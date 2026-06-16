@@ -216,6 +216,7 @@ function Show-ProgressWindowUntilExit($proc) {
         WindowStartupLocation="CenterScreen"
         Background="#1A1D27"
         Foreground="#E8E8EE"
+        ShowActivated="False"
         Topmost="False">
   <Border Padding="24" Background="#1A1D27" BorderBrush="#2D3041" BorderThickness="1">
     <Grid>
@@ -235,6 +236,7 @@ function Show-ProgressWindowUntilExit($proc) {
 "@
     $reader = New-Object System.Xml.XmlNodeReader $xaml
     $window = [Windows.Markup.XamlReader]::Load($reader)
+    $window.ShowActivated = $false
     $window.Topmost = $false
     $timer = New-Object Windows.Threading.DispatcherTimer
     $timer.Interval = [TimeSpan]::FromMilliseconds(500)

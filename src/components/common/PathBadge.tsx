@@ -3,7 +3,7 @@ import { shortenPath } from '@/utils/pathLink';
 
 interface PathBadgeProps {
   path: string;
-  /** CompositingView 전용 — 해결된 리비전 경로 회색 처리. 메모/댓글/메모위젯 사용처에선 항상 false. */
+  /** CompositingView 전용 — 해결된 리테이크 경로 회색 처리. 메모/댓글/메모위젯 사용처에선 항상 false. */
   resolved?: boolean;
   className?: string;
 }
@@ -11,7 +11,7 @@ interface PathBadgeProps {
 /**
  * G:\ 경로를 클릭 가능한 뱃지로 표시. 클릭 시 파일 탐색기에서 해당 경로 열기.
  *
- * 4곳에서 재사용: 메모(InlineTextareaRow) / 댓글(CommentPanel) / 메모 위젯(TipTap) / 리비전(CompositingView).
+ * 4곳에서 재사용: 메모(InlineTextareaRow) / 댓글(CommentPanel) / 메모 위젯(TipTap) / 리테이크(CompositingView).
  * 외관·동작은 한 곳에서 정의해 일관성 + 유지보수성 확보.
  */
 export function PathBadge({ path, resolved, className }: PathBadgeProps) {

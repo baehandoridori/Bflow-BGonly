@@ -1,4 +1,4 @@
-// ─── 리비전 아이템 (확장된 씬 내부) ──────────
+// ─── 리테이크 아이템 (확장된 씬 내부) ──────────
 
 import { useMemo, useState, type MouseEvent } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -41,7 +41,7 @@ export function RevisionItem({
 }: {
   revision: CompRevision;
   isSelected: boolean;
-  /** v1.19.6: 이 리비전에 달린 댓글 개수. 0 이면 마커 표시 안 함. */
+  /** v1.19.6: 이 리테이크에 달린 댓글 개수. 0 이면 마커 표시 안 함. */
   commentCount?: number;
   /** 확인한 댓글은 회색 마커로 낮춰 보인다. */
   commentSeen?: boolean;
@@ -302,7 +302,7 @@ export function RevisionItem({
           closeLightbox={() => setLightbox(null)}
           lightboxStep={lightboxStep}
           sceneLabel={revisionLabel}
-          ariaLabel="리비전 이미지 확대 보기"
+          ariaLabel="리테이크 이미지 확대 보기"
           fileNamePrefix={`${revisionLabel}-revision`}
         />
       )}

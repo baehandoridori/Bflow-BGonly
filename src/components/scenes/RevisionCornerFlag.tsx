@@ -10,7 +10,7 @@ interface RevisionCornerFlagProps {
 export function RevisionCornerFlag({ count, resolved = false, className }: RevisionCornerFlagProps) {
   if (count <= 0) return null;
 
-  const label = `${resolved ? '완료된 리비전' : '미해결 리비전'} ${count}`;
+  const label = `${resolved ? '완료된 리테이크' : '미해결 리테이크'} ${count}`;
 
   return (
     <span

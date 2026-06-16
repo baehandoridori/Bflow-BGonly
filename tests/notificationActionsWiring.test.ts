@@ -39,8 +39,8 @@ test('notification action labels describe the actual destination', () => {
   assert.match(notificationPanel, /getNotificationSceneActionLabel\(n\.type,\s*n\.metadata\)/);
   assert.match(notificationHelper, /getNotificationSceneActionLabel\(payload\.type,\s*payload\.metadata\)/);
   assert.match(notificationSceneAction, /return '댓글 보기'/);
-  assert.match(notificationSceneAction, /return '리비전 댓글'/);
-  assert.match(notificationSceneAction, /return '리비전 보기'/);
+  assert.match(notificationSceneAction, /return '리테이크 댓글'/);
+  assert.match(notificationSceneAction, /return '리테이크 보기'/);
   assert.match(notificationSceneAction, /return '씬 보기'/);
 });
 

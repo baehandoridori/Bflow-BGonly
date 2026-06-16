@@ -8,6 +8,7 @@ const modulePath = path.join(process.cwd(), 'src', 'utils', 'devPreviewNotificat
 test('dev preview notification builder creates real scene-jump alarm types from mock episode data', async () => {
   assert.equal(existsSync(modulePath), true, 'devPreviewNotifications.ts must exist');
   const { buildDevPreviewNotifications } = await import('../src/utils/devPreviewNotifications.ts');
+  const { buildNotificationDisplayGroups } = await import('../src/utils/notificationGrouping.ts');
 
   const notifications = buildDevPreviewNotifications([
     {
@@ -60,16 +61,37 @@ test('dev preview notification builder creates real scene-jump alarm types from 
         },
       ],
     },
-  ]);
+  ], { 1: '그림자국' });
 
   assert.deepEqual(
     notifications.map((n) => n.type),
-    ['mention', 'comment_reaction', 'revision', 'acting_feedback', 'scene_assignment'],
+    ['mention', 'comment_reaction', 'revision', 'revision', 'revision', 'revision', 'acting_feedback', 'scene_assignment'],
   );
   assert.equal(notifications[0].metadata?.commentPartId, 'part-bg');
   assert.equal(notifications[0].metadata?.commentSceneId, '1');
-  assert.equal(notifications[3].metadata?.sheetName, 'EP01_A_ACT');
-  assert.equal(notifications[4].metadata?.assignmentNotificationId, 'dev-preview-assignment');
+  assert.deepEqual(
+    notifications.slice(2, 5).map((n) => n.metadata?.revisionAction),
+    ['add', 'in_progress', 'resolve'],
+  );
+  assert.equal(notifications[2].metadata?.revisionId, 'dev-preview-retake-lifecycle');
+  assert.equal(notifications[3].metadata?.revisionId, 'dev-preview-retake-lifecycle');
+  assert.equal(notifications[4].metadata?.revisionId, 'dev-preview-retake-lifecycle');
+  const displayGroups = buildNotificationDisplayGroups(notifications.map((n, index) => ({
+    ...n,
+    id: `preview-${index}`,
+    isRead: false,
+    createdAt: new Date(Date.now() + index).toISOString(),
+  })));
+  assert.ok(displayGroups.some((item) =>
+    item.kind === 'group' &&
+    item.key === 'revision:dev-preview-retake-lifecycle' &&
+    item.notifications.length === 3 &&
+    item.title === '리테이크 알림 3건',
+  ));
+  assert.equal(notifications[6].metadata?.sheetName, 'EP01_A_ACT');
+  assert.equal(notifications[7].metadata?.assignmentNotificationId, 'dev-preview-assignment');
+  assert.match(notifications[6].body ?? '', /그림자국/);
+  assert.match(notifications[7].body ?? '', /그림자국/);
 });
 
 test('notification dropdown exposes a dev-only test alarm generator', () => {

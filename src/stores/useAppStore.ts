@@ -15,7 +15,7 @@ import {
 
 export type ViewMode = 'dashboard' | 'episode' | 'scenes' | 'assignee' | 'team' | 'calendar' | 'schedule' | 'vacation' | 'compositing' | 'compositing-revisions' | 'settings';
 // v1.30.0~ : 'compositing' = 새 컴포지팅 현황 대시보드 (CompositingDashboardView)
-//            'compositing-revisions' = 기존 컴포지팅 리비전 피드백 보드 (CompositingView)
+//            'compositing-revisions' = 기존 컴포지팅 리테이크 보드 (CompositingView)
 // 사이드바 라우팅 분기는 PR 3 에서 App.tsx + Sidebar.tsx 수정.
 export type SortKey = 'no' | 'assignee' | 'progress' | 'incomplete';
 export type SortDir = 'asc' | 'desc';
@@ -58,14 +58,14 @@ interface AppState {
     focusRevisionId?: string;
     /** v1.24.0: 모달 진입 시 자동 스크롤 + 펄스 강조할 댓글 id (알림/활동 점프용). */
     focusCommentId?: string;
-    /** 리비전 카드 내부 댓글 스레드에서 자동 스크롤 + 펄스 강조할 댓글 id. */
+    /** 리테이크 카드 내부 댓글 스레드에서 자동 스크롤 + 펄스 강조할 댓글 id. */
     focusRevisionCommentId?: string;
     /** v1.24.0: 모달 진입 시 부서 토글을 강제할 모드 (최근 작업 위젯 → 'all' 자동). */
     forceDeptFilter?: 'all' | 'bg' | 'acting';
   } | null;
   setPendingSceneModalRequest: (req: AppState['pendingSceneModalRequest']) => void;
 
-  // 씬 하이라이트 (스포트라이트/인원별 뷰에서 씬 이동 시 글로우 피드백)
+  // 씬 하이라이트 (스포트라이트/인원별 뷰에서 씬 이동 시 글로우 리테이크)
   highlightSceneId: string | null;
   setHighlightSceneId: (id: string | null) => void;
 

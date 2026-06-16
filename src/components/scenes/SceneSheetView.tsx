@@ -24,6 +24,8 @@ import {
 import { ScenePhaseToggle } from './ScenePhaseToggle';
 import { StageSegmentToggle } from './StageSegmentToggle';
 import { SheetAlertBadges } from './SheetAlertBadges';
+import { AssigneeProgressStack } from './AssigneeProgressStack';
+import { hasMultiAssigneeProgress } from '@/utils/assigneeProgress';
 
 // ─── Props ───────────────────────────────────────────────────
 
@@ -43,6 +45,10 @@ interface SceneSheetViewProps {
   onActPhaseStateClick?: (sheetName: string, sceneId: string, newState: ScenePhaseState, sceneUuid?: string | null, sceneIndex?: number) => void;
   onActFeedbackRequest?: (sheetName: string, sceneId: string) => void;
   onActRoundBump?: (sheetName: string, sceneId: string, kind: 'work' | 'feedback', delta: 1 | -1) => void;
+  onAssigneeStageToggle?: (sheetName: string, sceneId: string, assigneeName: string, stage: Stage, sceneUuid?: string | null, sceneIndex?: number, dept?: Department) => void;
+  onAssigneeActPhaseStateClick?: (sheetName: string, sceneId: string, assigneeName: string, newState: ScenePhaseState, sceneUuid?: string | null, sceneIndex?: number) => void;
+  onAssigneeActFeedbackRequest?: (sheetName: string, sceneId: string, assigneeName: string, sceneUuid?: string | null, sceneIndex?: number) => void;
+  onAssigneeActRoundBump?: (sheetName: string, sceneId: string, assigneeName: string, kind: 'work' | 'feedback', delta: 1 | -1, sceneUuid?: string | null, sceneIndex?: number) => void;
   onDelete: (sceneIndex: number) => void;
   onOpenDetail: (sceneIndex: number) => void;
   onFieldUpdate: (sceneIndex: number, field: string, value: string) => void;
@@ -139,13 +145,17 @@ function SheetEditableCell({
     if (!isEditing) return;
     cancelledRef.current = false;
     return () => {
+      if (type === 'assignee') {
+        cancelledRef.current = false;
+        return;
+      }
       if (!cancelledRef.current && draftRef.current !== valueRef.current) {
         onSave(sceneIndex, field, draftRef.current);
       }
       cancelledRef.current = false;
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isEditing]);
+  }, [isEditing, type]);
 
   // 편집 모드 진입 시 포커스 (BUG-2 fix: initialChar 있으면 select 건너뜀)
   useEffect(() => {
@@ -176,6 +186,12 @@ function SheetEditableCell({
     onStopEditing();
   }, [draft, value, onSave, sceneIndex, field, onStopEditing]);
 
+  const handleAssigneeChange = useCallback((v: string) => {
+    setDraft(v);
+    draftRef.current = v;
+    onSave(sceneIndex, field, v);
+  }, [onSave, sceneIndex, field]);
+
   if (isEditing) {
     if (type === 'assignee') {
       return (
@@ -187,7 +203,7 @@ function SheetEditableCell({
         >
           <AssigneeMultiSelect
             value={draft}
-            onChange={(v) => onSave(sceneIndex, field, v)}
+            onChange={handleAssigneeChange}
             onClose={onStopEditing}
             className="w-full"
             autoFocus
@@ -323,6 +339,10 @@ export function SceneSheetView({
   onActPhaseStateClick,
   onActFeedbackRequest,
   onActRoundBump,
+  onAssigneeStageToggle,
+  onAssigneeActPhaseStateClick,
+  onAssigneeActFeedbackRequest,
+  onAssigneeActRoundBump,
   onDelete,
   onOpenDetail,
   onFieldUpdate,
@@ -866,24 +886,44 @@ export function SceneSheetView({
                   {useActingPhaseControls ? (
                     <td colSpan={4} className="px-1 py-1.5">
                       <div onClick={(e) => e.stopPropagation()}>
-                        <ScenePhaseToggle
-                          scene={scene}
-                          compact
-                          onStateClick={(next) => onActPhaseStateClick(sheetName, scene.sceneId, next, scene.id ?? null, idx)}
-                          onRequestFeedback={() => onActFeedbackRequest(sheetName, scene.sceneId)}
-                          onRoundBump={(kind, delta) => onActRoundBump(sheetName, scene.sceneId, kind, delta)}
-                        />
+                        {hasMultiAssigneeProgress(scene) ? (
+                          <AssigneeProgressStack
+                            scene={scene}
+                            department={department}
+                            compact
+                            onAssigneePhaseStateClick={(name, state) => onAssigneeActPhaseStateClick?.(sheetName, scene.sceneId, name, state, scene.id ?? null, idx)}
+                            onAssigneeFeedbackRequest={(name) => onAssigneeActFeedbackRequest?.(sheetName, scene.sceneId, name, scene.id ?? null, idx)}
+                            onAssigneeRoundBump={(name, kind, delta) => onAssigneeActRoundBump?.(sheetName, scene.sceneId, name, kind, delta, scene.id ?? null, idx)}
+                          />
+                        ) : (
+                          <ScenePhaseToggle
+                            scene={scene}
+                            compact
+                            onStateClick={(next) => onActPhaseStateClick(sheetName, scene.sceneId, next, scene.id ?? null, idx)}
+                            onRequestFeedback={() => onActFeedbackRequest(sheetName, scene.sceneId)}
+                            onRoundBump={(kind, delta) => onActRoundBump(sheetName, scene.sceneId, kind, delta)}
+                          />
+                        )}
                       </div>
                     </td>
                   ) : (
                     <td colSpan={4} className="px-1 py-1.5">
-                      <StageSegmentToggle
-                        scene={scene}
-                        department={department}
-                        compact
-                        iconDisplay="never"
-                        onToggle={(stage) => onToggle(scene.sceneId, stage, scene.id ?? null, idx)}
-                      />
+                      {hasMultiAssigneeProgress(scene) ? (
+                        <AssigneeProgressStack
+                          scene={scene}
+                          department={department}
+                          compact
+                          onAssigneeStageToggle={(name, stage) => onAssigneeStageToggle?.(sheetName, scene.sceneId, name, stage, scene.id ?? null, idx, department)}
+                        />
+                      ) : (
+                        <StageSegmentToggle
+                          scene={scene}
+                          department={department}
+                          compact
+                          iconDisplay="never"
+                          onToggle={(stage) => onToggle(scene.sceneId, stage, scene.id ?? null, idx)}
+                        />
+                      )}
                     </td>
                   )}
 

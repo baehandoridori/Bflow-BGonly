@@ -244,10 +244,10 @@ test('formatActivitySceneLabel: 빈 라벨', () => {
   assert.equal(formatActivitySceneLabel('', 2, {}), '');
 });
 
-test('formatActivitySceneLabel: 리비전 라벨도 가운데점 분리', () => {
+test('formatActivitySceneLabel: 리테이크 라벨도 가운데점 분리', () => {
   const titles = { 2: '그림자국' };
   assert.equal(
-    formatActivitySceneLabel('EP02 E #15 리비전 #3', 2, titles),
-    '그림자국 · E · #15 · 리비전 · #3',
+    formatActivitySceneLabel('EP02 E #15 리테이크 #3', 2, titles),
+    '그림자국 · E · #15 · 리테이크 · #3',
   );
 });

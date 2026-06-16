@@ -497,7 +497,7 @@ function seedFeedbackHubPreview() {
     6: 'EP.06',
   });
   useDataStore.getState().setEpisodeMemos({
-    5: '피드백 허브 메인 플로우 확인용 더미 에피소드',
+    5: '리테이크 허브 메인 플로우 확인용 더미 에피소드',
     6: '에피소드 필터와 상태 전환 확인용 더미 에피소드',
   });
   useAppStore.setState({
@@ -578,7 +578,7 @@ export function FeedbackHubPreviewApp() {
   const currentView = useAppStore((s) => s.currentView);
 
   useEffect(() => {
-    document.title = 'B flow - 피드백 허브 프리뷰';
+    document.title = 'B flow - 리테이크 허브 프리뷰';
   }, []);
 
   return (

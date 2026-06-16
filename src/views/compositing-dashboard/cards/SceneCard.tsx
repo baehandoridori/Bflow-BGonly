@@ -190,7 +190,7 @@ export function SceneCard({ card, state, staggerIndex, dimmed, partSceneIds }: S
           <ImageSlot label="가이드" url={card.guideUrl} />
         </div>
 
-        {/* 하단 담당자 + 댓글/리비전 아이콘 */}
+        {/* 하단 담당자 + 댓글/리테이크 아이콘 */}
         <div className="flex flex-col gap-1 px-2.5 py-1.5 text-[10px]">
           {bgName && <AssigneeRow tag="BG" name={bgName} />}
           {actName && <AssigneeRow tag="ACT" name={actName} />}

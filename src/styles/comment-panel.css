@@ -16,7 +16,7 @@
 }
 
 /* 떠있는 입력 카드 — mockup 분위기로 단순화 (그림자 약화 + 펄스 제거).
- * 한솔 피드백(2026-05-02): focus 시 accent ring 도 보라처럼 보여서 중립 흰색 알파로. */
+ * 한솔 리테이크(2026-05-02): focus 시 accent ring 도 보라처럼 보여서 중립 흰색 알파로. */
 .comment-input-card {
   box-shadow: var(--comment-shadow-base);
   transition: border-color 180ms ease, box-shadow 200ms ease;
@@ -123,7 +123,7 @@
   100% { box-shadow: 0 0 0 0 rgba(108, 92, 231, 0); }
 }
 
-/* 리비전 활동 줄 — Tailwind 색상만 쓰면 라이트 모드에서 "해결" 텍스트가 흰 민트로 떠서 안 보인다.
+/* 리테이크 활동 줄 — Tailwind 색상만 쓰면 라이트 모드에서 "해결" 텍스트가 흰 민트로 떠서 안 보인다.
  * 여기서는 테마 토큰 기준으로 카드/텍스트/배지 대비를 고정한다. */
 .comment-inline-event {
   color: rgb(var(--color-text-primary));

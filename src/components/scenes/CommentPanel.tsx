@@ -48,7 +48,7 @@ import '@/styles/comment-panel.css';
 
 // ─── 타입 ───────────────────────────────────
 
-/** 시스템 이벤트 — 댓글 사이사이에 작은 줄로 인라인 표시 (씬 생성/완료/리비전 등) */
+/** 시스템 이벤트 — 댓글 사이사이에 작은 줄로 인라인 표시 (씬 생성/완료/리테이크 등) */
 export interface CommentInlineEvent {
   id: string;
   at: string;       // ISO 8601
@@ -65,22 +65,22 @@ interface CommentPanelProps {
   /** 사용자별 읽음 상태 저장에 쓰는 canonical 씬 대화 키 */
   sceneThreadKey?: string;
   onCountChange?: (count: number) => void;
-  /** 댓글 사이에 시간순으로 끼어들어가는 시스템 이벤트 (씬 생성/완료/리비전 등) */
+  /** 댓글 사이에 시간순으로 끼어들어가는 시스템 이벤트 (씬 생성/완료/리테이크 등) */
   inlineEvents?: CommentInlineEvent[];
   /** v1.24.0: 외부 점프 시 자동 스크롤 + 펄스 강조할 댓글 id. 답글이면 부모 자동 펼침. */
   focusCommentId?: string | null;
   /** v1.24.0: 댓글 이미지 라이트박스 상단에 표시할 씬 라벨 (예: "EP01 A컷 #03"). */
   sceneLabel?: string;
-  /** 댓글 입력창의 /re 빠른 리비전 등록 문맥. 없으면 /re 는 일반 댓글로 취급된다. */
+  /** 댓글 입력창의 /re 빠른 리테이크 등록 문맥. 없으면 /re 는 일반 댓글로 취급된다. */
   quickRevision?: CommentPanelQuickRevisionContext;
 }
 
 export interface CommentPanelQuickRevisionContext {
-  /** buildSceneKey() 로 만든 리비전 canonical sceneKey */
+  /** buildSceneKey() 로 만든 리테이크 canonical sceneKey */
   sceneKey: string;
   /** 현재 화면 문맥. 전체 모드는 BG/ACT 담당자를 모두 기본 체크한다. */
   context: RevisionSlashContext;
-  /** 리비전에 기록할 부서. 전체 모드에서는 생략 가능. */
+  /** 리테이크에 기록할 부서. 전체 모드에서는 생략 가능. */
   department?: 'bg' | 'acting';
   bgAssignee?: string | null;
   actingAssignee?: string | null;
@@ -193,6 +193,35 @@ function ReactionsArea({
   );
 }
 
+function ThreadReplyButton({
+  compact = false,
+  onClick,
+  'aria-label': ariaLabel,
+}: {
+  compact?: boolean;
+  onClick: () => void;
+  'aria-label': string;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={(event) => {
+        event.stopPropagation();
+        onClick();
+      }}
+      aria-label={ariaLabel}
+      title="이 스레드에 답글"
+      className={cn(
+        'inline-flex shrink-0 items-center gap-1 rounded-full border border-bg-border/70 bg-bg-primary/60 text-text-secondary/70 hover:border-accent/50 hover:bg-accent/[0.08] hover:text-accent-sub transition-all',
+        compact ? 'h-5 px-1.5 text-[10px]' : 'h-6 px-2 text-[11px]',
+      )}
+    >
+      <Reply size={compact ? 10 : 11} />
+      <span>답글</span>
+    </button>
+  );
+}
+
 // ─── 메인 컴포넌트 ──────────────────────────
 
 export function CommentPanel({ sceneKey, secondarySceneKey, sceneThreadKey, onCountChange, inlineEvents, focusCommentId, sceneLabel, quickRevision }: CommentPanelProps) {
@@ -260,8 +289,8 @@ export function CommentPanel({ sceneKey, secondarySceneKey, sceneThreadKey, onCo
     setUnreadDividerElement(node);
   }, []);
 
-  // v1.18.0: "re만" 필터 — 리비전 맥락 댓글(revisionId 있음)만 표시.
-  // 한솔 결정 (spec 2026-05-03): 댓글 패널에서 "리비전 댓글만" 빠르게 가려보고 싶을 때 토글.
+  // v1.18.0: "re만" 필터 — 리테이크 맥락 댓글(revisionId 있음)만 표시.
+  // 한솔 결정 (spec 2026-05-03): 댓글 패널에서 "리테이크 댓글만" 빠르게 가려보고 싶을 때 토글.
   // onCountChange 는 전체 카운트로 유지(외부 배지 표기 일관성), 시각 필터만 패널 내부 적용.
   const [reOnly, setReOnly] = useState(false);
   // v1.23.4 (#3 한솔): 활동(inlineEvents) 감추기 — 댓글만 보기. localStorage 영속.
@@ -600,7 +629,7 @@ export function CommentPanel({ sceneKey, secondarySceneKey, sceneThreadKey, onCo
       if (attempts < 10) {
         retryTimer = setTimeout(tryScroll, 200);
       } else {
-        // 포기 — 펄스만 짧게 해제 (사용자에게 "찾으려 했음" 시각 피드백 잔존).
+        // 포기 — 펄스만 짧게 해제 (사용자에게 "찾으려 했음" 시각 리테이크 잔존).
         clearTimer = setTimeout(() => setFocusedCommentId(null), 200);
       }
     };
@@ -777,7 +806,7 @@ export function CommentPanel({ sceneKey, secondarySceneKey, sceneThreadKey, onCo
         try { URL.revokeObjectURL(item.previewUrl); } catch { /* ignore */ }
         if (item.uploadedUrl) {
           storageService.deleteImage(item.uploadedUrl).catch(err => {
-            console.warn('[빠른 리비전 첨부 교체] 이전 업로드 객체 정리 실패:', err);
+            console.warn('[빠른 리테이크 첨부 교체] 이전 업로드 객체 정리 실패:', err);
           });
         }
       });
@@ -885,22 +914,22 @@ export function CommentPanel({ sceneKey, secondarySceneKey, sceneThreadKey, onCo
         });
         unusedUploadedImageUrls.forEach((url) => {
           storageService.deleteImage(url).catch(err => {
-            console.warn('[빠른 리비전 등록] 미사용 업로드 객체 정리 실패:', err);
+            console.warn('[빠른 리테이크 등록] 미사용 업로드 객체 정리 실패:', err);
           });
         });
         const targetNames = quickRevisionSelectedUsers.map((user) => user.name).join(', ');
-        sonnerToast.success('리비전을 등록했습니다', {
+        sonnerToast.success('리테이크를 등록했습니다', {
           description: targetNames ? `${targetNames}에게 알림을 보냈습니다.` : undefined,
           duration: 2200,
         });
       } catch (err) {
-        console.error('[리비전 빠른 등록 실패]', err);
+        console.error('[리테이크 빠른 등록 실패]', err);
         if (!mountedRef.current) {
           prevAttached.forEach((item) => {
             try { URL.revokeObjectURL(item.previewUrl); } catch { /* ignore */ }
             if (item.uploadedUrl) {
               storageService.deleteImage(item.uploadedUrl).catch(err2 => {
-                console.warn('[리비전 빠른 등록 실패 + unmount] storage 정리 실패:', err2);
+                console.warn('[리테이크 빠른 등록 실패 + unmount] storage 정리 실패:', err2);
               });
             }
           });
@@ -913,7 +942,7 @@ export function CommentPanel({ sceneKey, secondarySceneKey, sceneThreadKey, onCo
             try { URL.revokeObjectURL(item.previewUrl); } catch { /* ignore */ }
             if (item.uploadedUrl) {
               storageService.deleteImage(item.uploadedUrl).catch(err2 => {
-                console.warn('[리비전 빠른 등록 실패 롤백] 버려진 업로드 객체 정리 실패:', err2);
+                console.warn('[리테이크 빠른 등록 실패 롤백] 버려진 업로드 객체 정리 실패:', err2);
               });
             }
           });
@@ -921,7 +950,7 @@ export function CommentPanel({ sceneKey, secondarySceneKey, sceneThreadKey, onCo
           setAttachedImages(prevAttached);
           attachedImagesRef.current = prevAttached;
         }
-        sonnerToast.error('리비전 등록 실패', {
+        sonnerToast.error('리테이크 등록 실패', {
           description: err instanceof Error ? err.message : '잠시 후 다시 시도해 주세요.',
         });
       } finally {
@@ -934,6 +963,7 @@ export function CommentPanel({ sceneKey, secondarySceneKey, sceneThreadKey, onCo
 
     const replyThreadTarget = buildCommentReplyTarget(comments, replyTarget);
     const replyParent = replyThreadTarget.rootComment;
+    const isReplyToReply = replyThreadTarget.isReplyToReply;
 
     const mentions = extractMentions(input, userNames);
     // v1.24.0: 답글이면 부모 작성자도 mentions 에 포함 (자동 멘션 — 슬랙 알림/멘션 알림 트리거).
@@ -1337,7 +1367,7 @@ export function CommentPanel({ sceneKey, secondarySceneKey, sceneThreadKey, onCo
         <button
           type="button"
           onClick={() => setReOnly((v) => !v)}
-          title={reOnly ? '리비전 댓글만 표시중 — 클릭해 전체 보기' : '리비전 댓글만 보기'}
+          title={reOnly ? '리테이크 댓글만 표시중 — 클릭해 전체 보기' : '리테이크 댓글만 보기'}
           className={cn(
             'text-[10px] px-2 py-1 rounded transition-colors cursor-pointer font-bold',
             reOnly
@@ -1352,11 +1382,11 @@ export function CommentPanel({ sceneKey, secondarySceneKey, sceneThreadKey, onCo
       {/* 댓글 목록 — 시스템 이벤트(inlineEvents)와 시간순 머지 + 새 항목 슬라이드 인 */}
       <div ref={scrollRef} className="flex-1 overflow-y-auto px-4 py-3 space-y-4 min-h-0 select-text">
         {/* 코덱스 P3 fix (9차, 2026-05-05): reOnly 시 inlineEvents 는 어차피 mergeFeed 에서 drop 되므로
-            empty-state 판정에서도 inlineEvents 무시 → 리비전 댓글 0 + inline 만 있을 때 빈 영역 방지. */}
+            empty-state 판정에서도 inlineEvents 무시 → 리테이크 댓글 0 + inline 만 있을 때 빈 영역 방지. */}
         {visibleComments.length === 0 && (reOnly || hideActivity || !inlineEvents || inlineEvents.length === 0) ? (
           <div className="text-center py-10">
             <p className="text-text-secondary text-xs">
-              {reOnly ? '리비전 댓글이 없습니다' : '아직 의견이 없습니다'}
+              {reOnly ? '리테이크 댓글이 없습니다' : '아직 의견이 없습니다'}
             </p>
             <p className="text-text-secondary/40 text-[11px] mt-1">
               {reOnly ? '"re만" 토글을 끄면 일반 댓글이 보입니다' : '첫 의견을 남겨보세요'}
@@ -1499,7 +1529,7 @@ export function CommentPanel({ sceneKey, secondarySceneKey, sceneThreadKey, onCo
                       </span>
                     </>
                   )}
-                  {/* v1.18.0: 리비전 맥락 댓글은 [re#] 칩 → 클릭 시 모달이 리비전 탭/카드로 점프 */}
+                  {/* v1.18.0: 리테이크 맥락 댓글은 [re#] 칩 → 클릭 시 모달이 리테이크 탭/카드로 점프 */}
                   {comment.revisionId && (
                     <RevisionCommentBadge
                       revisionId={comment.revisionId}
@@ -1623,7 +1653,7 @@ export function CommentPanel({ sceneKey, secondarySceneKey, sceneThreadKey, onCo
 
                 {/* v1.26.0: 이모지 리액션 — 부모 댓글 */}
                 <div className={cn('mt-1 flex', isOwn ? 'justify-end' : 'justify-start')}>
-                  <div className="max-w-[85%] w-fit">
+                  <div className={cn('max-w-[85%] w-fit flex items-center gap-1.5', isOwn && 'flex-row-reverse')}>
                     <ReactionsArea
                       commentId={comment.id}
                       reactions={reactionsByCommentId.get(comment.id) ?? []}
@@ -1633,6 +1663,10 @@ export function CommentPanel({ sceneKey, secondarySceneKey, sceneThreadKey, onCo
                       onPickerOpen={() => setPickerForCommentId(comment.id)}
                       onPickerClose={() => setPickerForCommentId(null)}
                     />
+                    <ThreadReplyButton
+                      aria-label={`답글 달기: ${comment.userName}`}
+                      onClick={() => setReplyTarget(comment)}
+                    />
                   </div>
                 </div>
 
@@ -1641,7 +1675,7 @@ export function CommentPanel({ sceneKey, secondarySceneKey, sceneThreadKey, onCo
                   <div className="mt-1.5 ml-3 pl-3 border-l-2 border-accent/30 space-y-2">
                     <button
                       onClick={() => toggleThread(comment.id)}
-                      className="inline-flex items-center gap-1 text-[11px] text-text-secondary hover:text-accent transition-colors"
+                      className="inline-flex items-center gap-1 text-[12px] font-semibold text-text-secondary hover:text-accent transition-colors"
                       title={threadCollapsed ? '답글 펼치기' : '답글 접기'}
                     >
                       {threadCollapsed ? <ChevronRight size={11} /> : <ChevronDown size={11} />}
@@ -1779,16 +1813,23 @@ export function CommentPanel({ sceneKey, secondarySceneKey, sceneThreadKey, onCo
                             )}
                           </div>
                           {/* v1.26.0: 답글 리액션 영역 (compact) */}
-                          <ReactionsArea
-                            commentId={reply.id}
-                            reactions={reactionsByCommentId.get(reply.id) ?? []}
-                            currentUserId={currentUser?.id ?? null}
-                            onToggle={handleReactionToggle}
-                            pickerOpen={pickerForCommentId === reply.id}
-                            onPickerOpen={() => setPickerForCommentId(reply.id)}
-                            onPickerClose={() => setPickerForCommentId(null)}
-                            compact
-                          />
+                          <div className="flex items-center gap-1.5">
+                            <ReactionsArea
+                              commentId={reply.id}
+                              reactions={reactionsByCommentId.get(reply.id) ?? []}
+                              currentUserId={currentUser?.id ?? null}
+                              onToggle={handleReactionToggle}
+                              pickerOpen={pickerForCommentId === reply.id}
+                              onPickerOpen={() => setPickerForCommentId(reply.id)}
+                              onPickerClose={() => setPickerForCommentId(null)}
+                              compact
+                            />
+                            <ThreadReplyButton
+                              compact
+                              aria-label={`답글 달기: ${reply.userName}`}
+                              onClick={() => setReplyTarget(reply)}
+                            />
+                          </div>
                         </div>
                         </Fragment>
                       );
@@ -1844,10 +1885,10 @@ export function CommentPanel({ sceneKey, secondarySceneKey, sceneThreadKey, onCo
                       <span className="w-6 h-6 rounded-lg border border-accent/35 bg-accent/20 text-accent-sub inline-flex items-center justify-center shrink-0">
                         <MessageSquareWarning size={13} strokeWidth={2.4} />
                       </span>
-                      리비전 빠른 등록
+                      리테이크 빠른 등록
                     </div>
                     <div className="mt-1 text-[12px] text-text-secondary/85 truncate">
-                      {quickRevisionDescription || '내용을 입력하면 리비전으로 등록됩니다'}
+                      {quickRevisionDescription || '내용을 입력하면 리테이크으로 등록됩니다'}
                     </div>
                   </div>
                   <button
@@ -1880,7 +1921,7 @@ export function CommentPanel({ sceneKey, secondarySceneKey, sceneThreadKey, onCo
 
                 {quickRevisionHasAttachments && (
                   <div className="rounded-lg border border-accent/30 bg-accent/10 px-2.5 py-2 text-[11px] text-accent-sub">
-                    첨부 이미지가 리비전 이미지로 함께 등록됩니다.
+                    첨부 이미지가 리테이크 이미지로 함께 등록됩니다.
                   </div>
                 )}
 
@@ -1906,7 +1947,7 @@ export function CommentPanel({ sceneKey, secondarySceneKey, sceneThreadKey, onCo
           className={`comment-input-card rounded-xl border px-2.5 pt-2 pb-1.5 flex flex-col overflow-hidden ${focused && !draggingOver ? 'focused' : ''} ${draggingOver ? 'dragover' : ''}`}
           style={{
             background: 'rgb(var(--comment-card-elev-rgb))',
-            // 한솔 피드백(2026-05-02): focus 시 accent-sub(보라)가 박혀서 "보라색 고정"으로 보임 → 중립 흰색 알파로 변경
+            // 한솔 리테이크(2026-05-02): focus 시 accent-sub(보라)가 박혀서 "보라색 고정"으로 보임 → 중립 흰색 알파로 변경
             borderColor: draggingOver
               ? 'rgb(var(--color-accent))'
               : replyTarget
@@ -2040,7 +2081,7 @@ export function CommentPanel({ sceneKey, secondarySceneKey, sceneThreadKey, onCo
                 quickRevisionActive
                   ? quickRevisionNotifyIds.length === 0
                       ? '알람 보낼 담당자를 선택해 주세요'
-                      : '리비전 등록 (Enter)'
+                      : '리테이크 등록 (Enter)'
                   : hasUploadingImage ? '이미지 업로드 중...' : '전송 (Enter)'
               }
             >
@@ -2065,7 +2106,7 @@ export function CommentPanel({ sceneKey, secondarySceneKey, sceneThreadKey, onCo
               이미지를 여기에 놓으세요
             </div>
             <div className="text-[11px] text-text-secondary">
-              {quickRevisionActive ? '빠른 리비전 이미지로 첨부됩니다' : '여러 장을 한 번에 첨부할 수 있어요'}
+              {quickRevisionActive ? '빠른 리테이크 이미지로 첨부됩니다' : '여러 장을 한 번에 첨부할 수 있어요'}
             </div>
           </div>
         </div>

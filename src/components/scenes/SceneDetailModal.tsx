@@ -40,6 +40,8 @@ import { formatStamp, formatTime } from '@/utils/formatTime';
 import { findLatestMemoActivity, type MemoAuthorMeta } from './memoAuthorMeta';
 import { describeActivity, deptPrefix } from './activityLabels';
 import { useOptimisticSceneImageUrl } from '@/hooks/useOptimisticSceneImageUrl';
+import { AssigneeProgressStack } from './AssigneeProgressStack';
+import { hasMultiAssigneeProgress } from '@/utils/assigneeProgress';
 
 // ─── 타입 ──────────────────────────────────────────
 
@@ -48,7 +50,7 @@ interface SceneDetailModalProps {
   sceneIndex: number;
   sheetName: string;
   department: Department;
-  /** 반대 부서의 댓글/리비전을 함께 보려면 반대편 sheetName 지정 (BG 단독 모달에서도 ACT 댓글 노출) */
+  /** 반대 부서의 댓글/리테이크를 함께 보려면 반대편 sheetName 지정 (BG 단독 모달에서도 ACT 댓글 노출) */
   counterpartSheetName?: string | null;
   /** 반대 부서에 같은 번호의 씬이 존재하면 그 씬의 scene.no (댓글 키용) */
   counterpartSceneNo?: number | null;
@@ -60,6 +62,10 @@ interface SceneDetailModalProps {
   onActPhaseStateClick?: (sheetName: string, sceneId: string, newState: ScenePhaseState) => void;
   onActFeedbackRequest?: (sheetName: string, sceneId: string) => void;
   onActRoundBump?: (sheetName: string, sceneId: string, kind: 'work' | 'feedback', delta: 1 | -1) => void;
+  onAssigneeStageToggle?: (sheetName: string, sceneId: string, assigneeName: string, stage: Stage, sceneUuid?: string | null, sceneIndex?: number, dept?: Department) => void;
+  onAssigneeActPhaseStateClick?: (sheetName: string, sceneId: string, assigneeName: string, newState: ScenePhaseState, sceneUuid?: string | null, sceneIndex?: number) => void;
+  onAssigneeActFeedbackRequest?: (sheetName: string, sceneId: string, assigneeName: string, sceneUuid?: string | null, sceneIndex?: number) => void;
+  onAssigneeActRoundBump?: (sheetName: string, sceneId: string, assigneeName: string, kind: 'work' | 'feedback', delta: 1 | -1, sceneUuid?: string | null, sceneIndex?: number) => void;
   onClose: () => void;
   onNavigate?: (direction: 'prev' | 'next') => void;
   hasPrev?: boolean;
@@ -68,13 +74,13 @@ interface SceneDetailModalProps {
   currentSceneIndex?: number;
   /**
    * 코덱스 P2 fix (5차, 2026-05-05): 단일 부서 모달도 알림 라우팅 지원.
-   * 알림 클릭으로 진입했을 때 초기 탭/포커스할 리비전 카드 지정. UnifiedSceneDetailModal 과 동일.
+   * 알림 클릭으로 진입했을 때 초기 탭/포커스할 리테이크 카드 지정. UnifiedSceneDetailModal 과 동일.
    */
   initialTab?: 'detail' | 'revisions' | 'files' | 'history';
   focusRevisionId?: string;
   /** v1.24.0: 댓글 점프용 — 모달 진입 시 자동 스크롤 + 펄스. */
   focusCommentId?: string;
-  /** 리비전 카드 내부 댓글 스레드에서 강조할 댓글 id. */
+  /** 리테이크 카드 내부 댓글 스레드에서 강조할 댓글 id. */
   focusRevisionCommentId?: string;
 }
 
@@ -438,6 +444,10 @@ export function SceneDetailModal({
   onActPhaseStateClick,
   onActFeedbackRequest,
   onActRoundBump,
+  onAssigneeStageToggle,
+  onAssigneeActPhaseStateClick,
+  onAssigneeActFeedbackRequest,
+  onAssigneeActRoundBump,
   onClose,
   onNavigate,
   hasPrev = false,
@@ -505,7 +515,7 @@ export function SceneDetailModal({
 
     return events;
   }, [department, scene.completedAt, scene.completedBy, scene.id, sceneActivities]);
-  // 코덱스 P2 fix (5차, 2026-05-05): 알림 라우팅 시 initialTab='revisions' 면 리비전 패널 자동 펼침.
+  // 코덱스 P2 fix (5차, 2026-05-05): 알림 라우팅 시 initialTab='revisions' 면 리테이크 패널 자동 펼침.
   const [showRevisions, setShowRevisions] = useState(initialTab === 'revisions');
   // 코덱스 P2 fix (6차, 2026-05-05): 모달 인스턴스가 재사용되어 initialTab prop 이 나중에 바뀌면
   // useState 초기값만으로는 sync 안 됨. effect 로 prop 변경 감지 → revisions 모드로 전환.
@@ -513,7 +523,7 @@ export function SceneDetailModal({
     if (initialTab === 'revisions') setShowRevisions(true);
   }, [initialTab]);
 
-  // 코덱스 P2 fix (9차, 2026-05-05): 댓글 패널의 [re#] 배지 클릭 → 리비전 패널 펼침 + 카드 강조.
+  // 코덱스 P2 fix (9차, 2026-05-05): 댓글 패널의 [re#] 배지 클릭 → 리테이크 패널 펼침 + 카드 강조.
   // UnifiedSceneDetailModal:173 동일 패턴. 단일 부서 모달도 같은 동작 보장.
   useEffect(() => {
     function onJump(e: Event) {
@@ -541,7 +551,7 @@ export function SceneDetailModal({
   }, []);
 
   // 코덱스 P2 fix (5차, 2026-05-05): focusRevisionId 강조 — UnifiedSceneDetailModal:204 동일 패턴.
-  // 단일 부서 모달에서도 알림 클릭 → 리비전 패널 펼침 + 해당 카드 scrollIntoView + pulse.
+  // 단일 부서 모달에서도 알림 클릭 → 리테이크 패널 펼침 + 해당 카드 scrollIntoView + pulse.
   useEffect(() => {
     if (!focusRevisionId || !showRevisions) return;
     let cancelled = false;
@@ -609,6 +619,11 @@ export function SceneDetailModal({
 
   const deptConfig = DEPARTMENT_CONFIGS[department];
   const pct = sceneProgress(scene);
+  const canUseAssigneeProgressStack = hasMultiAssigneeProgress(scene) && (
+    department === 'acting'
+      ? Boolean(onAssigneeActPhaseStateClick && onAssigneeActFeedbackRequest && onAssigneeActRoundBump)
+      : Boolean(onAssigneeStageToggle)
+  );
   const sceneKey = `${sheetName}:${scene.no}`;
   const revisionSceneKey = buildSceneKey(sheetName, scene.sceneId);
   const sceneThreadKey = buildSceneThreadKeyFromRevisionKey(revisionSceneKey);
@@ -955,7 +970,16 @@ export function SceneDetailModal({
                     진행 단계
                   </h3>
                   <div className="mx-4">
-                    {department === 'acting' && onActPhaseStateClick && onActFeedbackRequest && onActRoundBump ? (
+                    {canUseAssigneeProgressStack ? (
+                      <AssigneeProgressStack
+                        scene={scene}
+                        department={department}
+                        onAssigneeStageToggle={(name, stage) => onAssigneeStageToggle?.(sheetName, scene.sceneId, name, stage, scene.id ?? null, sceneIndex, department)}
+                        onAssigneePhaseStateClick={(name, state) => onAssigneeActPhaseStateClick?.(sheetName, scene.sceneId, name, state, scene.id ?? null, sceneIndex)}
+                        onAssigneeFeedbackRequest={(name) => onAssigneeActFeedbackRequest?.(sheetName, scene.sceneId, name, scene.id ?? null, sceneIndex)}
+                        onAssigneeRoundBump={(name, kind, delta) => onAssigneeActRoundBump?.(sheetName, scene.sceneId, name, kind, delta, scene.id ?? null, sceneIndex)}
+                      />
+                    ) : department === 'acting' && onActPhaseStateClick && onActFeedbackRequest && onActRoundBump ? (
                       <ScenePhaseToggle
                         scene={scene}
                         iconDisplay="always"
@@ -1122,7 +1146,7 @@ export function SceneDetailModal({
               )}
             </motion.div>
 
-            {/* ── 컴포지팅 리비전 탭 버튼 ── */}
+            {/* ── 컴포지팅 리테이크 탭 버튼 ── */}
             <AnimatePresence>
               {!showRevisions && (
                 <motion.button
@@ -1134,7 +1158,7 @@ export function SceneDetailModal({
                   onClick={() => setShowRevisions(true)}
                   className="absolute -right-11 top-20 flex flex-col items-center gap-1 px-2 py-3 rounded-r-xl bg-bg-border/80 text-text-secondary hover:text-[#FDCB6E] transition-all cursor-pointer"
                   style={openRevCount > 0 ? { backgroundColor: 'rgba(253, 203, 110, 0.15)' } : {}}
-                  title="컴포지팅 리비전"
+                  title="컴포지팅 리테이크"
                 >
                   <Film size={18} />
                   {openRevCount > 0 && (
@@ -1144,7 +1168,7 @@ export function SceneDetailModal({
               )}
             </AnimatePresence>
 
-          {/* ── 컴포지팅 리비전 패널 (사이드 토글) ── */}
+          {/* ── 컴포지팅 리테이크 패널 (사이드 토글) ── */}
           <AnimatePresence>
             {showRevisions && (
               <motion.div

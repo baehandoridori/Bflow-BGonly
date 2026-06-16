@@ -10,8 +10,8 @@ import {
  * 알림 타입 (v1.24.0 / v1.25.5 acting_feedback / v1.25.8 scene_assignment 추가)
  * - 'comment': 자동 알림 (씬 작업자에게 발송, 차분한 톤)
  * - 'mention': 명시적 멘션 (@-멘션·답글 자동 멘션, 강한 톤 + 펄스)
- * - 'revision': 리비전 등록/진행/완료 알림
- * - 'acting_feedback': v1.25.5 — 액팅 씬 피드백 대기 요청 (강한 톤, mention 과 동일 시각 처리)
+ * - 'revision': 리테이크 등록/진행/완료 알림
+ * - 'acting_feedback': v1.25.5 — 액팅 씬 리테이크 대기 요청 (강한 톤, mention 과 동일 시각 처리)
  * - 'scene_assignment': v1.25.8 — 본인이 새 담당자로 배정된 씬 알림 (강한 톤, mention 과 동일 시각 처리)
  * - 'scene_change' / 'milestone' / 'system': 기존 동작 유지
  */
@@ -37,17 +37,17 @@ export interface AppNotification {
     commentSceneId?: string;
     /** comments.part_id — 댓글이 저장된 Supabase part UUID */
     commentPartId?: string;
-    /** v1.18.0: 리비전 알림 — 클릭 시 해당 리비전 패널로 이동 */
+    /** v1.18.0: 리테이크 알림 — 클릭 시 해당 리테이크 패널로 이동 */
     revisionId?: string;
-    /** v1.18.0: 리비전 알림 액션 종류 */
+    /** v1.18.0: 리테이크 알림 액션 종류 */
     revisionAction?: 'add' | 'in_progress' | 'resolve' | 'comment';
     /** v1.24.0: 답글 알림이면 부모 댓글 id (점프 시 펼침 처리용) */
     parentCommentId?: string;
     /** v1.24.0: 멘션 알림 발신자 식별용 (자동 멘션과 직접 멘션 구분) */
     mentionedBy?: string;
-    /** v1.25.5: 액팅 피드백 알림 DB row id — 씬 점프 시 read_at 처리용 */
+    /** v1.25.5: 액팅 리테이크 알림 DB row id — 씬 점프 시 read_at 처리용 */
     feedbackNotificationId?: string;
-    /** v1.25.5: 액팅 피드백 알림 표시용 메타 (예: '작업중 2차 → 피드백 대기 2차') */
+    /** v1.25.5: 액팅 리테이크 알림 표시용 메타 (예: '작업중 2차 → 리테이크 대기 2차') */
     feedbackTransition?: string;
     /** v1.25.8: 씬 담당자 배정 알림 DB row id — 씬 점프 시 read_at 처리용 */
     assignmentNotificationId?: string;

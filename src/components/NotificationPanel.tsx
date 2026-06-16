@@ -1,5 +1,5 @@
-import { useEffect, useRef, useState } from 'react';
-import { Bell, Check, Trash2, MessageSquare, MessageSquareWarning, RefreshCw, Award, ExternalLink, AtSign, UserPlus } from 'lucide-react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { Bell, Check, Trash2, MessageSquare, MessageSquareWarning, RefreshCw, Award, ExternalLink, AtSign, UserPlus, ChevronDown, ChevronRight } from 'lucide-react';
 import { useNotificationStore, type AppNotification, type NotificationType } from '@/stores/useNotificationStore';
 import { cn } from '@/utils/cn';
 import { floatingGlassStyle, glassTopHighlight } from '@/utils/glassStyles';
@@ -20,6 +20,10 @@ import {
   addDevPreviewNotifications,
   isDevPreviewNotificationToolsEnabled,
 } from '@/utils/devPreviewNotifications';
+import {
+  buildNotificationDisplayGroups,
+  type NotificationDisplayItem,
+} from '@/utils/notificationGrouping';
 
 // ─── 상대 시간 포맷 ─────────────────────────────────
 function timeAgo(iso: string): string {
@@ -43,9 +47,9 @@ function typeConfig(type: NotificationType) {
     case 'mention': return { icon: AtSign, color: 'rgb(var(--color-accent))', label: '멘션' };
     case 'milestone': return { icon: Award, color: '#00B894', label: '마일스톤' };
     case 'system': return { icon: Bell, color: '#8B8DA3', label: '시스템' };
-    // v1.18.0: 리비전 알림 — MessageSquareWarning 아이콘 + accent 색상.
-    case 'revision': return { icon: MessageSquareWarning, color: 'rgb(var(--color-accent))', label: '리비전' };
-    // v1.25.5: 액팅 피드백 — 검수 요청 (강한 톤, mention 시각 처리와 동일).
+    // v1.18.0: 리테이크 알림 — MessageSquareWarning 아이콘 + accent 색상.
+    case 'revision': return { icon: MessageSquareWarning, color: 'rgb(var(--color-accent))', label: '리테이크' };
+    // v1.25.5: 액팅 피드백 요청 — 검수 요청 (강한 톤, mention 시각 처리와 동일).
     case 'acting_feedback': return { icon: MessageSquareWarning, color: '#FDCB6E', label: '피드백' };
     // v1.25.8: 씬 담당자 배정 — 본인이 새 담당자 (강한 톤, mention 동일 시각 처리).
     case 'scene_assignment': return { icon: UserPlus, color: 'rgb(var(--color-accent))', label: '배정' };
@@ -53,6 +57,45 @@ function typeConfig(type: NotificationType) {
     //   마지막 원소(또는 fallback 💬) 로 덮어 그리므로 여기 icon 값은 placeholder.
     case 'comment_reaction': return { icon: MessageSquare, color: '#8B8DA3', label: '반응' };
   }
+}
+
+function NotificationGroupItem({
+  group,
+  collapsed,
+  onToggle,
+  onNavigate,
+}: {
+  group: Extract<NotificationDisplayItem, { kind: 'group' }>;
+  collapsed: boolean;
+  onToggle: () => void;
+  onNavigate: (n: AppNotification) => void;
+}) {
+  return (
+    <div className="rounded-lg border border-bg-border/35 bg-bg-primary/20 overflow-hidden">
+      <button
+        type="button"
+        onClick={onToggle}
+        className="flex w-full items-center gap-2 px-3 py-2 text-left hover:bg-bg-border/20 transition-colors"
+        title={collapsed ? '묶음 펼치기' : '묶음 접기'}
+      >
+        {collapsed ? <ChevronRight size={13} className="text-text-secondary/70" /> : <ChevronDown size={13} className="text-text-secondary/70" />}
+        <span className="min-w-0 flex-1 truncate text-[12px] font-semibold text-text-primary">{group.title}</span>
+        {group.unreadCount > 0 && (
+          <span className="rounded-full bg-accent/15 px-1.5 py-0.5 text-[9px] font-bold text-accent">
+            {group.unreadCount}
+          </span>
+        )}
+        <span className="text-[10px] text-text-secondary/50">{timeAgo(group.latestCreatedAt)}</span>
+      </button>
+      {!collapsed && (
+        <div className="space-y-0.5 border-t border-bg-border/25 p-1">
+          {group.notifications.map((notification) => (
+            <NotificationItem key={notification.id} n={notification} onNavigate={onNavigate} />
+          ))}
+        </div>
+      )}
+    </div>
+  );
 }
 
 // ─── 알림 항목 ───────────────────────────────────────
@@ -241,6 +284,8 @@ function NotificationDropdown() {
   const [liveSize, setLiveSize] = useState<{ width?: number; height?: number } | null>(null);
   const [hoverAxis, setHoverAxis] = useState<'w' | 's' | 'sw' | null>(null);
   const [dragAxis, setDragAxis] = useState<'w' | 's' | 'sw' | null>(null);
+  const [groupCollapsedKeys, setGroupCollapsedKeys] = useState<Set<string>>(new Set());
+  const displayGroups = useMemo(() => buildNotificationDisplayGroups(notifications), [notifications]);
 
   const { startDrag } = useNotificationPanelResizer({
     liveSetSize: (size) => setLiveSize((prev) => ({ ...(prev ?? {}), ...size })),
@@ -279,6 +324,15 @@ function NotificationDropdown() {
   const handleNavigate = (n: AppNotification) => {
     navigateNotificationToScene(n.type, n.metadata);
     setPanelOpen(false);
+  };
+
+  const toggleGroup = (key: string) => {
+    setGroupCollapsedKeys((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
   };
 
   return (
@@ -373,8 +427,18 @@ function NotificationDropdown() {
               <p className="text-[12px] text-text-secondary/50">알림이 없습니다</p>
             </div>
           ) : (
-            notifications.map((n) => (
-              <NotificationItem key={n.id} n={n} onNavigate={handleNavigate} />
+            displayGroups.map((item) => (
+              item.kind === 'group' ? (
+                <NotificationGroupItem
+                  key={item.key}
+                  group={item}
+                  collapsed={groupCollapsedKeys.has(item.key)}
+                  onToggle={() => toggleGroup(item.key)}
+                  onNavigate={handleNavigate}
+                />
+              ) : (
+                <NotificationItem key={item.notification.id} n={item.notification} onNavigate={handleNavigate} />
+              )
             ))
           )}
         </div>

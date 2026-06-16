@@ -11,6 +11,12 @@ import type {
   Department,
 } from '@/types';
 import { STAGES, STAGE_LABELS, DEPARTMENTS, DEPARTMENT_CONFIGS } from '@/types';
+import {
+  isAssigneeProgressFullyDone,
+  isAssigneeProgressNotStarted,
+  sceneProgressForAssignee,
+  sceneProgressFromAssignees,
+} from '@/utils/assigneeProgress';
 
 /**
  * v1.25.2~ 액팅 씬의 sceneState 기반 진행률 단계 수.
@@ -31,6 +37,8 @@ function sceneStateProgressCount(scene: Scene): number | null {
  *  v1.25.2~ 액팅 씬은 sceneState 우선, NULL 이면 legacy boolean fallback.
  */
 export function sceneProgress(scene: Scene): number {
+  const assigneeProgress = sceneProgressFromAssignees(scene);
+  if (assigneeProgress !== null) return assigneeProgress;
   const stateCount = sceneStateProgressCount(scene);
   if (stateCount !== null) return (stateCount / 4) * 100;
   const checks = [scene.lo, scene.done, scene.review, scene.png];
@@ -40,12 +48,16 @@ export function sceneProgress(scene: Scene): number {
 
 /** 씬이 4단계 모두 완료인지 — sceneState 우선, 없으면 legacy. */
 export function isFullyDone(scene: Scene): boolean {
+  const assigneeDone = isAssigneeProgressFullyDone(scene);
+  if (assigneeDone !== null) return assigneeDone;
   if (scene.sceneState) return scene.sceneState === 'done';
   return scene.lo && scene.done && scene.review && scene.png;
 }
 
 /** 씬이 아무것도 시작 안 한 상태인지 — sceneState 우선, 없으면 legacy. */
 export function isNotStarted(scene: Scene): boolean {
+  const assigneeNotStarted = isAssigneeProgressNotStarted(scene);
+  if (assigneeNotStarted !== null) return assigneeNotStarted;
   if (scene.sceneState) return scene.sceneState === 'wait';
   return !scene.lo && !scene.done && !scene.review && !scene.png;
 }
@@ -116,9 +128,9 @@ export function calcDashboardStats(episodes: Episode[], department?: Department)
     const names = scene.assignee
       ? scene.assignee.split(',').map(s => s.trim()).filter(Boolean)
       : ['미배정'];
-    const prog = sceneProgress(scene);
-    const done = isFullyDone(scene);
     for (const name of names) {
+      const prog = sceneProgressForAssignee(scene, name);
+      const done = prog >= 100;
       const entry = assigneeMap.get(name) || { total: 0, completed: 0, progressSum: 0 };
       entry.total++;
       if (done) entry.completed++;
@@ -249,9 +261,9 @@ export function calcEpisodeDetailStats(episodes: Episode[], epNum: number): Epis
     const names = scene.assignee
       ? scene.assignee.split(',').map(s => s.trim()).filter(Boolean)
       : ['미배정'];
-    const prog = sceneProgress(scene);
-    const done = isFullyDone(scene);
     for (const name of names) {
+      const prog = sceneProgressForAssignee(scene, name);
+      const done = prog >= 100;
       const entry = assigneeMap.get(name) || { total: 0, completed: 0, progressSum: 0 };
       entry.total++;
       if (done) entry.completed++;
@@ -275,9 +287,9 @@ export function calcEpisodeDetailStats(episodes: Episode[], epNum: number): Epis
       const names = scene.assignee
         ? scene.assignee.split(',').map(s => s.trim()).filter(Boolean)
         : ['미배정'];
-      const prog = sceneProgress(scene);
-      const done = isFullyDone(scene);
       for (const name of names) {
+        const prog = sceneProgressForAssignee(scene, name);
+        const done = prog >= 100;
         const entry = deptAssigneeMap.get(name) || { total: 0, completed: 0, progressSum: 0 };
         entry.total++;
         if (done) entry.completed++;

@@ -68,16 +68,16 @@ export default function CompositingView({
   const [searchQuery, setSearchQuery] = useState('');
   const [sortMode, setSortMode] = useState<SortMode>('recent');
   const [groupMode, setGroupMode] = useState<GroupMode>('scene');
-  // v1.19.5: 헤더에서 직접 새 리비전 등록 모달 열기
+  // v1.19.5: 헤더에서 직접 새 리테이크 등록 모달 열기
   const [newRevModalOpen, setNewRevModalOpen] = useState(false);
-  // v1.19.6: 리비전별 댓글 카운트 맵 (revisionId → count). 표시되는 sheetName 들의 댓글을 한 번 fetch 해 빌드.
+  // v1.19.6: 리테이크별 댓글 카운트 맵 (revisionId → count). 표시되는 sheetName 들의 댓글을 한 번 fetch 해 빌드.
   const [commentCountByRev, setCommentCountByRev] = useState<Map<string, number>>(() => new Map());
   const [commentLatestByRev, setCommentLatestByRev] = useState<Map<string, string>>(() => new Map());
   const [commentReadAtByThreadKey, setCommentReadAtByThreadKey] = useState<Record<string, string>>({});
   // 댓글 변경(다른 창에서 추가/수정/삭제) 시 카운트 재빌드 트리거용 카운터
   const [commentRefreshTick, setCommentRefreshTick] = useState(0);
 
-  // 선택된 리비전 객체
+  // 선택된 리테이크 객체
   const selectedRevision = useMemo(
     () => selectedRevisionId ? revisions.find(r => r.id === selectedRevisionId) ?? null : null,
     [revisions, selectedRevisionId],
@@ -164,11 +164,11 @@ export default function CompositingView({
   }, [commentLatestByRev, commentReadAtByThreadKey, effectiveCommentCountByRev, notificationCommentSeenByRev, revisions]);
   const effectiveCommentSeenByRev = previewMode ? previewCommentSeenByRev : readStateCommentSeenByRev;
 
-  // 씬 정보 맵 빌드 (에피소드 데이터 + 리비전 sceneKey 매칭)
+  // 씬 정보 맵 빌드 (에피소드 데이터 + 리테이크 sceneKey 매칭)
   //
   // v1.19.6: 부서(BG/ACT) 분리 폐기.
   // buildSceneKey 결과가 부서 무관(EP:Part:sceneId)이라 BG sheet 의 scene 과 ACT sheet 의 scene 이
-  // 같은 sceneKey 에 매핑된다. 따라서 같은 씬의 BG/ACT 리비전은 자연스럽게 한 그룹으로 합산된다.
+  // 같은 sceneKey 에 매핑된다. 따라서 같은 씬의 BG/ACT 리테이크는 자연스럽게 한 그룹으로 합산된다.
   //
   // SceneInfo 합병 규칙:
   // - sheetName/department: BG sheet 가 있으면 BG, 없으면 ACT (씬 모달 점프·댓글 라우팅 기준)
@@ -204,15 +204,15 @@ export default function CompositingView({
     return map;
   }, [episodes]);
 
-  // v1.19.0: 검색 + 정렬 적용된 리비전. 그룹핑 단계 입력으로 사용.
+  // v1.19.0: 검색 + 정렬 적용된 리테이크. 그룹핑 단계 입력으로 사용.
   // 코덱스 P2 fix (5차, 2026-05-05): "댓글 많은순" 정렬 시 commentCountByRev 전달.
-  // 이전엔 인자 누락으로 sortRevisions 가 모든 리비전을 0 으로 취급해 정렬 무효였음.
+  // 이전엔 인자 누락으로 sortRevisions 가 모든 리테이크를 0 으로 취급해 정렬 무효였음.
   const searchedSorted = useMemo(() => {
     const filtered = filterRevisionsBySearch(revisions, searchQuery, sceneInfoMap);
     return sortRevisions(filtered, sortMode, effectiveCommentCountByRev);
   }, [revisions, searchQuery, sortMode, sceneInfoMap, effectiveCommentCountByRev]);
 
-  // 선택된 리비전의 씬 정보
+  // 선택된 리테이크의 씬 정보
   const selectedRevisionSceneInfo = useMemo(
     () => selectedRevision ? sceneInfoMap.get(selectedRevision.sceneKey) ?? null : null,
     [selectedRevision, sceneInfoMap],
@@ -221,7 +221,7 @@ export default function CompositingView({
   // 씬 그룹 빌드
   //
   // v1.19.6: sceneKey 단위 통합. buildSceneKey 가 부서 무관 키를 만들어 BG/ACT 가 같은 씬이면
-  // 한 그룹에 두 부서 리비전이 모두 합산된다. allSceneKeys 에 BG·ACT 가 모두 push 되어도
+  // 한 그룹에 두 부서 리테이크가 모두 합산된다. allSceneKeys 에 BG·ACT 가 모두 push 되어도
   // sceneGroups 빌드 시 `seen.has(key)` 가드로 한 번만 그룹 생성.
   const sceneGroups = useMemo(() => {
     // 에피소드 필터링
@@ -243,7 +243,7 @@ export default function CompositingView({
       }
     }
 
-    // 리비전을 sceneKey로 그룹핑 (검색·정렬 적용된 결과 기준)
+    // 리테이크를 sceneKey로 그룹핑 (검색·정렬 적용된 결과 기준)
     const revByScene = new Map<string, CompRevision[]>();
     for (const rev of searchedSorted) {
       const list = revByScene.get(rev.sceneKey) || [];
@@ -251,7 +251,7 @@ export default function CompositingView({
       revByScene.set(rev.sceneKey, list);
     }
 
-    // 그룹 빌드 (리비전이 있는 씬만)
+    // 그룹 빌드 (리테이크가 있는 씬만)
     const groups: SceneGroup[] = [];
     const seen = new Set<string>();
 
@@ -308,7 +308,7 @@ export default function CompositingView({
       });
     }
 
-    // 또한, 선택된 에피소드에 속하지 않는 리비전도 표시 (selectedEp가 null일 때)
+    // 또한, 선택된 에피소드에 속하지 않는 리테이크도 표시 (selectedEp가 null일 때)
     if (selectedEp === null) {
       for (const [key, revs] of revByScene) {
         if (seen.has(key)) continue;
@@ -515,7 +515,7 @@ export default function CompositingView({
     }
   }, [feedbackTree, hasFeedbackTreeExpansion, sceneGroups]);
 
-  // 리비전 선택
+  // 리테이크 선택
   const handleSelectRevision = useCallback((rev: CompRevision) => {
     setSelectedRevisionId(prev => prev === rev.id ? null : rev.id);
   }, []);
@@ -530,20 +530,20 @@ export default function CompositingView({
 
   return (
     <div className="h-full flex bg-bg-primary/40">
-      {/* 좌측: 피드백 허브 */}
+      {/* 좌측: 리테이크 허브 */}
       <div className="flex-1 flex flex-col min-w-0 h-full">
         {/* 헤더 */}
         <div className="shrink-0 px-6 pt-6 pb-4 space-y-3 border-b border-bg-border/25">
           <div className="flex items-start justify-between gap-4">
             <div className="min-w-0">
               <div className="flex items-center gap-3">
-                <h1 className="text-xl font-semibold text-text-primary">피드백 허브</h1>
+                <h1 className="text-xl font-semibold text-text-primary">리테이크 허브</h1>
                 <span className="text-xs text-text-secondary">
-                  {stats.totalScenes}개 씬 &middot; {stats.totalRevisions}개 피드백
+                  {stats.totalScenes}개 씬 &middot; {stats.totalRevisions}개 리테이크
                 </span>
               </div>
               <p className="mt-1 text-xs text-text-secondary leading-relaxed">
-                씬별 피드백과 상태 흐름을 한 화면에서 정리합니다.
+                씬별 리테이크와 상태 흐름을 한 화면에서 정리합니다.
               </p>
             </div>
             <div className="flex items-center gap-2 shrink-0">
@@ -558,12 +558,12 @@ export default function CompositingView({
                   />
                 </button>
               )}
-              {/* v1.19.5: 헤더에서 직접 새 리비전 등록 */}
+              {/* v1.19.5: 헤더에서 직접 새 리테이크 등록 */}
               <button
                 onClick={() => setNewRevModalOpen(true)}
                 className="compact-label-container min-h-[34px] inline-flex min-w-0 shrink items-center gap-1 px-3 text-[11px] font-bold rounded-md bg-accent text-white hover:opacity-90 transition-opacity cursor-pointer"
               >
-                <CompactIconLabel icon={<Plus size={12} strokeWidth={2.5} />} label="새 피드백" />
+                <CompactIconLabel icon={<Plus size={12} strokeWidth={2.5} />} label="새 리테이크 요청" />
               </button>
             </div>
           </div>
@@ -666,7 +666,7 @@ export default function CompositingView({
           </div>
         </div>
 
-        {/* 피드백 목록 */}
+        {/* 리테이크 목록 */}
         <div className="flex-1 overflow-y-auto">
           {isLoading && revisions.length === 0 ? (
             <div className="flex items-center justify-center py-16 text-text-secondary/50 text-sm">
@@ -675,8 +675,8 @@ export default function CompositingView({
           ) : sceneGroups.length === 0 ? (
             <div className="flex flex-col items-center justify-center py-16 text-text-secondary/50">
               <Filter size={32} className="mb-3" />
-              <p className="text-sm">피드백이 있는 씬이 없습니다</p>
-              <p className="text-xs mt-1">씬 상세에서 수정 요청을 등록해보세요</p>
+              <p className="text-sm">리테이크가 있는 씬이 없습니다</p>
+              <p className="text-xs mt-1">씬 상세에서 리테이크 요청을 등록해보세요</p>
             </div>
           ) : groupMode === 'scene' ? (
             <FeedbackTreeSection
@@ -705,9 +705,9 @@ export default function CompositingView({
               onToggleScene={toggleScene}
             />
           ) : (
-            // 코덱스 P2 fix (10차, 2026-05-05): 진행률별 모드도 sceneGroups 의 필터 적용된 리비전들을 사용.
+            // 코덱스 P2 fix (10차, 2026-05-05): 진행률별 모드도 sceneGroups 의 필터 적용된 리테이크들을 사용.
             // searchedSorted 는 검색/정렬만 반영하고 selectedEp/statusFilter/myTasksOnly 무시 →
-            // 사용자가 EP/상태/내할일 토글 후 진행률별 보기로 전환하면 무관한 리비전이 보임.
+            // 사용자가 EP/상태/내할일 토글 후 진행률별 보기로 전환하면 무관한 리테이크가 보임.
             <ProgressKanbanSection
               revisions={visibleRevisions}
               sceneInfoMap={sceneInfoMap}
@@ -720,7 +720,7 @@ export default function CompositingView({
         </div>
       </div>
 
-      {/* 우측: 피드백 상세 패널 */}
+      {/* 우측: 리테이크 상세 패널 */}
       <AnimatePresence>
         {selectedRevision && (
           <DetailPanel
@@ -735,7 +735,7 @@ export default function CompositingView({
         )}
       </AnimatePresence>
 
-      {/* v1.19.5: 새 리비전 등록 모달 (중앙) */}
+      {/* v1.19.5: 새 리테이크 등록 모달 (중앙) */}
       <NewRevisionModal
         open={newRevModalOpen}
         onClose={() => setNewRevModalOpen(false)}

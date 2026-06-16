@@ -3,7 +3,7 @@
  * Electron 없이 Vite dev server에서 앱을 테스트할 수 있게 함
  */
 
-import type { ElectronAPI, AppUser } from '@/types';
+import type { ElectronAPI, AppUser, Episode, Scene } from '@/types';
 import { MOCK_EPISODES, MOCK_COMPOSITING_STATES, type MockCompositingRow } from './compositingMockSeed';
 import {
   buildDevPreviewCommentReadStates,
@@ -35,6 +35,52 @@ const localStore: Record<string, unknown> = {};
 const COMMENTS_FILE = 'comments.json';
 
 const noop = () => () => {};
+
+function cloneMockEpisodes(): Episode[] {
+  return JSON.parse(JSON.stringify(MOCK_EPISODES)) as Episode[];
+}
+
+function getMockEpisodes(): Episode[] {
+  return (localStore.__mockEpisodes as Episode[] | undefined)
+    ?? (localStore.__mockEpisodes = cloneMockEpisodes()) as Episode[];
+}
+
+function createMockScene(sheetName: string, sceneId: string, assignee: string, memo: string, no: number): Scene {
+  const safeSheet = sheetName.replace(/[^a-z0-9_-]+/gi, '-');
+  const safeScene = sceneId.replace(/[^a-z0-9_-]+/gi, '-');
+  return {
+    id: `mock-scene-${safeSheet}-${safeScene}`,
+    no,
+    sceneId,
+    memo: memo || '',
+    storyboardUrl: '',
+    guideUrl: '',
+    assignee: assignee || '',
+    layoutId: '',
+    lo: false,
+    done: false,
+    review: false,
+    png: false,
+  };
+}
+
+function addMockScene(sheetName: string, sceneId: string, assignee: string, memo: string): { sceneUuid: string | null } {
+  const episodes = getMockEpisodes();
+  for (const episode of episodes) {
+    const part = episode.parts.find((item) => item.sheetName === sheetName);
+    if (!part) continue;
+    const existing = part.scenes.find((scene) => scene.sceneId.trim().toLowerCase() === sceneId.trim().toLowerCase());
+    if (existing) return { sceneUuid: existing.id ?? null };
+    const nextNo = part.scenes.length > 0
+      ? Math.max(...part.scenes.map((scene) => scene.no)) + 1
+      : 1;
+    const nextScene = createMockScene(sheetName, sceneId, assignee, memo, nextNo);
+    part.scenes.push(nextScene);
+    localStore.__mockEpisodes = episodes;
+    return { sceneUuid: nextScene.id ?? null };
+  }
+  return { sceneUuid: null };
+}
 
 interface MockMetadataRow {
   type: string;
@@ -163,7 +209,7 @@ function findMockSceneContext(sceneKey: string, preferredDepartment?: string) {
     scene: (typeof MOCK_EPISODES)[number]['parts'][number]['scenes'][number];
   } | null = null;
 
-  for (const episode of MOCK_EPISODES) {
+  for (const episode of getMockEpisodes()) {
     if (episodeNumber && episode.episodeNumber !== episodeNumber) continue;
     for (const part of episode.parts) {
       if (part.partId.trim().toUpperCase() !== partKey) continue;
@@ -201,8 +247,8 @@ function createMockRevisionActivityRow(params: {
     ? params.department
     : context?.part.department ?? null;
   const sceneLabel = context
-    ? `${context.episode.title} ${context.part.partId.toUpperCase()} ${context.scene.sceneId} 리비전 #${revisionNo}`
-    : `씬 ${sceneKey} 리비전 #${revisionNo}`;
+    ? `${context.episode.title} ${context.part.partId.toUpperCase()} ${context.scene.sceneId} 리테이크 #${revisionNo}`
+    : `씬 ${sceneKey} 리테이크 #${revisionNo}`;
 
   return {
     id: `mock-activity-revision_add-${id}`,
@@ -237,8 +283,8 @@ function createMockRevisionStatusActivityRow(params: {
     ? revision.department
     : context?.part.department ?? null;
   const sceneLabel = context
-    ? `${context.episode.title} ${context.part.partId.toUpperCase()} ${context.scene.sceneId} 리비전 #${revision.revisionNo}`
-    : `씬 ${revision.sceneKey} 리비전 #${revision.revisionNo}`;
+    ? `${context.episode.title} ${context.part.partId.toUpperCase()} ${context.scene.sceneId} 리테이크 #${revision.revisionNo}`
+    : `씬 ${revision.sceneKey} 리테이크 #${revision.revisionNo}`;
 
   return {
     id: `mock-activity-${actionType}-${revision.id}`,
@@ -376,7 +422,7 @@ export function installDevElectronAPI(): void {
       console.log(`[DEV 알림] ${title}: ${body}`);
     },
 
-    // v1.25.0~ 액팅 단계 토글 + 피드백 알림 (mock — 로그만)
+    // v1.25.0~ 액팅 단계 토글 + 리테이크 알림 (mock — 로그만)
     supabaseUpdateScenePhase: async (sceneUuid, sceneState, workRound, feedbackRound) => {
       console.log('[DEV] supabaseUpdateScenePhase:', { sceneUuid, sceneState, workRound, feedbackRound });
     },
@@ -453,7 +499,7 @@ export function installDevElectronAPI(): void {
     supabaseTestConnection: async () => ({ ok: true }),
     // v1.30.0: 컴포지팅 대시보드 시각 검증용 — MOCK_EPISODES 시드.
     // 운영(.exe)에는 영향 없음 (devElectronAPI 자체가 install skip).
-    supabaseReadAll: async () => MOCK_EPISODES as unknown as Record<string, unknown>[],
+    supabaseReadAll: async () => getMockEpisodes() as unknown as Record<string, unknown>[],
     supabaseAddEpisode: async () => {},
     supabaseSoftDeleteEpisode: async () => {},
     supabaseArchiveEpisode: async () => {},
@@ -461,8 +507,10 @@ export function installDevElectronAPI(): void {
     supabaseReadArchived: async () => [],
     supabaseAddPart: async () => {},
     supabaseSoftDeletePart: async () => {},
-    supabaseAddScene: async () => ({ sceneUuid: null }),
-    supabaseAddScenes: async () => {},
+    supabaseAddScene: async (sheetName, sceneId, assignee, memo) => addMockScene(sheetName, sceneId, assignee, memo),
+    supabaseAddScenes: async (sheetName, scenes) => {
+      scenes.forEach((scene) => addMockScene(sheetName, scene.sceneId, scene.assignee, scene.memo));
+    },
     supabaseDeleteScene: async () => {},
     supabaseUpdateSceneStage: async () => {},
     supabaseBulkUpdateSceneStages: async (updates) => updates.map((u) => ({ sceneUuid: u.sceneUuid, success: true })),

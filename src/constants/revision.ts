@@ -33,7 +33,7 @@ export const PRIORITY_CONFIG: Record<RevisionPriority, { label: string; color: s
 };
 
 /**
- * 리비전 번호를 라벨로 변환. 1 → "re1", 2 → "re2", ...
+ * 리테이크 번호를 라벨로 변환. 1 → "re1", 2 → "re2", ...
  * 씬 모달, 카드, [re#] 배지, 알림 라벨 등 모든 표시에서 사용.
  */
 export function revisionNoToLabel(n: number): string {

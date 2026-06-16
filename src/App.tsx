@@ -14,7 +14,7 @@ const TeamView = lazy(() => import('@/views/TeamView').then(m => ({ default: m.T
 const CalendarView = lazy(() => import('@/views/CalendarView').then(m => ({ default: m.CalendarView })));
 const ScheduleView = lazy(() => import('@/views/ScheduleView').then(m => ({ default: m.ScheduleView })));
 const VacationView = lazy(() => import('@/views/VacationView').then(m => ({ default: m.VacationView })));
-const CompositingView = lazy(() => import('@/views/CompositingView')); // default export — 기존 리비전 피드백 보드 (v1.30.0~ 'compositing-revisions' 로 이관)
+const CompositingView = lazy(() => import('@/views/CompositingView')); // default export — 기존 리테이크 보드 (v1.30.0~ 'compositing-revisions' 로 이관)
 const CompositingDashboardView = lazy(() => import('@/views/CompositingDashboardView')); // v1.30.0+ 새 현황 대시보드
 const SettingsView = lazy(() => import('@/views/SettingsView').then(m => ({ default: m.SettingsView })));
 import { SpotlightSearch } from '@/components/spotlight/SpotlightSearch';
@@ -25,7 +25,8 @@ import { GlobalTooltipProvider } from '@/components/ui/GlobalTooltip';
 import { GradientBackdrop } from '@/components/common/GradientBackdrop';
 import { loadGasConfig, connectGas, checkGasConnection } from '@/services/gasConfigService';
 import { readAll } from '@/services/supabaseService';
-import { readAllFromSupabase, testSupabaseConnection, readAllMetadataFromSupabase, onSupabaseRealtimeEvent, onSupabaseStatusChange } from '@/services/supabaseService';
+import { testSupabaseConnection, readAllMetadataFromSupabase, onSupabaseRealtimeEvent, onSupabaseStatusChange } from '@/services/supabaseService';
+import { applyAssigneeProgressMetadata } from '@/utils/assigneeProgress';
 import type { SupabaseRealtimeEvent } from '@/services/supabaseService';
 import { invalidatePartCache } from '@/services/commentService';
 import { invalidateRevisionsCache } from '@/services/revisionService';
@@ -71,6 +72,11 @@ import {
   isCommentByUser,
   hasUserCommentedOnScene,
 } from '@/utils/sceneNotificationRecipients';
+import { buildRevisionNotificationUserIds } from '@/utils/revisionNotificationRecipients';
+import {
+  buildNotificationSceneDisplayLabel,
+  buildNotificationSceneDisplayLabelFromSceneKey,
+} from '@/utils/notificationEpisodeLabels';
 import { isRecentSelfRevisionAction } from '@/stores/useRevisionStore';
 import type { UpdateInfo } from '@/types';
 
@@ -287,7 +293,7 @@ export default function App() {
 
     import('@/stores/useRevisionStore').then(async ({ useRevisionStore }) => {
       let rev = useRevisionStore.getState().revisions.find((r) => r.id === newComment.revision_id);
-      // 리비전 store 가 비어있으면 fresh 세션에서도 알림이 빠지지 않게 lazy load 후 재시도.
+      // 리테이크 store 가 비어있으면 fresh 세션에서도 알림이 빠지지 않게 lazy load 후 재시도.
       if (!rev) {
         await useRevisionStore.getState().loadRevisions();
         rev = useRevisionStore.getState().revisions.find((r) => r.id === newComment.revision_id);
@@ -299,23 +305,38 @@ export default function App() {
       const mentionedUserIds = useAuthStore.getState().users
         .filter((user) => mentionedNames.includes(user.name))
         .map((user) => user.id);
-      const targets = new Set([...revisionNotifyIds, ...mentionedUserIds]);
+      const targets = new Set(buildRevisionNotificationUserIds({
+        notifyUserIds: revisionNotifyIds,
+        requesterId: rev.requesterId,
+        mentionedUserIds,
+      }));
       const isMentioned = mentionedNames.includes(me.name);
       if (!targets.has(me.id)) return;
 
       const dedupeKey = `revcomment:${newComment.id ?? ''}:${newComment.revision_id}`;
       if (!dedupeNotification(dedupeKey)) return;
 
+      const dataState = useDataStore.getState();
       const sceneByUuid = newComment.scene_uuid
-        ? useDataStore.getState().findSceneByUuid(newComment.scene_uuid)
+        ? dataState.findSceneByUuid(newComment.scene_uuid)
         : null;
+      const sceneLabel = (() => {
+        if (sceneByUuid?.sceneId) return sceneByUuid.sceneId;
+        const sceneKeyLabel = buildNotificationSceneDisplayLabelFromSceneKey(
+          newComment.scene_id,
+          dataState.episodeTitles,
+          dataState.episodes,
+        );
+        if (sceneKeyLabel) return sceneKeyLabel;
+        return newComment.scene_id || '';
+      })();
       const body = newComment.text
         ? (newComment.text.length > 60 ? newComment.text.slice(0, 60) + '...' : newComment.text)
         : `${newComment.user_name || '누군가'}님 댓글`;
 
       dispatchNotification({
         type: 'revision',
-        title: `${isMentioned ? '리비전 댓글 멘션' : '리비전 댓글'} — ${sceneByUuid?.sceneId || newComment.scene_id || ''}`,
+        title: `${isMentioned ? '리테이크 댓글 멘션' : '리테이크 댓글'} — ${sceneLabel}`,
         body,
         metadata: {
           sceneId: sceneByUuid?.id ?? newComment.scene_uuid ?? undefined,
@@ -353,8 +374,7 @@ export default function App() {
       const sbConn = await testSupabaseConnection();
       if (sbConn.ok) {
         setActiveDataSource('supabase');
-        const episodes = await readAllFromSupabase();
-        setEpisodes(episodes);
+        const episodes = await readAll();
         setLastSyncTime(Date.now());
 
         // 메타데이터 로드 (Supabase)
@@ -369,6 +389,7 @@ export default function App() {
           setEpisodeTitles(titles);
           setEpisodeMemos(memos);
         } catch { /* 메타데이터 로드 실패는 무시 */ }
+        setEpisodes(episodes);
         return;
       }
 
@@ -388,8 +409,8 @@ export default function App() {
         }
       }
 
-      const episodes = await readAll();
-      setEpisodes(episodes);
+      const loadedEpisodes = await readAll();
+      let episodes = loadedEpisodes;
       setLastSyncTime(Date.now());
 
       // 메타데이터 로드 (Sheets)
@@ -403,11 +424,13 @@ export default function App() {
               if (m.type === 'episode-title' && m.value) titles[Number(m.key)] = m.value;
               if (m.type === 'episode-memo' && m.value) memos[Number(m.key)] = m.value;
             }
+            episodes = applyAssigneeProgressMetadata(loadedEpisodes, metaRes.data);
             setEpisodeTitles(titles);
             setEpisodeMemos(memos);
           }
         }
       } catch { /* 메타데이터 로드 실패는 무시 */ }
+      setEpisodes(episodes);
     } catch (err) {
       console.error('[동기화 실패]', err);
       setSyncError(String(err));
@@ -726,7 +749,7 @@ export default function App() {
       // 1초 지연으로 다른 환영 토스트와 겹치지 않게.
       const t = window.setTimeout(() => {
         sonnerToast.info('컴포지팅 메뉴가 둘로 나뉘었어요', {
-          description: '"컴포지팅" 은 새 진행 현황 대시보드, "리비전" 은 기존 피드백 보드입니다.',
+          description: '"컴포지팅" 은 새 진행 현황 대시보드, "리테이크" 은 기존 리테이크 보드입니다.',
           duration: 7000,
         });
         try { localStorage.setItem(KEY, '1'); } catch { /* noop */ }
@@ -914,12 +937,18 @@ export default function App() {
         }
         const store = useNotificationStore.getState();
         for (const m of all) {
-          const epLabel = `EP${String(m.episodeNumber).padStart(2, '0')}`;
+          const ds = useDataStore.getState();
+          const epLabel = buildNotificationSceneDisplayLabel({
+            episodeNumber: m.episodeNumber,
+            sceneId: m.sceneId,
+            episodeTitles: ds.episodeTitles,
+            episodes: ds.episodes,
+          });
           const transitionLabel = `${m.fromState ?? ''} → ${m.toState}`;
           store.addNotification({
             type: 'acting_feedback',
             title: `${m.senderName}님이 피드백을 요청했습니다`,
-            body: `${epLabel} · ${m.sceneId}`,
+            body: epLabel,
             metadata: {
               sceneId: m.sceneUuid ?? undefined,
               sceneName: m.sceneId,
@@ -991,13 +1020,19 @@ export default function App() {
         }
         const store = useNotificationStore.getState();
         for (const m of all) {
-          const epLabel = `EP${String(m.episodeNumber).padStart(2, '0')}`;
+          const ds = useDataStore.getState();
+          const epLabel = buildNotificationSceneDisplayLabel({
+            episodeNumber: m.episodeNumber,
+            sceneId: m.sceneId,
+            episodeTitles: ds.episodeTitles,
+            episodes: ds.episodes,
+          });
           const prev = m.prevAssignee?.trim();
           const transitionLabel = prev ? `${prev} → ${m.newAssignee}` : `미배정 → ${m.newAssignee}`;
           store.addNotification({
             type: 'scene_assignment',
             title: `${m.senderName}님이 담당자로 지정했습니다`,
-            body: `${epLabel} · ${m.sceneId}`,
+            body: epLabel,
             metadata: {
               sceneId: m.sceneUuid,
               sceneName: m.sceneId,
@@ -1287,19 +1322,19 @@ export default function App() {
             user_id?: string;
             text?: string;
             mentions?: string[];
-            // v1.18.0: 리비전 맥락 댓글 식별 — 값 있으면 'revision' 알림 경로로 분기.
+            // v1.18.0: 리테이크 맥락 댓글 식별 — 값 있으면 'revision' 알림 경로로 분기.
             revision_id?: string | null;
             // v1.24.0: 1단계 대댓글이면 부모 댓글 id. 답글 알림 분기에 사용.
             parent_comment_id?: string | null;
           };
           const me = useAuthStore.getState().currentUser;
 
-          // v1.18.0: 리비전 맥락 댓글 → 'revision' 알림 (revisionAction='comment').
+          // v1.18.0: 리테이크 맥락 댓글 → 'revision' 알림 (revisionAction='comment').
           // 일반 댓글 알림 경로(isMentioned/isAssignee) 와 *분리* 해 중복 알림 방지.
-          // 조건: revision_id 있음 + 그 리비전 notifyUserIds 에 나 포함 + 내가 작성자 아님.
+          // 조건: revision_id 있음 + 그 리테이크 notifyUserIds 에 나 포함 + 내가 작성자 아님.
           if (dispatchRevisionCommentNotification(newComment)) {
-            // 리비전 맥락 댓글은 일반 댓글 알림 경로 스킵.
-            // 코덱스 P2 fix (2026-05-10): early return *전* 캐시 무효화. 안 그러면 리비전 댓글이
+            // 리테이크 맥락 댓글은 일반 댓글 알림 경로 스킵.
+            // 코덱스 P2 fix (2026-05-10): early return *전* 캐시 무효화. 안 그러면 리테이크 댓글이
             //   캐시에 stale 한 상태로 남아 일반 댓글 뷰에서 누락됨 (broadcast 가 늦거나 끊긴 케이스).
             invalidatePartCache();
             return;
@@ -1457,7 +1492,7 @@ export default function App() {
         // deletedId 없으면 (REPLICA IDENTITY 특이 상황) 아래 debounced reload로 fallthrough
       }
 
-      // 리비전 변경 → 캐시 무효화 + 스토어 리로드 신호
+      // 리테이크 변경 → 캐시 무효화 + 스토어 리로드 신호
       if (table === 'comp_revisions') {
         invalidateRevisionsCache();
         window.dispatchEvent(new Event('bflow:revisions-invalidated'));
@@ -1498,14 +1533,19 @@ export default function App() {
 
           // sceneKey → 씬 매칭 (revisions 의 scene_id 는 'EP01:A:1' sceneKey 형식)
           const sceneKey = row.scene_id || '';
-          const sceneNameForLabel = sceneKey.split(':').pop() || sceneKey;
+          const dataState = useDataStore.getState();
+          const sceneNameForLabel = buildNotificationSceneDisplayLabelFromSceneKey(
+            sceneKey,
+            dataState.episodeTitles,
+            dataState.episodes,
+          ) || sceneKey.split(':').pop() || sceneKey;
           // 코덱스 P1 fix (2026-05-05): metadata.sceneName 에 last-token('a001')만 저장하면
           // 다른 EP/Part 의 같은 raw sceneId 와 reuse 충돌 → 알림 클릭 시 잘못된 씬으로 라우팅 가능.
           // sceneId(UUID) 우선 매칭으로 정확도 보장. sceneName 은 sceneKey 전체 보존 (fallback 식별자).
 
           dispatchNotification({
             type: 'revision',
-            title: `새 리비전 — ${sceneNameForLabel}`,
+            title: `새 리테이크 — ${sceneNameForLabel}`,
             body: row.description ? (row.description.length > 50 ? row.description.slice(0, 50) + '...' : row.description) : `${row.requester_name || '누군가'}님이 등록`,
             metadata: {
               sceneId: row.scene_uuid,  // UUID 매칭 우선 (NotificationPanel:181 부근)
@@ -1543,10 +1583,10 @@ export default function App() {
           let titlePrefix: string;
           if (newRow.status === 'in_progress') {
             action = 'in_progress';
-            titlePrefix = '리비전 진행중';
+            titlePrefix = '리테이크 진행중';
           } else if (newRow.status === 'resolved') {
             action = 'resolve';
-            titlePrefix = '리비전 완료';
+            titlePrefix = '리테이크 완료';
           } else {
             // open 으로 되돌림 — 알림 X
             return;
@@ -1567,7 +1607,12 @@ export default function App() {
           }
 
           const sceneKey = newRow.scene_id || '';
-          const sceneNameForLabel = sceneKey.split(':').pop() || sceneKey;
+          const dataState = useDataStore.getState();
+          const sceneNameForLabel = buildNotificationSceneDisplayLabelFromSceneKey(
+            sceneKey,
+            dataState.episodeTitles,
+            dataState.episodes,
+          ) || sceneKey.split(':').pop() || sceneKey;
           // 코덱스 P1 fix (2026-05-05): INSERT 분기와 동일 — sceneId(UUID) 우선,
           // sceneName 은 sceneKey 전체 보존 (last-token reuse 충돌 방지).
           dispatchNotification({
@@ -1616,7 +1661,7 @@ export default function App() {
     return () => { cleanup?.(); };
   }, []);
 
-  // Realtime 리비전 변경 → useRevisionStore 리로드
+  // Realtime 리테이크 변경 → useRevisionStore 리로드
   useEffect(() => {
     const handler = () => {
       import('@/stores/useRevisionStore').then(({ useRevisionStore }) => {
@@ -1656,13 +1701,19 @@ export default function App() {
         // 본인이 본인을 지정하는 경우는 차단
         if (ap.senderId === me.id) return;
 
-        const epLabel = `EP${String(ap.episodeNumber).padStart(2, '0')}`;
+        const ds = useDataStore.getState();
+        const epLabel = buildNotificationSceneDisplayLabel({
+          episodeNumber: ap.episodeNumber,
+          sceneId: ap.sceneId,
+          episodeTitles: ds.episodeTitles,
+          episodes: ds.episodes,
+        });
         const prev = ap.prevAssignee?.trim();
         const transitionLabel = prev ? `${prev} → ${ap.newAssignee}` : `미배정 → ${ap.newAssignee}`;
         dispatchNotification({
           type: 'scene_assignment',
           title: `${ap.senderName}님이 담당자로 지정했습니다`,
-          body: `${epLabel} · ${ap.sceneId} (${transitionLabel})`,
+          body: `${epLabel} (${transitionLabel})`,
           metadata: {
             sceneId: ap.sceneUuid,
             sceneName: ap.sceneId,
@@ -1672,11 +1723,11 @@ export default function App() {
             assignmentNotificationId: ap.notificationId,
           },
         }, { ...notiSettingsRef.current, osNotification: false });
-        // Windows 네이티브 토스트 + 클릭 시 점프 (피드백과 동일 sceneJump 경로 재사용)
+        // Windows 네이티브 토스트 + 클릭 시 점프 (리테이크와 동일 sceneJump 경로 재사용)
         // 코덱스 3차 P2 fix: notificationId/kind 도 함께 전달 — 클릭으로 점프했을 때 jump 핸들러가 read_at 처리.
         window.electronAPI.notifyFeedbackToast({
           title: 'B flow — 담당자 배정',
-          body: `${ap.senderName}님이 ${epLabel} ${ap.sceneId} 담당자로 지정했습니다.`,
+          body: `${ap.senderName}님이 ${epLabel} 담당자로 지정했습니다.`,
           sceneJump: {
             sheetName: ap.sheetName,
             sceneId: ap.sceneId,
@@ -1714,7 +1765,13 @@ export default function App() {
       if (!Array.isArray(p.recipients) || !p.recipients.includes(me.id)) return;
       if (p.senderId === me.id) return;
 
-      const epLabel = `EP${String(p.episodeNumber).padStart(2, '0')}`;
+      const ds = useDataStore.getState();
+      const epLabel = buildNotificationSceneDisplayLabel({
+        episodeNumber: p.episodeNumber,
+        sceneId: p.sceneId,
+        episodeTitles: ds.episodeTitles,
+        episodes: ds.episodes,
+      });
       // v1.25.5: dispatchNotification 으로 sonner + 알림 store(인앱 누적·persist) 통합.
       //  OS 네이티브 토스트는 osNotification=false 로 차단하고 notifyFeedbackToast 별도 호출
       //  (Windows 토스트 click handler 의 씬 점프 기능 유지).
@@ -1725,7 +1782,7 @@ export default function App() {
       dispatchNotification({
         type: 'acting_feedback',
         title: `${p.senderName}님이 피드백을 요청했습니다`,
-        body: `${epLabel} · ${p.sceneId} (${transitionLabel})`,
+        body: `${epLabel} (${transitionLabel})`,
         metadata: {
           sceneId: p.sceneUuid,
           sceneName: p.sceneId,
@@ -1739,7 +1796,7 @@ export default function App() {
       // 코덱스 3차 P2 fix: notificationId/kind 도 함께 전달 — feedback 토스트 클릭 후 read_at 처리.
       window.electronAPI.notifyFeedbackToast({
         title: 'B flow — 피드백 요청',
-        body: `${p.senderName}님이 ${epLabel} ${p.sceneId} 검수를 요청했습니다.`,
+        body: `${p.senderName}님이 ${epLabel} 검수를 요청했습니다.`,
         sceneJump: {
           sheetName: p.sheetName,
           sceneId: p.sceneId,

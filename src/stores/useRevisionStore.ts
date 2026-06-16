@@ -4,7 +4,7 @@ import * as revisionService from '@/services/revisionService';
 import { useDataStore } from '@/stores/useDataStore';
 
 /**
- * v1.18.0: 리비전 등록 input. 우선순위/프레임/담당자 입력 UI 가 폼에서 제거되어
+ * v1.18.0: 리테이크 등록 input. 우선순위/프레임/담당자 입력 UI 가 폼에서 제거되어
  * (한솔 결정 — spec 2026-05-03) 자동값으로 처리. 호출자는 sceneKey/description/이미지/
  * 알림 대상자/부서/등록자 정보만 전달.
  */
@@ -93,7 +93,7 @@ export const useRevisionStore = create<RevisionState>((set, get) => ({
         lastLoadTime: Date.now(),
       });
     } catch (err) {
-      console.error('[리비전 스토어] 로드 실패:', err);
+      console.error('[리테이크 스토어] 로드 실패:', err);
     } finally {
       set({ isLoading: false });
     }
@@ -148,7 +148,7 @@ export const useRevisionStore = create<RevisionState>((set, get) => ({
     } catch (err) {
       // Codex 리뷰 #6 P2: stale snapshot 복원은 in-flight 간 들어온 realtime/로컬 변경을
       // 덮어쓸 수 있음. 서버에서 재로드해 실제 상태와 동기화한다.
-      console.error('[리비전 스토어] 삭제 실패 → 서버 재로드:', err);
+      console.error('[리테이크 스토어] 삭제 실패 → 서버 재로드:', err);
       await get().loadRevisions();
       throw err;
     }
@@ -176,7 +176,7 @@ export const useRevisionStore = create<RevisionState>((set, get) => ({
     try {
       await revisionService.updateRevisionStatus(id, sceneKey, status, extra);
     } catch (err) {
-      console.error('[리비전 스토어] 상태 업데이트 실패:', err);
+      console.error('[리테이크 스토어] 상태 업데이트 실패:', err);
       // 롤백: 다시 로드
       await get().loadRevisions();
     }

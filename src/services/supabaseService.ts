@@ -9,6 +9,7 @@ import type {
   CompositingState, CompositingStatus, CompositingErrorKind,
   CommentReadStateRow,
 } from '../types';
+import { applyAssigneeProgressMetadata } from '../utils/assigneeProgress';
 
 // 일괄 작업 타입 재노출 — 다른 렌더러 모듈에서 쉽게 참조 가능
 export type { BulkStageUpdate, BulkFieldUpdate, BulkUpdateResult };
@@ -87,7 +88,7 @@ export async function updateScenePhaseInSupabase(
   await window.electronAPI.supabaseUpdateScenePhase(sceneUuid, sceneState, workRound, feedbackRound, updatedBy);
 }
 
-/** v1.25.0~ 액팅 피드백 알림 발송 — broadcast 채널로 다른 클라이언트 전파 */
+/** v1.25.0~ 액팅 리테이크 알림 발송 — broadcast 채널로 다른 클라이언트 전파 */
 export async function dispatchActingFeedbackNotification(payload: {
   sceneUuid: string;
   sceneId: string;
@@ -105,7 +106,7 @@ export async function dispatchActingFeedbackNotification(payload: {
   await window.electronAPI.supabaseDispatchFeedbackNotification(payload);
 }
 
-/** v1.25.5 로그인 catch-up — 마지막 본 시각 이후 미읽음 액팅 피드백 알림 조회.
+/** v1.25.5 로그인 catch-up — 마지막 본 시각 이후 미읽음 액팅 리테이크 알림 조회.
  *  before: 페이지네이션 (created_at < before). */
 export async function fetchMissedFeedbackNotifications(
   userId: string,
@@ -236,7 +237,7 @@ export async function addCommentToSupabase(
   commentId: string, partUuid: string, sceneId: string,
   userId: string, userName: string, text: string, mentions: string[], createdAt: string,
   images: string[] = [],
-  /** v1.18.0: 리비전 맥락 댓글이면 해당 id, 일반 씬 댓글이면 null. */
+  /** v1.18.0: 리테이크 맥락 댓글이면 해당 id, 일반 씬 댓글이면 null. */
   revisionId: string | null = null,
   /** v1.24.0: 1단계 대댓글이면 부모 댓글 id, 일반 댓글이면 null. */
   parentCommentId: string | null = null,
@@ -437,7 +438,14 @@ export async function readMetadata(type: string, key: string): Promise<{ type: s
 
 /** 전체 에피소드 데이터 조회 */
 export async function readAll(): Promise<Episode[]> {
-  return readAllFromSupabase();
+  const episodes = await readAllFromSupabase();
+  try {
+    const metadata = (await readAllMetadataFromSupabase()) as { type: string; key: string; value: string }[];
+    return applyAssigneeProgressMetadata(episodes, metadata);
+  } catch (err) {
+    console.warn('[supabaseService] 담당자별 진행 메타데이터 적용 실패:', err);
+    return episodes;
+  }
 }
 
 // ─── 배치 실행 ──────────

@@ -135,8 +135,8 @@ export function VacationRegisterModal({
       });
 
       if (result.ok && result.success) {
-        // pending 제거 → 로컬 즉시 피드백 + 다른 창에 완료 브로드캐스트
-        // 로컬 setToast: 현재 창 즉시 피드백 (dev/test 모드 포함).
+        // pending 제거 → 로컬 즉시 리테이크 + 다른 창에 완료 브로드캐스트
+        // 로컬 setToast: 현재 창 즉시 리테이크 (dev/test 모드 포함).
         // broadcast는 `excludeSenderId` 적용으로 다른 창만 수신 → 중복 토스트 없음.
         await safeRemovePending('성공 후');
         setToast({ message: `${userName} 휴가 등록 완료 (${type})`, type: 'success' });

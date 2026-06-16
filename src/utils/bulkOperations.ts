@@ -1,6 +1,14 @@
 import { useBulkOperationsStore, type OpKind } from '@/stores/useBulkOperationsStore';
 import { useDataStore } from '@/stores/useDataStore';
-import type { BulkUpdateResult, MergedScene, Part, Scene, ScenePhaseState, Stage } from '@/types';
+import type {
+  BulkUpdateResult,
+  MergedScene,
+  Part,
+  Scene,
+  SceneAssigneeProgressMap,
+  ScenePhaseState,
+  Stage,
+} from '@/types';
 import {
   parseSingleSceneSelectionId,
   resolveSingleSceneSelection,
@@ -157,6 +165,10 @@ type RunBulkOpOptions = {
    */
   stagePatchByUuid?: Map<string, Partial<Record<Stage, boolean>>>;
   /**
+   * stage-toggle에서 다중 담당자 진행률 metadata도 함께 바뀌는 경우 성공 시 store에 반영한다.
+   */
+  assigneeProgressByUuid?: Map<string, SceneAssigneeProgressMap>;
+  /**
    * field-edit에서 적용할 필드. 성공 시 store에 반영한다.
    */
   fieldsByUuid?: Map<string, Partial<Scene>>;
@@ -182,6 +194,7 @@ export interface ActPhasePatch {
   done: boolean;
   review: boolean;
   png: boolean;
+  assigneeProgress?: SceneAssigneeProgressMap;
   completedBy?: string;
   completedAt?: string;
 }
@@ -221,6 +234,10 @@ export async function runBulkOp(
       if (meta) {
         patch.completedBy = meta.completedBy;
         patch.completedAt = meta.completedAt;
+      }
+      const assigneeProgress = opts.assigneeProgressByUuid?.get(sceneUuid);
+      if (assigneeProgress) {
+        patch.assigneeProgress = assigneeProgress;
       }
       if (Object.keys(patch).length > 0) {
         useDataStore.getState().updateSceneByUuid(sceneUuid, patch);

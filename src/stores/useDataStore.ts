@@ -60,10 +60,10 @@ interface DataState {
    * v1.25.0~: 액팅 씬 단계 상태 변경 (낙관적). 진입 시점에 차수 자동 동기화.
    * spec 4-2 전이 규칙 적용:
    *  - 대기 → 작업중: workRound = 1 (기존 0 일 때)
-   *  - 작업중 → 피드백 대기: feedbackRound = workRound 동기화
-   *  - 피드백 대기 → 작업중: workRound = feedbackRound + 1 (자동 +1)
+   *  - 작업중 → 리테이크 대기: feedbackRound = workRound 동기화
+   *  - 리테이크 대기 → 작업중: workRound = feedbackRound + 1 (자동 +1)
    *  - 어떤 상태 → 대기 또는 완료: round 모두 0
-   *  - 어떤 상태 → 피드백 대기 (직접 점프): feedbackRound = max(1, 기존)
+   *  - 어떤 상태 → 리테이크 대기 (직접 점프): feedbackRound = max(1, 기존)
    */
   setScenePhaseOptimistic: (
     sheetName: string,

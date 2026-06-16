@@ -1,10 +1,10 @@
 /**
- * v1.25.0~ 액팅 씬 단계 토글 (대기/작업중/피드백 대기/완료).
+ * v1.25.0~ 액팅 씬 단계 토글 (대기/작업중/리테이크 대기/완료).
  *
- * v1.25.7 (한솔 결정 — 시안 B + 피드백 차수 숨김):
+ * v1.25.7 (한솔 결정 — 시안 B + 리테이크 차수 숨김):
  *  - 칩은 라벨만, 균등 분할(flex-1). 폭이 줄어들어도 글자 잘림 X.
  *  - 활성이 '작업중' 일 때만 칩 위 우측에 작은 박스로 "작업중 N차 ▾▴" 표시.
- *  - 피드백 대기/대기/완료 일 때는 차수 영역 자체가 사라짐 (한솔: "피드백 대기는 숫자 없이 OK").
+ *  - 리테이크 대기/대기/완료 일 때는 차수 영역 자체가 사라짐 (한솔: "리테이크 대기는 숫자 없이 OK").
  *  - 데이터(work_round/feedback_round)는 보존되어 상태 전이 시 자동 +1 룰은 그대로.
  *
  * spec: docs/superpowers/specs/2026-05-11-acting-phase-toggle-design.md (섹션 4)
@@ -25,7 +25,7 @@ export interface ScenePhaseToggleProps {
   scene: Scene;
   /** 칩 클릭 시 호출. 'feedback' 인 경우 onRequestFeedback 가 별도로 호출됨 */
   onStateClick: (next: ScenePhaseState) => void;
-  /** 피드백 대기 칩 클릭 시 호출 (확인 모달 트리거) */
+  /** 리테이크 대기 칩 클릭 시 호출 (확인 모달 트리거) */
   onRequestFeedback: () => void;
   /** 차수 ▴▾ 클릭. 작업중일 때만 노출되므로 kind 는 'work' 만 사용 */
   onRoundBump: (kind: 'work' | 'feedback', delta: 1 | -1) => void;
@@ -54,7 +54,7 @@ export function ScenePhaseToggle({
   iconDisplay = 'auto',
 }: ScenePhaseToggleProps) {
   const activeState: ScenePhaseState = scene.sceneState ?? 'wait';
-  // v1.25.7: 작업중일 때만 차수 헤더 노출. 피드백/대기/완료는 차수 숨김.
+  // v1.25.7: 작업중일 때만 차수 헤더 노출. 리테이크/대기/완료는 차수 숨김.
   const showWorkRound = activeState === 'work';
   const workRound = scene.workRound ?? 1;
   const pointerHandledRef = useRef(false);

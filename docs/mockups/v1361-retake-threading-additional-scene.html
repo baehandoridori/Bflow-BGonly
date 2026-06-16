@@ -1,0 +1,414 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>B flow v1.36.1 minor UX mockup</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #0f1117;
+      --panel: #171a22;
+      --panel-2: #20242e;
+      --line: #323747;
+      --text: #eceef5;
+      --muted: #9ca3b7;
+      --accent: #8bd3ff;
+      --green: #5ee0a0;
+      --yellow: #f8c96b;
+      --red: #ff7b86;
+      --orange: #ff9f68;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      background: var(--bg);
+      color: var(--text);
+      font-family: Inter, "Pretendard", "Noto Sans KR", system-ui, sans-serif;
+      letter-spacing: 0;
+    }
+    header {
+      position: sticky;
+      top: 0;
+      z-index: 5;
+      border-bottom: 1px solid var(--line);
+      background: rgba(15, 17, 23, 0.93);
+      backdrop-filter: blur(12px);
+    }
+    .wrap { width: min(1200px, calc(100vw - 32px)); margin: 0 auto; }
+    .top { display: flex; align-items: center; justify-content: space-between; gap: 20px; padding: 18px 0; }
+    h1 { margin: 0; font-size: 19px; font-weight: 750; }
+    .sub { color: var(--muted); font-size: 12px; }
+    .tabs, .segmented { display: flex; gap: 8px; flex-wrap: wrap; }
+    .tabs { padding-bottom: 12px; }
+    button {
+      border: 1px solid var(--line);
+      background: var(--panel);
+      color: var(--text);
+      border-radius: 8px;
+      padding: 8px 11px;
+      font: inherit;
+      font-size: 12px;
+      cursor: pointer;
+    }
+    button.active, button.primary { color: var(--accent); border-color: rgba(139, 211, 255, 0.55); background: rgba(139, 211, 255, 0.1); }
+    main { padding: 22px 0 36px; }
+    .grid { display: grid; grid-template-columns: 1fr 360px; gap: 16px; align-items: start; }
+    .panel { border: 1px solid var(--line); background: var(--panel); border-radius: 8px; overflow: hidden; }
+    .panel-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; border-bottom: 1px solid var(--line); padding: 12px 14px; }
+    .panel-title { font-size: 13px; font-weight: 720; }
+    .panel-body { padding: 14px; }
+    .row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+    .stack { display: grid; gap: 10px; }
+    .muted { color: var(--muted); }
+    .pill { border: 1px solid var(--line); border-radius: 999px; padding: 4px 8px; color: var(--muted); font-size: 11px; white-space: nowrap; }
+    .pill.good { color: var(--green); border-color: rgba(94, 224, 160, 0.42); background: rgba(94, 224, 160, 0.08); }
+    .pill.warn { color: var(--yellow); border-color: rgba(248, 201, 107, 0.42); background: rgba(248, 201, 107, 0.08); }
+    .comment { display: grid; gap: 7px; padding: 12px; background: var(--panel-2); border: 1px solid var(--line); border-radius: 8px; }
+    .reply { margin-left: 18px; border-left: 2px solid rgba(139, 211, 255, 0.36); padding-left: 12px; }
+    .bubble { background: rgba(255,255,255,0.055); border-radius: 8px; padding: 9px 10px; font-size: 13px; line-height: 1.55; }
+    .mini-btn { border-radius: 999px; padding: 5px 8px; font-size: 11px; }
+    .mini-btn.primary { color: var(--accent); }
+    .thread-toggle { font-size: 13px; font-weight: 700; color: var(--accent); padding: 7px 10px; }
+    .notif { display: grid; gap: 7px; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+    .notif summary { cursor: pointer; padding: 11px 12px; background: var(--panel-2); font-size: 13px; font-weight: 700; }
+    .notif-item { padding: 9px 12px; border-top: 1px solid var(--line); color: var(--muted); font-size: 12px; display: flex; justify-content: space-between; gap: 12px; }
+    label { display: grid; gap: 6px; color: var(--muted); font-size: 11px; }
+    input, select {
+      width: 100%;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #10131a;
+      color: var(--text);
+      padding: 9px 10px;
+      font: inherit;
+      font-size: 13px;
+    }
+    table { width: 100%; border-collapse: collapse; font-size: 12px; }
+    th, td { padding: 10px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: middle; }
+    th { color: var(--muted); font-weight: 650; }
+    .bar { height: 7px; border-radius: 999px; background: #2a2f3c; overflow: hidden; }
+    .bar > span { display: block; height: 100%; background: linear-gradient(90deg, var(--accent), var(--green)); }
+    .scene-card {
+      border: 1px solid var(--line);
+      background: var(--panel-2);
+      border-radius: 8px;
+      padding: 12px;
+      display: grid;
+      gap: 10px;
+    }
+    .split-progress { display: grid; gap: 7px; }
+    .split-progress .person { display: grid; grid-template-columns: 62px 1fr 36px; gap: 8px; align-items: center; font-size: 12px; }
+    .view-panel { display: none; }
+    .view-panel.active { display: block; }
+    .hidden { display: none; }
+    @media (max-width: 900px) { .grid { grid-template-columns: 1fr; } }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="wrap">
+      <div class="top">
+        <div>
+          <h1>v1.36.1 마이너 UX 프리뷰</h1>
+          <div class="sub">스레드, 알림 묶음 생성, 추가씬 실제 추가, 캘린더 배지, 2인 담당자 진행률 검토</div>
+        </div>
+        <span class="pill good">interactive mockup</span>
+      </div>
+      <nav class="tabs" aria-label="시안 전환">
+        <button class="active" data-tab="thread">스레드</button>
+        <button data-tab="notifications">알림 묶음</button>
+        <button data-tab="scene">추가씬</button>
+        <button data-tab="calendar">캘린더 배지</button>
+        <button data-tab="assignee">2인 담당자</button>
+      </nav>
+    </div>
+  </header>
+
+  <main class="wrap">
+    <section id="thread" class="grid tab-view">
+      <div class="panel">
+        <div class="panel-head">
+          <span class="panel-title">댓글 스레드</span>
+          <button class="thread-toggle">답글 2개 접기</button>
+        </div>
+        <div class="panel-body stack">
+          <div class="comment">
+            <div class="row"><strong>홍길동</strong><span class="muted">12:03</span></div>
+            <div class="bubble">123</div>
+            <div class="row"><button class="mini-btn">😀</button><button class="mini-btn primary">↩ 답글</button></div>
+            <div class="reply stack">
+              <div class="comment">
+                <div class="row"><strong>홍길순</strong><span class="muted">12:05</span><span class="pill">스레드 안 답글</span></div>
+                <div class="bubble">456</div>
+                <div class="row"><button class="mini-btn">🔥</button><button class="mini-btn primary">↩ 이 스레드에 답글</button></div>
+              </div>
+              <div class="comment">
+                <div class="row"><strong>배한솔</strong><span class="muted">12:07</span></div>
+                <div class="bubble">@홍길순 확인했습니다. 이 답글은 홍길순에게 답하지만 위치는 같은 스레드에 유지됩니다.</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <aside class="panel">
+        <div class="panel-head"><span class="panel-title">판단 기준</span></div>
+        <div class="panel-body stack">
+          <div class="muted">대댓글에 또 답글을 달아도 새 가지를 만들지 않고, 원댓글 아래 스레드에 평평하게 쌓습니다.</div>
+          <div class="muted">멘션 대상은 누른 메시지 작성자로 잡아 “누구에게 답하는지”를 분명히 합니다.</div>
+        </div>
+      </aside>
+    </section>
+
+    <section id="notifications" class="grid tab-view hidden">
+      <div class="panel">
+        <div class="panel-head">
+          <span class="panel-title">알림 묶음 테스트</span>
+          <div class="row">
+            <button data-action="add-retake-notification">리테이크 알림 생성</button>
+            <button data-action="add-scene-notification">씬 알림 생성</button>
+          </div>
+        </div>
+        <div class="panel-body stack" id="notification-list"></div>
+      </div>
+      <aside class="panel">
+        <div class="panel-head"><span class="panel-title">확인 포인트</span></div>
+        <div class="panel-body stack">
+          <div class="muted">같은 리테이크 ID나 같은 씬 타깃은 한 묶음으로 합쳐집니다.</div>
+          <div class="muted">각 묶음은 접거나 펼쳐서 시간순 기록을 볼 수 있습니다.</div>
+        </div>
+      </aside>
+    </section>
+
+    <section id="scene" class="grid tab-view hidden">
+      <div class="panel">
+        <div class="panel-head"><span class="panel-title">씬 추가 / 추가씬</span><span class="pill">목록에 실제 추가됨</span></div>
+        <div class="panel-body stack">
+          <div class="row">
+            <label style="flex:1">기준 씬
+              <select id="base-scene"></select>
+            </label>
+            <label style="flex:1">접미
+              <select id="suffix-choice">
+                <option value="a">A</option>
+                <option value="b">B</option>
+                <option value="c">C</option>
+                <option value="d">D</option>
+                <option value="sc">SC</option>
+                <option value="custom">직접 입력</option>
+              </select>
+            </label>
+            <label style="flex:1">직접 입력
+              <input id="custom-suffix" value="x" />
+            </label>
+          </div>
+          <label>생성될 ID<input id="next-scene-id" readonly /></label>
+          <button class="primary" data-action="add-scene">+ 추가씬 추가</button>
+          <table>
+            <thead><tr><th>순서</th><th>씬 ID</th><th>종류</th><th>메모</th></tr></thead>
+            <tbody id="scene-list"></tbody>
+          </table>
+        </div>
+      </div>
+      <aside class="panel">
+        <div class="panel-head"><span class="panel-title">정렬 규칙</span></div>
+        <div class="panel-body stack">
+          <div class="muted">씬 숫자를 먼저 비교하고, 같은 숫자면 접미 알파벳 순서로 정렬합니다.</div>
+          <div class="muted">예: a007 → a007a → a007b → a008</div>
+        </div>
+      </aside>
+    </section>
+
+    <section id="calendar" class="grid tab-view hidden">
+      <div class="panel">
+        <div class="panel-head"><span class="panel-title">사이드바 캘린더 상태 배지</span><span class="pill good">캘린더 연동됨</span></div>
+        <div class="panel-body stack">
+          <div class="row">
+            <button class="primary">📅 캘린더</button>
+            <span class="pill good">초록 점 · 연동됨</span>
+            <span class="pill warn">노랑 점 · 확인 중</span>
+            <span class="pill">회색 점 · 미연동</span>
+          </div>
+          <div class="muted">사용자는 설정에 들어가지 않아도 사이드바에서 현재 Google Calendar 연동 상태를 바로 볼 수 있습니다.</div>
+          <div class="muted">최초 연동 후에는 저장된 인증 상태를 먼저 보여주고, 앱이 실제 인증 유지 여부를 확인하면 배지가 갱신됩니다.</div>
+        </div>
+      </div>
+      <aside class="panel"><div class="panel-body muted">웹 프리뷰에서는 실제 OAuth 재시작 판정은 하지 않고, 배지 위치와 문구만 확인합니다.</div></aside>
+    </section>
+
+    <section id="assignee" class="grid tab-view hidden">
+      <div class="panel">
+        <div class="panel-head">
+          <span class="panel-title">2인 담당자 진행률</span>
+          <div class="segmented">
+            <button class="active" data-view="two-card">카드</button>
+            <button data-view="two-sheet">시트</button>
+            <button data-view="two-plan">처리 계획</button>
+          </div>
+        </div>
+        <div class="panel-body">
+          <div class="view-panel active" id="two-card">
+            <div class="scene-card">
+              <div class="row"><strong>a032</strong><span class="pill">BG · 2인 담당</span><span class="pill good">합산 63%</span></div>
+              <div class="bar"><span style="width:63%"></span></div>
+              <div class="split-progress">
+                <div class="person"><span>김작화</span><div class="bar"><span style="width:50%"></span></div><span>50%</span></div>
+                <div class="person"><span>이배경</span><div class="bar"><span style="width:75%"></span></div><span>75%</span></div>
+              </div>
+              <div class="muted">카드에서는 전체 합산 퍼센트를 크게 보고, 사람별 진행 바를 보조 정보로 둡니다.</div>
+            </div>
+          </div>
+          <div class="view-panel" id="two-sheet">
+            <table>
+              <thead><tr><th>씬</th><th>담당자별 진행</th><th>LO</th><th>완료</th><th>검수</th><th>PNG</th><th>합산</th></tr></thead>
+              <tbody>
+                <tr><td>a032</td><td>김작화 2/4<br />이배경 3/4</td><td>2/2</td><td>2/2</td><td>1/2</td><td>0/2</td><td><strong>63%</strong></td></tr>
+                <tr><td>a033</td><td>박액팅 4/4<br />최원화 4/4</td><td>2/2</td><td>2/2</td><td>2/2</td><td>2/2</td><td><strong>100%</strong></td></tr>
+              </tbody>
+            </table>
+          </div>
+          <div class="view-panel" id="two-plan">
+            <div class="stack">
+              <div class="panel"><div class="panel-body"><strong>전체 씬 조작</strong><br /><span class="muted">여러 씬에 같은 단계 체크를 적용할 때는 선택된 씬의 모든 담당자 슬롯에 동일 단계가 적용됩니다. 단, 일부 담당자만 바꾸는 옵션은 별도 토글로 분리합니다.</span></div></div>
+              <div class="panel"><div class="panel-body"><strong>개별 조작</strong><br /><span class="muted">카드/시트에서 사람 이름 옆 작은 단계 칩을 누르면 해당 담당자 슬롯만 바뀝니다. 씬 전체 단계 칩을 누르면 두 사람 모두에 적용됩니다.</span></div></div>
+              <div class="panel"><div class="panel-body"><strong>계산 방식</strong><br /><span class="muted">2명 담당이면 총 단계는 8개입니다. 두 사람의 완료 단계를 합산해 씬 퍼센트를 계산합니다.</span></div></div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <aside class="panel">
+        <div class="panel-head"><span class="panel-title">추천 방향</span></div>
+        <div class="panel-body stack">
+          <div class="muted">카드는 “씬 상태를 빠르게 읽는 화면”이라 합산 진행률을 우선합니다.</div>
+          <div class="muted">시트는 “정확히 조작하는 화면”이라 사람별 단계 수를 노출하는 편이 안전합니다.</div>
+        </div>
+      </aside>
+    </section>
+  </main>
+
+  <script>
+    const buttons = [...document.querySelectorAll('[data-tab]')];
+    const views = [...document.querySelectorAll('.tab-view')];
+    buttons.forEach((button) => {
+      button.addEventListener('click', () => {
+        buttons.forEach((item) => item.classList.toggle('active', item === button));
+        views.forEach((view) => view.classList.toggle('hidden', view.id !== button.dataset.tab));
+      });
+    });
+
+    const notificationGroups = [
+      {
+        id: 'retake-a032-r32',
+        title: '리테이크 32 · EP03 A a032',
+        items: ['리테이크 요청 생성', '진행중으로 변경', '완료 처리'],
+      },
+      {
+        id: 'scene-a041',
+        title: '씬 알림 · EP03 A a041',
+        items: ['담당자 변경', 'PNG 완료'],
+      },
+    ];
+
+    function renderNotifications() {
+      const list = document.querySelector('#notification-list');
+      list.innerHTML = notificationGroups.map((group, index) => `
+        <details class="notif" ${index === 0 ? 'open' : ''}>
+          <summary>${group.title} · ${group.items.length}건</summary>
+          ${group.items.map((item, itemIndex) => `
+            <div class="notif-item"><span>${item}</span><span>${String(itemIndex + 1).padStart(2, '0')}</span></div>
+          `).join('')}
+        </details>
+      `).join('');
+    }
+
+    document.querySelector('[data-action="add-retake-notification"]').addEventListener('click', () => {
+      const group = notificationGroups.find((item) => item.id === 'retake-a032-r32');
+      group.items.push(`상태 갱신 ${group.items.length + 1}`);
+      renderNotifications();
+    });
+
+    document.querySelector('[data-action="add-scene-notification"]').addEventListener('click', () => {
+      const group = notificationGroups.find((item) => item.id === 'scene-a041');
+      group.items.push(`씬 변경 ${group.items.length + 1}`);
+      renderNotifications();
+    });
+
+    const sceneRows = [
+      { id: 'a007', type: '원본', memo: '기준 씬' },
+      { id: 'a007a', type: '추가씬', memo: '추가 액션' },
+      { id: 'a008', type: '원본', memo: '다음 씬' },
+      { id: 'a032', type: '원본', memo: '선택 기준' },
+    ];
+
+    function splitSceneId(id) {
+      const match = id.toLowerCase().match(/^([a-z]+)(\d+)([a-z]*)$/);
+      return {
+        prefix: match?.[1] ?? id,
+        number: Number(match?.[2] ?? 0),
+        suffix: match?.[3] ?? '',
+      };
+    }
+
+    function sortScenes(a, b) {
+      const left = splitSceneId(a.id);
+      const right = splitSceneId(b.id);
+      if (left.prefix !== right.prefix) return left.prefix.localeCompare(right.prefix);
+      if (left.number !== right.number) return left.number - right.number;
+      return left.suffix.localeCompare(right.suffix);
+    }
+
+    function updateScenePreviewId() {
+      const base = document.querySelector('#base-scene').value;
+      const selected = document.querySelector('#suffix-choice').value;
+      const suffix = selected === 'custom' ? document.querySelector('#custom-suffix').value.trim().toLowerCase() : selected;
+      document.querySelector('#next-scene-id').value = `${base}${suffix}`;
+    }
+
+    function renderScenes() {
+      sceneRows.sort(sortScenes);
+      const baseSelect = document.querySelector('#base-scene');
+      const previousBase = baseSelect.value || 'a032';
+      baseSelect.innerHTML = sceneRows
+        .filter((row) => row.type === '원본')
+        .map((row) => `<option value="${row.id}">${row.id}</option>`)
+        .join('');
+      if ([...baseSelect.options].some((option) => option.value === previousBase)) {
+        baseSelect.value = previousBase;
+      }
+      const body = document.querySelector('#scene-list');
+      body.innerHTML = sceneRows.map((row, index) => `
+        <tr>
+          <td>${index + 1}</td>
+          <td><strong>${row.id}</strong></td>
+          <td>${row.type}</td>
+          <td>${row.memo}</td>
+        </tr>
+      `).join('');
+      updateScenePreviewId();
+    }
+
+    document.querySelector('[data-action="add-scene"]').addEventListener('click', () => {
+      const id = document.querySelector('#next-scene-id').value;
+      if (!sceneRows.some((row) => row.id === id)) {
+        sceneRows.push({ id, type: '추가씬', memo: '프리뷰에서 추가됨' });
+      }
+      renderScenes();
+    });
+    document.querySelector('#base-scene').addEventListener('change', updateScenePreviewId);
+    document.querySelector('#suffix-choice').addEventListener('change', updateScenePreviewId);
+    document.querySelector('#custom-suffix').addEventListener('input', updateScenePreviewId);
+
+    const twoViewButtons = [...document.querySelectorAll('[data-view]')];
+    twoViewButtons.forEach((button) => {
+      button.addEventListener('click', () => {
+        twoViewButtons.forEach((item) => item.classList.toggle('active', item === button));
+        document.querySelectorAll('.view-panel').forEach((panel) => panel.classList.toggle('active', panel.id === button.dataset.view));
+      });
+    });
+
+    renderNotifications();
+    renderScenes();
+  </script>
+</body>
+</html>

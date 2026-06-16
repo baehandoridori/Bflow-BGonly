@@ -1,5 +1,5 @@
 /**
- * RevisionRecipientPicker — 리비전 등록 폼 "알림 받을 사람" 선택 위젯
+ * RevisionRecipientPicker — 리테이크 등록 폼 "알림 받을 사람" 선택 위젯
  *
  * v1.18.0 (한솔 결정 — spec 2026-05-03):
  *   - 자동 체크 칩 + 사용자가 추가로 선택한 칩을 union 으로 표시.

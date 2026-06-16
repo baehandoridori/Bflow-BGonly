@@ -1,5 +1,5 @@
 /**
- * 컴포지팅 리비전 서비스
+ * 컴포지팅 리테이크 서비스
  *
  * Google Sheets _COMP_REVISIONS 탭 동기화
  * - 시트 연결 시: _COMP_REVISIONS 탭에서 전체 로딩 + 캐시
@@ -19,6 +19,7 @@ import {
 } from '../utils/revisionSceneKey';
 import { normalizeSceneIdKey } from '../utils/sceneIdKey';
 import { normalizePartIdKey } from '../utils/partId';
+import { buildRevisionNotificationUserIds } from '../utils/revisionNotificationRecipients';
 
 const REVISIONS_FILE = 'revisions.json';
 const DIGITS_ONLY_RE = /^\d+$/;
@@ -346,7 +347,7 @@ export async function loadAllRevisions(): Promise<RevisionsStore> {
       const result = await window.electronAPI.sheetsReadRevisions();
       if (result.ok) rows = result.data ?? [];
     } catch (err) {
-      console.warn('[리비전] 로드 실패:', err);
+      console.warn('[리테이크] 로드 실패:', err);
       return {};
     }
   }
@@ -399,7 +400,7 @@ function nextRevisionNo(store: RevisionsStore, sceneKeys: string[]): number {
 }
 
 /**
- * v1.18.0: 리비전 등록 input 시그니처.
+ * v1.18.0: 리테이크 등록 input 시그니처.
  * 우선순위/프레임/담당자 입력 UI 가 폼에서 제거되어 (한솔 결정 — spec 2026-05-03)
  * 자동값('normal' / '' / '') 으로 처리. 호출자는 핵심 데이터만 전달.
  */
@@ -422,7 +423,10 @@ export async function createRevision(input: CreateRevisionServiceInput): Promise
   // v1.18.0 자동값: 우선순위/프레임/담당자 입력 UI 제거 → 항상 'normal' / '' / ''.
   const priority: RevisionPriority = 'normal';
   const department = input.department || input.lookupDepartment;
-  const notifyUserIds = Array.isArray(input.notifyUserIds) ? input.notifyUserIds : [];
+  const notifyUserIds = buildRevisionNotificationUserIds({
+    notifyUserIds: input.notifyUserIds,
+    requesterId: input.requesterId,
+  });
 
   if (sheetsMode) {
     const store = await loadAllRevisions();
@@ -551,7 +555,7 @@ export async function updateRevisionStatus(
 }
 
 /**
- * 리비전 삭제 — Supabase 모드에서는 Storage 이미지도 함께 정리 (서버 측),
+ * 리테이크 삭제 — Supabase 모드에서는 Storage 이미지도 함께 정리 (서버 측),
  * 로컬 모드에서는 단순히 로컬 파일에서만 제거.
  */
 export async function deleteRevision(id: string, sceneKey: string): Promise<void> {
@@ -582,7 +586,7 @@ export async function deleteRevision(id: string, sceneKey: string): Promise<void
 }
 
 /**
- * 씬별 오픈 리비전 수 계산 (뱃지용)
+ * 씬별 오픈 리테이크 수 계산 (뱃지용)
  */
 export async function getOpenRevisionCounts(): Promise<Record<string, number>> {
   let store: RevisionsStore;

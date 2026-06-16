@@ -4,7 +4,7 @@ import { useDataStore, legacyStagesFor } from '@/stores/useDataStore';
 import { useAppStore } from '@/stores/useAppStore';
 import type { SortKey, StatusFilter, ViewMode } from '@/stores/useAppStore';
 import { STAGES, DEPARTMENTS, DEPARTMENT_CONFIGS, SCENE_PHASE_LABELS, SCENE_PHASES, SCENE_PHASE_LABELS_SHORT, SCENE_PHASE_COLORS } from '@/types';
-import type { Scene, Stage, Department, ScenesDeptFilter, MergedScene, ScenePhaseState } from '@/types';
+import type { Scene, Stage, Department, ScenesDeptFilter, MergedScene, ScenePhaseState, SceneAssigneeProgressMap } from '@/types';
 import { FeedbackRequestModal } from '@/components/scenes/FeedbackRequestModal';
 import { updateScenePhaseInSupabase, dispatchActingFeedbackNotification } from '@/services/supabaseService';
 import { sceneProgress, isFullyDone, isNotStarted, progressGradient } from '@/utils/calcStats';
@@ -36,6 +36,7 @@ import { LengthIcon } from '@/components/scenes/LengthIcon';
 import { UnifiedSceneDetailModal } from '@/components/scenes/UnifiedSceneDetailModal';
 import { StageSegmentToggle, stageIcon } from '@/components/scenes/StageSegmentToggle';
 import { RevisionCornerFlag } from '@/components/scenes/RevisionCornerFlag';
+import { AssigneeProgressStack } from '@/components/scenes/AssigneeProgressStack';
 import { BulkOperationStatus } from '@/components/scenes/BulkOperationStatus';
 import { useAuthStore } from '@/stores/useAuthStore';
 import { setCommentsSheetsMode, getCommentStoreForPart, invalidatePartCache } from '@/services/commentService';
@@ -59,12 +60,30 @@ import {
   saveLengthChangeField,
   type LengthChangeTarget,
 } from '@/utils/lengthChangePersistence';
+import { compareSceneIdsByNumberThenSuffix, compareScenesByNumberThenSuffix } from '@/utils/sceneSort';
+import {
+  SCENE_ASSIGNEE_PROGRESS_META_TYPE,
+  aggregateScenePatchFromAssignees,
+  serializeAssigneeProgress,
+  updateAllAssigneeProgressEntries,
+  updateAssigneeProgressEntry,
+  hasMultiAssigneeProgress,
+  normalizeAssigneeProgressMap,
+  sceneStateFromScene,
+} from '@/utils/assigneeProgress';
 
 function phaseIcon(phase: ScenePhaseState, size = 12) {
   if (phase === 'wait') return <Clock size={size} strokeWidth={2.4} />;
   if (phase === 'work') return <PlayCircle size={size} strokeWidth={2.4} />;
   if (phase === 'feedback') return <MessageSquareWarning size={size} strokeWidth={2.4} />;
   return <CheckCircle2 size={size} strokeWidth={2.4} />;
+}
+
+function phaseFromStage(stage: Stage): ScenePhaseState {
+  if (stage === 'lo') return 'wait';
+  if (stage === 'done') return 'work';
+  if (stage === 'review') return 'feedback';
+  return 'done';
 }
 
 function parseAssigneeNames(assignee: string | null | undefined): string[] {
@@ -377,17 +396,13 @@ function formatCompletedMeta(iso: string | undefined, completedBy: string | unde
 }
 
 /* ── 파트 완료 오버레이 ── */
-function PartCompleteOverlay({ completedMeta, onUndoLastAction }: {
+function PartCompleteOverlay({ completedMeta, onDismiss, onUndoLastAction }: {
   completedMeta?: ReturnType<typeof formatCompletedMeta>;
+  onDismiss: () => void;
   onUndoLastAction?: () => void;
 }) {
   const colorMode = useAppStore((s) => s.colorMode);
   const isLight = colorMode === 'light';
-  const completionOverlayFrameStyle = useMemo(() => ({
-    height: 'clamp(320px, calc(100vh - 220px), 560px)',
-    marginBottom: 'calc(-1 * clamp(320px, calc(100vh - 220px), 560px))',
-    contain: 'layout paint',
-  }), []);
   const flowRibbons = useMemo(() => [
     {
       top: '14%',
@@ -479,8 +494,7 @@ function PartCompleteOverlay({ completedMeta, onUndoLastAction }: {
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
       transition={{ duration: 1, ease: [0.16, 1, 0.3, 1] }}
-      className="sticky top-0 z-20 pointer-events-none overflow-hidden rounded-[28px]"
-      style={completionOverlayFrameStyle}
+      className="fixed inset-0 z-[60] pointer-events-none overflow-hidden rounded-[28px]"
     >
       <div
         className="absolute inset-0 rounded-[inherit]"
@@ -580,12 +594,12 @@ function PartCompleteOverlay({ completedMeta, onUndoLastAction }: {
         }}
       />
 
-      <div className="absolute inset-0 flex items-start justify-center p-4 pt-[clamp(1rem,7vh,4.5rem)] sm:p-6 sm:pt-[clamp(1.5rem,8vh,5rem)]">
+      <div className="absolute inset-0 flex items-center justify-center p-4 sm:p-6">
         <motion.div
           initial={{ opacity: 0, y: 18, scale: 0.96 }}
           animate={{ opacity: 1, y: 0, scale: 1 }}
           transition={{ duration: 0.55, delay: 0.08, ease: [0.22, 1, 0.36, 1] }}
-          className="relative w-full max-w-[560px] overflow-hidden rounded-[30px] border px-5 py-5 text-center sm:px-7 sm:py-6"
+          className="pointer-events-auto relative w-full max-w-[560px] overflow-hidden rounded-[30px] border px-5 py-5 text-center sm:px-7 sm:py-6"
           style={{
             background: isLight
               ? 'linear-gradient(180deg, rgba(255,255,255,0.92) 0%, rgba(244,255,251,0.86) 100%)'
@@ -597,6 +611,23 @@ function PartCompleteOverlay({ completedMeta, onUndoLastAction }: {
             backdropFilter: 'blur(20px)',
           }}
         >
+          <button
+            type="button"
+            aria-label="완료 안내 숨기기"
+            title="완료 안내 숨기기"
+            onClick={(event) => {
+              event.stopPropagation();
+              onDismiss();
+            }}
+            className={cn(
+              'absolute right-3 top-3 z-10 inline-flex h-8 w-8 items-center justify-center rounded-full border transition-all',
+              isLight
+                ? 'border-emerald-200 bg-white/80 text-emerald-800 hover:bg-white'
+                : 'border-emerald-300/20 bg-white/8 text-emerald-100 hover:bg-white/12',
+            )}
+          >
+            <X size={15} />
+          </button>
           <motion.div
             className="absolute inset-y-0 -left-1/3 w-1/3"
             style={{
@@ -691,6 +722,26 @@ function PartCompleteOverlay({ completedMeta, onUndoLastAction }: {
     </motion.div>
   );
 }
+
+function CompletionRestoreButton({ onClick }: { onClick: () => void }) {
+  const colorMode = useAppStore((s) => s.colorMode);
+  const isLight = colorMode === 'light';
+  return (
+    <button
+      type="button"
+      aria-label="완료 안내 다시 보기"
+      onClick={onClick}
+      className={cn(
+        'fixed bottom-5 left-1/2 z-[61] -translate-x-1/2 rounded-full border px-4 py-2 text-sm font-semibold shadow-lg backdrop-blur-md transition-all hover:-translate-y-0.5',
+        isLight
+          ? 'border-emerald-200 bg-white/90 text-emerald-800 shadow-emerald-900/10 hover:bg-white'
+          : 'border-emerald-300/25 bg-bg-card/85 text-emerald-100 shadow-black/30 hover:bg-bg-card',
+      )}
+    >
+      완료 안내 다시 보기
+    </button>
+  );
+}
 import {
   updateCell,
   updateCellByUuid,
@@ -753,6 +804,10 @@ interface SceneCardProps {
   onActPhaseStateClick?: (sheetName: string, sceneId: string, newState: ScenePhaseState, sceneUuid?: string | null, sceneIndex?: number) => void;
   onActFeedbackRequest?: (sheetName: string, sceneId: string) => void;
   onActRoundBump?: (sheetName: string, sceneId: string, kind: 'work' | 'feedback', delta: 1 | -1) => void;
+  onAssigneeStageToggle?: (sheetName: string, sceneId: string, assigneeName: string, stage: Stage, sceneUuid?: string | null, sceneIndex?: number, dept?: Department) => void;
+  onAssigneeActPhaseStateClick?: (sheetName: string, sceneId: string, assigneeName: string, newState: ScenePhaseState, sceneUuid?: string | null, sceneIndex?: number) => void;
+  onAssigneeActFeedbackRequest?: (sheetName: string, sceneId: string, assigneeName: string, sceneUuid?: string | null, sceneIndex?: number) => void;
+  onAssigneeActRoundBump?: (sheetName: string, sceneId: string, assigneeName: string, kind: 'work' | 'feedback', delta: 1 | -1, sceneUuid?: string | null, sceneIndex?: number) => void;
   onDelete: (sceneIndex: number) => void;
   onOpenDetail: () => void;
   onCelebrationEnd: () => void;
@@ -760,7 +815,7 @@ interface SceneCardProps {
   onShiftClick?: () => void;
 }
 
-function SceneCard({ scene, sceneIndex, celebrating, department, isHighlighted, isSelected, searchQuery, commentCount = 0, hasUnreadComments = false, revisionCount = 0, selectionId, sheetName, fallbackStoryboardUrl, fallbackGuideUrl, onToggle, onActPhaseStateClick, onActFeedbackRequest, onActRoundBump, onDelete, onOpenDetail, onCelebrationEnd, onCtrlClick, onShiftClick }: SceneCardProps) {
+function SceneCard({ scene, sceneIndex, celebrating, department, isHighlighted, isSelected, searchQuery, commentCount = 0, hasUnreadComments = false, revisionCount = 0, selectionId, sheetName, fallbackStoryboardUrl, fallbackGuideUrl, onToggle, onActPhaseStateClick, onActFeedbackRequest, onActRoundBump, onAssigneeStageToggle, onAssigneeActPhaseStateClick, onAssigneeActFeedbackRequest, onAssigneeActRoundBump, onDelete, onOpenDetail, onCelebrationEnd, onCtrlClick, onShiftClick }: SceneCardProps) {
   const deptConfig = DEPARTMENT_CONFIGS[department];
   const completionTintEnabled = useAppStore((s) => s.completionTintEnabled);
   const pct = sceneProgress(scene);
@@ -930,7 +985,19 @@ function SceneCard({ scene, sceneIndex, celebrating, department, isHighlighted, 
 
       {/* ── 하단: 프로세스 트랙 ── */}
       <div className="px-4 pt-1 pb-3.5 mt-auto relative overflow-visible">
-        {useActingPhaseControls ? (
+        {hasMultiAssigneeProgress(scene) && sheetName ? (
+          <div onClick={(e) => e.stopPropagation()}>
+            <AssigneeProgressStack
+              scene={scene}
+              department={department}
+              compact
+              onAssigneeStageToggle={(name, stage) => onAssigneeStageToggle?.(sheetName, scene.sceneId, name, stage, scene.id ?? null, sceneIndex, department)}
+              onAssigneePhaseStateClick={(name, state) => onAssigneeActPhaseStateClick?.(sheetName, scene.sceneId, name, state, scene.id ?? null, sceneIndex)}
+              onAssigneeFeedbackRequest={(name) => onAssigneeActFeedbackRequest?.(sheetName, scene.sceneId, name, scene.id ?? null, sceneIndex)}
+              onAssigneeRoundBump={(name, kind, delta) => onAssigneeActRoundBump?.(sheetName, scene.sceneId, name, kind, delta, scene.id ?? null, sceneIndex)}
+            />
+          </div>
+        ) : useActingPhaseControls ? (
           <div onClick={(e) => e.stopPropagation()}>
             <ScenePhaseToggle
               scene={scene}
@@ -955,8 +1022,28 @@ function SceneCard({ scene, sceneIndex, celebrating, department, isHighlighted, 
 // ─── 씬 추가 폼 ────────────────────────────────────────────────
 
 const ALPHABET_PREFIXES = 'abcdefghijklmnopqrstuvwx'.split('');
+const ADDITIONAL_SCENE_SUFFIXES = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'.split('');
 
 type PrefixMode = 'alphabet' | 'sc' | 'custom';
+type AddSceneMode = 'new' | 'additional';
+type SceneSuffixMode = 'none' | 'preset' | 'custom';
+
+function sanitizeSceneSuffix(value: string): string {
+  return value.replace(/[^a-zA-Z]/g, '').toUpperCase().slice(0, 3);
+}
+
+function getFirstAvailableSceneSuffix(baseSceneId: string, existingSceneIds: string[]): string {
+  const existing = new Set(existingSceneIds.map((id) => id.trim().toLowerCase()));
+  return ADDITIONAL_SCENE_SUFFIXES.find((suffix) => !existing.has(`${baseSceneId}${suffix}`.toLowerCase())) ?? 'A';
+}
+
+function getAdditionalSceneSuffixOptions(currentSuffix: string): string[] {
+  const defaultOptions = ADDITIONAL_SCENE_SUFFIXES.slice(0, 24);
+  const normalized = sanitizeSceneSuffix(currentSuffix);
+  return normalized && !defaultOptions.includes(normalized)
+    ? [...defaultOptions, normalized]
+    : defaultOptions;
+}
 
 type CompletionUndoAction =
   | {
@@ -1241,10 +1328,19 @@ interface AddSceneFormProps {
 }
 
 function AddSceneForm({ existingSceneIds, onSubmit, onBulkSubmit, onCancel }: AddSceneFormProps) {
+  const sortedExistingSceneIds = useMemo(
+    () => [...existingSceneIds].sort(compareSceneIdsByNumberThenSuffix),
+    [existingSceneIds],
+  );
+  const [sceneAddMode, setSceneAddMode] = useState<AddSceneMode>('new');
   const [prefixMode, setPrefixMode] = useState<PrefixMode>('alphabet');
   const [alphaPrefix, setAlphaPrefix] = useState('a');
   const [customPrefix, setCustomPrefix] = useState('');
   const [number, setNumber] = useState(() => suggestNextNumber('a', existingSceneIds));
+  const [baseSceneId, setBaseSceneId] = useState(() => sortedExistingSceneIds[0] ?? '');
+  const [suffixMode, setSuffixMode] = useState<SceneSuffixMode>('none');
+  const [presetSuffix, setPresetSuffix] = useState(() => getFirstAvailableSceneSuffix(sortedExistingSceneIds[0] ?? '', existingSceneIds));
+  const [customSuffix, setCustomSuffix] = useState('');
   const [assignee, setAssignee] = useState('');
   const [memo, setMemo] = useState('');
   const [layoutId, setLayoutId] = useState('');
@@ -1254,8 +1350,27 @@ function AddSceneForm({ existingSceneIds, onSubmit, onBulkSubmit, onCancel }: Ad
   const [bulkEnd, setBulkEnd] = useState('');
 
   const prefix = prefixMode === 'alphabet' ? alphaPrefix : prefixMode === 'sc' ? 'sc' : customPrefix;
-  const sceneId = `${prefix}${number}`;
+  const effectiveSuffixMode = sceneAddMode === 'additional' && suffixMode === 'none' ? 'preset' : suffixMode;
+  const sceneSuffix = effectiveSuffixMode === 'custom'
+    ? sanitizeSceneSuffix(customSuffix)
+    : effectiveSuffixMode === 'preset'
+      ? sanitizeSceneSuffix(presetSuffix)
+      : '';
+  const newSceneBaseId = `${prefix}${number}`;
+  const sceneId = sceneAddMode === 'additional'
+    ? `${baseSceneId}${sceneSuffix}`
+    : `${newSceneBaseId}${sceneSuffix}`;
+  const suffixDisablesBulk = sceneAddMode === 'additional' || Boolean(sceneSuffix);
+  const bulkEnabled = bulkMode && !suffixDisablesBulk;
   const isDuplicate = existingSceneIds.includes(sceneId);
+  const invalidSceneId = sceneAddMode === 'additional'
+    ? !baseSceneId || !sceneSuffix
+    : !prefix || !number.trim() || (effectiveSuffixMode === 'custom' && !sceneSuffix);
+
+  useEffect(() => {
+    if (baseSceneId || sortedExistingSceneIds.length === 0) return;
+    setBaseSceneId(sortedExistingSceneIds[0]);
+  }, [baseSceneId, sortedExistingSceneIds]);
 
   const updatePrefix = (mode: PrefixMode, value?: string) => {
     setPrefixMode(mode);
@@ -1274,9 +1389,9 @@ function AddSceneForm({ existingSceneIds, onSubmit, onBulkSubmit, onCancel }: Ad
   };
 
   const handleSubmit = () => {
-    if (isDuplicate || !prefix) return;
+    if (isDuplicate || invalidSceneId) return;
 
-    if (bulkMode) {
+    if (bulkEnabled) {
       // 일괄 생성: number~bulkEnd 범위
       const startN = parseInt(number, 10);
       const endN = parseInt(bulkEnd, 10);
@@ -1314,6 +1429,10 @@ function AddSceneForm({ existingSceneIds, onSubmit, onBulkSubmit, onCancel }: Ad
       onSubmit(sceneId, assignee, memo, layoutId, imgs);
       const updatedIds = [...existingSceneIds, sceneId];
       setNumber(suggestNextNumber(prefix, updatedIds));
+      if (sceneAddMode === 'additional') {
+        setPresetSuffix(getFirstAvailableSceneSuffix(baseSceneId, updatedIds));
+        setSuffixMode('preset');
+      }
     }
 
     setAssignee('');
@@ -1324,7 +1443,7 @@ function AddSceneForm({ existingSceneIds, onSubmit, onBulkSubmit, onCancel }: Ad
   };
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === 'Enter' && !isDuplicate) handleSubmit();
+    if (e.key === 'Enter' && !isDuplicate && !invalidSceneId) handleSubmit();
     if (e.key === 'Escape') onCancel();
   };
 
@@ -1337,9 +1456,97 @@ function AddSceneForm({ existingSceneIds, onSubmit, onBulkSubmit, onCancel }: Ad
 
       {/* ── 스크롤 가능한 폼 바디 ── */}
       <div className="flex-1 overflow-y-auto px-5 py-4 flex flex-col gap-5">
+        {/* 0) 추가 방식 */}
+        <div className="flex flex-col gap-2">
+          <span className="text-[11px] text-text-secondary font-medium">추가 방식</span>
+          <div className="grid grid-cols-2 gap-2 rounded-lg border border-bg-border bg-bg-primary p-1">
+            {([
+              { value: 'new' as const, label: '새 번호' },
+              { value: 'additional' as const, label: '추가씬' },
+            ]).map((item) => (
+              <button
+                key={item.value}
+                type="button"
+                onClick={() => {
+                  setSceneAddMode(item.value);
+                  if (item.value === 'additional') {
+                    const fallbackBase = baseSceneId || sortedExistingSceneIds[0] || '';
+                    setBaseSceneId(fallbackBase);
+                    setPresetSuffix(getFirstAvailableSceneSuffix(fallbackBase, existingSceneIds));
+                    setSuffixMode('preset');
+                    setBulkMode(false);
+                  }
+                }}
+                className={cn(
+                  'rounded-md px-3 py-2 text-xs font-semibold transition-all',
+                  sceneAddMode === item.value
+                    ? 'bg-accent text-white shadow-sm shadow-accent/25'
+                    : 'text-text-secondary hover:bg-bg-border/30 hover:text-text-primary',
+                )}
+              >
+                {item.label}
+              </button>
+            ))}
+          </div>
+        </div>
+
         {/* 1) 접두사 & 씬 번호 */}
         <div className="flex flex-col gap-2.5">
-          <span className="text-[11px] text-text-secondary font-medium">접두사 & 씬 번호</span>
+          <span className="text-[11px] text-text-secondary font-medium">
+            {sceneAddMode === 'additional' ? '기준 씬 & 접미' : '접두사 & 씬 번호'}
+          </span>
+          {sceneAddMode === 'additional' ? (
+            <div className="grid grid-cols-[1fr_auto] gap-2">
+              <div className="relative">
+                <select
+                  value={baseSceneId}
+                  onChange={(e) => {
+                    const nextBase = e.target.value;
+                    setBaseSceneId(nextBase);
+                    setPresetSuffix(getFirstAvailableSceneSuffix(nextBase, existingSceneIds));
+                    setCustomSuffix('');
+                  }}
+                  className="w-full appearance-none bg-bg-primary border border-bg-border rounded-lg pl-3 pr-8 py-2 text-sm text-text-primary font-mono cursor-pointer hover:border-accent/50 focus:border-accent focus:ring-1 focus:ring-accent/20 outline-none transition-all"
+                >
+                  {sortedExistingSceneIds.map((id) => (
+                    <option key={id} value={id}>{id}</option>
+                  ))}
+                </select>
+                <ChevronDown size={12} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-text-secondary/50 pointer-events-none" />
+              </div>
+              <div className="flex items-center gap-2">
+                <select
+                  value={effectiveSuffixMode === 'custom' ? 'custom' : presetSuffix}
+                  onChange={(e) => {
+                    if (e.target.value === 'custom') {
+                      setSuffixMode('custom');
+                      setCustomSuffix('');
+                    } else {
+                      setSuffixMode('preset');
+                      setPresetSuffix(e.target.value);
+                    }
+                  }}
+                  className="appearance-none bg-bg-primary border border-bg-border rounded-lg px-3 py-2 text-sm text-text-primary font-mono cursor-pointer hover:border-accent/50 focus:border-accent focus:ring-1 focus:ring-accent/20 outline-none transition-all"
+                >
+                  {getAdditionalSceneSuffixOptions(presetSuffix).map((suffix) => (
+                    <option key={suffix} value={suffix}>{suffix}</option>
+                  ))}
+                  <option value="custom">직접</option>
+                </select>
+                {effectiveSuffixMode === 'custom' && (
+                  <input
+                    autoFocus
+                    value={customSuffix}
+                    onChange={(e) => setCustomSuffix(sanitizeSceneSuffix(e.target.value))}
+                    onKeyDown={handleKeyDown}
+                    placeholder="A"
+                    className="w-16 bg-bg-primary border border-bg-border rounded-lg px-3 py-2 text-sm text-text-primary font-mono placeholder:text-text-secondary/45 focus:border-accent focus:ring-1 focus:ring-accent/20 outline-none transition-all"
+                  />
+                )}
+              </div>
+            </div>
+          ) : (
+            <>
           {/* 세그먼트 라디오 + 접두사 값 */}
           <div className="flex items-center gap-2">
             <div className="flex bg-bg-primary rounded-lg p-0.5 border border-bg-border">
@@ -1414,15 +1621,24 @@ function AddSceneForm({ existingSceneIds, onSubmit, onBulkSubmit, onCancel }: Ad
               </div>
             </div>
             <button
-              onClick={() => setBulkMode(!bulkMode)}
+              onClick={() => {
+                if (suffixDisablesBulk) return;
+                setBulkMode(!bulkMode);
+              }}
+              disabled={suffixDisablesBulk}
+              title={suffixDisablesBulk ? '접미가 있는 씬은 한 개씩 추가합니다' : '일괄 추가'}
               className={cn(
                 'px-3 py-2 text-xs rounded-lg font-medium transition-colors cursor-pointer',
-                bulkMode ? 'bg-accent/20 text-accent border border-accent/30' : 'text-text-secondary/50 hover:text-text-primary border border-bg-border',
+                suffixDisablesBulk
+                  ? 'text-text-secondary/25 border border-bg-border/60 cursor-not-allowed'
+                  : bulkMode
+                    ? 'bg-accent/20 text-accent border border-accent/30'
+                    : 'text-text-secondary/50 hover:text-text-primary border border-bg-border',
               )}
             >
               일괄
             </button>
-            {bulkMode && (
+            {bulkEnabled && (
               <>
                 <span className="text-text-secondary/40 text-xs">~</span>
                 <input
@@ -1436,6 +1652,60 @@ function AddSceneForm({ existingSceneIds, onSubmit, onBulkSubmit, onCancel }: Ad
             )}
           </div>
 
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => {
+                const nextMode: SceneSuffixMode = effectiveSuffixMode === 'none' ? 'preset' : 'none';
+                setSuffixMode(nextMode);
+                if (nextMode === 'none') setCustomSuffix('');
+                setBulkMode(false);
+              }}
+              className={cn(
+                'px-3 py-1.5 text-xs rounded-lg border transition-colors',
+                effectiveSuffixMode !== 'none'
+                  ? 'border-accent/30 bg-accent/15 text-accent'
+                  : 'border-bg-border text-text-secondary/60 hover:text-text-primary',
+              )}
+            >
+              접미 추가
+            </button>
+            {effectiveSuffixMode !== 'none' && (
+              <>
+                <select
+                  value={effectiveSuffixMode === 'custom' ? 'custom' : presetSuffix}
+                  onChange={(e) => {
+                    if (e.target.value === 'custom') {
+                      setSuffixMode('custom');
+                      setCustomSuffix('');
+                    } else {
+                      setSuffixMode('preset');
+                      setPresetSuffix(e.target.value);
+                    }
+                    setBulkMode(false);
+                  }}
+                  className="appearance-none bg-bg-primary border border-bg-border rounded-lg px-3 py-1.5 text-sm text-text-primary font-mono cursor-pointer hover:border-accent/50 focus:border-accent focus:ring-1 focus:ring-accent/20 outline-none transition-all"
+                >
+                  {getAdditionalSceneSuffixOptions(presetSuffix).map((suffix) => (
+                    <option key={suffix} value={suffix}>{suffix}</option>
+                  ))}
+                  <option value="custom">직접</option>
+                </select>
+                {effectiveSuffixMode === 'custom' && (
+                  <input
+                    value={customSuffix}
+                    onChange={(e) => setCustomSuffix(sanitizeSceneSuffix(e.target.value))}
+                    onKeyDown={handleKeyDown}
+                    placeholder="A"
+                    className="w-16 bg-bg-primary border border-bg-border rounded-lg px-3 py-1.5 text-sm text-text-primary font-mono placeholder:text-text-secondary/45 focus:border-accent focus:ring-1 focus:ring-accent/20 outline-none transition-all"
+                  />
+                )}
+              </>
+            )}
+          </div>
+          </>
+          )}
+
           {/* ID 미리보기 뱃지 */}
           <div className="flex items-center gap-2">
             <div className="flex items-center gap-1.5 px-3 py-1.5 bg-accent/10 border border-accent/20 rounded-lg">
@@ -1445,11 +1715,14 @@ function AddSceneForm({ existingSceneIds, onSubmit, onBulkSubmit, onCancel }: Ad
             {isDuplicate && (
               <span className="text-[11px] text-red-400 bg-red-500/10 px-2 py-1 rounded-md font-medium">중복된 ID</span>
             )}
+            {sceneAddMode === 'additional' && !isDuplicate && (
+              <span className="text-[11px] text-emerald-400 bg-emerald-500/10 px-2 py-1 rounded-md font-medium">추가씬</span>
+            )}
           </div>
         </div>
 
         {/* 2) 이미지 슬롯 */}
-        {!bulkMode && (
+        {!bulkEnabled && (
           <div className="flex flex-col gap-2">
             <span className="text-[11px] text-text-secondary font-medium">이미지 (선택)</span>
             <div className="flex gap-3">
@@ -1509,16 +1782,16 @@ function AddSceneForm({ existingSceneIds, onSubmit, onBulkSubmit, onCancel }: Ad
           </button>
           <button
             onClick={handleSubmit}
-            disabled={isDuplicate || !prefix || (bulkMode && !bulkEnd)}
-            className={cn(
-              'px-5 py-2 text-white text-xs font-medium rounded-lg transition-all cursor-pointer',
-              isDuplicate || !prefix || (bulkMode && !bulkEnd)
-                ? 'bg-gray-600 cursor-not-allowed opacity-50'
-                : 'bg-accent hover:bg-accent/90 shadow-sm shadow-accent/25 hover:shadow-md hover:shadow-accent/30',
-            )}
-          >
-            {bulkMode ? '일괄 추가' : '+ 추가'}
-          </button>
+              disabled={isDuplicate || invalidSceneId || (bulkEnabled && !bulkEnd)}
+              className={cn(
+                'px-5 py-2 text-white text-xs font-medium rounded-lg transition-all cursor-pointer',
+                isDuplicate || invalidSceneId || (bulkEnabled && !bulkEnd)
+                  ? 'bg-gray-600 cursor-not-allowed opacity-50'
+                  : 'bg-accent hover:bg-accent/90 shadow-sm shadow-accent/25 hover:shadow-md hover:shadow-accent/30',
+              )}
+            >
+              {bulkEnabled ? '일괄 추가' : '+ 추가'}
+            </button>
         </div>
       </div>
     </div>
@@ -1694,6 +1967,37 @@ export function ScenesView() {
   const currentUser = useAuthStore((s) => s.currentUser);
   const isBulkInFlight = useBulkOperationsStore((s) => s.activeOp?.status === 'in-flight');
   const isLight = colorMode === 'light';
+  const assigneeProgressWriteQueueRef = useRef<Map<string, Promise<void>>>(new Map());
+  const assigneeProgressMutationSeqRef = useRef<Map<string, number>>(new Map());
+
+  const enqueueAssigneeProgressWrite = useCallback(
+    (sceneUuid: string, task: () => Promise<void>) => {
+      const queues = assigneeProgressWriteQueueRef.current;
+      const previous = queues.get(sceneUuid) ?? Promise.resolve();
+      const run = previous.catch(() => undefined).then(task);
+      const settled = run.catch(() => undefined);
+      queues.set(sceneUuid, settled);
+      void settled.finally(() => {
+        if (queues.get(sceneUuid) === settled) {
+          queues.delete(sceneUuid);
+        }
+      });
+      return run;
+    },
+    [],
+  );
+
+  const writeAssigneeProgressMetadata = useCallback(
+    (sceneUuid: string, progress: SceneAssigneeProgressMap) =>
+      enqueueAssigneeProgressWrite(sceneUuid, () =>
+        writeMetadata(
+          SCENE_ASSIGNEE_PROGRESS_META_TYPE,
+          sceneUuid,
+          serializeAssigneeProgress(progress),
+        ),
+      ),
+    [enqueueAssigneeProgressWrite],
+  );
 
   // v1.25.0~ 피드백 대기 확인 모달 상태
   const [feedbackModal, setFeedbackModal] = useState<{
@@ -1705,6 +2009,9 @@ export function ScenesView() {
     fromState: ScenePhaseState;
     fromWorkRound: number;
     fromFeedbackRound: number;
+    assigneeName?: string;
+    sceneUuid?: string | null;
+    sceneIndex?: number;
   } | null>(null);
 
   // v1.25.0~ 액팅 토글 핸들러
@@ -1742,6 +2049,7 @@ export function ScenesView() {
       const prevCompletedAt = scene.completedAt ?? '';
       const wasFullyDone = Boolean(scene.lo && scene.done && scene.review && scene.png);
       const willBeFullyDone = newState === 'done';
+      const prevAssigneeProgress = scene.assigneeProgress;
       let workRound = prevWork;
       let feedbackRound = prevFb;
       if (newState === 'wait' || newState === 'done') {
@@ -1774,12 +2082,22 @@ export function ScenesView() {
         return null;
       })();
 
-      updateSceneByUuid(sceneUuid, {
+      const nextProgress = hasMultiAssigneeProgress(scene)
+        ? updateAllAssigneeProgressEntries(
+            scene,
+            { kind: 'phase', state: newState, workRound, feedbackRound },
+            currentUser?.name,
+          )
+        : null;
+      const phasePatch = {
         sceneState: newState,
         workRound,
         feedbackRound,
         ...legacyStagesFor(newState),
-      });
+        ...(nextProgress ? { assigneeProgress: nextProgress } : {}),
+      };
+
+      updateSceneByUuid(sceneUuid, phasePatch);
       if (completionMeta) {
         if (completionMeta.nextCompletedBy && completionMeta.nextCompletedAt) {
           setCelebratingTarget(buildCompletionTarget(sheetName, scene, sceneIndex));
@@ -1815,8 +2133,20 @@ export function ScenesView() {
           ...prevLegacy,
           completedBy: prevCompletedBy,
           completedAt: prevCompletedAt,
+          assigneeProgress: prevAssigneeProgress,
         });
         return;
+      }
+
+      if (nextProgress) {
+        try {
+          await writeAssigneeProgressMetadata(sceneUuid, nextProgress);
+        } catch (err) {
+          console.error('[ScenesView] 담당자별 진행 저장 실패:', err);
+          sonnerToast.error('담당자별 진행 저장에 실패했습니다.');
+          updateSceneByUuid(sceneUuid, { assigneeProgress: prevAssigneeProgress });
+          syncInBackground();
+        }
       }
 
       if (completionMeta) {
@@ -1836,27 +2166,50 @@ export function ScenesView() {
         }
       }
     },
-    [updateSceneByUuid, updateSceneFieldOptimistic, currentUser?.id, currentUser?.name],
+    [updateSceneByUuid, updateSceneFieldOptimistic, currentUser?.id, currentUser?.name, writeAssigneeProgressMetadata],
   );
 
   const handleActFeedbackRequest = useCallback(
-    (sheetName: string, sceneId: string) => {
-      const scene = findSceneInSheet(sheetName, sceneId);
+    (
+      sheetName: string,
+      sceneId: string,
+      assigneeName?: string,
+      requestedSceneUuid?: string | null,
+      requestedSceneIndex?: number,
+    ) => {
+      const latestPart = useDataStore.getState().episodes
+        .flatMap((ep) => ep.parts)
+        .find((part) => part.sheetName === sheetName);
+      const sceneIndex = latestPart
+        ? findCompletionSceneIndex(latestPart.scenes, {
+            sceneId,
+            sceneUuid: requestedSceneUuid ?? null,
+            sceneIndex: requestedSceneIndex,
+          })
+        : -1;
+      const scene = sceneIndex >= 0 ? latestPart?.scenes[sceneIndex] : undefined;
       if (!scene) return;
       const ep = episodes.find((e) => e.parts.some((p) => p.sheetName === sheetName));
       if (!ep) return;
+      const assigneeProgress = assigneeName ? normalizeAssigneeProgressMap(scene)[assigneeName] : null;
+      const fromState = assigneeProgress?.sceneState ?? scene.sceneState ?? sceneStateFromScene(scene);
+      const fromWorkRound = assigneeProgress?.workRound ?? scene.workRound ?? 0;
+      const fromFeedbackRound = assigneeProgress?.feedbackRound ?? scene.feedbackRound ?? 0;
       setFeedbackModal({
         open: true,
         sheetName,
         sceneId,
         scene,
         episodeNumber: ep.episodeNumber,
-        fromState: scene.sceneState ?? 'wait',
-        fromWorkRound: scene.workRound ?? 0,
-        fromFeedbackRound: scene.feedbackRound ?? 0,
+        fromState,
+        fromWorkRound,
+        fromFeedbackRound,
+        assigneeName,
+        sceneUuid: scene.id ?? requestedSceneUuid ?? null,
+        sceneIndex,
       });
     },
-    [episodes, findSceneInSheet],
+    [episodes],
   );
 
   const handleActRoundBump = useCallback(
@@ -1886,11 +2239,181 @@ export function ScenesView() {
     [findSceneInSheet, bumpScenePhaseRoundOptimistic, updateSceneByUuid, currentUser?.id],
   );
 
+  const persistAssigneeProgress = useCallback(
+    async (
+      sheetName: string,
+      sceneId: string,
+      assigneeName: string,
+      update:
+        | { kind: 'stage'; stage: Stage }
+        | { kind: 'phase'; state: ScenePhaseState }
+        | { kind: 'round'; roundKind: 'work' | 'feedback'; delta: 1 | -1 },
+      department: Department,
+      requestedSceneUuid?: string | null,
+      requestedSceneIndex?: number,
+    ) => {
+      const latestPart = useDataStore.getState().episodes
+        .flatMap((ep) => ep.parts)
+        .find((part) => part.sheetName === sheetName);
+      const sceneIndex = latestPart
+        ? findCompletionSceneIndex(latestPart.scenes, {
+            sceneId,
+            sceneUuid: requestedSceneUuid ?? null,
+            sceneIndex: requestedSceneIndex,
+          })
+        : -1;
+      const scene = sceneIndex >= 0 ? latestPart?.scenes[sceneIndex] : undefined;
+      if (!scene?.id || sceneIndex < 0) return;
+      const sceneUuid = scene.id;
+
+      const prevScene = { ...scene };
+      const mutationSeq = (assigneeProgressMutationSeqRef.current.get(sceneUuid) ?? 0) + 1;
+      assigneeProgressMutationSeqRef.current.set(sceneUuid, mutationSeq);
+      const nextProgress = updateAssigneeProgressEntry(scene, assigneeName, update, currentUser?.name);
+      const patch = aggregateScenePatchFromAssignees(scene, nextProgress, department);
+      const wasFullyDone = isFullyDone(scene);
+      const nextScene = { ...scene, ...patch };
+      const willBeFullyDone = isFullyDone(nextScene);
+      const prevCompletedBy = scene.completedBy ?? '';
+      const prevCompletedAt = scene.completedAt ?? '';
+      const completionMeta = (() => {
+        if (willBeFullyDone && !wasFullyDone) {
+          return {
+            nextCompletedBy: currentUser?.name ?? '알 수 없음',
+            nextCompletedAt: new Date().toISOString(),
+          };
+        }
+        if (wasFullyDone && !willBeFullyDone && (prevCompletedBy || prevCompletedAt)) {
+          return {
+            nextCompletedBy: '',
+            nextCompletedAt: '',
+          };
+        }
+        return null;
+      })();
+      if (completionMeta) {
+        patch.completedBy = completionMeta.nextCompletedBy;
+        patch.completedAt = completionMeta.nextCompletedAt;
+      }
+
+      updateSceneByUuid(sceneUuid, patch);
+      if (!wasFullyDone && willBeFullyDone) {
+        setCelebratingTarget(buildCompletionTarget(sheetName, scene, sceneIndex));
+      }
+
+      try {
+        await enqueueAssigneeProgressWrite(sceneUuid, async () => {
+          await writeMetadata(
+            SCENE_ASSIGNEE_PROGRESS_META_TYPE,
+            sceneUuid,
+            serializeAssigneeProgress(nextProgress),
+          );
+          if (completionMeta) {
+            try {
+              await updateSceneCompletionMeta(
+                sheetName,
+                sceneIndex,
+                completionMeta.nextCompletedBy && completionMeta.nextCompletedAt
+                  ? {
+                      completedBy: completionMeta.nextCompletedBy,
+                      completedAt: completionMeta.nextCompletedAt,
+                    }
+                  : null,
+              );
+            } catch (metaErr) {
+              console.error('[담당자별 완료 메타 저장 실패]', metaErr);
+            }
+          }
+        });
+      } catch (err) {
+        console.error('[ScenesView] 담당자별 진행 저장 실패:', err);
+        sonnerToast.error('담당자별 진행 저장에 실패했습니다.');
+        if (assigneeProgressMutationSeqRef.current.get(sceneUuid) === mutationSeq) {
+          updateSceneByUuid(sceneUuid, prevScene);
+        }
+        return;
+      }
+    },
+    [currentUser?.name, enqueueAssigneeProgressWrite, updateSceneByUuid, updateSceneCompletionMeta],
+  );
+
+  const handleAssigneeStageToggle = useCallback(
+    (
+      sheetName: string,
+      sceneId: string,
+      assigneeName: string,
+      stage: Stage,
+      sceneUuid?: string | null,
+      sceneIndex?: number,
+      department: Department = 'bg',
+    ) => {
+      void persistAssigneeProgress(
+        sheetName,
+        sceneId,
+        assigneeName,
+        { kind: 'stage', stage },
+        department,
+        sceneUuid,
+        sceneIndex,
+      );
+    },
+    [persistAssigneeProgress],
+  );
+
+  const handleAssigneeActPhaseStateClick = useCallback(
+    (
+      sheetName: string,
+      sceneId: string,
+      assigneeName: string,
+      newState: ScenePhaseState,
+      sceneUuid?: string | null,
+      sceneIndex?: number,
+    ) => {
+      if (newState === 'feedback') {
+        handleActFeedbackRequest(sheetName, sceneId, assigneeName, sceneUuid, sceneIndex);
+        return;
+      }
+      void persistAssigneeProgress(
+        sheetName,
+        sceneId,
+        assigneeName,
+        { kind: 'phase', state: newState },
+        'acting',
+        sceneUuid,
+        sceneIndex,
+      );
+    },
+    [handleActFeedbackRequest, persistAssigneeProgress],
+  );
+
+  const handleAssigneeActRoundBump = useCallback(
+    (
+      sheetName: string,
+      sceneId: string,
+      assigneeName: string,
+      kind: 'work' | 'feedback',
+      delta: 1 | -1,
+      sceneUuid?: string | null,
+      sceneIndex?: number,
+    ) => {
+      void persistAssigneeProgress(
+        sheetName,
+        sceneId,
+        assigneeName,
+        { kind: 'round', roundKind: kind, delta },
+        'acting',
+        sceneUuid,
+        sceneIndex,
+      );
+    },
+    [persistAssigneeProgress],
+  );
+
   // 피드백 모달 — 알림 보내기 (상태 변경 + broadcast)
   const sendFeedbackWithNotification = useCallback(
     async (recipientIds: string[]) => {
       if (!feedbackModal) return;
-      const { sheetName, sceneId, scene, episodeNumber, fromState, fromWorkRound, fromFeedbackRound } = feedbackModal;
+      const { sheetName, sceneId, scene, episodeNumber, fromState, fromWorkRound, fromFeedbackRound, assigneeName } = feedbackModal;
       if (!scene.id) {
         setFeedbackModal(null);
         return;
@@ -1899,21 +2422,41 @@ export function ScenesView() {
 
       // 1) 상태 변경 (낙관적 + Supabase)
       const sceneUuid = scene.id;
-      setScenePhaseOptimistic(sheetName, sceneId, 'feedback');
-      try {
-        await updateScenePhaseInSupabase(sceneUuid, 'feedback', fromWorkRound, targetRound, currentUser?.id);
-      } catch (err) {
-        console.error('[ScenesView] 피드백 대기 저장 실패:', err);
-        sonnerToast.error('피드백 대기 저장에 실패했습니다.');
-        // 코덱스 1차 P1 #2 / 5차 P1 #11 fix: 명시적 복원 (sceneState/round/legacy 모두)
-        updateSceneByUuid(sceneUuid, {
-          sceneState: fromState,
-          workRound: fromWorkRound,
-          feedbackRound: feedbackModal.fromFeedbackRound,
-          lo: scene.lo, done: scene.done, review: scene.review, png: scene.png,
-        });
-        setFeedbackModal(null);
-        return;
+      if (assigneeName) {
+        const nextProgress = updateAssigneeProgressEntry(
+          scene,
+          assigneeName,
+          { kind: 'phase', state: 'feedback' },
+          currentUser?.name,
+        );
+        const patch = aggregateScenePatchFromAssignees(scene, nextProgress, 'acting');
+        updateSceneByUuid(sceneUuid, patch);
+        try {
+          await writeAssigneeProgressMetadata(sceneUuid, nextProgress);
+        } catch (err) {
+          console.error('[ScenesView] 담당자별 피드백 대기 저장 실패:', err);
+          sonnerToast.error('담당자별 피드백 대기 저장에 실패했습니다.');
+          updateSceneByUuid(sceneUuid, scene);
+          setFeedbackModal(null);
+          return;
+        }
+      } else {
+        setScenePhaseOptimistic(sheetName, sceneId, 'feedback');
+        try {
+          await updateScenePhaseInSupabase(sceneUuid, 'feedback', fromWorkRound, targetRound, currentUser?.id);
+        } catch (err) {
+          console.error('[ScenesView] 피드백 대기 저장 실패:', err);
+          sonnerToast.error('피드백 대기 저장에 실패했습니다.');
+          // 코덱스 1차 P1 #2 / 5차 P1 #11 fix: 명시적 복원 (sceneState/round/legacy 모두)
+          updateSceneByUuid(sceneUuid, {
+            sceneState: fromState,
+            workRound: fromWorkRound,
+            feedbackRound: feedbackModal.fromFeedbackRound,
+            lo: scene.lo, done: scene.done, review: scene.review, png: scene.png,
+          });
+          setFeedbackModal(null);
+          return;
+        }
       }
 
       // 2) 알림 발송 (recipients 가 비어있으면 skip)
@@ -1941,36 +2484,55 @@ export function ScenesView() {
 
       setFeedbackModal(null);
     },
-    [feedbackModal, currentUser?.id, currentUser?.name, setScenePhaseOptimistic, updateSceneByUuid],
+    [feedbackModal, currentUser?.id, currentUser?.name, setScenePhaseOptimistic, updateSceneByUuid, writeAssigneeProgressMetadata],
   );
 
   // 피드백 모달 — 알림 없이 상태만 변경
   const silentChangeToFeedback = useCallback(async () => {
     if (!feedbackModal) return;
-    const { sheetName, sceneId, scene, fromState, fromWorkRound, fromFeedbackRound } = feedbackModal;
+    const { sheetName, sceneId, scene, fromState, fromWorkRound, fromFeedbackRound, assigneeName } = feedbackModal;
     if (!scene.id) {
       setFeedbackModal(null);
       return;
     }
     const sceneUuid = scene.id;
     const targetRound = fromState === 'work' ? fromWorkRound : Math.max(1, fromFeedbackRound || 1);
-    setScenePhaseOptimistic(sheetName, sceneId, 'feedback');
-    try {
-      await updateScenePhaseInSupabase(sceneUuid, 'feedback', fromWorkRound, targetRound, currentUser?.id);
-      sonnerToast.success('상태만 변경했습니다 (알림 없음).');
-    } catch (err) {
-      console.error('[ScenesView] 피드백 대기(조용히) 저장 실패:', err);
-      sonnerToast.error('피드백 대기 저장에 실패했습니다.');
-      // 코덱스 1차 P1 #2 / 5차 P1 #11 fix: 명시적 복원 (legacy 포함)
-      updateSceneByUuid(sceneUuid, {
-        sceneState: fromState,
-        workRound: fromWorkRound,
-        feedbackRound: fromFeedbackRound,
-        lo: scene.lo, done: scene.done, review: scene.review, png: scene.png,
-      });
+    if (assigneeName) {
+      const nextProgress = updateAssigneeProgressEntry(
+        scene,
+        assigneeName,
+        { kind: 'phase', state: 'feedback' },
+        currentUser?.name,
+      );
+      const patch = aggregateScenePatchFromAssignees(scene, nextProgress, 'acting');
+      updateSceneByUuid(sceneUuid, patch);
+      try {
+        await writeAssigneeProgressMetadata(sceneUuid, nextProgress);
+        sonnerToast.success('상태만 변경했습니다 (알림 없음).');
+      } catch (err) {
+        console.error('[ScenesView] 담당자별 피드백 대기(조용히) 저장 실패:', err);
+        sonnerToast.error('담당자별 피드백 대기 저장에 실패했습니다.');
+        updateSceneByUuid(sceneUuid, scene);
+      }
+    } else {
+      setScenePhaseOptimistic(sheetName, sceneId, 'feedback');
+      try {
+        await updateScenePhaseInSupabase(sceneUuid, 'feedback', fromWorkRound, targetRound, currentUser?.id);
+        sonnerToast.success('상태만 변경했습니다 (알림 없음).');
+      } catch (err) {
+        console.error('[ScenesView] 피드백 대기(조용히) 저장 실패:', err);
+        sonnerToast.error('피드백 대기 저장에 실패했습니다.');
+        // 코덱스 1차 P1 #2 / 5차 P1 #11 fix: 명시적 복원 (legacy 포함)
+        updateSceneByUuid(sceneUuid, {
+          sceneState: fromState,
+          workRound: fromWorkRound,
+          feedbackRound: fromFeedbackRound,
+          lo: scene.lo, done: scene.done, review: scene.review, png: scene.png,
+        });
+      }
     }
     setFeedbackModal(null);
-  }, [feedbackModal, currentUser?.id, setScenePhaseOptimistic, updateSceneByUuid]);
+  }, [feedbackModal, currentUser?.id, currentUser?.name, setScenePhaseOptimistic, updateSceneByUuid, writeAssigneeProgressMetadata]);
 
   const fromStateLabel = useMemo(() => {
     if (!feedbackModal) return '';
@@ -2093,7 +2655,7 @@ export function ScenesView() {
   const scenePrefsRef = useRef<UserPreferences | null>(null);
 
   // v1.18.0: 알림 클릭 등 외부에서 모달 자동 오픈 시 전달되는 라우팅 옵션.
-  // 'revisions' 탭으로 시작 + 특정 리비전 카드 강조 등.
+  // 'revisions' 탭으로 시작 + 특정 리테이크 카드 강조 등.
   // v1.24.0: focusCommentId 추가 — 알림/활동 점프 시 댓글 자동 스크롤 + 펄스.
   const [modalRouting, setModalRouting] = useState<{
     initialTab?: 'detail' | 'revisions' | 'files' | 'history';
@@ -2102,10 +2664,10 @@ export function ScenesView() {
     focusRevisionCommentId?: string;
   } | null>(null);
 
-  // 리비전 초기 로드
+  // 리테이크 초기 로드
   const loadRevisions = useRevisionStore((s) => s.loadRevisions);
 
-  // 댓글 + 리비전 모드 설정. 프리뷰/오프라인은 로컬 더미 저장소, 연결 상태는 Supabase/Sheets 경로를 사용.
+  // 댓글 + 리테이크 모드 설정. 프리뷰/오프라인은 로컬 더미 저장소, 연결 상태는 Supabase/Sheets 경로를 사용.
   useEffect(() => {
     setCommentsSheetsMode(dataConnected);
     setRevisionsSheetsMode(dataConnected);
@@ -2344,6 +2906,7 @@ export function ScenesView() {
   const [detailContext, setDetailContext] = useState<{ sheetName: string; sceneIndex: number } | null>(null);
   const [continuitySourceElement, setContinuitySourceElement] = useState<HTMLElement | null>(null);
   const [lastCompletionUndoAction, setLastCompletionUndoAction] = useState<CompletionUndoAction | null>(null);
+  const [dismissedCompletionOverlayKey, setDismissedCompletionOverlayKey] = useState<string | null>(null);
   const clearContinuitySource = useCallback(() => {
     setContinuitySourceElement(null);
   }, []);
@@ -2352,6 +2915,8 @@ export function ScenesView() {
   // sceneId는 씬번호(예: a003) 또는 씬 인덱스(예: 12) 모두 지원
   const pendingDeepLink = useAppStore((s) => s.pendingDeepLink);
   const setPendingDeepLink = useAppStore((s) => s.setPendingDeepLink);
+  const pendingReq = useAppStore((s) => s.pendingSceneModalRequest);
+  const setPendingReq = useAppStore((s) => s.setPendingSceneModalRequest);
   useEffect(() => {
     if (!pendingDeepLink) return;
     const { sheetName, sceneId } = pendingDeepLink;
@@ -2368,11 +2933,20 @@ export function ScenesView() {
           }
           console.log('[DeepLink] 매칭 시트:', part.sheetName, '씬 인덱스:', sceneIndex);
           if (sceneIndex >= 0) {
+            const matchedScene = part.scenes[sceneIndex];
             setSelectedEpisode(ep.episodeNumber);
             setSelectedPart(part.partId);
-            setSelectedDepartment(part.department);
-            setDashboardDeptFilter(part.department);
-            setDetailContext({ sheetName, sceneIndex });
+            setSelectedDepartment('all');
+            setDashboardDeptFilter('all');
+            setHighlightSceneId(matchedScene.sceneId);
+            setPendingReq({
+              sceneUuid: matchedScene.id,
+              sceneName: matchedScene.sceneId,
+              episodeNumber: ep.episodeNumber,
+              partId: part.partId,
+              initialTab: 'detail',
+              forceDeptFilter: 'all',
+            });
             setPendingDeepLink(null);
             return;
           }
@@ -2382,7 +2956,7 @@ export function ScenesView() {
     console.warn('[DeepLink] 씬을 찾을 수 없음:', pendingDeepLink);
     console.warn('[DeepLink] 전체 시트:', episodes.flatMap(ep => ep.parts.map(p => p.sheetName)));
     setPendingDeepLink(null);
-  }, [pendingDeepLink, episodes]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [pendingDeepLink, episodes, setPendingDeepLink, setPendingReq, setDashboardDeptFilter, setHighlightSceneId, setSelectedDepartment, setSelectedEpisode, setSelectedPart]);
 
   // 댓글 카운트 로드 (currentPart 또는 bgPart/actPart 정의 후).
   // 주의: 이 함수 내부에서 invalidatePartCache 를 호출하면 'bflow:comments-invalidated' 이벤트가
@@ -2563,10 +3137,7 @@ export function ScenesView() {
     let cmp = 0;
     switch (sortKey) {
       case 'no': {
-        // sceneId에서 숫자 추출하여 정렬 (a001→1, sc010→10)
-        const aNum = parseInt(a.sceneId?.match(/\d+$/)?.[0] || '0', 10) || a.no;
-        const bNum = parseInt(b.sceneId?.match(/\d+$/)?.[0] || '0', 10) || b.no;
-        cmp = aNum - bNum;
+        cmp = compareScenesByNumberThenSuffix(a, b);
         break;
       }
       case 'assignee': cmp = (a.assignee || '').localeCompare(b.assignee || ''); break;
@@ -2623,9 +3194,7 @@ export function ScenesView() {
       let cmp = 0;
       switch (sortKey) {
         case 'no': {
-          const aNum = parseInt(a.sceneId?.match(/\d+$/)?.[0] || '0', 10) || a.no;
-          const bNum = parseInt(b.sceneId?.match(/\d+$/)?.[0] || '0', 10) || b.no;
-          cmp = aNum - bNum;
+          cmp = compareScenesByNumberThenSuffix(a, b);
           break;
         }
         case 'assignee': cmp = (a.assignee || '').localeCompare(b.assignee || ''); break;
@@ -2736,8 +3305,6 @@ export function ScenesView() {
   // store 사용 시 ScenesView 마운트 후 첫 tick 에서 useEffect 로 안정적 처리.
   // 코덱스 P2 fix (3차, 2026-05-05): pending 의 episodeNumber/partId 가 현재 선택과 다르면
   // 먼저 selectedEpisode/selectedPart 를 변경 → 다음 render 의 새 currentPart/mergedScenes 로 매칭.
-  const pendingReq = useAppStore((s) => s.pendingSceneModalRequest);
-  const setPendingReq = useAppStore((s) => s.setPendingSceneModalRequest);
   useEffect(() => {
     if (!pendingReq) return;
     const detail = pendingReq;
@@ -2902,6 +3469,32 @@ export function ScenesView() {
     ),
     [partCompletionState.completedMeta],
   );
+  const completionOverlayKey = useMemo(() => {
+    if (!isVisibleComplete) return null;
+    return [
+      selectedEpisode ?? '__episode__',
+      selectedPart ?? '__part__',
+      selectedDepartment,
+      partCompletionState.completedMeta?.completedBy ?? '__unknown__',
+      partCompletionState.completedMeta?.completedAt ?? '__time__',
+    ].join(':');
+  }, [
+    isVisibleComplete,
+    partCompletionState.completedMeta?.completedAt,
+    partCompletionState.completedMeta?.completedBy,
+    selectedDepartment,
+    selectedEpisode,
+    selectedPart,
+  ]);
+  useEffect(() => {
+    if (!completionOverlayKey) setDismissedCompletionOverlayKey(null);
+  }, [completionOverlayKey]);
+  const showCompletionOverlay = Boolean(isVisibleComplete && completionOverlayKey !== dismissedCompletionOverlayKey);
+  const showCompletionRestoreButton = Boolean(
+    isVisibleComplete
+    && completionOverlayKey
+    && completionOverlayKey === dismissedCompletionOverlayKey,
+  );
   const canUndoLastCompletionAction = useMemo(() => {
     if (!lastCompletionUndoAction) return false;
     const undoTarget: CompletionCelebrationTarget = {
@@ -2982,6 +3575,7 @@ export function ScenesView() {
     const stagePatch = buildSequentialStagePatch(scene, stage);
     const changedStages = getChangedSequentialStages(scene, stagePatch);
     if (changedStages.length === 0) return;
+    const prevAssigneeProgress = scene.assigneeProgress;
 
     const completionMeta = (() => {
       const prevCompletedBy = scene.completedBy ?? '';
@@ -3063,6 +3657,24 @@ export function ScenesView() {
       });
     }
 
+    const nextAssigneeProgress = scene.id && hasMultiAssigneeProgress(scene)
+      ? updateAllAssigneeProgressEntries(
+          scene,
+          isActingScene && actingPhaseSync
+            ? {
+                kind: 'phase',
+                state: actingPhaseSync.state,
+                workRound: actingPhaseSync.workRound,
+                feedbackRound: actingPhaseSync.feedbackRound,
+              }
+            : { kind: 'stagePatch', patch: stagePatch },
+          currentUser?.name,
+        )
+      : null;
+    if (scene.id && nextAssigneeProgress) {
+      updateSceneByUuid(scene.id, { assigneeProgress: nextAssigneeProgress });
+    }
+
     // API 호출을 큐에 넣어 순차 실행 (race condition 방지)
     toggleQueueRef.current = toggleQueueRef.current.then(async () => {
       try {
@@ -3094,6 +3706,16 @@ export function ScenesView() {
             console.warn('[액팅 phase 동기화 실패 — legacy stage 는 저장됨]', phaseErr);
           }
         }
+        if (scene.id && nextAssigneeProgress) {
+          try {
+            await writeAssigneeProgressMetadata(scene.id, nextAssigneeProgress);
+          } catch (progressErr) {
+            console.error('[ScenesView] 담당자별 진행 저장 실패:', progressErr);
+            sonnerToast.error('담당자별 진행 저장에 실패했습니다.');
+            updateSceneByUuid(scene.id, { assigneeProgress: prevAssigneeProgress });
+            syncInBackground();
+          }
+        }
       } catch (err) {
         console.error('[토글 실패]', err);
         changedStages.forEach((changedStage) => {
@@ -3106,6 +3728,9 @@ export function ScenesView() {
         // 액팅 phase 도 롤백
         if (actingPhaseSync) {
           setScenePhaseOptimistic(sheetName, sceneId, scene.sceneState ?? 'wait');
+        }
+        if (scene.id && nextAssigneeProgress) {
+          updateSceneByUuid(scene.id, { assigneeProgress: prevAssigneeProgress });
         }
         return;
       }
@@ -3214,6 +3839,8 @@ export function ScenesView() {
     const updates: BulkStageUpdate[] = [];
     const completedMetaByUuid = new Map<string, { completedBy: string; completedAt: string }>();
     const stagePatchByUuid = new Map<string, Partial<Record<Stage, boolean>>>();
+    const bulkAssigneeProgressByUuid = new Map<string, SceneAssigneeProgressMap>();
+    const isActingBulkTarget = (onlyDept ?? (selectedDepartment === 'acting' ? 'acting' : 'bg')) === 'acting';
 
     for (const s of targetScenes) {
       if (!s.id) continue;
@@ -3254,6 +3881,21 @@ export function ScenesView() {
         updates.push(update);
       });
       stagePatchByUuid.set(s.id, sceneStagePatch);
+
+      if (hasMultiAssigneeProgress(s)) {
+        const nextProgress = isActingBulkTarget
+          ? updateAllAssigneeProgressEntries(
+              s,
+              { kind: 'phase', state: phaseFromStage(stage) },
+              currentUser?.name,
+            )
+          : updateAllAssigneeProgressEntries(
+              s,
+              { kind: 'stagePatch', patch: stagePatch },
+              currentUser?.name,
+            );
+        bulkAssigneeProgressByUuid.set(s.id, nextProgress);
+      }
     }
 
     if (updates.length === 0) return;
@@ -3291,9 +3933,22 @@ export function ScenesView() {
         const set = new Set(uuidsToSend);
         const subset = updates.filter((u) => set.has(u.sceneUuid));
         const results = await bulkUpdateSceneStages(subset, currentUser?.id ?? '');
-        return coalesceBulkStageResults(uuidsToSend, results);
+        const coalesced = coalesceBulkStageResults(uuidsToSend, results);
+        return Promise.all(
+          coalesced.map(async (result) => {
+            const nextProgress = bulkAssigneeProgressByUuid.get(result.sceneUuid);
+            if (!result.success || !nextProgress) return result;
+            try {
+              await writeAssigneeProgressMetadata(result.sceneUuid, nextProgress);
+              return result;
+            } catch (err) {
+              const message = err instanceof Error ? err.message : 'assignee progress metadata failed';
+              return { sceneUuid: result.sceneUuid, success: false, error: message };
+            }
+          }),
+        );
       },
-      { targetStage: stage, completedMetaByUuid, stagePatchByUuid },
+      { targetStage: stage, completedMetaByUuid, stagePatchByUuid, assigneeProgressByUuid: bulkAssigneeProgressByUuid },
     );
   };
 
@@ -3335,6 +3990,7 @@ export function ScenesView() {
         done: s.done,
         review: s.review,
         png: s.png,
+        assigneeProgress: s.assigneeProgress,
         completedBy: prevCompletedBy,
         completedAt: prevCompletedAt,
       });
@@ -3381,6 +4037,14 @@ export function ScenesView() {
         phaseCompletionMetaByUuid.set(s.id, { completedBy: nextCompletedBy, completedAt: nextCompletedAt });
         const location = findSceneLocationByUuid(s.id);
         if (location) phaseCompletionLocationByUuid.set(s.id, location);
+      }
+      if (hasMultiAssigneeProgress(s)) {
+        const nextProgress = updateAllAssigneeProgressEntries(
+          s,
+          { kind: 'phase', state: phase, workRound, feedbackRound },
+          currentUser?.name,
+        );
+        phasePatch.assigneeProgress = nextProgress;
       }
 
       phasePatchByUuid.set(s.id, phasePatch);
@@ -3431,6 +4095,16 @@ export function ScenesView() {
                   }
                 } else {
                   console.warn('[액팅 일괄 완료 메타 저장 스킵 — 씬 위치를 찾을 수 없음]', uuid);
+                }
+              }
+              if (patch.assigneeProgress) {
+                try {
+                  await writeAssigneeProgressMetadata(uuid, patch.assigneeProgress);
+                } catch (progressErr) {
+                  const prev = prevByUuid.get(uuid);
+                  if (prev) updateSceneByUuid(uuid, { assigneeProgress: prev.assigneeProgress });
+                  const message = progressErr instanceof Error ? progressErr.message : 'assignee progress metadata failed';
+                  return { sceneUuid: uuid, success: false, error: message };
                 }
               }
               return { sceneUuid: uuid, success: true };
@@ -3998,7 +4672,7 @@ export function ScenesView() {
 
     try {
       await deleteSceneFromSupabase(sceneUuid);
-      // CASCADE 로 DB 쪽 댓글/리비전은 이 시점에 확실히 사라졌으므로 캐시 무효화 + 이벤트 전파.
+      // CASCADE 로 DB 쪽 댓글/리테이크는 이 시점에 확실히 사라졌으므로 캐시 무효화 + 이벤트 전파.
       invalidatePartCache(sheetName);
       syncInBackground();
     } catch (err) {
@@ -4068,7 +4742,7 @@ export function ScenesView() {
     if (targetParts.length === 0) return;
 
     const partLabel = [...new Set(targetParts.map((p) => p.partId))].join('·');
-    if (!confirm(`${partLabel}파트를 삭제하시겠습니까?\n파트에 속한 모든 씬·댓글·리비전도 함께 정리됩니다.`)) return;
+    if (!confirm(`${partLabel}파트를 삭제하시겠습니까?\n파트에 속한 모든 씬·댓글·리테이크도 함께 정리됩니다.`)) return;
 
     const prevEpisodes = useDataStore.getState().episodes;
     const prevSelectedPart = selectedPart;
@@ -4840,13 +5514,20 @@ export function ScenesView() {
           )}
         >
           <AnimatePresence>
-            {isVisibleComplete && (
+            {showCompletionOverlay && (
               <PartCompleteOverlay
                 completedMeta={visibleCompletedMeta}
+                onDismiss={() => {
+                  if (!completionOverlayKey) return;
+                  setDismissedCompletionOverlayKey(completionOverlayKey);
+                }}
                 onUndoLastAction={canUndoLastCompletionAction ? handleUndoLastCompletionAction : undefined}
               />
             )}
           </AnimatePresence>
+          {showCompletionRestoreButton && (
+            <CompletionRestoreButton onClick={() => setDismissedCompletionOverlayKey(null)} />
+          )}
           <div className="relative z-10 flex h-full min-h-0 flex-col">
             {mergedScenes.length === 0 ? (
               <div className="text-sm text-text-secondary/50 text-center py-8">표시할 씬이 없습니다</div>
@@ -4876,6 +5557,10 @@ export function ScenesView() {
                 onActPhaseStateClick={handleActPhaseStateClick}
                 onActFeedbackRequest={handleActFeedbackRequest}
                 onActRoundBump={handleActRoundBump}
+                onAssigneeStageToggle={handleAssigneeStageToggle}
+                onAssigneeActPhaseStateClick={handleAssigneeActPhaseStateClick}
+                onAssigneeActFeedbackRequest={handleActFeedbackRequest}
+                onAssigneeActRoundBump={handleAssigneeActRoundBump}
               />
             ) : mergedLayoutGroups ? (
               <div className="flex flex-col gap-6">
@@ -4937,6 +5622,10 @@ export function ScenesView() {
                             onActPhaseStateClick={handleActPhaseStateClick}
                             onActFeedbackRequest={handleActFeedbackRequest}
                             onActRoundBump={handleActRoundBump}
+                            onAssigneeStageToggle={handleAssigneeStageToggle}
+                            onAssigneeActPhaseStateClick={handleAssigneeActPhaseStateClick}
+                            onAssigneeActFeedbackRequest={handleActFeedbackRequest}
+                            onAssigneeActRoundBump={handleAssigneeActRoundBump}
                           />
                         );
                       })}
@@ -4993,6 +5682,10 @@ export function ScenesView() {
                       onActPhaseStateClick={handleActPhaseStateClick}
                       onActFeedbackRequest={handleActFeedbackRequest}
                       onActRoundBump={handleActRoundBump}
+                      onAssigneeStageToggle={handleAssigneeStageToggle}
+                      onAssigneeActPhaseStateClick={handleAssigneeActPhaseStateClick}
+                      onAssigneeActFeedbackRequest={handleActFeedbackRequest}
+                      onAssigneeActRoundBump={handleAssigneeActRoundBump}
                     />
                   );
                 })}
@@ -5012,13 +5705,20 @@ export function ScenesView() {
       >
         {/* 파트 완료 보케 오버레이 */}
         <AnimatePresence>
-          {isVisibleComplete && (
+          {showCompletionOverlay && (
             <PartCompleteOverlay
               completedMeta={visibleCompletedMeta}
+              onDismiss={() => {
+                if (!completionOverlayKey) return;
+                setDismissedCompletionOverlayKey(completionOverlayKey);
+              }}
               onUndoLastAction={canUndoLastCompletionAction ? handleUndoLastCompletionAction : undefined}
             />
           )}
         </AnimatePresence>
+        {showCompletionRestoreButton && (
+          <CompletionRestoreButton onClick={() => setDismissedCompletionOverlayKey(null)} />
+        )}
         <div className="relative z-10 flex h-full min-h-0 flex-col">
           {scenes.length === 0 ? (
             <div className="flex-1 flex flex-col items-center justify-center text-text-secondary h-full gap-2">
@@ -5049,6 +5749,10 @@ export function ScenesView() {
                   onActPhaseStateClick={handleActPhaseStateClick}
                   onActFeedbackRequest={handleActFeedbackRequest}
                   onActRoundBump={handleActRoundBump}
+                  onAssigneeStageToggle={handleAssigneeStageToggle}
+                  onAssigneeActPhaseStateClick={handleAssigneeActPhaseStateClick}
+                  onAssigneeActFeedbackRequest={handleActFeedbackRequest}
+                  onAssigneeActRoundBump={handleAssigneeActRoundBump}
                   onDelete={handleDeleteScene}
                   onOpenDetail={(idx) => setDetailSceneIndex(idx)}
                   onFieldUpdate={handleFieldUpdate}
@@ -5113,6 +5817,10 @@ export function ScenesView() {
                               onActPhaseStateClick={handleActPhaseStateClick}
                               onActFeedbackRequest={handleActFeedbackRequest}
                               onActRoundBump={handleActRoundBump}
+                              onAssigneeStageToggle={handleAssigneeStageToggle}
+                              onAssigneeActPhaseStateClick={handleAssigneeActPhaseStateClick}
+                              onAssigneeActFeedbackRequest={handleActFeedbackRequest}
+                              onAssigneeActRoundBump={handleAssigneeActRoundBump}
                               onDelete={handleDeleteScene}
                               onOpenDetail={() => setDetailSceneIndex(sIdx)}
                               onCelebrationEnd={clearCelebration}
@@ -5166,6 +5874,10 @@ export function ScenesView() {
                 onActPhaseStateClick={handleActPhaseStateClick}
                 onActFeedbackRequest={handleActFeedbackRequest}
                 onActRoundBump={handleActRoundBump}
+                onAssigneeStageToggle={handleAssigneeStageToggle}
+                onAssigneeActPhaseStateClick={handleAssigneeActPhaseStateClick}
+                onAssigneeActFeedbackRequest={handleActFeedbackRequest}
+                onAssigneeActRoundBump={handleAssigneeActRoundBump}
                 onDelete={handleDeleteScene}
                 onOpenDetail={(idx) => setDetailSceneIndex(idx)}
                 onFieldUpdate={handleFieldUpdate}
@@ -5199,6 +5911,10 @@ export function ScenesView() {
                     onActPhaseStateClick={handleActPhaseStateClick}
                     onActFeedbackRequest={handleActFeedbackRequest}
                     onActRoundBump={handleActRoundBump}
+                    onAssigneeStageToggle={handleAssigneeStageToggle}
+                    onAssigneeActPhaseStateClick={handleAssigneeActPhaseStateClick}
+                    onAssigneeActFeedbackRequest={handleActFeedbackRequest}
+                    onAssigneeActRoundBump={handleAssigneeActRoundBump}
                     onDelete={handleDeleteScene}
                     onOpenDetail={() => setDetailSceneIndex(sIdx)}
                     onCelebrationEnd={clearCelebration}
@@ -5349,8 +6065,13 @@ export function ScenesView() {
               STAGES.map((stage) => (
                 <button
                   key={stage}
-                  onClick={() => handleBulkStageToggle(stage)}
+                  onClick={() => selectedDepartment === 'acting'
+                    ? handleBulkActPhaseSet(phaseFromStage(stage))
+                    : handleBulkStageToggle(stage)}
                   disabled={isBulkInFlight}
+                  title={selectedDepartment === 'acting'
+                    ? `선택된 액팅 씬을 모두 "${SCENE_PHASE_LABELS[phaseFromStage(stage)]}" 로 설정`
+                    : undefined}
                   className="compact-label-container inline-flex h-7 min-w-0 shrink items-center justify-center px-2.5 text-[11px] font-medium rounded-md transition-colors cursor-pointer leading-none disabled:opacity-50 disabled:cursor-not-allowed"
                   style={{
                     backgroundColor: `${deptConfig.stageColors[stage]}20`,
@@ -5639,6 +6360,10 @@ export function ScenesView() {
             onActPhaseStateClick={handleActPhaseStateClick}
             onActFeedbackRequest={handleActFeedbackRequest}
             onActRoundBump={handleActRoundBump}
+            onAssigneeStageToggle={handleAssigneeStageToggle}
+            onAssigneeActPhaseStateClick={handleAssigneeActPhaseStateClick}
+            onAssigneeActFeedbackRequest={handleActFeedbackRequest}
+            onAssigneeActRoundBump={handleAssigneeActRoundBump}
             onClose={() => { setDetailSceneIndex(null); setDetailContext(null); setModalRouting(null); }}
             initialTab={modalRouting?.initialTab}
             focusRevisionId={modalRouting?.focusRevisionId}
@@ -5737,6 +6462,10 @@ export function ScenesView() {
             onActPhaseStateClick={handleActPhaseStateClick}
             onActFeedbackRequest={handleActFeedbackRequest}
             onActRoundBump={handleActRoundBump}
+            onAssigneeStageToggle={handleAssigneeStageToggle}
+            onAssigneeActPhaseStateClick={handleAssigneeActPhaseStateClick}
+            onAssigneeActFeedbackRequest={handleActFeedbackRequest}
+            onAssigneeActRoundBump={handleAssigneeActRoundBump}
             continuitySourceElement={continuitySourceElement}
             onContinuityEnd={clearContinuitySource}
           />
@@ -6036,7 +6765,7 @@ export function ScenesView() {
       {feedbackModal && (
         <FeedbackRequestModal
           open={feedbackModal.open}
-          scene={feedbackModal.scene}
+          scene={feedbackModal.assigneeName ? { ...feedbackModal.scene, assignee: feedbackModal.assigneeName } : feedbackModal.scene}
           episodeLabel={`EP${String(feedbackModal.episodeNumber).padStart(2, '0')}`}
           targetRound={targetFeedbackRound}
           fromLabel={fromStateLabel}
