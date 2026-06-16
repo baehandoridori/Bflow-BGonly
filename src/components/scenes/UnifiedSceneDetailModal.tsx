@@ -1195,6 +1195,11 @@ function DeptSection({
 }) {
   const cfg = DEPARTMENT_CONFIGS[dept];
   const visualColor = deptVisualColor(dept);
+  const canUseAssigneeProgressStack = hasMultiAssigneeProgress(scene) && (
+    dept === 'acting'
+      ? Boolean(onAssigneeActPhaseStateClick && onAssigneeActFeedbackRequest && onAssigneeActRoundBump)
+      : Boolean(onAssigneeStageToggle)
+  );
 
   // 빈 상태 — 부서 추가 버튼은 기존 그대로
   if (!scene || !sheetName) {
@@ -1267,7 +1272,7 @@ function DeptSection({
       <div>
         <span className="block text-xs text-text-secondary mb-1.5">진행 단계</span>
         {/* v1.25.0~: 액팅 + 핸들러 모두 전달 시 새 ScenePhaseToggle, 아니면 기존 4-stage 토글 */}
-        {hasMultiAssigneeProgress(scene) ? (
+        {canUseAssigneeProgressStack ? (
           <div data-continuity-target={dept === 'bg' ? 'bg-stage' : 'act-stage'}>
             <AssigneeProgressStack
               scene={scene}

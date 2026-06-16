@@ -123,6 +123,19 @@ test('scene surfaces wire the shared progress stack instead of a single shared c
   }
 });
 
+test('detail modals only show per-assignee controls when update handlers are available', () => {
+  const files = [
+    'src/components/scenes/UnifiedSceneDetailModal.tsx',
+    'src/components/scenes/SceneDetailModal.tsx',
+  ];
+  for (const file of files) {
+    const source = readFileSync(file, 'utf8');
+    assert.match(source, /const canUseAssigneeProgressStack = hasMultiAssigneeProgress\(scene\)/, file);
+    assert.match(source, /onAssigneeActPhaseStateClick && onAssigneeActFeedbackRequest && onAssigneeActRoundBump/, file);
+    assert.match(source, /\{canUseAssigneeProgressStack \? \(/, file);
+  }
+});
+
 test('dev preview seeds two ACT assignees with different progress states', () => {
   const source = readFileSync('src/mocks/compositingMockSeed.ts', 'utf8');
   assert.match(source, /assigneeProgress/);

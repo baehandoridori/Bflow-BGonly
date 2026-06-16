@@ -619,6 +619,11 @@ export function SceneDetailModal({
 
   const deptConfig = DEPARTMENT_CONFIGS[department];
   const pct = sceneProgress(scene);
+  const canUseAssigneeProgressStack = hasMultiAssigneeProgress(scene) && (
+    department === 'acting'
+      ? Boolean(onAssigneeActPhaseStateClick && onAssigneeActFeedbackRequest && onAssigneeActRoundBump)
+      : Boolean(onAssigneeStageToggle)
+  );
   const sceneKey = `${sheetName}:${scene.no}`;
   const revisionSceneKey = buildSceneKey(sheetName, scene.sceneId);
   const sceneThreadKey = buildSceneThreadKeyFromRevisionKey(revisionSceneKey);
@@ -965,7 +970,7 @@ export function SceneDetailModal({
                     진행 단계
                   </h3>
                   <div className="mx-4">
-                    {hasMultiAssigneeProgress(scene) ? (
+                    {canUseAssigneeProgressStack ? (
                       <AssigneeProgressStack
                         scene={scene}
                         department={department}
