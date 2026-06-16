@@ -9,6 +9,7 @@ import type {
   CompositingState, CompositingStatus, CompositingErrorKind,
   CommentReadStateRow,
 } from '../types';
+import { applyAssigneeProgressMetadata } from '../utils/assigneeProgress';
 
 // 일괄 작업 타입 재노출 — 다른 렌더러 모듈에서 쉽게 참조 가능
 export type { BulkStageUpdate, BulkFieldUpdate, BulkUpdateResult };
@@ -437,7 +438,14 @@ export async function readMetadata(type: string, key: string): Promise<{ type: s
 
 /** 전체 에피소드 데이터 조회 */
 export async function readAll(): Promise<Episode[]> {
-  return readAllFromSupabase();
+  const episodes = await readAllFromSupabase();
+  try {
+    const metadata = (await readAllMetadataFromSupabase()) as { type: string; key: string; value: string }[];
+    return applyAssigneeProgressMetadata(episodes, metadata);
+  } catch (err) {
+    console.warn('[supabaseService] 담당자별 진행 메타데이터 적용 실패:', err);
+    return episodes;
+  }
 }
 
 // ─── 배치 실행 ──────────

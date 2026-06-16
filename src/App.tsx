@@ -25,7 +25,7 @@ import { GlobalTooltipProvider } from '@/components/ui/GlobalTooltip';
 import { GradientBackdrop } from '@/components/common/GradientBackdrop';
 import { loadGasConfig, connectGas, checkGasConnection } from '@/services/gasConfigService';
 import { readAll } from '@/services/supabaseService';
-import { readAllFromSupabase, testSupabaseConnection, readAllMetadataFromSupabase, onSupabaseRealtimeEvent, onSupabaseStatusChange } from '@/services/supabaseService';
+import { testSupabaseConnection, readAllMetadataFromSupabase, onSupabaseRealtimeEvent, onSupabaseStatusChange } from '@/services/supabaseService';
 import { applyAssigneeProgressMetadata } from '@/utils/assigneeProgress';
 import type { SupabaseRealtimeEvent } from '@/services/supabaseService';
 import { invalidatePartCache } from '@/services/commentService';
@@ -374,14 +374,12 @@ export default function App() {
       const sbConn = await testSupabaseConnection();
       if (sbConn.ok) {
         setActiveDataSource('supabase');
-        const loadedEpisodes = await readAllFromSupabase();
-        let episodes = loadedEpisodes;
+        const episodes = await readAll();
         setLastSyncTime(Date.now());
 
         // 메타데이터 로드 (Supabase)
         try {
           const metaList = (await readAllMetadataFromSupabase()) as { type: string; key: string; value: string }[];
-          episodes = applyAssigneeProgressMetadata(loadedEpisodes, metaList);
           const titles: Record<number, string> = {};
           const memos: Record<number, string> = {};
           for (const m of metaList) {

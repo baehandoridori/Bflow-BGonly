@@ -62,9 +62,13 @@ test('multi-assignee acting feedback clicks route through the request modal flow
 
 test('loaded assignee progress rehydrates aggregate scene flags for legacy progress surfaces', () => {
   const util = readFileSync(progressUtilPath, 'utf8');
+  const service = readFileSync('src/services/supabaseService.ts', 'utf8');
+  const app = readFileSync('src/App.tsx', 'utf8');
 
   assert.match(util, /applyAssigneeProgressMetadata/);
   assert.match(util, /aggregateScenePatchFromAssignees\(scene, assigneeProgress, part\.department\)/);
+  assert.match(service, /export async function readAll\(\): Promise<Episode\[]> \{[\s\S]*readAllMetadataFromSupabase\(\)[\s\S]*applyAssigneeProgressMetadata\(episodes, metadata\)/);
+  assert.match(app, /const episodes = await readAll\(\);/);
 });
 
 test('per-assignee completion boundary changes persist completion metadata', () => {
