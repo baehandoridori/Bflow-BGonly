@@ -60,7 +60,7 @@ test('UnifiedSceneDetailModal passes canonical thread key as comment read-state 
 
 test('Scene detail comment panels expose /re quick revision context', () => {
   assert.match(commentPanel, /parseRevisionSlashCommand/);
-  assert.match(commentPanel, /리비전 빠른 등록/);
+  assert.match(commentPanel, /리테이크 빠른 등록/);
   assert.match(commentPanel, /알람 보낼 담당자/);
   assert.match(commentPanel, /createRevision\(\{/);
   assert.match(resizable, /quickRevision\?: CommentPanelQuickRevisionContext/);
@@ -88,11 +88,11 @@ test('revision activity rows use theme-aware contrast in light mode', () => {
 test('quick revision can register a pasted attachment as the revision image', () => {
   assert.match(commentPanel, /imageUrl:\s*revisionImageUrl/);
   assert.match(commentPanel, /const prevAttached = attachedImages;[\s\S]*setAttachedImages\(\[\]\);[\s\S]*attachedImagesRef\.current = \[\];[\s\S]*await createRevision\(\{/);
-  assert.match(commentPanel, /\[리비전 빠른 등록 실패 \+ unmount\]/);
+  assert.match(commentPanel, /\[리테이크 빠른 등록 실패 \+ unmount\]/);
   assert.match(commentPanel, /setAttachedImages\(prevAttached\);[\s\S]*attachedImagesRef\.current = prevAttached/);
-  assert.match(commentPanel, /첨부 이미지가 리비전 이미지로 함께 등록됩니다/);
+  assert.match(commentPanel, /첨부 이미지가 리테이크 이미지로 함께 등록됩니다/);
   assert.match(commentPanel, /quickRevisionActive \? files\.slice\(0, 1\) : files/);
-  assert.doesNotMatch(commentPanel, /빠른 리비전은 텍스트만 등록합니다/);
+  assert.doesNotMatch(commentPanel, /빠른 리테이크는 텍스트만 등록합니다/);
   assert.doesNotMatch(commentPanel, /disabled=\{quickRevisionActive\}/);
   assert.doesNotMatch(commentPanel, /&& !quickRevisionHasAttachments/);
 });
@@ -135,8 +135,9 @@ test('comment and revision images share enlarge, copy, and download actions', ()
 test('revision comment notifications include explicitly mentioned users', () => {
   assert.match(app, /const mentionedNames = Array\.isArray\(newComment\.mentions\) \? newComment\.mentions : \[\]/);
   assert.match(app, /const mentionedUserIds = useAuthStore\.getState\(\)\.users/);
-  assert.match(app, /const targets = new Set\(\[\.\.\.revisionNotifyIds, \.\.\.mentionedUserIds\]\)/);
-  assert.match(app, /리비전 댓글 멘션/);
+  assert.match(app, /buildRevisionNotificationUserIds\(\{/);
+  assert.match(app, /mentionedUserIds/);
+  assert.match(app, /리테이크 댓글 멘션/);
 });
 
 test('revision comment broadcasts keep revision context and avoid general comment notification fallback', () => {
@@ -206,6 +207,29 @@ test('CommentPanel uses a Slack-style flat thread for reply-to-reply flows', () 
   assert.match(commentPanel, /선택한 메시지/);
   assert.doesNotMatch(commentPanel, /getReplyMentionDisplay\(reply\.text,\s*userNames\)/);
   assert.doesNotMatch(commentPanel, /<span className="text-accent">@\{replyMentionDisplay\.mentionName\}<\/span>에게/);
+});
+
+test('CommentPanel exposes reply buttons next to reaction controls for parent comments and replies', () => {
+  assert.match(commentPanel, /ThreadReplyButton/);
+  assert.match(commentPanel, /aria-label=\{`답글 달기: \$\{comment\.userName\}`\}/);
+  assert.match(commentPanel, /aria-label=\{`답글 달기: \$\{reply\.userName\}`\}/);
+  assert.match(commentPanel, /이 스레드에 답글/);
+  assert.match(commentPanel, /replyThreadTarget\.isReplyToReply/);
+});
+
+test('CommentPanel thread collapse control is large enough to scan', () => {
+  assert.match(commentPanel, /답글 \{replies\.length\}개 \{threadCollapsed \? '펼치기' : '접기'\}/);
+  assert.match(commentPanel, /text-\[12px\][\s\S]{0,120}font-semibold/);
+});
+
+test('CommentPanelResizable lets users resize from both the inner divider and outer outline', () => {
+  assert.match(resizable, /data-comment-panel-resize-edge="inner"/);
+  assert.match(resizable, /data-comment-panel-resize-edge="outer"/);
+  assert.match(resizable, /aria-label="댓글 패널 안쪽 경계로 너비 조절"/);
+  assert.match(resizable, /aria-label="댓글 패널 바깥쪽 경계로 너비 조절"/);
+  assert.match(resizable, /onMouseDown\(e, effectiveWidth, 'inner'\)/);
+  assert.match(resizable, /onMouseDown\(e, effectiveWidth, 'outer'\)/);
+  assert.match(resizable, /right-0 top-0 bottom-0/);
 });
 
 test('CommentPanel reruns scroll and observer setup after the unread divider mounts', () => {

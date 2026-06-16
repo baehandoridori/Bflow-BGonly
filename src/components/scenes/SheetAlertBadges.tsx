@@ -19,8 +19,8 @@ export function SheetAlertBadges({
       {revisionCount > 0 && (
         <span
           className="relative inline-flex h-6 w-6 items-center justify-center rounded-md border border-accent/25 bg-accent/15 text-accent"
-          title={`미해결 리비전 ${revisionCount}`}
-          aria-label={`미해결 리비전 ${revisionCount}`}
+          title={`미해결 리테이크 ${revisionCount}`}
+          aria-label={`미해결 리테이크 ${revisionCount}`}
         >
           <MessageSquareWarning size={12} strokeWidth={2.4} />
           <span className="absolute -right-1 -top-1 min-w-3.5 rounded-full bg-accent px-0.5 text-center text-[9px] font-black leading-3.5 text-white">

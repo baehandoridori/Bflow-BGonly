@@ -1,5 +1,13 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { loadPreferences, savePreferences } from '@/services/settingsService';
+import {
+  COMMENT_PANEL_MAX_WIDTH,
+  COMMENT_PANEL_MIN_WIDTH,
+  clampCommentPanelWidth,
+  computeAutoCommentPanelWidth,
+  computeCommentPanelResizeWidth,
+  type CommentPanelResizeEdge,
+} from '@/utils/commentPanelResize';
 
 /**
  * v1.27.0: 댓글 패널 너비 계산 (자동 모드).
@@ -7,13 +15,8 @@ import { loadPreferences, savePreferences } from '@/services/settingsService';
  * - 댓글 갯수에 따라 boost: 6~15건 → +40, 16건+ → +80
  * - 자동 모드 상한은 600px. (사용자 드래그는 720까지 허용 — useCommentPanelWidth.setWidth 참조)
  *
- * 순수 함수라 React 없이도 단위 테스트 가능.
  */
-export function computeAutoCommentPanelWidth(viewportW: number, commentCount: number): number {
-  const base = Math.max(320, Math.min(480, viewportW * 0.26));
-  const boost = commentCount > 15 ? 80 : commentCount > 5 ? 40 : 0;
-  return Math.min(600, base + boost);
-}
+export { computeAutoCommentPanelWidth, computeCommentPanelResizeWidth };
 
 /** 화면 너비 변화 추적용 — 윈도우 리사이즈 시 컴포넌트 재렌더. */
 function useViewportWidth(): number {
@@ -56,7 +59,12 @@ export function useCommentPanelWidth(commentCount: number): UseCommentPanelWidth
     loadPreferences().then((prefs) => {
       if (cancelled) return;
       const v = prefs?.commentPanelWidthPx;
-      if (typeof v === 'number' && Number.isFinite(v) && v >= 280 && v <= 720) {
+      if (
+        typeof v === 'number'
+        && Number.isFinite(v)
+        && v >= COMMENT_PANEL_MIN_WIDTH
+        && v <= COMMENT_PANEL_MAX_WIDTH
+      ) {
         setSavedWidth(v);
       }
     });
@@ -76,8 +84,8 @@ export function useCommentPanelWidth(commentCount: number): UseCommentPanelWidth
     if (px == null) {
       setSavedWidth(null);
     } else {
-      // 280..720 범위 강제. UI 단의 드래그 핸들러도 이 범위로 clamp 하지만 방어적 한 번 더.
-      const clamped = Math.max(280, Math.min(720, px));
+      // 저장 가능한 범위 강제. UI 단의 드래그 핸들러도 clamp 하지만 방어적 한 번 더.
+      const clamped = clampCommentPanelWidth(px);
       setSavedWidth(clamped);
     }
     // 디스크 동기화 — 다른 preference 필드 보존하면서 commentPanelWidthPx 만 갱신.
@@ -86,7 +94,7 @@ export function useCommentPanelWidth(commentCount: number): UseCommentPanelWidth
       const { commentPanelWidthPx: _omit, ...rest } = prefs;
       await savePreferences(rest);
     } else {
-      const clamped = Math.max(280, Math.min(720, px));
+      const clamped = clampCommentPanelWidth(px);
       await savePreferences({ ...prefs, commentPanelWidthPx: clamped });
     }
   }, []);
@@ -106,22 +114,21 @@ export function useCommentPanelResizer(opts: {
   commitWidth: (px: number) => void;
 }) {
   const { liveSetWidth, commitWidth } = opts;
-  const dragStateRef = useRef<{ startX: number; startW: number } | null>(null);
+  const dragStateRef = useRef<{ startX: number; startW: number; edge: CommentPanelResizeEdge } | null>(null);
   const mouseMoveRef = useRef<((e: MouseEvent) => void) | null>(null);
   const mouseUpRef = useRef<((e: MouseEvent) => void) | null>(null);
 
   const onMouseDown = useCallback(
-    (e: React.MouseEvent, currentWidth: number) => {
+    (e: React.MouseEvent, currentWidth: number, edge: CommentPanelResizeEdge = 'inner') => {
       e.preventDefault();
-      dragStateRef.current = { startX: e.clientX, startW: currentWidth };
+      dragStateRef.current = { startX: e.clientX, startW: currentWidth, edge };
       document.body.style.cursor = 'col-resize';
       document.body.style.userSelect = 'none';
 
       const onMove = (ev: MouseEvent) => {
         if (!dragStateRef.current) return;
-        const { startX, startW } = dragStateRef.current;
-        // 좌측 핸들이라 부호 반대 — 왼쪽으로 끌면 너비 증가.
-        const next = Math.max(280, Math.min(720, startW - (ev.clientX - startX)));
+        const { startX, startW, edge: dragEdge } = dragStateRef.current;
+        const next = computeCommentPanelResizeWidth(startW, startX, ev.clientX, dragEdge);
         liveSetWidth(next);
       };
       const onUp = (ev: MouseEvent) => {
@@ -134,7 +141,7 @@ export function useCommentPanelResizer(opts: {
         mouseMoveRef.current = null;
         mouseUpRef.current = null;
         if (!state) return;
-        const finalW = Math.max(280, Math.min(720, state.startW - (ev.clientX - state.startX)));
+        const finalW = computeCommentPanelResizeWidth(state.startW, state.startX, ev.clientX, state.edge);
         commitWidth(finalW);
       };
       mouseMoveRef.current = onMove;

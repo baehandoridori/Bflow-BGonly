@@ -17,7 +17,7 @@ export const ACTION_TYPE_TO_GROUP: Record<ActionType, ActionGroup> = {
   revision_in_progress: 'memo',
   revision_resolve: 'memo',
   revision_delete: 'memo',
-  // v1.18.0: 리비전 댓글 — '메모/댓글' 그룹으로 묶어 일반 comment_add 와 같은 필터에 포함
+  // v1.18.0: 리테이크 댓글 — '메모/댓글' 그룹으로 묶어 일반 comment_add 와 같은 필터에 포함
   revision_comment: 'memo',
   scene_add: 'scene',
   scene_delete: 'scene',
@@ -40,16 +40,16 @@ export const ACTION_TYPE_LABEL: Record<ActionType, string> = {
   // v1.25.6: 액팅 단계 라벨 — 사용자가 액팅 씬 토글 클릭 시 표시
   phase_wait: '대기로 변경',
   phase_work: '작업중 시작',
-  phase_feedback: '피드백 대기',
+  phase_feedback: '리테이크 대기',
   phase_done: '액팅 완료',
   memo_update: '메모 수정',
   comment_add: '댓글 작성',
-  revision_add: '리비전 등록',
-  revision_in_progress: '리비전 진행중',
-  revision_resolve: '리비전 해결',
-  revision_delete: '리비전 삭제',
-  // v1.18.0: 리비전 댓글
-  revision_comment: '리비전 댓글',
+  revision_add: '리테이크 등록',
+  revision_in_progress: '리테이크 진행중',
+  revision_resolve: '리테이크 해결',
+  revision_delete: '리테이크 삭제',
+  // v1.18.0: 리테이크 댓글
+  revision_comment: '리테이크 댓글',
   scene_add: '씬 추가',
   scene_delete: '씬 삭제',
   assignee_change: '담당자 변경',
@@ -79,7 +79,7 @@ export const ACTION_TYPE_COLOR: Record<ActionType, string> = {
   revision_in_progress: '#5EBBC9',
   revision_resolve: '#81ECEC',
   revision_delete: '#FF7675',
-  // v1.18.0: 리비전 댓글 — 시안~카키 사이로 일반 comment_add 와 시각 구분
+  // v1.18.0: 리테이크 댓글 — 시안~카키 사이로 일반 comment_add 와 시각 구분
   revision_comment: '#A0E7E5',
   scene_add: '#6FCF97',
   scene_delete: '#FF7675',

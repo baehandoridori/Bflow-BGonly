@@ -1,6 +1,6 @@
 // ─── 에피소드별 그룹 뷰 (v1.19.0) ─────────
 //
-// EP 헤더 → 펼치면 그 EP의 씬들 nested → 각 씬 안에 미니 리비전 행들.
+// EP 헤더 → 펼치면 그 EP의 씬들 nested → 각 씬 안에 미니 리테이크 행들.
 // mockup `revision-board-v3.html` view-episode 섹션 참조.
 
 import { useMemo, useState } from 'react';
@@ -268,7 +268,7 @@ function SceneNested({
   );
 }
 
-// ─── 미니 리비전 행 (에피소드 nested 안) ──────────
+// ─── 미니 리테이크 행 (에피소드 nested 안) ──────────
 
 function MiniRevisionRow({
   rev,

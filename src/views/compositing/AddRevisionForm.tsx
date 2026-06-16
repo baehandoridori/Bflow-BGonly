@@ -1,4 +1,4 @@
-// ─── 새 리비전 등록 폼 ──────────────────────
+// ─── 새 리테이크 등록 폼 ──────────────────────
 
 import { useState, useEffect, useMemo, useRef } from 'react';
 import { motion } from 'framer-motion';
@@ -86,7 +86,7 @@ export function AddRevisionForm({
       });
       onClose();
     } catch (err) {
-      console.error('리비전 등록 실패:', err);
+      console.error('리테이크 등록 실패:', err);
     } finally {
       setSubmitting(false);
     }

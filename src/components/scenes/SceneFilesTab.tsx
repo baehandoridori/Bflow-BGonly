@@ -11,14 +11,14 @@ import type { Scene, CompRevision } from '@/types';
  *
  * 데이터:
  *  - 스토리보드 / 가이드 (BG scene 의 storyboardUrl, guideUrl)
- *  - 리비전 첨부 (revision.imageUrl 가 있는 항목)
+ *  - 리테이크 첨부 (revision.imageUrl 가 있는 항목)
  *  - 댓글 첨부 (comment.images[])
  *
  * 모두 시간순 (등록 시각 또는 createdAt) 정렬.
  *
  * 디자인 톤:
  *  - 다크 카드 grid
- *  - 출처 배지 (BG / 리비전 / 댓글) + accent / coral / 텍스트 무드
+ *  - 출처 배지 (BG / 리테이크 / 댓글) + accent / coral / 텍스트 무드
  *  - 호버 시 다운로드 아이콘
  */
 
@@ -34,7 +34,7 @@ type FileItem = {
 const SOURCE_META: Record<FileItem['source'], { label: string; tone: string; Icon: typeof ImageIcon }> = {
   storyboard: { label: '스토리보드', tone: 'rgb(var(--color-accent-sub))',         Icon: ImageIcon },
   guide:      { label: '가이드',     tone: 'rgb(var(--color-accent))',             Icon: ImageIcon },
-  revision:   { label: '리비전',     tone: '#FFB74D',                              Icon: Film },
+  revision:   { label: '리테이크',     tone: '#FFB74D',                              Icon: Film },
   comment:    { label: '댓글',       tone: 'rgb(var(--color-text-secondary))',     Icon: MessageSquare },
 };
 
@@ -43,7 +43,7 @@ export interface SceneFilesTabProps {
   primaryCommentKey: string;
   secondaryCommentKey?: string;
   /**
-   * 리비전 fetch 용 정규화된 key — 반드시 modal 에서 buildSceneKey() 로 만든 결과 전달.
+   * 리테이크 fetch 용 정규화된 key — 반드시 modal 에서 buildSceneKey() 로 만든 결과 전달.
    * raw `${sheetName}:${sceneId}` 사용 시 revisionService 의 alias/normalization 통과 못 해 누락 발생.
    * (Codex P1 2026-05-03)
    */
@@ -86,7 +86,7 @@ export function SceneFilesTab({
         });
       }
 
-      // 2) 리비전 첨부 — modal 이 buildSceneKey 로 정규화한 sceneKey 사용
+      // 2) 리테이크 첨부 — modal 이 buildSceneKey 로 정규화한 sceneKey 사용
       try {
         const revs: CompRevision[] = revisionSceneKey ? await getRevisions(revisionSceneKey) : [];
         for (const r of revs) {
@@ -102,7 +102,7 @@ export function SceneFilesTab({
           }
         }
       } catch (err) {
-        console.warn('[FilesTab] 리비전 로드 실패', err);
+        console.warn('[FilesTab] 리테이크 로드 실패', err);
       }
 
       // 3) 댓글 첨부 (primary + secondary)

@@ -5,7 +5,7 @@ import { shortenPath } from '@/utils/pathLink';
 /**
  * TipTap PathLink Node 의 React 렌더러.
  *
- * - PathBadge(textarea/리비전) 와 동일한 청색 박스 외관
+ * - PathBadge(textarea/리테이크) 와 동일한 청색 박스 외관
  * - 짧은 이름만 표시 (full path 는 hover title)
  * - 우측 X 버튼으로 노드 삭제 (deleteNode)
  * - 박스 본체 클릭 → window.electronAPI.shellShowItem 으로 파일탐색기 열기

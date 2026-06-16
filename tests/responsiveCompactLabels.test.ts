@@ -77,10 +77,12 @@ test('ScenePhaseToggle maps every phase to a lucide icon label', () => {
   assert.match(source, /className="w-full"/);
 });
 
-test('acting department labels no longer expose deprecated animation stages', () => {
+test('acting department labels keep the approved feedback stage wording', () => {
   const source = read('src/types/index.ts');
 
   assert.match(source, /stageLabels:\s*\{\s*lo:\s*'대기',\s*done:\s*'작업중',\s*review:\s*'피드백',\s*png:\s*'완료'\s*\}/);
+  assert.match(source, /feedback:\s*'피드백 대기'/);
+  assert.match(source, /feedback:\s*'피드백'/);
 });
 
 test('sheet headers support full and short labels', () => {

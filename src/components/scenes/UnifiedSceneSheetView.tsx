@@ -27,6 +27,8 @@ import {
 import { useAppStore } from '@/stores/useAppStore';
 import { StageSegmentToggle } from './StageSegmentToggle';
 import { SheetAlertBadges } from './SheetAlertBadges';
+import { AssigneeProgressStack } from './AssigneeProgressStack';
+import { hasMultiAssigneeProgress } from '@/utils/assigneeProgress';
 import {
   persistLengthChangeAtomic,
   saveLengthChangeField,
@@ -59,6 +61,10 @@ interface UnifiedSceneSheetViewProps {
   onActPhaseStateClick?: (sheetName: string, sceneId: string, newState: ScenePhaseState, sceneUuid?: string | null, sceneIndex?: number) => void;
   onActFeedbackRequest?: (sheetName: string, sceneId: string) => void;
   onActRoundBump?: (sheetName: string, sceneId: string, kind: 'work' | 'feedback', delta: 1 | -1) => void;
+  onAssigneeStageToggle?: (sheetName: string, sceneId: string, assigneeName: string, stage: Stage, sceneUuid?: string | null, sceneIndex?: number, dept?: 'bg' | 'acting') => void;
+  onAssigneeActPhaseStateClick?: (sheetName: string, sceneId: string, assigneeName: string, newState: ScenePhaseState, sceneUuid?: string | null, sceneIndex?: number) => void;
+  onAssigneeActFeedbackRequest?: (sheetName: string, sceneId: string, assigneeName: string, sceneUuid?: string | null, sceneIndex?: number) => void;
+  onAssigneeActRoundBump?: (sheetName: string, sceneId: string, assigneeName: string, kind: 'work' | 'feedback', delta: 1 | -1, sceneUuid?: string | null, sceneIndex?: number) => void;
 }
 
 // ─── 셀 선택 타입 ───────────────────────────────────────────
@@ -186,13 +192,17 @@ function SheetEditableCell({
     if (!isEditing) return;
     cancelledRef.current = false;
     return () => {
+      if (type === 'assignee') {
+        cancelledRef.current = false;
+        return;
+      }
       if (!cancelledRef.current && draftRef.current !== valueRef.current) {
         onSave(draftRef.current);
       }
       cancelledRef.current = false;
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isEditing]);
+  }, [isEditing, type]);
 
   useEffect(() => {
     if (isEditing && type === 'text' && inputRef.current) {
@@ -220,6 +230,12 @@ function SheetEditableCell({
     onStopEditing();
   }, [draft, value, onSave, onStopEditing]);
 
+  const handleAssigneeChange = useCallback((v: string) => {
+    setDraft(v);
+    draftRef.current = v;
+    onSave(v);
+  }, [onSave]);
+
   if (isEditing) {
     if (type === 'assignee') {
       return (
@@ -231,7 +247,7 @@ function SheetEditableCell({
         >
           <AssigneeMultiSelect
             value={draft}
-            onChange={onSave}
+            onChange={handleAssigneeChange}
             onClose={onStopEditing}
             className="w-full"
             autoFocus
@@ -381,6 +397,10 @@ export function UnifiedSceneSheetView({
   onActPhaseStateClick,
   onActFeedbackRequest,
   onActRoundBump,
+  onAssigneeStageToggle,
+  onAssigneeActPhaseStateClick,
+  onAssigneeActFeedbackRequest,
+  onAssigneeActRoundBump,
 }: UnifiedSceneSheetViewProps) {
   const bgCfg = DEPARTMENT_CONFIGS.bg;
   const actCfg = DEPARTMENT_CONFIGS.acting;
@@ -416,7 +436,7 @@ export function UnifiedSceneSheetView({
     return layoutGroups.flatMap(([, scenes]) => scenes);
   }, [layoutGroups, mergedScenes]);
 
-  // v1.18.0: 리비전 시각 표시 — 행마다 미해결 카운트 lookup.
+  // v1.18.0: 리테이크 시각 표시 — 행마다 미해결 카운트 lookup.
   // useRevisionStore.revisions 변경 시 재계산되도록 store selector 사용 (rerender 트리거).
   // store 의 getOpenCount 는 revisionService.getRevisionLookupSceneKeys 로 alias 까지 처리하므로
   // 단순 sceneKey 비교보다 안전하다.
@@ -978,7 +998,7 @@ export function UnifiedSceneSheetView({
               // v1.16.0: 길이 변경 라벨 (BG/ACT 양쪽 동기화 정책 — BG 우선)
               const lengthChange = bgScene?.lengthChange ?? actScene?.lengthChange ?? null;
 
-              // v1.18.0: 미해결 리비전 카운트 (행 좌측 막대 + 씬번호 셀 배지)
+              // v1.18.0: 미해결 리테이크 카운트 (행 좌측 막대 + 씬번호 셀 배지)
               const openRevCount = revisionCountByMergedKey.get(mergedKey) ?? 0;
               const isMergedComplete = !!bgScene && !!actScene && isFullyDone(bgScene) && isFullyDone(actScene);
 
@@ -1013,7 +1033,7 @@ export function UnifiedSceneSheetView({
                       lengthChange === 'LD' && 'sheet-row-length-up',
                       lengthChange === 'SD' && 'sheet-row-length-down',
                       completionTintEnabled && isMergedComplete && 'scene-completion-tint-row',
-                      // v1.18.0: 미해결 리비전 행 — 액센트 좌측 강조 (셀 배지와 함께 시각적 anchor)
+                      // v1.18.0: 미해결 리테이크 행 — 액센트 좌측 강조 (셀 배지와 함께 시각적 anchor)
                       openRevCount > 0 && 'sheet-row-revision-open',
                     )}
                     onClick={(e) => {
@@ -1134,13 +1154,22 @@ export function UnifiedSceneSheetView({
                   {/* BG 스테이지 — ACT 단계와 같은 segmented track 구조 */}
                   <td colSpan={4} className="px-1 py-1.5">
                     {bgScene && bgSheetName ? (
-                      <StageSegmentToggle
-                        scene={bgScene}
-                        department="bg"
-                        compact
-                        iconDisplay="never"
-                        onToggle={(stage) => onToggle(bgSheetName, bgScene.sceneId, stage, bgScene.id ?? null, bgSceneIndex)}
-                      />
+                      hasMultiAssigneeProgress(bgScene) ? (
+                        <AssigneeProgressStack
+                          scene={bgScene}
+                          department="bg"
+                          compact
+                          onAssigneeStageToggle={(name, stage) => onAssigneeStageToggle?.(bgSheetName, bgScene.sceneId, name, stage, bgScene.id ?? null, bgSceneIndex, 'bg')}
+                        />
+                      ) : (
+                        <StageSegmentToggle
+                          scene={bgScene}
+                          department="bg"
+                          compact
+                          iconDisplay="never"
+                          onToggle={(stage) => onToggle(bgSheetName, bgScene.sceneId, stage, bgScene.id ?? null, bgSceneIndex)}
+                        />
+                      )
                     ) : (
                       <span className="text-text-secondary/20 text-xs">—</span>
                     )}
@@ -1171,13 +1200,24 @@ export function UnifiedSceneSheetView({
                     <td colSpan={4} className="px-1 py-1.5">
                       {actScene && actSheetName ? (
                         <div onClick={(e) => e.stopPropagation()}>
-                          <ScenePhaseToggle
-                            scene={actScene}
-                            compact
-                            onStateClick={(next) => onActPhaseStateClick(actSheetName, actScene.sceneId, next, actScene.id ?? null, actSceneIndex)}
-                            onRequestFeedback={() => onActFeedbackRequest(actSheetName, actScene.sceneId)}
-                            onRoundBump={(kind, delta) => onActRoundBump(actSheetName, actScene.sceneId, kind, delta)}
-                          />
+                          {hasMultiAssigneeProgress(actScene) ? (
+                            <AssigneeProgressStack
+                              scene={actScene}
+                              department="acting"
+                              compact
+                              onAssigneePhaseStateClick={(name, state) => onAssigneeActPhaseStateClick?.(actSheetName, actScene.sceneId, name, state, actScene.id ?? null, actSceneIndex)}
+                              onAssigneeFeedbackRequest={(name) => onAssigneeActFeedbackRequest?.(actSheetName, actScene.sceneId, name, actScene.id ?? null, actSceneIndex)}
+                              onAssigneeRoundBump={(name, kind, delta) => onAssigneeActRoundBump?.(actSheetName, actScene.sceneId, name, kind, delta, actScene.id ?? null, actSceneIndex)}
+                            />
+                          ) : (
+                            <ScenePhaseToggle
+                              scene={actScene}
+                              compact
+                              onStateClick={(next) => onActPhaseStateClick(actSheetName, actScene.sceneId, next, actScene.id ?? null, actSceneIndex)}
+                              onRequestFeedback={() => onActFeedbackRequest(actSheetName, actScene.sceneId)}
+                              onRoundBump={(kind, delta) => onActRoundBump(actSheetName, actScene.sceneId, kind, delta)}
+                            />
+                          )}
                         </div>
                       ) : (
                         <span className="text-text-secondary/20 text-xs">—</span>

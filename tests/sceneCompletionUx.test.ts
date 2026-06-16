@@ -19,12 +19,21 @@ test('complete overlay can undo the exact last completion action', async () => {
   assert.match(scenesView, /updateSceneCompletionMeta\(/);
 });
 
-test('complete overlay stays in the visible scene scroll area', async () => {
+test('complete overlay stays centered in the viewport and can be hidden', async () => {
   const scenesView = await readRepoFile('src', 'views', 'ScenesView.tsx');
 
-  assert.match(scenesView, /completionOverlayFrameStyle/);
-  assert.match(scenesView, /className="sticky top-0 z-20 pointer-events-none overflow-hidden rounded-\[28px\]"/);
-  assert.match(scenesView, /items-start justify-center/);
+  assert.match(scenesView, /dismissedCompletionOverlayKey/);
+  assert.match(scenesView, /showCompletionRestoreButton/);
+  assert.match(scenesView, /onDismiss/);
+  assert.match(scenesView, /className="fixed inset-0 z-\[60\] pointer-events-none/);
+  assert.match(scenesView, /items-center justify-center/);
+  assert.match(scenesView, /aria-label="완료 안내 숨기기"/);
+  assert.match(scenesView, /aria-label="완료 안내 다시 보기"/);
+  assert.match(scenesView, /완료 안내 다시 보기/);
+  assert.match(scenesView, /setDismissedCompletionOverlayKey\(completionOverlayKey\)/);
+  assert.match(scenesView, /setDismissedCompletionOverlayKey\(null\)/);
+  assert.doesNotMatch(scenesView, /completionOverlayFrameStyle/);
+  assert.doesNotMatch(scenesView, /className="sticky top-0 z-20 pointer-events-none overflow-hidden rounded-\[28px\]"/);
   assert.doesNotMatch(scenesView, /className="absolute bottom-4 left-4 right-4"/);
 });
 

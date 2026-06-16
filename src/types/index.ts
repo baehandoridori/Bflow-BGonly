@@ -69,7 +69,7 @@ export const SCENE_PHASE_LABELS: Record<ScenePhaseState, string> = {
   done: '완료',
 };
 
-/** v1.25.3~ 칩 안에 표시하는 짧은 라벨 — '피드백 대기' 5자가 좁은 컨테이너에서 wrap 되는 문제 해결.
+/** v1.25.3~ 칩 안에 표시하는 짧은 라벨 — '피드백 대기'가 좁은 컨테이너에서 wrap 되는 문제 해결.
  *  의미 보존 (피드백을 받기 대기 중 → 피드백). 풀 라벨은 알림 메시지/모달 헤더 등에서 유지. */
 export const SCENE_PHASE_LABELS_SHORT: Record<ScenePhaseState, string> = {
   wait: '대기',
@@ -88,6 +88,20 @@ export const SCENE_PHASE_COLORS: Record<ScenePhaseState, string> = {
 /** 차수 최소/최대 (UI ▴▾ 범위 제한) */
 export const SCENE_PHASE_ROUND_MIN = 1;
 export const SCENE_PHASE_ROUND_MAX = 99;
+
+export interface SceneAssigneeProgress {
+  lo?: boolean;
+  done?: boolean;
+  review?: boolean;
+  png?: boolean;
+  sceneState?: ScenePhaseState | null;
+  workRound?: number;
+  feedbackRound?: number;
+  updatedAt?: string;
+  updatedBy?: string;
+}
+
+export type SceneAssigneeProgressMap = Record<string, SceneAssigneeProgress>;
 
 // ─── 컴포지팅 단계 상태 (v1.30.0~) ──────────
 // 씬 단위 1 row. BG/ACT 시트와 무관 — (episode_number, scene_id) 키로 식별.
@@ -172,6 +186,11 @@ export interface Scene {
   /** 피드백 대기 라운드 번호 (1~99). state !== 'feedback' 일 때 0 또는 마지막 값 유지 */
   feedbackRound?: number;
   /**
+   * 2인 이상 담당 씬의 사람별 진행 상태.
+   * 기존 scenes 테이블 컬럼을 깨지 않기 위해 Supabase metadata(type='scene-assignee-progress')에서 로드한다.
+   */
+  assigneeProgress?: SceneAssigneeProgressMap;
+  /**
    * v1.30.0~: 씬 길이 (24fps 기준 프레임 단위, 정수).
    * 컴포지팅 대시보드의 AE 타임라인 패널이 진짜 시간축으로 작동하려면 필요.
    * MVP 에는 입력 UI 없음 — 데이터 비어있으면 AE 패널은 "씬 인덱스" fallback.
@@ -192,7 +211,7 @@ export interface MergedScene {
   actSceneIndex: number;   // actPart.scenes 내 인덱스 (-1 if absent)
 }
 
-// ─── 컴포지팅 리비전 ─────────────────────────
+// ─── 컴포지팅 리테이크 ─────────────────────────
 
 export type RevisionStatus = 'open' | 'in_progress' | 'resolved';
 export type RevisionPriority = 'urgent' | 'high' | 'normal';
@@ -237,7 +256,7 @@ export interface AppUser {
   role?: string;       // Phase 0-4: 역할 (admin | user)
   /**
    * v1.18.1: 컴포지터 단일 boolean (BG/ACT 부서 구분 없음).
-   * 한솔 정정: 컴포지터는 부서로 나뉘지 않음 — 리비전 등록 시 모든 컴포지터가 자동 알림 대상.
+   * 한솔 정정: 컴포지터는 부서로 나뉘지 않음 — 리테이크 등록 시 모든 컴포지터가 자동 알림 대상.
    */
   isCompositor?: boolean;
   /**
@@ -545,7 +564,7 @@ export type ActionType =
   | 'phase_wait' | 'phase_work' | 'phase_feedback' | 'phase_done'
   | 'memo_update' | 'comment_add'
   | 'revision_add' | 'revision_in_progress' | 'revision_resolve' | 'revision_delete'
-  // v1.18.0: 리비전 맥락 댓글 — 일반 comment_add 와 분리해 활동 피드에서 별도 표시
+  // v1.18.0: 리테이크 맥락 댓글 — 일반 comment_add 와 분리해 활동 피드에서 별도 표시
   | 'revision_comment'
   | 'scene_add' | 'scene_delete'
   | 'assignee_change' | 'layout_change'
@@ -850,7 +869,7 @@ export interface ElectronAPI {
       kind?: 'feedback' | 'assignment';
     };
   }) => Promise<void>;
-  /** v1.25.0~ 피드백 토스트 클릭 → 씬 점프 신호 수신 */
+  /** v1.25.0~ 리테이크 토스트 클릭 → 씬 점프 신호 수신 */
   onFeedbackJumpToScene: (
     callback: (payload: {
       sheetName: string; sceneId: string; sceneUuid: string;

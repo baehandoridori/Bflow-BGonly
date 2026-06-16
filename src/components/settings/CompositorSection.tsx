@@ -1,8 +1,8 @@
 /**
- * v1.18.1 — 어드민 전용 리비전 컴포지터 지정 섹션.
+ * v1.18.1 — 어드민 전용 리테이크 컴포지터 지정 섹션.
  *
  * 한솔 정정: 컴포지터는 BG/ACT 부서로 나뉘지 않는다 (단일 역할).
- * 컴포지터로 지정된 사용자는 모든 씬에 새 리비전이 등록되면 자동으로 알림을 받는다
+ * 컴포지터로 지정된 사용자는 모든 씬에 새 리테이크가 등록되면 자동으로 알림을 받는다
  * (RevisionRecipientPicker 자동 대상자).
  *
  * `users.is_compositor` 컬럼: BOOLEAN NOT NULL DEFAULT false.
@@ -121,7 +121,7 @@ export function CompositorSection() {
   return (
     <SettingsSection
       icon={<Layers size={14} className="text-accent" />}
-      title="리비전 컴포지터 지정"
+      title="리테이크 컴포지터 지정"
       action={
         <button
           onClick={handleSave}
@@ -148,7 +148,7 @@ export function CompositorSection() {
       }
     >
       <p className="text-[11px] text-text-secondary/70 mb-4 leading-relaxed">
-        컴포지터로 지정된 사람은 새 리비전이 등록되면 자동으로 알림을 받습니다.
+        컴포지터로 지정된 사람은 새 리테이크가 등록되면 자동으로 알림을 받습니다.
       </p>
 
       <div className="rounded-lg border border-bg-border/60 bg-bg-primary/30 p-3">

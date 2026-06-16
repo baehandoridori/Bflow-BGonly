@@ -21,6 +21,13 @@ import { IntegrationCard, btnStyles } from './IntegrationCard';
 import { IntegrationOverview } from './IntegrationOverview';
 import { SupabaseStatusCard } from './SupabaseStatusCard';
 
+const GCAL_AUTH_EVENT = 'bflow:gcal-auth-changed';
+
+function publishGcalAuthState(authed: boolean) {
+  localStorage.setItem('bflow_gcal_authed', String(authed));
+  window.dispatchEvent(new CustomEvent(GCAL_AUTH_EVENT, { detail: { authed } }));
+}
+
 export function SheetsSection() {
   const {
     dataConnected, setDataConnected, setGasConfig,
@@ -48,6 +55,7 @@ export function SheetsSection() {
   const [isSyncing, setIsSyncing] = useState(false);
   const [syncMessage, setSyncMessage] = useState<string | null>(null);
   const [gcalHasCreds, setGcalHasCreds] = useState<boolean>(false);
+  const [gcalAuthCheckedAt, setGcalAuthCheckedAt] = useState<string | null>(null);
   const [gcalClientId, setGcalClientId] = useState('');
   const [gcalClientSecret, setGcalClientSecret] = useState('');
   const [showCredsForm, setShowCredsForm] = useState(false);
@@ -75,7 +83,8 @@ export function SheetsSection() {
         const hasCreds = await gcalService.hasCredentials();
         setGcalHasCreds(hasCreds);
         const authed = await gcalService.isAuthenticated();
-        setGcalAuth(authed); localStorage.setItem('bflow_gcal_authed', String(authed));
+        setGcalAuthCheckedAt(new Date().toISOString());
+        setGcalAuth(authed); publishGcalAuthState(authed);
         if (authed) {
           const cals = await gcalService.listCalendars();
           setCalendars(cals);
@@ -157,7 +166,8 @@ export function SheetsSection() {
       }
       await gcalService.startAuth();
       const authed = await gcalService.isAuthenticated();
-      setGcalAuth(authed); localStorage.setItem('bflow_gcal_authed', String(authed));
+      setGcalAuthCheckedAt(new Date().toISOString());
+      setGcalAuth(authed); publishGcalAuthState(authed);
       if (authed) {
         const cals = await gcalService.listCalendars();
         setCalendars(cals);
@@ -167,7 +177,8 @@ export function SheetsSection() {
       if (msg.includes('invalid_request') || msg.includes('invalid_grant') || msg.includes('unauthorized')) {
         try { await gcalService.signOut(); } catch { /* 무시 */ }
         setGcalAuth(false);
-        localStorage.setItem('bflow_gcal_authed', 'false');
+        setGcalAuthCheckedAt(new Date().toISOString());
+        publishGcalAuthState(false);
         setGcalError(
           'OAuth 인증이 거절되었습니다. 다음을 확인해 주세요:\n' +
           '1) Google Cloud Console 에서 Calendar API 가 활성화되어 있는지\n' +
@@ -188,7 +199,8 @@ export function SheetsSection() {
   const handleGcalDisconnect = async () => {
     try {
       await gcalService.signOut();
-      setGcalAuth(false); localStorage.setItem('bflow_gcal_authed', 'false');
+      setGcalAuth(false); publishGcalAuthState(false);
+      setGcalAuthCheckedAt(new Date().toISOString());
       setCalendars([]);
       saveLocalGCalSettings({ personalCalendarId: null, lastSyncAt: null });
       setGcalSettingsState((prev) => ({ ...prev, personalCalendarId: null, lastSyncAt: null }));
@@ -209,7 +221,8 @@ export function SheetsSection() {
       if (msg.includes('invalid_request') || msg.includes('invalid_grant') || msg.includes('unauthorized')) {
         try { await gcalService.signOut(); } catch { /* 무시 */ }
         setGcalAuth(false);
-        localStorage.setItem('bflow_gcal_authed', 'false');
+        setGcalAuthCheckedAt(new Date().toISOString());
+        publishGcalAuthState(false);
         setCalendars([]);
         setGcalError(
           '인증 토큰이 유효하지 않습니다. 아래 단계를 확인해 주세요:\n' +
@@ -421,6 +434,22 @@ export function SheetsSection() {
               </button>
             ) : (
               <>
+                <div className="mb-3 rounded-md border border-emerald-500/25 bg-emerald-500/8 px-3 py-2.5">
+                  <div className="flex items-center justify-between gap-3">
+                    <span className="text-[11px] font-semibold text-text-secondary">현재 연동 상태</span>
+                    <span className="rounded-full border border-emerald-400/35 bg-emerald-500/12 px-2 py-0.5 text-[11px] font-semibold text-emerald-300">
+                      인증 유지됨
+                    </span>
+                  </div>
+                  <p className="mt-1.5 text-[11px] leading-relaxed text-text-secondary/75">
+                    앱을 다시 열어도 인증이 유지됩니다. 토큰이 만료되거나 Google에서 권한을 거절하면 이 영역이 재인증 필요 상태로 바뀝니다.
+                  </p>
+                  {gcalAuthCheckedAt && (
+                    <p className="mt-1.5 text-[10px] font-mono text-text-secondary/50">
+                      마지막 인증 확인: {new Date(gcalAuthCheckedAt).toLocaleString('ko-KR')}
+                    </p>
+                  )}
+                </div>
                 <div className="mb-3 rounded-md border border-bg-border/50 bg-bg-primary/40 px-3 py-2.5">
                   <p className="text-[11px] text-text-secondary leading-relaxed">
                     공개 일정은 로그인하신 Google 계정(<span className="text-text-primary">@studiojbbj.com</span>) 의 <b>기본 캘린더</b>에

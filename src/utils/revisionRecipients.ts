@@ -1,9 +1,9 @@
 /**
- * 리비전 알림 자동 대상자 계산 헬퍼.
+ * 리테이크 알림 자동 대상자 계산 헬퍼.
  *
  * v1.18.1 — 한솔 정정:
  *   - 컴포지터는 BG/ACT 부서로 나뉘지 않는다 (단일 역할).
- *   - 리비전 등록 시 폼이 자동으로 "모든 컴포지터 + 씬 모든 단계 담당자" 를 미리 체크.
+ *   - 리테이크 등록 시 폼이 자동으로 "모든 컴포지터 + 씬 모든 단계 담당자" 를 미리 체크.
  *   - 등록자 본인은 제외 (자기 알림 X).
  *   - Scene.assignee 는 comma-separated string 으로 다중 담당자를 표현.
  *   - AppUser.isCompositor === true 인 사용자가 컴포지터.
@@ -44,14 +44,14 @@ function namesToUsers(names: readonly string[], allUsers: readonly AppUser[]): A
 }
 
 /**
- * 리비전 알림 기본 대상자 user.id 배열 계산.
+ * 리테이크 알림 기본 대상자 user.id 배열 계산.
  *
  * - 모든 컴포지터 (isCompositor === true) +
  * - 씬 담당자 (scene.assignee comma-separated) 모두
  * - 등록자 본인(excludeUserId) 제외
  * - 중복 제거
  *
- * v1.24.0 한솔 보고: BG sheet 에서 리비전 등록 시 같은 컷의 ACT 작업자도 자동 태그되어야 한다
+ * v1.24.0 한솔 보고: BG sheet 에서 리테이크 등록 시 같은 컷의 ACT 작업자도 자동 태그되어야 한다
  *   (반대도 동일). 단일 scene 만 보면 한쪽 부서 작업자가 누락되는 회귀.
  *   → counterpartScene 옵션으로 BG↔ACT 양쪽 scene 의 assignee 모두 수집.
  *

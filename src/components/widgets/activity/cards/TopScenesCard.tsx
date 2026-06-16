@@ -25,7 +25,7 @@ export function TopScenesCard({ scenes }: Props) {
   return (
     <div className="rounded-2xl border border-bg-border/60 bg-bg-primary/35 p-5">
       <div className="text-[14px] font-semibold mb-1">작업이 많이 손이 가는 씬 Top 10</div>
-      <div className="text-[11px] text-text-secondary mb-4">리비전·메모·재작업이 누적된 씬 — 병목·난항 씬 발견</div>
+      <div className="text-[11px] text-text-secondary mb-4">리테이크·메모·재작업이 누적된 씬 — 병목·난항 씬 발견</div>
 
       <div className="space-y-1.5">
         {scenes.length === 0 && (
@@ -51,7 +51,7 @@ export function TopScenesCard({ scenes }: Props) {
                 {display}
               </span>
               <div className="flex-1 flex items-center gap-2 text-[10.5px] text-text-secondary ml-2">
-                <span>리비전 {s.revCount}</span><span className="opacity-30">·</span>
+                <span>리테이크 {s.revCount}</span><span className="opacity-30">·</span>
                 <span>메모 {s.memoCount}</span><span className="opacity-30">·</span>
                 <span>단계 {s.stageCount}</span>
               </div>

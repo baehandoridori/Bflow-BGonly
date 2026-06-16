@@ -1,4 +1,4 @@
-import { useState, useRef, useCallback, useMemo } from 'react';
+import { useState, useRef, useCallback, useMemo, useEffect } from 'react';
 import { LayoutDashboard, Film, List, Users, CircleUser, GanttChart, CalendarDays, Palmtree, Clapperboard, MessageSquareWarning, Settings, PanelLeft } from 'lucide-react';
 import { AnimatePresence } from 'framer-motion';
 import { useAppStore, type ViewMode } from '@/stores/useAppStore';
@@ -9,6 +9,25 @@ import { SplashScreen } from '@/components/splash/SplashScreen';
 import { getPreset, rgbToHex } from '@/themes';
 import { loadPreferences, savePreferences } from '@/services/settingsService';
 import { VersionHoverTip, deriveHoverState } from './VersionHoverTip';
+import * as gcalService from '@/services/googleCalendarService';
+
+const GCAL_AUTH_EVENT = 'bflow:gcal-auth-changed';
+type CalendarAuthState = 'checking' | 'connected' | 'disconnected';
+
+function readCachedCalendarAuthState(): CalendarAuthState {
+  if (typeof window === 'undefined') return 'disconnected';
+  try {
+    return localStorage.getItem('bflow_gcal_authed') === 'true' ? 'connected' : 'disconnected';
+  } catch {
+    return 'disconnected';
+  }
+}
+
+function getCalendarAuthLabel(calendarAuthState: CalendarAuthState) {
+  if (calendarAuthState === 'connected') return '캘린더 연동됨';
+  if (calendarAuthState === 'checking') return '캘린더 연동 확인 중';
+  return '캘린더 미연동';
+}
 
 const NAV_ITEMS: { id: ViewMode; label: string; icon: React.ReactNode }[] = [
   { id: 'dashboard', label: '대시보드', icon: <LayoutDashboard size={20} /> },
@@ -21,9 +40,9 @@ const NAV_ITEMS: { id: ViewMode; label: string; icon: React.ReactNode }[] = [
   { id: 'vacation', label: '휴가', icon: <Palmtree size={20} /> },
   // v1.30.0~: 컴포지팅 메뉴가 둘로 분리됨.
   //   - 'compositing' : 새 현황 대시보드 (CompositingDashboardView, 6 단계 진행도)
-  //   - 'compositing-revisions' : 기존 리비전 피드백 보드 (CompositingView)
+  //   - 'compositing-revisions' : 기존 리테이크 보드 (CompositingView)
   { id: 'compositing', label: '컴포지팅', icon: <Clapperboard size={20} /> },
-  { id: 'compositing-revisions', label: '피드백', icon: <MessageSquareWarning size={20} /> },
+  { id: 'compositing-revisions', label: '리테이크', icon: <MessageSquareWarning size={20} /> },
   { id: 'settings', label: '설정', icon: <Settings size={20} /> },
 ];
 
@@ -184,6 +203,7 @@ export function Sidebar() {
   const [showSplash, setShowSplash] = useState(false);
   const [isHovered, setIsHovered] = useState(false);
   const hoverTimeoutRef = useRef<ReturnType<typeof setTimeout>>();
+  const [calendarAuthState, setCalendarAuthState] = useState<CalendarAuthState>(() => readCachedCalendarAuthState());
 
   const isExpanded = sidebarExpanded;
   const isVisuallyExpanded = isExpanded || isHovered;
@@ -212,6 +232,40 @@ export function Sidebar() {
   const handleVersionLeave = useCallback(() => {
     if (versionTipTimer.current) clearTimeout(versionTipTimer.current);
     setVersionTipShow(false);
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    const applyAuthState = (authed: boolean) => {
+      if (!cancelled) setCalendarAuthState(authed ? 'connected' : 'disconnected');
+    };
+
+    setCalendarAuthState((prev) => (prev === 'connected' ? prev : 'checking'));
+    gcalService.isAuthenticated()
+      .then(applyAuthState)
+      .catch(() => {
+        if (!cancelled) setCalendarAuthState(readCachedCalendarAuthState());
+      });
+
+    const handleAuthChanged = (event: Event) => {
+      const authed = (event as CustomEvent<{ authed?: boolean }>).detail?.authed;
+      if (typeof authed === 'boolean') {
+        applyAuthState(authed);
+        return;
+      }
+      setCalendarAuthState(readCachedCalendarAuthState());
+    };
+    const handleStorage = (event: StorageEvent) => {
+      if (event.key === 'bflow_gcal_authed') applyAuthState(event.newValue === 'true');
+    };
+
+    window.addEventListener(GCAL_AUTH_EVENT, handleAuthChanged as EventListener);
+    window.addEventListener('storage', handleStorage);
+    return () => {
+      cancelled = true;
+      window.removeEventListener(GCAL_AUTH_EVENT, handleAuthChanged as EventListener);
+      window.removeEventListener('storage', handleStorage);
+    };
   }, []);
 
   const handleToggle = useCallback(async () => {
@@ -281,11 +335,30 @@ export function Sidebar() {
             {/* 아이콘: 항상 w-12 내 중앙 → 펼침/접힘 무관 동일 위치 */}
             <span className="shrink-0 w-12 flex justify-center relative">
               {item.icon}
+              {item.id === 'schedule' && (
+                <span
+                  aria-label={getCalendarAuthLabel(calendarAuthState)}
+                  title={getCalendarAuthLabel(calendarAuthState)}
+                  className={cn(
+                    'absolute -top-0.5 right-1.5 h-2.5 w-2.5 rounded-full border border-bg-card shadow-[0_0_0_1px_rgba(0,0,0,0.18)]',
+                    calendarAuthState === 'checking' && 'animate-pulse',
+                  )}
+                  style={{
+                    backgroundColor: calendarAuthState === 'connected'
+                      ? '#22C55E'
+                      : calendarAuthState === 'checking'
+                        ? '#FDCB6E'
+                        : '#8B8DA3',
+                  }}
+                >
+                  <span className="sr-only">{getCalendarAuthLabel(calendarAuthState)}</span>
+                </span>
+              )}
               {item.id === 'compositing-revisions' && totalOpenRevisions > 0 && (
                 <span
                   className="absolute -top-1 -right-0.5 min-w-[16px] h-4 flex items-center justify-center text-[10px] font-bold rounded-full px-1"
                   style={{ backgroundColor: '#FDCB6E', color: '#1A1D27' }}
-                  title={`미해결 리비전 ${totalOpenRevisions}개`}
+                  title={`미해결 리테이크 ${totalOpenRevisions}개`}
                 >
                   {totalOpenRevisions}
                 </span>

@@ -77,7 +77,7 @@ export interface SceneGroup {
 export type SortMode = 'recent' | 'oldest' | 'sceneNo' | 'comments';
 
 /**
- * 본문/등록자/담당자/씬 이름에서 검색어 일치하는 리비전만 필터.
+ * 본문/등록자/담당자/씬 이름에서 검색어 일치하는 리테이크만 필터.
  * 빈 쿼리면 전체 반환.
  */
 export function filterRevisionsBySearch(

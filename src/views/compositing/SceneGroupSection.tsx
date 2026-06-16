@@ -209,7 +209,7 @@ export function SceneRow({
         </div>
       </div>
 
-      {/* 확장된 리비전 목록 */}
+      {/* 확장된 리테이크 목록 */}
       <AnimatePresence>
         {expanded && (
           <motion.div
@@ -219,7 +219,7 @@ export function SceneRow({
             transition={{ duration: 0.25, ease: [0.25, 0.1, 0.25, 1] }}
             className="overflow-hidden"
           >
-            {/* 세로 가이드라인 + 리비전 아이템들 */}
+            {/* 세로 가이드라인 + 리테이크 아이템들 */}
             <div className="relative pb-2 ml-8">
               {ambientLineStyle && (
                 <div
@@ -230,7 +230,7 @@ export function SceneRow({
                 />
               )}
 
-              {/* 리비전 아이템들 */}
+              {/* 리테이크 아이템들 */}
               {sortedRevisions
                 .map((rev) => (
                   <RevisionItem
@@ -270,7 +270,7 @@ export function SceneRow({
                     >
                       <CompactIconLabel
                         icon={<Plus size={12} />}
-                        label="추가 수정 요청"
+                        label="추가 리테이크 요청"
                       />
                     </button>
                   </motion.div>
@@ -284,7 +284,7 @@ export function SceneRow({
   );
 }
 
-// ─── 피드백 허브 트리 (에피소드 → 파트 → 씬) ─────────────────────
+// ─── 리테이크 허브 트리 (에피소드 → 파트 → 씬) ─────────────────────
 
 export function FeedbackTreeSection({
   episodeTrees,
@@ -350,7 +350,7 @@ export function FeedbackTreeSection({
                 <div className="flex items-center gap-2">
                   <span className="text-sm font-bold text-text-primary">{episodeTree.episodeLabel}</span>
                   <span className="text-[10px] text-text-secondary/60">
-                    {episodeTree.sceneCount}씬 · {episodeTree.totalRevisions}개 피드백
+                    {episodeTree.sceneCount}씬 · {episodeTree.totalRevisions}개 리테이크
                   </span>
                   <RevisionCommentMarker
                     count={episodeCommentSummary.count}

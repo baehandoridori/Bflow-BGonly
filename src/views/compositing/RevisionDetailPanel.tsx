@@ -96,7 +96,7 @@ export function DetailPanel({
           {/* 헤더 */}
           <div className="flex items-center justify-between mb-5">
             <div>
-              <h3 className="text-sm font-semibold text-text-primary">선택 피드백</h3>
+              <h3 className="text-sm font-semibold text-text-primary">선택 리테이크</h3>
               <p className="mt-0.5 text-[11px] text-text-secondary">
                 {sceneInfo?.sceneId || sceneId}
               </p>
@@ -205,7 +205,7 @@ export function DetailPanel({
               closeLightbox={() => setLightbox(null)}
               lightboxStep={lightboxStep}
               sceneLabel={revisionLabel}
-              ariaLabel="리비전 이미지 확대 보기"
+              ariaLabel="리테이크 이미지 확대 보기"
               fileNamePrefix={`${revisionLabel}-revision`}
             />
           )}
@@ -343,7 +343,7 @@ export function DetailPanel({
             </button>
           )}
 
-          {/* 리비전 댓글 스레드 — sceneInfo 가 있을 때만 (sheetName + sceneNo 필요).
+          {/* 리테이크 댓글 스레드 — sceneInfo 가 있을 때만 (sheetName + sceneNo 필요).
               ⚠️ sceneNo (DB sort_order, 숫자) 사용. raw sceneId("a001" 등) 사용 시
               comment 저장 로직이 Number() 변환 후 sort_order 매칭 실패 → "씬을 찾을 수 없음" 에러
               (이슈: 2026-05-04 #2). UnifiedSceneDetailModal:134 의 primaryCommentKey 와 동일 패턴. */}

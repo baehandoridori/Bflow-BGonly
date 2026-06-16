@@ -14,9 +14,9 @@ import { ResizeHandleParticles } from '@/components/common/ResizeHandleParticles
  *   2. 댓글 갯수 boost (6~15건 → +40, 16건+ → +80).
  *   3. viewport 기반 clamp(320, viewport*0.26, 480).
  *
- * 좌측 4px 경계가 드래그 핸들. 드래그 중에는 화면 즉시 갱신, mouseup 시 1회만
- * disk 저장 (mousemove 마다 savePreferences 호출하면 I/O 폭주). 더블클릭 시
- * 사용자 저장값 제거 → 자동 모드 복귀.
+ * 안쪽 경계와 바깥쪽 아웃라인이 드래그 핸들. 드래그 중에는 화면 즉시 갱신,
+ * mouseup 시 1회만 disk 저장 (mousemove 마다 savePreferences 호출하면 I/O 폭주).
+ * 더블클릭 시 사용자 저장값 제거 → 자동 모드 복귀.
  */
 interface CommentPanelResizableProps {
   commentCount: number;
@@ -35,7 +35,7 @@ interface CommentPanelResizableProps {
   secondarySceneKey?: string;
   /** UnifiedSceneDetailModal 에서 inlineEvents 도 전달. */
   inlineEvents?: React.ComponentProps<typeof CommentPanel>['inlineEvents'];
-  /** 댓글 입력창 /re 빠른 리비전 등록 문맥. */
+  /** 댓글 입력창 /re 빠른 리테이크 등록 문맥. */
   quickRevision?: CommentPanelQuickRevisionContext;
   /** 패널 헤더 제목 (기본: "댓글 및 활동"). */
   headerTitle?: string;
@@ -67,14 +67,16 @@ export function CommentPanelResizable(props: CommentPanelResizableProps) {
   // 드래그 중에는 disk 저장 없이 화면만 즉시 갱신할 임시 너비.
   // mousemove → setLiveWidth(px) 만 호출, mouseup → commitWidth(px) 가 setWidth 호출 (disk 저장).
   const [liveWidth, setLiveWidth] = useState<number | null>(null);
-  const [handleHover, setHandleHover] = useState(false);
+  const [handleHover, setHandleHover] = useState<'inner' | 'outer' | null>(null);
   const [dragging, setDragging] = useState(false);
+  const [dragEdge, setDragEdge] = useState<'inner' | 'outer' | null>(null);
 
   const { onMouseDown } = useCommentPanelResizer({
     liveSetWidth: (px) => setLiveWidth(px),
     commitWidth: (px) => {
       setLiveWidth(null);
       setDragging(false);
+      setDragEdge(null);
       void setWidth(px);
     },
   });
@@ -95,35 +97,62 @@ export function CommentPanelResizable(props: CommentPanelResizableProps) {
       className={`bg-bg-card rounded-2xl shadow-2xl border border-bg-border ${heightClass} flex flex-col shrink-0 relative ${className}`}
       style={{ width: effectiveWidth }}
     >
-      {/* 좌측 드래그 핸들 — 8px hit zone (얇아 보이지만 잡기 쉽게).
-          hover/drag 시 ResizeEdgeGlow 가 accent gradient + glow 표시 (대시보드 위젯 톤 통일).
-          더블클릭 = 자동 모드 복귀. */}
+      {/* 안쪽 경계 드래그 핸들 — 본문과 댓글 사이에서 잡는 기존 경로. */}
       <div
         role="separator"
         aria-orientation="vertical"
-        aria-label="댓글 패널 너비 조절"
+        aria-label="댓글 패널 안쪽 경계로 너비 조절"
         title="드래그로 너비 조절 · 더블클릭으로 자동 모드 복귀"
         data-no-lasso
-        onMouseEnter={() => setHandleHover(true)}
-        onMouseLeave={() => setHandleHover(false)}
+        data-comment-panel-resize-edge="inner"
+        onMouseEnter={() => setHandleHover('inner')}
+        onMouseLeave={() => setHandleHover(null)}
         onMouseDown={(e) => {
           setDragging(true);
-          onMouseDown(e, effectiveWidth);
+          setDragEdge('inner');
+          onMouseDown(e, effectiveWidth, 'inner');
         }}
         onDoubleClick={() => {
           setLiveWidth(null);
           void setWidth(null);
         }}
-        className="absolute left-0 top-0 bottom-0 w-2 cursor-col-resize z-10"
+        className="absolute left-0 top-0 bottom-0 w-3 cursor-col-resize z-10"
+      />
+      {/* 바깥쪽 아웃라인 드래그 핸들 — 패널 오른쪽 테두리를 잡아도 너비 조절. */}
+      <div
+        role="separator"
+        aria-orientation="vertical"
+        aria-label="댓글 패널 바깥쪽 경계로 너비 조절"
+        title="바깥쪽 아웃라인을 드래그로 너비 조절 · 더블클릭으로 자동 모드 복귀"
+        data-no-lasso
+        data-comment-panel-resize-edge="outer"
+        onMouseEnter={() => setHandleHover('outer')}
+        onMouseLeave={() => setHandleHover(null)}
+        onMouseDown={(e) => {
+          setDragging(true);
+          setDragEdge('outer');
+          onMouseDown(e, effectiveWidth, 'outer');
+        }}
+        onDoubleClick={() => {
+          setLiveWidth(null);
+          void setWidth(null);
+        }}
+        className="absolute right-0 top-0 bottom-0 w-3 cursor-col-resize z-10"
       />
       {/* 핸들 idle/hover/drag 3 단계 발광. 평상시도 살짝 보여 핸들 위치 암시 (한솔 v1.27.0 보고). */}
       <ResizeEdgeGlow
         edge="w"
-        intensity={dragging ? 'drag' : handleHover ? 'hover' : 'idle'}
+        intensity={dragging && dragEdge === 'inner' ? 'drag' : handleHover === 'inner' ? 'hover' : 'idle'}
         radius={16}
       />
-      {/* 드래그 중에만 좌측 변에서 파티클 사르르 (한솔 v1.27.0 보고). */}
-      <ResizeHandleParticles edge="w" active={dragging} />
+      <ResizeEdgeGlow
+        edge="e"
+        intensity={dragging && dragEdge === 'outer' ? 'drag' : handleHover === 'outer' ? 'hover' : 'idle'}
+        radius={16}
+      />
+      {/* 드래그 중에만 잡고 있는 변에서 파티클 표시. */}
+      <ResizeHandleParticles edge="w" active={dragging && dragEdge === 'inner'} />
+      <ResizeHandleParticles edge="e" active={dragging && dragEdge === 'outer'} />
 
       <div className="px-4 py-3 border-b border-bg-border shrink-0 flex items-center justify-between gap-2">
         <h3 className="text-sm font-medium text-text-primary">

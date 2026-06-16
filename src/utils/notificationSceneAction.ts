@@ -54,8 +54,8 @@ export function getNotificationSceneActionLabel(
   metadata?: Record<string, unknown> | null,
 ): string {
   if (type === 'comment' || type === 'mention' || type === 'comment_reaction') return '댓글 보기';
-  if (type === 'revision' && asString(metadataValue(metadata, 'revisionAction')) === 'comment') return '리비전 댓글';
-  if (type === 'revision') return '리비전 보기';
+  if (type === 'revision' && asString(metadataValue(metadata, 'revisionAction')) === 'comment') return '리테이크 댓글';
+  if (type === 'revision') return '리테이크 보기';
   return '씬 보기';
 }
 

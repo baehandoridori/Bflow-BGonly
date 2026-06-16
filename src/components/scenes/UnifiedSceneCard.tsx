@@ -8,6 +8,7 @@ import { STAGES, DEPARTMENT_CONFIGS } from '@/types';
 import type { MergedScene, Stage, Department, ScenePhaseState } from '@/types';
 import { ScenePhaseToggle } from './ScenePhaseToggle';
 import { HighlightText } from '@/components/common/HighlightText';
+import { AssigneeChipList } from '@/components/common/AssigneeMultiSelect';
 import { CompactIconLabel } from '@/components/common/CompactIconLabel';
 import { PathLinkifiedText } from '@/components/common/PathLinkifiedText';
 import { Confetti } from '@/components/ui/Confetti';
@@ -20,6 +21,8 @@ import { LengthIcon } from './LengthIcon';
 import { SceneContextMenu } from './SceneContextMenu';
 import { StageSegmentToggle, stageIcon } from './StageSegmentToggle';
 import { RevisionCornerFlag } from './RevisionCornerFlag';
+import { AssigneeProgressStack } from './AssigneeProgressStack';
+import { hasMultiAssigneeProgress } from '@/utils/assigneeProgress';
 import {
   persistLengthChangeAtomic,
   saveLengthChangeField,
@@ -63,6 +66,10 @@ interface UnifiedSceneCardProps {
   onActPhaseStateClick?: (sheetName: string, sceneId: string, newState: ScenePhaseState, sceneUuid?: string | null, sceneIndex?: number) => void;
   onActFeedbackRequest?: (sheetName: string, sceneId: string) => void;
   onActRoundBump?: (sheetName: string, sceneId: string, kind: 'work' | 'feedback', delta: 1 | -1) => void;
+  onAssigneeStageToggle?: (sheetName: string, sceneId: string, assigneeName: string, stage: Stage, sceneUuid?: string | null, sceneIndex?: number, dept?: Department) => void;
+  onAssigneeActPhaseStateClick?: (sheetName: string, sceneId: string, assigneeName: string, newState: ScenePhaseState, sceneUuid?: string | null, sceneIndex?: number) => void;
+  onAssigneeActFeedbackRequest?: (sheetName: string, sceneId: string, assigneeName: string, sceneUuid?: string | null, sceneIndex?: number) => void;
+  onAssigneeActRoundBump?: (sheetName: string, sceneId: string, assigneeName: string, kind: 'work' | 'feedback', delta: 1 | -1, sceneUuid?: string | null, sceneIndex?: number) => void;
 }
 
 export function UnifiedSceneCard({
@@ -88,6 +95,10 @@ export function UnifiedSceneCard({
   onActPhaseStateClick,
   onActFeedbackRequest,
   onActRoundBump,
+  onAssigneeStageToggle,
+  onAssigneeActPhaseStateClick,
+  onAssigneeActFeedbackRequest,
+  onAssigneeActRoundBump,
 }: UnifiedSceneCardProps) {
   const { sceneId, mergedKey, bgScene, actScene, bgSceneIndex, actSceneIndex } = merged;
   const primaryScene = bgScene ?? actScene;
@@ -192,7 +203,7 @@ export function UnifiedSceneCard({
   // BG/ACT 둘 중 하나라도 lengthChange 가 있으면 그 값 (BG 우선, 양쪽 동기화 정책)
   const lengthChange = bgScene?.lengthChange ?? actScene?.lengthChange ?? null;
 
-  // v1.18.0: 리비전 시각 표시 — 미해결 개수 + 완료 개수 분리.
+  // v1.18.0: 리테이크 시각 표시 — 미해결 개수 + 완료 개수 분리.
   // sceneKey 빌드는 BG/ACT 공용 (buildSceneKey 가 EP:Part:sceneId 정규화).
   // siblingSceneIds 는 별도 계산 비용을 피하려 빈 배열 — buildSceneKey 안에서 fallback 으로 part 정보 조회됨.
   const episodes = useDataStore((s) => s.episodes);
@@ -211,7 +222,7 @@ export function UnifiedSceneCard({
     return buildSceneKey(revisionSheetName, revisionSceneId, { siblingSceneIds: siblings });
   }, [episodes, revisionSheetName, revisionSceneId]);
   // 코덱스 P2 fix (8차, 2026-05-05): selector 가 새 배열을 매번 반환하면 모든 카드가 어떤
-  // 리비전 변경에도 re-render 됨 (보드에 카드 많을 때 jank). 두 selector 모두 number 반환 →
+  // 리테이크 변경에도 re-render 됨 (보드에 카드 많을 때 jank). 두 selector 모두 number 반환 →
   // 카운트 안 변하면 카드 stable. resolved selector 가 getRevisionsForScene 을 호출해도
   // 결과는 number 라 zustand 의 strict-equal 비교로 안정.
   const openRevCount = useRevisionStore((s) =>
@@ -233,7 +244,7 @@ export function UnifiedSceneCard({
         'scene-card-interactive',
         'hover:-translate-y-0.5 hover:border-accent/70',
         completionTintEnabled && isMergedComplete && 'scene-completion-tint-card',
-        // v1.18.0: 미해결 리비전 있는 카드 → 보더에 액센트 강조 (mockup revision-visibility.html 시안 1)
+        // v1.18.0: 미해결 리테이크 있는 카드 → 보더에 액센트 강조 (mockup revision-visibility.html 시안 1)
         openRevCount > 0 && 'border-accent/60',
         isHighlighted && 'scene-highlight',
         isSelected && 'scene-card-selected',
@@ -374,6 +385,10 @@ export function UnifiedSceneCard({
             onToggle={onToggle}
             onDelete={onDelete}
             activeOp={activeOp}
+            onAssigneeStageToggle={onAssigneeStageToggle}
+            onAssigneeActPhaseStateClick={onAssigneeActPhaseStateClick}
+            onAssigneeActFeedbackRequest={onAssigneeActFeedbackRequest}
+            onAssigneeActRoundBump={onAssigneeActRoundBump}
           />
           <DeptSection
             dept="acting"
@@ -388,6 +403,10 @@ export function UnifiedSceneCard({
             onActPhaseStateClick={onActPhaseStateClick}
             onActFeedbackRequest={onActFeedbackRequest}
             onActRoundBump={onActRoundBump}
+            onAssigneeStageToggle={onAssigneeStageToggle}
+            onAssigneeActPhaseStateClick={onAssigneeActPhaseStateClick}
+            onAssigneeActFeedbackRequest={onAssigneeActFeedbackRequest}
+            onAssigneeActRoundBump={onAssigneeActRoundBump}
           />
         </div>
 
@@ -425,6 +444,10 @@ function DeptSection({
   onActPhaseStateClick,
   onActFeedbackRequest,
   onActRoundBump,
+  onAssigneeStageToggle,
+  onAssigneeActPhaseStateClick,
+  onAssigneeActFeedbackRequest,
+  onAssigneeActRoundBump,
 }: {
   dept: Department;
   scene: import('@/types').Scene | null;
@@ -438,6 +461,10 @@ function DeptSection({
   onActPhaseStateClick?: (sheetName: string, sceneId: string, newState: ScenePhaseState, sceneUuid?: string | null, sceneIndex?: number) => void;
   onActFeedbackRequest?: (sheetName: string, sceneId: string) => void;
   onActRoundBump?: (sheetName: string, sceneId: string, kind: 'work' | 'feedback', delta: 1 | -1) => void;
+  onAssigneeStageToggle?: (sheetName: string, sceneId: string, assigneeName: string, stage: Stage, sceneUuid?: string | null, sceneIndex?: number, dept?: Department) => void;
+  onAssigneeActPhaseStateClick?: (sheetName: string, sceneId: string, assigneeName: string, newState: ScenePhaseState, sceneUuid?: string | null, sceneIndex?: number) => void;
+  onAssigneeActFeedbackRequest?: (sheetName: string, sceneId: string, assigneeName: string, sceneUuid?: string | null, sceneIndex?: number) => void;
+  onAssigneeActRoundBump?: (sheetName: string, sceneId: string, assigneeName: string, kind: 'work' | 'feedback', delta: 1 | -1, sceneUuid?: string | null, sceneIndex?: number) => void;
 }) {
   const cfg = DEPARTMENT_CONFIGS[dept];
   const completionTintEnabled = useAppStore((s) => s.completionTintEnabled);
@@ -496,8 +523,14 @@ function DeptSection({
           )}
         </div>
         <div className="flex items-center gap-1.5">
-          <span className="text-xs text-text-secondary">
-            {searchQuery ? <HighlightText text={scene.assignee || '-'} query={searchQuery} /> : (scene.assignee || '-')}
+          <span className="min-w-0 text-xs text-text-secondary">
+            {searchQuery ? (
+              <HighlightText text={scene.assignee || '-'} query={searchQuery} />
+            ) : scene.assignee ? (
+              <AssigneeChipList value={scene.assignee} size="sm" maxVisible={1} />
+            ) : (
+              '-'
+            )}
           </span>
           <button
             onClick={(e) => { e.stopPropagation(); onDelete(sheetName, sceneIndex); }}
@@ -511,7 +544,19 @@ function DeptSection({
       {/* v1.25.0~: 액팅 부서 + 핸들러 모두 전달된 경우 새 ScenePhaseToggle 사용.
           v1.25.3 (한솔 보고): ScenePhaseToggle 가 자체 컨테이너(flex w-full + bg/border)를
           가지므로 wrapper 는 클릭 이벤트 전파만 막음. 기존 4-stage 토글과 동일한 모양. */}
-      {dept === 'acting' && onActPhaseStateClick && onActFeedbackRequest && onActRoundBump ? (
+      {hasMultiAssigneeProgress(scene) ? (
+        <div onClick={(e) => e.stopPropagation()} data-continuity-source={dept === 'bg' ? 'bg-stage' : 'act-stage'}>
+          <AssigneeProgressStack
+            scene={scene}
+            department={dept}
+            compact
+            onAssigneeStageToggle={(name, stage) => onAssigneeStageToggle?.(sheetName, sceneId, name, stage, scene.id ?? null, sceneIndex, dept)}
+            onAssigneePhaseStateClick={(name, state) => onAssigneeActPhaseStateClick?.(sheetName, sceneId, name, state, scene.id ?? null, sceneIndex)}
+            onAssigneeFeedbackRequest={(name) => onAssigneeActFeedbackRequest?.(sheetName, sceneId, name, scene.id ?? null, sceneIndex)}
+            onAssigneeRoundBump={(name, kind, delta) => onAssigneeActRoundBump?.(sheetName, sceneId, name, kind, delta, scene.id ?? null, sceneIndex)}
+          />
+        </div>
+      ) : dept === 'acting' && onActPhaseStateClick && onActFeedbackRequest && onActRoundBump ? (
         <div
           onClick={(e) => e.stopPropagation()}
           data-continuity-source="act-stage"

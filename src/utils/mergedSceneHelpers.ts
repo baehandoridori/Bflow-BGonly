@@ -1,5 +1,6 @@
 import { buildCanonicalSceneId, normalizeSceneIdKey } from './sceneIdKey.ts';
 import { buildDistinctRevisionSceneId } from './revisionSceneKey.ts';
+import { compareSceneIdsByNumberThenSuffix } from './sceneSort.ts';
 
 type SceneLike = {
   id?: string;
@@ -342,9 +343,8 @@ export function buildMergedScenes<TScene extends SortableSceneLike>({
     let cmp = 0;
     switch (sortKey) {
       case 'no': {
-        const aNum = parseInt(aScene.sceneId?.match(/\d+$/)?.[0] || '0', 10) || aScene.no;
-        const bNum = parseInt(bScene.sceneId?.match(/\d+$/)?.[0] || '0', 10) || bScene.no;
-        cmp = aNum - bNum;
+        cmp = compareSceneIdsByNumberThenSuffix(aScene.sceneId, bScene.sceneId);
+        if (cmp === 0) cmp = (aScene.no ?? 0) - (bScene.no ?? 0);
         break;
       }
       case 'assignee':

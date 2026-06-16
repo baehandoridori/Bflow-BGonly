@@ -25,7 +25,7 @@ export interface NotificationSceneModalRequest {
   sceneName: string;
   episodeNumber: number;
   partId: string;
-  initialTab: 'detail' | 'revisions';
+  initialTab: 'detail' | 'revisions' | 'files' | 'history';
   focusRevisionId?: string;
   focusCommentId?: string;
   focusRevisionCommentId?: string;
@@ -229,6 +229,14 @@ export function buildNotificationSceneModalRequest(
       initialTab: 'revisions',
       focusRevisionId: asString(metadata?.revisionId),
       focusRevisionCommentId: isRevisionComment ? asString(metadata?.commentId) : undefined,
+    };
+  }
+
+  if (type === 'scene_change' || type === 'acting_feedback' || type === 'scene_assignment') {
+    return {
+      ...base,
+      initialTab: 'detail',
+      forceDeptFilter: 'all',
     };
   }
 

@@ -1,7 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { computeAutoCommentPanelWidth } from '../src/hooks/useCommentPanelWidth.ts';
+import {
+  computeAutoCommentPanelWidth,
+  computeCommentPanelResizeWidth,
+} from '../src/utils/commentPanelResize.ts';
 
 test('viewport=1440 count=0 → base=Math.min(480, 1440*0.26)=374.4', () => {
   const w = computeAutoCommentPanelWidth(1440, 0);
@@ -44,4 +47,21 @@ test('viewport=1500 count=15 → max(320, min(480, 390))=390 + 40 = 430 (count �
 test('viewport=1500 count=16 → 390 + 80 = 470 (count 16 → boost80)', () => {
   const w = computeAutoCommentPanelWidth(1500, 16);
   assert.equal(w, 470);
+});
+
+test('댓글 패널 안쪽 경계 드래그는 왼쪽으로 끌 때 너비가 커진다', () => {
+  assert.equal(computeCommentPanelResizeWidth(420, 1000, 940, 'inner'), 480);
+  assert.equal(computeCommentPanelResizeWidth(420, 1000, 1060, 'inner'), 360);
+});
+
+test('댓글 패널 바깥쪽 아웃라인 드래그는 오른쪽으로 끌 때 너비가 커진다', () => {
+  assert.equal(computeCommentPanelResizeWidth(420, 1000, 1060, 'outer'), 480);
+  assert.equal(computeCommentPanelResizeWidth(420, 1000, 940, 'outer'), 360);
+});
+
+test('댓글 패널 드래그 너비는 저장 가능 범위 안으로 제한된다', () => {
+  assert.equal(computeCommentPanelResizeWidth(420, 1000, 0, 'inner'), 720);
+  assert.equal(computeCommentPanelResizeWidth(420, 1000, 2000, 'inner'), 280);
+  assert.equal(computeCommentPanelResizeWidth(420, 1000, 2000, 'outer'), 720);
+  assert.equal(computeCommentPanelResizeWidth(420, 1000, 0, 'outer'), 280);
 });

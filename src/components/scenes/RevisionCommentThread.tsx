@@ -1,8 +1,8 @@
 /**
- * RevisionCommentThread — 리비전 카드 안에 마운트되는 댓글 스레드 (v1.18.0)
+ * RevisionCommentThread — 리테이크 카드 안에 마운트되는 댓글 스레드 (v1.18.0)
  *
  * 한솔 결정 (spec 2026-05-03):
- *   - 모든 댓글은 단일 `comments` 테이블 사용. revisionId NULL → 일반 씬 댓글, 값 있음 → 리비전 맥락 댓글.
+ *   - 모든 댓글은 단일 `comments` 테이블 사용. revisionId NULL → 일반 씬 댓글, 값 있음 → 리테이크 맥락 댓글.
  *   - 카드 안에서 작성된 댓글은 자동으로 `revisionId = 그 카드 id` 로 저장.
  *   - "bflow:expand-revision" 이벤트(detail.revisionId === 본인) 수신 시 자동 펼침.
  *   - "bflow:comments-invalidated" 수신 시 디바운스 재로드 (기존 CommentPanel 패턴 동일).
@@ -42,7 +42,7 @@ interface Props {
   /**
    * commentService 형식 sceneKey (`sheetName:sceneNo`, 예: "EP01_A_BG:3").
    *
-   * ⚠️ 리비전 시스템 sceneKey(`episode:part:sceneId`, 예: "EP01:A:1")와 형식이 다름.
+   * ⚠️ 리테이크 시스템 sceneKey(`episode:part:sceneId`, 예: "EP01:A:1")와 형식이 다름.
    * 호출 측에서 반드시 commentService 형식으로 변환해서 넘겨야 한다.
    * 잘못된 형식이 전달되면 commentService.parseSceneKey 가 lastIndexOf(':')로 split해
    * partUuid lookup 실패 → "씬을 찾을 수 없음 (partUuid=, sceneId=...)" 에러 발생
@@ -125,14 +125,14 @@ export function RevisionCommentThread({ revisionId, sceneKey }: Props) {
         try { URL.revokeObjectURL(item.previewUrl); } catch { /* ignore */ }
         if (item.uploadedUrl) {
           storageService.deleteImage(item.uploadedUrl).catch(err => {
-            console.warn('[리비전 댓글 첨부 unmount] draft Storage 정리 실패:', err);
+            console.warn('[리테이크 댓글 첨부 unmount] draft Storage 정리 실패:', err);
           });
         }
       });
     };
   }, []);
 
-  // 이 리비전 맥락 댓글만 필터 (시간순)
+  // 이 리테이크 맥락 댓글만 필터 (시간순)
   const comments = allComments
     .filter(c => c.revisionId === revisionId)
     .sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
@@ -173,7 +173,7 @@ export function RevisionCommentThread({ revisionId, sceneKey }: Props) {
   const loadComments = useCallback(() => {
     getComments(sceneKey)
       .then(list => setAllComments(list))
-      .catch(err => console.error('[리비전 댓글 스레드] 로드 실패:', err));
+      .catch(err => console.error('[리테이크 댓글 스레드] 로드 실패:', err));
   }, [sceneKey]);
 
   useEffect(() => { loadComments(); }, [loadComments]);
@@ -243,7 +243,7 @@ export function RevisionCommentThread({ revisionId, sceneKey }: Props) {
       const url = result.url;
       if (!mountedRef.current) {
         storageService.deleteImage(url).catch(err => {
-          console.warn('[리비전 댓글 첨부 unmount race] 정리 실패:', err);
+          console.warn('[리테이크 댓글 첨부 unmount race] 정리 실패:', err);
         });
         return;
       }
@@ -252,7 +252,7 @@ export function RevisionCommentThread({ revisionId, sceneKey }: Props) {
         const exists = prev.some(item => item.id === id);
         if (!exists) {
           storageService.deleteImage(url).catch(err => {
-            console.warn('[리비전 댓글 첨부 race] 제거 후 도착한 업로드 객체 정리 실패:', err);
+            console.warn('[리테이크 댓글 첨부 race] 제거 후 도착한 업로드 객체 정리 실패:', err);
           });
           return prev;
         }
@@ -261,7 +261,7 @@ export function RevisionCommentThread({ revisionId, sceneKey }: Props) {
         );
       });
     } catch (err) {
-      console.error('[리비전 댓글 이미지 업로드 실패]', err);
+      console.error('[리테이크 댓글 이미지 업로드 실패]', err);
       if (!mountedRef.current) return;
       const message = err instanceof Error ? err.message : String(err);
       setAttachedImages(prev => prev.map(item =>
@@ -285,7 +285,7 @@ export function RevisionCommentThread({ revisionId, sceneKey }: Props) {
       }
       if (target?.uploadedUrl) {
         storageService.deleteImage(target.uploadedUrl).catch(err => {
-          console.warn('[리비전 댓글 첨부 제거] Storage 삭제 실패:', err);
+          console.warn('[리테이크 댓글 첨부 제거] Storage 삭제 실패:', err);
         });
       }
       return prev.filter(item => item.id !== id);
@@ -359,7 +359,7 @@ export function RevisionCommentThread({ revisionId, sceneKey }: Props) {
       mentions: extractMentions(draft, users.map(user => user.name)),
       images: uploadedImageUrls,
       createdAt: new Date().toISOString(),
-      // v1.18.0 핵심: 이 댓글은 해당 리비전 맥락에 속함.
+      // v1.18.0 핵심: 이 댓글은 해당 리테이크 맥락에 속함.
       // commentService.addComment → supabase:add-comment IPC → addComment(... revisionId)
       // 까지 정식 전달되어 comments.revision_id 컬럼에 저장된다 (청크 4 Task 14 정식화).
       revisionId,
@@ -401,14 +401,14 @@ export function RevisionCommentThread({ revisionId, sceneKey }: Props) {
         }
       }
     } catch (err) {
-      console.error('[리비전 댓글 스레드] 전송 실패:', err);
+      console.error('[리테이크 댓글 스레드] 전송 실패:', err);
 
       if (!mountedRef.current) {
         prevAttached.forEach((item) => {
           try { URL.revokeObjectURL(item.previewUrl); } catch { /* ignore */ }
           if (item.uploadedUrl) {
             storageService.deleteImage(item.uploadedUrl).catch(err2 => {
-              console.warn('[리비전 댓글 전송 실패 + unmount] storage 정리 실패:', err2);
+              console.warn('[리테이크 댓글 전송 실패 + unmount] storage 정리 실패:', err2);
             });
           }
         });
@@ -423,7 +423,7 @@ export function RevisionCommentThread({ revisionId, sceneKey }: Props) {
           try { URL.revokeObjectURL(item.previewUrl); } catch { /* ignore */ }
           if (item.uploadedUrl) {
             storageService.deleteImage(item.uploadedUrl).catch(err2 => {
-              console.warn('[리비전 댓글 전송 실패 롤백] 버려진 업로드 객체 정리 실패:', err2);
+              console.warn('[리테이크 댓글 전송 실패 롤백] 버려진 업로드 객체 정리 실패:', err2);
             });
           }
         });
@@ -612,7 +612,7 @@ export function RevisionCommentThread({ revisionId, sceneKey }: Props) {
           closeLightbox={closeLightbox}
           lightboxStep={lightboxStep}
           sceneLabel={`${revisionLabel} 댓글`}
-          ariaLabel="리비전 댓글 이미지 확대 보기"
+          ariaLabel="리테이크 댓글 이미지 확대 보기"
           fileNamePrefix={`${revisionLabel}-comment`}
         />
       )}

@@ -97,9 +97,9 @@ export function IntegrationOverview() {
     },
     {
       key: 'gcal',
-      label: 'Google Cal.',
+      label: 'Google Calendar',
       status: toStatus(gcalOk),
-      valueText: toLabel(gcalOk),
+      valueText: toLabel(gcalOk, '인증 유지'),
     },
   ];
 

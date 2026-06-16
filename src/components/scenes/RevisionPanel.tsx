@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Plus, Check, Clock, Circle, ChevronDown, ImagePlus, X, Trash2, MessageSquareWarning, Bell } from 'lucide-react';
+import { Plus, Check, Clock, Circle, ImagePlus, X, Trash2, MessageSquareWarning, Bell, Undo2 } from 'lucide-react';
 import { toast as sonnerToast } from 'sonner';
 import { ConfirmDialog } from '@/components/common/ConfirmDialog';
 import { useAuthStore } from '@/stores/useAuthStore';
@@ -11,12 +11,13 @@ import { resizeBlob } from '@/utils/imageUtils';
 import type { CompRevision, RevisionStatus, Scene } from '@/types';
 import { formatTime } from '@/utils/formatTime';
 import { STATUS_CONFIG, revisionNoToLabel } from '@/constants/revision';
-import { elevatedGlassStyle, floatingGlassStyle } from '@/utils/glassStyles';
+import { elevatedGlassStyle } from '@/utils/glassStyles';
 import { RevisionRecipientPicker } from './RevisionRecipientPicker';
 import { RevisionCommentThread } from './RevisionCommentThread';
 import { AttachmentImageLightbox, type AttachmentImageLightboxState } from './AttachmentImageLightbox';
 import { calcDefaultRecipients } from '@/utils/revisionRecipients';
 import { PathLinkifiedText } from '@/components/common/PathLinkifiedText';
+import { CompactIconLabel } from '@/components/common/CompactIconLabel';
 
 // ─── 상태 뱃지 ───────────────────────────────
 
@@ -41,65 +42,60 @@ function StatusBadge({ status, size = 'sm' }: { status: RevisionStatus; size?: '
   );
 }
 
-// ─── 상태 드롭다운 ───────────────────────────
+// ─── 상태 직접 전환 버튼 ──────────────────────
 
-function StatusDropdown({
-  currentStatus,
-  onSelect,
+function RevisionStatusAction({
+  status,
+  onStatusChange,
 }: {
-  currentStatus: RevisionStatus;
-  onSelect: (status: RevisionStatus) => void;
+  status: RevisionStatus;
+  onStatusChange: (status: RevisionStatus) => void;
 }) {
-  const [open, setOpen] = useState(false);
-  const ref = useRef<HTMLDivElement>(null);
+  if (status === 'resolved') {
+    return (
+      <button
+        type="button"
+        onClick={() => onStatusChange('in_progress')}
+        title="진행 중으로 되돌리기"
+        aria-label="진행 중으로 되돌리기"
+        className="compact-label-container inline-flex min-w-0 shrink items-center gap-1 rounded-full border border-bg-border/45 bg-bg-primary/55 px-2 py-1 text-[10px] font-semibold text-text-secondary/75 transition-all hover:border-accent/35 hover:bg-accent/10 hover:text-accent-sub cursor-pointer"
+      >
+        <CompactIconLabel icon={<Undo2 size={10} />} label="되돌리기" />
+      </button>
+    );
+  }
 
-  useEffect(() => {
-    if (!open) return;
-    const handler = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
-    };
-    document.addEventListener('mousedown', handler);
-    return () => document.removeEventListener('mousedown', handler);
-  }, [open]);
-
-  const options: RevisionStatus[] = ['open', 'in_progress', 'resolved'];
+  const nextStatus: RevisionStatus = status === 'open' ? 'in_progress' : 'resolved';
+  const actionColor = nextStatus === 'in_progress' ? STATUS_CONFIG.in_progress.color : STATUS_CONFIG.resolved.color;
+  const actionBg = nextStatus === 'in_progress' ? STATUS_CONFIG.in_progress.bg : STATUS_CONFIG.resolved.bg;
+  const actionLabel = nextStatus === 'in_progress' ? '진행 중으로 변경' : '완료로 변경';
+  const ActionIcon = nextStatus === 'in_progress' ? Clock : Check;
 
   return (
-    <div ref={ref} className="relative">
-      <button
-        onClick={() => setOpen(!open)}
-        className="flex items-center gap-1 text-xs text-text-secondary hover:text-text-primary transition-colors cursor-pointer"
+    <AnimatePresence mode="wait" initial={false}>
+      <motion.button
+        key={nextStatus}
+        type="button"
+        data-retake-status-action={nextStatus}
+        onClick={() => onStatusChange(nextStatus)}
+        initial={{ opacity: 0, y: 2, filter: 'blur(6px)' }}
+        animate={{ opacity: 1, y: 0, filter: 'blur(0px)' }}
+        exit={{ opacity: 0, y: -2, filter: 'blur(6px)' }}
+        transition={{ duration: 0.18, ease: 'easeOut' }}
+        className="compact-label-container inline-flex min-w-0 shrink items-center justify-center gap-1.5 rounded-full border px-3 py-1.5 text-[11px] font-bold shadow-sm transition-colors cursor-pointer hover:brightness-110"
+        style={{
+          color: actionColor,
+          backgroundColor: actionBg,
+          borderColor: `color-mix(in srgb, ${actionColor} 30%, transparent)`,
+        }}
       >
-        <ChevronDown size={12} className={`transition-transform ${open ? 'rotate-180' : ''}`} />
-        상태 변경
-      </button>
-      <AnimatePresence>
-        {open && (
-          <motion.div
-            initial={{ opacity: 0, y: -4, scale: 0.95 }}
-            animate={{ opacity: 1, y: 0, scale: 1 }}
-            exit={{ opacity: 0, y: -4, scale: 0.95 }}
-            transition={{ duration: 0.15 }}
-            className="absolute right-0 top-full mt-1 z-10 rounded-xl overflow-hidden border border-bg-border shadow-xl"
-            style={floatingGlassStyle}
-          >
-            {options.filter(s => s !== currentStatus).map((s) => (
-              <button
-                key={s}
-                onClick={() => { onSelect(s); setOpen(false); }}
-                className="flex items-center gap-2 px-3 py-2 text-xs w-full hover:bg-bg-border/20 transition-colors cursor-pointer"
-              >
-                <StatusBadge status={s} />
-              </button>
-            ))}
-          </motion.div>
-        )}
-      </AnimatePresence>
-    </div>
+        <CompactIconLabel icon={<ActionIcon size={12} />} label={actionLabel} />
+      </motion.button>
+    </AnimatePresence>
   );
 }
 
-// ─── 리비전 카드 ──────────────────────────────
+// ─── 리테이크 카드 ──────────────────────────────
 
 function RevisionCard({
   revision,
@@ -110,7 +106,7 @@ function RevisionCard({
   revision: CompRevision;
   /**
    * commentService 형식 sceneKey (`sheetName:sceneNo`, 예: "EP01_A_BG:3").
-   * ⚠️ 리비전 시스템의 sceneKey(`episode:part:sceneId`, 예: "EP01:A:1")와 형식이 다름.
+   * ⚠️ 리테이크 시스템의 sceneKey(`episode:part:sceneId`, 예: "EP01:A:1")와 형식이 다름.
    * 이 카드는 RevisionCommentThread 마운트에만 sceneKey를 사용하므로 commentService 형식으로 받는다.
    * 잘못된 형식이 전달되면 commentService.parseSceneKey 가 lastIndexOf(':')로 split해
    * partUuid lookup이 실패하고 "씬을 찾을 수 없음" 에러가 발생한다 (이슈: 2026-05-04).
@@ -119,8 +115,6 @@ function RevisionCard({
   onStatusChange: (status: RevisionStatus, note?: string) => void;
   onDelete?: () => void;
 }) {
-  const [showResolveNote, setShowResolveNote] = useState(false);
-  const [resolveNote, setResolveNote] = useState('');
   const [lightbox, setLightbox] = useState<AttachmentImageLightboxState | null>(null);
   const { currentUser, users: allUsers } = useAuthStore();
   const canDelete = !!(
@@ -138,17 +132,7 @@ function RevisionCard({
   );
 
   const handleStatusChange = (status: RevisionStatus) => {
-    if (status === 'resolved') {
-      setShowResolveNote(true);
-      return;
-    }
     onStatusChange(status);
-  };
-
-  const handleResolve = () => {
-    onStatusChange('resolved', resolveNote);
-    setShowResolveNote(false);
-    setResolveNote('');
   };
 
   const openRevisionImage = () => {
@@ -204,11 +188,11 @@ function RevisionCard({
         </div>
         {currentUser && (
           <div className="flex items-center gap-1.5">
-            <StatusDropdown currentStatus={revision.status} onSelect={handleStatusChange} />
+            <RevisionStatusAction status={revision.status} onStatusChange={handleStatusChange} />
             {canDelete && (
               <button
                 onClick={onDelete}
-                title="리비전 삭제"
+                title="리테이크 삭제"
                 className="opacity-0 group-hover:opacity-100 p-1 rounded-md text-text-secondary/60 hover:text-red-400 hover:bg-red-500/10 transition-all cursor-pointer"
               >
                 <Trash2 size={12} />
@@ -247,46 +231,10 @@ function RevisionCard({
           closeLightbox={() => setLightbox(null)}
           lightboxStep={lightboxStep}
           sceneLabel={revisionNoToLabel(revision.revisionNo)}
-          ariaLabel="리비전 이미지 확대 보기"
+          ariaLabel="리테이크 이미지 확대 보기"
           fileNamePrefix={`${revisionNoToLabel(revision.revisionNo)}-revision`}
         />
       )}
-
-      {/* 해결 메모 입력 */}
-      <AnimatePresence>
-        {showResolveNote && (
-          <motion.div
-            initial={{ opacity: 0, height: 0 }}
-            animate={{ opacity: 1, height: 'auto' }}
-            exit={{ opacity: 0, height: 0 }}
-            transition={{ duration: 0.2 }}
-            className="mb-2 overflow-hidden"
-          >
-            <textarea
-              value={resolveNote}
-              onChange={(e) => setResolveNote(e.target.value)}
-              placeholder="해결 메모 (선택)"
-              className="w-full px-3 py-2 text-sm bg-bg-primary rounded-lg border border-bg-border text-text-primary placeholder:text-text-secondary/50 resize-none focus:outline-none focus:ring-1 focus:ring-accent/50"
-              rows={2}
-            />
-            <div className="flex justify-end gap-2 mt-1">
-              <button
-                onClick={() => { setShowResolveNote(false); setResolveNote(''); }}
-                className="text-xs text-text-secondary hover:text-text-primary transition-colors cursor-pointer"
-              >
-                취소
-              </button>
-              <button
-                onClick={handleResolve}
-                className="text-xs px-3 py-1 rounded-lg text-white transition-colors cursor-pointer"
-                style={{ backgroundColor: STATUS_CONFIG.resolved.color }}
-              >
-                해결
-              </button>
-            </div>
-          </motion.div>
-        )}
-      </AnimatePresence>
 
       {/* 해결 메모 표시 */}
       {revision.status === 'resolved' && revision.resolvedNote && (
@@ -496,7 +444,7 @@ export function RevisionPanel({ sheetName, sceneId, siblingSceneIds, department,
       setNotifyIds([]);
       setShowForm(false);
     } catch (err) {
-      console.error('리비전 등록 실패:', err);
+      console.error('리테이크 등록 실패:', err);
     } finally {
       setSubmitting(false);
     }
@@ -511,7 +459,7 @@ export function RevisionPanel({ sheetName, sceneId, siblingSceneIds, department,
 
   const handleDelete = async (rev: CompRevision) => {
     const ok = await ConfirmDialog.show({
-      message: `${revisionNoToLabel(rev.revisionNo)} 리비전을 삭제하시겠습니까?\n첨부 이미지도 함께 제거됩니다.`,
+      message: `${revisionNoToLabel(rev.revisionNo)} 리테이크를 삭제하시겠습니까?\n첨부 이미지도 함께 제거됩니다.`,
       confirmLabel: '삭제',
       tone: 'danger',
     });
@@ -521,18 +469,18 @@ export function RevisionPanel({ sheetName, sceneId, siblingSceneIds, department,
       await useRevisionStore.getState().deleteRevision(rev.id, rev.sceneKey);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
-      sonnerToast.error(`리비전 삭제 실패: ${msg}`);
+      sonnerToast.error(`리테이크 삭제 실패: ${msg}`);
     }
   };
 
   return (
     <div className="flex flex-col h-full">
-      {/* 리비전 목록 */}
+      {/* 리테이크 목록 */}
       <div className="flex-1 overflow-y-auto px-4 py-3 space-y-2.5">
         {sortedRevisions.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-8 text-text-secondary/50">
             <Circle size={24} className="mb-2" />
-            <p className="text-xs">리비전 요청이 없습니다</p>
+            <p className="text-xs">리테이크 요청이 없습니다</p>
           </div>
         ) : (
           <AnimatePresence initial={false}>
@@ -549,7 +497,7 @@ export function RevisionPanel({ sheetName, sceneId, siblingSceneIds, department,
         )}
       </div>
 
-      {/* 수정 요청 폼 — v1.18.0 재설계: 우선순위/프레임/부서 제거 + 알림 받을 사람 칩 */}
+      {/* 리테이크 요청 폼 — v1.18.0 재설계: 우선순위/프레임/부서 제거 + 알림 받을 사람 칩 */}
       <div className="shrink-0 border-t border-bg-border">
         <AnimatePresence>
           {showForm ? (
@@ -567,7 +515,7 @@ export function RevisionPanel({ sheetName, sceneId, siblingSceneIds, department,
                   <div className="flex items-center justify-between">
                     <div className="flex items-center gap-2">
                       <MessageSquareWarning className="w-4 h-4 text-accent" strokeWidth={2.4} />
-                      <span className="text-[13px] font-bold text-text-primary">새 리비전 등록</span>
+                      <span className="text-[13px] font-bold text-text-primary">새 리테이크 등록</span>
                     </div>
                     <button
                       onClick={() => { setShowForm(false); setDescription(''); setImagePreview(null); }}
@@ -675,7 +623,7 @@ export function RevisionPanel({ sheetName, sceneId, siblingSceneIds, department,
                         disabled={!description.trim() || submitting}
                         className="px-4 py-1.5 text-xs font-bold rounded-md bg-accent text-white hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer transition-opacity"
                       >
-                        {submitting ? '등록 중...' : '리비전 등록'}
+                        {submitting ? '등록 중...' : '리테이크 등록'}
                       </button>
                     </div>
                   </div>
@@ -695,7 +643,7 @@ export function RevisionPanel({ sheetName, sceneId, siblingSceneIds, department,
                 className="w-full flex items-center justify-center gap-1.5 py-2 text-xs font-medium rounded-xl border border-dashed border-bg-border text-text-secondary hover:text-accent hover:border-accent/40 transition-all cursor-pointer"
               >
                 <Plus size={14} />
-                새 리비전
+                새 리테이크
               </button>
             </motion.div>
           )}

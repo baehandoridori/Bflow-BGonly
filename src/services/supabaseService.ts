@@ -87,7 +87,7 @@ export async function updateScenePhaseInSupabase(
   await window.electronAPI.supabaseUpdateScenePhase(sceneUuid, sceneState, workRound, feedbackRound, updatedBy);
 }
 
-/** v1.25.0~ 액팅 피드백 알림 발송 — broadcast 채널로 다른 클라이언트 전파 */
+/** v1.25.0~ 액팅 리테이크 알림 발송 — broadcast 채널로 다른 클라이언트 전파 */
 export async function dispatchActingFeedbackNotification(payload: {
   sceneUuid: string;
   sceneId: string;
@@ -105,7 +105,7 @@ export async function dispatchActingFeedbackNotification(payload: {
   await window.electronAPI.supabaseDispatchFeedbackNotification(payload);
 }
 
-/** v1.25.5 로그인 catch-up — 마지막 본 시각 이후 미읽음 액팅 피드백 알림 조회.
+/** v1.25.5 로그인 catch-up — 마지막 본 시각 이후 미읽음 액팅 리테이크 알림 조회.
  *  before: 페이지네이션 (created_at < before). */
 export async function fetchMissedFeedbackNotifications(
   userId: string,
@@ -236,7 +236,7 @@ export async function addCommentToSupabase(
   commentId: string, partUuid: string, sceneId: string,
   userId: string, userName: string, text: string, mentions: string[], createdAt: string,
   images: string[] = [],
-  /** v1.18.0: 리비전 맥락 댓글이면 해당 id, 일반 씬 댓글이면 null. */
+  /** v1.18.0: 리테이크 맥락 댓글이면 해당 id, 일반 씬 댓글이면 null. */
   revisionId: string | null = null,
   /** v1.24.0: 1단계 대댓글이면 부모 댓글 id, 일반 댓글이면 null. */
   parentCommentId: string | null = null,

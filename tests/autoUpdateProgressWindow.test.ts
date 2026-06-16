@@ -10,6 +10,8 @@ test('installer progress window is a normal non-modal window', async () => {
   );
 
   assert.match(source, /Topmost="False"/);
+  assert.match(source, /ShowActivated="False"/);
+  assert.match(source, /\$window\.ShowActivated = \$false/);
   assert.match(source, /\$window\.Show\(\) \| Out-Null/);
   assert.doesNotMatch(source, /\$window\.ShowDialog\(\)/);
 });

@@ -40,6 +40,8 @@ import { buildMergedRevisionSceneId } from '@/utils/mergedSceneHelpers';
 import { findLatestMemoActivity, type MemoAuthorMeta } from './memoAuthorMeta';
 import { SceneContinuityTransition } from './SceneContinuityTransition';
 import { useOptimisticSceneImageUrl } from '@/hooks/useOptimisticSceneImageUrl';
+import { AssigneeProgressStack } from './AssigneeProgressStack';
+import { hasMultiAssigneeProgress } from '@/utils/assigneeProgress';
 
 /**
  * 전체 뷰(BG+ACT 통합) 전용 상세 모달.
@@ -47,7 +49,7 @@ import { useOptimisticSceneImageUrl } from '@/hooks/useOptimisticSceneImageUrl';
  * SCENE-MODAL-A 디자인 적용 (mockup 핸드오프 §3 그라디언트 풀세트):
  *  - 모달 chrome: 라운드 18, 그림자 강화, 배경 글로우 두 개 (보라+코랄)
  *  - 부서 패널: 상단 2px 라이트 라인 + 보더 알파
- *  - 본체 내 탭 구조 (상세 / 리비전·N) — 우측 토글 패널 제거
+ *  - 본체 내 탭 구조 (상세 / 리테이크·N) — 우측 토글 패널 제거
  *  - 헤더 글래스 backdrop blur
  *
  * 보존 (한솔 결정 — "버튼 디자인 가만 놔두고"):
@@ -101,16 +103,20 @@ export interface UnifiedSceneDetailModalProps {
   episodeLabel?: string;
   /** v1.18.0: 알림 클릭 등 외부에서 모달 열 때 시작 탭 지정. */
   initialTab?: TabKey;
-  /** v1.18.0: 'revisions' 탭에서 강조할 리비전 id — scrollIntoView + pulse 애니메이션. */
+  /** v1.18.0: 'revisions' 탭에서 강조할 리테이크 id — scrollIntoView + pulse 애니메이션. */
   focusRevisionId?: string;
   /** v1.24.0: 댓글 패널에서 강조할 댓글 id — 자동 스크롤 + comment-target-pulse. */
   focusCommentId?: string;
-  /** 리비전 카드 내부 댓글 스레드에서 강조할 댓글 id. */
+  /** 리테이크 카드 내부 댓글 스레드에서 강조할 댓글 id. */
   focusRevisionCommentId?: string;
   /** v1.25.0~: 액팅 단계 토글 핸들러 (전달되면 ACT DeptSection 에서 ScenePhaseToggle 사용) */
   onActPhaseStateClick?: (sheetName: string, sceneId: string, newState: ScenePhaseState) => void;
   onActFeedbackRequest?: (sheetName: string, sceneId: string) => void;
   onActRoundBump?: (sheetName: string, sceneId: string, kind: 'work' | 'feedback', delta: 1 | -1) => void;
+  onAssigneeStageToggle?: (sheetName: string, sceneId: string, assigneeName: string, stage: Stage, sceneUuid?: string | null, sceneIndex?: number, dept?: Department) => void;
+  onAssigneeActPhaseStateClick?: (sheetName: string, sceneId: string, assigneeName: string, newState: ScenePhaseState, sceneUuid?: string | null, sceneIndex?: number) => void;
+  onAssigneeActFeedbackRequest?: (sheetName: string, sceneId: string, assigneeName: string, sceneUuid?: string | null, sceneIndex?: number) => void;
+  onAssigneeActRoundBump?: (sheetName: string, sceneId: string, assigneeName: string, kind: 'work' | 'feedback', delta: 1 | -1, sceneUuid?: string | null, sceneIndex?: number) => void;
   /** 카드 뷰에서 열릴 때 카드 내부 요소를 실제 모달 위치로 연결하는 시작 DOM. */
   continuitySourceElement?: HTMLElement | null;
   /** continuity transition 종료 후 source DOM 참조를 비울 때 사용. */
@@ -149,6 +155,10 @@ export function UnifiedSceneDetailModal({
   onActPhaseStateClick,
   onActFeedbackRequest,
   onActRoundBump,
+  onAssigneeStageToggle,
+  onAssigneeActPhaseStateClick,
+  onAssigneeActFeedbackRequest,
+  onAssigneeActRoundBump,
   continuitySourceElement,
   onContinuityEnd,
   compositingSection,
@@ -202,7 +212,7 @@ export function UnifiedSceneDetailModal({
   // 댓글 키: BG와 ACT 양쪽 조회 가능하게.
   // primary 는 "실제로 이 merged 에 존재하는 부서" 와 일치해야 한다 —
   // ACT-only 병합 항목에서 BG sheetName 을 쓰면 ACT 씬 번호가 BG 시트 경로로 라우팅되어
-  // 댓글/리비전이 엉뚱한 키에 저장되는 문제가 생김.
+  // 댓글/리테이크가 엉뚱한 키에 저장되는 문제가 생김.
   const primaryScene = bgScene ?? actScene;
   const primarySheet = bgScene
     ? (bgSheetName ?? '')
@@ -215,7 +225,7 @@ export function UnifiedSceneDetailModal({
 
   const unifiedSceneId = merged.sceneId || primaryScene?.sceneId || '';
 
-  // 리비전 키 — buildSceneKey 가 부서 구분 없이 EP:Part:sceneId 로 해싱되므로 BG/ACT 공용
+  // 리테이크 키 — buildSceneKey 가 부서 구분 없이 EP:Part:sceneId 로 해싱되므로 BG/ACT 공용
   const revisionSheetName = primarySheet;
   const revisionSceneId = buildMergedRevisionSceneId(merged) || primaryScene?.sceneId || unifiedSceneId;
   const episodes = useDataStore((s) => s.episodes);
@@ -245,7 +255,7 @@ export function UnifiedSceneDetailModal({
     if (initialTab) setTab(initialTab);
   }, [initialTab]);
 
-  // v1.18.0: 댓글 패널의 [re#] 칩 클릭 → 리비전 탭 + 카드 강조 + 스레드 펼침.
+  // v1.18.0: 댓글 패널의 [re#] 칩 클릭 → 리테이크 탭 + 카드 강조 + 스레드 펼침.
   // CommentPanel(같은 모달 내부) 이 'bflow:jump-to-revision' 을 dispatch 한다.
   useEffect(() => {
     function onJump(e: Event) {
@@ -370,7 +380,7 @@ export function UnifiedSceneDetailModal({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentMergedIndex]);
 
-  // 리비전 탭 라벨용 — open 우선, 없으면 전체
+  // 리테이크 탭 라벨용 — open 우선, 없으면 전체
   const revisionTabBadge = openRevCount > 0 ? openRevCount : (revisionCount > 0 ? revisionCount : 0);
 
   // 헤더 합산 퍼센트 — 양쪽 다 있으면 평균, 한쪽만 있으면 그 쪽
@@ -785,7 +795,7 @@ export function UnifiedSceneDetailModal({
                 </button>
               </div>
 
-              {/* 탭 (상세 / 리비전·N / 파일 / 히스토리) */}
+              {/* 탭 (상세 / 리테이크·N / 파일 / 히스토리) */}
               <div className="flex gap-1 px-5 border-b border-bg-border/40 shrink-0">
                 <TabButton active={tab === 'detail'} onClick={() => setTab('detail')}>
                   상세
@@ -795,7 +805,7 @@ export function UnifiedSceneDetailModal({
                   onClick={() => setTab('revisions')}
                   badge={revisionTabBadge > 0 ? revisionTabBadge : undefined}
                 >
-                  리비전
+                  리테이크
                 </TabButton>
                 <TabButton active={tab === 'files'} onClick={() => setTab('files')}>
                   파일
@@ -876,6 +886,10 @@ export function UnifiedSceneDetailModal({
                             onDelete={() => setDeleteConfirm('bg')}
                             onAdd={() => handleAddDept('bg')}
                             memoAuthorMeta={bgMemoAuthorMeta}
+                            onAssigneeStageToggle={onAssigneeStageToggle}
+                            onAssigneeActPhaseStateClick={onAssigneeActPhaseStateClick}
+                            onAssigneeActFeedbackRequest={onAssigneeActFeedbackRequest}
+                            onAssigneeActRoundBump={onAssigneeActRoundBump}
                           />
                           <DeptSection
                             dept="acting"
@@ -891,6 +905,10 @@ export function UnifiedSceneDetailModal({
                             onActPhaseStateClick={onActPhaseStateClick}
                             onActFeedbackRequest={onActFeedbackRequest}
                             onActRoundBump={onActRoundBump}
+                            onAssigneeStageToggle={onAssigneeStageToggle}
+                            onAssigneeActPhaseStateClick={onAssigneeActPhaseStateClick}
+                            onAssigneeActFeedbackRequest={onAssigneeActFeedbackRequest}
+                            onAssigneeActRoundBump={onAssigneeActRoundBump}
                           />
                         </div>
 
@@ -1152,6 +1170,10 @@ function DeptSection({
   onActPhaseStateClick,
   onActFeedbackRequest,
   onActRoundBump,
+  onAssigneeStageToggle,
+  onAssigneeActPhaseStateClick,
+  onAssigneeActFeedbackRequest,
+  onAssigneeActRoundBump,
 }: {
   dept: Department;
   scene: Scene | null;
@@ -1166,6 +1188,10 @@ function DeptSection({
   onActPhaseStateClick?: (sheetName: string, sceneId: string, newState: ScenePhaseState) => void;
   onActFeedbackRequest?: (sheetName: string, sceneId: string) => void;
   onActRoundBump?: (sheetName: string, sceneId: string, kind: 'work' | 'feedback', delta: 1 | -1) => void;
+  onAssigneeStageToggle?: (sheetName: string, sceneId: string, assigneeName: string, stage: Stage, sceneUuid?: string | null, sceneIndex?: number, dept?: Department) => void;
+  onAssigneeActPhaseStateClick?: (sheetName: string, sceneId: string, assigneeName: string, newState: ScenePhaseState, sceneUuid?: string | null, sceneIndex?: number) => void;
+  onAssigneeActFeedbackRequest?: (sheetName: string, sceneId: string, assigneeName: string, sceneUuid?: string | null, sceneIndex?: number) => void;
+  onAssigneeActRoundBump?: (sheetName: string, sceneId: string, assigneeName: string, kind: 'work' | 'feedback', delta: 1 | -1, sceneUuid?: string | null, sceneIndex?: number) => void;
 }) {
   const cfg = DEPARTMENT_CONFIGS[dept];
   const visualColor = deptVisualColor(dept);
@@ -1241,7 +1267,18 @@ function DeptSection({
       <div>
         <span className="block text-xs text-text-secondary mb-1.5">진행 단계</span>
         {/* v1.25.0~: 액팅 + 핸들러 모두 전달 시 새 ScenePhaseToggle, 아니면 기존 4-stage 토글 */}
-        {dept === 'acting' && onActPhaseStateClick && onActFeedbackRequest && onActRoundBump ? (
+        {hasMultiAssigneeProgress(scene) ? (
+          <div data-continuity-target={dept === 'bg' ? 'bg-stage' : 'act-stage'}>
+            <AssigneeProgressStack
+              scene={scene}
+              department={dept}
+              onAssigneeStageToggle={(name, stage) => onAssigneeStageToggle?.(sheetName, sceneId, name, stage, scene.id ?? null, sceneIndex, dept)}
+              onAssigneePhaseStateClick={(name, state) => onAssigneeActPhaseStateClick?.(sheetName, sceneId, name, state, scene.id ?? null, sceneIndex)}
+              onAssigneeFeedbackRequest={(name) => onAssigneeActFeedbackRequest?.(sheetName, sceneId, name, scene.id ?? null, sceneIndex)}
+              onAssigneeRoundBump={(name, kind, delta) => onAssigneeActRoundBump?.(sheetName, sceneId, name, kind, delta, scene.id ?? null, sceneIndex)}
+            />
+          </div>
+        ) : dept === 'acting' && onActPhaseStateClick && onActFeedbackRequest && onActRoundBump ? (
           <div data-continuity-target="act-stage">
             <ScenePhaseToggle
               scene={scene}

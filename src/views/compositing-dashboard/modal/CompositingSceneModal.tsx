@@ -10,7 +10,7 @@
  *     - onDeleteDept / onDeleteBoth / onAddDept 는 컴포지팅 환경에서 안 씀 (warning)
  *
  * 결과:
- *   - 이미지 클릭/주석/댓글/리비전/히스토리/메모/담당자 편집 = UnifiedSceneDetailModal 의 모든 기능 그대로
+ *   - 이미지 클릭/주석/댓글/리테이크/히스토리/메모/담당자 편집 = UnifiedSceneDetailModal 의 모든 기능 그대로
  *   - 추가: 컴포지팅 6 단계 칩 (모달 최상단, isCompositor 일 때만 활성)
  *
  * spec: 2026-05-21-compositing-dashboard-design.md (9.x — layout 은 UnifiedSceneDetailModal 따름)
@@ -154,7 +154,7 @@ export function CompositingSceneModal({ sceneKey, episodeNumber, isCompositor }:
     }
   }, [currentUser, episodeNumber]);
 
-  // ── 액팅 단계 (대기/작업중/피드백/완료) — ScenesView 와 동일 패턴 ──
+  // ── 액팅 단계 (대기/작업중/리테이크/완료) — ScenesView 와 동일 패턴 ──
   const handleActPhaseStateClick = useCallback((sheetName: string, sceneIdArg: string, newState: ScenePhaseState) => {
     if (!currentUser) return;
     const store = useDataStore.getState();
@@ -183,9 +183,9 @@ export function CompositingSceneModal({ sceneKey, episodeNumber, isCompositor }:
     }
   }, [currentUser, episodeNumber]);
 
-  // ── 액팅 피드백 요청 — 컴포지팅 환경에서는 단순 안내 (정식 흐름은 씬 뷰에서) ──
+  // ── 액팅 리테이크 요청 — 컴포지팅 환경에서는 단순 안내 (정식 흐름은 씬 뷰에서) ──
   const handleActFeedbackRequest = useCallback(() => {
-    sonnerToast.info('피드백 요청은 씬 목록 화면에서 진행해주세요.');
+    sonnerToast.info('리테이크 요청은 씬 목록 화면에서 진행해주세요.');
   }, []);
 
   // ── 삭제/부서 추가 — 컴포지팅 환경에서 안 씀 ──

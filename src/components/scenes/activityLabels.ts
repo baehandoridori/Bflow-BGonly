@@ -76,7 +76,7 @@ export function describeActivity(activity: Activity): ActivityVisual {
       // v1.24.0: 차수(re#N) + description 멘트 (앞 30자). 차수는 detail.revisionNumber 가 있을 때만.
       const desc = readDetailString(detail, 'descriptionPreview');
       const num = readDetailNumber(detail, 'revisionNumber');
-      const prefix = num ? `re#${num}` : '리비전';
+      const prefix = num ? `re#${num}` : '리테이크';
       return {
         Icon: Film,
         text: desc ? `${prefix} 등록 — “${trimText(desc, 30)}”` : `${prefix} 등록`,
@@ -86,7 +86,7 @@ export function describeActivity(activity: Activity): ActivityVisual {
     case 'revision_in_progress': {
       const num = readDetailNumber(detail, 'revisionNumber');
       const desc = readDetailString(detail, 'descriptionPreview');
-      const prefix = num ? `re#${num}` : '리비전';
+      const prefix = num ? `re#${num}` : '리테이크';
       return {
         Icon: Film,
         text: desc ? `${prefix} 진행중 — “${trimText(desc, 30)}”` : `${prefix} 진행중`,
@@ -97,7 +97,7 @@ export function describeActivity(activity: Activity): ActivityVisual {
       // v1.24.0: 차수(re#N) + resolvedNote 또는 description 멘트.
       const note = readDetailString(detail, 'resolvedNote') || readDetailString(detail, 'descriptionPreview');
       const num = readDetailNumber(detail, 'revisionNumber');
-      const prefix = num ? `re#${num} ✓` : '리비전';
+      const prefix = num ? `re#${num} ✓` : '리테이크';
       return {
         Icon: Sparkles,
         text: note ? `${prefix} 해결 — “${trimText(note, 30)}”` : `${prefix} 해결`,
@@ -106,7 +106,7 @@ export function describeActivity(activity: Activity): ActivityVisual {
     }
     case 'revision_delete': {
       const num = readDetailNumber(detail, 'revisionNumber');
-      return { Icon: Trash2, text: num ? `re#${num} 삭제` : '리비전 삭제', tone: TONE.scenedel };
+      return { Icon: Trash2, text: num ? `re#${num} 삭제` : '리테이크 삭제', tone: TONE.scenedel };
     }
     case 'scene_add':
       return { Icon: Plus, text: '씬 생성', tone: TONE.scene };

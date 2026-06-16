@@ -32,7 +32,7 @@ export function ensureLastSeenInitialized(userId: string): void {
   }
 }
 
-// ─── v1.25.5: 액팅 피드백 catch-up 전용 별도 키 ────────────
+// ─── v1.25.5: 액팅 리테이크 catch-up 전용 별도 키 ────────────
 //   댓글 멘션 last_seen 과 분리해, 두 catch-up effect 가 서로의 lastSeen 갱신에
 //   영향받지 않도록 격리.
 
@@ -60,7 +60,7 @@ export function ensureFeedbackLastSeenInitialized(userId: string): void {
 }
 
 // ─── v1.25.8: 씬 담당자 배정 catch-up 전용 별도 키 ─────────
-//   댓글 멘션 / 액팅 피드백 catch-up 과 격리. 한 도메인의 lastSeen 갱신이
+//   댓글 멘션 / 액팅 리테이크 catch-up 과 격리. 한 도메인의 lastSeen 갱신이
 //   다른 도메인 catch-up 에 영향을 주지 않도록 한다.
 
 const ASSIGNMENT_KEY_PREFIX = 'bflow_assignment_last_seen_';

@@ -23,8 +23,8 @@ export interface SceneComment {
   createdAt: string;    // ISO 8601
   editedAt?: string;
   /**
-   * v1.18.0: 리비전 맥락 댓글이면 해당 리비전 id, 일반 씬 댓글이면 null/undefined.
-   * 리비전 ↔ 댓글 단일 흐름 통합 — 리비전 패널에서 작성된 댓글은 이 필드로 연결.
+   * v1.18.0: 리테이크 맥락 댓글이면 해당 리테이크 id, 일반 씬 댓글이면 null/undefined.
+   * 리테이크 ↔ 댓글 단일 흐름 통합 — 리테이크 패널에서 작성된 댓글은 이 필드로 연결.
    */
   revisionId?: string | null;
   /**
@@ -238,7 +238,7 @@ export async function loadPartComments(sheetName: string): Promise<CommentsStore
       images: c.images,
       createdAt: c.createdAt,
       editedAt: c.editedAt || undefined,
-      // v1.18.0: 리비전 맥락 댓글 식별용 — Supabase 경로만 채워지고 Sheets fallback 은 undefined.
+      // v1.18.0: 리테이크 맥락 댓글 식별용 — Supabase 경로만 채워지고 Sheets fallback 은 undefined.
       revisionId: c.revisionId ?? null,
       // v1.24.0: 1단계 대댓글 부모 참조 — Supabase 만 채워짐.
       parentCommentId: c.parentCommentId ?? null,
@@ -307,7 +307,7 @@ export async function addComment(sceneKey: string, comment: SceneComment): Promi
       comment.id, partUuid, sceneId,
       comment.userId, comment.userName, comment.text,
       comment.mentions, comment.createdAt, comment.images ?? [],
-      // v1.18.0: revisionId 정식 전달 — null 이면 일반 씬 댓글, 값 있으면 리비전 맥락 댓글.
+      // v1.18.0: revisionId 정식 전달 — null 이면 일반 씬 댓글, 값 있으면 리테이크 맥락 댓글.
       comment.revisionId ?? null,
       // v1.24.0: 1단계 대댓글 부모 id 정식 전달.
       comment.parentCommentId ?? null,

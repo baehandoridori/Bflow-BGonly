@@ -51,6 +51,36 @@ function makePartPair(
 ): Array<Episode['parts'][number]> {
   const bgScenes = sceneIds.map((sid, i) => makeScene(i + 1, sid, bgAssignee, 4 + (i % 4), `EP05-${partId}-BG-${sid}`));
   const actScenes = sceneIds.map((sid, i) => makeScene(i + 1, sid, actAssignee, 4 + (i % 4), `EP05-${partId}-ACT-${sid}`));
+  if (partId === 'A' && actScenes[0]) {
+    actScenes[0] = {
+      ...actScenes[0],
+      assignee: `${actAssignee}, 강선영`,
+      sceneState: 'work',
+      workRound: 1,
+      lo: true,
+      done: true,
+      assigneeProgress: {
+        [actAssignee]: {
+          sceneState: 'work',
+          workRound: 1,
+          feedbackRound: 0,
+          lo: true,
+          done: true,
+          review: false,
+          png: false,
+        },
+        강선영: {
+          sceneState: 'wait',
+          workRound: 0,
+          feedbackRound: 0,
+          lo: false,
+          done: false,
+          review: false,
+          png: false,
+        },
+      },
+    };
+  }
   const lower = partId.toLowerCase();
   return [
     { id: `mock-part-EP05-${partId}-BG`, partId, department: 'bg', sheetName: `EP05_${partId}_BG`, scenes: bgScenes },

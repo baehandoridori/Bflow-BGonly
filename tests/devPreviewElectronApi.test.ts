@@ -30,6 +30,17 @@ test('browser preview Electron API mock supports preview login writes', async ()
   assert.match(mockApi, /dataset\.devElectronApi = 'installed'/);
 });
 
+test('browser preview Electron API mock persists added scenes across readAll sync', async () => {
+  const mockApi = await readRepoFile('src', 'mocks', 'devElectronAPI.ts');
+
+  assert.match(mockApi, /function getMockEpisodes\(/);
+  assert.match(mockApi, /function addMockScene\(/);
+  assert.match(mockApi, /supabaseReadAll:\s*async \(\) => getMockEpisodes\(\)/);
+  assert.match(mockApi, /supabaseAddScene:\s*async \(sheetName, sceneId, assignee, memo\)/);
+  assert.match(mockApi, /addMockScene\(sheetName, sceneId, assignee, memo\)/);
+  assert.match(mockApi, /supabaseAddScenes:\s*async \(sheetName, scenes\)/);
+});
+
 test('browser preview starts directly at the login form after the mock is installed', async () => {
   const loginScreen = await readRepoFile('src', 'components', 'auth', 'LoginScreen.tsx');
 

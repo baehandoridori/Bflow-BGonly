@@ -61,7 +61,7 @@ export function useSceneActivities(
     return () => { cancelled = true; };
   }, [validIds, limit]);
 
-  // Realtime — 자체 구독 (한솔 피드백 2026-05-02).
+  // Realtime — 자체 구독 (한솔 리테이크 2026-05-02).
   // useActivityStore.receiveRealtime 은 dashboardDeptFilter 가 'bg' 또는 'acting' 이면
   // 다른 부서 활동을 cache 에서 drop. 모달은 BG+ACT 통합이라 cache 만 의존하면 한쪽 부서 audit 누락.
   // → hook 자체에서 sceneId 매칭만으로 직접 구독, 부서 필터 우회.

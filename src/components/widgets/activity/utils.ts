@@ -6,7 +6,7 @@ import { GROUP_WINDOW_MS } from './constants';
 /**
  * 멀티-씬 액션 — 한 번의 사용자 행위로 여러 씬에 동시에 영향이 가는 액션.
  * 이 화이트리스트에 속하는 액션은 `sameGroup` 에서 sceneId 가 달라도 묶음.
- * 단일-씬 액션(stage 토글, phase 토글, 댓글, 리비전 등)은 기존 정책대로 sceneId 일치 요구.
+ * 단일-씬 액션(stage 토글, phase 토글, 댓글, 리테이크 등)은 기존 정책대로 sceneId 일치 요구.
  * 향후 새 멀티-씬 액션이 추가되면 여기에 함께 등록할 것.
  */
 export const MULTI_SCENE_ACTIONS: ReadonlySet<ActionType> = new Set([

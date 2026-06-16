@@ -204,6 +204,28 @@ test('legacy comment shortcuts still open the detail modal when comment id is mi
   );
 });
 
+test('scene shortcuts from Slack-style links open the full scene modal by default', () => {
+  const target = resolveNotificationSceneTarget(
+    {
+      sheetName: 'EP02_B_BG',
+      sceneName: 'b018',
+    },
+    episodes,
+  );
+  assert.ok(target);
+  assert.deepEqual(
+    buildNotificationSceneModalRequest('scene_change', { sheetName: 'EP02_B_BG', sceneName: 'b018' }, target),
+    {
+      sceneUuid: 'scene-bg-uuid',
+      sceneName: 'b018',
+      episodeNumber: 2,
+      partId: 'B',
+      initialTab: 'detail',
+      forceDeptFilter: 'all',
+    },
+  );
+});
+
 test('revision comment shortcuts request the revisions tab with a nested comment focus target', () => {
   const target = resolveNotificationSceneTarget(
     {

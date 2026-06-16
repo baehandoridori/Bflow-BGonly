@@ -1,5 +1,5 @@
 /**
- * NewRevisionModal — v1.19.5: 컴포지팅 뷰 헤더에서 직접 새 리비전을 등록하는 중앙 모달.
+ * NewRevisionModal — v1.19.5: 컴포지팅 뷰 헤더에서 직접 새 리테이크를 등록하는 중앙 모달.
  *
  * 4단계 흐름 (mockup `docs/mockups/new-revision-flow.html` 그대로):
  *   1. 에피소드 선택 (커스텀 제목 chip — "두근두근 첫 등교")
@@ -280,7 +280,7 @@ export default function NewRevisionModal({ open, onClose }: Props) {
       });
       onClose();
     } catch (err) {
-      console.error('[NewRevisionModal] 리비전 등록 실패:', err);
+      console.error('[NewRevisionModal] 리테이크 등록 실패:', err);
     } finally {
       setSubmitting(false);
     }
@@ -308,7 +308,7 @@ export default function NewRevisionModal({ open, onClose }: Props) {
         <div className="px-5 py-4 border-b border-bg-border/40 flex items-center justify-between">
           <div className="flex items-center gap-2">
             <MessageSquare size={16} className="text-accent" strokeWidth={2.4} />
-            <span className="text-sm font-bold text-text-primary">새 리비전 등록</span>
+            <span className="text-sm font-bold text-text-primary">새 리테이크 등록</span>
           </div>
           <button
             onClick={onClose}
@@ -660,7 +660,7 @@ export default function NewRevisionModal({ open, onClose }: Props) {
               disabled={!canSubmit}
               className="px-4 py-1.5 text-xs font-bold rounded-md bg-accent text-white cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
             >
-              {submitting ? '등록 중...' : '리비전 등록'}
+              {submitting ? '등록 중...' : '리테이크 등록'}
             </button>
           </div>
         </div>
