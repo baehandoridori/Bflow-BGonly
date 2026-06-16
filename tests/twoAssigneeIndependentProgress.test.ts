@@ -44,7 +44,7 @@ test('whole-scene and bulk actions persist all assignee progress together', () =
 
   assert.match(util, /updateAllAssigneeProgressEntries/);
   assert.match(scenesView, /bulkAssigneeProgressByUuid/);
-  assert.match(scenesView, /writeMetadata\(\s*SCENE_ASSIGNEE_PROGRESS_META_TYPE,\s*uuid,/);
+  assert.match(scenesView, /writeAssigneeProgressMetadata\(uuid, patch\.assigneeProgress\)/);
   assert.match(scenesView, /assigneeProgress: nextProgress/);
   assert.match(scenesView, /phasePatch\.assigneeProgress = nextProgress/);
 });
@@ -74,6 +74,16 @@ test('per-assignee completion boundary changes persist completion metadata', () 
   assert.match(scenesView, /patch\.completedBy = completionMeta\.nextCompletedBy/);
   assert.match(scenesView, /patch\.completedAt = completionMeta\.nextCompletedAt/);
   assert.match(scenesView, /await updateSceneCompletionMeta\(\s*sheetName,\s*sceneIndex,/);
+});
+
+test('per-assignee progress metadata writes are serialized per scene', () => {
+  const scenesView = readFileSync('src/views/ScenesView.tsx', 'utf8');
+
+  assert.match(scenesView, /assigneeProgressWriteQueueRef/);
+  assert.match(scenesView, /queues\.get\(sceneUuid\) \?\? Promise\.resolve\(\)/);
+  assert.match(scenesView, /const run = previous\.catch\(\(\) => undefined\)\.then\(task\)/);
+  assert.match(scenesView, /writeAssigneeProgressMetadata\(sceneUuid, nextProgress\)/);
+  assert.match(scenesView, /assigneeProgressMutationSeqRef/);
 });
 
 test('scene surfaces wire the shared progress stack instead of a single shared control for multi-assignee scenes', () => {

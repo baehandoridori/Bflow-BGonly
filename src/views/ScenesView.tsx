@@ -1959,6 +1959,37 @@ export function ScenesView() {
   const currentUser = useAuthStore((s) => s.currentUser);
   const isBulkInFlight = useBulkOperationsStore((s) => s.activeOp?.status === 'in-flight');
   const isLight = colorMode === 'light';
+  const assigneeProgressWriteQueueRef = useRef<Map<string, Promise<void>>>(new Map());
+  const assigneeProgressMutationSeqRef = useRef<Map<string, number>>(new Map());
+
+  const enqueueAssigneeProgressWrite = useCallback(
+    (sceneUuid: string, task: () => Promise<void>) => {
+      const queues = assigneeProgressWriteQueueRef.current;
+      const previous = queues.get(sceneUuid) ?? Promise.resolve();
+      const run = previous.catch(() => undefined).then(task);
+      const settled = run.catch(() => undefined);
+      queues.set(sceneUuid, settled);
+      void settled.finally(() => {
+        if (queues.get(sceneUuid) === settled) {
+          queues.delete(sceneUuid);
+        }
+      });
+      return run;
+    },
+    [],
+  );
+
+  const writeAssigneeProgressMetadata = useCallback(
+    (sceneUuid: string, progress: SceneAssigneeProgressMap) =>
+      enqueueAssigneeProgressWrite(sceneUuid, () =>
+        writeMetadata(
+          SCENE_ASSIGNEE_PROGRESS_META_TYPE,
+          sceneUuid,
+          serializeAssigneeProgress(progress),
+        ),
+      ),
+    [enqueueAssigneeProgressWrite],
+  );
 
   // v1.25.0~ 피드백 대기 확인 모달 상태
   const [feedbackModal, setFeedbackModal] = useState<{
@@ -2101,11 +2132,7 @@ export function ScenesView() {
 
       if (nextProgress) {
         try {
-          await writeMetadata(
-            SCENE_ASSIGNEE_PROGRESS_META_TYPE,
-            sceneUuid,
-            serializeAssigneeProgress(nextProgress),
-          );
+          await writeAssigneeProgressMetadata(sceneUuid, nextProgress);
         } catch (err) {
           console.error('[ScenesView] 담당자별 진행 저장 실패:', err);
           sonnerToast.error('담당자별 진행 저장에 실패했습니다.');
@@ -2131,7 +2158,7 @@ export function ScenesView() {
         }
       }
     },
-    [updateSceneByUuid, updateSceneFieldOptimistic, currentUser?.id, currentUser?.name],
+    [updateSceneByUuid, updateSceneFieldOptimistic, currentUser?.id, currentUser?.name, writeAssigneeProgressMetadata],
   );
 
   const handleActFeedbackRequest = useCallback(
@@ -2229,8 +2256,11 @@ export function ScenesView() {
         : -1;
       const scene = sceneIndex >= 0 ? latestPart?.scenes[sceneIndex] : undefined;
       if (!scene?.id || sceneIndex < 0) return;
+      const sceneUuid = scene.id;
 
       const prevScene = { ...scene };
+      const mutationSeq = (assigneeProgressMutationSeqRef.current.get(sceneUuid) ?? 0) + 1;
+      assigneeProgressMutationSeqRef.current.set(sceneUuid, mutationSeq);
       const nextProgress = updateAssigneeProgressEntry(scene, assigneeName, update, currentUser?.name);
       const patch = aggregateScenePatchFromAssignees(scene, nextProgress, department);
       const wasFullyDone = isFullyDone(scene);
@@ -2258,42 +2288,45 @@ export function ScenesView() {
         patch.completedAt = completionMeta.nextCompletedAt;
       }
 
-      updateSceneByUuid(scene.id, patch);
+      updateSceneByUuid(sceneUuid, patch);
       if (!wasFullyDone && willBeFullyDone) {
         setCelebratingTarget(buildCompletionTarget(sheetName, scene, sceneIndex));
       }
 
       try {
-        await writeMetadata(
-          SCENE_ASSIGNEE_PROGRESS_META_TYPE,
-          scene.id,
-          serializeAssigneeProgress(nextProgress),
-        );
+        await enqueueAssigneeProgressWrite(sceneUuid, async () => {
+          await writeMetadata(
+            SCENE_ASSIGNEE_PROGRESS_META_TYPE,
+            sceneUuid,
+            serializeAssigneeProgress(nextProgress),
+          );
+          if (completionMeta) {
+            try {
+              await updateSceneCompletionMeta(
+                sheetName,
+                sceneIndex,
+                completionMeta.nextCompletedBy && completionMeta.nextCompletedAt
+                  ? {
+                      completedBy: completionMeta.nextCompletedBy,
+                      completedAt: completionMeta.nextCompletedAt,
+                    }
+                  : null,
+              );
+            } catch (metaErr) {
+              console.error('[담당자별 완료 메타 저장 실패]', metaErr);
+            }
+          }
+        });
       } catch (err) {
         console.error('[ScenesView] 담당자별 진행 저장 실패:', err);
         sonnerToast.error('담당자별 진행 저장에 실패했습니다.');
-        updateSceneByUuid(scene.id, prevScene);
+        if (assigneeProgressMutationSeqRef.current.get(sceneUuid) === mutationSeq) {
+          updateSceneByUuid(sceneUuid, prevScene);
+        }
         return;
       }
-
-      if (completionMeta) {
-        try {
-          await updateSceneCompletionMeta(
-            sheetName,
-            sceneIndex,
-            completionMeta.nextCompletedBy && completionMeta.nextCompletedAt
-              ? {
-                  completedBy: completionMeta.nextCompletedBy,
-                  completedAt: completionMeta.nextCompletedAt,
-                }
-              : null,
-          );
-        } catch (metaErr) {
-          console.error('[담당자별 완료 메타 저장 실패]', metaErr);
-        }
-      }
     },
-    [currentUser?.name, updateSceneByUuid, updateSceneCompletionMeta],
+    [currentUser?.name, enqueueAssigneeProgressWrite, updateSceneByUuid, updateSceneCompletionMeta],
   );
 
   const handleAssigneeStageToggle = useCallback(
@@ -2391,11 +2424,7 @@ export function ScenesView() {
         const patch = aggregateScenePatchFromAssignees(scene, nextProgress, 'acting');
         updateSceneByUuid(sceneUuid, patch);
         try {
-          await writeMetadata(
-            SCENE_ASSIGNEE_PROGRESS_META_TYPE,
-            sceneUuid,
-            serializeAssigneeProgress(nextProgress),
-          );
+          await writeAssigneeProgressMetadata(sceneUuid, nextProgress);
         } catch (err) {
           console.error('[ScenesView] 담당자별 피드백 대기 저장 실패:', err);
           sonnerToast.error('담당자별 피드백 대기 저장에 실패했습니다.');
@@ -2447,7 +2476,7 @@ export function ScenesView() {
 
       setFeedbackModal(null);
     },
-    [feedbackModal, currentUser?.id, currentUser?.name, setScenePhaseOptimistic, updateSceneByUuid],
+    [feedbackModal, currentUser?.id, currentUser?.name, setScenePhaseOptimistic, updateSceneByUuid, writeAssigneeProgressMetadata],
   );
 
   // 피드백 모달 — 알림 없이 상태만 변경
@@ -2470,11 +2499,7 @@ export function ScenesView() {
       const patch = aggregateScenePatchFromAssignees(scene, nextProgress, 'acting');
       updateSceneByUuid(sceneUuid, patch);
       try {
-        await writeMetadata(
-          SCENE_ASSIGNEE_PROGRESS_META_TYPE,
-          sceneUuid,
-          serializeAssigneeProgress(nextProgress),
-        );
+        await writeAssigneeProgressMetadata(sceneUuid, nextProgress);
         sonnerToast.success('상태만 변경했습니다 (알림 없음).');
       } catch (err) {
         console.error('[ScenesView] 담당자별 피드백 대기(조용히) 저장 실패:', err);
@@ -2499,7 +2524,7 @@ export function ScenesView() {
       }
     }
     setFeedbackModal(null);
-  }, [feedbackModal, currentUser?.id, currentUser?.name, setScenePhaseOptimistic, updateSceneByUuid]);
+  }, [feedbackModal, currentUser?.id, currentUser?.name, setScenePhaseOptimistic, updateSceneByUuid, writeAssigneeProgressMetadata]);
 
   const fromStateLabel = useMemo(() => {
     if (!feedbackModal) return '';
@@ -3675,11 +3700,7 @@ export function ScenesView() {
         }
         if (scene.id && nextAssigneeProgress) {
           try {
-            await writeMetadata(
-              SCENE_ASSIGNEE_PROGRESS_META_TYPE,
-              scene.id,
-              serializeAssigneeProgress(nextAssigneeProgress),
-            );
+            await writeAssigneeProgressMetadata(scene.id, nextAssigneeProgress);
           } catch (progressErr) {
             console.error('[ScenesView] 담당자별 진행 저장 실패:', progressErr);
             sonnerToast.error('담당자별 진행 저장에 실패했습니다.');
@@ -3910,11 +3931,7 @@ export function ScenesView() {
             const nextProgress = bulkAssigneeProgressByUuid.get(result.sceneUuid);
             if (!result.success || !nextProgress) return result;
             try {
-              await writeMetadata(
-                SCENE_ASSIGNEE_PROGRESS_META_TYPE,
-                result.sceneUuid,
-                serializeAssigneeProgress(nextProgress),
-              );
+              await writeAssigneeProgressMetadata(result.sceneUuid, nextProgress);
               return result;
             } catch (err) {
               const message = err instanceof Error ? err.message : 'assignee progress metadata failed';
@@ -4074,11 +4091,7 @@ export function ScenesView() {
               }
               if (patch.assigneeProgress) {
                 try {
-                  await writeMetadata(
-                    SCENE_ASSIGNEE_PROGRESS_META_TYPE,
-                    uuid,
-                    serializeAssigneeProgress(patch.assigneeProgress),
-                  );
+                  await writeAssigneeProgressMetadata(uuid, patch.assigneeProgress);
                 } catch (progressErr) {
                   const prev = prevByUuid.get(uuid);
                   if (prev) updateSceneByUuid(uuid, { assigneeProgress: prev.assigneeProgress });
