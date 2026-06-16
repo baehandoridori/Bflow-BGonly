@@ -71,6 +71,22 @@ test('loaded assignee progress rehydrates aggregate scene flags for legacy progr
   assert.match(app, /const episodes = await readAll\(\);/);
 });
 
+test('stale assignee metadata is ignored once a scene no longer has multiple assignees', () => {
+  const util = readFileSync(progressUtilPath, 'utf8');
+
+  assert.match(util, /if \(names\.length <= 1\) return \{\};/);
+  assert.match(util, /parseAssigneeNames\(scene\.assignee\)\.length <= 1/);
+  assert.match(util, /sceneWithoutStaleAssigneeProgress/);
+});
+
+test('acting aggregate rounds come from the assignee state that determines the bottleneck', () => {
+  const util = readFileSync(progressUtilPath, 'utf8');
+
+  assert.match(util, /const roundSourceEntries = entries\.filter\(\(entry\) => entry\.state === lowestState\)/);
+  assert.match(util, /const maxRoundFor = \(key: 'workRound' \| 'feedbackRound'\) =>/);
+  assert.doesNotMatch(util, /assigneeProgress\[names\[0\]\]\?\.workRound/);
+});
+
 test('per-assignee completion boundary changes persist completion metadata', () => {
   const scenesView = readFileSync('src/views/ScenesView.tsx', 'utf8');
 

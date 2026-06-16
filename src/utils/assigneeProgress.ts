@@ -283,19 +283,29 @@ export function aggregateScenePatchFromAssignees(
   department: Department,
 ): Partial<Scene> {
   const names = parseAssigneeNames(scene.assignee);
-  if (names.length === 0) return { assigneeProgress };
+  if (names.length <= 1) return {};
   if (department === 'acting') {
     const order: ScenePhaseState[] = ['wait', 'work', 'feedback', 'done'];
-    const lowestState = names.reduce<ScenePhaseState>((lowest, name) => {
-      const state = assigneeProgress[name]?.sceneState ?? sceneStateFromScene(scene);
-      return order.indexOf(state) < order.indexOf(lowest) ? state : lowest;
+    const entries = names.map((name) => {
+      const progress = assigneeProgress[name] ?? baseProgressFromScene(scene);
+      return {
+        name,
+        progress,
+        state: progress.sceneState ?? sceneStateFromScene(scene),
+      };
+    });
+    const lowestState = entries.reduce<ScenePhaseState>((lowest, entry) => {
+      return order.indexOf(entry.state) < order.indexOf(lowest) ? entry.state : lowest;
     }, 'done');
+    const roundSourceEntries = entries.filter((entry) => entry.state === lowestState);
+    const maxRoundFor = (key: 'workRound' | 'feedbackRound') =>
+      roundSourceEntries.reduce((max, entry) => Math.max(max, entry.progress[key] ?? 0), scene[key] ?? 0);
     const legacy = legacyStagesForState(lowestState);
     return {
       assigneeProgress,
       sceneState: lowestState,
-      workRound: assigneeProgress[names[0]]?.workRound ?? scene.workRound ?? 0,
-      feedbackRound: assigneeProgress[names[0]]?.feedbackRound ?? scene.feedbackRound ?? 0,
+      workRound: maxRoundFor('workRound'),
+      feedbackRound: maxRoundFor('feedbackRound'),
       ...legacy,
     };
   }
@@ -340,6 +350,11 @@ export function applyAssigneeProgressMetadata(
       ...part,
       scenes: part.scenes.map((scene) => {
         if (!scene.id) return scene;
+        if (parseAssigneeNames(scene.assignee).length <= 1) {
+          if (!scene.assigneeProgress) return scene;
+          const { assigneeProgress: _ignored, ...sceneWithoutStaleAssigneeProgress } = scene;
+          return sceneWithoutStaleAssigneeProgress;
+        }
         const assigneeProgress = progressBySceneUuid.get(scene.id);
         return assigneeProgress
           ? { ...scene, ...aggregateScenePatchFromAssignees(scene, assigneeProgress, part.department) }
