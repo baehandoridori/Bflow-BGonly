@@ -40,7 +40,7 @@ export const ACTION_TYPE_LABEL: Record<ActionType, string> = {
   // v1.25.6: 액팅 단계 라벨 — 사용자가 액팅 씬 토글 클릭 시 표시
   phase_wait: '대기로 변경',
   phase_work: '작업중 시작',
-  phase_feedback: '리테이크 대기',
+  phase_feedback: '피드백 대기',
   phase_done: '액팅 완료',
   memo_update: '메모 수정',
   comment_add: '댓글 작성',

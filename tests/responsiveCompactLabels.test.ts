@@ -79,10 +79,12 @@ test('ScenePhaseToggle maps every phase to a lucide icon label', () => {
 
 test('acting department labels keep the approved feedback stage wording', () => {
   const source = read('src/types/index.ts');
+  const activityConstants = read('src/components/widgets/activity/constants.ts');
 
   assert.match(source, /stageLabels:\s*\{\s*lo:\s*'대기',\s*done:\s*'작업중',\s*review:\s*'피드백',\s*png:\s*'완료'\s*\}/);
   assert.match(source, /feedback:\s*'피드백 대기'/);
   assert.match(source, /feedback:\s*'피드백'/);
+  assert.match(activityConstants, /phase_feedback:\s*'피드백 대기'/);
 });
 
 test('sheet headers support full and short labels', () => {

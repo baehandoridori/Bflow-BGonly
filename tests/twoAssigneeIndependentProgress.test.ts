@@ -84,6 +84,8 @@ test('acting aggregate rounds come from the assignee state that determines the b
 
   assert.match(util, /const roundSourceEntries = entries\.filter\(\(entry\) => entry\.state === lowestState\)/);
   assert.match(util, /const maxRoundFor = \(key: 'workRound' \| 'feedbackRound'\) =>/);
+  assert.match(util, /const shouldResetRounds = lowestState === 'wait' \|\| lowestState === 'done'/);
+  assert.match(util, /workRound: shouldResetRounds \? 0 : maxRoundFor\('workRound'\)/);
   assert.doesNotMatch(util, /assigneeProgress\[names\[0\]\]\?\.workRound/);
 });
 

@@ -300,12 +300,13 @@ export function aggregateScenePatchFromAssignees(
     const roundSourceEntries = entries.filter((entry) => entry.state === lowestState);
     const maxRoundFor = (key: 'workRound' | 'feedbackRound') =>
       roundSourceEntries.reduce((max, entry) => Math.max(max, entry.progress[key] ?? 0), scene[key] ?? 0);
+    const shouldResetRounds = lowestState === 'wait' || lowestState === 'done';
     const legacy = legacyStagesForState(lowestState);
     return {
       assigneeProgress,
       sceneState: lowestState,
-      workRound: maxRoundFor('workRound'),
-      feedbackRound: maxRoundFor('feedbackRound'),
+      workRound: shouldResetRounds ? 0 : maxRoundFor('workRound'),
+      feedbackRound: shouldResetRounds ? 0 : maxRoundFor('feedbackRound'),
       ...legacy,
     };
   }
