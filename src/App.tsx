@@ -321,13 +321,14 @@ export default function App() {
         ? dataState.findSceneByUuid(newComment.scene_uuid)
         : null;
       const sceneLabel = (() => {
+        if (sceneByUuid?.sceneId) return sceneByUuid.sceneId;
         const sceneKeyLabel = buildNotificationSceneDisplayLabelFromSceneKey(
           newComment.scene_id,
           dataState.episodeTitles,
           dataState.episodes,
         );
         if (sceneKeyLabel) return sceneKeyLabel;
-        return sceneByUuid?.sceneId || newComment.scene_id || '';
+        return newComment.scene_id || '';
       })();
       const body = newComment.text
         ? (newComment.text.length > 60 ? newComment.text.slice(0, 60) + '...' : newComment.text)

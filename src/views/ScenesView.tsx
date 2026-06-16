@@ -2235,9 +2235,31 @@ export function ScenesView() {
       const patch = aggregateScenePatchFromAssignees(scene, nextProgress, department);
       const wasFullyDone = isFullyDone(scene);
       const nextScene = { ...scene, ...patch };
+      const willBeFullyDone = isFullyDone(nextScene);
+      const prevCompletedBy = scene.completedBy ?? '';
+      const prevCompletedAt = scene.completedAt ?? '';
+      const completionMeta = (() => {
+        if (willBeFullyDone && !wasFullyDone) {
+          return {
+            nextCompletedBy: currentUser?.name ?? '알 수 없음',
+            nextCompletedAt: new Date().toISOString(),
+          };
+        }
+        if (wasFullyDone && !willBeFullyDone && (prevCompletedBy || prevCompletedAt)) {
+          return {
+            nextCompletedBy: '',
+            nextCompletedAt: '',
+          };
+        }
+        return null;
+      })();
+      if (completionMeta) {
+        patch.completedBy = completionMeta.nextCompletedBy;
+        patch.completedAt = completionMeta.nextCompletedAt;
+      }
 
       updateSceneByUuid(scene.id, patch);
-      if (!wasFullyDone && isFullyDone(nextScene)) {
+      if (!wasFullyDone && willBeFullyDone) {
         setCelebratingTarget(buildCompletionTarget(sheetName, scene, sceneIndex));
       }
 
@@ -2251,9 +2273,27 @@ export function ScenesView() {
         console.error('[ScenesView] 담당자별 진행 저장 실패:', err);
         sonnerToast.error('담당자별 진행 저장에 실패했습니다.');
         updateSceneByUuid(scene.id, prevScene);
+        return;
+      }
+
+      if (completionMeta) {
+        try {
+          await updateSceneCompletionMeta(
+            sheetName,
+            sceneIndex,
+            completionMeta.nextCompletedBy && completionMeta.nextCompletedAt
+              ? {
+                  completedBy: completionMeta.nextCompletedBy,
+                  completedAt: completionMeta.nextCompletedAt,
+                }
+              : null,
+          );
+        } catch (metaErr) {
+          console.error('[담당자별 완료 메타 저장 실패]', metaErr);
+        }
       }
     },
-    [currentUser?.name, updateSceneByUuid],
+    [currentUser?.name, updateSceneByUuid, updateSceneCompletionMeta],
   );
 
   const handleAssigneeStageToggle = useCallback(

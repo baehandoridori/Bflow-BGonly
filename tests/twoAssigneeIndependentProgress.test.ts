@@ -67,6 +67,15 @@ test('loaded assignee progress rehydrates aggregate scene flags for legacy progr
   assert.match(util, /aggregateScenePatchFromAssignees\(scene, assigneeProgress, part\.department\)/);
 });
 
+test('per-assignee completion boundary changes persist completion metadata', () => {
+  const scenesView = readFileSync('src/views/ScenesView.tsx', 'utf8');
+
+  assert.match(scenesView, /const completionMeta = \(\(\) =>/);
+  assert.match(scenesView, /patch\.completedBy = completionMeta\.nextCompletedBy/);
+  assert.match(scenesView, /patch\.completedAt = completionMeta\.nextCompletedAt/);
+  assert.match(scenesView, /await updateSceneCompletionMeta\(\s*sheetName,\s*sceneIndex,/);
+});
+
 test('scene surfaces wire the shared progress stack instead of a single shared control for multi-assignee scenes', () => {
   const files = [
     'src/components/scenes/UnifiedSceneCard.tsx',

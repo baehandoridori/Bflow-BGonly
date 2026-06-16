@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 
 import {
   buildNotificationSceneDisplayLabel,
@@ -35,4 +36,14 @@ test('notification scene display label keeps a stable fallback when title is mis
     }),
     'EP02 · b018',
   );
+});
+
+test('revision comment notifications prefer uuid scene labels over numeric comment sort ids', () => {
+  const app = readFileSync('src/App.tsx', 'utf8');
+  const uuidLabelIndex = app.indexOf('if (sceneByUuid?.sceneId) return sceneByUuid.sceneId;');
+  const sceneKeyLabelIndex = app.indexOf('const sceneKeyLabel = buildNotificationSceneDisplayLabelFromSceneKey');
+
+  assert.ok(uuidLabelIndex > -1);
+  assert.ok(sceneKeyLabelIndex > -1);
+  assert.ok(uuidLabelIndex < sceneKeyLabelIndex);
 });
