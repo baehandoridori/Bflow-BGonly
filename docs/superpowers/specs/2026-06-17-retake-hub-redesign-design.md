@@ -104,6 +104,13 @@ isCompositor === true || role === 'admin' || name === '배한솔'
 
 `assignee_states[userId].state` 값: `'pending' | 'in_progress' | 'done'`.
 
+**불변식 `assignee_ids ⊆ notify_user_ids` 강제 (§7.2 보강):**
+- 담당자 승격 시 해당 `user.id`가 `notify_user_ids`에 없으면 자동 추가.
+- 알림 대상에서 사람을 제거할 때 그 사람이 담당자면 **담당에서도 함께 해제**한다(UI에서 "담당자이기도 합니다 — 함께 해제됩니다" 경고). 차단하지 않고 동시 해제.
+- 동시 편집(LWW) 대비: 로드/`mapRevision` 시 `assignee_ids`에서 `notify_user_ids`에 없는 id를 **정리(sanitize)** 하고 `assignee_states`도 그에 맞춰 보정. 저장이 깨져도 읽는 쪽에서 항상 불변식을 복원한다.
+
+**레거시 `assignee TEXT` 처리(확정):** 기존 콤마 구분 `assignee` 값은 **마이그레이션에서 옮기지 않고 버린다**(담당자 개념이 신규 도입이므로). 신규 로직은 `assignee_ids`/`assignee_states`만 사용. `assignee` 컬럼은 삭제하지 않고 방치하며, 다른 코드 의존 여부 확인 후 2차에서 정리한다.
+
 ### 6.2 전체 상태(`status`) 파생 규칙
 
 `RevisionStatus` 타입에 `'assignee_done'` 추가:
@@ -111,13 +118,21 @@ isCompositor === true || role === 'admin' || name === '배한솔'
 'open' | 'in_progress' | 'assignee_done' | 'resolved'
 ```
 
-전체 `status`는 `assignee_states`로부터 파생하되, 표시·쿼리 편의를 위해 컬럼에도 저장(낙관적 업데이트와 일관 유지):
-- 담당자 0명이거나 전원 `pending` → `open` (대기)
-- 누군가 `in_progress`이거나 일부만 `done` → `in_progress` (진행중)
-- 담당자 전원 `done` 이고 최종완료 전 → `assignee_done` (담당 완료 / 최종 대기)
-- 최종 완료됨 → `resolved`
+전체 `status`는 **`final_resolved_at` + `assignee_states`로부터 파생**하되, 표시·쿼리 편의를 위해 컬럼에도 저장한다. **파생이 권위(source of truth)이고 컬럼은 캐시**다 — 아래 트리거마다 재계산해 저장하고, 읽을 때(`mapRevision`)도 동일 규칙으로 재계산해 불일치를 복원한다.
 
-> 담당자가 한 명도 없는 항목(담당 미지정)은 `open`으로 두고, 카드에서 '담당 지정' 유도.
+파생 규칙(위에서부터 먼저 만족하는 것):
+1. `final_resolved_at`이 있으면 → `resolved` (최종 완료)
+2. 담당자 0명(`assignee_ids` 비어 있음) 또는 전원 `pending` → `open` (대기)
+3. 담당자 전원 `done` → `assignee_done` (담당 완료 / 최종 대기)
+4. 그 외(누군가 `in_progress`이거나 일부만 `done`) → `in_progress` (진행중)
+
+**재계산 트리거 시점:** 담당 상태 전이(시작/완료/되돌리기), 담당자 재배정(추가/제거), 최종완료/최종완료 되돌리기. 매번 위 규칙으로 재계산 후 저장.
+
+**경계 케이스:**
+- 담당자 재배정으로 담당자가 0명이 되면 → `open`. 마지막 `done` 담당자가 제거되면 남은 담당자 상태로 재파생(전원 `done`이면 `assignee_done`, 아니면 `in_progress`, 아무도 없으면 `open`).
+- `resolved`(최종완료) 상태에서는 담당자 개별 되돌리기(`done → in_progress`)를 **막는다**. 되돌리려면 먼저 **최종완료 되돌리기**(`final_resolved_at` 제거 → 본 규칙으로 `assignee_done` 등으로 복귀)를 해야 한다. 즉 `resolved`는 항상 `final_resolved_at` 유무로만 진입/이탈한다.
+
+> 담당자가 한 명도 없는 항목(담당 미지정)은 `open`으로 두고, 카드에서 '담당 지정'을 유도.
 
 ### 6.3 신규 테이블 `comp_revision_sets`
 
@@ -134,10 +149,19 @@ CREATE TABLE IF NOT EXISTS comp_revision_sets (
   updated_at    TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS idx_comp_revisions_set ON comp_revisions(set_id) WHERE set_id IS NOT NULL;
+
+-- Realtime 전파를 위해 publication에 신규 테이블 추가 (필수)
+ALTER PUBLICATION supabase_realtime ADD TABLE comp_revision_sets;
 ```
 
 - 세트 진행률은 `comp_revisions WHERE set_id = ?`의 `status` 집계로 계산 (저장 안 함, 파생).
-- 세트 `status='done'`: 하위 전원 `resolved` 시 자동 전환 (낙관적 + 동기화).
+- 세트 `status='done'`: 하위 **1개 이상** 전원 `resolved` 시 자동 전환 (낙관적 + 동기화). 빈 세트(0/0)는 자동완료하지 않으며, 마지막 항목이 `set_id` 해제로 빠지면 `open`으로 재평가.
+
+**Realtime 배선 (신규 테이블 필수):** `comp_revisions`는 이미 publication·핸들러에 있어 담당자 상태 변경은 기존 경로로 전파된다. `comp_revision_sets`는 신규이므로 다음이 모두 필요하다:
+1. 위 `ALTER PUBLICATION ... ADD TABLE comp_revision_sets` 마이그레이션
+2. `electron/realtime.ts`에 `comp_revision_sets` 테이블 `.on('postgres_changes', ...)` 핸들러 추가
+3. `RealtimeCallbacks` 인터페이스에 `onRevisionSetChange` 추가
+4. 렌더러 배선(세트 스토어 새로고침 연결)
 
 ### 6.4 TypeScript 타입 (`src/types/index.ts`)
 
@@ -209,7 +233,7 @@ export interface CompRevisionSet {
 기존 `revision_in_progress` / `revision_resolve` 유지 + 추가:
 - `revision_assignee_done` (담당자 완료)
 - `revision_final_resolve` (최종 완료)
-- `revision_reassign` (담당자 변경) — 선택
+- `revision_reassign` (담당자 변경) — **포함** (재배정은 권한 가드가 있는 액션이라 감사 로그 가치가 있음)
 
 ---
 
@@ -271,6 +295,8 @@ export interface CompRevisionSet {
 
 - 진행률 = `resolved 개수 / 전체 하위 개수`.
 - 하위 전원 `resolved` → 세트 `status='done'` 자동 전환(낙관적 + 동기화). 좌측 목록에서 완료 세트는 흐림+초록.
+- 빈 세트(하위 0개)는 진행률 `0/0`으로 표시하고 자동완료하지 않는다. 가져오기 취소 등으로 마지막 항목이 빠지면 세트를 `open`으로 되돌린다.
+- 진행률 분자 = `resolved` 하위 개수, 분모 = 전체 하위 개수. 이미 `resolved`인 항목만 가져오기로 편입돼 전원 `resolved`가 되면 그 시점에 자동완료 트리거가 발동한다.
 
 ---
 
@@ -323,6 +349,7 @@ export interface CompRevisionSet {
 - `DEVLOG/migrations/2026-06-17-retake-hub.sql` (신규): `comp_revisions` 컬럼 추가, `scene_id` nullable, `comp_revision_sets` 생성, 인덱스
 - `electron/supabase.ts`: `mapRevision` 확장, 세트 CRUD(`readRevisionSets`/`addRevisionSet`/`updateRevisionSet`/`deleteRevisionSet`), 담당자 상태 업데이트
 - `electron/main.ts` + `electron/preload.ts`: 세트/담당 관련 IPC 채널 추가
+- `electron/realtime.ts`: `comp_revision_sets` 변경 핸들러 + `RealtimeCallbacks.onRevisionSetChange` 추가 (신규 테이블 Realtime 전파)
 - `src/types/index.ts`: 타입 추가 (§6.4)
 - `src/constants/revision.ts`: `STATUS_CONFIG`에 `assignee_done` 추가, `revisionNoToLabel` 유지
 
@@ -346,11 +373,11 @@ export interface CompRevisionSet {
 
 ## 13. 구현 단계 (제안 순서)
 
-1. **DB 마이그레이션 + 타입/매핑** — `comp_revisions` 확장, `comp_revision_sets`, 타입, `mapRevision`. (라이브 적용은 한솔 승인 후.)
-2. **담당자 워크플로우 백엔드/스토어** — 담당 상태 전이, 파생 `status`, 재배정, 권한 가드.
-3. **인라인 카드(시안 A)** — `RevisionPanel` 카드 + 담당 칩 + 최종완료 바 + 인라인 확장. 씬 모달/기본 탭 적용.
-4. **엔티티 감지 공통 입력** — 훅 + 컴포넌트, 댓글류부터 교체 후 리테이크/메모로 확장.
-5. **리테이크 허브(세트)** — 세트 CRUD, 허브 뷰, 자동취합 탭(테이블 시안 B), 항목 추가/가져오기, 진행률/자동완료.
+1. **DB 마이그레이션 + 워크플로우 백엔드/스토어** (한 PR로 묶음) — `comp_revisions` 확장, `comp_revision_sets`, 타입, `mapRevision`(파생 `status` 재계산·불변식 sanitize 포함), 담당 상태 전이, 재배정, 권한 가드. (마이그레이션만 적용하고 파생 로직이 없으면 신규 컬럼이 빈 채 중간 상태가 불완전하므로 묶는다. 라이브 적용은 한솔 승인 후.) — 단 세트 테이블의 `ALTER PUBLICATION ... comp_revision_sets`는 핸들러가 없는 중간 상태를 피하기 위해 **5단계(Realtime 배선)와 함께 적용**하거나 1단계에 핸들러 stub을 포함한다.
+2. **인라인 카드(시안 A)** — `RevisionPanel` 카드 + 담당 칩 + 최종완료 바 + 인라인 확장. 씬 모달/기본 탭 적용.
+3. **엔티티 감지 공통 입력 — 댓글류** — 훅 + 컴포넌트, 기존 `@멘션`이 있는 댓글류(`RevisionCommentThread`/`CommentPanel`)부터 교체.
+4. **엔티티 감지 — 메모/리테이크 전면 확장** — 리테이크 생성·완료멘트·씬/일정/작업 메모로 확장(§10.4). `MemoEditor`(TipTap)는 2차.
+5. **리테이크 허브(세트)** — 세트 CRUD + Realtime 배선, 허브 뷰, 자동취합 탭(테이블 시안 B), 항목 추가/가져오기, 진행률/자동완료.
 6. **디자인 스킬 설치 + 폴리싱** — 그리드 디자인 스킬 적용, morph 인터랙션 다듬기.
 
 각 단계: `npm run typecheck` + 관련 테스트 + `npm run build:vite` 통과 확인. (정식 배포 시 `npm run build`.)
