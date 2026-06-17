@@ -1909,9 +1909,21 @@ export async function updateRevision(
     frameNo: 'frame_no', imageUrl: 'image_url', assignee: 'assignee',
     resolvedBy: 'resolved_by', resolvedNote: 'resolved_note',
     resolvedAt: 'resolved_at', updatedAt: 'updated_at',
+    assigneeIds: 'assignee_ids',
+    assigneeStates: 'assignee_states',
+    setId: 'set_id',
+    finalResolvedBy: 'final_resolved_by',
+    finalResolvedAt: 'final_resolved_at',
   };
+  // JSONB 컬럼은 문자열로 전달받아 파싱해서 저장 (실패 시 원본 문자열 fallback)
+  const jsonFields = new Set(['assigneeIds', 'assigneeStates']);
   for (const [k, v] of Object.entries(updates)) {
-    dbUpdates[fieldMap[k] || k] = v;
+    const col = fieldMap[k] || k;
+    if (jsonFields.has(k)) {
+      try { dbUpdates[col] = JSON.parse(v); } catch { dbUpdates[col] = v; }
+    } else {
+      dbUpdates[col] = v;
+    }
   }
   const { error } = await supabase.from('comp_revisions').update(dbUpdates).eq('id', id);
   throwIfError(error);
