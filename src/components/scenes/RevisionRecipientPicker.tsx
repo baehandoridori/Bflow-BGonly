@@ -13,7 +13,8 @@
  */
 
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Check, Plus } from 'lucide-react';
+import { Check, Plus, Crown } from 'lucide-react';
+import { toast as sonnerToast } from 'sonner';
 import type { AppUser } from '@/types';
 import { avatarColor } from '@/utils/avatarColor';
 
@@ -25,6 +26,13 @@ interface Props {
   excludeUserId: string;
   /** 체크된 user.id 배열 (자동 체크 - 사용자 명시 해제 + 사용자 명시 추가) */
   onChange: (checkedIds: string[]) => void;
+  /**
+   * 담당자 승격 차원 활성화 (리테이크 허브 2단계). true 면 칩 클릭이 3-state 사이클:
+   * 미선택 → 알림 → 담당자(왕관) → 미선택. 담당자는 항상 알림에도 포함(불변식 assignee ⊆ notify).
+   */
+  enableAssignee?: boolean;
+  /** 담당자로 승격된 user.id 배열 (enableAssignee 일 때만 의미). 항상 checkedIds 의 부분집합. */
+  onAssigneesChange?: (assigneeIds: string[]) => void;
 }
 
 // ─── 컴포넌트 ──────────────────────────────────────────────────────────
@@ -34,11 +42,15 @@ export function RevisionRecipientPicker({
   defaultCheckedIds,
   excludeUserId,
   onChange,
+  enableAssignee = false,
+  onAssigneesChange,
 }: Props) {
   // 사용자가 명시적으로 추가한 user.id (defaultCheckedIds 외 추가분)
   const [extraIds, setExtraIds] = useState<string[]>([]);
   // 사용자가 명시적으로 unchecked 한 default 항목 (회색 표시 + onChange 제외)
   const [uncheckedDefaults, setUncheckedDefaults] = useState<string[]>([]);
+  // 담당자로 승격된 user.id (enableAssignee 일 때만). 항상 checked 의 부분집합으로 유지.
+  const [assigneeIds, setAssigneeIds] = useState<string[]>([]);
 
   const [searchOpen, setSearchOpen] = useState(false);
   const [query, setQuery] = useState('');
@@ -54,7 +66,8 @@ export function RevisionRecipientPicker({
   useEffect(() => {
     setUncheckedDefaults([]);
     setExtraIds([]);
-    emitChange([], []);
+    setAssigneeIds([]);
+    emitChange([], [], []);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [defaultCheckedKey]);
 
@@ -93,8 +106,8 @@ export function RevisionRecipientPicker({
     return extraIds.includes(id);
   }
 
-  // 부모로 전달할 최종 checked id 목록
-  function emitChange(nextUnchecked: string[], nextExtra: string[]) {
+  // 부모로 전달할 최종 checked id 목록. enableAssignee 면 담당자(checked 부분집합)도 함께 emit.
+  function emitChange(nextUnchecked: string[], nextExtra: string[], nextAssignees: string[] = assigneeIds) {
     const checked: string[] = [];
     for (const id of defaultCheckedIds) {
       if (id === excludeUserId) continue;
@@ -105,24 +118,56 @@ export function RevisionRecipientPicker({
       if (!checked.includes(id)) checked.push(id);
     }
     onChange(checked);
+    if (enableAssignee) {
+      // 불변식: 담당자는 항상 알림(checked)에 포함. checked 에서 빠진 담당자는 자동 탈락.
+      onAssigneesChange?.(nextAssignees.filter((id) => checked.includes(id)));
+    }
   }
 
   // (코덱스 P1 fix 4차, 2026-05-05) — 위 useEffect 에서 reset + emit 을 한 번에 처리하도록
   // 합쳤으므로 별도 sync effect 불필요. 마운트 시 초기 알림 대상 통보도 같은 경로로 발화.
 
-  function toggle(id: string) {
+  // 체크 상태만 변경 (담당 차원과 무관). makeChecked=true → 알림 포함, false → 제외.
+  function applyCheck(id: string, makeChecked: boolean, nextAssignees: string[] = assigneeIds) {
     if (defaultCheckedIds.includes(id)) {
-      // 자동 체크 항목 — uncheckedDefaults 에 토글
-      const next = uncheckedDefaults.includes(id)
-        ? uncheckedDefaults.filter(x => x !== id)
-        : [...uncheckedDefaults, id];
+      const next = makeChecked
+        ? uncheckedDefaults.filter((x) => x !== id)
+        : uncheckedDefaults.includes(id) ? uncheckedDefaults : [...uncheckedDefaults, id];
       setUncheckedDefaults(next);
-      emitChange(next, extraIds);
+      emitChange(next, extraIds, nextAssignees);
     } else {
-      // 수동 추가 항목 — extraIds 에서 제거 (= 칩 자체 제거)
-      const next = extraIds.filter(x => x !== id);
+      const next = makeChecked
+        ? extraIds.includes(id) ? extraIds : [...extraIds, id]
+        : extraIds.filter((x) => x !== id);
       setExtraIds(next);
-      emitChange(uncheckedDefaults, next);
+      emitChange(uncheckedDefaults, next, nextAssignees);
+    }
+  }
+
+  // 칩 클릭 사이클. enableAssignee=false 면 기존 2-state(알림 토글),
+  // true 면 3-state: 미선택 → 알림 → 담당자(왕관) → 미선택.
+  function cycle(id: string) {
+    const checked = isChecked(id);
+    if (!enableAssignee) {
+      applyCheck(id, !checked);
+      return;
+    }
+    const isAssignee = assigneeIds.includes(id);
+    if (!checked) {
+      // 미선택 → 알림
+      applyCheck(id, true);
+    } else if (!isAssignee) {
+      // 알림 → 담당자 (알림 유지)
+      const next = [...assigneeIds, id];
+      setAssigneeIds(next);
+      emitChange(uncheckedDefaults, extraIds, next);
+    } else {
+      // 담당자 → 미선택: 담당·알림 동시 해제 (spec §7.2 경고)
+      const u = allUsers.find((x) => x.id === id);
+      const nextAssignees = assigneeIds.filter((x) => x !== id);
+      setAssigneeIds(nextAssignees);
+      applyCheck(id, false, nextAssignees);
+      sonnerToast(`${u?.name ?? '담당자'} 님을 담당과 알림에서 함께 제외했어요`);
     }
   }
 
@@ -148,17 +193,27 @@ export function RevisionRecipientPicker({
       <div className="flex flex-wrap items-center gap-1.5">
         {visibleUsers.map(u => {
           const cked = isChecked(u.id);
+          const isAssignee = enableAssignee && assigneeIds.includes(u.id);
+          const title = enableAssignee
+            ? isAssignee
+              ? '담당자 — 클릭하면 담당·알림에서 함께 제외'
+              : cked
+                ? '클릭하면 담당자로 지정 (알림 유지)'
+                : '클릭하면 알림 대상에 포함'
+            : cked
+              ? '클릭하면 알림 대상에서 제외'
+              : '클릭하면 알림 대상에 포함';
           return (
             <button
               key={u.id}
               type="button"
-              onClick={() => toggle(u.id)}
+              onClick={() => cycle(u.id)}
               className={`inline-flex items-center gap-1.5 pl-1 pr-2.5 py-1 rounded-full border text-[12px] cursor-pointer transition-colors ${
                 cked
                   ? 'bg-accent/15 border-accent/60 text-text-primary'
                   : 'bg-bg-primary/50 border-bg-border/50 text-text-secondary hover:border-accent/40'
               }`}
-              title={cked ? '클릭하면 알림 대상에서 제외' : '클릭하면 알림 대상에 포함'}
+              title={title}
             >
               <span
                 className="w-5 h-5 rounded-full inline-flex items-center justify-center text-[10px] font-bold text-white"
@@ -172,14 +227,22 @@ export function RevisionRecipientPicker({
                   컴포지터
                 </span>
               )}
-              {cked && (
+              {isAssignee ? (
+                <span
+                  className="inline-flex items-center justify-center px-1 h-3.5 rounded-full bg-accent text-white text-[8px] font-bold gap-0.5"
+                  title="담당자"
+                >
+                  <Crown className="w-2.5 h-2.5" strokeWidth={2.6} />
+                  담당
+                </span>
+              ) : cked ? (
                 <span
                   className="w-3.5 h-3.5 rounded-full bg-accent text-white inline-flex items-center justify-center"
                   aria-hidden
                 >
                   <Check className="w-2.5 h-2.5" strokeWidth={3} />
                 </span>
-              )}
+              ) : null}
             </button>
           );
         })}
@@ -193,6 +256,12 @@ export function RevisionRecipientPicker({
           다른 사람 추가
         </button>
       </div>
+
+      {enableAssignee && (
+        <p className="mt-1.5 text-[10px] text-text-secondary/60">
+          칩을 한 번 더 누르면 <span className="text-accent-sub font-semibold">담당자</span>로 지정돼요 — 담당자는 알림도 함께 받습니다.
+        </p>
+      )}
 
       {searchOpen && (
         <div className="mt-2 bg-bg-card border border-bg-border/60 rounded-lg p-2 max-w-md">
