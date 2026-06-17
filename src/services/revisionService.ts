@@ -20,6 +20,9 @@ import {
 import { normalizeSceneIdKey } from '../utils/sceneIdKey';
 import { normalizePartIdKey } from '../utils/partId';
 import { buildRevisionNotificationUserIds } from '../utils/revisionNotificationRecipients';
+import {
+  startAssignee, completeAssignee, revertAssignee, deriveRevisionStatus, sanitizeAssignees,
+} from '../utils/revisionWorkflow';
 
 const REVISIONS_FILE = 'revisions.json';
 const DIGITS_ONLY_RE = /^\d+$/;
@@ -567,6 +570,74 @@ export async function updateRevisionStatus(
     }
   }
   await saveLocal(all);
+}
+
+// ─── 담당 워크플로우 (리테이크 허브 1단계) ─────────────────────────
+// 모두 deriveRevisionStatus 로 status 를 파생해 서버에 함께 보낸다.
+// supabaseUpdateRevision 은 Record<string,string> 만 받으므로 객체/배열은 JSON 문자열로 직렬화한다.
+
+/** 담당자 본인이 작업 시작 (none/pending → in_progress). */
+export async function startAssigneeWork(rev: CompRevision, userId: string): Promise<void> {
+  const now = new Date().toISOString();
+  const states = startAssignee(rev.assigneeStates ?? {}, userId, now);
+  const status = deriveRevisionStatus(rev.assigneeIds ?? [], states, rev.finalResolvedAt);
+  await window.electronAPI.supabaseUpdateRevision(rev.id, {
+    assigneeStates: JSON.stringify(states), status, updatedAt: now,
+  });
+}
+
+/** 담당자 본인 완료 (멘트 포함). */
+export async function completeAssigneeWork(rev: CompRevision, userId: string, note: string): Promise<void> {
+  const now = new Date().toISOString();
+  const states = completeAssignee(rev.assigneeStates ?? {}, userId, note, now);
+  const status = deriveRevisionStatus(rev.assigneeIds ?? [], states, rev.finalResolvedAt);
+  await window.electronAPI.supabaseUpdateRevision(rev.id, {
+    assigneeStates: JSON.stringify(states), status, updatedAt: now,
+  });
+}
+
+/** 담당자 재배정 (요청자/컴포지터급). assigneeIds 는 notify 의 부분집합으로 sanitize. */
+export async function reassignRevision(rev: CompRevision, nextAssigneeIds: string[]): Promise<void> {
+  const now = new Date().toISOString();
+  const { assigneeIds, assigneeStates } = sanitizeAssignees(
+    nextAssigneeIds, rev.assigneeStates ?? {}, rev.notifyUserIds ?? [],
+  );
+  const status = deriveRevisionStatus(assigneeIds, assigneeStates, rev.finalResolvedAt);
+  await window.electronAPI.supabaseUpdateRevision(rev.id, {
+    assigneeIds: JSON.stringify(assigneeIds),
+    assigneeStates: JSON.stringify(assigneeStates),
+    status, updatedAt: now,
+  });
+}
+
+/** 최종 완료 (요청자/컴포지터급). */
+export async function finalResolveRevision(rev: CompRevision, byName: string): Promise<void> {
+  const now = new Date().toISOString();
+  await window.electronAPI.supabaseUpdateRevision(rev.id, {
+    finalResolvedAt: now, finalResolvedBy: byName, status: 'resolved', updatedAt: now,
+  });
+}
+
+/** 최종 완료 되돌리기. */
+export async function revertFinalResolve(rev: CompRevision): Promise<void> {
+  const now = new Date().toISOString();
+  const status = deriveRevisionStatus(rev.assigneeIds ?? [], rev.assigneeStates ?? {}, null);
+  await window.electronAPI.supabaseUpdateRevision(rev.id, {
+    finalResolvedAt: '', finalResolvedBy: '', status, updatedAt: now,
+  });
+}
+
+/** 담당자 본인 완료 되돌리기 (done → in_progress). 최종완료 상태면 차단. */
+export async function revertAssigneeWork(rev: CompRevision, userId: string): Promise<void> {
+  if (rev.finalResolvedAt) {
+    throw new Error('최종 완료된 리테이크는 먼저 최종 완료를 되돌려야 합니다.');
+  }
+  const now = new Date().toISOString();
+  const states = revertAssignee(rev.assigneeStates ?? {}, userId);
+  const status = deriveRevisionStatus(rev.assigneeIds ?? [], states, rev.finalResolvedAt);
+  await window.electronAPI.supabaseUpdateRevision(rev.id, {
+    assigneeStates: JSON.stringify(states), status, updatedAt: now,
+  });
 }
 
 /**
