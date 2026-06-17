@@ -1,7 +1,13 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { deriveRevisionStatus, sanitizeAssignees } from '../src/utils/revisionWorkflow.ts';
+import {
+  deriveRevisionStatus,
+  sanitizeAssignees,
+  startAssignee,
+  completeAssignee,
+  revertAssignee,
+} from '../src/utils/revisionWorkflow.ts';
 import type { RevisionAssigneeState } from '../src/types/index.ts';
 
 const S = (state: 'pending' | 'in_progress' | 'done'): RevisionAssigneeState => ({ state });
@@ -46,4 +52,29 @@ test('sanitizeAssignees: 빈 입력', () => {
   const r = sanitizeAssignees([], {}, []);
   assert.deepEqual(r.assigneeIds, []);
   assert.deepEqual(r.assigneeStates, {});
+});
+
+// ─── Task 6: 담당 상태 전이 ───────────────────
+
+test('startAssignee: pending → in_progress, startedAt 세팅', () => {
+  const next = startAssignee({ a: S('pending') }, 'a', '2026-06-17T01:00:00Z');
+  assert.equal(next.a.state, 'in_progress');
+  assert.equal(next.a.startedAt, '2026-06-17T01:00:00Z');
+});
+test('completeAssignee: → done, note/doneAt 세팅', () => {
+  const next = completeAssignee({ a: S('in_progress') }, 'a', 'G:\\path\\v3.psd', '2026-06-17T02:00:00Z');
+  assert.equal(next.a.state, 'done');
+  assert.equal(next.a.note, 'G:\\path\\v3.psd');
+  assert.equal(next.a.doneAt, '2026-06-17T02:00:00Z');
+});
+test('revertAssignee: done → in_progress, doneAt 제거, startedAt 보존', () => {
+  const next = revertAssignee({ a: { state: 'done', note: 'x', startedAt: 's', doneAt: 't' } }, 'a');
+  assert.equal(next.a.state, 'in_progress');
+  assert.equal(next.a.doneAt, undefined);
+  assert.equal(next.a.startedAt, 's');
+});
+test('전이 함수는 원본을 변경하지 않는다(불변)', () => {
+  const orig = { a: S('pending') };
+  startAssignee(orig, 'a', 't');
+  assert.equal(orig.a.state, 'pending');
 });
