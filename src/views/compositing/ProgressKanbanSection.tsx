@@ -32,9 +32,10 @@ export function ProgressKanbanSection({
   commentSeenByRev?: Map<string, boolean>;
   onSelectRevision: (rev: CompRevision) => void;
 }) {
+  // assignee_done(담당 완료/최종 대기)은 임시로 진행중에 합산 — 정식 칸반 컬럼은 2단계 UI에서 분리
   const byStatus = useMemo(() => ({
     open: revisions.filter((r) => r.status === 'open'),
-    in_progress: revisions.filter((r) => r.status === 'in_progress'),
+    in_progress: revisions.filter((r) => r.status === 'in_progress' || r.status === 'assignee_done'),
     resolved: revisions.filter((r) => r.status === 'resolved'),
   }), [revisions]);
 

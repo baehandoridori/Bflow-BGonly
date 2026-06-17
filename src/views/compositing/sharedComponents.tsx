@@ -116,6 +116,7 @@ export function StatusDropdown({
     return () => document.removeEventListener('mousedown', handler);
   }, [open]);
 
+  // assignee_done은 담당자 전원 완료 시 자동 파생되는 상태 — 수동 선택 대상 아님
   const options: RevisionStatus[] = ['open', 'in_progress', 'resolved'];
 
   return (

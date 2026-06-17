@@ -32,6 +32,7 @@ EXCEPTION WHEN duplicate_object THEN
 END $$;
 
 -- ─── 3) scene_id NOT NULL 완화 (세트 '전반' 항목) ───
+-- 기존 데이터(scene_id 있는 행)는 영향 없음. 이후 신규 '전반' 항목만 NULL 허용. 재실행 시 no-op(멱등).
 ALTER TABLE comp_revisions ALTER COLUMN scene_id DROP NOT NULL;
 
 -- ─── 4) comp_revision_sets 테이블 ───
@@ -39,7 +40,7 @@ CREATE TABLE IF NOT EXISTS comp_revision_sets (
   id             UUID         PRIMARY KEY DEFAULT gen_random_uuid(),
   title          TEXT         NOT NULL,
   episode_number INTEGER      NULL,
-  department     TEXT         NULL,
+  department     TEXT         NULL,  -- 'bg' | 'acting' | null. 값 범위는 앱 타입에서만 통제(DB CHECK 미적용).
   aggregator_id  TEXT         NULL REFERENCES users(id) ON DELETE SET NULL,
   status         TEXT         NOT NULL DEFAULT 'open' CHECK (status IN ('open','done')),
   created_by     TEXT         NULL,
