@@ -1809,6 +1809,7 @@ export async function addRevision(
   assignee: string,
   createdAt: string,
   notifyUserIdsJson?: string,
+  assigneeIdsJson?: string,
 ): Promise<void> {
   // partUuid가 비어있으면 sceneId(=sceneKey)에서 역조회
   let resolvedPartUuid = partUuid;
@@ -1857,6 +1858,22 @@ export async function addRevision(
     }
   }
 
+  // 리테이크 허브: 담당자 user.id 배열 + 초기 상태 맵.
+  let assigneeIds: string[] = [];
+  if (assigneeIdsJson) {
+    try {
+      const parsed = JSON.parse(assigneeIdsJson);
+      if (Array.isArray(parsed)) assigneeIds = parsed.filter((x) => typeof x === 'string');
+    } catch {
+      console.warn('[addRevision] assigneeIdsJson 파싱 실패:', assigneeIdsJson);
+    }
+  }
+  // 불변식: 담당자는 알림 대상에 포함
+  const notifySet = new Set(notifyUserIds);
+  assigneeIds = assigneeIds.filter((id) => notifySet.has(id));
+  const assigneeStates: Record<string, { state: string }> = {};
+  for (const id of assigneeIds) assigneeStates[id] = { state: 'pending' };
+
   const { error } = await supabase.from('comp_revisions').insert({
     id,
     part_id: resolvedPartUuid,
@@ -1874,6 +1891,8 @@ export async function addRevision(
     assignee,
     created_at: createdAt,
     notify_user_ids: notifyUserIds,
+    assignee_ids: assigneeIds,
+    assignee_states: assigneeStates,
   });
   throwIfError(error);
   broadcastDataChange('comp_revisions', 'INSERT');
