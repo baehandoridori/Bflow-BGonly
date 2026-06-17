@@ -2419,6 +2419,8 @@ export type ActionType =
   | 'stage_lo' | 'stage_done' | 'stage_review' | 'stage_png'
   | 'memo_update' | 'comment_add'
   | 'revision_add' | 'revision_in_progress' | 'revision_resolve' | 'revision_delete'
+  // 리테이크 허브 1단계: 담당자 본인 완료 / 최종 완료 / 재배정
+  | 'revision_assignee_done' | 'revision_final_resolve' | 'revision_reassign'
   // v1.18.0: 리비전 맥락 댓글
   | 'revision_comment'
   | 'scene_add' | 'scene_delete'

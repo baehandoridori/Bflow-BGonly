@@ -1897,11 +1897,15 @@ ipcMain.handle('supabase:add-revision', wrapIpc(async (_e: unknown, id: string, 
   }));
 ipcMain.handle('supabase:update-revision', wrapIpc(async (_e: unknown, id: string, updates: Record<string, string>) => {
   await sbUpdateRevision(id, updates);
-  // status 전이만 활동 기록 (in_progress / resolved). 한솔 결정 (2026-05-02): 진행중도 audit.
-  const statusActionType: ActionType | null =
-    updates.status === 'resolved' ? 'revision_resolve'
-    : updates.status === 'in_progress' ? 'revision_in_progress'
-    : null;
+  // status 전이/담당 워크플로우 활동 기록. 한솔 결정 (2026-05-02): 진행중도 audit.
+  // 우선순위: 최종완료 > 담당완료 > 진행중 > 해결 > 재배정.
+  // 주의: finalResolvedAt 이 빈 문자열('')이면(최종완료 되돌리기) truthy 아님 → 분기 제외(의도된 조용한 스킵).
+  let statusActionType: ActionType | null = null;
+  if (updates.finalResolvedAt) statusActionType = 'revision_final_resolve';
+  else if (updates.status === 'assignee_done') statusActionType = 'revision_assignee_done';
+  else if (updates.status === 'in_progress') statusActionType = 'revision_in_progress';
+  else if (updates.status === 'resolved') statusActionType = 'revision_resolve';
+  else if (updates.assigneeIds) statusActionType = 'revision_reassign';
   if (currentActivityUser && statusActionType) {
     try {
       const { data: revRow } = await supabaseClient

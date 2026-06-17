@@ -595,6 +595,8 @@ export type ActionType =
   | 'phase_wait' | 'phase_work' | 'phase_feedback' | 'phase_done'
   | 'memo_update' | 'comment_add'
   | 'revision_add' | 'revision_in_progress' | 'revision_resolve' | 'revision_delete'
+  // 리테이크 허브 1단계: 담당자 본인 완료 / 최종 완료 / 재배정
+  | 'revision_assignee_done' | 'revision_final_resolve' | 'revision_reassign'
   // v1.18.0: 리테이크 맥락 댓글 — 일반 comment_add 와 분리해 활동 피드에서 별도 표시
   | 'revision_comment'
   | 'scene_add' | 'scene_delete'
