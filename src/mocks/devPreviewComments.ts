@@ -37,6 +37,12 @@ export interface DevPreviewRevisionRow {
   updatedAt: string;
   resolvedAt: string;
   notifyUserIds?: string[] | null;
+  // 리테이크 허브 2단계 — 담당자 워크플로우 (preview 카드 검증용)
+  assigneeIds?: string[];
+  assigneeStates?: Record<string, { state: 'pending' | 'in_progress' | 'done'; note?: string; startedAt?: string; doneAt?: string }>;
+  setId?: string | null;
+  finalResolvedBy?: string;
+  finalResolvedAt?: string;
 }
 
 export const DEV_PREVIEW_UNREAD_COMMENT_IDS = [

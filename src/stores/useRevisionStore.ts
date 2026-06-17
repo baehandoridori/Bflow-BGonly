@@ -23,6 +23,8 @@ export interface CreateRevisionInput {
   requesterName: string;
   /** 알림 받을 사람 user.id 배열 (등록자 본인 포함 가능 — 자기 알림은 발송 시 스킵). */
   notifyUserIds: string[];
+  /** 생성 시 담당자 지정 (리테이크 허브 2단계). 항상 notifyUserIds 부분집합으로 보정됨. */
+  assigneeIds?: string[];
 }
 
 interface RevisionState {

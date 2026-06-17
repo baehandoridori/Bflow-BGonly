@@ -623,8 +623,10 @@ export function installDevElectronAPI(): void {
       assignee: string,
       createdAt: string,
       notifyUserIdsJson?: string,
+      assigneeIdsJson?: string,
     ) => {
       const revisions = getMockRevisionRows();
+      const mockAssigneeIds = parseJsonStringArray(assigneeIdsJson);
       revisions.push({
         id,
         sceneKey,
@@ -644,6 +646,11 @@ export function installDevElectronAPI(): void {
         updatedAt: createdAt,
         resolvedAt: '',
         notifyUserIds: parseJsonStringArray(notifyUserIdsJson),
+        assigneeIds: mockAssigneeIds,
+        assigneeStates: Object.fromEntries(mockAssigneeIds.map((aid) => [aid, { state: 'pending' }])),
+        setId: null,
+        finalResolvedBy: '',
+        finalResolvedAt: '',
       });
       localStore.__revisionRows = revisions;
       window.dispatchEvent(new CustomEvent('bflow:revisions-invalidated'));

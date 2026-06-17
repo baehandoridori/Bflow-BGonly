@@ -431,6 +431,8 @@ export interface CreateRevisionServiceInput {
   requesterId: string;
   requesterName: string;
   notifyUserIds: string[];
+  /** 생성 시 담당자 지정 (리테이크 허브 2단계). 항상 notifyUserIds 의 부분집합으로 보정됨. */
+  assigneeIds?: string[];
 }
 
 export async function createRevision(input: CreateRevisionServiceInput): Promise<CompRevision> {
@@ -445,6 +447,10 @@ export async function createRevision(input: CreateRevisionServiceInput): Promise
     notifyUserIds: input.notifyUserIds,
     requesterId: input.requesterId,
   });
+  // 담당자 지정(2단계): 불변식 assignee_ids ⊆ notify_user_ids 복원 후 초기 status 파생.
+  // (담당자 있어도 전원 pending 이라 보통 'open'. status 는 읽을 때 mapRevision 이 재파생하는 캐시값.)
+  const { assigneeIds, assigneeStates } = sanitizeAssignees(input.assigneeIds ?? [], {}, notifyUserIds);
+  const initialStatus = deriveRevisionStatus(assigneeIds, assigneeStates, undefined);
 
   if (sheetsMode) {
     const store = await loadAllRevisions();
@@ -453,7 +459,7 @@ export async function createRevision(input: CreateRevisionServiceInput): Promise
       id,
       sceneKey: normalizedSceneKey,
       revisionNo,
-      status: 'open',
+      status: initialStatus,
       priority,
       description: input.description,
       frameNo: undefined,
@@ -465,8 +471,8 @@ export async function createRevision(input: CreateRevisionServiceInput): Promise
       createdAt: now,
       updatedAt: now,
       notifyUserIds,
-      assigneeIds: [],
-      assigneeStates: {},
+      assigneeIds,
+      assigneeStates,
       setId: null,
       finalResolvedBy: '',
       finalResolvedAt: undefined,
@@ -474,10 +480,11 @@ export async function createRevision(input: CreateRevisionServiceInput): Promise
 
     // Supabase: partUuid + sceneId로 저장 (sceneKey를 그대로 partUuid 자리에 전달 — 서버에서 해석)
     await window.electronAPI.supabaseAddRevision(
-      id, '', normalizedSceneKey, revisionNo, 'open', priority,
+      id, '', normalizedSceneKey, revisionNo, initialStatus, priority,
       input.description, '', input.imageUrl || '', department || '', input.lookupDepartment || department || '',
       input.requesterId, input.requesterName, '', now,
       JSON.stringify(notifyUserIds),
+      JSON.stringify(assigneeIds),
     );
 
     // 캐시 업데이트
@@ -494,7 +501,7 @@ export async function createRevision(input: CreateRevisionServiceInput): Promise
     id,
     sceneKey: normalizedSceneKey,
     revisionNo,
-    status: 'open',
+    status: initialStatus,
     priority,
     description: input.description,
     frameNo: undefined,
@@ -506,6 +513,11 @@ export async function createRevision(input: CreateRevisionServiceInput): Promise
     createdAt: now,
     updatedAt: now,
     notifyUserIds,
+    assigneeIds,
+    assigneeStates,
+    setId: null,
+    finalResolvedBy: '',
+    finalResolvedAt: undefined,
   };
 
   if (!all[normalizedSceneKey]) all[normalizedSceneKey] = [];
