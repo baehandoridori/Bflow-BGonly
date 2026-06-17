@@ -64,6 +64,10 @@ test('startAssignee: pending → in_progress, startedAt 세팅', () => {
   assert.equal(next.a.state, 'in_progress');
   assert.equal(next.a.startedAt, '2026-06-17T01:00:00Z');
 });
+test('startAssignee: 이미 startedAt 있으면 보존(재시작 시 덮어쓰지 않음)', () => {
+  const next = startAssignee({ a: { state: 'in_progress', startedAt: 'first' } }, 'a', 'second');
+  assert.equal(next.a.startedAt, 'first');
+});
 test('completeAssignee: → done, note/doneAt 세팅', () => {
   const next = completeAssignee({ a: S('in_progress') }, 'a', 'G:\\path\\v3.psd', '2026-06-17T02:00:00Z');
   assert.equal(next.a.state, 'done');

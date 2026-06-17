@@ -4,7 +4,7 @@
  * - UI/DB 의존 없음 — 입력 → 출력만.
  * - 모든 함수 불변: 입력 객체를 직접 수정하지 않음.
  *
- * spec: docs/superpowers/specs/2026-06-17-retake-hub-phase1.md
+ * spec: docs/superpowers/specs/2026-06-17-retake-hub-redesign-design.md
  */
 
 import type { RevisionStatus, RevisionAssigneeState, AppUser, CompRevision } from '@/types';
@@ -69,12 +69,14 @@ export function completeAssignee(states: Readonly<StateMap>, userId: string, not
 export function revertAssignee(states: Readonly<StateMap>, userId: string): StateMap {
   const prev = states[userId] ?? { state: 'pending' };
   const next: RevisionAssigneeState = { ...prev, state: 'in_progress' };
+  // doneAt은 done 상태에서만 존재 — 되돌릴 때 항상 제거. (JSONB 저장 시 undefined 필드는 mapRevision/직렬화에서 strip)
   delete next.doneAt;
   return { ...states, [userId]: next };
 }
 
 // ─── 권한 가드 ────────────────────────────────
 
+// 재배정·최종완료 권한은 동일 정책(요청자 본인 또는 컴포지터급). 의미 구분을 위해 별도 export 유지.
 /** 컴포지터급(컴포지터/admin/배한솔) 또는 리테이크 요청자 본인. */
 function isRequesterOrCompositor(
   user: AppUser | null | undefined,
