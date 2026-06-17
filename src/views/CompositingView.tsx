@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo, useCallback } from 'react';
 import { AnimatePresence } from 'framer-motion';
-import { ArrowUpDown, BarChart3, CheckCircle2, Circle, Clock, Filter, Layers, List, ListFilter, PlayCircle, Plus, Search } from 'lucide-react';
+import { ArrowUpDown, BarChart3, CheckCheck, CheckCircle2, Circle, Clock, Filter, Layers, List, ListFilter, PlayCircle, Plus, Search } from 'lucide-react';
 import { useRevisionStore } from '@/stores/useRevisionStore';
 import { useDataStore } from '@/stores/useDataStore';
 import { useAuthStore } from '@/stores/useAuthStore';
@@ -627,6 +627,7 @@ export default function CompositingView({
                 { key: 'all' as const, label: '전체', icon: <Circle size={11} strokeWidth={2.4} /> },
                 { key: 'open' as const, label: '대기', icon: <Clock size={11} strokeWidth={2.4} /> },
                 { key: 'in_progress' as const, label: '진행중', icon: <PlayCircle size={11} strokeWidth={2.4} /> },
+                { key: 'assignee_done' as const, label: '담당완료', icon: <CheckCheck size={11} strokeWidth={2.4} /> },
                 { key: 'resolved' as const, label: '완료', icon: <CheckCircle2 size={11} strokeWidth={2.4} /> },
               ]).map(({ key, label, icon }) => (
                 <button
