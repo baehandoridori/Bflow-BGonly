@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { deriveRevisionStatus } from '../src/utils/revisionWorkflow.ts';
+import { deriveRevisionStatus, sanitizeAssignees } from '../src/utils/revisionWorkflow.ts';
 import type { RevisionAssigneeState } from '../src/types/index.ts';
 
 const S = (state: 'pending' | 'in_progress' | 'done'): RevisionAssigneeState => ({ state });
@@ -27,4 +27,23 @@ test('deriveRevisionStatus: 누군가 in_progress면 in_progress', () => {
 });
 test('deriveRevisionStatus: state 누락 항목은 pending 취급', () => {
   assert.equal(deriveRevisionStatus(['a', 'b'], { a: S('done') }, null), 'in_progress');
+});
+
+// ─── Task 5: sanitizeAssignees ────────────────
+
+test('sanitizeAssignees: notify에 없는 담당자 제거', () => {
+  const r = sanitizeAssignees(['a', 'b', 'c'], { a: S('done'), b: S('in_progress'), c: S('pending') }, ['a', 'b']);
+  assert.deepEqual(r.assigneeIds, ['a', 'b']);
+  assert.deepEqual(Object.keys(r.assigneeStates).sort(), ['a', 'b']);
+  assert.equal(r.assigneeStates.a.state, 'done');
+});
+test('sanitizeAssignees: state 없는 담당자는 pending으로 채움', () => {
+  const r = sanitizeAssignees(['a'], {}, ['a', 'b']);
+  assert.deepEqual(r.assigneeIds, ['a']);
+  assert.equal(r.assigneeStates.a.state, 'pending');
+});
+test('sanitizeAssignees: 빈 입력', () => {
+  const r = sanitizeAssignees([], {}, []);
+  assert.deepEqual(r.assigneeIds, []);
+  assert.deepEqual(r.assigneeStates, {});
 });
