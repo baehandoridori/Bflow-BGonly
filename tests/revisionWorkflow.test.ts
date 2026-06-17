@@ -7,8 +7,11 @@ import {
   startAssignee,
   completeAssignee,
   revertAssignee,
+  canReassignRevision,
+  canFinalResolveRevision,
+  canActAsAssignee,
 } from '../src/utils/revisionWorkflow.ts';
-import type { RevisionAssigneeState } from '../src/types/index.ts';
+import type { RevisionAssigneeState, AppUser, CompRevision } from '../src/types/index.ts';
 
 const S = (state: 'pending' | 'in_progress' | 'done'): RevisionAssigneeState => ({ state });
 
@@ -77,4 +80,36 @@ test('전이 함수는 원본을 변경하지 않는다(불변)', () => {
   const orig = { a: S('pending') };
   startAssignee(orig, 'a', 't');
   assert.equal(orig.a.state, 'pending');
+});
+
+// ─── Task 7: 권한 가드 ────────────────────────
+
+const user = (over: Partial<AppUser>): AppUser =>
+  ({ id: 'u', name: 'n', slackId: '', password: '', isInitialPassword: false, createdAt: '', ...over });
+const rev = (over: Partial<CompRevision>): CompRevision =>
+  ({ id: 'r', sceneKey: '', revisionNo: 1, status: 'open', priority: 'normal', description: '',
+     requesterId: 'req', requesterName: '', createdAt: '', updatedAt: '', ...over });
+
+test('canReassignRevision: 요청자 본인 허용', () => {
+  assert.equal(canReassignRevision(user({ id: 'req' }), rev({ requesterId: 'req' })), true);
+});
+test('canReassignRevision: 컴포지터 허용', () => {
+  assert.equal(canReassignRevision(user({ id: 'x', isCompositor: true }), rev({})), true);
+});
+test('canReassignRevision: admin 허용', () => {
+  assert.equal(canReassignRevision(user({ id: 'x', role: 'admin' }), rev({})), true);
+});
+test('canReassignRevision: 무관한 일반 사용자 거부', () => {
+  assert.equal(canReassignRevision(user({ id: 'x' }), rev({ requesterId: 'req' })), false);
+});
+test('canReassignRevision: null 사용자 거부', () => {
+  assert.equal(canReassignRevision(null, rev({})), false);
+});
+test('canFinalResolveRevision: 요청자/컴포지터급만', () => {
+  assert.equal(canFinalResolveRevision(user({ id: 'req' }), rev({ requesterId: 'req' })), true);
+  assert.equal(canFinalResolveRevision(user({ id: 'x' }), rev({ requesterId: 'req' })), false);
+});
+test('canActAsAssignee: 담당자 본인만', () => {
+  assert.equal(canActAsAssignee(user({ id: 'a' }), rev({ assigneeIds: ['a', 'b'] })), true);
+  assert.equal(canActAsAssignee(user({ id: 'z' }), rev({ assigneeIds: ['a', 'b'] })), false);
 });
