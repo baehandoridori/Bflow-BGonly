@@ -222,11 +222,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
       id: string, partUuid: string, sceneId: string, revisionNo: number, status: string,
       priority: string, description: string, frameNo: string, imageUrl: string,
       department: string, lookupDepartment: string, requesterId: string, requesterName: string, assignee: string, createdAt: string,
-      notifyUserIdsJson: string,
+      notifyUserIdsJson: string, assigneeIdsJson?: string,
     ) =>
       ipcRenderer.invoke('supabase:add-revision', id, partUuid, sceneId, revisionNo, status,
         priority, description, frameNo, imageUrl, department, lookupDepartment, requesterId, requesterName, assignee, createdAt,
-        notifyUserIdsJson),
+        notifyUserIdsJson, assigneeIdsJson),
   supabaseUpdateRevision: (id: string, updates: Record<string, string>) =>
     ipcRenderer.invoke('supabase:update-revision', id, updates),
   supabaseDeleteRevision: (id: string) =>
