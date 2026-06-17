@@ -329,7 +329,7 @@ function rowToRevision(row: {
     resolvedAt: row.resolvedAt || undefined,
     notifyUserIds: Array.isArray(row.notifyUserIds) ? row.notifyUserIds : undefined,
     assigneeIds: Array.isArray(row.assigneeIds) ? row.assigneeIds : [],
-    assigneeStates: (row.assigneeStates && typeof row.assigneeStates === 'object') ? row.assigneeStates : {},
+    assigneeStates: (row.assigneeStates && typeof row.assigneeStates === 'object' && !Array.isArray(row.assigneeStates)) ? row.assigneeStates : {},
     setId: (row.setId as string) ?? null,
     finalResolvedBy: (row.finalResolvedBy as string) ?? '',
     finalResolvedAt: (row.finalResolvedAt as string) || undefined,
@@ -465,6 +465,11 @@ export async function createRevision(input: CreateRevisionServiceInput): Promise
       createdAt: now,
       updatedAt: now,
       notifyUserIds,
+      assigneeIds: [],
+      assigneeStates: {},
+      setId: null,
+      finalResolvedBy: '',
+      finalResolvedAt: undefined,
     };
 
     // Supabase: partUuid + sceneId로 저장 (sceneKey를 그대로 partUuid 자리에 전달 — 서버에서 해석)

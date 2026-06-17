@@ -179,7 +179,7 @@ export interface SupabaseRevision {
   assigneeStates: Record<string, { state: string; note?: string; startedAt?: string; doneAt?: string }>;
   setId: string | null;
   finalResolvedBy: string;
-  finalResolvedAt: string | null;
+  finalResolvedAt: string | undefined;
 }
 
 // ─── 헬퍼 ──────────────────────────────────────
@@ -1917,10 +1917,11 @@ export async function updateRevision(
   };
   // JSONB 컬럼은 문자열로 전달받아 파싱해서 저장 (실패 시 원본 문자열 fallback)
   const jsonFields = new Set(['assigneeIds', 'assigneeStates']);
-  // TIMESTAMPTZ/UUID 컬럼은 빈 문자열 대신 null 저장 (PostgreSQL 타입 에러 방지)
-  const nullableWhenEmpty = new Set(['finalResolvedAt', 'setId', 'resolvedAt']);
+  // TIMESTAMPTZ/UUID/TEXT 컬럼은 빈 문자열 대신 null 저장 (PostgreSQL 타입 에러 방지)
+  const nullableWhenEmpty = new Set(['finalResolvedAt', 'setId', 'resolvedAt', 'finalResolvedBy']);
   for (const [k, v] of Object.entries(updates)) {
-    const col = fieldMap[k] || k;
+    const col = fieldMap[k];
+    if (!col) { console.warn('[updateRevision] 허용되지 않은 필드 무시:', k); continue; }
     if (jsonFields.has(k)) {
       try { dbUpdates[col] = JSON.parse(v); } catch { dbUpdates[col] = v; }
     } else if (nullableWhenEmpty.has(k) && v === '') {
@@ -1947,16 +1948,16 @@ function mapRevision(r: Record<string, unknown>): SupabaseRevision & { sceneKey:
   const assigneeStates = (r.assignee_states && typeof r.assignee_states === 'object' && !Array.isArray(r.assignee_states))
     ? (r.assignee_states as Record<string, { state: string; note?: string; startedAt?: string; doneAt?: string }>)
     : {};
-  const finalResolvedAt = (r.final_resolved_at as string) || null;
+  const finalResolvedAt = (r.final_resolved_at as string) || undefined;
 
   // 불변식 복원: assignee_ids ⊆ notify_user_ids
   const allowed = new Set(notifyUserIds);
   const cleanAssigneeIds = assigneeIds.filter((id) => allowed.has(id));
 
-  // assigneeStates도 cleanAssigneeIds 기준으로 정제 (ghost state 제거)
+  // assigneeStates도 cleanAssigneeIds 기준으로 정제 (ghost state 제거, 누락 항목은 pending으로 채움)
   const cleanAssigneeStates: Record<string, { state: string; note?: string; startedAt?: string; doneAt?: string }> = {};
   for (const id of cleanAssigneeIds) {
-    if (assigneeStates[id]) cleanAssigneeStates[id] = assigneeStates[id];
+    cleanAssigneeStates[id] = assigneeStates[id] ?? { state: 'pending' };
   }
 
   // 파생 status (권위) — 저장된 status는 캐시로 보고 재계산값으로 덮어씀
