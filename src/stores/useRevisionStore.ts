@@ -215,9 +215,10 @@ export const useRevisionStore = create<RevisionState>((set, get) => ({
   },
 
   reassign: async (rev, nextAssigneeIds) => {
+    const now = new Date().toISOString();
     const { assigneeIds, assigneeStates } = sanitizeAssignees(nextAssigneeIds, rev.assigneeStates ?? {}, rev.notifyUserIds ?? []);
     const status = deriveRevisionStatus(assigneeIds, assigneeStates, rev.finalResolvedAt);
-    get().updateRevisionOptimistic(rev.id, rev.sceneKey, { assigneeIds, assigneeStates, status });
+    get().updateRevisionOptimistic(rev.id, rev.sceneKey, { assigneeIds, assigneeStates, status, updatedAt: now });
     try { await revisionService.reassignRevision(rev, nextAssigneeIds); }
     catch { await get().loadRevisions(); }
   },
@@ -230,17 +231,19 @@ export const useRevisionStore = create<RevisionState>((set, get) => ({
   },
 
   revertFinalResolve: async (rev) => {
+    const now = new Date().toISOString();
     const status = deriveRevisionStatus(rev.assigneeIds ?? [], rev.assigneeStates ?? {}, null);
-    get().updateRevisionOptimistic(rev.id, rev.sceneKey, { finalResolvedAt: undefined, finalResolvedBy: undefined, status });
+    get().updateRevisionOptimistic(rev.id, rev.sceneKey, { finalResolvedAt: undefined, finalResolvedBy: undefined, status, updatedAt: now });
     try { await revisionService.revertFinalResolve(rev); }
     catch { await get().loadRevisions(); }
   },
 
   revertAssignee: async (rev, userId) => {
     if (rev.finalResolvedAt) return; // 최종완료 상태면 차단 (spec §6.2)
+    const now = new Date().toISOString();
     const states = revertAssignee(rev.assigneeStates ?? {}, userId);
     const status = deriveRevisionStatus(rev.assigneeIds ?? [], states, rev.finalResolvedAt);
-    get().updateRevisionOptimistic(rev.id, rev.sceneKey, { assigneeStates: states, status });
+    get().updateRevisionOptimistic(rev.id, rev.sceneKey, { assigneeStates: states, status, updatedAt: now });
     try { await revisionService.revertAssigneeWork(rev, userId); }
     catch { await get().loadRevisions(); }
   },
