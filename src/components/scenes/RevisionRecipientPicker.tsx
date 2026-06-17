@@ -15,6 +15,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Check, Plus } from 'lucide-react';
 import type { AppUser } from '@/types';
+import { avatarColor } from '@/utils/avatarColor';
 
 interface Props {
   allUsers: AppUser[];
@@ -24,21 +25,6 @@ interface Props {
   excludeUserId: string;
   /** 체크된 user.id 배열 (자동 체크 - 사용자 명시 해제 + 사용자 명시 추가) */
   onChange: (checkedIds: string[]) => void;
-}
-
-// ─── 사용자 ID → 일관된 아바타 색 (테마 무관) ──────────────────────────
-
-const AVATAR_COLORS = [
-  '#6C5CE7', '#74B9FF', '#FDCB6E', '#E17055',
-  '#A29BFE', '#00B894', '#FF6B6B', '#F9A8D4',
-];
-
-function avatarColor(id: string): string {
-  let hash = 0;
-  for (let i = 0; i < id.length; i++) {
-    hash = (hash * 31 + id.charCodeAt(i)) | 0;
-  }
-  return AVATAR_COLORS[Math.abs(hash) % AVATAR_COLORS.length];
 }
 
 // ─── 컴포넌트 ──────────────────────────────────────────────────────────

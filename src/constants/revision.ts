@@ -1,4 +1,4 @@
-import type { RevisionStatus, RevisionPriority } from '@/types';
+import type { RevisionStatus, RevisionPriority, AssigneeState } from '@/types';
 
 export const STATUS_CONFIG: Record<RevisionStatus, { label: string; color: string; bg: string }> = {
   open: {
@@ -21,6 +21,17 @@ export const STATUS_CONFIG: Record<RevisionStatus, { label: string; color: strin
     color: 'var(--status-done)',
     bg: 'color-mix(in srgb, var(--status-done) 15%, transparent)',
   },
+};
+
+/**
+ * 담당자 개별 상태(AssigneeState) 표시값. 리테이크 전체 status(STATUS_CONFIG)와 별개 개념이다.
+ * 담당 칩의 상태 점·라벨에 사용. 색은 §8.1 좌측 막대 색 규약과 정렬:
+ *   대기=#FDCB6E / 진행중=#74B9FF / 완료=accent(#6C5CE7).
+ */
+export const ASSIGNEE_STATE_CONFIG: Record<AssigneeState, { label: string; color: string }> = {
+  pending: { label: '대기', color: 'var(--status-adjust)' },
+  in_progress: { label: '진행중', color: 'var(--status-combine)' },
+  done: { label: '완료', color: 'rgb(var(--color-accent))' },
 };
 
 /**
