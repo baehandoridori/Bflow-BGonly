@@ -2,6 +2,9 @@ import { create } from 'zustand';
 import type { CompRevision, Episode, RevisionStatus } from '@/types';
 import * as revisionService from '@/services/revisionService';
 import { useDataStore } from '@/stores/useDataStore';
+import {
+  startAssignee, completeAssignee, revertAssignee, deriveRevisionStatus, sanitizeAssignees,
+} from '@/utils/revisionWorkflow';
 
 /**
  * v1.18.0: 리테이크 등록 input. 우선순위/프레임/담당자 입력 UI 가 폼에서 제거되어
@@ -42,6 +45,14 @@ interface RevisionState {
     status: RevisionStatus,
     extra?: { resolvedBy?: string; resolvedNote?: string },
   ) => Promise<void>;
+
+  // ─── 담당 워크플로우 (리테이크 허브 1단계) ─────────────
+  startAssignee: (rev: CompRevision, userId: string) => Promise<void>;
+  completeAssignee: (rev: CompRevision, userId: string, note: string) => Promise<void>;
+  reassign: (rev: CompRevision, nextAssigneeIds: string[]) => Promise<void>;
+  finalResolve: (rev: CompRevision, byName: string) => Promise<void>;
+  revertFinalResolve: (rev: CompRevision) => Promise<void>;
+  revertAssignee: (rev: CompRevision, userId: string) => Promise<void>;
 
   deleteRevision: (id: string, sceneKey: string) => Promise<void>;
 
@@ -180,6 +191,58 @@ export const useRevisionStore = create<RevisionState>((set, get) => ({
       // 롤백: 다시 로드
       await get().loadRevisions();
     }
+  },
+
+  // ─── 담당 워크플로우 (리테이크 허브 1단계) ─────────────
+  // 모두 낙관적 업데이트 → 서비스 호출 → 실패 시 서버 재로드(롤백).
+
+  startAssignee: async (rev, userId) => {
+    const now = new Date().toISOString();
+    const states = startAssignee(rev.assigneeStates ?? {}, userId, now);
+    const status = deriveRevisionStatus(rev.assigneeIds ?? [], states, rev.finalResolvedAt);
+    get().updateRevisionOptimistic(rev.id, rev.sceneKey, { assigneeStates: states, status, updatedAt: now });
+    try { await revisionService.startAssigneeWork(rev, userId); }
+    catch { await get().loadRevisions(); }
+  },
+
+  completeAssignee: async (rev, userId, note) => {
+    const now = new Date().toISOString();
+    const states = completeAssignee(rev.assigneeStates ?? {}, userId, note, now);
+    const status = deriveRevisionStatus(rev.assigneeIds ?? [], states, rev.finalResolvedAt);
+    get().updateRevisionOptimistic(rev.id, rev.sceneKey, { assigneeStates: states, status, updatedAt: now });
+    try { await revisionService.completeAssigneeWork(rev, userId, note); }
+    catch { await get().loadRevisions(); }
+  },
+
+  reassign: async (rev, nextAssigneeIds) => {
+    const { assigneeIds, assigneeStates } = sanitizeAssignees(nextAssigneeIds, rev.assigneeStates ?? {}, rev.notifyUserIds ?? []);
+    const status = deriveRevisionStatus(assigneeIds, assigneeStates, rev.finalResolvedAt);
+    get().updateRevisionOptimistic(rev.id, rev.sceneKey, { assigneeIds, assigneeStates, status });
+    try { await revisionService.reassignRevision(rev, nextAssigneeIds); }
+    catch { await get().loadRevisions(); }
+  },
+
+  finalResolve: async (rev, byName) => {
+    const now = new Date().toISOString();
+    get().updateRevisionOptimistic(rev.id, rev.sceneKey, { finalResolvedAt: now, finalResolvedBy: byName, status: 'resolved' });
+    try { await revisionService.finalResolveRevision(rev, byName); }
+    catch { await get().loadRevisions(); }
+  },
+
+  revertFinalResolve: async (rev) => {
+    const status = deriveRevisionStatus(rev.assigneeIds ?? [], rev.assigneeStates ?? {}, null);
+    get().updateRevisionOptimistic(rev.id, rev.sceneKey, { finalResolvedAt: undefined, finalResolvedBy: undefined, status });
+    try { await revisionService.revertFinalResolve(rev); }
+    catch { await get().loadRevisions(); }
+  },
+
+  revertAssignee: async (rev, userId) => {
+    if (rev.finalResolvedAt) return; // 최종완료 상태면 차단 (spec §6.2)
+    const states = revertAssignee(rev.assigneeStates ?? {}, userId);
+    const status = deriveRevisionStatus(rev.assigneeIds ?? [], states, rev.finalResolvedAt);
+    get().updateRevisionOptimistic(rev.id, rev.sceneKey, { assigneeStates: states, status });
+    try { await revisionService.revertAssigneeWork(rev, userId); }
+    catch { await get().loadRevisions(); }
   },
 
   getRevisionsForScene: (sceneKey) => {
