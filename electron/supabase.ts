@@ -1917,10 +1917,14 @@ export async function updateRevision(
   };
   // JSONB 컬럼은 문자열로 전달받아 파싱해서 저장 (실패 시 원본 문자열 fallback)
   const jsonFields = new Set(['assigneeIds', 'assigneeStates']);
+  // TIMESTAMPTZ/UUID 컬럼은 빈 문자열 대신 null 저장 (PostgreSQL 타입 에러 방지)
+  const nullableWhenEmpty = new Set(['finalResolvedAt', 'setId', 'resolvedAt']);
   for (const [k, v] of Object.entries(updates)) {
     const col = fieldMap[k] || k;
     if (jsonFields.has(k)) {
       try { dbUpdates[col] = JSON.parse(v); } catch { dbUpdates[col] = v; }
+    } else if (nullableWhenEmpty.has(k) && v === '') {
+      dbUpdates[col] = null;
     } else {
       dbUpdates[col] = v;
     }
@@ -1940,7 +1944,7 @@ function mapRevision(r: Record<string, unknown>): SupabaseRevision & { sceneKey:
   const assigneeIds: string[] = Array.isArray(rawAssigneeIds)
     ? (rawAssigneeIds.filter((x) => typeof x === 'string') as string[])
     : [];
-  const assigneeStates = (r.assignee_states && typeof r.assignee_states === 'object')
+  const assigneeStates = (r.assignee_states && typeof r.assignee_states === 'object' && !Array.isArray(r.assignee_states))
     ? (r.assignee_states as Record<string, { state: string; note?: string; startedAt?: string; doneAt?: string }>)
     : {};
   const finalResolvedAt = (r.final_resolved_at as string) || null;
@@ -1949,12 +1953,18 @@ function mapRevision(r: Record<string, unknown>): SupabaseRevision & { sceneKey:
   const allowed = new Set(notifyUserIds);
   const cleanAssigneeIds = assigneeIds.filter((id) => allowed.has(id));
 
+  // assigneeStates도 cleanAssigneeIds 기준으로 정제 (ghost state 제거)
+  const cleanAssigneeStates: Record<string, { state: string; note?: string; startedAt?: string; doneAt?: string }> = {};
+  for (const id of cleanAssigneeIds) {
+    if (assigneeStates[id]) cleanAssigneeStates[id] = assigneeStates[id];
+  }
+
   // 파생 status (권위) — 저장된 status는 캐시로 보고 재계산값으로 덮어씀
-  let derivedStatus: string;
+  let derivedStatus: 'open' | 'in_progress' | 'assignee_done' | 'resolved';
   if (finalResolvedAt) derivedStatus = 'resolved';
   else if (cleanAssigneeIds.length === 0) derivedStatus = 'open';
   else {
-    const states = cleanAssigneeIds.map((id) => assigneeStates[id]?.state ?? 'pending');
+    const states = cleanAssigneeIds.map((id) => cleanAssigneeStates[id]?.state ?? 'pending');
     if (states.every((s) => s === 'pending')) derivedStatus = 'open';
     else if (states.every((s) => s === 'done')) derivedStatus = 'assignee_done';
     else derivedStatus = 'in_progress';
@@ -1982,8 +1992,8 @@ function mapRevision(r: Record<string, unknown>): SupabaseRevision & { sceneKey:
     resolvedAt: (r.resolved_at as string) || null,
     notifyUserIds,
     assigneeIds: cleanAssigneeIds,
-    assigneeStates,
-    setId: (r.set_id as string) || null,
+    assigneeStates: cleanAssigneeStates,
+    setId: (r.set_id as string | null) ?? null,
     finalResolvedBy: (r.final_resolved_by as string) || '',
     finalResolvedAt,
   };
