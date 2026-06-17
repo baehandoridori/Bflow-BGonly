@@ -224,7 +224,7 @@ export const useRevisionStore = create<RevisionState>((set, get) => ({
 
   finalResolve: async (rev, byName) => {
     const now = new Date().toISOString();
-    get().updateRevisionOptimistic(rev.id, rev.sceneKey, { finalResolvedAt: now, finalResolvedBy: byName, status: 'resolved' });
+    get().updateRevisionOptimistic(rev.id, rev.sceneKey, { finalResolvedAt: now, finalResolvedBy: byName, status: 'resolved', updatedAt: now });
     try { await revisionService.finalResolveRevision(rev, byName); }
     catch { await get().loadRevisions(); }
   },
