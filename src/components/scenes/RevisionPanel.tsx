@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Plus, Check, Clock, Circle, ImagePlus, X, Trash2, MessageSquareWarning, Bell, Undo2 } from 'lucide-react';
+import { Plus, Check, CheckCheck, Clock, Circle, ImagePlus, X, Trash2, MessageSquareWarning, Bell, Undo2, UserPlus, Users } from 'lucide-react';
 import { toast as sonnerToast } from 'sonner';
 import { ConfirmDialog } from '@/components/common/ConfirmDialog';
 import { useAuthStore } from '@/stores/useAuthStore';
@@ -18,6 +18,12 @@ import { AttachmentImageLightbox, type AttachmentImageLightboxState } from './At
 import { calcDefaultRecipients } from '@/utils/revisionRecipients';
 import { PathLinkifiedText } from '@/components/common/PathLinkifiedText';
 import { CompactIconLabel } from '@/components/common/CompactIconLabel';
+import { canActAsAssignee, canReassignRevision, canFinalResolveRevision } from '@/utils/revisionWorkflow';
+import { summarizeAssignees, collectAssigneeNotes, sideBarColorClass, canShowFinalResolveBar } from '@/utils/revisionCardView';
+import { AssigneeChipRow } from './revision/AssigneeChipRow';
+import { CompletionNoteInput } from './revision/CompletionNoteInput';
+import { FinalResolveBar } from './revision/FinalResolveBar';
+import { ReassignInline } from './revision/ReassignInline';
 
 // ─── 상태 뱃지 ───────────────────────────────
 
@@ -36,6 +42,7 @@ function StatusBadge({ status, size = 'sm' }: { status: RevisionStatus; size?: '
     >
       {status === 'open' && <Circle size={size === 'sm' ? 8 : 10} fill="currentColor" />}
       {status === 'in_progress' && <Clock size={size === 'sm' ? 8 : 10} />}
+      {status === 'assignee_done' && <CheckCheck size={size === 'sm' ? 8 : 10} />}
       {status === 'resolved' && <Check size={size === 'sm' ? 8 : 10} />}
       {cfg.label}
     </motion.span>
@@ -117,6 +124,17 @@ function RevisionCard({
 }) {
   const [lightbox, setLightbox] = useState<AttachmentImageLightboxState | null>(null);
   const { currentUser, users: allUsers } = useAuthStore();
+  // 담당 워크플로우 액션 (리테이크 허브 2단계) — store 가 낙관/롤백/self-mark 전담.
+  const startAssignee = useRevisionStore((s) => s.startAssignee);
+  const completeAssignee = useRevisionStore((s) => s.completeAssignee);
+  const revertAssignee = useRevisionStore((s) => s.revertAssignee);
+  const reassign = useRevisionStore((s) => s.reassign);
+  const finalResolve = useRevisionStore((s) => s.finalResolve);
+  const revertFinalResolve = useRevisionStore((s) => s.revertFinalResolve);
+
+  const [noteEditingFor, setNoteEditingFor] = useState<string | null>(null);
+  const [reassigning, setReassigning] = useState(false);
+
   const canDelete = !!(
     currentUser && onDelete &&
     (currentUser.id === revision.requesterId || currentUser.role === 'admin')
@@ -131,8 +149,47 @@ function RevisionCard({
     [revision.notifyUserIds, allUsers],
   );
 
+  // ─── 담당 워크플로우 파생값 ───
+  const assigneeIds = revision.assigneeIds ?? [];
+  const assigneeStates = revision.assigneeStates ?? {};
+  const hasAssignees = assigneeIds.length > 0;
+  const summary = summarizeAssignees(assigneeIds, assigneeStates);
+  const doneNotes = collectAssigneeNotes(assigneeIds, assigneeStates);
+  const isFinalResolved = revision.status === 'resolved';
+  const canAct = canActAsAssignee(currentUser, revision);
+  const canReassign = canReassignRevision(currentUser, revision);
+  const canFinal = canFinalResolveRevision(currentUser, revision);
+
+  const nameOf = (id: string) => allUsers.find((u) => u.id === id)?.name ?? id;
+  const assigneeChips = useMemo(
+    () =>
+      assigneeIds.map((id) => ({
+        id,
+        name: allUsers.find((u) => u.id === id)?.name ?? id,
+        state: assigneeStates[id]?.state ?? ('pending' as const),
+      })),
+    [assigneeIds, assigneeStates, allUsers],
+  );
+
   const handleStatusChange = (status: RevisionStatus) => {
     onStatusChange(status);
+  };
+
+  const handleCompleteClick = (uid: string) => {
+    setReassigning(false);
+    setNoteEditingFor(uid);
+  };
+  const handleNoteConfirm = (note: string) => {
+    if (!noteEditingFor) return;
+    completeAssignee(revision, noteEditingFor, note);
+    setNoteEditingFor(null);
+  };
+  const handleReassignConfirm = (ids: string[]) => {
+    reassign(revision, ids);
+    setReassigning(false);
+  };
+  const handleFinalResolve = () => {
+    if (currentUser) finalResolve(revision, currentUser.name);
   };
 
   const openRevisionImage = () => {
@@ -188,7 +245,10 @@ function RevisionCard({
         </div>
         {currentUser && (
           <div className="flex items-center gap-1.5">
-            <RevisionStatusAction status={revision.status} onStatusChange={handleStatusChange} />
+            {/* 담당자 0명(legacy/미지정)만 단순 상태 전환 버튼. 담당자 있으면 담당 칩+최종완료 바로 처리. */}
+            {!hasAssignees && (
+              <RevisionStatusAction status={revision.status} onStatusChange={handleStatusChange} />
+            )}
             {canDelete && (
               <button
                 onClick={onDelete}
@@ -236,14 +296,126 @@ function RevisionCard({
         />
       )}
 
-      {/* 해결 메모 표시 */}
-      {revision.status === 'resolved' && revision.resolvedNote && (
-        <div className="mb-2 px-3 py-2 rounded-lg" style={{ background: STATUS_CONFIG.resolved.bg }}>
-          <p className="text-xs text-text-secondary">
-            <span className="font-medium" style={{ color: STATUS_CONFIG.resolved.color }}>해결:</span>{' '}
-            {revision.resolvedNote}
-          </p>
+      {/* ─── 담당 워크플로우 (담당자 1명+) ─── */}
+      {hasAssignees && (
+        <div className="space-y-2 mb-2">
+          <AssigneeChipRow
+            assignees={assigneeChips}
+            currentUserId={currentUser?.id ?? null}
+            canAct={canAct}
+            finalResolved={!!revision.finalResolvedAt}
+            onStart={(uid) => startAssignee(revision, uid)}
+            onComplete={handleCompleteClick}
+            onRevert={(uid) => revertAssignee(revision, uid)}
+          />
+
+          <AnimatePresence>
+            {noteEditingFor && (
+              <motion.div
+                key="note-input"
+                initial={{ opacity: 0, height: 0 }}
+                animate={{ opacity: 1, height: 'auto' }}
+                exit={{ opacity: 0, height: 0 }}
+                transition={{ duration: 0.2, ease: 'easeOut' }}
+                className="overflow-hidden"
+              >
+                <CompletionNoteInput
+                  initialValue={assigneeStates[noteEditingFor]?.note ?? ''}
+                  onConfirm={handleNoteConfirm}
+                  onCancel={() => setNoteEditingFor(null)}
+                />
+              </motion.div>
+            )}
+          </AnimatePresence>
+
+          {/* 담당자 완료 멘트 표시 */}
+          {doneNotes.length > 0 && (
+            <div className="space-y-1">
+              {doneNotes.map(({ userId, note }) => (
+                <div
+                  key={userId}
+                  className="px-3 py-2 rounded-lg"
+                  style={{ background: 'color-mix(in srgb, rgb(var(--color-accent)) 10%, transparent)' }}
+                >
+                  <p className="text-xs text-text-secondary">
+                    <span className="font-medium text-accent-sub">{nameOf(userId)} 완료:</span>{' '}
+                    <PathLinkifiedText text={note} />
+                  </p>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* 담당 변경 (요청자/컴포지터급) */}
+          {canReassign &&
+            (reassigning ? (
+              <ReassignInline
+                candidates={notifyUsers.map((u) => ({ id: u.id, name: u.name }))}
+                currentAssigneeIds={assigneeIds}
+                onConfirm={handleReassignConfirm}
+                onCancel={() => setReassigning(false)}
+              />
+            ) : (
+              <button
+                type="button"
+                onClick={() => {
+                  setNoteEditingFor(null);
+                  setReassigning(true);
+                }}
+                className="inline-flex items-center gap-1 text-[11px] font-semibold text-text-secondary/75 hover:text-accent-sub cursor-pointer transition-colors"
+              >
+                <Users size={12} />
+                담당 변경
+              </button>
+            ))}
+
+          {/* 최종완료 바 */}
+          {canShowFinalResolveBar(assigneeIds, revision.finalResolvedAt) && (
+            <FinalResolveBar
+              resolved={isFinalResolved}
+              enabled={summary.allDone}
+              canFinalResolve={canFinal}
+              finalResolvedBy={revision.finalResolvedBy}
+              onResolve={handleFinalResolve}
+              onRevert={() => revertFinalResolve(revision)}
+            />
+          )}
         </div>
+      )}
+
+      {/* ─── 담당자 0명 — 단순 흐름(legacy 호환) + 담당 지정 ─── */}
+      {!hasAssignees && (
+        <>
+          {revision.status === 'resolved' && revision.resolvedNote && (
+            <div className="mb-2 px-3 py-2 rounded-lg" style={{ background: STATUS_CONFIG.resolved.bg }}>
+              <p className="text-xs text-text-secondary">
+                <span className="font-medium" style={{ color: STATUS_CONFIG.resolved.color }}>해결:</span>{' '}
+                {revision.resolvedNote}
+              </p>
+            </div>
+          )}
+          {canReassign && (
+            <div className="mb-2">
+              {reassigning ? (
+                <ReassignInline
+                  candidates={notifyUsers.map((u) => ({ id: u.id, name: u.name }))}
+                  currentAssigneeIds={[]}
+                  onConfirm={handleReassignConfirm}
+                  onCancel={() => setReassigning(false)}
+                />
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => setReassigning(true)}
+                  className="inline-flex items-center gap-1 text-[11px] font-semibold text-accent-sub hover:text-accent cursor-pointer transition-colors"
+                >
+                  <UserPlus size={12} />
+                  담당 지정
+                </button>
+              )}
+            </div>
+          )}
+        </>
       )}
 
       {/* 푸터 */}
@@ -367,6 +539,7 @@ export function RevisionPanel({ sheetName, sceneId, siblingSceneIds, department,
   const [imagePreview, setImagePreview] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [notifyIds, setNotifyIds] = useState<string[]>([]);
+  const [formAssigneeIds, setFormAssigneeIds] = useState<string[]>([]);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -438,10 +611,13 @@ export function RevisionPanel({ sheetName, sceneId, siblingSceneIds, department,
         requesterName: currentUser.name,
         // v1.18.0: RevisionRecipientPicker 가 계산한 알림 대상자 (자동 체크 ± 사용자 수정).
         notifyUserIds: notifyIds,
+        // 리테이크 허브 2단계: 알림 대상 중 담당자로 승격된 사람 (service 가 notify⊆ 보정).
+        assigneeIds: formAssigneeIds,
       });
       setDescription('');
       setImagePreview(null);
       setNotifyIds([]);
+      setFormAssigneeIds([]);
       setShowForm(false);
     } catch (err) {
       console.error('리테이크 등록 실패:', err);
@@ -603,6 +779,8 @@ export function RevisionPanel({ sheetName, sceneId, siblingSceneIds, department,
                       defaultCheckedIds={defaultRecipients}
                       excludeUserId={currentUser?.id || ''}
                       onChange={setNotifyIds}
+                      enableAssignee
+                      onAssigneesChange={setFormAssigneeIds}
                     />
                   </div>
 
