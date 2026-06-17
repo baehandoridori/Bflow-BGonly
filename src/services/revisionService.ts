@@ -8,7 +8,7 @@
  * sceneKey 형식: "EP01:A:1" (에피소드:파트:정규화된 씬번호 — 시트명 비의존)
  */
 
-import type { CompRevision, Part, RevisionPriority, RevisionStatus } from '../types';
+import type { CompRevision, Part, RevisionAssigneeState, RevisionPriority, RevisionStatus } from '../types';
 import { useDataStore } from '../stores/useDataStore';
 import {
   buildDistinctRevisionSceneId,
@@ -298,6 +298,11 @@ function rowToRevision(row: {
   createdAt: string; updatedAt: string; resolvedAt: string;
   priority?: string; frameNo?: string;
   notifyUserIds?: string[] | null;
+  assigneeIds?: string[] | null;
+  assigneeStates?: Record<string, RevisionAssigneeState> | null;
+  setId?: string | null;
+  finalResolvedBy?: string | null;
+  finalResolvedAt?: string | null;
 }): CompRevision {
   const p = row.priority as RevisionPriority | undefined;
   const sceneKey = normalizeStoredRevisionSceneKey(row.sceneKey);
@@ -320,6 +325,11 @@ function rowToRevision(row: {
     updatedAt: row.updatedAt || '',
     resolvedAt: row.resolvedAt || undefined,
     notifyUserIds: Array.isArray(row.notifyUserIds) ? row.notifyUserIds : undefined,
+    assigneeIds: Array.isArray(row.assigneeIds) ? row.assigneeIds : [],
+    assigneeStates: (row.assigneeStates && typeof row.assigneeStates === 'object') ? row.assigneeStates : {},
+    setId: (row.setId as string) ?? null,
+    finalResolvedBy: (row.finalResolvedBy as string) ?? '',
+    finalResolvedAt: (row.finalResolvedAt as string) || undefined,
   };
 }
 
@@ -335,6 +345,11 @@ export async function loadAllRevisions(): Promise<RevisionsStore> {
     createdAt: string; updatedAt: string; resolvedAt: string;
     priority?: string; frameNo?: string;
     notifyUserIds?: string[] | null;
+    assigneeIds?: string[] | null;
+    assigneeStates?: Record<string, RevisionAssigneeState> | null;
+    setId?: string | null;
+    finalResolvedBy?: string | null;
+    finalResolvedAt?: string | null;
   }[] = [];
 
   try {

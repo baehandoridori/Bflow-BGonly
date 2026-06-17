@@ -100,3 +100,8 @@ BEGIN
     ALTER PUBLICATION supabase_realtime ADD TABLE comp_revision_sets;
   END IF;
 END $$;
+
+-- ─── 9) 레거시 resolved 행을 final_resolved_at 로 백필 (파생 status 호환) ───
+UPDATE comp_revisions
+  SET final_resolved_at = COALESCE(resolved_at, updated_at, now())
+  WHERE status = 'resolved' AND final_resolved_at IS NULL;

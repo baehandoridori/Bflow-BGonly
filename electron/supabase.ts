@@ -175,6 +175,11 @@ export interface SupabaseRevision {
   createdAt: string;
   updatedAt: string;
   resolvedAt: string | null;
+  assigneeIds: string[];
+  assigneeStates: Record<string, { state: string; note?: string; startedAt?: string; doneAt?: string }>;
+  setId: string | null;
+  finalResolvedBy: string;
+  finalResolvedAt: string | null;
 }
 
 // ─── 헬퍼 ──────────────────────────────────────
@@ -1899,13 +1904,38 @@ function mapRevision(r: Record<string, unknown>): SupabaseRevision & { sceneKey:
   const notifyUserIds: string[] = Array.isArray(rawNotify)
     ? (rawNotify.filter((x) => typeof x === 'string') as string[])
     : [];
+
+  const rawAssigneeIds = r.assignee_ids;
+  const assigneeIds: string[] = Array.isArray(rawAssigneeIds)
+    ? (rawAssigneeIds.filter((x) => typeof x === 'string') as string[])
+    : [];
+  const assigneeStates = (r.assignee_states && typeof r.assignee_states === 'object')
+    ? (r.assignee_states as Record<string, { state: string; note?: string; startedAt?: string; doneAt?: string }>)
+    : {};
+  const finalResolvedAt = (r.final_resolved_at as string) || null;
+
+  // 불변식 복원: assignee_ids ⊆ notify_user_ids
+  const allowed = new Set(notifyUserIds);
+  const cleanAssigneeIds = assigneeIds.filter((id) => allowed.has(id));
+
+  // 파생 status (권위) — 저장된 status는 캐시로 보고 재계산값으로 덮어씀
+  let derivedStatus: string;
+  if (finalResolvedAt) derivedStatus = 'resolved';
+  else if (cleanAssigneeIds.length === 0) derivedStatus = 'open';
+  else {
+    const states = cleanAssigneeIds.map((id) => assigneeStates[id]?.state ?? 'pending');
+    if (states.every((s) => s === 'pending')) derivedStatus = 'open';
+    else if (states.every((s) => s === 'done')) derivedStatus = 'assignee_done';
+    else derivedStatus = 'in_progress';
+  }
+
   return {
     id: r.id as string,
     partId: r.part_id as string,
     sceneId: r.scene_id as string,
     sceneKey: (r.scene_id as string) || '',  // scene_id에 sceneKey 저장 (호환용)
     revisionNo: r.revision_no as number,
-    status: (r.status as string) || 'open',
+    status: derivedStatus,
     priority: (r.priority as string) || 'normal',
     description: (r.description as string) || '',
     frameNo: (r.frame_no as string) || '',
@@ -1920,6 +1950,11 @@ function mapRevision(r: Record<string, unknown>): SupabaseRevision & { sceneKey:
     updatedAt: (r.updated_at as string) || '',
     resolvedAt: (r.resolved_at as string) || null,
     notifyUserIds,
+    assigneeIds: cleanAssigneeIds,
+    assigneeStates,
+    setId: (r.set_id as string) || null,
+    finalResolvedBy: (r.final_resolved_by as string) || '',
+    finalResolvedAt,
   };
 }
 
