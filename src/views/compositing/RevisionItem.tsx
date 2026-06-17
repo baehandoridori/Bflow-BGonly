@@ -25,6 +25,10 @@ const STATUS_TINT: Record<RevisionStatus, { background: string; halo: string }> 
     background: 'linear-gradient(90deg, color-mix(in srgb, var(--status-combine) 13%, transparent) 0%, color-mix(in srgb, var(--status-combine) 4.5%, transparent) 42%, transparent 88%)',
     halo: 'color-mix(in srgb, var(--status-combine) 18%, transparent)',
   },
+  assignee_done: {
+    background: 'linear-gradient(90deg, color-mix(in srgb, rgb(var(--color-accent)) 13%, transparent) 0%, color-mix(in srgb, rgb(var(--color-accent)) 4.5%, transparent) 42%, transparent 88%)',
+    halo: 'color-mix(in srgb, rgb(var(--color-accent)) 18%, transparent)',
+  },
   resolved: {
     background: 'linear-gradient(90deg, color-mix(in srgb, var(--status-done) 7.5%, transparent) 0%, color-mix(in srgb, var(--status-done) 2.8%, transparent) 42%, transparent 88%)',
     halo: 'color-mix(in srgb, var(--status-done) 12%, transparent)',

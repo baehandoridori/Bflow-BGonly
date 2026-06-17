@@ -213,8 +213,17 @@ export interface MergedScene {
 
 // ─── 컴포지팅 리테이크 ─────────────────────────
 
-export type RevisionStatus = 'open' | 'in_progress' | 'resolved';
+export type RevisionStatus = 'open' | 'in_progress' | 'assignee_done' | 'resolved';
 export type RevisionPriority = 'urgent' | 'high' | 'normal';
+
+export type AssigneeState = 'pending' | 'in_progress' | 'done';
+
+export interface RevisionAssigneeState {
+  state: AssigneeState;
+  note?: string;        // 담당자 완료 멘트(파일경로 등)
+  startedAt?: string;   // ISO 8601
+  doneAt?: string;      // ISO 8601
+}
 
 export interface CompRevision {
   id: string;
@@ -240,6 +249,28 @@ export interface CompRevision {
    * 옵셔널 — 사용처에서 `?? []`로 가드. 레거시 데이터/생성 경로 호환.
    */
   notifyUserIds?: string[];
+  /** 담당자 user.id 배열 (반드시 notifyUserIds의 부분집합). */
+  assigneeIds?: string[];
+  /** 담당자별 상태 맵 { [userId]: { state, note?, startedAt?, doneAt? } }. */
+  assigneeStates?: Record<string, RevisionAssigneeState>;
+  /** 소속 리테이크 세트 id (없으면 일반 리테이크). */
+  setId?: string | null;
+  /** 최종 완료자 이름. */
+  finalResolvedBy?: string;
+  /** 최종 완료 시각 ISO 8601. */
+  finalResolvedAt?: string;
+}
+
+export interface CompRevisionSet {
+  id: string;
+  title: string;
+  episodeNumber?: number | null;
+  department?: 'bg' | 'acting' | null;
+  aggregatorId?: string | null;
+  status: 'open' | 'done';
+  createdBy?: string;
+  createdAt: string;
+  updatedAt: string;
 }
 
 // ─── 사용자 & 인증 ─────────────────────────

@@ -11,6 +11,11 @@ export const STATUS_CONFIG: Record<RevisionStatus, { label: string; color: strin
     color: 'var(--status-combine)',
     bg: 'color-mix(in srgb, var(--status-combine) 15%, transparent)',
   },
+  assignee_done: {
+    label: '담당 완료',
+    color: 'rgb(var(--color-accent))',
+    bg: 'color-mix(in srgb, rgb(var(--color-accent)) 15%, transparent)',
+  },
   resolved: {
     label: '완료',
     color: 'var(--status-done)',
