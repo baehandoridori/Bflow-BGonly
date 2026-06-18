@@ -624,6 +624,8 @@ export async function reassignRevision(rev: CompRevision, nextAssigneeIds: strin
     assigneeIds: JSON.stringify(assigneeIds),
     assigneeStates: JSON.stringify(assigneeStates),
     status, updatedAt: now,
+    // 활동기록 분기 전용 신호. main 핸들러가 분리해 DB 로는 보내지 않는다(fieldMap 미등록).
+    __op: 'reassign',
   });
 }
 

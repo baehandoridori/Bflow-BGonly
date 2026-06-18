@@ -1579,11 +1579,15 @@ export default function App() {
           // 본인이 변경한 거면 스킵 (resolved_by 가 본인 이름이면) — resolved 전용 가드.
           if (newRow.resolved_by === me.name) return;
 
-          let action: 'in_progress' | 'resolve';
+          let action: 'in_progress' | 'assignee_done' | 'resolve';
           let titlePrefix: string;
           if (newRow.status === 'in_progress') {
             action = 'in_progress';
             titlePrefix = '리테이크 진행중';
+          } else if (newRow.status === 'assignee_done') {
+            // 리테이크 허브 2단계: 담당 전원 완료 → 최종 완료 대기
+            action = 'assignee_done';
+            titlePrefix = '리테이크 담당 완료';
           } else if (newRow.status === 'resolved') {
             action = 'resolve';
             titlePrefix = '리테이크 완료';

@@ -39,8 +39,8 @@ export interface AppNotification {
     commentPartId?: string;
     /** v1.18.0: 리테이크 알림 — 클릭 시 해당 리테이크 패널로 이동 */
     revisionId?: string;
-    /** v1.18.0: 리테이크 알림 액션 종류 */
-    revisionAction?: 'add' | 'in_progress' | 'resolve' | 'comment';
+    /** v1.18.0: 리테이크 알림 액션 종류 (2단계: 담당 완료 추가) */
+    revisionAction?: 'add' | 'in_progress' | 'assignee_done' | 'resolve' | 'comment';
     /** v1.24.0: 답글 알림이면 부모 댓글 id (점프 시 펼침 처리용) */
     parentCommentId?: string;
     /** v1.24.0: 멘션 알림 발신자 식별용 (자동 멘션과 직접 멘션 구분) */

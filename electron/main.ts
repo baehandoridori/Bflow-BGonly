@@ -1896,16 +1896,19 @@ ipcMain.handle('supabase:add-revision', wrapIpc(async (_e: unknown, id: string, 
     }
   }));
 ipcMain.handle('supabase:update-revision', wrapIpc(async (_e: unknown, id: string, updates: Record<string, string>) => {
-  await sbUpdateRevision(id, updates);
+  // 리테이크 허브 2단계: __op 는 활동기록 분기 전용 신호 — DB 로는 보내지 않는다(fieldMap 미등록이라 분리).
+  const { __op, ...dbUpdates } = updates;
+  await sbUpdateRevision(id, dbUpdates);
   // status 전이/담당 워크플로우 활동 기록. 한솔 결정 (2026-05-02): 진행중도 audit.
-  // 우선순위: 최종완료 > 담당완료 > 진행중 > 해결 > 재배정.
+  // 우선순위: 최종완료 > 재배정(동반 status 전이보다 우선, 한솔 §7.3 '재배정 포함') > 담당완료 > 진행중 > 해결.
   // 주의: finalResolvedAt 이 빈 문자열('')이면(최종완료 되돌리기) truthy 아님 → 분기 제외(의도된 조용한 스킵).
   let statusActionType: ActionType | null = null;
-  if (updates.finalResolvedAt) statusActionType = 'revision_final_resolve';
-  else if (updates.status === 'assignee_done') statusActionType = 'revision_assignee_done';
-  else if (updates.status === 'in_progress') statusActionType = 'revision_in_progress';
-  else if (updates.status === 'resolved') statusActionType = 'revision_resolve';
-  else if (updates.assigneeIds) statusActionType = 'revision_reassign';
+  if (dbUpdates.finalResolvedAt) statusActionType = 'revision_final_resolve';
+  else if (__op === 'reassign') statusActionType = 'revision_reassign';
+  else if (dbUpdates.status === 'assignee_done') statusActionType = 'revision_assignee_done';
+  else if (dbUpdates.status === 'in_progress') statusActionType = 'revision_in_progress';
+  else if (dbUpdates.status === 'resolved') statusActionType = 'revision_resolve';
+  else if (dbUpdates.assigneeIds) statusActionType = 'revision_reassign';
   if (currentActivityUser && statusActionType) {
     try {
       const { data: revRow } = await supabaseClient
