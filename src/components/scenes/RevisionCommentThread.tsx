@@ -515,7 +515,8 @@ export function RevisionCommentThread({ revisionId, sceneKey }: Props) {
                 type="text"
                 value={draft}
                 onChange={e => { setDraft(e.target.value); draftRef.current = e.target.value; mention.refresh(); }}
-                onKeyUp={mention.refresh}
+                // caret 이동은 onSelect/onClick 으로만 감지(onKeyUp 미사용) — 멘션 활성 중 Arrow/Escape 는
+                // preventDefault 되어 caret 이 안 바뀌므로 refresh 가 안 돌아 index 리셋·Escape 후 재오픈이 없다.
                 onClick={mention.refresh}
                 onSelect={mention.refresh}
                 onKeyDown={e => {

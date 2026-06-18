@@ -1962,7 +1962,9 @@ export function CommentPanel({ sceneKey, secondarySceneKey, sceneThreadKey, onCo
             ref={inputRef}
             value={input}
             onChange={(e) => { handleInputChange(e.target.value); mention.refresh(); }}
-            onKeyUp={mention.refresh}
+            // caret 이동은 onSelect/onClick 으로만 감지. onKeyUp 은 쓰지 않는다 —
+            // 멘션 활성 중 Arrow/Escape 는 onKeyDown 에서 preventDefault 되어 caret 이 안 바뀌므로
+            // onSelect 가 안 터지고, keyup refresh 가 없으니 active index 리셋·Escape 후 재오픈이 없다.
             onClick={mention.refresh}
             onSelect={mention.refresh}
             onFocus={() => setFocused(true)}
