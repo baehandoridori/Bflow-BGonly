@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, useMemo } from 'react';
+import { useState, useRef, useEffect, useMemo, useCallback, memo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Plus, Check, CheckCheck, Clock, Circle, ImagePlus, X, Trash2, MessageSquareWarning, Bell, Undo2, UserPlus, Users } from 'lucide-react';
 import { toast as sonnerToast } from 'sonner';
@@ -104,7 +104,7 @@ function RevisionStatusAction({
 
 // ─── 리테이크 카드 ──────────────────────────────
 
-function RevisionCard({
+const RevisionCard = memo(function RevisionCard({
   revision,
   commentSceneKey,
   onStatusChange,
@@ -119,8 +119,8 @@ function RevisionCard({
    * partUuid lookup이 실패하고 "씬을 찾을 수 없음" 에러가 발생한다 (이슈: 2026-05-04).
    */
   commentSceneKey: string;
-  onStatusChange: (status: RevisionStatus, note?: string) => void;
-  onDelete?: () => void;
+  onStatusChange: (revId: string, status: RevisionStatus, note?: string) => void;
+  onDelete?: (rev: CompRevision) => void;
 }) {
   const [lightbox, setLightbox] = useState<AttachmentImageLightboxState | null>(null);
   const { currentUser, users: allUsers } = useAuthStore();
@@ -172,7 +172,7 @@ function RevisionCard({
   );
 
   const handleStatusChange = (status: RevisionStatus) => {
-    onStatusChange(status);
+    onStatusChange(revision.id, status);
   };
 
   const handleCompleteClick = (uid: string) => {
@@ -225,9 +225,9 @@ function RevisionCard({
       className="rev-card relative rounded-xl p-3 border border-bg-border/60 group"
       style={elevatedGlassStyle}
     >
-      {/* 좌측 컬러 막대 — 미해결: 액센트 / 완료: 그린 */}
+      {/* 좌측 컬러 막대 — §8.1 status별 4색 (대기/진행중/담당완료/최종완료) */}
       <span
-        className={`rev-side-bar${revision.status === 'resolved' ? ' rev-side-bar-done' : ''}`}
+        className={`rev-side-bar ${sideBarColorClass(revision.status)}`}
         aria-hidden
       />
 
@@ -251,7 +251,7 @@ function RevisionCard({
             )}
             {canDelete && (
               <button
-                onClick={onDelete}
+                onClick={() => onDelete?.(revision)}
                 title="리테이크 삭제"
                 className="opacity-0 group-hover:opacity-100 p-1 rounded-md text-text-secondary/60 hover:text-red-400 hover:bg-red-500/10 transition-all cursor-pointer"
               >
@@ -346,8 +346,8 @@ function RevisionCard({
             </div>
           )}
 
-          {/* 담당 변경 (요청자/컴포지터급) */}
-          {canReassign &&
+          {/* 담당 변경 (요청자/컴포지터급) — 최종완료 상태에선 숨김(먼저 최종완료 되돌리기) */}
+          {canReassign && !isFinalResolved &&
             (reassigning ? (
               <ReassignInline
                 candidates={notifyUsers.map((u) => ({ id: u.id, name: u.name }))}
@@ -394,7 +394,8 @@ function RevisionCard({
               </p>
             </div>
           )}
-          {canReassign && (
+          {/* 담당 지정 — 최종완료 전 + 알림 대상이 있어야(후보 = 알림 대상자). 0명이면 막다른 길 방지로 숨김. */}
+          {canReassign && !isFinalResolved && notifyUsers.length > 0 && (
             <div className="mb-2">
               {reassigning ? (
                 <ReassignInline
@@ -466,7 +467,7 @@ function RevisionCard({
       <RevisionCommentThread revisionId={revision.id} sceneKey={commentSceneKey} />
     </motion.div>
   );
-}
+});
 
 // ─── 메인 패널 ───────────────────────────────
 
@@ -486,7 +487,13 @@ interface RevisionPanelProps {
 
 export function RevisionPanel({ sheetName, sceneId, siblingSceneIds, department, onCountChange }: RevisionPanelProps) {
   const { currentUser, users: allUsers } = useAuthStore();
-  const { createRevision, updateStatus, loadRevisions, getRevisionsForScene, getOpenCount } = useRevisionStore();
+  // 필드별 selector — 액션은 안정 참조라 store 의 무관한 필드 변경엔 리렌더 안 됨.
+  const createRevision = useRevisionStore((s) => s.createRevision);
+  const updateStatus = useRevisionStore((s) => s.updateStatus);
+  const loadRevisions = useRevisionStore((s) => s.loadRevisions);
+  const getRevisionsForScene = useRevisionStore((s) => s.getRevisionsForScene);
+  const getOpenCount = useRevisionStore((s) => s.getOpenCount);
+  const allRevisions = useRevisionStore((s) => s.revisions);
   const episodes = useDataStore((s) => s.episodes);
 
   // 그 sheetName 의 part + 그 안에서 sceneId 매칭되는 scene 객체 (담당자 자동 체크용).
@@ -529,9 +536,14 @@ export function RevisionPanel({ sheetName, sceneId, siblingSceneIds, department,
   //   - 두 번째 fix(2026-05-04 #2): comment 저장은 sceneId 를 Number()로 sort_order 변환해 scenes lookup → "a001" 같은 raw 값은 NaN 이라 실패
   //   → CommentPanel(`UnifiedSceneDetailModal:134`)와 동일하게 scene.no 사용.
   const commentSceneKey = scene ? `${sheetName}:${scene.no}` : '';
-  const revisions = getRevisionsForScene(sceneKey);
-  const sortedRevisions = [...revisions].sort((a, b) =>
-    new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
+  // allRevisions 변경 시에만 재계산 — 매 렌더 새 배열 생성 방지.
+  const revisions = useMemo(
+    () => getRevisionsForScene(sceneKey),
+    [allRevisions, sceneKey, getRevisionsForScene],
+  );
+  const sortedRevisions = useMemo(
+    () => [...revisions].sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()),
+    [revisions],
   );
 
   const [showForm, setShowForm] = useState(false);
@@ -626,14 +638,15 @@ export function RevisionPanel({ sheetName, sceneId, siblingSceneIds, department,
     }
   };
 
-  const handleStatusChange = async (revId: string, status: RevisionStatus, note?: string) => {
+  // 안정 콜백 — RevisionCard(memo) 의 props 참조를 고정해 형제 카드 리렌더를 막는다.
+  const handleStatusChange = useCallback(async (revId: string, status: RevisionStatus, note?: string) => {
     await updateStatus(revId, sceneKey, status, {
       resolvedBy: currentUser?.name,
       resolvedNote: note,
     });
-  };
+  }, [updateStatus, sceneKey, currentUser?.name]);
 
-  const handleDelete = async (rev: CompRevision) => {
+  const handleDelete = useCallback(async (rev: CompRevision) => {
     const ok = await ConfirmDialog.show({
       message: `${revisionNoToLabel(rev.revisionNo)} 리테이크를 삭제하시겠습니까?\n첨부 이미지도 함께 제거됩니다.`,
       confirmLabel: '삭제',
@@ -647,7 +660,7 @@ export function RevisionPanel({ sheetName, sceneId, siblingSceneIds, department,
       const msg = err instanceof Error ? err.message : String(err);
       sonnerToast.error(`리테이크 삭제 실패: ${msg}`);
     }
-  };
+  }, []);
 
   return (
     <div className="flex flex-col h-full">
@@ -665,8 +678,8 @@ export function RevisionPanel({ sheetName, sceneId, siblingSceneIds, department,
                 key={rev.id}
                 revision={rev}
                 commentSceneKey={commentSceneKey}
-                onStatusChange={(status, note) => handleStatusChange(rev.id, status, note)}
-                onDelete={() => handleDelete(rev)}
+                onStatusChange={handleStatusChange}
+                onDelete={handleDelete}
               />
             ))}
           </AnimatePresence>

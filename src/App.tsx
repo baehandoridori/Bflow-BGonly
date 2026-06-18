@@ -1576,6 +1576,9 @@ export default function App() {
 
           // 상태 변경 detect — old.status !== new.status 일 때만 알림
           if (!oldRow || oldRow.status === newRow.status) return;
+          // 최종완료 되돌리기(resolved → 비resolved)는 알림 보내지 않음 (open 복귀와 동일 무알림 정책).
+          // 되돌리기 전용 알림이 '담당 완료'로 오인 발송되던 문제 방지.
+          if (oldRow.status === 'resolved' && newRow.status !== 'resolved') return;
           // 본인이 변경한 거면 스킵 (resolved_by 가 본인 이름이면) — resolved 전용 가드.
           if (newRow.resolved_by === me.name) return;
 

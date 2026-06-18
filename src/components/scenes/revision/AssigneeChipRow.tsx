@@ -46,9 +46,9 @@ export function AssigneeChipRow({
       {assignees.map((a) => {
         const cfg = ASSIGNEE_STATE_CONFIG[a.state];
         const isMine = !!currentUserId && a.id === currentUserId && canAct;
-        // 본인 칩의 다음 액션: pending→시작 / in_progress→완료 / done→되돌리기(최종완료 전).
-        const revertBlocked = a.state === 'done' && finalResolved;
-        const actionable = isMine && !revertBlocked;
+        // 본인 칩의 다음 액션: pending→시작 / in_progress→완료 / done→되돌리기.
+        // 최종완료(finalResolved) 상태에선 모든 담당 전이 차단 (spec §6.2 — 먼저 최종완료 되돌리기).
+        const actionable = isMine && !finalResolved;
 
         const ActionIcon = a.state === 'pending' ? Play : a.state === 'in_progress' ? Check : Undo2;
         const actionLabel =
@@ -112,7 +112,7 @@ export function AssigneeChipRow({
           <span
             key={a.id}
             className={`${chipBase} ${chipTone}`}
-            title={`${a.name} · ${cfg.label}${isMine && revertBlocked ? ' (최종완료 상태 — 먼저 최종완료 되돌리기)' : ''}`}
+            title={`${a.name} · ${cfg.label}${isMine && finalResolved ? ' (최종완료 상태 — 먼저 최종완료 되돌리기)' : ''}`}
           >
             {inner}
           </span>

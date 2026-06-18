@@ -199,6 +199,7 @@ export const useRevisionStore = create<RevisionState>((set, get) => ({
   // 모두 낙관적 업데이트 → 서비스 호출 → 실패 시 서버 재로드(롤백).
 
   startAssignee: async (rev, userId) => {
+    if (rev.finalResolvedAt) return; // 최종완료 상태에선 담당 전이 차단 (spec §6.2 — resolved 는 final 유무로만 이탈)
     const now = new Date().toISOString();
     const states = startAssignee(rev.assigneeStates ?? {}, userId, now);
     const status = deriveRevisionStatus(rev.assigneeIds ?? [], states, rev.finalResolvedAt);
@@ -209,6 +210,7 @@ export const useRevisionStore = create<RevisionState>((set, get) => ({
   },
 
   completeAssignee: async (rev, userId, note) => {
+    if (rev.finalResolvedAt) return; // 최종완료 상태에선 담당 전이 차단 (spec §6.2)
     const now = new Date().toISOString();
     const states = completeAssignee(rev.assigneeStates ?? {}, userId, note, now);
     const status = deriveRevisionStatus(rev.assigneeIds ?? [], states, rev.finalResolvedAt);

@@ -1896,6 +1896,9 @@ ipcMain.handle('supabase:add-revision', wrapIpc(async (_e: unknown, id: string, 
     }
   }));
 ipcMain.handle('supabase:update-revision', wrapIpc(async (_e: unknown, id: string, updates: Record<string, string>) => {
+  // 권한 검증은 클라이언트 가드(revisionWorkflow canActAsAssignee/canReassignRevision/canFinalResolveRevision)에
+  // 위임한다 — spec §5: DB RLS allow-all, 클라이언트 단 가드 기준(의도된 설계). delete-revision 만 신뢰 세션을
+  // 별도 확인하는 비대칭은 삭제의 감사 귀속(Codex #8) 목적이며 실수가 아니다.
   // 리테이크 허브 2단계: __op 는 활동기록 분기 전용 신호 — DB 로는 보내지 않는다(fieldMap 미등록이라 분리).
   const { __op, ...dbUpdates } = updates;
   await sbUpdateRevision(id, dbUpdates);
