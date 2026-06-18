@@ -30,7 +30,9 @@ import { formatCommentTime } from '@/utils/formatTime';
 import * as storageService from '@/services/storageService';
 import { resizeBlob } from '@/utils/imageUtils';
 import { sendMentionWebhook } from '@/services/slackWebhookService';
-import { PathLinkifiedText } from '@/components/common/PathLinkifiedText';
+import { EntityText } from '@/components/common/EntityText';
+import { MentionDropdown } from '@/components/common/MentionDropdown';
+import { useMentionAutocomplete } from '@/hooks/useMentionAutocomplete';
 import {
   AttachmentImageLightbox,
   type AttachmentImageLightboxEntry,
@@ -92,13 +94,9 @@ export function RevisionCommentThread({ revisionId, sceneKey }: Props) {
   const [focusedCommentId, setFocusedCommentId] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [attachedImages, setAttachedImages] = useState<AttachedImage[]>([]);
-  const [showMentions, setShowMentions] = useState(false);
-  const [mentionFilter, setMentionFilter] = useState('');
-  const [mentionIndex, setMentionIndex] = useState(0);
   const [lightbox, setLightbox] = useState<AttachmentImageLightboxState | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
-  const mentionDropdownRef = useRef<HTMLDivElement>(null);
   const attachedImagesRef = useRef<AttachedImage[]>([]);
   const draftRef = useRef('');
   const mountedRef = useRef(true);
@@ -110,13 +108,6 @@ export function RevisionCommentThread({ revisionId, sceneKey }: Props) {
 
   useEffect(() => { attachedImagesRef.current = attachedImages; }, [attachedImages]);
   useEffect(() => { draftRef.current = draft; }, [draft]);
-  useEffect(() => {
-    if (!showMentions) return;
-    const container = mentionDropdownRef.current;
-    if (!container) return;
-    const items = container.querySelectorAll('button');
-    items[mentionIndex]?.scrollIntoView({ block: 'nearest' });
-  }, [mentionIndex, showMentions]);
   useEffect(() => {
     mountedRef.current = true;
     return () => {
@@ -310,35 +301,11 @@ export function RevisionCommentThread({ revisionId, sceneKey }: Props) {
     e.target.value = '';
   }, [addAttachedImageFromBlob]);
 
-  const handleDraftChange = useCallback((text: string) => {
-    setDraft(text);
-    const lastAt = text.lastIndexOf('@');
-    if (lastAt >= 0) {
-      const afterAt = text.slice(lastAt + 1);
-      if (!afterAt.includes(' ') && afterAt.length < 20) {
-        setShowMentions(true);
-        setMentionFilter(afterAt.toLowerCase());
-        setMentionIndex(0);
-        return;
-      }
-    }
-    setShowMentions(false);
-  }, []);
-
-  const filteredUsers = useMemo(
-    () => users.filter(user => user.name.toLowerCase().includes(mentionFilter)),
-    [mentionFilter, users],
-  );
-
-  const insertMention = useCallback((userName: string) => {
-    const lastAt = draft.lastIndexOf('@');
-    const before = lastAt >= 0 ? draft.slice(0, lastAt) : `${draft} `;
-    const nextDraft = `${before}@${userName} `;
-    setDraft(nextDraft);
-    draftRef.current = nextDraft;
-    setShowMentions(false);
-    inputRef.current?.focus();
-  }, [draft]);
+  const mention = useMentionAutocomplete({
+    onChange: (next) => { setDraft(next); draftRef.current = next; },
+    users,
+    inputRef,
+  });
 
   const hasUploadingImage = attachedImages.some(item => item.uploading);
   const uploadedImageUrls = attachedImages.map(item => item.uploadedUrl).filter((url): url is string => !!url);
@@ -371,7 +338,7 @@ export function RevisionCommentThread({ revisionId, sceneKey }: Props) {
     const prevAttached = attachedImages;
     setDraft('');
     draftRef.current = '';
-    setShowMentions(false);
+    mention.close();
     setAttachedImages([]);
     attachedImagesRef.current = [];
 
@@ -519,25 +486,13 @@ export function RevisionCommentThread({ revisionId, sceneKey }: Props) {
               </div>
             )}
             <div className="relative flex gap-2">
-              {showMentions && filteredUsers.length > 0 && (
-                <div
-                  ref={mentionDropdownRef}
-                  className="absolute bottom-full left-10 right-24 mb-1 max-h-32 overflow-y-auto rounded-lg border border-bg-border bg-bg-card shadow-lg z-20"
-                >
-                  {filteredUsers.map((user, index) => (
-                    <button
-                      key={user.id}
-                      type="button"
-                      onClick={() => insertMention(user.name)}
-                      className={`w-full text-left px-3 py-1.5 text-xs text-text-primary transition-colors flex items-center gap-2 cursor-pointer ${
-                        index === mentionIndex ? 'bg-accent/15' : 'hover:bg-accent/10'
-                      }`}
-                    >
-                      <span className="text-accent text-[11px]">@</span>
-                      <span>{user.name}</span>
-                    </button>
-                  ))}
-                </div>
+              {mention.active && (
+                <MentionDropdown
+                  items={mention.items}
+                  index={mention.index}
+                  onPick={mention.select}
+                  positionClassName="left-10 right-24"
+                />
               )}
               <input
                 ref={fileInputRef}
@@ -559,30 +514,12 @@ export function RevisionCommentThread({ revisionId, sceneKey }: Props) {
                 ref={inputRef}
                 type="text"
                 value={draft}
-                onChange={e => handleDraftChange(e.target.value)}
+                onChange={e => { setDraft(e.target.value); draftRef.current = e.target.value; mention.refresh(); }}
+                onKeyUp={mention.refresh}
+                onClick={mention.refresh}
+                onSelect={mention.refresh}
                 onKeyDown={e => {
-                  if (showMentions && filteredUsers.length > 0) {
-                    if (e.key === 'ArrowDown') {
-                      e.preventDefault();
-                      setMentionIndex((prev) => (prev + 1) % filteredUsers.length);
-                      return;
-                    }
-                    if (e.key === 'ArrowUp') {
-                      e.preventDefault();
-                      setMentionIndex((prev) => (prev - 1 + filteredUsers.length) % filteredUsers.length);
-                      return;
-                    }
-                    if (e.key === 'Enter' || e.key === 'Tab') {
-                      e.preventDefault();
-                      insertMention(filteredUsers[mentionIndex].name);
-                      return;
-                    }
-                    if (e.key === 'Escape') {
-                      e.preventDefault();
-                      setShowMentions(false);
-                      return;
-                    }
-                  }
+                  if (mention.onKeyDown(e)) return;
                   if (e.key === 'Enter' && !e.shiftKey) {
                     e.preventDefault();
                     send();
@@ -635,29 +572,6 @@ function CommentBubble({
   onImageClick: (url: string, comment: SceneComment) => void;
   onMentionClick: (userName: string) => void;
 }) {
-  const renderMentionInSegment = (segment: string, baseIdx: number) => {
-    const parts = segment.split(/(@\S+)/g);
-    return parts.map((part, index) => {
-      const key = `${baseIdx}-${index}`;
-      if (part.startsWith('@')) {
-        const name = part.slice(1);
-        if (users.some(user => user.name === name)) {
-          return (
-            <span
-              key={key}
-              className="text-accent font-bold bg-accent/10 rounded px-0.5 cursor-pointer hover:bg-accent/20 transition-colors"
-              onClick={() => onMentionClick(name)}
-              title={`${name} 팀원 보기`}
-            >
-              {part}
-            </span>
-          );
-        }
-      }
-      return <span key={key}>{part}</span>;
-    });
-  };
-
   return (
     <div
       className={`border rounded-lg px-3 py-2 ${
@@ -685,7 +599,11 @@ function CommentBubble({
       </div>
       {comment.text && (
         <div className="text-[12px] text-text-primary whitespace-pre-wrap leading-relaxed">
-          <PathLinkifiedText text={comment.text} renderTextSegment={renderMentionInSegment} />
+          <EntityText
+            text={comment.text}
+            userNames={users.map(user => user.name)}
+            onMentionClick={onMentionClick}
+          />
         </div>
       )}
       {(comment.images?.length ?? 0) > 0 && (
