@@ -17,6 +17,9 @@
   "author": "Studio JBBJ",
   "license": "UNLICENSED",
   "private": true,
+  "engines": {
+    "node": ">=22.6.0"
+  },
   "dependencies": {
     "@fontsource/gowun-dodum": "^5.2.8",
     "@fontsource/ibm-plex-sans-kr": "^5.2.8",
