@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo, useCallback } from 'react';
 import { AnimatePresence } from 'framer-motion';
-import { ArrowUpDown, BarChart3, CheckCircle2, Circle, Clock, Filter, Layers, List, ListFilter, PlayCircle, Plus, Search } from 'lucide-react';
+import { ArrowUpDown, BarChart3, CheckCheck, CheckCircle2, Circle, Clock, Filter, Layers, List, ListFilter, PlayCircle, Plus, Search } from 'lucide-react';
 import { useRevisionStore } from '@/stores/useRevisionStore';
 import { useDataStore } from '@/stores/useDataStore';
 import { useAuthStore } from '@/stores/useAuthStore';
@@ -271,7 +271,7 @@ export default function CompositingView({
       // 내 할 일 필터
       if (myTasksOnly && currentUser) {
         sceneRevisions = sceneRevisions.filter(
-          r => r.assignee === currentUser.name || r.requesterName === currentUser.name,
+          r => r.assignee === currentUser.name || r.requesterName === currentUser.name || (r.assigneeIds?.includes(currentUser.id) ?? false),
         );
         if (sceneRevisions.length === 0) continue;
       }
@@ -319,7 +319,7 @@ export default function CompositingView({
         }
         if (myTasksOnly && currentUser) {
           sceneRevisions = sceneRevisions.filter(
-            r => r.assignee === currentUser.name || r.requesterName === currentUser.name,
+            r => r.assignee === currentUser.name || r.requesterName === currentUser.name || (r.assigneeIds?.includes(currentUser.id) ?? false),
           );
         }
         if (sceneRevisions.length === 0) continue;
@@ -377,9 +377,10 @@ export default function CompositingView({
         revisions: visibleRevisions,
         commentCountByRev: effectiveCommentCountByRev,
         currentUserName: currentUser?.name,
+        currentUserId: currentUser?.id,
       }),
     };
-  }, [sceneGroups.length, visibleRevisions, effectiveCommentCountByRev, currentUser?.name]);
+  }, [sceneGroups.length, visibleRevisions, effectiveCommentCountByRev, currentUser?.name, currentUser?.id]);
 
   useEffect(() => {
     if (!selectedRevisionId) return;
@@ -627,6 +628,7 @@ export default function CompositingView({
                 { key: 'all' as const, label: '전체', icon: <Circle size={11} strokeWidth={2.4} /> },
                 { key: 'open' as const, label: '대기', icon: <Clock size={11} strokeWidth={2.4} /> },
                 { key: 'in_progress' as const, label: '진행중', icon: <PlayCircle size={11} strokeWidth={2.4} /> },
+                { key: 'assignee_done' as const, label: '담당완료', icon: <CheckCheck size={11} strokeWidth={2.4} /> },
                 { key: 'resolved' as const, label: '완료', icon: <CheckCircle2 size={11} strokeWidth={2.4} /> },
               ]).map(({ key, label, icon }) => (
                 <button

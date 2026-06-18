@@ -25,6 +25,10 @@ const STATUS_TINT: Record<RevisionStatus, { background: string; halo: string }> 
     background: 'linear-gradient(90deg, color-mix(in srgb, var(--status-combine) 13%, transparent) 0%, color-mix(in srgb, var(--status-combine) 4.5%, transparent) 42%, transparent 88%)',
     halo: 'color-mix(in srgb, var(--status-combine) 18%, transparent)',
   },
+  assignee_done: {
+    background: 'linear-gradient(90deg, color-mix(in srgb, rgb(var(--color-accent)) 13%, transparent) 0%, color-mix(in srgb, rgb(var(--color-accent)) 4.5%, transparent) 42%, transparent 88%)',
+    halo: 'color-mix(in srgb, rgb(var(--color-accent)) 18%, transparent)',
+  },
   resolved: {
     background: 'linear-gradient(90deg, color-mix(in srgb, var(--status-done) 7.5%, transparent) 0%, color-mix(in srgb, var(--status-done) 2.8%, transparent) 42%, transparent 88%)',
     halo: 'color-mix(in srgb, var(--status-done) 12%, transparent)',
@@ -66,6 +70,9 @@ export function RevisionItem({
         .filter((n): n is string => !!n),
     [revision.notifyUserIds, allUsers],
   );
+
+  // 담당자 있는 항목은 legacy 상태변경(특히 resolved)을 막는다 — 담당 워크플로우는 씬 모달에서 처리. (Codex P2)
+  const hasAssignees = (revision.assigneeIds?.length ?? 0) > 0;
 
   const handleStatusSelect = (status: RevisionStatus) => {
     if (status === 'resolved') {
@@ -280,10 +287,10 @@ export function RevisionItem({
         </AnimatePresence>
       </div>
 
-      {/* 상태 변경 (호버 시 노출) */}
-      {!isResolved ? (
+      {/* 상태 변경 (호버 시 노출) — 담당자 있는 항목은 보드에서 legacy 변경 차단(씬 모달 담당 워크플로우 사용, Codex P2) */}
+      {hasAssignees ? null : !isResolved ? (
         <div className="relative z-[1] shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">
-          <StatusDropdown currentStatus={revision.status} onSelect={handleStatusSelect} />
+          <StatusDropdown currentStatus={revision.status} onSelect={handleStatusSelect} hasAssignees={hasAssignees} />
         </div>
       ) : (
         <button

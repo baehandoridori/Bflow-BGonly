@@ -473,6 +473,7 @@ export function SceneDetailModal({
       'image_annotate_storyboard', 'image_annotate_guide',
       'scene_add',
       'revision_add', 'revision_in_progress', 'revision_resolve', 'revision_delete',
+      'revision_assignee_done', 'revision_final_resolve', 'revision_reassign',
     ]);
 
     const events: CommentInlineEvent[] = sceneActivities

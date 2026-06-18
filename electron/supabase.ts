@@ -175,6 +175,11 @@ export interface SupabaseRevision {
   createdAt: string;
   updatedAt: string;
   resolvedAt: string | null;
+  assigneeIds: string[];
+  assigneeStates: Record<string, { state: string; note?: string; startedAt?: string; doneAt?: string }>;
+  setId: string | null;
+  finalResolvedBy: string;
+  finalResolvedAt: string | undefined;
 }
 
 // ─── 헬퍼 ──────────────────────────────────────
@@ -1804,6 +1809,7 @@ export async function addRevision(
   assignee: string,
   createdAt: string,
   notifyUserIdsJson?: string,
+  assigneeIdsJson?: string,
 ): Promise<void> {
   // partUuid가 비어있으면 sceneId(=sceneKey)에서 역조회
   let resolvedPartUuid = partUuid;
@@ -1852,6 +1858,22 @@ export async function addRevision(
     }
   }
 
+  // 리테이크 허브: 담당자 user.id 배열 + 초기 상태 맵.
+  let assigneeIds: string[] = [];
+  if (assigneeIdsJson) {
+    try {
+      const parsed = JSON.parse(assigneeIdsJson);
+      if (Array.isArray(parsed)) assigneeIds = parsed.filter((x) => typeof x === 'string');
+    } catch {
+      console.warn('[addRevision] assigneeIdsJson 파싱 실패:', assigneeIdsJson);
+    }
+  }
+  // 불변식: 담당자는 알림 대상에 포함
+  const notifySet = new Set(notifyUserIds);
+  assigneeIds = assigneeIds.filter((id) => notifySet.has(id));
+  const assigneeStates: Record<string, { state: string }> = {};
+  for (const id of assigneeIds) assigneeStates[id] = { state: 'pending' };
+
   const { error } = await supabase.from('comp_revisions').insert({
     id,
     part_id: resolvedPartUuid,
@@ -1869,6 +1891,8 @@ export async function addRevision(
     assignee,
     created_at: createdAt,
     notify_user_ids: notifyUserIds,
+    assignee_ids: assigneeIds,
+    assignee_states: assigneeStates,
   });
   throwIfError(error);
   broadcastDataChange('comp_revisions', 'INSERT');
@@ -1885,9 +1909,26 @@ export async function updateRevision(
     frameNo: 'frame_no', imageUrl: 'image_url', assignee: 'assignee',
     resolvedBy: 'resolved_by', resolvedNote: 'resolved_note',
     resolvedAt: 'resolved_at', updatedAt: 'updated_at',
+    assigneeIds: 'assignee_ids',
+    assigneeStates: 'assignee_states',
+    setId: 'set_id',
+    finalResolvedBy: 'final_resolved_by',
+    finalResolvedAt: 'final_resolved_at',
   };
+  // JSONB 컬럼은 문자열로 전달받아 파싱해서 저장 (실패 시 원본 문자열 fallback)
+  const jsonFields = new Set(['assigneeIds', 'assigneeStates']);
+  // TIMESTAMPTZ/UUID/TEXT 컬럼은 빈 문자열 대신 null 저장 (PostgreSQL 타입 에러 방지)
+  const nullableWhenEmpty = new Set(['finalResolvedAt', 'setId', 'resolvedAt', 'finalResolvedBy']);
   for (const [k, v] of Object.entries(updates)) {
-    dbUpdates[fieldMap[k] || k] = v;
+    const col = fieldMap[k];
+    if (!col) { console.warn('[updateRevision] 허용되지 않은 필드 무시:', k); continue; }
+    if (jsonFields.has(k)) {
+      try { dbUpdates[col] = JSON.parse(v); } catch { dbUpdates[col] = v; }
+    } else if (nullableWhenEmpty.has(k) && v === '') {
+      dbUpdates[col] = null;
+    } else {
+      dbUpdates[col] = v;
+    }
   }
   const { error } = await supabase.from('comp_revisions').update(dbUpdates).eq('id', id);
   throwIfError(error);
@@ -1899,13 +1940,53 @@ function mapRevision(r: Record<string, unknown>): SupabaseRevision & { sceneKey:
   const notifyUserIds: string[] = Array.isArray(rawNotify)
     ? (rawNotify.filter((x) => typeof x === 'string') as string[])
     : [];
+
+  const rawAssigneeIds = r.assignee_ids;
+  const assigneeIds: string[] = Array.isArray(rawAssigneeIds)
+    ? (rawAssigneeIds.filter((x) => typeof x === 'string') as string[])
+    : [];
+  const assigneeStates = (r.assignee_states && typeof r.assignee_states === 'object' && !Array.isArray(r.assignee_states))
+    ? (r.assignee_states as Record<string, { state: string; note?: string; startedAt?: string; doneAt?: string }>)
+    : {};
+  const finalResolvedAt = (r.final_resolved_at as string) || undefined;
+
+  // 불변식 복원: assignee_ids ⊆ notify_user_ids
+  const allowed = new Set(notifyUserIds);
+  const cleanAssigneeIds = assigneeIds.filter((id) => allowed.has(id));
+
+  // assigneeStates도 cleanAssigneeIds 기준으로 정제 (ghost state 제거, 누락 항목은 pending으로 채움)
+  const cleanAssigneeStates: Record<string, { state: string; note?: string; startedAt?: string; doneAt?: string }> = {};
+  for (const id of cleanAssigneeIds) {
+    cleanAssigneeStates[id] = assigneeStates[id] ?? { state: 'pending' };
+  }
+
+  // 파생 status (권위) — 저장된 status는 캐시로 보고 재계산값으로 덮어씀.
+  // 단 담당자 0명(legacy/단순 흐름) 항목은 updateStatus 가 status 컬럼을 직접 관리하므로 stored status 가 권위다.
+  // (Codex P1: 담당 0명을 항상 open 으로 파생하면 legacy in_progress/resolved 가 reload 시 open 으로 다운그레이드되고,
+  //  백필된 resolved 행은 final_resolved_at 때문에 되돌리기가 막힌다. 담당 0명은 담당 워크플로우/final_resolved_at 무시.)
+  const storedStatus = (r.status as string) || 'open';
+  let derivedStatus: 'open' | 'in_progress' | 'assignee_done' | 'resolved';
+  if (cleanAssigneeIds.length === 0) {
+    // assignee_done 은 담당 0명에 성립 불가 → open 으로 정규화. 그 외 stored status 유지.
+    derivedStatus = storedStatus === 'in_progress' ? 'in_progress'
+      : storedStatus === 'resolved' ? 'resolved'
+      : 'open';
+  } else if (finalResolvedAt) {
+    derivedStatus = 'resolved';
+  } else {
+    const states = cleanAssigneeIds.map((id) => cleanAssigneeStates[id]?.state ?? 'pending');
+    if (states.every((s) => s === 'pending')) derivedStatus = 'open';
+    else if (states.every((s) => s === 'done')) derivedStatus = 'assignee_done';
+    else derivedStatus = 'in_progress';
+  }
+
   return {
     id: r.id as string,
     partId: r.part_id as string,
     sceneId: r.scene_id as string,
     sceneKey: (r.scene_id as string) || '',  // scene_id에 sceneKey 저장 (호환용)
     revisionNo: r.revision_no as number,
-    status: (r.status as string) || 'open',
+    status: derivedStatus,
     priority: (r.priority as string) || 'normal',
     description: (r.description as string) || '',
     frameNo: (r.frame_no as string) || '',
@@ -1920,6 +2001,14 @@ function mapRevision(r: Record<string, unknown>): SupabaseRevision & { sceneKey:
     updatedAt: (r.updated_at as string) || '',
     resolvedAt: (r.resolved_at as string) || null,
     notifyUserIds,
+    assigneeIds: cleanAssigneeIds,
+    assigneeStates: cleanAssigneeStates,
+    setId: (r.set_id as string | null) ?? null,
+    // 담당자 0명(legacy) 행은 final 필드를 renderer 로 노출하지 않는다 (Codex P2).
+    // 백필된 stale final_resolved_at 이 reassign/담당지정 시 deriveRevisionStatus 로 흘러가
+    // 새 담당 워크플로우를 즉시 resolved 로 만들어 start/complete 를 막던 문제 방지.
+    finalResolvedBy: cleanAssigneeIds.length === 0 ? '' : ((r.final_resolved_by as string) || ''),
+    finalResolvedAt: cleanAssigneeIds.length === 0 ? undefined : finalResolvedAt,
   };
 }
 
@@ -2343,6 +2432,8 @@ export type ActionType =
   | 'stage_lo' | 'stage_done' | 'stage_review' | 'stage_png'
   | 'memo_update' | 'comment_add'
   | 'revision_add' | 'revision_in_progress' | 'revision_resolve' | 'revision_delete'
+  // 리테이크 허브 1단계: 담당자 본인 완료 / 최종 완료 / 재배정
+  | 'revision_assignee_done' | 'revision_final_resolve' | 'revision_reassign'
   // v1.18.0: 리비전 맥락 댓글
   | 'revision_comment'
   | 'scene_add' | 'scene_delete'

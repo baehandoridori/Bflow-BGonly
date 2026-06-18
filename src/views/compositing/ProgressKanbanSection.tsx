@@ -32,14 +32,16 @@ export function ProgressKanbanSection({
   commentSeenByRev?: Map<string, boolean>;
   onSelectRevision: (rev: CompRevision) => void;
 }) {
+  // 리테이크 허브 2단계: 담당 완료(assignee_done)를 정식 컬럼으로 분리.
   const byStatus = useMemo(() => ({
     open: revisions.filter((r) => r.status === 'open'),
     in_progress: revisions.filter((r) => r.status === 'in_progress'),
+    assignee_done: revisions.filter((r) => r.status === 'assignee_done'),
     resolved: revisions.filter((r) => r.status === 'resolved'),
   }), [revisions]);
 
   return (
-    <div className="grid grid-cols-3 gap-3 px-6 pb-6">
+    <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 px-6 pb-6">
       <KanbanColumn
         title="대기"
         statusKey="open"
@@ -54,6 +56,16 @@ export function ProgressKanbanSection({
         title="진행중"
         statusKey="in_progress"
         revisions={byStatus.in_progress}
+        sceneInfoMap={sceneInfoMap}
+        selectedRevisionId={selectedRevisionId}
+        commentCountByRev={commentCountByRev}
+        commentSeenByRev={commentSeenByRev}
+        onSelectRevision={onSelectRevision}
+      />
+      <KanbanColumn
+        title="담당 완료"
+        statusKey="assignee_done"
+        revisions={byStatus.assignee_done}
         sceneInfoMap={sceneInfoMap}
         selectedRevisionId={selectedRevisionId}
         commentCountByRev={commentCountByRev}
@@ -87,7 +99,7 @@ function KanbanColumn({
   onSelectRevision,
 }: {
   title: string;
-  statusKey: 'open' | 'in_progress' | 'resolved';
+  statusKey: 'open' | 'in_progress' | 'assignee_done' | 'resolved';
   revisions: CompRevision[];
   sceneInfoMap: Map<string, SceneInfo>;
   selectedRevisionId: string | null;

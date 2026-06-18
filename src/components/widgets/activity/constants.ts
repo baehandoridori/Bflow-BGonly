@@ -17,6 +17,10 @@ export const ACTION_TYPE_TO_GROUP: Record<ActionType, ActionGroup> = {
   revision_in_progress: 'memo',
   revision_resolve: 'memo',
   revision_delete: 'memo',
+  // 리테이크 허브 1단계: 담당 완료 / 최종 완료 / 재배정 — 메모/댓글 그룹
+  revision_assignee_done: 'memo',
+  revision_final_resolve: 'memo',
+  revision_reassign: 'memo',
   // v1.18.0: 리테이크 댓글 — '메모/댓글' 그룹으로 묶어 일반 comment_add 와 같은 필터에 포함
   revision_comment: 'memo',
   scene_add: 'scene',
@@ -48,6 +52,10 @@ export const ACTION_TYPE_LABEL: Record<ActionType, string> = {
   revision_in_progress: '리테이크 진행중',
   revision_resolve: '리테이크 해결',
   revision_delete: '리테이크 삭제',
+  // 리테이크 허브 1단계: 담당 완료 / 최종 완료 / 재배정
+  revision_assignee_done: '리테이크 담당 완료',
+  revision_final_resolve: '리테이크 최종 완료',
+  revision_reassign: '리테이크 담당자 변경',
   // v1.18.0: 리테이크 댓글
   revision_comment: '리테이크 댓글',
   scene_add: '씬 추가',
@@ -79,6 +87,10 @@ export const ACTION_TYPE_COLOR: Record<ActionType, string> = {
   revision_in_progress: '#5EBBC9',
   revision_resolve: '#81ECEC',
   revision_delete: '#FF7675',
+  // 리테이크 허브 1단계: 담당 완료(진행 톤)/최종 완료(해결 톤)/재배정(메타 톤)
+  revision_assignee_done: '#5EBBC9',
+  revision_final_resolve: '#81ECEC',
+  revision_reassign: '#95A5A6',
   // v1.18.0: 리테이크 댓글 — 시안~카키 사이로 일반 comment_add 와 시각 구분
   revision_comment: '#A0E7E5',
   scene_add: '#6FCF97',

@@ -100,9 +100,12 @@ export function PriorityBadge({ priority }: { priority: RevisionPriority }) {
 export function StatusDropdown({
   currentStatus,
   onSelect,
+  hasAssignees = false,
 }: {
   currentStatus: RevisionStatus;
   onSelect: (status: RevisionStatus) => void;
+  /** 담당자 있는 항목은 legacy 'resolved'(최종완료)를 여기서 못 함 — 씬 모달 담당 워크플로우(최종완료 바)로 처리. (Codex P2) */
+  hasAssignees?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
@@ -116,7 +119,11 @@ export function StatusDropdown({
     return () => document.removeEventListener('mousedown', handler);
   }, [open]);
 
-  const options: RevisionStatus[] = ['open', 'in_progress', 'resolved'];
+  // assignee_done은 담당자 전원 완료 시 자동 파생되는 상태 — 수동 선택 대상 아님.
+  // 담당자 있는 항목은 legacy 'resolved'(finalResolvedAt 미기록 → reload 시 assignee_done 복귀)를 막는다.
+  const options: RevisionStatus[] = hasAssignees
+    ? ['open', 'in_progress']
+    : ['open', 'in_progress', 'resolved'];
 
   return (
     <div ref={ref} className="relative">

@@ -1576,14 +1576,21 @@ export default function App() {
 
           // 상태 변경 detect — old.status !== new.status 일 때만 알림
           if (!oldRow || oldRow.status === newRow.status) return;
+          // 최종완료 되돌리기(resolved → 비resolved)는 알림 보내지 않음 (open 복귀와 동일 무알림 정책).
+          // 되돌리기 전용 알림이 '담당 완료'로 오인 발송되던 문제 방지.
+          if (oldRow.status === 'resolved' && newRow.status !== 'resolved') return;
           // 본인이 변경한 거면 스킵 (resolved_by 가 본인 이름이면) — resolved 전용 가드.
           if (newRow.resolved_by === me.name) return;
 
-          let action: 'in_progress' | 'resolve';
+          let action: 'in_progress' | 'assignee_done' | 'resolve';
           let titlePrefix: string;
           if (newRow.status === 'in_progress') {
             action = 'in_progress';
             titlePrefix = '리테이크 진행중';
+          } else if (newRow.status === 'assignee_done') {
+            // 리테이크 허브 2단계: 담당 전원 완료 → 최종 완료 대기
+            action = 'assignee_done';
+            titlePrefix = '리테이크 담당 완료';
           } else if (newRow.status === 'resolved') {
             action = 'resolve';
             titlePrefix = '리테이크 완료';

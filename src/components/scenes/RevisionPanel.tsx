@@ -1,6 +1,6 @@
-import { useState, useRef, useEffect, useMemo } from 'react';
+import { useState, useRef, useEffect, useMemo, useCallback, memo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Plus, Check, Clock, Circle, ImagePlus, X, Trash2, MessageSquareWarning, Bell, Undo2 } from 'lucide-react';
+import { Plus, Check, CheckCheck, Clock, Circle, ImagePlus, X, Trash2, MessageSquareWarning, Bell, Undo2, UserPlus, Users } from 'lucide-react';
 import { toast as sonnerToast } from 'sonner';
 import { ConfirmDialog } from '@/components/common/ConfirmDialog';
 import { useAuthStore } from '@/stores/useAuthStore';
@@ -18,6 +18,12 @@ import { AttachmentImageLightbox, type AttachmentImageLightboxState } from './At
 import { calcDefaultRecipients } from '@/utils/revisionRecipients';
 import { PathLinkifiedText } from '@/components/common/PathLinkifiedText';
 import { CompactIconLabel } from '@/components/common/CompactIconLabel';
+import { canActAsAssignee, canReassignRevision, canFinalResolveRevision } from '@/utils/revisionWorkflow';
+import { summarizeAssignees, collectAssigneeNotes, sideBarColorClass, canShowFinalResolveBar } from '@/utils/revisionCardView';
+import { AssigneeChipRow } from './revision/AssigneeChipRow';
+import { CompletionNoteInput } from './revision/CompletionNoteInput';
+import { FinalResolveBar } from './revision/FinalResolveBar';
+import { ReassignInline } from './revision/ReassignInline';
 
 // ─── 상태 뱃지 ───────────────────────────────
 
@@ -36,6 +42,7 @@ function StatusBadge({ status, size = 'sm' }: { status: RevisionStatus; size?: '
     >
       {status === 'open' && <Circle size={size === 'sm' ? 8 : 10} fill="currentColor" />}
       {status === 'in_progress' && <Clock size={size === 'sm' ? 8 : 10} />}
+      {status === 'assignee_done' && <CheckCheck size={size === 'sm' ? 8 : 10} />}
       {status === 'resolved' && <Check size={size === 'sm' ? 8 : 10} />}
       {cfg.label}
     </motion.span>
@@ -97,7 +104,7 @@ function RevisionStatusAction({
 
 // ─── 리테이크 카드 ──────────────────────────────
 
-function RevisionCard({
+const RevisionCard = memo(function RevisionCard({
   revision,
   commentSceneKey,
   onStatusChange,
@@ -112,11 +119,22 @@ function RevisionCard({
    * partUuid lookup이 실패하고 "씬을 찾을 수 없음" 에러가 발생한다 (이슈: 2026-05-04).
    */
   commentSceneKey: string;
-  onStatusChange: (status: RevisionStatus, note?: string) => void;
-  onDelete?: () => void;
+  onStatusChange: (revId: string, status: RevisionStatus, note?: string) => void;
+  onDelete?: (rev: CompRevision) => void;
 }) {
   const [lightbox, setLightbox] = useState<AttachmentImageLightboxState | null>(null);
   const { currentUser, users: allUsers } = useAuthStore();
+  // 담당 워크플로우 액션 (리테이크 허브 2단계) — store 가 낙관/롤백/self-mark 전담.
+  const startAssignee = useRevisionStore((s) => s.startAssignee);
+  const completeAssignee = useRevisionStore((s) => s.completeAssignee);
+  const revertAssignee = useRevisionStore((s) => s.revertAssignee);
+  const reassign = useRevisionStore((s) => s.reassign);
+  const finalResolve = useRevisionStore((s) => s.finalResolve);
+  const revertFinalResolve = useRevisionStore((s) => s.revertFinalResolve);
+
+  const [noteEditingFor, setNoteEditingFor] = useState<string | null>(null);
+  const [reassigning, setReassigning] = useState(false);
+
   const canDelete = !!(
     currentUser && onDelete &&
     (currentUser.id === revision.requesterId || currentUser.role === 'admin')
@@ -131,8 +149,47 @@ function RevisionCard({
     [revision.notifyUserIds, allUsers],
   );
 
+  // ─── 담당 워크플로우 파생값 ───
+  const assigneeIds = revision.assigneeIds ?? [];
+  const assigneeStates = revision.assigneeStates ?? {};
+  const hasAssignees = assigneeIds.length > 0;
+  const summary = summarizeAssignees(assigneeIds, assigneeStates);
+  const doneNotes = collectAssigneeNotes(assigneeIds, assigneeStates);
+  const isFinalResolved = revision.status === 'resolved';
+  const canAct = canActAsAssignee(currentUser, revision);
+  const canReassign = canReassignRevision(currentUser, revision);
+  const canFinal = canFinalResolveRevision(currentUser, revision);
+
+  const nameOf = (id: string) => allUsers.find((u) => u.id === id)?.name ?? id;
+  const assigneeChips = useMemo(
+    () =>
+      assigneeIds.map((id) => ({
+        id,
+        name: allUsers.find((u) => u.id === id)?.name ?? id,
+        state: assigneeStates[id]?.state ?? ('pending' as const),
+      })),
+    [assigneeIds, assigneeStates, allUsers],
+  );
+
   const handleStatusChange = (status: RevisionStatus) => {
-    onStatusChange(status);
+    onStatusChange(revision.id, status);
+  };
+
+  const handleCompleteClick = (uid: string) => {
+    setReassigning(false);
+    setNoteEditingFor(uid);
+  };
+  const handleNoteConfirm = (note: string) => {
+    if (!noteEditingFor) return;
+    completeAssignee(revision, noteEditingFor, note);
+    setNoteEditingFor(null);
+  };
+  const handleReassignConfirm = (ids: string[]) => {
+    reassign(revision, ids);
+    setReassigning(false);
+  };
+  const handleFinalResolve = () => {
+    if (currentUser) finalResolve(revision, currentUser.name);
   };
 
   const openRevisionImage = () => {
@@ -168,9 +225,9 @@ function RevisionCard({
       className="rev-card relative rounded-xl p-3 border border-bg-border/60 group"
       style={elevatedGlassStyle}
     >
-      {/* 좌측 컬러 막대 — 미해결: 액센트 / 완료: 그린 */}
+      {/* 좌측 컬러 막대 — §8.1 status별 4색 (대기/진행중/담당완료/최종완료) */}
       <span
-        className={`rev-side-bar${revision.status === 'resolved' ? ' rev-side-bar-done' : ''}`}
+        className={`rev-side-bar ${sideBarColorClass(revision.status)}`}
         aria-hidden
       />
 
@@ -188,10 +245,13 @@ function RevisionCard({
         </div>
         {currentUser && (
           <div className="flex items-center gap-1.5">
-            <RevisionStatusAction status={revision.status} onStatusChange={handleStatusChange} />
+            {/* 담당자 0명(legacy/미지정)만 단순 상태 전환 버튼. 담당자 있으면 담당 칩+최종완료 바로 처리. */}
+            {!hasAssignees && (
+              <RevisionStatusAction status={revision.status} onStatusChange={handleStatusChange} />
+            )}
             {canDelete && (
               <button
-                onClick={onDelete}
+                onClick={() => onDelete?.(revision)}
                 title="리테이크 삭제"
                 className="opacity-0 group-hover:opacity-100 p-1 rounded-md text-text-secondary/60 hover:text-red-400 hover:bg-red-500/10 transition-all cursor-pointer"
               >
@@ -236,14 +296,127 @@ function RevisionCard({
         />
       )}
 
-      {/* 해결 메모 표시 */}
-      {revision.status === 'resolved' && revision.resolvedNote && (
-        <div className="mb-2 px-3 py-2 rounded-lg" style={{ background: STATUS_CONFIG.resolved.bg }}>
-          <p className="text-xs text-text-secondary">
-            <span className="font-medium" style={{ color: STATUS_CONFIG.resolved.color }}>해결:</span>{' '}
-            {revision.resolvedNote}
-          </p>
+      {/* ─── 담당 워크플로우 (담당자 1명+) ─── */}
+      {hasAssignees && (
+        <div className="space-y-2 mb-2">
+          <AssigneeChipRow
+            assignees={assigneeChips}
+            currentUserId={currentUser?.id ?? null}
+            canAct={canAct}
+            finalResolved={!!revision.finalResolvedAt}
+            onStart={(uid) => startAssignee(revision, uid)}
+            onComplete={handleCompleteClick}
+            onRevert={(uid) => revertAssignee(revision, uid)}
+          />
+
+          <AnimatePresence>
+            {noteEditingFor && (
+              <motion.div
+                key="note-input"
+                initial={{ opacity: 0, height: 0 }}
+                animate={{ opacity: 1, height: 'auto' }}
+                exit={{ opacity: 0, height: 0 }}
+                transition={{ duration: 0.2, ease: 'easeOut' }}
+                className="overflow-hidden"
+              >
+                <CompletionNoteInput
+                  initialValue={assigneeStates[noteEditingFor]?.note ?? ''}
+                  onConfirm={handleNoteConfirm}
+                  onCancel={() => setNoteEditingFor(null)}
+                />
+              </motion.div>
+            )}
+          </AnimatePresence>
+
+          {/* 담당자 완료 멘트 표시 */}
+          {doneNotes.length > 0 && (
+            <div className="space-y-1">
+              {doneNotes.map(({ userId, note }) => (
+                <div
+                  key={userId}
+                  className="px-3 py-2 rounded-lg"
+                  style={{ background: 'color-mix(in srgb, rgb(var(--color-accent)) 10%, transparent)' }}
+                >
+                  <p className="text-xs text-text-secondary">
+                    <span className="font-medium text-accent-sub">{nameOf(userId)} 완료:</span>{' '}
+                    <PathLinkifiedText text={note} />
+                  </p>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* 담당 변경 (요청자/컴포지터급) — 최종완료 상태에선 숨김(먼저 최종완료 되돌리기) */}
+          {canReassign && !isFinalResolved &&
+            (reassigning ? (
+              <ReassignInline
+                candidates={notifyUsers.map((u) => ({ id: u.id, name: u.name }))}
+                currentAssigneeIds={assigneeIds}
+                onConfirm={handleReassignConfirm}
+                onCancel={() => setReassigning(false)}
+              />
+            ) : (
+              <button
+                type="button"
+                onClick={() => {
+                  setNoteEditingFor(null);
+                  setReassigning(true);
+                }}
+                className="inline-flex items-center gap-1 text-[11px] font-semibold text-text-secondary/75 hover:text-accent-sub cursor-pointer transition-colors"
+              >
+                <Users size={12} />
+                담당 변경
+              </button>
+            ))}
+
+          {/* 최종완료 바 */}
+          {canShowFinalResolveBar(assigneeIds, revision.finalResolvedAt) && (
+            <FinalResolveBar
+              resolved={isFinalResolved}
+              enabled={summary.allDone}
+              canFinalResolve={canFinal}
+              finalResolvedBy={revision.finalResolvedBy}
+              onResolve={handleFinalResolve}
+              onRevert={() => revertFinalResolve(revision)}
+            />
+          )}
         </div>
+      )}
+
+      {/* ─── 담당자 0명 — 단순 흐름(legacy 호환) + 담당 지정 ─── */}
+      {!hasAssignees && (
+        <>
+          {revision.status === 'resolved' && revision.resolvedNote && (
+            <div className="mb-2 px-3 py-2 rounded-lg" style={{ background: STATUS_CONFIG.resolved.bg }}>
+              <p className="text-xs text-text-secondary">
+                <span className="font-medium" style={{ color: STATUS_CONFIG.resolved.color }}>해결:</span>{' '}
+                {revision.resolvedNote}
+              </p>
+            </div>
+          )}
+          {/* 담당 지정 — 최종완료 전 + 알림 대상이 있어야(후보 = 알림 대상자). 0명이면 막다른 길 방지로 숨김. */}
+          {canReassign && !isFinalResolved && notifyUsers.length > 0 && (
+            <div className="mb-2">
+              {reassigning ? (
+                <ReassignInline
+                  candidates={notifyUsers.map((u) => ({ id: u.id, name: u.name }))}
+                  currentAssigneeIds={[]}
+                  onConfirm={handleReassignConfirm}
+                  onCancel={() => setReassigning(false)}
+                />
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => setReassigning(true)}
+                  className="inline-flex items-center gap-1 text-[11px] font-semibold text-accent-sub hover:text-accent cursor-pointer transition-colors"
+                >
+                  <UserPlus size={12} />
+                  담당 지정
+                </button>
+              )}
+            </div>
+          )}
+        </>
       )}
 
       {/* 푸터 */}
@@ -294,7 +467,7 @@ function RevisionCard({
       <RevisionCommentThread revisionId={revision.id} sceneKey={commentSceneKey} />
     </motion.div>
   );
-}
+});
 
 // ─── 메인 패널 ───────────────────────────────
 
@@ -314,7 +487,13 @@ interface RevisionPanelProps {
 
 export function RevisionPanel({ sheetName, sceneId, siblingSceneIds, department, onCountChange }: RevisionPanelProps) {
   const { currentUser, users: allUsers } = useAuthStore();
-  const { createRevision, updateStatus, loadRevisions, getRevisionsForScene, getOpenCount } = useRevisionStore();
+  // 필드별 selector — 액션은 안정 참조라 store 의 무관한 필드 변경엔 리렌더 안 됨.
+  const createRevision = useRevisionStore((s) => s.createRevision);
+  const updateStatus = useRevisionStore((s) => s.updateStatus);
+  const loadRevisions = useRevisionStore((s) => s.loadRevisions);
+  const getRevisionsForScene = useRevisionStore((s) => s.getRevisionsForScene);
+  const getOpenCount = useRevisionStore((s) => s.getOpenCount);
+  const allRevisions = useRevisionStore((s) => s.revisions);
   const episodes = useDataStore((s) => s.episodes);
 
   // 그 sheetName 의 part + 그 안에서 sceneId 매칭되는 scene 객체 (담당자 자동 체크용).
@@ -357,9 +536,14 @@ export function RevisionPanel({ sheetName, sceneId, siblingSceneIds, department,
   //   - 두 번째 fix(2026-05-04 #2): comment 저장은 sceneId 를 Number()로 sort_order 변환해 scenes lookup → "a001" 같은 raw 값은 NaN 이라 실패
   //   → CommentPanel(`UnifiedSceneDetailModal:134`)와 동일하게 scene.no 사용.
   const commentSceneKey = scene ? `${sheetName}:${scene.no}` : '';
-  const revisions = getRevisionsForScene(sceneKey);
-  const sortedRevisions = [...revisions].sort((a, b) =>
-    new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
+  // allRevisions 변경 시에만 재계산 — 매 렌더 새 배열 생성 방지.
+  const revisions = useMemo(
+    () => getRevisionsForScene(sceneKey),
+    [allRevisions, sceneKey, getRevisionsForScene],
+  );
+  const sortedRevisions = useMemo(
+    () => [...revisions].sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()),
+    [revisions],
   );
 
   const [showForm, setShowForm] = useState(false);
@@ -367,6 +551,7 @@ export function RevisionPanel({ sheetName, sceneId, siblingSceneIds, department,
   const [imagePreview, setImagePreview] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [notifyIds, setNotifyIds] = useState<string[]>([]);
+  const [formAssigneeIds, setFormAssigneeIds] = useState<string[]>([]);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -438,10 +623,13 @@ export function RevisionPanel({ sheetName, sceneId, siblingSceneIds, department,
         requesterName: currentUser.name,
         // v1.18.0: RevisionRecipientPicker 가 계산한 알림 대상자 (자동 체크 ± 사용자 수정).
         notifyUserIds: notifyIds,
+        // 리테이크 허브 2단계: 알림 대상 중 담당자로 승격된 사람 (service 가 notify⊆ 보정).
+        assigneeIds: formAssigneeIds,
       });
       setDescription('');
       setImagePreview(null);
       setNotifyIds([]);
+      setFormAssigneeIds([]);
       setShowForm(false);
     } catch (err) {
       console.error('리테이크 등록 실패:', err);
@@ -450,14 +638,15 @@ export function RevisionPanel({ sheetName, sceneId, siblingSceneIds, department,
     }
   };
 
-  const handleStatusChange = async (revId: string, status: RevisionStatus, note?: string) => {
+  // 안정 콜백 — RevisionCard(memo) 의 props 참조를 고정해 형제 카드 리렌더를 막는다.
+  const handleStatusChange = useCallback(async (revId: string, status: RevisionStatus, note?: string) => {
     await updateStatus(revId, sceneKey, status, {
       resolvedBy: currentUser?.name,
       resolvedNote: note,
     });
-  };
+  }, [updateStatus, sceneKey, currentUser?.name]);
 
-  const handleDelete = async (rev: CompRevision) => {
+  const handleDelete = useCallback(async (rev: CompRevision) => {
     const ok = await ConfirmDialog.show({
       message: `${revisionNoToLabel(rev.revisionNo)} 리테이크를 삭제하시겠습니까?\n첨부 이미지도 함께 제거됩니다.`,
       confirmLabel: '삭제',
@@ -471,7 +660,7 @@ export function RevisionPanel({ sheetName, sceneId, siblingSceneIds, department,
       const msg = err instanceof Error ? err.message : String(err);
       sonnerToast.error(`리테이크 삭제 실패: ${msg}`);
     }
-  };
+  }, []);
 
   return (
     <div className="flex flex-col h-full">
@@ -489,8 +678,8 @@ export function RevisionPanel({ sheetName, sceneId, siblingSceneIds, department,
                 key={rev.id}
                 revision={rev}
                 commentSceneKey={commentSceneKey}
-                onStatusChange={(status, note) => handleStatusChange(rev.id, status, note)}
-                onDelete={() => handleDelete(rev)}
+                onStatusChange={handleStatusChange}
+                onDelete={handleDelete}
               />
             ))}
           </AnimatePresence>
@@ -603,6 +792,8 @@ export function RevisionPanel({ sheetName, sceneId, siblingSceneIds, department,
                       defaultCheckedIds={defaultRecipients}
                       excludeUserId={currentUser?.id || ''}
                       onChange={setNotifyIds}
+                      enableAssignee
+                      onAssigneesChange={setFormAssigneeIds}
                     />
                   </div>
 

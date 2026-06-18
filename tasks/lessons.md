@@ -402,3 +402,15 @@ PR #116 에서 12 라운드 (P1×3, P2×6, P3×2) 끝에 silent-done. Monitor �
 - `src/views/compositing-dashboard/useCommentCount.ts` — 모듈 스코프 캐시 + listener 패턴 + stale refresh
 - `src/views/compositing-dashboard/compositingActions.ts` — sequence guard + rollback skip
 - `src/views/compositing-dashboard/timeline/TimelinePanel.tsx` — HTML5 native drag-drop
+
+---
+
+## 구현 계획의 "배선" 단계를 UI 재작성 중 누락 (2026-06-18, 리테이크 허브 2단계)
+
+증상: `sideBarColorClass` 유틸 + index.css 4색 클래스 + node 테스트를 다 만들고 RevisionPanel 에 import 까지 했으나, 정작 카드 렌더에서 `sideBarColorClass(...)` 호출을 빠뜨려 좌측 4색 막대가 죽은 코드가 됨(계획 Step 2=import 는 했고 Step 4=배선을 건너뜀). `noUnusedLocals: false` 라 typecheck/build 모두 통과 → 6차원 심층 코드리뷰가 4회 중복으로 잡아냄.
+
+교훈:
+- 계획의 각 Step(특히 "기존 X 를 Y 로 교체")을 끝까지 추적. 유틸을 만들면 "import 했다"가 아니라 "호출처가 실제 렌더에 도달한다"까지 확인.
+- 새 유틸/상수 추가 후 `grep` 으로 호출 0건(=import만 있고 미사용)이 아닌지 검증 — 배선 누락의 신호.
+- UI 시각 요소는 typecheck 가 못 잡는다(noUnusedLocals=false, ESLint 빌드 미포함). 멀티에이전트 리뷰 또는 preview 로 별도 검증.
+- 좋았던 패턴: 표현 컴포넌트를 store 비종속 props 기반으로 분리하면 카드/허브 양쪽 재사용 + 단위 테스트 + 리뷰가 쉬워진다.

@@ -1818,8 +1818,8 @@ ipcMain.handle('supabase:read-revisions', wrapIpc(async () => {
 ipcMain.handle('supabase:add-revision', wrapIpc(async (_e: unknown, id: string, partUuid: string, sceneId: string,
     revisionNo: number, status: string, priority: string, description: string, frameNo: string,
     imageUrl: string, department: string, lookupDepartment: string, requesterId: string, requesterName: string, assignee: string, createdAt: string,
-    notifyUserIdsJson?: string) => {
-    await sbAddRevision(id, partUuid, sceneId, revisionNo, status, priority, description, frameNo, imageUrl, department, lookupDepartment, requesterId, requesterName, assignee, createdAt, notifyUserIdsJson);
+    notifyUserIdsJson?: string, assigneeIdsJson?: string) => {
+    await sbAddRevision(id, partUuid, sceneId, revisionNo, status, priority, description, frameNo, imageUrl, department, lookupDepartment, requesterId, requesterName, assignee, createdAt, notifyUserIdsJson, assigneeIdsJson);
     if (currentActivityUser) {
       try {
         // sceneId 가 sceneKey 형식 (예: 'EP02:A:35') 일 수 있으므로 파싱 + raw- prefix 디코드 (Codex P2)
@@ -1896,12 +1896,26 @@ ipcMain.handle('supabase:add-revision', wrapIpc(async (_e: unknown, id: string, 
     }
   }));
 ipcMain.handle('supabase:update-revision', wrapIpc(async (_e: unknown, id: string, updates: Record<string, string>) => {
-  await sbUpdateRevision(id, updates);
-  // status 전이만 활동 기록 (in_progress / resolved). 한솔 결정 (2026-05-02): 진행중도 audit.
-  const statusActionType: ActionType | null =
-    updates.status === 'resolved' ? 'revision_resolve'
-    : updates.status === 'in_progress' ? 'revision_in_progress'
-    : null;
+  // 권한 검증은 클라이언트 가드(revisionWorkflow canActAsAssignee/canReassignRevision/canFinalResolveRevision)에
+  // 위임한다 — spec §5: DB RLS allow-all, 클라이언트 단 가드 기준(의도된 설계). delete-revision 만 신뢰 세션을
+  // 별도 확인하는 비대칭은 삭제의 감사 귀속(Codex #8) 목적이며 실수가 아니다.
+  // 리테이크 허브 2단계: __op 는 활동기록 분기 전용 신호 — DB 로는 보내지 않는다(fieldMap 미등록이라 분리).
+  const { __op, ...dbUpdates } = updates;
+  await sbUpdateRevision(id, dbUpdates);
+  // status 전이/담당 워크플로우 활동 기록. 한솔 결정 (2026-05-02): 진행중도 audit.
+  // 우선순위: 최종완료 > 재배정(동반 status 전이보다 우선, 한솔 §7.3 '재배정 포함') > 담당완료 > 진행중 > 해결.
+  // 주의: finalResolvedAt 이 빈 문자열('')이면(최종완료 되돌리기) truthy 아님 → 분기 제외(의도된 조용한 스킵).
+  let statusActionType: ActionType | null = null;
+  if (__op === 'revert_final') {
+    // 최종완료 되돌리기는 활동기록 스킵 — finalResolvedAt='' 가 falsy 라 아래 status 분기로 fall-through 하면
+    // 'revision_assignee_done'('담당 완료')로 오기록되던 문제 방지 (Codex P2).
+    statusActionType = null;
+  } else if (dbUpdates.finalResolvedAt) statusActionType = 'revision_final_resolve';
+  else if (__op === 'reassign') statusActionType = 'revision_reassign';
+  else if (dbUpdates.status === 'assignee_done') statusActionType = 'revision_assignee_done';
+  else if (dbUpdates.status === 'in_progress') statusActionType = 'revision_in_progress';
+  else if (dbUpdates.status === 'resolved') statusActionType = 'revision_resolve';
+  else if (dbUpdates.assigneeIds) statusActionType = 'revision_reassign';
   if (currentActivityUser && statusActionType) {
     try {
       const { data: revRow } = await supabaseClient

@@ -8,7 +8,7 @@
  * sceneKey 형식: "EP01:A:1" (에피소드:파트:정규화된 씬번호 — 시트명 비의존)
  */
 
-import type { CompRevision, Part, RevisionPriority, RevisionStatus } from '../types';
+import type { CompRevision, Part, RevisionAssigneeState, RevisionPriority, RevisionStatus } from '../types';
 import { useDataStore } from '../stores/useDataStore';
 import {
   buildDistinctRevisionSceneId,
@@ -20,6 +20,9 @@ import {
 import { normalizeSceneIdKey } from '../utils/sceneIdKey';
 import { normalizePartIdKey } from '../utils/partId';
 import { buildRevisionNotificationUserIds } from '../utils/revisionNotificationRecipients';
+import {
+  startAssignee, completeAssignee, revertAssignee, deriveRevisionStatus, sanitizeAssignees,
+} from '../utils/revisionWorkflow';
 
 const REVISIONS_FILE = 'revisions.json';
 const DIGITS_ONLY_RE = /^\d+$/;
@@ -298,6 +301,11 @@ function rowToRevision(row: {
   createdAt: string; updatedAt: string; resolvedAt: string;
   priority?: string; frameNo?: string;
   notifyUserIds?: string[] | null;
+  assigneeIds?: string[] | null;
+  assigneeStates?: Record<string, RevisionAssigneeState> | null;
+  setId?: string | null;
+  finalResolvedBy?: string | null;
+  finalResolvedAt?: string | null;
 }): CompRevision {
   const p = row.priority as RevisionPriority | undefined;
   const sceneKey = normalizeStoredRevisionSceneKey(row.sceneKey);
@@ -320,6 +328,11 @@ function rowToRevision(row: {
     updatedAt: row.updatedAt || '',
     resolvedAt: row.resolvedAt || undefined,
     notifyUserIds: Array.isArray(row.notifyUserIds) ? row.notifyUserIds : undefined,
+    assigneeIds: Array.isArray(row.assigneeIds) ? row.assigneeIds : [],
+    assigneeStates: (row.assigneeStates && typeof row.assigneeStates === 'object' && !Array.isArray(row.assigneeStates)) ? row.assigneeStates : {},
+    setId: (row.setId as string) ?? null,
+    finalResolvedBy: (row.finalResolvedBy as string) ?? '',
+    finalResolvedAt: (row.finalResolvedAt as string) || undefined,
   };
 }
 
@@ -335,6 +348,11 @@ export async function loadAllRevisions(): Promise<RevisionsStore> {
     createdAt: string; updatedAt: string; resolvedAt: string;
     priority?: string; frameNo?: string;
     notifyUserIds?: string[] | null;
+    assigneeIds?: string[] | null;
+    assigneeStates?: Record<string, RevisionAssigneeState> | null;
+    setId?: string | null;
+    finalResolvedBy?: string | null;
+    finalResolvedAt?: string | null;
   }[] = [];
 
   try {
@@ -413,6 +431,8 @@ export interface CreateRevisionServiceInput {
   requesterId: string;
   requesterName: string;
   notifyUserIds: string[];
+  /** 생성 시 담당자 지정 (리테이크 허브 2단계). 항상 notifyUserIds 의 부분집합으로 보정됨. */
+  assigneeIds?: string[];
 }
 
 export async function createRevision(input: CreateRevisionServiceInput): Promise<CompRevision> {
@@ -427,6 +447,10 @@ export async function createRevision(input: CreateRevisionServiceInput): Promise
     notifyUserIds: input.notifyUserIds,
     requesterId: input.requesterId,
   });
+  // 담당자 지정(2단계): 불변식 assignee_ids ⊆ notify_user_ids 복원 후 초기 status 파생.
+  // (담당자 있어도 전원 pending 이라 보통 'open'. status 는 읽을 때 mapRevision 이 재파생하는 캐시값.)
+  const { assigneeIds, assigneeStates } = sanitizeAssignees(input.assigneeIds ?? [], {}, notifyUserIds);
+  const initialStatus = deriveRevisionStatus(assigneeIds, assigneeStates, undefined);
 
   if (sheetsMode) {
     const store = await loadAllRevisions();
@@ -435,7 +459,7 @@ export async function createRevision(input: CreateRevisionServiceInput): Promise
       id,
       sceneKey: normalizedSceneKey,
       revisionNo,
-      status: 'open',
+      status: initialStatus,
       priority,
       description: input.description,
       frameNo: undefined,
@@ -447,14 +471,20 @@ export async function createRevision(input: CreateRevisionServiceInput): Promise
       createdAt: now,
       updatedAt: now,
       notifyUserIds,
+      assigneeIds,
+      assigneeStates,
+      setId: null,
+      finalResolvedBy: '',
+      finalResolvedAt: undefined,
     };
 
     // Supabase: partUuid + sceneId로 저장 (sceneKey를 그대로 partUuid 자리에 전달 — 서버에서 해석)
     await window.electronAPI.supabaseAddRevision(
-      id, '', normalizedSceneKey, revisionNo, 'open', priority,
+      id, '', normalizedSceneKey, revisionNo, initialStatus, priority,
       input.description, '', input.imageUrl || '', department || '', input.lookupDepartment || department || '',
       input.requesterId, input.requesterName, '', now,
       JSON.stringify(notifyUserIds),
+      JSON.stringify(assigneeIds),
     );
 
     // 캐시 업데이트
@@ -471,7 +501,7 @@ export async function createRevision(input: CreateRevisionServiceInput): Promise
     id,
     sceneKey: normalizedSceneKey,
     revisionNo,
-    status: 'open',
+    status: initialStatus,
     priority,
     description: input.description,
     frameNo: undefined,
@@ -483,6 +513,11 @@ export async function createRevision(input: CreateRevisionServiceInput): Promise
     createdAt: now,
     updatedAt: now,
     notifyUserIds,
+    assigneeIds,
+    assigneeStates,
+    setId: null,
+    finalResolvedBy: '',
+    finalResolvedAt: undefined,
   };
 
   if (!all[normalizedSceneKey]) all[normalizedSceneKey] = [];
@@ -552,6 +587,133 @@ export async function updateRevisionStatus(
     }
   }
   await saveLocal(all);
+}
+
+// ─── 담당 워크플로우 (리테이크 허브 1단계, 2단계에서 local mode 지원 추가) ─────────────
+// 모두 deriveRevisionStatus 로 status 를 파생해 저장한다.
+// supabaseUpdateRevision 은 Record<string,string> 만 받으므로 객체/배열은 JSON 문자열로 직렬화한다.
+
+/**
+ * 담당 워크플로우 변경을 sheetsMode 면 IPC(+ sheetsCache 패치), 아니면 local revisions.json 에 반영.
+ * (Codex P2: 기존 헬퍼가 sheetsMode 분기 없이 IPC 만 호출해 local/preview/test 모드에서 액션이 손실되던 문제.)
+ * @param supabaseUpdates IPC 로 보낼 Record<string,string> (JSON 문자열·__op 포함)
+ * @param localPatch 로컬/캐시 CompRevision 에 머지할 부분 객체
+ */
+async function persistRevisionWorkflow(
+  rev: CompRevision,
+  supabaseUpdates: Record<string, string>,
+  localPatch: Partial<CompRevision>,
+): Promise<void> {
+  const lookupSceneKeys = getRevisionLookupSceneKeys(rev.sceneKey);
+  if (sheetsMode) {
+    await window.electronAPI.supabaseUpdateRevision(rev.id, supabaseUpdates);
+    if (sheetsCache) {
+      for (const key of lookupSceneKeys) {
+        const list = sheetsCache[key];
+        if (!list) continue;
+        const idx = list.findIndex((r) => r.id === rev.id);
+        if (idx >= 0) { list[idx] = { ...list[idx], ...localPatch }; break; }
+      }
+    }
+    return;
+  }
+  // 로컬 모드 (preview/test fallback)
+  const all = await loadLocalAll();
+  for (const key of lookupSceneKeys) {
+    const list = all[key];
+    if (!list) continue;
+    const idx = list.findIndex((r) => r.id === rev.id);
+    if (idx >= 0) { list[idx] = { ...list[idx], ...localPatch }; break; }
+  }
+  await saveLocal(all);
+}
+
+/**
+ * 담당 상태 전이 직전 서버 최신 assignee_states 를 읽어 merge base 로 쓴다 (Codex P1 — 동시 완료 lost update 방지).
+ * store 의 client 스냅샷이 realtime 전파 전이라 stale 할 수 있으므로, write 직전 서버 권위값으로 base 를 다시 잡는다.
+ */
+async function freshAssigneeStates(rev: CompRevision): Promise<Record<string, RevisionAssigneeState>> {
+  if (!sheetsMode) return rev.assigneeStates ?? {};
+  try {
+    const rawData = await window.electronAPI.supabaseReadRevisions();
+    const rows = (rawData as Array<Parameters<typeof rowToRevision>[0]>) ?? [];
+    const fresh = rows.find((r) => r.id === rev.id);
+    return fresh ? (rowToRevision(fresh).assigneeStates ?? {}) : (rev.assigneeStates ?? {});
+  } catch {
+    return rev.assigneeStates ?? {};
+  }
+}
+
+/** 담당자 본인이 작업 시작 (none/pending → in_progress). */
+export async function startAssigneeWork(rev: CompRevision, userId: string): Promise<void> {
+  const now = new Date().toISOString();
+  const states = startAssignee(await freshAssigneeStates(rev), userId, now);
+  const status = deriveRevisionStatus(rev.assigneeIds ?? [], states, rev.finalResolvedAt);
+  await persistRevisionWorkflow(rev,
+    { assigneeStates: JSON.stringify(states), status, updatedAt: now },
+    { assigneeStates: states, status, updatedAt: now });
+}
+
+/** 담당자 본인 완료 (멘트 포함). */
+export async function completeAssigneeWork(rev: CompRevision, userId: string, note: string): Promise<void> {
+  const now = new Date().toISOString();
+  const states = completeAssignee(await freshAssigneeStates(rev), userId, note, now);
+  const status = deriveRevisionStatus(rev.assigneeIds ?? [], states, rev.finalResolvedAt);
+  await persistRevisionWorkflow(rev,
+    { assigneeStates: JSON.stringify(states), status, updatedAt: now },
+    { assigneeStates: states, status, updatedAt: now });
+}
+
+/** 담당자 재배정 (요청자/컴포지터급). assigneeIds 는 notify 의 부분집합으로 sanitize. */
+export async function reassignRevision(rev: CompRevision, nextAssigneeIds: string[]): Promise<void> {
+  const now = new Date().toISOString();
+  const { assigneeIds, assigneeStates } = sanitizeAssignees(
+    nextAssigneeIds, rev.assigneeStates ?? {}, rev.notifyUserIds ?? [],
+  );
+  // 담당 (재)배정은 담당 워크플로우 (재)시작이다 — 백필/레거시로 남은 final 잔재를 clear 한다 (Codex P1).
+  // final 무시(null)로 status 파생 + DB final 컬럼도 비워(빈문자→null) reload 시 resolved 로 굳지 않게 한다.
+  const status = deriveRevisionStatus(assigneeIds, assigneeStates, null);
+  await persistRevisionWorkflow(rev,
+    {
+      assigneeIds: JSON.stringify(assigneeIds),
+      assigneeStates: JSON.stringify(assigneeStates),
+      status, updatedAt: now,
+      finalResolvedAt: '', finalResolvedBy: '',
+      // 활동기록 분기 전용 신호. main 핸들러가 분리해 DB 로는 보내지 않는다(fieldMap 미등록).
+      __op: 'reassign',
+    },
+    { assigneeIds, assigneeStates, status, finalResolvedAt: undefined, finalResolvedBy: '', updatedAt: now });
+}
+
+/** 최종 완료 (요청자/컴포지터급). */
+export async function finalResolveRevision(rev: CompRevision, byName: string): Promise<void> {
+  const now = new Date().toISOString();
+  await persistRevisionWorkflow(rev,
+    { finalResolvedAt: now, finalResolvedBy: byName, status: 'resolved', updatedAt: now },
+    { finalResolvedAt: now, finalResolvedBy: byName, status: 'resolved', updatedAt: now });
+}
+
+/** 최종 완료 되돌리기. */
+export async function revertFinalResolve(rev: CompRevision): Promise<void> {
+  const now = new Date().toISOString();
+  const status = deriveRevisionStatus(rev.assigneeIds ?? [], rev.assigneeStates ?? {}, null);
+  await persistRevisionWorkflow(rev,
+    // __op: 'revert_final' — main 핸들러가 활동기록을 스킵(status fall-through 로 '담당 완료' 오기록 방지, Codex P2).
+    { finalResolvedAt: '', finalResolvedBy: '', status, updatedAt: now, __op: 'revert_final' },
+    { finalResolvedAt: undefined, finalResolvedBy: '', status, updatedAt: now });
+}
+
+/** 담당자 본인 완료 되돌리기 (done → in_progress). 최종완료 상태면 차단. */
+export async function revertAssigneeWork(rev: CompRevision, userId: string): Promise<void> {
+  if (rev.finalResolvedAt) {
+    throw new Error('최종 완료된 리테이크는 먼저 최종 완료를 되돌려야 합니다.');
+  }
+  const now = new Date().toISOString();
+  const states = revertAssignee(await freshAssigneeStates(rev), userId);
+  const status = deriveRevisionStatus(rev.assigneeIds ?? [], states, rev.finalResolvedAt);
+  await persistRevisionWorkflow(rev,
+    { assigneeStates: JSON.stringify(states), status, updatedAt: now },
+    { assigneeStates: states, status, updatedAt: now });
 }
 
 /**

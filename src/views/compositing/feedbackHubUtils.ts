@@ -43,11 +43,14 @@ export function buildFeedbackHubStats({
   revisions,
   commentCountByRev,
   currentUserName,
+  currentUserId,
   now = new Date(),
 }: {
   revisions: CompRevision[];
   commentCountByRev?: Map<string, number>;
   currentUserName?: string;
+  /** 신규 담당자(assigneeIds, user.id 기반) 매칭용 — '내 관련'이 담당자도 포함하도록. */
+  currentUserId?: string;
   now?: Date;
 }) {
   const openRevisions = revisions.filter((revision) => revision.status !== 'resolved');
@@ -56,9 +59,11 @@ export function buildFeedbackHubStats({
   return {
     totalOpen: openRevisions.length,
     withComments: revisions.filter((revision) => (commentCountByRev?.get(revision.id) ?? 0) > 0).length,
-    myRelated: currentUserName
+    myRelated: (currentUserName || currentUserId)
       ? revisions.filter((revision) =>
-          revision.assignee === currentUserName || revision.requesterName === currentUserName,
+          revision.assignee === currentUserName
+          || revision.requesterName === currentUserName
+          || (currentUserId ? (revision.assigneeIds?.includes(currentUserId) ?? false) : false),
         ).length
       : 0,
     stalled: openRevisions.filter((revision) => revisionActivityTime(revision).getTime() <= stalledSince).length,

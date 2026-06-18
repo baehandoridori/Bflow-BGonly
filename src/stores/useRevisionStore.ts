@@ -2,6 +2,9 @@ import { create } from 'zustand';
 import type { CompRevision, Episode, RevisionStatus } from '@/types';
 import * as revisionService from '@/services/revisionService';
 import { useDataStore } from '@/stores/useDataStore';
+import {
+  startAssignee, completeAssignee, revertAssignee, deriveRevisionStatus, sanitizeAssignees,
+} from '@/utils/revisionWorkflow';
 
 /**
  * v1.18.0: 리테이크 등록 input. 우선순위/프레임/담당자 입력 UI 가 폼에서 제거되어
@@ -20,6 +23,8 @@ export interface CreateRevisionInput {
   requesterName: string;
   /** 알림 받을 사람 user.id 배열 (등록자 본인 포함 가능 — 자기 알림은 발송 시 스킵). */
   notifyUserIds: string[];
+  /** 생성 시 담당자 지정 (리테이크 허브 2단계). 항상 notifyUserIds 부분집합으로 보정됨. */
+  assigneeIds?: string[];
 }
 
 interface RevisionState {
@@ -42,6 +47,14 @@ interface RevisionState {
     status: RevisionStatus,
     extra?: { resolvedBy?: string; resolvedNote?: string },
   ) => Promise<void>;
+
+  // ─── 담당 워크플로우 (리테이크 허브 1단계) ─────────────
+  startAssignee: (rev: CompRevision, userId: string) => Promise<void>;
+  completeAssignee: (rev: CompRevision, userId: string, note: string) => Promise<void>;
+  reassign: (rev: CompRevision, nextAssigneeIds: string[]) => Promise<void>;
+  finalResolve: (rev: CompRevision, byName: string) => Promise<void>;
+  revertFinalResolve: (rev: CompRevision) => Promise<void>;
+  revertAssignee: (rev: CompRevision, userId: string) => Promise<void>;
 
   deleteRevision: (id: string, sceneKey: string) => Promise<void>;
 
@@ -182,6 +195,76 @@ export const useRevisionStore = create<RevisionState>((set, get) => ({
     }
   },
 
+  // ─── 담당 워크플로우 (리테이크 허브 1단계) ─────────────
+  // 모두 낙관적 업데이트 → 서비스 호출 → 실패 시 서버 재로드(롤백).
+
+  // Codex P1 완화: 담당 상태 전이는 액션 직전 store 최신 스냅샷(realtime 반영)을 merge base 로 사용한다.
+  // rev prop 이 stale 이면(다른 담당자가 그 사이 done 처리) 그 담당자 상태를 덮어써 완료가 손실되므로,
+  // get().revisions 의 최신 행에서 assigneeStates/assigneeIds 를 다시 읽어 본인 키만 갱신한다.
+  startAssignee: async (rev, userId) => {
+    const cur = get().revisions.find((r) => r.id === rev.id) ?? rev;
+    if (cur.finalResolvedAt) return; // 최종완료 상태에선 담당 전이 차단 (spec §6.2 — resolved 는 final 유무로만 이탈)
+    const now = new Date().toISOString();
+    const states = startAssignee(cur.assigneeStates ?? {}, userId, now);
+    const status = deriveRevisionStatus(cur.assigneeIds ?? [], states, cur.finalResolvedAt);
+    get().updateRevisionOptimistic(rev.id, rev.sceneKey, { assigneeStates: states, status, updatedAt: now });
+    markSelfFromStatus(rev.id, status);
+    try { await revisionService.startAssigneeWork(cur, userId); }
+    catch { await get().loadRevisions(); }
+  },
+
+  completeAssignee: async (rev, userId, note) => {
+    const cur = get().revisions.find((r) => r.id === rev.id) ?? rev;
+    if (cur.finalResolvedAt) return; // 최종완료 상태에선 담당 전이 차단 (spec §6.2)
+    const now = new Date().toISOString();
+    const states = completeAssignee(cur.assigneeStates ?? {}, userId, note, now);
+    const status = deriveRevisionStatus(cur.assigneeIds ?? [], states, cur.finalResolvedAt);
+    get().updateRevisionOptimistic(rev.id, rev.sceneKey, { assigneeStates: states, status, updatedAt: now });
+    markSelfFromStatus(rev.id, status);
+    try { await revisionService.completeAssigneeWork(cur, userId, note); }
+    catch { await get().loadRevisions(); }
+  },
+
+  reassign: async (rev, nextAssigneeIds) => {
+    const now = new Date().toISOString();
+    const { assigneeIds, assigneeStates } = sanitizeAssignees(nextAssigneeIds, rev.assigneeStates ?? {}, rev.notifyUserIds ?? []);
+    // 담당 (재)배정 시 legacy/백필 final 잔재 clear (Codex P1) — final 무시로 파생 + 낙관 패치도 비움.
+    const status = deriveRevisionStatus(assigneeIds, assigneeStates, null);
+    get().updateRevisionOptimistic(rev.id, rev.sceneKey, { assigneeIds, assigneeStates, status, finalResolvedAt: undefined, finalResolvedBy: undefined, updatedAt: now });
+    markSelfFromStatus(rev.id, status); // 재배정이 status 전이를 동반하면 그 알림을 본인에게서 억제
+    try { await revisionService.reassignRevision(rev, nextAssigneeIds); }
+    catch { await get().loadRevisions(); }
+  },
+
+  finalResolve: async (rev, byName) => {
+    const now = new Date().toISOString();
+    get().updateRevisionOptimistic(rev.id, rev.sceneKey, { finalResolvedAt: now, finalResolvedBy: byName, status: 'resolved', updatedAt: now });
+    markSelfRevisionAction(rev.id, 'resolve');
+    try { await revisionService.finalResolveRevision(rev, byName); }
+    catch { await get().loadRevisions(); }
+  },
+
+  revertFinalResolve: async (rev) => {
+    const now = new Date().toISOString();
+    const status = deriveRevisionStatus(rev.assigneeIds ?? [], rev.assigneeStates ?? {}, null);
+    get().updateRevisionOptimistic(rev.id, rev.sceneKey, { finalResolvedAt: undefined, finalResolvedBy: undefined, status, updatedAt: now });
+    markSelfFromStatus(rev.id, status);
+    try { await revisionService.revertFinalResolve(rev); }
+    catch { await get().loadRevisions(); }
+  },
+
+  revertAssignee: async (rev, userId) => {
+    const cur = get().revisions.find((r) => r.id === rev.id) ?? rev;
+    if (cur.finalResolvedAt) return; // 최종완료 상태면 차단 (spec §6.2)
+    const now = new Date().toISOString();
+    const states = revertAssignee(cur.assigneeStates ?? {}, userId);
+    const status = deriveRevisionStatus(cur.assigneeIds ?? [], states, cur.finalResolvedAt);
+    get().updateRevisionOptimistic(rev.id, rev.sceneKey, { assigneeStates: states, status, updatedAt: now });
+    markSelfFromStatus(rev.id, status);
+    try { await revisionService.revertAssigneeWork(cur, userId); }
+    catch { await get().loadRevisions(); }
+  },
+
   getRevisionsForScene: (sceneKey) => {
     const lookupKeys = getRevisionLookupKeys(sceneKey);
     return get().revisions.filter((r) => lookupKeys.has(r.sceneKey));
@@ -217,7 +300,19 @@ useDataStore.subscribe((state, previousState) => {
 const SELF_ACTION_TTL_MS = 5000;
 const _recentSelfRevisionActions = new Map<string, number>();
 
-export function markSelfRevisionAction(revisionId: string, action: 'in_progress' | 'resolve'): void {
+// 리테이크 허브 2단계: 담당 워크플로우 액션도 self-mark 대상에 포함.
+// action 값은 App.tsx 알림 핸들러의 status→action 매핑과 동일해야 self-억제가 동작한다.
+export type SelfRevisionAction = 'in_progress' | 'assignee_done' | 'resolve';
+
+/** 파생 status → 알림 action. open 은 알림이 없으므로 null(self-mark 불필요). */
+export function statusToSelfAction(status: RevisionStatus): SelfRevisionAction | null {
+  if (status === 'in_progress') return 'in_progress';
+  if (status === 'assignee_done') return 'assignee_done';
+  if (status === 'resolved') return 'resolve';
+  return null;
+}
+
+export function markSelfRevisionAction(revisionId: string, action: SelfRevisionAction): void {
   const key = `${revisionId}:${action}`;
   _recentSelfRevisionActions.set(key, Date.now());
   setTimeout(() => {
@@ -228,7 +323,7 @@ export function markSelfRevisionAction(revisionId: string, action: 'in_progress'
   }, SELF_ACTION_TTL_MS + 100);
 }
 
-export function isRecentSelfRevisionAction(revisionId: string, action: 'in_progress' | 'resolve'): boolean {
+export function isRecentSelfRevisionAction(revisionId: string, action: SelfRevisionAction): boolean {
   const key = `${revisionId}:${action}`;
   const ts = _recentSelfRevisionActions.get(key);
   if (!ts) return false;
@@ -237,4 +332,10 @@ export function isRecentSelfRevisionAction(revisionId: string, action: 'in_progr
     return false;
   }
   return true;
+}
+
+/** 파생 status 로부터 알림 action 을 정해 self-mark. open(알림 없음)이면 아무것도 안 함. */
+function markSelfFromStatus(revisionId: string, status: RevisionStatus): void {
+  const action = statusToSelfAction(status);
+  if (action) markSelfRevisionAction(revisionId, action);
 }

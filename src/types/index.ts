@@ -213,8 +213,17 @@ export interface MergedScene {
 
 // ─── 컴포지팅 리테이크 ─────────────────────────
 
-export type RevisionStatus = 'open' | 'in_progress' | 'resolved';
+export type RevisionStatus = 'open' | 'in_progress' | 'assignee_done' | 'resolved';
 export type RevisionPriority = 'urgent' | 'high' | 'normal';
+
+export type AssigneeState = 'pending' | 'in_progress' | 'done';
+
+export interface RevisionAssigneeState {
+  state: AssigneeState;
+  note?: string;        // 담당자 완료 멘트(파일경로 등)
+  startedAt?: string;   // ISO 8601
+  doneAt?: string;      // ISO 8601
+}
 
 export interface CompRevision {
   id: string;
@@ -240,6 +249,28 @@ export interface CompRevision {
    * 옵셔널 — 사용처에서 `?? []`로 가드. 레거시 데이터/생성 경로 호환.
    */
   notifyUserIds?: string[];
+  /** 담당자 user.id 배열 (반드시 notifyUserIds의 부분집합). */
+  assigneeIds?: string[];
+  /** 담당자별 상태 맵 { [userId]: { state, note?, startedAt?, doneAt? } }. */
+  assigneeStates?: Record<string, RevisionAssigneeState>;
+  /** 소속 리테이크 세트 id (없으면 일반 리테이크). */
+  setId?: string | null;
+  /** 최종 완료자 이름. */
+  finalResolvedBy?: string;
+  /** 최종 완료 시각 ISO 8601. */
+  finalResolvedAt?: string;
+}
+
+export interface CompRevisionSet {
+  id: string;
+  title: string;
+  episodeNumber?: number | null;
+  department?: 'bg' | 'acting' | null;
+  aggregatorId?: string | null;
+  status: 'open' | 'done';
+  createdBy?: string;
+  createdAt: string;
+  updatedAt: string;
 }
 
 // ─── 사용자 & 인증 ─────────────────────────
@@ -564,6 +595,8 @@ export type ActionType =
   | 'phase_wait' | 'phase_work' | 'phase_feedback' | 'phase_done'
   | 'memo_update' | 'comment_add'
   | 'revision_add' | 'revision_in_progress' | 'revision_resolve' | 'revision_delete'
+  // 리테이크 허브 1단계: 담당자 본인 완료 / 최종 완료 / 재배정
+  | 'revision_assignee_done' | 'revision_final_resolve' | 'revision_reassign'
   // v1.18.0: 리테이크 맥락 댓글 — 일반 comment_add 와 분리해 활동 피드에서 별도 표시
   | 'revision_comment'
   | 'scene_add' | 'scene_delete'
@@ -967,7 +1000,7 @@ export interface ElectronAPI {
   supabaseUpdatePrivateEvent: (id: string, updates: Record<string, unknown>) => Promise<void>;
   supabaseDeletePrivateEvent: (id: string) => Promise<void>;
   supabaseReadRevisions: () => Promise<unknown[]>;
-  supabaseAddRevision: (id: string, partUuid: string, sceneId: string, revisionNo: number, status: string, priority: string, description: string, frameNo: string, imageUrl: string, department: string, lookupDepartment: string, requesterId: string, requesterName: string, assignee: string, createdAt: string, notifyUserIdsJson: string) => Promise<void>;
+  supabaseAddRevision: (id: string, partUuid: string, sceneId: string, revisionNo: number, status: string, priority: string, description: string, frameNo: string, imageUrl: string, department: string, lookupDepartment: string, requesterId: string, requesterName: string, assignee: string, createdAt: string, notifyUserIdsJson: string, assigneeIdsJson?: string) => Promise<void>;
   supabaseUpdateRevision: (id: string, updates: Record<string, string>) => Promise<void>;
   supabaseDeleteRevision: (id: string) => Promise<void>;
   supabaseReadAllMetadata: () => Promise<unknown[]>;

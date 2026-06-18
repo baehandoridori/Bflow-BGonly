@@ -623,8 +623,10 @@ export function installDevElectronAPI(): void {
       assignee: string,
       createdAt: string,
       notifyUserIdsJson?: string,
+      assigneeIdsJson?: string,
     ) => {
       const revisions = getMockRevisionRows();
+      const mockAssigneeIds = parseJsonStringArray(assigneeIdsJson);
       revisions.push({
         id,
         sceneKey,
@@ -644,6 +646,11 @@ export function installDevElectronAPI(): void {
         updatedAt: createdAt,
         resolvedAt: '',
         notifyUserIds: parseJsonStringArray(notifyUserIdsJson),
+        assigneeIds: mockAssigneeIds,
+        assigneeStates: Object.fromEntries(mockAssigneeIds.map((aid) => [aid, { state: 'pending' }])),
+        setId: null,
+        finalResolvedBy: '',
+        finalResolvedAt: '',
       });
       localStore.__revisionRows = revisions;
       window.dispatchEvent(new CustomEvent('bflow:revisions-invalidated'));
@@ -666,9 +673,20 @@ export function installDevElectronAPI(): void {
       const target = revisions.find((revision) => revision.id === id);
       if (!target) return;
       const previousStatus = target.status;
+      // 프로덕션 main.ts 와 동일: __op 는 활동기록 분기 전용 신호라 행에 저장하지 않는다.
+      const { __op: _op, ...rest } = updates;
+      void _op;
+      // JSONB 필드는 JSON 문자열로 들어오므로 파싱해 객체/배열로 저장(재로드 시 타입가드 폴백 소실 방지).
+      const normalized: Record<string, unknown> = { ...rest };
+      if (typeof rest.assigneeIds === 'string') {
+        try { normalized.assigneeIds = JSON.parse(rest.assigneeIds); } catch { normalized.assigneeIds = []; }
+      }
+      if (typeof rest.assigneeStates === 'string') {
+        try { normalized.assigneeStates = JSON.parse(rest.assigneeStates); } catch { normalized.assigneeStates = {}; }
+      }
       Object.assign(target, {
-        ...updates,
-        updatedAt: updates.updatedAt ?? updates.updated_at ?? new Date().toISOString(),
+        ...normalized,
+        updatedAt: rest.updatedAt ?? rest.updated_at ?? new Date().toISOString(),
       });
       localStore.__revisionRows = revisions;
       window.dispatchEvent(new CustomEvent('bflow:revisions-invalidated'));
