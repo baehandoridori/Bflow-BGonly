@@ -1960,11 +1960,20 @@ function mapRevision(r: Record<string, unknown>): SupabaseRevision & { sceneKey:
     cleanAssigneeStates[id] = assigneeStates[id] ?? { state: 'pending' };
   }
 
-  // 파생 status (권위) — 저장된 status는 캐시로 보고 재계산값으로 덮어씀
+  // 파생 status (권위) — 저장된 status는 캐시로 보고 재계산값으로 덮어씀.
+  // 단 담당자 0명(legacy/단순 흐름) 항목은 updateStatus 가 status 컬럼을 직접 관리하므로 stored status 가 권위다.
+  // (Codex P1: 담당 0명을 항상 open 으로 파생하면 legacy in_progress/resolved 가 reload 시 open 으로 다운그레이드되고,
+  //  백필된 resolved 행은 final_resolved_at 때문에 되돌리기가 막힌다. 담당 0명은 담당 워크플로우/final_resolved_at 무시.)
+  const storedStatus = (r.status as string) || 'open';
   let derivedStatus: 'open' | 'in_progress' | 'assignee_done' | 'resolved';
-  if (finalResolvedAt) derivedStatus = 'resolved';
-  else if (cleanAssigneeIds.length === 0) derivedStatus = 'open';
-  else {
+  if (cleanAssigneeIds.length === 0) {
+    // assignee_done 은 담당 0명에 성립 불가 → open 으로 정규화. 그 외 stored status 유지.
+    derivedStatus = storedStatus === 'in_progress' ? 'in_progress'
+      : storedStatus === 'resolved' ? 'resolved'
+      : 'open';
+  } else if (finalResolvedAt) {
+    derivedStatus = 'resolved';
+  } else {
     const states = cleanAssigneeIds.map((id) => cleanAssigneeStates[id]?.state ?? 'pending');
     if (states.every((s) => s === 'pending')) derivedStatus = 'open';
     else if (states.every((s) => s === 'done')) derivedStatus = 'assignee_done';

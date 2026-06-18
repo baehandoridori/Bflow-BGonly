@@ -589,18 +589,53 @@ export async function updateRevisionStatus(
   await saveLocal(all);
 }
 
-// ─── 담당 워크플로우 (리테이크 허브 1단계) ─────────────────────────
-// 모두 deriveRevisionStatus 로 status 를 파생해 서버에 함께 보낸다.
+// ─── 담당 워크플로우 (리테이크 허브 1단계, 2단계에서 local mode 지원 추가) ─────────────
+// 모두 deriveRevisionStatus 로 status 를 파생해 저장한다.
 // supabaseUpdateRevision 은 Record<string,string> 만 받으므로 객체/배열은 JSON 문자열로 직렬화한다.
+
+/**
+ * 담당 워크플로우 변경을 sheetsMode 면 IPC(+ sheetsCache 패치), 아니면 local revisions.json 에 반영.
+ * (Codex P2: 기존 헬퍼가 sheetsMode 분기 없이 IPC 만 호출해 local/preview/test 모드에서 액션이 손실되던 문제.)
+ * @param supabaseUpdates IPC 로 보낼 Record<string,string> (JSON 문자열·__op 포함)
+ * @param localPatch 로컬/캐시 CompRevision 에 머지할 부분 객체
+ */
+async function persistRevisionWorkflow(
+  rev: CompRevision,
+  supabaseUpdates: Record<string, string>,
+  localPatch: Partial<CompRevision>,
+): Promise<void> {
+  const lookupSceneKeys = getRevisionLookupSceneKeys(rev.sceneKey);
+  if (sheetsMode) {
+    await window.electronAPI.supabaseUpdateRevision(rev.id, supabaseUpdates);
+    if (sheetsCache) {
+      for (const key of lookupSceneKeys) {
+        const list = sheetsCache[key];
+        if (!list) continue;
+        const idx = list.findIndex((r) => r.id === rev.id);
+        if (idx >= 0) { list[idx] = { ...list[idx], ...localPatch }; break; }
+      }
+    }
+    return;
+  }
+  // 로컬 모드 (preview/test fallback)
+  const all = await loadLocalAll();
+  for (const key of lookupSceneKeys) {
+    const list = all[key];
+    if (!list) continue;
+    const idx = list.findIndex((r) => r.id === rev.id);
+    if (idx >= 0) { list[idx] = { ...list[idx], ...localPatch }; break; }
+  }
+  await saveLocal(all);
+}
 
 /** 담당자 본인이 작업 시작 (none/pending → in_progress). */
 export async function startAssigneeWork(rev: CompRevision, userId: string): Promise<void> {
   const now = new Date().toISOString();
   const states = startAssignee(rev.assigneeStates ?? {}, userId, now);
   const status = deriveRevisionStatus(rev.assigneeIds ?? [], states, rev.finalResolvedAt);
-  await window.electronAPI.supabaseUpdateRevision(rev.id, {
-    assigneeStates: JSON.stringify(states), status, updatedAt: now,
-  });
+  await persistRevisionWorkflow(rev,
+    { assigneeStates: JSON.stringify(states), status, updatedAt: now },
+    { assigneeStates: states, status, updatedAt: now });
 }
 
 /** 담당자 본인 완료 (멘트 포함). */
@@ -608,9 +643,9 @@ export async function completeAssigneeWork(rev: CompRevision, userId: string, no
   const now = new Date().toISOString();
   const states = completeAssignee(rev.assigneeStates ?? {}, userId, note, now);
   const status = deriveRevisionStatus(rev.assigneeIds ?? [], states, rev.finalResolvedAt);
-  await window.electronAPI.supabaseUpdateRevision(rev.id, {
-    assigneeStates: JSON.stringify(states), status, updatedAt: now,
-  });
+  await persistRevisionWorkflow(rev,
+    { assigneeStates: JSON.stringify(states), status, updatedAt: now },
+    { assigneeStates: states, status, updatedAt: now });
 }
 
 /** 담당자 재배정 (요청자/컴포지터급). assigneeIds 는 notify 의 부분집합으로 sanitize. */
@@ -620,30 +655,32 @@ export async function reassignRevision(rev: CompRevision, nextAssigneeIds: strin
     nextAssigneeIds, rev.assigneeStates ?? {}, rev.notifyUserIds ?? [],
   );
   const status = deriveRevisionStatus(assigneeIds, assigneeStates, rev.finalResolvedAt);
-  await window.electronAPI.supabaseUpdateRevision(rev.id, {
-    assigneeIds: JSON.stringify(assigneeIds),
-    assigneeStates: JSON.stringify(assigneeStates),
-    status, updatedAt: now,
-    // 활동기록 분기 전용 신호. main 핸들러가 분리해 DB 로는 보내지 않는다(fieldMap 미등록).
-    __op: 'reassign',
-  });
+  await persistRevisionWorkflow(rev,
+    {
+      assigneeIds: JSON.stringify(assigneeIds),
+      assigneeStates: JSON.stringify(assigneeStates),
+      status, updatedAt: now,
+      // 활동기록 분기 전용 신호. main 핸들러가 분리해 DB 로는 보내지 않는다(fieldMap 미등록).
+      __op: 'reassign',
+    },
+    { assigneeIds, assigneeStates, status, updatedAt: now });
 }
 
 /** 최종 완료 (요청자/컴포지터급). */
 export async function finalResolveRevision(rev: CompRevision, byName: string): Promise<void> {
   const now = new Date().toISOString();
-  await window.electronAPI.supabaseUpdateRevision(rev.id, {
-    finalResolvedAt: now, finalResolvedBy: byName, status: 'resolved', updatedAt: now,
-  });
+  await persistRevisionWorkflow(rev,
+    { finalResolvedAt: now, finalResolvedBy: byName, status: 'resolved', updatedAt: now },
+    { finalResolvedAt: now, finalResolvedBy: byName, status: 'resolved', updatedAt: now });
 }
 
 /** 최종 완료 되돌리기. */
 export async function revertFinalResolve(rev: CompRevision): Promise<void> {
   const now = new Date().toISOString();
   const status = deriveRevisionStatus(rev.assigneeIds ?? [], rev.assigneeStates ?? {}, null);
-  await window.electronAPI.supabaseUpdateRevision(rev.id, {
-    finalResolvedAt: '', finalResolvedBy: '', status, updatedAt: now,
-  });
+  await persistRevisionWorkflow(rev,
+    { finalResolvedAt: '', finalResolvedBy: '', status, updatedAt: now },
+    { finalResolvedAt: undefined, finalResolvedBy: '', status, updatedAt: now });
 }
 
 /** 담당자 본인 완료 되돌리기 (done → in_progress). 최종완료 상태면 차단. */
@@ -654,9 +691,9 @@ export async function revertAssigneeWork(rev: CompRevision, userId: string): Pro
   const now = new Date().toISOString();
   const states = revertAssignee(rev.assigneeStates ?? {}, userId);
   const status = deriveRevisionStatus(rev.assigneeIds ?? [], states, rev.finalResolvedAt);
-  await window.electronAPI.supabaseUpdateRevision(rev.id, {
-    assigneeStates: JSON.stringify(states), status, updatedAt: now,
-  });
+  await persistRevisionWorkflow(rev,
+    { assigneeStates: JSON.stringify(states), status, updatedAt: now },
+    { assigneeStates: states, status, updatedAt: now });
 }
 
 /**
