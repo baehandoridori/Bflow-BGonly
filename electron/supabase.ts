@@ -2004,8 +2004,11 @@ function mapRevision(r: Record<string, unknown>): SupabaseRevision & { sceneKey:
     assigneeIds: cleanAssigneeIds,
     assigneeStates: cleanAssigneeStates,
     setId: (r.set_id as string | null) ?? null,
-    finalResolvedBy: (r.final_resolved_by as string) || '',
-    finalResolvedAt,
+    // 담당자 0명(legacy) 행은 final 필드를 renderer 로 노출하지 않는다 (Codex P2).
+    // 백필된 stale final_resolved_at 이 reassign/담당지정 시 deriveRevisionStatus 로 흘러가
+    // 새 담당 워크플로우를 즉시 resolved 로 만들어 start/complete 를 막던 문제 방지.
+    finalResolvedBy: cleanAssigneeIds.length === 0 ? '' : ((r.final_resolved_by as string) || ''),
+    finalResolvedAt: cleanAssigneeIds.length === 0 ? undefined : finalResolvedAt,
   };
 }
 

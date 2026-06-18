@@ -198,25 +198,30 @@ export const useRevisionStore = create<RevisionState>((set, get) => ({
   // ─── 담당 워크플로우 (리테이크 허브 1단계) ─────────────
   // 모두 낙관적 업데이트 → 서비스 호출 → 실패 시 서버 재로드(롤백).
 
+  // Codex P1 완화: 담당 상태 전이는 액션 직전 store 최신 스냅샷(realtime 반영)을 merge base 로 사용한다.
+  // rev prop 이 stale 이면(다른 담당자가 그 사이 done 처리) 그 담당자 상태를 덮어써 완료가 손실되므로,
+  // get().revisions 의 최신 행에서 assigneeStates/assigneeIds 를 다시 읽어 본인 키만 갱신한다.
   startAssignee: async (rev, userId) => {
-    if (rev.finalResolvedAt) return; // 최종완료 상태에선 담당 전이 차단 (spec §6.2 — resolved 는 final 유무로만 이탈)
+    const cur = get().revisions.find((r) => r.id === rev.id) ?? rev;
+    if (cur.finalResolvedAt) return; // 최종완료 상태에선 담당 전이 차단 (spec §6.2 — resolved 는 final 유무로만 이탈)
     const now = new Date().toISOString();
-    const states = startAssignee(rev.assigneeStates ?? {}, userId, now);
-    const status = deriveRevisionStatus(rev.assigneeIds ?? [], states, rev.finalResolvedAt);
+    const states = startAssignee(cur.assigneeStates ?? {}, userId, now);
+    const status = deriveRevisionStatus(cur.assigneeIds ?? [], states, cur.finalResolvedAt);
     get().updateRevisionOptimistic(rev.id, rev.sceneKey, { assigneeStates: states, status, updatedAt: now });
     markSelfFromStatus(rev.id, status);
-    try { await revisionService.startAssigneeWork(rev, userId); }
+    try { await revisionService.startAssigneeWork(cur, userId); }
     catch { await get().loadRevisions(); }
   },
 
   completeAssignee: async (rev, userId, note) => {
-    if (rev.finalResolvedAt) return; // 최종완료 상태에선 담당 전이 차단 (spec §6.2)
+    const cur = get().revisions.find((r) => r.id === rev.id) ?? rev;
+    if (cur.finalResolvedAt) return; // 최종완료 상태에선 담당 전이 차단 (spec §6.2)
     const now = new Date().toISOString();
-    const states = completeAssignee(rev.assigneeStates ?? {}, userId, note, now);
-    const status = deriveRevisionStatus(rev.assigneeIds ?? [], states, rev.finalResolvedAt);
+    const states = completeAssignee(cur.assigneeStates ?? {}, userId, note, now);
+    const status = deriveRevisionStatus(cur.assigneeIds ?? [], states, cur.finalResolvedAt);
     get().updateRevisionOptimistic(rev.id, rev.sceneKey, { assigneeStates: states, status, updatedAt: now });
     markSelfFromStatus(rev.id, status);
-    try { await revisionService.completeAssigneeWork(rev, userId, note); }
+    try { await revisionService.completeAssigneeWork(cur, userId, note); }
     catch { await get().loadRevisions(); }
   },
 
@@ -248,13 +253,14 @@ export const useRevisionStore = create<RevisionState>((set, get) => ({
   },
 
   revertAssignee: async (rev, userId) => {
-    if (rev.finalResolvedAt) return; // 최종완료 상태면 차단 (spec §6.2)
+    const cur = get().revisions.find((r) => r.id === rev.id) ?? rev;
+    if (cur.finalResolvedAt) return; // 최종완료 상태면 차단 (spec §6.2)
     const now = new Date().toISOString();
-    const states = revertAssignee(rev.assigneeStates ?? {}, userId);
-    const status = deriveRevisionStatus(rev.assigneeIds ?? [], states, rev.finalResolvedAt);
+    const states = revertAssignee(cur.assigneeStates ?? {}, userId);
+    const status = deriveRevisionStatus(cur.assigneeIds ?? [], states, cur.finalResolvedAt);
     get().updateRevisionOptimistic(rev.id, rev.sceneKey, { assigneeStates: states, status, updatedAt: now });
     markSelfFromStatus(rev.id, status);
-    try { await revisionService.revertAssigneeWork(rev, userId); }
+    try { await revisionService.revertAssigneeWork(cur, userId); }
     catch { await get().loadRevisions(); }
   },
 

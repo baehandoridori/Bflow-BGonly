@@ -271,7 +271,7 @@ export default function CompositingView({
       // 내 할 일 필터
       if (myTasksOnly && currentUser) {
         sceneRevisions = sceneRevisions.filter(
-          r => r.assignee === currentUser.name || r.requesterName === currentUser.name,
+          r => r.assignee === currentUser.name || r.requesterName === currentUser.name || (r.assigneeIds?.includes(currentUser.id) ?? false),
         );
         if (sceneRevisions.length === 0) continue;
       }
@@ -319,7 +319,7 @@ export default function CompositingView({
         }
         if (myTasksOnly && currentUser) {
           sceneRevisions = sceneRevisions.filter(
-            r => r.assignee === currentUser.name || r.requesterName === currentUser.name,
+            r => r.assignee === currentUser.name || r.requesterName === currentUser.name || (r.assigneeIds?.includes(currentUser.id) ?? false),
           );
         }
         if (sceneRevisions.length === 0) continue;
@@ -377,9 +377,10 @@ export default function CompositingView({
         revisions: visibleRevisions,
         commentCountByRev: effectiveCommentCountByRev,
         currentUserName: currentUser?.name,
+        currentUserId: currentUser?.id,
       }),
     };
-  }, [sceneGroups.length, visibleRevisions, effectiveCommentCountByRev, currentUser?.name]);
+  }, [sceneGroups.length, visibleRevisions, effectiveCommentCountByRev, currentUser?.name, currentUser?.id]);
 
   useEffect(() => {
     if (!selectedRevisionId) return;

@@ -71,6 +71,9 @@ export function RevisionItem({
     [revision.notifyUserIds, allUsers],
   );
 
+  // 담당자 있는 항목은 legacy 상태변경(특히 resolved)을 막는다 — 담당 워크플로우는 씬 모달에서 처리. (Codex P2)
+  const hasAssignees = (revision.assigneeIds?.length ?? 0) > 0;
+
   const handleStatusSelect = (status: RevisionStatus) => {
     if (status === 'resolved') {
       setShowResolveNote(true);
@@ -287,7 +290,7 @@ export function RevisionItem({
       {/* 상태 변경 (호버 시 노출) */}
       {!isResolved ? (
         <div className="relative z-[1] shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">
-          <StatusDropdown currentStatus={revision.status} onSelect={handleStatusSelect} />
+          <StatusDropdown currentStatus={revision.status} onSelect={handleStatusSelect} hasAssignees={hasAssignees} />
         </div>
       ) : (
         <button
