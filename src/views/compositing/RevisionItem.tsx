@@ -287,8 +287,8 @@ export function RevisionItem({
         </AnimatePresence>
       </div>
 
-      {/* 상태 변경 (호버 시 노출) */}
-      {!isResolved ? (
+      {/* 상태 변경 (호버 시 노출) — 담당자 있는 항목은 보드에서 legacy 변경 차단(씬 모달 담당 워크플로우 사용, Codex P2) */}
+      {hasAssignees ? null : !isResolved ? (
         <div className="relative z-[1] shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">
           <StatusDropdown currentStatus={revision.status} onSelect={handleStatusSelect} hasAssignees={hasAssignees} />
         </div>

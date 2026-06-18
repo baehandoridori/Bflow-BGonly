@@ -104,6 +104,31 @@ export function describeActivity(activity: Activity): ActivityVisual {
         tone: TONE.resolved,
       };
     }
+    case 'revision_assignee_done': {
+      const num = readDetailNumber(detail, 'revisionNumber');
+      const desc = readDetailString(detail, 'descriptionPreview');
+      const prefix = num ? `re#${num}` : '리테이크';
+      return {
+        Icon: Film,
+        text: desc ? `${prefix} 담당 완료 — “${trimText(desc, 30)}”` : `${prefix} 담당 완료`,
+        tone: TONE.progress,
+      };
+    }
+    case 'revision_final_resolve': {
+      const note = readDetailString(detail, 'resolvedNote') || readDetailString(detail, 'descriptionPreview');
+      const num = readDetailNumber(detail, 'revisionNumber');
+      const prefix = num ? `re#${num} ✓` : '리테이크';
+      return {
+        Icon: Sparkles,
+        text: note ? `${prefix} 최종 완료 — “${trimText(note, 30)}”` : `${prefix} 최종 완료`,
+        tone: TONE.resolved,
+      };
+    }
+    case 'revision_reassign': {
+      const num = readDetailNumber(detail, 'revisionNumber');
+      const prefix = num ? `re#${num}` : '리테이크';
+      return { Icon: UserCog, text: `${prefix} 담당 변경`, tone: TONE.meta };
+    }
     case 'revision_delete': {
       const num = readDetailNumber(detail, 'revisionNumber');
       return { Icon: Trash2, text: num ? `re#${num} 삭제` : '리테이크 삭제', tone: TONE.scenedel };

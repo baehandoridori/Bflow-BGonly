@@ -1906,7 +1906,11 @@ ipcMain.handle('supabase:update-revision', wrapIpc(async (_e: unknown, id: strin
   // 우선순위: 최종완료 > 재배정(동반 status 전이보다 우선, 한솔 §7.3 '재배정 포함') > 담당완료 > 진행중 > 해결.
   // 주의: finalResolvedAt 이 빈 문자열('')이면(최종완료 되돌리기) truthy 아님 → 분기 제외(의도된 조용한 스킵).
   let statusActionType: ActionType | null = null;
-  if (dbUpdates.finalResolvedAt) statusActionType = 'revision_final_resolve';
+  if (__op === 'revert_final') {
+    // 최종완료 되돌리기는 활동기록 스킵 — finalResolvedAt='' 가 falsy 라 아래 status 분기로 fall-through 하면
+    // 'revision_assignee_done'('담당 완료')로 오기록되던 문제 방지 (Codex P2).
+    statusActionType = null;
+  } else if (dbUpdates.finalResolvedAt) statusActionType = 'revision_final_resolve';
   else if (__op === 'reassign') statusActionType = 'revision_reassign';
   else if (dbUpdates.status === 'assignee_done') statusActionType = 'revision_assignee_done';
   else if (dbUpdates.status === 'in_progress') statusActionType = 'revision_in_progress';

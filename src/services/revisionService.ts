@@ -628,10 +628,26 @@ async function persistRevisionWorkflow(
   await saveLocal(all);
 }
 
+/**
+ * 담당 상태 전이 직전 서버 최신 assignee_states 를 읽어 merge base 로 쓴다 (Codex P1 — 동시 완료 lost update 방지).
+ * store 의 client 스냅샷이 realtime 전파 전이라 stale 할 수 있으므로, write 직전 서버 권위값으로 base 를 다시 잡는다.
+ */
+async function freshAssigneeStates(rev: CompRevision): Promise<Record<string, RevisionAssigneeState>> {
+  if (!sheetsMode) return rev.assigneeStates ?? {};
+  try {
+    const rawData = await window.electronAPI.supabaseReadRevisions();
+    const rows = (rawData as Array<Parameters<typeof rowToRevision>[0]>) ?? [];
+    const fresh = rows.find((r) => r.id === rev.id);
+    return fresh ? (rowToRevision(fresh).assigneeStates ?? {}) : (rev.assigneeStates ?? {});
+  } catch {
+    return rev.assigneeStates ?? {};
+  }
+}
+
 /** 담당자 본인이 작업 시작 (none/pending → in_progress). */
 export async function startAssigneeWork(rev: CompRevision, userId: string): Promise<void> {
   const now = new Date().toISOString();
-  const states = startAssignee(rev.assigneeStates ?? {}, userId, now);
+  const states = startAssignee(await freshAssigneeStates(rev), userId, now);
   const status = deriveRevisionStatus(rev.assigneeIds ?? [], states, rev.finalResolvedAt);
   await persistRevisionWorkflow(rev,
     { assigneeStates: JSON.stringify(states), status, updatedAt: now },
@@ -641,7 +657,7 @@ export async function startAssigneeWork(rev: CompRevision, userId: string): Prom
 /** 담당자 본인 완료 (멘트 포함). */
 export async function completeAssigneeWork(rev: CompRevision, userId: string, note: string): Promise<void> {
   const now = new Date().toISOString();
-  const states = completeAssignee(rev.assigneeStates ?? {}, userId, note, now);
+  const states = completeAssignee(await freshAssigneeStates(rev), userId, note, now);
   const status = deriveRevisionStatus(rev.assigneeIds ?? [], states, rev.finalResolvedAt);
   await persistRevisionWorkflow(rev,
     { assigneeStates: JSON.stringify(states), status, updatedAt: now },
@@ -654,16 +670,19 @@ export async function reassignRevision(rev: CompRevision, nextAssigneeIds: strin
   const { assigneeIds, assigneeStates } = sanitizeAssignees(
     nextAssigneeIds, rev.assigneeStates ?? {}, rev.notifyUserIds ?? [],
   );
-  const status = deriveRevisionStatus(assigneeIds, assigneeStates, rev.finalResolvedAt);
+  // 담당 (재)배정은 담당 워크플로우 (재)시작이다 — 백필/레거시로 남은 final 잔재를 clear 한다 (Codex P1).
+  // final 무시(null)로 status 파생 + DB final 컬럼도 비워(빈문자→null) reload 시 resolved 로 굳지 않게 한다.
+  const status = deriveRevisionStatus(assigneeIds, assigneeStates, null);
   await persistRevisionWorkflow(rev,
     {
       assigneeIds: JSON.stringify(assigneeIds),
       assigneeStates: JSON.stringify(assigneeStates),
       status, updatedAt: now,
+      finalResolvedAt: '', finalResolvedBy: '',
       // 활동기록 분기 전용 신호. main 핸들러가 분리해 DB 로는 보내지 않는다(fieldMap 미등록).
       __op: 'reassign',
     },
-    { assigneeIds, assigneeStates, status, updatedAt: now });
+    { assigneeIds, assigneeStates, status, finalResolvedAt: undefined, finalResolvedBy: '', updatedAt: now });
 }
 
 /** 최종 완료 (요청자/컴포지터급). */
@@ -679,7 +698,8 @@ export async function revertFinalResolve(rev: CompRevision): Promise<void> {
   const now = new Date().toISOString();
   const status = deriveRevisionStatus(rev.assigneeIds ?? [], rev.assigneeStates ?? {}, null);
   await persistRevisionWorkflow(rev,
-    { finalResolvedAt: '', finalResolvedBy: '', status, updatedAt: now },
+    // __op: 'revert_final' — main 핸들러가 활동기록을 스킵(status fall-through 로 '담당 완료' 오기록 방지, Codex P2).
+    { finalResolvedAt: '', finalResolvedBy: '', status, updatedAt: now, __op: 'revert_final' },
     { finalResolvedAt: undefined, finalResolvedBy: '', status, updatedAt: now });
 }
 
@@ -689,7 +709,7 @@ export async function revertAssigneeWork(rev: CompRevision, userId: string): Pro
     throw new Error('최종 완료된 리테이크는 먼저 최종 완료를 되돌려야 합니다.');
   }
   const now = new Date().toISOString();
-  const states = revertAssignee(rev.assigneeStates ?? {}, userId);
+  const states = revertAssignee(await freshAssigneeStates(rev), userId);
   const status = deriveRevisionStatus(rev.assigneeIds ?? [], states, rev.finalResolvedAt);
   await persistRevisionWorkflow(rev,
     { assigneeStates: JSON.stringify(states), status, updatedAt: now },

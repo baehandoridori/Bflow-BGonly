@@ -42,6 +42,8 @@ export function DetailPanel({
   const [lightbox, setLightbox] = useState<AttachmentImageLightboxState | null>(null);
   const { description: descText, paths: detailPaths } = parsePathsFromText(revision.description);
   const allUsers = useAuthStore((s) => s.users);
+  // 담당자 있는 항목은 상세 패널에서 legacy 상태변경(시작/완료/되돌리기) 차단 — 씬 모달 담당 워크플로우 사용 (Codex P2).
+  const hasAssignees = (revision.assigneeIds?.length ?? 0) > 0;
   // v1.19.4: notifyUserIds 를 사용자 객체로 변환 (이름 + 컴포지터 라벨 표시)
   const notifyUsers = (revision.notifyUserIds ?? [])
     .map((uid) => allUsers.find((u) => u.id === uid))
@@ -261,13 +263,15 @@ export function DetailPanel({
                   <Check size={14} style={{ color: STATUS_CONFIG.resolved.color }} />
                   <span className="text-xs font-medium" style={{ color: STATUS_CONFIG.resolved.color }}>완료됨</span>
                 </div>
-                <button
-                  onClick={() => onStatusChange('open')}
-                  className="compact-label-container inline-flex min-w-0 shrink items-center gap-1 px-2 py-1 text-[11px] text-text-secondary hover:text-accent rounded-md hover:bg-accent/10 transition-all cursor-pointer"
-                  title="대기로 되돌리기"
-                >
-                  <CompactIconLabel icon={<Undo2 size={11} />} label="되돌리기" />
-                </button>
+                {!hasAssignees && (
+                  <button
+                    onClick={() => onStatusChange('open')}
+                    className="compact-label-container inline-flex min-w-0 shrink items-center gap-1 px-2 py-1 text-[11px] text-text-secondary hover:text-accent rounded-md hover:bg-accent/10 transition-all cursor-pointer"
+                    title="대기로 되돌리기"
+                  >
+                    <CompactIconLabel icon={<Undo2 size={11} />} label="되돌리기" />
+                  </button>
+                )}
               </div>
               {revision.resolvedBy && (
                 <p className="text-xs text-text-secondary mb-1">
@@ -320,8 +324,8 @@ export function DetailPanel({
             )}
           </AnimatePresence>
 
-          {/* 상태 변경 버튼 — 워크플로우 순서: 진행 시작(위) → 해결 완료(아래) */}
-          {revision.status === 'open' && !showResolveNote && (
+          {/* 상태 변경 버튼 — 워크플로우 순서: 진행 시작(위) → 해결 완료(아래). 담당자 있으면 숨김(씬 모달에서 처리) */}
+          {revision.status === 'open' && !showResolveNote && !hasAssignees && (
             <button
               onClick={() => handleStatusSelect('in_progress')}
               className="compact-label-container w-full flex min-w-0 items-center justify-center gap-2 py-2.5 text-xs font-medium rounded-xl border transition-all cursor-pointer"
@@ -333,7 +337,7 @@ export function DetailPanel({
               <CompactIconLabel icon={<Clock size={14} />} label="진행 시작" />
             </button>
           )}
-          {revision.status !== 'resolved' && !showResolveNote && (
+          {revision.status !== 'resolved' && !showResolveNote && !hasAssignees && (
             <button
               onClick={() => handleStatusSelect('resolved')}
               className={`compact-label-container w-full flex min-w-0 items-center justify-center gap-2 py-3 text-sm font-medium rounded-xl text-white transition-all cursor-pointer hover:opacity-90${revision.status === 'open' ? ' mt-2' : ''}`}

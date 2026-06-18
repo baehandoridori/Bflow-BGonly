@@ -228,8 +228,9 @@ export const useRevisionStore = create<RevisionState>((set, get) => ({
   reassign: async (rev, nextAssigneeIds) => {
     const now = new Date().toISOString();
     const { assigneeIds, assigneeStates } = sanitizeAssignees(nextAssigneeIds, rev.assigneeStates ?? {}, rev.notifyUserIds ?? []);
-    const status = deriveRevisionStatus(assigneeIds, assigneeStates, rev.finalResolvedAt);
-    get().updateRevisionOptimistic(rev.id, rev.sceneKey, { assigneeIds, assigneeStates, status, updatedAt: now });
+    // 담당 (재)배정 시 legacy/백필 final 잔재 clear (Codex P1) — final 무시로 파생 + 낙관 패치도 비움.
+    const status = deriveRevisionStatus(assigneeIds, assigneeStates, null);
+    get().updateRevisionOptimistic(rev.id, rev.sceneKey, { assigneeIds, assigneeStates, status, finalResolvedAt: undefined, finalResolvedBy: undefined, updatedAt: now });
     markSelfFromStatus(rev.id, status); // 재배정이 status 전이를 동반하면 그 알림을 본인에게서 억제
     try { await revisionService.reassignRevision(rev, nextAssigneeIds); }
     catch { await get().loadRevisions(); }
