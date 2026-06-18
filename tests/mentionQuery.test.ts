@@ -17,8 +17,16 @@ test('detect: 중간 caret 멘션', () => {
 test('detect: 문자열 맨 앞 @', () => {
   assert.deepEqual(detectMentionQuery('@', 1), { query: '', start: 0, end: 1 });
 });
-test('detect: 이메일 a@b 는 멘션 아님', () => {
+test('detect: 이메일 a@b 는 멘션 아님(영숫자 뒤 @)', () => {
   assert.equal(detectMentionQuery('a@b', 3), null);
+});
+test('detect: 한글 뒤 붙은 @ 도 멘션(한글은 공백 없이 붙여 씀)', () => {
+  // 이(0)거(1)@(2)배(3), caret=4 → '@' 앞이 한글이라 이메일 아님 → 멘션 허용
+  assert.deepEqual(detectMentionQuery('이거@배', 4), { query: '배', start: 2, end: 4 });
+});
+test('detect: 기호 뒤 붙은 @ 도 멘션', () => {
+  // )(0)@(1)김(2), caret=3
+  assert.deepEqual(detectMentionQuery(')@김', 3), { query: '김', start: 1, end: 3 });
 });
 test('detect: query 안에 공백이면 멘션 아님(토큰 종료)', () => {
   assert.equal(detectMentionQuery('@김 철수', 5), null);

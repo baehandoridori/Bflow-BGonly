@@ -20,9 +20,11 @@ export function detectMentionQuery(text: string, caret: number): MentionQuery | 
   while (i >= 0) {
     const ch = text[i];
     if (ch === '@') {
-      // '@' 앞은 문자열 시작이거나 공백이어야 멘션(이메일 a@b 방지)
+      // '@' 앞이 영문/숫자면 이메일(a@b) 가능성이라 멘션 트리거 제외.
+      // 그 외(한글·기호·공백·문자열 시작)는 허용 — 한글은 '@'를 앞 단어에 공백 없이 붙여 쓰는 게
+      // 자연스럽고, 표시 칩(EntityText)·알림(extractMentions, /@(\S+)/, 앞 무관)과 트리거를 정렬한다.
       const before = i === 0 ? '' : text[i - 1];
-      if (i !== 0 && !/\s/.test(before)) return null;
+      if (i !== 0 && /[A-Za-z0-9]/.test(before)) return null;
       const query = text.slice(i + 1, caret);
       if (query.length >= MAX_QUERY_LEN) return null;
       if (/\s/.test(query)) return null;

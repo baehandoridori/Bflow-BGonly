@@ -747,6 +747,10 @@ git commit -m "리테이크 3단계: 엔티티 감지 테스트 빌드 체인 �
 - 멘션 규칙 단일화: 현재 `entityTokens.MENTION_REGEX` ↔ `commentService.extractMentions` 동기화는 주석 고정. 4단계에서 단일 출처로 통합 검토.
 - `PathLinkifiedText`는 7개 사용처가 있어 잔존. 4단계에서 `EntityText`로 점진 대체 후 제거 검토.
 
+**코드리뷰 잔여(기존 동작 — 3단계 회귀 아님, 4단계/폴리싱 처리):**
+- (P3) 같은 줄 `G:\경로 @멘션`: `G_PATH_REGEX_GLOBAL`이 줄끝까지 탐욕 매칭이라 `@멘션`이 경로 토큰에 흡수돼 칩은 안 뜨지만, `send`/`handleSubmit`의 `extractMentions`(경로 무관)는 그 이름을 잡아 슬랙 알림을 쏜다('알림 가는데 칩 없음'). 3단계 이전부터 동일했고 `pathLink.ts` 헤더가 "경로 뒤 텍스트는 줄 분리" 규약을 문서화. → 4단계 멘션 단일화 때 `send`의 `mentions`를 `tokenizeEntities` mention-token에서 유도해 해소.
+- (P3) CommentPanel 멘션 드롭다운 위치: `bottom-full`이 입력 wrapper(`px-3 pb-3 pt-3 relative`)에 앵커돼, quickRevision 프리뷰·답글 헤더·이미지 썸네일이 열리면 드롭다운이 caret(textarea)에서 멀어진다(기존 동작). → 폴리싱 시 카드/입력행을 anchor로(`relative`를 입력행에만).
+
 ## 검증 (스펙 §14 해당분)
 
 - 단계별 `npm run typecheck` + `node --test`(신규 2종) + `npm run build:vite`.

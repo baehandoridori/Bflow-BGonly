@@ -13,7 +13,7 @@ interface Props {
 /**
  * @멘션 자동완성 드롭다운(공통). 위치는 호출 측이 positionClassName 으로 제어.
  * 활성 항목 스크롤은 내부에서 처리(드롭다운 UI 책임 응집).
- * z-40: 기존 z-20(RevisionCommentThread)/z-30(CommentPanel quickRevision 프리뷰) 위에 확실히 표시.
+ * z-40: 입력 영역의 다른 오버레이(예: CommentPanel 드래그 오버레이 z-20) 위에 확실히 표시.
  */
 export function MentionDropdown({ items, index, onPick, positionClassName }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
