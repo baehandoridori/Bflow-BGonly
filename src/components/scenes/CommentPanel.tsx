@@ -1966,8 +1966,9 @@ export function CommentPanel({ sceneKey, secondarySceneKey, sceneThreadKey, onCo
             </div>
           )}
 
-          {/* textarea — 풀 너비. flex-1 min-h-0 은 wrapper 로(footer 보존) + 4a-2 입력 하이라이트 미러를 뒤에 겹침. */}
-          <div className="relative flex-1 min-h-0">
+          {/* textarea — 풀 너비. wrapper 는 flex-col(입력카드의 flex item), textarea 가 그 안의 flex item 으로
+              남은 공간을 차지하되 footer 보존(기존 동작 유지) + 4a-2 입력 하이라이트 미러를 뒤에 겹침. */}
+          <div className="relative flex-1 min-h-0 flex flex-col">
             {/* 입력 중 @이름·경로·컷 파란 강조(미러). textarea 는 이미 bg-transparent 라 그대로 위에 보임. */}
             <EntityHighlightOverlay
               text={input}
@@ -1987,7 +1988,7 @@ export function CommentPanel({ sceneKey, secondarySceneKey, sceneThreadKey, onCo
               onBlur={() => setFocused(false)}
               placeholder="댓글 입력... (Ctrl+V / 드래그로 이미지)"
               rows={1}
-              className="comment-input-textarea relative block w-full px-2 py-1.5 text-xs resize-none outline-none bg-transparent leading-relaxed text-text-primary placeholder:text-text-secondary/40 overflow-y-auto whitespace-pre-wrap break-words"
+              className="comment-input-textarea relative block w-full flex-1 min-h-0 px-2 py-1.5 text-xs resize-none outline-none bg-transparent leading-relaxed text-text-primary placeholder:text-text-secondary/40 overflow-y-auto whitespace-pre-wrap break-words"
               style={{ height: taHeight, maxHeight: taMaxPx, boxSizing: 'border-box' }}
               onKeyDown={(e) => {
                 if (mention.onKeyDown(e)) return;
