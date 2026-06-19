@@ -26,6 +26,7 @@ import { buildSceneKey } from '@/services/revisionService';
 import { calcDefaultRecipients } from '@/utils/revisionRecipients';
 import { resizeBlob } from '@/utils/imageUtils';
 import { RevisionRecipientPicker } from '@/components/scenes/RevisionRecipientPicker';
+import { EntityAwareInput } from '@/components/common/EntityAwareInput';
 import type { Episode, Part, Scene } from '@/types';
 import {
   buildRevisionPartOptions,
@@ -73,7 +74,7 @@ export default function NewRevisionModal({ open, onClose }: Props) {
 
   const sceneInputRef = useRef<HTMLInputElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const sceneSectionRef = useRef<HTMLElement>(null);
   const dropdownContainerRef = useRef<HTMLDivElement>(null);
 
   // ── 파생 상태 ────
@@ -219,8 +220,8 @@ export default function NewRevisionModal({ open, onClose }: Props) {
     setSelectedScene(scene);
     setSceneDropdownOpen(false);
     setSceneSearchQuery('');
-    // 4단계로 자동 포커스
-    setTimeout(() => textareaRef.current?.focus(), 30);
+    // 4단계로 자동 포커스 (EntityAwareInput 내부 textarea)
+    setTimeout(() => sceneSectionRef.current?.querySelector('textarea')?.focus(), 30);
   };
 
   const handleSceneClear = () => {
@@ -557,7 +558,7 @@ export default function NewRevisionModal({ open, onClose }: Props) {
           </section>
 
           {/* 4. 내용 */}
-          <section className="border-t border-bg-border/40 pt-4 space-y-3">
+          <section ref={sceneSectionRef} className="border-t border-bg-border/40 pt-4 space-y-3">
             <div className="flex items-baseline gap-2">
               <label className="text-[11px] font-bold uppercase tracking-wider text-text-secondary">
                 4. 내용
@@ -567,12 +568,14 @@ export default function NewRevisionModal({ open, onClose }: Props) {
               )}
             </div>
 
-            <textarea
-              ref={textareaRef}
+            <EntityAwareInput
+              multiline
               value={description}
-              onChange={(e) => setDescription(e.target.value)}
+              onChange={setDescription}
+              users={allUsers}
               onPaste={handlePaste}
-              placeholder="어떤 부분을 수정해야 하는지, 또는 무엇이 변경되었는지 적어주세요."
+              dropdownPositionClassName="left-2 right-2"
+              placeholder="어떤 부분을 수정해야 하는지, 또는 무엇이 변경되었는지 적어주세요. (@이름으로 멘션)"
               className="w-full px-3 py-2.5 text-[13px] bg-bg-primary/80 border border-bg-border/60 rounded-lg text-text-primary placeholder:text-text-secondary/50 focus:outline-none focus:border-accent/70 resize-y min-h-[88px] leading-relaxed"
             />
 

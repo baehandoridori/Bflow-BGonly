@@ -72,7 +72,8 @@ export function EntityAwareInput({
     placeholder,
     autoFocus,
     'aria-label': ariaLabel,
-    className: `${className ?? ''} relative bg-transparent`,
+    // 입력칸 배경은 투명 강제(뒤 하이라이트 레이어가 비치도록). 배경/보더는 overlay 가 className 으로 그린다.
+    className: `${className ?? ''} relative !bg-transparent`,
   };
 
   return (
