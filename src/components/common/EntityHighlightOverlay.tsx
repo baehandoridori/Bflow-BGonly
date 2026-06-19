@@ -22,7 +22,9 @@ export function EntityHighlightOverlay({ text, userNames, className, scrollTop =
   return (
     <div
       aria-hidden
-      className={`pointer-events-none absolute inset-0 overflow-hidden whitespace-pre-wrap break-words !text-transparent ${className ?? ''}`}
+      // 테두리·배경·글자색은 입력칸이 단독으로 그린다. overlay 는 토큰 배경 span 만 보이게 모두 중화
+      // (border-width/padding 은 className 으로 유지해 정렬만 맞춘다 — 포커스 시 테두리 이중색 방지).
+      className={`pointer-events-none absolute inset-0 overflow-hidden whitespace-pre-wrap break-words !bg-transparent !border-transparent !text-transparent ${className ?? ''}`}
       style={{ transform: `translate(${-scrollLeft}px, ${-scrollTop}px)` }}
     >
       {tokens.map((t, i) => {

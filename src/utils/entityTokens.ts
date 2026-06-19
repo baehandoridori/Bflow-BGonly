@@ -31,7 +31,9 @@ function tokenizeTextSegment(text: string, userNames: string[]): EntityToken[] {
   }
   for (const m of text.matchAll(CUT_REGEX)) {
     if (m.index === undefined) continue;
-    matches.push({ start: m.index, end: m.index + m[0].length, token: { type: 'cut', content: m[0], number: parseInt(m[1], 10) } });
+    const number = parseInt(m[1], 10);
+    if (!Number.isInteger(number) || number <= 0) continue; // '컷0'/'컷00' 등은 빈/0 씬 오점프 방지로 제외
+    matches.push({ start: m.index, end: m.index + m[0].length, token: { type: 'cut', content: m[0], number } });
   }
   matches.sort((a, b) => a.start - b.start);
   const out: EntityToken[] = [];

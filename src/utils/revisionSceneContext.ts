@@ -10,10 +10,11 @@ export function parseRevisionSceneContext(
   if (!sceneKey) return null;
   const segs = sceneKey.split(':');
   if (segs.length < 2) return null;
-  const digits = segs[0].replace(/\D/g, '');
+  // EP 접두어 + 숫자만(자릿수 무관)인 형식만 인정. 'EP00'/접두어없음/중간글자 섞임은 거부 → onCutClick 생략(방안A).
+  const epMatch = /^EP(\d+)$/i.exec(segs[0].trim());
   const partId = segs[1];
-  if (!digits || !partId) return null;
-  const episodeNumber = parseInt(digits, 10);
-  if (!Number.isFinite(episodeNumber)) return null;
+  if (!epMatch || !partId) return null;
+  const episodeNumber = parseInt(epMatch[1], 10);
+  if (!Number.isInteger(episodeNumber) || episodeNumber <= 0) return null;
   return { episodeNumber, partId };
 }

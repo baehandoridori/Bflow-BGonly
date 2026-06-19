@@ -62,6 +62,10 @@ test('한글 바로 뒤 컷도 감지(앞 경계는 영숫자만 차단)', () =>
 test('씬N 은 감지 안 함(컷만 — 씬은 sceneId 혼동)', () => {
   assert.deepEqual(tokenizeEntities('씬5', USERS), [{ type: 'text', content: '씬5' }]);
 });
+test('컷0/컷00 은 컷 토큰 아님(number<=0 가드 — 빈/0 씬 오점프 방지)', () => {
+  assert.deepEqual(tokenizeEntities('컷0', USERS), [{ type: 'text', content: '컷0' }]);
+  assert.deepEqual(tokenizeEntities('컷00', USERS), [{ type: 'text', content: '컷00' }]);
+});
 test('멘션+컷 혼합 위치순', () => {
   assert.deepEqual(tokenizeEntities('@홍길동 컷3', USERS), [
     { type: 'mention', content: '@홍길동', name: '홍길동' },

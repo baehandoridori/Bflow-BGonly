@@ -79,10 +79,12 @@ export function useMentionAutocomplete({ onChange, users, inputRef }: Params) {
   const onKeyDown = useCallback(
     (e: KeyboardEvent): boolean => {
       if (!active) return false;
-      if (e.key === 'ArrowDown') { e.preventDefault(); setIndex((p) => (p + 1) % items.length); return true; }
-      if (e.key === 'ArrowUp') { e.preventDefault(); setIndex((p) => (p - 1 + items.length) % items.length); return true; }
-      if (e.key === 'Enter' || e.key === 'Tab') { e.preventDefault(); select(items[index].name); return true; }
-      if (e.key === 'Escape') { e.preventDefault(); close(); return true; }
+      // stopPropagation: 처리한 멘션 키(Arrow/Enter/Tab/Escape)가 상위/window 리스너로 새지 않게 한다.
+      // (예: NewRevisionModal 의 window Escape 가 멘션 닫기 대신 모달 전체를 닫던 회귀 방지)
+      if (e.key === 'ArrowDown') { e.preventDefault(); e.stopPropagation(); setIndex((p) => (p + 1) % items.length); return true; }
+      if (e.key === 'ArrowUp') { e.preventDefault(); e.stopPropagation(); setIndex((p) => (p - 1 + items.length) % items.length); return true; }
+      if (e.key === 'Enter' || e.key === 'Tab') { e.preventDefault(); e.stopPropagation(); select(items[index].name); return true; }
+      if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); close(); return true; }
       return false;
     },
     [active, items, index, select, close],
