@@ -1284,14 +1284,16 @@ export function CommentPanel({ sceneKey, secondarySceneKey, sceneThreadKey, onCo
     setView('team');
   };
 
-  // 4a-2: 컷 칩 클릭 점프 — 댓글 sceneKey(commentService형)에서 EP·파트 컨텍스트 도출(없으면 색 표시만).
-  const commentCutContext = useMemo(() => parseCommentSceneContext(sceneKey), [sceneKey]);
-  const handleCommentCutClick = commentCutContext
-    ? (n: number) => { navigateToCutNumber(n, commentCutContext); }
-    : undefined;
-  const renderText = (text: string) => (
-    <EntityText text={text} userNames={userNames} onMentionClick={handleMentionClick} onCutClick={handleCommentCutClick} />
-  );
+  // 4a-2: 컷 칩 클릭 점프 — 각 댓글의 출처(sourceKey, 통합 뷰의 secondary 포함)에서 EP·파트·부서 도출.
+  //   통합(BG+ACT) 모달에서 secondary 댓글은 primary 와 부서가 달라, primary sceneKey 로 한 번만 계산하면
+  //   ACT 댓글의 컷이 BG 씬으로 점프할 수 있다(코덱스 P2). 댓글별 sourceKey 기준으로 계산한다.
+  const renderText = (text: string, sourceKey?: string) => {
+    const cutCtx = parseCommentSceneContext(sourceKey ?? sceneKey);
+    const onCutClick = cutCtx ? (n: number) => { navigateToCutNumber(n, cutCtx); } : undefined;
+    return (
+      <EntityText text={text} userNames={userNames} onMentionClick={handleMentionClick} onCutClick={onCutClick} />
+    );
+  };
 
   // ─── 렌더링 ────────────────────────────────
 
@@ -1551,7 +1553,7 @@ export function CommentPanel({ sceneKey, secondarySceneKey, sceneThreadKey, onCo
                           isOwn ? 'bg-accent/20 border border-accent/30' : 'bg-bg-border/70'
                         }`}
                       >
-                        {comment.text && <div>{renderText(comment.text)}</div>}
+                        {comment.text && <div>{renderText(comment.text, comment._sourceKey)}</div>}
                         {hasImages && (
                           <div
                             className={`grid gap-1 ${comment.text ? 'mt-2' : ''} ${
@@ -1722,7 +1724,7 @@ export function CommentPanel({ sceneKey, secondarySceneKey, sceneThreadKey, onCo
                                   replyIsOwn ? 'bg-accent/15 border border-accent/25' : 'bg-bg-border/50'
                                 }`}
                               >
-                                {reply.text && <div>{renderText(reply.text)}</div>}
+                                {reply.text && <div>{renderText(reply.text, reply._sourceKey)}</div>}
                                 {replyHasImages && (
                                   <div className={`grid gap-1 ${reply.text ? 'mt-1.5' : ''} ${reply.images!.length === 1 ? 'grid-cols-1' : 'grid-cols-2'}`}>
                                     {reply.images!.map((url, i) => (
