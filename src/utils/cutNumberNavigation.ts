@@ -23,11 +23,20 @@ export function navigateToCutNumber(cutNumber: number, ctx: CutContext): boolean
     useAppStore.getState().setToast(`컷${cutNumber}을(를) 찾을 수 없습니다.`);
     return false;
   }
+  // modalRequest 로 타겟 씬 상세 모달을 열어 교체한다. 컷 칩은 씬 상세 모달(댓글/리테이크) 안에서 클릭되므로,
+  // 하이라이트만 하면 기존 모달 뒤로 가려 이동이 안 보인다(코덱스 P2). 알림 점프와 동일하게 모달을 reopen 한다.
   navigateToSceneView({
     episodeNumber: ctx.episodeNumber,
     partId: ctx.partId,
     department: ctx.department ?? undefined,
     highlightSceneId: scene.sceneId,
+    modalRequest: {
+      sceneName: scene.sceneId,
+      episodeNumber: ctx.episodeNumber,
+      partId: ctx.partId,
+      initialTab: 'detail',
+      forceDeptFilter: ctx.department ?? undefined,
+    },
   });
   return true;
 }
