@@ -1987,7 +1987,7 @@ export function CommentPanel({ sceneKey, secondarySceneKey, sceneThreadKey, onCo
               onBlur={() => setFocused(false)}
               placeholder="댓글 입력... (Ctrl+V / 드래그로 이미지)"
               rows={1}
-              className="comment-input-textarea relative block w-full px-2 py-1.5 text-xs resize-none outline-none bg-transparent leading-relaxed text-text-primary placeholder:text-text-secondary/40 overflow-y-auto"
+              className="comment-input-textarea relative block w-full px-2 py-1.5 text-xs resize-none outline-none bg-transparent leading-relaxed text-text-primary placeholder:text-text-secondary/40 overflow-y-auto whitespace-pre-wrap break-words"
               style={{ height: taHeight, maxHeight: taMaxPx, boxSizing: 'border-box' }}
               onKeyDown={(e) => {
                 if (mention.onKeyDown(e)) return;
