@@ -1553,7 +1553,7 @@ export function CommentPanel({ sceneKey, secondarySceneKey, sceneThreadKey, onCo
                           isOwn ? 'bg-accent/20 border border-accent/30' : 'bg-bg-border/70'
                         }`}
                       >
-                        {comment.text && <div>{renderText(comment.text, comment._sourceKey)}</div>}
+                        {comment.text && <div>{renderText(comment.text, comment.storageKey ?? comment._sourceKey)}</div>}
                         {hasImages && (
                           <div
                             className={`grid gap-1 ${comment.text ? 'mt-2' : ''} ${
@@ -1724,7 +1724,7 @@ export function CommentPanel({ sceneKey, secondarySceneKey, sceneThreadKey, onCo
                                   replyIsOwn ? 'bg-accent/15 border border-accent/25' : 'bg-bg-border/50'
                                 }`}
                               >
-                                {reply.text && <div>{renderText(reply.text, reply._sourceKey)}</div>}
+                                {reply.text && <div>{renderText(reply.text, reply.storageKey ?? reply._sourceKey)}</div>}
                                 {replyHasImages && (
                                   <div className={`grid gap-1 ${reply.text ? 'mt-1.5' : ''} ${reply.images!.length === 1 ? 'grid-cols-1' : 'grid-cols-2'}`}>
                                     {reply.images!.map((url, i) => (

@@ -310,11 +310,12 @@ export function RevisionCommentThread({ revisionId, sceneKey }: Props) {
     inputRef,
   });
   const [inputScrollLeft, setInputScrollLeft] = useState(0);
-  // 4a-2: 컷 칩 클릭 점프 — 댓글 sceneKey(commentService형)에서 EP·파트 컨텍스트 도출(없으면 색 표시만).
-  const commentCutContext = useMemo(() => parseCommentSceneContext(sceneKey), [sceneKey]);
-  const handleCommentCutClick = commentCutContext
-    ? (n: number) => { navigateToCutNumber(n, commentCutContext); }
-    : undefined;
+  // 4a-2: 컷 칩 클릭 점프 — 댓글별 출처(storageKey, counterpart 부서 댓글 포함)로 EP·파트·부서 도출.
+  //   getComments 가 다른 부서 댓글을 섞어 줄 수 있어, thread sceneKey 한 개가 아니라 댓글마다 계산한다.
+  const makeCutHandler = useCallback((srcKey?: string) => {
+    const ctx = parseCommentSceneContext(srcKey ?? sceneKey);
+    return ctx ? (n: number) => { navigateToCutNumber(n, ctx); } : undefined;
+  }, [sceneKey]);
 
   const hasUploadingImage = attachedImages.some(item => item.uploading);
   const uploadedImageUrls = attachedImages.map(item => item.uploadedUrl).filter((url): url is string => !!url);
@@ -444,7 +445,7 @@ export function RevisionCommentThread({ revisionId, sceneKey }: Props) {
               setHighlightUserName(userName);
               setView('team');
             }}
-            onCutClick={handleCommentCutClick}
+            onCutClick={makeCutHandler(c.storageKey)}
           />
         </div>
       ))}
