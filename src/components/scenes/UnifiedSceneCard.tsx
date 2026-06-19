@@ -10,12 +10,15 @@ import { ScenePhaseToggle } from './ScenePhaseToggle';
 import { HighlightText } from '@/components/common/HighlightText';
 import { AssigneeChipList } from '@/components/common/AssigneeMultiSelect';
 import { CompactIconLabel } from '@/components/common/CompactIconLabel';
-import { PathLinkifiedText } from '@/components/common/PathLinkifiedText';
+import { EntityText } from '@/components/common/EntityText';
+import { navigateToCutNumber } from '@/utils/cutNumberNavigation';
+import { parseCommentSceneContext } from '@/utils/revisionSceneContext';
 import { Confetti } from '@/components/ui/Confetti';
 import { useBulkOperationsStore, type PendingOp } from '@/stores/useBulkOperationsStore';
 import { useDataStore } from '@/stores/useDataStore';
 import { useRevisionStore } from '@/stores/useRevisionStore';
 import { useAppStore } from '@/stores/useAppStore';
+import { useAuthStore } from '@/stores/useAuthStore';
 import { buildSceneKey } from '@/services/revisionService';
 import { LengthIcon } from './LengthIcon';
 import { SceneContextMenu } from './SceneContextMenu';
@@ -103,6 +106,10 @@ export function UnifiedSceneCard({
   const { sceneId, mergedKey, bgScene, actScene, bgSceneIndex, actSceneIndex } = merged;
   const primaryScene = bgScene ?? actScene;
   const completionTintEnabled = useAppStore((s) => s.completionTintEnabled);
+  const users = useAuthStore((s) => s.users);
+  const userNames = useMemo(() => users.map((u) => u.name), [users]);
+  const bgCutCtx = useMemo(() => (bgSheetName ? parseCommentSceneContext(bgSheetName) : null), [bgSheetName]);
+  const actCutCtx = useMemo(() => (actSheetName ? parseCommentSceneContext(actSheetName) : null), [actSheetName]);
 
   const cardRootRef = useRef<HTMLDivElement>(null);
   const prevHighlightedRef = useRef(false);
@@ -351,8 +358,10 @@ export function UnifiedSceneCard({
               <div className="flex items-center gap-1.5 overflow-hidden" data-continuity-source="bg-memo">
                 <span className="text-[9px] font-bold tracking-wide px-1 py-px rounded text-blue-300 bg-blue-300/15 flex-shrink-0">BG</span>
                 <p className="text-[11px] text-amber-400/70 leading-relaxed truncate min-w-0">
-                  <PathLinkifiedText
+                  <EntityText
                     text={bgScene.memo}
+                    userNames={userNames}
+                    onCutClick={bgCutCtx ? (n) => navigateToCutNumber(n, { episodeNumber: bgCutCtx.episodeNumber, partId: bgCutCtx.partId }) : undefined}
                     renderTextSegment={(seg, idx) => <HighlightText key={idx} text={seg} query={searchQuery} />}
                   />
                 </p>
@@ -362,8 +371,10 @@ export function UnifiedSceneCard({
               <div className="flex items-center gap-1.5 overflow-hidden" data-continuity-source="act-memo">
                 <span className="text-[9px] font-bold tracking-wide px-1 py-px rounded text-pink-300 bg-pink-300/15 flex-shrink-0">ACT</span>
                 <p className="text-[11px] text-amber-400/70 leading-relaxed truncate min-w-0">
-                  <PathLinkifiedText
+                  <EntityText
                     text={actScene.memo}
+                    userNames={userNames}
+                    onCutClick={actCutCtx ? (n) => navigateToCutNumber(n, { episodeNumber: actCutCtx.episodeNumber, partId: actCutCtx.partId }) : undefined}
                     renderTextSegment={(seg, idx) => <HighlightText key={idx} text={seg} query={searchQuery} />}
                   />
                 </p>
