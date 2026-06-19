@@ -2,6 +2,8 @@ import { useState, useMemo, useCallback, useEffect, useContext, useRef, forwardR
 import { CheckSquare, Plus, X, Search, Check, ListFilter, Pencil, ChevronDown, ChevronRight, PartyPopper, GripVertical, Calendar, CalendarDays } from 'lucide-react';
 import { motion, AnimatePresence, Reorder } from 'framer-motion';
 import { Widget, IsPopupContext, WidgetIdContext } from './Widget';
+import { EntityAwareInput } from '@/components/common/EntityAwareInput';
+import { EntityText } from '@/components/common/EntityText';
 import { useDataStore } from '@/stores/useDataStore';
 import { useAppStore } from '@/stores/useAppStore';
 import { useAuthStore } from '@/stores/useAuthStore';
@@ -249,6 +251,7 @@ function AddTaskModal({
   // 개인 할일 상태
   const [todoTitle, setTodoTitle] = useState('');
   const [todoMemo, setTodoMemo] = useState('');
+  const users = useAuthStore((s) => s.users);
   const [todoStartDate, setTodoStartDate] = useState(() => new Date().toISOString().split('T')[0]);
   const [todoEndDate, setTodoEndDate] = useState(() => new Date().toISOString().split('T')[0]);
   const [todoAddToCalendar, setTodoAddToCalendar] = useState(false);
@@ -450,9 +453,11 @@ function AddTaskModal({
               </div>
               <div>
                 <label className="text-[11px] text-text-secondary/60 mb-1.5 block">메모</label>
-                <textarea
+                <EntityAwareInput
+                  multiline
                   value={todoMemo}
-                  onChange={(e) => setTodoMemo(e.target.value)}
+                  onChange={setTodoMemo}
+                  users={users}
                   placeholder="메모 (선택)"
                   rows={2}
                   className="w-full bg-bg-primary border border-bg-border rounded-lg px-3 py-2 text-xs text-text-primary outline-none focus:border-accent/50 placeholder:text-text-secondary/30 resize-none"
@@ -561,6 +566,7 @@ const EditableSceneRow = forwardRef<HTMLDivElement, EditableSceneRowProps>(funct
   const [editingField, setEditingField] = useState<string | null>(null);
   const [editValue, setEditValue] = useState('');
   const inputRef = useRef<HTMLInputElement>(null);
+  const users = useAuthStore((s) => s.users);
 
   const startEdit = (field: string, currentValue: string) => {
     setEditingField(field);
@@ -599,21 +605,26 @@ const EditableSceneRow = forwardRef<HTMLDivElement, EditableSceneRowProps>(funct
         <div className="flex items-center gap-1">
           <span className="text-[12px] font-mono text-accent shrink-0">#{sceneNum}</span>
           {editingField === 'memo' ? (
-            <input
-              ref={inputRef}
-              value={editValue}
-              onChange={(e) => setEditValue(e.target.value)}
-              onBlur={commitEdit}
-              onKeyDown={(e) => { if (e.key === 'Enter') commitEdit(); if (e.key === 'Escape') setEditingField(null); }}
-              className="text-[13px] text-text-primary bg-bg-primary border border-accent/30 rounded px-1 py-0 outline-none flex-1 min-w-0"
-            />
+            <div className="flex-1 min-w-0">
+              <EntityAwareInput
+                value={editValue}
+                onChange={setEditValue}
+                users={users}
+                onBlur={commitEdit}
+                submitOn="enter"
+                onSubmit={commitEdit}
+                onCancel={() => setEditingField(null)}
+                autoFocus
+                className="w-full text-[13px] text-text-primary bg-bg-primary border border-accent/30 rounded px-1 py-0 outline-none"
+              />
+            </div>
           ) : (
             <span
               className="text-[14px] font-semibold text-text-primary truncate cursor-pointer hover:text-accent transition-colors"
               onDoubleClick={() => startEdit('memo', s.memo)}
               title="더블클릭하여 메모 편집"
             >
-              {s.memo || s.sceneId}
+              {s.memo ? <EntityText text={s.memo} userNames={users.map((u) => u.name)} /> : s.sceneId}
             </span>
           )}
         </div>
@@ -691,6 +702,7 @@ function PersonalTodoContent({
 }) {
   const [editingTitle, setEditingTitle] = useState(false);
   const [editTitle, setEditTitle] = useState(todo.title);
+  const users = useAuthStore((s) => s.users);
   const [editingDates, setEditingDates] = useState(false);
   const [editStart, setEditStart] = useState(todo.startDate ?? '');
   const [editEnd, setEditEnd] = useState(todo.endDate ?? '');
@@ -792,7 +804,7 @@ function PersonalTodoContent({
           </span>
         )}
         {todo.memo && (
-          <span className="text-[11px] text-text-secondary/50 truncate">{todo.memo}</span>
+          <span className="text-[11px] text-text-secondary/50 truncate"><EntityText text={todo.memo} userNames={users.map((u) => u.name)} /></span>
         )}
         {editingDates ? (
           <div className="flex items-center gap-1 text-[9px]" onClick={(e) => e.stopPropagation()}>
