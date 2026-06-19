@@ -23,12 +23,15 @@ test('EP 형식 엄격 검증 — EP00/접두어없음/중간글자 → null', (
   assert.equal(parseRevisionSceneContext('EP1A:B:1'), null); // 중간 글자 섞임
 });
 
-// ─── 4a-2: 댓글 sceneKey 컨텍스트 ───
-test('parseCommentSceneContext: EP01_A_BG:3 → {1, A}', () => {
-  assert.deepEqual(parseCommentSceneContext('EP01_A_BG:3'), { episodeNumber: 1, partId: 'A' });
+// ─── 4a-2: 댓글 sceneKey 컨텍스트 (부서 보존) ───
+test('parseCommentSceneContext: EP01_A_BG:3 → {1, A, bg}', () => {
+  assert.deepEqual(parseCommentSceneContext('EP01_A_BG:3'), { episodeNumber: 1, partId: 'A', department: 'bg' });
 });
-test('parseCommentSceneContext: EP12_C_ACT:7 → {12, C}', () => {
-  assert.deepEqual(parseCommentSceneContext('EP12_C_ACT:7'), { episodeNumber: 12, partId: 'C' });
+test('parseCommentSceneContext: EP12_C_ACT:7 → {12, C, acting}', () => {
+  assert.deepEqual(parseCommentSceneContext('EP12_C_ACT:7'), { episodeNumber: 12, partId: 'C', department: 'acting' });
+});
+test('parseCommentSceneContext: legacy(부서 접미어 없음)은 bg', () => {
+  assert.deepEqual(parseCommentSceneContext('EP02_A:5'), { episodeNumber: 2, partId: 'A', department: 'bg' });
 });
 test('parseCommentSceneContext: 형식 불일치 → null', () => {
   assert.equal(parseCommentSceneContext(''), null);

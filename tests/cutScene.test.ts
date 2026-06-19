@@ -31,6 +31,21 @@ test('같은 partId 가 부서별(BG/ACT) 별도 Part 로 나뉘어도 모든 �
   assert.deepEqual(resolveCutScene(eps, 1, 'A', 9), { no: 9, sceneId: 'a009-act' });
   assert.deepEqual(resolveCutScene(eps, 1, 'A', 1), { no: 1, sceneId: 'a001' });
 });
+test('department 지정 시 그 부서 파트에서만 찾기(BG/ACT 동일 컷 구분)', () => {
+  const eps = [{ episodeNumber: 1, parts: [
+    { partId: 'A', department: 'bg', scenes: [{ no: 5, sceneId: 'a005-bg' }] },
+    { partId: 'A', department: 'acting', scenes: [{ no: 5, sceneId: 'a005-act' }] },
+  ] }];
+  assert.deepEqual(resolveCutScene(eps, 1, 'A', 5, 'acting'), { no: 5, sceneId: 'a005-act' });
+  assert.deepEqual(resolveCutScene(eps, 1, 'A', 5, 'bg'), { no: 5, sceneId: 'a005-bg' });
+});
+test('department 미지정이면 모든 파트 순회(리테이크 — 첫 매칭)', () => {
+  const eps = [{ episodeNumber: 1, parts: [
+    { partId: 'A', department: 'bg', scenes: [{ no: 9, sceneId: 'a009-bg' }] },
+    { partId: 'A', department: 'acting', scenes: [{ no: 9, sceneId: 'a009-act' }] },
+  ] }];
+  assert.deepEqual(resolveCutScene(eps, 1, 'A', 9), { no: 9, sceneId: 'a009-bg' });
+});
 test('Scene.no 가 문자열이어도 숫자 비교', () => {
   const eps = [{ episodeNumber: 2, parts: [{ partId: 'A', scenes: [{ no: '7', sceneId: 'a007' }] }] }];
   assert.deepEqual(resolveCutScene(eps, 2, 'A', 7), { no: '7', sceneId: 'a007' });
