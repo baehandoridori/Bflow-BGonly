@@ -33,7 +33,7 @@ export function EntityText({ text, userNames, onMentionClick, onCutClick, render
               className={`text-accent font-bold bg-accent/10 rounded px-0.5 transition-colors ${
                 onMentionClick ? 'cursor-pointer hover:bg-accent/20' : ''
               }`}
-              onClick={onMentionClick ? () => onMentionClick(name) : undefined}
+              onClick={onMentionClick ? (e) => { e.stopPropagation(); onMentionClick(name); } : undefined}
               title={onMentionClick ? `${name} 팀원 보기` : undefined}
             >
               {tok.content}
@@ -48,7 +48,7 @@ export function EntityText({ text, userNames, onMentionClick, onCutClick, render
               className={`inline-flex items-center gap-0.5 align-baseline rounded px-1 font-semibold text-text-secondary bg-text-secondary/15 transition-colors ${
                 onCutClick ? 'cursor-pointer hover:bg-accent/15 hover:text-accent-sub' : ''
               }`}
-              onClick={onCutClick ? () => onCutClick(number) : undefined}
+              onClick={onCutClick ? (e) => { e.stopPropagation(); onCutClick(number); } : undefined}
               title={onCutClick ? `컷${number}(으)로 이동` : '씬·컷 표시'}
             >
               <Scissors size={9} className="shrink-0" />
