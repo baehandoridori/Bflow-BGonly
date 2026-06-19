@@ -1,6 +1,6 @@
 // ─── 새 리테이크 등록 폼 ──────────────────────
 
-import { useState, useEffect, useMemo, useRef } from 'react';
+import { useState, useMemo, useRef } from 'react';
 import { motion } from 'framer-motion';
 import { ImagePlus, X } from 'lucide-react';
 import { useRevisionStore } from '@/stores/useRevisionStore';
@@ -9,6 +9,7 @@ import { resizeBlob } from '@/utils/imageUtils';
 import { elevatedGlassStyle } from '@/utils/glassStyles';
 import { RevisionRecipientPicker } from '@/components/scenes/RevisionRecipientPicker';
 import { calcDefaultRecipients } from '@/utils/revisionRecipients';
+import { EntityAwareInput } from '@/components/common/EntityAwareInput';
 
 export function AddRevisionForm({
   sceneKey,
@@ -31,7 +32,6 @@ export function AddRevisionForm({
   const [imagePreview, setImagePreview] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [notifyIds, setNotifyIds] = useState<string[]>([]);
-  const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // 자동 체크 대상자 — 모든 컴포지터 + 그 씬 담당자 (등록자 본인 제외).
@@ -44,10 +44,6 @@ export function AddRevisionForm({
       currentUser.id,
     );
   }, [sceneAssignee, allUsers, currentUser]);
-
-  useEffect(() => {
-    textareaRef.current?.focus();
-  }, []);
 
   const handleImageFile = async (file: File) => {
     try {
@@ -106,18 +102,19 @@ export function AddRevisionForm({
         onClick={(e) => e.stopPropagation()}
       >
         {/* 설명 */}
-        <textarea
-          ref={textareaRef}
-          value={description}
-          onChange={(e) => setDescription(e.target.value)}
-          onPaste={handlePaste}
-          onKeyDown={(e) => {
-            if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSubmit(); }
-            if (e.key === 'Escape') onClose();
-          }}
-          placeholder="수정 내용을 설명해주세요..."
-          className="w-full px-3 py-2 text-sm bg-bg-primary rounded-lg border border-bg-border text-text-primary placeholder:text-text-secondary/50 resize-none focus:outline-none focus:ring-1 focus:ring-accent/50"
+        <EntityAwareInput
+          multiline
           rows={2}
+          value={description}
+          onChange={setDescription}
+          users={allUsers}
+          onPaste={handlePaste}
+          submitOn="enter"
+          onSubmit={handleSubmit}
+          onCancel={onClose}
+          autoFocus
+          placeholder="수정 내용을 설명해주세요... (@이름으로 멘션)"
+          className="w-full px-3 py-2 text-sm bg-bg-primary rounded-lg border border-bg-border text-text-primary placeholder:text-text-secondary/50 resize-none focus:outline-none focus:ring-1 focus:ring-accent/50"
         />
 
         {/* 이미지 프리뷰 */}

@@ -4,6 +4,7 @@ import { Plus, Check, CheckCheck, Clock, Circle, ImagePlus, X, Trash2, MessageSq
 import { toast as sonnerToast } from 'sonner';
 import { ConfirmDialog } from '@/components/common/ConfirmDialog';
 import { useAuthStore } from '@/stores/useAuthStore';
+import { useAppStore } from '@/stores/useAppStore';
 import { useRevisionStore } from '@/stores/useRevisionStore';
 import { useDataStore } from '@/stores/useDataStore';
 import { buildSceneKey } from '@/services/revisionService';
@@ -16,7 +17,10 @@ import { RevisionRecipientPicker } from './RevisionRecipientPicker';
 import { RevisionCommentThread } from './RevisionCommentThread';
 import { AttachmentImageLightbox, type AttachmentImageLightboxState } from './AttachmentImageLightbox';
 import { calcDefaultRecipients } from '@/utils/revisionRecipients';
-import { PathLinkifiedText } from '@/components/common/PathLinkifiedText';
+import { EntityText } from '@/components/common/EntityText';
+import { EntityAwareInput } from '@/components/common/EntityAwareInput';
+import { navigateToCutNumber } from '@/utils/cutNumberNavigation';
+import { parseRevisionSceneContext } from '@/utils/revisionSceneContext';
 import { CompactIconLabel } from '@/components/common/CompactIconLabel';
 import { canActAsAssignee, canReassignRevision, canFinalResolveRevision } from '@/utils/revisionWorkflow';
 import { summarizeAssignees, collectAssigneeNotes, sideBarColorClass, canShowFinalResolveBar } from '@/utils/revisionCardView';
@@ -124,6 +128,12 @@ const RevisionCard = memo(function RevisionCard({
 }) {
   const [lightbox, setLightbox] = useState<AttachmentImageLightboxState | null>(null);
   const { currentUser, users: allUsers } = useAuthStore();
+  const { setView, setHighlightUserName } = useAppStore();
+  // 4a: 카드 본문(내용/완료멘트) 엔티티 표시 — 멘션 클릭=팀뷰, 컷 클릭=씬 점프(sceneKey 컨텍스트 있을 때만).
+  const entityUserNames = useMemo(() => allUsers.map((u) => u.name), [allUsers]);
+  const cutContext = useMemo(() => parseRevisionSceneContext(revision.sceneKey), [revision.sceneKey]);
+  const handleEntityMentionClick = (name: string) => { setHighlightUserName(name); setView('team'); };
+  const handleEntityCutClick = cutContext ? (n: number) => { navigateToCutNumber(n, cutContext); } : undefined;
   // 담당 워크플로우 액션 (리테이크 허브 2단계) — store 가 낙관/롤백/self-mark 전담.
   const startAssignee = useRevisionStore((s) => s.startAssignee);
   const completeAssignee = useRevisionStore((s) => s.completeAssignee);
@@ -264,7 +274,12 @@ const RevisionCard = memo(function RevisionCard({
 
       {/* 설명 — G:\ 경로는 PathBadge 아이콘 버튼으로 자동 변환 (메모/댓글과 동일 패턴) */}
       <p className="rev-card-description text-sm text-text-primary leading-relaxed mb-2 whitespace-pre-wrap">
-        <PathLinkifiedText text={revision.description} />
+        <EntityText
+          text={revision.description}
+          userNames={entityUserNames}
+          onMentionClick={handleEntityMentionClick}
+          onCutClick={handleEntityCutClick}
+        />
       </p>
 
       {/* 이미지 썸네일 */}
@@ -339,7 +354,12 @@ const RevisionCard = memo(function RevisionCard({
                 >
                   <p className="text-xs text-text-secondary">
                     <span className="font-medium text-accent-sub">{nameOf(userId)} 완료:</span>{' '}
-                    <PathLinkifiedText text={note} />
+                    <EntityText
+                      text={note}
+                      userNames={entityUserNames}
+                      onMentionClick={handleEntityMentionClick}
+                      onCutClick={handleEntityCutClick}
+                    />
                   </p>
                 </div>
               ))}
@@ -552,7 +572,6 @@ export function RevisionPanel({ sheetName, sceneId, siblingSceneIds, department,
   const [submitting, setSubmitting] = useState(false);
   const [notifyIds, setNotifyIds] = useState<string[]>([]);
   const [formAssigneeIds, setFormAssigneeIds] = useState<string[]>([]);
-  const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // 자동 체크 대상자 — 모든 컴포지터 + 그 씬 담당자 (등록자 본인 제외).
@@ -584,10 +603,6 @@ export function RevisionPanel({ sheetName, sceneId, siblingSceneIds, department,
   useEffect(() => {
     onCountChange?.(getOpenCount(sceneKey));
   }, [sceneKey, revisions.length, getOpenCount, onCountChange]);
-
-  useEffect(() => {
-    if (showForm) textareaRef.current?.focus();
-  }, [showForm]);
 
   const handleImageFile = async (file: File) => {
     try {
@@ -720,18 +735,16 @@ export function RevisionPanel({ sheetName, sceneId, siblingSceneIds, department,
                     <label className="text-[11px] font-bold uppercase tracking-wider text-text-secondary mb-1.5 block">
                       내용 <span className="text-accent">*</span>
                     </label>
-                    <textarea
-                      ref={textareaRef}
+                    <EntityAwareInput
+                      multiline
                       value={description}
-                      onChange={(e) => setDescription(e.target.value)}
+                      onChange={setDescription}
+                      users={allUsers}
                       onPaste={handlePaste}
-                      onKeyDown={(e) => {
-                        if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
-                          e.preventDefault();
-                          handleSubmit();
-                        }
-                      }}
-                      placeholder="어떤 부분을 수정해야 하는지, 또는 무엇이 변경되었는지 적어주세요."
+                      submitOn="ctrl-enter"
+                      onSubmit={handleSubmit}
+                      autoFocus
+                      placeholder="어떤 부분을 수정해야 하는지, 또는 무엇이 변경되었는지 적어주세요. (@이름으로 멘션)"
                       className="w-full min-h-[88px] px-3 py-2 text-[13px] bg-bg-primary/80 border border-bg-border/60 rounded-lg text-text-primary placeholder:text-text-secondary/50 resize-y focus:outline-none focus:border-accent/60"
                     />
                   </div>

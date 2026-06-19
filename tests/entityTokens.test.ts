@@ -32,3 +32,44 @@ test('멘션+경로 혼합 위치순 보존(경로 먼저 분리)', () => {
 test('빈 문자열', () => {
   assert.deepEqual(tokenizeEntities('', USERS), []);
 });
+
+// ─── 4a: 컷 번호 토큰 ───
+test('컷 번호 감지(컷N/cutN) + 숫자 파싱', () => {
+  assert.deepEqual(tokenizeEntities('컷5 확인 cut12', USERS), [
+    { type: 'cut', content: '컷5', number: 5 },
+    { type: 'text', content: ' 확인 ' },
+    { type: 'cut', content: 'cut12', number: 12 },
+  ]);
+});
+test('cut 사이 공백 허용, 대소문자 무시', () => {
+  assert.deepEqual(tokenizeEntities('Cut 7', USERS), [{ type: 'cut', content: 'Cut 7', number: 7 }]);
+});
+test('uncut3 영문 단어 내부는 컷 아님', () => {
+  assert.deepEqual(tokenizeEntities('uncut3', USERS), [{ type: 'text', content: 'uncut3' }]);
+});
+test('공백 뒤 컷은 감지', () => {
+  assert.deepEqual(tokenizeEntities('추가 컷3', USERS), [
+    { type: 'text', content: '추가 ' },
+    { type: 'cut', content: '컷3', number: 3 },
+  ]);
+});
+test('한글 바로 뒤 컷도 감지(앞 경계는 영숫자만 차단)', () => {
+  assert.deepEqual(tokenizeEntities('한컷3', USERS), [
+    { type: 'text', content: '한' },
+    { type: 'cut', content: '컷3', number: 3 },
+  ]);
+});
+test('씬N 은 감지 안 함(컷만 — 씬은 sceneId 혼동)', () => {
+  assert.deepEqual(tokenizeEntities('씬5', USERS), [{ type: 'text', content: '씬5' }]);
+});
+test('컷0/컷00 은 컷 토큰 아님(number<=0 가드 — 빈/0 씬 오점프 방지)', () => {
+  assert.deepEqual(tokenizeEntities('컷0', USERS), [{ type: 'text', content: '컷0' }]);
+  assert.deepEqual(tokenizeEntities('컷00', USERS), [{ type: 'text', content: '컷00' }]);
+});
+test('멘션+컷 혼합 위치순', () => {
+  assert.deepEqual(tokenizeEntities('@홍길동 컷3', USERS), [
+    { type: 'mention', content: '@홍길동', name: '홍길동' },
+    { type: 'text', content: ' ' },
+    { type: 'cut', content: '컷3', number: 3 },
+  ]);
+});
