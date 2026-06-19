@@ -1,14 +1,15 @@
 {
   "name": "bflow",
-  "version": "1.37.0",
+  "version": "1.38.0",
   "description": "B flow - Studio JBBJ 워크플로우 대시보드",
   "main": "dist-electron/main.js",
   "scripts": {
     "dev": "vite",
     "typecheck": "tsc --noEmit && tsc -p tsconfig.node.json --noEmit",
     "test:auto-update": "node --test ./tests/autoUpdateHelperSwap.test.ts ./tests/autoUpdateManifest.test.ts ./tests/autoUpdateFailurePolicy.test.ts ./tests/autoUpdateInstallerFlow.test.ts",
-    "build": "npm run typecheck && npm run test:auto-update && vite build && electron-builder && node scripts/generate-manifest.js",
-    "build:vite": "npm run typecheck && npm run test:auto-update && vite build && node scripts/generate-manifest.js --allow-missing-installer",
+    "test:entity": "node --test ./tests/mentionQuery.test.ts ./tests/entityTokens.test.ts",
+    "build": "npm run typecheck && npm run test:auto-update && npm run test:entity && vite build && electron-builder && node scripts/generate-manifest.js",
+    "build:vite": "npm run typecheck && npm run test:auto-update && npm run test:entity && vite build && node scripts/generate-manifest.js --allow-missing-installer",
     "preview": "vite preview",
     "electron:dev": "vite build && electron .",
     "lint": "eslint src --ext ts,tsx"
@@ -16,6 +17,9 @@
   "author": "Studio JBBJ",
   "license": "UNLICENSED",
   "private": true,
+  "engines": {
+    "node": ">=22.6.0"
+  },
   "dependencies": {
     "@fontsource/gowun-dodum": "^5.2.8",
     "@fontsource/ibm-plex-sans-kr": "^5.2.8",

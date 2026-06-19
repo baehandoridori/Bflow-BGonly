@@ -24,7 +24,9 @@ import { EmojiPicker } from './EmojiPicker';
 import { SmilePlus } from 'lucide-react';
 import { sendMentionWebhook } from '@/services/slackWebhookService';
 import { formatCommentTime } from '@/utils/formatTime';
-import { PathLinkifiedText } from '@/components/common/PathLinkifiedText';
+import { EntityText } from '@/components/common/EntityText';
+import { MentionDropdown } from '@/components/common/MentionDropdown';
+import { useMentionAutocomplete } from '@/hooks/useMentionAutocomplete';
 import {
   COMMENT_READ_STATE_EVENT,
   getCommentReadStateForUser,
@@ -251,10 +253,6 @@ export function CommentPanel({ sceneKey, secondarySceneKey, sceneThreadKey, onCo
   const [quickRevisionPickerOpen, setQuickRevisionPickerOpen] = useState(false);
   const [quickRevisionNotifyIds, setQuickRevisionNotifyIds] = useState<string[]>([]);
 
-  // 멘션 자동완성
-  const [showMentions, setShowMentions] = useState(false);
-  const [mentionFilter, setMentionFilter] = useState('');
-  const [mentionIndex, setMentionIndex] = useState(0);
 
   // v1.24.0: 답글 입력 모드 — 클릭 시 입력 카드 상단에 답글 컨텍스트 헤더 노출 + parentCommentId 채워서 저장.
   // 코덱스 P2 fix (2026-05-10): sceneKey 변경 시 reset 필수 — 안 그러면 다른 씬으로 이동 후 전송 시
@@ -356,7 +354,6 @@ export function CommentPanel({ sceneKey, secondarySceneKey, sceneThreadKey, onCo
 
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
-  const mentionDropdownRef = useRef<HTMLDivElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const dragCounter = useRef(0);
@@ -687,15 +684,6 @@ export function CommentPanel({ sceneKey, secondarySceneKey, sceneThreadKey, onCo
     inputRef.current?.focus();
   }, [replyTarget, comments]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // 멘션 드롭다운 활성 항목 스크롤
-  useEffect(() => {
-    if (!showMentions) return;
-    const container = mentionDropdownRef.current;
-    if (!container) return;
-    const items = container.querySelectorAll('button');
-    items[mentionIndex]?.scrollIntoView({ block: 'nearest' });
-  }, [mentionIndex, showMentions]);
-
   // v1.24.0: 라이트박스 키보드 — Escape 닫기 + ArrowLeft/Right 로 한 댓글 내 이미지 이동.
   // stopPropagation 으로 모달 prev/next (← →) 와 충돌 차단 — 라이트박스 활성 시 화살표는 *이미지만* 이동.
   useEffect(() => {
@@ -729,6 +717,17 @@ export function CommentPanel({ sceneKey, secondarySceneKey, sceneThreadKey, onCo
   useEffect(() => { attachedImagesRef.current = attachedImages; }, [attachedImages]);
   const inputValueRef = useRef('');
   useEffect(() => { inputValueRef.current = input; }, [input]);
+
+  // 3단계: @멘션 자동완성 공통 훅(caret 기반 중간 멘션 + DOM 직접 읽기)
+  const mention = useMentionAutocomplete({
+    onChange: (next) => { setInput(next); inputValueRef.current = next; },
+    users,
+    inputRef,
+  });
+  // 답글 진입(replyTarget 설정) 시 멘션 드롭다운 닫기 — 답글 프리셋 setInput+focus 가 stale 드롭다운을 남기지 않게.
+  useEffect(() => {
+    if (replyTarget) mention.close();
+  }, [replyTarget, mention.close]);
   // Codex P2 8차(2026-04-29): unmount 후 upload 완료 race 처리 — React 가 unmounted component 의 setState 를
   // drop 하므로 setAttachedImages updater 안의 side-effect (deleteImage) 도 실행 안 됨 → orphan.
   // mountedRef 로 unmount 여부를 직접 확인해 그 케이스에서 storage 즉시 정리.
@@ -907,7 +906,7 @@ export function CommentPanel({ sceneKey, secondarySceneKey, sceneThreadKey, onCo
         setInput('');
         inputValueRef.current = '';
         setQuickRevisionPickerOpen(false);
-        setShowMentions(false);
+        mention.close();
         setReplyTarget(null);
         prevAttached.forEach((item) => {
           try { URL.revokeObjectURL(item.previewUrl); } catch { /* ignore */ }
@@ -1020,7 +1019,7 @@ export function CommentPanel({ sceneKey, secondarySceneKey, sceneThreadKey, onCo
     const prevReplyTarget = replyTarget;
     setInput('');
     inputValueRef.current = '';
-    setShowMentions(false);
+    mention.close();
     setAttachedImages([]);
     attachedImagesRef.current = [];
     // v1.24.0: 답글 전송 후 답글 모드 해제 (성공/실패 무관 — 실패 시 아래에서 복원).
@@ -1154,33 +1153,10 @@ export function CommentPanel({ sceneKey, secondarySceneKey, sceneThreadKey, onCo
     }
   };
 
-  // @멘션 입력 추적 (자라기 동작은 useLayoutEffect 가 담당)
+  // @멘션 등 엔티티 자동완성은 useMentionAutocomplete 가 담당. 여기선 입력값만 반영(자라기는 useLayoutEffect).
   const handleInputChange = (text: string) => {
     setInput(text);
-    const lastAt = text.lastIndexOf('@');
-    if (lastAt >= 0) {
-      const afterAt = text.slice(lastAt + 1);
-      if (!afterAt.includes(' ') && afterAt.length < 20) {
-        setShowMentions(true);
-        setMentionFilter(afterAt.toLowerCase());
-        setMentionIndex(0);
-        return;
-      }
-    }
-    setShowMentions(false);
   };
-
-  const insertMention = (userName: string) => {
-    const lastAt = input.lastIndexOf('@');
-    const before = input.slice(0, lastAt);
-    setInput(`${before}@${userName} `);
-    setShowMentions(false);
-    inputRef.current?.focus();
-  };
-
-  const filteredUsers = users.filter(u =>
-    u.name.toLowerCase().includes(mentionFilter)
-  );
 
   // v1.18.0: re만 필터 — 토글 켜져 있으면 revisionId 있는 댓글만 노출.
   const visibleComments = useMemo(
@@ -1304,32 +1280,8 @@ export function CommentPanel({ sceneKey, secondarySceneKey, sceneThreadKey, onCo
     setView('team');
   };
 
-  const renderMentionInSegment = (segment: string, baseIdx: number) => {
-    const parts = segment.split(/(@\S+)/g);
-    return parts.map((part, i) => {
-      const key = `${baseIdx}-${i}`;
-      if (part.startsWith('@')) {
-        const name = part.slice(1);
-        const isUser = userNames.includes(name);
-        if (isUser) {
-          return (
-            <span
-              key={key}
-              className="text-accent font-bold bg-accent/10 rounded px-0.5 cursor-pointer hover:bg-accent/20 transition-colors"
-              onClick={() => handleMentionClick(name)}
-              title={`${name} 팀원 보기`}
-            >
-              {part}
-            </span>
-          );
-        }
-      }
-      return <span key={key}>{part}</span>;
-    });
-  };
-
   const renderText = (text: string) => (
-    <PathLinkifiedText text={text} renderTextSegment={renderMentionInSegment} />
+    <EntityText text={text} userNames={userNames} onMentionClick={handleMentionClick} />
   );
 
   // ─── 렌더링 ────────────────────────────────
@@ -1850,21 +1802,13 @@ export function CommentPanel({ sceneKey, secondarySceneKey, sceneThreadKey, onCo
           반대로 자식 카드의 maxHeight cap (inputCardMaxPx) 으로 wrapper 가 넘쳐 grow 하는 것도 방지. */}
       <div className="px-3 pb-3 pt-3 relative shrink-0">
         {/* @멘션 자동완성 */}
-        {showMentions && filteredUsers.length > 0 && (
-          <div ref={mentionDropdownRef} className="absolute bottom-full left-3 right-3 mb-1 bg-bg-card border border-bg-border rounded-lg shadow-lg max-h-32 overflow-y-auto z-30">
-            {filteredUsers.map((user, i) => (
-              <button
-                key={user.id}
-                onClick={() => insertMention(user.name)}
-                className={`w-full text-left px-3 py-1.5 text-xs text-text-primary transition-colors flex items-center gap-2 cursor-pointer ${
-                  i === mentionIndex ? 'bg-accent/15' : 'hover:bg-accent/10'
-                }`}
-              >
-                <span className="text-accent text-[11px]">@</span>
-                <span>{user.name}</span>
-              </button>
-            ))}
-          </div>
+        {mention.active && (
+          <MentionDropdown
+            items={mention.items}
+            index={mention.index}
+            onPick={mention.select}
+            positionClassName="left-3 right-3"
+          />
         )}
 
         <AnimatePresence initial={false}>
@@ -2017,7 +1961,12 @@ export function CommentPanel({ sceneKey, secondarySceneKey, sceneThreadKey, onCo
           <textarea
             ref={inputRef}
             value={input}
-            onChange={(e) => handleInputChange(e.target.value)}
+            onChange={(e) => { handleInputChange(e.target.value); mention.refresh(); }}
+            // caret 이동은 onSelect/onClick 으로만 감지. onKeyUp 은 쓰지 않는다 —
+            // 멘션 활성 중 Arrow/Escape 는 onKeyDown 에서 preventDefault 되어 caret 이 안 바뀌므로
+            // onSelect 가 안 터지고, keyup refresh 가 없으니 active index 리셋·Escape 후 재오픈이 없다.
+            onClick={mention.refresh}
+            onSelect={mention.refresh}
             onFocus={() => setFocused(true)}
             onBlur={() => setFocused(false)}
             placeholder="댓글 입력... (Ctrl+V / 드래그로 이미지)"
@@ -2025,29 +1974,7 @@ export function CommentPanel({ sceneKey, secondarySceneKey, sceneThreadKey, onCo
             className="comment-input-textarea block w-full px-2 py-1.5 text-xs resize-none outline-none bg-transparent leading-relaxed text-text-primary placeholder:text-text-secondary/40 overflow-y-auto flex-1 min-h-0"
             style={{ height: taHeight, maxHeight: taMaxPx, boxSizing: 'border-box' }}
             onKeyDown={(e) => {
-              // @멘션 키보드 탐색
-              if (showMentions && filteredUsers.length > 0) {
-                if (e.key === 'ArrowDown') {
-                  e.preventDefault();
-                  setMentionIndex((prev) => (prev + 1) % filteredUsers.length);
-                  return;
-                }
-                if (e.key === 'ArrowUp') {
-                  e.preventDefault();
-                  setMentionIndex((prev) => (prev - 1 + filteredUsers.length) % filteredUsers.length);
-                  return;
-                }
-                if (e.key === 'Enter' || e.key === 'Tab') {
-                  e.preventDefault();
-                  insertMention(filteredUsers[mentionIndex].name);
-                  return;
-                }
-                if (e.key === 'Escape') {
-                  e.preventDefault();
-                  setShowMentions(false);
-                  return;
-                }
-              }
+              if (mention.onKeyDown(e)) return;
               if (e.key === 'Enter' && !e.shiftKey) {
                 e.preventDefault();
                 handleSubmit();

@@ -107,12 +107,12 @@ test('revision comment thread supports image paste and file attachments', () => 
 });
 
 test('revision comment thread supports user mentions like the main comment panel', () => {
+  // 3단계: 멘션 자체구현 → 공통 엔티티 감지(useMentionAutocomplete/MentionDropdown/EntityText)로 통합.
   assert.match(revisionCommentThread, /extractMentions/);
   assert.match(revisionCommentThread, /mentions:\s*extractMentions\(draft,\s*users\.map/);
-  assert.match(revisionCommentThread, /showMentions/);
-  assert.match(revisionCommentThread, /mentionFilter/);
-  assert.match(revisionCommentThread, /insertMention/);
-  assert.match(revisionCommentThread, /PathLinkifiedText/);
+  assert.match(revisionCommentThread, /useMentionAutocomplete/);
+  assert.match(revisionCommentThread, /MentionDropdown/);
+  assert.match(revisionCommentThread, /EntityText/);
   assert.match(revisionCommentThread, /sendMentionWebhook/);
 });
 
