@@ -14,6 +14,12 @@ export function resolveCutScene(
   cutNumber: number,
 ): SceneLike | null {
   const ep = episodes.find((e) => e.episodeNumber === episodeNumber);
-  const part = ep?.parts.find((p) => p.partId === partId);
-  return part?.scenes.find((s) => Number(s.no) === cutNumber) ?? null;
+  if (!ep) return null;
+  // 같은 partId 가 BG/ACT 별도 Part 로 나뉠 수 있어(NewRevisionModal 도 union) 매칭 파트를 모두 순회한다.
+  for (const part of ep.parts) {
+    if (part.partId !== partId) continue;
+    const scene = part.scenes.find((s) => Number(s.no) === cutNumber);
+    if (scene) return scene;
+  }
+  return null;
 }
