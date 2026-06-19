@@ -176,7 +176,7 @@ function PropertyRow({ label, value, placeholder, onSave, memoAuthorMeta, entity
                   <EntityText
                     text={value}
                     userNames={userNames}
-                    onCutClick={cutCtx ? (n) => navigateToCutNumber(n, { episodeNumber: cutCtx.episodeNumber, partId: cutCtx.partId }) : undefined}
+                    onCutClick={cutCtx ? (n) => navigateToCutNumber(n, cutCtx) : undefined}
                   />
                 ) : (
                   <PathLinkifiedText text={value} />

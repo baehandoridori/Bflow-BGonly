@@ -361,7 +361,7 @@ export function UnifiedSceneCard({
                   <EntityText
                     text={bgScene.memo}
                     userNames={userNames}
-                    onCutClick={bgCutCtx ? (n) => navigateToCutNumber(n, { episodeNumber: bgCutCtx.episodeNumber, partId: bgCutCtx.partId }) : undefined}
+                    onCutClick={bgCutCtx ? (n) => navigateToCutNumber(n, bgCutCtx) : undefined}
                     renderTextSegment={(seg, idx) => <HighlightText key={idx} text={seg} query={searchQuery} />}
                   />
                 </p>
@@ -374,7 +374,7 @@ export function UnifiedSceneCard({
                   <EntityText
                     text={actScene.memo}
                     userNames={userNames}
-                    onCutClick={actCutCtx ? (n) => navigateToCutNumber(n, { episodeNumber: actCutCtx.episodeNumber, partId: actCutCtx.partId }) : undefined}
+                    onCutClick={actCutCtx ? (n) => navigateToCutNumber(n, actCutCtx) : undefined}
                     renderTextSegment={(seg, idx) => <HighlightText key={idx} text={seg} query={searchQuery} />}
                   />
                 </p>

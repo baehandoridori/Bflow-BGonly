@@ -1431,7 +1431,7 @@ function InlineTextareaRow({ label, value, onSave, memoAuthorMeta, continuityTar
           style={{ background: value ? 'rgba(255,255,255,0.025)' : undefined }}
         >
           {value
-            ? <EntityText text={value} userNames={userNames} onCutClick={cutCtx ? (n) => navigateToCutNumber(n, { episodeNumber: cutCtx.episodeNumber, partId: cutCtx.partId }) : undefined} />
+            ? <EntityText text={value} userNames={userNames} onCutClick={cutCtx ? (n) => navigateToCutNumber(n, cutCtx) : undefined} />
             : <span className="text-text-secondary/50">메모 없음</span>}
           {value && (
             <Pencil size={12} className="inline-block ml-2 opacity-0 hover:opacity-60 transition-opacity" />

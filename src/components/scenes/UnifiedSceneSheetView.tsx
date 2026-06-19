@@ -313,7 +313,7 @@ function SheetEditableCell({
         <EntityText
           text={value || '-'}
           userNames={userNames}
-          onCutClick={cutCtx ? (n) => navigateToCutNumber(n, { episodeNumber: cutCtx.episodeNumber, partId: cutCtx.partId }) : undefined}
+          onCutClick={cutCtx ? (n) => navigateToCutNumber(n, cutCtx) : undefined}
           renderTextSegment={(seg, idx) => <HighlightText key={idx} text={seg} query={searchQuery} />}
         />
       ) : type === 'assignee' ? (

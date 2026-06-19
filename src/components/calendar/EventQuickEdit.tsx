@@ -266,7 +266,7 @@ export function EventQuickEdit({
                     rows={3}
                     placeholder="메모"
                     dropdownPositionClassName="left-2 right-2"
-                    className="w-full px-2.5 py-1.5 rounded-lg text-xs outline-none resize-none placeholder:text-text-secondary/45 bg-bg-primary/80 border border-bg-border/60 text-text-primary"
+                    className="w-full px-2.5 py-1.5 rounded-lg text-xs outline-none resize-none placeholder:text-text-secondary/45 bg-bg-primary/[0.82] border border-bg-border/[0.56] text-text-primary"
                   />
 
                   {/* 저장 */}
