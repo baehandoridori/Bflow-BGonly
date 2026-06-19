@@ -4,6 +4,8 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { X, Copy, Trash2, Check, Palette, Pencil } from 'lucide-react';
 import { CalendarEvent, CalendarEventType, EVENT_COLORS } from '@/types/calendar';
 import { useAppStore } from '@/stores/useAppStore';
+import { useAuthStore } from '@/stores/useAuthStore';
+import { EntityAwareInput } from '@/components/common/EntityAwareInput';
 import { floatingGlassStyle } from '@/utils/glassStyles';
 
 interface EventQuickEditProps {
@@ -45,6 +47,7 @@ export function EventQuickEdit({
   const [endDate, setEndDate] = useState(event.endDate);
   const [type, setType] = useState<CalendarEventType>(event.type);
   const [memo, setMemo] = useState(event.memo);
+  const users = useAuthStore((s) => s.users);
 
   const isVacation = event.type === 'vacation';
   const fieldStyle = {
@@ -255,13 +258,15 @@ export function EventQuickEdit({
                   </div>
 
                   {/* 메모 */}
-                  <textarea
-                    value={memo}
-                    onChange={(e) => setMemo(e.target.value)}
-                    placeholder="메모"
+                  <EntityAwareInput
+                    multiline
+                    value={memo ?? ''}
+                    onChange={setMemo}
+                    users={users}
                     rows={3}
-                    className="w-full px-2.5 py-1.5 rounded-lg text-xs outline-none resize-none placeholder:text-text-secondary/45"
-                    style={fieldStyle}
+                    placeholder="메모"
+                    dropdownPositionClassName="left-2 right-2"
+                    className="w-full px-2.5 py-1.5 rounded-lg text-xs outline-none resize-none placeholder:text-text-secondary/45 bg-bg-primary/80 border border-bg-border/60 text-text-primary"
                   />
 
                   {/* 저장 */}
