@@ -1,4 +1,5 @@
 import { Fragment } from 'react';
+import { Scissors } from 'lucide-react';
 import { tokenizeEntities } from '@/utils/entityTokens';
 import { PathBadge } from './PathBadge';
 
@@ -7,15 +8,16 @@ interface Props {
   userNames: string[];
   /** 멘션 칩 클릭 — 팀 뷰로 점프 등. 미지정 시 비클릭. */
   onMentionClick?: (name: string) => void;
+  /** 컷 칩 클릭 — 해당 씬으로 점프. 씬 컨텍스트 있는 곳에서만 전달(없으면 색 표시만). */
+  onCutClick?: (cutNumber: number) => void;
 }
 
 /**
- * 평문 텍스트를 엔티티 칩으로 렌더(스펙 §10.3 — 보낸 댓글 표시 칩).
- *  - 경로: PathBadge(기존)  · 멘션: 보라 칩(클릭 시 onMentionClick)
- * PathLinkifiedText + renderMentionInSegment 조합을 한 컴포넌트로 통합.
- * (씬·컷 칩은 4단계 추가)
+ * 평문 텍스트를 엔티티 칩으로 렌더(스펙 §10.3 — 보낸 댓글/내용 표시 칩).
+ *  - 경로: PathBadge  · 멘션: 보라 칩(onMentionClick)  · 컷: 중립 칩(onCutClick 있으면 점프)
+ * 컷 칩 색은 상태색(#74B9FF 진행중)·경로색과 겹치지 않게 중립으로 둠 — 6단계 폴리싱서 재검토.
  */
-export function EntityText({ text, userNames, onMentionClick }: Props) {
+export function EntityText({ text, userNames, onMentionClick, onCutClick }: Props) {
   const tokens = tokenizeEntities(text, userNames);
   return (
     <>
@@ -32,6 +34,22 @@ export function EntityText({ text, userNames, onMentionClick }: Props) {
               onClick={onMentionClick ? () => onMentionClick(name) : undefined}
               title={onMentionClick ? `${name} 팀원 보기` : undefined}
             >
+              {tok.content}
+            </span>
+          );
+        }
+        if (tok.type === 'cut') {
+          const number = tok.number;
+          return (
+            <span
+              key={`c${i}`}
+              className={`inline-flex items-center gap-0.5 align-baseline rounded px-1 font-semibold text-text-secondary bg-text-secondary/15 transition-colors ${
+                onCutClick ? 'cursor-pointer hover:bg-accent/15 hover:text-accent-sub' : ''
+              }`}
+              onClick={onCutClick ? () => onCutClick(number) : undefined}
+              title={onCutClick ? `컷${number}(으)로 이동` : '씬·컷 표시'}
+            >
+              <Scissors size={9} className="shrink-0" />
               {tok.content}
             </span>
           );
