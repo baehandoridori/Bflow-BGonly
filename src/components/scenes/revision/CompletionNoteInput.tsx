@@ -1,12 +1,14 @@
 /**
  * CompletionNoteInput — 담당자 완료 멘트 입력 (시안 A / 시안 B 공유).
  *
- * 평문 textarea. 빈 멘트 허용(spec §8.3), placeholder 로 경로 입력 유도.
- * ⚠️ 엔티티 감지(@멘션/G:\경로/씬·컷 morph)는 3단계 — 여기는 평문만. morph 도입 금지.
+ * 빈 멘트 허용(spec §8.3 · 한솔 확정), placeholder 로 경로 입력 유도.
+ * 4a: @멘션 자동완성 + 인-인풋 하이라이트(EntityAwareInput). 표시 칩은 호출 측이 EntityText 로 렌더.
  */
 
-import { useEffect, useRef, useState } from 'react';
+import { useState } from 'react';
 import { Check, X } from 'lucide-react';
+import { useAuthStore } from '@/stores/useAuthStore';
+import { EntityAwareInput } from '@/components/common/EntityAwareInput';
 
 interface Props {
   initialValue?: string;
@@ -16,32 +18,23 @@ interface Props {
 
 export function CompletionNoteInput({ initialValue = '', onConfirm, onCancel }: Props) {
   const [value, setValue] = useState(initialValue);
-  const ref = useRef<HTMLTextAreaElement>(null);
-
-  useEffect(() => {
-    ref.current?.focus();
-  }, []);
+  const { users } = useAuthStore();
 
   return (
     <div
       className="mt-2 rounded-lg border border-accent/40 bg-bg-primary/60 p-2.5 space-y-2"
       onClick={(e) => e.stopPropagation()}
     >
-      <textarea
-        ref={ref}
+      <EntityAwareInput
+        multiline
         value={value}
-        onChange={(e) => setValue(e.target.value)}
-        onKeyDown={(e) => {
-          if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
-            e.preventDefault();
-            onConfirm(value.trim());
-          }
-          if (e.key === 'Escape') {
-            e.preventDefault();
-            onCancel();
-          }
-        }}
-        placeholder="완료 결과·파일 경로(G:\...)를 적어주세요 — 비워도 됩니다."
+        onChange={setValue}
+        users={users}
+        submitOn="ctrl-enter"
+        onSubmit={() => onConfirm(value.trim())}
+        onCancel={onCancel}
+        autoFocus
+        placeholder="완료 결과·파일 경로(G:\...)를 적어주세요 — 비워도 됩니다. (@이름으로 멘션)"
         className="w-full min-h-[64px] px-2.5 py-2 text-[13px] bg-bg-primary/80 border border-bg-border/60 rounded-md text-text-primary placeholder:text-text-secondary/50 resize-y focus:outline-none focus:border-accent/60"
       />
       <div className="flex items-center justify-end gap-2">
