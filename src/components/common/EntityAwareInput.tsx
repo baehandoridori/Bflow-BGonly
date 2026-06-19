@@ -84,6 +84,7 @@ export function EntityAwareInput({
         className={className}
         scrollTop={scroll.top}
         scrollLeft={scroll.left}
+        singleLine={!multiline}
       />
       {mention.active && (
         <MentionDropdown

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { parseRevisionSceneContext } from '../src/utils/revisionSceneContext.ts';
+import { parseRevisionSceneContext, parseCommentSceneContext } from '../src/utils/revisionSceneContext.ts';
 
 test('EP01:A:1 → {1, A}', () => {
   assert.deepEqual(parseRevisionSceneContext('EP01:A:1'), { episodeNumber: 1, partId: 'A' });
@@ -21,4 +21,17 @@ test('EP 형식 엄격 검증 — EP00/접두어없음/중간글자 → null', (
   assert.equal(parseRevisionSceneContext('EP00:A:1'), null); // episode 0 없음
   assert.equal(parseRevisionSceneContext('3:A:1'), null);    // EP 접두어 없음
   assert.equal(parseRevisionSceneContext('EP1A:B:1'), null); // 중간 글자 섞임
+});
+
+// ─── 4a-2: 댓글 sceneKey 컨텍스트 ───
+test('parseCommentSceneContext: EP01_A_BG:3 → {1, A}', () => {
+  assert.deepEqual(parseCommentSceneContext('EP01_A_BG:3'), { episodeNumber: 1, partId: 'A' });
+});
+test('parseCommentSceneContext: EP12_C_ACT:7 → {12, C}', () => {
+  assert.deepEqual(parseCommentSceneContext('EP12_C_ACT:7'), { episodeNumber: 12, partId: 'C' });
+});
+test('parseCommentSceneContext: 형식 불일치 → null', () => {
+  assert.equal(parseCommentSceneContext(''), null);
+  assert.equal(parseCommentSceneContext(null), null);
+  assert.equal(parseCommentSceneContext('foo:3'), null);
 });

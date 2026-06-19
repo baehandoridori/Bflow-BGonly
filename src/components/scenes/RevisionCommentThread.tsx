@@ -31,8 +31,11 @@ import * as storageService from '@/services/storageService';
 import { resizeBlob } from '@/utils/imageUtils';
 import { sendMentionWebhook } from '@/services/slackWebhookService';
 import { EntityText } from '@/components/common/EntityText';
+import { EntityHighlightOverlay } from '@/components/common/EntityHighlightOverlay';
 import { MentionDropdown } from '@/components/common/MentionDropdown';
 import { useMentionAutocomplete } from '@/hooks/useMentionAutocomplete';
+import { navigateToCutNumber } from '@/utils/cutNumberNavigation';
+import { parseCommentSceneContext } from '@/utils/revisionSceneContext';
 import {
   AttachmentImageLightbox,
   type AttachmentImageLightboxEntry,
@@ -306,6 +309,12 @@ export function RevisionCommentThread({ revisionId, sceneKey }: Props) {
     users,
     inputRef,
   });
+  const [inputScrollLeft, setInputScrollLeft] = useState(0);
+  // 4a-2: 컷 칩 클릭 점프 — 댓글 sceneKey(commentService형)에서 EP·파트 컨텍스트 도출(없으면 색 표시만).
+  const commentCutContext = useMemo(() => parseCommentSceneContext(sceneKey), [sceneKey]);
+  const handleCommentCutClick = commentCutContext
+    ? (n: number) => { navigateToCutNumber(n, commentCutContext); }
+    : undefined;
 
   const hasUploadingImage = attachedImages.some(item => item.uploading);
   const uploadedImageUrls = attachedImages.map(item => item.uploadedUrl).filter((url): url is string => !!url);
@@ -435,6 +444,7 @@ export function RevisionCommentThread({ revisionId, sceneKey }: Props) {
               setHighlightUserName(userName);
               setView('team');
             }}
+            onCutClick={handleCommentCutClick}
           />
         </div>
       ))}
@@ -510,25 +520,36 @@ export function RevisionCommentThread({ revisionId, sceneKey }: Props) {
               >
                 <Paperclip size={13} />
               </button>
-              <input
-                ref={inputRef}
-                type="text"
-                value={draft}
-                onChange={e => { setDraft(e.target.value); draftRef.current = e.target.value; mention.refresh(); }}
-                // caret 이동은 onSelect/onClick 으로만 감지(onKeyUp 미사용) — 멘션 활성 중 Arrow/Escape 는
-                // preventDefault 되어 caret 이 안 바뀌므로 refresh 가 안 돌아 index 리셋·Escape 후 재오픈이 없다.
-                onClick={mention.refresh}
-                onSelect={mention.refresh}
-                onKeyDown={e => {
-                  if (mention.onKeyDown(e)) return;
-                  if (e.key === 'Enter' && !e.shiftKey) {
-                    e.preventDefault();
-                    send();
-                  }
-                }}
-                placeholder={`${revisionLabel} 댓글 남기기... (Ctrl+V)`}
-                className="flex-1 min-w-0 px-3 py-1.5 bg-bg-primary/80 border border-bg-border/60 rounded text-[12px] text-text-primary placeholder:text-text-secondary/50 focus:outline-none focus:border-accent/60"
-              />
+              <div className="relative flex-1 min-w-0">
+                {/* 4a-2: 입력 중 @이름·경로·컷 파란 강조(미러). 입력칸은 !bg-transparent + 위. */}
+                <EntityHighlightOverlay
+                  text={draft}
+                  userNames={users.map(user => user.name)}
+                  singleLine
+                  scrollLeft={inputScrollLeft}
+                  className="w-full px-3 py-1.5 border rounded text-[12px]"
+                />
+                <input
+                  ref={inputRef}
+                  type="text"
+                  value={draft}
+                  onChange={e => { setDraft(e.target.value); draftRef.current = e.target.value; mention.refresh(); }}
+                  // caret 이동은 onSelect/onClick 으로만 감지(onKeyUp 미사용) — 멘션 활성 중 Arrow/Escape 는
+                  // preventDefault 되어 caret 이 안 바뀌므로 refresh 가 안 돌아 index 리셋·Escape 후 재오픈이 없다.
+                  onClick={mention.refresh}
+                  onSelect={mention.refresh}
+                  onScroll={e => setInputScrollLeft(e.currentTarget.scrollLeft)}
+                  onKeyDown={e => {
+                    if (mention.onKeyDown(e)) return;
+                    if (e.key === 'Enter' && !e.shiftKey) {
+                      e.preventDefault();
+                      send();
+                    }
+                  }}
+                  placeholder={`${revisionLabel} 댓글 남기기... (Ctrl+V)`}
+                  className="relative w-full px-3 py-1.5 !bg-transparent border border-bg-border/60 rounded text-[12px] text-text-primary placeholder:text-text-secondary/50 focus:outline-none focus:border-accent/60"
+                />
+              </div>
               <button
                 type="button"
                 onClick={send}
@@ -566,12 +587,14 @@ function CommentBubble({
   users,
   onImageClick,
   onMentionClick,
+  onCutClick,
 }: {
   comment: SceneComment;
   isMe: boolean;
   users: { name: string }[];
   onImageClick: (url: string, comment: SceneComment) => void;
   onMentionClick: (userName: string) => void;
+  onCutClick?: (cutNumber: number) => void;
 }) {
   return (
     <div
@@ -604,6 +627,7 @@ function CommentBubble({
             text={comment.text}
             userNames={users.map(user => user.name)}
             onMentionClick={onMentionClick}
+            onCutClick={onCutClick}
           />
         </div>
       )}

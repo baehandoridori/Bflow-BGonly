@@ -9,6 +9,8 @@ interface Props {
   /** 입력칸 스크롤 동기화 */
   scrollTop?: number;
   scrollLeft?: number;
+  /** 한 줄 input 용(줄바꿈 없음, 가로 스크롤). textarea 는 false(기본). */
+  singleLine?: boolean;
 }
 
 /**
@@ -17,14 +19,14 @@ interface Props {
  * contentEditable 미사용 — 입력은 실제 textarea/input 이 처리하므로 한글 IME·caret 100% 안정.
  * 정렬: 호출 측(EntityAwareInput)이 입력칸과 동일한 className 을 넘겨 font/padding/line-height 를 맞춘다.
  */
-export function EntityHighlightOverlay({ text, userNames, className, scrollTop = 0, scrollLeft = 0 }: Props) {
+export function EntityHighlightOverlay({ text, userNames, className, scrollTop = 0, scrollLeft = 0, singleLine = false }: Props) {
   const tokens = tokenizeEntities(text, userNames);
   return (
     <div
       aria-hidden
       // 테두리·배경·글자색은 입력칸이 단독으로 그린다. overlay 는 토큰 배경 span 만 보이게 모두 중화
       // (border-width/padding 은 className 으로 유지해 정렬만 맞춘다 — 포커스 시 테두리 이중색 방지).
-      className={`pointer-events-none absolute inset-0 overflow-hidden whitespace-pre-wrap break-words !bg-transparent !border-transparent !text-transparent ${className ?? ''}`}
+      className={`pointer-events-none absolute inset-0 overflow-hidden !bg-transparent !border-transparent !text-transparent ${singleLine ? 'whitespace-pre' : 'whitespace-pre-wrap break-words'} ${className ?? ''}`}
       style={{ transform: `translate(${-scrollLeft}px, ${-scrollTop}px)` }}
     >
       {tokens.map((t, i) => {

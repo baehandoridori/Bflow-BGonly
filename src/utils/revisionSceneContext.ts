@@ -18,3 +18,19 @@ export function parseRevisionSceneContext(
   if (!Number.isInteger(episodeNumber) || episodeNumber <= 0) return null;
   return { episodeNumber, partId };
 }
+
+/**
+ * 댓글 sceneKey(commentService 형 'sheetName:sceneNo', 예 'EP01_A_BG:3')에서 컷 점프용 컨텍스트를 뽑는다(4a-2).
+ * sheetName 'EP01_A_BG' → episodeNumber 1, partId 'A'. 형식이 안 맞으면 null → onCutClick 생략.
+ */
+export function parseCommentSceneContext(
+  sceneKey: string | null | undefined,
+): { episodeNumber: number; partId: string } | null {
+  if (!sceneKey) return null;
+  const sheetName = sceneKey.split(':')[0];
+  const m = /^EP(\d+)_([A-Za-z])/.exec(sheetName);
+  if (!m) return null;
+  const episodeNumber = parseInt(m[1], 10);
+  if (!Number.isInteger(episodeNumber) || episodeNumber <= 0) return null;
+  return { episodeNumber, partId: m[2].toUpperCase() };
+}
