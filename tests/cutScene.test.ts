@@ -46,6 +46,13 @@ test('department 미지정이면 모든 파트 순회(리테이크 — 첫 매�
   ] }];
   assert.deepEqual(resolveCutScene(eps, 1, 'A', 9), { no: 9, sceneId: 'a009-bg' });
 });
+test('partId 비교는 대소문자 무관(소문자 acting 파트 지원)', () => {
+  const eps = [{ episodeNumber: 1, parts: [
+    { partId: 'a', department: 'acting', scenes: [{ no: 3, sceneId: 'a003-act' }] },
+  ] }];
+  assert.deepEqual(resolveCutScene(eps, 1, 'A', 3, 'acting'), { no: 3, sceneId: 'a003-act' });
+  assert.deepEqual(resolveCutScene(eps, 1, 'a', 3, 'acting'), { no: 3, sceneId: 'a003-act' });
+});
 test('Scene.no 가 문자열이어도 숫자 비교', () => {
   const eps = [{ episodeNumber: 2, parts: [{ partId: 'A', scenes: [{ no: '7', sceneId: 'a007' }] }] }];
   assert.deepEqual(resolveCutScene(eps, 2, 'A', 7), { no: '7', sceneId: 'a007' });

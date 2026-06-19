@@ -34,5 +34,6 @@ export function parseCommentSceneContext(
   const episodeNumber = parseInt(m[1], 10);
   if (!Number.isInteger(episodeNumber) || episodeNumber <= 0) return null;
   const department = m[3] && m[3].toUpperCase() === 'ACT' ? 'acting' : 'bg';
-  return { episodeNumber, partId: m[2].toUpperCase(), department };
+  // partId 는 원본 casing 보존(앱이 소문자 acting 파트도 지원). 비교는 resolveCutScene 이 대소문자 무관 처리.
+  return { episodeNumber, partId: m[2], department };
 }

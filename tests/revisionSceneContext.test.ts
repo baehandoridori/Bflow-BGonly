@@ -33,6 +33,9 @@ test('parseCommentSceneContext: EP12_C_ACT:7 → {12, C, acting}', () => {
 test('parseCommentSceneContext: legacy(부서 접미어 없음)은 bg', () => {
   assert.deepEqual(parseCommentSceneContext('EP02_A:5'), { episodeNumber: 2, partId: 'A', department: 'bg' });
 });
+test('parseCommentSceneContext: 소문자 partId 원본 보존(강제 대문자화 안 함)', () => {
+  assert.deepEqual(parseCommentSceneContext('EP05_a_ACT:1'), { episodeNumber: 5, partId: 'a', department: 'acting' });
+});
 test('parseCommentSceneContext: 형식 불일치 → null', () => {
   assert.equal(parseCommentSceneContext(''), null);
   assert.equal(parseCommentSceneContext(null), null);

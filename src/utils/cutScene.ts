@@ -20,8 +20,9 @@ export function resolveCutScene(
 ): SceneLike | null {
   const ep = episodes.find((e) => e.episodeNumber === episodeNumber);
   if (!ep) return null;
+  const wantPart = partId.toLowerCase();
   for (const part of ep.parts) {
-    if (part.partId !== partId) continue;
+    if (part.partId.toLowerCase() !== wantPart) continue; // partId 대소문자 무관(소문자 acting 파트 지원)
     if (department && part.department !== department) continue; // 부서 지정 시 그 부서만
     const scene = part.scenes.find((s) => Number(s.no) === cutNumber);
     if (scene) return scene;
