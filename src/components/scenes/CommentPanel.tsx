@@ -25,8 +25,11 @@ import { SmilePlus } from 'lucide-react';
 import { sendMentionWebhook } from '@/services/slackWebhookService';
 import { formatCommentTime } from '@/utils/formatTime';
 import { EntityText } from '@/components/common/EntityText';
+import { EntityHighlightOverlay } from '@/components/common/EntityHighlightOverlay';
 import { MentionDropdown } from '@/components/common/MentionDropdown';
 import { useMentionAutocomplete } from '@/hooks/useMentionAutocomplete';
+import { navigateToCutNumber } from '@/utils/cutNumberNavigation';
+import { parseCommentSceneContext } from '@/utils/revisionSceneContext';
 import {
   COMMENT_READ_STATE_EVENT,
   getCommentReadStateForUser,
@@ -247,6 +250,7 @@ export function CommentPanel({ sceneKey, secondarySceneKey, sceneThreadKey, onCo
   // 입력 상태
   const [input, setInput] = useState('');
   const [taHeight, setTaHeight] = useState(40);
+  const [taScrollTop, setTaScrollTop] = useState(0);
   const [focused, setFocused] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [attachedImages, setAttachedImages] = useState<AttachedImage[]>([]);
@@ -1280,9 +1284,16 @@ export function CommentPanel({ sceneKey, secondarySceneKey, sceneThreadKey, onCo
     setView('team');
   };
 
-  const renderText = (text: string) => (
-    <EntityText text={text} userNames={userNames} onMentionClick={handleMentionClick} />
-  );
+  // 4a-2: 컷 칩 클릭 점프 — 각 댓글의 출처(sourceKey, 통합 뷰의 secondary 포함)에서 EP·파트·부서 도출.
+  //   통합(BG+ACT) 모달에서 secondary 댓글은 primary 와 부서가 달라, primary sceneKey 로 한 번만 계산하면
+  //   ACT 댓글의 컷이 BG 씬으로 점프할 수 있다(코덱스 P2). 댓글별 sourceKey 기준으로 계산한다.
+  const renderText = (text: string, sourceKey?: string) => {
+    const cutCtx = parseCommentSceneContext(sourceKey ?? sceneKey);
+    const onCutClick = cutCtx ? (n: number) => { navigateToCutNumber(n, cutCtx); } : undefined;
+    return (
+      <EntityText text={text} userNames={userNames} onMentionClick={handleMentionClick} onCutClick={onCutClick} />
+    );
+  };
 
   // ─── 렌더링 ────────────────────────────────
 
@@ -1542,7 +1553,7 @@ export function CommentPanel({ sceneKey, secondarySceneKey, sceneThreadKey, onCo
                           isOwn ? 'bg-accent/20 border border-accent/30' : 'bg-bg-border/70'
                         }`}
                       >
-                        {comment.text && <div>{renderText(comment.text)}</div>}
+                        {comment.text && <div>{renderText(comment.text, comment.storageKey ?? comment._sourceKey)}</div>}
                         {hasImages && (
                           <div
                             className={`grid gap-1 ${comment.text ? 'mt-2' : ''} ${
@@ -1713,7 +1724,7 @@ export function CommentPanel({ sceneKey, secondarySceneKey, sceneThreadKey, onCo
                                   replyIsOwn ? 'bg-accent/15 border border-accent/25' : 'bg-bg-border/50'
                                 }`}
                               >
-                                {reply.text && <div>{renderText(reply.text)}</div>}
+                                {reply.text && <div>{renderText(reply.text, reply.storageKey ?? reply._sourceKey)}</div>}
                                 {replyHasImages && (
                                   <div className={`grid gap-1 ${reply.text ? 'mt-1.5' : ''} ${reply.images!.length === 1 ? 'grid-cols-1' : 'grid-cols-2'}`}>
                                     {reply.images!.map((url, i) => (
@@ -1957,30 +1968,39 @@ export function CommentPanel({ sceneKey, secondarySceneKey, sceneThreadKey, onCo
             </div>
           )}
 
-          {/* textarea — 풀 너비, v1.23.3 (#1): flex-1 + min-h-0 으로 카드 내 남은 공간 모두 차지하되 footer 보존 */}
-          <textarea
-            ref={inputRef}
-            value={input}
-            onChange={(e) => { handleInputChange(e.target.value); mention.refresh(); }}
-            // caret 이동은 onSelect/onClick 으로만 감지. onKeyUp 은 쓰지 않는다 —
-            // 멘션 활성 중 Arrow/Escape 는 onKeyDown 에서 preventDefault 되어 caret 이 안 바뀌므로
-            // onSelect 가 안 터지고, keyup refresh 가 없으니 active index 리셋·Escape 후 재오픈이 없다.
-            onClick={mention.refresh}
-            onSelect={mention.refresh}
-            onFocus={() => setFocused(true)}
-            onBlur={() => setFocused(false)}
-            placeholder="댓글 입력... (Ctrl+V / 드래그로 이미지)"
-            rows={1}
-            className="comment-input-textarea block w-full px-2 py-1.5 text-xs resize-none outline-none bg-transparent leading-relaxed text-text-primary placeholder:text-text-secondary/40 overflow-y-auto flex-1 min-h-0"
-            style={{ height: taHeight, maxHeight: taMaxPx, boxSizing: 'border-box' }}
-            onKeyDown={(e) => {
-              if (mention.onKeyDown(e)) return;
-              if (e.key === 'Enter' && !e.shiftKey) {
-                e.preventDefault();
-                handleSubmit();
-              }
-            }}
-          />
+          {/* textarea — 풀 너비. wrapper 는 flex-col(입력카드의 flex item), textarea 가 그 안의 flex item 으로
+              남은 공간을 차지하되 footer 보존(기존 동작 유지) + 4a-2 입력 하이라이트 미러를 뒤에 겹침. */}
+          <div className="relative flex-1 min-h-0 flex flex-col">
+            {/* 입력 중 @이름·경로·컷 파란 강조(미러). textarea 는 이미 bg-transparent 라 그대로 위에 보임. */}
+            <EntityHighlightOverlay
+              text={input}
+              userNames={userNames}
+              scrollTop={taScrollTop}
+              className="block w-full px-2 py-1.5 text-xs leading-relaxed"
+            />
+            <textarea
+              ref={inputRef}
+              value={input}
+              onChange={(e) => { handleInputChange(e.target.value); mention.refresh(); }}
+              // caret 이동은 onSelect/onClick 으로만 감지(onKeyUp 미사용 — Arrow/Escape preventDefault 로 index 리셋 방지).
+              onClick={mention.refresh}
+              onSelect={mention.refresh}
+              onScroll={(e) => setTaScrollTop(e.currentTarget.scrollTop)}
+              onFocus={() => setFocused(true)}
+              onBlur={() => setFocused(false)}
+              placeholder="댓글 입력... (Ctrl+V / 드래그로 이미지)"
+              rows={1}
+              className="comment-input-textarea relative block w-full flex-1 min-h-0 px-2 py-1.5 text-xs resize-none outline-none bg-transparent leading-relaxed text-text-primary placeholder:text-text-secondary/40 overflow-y-auto whitespace-pre-wrap break-words"
+              style={{ height: taHeight, maxHeight: taMaxPx, boxSizing: 'border-box' }}
+              onKeyDown={(e) => {
+                if (mention.onKeyDown(e)) return;
+                if (e.key === 'Enter' && !e.shiftKey) {
+                  e.preventDefault();
+                  handleSubmit();
+                }
+              }}
+            />
+          </div>
           <input
             ref={fileInputRef}
             type="file"

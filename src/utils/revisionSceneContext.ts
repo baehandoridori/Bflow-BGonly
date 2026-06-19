@@ -18,3 +18,22 @@ export function parseRevisionSceneContext(
   if (!Number.isInteger(episodeNumber) || episodeNumber <= 0) return null;
   return { episodeNumber, partId };
 }
+
+/**
+ * 댓글 sceneKey(commentService 형 'sheetName:sceneNo', 예 'EP01_A_BG:3')에서 컷 점프용 컨텍스트를 뽑는다(4a-2).
+ * sheetName 'EP01_A_BG' → {episodeNumber:1, partId:'A', department:'bg'}. 부서 접미어(_BG/_ACT)를 보존해
+ * BG/ACT 가 같은 컷 번호를 가질 때 정확한 부서 씬으로 점프하게 한다(접미어 없는 legacy 는 bg). 형식 불일치 시 null.
+ */
+export function parseCommentSceneContext(
+  sceneKey: string | null | undefined,
+): { episodeNumber: number; partId: string; department: 'bg' | 'acting' } | null {
+  if (!sceneKey) return null;
+  const sheetName = sceneKey.split(':')[0];
+  const m = /^EP(\d+)_([A-Za-z])(?:_(BG|ACT))?/i.exec(sheetName);
+  if (!m) return null;
+  const episodeNumber = parseInt(m[1], 10);
+  if (!Number.isInteger(episodeNumber) || episodeNumber <= 0) return null;
+  const department = m[3] && m[3].toUpperCase() === 'ACT' ? 'acting' : 'bg';
+  // partId 는 원본 casing 보존(앱이 소문자 acting 파트도 지원). 비교는 resolveCutScene 이 대소문자 무관 처리.
+  return { episodeNumber, partId: m[2], department };
+}
