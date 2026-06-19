@@ -31,6 +31,9 @@ export function navigateToCutNumber(cutNumber: number, ctx: CutContext): boolean
     department: ctx.department ?? undefined,
     highlightSceneId: scene.sceneId,
     modalRequest: {
+      // sceneUuid(Supabase) 우선 — 통합('all') 뷰는 raw sceneId 가 아니라 sceneUuid/대표 sceneId 로 매칭하므로
+      // 정규화 쌍(BG 'ac001'→merged 'a001')에서도 안정적으로 타겟 모달을 연다. 없으면 sceneName 으로 폴백.
+      sceneUuid: scene.id,
       sceneName: scene.sceneId,
       episodeNumber: ctx.episodeNumber,
       partId: ctx.partId,

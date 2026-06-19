@@ -3,7 +3,7 @@
  * 번호만으론 EP/파트 특정 불가하므로 호출 측이 episodeNumber+partId 컨텍스트를 준다.
  * 순수 함수 — node:test 검증. (Scene.no 가 문자열일 수 있어 Number() 비교)
  */
-interface SceneLike { no: number | string; sceneId: string }
+interface SceneLike { no: number | string; sceneId: string; id?: string }
 interface PartLike { partId: string; department?: string; scenes: readonly SceneLike[] }
 interface EpisodeLike { episodeNumber: number; parts: readonly PartLike[] }
 
