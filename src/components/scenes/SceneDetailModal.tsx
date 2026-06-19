@@ -22,6 +22,10 @@ import * as storageService from '@/services/storageService';
 import { AssigneeSelect, getUserColor } from '@/components/common/AssigneeSelect';
 import { AssigneeMultiSelect } from '@/components/common/AssigneeMultiSelect';
 import { PathLinkifiedText } from '@/components/common/PathLinkifiedText';
+import { EntityAwareInput } from '@/components/common/EntityAwareInput';
+import { EntityText } from '@/components/common/EntityText';
+import { navigateToCutNumber } from '@/utils/cutNumberNavigation';
+import { parseCommentSceneContext } from '@/utils/revisionSceneContext';
 import { resizeBlob, pasteImageFromClipboard } from '@/utils/imageUtils';
 import { ImageModal } from './ImageModal';
 import { ScenePhaseToggle } from './ScenePhaseToggle';
@@ -34,6 +38,7 @@ import { useSceneActivities } from '@/hooks/useSceneActivities';
 import { useRevisionStore } from '@/stores/useRevisionStore';
 import { useAppStore } from '@/stores/useAppStore';
 import { useDataStore } from '@/stores/useDataStore';
+import { useAuthStore } from '@/stores/useAuthStore';
 import { buildSceneKey } from '@/services/revisionService';
 import { buildSceneThreadKeyFromRevisionKey } from '@/utils/commentThreadKey';
 import { formatStamp, formatTime } from '@/utils/formatTime';
@@ -92,12 +97,19 @@ interface PropertyRowProps {
   placeholder?: string;
   onSave: (value: string) => void;
   memoAuthorMeta?: MemoAuthorMeta | null;
+  /** 메모 행만 켠다 — @멘션 자동완성·경로/컷 칩 입력/표시(4b). */
+  entityAware?: boolean;
+  /** 컷 점프 컨텍스트용 sheetName(entityAware 메모 전용). */
+  sheetName?: string;
 }
 
-function PropertyRow({ label, value, placeholder, onSave, memoAuthorMeta }: PropertyRowProps) {
+function PropertyRow({ label, value, placeholder, onSave, memoAuthorMeta, entityAware, sheetName }: PropertyRowProps) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(value);
   const inputRef = useRef<HTMLInputElement>(null);
+  const { users } = useAuthStore();
+  const userNames = useMemo(() => users.map((u) => u.name), [users]);
+  const cutCtx = useMemo(() => (entityAware && sheetName ? parseCommentSceneContext(sheetName) : null), [entityAware, sheetName]);
 
   useEffect(() => {
     setDraft(value);
@@ -128,17 +140,31 @@ function PropertyRow({ label, value, placeholder, onSave, memoAuthorMeta }: Prop
       </span>
       <div className="flex-1 min-w-0">
         {editing ? (
-          <input
-            ref={inputRef}
-            value={draft}
-            onChange={(e) => setDraft(e.target.value)}
-            onBlur={commit}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter') commit();
-              if (e.key === 'Escape') { setDraft(value); setEditing(false); }
-            }}
-            className="w-full bg-bg-primary border border-accent/50 rounded-md px-2.5 py-1 text-sm text-text-primary outline-none focus:border-accent transition-shadow focus:shadow-[0_0_8px_rgba(108,92,231,0.4)]"
-          />
+          entityAware ? (
+            <EntityAwareInput
+              value={draft}
+              onChange={setDraft}
+              users={users}
+              onBlur={commit}
+              submitOn="enter"
+              onSubmit={commit}
+              onCancel={() => { setDraft(value); setEditing(false); }}
+              autoFocus
+              className="w-full bg-bg-primary border border-accent/50 rounded-md px-2.5 py-1 text-sm text-text-primary outline-none focus:border-accent transition-shadow focus:shadow-[0_0_8px_rgba(108,92,231,0.4)]"
+            />
+          ) : (
+            <input
+              ref={inputRef}
+              value={draft}
+              onChange={(e) => setDraft(e.target.value)}
+              onBlur={commit}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') commit();
+                if (e.key === 'Escape') { setDraft(value); setEditing(false); }
+              }}
+              className="w-full bg-bg-primary border border-accent/50 rounded-md px-2.5 py-1 text-sm text-text-primary outline-none focus:border-accent transition-shadow focus:shadow-[0_0_8px_rgba(108,92,231,0.4)]"
+            />
+          )
         ) : (
           <div
             onClick={() => setEditing(true)}
@@ -146,9 +172,17 @@ function PropertyRow({ label, value, placeholder, onSave, memoAuthorMeta }: Prop
           >
             <span className="text-sm text-text-primary">
               {value ? (
-                <PathLinkifiedText text={value} />
+                entityAware ? (
+                  <EntityText
+                    text={value}
+                    userNames={userNames}
+                    onCutClick={cutCtx ? (n) => navigateToCutNumber(n, { episodeNumber: cutCtx.episodeNumber, partId: cutCtx.partId }) : undefined}
+                  />
+                ) : (
+                  <PathLinkifiedText text={value} />
+                )
               ) : (
-                <span className="text-text-secondary/50 italic">
+                <span className="text-text-secondary/50">
                   {placeholder ?? '비어 있음'}
                 </span>
               )}
@@ -1037,6 +1071,8 @@ export function SceneDetailModal({
                       placeholder="메모 입력"
                       onSave={(v) => onFieldUpdate(sceneIndex, 'memo', v)}
                       memoAuthorMeta={memoAuthorMeta}
+                      entityAware
+                      sheetName={sheetName}
                     />
                   </div>
                 </section>
