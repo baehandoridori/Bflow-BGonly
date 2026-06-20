@@ -33,7 +33,9 @@ import { sendMentionWebhook } from '@/services/slackWebhookService';
 import { EntityText } from '@/components/common/EntityText';
 import { EntityHighlightOverlay } from '@/components/common/EntityHighlightOverlay';
 import { MentionDropdown } from '@/components/common/MentionDropdown';
+import { HashtagDropdown } from '@/components/common/HashtagDropdown';
 import { useMentionAutocomplete } from '@/hooks/useMentionAutocomplete';
+import { useHashtagAutocomplete } from '@/hooks/useHashtagAutocomplete';
 import { navigateToHashTarget } from '@/utils/hashNavigation';
 import {
   AttachmentImageLightbox,
@@ -308,6 +310,11 @@ export function RevisionCommentThread({ revisionId, sceneKey }: Props) {
     users,
     inputRef,
   });
+  // 4c: #태그 자동완성 — @멘션 옆에 나란히 공존(EntityAwareInput 패턴). users 불필요(episodes 자체 구독).
+  const hash = useHashtagAutocomplete({
+    onChange: (next) => { setDraft(next); draftRef.current = next; },
+    inputRef,
+  });
   const [inputScrollLeft, setInputScrollLeft] = useState(0);
 
   const hasUploadingImage = attachedImages.some(item => item.uploading);
@@ -342,6 +349,7 @@ export function RevisionCommentThread({ revisionId, sceneKey }: Props) {
     setDraft('');
     draftRef.current = '';
     mention.close();
+    hash.close();
     setAttachedImages([]);
     attachedImagesRef.current = [];
 
@@ -490,14 +498,21 @@ export function RevisionCommentThread({ revisionId, sceneKey }: Props) {
               </div>
             )}
             <div className="relative flex gap-2">
-              {mention.active && (
+              {mention.active ? (
                 <MentionDropdown
                   items={mention.items}
                   index={mention.index}
                   onPick={mention.select}
                   positionClassName="left-10 right-24"
                 />
-              )}
+              ) : hash.active ? (
+                <HashtagDropdown
+                  items={hash.items}
+                  index={hash.index}
+                  onPick={hash.select}
+                  positionClassName="left-10 right-24"
+                />
+              ) : null}
               <input
                 ref={fileInputRef}
                 type="file"
@@ -527,14 +542,15 @@ export function RevisionCommentThread({ revisionId, sceneKey }: Props) {
                   ref={inputRef}
                   type="text"
                   value={draft}
-                  onChange={e => { setDraft(e.target.value); draftRef.current = e.target.value; mention.refresh(); }}
+                  onChange={e => { setDraft(e.target.value); draftRef.current = e.target.value; mention.refresh(); hash.refresh(); }}
                   // caret 이동은 onSelect/onClick 으로만 감지(onKeyUp 미사용) — 멘션 활성 중 Arrow/Escape 는
                   // preventDefault 되어 caret 이 안 바뀌므로 refresh 가 안 돌아 index 리셋·Escape 후 재오픈이 없다.
-                  onClick={mention.refresh}
-                  onSelect={mention.refresh}
+                  onClick={() => { mention.refresh(); hash.refresh(); }}
+                  onSelect={() => { mention.refresh(); hash.refresh(); }}
                   onScroll={e => setInputScrollLeft(e.currentTarget.scrollLeft)}
                   onKeyDown={e => {
                     if (mention.onKeyDown(e)) return;
+                    if (hash.onKeyDown(e)) return;
                     if (e.key === 'Enter' && !e.shiftKey) {
                       e.preventDefault();
                       send();

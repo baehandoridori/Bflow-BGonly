@@ -27,7 +27,9 @@ import { formatCommentTime } from '@/utils/formatTime';
 import { EntityText } from '@/components/common/EntityText';
 import { EntityHighlightOverlay } from '@/components/common/EntityHighlightOverlay';
 import { MentionDropdown } from '@/components/common/MentionDropdown';
+import { HashtagDropdown } from '@/components/common/HashtagDropdown';
 import { useMentionAutocomplete } from '@/hooks/useMentionAutocomplete';
+import { useHashtagAutocomplete } from '@/hooks/useHashtagAutocomplete';
 import { navigateToHashTarget } from '@/utils/hashNavigation';
 import {
   COMMENT_READ_STATE_EVENT,
@@ -727,10 +729,15 @@ export function CommentPanel({ sceneKey, secondarySceneKey, sceneThreadKey, onCo
     users,
     inputRef,
   });
-  // 답글 진입(replyTarget 설정) 시 멘션 드롭다운 닫기 — 답글 프리셋 setInput+focus 가 stale 드롭다운을 남기지 않게.
+  // 4c: #태그 자동완성 — @멘션 옆에 나란히 공존(EntityAwareInput 패턴). users 불필요(episodes 자체 구독).
+  const hash = useHashtagAutocomplete({
+    onChange: (next) => { setInput(next); inputValueRef.current = next; },
+    inputRef,
+  });
+  // 답글 진입(replyTarget 설정) 시 멘션·태그 드롭다운 닫기 — 답글 프리셋 setInput+focus 가 stale 드롭다운을 남기지 않게.
   useEffect(() => {
-    if (replyTarget) mention.close();
-  }, [replyTarget, mention.close]);
+    if (replyTarget) { mention.close(); hash.close(); }
+  }, [replyTarget, mention.close, hash.close]);
   // Codex P2 8차(2026-04-29): unmount 후 upload 완료 race 처리 — React 가 unmounted component 의 setState 를
   // drop 하므로 setAttachedImages updater 안의 side-effect (deleteImage) 도 실행 안 됨 → orphan.
   // mountedRef 로 unmount 여부를 직접 확인해 그 케이스에서 storage 즉시 정리.
@@ -910,6 +917,7 @@ export function CommentPanel({ sceneKey, secondarySceneKey, sceneThreadKey, onCo
         inputValueRef.current = '';
         setQuickRevisionPickerOpen(false);
         mention.close();
+        hash.close();
         setReplyTarget(null);
         prevAttached.forEach((item) => {
           try { URL.revokeObjectURL(item.previewUrl); } catch { /* ignore */ }
@@ -1023,6 +1031,7 @@ export function CommentPanel({ sceneKey, secondarySceneKey, sceneThreadKey, onCo
     setInput('');
     inputValueRef.current = '';
     mention.close();
+    hash.close();
     setAttachedImages([]);
     attachedImagesRef.current = [];
     // v1.24.0: 답글 전송 후 답글 모드 해제 (성공/실패 무관 — 실패 시 아래에서 복원).
@@ -1805,15 +1814,22 @@ export function CommentPanel({ sceneKey, secondarySceneKey, sceneThreadKey, onCo
           v1.23.2 (#3): shrink-0 명시 — 부모 column flex 안에서 압축 안 되도록 하되,
           반대로 자식 카드의 maxHeight cap (inputCardMaxPx) 으로 wrapper 가 넘쳐 grow 하는 것도 방지. */}
       <div className="px-3 pb-3 pt-3 relative shrink-0">
-        {/* @멘션 자동완성 */}
-        {mention.active && (
+        {/* @멘션·#태그 자동완성 (멘션 우선) */}
+        {mention.active ? (
           <MentionDropdown
             items={mention.items}
             index={mention.index}
             onPick={mention.select}
             positionClassName="left-3 right-3"
           />
-        )}
+        ) : hash.active ? (
+          <HashtagDropdown
+            items={hash.items}
+            index={hash.index}
+            onPick={hash.select}
+            positionClassName="left-3 right-3"
+          />
+        ) : null}
 
         <AnimatePresence initial={false}>
           {quickRevisionActive && (
@@ -1974,10 +1990,10 @@ export function CommentPanel({ sceneKey, secondarySceneKey, sceneThreadKey, onCo
             <textarea
               ref={inputRef}
               value={input}
-              onChange={(e) => { handleInputChange(e.target.value); mention.refresh(); }}
+              onChange={(e) => { handleInputChange(e.target.value); mention.refresh(); hash.refresh(); }}
               // caret 이동은 onSelect/onClick 으로만 감지(onKeyUp 미사용 — Arrow/Escape preventDefault 로 index 리셋 방지).
-              onClick={mention.refresh}
-              onSelect={mention.refresh}
+              onClick={() => { mention.refresh(); hash.refresh(); }}
+              onSelect={() => { mention.refresh(); hash.refresh(); }}
               onScroll={(e) => setTaScrollTop(e.currentTarget.scrollTop)}
               onFocus={() => setFocused(true)}
               onBlur={() => setFocused(false)}
@@ -1987,6 +2003,7 @@ export function CommentPanel({ sceneKey, secondarySceneKey, sceneThreadKey, onCo
               style={{ height: taHeight, maxHeight: taMaxPx, boxSizing: 'border-box' }}
               onKeyDown={(e) => {
                 if (mention.onKeyDown(e)) return;
+                if (hash.onKeyDown(e)) return;
                 if (e.key === 'Enter' && !e.shiftKey) {
                   e.preventDefault();
                   handleSubmit();
