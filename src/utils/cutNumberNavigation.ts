@@ -28,7 +28,9 @@ export function navigateToCutNumber(cutNumber: number, ctx: CutContext): boolean
   navigateToSceneView({
     episodeNumber: ctx.episodeNumber,
     partId: ctx.partId,
-    department: ctx.department ?? undefined,
+    // 통합(전체) 모달로 연다 — sheetName 에 박힌 부서로 단일 부서 뷰를 강제하지 않는다(한솔 요구).
+    // 씬 자체는 위 resolveCutScene 이 ctx.department 로 정확히 찾으므로, 모달만 'all' 로 띄운다.
+    department: 'all',
     highlightSceneId: scene.sceneId,
     modalRequest: {
       // sceneUuid(Supabase) 우선 — 통합('all') 뷰는 raw sceneId 가 아니라 sceneUuid/대표 sceneId 로 매칭하므로
@@ -38,7 +40,7 @@ export function navigateToCutNumber(cutNumber: number, ctx: CutContext): boolean
       episodeNumber: ctx.episodeNumber,
       partId: ctx.partId,
       initialTab: 'detail',
-      forceDeptFilter: ctx.department ?? undefined,
+      forceDeptFilter: 'all',
     },
   });
   return true;
