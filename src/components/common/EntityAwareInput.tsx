@@ -1,7 +1,9 @@
 import { useRef, useState } from 'react';
 import type { ChangeEvent, ClipboardEvent, FocusEvent, KeyboardEvent, RefObject, UIEvent } from 'react';
 import { useMentionAutocomplete } from '@/hooks/useMentionAutocomplete';
+import { useHashtagAutocomplete } from '@/hooks/useHashtagAutocomplete';
 import { MentionDropdown } from './MentionDropdown';
+import { HashtagDropdown } from './HashtagDropdown';
 import { EntityHighlightOverlay } from './EntityHighlightOverlay';
 
 interface MentionUser { id: string; name: string }
@@ -23,6 +25,14 @@ interface Props {
   onPaste?: (e: ClipboardEvent) => void;
   /** 포커스 떠날 때(인라인 메모 blur 저장). 멘션 드롭다운 클릭은 preventDefault라 여기로 안 옴(MentionDropdown). */
   onBlur?: (e: FocusEvent<HTMLInputElement | HTMLTextAreaElement>) => void;
+  /**
+   * #태그 자동완성 사용 여부(opt-in, 기본 false). 입력값이 표시될 때 EntityText + onHashClick(점프)으로
+   * #칩이 렌더되는 입력칸(씬 메모/일정 메모/작업 메모 등)에서만 true 로 켠다.
+   * 표시 측이 평문(`<p>{...}</p>`)이거나 #이 의미없는 입력은 미지정(끔) — 그래야 raw 직렬화
+   * 토큰('[#a001](...)')이 평문으로 노출되지 않는다.
+   * 훅은 항상 호출하고(React 훅 순서 유지) 키핸들·드롭다운에서만 게이트한다.
+   */
+  enableHashtag?: boolean;
   'aria-label'?: string;
 }
 
@@ -35,7 +45,7 @@ interface Props {
 export function EntityAwareInput({
   value, onChange, users, multiline, placeholder, className, rows, autoFocus,
   dropdownPositionClassName, submitOn = 'none', onSubmit, onCancel, onPaste, onBlur,
-  'aria-label': ariaLabel,
+  enableHashtag, 'aria-label': ariaLabel,
 }: Props) {
   const inputRef = useRef<HTMLInputElement | HTMLTextAreaElement>(null);
   const [scroll, setScroll] = useState({ top: 0, left: 0 });
@@ -45,9 +55,20 @@ export function EntityAwareInput({
     users,
     inputRef: inputRef as RefObject<HTMLTextAreaElement | null>,
   });
+  const hash = useHashtagAutocomplete({
+    onChange,
+    inputRef: inputRef as RefObject<HTMLTextAreaElement | null>,
+  });
+  // #태그는 opt-in(기본 끔) — enableHashtag === true 로 명시한 입력칸(표시 측 EntityText+onHashClick)에서만 켠다.
+  // 끈 입력칸에선 키핸들·드롭다운만 게이트, 훅 호출 자체는 항상(훅 순서 유지).
+  const hashEnabled = enableHashtag === true;
+  // @멘션·#태그 둘 다 DOM 을 직접 읽어 갱신. active 는 한쪽만(키핸들에서 mention 우선).
+  // refresh 는 무해(상태만 갱신, hashEnabled 시 드롭다운 미표시)하므로 게이트 불필요.
+  const refreshAll = () => { mention.refresh(); hash.refresh(); };
 
   const handleKeyDown = (e: KeyboardEvent) => {
     if (mention.onKeyDown(e)) return;
+    if (hashEnabled && hash.onKeyDown(e)) return;
     if (e.key === 'Escape' && onCancel) { e.preventDefault(); onCancel(); return; }
     if (onSubmit && e.key === 'Enter') {
       if (submitOn === 'enter' && !e.shiftKey) { e.preventDefault(); onSubmit(); }
@@ -57,7 +78,7 @@ export function EntityAwareInput({
 
   const handleChange = (e: ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
     onChange(e.target.value);
-    mention.refresh();
+    refreshAll();
   };
   const handleScroll = (e: UIEvent<HTMLInputElement | HTMLTextAreaElement>) => {
     setScroll({ top: e.currentTarget.scrollTop, left: e.currentTarget.scrollLeft });
@@ -66,13 +87,13 @@ export function EntityAwareInput({
   const shared = {
     value,
     onChange: handleChange,
-    onClick: mention.refresh,
-    onSelect: mention.refresh,
+    onClick: refreshAll,
+    onSelect: refreshAll,
     onKeyDown: handleKeyDown,
     onScroll: handleScroll,
     onPaste,
     onBlur,
-    // 멘션·경로·컷 입력칸은 spell-check 불필요(고유명사·G:\경로·한글 다수 → Electron 기본 영어 사전이 오탐). 전역 off.
+    // 멘션·경로·#태그 입력칸은 spell-check 불필요(고유명사·G:\경로·한글 다수 → Electron 기본 영어 사전이 오탐). 전역 off.
     spellCheck: false,
     placeholder,
     autoFocus,
@@ -91,14 +112,21 @@ export function EntityAwareInput({
         scrollLeft={scroll.left}
         singleLine={!multiline}
       />
-      {mention.active && (
+      {mention.active ? (
         <MentionDropdown
           items={mention.items}
           index={mention.index}
           onPick={mention.select}
           positionClassName={dropdownPositionClassName}
         />
-      )}
+      ) : hashEnabled && hash.active ? (
+        <HashtagDropdown
+          items={hash.items}
+          index={hash.index}
+          onPick={hash.select}
+          positionClassName={dropdownPositionClassName}
+        />
+      ) : null}
       {multiline
         ? <textarea ref={inputRef as RefObject<HTMLTextAreaElement>} rows={rows} {...shared} />
         : <input type="text" ref={inputRef as RefObject<HTMLInputElement>} {...shared} />}

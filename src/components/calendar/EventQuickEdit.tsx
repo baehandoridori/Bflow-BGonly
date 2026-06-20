@@ -263,6 +263,8 @@ export function EventQuickEdit({
                     value={memo ?? ''}
                     onChange={setMemo}
                     users={users}
+                    /* #태그 끔: 캘린더 메모는 ScheduleView·CalendarView 등에서 평문으로 표시돼
+                       직렬화 토큰('[#a001](...)')이 노출된다(EntityAwareInput enableHashtag 주석 참조). */
                     rows={3}
                     placeholder="메모"
                     dropdownPositionClassName="left-2 right-2"

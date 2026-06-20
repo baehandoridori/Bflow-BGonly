@@ -65,6 +65,15 @@ interface AppState {
   } | null;
   setPendingSceneModalRequest: (req: AppState['pendingSceneModalRequest']) => void;
 
+  /**
+   * #화·#파트 점프 시 열려 있는 씬 상세 모달을 강제로 닫는 신호(4c, 코덱스 4차 P2).
+   * scene 점프는 pendingSceneModalRequest 로 모달을 교체하지만, part/episode 점프는
+   * 모달을 열지 않으므로 기존에 떠 있던 상세 모달이 목적지를 가린다.
+   * 카운터를 증가시켜 ScenesView 가 useEffect 로 감지 → detail 모달 상태를 null 로.
+   */
+  closeSceneModalSignal: number;
+  requestCloseSceneModal: () => void;
+
   // 씬 하이라이트 (스포트라이트/인원별 뷰에서 씬 이동 시 글로우 리테이크)
   highlightSceneId: string | null;
   setHighlightSceneId: (id: string | null) => void;
@@ -220,6 +229,9 @@ export const useAppStore = create<AppState>((set) => ({
   setView: (view) => set((s) => ({ currentView: view, previousView: s.currentView })),
   pendingSceneModalRequest: null,
   setPendingSceneModalRequest: (req) => set({ pendingSceneModalRequest: req }),
+
+  closeSceneModalSignal: 0,
+  requestCloseSceneModal: () => set((s) => ({ closeSceneModalSignal: s.closeSceneModalSignal + 1 })),
 
   selectedDepartment: 'all',
   setSelectedDepartment: (dept) => set({ selectedDepartment: dept }),

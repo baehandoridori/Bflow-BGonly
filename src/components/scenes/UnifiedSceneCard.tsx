@@ -11,8 +11,7 @@ import { HighlightText } from '@/components/common/HighlightText';
 import { AssigneeChipList } from '@/components/common/AssigneeMultiSelect';
 import { CompactIconLabel } from '@/components/common/CompactIconLabel';
 import { EntityText } from '@/components/common/EntityText';
-import { navigateToCutNumber } from '@/utils/cutNumberNavigation';
-import { parseCommentSceneContext } from '@/utils/revisionSceneContext';
+import { navigateToHashTarget } from '@/utils/hashNavigation';
 import { Confetti } from '@/components/ui/Confetti';
 import { useBulkOperationsStore, type PendingOp } from '@/stores/useBulkOperationsStore';
 import { useDataStore } from '@/stores/useDataStore';
@@ -108,8 +107,6 @@ export function UnifiedSceneCard({
   const completionTintEnabled = useAppStore((s) => s.completionTintEnabled);
   const users = useAuthStore((s) => s.users);
   const userNames = useMemo(() => users.map((u) => u.name), [users]);
-  const bgCutCtx = useMemo(() => (bgSheetName ? parseCommentSceneContext(bgSheetName) : null), [bgSheetName]);
-  const actCutCtx = useMemo(() => (actSheetName ? parseCommentSceneContext(actSheetName) : null), [actSheetName]);
 
   const cardRootRef = useRef<HTMLDivElement>(null);
   const prevHighlightedRef = useRef(false);
@@ -361,7 +358,7 @@ export function UnifiedSceneCard({
                   <EntityText
                     text={bgScene.memo}
                     userNames={userNames}
-                    onCutClick={bgCutCtx ? (n) => navigateToCutNumber(n, bgCutCtx) : undefined}
+                    onHashClick={navigateToHashTarget}
                     renderTextSegment={(seg, idx) => <HighlightText key={idx} text={seg} query={searchQuery} />}
                   />
                 </p>
@@ -374,7 +371,7 @@ export function UnifiedSceneCard({
                   <EntityText
                     text={actScene.memo}
                     userNames={userNames}
-                    onCutClick={actCutCtx ? (n) => navigateToCutNumber(n, actCutCtx) : undefined}
+                    onHashClick={navigateToHashTarget}
                     renderTextSegment={(seg, idx) => <HighlightText key={idx} text={seg} query={searchQuery} />}
                   />
                 </p>

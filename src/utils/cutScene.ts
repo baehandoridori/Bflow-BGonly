@@ -1,31 +1,44 @@
 /**
- * 같은 에피소드·파트 안에서 컷(=Scene.no) 번호로 씬을 찾는다(스펙 §10.2 4a — 씬·컷 점프).
+ * sceneId 로 같은 에피소드·파트 안의 씬을 찾는다(4c #씬 태그 점프).
  * 번호만으론 EP/파트 특정 불가하므로 호출 측이 episodeNumber+partId 컨텍스트를 준다.
- * 순수 함수 — node:test 검증. (Scene.no 가 문자열일 수 있어 Number() 비교)
+ * 순수 함수 — node:test 검증.
  */
 interface SceneLike { no: number | string; sceneId: string; id?: string }
 interface PartLike { partId: string; department?: string; scenes: readonly SceneLike[] }
 interface EpisodeLike { episodeNumber: number; parts: readonly PartLike[] }
 
 /**
- * department 지정 시(댓글 — 부서 정보 보존) 그 부서 Part 에서만 찾고,
- * 미지정 시(리테이크 — sceneKey 에 부서 없음) 같은 partId 의 모든 부서 Part 를 순회한다(첫 매칭).
+ * sceneId 로 같은 EP·파트의 씬을 찾는다(4c #씬 태그 점프). 화 간 sceneId 중복은 episodeNumber+partId 로 한정.
+ * partId 대소문자 무관. 모든 (부서)파트 순회 — sceneId 는 보통 부서 무관 동일.
+ * sceneUuid 가 주어지면 같은 파트 내 sceneId 중복 row 를 정확히 구분하기 위해 Supabase UUID(s.id) 매칭을 우선한다.
+ * uuid 미제공/미발견 시 기존 sceneId 매칭으로 폴백(구형 태그 호환).
  */
-export function resolveCutScene(
+export function resolveSceneById(
   episodes: readonly EpisodeLike[],
   episodeNumber: number,
   partId: string,
-  cutNumber: number,
-  department?: 'bg' | 'acting',
-): SceneLike | null {
+  sceneId: string,
+  sceneUuid?: string,
+): (SceneLike & { department?: string }) | null {
   const ep = episodes.find((e) => e.episodeNumber === episodeNumber);
   if (!ep) return null;
   const wantPart = partId.toLowerCase();
-  for (const part of ep.parts) {
-    if (part.partId.toLowerCase() !== wantPart) continue; // partId 대소문자 무관(소문자 acting 파트 지원)
-    if (department && part.department !== department) continue; // 부서 지정 시 그 부서만
-    const scene = part.scenes.find((s) => Number(s.no) === cutNumber);
-    if (scene) return scene;
+  const parts = ep.parts.filter((part) => part.partId.toLowerCase() === wantPart);
+  // 찾은 파트의 부서도 함께 돌려준다(uuid 없는 Sheets/test 점프 폴백용, hashNavigation).
+  const withDept = (part: PartLike, scene: SceneLike): SceneLike & { department?: string } =>
+    part.department ? { ...scene, department: part.department } : scene;
+  // 1) uuid 우선: 모든 (부서)파트를 먼저 훑는다 — 같은 partId 의 BG/ACT 가 같은 sceneId 를 가져도
+  //    파트별 sceneId 폴백이 먼저 걸려 엉뚱한 부서 row 가 열리는 일을 막는다(코덱스 7차).
+  if (sceneUuid) {
+    for (const part of parts) {
+      const scene = part.scenes.find((s) => s.id === sceneUuid);
+      if (scene) return withDept(part, scene);
+    }
+  }
+  // 2) sceneId 폴백(구형 태그·uuid 미발견): 첫 매치.
+  for (const part of parts) {
+    const scene = part.scenes.find((s) => s.sceneId === sceneId);
+    if (scene) return withDept(part, scene);
   }
   return null;
 }

@@ -26,6 +26,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { ArrowUpDown, LayoutGrid, Grid3x3, Layers, List, ChevronUp, ChevronDown, ClipboardPaste, ImagePlus, ArrowLeft, CheckSquare, Trash2, X, MessageCircle, Pencil, MoreVertical, StickyNote, Archive, Film, RotateCcw, Clock, PlayCircle, CheckCircle2, Circle, MessageSquareWarning, Plus, UserRound } from 'lucide-react';
 import { AssigneeSelect } from '@/components/common/AssigneeSelect';
 import { HighlightText } from '@/components/common/HighlightText';
+import { stripEntityTokens } from '@/utils/entityTokens';
 import { CompactIconLabel } from '@/components/common/CompactIconLabel';
 import { EpisodeTreeNav } from '@/components/scenes/EpisodeTreeNav';
 import { SceneSheetView } from '@/components/scenes/SceneSheetView';
@@ -978,7 +979,7 @@ function SceneCard({ scene, sceneIndex, celebrating, department, isHighlighted, 
       {scene.memo && (
         <div className="mx-4 mt-1">
           <p className="text-[11px] text-amber-400/70 leading-relaxed line-clamp-2">
-            <HighlightText text={scene.memo} query={searchQuery} />
+            <HighlightText text={stripEntityTokens(scene.memo)} query={searchQuery} />
           </p>
         </div>
       )}
@@ -3382,6 +3383,24 @@ export function ScenesView() {
       setPendingReq(null);
     }
   }, [pendingReq, selectedDepartment, selectedEpisode, selectedPart, allMergedScenes, currentPart, setDetailMerged, setPendingReq, setSelectedEpisode, setSelectedPart, setSelectedDepartment, setDashboardDeptFilter]);
+
+  // #화·#파트 점프 시 열려 있는 씬 상세 모달 닫기 (4c, 코덱스 4차 P2).
+  // navigateToSceneView({ closeModal: true }) 가 store 카운터를 올리면 감지해 두 상세 모달 상태를 비운다.
+  // 두 onClose 핸들러(SceneDetailModal / UnifiedSceneDetailModal)와 동일하게 정리한다.
+  // scene 점프는 modalRequest 경로라 이 신호를 보내지 않으므로(navigateToSceneView 가드) 충돌 없음.
+  const closeSceneModalSignal = useAppStore((s) => s.closeSceneModalSignal);
+  // 마지막으로 소비한 signal 값을 추적해 "값이 실제로 증가(변경)" 했을 때만 닫는다.
+  // mount/remount 직후엔 ref===store값이라 닫지 않음 → 뷰 전환 remount 시 pending 점프 모달을 즉시 닫지 않는다.
+  const lastCloseSignalRef = useRef(closeSceneModalSignal);
+  useEffect(() => {
+    if (closeSceneModalSignal === lastCloseSignalRef.current) return; // 변화 없으면 무시(remount 포함)
+    lastCloseSignalRef.current = closeSceneModalSignal;
+    setDetailSceneIndex(null);
+    setDetailContext(null);
+    setDetailMerged(null);
+    setModalRouting(null);
+    clearContinuitySource();
+  }, [closeSceneModalSignal, setDetailMerged, clearContinuitySource]);
 
   // ACT 단독 뷰에서는 대응하는 BG 이미지를 폴백으로 사용한다.
   const actToBgImageMap = useMemo(() => {
