@@ -20,8 +20,9 @@ export function detectHashtagQuery(text: string, caret: number): HashtagQuery | 
     const ch = text[i];
     if (ch === '#') {
       // '#' 앞이 영숫자면 단어 내부(예 'abc#x')라 트리거 제외. 한글·기호·공백·시작은 허용.
+      // 앞이 '[' 이면 직렬화된 태그 내부(예 '[#a001](bscene:...)')라 새 쿼리로 오인 금지.
       const before = i === 0 ? '' : text[i - 1];
-      if (i !== 0 && /[A-Za-z0-9]/.test(before)) return null;
+      if (i !== 0 && (before === '[' || /[A-Za-z0-9]/.test(before))) return null;
       const query = text.slice(i + 1, caret);
       if (query.length >= MAX_QUERY_LEN) return null;
       if (/\s/.test(query)) return null;

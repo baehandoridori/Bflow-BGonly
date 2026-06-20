@@ -22,6 +22,10 @@ test('공백 만나면 토큰 아님', () => {
 test('# 없으면 null', () => {
   assert.equal(detectHashtagQuery('그냥글', 3), null);
 });
+test('직렬화 태그 내부 #는 무시(앞 글자 [)', () => {
+  // '[#a001](bscene:1:A:a001)' : [0 #1 a2 0(3) 0(4) 1(5) ](6) → 라벨 뒤 caret 6 (닫는 ] 앞)
+  assert.equal(detectHashtagQuery('[#a001](bscene:1:A:a001)', 6), null);
+});
 test('applyHashtag: scene 토큰을 마크다운 링크로 치환', () => {
   const r = applyHashtag('보세요 #a0', 4, 7, { kind: 'scene', label: 'a001', episodeNumber: 1, partId: 'A', sceneId: 'a001' });
   assert.equal(r.text, '보세요 [#a001](bscene:1:A:a001) ');

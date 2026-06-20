@@ -3388,8 +3388,12 @@ export function ScenesView() {
   // 두 onClose 핸들러(SceneDetailModal / UnifiedSceneDetailModal)와 동일하게 정리한다.
   // scene 점프는 modalRequest 경로라 이 신호를 보내지 않으므로(navigateToSceneView 가드) 충돌 없음.
   const closeSceneModalSignal = useAppStore((s) => s.closeSceneModalSignal);
+  // 마지막으로 소비한 signal 값을 추적해 "값이 실제로 증가(변경)" 했을 때만 닫는다.
+  // mount/remount 직후엔 ref===store값이라 닫지 않음 → 뷰 전환 remount 시 pending 점프 모달을 즉시 닫지 않는다.
+  const lastCloseSignalRef = useRef(closeSceneModalSignal);
   useEffect(() => {
-    if (closeSceneModalSignal === 0) return; // 초기값(미요청)은 무시
+    if (closeSceneModalSignal === lastCloseSignalRef.current) return; // 변화 없으면 무시(remount 포함)
+    lastCloseSignalRef.current = closeSceneModalSignal;
     setDetailSceneIndex(null);
     setDetailContext(null);
     setDetailMerged(null);

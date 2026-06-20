@@ -25,6 +25,12 @@ interface Props {
   onPaste?: (e: ClipboardEvent) => void;
   /** 포커스 떠날 때(인라인 메모 blur 저장). 멘션 드롭다운 클릭은 preventDefault라 여기로 안 옴(MentionDropdown). */
   onBlur?: (e: FocusEvent<HTMLInputElement | HTMLTextAreaElement>) => void;
+  /**
+   * #태그 자동완성 사용 여부(기본 true). 표시 측이 EntityText 가 아니라 평문이라
+   * 직렬화 토큰('[#a001](...)')이 raw 로 보이는 입력칸(컴포지팅 리테이크 생성 폼)은 false 로 끈다.
+   * 훅은 항상 호출하고(React 훅 순서 유지) 키핸들·드롭다운에서만 게이트한다.
+   */
+  enableHashtag?: boolean;
   'aria-label'?: string;
 }
 
@@ -37,7 +43,7 @@ interface Props {
 export function EntityAwareInput({
   value, onChange, users, multiline, placeholder, className, rows, autoFocus,
   dropdownPositionClassName, submitOn = 'none', onSubmit, onCancel, onPaste, onBlur,
-  'aria-label': ariaLabel,
+  enableHashtag, 'aria-label': ariaLabel,
 }: Props) {
   const inputRef = useRef<HTMLInputElement | HTMLTextAreaElement>(null);
   const [scroll, setScroll] = useState({ top: 0, left: 0 });
@@ -51,12 +57,15 @@ export function EntityAwareInput({
     onChange,
     inputRef: inputRef as RefObject<HTMLTextAreaElement | null>,
   });
+  // #태그 비활성(평문 렌더 입력칸) 시 키핸들·드롭다운에서만 게이트. 훅 호출 자체는 항상(훅 순서 유지).
+  const hashEnabled = enableHashtag !== false;
   // @멘션·#태그 둘 다 DOM 을 직접 읽어 갱신. active 는 한쪽만(키핸들에서 mention 우선).
+  // refresh 는 무해(상태만 갱신, hashEnabled 시 드롭다운 미표시)하므로 게이트 불필요.
   const refreshAll = () => { mention.refresh(); hash.refresh(); };
 
   const handleKeyDown = (e: KeyboardEvent) => {
     if (mention.onKeyDown(e)) return;
-    if (hash.onKeyDown(e)) return;
+    if (hashEnabled && hash.onKeyDown(e)) return;
     if (e.key === 'Escape' && onCancel) { e.preventDefault(); onCancel(); return; }
     if (onSubmit && e.key === 'Enter') {
       if (submitOn === 'enter' && !e.shiftKey) { e.preventDefault(); onSubmit(); }
@@ -107,7 +116,7 @@ export function EntityAwareInput({
           onPick={mention.select}
           positionClassName={dropdownPositionClassName}
         />
-      ) : hash.active ? (
+      ) : hashEnabled && hash.active ? (
         <HashtagDropdown
           items={hash.items}
           index={hash.index}

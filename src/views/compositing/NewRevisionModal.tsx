@@ -573,6 +573,7 @@ export default function NewRevisionModal({ open, onClose }: Props) {
               value={description}
               onChange={setDescription}
               users={allUsers}
+              enableHashtag={false}
               onPaste={handlePaste}
               dropdownPositionClassName="left-2 right-2"
               placeholder="어떤 부분을 수정해야 하는지, 또는 무엇이 변경되었는지 적어주세요. (@이름으로 멘션)"
