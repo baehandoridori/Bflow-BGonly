@@ -29,3 +29,24 @@ export function resolveCutScene(
   }
   return null;
 }
+
+/**
+ * sceneId 로 같은 EP·파트의 씬을 찾는다(4c #씬 태그 점프). 화 간 sceneId 중복은 episodeNumber+partId 로 한정.
+ * partId 대소문자 무관. 모든 (부서)파트 순회 — sceneId 는 보통 부서 무관 동일.
+ */
+export function resolveSceneById(
+  episodes: readonly EpisodeLike[],
+  episodeNumber: number,
+  partId: string,
+  sceneId: string,
+): SceneLike | null {
+  const ep = episodes.find((e) => e.episodeNumber === episodeNumber);
+  if (!ep) return null;
+  const wantPart = partId.toLowerCase();
+  for (const part of ep.parts) {
+    if (part.partId.toLowerCase() !== wantPart) continue;
+    const scene = part.scenes.find((s) => s.sceneId === sceneId);
+    if (scene) return scene;
+  }
+  return null;
+}
