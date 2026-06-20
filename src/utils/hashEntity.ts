@@ -27,7 +27,10 @@ export function serializeHashTag(t: HashTag): string {
       : t.kind === 'part'
         ? `bpart:${t.episodeNumber}:${t.partId}`
         : `bepisode:${t.episodeNumber}`;
-  return `[#${t.label}](${payload})`;
+  // 라벨은 free-form(커스텀 화 제목)이라 `[`,`]`,`(`,`)`가 들어가면 마크다운식 토큰이 깨진다
+  // (HASH_LINK_REGEX `[^\]]+`가 첫 `]`에서 멈춰 파싱 실패 → 평문화). payload는 영숫자라 안전, 라벨만 제거.
+  const safeLabel = t.label.replace(/[[\]()]/g, '');
+  return `[#${safeLabel}](${payload})`;
 }
 
 export function parseHashTarget(target: string): HashTarget | null {

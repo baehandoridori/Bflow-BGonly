@@ -3383,6 +3383,20 @@ export function ScenesView() {
     }
   }, [pendingReq, selectedDepartment, selectedEpisode, selectedPart, allMergedScenes, currentPart, setDetailMerged, setPendingReq, setSelectedEpisode, setSelectedPart, setSelectedDepartment, setDashboardDeptFilter]);
 
+  // #화·#파트 점프 시 열려 있는 씬 상세 모달 닫기 (4c, 코덱스 4차 P2).
+  // navigateToSceneView({ closeModal: true }) 가 store 카운터를 올리면 감지해 두 상세 모달 상태를 비운다.
+  // 두 onClose 핸들러(SceneDetailModal / UnifiedSceneDetailModal)와 동일하게 정리한다.
+  // scene 점프는 modalRequest 경로라 이 신호를 보내지 않으므로(navigateToSceneView 가드) 충돌 없음.
+  const closeSceneModalSignal = useAppStore((s) => s.closeSceneModalSignal);
+  useEffect(() => {
+    if (closeSceneModalSignal === 0) return; // 초기값(미요청)은 무시
+    setDetailSceneIndex(null);
+    setDetailContext(null);
+    setDetailMerged(null);
+    setModalRouting(null);
+    clearContinuitySource();
+  }, [closeSceneModalSignal, setDetailMerged, clearContinuitySource]);
+
   // ACT 단독 뷰에서는 대응하는 BG 이미지를 폴백으로 사용한다.
   const actToBgImageMap = useMemo(() => {
     if (selectedDepartment !== 'acting') return null;
