@@ -36,6 +36,8 @@ test('parse invalid → null', () => {
   assert.equal(parseHashTarget('bscene:1:A'), null); // 부족
   assert.equal(parseHashTarget('bpart:1'), null); // partId 없음
   assert.equal(parseHashTarget(''), null);
+  assert.equal(parseHashTarget('bepisode:1abc'), null); // ep 접두사 숫자 거부(손편집)
+  assert.equal(parseHashTarget('bscene:1x:A:a001'), null); // ep 접두사 숫자 거부
 });
 test('roundtrip: serialize → parse', () => {
   const t = { kind: 'scene', label: 'b012', episodeNumber: 3, partId: 'B', sceneId: 'b012' } as const;

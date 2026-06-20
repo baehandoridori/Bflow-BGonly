@@ -41,6 +41,9 @@ export function serializeHashTag(t: HashTag): string {
 
 export function parseHashTarget(target: string): HashTarget | null {
   const seg = target.split(':');
+  // ep 는 순수 숫자만 허용 — parseInt 는 '1abc'→1 처럼 접두사를 받아들여, 손편집/복사된
+  // 잘못된 payload(bepisode:1abc 등)가 클릭 칩으로 렌더돼 엉뚱하게 점프하는 걸 막는다(코덱스 8차).
+  if (!/^\d+$/.test(seg[1] ?? '')) return null;
   const ep = parseInt(seg[1], 10);
   if (!Number.isInteger(ep) || ep <= 0) return null;
   if (seg[0] === 'bscene' && seg.length === 5 && seg[2] && seg[3] && seg[4])
