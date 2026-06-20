@@ -45,6 +45,27 @@ test('BG/ACT 같은 (ep,partId,sceneId) → scene 후보 1개 병합, uuid 미�
   assert.equal(payload, 'bscene:1:A:a001');
   assert.equal(payload.split(':').length, 4);
 });
+test('BG/ACT 같은 (ep,partId) → part 후보도 1개 병합(중복 제거)', () => {
+  // all-mode: 같은 partId 'A' 가 BG·ACT 2 row 로 와도 #A파트 후보는 1개여야 한다.
+  const eps = [
+    { episodeNumber: 1, title: 'EP.01', parts: [
+      { partId: 'A', scenes: [{ sceneId: 'a001', id: 'uuid-bg' }] },     // BG 파트
+      { partId: 'A', scenes: [{ sceneId: 'a001', id: 'uuid-acting' }] }, // ACT 파트(같은 partId)
+    ] },
+  ];
+  const parts = buildHashtagCandidates(eps, {}, 'A파트').filter((x) => x.kind === 'part' && x.label === 'A파트');
+  assert.equal(parts.length, 1);
+});
+test('빈 쿼리에서도 같은 (ep,partId) 파트 중복 미발생', () => {
+  const eps = [
+    { episodeNumber: 1, title: 'EP.01', parts: [
+      { partId: 'A', scenes: [{ sceneId: 'a001' }] },
+      { partId: 'A', scenes: [{ sceneId: 'a002' }] }, // 같은 partId 두 번째 row
+    ] },
+  ];
+  const parts = buildHashtagCandidates(eps, {}, '').filter((x) => x.kind === 'part');
+  assert.equal(parts.length, 1);
+});
 test('친모 → 커스텀 제목 화 후보', () => {
   const c = buildHashtagCandidates(EPISODES, TITLES, '친모');
   assert.ok(c.some((x) => x.kind === 'episode' && x.label === '친모2' && x.tag.episodeNumber === 2));

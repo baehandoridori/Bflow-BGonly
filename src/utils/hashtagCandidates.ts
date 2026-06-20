@@ -37,6 +37,8 @@ export function buildHashtagCandidates(
   const out: HashCandidate[] = [];
   // 같은 (ep, partId, sceneId) 가 BG·ACT 2개로 와도 scene 후보는 1개만 — dedupe 키.
   const seenScene = new Set<string>();
+  // 파트도 동일: all-mode 는 같은 (ep, partId) 가 BG·ACT 2 row 로 와 part 후보가 중복된다 — 1개만 싣는다.
+  const seenPart = new Set<string>();
   for (const ep of episodes) {
     const title = episodeTitles[ep.episodeNumber] || ep.title;
     // 화
@@ -45,7 +47,9 @@ export function buildHashtagCandidates(
     }
     for (const part of ep.parts) {
       const partLabel = `${part.partId}파트`;
-      if (!q || partLabel.toLowerCase().includes(q)) {
+      const partKey = `${ep.episodeNumber}:${part.partId}`;
+      if (!seenPart.has(partKey) && (!q || partLabel.toLowerCase().includes(q))) {
+        seenPart.add(partKey);
         out.push({ kind: 'part', label: partLabel, context: title, tag: { kind: 'part', label: partLabel, episodeNumber: ep.episodeNumber, partId: part.partId } });
       }
       for (const sc of part.scenes) {
