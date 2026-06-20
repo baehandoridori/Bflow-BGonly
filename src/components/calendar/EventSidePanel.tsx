@@ -371,6 +371,7 @@ export function EventSidePanel({
               value={draftMemo ?? ''}
               onChange={setDraftMemo}
               users={users}
+              enableHashtag
               rows={4}
               className="w-full bg-bg-primary/85 border border-bg-border/70 focus:border-accent/50 rounded-md px-2.5 py-2 text-xs text-text-primary outline-none resize-none leading-relaxed transition-colors"
               placeholder="메모 입력..."

@@ -459,6 +459,7 @@ function AddTaskModal({
                   value={todoMemo}
                   onChange={setTodoMemo}
                   users={users}
+                  enableHashtag
                   placeholder="메모 (선택)"
                   rows={2}
                   className="w-full bg-bg-primary border border-bg-border rounded-lg px-3 py-2 text-xs text-text-primary outline-none focus:border-accent/50 placeholder:text-text-secondary/30 resize-none"
@@ -611,6 +612,7 @@ const EditableSceneRow = forwardRef<HTMLDivElement, EditableSceneRowProps>(funct
                 value={editValue}
                 onChange={setEditValue}
                 users={users}
+                enableHashtag
                 onBlur={commitEdit}
                 submitOn="enter"
                 onSubmit={commitEdit}

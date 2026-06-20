@@ -108,7 +108,6 @@ export function AddRevisionForm({
           value={description}
           onChange={setDescription}
           users={allUsers}
-          enableHashtag={false}
           onPaste={handlePaste}
           submitOn="enter"
           onSubmit={handleSubmit}

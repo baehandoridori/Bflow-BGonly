@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { buildHashtagCandidates } from '../src/utils/hashtagCandidates.ts';
+import { serializeHashTag } from '../src/utils/hashEntity.ts';
 
 const EPISODES = [
   { episodeNumber: 1, title: 'EP.01', parts: [
@@ -25,15 +26,24 @@ test('씬 후보 tag 에 정확한 타깃', () => {
   const sc = c.find((x) => x.kind === 'scene' && x.label === 'a012');
   assert.deepEqual(sc?.tag, { kind: 'scene', label: 'a012', episodeNumber: 1, partId: 'A', sceneId: 'a012' });
 });
-test('씬 후보: scene.id 있으면 tag 에 sceneUuid 포함', () => {
+test('BG/ACT 같은 (ep,partId,sceneId) → scene 후보 1개 병합, uuid 미탑재', () => {
+  // 새 에피소드: 같은 partId 'A' 에 BG·ACT 파트가 함께 생겨 같은 sceneId(a001) row 가 2개.
+  // 부서는 다르나(서로 다른 uuid) #씬은 통합 1개로 병합되고, 직렬화에 uuid(5번째 seg)가 없어야 한다.
   const eps = [
     { episodeNumber: 1, title: 'EP.01', parts: [
-      { partId: 'A', scenes: [{ sceneId: 'a001', id: 'uuid-1' }] },
+      { partId: 'A', scenes: [{ sceneId: 'a001', id: 'uuid-bg' }] },   // BG 파트
+      { partId: 'A', scenes: [{ sceneId: 'a001', id: 'uuid-acting' }] }, // ACT 파트(같은 partId·sceneId)
     ] },
   ];
   const c = buildHashtagCandidates(eps, {}, 'a001');
-  const sc = c.find((x) => x.kind === 'scene' && x.label === 'a001');
-  assert.deepEqual(sc?.tag, { kind: 'scene', label: 'a001', episodeNumber: 1, partId: 'A', sceneId: 'a001', sceneUuid: 'uuid-1' });
+  const scenes = c.filter((x) => x.kind === 'scene' && x.label === 'a001');
+  assert.equal(scenes.length, 1); // 통합 1개
+  assert.deepEqual(scenes[0].tag, { kind: 'scene', label: 'a001', episodeNumber: 1, partId: 'A', sceneId: 'a001' });
+  // 직렬화 payload 는 'bscene:1:A:a001' — `:` 분할 시 4세그(5번째 uuid 없음).
+  const serialized = serializeHashTag(scenes[0].tag);
+  const payload = serialized.slice(serialized.indexOf('(') + 1, serialized.lastIndexOf(')'));
+  assert.equal(payload, 'bscene:1:A:a001');
+  assert.equal(payload.split(':').length, 4);
 });
 test('친모 → 커스텀 제목 화 후보', () => {
   const c = buildHashtagCandidates(EPISODES, TITLES, '친모');

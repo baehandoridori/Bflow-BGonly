@@ -141,6 +141,7 @@ function PropertyRow({ label, value, placeholder, onSave, memoAuthorMeta, entity
               value={draft}
               onChange={setDraft}
               users={users}
+              enableHashtag
               onBlur={commit}
               submitOn="enter"
               onSubmit={commit}

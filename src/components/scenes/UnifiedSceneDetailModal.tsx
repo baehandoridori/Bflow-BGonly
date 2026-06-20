@@ -1416,6 +1416,7 @@ function InlineTextareaRow({ label, value, onSave, memoAuthorMeta, continuityTar
           value={draft}
           onChange={setDraft}
           users={users}
+          enableHashtag
           onBlur={commit}
           onCancel={() => { setDraft(value); setEditing(false); }}
           autoFocus

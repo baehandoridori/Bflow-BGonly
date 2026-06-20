@@ -263,6 +263,7 @@ export function EventQuickEdit({
                     value={memo ?? ''}
                     onChange={setMemo}
                     users={users}
+                    enableHashtag
                     rows={3}
                     placeholder="메모"
                     dropdownPositionClassName="left-2 right-2"

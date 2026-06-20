@@ -30,6 +30,7 @@ export function CompletionNoteInput({ initialValue = '', onConfirm, onCancel }: 
         value={value}
         onChange={setValue}
         users={users}
+        enableHashtag
         submitOn="ctrl-enter"
         onSubmit={() => onConfirm(value.trim())}
         onCancel={onCancel}
