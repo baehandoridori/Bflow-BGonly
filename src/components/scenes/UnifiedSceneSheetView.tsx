@@ -11,8 +11,7 @@ import { cn } from '@/utils/cn';
 import { getMergedCommentBadgeCounts } from '@/utils/mergedSceneHelpers';
 import { HighlightText } from '@/components/common/HighlightText';
 import { EntityText } from '@/components/common/EntityText';
-import { navigateToCutNumber } from '@/utils/cutNumberNavigation';
-import { parseCommentSceneContext } from '@/utils/revisionSceneContext';
+import { navigateToHashTarget } from '@/utils/hashNavigation';
 import { AssigneeSelect } from '@/components/common/AssigneeSelect';
 import { AssigneeMultiSelect, AssigneeChipList } from '@/components/common/AssigneeMultiSelect';
 import { useDataStore } from '@/stores/useDataStore';
@@ -185,10 +184,6 @@ function SheetEditableCell({
   const [draft, setDraft] = useState(value);
   const users = useAuthStore((s) => s.users);
   const userNames = useMemo(() => users.map((u) => u.name), [users]);
-  const cutCtx = useMemo(
-    () => (sheetName && (field === 'bgMemo' || field === 'actMemo') ? parseCommentSceneContext(sheetName) : null),
-    [sheetName, field],
-  );
   const inputRef = useRef<HTMLInputElement>(null);
   const cellRef = useRef<HTMLTableCellElement>(null);
   const draftRef = useRef(draft);
@@ -313,7 +308,7 @@ function SheetEditableCell({
         <EntityText
           text={value || '-'}
           userNames={userNames}
-          onCutClick={cutCtx ? (n) => navigateToCutNumber(n, cutCtx) : undefined}
+          onHashClick={navigateToHashTarget}
           renderTextSegment={(seg, idx) => <HighlightText key={idx} text={seg} query={searchQuery} />}
         />
       ) : type === 'assignee' ? (

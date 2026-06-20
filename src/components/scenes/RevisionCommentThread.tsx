@@ -34,8 +34,7 @@ import { EntityText } from '@/components/common/EntityText';
 import { EntityHighlightOverlay } from '@/components/common/EntityHighlightOverlay';
 import { MentionDropdown } from '@/components/common/MentionDropdown';
 import { useMentionAutocomplete } from '@/hooks/useMentionAutocomplete';
-import { navigateToCutNumber } from '@/utils/cutNumberNavigation';
-import { parseCommentSceneContext } from '@/utils/revisionSceneContext';
+import { navigateToHashTarget } from '@/utils/hashNavigation';
 import {
   AttachmentImageLightbox,
   type AttachmentImageLightboxEntry,
@@ -310,12 +309,6 @@ export function RevisionCommentThread({ revisionId, sceneKey }: Props) {
     inputRef,
   });
   const [inputScrollLeft, setInputScrollLeft] = useState(0);
-  // 4a-2: 컷 칩 클릭 점프 — 댓글별 출처(storageKey, counterpart 부서 댓글 포함)로 EP·파트·부서 도출.
-  //   getComments 가 다른 부서 댓글을 섞어 줄 수 있어, thread sceneKey 한 개가 아니라 댓글마다 계산한다.
-  const makeCutHandler = useCallback((srcKey?: string) => {
-    const ctx = parseCommentSceneContext(srcKey ?? sceneKey);
-    return ctx ? (n: number) => { navigateToCutNumber(n, ctx); } : undefined;
-  }, [sceneKey]);
 
   const hasUploadingImage = attachedImages.some(item => item.uploading);
   const uploadedImageUrls = attachedImages.map(item => item.uploadedUrl).filter((url): url is string => !!url);
@@ -445,7 +438,7 @@ export function RevisionCommentThread({ revisionId, sceneKey }: Props) {
               setHighlightUserName(userName);
               setView('team');
             }}
-            onCutClick={makeCutHandler(c.storageKey)}
+            onHashClick={navigateToHashTarget}
           />
         </div>
       ))}
@@ -588,14 +581,14 @@ function CommentBubble({
   users,
   onImageClick,
   onMentionClick,
-  onCutClick,
+  onHashClick,
 }: {
   comment: SceneComment;
   isMe: boolean;
   users: { name: string }[];
   onImageClick: (url: string, comment: SceneComment) => void;
   onMentionClick: (userName: string) => void;
-  onCutClick?: (cutNumber: number) => void;
+  onHashClick?: (target: import('@/utils/hashEntity').HashTarget) => void;
 }) {
   return (
     <div
@@ -628,7 +621,7 @@ function CommentBubble({
             text={comment.text}
             userNames={users.map(user => user.name)}
             onMentionClick={onMentionClick}
-            onCutClick={onCutClick}
+            onHashClick={onHashClick}
           />
         </div>
       )}

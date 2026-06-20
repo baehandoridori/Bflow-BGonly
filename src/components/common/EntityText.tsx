@@ -1,5 +1,5 @@
 import { Fragment, type ReactNode, type MouseEvent } from 'react';
-import { Scissors, Image, Layers, Clapperboard } from 'lucide-react';
+import { Image, Layers, Clapperboard } from 'lucide-react';
 import { tokenizeEntities } from '@/utils/entityTokens';
 import type { HashTarget } from '@/utils/hashEntity';
 import { PathBadge } from './PathBadge';
@@ -9,9 +9,7 @@ interface Props {
   userNames: string[];
   /** 멘션 칩 클릭 — 팀 뷰로 점프 등. 미지정 시 비클릭. */
   onMentionClick?: (name: string) => void;
-  /** 컷 칩 클릭 — 해당 씬으로 점프. 씬 컨텍스트 있는 곳에서만 전달(없으면 색 표시만). */
-  onCutClick?: (cutNumber: number) => void;
-  /** path/멘션/컷 외 평문 세그먼트 추가 변환(예: 검색어 하이라이트). 미지정 시 그대로. PathLinkifiedText와 동일 계약(평문 토큰에만 적용). */
+  /** path/멘션/#태그 외 평문 세그먼트 추가 변환(예: 검색어 하이라이트). 미지정 시 그대로. PathLinkifiedText와 동일 계약(평문 토큰에만 적용). */
   renderTextSegment?: (segment: string, idx: number) => ReactNode;
   /** #태그 칩 좌클릭 — 옆 참조 패널 등(4c). 미지정 시 비클릭. */
   onHashClick?: (target: HashTarget) => void;
@@ -21,10 +19,9 @@ interface Props {
 
 /**
  * 평문 텍스트를 엔티티 칩으로 렌더(스펙 §10.3 — 보낸 댓글/내용 표시 칩).
- *  - 경로: PathBadge  · 멘션: 보라 칩(onMentionClick)  · 컷: 중립 칩(onCutClick 있으면 점프)
- * 컷 칩 색은 상태색(#74B9FF 진행중)·경로색과 겹치지 않게 중립으로 둠 — 6단계 폴리싱서 재검토.
+ *  - 경로: PathBadge  · 멘션: 보라 칩(onMentionClick)  · #태그: 씬/파트/화 칩(onHashClick 있으면 점프)
  */
-export function EntityText({ text, userNames, onMentionClick, onCutClick, renderTextSegment, onHashClick, onHashContextMenu }: Props) {
+export function EntityText({ text, userNames, onMentionClick, renderTextSegment, onHashClick, onHashContextMenu }: Props) {
   const tokens = tokenizeEntities(text, userNames);
   return (
     <>
@@ -41,22 +38,6 @@ export function EntityText({ text, userNames, onMentionClick, onCutClick, render
               onClick={onMentionClick ? (e) => { e.stopPropagation(); onMentionClick(name); } : undefined}
               title={onMentionClick ? `${name} 팀원 보기` : undefined}
             >
-              {tok.content}
-            </span>
-          );
-        }
-        if (tok.type === 'cut') {
-          const number = tok.number;
-          return (
-            <span
-              key={`c${i}`}
-              className={`inline-flex items-center gap-0.5 align-baseline rounded px-1 font-semibold text-text-secondary bg-text-secondary/15 transition-colors ${
-                onCutClick ? 'cursor-pointer hover:bg-accent/15 hover:text-accent-sub' : ''
-              }`}
-              onClick={onCutClick ? (e) => { e.stopPropagation(); onCutClick(number); } : undefined}
-              title={onCutClick ? `컷${number}(으)로 이동` : '씬·컷 표시'}
-            >
-              <Scissors size={9} className="shrink-0" />
               {tok.content}
             </span>
           );

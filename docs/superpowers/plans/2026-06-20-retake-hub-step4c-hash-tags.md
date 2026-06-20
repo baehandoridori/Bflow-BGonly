@@ -313,8 +313,33 @@ test('applyHashtag: 토큰을 마크다운 링크로 치환', () => {
 
 ---
 
+## 4c 계획 리뷰 반영 (3관점 적대리뷰 + 한솔 확정 2026-06-20)
+
+**한솔 추가 확정:** 입력 중에도 #태그 짧게(@멘션 느낌) / **단계 배포**.
+
+### 단계 배포 (3 PR — 각각 멀티에이전트 리뷰+코덱스+머지+배포)
+- **PR1 (Chunk 1~5)**: # 토큰·자동완성·칩·입력·적용(댓글/메모/상세) + 컷 텍스트 제거. → 배포(v1.42.0), **한솔 입력 느낌 확인**.
+- **PR2 (Chunk 6)**: 참조 패널(좌클릭). → 배포(v1.43.0).
+- **PR3 (Chunk 7)**: 우클릭 메뉴. → 배포(v1.44.0).
+- Chunk 8(정리/검증)은 각 PR 말미에 분산.
+
+### 입력 UX (한솔: 입력 중 짧게) — 평문 textarea 한계 + 1단계 실증
+- 저장은 마크다운 링크식(정확성, §저장형식 유지). 입력 중에는 `EntityHighlightOverlay`가 hash 토큰의 `[`·`](target)` 부분을 투명 처리하고 **라벨만 칩 배경**으로 → 평상시 `#a001`처럼 짧게.
+- 평문 textarea 특성상 caret이 토큰 내부를 지날 때 문법 일부가 드러날 수 있음(contentEditable은 한글 IME 위험으로 거부). **PR1 배포 후 한솔 실사용 확인** → 부족하면 토큰 객체 모델(입력 state에 라벨↔타깃 맵)을 PR1.5로 검토(지금은 YAGNI).
+
+### 본문 반영 (구현 시 적용)
+- **[P1] Part 라벨**: `Part` 타입에 `title` 없음 → `buildHashtagCandidates`가 `partId`로 라벨 합성(`A파트`). 스키마 변경 X.
+- **[P1] 토큰화 통합**: `HASH_LINK_REGEX`를 `tokenizeTextSegment` 안에서 mention과 위치순 병합(pathLink가 G:\경로 먼저 분리한 fragment 내). 별도 패스 금지(인덱스 어긋남).
+- **[P1] @+# 훅 공존**: `refresh()`는 둘 다 호출하되 active는 하나만(mention 우선). `handleKeyDown`은 `if (mention.onKeyDown(e)) return; if (hash.onKeyDown(e)) return;`. 드롭다운 `hash.active && !mention.active`.
+- **[P2] 점프**: `resolveSceneById(episodes, ep, partId, sceneId)` 3중키 매칭 + 핫픽스 uuid 폴백(uuid 있으면 통합모달 `forceDeptFilter='all'`, 없으면 부서). part/episode 타깃은 모달 없이 뷰 이동.
+- **[P2] parseCommentSceneContext 유지**: 댓글 sceneKey 메타 추출용이라 존속(해시는 텍스트 토큰으로 EntityText가 처리). 컷 점프(navigateToCutNumber 호출)만 제거.
+- **[P2] 성능**: `buildHashtagCandidates`는 드롭다운 active(쿼리 입력 시)에만 호출. episodes/episodeTitles는 useMemo 캐시.
+- **[P2] 클릭 분리**: 좌클릭=`onHashClick`(참조), 우클릭=`onHashContextMenu`(e.preventDefault). 기존 `onMentionClick`과 별개.
+- **[P3] 아카이브**: `buildHashtagCandidates`는 활성 에피소드만(호출처에서 필터, 또는 archivedSet 인자). 테스트에 archived 제외 케이스.
+- **[P3] 컷 제거 회귀체크**: EntityText cut 분기 제거, entityTokens CUT_REGEX 제거, `grep cutNumber|CUT_REGEX`로 잔재 확인.
+
 ## 입력 UX 리스크 (배포 후 한솔 확인 필수)
-- 마크다운 링크 토큰이 입력 중 평문에 노출되는 정도(미러 오버레이로 라벨만 보이게 처리하나 완벽한 in-input 칩은 아님). 한솔 "@멘션 느낌"과 차이 시 추후 in-input chip morph 개선.
+- 위 "입력 UX" 항목 참조. PR1 배포 후 한솔이 입력 중 표시를 실제 확인 → 필요 시 토큰 객체 모델 개선.
 
 ## 검증
 - 단계별 typecheck + node:test + build:vite. 멀티에이전트 적대리뷰 + 코덱스. preview 불가 → 배포 후 한솔 실제 확인.

@@ -23,8 +23,7 @@ import { sceneProgress } from '@/utils/calcStats';
 import { AssigneeMultiSelect, AssigneeChipList } from '@/components/common/AssigneeMultiSelect';
 import { EntityAwareInput } from '@/components/common/EntityAwareInput';
 import { EntityText } from '@/components/common/EntityText';
-import { navigateToCutNumber } from '@/utils/cutNumberNavigation';
-import { parseCommentSceneContext } from '@/utils/revisionSceneContext';
+import { navigateToHashTarget } from '@/utils/hashNavigation';
 import { resizeBlob } from '@/utils/imageUtils';
 import { ImageModal } from './ImageModal';
 import type { CommentInlineEvent } from './CommentPanel';
@@ -1317,7 +1316,6 @@ function DeptSection({
         onSave={(v) => onFieldUpdate(sheetName, sceneIndex, 'memo', v)}
         memoAuthorMeta={memoAuthorMeta}
         continuityTarget={dept === 'bg' ? 'bg-memo' : 'act-memo'}
-        sheetName={sheetName}
       />
     </div>
   );
@@ -1374,14 +1372,13 @@ function InlineAssigneeRow({ label, value, onSave }: {
 
 /* ── 인라인 메모 ── */
 
-function InlineTextareaRow({ label, value, onSave, memoAuthorMeta, continuityTarget, sheetName }: {
-  label: string; value: string; onSave: (v: string) => void; memoAuthorMeta?: MemoAuthorMeta | null; continuityTarget?: string; sheetName?: string;
+function InlineTextareaRow({ label, value, onSave, memoAuthorMeta, continuityTarget }: {
+  label: string; value: string; onSave: (v: string) => void; memoAuthorMeta?: MemoAuthorMeta | null; continuityTarget?: string;
 }) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(value);
   const { users } = useAuthStore();
   const userNames = useMemo(() => users.map((u) => u.name), [users]);
-  const cutCtx = useMemo(() => (sheetName ? parseCommentSceneContext(sheetName) : null), [sheetName]);
 
   useEffect(() => { setDraft(value); }, [value]);
 
@@ -1431,7 +1428,7 @@ function InlineTextareaRow({ label, value, onSave, memoAuthorMeta, continuityTar
           style={{ background: value ? 'rgba(255,255,255,0.025)' : undefined }}
         >
           {value
-            ? <EntityText text={value} userNames={userNames} onCutClick={cutCtx ? (n) => navigateToCutNumber(n, cutCtx) : undefined} />
+            ? <EntityText text={value} userNames={userNames} onHashClick={navigateToHashTarget} />
             : <span className="text-text-secondary/50">메모 없음</span>}
           {value && (
             <Pencil size={12} className="inline-block ml-2 opacity-0 hover:opacity-60 transition-opacity" />

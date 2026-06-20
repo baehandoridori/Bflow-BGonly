@@ -33,19 +33,9 @@ test('빈 문자열', () => {
   assert.deepEqual(tokenizeEntities('', USERS), []);
 });
 
-// ─── 4a: 컷 번호 토큰 (4c에서 #태그로 전환 중 — Chunk5 정리 시 제거 예정) ───
-test('컷 번호 감지(컷N/cutN) + 숫자 파싱', () => {
-  assert.deepEqual(tokenizeEntities('컷5 확인 cut12', USERS), [
-    { type: 'cut', content: '컷5', number: 5 },
-    { type: 'text', content: ' 확인 ' },
-    { type: 'cut', content: 'cut12', number: 12 },
-  ]);
-});
-test('uncut3 영문 단어 내부는 컷 아님', () => {
-  assert.deepEqual(tokenizeEntities('uncut3', USERS), [{ type: 'text', content: 'uncut3' }]);
-});
-test('컷0/컷00 은 컷 토큰 아님(number<=0 가드)', () => {
-  assert.deepEqual(tokenizeEntities('컷0', USERS), [{ type: 'text', content: '컷0' }]);
+// ─── 4c Chunk5: 컷 텍스트 자동인식 제거(평문화) ───
+test('컷5 텍스트는 더 이상 토큰 아님(평문)', () => {
+  assert.deepEqual(tokenizeEntities('컷5 확인', USERS), [{ type: 'text', content: '컷5 확인' }]);
 });
 
 // ─── 4c: # 씬·파트·화 태그(마크다운 링크식) ───

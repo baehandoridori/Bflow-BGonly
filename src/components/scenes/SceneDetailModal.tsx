@@ -24,8 +24,7 @@ import { AssigneeMultiSelect } from '@/components/common/AssigneeMultiSelect';
 import { PathLinkifiedText } from '@/components/common/PathLinkifiedText';
 import { EntityAwareInput } from '@/components/common/EntityAwareInput';
 import { EntityText } from '@/components/common/EntityText';
-import { navigateToCutNumber } from '@/utils/cutNumberNavigation';
-import { parseCommentSceneContext } from '@/utils/revisionSceneContext';
+import { navigateToHashTarget } from '@/utils/hashNavigation';
 import { resizeBlob, pasteImageFromClipboard } from '@/utils/imageUtils';
 import { ImageModal } from './ImageModal';
 import { ScenePhaseToggle } from './ScenePhaseToggle';
@@ -97,19 +96,16 @@ interface PropertyRowProps {
   placeholder?: string;
   onSave: (value: string) => void;
   memoAuthorMeta?: MemoAuthorMeta | null;
-  /** 메모 행만 켠다 — @멘션 자동완성·경로/컷 칩 입력/표시(4b). */
+  /** 메모 행만 켠다 — @멘션 자동완성·경로/#태그 칩 입력/표시(4b). */
   entityAware?: boolean;
-  /** 컷 점프 컨텍스트용 sheetName(entityAware 메모 전용). */
-  sheetName?: string;
 }
 
-function PropertyRow({ label, value, placeholder, onSave, memoAuthorMeta, entityAware, sheetName }: PropertyRowProps) {
+function PropertyRow({ label, value, placeholder, onSave, memoAuthorMeta, entityAware }: PropertyRowProps) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(value);
   const inputRef = useRef<HTMLInputElement>(null);
   const { users } = useAuthStore();
   const userNames = useMemo(() => users.map((u) => u.name), [users]);
-  const cutCtx = useMemo(() => (entityAware && sheetName ? parseCommentSceneContext(sheetName) : null), [entityAware, sheetName]);
 
   useEffect(() => {
     setDraft(value);
@@ -176,7 +172,7 @@ function PropertyRow({ label, value, placeholder, onSave, memoAuthorMeta, entity
                   <EntityText
                     text={value}
                     userNames={userNames}
-                    onCutClick={cutCtx ? (n) => navigateToCutNumber(n, cutCtx) : undefined}
+                    onHashClick={navigateToHashTarget}
                   />
                 ) : (
                   <PathLinkifiedText text={value} />
@@ -1072,7 +1068,6 @@ export function SceneDetailModal({
                       onSave={(v) => onFieldUpdate(sceneIndex, 'memo', v)}
                       memoAuthorMeta={memoAuthorMeta}
                       entityAware
-                      sheetName={sheetName}
                     />
                   </div>
                 </section>

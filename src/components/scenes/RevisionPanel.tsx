@@ -19,8 +19,7 @@ import { AttachmentImageLightbox, type AttachmentImageLightboxState } from './At
 import { calcDefaultRecipients } from '@/utils/revisionRecipients';
 import { EntityText } from '@/components/common/EntityText';
 import { EntityAwareInput } from '@/components/common/EntityAwareInput';
-import { navigateToCutNumber } from '@/utils/cutNumberNavigation';
-import { parseRevisionSceneContext } from '@/utils/revisionSceneContext';
+import { navigateToHashTarget } from '@/utils/hashNavigation';
 import { CompactIconLabel } from '@/components/common/CompactIconLabel';
 import { canActAsAssignee, canReassignRevision, canFinalResolveRevision } from '@/utils/revisionWorkflow';
 import { summarizeAssignees, collectAssigneeNotes, sideBarColorClass, canShowFinalResolveBar } from '@/utils/revisionCardView';
@@ -129,11 +128,9 @@ const RevisionCard = memo(function RevisionCard({
   const [lightbox, setLightbox] = useState<AttachmentImageLightboxState | null>(null);
   const { currentUser, users: allUsers } = useAuthStore();
   const { setView, setHighlightUserName } = useAppStore();
-  // 4a: 카드 본문(내용/완료멘트) 엔티티 표시 — 멘션 클릭=팀뷰, 컷 클릭=씬 점프(sceneKey 컨텍스트 있을 때만).
+  // 4c: 카드 본문(내용/완료멘트) 엔티티 표시 — 멘션 클릭=팀뷰, #태그 클릭=씬/파트/화 점프.
   const entityUserNames = useMemo(() => allUsers.map((u) => u.name), [allUsers]);
-  const cutContext = useMemo(() => parseRevisionSceneContext(revision.sceneKey), [revision.sceneKey]);
   const handleEntityMentionClick = (name: string) => { setHighlightUserName(name); setView('team'); };
-  const handleEntityCutClick = cutContext ? (n: number) => { navigateToCutNumber(n, cutContext); } : undefined;
   // 담당 워크플로우 액션 (리테이크 허브 2단계) — store 가 낙관/롤백/self-mark 전담.
   const startAssignee = useRevisionStore((s) => s.startAssignee);
   const completeAssignee = useRevisionStore((s) => s.completeAssignee);
@@ -278,7 +275,7 @@ const RevisionCard = memo(function RevisionCard({
           text={revision.description}
           userNames={entityUserNames}
           onMentionClick={handleEntityMentionClick}
-          onCutClick={handleEntityCutClick}
+          onHashClick={navigateToHashTarget}
         />
       </p>
 
@@ -358,7 +355,7 @@ const RevisionCard = memo(function RevisionCard({
                       text={note}
                       userNames={entityUserNames}
                       onMentionClick={handleEntityMentionClick}
-                      onCutClick={handleEntityCutClick}
+                      onHashClick={navigateToHashTarget}
                     />
                   </p>
                 </div>
