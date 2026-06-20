@@ -28,3 +28,31 @@ test('resolveSceneById: 없으면 null, partId 대소문자 무관', () => {
   assert.equal(resolveSceneById(EPISODES, 1, 'A', 'zzz'), null);
   assert.deepEqual(resolveSceneById(EPISODES, 1, 'a', 'a005'), { no: 5, sceneId: 'a005' });
 });
+
+// ─── 4c PR1(코덱스 6차): 같은 파트 내 sceneId 중복 row 를 uuid 로 정확히 구분 ───
+const DUP_EPISODES = [
+  { episodeNumber: 1, parts: [
+    { partId: 'A', scenes: [
+      { no: 1, sceneId: 'a001', id: 'uuid-first' },
+      { no: 2, sceneId: 'a001', id: 'uuid-second' },
+    ] },
+  ] },
+];
+test('resolveSceneById: uuid 로 같은 sceneId 두 번째 row 를 정확히 찾음', () => {
+  assert.deepEqual(
+    resolveSceneById(DUP_EPISODES, 1, 'A', 'a001', 'uuid-second'),
+    { no: 2, sceneId: 'a001', id: 'uuid-second' },
+  );
+});
+test('resolveSceneById: uuid 미제공 시 첫 매치(첫 row) 폴백', () => {
+  assert.deepEqual(
+    resolveSceneById(DUP_EPISODES, 1, 'A', 'a001'),
+    { no: 1, sceneId: 'a001', id: 'uuid-first' },
+  );
+});
+test('resolveSceneById: uuid 미발견 시 sceneId 폴백', () => {
+  assert.deepEqual(
+    resolveSceneById(DUP_EPISODES, 1, 'A', 'a001', 'uuid-nope'),
+    { no: 1, sceneId: 'a001', id: 'uuid-first' },
+  );
+});

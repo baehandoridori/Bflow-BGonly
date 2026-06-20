@@ -9,6 +9,12 @@ test('serialize scene', () => {
     '[#a001](bscene:1:A:a001)',
   );
 });
+test('serialize scene + uuid', () => {
+  assert.equal(
+    serializeHashTag({ kind: 'scene', label: 'a001', episodeNumber: 1, partId: 'A', sceneId: 'a001', sceneUuid: 'uuid-xyz' }),
+    '[#a001](bscene:1:A:a001:uuid-xyz)',
+  );
+});
 test('serialize part / episode', () => {
   assert.equal(serializeHashTag({ kind: 'part', label: 'A파트', episodeNumber: 1, partId: 'A' }), '[#A파트](bpart:1:A)');
   assert.equal(serializeHashTag({ kind: 'episode', label: '친모2', episodeNumber: 2 }), '[#친모2](bepisode:2)');
@@ -17,6 +23,12 @@ test('parse scene/part/episode target', () => {
   assert.deepEqual(parseHashTarget('bscene:1:A:a001'), { kind: 'scene', episodeNumber: 1, partId: 'A', sceneId: 'a001' });
   assert.deepEqual(parseHashTarget('bpart:12:C'), { kind: 'part', episodeNumber: 12, partId: 'C' });
   assert.deepEqual(parseHashTarget('bepisode:2'), { kind: 'episode', episodeNumber: 2 });
+});
+test('parse scene + uuid target (5 seg)', () => {
+  assert.deepEqual(parseHashTarget('bscene:1:A:a001:uuid-xyz'), { kind: 'scene', episodeNumber: 1, partId: 'A', sceneId: 'a001', sceneUuid: 'uuid-xyz' });
+});
+test('parse 구형 scene 태그(uuid 없음, 4 seg) 도 여전히 OK', () => {
+  assert.deepEqual(parseHashTarget('bscene:3:B:b012'), { kind: 'scene', episodeNumber: 3, partId: 'B', sceneId: 'b012' });
 });
 test('parse invalid → null', () => {
   assert.equal(parseHashTarget('http://x'), null);
@@ -30,6 +42,12 @@ test('roundtrip: serialize → parse', () => {
   const link = serializeHashTag(t);
   const inner = link.slice(link.indexOf('(') + 1, link.lastIndexOf(')'));
   assert.deepEqual(parseHashTarget(inner), { kind: 'scene', episodeNumber: 3, partId: 'B', sceneId: 'b012' });
+});
+test('roundtrip: serialize → parse (uuid 보존)', () => {
+  const t = { kind: 'scene', label: 'b012', episodeNumber: 3, partId: 'B', sceneId: 'b012', sceneUuid: 'u-99' } as const;
+  const link = serializeHashTag(t);
+  const inner = link.slice(link.indexOf('(') + 1, link.lastIndexOf(')'));
+  assert.deepEqual(parseHashTarget(inner), { kind: 'scene', episodeNumber: 3, partId: 'B', sceneId: 'b012', sceneUuid: 'u-99' });
 });
 test('label escape: 라벨에 []() 포함 시 토큰이 깨지지 않음', () => {
   // free-form 라벨(커스텀 화 제목)에 마크다운 특수문자가 들어가도 직렬화 결과가

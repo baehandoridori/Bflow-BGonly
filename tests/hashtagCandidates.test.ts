@@ -25,6 +25,16 @@ test('씬 후보 tag 에 정확한 타깃', () => {
   const sc = c.find((x) => x.kind === 'scene' && x.label === 'a012');
   assert.deepEqual(sc?.tag, { kind: 'scene', label: 'a012', episodeNumber: 1, partId: 'A', sceneId: 'a012' });
 });
+test('씬 후보: scene.id 있으면 tag 에 sceneUuid 포함', () => {
+  const eps = [
+    { episodeNumber: 1, title: 'EP.01', parts: [
+      { partId: 'A', scenes: [{ sceneId: 'a001', id: 'uuid-1' }] },
+    ] },
+  ];
+  const c = buildHashtagCandidates(eps, {}, 'a001');
+  const sc = c.find((x) => x.kind === 'scene' && x.label === 'a001');
+  assert.deepEqual(sc?.tag, { kind: 'scene', label: 'a001', episodeNumber: 1, partId: 'A', sceneId: 'a001', sceneUuid: 'uuid-1' });
+});
 test('친모 → 커스텀 제목 화 후보', () => {
   const c = buildHashtagCandidates(EPISODES, TITLES, '친모');
   assert.ok(c.some((x) => x.kind === 'episode' && x.label === '친모2' && x.tag.episodeNumber === 2));

@@ -7,7 +7,7 @@
  */
 import { type HashTag } from './hashEntity.ts';
 
-interface SceneLike { sceneId: string }
+interface SceneLike { sceneId: string; id?: string }
 interface PartLike { partId: string; scenes: readonly SceneLike[] }
 interface EpisodeLike { episodeNumber: number; title: string; parts: readonly PartLike[] }
 
@@ -45,7 +45,8 @@ export function buildHashtagCandidates(
             kind: 'scene',
             label: sc.sceneId,
             context: `${ep2(ep.episodeNumber)} ${part.partId}`,
-            tag: { kind: 'scene', label: sc.sceneId, episodeNumber: ep.episodeNumber, partId: part.partId, sceneId: sc.sceneId },
+            // Supabase UUID(sc.id)가 있으면 실어 같은 파트 내 sceneId 중복 row 를 정확히 구분(없으면 구형 동작).
+            tag: { kind: 'scene', label: sc.sceneId, episodeNumber: ep.episodeNumber, partId: part.partId, sceneId: sc.sceneId, ...(sc.id ? { sceneUuid: sc.id } : {}) },
           });
         }
       }

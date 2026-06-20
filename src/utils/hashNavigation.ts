@@ -24,7 +24,8 @@ export function navigateToHashTarget(target: HashTarget): void {
   }
   // scene
   const episodes = useDataStore.getState().episodes;
-  const scene = resolveSceneById(episodes, target.episodeNumber, target.partId, target.sceneId);
+  // target.sceneUuid(있으면) 로 같은 파트 내 sceneId 중복 row 를 정확히 구분해 연다.
+  const scene = resolveSceneById(episodes, target.episodeNumber, target.partId, target.sceneId, target.sceneUuid);
   if (!scene) {
     useAppStore.getState().setToast(`${target.sceneId} 씬을 찾을 수 없습니다.`);
     return;
@@ -39,7 +40,8 @@ export function navigateToHashTarget(target: HashTarget): void {
     department: useAllMode ? 'all' : fallbackDept,
     highlightSceneId: scene.sceneId,
     modalRequest: {
-      sceneUuid: scene.id,
+      // resolve 된 scene.id 우선, 없으면 태그에 실린 sceneUuid 폴백.
+      sceneUuid: scene.id ?? target.sceneUuid,
       sceneName: scene.sceneId,
       episodeNumber: target.episodeNumber,
       partId: target.partId,
