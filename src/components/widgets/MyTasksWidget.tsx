@@ -4,6 +4,7 @@ import { motion, AnimatePresence, Reorder } from 'framer-motion';
 import { Widget, IsPopupContext, WidgetIdContext } from './Widget';
 import { EntityAwareInput } from '@/components/common/EntityAwareInput';
 import { EntityText } from '@/components/common/EntityText';
+import { navigateToHashTarget } from '@/utils/hashNavigation';
 import { useDataStore } from '@/stores/useDataStore';
 import { useAppStore } from '@/stores/useAppStore';
 import { useAuthStore } from '@/stores/useAuthStore';
@@ -624,7 +625,7 @@ const EditableSceneRow = forwardRef<HTMLDivElement, EditableSceneRowProps>(funct
               onDoubleClick={() => startEdit('memo', s.memo)}
               title="더블클릭하여 메모 편집"
             >
-              {s.memo ? <EntityText text={s.memo} userNames={users.map((u) => u.name)} /> : s.sceneId}
+              {s.memo ? <EntityText text={s.memo} userNames={users.map((u) => u.name)} onHashClick={navigateToHashTarget} /> : s.sceneId}
             </span>
           )}
         </div>
@@ -804,7 +805,7 @@ function PersonalTodoContent({
           </span>
         )}
         {todo.memo && (
-          <span className="text-[11px] text-text-secondary/50 truncate"><EntityText text={todo.memo} userNames={users.map((u) => u.name)} /></span>
+          <span className="text-[11px] text-text-secondary/50 truncate"><EntityText text={todo.memo} userNames={users.map((u) => u.name)} onHashClick={navigateToHashTarget} /></span>
         )}
         {editingDates ? (
           <div className="flex items-center gap-1 text-[9px]" onClick={(e) => e.stopPropagation()}>

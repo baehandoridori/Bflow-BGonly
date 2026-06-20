@@ -20,6 +20,7 @@ import { useAppStore } from '@/stores/useAppStore';
 import { useAuthStore } from '@/stores/useAuthStore';
 import { EntityAwareInput } from '@/components/common/EntityAwareInput';
 import { EntityText } from '@/components/common/EntityText';
+import { navigateToHashTarget } from '@/utils/hashNavigation';
 import { DEPARTMENT_CONFIGS } from '@/types';
 import { floatingGlassStyle } from '@/utils/glassStyles';
 
@@ -378,7 +379,7 @@ export function EventSidePanel({
             <div className="bg-bg-primary/40 rounded-md px-2.5 py-2 min-h-[48px]">
               <p className="text-xs text-text-primary/80 leading-relaxed whitespace-pre-wrap">
                 {event.memo
-                  ? <EntityText text={event.memo} userNames={userNames} />
+                  ? <EntityText text={event.memo} userNames={userNames} onHashClick={navigateToHashTarget} />
                   : <span className="text-text-secondary/40">메모 없음</span>}
               </p>
             </div>

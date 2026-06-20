@@ -16,14 +16,15 @@ export function resolveSceneById(
   episodeNumber: number,
   partId: string,
   sceneId: string,
-): SceneLike | null {
+): (SceneLike & { department?: string }) | null {
   const ep = episodes.find((e) => e.episodeNumber === episodeNumber);
   if (!ep) return null;
   const wantPart = partId.toLowerCase();
   for (const part of ep.parts) {
     if (part.partId.toLowerCase() !== wantPart) continue;
     const scene = part.scenes.find((s) => s.sceneId === sceneId);
-    if (scene) return scene;
+    // uuid 없는(Sheets/test) 데이터 점프 폴백용으로 찾은 파트의 부서도 함께 돌려준다(hashNavigation).
+    if (scene) return part.department ? { ...scene, department: part.department } : scene;
   }
   return null;
 }

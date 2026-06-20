@@ -28,10 +28,13 @@ export function navigateToHashTarget(target: HashTarget): void {
     return;
   }
   const useAllMode = Boolean(scene.id);
+  // uuid 없는(Sheets/preview/test) 씬은 all-mode 정규화 매칭(BG ac001→merged a001)에서 누락될 수 있어,
+  // 찾은 파트의 부서로 폴백한다(핫픽스 v1.41.1과 동일 회피). uuid 있으면 통합('all') 모달.
+  const fallbackDept = scene.department === 'acting' ? 'acting' : scene.department === 'bg' ? 'bg' : undefined;
   navigateToSceneView({
     episodeNumber: target.episodeNumber,
     partId: target.partId,
-    department: useAllMode ? 'all' : undefined,
+    department: useAllMode ? 'all' : fallbackDept,
     highlightSceneId: scene.sceneId,
     modalRequest: {
       sceneUuid: scene.id,
@@ -39,7 +42,7 @@ export function navigateToHashTarget(target: HashTarget): void {
       episodeNumber: target.episodeNumber,
       partId: target.partId,
       initialTab: 'detail',
-      forceDeptFilter: useAllMode ? 'all' : undefined,
+      forceDeptFilter: useAllMode ? 'all' : fallbackDept,
     },
   });
 }
