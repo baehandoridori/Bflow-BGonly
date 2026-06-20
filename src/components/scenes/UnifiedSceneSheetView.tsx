@@ -10,7 +10,9 @@ import { isFullyDone } from '@/utils/calcStats';
 import { cn } from '@/utils/cn';
 import { getMergedCommentBadgeCounts } from '@/utils/mergedSceneHelpers';
 import { HighlightText } from '@/components/common/HighlightText';
-import { PathLinkifiedText } from '@/components/common/PathLinkifiedText';
+import { EntityText } from '@/components/common/EntityText';
+import { navigateToCutNumber } from '@/utils/cutNumberNavigation';
+import { parseCommentSceneContext } from '@/utils/revisionSceneContext';
 import { AssigneeSelect } from '@/components/common/AssigneeSelect';
 import { AssigneeMultiSelect, AssigneeChipList } from '@/components/common/AssigneeMultiSelect';
 import { useDataStore } from '@/stores/useDataStore';
@@ -25,6 +27,7 @@ import {
   type SheetColumnDefinition,
 } from './SheetColumnResize';
 import { useAppStore } from '@/stores/useAppStore';
+import { useAuthStore } from '@/stores/useAuthStore';
 import { StageSegmentToggle } from './StageSegmentToggle';
 import { SheetAlertBadges } from './SheetAlertBadges';
 import { AssigneeProgressStack } from './AssigneeProgressStack';
@@ -162,6 +165,7 @@ function SheetEditableCell({
   onMouseEnter,
   onStartEditing,
   onStopEditing,
+  sheetName,
 }: {
   value: string;
   field: string;
@@ -175,8 +179,16 @@ function SheetEditableCell({
   onMouseEnter: () => void;
   onStartEditing: () => void;
   onStopEditing: () => void;
+  /** 메모 셀 컷 점프 컨텍스트(4b, 표시 전용). */
+  sheetName?: string;
 }) {
   const [draft, setDraft] = useState(value);
+  const users = useAuthStore((s) => s.users);
+  const userNames = useMemo(() => users.map((u) => u.name), [users]);
+  const cutCtx = useMemo(
+    () => (sheetName && (field === 'bgMemo' || field === 'actMemo') ? parseCommentSceneContext(sheetName) : null),
+    [sheetName, field],
+  );
   const inputRef = useRef<HTMLInputElement>(null);
   const cellRef = useRef<HTMLTableCellElement>(null);
   const draftRef = useRef(draft);
@@ -298,8 +310,10 @@ function SheetEditableCell({
     >
       {/* v1.16.0: 메모 컬럼은 G드라이브 경로 클릭 가능 (PathBadge) */}
       {isMemo ? (
-        <PathLinkifiedText
+        <EntityText
           text={value || '-'}
+          userNames={userNames}
+          onCutClick={cutCtx ? (n) => navigateToCutNumber(n, cutCtx) : undefined}
           renderTextSegment={(seg, idx) => <HighlightText key={idx} text={seg} query={searchQuery} />}
         />
       ) : type === 'assignee' ? (
@@ -1094,6 +1108,7 @@ export function UnifiedSceneSheetView({
                       field="bgMemo"
                       onSave={(v) => saveField(rowIndex, 0, v)}
                       searchQuery={searchQuery}
+                      sheetName={bgSheetName ?? undefined}
                       isSelected={selectedCells.has(cellKey(rowIndex, 0))}
                       isEditing={editingCell?.row === rowIndex && editingCell?.col === 0}
                       initialChar={editingCell?.row === rowIndex && editingCell?.col === 0 ? initialEditChar : undefined}
@@ -1113,6 +1128,7 @@ export function UnifiedSceneSheetView({
                       field="actMemo"
                       onSave={(v) => saveField(rowIndex, 1, v)}
                       searchQuery={searchQuery}
+                      sheetName={actSheetName ?? undefined}
                       isSelected={selectedCells.has(cellKey(rowIndex, 1))}
                       isEditing={editingCell?.row === rowIndex && editingCell?.col === 1}
                       initialChar={editingCell?.row === rowIndex && editingCell?.col === 1 ? initialEditChar : undefined}

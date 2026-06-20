@@ -1,5 +1,5 @@
 import { useRef, useState } from 'react';
-import type { ChangeEvent, ClipboardEvent, KeyboardEvent, RefObject, UIEvent } from 'react';
+import type { ChangeEvent, ClipboardEvent, FocusEvent, KeyboardEvent, RefObject, UIEvent } from 'react';
 import { useMentionAutocomplete } from '@/hooks/useMentionAutocomplete';
 import { MentionDropdown } from './MentionDropdown';
 import { EntityHighlightOverlay } from './EntityHighlightOverlay';
@@ -21,6 +21,8 @@ interface Props {
   onSubmit?: () => void;
   onCancel?: () => void;          // Escape (멘션 비활성 시)
   onPaste?: (e: ClipboardEvent) => void;
+  /** 포커스 떠날 때(인라인 메모 blur 저장). 멘션 드롭다운 클릭은 preventDefault라 여기로 안 옴(MentionDropdown). */
+  onBlur?: (e: FocusEvent<HTMLInputElement | HTMLTextAreaElement>) => void;
   'aria-label'?: string;
 }
 
@@ -32,7 +34,7 @@ interface Props {
  */
 export function EntityAwareInput({
   value, onChange, users, multiline, placeholder, className, rows, autoFocus,
-  dropdownPositionClassName, submitOn = 'none', onSubmit, onCancel, onPaste,
+  dropdownPositionClassName, submitOn = 'none', onSubmit, onCancel, onPaste, onBlur,
   'aria-label': ariaLabel,
 }: Props) {
   const inputRef = useRef<HTMLInputElement | HTMLTextAreaElement>(null);
@@ -69,6 +71,9 @@ export function EntityAwareInput({
     onKeyDown: handleKeyDown,
     onScroll: handleScroll,
     onPaste,
+    onBlur,
+    // 멘션·경로·컷 입력칸은 spell-check 불필요(고유명사·G:\경로·한글 다수 → Electron 기본 영어 사전이 오탐). 전역 off.
+    spellCheck: false,
     placeholder,
     autoFocus,
     'aria-label': ariaLabel,

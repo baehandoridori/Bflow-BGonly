@@ -41,3 +41,10 @@ test('parseCommentSceneContext: 형식 불일치 → null', () => {
   assert.equal(parseCommentSceneContext(null), null);
   assert.equal(parseCommentSceneContext('foo:3'), null);
 });
+
+// ─── 4b: 씬 메모 sheetName-only 컨텍스트 (:sceneNo 없음) ───
+test('parseCommentSceneContext: sheetName 만(:sceneNo 없음)도 컨텍스트 추출 — 4b 씬 메모', () => {
+  assert.deepEqual(parseCommentSceneContext('EP01_A_BG'), { episodeNumber: 1, partId: 'A', department: 'bg' });
+  assert.deepEqual(parseCommentSceneContext('EP12_C_ACT'), { episodeNumber: 12, partId: 'C', department: 'acting' });
+  assert.deepEqual(parseCommentSceneContext('EP02_A'), { episodeNumber: 2, partId: 'A', department: 'bg' });
+});

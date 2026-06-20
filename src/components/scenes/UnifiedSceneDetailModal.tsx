@@ -21,7 +21,10 @@ import { ScenePhaseToggle } from './ScenePhaseToggle';
 import { StageSegmentToggle } from './StageSegmentToggle';
 import { sceneProgress } from '@/utils/calcStats';
 import { AssigneeMultiSelect, AssigneeChipList } from '@/components/common/AssigneeMultiSelect';
-import { PathLinkifiedText } from '@/components/common/PathLinkifiedText';
+import { EntityAwareInput } from '@/components/common/EntityAwareInput';
+import { EntityText } from '@/components/common/EntityText';
+import { navigateToCutNumber } from '@/utils/cutNumberNavigation';
+import { parseCommentSceneContext } from '@/utils/revisionSceneContext';
 import { resizeBlob } from '@/utils/imageUtils';
 import { ImageModal } from './ImageModal';
 import type { CommentInlineEvent } from './CommentPanel';
@@ -34,6 +37,7 @@ import { describeActivity, deptPrefix } from './activityLabels';
 import { useRevisionStore } from '@/stores/useRevisionStore';
 import { useDataStore } from '@/stores/useDataStore';
 import { useAppStore } from '@/stores/useAppStore';
+import { useAuthStore } from '@/stores/useAuthStore';
 import { buildSceneKey } from '@/services/revisionService';
 import { buildSceneThreadKeyFromRevisionKey } from '@/utils/commentThreadKey';
 import { buildMergedRevisionSceneId } from '@/utils/mergedSceneHelpers';
@@ -1313,6 +1317,7 @@ function DeptSection({
         onSave={(v) => onFieldUpdate(sheetName, sceneIndex, 'memo', v)}
         memoAuthorMeta={memoAuthorMeta}
         continuityTarget={dept === 'bg' ? 'bg-memo' : 'act-memo'}
+        sheetName={sheetName}
       />
     </div>
   );
@@ -1369,15 +1374,16 @@ function InlineAssigneeRow({ label, value, onSave }: {
 
 /* ── 인라인 메모 ── */
 
-function InlineTextareaRow({ label, value, onSave, memoAuthorMeta, continuityTarget }: {
-  label: string; value: string; onSave: (v: string) => void; memoAuthorMeta?: MemoAuthorMeta | null; continuityTarget?: string;
+function InlineTextareaRow({ label, value, onSave, memoAuthorMeta, continuityTarget, sheetName }: {
+  label: string; value: string; onSave: (v: string) => void; memoAuthorMeta?: MemoAuthorMeta | null; continuityTarget?: string; sheetName?: string;
 }) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(value);
-  const ref = useRef<HTMLTextAreaElement>(null);
+  const { users } = useAuthStore();
+  const userNames = useMemo(() => users.map((u) => u.name), [users]);
+  const cutCtx = useMemo(() => (sheetName ? parseCommentSceneContext(sheetName) : null), [sheetName]);
 
   useEffect(() => { setDraft(value); }, [value]);
-  useEffect(() => { if (editing) ref.current?.focus(); }, [editing]);
 
   const commit = () => {
     if (draft !== value) onSave(draft);
@@ -1408,16 +1414,15 @@ function InlineTextareaRow({ label, value, onSave, memoAuthorMeta, continuityTar
         )}
       </div>
       {editing ? (
-        <textarea
-          ref={ref}
+        <EntityAwareInput
+          multiline
           value={draft}
-          onChange={(e) => setDraft(e.target.value)}
+          onChange={setDraft}
+          users={users}
           onBlur={commit}
-          onKeyDown={(e) => {
-            if (e.key === 'Escape') { setDraft(value); setEditing(false); }
-          }}
+          onCancel={() => { setDraft(value); setEditing(false); }}
+          autoFocus
           className="w-full min-h-[64px] bg-bg-primary border border-accent/50 rounded-md px-3 py-2 text-sm text-text-primary outline-none focus:border-accent resize-y"
-          spellCheck={false}
         />
       ) : (
         <div
@@ -1426,7 +1431,7 @@ function InlineTextareaRow({ label, value, onSave, memoAuthorMeta, continuityTar
           style={{ background: value ? 'rgba(255,255,255,0.025)' : undefined }}
         >
           {value
-            ? <PathLinkifiedText text={value} />
+            ? <EntityText text={value} userNames={userNames} onCutClick={cutCtx ? (n) => navigateToCutNumber(n, cutCtx) : undefined} />
             : <span className="text-text-secondary/50">메모 없음</span>}
           {value && (
             <Pencil size={12} className="inline-block ml-2 opacity-0 hover:opacity-60 transition-opacity" />

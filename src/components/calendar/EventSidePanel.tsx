@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   X,
@@ -17,6 +17,9 @@ import type { CalendarEvent, CalendarEventType } from '@/types/calendar';
 import { EVENT_COLORS } from '@/types/calendar';
 import { useDataStore } from '@/stores/useDataStore';
 import { useAppStore } from '@/stores/useAppStore';
+import { useAuthStore } from '@/stores/useAuthStore';
+import { EntityAwareInput } from '@/components/common/EntityAwareInput';
+import { EntityText } from '@/components/common/EntityText';
 import { DEPARTMENT_CONFIGS } from '@/types';
 import { floatingGlassStyle } from '@/utils/glassStyles';
 
@@ -108,6 +111,8 @@ export function EventSidePanel({
   const [draftStart, setDraftStart] = useState(event.startDate);
   const [draftEnd, setDraftEnd] = useState(event.endDate);
   const [draftMemo, setDraftMemo] = useState(event.memo);
+  const users = useAuthStore((s) => s.users);
+  const userNames = useMemo(() => users.map((u) => u.name), [users]);
   const [draftPrivate, setDraftPrivate] = useState<boolean>(!!event.isPrivate);
 
   // 이벤트 변경 시 드래프트 리셋
@@ -360,9 +365,11 @@ export function EventSidePanel({
             <span className="text-[10px] font-medium uppercase tracking-wide">메모</span>
           </div>
           {editing ? (
-            <textarea
-              value={draftMemo}
-              onChange={(e) => setDraftMemo(e.target.value)}
+            <EntityAwareInput
+              multiline
+              value={draftMemo ?? ''}
+              onChange={setDraftMemo}
+              users={users}
               rows={4}
               className="w-full bg-bg-primary/85 border border-bg-border/70 focus:border-accent/50 rounded-md px-2.5 py-2 text-xs text-text-primary outline-none resize-none leading-relaxed transition-colors"
               placeholder="메모 입력..."
@@ -370,9 +377,9 @@ export function EventSidePanel({
           ) : (
             <div className="bg-bg-primary/40 rounded-md px-2.5 py-2 min-h-[48px]">
               <p className="text-xs text-text-primary/80 leading-relaxed whitespace-pre-wrap">
-                {event.memo || (
-                  <span className="text-text-secondary/40 italic">메모 없음</span>
-                )}
+                {event.memo
+                  ? <EntityText text={event.memo} userNames={userNames} />
+                  : <span className="text-text-secondary/40">메모 없음</span>}
               </p>
             </div>
           )}
