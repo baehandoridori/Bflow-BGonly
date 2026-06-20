@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { tokenizeEntities } from '../src/utils/entityTokens.ts';
+import { tokenizeEntities, stripEntityTokens } from '../src/utils/entityTokens.ts';
 
 const USERS = ['홍길동', '김철수'];
 
@@ -65,4 +65,20 @@ test('해시 라벨 안에 컷 패턴이 있어도 hash 우선(겹침)', () => {
   const toks = tokenizeEntities('[#컷5씬](bscene:1:A:a001)', USERS);
   assert.equal(toks.length, 1);
   assert.equal(toks[0].type, 'hash');
+});
+
+// ─── 4c PR1: 평문 환원(직렬화 토큰을 못 쓰는 표시 자리용) ───
+test('stripEntityTokens: #토큰 → 평문 #라벨', () => {
+  assert.equal(stripEntityTokens('보세요 [#a001](bscene:1:A:a001) 참고'), '보세요 #a001 참고');
+  assert.equal(stripEntityTokens('[#A파트](bpart:1:A) / [#친모2](bepisode:2)'), '#A파트 / #친모2');
+});
+test('stripEntityTokens: 멘션·경로·텍스트는 그대로, 빈값은 빈문자열', () => {
+  // 경로(G:\)는 '줄끝까지' 흡수하므로 같은 줄 뒤 토큰을 먹는다 → 해시는 경로와 같은 줄에 두지 않는다.
+  assert.equal(stripEntityTokens('@홍길동 [#a001](bscene:1:A:a001) 메모'), '@홍길동 #a001 메모');
+  assert.equal(stripEntityTokens('경로 G:\\공유\\a.png'), '경로 G:\\공유\\a.png');
+  assert.equal(stripEntityTokens('그냥 글'), '그냥 글');
+  assert.equal(stripEntityTokens(''), '');
+});
+test('stripEntityTokens: 잘못된 타깃은 평문 유지(환원 안 함)', () => {
+  assert.equal(stripEntityTokens('[#x](http://y)'), '[#x](http://y)');
 });

@@ -26,6 +26,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { ArrowUpDown, LayoutGrid, Grid3x3, Layers, List, ChevronUp, ChevronDown, ClipboardPaste, ImagePlus, ArrowLeft, CheckSquare, Trash2, X, MessageCircle, Pencil, MoreVertical, StickyNote, Archive, Film, RotateCcw, Clock, PlayCircle, CheckCircle2, Circle, MessageSquareWarning, Plus, UserRound } from 'lucide-react';
 import { AssigneeSelect } from '@/components/common/AssigneeSelect';
 import { HighlightText } from '@/components/common/HighlightText';
+import { stripEntityTokens } from '@/utils/entityTokens';
 import { CompactIconLabel } from '@/components/common/CompactIconLabel';
 import { EpisodeTreeNav } from '@/components/scenes/EpisodeTreeNav';
 import { SceneSheetView } from '@/components/scenes/SceneSheetView';
@@ -978,7 +979,7 @@ function SceneCard({ scene, sceneIndex, celebrating, department, isHighlighted, 
       {scene.memo && (
         <div className="mx-4 mt-1">
           <p className="text-[11px] text-amber-400/70 leading-relaxed line-clamp-2">
-            <HighlightText text={scene.memo} query={searchQuery} />
+            <HighlightText text={stripEntityTokens(scene.memo)} query={searchQuery} />
           </p>
         </div>
       )}

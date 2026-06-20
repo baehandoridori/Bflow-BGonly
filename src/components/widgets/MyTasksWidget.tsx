@@ -5,6 +5,7 @@ import { Widget, IsPopupContext, WidgetIdContext } from './Widget';
 import { EntityAwareInput } from '@/components/common/EntityAwareInput';
 import { EntityText } from '@/components/common/EntityText';
 import { navigateToHashTarget } from '@/utils/hashNavigation';
+import { stripEntityTokens } from '@/utils/entityTokens';
 import { useDataStore } from '@/stores/useDataStore';
 import { useAppStore } from '@/stores/useAppStore';
 import { useAuthStore } from '@/stores/useAuthStore';
@@ -408,7 +409,7 @@ function AddTaskModal({
                       <span className="text-xs font-mono font-bold text-accent shrink-0">#{s.sceneId.match(/\d+$/)?.[0]?.replace(/^0+/, '') || s.no}</span>
                       <div className="flex flex-col min-w-0 flex-1">
                         <span className="text-xs text-text-primary truncate">{s.sceneId}</span>
-                        {s.memo && <span className="text-[10px] text-text-secondary/40 truncate">{s.memo}</span>}
+                        {s.memo && <span className="text-[10px] text-text-secondary/40 truncate">{stripEntityTokens(s.memo)}</span>}
                       </div>
                       {s.assignee && <span className="text-[11px] text-text-secondary/50 shrink-0">{s.assignee}</span>}
                       <span className="ml-auto text-[11px] tabular-nums shrink-0" style={{ color: pct >= 100 ? '#00B894' : pct >= 50 ? '#FDCB6E' : '#8B8DA3' }}>
@@ -459,7 +460,8 @@ function AddTaskModal({
                   value={todoMemo}
                   onChange={setTodoMemo}
                   users={users}
-                  enableHashtag
+                  /* #태그 끔: 할일 메모는 캘린더 일정과 동기화돼(addToCalendar) ScheduleView·CalendarView 등
+                     평문 경로로 표시되므로 직렬화 토큰('[#a001](...)')이 노출된다(캘린더 메모와 동일 정책). */
                   placeholder="메모 (선택)"
                   rows={2}
                   className="w-full bg-bg-primary border border-bg-border rounded-lg px-3 py-2 text-xs text-text-primary outline-none focus:border-accent/50 placeholder:text-text-secondary/30 resize-none"

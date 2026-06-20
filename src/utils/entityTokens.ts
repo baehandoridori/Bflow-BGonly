@@ -58,3 +58,18 @@ export function tokenizeEntities(text: string, userNames: string[]): EntityToken
   }
   return out;
 }
+
+/**
+ * 직렬화된 엔티티 텍스트를 '평문 표시용' 문자열로 환원한다(4c).
+ *  - #태그 마크다운 토큰('[#a001](bscene:...)') → '#a001'(라벨만)
+ *  - 멘션('@이름')·경로(G:\...)·그 외 텍스트 → 그대로
+ * EntityText(칩) 를 못 쓰는 표시 자리(검색 미리보기·truncate/slice·아카이브 트리 등)에서
+ * 직렬화 토큰이 그대로 노출되지 않게 한다. 결과는 일반 문자열이라 slice/하이라이트와 호환된다.
+ * 멘션 판별에 userNames 가 필요 없다(평문 환원 결과가 동일) → 인자 없이 호출한다.
+ */
+export function stripEntityTokens(text: string): string {
+  if (!text) return '';
+  return tokenizeEntities(text, [])
+    .map((tok) => (tok.type === 'hash' ? `#${tok.label}` : tok.content))
+    .join('');
+}

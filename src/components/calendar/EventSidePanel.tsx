@@ -20,7 +20,6 @@ import { useAppStore } from '@/stores/useAppStore';
 import { useAuthStore } from '@/stores/useAuthStore';
 import { EntityAwareInput } from '@/components/common/EntityAwareInput';
 import { EntityText } from '@/components/common/EntityText';
-import { navigateToHashTarget } from '@/utils/hashNavigation';
 import { DEPARTMENT_CONFIGS } from '@/types';
 import { floatingGlassStyle } from '@/utils/glassStyles';
 
@@ -371,7 +370,8 @@ export function EventSidePanel({
               value={draftMemo ?? ''}
               onChange={setDraftMemo}
               users={users}
-              enableHashtag
+              /* #태그 끔: 이 메모는 ScheduleView 카드/툴팁/상세·CalendarView 선택 패널에서 평문({event.memo})으로
+                 표시돼 직렬화 토큰('[#a001](...)')이 노출된다(EntityAwareInput enableHashtag 주석 참조). */
               rows={4}
               className="w-full bg-bg-primary/85 border border-bg-border/70 focus:border-accent/50 rounded-md px-2.5 py-2 text-xs text-text-primary outline-none resize-none leading-relaxed transition-colors"
               placeholder="메모 입력..."
@@ -380,7 +380,7 @@ export function EventSidePanel({
             <div className="bg-bg-primary/40 rounded-md px-2.5 py-2 min-h-[48px]">
               <p className="text-xs text-text-primary/80 leading-relaxed whitespace-pre-wrap">
                 {event.memo
-                  ? <EntityText text={event.memo} userNames={userNames} onHashClick={navigateToHashTarget} />
+                  ? <EntityText text={event.memo} userNames={userNames} />
                   : <span className="text-text-secondary/40">메모 없음</span>}
               </p>
             </div>

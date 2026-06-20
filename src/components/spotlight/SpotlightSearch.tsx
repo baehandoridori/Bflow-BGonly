@@ -4,6 +4,7 @@ import { Search, Film, User, FileText, Zap, Hash, Layers, CalendarDays, StickyNo
 import { useDataStore } from '@/stores/useDataStore';
 import { useAppStore } from '@/stores/useAppStore';
 import { sceneProgress } from '@/utils/calcStats';
+import { stripEntityTokens } from '@/utils/entityTokens';
 import { DEPARTMENT_CONFIGS } from '@/types';
 import type { Episode } from '@/types';
 import { cn } from '@/utils/cn';
@@ -355,10 +356,11 @@ export function SpotlightSearch() {
             });
           }
           if (scene.memo && fuzzyScore(q, scene.memo) > 0) {
+            const memoText = stripEntityTokens(scene.memo);
             items.push({
               id: `memo-${part.sheetName}-${scene.sceneId}`,
               category: 'memo',
-              title: scene.memo.length > 50 ? scene.memo.slice(0, 50) + '...' : scene.memo,
+              title: memoText.length > 50 ? memoText.slice(0, 50) + '...' : memoText,
               subtitle: `${scene.sceneId} · ${epName(ep)} ${part.partId}파트`,
               icon: <FileText size={16} />,
               score: fuzzyScore(q, scene.memo),
