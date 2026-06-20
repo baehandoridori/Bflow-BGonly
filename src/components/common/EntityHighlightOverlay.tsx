@@ -33,6 +33,7 @@ export function EntityHighlightOverlay({ text, userNames, className, scrollTop =
         if (t.type === 'mention') return <span key={i} className="rounded bg-accent/25">{t.content}</span>;
         if (t.type === 'path') return <span key={i} className="rounded bg-[#74B9FF]/20">{t.content}</span>;
         if (t.type === 'cut') return <span key={i} className="rounded bg-text-secondary/25">{t.content}</span>;
+        if (t.type === 'hash') return <span key={i} className="rounded bg-[#5fe3cd]/25">{t.content}</span>;
         return <Fragment key={i}>{t.content}</Fragment>;
       })}
       {/* 마지막 글자가 개행이면 caret 줄 높이 보정 */}

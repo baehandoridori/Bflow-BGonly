@@ -1,7 +1,9 @@
 import { useRef, useState } from 'react';
 import type { ChangeEvent, ClipboardEvent, FocusEvent, KeyboardEvent, RefObject, UIEvent } from 'react';
 import { useMentionAutocomplete } from '@/hooks/useMentionAutocomplete';
+import { useHashtagAutocomplete } from '@/hooks/useHashtagAutocomplete';
 import { MentionDropdown } from './MentionDropdown';
+import { HashtagDropdown } from './HashtagDropdown';
 import { EntityHighlightOverlay } from './EntityHighlightOverlay';
 
 interface MentionUser { id: string; name: string }
@@ -45,9 +47,16 @@ export function EntityAwareInput({
     users,
     inputRef: inputRef as RefObject<HTMLTextAreaElement | null>,
   });
+  const hash = useHashtagAutocomplete({
+    onChange,
+    inputRef: inputRef as RefObject<HTMLTextAreaElement | null>,
+  });
+  // @멘션·#태그 둘 다 DOM 을 직접 읽어 갱신. active 는 한쪽만(키핸들에서 mention 우선).
+  const refreshAll = () => { mention.refresh(); hash.refresh(); };
 
   const handleKeyDown = (e: KeyboardEvent) => {
     if (mention.onKeyDown(e)) return;
+    if (hash.onKeyDown(e)) return;
     if (e.key === 'Escape' && onCancel) { e.preventDefault(); onCancel(); return; }
     if (onSubmit && e.key === 'Enter') {
       if (submitOn === 'enter' && !e.shiftKey) { e.preventDefault(); onSubmit(); }
@@ -57,7 +66,7 @@ export function EntityAwareInput({
 
   const handleChange = (e: ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
     onChange(e.target.value);
-    mention.refresh();
+    refreshAll();
   };
   const handleScroll = (e: UIEvent<HTMLInputElement | HTMLTextAreaElement>) => {
     setScroll({ top: e.currentTarget.scrollTop, left: e.currentTarget.scrollLeft });
@@ -66,8 +75,8 @@ export function EntityAwareInput({
   const shared = {
     value,
     onChange: handleChange,
-    onClick: mention.refresh,
-    onSelect: mention.refresh,
+    onClick: refreshAll,
+    onSelect: refreshAll,
     onKeyDown: handleKeyDown,
     onScroll: handleScroll,
     onPaste,
@@ -91,14 +100,21 @@ export function EntityAwareInput({
         scrollLeft={scroll.left}
         singleLine={!multiline}
       />
-      {mention.active && (
+      {mention.active ? (
         <MentionDropdown
           items={mention.items}
           index={mention.index}
           onPick={mention.select}
           positionClassName={dropdownPositionClassName}
         />
-      )}
+      ) : hash.active ? (
+        <HashtagDropdown
+          items={hash.items}
+          index={hash.index}
+          onPick={hash.select}
+          positionClassName={dropdownPositionClassName}
+        />
+      ) : null}
       {multiline
         ? <textarea ref={inputRef as RefObject<HTMLTextAreaElement>} rows={rows} {...shared} />
         : <input type="text" ref={inputRef as RefObject<HTMLInputElement>} {...shared} />}
