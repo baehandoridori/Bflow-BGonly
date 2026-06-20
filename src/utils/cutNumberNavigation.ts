@@ -25,10 +25,14 @@ export function navigateToCutNumber(cutNumber: number, ctx: CutContext): boolean
   }
   // modalRequest 로 타겟 씬 상세 모달을 열어 교체한다. 컷 칩은 씬 상세 모달(댓글/리테이크) 안에서 클릭되므로,
   // 하이라이트만 하면 기존 모달 뒤로 가려 이동이 안 보인다(코덱스 P2). 알림 점프와 동일하게 모달을 reopen 한다.
+  // scene.id(Supabase UUID)가 있으면 통합('all') 모달로 연다 — sheetName 부서로 단일 뷰를 강제하지 않는다(한솔 요구).
+  // uuid 가 없는 레거시/test 데이터는 통합 매칭이 정규화 쌍(BG ac001→merged a001)에서 sceneName 으로만 폴백돼
+  // 실패할 수 있으므로(코덱스 P2) 기존 부서 동작을 유지한다.
+  const useAllMode = Boolean(scene.id);
   navigateToSceneView({
     episodeNumber: ctx.episodeNumber,
     partId: ctx.partId,
-    department: ctx.department ?? undefined,
+    department: useAllMode ? 'all' : (ctx.department ?? undefined),
     highlightSceneId: scene.sceneId,
     modalRequest: {
       // sceneUuid(Supabase) 우선 — 통합('all') 뷰는 raw sceneId 가 아니라 sceneUuid/대표 sceneId 로 매칭하므로
@@ -38,7 +42,7 @@ export function navigateToCutNumber(cutNumber: number, ctx: CutContext): boolean
       episodeNumber: ctx.episodeNumber,
       partId: ctx.partId,
       initialTab: 'detail',
-      forceDeptFilter: ctx.department ?? undefined,
+      forceDeptFilter: useAllMode ? 'all' : (ctx.department ?? undefined),
     },
   });
   return true;
