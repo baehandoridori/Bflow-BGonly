@@ -56,3 +56,23 @@ test('resolveSceneById: uuid 미발견 시 sceneId 폴백', () => {
     { no: 1, sceneId: 'a001', id: 'uuid-first' },
   );
 });
+
+// ─── 4c PR1(코덱스 7차): 같은 partId 의 BG/ACT 가 같은 sceneId 면 uuid 로 정확한 부서 row ───
+const DEPT_DUP_EPISODES = [
+  { episodeNumber: 1, parts: [
+    { partId: 'A', department: 'bg', scenes: [{ no: 1, sceneId: 'a001', id: 'uuid-bg' }] },
+    { partId: 'A', department: 'acting', scenes: [{ no: 1, sceneId: 'a001', id: 'uuid-act' }] },
+  ] },
+];
+test('resolveSceneById: BG/ACT 같은 sceneId 에서 uuid 로 ACT row 정확 — 첫 파트(BG) sceneId 폴백에 안 걸림', () => {
+  assert.deepEqual(
+    resolveSceneById(DEPT_DUP_EPISODES, 1, 'A', 'a001', 'uuid-act'),
+    { no: 1, sceneId: 'a001', id: 'uuid-act', department: 'acting' },
+  );
+});
+test('resolveSceneById: uuid 미제공 시 첫 부서 파트(BG) 폴백', () => {
+  assert.deepEqual(
+    resolveSceneById(DEPT_DUP_EPISODES, 1, 'A', 'a001'),
+    { no: 1, sceneId: 'a001', id: 'uuid-bg', department: 'bg' },
+  );
+});

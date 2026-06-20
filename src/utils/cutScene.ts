@@ -23,14 +23,22 @@ export function resolveSceneById(
   const ep = episodes.find((e) => e.episodeNumber === episodeNumber);
   if (!ep) return null;
   const wantPart = partId.toLowerCase();
-  for (const part of ep.parts) {
-    if (part.partId.toLowerCase() !== wantPart) continue;
-    // uuid 가 있으면 row(s.id) 우선 매칭 — 같은 sceneId 중복 row 중 정확한 것을 연다. 못 찾으면 sceneId 폴백.
-    const scene =
-      (sceneUuid ? part.scenes.find((s) => s.id === sceneUuid) : undefined) ??
-      part.scenes.find((s) => s.sceneId === sceneId);
-    // uuid 없는(Sheets/test) 데이터 점프 폴백용으로 찾은 파트의 부서도 함께 돌려준다(hashNavigation).
-    if (scene) return part.department ? { ...scene, department: part.department } : scene;
+  const parts = ep.parts.filter((part) => part.partId.toLowerCase() === wantPart);
+  // 찾은 파트의 부서도 함께 돌려준다(uuid 없는 Sheets/test 점프 폴백용, hashNavigation).
+  const withDept = (part: PartLike, scene: SceneLike): SceneLike & { department?: string } =>
+    part.department ? { ...scene, department: part.department } : scene;
+  // 1) uuid 우선: 모든 (부서)파트를 먼저 훑는다 — 같은 partId 의 BG/ACT 가 같은 sceneId 를 가져도
+  //    파트별 sceneId 폴백이 먼저 걸려 엉뚱한 부서 row 가 열리는 일을 막는다(코덱스 7차).
+  if (sceneUuid) {
+    for (const part of parts) {
+      const scene = part.scenes.find((s) => s.id === sceneUuid);
+      if (scene) return withDept(part, scene);
+    }
+  }
+  // 2) sceneId 폴백(구형 태그·uuid 미발견): 첫 매치.
+  for (const part of parts) {
+    const scene = part.scenes.find((s) => s.sceneId === sceneId);
+    if (scene) return withDept(part, scene);
   }
   return null;
 }
