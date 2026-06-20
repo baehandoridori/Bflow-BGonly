@@ -81,7 +81,7 @@ export function EntityAwareInput({
     onScroll: handleScroll,
     onPaste,
     onBlur,
-    // 멘션·경로·컷 입력칸은 spell-check 불필요(고유명사·G:\경로·한글 다수 → Electron 기본 영어 사전이 오탐). 전역 off.
+    // 멘션·경로·#태그 입력칸은 spell-check 불필요(고유명사·G:\경로·한글 다수 → Electron 기본 영어 사전이 오탐). 전역 off.
     spellCheck: false,
     placeholder,
     autoFocus,

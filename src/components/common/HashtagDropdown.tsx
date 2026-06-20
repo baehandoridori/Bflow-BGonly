@@ -40,8 +40,8 @@ export function HashtagDropdown({ items, index, onPick, positionClassName }: Pro
             }`}
           >
             <Icon size={12} className="text-text-secondary shrink-0" />
-            <span className="text-text-primary">{cand.label}</span>
-            <span className="text-text-secondary/60 text-[11px] ml-auto shrink-0">{cand.context}</span>
+            <span className="text-text-primary truncate min-w-0 flex-1">{cand.label}</span>
+            <span className="text-text-secondary/60 text-[11px] shrink-0 max-w-[45%] truncate">{cand.context}</span>
           </button>
         );
       })}
