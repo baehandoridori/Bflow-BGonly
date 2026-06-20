@@ -12,7 +12,8 @@ import type { HashTarget } from '@/utils/hashEntity';
 
 export function navigateToHashTarget(target: HashTarget): void {
   if (target.kind === 'episode') {
-    navigateToSceneView({ episodeNumber: target.episodeNumber, department: 'all' });
+    // partId: null 로 선택 파트를 비운다 — 안 그러면 보던 파트(예 B)가 남아 엉뚱한 파트로 열림(코덱스 P2).
+    navigateToSceneView({ episodeNumber: target.episodeNumber, partId: null, department: 'all' });
     return;
   }
   if (target.kind === 'part') {
