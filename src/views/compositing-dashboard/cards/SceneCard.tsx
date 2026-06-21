@@ -17,6 +17,7 @@ import type { CompositingState } from '@/types';
 import { COMPOSITING_STATUS_LABEL, COMPOSITING_STATUS_TOKEN, COMPOSITING_ERROR_LABEL } from '@/utils/compositingLabels';
 import { StatusDot } from '@/components/compositing-dashboard/common/StatusDot';
 import { useCompositingDashboardStore } from '@/stores/useCompositingDashboardStore';
+import { compositingKey } from '@/stores/useDataStore';
 import { useTransientHighlightStore, selectHighlight } from '@/stores/transientHighlightStore';
 import { stripEntityTokens } from '@/utils/entityTokens';
 import { useAuthStore } from '@/stores/useAuthStore';
@@ -76,8 +77,10 @@ export function SceneCard({ card, state, staggerIndex, dimmed, partSceneIds }: S
     return () => window.clearTimeout(t);
   }, [isPinned]);
 
-  // transientHighlight — 다른 사용자 변경 시 색 펄스 + 보낸 사람 아바타 배지
-  const highlight = useTransientHighlightStore((s) => selectHighlight(s, sceneKey));
+  // transientHighlight — 다른 사용자 변경 시 색 펄스 + 보낸 사람 아바타 배지.
+  //   하이라이트는 compositingKey(소문자) 로 등록되므로, 조회도 같은 정규화 키로(선택/핀용 sceneKey 는 raw 유지).
+  const highlightKey = compositingKey(card.episodeNumber, card.sceneId);
+  const highlight = useTransientHighlightStore((s) => selectHighlight(s, highlightKey));
   const allUsers = useAuthStore((s) => s.users);
   const byUser = useMemo(() => {
     if (!highlight?.by) return null;
