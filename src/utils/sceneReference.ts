@@ -41,7 +41,11 @@ export function resolveReferenceMergedScene(
     sortKey,
     sortDir,
   }) as MergedScene[];
-  const found = merged.find((m) => m.sceneId === target.sceneId);
+  // target.sceneUuid 가 있으면(화 간/부서 내 sceneId 중복 대비) 그 row(bg/act)를 품은 merged 우선,
+  // 없으면 sceneId 폴백 — navigateToHashTarget(resolveSceneById)와 동일하게 정확한 row 를 연다.
+  const found = (target.sceneUuid
+    ? merged.find((m) => m.bgScene?.id === target.sceneUuid || m.actScene?.id === target.sceneUuid)
+    : undefined) ?? merged.find((m) => m.sceneId === target.sceneId);
   if (!found) return null;
   return {
     merged: found,

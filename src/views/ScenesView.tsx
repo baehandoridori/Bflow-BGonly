@@ -2947,6 +2947,19 @@ export function ScenesView() {
     setReferenceSide(side);
     setReferenceTarget(target);
   }, [sortKey, sortDir]);
+  // 참조 패널은 detailMerged 와 달리 자동 동기화 effect가 없어, 참조 패널에서 한 편집(낙관적 업데이트)이
+  // 패널 UI에 안 비쳤다(P2 — 코덱스). episodes 변경 시 referenceTarget 으로 재해석해 referenceMerged/시트명 갱신.
+  useEffect(() => {
+    if (!referenceTarget) return;
+    const r = resolveReferenceMergedScene(referenceTarget, episodes, sortKey, sortDir);
+    if (r) {
+      setReferenceMerged(r.merged);
+      setReferenceBgSheet(r.bgSheetName);
+      setReferenceActSheet(r.actSheetName);
+    } else {
+      clearReference(); // 참조 씬이 사라졌으면(삭제 등) 패널 닫기
+    }
+  }, [episodes, referenceTarget, sortKey, sortDir, clearReference]);
 
   // 딥링크 처리: bflow://scene/sheetName/sceneId → 해당 씬 모달 자동 오픈
   // sceneId는 씬번호(예: a003) 또는 씬 인덱스(예: 12) 모두 지원
