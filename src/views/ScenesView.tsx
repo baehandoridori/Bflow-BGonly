@@ -6451,6 +6451,8 @@ export function ScenesView() {
             hasNext={false}
             onClose={clearReference}
             onSceneReference={openReference}
+            onDockToggleSide={(side) => setReferenceSide(side)}
+            onDockPromote={() => { setDetailMerged(referenceMerged); clearReference(); }}
             onToggle={(sheet, id, stage) => handleToggleForSheet(sheet, id, stage)}
             onFieldUpdate={(sheet, idx, field, value) => handleFieldUpdateForSheet(sheet, idx, field, value)}
             onDeleteDept={(sheet, idx) => handleDeleteSceneForSheet(sheet, idx)}
