@@ -5,7 +5,7 @@
  * Part 에서 따로 뽑아 함께 반환한다.
  * 순수 함수 — node:test 검증.
  */
-import { buildMergedScenes } from './mergedSceneHelpers.ts';
+import { buildMergedScenes, snapshotRawCounterpartState, restoreRawCounterpartState } from './mergedSceneHelpers.ts';
 import type { HashTarget } from './hashEntity.ts';
 import type { MergedScene } from '@/types';
 
@@ -32,6 +32,9 @@ export function resolveReferenceMergedScene(
   if (!bgPart && !actPart) return null;
   const bgScenes = bgPart?.scenes ?? [];
   const actScenes = actPart?.scenes ?? [];
+  // buildMergedScenes 는 전역 counterpart 맵(partId 키)을 갱신한다 — 참조(다른 파트) 해석이 메인 파트를
+  // 오염시키지 않게, 호출 전 스냅샷 후 복원한다(빌드 내부 등록은 그대로 두어 merged.sceneId 는 정확).
+  const counterpartSnapshot = snapshotRawCounterpartState(target.partId);
   const merged = buildMergedScenes({
     bgScenes,
     actScenes,
@@ -41,6 +44,7 @@ export function resolveReferenceMergedScene(
     sortKey,
     sortDir,
   }) as MergedScene[];
+  restoreRawCounterpartState(target.partId, counterpartSnapshot);
   // target.sceneUuid 가 있으면(화 간/부서 내 sceneId 중복 대비) 그 row(bg/act)를 품은 merged 우선,
   // 없으면 sceneId 폴백 — navigateToHashTarget(resolveSceneById)와 동일하게 정확한 row 를 연다.
   const found = (target.sceneUuid

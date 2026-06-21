@@ -6466,6 +6466,7 @@ export function ScenesView() {
             bgSheetName={referenceBgSheet}
             actSheetName={referenceActSheet}
             dockMode={referenceSide}
+            referenceSide={referenceSide}
             hasPrev={false}
             hasNext={false}
             onClose={clearReference}
