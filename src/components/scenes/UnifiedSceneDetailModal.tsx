@@ -1109,6 +1109,7 @@ export function UnifiedSceneDetailModal({
                 headerRight={commentCount > 0 ? (
                   <span className="text-xs text-text-secondary/60 tabular-nums">({commentCount})</span>
                 ) : null}
+                onHashClick={handleHash}
               />
             )}
 
