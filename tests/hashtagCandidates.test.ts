@@ -17,9 +17,10 @@ const TITLES: Record<number, string> = { 2: '친모2' };
 test('a0 → 씬 후보, EP/파트로 중복 구분', () => {
   const c = buildHashtagCandidates(EPISODES, TITLES, 'a0');
   const scenes = c.filter((x) => x.kind === 'scene');
-  assert.ok(scenes.some((s) => s.label === 'a001' && s.context === 'EP01 A'));
-  assert.ok(scenes.some((s) => s.label === 'a001' && s.context === 'EP02 A'));
-  assert.ok(scenes.some((s) => s.label === 'a012' && s.context === 'EP01 A'));
+  // context 는 에피소드 '이름'(v1.43.1) — ep1 은 커스텀 제목 없어 ep.title('EP.01'), ep2 는 커스텀 '친모2'.
+  assert.ok(scenes.some((s) => s.label === 'a001' && s.context === 'EP.01 A'));
+  assert.ok(scenes.some((s) => s.label === 'a001' && s.context === '친모2 A'));
+  assert.ok(scenes.some((s) => s.label === 'a012' && s.context === 'EP.01 A'));
 });
 test('씬 후보 tag 에 정확한 타깃', () => {
   const c = buildHashtagCandidates(EPISODES, TITLES, 'a012');

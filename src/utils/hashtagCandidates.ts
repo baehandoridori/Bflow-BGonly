@@ -59,7 +59,7 @@ export function buildHashtagCandidates(
           out.push({
             kind: 'scene',
             label: sc.sceneId,
-            context: `${ep2(ep.episodeNumber)} ${part.partId}`,
+            context: `${title} ${part.partId}`,
             // sceneUuid 미탑재 — BG/ACT 통합 점프(navigateToHashTarget 이 resolveSceneById 로 all-mode 모달 오픈).
             tag: { kind: 'scene', label: sc.sceneId, episodeNumber: ep.episodeNumber, partId: part.partId, sceneId: sc.sceneId },
           });

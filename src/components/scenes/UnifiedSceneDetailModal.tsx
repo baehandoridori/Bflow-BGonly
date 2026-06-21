@@ -231,18 +231,8 @@ export function UnifiedSceneDetailModal({
   const backdropMouseDownRef = useRef(false);
   const modalMainRef = useRef<HTMLDivElement>(null);
 
-  // 4c PR2: 참조 패널이 붙으면 본체+참조+댓글 셋이 가로로 넘칠 수 있다.
-  //   좁은 화면(<1500px)에서는 댓글 패널을 숨겨 가로 오버플로를 막는다. 참조가 없으면 영향 0.
-  const [viewportNarrowForReference, setViewportNarrowForReference] = useState(
-    () => typeof window !== 'undefined' && window.innerWidth < 1500,
-  );
-  useEffect(() => {
-    if (!referencePanel) return;
-    const onResize = () => setViewportNarrowForReference(window.innerWidth < 1500);
-    onResize();
-    window.addEventListener('resize', onResize);
-    return () => window.removeEventListener('resize', onResize);
-  }, [referencePanel]);
+  // 4c PR2/v1.43.1: 참조 패널이 붙으면 본체+참조 두 상세가 이미 가로를 많이 쓴다. 댓글 패널까지 더하면
+  //   넘쳐서 잘리므로(한솔 보고), 참조가 열려 있는 동안은 댓글 패널을 숨긴다(참조 닫으면 복귀). 폭 무관·항상.
 
   // 댓글 키: BG와 ACT 양쪽 조회 가능하게.
   // primary 는 "실제로 이 merged 에 존재하는 부서" 와 일치해야 한다 —
@@ -1095,7 +1085,7 @@ export function UnifiedSceneDetailModal({
             {bodyEl}
 
             {/* ── 댓글 패널 — 본체와 같은 높이. 참조 패널이 붙고 화면이 좁으면 가로 오버플로 방지로 숨김 */}
-            {primaryCommentKey && !(referencePanel && viewportNarrowForReference) && (
+            {primaryCommentKey && !referencePanel && (
               <CommentPanelResizable
                 commentCount={commentCount}
                 sceneKey={primaryCommentKey}

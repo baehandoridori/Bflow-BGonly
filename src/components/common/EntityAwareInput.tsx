@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { ChangeEvent, ClipboardEvent, FocusEvent, KeyboardEvent, RefObject, UIEvent } from 'react';
 import { useMentionAutocomplete } from '@/hooks/useMentionAutocomplete';
 import { useHashtagAutocomplete } from '@/hooks/useHashtagAutocomplete';
@@ -65,6 +65,15 @@ export function EntityAwareInput({
   // @멘션·#태그 둘 다 DOM 을 직접 읽어 갱신. active 는 한쪽만(키핸들에서 mention 우선).
   // refresh 는 무해(상태만 갱신, hashEnabled 시 드롭다운 미표시)하므로 게이트 불필요.
   const refreshAll = () => { mention.refresh(); hash.refresh(); };
+
+  // multiline 은 내용 높이에 맞춰 자동 확장 — 긴 메모/댓글이 작은 칸에 갇히지 않고 큰 상태로 시작(한솔, E2).
+  useEffect(() => {
+    if (!multiline) return;
+    const el = inputRef.current as HTMLTextAreaElement | null;
+    if (!el) return;
+    el.style.height = 'auto';
+    el.style.height = `${el.scrollHeight}px`;
+  }, [value, multiline]);
 
   const handleKeyDown = (e: KeyboardEvent) => {
     if (mention.onKeyDown(e)) return;
