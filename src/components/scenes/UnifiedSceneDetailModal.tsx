@@ -662,9 +662,13 @@ export function UnifiedSceneDetailModal({
 
   // 4c PR2: 참조 패널이 붙으면 본체를 좁혀 본체+참조(+댓글) 가 가로로 들어오게 한다.
   //   참조가 없으면 기존 폭 그대로(영향 0). 참조 인스턴스 자신(dock 모드)은 referencePanel 이 없어 영향 없음.
-  const bodyWidthClass = referencePanel
-    ? 'w-[min(560px,calc(100vw-44rem))] min-w-[420px] shrink'
-    : 'w-[min(720px,calc(100vw-26rem))]';
+  const bodyWidthClass = dockMode !== 'modal'
+    // dock(참조) 인스턴스는 자신의 referencePanel 이 없어 720px 가 되어 부모 슬롯(560px/40vw)을 넘쳤다(코덱스 P2).
+    // 슬롯에 맞춰 채운다.
+    ? 'w-full'
+    : referencePanel
+      ? 'w-[min(560px,calc(100vw-44rem))] min-w-[420px] shrink'
+      : 'w-[min(720px,calc(100vw-26rem))]';
 
   // ── 본체 motion.div — modal/dock 모드 공통 ──
   const bodyEl = (
