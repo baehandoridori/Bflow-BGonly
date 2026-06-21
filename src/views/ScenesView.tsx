@@ -6472,7 +6472,7 @@ export function ScenesView() {
             onSceneReference={openReference}
             onDockToggleSide={(side) => setReferenceSide(side)}
             onDockPromote={() => { if (referenceTarget) navigateToHashTarget(referenceTarget); clearReference(); }}
-            onToggle={(sheet, id, stage) => handleToggleForSheet(sheet, id, stage)}
+            onToggle={(sheet, id, stage, options) => handleToggleForSheet(sheet, id, stage, options)}
             onFieldUpdate={(sheet, idx, field, value) => handleFieldUpdateForSheet(sheet, idx, field, value)}
             onDeleteDept={(sheet, idx) => handleDeleteSceneForSheet(sheet, idx)}
             onDeleteBoth={async () => {
@@ -6552,7 +6552,7 @@ export function ScenesView() {
             focusRevisionCommentId={modalRouting?.focusRevisionCommentId}
             onClose={() => { setDetailMerged(null); setModalRouting(null); clearContinuitySource(); clearReference(); }}
             onSceneReference={openReference}
-            onToggle={(sheet, id, stage) => handleToggleForSheet(sheet, id, stage)}
+            onToggle={(sheet, id, stage, options) => handleToggleForSheet(sheet, id, stage, options)}
             onFieldUpdate={(sheet, idx, field, value) => handleFieldUpdateForSheet(sheet, idx, field, value)}
             onDeleteDept={(sheet, idx) => handleDeleteSceneForSheet(sheet, idx)}
             onDeleteBoth={async () => {

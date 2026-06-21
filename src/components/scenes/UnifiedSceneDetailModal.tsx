@@ -293,6 +293,7 @@ export function UnifiedSceneDetailModal({
   // v1.18.0: 댓글 패널의 [re#] 칩 클릭 → 리테이크 탭 + 카드 강조 + 스레드 펼침.
   // CommentPanel(같은 모달 내부) 이 'bflow:jump-to-revision' 을 dispatch 한다.
   useEffect(() => {
+    if (dockMode !== 'modal') return; // dock(참조) 인스턴스는 전역 jump-to-revision 을 가로채지 않는다 — 메인 모달 전용(코덱스 P2).
     function onJump(e: Event) {
       const detail = (e as CustomEvent<{ revisionId?: string }>).detail;
       const revisionId = detail?.revisionId;
@@ -319,7 +320,7 @@ export function UnifiedSceneDetailModal({
     }
     window.addEventListener('bflow:jump-to-revision', onJump);
     return () => window.removeEventListener('bflow:jump-to-revision', onJump);
-  }, []);
+  }, [dockMode]);
 
   // v1.18.0: focusRevisionId 강조 — 활성 탭이 'revisions' 일 때 카드를 scrollIntoView + pulse 클래스 부여.
   // 카드 element 는 RevisionCard 의 root motion.div 가 id={`rev-card-${revision.id}`} 로 설정.
