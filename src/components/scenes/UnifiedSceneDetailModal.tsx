@@ -803,23 +803,26 @@ export function UnifiedSceneDetailModal({
                   </button>
                 )}
 
-                {/* v1.23.2 (#1 재설계): 토글 = 전역 selectedDepartment(+dashboardDeptFilter) 변경 + 모달 닫음 → 같은 컷 다시 클릭 시 새 부서 모달. */}
-                <div className="flex gap-[2px] bg-bg-border/40 p-[2px] rounded-md shrink-0">
-                  {(['all', 'bg', 'acting'] as const).map((d) => (
-                    <button
-                      key={d}
-                      onClick={() => handleDeptToggle(d)}
-                      className={cn(
-                        'px-2 py-1 rounded-[4px] text-[10.5px] cursor-pointer transition-all whitespace-nowrap',
-                        selectedDepartment === d ? 'bg-accent/22 text-accent-sub' : 'text-text-secondary hover:text-text-primary',
-                      )}
-                      style={selectedDepartment === d ? { boxShadow: 'inset 0 0 0 1px rgba(108, 92, 231, 0.32)' } : {}}
-                      title={d === 'all' ? '통합 모드로 전환 (모달 닫고 다시 클릭하면 BG+액팅 모달)' : d === 'bg' ? '배경 모드로 전환' : '액팅 모드로 전환'}
-                    >
-                      {d === 'all' ? '통합' : d === 'bg' ? 'BG' : '액팅'}
-                    </button>
-                  ))}
-                </div>
+                {/* v1.23.2 (#1 재설계): 토글 = 전역 selectedDepartment(+dashboardDeptFilter) 변경 + 모달 닫음 → 같은 컷 다시 클릭 시 새 부서 모달.
+                    dock(참조) 모드에선 숨긴다 — 전역 부서 전환이 Scenes 뷰 전체를 바꿔 dock 을 닫고 메인 파트 기준으로 재오픈해 참조 컨텍스트를 깨므로(코덱스 P2). */}
+                {dockMode === 'modal' && (
+                  <div className="flex gap-[2px] bg-bg-border/40 p-[2px] rounded-md shrink-0">
+                    {(['all', 'bg', 'acting'] as const).map((d) => (
+                      <button
+                        key={d}
+                        onClick={() => handleDeptToggle(d)}
+                        className={cn(
+                          'px-2 py-1 rounded-[4px] text-[10.5px] cursor-pointer transition-all whitespace-nowrap',
+                          selectedDepartment === d ? 'bg-accent/22 text-accent-sub' : 'text-text-secondary hover:text-text-primary',
+                        )}
+                        style={selectedDepartment === d ? { boxShadow: 'inset 0 0 0 1px rgba(108, 92, 231, 0.32)' } : {}}
+                        title={d === 'all' ? '통합 모드로 전환 (모달 닫고 다시 클릭하면 BG+액팅 모달)' : d === 'bg' ? '배경 모드로 전환' : '액팅 모드로 전환'}
+                      >
+                        {d === 'all' ? '통합' : d === 'bg' ? 'BG' : '액팅'}
+                      </button>
+                    ))}
+                  </div>
+                )}
 
                 {/* 4c PR2: dock 모드 헤더 컨트롤 — 좌/우 토글 + 메인으로 승격 (모달 모드에선 숨김) */}
                 {dockMode !== 'modal' && (
