@@ -225,6 +225,19 @@ export function UnifiedSceneDetailModal({
   const backdropMouseDownRef = useRef(false);
   const modalMainRef = useRef<HTMLDivElement>(null);
 
+  // 4c PR2: 참조 패널이 붙으면 본체+참조+댓글 셋이 가로로 넘칠 수 있다.
+  //   좁은 화면(<1500px)에서는 댓글 패널을 숨겨 가로 오버플로를 막는다. 참조가 없으면 영향 0.
+  const [viewportNarrowForReference, setViewportNarrowForReference] = useState(
+    () => typeof window !== 'undefined' && window.innerWidth < 1500,
+  );
+  useEffect(() => {
+    if (!referencePanel) return;
+    const onResize = () => setViewportNarrowForReference(window.innerWidth < 1500);
+    onResize();
+    window.addEventListener('resize', onResize);
+    return () => window.removeEventListener('resize', onResize);
+  }, [referencePanel]);
+
   // 댓글 키: BG와 ACT 양쪽 조회 가능하게.
   // primary 는 "실제로 이 merged 에 존재하는 부서" 와 일치해야 한다 —
   // ACT-only 병합 항목에서 BG sheetName 을 쓰면 ACT 씬 번호가 BG 시트 경로로 라우팅되어
@@ -636,6 +649,12 @@ export function UnifiedSceneDetailModal({
   // dockMode 별 슬라이드 방향 — 도킹 시 subtle slide-in/out
   const dockInitialX = dockMode === 'left' ? -24 : dockMode === 'right' ? 24 : 0;
 
+  // 4c PR2: 참조 패널이 붙으면 본체를 좁혀 본체+참조(+댓글) 가 가로로 들어오게 한다.
+  //   참조가 없으면 기존 폭 그대로(영향 0). 참조 인스턴스 자신(dock 모드)은 referencePanel 이 없어 영향 없음.
+  const bodyWidthClass = referencePanel
+    ? 'w-[min(560px,calc(100vw-44rem))] min-w-[420px] shrink'
+    : 'w-[min(720px,calc(100vw-26rem))]';
+
   // ── 본체 motion.div — modal/dock 모드 공통 ──
   const bodyEl = (
     <motion.div
@@ -653,7 +672,7 @@ export function UnifiedSceneDetailModal({
           : { opacity: 0, scale: 0.96, y: 6 }
       }
       transition={{ duration: 0.18, ease: [0.16, 1, 0.3, 1] }}
-      className="relative w-[min(720px,calc(100vw-26rem))] h-[min(900px,92vh)] flex flex-col bg-bg-card border border-bg-border overflow-hidden"
+      className={`relative ${bodyWidthClass} h-[min(900px,92vh)] flex flex-col bg-bg-card border border-bg-border overflow-hidden`}
       style={{ borderRadius: 18, boxShadow: '0 40px 80px rgba(0,0,0,0.5)' }}
     >
             {/* §3-1 배경 글로우 두 개 — 시그니처 */}
@@ -1011,16 +1030,21 @@ export function UnifiedSceneDetailModal({
             backdropMouseDownRef.current = false;
           }}
         >
-          {/* flex 래퍼 — 본체 + 댓글 (좌우 이동 시 같이 흔들기 위해 motion.div 로 감쌈) */}
+          {/* flex 래퍼 — 본체 + 댓글 (+ 참조 도킹 패널) (좌우 이동 시 같이 흔들기 위해 motion.div 로 감쌈) */}
           <motion.div
             animate={wrapperControls}
             className="flex gap-3 items-stretch max-w-full max-h-full"
             onClick={(e) => e.stopPropagation()}
           >
+            {/* 참조 패널 좌측 도킹 — 본체보다 먼저 */}
+            {referencePanel && referenceSide === 'left' && (
+              <div className="w-[min(560px,40vw)] shrink-0 max-h-full">{referencePanel}</div>
+            )}
+
             {bodyEl}
 
-            {/* ── 댓글 패널 (상시 표시) — 본체와 같은 높이 */}
-            {primaryCommentKey && (
+            {/* ── 댓글 패널 — 본체와 같은 높이. 참조 패널이 붙고 화면이 좁으면 가로 오버플로 방지로 숨김 */}
+            {primaryCommentKey && !(referencePanel && viewportNarrowForReference) && (
               <CommentPanelResizable
                 commentCount={commentCount}
                 sceneKey={primaryCommentKey}
@@ -1044,6 +1068,11 @@ export function UnifiedSceneDetailModal({
                   <span className="text-xs text-text-secondary/60 tabular-nums">({commentCount})</span>
                 ) : null}
               />
+            )}
+
+            {/* 참조 패널 우측 도킹 — 댓글 패널 뒤 */}
+            {referencePanel && referenceSide === 'right' && (
+              <div className="w-[min(560px,40vw)] shrink-0 max-h-full">{referencePanel}</div>
             )}
           </motion.div>
         </motion.div>

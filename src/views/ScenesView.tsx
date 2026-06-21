@@ -6440,9 +6440,36 @@ export function ScenesView() {
         const curIdx = mergedScenes.findIndex((m) => m.mergedKey === detailMerged.mergedKey);
         const hasPrev = curIdx > 0;
         const hasNext = curIdx >= 0 && curIdx < mergedScenes.length - 1;
+        // 4c PR2: 참조 도킹 패널 — 참조 씬 자체의 시트명/파트로 편집(메인 씬 절대 미침).
+        const referencePanelNode = referenceMerged ? (
+          <UnifiedSceneDetailModal
+            merged={referenceMerged}
+            bgSheetName={referenceBgSheet}
+            actSheetName={referenceActSheet}
+            dockMode={referenceSide}
+            hasPrev={false}
+            hasNext={false}
+            onClose={clearReference}
+            onSceneReference={openReference}
+            onToggle={(sheet, id, stage) => handleToggleForSheet(sheet, id, stage)}
+            onFieldUpdate={(sheet, idx, field, value) => handleFieldUpdateForSheet(sheet, idx, field, value)}
+            onDeleteDept={(sheet, idx) => handleDeleteSceneForSheet(sheet, idx)}
+            onDeleteBoth={() => { /* Task 7 에서 참조 파트 기준으로 재바인딩 */ }}
+            onAddDept={() => { /* Task 7 에서 참조 파트 기준으로 재바인딩 */ }}
+            onActPhaseStateClick={handleActPhaseStateClick}
+            onActFeedbackRequest={handleActFeedbackRequest}
+            onActRoundBump={handleActRoundBump}
+            onAssigneeStageToggle={handleAssigneeStageToggle}
+            onAssigneeActPhaseStateClick={handleAssigneeActPhaseStateClick}
+            onAssigneeActFeedbackRequest={handleActFeedbackRequest}
+            onAssigneeActRoundBump={handleAssigneeActRoundBump}
+          />
+        ) : null;
         return (
           <UnifiedSceneDetailModal
             merged={detailMerged}
+            referencePanel={referencePanelNode}
+            referenceSide={referenceSide}
             bgSheetName={bgPart?.sheetName ?? null}
             actSheetName={actPart?.sheetName ?? null}
             partLabel={currentPartId ? `${currentPartId}파트` : undefined}
