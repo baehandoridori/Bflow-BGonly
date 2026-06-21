@@ -92,7 +92,7 @@ export interface UnifiedSceneDetailModalProps {
   merged: MergedScene;
   bgSheetName: string | null;
   actSheetName: string | null;
-  onToggle: (sheetName: string, sceneId: string, stage: Stage) => void;
+  onToggle: (sheetName: string, sceneId: string, stage: Stage, options?: { sceneUuid?: string | null; sceneIndex?: number }) => void;
   onFieldUpdate: (sheetName: string, sceneIndex: number, field: string, value: string) => void;
   onDeleteDept: (sheetName: string, sceneIndex: number) => void;
   onDeleteBoth: () => void;
@@ -114,7 +114,7 @@ export interface UnifiedSceneDetailModalProps {
   /** 리테이크 카드 내부 댓글 스레드에서 강조할 댓글 id. */
   focusRevisionCommentId?: string;
   /** v1.25.0~: 액팅 단계 토글 핸들러 (전달되면 ACT DeptSection 에서 ScenePhaseToggle 사용) */
-  onActPhaseStateClick?: (sheetName: string, sceneId: string, newState: ScenePhaseState) => void;
+  onActPhaseStateClick?: (sheetName: string, sceneId: string, newState: ScenePhaseState, sceneUuid?: string | null, sceneIndex?: number) => void;
   onActFeedbackRequest?: (sheetName: string, sceneId: string) => void;
   onActRoundBump?: (sheetName: string, sceneId: string, kind: 'work' | 'feedback', delta: 1 | -1) => void;
   onAssigneeStageToggle?: (sheetName: string, sceneId: string, assigneeName: string, stage: Stage, sceneUuid?: string | null, sceneIndex?: number, dept?: Department) => void;
@@ -1301,12 +1301,12 @@ function DeptSection({
   sheetName: string | null;
   sceneIndex: number;
   sceneId: string;
-  onToggle: (sheetName: string, sceneId: string, stage: Stage) => void;
+  onToggle: (sheetName: string, sceneId: string, stage: Stage, options?: { sceneUuid?: string | null; sceneIndex?: number }) => void;
   onFieldUpdate: (sheetName: string, sceneIndex: number, field: string, value: string) => void;
   onDelete: () => void;
   onAdd: () => void;
   memoAuthorMeta?: MemoAuthorMeta | null;
-  onActPhaseStateClick?: (sheetName: string, sceneId: string, newState: ScenePhaseState) => void;
+  onActPhaseStateClick?: (sheetName: string, sceneId: string, newState: ScenePhaseState, sceneUuid?: string | null, sceneIndex?: number) => void;
   onActFeedbackRequest?: (sheetName: string, sceneId: string) => void;
   onActRoundBump?: (sheetName: string, sceneId: string, kind: 'work' | 'feedback', delta: 1 | -1) => void;
   onAssigneeStageToggle?: (sheetName: string, sceneId: string, assigneeName: string, stage: Stage, sceneUuid?: string | null, sceneIndex?: number, dept?: Department) => void;
@@ -1410,7 +1410,7 @@ function DeptSection({
             <ScenePhaseToggle
               scene={scene}
               iconDisplay="always"
-              onStateClick={(next) => onActPhaseStateClick(sheetName, sceneId, next)}
+              onStateClick={(next) => onActPhaseStateClick(sheetName, sceneId, next, scene.id ?? null, sceneIndex)}
               onRequestFeedback={() => onActFeedbackRequest(sheetName, sceneId)}
               onRoundBump={(kind, delta) => onActRoundBump(sheetName, sceneId, kind, delta)}
             />
@@ -1423,7 +1423,7 @@ function DeptSection({
             className="bg-black/[0.06] dark:bg-white/[0.04] border-transparent"
             segmentClassName="py-2 text-xs"
             dataContinuityTarget={dept === 'bg' ? 'bg-stage' : 'act-stage'}
-            onToggle={(stage) => onToggle(sheetName, sceneId, stage)}
+            onToggle={(stage) => onToggle(sheetName, sceneId, stage, { sceneUuid: scene.id ?? null, sceneIndex })}
           />
         )}
       </div>
