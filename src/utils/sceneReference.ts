@@ -45,7 +45,12 @@ export function resolveReferenceMergedScene(
   // 없으면 sceneId 폴백 — navigateToHashTarget(resolveSceneById)와 동일하게 정확한 row 를 연다.
   const found = (target.sceneUuid
     ? merged.find((m) => m.bgScene?.id === target.sceneUuid || m.actScene?.id === target.sceneUuid)
-    : undefined) ?? merged.find((m) => m.sceneId === target.sceneId);
+    : undefined)
+    // sceneId 매칭은 정규 merged.sceneId 뿐 아니라 raw bg/act sceneId 도 본다 — ACT 비정규 id(ac001)가
+    // 정규(a001)로 병합돼도 #ac001 태그(target.sceneId='ac001')로 찾히게(navigateToHashTarget 일관).
+    ?? merged.find((m) => m.sceneId === target.sceneId
+      || m.bgScene?.sceneId === target.sceneId
+      || m.actScene?.sceneId === target.sceneId);
   if (!found) return null;
   return {
     merged: found,
