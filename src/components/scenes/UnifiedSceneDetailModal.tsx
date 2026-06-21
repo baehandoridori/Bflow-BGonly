@@ -401,7 +401,7 @@ export function UnifiedSceneDetailModal({
   // 4c PR2: 모달 안에서 #씬 칩 클릭 → 점프 대신 좌/우 도킹 참조 패널로 연다.
   //   #파트/#화 및 onSceneReference 미연결 시에는 기존 점프(navigateToHashTarget) 유지.
   const handleHash = (t: HashTarget) =>
-    (t.kind === 'scene' && onSceneReference) ? onSceneReference(t, 'right') : navigateToHashTarget(t);
+    (t.kind === 'scene' && onSceneReference) ? onSceneReference(t, referenceSide ?? 'right') : navigateToHashTarget(t);
 
   // 모달 박스 + 댓글 패널 wrapper 의 좌우 흔들림 (한솔 요청: "본체와 댓글 창 같이 옆으로 움직임")
   // navigate 시 wrapper 가 ±36px 슬라이드 → 본체와 댓글이 함께 밀림.

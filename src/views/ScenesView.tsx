@@ -55,6 +55,7 @@ import type { PartContextMenuTarget } from '@/utils/partMemoHelpers';
 import { usePartMemos } from '@/hooks/usePartMemos';
 import { useUnifiedScenes } from '@/hooks/useUnifiedScenes';
 import { resolveReferenceMergedScene } from '@/utils/sceneReference';
+import { navigateToHashTarget } from '@/utils/hashNavigation';
 import type { HashTarget } from '@/utils/hashEntity';
 import { loadPreferences, savePreferences, type UserPreferences } from '@/services/settingsService';
 import {
@@ -2922,11 +2923,15 @@ export function ScenesView() {
   const [referenceBgSheet, setReferenceBgSheet] = useState<string | null>(null);
   const [referenceActSheet, setReferenceActSheet] = useState<string | null>(null);
   const [referencePartId, setReferencePartId] = useState<string>('');
+  // 승격("메인으로")은 검증된 점프 경로(navigateToHashTarget→pendingSceneModalRequest)로 보내야
+  // selectedEpisode/Part 가 참조 씬에 맞게 정렬된다(직접 setDetailMerged 하면 다른 파트일 때 시트명 불일치=손상).
+  const [referenceTarget, setReferenceTarget] = useState<HashTarget | null>(null);
   const clearReference = useCallback(() => {
     setReferenceMerged(null);
     setReferenceBgSheet(null);
     setReferenceActSheet(null);
     setReferencePartId('');
+    setReferenceTarget(null);
   }, []);
   const openReference = useCallback((target: HashTarget, side: 'left' | 'right') => {
     if (target.kind !== 'scene') return;
@@ -2940,6 +2945,7 @@ export function ScenesView() {
     setReferenceActSheet(r.actSheetName);
     setReferencePartId(target.partId);
     setReferenceSide(side);
+    setReferenceTarget(target);
   }, [sortKey, sortDir]);
 
   // 딥링크 처리: bflow://scene/sheetName/sceneId → 해당 씬 모달 자동 오픈
@@ -6452,7 +6458,7 @@ export function ScenesView() {
             onClose={clearReference}
             onSceneReference={openReference}
             onDockToggleSide={(side) => setReferenceSide(side)}
-            onDockPromote={() => { setDetailMerged(referenceMerged); clearReference(); }}
+            onDockPromote={() => { if (referenceTarget) navigateToHashTarget(referenceTarget); clearReference(); }}
             onToggle={(sheet, id, stage) => handleToggleForSheet(sheet, id, stage)}
             onFieldUpdate={(sheet, idx, field, value) => handleFieldUpdateForSheet(sheet, idx, field, value)}
             onDeleteDept={(sheet, idx) => handleDeleteSceneForSheet(sheet, idx)}
