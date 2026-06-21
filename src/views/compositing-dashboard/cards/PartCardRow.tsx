@@ -14,6 +14,7 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react
 import type { CompositingState } from '@/types';
 import { isCompletedStatus } from '@/utils/compositingLabels';
 import { useCompositingDashboardStore } from '@/stores/useCompositingDashboardStore';
+import { compositingKey } from '@/stores/useDataStore';
 import type { CardScene } from '../cardSceneHelpers';
 import { PartHeader } from './PartHeader';
 import { SceneCard } from './SceneCard';
@@ -88,7 +89,7 @@ export function PartCardRow({ partId, scenes, epStates }: PartCardRowProps) {
   // 완료 씬 카운트 — 한솔 정의 (2026-05-22): "완료 = done + aggregated".
   let doneCount = 0;
   for (const sc of scenes) {
-    const st = epStates.get(`${sc.episodeNumber}:${sc.sceneId}`);
+    const st = epStates.get(compositingKey(sc.episodeNumber, sc.sceneId));
     if (isCompletedStatus(st?.status)) doneCount += 1;
   }
 
@@ -169,7 +170,7 @@ export function PartCardRow({ partId, scenes, epStates }: PartCardRowProps) {
             }}
           >
             {scenes.map((sc, idx) => {
-              const stateKey = `${sc.episodeNumber}:${sc.sceneId}`;
+              const stateKey = compositingKey(sc.episodeNumber, sc.sceneId);
               const state = epStates.get(stateKey);
               const status = state?.status ?? 'batch';
 
