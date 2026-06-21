@@ -173,9 +173,9 @@ export function CompositingSceneModal({ sceneKey, episodeNumber, isCompositor }:
     if (!currentUser) return;
     const store = useDataStore.getState();
     store.toggleSceneStage(sheetName, sceneIdArg, stage as 'lo' | 'done' | 'review' | 'png');
-    // 새 값 계산 (낙관적 토글 후)
-    const ep2 = useDataStore.getState().episodes.find((e) => e.episodeNumber === episodeNumber);
-    const part = ep2?.parts.find((p) => p.sheetName === sheetName);
+    // 새 값 계산 (낙관적 토글 후) — 참조 패널이 다른 화의 씬일 수 있어, 메인 화에 가두지 않고
+    //   전체 episodes 에서 sheetName 으로 파트를 찾는다(sheetName 은 전역 유니크 — ScenesView 동일). 안 그러면 저장이 누락됨.
+    const part = useDataStore.getState().episodes.flatMap((e) => e.parts).find((p) => p.sheetName === sheetName);
     const sc = part?.scenes.find((s) => s.sceneId === sceneIdArg);
     if (!sc?.id) return;
     const newValue = Boolean(sc[stage as keyof Scene]);
@@ -190,9 +190,8 @@ export function CompositingSceneModal({ sceneKey, episodeNumber, isCompositor }:
   const handleFieldUpdate = useCallback((sheetName: string, sceneIndex: number, field: string, value: string) => {
     if (!currentUser) return;
     const store = useDataStore.getState();
-    // 낙관적 — 시트 안 그 sceneIndex 의 field 변경
-    const ep2 = store.episodes.find((e) => e.episodeNumber === episodeNumber);
-    const part = ep2?.parts.find((p) => p.sheetName === sheetName);
+    // 낙관적 — 시트 안 그 sceneIndex 의 field 변경. 참조 패널이 다른 화일 수 있어 전체에서 sheetName 으로 찾는다(저장 누락 방지).
+    const part = store.episodes.flatMap((e) => e.parts).find((p) => p.sheetName === sheetName);
     const sc = part?.scenes[sceneIndex];
     if (!sc) return;
     store.setSceneFieldBySceneId(sheetName, sc.sceneId, field, value);
@@ -208,8 +207,8 @@ export function CompositingSceneModal({ sceneKey, episodeNumber, isCompositor }:
     if (!currentUser) return;
     const store = useDataStore.getState();
     store.setScenePhaseOptimistic(sheetName, sceneIdArg, newState);
-    const ep2 = useDataStore.getState().episodes.find((e) => e.episodeNumber === episodeNumber);
-    const part = ep2?.parts.find((p) => p.sheetName === sheetName);
+    // 참조 패널이 다른 화일 수 있어 전체 episodes 에서 sheetName 으로 찾는다(저장 누락 방지).
+    const part = useDataStore.getState().episodes.flatMap((e) => e.parts).find((p) => p.sheetName === sheetName);
     const sc = part?.scenes.find((s) => s.sceneId === sceneIdArg);
     if (sc?.id) {
       window.electronAPI?.supabaseUpdateScenePhase?.(sc.id, newState, sc.workRound ?? 0, sc.feedbackRound ?? 0).catch((err: unknown) => {
@@ -222,8 +221,8 @@ export function CompositingSceneModal({ sceneKey, episodeNumber, isCompositor }:
     if (!currentUser) return;
     const store = useDataStore.getState();
     store.bumpScenePhaseRoundOptimistic(sheetName, sceneIdArg, kind, delta);
-    const ep2 = useDataStore.getState().episodes.find((e) => e.episodeNumber === episodeNumber);
-    const part = ep2?.parts.find((p) => p.sheetName === sheetName);
+    // 참조 패널이 다른 화일 수 있어 전체 episodes 에서 sheetName 으로 찾는다(저장 누락 방지).
+    const part = useDataStore.getState().episodes.flatMap((e) => e.parts).find((p) => p.sheetName === sheetName);
     const sc = part?.scenes.find((s) => s.sceneId === sceneIdArg);
     if (sc?.id) {
       window.electronAPI?.supabaseUpdateScenePhase?.(sc.id, sc.sceneState ?? 'wait', sc.workRound ?? 0, sc.feedbackRound ?? 0).catch((err: unknown) => {
@@ -305,8 +304,8 @@ export function CompositingSceneModal({ sceneKey, episodeNumber, isCompositor }:
   );
 
   // 4c v1.43.1 ③: 참조 도킹 패널 — 참조 씬 자체의 시트명/파트로 편집(컴포지팅 카드의 메인 씬 절대 미침).
-  //   handleToggle/handleFieldUpdate/handleActPhaseStateClick/handleActRoundBump 는 모두 sheetName 으로 라우팅하므로,
-  //   referenceBgSheet/referenceActSheet 를 넘기면 참조 씬만 대상으로 동작한다.
+  //   handleToggle/handleFieldUpdate/handleActPhaseStateClick/handleActRoundBump 는 전체 episodes 에서 sheetName 으로
+  //   파트를 찾으므로(다른 화의 참조도 Supabase 저장됨), referenceBgSheet/referenceActSheet 의 참조 씬만 대상으로 동작한다.
   //   삭제/부서추가는 컴포지팅에서 안 쓰는 안내 토스트(handleDelete*/handleAddDept) 라 참조 인스턴스도 그대로 재사용해도 안전.
   //   referencePartId 는 onAddDept 등 파트 컨텍스트가 필요한 경우 대비 보관(현재 컴포지팅은 안내 토스트라 값 자체는 미소비).
   const referencePanelNode = referenceMerged ? (
