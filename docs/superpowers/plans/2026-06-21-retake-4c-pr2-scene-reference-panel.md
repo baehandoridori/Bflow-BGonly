@@ -99,7 +99,7 @@
 - Create: `tests/sceneReference.test.ts`
 - 참조: `src/utils/mergedSceneHelpers.ts:260`(`buildMergedScenes`), `src/utils/cutScene.ts`(`resolveSceneById`), `src/utils/hashEntity.ts`(`HashTarget`)
 
-- [ ] **Step 1: 구현/시그니처 사전 확인** — `Read` `mergedSceneHelpers.ts`의 `buildMergedScenes` 정확한 시그니처(인자: 단일 파트 BG scenes[], ACT scenes[], partId 등 — 실제 확인)와 `MergedScene` 타입. `resolveSceneById` 시그니처 확인.
+- [ ] **Step 1: 시그니처(확인 완료)** — `buildMergedScenes`는 **객체 인자 7필드**(`{ bgScenes, actScenes, bgPartScenes, actPartScenes, mergedScenePartId, sortKey, sortDir }`, `mergedSceneHelpers.ts:260`). `MergedScene`(`types/index.ts:205`)는 `sceneId/mergedKey/bgScene/actScene/bgSceneIndex/actSceneIndex`만 — **`sheetName` 없음**(시트명은 `Part.sheetName`). `Part`는 `department: 'bg'|'acting'` + `sheetName` 보유. `SortKeyLike`/`SortDirLike` 허용값만 한 번 확인.
 - [ ] **Step 2: 실패 테스트** — `tests/sceneReference.test.ts`:
   ```ts
   import test from 'node:test';
@@ -112,42 +112,64 @@
     { partId: 'A', department: 'acting', scenes: [{ sceneId: 'a001', no: '1', memo: 'act메모' }] },
   ]}];
 
-  test('scene 타깃 → 통합 MergedScene(같은 sceneId BG+ACT 병합)', () => {
-    const m = resolveReferenceMergedScene(
-      { kind: 'scene', episodeNumber: 1, partId: 'A', sceneId: 'a001' }, EPISODES as any);
-    assert.ok(m);
-    assert.equal(m!.sceneId, 'a001');
-    // bg/act 양쪽이 채워졌는지(통합)
-    assert.ok(m!.bgScene || m!.actScene);
+  // fixture: Part 에 sheetName 포함(EP01_A_BG / EP01_A_ACT)
+  const EPISODES2 = [{ episodeNumber: 1, title: 'EP.01', parts: [
+    { partId: 'A', department: 'bg', sheetName: 'EP01_A_BG', scenes: [{ sceneId: 'a001', no: '1', memo: 'bg' }] },
+    { partId: 'A', department: 'acting', sheetName: 'EP01_A_ACT', scenes: [{ sceneId: 'a001', no: '1', memo: 'act' }] },
+  ]}];
+
+  test('scene 타깃 → {merged, bgSheetName, actSheetName}', () => {
+    const r = resolveReferenceMergedScene(
+      { kind: 'scene', episodeNumber: 1, partId: 'A', sceneId: 'a001' }, EPISODES2 as any, 'no', 'asc');
+    assert.ok(r);
+    assert.equal(r!.merged.sceneId, 'a001');
+    assert.equal(r!.bgSheetName, 'EP01_A_BG');
+    assert.equal(r!.actSheetName, 'EP01_A_ACT');
+    assert.ok(r!.merged.bgScene || r!.merged.actScene);
   });
   test('없는 씬 → null', () => {
     assert.equal(resolveReferenceMergedScene(
-      { kind: 'scene', episodeNumber: 9, partId: 'Z', sceneId: 'zzz' }, EPISODES as any), null);
+      { kind: 'scene', episodeNumber: 9, partId: 'Z', sceneId: 'zzz' }, EPISODES2 as any, 'no', 'asc'), null);
   });
   ```
-  > fixture의 정확한 episode/part/scene 구조는 Step1에서 확인한 실제 타입에 맞춰 조정.
+  > `sortKey`/`sortDir`('no'/'asc')는 Step1에서 확인한 실제 허용값으로. EPISODES 픽스처는 EPISODES2로 통일.
 - [ ] **Step 3: 실패 확인** — `node --test ./tests/sceneReference.test.ts` → FAIL(헬퍼 없음).
 - [ ] **Step 4: 구현** — `src/utils/sceneReference.ts`:
   ```ts
-  // #씬 타깃(ep,part,sceneId) → 도킹 참조용 단일 MergedScene. cross-part/ep 포함, 활성 episodes 전수.
-  // buildMergedScenes(단일 파트 BG/ACT 배열)를 재사용 — 신규 merge 로직 없음.
+  // #씬 타깃(ep,part,sceneId) → 도킹 참조용 MergedScene + 시트명. cross-part/ep 포함.
+  // buildMergedScenes(객체 인자)를 재사용 — 신규 merge 로직 없음. MergedScene 엔 sheetName 이 없으므로
+  // 편집 콜백용 bgSheetName/actSheetName 을 Part 에서 따로 뽑아 함께 반환한다(검토 반영).
   import { buildMergedScenes } from './mergedSceneHelpers.ts';
   import type { HashTarget } from './hashEntity.ts';
+  import type { MergedScene } from '@/types';  // 실제 export 위치 확인
 
-  export function resolveReferenceMergedScene(target: HashTarget, episodes: readonly any[]) {
+  export interface ReferenceResolution {
+    merged: MergedScene;
+    bgSheetName: string | null;
+    actSheetName: string | null;
+  }
+
+  export function resolveReferenceMergedScene(
+    target: HashTarget, episodes: readonly any[], sortKey: any, sortDir: any,
+  ): ReferenceResolution | null {
     if (target.kind !== 'scene') return null;
     const ep = episodes.find((e) => e.episodeNumber === target.episodeNumber);
     if (!ep) return null;
-    // 같은 partId 의 BG·ACT 파트 row 를 모아 buildMergedScenes 로 통합.
-    const partRows = ep.parts.filter((p: any) => p.partId === target.partId);
-    if (partRows.length === 0) return null;
-    const bgScenes = partRows.find((p: any) => p.department === 'bg')?.scenes ?? [];
-    const actScenes = partRows.find((p: any) => p.department === 'acting')?.scenes ?? [];
-    const merged = buildMergedScenes(/* 실제 시그니처에 맞춰 */ bgScenes, actScenes, target.partId, ep);
-    return merged.find((m: any) => m.sceneId === target.sceneId) ?? null;
+    const bgPart = ep.parts.find((p: any) => p.partId === target.partId && p.department === 'bg');
+    const actPart = ep.parts.find((p: any) => p.partId === target.partId && p.department === 'acting');
+    if (!bgPart && !actPart) return null;
+    const bgScenes = bgPart?.scenes ?? [];
+    const actScenes = actPart?.scenes ?? [];
+    const merged = buildMergedScenes({
+      bgScenes, actScenes, bgPartScenes: bgScenes, actPartScenes: actScenes,
+      mergedScenePartId: target.partId, sortKey, sortDir,
+    }) as MergedScene[];
+    const found = merged.find((m) => m.sceneId === target.sceneId);
+    if (!found) return null;
+    return { merged: found, bgSheetName: bgPart?.sheetName ?? null, actSheetName: actPart?.sheetName ?? null };
   }
   ```
-  > **`buildMergedScenes` 실제 시그니처에 맞춰 인자 정정**(Step1 확인). sheetName/bgSceneIndex/actSceneIndex가 채워지는지 반환값에서 확인(§8.1 편집 정합).
+  > `buildMergedScenes`는 **객체 인자**(`mergedSceneHelpers.ts:260`). 인덱스(`bgSceneIndex`)는 `bgPartScenes.indexOf` 기준이라 sort 무관 — `sortKey`/`sortDir`는 결과 정렬용(ScenesView 현재 값 전달). **MergedScene 엔 sheetName 없음** → `bgSheetName`/`actSheetName` 별도 반환(편집 시 필수, §8.1·Task 6).
 - [ ] **Step 5: 통과 확인** — `node --test ./tests/sceneReference.test.ts` → PASS.
 - [ ] **Step 6: package.json test:entity 에 편입** — `test:entity` 스크립트에 `./tests/sceneReference.test.ts` 추가.
 - [ ] **Step 7: 커밋** — `리테이크 4c PR2: 참조 씬 MergedScene 해석 헬퍼(buildMergedScenes 재사용)`
@@ -161,20 +183,23 @@
 **Files:**
 - Modify: `src/views/ScenesView.tsx`(모달 렌더 `:6408`, useUnifiedScenes `:3226`)
 
-- [ ] **Step 1: state 추가** — ScenesView 함수 본문에:
+- [ ] **Step 1: state 추가** — ScenesView 함수 본문에(시트명도 함께 — 편집 콜백 필수):
   ```ts
   const [referenceMerged, setReferenceMerged] = useState<MergedScene | null>(null);
   const [referenceSide, setReferenceSide] = useState<'left' | 'right'>('right');
+  const [referenceBgSheet, setReferenceBgSheet] = useState<string | null>(null);
+  const [referenceActSheet, setReferenceActSheet] = useState<string | null>(null);
   ```
 - [ ] **Step 2: openReference 콜백** —
   ```ts
   const openReference = useCallback((target: HashTarget, side: 'left' | 'right') => {
-    const m = resolveReferenceMergedScene(target, useDataStore.getState().episodes);
-    if (!m) { useAppStore.getState().setToast(`${target.sceneId} 씬을 찾을 수 없습니다.`); return; }
-    setReferenceMerged(m); setReferenceSide(side);
-  }, []);
+    const r = resolveReferenceMergedScene(target, useDataStore.getState().episodes, sortKey, sortDir);
+    if (!r) { useAppStore.getState().setToast(`${target.sceneId} 씬을 찾을 수 없습니다.`); return; }
+    setReferenceMerged(r.merged); setReferenceBgSheet(r.bgSheetName); setReferenceActSheet(r.actSheetName);
+    setReferenceSide(side);
+  }, [sortKey, sortDir]);
   ```
-  (import `resolveReferenceMergedScene`, `HashTarget`.)
+  (import `resolveReferenceMergedScene`, `HashTarget`. `sortKey`/`sortDir`는 ScenesView의 현재 정렬 state.)
 - [ ] **Step 3: 모달 닫힐 때 참조도 클리어** — `detailMerged`가 null 되는 onClose 경로(`:3389` 부근 onClose 핸들러)에 `setReferenceMerged(null)` 추가. (모달 닫히면 참조 자동 제거.)
 - [ ] **Step 4: 메인 모달에 onSceneReference 전달** — `:6413` `<UnifiedSceneDetailModal>`에 `onSceneReference={openReference}` 추가.
 - [ ] **Step 5: typecheck** — PASS(아직 참조 패널 미렌더라 동작 변화 없음).
@@ -195,13 +220,16 @@
   ```tsx
   <UnifiedSceneDetailModal
     merged={referenceMerged}
+    bgSheetName={referenceBgSheet}     // ★ 필수 — 없으면 편집이 메인 시트로 감(데이터 손상)
+    actSheetName={referenceActSheet}   // ★ 필수
     dockMode={referenceSide}
-    onClose={() => setReferenceMerged(null)}
+    onClose={() => { setReferenceMerged(null); setReferenceBgSheet(null); setReferenceActSheet(null); }}
     onSceneReference={openReference}   // 중첩 #씬 → 참조 교체
+    hasPrev={false} hasNext={false}    // prev/next 비활성
     {...참조용_편집콜백}                  // Task 7
-    /* prev/next 비활성: hasPrev/hasNext={false} */
   />`
   `)` 를 메인 모달의 `referencePanel` prop으로 전달 + `referenceSide={referenceSide}`.
+  > **★ `bgSheetName`/`actSheetName`은 필수 prop**(`UnifiedSceneDetailModal.tsx:92-93`). 모달은 이 값으로 모든 편집 시트명을 도출하므로, **참조 씬의 시트명**(Task 4 반환)을 반드시 넘긴다 — 안 그러면 토글/필드/메모/삭제가 **메인 씬 시트**로 가는 데이터 손상.
   > 참조 헤더의 좌/우 토글·메인으로·닫기 버튼은 dock 모드 헤더에 추가(Task 8). 우선 Step에서는 dockMode 본체가 보이게만.
 - [ ] **Step 4: typecheck + build:vite** — PASS. 본체+참조 동시 렌더 시 레이아웃 깨짐 없는지(빌드 통과 + 한솔 확인 예정).
 - [ ] **Step 5: 커밋** — `리테이크 4c PR2: 참조 패널 도킹 렌더 + 반응형 폭`
@@ -213,7 +241,9 @@
 **Files:**
 - Modify: `src/views/ScenesView.tsx`(`onDeleteBoth :6431`, `onAddDept :6452` 참고)
 
-- [ ] **Step 1: 재바인딩 콜백 작성** — 참조용 `onDeleteBoth`/`onAddDept`를 `referenceMerged`의 part/sheetName 기준으로 구성(메인의 `bgPart`/`actPart`/`mergedScenePartId` 대신 참조 씬 컨텍스트 사용). 나머지(`onToggle`/`onFieldUpdate`/`onDeleteDept`)는 메인과 동일 핸들러 재사용.
+- [ ] **Step 1: 콜백 구성** (검토 반영):
+  - **그대로 재사용**(sheet-keyed 자기완결 — Task 6에서 올바른 시트명만 넘기면 cross-part 안전): `onToggle`(`handleToggleForSheet`)·`onFieldUpdate`(`handleFieldUpdateForSheet`)·`onDeleteDept`, 그리고 **ACT/담당자 핸들러**(`onActPhaseStateClick`/`onActFeedbackRequest`/`onAssigneeStageToggle` 등 — 이들도 인자로 sheetName 받음). → 메인과 동일 핸들러 전달.
+  - **재바인딩 필수**(메인 파트 컨텍스트 하드코딩이라): `onDeleteBoth`(`ScenesView.tsx:6431`, 메인 `bgPart.sheetName` 읽음)·`onAddDept`(`:6452`, 메인 `bgPart`/`actPart`/`mergedScenePartId` 읽음) → 참조용은 `referenceBgSheet`/`referenceActSheet`/`referenceMerged` 기준으로 새로 구성.
 - [ ] **Step 2: 참조 인스턴스에 전달** — Task 6 Step3의 `{...참조용_편집콜백}` 채움.
 - [ ] **Step 3: typecheck** — PASS.
 - [ ] **Step 4: 커밋** — `리테이크 4c PR2: 참조 패널 편집 콜백(참조 파트 기준 재바인딩)`
@@ -241,9 +271,9 @@
 ### Task 9: 씬 댓글 브랜치 (CommentPanelResizable → CommentPanel)
 
 **Files:**
-- Modify: `src/components/scenes/CommentPanelResizable.tsx`(prop 통과), `src/components/scenes/CommentPanel.tsx`(`navigateToHashTarget` 하드코딩 `:1297`, renderText `:1558`/`:1729`)
+- Modify: `src/components/scenes/CommentPanelResizable.tsx`(prop 통과), `src/components/scenes/CommentPanel.tsx`(`renderText` 정의 `:1297` — 여기서 `navigateToHashTarget` 하드코딩; `:1558`/`:1729`는 호출처라 수정 불필요)
 
-- [ ] **Step 1: CommentPanel onHashClick prop화** — `CommentPanel` Props에 `onHashClick?: (t: HashTarget) => void` 추가. `renderText`(`:1558`/`:1729`)에서 EntityText `onHashClick`을 `onHashClick ?? navigateToHashTarget`로(미지정 시 기존 동작 유지 — 무회귀).
+- [ ] **Step 1: CommentPanel onHashClick prop화** — `CommentPanel` Props에 `onHashClick?: (t: HashTarget) => void` 추가. `renderText` **정의(`:1297`)**의 EntityText `onHashClick`을 `onHashClick ?? navigateToHashTarget`로(미지정 시 기존 동작 유지 — 무회귀). 호출처 `:1558`/`:1729`는 그대로.
 - [ ] **Step 2: CommentPanelResizable 통과** — `CommentPanelResizable` Props에 `onHashClick?` 추가, 내부 `CommentPanel`에 전달.
 - [ ] **Step 3: UnifiedSceneDetailModal 배선** — `:992` `<CommentPanelResizable …>`에 `onHashClick={handleHash}` 전달.
 - [ ] **Step 4: typecheck + build:vite** — PASS.
@@ -252,11 +282,12 @@
 ### Task 10: 리테이크 댓글 브랜치 (RevisionPanel → RevisionCommentThread) + RevisionPanel 본문
 
 **Files:**
-- Modify: `src/components/scenes/RevisionPanel.tsx`(EntityText `:277`/`:357`, RevisionCommentThread 렌더 `:484`), `src/components/scenes/RevisionCommentThread.tsx`(`onHashClick` prop `:640`, 배선 확인)
+- Modify: `src/components/scenes/RevisionCommentThread.tsx`(Props `:46`/`:88` — **컴포넌트 레벨 `onHashClick` 없음**, 추가 필요; `navigateToHashTarget` 하드코딩 `:449`; 내부 CommentBubble onHashClick `:600`/`:607`/`:640`)
+- Modify: `src/components/scenes/RevisionPanel.tsx`(EntityText `:278`/`:358`, RevisionCommentThread 렌더 `:484` — 현재 onHashClick **미전달**)
 
-- [ ] **Step 1: RevisionPanel onHashClick 수신** — `RevisionPanel`이 `onHashClick?: (t: HashTarget) => void` prop을 받도록(UnifiedSceneDetailModal `:925`에서 `handleHash` 전달). 자체 EntityText(`:277`/`:357`)와 `RevisionCommentThread`(`:484`)에 전달.
-- [ ] **Step 2: RevisionCommentThread 확인** — `onHashClick`(`:640`)이 내부 EntityText에 실제로 연결돼 있는지 확인(현재 prop만 있고 미사용일 수 있음 → 연결).
-- [ ] **Step 3: UnifiedSceneDetailModal → RevisionPanel 배선** — `:925` `<RevisionPanel …>`에 `onHashClick={handleHash}`.
+- [ ] **Step 1: RevisionCommentThread에 onHashClick prop 신설**(검토 반영 — 현재 컴포넌트 Props엔 `revisionId`/`sceneKey`만 있음): `Props`(`:46`)에 `onHashClick?: (t: HashTarget) => void` 추가(구조분해 `:88`). 부모가 CommentBubble에 넘기던 **하드코딩 `navigateToHashTarget`(`:449`)** 를 `onHashClick ?? navigateToHashTarget`로(미지정 시 기존 동작 — 무회귀).
+- [ ] **Step 2: RevisionPanel onHashClick 수신·전달** — `RevisionPanel`이 `onHashClick?: (t: HashTarget) => void` prop 수신. 자체 EntityText(`:278`/`:358`)와 `<RevisionCommentThread …>`(`:484`, 현재 미전달)에 전달.
+- [ ] **Step 3: UnifiedSceneDetailModal → RevisionPanel 배선** — `:925` `<RevisionPanel …>`에 `onHashClick={handleHash}`. (이로써 리테이크 댓글 #씬 칩이 **이번에 비로소 활성화**됨.)
 - [ ] **Step 4: typecheck + build:vite** — PASS.
 - [ ] **Step 5: 커밋** — `리테이크 4c PR2: 리테이크 댓글/본문 #씬 → 참조 분기(RevisionPanel·RevisionCommentThread)`
 

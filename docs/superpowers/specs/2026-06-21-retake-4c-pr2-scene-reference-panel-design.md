@@ -68,7 +68,8 @@
 - 해석:
   1. `resolveSceneById(...)`로 raw scene 확인(없으면 toast, 패널 안 염).
   2. MergedScene 빌드: 1차 현재 `allMergedScenes`에서 `(ep, part, sceneId)` 매칭. 2차(cross-part/ep) `useDataStore.getState().episodes` 전수 + 기존 merge 로직 재사용으로 빌드.
-- 빌더 — `buildMergedScenes`(`src/utils/mergedSceneHelpers.ts:260`)가 **단일 파트 BG/ACT 배열을 받는 순수 export 헬퍼로 이미 존재**(검토 확인). 신규 merge 로직이 아니라 **단일 (ep,part,sceneId)용 얇은 래퍼**만 추출하면 됨(저위험, node:test 가능). 산출 MergedScene이 `sheetName`/`bgSceneIndex`/`actSceneIndex`를 담아 §8.1의 안전 편집 콜백과 정합.
+- 빌더 — `buildMergedScenes`(`src/utils/mergedSceneHelpers.ts:260`)가 **객체 인자 7필드**(`{bgScenes,actScenes,bgPartScenes,actPartScenes,mergedScenePartId,sortKey,sortDir}`)를 받는 순수 export 헬퍼로 **이미 존재**(검토 확인). 신규 merge 로직이 아니라 얇은 래퍼만 추출(저위험, node:test).
+- **시트명 주의**(검토 반영): `MergedScene`(`types/index.ts:205`)은 `bgSceneIndex`/`actSceneIndex`만 담고 **`sheetName`은 없음**(시트명은 `Part.sheetName` 소유). 편집 콜백은 sheetName+index로 동작하므로, 해석 헬퍼는 `{ merged, bgSheetName, actSheetName }`를 반환하고 참조 모달에 `bgSheetName`/`actSheetName`(필수 prop)으로 넘겨야 한다 — 안 넘기면 편집이 메인 시트로 가는 데이터 손상.
 
 ### 4.E 레이아웃 (flex wrapper 확장)
 
@@ -123,7 +124,7 @@
 ## 8. 리스크 / 미해결
 
 1. **두 상세뷰 편집 콜백 — 일부만 재바인딩 필요**(검토 반영, 초안보다 작음):
-   - **안전(그대로 재사용)**: `onToggle`(`handleToggleForSheet`)·`onFieldUpdate`(`handleFieldUpdateForSheet`, `ScenesView.tsx:4723`)·`onDeleteDept` — sheetName+index/uuid 자기완결. 참조 MergedScene이 올바른 `sheetName`/`bgSceneIndex`/`actSceneIndex`(=`buildMergedScenes` 산출)를 담으면 cross-part 편집도 안전.
+   - **안전(그대로 재사용)**: `onToggle`(`handleToggleForSheet`)·`onFieldUpdate`(`handleFieldUpdateForSheet`, `ScenesView.tsx:4723`)·`onDeleteDept`, 그리고 ACT/담당자 핸들러 — 모두 sheetName+index 인자로 자기완결. 참조 모달에 **올바른 시트명**(헬퍼 별도 반환)과 `buildMergedScenes` 산출 인덱스를 넘기면 cross-part 편집도 안전.
    - **위험(메인 파트 바인딩 → 참조용 재바인딩 필수)**: `onDeleteBoth`(`ScenesView.tsx:6431`, 메인 `bgPart.sheetName` 읽음)·`onAddDept`(`:6452`, 메인 `bgPart`/`actPart`/`mergedScenePartId` 읽음). 참조 패널엔 **참조 씬 파트 기준으로 재바인딩한 콜백 세트**를 별도 전달(안 하면 엉뚱한 메인 씬에 삭제/추가).
    - 낙관적 업데이트 재계산 2회 가능 → 검증.
 2. **모달 컨텍스트 prop 체인**: §4.C의 4갈래(CommentPanelResizable·CommentPanel·RevisionPanel·RevisionCommentThread). CommentPanel의 하드코딩 import → prop화, 리테이크 댓글 #칩은 이번에 비로소 활성화됨.
