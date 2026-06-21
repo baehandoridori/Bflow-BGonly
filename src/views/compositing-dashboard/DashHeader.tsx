@@ -14,7 +14,7 @@
 import { useMemo } from 'react';
 import { ChevronLeft, ChevronRight, RotateCw, Eye, Lock, Unlock, FileText } from 'lucide-react';
 import { cn } from '@/utils/cn';
-import { useDataStore } from '@/stores/useDataStore';
+import { useDataStore, compositingKey } from '@/stores/useDataStore';
 import { useAuthStore } from '@/stores/useAuthStore';
 import { useCompositingDashboardStore } from '@/stores/useCompositingDashboardStore';
 import { isCompositorForCompositing, isCompletedStatus } from '@/utils/compositingLabels';
@@ -59,16 +59,17 @@ export function DashHeader({ episodeNumber, onCascadeReplay }: DashHeaderProps) 
     if (episodeNumber === null) return 0;
     const ep = episodes.find((e) => e.episodeNumber === episodeNumber);
     if (!ep) return 0;
-    // EP 의 모든 씬 수집 — sceneId 단위 dedup (BG/ACT 두 sheet 의 같은 sceneId 는 한 컷).
+    // EP 의 모든 씬 수집 — sceneId 단위 dedup. BG 소문자 d001 / ACT 대문자 D001 은 한 컷이므로
+    //   대소문자 무관(소문자)으로 dedup 해야 분모가 부풀지 않는다(컴포지팅 카드 병합과 동일 규칙).
     const sceneIds = new Set<string>();
     for (const part of ep.parts) {
-      for (const sc of part.scenes) sceneIds.add(sc.sceneId);
+      for (const sc of part.scenes) sceneIds.add((sc.sceneId || '').trim().toLowerCase());
     }
     const total = sceneIds.size;
     if (total === 0) return 0;
     let done = 0;
     for (const sceneId of sceneIds) {
-      const row = compositingStates.get(`${episodeNumber}:${sceneId}`);
+      const row = compositingStates.get(compositingKey(episodeNumber, sceneId));
       if (isCompletedStatus(row?.status)) done += 1;
     }
     return Math.round((done / total) * 100);

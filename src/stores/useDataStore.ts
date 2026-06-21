@@ -17,7 +17,9 @@ import { loadCompositingStates as svcLoadCompositingStates } from '@/services/su
  * 다른 모듈(낙관적 토글, Realtime 수신, 상세 모달)에서 동일 포맷으로 키를 만든다.
  */
 export function compositingKey(episodeNumber: number, sceneId: string): string {
-  return `${episodeNumber}:${sceneId}`;
+  // sceneId 대소문자 무관 — BG 소문자 d001 / ACT 대문자 D001 은 같은 씬이라 컴포지팅 상태(취합 단계)를 공유해야 한다.
+  //   store 맵의 단일 키 함수라, 여기서 정규화하면 적재·조회·실시간 갱신이 모두 케이스 무관이 된다.
+  return `${episodeNumber}:${(sceneId || '').trim().toLowerCase()}`;
 }
 
 interface DataState {

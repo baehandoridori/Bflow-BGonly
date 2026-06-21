@@ -78,10 +78,19 @@ const RELEASE_NOTE_CATEGORY_META = {
 
 type ReleaseNoteCategory = keyof typeof RELEASE_NOTE_CATEGORY_META;
 
+// 과거/오타 카테고리 별칭 — 미등록 값이 'change'(기능 수정) 로 잘못 폴백돼 '버그 수정'이 파란 배지로
+//   보이던 문제 방어. 새 항목은 정식 카테고리를 쓰되, 흔한 변형은 여기서 정규화한다.
+const RELEASE_NOTE_CATEGORY_ALIAS: Record<string, ReleaseNoteCategory> = {
+  fix: 'bugfix',
+  bugfix: 'bugfix',
+  feat: 'feature',
+  data: 'change',
+};
+
 function resolveReleaseNoteCategory(category?: string): ReleaseNoteCategory {
-  return category && category in RELEASE_NOTE_CATEGORY_META
-    ? category as ReleaseNoteCategory
-    : 'change';
+  if (!category) return 'change';
+  if (category in RELEASE_NOTE_CATEGORY_META) return category as ReleaseNoteCategory;
+  return RELEASE_NOTE_CATEGORY_ALIAS[category.trim().toLowerCase()] ?? 'change';
 }
 
 function normalizeReleaseNoteItem(item: UpdateReleaseNoteItem): {

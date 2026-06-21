@@ -23,6 +23,8 @@ export function resolveSceneById(
   const ep = episodes.find((e) => e.episodeNumber === episodeNumber);
   if (!ep) return null;
   const wantPart = partId.toLowerCase();
+  // sceneId 도 대소문자 무관 — BG 소문자 d001 / ACT 대문자 D001 처럼 부서별 케이스가 달라도 매칭되게.
+  const wantScene = (sceneId || '').toLowerCase();
   const parts = ep.parts.filter((part) => part.partId.toLowerCase() === wantPart);
   // 찾은 파트의 부서도 함께 돌려준다(uuid 없는 Sheets/test 점프 폴백용, hashNavigation).
   const withDept = (part: PartLike, scene: SceneLike): SceneLike & { department?: string } =>
@@ -35,9 +37,9 @@ export function resolveSceneById(
       if (scene) return withDept(part, scene);
     }
   }
-  // 2) sceneId 폴백(구형 태그·uuid 미발견): 첫 매치.
+  // 2) sceneId 폴백(구형 태그·uuid 미발견): 첫 매치. 대소문자 무관.
   for (const part of parts) {
-    const scene = part.scenes.find((s) => s.sceneId === sceneId);
+    const scene = part.scenes.find((s) => (s.sceneId || '').toLowerCase() === wantScene);
     if (scene) return withDept(part, scene);
   }
   return null;

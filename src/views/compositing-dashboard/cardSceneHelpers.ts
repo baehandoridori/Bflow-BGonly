@@ -52,6 +52,15 @@ function normPartId(p: string): string {
 }
 
 /**
+ * BG/ACT 페어 병합 키 — sceneId 를 대소문자 무관으로 정규화한다.
+ * BG 소문자 `d001` 과 ACT 대문자 `D001` 은 같은 씬이므로 한 카드로 묶여야 한다.
+ * (씬 뷰 통합 머지 `rawSceneIdKey` 와 동일한 소문자 규칙. 표시용 sceneId 는 원본 그대로 둔다.)
+ */
+function sceneMergeKey(id: string): string {
+  return (id || '').trim().toLowerCase();
+}
+
+/**
  * sceneId 안의 마지막 숫자 부분을 추출. 정렬에 사용.
  * 'a001' → 1, 'a025' → 25, 'b100' → 100.
  * 사전식 정렬은 'a100' < 'a25' < 'a5' 가 되어버려 — 숫자 정렬로 fix (한솔 보고 2026-05-21).
@@ -74,7 +83,7 @@ export function buildCardScenes(episode: Episode | undefined): CardSceneGroup[] 
     const partId = normPartId(part.partId);
     const isBg = part.department === 'bg';
     part.scenes.forEach((sc, sceneIdx) => {
-      const key = sc.sceneId;
+      const key = sceneMergeKey(sc.sceneId);
       const existing = byScene.get(key);
       const next: CardScene = existing ?? {
         sceneId: sc.sceneId,

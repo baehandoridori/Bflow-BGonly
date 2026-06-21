@@ -3315,7 +3315,7 @@ export function ScenesView() {
         const target = allMergedScenes.find((m) =>
           (m.bgScene?.id && m.bgScene.id === detail.sceneUuid)
           || (m.actScene?.id && m.actScene.id === detail.sceneUuid)
-          || (detail.sceneName && m.sceneId === detail.sceneName),
+          || (detail.sceneName && (m.sceneId || '').toLowerCase() === detail.sceneName.toLowerCase()),
         );
         if (target) {
           setDetailMerged(target);
@@ -3333,7 +3333,7 @@ export function ScenesView() {
       if (currentPart) {
         const idx = currentPart.scenes.findIndex((s) =>
           (detail.sceneUuid && s.id === detail.sceneUuid)
-          || (detail.sceneName && s.sceneId === detail.sceneName),
+          || (detail.sceneName && (s.sceneId || '').toLowerCase() === detail.sceneName.toLowerCase()),
         );
         if (idx >= 0) {
           setDetailSceneIndex(idx);
@@ -3382,7 +3382,7 @@ export function ScenesView() {
       const target = allMergedScenes.find((m) =>
         (m.bgScene?.id && m.bgScene.id === detail.sceneUuid)
         || (m.actScene?.id && m.actScene.id === detail.sceneUuid)
-        || (detail.sceneName && m.sceneId === detail.sceneName),
+        || (detail.sceneName && (m.sceneId || '').toLowerCase() === detail.sceneName.toLowerCase()),
       );
       if (target) {
         matchedPendingSceneRequest = true;
@@ -3409,7 +3409,7 @@ export function ScenesView() {
     if (currentPart) {
       const idx = currentPart.scenes.findIndex((s) =>
         (detail.sceneUuid && s.id === detail.sceneUuid)
-        || (detail.sceneName && s.sceneId === detail.sceneName),
+        || (detail.sceneName && (s.sceneId || '').toLowerCase() === detail.sceneName.toLowerCase()),
       );
       if (idx >= 0) {
         matchedPendingSceneRequest = true;
