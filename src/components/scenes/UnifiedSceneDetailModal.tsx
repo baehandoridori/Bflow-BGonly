@@ -130,6 +130,8 @@ export interface UnifiedSceneDetailModalProps {
    * 컴포지팅 컨텍스트가 모달 챕터를 모두 정의하므로, host(CompositingSceneModal) 가 직접 ReactNode 를 만들어 전달.
    */
   compositingSection?: React.ReactNode;
+  /** 'modal'(기본): 풀스크린 backdrop+센터. 'left'/'right': backdrop 없이 본체만(부모가 위치). 참조 도킹용. */
+  dockMode?: 'modal' | 'left' | 'right';
 }
 
 type TabKey = 'detail' | 'revisions' | 'files' | 'history';
@@ -165,6 +167,7 @@ export function UnifiedSceneDetailModal({
   continuitySourceElement,
   onContinuityEnd,
   compositingSection,
+  dockMode = 'modal',
 }: UnifiedSceneDetailModalProps) {
   const { bgScene, actScene, bgSceneIndex, actSceneIndex } = merged;
   const headScene = bgScene ?? actScene;
@@ -460,8 +463,9 @@ export function UnifiedSceneDetailModal({
     [sceneActivities, actScene?.id],
   );
 
-  // ESC 닫기 + 좌우 화살표
+  // ESC 닫기 + 좌우 화살표 (도킹 모드에선 전역 단축키 비활성 — 부모가 닫기 제어)
   useEffect(() => {
+    if (dockMode !== 'modal') return;
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
         if (showImageModal) { setShowImageModal(null); return; }
@@ -477,7 +481,7 @@ export function UnifiedSceneDetailModal({
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [onClose, handleNavigate, hasPrev, hasNext, showImageModal, deleteConfirm]);
+  }, [dockMode, onClose, handleNavigate, hasPrev, hasNext, showImageModal, deleteConfirm]);
 
   // v1.30.1 (한솔 보고 2026-05-23): 클립보드 붙여넣기 UI/UX 강화.
   //   - 호버 중인 슬롯이 있으면 그 슬롯을 target. 없으면 빈 슬롯 자동 우선 (기존 동작).
@@ -508,8 +512,9 @@ export function UnifiedSceneDetailModal({
     document.addEventListener('keydown', onKey, true); // capture phase 로 먼저 받음
     return () => document.removeEventListener('keydown', onKey, true);
   }, [pinnedImageSlot]);
-  // Ctrl+V 이미지 붙여넣기 (BG 만)
+  // Ctrl+V 이미지 붙여넣기 (BG 만, 도킹 모드 제외)
   useEffect(() => {
+    if (dockMode !== 'modal') return;
     if (!bgScene || !bgSheetName) return;
     const onPaste = async (e: ClipboardEvent) => {
       if (showImageModal) return;
@@ -546,7 +551,7 @@ export function UnifiedSceneDetailModal({
     window.addEventListener('paste', onPaste);
     return () => window.removeEventListener('paste', onPaste);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [bgScene?.storyboardUrl, bgScene?.guideUrl, bgSheetName, showImageModal, hoveredImageSlot, pinnedImageSlot]);
+  }, [dockMode, bgScene?.storyboardUrl, bgScene?.guideUrl, bgSheetName, showImageModal, hoveredImageSlot, pinnedImageSlot]);
 
   // 코덱스 P2 (2026-05-24): 호출자가 성공/실패 분기로 토스트 띄울 수 있도록 boolean 반환.
   //   기존엔 catch 가 swallow 해서 paste 가 실패해도 onPaste 가 success 토스트를 띄움.
@@ -618,43 +623,29 @@ export function UnifiedSceneDetailModal({
   const sceneNoDisplay = unifiedSceneId.match(/\d+$/)?.[0]?.replace(/^0+/, '') || String(headScene.no);
   const showSceneDots = totalMerged > 0 && totalMerged <= 80;
 
-  return (
-    <AnimatePresence>
-      {/* data-no-lasso: 모달 내부 드래그가 뒤쪽 씬 그리드 라쏘를 트리거하지 않도록 */}
-      <motion.div
-        key="unified-modal-backdrop"
-        data-no-lasso
-        initial={{ opacity: 0 }}
-        animate={{ opacity: 1 }}
-        exit={{ opacity: 0 }}
-        transition={{ duration: 0.15 }}
-        className="fixed inset-0 z-50 flex items-center justify-center bg-overlay/60 backdrop-blur-sm p-4"
-        onMouseDown={(e) => {
-          backdropMouseDownRef.current = e.target === e.currentTarget;
-        }}
-        onClick={(e) => {
-          if (backdropMouseDownRef.current && e.target === e.currentTarget) {
-            onClose();
-          }
-          backdropMouseDownRef.current = false;
-        }}
-      >
-        {/* ── flex 래퍼 — 본체 + 댓글 (좌우 이동 시 같이 흔들기 위해 motion.div 로 감쌈) ── */}
-        <motion.div
-          animate={wrapperControls}
-          className="flex gap-3 items-stretch max-w-full max-h-full"
-          onClick={(e) => e.stopPropagation()}
-        >
-          {/* ── 본체 ── */}
-          <motion.div
-            ref={modalMainRef}
-            initial={continuitySourceElement ? { opacity: 1, scale: 1, y: 0 } : { opacity: 0, scale: 0.96, y: 12 }}
-            animate={{ opacity: 1, scale: 1, y: 0 }}
-            exit={{ opacity: 0, scale: 0.96, y: 6 }}
-            transition={{ duration: 0.18, ease: [0.16, 1, 0.3, 1] }}
-            className="relative w-[min(720px,calc(100vw-26rem))] h-[min(900px,92vh)] flex flex-col bg-bg-card border border-bg-border overflow-hidden"
-            style={{ borderRadius: 18, boxShadow: '0 40px 80px rgba(0,0,0,0.5)' }}
-          >
+  // dockMode 별 슬라이드 방향 — 도킹 시 subtle slide-in/out
+  const dockInitialX = dockMode === 'left' ? -24 : dockMode === 'right' ? 24 : 0;
+
+  // ── 본체 motion.div — modal/dock 모드 공통 ──
+  const bodyEl = (
+    <motion.div
+      key="unified-modal-body"
+      ref={modalMainRef}
+      initial={
+        dockMode !== 'modal'
+          ? { opacity: 0, x: dockInitialX }
+          : continuitySourceElement ? { opacity: 1, scale: 1, y: 0 } : { opacity: 0, scale: 0.96, y: 12 }
+      }
+      animate={{ opacity: 1, scale: 1, y: 0, x: 0 }}
+      exit={
+        dockMode !== 'modal'
+          ? { opacity: 0, x: dockInitialX }
+          : { opacity: 0, scale: 0.96, y: 6 }
+      }
+      transition={{ duration: 0.18, ease: [0.16, 1, 0.3, 1] }}
+      className="relative w-[min(720px,calc(100vw-26rem))] h-[min(900px,92vh)] flex flex-col bg-bg-card border border-bg-border overflow-hidden"
+      style={{ borderRadius: 18, boxShadow: '0 40px 80px rgba(0,0,0,0.5)' }}
+    >
             {/* §3-1 배경 글로우 두 개 — 시그니처 */}
             <div
               aria-hidden
@@ -985,36 +976,71 @@ export function UnifiedSceneDetailModal({
                 </div>
               )}
             </div>
-          </motion.div>
+    </motion.div>
+  );
 
-          {/* ── 댓글 패널 (상시 표시) — 본체와 같은 높이 */}
-          {primaryCommentKey && (
-            <CommentPanelResizable
-              commentCount={commentCount}
-              sceneKey={primaryCommentKey}
-              sceneThreadKey={sceneThreadKey}
-              secondarySceneKey={secondaryCommentKey || undefined}
-              onCountChange={setCommentCount}
-              inlineEvents={inlineEvents}
-              focusCommentId={focusCommentId}
-              sceneLabel={[episodeLabel, partLabel, unifiedSceneId ? `#${unifiedSceneId}` : null]
-                .filter(Boolean)
-                .join(' / ')}
-              quickRevision={{
-                sceneKey: revisionSceneKey,
-                context: selectedDepartment === 'bg' || selectedDepartment === 'acting' ? selectedDepartment : 'all',
-                department: selectedDepartment === 'bg' || selectedDepartment === 'acting' ? selectedDepartment : undefined,
-                bgAssignee: bgScene?.assignee ?? null,
-                actingAssignee: actScene?.assignee ?? null,
-              }}
-              heightClass="h-[min(900px,92vh)]"
-              headerRight={commentCount > 0 ? (
-                <span className="text-xs text-text-secondary/60 tabular-nums">({commentCount})</span>
-              ) : null}
-            />
-          )}
+  return (
+    <AnimatePresence>
+      {dockMode === 'modal' ? (
+        /* ── 모달 모드: 풀스크린 backdrop + 댓글 사이드 패널 ── */
+        <motion.div
+          key="unified-modal-backdrop"
+          data-no-lasso
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          exit={{ opacity: 0 }}
+          transition={{ duration: 0.15 }}
+          className="fixed inset-0 z-50 flex items-center justify-center bg-overlay/60 backdrop-blur-sm p-4"
+          onMouseDown={(e) => {
+            backdropMouseDownRef.current = e.target === e.currentTarget;
+          }}
+          onClick={(e) => {
+            if (backdropMouseDownRef.current && e.target === e.currentTarget) {
+              onClose();
+            }
+            backdropMouseDownRef.current = false;
+          }}
+        >
+          {/* flex 래퍼 — 본체 + 댓글 (좌우 이동 시 같이 흔들기 위해 motion.div 로 감쌈) */}
+          <motion.div
+            animate={wrapperControls}
+            className="flex gap-3 items-stretch max-w-full max-h-full"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {bodyEl}
+
+            {/* ── 댓글 패널 (상시 표시) — 본체와 같은 높이 */}
+            {primaryCommentKey && (
+              <CommentPanelResizable
+                commentCount={commentCount}
+                sceneKey={primaryCommentKey}
+                sceneThreadKey={sceneThreadKey}
+                secondarySceneKey={secondaryCommentKey || undefined}
+                onCountChange={setCommentCount}
+                inlineEvents={inlineEvents}
+                focusCommentId={focusCommentId}
+                sceneLabel={[episodeLabel, partLabel, unifiedSceneId ? `#${unifiedSceneId}` : null]
+                  .filter(Boolean)
+                  .join(' / ')}
+                quickRevision={{
+                  sceneKey: revisionSceneKey,
+                  context: selectedDepartment === 'bg' || selectedDepartment === 'acting' ? selectedDepartment : 'all',
+                  department: selectedDepartment === 'bg' || selectedDepartment === 'acting' ? selectedDepartment : undefined,
+                  bgAssignee: bgScene?.assignee ?? null,
+                  actingAssignee: actScene?.assignee ?? null,
+                }}
+                heightClass="h-[min(900px,92vh)]"
+                headerRight={commentCount > 0 ? (
+                  <span className="text-xs text-text-secondary/60 tabular-nums">({commentCount})</span>
+                ) : null}
+              />
+            )}
+          </motion.div>
         </motion.div>
-      </motion.div>
+      ) : (
+        /* ── 도킹 모드: 본체만 (backdrop/댓글 패널 없음, 부모가 위치 제어) ── */
+        bodyEl
+      )}
 
       {continuitySourceElement && (
         <SceneContinuityTransition
