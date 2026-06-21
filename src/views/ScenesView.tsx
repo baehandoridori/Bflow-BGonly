@@ -6454,8 +6454,55 @@ export function ScenesView() {
             onToggle={(sheet, id, stage) => handleToggleForSheet(sheet, id, stage)}
             onFieldUpdate={(sheet, idx, field, value) => handleFieldUpdateForSheet(sheet, idx, field, value)}
             onDeleteDept={(sheet, idx) => handleDeleteSceneForSheet(sheet, idx)}
-            onDeleteBoth={() => { /* Task 7 에서 참조 파트 기준으로 재바인딩 */ }}
-            onAddDept={() => { /* Task 7 에서 참조 파트 기준으로 재바인딩 */ }}
+            onDeleteBoth={async () => {
+              // 참조 씬 양쪽 삭제 — 참조 자체 시트명/인덱스/uuid 로만 동작(메인 씬 미침).
+              const targets: { sheet: string; idx: number; uuid: string }[] = [];
+              if (referenceMerged.bgScene?.id && referenceBgSheet) {
+                targets.push({ sheet: referenceBgSheet, idx: referenceMerged.bgSceneIndex, uuid: referenceMerged.bgScene.id });
+              }
+              if (referenceMerged.actScene?.id && referenceActSheet) {
+                targets.push({ sheet: referenceActSheet, idx: referenceMerged.actSceneIndex, uuid: referenceMerged.actScene.id });
+              }
+              if (targets.length === 0) return;
+              const prevEpisodes = useDataStore.getState().episodes;
+              targets.sort((a, b) => b.idx - a.idx);
+              targets.forEach((target) => deleteSceneOptimistic(target.sheet, target.idx));
+              try {
+                await Promise.all(targets.map((target) => deleteSceneFromSupabase(target.uuid)));
+                syncInBackground();
+                clearReference();
+              } catch (err) {
+                setEpisodes(prevEpisodes);
+                handleSheetError(err, '씬 삭제');
+                syncInBackground();
+              }
+            }}
+            onAddDept={async (dept) => {
+              // 참조 파트(referencePartId) 기준으로 반대편 부서 씬 추가 — 참조 시트로만 동작.
+              const targetSheet = dept === 'bg' ? referenceBgSheet : referenceActSheet;
+              if (!targetSheet) {
+                sonnerToast.error(`${dept === 'bg' ? 'BG' : 'ACT'} 파트가 존재하지 않습니다. 먼저 파트를 만들어 주세요.`);
+                return;
+              }
+              const targetSceneId = buildUnifiedSceneId(referencePartId, referenceMerged.sceneId);
+              // 중복 방지: 참조 파트의 현재 씬 목록을 라이브 스토어에서 시트명으로 조회.
+              const targetPart = useDataStore.getState().episodes
+                .flatMap((ep) => ep.parts)
+                .find((p) => p.sheetName === targetSheet);
+              const existing = targetPart?.scenes.find((scene) =>
+                buildUnifiedSceneId(referencePartId, scene.sceneId) === targetSceneId,
+              );
+              if (existing) {
+                sonnerToast.error(`이미 ${dept === 'bg' ? 'BG' : 'ACT'} 쪽에 "${targetSceneId}" 씬이 있습니다.`);
+                return;
+              }
+              try {
+                await addScene(targetSheet, targetSceneId, '', '');
+                await syncInBackground();
+              } catch (err) {
+                handleSheetError(err, '씬 추가');
+              }
+            }}
             onActPhaseStateClick={handleActPhaseStateClick}
             onActFeedbackRequest={handleActFeedbackRequest}
             onActRoundBump={handleActRoundBump}
