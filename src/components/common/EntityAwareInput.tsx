@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { ChangeEvent, ClipboardEvent, FocusEvent, KeyboardEvent, RefObject, UIEvent } from 'react';
 import { useMentionAutocomplete } from '@/hooks/useMentionAutocomplete';
 import { useHashtagAutocomplete } from '@/hooks/useHashtagAutocomplete';
@@ -33,6 +33,12 @@ interface Props {
    * 훅은 항상 호출하고(React 훅 순서 유지) 키핸들·드롭다운에서만 게이트한다.
    */
   enableHashtag?: boolean;
+  /**
+   * multiline 일 때 내용 높이에 맞춰 자동 확장(opt-in, 기본 끔). 긴 메모가 작은 칸에 갇히지 않고 큰 상태로 시작.
+   * 공용 컴포넌트라 무조건 켜면, resize-y(수동 드래그 리사이즈) 입력칸들의 수동 높이가 매 입력마다 덮어써지는
+   * 회귀가 생긴다 → 자동 확장을 원하는 칸만 켜고, 켠 칸은 resize-none 권장(수동/자동 충돌 방지).
+   */
+  autoGrow?: boolean;
   'aria-label'?: string;
 }
 
@@ -45,7 +51,7 @@ interface Props {
 export function EntityAwareInput({
   value, onChange, users, multiline, placeholder, className, rows, autoFocus,
   dropdownPositionClassName, submitOn = 'none', onSubmit, onCancel, onPaste, onBlur,
-  enableHashtag, 'aria-label': ariaLabel,
+  enableHashtag, autoGrow, 'aria-label': ariaLabel,
 }: Props) {
   const inputRef = useRef<HTMLInputElement | HTMLTextAreaElement>(null);
   const [scroll, setScroll] = useState({ top: 0, left: 0 });
@@ -65,6 +71,16 @@ export function EntityAwareInput({
   // @멘션·#태그 둘 다 DOM 을 직접 읽어 갱신. active 는 한쪽만(키핸들에서 mention 우선).
   // refresh 는 무해(상태만 갱신, hashEnabled 시 드롭다운 미표시)하므로 게이트 불필요.
   const refreshAll = () => { mention.refresh(); hash.refresh(); };
+
+  // autoGrow(opt-in) 일 때만 multiline 내용 높이에 맞춰 자동 확장 — 긴 메모가 작은 칸에 갇히지 않고 큰 상태로 시작(한솔, E2).
+  //   무조건 켜면 resize-y 입력칸(완료멘트·리테이크 등)의 수동 리사이즈가 매 입력마다 덮어써지는 회귀가 생겨 opt-in 으로 둔다.
+  useEffect(() => {
+    if (!autoGrow || !multiline) return;
+    const el = inputRef.current as HTMLTextAreaElement | null;
+    if (!el) return;
+    el.style.height = 'auto';
+    el.style.height = `${el.scrollHeight}px`;
+  }, [value, multiline, autoGrow]);
 
   const handleKeyDown = (e: KeyboardEvent) => {
     if (mention.onKeyDown(e)) return;

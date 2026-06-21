@@ -30,6 +30,7 @@ import { ImageModal } from './ImageModal';
 import type { CommentInlineEvent } from './CommentPanel';
 import { CommentPanelResizable } from './CommentPanelResizable';
 import { RevisionPanel } from './RevisionPanel';
+import { EntityHashContextMenu } from './EntityHashContextMenu';
 import { SceneFilesTab } from './SceneFilesTab';
 import { SceneHistoryTab } from './SceneHistoryTab';
 import { useSceneActivities } from '@/hooks/useSceneActivities';
@@ -231,18 +232,8 @@ export function UnifiedSceneDetailModal({
   const backdropMouseDownRef = useRef(false);
   const modalMainRef = useRef<HTMLDivElement>(null);
 
-  // 4c PR2: 참조 패널이 붙으면 본체+참조+댓글 셋이 가로로 넘칠 수 있다.
-  //   좁은 화면(<1500px)에서는 댓글 패널을 숨겨 가로 오버플로를 막는다. 참조가 없으면 영향 0.
-  const [viewportNarrowForReference, setViewportNarrowForReference] = useState(
-    () => typeof window !== 'undefined' && window.innerWidth < 1500,
-  );
-  useEffect(() => {
-    if (!referencePanel) return;
-    const onResize = () => setViewportNarrowForReference(window.innerWidth < 1500);
-    onResize();
-    window.addEventListener('resize', onResize);
-    return () => window.removeEventListener('resize', onResize);
-  }, [referencePanel]);
+  // 4c PR2/v1.43.1: 참조 패널이 붙으면 본체+참조 두 상세가 이미 가로를 많이 쓴다. 댓글 패널까지 더하면
+  //   넘쳐서 잘리므로(한솔 보고), 참조가 열려 있는 동안은 댓글 패널을 숨긴다(참조 닫으면 복귀). 폭 무관·항상.
 
   // 댓글 키: BG와 ACT 양쪽 조회 가능하게.
   // primary 는 "실제로 이 merged 에 존재하는 부서" 와 일치해야 한다 —
@@ -284,6 +275,8 @@ export function UnifiedSceneDetailModal({
   const [tab, setTab] = useState<TabKey>(initialTab ?? 'detail');
   const [commentCount, setCommentCount] = useState(0);
   const [revisionCount, setRevisionCount] = useState(0);
+  // 4c PR3: #칩 우클릭 메뉴 상태.
+  const [hashMenu, setHashMenu] = useState<{ target: HashTarget; x: number; y: number } | null>(null);
 
   // v1.18.0: initialTab 변경 → 활성 탭 동기화 (모달이 마운트된 상태에서 다른 알림 클릭 시).
   useEffect(() => {
@@ -403,6 +396,11 @@ export function UnifiedSceneDetailModal({
   //   #파트/#화 및 onSceneReference 미연결 시에는 기존 점프(navigateToHashTarget) 유지.
   const handleHash = (t: HashTarget) =>
     (t.kind === 'scene' && onSceneReference) ? onSceneReference(t, referenceSide ?? 'right') : navigateToHashTarget(t);
+
+  // 4c PR3: #칩 우클릭 → 컨텍스트 메뉴 열기.
+  const handleHashContext = useCallback((t: HashTarget, e: React.MouseEvent) => {
+    setHashMenu({ target: t, x: e.clientX, y: e.clientY });
+  }, []);
 
   // 모달 박스 + 댓글 패널 wrapper 의 좌우 흔들림 (한솔 요청: "본체와 댓글 창 같이 옆으로 움직임")
   // navigate 시 wrapper 가 ±36px 슬라이드 → 본체와 댓글이 함께 밀림.
@@ -963,6 +961,7 @@ export function UnifiedSceneDetailModal({
                             onAssigneeActFeedbackRequest={onAssigneeActFeedbackRequest}
                             onAssigneeActRoundBump={onAssigneeActRoundBump}
                             onHashClick={handleHash}
+                            onHashContextMenu={handleHashContext}
                           />
                           <DeptSection
                             dept="acting"
@@ -983,6 +982,7 @@ export function UnifiedSceneDetailModal({
                             onAssigneeActFeedbackRequest={onAssigneeActFeedbackRequest}
                             onAssigneeActRoundBump={onAssigneeActRoundBump}
                             onHashClick={handleHash}
+                            onHashContextMenu={handleHashContext}
                           />
                         </div>
 
@@ -998,6 +998,7 @@ export function UnifiedSceneDetailModal({
                         siblingSceneIds={revisionSiblingSceneIds}
                         onCountChange={setRevisionCount}
                         onHashClick={handleHash}
+                        onHashContextMenu={handleHashContext}
                       />
                     )}
 
@@ -1095,7 +1096,7 @@ export function UnifiedSceneDetailModal({
             {bodyEl}
 
             {/* ── 댓글 패널 — 본체와 같은 높이. 참조 패널이 붙고 화면이 좁으면 가로 오버플로 방지로 숨김 */}
-            {primaryCommentKey && !(referencePanel && viewportNarrowForReference) && (
+            {primaryCommentKey && !referencePanel && (
               <CommentPanelResizable
                 commentCount={commentCount}
                 sceneKey={primaryCommentKey}
@@ -1119,6 +1120,7 @@ export function UnifiedSceneDetailModal({
                   <span className="text-xs text-text-secondary/60 tabular-nums">({commentCount})</span>
                 ) : null}
                 onHashClick={handleHash}
+                onHashContextMenu={handleHashContext}
               />
             )}
 
@@ -1159,6 +1161,18 @@ export function UnifiedSceneDetailModal({
             return si(base64, bgSheetName, bgScene.sceneId || String(bgScene.no), imageType);
           }}
           onLatestImageUrlChange={applyLatestImageUrl}
+        />
+      )}
+
+      {/* 4c PR3: #칩 우클릭 컨텍스트 메뉴 */}
+      {hashMenu && (
+        <EntityHashContextMenu
+          target={hashMenu.target}
+          x={hashMenu.x}
+          y={hashMenu.y}
+          onClose={() => setHashMenu(null)}
+          onNavigate={navigateToHashTarget}
+          onReference={(t) => onSceneReference?.(t, referenceSide ?? 'right')}
         />
       )}
 
@@ -1296,6 +1310,7 @@ function DeptSection({
   onAssigneeActFeedbackRequest,
   onAssigneeActRoundBump,
   onHashClick,
+  onHashContextMenu,
 }: {
   dept: Department;
   scene: Scene | null;
@@ -1315,6 +1330,8 @@ function DeptSection({
   onAssigneeActFeedbackRequest?: (sheetName: string, sceneId: string, assigneeName: string, sceneUuid?: string | null, sceneIndex?: number) => void;
   onAssigneeActRoundBump?: (sheetName: string, sceneId: string, assigneeName: string, kind: 'work' | 'feedback', delta: 1 | -1, sceneUuid?: string | null, sceneIndex?: number) => void;
   onHashClick?: (t: HashTarget) => void;
+  /** 4c PR3: #씬·#파트·#화 칩 우클릭 메뉴. */
+  onHashContextMenu?: (t: HashTarget, e: React.MouseEvent) => void;
 }) {
   const cfg = DEPARTMENT_CONFIGS[dept];
   const visualColor = deptVisualColor(dept);
@@ -1436,6 +1453,7 @@ function DeptSection({
         memoAuthorMeta={memoAuthorMeta}
         continuityTarget={dept === 'bg' ? 'bg-memo' : 'act-memo'}
         onHashClick={onHashClick}
+        onHashContextMenu={onHashContextMenu}
       />
     </div>
   );
@@ -1492,8 +1510,8 @@ function InlineAssigneeRow({ label, value, onSave }: {
 
 /* ── 인라인 메모 ── */
 
-function InlineTextareaRow({ label, value, onSave, memoAuthorMeta, continuityTarget, onHashClick }: {
-  label: string; value: string; onSave: (v: string) => void; memoAuthorMeta?: MemoAuthorMeta | null; continuityTarget?: string; onHashClick?: (t: HashTarget) => void;
+function InlineTextareaRow({ label, value, onSave, memoAuthorMeta, continuityTarget, onHashClick, onHashContextMenu }: {
+  label: string; value: string; onSave: (v: string) => void; memoAuthorMeta?: MemoAuthorMeta | null; continuityTarget?: string; onHashClick?: (t: HashTarget) => void; onHashContextMenu?: (t: HashTarget, e: React.MouseEvent) => void;
 }) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(value);
@@ -1533,6 +1551,7 @@ function InlineTextareaRow({ label, value, onSave, memoAuthorMeta, continuityTar
       {editing ? (
         <EntityAwareInput
           multiline
+          autoGrow
           value={draft}
           onChange={setDraft}
           users={users}
@@ -1540,7 +1559,7 @@ function InlineTextareaRow({ label, value, onSave, memoAuthorMeta, continuityTar
           onBlur={commit}
           onCancel={() => { setDraft(value); setEditing(false); }}
           autoFocus
-          className="w-full min-h-[64px] bg-bg-primary border border-accent/50 rounded-md px-3 py-2 text-sm text-text-primary outline-none focus:border-accent resize-y"
+          className="w-full min-h-[64px] bg-bg-primary border border-accent/50 rounded-md px-3 py-2 text-sm text-text-primary outline-none focus:border-accent resize-none"
         />
       ) : (
         <div
@@ -1549,7 +1568,7 @@ function InlineTextareaRow({ label, value, onSave, memoAuthorMeta, continuityTar
           style={{ background: value ? 'rgba(255,255,255,0.025)' : undefined }}
         >
           {value
-            ? <EntityText text={value} userNames={userNames} onHashClick={onHashClick ?? navigateToHashTarget} />
+            ? <EntityText text={value} userNames={userNames} onHashClick={onHashClick ?? navigateToHashTarget} onHashContextMenu={onHashContextMenu} />
             : <span className="text-text-secondary/50">메모 없음</span>}
           {value && (
             <Pencil size={12} className="inline-block ml-2 opacity-0 hover:opacity-60 transition-opacity" />

@@ -43,6 +43,8 @@ interface CommentPanelResizableProps {
   headerRight?: React.ReactNode;
   /** 4c PR2: #씬 칩 클릭 처리 분기(도킹 참조). 없으면 기존 점프. */
   onHashClick?: React.ComponentProps<typeof CommentPanel>['onHashClick'];
+  /** 4c PR3: #씬·#파트·#화 칩 우클릭 메뉴. */
+  onHashContextMenu?: React.ComponentProps<typeof CommentPanel>['onHashContextMenu'];
 }
 
 export function CommentPanelResizable(props: CommentPanelResizableProps) {
@@ -63,6 +65,7 @@ export function CommentPanelResizable(props: CommentPanelResizableProps) {
     headerTitle = '댓글 및 활동',
     headerRight,
     onHashClick,
+    onHashContextMenu,
   } = props;
 
   const { width, setWidth, isUserOverride } = useCommentPanelWidth(commentCount);
@@ -179,6 +182,7 @@ export function CommentPanelResizable(props: CommentPanelResizableProps) {
           inlineEvents={inlineEvents}
           quickRevision={quickRevision}
           onHashClick={onHashClick}
+          onHashContextMenu={onHashContextMenu}
         />
       </CommentPanelErrorBoundary>
     </motion.div>

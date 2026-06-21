@@ -58,6 +58,8 @@ interface Props {
   sceneKey: string;
   /** 4c PR2: #씬 칩 클릭 처리 분기(도킹 참조). 없으면 기존 점프. */
   onHashClick?: (t: HashTarget) => void;
+  /** 4c PR3: #씬·#파트·#화 칩 우클릭 메뉴. 없으면 기본 우클릭. */
+  onHashContextMenu?: (t: HashTarget, e: React.MouseEvent) => void;
 }
 
 interface AttachedImage {
@@ -88,7 +90,7 @@ function avatarColor(id: string): string {
 
 // ─── 메인 컴포넌트 ──────────────────────────────────────────────────────
 
-export function RevisionCommentThread({ revisionId, sceneKey, onHashClick }: Props) {
+export function RevisionCommentThread({ revisionId, sceneKey, onHashClick, onHashContextMenu }: Props) {
   const { currentUser, users } = useAuthStore();
   const { setView, setHighlightUserName } = useAppStore();
   const revision = useRevisionStore(s => s.revisions.find(r => r.id === revisionId));
@@ -450,6 +452,7 @@ export function RevisionCommentThread({ revisionId, sceneKey, onHashClick }: Pro
               setView('team');
             }}
             onHashClick={onHashClick ?? navigateToHashTarget}
+            onHashContextMenu={onHashContextMenu}
           />
         </div>
       ))}
@@ -601,6 +604,7 @@ function CommentBubble({
   onImageClick,
   onMentionClick,
   onHashClick,
+  onHashContextMenu,
 }: {
   comment: SceneComment;
   isMe: boolean;
@@ -608,6 +612,7 @@ function CommentBubble({
   onImageClick: (url: string, comment: SceneComment) => void;
   onMentionClick: (userName: string) => void;
   onHashClick?: (target: import('@/utils/hashEntity').HashTarget) => void;
+  onHashContextMenu?: (t: import('@/utils/hashEntity').HashTarget, e: React.MouseEvent) => void;
 }) {
   return (
     <div
@@ -641,6 +646,7 @@ function CommentBubble({
             userNames={users.map(user => user.name)}
             onMentionClick={onMentionClick}
             onHashClick={onHashClick}
+            onHashContextMenu={onHashContextMenu}
           />
         </div>
       )}

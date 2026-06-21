@@ -16,7 +16,7 @@
  * spec: 2026-05-21-compositing-dashboard-design.md (9.x — layout 은 UnifiedSceneDetailModal 따름)
  */
 
-import { useCallback, useEffect, useMemo } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Layers } from 'lucide-react';
 import { toast as sonnerToast } from 'sonner';
 import { cn } from '@/utils/cn';
@@ -31,6 +31,9 @@ import { useAuthStore } from '@/stores/useAuthStore';
 import { useCompositingDashboardStore } from '@/stores/useCompositingDashboardStore';
 import { UnifiedSceneDetailModal } from '@/components/scenes/UnifiedSceneDetailModal';
 import { updateSceneFieldInSupabase, updateSceneStageInSupabase } from '@/services/supabaseService';
+import { resolveReferenceMergedScene } from '@/utils/sceneReference';
+import { navigateToHashTarget } from '@/utils/hashNavigation';
+import type { HashTarget } from '@/utils/hashEntity';
 import { buildCardScenes, flattenCardScenes } from '../cardSceneHelpers';
 import { toggleCompositingStatus } from '../compositingActions';
 
@@ -82,6 +85,52 @@ export function CompositingSceneModal({ sceneKey, episodeNumber, isCompositor }:
 
   const close = useCallback(() => setDetailScene(null), [setDetailScene]);
 
+  // 4c v1.43.1 ③: 컴포지팅 씬 모달 안에서 #씬 칩 클릭 → 그 씬 상세를 좌/우 도킹 패널로 연다(편집 가능).
+  //   ScenesView 의 검증된 참조 패널 패턴을 그대로 옮긴다.
+  //   참조 패널은 자체 시트명(referenceBgSheet/referenceActSheet)으로 편집해, 컴포지팅 카드의 메인 씬을 절대 건드리지 않는다.
+  //   컴포지팅 모달엔 sortKey/sortDir 가 없으므로, 후보 정렬에만 영향을 주는 무해한 기본값('no'/'asc')을 쓴다.
+  const [referenceMerged, setReferenceMerged] = useState<MergedScene | null>(null);
+  const [referenceSide, setReferenceSide] = useState<'left' | 'right'>('right');
+  const [referenceBgSheet, setReferenceBgSheet] = useState<string | null>(null);
+  const [referenceActSheet, setReferenceActSheet] = useState<string | null>(null);
+  const [referencePartId, setReferencePartId] = useState<string>('');
+  // 승격("메인으로")은 검증된 점프 경로(navigateToHashTarget)로 보내 컴포지팅을 떠나 전체 통합 모달을 연다.
+  const [referenceTarget, setReferenceTarget] = useState<HashTarget | null>(null);
+  const clearReference = useCallback(() => {
+    setReferenceMerged(null);
+    setReferenceBgSheet(null);
+    setReferenceActSheet(null);
+    setReferencePartId('');
+    setReferenceTarget(null);
+  }, []);
+  const openReference = useCallback((target: HashTarget, side: 'left' | 'right') => {
+    if (target.kind !== 'scene') return;
+    const r = resolveReferenceMergedScene(target, useDataStore.getState().episodes, 'no', 'asc');
+    if (!r) {
+      sonnerToast.error(`${target.sceneId} 씬을 찾을 수 없습니다.`);
+      return;
+    }
+    setReferenceMerged(r.merged);
+    setReferenceBgSheet(r.bgSheetName);
+    setReferenceActSheet(r.actSheetName);
+    setReferencePartId(target.partId);
+    setReferenceSide(side);
+    setReferenceTarget(target);
+  }, []);
+  // 참조 패널엔 자동 동기화 effect 가 없어, 참조 패널에서 한 편집(낙관적 업데이트)이 패널 UI 에 안 비친다.
+  //   episodes 변경 시 referenceTarget 으로 재해석해 referenceMerged/시트명을 갱신한다.
+  useEffect(() => {
+    if (!referenceTarget) return;
+    const r = resolveReferenceMergedScene(referenceTarget, episodes, 'no', 'asc');
+    if (r) {
+      setReferenceMerged(r.merged);
+      setReferenceBgSheet(r.bgSheetName);
+      setReferenceActSheet(r.actSheetName);
+    } else {
+      clearReference(); // 참조 씬이 사라졌으면(삭제 등) 패널 닫기
+    }
+  }, [episodes, referenceTarget, clearReference]);
+
   // ── 코덱스 4차 P2 (2026-05-22): 1~6 키보드 핫키로 컴포지팅 단계 변경 ──
   //   - UnifiedSceneDetailModal 로 wrapping 한 뒤 키보드 매핑이 사라져 마우스로만 변경 가능했음.
   //   - 1=배치, 2=취합중, 3=취합완료, 4=보정중, 5=오류, 6=완료 (COMPOSITING_STATUS_ORDER 순).
@@ -124,9 +173,9 @@ export function CompositingSceneModal({ sceneKey, episodeNumber, isCompositor }:
     if (!currentUser) return;
     const store = useDataStore.getState();
     store.toggleSceneStage(sheetName, sceneIdArg, stage as 'lo' | 'done' | 'review' | 'png');
-    // 새 값 계산 (낙관적 토글 후)
-    const ep2 = useDataStore.getState().episodes.find((e) => e.episodeNumber === episodeNumber);
-    const part = ep2?.parts.find((p) => p.sheetName === sheetName);
+    // 새 값 계산 (낙관적 토글 후) — 참조 패널이 다른 화의 씬일 수 있어, 메인 화에 가두지 않고
+    //   전체 episodes 에서 sheetName 으로 파트를 찾는다(sheetName 은 전역 유니크 — ScenesView 동일). 안 그러면 저장이 누락됨.
+    const part = useDataStore.getState().episodes.flatMap((e) => e.parts).find((p) => p.sheetName === sheetName);
     const sc = part?.scenes.find((s) => s.sceneId === sceneIdArg);
     if (!sc?.id) return;
     const newValue = Boolean(sc[stage as keyof Scene]);
@@ -141,9 +190,8 @@ export function CompositingSceneModal({ sceneKey, episodeNumber, isCompositor }:
   const handleFieldUpdate = useCallback((sheetName: string, sceneIndex: number, field: string, value: string) => {
     if (!currentUser) return;
     const store = useDataStore.getState();
-    // 낙관적 — 시트 안 그 sceneIndex 의 field 변경
-    const ep2 = store.episodes.find((e) => e.episodeNumber === episodeNumber);
-    const part = ep2?.parts.find((p) => p.sheetName === sheetName);
+    // 낙관적 — 시트 안 그 sceneIndex 의 field 변경. 참조 패널이 다른 화일 수 있어 전체에서 sheetName 으로 찾는다(저장 누락 방지).
+    const part = store.episodes.flatMap((e) => e.parts).find((p) => p.sheetName === sheetName);
     const sc = part?.scenes[sceneIndex];
     if (!sc) return;
     store.setSceneFieldBySceneId(sheetName, sc.sceneId, field, value);
@@ -159,8 +207,8 @@ export function CompositingSceneModal({ sceneKey, episodeNumber, isCompositor }:
     if (!currentUser) return;
     const store = useDataStore.getState();
     store.setScenePhaseOptimistic(sheetName, sceneIdArg, newState);
-    const ep2 = useDataStore.getState().episodes.find((e) => e.episodeNumber === episodeNumber);
-    const part = ep2?.parts.find((p) => p.sheetName === sheetName);
+    // 참조 패널이 다른 화일 수 있어 전체 episodes 에서 sheetName 으로 찾는다(저장 누락 방지).
+    const part = useDataStore.getState().episodes.flatMap((e) => e.parts).find((p) => p.sheetName === sheetName);
     const sc = part?.scenes.find((s) => s.sceneId === sceneIdArg);
     if (sc?.id) {
       window.electronAPI?.supabaseUpdateScenePhase?.(sc.id, newState, sc.workRound ?? 0, sc.feedbackRound ?? 0).catch((err: unknown) => {
@@ -173,8 +221,8 @@ export function CompositingSceneModal({ sceneKey, episodeNumber, isCompositor }:
     if (!currentUser) return;
     const store = useDataStore.getState();
     store.bumpScenePhaseRoundOptimistic(sheetName, sceneIdArg, kind, delta);
-    const ep2 = useDataStore.getState().episodes.find((e) => e.episodeNumber === episodeNumber);
-    const part = ep2?.parts.find((p) => p.sheetName === sheetName);
+    // 참조 패널이 다른 화일 수 있어 전체 episodes 에서 sheetName 으로 찾는다(저장 누락 방지).
+    const part = useDataStore.getState().episodes.flatMap((e) => e.parts).find((p) => p.sheetName === sheetName);
     const sc = part?.scenes.find((s) => s.sceneId === sceneIdArg);
     if (sc?.id) {
       window.electronAPI?.supabaseUpdateScenePhase?.(sc.id, sc.sceneState ?? 'wait', sc.workRound ?? 0, sc.feedbackRound ?? 0).catch((err: unknown) => {
@@ -255,12 +303,44 @@ export function CompositingSceneModal({ sceneKey, episodeNumber, isCompositor }:
     />
   );
 
+  // 4c v1.43.1 ③: 참조 도킹 패널 — 참조 씬 자체의 시트명/파트로 편집(컴포지팅 카드의 메인 씬 절대 미침).
+  //   handleToggle/handleFieldUpdate/handleActPhaseStateClick/handleActRoundBump 는 전체 episodes 에서 sheetName 으로
+  //   파트를 찾으므로(다른 화의 참조도 Supabase 저장됨), referenceBgSheet/referenceActSheet 의 참조 씬만 대상으로 동작한다.
+  //   삭제/부서추가는 컴포지팅에서 안 쓰는 안내 토스트(handleDelete*/handleAddDept) 라 참조 인스턴스도 그대로 재사용해도 안전.
+  //   referencePartId 는 onAddDept 등 파트 컨텍스트가 필요한 경우 대비 보관(현재 컴포지팅은 안내 토스트라 값 자체는 미소비).
+  const referencePanelNode = referenceMerged ? (
+    <UnifiedSceneDetailModal
+      merged={referenceMerged}
+      bgSheetName={referenceBgSheet}
+      actSheetName={referenceActSheet}
+      dockMode={referenceSide}
+      referenceSide={referenceSide}
+      hasPrev={false}
+      hasNext={false}
+      onClose={clearReference}
+      onSceneReference={openReference}
+      onDockToggleSide={(side) => setReferenceSide(side)}
+      onDockPromote={() => { if (referenceTarget) navigateToHashTarget(referenceTarget); clearReference(); }}
+      onToggle={handleToggle}
+      onFieldUpdate={handleFieldUpdate}
+      onDeleteDept={handleDeleteDept}
+      onDeleteBoth={handleDeleteBoth}
+      onAddDept={handleAddDept}
+      onActPhaseStateClick={handleActPhaseStateClick}
+      onActFeedbackRequest={handleActFeedbackRequest}
+      onActRoundBump={handleActRoundBump}
+    />
+  ) : null;
+
   return (
     <UnifiedSceneDetailModal
       merged={merged}
+      referencePanel={referencePanelNode}
+      referenceSide={referenceSide}
       bgSheetName={bgSheetName}
       actSheetName={actSheetName}
-      onClose={close}
+      onClose={() => { clearReference(); close(); }}
+      onSceneReference={openReference}
       onToggle={handleToggle}
       onFieldUpdate={handleFieldUpdate}
       onDeleteDept={handleDeleteDept}

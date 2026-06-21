@@ -3,6 +3,7 @@ import { Image, Layers, Clapperboard } from 'lucide-react';
 import { tokenizeEntities } from '@/utils/entityTokens';
 import type { HashTarget } from '@/utils/hashEntity';
 import { PathBadge } from './PathBadge';
+import { useDataStore } from '@/stores/useDataStore';
 
 interface Props {
   text: string;
@@ -22,6 +23,9 @@ interface Props {
  *  - 경로: PathBadge  · 멘션: 보라 칩(onMentionClick)  · #태그: 씬/파트/화 칩(onHashClick 있으면 점프)
  */
 export function EntityText({ text, userNames, onMentionClick, renderTextSegment, onHashClick, onHashContextMenu }: Props) {
+  const episodeTitles = useDataStore((s) => s.episodeTitles);
+  // fallback 은 앱 표준 표기(Episode.title = 'EP.NN')와 통일 — 점(.) 없는 'EPNN' 이면 헤더·트리·드롭다운과 어긋난다.
+  const epName = (n: number) => episodeTitles[n] || `EP.${String(n).padStart(2, '0')}`;
   const tokens = tokenizeEntities(text, userNames);
   return (
     <>
@@ -51,16 +55,24 @@ export function EntityText({ text, userNames, onMentionClick, renderTextSegment,
               : target.kind === 'part'
                 ? 'text-[#f5c97a] bg-[#f5c97a]/12'
                 : 'text-[#9cc9ff] bg-[#9cc9ff]/12';
+          // 칩 표기·툴팁에 에피소드 이름 포함(a001 → '친모2 a001', 툴팁 '친모2 - A - a001').
+          const epLabel = epName(target.episodeNumber);
+          const chipLabel = target.kind === 'episode' ? tok.label : `${epLabel} ${tok.label}`;
+          const tip = target.kind === 'scene'
+            ? `${epLabel} - ${target.partId} - ${target.sceneId}`
+            : target.kind === 'part'
+              ? `${epLabel} - ${target.partId}`
+              : epLabel;
           return (
             <span
               key={`h${i}`}
               className={`inline-flex items-center gap-0.5 align-baseline rounded px-1 font-semibold transition-opacity ${color} ${onHashClick ? 'cursor-pointer hover:opacity-75' : ''}`}
               onClick={onHashClick ? (e) => { e.stopPropagation(); onHashClick(target); } : undefined}
               onContextMenu={onHashContextMenu ? (e) => { e.preventDefault(); e.stopPropagation(); onHashContextMenu(target, e); } : undefined}
-              title={`#${tok.label}`}
+              title={tip}
             >
               <Icon size={9} className="shrink-0" />
-              {tok.label}
+              {chipLabel}
             </span>
           );
         }
