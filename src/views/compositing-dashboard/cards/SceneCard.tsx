@@ -18,6 +18,7 @@ import { COMPOSITING_STATUS_LABEL, COMPOSITING_STATUS_TOKEN, COMPOSITING_ERROR_L
 import { StatusDot } from '@/components/compositing-dashboard/common/StatusDot';
 import { useCompositingDashboardStore } from '@/stores/useCompositingDashboardStore';
 import { useTransientHighlightStore, selectHighlight } from '@/stores/transientHighlightStore';
+import { stripEntityTokens } from '@/utils/entityTokens';
 import { useAuthStore } from '@/stores/useAuthStore';
 import type { CardScene } from '../cardSceneHelpers';
 import { nameInitial, primaryAssignee } from '../cardSceneHelpers';
@@ -266,6 +267,7 @@ export function SceneCard({ card, state, staggerIndex, dimmed, partSceneIds }: S
 function CardFooter({ card }: { card: CardScene }) {
   const lengthChange = card.bg?.lengthChange ?? card.act?.lengthChange;
   const memo = card.bg?.memo || card.act?.memo;
+  const memoText = memo ? stripEntityTokens(memo) : memo;
   // 한솔 정정 (2026-05-22): comments.scene_id 는 scene.no 의 숫자 문자열.
   // bgSceneNo / actSceneNo 두 키로 합산 fetch.
   const commentCount = useCommentCount(
@@ -292,10 +294,10 @@ function CardFooter({ card }: { card: CardScene }) {
       {memo && (
         <span
           className="flex items-center gap-1 truncate min-w-0"
-          title={memo}
+          title={memoText}
         >
           <FileText size={10} strokeWidth={2} className="shrink-0 text-text-secondary/80" />
-          <span className="truncate">{memo}</span>
+          <span className="truncate">{memoText}</span>
         </span>
       )}
       <span className="ml-auto flex items-center gap-0.5 text-text-secondary/85 shrink-0" title="댓글">
