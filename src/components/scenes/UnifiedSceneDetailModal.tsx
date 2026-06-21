@@ -989,6 +989,7 @@ export function UnifiedSceneDetailModal({
                         sceneId={revisionSceneId}
                         siblingSceneIds={revisionSiblingSceneIds}
                         onCountChange={setRevisionCount}
+                        onHashClick={handleHash}
                       />
                     )}
 

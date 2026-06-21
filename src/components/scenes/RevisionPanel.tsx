@@ -20,6 +20,7 @@ import { calcDefaultRecipients } from '@/utils/revisionRecipients';
 import { EntityText } from '@/components/common/EntityText';
 import { EntityAwareInput } from '@/components/common/EntityAwareInput';
 import { navigateToHashTarget } from '@/utils/hashNavigation';
+import type { HashTarget } from '@/utils/hashEntity';
 import { CompactIconLabel } from '@/components/common/CompactIconLabel';
 import { canActAsAssignee, canReassignRevision, canFinalResolveRevision } from '@/utils/revisionWorkflow';
 import { summarizeAssignees, collectAssigneeNotes, sideBarColorClass, canShowFinalResolveBar } from '@/utils/revisionCardView';
@@ -112,6 +113,7 @@ const RevisionCard = memo(function RevisionCard({
   commentSceneKey,
   onStatusChange,
   onDelete,
+  onHashClick,
 }: {
   revision: CompRevision;
   /**
@@ -124,6 +126,7 @@ const RevisionCard = memo(function RevisionCard({
   commentSceneKey: string;
   onStatusChange: (revId: string, status: RevisionStatus, note?: string) => void;
   onDelete?: (rev: CompRevision) => void;
+  onHashClick?: (t: HashTarget) => void;
 }) {
   const [lightbox, setLightbox] = useState<AttachmentImageLightboxState | null>(null);
   const { currentUser, users: allUsers } = useAuthStore();
@@ -275,7 +278,7 @@ const RevisionCard = memo(function RevisionCard({
           text={revision.description}
           userNames={entityUserNames}
           onMentionClick={handleEntityMentionClick}
-          onHashClick={navigateToHashTarget}
+          onHashClick={onHashClick ?? navigateToHashTarget}
         />
       </p>
 
@@ -355,7 +358,7 @@ const RevisionCard = memo(function RevisionCard({
                       text={note}
                       userNames={entityUserNames}
                       onMentionClick={handleEntityMentionClick}
-                      onHashClick={navigateToHashTarget}
+                      onHashClick={onHashClick ?? navigateToHashTarget}
                     />
                   </p>
                 </div>
@@ -481,7 +484,7 @@ const RevisionCard = memo(function RevisionCard({
       </div>
 
       {/* 카드 내 댓글 스레드 — v1.18.0 신규 */}
-      <RevisionCommentThread revisionId={revision.id} sceneKey={commentSceneKey} />
+      <RevisionCommentThread revisionId={revision.id} sceneKey={commentSceneKey} onHashClick={onHashClick} />
     </motion.div>
   );
 });
@@ -500,9 +503,11 @@ interface RevisionPanelProps {
   siblingSceneIds?: readonly string[];
   department?: 'bg' | 'acting';
   onCountChange?: (count: number) => void;
+  /** 4c PR2: #씬 칩 클릭 처리 분기(도킹 참조). 없으면 기존 점프. */
+  onHashClick?: (t: HashTarget) => void;
 }
 
-export function RevisionPanel({ sheetName, sceneId, siblingSceneIds, department, onCountChange }: RevisionPanelProps) {
+export function RevisionPanel({ sheetName, sceneId, siblingSceneIds, department, onCountChange, onHashClick }: RevisionPanelProps) {
   const { currentUser, users: allUsers } = useAuthStore();
   // 필드별 selector — 액션은 안정 참조라 store 의 무관한 필드 변경엔 리렌더 안 됨.
   const createRevision = useRevisionStore((s) => s.createRevision);
@@ -692,6 +697,7 @@ export function RevisionPanel({ sheetName, sceneId, siblingSceneIds, department,
                 commentSceneKey={commentSceneKey}
                 onStatusChange={handleStatusChange}
                 onDelete={handleDelete}
+                onHashClick={onHashClick}
               />
             ))}
           </AnimatePresence>

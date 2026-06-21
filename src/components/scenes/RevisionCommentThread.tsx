@@ -37,6 +37,7 @@ import { HashtagDropdown } from '@/components/common/HashtagDropdown';
 import { useMentionAutocomplete } from '@/hooks/useMentionAutocomplete';
 import { useHashtagAutocomplete } from '@/hooks/useHashtagAutocomplete';
 import { navigateToHashTarget } from '@/utils/hashNavigation';
+import type { HashTarget } from '@/utils/hashEntity';
 import {
   AttachmentImageLightbox,
   type AttachmentImageLightboxEntry,
@@ -55,6 +56,8 @@ interface Props {
    * (이슈: 2026-05-04, RevisionPanel 의 buildSceneKey 결과를 그대로 전달하던 v1.18.0 버그).
    */
   sceneKey: string;
+  /** 4c PR2: #씬 칩 클릭 처리 분기(도킹 참조). 없으면 기존 점프. */
+  onHashClick?: (t: HashTarget) => void;
 }
 
 interface AttachedImage {
@@ -85,7 +88,7 @@ function avatarColor(id: string): string {
 
 // ─── 메인 컴포넌트 ──────────────────────────────────────────────────────
 
-export function RevisionCommentThread({ revisionId, sceneKey }: Props) {
+export function RevisionCommentThread({ revisionId, sceneKey, onHashClick }: Props) {
   const { currentUser, users } = useAuthStore();
   const { setView, setHighlightUserName } = useAppStore();
   const revision = useRevisionStore(s => s.revisions.find(r => r.id === revisionId));
@@ -446,7 +449,7 @@ export function RevisionCommentThread({ revisionId, sceneKey }: Props) {
               setHighlightUserName(userName);
               setView('team');
             }}
-            onHashClick={navigateToHashTarget}
+            onHashClick={onHashClick ?? navigateToHashTarget}
           />
         </div>
       ))}
