@@ -634,8 +634,10 @@ export function TimelinePanel({ episodeNumber, partGroups, epStates, onReorder, 
         >
           {carousel.selection.visibleIndices.map((sceneIndex) => {
             const scene = carousel.group.scenes[sceneIndex];
-            const sceneKey = compositingKey(scene.episodeNumber, scene.sceneId);
-            const status = epStates.get(sceneKey)?.status ?? 'batch';
+            // sceneKey 는 핀/선택/모달용 raw 키 — SceneCard 의 raw `${ep}:${card.sceneId}` 비교와 같은 도메인이어야
+            //   캐러셀 클릭 핀이 카드에 맞는다. status 조회만 정규화 키(compositingKey)로 한다.
+            const sceneKey = `${scene.episodeNumber}:${scene.sceneId}`;
+            const status = epStates.get(compositingKey(scene.episodeNumber, scene.sceneId))?.status ?? 'batch';
             const tokenVar = COMPOSITING_STATUS_TOKEN[status];
             const episodeLabel = episodeLabelByNumber.get(scene.episodeNumber)
               ?? `EP.${String(scene.episodeNumber).padStart(2, '0')}`;
