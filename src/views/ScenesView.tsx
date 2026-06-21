@@ -54,6 +54,8 @@ import { useRevisionStore } from '@/stores/useRevisionStore';
 import type { PartContextMenuTarget } from '@/utils/partMemoHelpers';
 import { usePartMemos } from '@/hooks/usePartMemos';
 import { useUnifiedScenes } from '@/hooks/useUnifiedScenes';
+import { resolveReferenceMergedScene } from '@/utils/sceneReference';
+import type { HashTarget } from '@/utils/hashEntity';
 import { loadPreferences, savePreferences, type UserPreferences } from '@/services/settingsService';
 import {
   persistLengthChangeAtomic,
@@ -2912,6 +2914,34 @@ export function ScenesView() {
     setContinuitySourceElement(null);
   }, []);
 
+  // 4c PR2: 메인 모달 안에서 #씬 칩 클릭 → 그 씬 상세를 좌/우 도킹 패널로 연다.
+  //   참조 패널은 자체 시트명(referenceBgSheet/referenceActSheet)으로 편집해, 메인 씬을 절대 건드리지 않는다.
+  //   referencePartId 는 참조 파트 기준 onAddDept/onDeleteBoth 재바인딩에 쓰인다(MergedScene 엔 partId 없음).
+  const [referenceMerged, setReferenceMerged] = useState<MergedScene | null>(null);
+  const [referenceSide, setReferenceSide] = useState<'left' | 'right'>('right');
+  const [referenceBgSheet, setReferenceBgSheet] = useState<string | null>(null);
+  const [referenceActSheet, setReferenceActSheet] = useState<string | null>(null);
+  const [referencePartId, setReferencePartId] = useState<string>('');
+  const clearReference = useCallback(() => {
+    setReferenceMerged(null);
+    setReferenceBgSheet(null);
+    setReferenceActSheet(null);
+    setReferencePartId('');
+  }, []);
+  const openReference = useCallback((target: HashTarget, side: 'left' | 'right') => {
+    if (target.kind !== 'scene') return;
+    const r = resolveReferenceMergedScene(target, useDataStore.getState().episodes, sortKey, sortDir);
+    if (!r) {
+      sonnerToast.error(`${target.sceneId} 씬을 찾을 수 없습니다.`);
+      return;
+    }
+    setReferenceMerged(r.merged);
+    setReferenceBgSheet(r.bgSheetName);
+    setReferenceActSheet(r.actSheetName);
+    setReferencePartId(target.partId);
+    setReferenceSide(side);
+  }, [sortKey, sortDir]);
+
   // 딥링크 처리: bflow://scene/sheetName/sceneId → 해당 씬 모달 자동 오픈
   // sceneId는 씬번호(예: a003) 또는 씬 인덱스(예: 12) 모두 지원
   const pendingDeepLink = useAppStore((s) => s.pendingDeepLink);
@@ -3400,7 +3430,8 @@ export function ScenesView() {
     setDetailMerged(null);
     setModalRouting(null);
     clearContinuitySource();
-  }, [closeSceneModalSignal, setDetailMerged, clearContinuitySource]);
+    clearReference();
+  }, [closeSceneModalSignal, setDetailMerged, clearContinuitySource, clearReference]);
 
   // ACT 단독 뷰에서는 대응하는 BG 이미지를 폴백으로 사용한다.
   const actToBgImageMap = useMemo(() => {
@@ -6424,7 +6455,8 @@ export function ScenesView() {
             focusRevisionId={modalRouting?.focusRevisionId}
             focusCommentId={modalRouting?.focusCommentId}
             focusRevisionCommentId={modalRouting?.focusRevisionCommentId}
-            onClose={() => { setDetailMerged(null); setModalRouting(null); clearContinuitySource(); }}
+            onClose={() => { setDetailMerged(null); setModalRouting(null); clearContinuitySource(); clearReference(); }}
+            onSceneReference={openReference}
             onToggle={(sheet, id, stage) => handleToggleForSheet(sheet, id, stage)}
             onFieldUpdate={(sheet, idx, field, value) => handleFieldUpdateForSheet(sheet, idx, field, value)}
             onDeleteDept={(sheet, idx) => handleDeleteSceneForSheet(sheet, idx)}

@@ -24,6 +24,7 @@ import { AssigneeMultiSelect, AssigneeChipList } from '@/components/common/Assig
 import { EntityAwareInput } from '@/components/common/EntityAwareInput';
 import { EntityText } from '@/components/common/EntityText';
 import { navigateToHashTarget } from '@/utils/hashNavigation';
+import type { HashTarget } from '@/utils/hashEntity';
 import { resizeBlob } from '@/utils/imageUtils';
 import { ImageModal } from './ImageModal';
 import type { CommentInlineEvent } from './CommentPanel';
@@ -132,6 +133,12 @@ export interface UnifiedSceneDetailModalProps {
   compositingSection?: React.ReactNode;
   /** 'modal'(기본): 풀스크린 backdrop+센터. 'left'/'right': backdrop 없이 본체만(부모가 위치). 참조 도킹용. */
   dockMode?: 'modal' | 'left' | 'right';
+  /** 4c PR2: 모달 안 #씬 칩 클릭 → 그 씬을 좌/우 도킹 참조 패널로 연다(부모가 처리). */
+  onSceneReference?: (target: HashTarget, side: 'left' | 'right') => void;
+  /** 4c PR2: 참조 도킹 패널 노드(자체가 dockMode 모달). flex 래퍼 안에 side 위치로 렌더된다. */
+  referencePanel?: React.ReactNode;
+  /** 4c PR2: 참조 패널을 본체 좌/우 어느 쪽에 둘지. referencePanel 이 있을 때만 의미. */
+  referenceSide?: 'left' | 'right';
 }
 
 type TabKey = 'detail' | 'revisions' | 'files' | 'history';
@@ -168,6 +175,9 @@ export function UnifiedSceneDetailModal({
   onContinuityEnd,
   compositingSection,
   dockMode = 'modal',
+  onSceneReference,
+  referencePanel,
+  referenceSide = 'right',
 }: UnifiedSceneDetailModalProps) {
   const { bgScene, actScene, bgSceneIndex, actSceneIndex } = merged;
   const headScene = bgScene ?? actScene;
