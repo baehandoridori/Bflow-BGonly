@@ -53,7 +53,12 @@
 - **모달 안**에서 표시되는 모든 `EntityText`(本體 메모 `1432`, `CommentPanel`, `RevisionPanel`, `RevisionCommentThread` 댓글)에는 `onHashClick`으로 **"참조 열기" 래퍼**를 내려보낸다:
   - `(target) => (target.kind === 'scene' && onSceneReference) ? onSceneReference(target, referenceSide) : navigateToHashTarget(target)`
   - 즉 scene → 참조 패널, part/episode → 기존 navigate.
-- 구현: `UnifiedSceneDetailModal`에 `onSceneReference?: (target: HashTarget, side) => void` prop 추가 → 내부 EntityText 및 자식(`CommentPanel`/`RevisionCommentThread`는 커서 직접 조립이므로 동일 콜백 주입)에 전달.
+- 구현 — `onSceneReference?: (target: HashTarget, side) => void` 콜백을 모달 안 표시처에 주입(**4갈래, 2브랜치 — 스펙 초안의 'CommentPanel→RevisionCommentThread 2-hop'은 과소평가였음, 검토 반영**):
+  1. 本體 메모 `EntityText`(`UnifiedSceneDetailModal.tsx:1432`) — 직접 prop.
+  2. **씬 댓글 브랜치**: `UnifiedSceneDetailModal` → `CommentPanelResizable`(현재 hash 관련 prop **없음** → prop 신설) → `CommentPanel`(현재 `navigateToHashTarget`를 모듈 import로 **하드코딩**, `renderText`가 댓글 `:1558`·답글 `:1729`에서 사용 → **prop화** 필요).
+  3. **리테이크 댓글 브랜치**: `RevisionPanel`(모달 `:925`에서 렌더) → `RevisionCommentThread`(`RevisionPanel:484`에서 렌더, 현재 `onHashClick` **미전달** = 리테이크 댓글 #칩 비활성). `RevisionCommentThread`는 `onHashClick` prop(`:640`) 보유 → `RevisionPanel`이 주입.
+  4. 참조 패널(dock) 자신도 같은 콜백 받아 중첩 #씬 → 참조 교체.
+  → 즉 **CommentPanelResizable·CommentPanel·RevisionPanel·RevisionCommentThread 4곳**을 건드린다.
 - **모달 밖**(UnifiedSceneCard, UnifiedSceneSheetView, MyTasksWidget 등)은 현행 `navigateToHashTarget` 유지(참조 붙일 모달이 없음). → #씬 클릭 시 기존처럼 모달 오픈.
 - 참조 패널 **안**에서 또 #씬 클릭 → 참조가 그 씬으로 교체(같은 onSceneReference, 단일 참조 슬롯).
 
@@ -63,7 +68,7 @@
 - 해석:
   1. `resolveSceneById(...)`로 raw scene 확인(없으면 toast, 패널 안 염).
   2. MergedScene 빌드: 1차 현재 `allMergedScenes`에서 `(ep, part, sceneId)` 매칭. 2차(cross-part/ep) `useDataStore.getState().episodes` 전수 + 기존 merge 로직 재사용으로 빌드.
-- `useUnifiedScenes`의 merge 빌더가 (ep,part) 단위로 재사용 가능한지 확인하여, **단일 (ep,part,sceneId) → MergedScene** 헬퍼로 추출(순수에 가깝게 → 가능하면 node:test).
+- 빌더 — `buildMergedScenes`(`src/utils/mergedSceneHelpers.ts:260`)가 **단일 파트 BG/ACT 배열을 받는 순수 export 헬퍼로 이미 존재**(검토 확인). 신규 merge 로직이 아니라 **단일 (ep,part,sceneId)용 얇은 래퍼**만 추출하면 됨(저위험, node:test 가능). 산출 MergedScene이 `sheetName`/`bgSceneIndex`/`actSceneIndex`를 담아 §8.1의 안전 편집 콜백과 정합.
 
 ### 4.E 레이아웃 (flex wrapper 확장)
 
@@ -74,6 +79,7 @@
   - 참조 열릴 때 本體 폭을 `flex-shrink` 허용 + 참조 패널 고정폭 `min(560px, 40vw)`.
   - 화면 폭이 임계 미만이면 참조 열 때 댓글 패널 자동 접기(또는 참조를 본체 위 오버레이로 폴백).
 - backdrop 클릭=닫기: 참조 패널은 반드시 flex wrapper **안**(같은 z) → backdrop 클릭이 메인+참조 함께 닫음(자연스러움). 참조 내부 클릭은 `stopPropagation`.
+- (애니메이션) 기존 flex wrapper는 prev/next 시 `wrapperControls`로 ±56px 슬라이드(`UnifiedSceneDetailModal.tsx:371`). dock 열기/닫기 애니메이션이 이 nav-slide와 **충돌하지 않게 분리**(별도 motion 또는 layout 애니메이션).
 
 ### 4.F "메인으로" 승격
 
@@ -116,8 +122,11 @@
 
 ## 8. 리스크 / 미해결
 
-1. **두 상세뷰 편집 콜백 일반화**(가장 큰 작업): 편집 콜백(onToggle/onFieldUpdate 등)이 참조 씬에도 동작하도록 ScenesView에서 일반화/주입. 낙관적 업데이트 재계산 2회 가능 → 검증 필요.
-2. **모달 컨텍스트 prop 체인 깊이**: CommentPanel→RevisionCommentThread까지 onSceneReference 전달.
+1. **두 상세뷰 편집 콜백 — 일부만 재바인딩 필요**(검토 반영, 초안보다 작음):
+   - **안전(그대로 재사용)**: `onToggle`(`handleToggleForSheet`)·`onFieldUpdate`(`handleFieldUpdateForSheet`, `ScenesView.tsx:4723`)·`onDeleteDept` — sheetName+index/uuid 자기완결. 참조 MergedScene이 올바른 `sheetName`/`bgSceneIndex`/`actSceneIndex`(=`buildMergedScenes` 산출)를 담으면 cross-part 편집도 안전.
+   - **위험(메인 파트 바인딩 → 참조용 재바인딩 필수)**: `onDeleteBoth`(`ScenesView.tsx:6431`, 메인 `bgPart.sheetName` 읽음)·`onAddDept`(`:6452`, 메인 `bgPart`/`actPart`/`mergedScenePartId` 읽음). 참조 패널엔 **참조 씬 파트 기준으로 재바인딩한 콜백 세트**를 별도 전달(안 하면 엉뚱한 메인 씬에 삭제/추가).
+   - 낙관적 업데이트 재계산 2회 가능 → 검증.
+2. **모달 컨텍스트 prop 체인**: §4.C의 4갈래(CommentPanelResizable·CommentPanel·RevisionPanel·RevisionCommentThread). CommentPanel의 하드코딩 import → prop화, 리테이크 댓글 #칩은 이번에 비로소 활성화됨.
 3. **뷰포트 오버플로우 반응형**: 4.E.
 4. **참조 MergedScene cross-part 빌드**: 4.D.
 
