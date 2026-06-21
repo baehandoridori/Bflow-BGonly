@@ -19,7 +19,7 @@ import type { CompositingState, CompositingStatus } from '@/types';
 import { COMPOSITING_STATUS_LABEL, COMPOSITING_STATUS_ORDER, COMPOSITING_STATUS_TOKEN, isCompletedStatus, partCssColor } from '@/utils/compositingLabels';
 import { getTimelineCarouselSelection } from '@/utils/compositingTimelineCarousel';
 import { useCompositingDashboardStore } from '@/stores/useCompositingDashboardStore';
-import { useDataStore } from '@/stores/useDataStore';
+import { useDataStore, compositingKey } from '@/stores/useDataStore';
 import { PartBadge } from '@/components/compositing-dashboard/common/PartBadge';
 
 const PART_BOX_H = 96;
@@ -296,7 +296,7 @@ export function TimelinePanel({ episodeNumber, partGroups, epStates, onReorder, 
         batch: 0, combine: 0, aggregated: 0, adjust: 0, error: 0, done: 0,
       };
       for (const sc of g.scenes) {
-        const st = epStates.get(`${sc.episodeNumber}:${sc.sceneId}`);
+        const st = epStates.get(compositingKey(sc.episodeNumber, sc.sceneId));
         counts[st?.status ?? 'batch'] += 1;
       }
       const total = g.scenes.length;
@@ -320,7 +320,7 @@ export function TimelinePanel({ episodeNumber, partGroups, epStates, onReorder, 
       const partFrac = partFractions.get(g.partId) ?? 0;
       const slice = g.scenes.length > 0 ? partFrac / g.scenes.length : 0;
       g.scenes.forEach((sc, i) => {
-        const st = epStates.get(`${sc.episodeNumber}:${sc.sceneId}`);
+        const st = epStates.get(compositingKey(sc.episodeNumber, sc.sceneId));
         out.set(sc.sceneId, {
           startFrac: partStart + i * slice,
           endFrac: partStart + (i + 1) * slice,
@@ -596,7 +596,7 @@ export function TimelinePanel({ episodeNumber, partGroups, epStates, onReorder, 
           const isLast = i >= partGroups.length - 1;
           // 한솔 정정 (2026-05-21): 파트 박스 안 status 표시도 씬 번호 위치 기반.
           // 씬 i = i/N ~ (i+1)/N 위치, 그 칸 색 = 그 씬 status.
-          const sceneStatuses = g.scenes.map((sc) => epStates.get(`${sc.episodeNumber}:${sc.sceneId}`)?.status ?? 'batch' as CompositingStatus);
+          const sceneStatuses = g.scenes.map((sc) => epStates.get(compositingKey(sc.episodeNumber, sc.sceneId))?.status ?? 'batch' as CompositingStatus);
           return (
             <PartBox
               key={g.partId}
@@ -634,8 +634,10 @@ export function TimelinePanel({ episodeNumber, partGroups, epStates, onReorder, 
         >
           {carousel.selection.visibleIndices.map((sceneIndex) => {
             const scene = carousel.group.scenes[sceneIndex];
+            // sceneKey 는 핀/선택/모달용 raw 키 — SceneCard 의 raw `${ep}:${card.sceneId}` 비교와 같은 도메인이어야
+            //   캐러셀 클릭 핀이 카드에 맞는다. status 조회만 정규화 키(compositingKey)로 한다.
             const sceneKey = `${scene.episodeNumber}:${scene.sceneId}`;
-            const status = epStates.get(sceneKey)?.status ?? 'batch';
+            const status = epStates.get(compositingKey(scene.episodeNumber, scene.sceneId))?.status ?? 'batch';
             const tokenVar = COMPOSITING_STATUS_TOKEN[status];
             const episodeLabel = episodeLabelByNumber.get(scene.episodeNumber)
               ?? `EP.${String(scene.episodeNumber).padStart(2, '0')}`;

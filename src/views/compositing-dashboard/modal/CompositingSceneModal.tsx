@@ -26,7 +26,7 @@ import {
   COMPOSITING_STATUS_ORDER,
   COMPOSITING_STATUS_TOKEN,
 } from '@/utils/compositingLabels';
-import { useDataStore } from '@/stores/useDataStore';
+import { useDataStore, compositingKey } from '@/stores/useDataStore';
 import { useAuthStore } from '@/stores/useAuthStore';
 import { useCompositingDashboardStore } from '@/stores/useCompositingDashboardStore';
 import { UnifiedSceneDetailModal } from '@/components/scenes/UnifiedSceneDetailModal';
@@ -61,7 +61,9 @@ export function CompositingSceneModal({ sceneKey, episodeNumber, isCompositor }:
     if (!ep) return null;
     const cards = buildCardScenes(ep);
     const all = flattenCardScenes(cards);
-    const card = all.find((s) => s.sceneId === sceneId);
+    // 대소문자 무관 — 카드의 sceneId(병합 시 먼저 본 부서 케이스)와 sceneKey 케이스가 달라도 찾도록.
+    const wantId = sceneId.toLowerCase();
+    const card = all.find((s) => s.sceneId.toLowerCase() === wantId);
     if (!card) return null;
     return {
       card,
@@ -150,7 +152,7 @@ export function CompositingSceneModal({ sceneKey, episodeNumber, isCompositor }:
       if (Number.isNaN(idx) || idx < 1 || idx > COMPOSITING_STATUS_ORDER.length) return;
       const next = COMPOSITING_STATUS_ORDER[idx - 1];
       // 현재 status 와 같으면 noop. store 에서 최신값 직접 읽음 (useEffect closure stale 방지).
-      const cur = useDataStore.getState().compositingStates.get(`${episodeNumber}:${card.sceneId}`)?.status ?? 'batch';
+      const cur = useDataStore.getState().compositingStates.get(compositingKey(episodeNumber, card.sceneId))?.status ?? 'batch';
       if (next === cur) return;
       e.preventDefault();
       toggleCompositingStatus({
@@ -273,7 +275,7 @@ export function CompositingSceneModal({ sceneKey, episodeNumber, isCompositor }:
     actSceneIndex,
   };
 
-  const state = compositingStates.get(sceneKey);
+  const state = compositingStates.get(compositingKey(episodeNumber, sceneId));
   const status: CompositingStatus = state?.status ?? 'batch';
 
   const handleChangeStatus = (next: CompositingStatus) => {

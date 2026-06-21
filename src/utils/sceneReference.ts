@@ -27,8 +27,11 @@ export function resolveReferenceMergedScene(
   if (target.kind !== 'scene') return null;
   const ep = episodes.find((e) => e.episodeNumber === target.episodeNumber);
   if (!ep) return null;
-  const bgPart = ep.parts.find((p: any) => p.partId === target.partId && p.department === 'bg');
-  const actPart = ep.parts.find((p: any) => p.partId === target.partId && p.department === 'acting');
+  // partId·sceneId 대소문자 무관 — BG 소문자(d/d001) ↔ ACT 대문자(D/D001) 도 같은 #씬 타깃으로 해석.
+  const wantPart = (target.partId || '').toLowerCase();
+  const wantScene = (target.sceneId || '').toLowerCase();
+  const bgPart = ep.parts.find((p: any) => (p.partId || '').toLowerCase() === wantPart && p.department === 'bg');
+  const actPart = ep.parts.find((p: any) => (p.partId || '').toLowerCase() === wantPart && p.department === 'acting');
   if (!bgPart && !actPart) return null;
   const bgScenes = bgPart?.scenes ?? [];
   const actScenes = actPart?.scenes ?? [];
@@ -52,9 +55,9 @@ export function resolveReferenceMergedScene(
     : undefined)
     // sceneId 매칭은 정규 merged.sceneId 뿐 아니라 raw bg/act sceneId 도 본다 — ACT 비정규 id(ac001)가
     // 정규(a001)로 병합돼도 #ac001 태그(target.sceneId='ac001')로 찾히게(navigateToHashTarget 일관).
-    ?? merged.find((m) => m.sceneId === target.sceneId
-      || m.bgScene?.sceneId === target.sceneId
-      || m.actScene?.sceneId === target.sceneId);
+    ?? merged.find((m) => (m.sceneId || '').toLowerCase() === wantScene
+      || (m.bgScene?.sceneId || '').toLowerCase() === wantScene
+      || (m.actScene?.sceneId || '').toLowerCase() === wantScene);
   if (!found) return null;
   return {
     merged: found,

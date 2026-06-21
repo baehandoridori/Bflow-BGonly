@@ -28,6 +28,13 @@ test('resolveSceneById: 없으면 null, partId 대소문자 무관', () => {
   assert.equal(resolveSceneById(EPISODES, 1, 'A', 'zzz'), null);
   assert.deepEqual(resolveSceneById(EPISODES, 1, 'a', 'a005'), { no: 5, sceneId: 'a005' });
 });
+test('resolveSceneById: sceneId 도 대소문자 무관 (BG d001 / ACT D001)', () => {
+  // 실제 데이터는 대문자 D001 인데 소문자 d001 로 점프해도 찾아야 한다(부서별 케이스 차이).
+  const eps = [
+    { episodeNumber: 1, parts: [{ partId: 'D', scenes: [{ no: 1, sceneId: 'D001' }] }] },
+  ];
+  assert.deepEqual(resolveSceneById(eps, 1, 'D', 'd001'), { no: 1, sceneId: 'D001' });
+});
 
 // ─── 4c PR1(코덱스 6차): 같은 파트 내 sceneId 중복 row 를 uuid 로 정확히 구분 ───
 const DUP_EPISODES = [

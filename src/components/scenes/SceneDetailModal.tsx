@@ -1380,8 +1380,12 @@ function DeptToggle({ scene, sceneIdName, sheetName, onClose }: { scene: Scene; 
       // 2) 같은 EP + partId + target dept 인 part 안에서만 sceneId 매칭
       if (currentEpisodeNumber != null && currentPartId != null) {
         const epRow = dataEpisodes.find((e) => e.episodeNumber === currentEpisodeNumber);
-        const targetPart = epRow?.parts.find((p) => p.partId === currentPartId && p.department === next);
-        const found = targetPart?.scenes.find((s) => s.sceneId === sceneIdValue);
+        // partId·sceneId 모두 대소문자 무관 — BG 소문자(d / d001) ↔ ACT 대문자(D / D001) 부서 전환이
+        //   raw === 비교 때문에 "데이터 없음"으로 막히던 문제 fix(통합 머지의 케이스 무관 규칙과 일치).
+        const wantPartLc = currentPartId.toLowerCase();
+        const wantSceneLc = (sceneIdValue || '').toLowerCase();
+        const targetPart = epRow?.parts.find((p) => p.partId.toLowerCase() === wantPartLc && p.department === next);
+        const found = targetPart?.scenes.find((s) => (s.sceneId || '').toLowerCase() === wantSceneLc);
         if (found) {
           targetUuid = found.id;
           hasTarget = true;

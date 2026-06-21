@@ -52,12 +52,15 @@ export async function toggleCompositingStatus({
   const store = useDataStore.getState();
   const prev = store.compositingStates.get(key);
   const seq = nextSeq(key);
+  // 코덱스 P2: 같은 컷이 다른 케이스(BG d001 / ACT D001)로 이미 DB 에 있으면, 그 기존 행의 원본 sceneId 로 써야
+  //   case-sensitive (episode_number, scene_id) UPSERT 가 새 행을 만들지 않고 기존 행을 갱신한다(중복 행·롤백 방지).
+  const writeSceneId = prev?.sceneId ?? sceneId;
 
   // 1. 낙관적 — UI 즉시 반영
   const optimistic: CompositingState = {
     id: prev?.id ?? 'pending',
     episodeNumber,
-    sceneId,
+    sceneId: writeSceneId,
     partId,
     status: next,
     // 단계 변경 시 error 관련 필드 정리 (다른 단계로 갈 때)
@@ -72,7 +75,7 @@ export async function toggleCompositingStatus({
   // 2. Supabase UPSERT
   try {
     const row = await setCompositingState({
-      episodeNumber, sceneId, partId,
+      episodeNumber, sceneId: writeSceneId, partId,
       status: next,
       errorKind: optimistic.errorKind,
       errorNote: optimistic.errorNote,
@@ -140,7 +143,8 @@ export async function updateCompositingError({
 
   try {
     const row = await setCompositingState({
-      episodeNumber, sceneId, partId,
+      // 코덱스 P2: 기존 행의 원본 sceneId 로 갱신 — 다른 케이스로 중복 행 INSERT 방지.
+      episodeNumber, sceneId: prev.sceneId, partId,
       status: prev.status,
       errorKind,
       errorNote,

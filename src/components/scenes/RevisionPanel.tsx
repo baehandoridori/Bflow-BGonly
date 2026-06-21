@@ -541,12 +541,15 @@ export function RevisionPanel({ sheetName, sceneId, siblingSceneIds, department,
     for (const episode of episodes) {
       const part = episode.parts.find((candidate) => candidate.sheetName === sheetName);
       if (!part) continue;
-      const ownScene = part.scenes.find((s) => s.sceneId === sceneId);
+      // sceneId 대소문자 무관 — 반대 부서(BG↔ACT)가 같은 컷을 d001/D001 로 케이스만 다르게 저장해도
+      //   counterpart 담당자 자동 체크가 누락되지 않게(통합 머지의 케이스 무관 규칙과 일치).
+      const wantId = (sceneId || '').toLowerCase();
+      const ownScene = part.scenes.find((s) => (s.sceneId || '').toLowerCase() === wantId);
       // counterpart 는 같은 episode 안에서만 매칭 (alias-collision 방지).
       const counterpartPart = counterpartSheetName
         ? episode.parts.find((p) => p.sheetName === counterpartSheetName)
         : null;
-      const cpScene = counterpartPart?.scenes.find((s) => s.sceneId === sceneId);
+      const cpScene = counterpartPart?.scenes.find((s) => (s.sceneId || '').toLowerCase() === wantId);
       return {
         inferredSiblingSceneIds: part.scenes.map((s) => s.sceneId),
         scene: ownScene,
