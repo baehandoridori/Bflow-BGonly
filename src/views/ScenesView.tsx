@@ -6506,7 +6506,9 @@ export function ScenesView() {
                 sonnerToast.error(`${dept === 'bg' ? 'BG' : 'ACT'} 파트가 존재하지 않습니다. 먼저 파트를 만들어 주세요.`);
                 return;
               }
-              const targetSceneId = buildUnifiedSceneId(referencePartId, referenceMerged.sceneId);
+              // 참조 해석이 전역 맵을 복원하므로 buildUnifiedSceneId 재계산은 raw id(ac001)를 잘못 정규화할 수 있다(코덱스 P2).
+              // referenceMerged.sceneId 는 이미 참조 파트 기준으로 올바르게 통합된 id(buildMergedScenes 내부 등록 시 산출)라 그대로 쓴다.
+              const targetSceneId = referenceMerged.sceneId;
               // 중복 방지: 참조 파트의 현재 씬 목록을 라이브 스토어에서 시트명으로 조회.
               const targetPart = useDataStore.getState().episodes
                 .flatMap((ep) => ep.parts)
