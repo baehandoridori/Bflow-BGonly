@@ -24,6 +24,7 @@ import { AssigneeMultiSelect, AssigneeChipList } from '@/components/common/Assig
 import { EntityAwareInput } from '@/components/common/EntityAwareInput';
 import { EntityText } from '@/components/common/EntityText';
 import { navigateToHashTarget } from '@/utils/hashNavigation';
+import type { HashTarget } from '@/utils/hashEntity';
 import { resizeBlob } from '@/utils/imageUtils';
 import { ImageModal } from './ImageModal';
 import type { CommentInlineEvent } from './CommentPanel';
@@ -91,7 +92,7 @@ export interface UnifiedSceneDetailModalProps {
   merged: MergedScene;
   bgSheetName: string | null;
   actSheetName: string | null;
-  onToggle: (sheetName: string, sceneId: string, stage: Stage) => void;
+  onToggle: (sheetName: string, sceneId: string, stage: Stage, options?: { sceneUuid?: string | null; sceneIndex?: number }) => void;
   onFieldUpdate: (sheetName: string, sceneIndex: number, field: string, value: string) => void;
   onDeleteDept: (sheetName: string, sceneIndex: number) => void;
   onDeleteBoth: () => void;
@@ -113,7 +114,7 @@ export interface UnifiedSceneDetailModalProps {
   /** 리테이크 카드 내부 댓글 스레드에서 강조할 댓글 id. */
   focusRevisionCommentId?: string;
   /** v1.25.0~: 액팅 단계 토글 핸들러 (전달되면 ACT DeptSection 에서 ScenePhaseToggle 사용) */
-  onActPhaseStateClick?: (sheetName: string, sceneId: string, newState: ScenePhaseState) => void;
+  onActPhaseStateClick?: (sheetName: string, sceneId: string, newState: ScenePhaseState, sceneUuid?: string | null, sceneIndex?: number) => void;
   onActFeedbackRequest?: (sheetName: string, sceneId: string) => void;
   onActRoundBump?: (sheetName: string, sceneId: string, kind: 'work' | 'feedback', delta: 1 | -1) => void;
   onAssigneeStageToggle?: (sheetName: string, sceneId: string, assigneeName: string, stage: Stage, sceneUuid?: string | null, sceneIndex?: number, dept?: Department) => void;
@@ -130,6 +131,18 @@ export interface UnifiedSceneDetailModalProps {
    * 컴포지팅 컨텍스트가 모달 챕터를 모두 정의하므로, host(CompositingSceneModal) 가 직접 ReactNode 를 만들어 전달.
    */
   compositingSection?: React.ReactNode;
+  /** 'modal'(기본): 풀스크린 backdrop+센터. 'left'/'right': backdrop 없이 본체만(부모가 위치). 참조 도킹용. */
+  dockMode?: 'modal' | 'left' | 'right';
+  /** 4c PR2: 모달 안 #씬 칩 클릭 → 그 씬을 좌/우 도킹 참조 패널로 연다(부모가 처리). */
+  onSceneReference?: (target: HashTarget, side: 'left' | 'right') => void;
+  /** 4c PR2: 참조 도킹 패널 노드(자체가 dockMode 모달). flex 래퍼 안에 side 위치로 렌더된다. */
+  referencePanel?: React.ReactNode;
+  /** 4c PR2: 참조 패널을 본체 좌/우 어느 쪽에 둘지. referencePanel 이 있을 때만 의미. */
+  referenceSide?: 'left' | 'right';
+  /** 4c PR2: dock 헤더 [좌]/[우] 토글 — 참조 패널을 본체 어느 쪽에 둘지 변경(부모가 처리). */
+  onDockToggleSide?: (side: 'left' | 'right') => void;
+  /** 4c PR2: dock 헤더 [메인으로] — 이 참조 패널을 메인 모달로 승격(부모가 처리). */
+  onDockPromote?: () => void;
 }
 
 type TabKey = 'detail' | 'revisions' | 'files' | 'history';
@@ -165,6 +178,12 @@ export function UnifiedSceneDetailModal({
   continuitySourceElement,
   onContinuityEnd,
   compositingSection,
+  dockMode = 'modal',
+  onSceneReference,
+  referencePanel,
+  referenceSide = 'right',
+  onDockToggleSide,
+  onDockPromote,
 }: UnifiedSceneDetailModalProps) {
   const { bgScene, actScene, bgSceneIndex, actSceneIndex } = merged;
   const headScene = bgScene ?? actScene;
@@ -211,6 +230,19 @@ export function UnifiedSceneDetailModal({
   // 모달 backdrop 드래그 닫힘 방지 — mousedown 시작 위치를 추적해 backdrop 자체에서 시작한 경우만 onClose 트리거
   const backdropMouseDownRef = useRef(false);
   const modalMainRef = useRef<HTMLDivElement>(null);
+
+  // 4c PR2: 참조 패널이 붙으면 본체+참조+댓글 셋이 가로로 넘칠 수 있다.
+  //   좁은 화면(<1500px)에서는 댓글 패널을 숨겨 가로 오버플로를 막는다. 참조가 없으면 영향 0.
+  const [viewportNarrowForReference, setViewportNarrowForReference] = useState(
+    () => typeof window !== 'undefined' && window.innerWidth < 1500,
+  );
+  useEffect(() => {
+    if (!referencePanel) return;
+    const onResize = () => setViewportNarrowForReference(window.innerWidth < 1500);
+    onResize();
+    window.addEventListener('resize', onResize);
+    return () => window.removeEventListener('resize', onResize);
+  }, [referencePanel]);
 
   // 댓글 키: BG와 ACT 양쪽 조회 가능하게.
   // primary 는 "실제로 이 merged 에 존재하는 부서" 와 일치해야 한다 —
@@ -261,6 +293,7 @@ export function UnifiedSceneDetailModal({
   // v1.18.0: 댓글 패널의 [re#] 칩 클릭 → 리테이크 탭 + 카드 강조 + 스레드 펼침.
   // CommentPanel(같은 모달 내부) 이 'bflow:jump-to-revision' 을 dispatch 한다.
   useEffect(() => {
+    if (dockMode !== 'modal') return; // dock(참조) 인스턴스는 전역 jump-to-revision 을 가로채지 않는다 — 메인 모달 전용(코덱스 P2).
     function onJump(e: Event) {
       const detail = (e as CustomEvent<{ revisionId?: string }>).detail;
       const revisionId = detail?.revisionId;
@@ -287,7 +320,7 @@ export function UnifiedSceneDetailModal({
     }
     window.addEventListener('bflow:jump-to-revision', onJump);
     return () => window.removeEventListener('bflow:jump-to-revision', onJump);
-  }, []);
+  }, [dockMode]);
 
   // v1.18.0: focusRevisionId 강조 — 활성 탭이 'revisions' 일 때 카드를 scrollIntoView + pulse 클래스 부여.
   // 카드 element 는 RevisionCard 의 root motion.div 가 id={`rev-card-${revision.id}`} 로 설정.
@@ -365,6 +398,11 @@ export function UnifiedSceneDetailModal({
     setNavDirection(dir === 'next' ? 1 : -1);
     onNavigate?.(dir);
   }, [onNavigate]);
+
+  // 4c PR2: 모달 안에서 #씬 칩 클릭 → 점프 대신 좌/우 도킹 참조 패널로 연다.
+  //   #파트/#화 및 onSceneReference 미연결 시에는 기존 점프(navigateToHashTarget) 유지.
+  const handleHash = (t: HashTarget) =>
+    (t.kind === 'scene' && onSceneReference) ? onSceneReference(t, referenceSide ?? 'right') : navigateToHashTarget(t);
 
   // 모달 박스 + 댓글 패널 wrapper 의 좌우 흔들림 (한솔 요청: "본체와 댓글 창 같이 옆으로 움직임")
   // navigate 시 wrapper 가 ±36px 슬라이드 → 본체와 댓글이 함께 밀림.
@@ -460,8 +498,9 @@ export function UnifiedSceneDetailModal({
     [sceneActivities, actScene?.id],
   );
 
-  // ESC 닫기 + 좌우 화살표
+  // ESC 닫기 + 좌우 화살표 (도킹 모드에선 전역 단축키 비활성 — 부모가 닫기 제어)
   useEffect(() => {
+    if (dockMode !== 'modal') return;
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
         if (showImageModal) { setShowImageModal(null); return; }
@@ -477,7 +516,7 @@ export function UnifiedSceneDetailModal({
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [onClose, handleNavigate, hasPrev, hasNext, showImageModal, deleteConfirm]);
+  }, [dockMode, onClose, handleNavigate, hasPrev, hasNext, showImageModal, deleteConfirm]);
 
   // v1.30.1 (한솔 보고 2026-05-23): 클립보드 붙여넣기 UI/UX 강화.
   //   - 호버 중인 슬롯이 있으면 그 슬롯을 target. 없으면 빈 슬롯 자동 우선 (기존 동작).
@@ -508,8 +547,9 @@ export function UnifiedSceneDetailModal({
     document.addEventListener('keydown', onKey, true); // capture phase 로 먼저 받음
     return () => document.removeEventListener('keydown', onKey, true);
   }, [pinnedImageSlot]);
-  // Ctrl+V 이미지 붙여넣기 (BG 만)
+  // Ctrl+V 이미지 붙여넣기 (BG 만, 도킹 모드 제외)
   useEffect(() => {
+    if (dockMode !== 'modal') return;
     if (!bgScene || !bgSheetName) return;
     const onPaste = async (e: ClipboardEvent) => {
       if (showImageModal) return;
@@ -546,7 +586,7 @@ export function UnifiedSceneDetailModal({
     window.addEventListener('paste', onPaste);
     return () => window.removeEventListener('paste', onPaste);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [bgScene?.storyboardUrl, bgScene?.guideUrl, bgSheetName, showImageModal, hoveredImageSlot, pinnedImageSlot]);
+  }, [dockMode, bgScene?.storyboardUrl, bgScene?.guideUrl, bgSheetName, showImageModal, hoveredImageSlot, pinnedImageSlot]);
 
   // 코덱스 P2 (2026-05-24): 호출자가 성공/실패 분기로 토스트 띄울 수 있도록 boolean 반환.
   //   기존엔 catch 가 swallow 해서 paste 가 실패해도 onPaste 가 success 토스트를 띄움.
@@ -618,43 +658,39 @@ export function UnifiedSceneDetailModal({
   const sceneNoDisplay = unifiedSceneId.match(/\d+$/)?.[0]?.replace(/^0+/, '') || String(headScene.no);
   const showSceneDots = totalMerged > 0 && totalMerged <= 80;
 
-  return (
-    <AnimatePresence>
-      {/* data-no-lasso: 모달 내부 드래그가 뒤쪽 씬 그리드 라쏘를 트리거하지 않도록 */}
-      <motion.div
-        key="unified-modal-backdrop"
-        data-no-lasso
-        initial={{ opacity: 0 }}
-        animate={{ opacity: 1 }}
-        exit={{ opacity: 0 }}
-        transition={{ duration: 0.15 }}
-        className="fixed inset-0 z-50 flex items-center justify-center bg-overlay/60 backdrop-blur-sm p-4"
-        onMouseDown={(e) => {
-          backdropMouseDownRef.current = e.target === e.currentTarget;
-        }}
-        onClick={(e) => {
-          if (backdropMouseDownRef.current && e.target === e.currentTarget) {
-            onClose();
-          }
-          backdropMouseDownRef.current = false;
-        }}
-      >
-        {/* ── flex 래퍼 — 본체 + 댓글 (좌우 이동 시 같이 흔들기 위해 motion.div 로 감쌈) ── */}
-        <motion.div
-          animate={wrapperControls}
-          className="flex gap-3 items-stretch max-w-full max-h-full"
-          onClick={(e) => e.stopPropagation()}
-        >
-          {/* ── 본체 ── */}
-          <motion.div
-            ref={modalMainRef}
-            initial={continuitySourceElement ? { opacity: 1, scale: 1, y: 0 } : { opacity: 0, scale: 0.96, y: 12 }}
-            animate={{ opacity: 1, scale: 1, y: 0 }}
-            exit={{ opacity: 0, scale: 0.96, y: 6 }}
-            transition={{ duration: 0.18, ease: [0.16, 1, 0.3, 1] }}
-            className="relative w-[min(720px,calc(100vw-26rem))] h-[min(900px,92vh)] flex flex-col bg-bg-card border border-bg-border overflow-hidden"
-            style={{ borderRadius: 18, boxShadow: '0 40px 80px rgba(0,0,0,0.5)' }}
-          >
+  // dockMode 별 슬라이드 방향 — 도킹 시 subtle slide-in/out
+  const dockInitialX = dockMode === 'left' ? -24 : dockMode === 'right' ? 24 : 0;
+
+  // 4c PR2: 참조 패널이 붙으면 본체를 좁혀 본체+참조(+댓글) 가 가로로 들어오게 한다.
+  //   참조가 없으면 기존 폭 그대로(영향 0). 참조 인스턴스 자신(dock 모드)은 referencePanel 이 없어 영향 없음.
+  const bodyWidthClass = dockMode !== 'modal'
+    // dock(참조) 인스턴스는 자신의 referencePanel 이 없어 720px 가 되어 부모 슬롯(560px/40vw)을 넘쳤다(코덱스 P2).
+    // 슬롯에 맞춰 채운다.
+    ? 'w-full'
+    : referencePanel
+      ? 'w-[min(560px,calc(100vw-44rem))] min-w-[420px] shrink'
+      : 'w-[min(720px,calc(100vw-26rem))]';
+
+  // ── 본체 motion.div — modal/dock 모드 공통 ──
+  const bodyEl = (
+    <motion.div
+      key="unified-modal-body"
+      ref={modalMainRef}
+      initial={
+        dockMode !== 'modal'
+          ? { opacity: 0, x: dockInitialX }
+          : continuitySourceElement ? { opacity: 1, scale: 1, y: 0 } : { opacity: 0, scale: 0.96, y: 12 }
+      }
+      animate={{ opacity: 1, scale: 1, y: 0, x: 0 }}
+      exit={
+        dockMode !== 'modal'
+          ? { opacity: 0, x: dockInitialX }
+          : { opacity: 0, scale: 0.96, y: 6 }
+      }
+      transition={{ duration: 0.18, ease: [0.16, 1, 0.3, 1] }}
+      className={`relative ${bodyWidthClass} h-[min(900px,92vh)] flex flex-col bg-bg-card border border-bg-border overflow-hidden`}
+      style={{ borderRadius: 18, boxShadow: '0 40px 80px rgba(0,0,0,0.5)' }}
+    >
             {/* §3-1 배경 글로우 두 개 — 시그니처 */}
             <div
               aria-hidden
@@ -772,23 +808,55 @@ export function UnifiedSceneDetailModal({
                   </button>
                 )}
 
-                {/* v1.23.2 (#1 재설계): 토글 = 전역 selectedDepartment(+dashboardDeptFilter) 변경 + 모달 닫음 → 같은 컷 다시 클릭 시 새 부서 모달. */}
-                <div className="flex gap-[2px] bg-bg-border/40 p-[2px] rounded-md shrink-0">
-                  {(['all', 'bg', 'acting'] as const).map((d) => (
+                {/* v1.23.2 (#1 재설계): 토글 = 전역 selectedDepartment(+dashboardDeptFilter) 변경 + 모달 닫음 → 같은 컷 다시 클릭 시 새 부서 모달.
+                    dock(참조) 모드에선 숨긴다 — 전역 부서 전환이 Scenes 뷰 전체를 바꿔 dock 을 닫고 메인 파트 기준으로 재오픈해 참조 컨텍스트를 깨므로(코덱스 P2). */}
+                {dockMode === 'modal' && (
+                  <div className="flex gap-[2px] bg-bg-border/40 p-[2px] rounded-md shrink-0">
+                    {(['all', 'bg', 'acting'] as const).map((d) => (
+                      <button
+                        key={d}
+                        onClick={() => handleDeptToggle(d)}
+                        className={cn(
+                          'px-2 py-1 rounded-[4px] text-[10.5px] cursor-pointer transition-all whitespace-nowrap',
+                          selectedDepartment === d ? 'bg-accent/22 text-accent-sub' : 'text-text-secondary hover:text-text-primary',
+                        )}
+                        style={selectedDepartment === d ? { boxShadow: 'inset 0 0 0 1px rgba(108, 92, 231, 0.32)' } : {}}
+                        title={d === 'all' ? '통합 모드로 전환 (모달 닫고 다시 클릭하면 BG+액팅 모달)' : d === 'bg' ? '배경 모드로 전환' : '액팅 모드로 전환'}
+                      >
+                        {d === 'all' ? '통합' : d === 'bg' ? 'BG' : '액팅'}
+                      </button>
+                    ))}
+                  </div>
+                )}
+
+                {/* 4c PR2: dock 모드 헤더 컨트롤 — 좌/우 토글 + 메인으로 승격 (모달 모드에선 숨김) */}
+                {dockMode !== 'modal' && (
+                  <>
+                    <div className="flex gap-[2px] bg-bg-border/40 p-[2px] rounded-md shrink-0">
+                      {(['left', 'right'] as const).map((side) => (
+                        <button
+                          key={side}
+                          onClick={() => onDockToggleSide?.(side)}
+                          className={cn(
+                            'px-2 py-1 rounded-[4px] text-[10.5px] cursor-pointer transition-all whitespace-nowrap',
+                            dockMode === side ? 'bg-accent/22 text-accent-sub' : 'text-text-secondary hover:text-text-primary',
+                          )}
+                          style={dockMode === side ? { boxShadow: 'inset 0 0 0 1px rgba(108, 92, 231, 0.32)' } : {}}
+                          title={side === 'left' ? '참조 패널을 왼쪽에 두기' : '참조 패널을 오른쪽에 두기'}
+                        >
+                          {side === 'left' ? '좌' : '우'}
+                        </button>
+                      ))}
+                    </div>
                     <button
-                      key={d}
-                      onClick={() => handleDeptToggle(d)}
-                      className={cn(
-                        'px-2 py-1 rounded-[4px] text-[10.5px] cursor-pointer transition-all whitespace-nowrap',
-                        selectedDepartment === d ? 'bg-accent/22 text-accent-sub' : 'text-text-secondary hover:text-text-primary',
-                      )}
-                      style={selectedDepartment === d ? { boxShadow: 'inset 0 0 0 1px rgba(108, 92, 231, 0.32)' } : {}}
-                      title={d === 'all' ? '통합 모드로 전환 (모달 닫고 다시 클릭하면 BG+액팅 모달)' : d === 'bg' ? '배경 모드로 전환' : '액팅 모드로 전환'}
+                      onClick={() => onDockPromote?.()}
+                      className="px-2.5 py-1 rounded-md bg-accent/15 border border-accent/30 text-accent-sub text-[11px] font-medium hover:bg-accent/25 cursor-pointer transition-colors shrink-0 whitespace-nowrap"
+                      title="이 참조 씬을 메인 모달로 열기"
                     >
-                      {d === 'all' ? '통합' : d === 'bg' ? 'BG' : '액팅'}
+                      메인으로
                     </button>
-                  ))}
-                </div>
+                  </>
+                )}
 
                 <button
                   onClick={onClose}
@@ -894,6 +962,7 @@ export function UnifiedSceneDetailModal({
                             onAssigneeActPhaseStateClick={onAssigneeActPhaseStateClick}
                             onAssigneeActFeedbackRequest={onAssigneeActFeedbackRequest}
                             onAssigneeActRoundBump={onAssigneeActRoundBump}
+                            onHashClick={handleHash}
                           />
                           <DeptSection
                             dept="acting"
@@ -913,6 +982,7 @@ export function UnifiedSceneDetailModal({
                             onAssigneeActPhaseStateClick={onAssigneeActPhaseStateClick}
                             onAssigneeActFeedbackRequest={onAssigneeActFeedbackRequest}
                             onAssigneeActRoundBump={onAssigneeActRoundBump}
+                            onHashClick={handleHash}
                           />
                         </div>
 
@@ -927,6 +997,7 @@ export function UnifiedSceneDetailModal({
                         sceneId={revisionSceneId}
                         siblingSceneIds={revisionSiblingSceneIds}
                         onCountChange={setRevisionCount}
+                        onHashClick={handleHash}
                       />
                     )}
 
@@ -985,36 +1056,82 @@ export function UnifiedSceneDetailModal({
                 </div>
               )}
             </div>
-          </motion.div>
+    </motion.div>
+  );
 
-          {/* ── 댓글 패널 (상시 표시) — 본체와 같은 높이 */}
-          {primaryCommentKey && (
-            <CommentPanelResizable
-              commentCount={commentCount}
-              sceneKey={primaryCommentKey}
-              sceneThreadKey={sceneThreadKey}
-              secondarySceneKey={secondaryCommentKey || undefined}
-              onCountChange={setCommentCount}
-              inlineEvents={inlineEvents}
-              focusCommentId={focusCommentId}
-              sceneLabel={[episodeLabel, partLabel, unifiedSceneId ? `#${unifiedSceneId}` : null]
-                .filter(Boolean)
-                .join(' / ')}
-              quickRevision={{
-                sceneKey: revisionSceneKey,
-                context: selectedDepartment === 'bg' || selectedDepartment === 'acting' ? selectedDepartment : 'all',
-                department: selectedDepartment === 'bg' || selectedDepartment === 'acting' ? selectedDepartment : undefined,
-                bgAssignee: bgScene?.assignee ?? null,
-                actingAssignee: actScene?.assignee ?? null,
-              }}
-              heightClass="h-[min(900px,92vh)]"
-              headerRight={commentCount > 0 ? (
-                <span className="text-xs text-text-secondary/60 tabular-nums">({commentCount})</span>
-              ) : null}
-            />
-          )}
+  return (
+    <AnimatePresence>
+      {dockMode === 'modal' ? (
+        /* ── 모달 모드: 풀스크린 backdrop + 댓글 사이드 패널 ── */
+        <motion.div
+          key="unified-modal-backdrop"
+          data-no-lasso
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          exit={{ opacity: 0 }}
+          transition={{ duration: 0.15 }}
+          className="fixed inset-0 z-50 flex items-center justify-center bg-overlay/60 backdrop-blur-sm p-4"
+          onMouseDown={(e) => {
+            backdropMouseDownRef.current = e.target === e.currentTarget;
+          }}
+          onClick={(e) => {
+            if (backdropMouseDownRef.current && e.target === e.currentTarget) {
+              onClose();
+            }
+            backdropMouseDownRef.current = false;
+          }}
+        >
+          {/* flex 래퍼 — 본체 + 댓글 (+ 참조 도킹 패널) (좌우 이동 시 같이 흔들기 위해 motion.div 로 감쌈) */}
+          <motion.div
+            animate={wrapperControls}
+            className="flex gap-3 items-stretch max-w-full max-h-full"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* 참조 패널 좌측 도킹 — 본체보다 먼저 */}
+            {referencePanel && referenceSide === 'left' && (
+              <div className="w-[min(560px,40vw)] shrink-0 max-h-full">{referencePanel}</div>
+            )}
+
+            {bodyEl}
+
+            {/* ── 댓글 패널 — 본체와 같은 높이. 참조 패널이 붙고 화면이 좁으면 가로 오버플로 방지로 숨김 */}
+            {primaryCommentKey && !(referencePanel && viewportNarrowForReference) && (
+              <CommentPanelResizable
+                commentCount={commentCount}
+                sceneKey={primaryCommentKey}
+                sceneThreadKey={sceneThreadKey}
+                secondarySceneKey={secondaryCommentKey || undefined}
+                onCountChange={setCommentCount}
+                inlineEvents={inlineEvents}
+                focusCommentId={focusCommentId}
+                sceneLabel={[episodeLabel, partLabel, unifiedSceneId ? `#${unifiedSceneId}` : null]
+                  .filter(Boolean)
+                  .join(' / ')}
+                quickRevision={{
+                  sceneKey: revisionSceneKey,
+                  context: selectedDepartment === 'bg' || selectedDepartment === 'acting' ? selectedDepartment : 'all',
+                  department: selectedDepartment === 'bg' || selectedDepartment === 'acting' ? selectedDepartment : undefined,
+                  bgAssignee: bgScene?.assignee ?? null,
+                  actingAssignee: actScene?.assignee ?? null,
+                }}
+                heightClass="h-[min(900px,92vh)]"
+                headerRight={commentCount > 0 ? (
+                  <span className="text-xs text-text-secondary/60 tabular-nums">({commentCount})</span>
+                ) : null}
+                onHashClick={handleHash}
+              />
+            )}
+
+            {/* 참조 패널 우측 도킹 — 댓글 패널 뒤 */}
+            {referencePanel && referenceSide === 'right' && (
+              <div className="w-[min(560px,40vw)] shrink-0 max-h-full">{referencePanel}</div>
+            )}
+          </motion.div>
         </motion.div>
-      </motion.div>
+      ) : (
+        /* ── 도킹 모드: 본체만 (backdrop/댓글 패널 없음, 부모가 위치 제어) ── */
+        bodyEl
+      )}
 
       {continuitySourceElement && (
         <SceneContinuityTransition
@@ -1178,24 +1295,26 @@ function DeptSection({
   onAssigneeActPhaseStateClick,
   onAssigneeActFeedbackRequest,
   onAssigneeActRoundBump,
+  onHashClick,
 }: {
   dept: Department;
   scene: Scene | null;
   sheetName: string | null;
   sceneIndex: number;
   sceneId: string;
-  onToggle: (sheetName: string, sceneId: string, stage: Stage) => void;
+  onToggle: (sheetName: string, sceneId: string, stage: Stage, options?: { sceneUuid?: string | null; sceneIndex?: number }) => void;
   onFieldUpdate: (sheetName: string, sceneIndex: number, field: string, value: string) => void;
   onDelete: () => void;
   onAdd: () => void;
   memoAuthorMeta?: MemoAuthorMeta | null;
-  onActPhaseStateClick?: (sheetName: string, sceneId: string, newState: ScenePhaseState) => void;
+  onActPhaseStateClick?: (sheetName: string, sceneId: string, newState: ScenePhaseState, sceneUuid?: string | null, sceneIndex?: number) => void;
   onActFeedbackRequest?: (sheetName: string, sceneId: string) => void;
   onActRoundBump?: (sheetName: string, sceneId: string, kind: 'work' | 'feedback', delta: 1 | -1) => void;
   onAssigneeStageToggle?: (sheetName: string, sceneId: string, assigneeName: string, stage: Stage, sceneUuid?: string | null, sceneIndex?: number, dept?: Department) => void;
   onAssigneeActPhaseStateClick?: (sheetName: string, sceneId: string, assigneeName: string, newState: ScenePhaseState, sceneUuid?: string | null, sceneIndex?: number) => void;
   onAssigneeActFeedbackRequest?: (sheetName: string, sceneId: string, assigneeName: string, sceneUuid?: string | null, sceneIndex?: number) => void;
   onAssigneeActRoundBump?: (sheetName: string, sceneId: string, assigneeName: string, kind: 'work' | 'feedback', delta: 1 | -1, sceneUuid?: string | null, sceneIndex?: number) => void;
+  onHashClick?: (t: HashTarget) => void;
 }) {
   const cfg = DEPARTMENT_CONFIGS[dept];
   const visualColor = deptVisualColor(dept);
@@ -1292,7 +1411,7 @@ function DeptSection({
             <ScenePhaseToggle
               scene={scene}
               iconDisplay="always"
-              onStateClick={(next) => onActPhaseStateClick(sheetName, sceneId, next)}
+              onStateClick={(next) => onActPhaseStateClick(sheetName, sceneId, next, scene.id ?? null, sceneIndex)}
               onRequestFeedback={() => onActFeedbackRequest(sheetName, sceneId)}
               onRoundBump={(kind, delta) => onActRoundBump(sheetName, sceneId, kind, delta)}
             />
@@ -1305,7 +1424,7 @@ function DeptSection({
             className="bg-black/[0.06] dark:bg-white/[0.04] border-transparent"
             segmentClassName="py-2 text-xs"
             dataContinuityTarget={dept === 'bg' ? 'bg-stage' : 'act-stage'}
-            onToggle={(stage) => onToggle(sheetName, sceneId, stage)}
+            onToggle={(stage) => onToggle(sheetName, sceneId, stage, { sceneUuid: scene.id ?? null, sceneIndex })}
           />
         )}
       </div>
@@ -1316,6 +1435,7 @@ function DeptSection({
         onSave={(v) => onFieldUpdate(sheetName, sceneIndex, 'memo', v)}
         memoAuthorMeta={memoAuthorMeta}
         continuityTarget={dept === 'bg' ? 'bg-memo' : 'act-memo'}
+        onHashClick={onHashClick}
       />
     </div>
   );
@@ -1372,8 +1492,8 @@ function InlineAssigneeRow({ label, value, onSave }: {
 
 /* ── 인라인 메모 ── */
 
-function InlineTextareaRow({ label, value, onSave, memoAuthorMeta, continuityTarget }: {
-  label: string; value: string; onSave: (v: string) => void; memoAuthorMeta?: MemoAuthorMeta | null; continuityTarget?: string;
+function InlineTextareaRow({ label, value, onSave, memoAuthorMeta, continuityTarget, onHashClick }: {
+  label: string; value: string; onSave: (v: string) => void; memoAuthorMeta?: MemoAuthorMeta | null; continuityTarget?: string; onHashClick?: (t: HashTarget) => void;
 }) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(value);
@@ -1429,7 +1549,7 @@ function InlineTextareaRow({ label, value, onSave, memoAuthorMeta, continuityTar
           style={{ background: value ? 'rgba(255,255,255,0.025)' : undefined }}
         >
           {value
-            ? <EntityText text={value} userNames={userNames} onHashClick={navigateToHashTarget} />
+            ? <EntityText text={value} userNames={userNames} onHashClick={onHashClick ?? navigateToHashTarget} />
             : <span className="text-text-secondary/50">메모 없음</span>}
           {value && (
             <Pencil size={12} className="inline-block ml-2 opacity-0 hover:opacity-60 transition-opacity" />

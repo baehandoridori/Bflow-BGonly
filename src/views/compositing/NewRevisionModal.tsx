@@ -25,6 +25,7 @@ import { useAuthStore } from '@/stores/useAuthStore';
 import { buildSceneKey } from '@/services/revisionService';
 import { calcDefaultRecipients } from '@/utils/revisionRecipients';
 import { resizeBlob } from '@/utils/imageUtils';
+import { stripEntityTokens } from '@/utils/entityTokens';
 import { RevisionRecipientPicker } from '@/components/scenes/RevisionRecipientPicker';
 import { EntityAwareInput } from '@/components/common/EntityAwareInput';
 import type { Episode, Part, Scene } from '@/types';
@@ -467,7 +468,7 @@ export default function NewRevisionModal({ open, onClose }: Props) {
                     {selectedPartLabel} {selectedScene.no}
                   </span>
                   <span className="text-[12px] text-text-primary truncate">
-                    {selectedScene.memo || '메모 없음'}
+                    {selectedScene.memo ? stripEntityTokens(selectedScene.memo) : '메모 없음'}
                   </span>
                   {(() => {
                     const sourcePart = getSourcePartForRevisionScene(
@@ -540,7 +541,7 @@ export default function NewRevisionModal({ open, onClose }: Props) {
                                 scene.memo ? 'text-text-secondary' : 'text-text-secondary/50'
                               }`}
                             >
-                              {scene.memo || '—'}
+                              {scene.memo ? stripEntityTokens(scene.memo) : '—'}
                             </span>
                             {openCount > 0 && (
                               <span className="text-[9px] px-1 py-0.5 rounded bg-accent text-white font-bold shrink-0">

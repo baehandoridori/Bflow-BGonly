@@ -31,6 +31,7 @@ import { HashtagDropdown } from '@/components/common/HashtagDropdown';
 import { useMentionAutocomplete } from '@/hooks/useMentionAutocomplete';
 import { useHashtagAutocomplete } from '@/hooks/useHashtagAutocomplete';
 import { navigateToHashTarget } from '@/utils/hashNavigation';
+import type { HashTarget } from '@/utils/hashEntity';
 import {
   COMMENT_READ_STATE_EVENT,
   getCommentReadStateForUser,
@@ -79,6 +80,8 @@ interface CommentPanelProps {
   sceneLabel?: string;
   /** 댓글 입력창의 /re 빠른 리테이크 등록 문맥. 없으면 /re 는 일반 댓글로 취급된다. */
   quickRevision?: CommentPanelQuickRevisionContext;
+  /** 4c PR2: #씬 칩 클릭 처리 분기(도킹 참조). 없으면 기존 점프(navigateToHashTarget). */
+  onHashClick?: (t: HashTarget) => void;
 }
 
 export interface CommentPanelQuickRevisionContext {
@@ -230,7 +233,7 @@ function ThreadReplyButton({
 
 // ─── 메인 컴포넌트 ──────────────────────────
 
-export function CommentPanel({ sceneKey, secondarySceneKey, sceneThreadKey, onCountChange, inlineEvents, focusCommentId, sceneLabel, quickRevision }: CommentPanelProps) {
+export function CommentPanel({ sceneKey, secondarySceneKey, sceneThreadKey, onCountChange, inlineEvents, focusCommentId, sceneLabel, quickRevision, onHashClick }: CommentPanelProps) {
   const { currentUser, users } = useAuthStore();
   const { setView, setHighlightUserName } = useAppStore();
   const { createRevision } = useRevisionStore();
@@ -1294,7 +1297,7 @@ export function CommentPanel({ sceneKey, secondarySceneKey, sceneThreadKey, onCo
 
   // 4c: 댓글 본문 #태그 칩 클릭 → 해당 씬/파트/화로 점프(통합 모달/뷰).
   const renderText = (text: string, _sourceKey?: string) => (
-    <EntityText text={text} userNames={userNames} onMentionClick={handleMentionClick} onHashClick={navigateToHashTarget} />
+    <EntityText text={text} userNames={userNames} onMentionClick={handleMentionClick} onHashClick={onHashClick ?? navigateToHashTarget} />
   );
 
   // ─── 렌더링 ────────────────────────────────

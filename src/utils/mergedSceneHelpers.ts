@@ -50,6 +50,19 @@ function shouldPreserveRawSceneId(partId: string | null | undefined, sceneId: st
   return rawCounterpartSceneIdsByPart.get(normalizedPartId)?.has(rawSceneIdKey(sceneId)) ?? false;
 }
 
+// 참조 패널이 '다른 파트'의 merged 를 만들면 buildMergedScenes 가 전역 counterpart 맵(partId 키, 화 미구분)을
+// 갱신해 메인 파트의 buildUnifiedSceneId 를 오염시킨다(코덱스 P2). 참조 해석은 호출 전 스냅샷 → 후 복원으로 격리한다.
+export function snapshotRawCounterpartState(partId: string | null | undefined): Set<string> | undefined {
+  const k = normalizePartId(partId);
+  return k ? rawCounterpartSceneIdsByPart.get(k) : undefined;
+}
+export function restoreRawCounterpartState(partId: string | null | undefined, snapshot: Set<string> | undefined): void {
+  const k = normalizePartId(partId);
+  if (!k) return;
+  if (snapshot) rawCounterpartSceneIdsByPart.set(k, snapshot);
+  else rawCounterpartSceneIdsByPart.delete(k);
+}
+
 function dedupeUpdates(updates: { sceneId: string; sceneIndex: number }[]) {
   const seen = new Set<string>();
   return updates.filter((update) => {
