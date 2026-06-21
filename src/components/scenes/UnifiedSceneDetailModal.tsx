@@ -1551,6 +1551,7 @@ function InlineTextareaRow({ label, value, onSave, memoAuthorMeta, continuityTar
       {editing ? (
         <EntityAwareInput
           multiline
+          autoGrow
           value={draft}
           onChange={setDraft}
           users={users}
@@ -1558,7 +1559,7 @@ function InlineTextareaRow({ label, value, onSave, memoAuthorMeta, continuityTar
           onBlur={commit}
           onCancel={() => { setDraft(value); setEditing(false); }}
           autoFocus
-          className="w-full min-h-[64px] bg-bg-primary border border-accent/50 rounded-md px-3 py-2 text-sm text-text-primary outline-none focus:border-accent resize-y"
+          className="w-full min-h-[64px] bg-bg-primary border border-accent/50 rounded-md px-3 py-2 text-sm text-text-primary outline-none focus:border-accent resize-none"
         />
       ) : (
         <div

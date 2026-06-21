@@ -24,7 +24,8 @@ interface Props {
  */
 export function EntityText({ text, userNames, onMentionClick, renderTextSegment, onHashClick, onHashContextMenu }: Props) {
   const episodeTitles = useDataStore((s) => s.episodeTitles);
-  const epName = (n: number) => episodeTitles[n] || `EP${String(n).padStart(2, '0')}`;
+  // fallback 은 앱 표준 표기(Episode.title = 'EP.NN')와 통일 — 점(.) 없는 'EPNN' 이면 헤더·트리·드롭다운과 어긋난다.
+  const epName = (n: number) => episodeTitles[n] || `EP.${String(n).padStart(2, '0')}`;
   const tokens = tokenizeEntities(text, userNames);
   return (
     <>
