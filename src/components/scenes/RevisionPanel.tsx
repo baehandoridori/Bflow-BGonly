@@ -114,6 +114,7 @@ const RevisionCard = memo(function RevisionCard({
   onStatusChange,
   onDelete,
   onHashClick,
+  onHashContextMenu,
 }: {
   revision: CompRevision;
   /**
@@ -127,6 +128,8 @@ const RevisionCard = memo(function RevisionCard({
   onStatusChange: (revId: string, status: RevisionStatus, note?: string) => void;
   onDelete?: (rev: CompRevision) => void;
   onHashClick?: (t: HashTarget) => void;
+  /** 4c PR3: #씬·#파트·#화 칩 우클릭 메뉴. */
+  onHashContextMenu?: (t: HashTarget, e: React.MouseEvent) => void;
 }) {
   const [lightbox, setLightbox] = useState<AttachmentImageLightboxState | null>(null);
   const { currentUser, users: allUsers } = useAuthStore();
@@ -279,6 +282,7 @@ const RevisionCard = memo(function RevisionCard({
           userNames={entityUserNames}
           onMentionClick={handleEntityMentionClick}
           onHashClick={onHashClick ?? navigateToHashTarget}
+          onHashContextMenu={onHashContextMenu}
         />
       </p>
 
@@ -359,6 +363,7 @@ const RevisionCard = memo(function RevisionCard({
                       userNames={entityUserNames}
                       onMentionClick={handleEntityMentionClick}
                       onHashClick={onHashClick ?? navigateToHashTarget}
+                      onHashContextMenu={onHashContextMenu}
                     />
                   </p>
                 </div>
@@ -484,7 +489,7 @@ const RevisionCard = memo(function RevisionCard({
       </div>
 
       {/* 카드 내 댓글 스레드 — v1.18.0 신규 */}
-      <RevisionCommentThread revisionId={revision.id} sceneKey={commentSceneKey} onHashClick={onHashClick} />
+      <RevisionCommentThread revisionId={revision.id} sceneKey={commentSceneKey} onHashClick={onHashClick} onHashContextMenu={onHashContextMenu} />
     </motion.div>
   );
 });
@@ -505,9 +510,11 @@ interface RevisionPanelProps {
   onCountChange?: (count: number) => void;
   /** 4c PR2: #씬 칩 클릭 처리 분기(도킹 참조). 없으면 기존 점프. */
   onHashClick?: (t: HashTarget) => void;
+  /** 4c PR3: #씬·#파트·#화 칩 우클릭 메뉴. */
+  onHashContextMenu?: (t: HashTarget, e: React.MouseEvent) => void;
 }
 
-export function RevisionPanel({ sheetName, sceneId, siblingSceneIds, department, onCountChange, onHashClick }: RevisionPanelProps) {
+export function RevisionPanel({ sheetName, sceneId, siblingSceneIds, department, onCountChange, onHashClick, onHashContextMenu }: RevisionPanelProps) {
   const { currentUser, users: allUsers } = useAuthStore();
   // 필드별 selector — 액션은 안정 참조라 store 의 무관한 필드 변경엔 리렌더 안 됨.
   const createRevision = useRevisionStore((s) => s.createRevision);
@@ -698,6 +705,7 @@ export function RevisionPanel({ sheetName, sceneId, siblingSceneIds, department,
                 onStatusChange={handleStatusChange}
                 onDelete={handleDelete}
                 onHashClick={onHashClick}
+                onHashContextMenu={onHashContextMenu}
               />
             ))}
           </AnimatePresence>

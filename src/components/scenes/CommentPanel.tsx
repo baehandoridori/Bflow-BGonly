@@ -82,6 +82,8 @@ interface CommentPanelProps {
   quickRevision?: CommentPanelQuickRevisionContext;
   /** 4c PR2: #씬 칩 클릭 처리 분기(도킹 참조). 없으면 기존 점프(navigateToHashTarget). */
   onHashClick?: (t: HashTarget) => void;
+  /** 4c PR3: #씬·#파트·#화 칩 우클릭 메뉴. */
+  onHashContextMenu?: (t: HashTarget, e: React.MouseEvent) => void;
 }
 
 export interface CommentPanelQuickRevisionContext {
@@ -233,7 +235,7 @@ function ThreadReplyButton({
 
 // ─── 메인 컴포넌트 ──────────────────────────
 
-export function CommentPanel({ sceneKey, secondarySceneKey, sceneThreadKey, onCountChange, inlineEvents, focusCommentId, sceneLabel, quickRevision, onHashClick }: CommentPanelProps) {
+export function CommentPanel({ sceneKey, secondarySceneKey, sceneThreadKey, onCountChange, inlineEvents, focusCommentId, sceneLabel, quickRevision, onHashClick, onHashContextMenu }: CommentPanelProps) {
   const { currentUser, users } = useAuthStore();
   const { setView, setHighlightUserName } = useAppStore();
   const { createRevision } = useRevisionStore();
@@ -1295,9 +1297,9 @@ export function CommentPanel({ sceneKey, secondarySceneKey, sceneThreadKey, onCo
     setView('team');
   };
 
-  // 4c: 댓글 본문 #태그 칩 클릭 → 해당 씬/파트/화로 점프(통합 모달/뷰).
+  // 4c: 댓글 본문 #태그 칩 클릭/우클릭 → 해당 씬/파트/화로 점프 또는 메뉴.
   const renderText = (text: string, _sourceKey?: string) => (
-    <EntityText text={text} userNames={userNames} onMentionClick={handleMentionClick} onHashClick={onHashClick ?? navigateToHashTarget} />
+    <EntityText text={text} userNames={userNames} onMentionClick={handleMentionClick} onHashClick={onHashClick ?? navigateToHashTarget} onHashContextMenu={onHashContextMenu} />
   );
 
   // ─── 렌더링 ────────────────────────────────
