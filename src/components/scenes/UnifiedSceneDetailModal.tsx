@@ -139,6 +139,10 @@ export interface UnifiedSceneDetailModalProps {
   referencePanel?: React.ReactNode;
   /** 4c PR2: 참조 패널을 본체 좌/우 어느 쪽에 둘지. referencePanel 이 있을 때만 의미. */
   referenceSide?: 'left' | 'right';
+  /** 4c PR2: dock 헤더 [좌]/[우] 토글 — 참조 패널을 본체 어느 쪽에 둘지 변경(부모가 처리). */
+  onDockToggleSide?: (side: 'left' | 'right') => void;
+  /** 4c PR2: dock 헤더 [메인으로] — 이 참조 패널을 메인 모달로 승격(부모가 처리). */
+  onDockPromote?: () => void;
 }
 
 type TabKey = 'detail' | 'revisions' | 'files' | 'history';
@@ -178,6 +182,8 @@ export function UnifiedSceneDetailModal({
   onSceneReference,
   referencePanel,
   referenceSide = 'right',
+  onDockToggleSide,
+  onDockPromote,
 }: UnifiedSceneDetailModalProps) {
   const { bgScene, actScene, bgSceneIndex, actSceneIndex } = merged;
   const headScene = bgScene ?? actScene;
@@ -391,6 +397,11 @@ export function UnifiedSceneDetailModal({
     setNavDirection(dir === 'next' ? 1 : -1);
     onNavigate?.(dir);
   }, [onNavigate]);
+
+  // 4c PR2: 모달 안에서 #씬 칩 클릭 → 점프 대신 좌/우 도킹 참조 패널로 연다.
+  //   #파트/#화 및 onSceneReference 미연결 시에는 기존 점프(navigateToHashTarget) 유지.
+  const handleHash = (t: HashTarget) =>
+    (t.kind === 'scene' && onSceneReference) ? onSceneReference(t, 'right') : navigateToHashTarget(t);
 
   // 모달 박스 + 댓글 패널 wrapper 의 좌우 흔들림 (한솔 요청: "본체와 댓글 창 같이 옆으로 움직임")
   // navigate 시 wrapper 가 ±36px 슬라이드 → 본체와 댓글이 함께 밀림.
@@ -810,6 +821,35 @@ export function UnifiedSceneDetailModal({
                   ))}
                 </div>
 
+                {/* 4c PR2: dock 모드 헤더 컨트롤 — 좌/우 토글 + 메인으로 승격 (모달 모드에선 숨김) */}
+                {dockMode !== 'modal' && (
+                  <>
+                    <div className="flex gap-[2px] bg-bg-border/40 p-[2px] rounded-md shrink-0">
+                      {(['left', 'right'] as const).map((side) => (
+                        <button
+                          key={side}
+                          onClick={() => onDockToggleSide?.(side)}
+                          className={cn(
+                            'px-2 py-1 rounded-[4px] text-[10.5px] cursor-pointer transition-all whitespace-nowrap',
+                            dockMode === side ? 'bg-accent/22 text-accent-sub' : 'text-text-secondary hover:text-text-primary',
+                          )}
+                          style={dockMode === side ? { boxShadow: 'inset 0 0 0 1px rgba(108, 92, 231, 0.32)' } : {}}
+                          title={side === 'left' ? '참조 패널을 왼쪽에 두기' : '참조 패널을 오른쪽에 두기'}
+                        >
+                          {side === 'left' ? '좌' : '우'}
+                        </button>
+                      ))}
+                    </div>
+                    <button
+                      onClick={() => onDockPromote?.()}
+                      className="px-2.5 py-1 rounded-md bg-accent/15 border border-accent/30 text-accent-sub text-[11px] font-medium hover:bg-accent/25 cursor-pointer transition-colors shrink-0 whitespace-nowrap"
+                      title="이 참조 씬을 메인 모달로 열기"
+                    >
+                      메인으로
+                    </button>
+                  </>
+                )}
+
                 <button
                   onClick={onClose}
                   className="p-1.5 rounded-md text-text-secondary hover:text-text-primary hover:bg-bg-border/40 cursor-pointer transition-colors shrink-0"
@@ -914,6 +954,7 @@ export function UnifiedSceneDetailModal({
                             onAssigneeActPhaseStateClick={onAssigneeActPhaseStateClick}
                             onAssigneeActFeedbackRequest={onAssigneeActFeedbackRequest}
                             onAssigneeActRoundBump={onAssigneeActRoundBump}
+                            onHashClick={handleHash}
                           />
                           <DeptSection
                             dept="acting"
@@ -933,6 +974,7 @@ export function UnifiedSceneDetailModal({
                             onAssigneeActPhaseStateClick={onAssigneeActPhaseStateClick}
                             onAssigneeActFeedbackRequest={onAssigneeActFeedbackRequest}
                             onAssigneeActRoundBump={onAssigneeActRoundBump}
+                            onHashClick={handleHash}
                           />
                         </div>
 
@@ -1243,6 +1285,7 @@ function DeptSection({
   onAssigneeActPhaseStateClick,
   onAssigneeActFeedbackRequest,
   onAssigneeActRoundBump,
+  onHashClick,
 }: {
   dept: Department;
   scene: Scene | null;
@@ -1261,6 +1304,7 @@ function DeptSection({
   onAssigneeActPhaseStateClick?: (sheetName: string, sceneId: string, assigneeName: string, newState: ScenePhaseState, sceneUuid?: string | null, sceneIndex?: number) => void;
   onAssigneeActFeedbackRequest?: (sheetName: string, sceneId: string, assigneeName: string, sceneUuid?: string | null, sceneIndex?: number) => void;
   onAssigneeActRoundBump?: (sheetName: string, sceneId: string, assigneeName: string, kind: 'work' | 'feedback', delta: 1 | -1, sceneUuid?: string | null, sceneIndex?: number) => void;
+  onHashClick?: (t: HashTarget) => void;
 }) {
   const cfg = DEPARTMENT_CONFIGS[dept];
   const visualColor = deptVisualColor(dept);
@@ -1381,6 +1425,7 @@ function DeptSection({
         onSave={(v) => onFieldUpdate(sheetName, sceneIndex, 'memo', v)}
         memoAuthorMeta={memoAuthorMeta}
         continuityTarget={dept === 'bg' ? 'bg-memo' : 'act-memo'}
+        onHashClick={onHashClick}
       />
     </div>
   );
@@ -1437,8 +1482,8 @@ function InlineAssigneeRow({ label, value, onSave }: {
 
 /* ── 인라인 메모 ── */
 
-function InlineTextareaRow({ label, value, onSave, memoAuthorMeta, continuityTarget }: {
-  label: string; value: string; onSave: (v: string) => void; memoAuthorMeta?: MemoAuthorMeta | null; continuityTarget?: string;
+function InlineTextareaRow({ label, value, onSave, memoAuthorMeta, continuityTarget, onHashClick }: {
+  label: string; value: string; onSave: (v: string) => void; memoAuthorMeta?: MemoAuthorMeta | null; continuityTarget?: string; onHashClick?: (t: HashTarget) => void;
 }) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(value);
@@ -1494,7 +1539,7 @@ function InlineTextareaRow({ label, value, onSave, memoAuthorMeta, continuityTar
           style={{ background: value ? 'rgba(255,255,255,0.025)' : undefined }}
         >
           {value
-            ? <EntityText text={value} userNames={userNames} onHashClick={navigateToHashTarget} />
+            ? <EntityText text={value} userNames={userNames} onHashClick={onHashClick ?? navigateToHashTarget} />
             : <span className="text-text-secondary/50">메모 없음</span>}
           {value && (
             <Pencil size={12} className="inline-block ml-2 opacity-0 hover:opacity-60 transition-opacity" />
