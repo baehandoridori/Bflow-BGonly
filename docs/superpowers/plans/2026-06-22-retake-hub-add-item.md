@@ -465,7 +465,7 @@ git commit -m "createRevision 전반 분기 + setId 배선 + 생성 후 세트 �
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { motion } from 'framer-motion';
-import { ClipboardPlus, ImagePlus, X } from 'lucide-react';
+import { ClipboardList, ImagePlus, X } from 'lucide-react';
 import type { AppUser, CompRevisionSet, Episode, Part, Scene } from '@/types';
 import { useRevisionStore } from '@/stores/useRevisionStore';
 import { buildSceneKey } from '@/services/revisionService';
@@ -651,7 +651,7 @@ export function RevisionAddModal({ targetSet, episodes, episodeTitles, allUsers,
       >
         <div className="flex items-center justify-between px-5 py-4 border-b border-bg-border/60 shrink-0">
           <div className="flex items-center gap-2">
-            <ClipboardPlus size={18} className="text-accent" />
+            <ClipboardList size={18} className="text-accent" />
             <span className="text-[15px] font-bold text-text-primary">세트에 항목 추가</span>
           </div>
           <button
