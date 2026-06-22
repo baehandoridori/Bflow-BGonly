@@ -159,8 +159,8 @@ export function RetakeHubItemRow({ revision, allUsers, sideBarClass, reLabel }: 
           {reLabel}
         </span>
 
-        {/* 내용 — 엔티티 칩, 1줄 클램프. 칩(경로/멘션) 클릭이 행 토글로 버블링되지 않게 막는다. */}
-        <span className="min-w-0 text-[13px] text-text-primary truncate" onClick={(e) => e.stopPropagation()}>
+        {/* 내용 — 엔티티 칩, 1줄 클램프. (내용 클릭도 행 토글로 동작하게 — 경로/멘션 칩은 자체 동작 + 행도 펼침.) */}
+        <span className="min-w-0 text-[13px] text-text-primary truncate">
           <EntityText
             text={revision.description}
             userNames={entityUserNames}
