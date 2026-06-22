@@ -1002,21 +1002,14 @@ ipcMain.handle('update:retry', async () => {
   } catch (err) {
     console.warn('[autoUpdate] retry: suppression marker 정리 실패 (무시):', err);
   }
-  // 실패했던 stale installer-pending을 통째로 비워 fresh download를 강제한다.
+  // 실패했던 stale installer-pending을 비워 fresh download를 강제한다.
   // (지우지 않으면 prepareUpdate가 readPendingUpdateInfo에서 기존 ready pending을 먼저
   //  반환해 fresh-download cleanup에 도달하지 못하고, 실패 원인이던 같은 installer를
-  //  재사용한다. 그러면 다음 실행에 그 stale을 정리할 .installer-attempted 마커도 이미
-  //  사라진 상태라 누수가 된다 — Codex 1차 P2.)
-  try {
-    await fs.promises.rm(localInstallerPendingDir(), { recursive: true, force: true });
-  } catch (err) {
-    console.warn('[autoUpdate] retry: installer-pending 정리 실패 (무시):', err);
-  }
-  try {
-    await fs.promises.rm(localInstallerAttemptedMarker(), { force: true });
-  } catch (err) {
-    console.warn('[autoUpdate] retry: attempted marker 정리 실패 (무시):', err);
-  }
+  //  재사용한다 — Codex 1차 P2.)
+  // 단, pending 정리가 실패하면(파일 잠김 등) .installer-attempted를 남겨야 다음 시작 시
+  // notifyAndCleanupOnInstallerFailure가 그 stale을 다시 보고/정리할 수 있다. 이
+  // "성공 시에만 attempted 제거" 가드를 가진 기존 정리 헬퍼를 그대로 재사용한다 — Codex 2차 P2.
+  await cleanupInstallerPendingAndAttemptedMarker();
   return runManualUpdateCheck();
 });
 
