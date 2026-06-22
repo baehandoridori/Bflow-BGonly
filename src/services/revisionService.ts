@@ -23,6 +23,7 @@ import { buildRevisionNotificationUserIds } from '../utils/revisionNotificationR
 import {
   startAssignee, completeAssignee, revertAssignee, deriveRevisionStatus, sanitizeAssignees,
 } from '../utils/revisionWorkflow';
+import { nextGeneralRevisionNo } from '../utils/revisionGeneral';
 
 const REVISIONS_FILE = 'revisions.json';
 const DIGITS_ONLY_RE = /^\d+$/;
@@ -423,7 +424,8 @@ function nextRevisionNo(store: RevisionsStore, sceneKeys: string[]): number {
  * 자동값('normal' / '' / '') 으로 처리. 호출자는 핵심 데이터만 전달.
  */
 export interface CreateRevisionServiceInput {
-  sceneKey: string;
+  /** 씬 매인 항목은 필수. 허브 '전반' 항목은 미지정(빈/undefined). */
+  sceneKey?: string;
   description: string;
   imageUrl?: string;
   department?: 'bg' | 'acting';
@@ -433,11 +435,15 @@ export interface CreateRevisionServiceInput {
   notifyUserIds: string[];
   /** 생성 시 담당자 지정 (리테이크 허브 2단계). 항상 notifyUserIds 의 부분집합으로 보정됨. */
   assigneeIds?: string[];
+  /** 리테이크 세트 소속(허브 항목 추가). 씬지정/전반 공통. */
+  setId?: string | null;
 }
 
 export async function createRevision(input: CreateRevisionServiceInput): Promise<CompRevision> {
-  const lookupSceneKeys = getRevisionLookupSceneKeys(input.sceneKey);
-  const normalizedSceneKey = lookupSceneKeys[0];
+  const isGeneral = !input.sceneKey?.trim();
+  const lookupSceneKeys = isGeneral ? [''] : getRevisionLookupSceneKeys(input.sceneKey as string);
+  const normalizedSceneKey = isGeneral ? '' : lookupSceneKeys[0];
+  const setId = input.setId ?? null;
   const now = new Date().toISOString();
   const id = crypto.randomUUID();
   // v1.18.0 자동값: 우선순위/프레임/담당자 입력 UI 제거 → 항상 'normal' / '' / ''.
@@ -454,7 +460,9 @@ export async function createRevision(input: CreateRevisionServiceInput): Promise
 
   if (sheetsMode) {
     const store = await loadAllRevisions();
-    const revisionNo = nextRevisionNo(store, lookupSceneKeys);
+    const revisionNo = isGeneral
+      ? nextGeneralRevisionNo(Object.values(store).flat(), setId ?? '')
+      : nextRevisionNo(store, lookupSceneKeys);
     const revision: CompRevision = {
       id,
       sceneKey: normalizedSceneKey,
@@ -473,18 +481,20 @@ export async function createRevision(input: CreateRevisionServiceInput): Promise
       notifyUserIds,
       assigneeIds,
       assigneeStates,
-      setId: null,
+      setId,
       finalResolvedBy: '',
       finalResolvedAt: undefined,
     };
 
     // Supabase: partUuid + sceneId로 저장 (sceneKey를 그대로 partUuid 자리에 전달 — 서버에서 해석)
+    // 전반(허브 '전반' 항목)은 normalizedSceneKey 가 '' 라 서버에서 씬 해석을 건너뛰고 scene_id=null 로 저장.
     await window.electronAPI.supabaseAddRevision(
       id, '', normalizedSceneKey, revisionNo, initialStatus, priority,
       input.description, '', input.imageUrl || '', department || '', input.lookupDepartment || department || '',
       input.requesterId, input.requesterName, '', now,
       JSON.stringify(notifyUserIds),
       JSON.stringify(assigneeIds),
+      setId || undefined,
     );
 
     // 캐시 업데이트
@@ -496,7 +506,9 @@ export async function createRevision(input: CreateRevisionServiceInput): Promise
 
   // 로컬 모드
   const all = await loadLocalAll();
-  const revisionNo = nextRevisionNo(all, lookupSceneKeys);
+  const revisionNo = isGeneral
+    ? nextGeneralRevisionNo(Object.values(all).flat(), setId ?? '')
+    : nextRevisionNo(all, lookupSceneKeys);
   const revision: CompRevision = {
     id,
     sceneKey: normalizedSceneKey,
@@ -515,7 +527,7 @@ export async function createRevision(input: CreateRevisionServiceInput): Promise
     notifyUserIds,
     assigneeIds,
     assigneeStates,
-    setId: null,
+    setId,
     finalResolvedBy: '',
     finalResolvedAt: undefined,
   };

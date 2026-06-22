@@ -527,11 +527,13 @@ function seedFeedbackHubPreview() {
     },
     createRevision: async (input: CreateRevisionInput) => {
       const now = new Date().toISOString();
-      const context = findPreviewSceneContext(input.sceneKey, input.department);
+      // 허브 '전반' 항목은 sceneKey 미지정 → '' (특정 씬에 안 매임).
+      const sceneKey = input.sceneKey ?? '';
+      const context = findPreviewSceneContext(sceneKey, input.department);
       const revision: CompRevision = {
         id: `preview-rev-${Date.now()}`,
-        sceneKey: input.sceneKey,
-        revisionNo: nextRevisionNo(input.sceneKey),
+        sceneKey,
+        revisionNo: nextRevisionNo(sceneKey),
         status: 'open',
         priority: 'normal',
         description: input.description,
@@ -541,6 +543,8 @@ function seedFeedbackHubPreview() {
         requesterName: input.requesterName,
         assignee: context?.scene.assignee,
         notifyUserIds: input.notifyUserIds,
+        assigneeIds: input.assigneeIds,
+        setId: input.setId ?? null,
         createdAt: now,
         updatedAt: now,
       };
