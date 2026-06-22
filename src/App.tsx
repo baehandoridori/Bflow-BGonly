@@ -1590,6 +1590,7 @@ export default function App() {
             revision_no?: number;
             resolved_by?: string | null;
             notify_user_ids?: string[] | null;
+            set_id?: string | null;
             updated_at?: string | null;
             resolved_at?: string | null;
           };
@@ -1637,6 +1638,22 @@ export default function App() {
           }
 
           const sceneKey = newRow.scene_id || '';
+          // '전반' 항목 상태 변경 — 씬 컨텍스트 없음 → 세트 제목 + 클릭 시 허브로(코덱스 P2, INSERT 분기와 동일).
+          if (!sceneKey) {
+            const setTitle = newRow.set_id
+              ? useRevisionSetStore.getState().sets.find((s) => s.id === newRow.set_id)?.title
+              : undefined;
+            dispatchNotification({
+              type: 'revision',
+              title: `${titlePrefix} — ${setTitle || '전반 항목'}`,
+              metadata: {
+                revisionId: newRow.id,
+                revisionAction: action,
+                retakeHubSetId: newRow.set_id ?? undefined,
+              } as Record<string, unknown>,
+            }, notiSettings);
+            return;
+          }
           const dataState = useDataStore.getState();
           const sceneNameForLabel = buildNotificationSceneDisplayLabelFromSceneKey(
             sceneKey,
