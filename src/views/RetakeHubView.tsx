@@ -447,6 +447,7 @@ export default function RetakeHubView() {
       {showAdd && selectedSet && (
         <Suspense fallback={null}>
           <RevisionAddModal
+            key={selectedSet.id}
             targetSet={selectedSet}
             episodes={episodes}
             episodeTitles={episodeTitles}

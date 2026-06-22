@@ -13,6 +13,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { motion } from 'framer-motion';
 import { ClipboardList, ImagePlus, X } from 'lucide-react';
+import { toast as sonnerToast } from 'sonner';
 import type { AppUser, CompRevisionSet, Episode, Part, Scene } from '@/types';
 import { useRevisionStore } from '@/stores/useRevisionStore';
 import { buildSceneKey } from '@/services/revisionService';
@@ -176,9 +177,11 @@ export function RevisionAddModal({ targetSet, episodes, episodeTitles, allUsers,
           assigneeIds,
         });
       }
+      sonnerToast.success('세트에 항목을 추가했어요.');
       onClose();
     } catch (err) {
       console.error('[RevisionAddModal] 항목 추가 실패:', err);
+      sonnerToast.error('항목을 추가하지 못했어요. 잠시 후 다시 시도해주세요.');
     } finally {
       setSubmitting(false);
     }
@@ -242,10 +245,17 @@ export function RevisionAddModal({ targetSet, episodes, episodeTitles, allUsers,
               <div>
                 <label className="text-[11px] font-bold uppercase tracking-wider text-text-secondary mb-1.5 block">에피소드</label>
                 {episodeLocked ? (
-                  <div className="px-3 py-2 text-[13px] bg-bg-primary/50 border border-bg-border/60 rounded-lg text-text-secondary flex items-center gap-2">
-                    {episodeLabel ?? '—'}
-                    <span className="text-[10px] text-text-secondary/50">세트 고정</span>
-                  </div>
+                  <>
+                    <div className="px-3 py-2 text-[13px] bg-bg-primary/50 border border-bg-border/60 rounded-lg text-text-secondary flex items-center gap-2">
+                      {episodeLabel ?? '—'}
+                      <span className="text-[10px] text-text-secondary/50">세트 고정</span>
+                    </div>
+                    {!selectedEpisode && (
+                      <p className="mt-1.5 text-[11px] text-amber-400/90">
+                        이 세트의 화를 지금 화면에서 찾을 수 없어 씬을 고를 수 없어요. ‘전반’으로 추가해주세요.
+                      </p>
+                    )}
+                  </>
                 ) : (
                   <select
                     value={selectedEpisodeNumber ?? ''}
