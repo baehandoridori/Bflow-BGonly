@@ -752,6 +752,17 @@ export function installDevElectronAPI(): void {
     },
     supabaseDeleteRevisionSet: async (id) => {
       localStore.__revisionSets = getMockRevisionSets().filter((s) => s.id !== id);
+      // 실 DB FK ON DELETE SET NULL 패리티(코덱스 P2) — 삭제된 세트를 가리키던 mock 리비전의 setId 를 해제.
+      //   안 하면 preview 에서 유령 세트 소속·stale setId 동작이 남는다(UI 안내도 '항목 소속만 해제').
+      const revisions = getMockRevisionRows();
+      let touched = false;
+      for (const rev of revisions) {
+        if (rev.setId === id) { rev.setId = null; touched = true; }
+      }
+      if (touched) {
+        localStore.__revisionRows = revisions;
+        window.dispatchEvent(new CustomEvent('bflow:revisions-invalidated'));
+      }
       window.dispatchEvent(new CustomEvent('bflow:revision-sets-invalidated'));
     },
     supabaseReadAllMetadata: async () => getMockMetadataRows(),
