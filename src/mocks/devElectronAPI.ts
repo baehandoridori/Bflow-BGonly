@@ -735,6 +735,7 @@ export function installDevElectronAPI(): void {
         updatedAt: now,
       };
       localStore.__revisionSets = [...getMockRevisionSets(), set];
+      window.dispatchEvent(new CustomEvent('bflow:revision-sets-invalidated'));
       return set;
     },
     supabaseUpdateRevisionSet: async (id, fields) => {
@@ -746,10 +747,12 @@ export function installDevElectronAPI(): void {
         return updated;
       });
       if (!updated) throw new Error(`mock revision set not found: ${id}`);
+      window.dispatchEvent(new CustomEvent('bflow:revision-sets-invalidated'));
       return updated;
     },
     supabaseDeleteRevisionSet: async (id) => {
       localStore.__revisionSets = getMockRevisionSets().filter((s) => s.id !== id);
+      window.dispatchEvent(new CustomEvent('bflow:revision-sets-invalidated'));
     },
     supabaseReadAllMetadata: async () => getMockMetadataRows(),
     supabaseReadMetadata: async (type, key) =>

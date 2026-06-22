@@ -1637,6 +1637,12 @@ export default function App() {
         return;
       }
 
+      // 리테이크 세트 변경 → 세트 스토어 리로드 신호 (comp_revisions 분기와 동일 패턴)
+      if (table === 'comp_revision_sets') {
+        window.dispatchEvent(new Event('bflow:revision-sets-invalidated'));
+        return;
+      }
+
       // 그 외 (INSERT, DELETE, 구조 변경 등) → 디바운스 full reload
       if (debounceTimer) clearTimeout(debounceTimer);
       debounceTimer = setTimeout(() => {
@@ -1680,6 +1686,17 @@ export default function App() {
     };
     window.addEventListener('bflow:revisions-invalidated', handler);
     return () => window.removeEventListener('bflow:revisions-invalidated', handler);
+  }, []);
+
+  // Realtime 리테이크 세트 변경 → useRevisionSetStore 리로드
+  useEffect(() => {
+    const handler = () => {
+      import('@/stores/useRevisionSetStore').then(({ useRevisionSetStore }) => {
+        useRevisionSetStore.getState().reload();
+      });
+    };
+    window.addEventListener('bflow:revision-sets-invalidated', handler);
+    return () => window.removeEventListener('bflow:revision-sets-invalidated', handler);
   }, []);
 
   // v1.25.0~ 액팅 피드백 알림 수신 + 씬 점프 리스너 (코덱스 2차 P1 #4 fix)
