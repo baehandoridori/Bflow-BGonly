@@ -308,6 +308,15 @@ export default function RetakeHubView() {
     // '전반' 항목은 세트 밖에선 볼 수 없어, 세트 삭제로 setId 만 풀리면 고아가 된다(코덱스 P2).
     //   → 세트 삭제 시 함께 삭제한다. 씬 매인 항목은 씬 패널에 남으므로 소속만 해제.
     const generalItems = selectedItems.filter((r) => isGeneralRevisionSceneKey(r.sceneKey));
+    // 삭제 권한 preflight(코덱스 P2) — 리비전 삭제는 등록자 본인 또는 관리자만 가능(electron deleteRevision).
+    //   못 지우는 전반 항목이 하나라도 있으면, 일부만 지우고 중단해 데이터가 사라지는 부분 삭제를 막기 위해
+    //   삭제를 아예 시작하지 않는다.
+    const isAdmin = currentUser?.role === 'admin';
+    const undeletable = generalItems.filter((r) => !isAdmin && r.requesterId !== currentUser?.id);
+    if (undeletable.length > 0) {
+      sonnerToast.error('내가 등록하지 않은 전반 항목이 있어 세트를 삭제할 수 없어요. 등록자나 관리자에게 요청해주세요.');
+      return;
+    }
     const ok = await ConfirmDialog.show({
       message:
         `"${selectedSet.title}" 세트를 삭제하시겠습니까?\n` +
@@ -319,8 +328,8 @@ export default function RetakeHubView() {
     });
     if (!ok) return;
     // 전반 항목 먼저 삭제 → 세트 삭제(나머지 씬 매인 항목은 FK SET NULL 로 소속만 해제).
-    // 삭제가 하나라도 실패하면(예: 남이 등록한 항목 — main 이 requester/admin 만 허용) 세트 삭제를 중단한다.
-    //   안 그러면 FK 가 그 전반 항목들의 setId 만 비워 영영 안 보이는 고아가 된다(코덱스 P2).
+    // preflight 로 권한은 보장됐지만, 일시적 실패(네트워크 등)가 나면 세트 삭제를 중단해
+    //   FK 가 setId 만 비워 고아가 되는 걸 막는다(코덱스 P2).
     let anyFailed = false;
     for (const r of generalItems) {
       try {
@@ -331,7 +340,7 @@ export default function RetakeHubView() {
       }
     }
     if (anyFailed) {
-      sonnerToast.error('내가 등록하지 않은 전반 항목이 있어 세트를 삭제하지 않았어요. 등록자나 관리자에게 요청해주세요.');
+      sonnerToast.error('일부 전반 항목을 삭제하지 못해 세트를 삭제하지 않았어요. 잠시 후 다시 시도해주세요.');
       return;
     }
     await removeRevisionSet(selectedSet.id);
