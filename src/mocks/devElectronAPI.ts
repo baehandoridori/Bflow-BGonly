@@ -419,6 +419,7 @@ export function installDevElectronAPI(): void {
     onRetryNotify: noop,
     onSavingBeforeQuit: noop,
     getUpdateState: async () => null,
+    retryUpdate: async () => null,
     onUpdateState: noop,
     onUpdateReady: noop,
     applyUpdateNow: async () => {},

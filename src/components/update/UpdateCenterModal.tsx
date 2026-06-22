@@ -151,6 +151,31 @@ export function UpdateCenterModal() {
     }
   }, [setUpdateInfo, updateInfo]);
 
+  // v1.44.2: '자동 중단'/'준비 실패' 상태에서 사용자가 직접 빠져나오는 경로.
+  // 차단 표식을 지우고 새 버전을 다시 받아온다. 새로고침과 같은 in-flight 가드를 공유한다.
+  const handleRetry = useCallback(async () => {
+    if (refreshInFlightRef.current) return;
+    frozenUpdateInfoRef.current = updateInfo;
+    refreshInFlightRef.current = true;
+    setIsRefreshing(true);
+    setRefreshError(null);
+    try {
+      const nextInfo = await window.electronAPI?.retryUpdate?.();
+      setUpdateInfo(nextInfo ?? createFallbackUpdateInfo('업데이트를 다시 확인했습니다. 현재 버전으로 계속 사용할 수 있습니다.'));
+      setLastCheckedAt(new Date());
+    } catch {
+      const message = '다시 시도하지 못했습니다. 잠시 후 한 번 더 누르거나, 받은 안내대로 설치 파일을 직접 실행해주세요.';
+      setRefreshError(message);
+      setUpdateInfo({
+        ...createFallbackUpdateInfo(message),
+        status: 'failed',
+      });
+    } finally {
+      refreshInFlightRef.current = false;
+      setIsRefreshing(false);
+    }
+  }, [setUpdateInfo, updateInfo]);
+
   useEffect(() => {
     if (!isRefreshing && updateInfo) {
       frozenUpdateInfoRef.current = updateInfo;
@@ -259,7 +284,7 @@ export function UpdateCenterModal() {
       title: isFailed || isSuppressed ? '업데이트 상태 안내' : '업데이트 내역 확인',
       items: [
         isSuppressed
-          ? '이전 업데이트 적용 실패 후 자동 재시도가 중단되어 있습니다. 정식 설치 파일로 갱신하거나 진단 로그를 확인해야 합니다.'
+          ? "이전에 새 버전 적용이 한 번 실패해서 자동 업데이트가 잠시 멈춰 있어요. 아래 '다시 시도'를 누르면 새 버전을 다시 받아옵니다. 그래도 안 되면 받으셨던 안내대로 설치 파일을 직접 실행해 주세요."
           : isFailed
             ? displayInfo.message ?? '업데이트 준비 중 문제가 발생했습니다. 다음 확인 때 다시 시도합니다.'
             : hasRemoteUpdate
@@ -558,19 +583,36 @@ export function UpdateCenterModal() {
             >
               닫기
             </button>
-            <button
-              type="button"
-              disabled={!canApply}
-              onClick={handleApply}
-              className={cn(
-                'px-4 py-2 rounded-xl border text-sm font-semibold transition-colors',
-                canApply
-                  ? 'border-accent/35 bg-accent/15 text-accent-sub hover:bg-accent/25 cursor-pointer'
-                  : 'border-bg-border bg-bg-border/20 text-text-secondary cursor-default',
-              )}
-            >
-              지금 업데이트
-            </button>
+            {isSuppressed || isFailed ? (
+              <button
+                type="button"
+                disabled={isRefreshing || isApplying}
+                onClick={handleRetry}
+                className={cn(
+                  'inline-flex items-center gap-2 px-4 py-2 rounded-xl border text-sm font-semibold transition-colors',
+                  isRefreshing || isApplying
+                    ? 'border-bg-border bg-bg-border/20 text-text-secondary cursor-default'
+                    : 'border-accent/35 bg-accent/15 text-accent-sub hover:bg-accent/25 cursor-pointer',
+                )}
+              >
+                <RefreshCw size={14} className={cn(isRefreshing && 'animate-spin')} />
+                다시 시도
+              </button>
+            ) : (
+              <button
+                type="button"
+                disabled={!canApply}
+                onClick={handleApply}
+                className={cn(
+                  'px-4 py-2 rounded-xl border text-sm font-semibold transition-colors',
+                  canApply
+                    ? 'border-accent/35 bg-accent/15 text-accent-sub hover:bg-accent/25 cursor-pointer'
+                    : 'border-bg-border bg-bg-border/20 text-text-secondary cursor-default',
+                )}
+              >
+                지금 업데이트
+              </button>
+            )}
           </div>
         </div>
       </div>

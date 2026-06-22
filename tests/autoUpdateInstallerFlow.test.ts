@@ -146,6 +146,43 @@ test('version center is always reachable and can refresh update state', async ()
   assert.match(main, /update:check-now/);
 });
 
+test('version center can recover from a suppressed/failed state via retry', async () => {
+  const main = await readRepoFile('electron', 'main.ts');
+  const preload = await readRepoFile('electron', 'preload.ts');
+  const types = await readRepoFile('src', 'types', 'index.ts');
+  const modal = await readRepoFile('src', 'components', 'update', 'UpdateCenterModal.tsx');
+
+  // retry IPC wipes the stale installer-pending first; only AFTER cleanup succeeds does it
+  // drop suppression and re-check. A locked/undeletable pending short-circuits to a failed
+  // status (no suppression release, no stale re-schedule) and asks the user to retry/install.
+  const retryBody = main.slice(
+    main.indexOf("ipcMain.handle('update:retry'"),
+    main.indexOf("ipcMain.handle('update:retry'") + 1200,
+  );
+  assert.match(retryBody, /const pendingCleared = await cleanupInstallerPendingAndAttemptedMarker\(\)/);
+  assert.match(retryBody, /if \(!pendingCleared\)[\s\S]*status:\s*'failed'[\s\S]*return info/);
+  // suppression is only cleared on the success path, which sits after the early failed return
+  assert.match(retryBody, /if \(!pendingCleared\)[\s\S]*localSwapSuppressedMarker\(\), \{ force: true \}[\s\S]*runManualUpdateCheck\(\)/);
+
+  // the shared cleanup reports whether the pending dir actually went away, and only drops the
+  // attempted marker once it did — so a locked pending still gets reported + cleaned next launch
+  const cleanupBody = main.slice(
+    main.indexOf('async function cleanupInstallerPendingAndAttemptedMarker'),
+    main.indexOf('async function cleanupInstallerPendingAndAttemptedMarker') + 800,
+  );
+  assert.match(cleanupBody, /Promise<boolean>/);
+  assert.match(cleanupBody, /localInstallerPendingDir\(\), \{ recursive: true, force: true \}/);
+  assert.match(cleanupBody, /if \(pendingCleaned\)[\s\S]*localInstallerAttemptedMarker/);
+  assert.match(cleanupBody, /return pendingCleaned/);
+
+  // exposed through preload + types + the modal action
+  assert.match(preload, /update:retry/);
+  assert.match(types, /retryUpdate\?: \(\) => Promise<UpdateInfo \| null>/);
+  assert.match(modal, /retryUpdate/);
+  assert.match(modal, /onClick=\{handleRetry\}/);
+  assert.match(modal, /다시 시도/);
+});
+
 test('version center only checks updates from the refresh button', async () => {
   const modal = await readRepoFile('src', 'components', 'update', 'UpdateCenterModal.tsx');
 
