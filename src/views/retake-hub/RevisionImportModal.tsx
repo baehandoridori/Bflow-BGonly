@@ -65,13 +65,17 @@ export function RevisionImportModal({
     return (id: string) => map.get(id) ?? id;
   }, [allUsers]);
 
-  // 후보: 현재 세트에 안 속한 리비전. 최신 등록 먼저.
+  // 후보: 현재 세트에 안 속한 리비전. 세트에 에피소드가 지정돼 있으면 같은 화의 리테이크만(한솔). 최신 등록 먼저.
   const candidates = useMemo(() => {
     return allRevisions
       .filter((r) => r.setId !== targetSet.id)
+      .filter((r) => {
+        if (targetSet.episodeNumber == null) return true; // 화 미지정 세트는 제한 없음
+        return parseRevisionSceneContext(r.sceneKey)?.episodeNumber === targetSet.episodeNumber;
+      })
       .slice()
       .sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''));
-  }, [allRevisions, targetSet.id]);
+  }, [allRevisions, targetSet.id, targetSet.episodeNumber]);
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();

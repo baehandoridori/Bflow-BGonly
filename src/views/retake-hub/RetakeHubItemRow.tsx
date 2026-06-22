@@ -145,7 +145,9 @@ export function RetakeHubItemRow({ revision, allUsers, sideBarClass, reLabel }: 
       <div
         role="button"
         tabIndex={0}
-        onClick={() => setExpanded((v) => !v)}
+        // capture 단계로 토글 — EntityText 의 멘션/#칩·PathBadge 가 bubble 단계에서 stopPropagation 하므로,
+        //   내용이 칩 위주여도 행 어디를 눌러도 펼쳐지게 한다(칩은 자체 동작도 수행). (코덱스 P3)
+        onClickCapture={() => setExpanded((v) => !v)}
         onKeyDown={(e) => {
           if ((e.key === 'Enter' || e.key === ' ') && e.target === e.currentTarget) {
             e.preventDefault();
@@ -159,8 +161,8 @@ export function RetakeHubItemRow({ revision, allUsers, sideBarClass, reLabel }: 
           {reLabel}
         </span>
 
-        {/* 내용 — 엔티티 칩, 1줄 클램프. 칩(경로/멘션) 클릭이 행 토글로 버블링되지 않게 막는다. */}
-        <span className="min-w-0 text-[13px] text-text-primary truncate" onClick={(e) => e.stopPropagation()}>
+        {/* 내용 — 엔티티 칩, 1줄 클램프. (내용 클릭도 행 토글로 동작하게 — 경로/멘션 칩은 자체 동작 + 행도 펼침.) */}
+        <span className="min-w-0 text-[13px] text-text-primary truncate">
           <EntityText
             text={revision.description}
             userNames={entityUserNames}
