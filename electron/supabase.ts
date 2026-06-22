@@ -285,14 +285,26 @@ export async function readAllEpisodes(): Promise<SupabaseEpisodeData[]> {
   }[] = [];
 
   if (partIds.length > 0) {
-    // Supabase IN 쿼리는 최대 수백 개까지 괜찮음
-    const { data: sceneRows, error: sceneErr } = await supabase
-      .from('scenes')
-      .select('id, part_id, scene_number, sort_order, memo, storyboard_url, guide_url, assignee, layout, lo, done, review, png, length_change, created_at, updated_at, scene_state, work_round, feedback_round')
-      .in('part_id', partIds)
-      .order('sort_order');
-    throwIfError(sceneErr);
-    scenes = sceneRows || [];
+    // Supabase IN 쿼리는 최대 수백 개까지 괜찮음.
+    // PostgREST 는 한 응답을 기본 1000행으로 제한한다. 스튜디오 전체 씬이 1000개를 넘으면
+    // 단일 select 로는 뒷부분(높은 sort_order) 씬이 통째로 누락되고, 그 결과 씬 추가 폼이
+    // 이미 존재하는 번호를 "다음 번호"로 제안해 UNIQUE(part_id, scene_number) 위반(중복 키)으로
+    // 추가가 실패한다. → range() 로 페이지를 끝까지 받아 전체 씬을 적재한다.
+    // sort_order 동률이 있어도 페이지 경계에서 누락/중복이 없도록 고유키(id)로 2차 정렬한다.
+    const SCENE_PAGE_SIZE = 1000;
+    for (let from = 0; ; from += SCENE_PAGE_SIZE) {
+      const { data: sceneRows, error: sceneErr } = await supabase
+        .from('scenes')
+        .select('id, part_id, scene_number, sort_order, memo, storyboard_url, guide_url, assignee, layout, lo, done, review, png, length_change, created_at, updated_at, scene_state, work_round, feedback_round')
+        .in('part_id', partIds)
+        .order('sort_order')
+        .order('id')
+        .range(from, from + SCENE_PAGE_SIZE - 1);
+      throwIfError(sceneErr);
+      if (!sceneRows || sceneRows.length === 0) break;
+      scenes.push(...sceneRows);
+      if (sceneRows.length < SCENE_PAGE_SIZE) break;
+    }
   }
 
   const sceneCompletionById = new Map<string, { completedBy: string; completedAt: string }>();
