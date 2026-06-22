@@ -95,14 +95,33 @@ export function RevisionAddModal({ targetSet, episodes, episodeTitles, allUsers,
       || `EP.${String(selectedEpisode.episodeNumber).padStart(2, '0')}`)
     : null;
 
+  // 선택 씬의 counterpart(BG↔ACT 같은 컷) 담당자도 기본 알림에 포함한다(코덱스 P2).
+  //   RevisionPanel 과 동일 — 한쪽 부서에서 등록해도 반대편 작업자가 누락되지 않게.
+  const counterpartScene = useMemo<Scene | undefined>(() => {
+    if (mode !== 'scene' || !selectedScene || !selectedPart || !selectedEpisode) return undefined;
+    const sourcePart = getSourcePartForRevisionScene(partScenesUnion.sourceMap, selectedScene.sceneId, selectedPart);
+    const sheet = sourcePart.sheetName;
+    const cpSheet = sheet.endsWith('_BG')
+      ? sheet.slice(0, -3) + '_ACT'
+      : sheet.endsWith('_ACT')
+        ? sheet.slice(0, -4) + '_BG'
+        : null;
+    if (!cpSheet) return undefined;
+    const wantId = (selectedScene.sceneId || '').toLowerCase();
+    return selectedEpisode.parts
+      .find((p) => p.sheetName === cpSheet)
+      ?.scenes.find((s) => (s.sceneId || '').toLowerCase() === wantId);
+  }, [mode, selectedScene, selectedPart, selectedEpisode, partScenesUnion.sourceMap]);
+
   const defaultRecipients = useMemo(() => {
     if (!currentUser) return [] as string[];
     return calcDefaultRecipients(
       mode === 'scene' && selectedScene ? { assignee: selectedScene.assignee } : null,
       allUsers,
       currentUser.id,
+      counterpartScene ? { assignee: counterpartScene.assignee } : undefined,
     );
-  }, [mode, selectedScene, allUsers, currentUser]);
+  }, [mode, selectedScene, allUsers, currentUser, counterpartScene]);
 
   const canSubmit = !!currentUser && description.trim().length > 0 && !submitting
     && (mode === 'general' || !!selectedScene);

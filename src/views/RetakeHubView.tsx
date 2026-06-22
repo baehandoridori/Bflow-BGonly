@@ -305,6 +305,12 @@ export default function RetakeHubView() {
 
   const handleDeleteSet = async () => {
     if (!selectedSet) return;
+    // 리비전 로드 전엔 selectedItems 가 비어 전반 항목을 못 잡는다. 그 상태로 세트를 지우면
+    //   FK 가 전반 항목의 setId 만 비워 고아가 되므로(코덱스 P2), 로드 완료 후에만 삭제한다.
+    if (!revisionsLoaded) {
+      sonnerToast.error('아직 항목을 불러오는 중이에요. 잠시 후 다시 시도해주세요.');
+      return;
+    }
     // '전반' 항목은 세트 밖에선 볼 수 없어, 세트 삭제로 setId 만 풀리면 고아가 된다(코덱스 P2).
     //   → 세트 삭제 시 함께 삭제한다. 씬 매인 항목은 씬 패널에 남으므로 소속만 해제.
     const generalItems = selectedItems.filter((r) => isGeneralRevisionSceneKey(r.sceneKey));
