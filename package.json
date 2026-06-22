@@ -7,7 +7,7 @@
     "dev": "vite",
     "typecheck": "tsc --noEmit && tsc -p tsconfig.node.json --noEmit",
     "test:auto-update": "node --test ./tests/autoUpdateHelperSwap.test.ts ./tests/autoUpdateManifest.test.ts ./tests/autoUpdateFailurePolicy.test.ts ./tests/autoUpdateInstallerFlow.test.ts ./tests/releaseNoteCategories.test.ts",
-    "test:entity": "node --test ./tests/mentionQuery.test.ts ./tests/entityTokens.test.ts ./tests/hashEntity.test.ts ./tests/hashtagQuery.test.ts ./tests/hashtagCandidates.test.ts ./tests/cutScene.test.ts ./tests/revisionSceneContext.test.ts ./tests/sceneReference.test.ts ./tests/cardSceneHelpers.test.ts",
+    "test:entity": "node --test ./tests/mentionQuery.test.ts ./tests/entityTokens.test.ts ./tests/hashEntity.test.ts ./tests/hashtagQuery.test.ts ./tests/hashtagCandidates.test.ts ./tests/cutScene.test.ts ./tests/revisionSceneContext.test.ts ./tests/sceneReference.test.ts ./tests/cardSceneHelpers.test.ts ./tests/revisionSet.test.ts",
     "build": "npm run typecheck && npm run test:auto-update && npm run test:entity && vite build && electron-builder && node scripts/generate-manifest.js",
     "build:vite": "npm run typecheck && npm run test:auto-update && npm run test:entity && vite build && node scripts/generate-manifest.js --allow-missing-installer",
     "preview": "vite preview",
