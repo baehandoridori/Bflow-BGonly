@@ -59,6 +59,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // v1.22.1: 자동 업데이트 알림 — 백그라운드 fetch 완료 시 토스트 띄우기
   getUpdateState: () => ipcRenderer.invoke('update:get-state'),
   checkForUpdates: () => ipcRenderer.invoke('update:check-now'),
+  // v1.44.2: '자동 중단' 상태에서 사용자가 직접 빠져나오기 — 차단 표식 정리 후 재확인
+  retryUpdate: () => ipcRenderer.invoke('update:retry'),
   onUpdateState: (callback: (state: unknown | null) => void) => {
     const handler = (_event: unknown, state: unknown | null) => callback(state);
     ipcRenderer.on('update:state', handler);

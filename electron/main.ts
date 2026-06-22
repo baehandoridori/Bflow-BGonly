@@ -948,7 +948,7 @@ function migrateLegacyUsersFileIfNeeded(): void {
 let updateRelaunchScheduled = false;
 ipcMain.handle('update:get-state', () => currentUpdateInfo);
 
-ipcMain.handle('update:check-now', async () => {
+async function runManualUpdateCheck(): Promise<UpdateInfo | null> {
   if (manualUpdateCheckInFlight) return manualUpdateCheckInFlight;
 
   manualUpdateCheckInFlight = (async () => {
@@ -982,6 +982,48 @@ ipcMain.handle('update:check-now', async () => {
   } finally {
     manualUpdateCheckInFlight = null;
   }
+}
+
+ipcMain.handle('update:check-now', () => runManualUpdateCheck());
+
+/**
+ * v1.44.2 — '자동 중단' 상태 수동 복구.
+ *
+ * 이전 업데이트 적용 실패로 `.swap-suppressed`(content=own version)가 남으면 checker가 같은
+ * 버전에선 fetch를 영구 skip한다(suppressed). 이 상태는 다른 버전을 직접 설치하기 전엔
+ * 자동으로 풀리지 않아, 비개발자 사용자가 앱 안에서 빠져나올 길이 없었다. 이 핸들러는
+ * 사용자가 '다시 시도'를 눌렀을 때 suppression/attempted 흔적을 지우고 즉시 재확인하여
+ * 자동 업데이트를 재개시킨다. (installer-pending stale 잔여물은 prepareUpdate의 fresh
+ * download 경로가 정리하므로 별도 처리 불필요.)
+ */
+ipcMain.handle('update:retry', async () => {
+  // 실패했던 stale installer-pending을 먼저 비운다. 정리에 성공해야만 suppression을 풀고
+  // 새 버전을 다시 받는다.
+  // - 지우지 않으면 prepareUpdate가 readPendingUpdateInfo에서 기존 ready pending을 먼저
+  //   반환해, 실패 원인이던 같은 installer를 그대로 재사용/재예약한다 (Codex 1·3차 P2).
+  // - pending 정리가 실패하면(파일 잠김 등) suppression을 그대로 두고 사용자에게 안내한다.
+  //   이때 .installer-attempted도 유지되어(헬퍼 가드) 다음 시작 시 stale을 다시 정리한다 (Codex 2차 P2).
+  const pendingCleared = await cleanupInstallerPendingAndAttemptedMarker();
+  if (!pendingCleared) {
+    const own = app.getVersion();
+    const info: UpdateInfo = {
+      status: 'failed',
+      currentVersion: own,
+      latestVersion: own,
+      buildAt: '',
+      ready: false,
+      releaseNotes: [],
+      message: '받아둔 설치 파일을 정리하지 못했어요. 다른 프로그램이 잡고 있을 수 있으니, 잠시 후 다시 시도하거나 안내대로 설치 파일을 직접 실행해 주세요.',
+    };
+    publishUpdateInfo(info);
+    return info;
+  }
+  try {
+    await fs.promises.rm(localSwapSuppressedMarker(), { force: true });
+  } catch (err) {
+    console.warn('[autoUpdate] retry: suppression marker 정리 실패 (무시):', err);
+  }
+  return runManualUpdateCheck();
 });
 
 ipcMain.handle('update:apply-now', async () => {
@@ -3641,7 +3683,7 @@ async function cleanupPendingAndSwapAttemptedMarker(): Promise<void> {
   }
 }
 
-async function cleanupInstallerPendingAndAttemptedMarker(): Promise<void> {
+async function cleanupInstallerPendingAndAttemptedMarker(): Promise<boolean> {
   let pendingCleaned = false;
   try {
     await fs.promises.rm(localInstallerPendingDir(), { recursive: true, force: true });
@@ -3654,6 +3696,7 @@ async function cleanupInstallerPendingAndAttemptedMarker(): Promise<void> {
       await fs.promises.unlink(localInstallerAttemptedMarker());
     } catch { /* 무시 */ }
   }
+  return pendingCleaned;
 }
 
 // macOS: open-url 이벤트
