@@ -66,6 +66,18 @@ function buildCountMap(revisions: CompRevision[]): Record<string, number> {
   return revisionService.buildOpenRevisionCountMap(revisions);
 }
 
+/**
+ * 세트(set_id)에 속한 리비전의 status/membership 이 바뀌면 그 세트의 자동완료를 재계산한다(코덱스 P2).
+ * 허브 뷰를 안 보고 있어도 일반 씬 패널의 최종완료/되돌리기/삭제가 comp_revision_sets.status 에 반영되게 한다.
+ * revisionSetService 와 순환 의존이라 동적 import + fire-and-forget(상태 변경 흐름을 막지도 실패시키지도 않음).
+ */
+function syncSetForRevision(setId: string | null | undefined): void {
+  if (!setId) return;
+  void import('@/services/revisionSetService')
+    .then((m) => m.recomputeSetCompletion(setId))
+    .catch((err) => console.error('[리테이크 세트] 자동완료 재계산 실패:', err));
+}
+
 function buildRevisionContextSignature(episodes: Episode[]): string {
   return episodes
     .map((episode) => episode.parts
@@ -155,6 +167,7 @@ export const useRevisionStore = create<RevisionState>((set, get) => ({
   },
 
   deleteRevision: async (id, sceneKey) => {
+    const setId = get().revisions.find((r) => r.id === id)?.setId;
     get().deleteRevisionOptimistic(id);
     try {
       await revisionService.deleteRevision(id, sceneKey);
@@ -165,9 +178,11 @@ export const useRevisionStore = create<RevisionState>((set, get) => ({
       await get().loadRevisions();
       throw err;
     }
+    syncSetForRevision(setId); // 세트 항목이 삭제되면 그 세트 자동완료 재계산(빈 세트 open 복귀 등)
   },
 
   updateStatus: async (id, sceneKey, status, extra) => {
+    const setId = get().revisions.find((r) => r.id === id)?.setId;
     const now = new Date().toISOString();
     // 낙관적 업데이트
     get().updateRevisionOptimistic(id, sceneKey, {
@@ -193,6 +208,7 @@ export const useRevisionStore = create<RevisionState>((set, get) => ({
       // 롤백: 다시 로드
       await get().loadRevisions();
     }
+    syncSetForRevision(setId); // resolved 진입/이탈이 세트 진행률을 바꾸므로 세트 자동완료 재계산
   },
 
   // ─── 담당 워크플로우 (리테이크 허브 1단계) ─────────────
@@ -242,6 +258,7 @@ export const useRevisionStore = create<RevisionState>((set, get) => ({
     markSelfRevisionAction(rev.id, 'resolve');
     try { await revisionService.finalResolveRevision(rev, byName); }
     catch { await get().loadRevisions(); }
+    syncSetForRevision(rev.setId); // 세트 소속이면 최종완료가 세트 자동완료(done)에 반영되게
   },
 
   revertFinalResolve: async (rev) => {
@@ -251,6 +268,7 @@ export const useRevisionStore = create<RevisionState>((set, get) => ({
     markSelfFromStatus(rev.id, status);
     try { await revisionService.revertFinalResolve(rev); }
     catch { await get().loadRevisions(); }
+    syncSetForRevision(rev.setId); // 최종완료 되돌리면 세트가 done→open 으로 복귀해야 함
   },
 
   revertAssignee: async (rev, userId) => {

@@ -123,8 +123,9 @@ async function changeRevisionSet(revisionId: string, setId: string | null): Prom
   if (setId) await recomputeSetCompletion(setId);
 }
 
-/** 한 세트의 현재 하위 항목으로 자동완료/복귀를 재계산 — 이동(편입/해제) 후 source·target 동기화. */
-async function recomputeSetCompletion(setId: string): Promise<void> {
+/** 한 세트의 현재 하위 항목으로 자동완료/복귀를 재계산 — 이동/편입/해제·하위 리비전 status 변경 후 동기화.
+ *  허브 뷰 effect 외에 useRevisionStore 의 resolve 경로에서도 호출돼, 허브를 안 봐도 세트 status 가 반영된다. */
+export async function recomputeSetCompletion(setId: string): Promise<void> {
   const set = useRevisionSetStore.getState().sets.find((s) => s.id === setId);
   if (!set) return;
   const items = useRevisionStore.getState().revisions.filter((r) => r.setId === setId);
