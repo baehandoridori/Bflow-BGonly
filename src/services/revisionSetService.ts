@@ -126,7 +126,13 @@ async function changeRevisionSet(revisionId: string, setId: string | null): Prom
 /** 한 세트의 현재 하위 항목으로 자동완료/복귀를 재계산 — 이동/편입/해제·하위 리비전 status 변경 후 동기화.
  *  허브 뷰 effect 외에 useRevisionStore 의 resolve 경로에서도 호출돼, 허브를 안 봐도 세트 status 가 반영된다. */
 export async function recomputeSetCompletion(setId: string): Promise<void> {
-  const set = useRevisionSetStore.getState().sets.find((s) => s.id === setId);
+  let set = useRevisionSetStore.getState().sets.find((s) => s.id === setId);
+  if (!set) {
+    // 허브를 아직 안 열어 세트 스토어가 비어 있으면(씬 패널에서 resolve/삭제 등) 세트를 불러와 채운다(코덱스 P2).
+    //   안 그러면 허브를 안 본 동안 comp_revision_sets.status 가 영영 안 바뀐다.
+    await loadRevisionSets();
+    set = useRevisionSetStore.getState().sets.find((s) => s.id === setId);
+  }
   if (!set) return;
   const items = useRevisionStore.getState().revisions.filter((r) => r.setId === setId);
   await maybeAutoCompleteSet(set, items);

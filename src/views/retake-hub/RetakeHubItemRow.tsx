@@ -30,6 +30,7 @@ import { AssigneeChipRow } from '@/components/scenes/revision/AssigneeChipRow';
 import { CompletionNoteInput } from '@/components/scenes/revision/CompletionNoteInput';
 import { FinalResolveBar } from '@/components/scenes/revision/FinalResolveBar';
 import { ReassignInline } from '@/components/scenes/revision/ReassignInline';
+import { RevisionStatusAction } from '@/components/scenes/RevisionPanel';
 
 interface Props {
   revision: CompRevision;
@@ -48,6 +49,7 @@ export function RetakeHubItemRow({ revision, allUsers, sideBarClass, reLabel }: 
   const reassign = useRevisionStore((s) => s.reassign);
   const finalResolve = useRevisionStore((s) => s.finalResolve);
   const revertFinalResolve = useRevisionStore((s) => s.revertFinalResolve);
+  const updateStatus = useRevisionStore((s) => s.updateStatus);
 
   const [expanded, setExpanded] = useState(false);
   const [noteEditingFor, setNoteEditingFor] = useState<string | null>(null);
@@ -303,6 +305,16 @@ export function RetakeHubItemRow({ revision, allUsers, sideBarClass, reLabel }: 
                     />
                   )}
                 </>
+              )}
+
+              {/* 담당자 0명 — 단순 상태 토글(완료/되돌리기). 가져온 기존(담당자 없는) 리테이크를 허브에서 직접 완료/되돌리기 가능하게(코덱스 P2). */}
+              {!hasAssignees && currentUser && (
+                <div className="mb-1">
+                  <RevisionStatusAction
+                    status={revision.status}
+                    onStatusChange={(next) => { void updateStatus(revision.id, revision.sceneKey, next, { resolvedBy: currentUser?.name }); }}
+                  />
+                </div>
               )}
 
               {/* ─── 담당자 0명 — 담당 지정 유도 ─── */}

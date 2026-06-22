@@ -55,7 +55,9 @@ function StatusBadge({ status, size = 'sm' }: { status: RevisionStatus; size?: '
 
 // ─── 상태 직접 전환 버튼 ──────────────────────
 
-function RevisionStatusAction({
+// 담당자 0명(legacy/미지정) 리테이크의 단순 상태 토글(open↔진행중↔완료/되돌리기).
+//   리테이크 허브의 담당자 없는 항목 행에서도 재사용한다(코덱스 P2 — 허브에서 완료 가능하게).
+export function RevisionStatusAction({
   status,
   onStatusChange,
 }: {
