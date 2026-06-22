@@ -17,7 +17,7 @@
  */
 
 import { lazy, Suspense, useEffect, useMemo, useState } from 'react';
-import { ListChecks, Plus, Trash2, Users as UsersIcon, ChevronRight } from 'lucide-react';
+import { ListChecks, Plus, Trash2, Users as UsersIcon, ChevronRight, FolderInput } from 'lucide-react';
 import { useAuthStore } from '@/stores/useAuthStore';
 import { useDataStore } from '@/stores/useDataStore';
 import { useRevisionStore } from '@/stores/useRevisionStore';
@@ -31,6 +31,10 @@ import { RetakeHubItemTable, type HubTab } from './retake-hub/RetakeHubItemTable
 
 const RevisionSetCreateModal = lazy(() =>
   import('./retake-hub/RevisionSetCreateModal').then((m) => ({ default: m.RevisionSetCreateModal })),
+);
+
+const RevisionImportModal = lazy(() =>
+  import('./retake-hub/RevisionImportModal').then((m) => ({ default: m.RevisionImportModal })),
 );
 
 const TABS: { id: HubTab; label: string }[] = [
@@ -127,6 +131,7 @@ function SetDetailHeader({
   aggregatorName,
   episodeLabel,
   canManage,
+  onImport,
   onDelete,
 }: {
   set: CompRevisionSet;
@@ -134,6 +139,7 @@ function SetDetailHeader({
   aggregatorName: string | null;
   episodeLabel: string | null;
   canManage: boolean;
+  onImport: () => void;
   onDelete: () => void;
 }) {
   const progress = computeSetProgress(items);
@@ -154,17 +160,29 @@ function SetDetailHeader({
             )}
           </div>
         </div>
-        {canManage && (
+        {/* 가져오기는 누구나(스펙 §9.4), 세트 삭제는 컴포지터급만. */}
+        <div className="shrink-0 flex items-center gap-2">
           <button
             type="button"
-            onClick={onDelete}
-            className="shrink-0 inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg border border-bg-border/50 text-[11px] font-semibold text-text-secondary/75 hover:text-red-400 hover:border-red-400/40 hover:bg-red-500/10 transition-all cursor-pointer"
-            title="세트 삭제"
+            onClick={onImport}
+            className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg border border-bg-border/50 text-[11px] font-semibold text-text-secondary/85 hover:text-accent hover:border-accent/40 hover:bg-accent/10 transition-all cursor-pointer"
+            title="기존 리테이크를 이 세트로 가져오기"
           >
-            <Trash2 size={12} />
-            세트 삭제
+            <FolderInput size={12} />
+            기존 리테이크 가져오기
           </button>
-        )}
+          {canManage && (
+            <button
+              type="button"
+              onClick={onDelete}
+              className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg border border-bg-border/50 text-[11px] font-semibold text-text-secondary/75 hover:text-red-400 hover:border-red-400/40 hover:bg-red-500/10 transition-all cursor-pointer"
+              title="세트 삭제"
+            >
+              <Trash2 size={12} />
+              세트 삭제
+            </button>
+          )}
+        </div>
       </div>
 
       {/* 진행률 바 */}
@@ -204,6 +222,7 @@ export default function RetakeHubView() {
 
   const [tab, setTab] = useState<HubTab>('part');
   const [showCreate, setShowCreate] = useState(false);
+  const [showImport, setShowImport] = useState(false);
 
   const canManage = isCompositorForCompositing(currentUser);
 
@@ -231,6 +250,12 @@ export default function RetakeHubView() {
       return episodeTitles[ep] || `EP.${String(ep).padStart(2, '0')}`;
     };
   }, [episodeTitles]);
+
+  // 세트 id → 제목 (가져오기 모달에서 타 세트 소속 표시용).
+  const setTitleOf = useMemo(() => {
+    const map = new Map(sets.map((s) => [s.id, s.title]));
+    return (id: string) => map.get(id) ?? null;
+  }, [sets]);
 
   const selectedSet = useMemo(
     () => sets.find((s) => s.id === selectedSetId) ?? null,
@@ -328,6 +353,7 @@ export default function RetakeHubView() {
               aggregatorName={userNameOf(selectedSet.aggregatorId)}
               episodeLabel={episodeLabelOf(selectedSet.episodeNumber)}
               canManage={canManage}
+              onImport={() => setShowImport(true)}
               onDelete={handleDeleteSet}
             />
 
@@ -374,6 +400,19 @@ export default function RetakeHubView() {
               setShowCreate(false);
               select(id);
             }}
+          />
+        </Suspense>
+      )}
+
+      {showImport && selectedSet && (
+        <Suspense fallback={null}>
+          <RevisionImportModal
+            targetSet={selectedSet}
+            allRevisions={revisions}
+            setTitleOf={setTitleOf}
+            episodeLabelOf={episodeLabelOf}
+            allUsers={allUsers}
+            onClose={() => setShowImport(false)}
           />
         </Suspense>
       )}

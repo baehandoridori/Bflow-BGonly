@@ -12,11 +12,14 @@
 
 import { useMemo, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Users as UsersIcon, UserPlus } from 'lucide-react';
+import { Users as UsersIcon, UserPlus, FolderMinus } from 'lucide-react';
+import { toast as sonnerToast } from 'sonner';
 import type { CompRevision, AppUser } from '@/types';
 import { useAuthStore } from '@/stores/useAuthStore';
 import { useAppStore } from '@/stores/useAppStore';
 import { useRevisionStore } from '@/stores/useRevisionStore';
+import { removeFromSet } from '@/services/revisionSetService';
+import { ConfirmDialog } from '@/components/common/ConfirmDialog';
 import { STATUS_CONFIG } from '@/constants/revision';
 import { EntityText } from '@/components/common/EntityText';
 import { avatarColor } from '@/utils/avatarColor';
@@ -49,6 +52,7 @@ export function RetakeHubItemRow({ revision, allUsers, sideBarClass, reLabel }: 
   const [expanded, setExpanded] = useState(false);
   const [noteEditingFor, setNoteEditingFor] = useState<string | null>(null);
   const [reassigning, setReassigning] = useState(false);
+  const [removing, setRemoving] = useState(false);
 
   const entityUserNames = useMemo(() => allUsers.map((u) => u.name), [allUsers]);
   const handleEntityMentionClick = (name: string) => { setHighlightUserName(name); setView('team'); };
@@ -101,6 +105,27 @@ export function RetakeHubItemRow({ revision, allUsers, sideBarClass, reLabel }: 
   };
   const handleFinalResolve = () => {
     if (currentUser) finalResolve(revision, currentUser.name);
+  };
+
+  // 세트에서 빼기 (스펙 §9.4) — 리비전의 setId 만 해제. 마지막 항목이 빠지면
+  // 서비스/허브 effect 가 세트를 open 으로 되돌린다. 항목 자체는 사라지지 않는다.
+  const handleRemoveFromSet = async () => {
+    if (removing) return;
+    const ok = await ConfirmDialog.show({
+      message: '이 리테이크를 세트에서 빼시겠습니까?\n항목 자체는 사라지지 않고 세트 소속만 해제됩니다.',
+      confirmLabel: '세트에서 빼기',
+      tone: 'danger',
+    });
+    if (!ok) return;
+    setRemoving(true);
+    try {
+      await removeFromSet(revision.id);
+      sonnerToast.success('세트에서 뺐어요.');
+    } catch {
+      sonnerToast.error('세트에서 빼지 못했어요. 잠시 후 다시 시도해주세요.');
+    } finally {
+      setRemoving(false);
+    }
   };
 
   return (
@@ -310,6 +335,17 @@ export function RetakeHubItemRow({ revision, allUsers, sideBarClass, reLabel }: 
                     <span style={{ color: STATUS_CONFIG.resolved.color }}>{revision.finalResolvedBy} 최종완료</span>
                   </>
                 )}
+                <span className="flex-1" />
+                <button
+                  type="button"
+                  onClick={handleRemoveFromSet}
+                  disabled={removing}
+                  className="inline-flex items-center gap-1 text-[11px] font-semibold text-text-secondary/70 hover:text-red-400 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer transition-colors"
+                  title="이 리테이크를 세트에서 빼기"
+                >
+                  <FolderMinus size={12} />
+                  {removing ? '빼는 중…' : '세트에서 빼기'}
+                </button>
               </div>
             </div>
           </motion.div>
