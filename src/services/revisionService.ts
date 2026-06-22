@@ -441,8 +441,12 @@ export interface CreateRevisionServiceInput {
 
 export async function createRevision(input: CreateRevisionServiceInput): Promise<CompRevision> {
   const isGeneral = !input.sceneKey?.trim();
-  const lookupSceneKeys = isGeneral ? [''] : getRevisionLookupSceneKeys(input.sceneKey as string);
-  const normalizedSceneKey = isGeneral ? '' : lookupSceneKeys[0];
+  // 전반 항목도 lookup 헬퍼가 만드는 정규형('::')으로 키를 잡는다. 그래야 이후 상태/담당/삭제 변경이
+  // getRevisionLookupSceneKeys(rev.sceneKey) 로 같은 버킷을 찾는다(코덱스 P2 — '' 로 저장하면
+  // 재로드 전까지 변경이 캐시/로컬 버킷을 못 찾아 손실되고, 로컬모드에선 삭제가 안 써져 되살아남).
+  // 단 Supabase 저장용 sceneId 인자는 '' 로 보내 electron 이 씬 해석을 건너뛰고 scene_id=null 로 INSERT 한다.
+  const lookupSceneKeys = isGeneral ? getRevisionLookupSceneKeys('') : getRevisionLookupSceneKeys(input.sceneKey as string);
+  const normalizedSceneKey = lookupSceneKeys[0];
   const setId = input.setId ?? null;
   const now = new Date().toISOString();
   const id = crypto.randomUUID();
@@ -489,7 +493,7 @@ export async function createRevision(input: CreateRevisionServiceInput): Promise
     // Supabase: partUuid + sceneId로 저장 (sceneKey를 그대로 partUuid 자리에 전달 — 서버에서 해석)
     // 전반(허브 '전반' 항목)은 normalizedSceneKey 가 '' 라 서버에서 씬 해석을 건너뛰고 scene_id=null 로 저장.
     await window.electronAPI.supabaseAddRevision(
-      id, '', normalizedSceneKey, revisionNo, initialStatus, priority,
+      id, '', isGeneral ? '' : normalizedSceneKey, revisionNo, initialStatus, priority,
       input.description, '', input.imageUrl || '', department || '', input.lookupDepartment || department || '',
       input.requesterId, input.requesterName, '', now,
       JSON.stringify(notifyUserIds),
