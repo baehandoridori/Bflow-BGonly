@@ -20,6 +20,8 @@ import { lazy, Suspense, useEffect, useMemo, useState } from 'react';
 import { ListChecks, Plus, Trash2, Users as UsersIcon, ChevronRight, FolderInput } from 'lucide-react';
 import { useAuthStore } from '@/stores/useAuthStore';
 import { useDataStore } from '@/stores/useDataStore';
+import { useAppStore } from '@/stores/useAppStore';
+import { setRevisionsSheetsMode } from '@/services/revisionService';
 import { useRevisionStore } from '@/stores/useRevisionStore';
 import { useRevisionSetStore } from '@/stores/useRevisionSetStore';
 import { loadRevisionSets, removeRevisionSet, maybeAutoCompleteSet } from '@/services/revisionSetService';
@@ -219,6 +221,9 @@ export default function RetakeHubView() {
 
   const revisions = useRevisionStore((s) => s.revisions);
   const loadRevisions = useRevisionStore((s) => s.loadRevisions);
+  // 리비전 로드 완료 여부 — 자동완료 판정 가드(로드 전 빈 목록으로 done→open 오작동 방지).
+  const revisionsLoaded = useRevisionStore((s) => s.lastLoadTime !== null && !s.isLoading);
+  const dataConnected = useAppStore((s) => s.dataConnected);
 
   const [tab, setTab] = useState<HubTab>('part');
   const [showCreate, setShowCreate] = useState(false);
@@ -227,10 +232,13 @@ export default function RetakeHubView() {
   const canManage = isCompositorForCompositing(currentUser);
 
   // 마운트 시 세트 + 리비전 로드 (preview mock 포함).
+  //   허브를 사이드바에서 바로 열어도 다른 뷰처럼 Supabase 모드가 되도록 dataConnected 로 리비전 모드를 먼저 설정한다.
+  //   (안 하면 revisionService 가 기본 로컬 파일 모드라 허브가 빈/stale 목록을 읽고, 담당/세트 액션이 로컬에만 저장됨 — 코덱스 P1.)
   useEffect(() => {
+    setRevisionsSheetsMode(dataConnected);
     loadRevisionSets();
     loadRevisions();
-  }, [loadRevisions]);
+  }, [dataConnected, loadRevisions]);
 
   // 세트 목록이 들어오면 선택이 비어 있을 때 첫 세트 자동 선택.
   useEffect(() => {
@@ -270,9 +278,11 @@ export default function RetakeHubView() {
   // 자동완료 배선 — 선택 세트의 하위 항목이 바뀔 때 maybeAutoCompleteSet 호출.
   // 서비스가 nextSetStatus 와 현재 status 가 같으면 no-op(중복 쓰기 방지)이라 매번 안전하게 호출 가능.
   useEffect(() => {
-    if (!selectedSet) return;
+    // 리비전 로드 전엔 selectedItems 가 []라 done 세트를 잘못 open 으로 되돌릴 수 있다(코덱스 P2).
+    //   로드가 끝난 뒤에만 자동완료 판정한다.
+    if (!selectedSet || !revisionsLoaded) return;
     void maybeAutoCompleteSet(selectedSet, selectedItems);
-  }, [selectedSet, selectedItems]);
+  }, [selectedSet, selectedItems, revisionsLoaded]);
 
   const handleDeleteSet = async () => {
     if (!selectedSet) return;
