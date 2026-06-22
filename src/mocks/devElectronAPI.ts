@@ -630,6 +630,7 @@ export function installDevElectronAPI(): void {
       createdAt: string,
       notifyUserIdsJson?: string,
       assigneeIdsJson?: string,
+      setId?: string,
     ) => {
       const revisions = getMockRevisionRows();
       const mockAssigneeIds = parseJsonStringArray(assigneeIdsJson);
@@ -654,7 +655,7 @@ export function installDevElectronAPI(): void {
         notifyUserIds: parseJsonStringArray(notifyUserIdsJson),
         assigneeIds: mockAssigneeIds,
         assigneeStates: Object.fromEntries(mockAssigneeIds.map((aid) => [aid, { state: 'pending' }])),
-        setId: null,
+        setId: setId ?? null,
         finalResolvedBy: '',
         finalResolvedAt: '',
       });
