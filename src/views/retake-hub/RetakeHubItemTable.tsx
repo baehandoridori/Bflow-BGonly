@@ -14,6 +14,7 @@ import { useMemo } from 'react';
 import type { CompRevision, AppUser } from '@/types';
 import { STATUS_CONFIG, revisionNoToLabel } from '@/constants/revision';
 import { sideBarColorClass } from '@/utils/revisionCardView';
+import { revisionPartOf, isGeneralRevisionSceneKey } from '@/utils/revisionGeneral';
 import { RetakeHubItemRow } from './RetakeHubItemRow';
 
 export type HubTab = 'part' | 'assignee' | 'status' | 'scene';
@@ -30,19 +31,6 @@ interface GroupBucket {
   /** 정렬 순서용 정수(작을수록 위). */
   order: number;
   items: CompRevision[];
-}
-
-/** sceneKey `EP01:A:1` → 파트 letter('A'). '전반'(빈/형식밖)은 null. */
-function partOf(sceneKey: string): string | null {
-  const parts = (sceneKey || '').split(':');
-  if (parts.length < 2) return null;
-  const p = parts[1]?.trim();
-  return p ? p.toUpperCase() : null;
-}
-
-/** '전반' 항목 — 대상 씬에 매이지 않음(sceneKey 비었거나 ep:part 형식 밖). */
-function isGeneralItem(r: CompRevision): boolean {
-  return partOf(r.sceneKey) == null;
 }
 
 const GENERAL_GROUP_KEY = '__general__';
@@ -66,7 +54,7 @@ function buildGroups(
   const general: CompRevision[] = [];
   const scoped: CompRevision[] = [];
   for (const r of items) {
-    (isGeneralItem(r) ? general : scoped).push(r);
+    (isGeneralRevisionSceneKey(r.sceneKey) ? general : scoped).push(r);
   }
 
   const buckets = new Map<string, GroupBucket>();
@@ -83,7 +71,7 @@ function buildGroups(
 
   for (const r of scoped) {
     if (tab === 'part') {
-      const p = partOf(r.sceneKey) ?? '?';
+      const p = revisionPartOf(r.sceneKey) ?? '?';
       push(`part:${p}`, `파트 ${p}`, p.charCodeAt(0), r);
     } else if (tab === 'assignee') {
       const ids = r.assigneeIds ?? [];

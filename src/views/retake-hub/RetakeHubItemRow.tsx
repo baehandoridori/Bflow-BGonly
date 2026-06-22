@@ -12,7 +12,7 @@
 
 import { useMemo, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Users as UsersIcon, UserPlus, FolderMinus } from 'lucide-react';
+import { Users as UsersIcon, UserPlus, FolderMinus, Trash2 } from 'lucide-react';
 import { toast as sonnerToast } from 'sonner';
 import type { CompRevision, AppUser } from '@/types';
 import { useAuthStore } from '@/stores/useAuthStore';
@@ -23,6 +23,7 @@ import { ConfirmDialog } from '@/components/common/ConfirmDialog';
 import { STATUS_CONFIG } from '@/constants/revision';
 import { EntityText } from '@/components/common/EntityText';
 import { avatarColor } from '@/utils/avatarColor';
+import { isGeneralRevisionSceneKey } from '@/utils/revisionGeneral';
 import { navigateToHashTarget } from '@/utils/hashNavigation';
 import { canActAsAssignee, canReassignRevision, canFinalResolveRevision } from '@/utils/revisionWorkflow';
 import { summarizeAssignees, collectAssigneeNotes, canShowFinalResolveBar } from '@/utils/revisionCardView';
@@ -50,6 +51,11 @@ export function RetakeHubItemRow({ revision, allUsers, sideBarClass, reLabel }: 
   const finalResolve = useRevisionStore((s) => s.finalResolve);
   const revertFinalResolve = useRevisionStore((s) => s.revertFinalResolve);
   const updateStatus = useRevisionStore((s) => s.updateStatus);
+  const deleteRevision = useRevisionStore((s) => s.deleteRevision);
+
+  // '전반'(씬 미지정) 항목은 setId 가 유일한 표시 앵커라, 세트에서 빼면 어디서도 안 보이는 고아가 된다.
+  // → 전반 항목은 '빼기' 대신 삭제로 처리한다(코덱스 P2).
+  const isGeneral = isGeneralRevisionSceneKey(revision.sceneKey);
 
   const [expanded, setExpanded] = useState(false);
   const [noteEditingFor, setNoteEditingFor] = useState<string | null>(null);
@@ -109,22 +115,38 @@ export function RetakeHubItemRow({ revision, allUsers, sideBarClass, reLabel }: 
     if (currentUser) finalResolve(revision, currentUser.name);
   };
 
-  // 세트에서 빼기 (스펙 §9.4) — 리비전의 setId 만 해제. 마지막 항목이 빠지면
-  // 서비스/허브 effect 가 세트를 open 으로 되돌린다. 항목 자체는 사라지지 않는다.
+  // 세트에서 빼기 (스펙 §9.4) — 씬 매인 항목은 setId 만 해제(씬 패널엔 남음). 마지막 항목이 빠지면
+  // 서비스/허브 effect 가 세트를 open 으로 되돌린다.
+  // '전반' 항목은 세트 밖에선 볼 수 없어 빼면 고아가 되므로 삭제한다(코덱스 P2).
   const handleRemoveFromSet = async () => {
     if (removing) return;
-    const ok = await ConfirmDialog.show({
-      message: '이 리테이크를 세트에서 빼시겠습니까?\n항목 자체는 사라지지 않고 세트 소속만 해제됩니다.',
-      confirmLabel: '세트에서 빼기',
-      tone: 'danger',
-    });
+    const ok = await ConfirmDialog.show(
+      isGeneral
+        ? {
+            message: '이 전반 항목을 삭제할까요?\n전반 항목은 세트 밖에선 볼 수 없어, 세트에서 빼면 사라집니다.',
+            confirmLabel: '삭제',
+            tone: 'danger',
+          }
+        : {
+            message: '이 리테이크를 세트에서 빼시겠습니까?\n항목 자체는 사라지지 않고 세트 소속만 해제됩니다.',
+            confirmLabel: '세트에서 빼기',
+            tone: 'danger',
+          },
+    );
     if (!ok) return;
     setRemoving(true);
     try {
-      await removeFromSet(revision.id);
-      sonnerToast.success('세트에서 뺐어요.');
+      if (isGeneral) {
+        await deleteRevision(revision.id, revision.sceneKey);
+        sonnerToast.success('전반 항목을 삭제했어요.');
+      } else {
+        await removeFromSet(revision.id);
+        sonnerToast.success('세트에서 뺐어요.');
+      }
     } catch {
-      sonnerToast.error('세트에서 빼지 못했어요. 잠시 후 다시 시도해주세요.');
+      sonnerToast.error(
+        isGeneral ? '삭제하지 못했어요. 잠시 후 다시 시도해주세요.' : '세트에서 빼지 못했어요. 잠시 후 다시 시도해주세요.',
+      );
     } finally {
       setRemoving(false);
     }
@@ -363,10 +385,10 @@ export function RetakeHubItemRow({ revision, allUsers, sideBarClass, reLabel }: 
                   onClick={handleRemoveFromSet}
                   disabled={removing}
                   className="inline-flex items-center gap-1 text-[11px] font-semibold text-text-secondary/70 hover:text-red-400 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer transition-colors"
-                  title="이 리테이크를 세트에서 빼기"
+                  title={isGeneral ? '이 전반 항목 삭제' : '이 리테이크를 세트에서 빼기'}
                 >
-                  <FolderMinus size={12} />
-                  {removing ? '빼는 중…' : '세트에서 빼기'}
+                  {isGeneral ? <Trash2 size={12} /> : <FolderMinus size={12} />}
+                  {removing ? (isGeneral ? '삭제 중…' : '빼는 중…') : (isGeneral ? '삭제' : '세트에서 빼기')}
                 </button>
               </div>
             </div>

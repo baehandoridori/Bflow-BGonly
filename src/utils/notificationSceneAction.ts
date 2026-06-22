@@ -1,5 +1,6 @@
 import { useAppStore } from '@/stores/useAppStore';
 import { useDataStore } from '@/stores/useDataStore';
+import { useRevisionSetStore } from '@/stores/useRevisionSetStore';
 import type { NotificationType } from '@/stores/useNotificationStore';
 import {
   buildNotificationSceneModalRequest,
@@ -65,6 +66,18 @@ export function navigateNotificationToScene(
   metadata?: Record<string, unknown> | null,
 ): NotificationSceneActionResult {
   markNotificationDomainRead(type, metadata);
+
+  // '전반' 리테이크 알림 — 씬 컨텍스트가 없으므로 리테이크 허브로 보낸다(코덱스 P2).
+  const retakeHubSetId = asString(metadataValue(metadata, 'retakeHubSetId'));
+  if (type === 'revision' && retakeHubSetId) {
+    useAppStore.getState().setView('retake-hub');
+    try {
+      useRevisionSetStore.getState().select(retakeHubSetId);
+    } catch {
+      /* 세트 스토어 미로드 — 허브 진입 후 자동 로드/선택 */
+    }
+    return { attempted: true, matched: true, openedModal: false };
+  }
 
   if (!hasSceneTargetHint(metadata)) {
     return { attempted: false, matched: false, openedModal: false };

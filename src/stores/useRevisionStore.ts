@@ -12,7 +12,8 @@ import {
  * 알림 대상자/부서/등록자 정보만 전달.
  */
 export interface CreateRevisionInput {
-  sceneKey: string;
+  /** 씬 매인 항목은 필수. 허브 '전반' 항목은 미지정. */
+  sceneKey?: string;
   description: string;
   imageUrl?: string;
   /** 부서 — sheetName 에서 추론한 값. 알림 자동 대상자 결정/저장용. */
@@ -25,6 +26,8 @@ export interface CreateRevisionInput {
   notifyUserIds: string[];
   /** 생성 시 담당자 지정 (리테이크 허브 2단계). 항상 notifyUserIds 부분집합으로 보정됨. */
   assigneeIds?: string[];
+  /** 리테이크 세트 소속(허브 항목 추가). */
+  setId?: string | null;
 }
 
 interface RevisionState {
@@ -163,6 +166,8 @@ export const useRevisionStore = create<RevisionState>((set, get) => ({
   createRevision: async (input) => {
     const revision = await revisionService.createRevision(input);
     get().addRevisionOptimistic(revision);
+    // 세트 소속(허브 항목)이면 세트 status(open/done) 재평가 — 새 open 항목이 done 세트를 open 으로 되돌림.
+    syncSetForRevision(revision.setId);
     return revision;
   },
 

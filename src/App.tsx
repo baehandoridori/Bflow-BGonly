@@ -60,6 +60,7 @@ import { SvgIconDefs } from '@/components/SvgIconDefs';
 import { useNotificationStore, type AppNotification } from '@/stores/useNotificationStore';
 import { useVacationPendingStore } from '@/stores/useVacationPendingStore';
 import { dispatchNotification, type NotificationSettings } from '@/utils/notificationHelper';
+import { useRevisionSetStore } from '@/stores/useRevisionSetStore';
 import { navigateNotificationToScene } from '@/utils/notificationSceneAction';
 import {
   beginCatchupRun,
@@ -1517,6 +1518,7 @@ export default function App() {
             description?: string;
             revision_no?: number;
             notify_user_ids?: string[] | null;
+            set_id?: string | null;
             created_at?: string | null;
           };
           // 본인이 등록자면 스킵
@@ -1534,6 +1536,26 @@ export default function App() {
 
           // sceneKey → 씬 매칭 (revisions 의 scene_id 는 'EP01:A:1' sceneKey 형식)
           const sceneKey = row.scene_id || '';
+          // '전반'(씬 미지정) 항목은 씬 컨텍스트가 없다 → 세트 제목으로 알리고, 클릭은 리테이크 허브로(코덱스 P2).
+          //   (씬 필드가 비어 있어 기존 씬 라벨/씬 점프 경로는 빈 제목 + 이동 불가가 된다.)
+          if (!sceneKey) {
+            const setTitle = row.set_id
+              ? useRevisionSetStore.getState().sets.find((s) => s.id === row.set_id)?.title
+              : undefined;
+            dispatchNotification({
+              type: 'revision',
+              title: `새 리테이크 — ${setTitle || '전반 항목'}`,
+              body: row.description
+                ? (row.description.length > 50 ? row.description.slice(0, 50) + '...' : row.description)
+                : `${row.requester_name || '누군가'}님이 등록`,
+              metadata: {
+                revisionId: row.id,
+                revisionAction: 'add',
+                retakeHubSetId: row.set_id ?? undefined,
+              } as Record<string, unknown>,
+            }, notiSettings);
+            return;
+          }
           const dataState = useDataStore.getState();
           const sceneNameForLabel = buildNotificationSceneDisplayLabelFromSceneKey(
             sceneKey,
@@ -1568,6 +1590,7 @@ export default function App() {
             revision_no?: number;
             resolved_by?: string | null;
             notify_user_ids?: string[] | null;
+            set_id?: string | null;
             updated_at?: string | null;
             resolved_at?: string | null;
           };
@@ -1615,6 +1638,22 @@ export default function App() {
           }
 
           const sceneKey = newRow.scene_id || '';
+          // '전반' 항목 상태 변경 — 씬 컨텍스트 없음 → 세트 제목 + 클릭 시 허브로(코덱스 P2, INSERT 분기와 동일).
+          if (!sceneKey) {
+            const setTitle = newRow.set_id
+              ? useRevisionSetStore.getState().sets.find((s) => s.id === newRow.set_id)?.title
+              : undefined;
+            dispatchNotification({
+              type: 'revision',
+              title: `${titlePrefix} — ${setTitle || '전반 항목'}`,
+              metadata: {
+                revisionId: newRow.id,
+                revisionAction: action,
+                retakeHubSetId: newRow.set_id ?? undefined,
+              } as Record<string, unknown>,
+            }, notiSettings);
+            return;
+          }
           const dataState = useDataStore.getState();
           const sceneNameForLabel = buildNotificationSceneDisplayLabelFromSceneKey(
             sceneKey,

@@ -26,8 +26,10 @@ import { useRevisionStore } from '@/stores/useRevisionStore';
 import { useRevisionSetStore } from '@/stores/useRevisionSetStore';
 import { loadRevisionSets, removeRevisionSet, maybeAutoCompleteSet } from '@/services/revisionSetService';
 import { computeSetProgress } from '@/utils/revisionSet';
+import { isGeneralRevisionSceneKey } from '@/utils/revisionGeneral';
 import { isCompositorForCompositing } from '@/utils/compositingLabels';
 import { ConfirmDialog } from '@/components/common/ConfirmDialog';
+import { toast as sonnerToast } from 'sonner';
 import type { CompRevision, CompRevisionSet } from '@/types';
 import { RetakeHubItemTable, type HubTab } from './retake-hub/RetakeHubItemTable';
 
@@ -37,6 +39,10 @@ const RevisionSetCreateModal = lazy(() =>
 
 const RevisionImportModal = lazy(() =>
   import('./retake-hub/RevisionImportModal').then((m) => ({ default: m.RevisionImportModal })),
+);
+
+const RevisionAddModal = lazy(() =>
+  import('./retake-hub/RevisionAddModal').then((m) => ({ default: m.RevisionAddModal })),
 );
 
 const TABS: { id: HubTab; label: string }[] = [
@@ -133,6 +139,7 @@ function SetDetailHeader({
   aggregatorName,
   episodeLabel,
   canManage,
+  onAddItem,
   onImport,
   onDelete,
 }: {
@@ -141,6 +148,7 @@ function SetDetailHeader({
   aggregatorName: string | null;
   episodeLabel: string | null;
   canManage: boolean;
+  onAddItem: () => void;
   onImport: () => void;
   onDelete: () => void;
 }) {
@@ -162,8 +170,17 @@ function SetDetailHeader({
             )}
           </div>
         </div>
-        {/* 가져오기는 누구나(스펙 §9.4), 세트 삭제는 컴포지터급만. */}
+        {/* 항목 추가·가져오기는 누구나(스펙 §9.4), 세트 삭제는 컴포지터급만. */}
         <div className="shrink-0 flex items-center gap-2">
+          <button
+            type="button"
+            onClick={onAddItem}
+            className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg border border-accent/50 bg-accent/10 text-[11px] font-semibold text-accent hover:bg-accent/20 transition-all cursor-pointer"
+            title="이 세트에 새 항목 만들기"
+          >
+            <Plus size={12} strokeWidth={2.6} />
+            항목 추가
+          </button>
           <button
             type="button"
             onClick={onImport}
@@ -221,6 +238,7 @@ export default function RetakeHubView() {
 
   const revisions = useRevisionStore((s) => s.revisions);
   const loadRevisions = useRevisionStore((s) => s.loadRevisions);
+  const deleteRevision = useRevisionStore((s) => s.deleteRevision);
   // 리비전 로드 완료 여부 — 자동완료 판정 가드(로드 전 빈 목록으로 done→open 오작동 방지).
   const revisionsLoaded = useRevisionStore((s) => s.lastLoadTime !== null && !s.isLoading);
   const dataConnected = useAppStore((s) => s.dataConnected);
@@ -228,6 +246,7 @@ export default function RetakeHubView() {
   const [tab, setTab] = useState<HubTab>('part');
   const [showCreate, setShowCreate] = useState(false);
   const [showImport, setShowImport] = useState(false);
+  const [showAdd, setShowAdd] = useState(false);
 
   const canManage = isCompositorForCompositing(currentUser);
 
@@ -286,14 +305,50 @@ export default function RetakeHubView() {
 
   const handleDeleteSet = async () => {
     if (!selectedSet) return;
+    // 리비전 로드 전엔 selectedItems 가 비어 전반 항목을 못 잡는다. 그 상태로 세트를 지우면
+    //   FK 가 전반 항목의 setId 만 비워 고아가 되므로(코덱스 P2), 로드 완료 후에만 삭제한다.
+    if (!revisionsLoaded) {
+      sonnerToast.error('아직 항목을 불러오는 중이에요. 잠시 후 다시 시도해주세요.');
+      return;
+    }
+    // '전반' 항목은 세트 밖에선 볼 수 없어, 세트 삭제로 setId 만 풀리면 고아가 된다(코덱스 P2).
+    //   → 세트 삭제 시 함께 삭제한다. 씬 매인 항목은 씬 패널에 남으므로 소속만 해제.
+    const generalItems = selectedItems.filter((r) => isGeneralRevisionSceneKey(r.sceneKey));
+    // 삭제 권한 preflight(코덱스 P2) — 리비전 삭제는 등록자 본인 또는 관리자만 가능(electron deleteRevision).
+    //   못 지우는 전반 항목이 하나라도 있으면, 일부만 지우고 중단해 데이터가 사라지는 부분 삭제를 막기 위해
+    //   삭제를 아예 시작하지 않는다.
+    const isAdmin = currentUser?.role === 'admin';
+    const undeletable = generalItems.filter((r) => !isAdmin && r.requesterId !== currentUser?.id);
+    if (undeletable.length > 0) {
+      sonnerToast.error('내가 등록하지 않은 전반 항목이 있어 세트를 삭제할 수 없어요. 등록자나 관리자에게 요청해주세요.');
+      return;
+    }
     const ok = await ConfirmDialog.show({
       message:
         `"${selectedSet.title}" 세트를 삭제하시겠습니까?\n` +
-        '세트 안의 리테이크 항목은 사라지지 않고 세트 소속만 해제됩니다.',
+        (generalItems.length > 0
+          ? `씬에 연결된 항목은 사라지지 않고 세트 소속만 해제되지만, '전반' 항목 ${generalItems.length}개는 세트 밖에선 볼 수 없어 함께 삭제됩니다.`
+          : '세트 안의 리테이크 항목은 사라지지 않고 세트 소속만 해제됩니다.'),
       confirmLabel: '세트 삭제',
       tone: 'danger',
     });
     if (!ok) return;
+    // 전반 항목 먼저 삭제 → 세트 삭제(나머지 씬 매인 항목은 FK SET NULL 로 소속만 해제).
+    // preflight 로 권한은 보장됐지만, 일시적 실패(네트워크 등)가 나면 세트 삭제를 중단해
+    //   FK 가 setId 만 비워 고아가 되는 걸 막는다(코덱스 P2).
+    let anyFailed = false;
+    for (const r of generalItems) {
+      try {
+        await deleteRevision(r.id, r.sceneKey);
+      } catch (err) {
+        console.error('[리테이크 허브] 전반 항목 삭제 실패:', err);
+        anyFailed = true;
+      }
+    }
+    if (anyFailed) {
+      sonnerToast.error('일부 전반 항목을 삭제하지 못해 세트를 삭제하지 않았어요. 잠시 후 다시 시도해주세요.');
+      return;
+    }
     await removeRevisionSet(selectedSet.id);
   };
 
@@ -363,6 +418,7 @@ export default function RetakeHubView() {
               aggregatorName={userNameOf(selectedSet.aggregatorId)}
               episodeLabel={episodeLabelOf(selectedSet.episodeNumber)}
               canManage={canManage}
+              onAddItem={() => setShowAdd(true)}
               onImport={() => setShowImport(true)}
               onDelete={handleDeleteSet}
             />
@@ -423,6 +479,20 @@ export default function RetakeHubView() {
             episodeLabelOf={episodeLabelOf}
             allUsers={allUsers}
             onClose={() => setShowImport(false)}
+          />
+        </Suspense>
+      )}
+
+      {showAdd && selectedSet && (
+        <Suspense fallback={null}>
+          <RevisionAddModal
+            key={selectedSet.id}
+            targetSet={selectedSet}
+            episodes={episodes}
+            episodeTitles={episodeTitles}
+            allUsers={allUsers}
+            currentUser={currentUser}
+            onClose={() => setShowAdd(false)}
           />
         </Suspense>
       )}
