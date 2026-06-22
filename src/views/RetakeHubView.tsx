@@ -39,6 +39,10 @@ const RevisionImportModal = lazy(() =>
   import('./retake-hub/RevisionImportModal').then((m) => ({ default: m.RevisionImportModal })),
 );
 
+const RevisionAddModal = lazy(() =>
+  import('./retake-hub/RevisionAddModal').then((m) => ({ default: m.RevisionAddModal })),
+);
+
 const TABS: { id: HubTab; label: string }[] = [
   { id: 'part', label: '파트별' },
   { id: 'assignee', label: '담당자별' },
@@ -133,6 +137,7 @@ function SetDetailHeader({
   aggregatorName,
   episodeLabel,
   canManage,
+  onAddItem,
   onImport,
   onDelete,
 }: {
@@ -141,6 +146,7 @@ function SetDetailHeader({
   aggregatorName: string | null;
   episodeLabel: string | null;
   canManage: boolean;
+  onAddItem: () => void;
   onImport: () => void;
   onDelete: () => void;
 }) {
@@ -162,8 +168,17 @@ function SetDetailHeader({
             )}
           </div>
         </div>
-        {/* 가져오기는 누구나(스펙 §9.4), 세트 삭제는 컴포지터급만. */}
+        {/* 항목 추가·가져오기는 누구나(스펙 §9.4), 세트 삭제는 컴포지터급만. */}
         <div className="shrink-0 flex items-center gap-2">
+          <button
+            type="button"
+            onClick={onAddItem}
+            className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg border border-accent/50 bg-accent/10 text-[11px] font-semibold text-accent hover:bg-accent/20 transition-all cursor-pointer"
+            title="이 세트에 새 항목 만들기"
+          >
+            <Plus size={12} strokeWidth={2.6} />
+            항목 추가
+          </button>
           <button
             type="button"
             onClick={onImport}
@@ -228,6 +243,7 @@ export default function RetakeHubView() {
   const [tab, setTab] = useState<HubTab>('part');
   const [showCreate, setShowCreate] = useState(false);
   const [showImport, setShowImport] = useState(false);
+  const [showAdd, setShowAdd] = useState(false);
 
   const canManage = isCompositorForCompositing(currentUser);
 
@@ -363,6 +379,7 @@ export default function RetakeHubView() {
               aggregatorName={userNameOf(selectedSet.aggregatorId)}
               episodeLabel={episodeLabelOf(selectedSet.episodeNumber)}
               canManage={canManage}
+              onAddItem={() => setShowAdd(true)}
               onImport={() => setShowImport(true)}
               onDelete={handleDeleteSet}
             />
@@ -423,6 +440,19 @@ export default function RetakeHubView() {
             episodeLabelOf={episodeLabelOf}
             allUsers={allUsers}
             onClose={() => setShowImport(false)}
+          />
+        </Suspense>
+      )}
+
+      {showAdd && selectedSet && (
+        <Suspense fallback={null}>
+          <RevisionAddModal
+            targetSet={selectedSet}
+            episodes={episodes}
+            episodeTitles={episodeTitles}
+            allUsers={allUsers}
+            currentUser={currentUser}
+            onClose={() => setShowAdd(false)}
           />
         </Suspense>
       )}
