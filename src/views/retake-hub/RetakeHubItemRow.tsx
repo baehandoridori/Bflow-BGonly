@@ -141,9 +141,17 @@ export function RetakeHubItemRow({ revision, allUsers, sideBarClass, reLabel }: 
       <span className={`rev-side-bar ${sideBarClass}`} aria-hidden />
 
       {/* ─── 접힘 행 ─── */}
-      <button
-        type="button"
+      {/* div(role=button) — 내용의 파일경로 칩(PathBadge=button)이 button 안에 중첩되는 잘못된 DOM 을 피한다(코덱스 P2). */}
+      <div
+        role="button"
+        tabIndex={0}
         onClick={() => setExpanded((v) => !v)}
+        onKeyDown={(e) => {
+          if ((e.key === 'Enter' || e.key === ' ') && e.target === e.currentTarget) {
+            e.preventDefault();
+            setExpanded((v) => !v);
+          }
+        }}
         className="w-full grid grid-cols-[4px_56px_1fr_auto_auto] items-center gap-2 px-2 py-2 text-left cursor-pointer hover:bg-bg-border/20 transition-colors"
       >
         <span aria-hidden />
@@ -151,8 +159,8 @@ export function RetakeHubItemRow({ revision, allUsers, sideBarClass, reLabel }: 
           {reLabel}
         </span>
 
-        {/* 내용 — 엔티티 칩, 1줄 클램프 */}
-        <span className="min-w-0 text-[13px] text-text-primary truncate">
+        {/* 내용 — 엔티티 칩, 1줄 클램프. 칩(경로/멘션) 클릭이 행 토글로 버블링되지 않게 막는다. */}
+        <span className="min-w-0 text-[13px] text-text-primary truncate" onClick={(e) => e.stopPropagation()}>
           <EntityText
             text={revision.description}
             userNames={entityUserNames}
@@ -189,7 +197,7 @@ export function RetakeHubItemRow({ revision, allUsers, sideBarClass, reLabel }: 
         >
           {statusCfg.label}
         </span>
-      </button>
+      </div>
 
       {/* ─── 인라인 확장 ─── */}
       <AnimatePresence initial={false}>
