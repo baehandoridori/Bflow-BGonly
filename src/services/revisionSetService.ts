@@ -103,8 +103,9 @@ async function changeRevisionSet(revisionId: string, setId: string | null): Prom
   const revStore = useRevisionStore.getState();
   const rev = revStore.revisions.find((r) => r.id === revisionId);
   if (!rev) {
-    console.warn('[리테이크 세트] 대상 리비전 없음 — 편입/해제 스킵:', revisionId);
-    return;
+    // 못 찾으면 throw — 무음 return 하면 가져오기 모달(Promise.allSettled)이 '성공'으로 오집계해
+    //   아무것도 안 바뀌었는데 "담았어요" 거짓 토스트가 뜬다(적대 검증 발견). 실패로 정확히 보고되게 한다.
+    throw new Error(`대상 리비전을 찾을 수 없습니다: ${revisionId}`);
   }
   revStore.updateRevisionOptimistic(rev.id, rev.sceneKey, { setId });
   try {
