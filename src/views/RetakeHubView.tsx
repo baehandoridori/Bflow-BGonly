@@ -29,6 +29,7 @@ import { computeSetProgress } from '@/utils/revisionSet';
 import { isGeneralRevisionSceneKey } from '@/utils/revisionGeneral';
 import { isCompositorForCompositing } from '@/utils/compositingLabels';
 import { ConfirmDialog } from '@/components/common/ConfirmDialog';
+import { toast as sonnerToast } from 'sonner';
 import type { CompRevision, CompRevisionSet } from '@/types';
 import { RetakeHubItemTable, type HubTab } from './retake-hub/RetakeHubItemTable';
 
@@ -318,12 +319,20 @@ export default function RetakeHubView() {
     });
     if (!ok) return;
     // 전반 항목 먼저 삭제 → 세트 삭제(나머지 씬 매인 항목은 FK SET NULL 로 소속만 해제).
+    // 삭제가 하나라도 실패하면(예: 남이 등록한 항목 — main 이 requester/admin 만 허용) 세트 삭제를 중단한다.
+    //   안 그러면 FK 가 그 전반 항목들의 setId 만 비워 영영 안 보이는 고아가 된다(코덱스 P2).
+    let anyFailed = false;
     for (const r of generalItems) {
       try {
         await deleteRevision(r.id, r.sceneKey);
       } catch (err) {
         console.error('[리테이크 허브] 전반 항목 삭제 실패:', err);
+        anyFailed = true;
       }
+    }
+    if (anyFailed) {
+      sonnerToast.error('내가 등록하지 않은 전반 항목이 있어 세트를 삭제하지 않았어요. 등록자나 관리자에게 요청해주세요.');
+      return;
     }
     await removeRevisionSet(selectedSet.id);
   };
