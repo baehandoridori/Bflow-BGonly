@@ -26,6 +26,7 @@ import { useRevisionStore } from '@/stores/useRevisionStore';
 import { useRevisionSetStore } from '@/stores/useRevisionSetStore';
 import { loadRevisionSets, removeRevisionSet, maybeAutoCompleteSet } from '@/services/revisionSetService';
 import { computeSetProgress } from '@/utils/revisionSet';
+import { isGeneralRevisionSceneKey } from '@/utils/revisionGeneral';
 import { isCompositorForCompositing } from '@/utils/compositingLabels';
 import { ConfirmDialog } from '@/components/common/ConfirmDialog';
 import type { CompRevision, CompRevisionSet } from '@/types';
@@ -236,6 +237,7 @@ export default function RetakeHubView() {
 
   const revisions = useRevisionStore((s) => s.revisions);
   const loadRevisions = useRevisionStore((s) => s.loadRevisions);
+  const deleteRevision = useRevisionStore((s) => s.deleteRevision);
   // 리비전 로드 완료 여부 — 자동완료 판정 가드(로드 전 빈 목록으로 done→open 오작동 방지).
   const revisionsLoaded = useRevisionStore((s) => s.lastLoadTime !== null && !s.isLoading);
   const dataConnected = useAppStore((s) => s.dataConnected);
@@ -302,14 +304,27 @@ export default function RetakeHubView() {
 
   const handleDeleteSet = async () => {
     if (!selectedSet) return;
+    // '전반' 항목은 세트 밖에선 볼 수 없어, 세트 삭제로 setId 만 풀리면 고아가 된다(코덱스 P2).
+    //   → 세트 삭제 시 함께 삭제한다. 씬 매인 항목은 씬 패널에 남으므로 소속만 해제.
+    const generalItems = selectedItems.filter((r) => isGeneralRevisionSceneKey(r.sceneKey));
     const ok = await ConfirmDialog.show({
       message:
         `"${selectedSet.title}" 세트를 삭제하시겠습니까?\n` +
-        '세트 안의 리테이크 항목은 사라지지 않고 세트 소속만 해제됩니다.',
+        (generalItems.length > 0
+          ? `씬에 연결된 항목은 사라지지 않고 세트 소속만 해제되지만, '전반' 항목 ${generalItems.length}개는 세트 밖에선 볼 수 없어 함께 삭제됩니다.`
+          : '세트 안의 리테이크 항목은 사라지지 않고 세트 소속만 해제됩니다.'),
       confirmLabel: '세트 삭제',
       tone: 'danger',
     });
     if (!ok) return;
+    // 전반 항목 먼저 삭제 → 세트 삭제(나머지 씬 매인 항목은 FK SET NULL 로 소속만 해제).
+    for (const r of generalItems) {
+      try {
+        await deleteRevision(r.id, r.sceneKey);
+      } catch (err) {
+        console.error('[리테이크 허브] 전반 항목 삭제 실패:', err);
+      }
+    }
     await removeRevisionSet(selectedSet.id);
   };
 
