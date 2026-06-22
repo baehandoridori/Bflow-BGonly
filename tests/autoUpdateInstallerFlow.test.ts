@@ -152,23 +152,28 @@ test('version center can recover from a suppressed/failed state via retry', asyn
   const types = await readRepoFile('src', 'types', 'index.ts');
   const modal = await readRepoFile('src', 'components', 'update', 'UpdateCenterModal.tsx');
 
-  // retry IPC clears the suppression marker, then reuses the shared cleanup helper to
-  // wipe the stale installer-pending (forcing prepareUpdate to fetch fresh), then re-checks
-  assert.match(main, /ipcMain\.handle\('update:retry'/);
-  assert.match(main, /localSwapSuppressedMarker\(\), \{ force: true \}/);
-  assert.match(
-    main,
-    /ipcMain\.handle\('update:retry'[\s\S]*cleanupInstallerPendingAndAttemptedMarker\(\)[\s\S]*runManualUpdateCheck\(\)/,
+  // retry IPC wipes the stale installer-pending first; only AFTER cleanup succeeds does it
+  // drop suppression and re-check. A locked/undeletable pending short-circuits to a failed
+  // status (no suppression release, no stale re-schedule) and asks the user to retry/install.
+  const retryBody = main.slice(
+    main.indexOf("ipcMain.handle('update:retry'"),
+    main.indexOf("ipcMain.handle('update:retry'") + 1200,
   );
+  assert.match(retryBody, /const pendingCleared = await cleanupInstallerPendingAndAttemptedMarker\(\)/);
+  assert.match(retryBody, /if \(!pendingCleared\)[\s\S]*status:\s*'failed'[\s\S]*return info/);
+  // suppression is only cleared on the success path, which sits after the early failed return
+  assert.match(retryBody, /if \(!pendingCleared\)[\s\S]*localSwapSuppressedMarker\(\), \{ force: true \}[\s\S]*runManualUpdateCheck\(\)/);
 
-  // the shared cleanup only drops the attempted marker after the pending dir is actually gone,
-  // so a locked/undeletable pending still gets reported + cleaned on the next launch
+  // the shared cleanup reports whether the pending dir actually went away, and only drops the
+  // attempted marker once it did — so a locked pending still gets reported + cleaned next launch
   const cleanupBody = main.slice(
     main.indexOf('async function cleanupInstallerPendingAndAttemptedMarker'),
     main.indexOf('async function cleanupInstallerPendingAndAttemptedMarker') + 800,
   );
+  assert.match(cleanupBody, /Promise<boolean>/);
   assert.match(cleanupBody, /localInstallerPendingDir\(\), \{ recursive: true, force: true \}/);
   assert.match(cleanupBody, /if \(pendingCleaned\)[\s\S]*localInstallerAttemptedMarker/);
+  assert.match(cleanupBody, /return pendingCleaned/);
 
   // exposed through preload + types + the modal action
   assert.match(preload, /update:retry/);

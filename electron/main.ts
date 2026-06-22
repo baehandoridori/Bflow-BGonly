@@ -997,19 +997,32 @@ ipcMain.handle('update:check-now', () => runManualUpdateCheck());
  * download 경로가 정리하므로 별도 처리 불필요.)
  */
 ipcMain.handle('update:retry', async () => {
+  // 실패했던 stale installer-pending을 먼저 비운다. 정리에 성공해야만 suppression을 풀고
+  // 새 버전을 다시 받는다.
+  // - 지우지 않으면 prepareUpdate가 readPendingUpdateInfo에서 기존 ready pending을 먼저
+  //   반환해, 실패 원인이던 같은 installer를 그대로 재사용/재예약한다 (Codex 1·3차 P2).
+  // - pending 정리가 실패하면(파일 잠김 등) suppression을 그대로 두고 사용자에게 안내한다.
+  //   이때 .installer-attempted도 유지되어(헬퍼 가드) 다음 시작 시 stale을 다시 정리한다 (Codex 2차 P2).
+  const pendingCleared = await cleanupInstallerPendingAndAttemptedMarker();
+  if (!pendingCleared) {
+    const own = app.getVersion();
+    const info: UpdateInfo = {
+      status: 'failed',
+      currentVersion: own,
+      latestVersion: own,
+      buildAt: '',
+      ready: false,
+      releaseNotes: [],
+      message: '받아둔 설치 파일을 정리하지 못했어요. 다른 프로그램이 잡고 있을 수 있으니, 잠시 후 다시 시도하거나 안내대로 설치 파일을 직접 실행해 주세요.',
+    };
+    publishUpdateInfo(info);
+    return info;
+  }
   try {
     await fs.promises.rm(localSwapSuppressedMarker(), { force: true });
   } catch (err) {
     console.warn('[autoUpdate] retry: suppression marker 정리 실패 (무시):', err);
   }
-  // 실패했던 stale installer-pending을 비워 fresh download를 강제한다.
-  // (지우지 않으면 prepareUpdate가 readPendingUpdateInfo에서 기존 ready pending을 먼저
-  //  반환해 fresh-download cleanup에 도달하지 못하고, 실패 원인이던 같은 installer를
-  //  재사용한다 — Codex 1차 P2.)
-  // 단, pending 정리가 실패하면(파일 잠김 등) .installer-attempted를 남겨야 다음 시작 시
-  // notifyAndCleanupOnInstallerFailure가 그 stale을 다시 보고/정리할 수 있다. 이
-  // "성공 시에만 attempted 제거" 가드를 가진 기존 정리 헬퍼를 그대로 재사용한다 — Codex 2차 P2.
-  await cleanupInstallerPendingAndAttemptedMarker();
   return runManualUpdateCheck();
 });
 
@@ -3670,7 +3683,7 @@ async function cleanupPendingAndSwapAttemptedMarker(): Promise<void> {
   }
 }
 
-async function cleanupInstallerPendingAndAttemptedMarker(): Promise<void> {
+async function cleanupInstallerPendingAndAttemptedMarker(): Promise<boolean> {
   let pendingCleaned = false;
   try {
     await fs.promises.rm(localInstallerPendingDir(), { recursive: true, force: true });
@@ -3683,6 +3696,7 @@ async function cleanupInstallerPendingAndAttemptedMarker(): Promise<void> {
       await fs.promises.unlink(localInstallerAttemptedMarker());
     } catch { /* 무시 */ }
   }
+  return pendingCleaned;
 }
 
 // macOS: open-url 이벤트
