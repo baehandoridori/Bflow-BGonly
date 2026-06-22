@@ -79,6 +79,7 @@
 - 새로고침 중에는 기존 표시 내용을 고정해 모달 레이아웃이 흔들리지 않게 한다.
 - 최신 3개 업데이트 내역은 기본 표시하고, 이전 내역은 `이전 업데이트 내역 N개 보기`로 펼친다.
 - `DEVLOG/update-notes.json`의 과거 항목은 사용자에게 보이는 기록이므로 삭제하지 않는다.
+- (v1.44.2) 이전 적용 실패로 `자동 중단`(suppressed) 상태가 되면 모달 푸터의 주 버튼이 `다시 시도`로 바뀐다. 누르면 `update:retry` IPC가 `.swap-suppressed`/`.installer-attempted` 표식을 지우고 즉시 재확인해 자동 업데이트를 재개시킨다. `새로고침`만으로는 같은 버전에서 suppression이 풀리지 않으므로, 사용자가 앱 안에서 빠져나오는 경로는 `다시 시도`다.
 
 ---
 
@@ -196,6 +197,7 @@ Get-Content -LiteralPath $log -Tail 40
 | 모달이 계속 새로고침됨 | `UpdateCenterModal.tsx`에 open 시 자동 `handleRefresh()`가 있는지 확인 | 현재 정책은 버튼 클릭 때만 확인 |
 | 이전 업데이트 내역이 안 보임 | `manifest.json.releaseNotes` 길이 확인 | `generate-manifest.js`가 내역을 자르지 않아야 함 |
 | G드라이브 배포 직후 감지 실패 | 원격 `manifest.json`, `BFLOW-Setup.exe` 해시/크기 확인 | manifest가 마지막에 올라갔는지 확인 |
+| 업데이트가 `자동 중단`(suppressed)으로 멈춤 | `%LOCALAPPDATA%\Bflow-BGonly\.swap-suppressed`(content=설치 버전) 존재 여부 | 적용 실패 후 영구 suppression. 모달 `다시 시도`(v1.44.2~) 또는 설치 파일 직접 실행으로 해제. 다른 버전 설치 시 own 버전이 바뀌면 자동 정리 |
 
 ---
 

@@ -146,6 +146,26 @@ test('version center is always reachable and can refresh update state', async ()
   assert.match(main, /update:check-now/);
 });
 
+test('version center can recover from a suppressed/failed state via retry', async () => {
+  const main = await readRepoFile('electron', 'main.ts');
+  const preload = await readRepoFile('electron', 'preload.ts');
+  const types = await readRepoFile('src', 'types', 'index.ts');
+  const modal = await readRepoFile('src', 'components', 'update', 'UpdateCenterModal.tsx');
+
+  // retry IPC clears the suppression/attempted markers, then re-checks
+  assert.match(main, /update:retry/);
+  assert.match(main, /localSwapSuppressedMarker\(\), \{ force: true \}/);
+  assert.match(main, /localInstallerAttemptedMarker\(\), \{ force: true \}/);
+  assert.match(main, /ipcMain\.handle\('update:retry'[\s\S]*runManualUpdateCheck\(\)/);
+
+  // exposed through preload + types + the modal action
+  assert.match(preload, /update:retry/);
+  assert.match(types, /retryUpdate\?: \(\) => Promise<UpdateInfo \| null>/);
+  assert.match(modal, /retryUpdate/);
+  assert.match(modal, /onClick=\{handleRetry\}/);
+  assert.match(modal, /다시 시도/);
+});
+
 test('version center only checks updates from the refresh button', async () => {
   const modal = await readRepoFile('src', 'components', 'update', 'UpdateCenterModal.tsx');
 
