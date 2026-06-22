@@ -374,6 +374,11 @@ export function WidgetPopup({ widgetId, extraParams }: { widgetId: string; extra
         return;
       }
 
+      if (table === 'comp_revision_sets') {
+        window.dispatchEvent(new Event('bflow:revision-sets-invalidated'));
+        return;
+      }
+
       // 그 외 → 디바운스 full reload
       if (_reloadCooldown) {
         if (reloadTimer) clearTimeout(reloadTimer);

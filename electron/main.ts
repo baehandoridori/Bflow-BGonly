@@ -1160,6 +1160,12 @@ import {
   addRevision as sbAddRevision,
   updateRevision as sbUpdateRevision,
   deleteRevision as sbDeleteRevision,
+  readAllRevisionSets as sbReadRevisionSets,
+  addRevisionSet as sbAddRevisionSet,
+  updateRevisionSet as sbUpdateRevisionSet,
+  deleteRevisionSet as sbDeleteRevisionSet,
+  type AddRevisionSetInput,
+  type UpdateRevisionSetInput,
   readAllMetadata as sbReadAllMetadata,
   readMetadata as sbReadMetadata,
   writeMetadata as sbWriteMetadata,
@@ -2097,6 +2103,20 @@ ipcMain.handle('supabase:delete-revision', wrapIpc(async (_e: unknown, id: strin
   }
 }));
 
+// ─── Comp Revision Sets (리테이크 세트) ───
+ipcMain.handle('supabase:read-revision-sets', wrapIpc(async () => {
+  return sbReadRevisionSets();
+}));
+ipcMain.handle('supabase:add-revision-set', wrapIpc(async (_e: unknown, input: AddRevisionSetInput) => {
+  return sbAddRevisionSet(input);
+}));
+ipcMain.handle('supabase:update-revision-set', wrapIpc(async (_e: unknown, id: string, fields: UpdateRevisionSetInput) => {
+  return sbUpdateRevisionSet(id, fields);
+}));
+ipcMain.handle('supabase:delete-revision-set', wrapIpc(async (_e: unknown, id: string) => {
+  await sbDeleteRevisionSet(id);
+}));
+
 // ─── Metadata ───
 ipcMain.handle('supabase:read-all-metadata', wrapIpc(async () => {
   return sbReadAllMetadata();
@@ -2280,6 +2300,7 @@ function startSupabaseRealtime() {
     onSceneChange: (payload) => broadcastSupabaseEvent('scenes', payload),
     onCommentChange: (payload) => broadcastSupabaseEvent('comments', payload),
     onRevisionChange: (payload) => broadcastSupabaseEvent('comp_revisions', payload),
+    onRevisionSetChange: (payload) => broadcastSupabaseEvent('comp_revision_sets', payload),
     onEpisodeChange: (payload) => broadcastSupabaseEvent('episodes', payload),
     onPartChange: (payload) => broadcastSupabaseEvent('parts', payload),
     onActivityInsert: (payload) => {

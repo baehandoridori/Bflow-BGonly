@@ -11,6 +11,7 @@ export interface RealtimeCallbacks {
   onSceneChange: (payload: ChangePayload) => void;
   onCommentChange: (payload: ChangePayload) => void;
   onRevisionChange: (payload: ChangePayload) => void;
+  onRevisionSetChange?: (payload: ChangePayload) => void;
   onEpisodeChange: (payload: ChangePayload) => void;
   onPartChange: (payload: ChangePayload) => void;
   onActivityInsert: (payload: ChangePayload) => void;
@@ -46,6 +47,14 @@ function createChannel(callbacks: RealtimeCallbacks): RealtimeChannel {
       (payload) => {
         console.log('[Realtime] comp_revisions 이벤트 수신:', payload.eventType);
         callbacks.onRevisionChange(payload);
+      },
+    )
+    .on(
+      'postgres_changes',
+      { event: '*', schema: 'public', table: 'comp_revision_sets' },
+      (payload) => {
+        console.log('[Realtime] comp_revision_sets 이벤트 수신:', payload.eventType);
+        callbacks.onRevisionSetChange?.(payload);
       },
     )
     .on(

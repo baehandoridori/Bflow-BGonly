@@ -748,6 +748,18 @@ export async function deleteRevision(id: string, sceneKey: string): Promise<void
 }
 
 /**
+ * 리비전의 소속 세트(setId) 변경 — 세트 편입/해제 (리테이크 허브 5단계 Chunk D).
+ * setId 가 null 이면 해제. IPC 는 Record<string,string> 만 받으므로 null 은 빈 문자열로 직렬화
+ * (electron 측 nullableWhenEmpty 가 set_id 빈 문자열을 null 로 저장). 캐시/로컬에는 null 로 패치.
+ */
+export async function setRevisionSet(rev: CompRevision, setId: string | null): Promise<void> {
+  const now = new Date().toISOString();
+  await persistRevisionWorkflow(rev,
+    { setId: setId ?? '', updatedAt: now },
+    { setId: setId ?? null, updatedAt: now });
+}
+
+/**
  * 씬별 오픈 리테이크 수 계산 (뱃지용)
  */
 export async function getOpenRevisionCounts(): Promise<Record<string, number>> {

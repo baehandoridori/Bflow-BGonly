@@ -1,5 +1,5 @@
 import { useState, useRef, useCallback, useMemo, useEffect } from 'react';
-import { LayoutDashboard, Film, List, Users, CircleUser, GanttChart, CalendarDays, Palmtree, Clapperboard, MessageSquareWarning, Settings, PanelLeft } from 'lucide-react';
+import { LayoutDashboard, Film, List, Users, CircleUser, GanttChart, CalendarDays, Palmtree, Clapperboard, MessageSquareWarning, ListChecks, Settings, PanelLeft } from 'lucide-react';
 import { AnimatePresence } from 'framer-motion';
 import { useAppStore, type ViewMode } from '@/stores/useAppStore';
 import { useRevisionStore } from '@/stores/useRevisionStore';
@@ -43,6 +43,8 @@ const NAV_ITEMS: { id: ViewMode; label: string; icon: React.ReactNode }[] = [
   //   - 'compositing-revisions' : 기존 리테이크 보드 (CompositingView)
   { id: 'compositing', label: '컴포지팅', icon: <Clapperboard size={20} /> },
   { id: 'compositing-revisions', label: '리테이크', icon: <MessageSquareWarning size={20} /> },
+  // 리테이크 허브 5단계: 감독/취합자용 세트 허브 (RetakeHubView).
+  { id: 'retake-hub', label: '리테이크 허브', icon: <ListChecks size={20} /> },
   { id: 'settings', label: '설정', icon: <Settings size={20} /> },
 ];
 

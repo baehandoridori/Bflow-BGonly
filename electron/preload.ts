@@ -231,6 +231,15 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.invoke('supabase:update-revision', id, updates),
   supabaseDeleteRevision: (id: string) =>
     ipcRenderer.invoke('supabase:delete-revision', id),
+  // 리테이크 세트 (comp_revision_sets)
+  supabaseReadRevisionSets: () =>
+    ipcRenderer.invoke('supabase:read-revision-sets'),
+  supabaseAddRevisionSet: (input: unknown) =>
+    ipcRenderer.invoke('supabase:add-revision-set', input),
+  supabaseUpdateRevisionSet: (id: string, fields: unknown) =>
+    ipcRenderer.invoke('supabase:update-revision-set', id, fields),
+  supabaseDeleteRevisionSet: (id: string) =>
+    ipcRenderer.invoke('supabase:delete-revision-set', id),
   supabaseReadAllMetadata: () =>
     ipcRenderer.invoke('supabase:read-all-metadata'),
   supabaseReadMetadata: (type: string, key: string) =>
