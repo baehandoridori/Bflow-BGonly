@@ -107,6 +107,7 @@ async function changeRevisionSet(revisionId: string, setId: string | null): Prom
     //   아무것도 안 바뀌었는데 "담았어요" 거짓 토스트가 뜬다(적대 검증 발견). 실패로 정확히 보고되게 한다.
     throw new Error(`대상 리비전을 찾을 수 없습니다: ${revisionId}`);
   }
+  const prevSetId = rev.setId ?? null;
   revStore.updateRevisionOptimistic(rev.id, rev.sceneKey, { setId });
   try {
     await setRevisionSet(rev, setId);
@@ -115,6 +116,19 @@ async function changeRevisionSet(revisionId: string, setId: string | null): Prom
     await useRevisionStore.getState().loadRevisions();
     throw err;
   }
+  // 편입/해제로 영향받은 세트(이전·새) 자동완료를 즉시 재계산한다(코덱스 P2).
+  //   특히 다른 세트에 있던 항목을 가져오면 '이전' 세트가 변하는데, 마지막 항목을 빼가면 빈 세트가 되어
+  //   open 으로 복귀해야 한다(§9.5). 허브가 그 이전 세트를 보고 있지 않아도 반영되게 양쪽을 직접 재계산.
+  if (prevSetId && prevSetId !== setId) await recomputeSetCompletion(prevSetId);
+  if (setId) await recomputeSetCompletion(setId);
+}
+
+/** 한 세트의 현재 하위 항목으로 자동완료/복귀를 재계산 — 이동(편입/해제) 후 source·target 동기화. */
+async function recomputeSetCompletion(setId: string): Promise<void> {
+  const set = useRevisionSetStore.getState().sets.find((s) => s.id === setId);
+  if (!set) return;
+  const items = useRevisionStore.getState().revisions.filter((r) => r.setId === setId);
+  await maybeAutoCompleteSet(set, items);
 }
 
 /** 리비전을 세트에 편입 — 해당 리비전의 setId 를 setId 로 갱신. */
