@@ -1003,6 +1003,10 @@ export interface ElectronAPI {
   supabaseAddRevision: (id: string, partUuid: string, sceneId: string, revisionNo: number, status: string, priority: string, description: string, frameNo: string, imageUrl: string, department: string, lookupDepartment: string, requesterId: string, requesterName: string, assignee: string, createdAt: string, notifyUserIdsJson: string, assigneeIdsJson?: string) => Promise<void>;
   supabaseUpdateRevision: (id: string, updates: Record<string, string>) => Promise<void>;
   supabaseDeleteRevision: (id: string) => Promise<void>;
+  supabaseReadRevisionSets: () => Promise<CompRevisionSet[]>;
+  supabaseAddRevisionSet: (input: Omit<CompRevisionSet, 'id' | 'status' | 'createdAt' | 'updatedAt'>) => Promise<CompRevisionSet>;
+  supabaseUpdateRevisionSet: (id: string, fields: Partial<Pick<CompRevisionSet, 'title' | 'episodeNumber' | 'department' | 'aggregatorId' | 'status'>>) => Promise<CompRevisionSet>;
+  supabaseDeleteRevisionSet: (id: string) => Promise<void>;
   supabaseReadAllMetadata: () => Promise<unknown[]>;
   supabaseReadMetadata: (type: string, key: string) => Promise<unknown>;
   supabaseWriteMetadata: (type: string, key: string, value: string) => Promise<void>;

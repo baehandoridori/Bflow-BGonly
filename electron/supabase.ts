@@ -2013,6 +2013,118 @@ function mapRevision(r: Record<string, unknown>): SupabaseRevision & { sceneKey:
 }
 
 // ═══════════════════════════════════════════════
+// COMP_REVISION_SETS (리테이크 세트)
+// ═══════════════════════════════════════════════
+
+/** 리테이크 세트 (renderer CompRevisionSet 와 동형). */
+export interface SupabaseRevisionSet {
+  id: string;
+  title: string;
+  episodeNumber: number | null;
+  department: 'bg' | 'acting' | null;
+  aggregatorId: string | null;
+  status: 'open' | 'done';
+  createdBy: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/** 세트 추가 입력 — id/status/타임스탬프는 DB default 가 채운다. */
+export interface AddRevisionSetInput {
+  title: string;
+  episodeNumber?: number | null;
+  department?: 'bg' | 'acting' | null;
+  aggregatorId?: string | null;
+  createdBy?: string | null;
+}
+
+/** 세트 업데이트 입력 — 화이트리스트 필드만 (updated_at 은 트리거 자동). */
+export interface UpdateRevisionSetInput {
+  title?: string;
+  episodeNumber?: number | null;
+  department?: 'bg' | 'acting' | null;
+  aggregatorId?: string | null;
+  status?: 'open' | 'done';
+}
+
+function mapRevisionSet(r: Record<string, unknown>): SupabaseRevisionSet {
+  const rawEp = r.episode_number;
+  const episodeNumber = typeof rawEp === 'number' ? rawEp : null;
+  const rawDept = r.department;
+  const department = (rawDept === 'bg' || rawDept === 'acting') ? rawDept : null;
+  const storedStatus = r.status === 'done' ? 'done' : 'open';
+  return {
+    id: r.id as string,
+    title: (r.title as string) || '',
+    episodeNumber,
+    department,
+    aggregatorId: (r.aggregator_id as string | null) ?? null,
+    status: storedStatus,
+    createdBy: (r.created_by as string) || '',
+    createdAt: (r.created_at as string) || '',
+    updatedAt: (r.updated_at as string) || '',
+  };
+}
+
+/** 모든 리테이크 세트 읽기 */
+export async function readAllRevisionSets(): Promise<SupabaseRevisionSet[]> {
+  const { data, error } = await supabase
+    .from('comp_revision_sets')
+    .select('*')
+    .order('created_at');
+  throwIfError(error);
+  return (data || []).map(mapRevisionSet);
+}
+
+/** 리테이크 세트 추가 — id 는 DB default(gen_random_uuid), 저장 후 단건 조회해 map. */
+export async function addRevisionSet(input: AddRevisionSetInput): Promise<SupabaseRevisionSet> {
+  const { data, error } = await supabase
+    .from('comp_revision_sets')
+    .insert({
+      title: input.title,
+      episode_number: input.episodeNumber ?? null,
+      department: input.department ?? null,
+      aggregator_id: input.aggregatorId ?? null,
+      created_by: input.createdBy ?? null,
+    })
+    .select('*')
+    .single();
+  throwIfError(error);
+  broadcastDataChange('comp_revision_sets', 'INSERT');
+  return mapRevisionSet(data as Record<string, unknown>);
+}
+
+/** 리테이크 세트 업데이트 — 화이트리스트 필드만 snake_case 매핑 (updated_at 은 트리거 자동). */
+export async function updateRevisionSet(
+  id: string,
+  fields: UpdateRevisionSetInput,
+): Promise<SupabaseRevisionSet> {
+  const dbUpdates: Record<string, unknown> = {};
+  if (fields.title !== undefined) dbUpdates.title = fields.title;
+  if (fields.episodeNumber !== undefined) dbUpdates.episode_number = fields.episodeNumber;
+  if (fields.department !== undefined) dbUpdates.department = fields.department;
+  if (fields.aggregatorId !== undefined) dbUpdates.aggregator_id = fields.aggregatorId;
+  if (fields.status !== undefined) dbUpdates.status = fields.status;
+
+  const { data, error } = await supabase
+    .from('comp_revision_sets')
+    .update(dbUpdates)
+    .eq('id', id)
+    .select('*')
+    .single();
+  throwIfError(error);
+  broadcastDataChange('comp_revision_sets', 'UPDATE');
+  return mapRevisionSet(data as Record<string, unknown>);
+}
+
+/** 리테이크 세트 삭제 — 하위 리비전의 set_id 는 FK ON DELETE SET NULL 로 자동 해제. */
+export async function deleteRevisionSet(id: string): Promise<void> {
+  const { error } = await supabase.from('comp_revision_sets').delete().eq('id', id);
+  throwIfError(error);
+  broadcastDataChange('comp_revision_sets', 'DELETE');
+}
+
+// ═══════════════════════════════════════════════
 // METADATA
 // ═══════════════════════════════════════════════
 

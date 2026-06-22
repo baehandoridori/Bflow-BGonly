@@ -3,7 +3,7 @@
  * Electron 없이 Vite dev server에서 앱을 테스트할 수 있게 함
  */
 
-import type { ElectronAPI, AppUser, Episode, Scene } from '@/types';
+import type { ElectronAPI, AppUser, Episode, Scene, CompRevisionSet } from '@/types';
 import { MOCK_EPISODES, MOCK_COMPOSITING_STATES, type MockCompositingRow } from './compositingMockSeed';
 import {
   buildDevPreviewCommentReadStates,
@@ -170,6 +170,11 @@ function getMockCommentReadStates(userId: string) {
 function getMockRevisionRows(): DevPreviewRevisionRow[] {
   return (localStore.__revisionRows as DevPreviewRevisionRow[] | undefined)
     ?? (localStore.__revisionRows = buildDevPreviewRevisionRows(MOCK_EPISODES)) as DevPreviewRevisionRow[];
+}
+
+function getMockRevisionSets(): CompRevisionSet[] {
+  return (localStore.__revisionSets as CompRevisionSet[] | undefined)
+    ?? (localStore.__revisionSets = []) as CompRevisionSet[];
 }
 
 function parseJsonStringArray(value?: string): string[] {
@@ -714,6 +719,37 @@ export function installDevElectronAPI(): void {
     supabaseDeleteRevision: async (id: string) => {
       localStore.__revisionRows = getMockRevisionRows().filter((revision) => revision.id !== id);
       window.dispatchEvent(new CustomEvent('bflow:revisions-invalidated'));
+    },
+    supabaseReadRevisionSets: async () => getMockRevisionSets(),
+    supabaseAddRevisionSet: async (input) => {
+      const now = new Date().toISOString();
+      const set = {
+        id: `mock-set-${Date.now()}`,
+        title: input.title,
+        episodeNumber: input.episodeNumber ?? null,
+        department: input.department ?? null,
+        aggregatorId: input.aggregatorId ?? null,
+        status: 'open' as const,
+        createdBy: input.createdBy,
+        createdAt: now,
+        updatedAt: now,
+      };
+      localStore.__revisionSets = [...getMockRevisionSets(), set];
+      return set;
+    },
+    supabaseUpdateRevisionSet: async (id, fields) => {
+      const sets = getMockRevisionSets();
+      let updated = sets.find((s) => s.id === id);
+      localStore.__revisionSets = sets.map((s) => {
+        if (s.id !== id) return s;
+        updated = { ...s, ...fields, updatedAt: new Date().toISOString() };
+        return updated;
+      });
+      if (!updated) throw new Error(`mock revision set not found: ${id}`);
+      return updated;
+    },
+    supabaseDeleteRevisionSet: async (id) => {
+      localStore.__revisionSets = getMockRevisionSets().filter((s) => s.id !== id);
     },
     supabaseReadAllMetadata: async () => getMockMetadataRows(),
     supabaseReadMetadata: async (type, key) =>
