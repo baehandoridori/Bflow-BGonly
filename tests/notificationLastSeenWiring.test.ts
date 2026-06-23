@@ -23,6 +23,8 @@ test('live notification cursors use source timestamps and never move backwards',
   assert.match(app, /setFeedbackLastSeenAt\(me\.id, myFeedbackCreatedAt \?\? new Date\(\)\.toISOString\(\)\)/);
   assert.match(app, /setLastSeenAt\(me\.id, newComment\.created_at \?\? new Date\(\)\.toISOString\(\)\)/);
   assert.match(app, /setLastSeenAt\(me\.id, commentCreatedAt \?\? new Date\(\)\.toISOString\(\)\)/);
+  assert.match(lastSeenTracker, /function fractionalCursorPart\(value: string\): string/);
+  assert.match(lastSeenTracker, /fractionalCursorPart\(next\) > fractionalCursorPart\(current\)/);
   assert.match(lastSeenTracker, /function setMonotonicIso\(key: string, isoString: string\)/);
   assert.match(lastSeenTracker, /if \(isIsoAfter\(isoString, current\)\)/);
 });

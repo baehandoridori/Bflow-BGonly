@@ -10,11 +10,19 @@
 
 const KEY_PREFIX = 'bflow_notification_last_seen_';
 
+function fractionalCursorPart(value: string): string {
+  const match = value.match(/\.(\d+)(?:Z|[+-]\d{2}:?\d{2})?$/);
+  return (match?.[1] ?? '').padEnd(9, '0').slice(0, 9);
+}
+
 function isIsoAfter(next: string, current: string | null): boolean {
   if (!current) return true;
   const nextTime = new Date(next).getTime();
   const currentTime = new Date(current).getTime();
   if (!Number.isFinite(nextTime) || !Number.isFinite(currentTime)) return true;
+  if (nextTime === currentTime) {
+    return fractionalCursorPart(next) > fractionalCursorPart(current);
+  }
   return nextTime > currentTime;
 }
 
