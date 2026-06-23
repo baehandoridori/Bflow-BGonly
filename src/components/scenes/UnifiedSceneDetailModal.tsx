@@ -668,6 +668,9 @@ export function UnifiedSceneDetailModal({
     : referencePanel
       ? 'w-[min(560px,calc(100vw-44rem))] min-w-[420px] shrink'
       : 'w-[min(720px,calc(100vw-26rem))]';
+  const bodyHeightClass = dockMode !== 'modal'
+    ? 'h-full max-h-full'
+    : 'h-[min(900px,92vh)]';
 
   // ── 본체 motion.div — modal/dock 모드 공통 ──
   const bodyEl = (
@@ -686,7 +689,11 @@ export function UnifiedSceneDetailModal({
           : { opacity: 0, scale: 0.96, y: 6 }
       }
       transition={{ duration: 0.18, ease: [0.16, 1, 0.3, 1] }}
-      className={`relative ${bodyWidthClass} h-[min(900px,92vh)] flex flex-col bg-bg-card border border-bg-border overflow-hidden`}
+      className={cn(
+        'relative flex flex-col bg-bg-card border border-bg-border overflow-hidden',
+        bodyWidthClass,
+        bodyHeightClass,
+      )}
       style={{ borderRadius: 18, boxShadow: '0 40px 80px rgba(0,0,0,0.5)' }}
     >
             {/* §3-1 배경 글로우 두 개 — 시그니처 */}
@@ -1090,7 +1097,7 @@ export function UnifiedSceneDetailModal({
           >
             {/* 참조 패널 좌측 도킹 — 본체보다 먼저 */}
             {referencePanel && referenceSide === 'left' && (
-              <div className="w-[min(560px,40vw)] shrink-0 max-h-full">{referencePanel}</div>
+              <div className="w-[min(560px,40vw)] h-[min(900px,92vh)] max-h-full min-h-0 shrink-0 overflow-hidden">{referencePanel}</div>
             )}
 
             {bodyEl}
@@ -1126,7 +1133,7 @@ export function UnifiedSceneDetailModal({
 
             {/* 참조 패널 우측 도킹 — 댓글 패널 뒤 */}
             {referencePanel && referenceSide === 'right' && (
-              <div className="w-[min(560px,40vw)] shrink-0 max-h-full">{referencePanel}</div>
+              <div className="w-[min(560px,40vw)] h-[min(900px,92vh)] max-h-full min-h-0 shrink-0 overflow-hidden">{referencePanel}</div>
             )}
           </motion.div>
         </motion.div>

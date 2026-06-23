@@ -2,6 +2,7 @@ import { useAppStore } from '@/stores/useAppStore';
 import { useDataStore } from '@/stores/useDataStore';
 import { useRevisionSetStore } from '@/stores/useRevisionSetStore';
 import type { NotificationType } from '@/stores/useNotificationStore';
+import { markNotificationDomainRead } from '@/utils/notificationDomainRead';
 import {
   buildNotificationSceneModalRequest,
   hasSceneTargetHint,
@@ -9,6 +10,8 @@ import {
   resolveNotificationSceneTarget,
 } from '@/utils/notificationSceneNavigation';
 import { navigateToSceneView } from '@/utils/sceneNavigationAction';
+
+export { markNotificationDomainRead } from '@/utils/notificationDomainRead';
 
 export interface NotificationSceneActionResult {
   attempted: boolean;
@@ -22,32 +25,6 @@ function asString(value: unknown): string | null {
 
 function metadataValue(metadata: Record<string, unknown> | undefined | null, key: string): unknown {
   return metadata ? metadata[key] : undefined;
-}
-
-export function markNotificationDomainRead(
-  type: NotificationType | string,
-  metadata?: Record<string, unknown> | null,
-) {
-  const reactionNotificationId = asString(metadataValue(metadata, 'reactionNotificationId'));
-  if (type === 'comment_reaction' && reactionNotificationId) {
-    import('@/services/supabaseService')
-      .then(({ markCommentReactionRead }) => markCommentReactionRead(reactionNotificationId))
-      .catch((err) => console.warn('[notificationSceneAction] markCommentReactionRead 실패:', err));
-  }
-
-  const feedbackNotificationId = asString(metadataValue(metadata, 'feedbackNotificationId'));
-  if (type === 'acting_feedback' && feedbackNotificationId) {
-    import('@/services/supabaseService')
-      .then(({ markFeedbackNotificationRead }) => markFeedbackNotificationRead(feedbackNotificationId))
-      .catch((err) => console.warn('[notificationSceneAction] markFeedbackNotificationRead 실패:', err));
-  }
-
-  const assignmentNotificationId = asString(metadataValue(metadata, 'assignmentNotificationId'));
-  if (type === 'scene_assignment' && assignmentNotificationId) {
-    import('@/services/supabaseService')
-      .then(({ markAssignmentNotificationRead }) => markAssignmentNotificationRead(assignmentNotificationId))
-      .catch((err) => console.warn('[notificationSceneAction] markAssignmentNotificationRead 실패:', err));
-  }
 }
 
 export function getNotificationSceneActionLabel(

@@ -186,6 +186,7 @@ export interface FeedbackBroadcastPayload {
   /** v1.25.5 코덱스 1차 P2 #3 fix: INSERT 결과의 (recipient_id → notification_id) 매핑.
    *  수신자가 자기 ID 로 notificationId 찾아 markRead 가능. */
   notificationIdsByRecipient?: Record<string, string>;
+  notificationCreatedAtByRecipient?: Record<string, string>;
   ts: number;
 }
 export function broadcastActingFeedbackRequest(payload: Omit<FeedbackBroadcastPayload, 'ts'>): void {
@@ -196,6 +197,7 @@ export function broadcastActingFeedbackRequest(payload: Omit<FeedbackBroadcastPa
  *  recipient_id 가 자기 user.id 와 같은 클라이언트만 토스트 표시. */
 export interface AssignmentBroadcastPayload {
   notificationId: string;
+  createdAt?: string;
   sceneUuid: string;
   sceneId: string;
   sheetName: string;

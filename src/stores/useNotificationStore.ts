@@ -4,6 +4,7 @@ import {
   getNotificationIdentity,
   prependNotificationDeduped,
 } from '../utils/notificationIdentity';
+import { markNotificationDomainRead } from '../utils/notificationDomainRead';
 
 // ─── 알림 타입 정의 ─────────────────────────────────
 /**
@@ -141,6 +142,13 @@ async function persistToDisk(notifications: AppNotification[]) {
   }
 }
 
+function syncDomainRead(notification: AppNotification) {
+  markNotificationDomainRead(
+    notification.type,
+    notification.metadata as Record<string, unknown> | undefined,
+  );
+}
+
 export const useNotificationStore = create<NotificationState>((set, get) => ({
   notifications: [],
   unreadCount: 0,
@@ -160,7 +168,10 @@ export const useNotificationStore = create<NotificationState>((set, get) => ({
   },
 
   markAsRead: (id) => {
-    const next = get().notifications.map((n) =>
+    const current = get().notifications;
+    const target = current.find((n) => n.id === id);
+    if (target && !target.isRead) syncDomainRead(target);
+    const next = current.map((n) =>
       n.id === id ? { ...n, isRead: true } : n
     );
     setNotifications(set, next);
@@ -168,18 +179,24 @@ export const useNotificationStore = create<NotificationState>((set, get) => ({
   },
 
   markAllAsRead: () => {
-    const next = get().notifications.map((n) => ({ ...n, isRead: true }));
+    const current = get().notifications;
+    current.filter((n) => !n.isRead).forEach(syncDomainRead);
+    const next = current.map((n) => ({ ...n, isRead: true }));
     setNotifications(set, next);
     persistToDisk(next);
   },
 
   removeNotification: (id) => {
-    const next = get().notifications.filter((n) => n.id !== id);
+    const current = get().notifications;
+    const target = current.find((n) => n.id === id);
+    if (target) syncDomainRead(target);
+    const next = current.filter((n) => n.id !== id);
     setNotifications(set, next);
     persistToDisk(next);
   },
 
   clearAll: () => {
+    get().notifications.forEach(syncDomainRead);
     setNotifications(set, []);
     persistToDisk([]);
   },

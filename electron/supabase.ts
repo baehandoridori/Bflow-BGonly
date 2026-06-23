@@ -734,10 +734,15 @@ export interface MissedFeedbackNotification {
 /** 알림 row INSERT — recipient 한 명당 한 row. broadcast 와 별개 영구 저장.
  *  v1.25.5 코덱스 1차 P2 #3 fix: INSERT 결과의 (recipient_id, id) 매핑을 반환 →
  *  broadcast payload 에 포함시켜 수신자가 자기 row ID 로 markRead 가능. */
+export interface FeedbackInsertResult {
+  id: string;
+  createdAt: string;
+}
+
 export async function insertActingFeedbackNotifications(
   payload: FeedbackNotificationPayload,
   recipientIds: string[],
-): Promise<Record<string, string>> {
+): Promise<Record<string, FeedbackInsertResult>> {
   if (recipientIds.length === 0) return {};
   const rows = recipientIds.map((rid) => ({
     sender_id: payload.senderId,
@@ -756,11 +761,11 @@ export async function insertActingFeedbackNotifications(
   const { data, error } = await supabase
     .from('acting_feedback_notifications')
     .insert(rows)
-    .select('id, recipient_id');
+    .select('id, recipient_id, created_at');
   throwIfError(error);
-  const map: Record<string, string> = {};
-  for (const r of (data ?? []) as Array<{ id: string; recipient_id: string }>) {
-    map[r.recipient_id] = r.id;
+  const map: Record<string, FeedbackInsertResult> = {};
+  for (const r of (data ?? []) as Array<{ id: string; recipient_id: string; created_at: string }>) {
+    map[r.recipient_id] = { id: r.id, createdAt: r.created_at };
   }
   return map;
 }
@@ -865,6 +870,7 @@ export interface AssignmentInsertResult {
   recipientId: string;
   recipientName: string;
   notificationId: string;
+  createdAt: string;
 }
 
 /** 알림 row INSERT — v1.25.8 코덱스 1차 P2 fix: comma-separated multi-assignee 지원.
@@ -934,11 +940,17 @@ export async function insertSceneAssignmentNotifications(
         prev_assignee: payload.prevAssignee || null,
         new_assignee: payload.newAssignee,
       })
-      .select('id')
+      .select('id, created_at')
       .single();
     if (insErr) throwIfError(insErr);
     if (!inserted) continue;
-    results.push({ recipientId, recipientName: name, notificationId: (inserted as { id: string }).id });
+    const row = inserted as { id: string; created_at: string };
+    results.push({
+      recipientId,
+      recipientName: name,
+      notificationId: row.id,
+      createdAt: row.created_at,
+    });
   }
   return results;
 }
