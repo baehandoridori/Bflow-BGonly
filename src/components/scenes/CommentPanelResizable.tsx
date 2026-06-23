@@ -108,7 +108,7 @@ export function CommentPanelResizable(props: CommentPanelResizableProps) {
   const effectiveWidth = liveWidth ?? width;
   const threadMaxWidth = getCommentThreadPanelMaxWidthForMainWidth(effectiveWidth);
   const effectiveThreadWidth = clampCommentThreadPanelWidth(liveThreadWidth ?? threadWidth, threadMaxWidth);
-  const threadFrameWidth = threadPanelOpen ? COMMENT_THREAD_PANEL_DEFAULT_WIDTH + COMMENT_THREAD_PANEL_GAP_WIDTH : 0;
+  const threadFrameWidth = threadPanelOpen ? effectiveThreadWidth + COMMENT_THREAD_PANEL_GAP_WIDTH : 0;
   const renderedWidth = effectiveWidth + threadFrameWidth;
   const secondaryKey =
     explicitSecondaryKey
