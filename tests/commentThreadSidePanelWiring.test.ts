@@ -73,6 +73,21 @@ test('reply buttons use the side thread opener for parent comments and replies',
   assert.doesNotMatch(commentPanel, /onClick=\{\(\) => setReplyTarget\(reply\)\}/);
 });
 
+test('side thread has its own composer and main composer stays top-level', () => {
+  assert.match(commentPanel, /const \[threadInput, setThreadInput\] = useState\(''\)/);
+  assert.match(commentPanel, /const \[threadSubmitting, setThreadSubmitting\] = useState\(false\)/);
+  assert.match(commentPanel, /const threadInputRef = useRef<HTMLTextAreaElement>\(null\)/);
+  assert.match(commentPanel, /threadInputRef\.current\?\.focus\(\)/);
+  assert.doesNotMatch(commentPanel, /setReplyTarget\(target\)/);
+  assert.doesNotMatch(commentPanel, /requestAnimationFrame\(\(\) => inputRef\.current\?\.focus\(\)\)/);
+  assert.match(commentPanel, /const handleThreadSubmit = async \(\) =>/);
+  assert.match(commentPanel, /parentCommentId: threadRoot\.id/);
+  assert.match(commentPanel, /data-comment-thread-input/);
+  assert.match(commentPanel, /placeholder="스레드에 댓글 입력\.\.\."/);
+  assert.match(commentPanel, /onClick=\{handleThreadSubmit\}/);
+  assert.match(commentPanel, /onClick=\{handleSubmit\}/);
+});
+
 test('UnifiedSceneDetailModal keeps the comment side panel visible with reference panels', () => {
   assert.match(unifiedSceneDetailModal, /primaryCommentKey && \(/);
   assert.doesNotMatch(unifiedSceneDetailModal, /primaryCommentKey && !referencePanel &&/);

@@ -279,6 +279,10 @@ export function CommentPanel({
 
   const { sheetName, sceneId } = useMemo(() => parseSceneKey(sceneKey), [sceneKey]);
   const effectiveSceneThreadKey = sceneThreadKey ?? sceneKey;
+  const sceneKeyRef = useRef(sceneKey);
+  useEffect(() => {
+    sceneKeyRef.current = sceneKey;
+  }, [sceneKey]);
 
   // 댓글 상태
   const [comments, setComments] = useState<SceneCommentWithSource[]>([]);
@@ -295,6 +299,8 @@ export function CommentPanel({
   const [taScrollTop, setTaScrollTop] = useState(0);
   const [focused, setFocused] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const [threadInput, setThreadInput] = useState('');
+  const [threadSubmitting, setThreadSubmitting] = useState(false);
   const [attachedImages, setAttachedImages] = useState<AttachedImage[]>([]);
   const [quickRevisionPickerOpen, setQuickRevisionPickerOpen] = useState(false);
   const [quickRevisionNotifyIds, setQuickRevisionNotifyIds] = useState<string[]>([]);
@@ -310,7 +316,12 @@ export function CommentPanel({
     setReplyTarget(null);
     setActiveThreadRootId(null);
     setLastThreadRootId(null);
+    setThreadInput('');
+    setThreadSubmitting(false);
   }, [sceneKey]);
+  useEffect(() => {
+    setThreadInput('');
+  }, [activeThreadRootId]);
   // v1.24.0: 부모 댓글 별 답글 접힘 상태 (기본 펼침 — 처음 진입 시 모두 펼친 상태).
   const [collapsedThreads, setCollapsedThreads] = useState<Set<string>>(new Set());
   const toggleThread = useCallback((parentId: string) => {
@@ -404,6 +415,7 @@ export function CommentPanel({
 
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  const threadInputRef = useRef<HTMLTextAreaElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const dragCounter = useRef(0);
@@ -418,8 +430,8 @@ export function CommentPanel({
       next.delete(threadRootId);
       return next;
     });
-    setReplyTarget(target);
-    requestAnimationFrame(() => inputRef.current?.focus());
+    setReplyTarget(null);
+    requestAnimationFrame(() => threadInputRef.current?.focus());
   }, [comments]);
 
   // ── 입력 카드 + textarea 한계 계산 ──
@@ -1284,6 +1296,78 @@ export function CommentPanel({
     () => activeThreadRoot ? [activeThreadRoot, ...activeThreadReplies] : [],
     [activeThreadRoot, activeThreadReplies],
   );
+  const canSubmitThread = !!activeThreadRoot && !!currentUser && !threadSubmitting && threadInput.trim().length > 0;
+  const handleThreadSubmit = async () => {
+    if (!canSubmitThread || !currentUser || !activeThreadRoot) return;
+
+    const threadRoot = activeThreadRoot;
+    const panelSceneKey = sceneKey;
+    const text = threadInput.trim();
+    const targetSceneKey = threadRoot.storageKey ?? threadRoot._sourceKey ?? sceneKey;
+    const mentions = extractMentions(text, userNames);
+    if (threadRoot.userName !== currentUser.name && !mentions.includes(threadRoot.userName)) {
+      mentions.push(threadRoot.userName);
+    }
+    const comment: SceneCommentWithSource = {
+      id: createUuid(),
+      userId: currentUser.id,
+      userName: currentUser.name,
+      text,
+      mentions,
+      images: [],
+      createdAt: new Date().toISOString(),
+      parentCommentId: threadRoot.id,
+      _sourceKey: targetSceneKey,
+    };
+
+    const prevComments = comments;
+    const next = [...comments, comment];
+    setThreadSubmitting(true);
+    setComments(next);
+    onCountChange?.(next.length);
+    setLastThreadRootId(threadRoot.id);
+    setCollapsedThreads((prev) => {
+      if (!prev.has(threadRoot.id)) return prev;
+      const opened = new Set(prev);
+      opened.delete(threadRoot.id);
+      return opened;
+    });
+    setThreadInput('');
+
+    try {
+      await addComment(targetSceneKey, comment);
+      markUnreadCommentsRead();
+
+      if (mentions.length > 0 && currentUser.slackId) {
+        const { sheetName: threadSheetName, sceneId: threadSceneId } = parseSceneKey(targetSceneKey);
+        const parts = threadSheetName.match(/^EP(\d+)_([A-Z])_/);
+        const epLabel = parts ? `EP.${parts[1].padStart(2, '0')}` : threadSheetName;
+        const partLabel = parts ? `${parts[2]}파트` : '';
+        for (const mentionedName of mentions) {
+          const target = users.find(u => u.name === mentionedName);
+          if (target?.slackId && target.slackId !== currentUser.slackId) {
+            sendMentionWebhook({
+              commentText: comment.text,
+              episodeLabel: epLabel,
+              sceneId: threadSceneId,
+              partLabel,
+              sheetName: threadSheetName,
+              authorSlackId: currentUser.slackId,
+              targetSlackId: target.slackId,
+            });
+          }
+        }
+      }
+    } catch (err) {
+      console.error('[스레드 댓글 추가 실패]', err);
+      if (!mountedRef.current || sceneKeyRef.current !== panelSceneKey) return;
+      setComments(prevComments);
+      onCountChange?.(prevComments.length);
+      setThreadInput(text);
+    } finally {
+      setThreadSubmitting(false);
+    }
+  };
   const canReopenLastThread = !!lastThreadRootId && !activeThreadRoot && comments.some((c) => c.id === lastThreadRootId);
 
   /** orphan 답글 — 부모가 visibleComments 에 없는 답글. 메인 흐름에 일반 댓글로 노출. */
@@ -2280,6 +2364,42 @@ export function CommentPanel({
                   </div>
                 );
               })}
+            </div>
+
+            <div className="shrink-0 border-t border-bg-border bg-bg-primary/80 px-3 py-3">
+              <div className="rounded-lg border border-bg-border/80 bg-bg-card/70 p-2 transition-colors focus-within:border-accent/50">
+                <textarea
+                  ref={threadInputRef}
+                  data-comment-thread-input
+                  value={threadInput}
+                  onChange={(event) => setThreadInput(event.target.value)}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter' && !event.shiftKey) {
+                      event.preventDefault();
+                      handleThreadSubmit();
+                    }
+                  }}
+                  placeholder="스레드에 댓글 입력..."
+                  rows={2}
+                  className="block min-h-[44px] w-full resize-none bg-transparent px-1 py-0.5 text-[11.5px] leading-relaxed text-text-primary outline-none placeholder:text-text-secondary/45"
+                />
+                <div className="mt-2 flex items-center justify-end">
+                  <button
+                    type="button"
+                    onClick={handleThreadSubmit}
+                    disabled={!canSubmitThread}
+                    className="inline-flex h-7 w-7 items-center justify-center rounded-md bg-accent text-white transition-colors hover:bg-accent-sub disabled:cursor-not-allowed disabled:opacity-30"
+                    title="스레드에 전송 (Enter)"
+                    aria-label="스레드에 전송"
+                  >
+                    {threadSubmitting ? (
+                      <div className="h-3 w-3 rounded-full border-2 border-white/30 border-t-white animate-spin" />
+                    ) : (
+                      <ArrowUp size={14} strokeWidth={2.5} />
+                    )}
+                  </button>
+                </div>
+              </div>
             </div>
           </motion.aside>
           </Fragment>
