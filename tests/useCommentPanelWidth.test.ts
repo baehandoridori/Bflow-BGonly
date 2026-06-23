@@ -5,6 +5,7 @@ import {
   computeAutoCommentPanelWidth,
   computeCommentPanelResizeWidth,
   computeCommentThreadPanelResizeWidth,
+  getCommentThreadPanelMaxWidthForMainWidth,
 } from '../src/utils/commentPanelResize.ts';
 
 test('viewport=1440 count=0 → base=Math.min(480, 1440*0.26)=374.4', () => {
@@ -75,4 +76,10 @@ test('스레드 칸 경계 드래그는 왼쪽으로 끌 때 스레드 폭이 �
 test('스레드 칸 드래그 폭은 읽기 가능한 범위 안으로 제한된다', () => {
   assert.equal(computeCommentThreadPanelResizeWidth(340, 1000, 0), 560);
   assert.equal(computeCommentThreadPanelResizeWidth(340, 1000, 2000), 260);
+});
+
+test('스레드 칸 드래그 폭은 현재 댓글 본문 최소 폭을 침범하지 않는다', () => {
+  assert.equal(getCommentThreadPanelMaxWidthForMainWidth(320), 380);
+  assert.equal(getCommentThreadPanelMaxWidthForMainWidth(560), 560);
+  assert.equal(computeCommentThreadPanelResizeWidth(340, 1000, 0, getCommentThreadPanelMaxWidthForMainWidth(320)), 380);
 });

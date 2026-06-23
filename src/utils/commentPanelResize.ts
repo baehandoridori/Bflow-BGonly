@@ -11,8 +11,17 @@ export function clampCommentPanelWidth(px: number): number {
   return Math.max(COMMENT_PANEL_MIN_WIDTH, Math.min(COMMENT_PANEL_MAX_WIDTH, px));
 }
 
-export function clampCommentThreadPanelWidth(px: number): number {
-  return Math.max(COMMENT_THREAD_PANEL_MIN_WIDTH, Math.min(COMMENT_THREAD_PANEL_MAX_WIDTH, Math.round(px)));
+export function getCommentThreadPanelMaxWidthForMainWidth(mainWidth: number): number {
+  const maxWithinFrame = Math.round(mainWidth + COMMENT_THREAD_PANEL_DEFAULT_WIDTH - COMMENT_PANEL_MIN_WIDTH);
+  return Math.max(
+    COMMENT_THREAD_PANEL_MIN_WIDTH,
+    Math.min(COMMENT_THREAD_PANEL_MAX_WIDTH, maxWithinFrame),
+  );
+}
+
+export function clampCommentThreadPanelWidth(px: number, maxWidth = COMMENT_THREAD_PANEL_MAX_WIDTH): number {
+  const effectiveMaxWidth = Math.max(COMMENT_THREAD_PANEL_MIN_WIDTH, Math.min(COMMENT_THREAD_PANEL_MAX_WIDTH, maxWidth));
+  return Math.max(COMMENT_THREAD_PANEL_MIN_WIDTH, Math.min(effectiveMaxWidth, Math.round(px)));
 }
 
 /**
@@ -45,7 +54,8 @@ export function computeCommentThreadPanelResizeWidth(
   startWidth: number,
   startX: number,
   currentX: number,
+  maxWidth = COMMENT_THREAD_PANEL_MAX_WIDTH,
 ): number {
   const deltaX = currentX - startX;
-  return clampCommentThreadPanelWidth(startWidth - deltaX);
+  return clampCommentThreadPanelWidth(startWidth - deltaX, maxWidth);
 }

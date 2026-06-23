@@ -10,6 +10,7 @@ import {
   COMMENT_THREAD_PANEL_GAP_WIDTH,
   clampCommentThreadPanelWidth,
   computeCommentThreadPanelResizeWidth,
+  getCommentThreadPanelMaxWidthForMainWidth,
 } from '@/utils/commentPanelResize';
 
 /**
@@ -102,8 +103,10 @@ export function CommentPanelResizable(props: CommentPanelResizableProps) {
   });
 
   const effectiveWidth = liveWidth ?? width;
-  const effectiveThreadWidth = clampCommentThreadPanelWidth(liveThreadWidth ?? threadWidth);
-  const renderedWidth = effectiveWidth + (threadPanelOpen ? effectiveThreadWidth + COMMENT_THREAD_PANEL_GAP_WIDTH : 0);
+  const threadMaxWidth = getCommentThreadPanelMaxWidthForMainWidth(effectiveWidth);
+  const effectiveThreadWidth = clampCommentThreadPanelWidth(liveThreadWidth ?? threadWidth, threadMaxWidth);
+  const threadFrameWidth = threadPanelOpen ? COMMENT_THREAD_PANEL_DEFAULT_WIDTH + COMMENT_THREAD_PANEL_GAP_WIDTH : 0;
+  const renderedWidth = effectiveWidth + threadFrameWidth;
   const secondaryKey =
     explicitSecondaryKey
       ?? (counterpartSheetName && counterpartSceneNo != null
@@ -133,12 +136,12 @@ export function CommentPanelResizable(props: CommentPanelResizableProps) {
     const onMove = (moveEvent: MouseEvent) => {
       const state = threadDragStateRef.current;
       if (!state) return;
-      setLiveThreadWidth(computeCommentThreadPanelResizeWidth(state.startW, state.startX, moveEvent.clientX));
+      setLiveThreadWidth(computeCommentThreadPanelResizeWidth(state.startW, state.startX, moveEvent.clientX, threadMaxWidth));
     };
     const onUp = (upEvent: MouseEvent) => {
       const state = threadDragStateRef.current;
       const nextWidth = state
-        ? computeCommentThreadPanelResizeWidth(state.startW, state.startX, upEvent.clientX)
+        ? computeCommentThreadPanelResizeWidth(state.startW, state.startX, upEvent.clientX, threadMaxWidth)
         : effectiveThreadWidth;
       clearThreadDragListeners();
       setLiveThreadWidth(null);
@@ -150,7 +153,7 @@ export function CommentPanelResizable(props: CommentPanelResizableProps) {
     threadMouseUpRef.current = onUp;
     window.addEventListener('mousemove', onMove);
     window.addEventListener('mouseup', onUp);
-  }, [clearThreadDragListeners, effectiveThreadWidth]);
+  }, [clearThreadDragListeners, effectiveThreadWidth, threadMaxWidth]);
 
   const resetThreadWidth = useCallback(() => {
     setLiveThreadWidth(null);

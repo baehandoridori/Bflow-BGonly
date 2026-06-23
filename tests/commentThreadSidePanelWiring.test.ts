@@ -43,8 +43,10 @@ test('thread side panel has a draggable split handle and variable width', () => 
 test('CommentPanelResizable owns thread split width while keeping whole-panel resize handles', () => {
   assert.match(commentPanelResizable, /COMMENT_THREAD_PANEL_DEFAULT_WIDTH/);
   assert.match(commentPanelResizable, /computeCommentThreadPanelResizeWidth/);
+  assert.match(commentPanelResizable, /getCommentThreadPanelMaxWidthForMainWidth/);
   assert.match(commentPanelResizable, /const \[threadWidth, setThreadWidth\] = useState/);
-  assert.match(commentPanelResizable, /const renderedWidth = effectiveWidth \+ \(threadPanelOpen \? effectiveThreadWidth \+ COMMENT_THREAD_PANEL_GAP_WIDTH : 0\)/);
+  assert.match(commentPanelResizable, /const threadFrameWidth = threadPanelOpen \? COMMENT_THREAD_PANEL_DEFAULT_WIDTH \+ COMMENT_THREAD_PANEL_GAP_WIDTH : 0/);
+  assert.match(commentPanelResizable, /const renderedWidth = effectiveWidth \+ threadFrameWidth/);
   assert.match(commentPanelResizable, /threadWidth=\{effectiveThreadWidth\}/);
   assert.match(commentPanelResizable, /onThreadResizeMouseDown=\{handleThreadResizeMouseDown\}/);
   assert.match(commentPanelResizable, /data-comment-panel-resize-edge="inner"/);
