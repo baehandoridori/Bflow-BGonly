@@ -10,6 +10,7 @@ const settingsService = readFileSync('src/services/settingsService.ts', 'utf8');
 
 test('CommentPanel opens a separate side thread when replying', () => {
   assert.match(commentPanel, /const \[activeThreadRootId, setActiveThreadRootId\] = useState<string \| null>\(null\)/);
+  assert.match(commentPanel, /const activeThreadRootIdRef = useRef<string \| null>\(activeThreadRootId\);\s*activeThreadRootIdRef\.current = activeThreadRootId/);
   assert.match(commentPanel, /const openThreadReply = useCallback/);
   assert.match(commentPanel, /const threadRootId = threadTarget\.parentCommentId/);
   assert.match(commentPanel, /setActiveThreadRootId\(threadRootId\)/);
@@ -71,6 +72,58 @@ test('reply buttons use the side thread opener for parent comments and replies',
   assert.match(commentPanel, /onClick=\{\(\) => openThreadReply\(reply\)\}/);
   assert.doesNotMatch(commentPanel, /onClick=\{\(\) => setReplyTarget\(comment\)\}/);
   assert.doesNotMatch(commentPanel, /onClick=\{\(\) => setReplyTarget\(reply\)\}/);
+});
+
+test('side thread has its own composer and main composer stays top-level', () => {
+  assert.match(commentPanel, /const \[threadInput, setThreadInput\] = useState\(''\)/);
+  assert.match(commentPanel, /const \[threadSubmitting, setThreadSubmitting\] = useState\(false\)/);
+  assert.match(commentPanel, /const \[threadMentionTarget, setThreadMentionTarget\] = useState<SceneCommentWithSource \| null>\(null\)/);
+  assert.match(commentPanel, /const \[threadAttachedImages, setThreadAttachedImages\] = useState<AttachedImage\[\]>\(\[\]\)/);
+  assert.match(commentPanel, /const sceneKeyRef = useRef\(sceneKey\);\s*sceneKeyRef\.current = sceneKey/);
+  assert.match(commentPanel, /const threadInputValueRef = useRef\(''\)/);
+  assert.match(commentPanel, /const threadSubmitRequestRef = useRef<string \| null>\(null\)/);
+  assert.match(commentPanel, /const threadAttachedImagesRef = useRef<AttachedImage\[\]>\(\[\]\)/);
+  assert.match(commentPanel, /const threadInputRef = useRef<HTMLTextAreaElement>\(null\)/);
+  assert.match(commentPanel, /const threadFileInputRef = useRef<HTMLInputElement>\(null\)/);
+  assert.match(commentPanel, /useEffect\(\(\) => \{ threadAttachedImagesRef\.current = threadAttachedImages; \}, \[threadAttachedImages\]\)/);
+  assert.match(commentPanel, /setThreadMentionTarget\(target\)/);
+  assert.match(commentPanel, /threadInputRef\.current\?\.focus\(\)/);
+  assert.doesNotMatch(commentPanel, /setReplyTarget\(target\)/);
+  assert.doesNotMatch(commentPanel, /requestAnimationFrame\(\(\) => inputRef\.current\?\.focus\(\)\)/);
+  assert.match(commentPanel, /const handleThreadPaste = \(e: React\.ClipboardEvent\) =>/);
+  assert.match(commentPanel, /const handleThreadDrop = \(e: React\.DragEvent\) =>/);
+  assert.match(commentPanel, /dragCounter\.current = 0/);
+  assert.match(commentPanel, /setDraggingOver\(false\)/);
+  assert.match(commentPanel, /const handleThreadFileChange = \(e: React\.ChangeEvent<HTMLInputElement>\) =>/);
+  assert.match(commentPanel, /const threadUploadedImageUrls = threadAttachedImages\.map/);
+  assert.match(commentPanel, /const handleThreadSubmit = async \(\) =>/);
+  assert.match(commentPanel, /const submittedThreadAttached = threadAttachedImages/);
+  assert.match(commentPanel, /const submittedThreadImageUrls = threadUploadedImageUrls/);
+  assert.match(commentPanel, /const submitRequestId = comment\.id/);
+  assert.match(commentPanel, /threadSubmitRequestRef\.current = submitRequestId/);
+  assert.match(commentPanel, /const threadMentionTargetInCurrentThread =/);
+  assert.match(commentPanel, /const mentionTargetName = threadMentionTargetInCurrentThread/);
+  assert.match(commentPanel, /mentions\.push\(mentionTargetName\)/);
+  assert.match(commentPanel, /images: submittedThreadImageUrls/);
+  assert.match(commentPanel, /setThreadAttachedImages\(\[\]\)/);
+  assert.match(commentPanel, /threadAttachedImagesRef\.current = \[\]/);
+  assert.match(commentPanel, /activeThreadRootIdRef\.current === threadRoot\.id/);
+  assert.match(commentPanel, /threadSubmitRequestRef\.current === submitRequestId/);
+  assert.match(commentPanel, /threadSubmitRequestRef\.current = null/);
+  assert.match(commentPanel, /current\.filter\(\(c\) => c\.id !== comment\.id\)/);
+  assert.match(commentPanel, /threadAttachedImagesRef\.current\.length === 0/);
+  assert.match(commentPanel, /setThreadAttachedImages\(submittedThreadAttached\)/);
+  assert.match(commentPanel, /cleanupSubmittedThreadDraft\(\)/);
+  assert.match(commentPanel, /parentCommentId: threadRoot\.id/);
+  assert.match(commentPanel, /data-comment-thread-attachments/);
+  assert.match(commentPanel, /data-comment-thread-input/);
+  assert.match(commentPanel, /onPaste=\{handleThreadPaste\}/);
+  assert.match(commentPanel, /onDrop=\{handleThreadDrop\}/);
+  assert.match(commentPanel, /placeholder="스레드에 댓글 입력\.\.\. \(Ctrl\+V \/ 드래그로 이미지\)"/);
+  assert.match(commentPanel, /onChange=\{handleThreadFileChange\}/);
+  assert.match(commentPanel, /threadFileInputRef\.current\?\.click\(\)/);
+  assert.match(commentPanel, /onClick=\{handleThreadSubmit\}/);
+  assert.match(commentPanel, /onClick=\{handleSubmit\}/);
 });
 
 test('UnifiedSceneDetailModal keeps the comment side panel visible with reference panels', () => {

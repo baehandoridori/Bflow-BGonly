@@ -146,6 +146,17 @@ interface AttachedImage {
   error?: string;
 }
 
+function cleanupDraftImages(images: AttachedImage[], context: string) {
+  images.forEach((item) => {
+    try { URL.revokeObjectURL(item.previewUrl); } catch { /* ignore */ }
+    if (item.uploadedUrl) {
+      storageService.deleteImage(item.uploadedUrl).catch(err => {
+        console.warn(`${context} Storage 정리 실패:`, err);
+      });
+    }
+  });
+}
+
 // ─── sceneKey 분해 ─────────────────────────
 function parseSceneKey(sceneKey: string): { sheetName: string; sceneId: string } {
   const idx = sceneKey.lastIndexOf(':');
@@ -279,6 +290,8 @@ export function CommentPanel({
 
   const { sheetName, sceneId } = useMemo(() => parseSceneKey(sceneKey), [sceneKey]);
   const effectiveSceneThreadKey = sceneThreadKey ?? sceneKey;
+  const sceneKeyRef = useRef(sceneKey);
+  sceneKeyRef.current = sceneKey;
 
   // 댓글 상태
   const [comments, setComments] = useState<SceneCommentWithSource[]>([]);
@@ -295,6 +308,10 @@ export function CommentPanel({
   const [taScrollTop, setTaScrollTop] = useState(0);
   const [focused, setFocused] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const [threadInput, setThreadInput] = useState('');
+  const [threadSubmitting, setThreadSubmitting] = useState(false);
+  const [threadMentionTarget, setThreadMentionTarget] = useState<SceneCommentWithSource | null>(null);
+  const [threadAttachedImages, setThreadAttachedImages] = useState<AttachedImage[]>([]);
   const [attachedImages, setAttachedImages] = useState<AttachedImage[]>([]);
   const [quickRevisionPickerOpen, setQuickRevisionPickerOpen] = useState(false);
   const [quickRevisionNotifyIds, setQuickRevisionNotifyIds] = useState<string[]>([]);
@@ -305,12 +322,31 @@ export function CommentPanel({
   //   cross-scene parentCommentId 가 박혀 orphan 답글 + 잘못된 부모 작성자에게 알림 발송.
   const [replyTarget, setReplyTarget] = useState<SceneCommentWithSource | null>(null);
   const [activeThreadRootId, setActiveThreadRootId] = useState<string | null>(null);
+  const activeThreadRootIdRef = useRef<string | null>(activeThreadRootId);
+  activeThreadRootIdRef.current = activeThreadRootId;
   const [lastThreadRootId, setLastThreadRootId] = useState<string | null>(null);
   useEffect(() => {
     setReplyTarget(null);
     setActiveThreadRootId(null);
     setLastThreadRootId(null);
+    setThreadInput('');
+    threadInputValueRef.current = '';
+    cleanupDraftImages(threadAttachedImagesRef.current, '[스레드 댓글 scene 변경]');
+    setThreadAttachedImages([]);
+    threadAttachedImagesRef.current = [];
+    setThreadSubmitting(false);
+    threadSubmitRequestRef.current = null;
+    setThreadMentionTarget(null);
   }, [sceneKey]);
+  useEffect(() => {
+    setThreadInput('');
+    threadInputValueRef.current = '';
+    cleanupDraftImages(threadAttachedImagesRef.current, '[스레드 댓글 전환]');
+    setThreadAttachedImages([]);
+    threadAttachedImagesRef.current = [];
+    setThreadSubmitting(false);
+    threadSubmitRequestRef.current = null;
+  }, [activeThreadRootId]);
   // v1.24.0: 부모 댓글 별 답글 접힘 상태 (기본 펼침 — 처음 진입 시 모두 펼친 상태).
   const [collapsedThreads, setCollapsedThreads] = useState<Set<string>>(new Set());
   const toggleThread = useCallback((parentId: string) => {
@@ -404,6 +440,11 @@ export function CommentPanel({
 
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  const threadInputValueRef = useRef('');
+  const threadSubmitRequestRef = useRef<string | null>(null);
+  const threadAttachedImagesRef = useRef<AttachedImage[]>([]);
+  const threadInputRef = useRef<HTMLTextAreaElement>(null);
+  const threadFileInputRef = useRef<HTMLInputElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const dragCounter = useRef(0);
@@ -418,8 +459,9 @@ export function CommentPanel({
       next.delete(threadRootId);
       return next;
     });
-    setReplyTarget(target);
-    requestAnimationFrame(() => inputRef.current?.focus());
+    setReplyTarget(null);
+    setThreadMentionTarget(target);
+    requestAnimationFrame(() => threadInputRef.current?.focus());
   }, [comments]);
 
   // ── 입력 카드 + textarea 한계 계산 ──
@@ -711,6 +753,7 @@ export function CommentPanel({
       const replyFocusThread = buildCommentReplyTarget(comments, target);
       const threadRootId = replyFocusThread.parentCommentId;
       if (!threadRootId) return;
+      setThreadMentionTarget(null);
       setActiveThreadRootId(threadRootId);
       setLastThreadRootId(threadRootId);
       setCollapsedThreads((prev) => {
@@ -781,6 +824,7 @@ export function CommentPanel({
   // 빈 deps 의 cleanup 은 초기 렌더 값만 capture 하므로 ref 가 필수.
   const attachedImagesRef = useRef<AttachedImage[]>([]);
   useEffect(() => { attachedImagesRef.current = attachedImages; }, [attachedImages]);
+  useEffect(() => { threadAttachedImagesRef.current = threadAttachedImages; }, [threadAttachedImages]);
   const inputValueRef = useRef('');
   useEffect(() => { inputValueRef.current = input; }, [input]);
 
@@ -819,6 +863,7 @@ export function CommentPanel({
           });
         }
       });
+      cleanupDraftImages(threadAttachedImagesRef.current, '[스레드 댓글 패널 unmount]');
     };
   }, []);
 
@@ -939,6 +984,84 @@ export function CommentPanel({
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(e.target.files || []).filter(f => f.type.startsWith('image/'));
     (quickRevisionActive ? files.slice(0, 1) : files).forEach(addAttachedImageFromBlob);
+    e.target.value = '';
+  };
+
+  const uploadThreadAttachedImage = useCallback(async (id: string, file: File | Blob) => {
+    try {
+      const base64 = await resizeBlob(file, 800, 0.8);
+      const result = await storageService.uploadImage(sheetName, sceneId, 'comment', base64);
+      if (result.ok && result.url) {
+        const url = result.url;
+        if (!mountedRef.current) {
+          storageService.deleteImage(url).catch(err => {
+            console.warn('[스레드 댓글 이미지 unmount race] 정리 실패:', err);
+          });
+          return;
+        }
+        setThreadAttachedImages(prev => {
+          const exists = prev.some(a => a.id === id);
+          if (!exists) {
+            storageService.deleteImage(url).catch(err => {
+              console.warn('[스레드 댓글 이미지 race] 사용자 제거 후 도착한 업로드 객체 정리 실패:', err);
+            });
+            return prev;
+          }
+          return prev.map(a =>
+            a.id === id ? { ...a, uploadedUrl: url, uploading: false } : a
+          );
+        });
+      } else {
+        throw new Error(result.error || '업로드 실패');
+      }
+    } catch (err) {
+      console.error('[스레드 댓글 이미지 업로드 실패]', err);
+      if (!mountedRef.current) return;
+      const msg = err instanceof Error ? err.message : String(err);
+      setThreadAttachedImages(prev => prev.map(a =>
+        a.id === id ? { ...a, uploading: false, error: msg } : a
+      ));
+    }
+  }, [sheetName, sceneId]);
+
+  const addThreadAttachedImageFromBlob = useCallback((file: File | Blob) => {
+    const id = createUuid();
+    const previewUrl = URL.createObjectURL(file);
+    setThreadAttachedImages(prev => [...prev, { id, previewUrl, uploading: true }]);
+    void uploadThreadAttachedImage(id, file);
+  }, [uploadThreadAttachedImage]);
+
+  const removeThreadAttachedImage = (id: string) => {
+    setThreadAttachedImages(prev => {
+      const target = prev.find(a => a.id === id);
+      cleanupDraftImages(target ? [target] : [], '[스레드 댓글 첨부 제거]');
+      return prev.filter(a => a.id !== id);
+    });
+  };
+
+  const handleThreadPaste = (e: React.ClipboardEvent) => {
+    const items = Array.from(e.clipboardData?.items || []);
+    const imageItems = items.filter(it => it.type.startsWith('image/'));
+    if (imageItems.length === 0) return;
+    e.preventDefault();
+    imageItems.forEach(it => {
+      const f = it.getAsFile();
+      if (f) addThreadAttachedImageFromBlob(f);
+    });
+  };
+
+  const handleThreadDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    dragCounter.current = 0;
+    setDraggingOver(false);
+    const files = Array.from(e.dataTransfer.files || []).filter(f => f.type.startsWith('image/'));
+    files.forEach(addThreadAttachedImageFromBlob);
+  };
+
+  const handleThreadFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(e.target.files || []).filter(f => f.type.startsWith('image/'));
+    files.forEach(addThreadAttachedImageFromBlob);
     e.target.value = '';
   };
 
@@ -1284,6 +1407,130 @@ export function CommentPanel({
     () => activeThreadRoot ? [activeThreadRoot, ...activeThreadReplies] : [],
     [activeThreadRoot, activeThreadReplies],
   );
+  const threadHasUploadingImage = threadAttachedImages.some(a => a.uploading);
+  const threadUploadedImageUrls = threadAttachedImages.map(a => a.uploadedUrl).filter((u): u is string => !!u);
+  const canSubmitThread =
+    !!activeThreadRoot
+    && !!currentUser
+    && !threadSubmitting
+    && !threadHasUploadingImage
+    && (threadInput.trim().length > 0 || threadUploadedImageUrls.length > 0);
+  const handleThreadSubmit = async () => {
+    if (!canSubmitThread || !currentUser || !activeThreadRoot) return;
+
+    const threadRoot = activeThreadRoot;
+    const panelSceneKey = sceneKey;
+    const text = threadInput.trim();
+    const submittedThreadAttached = threadAttachedImages;
+    const submittedThreadImageUrls = threadUploadedImageUrls;
+    const targetSceneKey = threadRoot.storageKey ?? threadRoot._sourceKey ?? sceneKey;
+    const mentions = extractMentions(text, userNames);
+    const threadMentionReplyTarget = buildCommentReplyTarget(comments, threadMentionTarget);
+    const threadMentionTargetInCurrentThread =
+      threadMentionTarget?.id === threadRoot.id
+      || threadMentionReplyTarget.parentCommentId === threadRoot.id;
+    const mentionTargetName = threadMentionTargetInCurrentThread
+      ? threadMentionTarget!.userName
+      : threadRoot.userName;
+    if (mentionTargetName !== currentUser.name && !mentions.includes(mentionTargetName)) {
+      mentions.push(mentionTargetName);
+    }
+    const comment: SceneCommentWithSource = {
+      id: createUuid(),
+      userId: currentUser.id,
+      userName: currentUser.name,
+      text,
+      mentions,
+      images: submittedThreadImageUrls,
+      createdAt: new Date().toISOString(),
+      parentCommentId: threadRoot.id,
+      _sourceKey: targetSceneKey,
+    };
+
+    const next = [...comments, comment];
+    const submitRequestId = comment.id;
+    setThreadSubmitting(true);
+    threadSubmitRequestRef.current = submitRequestId;
+    setComments(next);
+    onCountChange?.(next.length);
+    setLastThreadRootId(threadRoot.id);
+    setCollapsedThreads((prev) => {
+      if (!prev.has(threadRoot.id)) return prev;
+      const opened = new Set(prev);
+      opened.delete(threadRoot.id);
+      return opened;
+    });
+    setThreadInput('');
+    threadInputValueRef.current = '';
+    setThreadAttachedImages([]);
+    threadAttachedImagesRef.current = [];
+
+    try {
+      await addComment(targetSceneKey, comment);
+      markUnreadCommentsRead();
+      setThreadMentionTarget((current) => current?.id === threadMentionTarget?.id ? null : current);
+      submittedThreadAttached.forEach((item) => {
+        try { URL.revokeObjectURL(item.previewUrl); } catch { /* ignore */ }
+      });
+
+      if (mentions.length > 0 && currentUser.slackId) {
+        const { sheetName: threadSheetName, sceneId: threadSceneId } = parseSceneKey(targetSceneKey);
+        const parts = threadSheetName.match(/^EP(\d+)_([A-Z])_/);
+        const epLabel = parts ? `EP.${parts[1].padStart(2, '0')}` : threadSheetName;
+        const partLabel = parts ? `${parts[2]}파트` : '';
+        for (const mentionedName of mentions) {
+          const target = users.find(u => u.name === mentionedName);
+          if (target?.slackId && target.slackId !== currentUser.slackId) {
+            sendMentionWebhook({
+              commentText: comment.text,
+              episodeLabel: epLabel,
+              sceneId: threadSceneId,
+              partLabel,
+              sheetName: threadSheetName,
+              authorSlackId: currentUser.slackId,
+              targetSlackId: target.slackId,
+            });
+          }
+        }
+      }
+    } catch (err) {
+      console.error('[스레드 댓글 추가 실패]', err);
+      const cleanupSubmittedThreadDraft = () => cleanupDraftImages(submittedThreadAttached, '[스레드 댓글 전송 실패]');
+      if (!mountedRef.current || sceneKeyRef.current !== panelSceneKey) {
+        cleanupSubmittedThreadDraft();
+        return;
+      }
+      setComments((current) => {
+        const withoutFailedComment = current.filter((c) => c.id !== comment.id);
+        if (withoutFailedComment.length !== current.length) {
+          onCountChange?.(withoutFailedComment.length);
+        }
+        return withoutFailedComment;
+      });
+      const canRestoreThreadDraft =
+        activeThreadRootIdRef.current === threadRoot.id
+        && threadInputValueRef.current.length === 0
+        && threadAttachedImagesRef.current.length === 0;
+      if (canRestoreThreadDraft) {
+        setThreadInput(text);
+        threadInputValueRef.current = text;
+        setThreadAttachedImages(submittedThreadAttached);
+        threadAttachedImagesRef.current = submittedThreadAttached;
+      } else {
+        cleanupSubmittedThreadDraft();
+      }
+    } finally {
+      if (
+        mountedRef.current
+        && sceneKeyRef.current === panelSceneKey
+        && activeThreadRootIdRef.current === threadRoot.id
+        && threadSubmitRequestRef.current === submitRequestId
+      ) {
+        setThreadSubmitting(false);
+        threadSubmitRequestRef.current = null;
+      }
+    }
+  };
   const canReopenLastThread = !!lastThreadRootId && !activeThreadRoot && comments.some((c) => c.id === lastThreadRootId);
 
   /** orphan 답글 — 부모가 visibleComments 에 없는 답글. 메인 흐름에 일반 댓글로 노출. */
@@ -1404,7 +1651,10 @@ export function CommentPanel({
         {canReopenLastThread && (
           <button
             type="button"
-            onClick={() => setActiveThreadRootId(lastThreadRootId)}
+            onClick={() => {
+              setThreadMentionTarget(null);
+              setActiveThreadRootId(lastThreadRootId);
+            }}
             title="마지막으로 보던 스레드 다시 열기"
             className="text-[10px] px-2 py-1 rounded transition-colors cursor-pointer font-bold text-text-secondary hover:text-text-primary hover:bg-bg-primary/50"
           >
@@ -2199,6 +2449,7 @@ export function CommentPanel({
                 type="button"
                 onClick={() => {
                   setLastThreadRootId(activeThreadRoot.id);
+                  setThreadMentionTarget(null);
                   setActiveThreadRootId(null);
                 }}
                 className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-text-secondary hover:bg-bg-border/60 hover:text-text-primary"
@@ -2280,6 +2531,115 @@ export function CommentPanel({
                   </div>
                 );
               })}
+            </div>
+
+            <div className="shrink-0 border-t border-bg-border bg-bg-primary/80 px-3 py-3">
+              <div
+                className="rounded-lg border border-bg-border/80 bg-bg-card/70 p-2 transition-colors focus-within:border-accent/50"
+                onDragEnter={(event) => {
+                  if (Array.from(event.dataTransfer?.types || []).includes('Files')) {
+                    event.preventDefault();
+                    event.stopPropagation();
+                  }
+                }}
+                onDragOver={(event) => {
+                  event.preventDefault();
+                  event.stopPropagation();
+                }}
+                onDrop={handleThreadDrop}
+              >
+                {threadMentionTarget && threadMentionTarget.id !== activeThreadRoot.id && (
+                  <div className="mb-1.5 flex items-center gap-1.5 px-1 text-[10.5px] font-medium text-accent">
+                    <CornerDownRight size={11} />
+                    <span className="min-w-0 truncate">{threadMentionTarget.userName}에게 답글</span>
+                  </div>
+                )}
+                {threadAttachedImages.length > 0 && (
+                  <div data-comment-thread-attachments className="mb-2 flex gap-2 overflow-x-auto pb-1">
+                    {threadAttachedImages.map((img) => (
+                      <div key={img.id} className="relative h-14 w-14 shrink-0">
+                        <img
+                          src={img.previewUrl}
+                          className="h-14 w-14 rounded-lg border border-bg-border object-cover"
+                          alt=""
+                        />
+                        {img.uploading && (
+                          <div className="absolute inset-0 flex items-center justify-center rounded-lg bg-black/40">
+                            <div className="h-3.5 w-3.5 rounded-full border-2 border-white/30 border-t-white animate-spin" />
+                          </div>
+                        )}
+                        {img.error && (
+                          <div className="absolute inset-0 flex items-center justify-center rounded-lg bg-red-500/40" title={`업로드 실패: ${img.error}`}>
+                            <X size={16} className="text-white" />
+                          </div>
+                        )}
+                        <button
+                          type="button"
+                          onClick={() => removeThreadAttachedImage(img.id)}
+                          className="absolute -right-1.5 -top-1.5 flex h-5 w-5 items-center justify-center rounded-full bg-red-500 text-[11px] text-white transition-transform hover:scale-110"
+                          style={{ border: '2px solid rgb(var(--comment-card-elev-rgb))' }}
+                          title="제거"
+                          aria-label="스레드 첨부 이미지 제거"
+                        >
+                          ×
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+                <textarea
+                  ref={threadInputRef}
+                  data-comment-thread-input
+                  value={threadInput}
+                  onChange={(event) => {
+                    setThreadInput(event.target.value);
+                    threadInputValueRef.current = event.target.value;
+                  }}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter' && !event.shiftKey) {
+                      event.preventDefault();
+                      handleThreadSubmit();
+                    }
+                  }}
+                  onPaste={handleThreadPaste}
+                  placeholder="스레드에 댓글 입력... (Ctrl+V / 드래그로 이미지)"
+                  rows={2}
+                  className="block min-h-[44px] w-full resize-none bg-transparent px-1 py-0.5 text-[11.5px] leading-relaxed text-text-primary outline-none placeholder:text-text-secondary/45"
+                />
+                <input
+                  ref={threadFileInputRef}
+                  type="file"
+                  accept="image/*"
+                  multiple
+                  hidden
+                  onChange={handleThreadFileChange}
+                />
+                <div className="mt-2 flex items-center justify-between">
+                  <button
+                    type="button"
+                    onClick={() => threadFileInputRef.current?.click()}
+                    className="inline-flex h-7 w-7 items-center justify-center rounded-md text-text-secondary transition-colors hover:bg-bg-border/60 hover:text-text-primary"
+                    title="스레드에 이미지 첨부"
+                    aria-label="스레드에 이미지 첨부"
+                  >
+                    <Paperclip size={14} />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleThreadSubmit}
+                    disabled={!canSubmitThread}
+                    className="inline-flex h-7 w-7 items-center justify-center rounded-md bg-accent text-white transition-colors hover:bg-accent-sub disabled:cursor-not-allowed disabled:opacity-30"
+                    title={threadHasUploadingImage ? '스레드 이미지 업로드 중...' : '스레드에 전송 (Enter)'}
+                    aria-label="스레드에 전송"
+                  >
+                    {threadSubmitting ? (
+                      <div className="h-3 w-3 rounded-full border-2 border-white/30 border-t-white animate-spin" />
+                    ) : (
+                      <ArrowUp size={14} strokeWidth={2.5} />
+                    )}
+                  </button>
+                </div>
+              </div>
             </div>
           </motion.aside>
           </Fragment>
