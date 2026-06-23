@@ -5,6 +5,7 @@ import { CommentPanelErrorBoundary } from '@/components/common/CommentPanelError
 import { useCommentPanelWidth, useCommentPanelResizer } from '@/hooks/useCommentPanelWidth';
 import { ResizeEdgeGlow } from '@/components/common/ResizeEdgeGlow';
 import { ResizeHandleParticles } from '@/components/common/ResizeHandleParticles';
+import { loadPreferences, savePreferences } from '@/services/settingsService';
 import {
   COMMENT_THREAD_PANEL_DEFAULT_WIDTH,
   COMMENT_THREAD_PANEL_GAP_WIDTH,
@@ -20,6 +21,8 @@ import {
  *   1. 사용자가 드래그로 저장한 값 (preferences.json.commentPanelWidthPx).
  *   2. 댓글 갯수 boost (6~15건 → +40, 16건+ → +80).
  *   3. viewport 기반 clamp(320, viewport*0.26, 480).
+ *
+ * 스레드 칸 너비는 사용자가 드래그로 조절하면 preferences.json.commentThreadPanelWidthPx 에 저장한다.
  *
  * 안쪽 경계와 바깥쪽 아웃라인이 드래그 핸들. 드래그 중에는 화면 즉시 갱신,
  * mouseup 시 1회만 disk 저장 (mousemove 마다 savePreferences 호출하면 I/O 폭주).
@@ -113,6 +116,38 @@ export function CommentPanelResizable(props: CommentPanelResizableProps) {
         ? `${counterpartSheetName}:${counterpartSceneNo}`
         : undefined);
 
+  useEffect(() => {
+    let cancelled = false;
+    loadPreferences().then((prefs) => {
+      if (cancelled) return;
+      const v = prefs?.commentThreadPanelWidthPx;
+      if (typeof v === 'number' && Number.isFinite(v)) {
+        setThreadWidth(clampCommentThreadPanelWidth(v));
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const setThreadWidthPersistent = useCallback(async (px: number | null) => {
+    if (px == null) {
+      setThreadWidth(COMMENT_THREAD_PANEL_DEFAULT_WIDTH);
+    } else {
+      const clamped = clampCommentThreadPanelWidth(px);
+      setThreadWidth(clamped);
+    }
+
+    const prefs = (await loadPreferences()) ?? {};
+    if (px == null) {
+      const { commentThreadPanelWidthPx: _omit, ...rest } = prefs;
+      await savePreferences(rest);
+    } else {
+      const clamped = clampCommentThreadPanelWidth(px);
+      await savePreferences({ ...prefs, commentThreadPanelWidthPx: clamped });
+    }
+  }, []);
+
   const clearThreadDragListeners = useCallback(() => {
     if (threadMouseMoveRef.current) window.removeEventListener('mousemove', threadMouseMoveRef.current);
     if (threadMouseUpRef.current) window.removeEventListener('mouseup', threadMouseUpRef.current);
@@ -146,19 +181,19 @@ export function CommentPanelResizable(props: CommentPanelResizableProps) {
       clearThreadDragListeners();
       setLiveThreadWidth(null);
       setThreadDragging(false);
-      setThreadWidth(nextWidth);
+      void setThreadWidthPersistent(nextWidth);
     };
 
     threadMouseMoveRef.current = onMove;
     threadMouseUpRef.current = onUp;
     window.addEventListener('mousemove', onMove);
     window.addEventListener('mouseup', onUp);
-  }, [clearThreadDragListeners, effectiveThreadWidth, threadMaxWidth]);
+  }, [clearThreadDragListeners, effectiveThreadWidth, setThreadWidthPersistent, threadMaxWidth]);
 
   const resetThreadWidth = useCallback(() => {
     setLiveThreadWidth(null);
-    setThreadWidth(COMMENT_THREAD_PANEL_DEFAULT_WIDTH);
-  }, []);
+    void setThreadWidthPersistent(null);
+  }, [setThreadWidthPersistent]);
 
   useEffect(() => {
     return () => {

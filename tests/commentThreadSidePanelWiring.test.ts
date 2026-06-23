@@ -6,6 +6,7 @@ const commentPanel = readFileSync('src/components/scenes/CommentPanel.tsx', 'utf
 const commentPanelResizable = readFileSync('src/components/scenes/CommentPanelResizable.tsx', 'utf8');
 const sceneDetailModal = readFileSync('src/components/scenes/SceneDetailModal.tsx', 'utf8');
 const unifiedSceneDetailModal = readFileSync('src/components/scenes/UnifiedSceneDetailModal.tsx', 'utf8');
+const settingsService = readFileSync('src/services/settingsService.ts', 'utf8');
 
 test('CommentPanel opens a separate side thread when replying', () => {
   assert.match(commentPanel, /const \[activeThreadRootId, setActiveThreadRootId\] = useState<string \| null>\(null\)/);
@@ -52,6 +53,16 @@ test('CommentPanelResizable owns thread split width while keeping whole-panel re
   assert.match(commentPanelResizable, /onThreadResizeMouseDown=\{handleThreadResizeMouseDown\}/);
   assert.match(commentPanelResizable, /data-comment-panel-resize-edge="inner"/);
   assert.match(commentPanelResizable, /data-comment-panel-resize-edge="outer"/);
+});
+
+test('CommentPanelResizable persists the last thread split width', () => {
+  assert.match(settingsService, /commentThreadPanelWidthPx\?: number/);
+  assert.match(commentPanelResizable, /loadPreferences, savePreferences/);
+  assert.match(commentPanelResizable, /prefs\?\.commentThreadPanelWidthPx/);
+  assert.match(commentPanelResizable, /commentThreadPanelWidthPx: clamped/);
+  assert.match(commentPanelResizable, /const \{ commentThreadPanelWidthPx: _omit, \.\.\.rest \} = prefs/);
+  assert.match(commentPanelResizable, /setThreadWidthPersistent\(nextWidth\)/);
+  assert.match(commentPanelResizable, /setThreadWidthPersistent\(null\)/);
 });
 
 test('reply buttons use the side thread opener for parent comments and replies', () => {
