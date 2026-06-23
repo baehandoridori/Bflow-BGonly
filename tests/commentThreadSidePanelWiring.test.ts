@@ -13,10 +13,23 @@ test('CommentPanel opens a separate side thread when replying', () => {
   assert.match(commentPanel, /setActiveThreadRootId\(threadRootId\)/);
   assert.match(commentPanel, /onThreadPanelOpenChange\?\.\(activeThreadRoot != null\)/);
   assert.doesNotMatch(commentPanel, /onThreadPanelOpenChange\?\.\(activeThreadRootId != null\)/);
+  assert.match(commentPanel, /comments\s*\n\s*\.filter\(\(c\) => c\.parentCommentId === activeThreadRoot\.id\)/);
+  assert.doesNotMatch(commentPanel, /activeThreadRoot \? repliesByParent\.get\(activeThreadRoot\.id\)/);
   assert.match(commentPanel, /data-comment-thread-side-panel/);
   assert.match(commentPanel, /스레드/);
   assert.match(commentPanel, /스레드 닫기/);
   assert.match(commentPanel, /스레드 다시 열기/);
+});
+
+test('main list and side thread reaction pickers are surface-specific', () => {
+  assert.match(commentPanel, /type CommentReactionPickerSurface = 'main' \| 'thread'/);
+  assert.match(commentPanel, /const \[reactionPicker, setReactionPicker\] = useState<CommentReactionPickerTarget \| null>\(null\)/);
+  assert.match(commentPanel, /reactionPicker\?\.surface === 'main' && reactionPicker\.commentId === comment\.id/);
+  assert.match(commentPanel, /reactionPicker\?\.surface === 'main' && reactionPicker\.commentId === reply\.id/);
+  assert.match(commentPanel, /reactionPicker\?\.surface === 'thread' && reactionPicker\.commentId === message\.id/);
+  assert.match(commentPanel, /setReactionPicker\(\{ commentId: comment\.id, surface: 'main' \}\)/);
+  assert.match(commentPanel, /setReactionPicker\(\{ commentId: message\.id, surface: 'thread' \}\)/);
+  assert.doesNotMatch(commentPanel, /pickerForCommentId/);
 });
 
 test('thread side panel has a draggable split handle and variable width', () => {

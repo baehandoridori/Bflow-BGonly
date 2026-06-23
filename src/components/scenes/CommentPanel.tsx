@@ -97,6 +97,13 @@ interface CommentPanelProps {
   onThreadResizeHoverChange?: (hover: boolean) => void;
 }
 
+type CommentReactionPickerSurface = 'main' | 'thread';
+
+interface CommentReactionPickerTarget {
+  commentId: string;
+  surface: CommentReactionPickerSurface;
+}
+
 export interface CommentPanelQuickRevisionContext {
   /** buildSceneKey() 로 만든 리테이크 canonical sceneKey */
   sceneKey: string;
@@ -279,7 +286,7 @@ export function CommentPanel({
   const [editText, setEditText] = useState('');
   // v1.26.0: 이모지 리액션 — commentId → reactions
   const [reactionsByCommentId, setReactionsByCommentId] = useState<Map<string, CommentReaction[]>>(new Map());
-  const [pickerForCommentId, setPickerForCommentId] = useState<string | null>(null);
+  const [reactionPicker, setReactionPicker] = useState<CommentReactionPickerTarget | null>(null);
   const pickerAnchorRef = useRef<Map<string, HTMLButtonElement>>(new Map());
 
   // 입력 상태
@@ -1266,8 +1273,12 @@ export function CommentPanel({
     onThreadPanelOpenChange?.(activeThreadRoot != null);
   }, [activeThreadRoot, onThreadPanelOpenChange]);
   const activeThreadReplies = useMemo(
-    () => activeThreadRoot ? repliesByParent.get(activeThreadRoot.id) ?? [] : [],
-    [activeThreadRoot, repliesByParent],
+    () => activeThreadRoot
+      ? comments
+        .filter((c) => c.parentCommentId === activeThreadRoot.id)
+        .sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime())
+      : [],
+    [activeThreadRoot, comments],
   );
   const activeThreadMessages = useMemo(
     () => activeThreadRoot ? [activeThreadRoot, ...activeThreadReplies] : [],
@@ -1708,9 +1719,9 @@ export function CommentPanel({
                       reactions={reactionsByCommentId.get(comment.id) ?? []}
                       currentUserId={currentUser?.id ?? null}
                       onToggle={handleReactionToggle}
-                      pickerOpen={pickerForCommentId === comment.id}
-                      onPickerOpen={() => setPickerForCommentId(comment.id)}
-                      onPickerClose={() => setPickerForCommentId(null)}
+                      pickerOpen={reactionPicker?.surface === 'main' && reactionPicker.commentId === comment.id}
+                      onPickerOpen={() => setReactionPicker({ commentId: comment.id, surface: 'main' })}
+                      onPickerClose={() => setReactionPicker(null)}
                     />
                     <ThreadReplyButton
                       aria-label={`답글 달기: ${comment.userName}`}
@@ -1868,9 +1879,9 @@ export function CommentPanel({
                               reactions={reactionsByCommentId.get(reply.id) ?? []}
                               currentUserId={currentUser?.id ?? null}
                               onToggle={handleReactionToggle}
-                              pickerOpen={pickerForCommentId === reply.id}
-                              onPickerOpen={() => setPickerForCommentId(reply.id)}
-                              onPickerClose={() => setPickerForCommentId(null)}
+                              pickerOpen={reactionPicker?.surface === 'main' && reactionPicker.commentId === reply.id}
+                              onPickerOpen={() => setReactionPicker({ commentId: reply.id, surface: 'main' })}
+                              onPickerClose={() => setReactionPicker(null)}
                               compact
                             />
                             <ThreadReplyButton
@@ -2255,9 +2266,9 @@ export function CommentPanel({
                         reactions={reactionsByCommentId.get(message.id) ?? []}
                         currentUserId={currentUser?.id ?? null}
                         onToggle={handleReactionToggle}
-                        pickerOpen={pickerForCommentId === message.id}
-                        onPickerOpen={() => setPickerForCommentId(message.id)}
-                        onPickerClose={() => setPickerForCommentId(null)}
+                        pickerOpen={reactionPicker?.surface === 'thread' && reactionPicker.commentId === message.id}
+                        onPickerOpen={() => setReactionPicker({ commentId: message.id, surface: 'thread' })}
+                        onPickerClose={() => setReactionPicker(null)}
                         compact
                       />
                       <ThreadReplyButton
