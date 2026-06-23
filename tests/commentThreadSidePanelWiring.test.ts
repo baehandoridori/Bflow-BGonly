@@ -77,14 +77,17 @@ test('side thread has its own composer and main composer stays top-level', () =>
   assert.match(commentPanel, /const \[threadInput, setThreadInput\] = useState\(''\)/);
   assert.match(commentPanel, /const \[threadSubmitting, setThreadSubmitting\] = useState\(false\)/);
   assert.match(commentPanel, /const \[threadMentionTarget, setThreadMentionTarget\] = useState<SceneCommentWithSource \| null>\(null\)/);
+  assert.match(commentPanel, /const threadInputValueRef = useRef\(''\)/);
   assert.match(commentPanel, /const threadInputRef = useRef<HTMLTextAreaElement>\(null\)/);
   assert.match(commentPanel, /setThreadMentionTarget\(target\)/);
   assert.match(commentPanel, /threadInputRef\.current\?\.focus\(\)/);
   assert.doesNotMatch(commentPanel, /setReplyTarget\(target\)/);
   assert.doesNotMatch(commentPanel, /requestAnimationFrame\(\(\) => inputRef\.current\?\.focus\(\)\)/);
   assert.match(commentPanel, /const handleThreadSubmit = async \(\) =>/);
-  assert.match(commentPanel, /const mentionTargetName = threadMentionTarget\?\.userName \?\? threadRoot\.userName/);
+  assert.match(commentPanel, /const threadMentionTargetInCurrentThread =/);
+  assert.match(commentPanel, /const mentionTargetName = threadMentionTargetInCurrentThread/);
   assert.match(commentPanel, /mentions\.push\(mentionTargetName\)/);
+  assert.match(commentPanel, /if \(threadInputValueRef\.current\.length === 0\)/);
   assert.match(commentPanel, /parentCommentId: threadRoot\.id/);
   assert.match(commentPanel, /data-comment-thread-input/);
   assert.match(commentPanel, /placeholder="스레드에 댓글 입력\.\.\."/);

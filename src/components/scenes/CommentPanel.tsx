@@ -318,11 +318,13 @@ export function CommentPanel({
     setActiveThreadRootId(null);
     setLastThreadRootId(null);
     setThreadInput('');
+    threadInputValueRef.current = '';
     setThreadSubmitting(false);
     setThreadMentionTarget(null);
   }, [sceneKey]);
   useEffect(() => {
     setThreadInput('');
+    threadInputValueRef.current = '';
   }, [activeThreadRootId]);
   // v1.24.0: 부모 댓글 별 답글 접힘 상태 (기본 펼침 — 처음 진입 시 모두 펼친 상태).
   const [collapsedThreads, setCollapsedThreads] = useState<Set<string>>(new Set());
@@ -417,6 +419,7 @@ export function CommentPanel({
 
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  const threadInputValueRef = useRef('');
   const threadInputRef = useRef<HTMLTextAreaElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -726,6 +729,7 @@ export function CommentPanel({
       const replyFocusThread = buildCommentReplyTarget(comments, target);
       const threadRootId = replyFocusThread.parentCommentId;
       if (!threadRootId) return;
+      setThreadMentionTarget(null);
       setActiveThreadRootId(threadRootId);
       setLastThreadRootId(threadRootId);
       setCollapsedThreads((prev) => {
@@ -1308,7 +1312,13 @@ export function CommentPanel({
     const text = threadInput.trim();
     const targetSceneKey = threadRoot.storageKey ?? threadRoot._sourceKey ?? sceneKey;
     const mentions = extractMentions(text, userNames);
-    const mentionTargetName = threadMentionTarget?.userName ?? threadRoot.userName;
+    const threadMentionReplyTarget = buildCommentReplyTarget(comments, threadMentionTarget);
+    const threadMentionTargetInCurrentThread =
+      threadMentionTarget?.id === threadRoot.id
+      || threadMentionReplyTarget.parentCommentId === threadRoot.id;
+    const mentionTargetName = threadMentionTargetInCurrentThread
+      ? threadMentionTarget!.userName
+      : threadRoot.userName;
     if (mentionTargetName !== currentUser.name && !mentions.includes(mentionTargetName)) {
       mentions.push(mentionTargetName);
     }
@@ -1337,6 +1347,7 @@ export function CommentPanel({
       return opened;
     });
     setThreadInput('');
+    threadInputValueRef.current = '';
 
     try {
       await addComment(targetSceneKey, comment);
@@ -1368,7 +1379,10 @@ export function CommentPanel({
       if (!mountedRef.current || sceneKeyRef.current !== panelSceneKey) return;
       setComments(prevComments);
       onCountChange?.(prevComments.length);
-      setThreadInput(text);
+      if (threadInputValueRef.current.length === 0) {
+        setThreadInput(text);
+        threadInputValueRef.current = text;
+      }
     } finally {
       setThreadSubmitting(false);
     }
@@ -2387,7 +2401,10 @@ export function CommentPanel({
                   ref={threadInputRef}
                   data-comment-thread-input
                   value={threadInput}
-                  onChange={(event) => setThreadInput(event.target.value)}
+                  onChange={(event) => {
+                    setThreadInput(event.target.value);
+                    threadInputValueRef.current = event.target.value;
+                  }}
                   onKeyDown={(event) => {
                     if (event.key === 'Enter' && !event.shiftKey) {
                       event.preventDefault();
