@@ -320,11 +320,14 @@ export function CommentPanel({
     setThreadInput('');
     threadInputValueRef.current = '';
     setThreadSubmitting(false);
+    threadSubmitRequestRef.current = null;
     setThreadMentionTarget(null);
   }, [sceneKey]);
   useEffect(() => {
     setThreadInput('');
     threadInputValueRef.current = '';
+    setThreadSubmitting(false);
+    threadSubmitRequestRef.current = null;
   }, [activeThreadRootId]);
   // v1.24.0: 부모 댓글 별 답글 접힘 상태 (기본 펼침 — 처음 진입 시 모두 펼친 상태).
   const [collapsedThreads, setCollapsedThreads] = useState<Set<string>>(new Set());
@@ -420,6 +423,7 @@ export function CommentPanel({
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const threadInputValueRef = useRef('');
+  const threadSubmitRequestRef = useRef<string | null>(null);
   const threadInputRef = useRef<HTMLTextAreaElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -1335,7 +1339,9 @@ export function CommentPanel({
     };
 
     const next = [...comments, comment];
+    const submitRequestId = comment.id;
     setThreadSubmitting(true);
+    threadSubmitRequestRef.current = submitRequestId;
     setComments(next);
     onCountChange?.(next.length);
     setLastThreadRootId(threadRoot.id);
@@ -1388,7 +1394,15 @@ export function CommentPanel({
         threadInputValueRef.current = text;
       }
     } finally {
-      setThreadSubmitting(false);
+      if (
+        mountedRef.current
+        && sceneKeyRef.current === panelSceneKey
+        && activeThreadRootIdRef.current === threadRoot.id
+        && threadSubmitRequestRef.current === submitRequestId
+      ) {
+        setThreadSubmitting(false);
+        threadSubmitRequestRef.current = null;
+      }
     }
   };
   const canReopenLastThread = !!lastThreadRootId && !activeThreadRoot && comments.some((c) => c.id === lastThreadRootId);
