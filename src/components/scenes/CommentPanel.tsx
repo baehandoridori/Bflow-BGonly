@@ -301,6 +301,7 @@ export function CommentPanel({
   const [submitting, setSubmitting] = useState(false);
   const [threadInput, setThreadInput] = useState('');
   const [threadSubmitting, setThreadSubmitting] = useState(false);
+  const [threadMentionTarget, setThreadMentionTarget] = useState<SceneCommentWithSource | null>(null);
   const [attachedImages, setAttachedImages] = useState<AttachedImage[]>([]);
   const [quickRevisionPickerOpen, setQuickRevisionPickerOpen] = useState(false);
   const [quickRevisionNotifyIds, setQuickRevisionNotifyIds] = useState<string[]>([]);
@@ -318,6 +319,7 @@ export function CommentPanel({
     setLastThreadRootId(null);
     setThreadInput('');
     setThreadSubmitting(false);
+    setThreadMentionTarget(null);
   }, [sceneKey]);
   useEffect(() => {
     setThreadInput('');
@@ -431,6 +433,7 @@ export function CommentPanel({
       return next;
     });
     setReplyTarget(null);
+    setThreadMentionTarget(target);
     requestAnimationFrame(() => threadInputRef.current?.focus());
   }, [comments]);
 
@@ -1305,8 +1308,9 @@ export function CommentPanel({
     const text = threadInput.trim();
     const targetSceneKey = threadRoot.storageKey ?? threadRoot._sourceKey ?? sceneKey;
     const mentions = extractMentions(text, userNames);
-    if (threadRoot.userName !== currentUser.name && !mentions.includes(threadRoot.userName)) {
-      mentions.push(threadRoot.userName);
+    const mentionTargetName = threadMentionTarget?.userName ?? threadRoot.userName;
+    if (mentionTargetName !== currentUser.name && !mentions.includes(mentionTargetName)) {
+      mentions.push(mentionTargetName);
     }
     const comment: SceneCommentWithSource = {
       id: createUuid(),
@@ -1337,6 +1341,7 @@ export function CommentPanel({
     try {
       await addComment(targetSceneKey, comment);
       markUnreadCommentsRead();
+      setThreadMentionTarget((current) => current?.id === threadMentionTarget?.id ? null : current);
 
       if (mentions.length > 0 && currentUser.slackId) {
         const { sheetName: threadSheetName, sceneId: threadSceneId } = parseSceneKey(targetSceneKey);
@@ -1488,7 +1493,10 @@ export function CommentPanel({
         {canReopenLastThread && (
           <button
             type="button"
-            onClick={() => setActiveThreadRootId(lastThreadRootId)}
+            onClick={() => {
+              setThreadMentionTarget(null);
+              setActiveThreadRootId(lastThreadRootId);
+            }}
             title="마지막으로 보던 스레드 다시 열기"
             className="text-[10px] px-2 py-1 rounded transition-colors cursor-pointer font-bold text-text-secondary hover:text-text-primary hover:bg-bg-primary/50"
           >
@@ -2283,6 +2291,7 @@ export function CommentPanel({
                 type="button"
                 onClick={() => {
                   setLastThreadRootId(activeThreadRoot.id);
+                  setThreadMentionTarget(null);
                   setActiveThreadRootId(null);
                 }}
                 className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-text-secondary hover:bg-bg-border/60 hover:text-text-primary"
@@ -2368,6 +2377,12 @@ export function CommentPanel({
 
             <div className="shrink-0 border-t border-bg-border bg-bg-primary/80 px-3 py-3">
               <div className="rounded-lg border border-bg-border/80 bg-bg-card/70 p-2 transition-colors focus-within:border-accent/50">
+                {threadMentionTarget && threadMentionTarget.id !== activeThreadRoot.id && (
+                  <div className="mb-1.5 flex items-center gap-1.5 px-1 text-[10.5px] font-medium text-accent">
+                    <CornerDownRight size={11} />
+                    <span className="min-w-0 truncate">{threadMentionTarget.userName}에게 답글</span>
+                  </div>
+                )}
                 <textarea
                   ref={threadInputRef}
                   data-comment-thread-input
