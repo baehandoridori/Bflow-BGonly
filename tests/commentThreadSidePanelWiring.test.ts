@@ -4,6 +4,7 @@ import { readFileSync } from 'node:fs';
 
 const commentPanel = readFileSync('src/components/scenes/CommentPanel.tsx', 'utf8');
 const commentPanelResizable = readFileSync('src/components/scenes/CommentPanelResizable.tsx', 'utf8');
+const sceneDetailModal = readFileSync('src/components/scenes/SceneDetailModal.tsx', 'utf8');
 const unifiedSceneDetailModal = readFileSync('src/components/scenes/UnifiedSceneDetailModal.tsx', 'utf8');
 
 test('CommentPanel opens a separate side thread when replying', () => {
@@ -64,4 +65,9 @@ test('UnifiedSceneDetailModal keeps the comment side panel visible with referenc
   assert.match(unifiedSceneDetailModal, /primaryCommentKey && \(/);
   assert.doesNotMatch(unifiedSceneDetailModal, /primaryCommentKey && !referencePanel &&/);
   assert.match(unifiedSceneDetailModal, /overflow-x-auto/);
+});
+
+test('scene detail modal wrappers allow horizontal overflow for opened thread panels', () => {
+  assert.match(sceneDetailModal, /relative flex gap-3 items-stretch max-w-full max-h-full overflow-x-auto overflow-y-hidden pb-1/);
+  assert.match(unifiedSceneDetailModal, /flex gap-3 items-stretch max-w-full max-h-full overflow-x-auto overflow-y-hidden pb-1/);
 });
