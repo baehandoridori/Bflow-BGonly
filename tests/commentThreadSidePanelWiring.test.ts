@@ -89,8 +89,9 @@ test('side thread has its own composer and main composer stays top-level', () =>
   assert.match(commentPanel, /const threadMentionTargetInCurrentThread =/);
   assert.match(commentPanel, /const mentionTargetName = threadMentionTargetInCurrentThread/);
   assert.match(commentPanel, /mentions\.push\(mentionTargetName\)/);
-  assert.match(commentPanel, /activeThreadRootIdRef\.current !== threadRoot\.id/);
-  assert.match(commentPanel, /if \(threadInputValueRef\.current\.length === 0\)/);
+  assert.match(commentPanel, /activeThreadRootIdRef\.current === threadRoot\.id/);
+  assert.match(commentPanel, /current\.filter\(\(c\) => c\.id !== comment\.id\)/);
+  assert.match(commentPanel, /activeThreadRootIdRef\.current === threadRoot\.id && threadInputValueRef\.current\.length === 0/);
   assert.match(commentPanel, /parentCommentId: threadRoot\.id/);
   assert.match(commentPanel, /data-comment-thread-input/);
   assert.match(commentPanel, /placeholder="스레드에 댓글 입력\.\.\."/);

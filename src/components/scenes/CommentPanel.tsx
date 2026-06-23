@@ -1334,7 +1334,6 @@ export function CommentPanel({
       _sourceKey: targetSceneKey,
     };
 
-    const prevComments = comments;
     const next = [...comments, comment];
     setThreadSubmitting(true);
     setComments(next);
@@ -1376,14 +1375,15 @@ export function CommentPanel({
       }
     } catch (err) {
       console.error('[스레드 댓글 추가 실패]', err);
-      if (
-        !mountedRef.current
-        || sceneKeyRef.current !== panelSceneKey
-        || activeThreadRootIdRef.current !== threadRoot.id
-      ) return;
-      setComments(prevComments);
-      onCountChange?.(prevComments.length);
-      if (threadInputValueRef.current.length === 0) {
+      if (!mountedRef.current || sceneKeyRef.current !== panelSceneKey) return;
+      setComments((current) => {
+        const withoutFailedComment = current.filter((c) => c.id !== comment.id);
+        if (withoutFailedComment.length !== current.length) {
+          onCountChange?.(withoutFailedComment.length);
+        }
+        return withoutFailedComment;
+      });
+      if (activeThreadRootIdRef.current === threadRoot.id && threadInputValueRef.current.length === 0) {
         setThreadInput(text);
         threadInputValueRef.current = text;
       }
