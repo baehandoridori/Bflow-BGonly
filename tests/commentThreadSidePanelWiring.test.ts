@@ -77,6 +77,7 @@ test('side thread has its own composer and main composer stays top-level', () =>
   assert.match(commentPanel, /const \[threadInput, setThreadInput\] = useState\(''\)/);
   assert.match(commentPanel, /const \[threadSubmitting, setThreadSubmitting\] = useState\(false\)/);
   assert.match(commentPanel, /const \[threadMentionTarget, setThreadMentionTarget\] = useState<SceneCommentWithSource \| null>\(null\)/);
+  assert.match(commentPanel, /const sceneKeyRef = useRef\(sceneKey\);\s*sceneKeyRef\.current = sceneKey/);
   assert.match(commentPanel, /const threadInputValueRef = useRef\(''\)/);
   assert.match(commentPanel, /const threadInputRef = useRef<HTMLTextAreaElement>\(null\)/);
   assert.match(commentPanel, /setThreadMentionTarget\(target\)/);

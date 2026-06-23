@@ -280,9 +280,7 @@ export function CommentPanel({
   const { sheetName, sceneId } = useMemo(() => parseSceneKey(sceneKey), [sceneKey]);
   const effectiveSceneThreadKey = sceneThreadKey ?? sceneKey;
   const sceneKeyRef = useRef(sceneKey);
-  useEffect(() => {
-    sceneKeyRef.current = sceneKey;
-  }, [sceneKey]);
+  sceneKeyRef.current = sceneKey;
 
   // 댓글 상태
   const [comments, setComments] = useState<SceneCommentWithSource[]>([]);
