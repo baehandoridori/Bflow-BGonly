@@ -6,6 +6,7 @@ const commentPanel = readFileSync('src/components/scenes/CommentPanel.tsx', 'utf
 const commentPanelResizable = readFileSync('src/components/scenes/CommentPanelResizable.tsx', 'utf8');
 const sceneDetailModal = readFileSync('src/components/scenes/SceneDetailModal.tsx', 'utf8');
 const unifiedSceneDetailModal = readFileSync('src/components/scenes/UnifiedSceneDetailModal.tsx', 'utf8');
+const settingsService = readFileSync('src/services/settingsService.ts', 'utf8');
 
 test('CommentPanel opens a separate side thread when replying', () => {
   assert.match(commentPanel, /const \[activeThreadRootId, setActiveThreadRootId\] = useState<string \| null>\(null\)/);
@@ -46,12 +47,23 @@ test('CommentPanelResizable owns thread split width while keeping whole-panel re
   assert.match(commentPanelResizable, /computeCommentThreadPanelResizeWidth/);
   assert.match(commentPanelResizable, /getCommentThreadPanelMaxWidthForMainWidth/);
   assert.match(commentPanelResizable, /const \[threadWidth, setThreadWidth\] = useState/);
+  assert.match(commentPanelResizable, /스레드 핸들은 댓글 목록과 스레드 사이 폭 배분만 바꾼다/);
   assert.match(commentPanelResizable, /const threadFrameWidth = threadPanelOpen \? COMMENT_THREAD_PANEL_DEFAULT_WIDTH \+ COMMENT_THREAD_PANEL_GAP_WIDTH : 0/);
   assert.match(commentPanelResizable, /const renderedWidth = effectiveWidth \+ threadFrameWidth/);
   assert.match(commentPanelResizable, /threadWidth=\{effectiveThreadWidth\}/);
   assert.match(commentPanelResizable, /onThreadResizeMouseDown=\{handleThreadResizeMouseDown\}/);
   assert.match(commentPanelResizable, /data-comment-panel-resize-edge="inner"/);
   assert.match(commentPanelResizable, /data-comment-panel-resize-edge="outer"/);
+});
+
+test('CommentPanelResizable persists the last thread split width', () => {
+  assert.match(settingsService, /commentThreadPanelWidthPx\?: number/);
+  assert.match(commentPanelResizable, /loadPreferences, savePreferences/);
+  assert.match(commentPanelResizable, /prefs\?\.commentThreadPanelWidthPx/);
+  assert.match(commentPanelResizable, /commentThreadPanelWidthPx: clamped/);
+  assert.match(commentPanelResizable, /const \{ commentThreadPanelWidthPx: _omit, \.\.\.rest \} = prefs/);
+  assert.match(commentPanelResizable, /setThreadWidthPersistent\(nextWidth\)/);
+  assert.match(commentPanelResizable, /setThreadWidthPersistent\(null\)/);
 });
 
 test('reply buttons use the side thread opener for parent comments and replies', () => {
