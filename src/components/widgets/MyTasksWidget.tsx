@@ -13,6 +13,7 @@ import { useDashboardEpisodes } from '@/hooks/useDashboardEpisodes';
 import { DEPARTMENT_CONFIGS, STAGES } from '@/types';
 import type { Stage, Scene, Episode, Department } from '@/types';
 import { cn } from '@/utils/cn';
+import { createUuid } from '@/utils/createUuid';
 import { updateEvent as updateCalEvent, deleteEvent as deleteCalEvent, addEvent as addCalEvent, findEventByTodoId } from '@/services/calendarService';
 import * as supabaseService from '@/services/supabaseService';
 
@@ -294,7 +295,7 @@ function AddTaskModal({
   const handleAddPersonalTodo = () => {
     if (!todoTitle.trim()) return;
     onAddPersonalTodo({
-      id: crypto.randomUUID(),
+      id: createUuid(),
       title: todoTitle.trim(),
       memo: todoMemo.trim(),
       completed: false,

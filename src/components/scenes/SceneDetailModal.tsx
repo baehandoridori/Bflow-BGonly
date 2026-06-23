@@ -928,7 +928,7 @@ export function SceneDetailModal({
       >
         {/* 모달 래퍼 — 좌: 본체 + 우: 댓글 패널 (항상 표시) */}
         <motion.div
-          className="relative flex gap-3"
+          className="relative flex gap-3 items-stretch max-w-full max-h-full overflow-x-auto overflow-y-hidden pb-1"
           onClick={(e) => e.stopPropagation()}
         >
             {/* 모달 본체 */}

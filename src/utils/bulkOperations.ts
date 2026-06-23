@@ -14,6 +14,7 @@ import {
   resolveSingleSceneSelection,
   type SingleSceneSelectionTarget,
 } from './sceneSelectionId';
+import { createUuid } from './createUuid';
 
 // v1.25.12 — 머지드 단위 카운트 헬퍼 재노출 (테스트 격리 위해 별도 파일).
 export { countSelectedScenes } from './bulkSelectionCount';
@@ -261,7 +262,7 @@ export async function runBulkOp(
 
   // opId를 로컬에 보관해 async 응답 처리 시점에 "내가 시작한 op이 여전히 활성인지" 검증.
   // 사용자가 취소 + 새 op 시작 등의 상황에서 이전 요청의 응답이 새 op에 새어들어가지 않도록 scope 제한. (Codex 리뷰 #8)
-  const opId = crypto.randomUUID();
+  const opId = createUuid();
   const isStillActive = () => useBulkOperationsStore.getState().activeOp?.id === opId;
 
   const store = useBulkOperationsStore.getState();

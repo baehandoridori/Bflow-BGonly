@@ -1,5 +1,6 @@
 import { useRef, useCallback, useState } from 'react';
 import type { WhiteboardStroke, WhiteboardLayer, WhiteboardTool, StrokePoint, WhiteboardData } from '@/types/whiteboard';
+import { createUuid } from '@/utils/createUuid';
 
 // ─── 상수 ───────────────────────────────────────────────────
 
@@ -289,7 +290,7 @@ export function useWhiteboardEngine(): WhiteboardEngine {
     drawingRef.current = {
       active: true,
       stroke: {
-        id: crypto.randomUUID(),
+        id: createUuid(),
         points: [{ x, y }],
         color: s.color,
         width: s.brushWidth,

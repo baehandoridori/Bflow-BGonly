@@ -24,6 +24,7 @@ import {
   startAssignee, completeAssignee, revertAssignee, deriveRevisionStatus, sanitizeAssignees,
 } from '../utils/revisionWorkflow';
 import { nextGeneralRevisionNo } from '../utils/revisionGeneral';
+import { createUuid } from '../utils/createUuid';
 
 const REVISIONS_FILE = 'revisions.json';
 const DIGITS_ONLY_RE = /^\d+$/;
@@ -449,7 +450,7 @@ export async function createRevision(input: CreateRevisionServiceInput): Promise
   const normalizedSceneKey = lookupSceneKeys[0];
   const setId = input.setId ?? null;
   const now = new Date().toISOString();
-  const id = crypto.randomUUID();
+  const id = createUuid();
   // v1.18.0 자동값: 우선순위/프레임/담당자 입력 UI 제거 → 항상 'normal' / '' / ''.
   const priority: RevisionPriority = 'normal';
   const department = input.department || input.lookupDepartment;

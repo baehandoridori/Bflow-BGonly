@@ -1,10 +1,17 @@
-import { useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { motion } from 'framer-motion';
 import { CommentPanel, type CommentPanelQuickRevisionContext } from './CommentPanel';
 import { CommentPanelErrorBoundary } from '@/components/common/CommentPanelErrorBoundary';
 import { useCommentPanelWidth, useCommentPanelResizer } from '@/hooks/useCommentPanelWidth';
 import { ResizeEdgeGlow } from '@/components/common/ResizeEdgeGlow';
 import { ResizeHandleParticles } from '@/components/common/ResizeHandleParticles';
+import {
+  COMMENT_THREAD_PANEL_DEFAULT_WIDTH,
+  COMMENT_THREAD_PANEL_GAP_WIDTH,
+  clampCommentThreadPanelWidth,
+  computeCommentThreadPanelResizeWidth,
+  getCommentThreadPanelMaxWidthForMainWidth,
+} from '@/utils/commentPanelResize';
 
 /**
  * v1.27.0: 상세 모달 옆 댓글 패널 — 3중 반응형.
@@ -76,6 +83,14 @@ export function CommentPanelResizable(props: CommentPanelResizableProps) {
   const [handleHover, setHandleHover] = useState<'inner' | 'outer' | null>(null);
   const [dragging, setDragging] = useState(false);
   const [dragEdge, setDragEdge] = useState<'inner' | 'outer' | null>(null);
+  const [threadPanelOpen, setThreadPanelOpen] = useState(false);
+  const [threadWidth, setThreadWidth] = useState(COMMENT_THREAD_PANEL_DEFAULT_WIDTH);
+  const [liveThreadWidth, setLiveThreadWidth] = useState<number | null>(null);
+  const [threadHandleHover, setThreadHandleHover] = useState(false);
+  const [threadDragging, setThreadDragging] = useState(false);
+  const threadDragStateRef = useRef<{ startX: number; startW: number } | null>(null);
+  const threadMouseMoveRef = useRef<((event: MouseEvent) => void) | null>(null);
+  const threadMouseUpRef = useRef<((event: MouseEvent) => void) | null>(null);
 
   const { onMouseDown } = useCommentPanelResizer({
     liveSetWidth: (px) => setLiveWidth(px),
@@ -88,11 +103,68 @@ export function CommentPanelResizable(props: CommentPanelResizableProps) {
   });
 
   const effectiveWidth = liveWidth ?? width;
+  const threadMaxWidth = getCommentThreadPanelMaxWidthForMainWidth(effectiveWidth);
+  const effectiveThreadWidth = clampCommentThreadPanelWidth(liveThreadWidth ?? threadWidth, threadMaxWidth);
+  const threadFrameWidth = threadPanelOpen ? COMMENT_THREAD_PANEL_DEFAULT_WIDTH + COMMENT_THREAD_PANEL_GAP_WIDTH : 0;
+  const renderedWidth = effectiveWidth + threadFrameWidth;
   const secondaryKey =
     explicitSecondaryKey
       ?? (counterpartSheetName && counterpartSceneNo != null
         ? `${counterpartSheetName}:${counterpartSceneNo}`
         : undefined);
+
+  const clearThreadDragListeners = useCallback(() => {
+    if (threadMouseMoveRef.current) window.removeEventListener('mousemove', threadMouseMoveRef.current);
+    if (threadMouseUpRef.current) window.removeEventListener('mouseup', threadMouseUpRef.current);
+    threadMouseMoveRef.current = null;
+    threadMouseUpRef.current = null;
+    threadDragStateRef.current = null;
+    document.body.style.cursor = '';
+    document.body.style.userSelect = '';
+  }, []);
+
+  const handleThreadResizeMouseDown = useCallback((event: React.MouseEvent) => {
+    event.preventDefault();
+    event.stopPropagation();
+    const startX = event.clientX;
+    const startW = effectiveThreadWidth;
+    threadDragStateRef.current = { startX, startW };
+    setThreadDragging(true);
+    document.body.style.cursor = 'col-resize';
+    document.body.style.userSelect = 'none';
+
+    const onMove = (moveEvent: MouseEvent) => {
+      const state = threadDragStateRef.current;
+      if (!state) return;
+      setLiveThreadWidth(computeCommentThreadPanelResizeWidth(state.startW, state.startX, moveEvent.clientX, threadMaxWidth));
+    };
+    const onUp = (upEvent: MouseEvent) => {
+      const state = threadDragStateRef.current;
+      const nextWidth = state
+        ? computeCommentThreadPanelResizeWidth(state.startW, state.startX, upEvent.clientX, threadMaxWidth)
+        : effectiveThreadWidth;
+      clearThreadDragListeners();
+      setLiveThreadWidth(null);
+      setThreadDragging(false);
+      setThreadWidth(nextWidth);
+    };
+
+    threadMouseMoveRef.current = onMove;
+    threadMouseUpRef.current = onUp;
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
+  }, [clearThreadDragListeners, effectiveThreadWidth, threadMaxWidth]);
+
+  const resetThreadWidth = useCallback(() => {
+    setLiveThreadWidth(null);
+    setThreadWidth(COMMENT_THREAD_PANEL_DEFAULT_WIDTH);
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      clearThreadDragListeners();
+    };
+  }, [clearThreadDragListeners]);
 
   return (
     <motion.div
@@ -101,7 +173,7 @@ export function CommentPanelResizable(props: CommentPanelResizableProps) {
       animate={{ opacity: 1, x: 0 }}
       transition={{ duration: 0.25, delay: 0.1 }}
       className={`bg-bg-card rounded-2xl shadow-2xl border border-bg-border ${heightClass} flex flex-col shrink-0 relative ${className}`}
-      style={{ width: effectiveWidth }}
+      style={{ width: renderedWidth }}
     >
       {/* 안쪽 경계 드래그 핸들 — 본문과 댓글 사이에서 잡는 기존 경로. */}
       <div
@@ -183,6 +255,13 @@ export function CommentPanelResizable(props: CommentPanelResizableProps) {
           quickRevision={quickRevision}
           onHashClick={onHashClick}
           onHashContextMenu={onHashContextMenu}
+          onThreadPanelOpenChange={setThreadPanelOpen}
+          threadWidth={effectiveThreadWidth}
+          threadResizeActive={threadDragging}
+          threadResizeHover={threadHandleHover}
+          onThreadResizeMouseDown={handleThreadResizeMouseDown}
+          onThreadResizeDoubleClick={resetThreadWidth}
+          onThreadResizeHoverChange={setThreadHandleHover}
         />
       </CommentPanelErrorBoundary>
     </motion.div>
