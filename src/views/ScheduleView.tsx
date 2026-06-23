@@ -33,6 +33,7 @@ import DaySidebar from '@/components/calendar/DaySidebar';
 import { useCalendarDragCreate } from '@/hooks/useCalendarDragCreate';
 import { floatingGlassStyle, tooltipGlassStyle } from '@/utils/glassStyles';
 import { navigateToSceneView } from '@/utils/sceneNavigationAction';
+import { createUuid } from '@/utils/createUuid';
 
 /* ═══════════════════════════════════════════════════
    유틸리티
@@ -1487,7 +1488,7 @@ export function ScheduleView() {
     try {
       const ev: CalendarEvent = {
         ...data,
-        id: crypto.randomUUID(),
+        id: createUuid(),
         createdAt: new Date().toISOString(),
       };
       await addEvent(ev);
@@ -1803,7 +1804,7 @@ export function ScheduleView() {
   const handleDuplicateEvent = useCallback(async (event: CalendarEvent) => {
     const newEv: CalendarEvent = {
       ...event,
-      id: crypto.randomUUID(),
+      id: createUuid(),
       title: `${event.title} (복사)`,
       createdAt: new Date().toISOString(),
       // 연결 정보 모두 제거: 완전 독립 이벤트로 복제

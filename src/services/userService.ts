@@ -8,6 +8,7 @@
  */
 
 import type { AppUser, UsersFile, AuthSession } from '@/types';
+import { createUuid } from '@/utils/createUuid';
 
 const AUTH_FILE = 'auth.json'; // APPDATA 로컬 저장
 const DEFAULT_PASSWORD = '1234';
@@ -80,7 +81,7 @@ export async function addUser(
   hireDate?: string, birthday?: string,
 ): Promise<AppUser> {
   const newUser: AppUser = {
-    id: crypto.randomUUID(),
+    id: createUuid(),
     name,
     slackId,
     password: DEFAULT_PASSWORD,

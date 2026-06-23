@@ -232,8 +232,7 @@ export function UnifiedSceneDetailModal({
   const backdropMouseDownRef = useRef(false);
   const modalMainRef = useRef<HTMLDivElement>(null);
 
-  // 4c PR2/v1.43.1: 참조 패널이 붙으면 본체+참조 두 상세가 이미 가로를 많이 쓴다. 댓글 패널까지 더하면
-  //   넘쳐서 잘리므로(한솔 보고), 참조가 열려 있는 동안은 댓글 패널을 숨긴다(참조 닫으면 복귀). 폭 무관·항상.
+  // 참조 패널이 붙어도 댓글 패널은 유지한다. 좁은 화면은 모달 래퍼의 가로 스크롤로 처리한다.
 
   // 댓글 키: BG와 ACT 양쪽 조회 가능하게.
   // primary 는 "실제로 이 merged 에 존재하는 부서" 와 일치해야 한다 —
@@ -1092,7 +1091,7 @@ export function UnifiedSceneDetailModal({
           {/* flex 래퍼 — 본체 + 댓글 (+ 참조 도킹 패널) (좌우 이동 시 같이 흔들기 위해 motion.div 로 감쌈) */}
           <motion.div
             animate={wrapperControls}
-            className="flex gap-3 items-stretch max-w-full max-h-full"
+            className="flex gap-3 items-stretch max-w-full max-h-full overflow-x-auto overflow-y-hidden pb-1"
             onClick={(e) => e.stopPropagation()}
           >
             {/* 참조 패널 좌측 도킹 — 본체보다 먼저 */}
@@ -1102,8 +1101,8 @@ export function UnifiedSceneDetailModal({
 
             {bodyEl}
 
-            {/* ── 댓글 패널 — 본체와 같은 높이. 참조 패널이 붙고 화면이 좁으면 가로 오버플로 방지로 숨김 */}
-            {primaryCommentKey && !referencePanel && (
+            {/* ── 댓글 패널 — 본체와 같은 높이. 참조 패널이 붙어도 유지하고, 좁은 화면은 wrapper 가로 스크롤로 처리. */}
+            {primaryCommentKey && (
               <CommentPanelResizable
                 commentCount={commentCount}
                 sceneKey={primaryCommentKey}

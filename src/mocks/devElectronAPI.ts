@@ -14,6 +14,7 @@ import {
   type DevPreviewRevisionRow,
 } from './devPreviewComments';
 import { normalizeSceneIdKey } from '@/utils/sceneIdKey';
+import { createUuid } from '@/utils/createUuid';
 
 const MOCK_USERS: AppUser[] = [
   { id: '1', name: '배한솔', slackId: 'U05DFV9UAN5', password: '1234', isInitialPassword: false, createdAt: '2025-01-01T00:00:00Z', role: 'admin' },
@@ -805,7 +806,7 @@ export function installDevElectronAPI(): void {
     gcalListCalendars: async () => [],
     gcalFullSync: async () => [],
     gcalIncrementalSync: async () => ({ updated: [], deleted: [], isFullSync: false }),
-    gcalInsertEvent: async () => (typeof crypto !== 'undefined' && crypto.randomUUID ? `mock_${crypto.randomUUID()}` : `mock_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`),
+    gcalInsertEvent: async () => `mock_${createUuid()}`,
     gcalUpdateEvent: async () => {},
     gcalDeleteEvent: async () => {},
     gcalEnsureWatch: async () => {},
@@ -866,11 +867,7 @@ export function installDevElectronAPI(): void {
         (r) => r.episode_number === input.episodeNumber && r.scene_id === input.sceneId,
       );
       const row: MockCompositingRow = {
-        id: idx >= 0
-          ? compStore[idx].id
-          : (typeof crypto !== 'undefined' && crypto.randomUUID
-              ? crypto.randomUUID()
-              : `mock_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`),
+        id: idx >= 0 ? compStore[idx].id : createUuid(),
         episode_number: input.episodeNumber,
         scene_id: input.sceneId,
         part_id: input.partId,

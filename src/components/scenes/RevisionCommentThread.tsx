@@ -38,6 +38,7 @@ import { useMentionAutocomplete } from '@/hooks/useMentionAutocomplete';
 import { useHashtagAutocomplete } from '@/hooks/useHashtagAutocomplete';
 import { navigateToHashTarget } from '@/utils/hashNavigation';
 import type { HashTarget } from '@/utils/hashEntity';
+import { createUuid } from '@/utils/createUuid';
 import {
   AttachmentImageLightbox,
   type AttachmentImageLightboxEntry,
@@ -271,7 +272,7 @@ export function RevisionCommentThread({ revisionId, sceneKey, onHashClick, onHas
   }, [sceneId, sheetName]);
 
   const addAttachedImageFromBlob = useCallback((file: File | Blob) => {
-    const id = crypto.randomUUID();
+    const id = createUuid();
     const previewUrl = URL.createObjectURL(file);
     setAttachedImages(prev => [...prev, { id, previewUrl, uploading: true }]);
     void uploadAttachedImage(id, file);
@@ -334,7 +335,7 @@ export function RevisionCommentThread({ revisionId, sceneKey, onHashClick, onHas
     setSubmitting(true);
 
     const newComment: SceneComment = {
-      id: crypto.randomUUID(),
+      id: createUuid(),
       userId: currentUser.id,
       userName: currentUser.name,
       text: draft.trim(),

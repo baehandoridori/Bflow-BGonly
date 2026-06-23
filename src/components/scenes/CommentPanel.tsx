@@ -49,6 +49,7 @@ import {
   type RevisionSlashContext,
 } from '@/utils/revisionSlashCommand';
 import { buildCommentReplyTarget } from '@/utils/commentThreading';
+import { createUuid } from '@/utils/createUuid';
 import { AttachmentImageLightbox } from './AttachmentImageLightbox';
 import { toast as sonnerToast } from 'sonner';
 import '@/styles/comment-panel.css';
@@ -84,6 +85,16 @@ interface CommentPanelProps {
   onHashClick?: (t: HashTarget) => void;
   /** 4c PR3: #씬·#파트·#화 칩 우클릭 메뉴. */
   onHashContextMenu?: (t: HashTarget, e: React.MouseEvent) => void;
+  /** Slack-style 스레드 사이드 패널 열림 상태를 부모 패널 폭 계산에 알려준다. */
+  onThreadPanelOpenChange?: (open: boolean) => void;
+  /** 스레드 사이드 패널 폭(px). 부모의 분할 리사이즈 상태가 내려온다. */
+  threadWidth?: number;
+  /** 댓글 목록과 스레드 사이 분할 핸들의 현재 drag/hover 상태. */
+  threadResizeActive?: boolean;
+  threadResizeHover?: boolean;
+  onThreadResizeMouseDown?: (event: React.MouseEvent) => void;
+  onThreadResizeDoubleClick?: () => void;
+  onThreadResizeHoverChange?: (hover: boolean) => void;
 }
 
 export interface CommentPanelQuickRevisionContext {
@@ -235,7 +246,25 @@ function ThreadReplyButton({
 
 // ─── 메인 컴포넌트 ──────────────────────────
 
-export function CommentPanel({ sceneKey, secondarySceneKey, sceneThreadKey, onCountChange, inlineEvents, focusCommentId, sceneLabel, quickRevision, onHashClick, onHashContextMenu }: CommentPanelProps) {
+export function CommentPanel({
+  sceneKey,
+  secondarySceneKey,
+  sceneThreadKey,
+  onCountChange,
+  inlineEvents,
+  focusCommentId,
+  sceneLabel,
+  quickRevision,
+  onHashClick,
+  onHashContextMenu,
+  onThreadPanelOpenChange,
+  threadWidth = 340,
+  threadResizeActive = false,
+  threadResizeHover = false,
+  onThreadResizeMouseDown,
+  onThreadResizeDoubleClick,
+  onThreadResizeHoverChange,
+}: CommentPanelProps) {
   const { currentUser, users } = useAuthStore();
   const { setView, setHighlightUserName } = useAppStore();
   const { createRevision } = useRevisionStore();
@@ -268,8 +297,12 @@ export function CommentPanel({ sceneKey, secondarySceneKey, sceneThreadKey, onCo
   // 코덱스 P2 fix (2026-05-10): sceneKey 변경 시 reset 필수 — 안 그러면 다른 씬으로 이동 후 전송 시
   //   cross-scene parentCommentId 가 박혀 orphan 답글 + 잘못된 부모 작성자에게 알림 발송.
   const [replyTarget, setReplyTarget] = useState<SceneCommentWithSource | null>(null);
+  const [activeThreadRootId, setActiveThreadRootId] = useState<string | null>(null);
+  const [lastThreadRootId, setLastThreadRootId] = useState<string | null>(null);
   useEffect(() => {
     setReplyTarget(null);
+    setActiveThreadRootId(null);
+    setLastThreadRootId(null);
   }, [sceneKey]);
   // v1.24.0: 부모 댓글 별 답글 접힘 상태 (기본 펼침 — 처음 진입 시 모두 펼친 상태).
   const [collapsedThreads, setCollapsedThreads] = useState<Set<string>>(new Set());
@@ -367,6 +400,20 @@ export function CommentPanel({ sceneKey, secondarySceneKey, sceneThreadKey, onCo
   const panelRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const dragCounter = useRef(0);
+  const openThreadReply = useCallback((target: SceneCommentWithSource) => {
+    const threadTarget = buildCommentReplyTarget(comments, target);
+    const threadRootId = threadTarget.parentCommentId ?? threadTarget.rootComment?.id ?? target.id;
+    setActiveThreadRootId(threadRootId);
+    setLastThreadRootId(threadRootId);
+    setCollapsedThreads((prev) => {
+      if (!prev.has(threadRootId)) return prev;
+      const next = new Set(prev);
+      next.delete(threadRootId);
+      return next;
+    });
+    setReplyTarget(target);
+    requestAnimationFrame(() => inputRef.current?.focus());
+  }, [comments]);
 
   // ── 입력 카드 + textarea 한계 계산 ──
   // 패널 전체 높이의 30% 까지 입력 카드가 자란다. 그 이상은 textarea 안에서 스크롤.
@@ -657,6 +704,8 @@ export function CommentPanel({ sceneKey, secondarySceneKey, sceneThreadKey, onCo
       const replyFocusThread = buildCommentReplyTarget(comments, target);
       const threadRootId = replyFocusThread.parentCommentId;
       if (!threadRootId) return;
+      setActiveThreadRootId(threadRootId);
+      setLastThreadRootId(threadRootId);
       setCollapsedThreads((prev) => {
         if (!prev.has(threadRootId)) return prev;
         const next = new Set(prev);
@@ -811,7 +860,7 @@ export function CommentPanel({ sceneKey, secondarySceneKey, sceneThreadKey, onCo
   }, [sheetName, sceneId]);
 
   const addAttachedImageFromBlob = useCallback((file: File | Blob) => {
-    const id = crypto.randomUUID();
+    const id = createUuid();
     const previewUrl = URL.createObjectURL(file);
     setAttachedImages(prev => {
       if (!quickRevisionActive) return [...prev, { id, previewUrl, uploading: true }];
@@ -1000,7 +1049,7 @@ export function CommentPanel({ sceneKey, secondarySceneKey, sceneThreadKey, onCo
       ?? replyTarget?._sourceKey
       ?? sceneKey;
     const comment: SceneCommentWithSource = {
-      id: crypto.randomUUID(),
+      id: createUuid(),
       userId: currentUser.id,
       userName: currentUser.name,
       text: input.trim(),
@@ -1017,6 +1066,8 @@ export function CommentPanel({ sceneKey, secondarySceneKey, sceneThreadKey, onCo
     setComments(next);
     onCountChange?.(next.length);
     if (replyThreadTarget.parentCommentId) {
+      setActiveThreadRootId(replyThreadTarget.parentCommentId);
+      setLastThreadRootId(replyThreadTarget.parentCommentId);
       setCollapsedThreads((prev) => {
         if (!prev.has(replyThreadTarget.parentCommentId!)) return prev;
         const opened = new Set(prev);
@@ -1207,6 +1258,23 @@ export function CommentPanel({ sceneKey, secondarySceneKey, sceneThreadKey, onCo
     return map;
   }, [visibleComments, topLevelComments]);
 
+  const activeThreadRoot = useMemo(
+    () => activeThreadRootId ? comments.find((c) => c.id === activeThreadRootId) ?? null : null,
+    [activeThreadRootId, comments],
+  );
+  useEffect(() => {
+    onThreadPanelOpenChange?.(activeThreadRoot != null);
+  }, [activeThreadRoot, onThreadPanelOpenChange]);
+  const activeThreadReplies = useMemo(
+    () => activeThreadRoot ? repliesByParent.get(activeThreadRoot.id) ?? [] : [],
+    [activeThreadRoot, repliesByParent],
+  );
+  const activeThreadMessages = useMemo(
+    () => activeThreadRoot ? [activeThreadRoot, ...activeThreadReplies] : [],
+    [activeThreadRoot, activeThreadReplies],
+  );
+  const canReopenLastThread = !!lastThreadRootId && !activeThreadRoot && comments.some((c) => c.id === lastThreadRootId);
+
   /** orphan 답글 — 부모가 visibleComments 에 없는 답글. 메인 흐름에 일반 댓글로 노출. */
   const orphanReplies = useMemo(() => {
     const topIds = new Set(topLevelComments.map((c) => c.id));
@@ -1316,11 +1384,22 @@ export function CommentPanel({ sceneKey, secondarySceneKey, sceneThreadKey, onCo
       //     CommentPanel 의 h-full = 100% of parent (부모 전체 height) → 헤더 자리만큼 overflow.
       //   flex-1 + min-h-0 으로 변경: 부모의 남은 공간 정확히 차지 + 자식들이 자체 scroll 가능.
       //   h-full 도 같이 두어 부모가 column flex 가 아닌 경우(legacy)에도 작동.
-      className="flex flex-col h-full flex-1 min-h-0 relative"
+      className="flex h-full flex-1 min-h-0 relative overflow-visible"
     >
+      <div className="flex min-w-0 flex-1 flex-col h-full">
       {/* v1.18.0: 상단 미니 툴바 — "re만" 필터 토글 (한솔 결정 spec 2026-05-03).
           v1.23.4 (#3 한솔): "활동 감추기" 토글 추가 — 시스템 활동(단계 변경 등) 숨기고 댓글만 표시. */}
       <div className="px-3 pt-2 pb-1 flex items-center justify-end gap-1 shrink-0">
+        {canReopenLastThread && (
+          <button
+            type="button"
+            onClick={() => setActiveThreadRootId(lastThreadRootId)}
+            title="마지막으로 보던 스레드 다시 열기"
+            className="text-[10px] px-2 py-1 rounded transition-colors cursor-pointer font-bold text-text-secondary hover:text-text-primary hover:bg-bg-primary/50"
+          >
+            스레드 다시 열기
+          </button>
+        )}
         <button
           type="button"
           onClick={toggleHideActivity}
@@ -1592,7 +1671,7 @@ export function CommentPanel({ sceneKey, secondarySceneKey, sceneThreadKey, onCo
                         )}
                       >
                         <button
-                          onClick={() => setReplyTarget(comment)}
+                          onClick={() => openThreadReply(comment)}
                           className="p-1 rounded hover:bg-bg-border/50 text-text-secondary hover:text-accent transition-colors cursor-pointer"
                           title="답글"
                         >
@@ -1635,7 +1714,7 @@ export function CommentPanel({ sceneKey, secondarySceneKey, sceneThreadKey, onCo
                     />
                     <ThreadReplyButton
                       aria-label={`답글 달기: ${comment.userName}`}
-                      onClick={() => setReplyTarget(comment)}
+                      onClick={() => openThreadReply(comment)}
                     />
                   </div>
                 </div>
@@ -1755,7 +1834,7 @@ export function CommentPanel({ sceneKey, secondarySceneKey, sceneThreadKey, onCo
                                 replyIsOwn ? '-right-16' : '-right-7',
                               )}>
                                 <button
-                                  onClick={() => setReplyTarget(reply)}
+                                  onClick={() => openThreadReply(reply)}
                                   className="p-0.5 rounded hover:bg-bg-border/50 text-text-secondary hover:text-accent cursor-pointer"
                                   title="답글"
                                 >
@@ -1797,7 +1876,7 @@ export function CommentPanel({ sceneKey, secondarySceneKey, sceneThreadKey, onCo
                             <ThreadReplyButton
                               compact
                               aria-label={`답글 달기: ${reply.userName}`}
-                              onClick={() => setReplyTarget(reply)}
+                              onClick={() => openThreadReply(reply)}
                             />
                           </div>
                         </div>
@@ -2056,6 +2135,145 @@ export function CommentPanel({ sceneKey, secondarySceneKey, sceneThreadKey, onCo
           </div>
         </div>
       </div>
+      </div>
+
+      <AnimatePresence initial={false}>
+        {activeThreadRoot && (
+          <Fragment key={activeThreadRoot.id}>
+          <motion.div
+            key={`${activeThreadRoot.id}:resize`}
+            role="separator"
+            aria-orientation="vertical"
+            aria-label="댓글과 스레드 사이 경계로 너비 조절"
+            title="드래그로 스레드 칸 너비 조절 · 더블클릭으로 기본 폭 복귀"
+            data-no-lasso
+            data-comment-thread-resize-handle
+            initial={{ opacity: 0, x: 8 }}
+            animate={{ opacity: 1, x: 0 }}
+            exit={{ opacity: 0, x: 6 }}
+            transition={{ duration: 0.16, ease: [0.16, 1, 0.3, 1] }}
+            onMouseEnter={() => onThreadResizeHoverChange?.(true)}
+            onMouseLeave={() => onThreadResizeHoverChange?.(false)}
+            onMouseDown={onThreadResizeMouseDown}
+            onDoubleClick={onThreadResizeDoubleClick}
+            className="relative flex h-full w-5 shrink-0 cursor-col-resize items-stretch justify-center"
+          >
+            <div
+              className={cn(
+                'my-3 w-px rounded-full transition-[background-color,box-shadow,opacity,transform] duration-150',
+                threadResizeActive || threadResizeHover
+                  ? 'bg-accent/80 opacity-100 shadow-[0_0_14px_rgba(108,92,231,0.45)] scale-x-[2]'
+                  : 'bg-bg-border/85 opacity-45',
+              )}
+            />
+          </motion.div>
+          <motion.aside
+            key={activeThreadRoot.id}
+            data-comment-thread-side-panel
+            initial={{ opacity: 0, x: 18 }}
+            animate={{ opacity: 1, x: 0 }}
+            exit={{ opacity: 0, x: 12 }}
+            transition={{ duration: 0.18, ease: [0.16, 1, 0.3, 1] }}
+            className="flex h-full shrink-0 flex-col overflow-hidden rounded-xl border border-bg-border bg-bg-primary/55 shadow-[0_18px_42px_rgba(0,0,0,0.28)]"
+            style={{ width: threadWidth }}
+          >
+            <div className="flex shrink-0 items-start justify-between gap-2 border-b border-bg-border px-3 py-3">
+              <div className="min-w-0">
+                <div className="text-sm font-semibold text-text-primary">스레드</div>
+                <div className="mt-0.5 truncate text-[11px] text-text-secondary/70">
+                  {activeThreadRoot.userName} · 답글 {activeThreadReplies.length}개
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  setLastThreadRootId(activeThreadRoot.id);
+                  setActiveThreadRootId(null);
+                }}
+                className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-text-secondary hover:bg-bg-border/60 hover:text-text-primary"
+                title="스레드 닫기"
+                aria-label="스레드 닫기"
+              >
+                <X size={14} />
+              </button>
+            </div>
+
+            <div className="min-h-0 flex-1 overflow-y-auto px-3 py-3 space-y-3">
+              {activeThreadMessages.map((message, index) => {
+                const messageIsOwn = currentUser?.id === message.userId;
+                const messageHasImages = (message.images?.length ?? 0) > 0;
+                const messageMentionsMe = !!currentUser && (message.mentions ?? []).includes(currentUser.name);
+                const messageIsFocused = focusedCommentId === message.id;
+                return (
+                  <div
+                    key={message.id}
+                    ref={(el) => { commentRefs.current.set(message.id, el); }}
+                    onClick={markUnreadCommentsRead}
+                    className={cn(
+                      'group/thread-message relative',
+                      messageMentionsMe && 'pl-1.5',
+                      messageIsFocused && 'comment-target-pulse',
+                    )}
+                    style={messageMentionsMe ? { borderLeft: '3px solid rgb(var(--color-accent))', borderRadius: 3 } : undefined}
+                  >
+                    <div className="mb-1 flex items-center gap-1.5">
+                      <span className="text-[11px] font-semibold text-text-primary">{message.userName}</span>
+                      <span className="text-[10px] text-text-secondary/50">{formatCommentTime(message.createdAt)}</span>
+                      {index === 0 && (
+                        <span className="ml-auto rounded-full border border-accent/25 bg-accent/10 px-1.5 py-0.5 text-[9.5px] font-semibold text-accent">
+                          원댓글
+                        </span>
+                      )}
+                      {message.editedAt && (
+                        <span className="text-[10px] text-text-secondary/30 italic">수정됨</span>
+                      )}
+                    </div>
+                    <div className={cn(
+                      'rounded-lg px-2.5 py-2 text-[11.5px] leading-relaxed break-words text-text-primary',
+                      messageIsOwn ? 'bg-accent/15 border border-accent/25' : 'bg-bg-border/50',
+                    )}>
+                      {message.text && <div>{renderText(message.text, message.storageKey ?? message._sourceKey)}</div>}
+                      {messageHasImages && (
+                        <div className={`grid gap-1 ${message.text ? 'mt-1.5' : ''} ${message.images!.length === 1 ? 'grid-cols-1' : 'grid-cols-2'}`}>
+                          {message.images!.map((url, i) => (
+                            <img
+                              key={i}
+                              src={url}
+                              alt=""
+                              className="rounded w-full object-cover cursor-zoom-in hover:opacity-90 transition-opacity"
+                              style={{ maxHeight: 120 }}
+                              onClick={() => openLightbox(url, message)}
+                              loading="lazy"
+                            />
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                    <div className="mt-1 flex items-center gap-1.5">
+                      <ReactionsArea
+                        commentId={message.id}
+                        reactions={reactionsByCommentId.get(message.id) ?? []}
+                        currentUserId={currentUser?.id ?? null}
+                        onToggle={handleReactionToggle}
+                        pickerOpen={pickerForCommentId === message.id}
+                        onPickerOpen={() => setPickerForCommentId(message.id)}
+                        onPickerClose={() => setPickerForCommentId(null)}
+                        compact
+                      />
+                      <ThreadReplyButton
+                        compact
+                        aria-label={`답글 달기: ${message.userName}`}
+                        onClick={() => openThreadReply(message)}
+                      />
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </motion.aside>
+          </Fragment>
+        )}
+      </AnimatePresence>
 
       {/* 드래그 오버레이 */}
       {draggingOver && (

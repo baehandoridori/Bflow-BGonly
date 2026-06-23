@@ -12,6 +12,7 @@ import type { CompRevisionSet } from '../types';
 import { nextSetStatus, type SetItemLike } from '../utils/revisionSet';
 import { useRevisionSetStore } from '../stores/useRevisionSetStore';
 import { useRevisionStore } from '../stores/useRevisionStore';
+import { createUuid } from '../utils/createUuid';
 import { setRevisionSet } from './revisionService';
 
 type CreateRevisionSetInput = Parameters<typeof window.electronAPI.supabaseAddRevisionSet>[0];
@@ -40,7 +41,7 @@ export async function loadRevisionSets(): Promise<CompRevisionSet[]> {
 export async function createRevisionSet(input: CreateRevisionSetInput): Promise<CompRevisionSet | null> {
   const store = useRevisionSetStore.getState();
   const now = new Date().toISOString();
-  const tempId = `temp-set-${crypto.randomUUID()}`;
+  const tempId = `temp-set-${createUuid()}`;
   const optimistic: CompRevisionSet = {
     id: tempId,
     title: input.title,

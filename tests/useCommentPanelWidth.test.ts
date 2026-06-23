@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 import {
   computeAutoCommentPanelWidth,
   computeCommentPanelResizeWidth,
+  computeCommentThreadPanelResizeWidth,
 } from '../src/utils/commentPanelResize.ts';
 
 test('viewport=1440 count=0 → base=Math.min(480, 1440*0.26)=374.4', () => {
@@ -64,4 +65,14 @@ test('댓글 패널 드래그 너비는 저장 가능 범위 안으로 제한된
   assert.equal(computeCommentPanelResizeWidth(420, 1000, 2000, 'inner'), 280);
   assert.equal(computeCommentPanelResizeWidth(420, 1000, 2000, 'outer'), 720);
   assert.equal(computeCommentPanelResizeWidth(420, 1000, 0, 'outer'), 280);
+});
+
+test('스레드 칸 경계 드래그는 왼쪽으로 끌 때 스레드 폭이 커진다', () => {
+  assert.equal(computeCommentThreadPanelResizeWidth(340, 1000, 940), 400);
+  assert.equal(computeCommentThreadPanelResizeWidth(340, 1000, 1060), 280);
+});
+
+test('스레드 칸 드래그 폭은 읽기 가능한 범위 안으로 제한된다', () => {
+  assert.equal(computeCommentThreadPanelResizeWidth(340, 1000, 0), 560);
+  assert.equal(computeCommentThreadPanelResizeWidth(340, 1000, 2000), 260);
 });

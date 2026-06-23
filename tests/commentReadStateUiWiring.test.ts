@@ -201,7 +201,7 @@ test('CommentPanel can place the unread divider before a nested unread reply', (
 test('CommentPanel uses a Slack-style flat thread for reply-to-reply flows', () => {
   assert.match(commentPanel, /buildCommentReplyTarget\(comments,\s*replyTarget\)/);
   assert.match(commentPanel, /parentCommentId:\s*replyThreadTarget\.parentCommentId/);
-  assert.match(commentPanel, /setReplyTarget\(reply\)/);
+  assert.match(commentPanel, /openThreadReply\(reply\)/);
   assert.match(commentPanel, /replyInputThreadTarget\.isReplyToReply/);
   assert.match(commentPanel, /스레드에 댓글 추가/);
   assert.match(commentPanel, /선택한 메시지/);
@@ -214,6 +214,8 @@ test('CommentPanel exposes reply buttons next to reaction controls for parent co
   assert.match(commentPanel, /aria-label=\{`답글 달기: \$\{comment\.userName\}`\}/);
   assert.match(commentPanel, /aria-label=\{`답글 달기: \$\{reply\.userName\}`\}/);
   assert.match(commentPanel, /이 스레드에 답글/);
+  assert.match(commentPanel, /openThreadReply\(comment\)/);
+  assert.match(commentPanel, /openThreadReply\(reply\)/);
   assert.match(commentPanel, /replyThreadTarget\.isReplyToReply/);
 });
 

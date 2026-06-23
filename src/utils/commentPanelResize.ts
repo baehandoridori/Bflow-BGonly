@@ -2,9 +2,17 @@ export type CommentPanelResizeEdge = 'inner' | 'outer';
 
 export const COMMENT_PANEL_MIN_WIDTH = 280;
 export const COMMENT_PANEL_MAX_WIDTH = 720;
+export const COMMENT_THREAD_PANEL_DEFAULT_WIDTH = 340;
+export const COMMENT_THREAD_PANEL_MIN_WIDTH = 260;
+export const COMMENT_THREAD_PANEL_MAX_WIDTH = 560;
+export const COMMENT_THREAD_PANEL_GAP_WIDTH = 20;
 
 export function clampCommentPanelWidth(px: number): number {
   return Math.max(COMMENT_PANEL_MIN_WIDTH, Math.min(COMMENT_PANEL_MAX_WIDTH, px));
+}
+
+export function clampCommentThreadPanelWidth(px: number): number {
+  return Math.max(COMMENT_THREAD_PANEL_MIN_WIDTH, Math.min(COMMENT_THREAD_PANEL_MAX_WIDTH, Math.round(px)));
 }
 
 /**
@@ -31,4 +39,13 @@ export function computeCommentPanelResizeWidth(
     : startWidth - deltaX;
 
   return clampCommentPanelWidth(nextWidth);
+}
+
+export function computeCommentThreadPanelResizeWidth(
+  startWidth: number,
+  startX: number,
+  currentX: number,
+): number {
+  const deltaX = currentX - startX;
+  return clampCommentThreadPanelWidth(startWidth - deltaX);
 }

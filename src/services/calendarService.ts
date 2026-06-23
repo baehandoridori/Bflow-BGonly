@@ -6,6 +6,7 @@ import type { CalendarEvent, CalendarEventType, BflowEventMeta, GCalSettings } f
 import * as gcalService from './googleCalendarService';
 import { readMetadata, writeMetadata } from './supabaseService';
 import { useAuthStore } from '@/stores/useAuthStore';
+import { createUuid } from '@/utils/createUuid';
 
 // 비공개 이벤트는 Google Calendar 가 아닌 Supabase 에만 저장된다.
 // sourceCalendarId 에 이 특수 식별자를 써서 update/delete 시 올바른 저장소로 라우팅.
@@ -455,9 +456,7 @@ export async function updateEvent(eventId: string, updates: Partial<CalendarEven
     // create-first: 새 저장소에 먼저 생성해 성공을 확정한 뒤 기존 저장소에서 제거한다.
     // delete-first 방식이면 create 가 네트워크/인증 오류로 실패했을 때 원본이 이미
     // 사라져 데이터 손실이 발생하므로, 사용자 관점에서 atomic 하게 느껴지도록 순서를 뒤집음.
-    const freshLocalId = (typeof crypto !== 'undefined' && 'randomUUID' in crypto)
-      ? `cal_${crypto.randomUUID()}`
-      : `cal_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+    const freshLocalId = `cal_${createUuid()}`;
     const fresh: CalendarEvent = {
       ...merged,
       id: freshLocalId,
