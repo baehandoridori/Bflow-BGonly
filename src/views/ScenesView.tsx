@@ -23,7 +23,7 @@ import {
 } from '@/utils/sceneStageProgression';
 import { buildSingleSceneSelectionId } from '@/utils/sceneSelectionId';
 import { motion, AnimatePresence } from 'framer-motion';
-import { ArrowUpDown, LayoutGrid, Grid3x3, Layers, List, ChevronUp, ChevronDown, ClipboardPaste, ImagePlus, ArrowLeft, CheckSquare, Trash2, X, MessageCircle, Pencil, MoreVertical, StickyNote, Archive, Film, RotateCcw, Clock, PlayCircle, CheckCircle2, Circle, MessageSquareWarning, Plus, UserRound } from 'lucide-react';
+import { ArrowUpDown, LayoutGrid, Grid3x3, Layers, List, ChevronUp, ChevronDown, ChevronLeft, ChevronRight, ClipboardPaste, ImagePlus, ArrowLeft, CheckSquare, Trash2, X, MessageCircle, Pencil, MoreVertical, StickyNote, Archive, Film, RotateCcw, Clock, PlayCircle, CheckCircle2, Circle, MessageSquareWarning, Plus, UserRound } from 'lucide-react';
 import { AssigneeSelect } from '@/components/common/AssigneeSelect';
 import { HighlightText } from '@/components/common/HighlightText';
 import { stripEntityTokens } from '@/utils/entityTokens';
@@ -75,6 +75,29 @@ import {
   normalizeAssigneeProgressMap,
   sceneStateFromScene,
 } from '@/utils/assigneeProgress';
+
+type SceneHashTarget = Extract<HashTarget, { kind: 'scene' }>;
+
+interface SceneReferencePin {
+  id: string;
+  target: SceneHashTarget;
+  merged: MergedScene;
+  bgSheetName: string | null;
+  actSheetName: string | null;
+  partId: string;
+}
+
+function getReferencePinId(target: SceneHashTarget): string {
+  return [
+    target.episodeNumber,
+    target.partId.toLowerCase(),
+    target.sceneUuid ?? target.sceneId.toLowerCase(),
+  ].join(':');
+}
+
+function getReferencePinLabel(pin: SceneReferencePin): string {
+  return `EP${String(pin.target.episodeNumber).padStart(2, '0')} · ${pin.partId} · ${pin.merged.sceneId}`;
+}
 
 function phaseIcon(phase: ScenePhaseState, size = 12) {
   if (phase === 'wait') return <Clock size={size} strokeWidth={2.4} />;
@@ -2916,23 +2939,28 @@ export function ScenesView() {
   }, []);
 
   // 4c PR2: 메인 모달 안에서 #씬 칩 클릭 → 그 씬 상세를 좌/우 도킹 패널로 연다.
-  //   참조 패널은 자체 시트명(referenceBgSheet/referenceActSheet)으로 편집해, 메인 씬을 절대 건드리지 않는다.
-  //   referencePartId 는 참조 파트 기준 onAddDept/onDeleteBoth 재바인딩에 쓰인다(MergedScene 엔 partId 없음).
-  const [referenceMerged, setReferenceMerged] = useState<MergedScene | null>(null);
+  //   참조 패널은 핀마다 자체 시트명/파트를 들고 있어, 메인 씬이나 다른 핀을 절대 건드리지 않는다.
+  //   여러 #씬을 고정해 좌우 카드처럼 넘겨볼 수 있다.
+  const [referencePins, setReferencePins] = useState<SceneReferencePin[]>([]);
+  const [activeReferenceIndex, setActiveReferenceIndex] = useState(0);
   const [referenceSide, setReferenceSide] = useState<'left' | 'right'>('right');
-  const [referenceBgSheet, setReferenceBgSheet] = useState<string | null>(null);
-  const [referenceActSheet, setReferenceActSheet] = useState<string | null>(null);
-  const [referencePartId, setReferencePartId] = useState<string>('');
   // 승격("메인으로")은 검증된 점프 경로(navigateToHashTarget→pendingSceneModalRequest)로 보내야
   // selectedEpisode/Part 가 참조 씬에 맞게 정렬된다(직접 setDetailMerged 하면 다른 파트일 때 시트명 불일치=손상).
-  const [referenceTarget, setReferenceTarget] = useState<HashTarget | null>(null);
+  const activeReferencePin = referencePins[Math.min(activeReferenceIndex, Math.max(0, referencePins.length - 1))] ?? null;
   const clearReference = useCallback(() => {
-    setReferenceMerged(null);
-    setReferenceBgSheet(null);
-    setReferenceActSheet(null);
-    setReferencePartId('');
-    setReferenceTarget(null);
+    setReferencePins([]);
+    setActiveReferenceIndex(0);
   }, []);
+  const closeActiveReference = useCallback(() => {
+    setReferencePins((prev) => prev.filter((_, idx) => idx !== activeReferenceIndex));
+    setActiveReferenceIndex((idx) => Math.max(0, Math.min(idx, referencePins.length - 2)));
+  }, [activeReferenceIndex, referencePins.length]);
+  const showPreviousReference = useCallback(() => {
+    setActiveReferenceIndex((idx) => referencePins.length > 0 ? (idx - 1 + referencePins.length) % referencePins.length : 0);
+  }, [referencePins.length]);
+  const showNextReference = useCallback(() => {
+    setActiveReferenceIndex((idx) => referencePins.length > 0 ? (idx + 1) % referencePins.length : 0);
+  }, [referencePins.length]);
   const openReference = useCallback((target: HashTarget, side: 'left' | 'right') => {
     if (target.kind !== 'scene') return;
     const r = resolveReferenceMergedScene(target, useDataStore.getState().episodes, sortKey, sortDir);
@@ -2940,26 +2968,46 @@ export function ScenesView() {
       sonnerToast.error(`${target.sceneId} 씬을 찾을 수 없습니다.`);
       return;
     }
-    setReferenceMerged(r.merged);
-    setReferenceBgSheet(r.bgSheetName);
-    setReferenceActSheet(r.actSheetName);
-    setReferencePartId(target.partId);
+    const pin: SceneReferencePin = {
+      id: getReferencePinId(target),
+      target,
+      merged: r.merged,
+      bgSheetName: r.bgSheetName,
+      actSheetName: r.actSheetName,
+      partId: target.partId,
+    };
     setReferenceSide(side);
-    setReferenceTarget(target);
+    setReferencePins((prev) => {
+      const existingIndex = prev.findIndex((p) => p.id === pin.id);
+      if (existingIndex >= 0) {
+        setActiveReferenceIndex(existingIndex);
+        return prev.map((p, idx) => idx === existingIndex ? pin : p);
+      }
+      setActiveReferenceIndex(prev.length);
+      return [...prev, pin];
+    });
   }, [sortKey, sortDir]);
   // 참조 패널은 detailMerged 와 달리 자동 동기화 effect가 없어, 참조 패널에서 한 편집(낙관적 업데이트)이
-  // 패널 UI에 안 비쳤다(P2 — 코덱스). episodes 변경 시 referenceTarget 으로 재해석해 referenceMerged/시트명 갱신.
+  // 패널 UI에 안 비쳤다(P2 — 코덱스). episodes 변경 시 각 reference pin 을 재해석해 패널/시트명 갱신.
   useEffect(() => {
-    if (!referenceTarget) return;
-    const r = resolveReferenceMergedScene(referenceTarget, episodes, sortKey, sortDir);
-    if (r) {
-      setReferenceMerged(r.merged);
-      setReferenceBgSheet(r.bgSheetName);
-      setReferenceActSheet(r.actSheetName);
-    } else {
-      clearReference(); // 참조 씬이 사라졌으면(삭제 등) 패널 닫기
-    }
-  }, [episodes, referenceTarget, sortKey, sortDir, clearReference]);
+    setReferencePins((prev) => {
+      if (prev.length === 0) return prev;
+      const next = prev.flatMap((pin) => {
+        const r = resolveReferenceMergedScene(pin.target, episodes, sortKey, sortDir);
+        if (!r) return [];
+        return [{
+          ...pin,
+          merged: r.merged,
+          bgSheetName: r.bgSheetName,
+          actSheetName: r.actSheetName,
+        }];
+      });
+      if (next.length !== prev.length) {
+        setActiveReferenceIndex((idx) => next.length > 0 ? Math.min(idx, next.length - 1) : 0);
+      }
+      return next;
+    });
+  }, [episodes, sortKey, sortDir]);
 
   // 딥링크 처리: bflow://scene/sheetName/sceneId → 해당 씬 모달 자동 오픈
   // sceneId는 씬번호(예: a003) 또는 씬 인덱스(예: 12) 모두 지원
@@ -5116,7 +5164,7 @@ export function ScenesView() {
       )}
 
       {/* 필터 바 — 2줄 구조 */}
-      <div className="relative z-20 flex flex-col gap-2 bg-bg-card border border-bg-border rounded-xl p-3">
+      <div className="sticky top-0 z-30 flex flex-col gap-2 bg-bg-card/95 border border-bg-border rounded-xl p-3 shadow-[0_14px_32px_rgba(0,0,0,0.24)] backdrop-blur-md">
         {/* 1줄: 필수 네비게이션 (부서 + 에피소드 + 파트) */}
         <div className="flex flex-wrap items-center gap-3">
           {/* 부서 탭 */}
@@ -6047,7 +6095,7 @@ export function ScenesView() {
           // 사이드바 너비를 뺀 콘텐츠 영역의 정중앙 픽셀 좌표.
           // viewport 1996, 사이드바 64 → bulkBarLeftPx = 64 + (1996-64)/2 = 1030.
           // framer-motion 의 x:'-50%' 가 transform: translateX(-50%) 로 변환되며 정중앙 정렬.
-          const sidebarW = sidebarExpanded ? 132 : 64;
+          const sidebarW = sidebarExpanded ? 192 : 64;
           const bulkBarLeftPx = sidebarW + (viewportW - sidebarW) / 2;
           return (
           <motion.div
@@ -6459,82 +6507,122 @@ export function ScenesView() {
         const curIdx = mergedScenes.findIndex((m) => m.mergedKey === detailMerged.mergedKey);
         const hasPrev = curIdx > 0;
         const hasNext = curIdx >= 0 && curIdx < mergedScenes.length - 1;
-        // 4c PR2: 참조 도킹 패널 — 참조 씬 자체의 시트명/파트로 편집(메인 씬 절대 미침).
-        const referencePanelNode = referenceMerged ? (
-          <UnifiedSceneDetailModal
-            merged={referenceMerged}
-            bgSheetName={referenceBgSheet}
-            actSheetName={referenceActSheet}
-            dockMode={referenceSide}
-            referenceSide={referenceSide}
-            hasPrev={false}
-            hasNext={false}
-            onClose={clearReference}
-            onSceneReference={openReference}
-            onDockToggleSide={(side) => setReferenceSide(side)}
-            onDockPromote={() => { if (referenceTarget) navigateToHashTarget(referenceTarget); clearReference(); }}
-            onToggle={(sheet, id, stage, options) => handleToggleForSheet(sheet, id, stage, options)}
-            onFieldUpdate={(sheet, idx, field, value) => handleFieldUpdateForSheet(sheet, idx, field, value)}
-            onDeleteDept={(sheet, idx) => handleDeleteSceneForSheet(sheet, idx)}
-            onDeleteBoth={async () => {
-              // 참조 씬 양쪽 삭제 — 참조 자체 시트명/인덱스/uuid 로만 동작(메인 씬 미침).
-              const targets: { sheet: string; idx: number; uuid: string }[] = [];
-              if (referenceMerged.bgScene?.id && referenceBgSheet) {
-                targets.push({ sheet: referenceBgSheet, idx: referenceMerged.bgSceneIndex, uuid: referenceMerged.bgScene.id });
-              }
-              if (referenceMerged.actScene?.id && referenceActSheet) {
-                targets.push({ sheet: referenceActSheet, idx: referenceMerged.actSceneIndex, uuid: referenceMerged.actScene.id });
-              }
-              if (targets.length === 0) return;
-              const prevEpisodes = useDataStore.getState().episodes;
-              targets.sort((a, b) => b.idx - a.idx);
-              targets.forEach((target) => deleteSceneOptimistic(target.sheet, target.idx));
-              try {
-                await Promise.all(targets.map((target) => deleteSceneFromSupabase(target.uuid)));
-                syncInBackground();
-                clearReference();
-              } catch (err) {
-                setEpisodes(prevEpisodes);
-                handleSheetError(err, '씬 삭제');
-                syncInBackground();
-              }
-            }}
-            onAddDept={async (dept) => {
-              // 참조 파트(referencePartId) 기준으로 반대편 부서 씬 추가 — 참조 시트로만 동작.
-              const targetSheet = dept === 'bg' ? referenceBgSheet : referenceActSheet;
-              if (!targetSheet) {
-                sonnerToast.error(`${dept === 'bg' ? 'BG' : 'ACT'} 파트가 존재하지 않습니다. 먼저 파트를 만들어 주세요.`);
-                return;
-              }
-              // 참조 해석이 전역 맵을 복원하므로 buildUnifiedSceneId 재계산은 raw id(ac001)를 잘못 정규화할 수 있다(코덱스 P2).
-              // referenceMerged.sceneId 는 이미 참조 파트 기준으로 올바르게 통합된 id(buildMergedScenes 내부 등록 시 산출)라 그대로 쓴다.
-              const targetSceneId = referenceMerged.sceneId;
-              // 중복 방지: 참조 파트의 현재 씬 목록을 라이브 스토어에서 시트명으로 조회.
-              const targetPart = useDataStore.getState().episodes
-                .flatMap((ep) => ep.parts)
-                .find((p) => p.sheetName === targetSheet);
-              const existing = targetPart?.scenes.find((scene) =>
-                buildUnifiedSceneId(referencePartId, scene.sceneId) === targetSceneId,
-              );
-              if (existing) {
-                sonnerToast.error(`이미 ${dept === 'bg' ? 'BG' : 'ACT'} 쪽에 "${targetSceneId}" 씬이 있습니다.`);
-                return;
-              }
-              try {
-                await addScene(targetSheet, targetSceneId, '', '');
-                await syncInBackground();
-              } catch (err) {
-                handleSheetError(err, '씬 추가');
-              }
-            }}
-            onActPhaseStateClick={handleActPhaseStateClick}
-            onActFeedbackRequest={handleActFeedbackRequest}
-            onActRoundBump={handleActRoundBump}
-            onAssigneeStageToggle={handleAssigneeStageToggle}
-            onAssigneeActPhaseStateClick={handleAssigneeActPhaseStateClick}
-            onAssigneeActFeedbackRequest={handleActFeedbackRequest}
-            onAssigneeActRoundBump={handleAssigneeActRoundBump}
-          />
+        // 4c PR2: 참조 도킹 패널 — 핀마다 참조 씬 자체의 시트명/파트로 편집(메인 씬 절대 미침).
+        const referencePanelNode = activeReferencePin ? (
+          <div className="flex h-full min-h-0 flex-col gap-2" data-reference-pin-count={referencePins.length}>
+            <div className="flex shrink-0 items-center gap-2 rounded-lg border border-bg-border bg-bg-primary/80 px-2.5 py-2">
+              <button
+                type="button"
+                onClick={showPreviousReference}
+                disabled={referencePins.length <= 1}
+                className="inline-flex h-7 w-7 items-center justify-center rounded-md text-text-secondary hover:bg-bg-border/60 hover:text-text-primary disabled:cursor-not-allowed disabled:opacity-35"
+                title="이전 참조 씬"
+              >
+                <ChevronLeft size={14} />
+              </button>
+              <div className="min-w-0 flex-1">
+                <div className="truncate text-xs font-semibold text-text-primary" title={getReferencePinLabel(activeReferencePin)}>
+                  {getReferencePinLabel(activeReferencePin)}
+                </div>
+                <div className="text-[10px] text-text-secondary/70">
+                  {activeReferenceIndex + 1} / {referencePins.length} 참조
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={showNextReference}
+                disabled={referencePins.length <= 1}
+                className="inline-flex h-7 w-7 items-center justify-center rounded-md text-text-secondary hover:bg-bg-border/60 hover:text-text-primary disabled:cursor-not-allowed disabled:opacity-35"
+                title="다음 참조 씬"
+              >
+                <ChevronRight size={14} />
+              </button>
+              <button
+                type="button"
+                onClick={closeActiveReference}
+                className="inline-flex h-7 w-7 items-center justify-center rounded-md text-text-secondary hover:bg-red-500/15 hover:text-red-300"
+                title="현재 참조 닫기"
+              >
+                <X size={13} />
+              </button>
+            </div>
+            <div className="min-h-0 flex-1">
+              <UnifiedSceneDetailModal
+                merged={activeReferencePin.merged}
+                bgSheetName={activeReferencePin.bgSheetName}
+                actSheetName={activeReferencePin.actSheetName}
+                dockMode={referenceSide}
+                referenceSide={referenceSide}
+                hasPrev={false}
+                hasNext={false}
+                onClose={closeActiveReference}
+                onSceneReference={openReference}
+                onDockToggleSide={(side) => setReferenceSide(side)}
+                onDockPromote={() => { navigateToHashTarget(activeReferencePin.target); closeActiveReference(); }}
+                onToggle={(sheet, id, stage, options) => handleToggleForSheet(sheet, id, stage, options)}
+                onFieldUpdate={(sheet, idx, field, value) => handleFieldUpdateForSheet(sheet, idx, field, value)}
+                onDeleteDept={(sheet, idx) => handleDeleteSceneForSheet(sheet, idx)}
+                onDeleteBoth={async () => {
+                  // 참조 씬 양쪽 삭제 — 참조 자체 시트명/인덱스/uuid 로만 동작(메인 씬 미침).
+                  const targets: { sheet: string; idx: number; uuid: string }[] = [];
+                  if (activeReferencePin.merged.bgScene?.id && activeReferencePin.bgSheetName) {
+                    targets.push({ sheet: activeReferencePin.bgSheetName, idx: activeReferencePin.merged.bgSceneIndex, uuid: activeReferencePin.merged.bgScene.id });
+                  }
+                  if (activeReferencePin.merged.actScene?.id && activeReferencePin.actSheetName) {
+                    targets.push({ sheet: activeReferencePin.actSheetName, idx: activeReferencePin.merged.actSceneIndex, uuid: activeReferencePin.merged.actScene.id });
+                  }
+                  if (targets.length === 0) return;
+                  const prevEpisodes = useDataStore.getState().episodes;
+                  targets.sort((a, b) => b.idx - a.idx);
+                  targets.forEach((target) => deleteSceneOptimistic(target.sheet, target.idx));
+                  try {
+                    await Promise.all(targets.map((target) => deleteSceneFromSupabase(target.uuid)));
+                    syncInBackground();
+                    closeActiveReference();
+                  } catch (err) {
+                    setEpisodes(prevEpisodes);
+                    handleSheetError(err, '씬 삭제');
+                    syncInBackground();
+                  }
+                }}
+                onAddDept={async (dept) => {
+                  // 참조 파트(activeReferencePin.partId) 기준으로 반대편 부서 씬 추가 — 참조 시트로만 동작.
+                  const targetSheet = dept === 'bg' ? activeReferencePin.bgSheetName : activeReferencePin.actSheetName;
+                  if (!targetSheet) {
+                    sonnerToast.error(`${dept === 'bg' ? 'BG' : 'ACT'} 파트가 존재하지 않습니다. 먼저 파트를 만들어 주세요.`);
+                    return;
+                  }
+                  // 참조 해석이 전역 맵을 복원하므로 buildUnifiedSceneId 재계산은 raw id(ac001)를 잘못 정규화할 수 있다(코덱스 P2).
+                  // merged.sceneId 는 이미 참조 파트 기준으로 올바르게 통합된 id(buildMergedScenes 내부 등록 시 산출)라 그대로 쓴다.
+                  const targetSceneId = activeReferencePin.merged.sceneId;
+                  // 중복 방지: 참조 파트의 현재 씬 목록을 라이브 스토어에서 시트명으로 조회.
+                  const targetPart = useDataStore.getState().episodes
+                    .flatMap((ep) => ep.parts)
+                    .find((p) => p.sheetName === targetSheet);
+                  const existing = targetPart?.scenes.find((scene) =>
+                    buildUnifiedSceneId(activeReferencePin.partId, scene.sceneId) === targetSceneId,
+                  );
+                  if (existing) {
+                    sonnerToast.error(`이미 ${dept === 'bg' ? 'BG' : 'ACT'} 쪽에 "${targetSceneId}" 씬이 있습니다.`);
+                    return;
+                  }
+                  try {
+                    await addScene(targetSheet, targetSceneId, '', '');
+                    await syncInBackground();
+                  } catch (err) {
+                    handleSheetError(err, '씬 추가');
+                  }
+                }}
+                onActPhaseStateClick={handleActPhaseStateClick}
+                onActFeedbackRequest={handleActFeedbackRequest}
+                onActRoundBump={handleActRoundBump}
+                onAssigneeStageToggle={handleAssigneeStageToggle}
+                onAssigneeActPhaseStateClick={handleAssigneeActPhaseStateClick}
+                onAssigneeActFeedbackRequest={handleActFeedbackRequest}
+                onAssigneeActRoundBump={handleAssigneeActRoundBump}
+              />
+            </div>
+          </div>
         ) : null;
         return (
           <UnifiedSceneDetailModal

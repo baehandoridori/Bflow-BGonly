@@ -10,6 +10,23 @@
 
 const KEY_PREFIX = 'bflow_notification_last_seen_';
 
+function isIsoAfter(next: string, current: string | null): boolean {
+  if (!current) return true;
+  const nextTime = new Date(next).getTime();
+  const currentTime = new Date(current).getTime();
+  if (!Number.isFinite(nextTime) || !Number.isFinite(currentTime)) return true;
+  return nextTime > currentTime;
+}
+
+function setMonotonicIso(key: string, isoString: string): void {
+  try {
+    const current = localStorage.getItem(key);
+    if (isIsoAfter(isoString, current)) {
+      localStorage.setItem(key, isoString);
+    }
+  } catch { /* 개인정보보호 모드 등 — 무시 */ }
+}
+
 export function getLastSeenAt(userId: string): string | null {
   try {
     const v = localStorage.getItem(KEY_PREFIX + userId);
@@ -20,9 +37,7 @@ export function getLastSeenAt(userId: string): string | null {
 }
 
 export function setLastSeenAt(userId: string, isoString: string): void {
-  try {
-    localStorage.setItem(KEY_PREFIX + userId, isoString);
-  } catch { /* 개인정보보호 모드 등 — 무시 */ }
+  setMonotonicIso(KEY_PREFIX + userId, isoString);
 }
 
 /** 한 번도 기록 없으면 현재 시각으로 초기화. 다음 catch-up 부터 의미 가짐. */
@@ -48,9 +63,7 @@ export function getFeedbackLastSeenAt(userId: string): string | null {
 }
 
 export function setFeedbackLastSeenAt(userId: string, isoString: string): void {
-  try {
-    localStorage.setItem(FEEDBACK_KEY_PREFIX + userId, isoString);
-  } catch { /* 무시 */ }
+  setMonotonicIso(FEEDBACK_KEY_PREFIX + userId, isoString);
 }
 
 export function ensureFeedbackLastSeenInitialized(userId: string): void {
@@ -75,9 +88,7 @@ export function getAssignmentLastSeenAt(userId: string): string | null {
 }
 
 export function setAssignmentLastSeenAt(userId: string, isoString: string): void {
-  try {
-    localStorage.setItem(ASSIGNMENT_KEY_PREFIX + userId, isoString);
-  } catch { /* 무시 */ }
+  setMonotonicIso(ASSIGNMENT_KEY_PREFIX + userId, isoString);
 }
 
 export function ensureAssignmentLastSeenInitialized(userId: string): void {

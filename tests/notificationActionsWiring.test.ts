@@ -4,7 +4,9 @@ import { readFileSync } from 'node:fs';
 
 const notificationPanel = readFileSync('src/components/NotificationPanel.tsx', 'utf8');
 const notificationHelper = readFileSync('src/utils/notificationHelper.ts', 'utf8');
+const notificationDomainRead = readFileSync('src/utils/notificationDomainRead.ts', 'utf8');
 const notificationSceneAction = readFileSync('src/utils/notificationSceneAction.ts', 'utf8');
+const notificationStore = readFileSync('src/stores/useNotificationStore.ts', 'utf8');
 const appStore = readFileSync('src/stores/useAppStore.ts', 'utf8');
 const scenesView = readFileSync('src/views/ScenesView.tsx', 'utf8');
 const sceneDetailModal = readFileSync('src/components/scenes/SceneDetailModal.tsx', 'utf8');
@@ -30,9 +32,20 @@ test('native feedback toast jumps use the same notification scene navigation pat
 });
 
 test('all notification click paths mark domain read state before navigating', () => {
-  assert.match(notificationSceneAction, /markCommentReactionRead\(reactionNotificationId\)/);
-  assert.match(notificationSceneAction, /markFeedbackNotificationRead\(feedbackNotificationId\)/);
-  assert.match(notificationSceneAction, /markAssignmentNotificationRead\(assignmentNotificationId\)/);
+  assert.match(notificationSceneAction, /export \{ markNotificationDomainRead \} from '@\/utils\/notificationDomainRead'/);
+  assert.match(notificationDomainRead, /markCommentReactionRead\(reactionNotificationId\)/);
+  assert.match(notificationDomainRead, /markFeedbackNotificationRead\(feedbackNotificationId\)/);
+  assert.match(notificationDomainRead, /markAssignmentNotificationRead\(assignmentNotificationId\)/);
+});
+
+test('manual read and deletion paths also sync durable domain read state', () => {
+  assert.match(notificationStore, /import \{ markNotificationDomainRead \} from '\.\.\/utils\/notificationDomainRead'/);
+  assert.match(notificationStore, /function syncDomainRead\(notification: AppNotification\)/);
+  assert.match(notificationStore, /markAsRead: \(id\) => \{[\s\S]*if \(target && !target\.isRead\) syncDomainRead\(target\)/);
+  assert.match(notificationStore, /markAllAsRead: \(\) => \{[\s\S]*current\.filter\(\(n\) => !n\.isRead\)\.forEach\(syncDomainRead\)/);
+  assert.match(notificationStore, /removeNotification: \(id\) => \{[\s\S]*if \(target\) syncDomainRead\(target\)/);
+  assert.match(notificationStore, /clearAll: \(\) => \{[\s\S]*get\(\)\.notifications\.forEach\(syncDomainRead\)/);
+  assert.doesNotMatch(notificationPanel, /markCommentReactionRead/);
 });
 
 test('notification action labels describe the actual destination', () => {

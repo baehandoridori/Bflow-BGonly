@@ -36,7 +36,7 @@ import { loadVacationConfig, connectVacation } from '@/services/vacationService'
 import { loadLayout, loadPreferences, savePreferences, loadTheme, saveTheme } from '@/services/settingsService';
 import { semverGt } from '@/utils/semver';
 import { loadSession, loadUsers, setUsersSheetsMode, migrateUsersToSheets } from '@/services/userService';
-import { setFeedbackLastSeenAt, setAssignmentLastSeenAt, getCommentReactionLastSeenAt, setCommentReactionLastSeenAt } from '@/utils/lastSeenTracker';
+import { setLastSeenAt, setFeedbackLastSeenAt, setAssignmentLastSeenAt, getCommentReactionLastSeenAt, setCommentReactionLastSeenAt } from '@/utils/lastSeenTracker';
 import { buildReactionNotificationTitle } from '@/utils/commentReactionEmojiFormat';
 import { applyTheme, getPreset, getLightColors, deriveThemeFromAccent, sanitizeCustomHex, hexToRgb, DEFAULT_THEME_ID } from '@/themes';
 import { applyPreferencesToDOM, FONT_COLOR_PRESETS, applyTextColors } from '@/utils/typography';
@@ -552,7 +552,7 @@ export default function App() {
         // lastSeenVersion 은 갱신되어 다음 실행에도 안 보임 — 한솔 v1.27.0 1차 보고.
 
         // 알림 히스토리 로드
-        useNotificationStore.getState().loadFromDisk();
+        await useNotificationStore.getState().loadFromDisk();
 
         // 알림 설정 ref 업데이트
         if (savedPrefs?.notifications) {
@@ -839,8 +839,7 @@ export default function App() {
         const missed = await window.electronAPI?.supabaseFetchMissedMentions?.(me.id, me.name, lastSeen, 50);
         console.log('[catchup] fetch 결과', { count: missed?.length ?? 0, missed });
         if (!missed || missed.length === 0) {
-          setLastSeenAt(me.id, new Date().toISOString());
-          console.log('[catchup] 놓친 알림 없음 — last_seen 업데이트만');
+          console.log('[catchup] 놓친 알림 없음');
           return;
         }
         // 알림 패널에만 누적 (토스트 X — 한꺼번에 N 개 띄우면 시끄러움)
@@ -884,7 +883,7 @@ export default function App() {
           description: '종 모양을 클릭해 확인해주세요.',
           duration: 6000,
         });
-        setLastSeenAt(me.id, new Date().toISOString());
+        if (missed[0]?.createdAt) setLastSeenAt(me.id, missed[0].createdAt);
         console.log('[catchup] 완료', { added: missed.length });
       } catch (err) {
         console.warn('[catchup] 멘션 catch-up 실패:', err);
@@ -934,7 +933,6 @@ export default function App() {
         if (cappedOut) console.warn('[feedback-catchup] SAFE_CAP 도달 — 페이지네이션 break', { fetched: all.length });
         console.log('[feedback-catchup] 조회 결과', { count: all.length, cappedOut });
         if (all.length === 0) {
-          setFeedbackLastSeenAt(me.id, new Date().toISOString());
           return;
         }
         const store = useNotificationStore.getState();
@@ -1017,7 +1015,6 @@ export default function App() {
         if (cappedOut) console.warn('[assignment-catchup] SAFE_CAP 도달 — 페이지네이션 break', { fetched: all.length });
         console.log('[assignment-catchup] 조회 결과', { count: all.length, cappedOut });
         if (all.length === 0) {
-          setAssignmentLastSeenAt(me.id, new Date().toISOString());
           return;
         }
         const store = useNotificationStore.getState();
@@ -1324,6 +1321,7 @@ export default function App() {
             user_id?: string;
             text?: string;
             mentions?: string[];
+            created_at?: string;
             // v1.18.0: 리테이크 맥락 댓글 식별 — 값 있으면 'revision' 알림 경로로 분기.
             revision_id?: string | null;
             // v1.24.0: 1단계 대댓글이면 부모 댓글 id. 답글 알림 분기에 사용.
@@ -1442,6 +1440,7 @@ export default function App() {
                     body: bodyShort,
                     metadata: { ...baseMetadata, mentionedBy: author },
                   }, notiSettings);
+                  setLastSeenAt(me.id, newComment.created_at ?? new Date().toISOString());
                 } else if (isAssignee || isCounterpartAssignee || isThreadParticipant) {
                   const reason = isAssignee
                     ? '내 씬에 댓글'
@@ -1752,6 +1751,7 @@ export default function App() {
       if (e?.event === 'scene-assignment-notification') {
         const ap = e.payload as {
           notificationId: string;
+          createdAt?: string;
           sceneUuid: string; sceneId: string; sheetName: string;
           episodeNumber: number;
           recipientId: string;
@@ -1801,7 +1801,7 @@ export default function App() {
           },
         }).catch(() => { /* 토스트 실패 무시 */ });
         // broadcast 를 즉시 받았으므로 lastSeen 갱신 → 다음 로그인 catch-up 에서 중복 차단
-        if (me?.id) setAssignmentLastSeenAt(me.id, new Date().toISOString());
+        if (me?.id) setAssignmentLastSeenAt(me.id, ap.createdAt ?? new Date().toISOString());
         return;
       }
 
@@ -1814,6 +1814,7 @@ export default function App() {
         recipients: string[];
         // v1.25.5 코덱스 1차 P2 #3: INSERT 결과의 recipient_id → notification_id 매핑
         notificationIdsByRecipient?: Record<string, string>;
+        notificationCreatedAtByRecipient?: Record<string, string>;
       } | undefined;
       const me = useAuthStore.getState().currentUser;
       // v1.25.4 진단 로그 — 한솔 보고 "알림이 실제로 잘 오는지" 검증용.
@@ -1843,6 +1844,7 @@ export default function App() {
       //   metadata.feedbackNotificationId 로 markRead 가능.
       const transitionLabel = `${p.fromState || ''} → ${p.toState}`;
       const myFeedbackNotificationId = p.notificationIdsByRecipient?.[me.id];
+      const myFeedbackCreatedAt = p.notificationCreatedAtByRecipient?.[me.id];
       dispatchNotification({
         type: 'acting_feedback',
         title: `${p.senderName}님이 피드백을 요청했습니다`,
@@ -1870,7 +1872,7 @@ export default function App() {
         },
       }).catch(() => { /* 토스트 실패는 무시 */ });
       // v1.25.5: broadcast 를 즉시 받았으므로 lastSeen 갱신 — 다음 로그인 catch-up 에서 중복 차단
-      if (me?.id) setFeedbackLastSeenAt(me.id, new Date().toISOString());
+      if (me?.id) setFeedbackLastSeenAt(me.id, myFeedbackCreatedAt ?? new Date().toISOString());
     });
 
     const offJump = window.electronAPI.onFeedbackJumpToScene?.((payload) => {
@@ -2014,6 +2016,7 @@ export default function App() {
           parentCommentId: commentParent,
           partId: commentPartId,
           revisionId: commentRevisionId,
+          createdAt: commentCreatedAt,
         } = data.payload as {
           sceneId?: string;
           userName?: string;
@@ -2024,6 +2027,7 @@ export default function App() {
           parentCommentId?: string | null;
           partId?: string | null;
           revisionId?: string | null;
+          createdAt?: string | null;
         };
         const me = useAuthStore.getState().currentUser;
         if (commentRevisionId) {
@@ -2100,6 +2104,7 @@ export default function App() {
                 body: bodyShort,
                 metadata: { ...baseMetadata, mentionedBy: author },
               }, notiSettings);
+              setLastSeenAt(me.id, commentCreatedAt ?? new Date().toISOString());
             } else if (isAssignee || isCounterpartAssignee || isThreadParticipant) {
               const reason = isAssignee
                 ? '내 씬에 댓글'

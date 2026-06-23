@@ -13,6 +13,9 @@ import * as gcalService from '@/services/googleCalendarService';
 
 const GCAL_AUTH_EVENT = 'bflow:gcal-auth-changed';
 type CalendarAuthState = 'checking' | 'connected' | 'disconnected';
+const SIDEBAR_COLLAPSED_WIDTH = 64;
+const SIDEBAR_EXPANDED_WIDTH = 192;
+const SIDEBAR_LABEL_MAX_WIDTH = 120;
 
 function readCachedCalendarAuthState(): CalendarAuthState {
   if (typeof window === 'undefined') return 'disconnected';
@@ -299,7 +302,7 @@ export function Sidebar() {
       <div
         className="shrink-0"
         style={{
-          width: isExpanded ? 168 : 64,
+          width: isExpanded ? SIDEBAR_EXPANDED_WIDTH : SIDEBAR_COLLAPSED_WIDTH,
           transition: 'width 350ms cubic-bezier(0.4, 0, 0.2, 1)',
         }}
       />
@@ -310,7 +313,7 @@ export function Sidebar() {
         onMouseLeave={handleMouseLeave}
         className="fixed top-0 left-0 h-full border-r border-bg-border flex flex-col py-4 gap-2 overflow-hidden z-40"
         style={{
-          width: isVisuallyExpanded ? 168 : 64,
+          width: isVisuallyExpanded ? SIDEBAR_EXPANDED_WIDTH : SIDEBAR_COLLAPSED_WIDTH,
           transition: 'width 350ms cubic-bezier(0.4, 0, 0.2, 1)',
           background: sidebarBg,
         }}
@@ -376,9 +379,9 @@ export function Sidebar() {
               )}
             </span>
             <span
-              className="text-sm font-medium whitespace-nowrap overflow-hidden"
+              className="text-sm font-medium whitespace-nowrap overflow-hidden text-ellipsis"
               style={{
-                maxWidth: isVisuallyExpanded ? 104 : 0,
+                maxWidth: isVisuallyExpanded ? SIDEBAR_LABEL_MAX_WIDTH : 0,
                 opacity: isVisuallyExpanded ? 1 : 0,
                 paddingRight: isVisuallyExpanded ? 8 : 0,
                 transition: 'max-width 350ms cubic-bezier(0.4, 0, 0.2, 1), opacity 250ms ease 80ms, padding 350ms cubic-bezier(0.4, 0, 0.2, 1)',

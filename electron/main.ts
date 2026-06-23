@@ -1537,6 +1537,7 @@ async function notifyAssigneeChange(
     for (const r of inserted) {
       broadcastSceneAssignmentNotification({
         notificationId: r.notificationId,
+        createdAt: r.createdAt,
         sceneUuid,
         sceneId: s.scene_number,
         sheetName,
@@ -2527,9 +2528,10 @@ ipcMain.handle('supabase:dispatch-feedback-notification', wrapIpc(async (
   //   sender 자기 자신은 recipients 에서 자동 제외 (UI 단에서 이미 제외하지만 백업 가드)
   const filteredRecipients = payload.recipients.filter((rid) => rid !== payload.senderId);
   let notificationIdsByRecipient: Record<string, string> = {};
+  let notificationCreatedAtByRecipient: Record<string, string> = {};
   if (filteredRecipients.length > 0) {
     try {
-      notificationIdsByRecipient = await sbInsertFeedbackNotifications({
+      const insertedByRecipient = await sbInsertFeedbackNotifications({
         senderId: payload.senderId,
         senderName: payload.senderName,
         sceneUuid: payload.sceneUuid,
@@ -2542,6 +2544,12 @@ ipcMain.handle('supabase:dispatch-feedback-notification', wrapIpc(async (
         feedbackRound: payload.feedbackRound,
         message: payload.message,
       }, filteredRecipients);
+      notificationIdsByRecipient = Object.fromEntries(
+        Object.entries(insertedByRecipient).map(([recipientId, row]) => [recipientId, row.id]),
+      );
+      notificationCreatedAtByRecipient = Object.fromEntries(
+        Object.entries(insertedByRecipient).map(([recipientId, row]) => [recipientId, row.createdAt]),
+      );
     } catch (err) {
       console.error('[Feedback Dispatch] DB INSERT 실패:', err);
       // INSERT 실패해도 broadcast 는 시도 — 즉시 받는 사용자는 토스트라도 받음.
@@ -2549,7 +2557,7 @@ ipcMain.handle('supabase:dispatch-feedback-notification', wrapIpc(async (
   }
   // 2) 즉시 broadcast — 켜져있는 클라이언트는 실시간 수신.
   //    INSERT 결과의 (recipient_id → notification_id) 매핑 포함 → 수신자가 자기 row ID 로 markRead 가능.
-  broadcastActingFeedbackRequest({ ...payload, notificationIdsByRecipient });
+  broadcastActingFeedbackRequest({ ...payload, notificationIdsByRecipient, notificationCreatedAtByRecipient });
 }));
 
 // v1.25.5 로그인 catch-up — last_seen_at 이후 미읽음 알림 일괄 조회 (페이지네이션 before 지원)
