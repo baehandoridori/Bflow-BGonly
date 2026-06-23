@@ -92,6 +92,8 @@ test('side thread has its own composer and main composer stays top-level', () =>
   assert.doesNotMatch(commentPanel, /requestAnimationFrame\(\(\) => inputRef\.current\?\.focus\(\)\)/);
   assert.match(commentPanel, /const handleThreadPaste = \(e: React\.ClipboardEvent\) =>/);
   assert.match(commentPanel, /const handleThreadDrop = \(e: React\.DragEvent\) =>/);
+  assert.match(commentPanel, /dragCounter\.current = 0/);
+  assert.match(commentPanel, /setDraggingOver\(false\)/);
   assert.match(commentPanel, /const handleThreadFileChange = \(e: React\.ChangeEvent<HTMLInputElement>\) =>/);
   assert.match(commentPanel, /const threadUploadedImageUrls = threadAttachedImages\.map/);
   assert.match(commentPanel, /const handleThreadSubmit = async \(\) =>/);

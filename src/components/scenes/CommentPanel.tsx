@@ -1053,6 +1053,8 @@ export function CommentPanel({
   const handleThreadDrop = (e: React.DragEvent) => {
     e.preventDefault();
     e.stopPropagation();
+    dragCounter.current = 0;
+    setDraggingOver(false);
     const files = Array.from(e.dataTransfer.files || []).filter(f => f.type.startsWith('image/'));
     files.forEach(addThreadAttachedImageFromBlob);
   };
