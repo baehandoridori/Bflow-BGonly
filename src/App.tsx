@@ -36,7 +36,7 @@ import { loadVacationConfig, connectVacation } from '@/services/vacationService'
 import { loadLayout, loadPreferences, savePreferences, loadTheme, saveTheme } from '@/services/settingsService';
 import { semverGt } from '@/utils/semver';
 import { loadSession, loadUsers, setUsersSheetsMode, migrateUsersToSheets } from '@/services/userService';
-import { setLastSeenAt, setFeedbackLastSeenAt, setAssignmentLastSeenAt, getCommentReactionLastSeenAt, setCommentReactionLastSeenAt } from '@/utils/lastSeenTracker';
+import { setFeedbackLastSeenAt, setAssignmentLastSeenAt, getCommentReactionLastSeenAt, setCommentReactionLastSeenAt } from '@/utils/lastSeenTracker';
 import { buildReactionNotificationTitle } from '@/utils/commentReactionEmojiFormat';
 import { applyTheme, getPreset, getLightColors, deriveThemeFromAccent, sanitizeCustomHex, hexToRgb, DEFAULT_THEME_ID } from '@/themes';
 import { applyPreferencesToDOM, FONT_COLOR_PRESETS, applyTextColors } from '@/utils/typography';
@@ -1321,7 +1321,6 @@ export default function App() {
             user_id?: string;
             text?: string;
             mentions?: string[];
-            created_at?: string;
             // v1.18.0: 리테이크 맥락 댓글 식별 — 값 있으면 'revision' 알림 경로로 분기.
             revision_id?: string | null;
             // v1.24.0: 1단계 대댓글이면 부모 댓글 id. 답글 알림 분기에 사용.
@@ -1440,7 +1439,6 @@ export default function App() {
                     body: bodyShort,
                     metadata: { ...baseMetadata, mentionedBy: author },
                   }, notiSettings);
-                  setLastSeenAt(me.id, newComment.created_at ?? new Date().toISOString());
                 } else if (isAssignee || isCounterpartAssignee || isThreadParticipant) {
                   const reason = isAssignee
                     ? '내 씬에 댓글'
@@ -2016,7 +2014,6 @@ export default function App() {
           parentCommentId: commentParent,
           partId: commentPartId,
           revisionId: commentRevisionId,
-          createdAt: commentCreatedAt,
         } = data.payload as {
           sceneId?: string;
           userName?: string;
@@ -2027,7 +2024,6 @@ export default function App() {
           parentCommentId?: string | null;
           partId?: string | null;
           revisionId?: string | null;
-          createdAt?: string | null;
         };
         const me = useAuthStore.getState().currentUser;
         if (commentRevisionId) {
@@ -2104,7 +2100,6 @@ export default function App() {
                 body: bodyShort,
                 metadata: { ...baseMetadata, mentionedBy: author },
               }, notiSettings);
-              setLastSeenAt(me.id, commentCreatedAt ?? new Date().toISOString());
             } else if (isAssignee || isCounterpartAssignee || isThreadParticipant) {
               const reason = isAssignee
                 ? '내 씬에 댓글'

@@ -1488,7 +1488,7 @@ export async function addComment(
   throwIfError(error);
   // v1.24.0 P0 #1: broadcast 페이로드에 commentId/parentCommentId/partId 추가 →
   //   렌더러가 realtime/broadcast 어느 쪽에서 먼저 도착하든 같은 알림 분기 호출 가능.
-  broadcastCommentAdded(sceneId, userName, userId, text, mentions, commentId, safeParent, partUuid, revisionId, createdAt);
+  broadcastCommentAdded(sceneId, userName, userId, text, mentions, commentId, safeParent, partUuid, revisionId);
 }
 
 /** 댓글 수정.

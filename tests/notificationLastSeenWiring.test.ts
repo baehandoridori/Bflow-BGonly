@@ -21,8 +21,8 @@ test('live notification cursors use source timestamps and never move backwards',
   assert.match(app, /setAssignmentLastSeenAt\(me\.id, ap\.createdAt \?\? new Date\(\)\.toISOString\(\)\)/);
   assert.match(app, /const myFeedbackCreatedAt = p\.notificationCreatedAtByRecipient\?\.\[me\.id\]/);
   assert.match(app, /setFeedbackLastSeenAt\(me\.id, myFeedbackCreatedAt \?\? new Date\(\)\.toISOString\(\)\)/);
-  assert.match(app, /setLastSeenAt\(me\.id, newComment\.created_at \?\? new Date\(\)\.toISOString\(\)\)/);
-  assert.match(app, /setLastSeenAt\(me\.id, commentCreatedAt \?\? new Date\(\)\.toISOString\(\)\)/);
+  assert.doesNotMatch(app, /setLastSeenAt\(me\.id, newComment\.created_at/);
+  assert.doesNotMatch(app, /setLastSeenAt\(me\.id, commentCreatedAt/);
   assert.match(lastSeenTracker, /function fractionalCursorPart\(value: string\): string/);
   assert.match(lastSeenTracker, /fractionalCursorPart\(next\) > fractionalCursorPart\(current\)/);
   assert.match(lastSeenTracker, /function setMonotonicIso\(key: string, isoString: string\)/);

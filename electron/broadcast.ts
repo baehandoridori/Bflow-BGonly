@@ -301,7 +301,6 @@ export function broadcastCommentAdded(
   parentCommentId?: string | null,
   partId?: string,
   revisionId?: string | null,
-  createdAt?: string,
 ): void {
   safeSend('comment-added', {
     sceneId,
@@ -313,7 +312,6 @@ export function broadcastCommentAdded(
     parentCommentId: parentCommentId ?? null,
     partId: partId ?? null,
     revisionId: revisionId ?? null,
-    createdAt: createdAt ?? null,
     ts: Date.now(),
   });
 }
