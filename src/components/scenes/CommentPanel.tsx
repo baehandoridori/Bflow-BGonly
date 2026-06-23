@@ -310,6 +310,8 @@ export function CommentPanel({
   //   cross-scene parentCommentId 가 박혀 orphan 답글 + 잘못된 부모 작성자에게 알림 발송.
   const [replyTarget, setReplyTarget] = useState<SceneCommentWithSource | null>(null);
   const [activeThreadRootId, setActiveThreadRootId] = useState<string | null>(null);
+  const activeThreadRootIdRef = useRef<string | null>(activeThreadRootId);
+  activeThreadRootIdRef.current = activeThreadRootId;
   const [lastThreadRootId, setLastThreadRootId] = useState<string | null>(null);
   useEffect(() => {
     setReplyTarget(null);
@@ -1374,7 +1376,11 @@ export function CommentPanel({
       }
     } catch (err) {
       console.error('[스레드 댓글 추가 실패]', err);
-      if (!mountedRef.current || sceneKeyRef.current !== panelSceneKey) return;
+      if (
+        !mountedRef.current
+        || sceneKeyRef.current !== panelSceneKey
+        || activeThreadRootIdRef.current !== threadRoot.id
+      ) return;
       setComments(prevComments);
       onCountChange?.(prevComments.length);
       if (threadInputValueRef.current.length === 0) {

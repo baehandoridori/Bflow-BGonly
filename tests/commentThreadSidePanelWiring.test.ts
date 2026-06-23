@@ -10,6 +10,7 @@ const settingsService = readFileSync('src/services/settingsService.ts', 'utf8');
 
 test('CommentPanel opens a separate side thread when replying', () => {
   assert.match(commentPanel, /const \[activeThreadRootId, setActiveThreadRootId\] = useState<string \| null>\(null\)/);
+  assert.match(commentPanel, /const activeThreadRootIdRef = useRef<string \| null>\(activeThreadRootId\);\s*activeThreadRootIdRef\.current = activeThreadRootId/);
   assert.match(commentPanel, /const openThreadReply = useCallback/);
   assert.match(commentPanel, /const threadRootId = threadTarget\.parentCommentId/);
   assert.match(commentPanel, /setActiveThreadRootId\(threadRootId\)/);
@@ -88,6 +89,7 @@ test('side thread has its own composer and main composer stays top-level', () =>
   assert.match(commentPanel, /const threadMentionTargetInCurrentThread =/);
   assert.match(commentPanel, /const mentionTargetName = threadMentionTargetInCurrentThread/);
   assert.match(commentPanel, /mentions\.push\(mentionTargetName\)/);
+  assert.match(commentPanel, /activeThreadRootIdRef\.current !== threadRoot\.id/);
   assert.match(commentPanel, /if \(threadInputValueRef\.current\.length === 0\)/);
   assert.match(commentPanel, /parentCommentId: threadRoot\.id/);
   assert.match(commentPanel, /data-comment-thread-input/);
