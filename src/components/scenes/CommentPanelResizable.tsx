@@ -108,7 +108,8 @@ export function CommentPanelResizable(props: CommentPanelResizableProps) {
   const effectiveWidth = liveWidth ?? width;
   const threadMaxWidth = getCommentThreadPanelMaxWidthForMainWidth(effectiveWidth);
   const effectiveThreadWidth = clampCommentThreadPanelWidth(liveThreadWidth ?? threadWidth, threadMaxWidth);
-  const threadFrameWidth = threadPanelOpen ? effectiveThreadWidth + COMMENT_THREAD_PANEL_GAP_WIDTH : 0;
+  // 스레드 핸들은 댓글 목록과 스레드 사이 폭 배분만 바꾼다. 전체 댓글 프레임 폭은 바깥 핸들이 담당한다.
+  const threadFrameWidth = threadPanelOpen ? COMMENT_THREAD_PANEL_DEFAULT_WIDTH + COMMENT_THREAD_PANEL_GAP_WIDTH : 0;
   const renderedWidth = effectiveWidth + threadFrameWidth;
   const secondaryKey =
     explicitSecondaryKey
