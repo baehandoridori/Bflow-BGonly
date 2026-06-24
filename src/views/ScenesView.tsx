@@ -3349,8 +3349,10 @@ export function ScenesView() {
   );
   // 'all' 모드: 화면에 실제 표시되는 병합 카드 기준 진행률
   const allModeScenes = useMemo(
-    () => mergedScenes.flatMap((merged) => [merged.bgScene, merged.actScene].filter((scene): scene is Scene => Boolean(scene))),
-    [mergedScenes],
+    () => mergedScenes
+      .flatMap((merged) => [merged.bgScene, merged.actScene].filter((scene): scene is Scene => Boolean(scene)))
+      .filter((scene) => !selectedAssignee || sceneMatchesAssignee(scene, selectedAssignee)),
+    [mergedScenes, selectedAssignee],
   );
 
   // v1.18.0: 알림 패널에서 디스패치한 'bflow:open-scene-modal' → 모달 자동 오픈 + 탭/포커스.
