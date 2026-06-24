@@ -137,13 +137,16 @@ function mergedMatchesStatusFilter(
 ): boolean {
   if (statusFilter === 'all') return true;
   const presentScenes = [merged.bgScene, merged.actScene].filter((scene): scene is Scene => Boolean(scene));
-  if (presentScenes.length === 0) return false;
+  const statusScenes = selectedAssignee
+    ? presentScenes.filter((scene) => sceneMatchesAssignee(scene, selectedAssignee))
+    : presentScenes;
+  if (statusScenes.length === 0) return false;
   const matchesRequestedStatus = (scene: Scene) => matchesAssigneeStatusFilter(scene, statusFilter, selectedAssignee);
-  const allDone = presentScenes.every((scene) => matchesAssigneeStatusFilter(scene, 'done', selectedAssignee));
-  const allNotStarted = presentScenes.every((scene) => matchesAssigneeStatusFilter(scene, 'not-started', selectedAssignee));
+  const allDone = statusScenes.every((scene) => matchesAssigneeStatusFilter(scene, 'done', selectedAssignee));
+  const allNotStarted = statusScenes.every((scene) => matchesAssigneeStatusFilter(scene, 'not-started', selectedAssignee));
 
-  if (statusFilter === 'done') return presentScenes.every(matchesRequestedStatus);
-  if (statusFilter === 'not-started') return presentScenes.every(matchesRequestedStatus);
+  if (statusFilter === 'done') return statusScenes.every(matchesRequestedStatus);
+  if (statusFilter === 'not-started') return statusScenes.every(matchesRequestedStatus);
   return !allDone && !allNotStarted;
 }
 

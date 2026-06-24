@@ -150,5 +150,7 @@ test('assignee filter applies status chips to the selected assignee progress', (
   assert.match(util, /matchesAssigneeStatusFilter/);
   assert.match(scenesView, /matchesAssigneeStatusFilter\(s,\s*statusFilter,\s*selectedAssignee\)/);
   assert.match(scenesView, /mergedMatchesStatusFilter\(merged,\s*statusFilter,\s*selectedAssignee\)/);
+  assert.match(scenesView, /const statusScenes = selectedAssignee[\s\S]*?presentScenes\.filter\(\(scene\) => sceneMatchesAssignee\(scene, selectedAssignee\)\)/);
+  assert.match(scenesView, /statusScenes\.every\(matchesRequestedStatus\)/);
   assert.match(scenesView, /matchesAssigneeStatusFilter\(scene,\s*statusFilter,\s*selectedAssignee\)/);
 });
