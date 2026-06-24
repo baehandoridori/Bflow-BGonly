@@ -1555,6 +1555,10 @@ export function CommentPanel({
     ),
     [visibleComments],
   );
+  const mainFeedNodes = useMemo(
+    () => mergeFeed(mainFlowComments, (reOnly || hideActivity) ? [] : (inlineEvents ?? [])),
+    [hideActivity, inlineEvents, mainFlowComments, reOnly],
+  );
 
   const firstUnreadCommentId = useMemo(() => {
     if (!currentUser?.id || !hasUnreadComments) return null;
@@ -1705,9 +1709,8 @@ export function CommentPanel({
         ) : (
         <AnimatePresence initial={false}>
           {(() => {
-            const feed = mergeFeed(mainFlowComments, (reOnly || hideActivity) ? [] : (inlineEvents ?? []));
             let prevUserId: string | null = null;
-            return feed.map((node) => {
+            return mainFeedNodes.map((node) => {
               if (node.kind === 'event') {
                 // v1.24.0: 시스템 활동이 끼어들면 묶음 끊김 (확정 규칙).
                 prevUserId = null;
@@ -1731,7 +1734,6 @@ export function CommentPanel({
                 return (
                   <motion.div
                     key={`evt:${node.event.id}`}
-                    layout="position"
                     initial={{ opacity: 0, y: -6 }}
                     animate={{ opacity: 1, y: 0 }}
                     exit={{ opacity: 0 }}
@@ -1804,7 +1806,6 @@ export function CommentPanel({
                 key={comment.id}
                 ref={(el) => { commentRefs.current.set(comment.id, el); }}
                 onClick={markUnreadCommentsRead}
-                layout="position"
                 initial={{ opacity: 0, y: -6 }}
                 animate={{ opacity: 1, y: 0 }}
                 exit={{ opacity: 0 }}

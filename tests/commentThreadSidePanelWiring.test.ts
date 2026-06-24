@@ -126,6 +126,13 @@ test('side thread has its own composer and main composer stays top-level', () =>
   assert.match(commentPanel, /onClick=\{handleSubmit\}/);
 });
 
+test('comment feed avoids layout-measure animations while thread composer is typing', () => {
+  assert.match(commentPanel, /const mainFeedNodes = useMemo\(/);
+  assert.match(commentPanel, /mergeFeed\(mainFlowComments, \(reOnly \|\| hideActivity\) \? \[\] : \(inlineEvents \?\? \[\]\)\)/);
+  assert.match(commentPanel, /return mainFeedNodes\.map\(\(node\) =>/);
+  assert.doesNotMatch(commentPanel, /layout="position"/);
+});
+
 test('UnifiedSceneDetailModal keeps the comment side panel visible with reference panels', () => {
   assert.match(unifiedSceneDetailModal, /primaryCommentKey && \(/);
   assert.doesNotMatch(unifiedSceneDetailModal, /primaryCommentKey && !referencePanel &&/);
