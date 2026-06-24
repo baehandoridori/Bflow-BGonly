@@ -7,7 +7,7 @@ import { STAGES, DEPARTMENTS, DEPARTMENT_CONFIGS, SCENE_PHASE_LABELS, SCENE_PHAS
 import type { Scene, Stage, Department, ScenesDeptFilter, MergedScene, ScenePhaseState, SceneAssigneeProgressMap } from '@/types';
 import { FeedbackRequestModal } from '@/components/scenes/FeedbackRequestModal';
 import { updateScenePhaseInSupabase, dispatchActingFeedbackNotification } from '@/services/supabaseService';
-import { sceneProgress, isFullyDone, isNotStarted, progressGradient } from '@/utils/calcStats';
+import { sceneProgress, isFullyDone, progressGradient } from '@/utils/calcStats';
 import { normalizeSceneIdKey } from '@/utils/sceneIdKey';
 import { findPartById, getCanonicalPartIds, partIdMatches } from '@/utils/partId';
 import {
@@ -74,6 +74,8 @@ import {
   hasMultiAssigneeProgress,
   normalizeAssigneeProgressMap,
   sceneStateFromScene,
+  matchesAssigneeStatusFilter,
+  sceneProgressForAssigneeFilter,
 } from '@/utils/assigneeProgress';
 
 type SceneHashTarget = Extract<HashTarget, { kind: 'scene' }>;
@@ -128,16 +130,60 @@ function buildSceneCardKey(sheetName: string | null | undefined, scene: Scene, s
   return scene.id ?? `${sheetName ?? 'scene'}:${scene.no}:${scene.sceneId}:${sceneIndex}`;
 }
 
-function mergedMatchesStatusFilter(merged: MergedScene, statusFilter: StatusFilter): boolean {
+function mergedMatchesStatusFilter(
+  merged: MergedScene,
+  statusFilter: StatusFilter,
+  selectedAssignee?: string | null,
+): boolean {
   if (statusFilter === 'all') return true;
   const presentScenes = [merged.bgScene, merged.actScene].filter((scene): scene is Scene => Boolean(scene));
-  if (presentScenes.length === 0) return false;
-  const allDone = presentScenes.every(isFullyDone);
-  const allNotStarted = presentScenes.every(isNotStarted);
+  const statusScenes = selectedAssignee
+    ? presentScenes.filter((scene) => sceneMatchesAssignee(scene, selectedAssignee))
+    : presentScenes;
+  if (statusScenes.length === 0) return false;
+  const matchesRequestedStatus = (scene: Scene) => matchesAssigneeStatusFilter(scene, statusFilter, selectedAssignee);
+  const allDone = statusScenes.every((scene) => matchesAssigneeStatusFilter(scene, 'done', selectedAssignee));
+  const allNotStarted = statusScenes.every((scene) => matchesAssigneeStatusFilter(scene, 'not-started', selectedAssignee));
 
-  if (statusFilter === 'done') return allDone;
-  if (statusFilter === 'not-started') return allNotStarted;
+  if (statusFilter === 'done') return statusScenes.every(matchesRequestedStatus);
+  if (statusFilter === 'not-started') return statusScenes.every(matchesRequestedStatus);
   return !allDone && !allNotStarted;
+}
+
+function completedStageCountForAssigneeFilter(scene: Scene, selectedAssignee?: string | null): number {
+  if (selectedAssignee) return sceneProgressForAssigneeFilter(scene, selectedAssignee) / 25;
+  return [scene.lo, scene.done, scene.review, scene.png].filter(Boolean).length;
+}
+
+function scenesForMergedAssigneeFilter(merged: MergedScene, selectedAssignee?: string | null): Scene[] {
+  const scenes = [merged.bgScene, merged.actScene].filter((scene): scene is Scene => Boolean(scene));
+  if (!selectedAssignee) return scenes;
+  return scenes.filter((scene) => sceneMatchesAssignee(scene, selectedAssignee));
+}
+
+function sortMergedScenesForAssigneeFilter(
+  mergedScenes: MergedScene[],
+  sortKey: SortKey,
+  sortDir: 'asc' | 'desc',
+  selectedAssignee?: string | null,
+): MergedScene[] {
+  if (!selectedAssignee || (sortKey !== 'progress' && sortKey !== 'incomplete')) return mergedScenes;
+
+  const progressForMerged = (merged: MergedScene) => {
+    const scenes = scenesForMergedAssigneeFilter(merged, selectedAssignee);
+    if (scenes.length === 0) return 0;
+    return scenes.reduce((sum, scene) => sum + sceneProgressForAssigneeFilter(scene, selectedAssignee), 0) / scenes.length;
+  };
+  const incompleteForMerged = (merged: MergedScene) =>
+    scenesForMergedAssigneeFilter(merged, selectedAssignee)
+      .reduce((sum, scene) => sum + (4 - completedStageCountForAssigneeFilter(scene, selectedAssignee)), 0);
+
+  return [...mergedScenes].sort((a, b) => {
+    const cmp = sortKey === 'progress'
+      ? progressForMerged(a) - progressForMerged(b)
+      : incompleteForMerged(b) - incompleteForMerged(a);
+    return sortDir === 'asc' ? cmp : -cmp;
+  });
 }
 
 /* ── 라쏘 드래그 선택 훅 ── */
@@ -3223,12 +3269,8 @@ export function ScenesView() {
     );
   }
   // 상태 필터
-  if (statusFilter === 'done') {
-    scenes = scenes.filter(isFullyDone);
-  } else if (statusFilter === 'not-started') {
-    scenes = scenes.filter(isNotStarted);
-  } else if (statusFilter === 'in-progress') {
-    scenes = scenes.filter((s) => !isFullyDone(s) && !isNotStarted(s));
+  if (statusFilter !== 'all') {
+    scenes = scenes.filter((s) => matchesAssigneeStatusFilter(s, statusFilter, selectedAssignee));
   }
   // 정렬
   scenes = [...scenes].sort((a, b) => {
@@ -3239,10 +3281,10 @@ export function ScenesView() {
         break;
       }
       case 'assignee': cmp = (a.assignee || '').localeCompare(b.assignee || ''); break;
-      case 'progress': cmp = sceneProgress(a) - sceneProgress(b); break;
+      case 'progress': cmp = sceneProgressForAssigneeFilter(a, selectedAssignee) - sceneProgressForAssigneeFilter(b, selectedAssignee); break;
       case 'incomplete': {
-        const aLeft = 4 - [a.lo, a.done, a.review, a.png].filter(Boolean).length;
-        const bLeft = 4 - [b.lo, b.done, b.review, b.png].filter(Boolean).length;
+        const aLeft = 4 - completedStageCountForAssigneeFilter(a, selectedAssignee);
+        const bLeft = 4 - completedStageCountForAssigneeFilter(b, selectedAssignee);
         cmp = bLeft - aLeft; // 미완료 많은 것 먼저
         break;
       }
@@ -3283,9 +3325,9 @@ export function ScenesView() {
       );
     }
     if (applyStatusFilter) {
-      if (statusFilter === 'done') result = result.filter(isFullyDone);
-      else if (statusFilter === 'not-started') result = result.filter(isNotStarted);
-      else if (statusFilter === 'in-progress') result = result.filter((s) => !isFullyDone(s) && !isNotStarted(s));
+      if (statusFilter !== 'all') {
+        result = result.filter((s) => matchesAssigneeStatusFilter(s, statusFilter, selectedAssignee));
+      }
     }
 
     result = [...result].sort((a, b) => {
@@ -3296,10 +3338,10 @@ export function ScenesView() {
           break;
         }
         case 'assignee': cmp = (a.assignee || '').localeCompare(b.assignee || ''); break;
-        case 'progress': cmp = sceneProgress(a) - sceneProgress(b); break;
+        case 'progress': cmp = sceneProgressForAssigneeFilter(a, selectedAssignee) - sceneProgressForAssigneeFilter(b, selectedAssignee); break;
         case 'incomplete': {
-          const aLeft = 4 - [a.lo, a.done, a.review, a.png].filter(Boolean).length;
-          const bLeft = 4 - [b.lo, b.done, b.review, b.png].filter(Boolean).length;
+          const aLeft = 4 - completedStageCountForAssigneeFilter(a, selectedAssignee);
+          const bLeft = 4 - completedStageCountForAssigneeFilter(b, selectedAssignee);
           cmp = bLeft - aLeft;
           break;
         }
@@ -3331,15 +3373,20 @@ export function ScenesView() {
     sortDir,
   });
   const mergedScenes = useMemo(
-    () => selectedDepartment === 'all'
-      ? searchFilteredMergedScenes.filter((merged) => mergedMatchesStatusFilter(merged, statusFilter))
-      : searchFilteredMergedScenes,
-    [searchFilteredMergedScenes, selectedDepartment, statusFilter],
+    () => {
+      const statusMatchedMergedScenes = selectedDepartment === 'all'
+        ? searchFilteredMergedScenes.filter((merged) => mergedMatchesStatusFilter(merged, statusFilter, selectedAssignee))
+        : searchFilteredMergedScenes;
+      return sortMergedScenesForAssigneeFilter(statusMatchedMergedScenes, sortKey, sortDir, selectedAssignee);
+    },
+    [searchFilteredMergedScenes, selectedDepartment, statusFilter, selectedAssignee, sortKey, sortDir],
   );
   // 'all' 모드: 화면에 실제 표시되는 병합 카드 기준 진행률
   const allModeScenes = useMemo(
-    () => mergedScenes.flatMap((merged) => [merged.bgScene, merged.actScene].filter((scene): scene is Scene => Boolean(scene))),
-    [mergedScenes],
+    () => mergedScenes
+      .flatMap((merged) => [merged.bgScene, merged.actScene].filter((scene): scene is Scene => Boolean(scene)))
+      .filter((scene) => !selectedAssignee || sceneMatchesAssignee(scene, selectedAssignee)),
+    [mergedScenes, selectedAssignee],
   );
 
   // v1.18.0: 알림 패널에서 디스패치한 'bflow:open-scene-modal' → 모달 자동 오픈 + 탭/포커스.
@@ -3568,7 +3615,7 @@ export function ScenesView() {
   const activeScenes = selectedDepartment === 'all' ? allModeScenes : scenes;
   const totalChecks = activeScenes.length * 4;
   const doneChecks = activeScenes.reduce(
-    (sum, s) => sum + [s.lo, s.done, s.review, s.png].filter(Boolean).length,
+    (sum, s) => sum + completedStageCountForAssigneeFilter(s, selectedAssignee),
     0
   );
   const overallPct = totalChecks > 0 ? Math.round((doneChecks / totalChecks) * 100) : 0;
@@ -5881,7 +5928,7 @@ export function ScenesView() {
                 {layoutGroups.map(([layoutKey, groupScenes]) => {
                   const groupTotal = groupScenes.length * 4;
                   const groupDone = groupScenes.reduce(
-                    (sum, s) => sum + [s.lo, s.done, s.review, s.png].filter(Boolean).length, 0
+                    (sum, s) => sum + completedStageCountForAssigneeFilter(s, selectedAssignee), 0
                   );
                   const groupPct = groupTotal > 0 ? Math.round((groupDone / groupTotal) * 100) : 0;
                   const sceneIds = groupScenes.map((s) => s.sceneId).join(', ');
