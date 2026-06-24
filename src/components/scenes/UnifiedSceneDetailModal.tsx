@@ -445,28 +445,48 @@ export function UnifiedSceneDetailModal({
       .filter((a) => BIG_EVENT_TYPES.has(a.actionType))
       .map<CommentInlineEvent>((a) => {
         const v = describeActivity(a);
+        const revisionId =
+          a.detail && typeof a.detail === 'object' && typeof a.detail.revisionId === 'string'
+            ? a.detail.revisionId
+            : undefined;
         const revisionTone =
           a.actionType === 'revision_add'
             ? 'revision_add'
             : a.actionType === 'revision_in_progress'
               ? 'revision_in_progress'
-              : a.actionType === 'revision_resolve'
+              : a.actionType === 'revision_resolve' || a.actionType === 'revision_final_resolve'
                 ? 'revision_resolve'
-                : undefined;
+                : a.actionType === 'revision_delete'
+                  ? 'revision_delete'
+                  : a.actionType.startsWith('revision_')
+                    ? 'revision_update'
+                    : undefined;
         const revisionLabel =
           a.actionType === 'revision_add'
             ? '등록'
             : a.actionType === 'revision_in_progress'
               ? '진행'
-              : a.actionType === 'revision_resolve'
+              : a.actionType === 'revision_resolve' || a.actionType === 'revision_final_resolve'
                 ? '완료'
-                : undefined;
+                : a.actionType === 'revision_delete'
+                  ? '삭제'
+                  : a.actionType.startsWith('revision_')
+                    ? '변경'
+                    : undefined;
         return {
           id: a.id,
           at: a.createdAt,
           text: `${a.userName} ${deptPrefix(a.department)}${v.text}`,
           tone: revisionTone,
           label: revisionLabel,
+          revisionId,
+          revisionAction: a.actionType === 'revision_add'
+            ? 'add'
+            : a.actionType === 'revision_delete'
+              ? 'delete'
+              : revisionId
+                ? 'status'
+                : undefined,
         };
       });
     // 단계 전부 완료 derive — Scene.completedAt + completedBy

@@ -485,6 +485,9 @@ function setPreviewRevisions(revisions: CompRevision[]) {
 }
 
 function seedFeedbackHubPreview() {
+  const previewFlow = new URLSearchParams(window.location.search).get('flow');
+  const openRetakeCommentThread = previewFlow === 'retake-comment-thread';
+
   useAuthStore.setState({
     currentUser: previewUsers[0],
     users: previewUsers,
@@ -501,7 +504,21 @@ function seedFeedbackHubPreview() {
     6: '에피소드 필터와 상태 전환 확인용 더미 에피소드',
   });
   useAppStore.setState({
-    currentView: 'compositing-revisions',
+    currentView: openRetakeCommentThread ? 'scenes' : 'compositing-revisions',
+    selectedEpisode: openRetakeCommentThread ? 5 : null,
+    selectedPart: openRetakeCommentThread ? 'A' : null,
+    selectedDepartment: 'all',
+    dashboardDeptFilter: 'all',
+    pendingSceneModalRequest: openRetakeCommentThread
+      ? {
+        sceneName: 'a001',
+        episodeNumber: 5,
+        partId: 'A',
+        initialTab: 'revisions',
+        focusRevisionId: 'preview-rev-ep05-a001-1',
+        forceDeptFilter: 'all',
+      }
+      : null,
     dataConnected: false,
     activeDataSource: 'supabase',
     colorMode: 'dark',
