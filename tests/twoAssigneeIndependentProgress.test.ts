@@ -142,3 +142,13 @@ test('dev preview seeds two ACT assignees with different progress states', () =>
   assert.match(source, /sceneState: 'work'/);
   assert.match(source, /sceneState: 'wait'/);
 });
+
+test('assignee filter applies status chips to the selected assignee progress', () => {
+  const util = readFileSync(progressUtilPath, 'utf8');
+  const scenesView = readFileSync('src/views/ScenesView.tsx', 'utf8');
+
+  assert.match(util, /matchesAssigneeStatusFilter/);
+  assert.match(scenesView, /matchesAssigneeStatusFilter\(s,\s*statusFilter,\s*selectedAssignee\)/);
+  assert.match(scenesView, /mergedMatchesStatusFilter\(merged,\s*statusFilter,\s*selectedAssignee\)/);
+  assert.match(scenesView, /matchesAssigneeStatusFilter\(scene,\s*statusFilter,\s*selectedAssignee\)/);
+});

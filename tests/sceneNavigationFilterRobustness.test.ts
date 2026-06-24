@@ -55,7 +55,7 @@ test('all-view status filter is applied after BG and ACT are merged', async () =
   const scenesView = await readRepoFile('src', 'views', 'ScenesView.tsx');
 
   assert.match(scenesView, /function mergedMatchesStatusFilter/);
-  assert.match(scenesView, /searchFilteredMergedScenes\.filter\(\(merged\) => mergedMatchesStatusFilter\(merged, statusFilter\)\)/);
+  assert.match(scenesView, /searchFilteredMergedScenes\.filter\(\(merged\) => mergedMatchesStatusFilter\(merged, statusFilter, selectedAssignee\)\)/);
   assert.match(scenesView, /filterAndSortScenes\(bgPart\.scenes, \{ applyStatusFilter: selectedDepartment !== 'all' \}\)/);
 });
 
