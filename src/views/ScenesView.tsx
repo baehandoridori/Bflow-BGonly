@@ -155,6 +155,37 @@ function completedStageCountForAssigneeFilter(scene: Scene, selectedAssignee?: s
   return [scene.lo, scene.done, scene.review, scene.png].filter(Boolean).length;
 }
 
+function scenesForMergedAssigneeFilter(merged: MergedScene, selectedAssignee?: string | null): Scene[] {
+  const scenes = [merged.bgScene, merged.actScene].filter((scene): scene is Scene => Boolean(scene));
+  if (!selectedAssignee) return scenes;
+  return scenes.filter((scene) => sceneMatchesAssignee(scene, selectedAssignee));
+}
+
+function sortMergedScenesForAssigneeFilter(
+  mergedScenes: MergedScene[],
+  sortKey: SortKey,
+  sortDir: 'asc' | 'desc',
+  selectedAssignee?: string | null,
+): MergedScene[] {
+  if (!selectedAssignee || (sortKey !== 'progress' && sortKey !== 'incomplete')) return mergedScenes;
+
+  const progressForMerged = (merged: MergedScene) => {
+    const scenes = scenesForMergedAssigneeFilter(merged, selectedAssignee);
+    if (scenes.length === 0) return 0;
+    return scenes.reduce((sum, scene) => sum + sceneProgressForAssigneeFilter(scene, selectedAssignee), 0) / scenes.length;
+  };
+  const incompleteForMerged = (merged: MergedScene) =>
+    scenesForMergedAssigneeFilter(merged, selectedAssignee)
+      .reduce((sum, scene) => sum + (4 - completedStageCountForAssigneeFilter(scene, selectedAssignee)), 0);
+
+  return [...mergedScenes].sort((a, b) => {
+    const cmp = sortKey === 'progress'
+      ? progressForMerged(a) - progressForMerged(b)
+      : incompleteForMerged(b) - incompleteForMerged(a);
+    return sortDir === 'asc' ? cmp : -cmp;
+  });
+}
+
 /* ── 라쏘 드래그 선택 훅 ── */
 interface LassoRect { x: number; y: number; w: number; h: number }
 
@@ -3342,10 +3373,13 @@ export function ScenesView() {
     sortDir,
   });
   const mergedScenes = useMemo(
-    () => selectedDepartment === 'all'
-      ? searchFilteredMergedScenes.filter((merged) => mergedMatchesStatusFilter(merged, statusFilter, selectedAssignee))
-      : searchFilteredMergedScenes,
-    [searchFilteredMergedScenes, selectedDepartment, statusFilter, selectedAssignee],
+    () => {
+      const statusMatchedMergedScenes = selectedDepartment === 'all'
+        ? searchFilteredMergedScenes.filter((merged) => mergedMatchesStatusFilter(merged, statusFilter, selectedAssignee))
+        : searchFilteredMergedScenes;
+      return sortMergedScenesForAssigneeFilter(statusMatchedMergedScenes, sortKey, sortDir, selectedAssignee);
+    },
+    [searchFilteredMergedScenes, selectedDepartment, statusFilter, selectedAssignee, sortKey, sortDir],
   );
   // 'all' 모드: 화면에 실제 표시되는 병합 카드 기준 진행률
   const allModeScenes = useMemo(
