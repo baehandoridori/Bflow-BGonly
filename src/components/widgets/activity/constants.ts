@@ -1,4 +1,4 @@
-import type { ActionGroup, ActionType } from '@/types';
+import type { ActionGroup, ActionType } from '../../../types/index.ts';
 
 /** action_type → 4그룹 매핑 (필터 칩 분류용) */
 export const ACTION_TYPE_TO_GROUP: Record<ActionType, ActionGroup> = {

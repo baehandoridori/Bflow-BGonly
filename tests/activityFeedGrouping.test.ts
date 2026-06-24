@@ -1,8 +1,11 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 
 import { groupActivities } from '../src/components/widgets/activity/utils.ts';
 import type { Activity, ActionType } from '../src/types/index.ts';
+
+const feedbackHubPreviewApp = readFileSync('src/views/FeedbackHubPreviewApp.tsx', 'utf8');
 
 function makeActivity(overrides: Partial<Activity> & { id: string }): Activity {
   return {
@@ -65,6 +68,25 @@ test('multi-scene action: 5분 윈도우 초과 → 2 그룹/아이템', () => {
   assert.equal(r.length, 2);
 });
 
+test('multi-scene action: 이전 항목과 5분 이내여도 묶음 첫 항목 기준 5분을 넘으면 끊김', () => {
+  const acts: Activity[] = [
+    makeActivity({ id: 'a1', sceneId: 's-1', createdAt: '2026-05-16T00:00:00Z' }),
+    makeActivity({ id: 'a2', sceneId: 's-2', createdAt: '2026-05-16T00:04:00Z' }),
+    makeActivity({ id: 'a3', sceneId: 's-3', createdAt: '2026-05-16T00:08:00Z' }),
+  ];
+
+  const r = groupActivities(acts);
+  assert.equal(r.length, 2);
+  assert.equal(r[0]?.type, 'group');
+  if (r[0]?.type === 'group') {
+    assert.deepEqual(r[0].items.map(item => item.id), ['a3', 'a2']);
+  }
+  assert.equal(r[1]?.type, 'item');
+  if (r[1]?.type === 'item') {
+    assert.equal(r[1].activity.id, 'a1');
+  }
+});
+
 test('multi-scene action: 다른 episode → 묶이지 않음', () => {
   const acts: Activity[] = [
     makeActivity({ id: 'a1', sceneId: 's-1', episodeNumber: 1, createdAt: '2026-05-16T00:00:00Z' }),
@@ -94,6 +116,97 @@ test('image_upload_storyboard 도 multi-scene 화이트리스트 적용', () => 
   if (r[0]?.type === 'group') assert.equal(r[0].items.length, 3);
 });
 
+test('retake revision_add bursts across scenes are grouped within 5 minutes', () => {
+  const acts: Activity[] = [
+    makeActivity({
+      id: 'r1',
+      actionType: 'revision_add',
+      actionGroup: 'memo',
+      sceneId: 's-1',
+      createdAt: '2026-05-16T00:00:00Z',
+    }),
+    makeActivity({
+      id: 'r2',
+      actionType: 'revision_add',
+      actionGroup: 'memo',
+      sceneId: 's-2',
+      createdAt: '2026-05-16T00:01:00Z',
+    }),
+    makeActivity({
+      id: 'r3',
+      actionType: 'revision_add',
+      actionGroup: 'memo',
+      sceneId: 's-3',
+      createdAt: '2026-05-16T00:02:00Z',
+    }),
+  ];
+
+  const r = groupActivities(acts);
+  assert.equal(r.length, 1);
+  assert.equal(r[0]?.type, 'group');
+  if (r[0]?.type === 'group') assert.equal(r[0].items.length, 3);
+});
+
+test('retake status bursts across scenes are grouped within 5 minutes', () => {
+  const acts: Activity[] = [
+    makeActivity({
+      id: 'r1',
+      actionType: 'revision_resolve',
+      actionGroup: 'memo',
+      sceneId: 's-1',
+      createdAt: '2026-05-16T00:00:00Z',
+    }),
+    makeActivity({
+      id: 'r2',
+      actionType: 'revision_resolve',
+      actionGroup: 'memo',
+      sceneId: 's-2',
+      createdAt: '2026-05-16T00:01:00Z',
+    }),
+  ];
+
+  const r = groupActivities(acts);
+  assert.equal(r.length, 1);
+  assert.equal(r[0]?.type, 'group');
+});
+
+test('retake bursts do not chain into a group longer than 5 minutes', () => {
+  const acts: Activity[] = [
+    makeActivity({
+      id: 'r1',
+      actionType: 'revision_add',
+      actionGroup: 'memo',
+      sceneId: 's-1',
+      createdAt: '2026-05-16T00:00:00Z',
+    }),
+    makeActivity({
+      id: 'r2',
+      actionType: 'revision_add',
+      actionGroup: 'memo',
+      sceneId: 's-2',
+      createdAt: '2026-05-16T00:04:00Z',
+    }),
+    makeActivity({
+      id: 'r3',
+      actionType: 'revision_add',
+      actionGroup: 'memo',
+      sceneId: 's-3',
+      createdAt: '2026-05-16T00:08:00Z',
+    }),
+  ];
+
+  const r = groupActivities(acts);
+  assert.equal(r.length, 2);
+  assert.equal(r[0]?.type, 'group');
+  if (r[0]?.type === 'group') {
+    assert.deepEqual(r[0].items.map(item => item.id), ['r3', 'r2']);
+  }
+  assert.equal(r[1]?.type, 'item');
+  if (r[1]?.type === 'item') {
+    assert.equal(r[1].activity.id, 'r1');
+  }
+});
+
 test('다른 user 의 같은 multi-scene 액션 → 묶이지 않음 (user 분리는 유지)', () => {
   const acts: Activity[] = [
     makeActivity({ id: 'a1', userId: 'u1', sceneId: 's-1', createdAt: '2026-05-16T00:00:00Z' }),
@@ -101,4 +214,19 @@ test('다른 user 의 같은 multi-scene 액션 → 묶이지 않음 (user 분�
   ];
   const r = groupActivities(acts);
   assert.equal(r.length, 2);
+});
+
+test('feedback hub preview retake activities use the same memo group as production activity constants', () => {
+  assert.match(feedbackHubPreviewApp, /actionGroup:\s*'memo'/);
+  assert.doesNotMatch(feedbackHubPreviewApp, /actionGroup:\s*'etc'/);
+});
+
+test('feedback hub preview retake burst uses one actor id for grouped demo', () => {
+  assert.match(feedbackHubPreviewApp, /const actorUserId = typeof actor === 'object' \? actor\.userId : revision\.requesterId/);
+  assert.match(feedbackHubPreviewApp, /const actorUserName = typeof actor === 'object' \? actor\.userName : actor \?\? revision\.requesterName/);
+  const burstActivityStart = feedbackHubPreviewApp.indexOf("'2026-05-28T07:37:00+09:00'");
+  assert.notEqual(burstActivityStart, -1);
+  const burstActivityCall = feedbackHubPreviewApp.slice(burstActivityStart, burstActivityStart + 180);
+  assert.match(burstActivityCall, /userId: 'preview-user-hansol'/);
+  assert.match(burstActivityCall, /userName: '한솔'/);
 });

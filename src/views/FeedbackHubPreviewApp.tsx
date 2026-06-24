@@ -407,17 +407,19 @@ function makePreviewActivity(
   revision: CompRevision,
   actionType: 'revision_add' | 'revision_in_progress' | 'revision_resolve',
   createdAt: string,
-  actorName?: string,
+  actor?: string | { userId: string; userName: string },
   resolvedNote?: string,
 ): Activity {
   const context = findPreviewSceneContext(revision.sceneKey, revision.department);
+  const actorUserId = typeof actor === 'object' ? actor.userId : revision.requesterId;
+  const actorUserName = typeof actor === 'object' ? actor.userName : actor ?? revision.requesterName;
 
   return {
     id: `preview-activity-${actionType}-${revision.id}-${createdAt}`,
-    userId: revision.requesterId,
-    userName: actorName ?? revision.requesterName,
+    userId: actorUserId,
+    userName: actorUserName,
     actionType,
-    actionGroup: 'etc',
+    actionGroup: 'memo',
     sceneId: context?.scene.id ?? null,
     sceneLabel: context ? `${context.episode.title} ${context.part.partId} ${context.scene.sceneId}` : null,
     episodeNumber: context?.episode.episodeNumber ?? null,
@@ -440,7 +442,12 @@ const previewActivities: Activity[] = [
   makePreviewActivity(revById('preview-rev-ep05-a001-1'), 'revision_add', '2026-05-28T07:35:00+09:00'),
   makePreviewActivity(revById('preview-rev-ep05-a001-2'), 'revision_add', '2026-05-27T18:20:00+09:00'),
   makePreviewActivity(revById('preview-rev-ep05-a001-2'), 'revision_in_progress', '2026-05-28T08:10:00+09:00', '배한'),
-  makePreviewActivity(revById('preview-rev-ep05-a002-1'), 'revision_add', '2026-05-26T14:00:00+09:00'),
+  makePreviewActivity(
+    revById('preview-rev-ep05-a002-1'),
+    'revision_add',
+    '2026-05-28T07:37:00+09:00',
+    { userId: 'preview-user-hansol', userName: '한솔' },
+  ),
   makePreviewActivity(revById('preview-rev-ep05-a002-1'), 'revision_in_progress', '2026-05-27T10:35:00+09:00', '서연'),
   makePreviewActivity(
     revById('preview-rev-ep05-a002-1'),
