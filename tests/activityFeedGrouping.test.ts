@@ -68,6 +68,25 @@ test('multi-scene action: 5분 윈도우 초과 → 2 그룹/아이템', () => {
   assert.equal(r.length, 2);
 });
 
+test('multi-scene action: 이전 항목과 5분 이내여도 묶음 첫 항목 기준 5분을 넘으면 끊김', () => {
+  const acts: Activity[] = [
+    makeActivity({ id: 'a1', sceneId: 's-1', createdAt: '2026-05-16T00:00:00Z' }),
+    makeActivity({ id: 'a2', sceneId: 's-2', createdAt: '2026-05-16T00:04:00Z' }),
+    makeActivity({ id: 'a3', sceneId: 's-3', createdAt: '2026-05-16T00:08:00Z' }),
+  ];
+
+  const r = groupActivities(acts);
+  assert.equal(r.length, 2);
+  assert.equal(r[0]?.type, 'group');
+  if (r[0]?.type === 'group') {
+    assert.deepEqual(r[0].items.map(item => item.id), ['a3', 'a2']);
+  }
+  assert.equal(r[1]?.type, 'item');
+  if (r[1]?.type === 'item') {
+    assert.equal(r[1].activity.id, 'a1');
+  }
+});
+
 test('multi-scene action: 다른 episode → 묶이지 않음', () => {
   const acts: Activity[] = [
     makeActivity({ id: 'a1', sceneId: 's-1', episodeNumber: 1, createdAt: '2026-05-16T00:00:00Z' }),
@@ -149,6 +168,43 @@ test('retake status bursts across scenes are grouped within 5 minutes', () => {
   const r = groupActivities(acts);
   assert.equal(r.length, 1);
   assert.equal(r[0]?.type, 'group');
+});
+
+test('retake bursts do not chain into a group longer than 5 minutes', () => {
+  const acts: Activity[] = [
+    makeActivity({
+      id: 'r1',
+      actionType: 'revision_add',
+      actionGroup: 'memo',
+      sceneId: 's-1',
+      createdAt: '2026-05-16T00:00:00Z',
+    }),
+    makeActivity({
+      id: 'r2',
+      actionType: 'revision_add',
+      actionGroup: 'memo',
+      sceneId: 's-2',
+      createdAt: '2026-05-16T00:04:00Z',
+    }),
+    makeActivity({
+      id: 'r3',
+      actionType: 'revision_add',
+      actionGroup: 'memo',
+      sceneId: 's-3',
+      createdAt: '2026-05-16T00:08:00Z',
+    }),
+  ];
+
+  const r = groupActivities(acts);
+  assert.equal(r.length, 2);
+  assert.equal(r[0]?.type, 'group');
+  if (r[0]?.type === 'group') {
+    assert.deepEqual(r[0].items.map(item => item.id), ['r3', 'r2']);
+  }
+  assert.equal(r[1]?.type, 'item');
+  if (r[1]?.type === 'item') {
+    assert.equal(r[1].activity.id, 'r1');
+  }
 });
 
 test('다른 user 의 같은 multi-scene 액션 → 묶이지 않음 (user 분리는 유지)', () => {

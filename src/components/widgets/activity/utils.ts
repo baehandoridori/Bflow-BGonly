@@ -103,9 +103,9 @@ export function groupActivities(items: Activity[]): FeedItem[] {
   };
 
   for (let i = 1; i < sorted.length; i++) {
-    const prev = buffer[buffer.length - 1];
+    const head = buffer[0];
     const cur = sorted[i];
-    if (sameGroup(prev, cur)) buffer.push(cur);
+    if (sameGroup(head, cur)) buffer.push(cur);
     else { flush(); buffer.push(cur); }
   }
   flush();
