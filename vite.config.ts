@@ -2,10 +2,15 @@ import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 import electron from 'vite-plugin-electron';
 import renderer from 'vite-plugin-electron-renderer';
+import fs from 'fs';
 import path from 'path';
 import pkg from './package.json';
 
 const rendererOnly = process.env.BFLOW_RENDERER_ONLY === '1';
+const workspaceNodeModules = path.resolve(__dirname, 'node_modules');
+const realWorkspaceNodeModules = fs.existsSync(workspaceNodeModules)
+  ? fs.realpathSync(workspaceNodeModules)
+  : workspaceNodeModules;
 
 export default defineConfig({
   define: {
@@ -46,6 +51,15 @@ export default defineConfig({
   resolve: {
     alias: {
       '@': path.resolve(__dirname, './src'),
+    },
+  },
+  server: {
+    fs: {
+      allow: [
+        __dirname,
+        workspaceNodeModules,
+        realWorkspaceNodeModules,
+      ],
     },
   },
   build: {

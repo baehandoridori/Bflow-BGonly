@@ -6,6 +6,7 @@ const commentPanel = readFileSync('src/components/scenes/CommentPanel.tsx', 'utf
 const commentPanelResizable = readFileSync('src/components/scenes/CommentPanelResizable.tsx', 'utf8');
 const sceneDetailModal = readFileSync('src/components/scenes/SceneDetailModal.tsx', 'utf8');
 const unifiedSceneDetailModal = readFileSync('src/components/scenes/UnifiedSceneDetailModal.tsx', 'utf8');
+const revisionCommentThread = readFileSync('src/components/scenes/RevisionCommentThread.tsx', 'utf8');
 const settingsService = readFileSync('src/services/settingsService.ts', 'utf8');
 
 test('CommentPanel opens a separate side thread when replying', () => {
@@ -14,7 +15,7 @@ test('CommentPanel opens a separate side thread when replying', () => {
   assert.match(commentPanel, /const openThreadReply = useCallback/);
   assert.match(commentPanel, /const threadRootId = threadTarget\.parentCommentId/);
   assert.match(commentPanel, /setActiveThreadRootId\(threadRootId\)/);
-  assert.match(commentPanel, /onThreadPanelOpenChange\?\.\(activeThreadRoot != null\)/);
+  assert.match(commentPanel, /onThreadPanelOpenChange\?\.\(activeThreadOpen\)/);
   assert.doesNotMatch(commentPanel, /onThreadPanelOpenChange\?\.\(activeThreadRootId != null\)/);
   assert.match(commentPanel, /comments\s*\n\s*\.filter\(\(c\) => c\.parentCommentId === activeThreadRoot\.id\)/);
   assert.doesNotMatch(commentPanel, /activeThreadRoot \? repliesByParent\.get\(activeThreadRoot\.id\)/);
@@ -67,9 +68,12 @@ test('CommentPanelResizable persists the last thread split width', () => {
   assert.match(commentPanelResizable, /setThreadWidthPersistent\(null\)/);
 });
 
-test('reply buttons use the side thread opener for parent comments and replies', () => {
-  assert.match(commentPanel, /onClick=\{\(\) => openThreadReply\(comment\)\}/);
-  assert.match(commentPanel, /onClick=\{\(\) => openThreadReply\(reply\)\}/);
+test('reply buttons use the context-aware side thread opener for parent comments and replies', () => {
+  assert.match(commentPanel, /const openContextualThreadReply = useCallback/);
+  assert.match(commentPanel, /if \(target\.revisionId\) \{/);
+  assert.match(commentPanel, /openRevisionThread\(target\.revisionId, true, target\)/);
+  assert.match(commentPanel, /onClick=\{\(\) => openContextualThreadReply\(comment\)\}/);
+  assert.match(commentPanel, /onClick=\{\(\) => openContextualThreadReply\(reply\)\}/);
   assert.doesNotMatch(commentPanel, /onClick=\{\(\) => setReplyTarget\(comment\)\}/);
   assert.doesNotMatch(commentPanel, /onClick=\{\(\) => setReplyTarget\(reply\)\}/);
 });
@@ -107,28 +111,91 @@ test('side thread has its own composer and main composer stays top-level', () =>
   assert.match(commentPanel, /images: submittedThreadImageUrls/);
   assert.match(commentPanel, /setThreadAttachedImages\(\[\]\)/);
   assert.match(commentPanel, /threadAttachedImagesRef\.current = \[\]/);
-  assert.match(commentPanel, /activeThreadRootIdRef\.current === threadRoot\.id/);
+  assert.match(commentPanel, /activeThreadRootIdRef\.current === threadRoot\?\.id/);
   assert.match(commentPanel, /threadSubmitRequestRef\.current === submitRequestId/);
   assert.match(commentPanel, /threadSubmitRequestRef\.current = null/);
   assert.match(commentPanel, /current\.filter\(\(c\) => c\.id !== comment\.id\)/);
   assert.match(commentPanel, /threadAttachedImagesRef\.current\.length === 0/);
   assert.match(commentPanel, /setThreadAttachedImages\(submittedThreadAttached\)/);
   assert.match(commentPanel, /cleanupSubmittedThreadDraft\(\)/);
-  assert.match(commentPanel, /parentCommentId: threadRoot\.id/);
+  assert.match(commentPanel, /parentCommentId: activeRevisionThreadId \? null : threadRoot!\.id/);
   assert.match(commentPanel, /data-comment-thread-attachments/);
   assert.match(commentPanel, /data-comment-thread-input/);
   assert.match(commentPanel, /onPaste=\{handleThreadPaste\}/);
   assert.match(commentPanel, /onDrop=\{handleThreadDrop\}/);
-  assert.match(commentPanel, /placeholder="스레드에 댓글 입력\.\.\. \(Ctrl\+V \/ 드래그로 이미지\)"/);
+  assert.match(commentPanel, /placeholder=\{activeRevisionThreadId \? '리테이크에 댓글 입력\.\.\. \(Ctrl\+V \/ 드래그로 이미지\)' : '스레드에 댓글 입력\.\.\. \(Ctrl\+V \/ 드래그로 이미지\)'\}/);
   assert.match(commentPanel, /onChange=\{handleThreadFileChange\}/);
   assert.match(commentPanel, /threadFileInputRef\.current\?\.click\(\)/);
   assert.match(commentPanel, /onClick=\{handleThreadSubmit\}/);
   assert.match(commentPanel, /onClick=\{handleSubmit\}/);
 });
 
+test('retake activity rows can open the detail card or the comment-side retake thread', () => {
+  assert.match(commentPanel, /revisionId\?: string/);
+  assert.match(commentPanel, /revisionAction\?: 'add' \| 'status' \| 'delete'/);
+  assert.match(commentPanel, /const \[activeRevisionThreadId, setActiveRevisionThreadId\] = useState<string \| null>\(null\)/);
+  assert.match(commentPanel, /const revisionExists = useCallback/);
+  assert.match(commentPanel, /const openRevisionDetail = useCallback/);
+  assert.match(commentPanel, /bflow:jump-to-revision/);
+  assert.match(commentPanel, /const openRevisionThread = useCallback/);
+  assert.match(commentPanel, /if \(!revisionExists\(revisionId\)\) return/);
+  assert.match(commentPanel, /setActiveRevisionThreadId\(revisionId\)/);
+  assert.match(commentPanel, /setActiveThreadRootId\(null\)/);
+  assert.match(commentPanel, /const canOpenRevision = revisionExists\(node\.event\.revisionId\) && node\.event\.revisionAction !== 'delete'/);
+  assert.match(commentPanel, /상세모달에서 열기/);
+  assert.match(commentPanel, /댓글에서 열기/);
+  assert.match(commentPanel, /openRevisionThread\(node\.event\.revisionId, true\)/);
+});
+
+test('retake side thread stores replies as revision comments instead of fake parent comments', () => {
+  assert.match(commentPanel, /const activeRevisionThreadComments = useMemo/);
+  assert.match(commentPanel, /comments\s*\n\s*\.filter\(\(c\) => c\.revisionId === activeRevisionThreadId\)/);
+  assert.match(commentPanel, /const activeThreadOpen = activeThreadRoot != null \|\| activeRevisionThreadId != null/);
+  assert.match(commentPanel, /const activeRevisionThreadAvailable = !activeRevisionThreadId \|\| !!activeRevisionThread/);
+  assert.match(commentPanel, /&& activeRevisionThreadAvailable/);
+  assert.match(commentPanel, /revisionId: activeRevisionThreadId \?\? threadRoot\?\.revisionId \?\? null/);
+  assert.match(commentPanel, /parentCommentId: activeRevisionThreadId \? null : threadRoot!\.id/);
+  assert.match(commentPanel, /data-retake-thread-root/);
+  assert.match(commentPanel, /리테이크 스레드/);
+  assert.match(commentPanel, /placeholder=\{activeRevisionThreadId \? '리테이크에 댓글 입력\.\.\. \(Ctrl\+V \/ 드래그로 이미지\)' : '스레드에 댓글 입력\.\.\. \(Ctrl\+V \/ 드래그로 이미지\)'\}/);
+});
+
+test('retake comments always keep their re badge in main and side thread views', () => {
+  assert.match(commentPanel, /let prevRevisionId: string \| null = null/);
+  assert.match(commentPanel, /prevRevisionId = null/);
+  assert.match(commentPanel, /const commentRevisionId = comment\.revisionId \?\? null/);
+  assert.match(commentPanel, /const isGroupedWithPrev = prevUserId === comment\.userId && !prevRevisionId && !commentRevisionId/);
+  assert.match(commentPanel, /const replyRevisionId = reply\.revisionId \?\? commentRevisionId/);
+  assert.match(commentPanel, /const replyIsGrouped = ri > 0 && replies\[ri - 1\]\.userId === reply\.userId && !prevReplyRevisionId && !replyRevisionId/);
+  assert.match(commentPanel, /revisionId=\{commentRevisionId\}/);
+  assert.match(commentPanel, /revisionId=\{replyRevisionId\}/);
+  assert.match(commentPanel, /onJump=\{openRevisionDetail\}/);
+  assert.match(commentPanel, /const messageRevisionId = message\.revisionId \?\? activeRevisionThreadId/);
+  assert.match(commentPanel, /revisionId=\{messageRevisionId\}/);
+  assert.match(revisionCommentThread, /import \{ RevisionCommentBadge \} from '\.\/RevisionCommentBadge';/);
+  assert.match(revisionCommentThread, /revisionId=\{c\.revisionId \?\? revisionId\}/);
+  assert.match(revisionCommentThread, /<RevisionCommentBadge revisionId=\{revisionId\} \/>/);
+});
+
+test('side thread submit state is released by request id', () => {
+  assert.match(commentPanel, /threadSubmitRequestRef\.current = submitRequestId/);
+  assert.match(commentPanel, /mountedRef\.current\s*&&\s*threadSubmitRequestRef\.current === submitRequestId/);
+  assert.doesNotMatch(
+    commentPanel,
+    /finally\s*\{\s*if \(\s*[\s\S]*activeRevisionThreadIdRef\.current === revisionThreadId[\s\S]*threadSubmitRequestRef\.current === submitRequestId/,
+  );
+});
+
+test('retake-only filter keeps retake activity cards visible', () => {
+  assert.match(commentPanel, /const visibleInlineEvents = useMemo/);
+  assert.match(commentPanel, /isRetakeInlineEvent/);
+  assert.match(commentPanel, /reOnly \? \(inlineEvents \?\? \[\]\)\.filter\(isRetakeInlineEvent\)/);
+  assert.match(commentPanel, /mergeFeed\(mainFlowComments, visibleInlineEvents\)/);
+});
+
 test('comment feed avoids layout-measure animations while thread composer is typing', () => {
   assert.match(commentPanel, /const mainFeedNodes = useMemo\(/);
-  assert.match(commentPanel, /mergeFeed\(mainFlowComments, \(reOnly \|\| hideActivity\) \? \[\] : \(inlineEvents \?\? \[\]\)\)/);
+  assert.match(commentPanel, /mergeFeed\(mainFlowComments, visibleInlineEvents\)/);
   assert.match(commentPanel, /return mainFeedNodes\.map\(\(node\) =>/);
   assert.doesNotMatch(commentPanel, /layout="position"/);
 });

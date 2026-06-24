@@ -17,7 +17,7 @@ import {
   fetchReactionsBulk,
 } from '@/services/commentService';
 import type { SceneComment } from '@/services/commentService';
-import type { AppUser, CommentReaction } from '@/types';
+import type { AppUser, CommentReaction, CompRevision } from '@/types';
 import { groupReactionsByEmoji } from '@/utils/commentReactionUtils';
 import { ReactionChip } from './ReactionChip';
 import { EmojiPicker } from './EmojiPicker';
@@ -43,6 +43,7 @@ import * as storageService from '@/services/storageService';
 import { resizeBlob } from '@/utils/imageUtils';
 import { RevisionCommentBadge } from './RevisionCommentBadge';
 import { RevisionRecipientPicker } from './RevisionRecipientPicker';
+import { revisionNoToLabel } from '@/constants/revision';
 import {
   getDefaultRevisionSlashRecipientIds,
   parseRevisionSlashCommand,
@@ -61,8 +62,10 @@ export interface CommentInlineEvent {
   id: string;
   at: string;       // ISO 8601
   text: string;     // 한 줄 텍스트 (예: "이다은이 BG 모든 단계를 완료했습니다")
-  tone?: 'default' | 'revision_add' | 'revision_in_progress' | 'revision_resolve';
+  tone?: 'default' | 'revision_add' | 'revision_in_progress' | 'revision_resolve' | 'revision_update' | 'revision_delete';
   label?: string;
+  revisionId?: string;
+  revisionAction?: 'add' | 'status' | 'delete';
 }
 
 interface CommentPanelProps {
@@ -161,6 +164,19 @@ function cleanupDraftImages(images: AttachedImage[], context: string) {
 function parseSceneKey(sceneKey: string): { sheetName: string; sceneId: string } {
   const idx = sceneKey.lastIndexOf(':');
   return { sheetName: sceneKey.substring(0, idx), sceneId: sceneKey.substring(idx + 1) };
+}
+
+function isRetakeInlineEvent(event: CommentInlineEvent): boolean {
+  return !!event.revisionId || (event.tone?.startsWith('revision_') ?? false);
+}
+
+function getRevisionStatusLabel(revision: CompRevision | null): string {
+  if (!revision) return '상태 확인 중';
+  if (revision.status === 'open') return '대기';
+  if (revision.status === 'in_progress') return '진행중';
+  if (revision.status === 'assignee_done') return '담당 완료';
+  if (revision.status === 'resolved') return '완료';
+  return '상태 확인 중';
 }
 
 // ─── v1.26.0: 댓글 리액션 영역 (보조 컴포넌트) ─────────────────
@@ -285,13 +301,20 @@ export function CommentPanel({
 }: CommentPanelProps) {
   const { currentUser, users } = useAuthStore();
   const { setView, setHighlightUserName } = useAppStore();
-  const { createRevision } = useRevisionStore();
+  const createRevision = useRevisionStore((s) => s.createRevision);
+  const loadRevisions = useRevisionStore((s) => s.loadRevisions);
+  const revisions = useRevisionStore((s) => s.revisions);
   const userNames = useMemo(() => users.map((u) => u.name), [users]);
 
   const { sheetName, sceneId } = useMemo(() => parseSceneKey(sceneKey), [sceneKey]);
   const effectiveSceneThreadKey = sceneThreadKey ?? sceneKey;
   const sceneKeyRef = useRef(sceneKey);
   sceneKeyRef.current = sceneKey;
+
+  useEffect(() => {
+    if (!quickRevision?.sceneKey) return;
+    loadRevisions();
+  }, [loadRevisions, quickRevision?.sceneKey]);
 
   // 댓글 상태
   const [comments, setComments] = useState<SceneCommentWithSource[]>([]);
@@ -324,10 +347,14 @@ export function CommentPanel({
   const [activeThreadRootId, setActiveThreadRootId] = useState<string | null>(null);
   const activeThreadRootIdRef = useRef<string | null>(activeThreadRootId);
   activeThreadRootIdRef.current = activeThreadRootId;
+  const [activeRevisionThreadId, setActiveRevisionThreadId] = useState<string | null>(null);
+  const activeRevisionThreadIdRef = useRef<string | null>(activeRevisionThreadId);
+  activeRevisionThreadIdRef.current = activeRevisionThreadId;
   const [lastThreadRootId, setLastThreadRootId] = useState<string | null>(null);
   useEffect(() => {
     setReplyTarget(null);
     setActiveThreadRootId(null);
+    setActiveRevisionThreadId(null);
     setLastThreadRootId(null);
     setThreadInput('');
     threadInputValueRef.current = '';
@@ -346,7 +373,7 @@ export function CommentPanel({
     threadAttachedImagesRef.current = [];
     setThreadSubmitting(false);
     threadSubmitRequestRef.current = null;
-  }, [activeThreadRootId]);
+  }, [activeThreadRootId, activeRevisionThreadId]);
   // v1.24.0: 부모 댓글 별 답글 접힘 상태 (기본 펼침 — 처음 진입 시 모두 펼친 상태).
   const [collapsedThreads, setCollapsedThreads] = useState<Set<string>>(new Set());
   const toggleThread = useCallback((parentId: string) => {
@@ -451,6 +478,7 @@ export function CommentPanel({
   const openThreadReply = useCallback((target: SceneCommentWithSource) => {
     const threadTarget = buildCommentReplyTarget(comments, target);
     const threadRootId = threadTarget.parentCommentId ?? threadTarget.rootComment?.id ?? target.id;
+    setActiveRevisionThreadId(null);
     setActiveThreadRootId(threadRootId);
     setLastThreadRootId(threadRootId);
     setCollapsedThreads((prev) => {
@@ -463,6 +491,36 @@ export function CommentPanel({
     setThreadMentionTarget(target);
     requestAnimationFrame(() => threadInputRef.current?.focus());
   }, [comments]);
+  const revisionExists = useCallback((revisionId?: string | null): revisionId is string => {
+    return !!revisionId && revisions.some((revision) => revision.id === revisionId);
+  }, [revisions]);
+  const openRevisionDetail = useCallback((revisionId?: string) => {
+    if (!revisionExists(revisionId)) return;
+    window.dispatchEvent(new CustomEvent('bflow:jump-to-revision', { detail: { revisionId } }));
+  }, [revisionExists]);
+  const openRevisionThread = useCallback((revisionId?: string, focusComposer = false, mentionTarget: SceneCommentWithSource | null = null) => {
+    if (!revisionExists(revisionId)) return;
+    setActiveThreadRootId(null);
+    setActiveRevisionThreadId(revisionId);
+    setReplyTarget(null);
+    setThreadMentionTarget(mentionTarget);
+    if (focusComposer) requestAnimationFrame(() => threadInputRef.current?.focus());
+  }, [revisionExists]);
+  const openContextualThreadReply = useCallback((target: SceneCommentWithSource) => {
+    if (target.revisionId) {
+      openRevisionThread(target.revisionId, true, target);
+      return;
+    }
+    openThreadReply(target);
+  }, [openRevisionThread, openThreadReply]);
+  const replyInActiveThread = useCallback((target: SceneCommentWithSource) => {
+    const targetRevisionId = activeRevisionThreadId ?? target.revisionId;
+    if (targetRevisionId) {
+      openRevisionThread(targetRevisionId, true, target);
+      return;
+    }
+    openThreadReply(target);
+  }, [activeRevisionThreadId, openRevisionThread, openThreadReply]);
 
   // ── 입력 카드 + textarea 한계 계산 ──
   // 패널 전체 높이의 30% 까지 입력 카드가 자란다. 그 이상은 textarea 안에서 스크롤.
@@ -1361,6 +1419,10 @@ export function CommentPanel({
     () => (reOnly ? comments.filter((c) => !!c.revisionId) : comments),
     [comments, reOnly],
   );
+  const visibleInlineEvents = useMemo(
+    () => hideActivity ? [] : reOnly ? (inlineEvents ?? []).filter(isRetakeInlineEvent) : (inlineEvents ?? []),
+    [hideActivity, inlineEvents, reOnly],
+  );
 
   // v1.24.0: 메인 흐름은 부모 댓글만(parentCommentId 없음). 답글은 별도 그룹.
   const topLevelComments = useMemo(
@@ -1392,9 +1454,22 @@ export function CommentPanel({
     () => activeThreadRootId ? comments.find((c) => c.id === activeThreadRootId) ?? null : null,
     [activeThreadRootId, comments],
   );
+  const activeRevisionThread = useMemo(
+    () => activeRevisionThreadId ? revisions.find((r) => r.id === activeRevisionThreadId) ?? null : null,
+    [activeRevisionThreadId, revisions],
+  );
+  const activeRevisionThreadEvent = useMemo(
+    () => activeRevisionThreadId
+      ? [...(inlineEvents ?? [])]
+        .filter((event) => event.revisionId === activeRevisionThreadId)
+        .sort((a, b) => new Date(b.at).getTime() - new Date(a.at).getTime())[0] ?? null
+      : null,
+    [activeRevisionThreadId, inlineEvents],
+  );
+  const activeThreadOpen = activeThreadRoot != null || activeRevisionThreadId != null;
   useEffect(() => {
-    onThreadPanelOpenChange?.(activeThreadRoot != null);
-  }, [activeThreadRoot, onThreadPanelOpenChange]);
+    onThreadPanelOpenChange?.(activeThreadOpen);
+  }, [activeThreadOpen, onThreadPanelOpenChange]);
   const activeThreadReplies = useMemo(
     () => activeThreadRoot
       ? comments
@@ -1407,31 +1482,45 @@ export function CommentPanel({
     () => activeThreadRoot ? [activeThreadRoot, ...activeThreadReplies] : [],
     [activeThreadRoot, activeThreadReplies],
   );
+  const activeRevisionThreadComments = useMemo(
+    () => activeRevisionThreadId
+      ? comments
+        .filter((c) => c.revisionId === activeRevisionThreadId)
+        .sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime())
+      : [],
+    [activeRevisionThreadId, comments],
+  );
+  const activeRevisionThreadAvailable = !activeRevisionThreadId || !!activeRevisionThread;
   const threadHasUploadingImage = threadAttachedImages.some(a => a.uploading);
   const threadUploadedImageUrls = threadAttachedImages.map(a => a.uploadedUrl).filter((u): u is string => !!u);
   const canSubmitThread =
-    !!activeThreadRoot
+    activeThreadOpen
+    && activeRevisionThreadAvailable
     && !!currentUser
     && !threadSubmitting
     && !threadHasUploadingImage
     && (threadInput.trim().length > 0 || threadUploadedImageUrls.length > 0);
   const handleThreadSubmit = async () => {
-    if (!canSubmitThread || !currentUser || !activeThreadRoot) return;
+    if (!canSubmitThread || !currentUser || (!activeThreadRoot && !activeRevisionThreadId)) return;
 
     const threadRoot = activeThreadRoot;
+    const revisionThreadId = activeRevisionThreadId;
     const panelSceneKey = sceneKey;
     const text = threadInput.trim();
     const submittedThreadAttached = threadAttachedImages;
     const submittedThreadImageUrls = threadUploadedImageUrls;
-    const targetSceneKey = threadRoot.storageKey ?? threadRoot._sourceKey ?? sceneKey;
+    const targetSceneKey = threadRoot?.storageKey ?? threadRoot?._sourceKey ?? sceneKey;
     const mentions = extractMentions(text, userNames);
     const threadMentionReplyTarget = buildCommentReplyTarget(comments, threadMentionTarget);
     const threadMentionTargetInCurrentThread =
-      threadMentionTarget?.id === threadRoot.id
-      || threadMentionReplyTarget.parentCommentId === threadRoot.id;
+      revisionThreadId
+        ? threadMentionTarget?.revisionId === revisionThreadId
+        : threadMentionTarget?.id === threadRoot?.id || threadMentionReplyTarget.parentCommentId === threadRoot?.id;
     const mentionTargetName = threadMentionTargetInCurrentThread
       ? threadMentionTarget!.userName
-      : threadRoot.userName;
+      : revisionThreadId
+        ? activeRevisionThread?.requesterName ?? threadMentionTarget?.userName ?? currentUser.name
+        : threadRoot!.userName;
     if (mentionTargetName !== currentUser.name && !mentions.includes(mentionTargetName)) {
       mentions.push(mentionTargetName);
     }
@@ -1443,7 +1532,8 @@ export function CommentPanel({
       mentions,
       images: submittedThreadImageUrls,
       createdAt: new Date().toISOString(),
-      parentCommentId: threadRoot.id,
+      revisionId: activeRevisionThreadId ?? threadRoot?.revisionId ?? null,
+      parentCommentId: activeRevisionThreadId ? null : threadRoot!.id,
       _sourceKey: targetSceneKey,
     };
 
@@ -1453,13 +1543,15 @@ export function CommentPanel({
     threadSubmitRequestRef.current = submitRequestId;
     setComments(next);
     onCountChange?.(next.length);
-    setLastThreadRootId(threadRoot.id);
-    setCollapsedThreads((prev) => {
-      if (!prev.has(threadRoot.id)) return prev;
-      const opened = new Set(prev);
-      opened.delete(threadRoot.id);
-      return opened;
-    });
+    if (threadRoot) {
+      setLastThreadRootId(threadRoot.id);
+      setCollapsedThreads((prev) => {
+        if (!prev.has(threadRoot.id)) return prev;
+        const opened = new Set(prev);
+        opened.delete(threadRoot.id);
+        return opened;
+      });
+    }
     setThreadInput('');
     threadInputValueRef.current = '';
     setThreadAttachedImages([]);
@@ -1508,7 +1600,11 @@ export function CommentPanel({
         return withoutFailedComment;
       });
       const canRestoreThreadDraft =
-        activeThreadRootIdRef.current === threadRoot.id
+        (
+          revisionThreadId
+            ? activeRevisionThreadIdRef.current === revisionThreadId
+            : activeThreadRootIdRef.current === threadRoot?.id
+        )
         && threadInputValueRef.current.length === 0
         && threadAttachedImagesRef.current.length === 0;
       if (canRestoreThreadDraft) {
@@ -1522,8 +1618,6 @@ export function CommentPanel({
     } finally {
       if (
         mountedRef.current
-        && sceneKeyRef.current === panelSceneKey
-        && activeThreadRootIdRef.current === threadRoot.id
         && threadSubmitRequestRef.current === submitRequestId
       ) {
         setThreadSubmitting(false);
@@ -1556,8 +1650,8 @@ export function CommentPanel({
     [visibleComments],
   );
   const mainFeedNodes = useMemo(
-    () => mergeFeed(mainFlowComments, (reOnly || hideActivity) ? [] : (inlineEvents ?? [])),
-    [hideActivity, inlineEvents, mainFlowComments, reOnly],
+    () => mergeFeed(mainFlowComments, visibleInlineEvents),
+    [mainFlowComments, visibleInlineEvents],
   );
 
   const firstUnreadCommentId = useMemo(() => {
@@ -1627,6 +1721,22 @@ export function CommentPanel({
     setView('team');
   };
 
+  const activeThreadPanelKey = activeRevisionThreadId
+    ? `revision:${activeRevisionThreadId}`
+    : activeThreadRoot?.id ?? 'thread';
+  const activeRevisionThreadLabel = activeRevisionThread
+    ? revisionNoToLabel(activeRevisionThread.revisionNo)
+    : activeRevisionThreadEvent?.label ?? '리테이크';
+  const activeRevisionThreadDescription =
+    activeRevisionThread?.description
+    ?? activeRevisionThreadEvent?.text
+    ?? '리테이크 내용을 불러오는 중입니다.';
+  const activeRevisionThreadRequester =
+    activeRevisionThread?.requesterName
+    ?? activeRevisionThreadEvent?.text.split(' ')[0]
+    ?? '리테이크';
+  const activeThreadMessagesForPanel = activeRevisionThreadId ? activeRevisionThreadComments : activeThreadMessages;
+
   // 4c: 댓글 본문 #태그 칩 클릭/우클릭 → 해당 씬/파트/화로 점프 또는 메뉴.
   const renderText = (text: string, _sourceKey?: string) => (
     <EntityText text={text} userNames={userNames} onMentionClick={handleMentionClick} onHashClick={onHashClick ?? navigateToHashTarget} onHashContextMenu={onHashContextMenu} />
@@ -1657,6 +1767,7 @@ export function CommentPanel({
             type="button"
             onClick={() => {
               setThreadMentionTarget(null);
+              setActiveRevisionThreadId(null);
               setActiveThreadRootId(lastThreadRootId);
             }}
             title="마지막으로 보던 스레드 다시 열기"
@@ -1697,7 +1808,7 @@ export function CommentPanel({
       <div ref={scrollRef} className="flex-1 overflow-y-auto px-4 py-3 space-y-4 min-h-0 select-text">
         {/* 코덱스 P3 fix (9차, 2026-05-05): reOnly 시 inlineEvents 는 어차피 mergeFeed 에서 drop 되므로
             empty-state 판정에서도 inlineEvents 무시 → 리테이크 댓글 0 + inline 만 있을 때 빈 영역 방지. */}
-        {visibleComments.length === 0 && (reOnly || hideActivity || !inlineEvents || inlineEvents.length === 0) ? (
+        {visibleComments.length === 0 && visibleInlineEvents.length === 0 ? (
           <div className="text-center py-10">
             <p className="text-text-secondary text-xs">
               {reOnly ? '리테이크 댓글이 없습니다' : '아직 의견이 없습니다'}
@@ -1710,11 +1821,13 @@ export function CommentPanel({
         <AnimatePresence initial={false}>
           {(() => {
             let prevUserId: string | null = null;
+            let prevRevisionId: string | null = null;
             return mainFeedNodes.map((node) => {
               if (node.kind === 'event') {
                 // v1.24.0: 시스템 활동이 끼어들면 묶음 끊김 (확정 규칙).
                 prevUserId = null;
-                const isRevisionEvent = node.event.tone?.startsWith('revision_') ?? false;
+                prevRevisionId = null;
+                const isRevisionEvent = isRetakeInlineEvent(node.event);
                 const eventToneClass =
                   node.event.tone === 'revision_resolve'
                     ? 'comment-inline-event comment-inline-event-resolve'
@@ -1722,7 +1835,11 @@ export function CommentPanel({
                       ? 'comment-inline-event comment-inline-event-in-progress'
                       : node.event.tone === 'revision_add'
                         ? 'comment-inline-event comment-inline-event-add'
-                        : 'text-text-secondary/55';
+                        : node.event.tone === 'revision_delete'
+                          ? 'comment-inline-event comment-inline-event-delete'
+                          : node.event.tone === 'revision_update'
+                            ? 'comment-inline-event comment-inline-event-update'
+                            : 'text-text-secondary/55';
                 const eventDotClass =
                   node.event.tone === 'revision_resolve'
                     ? 'comment-inline-event-dot comment-inline-event-dot-resolve'
@@ -1730,7 +1847,12 @@ export function CommentPanel({
                       ? 'comment-inline-event-dot comment-inline-event-dot-in-progress'
                       : node.event.tone === 'revision_add'
                         ? 'comment-inline-event-dot comment-inline-event-dot-add'
-                        : 'bg-text-secondary/40';
+                        : node.event.tone === 'revision_delete'
+                          ? 'comment-inline-event-dot comment-inline-event-dot-delete'
+                          : node.event.tone === 'revision_update'
+                            ? 'comment-inline-event-dot comment-inline-event-dot-update'
+                            : 'bg-text-secondary/40';
+                const canOpenRevision = revisionExists(node.event.revisionId) && node.event.revisionAction !== 'delete';
                 return (
                   <motion.div
                     key={`evt:${node.event.id}`}
@@ -1760,6 +1882,32 @@ export function CommentPanel({
                           )}
                           <span className="min-w-0 flex-1 truncate">{node.event.text}</span>
                         </div>
+                        {canOpenRevision && (
+                          <div className="mt-2 flex flex-wrap items-center gap-1.5">
+                            <button
+                              type="button"
+                              onClick={() => openRevisionDetail(node.event.revisionId)}
+                              className="rounded-md border border-bg-border/70 bg-bg-primary/40 px-2 py-1 text-[10px] font-semibold text-text-secondary hover:border-accent/45 hover:text-accent-sub transition-colors"
+                            >
+                              상세모달에서 열기
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => openRevisionThread(node.event.revisionId)}
+                              className="rounded-md border border-bg-border/70 bg-bg-primary/40 px-2 py-1 text-[10px] font-semibold text-text-secondary hover:border-accent/45 hover:text-accent-sub transition-colors"
+                            >
+                              댓글에서 열기
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => openRevisionThread(node.event.revisionId, true)}
+                              className="inline-flex items-center gap-1 rounded-md border border-accent/25 bg-accent/[0.08] px-2 py-1 text-[10px] font-semibold text-accent-sub hover:bg-accent/[0.14] transition-colors"
+                            >
+                              <Reply size={10} />
+                              답글
+                            </button>
+                          </div>
+                        )}
                       </div>
                     ) : (
                       <>
@@ -1772,9 +1920,12 @@ export function CommentPanel({
                 );
               }
               const comment = node.comment;
+              const commentRevisionId = comment.revisionId ?? null;
               // v1.24.0: 묶음 — 같은 사용자가 연속이면 메타 숨김 (Slack 스타일).
-              const isGroupedWithPrev = prevUserId === comment.userId;
+              // 리테이크 댓글은 각각의 re# 맥락이 핵심이라 작성자가 같아도 묶지 않는다.
+              const isGroupedWithPrev = prevUserId === comment.userId && !prevRevisionId && !commentRevisionId;
               prevUserId = comment.userId;
+              prevRevisionId = commentRevisionId;
               const isOwn = currentUser?.id === comment.userId;
               const isEditing = editingId === comment.id;
               const hasImages = (comment.images?.length ?? 0) > 0;
@@ -1841,12 +1992,10 @@ export function CommentPanel({
                     </>
                   )}
                   {/* v1.18.0: 리테이크 맥락 댓글은 [re#] 칩 → 클릭 시 모달이 리테이크 탭/카드로 점프 */}
-                  {comment.revisionId && (
+                  {commentRevisionId && (
                     <RevisionCommentBadge
-                      revisionId={comment.revisionId}
-                      onJump={(revId) => {
-                        window.dispatchEvent(new CustomEvent('bflow:jump-to-revision', { detail: { revisionId: revId } }));
-                      }}
+                      revisionId={commentRevisionId}
+                      onJump={openRevisionDetail}
                     />
                   )}
                   {/* v1.24.0: orphan reply (부모 댓글 사라진 답글) 표시 */}
@@ -1933,7 +2082,7 @@ export function CommentPanel({
                         )}
                       >
                         <button
-                          onClick={() => openThreadReply(comment)}
+                          onClick={() => openContextualThreadReply(comment)}
                           className="p-1 rounded hover:bg-bg-border/50 text-text-secondary hover:text-accent transition-colors cursor-pointer"
                           title="답글"
                         >
@@ -1976,7 +2125,7 @@ export function CommentPanel({
                     />
                     <ThreadReplyButton
                       aria-label={`답글 달기: ${comment.userName}`}
-                      onClick={() => openThreadReply(comment)}
+                      onClick={() => openContextualThreadReply(comment)}
                     />
                   </div>
                 </div>
@@ -2001,8 +2150,11 @@ export function CommentPanel({
                       const replyShowUnreadDivider =
                         firstUnreadCommentId != null
                         && reply.id === firstUnreadCommentId;
+                      const replyRevisionId = reply.revisionId ?? commentRevisionId;
+                      const prevReplyRevisionId = ri > 0 ? replies[ri - 1].revisionId ?? commentRevisionId : null;
                       // 답글 묶음 — 답글 내부에서도 같은 사용자 연속이면 메타 숨김.
-                      const replyIsGrouped = ri > 0 && replies[ri - 1].userId === reply.userId;
+                      // 리테이크 답글은 re# 표식이 사라지면 안 되므로 묶지 않는다.
+                      const replyIsGrouped = ri > 0 && replies[ri - 1].userId === reply.userId && !prevReplyRevisionId && !replyRevisionId;
                       return (
                         <Fragment key={reply.id}>
                         {replyShowUnreadDivider && (
@@ -2033,6 +2185,12 @@ export function CommentPanel({
                             <div className="flex items-center gap-1.5 mb-0.5">
                               <span className="text-[11px] font-semibold text-text-primary">{reply.userName}</span>
                               <span className="text-[10px] text-text-secondary/50">{formatCommentTime(reply.createdAt)}</span>
+                              {replyRevisionId && (
+                                <RevisionCommentBadge
+                                  revisionId={replyRevisionId}
+                                  onJump={openRevisionDetail}
+                                />
+                              )}
                               {reply.editedAt && (
                                 <span className="text-[10px] text-text-secondary/30 italic">수정됨</span>
                               )}
@@ -2096,7 +2254,7 @@ export function CommentPanel({
                                 replyIsOwn ? '-right-16' : '-right-7',
                               )}>
                                 <button
-                                  onClick={() => openThreadReply(reply)}
+                                  onClick={() => openContextualThreadReply(reply)}
                                   className="p-0.5 rounded hover:bg-bg-border/50 text-text-secondary hover:text-accent cursor-pointer"
                                   title="답글"
                                 >
@@ -2138,7 +2296,7 @@ export function CommentPanel({
                             <ThreadReplyButton
                               compact
                               aria-label={`답글 달기: ${reply.userName}`}
-                              onClick={() => openThreadReply(reply)}
+                              onClick={() => openContextualThreadReply(reply)}
                             />
                           </div>
                         </div>
@@ -2400,10 +2558,10 @@ export function CommentPanel({
       </div>
 
       <AnimatePresence initial={false}>
-        {activeThreadRoot && (
-          <Fragment key={activeThreadRoot.id}>
+        {activeThreadOpen && (
+          <Fragment key={activeThreadPanelKey}>
           <motion.div
-            key={`${activeThreadRoot.id}:resize`}
+            key={`${activeThreadPanelKey}:resize`}
             role="separator"
             aria-orientation="vertical"
             aria-label="댓글과 스레드 사이 경계로 너비 조절"
@@ -2430,7 +2588,7 @@ export function CommentPanel({
             />
           </motion.div>
           <motion.aside
-            key={activeThreadRoot.id}
+            key={activeThreadPanelKey}
             data-comment-thread-side-panel
             initial={{ opacity: 0, x: 18 }}
             animate={{ opacity: 1, x: 0 }}
@@ -2441,17 +2599,22 @@ export function CommentPanel({
           >
             <div className="flex shrink-0 items-start justify-between gap-2 border-b border-bg-border px-3 py-3">
               <div className="min-w-0">
-                <div className="text-sm font-semibold text-text-primary">스레드</div>
+                <div className="text-sm font-semibold text-text-primary">
+                  {activeRevisionThreadId ? '리테이크 스레드' : '스레드'}
+                </div>
                 <div className="mt-0.5 truncate text-[11px] text-text-secondary/70">
-                  {activeThreadRoot.userName} · 답글 {activeThreadReplies.length}개
+                  {activeRevisionThreadId
+                    ? `${activeRevisionThreadLabel} · 댓글 ${activeRevisionThreadComments.length}개`
+                    : `${activeThreadRoot?.userName ?? '댓글'} · 답글 ${activeThreadReplies.length}개`}
                 </div>
               </div>
               <button
                 type="button"
                 onClick={() => {
-                  setLastThreadRootId(activeThreadRoot.id);
+                  if (activeThreadRoot) setLastThreadRootId(activeThreadRoot.id);
                   setThreadMentionTarget(null);
                   setActiveThreadRootId(null);
+                  setActiveRevisionThreadId(null);
                 }}
                 className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-text-secondary hover:bg-bg-border/60 hover:text-text-primary"
                 title="스레드 닫기"
@@ -2462,11 +2625,65 @@ export function CommentPanel({
             </div>
 
             <div className="min-h-0 flex-1 overflow-y-auto px-3 py-3 space-y-3">
-              {activeThreadMessages.map((message, index) => {
+              {activeRevisionThreadId && (
+                <div
+                  data-retake-thread-root
+                  className="rounded-xl border border-accent/25 bg-accent/[0.07] px-3 py-3 text-text-primary"
+                >
+                  <div className="mb-2 flex flex-wrap items-center gap-1.5">
+                    <span className="rounded-md border border-accent/25 bg-bg-primary/35 px-1.5 py-0.5 text-[10px] font-bold text-accent-sub">
+                      {activeRevisionThreadLabel}
+                    </span>
+                    <span className="rounded-md border border-bg-border/70 bg-bg-primary/35 px-1.5 py-0.5 text-[10px] font-semibold text-text-secondary">
+                      {getRevisionStatusLabel(activeRevisionThread)}
+                    </span>
+                    <span className="ml-auto text-[10px] text-text-secondary/65">
+                      {activeRevisionThreadRequester}
+                    </span>
+                  </div>
+                  <div className="text-[11.5px] leading-relaxed whitespace-pre-wrap break-words">
+                    <EntityText
+                      text={activeRevisionThreadDescription}
+                      userNames={userNames}
+                      onMentionClick={handleMentionClick}
+                      onHashClick={onHashClick ?? navigateToHashTarget}
+                      onHashContextMenu={onHashContextMenu}
+                    />
+                  </div>
+                  <div className="mt-2 flex flex-wrap items-center gap-1.5">
+                    <button
+                      type="button"
+                      onClick={() => openRevisionDetail(activeRevisionThreadId)}
+                      className="rounded-md border border-bg-border/70 bg-bg-primary/45 px-2 py-1 text-[10px] font-semibold text-text-secondary hover:border-accent/45 hover:text-accent-sub transition-colors"
+                    >
+                      상세모달에서 열기
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setThreadMentionTarget(null);
+                        requestAnimationFrame(() => threadInputRef.current?.focus());
+                      }}
+                      className="inline-flex items-center gap-1 rounded-md border border-accent/25 bg-accent/[0.10] px-2 py-1 text-[10px] font-semibold text-accent-sub hover:bg-accent/[0.16] transition-colors"
+                    >
+                      <Reply size={10} />
+                      답글
+                    </button>
+                  </div>
+                </div>
+              )}
+              {activeRevisionThreadId && activeRevisionThreadComments.length === 0 && (
+                <div className="rounded-lg border border-dashed border-bg-border/70 px-3 py-6 text-center text-[11px] text-text-secondary/65">
+                  아직 리테이크 댓글이 없습니다
+                </div>
+              )}
+              {activeThreadMessagesForPanel.map((message, index) => {
                 const messageIsOwn = currentUser?.id === message.userId;
                 const messageHasImages = (message.images?.length ?? 0) > 0;
                 const messageMentionsMe = !!currentUser && (message.mentions ?? []).includes(currentUser.name);
                 const messageIsFocused = focusedCommentId === message.id;
+                const messageIsThreadRoot = !activeRevisionThreadId && index === 0;
+                const messageRevisionId = message.revisionId ?? activeRevisionThreadId;
                 return (
                   <div
                     key={message.id}
@@ -2482,10 +2699,16 @@ export function CommentPanel({
                     <div className="mb-1 flex items-center gap-1.5">
                       <span className="text-[11px] font-semibold text-text-primary">{message.userName}</span>
                       <span className="text-[10px] text-text-secondary/50">{formatCommentTime(message.createdAt)}</span>
-                      {index === 0 && (
+                      {messageIsThreadRoot && (
                         <span className="ml-auto rounded-full border border-accent/25 bg-accent/10 px-1.5 py-0.5 text-[9.5px] font-semibold text-accent">
                           원댓글
                         </span>
+                      )}
+                      {messageRevisionId && (
+                        <RevisionCommentBadge
+                          revisionId={messageRevisionId}
+                          onJump={openRevisionDetail}
+                        />
                       )}
                       {message.editedAt && (
                         <span className="text-[10px] text-text-secondary/30 italic">수정됨</span>
@@ -2526,7 +2749,7 @@ export function CommentPanel({
                       <ThreadReplyButton
                         compact
                         aria-label={`답글 달기: ${message.userName}`}
-                        onClick={() => openThreadReply(message)}
+                        onClick={() => replyInActiveThread(message)}
                       />
                     </div>
                   </div>
@@ -2549,7 +2772,7 @@ export function CommentPanel({
                 }}
                 onDrop={handleThreadDrop}
               >
-                {threadMentionTarget && threadMentionTarget.id !== activeThreadRoot.id && (
+                {threadMentionTarget && (!activeThreadRoot || threadMentionTarget.id !== activeThreadRoot.id) && (
                   <div className="mb-1.5 flex items-center gap-1.5 px-1 text-[10.5px] font-medium text-accent">
                     <CornerDownRight size={11} />
                     <span className="min-w-0 truncate">{threadMentionTarget.userName}에게 답글</span>
@@ -2603,7 +2826,7 @@ export function CommentPanel({
                     }
                   }}
                   onPaste={handleThreadPaste}
-                  placeholder="스레드에 댓글 입력... (Ctrl+V / 드래그로 이미지)"
+                  placeholder={activeRevisionThreadId ? '리테이크에 댓글 입력... (Ctrl+V / 드래그로 이미지)' : '스레드에 댓글 입력... (Ctrl+V / 드래그로 이미지)'}
                   rows={2}
                   className="block min-h-[44px] w-full resize-none bg-transparent px-1 py-0.5 text-[11.5px] leading-relaxed text-text-primary outline-none placeholder:text-text-secondary/45"
                 />

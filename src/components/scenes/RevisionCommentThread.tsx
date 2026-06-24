@@ -44,6 +44,7 @@ import {
   type AttachmentImageLightboxEntry,
   type AttachmentImageLightboxState,
 } from './AttachmentImageLightbox';
+import { RevisionCommentBadge } from './RevisionCommentBadge';
 
 interface Props {
   revisionId: string;
@@ -445,6 +446,7 @@ export function RevisionCommentThread({ revisionId, sceneKey, onHashClick, onHas
         >
           <CommentBubble
             comment={c}
+            revisionId={c.revisionId ?? revisionId}
             isMe={c.userId === currentUser?.id}
             users={users}
             onImageClick={openLightbox}
@@ -600,6 +602,7 @@ export function RevisionCommentThread({ revisionId, sceneKey, onHashClick, onHas
 
 function CommentBubble({
   comment,
+  revisionId,
   isMe,
   users,
   onImageClick,
@@ -608,6 +611,7 @@ function CommentBubble({
   onHashContextMenu,
 }: {
   comment: SceneComment;
+  revisionId: string;
   isMe: boolean;
   users: { name: string }[];
   onImageClick: (url: string, comment: SceneComment) => void;
@@ -635,6 +639,7 @@ function CommentBubble({
           <span className={`text-[11px] font-bold ${isMe ? 'text-accent-sub' : 'text-text-primary'}`}>
             {comment.userName}
           </span>
+          <RevisionCommentBadge revisionId={revisionId} />
         </div>
         <span className="text-[10px] text-text-secondary/50">
           {formatCommentTime(comment.createdAt)}
