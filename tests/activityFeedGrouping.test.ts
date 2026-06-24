@@ -164,3 +164,13 @@ test('feedback hub preview retake activities use the same memo group as producti
   assert.match(feedbackHubPreviewApp, /actionGroup:\s*'memo'/);
   assert.doesNotMatch(feedbackHubPreviewApp, /actionGroup:\s*'etc'/);
 });
+
+test('feedback hub preview retake burst uses one actor id for grouped demo', () => {
+  assert.match(feedbackHubPreviewApp, /const actorUserId = typeof actor === 'object' \? actor\.userId : revision\.requesterId/);
+  assert.match(feedbackHubPreviewApp, /const actorUserName = typeof actor === 'object' \? actor\.userName : actor \?\? revision\.requesterName/);
+  const burstActivityStart = feedbackHubPreviewApp.indexOf("'2026-05-28T07:37:00+09:00'");
+  assert.notEqual(burstActivityStart, -1);
+  const burstActivityCall = feedbackHubPreviewApp.slice(burstActivityStart, burstActivityStart + 180);
+  assert.match(burstActivityCall, /userId: 'preview-user-hansol'/);
+  assert.match(burstActivityCall, /userName: '한솔'/);
+});
