@@ -491,18 +491,21 @@ export function CommentPanel({
     setThreadMentionTarget(target);
     requestAnimationFrame(() => threadInputRef.current?.focus());
   }, [comments]);
+  const revisionExists = useCallback((revisionId?: string | null): revisionId is string => {
+    return !!revisionId && revisions.some((revision) => revision.id === revisionId);
+  }, [revisions]);
   const openRevisionDetail = useCallback((revisionId?: string) => {
-    if (!revisionId) return;
+    if (!revisionExists(revisionId)) return;
     window.dispatchEvent(new CustomEvent('bflow:jump-to-revision', { detail: { revisionId } }));
-  }, []);
+  }, [revisionExists]);
   const openRevisionThread = useCallback((revisionId?: string, focusComposer = false, mentionTarget: SceneCommentWithSource | null = null) => {
-    if (!revisionId) return;
+    if (!revisionExists(revisionId)) return;
     setActiveThreadRootId(null);
     setActiveRevisionThreadId(revisionId);
     setReplyTarget(null);
     setThreadMentionTarget(mentionTarget);
     if (focusComposer) requestAnimationFrame(() => threadInputRef.current?.focus());
-  }, []);
+  }, [revisionExists]);
   const openContextualThreadReply = useCallback((target: SceneCommentWithSource) => {
     if (target.revisionId) {
       openRevisionThread(target.revisionId, true, target);
@@ -1487,10 +1490,12 @@ export function CommentPanel({
       : [],
     [activeRevisionThreadId, comments],
   );
+  const activeRevisionThreadAvailable = !activeRevisionThreadId || !!activeRevisionThread;
   const threadHasUploadingImage = threadAttachedImages.some(a => a.uploading);
   const threadUploadedImageUrls = threadAttachedImages.map(a => a.uploadedUrl).filter((u): u is string => !!u);
   const canSubmitThread =
     activeThreadOpen
+    && activeRevisionThreadAvailable
     && !!currentUser
     && !threadSubmitting
     && !threadHasUploadingImage
@@ -1847,7 +1852,7 @@ export function CommentPanel({
                           : node.event.tone === 'revision_update'
                             ? 'comment-inline-event-dot comment-inline-event-dot-update'
                             : 'bg-text-secondary/40';
-                const canOpenRevision = !!node.event.revisionId && node.event.revisionAction !== 'delete';
+                const canOpenRevision = revisionExists(node.event.revisionId) && node.event.revisionAction !== 'delete';
                 return (
                   <motion.div
                     key={`evt:${node.event.id}`}

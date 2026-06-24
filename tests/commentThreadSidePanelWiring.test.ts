@@ -6,6 +6,7 @@ const commentPanel = readFileSync('src/components/scenes/CommentPanel.tsx', 'utf
 const commentPanelResizable = readFileSync('src/components/scenes/CommentPanelResizable.tsx', 'utf8');
 const sceneDetailModal = readFileSync('src/components/scenes/SceneDetailModal.tsx', 'utf8');
 const unifiedSceneDetailModal = readFileSync('src/components/scenes/UnifiedSceneDetailModal.tsx', 'utf8');
+const revisionCommentThread = readFileSync('src/components/scenes/RevisionCommentThread.tsx', 'utf8');
 const settingsService = readFileSync('src/services/settingsService.ts', 'utf8');
 
 test('CommentPanel opens a separate side thread when replying', () => {
@@ -133,11 +134,14 @@ test('retake activity rows can open the detail card or the comment-side retake t
   assert.match(commentPanel, /revisionId\?: string/);
   assert.match(commentPanel, /revisionAction\?: 'add' \| 'status' \| 'delete'/);
   assert.match(commentPanel, /const \[activeRevisionThreadId, setActiveRevisionThreadId\] = useState<string \| null>\(null\)/);
+  assert.match(commentPanel, /const revisionExists = useCallback/);
   assert.match(commentPanel, /const openRevisionDetail = useCallback/);
   assert.match(commentPanel, /bflow:jump-to-revision/);
   assert.match(commentPanel, /const openRevisionThread = useCallback/);
+  assert.match(commentPanel, /if \(!revisionExists\(revisionId\)\) return/);
   assert.match(commentPanel, /setActiveRevisionThreadId\(revisionId\)/);
   assert.match(commentPanel, /setActiveThreadRootId\(null\)/);
+  assert.match(commentPanel, /const canOpenRevision = revisionExists\(node\.event\.revisionId\) && node\.event\.revisionAction !== 'delete'/);
   assert.match(commentPanel, /상세모달에서 열기/);
   assert.match(commentPanel, /댓글에서 열기/);
   assert.match(commentPanel, /openRevisionThread\(node\.event\.revisionId, true\)/);
@@ -147,6 +151,8 @@ test('retake side thread stores replies as revision comments instead of fake par
   assert.match(commentPanel, /const activeRevisionThreadComments = useMemo/);
   assert.match(commentPanel, /comments\s*\n\s*\.filter\(\(c\) => c\.revisionId === activeRevisionThreadId\)/);
   assert.match(commentPanel, /const activeThreadOpen = activeThreadRoot != null \|\| activeRevisionThreadId != null/);
+  assert.match(commentPanel, /const activeRevisionThreadAvailable = !activeRevisionThreadId \|\| !!activeRevisionThread/);
+  assert.match(commentPanel, /&& activeRevisionThreadAvailable/);
   assert.match(commentPanel, /revisionId: activeRevisionThreadId \?\? threadRoot\?\.revisionId \?\? null/);
   assert.match(commentPanel, /parentCommentId: activeRevisionThreadId \? null : threadRoot!\.id/);
   assert.match(commentPanel, /data-retake-thread-root/);
@@ -166,6 +172,9 @@ test('retake comments always keep their re badge in main and side thread views',
   assert.match(commentPanel, /onJump=\{openRevisionDetail\}/);
   assert.match(commentPanel, /const messageRevisionId = message\.revisionId \?\? activeRevisionThreadId/);
   assert.match(commentPanel, /revisionId=\{messageRevisionId\}/);
+  assert.match(revisionCommentThread, /import \{ RevisionCommentBadge \} from '\.\/RevisionCommentBadge';/);
+  assert.match(revisionCommentThread, /revisionId=\{c\.revisionId \?\? revisionId\}/);
+  assert.match(revisionCommentThread, /<RevisionCommentBadge revisionId=\{revisionId\} \/>/);
 });
 
 test('side thread submit state is released by request id', () => {
