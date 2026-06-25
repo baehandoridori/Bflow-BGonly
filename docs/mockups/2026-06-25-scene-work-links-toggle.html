@@ -1,0 +1,285 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>B flow 시트 링크 배지 토글 v7</title>
+  <style>
+    :root {
+      --bg: #0F1117;
+      --panel: #1A1D27;
+      --panel2: #202435;
+      --line: #2D3041;
+      --text: #E8E8EE;
+      --muted: #8B8DA3;
+      --accent: #6C5CE7;
+      --bg-link: #6C5CE7;
+      --act-link: #D95D4F;
+      --empty: #73798E;
+      --shadow: rgba(0,0,0,.34);
+      color-scheme: dark;
+      font-family: "Pretendard", "IBM Plex Sans KR", Inter, system-ui, sans-serif;
+    }
+    body[data-theme="light"] {
+      --bg: #F6F7FB;
+      --panel: #FFFFFF;
+      --panel2: #F1F3F8;
+      --line: #D7DBE8;
+      --text: #171A24;
+      --muted: #686E83;
+      --accent: #6554D9;
+      --bg-link: #6554D9;
+      --act-link: #C95448;
+      --empty: #8C92A5;
+      --shadow: rgba(30,36,58,.12);
+      color-scheme: light;
+    }
+    * { box-sizing: border-box; }
+    body { margin:0; min-height:100vh; background:var(--bg); color:var(--text); letter-spacing:0; }
+    button { font:inherit; }
+    .page { width:min(1430px, calc(100vw - 32px)); margin:0 auto; padding:24px 0 48px; }
+    .top { display:flex; justify-content:space-between; align-items:flex-end; gap:20px; margin-bottom:16px; }
+    h1 { margin:0 0 7px; font-size:23px; line-height:1.2; font-weight:800; }
+    .sub { margin:0; max-width:860px; color:var(--muted); font-size:13px; line-height:1.5; }
+    .seg { display:inline-flex; gap:4px; padding:4px; border:1px solid var(--line); border-radius:8px; background:color-mix(in oklab,var(--panel) 90%,transparent); }
+    .seg button { height:30px; border:0; border-radius:6px; padding:0 10px; color:var(--muted); background:transparent; cursor:pointer; }
+    .seg button.active { color:var(--text); background:color-mix(in oklab,var(--accent) 18%,transparent); box-shadow:inset 0 0 0 1px color-mix(in oklab,var(--accent) 34%,transparent); }
+    .panel { border:1px solid var(--line); border-radius:8px; background:color-mix(in oklab,var(--panel) 91%,transparent); box-shadow:0 18px 44px var(--shadow); overflow:hidden; }
+    .panel + .panel { margin-top:16px; }
+    .panel-head { display:flex; justify-content:space-between; align-items:center; gap:16px; padding:13px 16px; border-bottom:1px solid var(--line); background:color-mix(in oklab,var(--panel2) 88%,transparent); }
+    h2 { margin:0; font-size:14px; font-weight:780; }
+    h3 { margin:0 0 10px; font-size:13px; font-weight:820; }
+    .hint { color:var(--muted); font-size:12px; line-height:1.45; }
+    .body { padding:16px; }
+    .toolbar {
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      gap:14px;
+      margin-bottom:12px;
+      padding:9px 10px;
+      border:1px solid color-mix(in oklab,var(--line) 78%,transparent);
+      border-radius:8px;
+      background:color-mix(in oklab,var(--panel2) 68%,transparent);
+    }
+    .view-tabs { display:flex; align-items:center; gap:4px; }
+    .view-tabs button {
+      height:28px;
+      border:0;
+      border-radius:6px;
+      padding:0 9px;
+      color:var(--muted);
+      background:transparent;
+      cursor:pointer;
+      font-size:12px;
+      font-weight:650;
+    }
+    .view-tabs button.active {
+      color:var(--text);
+      background:color-mix(in oklab,var(--accent) 16%,transparent);
+      box-shadow:inset 0 0 0 1px color-mix(in oklab,var(--accent) 32%,transparent);
+    }
+    .badge-toggle {
+      min-width:132px;
+      height:32px;
+      display:inline-flex;
+      align-items:center;
+      justify-content:space-between;
+      gap:9px;
+      border:1px solid color-mix(in oklab,var(--accent) 36%,var(--line));
+      border-radius:999px;
+      padding:0 6px 0 10px;
+      color:var(--text);
+      background:linear-gradient(180deg,color-mix(in oklab,var(--accent) 12%,var(--panel)),color-mix(in oklab,var(--panel) 92%,transparent));
+      cursor:pointer;
+      transition:background .18s, border-color .18s, color .18s;
+    }
+    .badge-toggle:focus-visible { outline:2px solid color-mix(in oklab,var(--accent) 62%,white); outline-offset:2px; }
+    .badge-toggle .label { display:inline-flex; align-items:center; gap:6px; font-size:12px; font-weight:760; white-space:nowrap; }
+    .badge-toggle .ico { width:14px; height:14px; }
+    .switch-track {
+      width:36px;
+      height:20px;
+      padding:2px;
+      border-radius:999px;
+      background:color-mix(in oklab,var(--accent) 58%,var(--panel));
+      box-shadow:inset 0 0 0 1px color-mix(in oklab,var(--accent) 52%,transparent);
+      transition:background .18s;
+    }
+    .switch-thumb {
+      width:16px;
+      height:16px;
+      border-radius:999px;
+      background:#fff;
+      transform:translateX(16px);
+      transition:transform .18s;
+      box-shadow:0 2px 7px rgba(0,0,0,.26);
+    }
+    body[data-badges="off"] .badge-toggle {
+      color:var(--muted);
+      border-color:color-mix(in oklab,var(--line) 90%,transparent);
+      background:color-mix(in oklab,var(--panel) 92%,transparent);
+    }
+    body[data-badges="off"] .switch-track {
+      background:color-mix(in oklab,var(--empty) 24%,transparent);
+      box-shadow:inset 0 0 0 1px color-mix(in oklab,var(--empty) 36%,transparent);
+    }
+    body[data-badges="off"] .switch-thumb { transform:translateX(0); }
+    .sheet-demo { padding:4px 0 0 56px; overflow:auto; transition:padding-left .18s; }
+    body[data-badges="off"] .sheet-demo { padding-left:0; }
+    .sheet { min-width:600px; border:1px solid var(--line); border-radius:8px; background:color-mix(in oklab,var(--bg) 52%,transparent); overflow:visible; }
+    .row { display:grid; grid-template-columns:74px 1.15fr 1.15fr 68px; min-height:44px; align-items:center; border-bottom:1px solid color-mix(in oklab,var(--line) 76%,transparent); font-size:11px; position:relative; }
+    .row:last-child { border-bottom:0; }
+    .row.head { color:var(--muted); font-size:10.5px; font-weight:760; background:color-mix(in oklab,var(--panel2) 94%,transparent); border-radius:8px 8px 0 0; }
+    .row > div { padding:7px 8px; min-width:0; }
+    .truncate { overflow:hidden; white-space:nowrap; text-overflow:ellipsis; }
+    .gutter { position:absolute; left:-51px; top:50%; transform:translateY(-50%); width:44px; display:flex; justify-content:flex-end; gap:3px; opacity:1; transition:opacity .16s, transform .16s; }
+    .gutter-dual { position:absolute; left:-53px; top:50%; transform:translateY(-50%); width:47px; display:grid; grid-template-rows:18px 18px; gap:3px; opacity:1; transition:opacity .16s, transform .16s; }
+    body[data-badges="off"] .gutter,
+    body[data-badges="off"] .gutter-dual {
+      opacity:0;
+      pointer-events:none;
+      transform:translate(-4px,-50%);
+    }
+    .dept-row { display:grid; grid-template-columns:3px 1fr 1fr; gap:3px; align-items:center; }
+    .dept-strip { width:3px; height:17px; border-radius:999px; opacity:.82; }
+    .dept-strip.bg { background:var(--bg-link); box-shadow:0 0 8px color-mix(in oklab,var(--bg-link) 40%,transparent); }
+    .dept-strip.act { background:var(--act-link); box-shadow:0 0 8px color-mix(in oklab,var(--act-link) 40%,transparent); }
+    .tiny { width:17px; height:17px; border-radius:5px; display:grid; place-items:center; color:var(--empty); background:color-mix(in oklab,var(--empty) 7%,transparent); border:1px solid color-mix(in oklab,var(--empty) 28%,transparent); }
+    .tiny .ico { width:11px; height:11px; }
+    .tiny.ready.bg { color:var(--bg-link); background:color-mix(in oklab,var(--bg-link) 10%,transparent); border-color:color-mix(in oklab,var(--bg-link) 36%,transparent); }
+    .tiny.ready.act { color:var(--act-link); background:color-mix(in oklab,var(--act-link) 10%,transparent); border-color:color-mix(in oklab,var(--act-link) 36%,transparent); }
+    .note { margin-top:12px; display:grid; gap:8px; color:var(--muted); font-size:11.5px; line-height:1.5; }
+    .note strong { color:color-mix(in oklab,var(--text) 86%,transparent); font-weight:780; }
+    .mode-grid { display:grid; grid-template-columns:1.15fr .85fr; gap:14px; }
+    .card { border:1px solid var(--line); border-radius:8px; background:color-mix(in oklab,var(--panel2) 72%,transparent); padding:13px; }
+    @media (max-width:1120px) {
+      .top, .toolbar, .panel-head { align-items:flex-start; flex-direction:column; }
+      .mode-grid { grid-template-columns:1fr; }
+    }
+  </style>
+</head>
+<body data-theme="dark" data-badges="on">
+  <svg width="0" height="0" aria-hidden="true" focusable="false" style="position:absolute">
+    <symbol id="icon-folder" viewBox="0 0 24 24"><path d="M3.5 6.8A2.3 2.3 0 0 1 5.8 4.5h4.35l1.9 2.05H18.2a2.3 2.3 0 0 1 2.3 2.3v8.35a2.3 2.3 0 0 1-2.3 2.3H5.8a2.3 2.3 0 0 1-2.3-2.3V6.8Z" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linejoin="round"/></symbol>
+    <symbol id="icon-file" viewBox="0 0 24 24"><path d="M7 3.8h6.15L18 8.65V20.2H7V3.8Z" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linejoin="round"/><path d="M13 4v5h5" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linejoin="round"/></symbol>
+    <symbol id="icon-badge" viewBox="0 0 24 24"><path d="M4.5 6.5h15v11h-15v-11Z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><path d="M8 10h3M8 14h8M15.5 10h.01" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"/></symbol>
+  </svg>
+
+  <div class="page">
+    <div class="top">
+      <div>
+        <h1>S1-A + 링크 배지 토글</h1>
+        <p class="sub">전체 씬 뷰는 S1-A를 유지하되, 시트가 너무 복잡해 보이면 사용자가 상태 배지를 숨길 수 있게 합니다. 기본값은 켜짐이고, 토글 값은 저장됩니다.</p>
+      </div>
+      <div class="seg">
+        <button class="active" data-theme-btn="dark" type="button">다크</button>
+        <button data-theme-btn="light" type="button">라이트</button>
+      </div>
+    </div>
+
+    <section class="panel">
+      <div class="panel-head">
+        <div><h2>시트 상단 도구줄</h2><div class="hint">토글은 행마다 반복하지 않고, 시트 도구줄 오른쪽에 한 번만 둡니다.</div></div>
+        <div class="hint">기본값: 켜짐 / 저장: 사용자 설정</div>
+      </div>
+      <div class="body">
+        <div class="toolbar">
+          <div class="view-tabs" aria-label="보기 모드">
+            <button class="active" type="button">전체</button>
+            <button type="button">BG</button>
+            <button type="button">ACT</button>
+          </div>
+          <button id="badgeToggle" class="badge-toggle" type="button" aria-pressed="true" aria-label="시트 링크 배지 표시 토글">
+            <span class="label"><svg class="ico"><use href="#icon-badge"/></svg><span>링크 배지</span></span>
+            <span class="switch-track" aria-hidden="true"><span class="switch-thumb"></span></span>
+          </button>
+        </div>
+
+        <div class="mode-grid">
+          <article class="card">
+            <h3>전체 씬 뷰: S1-A</h3>
+            <div class="sheet-demo">
+              <div class="sheet">
+                <div class="row head"><div>씬</div><div>BG 메모</div><div>ACT 메모</div><div>담당</div></div>
+                <div class="row">
+                  <div class="gutter-dual" title="위: BG, 아래: ACT">
+                    <div class="dept-row"><span class="dept-strip bg"></span><span class="tiny ready bg"><svg class="ico"><use href="#icon-folder"/></svg></span><span class="tiny ready bg"><svg class="ico"><use href="#icon-file"/></svg></span></div>
+                    <div class="dept-row"><span class="dept-strip act"></span><span class="tiny"><svg class="ico"><use href="#icon-folder"/></svg></span><span class="tiny ready act"><svg class="ico"><use href="#icon-file"/></svg></span></div>
+                  </div>
+                  <div><b>A_014</b></div><div class="truncate">야시장 간판 디테일</div><div class="truncate">캐릭터 진입 타이밍</div><div>민지</div>
+                </div>
+                <div class="row">
+                  <div class="gutter-dual" title="위: BG, 아래: ACT">
+                    <div class="dept-row"><span class="dept-strip bg"></span><span class="tiny"><svg class="ico"><use href="#icon-folder"/></svg></span><span class="tiny"><svg class="ico"><use href="#icon-file"/></svg></span></div>
+                    <div class="dept-row"><span class="dept-strip act"></span><span class="tiny ready act"><svg class="ico"><use href="#icon-folder"/></svg></span><span class="tiny ready act"><svg class="ico"><use href="#icon-file"/></svg></span></div>
+                  </div>
+                  <div><b>A_015</b></div><div class="truncate">비 오는 거리 정리</div><div class="truncate">액팅 파일 전달 완료</div><div>서연</div>
+                </div>
+                <div class="row">
+                  <div class="gutter-dual" title="위: BG, 아래: ACT">
+                    <div class="dept-row"><span class="dept-strip bg"></span><span class="tiny ready bg"><svg class="ico"><use href="#icon-folder"/></svg></span><span class="tiny"><svg class="ico"><use href="#icon-file"/></svg></span></div>
+                    <div class="dept-row"><span class="dept-strip act"></span><span class="tiny"><svg class="ico"><use href="#icon-folder"/></svg></span><span class="tiny"><svg class="ico"><use href="#icon-file"/></svg></span></div>
+                  </div>
+                  <div><b>A_016</b></div><div class="truncate">상점 내부 기준선</div><div class="truncate">액팅 대기</div><div>준호</div>
+                </div>
+              </div>
+            </div>
+          </article>
+
+          <article class="card">
+            <h3>BG 상세 뷰: 1줄 2아이콘</h3>
+            <div class="sheet-demo">
+              <div class="sheet" style="min-width:420px">
+                <div class="row head" style="grid-template-columns:74px 1fr 68px"><div>씬</div><div>작업 메모</div><div>담당</div></div>
+                <div class="row" style="grid-template-columns:74px 1fr 68px">
+                  <div class="gutter"><span class="tiny ready bg"><svg class="ico"><use href="#icon-folder"/></svg></span><span class="tiny ready bg"><svg class="ico"><use href="#icon-file"/></svg></span></div>
+                  <div><b>A_014</b></div><div class="truncate">야시장 간판 디테일</div><div>민지</div>
+                </div>
+                <div class="row" style="grid-template-columns:74px 1fr 68px">
+                  <div class="gutter"><span class="tiny"><svg class="ico"><use href="#icon-folder"/></svg></span><span class="tiny ready bg"><svg class="ico"><use href="#icon-file"/></svg></span></div>
+                  <div><b>A_015</b></div><div class="truncate">비 오는 거리 정리</div><div>서연</div>
+                </div>
+              </div>
+            </div>
+          </article>
+        </div>
+
+        <div class="note">
+          <div><strong>실제 앱 적용 기준:</strong> 이 토글은 시트 뷰의 표시 설정입니다. 링크 자체를 지우거나 비활성화하지 않고, 우클릭 메뉴와 파일 탭 기능은 그대로 유지됩니다.</div>
+          <div><strong>저장 위치:</strong> 실제 구현에서는 Bflow의 사용자 설정에 저장합니다. 팀 공용 링크 데이터와 섞지 않습니다.</div>
+        </div>
+      </div>
+    </section>
+  </div>
+
+  <script>
+    const BADGE_KEY = 'bflow.sheetWorkLinkBadges.visible';
+    const themeButtons = Array.from(document.querySelectorAll('[data-theme-btn]'));
+    const badgeToggle = document.getElementById('badgeToggle');
+
+    function setTheme(theme) {
+      document.body.dataset.theme = theme;
+      themeButtons.forEach((btn) => btn.classList.toggle('active', btn.dataset.themeBtn === theme));
+      if (window.brainstorm) window.brainstorm.send({ type:'click', choice:`theme-${theme}`, text:`theme ${theme}` });
+    }
+
+    function readBadgeSetting() {
+      const stored = localStorage.getItem(BADGE_KEY);
+      return stored === null ? true : stored === 'on';
+    }
+
+    function setBadges(visible, persist = true) {
+      document.body.dataset.badges = visible ? 'on' : 'off';
+      badgeToggle.setAttribute('aria-pressed', String(visible));
+      badgeToggle.title = visible ? '시트 링크 배지 숨기기' : '시트 링크 배지 표시';
+      if (persist) localStorage.setItem(BADGE_KEY, visible ? 'on' : 'off');
+      if (window.brainstorm) window.brainstorm.send({ type:'click', choice:visible ? 'sheet-badges-on' : 'sheet-badges-off', text:`sheet badges ${visible ? 'on' : 'off'}` });
+    }
+
+    themeButtons.forEach((btn) => btn.addEventListener('click', () => setTheme(btn.dataset.themeBtn)));
+    badgeToggle.addEventListener('click', () => setBadges(document.body.dataset.badges !== 'on'));
+    setBadges(readBadgeSetting(), false);
+  </script>
+</body>
+</html>
