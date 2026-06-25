@@ -1,9 +1,10 @@
 import { useState, useRef, useEffect, useMemo, useCallback, Fragment } from 'react';
 import { createPortal } from 'react-dom';
 import { motion } from 'framer-motion';
-import { Trash2 } from 'lucide-react';
+import { Link2, Trash2 } from 'lucide-react';
+import { toast } from 'sonner';
 import { STAGES, DEPARTMENT_CONFIGS } from '@/types';
-import type { MergedScene, Stage, Scene, ScenePhaseState } from '@/types';
+import type { MergedScene, Stage, Scene, ScenePhaseState, SceneWorkLink } from '@/types';
 import { ScenePhaseToggle } from './ScenePhaseToggle';
 import type { SceneGroupMode } from '@/stores/useAppStore';
 import { isFullyDone } from '@/utils/calcStats';
@@ -16,7 +17,10 @@ import { AssigneeSelect } from '@/components/common/AssigneeSelect';
 import { AssigneeMultiSelect, AssigneeChipList } from '@/components/common/AssigneeMultiSelect';
 import { useDataStore } from '@/stores/useDataStore';
 import { useRevisionStore } from '@/stores/useRevisionStore';
+import { useSceneWorkLinkStore } from '@/stores/useSceneWorkLinkStore';
 import { buildSceneKey } from '@/services/revisionService';
+import { openWorkPath } from '@/services/sceneWorkLinkService';
+import { getSceneWorkLinkSlots } from '@/utils/sceneWorkLinks';
 import { LengthIcon } from './LengthIcon';
 import { SceneContextMenu } from './SceneContextMenu';
 import {
@@ -30,7 +34,9 @@ import { useAuthStore } from '@/stores/useAuthStore';
 import { StageSegmentToggle } from './StageSegmentToggle';
 import { SheetAlertBadges } from './SheetAlertBadges';
 import { AssigneeProgressStack } from './AssigneeProgressStack';
+import { SceneWorkLinkBadges } from './SceneWorkLinkBadges';
 import { hasMultiAssigneeProgress } from '@/utils/assigneeProgress';
+import { loadPreferences, savePreferences } from '@/services/settingsService';
 import {
   persistLengthChangeAtomic,
   saveLengthChangeField,
@@ -414,6 +420,8 @@ export function UnifiedSceneSheetView({
   const bgCfg = DEPARTMENT_CONFIGS.bg;
   const actCfg = DEPARTMENT_CONFIGS.acting;
   const completionTintEnabled = useAppStore((s) => s.completionTintEnabled);
+  const selectedDepartment = useAppStore((s) => s.selectedDepartment);
+  const [sheetWorkLinkBadgesVisible, setSheetWorkLinkBadgesVisible] = useState(true);
   const {
     widthOf,
     hasCustomWidths,
@@ -452,6 +460,8 @@ export function UnifiedSceneSheetView({
   const revisions = useRevisionStore((s) => s.revisions);
   const getOpenCount = useRevisionStore((s) => s.getOpenCount);
   const episodes = useDataStore((s) => s.episodes);
+  const episodeTitles = useDataStore((s) => s.episodeTitles);
+  const linkMap = useSceneWorkLinkStore((s) => s.linkMap);
   const revisionCountByMergedKey = useMemo(() => {
     if (!bgSheetName && !actSheetName) return new Map<string, number>();
     const sheetForKey = bgSheetName ?? actSheetName ?? '';
@@ -548,6 +558,39 @@ export function UnifiedSceneSheetView({
   ) => {
     startBoundaryResize(leftKey, rightKey, event, leftVisualStartWidth, rightVisualStartWidth, fittedSheet.widths);
   }, [fittedSheet.widths, startBoundaryResize]);
+
+  useEffect(() => {
+    let cancelled = false;
+    void loadPreferences()
+      .then((prefs) => {
+        if (!cancelled) setSheetWorkLinkBadgesVisible(prefs?.sheetWorkLinkBadgesVisible ?? true);
+      })
+      .catch((err) => console.warn('[SceneWorkLinks] 시트 배지 설정 로드 실패', err));
+    return () => { cancelled = true; };
+  }, []);
+
+  useEffect(() => {
+    const cleanup = window.electronAPI?.onPreferencesChanged?.((payload: unknown) => {
+      const p = payload as { sheetWorkLinkBadgesVisible?: unknown } | null;
+      if (typeof p?.sheetWorkLinkBadgesVisible === 'boolean') {
+        setSheetWorkLinkBadgesVisible(p.sheetWorkLinkBadgesVisible);
+      }
+    });
+    return cleanup;
+  }, []);
+
+  const handleToggleWorkLinkBadges = useCallback(async () => {
+    const next = !sheetWorkLinkBadgesVisible;
+    setSheetWorkLinkBadgesVisible(next);
+    try {
+      const prefs = (await loadPreferences()) ?? {};
+      await savePreferences({ ...prefs, sheetWorkLinkBadgesVisible: next });
+      await window.electronAPI?.preferencesBroadcastChange?.({ sheetWorkLinkBadgesVisible: next });
+    } catch (err) {
+      console.warn('[SceneWorkLinks] 시트 배지 설정 저장 실패', err);
+      setSheetWorkLinkBadgesVisible(!next);
+    }
+  }, [sheetWorkLinkBadgesVisible]);
 
   // ── v1.16.0: 우클릭 컨텍스트 메뉴 상태 ──
   const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number; merged: MergedScene } | null>(null);
@@ -823,6 +866,41 @@ export function UnifiedSceneSheetView({
     }
   }, [editingCell, anchor, rangeEnd, maxRow, maxCol, selectedCells, getCellValue, saveField]);
 
+  const sheetWorkLinkBadgeMode = selectedDepartment === 'bg'
+    ? 'sheet-bg'
+    : selectedDepartment === 'acting'
+      ? 'sheet-acting'
+      : 'sheet-all';
+  const getEpisodeNameForMerged = useCallback((merged: MergedScene): string | undefined => {
+    const sheetName = merged.bgScene ? bgSheetName : actSheetName;
+    const fallbackSheetName = sheetName ?? bgSheetName ?? actSheetName;
+    if (!fallbackSheetName) return undefined;
+    const episode = episodes.find((ep) => ep.parts.some((part) => part.sheetName === fallbackSheetName));
+    return episode ? (episodeTitles[episode.episodeNumber] || episode.title) : undefined;
+  }, [actSheetName, bgSheetName, episodeTitles, episodes]);
+  const getWorkLinkDepartmentsForMerged = useCallback((merged: MergedScene) => {
+    const departments: Array<'bg' | 'acting'> = selectedDepartment === 'bg'
+      ? ['bg']
+      : selectedDepartment === 'acting'
+        ? ['acting']
+        : ['bg', 'acting'];
+    return departments.map((department) => {
+      const scene = department === 'bg' ? merged.bgScene : merged.actScene;
+      const slots = getSceneWorkLinkSlots(linkMap, scene?.id, department);
+      return {
+        department,
+        folder: slots.folder,
+        primaryFile: slots.primaryFile,
+      };
+    });
+  }, [linkMap, selectedDepartment]);
+  const handleOpenWorkLink = useCallback(async (link: SceneWorkLink) => {
+    const result = await openWorkPath(link.path);
+    if (!result.ok) {
+      toast.error(link.linkKind === 'folder' ? '이 PC에서 폴더를 찾을 수 없음' : '이 PC에서 파일을 찾을 수 없음');
+    }
+  }, []);
+
   return (
     <motion.div
       className="unified-scene-sheet"
@@ -830,11 +908,43 @@ export function UnifiedSceneSheetView({
       animate={{ opacity: 1 }}
       transition={{ duration: 0.2, ease: 'easeInOut' }}
     >
+      <div className="mb-2 flex justify-end">
+        <button
+          type="button"
+          role="switch"
+          aria-checked={sheetWorkLinkBadgesVisible}
+          onClick={() => void handleToggleWorkLinkBadges()}
+          className={cn(
+            'inline-flex h-8 items-center gap-2 rounded-md border px-2.5 text-[11.5px] font-semibold transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-accent/45',
+            sheetWorkLinkBadgesVisible
+              ? 'border-accent/35 bg-accent/12 text-accent-sub hover:bg-accent/18'
+              : 'border-bg-border/60 bg-bg-card/70 text-text-secondary hover:bg-white/6 hover:text-text-primary',
+          )}
+        >
+          <Link2 size={13} aria-hidden />
+          링크 배지
+          <span
+            className={cn(
+              'relative inline-flex h-4 w-7 rounded-full transition-colors duration-200',
+              sheetWorkLinkBadgesVisible ? 'bg-accent' : 'bg-text-secondary/25',
+            )}
+          >
+            <span
+              className={cn(
+                'absolute top-0.5 h-3 w-3 rounded-full bg-white transition-transform duration-200',
+                sheetWorkLinkBadgesVisible ? 'translate-x-3.5' : 'translate-x-0.5',
+              )}
+            />
+          </span>
+        </button>
+      </div>
+
       <div
         ref={tableRef}
         tabIndex={0}
         className={cn(
           'overflow-y-auto rounded-lg border border-bg-border focus:outline-none',
+          sheetWorkLinkBadgesVisible && 'pl-8',
           sheetOverflowsViewport ? 'overflow-x-auto' : 'overflow-x-hidden',
         )}
         onKeyDown={handleTableKeyDown}
@@ -1067,6 +1177,14 @@ export function UnifiedSceneSheetView({
 
                   {/* 씬번호 */}
                   <td className="px-2 py-1.5 font-mono text-xs relative" style={{ overflow: 'visible' }}>
+                    {sheetWorkLinkBadgesVisible && (
+                      <SceneWorkLinkBadges
+                        bgSceneUuid={bgScene?.id}
+                        actSceneUuid={actScene?.id}
+                        mode={sheetWorkLinkBadgeMode}
+                        className="absolute left-[-1.85rem] top-1/2 z-[2] -translate-y-1/2"
+                      />
+                    )}
                     <div className="flex min-w-0 items-center gap-1.5">
                       {lengthChange && (
                         <span
@@ -1289,6 +1407,12 @@ export function UnifiedSceneSheetView({
           current={ctxMenu.merged.bgScene?.lengthChange ?? ctxMenu.merged.actScene?.lengthChange ?? null}
           onSelect={(value) => handleSetLengthChange(ctxMenu.merged, value)}
           onClose={() => setCtxMenu(null)}
+          sceneLabel={ctxMenu.merged.sceneId || ctxMenu.merged.bgScene?.sceneId || ctxMenu.merged.actScene?.sceneId}
+          workLinks={{
+            episodeName: getEpisodeNameForMerged(ctxMenu.merged),
+            departments: getWorkLinkDepartmentsForMerged(ctxMenu.merged),
+            onOpen: handleOpenWorkLink,
+          }}
         />,
         document.body,
       )}

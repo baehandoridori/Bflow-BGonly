@@ -1,7 +1,7 @@
-import type { Activity, ActionType, ActivityStatRowV2, Department, Stage } from '@/types';
-import { DEPARTMENT_CONFIGS } from '@/types';
-import { ACTION_TYPE_LABEL } from './constants';
-import { GROUP_WINDOW_MS } from './constants';
+import type { Activity, ActionType, ActivityStatRowV2, Department, Stage } from '../../../types/index.ts';
+import { DEPARTMENT_CONFIGS } from '../../../types/index.ts';
+import { ACTION_TYPE_LABEL } from './constants.ts';
+import { GROUP_WINDOW_MS } from './constants.ts';
 
 /**
  * 멀티-씬 액션 — 한 번의 사용자 행위로 여러 씬에 동시에 영향이 가는 액션.
@@ -14,6 +14,25 @@ export const MULTI_SCENE_ACTIONS: ReadonlySet<ActionType> = new Set([
   'layout_change',
   'image_upload_storyboard',
   'image_upload_guide',
+]);
+
+/**
+ * 리테이크 처리 묶음 — 취합자가 짧은 시간에 여러 씬의 리테이크를 등록/상태 변경하는 경우가 잦다.
+ * 댓글 자체는 맥락 보존을 위해 씬/리테이크 단위로 남기고, 등록·상태·담당 처리만 묶는다.
+ */
+export const RETAKE_BURST_ACTIONS: ReadonlySet<ActionType> = new Set([
+  'revision_add',
+  'revision_in_progress',
+  'revision_resolve',
+  'revision_delete',
+  'revision_assignee_done',
+  'revision_final_resolve',
+  'revision_reassign',
+]);
+
+const CROSS_SCENE_GROUPABLE_ACTIONS: ReadonlySet<ActionType> = new Set([
+  ...MULTI_SCENE_ACTIONS,
+  ...RETAKE_BURST_ACTIONS,
 ]);
 
 /**
@@ -77,9 +96,9 @@ export function groupActivities(items: Activity[]): FeedItem[] {
     if (a.userId !== b.userId) return false;
     if (a.actionType !== b.actionType) return false;
     if (a.episodeNumber !== b.episodeNumber) return false;
-    // 단일-씬 액션은 sceneId 일치 요구 (Codex P2). 멀티-씬 액션(담당자/레이아웃/이미지 일괄 업로드)
-    // 은 한 번의 사용자 행위로 여러 씬에 동시에 영향이 가므로 sceneId 무관 묶음.
-    if (!MULTI_SCENE_ACTIONS.has(a.actionType) && a.sceneId !== b.sceneId) return false;
+    // 기본은 sceneId 일치. 단, 일괄 작업과 리테이크 연속 처리처럼 사용자가 같은 흐름에서
+    // 여러 씬을 빠르게 처리하는 액션은 sceneId 가 달라도 5분 묶음으로 정리한다.
+    if (!CROSS_SCENE_GROUPABLE_ACTIONS.has(a.actionType) && a.sceneId !== b.sceneId) return false;
     const da = new Date(a.createdAt).getTime();
     const db = new Date(b.createdAt).getTime();
     return Math.abs(da - db) <= GROUP_WINDOW_MS;
@@ -99,9 +118,9 @@ export function groupActivities(items: Activity[]): FeedItem[] {
   };
 
   for (let i = 1; i < sorted.length; i++) {
-    const prev = buffer[buffer.length - 1];
+    const head = buffer[0];
     const cur = sorted[i];
-    if (sameGroup(prev, cur)) buffer.push(cur);
+    if (sameGroup(head, cur)) buffer.push(cur);
     else { flush(); buffer.push(cur); }
   }
   flush();

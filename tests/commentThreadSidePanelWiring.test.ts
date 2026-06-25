@@ -130,6 +130,12 @@ test('side thread has its own composer and main composer stays top-level', () =>
   assert.match(commentPanel, /onClick=\{handleSubmit\}/);
 });
 
+test('CommentPanel mounted ref is restored after development remount checks', () => {
+  assert.match(commentPanel, /const mountedRef = useRef\(true\)/);
+  assert.match(commentPanel, /useEffect\(\(\) => \{\s*mountedRef\.current = true;\s*return \(\) => \{ mountedRef\.current = false; \};\s*\}, \[\]\)/);
+  assert.doesNotMatch(commentPanel, /useEffect\(\(\) => \(\) => \{ mountedRef\.current = false; \}, \[\]\)/);
+});
+
 test('retake activity rows can open the detail card or the comment-side retake thread', () => {
   assert.match(commentPanel, /revisionId\?: string/);
   assert.match(commentPanel, /revisionAction\?: 'add' \| 'status' \| 'delete'/);
@@ -179,11 +185,20 @@ test('retake comments always keep their re badge in main and side thread views',
 
 test('side thread submit state is released by request id', () => {
   assert.match(commentPanel, /threadSubmitRequestRef\.current = submitRequestId/);
-  assert.match(commentPanel, /mountedRef\.current\s*&&\s*threadSubmitRequestRef\.current === submitRequestId/);
+  assert.match(commentPanel, /try\s*\{\s*setThreadSubmitting\(true\);[\s\S]*?threadSubmitRequestRef\.current = submitRequestId[\s\S]*?onCountChange\?\.\(next\.length\)[\s\S]*?await addComment\(targetSceneKey, comment\)/);
+  assert.match(commentPanel, /mountedRef\.current\s*&&\s*\(\s*threadSubmitRequestRef\.current === submitRequestId/);
+  assert.match(commentPanel, /threadSubmitRequestRef\.current === submitRequestId \|\| threadSubmitRequestRef\.current == null/);
   assert.doesNotMatch(
     commentPanel,
     /finally\s*\{\s*if \(\s*[\s\S]*activeRevisionThreadIdRef\.current === revisionThreadId[\s\S]*threadSubmitRequestRef\.current === submitRequestId/,
   );
+});
+
+test('retake card thread submit keeps optimistic work inside the loading guard', () => {
+  assert.match(revisionCommentThread, /let newComment: SceneComment \| null = null/);
+  assert.match(revisionCommentThread, /try\s*\{\s*setSubmitting\(true\);[\s\S]*?setAllComments\(prev => \[\.\.\.prev, newComment!\]\)[\s\S]*?await addComment\(sceneKey, newComment\)/);
+  assert.match(revisionCommentThread, /const failedComment = newComment[\s\S]*?if \(!failedComment\)[\s\S]*?setDraft\(prevDraft\)[\s\S]*?return/);
+  assert.match(revisionCommentThread, /finally\s*\{\s*if \(mountedRef\.current\) \{\s*setSubmitting\(false\);/);
 });
 
 test('retake-only filter keeps retake activity cards visible', () => {

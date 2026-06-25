@@ -905,7 +905,10 @@ export function CommentPanel({
   // drop 하므로 setAttachedImages updater 안의 side-effect (deleteImage) 도 실행 안 됨 → orphan.
   // mountedRef 로 unmount 여부를 직접 확인해 그 케이스에서 storage 즉시 정리.
   const mountedRef = useRef(true);
-  useEffect(() => () => { mountedRef.current = false; }, []);
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => { mountedRef.current = false; };
+  }, []);
 
   // 컴포넌트 언마운트 시 blob URL 정리.
   // Codex P2 5차(2026-04-29): unmount 시점에 attachedImages 에 남아있는 항목은 모두 *전송 안 된 draft* 다
@@ -1539,25 +1542,25 @@ export function CommentPanel({
 
     const next = [...comments, comment];
     const submitRequestId = comment.id;
-    setThreadSubmitting(true);
-    threadSubmitRequestRef.current = submitRequestId;
-    setComments(next);
-    onCountChange?.(next.length);
-    if (threadRoot) {
-      setLastThreadRootId(threadRoot.id);
-      setCollapsedThreads((prev) => {
-        if (!prev.has(threadRoot.id)) return prev;
-        const opened = new Set(prev);
-        opened.delete(threadRoot.id);
-        return opened;
-      });
-    }
-    setThreadInput('');
-    threadInputValueRef.current = '';
-    setThreadAttachedImages([]);
-    threadAttachedImagesRef.current = [];
-
     try {
+      setThreadSubmitting(true);
+      threadSubmitRequestRef.current = submitRequestId;
+      setComments(next);
+      onCountChange?.(next.length);
+      if (threadRoot) {
+        setLastThreadRootId(threadRoot.id);
+        setCollapsedThreads((prev) => {
+          if (!prev.has(threadRoot.id)) return prev;
+          const opened = new Set(prev);
+          opened.delete(threadRoot.id);
+          return opened;
+        });
+      }
+      setThreadInput('');
+      threadInputValueRef.current = '';
+      setThreadAttachedImages([]);
+      threadAttachedImagesRef.current = [];
+
       await addComment(targetSceneKey, comment);
       markUnreadCommentsRead();
       setThreadMentionTarget((current) => current?.id === threadMentionTarget?.id ? null : current);
@@ -1618,10 +1621,12 @@ export function CommentPanel({
     } finally {
       if (
         mountedRef.current
-        && threadSubmitRequestRef.current === submitRequestId
+        && (threadSubmitRequestRef.current === submitRequestId || threadSubmitRequestRef.current == null)
       ) {
         setThreadSubmitting(false);
-        threadSubmitRequestRef.current = null;
+        if (threadSubmitRequestRef.current === submitRequestId) {
+          threadSubmitRequestRef.current = null;
+        }
       }
     }
   };

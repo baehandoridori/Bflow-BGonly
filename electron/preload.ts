@@ -8,6 +8,14 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // 파일탐색기에서 경로 열기
   shellShowItem: (filePath: string) =>
     ipcRenderer.invoke('shell:show-item', filePath) as Promise<{ ok: boolean; error?: string }>,
+  shellOpenPath: (targetPath: string) =>
+    ipcRenderer.invoke('shell:open-path', targetPath) as Promise<{ ok: boolean; error?: string }>,
+  chooseFolderPath: () =>
+    ipcRenderer.invoke('path:choose-folder') as Promise<string | null>,
+  chooseFilePath: () =>
+    ipcRenderer.invoke('path:choose-file') as Promise<string | null>,
+  pathExists: (targetPath: string) =>
+    ipcRenderer.invoke('path:exists', targetPath) as Promise<boolean>,
 
   // 외부 URL 을 기본 브라우저로 열기 (메모 링크)
   openExternal: (url: string) =>
@@ -123,6 +131,12 @@ contextBridge.exposeInMainWorld('electronAPI', {
     updatedBy?: string,
   ) =>
     ipcRenderer.invoke('supabase:update-scene-phase', sceneUuid, sceneState, workRound, feedbackRound, updatedBy),
+  supabaseReadSceneWorkLinks: (sceneUuids?: string[]) =>
+    ipcRenderer.invoke('supabase:read-scene-work-links', sceneUuids),
+  supabaseUpsertSceneWorkLink: (input: unknown) =>
+    ipcRenderer.invoke('supabase:upsert-scene-work-link', input),
+  supabaseDeleteSceneWorkLink: (sceneUuid: string, department: 'bg' | 'acting', linkKind: 'folder' | 'primary_file') =>
+    ipcRenderer.invoke('supabase:delete-scene-work-link', sceneUuid, department, linkKind),
   // v1.25.0~ 액팅 피드백 알림 디스패치
   supabaseDispatchFeedbackNotification: (payload: unknown) =>
     ipcRenderer.invoke('supabase:dispatch-feedback-notification', payload),
