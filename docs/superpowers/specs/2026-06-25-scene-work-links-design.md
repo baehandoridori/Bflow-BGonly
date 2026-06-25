@@ -244,7 +244,7 @@ CREATE INDEX IF NOT EXISTS idx_scene_work_links_scene
 
 경고 상태는 DB에 저장하지 않는다. `개인 경로`, `이 PC에서 확인 안 됨` 같은 상태는 사용자 PC 환경에 따라 달라지므로 앱에서 계산한다.
 
-마이그레이션에는 RLS `allow_all` 정책, `updated_at` 자동 갱신 트리거, `ALTER PUBLICATION supabase_realtime ADD TABLE scene_work_links`를 포함한다. 앱의 Realtime 구독에도 `scene_work_links` 핸들러를 추가해 다른 사용자가 바꾼 링크가 카드/시트/파일 탭에 반영되게 한다.
+마이그레이션에는 RLS `allow_all` 정책, 명시적 `GRANT SELECT, INSERT, UPDATE, DELETE`, `updated_at` 자동 갱신 트리거, `ALTER PUBLICATION supabase_realtime ADD TABLE scene_work_links`를 포함한다. 앱의 Realtime 구독에도 `scene_work_links` 핸들러를 추가해 다른 사용자가 바꾼 링크가 카드/시트/파일 탭에 반영되게 한다.
 
 ## 9. 프론트엔드 구조
 
