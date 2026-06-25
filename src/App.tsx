@@ -17,6 +17,7 @@ const VacationView = lazy(() => import('@/views/VacationView').then(m => ({ defa
 const CompositingView = lazy(() => import('@/views/CompositingView')); // default export — 기존 리테이크 보드 (v1.30.0~ 'compositing-revisions' 로 이관)
 const CompositingDashboardView = lazy(() => import('@/views/CompositingDashboardView')); // v1.30.0+ 새 현황 대시보드
 const RetakeHubView = lazy(() => import('@/views/RetakeHubView')); // 리테이크 허브 5단계 — 감독 세트 허브
+const CharacterBoardView = lazy(() => import('@/views/CharacterBoardView')); // 캐릭터 현황판 (게이팅)
 const SettingsView = lazy(() => import('@/views/SettingsView').then(m => ({ default: m.SettingsView })));
 import { SpotlightSearch } from '@/components/spotlight/SpotlightSearch';
 import { LoginScreen } from '@/components/auth/LoginScreen';
@@ -2452,6 +2453,8 @@ export default function App() {
           return <CompositingView />;
         case 'retake-hub':
           return <RetakeHubView />;
+        case 'character-board':
+          return <CharacterBoardView />;
         case 'settings':
           return <SettingsView />;
         default:

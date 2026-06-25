@@ -15,7 +15,7 @@ import {
   waitForAllPendingOps,
 } from './sheets';
 import { uploadImage as driveUploadImage, setImageUploadUrl } from './drive-image';
-import { uploadImage as storageUploadImage, deleteImage as storageDeleteImage } from './storage';
+import { uploadImage as storageUploadImage, deleteImage as storageDeleteImage, uploadCharacterImage as storageUploadCharacterImage } from './storage';
 // v1.20.0: 사용자 폰트 IPC + bflow-font:// custom protocol
 import { registerFontProtocol, registerFontIpcHandlers } from './fontIpc';
 // v1.21.0: 자동 업데이트 시스템 (G드라이브 → 로컬 PC 본체로 swap)
@@ -1244,6 +1244,20 @@ import {
   loadCompositingStates as sbLoadCompositingStates,
   setCompositingState as sbSetCompositingState,
   startCompositingStatesRealtime as sbStartCompositingStatesRealtime,
+  // 캐릭터 현황판
+  loadCharacters as sbLoadCharacters,
+  loadCharacterCostumes as sbLoadCharacterCostumes,
+  loadEpisodeCharacterMap as sbLoadEpisodeCharacterMap,
+  addCharacter as sbAddCharacter,
+  updateCharacter as sbUpdateCharacter,
+  deleteCharacter as sbDeleteCharacter,
+  addCharacterCostume as sbAddCharacterCostume,
+  updateCharacterCostume as sbUpdateCharacterCostume,
+  deleteCharacterCostume as sbDeleteCharacterCostume,
+  linkCharacterEpisode as sbLinkCharacterEpisode,
+  unlinkCharacterEpisode as sbUnlinkCharacterEpisode,
+  updateEpisodeCharacterMapping as sbUpdateEpisodeCharacterMapping,
+  startCharacterBoardRealtime as sbStartCharacterBoardRealtime,
 } from './supabase';
 import type { SupabaseUser, BulkStageUpdate, BulkFieldUpdate } from './supabase';
 import { setupRealtimeSubscription, teardownRealtime } from './realtime';
@@ -1354,6 +1368,74 @@ async function logSceneActivity(input: {
     });
   } catch {
     // 무시
+  }
+}
+
+/** 렌더러가 단계 변경 시 넘기는 표시용 컨텍스트 (신원은 제외 — 메인 세션 사용자 사용). */
+interface CostumeActivityLogContext {
+  characterId: string;
+  characterName: string;
+  costumeName: string;
+  kind: 'design' | 'rigging';
+  stage: string;       // 변경 후 단계 값 (예: 'rigging', 'done')
+  stageLabel: string;  // 사람이 읽는 단계 이름 (예: '리깅', '완성')
+}
+
+/**
+ * 캐릭터 복장 단계 변경 활동 자동 기록 (try/catch 흡수, 본 mutation 흐름 영향 없음).
+ * - 씬 단계 토글과 동일하게 메인 IPC 레이어에서 기록. action_group='progress'.
+ * - scene_id=null / scene_label="캐릭터명 · 복장명" (씬이 아니므로 클릭 네비게이션 없음).
+ * - 리깅이 '완성'(done)으로 전이되면 별도 action_type(character_rigging_done)로 남겨 피드에서 강조.
+ */
+async function logCostumeStageActivity(ctx?: CostumeActivityLogContext | null): Promise<void> {
+  if (!ctx || !currentActivityUser) return;
+  if (ctx.kind !== 'design' && ctx.kind !== 'rigging') return;
+  try {
+    const isRiggingDone = ctx.kind === 'rigging' && ctx.stage === 'done';
+    const actionType: ActionType = isRiggingDone
+      ? 'character_rigging_done'
+      : ctx.kind === 'design'
+        ? 'character_design_stage'
+        : 'character_rigging_stage';
+    const sceneLabel = `${ctx.characterName} · ${ctx.costumeName}`;
+    await sbRecordActivityLog({
+      userId: currentActivityUser.id,
+      userName: currentActivityUser.name,
+      actionType,
+      actionGroup: 'progress',
+      sceneId: null,
+      sceneLabel,
+      episodeNumber: null,
+      department: null,
+      detail: {
+        characterId: ctx.characterId,
+        characterName: ctx.characterName,
+        costumeName: ctx.costumeName,
+        kind: ctx.kind,
+        stage: ctx.stage,
+        stageLabel: ctx.stageLabel,
+        ...(isRiggingDone ? { completed: true } : {}),
+      },
+    });
+
+    if (isRiggingDone) {
+      // ── 완성(리깅 done) 작업공지 연결 자리 ───────────────────────────────────────
+      // TODO(slack): 작업공지 슬랙 채널 연결 — 웹훅이 준비되면 여기서 쏜다.
+      //   아직 작업공지용 webhook URL 이 없어 코드로 전송하지 않는다 (한솔 결정).
+      //   기존 sendSlackWebhook / slackWebhookService 패턴을 그대로 따른다. 보낼 payload 예시:
+      //   sendSlackWebhook({
+      //     text: `${ctx.characterName} · ${ctx.costumeName} 리깅 완성`,
+      //     // blocks: [{ type: 'section', text: { type: 'mrkdwn',
+      //     //   text: `*${ctx.characterName}* 캐릭터의 *${ctx.costumeName}* 리깅이 완성되었어요 🎉 (by ${currentActivityUser.name})` } }],
+      //   });
+      //
+      // TODO(공지위젯): 추후 '공지사항' 위젯에 완성 공지 push.
+      //   완성 공지 위젯이 생기면 이 지점에서 위젯 피드로도 push 한다 (현재는 placeholder).
+      //   예: pushAnnouncement({ kind: 'costume_rigging_done', characterId: ctx.characterId,
+      //   characterName: ctx.characterName, costumeName: ctx.costumeName, by: currentActivityUser.name });
+    }
+  } catch {
+    // 무시 — 활동 기록 실패가 단계 변경 자체를 막지 않는다.
   }
 }
 
@@ -2391,6 +2473,16 @@ function startSupabaseRealtime() {
       if (!win.isDestroyed()) win.webContents.send('compositing-states:realtime', payload);
     }
   });
+
+  // 4) 캐릭터 현황판 Realtime 구독 (characters / character_costumes / episode_character_mapping)
+  sbStartCharacterBoardRealtime((payload) => {
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send('character-board:realtime', payload);
+    }
+    for (const win of widgetWindows.values()) {
+      if (!win.isDestroyed()) win.webContents.send('character-board:realtime', payload);
+    }
+  });
 }
 
 function broadcastSupabaseEvent(table: string, payload: unknown) {
@@ -2460,6 +2552,13 @@ ipcMain.handle(
   'storage:delete-image',
   async (_event, url: string) => {
     await storageDeleteImage(url);
+  },
+);
+
+ipcMain.handle(
+  'storage:upload-character-image',
+  async (_event, characterId: string, costumeId: string, base64Data: string) => {
+    return storageUploadCharacterImage(characterId, costumeId, base64Data);
   },
 );
 
@@ -2631,6 +2730,96 @@ ipcMain.handle('supabase:set-compositing-state', wrapIpc(async (
   },
 ) => {
   return sbSetCompositingState(input);
+}));
+
+// ─── IPC 핸들러: 캐릭터 현황판 ──────────────
+
+ipcMain.handle('supabase:load-characters', wrapIpc(async () => {
+  return sbLoadCharacters();
+}));
+
+ipcMain.handle('supabase:load-character-costumes', wrapIpc(async () => {
+  return sbLoadCharacterCostumes();
+}));
+
+ipcMain.handle('supabase:load-episode-character-map', wrapIpc(async () => {
+  return sbLoadEpisodeCharacterMap();
+}));
+
+ipcMain.handle('supabase:add-character', wrapIpc(async (
+  _e: unknown,
+  input: { name: string; memo?: string | null; createdBy?: string | null },
+) => {
+  return sbAddCharacter(input);
+}));
+
+ipcMain.handle('supabase:update-character', wrapIpc(async (
+  _e: unknown,
+  id: string,
+  updates: Record<string, unknown>,
+) => {
+  return sbUpdateCharacter(id, updates);
+}));
+
+ipcMain.handle('supabase:delete-character', wrapIpc(async (
+  _e: unknown,
+  id: string,
+) => {
+  return sbDeleteCharacter(id);
+}));
+
+ipcMain.handle('supabase:add-costume', wrapIpc(async (
+  _e: unknown,
+  input: { characterId: string; name: string; createdBy?: string | null },
+) => {
+  return sbAddCharacterCostume(input);
+}));
+
+ipcMain.handle('supabase:update-costume', wrapIpc(async (
+  _e: unknown,
+  id: string,
+  updates: Record<string, unknown>,
+  logContext?: CostumeActivityLogContext | null,
+) => {
+  const row = await sbUpdateCharacterCostume(id, updates);
+  // 캐릭터 복장 단계 변경(디자인/리깅)을 씬 단계 토글과 동일 레이어(메인 IPC)에서 활동 피드에 기록.
+  //   logContext 가 있을 때만 = 렌더러가 "단계 변경"으로 표시한 경우만. 신원("누가")은
+  //   렌더러가 보낸 값을 믿지 않고 메인 세션 사용자(currentActivityUser)를 쓴다 (씬과 동일).
+  await logCostumeStageActivity(logContext);
+  return row;
+}));
+
+ipcMain.handle('supabase:delete-costume', wrapIpc(async (
+  _e: unknown,
+  id: string,
+) => {
+  return sbDeleteCharacterCostume(id);
+}));
+
+ipcMain.handle('supabase:link-character-episode', wrapIpc(async (
+  _e: unknown,
+  episodeNumber: number,
+  characterId: string,
+  createdBy?: string | null,
+) => {
+  return sbLinkCharacterEpisode(episodeNumber, characterId, createdBy);
+}));
+
+ipcMain.handle('supabase:unlink-character-episode', wrapIpc(async (
+  _e: unknown,
+  episodeNumber: number,
+  characterId: string,
+) => {
+  return sbUnlinkCharacterEpisode(episodeNumber, characterId);
+}));
+
+ipcMain.handle('supabase:update-episode-character-map', wrapIpc(async (
+  _e: unknown,
+  episodeNumber: number,
+  characterId: string,
+  updates: { memo?: string | null; costumeId?: string | null },
+) => {
+  return sbUpdateEpisodeCharacterMapping(episodeNumber, characterId, updates);
 }));
 
 // ─── IPC 핸들러: METADATA ───────────────────────────────────

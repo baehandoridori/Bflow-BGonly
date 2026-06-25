@@ -146,6 +146,88 @@ export interface CompositingState {
   updatedBy: string | null;                 // app_users.id
 }
 
+// ─── 캐릭터 현황판 ────────────────────────────
+
+/** 복장 디자인 단계 (4) */
+export type CostumeDesignStage =
+  | 'waiting'      // 대기
+  | 'in_progress'  // 진행 중
+  | 'feedback'     // 피드백
+  | 'done';        // 완료
+
+/** 복장 리깅 단계 (5) */
+export type CostumeRiggingStage =
+  | 'waiting'      // 대기
+  | 'vectorized'   // 벡터화
+  | 'rigging'      // 리깅
+  | 'feedback'     // 피드백
+  | 'done';        // 완성
+
+export const COSTUME_DESIGN_STAGES: CostumeDesignStage[] = [
+  'waiting', 'in_progress', 'feedback', 'done',
+];
+export const COSTUME_RIGGING_STAGES: CostumeRiggingStage[] = [
+  'waiting', 'vectorized', 'rigging', 'feedback', 'done',
+];
+
+/** 전역 캐릭터. characters 테이블 1 row + 연결된 에피소드 번호 목록. */
+export interface Character {
+  id: string;                  // UUID
+  name: string;
+  status: 'active' | 'archived';
+  memo: string | null;
+  sortOrder: number;
+  episodeIds: number[];        // 연결된 episodeNumber 목록 (매핑 테이블 조립)
+  createdAt: string;
+  updatedAt: string;
+}
+
+/**
+ * 캐릭터-에피소드 연결 1건. episode_character_mapping 1 row 의 도메인 표현.
+ * 보드의 출연 에피소드 토글(episodeIds)과 별개로, 이 편 전용 메모/복장을 보관.
+ */
+export interface EpisodeCharacterLink {
+  episodeNumber: number;
+  /** 이 편 주의점 메모. */
+  memo: string | null;
+  /** 이 편에 쓰는 복장 id (character_costumes.id). 미선택이면 null. */
+  costumeId: string | null;
+}
+
+/** 캐릭터 복장 (버전·진행 단위). character_costumes 테이블 1 row. */
+export interface CharacterCostume {
+  id: string;                  // UUID
+  characterId: string;
+  name: string;
+  versionNo: number;
+  designStage: CostumeDesignStage;
+  riggingStage: CostumeRiggingStage;
+  featuredImageUrl: string | null;
+  structureTags: string[];
+  assetTags: string[];
+  assignee: string | null;
+  memo: string | null;
+  sortOrder: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/**
+ * 복장 단계 변경을 활동 피드에 기록할 때 렌더러 → 메인으로 넘기는 표시용 컨텍스트.
+ * "누가" 변경했는지(신원)는 메인의 세션 사용자에서 가져오므로 여기에 담지 않는다.
+ * 단계 변경(디자인/리깅)이 아닐 때는 미전달 → 활동 기록 생략.
+ */
+export interface CostumeActivityLogContext {
+  characterId: string;
+  characterName: string;
+  costumeName: string;
+  kind: 'design' | 'rigging';
+  /** 변경된 후의 단계 값 (CostumeDesignStage | CostumeRiggingStage) */
+  stage: string;
+  /** 사람이 읽는 단계 이름 (예: '리깅', '완성') */
+  stageLabel: string;
+}
+
 // ─── 씬 ──────────────────────────────────────
 
 export interface Scene {
@@ -604,7 +686,11 @@ export type ActionType =
   | 'image_upload_storyboard' | 'image_upload_guide'
   | 'image_annotate_storyboard' | 'image_annotate_guide'
   // v1.29.0: 댓글 이모지 반응 — 메모/댓글 그룹에 포함, detail.commentId / detail.emoji 보관
-  | 'comment_reaction';
+  | 'comment_reaction'
+  // 캐릭터 현황판: 복장 디자인/리깅 단계 변경 — 작업 진행 그룹.
+  //   character_rigging_done 은 리깅이 '완성'으로 전이될 때만 기록해 피드에서 강조.
+  //   detail: { characterId, costumeId, kind, stage, stageLabel, characterName, costumeName, completed? }
+  | 'character_design_stage' | 'character_rigging_stage' | 'character_rigging_done';
 
 export interface Activity {
   id: string;
@@ -1141,6 +1227,31 @@ export interface ElectronAPI {
     updatedBy: string;
   }) => Promise<any>;
   onCompositingStatesRealtime: (cb: (payload: {
+    eventType: 'INSERT' | 'UPDATE' | 'DELETE';
+    row: any | null;
+    old: any | null;
+  }) => void) => () => void;
+
+  // ─── 캐릭터 현황판 ────────────────────────────
+  supabaseLoadCharacters: () => Promise<any[]>;
+  supabaseLoadCharacterCostumes: () => Promise<any[]>;
+  supabaseLoadEpisodeCharacterMap: () => Promise<any[]>;
+  supabaseAddCharacter: (input: { name: string; memo?: string | null; createdBy?: string | null }) => Promise<any>;
+  supabaseUpdateCharacter: (id: string, updates: Record<string, unknown>) => Promise<any>;
+  supabaseDeleteCharacter: (id: string) => Promise<void>;
+  supabaseAddCostume: (input: { characterId: string; name: string; createdBy?: string | null }) => Promise<any>;
+  supabaseUpdateCostume: (id: string, updates: Record<string, unknown>, logContext?: CostumeActivityLogContext) => Promise<any>;
+  supabaseDeleteCostume: (id: string) => Promise<void>;
+  supabaseLinkCharacterEpisode: (episodeNumber: number, characterId: string, createdBy?: string | null) => Promise<any>;
+  supabaseUnlinkCharacterEpisode: (episodeNumber: number, characterId: string) => Promise<void>;
+  supabaseUpdateEpisodeCharacterMap: (
+    episodeNumber: number,
+    characterId: string,
+    updates: { memo?: string | null; costumeId?: string | null },
+  ) => Promise<void>;
+  storageUploadCharacterImage: (characterId: string, costumeId: string, base64Data: string) => Promise<{ ok: boolean; url?: string; error?: string }>;
+  onCharacterBoardRealtime: (cb: (payload: {
+    table: 'characters' | 'character_costumes' | 'episode_character_mapping';
     eventType: 'INSERT' | 'UPDATE' | 'DELETE';
     row: any | null;
     old: any | null;

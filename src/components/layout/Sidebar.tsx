@@ -1,9 +1,10 @@
 import { useState, useRef, useCallback, useMemo, useEffect } from 'react';
-import { LayoutDashboard, Film, List, Users, CircleUser, GanttChart, CalendarDays, Palmtree, Clapperboard, MessageSquareWarning, ListChecks, Settings, PanelLeft } from 'lucide-react';
+import { LayoutDashboard, Film, List, Users, CircleUser, GanttChart, CalendarDays, Palmtree, Clapperboard, MessageSquareWarning, ListChecks, Drama, Settings, PanelLeft } from 'lucide-react';
 import { AnimatePresence } from 'framer-motion';
 import { useAppStore, type ViewMode } from '@/stores/useAppStore';
 import { useRevisionStore } from '@/stores/useRevisionStore';
 import { useDataStore } from '@/stores/useDataStore';
+import { useCharacterBoardAccess } from '@/hooks/useCharacterBoardAccess';
 import { cn } from '@/utils/cn';
 import { SplashScreen } from '@/components/splash/SplashScreen';
 import { getPreset, rgbToHex } from '@/themes';
@@ -48,6 +49,8 @@ const NAV_ITEMS: { id: ViewMode; label: string; icon: React.ReactNode }[] = [
   { id: 'compositing-revisions', label: '리테이크', icon: <MessageSquareWarning size={20} /> },
   // 리테이크 허브 5단계: 감독/취합자용 세트 허브 (RetakeHubView).
   { id: 'retake-hub', label: '리테이크 허브', icon: <ListChecks size={20} /> },
+  // 캐릭터 현황판 — 게이팅 허용 사용자에게만 노출 (Sidebar 가 access 플래그로 필터).
+  { id: 'character-board', label: '캐릭터', icon: <Drama size={20} /> },
   { id: 'settings', label: '설정', icon: <Settings size={20} /> },
 ];
 
@@ -205,6 +208,12 @@ export function Sidebar() {
     }
     return n;
   }, [compositingStates]);
+  // 캐릭터 현황판 게이팅 — 허용 사용자가 아니면 메뉴 항목 자체를 숨김.
+  const canSeeCharacterBoard = useCharacterBoardAccess();
+  const navItems = useMemo(
+    () => NAV_ITEMS.filter((item) => item.id !== 'character-board' || canSeeCharacterBoard),
+    [canSeeCharacterBoard],
+  );
   const [showSplash, setShowSplash] = useState(false);
   const [isHovered, setIsHovered] = useState(false);
   const hoverTimeoutRef = useRef<ReturnType<typeof setTimeout>>();
@@ -324,7 +333,7 @@ export function Sidebar() {
         </div>
 
         {/* 네비게이션 */}
-        {NAV_ITEMS.map((item) => (
+        {navItems.map((item) => (
           <button
             key={item.id}
             onClick={() => setView(item.id)}

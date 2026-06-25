@@ -569,4 +569,37 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.on('compositing-states:realtime', listener);
     return () => ipcRenderer.removeListener('compositing-states:realtime', listener);
   },
+
+  // ─── 캐릭터 현황판 ───
+  supabaseLoadCharacters: () => ipcRenderer.invoke('supabase:load-characters'),
+  supabaseLoadCharacterCostumes: () => ipcRenderer.invoke('supabase:load-character-costumes'),
+  supabaseLoadEpisodeCharacterMap: () => ipcRenderer.invoke('supabase:load-episode-character-map'),
+  supabaseAddCharacter: (input: { name: string; memo?: string | null; createdBy?: string | null }) =>
+    ipcRenderer.invoke('supabase:add-character', input),
+  supabaseUpdateCharacter: (id: string, updates: Record<string, unknown>) =>
+    ipcRenderer.invoke('supabase:update-character', id, updates),
+  supabaseDeleteCharacter: (id: string) =>
+    ipcRenderer.invoke('supabase:delete-character', id),
+  supabaseAddCostume: (input: { characterId: string; name: string; createdBy?: string | null }) =>
+    ipcRenderer.invoke('supabase:add-costume', input),
+  supabaseUpdateCostume: (id: string, updates: Record<string, unknown>, logContext?: unknown) =>
+    ipcRenderer.invoke('supabase:update-costume', id, updates, logContext),
+  supabaseDeleteCostume: (id: string) =>
+    ipcRenderer.invoke('supabase:delete-costume', id),
+  supabaseLinkCharacterEpisode: (episodeNumber: number, characterId: string, createdBy?: string | null) =>
+    ipcRenderer.invoke('supabase:link-character-episode', episodeNumber, characterId, createdBy),
+  supabaseUnlinkCharacterEpisode: (episodeNumber: number, characterId: string) =>
+    ipcRenderer.invoke('supabase:unlink-character-episode', episodeNumber, characterId),
+  supabaseUpdateEpisodeCharacterMap: (
+    episodeNumber: number,
+    characterId: string,
+    updates: { memo?: string | null; costumeId?: string | null },
+  ) => ipcRenderer.invoke('supabase:update-episode-character-map', episodeNumber, characterId, updates),
+  storageUploadCharacterImage: (characterId: string, costumeId: string, base64Data: string) =>
+    ipcRenderer.invoke('storage:upload-character-image', characterId, costumeId, base64Data),
+  onCharacterBoardRealtime: (callback: (payload: unknown) => void) => {
+    const listener = (_event: Electron.IpcRendererEvent, payload: unknown) => callback(payload);
+    ipcRenderer.on('character-board:realtime', listener);
+    return () => ipcRenderer.removeListener('character-board:realtime', listener);
+  },
 });

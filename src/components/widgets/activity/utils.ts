@@ -24,6 +24,21 @@ export const MULTI_SCENE_ACTIONS: ReadonlySet<ActionType> = new Set([
  * - stage 외 활동(메모/댓글/씬 추가 등)은 ACTION_TYPE_LABEL 그대로.
  */
 export function getActivityVerb(activity: Activity): string {
+  // 캐릭터 현황판: 복장 디자인/리깅 단계 변경 — detail.stageLabel 로 정확한 단계명 표시.
+  //   완성 전이는 눈에 띄게 'OO 완성' 으로 읽히게 한다 ("교복 리깅 완성").
+  if (
+    activity.actionType === 'character_design_stage' ||
+    activity.actionType === 'character_rigging_stage' ||
+    activity.actionType === 'character_rigging_done'
+  ) {
+    const detail = activity.detail as { kind?: unknown; stageLabel?: unknown; completed?: unknown } | null;
+    const kindLabel = detail?.kind === 'rigging' ? '리깅' : detail?.kind === 'design' ? '디자인' : '단계';
+    const stageLabel = typeof detail?.stageLabel === 'string' ? detail.stageLabel : '';
+    const isDone = activity.actionType === 'character_rigging_done' || detail?.completed === true;
+    if (isDone) return `${kindLabel} 완성`;
+    return stageLabel ? `${kindLabel} ${stageLabel}` : `${kindLabel} 단계 변경`;
+  }
+
   const stageMap: Record<string, Stage> = {
     stage_lo: 'lo', stage_done: 'done', stage_review: 'review', stage_png: 'png',
   };

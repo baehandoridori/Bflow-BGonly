@@ -55,6 +55,13 @@ function ActionIcon({ type, size = 11 }: { type: ActionType; size?: number }) {
     case 'image_annotate_storyboard':
     case 'image_annotate_guide':
       return <ImageIcon {...props} />;
+    // 캐릭터 현황판: 디자인=연필, 리깅=회전, 리깅 완성=반짝(강조)
+    case 'character_design_stage':
+      return <Pencil {...props} />;
+    case 'character_rigging_stage':
+      return <RotateCw {...props} />;
+    case 'character_rigging_done':
+      return <Sparkles {...props} />;
   }
 }
 

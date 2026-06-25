@@ -2585,7 +2585,9 @@ export type ActionType =
   | 'image_upload_storyboard' | 'image_upload_guide'
   | 'image_annotate_storyboard' | 'image_annotate_guide'
   // v1.29.0: 댓글 이모지 반응
-  | 'comment_reaction';
+  | 'comment_reaction'
+  // 캐릭터 현황판: 복장 디자인/리깅 단계 변경 + 리깅 완성 강조
+  | 'character_design_stage' | 'character_rigging_stage' | 'character_rigging_done';
 
 export interface ActivityRow {
   id: string;
@@ -3479,6 +3481,338 @@ export function startCompositingStatesRealtime(
       },
     )
     .subscribe();
+  return () => {
+    supabase.removeChannel(channel);
+  };
+}
+
+// ─── 캐릭터 현황판 (캐릭터 / 복장 / 에피소드 매핑) ──────────────────
+// 컴포지팅 대시보드(v1.30.0) 의 load/upsert/realtime 3 종 패턴을 그대로 미러링.
+//   - characters: 전역 캐릭터 (BG/ACT 무관)
+//   - character_costumes: 캐릭터 1:N 복장 (버전·진행 단위)
+//   - episode_character_mapping: 캐릭터 N:M 에피소드
+
+export type CostumeDesignStageValue = 'waiting' | 'in_progress' | 'feedback' | 'done';
+export type CostumeRiggingStageValue = 'waiting' | 'vectorized' | 'rigging' | 'feedback' | 'done';
+
+export interface CharacterRow {
+  id: string;
+  name: string;
+  status: 'active' | 'archived';
+  memo: string | null;
+  sort_order: number;
+  created_at: string;
+  updated_at: string;
+  created_by: string | null;
+}
+
+export interface CharacterCostumeRow {
+  id: string;
+  character_id: string;
+  name: string;
+  version_no: number;
+  design_stage: CostumeDesignStageValue;
+  rigging_stage: CostumeRiggingStageValue;
+  featured_image_url: string | null;
+  structure_tags: string[];
+  asset_tags: string[];
+  assignee: string | null;
+  memo: string | null;
+  sort_order: number;
+  created_at: string;
+  updated_at: string;
+  created_by: string | null;
+}
+
+/** 캐릭터-에피소드 매핑 row. episode_number 는 episodes 조인으로 채워 렌더러가 매핑하기 쉽게 함. */
+export interface EpisodeCharacterMapRow {
+  id: string;
+  episode_id: string;
+  character_id: string;
+  episode_number: number | null;
+  /** 이 편에서의 주의점 메모 (episode_character_mapping.memo). */
+  memo: string | null;
+  /** 이 편에서 사용하는 복장 (episode_character_mapping.costume_id, FK character_costumes ON DELETE SET NULL). */
+  costume_id: string | null;
+  created_at: string;
+}
+
+/** PostgREST 1000 행 제한 회피 — .range() 페이지네이션 반복 로드 (project_postgrest_1000_row_cap). */
+async function loadAllRows<T>(
+  table: string,
+  select: string,
+  order: { column: string; ascending: boolean },
+): Promise<T[]> {
+  const PAGE = 1000;
+  const all: T[] = [];
+  let from = 0;
+  // eslint-disable-next-line no-constant-condition
+  while (true) {
+    const { data, error } = await supabase
+      .from(table)
+      .select(select)
+      .order(order.column, { ascending: order.ascending })
+      .range(from, from + PAGE - 1);
+    if (error) throw error;
+    const rows = (data ?? []) as T[];
+    all.push(...rows);
+    if (rows.length < PAGE) break;
+    from += PAGE;
+  }
+  return all;
+}
+
+/** 모든 캐릭터 (active + archived). 페이지네이션 반복. */
+export async function loadCharacters(): Promise<CharacterRow[]> {
+  return loadAllRows<CharacterRow>('characters', '*', { column: 'sort_order', ascending: true });
+}
+
+/** 모든 복장. 페이지네이션 반복. */
+export async function loadCharacterCostumes(): Promise<CharacterCostumeRow[]> {
+  return loadAllRows<CharacterCostumeRow>(
+    'character_costumes',
+    '*',
+    { column: 'sort_order', ascending: true },
+  );
+}
+
+/** 모든 캐릭터-에피소드 매핑 (episode_number 조인). 페이지네이션 반복. */
+export async function loadEpisodeCharacterMap(): Promise<EpisodeCharacterMapRow[]> {
+  const rows = await loadAllRows<{
+    id: string;
+    episode_id: string;
+    character_id: string;
+    memo: string | null;
+    costume_id: string | null;
+    created_at: string;
+    episodes: { episode_number: number } | null;
+  }>(
+    'episode_character_mapping',
+    'id, episode_id, character_id, memo, costume_id, created_at, episodes(episode_number)',
+    { column: 'created_at', ascending: true },
+  );
+  return rows.map((r) => ({
+    id: r.id,
+    episode_id: r.episode_id,
+    character_id: r.character_id,
+    episode_number: r.episodes?.episode_number ?? null,
+    memo: r.memo ?? null,
+    costume_id: r.costume_id ?? null,
+    created_at: r.created_at,
+  }));
+}
+
+/** 캐릭터 추가 (INSERT). sort_order 는 현재 최대값 +1. */
+export async function addCharacter(input: {
+  name: string;
+  memo?: string | null;
+  createdBy?: string | null;
+}): Promise<CharacterRow> {
+  const { data: maxRow } = await supabase
+    .from('characters')
+    .select('sort_order')
+    .order('sort_order', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  const nextOrder = ((maxRow?.sort_order as number | undefined) ?? -1) + 1;
+  const { data, error } = await supabase
+    .from('characters')
+    .insert({
+      name: input.name,
+      memo: input.memo ?? null,
+      sort_order: nextOrder,
+      created_by: input.createdBy ?? null,
+    })
+    .select('*')
+    .single();
+  if (error) throw error;
+  return data as CharacterRow;
+}
+
+/** 캐릭터 수정 (단일 update 쿼리 — 여러 컬럼 한 번에). */
+export async function updateCharacter(
+  id: string,
+  updates: Record<string, unknown>,
+): Promise<CharacterRow> {
+  const { data, error } = await supabase
+    .from('characters')
+    .update({ ...updates, updated_at: new Date().toISOString() })
+    .eq('id', id)
+    .select('*')
+    .single();
+  if (error) throw error;
+  return data as CharacterRow;
+}
+
+/** 캐릭터 삭제. 복장/매핑은 FK cascade 로 자동 삭제. */
+export async function deleteCharacter(id: string): Promise<void> {
+  const { error } = await supabase.from('characters').delete().eq('id', id);
+  if (error) throw error;
+}
+
+/** 복장 추가 (INSERT). sort_order 는 해당 캐릭터 내 최대값 +1. */
+export async function addCharacterCostume(input: {
+  characterId: string;
+  name: string;
+  createdBy?: string | null;
+}): Promise<CharacterCostumeRow> {
+  const { data: maxRow } = await supabase
+    .from('character_costumes')
+    .select('sort_order')
+    .eq('character_id', input.characterId)
+    .order('sort_order', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  const nextOrder = ((maxRow?.sort_order as number | undefined) ?? -1) + 1;
+  const { data, error } = await supabase
+    .from('character_costumes')
+    .insert({
+      character_id: input.characterId,
+      name: input.name,
+      sort_order: nextOrder,
+      created_by: input.createdBy ?? null,
+    })
+    .select('*')
+    .single();
+  if (error) throw error;
+  return data as CharacterCostumeRow;
+}
+
+/** 복장 수정 (단일 update 쿼리 — design_stage/rigging_stage/version_no 등 여러 컬럼 한 번에). */
+export async function updateCharacterCostume(
+  id: string,
+  updates: Record<string, unknown>,
+): Promise<CharacterCostumeRow> {
+  const { data, error } = await supabase
+    .from('character_costumes')
+    .update({ ...updates, updated_at: new Date().toISOString() })
+    .eq('id', id)
+    .select('*')
+    .single();
+  if (error) throw error;
+  return data as CharacterCostumeRow;
+}
+
+/** 복장 삭제. */
+export async function deleteCharacterCostume(id: string): Promise<void> {
+  const { error } = await supabase.from('character_costumes').delete().eq('id', id);
+  if (error) throw error;
+}
+
+/** 캐릭터-에피소드 연결 (UPSERT, onConflict 'episode_id,character_id'). episodeNumber → episode_id 해석. */
+export async function linkCharacterEpisode(
+  episodeNumber: number,
+  characterId: string,
+  createdBy?: string | null,
+): Promise<EpisodeCharacterMapRow> {
+  const { data: ep, error: epErr } = await supabase
+    .from('episodes')
+    .select('id, episode_number')
+    .eq('episode_number', episodeNumber)
+    .maybeSingle();
+  if (epErr) throw epErr;
+  if (!ep) throw new Error(`에피소드 ${episodeNumber} 를 찾을 수 없습니다`);
+  const { data, error } = await supabase
+    .from('episode_character_mapping')
+    .upsert(
+      { episode_id: ep.id as string, character_id: characterId, created_by: createdBy ?? null },
+      { onConflict: 'episode_id,character_id' },
+    )
+    .select('*')
+    .single();
+  if (error) throw error;
+  return {
+    id: data.id as string,
+    episode_id: data.episode_id as string,
+    character_id: data.character_id as string,
+    episode_number: ep.episode_number as number,
+    memo: (data.memo ?? null) as string | null,
+    costume_id: (data.costume_id ?? null) as string | null,
+    created_at: data.created_at as string,
+  };
+}
+
+/** 캐릭터-에피소드 연결 해제. episodeNumber → episode_id 해석 후 삭제. */
+export async function unlinkCharacterEpisode(
+  episodeNumber: number,
+  characterId: string,
+): Promise<void> {
+  const { data: ep, error: epErr } = await supabase
+    .from('episodes')
+    .select('id')
+    .eq('episode_number', episodeNumber)
+    .maybeSingle();
+  if (epErr) throw epErr;
+  if (!ep) return;
+  const { error } = await supabase
+    .from('episode_character_mapping')
+    .delete()
+    .eq('episode_id', ep.id as string)
+    .eq('character_id', characterId);
+  if (error) throw error;
+}
+
+/**
+ * 캐릭터-에피소드 매핑의 이 편 전용 필드 수정 (memo / costume_id).
+ * (episode_number → episode_id 해석 후 episode_id & character_id 조건으로 update.)
+ * memo / costumeId 둘 중 전달된 것만 update. costumeId === null 이면 복장 선택 해제.
+ */
+export async function updateEpisodeCharacterMapping(
+  episodeNumber: number,
+  characterId: string,
+  updates: { memo?: string | null; costumeId?: string | null },
+): Promise<void> {
+  const { data: ep, error: epErr } = await supabase
+    .from('episodes')
+    .select('id')
+    .eq('episode_number', episodeNumber)
+    .maybeSingle();
+  if (epErr) throw epErr;
+  if (!ep) throw new Error(`에피소드 ${episodeNumber} 를 찾을 수 없습니다`);
+  const patch: Record<string, unknown> = {};
+  if (updates.memo !== undefined) patch.memo = updates.memo;
+  if (updates.costumeId !== undefined) patch.costume_id = updates.costumeId;
+  if (Object.keys(patch).length === 0) return;
+  const { error } = await supabase
+    .from('episode_character_mapping')
+    .update(patch)
+    .eq('episode_id', ep.id as string)
+    .eq('character_id', characterId);
+  if (error) throw error;
+}
+
+/**
+ * 캐릭터 현황판 Realtime 구독 — 메인 프로세스에서 한 번 호출.
+ * 한 채널 'public:character_board' 에서 세 테이블 postgres_changes 구독.
+ * payload 에 table 판별자 포함 → 렌더러가 어느 엔티티 변경인지 구분.
+ *
+ * cleanup 함수 반환.
+ */
+export function startCharacterBoardRealtime(
+  broadcast: (payload: {
+    table: 'characters' | 'character_costumes' | 'episode_character_mapping';
+    eventType: 'INSERT' | 'UPDATE' | 'DELETE';
+    row: Record<string, unknown> | null;
+    old: Record<string, unknown> | null;
+  }) => void,
+): () => void {
+  const tables = ['characters', 'character_costumes', 'episode_character_mapping'] as const;
+  let channel = supabase.channel('public:character_board');
+  for (const table of tables) {
+    channel = channel.on(
+      'postgres_changes',
+      { event: '*', schema: 'public', table },
+      (payload) => {
+        broadcast({
+          table,
+          eventType: payload.eventType as 'INSERT' | 'UPDATE' | 'DELETE',
+          row: (payload.new ?? null) as Record<string, unknown> | null,
+          old: (payload.old ?? null) as Record<string, unknown> | null,
+        });
+      },
+    );
+  }
+  channel.subscribe();
   return () => {
     supabase.removeChannel(channel);
   };

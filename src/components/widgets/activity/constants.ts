@@ -33,6 +33,10 @@ export const ACTION_TYPE_TO_GROUP: Record<ActionType, ActionGroup> = {
   image_annotate_guide: 'memo',
   // v1.29.0: 댓글 이모지 반응 — 메모/댓글 카테고리
   comment_reaction: 'memo',
+  // 캐릭터 현황판: 복장 디자인/리깅 단계 변경 + 리깅 완성 — 작업 진행 그룹
+  character_design_stage: 'progress',
+  character_rigging_stage: 'progress',
+  character_rigging_done: 'progress',
 };
 
 /** action_type → 한국어 라벨 */
@@ -68,6 +72,10 @@ export const ACTION_TYPE_LABEL: Record<ActionType, string> = {
   image_annotate_guide: '가이드 주석 업데이트',
   // v1.29.0: 댓글 이모지 반응
   comment_reaction: '이모지 반응',
+  // 캐릭터 현황판: 복장 디자인/리깅 단계 변경 + 리깅 완성 (실제 표시는 detail.stageLabel 로 보강)
+  character_design_stage: '디자인 단계 변경',
+  character_rigging_stage: '리깅 단계 변경',
+  character_rigging_done: '리깅 완성',
 };
 
 /** action_type → 픽토그램 색 (히트맵 분포 툴팁 + 피드 아이콘 컬러) */
@@ -103,6 +111,10 @@ export const ACTION_TYPE_COLOR: Record<ActionType, string> = {
   image_annotate_guide: '#4DD0E1',
   // v1.29.0: 댓글 이모지 반응 — 메모/댓글 톤(comment_add #FFA94D, memo_update #FF8FA3) 사이의 부드러운 보라/핑크
   comment_reaction: '#C8A2D8',
+  // 캐릭터 현황판: 디자인=핑크보라, 리깅=하늘, 리깅 완성=PNG 완성 톤(초록)으로 강조
+  character_design_stage: '#C8A2D8',
+  character_rigging_stage: '#74B9FF',
+  character_rigging_done: '#00B894',
 };
 
 export const GROUP_LABEL: Record<ActionGroup, string> = {
