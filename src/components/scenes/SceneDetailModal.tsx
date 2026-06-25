@@ -32,6 +32,7 @@ import { StageSegmentToggle } from './StageSegmentToggle';
 import { CommentPanelResizable } from './CommentPanelResizable';
 import type { CommentInlineEvent } from './CommentPanel';
 import { RevisionPanel } from './RevisionPanel';
+import { SceneWorkLinksPanel } from './SceneWorkLinksPanel';
 import { getComments } from '@/services/commentService';
 import { useSceneActivities } from '@/hooks/useSceneActivities';
 import { useRevisionStore } from '@/stores/useRevisionStore';
@@ -1051,6 +1052,12 @@ export function SceneDetailModal({
                     )}
                   </div>
                 </section>
+
+                <SceneWorkLinksPanel
+                  bgScene={department === 'bg' ? scene : null}
+                  actScene={department === 'acting' ? scene : null}
+                  visibleDepartments={[department]}
+                />
 
                 {/* ── 속성 섹션 ── */}
                 <section>

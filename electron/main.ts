@@ -1100,6 +1100,57 @@ ipcMain.handle('shell:show-item', async (_event, filePath: string) => {
   }
 });
 
+ipcMain.handle('shell:open-path', async (_event, targetPath: string) => {
+  try {
+    if (typeof targetPath !== 'string' || !targetPath.trim()) {
+      return { ok: false, error: 'empty path' };
+    }
+    const error = await shell.openPath(targetPath.trim());
+    return error ? { ok: false, error } : { ok: true };
+  } catch (err) {
+    return { ok: false, error: String(err) };
+  }
+});
+
+ipcMain.handle('path:choose-folder', async () => {
+  const result = await dialog.showOpenDialog({ properties: ['openDirectory'] });
+  if (result.canceled) return null;
+  return result.filePaths[0] ?? null;
+});
+
+ipcMain.handle('path:choose-file', async () => {
+  const result = await dialog.showOpenDialog({ properties: ['openFile'] });
+  if (result.canceled) return null;
+  return result.filePaths[0] ?? null;
+});
+
+const PATH_EXISTS_TIMEOUT_MS = 1500;
+
+function pathExistsAsyncWithTimeout(targetPath: string): Promise<boolean> {
+  const trimmed = targetPath.trim();
+  if (!trimmed) return Promise.resolve(false);
+
+  return new Promise((resolve) => {
+    let settled = false;
+    const finish = (exists: boolean) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      resolve(exists);
+    };
+    const timer = setTimeout(() => finish(false), PATH_EXISTS_TIMEOUT_MS);
+
+    fs.promises.access(trimmed, fs.constants.F_OK)
+      .then(() => finish(true))
+      .catch(() => finish(false));
+  });
+}
+
+ipcMain.handle('path:exists', async (_event, targetPath: string) => {
+  if (typeof targetPath !== 'string') return false;
+  return pathExistsAsyncWithTimeout(targetPath);
+});
+
 ipcMain.handle('settings:read', async (_event, fileName: string) => {
   const filePath = path.join(getDataPath(), fileName);
   try {
@@ -1208,6 +1259,10 @@ import {
   deleteRevisionSet as sbDeleteRevisionSet,
   type AddRevisionSetInput,
   type UpdateRevisionSetInput,
+  readSceneWorkLinks as sbReadSceneWorkLinks,
+  upsertSceneWorkLink as sbUpsertSceneWorkLink,
+  deleteSceneWorkLink as sbDeleteSceneWorkLink,
+  type SceneWorkLinkInput,
   readAllMetadata as sbReadAllMetadata,
   readMetadata as sbReadMetadata,
   writeMetadata as sbWriteMetadata,
@@ -1471,6 +1526,20 @@ ipcMain.handle('supabase:update-scene-phase', wrapIpc(async (
     actionGroup: 'progress',
     detail: { sceneState, workRound, feedbackRound },
   });
+}));
+ipcMain.handle('supabase:read-scene-work-links', wrapIpc(async (_e: unknown, sceneUuids?: string[]) => {
+  return sbReadSceneWorkLinks(sceneUuids);
+}));
+ipcMain.handle('supabase:upsert-scene-work-link', wrapIpc(async (_e: unknown, input: SceneWorkLinkInput) => {
+  return sbUpsertSceneWorkLink(input);
+}));
+ipcMain.handle('supabase:delete-scene-work-link', wrapIpc(async (
+  _e: unknown,
+  sceneUuid: string,
+  department: 'bg' | 'acting',
+  linkKind: 'folder' | 'primary_file',
+) => {
+  await sbDeleteSceneWorkLink(sceneUuid, department, linkKind);
 }));
 ipcMain.handle('supabase:bulk-update-scene-stages', wrapIpc(async (_e: unknown, updates: BulkStageUpdate[], updatedBy: string) => {
   const results = await sbBulkUpdateSceneStages(updates, updatedBy, currentActivityUser?.name ?? null);
@@ -2346,6 +2415,7 @@ function startSupabaseRealtime() {
     onRevisionSetChange: (payload) => broadcastSupabaseEvent('comp_revision_sets', payload),
     onEpisodeChange: (payload) => broadcastSupabaseEvent('episodes', payload),
     onPartChange: (payload) => broadcastSupabaseEvent('parts', payload),
+    onSceneWorkLinkChange: (payload) => broadcastSupabaseEvent('scene_work_links', payload),
     onActivityInsert: (payload) => {
       // 활동 기록은 INSERT 만 추적, 모든 윈도우에 전파
       const row = payload.new;

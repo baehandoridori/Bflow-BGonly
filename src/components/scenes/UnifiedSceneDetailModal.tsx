@@ -269,6 +269,11 @@ export function UnifiedSceneDetailModal({
     : '';
   const sceneThreadKey = revisionSceneKey ? buildSceneThreadKeyFromRevisionKey(revisionSceneKey) : '';
   const openRevCount = useRevisionStore((s) => revisionSceneKey ? s.getOpenCount(revisionSceneKey) : 0);
+  const visibleWorkLinkDepartments = selectedDepartment === 'bg'
+    ? ['bg'] as const
+    : selectedDepartment === 'acting'
+      ? ['acting'] as const
+      : ['bg', 'acting'] as const;
 
   // UI state — v1.18.0: initialTab 으로 외부에서 시작 탭 지정 가능 (알림 클릭 시 'revisions' 등)
   const [tab, setTab] = useState<TabKey>(initialTab ?? 'detail');
@@ -1031,6 +1036,8 @@ export function UnifiedSceneDetailModal({
                     {tab === 'files' && revisionSceneKey && (
                       <SceneFilesTab
                         bgScene={bgScene}
+                        actScene={actScene}
+                        visibleDepartments={[...visibleWorkLinkDepartments]}
                         primaryCommentKey={primaryCommentKey}
                         secondaryCommentKey={secondaryCommentKey || undefined}
                         revisionSceneKey={revisionSceneKey}

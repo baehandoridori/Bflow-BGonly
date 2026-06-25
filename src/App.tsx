@@ -59,6 +59,7 @@ import { ConfirmDialogHost } from '@/components/common/ConfirmDialog';
 import { SvgIconDefs } from '@/components/SvgIconDefs';
 import { useNotificationStore, type AppNotification } from '@/stores/useNotificationStore';
 import { useVacationPendingStore } from '@/stores/useVacationPendingStore';
+import { useSceneWorkLinkStore } from '@/stores/useSceneWorkLinkStore';
 import { dispatchNotification, type NotificationSettings } from '@/utils/notificationHelper';
 import { useRevisionSetStore } from '@/stores/useRevisionSetStore';
 import { navigateNotificationToScene } from '@/utils/notificationSceneAction';
@@ -1302,6 +1303,11 @@ export default function App() {
     const cleanup = onSupabaseRealtimeEvent((event: SupabaseRealtimeEvent) => {
       const { table, payload } = event;
       console.log(`[App Realtime] 이벤트 수신: table=${table}, type=${payload?.eventType}`);
+
+      if (table === 'scene_work_links') {
+        useSceneWorkLinkStore.getState().applyRealtime(payload);
+        return;
+      }
 
       // 댓글 변경 → 알림 분기 평가 → 캐시 무효화
       // 코덱스 P1 fix (2026-05-10): invalidatePartCache() 가 알림 분기 *전*에 있으면 isCommentByUser/

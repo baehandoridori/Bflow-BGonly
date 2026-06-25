@@ -2,10 +2,11 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { motion } from 'framer-motion';
 import { MessageCircle, Trash2 } from 'lucide-react';
+import { toast } from 'sonner';
 import { cn } from '@/utils/cn';
 import { isFullyDone, sceneProgress } from '@/utils/calcStats';
 import { STAGES, DEPARTMENT_CONFIGS } from '@/types';
-import type { MergedScene, Stage, Department, ScenePhaseState } from '@/types';
+import type { MergedScene, Stage, Department, ScenePhaseState, SceneWorkLink } from '@/types';
 import { ScenePhaseToggle } from './ScenePhaseToggle';
 import { HighlightText } from '@/components/common/HighlightText';
 import { AssigneeChipList } from '@/components/common/AssigneeMultiSelect';
@@ -18,12 +19,16 @@ import { useDataStore } from '@/stores/useDataStore';
 import { useRevisionStore } from '@/stores/useRevisionStore';
 import { useAppStore } from '@/stores/useAppStore';
 import { useAuthStore } from '@/stores/useAuthStore';
+import { useSceneWorkLinkStore } from '@/stores/useSceneWorkLinkStore';
 import { buildSceneKey } from '@/services/revisionService';
+import { openWorkPath } from '@/services/sceneWorkLinkService';
+import { getSceneWorkLinkSlots } from '@/utils/sceneWorkLinks';
 import { LengthIcon } from './LengthIcon';
 import { SceneContextMenu } from './SceneContextMenu';
 import { StageSegmentToggle, stageIcon } from './StageSegmentToggle';
 import { RevisionCornerFlag } from './RevisionCornerFlag';
 import { AssigneeProgressStack } from './AssigneeProgressStack';
+import { SceneWorkLinkBadges } from './SceneWorkLinkBadges';
 import { hasMultiAssigneeProgress } from '@/utils/assigneeProgress';
 import {
   persistLengthChangeAtomic,
@@ -105,8 +110,16 @@ export function UnifiedSceneCard({
   const { sceneId, mergedKey, bgScene, actScene, bgSceneIndex, actSceneIndex } = merged;
   const primaryScene = bgScene ?? actScene;
   const completionTintEnabled = useAppStore((s) => s.completionTintEnabled);
+  const selectedDepartment = useAppStore((s) => s.selectedDepartment);
   const users = useAuthStore((s) => s.users);
   const userNames = useMemo(() => users.map((u) => u.name), [users]);
+  const linkMap = useSceneWorkLinkStore((s) => s.linkMap);
+  const episodeName = useDataStore((s) => {
+    const sheetName = bgSheetName ?? actSheetName;
+    if (!sheetName) return undefined;
+    const episode = s.episodes.find((ep) => ep.parts.some((part) => part.sheetName === sheetName));
+    return episode ? (s.episodeTitles[episode.episodeNumber] || episode.title) : undefined;
+  });
 
   const cardRootRef = useRef<HTMLDivElement>(null);
   const prevHighlightedRef = useRef(false);
@@ -236,6 +249,33 @@ export function UnifiedSceneCard({
     if (!revisionSceneKey) return 0;
     return s.getRevisionsForScene(revisionSceneKey).filter((r) => r.status === 'resolved').length;
   });
+  const workLinkBadgeMode = selectedDepartment === 'bg'
+    ? 'card-bg'
+    : selectedDepartment === 'acting'
+      ? 'card-acting'
+      : 'card-all';
+  const workLinkDepartments = useMemo(() => {
+    const departments: Department[] = selectedDepartment === 'bg'
+      ? ['bg']
+      : selectedDepartment === 'acting'
+        ? ['acting']
+        : ['bg', 'acting'];
+    return departments.map((department) => {
+      const scene = department === 'bg' ? bgScene : actScene;
+      const slots = getSceneWorkLinkSlots(linkMap, scene?.id, department);
+      return {
+        department,
+        folder: slots.folder,
+        primaryFile: slots.primaryFile,
+      };
+    });
+  }, [actScene, bgScene, linkMap, selectedDepartment]);
+  const handleOpenWorkLink = async (link: SceneWorkLink) => {
+    const result = await openWorkPath(link.path);
+    if (!result.ok) {
+      toast.error(link.linkKind === 'folder' ? '이 PC에서 폴더를 찾을 수 없음' : '이 PC에서 파일을 찾을 수 없음');
+    }
+  };
 
   return (
     <motion.div
@@ -268,6 +308,13 @@ export function UnifiedSceneCard({
       } : {})}
     >
         {isHighlighted && <div className="scene-highlight-bg" />}
+
+        <SceneWorkLinkBadges
+          bgSceneUuid={bgScene?.id}
+          actSceneUuid={actScene?.id}
+          mode={workLinkBadgeMode}
+          className="absolute bottom-2.5 right-3 z-20"
+        />
 
         <RevisionCornerFlag
           count={openRevCount > 0 ? openRevCount : resolvedRevCount}
@@ -431,6 +478,12 @@ export function UnifiedSceneCard({
             current={lengthChange}
             onSelect={handleSetLengthChange}
             onClose={() => setCtxMenu(null)}
+            sceneLabel={sceneId || primaryScene.sceneId}
+            workLinks={{
+              episodeName,
+              departments: workLinkDepartments,
+              onOpen: handleOpenWorkLink,
+            }}
           />,
           document.body,
         )}

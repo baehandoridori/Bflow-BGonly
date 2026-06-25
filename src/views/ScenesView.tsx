@@ -1,10 +1,11 @@
 import { useState, useCallback, useRef, useMemo, useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import { toast as sonnerToast } from 'sonner';
 import { useDataStore, legacyStagesFor } from '@/stores/useDataStore';
 import { useAppStore } from '@/stores/useAppStore';
 import type { SortKey, StatusFilter, ViewMode } from '@/stores/useAppStore';
 import { STAGES, DEPARTMENTS, DEPARTMENT_CONFIGS, SCENE_PHASE_LABELS, SCENE_PHASES, SCENE_PHASE_LABELS_SHORT, SCENE_PHASE_COLORS } from '@/types';
-import type { Scene, Stage, Department, ScenesDeptFilter, MergedScene, ScenePhaseState, SceneAssigneeProgressMap } from '@/types';
+import type { Scene, Stage, Department, ScenesDeptFilter, MergedScene, ScenePhaseState, SceneAssigneeProgressMap, SceneWorkLink } from '@/types';
 import { FeedbackRequestModal } from '@/components/scenes/FeedbackRequestModal';
 import { updateScenePhaseInSupabase, dispatchActingFeedbackNotification } from '@/services/supabaseService';
 import { sceneProgress, isFullyDone, progressGradient } from '@/utils/calcStats';
@@ -33,6 +34,7 @@ import { EpisodeTreeNav } from '@/components/scenes/EpisodeTreeNav';
 import { SceneSheetView } from '@/components/scenes/SceneSheetView';
 import { UnifiedSceneCard } from '@/components/scenes/UnifiedSceneCard';
 import { UnifiedSceneSheetView } from '@/components/scenes/UnifiedSceneSheetView';
+import { SceneContextMenu } from '@/components/scenes/SceneContextMenu';
 import { ScenePhaseToggle } from '@/components/scenes/ScenePhaseToggle';
 import { LengthIcon } from '@/components/scenes/LengthIcon';
 import { UnifiedSceneDetailModal } from '@/components/scenes/UnifiedSceneDetailModal';
@@ -58,6 +60,7 @@ import { useUnifiedScenes } from '@/hooks/useUnifiedScenes';
 import { resolveReferenceMergedScene } from '@/utils/sceneReference';
 import { navigateToHashTarget } from '@/utils/hashNavigation';
 import type { HashTarget } from '@/utils/hashEntity';
+import { openWorkPath } from '@/services/sceneWorkLinkService';
 import { loadPreferences, savePreferences, type UserPreferences } from '@/services/settingsService';
 import {
   persistLengthChangeAtomic,
@@ -78,6 +81,8 @@ import {
   matchesAssigneeStatusFilter,
   sceneProgressForAssigneeFilter,
 } from '@/utils/assigneeProgress';
+import { getSceneWorkLinkSlots, getUniqueSceneUuids } from '@/utils/sceneWorkLinks';
+import { SceneWorkLinkBadges } from '@/components/scenes/SceneWorkLinkBadges';
 
 type SceneHashTarget = Extract<HashTarget, { kind: 'scene' }>;
 
@@ -838,6 +843,7 @@ import type { BatchAction } from '@/services/supabaseService';
 import type { BulkStageUpdate, BulkFieldUpdate, BulkUpdateResult } from '@/types';
 import { ConfirmDialog } from '@/components/common/ConfirmDialog';
 import { useBulkOperationsStore } from '@/stores/useBulkOperationsStore';
+import { useSceneWorkLinkStore } from '@/stores/useSceneWorkLinkStore';
 import {
   runBulkOp,
   resolveSelectedUuids,
@@ -898,8 +904,46 @@ function SceneCard({ scene, sceneIndex, celebrating, department, isHighlighted, 
   const guideUrl = scene.guideUrl || fallbackGuideUrl || '';
   const hasImages = !!(storyboardUrl || guideUrl);
   const useActingPhaseControls = department === 'acting' && !!sheetName && !!onActPhaseStateClick && !!onActFeedbackRequest && !!onActRoundBump;
+  const episodes = useDataStore((s) => s.episodes);
+  const episodeTitles = useDataStore((s) => s.episodeTitles);
+  const linkMap = useSceneWorkLinkStore((s) => s.linkMap);
+  const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number } | null>(null);
+  const lengthChangeInFlightRef = useRef(false);
 
   const borderColor = pct >= 100 ? '#6C5CE7' : pct >= 50 ? '#A599F5' : pct > 0 ? '#E17055' : 'rgb(var(--color-bg-border))';
+  const workLinkSlots = useMemo(
+    () => getSceneWorkLinkSlots(linkMap, scene.id, department),
+    [department, linkMap, scene.id],
+  );
+  const episodeName = useMemo(() => {
+    if (!sheetName) return undefined;
+    const episode = episodes.find((ep) => ep.parts.some((part) => part.sheetName === sheetName));
+    return episode ? (episodeTitles[episode.episodeNumber] || episode.title) : undefined;
+  }, [episodeTitles, episodes, sheetName]);
+  const workLinkDepartments = useMemo(() => [{
+    department,
+    folder: workLinkSlots.folder,
+    primaryFile: workLinkSlots.primaryFile,
+  }], [department, workLinkSlots.folder, workLinkSlots.primaryFile]);
+  const handleOpenWorkLink = useCallback(async (link: SceneWorkLink) => {
+    const result = await openWorkPath(link.path);
+    if (!result.ok) {
+      sonnerToast.error(link.linkKind === 'folder' ? '이 PC에서 폴더를 찾을 수 없음' : '이 PC에서 파일을 찾을 수 없음');
+    }
+  }, []);
+  const handleSetLengthChange = useCallback(async (value: 'LD' | 'SD' | null) => {
+    if (!scene.id || lengthChangeInFlightRef.current) return;
+    lengthChangeInFlightRef.current = true;
+    try {
+      await persistLengthChangeIndependent([{ uuid: scene.id, prev: scene.lengthChange ?? null }], value, {
+        updateScene: (uuid, lengthChange) => useDataStore.getState().updateSceneByUuid(uuid, { lengthChange }),
+        saveSceneField: saveLengthChangeField,
+        logPrefix: 'lengthChange single card',
+      });
+    } finally {
+      lengthChangeInFlightRef.current = false;
+    }
+  }, [scene.id, scene.lengthChange]);
 
   const handleClick = (e: React.MouseEvent) => {
     if (e.ctrlKey || e.metaKey) {
@@ -912,6 +956,10 @@ function SceneCard({ scene, sceneIndex, celebrating, department, isHighlighted, 
       // 단순 클릭: 씬 선택/선택해제 (토글)
       onCtrlClick?.();
     }
+  };
+  const handleContextMenu = (e: React.MouseEvent) => {
+    e.preventDefault();
+    setCtxMenu({ x: e.clientX, y: e.clientY });
   };
 
   return (
@@ -932,6 +980,7 @@ function SceneCard({ scene, sceneIndex, celebrating, department, isHighlighted, 
       }}
       onClick={handleClick}
       onDoubleClick={(e) => { e.stopPropagation(); onOpenDetail(); }}
+      onContextMenu={handleContextMenu}
       ref={isHighlighted ? (el) => el?.scrollIntoView({ behavior: 'smooth', block: 'center' }) : undefined}
       {...(isHighlighted ? {
         initial: { scale: 1.06 },
@@ -941,6 +990,13 @@ function SceneCard({ scene, sceneIndex, celebrating, department, isHighlighted, 
     >
       {/* 하이라이트 배경 오버레이 */}
       {isHighlighted && <div className="scene-highlight-bg" />}
+
+      <SceneWorkLinkBadges
+        bgSceneUuid={department === 'bg' ? scene.id : null}
+        actSceneUuid={department === 'acting' ? scene.id : null}
+        mode={department === 'bg' ? 'card-bg' : 'card-acting'}
+        className="absolute bottom-2.5 right-3 z-20"
+      />
 
       <RevisionCornerFlag count={revisionCount} />
 
@@ -1089,6 +1145,23 @@ function SceneCard({ scene, sceneIndex, celebrating, department, isHighlighted, 
         )}
         <Confetti active={celebrating} onComplete={onCelebrationEnd} />
       </div>
+
+      {ctxMenu && createPortal(
+        <SceneContextMenu
+          x={ctxMenu.x}
+          y={ctxMenu.y}
+          current={scene.lengthChange ?? null}
+          onSelect={handleSetLengthChange}
+          onClose={() => setCtxMenu(null)}
+          sceneLabel={scene.sceneId}
+          workLinks={{
+            episodeName,
+            departments: workLinkDepartments,
+            onOpen: handleOpenWorkLink,
+          }}
+        />,
+        document.body,
+      )}
     </motion.div>
   );
 }
@@ -3614,6 +3687,19 @@ export function ScenesView() {
 
   // 전체 진행도 (필터 기준)
   const activeScenes = selectedDepartment === 'all' ? allModeScenes : scenes;
+  const visibleWorkLinkSceneUuidKey = useMemo(() => {
+    const workLinkScenes = selectedDepartment === 'all'
+      ? mergedScenes.flatMap((merged) => [merged.bgScene, merged.actScene])
+      : activeScenes;
+    return getUniqueSceneUuids(workLinkScenes).join('|');
+  }, [activeScenes, mergedScenes, selectedDepartment]);
+  useEffect(() => {
+    if (!visibleWorkLinkSceneUuidKey) return;
+    const uuids = visibleWorkLinkSceneUuidKey.split('|').filter(Boolean);
+    void useSceneWorkLinkStore.getState().loadForSceneUuids(uuids).catch((err) => {
+      console.warn('[SceneWorkLinks] 로드 실패', err);
+    });
+  }, [visibleWorkLinkSceneUuidKey]);
   const totalChecks = activeScenes.length * 4;
   const doneChecks = activeScenes.reduce(
     (sum, s) => sum + completedStageCountForAssigneeFilter(s, selectedAssignee),

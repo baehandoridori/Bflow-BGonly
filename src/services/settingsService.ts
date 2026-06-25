@@ -171,6 +171,9 @@ export interface UserPreferences {
     completionTintEnabled?: boolean;
   };
 
+  // 시트 뷰 작업 링크 배지 표시 여부 (기본 true)
+  sheetWorkLinkBadgesVisible?: boolean;
+
   // 화이트보드 배경색
   whiteboardBgColor?: string;  // 기본값 '#FFFFFF'
 

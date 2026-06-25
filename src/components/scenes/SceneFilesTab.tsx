@@ -4,7 +4,8 @@ import { cn } from '@/utils/cn';
 import { formatStamp } from '@/utils/formatTime';
 import { getComments } from '@/services/commentService';
 import { getRevisions } from '@/services/revisionService';
-import type { Scene, CompRevision } from '@/types';
+import { SceneWorkLinksPanel } from './SceneWorkLinksPanel';
+import type { Scene, CompRevision, SceneWorkLinkDepartment } from '@/types';
 
 /**
  * 씬 상세 모달 — 파일 탭.
@@ -40,6 +41,8 @@ const SOURCE_META: Record<FileItem['source'], { label: string; tone: string; Ico
 
 export interface SceneFilesTabProps {
   bgScene: Scene | null;
+  actScene: Scene | null;
+  visibleDepartments: SceneWorkLinkDepartment[];
   primaryCommentKey: string;
   secondaryCommentKey?: string;
   /**
@@ -52,6 +55,8 @@ export interface SceneFilesTabProps {
 
 export function SceneFilesTab({
   bgScene,
+  actScene,
+  visibleDepartments,
   primaryCommentKey,
   secondaryCommentKey,
   revisionSceneKey,
@@ -147,6 +152,12 @@ export function SceneFilesTab({
 
   return (
     <div className="px-5 py-4">
+      <SceneWorkLinksPanel
+        bgScene={bgScene}
+        actScene={actScene}
+        visibleDepartments={visibleDepartments}
+      />
+
       <div className="mb-3 flex items-center justify-between">
         <span className="text-[11.5px] text-text-secondary">
           {loading ? '불러오는 중…' : `총 ${totalCount}개 파일`}
