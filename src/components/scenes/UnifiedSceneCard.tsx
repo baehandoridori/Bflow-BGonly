@@ -313,7 +313,7 @@ export function UnifiedSceneCard({
           bgSceneUuid={bgScene?.id}
           actSceneUuid={actScene?.id}
           mode={workLinkBadgeMode}
-          className="absolute bottom-2.5 right-3 z-20"
+          className="absolute -top-3 right-3 z-20 translate-y-1 scale-95 opacity-0 transition-all duration-200 ease-out group-hover:translate-y-0 group-hover:scale-100 group-hover:opacity-100 group-focus-within:translate-y-0 group-focus-within:scale-100 group-focus-within:opacity-100 motion-reduce:transition-none"
         />
 
         <RevisionCornerFlag
