@@ -6,17 +6,19 @@ import path from 'node:path';
 
 import {
   buildSequentialStagePatch,
+  enqueueSequentialStageSave,
   getChangedSequentialStages,
   isSequentialStageComplete,
+  persistSequentialStagePatchWithRollback,
 } from '../src/utils/sceneStageProgression.ts';
 
-test('stage toggle changes only the clicked stage when advancing', () => {
+test('stage toggle checks all previous stages when advancing', () => {
   assert.deepEqual(
     buildSequentialStagePatch(
       { lo: false, done: false, review: false, png: false },
       'review',
     ),
-    { lo: false, done: false, review: true, png: false },
+    { lo: true, done: true, review: true, png: false },
   );
 
   assert.deepEqual(
@@ -24,17 +26,17 @@ test('stage toggle changes only the clicked stage when advancing', () => {
       { lo: false, done: false, review: false, png: false },
       'png',
     ),
-    { lo: false, done: false, review: false, png: true },
+    { lo: true, done: true, review: true, png: true },
   );
 });
 
-test('stage toggle turns off only the clicked completed stage', () => {
+test('stage toggle clears the clicked and later stages when downgrading', () => {
   assert.deepEqual(
     buildSequentialStagePatch(
       { lo: true, done: true, review: true, png: true },
       'review',
     ),
-    { lo: true, done: true, review: false, png: true },
+    { lo: true, done: true, review: false, png: false },
   );
 
   assert.deepEqual(
@@ -50,7 +52,7 @@ test('stage progression exposes changed fields and full completion', () => {
   const current = { lo: false, done: true, review: false, png: false };
   const patch = buildSequentialStagePatch(current, 'review');
 
-  assert.deepEqual(getChangedSequentialStages(current, patch), ['review']);
+  assert.deepEqual(getChangedSequentialStages(current, patch), ['lo', 'review']);
   assert.equal(isSequentialStageComplete(patch), false);
   assert.equal(
     isSequentialStageComplete(
@@ -58,6 +60,116 @@ test('stage progression exposes changed fields and full completion', () => {
     ),
     true,
   );
+});
+
+test('stage toggle normalizes inconsistent background progress', () => {
+  assert.deepEqual(
+    buildSequentialStagePatch(
+      { lo: false, done: true, review: false, png: true },
+      'png',
+    ),
+    { lo: true, done: true, review: true, png: false },
+  );
+
+  assert.deepEqual(
+    buildSequentialStagePatch(
+      { lo: false, done: true, review: false, png: false },
+      'png',
+    ),
+    { lo: true, done: true, review: true, png: true },
+  );
+});
+
+test('stage persistence compensates all changed stages when a later write fails', async () => {
+  const calls: Array<{ stage: string; value: boolean }> = [];
+  const changedStages = ['lo', 'done', 'review'] as const;
+  const current = { lo: false, done: false, review: false, png: false };
+  const patch = { lo: true, done: true, review: true, png: false };
+
+  await assert.rejects(
+    persistSequentialStagePatchWithRollback(
+      [...changedStages],
+      patch,
+      current,
+      async (stage, value) => {
+        calls.push({ stage, value });
+        if (stage === 'done' && value) {
+          throw new Error('write failed');
+        }
+      },
+    ),
+    /write failed/,
+  );
+
+  assert.deepEqual(calls, [
+    { stage: 'lo', value: true },
+    { stage: 'done', value: true },
+    { stage: 'lo', value: false },
+    { stage: 'done', value: false },
+    { stage: 'review', value: false },
+  ]);
+});
+
+test('stage persistence writes every changed stage once when all saves succeed', async () => {
+  const calls: Array<{ stage: string; value: boolean }> = [];
+
+  await persistSequentialStagePatchWithRollback(
+    ['lo', 'done', 'review'],
+    { lo: true, done: true, review: true, png: false },
+    { lo: false, done: false, review: false, png: false },
+    async (stage, value) => {
+      calls.push({ stage, value });
+    },
+  );
+
+  assert.deepEqual(calls, [
+    { stage: 'lo', value: true },
+    { stage: 'done', value: true },
+    { stage: 'review', value: true },
+  ]);
+});
+
+test('stage save queue serializes writes for the same scene', async () => {
+  const queue = new Map<string, Promise<void>>();
+  const order: string[] = [];
+  let releaseFirst!: () => void;
+  const firstBlocker = new Promise<void>((resolve) => {
+    releaseFirst = resolve;
+  });
+
+  const first = enqueueSequentialStageSave(queue, 'scene-1', async () => {
+    order.push('first-start');
+    await firstBlocker;
+    order.push('first-end');
+  });
+  const second = enqueueSequentialStageSave(queue, 'scene-1', async () => {
+    order.push('second');
+  });
+
+  await new Promise<void>((resolve) => setTimeout(resolve, 0));
+  assert.deepEqual(order, ['first-start']);
+
+  releaseFirst();
+  await Promise.all([first, second]);
+
+  assert.deepEqual(order, ['first-start', 'first-end', 'second']);
+  assert.equal(queue.has('scene-1'), false);
+});
+
+test('stage save queue lets different scenes write independently', async () => {
+  const queue = new Map<string, Promise<void>>();
+  const order: string[] = [];
+
+  await Promise.all([
+    enqueueSequentialStageSave(queue, 'scene-1', async () => {
+      order.push('first');
+    }),
+    enqueueSequentialStageSave(queue, 'scene-2', async () => {
+      order.push('second');
+    }),
+  ]);
+
+  assert.deepEqual(order.sort(), ['first', 'second']);
 });
 
 test('acting phase toggle does not render previous phases as completed steps', async () => {
@@ -82,8 +194,8 @@ test('scene view uses sequential stage patches for single and bulk toggles', asy
   assert.match(scenesView, /buildSequentialStagePatch\(scene, stage\)/);
   assert.match(scenesView, /changedStages\.forEach\(\(changedStage\) => \{/);
   assert.match(scenesView, /setSceneStageValue\(sheetName, sceneId, changedStage, stagePatch\[changedStage\]\)/);
-  assert.match(scenesView, /for \(const changedStage of changedStages\)/);
-  assert.match(scenesView, /updateCell\(sheetName, sceneIndex, changedStage, stagePatch\[changedStage\]/);
+  assert.match(scenesView, /persistSequentialStagePatchWithRollback\(/);
+  assert.match(scenesView, /updateCell\(sheetName, sceneIndex, changedStage, value/);
   assert.doesNotMatch(scenesView, /toggleSceneStage\(sheetName, sceneId, stage\)/);
 
   assert.match(scenesView, /const stagePatchByUuid = new Map<string, Partial<Record<Stage, boolean>>>\(\)/);
@@ -91,6 +203,29 @@ test('scene view uses sequential stage patches for single and bulk toggles', asy
   assert.match(scenesView, /coalesceBulkStageResults/);
   assert.match(bulkOperations, /stagePatchByUuid\?: Map<string, Partial<Record<Stage, boolean>>>/);
   assert.match(bulkOperations, /Object\.assign\(patch, stagePatch\)/);
+});
+
+test('task widget and compositing modal persist all changed background stages', async () => {
+  const myTasksWidget = await readFile(path.join(process.cwd(), 'src', 'components', 'widgets', 'MyTasksWidget.tsx'), 'utf-8');
+  const compositingModal = await readFile(path.join(process.cwd(), 'src', 'views', 'compositing-dashboard', 'modal', 'CompositingSceneModal.tsx'), 'utf-8');
+
+  assert.match(myTasksWidget, /buildSequentialStagePatch\(scene, stage\)/);
+  assert.match(myTasksWidget, /getChangedSequentialStages\(scene, stagePatch\)/);
+  assert.match(myTasksWidget, /stageSaveBaselineRef/);
+  assert.match(myTasksWidget, /getChangedSequentialStages\(previousBaseline, stagePatch\)/);
+  assert.match(myTasksWidget, /persistSequentialStagePatchWithRollback\(queuedChangedStages/);
+  assert.match(myTasksWidget, /enqueueSequentialStageSave\(/);
+  assert.match(myTasksWidget, /persistSequentialStagePatchWithRollback\(/);
+  assert.doesNotMatch(myTasksWidget, /toggleSceneStage\(sheetName, scene\.sceneId, stage\)/);
+
+  assert.match(compositingModal, /buildSequentialStagePatch\(sc, stage\)/);
+  assert.match(compositingModal, /getChangedSequentialStages\(sc, stagePatch\)/);
+  assert.match(compositingModal, /stageSaveBaselineRef/);
+  assert.match(compositingModal, /getChangedSequentialStages\(previousBaseline, stagePatch\)/);
+  assert.match(compositingModal, /persistSequentialStagePatchWithRollback\(queuedChangedStages/);
+  assert.match(compositingModal, /enqueueSequentialStageSave\(/);
+  assert.match(compositingModal, /persistSequentialStagePatchWithRollback\(/);
+  assert.doesNotMatch(compositingModal, /store\.toggleSceneStage\(sheetName, sceneIdArg, stage/);
 });
 
 test('bulk acting phase set keeps completion metadata aligned with single clicks', async () => {
