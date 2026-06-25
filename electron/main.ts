@@ -1124,12 +1124,31 @@ ipcMain.handle('path:choose-file', async () => {
   return result.filePaths[0] ?? null;
 });
 
+const PATH_EXISTS_TIMEOUT_MS = 1500;
+
+function pathExistsAsyncWithTimeout(targetPath: string): Promise<boolean> {
+  const trimmed = targetPath.trim();
+  if (!trimmed) return Promise.resolve(false);
+
+  return new Promise((resolve) => {
+    let settled = false;
+    const finish = (exists: boolean) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      resolve(exists);
+    };
+    const timer = setTimeout(() => finish(false), PATH_EXISTS_TIMEOUT_MS);
+
+    fs.promises.access(trimmed, fs.constants.F_OK)
+      .then(() => finish(true))
+      .catch(() => finish(false));
+  });
+}
+
 ipcMain.handle('path:exists', async (_event, targetPath: string) => {
-  try {
-    return typeof targetPath === 'string' && !!targetPath.trim() && fs.existsSync(targetPath.trim());
-  } catch {
-    return false;
-  }
+  if (typeof targetPath !== 'string') return false;
+  return pathExistsAsyncWithTimeout(targetPath);
 });
 
 ipcMain.handle('settings:read', async (_event, fileName: string) => {
