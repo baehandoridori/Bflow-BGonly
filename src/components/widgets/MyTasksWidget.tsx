@@ -18,6 +18,7 @@ import {
   buildSequentialStagePatch,
   getChangedSequentialStages,
   isSequentialStageComplete,
+  persistSequentialStagePatchWithRollback,
 } from '@/utils/sceneStageProgression';
 import { updateEvent as updateCalEvent, deleteEvent as deleteCalEvent, addEvent as addCalEvent, findEventByTodoId } from '@/services/calendarService';
 import * as supabaseService from '@/services/supabaseService';
@@ -1305,9 +1306,9 @@ export function MyTasksWidget() {
 
     try {
       const { updateCell, updateSceneCompletionMeta } = await import('@/services/supabaseService');
-      for (const changedStage of changedStages) {
-        await updateCell(sheetName, sceneIndex, changedStage, stagePatch[changedStage], currentUser?.id);
-      }
+      await persistSequentialStagePatchWithRollback(changedStages, stagePatch, scene, (changedStage, value) =>
+        updateCell(sheetName, sceneIndex, changedStage, value, currentUser?.id),
+      );
       if (completionMeta) {
         await updateSceneCompletionMeta(
           sheetName,

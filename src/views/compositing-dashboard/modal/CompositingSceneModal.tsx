@@ -34,6 +34,7 @@ import { updateSceneFieldInSupabase, updateSceneStageInSupabase } from '@/servic
 import {
   buildSequentialStagePatch,
   getChangedSequentialStages,
+  persistSequentialStagePatchWithRollback,
 } from '@/utils/sceneStageProgression';
 import { resolveReferenceMergedScene } from '@/utils/sceneReference';
 import { navigateToHashTarget } from '@/utils/hashNavigation';
@@ -187,10 +188,8 @@ export function CompositingSceneModal({ sceneKey, episodeNumber, isCompositor }:
     if (changedStages.length === 0) return;
 
     store.updateSceneByUuid(sc.id, stagePatch);
-    Promise.all(
-      changedStages.map((changedStage) =>
-        updateSceneStageInSupabase(sc.id!, changedStage, stagePatch[changedStage], currentUser.id),
-      ),
+    persistSequentialStagePatchWithRollback(changedStages, stagePatch, sc, (changedStage, value) =>
+      updateSceneStageInSupabase(sc.id!, changedStage, value, currentUser.id),
     ).catch((err) => {
       useDataStore.getState().updateSceneByUuid(sc.id!, {
         lo: sc.lo,

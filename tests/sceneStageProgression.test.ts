@@ -8,6 +8,7 @@ import {
   buildSequentialStagePatch,
   getChangedSequentialStages,
   isSequentialStageComplete,
+  persistSequentialStagePatchWithRollback,
 } from '../src/utils/sceneStageProgression.ts';
 
 test('stage toggle checks all previous stages when advancing', () => {
@@ -78,6 +79,55 @@ test('stage toggle normalizes inconsistent background progress', () => {
   );
 });
 
+test('stage persistence compensates all changed stages when a later write fails', async () => {
+  const calls: Array<{ stage: string; value: boolean }> = [];
+  const changedStages = ['lo', 'done', 'review'] as const;
+  const current = { lo: false, done: false, review: false, png: false };
+  const patch = { lo: true, done: true, review: true, png: false };
+
+  await assert.rejects(
+    persistSequentialStagePatchWithRollback(
+      [...changedStages],
+      patch,
+      current,
+      async (stage, value) => {
+        calls.push({ stage, value });
+        if (stage === 'done' && value) {
+          throw new Error('write failed');
+        }
+      },
+    ),
+    /write failed/,
+  );
+
+  assert.deepEqual(calls, [
+    { stage: 'lo', value: true },
+    { stage: 'done', value: true },
+    { stage: 'lo', value: false },
+    { stage: 'done', value: false },
+    { stage: 'review', value: false },
+  ]);
+});
+
+test('stage persistence writes every changed stage once when all saves succeed', async () => {
+  const calls: Array<{ stage: string; value: boolean }> = [];
+
+  await persistSequentialStagePatchWithRollback(
+    ['lo', 'done', 'review'],
+    { lo: true, done: true, review: true, png: false },
+    { lo: false, done: false, review: false, png: false },
+    async (stage, value) => {
+      calls.push({ stage, value });
+    },
+  );
+
+  assert.deepEqual(calls, [
+    { stage: 'lo', value: true },
+    { stage: 'done', value: true },
+    { stage: 'review', value: true },
+  ]);
+});
+
 test('acting phase toggle does not render previous phases as completed steps', async () => {
   const phaseToggle = await readFile(path.join(process.cwd(), 'src', 'components', 'scenes', 'ScenePhaseToggle.tsx'), 'utf-8');
 
@@ -100,8 +150,8 @@ test('scene view uses sequential stage patches for single and bulk toggles', asy
   assert.match(scenesView, /buildSequentialStagePatch\(scene, stage\)/);
   assert.match(scenesView, /changedStages\.forEach\(\(changedStage\) => \{/);
   assert.match(scenesView, /setSceneStageValue\(sheetName, sceneId, changedStage, stagePatch\[changedStage\]\)/);
-  assert.match(scenesView, /for \(const changedStage of changedStages\)/);
-  assert.match(scenesView, /updateCell\(sheetName, sceneIndex, changedStage, stagePatch\[changedStage\]/);
+  assert.match(scenesView, /persistSequentialStagePatchWithRollback\(/);
+  assert.match(scenesView, /updateCell\(sheetName, sceneIndex, changedStage, value/);
   assert.doesNotMatch(scenesView, /toggleSceneStage\(sheetName, sceneId, stage\)/);
 
   assert.match(scenesView, /const stagePatchByUuid = new Map<string, Partial<Record<Stage, boolean>>>\(\)/);
@@ -117,12 +167,12 @@ test('task widget and compositing modal persist all changed background stages', 
 
   assert.match(myTasksWidget, /buildSequentialStagePatch\(scene, stage\)/);
   assert.match(myTasksWidget, /getChangedSequentialStages\(scene, stagePatch\)/);
-  assert.match(myTasksWidget, /for \(const changedStage of changedStages\)/);
+  assert.match(myTasksWidget, /persistSequentialStagePatchWithRollback\(/);
   assert.doesNotMatch(myTasksWidget, /toggleSceneStage\(sheetName, scene\.sceneId, stage\)/);
 
   assert.match(compositingModal, /buildSequentialStagePatch\(sc, stage\)/);
   assert.match(compositingModal, /getChangedSequentialStages\(sc, stagePatch\)/);
-  assert.match(compositingModal, /Promise\.all\(\s*changedStages\.map/);
+  assert.match(compositingModal, /persistSequentialStagePatchWithRollback\(/);
   assert.doesNotMatch(compositingModal, /store\.toggleSceneStage\(sheetName, sceneIdArg, stage/);
 });
 

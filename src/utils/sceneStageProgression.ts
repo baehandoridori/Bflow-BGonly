@@ -32,3 +32,23 @@ export function getChangedSequentialStages(
 export function isSequentialStageComplete(scene: SequentialStageSnapshot): boolean {
   return SEQUENTIAL_STAGE_ORDER.every((stage) => Boolean(scene[stage]));
 }
+
+export async function persistSequentialStagePatchWithRollback(
+  changedStages: Stage[],
+  patch: SequentialStagePatch,
+  previous: SequentialStageSnapshot,
+  writeStage: (stage: Stage, value: boolean) => Promise<void>,
+): Promise<void> {
+  try {
+    for (const changedStage of changedStages) {
+      await writeStage(changedStage, patch[changedStage]);
+    }
+  } catch (err) {
+    await Promise.allSettled(
+      changedStages.map((changedStage) =>
+        writeStage(changedStage, Boolean(previous[changedStage])),
+      ),
+    );
+    throw err;
+  }
+}

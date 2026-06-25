@@ -20,6 +20,7 @@ import {
   buildSequentialStagePatch,
   getChangedSequentialStages,
   isSequentialStageComplete,
+  persistSequentialStagePatchWithRollback,
 } from '@/utils/sceneStageProgression';
 import { buildSingleSceneSelectionId } from '@/utils/sceneSelectionId';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -3842,20 +3843,20 @@ export function ScenesView() {
     // API 호출을 큐에 넣어 순차 실행 (race condition 방지)
     toggleQueueRef.current = toggleQueueRef.current.then(async () => {
       try {
-        for (const changedStage of changedStages) {
+        await persistSequentialStagePatchWithRollback(changedStages, stagePatch, scene, async (changedStage, value) => {
           if (scene.id) {
-            await updateCellByUuid(scene.id, changedStage, stagePatch[changedStage], currentUser?.id);
+            await updateCellByUuid(scene.id, changedStage, value, currentUser?.id);
           } else {
-            await updateCell(sheetName, sceneIndex, changedStage, stagePatch[changedStage], currentUser?.id);
+            await updateCell(sheetName, sceneIndex, changedStage, value, currentUser?.id);
           }
           window.electronAPI?.dataNotifyChange?.({
             type: 'toggle',
             sheetName,
             sceneId,
             field: changedStage,
-            value: stagePatch[changedStage],
+            value,
           });
-        }
+        });
         // 액팅 phase reverse dual-write — stage 저장 성공 후 새 컬럼도 동기화
         if (actingPhaseSync && scene.id) {
           try {
