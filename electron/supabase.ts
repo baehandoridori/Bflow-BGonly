@@ -2189,6 +2189,8 @@ export async function deleteRevisionSet(id: string): Promise<void> {
 
 const SCENE_WORK_LINK_SELECT =
   'id, scene_uuid, department, link_kind, path, label, sort_order, created_by, created_at, updated_by, updated_at';
+const SCENE_WORK_LINK_UUID_QUERY_CHUNK_SIZE = 80;
+const SCENE_WORK_LINK_QUERY_PAGE_SIZE = 1000;
 
 function mapSceneWorkLinkRow(row: Record<string, unknown>): SupabaseSceneWorkLink {
   const department = row.department === 'acting' ? 'acting' : 'bg';
@@ -2211,14 +2213,49 @@ function mapSceneWorkLinkRow(row: Record<string, unknown>): SupabaseSceneWorkLin
 }
 
 export async function readSceneWorkLinks(sceneUuids?: string[]): Promise<SupabaseSceneWorkLink[]> {
+  const uniqueSceneUuids = sceneUuids ? Array.from(new Set(sceneUuids.filter(Boolean))) : null;
+  if (sceneUuids && uniqueSceneUuids?.length === 0) return [];
+
+  const chunks = uniqueSceneUuids && uniqueSceneUuids.length > 0
+    ? Array.from(
+      { length: Math.ceil(uniqueSceneUuids.length / SCENE_WORK_LINK_UUID_QUERY_CHUNK_SIZE) },
+      (_, index) => uniqueSceneUuids.slice(
+        index * SCENE_WORK_LINK_UUID_QUERY_CHUNK_SIZE,
+        (index + 1) * SCENE_WORK_LINK_UUID_QUERY_CHUNK_SIZE,
+      ),
+    )
+    : [null];
+
+  const rows: SupabaseSceneWorkLink[] = [];
+  for (const chunk of chunks) {
+    rows.push(...await readSceneWorkLinkChunk(chunk));
+  }
+  return rows;
+}
+
+async function readSceneWorkLinkChunk(sceneUuidChunk: string[] | null): Promise<SupabaseSceneWorkLink[]> {
+  const rows: SupabaseSceneWorkLink[] = [];
+  for (let offset = 0; ; offset += SCENE_WORK_LINK_QUERY_PAGE_SIZE) {
+    const page = await readSceneWorkLinkPage(sceneUuidChunk, offset);
+    rows.push(...page);
+    if (page.length < SCENE_WORK_LINK_QUERY_PAGE_SIZE) break;
+  }
+  return rows;
+}
+
+async function readSceneWorkLinkPage(
+  sceneUuidChunk: string[] | null,
+  offset: number,
+): Promise<SupabaseSceneWorkLink[]> {
   let query = supabase
     .from('scene_work_links')
     .select(SCENE_WORK_LINK_SELECT)
     .order('sort_order', { ascending: true })
-    .order('updated_at', { ascending: false });
+    .order('updated_at', { ascending: false })
+    .range(offset, offset + SCENE_WORK_LINK_QUERY_PAGE_SIZE - 1);
 
-  if (sceneUuids && sceneUuids.length > 0) {
-    query = query.in('scene_uuid', Array.from(new Set(sceneUuids.filter(Boolean))));
+  if (sceneUuidChunk && sceneUuidChunk.length > 0) {
+    query = query.in('scene_uuid', sceneUuidChunk);
   }
 
   const { data, error } = await query;
