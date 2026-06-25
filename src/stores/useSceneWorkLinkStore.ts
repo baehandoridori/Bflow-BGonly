@@ -12,6 +12,7 @@ import {
   getWorkLinkSlotKey,
   mapSceneWorkLinkRow,
   mergeSceneWorkLinkLoadResult,
+  restoreSceneWorkLinkSlotFromSnapshot,
 } from '@/utils/sceneWorkLinks';
 
 interface SceneWorkLinkState {
@@ -44,9 +45,10 @@ function markSlotTouched(input: {
   sceneUuid: string;
   department: SceneWorkLinkDepartment;
   linkKind: SceneWorkLink['linkKind'];
-}) {
+}): number {
   mutationSequence += 1;
   touchedSlotSequences.set(getWorkLinkSlotKey(input.sceneUuid, input.department, input.linkKind), mutationSequence);
+  return mutationSequence;
 }
 
 function markRealtimeSlotTouched(
@@ -72,6 +74,18 @@ function getTouchedSlotKeysAfter(sequence: number): Set<string> {
     if (touchedAt > sequence) keys.add(key);
   }
   return keys;
+}
+
+function wasSlotTouchedAfter(
+  input: {
+    sceneUuid: string;
+    department: SceneWorkLinkDepartment;
+    linkKind: SceneWorkLink['linkKind'];
+  },
+  sequence: number,
+): boolean {
+  const slotKey = getWorkLinkSlotKey(input.sceneUuid, input.department, input.linkKind);
+  return (touchedSlotSequences.get(slotKey) ?? 0) > sequence;
 }
 
 export const useSceneWorkLinkStore = create<SceneWorkLinkState>((set, get) => ({
@@ -100,7 +114,7 @@ export const useSceneWorkLinkStore = create<SceneWorkLinkState>((set, get) => ({
 
   upsertLink: async (input) => {
     const previous = get().links;
-    markSlotTouched(input);
+    const touchedAt = markSlotTouched(input);
     const now = new Date().toISOString();
     const optimistic: SceneWorkLink = {
       id: `optimistic:${input.sceneUuid}:${input.department}:${input.linkKind}`,
@@ -131,21 +145,37 @@ export const useSceneWorkLinkStore = create<SceneWorkLinkState>((set, get) => ({
       );
       set(withMap([...replaced, saved]));
     } catch (err) {
-      set(withMap(previous));
+      if (!wasSlotTouchedAfter(input, touchedAt)) {
+        set(withMap(restoreSceneWorkLinkSlotFromSnapshot(
+          get().links,
+          previous,
+          input.sceneUuid,
+          input.department,
+          input.linkKind,
+        )));
+      }
       throw err;
     }
   },
 
   deleteLink: async (sceneUuid, department, linkKind) => {
     const previous = get().links;
-    markSlotTouched({ sceneUuid, department, linkKind });
+    const touchedAt = markSlotTouched({ sceneUuid, department, linkKind });
     set(withMap(previous.filter((link) =>
       !(link.sceneUuid === sceneUuid && link.department === department && link.linkKind === linkKind)
     )));
     try {
       await deleteSceneWorkLink(sceneUuid, department, linkKind);
     } catch (err) {
-      set(withMap(previous));
+      if (!wasSlotTouchedAfter({ sceneUuid, department, linkKind }, touchedAt)) {
+        set(withMap(restoreSceneWorkLinkSlotFromSnapshot(
+          get().links,
+          previous,
+          sceneUuid,
+          department,
+          linkKind,
+        )));
+      }
       throw err;
     }
   },

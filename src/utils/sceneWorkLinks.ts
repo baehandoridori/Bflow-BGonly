@@ -73,6 +73,19 @@ export function mergeSceneWorkLinkLoadResult(
   return next;
 }
 
+export function restoreSceneWorkLinkSlotFromSnapshot(
+  current: SceneWorkLink[],
+  snapshot: SceneWorkLink[],
+  sceneUuid: string,
+  department: SceneWorkLinkDepartment,
+  linkKind: SceneWorkLinkKind,
+): SceneWorkLink[] {
+  const slotKey = getWorkLinkSlotKey(sceneUuid, department, linkKind);
+  const restored = snapshot.find((link) => getSceneWorkLinkSlotKeyFromLink(link) === slotKey);
+  const withoutSlot = current.filter((link) => getSceneWorkLinkSlotKeyFromLink(link) !== slotKey);
+  return restored ? [...withoutSlot, restored] : withoutSlot;
+}
+
 export function getUniqueSceneUuids(
   scenes: Array<{ id?: string | null } | null | undefined>,
 ): string[] {

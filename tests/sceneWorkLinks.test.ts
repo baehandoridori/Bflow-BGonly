@@ -11,6 +11,7 @@ import {
   isLikelyPersonalPath,
   mergeSceneWorkLinkLoadResult,
   mapSceneWorkLinkRow,
+  restoreSceneWorkLinkSlotFromSnapshot,
 } from '../src/utils/sceneWorkLinks.ts';
 import type { SceneWorkLink } from '../src/types/index.ts';
 
@@ -81,6 +82,24 @@ test('mergeSceneWorkLinkLoadResult preserves slots edited after a load started',
   assert.equal(getSceneWorkLinkSlots(buildSceneWorkLinkMap(merged), 's1', 'bg').folder?.path, 'G:\\new');
   assert.equal(getSceneWorkLinkSlots(buildSceneWorkLinkMap(merged), 's1', 'bg').primaryFile?.path, 'G:\\fresh.psd');
   assert.equal(getSceneWorkLinkSlots(buildSceneWorkLinkMap(merged), 's2', 'acting').primaryFile?.path, 'G:\\outside.clip');
+});
+
+test('restoreSceneWorkLinkSlotFromSnapshot rolls back only the attempted slot', () => {
+  const previousFolder = link({ id: 'old-folder', sceneUuid: 's1', department: 'bg', linkKind: 'folder', path: 'G:\\old-folder' });
+  const attemptedFolder = link({ id: 'optimistic-folder', sceneUuid: 's1', department: 'bg', linkKind: 'folder', path: 'G:\\attempted-folder' });
+  const realtimeFile = link({ id: 'realtime-file', sceneUuid: 's1', department: 'bg', linkKind: 'primary_file', path: 'G:\\realtime-file.psd' });
+
+  const restored = restoreSceneWorkLinkSlotFromSnapshot(
+    [attemptedFolder, realtimeFile],
+    [previousFolder],
+    's1',
+    'bg',
+    'folder',
+  );
+
+  const slots = getSceneWorkLinkSlots(buildSceneWorkLinkMap(restored), 's1', 'bg');
+  assert.equal(slots.folder?.path, 'G:\\old-folder');
+  assert.equal(slots.primaryFile?.path, 'G:\\realtime-file.psd');
 });
 
 test('isLikelyPersonalPath detects user profile paths but not shared drive or UNC paths', () => {
