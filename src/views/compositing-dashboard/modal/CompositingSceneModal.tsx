@@ -16,11 +16,11 @@
  * spec: 2026-05-21-compositing-dashboard-design.md (9.x — layout 은 UnifiedSceneDetailModal 따름)
  */
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Layers } from 'lucide-react';
 import { toast as sonnerToast } from 'sonner';
 import { cn } from '@/utils/cn';
-import type { MergedScene, Scene, Stage, ScenePhaseState, CompositingStatus } from '@/types';
+import type { MergedScene, Stage, ScenePhaseState, CompositingStatus } from '@/types';
 import {
   COMPOSITING_STATUS_LABEL,
   COMPOSITING_STATUS_ORDER,
@@ -31,6 +31,14 @@ import { useAuthStore } from '@/stores/useAuthStore';
 import { useCompositingDashboardStore } from '@/stores/useCompositingDashboardStore';
 import { UnifiedSceneDetailModal } from '@/components/scenes/UnifiedSceneDetailModal';
 import { updateSceneFieldInSupabase, updateSceneStageInSupabase } from '@/services/supabaseService';
+import {
+  buildSequentialStagePatch,
+  enqueueSequentialStageSave,
+  getChangedSequentialStages,
+  persistSequentialStagePatchWithRollback,
+  snapshotSequentialStages,
+} from '@/utils/sceneStageProgression';
+import type { SequentialStagePatch } from '@/utils/sceneStageProgression';
 import { resolveReferenceMergedScene } from '@/utils/sceneReference';
 import { navigateToHashTarget } from '@/utils/hashNavigation';
 import type { HashTarget } from '@/utils/hashEntity';
@@ -51,6 +59,8 @@ export function CompositingSceneModal({ sceneKey, episodeNumber, isCompositor }:
   const episodeMemos = useDataStore((s) => s.episodeMemos);
   const getEpisodeDisplayName = useDataStore((s) => s.getEpisodeDisplayName);
   const currentUser = useAuthStore((s) => s.currentUser);
+  const stageSaveQueueRef = useRef<Map<string, Promise<void>>>(new Map());
+  const stageSaveBaselineRef = useRef<Map<string, SequentialStagePatch>>(new Map());
 
   const sceneId = sceneKey.split(':').slice(1).join(':');
   const ep = episodes.find((e) => e.episodeNumber === episodeNumber);
@@ -169,24 +179,50 @@ export function CompositingSceneModal({ sceneKey, episodeNumber, isCompositor }:
 
   // ── BG/ACT 단계 토글 — 정상 시트 데이터 변경 (낙관적 + Supabase) ──
   // 코덱스 11차 P1 (2026-05-22): Supabase 실패 시 낙관적 토글을 복원해야 함.
-  //   - toggleSceneStage 는 토글이므로 다시 호출하면 이전 값으로 복귀.
+  //   - BG 단계는 순차 진행이라 목표 단계 기준으로 이전/이후 단계를 함께 정규화.
   //   - 실패 토스트만 띄우고 store 상태는 잘못된 값으로 남아 사용자가 계속 작업하는 문제 fix.
   const handleToggle = useCallback((sheetName: string, sceneIdArg: string, stage: Stage) => {
     if (!currentUser) return;
     const store = useDataStore.getState();
-    store.toggleSceneStage(sheetName, sceneIdArg, stage as 'lo' | 'done' | 'review' | 'png');
-    // 새 값 계산 (낙관적 토글 후) — 참조 패널이 다른 화의 씬일 수 있어, 메인 화에 가두지 않고
-    //   전체 episodes 에서 sheetName 으로 파트를 찾는다(sheetName 은 전역 유니크 — ScenesView 동일). 안 그러면 저장이 누락됨.
+    // 참조 패널이 다른 화의 씬일 수 있어, 메인 화에 가두지 않고 전체 episodes 에서 sheetName 으로 파트를 찾는다.
     const part = useDataStore.getState().episodes.flatMap((e) => e.parts).find((p) => p.sheetName === sheetName);
     const sc = part?.scenes.find((s) => s.sceneId === sceneIdArg);
     if (!sc?.id) return;
-    const newValue = Boolean(sc[stage as keyof Scene]);
-    updateSceneStageInSupabase(sc.id, stage, newValue).catch((err) => {
-      // 롤백 — 토글 다시 호출하면 이전 값으로 복귀.
-      useDataStore.getState().toggleSceneStage(sheetName, sceneIdArg, stage as 'lo' | 'done' | 'review' | 'png');
-      sonnerToast.error(`단계 변경 실패: ${err instanceof Error ? err.message : String(err)}`);
+    const stagePatch = buildSequentialStagePatch(sc, stage);
+    const changedStages = getChangedSequentialStages(sc, stagePatch);
+    if (changedStages.length === 0) return;
+    if (!stageSaveQueueRef.current.has(sc.id) && !stageSaveBaselineRef.current.has(sc.id)) {
+      stageSaveBaselineRef.current.set(sc.id, snapshotSequentialStages(sc));
+    }
+
+    store.updateSceneByUuid(sc.id, stagePatch);
+    const queuedSave = enqueueSequentialStageSave(stageSaveQueueRef.current, sc.id, async () => {
+      const previousBaseline = stageSaveBaselineRef.current.get(sc.id!) ?? snapshotSequentialStages(sc);
+      const queuedChangedStages = getChangedSequentialStages(previousBaseline, stagePatch);
+      store.updateSceneByUuid(sc.id!, stagePatch);
+      if (queuedChangedStages.length === 0) return;
+      try {
+        await persistSequentialStagePatchWithRollback(queuedChangedStages, stagePatch, previousBaseline, (changedStage, value) =>
+          updateSceneStageInSupabase(sc.id!, changedStage, value, currentUser.id),
+        );
+        stageSaveBaselineRef.current.set(sc.id!, { ...stagePatch });
+      } catch (err) {
+        stageSaveBaselineRef.current.set(sc.id!, previousBaseline);
+        useDataStore.getState().updateSceneByUuid(sc.id!, {
+          lo: previousBaseline.lo,
+          done: previousBaseline.done,
+          review: previousBaseline.review,
+          png: previousBaseline.png,
+        });
+        sonnerToast.error(`단계 변경 실패: ${err instanceof Error ? err.message : String(err)}`);
+      }
     });
-  }, [currentUser, episodeNumber]);
+    queuedSave.finally(() => {
+      if (!stageSaveQueueRef.current.has(sc.id!)) {
+        stageSaveBaselineRef.current.delete(sc.id!);
+      }
+    });
+  }, [currentUser]);
 
   // ── 필드 업데이트 — 메모 / 담당자 / 이미지 URL 등 ──
   const handleFieldUpdate = useCallback((sheetName: string, sceneIndex: number, field: string, value: string) => {

@@ -14,6 +14,16 @@ import { DEPARTMENT_CONFIGS, STAGES } from '@/types';
 import type { Stage, Scene, Episode, Department } from '@/types';
 import { cn } from '@/utils/cn';
 import { createUuid } from '@/utils/createUuid';
+import {
+  buildSequentialStagePatch,
+  enqueueSequentialStageSave,
+  getChangedSequentialStages,
+  isSequentialStageComplete,
+  persistSequentialStagePatchWithRollback,
+  SEQUENTIAL_STAGE_ORDER,
+  snapshotSequentialStages,
+} from '@/utils/sceneStageProgression';
+import type { SequentialStagePatch } from '@/utils/sceneStageProgression';
 import { updateEvent as updateCalEvent, deleteEvent as deleteCalEvent, addEvent as addCalEvent, findEventByTodoId } from '@/services/calendarService';
 import * as supabaseService from '@/services/supabaseService';
 
@@ -49,6 +59,19 @@ interface FlatScene {
   partId: string;
   department: Department;
   key: SceneKey;
+}
+
+type StageSaveBaseline = SequentialStagePatch & {
+  completedBy?: string;
+  completedAt?: string;
+};
+
+function createStageSaveBaseline(scene: Scene | StageSaveBaseline): StageSaveBaseline {
+  return {
+    ...snapshotSequentialStages(scene),
+    completedBy: scene.completedBy ?? '',
+    completedAt: scene.completedAt ?? '',
+  };
 }
 
 /* ─── 기본 뷰 ──────────────────────────────── */
@@ -993,11 +1016,12 @@ function TabBar({
 export function MyTasksWidget() {
   const episodes = useDashboardEpisodes();
   const episodeTitles = useDataStore((s) => s.episodeTitles);
-  const toggleSceneStage = useDataStore((s) => s.toggleSceneStage);
   const updateSceneFieldOptimistic = useDataStore((s) => s.updateSceneFieldOptimistic);
   const currentUser = useAuthStore((s) => s.currentUser);
   const isPopup = useContext(IsPopupContext);
   const widgetId = useContext(WidgetIdContext);
+  const stageSaveQueueRef = useRef<Map<string, Promise<void>>>(new Map());
+  const stageSaveBaselineRef = useRef<Map<string, StageSaveBaseline>>(new Map());
 
   // 데이터 변경 알림: 팝업에서는 쿨다운 래퍼, 대시보드에서는 직접 호출
   const notifyChange = useCallback(async () => {
@@ -1262,16 +1286,25 @@ export function MyTasksWidget() {
   // 토글 핸들러
   const handleToggle = useCallback(async (flat: FlatScene, stage: Stage) => {
     const { sheetName, scene, sceneIndex } = flat;
-    const newValue = !scene[stage];
+    const stagePatch = buildSequentialStagePatch(scene, stage);
+    const changedStages = getChangedSequentialStages(scene, stagePatch);
+    if (changedStages.length === 0) return;
+    const saveQueueKey = scene.id ?? `${sheetName}:${scene.sceneId}`;
+    if (!stageSaveQueueRef.current.has(saveQueueKey) && !stageSaveBaselineRef.current.has(saveQueueKey)) {
+      stageSaveBaselineRef.current.set(saveQueueKey, createStageSaveBaseline(scene));
+    }
 
-    toggleSceneStage(sheetName, scene.sceneId, stage);
+    SEQUENTIAL_STAGE_ORDER.forEach((changedStage) => {
+      updateSceneFieldOptimistic(sheetName, sceneIndex, changedStage, String(stagePatch[changedStage]));
+    });
 
-    const completionMeta = (() => {
-      const prevCompletedBy = scene.completedBy ?? '';
-      const prevCompletedAt = scene.completedAt ?? '';
-      if (newValue) {
-        const afterToggle = { ...scene, [stage]: true };
-        if (!afterToggle.lo || !afterToggle.done || !afterToggle.review || !afterToggle.png) return null;
+    const buildCompletionMeta = (previousScene: Scene | StageSaveBaseline) => {
+      const prevCompletedBy = previousScene.completedBy ?? '';
+      const prevCompletedAt = previousScene.completedAt ?? '';
+      const wasAllDone = isSequentialStageComplete(previousScene);
+      const willBeAllDone = isSequentialStageComplete(stagePatch);
+
+      if (!wasAllDone && willBeAllDone) {
         return {
           nextCompletedBy: currentUser?.name ?? '알 수 없음',
           nextCompletedAt: new Date().toISOString(),
@@ -1279,6 +1312,7 @@ export function MyTasksWidget() {
           prevCompletedAt,
         };
       }
+      if (!wasAllDone || willBeAllDone) return null;
       if (!prevCompletedBy && !prevCompletedAt) return null;
       return {
         nextCompletedBy: '',
@@ -1286,38 +1320,73 @@ export function MyTasksWidget() {
         prevCompletedBy,
         prevCompletedAt,
       };
-    })();
+    };
 
-    if (completionMeta) {
-      updateSceneFieldOptimistic(sheetName, sceneIndex, 'completedBy', completionMeta.nextCompletedBy);
-      updateSceneFieldOptimistic(sheetName, sceneIndex, 'completedAt', completionMeta.nextCompletedAt);
+    const immediateCompletionMeta = buildCompletionMeta(scene);
+
+    if (immediateCompletionMeta) {
+      updateSceneFieldOptimistic(sheetName, sceneIndex, 'completedBy', immediateCompletionMeta.nextCompletedBy);
+      updateSceneFieldOptimistic(sheetName, sceneIndex, 'completedAt', immediateCompletionMeta.nextCompletedAt);
     }
 
-    try {
-      const { updateCell, updateSceneCompletionMeta } = await import('@/services/supabaseService');
-      await updateCell(sheetName, sceneIndex, stage, newValue, currentUser?.id);
-      if (completionMeta) {
-        await updateSceneCompletionMeta(
-          sheetName,
-          sceneIndex,
-          completionMeta.nextCompletedBy && completionMeta.nextCompletedAt
-            ? {
-                completedBy: completionMeta.nextCompletedBy,
-                completedAt: completionMeta.nextCompletedAt,
-              }
-            : null,
-        ).catch(() => {});
+    const queuedSave = enqueueSequentialStageSave(stageSaveQueueRef.current, saveQueueKey, async () => {
+      const previousBaseline = stageSaveBaselineRef.current.get(saveQueueKey) ?? createStageSaveBaseline(scene);
+      const queuedChangedStages = getChangedSequentialStages(previousBaseline, stagePatch);
+      const queuedCompletionMeta = buildCompletionMeta(previousBaseline);
+
+      SEQUENTIAL_STAGE_ORDER.forEach((changedStage) => {
+        updateSceneFieldOptimistic(sheetName, sceneIndex, changedStage, String(stagePatch[changedStage]));
+      });
+      if (queuedCompletionMeta) {
+        updateSceneFieldOptimistic(sheetName, sceneIndex, 'completedBy', queuedCompletionMeta.nextCompletedBy);
+        updateSceneFieldOptimistic(sheetName, sceneIndex, 'completedAt', queuedCompletionMeta.nextCompletedAt);
       }
-      notifyChange();
-    } catch (err) {
-      console.error('[MyTasks 토글 실패]', err);
-      toggleSceneStage(sheetName, scene.sceneId, stage);
-      if (completionMeta) {
-        updateSceneFieldOptimistic(sheetName, sceneIndex, 'completedBy', completionMeta.prevCompletedBy);
-        updateSceneFieldOptimistic(sheetName, sceneIndex, 'completedAt', completionMeta.prevCompletedAt);
+
+      if (queuedChangedStages.length === 0 && !queuedCompletionMeta) return;
+
+      try {
+        const { updateCell, updateSceneCompletionMeta } = await import('@/services/supabaseService');
+        if (queuedChangedStages.length > 0) {
+          await persistSequentialStagePatchWithRollback(queuedChangedStages, stagePatch, previousBaseline, (changedStage, value) =>
+            updateCell(sheetName, sceneIndex, changedStage, value, currentUser?.id),
+          );
+        }
+        if (queuedCompletionMeta) {
+          await updateSceneCompletionMeta(
+            sheetName,
+            sceneIndex,
+            queuedCompletionMeta.nextCompletedBy && queuedCompletionMeta.nextCompletedAt
+              ? {
+                  completedBy: queuedCompletionMeta.nextCompletedBy,
+                  completedAt: queuedCompletionMeta.nextCompletedAt,
+                }
+              : null,
+          ).catch(() => {});
+        }
+        stageSaveBaselineRef.current.set(saveQueueKey, {
+          ...createStageSaveBaseline(previousBaseline),
+          ...stagePatch,
+          completedBy: queuedCompletionMeta?.nextCompletedBy ?? previousBaseline.completedBy,
+          completedAt: queuedCompletionMeta?.nextCompletedAt ?? previousBaseline.completedAt,
+        });
+        notifyChange();
+      } catch (err) {
+        console.error('[MyTasks 토글 실패]', err);
+        stageSaveBaselineRef.current.set(saveQueueKey, previousBaseline);
+        SEQUENTIAL_STAGE_ORDER.forEach((changedStage) => {
+          updateSceneFieldOptimistic(sheetName, sceneIndex, changedStage, String(Boolean(previousBaseline[changedStage])));
+        });
+        if (queuedCompletionMeta) {
+          updateSceneFieldOptimistic(sheetName, sceneIndex, 'completedBy', queuedCompletionMeta.prevCompletedBy);
+          updateSceneFieldOptimistic(sheetName, sceneIndex, 'completedAt', queuedCompletionMeta.prevCompletedAt);
+        }
       }
+    });
+    await queuedSave;
+    if (!stageSaveQueueRef.current.has(saveQueueKey)) {
+      stageSaveBaselineRef.current.delete(saveQueueKey);
     }
-  }, [toggleSceneStage, updateSceneFieldOptimistic, currentUser, notifyChange]);
+  }, [updateSceneFieldOptimistic, currentUser, notifyChange]);
 
   // 인라인 필드 편집
   const handleEditField = useCallback(async (flat: FlatScene, field: string, value: string) => {

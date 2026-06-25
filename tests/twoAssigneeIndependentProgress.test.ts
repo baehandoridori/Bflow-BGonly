@@ -142,3 +142,21 @@ test('dev preview seeds two ACT assignees with different progress states', () =>
   assert.match(source, /sceneState: 'work'/);
   assert.match(source, /sceneState: 'wait'/);
 });
+
+test('assignee filter applies status chips to the selected assignee progress', () => {
+  const util = readFileSync(progressUtilPath, 'utf8');
+  const scenesView = readFileSync('src/views/ScenesView.tsx', 'utf8');
+
+  assert.match(util, /matchesAssigneeStatusFilter/);
+  assert.match(scenesView, /matchesAssigneeStatusFilter\(s,\s*statusFilter,\s*selectedAssignee\)/);
+  assert.match(scenesView, /mergedMatchesStatusFilter\(merged,\s*statusFilter,\s*selectedAssignee\)/);
+  assert.match(scenesView, /const statusScenes = selectedAssignee[\s\S]*?presentScenes\.filter\(\(scene\) => sceneMatchesAssignee\(scene, selectedAssignee\)\)/);
+  assert.match(scenesView, /statusScenes\.every\(matchesRequestedStatus\)/);
+  assert.match(scenesView, /const allModeScenes = useMemo\([\s\S]*?\.filter\(\(scene\) => !selectedAssignee \|\| sceneMatchesAssignee\(scene, selectedAssignee\)\)/);
+  assert.match(scenesView, /\[mergedScenes, selectedAssignee\]/);
+  assert.match(scenesView, /function sortMergedScenesForAssigneeFilter/);
+  assert.match(scenesView, /progressForMerged\(a\) - progressForMerged\(b\)/);
+  assert.match(scenesView, /incompleteForMerged\(b\) - incompleteForMerged\(a\)/);
+  assert.match(scenesView, /return sortMergedScenesForAssigneeFilter\(statusMatchedMergedScenes, sortKey, sortDir, selectedAssignee\)/);
+  assert.match(scenesView, /matchesAssigneeStatusFilter\(scene,\s*statusFilter,\s*selectedAssignee\)/);
+});

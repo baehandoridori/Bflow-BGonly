@@ -146,6 +146,37 @@ export function sceneProgressForAssignee(scene: Scene, assigneeName: string): nu
   return (STAGES.filter((stage) => scene[stage]).length / STAGES.length) * 100;
 }
 
+export type AssigneeAwareStatusFilter = 'all' | 'not-started' | 'in-progress' | 'done';
+
+export function sceneProgressForAssigneeFilter(scene: Scene, assigneeName: string | null | undefined): number {
+  const selectedName = assigneeName?.trim();
+  if (selectedName) return sceneProgressForAssignee(scene, selectedName);
+
+  const assigneeProgress = sceneProgressFromAssignees(scene);
+  if (assigneeProgress !== null) return assigneeProgress;
+
+  const state = progressCountFromState(scene.sceneState);
+  if (state !== null) return (state / STAGES.length) * 100;
+
+  return (STAGES.filter((stage) => scene[stage]).length / STAGES.length) * 100;
+}
+
+export function matchesAssigneeStatusFilter(
+  scene: Scene,
+  statusFilter: AssigneeAwareStatusFilter,
+  assigneeName: string | null | undefined,
+): boolean {
+  if (statusFilter === 'all') return true;
+
+  const pct = sceneProgressForAssigneeFilter(scene, assigneeName);
+  const done = pct >= 100;
+  const notStarted = pct <= 0;
+
+  if (statusFilter === 'done') return done;
+  if (statusFilter === 'not-started') return notStarted;
+  return !done && !notStarted;
+}
+
 export function isAssigneeProgressFullyDone(scene: Scene): boolean | null {
   if (!hasMultiAssigneeProgress(scene)) return null;
   const entries = getAssigneeProgressEntries(scene);

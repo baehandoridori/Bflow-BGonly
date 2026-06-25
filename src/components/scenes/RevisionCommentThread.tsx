@@ -44,6 +44,7 @@ import {
   type AttachmentImageLightboxEntry,
   type AttachmentImageLightboxState,
 } from './AttachmentImageLightbox';
+import { RevisionCommentBadge } from './RevisionCommentBadge';
 
 interface Props {
   revisionId: string;
@@ -332,34 +333,36 @@ export function RevisionCommentThread({ revisionId, sceneKey, onHashClick, onHas
 
   async function send() {
     if (!canSend || !currentUser) return;
-    setSubmitting(true);
-
-    const newComment: SceneComment = {
-      id: createUuid(),
-      userId: currentUser.id,
-      userName: currentUser.name,
-      text: draft.trim(),
-      mentions: extractMentions(draft, users.map(user => user.name)),
-      images: uploadedImageUrls,
-      createdAt: new Date().toISOString(),
-      // v1.18.0 핵심: 이 댓글은 해당 리테이크 맥락에 속함.
-      // commentService.addComment → supabase:add-comment IPC → addComment(... revisionId)
-      // 까지 정식 전달되어 comments.revision_id 컬럼에 저장된다 (청크 4 Task 14 정식화).
-      revisionId,
-    };
-
-    // 낙관적 UI
-    setAllComments(prev => [...prev, newComment]);
     const prevDraft = draft;
     const prevAttached = attachedImages;
-    setDraft('');
-    draftRef.current = '';
-    mention.close();
-    hash.close();
-    setAttachedImages([]);
-    attachedImagesRef.current = [];
+    let newComment: SceneComment | null = null;
 
     try {
+      setSubmitting(true);
+
+      newComment = {
+        id: createUuid(),
+        userId: currentUser.id,
+        userName: currentUser.name,
+        text: draft.trim(),
+        mentions: extractMentions(draft, users.map(user => user.name)),
+        images: uploadedImageUrls,
+        createdAt: new Date().toISOString(),
+        // v1.18.0 핵심: 이 댓글은 해당 리테이크 맥락에 속함.
+        // commentService.addComment → supabase:add-comment IPC → addComment(... revisionId)
+        // 까지 정식 전달되어 comments.revision_id 컬럼에 저장된다 (청크 4 Task 14 정식화).
+        revisionId,
+      };
+
+      // 낙관적 UI
+      setAllComments(prev => [...prev, newComment!]);
+      setDraft('');
+      draftRef.current = '';
+      mention.close();
+      hash.close();
+      setAttachedImages([]);
+      attachedImagesRef.current = [];
+
       await addComment(sceneKey, newComment);
       prevAttached.forEach((item) => {
         try { URL.revokeObjectURL(item.previewUrl); } catch { /* ignore */ }
@@ -386,6 +389,16 @@ export function RevisionCommentThread({ revisionId, sceneKey, onHashClick, onHas
       }
     } catch (err) {
       console.error('[리테이크 댓글 스레드] 전송 실패:', err);
+      const failedComment = newComment;
+      if (!failedComment) {
+        if (mountedRef.current) {
+          setDraft(prevDraft);
+          draftRef.current = prevDraft;
+          setAttachedImages(prevAttached);
+          attachedImagesRef.current = prevAttached;
+        }
+        return;
+      }
 
       if (!mountedRef.current) {
         prevAttached.forEach((item) => {
@@ -400,7 +413,7 @@ export function RevisionCommentThread({ revisionId, sceneKey, onHashClick, onHas
       }
 
       // 롤백
-      setAllComments(prev => prev.filter(c => c.id !== newComment.id));
+      setAllComments(prev => prev.filter(c => c.id !== failedComment.id));
       const userStartedNewDraft = draftRef.current.length > 0 || attachedImagesRef.current.length > 0;
       if (userStartedNewDraft) {
         prevAttached.forEach((item) => {
@@ -418,7 +431,9 @@ export function RevisionCommentThread({ revisionId, sceneKey, onHashClick, onHas
         attachedImagesRef.current = prevAttached;
       }
     } finally {
-      setSubmitting(false);
+      if (mountedRef.current) {
+        setSubmitting(false);
+      }
     }
   }
 
@@ -445,6 +460,7 @@ export function RevisionCommentThread({ revisionId, sceneKey, onHashClick, onHas
         >
           <CommentBubble
             comment={c}
+            revisionId={c.revisionId ?? revisionId}
             isMe={c.userId === currentUser?.id}
             users={users}
             onImageClick={openLightbox}
@@ -600,6 +616,7 @@ export function RevisionCommentThread({ revisionId, sceneKey, onHashClick, onHas
 
 function CommentBubble({
   comment,
+  revisionId,
   isMe,
   users,
   onImageClick,
@@ -608,6 +625,7 @@ function CommentBubble({
   onHashContextMenu,
 }: {
   comment: SceneComment;
+  revisionId: string;
   isMe: boolean;
   users: { name: string }[];
   onImageClick: (url: string, comment: SceneComment) => void;
@@ -635,6 +653,7 @@ function CommentBubble({
           <span className={`text-[11px] font-bold ${isMe ? 'text-accent-sub' : 'text-text-primary'}`}>
             {comment.userName}
           </span>
+          <RevisionCommentBadge revisionId={revisionId} />
         </div>
         <span className="text-[10px] text-text-secondary/50">
           {formatCommentTime(comment.createdAt)}
