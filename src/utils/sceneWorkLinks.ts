@@ -35,6 +35,44 @@ export function getSceneWorkLinkSlots(
   };
 }
 
+export function getSceneWorkLinkSlotKeyFromLink(link: SceneWorkLink): string {
+  return getWorkLinkSlotKey(link.sceneUuid, link.department, link.linkKind);
+}
+
+export function mergeSceneWorkLinkLoadResult(
+  current: SceneWorkLink[],
+  loaded: SceneWorkLink[],
+  sceneUuids: string[],
+  preserveSlotKeys: Set<string> = new Set(),
+): SceneWorkLink[] {
+  const targetSceneUuids = new Set(sceneUuids.filter(Boolean));
+  if (targetSceneUuids.size === 0) return current;
+
+  const next: SceneWorkLink[] = [];
+  const preservedSlotKeys = new Set<string>();
+
+  for (const link of current) {
+    if (!targetSceneUuids.has(link.sceneUuid)) {
+      next.push(link);
+      continue;
+    }
+    const slotKey = getSceneWorkLinkSlotKeyFromLink(link);
+    if (preserveSlotKeys.has(slotKey)) {
+      next.push(link);
+      preservedSlotKeys.add(slotKey);
+    }
+  }
+
+  for (const link of loaded) {
+    if (!targetSceneUuids.has(link.sceneUuid)) continue;
+    const slotKey = getSceneWorkLinkSlotKeyFromLink(link);
+    if (preserveSlotKeys.has(slotKey) || preservedSlotKeys.has(slotKey)) continue;
+    next.push(link);
+  }
+
+  return next;
+}
+
 export function getUniqueSceneUuids(
   scenes: Array<{ id?: string | null } | null | undefined>,
 ): string[] {

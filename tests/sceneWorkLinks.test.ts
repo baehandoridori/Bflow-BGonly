@@ -4,10 +4,12 @@ import {
   applySceneWorkLinkRealtimeRows,
   buildSceneWorkLinkMap,
   getSceneWorkLinkSlots,
+  getSceneWorkLinkSlotKeyFromLink,
   getWorkLinkSlotKey,
   getUniqueSceneUuids,
   getWorkLinkWarnings,
   isLikelyPersonalPath,
+  mergeSceneWorkLinkLoadResult,
   mapSceneWorkLinkRow,
 } from '../src/utils/sceneWorkLinks.ts';
 import type { SceneWorkLink } from '../src/types/index.ts';
@@ -61,6 +63,24 @@ test('getUniqueSceneUuids keeps both halves of visible merged scenes', () => {
     ]),
     ['acting-visible-counterpart', 'bg-assignee-match'],
   );
+});
+
+test('mergeSceneWorkLinkLoadResult preserves slots edited after a load started', () => {
+  const staleLoaded = link({ id: 'old', sceneUuid: 's1', department: 'bg', linkKind: 'folder', path: 'G:\\old' });
+  const currentEdited = link({ id: 'saved', sceneUuid: 's1', department: 'bg', linkKind: 'folder', path: 'G:\\new' });
+  const outside = link({ id: 'outside', sceneUuid: 's2', department: 'acting', linkKind: 'primary_file', path: 'G:\\outside.clip' });
+  const untouchedLoaded = link({ id: 'fresh', sceneUuid: 's1', department: 'bg', linkKind: 'primary_file', path: 'G:\\fresh.psd' });
+
+  const merged = mergeSceneWorkLinkLoadResult(
+    [currentEdited, outside],
+    [staleLoaded, untouchedLoaded],
+    ['s1'],
+    new Set([getSceneWorkLinkSlotKeyFromLink(currentEdited)]),
+  );
+
+  assert.equal(getSceneWorkLinkSlots(buildSceneWorkLinkMap(merged), 's1', 'bg').folder?.path, 'G:\\new');
+  assert.equal(getSceneWorkLinkSlots(buildSceneWorkLinkMap(merged), 's1', 'bg').primaryFile?.path, 'G:\\fresh.psd');
+  assert.equal(getSceneWorkLinkSlots(buildSceneWorkLinkMap(merged), 's2', 'acting').primaryFile?.path, 'G:\\outside.clip');
 });
 
 test('isLikelyPersonalPath detects user profile paths but not shared drive or UNC paths', () => {
