@@ -2263,7 +2263,6 @@ export async function upsertSceneWorkLink(input: SceneWorkLinkInput): Promise<Su
     const existing = await findSceneWorkLinkSlot(input);
     if (existing?.id) {
       const updated = await updateSceneWorkLinkSlot(existing.id, input);
-      broadcastDataChange('scene_work_links', 'UPDATE', input.userId ?? undefined);
       return updated;
     }
   }
@@ -2287,13 +2286,11 @@ export async function upsertSceneWorkLink(input: SceneWorkLinkInput): Promise<Su
     const existing = await findSceneWorkLinkSlot(input);
     if (existing?.id) {
       const updated = await updateSceneWorkLinkSlot(existing.id, input);
-      broadcastDataChange('scene_work_links', 'UPDATE', input.userId ?? undefined);
       return updated;
     }
   }
 
   throwIfError(error);
-  broadcastDataChange('scene_work_links', 'INSERT', input.userId ?? undefined);
   return mapSceneWorkLinkRow(data as Record<string, unknown>);
 }
 
@@ -2309,7 +2306,6 @@ export async function deleteSceneWorkLink(
     .eq('department', department)
     .eq('link_kind', linkKind);
   throwIfError(error);
-  broadcastDataChange('scene_work_links', 'DELETE');
 }
 
 // ═══════════════════════════════════════════════

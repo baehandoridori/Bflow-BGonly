@@ -35,6 +35,16 @@ export function getSceneWorkLinkSlots(
   };
 }
 
+export function getUniqueSceneUuids(
+  scenes: Array<{ id?: string | null } | null | undefined>,
+): string[] {
+  return Array.from(new Set(
+    scenes
+      .map((scene) => scene?.id)
+      .filter((id): id is string => Boolean(id)),
+  )).sort();
+}
+
 export function isLikelyPersonalPath(input: string): boolean {
   const normalized = input.trim().replace(/\//g, '\\').toLowerCase();
   return (

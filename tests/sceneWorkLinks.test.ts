@@ -5,6 +5,7 @@ import {
   buildSceneWorkLinkMap,
   getSceneWorkLinkSlots,
   getWorkLinkSlotKey,
+  getUniqueSceneUuids,
   getWorkLinkWarnings,
   isLikelyPersonalPath,
   mapSceneWorkLinkRow,
@@ -47,6 +48,19 @@ test('getSceneWorkLinkSlots returns folder and primary file for a department', (
 
   assert.equal(slots.folder?.path, 'G:\\act\\A_014');
   assert.equal(slots.primaryFile?.path, 'G:\\act\\A_014\\main.clip');
+});
+
+test('getUniqueSceneUuids keeps both halves of visible merged scenes', () => {
+  assert.deepEqual(
+    getUniqueSceneUuids([
+      { id: 'acting-visible-counterpart' },
+      { id: 'bg-assignee-match' },
+      { id: 'bg-assignee-match' },
+      null,
+      {},
+    ]),
+    ['acting-visible-counterpart', 'bg-assignee-match'],
+  );
 });
 
 test('isLikelyPersonalPath detects user profile paths but not shared drive or UNC paths', () => {

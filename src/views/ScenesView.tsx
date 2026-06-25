@@ -78,6 +78,7 @@ import {
   matchesAssigneeStatusFilter,
   sceneProgressForAssigneeFilter,
 } from '@/utils/assigneeProgress';
+import { getUniqueSceneUuids } from '@/utils/sceneWorkLinks';
 
 type SceneHashTarget = Extract<HashTarget, { kind: 'scene' }>;
 
@@ -3616,11 +3617,11 @@ export function ScenesView() {
   // 전체 진행도 (필터 기준)
   const activeScenes = selectedDepartment === 'all' ? allModeScenes : scenes;
   const visibleWorkLinkSceneUuidKey = useMemo(() => {
-    const ids = activeScenes
-      .map((scene) => scene.id)
-      .filter((id): id is string => Boolean(id));
-    return Array.from(new Set(ids)).sort().join('|');
-  }, [activeScenes]);
+    const workLinkScenes = selectedDepartment === 'all'
+      ? mergedScenes.flatMap((merged) => [merged.bgScene, merged.actScene])
+      : activeScenes;
+    return getUniqueSceneUuids(workLinkScenes).join('|');
+  }, [activeScenes, mergedScenes, selectedDepartment]);
   useEffect(() => {
     if (!visibleWorkLinkSceneUuidKey) return;
     const uuids = visibleWorkLinkSceneUuidKey.split('|').filter(Boolean);
