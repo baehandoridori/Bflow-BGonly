@@ -3,7 +3,7 @@
  * Electron 없이 Vite dev server에서 앱을 테스트할 수 있게 함
  */
 
-import type { ElectronAPI, AppUser, Episode, Scene, CompRevisionSet } from '@/types';
+import type { ElectronAPI, AppUser, Episode, Scene, CompRevisionSet, SceneWorkLink } from '@/types';
 import { MOCK_EPISODES, MOCK_COMPOSITING_STATES, type MockCompositingRow } from './compositingMockSeed';
 import {
   buildDevPreviewCommentReadStates,
@@ -176,6 +176,11 @@ function getMockRevisionRows(): DevPreviewRevisionRow[] {
 function getMockRevisionSets(): CompRevisionSet[] {
   return (localStore.__revisionSets as CompRevisionSet[] | undefined)
     ?? (localStore.__revisionSets = []) as CompRevisionSet[];
+}
+
+function getMockSceneWorkLinks(): SceneWorkLink[] {
+  return (localStore.__sceneWorkLinks as SceneWorkLink[] | undefined)
+    ?? (localStore.__sceneWorkLinks = []) as SceneWorkLink[];
 }
 
 function parseJsonStringArray(value?: string): string[] {
@@ -390,6 +395,14 @@ export function installDevElectronAPI(): void {
 
   const mockAPI: ElectronAPI = {
     getDataPath: async () => '/dev/mock-data',
+    shellOpenPath: async (targetPath: string) => (
+      targetPath.includes('missing')
+        ? { ok: false, error: 'not found' }
+        : { ok: true }
+    ),
+    chooseFolderPath: async () => 'G:\\공유 드라이브\\JBBJ\\A_014',
+    chooseFilePath: async () => 'G:\\공유 드라이브\\JBBJ\\A_014\\main.psd',
+    pathExists: async (targetPath: string) => !targetPath.includes('missing'),
 
     // v1.20.0: 사용자 폰트 — 개발 환경에선 stub (Electron dialog/fs 사용 불가)
     fontAdd: async () => {
@@ -520,6 +533,50 @@ export function installDevElectronAPI(): void {
     },
     supabaseDeleteScene: async () => {},
     supabaseUpdateSceneStage: async () => {},
+    supabaseReadSceneWorkLinks: async (sceneUuids?: string[]) => {
+      const links = getMockSceneWorkLinks();
+      if (!sceneUuids?.length) return links;
+      return links.filter((link) => sceneUuids.includes(link.sceneUuid));
+    },
+    supabaseUpsertSceneWorkLink: async (input) => {
+      const links = getMockSceneWorkLinks();
+      const now = new Date().toISOString();
+      const existing = links.find((link) =>
+        link.sceneUuid === input.sceneUuid
+        && link.department === input.department
+        && link.linkKind === input.linkKind
+      );
+      if (existing) {
+        existing.path = input.path.trim();
+        existing.label = input.label ?? null;
+        existing.sortOrder = input.sortOrder ?? 0;
+        existing.updatedBy = input.userId ?? null;
+        existing.updatedAt = now;
+        localStore.__sceneWorkLinks = links;
+        return existing;
+      }
+      const created: SceneWorkLink = {
+        id: createUuid(),
+        sceneUuid: input.sceneUuid,
+        department: input.department,
+        linkKind: input.linkKind,
+        path: input.path.trim(),
+        label: input.label ?? null,
+        sortOrder: input.sortOrder ?? 0,
+        createdBy: input.userId ?? null,
+        createdAt: now,
+        updatedBy: input.userId ?? null,
+        updatedAt: now,
+      };
+      links.push(created);
+      localStore.__sceneWorkLinks = links;
+      return created;
+    },
+    supabaseDeleteSceneWorkLink: async (sceneUuid, department, linkKind) => {
+      localStore.__sceneWorkLinks = getMockSceneWorkLinks().filter((link) =>
+        !(link.sceneUuid === sceneUuid && link.department === department && link.linkKind === linkKind)
+      );
+    },
     supabaseBulkUpdateSceneStages: async (updates) => updates.map((u) => ({ sceneUuid: u.sceneUuid, success: true })),
     supabaseBulkDeleteScenes: async (sceneUuids) => sceneUuids.map((id) => ({ sceneUuid: id, success: true })),
     supabaseBulkUpdateSceneFields: async (updates) => updates.map((u) => ({ sceneUuid: u.sceneUuid, success: true })),

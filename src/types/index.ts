@@ -148,6 +148,23 @@ export interface CompositingState {
 
 // ─── 씬 ──────────────────────────────────────
 
+export type SceneWorkLinkDepartment = 'bg' | 'acting';
+export type SceneWorkLinkKind = 'folder' | 'primary_file' | 'extra_file';
+
+export interface SceneWorkLink {
+  id: string;
+  sceneUuid: string;
+  department: SceneWorkLinkDepartment;
+  linkKind: SceneWorkLinkKind;
+  path: string;
+  label: string | null;
+  sortOrder: number;
+  createdBy: string | null;
+  createdAt: string;
+  updatedBy: string | null;
+  updatedAt: string;
+}
+
 export interface Scene {
   id?: string;   // Supabase UUID (Sheets 모드에서는 undefined)
   no: number;
@@ -701,6 +718,10 @@ export interface UpdateInfo {
 export interface ElectronAPI {
   getDataPath: () => Promise<string>;
   shellShowItem?: (filePath: string) => Promise<{ ok: boolean; error?: string }>;
+  shellOpenPath?: (targetPath: string) => Promise<{ ok: boolean; error?: string }>;
+  chooseFolderPath?: () => Promise<string | null>;
+  chooseFilePath?: () => Promise<string | null>;
+  pathExists?: (targetPath: string) => Promise<boolean>;
   /** 외부 URL 을 기본 브라우저로 열기 (메모 링크 전용) */
   openExternal?: (url: string) => Promise<{ ok: boolean; error?: string }>;
 
@@ -808,6 +829,21 @@ export interface ElectronAPI {
     workRound: number,
     feedbackRound: number,
     updatedBy?: string,
+  ) => Promise<void>;
+  supabaseReadSceneWorkLinks: (sceneUuids?: string[]) => Promise<SceneWorkLink[]>;
+  supabaseUpsertSceneWorkLink: (input: {
+    sceneUuid: string;
+    department: SceneWorkLinkDepartment;
+    linkKind: SceneWorkLinkKind;
+    path: string;
+    label?: string | null;
+    sortOrder?: number;
+    userId?: string | null;
+  }) => Promise<SceneWorkLink>;
+  supabaseDeleteSceneWorkLink: (
+    sceneUuid: string,
+    department: SceneWorkLinkDepartment,
+    linkKind: 'folder' | 'primary_file',
   ) => Promise<void>;
   /** v1.25.0~ 액팅 피드백 알림 디스패치 — 다른 클라이언트에 broadcast */
   supabaseDispatchFeedbackNotification: (payload: {

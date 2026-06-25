@@ -182,6 +182,33 @@ export interface SupabaseRevision {
   finalResolvedAt: string | undefined;
 }
 
+export type SceneWorkLinkDepartment = 'bg' | 'acting';
+export type SceneWorkLinkKind = 'folder' | 'primary_file' | 'extra_file';
+
+export interface SceneWorkLinkInput {
+  sceneUuid: string;
+  department: SceneWorkLinkDepartment;
+  linkKind: SceneWorkLinkKind;
+  path: string;
+  label?: string | null;
+  sortOrder?: number;
+  userId?: string | null;
+}
+
+export interface SupabaseSceneWorkLink {
+  id: string;
+  sceneUuid: string;
+  department: SceneWorkLinkDepartment;
+  linkKind: SceneWorkLinkKind;
+  path: string;
+  label: string | null;
+  sortOrder: number;
+  createdBy: string | null;
+  createdAt: string;
+  updatedBy: string | null;
+  updatedAt: string;
+}
+
 // ─── 헬퍼 ──────────────────────────────────────
 
 /** 에피소드 번호 → "EP01" 형식 */
@@ -2154,6 +2181,135 @@ export async function deleteRevisionSet(id: string): Promise<void> {
   const { error } = await supabase.from('comp_revision_sets').delete().eq('id', id);
   throwIfError(error);
   broadcastDataChange('comp_revision_sets', 'DELETE');
+}
+
+// ═══════════════════════════════════════════════
+// SCENE WORK LINKS
+// ═══════════════════════════════════════════════
+
+const SCENE_WORK_LINK_SELECT =
+  'id, scene_uuid, department, link_kind, path, label, sort_order, created_by, created_at, updated_by, updated_at';
+
+function mapSceneWorkLinkRow(row: Record<string, unknown>): SupabaseSceneWorkLink {
+  const department = row.department === 'acting' ? 'acting' : 'bg';
+  const rawKind = row.link_kind;
+  const linkKind: SceneWorkLinkKind =
+    rawKind === 'primary_file' ? 'primary_file' : rawKind === 'extra_file' ? 'extra_file' : 'folder';
+  return {
+    id: String(row.id ?? ''),
+    sceneUuid: String(row.scene_uuid ?? ''),
+    department,
+    linkKind,
+    path: String(row.path ?? ''),
+    label: typeof row.label === 'string' ? row.label : null,
+    sortOrder: Number(row.sort_order ?? 0) || 0,
+    createdBy: typeof row.created_by === 'string' ? row.created_by : null,
+    createdAt: String(row.created_at ?? ''),
+    updatedBy: typeof row.updated_by === 'string' ? row.updated_by : null,
+    updatedAt: String(row.updated_at ?? ''),
+  };
+}
+
+export async function readSceneWorkLinks(sceneUuids?: string[]): Promise<SupabaseSceneWorkLink[]> {
+  let query = supabase
+    .from('scene_work_links')
+    .select(SCENE_WORK_LINK_SELECT)
+    .order('sort_order', { ascending: true })
+    .order('updated_at', { ascending: false });
+
+  if (sceneUuids && sceneUuids.length > 0) {
+    query = query.in('scene_uuid', Array.from(new Set(sceneUuids.filter(Boolean))));
+  }
+
+  const { data, error } = await query;
+  throwIfError(error);
+  return (data || []).map((row) => mapSceneWorkLinkRow(row as Record<string, unknown>));
+}
+
+async function findSceneWorkLinkSlot(input: SceneWorkLinkInput): Promise<{ id: string } | null> {
+  const { data, error } = await supabase
+    .from('scene_work_links')
+    .select('id')
+    .eq('scene_uuid', input.sceneUuid)
+    .eq('department', input.department)
+    .eq('link_kind', input.linkKind)
+    .limit(1)
+    .maybeSingle();
+  throwIfError(error);
+  return data ? { id: String(data.id) } : null;
+}
+
+async function updateSceneWorkLinkSlot(id: string, input: SceneWorkLinkInput): Promise<SupabaseSceneWorkLink> {
+  const { data, error } = await supabase
+    .from('scene_work_links')
+    .update({
+      path: input.path.trim(),
+      label: input.label ?? null,
+      sort_order: input.sortOrder ?? 0,
+      updated_by: input.userId ?? null,
+    })
+    .eq('id', id)
+    .select(SCENE_WORK_LINK_SELECT)
+    .single();
+  throwIfError(error);
+  return mapSceneWorkLinkRow(data as Record<string, unknown>);
+}
+
+export async function upsertSceneWorkLink(input: SceneWorkLinkInput): Promise<SupabaseSceneWorkLink> {
+  if (!input.sceneUuid) throw new Error('sceneUuid is required');
+  if (!input.path.trim()) throw new Error('path is required');
+
+  if (input.linkKind !== 'extra_file') {
+    const existing = await findSceneWorkLinkSlot(input);
+    if (existing?.id) {
+      const updated = await updateSceneWorkLinkSlot(existing.id, input);
+      broadcastDataChange('scene_work_links', 'UPDATE', input.userId ?? undefined);
+      return updated;
+    }
+  }
+
+  const { data, error } = await supabase
+    .from('scene_work_links')
+    .insert({
+      scene_uuid: input.sceneUuid,
+      department: input.department,
+      link_kind: input.linkKind,
+      path: input.path.trim(),
+      label: input.label ?? null,
+      sort_order: input.sortOrder ?? 0,
+      created_by: input.userId ?? null,
+      updated_by: input.userId ?? null,
+    })
+    .select(SCENE_WORK_LINK_SELECT)
+    .single();
+
+  if (error && input.linkKind !== 'extra_file' && isDuplicateKeyError(error)) {
+    const existing = await findSceneWorkLinkSlot(input);
+    if (existing?.id) {
+      const updated = await updateSceneWorkLinkSlot(existing.id, input);
+      broadcastDataChange('scene_work_links', 'UPDATE', input.userId ?? undefined);
+      return updated;
+    }
+  }
+
+  throwIfError(error);
+  broadcastDataChange('scene_work_links', 'INSERT', input.userId ?? undefined);
+  return mapSceneWorkLinkRow(data as Record<string, unknown>);
+}
+
+export async function deleteSceneWorkLink(
+  sceneUuid: string,
+  department: SceneWorkLinkDepartment,
+  linkKind: 'folder' | 'primary_file',
+): Promise<void> {
+  const { error } = await supabase
+    .from('scene_work_links')
+    .delete()
+    .eq('scene_uuid', sceneUuid)
+    .eq('department', department)
+    .eq('link_kind', linkKind);
+  throwIfError(error);
+  broadcastDataChange('scene_work_links', 'DELETE');
 }
 
 // ═══════════════════════════════════════════════

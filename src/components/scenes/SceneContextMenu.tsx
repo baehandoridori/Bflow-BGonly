@@ -11,7 +11,9 @@
  */
 
 import { useEffect, useRef } from 'react';
+import { File, Folder } from 'lucide-react';
 import { LengthIcon } from './LengthIcon';
+import type { SceneWorkLink } from '@/types';
 
 export interface SceneContextMenuProps {
   x: number;
@@ -19,9 +21,19 @@ export interface SceneContextMenuProps {
   current: 'LD' | 'SD' | null | undefined;
   onSelect: (value: 'LD' | 'SD' | null) => void;
   onClose: () => void;
+  sceneLabel?: string;
+  workLinks?: {
+    episodeName?: string;
+    departments: Array<{
+      department: 'bg' | 'acting';
+      folder?: SceneWorkLink;
+      primaryFile?: SceneWorkLink;
+    }>;
+    onOpen: (link: SceneWorkLink) => void;
+  };
 }
 
-export function SceneContextMenu({ x, y, current, onSelect, onClose }: SceneContextMenuProps) {
+export function SceneContextMenu({ x, y, current, onSelect, onClose, sceneLabel, workLinks }: SceneContextMenuProps) {
   const ref = useRef<HTMLDivElement>(null);
 
   // 외부 클릭/Esc 닫기
@@ -42,9 +54,9 @@ export function SceneContextMenu({ x, y, current, onSelect, onClose }: SceneCont
 
   // 화면 경계 자동 보정 — 메뉴가 잘리지 않게
   const menuWidth = 220;
-  const menuHeight = 168;
-  const adjustedX = Math.min(x, window.innerWidth - menuWidth - 8);
-  const adjustedY = Math.min(y, window.innerHeight - menuHeight - 8);
+  const menuHeight = workLinks ? 376 : 168;
+  const adjustedX = Math.max(4, Math.min(x, window.innerWidth - menuWidth - 8));
+  const adjustedY = Math.max(4, Math.min(y, window.innerHeight - menuHeight - 8));
 
   return (
     <div
@@ -63,6 +75,34 @@ export function SceneContextMenu({ x, y, current, onSelect, onClose }: SceneCont
       onClick={(e) => e.stopPropagation()}
       onMouseDown={(e) => e.stopPropagation()}
     >
+      {workLinks && (
+        <>
+          <div className="px-2.5 py-1.5 text-[10px] font-bold text-text-secondary uppercase tracking-wider">
+            작업 링크
+          </div>
+          {(workLinks.episodeName || sceneLabel) && (
+            <div className="mx-1.5 mb-1 rounded-md bg-bg-primary/65 px-2 py-1 text-[11px] text-text-secondary">
+              {[workLinks.episodeName, sceneLabel].filter(Boolean).join(' · ')}
+            </div>
+          )}
+          <div className="space-y-1">
+            {workLinks.departments.map((item) => (
+              <WorkLinkDepartmentMenu
+                key={item.department}
+                department={item.department}
+                folder={item.folder}
+                primaryFile={item.primaryFile}
+                onOpen={(link) => {
+                  workLinks.onOpen(link);
+                  onClose();
+                }}
+              />
+            ))}
+          </div>
+          <div className="h-px bg-bg-border/60 mx-1.5 my-1.5" />
+        </>
+      )}
+
       <div className="px-2.5 py-1.5 text-[10px] font-bold text-text-secondary uppercase tracking-wider">
         씬 길이 변경
       </div>
@@ -101,6 +141,72 @@ export function SceneContextMenu({ x, y, current, onSelect, onClose }: SceneCont
         길이 변경 표시 해제
       </MenuItem>
     </div>
+  );
+}
+
+function WorkLinkDepartmentMenu({
+  department,
+  folder,
+  primaryFile,
+  onOpen,
+}: {
+  department: 'bg' | 'acting';
+  folder?: SceneWorkLink;
+  primaryFile?: SceneWorkLink;
+  onOpen: (link: SceneWorkLink) => void;
+}) {
+  const label = department === 'bg' ? '배경' : '액팅';
+  const tone = department === 'bg' ? 'text-accent-sub' : 'text-[#F09A87]';
+  return (
+    <div>
+      <div className={`px-2.5 py-0.5 text-[10.5px] font-bold ${tone}`}>{label}</div>
+      <WorkLinkMenuItem
+        icon={<Folder size={13} aria-hidden />}
+        label="작업 폴더 열기"
+        link={folder}
+        onOpen={onOpen}
+      />
+      <WorkLinkMenuItem
+        icon={<File size={13} aria-hidden />}
+        label="작업 파일 열기"
+        link={primaryFile}
+        onOpen={onOpen}
+      />
+    </div>
+  );
+}
+
+function WorkLinkMenuItem({
+  icon,
+  label,
+  link,
+  onOpen,
+}: {
+  icon: React.ReactNode;
+  label: string;
+  link?: SceneWorkLink;
+  onOpen: (link: SceneWorkLink) => void;
+}) {
+  return (
+    <button
+      role="menuitem"
+      disabled={!link}
+      onClick={(e) => {
+        if (!link) return;
+        e.stopPropagation();
+        onOpen(link);
+      }}
+      className={[
+        'w-full flex items-center gap-2.5 px-2.5 py-1.5 rounded-md text-[12px] text-left transition-colors',
+        link
+          ? 'text-text-primary hover:bg-accent/10 hover:text-accent cursor-pointer'
+          : 'text-text-secondary/35 cursor-not-allowed',
+      ].join(' ')}
+    >
+      <span className="inline-flex w-[22px] justify-center flex-shrink-0">{icon}</span>
+      <span className="min-w-0 flex-1 truncate">{label}</span>
+      {!link && <span className="text-[10px] text-text-secondary/35">파일 탭에서 연결</span>}
+    </button>
   );
 }
 

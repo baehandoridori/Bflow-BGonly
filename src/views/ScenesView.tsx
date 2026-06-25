@@ -791,6 +791,7 @@ import type { BatchAction } from '@/services/supabaseService';
 import type { BulkStageUpdate, BulkFieldUpdate, BulkUpdateResult } from '@/types';
 import { ConfirmDialog } from '@/components/common/ConfirmDialog';
 import { useBulkOperationsStore } from '@/stores/useBulkOperationsStore';
+import { useSceneWorkLinkStore } from '@/stores/useSceneWorkLinkStore';
 import {
   runBulkOp,
   resolveSelectedUuids,
@@ -3566,6 +3567,19 @@ export function ScenesView() {
 
   // 전체 진행도 (필터 기준)
   const activeScenes = selectedDepartment === 'all' ? allModeScenes : scenes;
+  const visibleWorkLinkSceneUuidKey = useMemo(() => {
+    const ids = activeScenes
+      .map((scene) => scene.id)
+      .filter((id): id is string => Boolean(id));
+    return Array.from(new Set(ids)).sort().join('|');
+  }, [activeScenes]);
+  useEffect(() => {
+    if (!visibleWorkLinkSceneUuidKey) return;
+    const uuids = visibleWorkLinkSceneUuidKey.split('|').filter(Boolean);
+    void useSceneWorkLinkStore.getState().loadForSceneUuids(uuids).catch((err) => {
+      console.warn('[SceneWorkLinks] 로드 실패', err);
+    });
+  }, [visibleWorkLinkSceneUuidKey]);
   const totalChecks = activeScenes.length * 4;
   const doneChecks = activeScenes.reduce(
     (sum, s) => sum + [s.lo, s.done, s.review, s.png].filter(Boolean).length,
