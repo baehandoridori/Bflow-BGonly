@@ -10,6 +10,7 @@ import {
   applySceneWorkLinkRealtimeRows,
   buildSceneWorkLinkMap,
   getWorkLinkSlotKey,
+  mapSceneWorkLinkRow,
   mergeSceneWorkLinkLoadResult,
 } from '@/utils/sceneWorkLinks';
 
@@ -46,6 +47,23 @@ function markSlotTouched(input: {
 }) {
   mutationSequence += 1;
   touchedSlotSequences.set(getWorkLinkSlotKey(input.sceneUuid, input.department, input.linkKind), mutationSequence);
+}
+
+function markRealtimeSlotTouched(
+  row: Record<string, unknown>,
+  eventType: string,
+  currentLinks: SceneWorkLink[],
+) {
+  const rowSceneUuid = row.scene_uuid ?? row.sceneUuid;
+  if (rowSceneUuid) {
+    markSlotTouched(mapSceneWorkLinkRow(row));
+    return;
+  }
+
+  if (eventType !== 'DELETE') return;
+  const rowId = String(row.id ?? '');
+  const existing = currentLinks.find((link) => link.id === rowId);
+  if (existing) markSlotTouched(existing);
 }
 
 function getTouchedSlotKeysAfter(sequence: number): Set<string> {
@@ -141,6 +159,7 @@ export const useSceneWorkLinkStore = create<SceneWorkLinkState>((set, get) => ({
     if (!p?.eventType) return;
     const row = p.eventType === 'DELETE' ? p.old : p.new;
     if (!row) return;
+    markRealtimeSlotTouched(row, p.eventType, get().links);
     set(withMap(applySceneWorkLinkRealtimeRows(get().links, { eventType: p.eventType, row })));
   },
 
