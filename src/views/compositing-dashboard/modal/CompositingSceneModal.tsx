@@ -20,7 +20,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Layers } from 'lucide-react';
 import { toast as sonnerToast } from 'sonner';
 import { cn } from '@/utils/cn';
-import type { MergedScene, Scene, Stage, ScenePhaseState, CompositingStatus } from '@/types';
+import type { MergedScene, Stage, ScenePhaseState, CompositingStatus } from '@/types';
 import {
   COMPOSITING_STATUS_LABEL,
   COMPOSITING_STATUS_ORDER,
@@ -31,6 +31,10 @@ import { useAuthStore } from '@/stores/useAuthStore';
 import { useCompositingDashboardStore } from '@/stores/useCompositingDashboardStore';
 import { UnifiedSceneDetailModal } from '@/components/scenes/UnifiedSceneDetailModal';
 import { updateSceneFieldInSupabase, updateSceneStageInSupabase } from '@/services/supabaseService';
+import {
+  buildSequentialStagePatch,
+  getChangedSequentialStages,
+} from '@/utils/sceneStageProgression';
 import { resolveReferenceMergedScene } from '@/utils/sceneReference';
 import { navigateToHashTarget } from '@/utils/hashNavigation';
 import type { HashTarget } from '@/utils/hashEntity';
@@ -169,21 +173,31 @@ export function CompositingSceneModal({ sceneKey, episodeNumber, isCompositor }:
 
   // ── BG/ACT 단계 토글 — 정상 시트 데이터 변경 (낙관적 + Supabase) ──
   // 코덱스 11차 P1 (2026-05-22): Supabase 실패 시 낙관적 토글을 복원해야 함.
-  //   - toggleSceneStage 는 토글이므로 다시 호출하면 이전 값으로 복귀.
+  //   - BG 단계는 순차 진행이라 목표 단계 기준으로 이전/이후 단계를 함께 정규화.
   //   - 실패 토스트만 띄우고 store 상태는 잘못된 값으로 남아 사용자가 계속 작업하는 문제 fix.
   const handleToggle = useCallback((sheetName: string, sceneIdArg: string, stage: Stage) => {
     if (!currentUser) return;
     const store = useDataStore.getState();
-    store.toggleSceneStage(sheetName, sceneIdArg, stage as 'lo' | 'done' | 'review' | 'png');
-    // 새 값 계산 (낙관적 토글 후) — 참조 패널이 다른 화의 씬일 수 있어, 메인 화에 가두지 않고
-    //   전체 episodes 에서 sheetName 으로 파트를 찾는다(sheetName 은 전역 유니크 — ScenesView 동일). 안 그러면 저장이 누락됨.
+    // 참조 패널이 다른 화의 씬일 수 있어, 메인 화에 가두지 않고 전체 episodes 에서 sheetName 으로 파트를 찾는다.
     const part = useDataStore.getState().episodes.flatMap((e) => e.parts).find((p) => p.sheetName === sheetName);
     const sc = part?.scenes.find((s) => s.sceneId === sceneIdArg);
     if (!sc?.id) return;
-    const newValue = Boolean(sc[stage as keyof Scene]);
-    updateSceneStageInSupabase(sc.id, stage, newValue).catch((err) => {
-      // 롤백 — 토글 다시 호출하면 이전 값으로 복귀.
-      useDataStore.getState().toggleSceneStage(sheetName, sceneIdArg, stage as 'lo' | 'done' | 'review' | 'png');
+    const stagePatch = buildSequentialStagePatch(sc, stage);
+    const changedStages = getChangedSequentialStages(sc, stagePatch);
+    if (changedStages.length === 0) return;
+
+    store.updateSceneByUuid(sc.id, stagePatch);
+    Promise.all(
+      changedStages.map((changedStage) =>
+        updateSceneStageInSupabase(sc.id!, changedStage, stagePatch[changedStage], currentUser.id),
+      ),
+    ).catch((err) => {
+      useDataStore.getState().updateSceneByUuid(sc.id!, {
+        lo: sc.lo,
+        done: sc.done,
+        review: sc.review,
+        png: sc.png,
+      });
       sonnerToast.error(`단계 변경 실패: ${err instanceof Error ? err.message : String(err)}`);
     });
   }, [currentUser, episodeNumber]);

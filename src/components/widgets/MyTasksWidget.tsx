@@ -14,6 +14,11 @@ import { DEPARTMENT_CONFIGS, STAGES } from '@/types';
 import type { Stage, Scene, Episode, Department } from '@/types';
 import { cn } from '@/utils/cn';
 import { createUuid } from '@/utils/createUuid';
+import {
+  buildSequentialStagePatch,
+  getChangedSequentialStages,
+  isSequentialStageComplete,
+} from '@/utils/sceneStageProgression';
 import { updateEvent as updateCalEvent, deleteEvent as deleteCalEvent, addEvent as addCalEvent, findEventByTodoId } from '@/services/calendarService';
 import * as supabaseService from '@/services/supabaseService';
 
@@ -993,7 +998,6 @@ function TabBar({
 export function MyTasksWidget() {
   const episodes = useDashboardEpisodes();
   const episodeTitles = useDataStore((s) => s.episodeTitles);
-  const toggleSceneStage = useDataStore((s) => s.toggleSceneStage);
   const updateSceneFieldOptimistic = useDataStore((s) => s.updateSceneFieldOptimistic);
   const currentUser = useAuthStore((s) => s.currentUser);
   const isPopup = useContext(IsPopupContext);
@@ -1262,16 +1266,21 @@ export function MyTasksWidget() {
   // 토글 핸들러
   const handleToggle = useCallback(async (flat: FlatScene, stage: Stage) => {
     const { sheetName, scene, sceneIndex } = flat;
-    const newValue = !scene[stage];
+    const stagePatch = buildSequentialStagePatch(scene, stage);
+    const changedStages = getChangedSequentialStages(scene, stagePatch);
+    if (changedStages.length === 0) return;
 
-    toggleSceneStage(sheetName, scene.sceneId, stage);
+    changedStages.forEach((changedStage) => {
+      updateSceneFieldOptimistic(sheetName, sceneIndex, changedStage, String(stagePatch[changedStage]));
+    });
 
     const completionMeta = (() => {
       const prevCompletedBy = scene.completedBy ?? '';
       const prevCompletedAt = scene.completedAt ?? '';
-      if (newValue) {
-        const afterToggle = { ...scene, [stage]: true };
-        if (!afterToggle.lo || !afterToggle.done || !afterToggle.review || !afterToggle.png) return null;
+      const wasAllDone = isSequentialStageComplete(scene);
+      const willBeAllDone = isSequentialStageComplete(stagePatch);
+
+      if (!wasAllDone && willBeAllDone) {
         return {
           nextCompletedBy: currentUser?.name ?? '알 수 없음',
           nextCompletedAt: new Date().toISOString(),
@@ -1279,6 +1288,7 @@ export function MyTasksWidget() {
           prevCompletedAt,
         };
       }
+      if (!wasAllDone || willBeAllDone) return null;
       if (!prevCompletedBy && !prevCompletedAt) return null;
       return {
         nextCompletedBy: '',
@@ -1295,7 +1305,9 @@ export function MyTasksWidget() {
 
     try {
       const { updateCell, updateSceneCompletionMeta } = await import('@/services/supabaseService');
-      await updateCell(sheetName, sceneIndex, stage, newValue, currentUser?.id);
+      for (const changedStage of changedStages) {
+        await updateCell(sheetName, sceneIndex, changedStage, stagePatch[changedStage], currentUser?.id);
+      }
       if (completionMeta) {
         await updateSceneCompletionMeta(
           sheetName,
@@ -1311,13 +1323,15 @@ export function MyTasksWidget() {
       notifyChange();
     } catch (err) {
       console.error('[MyTasks 토글 실패]', err);
-      toggleSceneStage(sheetName, scene.sceneId, stage);
+      changedStages.forEach((changedStage) => {
+        updateSceneFieldOptimistic(sheetName, sceneIndex, changedStage, String(Boolean(scene[changedStage])));
+      });
       if (completionMeta) {
         updateSceneFieldOptimistic(sheetName, sceneIndex, 'completedBy', completionMeta.prevCompletedBy);
         updateSceneFieldOptimistic(sheetName, sceneIndex, 'completedAt', completionMeta.prevCompletedAt);
       }
     }
-  }, [toggleSceneStage, updateSceneFieldOptimistic, currentUser, notifyChange]);
+  }, [updateSceneFieldOptimistic, currentUser, notifyChange]);
 
   // 인라인 필드 편집
   const handleEditField = useCallback(async (flat: FlatScene, field: string, value: string) => {

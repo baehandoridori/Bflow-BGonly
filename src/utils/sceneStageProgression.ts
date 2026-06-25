@@ -9,11 +9,16 @@ export function buildSequentialStagePatch(
   scene: SequentialStageSnapshot,
   targetStage: Stage,
 ): SequentialStagePatch {
+  const targetIndex = SEQUENTIAL_STAGE_ORDER.indexOf(targetStage);
+  const targetWasDone = Boolean(scene[targetStage]);
+
   return Object.fromEntries(
-    SEQUENTIAL_STAGE_ORDER.map((stage) => [
-      stage,
-      stage === targetStage ? !scene[targetStage] : Boolean(scene[stage]),
-    ]),
+    SEQUENTIAL_STAGE_ORDER.map((stage, index) => {
+      const stageIsDone = targetWasDone
+        ? index < targetIndex
+        : index <= targetIndex;
+      return [stage, stageIsDone];
+    }),
   ) as SequentialStagePatch;
 }
 
