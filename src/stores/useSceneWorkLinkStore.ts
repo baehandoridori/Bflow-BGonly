@@ -138,6 +138,7 @@ export const useSceneWorkLinkStore = create<SceneWorkLinkState>((set, get) => ({
 
     try {
       const saved = await upsertSceneWorkLink(input);
+      if (wasSlotTouchedAfter(input, touchedAt)) return;
       const replaced = get().links.filter((link) =>
         !(link.sceneUuid === input.sceneUuid
           && link.department === input.department
