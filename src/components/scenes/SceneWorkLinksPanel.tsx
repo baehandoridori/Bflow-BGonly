@@ -23,6 +23,7 @@ import {
 } from '@/services/sceneWorkLinkService';
 import { cn } from '@/utils/cn';
 import {
+  getUniqueSceneUuids,
   getSceneWorkLinkSlots,
   getWorkLinkWarnings,
   type WorkLinkWarning,
@@ -60,10 +61,23 @@ export function SceneWorkLinksPanel({
   visibleDepartments,
 }: SceneWorkLinksPanelProps) {
   const linkMap = useSceneWorkLinkStore((state) => state.linkMap);
+  const loadForSceneUuids = useSceneWorkLinkStore((state) => state.loadForSceneUuids);
   const departments = useMemo(
     () => visibleDepartments.filter((dept, index, arr) => arr.indexOf(dept) === index),
     [visibleDepartments],
   );
+  const sceneUuidKey = useMemo(
+    () => getUniqueSceneUuids([bgScene, actScene]).join('|'),
+    [actScene, bgScene],
+  );
+
+  useEffect(() => {
+    if (!sceneUuidKey) return;
+    const sceneUuids = sceneUuidKey.split('|').filter(Boolean);
+    void loadForSceneUuids(sceneUuids).catch((err) => {
+      console.warn('[SceneWorkLinks] 패널 링크 로드 실패', err);
+    });
+  }, [loadForSceneUuids, sceneUuidKey]);
 
   if (departments.length === 0) return null;
 
