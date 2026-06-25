@@ -1331,6 +1331,7 @@ export function MyTasksWidget() {
 
     const queuedSave = enqueueSequentialStageSave(stageSaveQueueRef.current, saveQueueKey, async () => {
       const previousBaseline = stageSaveBaselineRef.current.get(saveQueueKey) ?? createStageSaveBaseline(scene);
+      const queuedChangedStages = getChangedSequentialStages(previousBaseline, stagePatch);
       const queuedCompletionMeta = buildCompletionMeta(previousBaseline);
 
       SEQUENTIAL_STAGE_ORDER.forEach((changedStage) => {
@@ -1341,11 +1342,15 @@ export function MyTasksWidget() {
         updateSceneFieldOptimistic(sheetName, sceneIndex, 'completedAt', queuedCompletionMeta.nextCompletedAt);
       }
 
+      if (queuedChangedStages.length === 0 && !queuedCompletionMeta) return;
+
       try {
         const { updateCell, updateSceneCompletionMeta } = await import('@/services/supabaseService');
-        await persistSequentialStagePatchWithRollback([...SEQUENTIAL_STAGE_ORDER], stagePatch, previousBaseline, (changedStage, value) =>
-          updateCell(sheetName, sceneIndex, changedStage, value, currentUser?.id),
-        );
+        if (queuedChangedStages.length > 0) {
+          await persistSequentialStagePatchWithRollback(queuedChangedStages, stagePatch, previousBaseline, (changedStage, value) =>
+            updateCell(sheetName, sceneIndex, changedStage, value, currentUser?.id),
+          );
+        }
         if (queuedCompletionMeta) {
           await updateSceneCompletionMeta(
             sheetName,

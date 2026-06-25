@@ -36,7 +36,6 @@ import {
   enqueueSequentialStageSave,
   getChangedSequentialStages,
   persistSequentialStagePatchWithRollback,
-  SEQUENTIAL_STAGE_ORDER,
   snapshotSequentialStages,
 } from '@/utils/sceneStageProgression';
 import type { SequentialStagePatch } from '@/utils/sceneStageProgression';
@@ -199,9 +198,11 @@ export function CompositingSceneModal({ sceneKey, episodeNumber, isCompositor }:
     store.updateSceneByUuid(sc.id, stagePatch);
     const queuedSave = enqueueSequentialStageSave(stageSaveQueueRef.current, sc.id, async () => {
       const previousBaseline = stageSaveBaselineRef.current.get(sc.id!) ?? snapshotSequentialStages(sc);
+      const queuedChangedStages = getChangedSequentialStages(previousBaseline, stagePatch);
       store.updateSceneByUuid(sc.id!, stagePatch);
+      if (queuedChangedStages.length === 0) return;
       try {
-        await persistSequentialStagePatchWithRollback([...SEQUENTIAL_STAGE_ORDER], stagePatch, previousBaseline, (changedStage, value) =>
+        await persistSequentialStagePatchWithRollback(queuedChangedStages, stagePatch, previousBaseline, (changedStage, value) =>
           updateSceneStageInSupabase(sc.id!, changedStage, value, currentUser.id),
         );
         stageSaveBaselineRef.current.set(sc.id!, { ...stagePatch });
