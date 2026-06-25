@@ -33,6 +33,12 @@ export function isSequentialStageComplete(scene: SequentialStageSnapshot): boole
   return SEQUENTIAL_STAGE_ORDER.every((stage) => Boolean(scene[stage]));
 }
 
+export function snapshotSequentialStages(scene: SequentialStageSnapshot): SequentialStagePatch {
+  return Object.fromEntries(
+    SEQUENTIAL_STAGE_ORDER.map((stage) => [stage, Boolean(scene[stage])]),
+  ) as SequentialStagePatch;
+}
+
 export async function persistSequentialStagePatchWithRollback(
   changedStages: Stage[],
   patch: SequentialStagePatch,

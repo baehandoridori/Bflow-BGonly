@@ -36,7 +36,10 @@ import {
   enqueueSequentialStageSave,
   getChangedSequentialStages,
   persistSequentialStagePatchWithRollback,
+  SEQUENTIAL_STAGE_ORDER,
+  snapshotSequentialStages,
 } from '@/utils/sceneStageProgression';
+import type { SequentialStagePatch } from '@/utils/sceneStageProgression';
 import { resolveReferenceMergedScene } from '@/utils/sceneReference';
 import { navigateToHashTarget } from '@/utils/hashNavigation';
 import type { HashTarget } from '@/utils/hashEntity';
@@ -58,6 +61,7 @@ export function CompositingSceneModal({ sceneKey, episodeNumber, isCompositor }:
   const getEpisodeDisplayName = useDataStore((s) => s.getEpisodeDisplayName);
   const currentUser = useAuthStore((s) => s.currentUser);
   const stageSaveQueueRef = useRef<Map<string, Promise<void>>>(new Map());
+  const stageSaveBaselineRef = useRef<Map<string, SequentialStagePatch>>(new Map());
 
   const sceneId = sceneKey.split(':').slice(1).join(':');
   const ep = episodes.find((e) => e.episodeNumber === episodeNumber);
@@ -188,22 +192,33 @@ export function CompositingSceneModal({ sceneKey, episodeNumber, isCompositor }:
     const stagePatch = buildSequentialStagePatch(sc, stage);
     const changedStages = getChangedSequentialStages(sc, stagePatch);
     if (changedStages.length === 0) return;
+    if (!stageSaveQueueRef.current.has(sc.id) && !stageSaveBaselineRef.current.has(sc.id)) {
+      stageSaveBaselineRef.current.set(sc.id, snapshotSequentialStages(sc));
+    }
 
     store.updateSceneByUuid(sc.id, stagePatch);
-    enqueueSequentialStageSave(stageSaveQueueRef.current, sc.id, async () => {
+    const queuedSave = enqueueSequentialStageSave(stageSaveQueueRef.current, sc.id, async () => {
+      const previousBaseline = stageSaveBaselineRef.current.get(sc.id!) ?? snapshotSequentialStages(sc);
       store.updateSceneByUuid(sc.id!, stagePatch);
       try {
-        await persistSequentialStagePatchWithRollback(changedStages, stagePatch, sc, (changedStage, value) =>
+        await persistSequentialStagePatchWithRollback([...SEQUENTIAL_STAGE_ORDER], stagePatch, previousBaseline, (changedStage, value) =>
           updateSceneStageInSupabase(sc.id!, changedStage, value, currentUser.id),
         );
+        stageSaveBaselineRef.current.set(sc.id!, { ...stagePatch });
       } catch (err) {
+        stageSaveBaselineRef.current.set(sc.id!, previousBaseline);
         useDataStore.getState().updateSceneByUuid(sc.id!, {
-          lo: sc.lo,
-          done: sc.done,
-          review: sc.review,
-          png: sc.png,
+          lo: previousBaseline.lo,
+          done: previousBaseline.done,
+          review: previousBaseline.review,
+          png: previousBaseline.png,
         });
         sonnerToast.error(`단계 변경 실패: ${err instanceof Error ? err.message : String(err)}`);
+      }
+    });
+    queuedSave.finally(() => {
+      if (!stageSaveQueueRef.current.has(sc.id!)) {
+        stageSaveBaselineRef.current.delete(sc.id!);
       }
     });
   }, [currentUser]);

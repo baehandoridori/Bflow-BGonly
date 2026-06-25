@@ -211,12 +211,16 @@ test('task widget and compositing modal persist all changed background stages', 
 
   assert.match(myTasksWidget, /buildSequentialStagePatch\(scene, stage\)/);
   assert.match(myTasksWidget, /getChangedSequentialStages\(scene, stagePatch\)/);
+  assert.match(myTasksWidget, /stageSaveBaselineRef/);
+  assert.match(myTasksWidget, /persistSequentialStagePatchWithRollback\(\[\.\.\.SEQUENTIAL_STAGE_ORDER\]/);
   assert.match(myTasksWidget, /enqueueSequentialStageSave\(/);
   assert.match(myTasksWidget, /persistSequentialStagePatchWithRollback\(/);
   assert.doesNotMatch(myTasksWidget, /toggleSceneStage\(sheetName, scene\.sceneId, stage\)/);
 
   assert.match(compositingModal, /buildSequentialStagePatch\(sc, stage\)/);
   assert.match(compositingModal, /getChangedSequentialStages\(sc, stagePatch\)/);
+  assert.match(compositingModal, /stageSaveBaselineRef/);
+  assert.match(compositingModal, /persistSequentialStagePatchWithRollback\(\[\.\.\.SEQUENTIAL_STAGE_ORDER\]/);
   assert.match(compositingModal, /enqueueSequentialStageSave\(/);
   assert.match(compositingModal, /persistSequentialStagePatchWithRollback\(/);
   assert.doesNotMatch(compositingModal, /store\.toggleSceneStage\(sheetName, sceneIdArg, stage/);
