@@ -6,6 +6,7 @@ import path from 'node:path';
 
 import {
   buildSequentialStagePatch,
+  enqueueSequentialStageSave,
   getChangedSequentialStages,
   isSequentialStageComplete,
   persistSequentialStagePatchWithRollback,
@@ -128,6 +129,49 @@ test('stage persistence writes every changed stage once when all saves succeed',
   ]);
 });
 
+test('stage save queue serializes writes for the same scene', async () => {
+  const queue = new Map<string, Promise<void>>();
+  const order: string[] = [];
+  let releaseFirst!: () => void;
+  const firstBlocker = new Promise<void>((resolve) => {
+    releaseFirst = resolve;
+  });
+
+  const first = enqueueSequentialStageSave(queue, 'scene-1', async () => {
+    order.push('first-start');
+    await firstBlocker;
+    order.push('first-end');
+  });
+  const second = enqueueSequentialStageSave(queue, 'scene-1', async () => {
+    order.push('second');
+  });
+
+  await new Promise<void>((resolve) => setTimeout(resolve, 0));
+  assert.deepEqual(order, ['first-start']);
+
+  releaseFirst();
+  await Promise.all([first, second]);
+
+  assert.deepEqual(order, ['first-start', 'first-end', 'second']);
+  assert.equal(queue.has('scene-1'), false);
+});
+
+test('stage save queue lets different scenes write independently', async () => {
+  const queue = new Map<string, Promise<void>>();
+  const order: string[] = [];
+
+  await Promise.all([
+    enqueueSequentialStageSave(queue, 'scene-1', async () => {
+      order.push('first');
+    }),
+    enqueueSequentialStageSave(queue, 'scene-2', async () => {
+      order.push('second');
+    }),
+  ]);
+
+  assert.deepEqual(order.sort(), ['first', 'second']);
+});
+
 test('acting phase toggle does not render previous phases as completed steps', async () => {
   const phaseToggle = await readFile(path.join(process.cwd(), 'src', 'components', 'scenes', 'ScenePhaseToggle.tsx'), 'utf-8');
 
@@ -167,11 +211,13 @@ test('task widget and compositing modal persist all changed background stages', 
 
   assert.match(myTasksWidget, /buildSequentialStagePatch\(scene, stage\)/);
   assert.match(myTasksWidget, /getChangedSequentialStages\(scene, stagePatch\)/);
+  assert.match(myTasksWidget, /enqueueSequentialStageSave\(/);
   assert.match(myTasksWidget, /persistSequentialStagePatchWithRollback\(/);
   assert.doesNotMatch(myTasksWidget, /toggleSceneStage\(sheetName, scene\.sceneId, stage\)/);
 
   assert.match(compositingModal, /buildSequentialStagePatch\(sc, stage\)/);
   assert.match(compositingModal, /getChangedSequentialStages\(sc, stagePatch\)/);
+  assert.match(compositingModal, /enqueueSequentialStageSave\(/);
   assert.match(compositingModal, /persistSequentialStagePatchWithRollback\(/);
   assert.doesNotMatch(compositingModal, /store\.toggleSceneStage\(sheetName, sceneIdArg, stage/);
 });

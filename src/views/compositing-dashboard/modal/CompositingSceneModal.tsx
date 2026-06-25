@@ -16,7 +16,7 @@
  * spec: 2026-05-21-compositing-dashboard-design.md (9.x — layout 은 UnifiedSceneDetailModal 따름)
  */
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Layers } from 'lucide-react';
 import { toast as sonnerToast } from 'sonner';
 import { cn } from '@/utils/cn';
@@ -33,6 +33,7 @@ import { UnifiedSceneDetailModal } from '@/components/scenes/UnifiedSceneDetailM
 import { updateSceneFieldInSupabase, updateSceneStageInSupabase } from '@/services/supabaseService';
 import {
   buildSequentialStagePatch,
+  enqueueSequentialStageSave,
   getChangedSequentialStages,
   persistSequentialStagePatchWithRollback,
 } from '@/utils/sceneStageProgression';
@@ -56,6 +57,7 @@ export function CompositingSceneModal({ sceneKey, episodeNumber, isCompositor }:
   const episodeMemos = useDataStore((s) => s.episodeMemos);
   const getEpisodeDisplayName = useDataStore((s) => s.getEpisodeDisplayName);
   const currentUser = useAuthStore((s) => s.currentUser);
+  const stageSaveQueueRef = useRef<Map<string, Promise<void>>>(new Map());
 
   const sceneId = sceneKey.split(':').slice(1).join(':');
   const ep = episodes.find((e) => e.episodeNumber === episodeNumber);
@@ -188,18 +190,23 @@ export function CompositingSceneModal({ sceneKey, episodeNumber, isCompositor }:
     if (changedStages.length === 0) return;
 
     store.updateSceneByUuid(sc.id, stagePatch);
-    persistSequentialStagePatchWithRollback(changedStages, stagePatch, sc, (changedStage, value) =>
-      updateSceneStageInSupabase(sc.id!, changedStage, value, currentUser.id),
-    ).catch((err) => {
-      useDataStore.getState().updateSceneByUuid(sc.id!, {
-        lo: sc.lo,
-        done: sc.done,
-        review: sc.review,
-        png: sc.png,
-      });
-      sonnerToast.error(`단계 변경 실패: ${err instanceof Error ? err.message : String(err)}`);
+    enqueueSequentialStageSave(stageSaveQueueRef.current, sc.id, async () => {
+      store.updateSceneByUuid(sc.id!, stagePatch);
+      try {
+        await persistSequentialStagePatchWithRollback(changedStages, stagePatch, sc, (changedStage, value) =>
+          updateSceneStageInSupabase(sc.id!, changedStage, value, currentUser.id),
+        );
+      } catch (err) {
+        useDataStore.getState().updateSceneByUuid(sc.id!, {
+          lo: sc.lo,
+          done: sc.done,
+          review: sc.review,
+          png: sc.png,
+        });
+        sonnerToast.error(`단계 변경 실패: ${err instanceof Error ? err.message : String(err)}`);
+      }
     });
-  }, [currentUser, episodeNumber]);
+  }, [currentUser]);
 
   // ── 필드 업데이트 — 메모 / 담당자 / 이미지 URL 등 ──
   const handleFieldUpdate = useCallback((sheetName: string, sceneIndex: number, field: string, value: string) => {

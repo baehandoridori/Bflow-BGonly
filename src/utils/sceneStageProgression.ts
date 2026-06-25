@@ -52,3 +52,22 @@ export async function persistSequentialStagePatchWithRollback(
     throw err;
   }
 }
+
+export function enqueueSequentialStageSave(
+  queue: Map<string, Promise<void>>,
+  key: string,
+  operation: () => Promise<void>,
+): Promise<void> {
+  const previous = queue.get(key) ?? Promise.resolve();
+  let next: Promise<void>;
+  next = previous
+    .catch(() => {})
+    .then(operation)
+    .finally(() => {
+      if (queue.get(key) === next) {
+        queue.delete(key);
+      }
+    });
+  queue.set(key, next);
+  return next;
+}

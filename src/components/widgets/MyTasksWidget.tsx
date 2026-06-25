@@ -16,6 +16,7 @@ import { cn } from '@/utils/cn';
 import { createUuid } from '@/utils/createUuid';
 import {
   buildSequentialStagePatch,
+  enqueueSequentialStageSave,
   getChangedSequentialStages,
   isSequentialStageComplete,
   persistSequentialStagePatchWithRollback,
@@ -1003,6 +1004,7 @@ export function MyTasksWidget() {
   const currentUser = useAuthStore((s) => s.currentUser);
   const isPopup = useContext(IsPopupContext);
   const widgetId = useContext(WidgetIdContext);
+  const stageSaveQueueRef = useRef<Map<string, Promise<void>>>(new Map());
 
   // 데이터 변경 알림: 팝업에서는 쿨다운 래퍼, 대시보드에서는 직접 호출
   const notifyChange = useCallback(async () => {
@@ -1304,34 +1306,41 @@ export function MyTasksWidget() {
       updateSceneFieldOptimistic(sheetName, sceneIndex, 'completedAt', completionMeta.nextCompletedAt);
     }
 
-    try {
-      const { updateCell, updateSceneCompletionMeta } = await import('@/services/supabaseService');
-      await persistSequentialStagePatchWithRollback(changedStages, stagePatch, scene, (changedStage, value) =>
-        updateCell(sheetName, sceneIndex, changedStage, value, currentUser?.id),
-      );
-      if (completionMeta) {
-        await updateSceneCompletionMeta(
-          sheetName,
-          sceneIndex,
-          completionMeta.nextCompletedBy && completionMeta.nextCompletedAt
-            ? {
-                completedBy: completionMeta.nextCompletedBy,
-                completedAt: completionMeta.nextCompletedAt,
-              }
-            : null,
-        ).catch(() => {});
-      }
-      notifyChange();
-    } catch (err) {
-      console.error('[MyTasks 토글 실패]', err);
+    const saveQueueKey = scene.id ?? `${sheetName}:${scene.sceneId}`;
+    await enqueueSequentialStageSave(stageSaveQueueRef.current, saveQueueKey, async () => {
       changedStages.forEach((changedStage) => {
-        updateSceneFieldOptimistic(sheetName, sceneIndex, changedStage, String(Boolean(scene[changedStage])));
+        updateSceneFieldOptimistic(sheetName, sceneIndex, changedStage, String(stagePatch[changedStage]));
       });
-      if (completionMeta) {
-        updateSceneFieldOptimistic(sheetName, sceneIndex, 'completedBy', completionMeta.prevCompletedBy);
-        updateSceneFieldOptimistic(sheetName, sceneIndex, 'completedAt', completionMeta.prevCompletedAt);
+
+      try {
+        const { updateCell, updateSceneCompletionMeta } = await import('@/services/supabaseService');
+        await persistSequentialStagePatchWithRollback(changedStages, stagePatch, scene, (changedStage, value) =>
+          updateCell(sheetName, sceneIndex, changedStage, value, currentUser?.id),
+        );
+        if (completionMeta) {
+          await updateSceneCompletionMeta(
+            sheetName,
+            sceneIndex,
+            completionMeta.nextCompletedBy && completionMeta.nextCompletedAt
+              ? {
+                  completedBy: completionMeta.nextCompletedBy,
+                  completedAt: completionMeta.nextCompletedAt,
+                }
+              : null,
+          ).catch(() => {});
+        }
+        notifyChange();
+      } catch (err) {
+        console.error('[MyTasks 토글 실패]', err);
+        changedStages.forEach((changedStage) => {
+          updateSceneFieldOptimistic(sheetName, sceneIndex, changedStage, String(Boolean(scene[changedStage])));
+        });
+        if (completionMeta) {
+          updateSceneFieldOptimistic(sheetName, sceneIndex, 'completedBy', completionMeta.prevCompletedBy);
+          updateSceneFieldOptimistic(sheetName, sceneIndex, 'completedAt', completionMeta.prevCompletedAt);
+        }
       }
-    }
+    });
   }, [updateSceneFieldOptimistic, currentUser, notifyChange]);
 
   // 인라인 필드 편집
