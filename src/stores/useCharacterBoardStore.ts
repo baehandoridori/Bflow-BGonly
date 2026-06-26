@@ -275,12 +275,14 @@ export const useCharacterBoardStore = create<CharacterBoardStore>((set, get) => 
   },
 
   updateCostumeStage: async (id, stage, value) => {
+    const costume = get().costumes.find((c) => c.id === id);
+    // 이미 같은 단계를 다시 누르면 no-op — 불필요한 쓰기·중복 활동 로그(특히 리깅 '완성' 재클릭) 방지.
+    if (costume && (stage === 'design' ? costume.designStage : costume.riggingStage) === value) return;
     const updates = stage === 'design'
       ? { designStage: value as CharacterCostume['designStage'] }
       : { riggingStage: value as CharacterCostume['riggingStage'] };
     // 활동 피드 표시용 컨텍스트 조립 — 캐릭터명·복장명은 store 에서 바로 얻는다(추가 DB 조회 불필요).
     //   "누가" 변경했는지는 메인 세션 사용자에서 가져오므로 여기 신원은 담지 않는다.
-    const costume = get().costumes.find((c) => c.id === id);
     let logContext: CostumeActivityLogContext | undefined;
     if (costume) {
       const characterName = get().characters.find((ch) => ch.id === costume.characterId)?.name ?? '캐릭터';

@@ -54,6 +54,8 @@ function FeatureRow({ featureKey, label }: { featureKey: string; label: string }
   const [saving, setSaving] = useState(false);
   const [open, setOpen] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
+  // 메타데이터 쓰기 직렬화 큐 — 빠른 연속 토글이 동시 upsert 로 경합해 옛 요청이 새 목록을 덮는 것 방지.
+  const writeChainRef = useRef<Promise<void>>(Promise.resolve());
 
   useEffect(() => {
     let cancelled = false;
@@ -82,8 +84,13 @@ function FeatureRow({ featureKey, label }: { featureKey: string; label: string }
     const prev = config;
     setConfig(next); // 낙관적
     setSaving(true);
+    // 직렬화: 이전 쓰기가 끝난 뒤 다음 쓰기를 시작 → 순서 보장(늦게 끝난 옛 요청이 새 목록을 덮어쓰지 않음).
+    const run = writeChainRef.current
+      .catch(() => { /* 이전 쓰기 실패가 다음 쓰기를 막지 않도록 */ })
+      .then(() => writeMetadataToSupabase('feature-access', featureKey, JSON.stringify(next)));
+    writeChainRef.current = run;
     try {
-      await writeMetadataToSupabase('feature-access', featureKey, JSON.stringify(next));
+      await run;
     } catch (err) {
       console.error('[FeatureGatingSection] 저장 실패:', err);
       setConfig(prev);
