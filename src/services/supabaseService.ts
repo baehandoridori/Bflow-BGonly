@@ -7,6 +7,8 @@ import type {
   Episode, Stage, ScenePhaseState, BulkStageUpdate, BulkFieldUpdate, BulkUpdateResult,
   Activity, ActionGroup,
   CompositingState, CompositingStatus, CompositingErrorKind,
+  Character, CharacterCostume, CostumeDesignStage, CostumeRiggingStage,
+  CostumeActivityLogContext,
   CommentReadStateRow,
 } from '../types';
 import { applyAssigneeProgressMetadata } from '../utils/assigneeProgress';
@@ -768,6 +770,186 @@ export function subscribeCompositingStatesRealtime(
     const eventType = payload.eventType as 'INSERT' | 'UPDATE' | 'DELETE';
     const row = payload.row ?? payload.old;
     if (row) onChange(rowToCompositingState(row), eventType);
+  });
+}
+
+// ─── 캐릭터 현황판 ────────────────────────────
+
+/** DB row(snake_case) → 도메인 Character(camelCase). episodeIds 는 caller 가 매핑으로 조립. */
+export function rowToCharacter(row: any): Character {
+  return {
+    id: row.id,
+    name: row.name,
+    status: (row.status ?? 'active') as Character['status'],
+    memo: row.memo ?? null,
+    sortOrder: row.sort_order ?? 0,
+    episodeIds: [],
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
+/** DB row(snake_case) → 도메인 CharacterCostume(camelCase). */
+export function rowToCostume(row: any): CharacterCostume {
+  return {
+    id: row.id,
+    characterId: row.character_id,
+    name: row.name,
+    versionNo: row.version_no ?? 1,
+    designStage: (row.design_stage ?? 'waiting') as CostumeDesignStage,
+    riggingStage: (row.rigging_stage ?? 'waiting') as CostumeRiggingStage,
+    featuredImageUrl: row.featured_image_url ?? null,
+    structureTags: Array.isArray(row.structure_tags) ? row.structure_tags : [],
+    assetTags: Array.isArray(row.asset_tags) ? row.asset_tags : [],
+    assignee: row.assignee ?? null,
+    memo: row.memo ?? null,
+    sortOrder: row.sort_order ?? 0,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
+export async function loadCharacters(): Promise<Character[]> {
+  const rows = await window.electronAPI.supabaseLoadCharacters();
+  return (rows ?? []).map(rowToCharacter);
+}
+
+export async function loadCharacterCostumes(): Promise<CharacterCostume[]> {
+  const rows = await window.electronAPI.supabaseLoadCharacterCostumes();
+  return (rows ?? []).map(rowToCostume);
+}
+
+/** 캐릭터-에피소드 매핑 → { characterId, episodeNumber, memo, costumeId } 목록. */
+export async function loadEpisodeCharacterMap(): Promise<{
+  characterId: string;
+  episodeNumber: number;
+  memo: string | null;
+  costumeId: string | null;
+}[]> {
+  const rows = await window.electronAPI.supabaseLoadEpisodeCharacterMap();
+  return (rows ?? [])
+    .filter((r: any) => r.episode_number != null)
+    .map((r: any) => ({
+      characterId: r.character_id,
+      episodeNumber: r.episode_number,
+      memo: r.memo ?? null,
+      costumeId: r.costume_id ?? null,
+    }));
+}
+
+export async function addCharacter(input: {
+  name: string;
+  memo?: string | null;
+  createdBy?: string | null;
+}): Promise<Character> {
+  const row = await window.electronAPI.supabaseAddCharacter(input);
+  return rowToCharacter(row);
+}
+
+export async function updateCharacter(id: string, updates: Record<string, unknown>): Promise<Character> {
+  const row = await window.electronAPI.supabaseUpdateCharacter(id, updates);
+  return rowToCharacter(row);
+}
+
+export async function deleteCharacter(id: string): Promise<void> {
+  await window.electronAPI.supabaseDeleteCharacter(id);
+}
+
+export async function addCharacterCostume(input: {
+  characterId: string;
+  name: string;
+  createdBy?: string | null;
+}): Promise<CharacterCostume> {
+  const row = await window.electronAPI.supabaseAddCostume(input);
+  return rowToCostume(row);
+}
+
+/**
+ * 복장 수정 — 도메인 camelCase 부분 업데이트를 snake_case 컬럼으로 매핑해 단일 update 쿼리.
+ * split-state 금지: 여러 필드를 한 번에 전달하면 한 번에 저장.
+ */
+export async function updateCharacterCostume(
+  id: string,
+  updates: Partial<{
+    name: string;
+    versionNo: number;
+    designStage: CostumeDesignStage;
+    riggingStage: CostumeRiggingStage;
+    featuredImageUrl: string | null;
+    structureTags: string[];
+    assetTags: string[];
+    assignee: string | null;
+    memo: string | null;
+    sortOrder: number;
+  }>,
+  /**
+   * 단계 변경(디자인/리깅)일 때만 전달 — 메인이 활동 피드에 기록할 표시용 컨텍스트.
+   * 신원("누가")은 메인 세션 사용자에서 가져오므로 여기엔 담지 않는다.
+   */
+  logContext?: CostumeActivityLogContext,
+): Promise<CharacterCostume> {
+  const snake: Record<string, unknown> = {};
+  if (updates.name !== undefined) snake.name = updates.name;
+  if (updates.versionNo !== undefined) snake.version_no = updates.versionNo;
+  if (updates.designStage !== undefined) snake.design_stage = updates.designStage;
+  if (updates.riggingStage !== undefined) snake.rigging_stage = updates.riggingStage;
+  if (updates.featuredImageUrl !== undefined) snake.featured_image_url = updates.featuredImageUrl;
+  if (updates.structureTags !== undefined) snake.structure_tags = updates.structureTags;
+  if (updates.assetTags !== undefined) snake.asset_tags = updates.assetTags;
+  if (updates.assignee !== undefined) snake.assignee = updates.assignee;
+  if (updates.memo !== undefined) snake.memo = updates.memo;
+  if (updates.sortOrder !== undefined) snake.sort_order = updates.sortOrder;
+  const row = await window.electronAPI.supabaseUpdateCostume(id, snake, logContext);
+  return rowToCostume(row);
+}
+
+export async function deleteCharacterCostume(id: string): Promise<void> {
+  await window.electronAPI.supabaseDeleteCostume(id);
+}
+
+export async function linkCharacterEpisode(
+  episodeNumber: number,
+  characterId: string,
+  createdBy?: string | null,
+): Promise<void> {
+  await window.electronAPI.supabaseLinkCharacterEpisode(episodeNumber, characterId, createdBy);
+}
+
+export async function unlinkCharacterEpisode(episodeNumber: number, characterId: string): Promise<void> {
+  await window.electronAPI.supabaseUnlinkCharacterEpisode(episodeNumber, characterId);
+}
+
+/** 캐릭터-에피소드 매핑의 이 편 전용 필드 수정 (memo / costumeId). */
+export async function updateEpisodeCharacterMapping(
+  episodeNumber: number,
+  characterId: string,
+  updates: { memo?: string | null; costumeId?: string | null },
+): Promise<void> {
+  await window.electronAPI.supabaseUpdateEpisodeCharacterMap(episodeNumber, characterId, updates);
+}
+
+export async function uploadCharacterImage(
+  characterId: string,
+  costumeId: string,
+  base64Data: string,
+): Promise<{ ok: boolean; url?: string; error?: string }> {
+  return window.electronAPI.storageUploadCharacterImage(characterId, costumeId, base64Data);
+}
+
+/**
+ * 캐릭터 현황판 Realtime 구독. 세 테이블 변경을 table 판별자와 함께 전달.
+ * 반환값은 cleanup 함수.
+ */
+export function subscribeCharacterBoardRealtime(
+  onChange: (payload: {
+    table: 'characters' | 'character_costumes' | 'episode_character_mapping';
+    eventType: 'INSERT' | 'UPDATE' | 'DELETE';
+    row: any | null;
+    old: any | null;
+  }) => void,
+): () => void {
+  return window.electronAPI.onCharacterBoardRealtime((payload: any) => {
+    onChange(payload);
   });
 }
 

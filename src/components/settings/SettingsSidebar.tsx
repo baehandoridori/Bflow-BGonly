@@ -3,7 +3,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import {
   Palette, Type, Keyboard, Sparkles, Monitor,
   KeyRound, Database, HelpCircle, UserCircle, Bell,
-  Layers,
+  Layers, ShieldCheck,
   ChevronDown, ChevronRight,
 } from 'lucide-react';
 import { cn } from '@/utils/cn';
@@ -22,7 +22,9 @@ export type SettingsTabId =
   | 'sheets'
   | 'guide'
   // v1.18.0: 어드민 전용 — 부서별 컴포지터 지정
-  | 'compositor';
+  | 'compositor'
+  // 어드민 전용 — 권한/기능 노출 관리
+  | 'admin-access';
 
 interface Tab {
   id: SettingsTabId;
@@ -78,6 +80,7 @@ const ADMIN_GROUP: Group = {
   id: 'admin',
   label: '관리자',
   tabs: [
+    { id: 'admin-access', label: '권한·노출', icon: <ShieldCheck size={16} /> },
     { id: 'compositor', label: '컴포지터', icon: <Layers size={16} /> },
   ],
 };

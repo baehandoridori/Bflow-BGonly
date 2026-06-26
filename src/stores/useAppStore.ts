@@ -13,7 +13,7 @@ import {
   type StarNestSettings,
 } from '@/utils/starNestSettings';
 
-export type ViewMode = 'dashboard' | 'episode' | 'scenes' | 'assignee' | 'team' | 'calendar' | 'schedule' | 'vacation' | 'compositing' | 'compositing-revisions' | 'retake-hub' | 'settings';
+export type ViewMode = 'dashboard' | 'episode' | 'scenes' | 'assignee' | 'team' | 'calendar' | 'schedule' | 'vacation' | 'compositing' | 'compositing-revisions' | 'retake-hub' | 'character-board' | 'settings';
 // v1.30.0~ : 'compositing' = 새 컴포지팅 현황 대시보드 (CompositingDashboardView)
 //            'compositing-revisions' = 기존 컴포지팅 리테이크 보드 (CompositingView)
 // 사이드바 라우팅 분기는 PR 3 에서 App.tsx + Sidebar.tsx 수정.

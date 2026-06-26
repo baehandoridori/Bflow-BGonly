@@ -24,9 +24,13 @@ function parseSheetName(sheetName: string): { ep: string; partId: string; dept: 
 }
 
 function buildPath(sheetName: string, sceneId: string, imageType: string, ext: 'jpg' | 'png'): string {
-  const { ep, partId, dept } = parseSheetName(sheetName);
   // 8자리 hex random suffix로 같은 ms 내 충돌 방지
   const uniq = `${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
+  // 캐릭터 댓글 이미지 — sheetName='char', sceneId=characterId. 씬 EP 경로 규칙(parseSheetName) 대신 캐릭터 경로로.
+  if (sheetName === 'char') {
+    return `characters/${sceneId}/comments/${imageType}_${uniq}.${ext}`;
+  }
+  const { ep, partId, dept } = parseSheetName(sheetName);
   return `${ep}/${partId}/${dept}/${sceneId}/${imageType}_${uniq}.${ext}`;
 }
 
@@ -105,4 +109,31 @@ export async function deleteImage(url: string): Promise<void> {
   if (!path) return; // 비-Supabase URL은 무시 (legacy drive URL 등)
   const { error } = await supabase.storage.from(BUCKET).remove([path]);
   if (error) console.warn('[Storage] 삭제 실패:', error.message);
+}
+
+/**
+ * 캐릭터 복장 대표 이미지 업로드.
+ * 씬 이미지(uploadImage)는 sheetName(EP/파트/부서) 경로 규칙에 묶여 있어 캐릭터엔 부적합.
+ * 경로: characters/{characterId}/{costumeId}/{uniq}.{ext}
+ */
+export async function uploadCharacterImage(
+  characterId: string,
+  costumeId: string,
+  base64Data: string,
+): Promise<{ ok: boolean; url?: string; error?: string }> {
+  try {
+    const processed = toBuffer(base64Data);
+    const uniq = `${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
+    const path = `characters/${characterId}/${costumeId}/${uniq}.${processed.ext}`;
+    const { error } = await supabase.storage
+      .from(BUCKET)
+      .upload(path, processed.buffer, { contentType: processed.mime, upsert: false });
+    if (error) throw error;
+    const { data } = supabase.storage.from(BUCKET).getPublicUrl(path);
+    return { ok: true, url: data.publicUrl };
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error('[Storage] 캐릭터 이미지 업로드 실패:', msg);
+    return { ok: false, error: msg };
+  }
 }

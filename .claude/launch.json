@@ -8,6 +8,13 @@
       "port": 5173
     },
     {
+      "name": "vite-preview",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["run", "dev:renderer"],
+      "port": 5190,
+      "autoPort": true
+    },
+    {
       "name": "dist-static",
       "runtimeExecutable": "npx",
       "runtimeArgs": ["-y", "http-server", "dist", "-p", "5182", "--silent"],

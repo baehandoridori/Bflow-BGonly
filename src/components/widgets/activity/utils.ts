@@ -30,6 +30,14 @@ export const RETAKE_BURST_ACTIONS: ReadonlySet<ActionType> = new Set([
   'revision_reassign',
 ]);
 
+/** 캐릭터 활동 — sceneId/episodeNumber 가 null 이라 sceneId 그룹화로는 서로 다른 복장이 한 그룹에 뭉친다.
+ *  detail 의 characterId + costumeName(캐릭터 내 유니크)으로 복장 단위 구분. */
+const CHARACTER_ACTIVITY_ACTIONS: ReadonlySet<ActionType> = new Set([
+  'character_design_stage',
+  'character_rigging_stage',
+  'character_rigging_done',
+]);
+
 const CROSS_SCENE_GROUPABLE_ACTIONS: ReadonlySet<ActionType> = new Set([
   ...MULTI_SCENE_ACTIONS,
   ...RETAKE_BURST_ACTIONS,
@@ -43,6 +51,21 @@ const CROSS_SCENE_GROUPABLE_ACTIONS: ReadonlySet<ActionType> = new Set([
  * - stage 외 활동(메모/댓글/씬 추가 등)은 ACTION_TYPE_LABEL 그대로.
  */
 export function getActivityVerb(activity: Activity): string {
+  // 캐릭터 현황판: 복장 디자인/리깅 단계 변경 — detail.stageLabel 로 정확한 단계명 표시.
+  //   완성 전이는 눈에 띄게 'OO 완성' 으로 읽히게 한다 ("교복 리깅 완성").
+  if (
+    activity.actionType === 'character_design_stage' ||
+    activity.actionType === 'character_rigging_stage' ||
+    activity.actionType === 'character_rigging_done'
+  ) {
+    const detail = activity.detail as { kind?: unknown; stageLabel?: unknown; completed?: unknown } | null;
+    const kindLabel = detail?.kind === 'rigging' ? '리깅' : detail?.kind === 'design' ? '디자인' : '단계';
+    const stageLabel = typeof detail?.stageLabel === 'string' ? detail.stageLabel : '';
+    const isDone = activity.actionType === 'character_rigging_done' || detail?.completed === true;
+    if (isDone) return `${kindLabel} 완성`;
+    return stageLabel ? `${kindLabel} ${stageLabel}` : `${kindLabel} 단계 변경`;
+  }
+
   const stageMap: Record<string, Stage> = {
     stage_lo: 'lo', stage_done: 'done', stage_review: 'review', stage_png: 'png',
   };
@@ -84,6 +107,13 @@ export function groupActivities(items: Activity[]): FeedItem[] {
     // 기본은 sceneId 일치. 단, 일괄 작업과 리테이크 연속 처리처럼 사용자가 같은 흐름에서
     // 여러 씬을 빠르게 처리하는 액션은 sceneId 가 달라도 5분 묶음으로 정리한다.
     if (!CROSS_SCENE_GROUPABLE_ACTIONS.has(a.actionType) && a.sceneId !== b.sceneId) return false;
+    // 캐릭터 활동은 sceneId 가 null 이라 위 검사를 통과 → 복장 단위(characterId+costumeName)로 추가 구분.
+    if (CHARACTER_ACTIVITY_ACTIONS.has(a.actionType)) {
+      const da2 = a.detail as { characterId?: unknown; costumeName?: unknown } | null;
+      const db2 = b.detail as { characterId?: unknown; costumeName?: unknown } | null;
+      if ((da2?.characterId ?? null) !== (db2?.characterId ?? null)) return false;
+      if ((da2?.costumeName ?? null) !== (db2?.costumeName ?? null)) return false;
+    }
     const da = new Date(a.createdAt).getTime();
     const db = new Date(b.createdAt).getTime();
     return Math.abs(da - db) <= GROUP_WINDOW_MS;

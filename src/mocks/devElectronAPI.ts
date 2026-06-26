@@ -35,6 +35,12 @@ const MOCK_USERS: AppUser[] = [
 const localStore: Record<string, unknown> = {};
 const COMMENTS_FILE = 'comments.json';
 
+/** 변경 가능한 mock 사용자 목록 — role 토글 등 update 를 반영하기 위해 MOCK_USERS 복제본 사용. */
+function getMockUsers(): AppUser[] {
+  return (localStore.__users as AppUser[] | undefined)
+    ?? (localStore.__users = MOCK_USERS.map((u) => ({ ...u }))) as AppUser[];
+}
+
 const noop = () => () => {};
 
 function cloneMockEpisodes(): Episode[] {
@@ -113,6 +119,13 @@ function getMockMetadataRows(): MockMetadataRow[] {
       { type: 'part-reel-worker', key: 'EP05_C_ACT', value: '강선영', updatedAt: '2026-06-05T00:00:00.000Z' },
       { type: 'part-reel-worker', key: 'EP05_D_BG', value: '박정인', updatedAt: '2026-06-05T00:00:00.000Z' },
       { type: 'part-reel-worker', key: 'EP05_D_ACT', value: '박정인', updatedAt: '2026-06-05T00:00:00.000Z' },
+      // 캐릭터 현황판 게이팅 — preview 의 mock 배한솔(id '1') 에게 메뉴 노출.
+      {
+        type: 'feature-access',
+        key: 'character-board',
+        value: '{"userIds":["1"],"allowAdmin":true}',
+        updatedAt: '2026-06-05T00:00:00.000Z',
+      },
     ]) as MockMetadataRow[];
 }
 
@@ -195,6 +208,70 @@ function parseJsonStringArray(value?: string): string[] {
 
 function emitMockActivityRealtime(row: MockActivityRow): void {
   activityRealtimeCallbacks.forEach((callback) => callback(row));
+}
+
+// ─── 캐릭터 현황판 mock 시드 ──────────────────────────────
+// preview 에서 보드/검색/에피소드탭이 비지 않도록 샘플 2~3 캐릭터 + 복장 + 태그 + 에피소드 연결.
+const MOCK_CHARACTER_EP = 5; // MOCK_EPISODES 에 존재하는 유일 에피소드(EP05).
+
+function seedMockCharacterData(): void {
+  if (localStore.__characters !== undefined) return; // 이미 시드/조작됨
+
+  const now = '2026-06-10T00:00:00.000Z';
+  const chars = [
+    { id: 'mock-char-1', name: '한솔', memo: '주인공' },
+    { id: 'mock-char-2', name: '삐쭈', memo: null },
+    { id: 'mock-char-3', name: '혜원', memo: null },
+  ].map((c, i) => ({
+    id: c.id, name: c.name, status: 'active', memo: c.memo,
+    sort_order: i, created_at: now, updated_at: now, created_by: '1',
+  }));
+
+  const costumes = [
+    // 한솔: 교복(핸드폰 보유), 사복
+    {
+      id: 'mock-cos-1a', character_id: 'mock-char-1', name: '교복', version_no: 2,
+      design_stage: 'done', rigging_stage: 'rigging',
+      structure_tags: ['얼굴각도 컨트롤러'], asset_tags: ['핸드폰', '안경'],
+    },
+    {
+      id: 'mock-cos-1b', character_id: 'mock-char-1', name: '사복', version_no: 1,
+      design_stage: 'in_progress', rigging_stage: 'waiting',
+      structure_tags: [], asset_tags: ['가방'],
+    },
+    // 삐쭈: 사복(핸드폰 보유)
+    {
+      id: 'mock-cos-2a', character_id: 'mock-char-2', name: '사복', version_no: 1,
+      design_stage: 'feedback', rigging_stage: 'vectorized',
+      structure_tags: ['입 모양 컨트롤러'], asset_tags: ['핸드폰'],
+    },
+    // 혜원: 체육복 (핸드폰 없음)
+    {
+      id: 'mock-cos-3a', character_id: 'mock-char-3', name: '체육복', version_no: 3,
+      design_stage: 'done', rigging_stage: 'done',
+      structure_tags: ['얼굴각도 컨트롤러'], asset_tags: ['물병'],
+    },
+  ].map((c, i) => ({
+    ...c,
+    featured_image_url: null, assignee: null, memo: null,
+    sort_order: i, created_at: now, updated_at: now, created_by: '1',
+  }));
+
+  // 한솔·삐쭈를 EP05 에 연결 (혜원은 미연결 → '등장 캐릭터 추가' 후보로 남김).
+  const charEpMap = [
+    {
+      id: 'mock-map-1', episode_id: `mock-ep-${MOCK_CHARACTER_EP}`, character_id: 'mock-char-1',
+      episode_number: MOCK_CHARACTER_EP, memo: '이 화에서는 교복에 안경 착용', costume_id: 'mock-cos-1a', created_at: now,
+    },
+    {
+      id: 'mock-map-2', episode_id: `mock-ep-${MOCK_CHARACTER_EP}`, character_id: 'mock-char-2',
+      episode_number: MOCK_CHARACTER_EP, memo: null, costume_id: null, created_at: now,
+    },
+  ];
+
+  localStore.__characters = chars;
+  localStore.__costumes = costumes;
+  localStore.__charEpMap = charEpMap;
 }
 
 function decodeRawRevisionSceneId(sceneId: string): string {
@@ -417,7 +494,7 @@ export function installDevElectronAPI(): void {
     fontGetPathForFile: () => '',
 
     usersRead: async () => ({
-      users: MOCK_USERS.map(u => ({
+      users: getMockUsers().map(u => ({
         id: u.id, name: u.name, slackId: u.slackId,
         password: u.password, isInitialPassword: u.isInitialPassword,
         createdAt: u.createdAt, role: u.role,
@@ -581,15 +658,25 @@ export function installDevElectronAPI(): void {
     supabaseBulkDeleteScenes: async (sceneUuids) => sceneUuids.map((id) => ({ sceneUuid: id, success: true })),
     supabaseBulkUpdateSceneFields: async (updates) => updates.map((u) => ({ sceneUuid: u.sceneUuid, success: true })),
     supabaseUpdateSceneField: async () => {},
-    supabaseReadUsers: async () => MOCK_USERS.map(u => ({
+    supabaseReadUsers: async () => getMockUsers().map(u => ({
       id: u.id, name: u.name, slack_id: u.slackId,
       password: u.password, is_initial_password: u.isInitialPassword,
       created_at: u.createdAt, role: u.role,
+      is_compositor: u.isCompositor ?? false,
+      is_acting_supervisor: u.isActingSupervisor ?? false,
     })),
     supabaseAddUser: async () => {},
-    supabaseUpdateUser: async () => {},
+    supabaseUpdateUser: async (userId, updates) => {
+      // role / boolean 토글 등을 mock 사용자 목록에 반영 (preview 검증용).
+      const user = getMockUsers().find((u) => u.id === userId);
+      if (!user) return;
+      if (updates.role !== undefined) user.role = updates.role as string;
+      if (updates.isCompositor !== undefined) user.isCompositor = updates.isCompositor as boolean;
+      if (updates.isActingSupervisor !== undefined) user.isActingSupervisor = updates.isActingSupervisor as boolean;
+    },
     supabaseDeleteUser: async () => {},
-    supabaseReadComments: async (partUuid) => getMockCommentRows().filter((comment) => comment.partId === partUuid),
+    supabaseReadComments: async (partUuid) => getMockCommentRows().filter((comment) => comment.partId === partUuid && !comment.characterId),
+    supabaseReadCommentsForCharacter: async (characterId) => getMockCommentRows().filter((comment) => comment.characterId === characterId),
     supabaseReadCommentReadStates: async (userId) => getMockCommentReadStates(userId),
     supabaseUpsertCommentReadState: async (userId, sceneThreadKey, lastReadAt) => {
       const stateRows = getMockCommentReadStates(userId);
@@ -604,12 +691,15 @@ export function installDevElectronAPI(): void {
       localStore.__commentReadStateRows = stateRows;
     },
     supabaseFetchMissedMentions: async () => [],
-    supabaseAddComment: async (commentId, partUuid, sceneId, userId, userName, text, mentions, createdAt, images, revisionId, parentCommentId) => {
+    supabaseAddComment: async (commentId, partUuid, sceneId, userId, userName, text, mentions, createdAt, images, revisionId, parentCommentId, characterId, costumeId) => {
       const comments = getMockCommentRows();
       comments.push({
         id: commentId,
-        partId: partUuid,
-        sceneId,
+        // 캐릭터 댓글이면 part/scene 비우고 character_id 채움 (라이브 DB 동작 미러).
+        partId: characterId ? '' : partUuid,
+        sceneId: characterId ? '' : sceneId,
+        characterId: characterId ?? null,
+        costumeId: costumeId ?? null,
         userId,
         userName,
         text,
@@ -940,6 +1030,95 @@ export function installDevElectronAPI(): void {
       return row;
     },
     onCompositingStatesRealtime: noop,
+
+    // ─── 캐릭터 현황판 (mock) ───
+    supabaseLoadCharacters: async () => {
+      seedMockCharacterData();
+      return localStore.__characters as unknown[];
+    },
+    supabaseLoadCharacterCostumes: async () => {
+      seedMockCharacterData();
+      return localStore.__costumes as unknown[];
+    },
+    supabaseLoadEpisodeCharacterMap: async () => {
+      seedMockCharacterData();
+      return localStore.__charEpMap as unknown[];
+    },
+    supabaseAddCharacter: async (input) => {
+      const store = (localStore.__characters as Record<string, unknown>[] | undefined)
+        ?? (localStore.__characters = [] as Record<string, unknown>[]);
+      const now = new Date().toISOString();
+      const row = {
+        id: createUuid(), name: input.name, status: 'active', memo: input.memo ?? null,
+        sort_order: store.length, created_at: now, updated_at: now, created_by: input.createdBy ?? null,
+      };
+      store.push(row);
+      return row;
+    },
+    supabaseUpdateCharacter: async (id, updates) => {
+      const store = (localStore.__characters as Record<string, unknown>[] | undefined) ?? [];
+      const row = store.find((r) => r.id === id);
+      if (row) Object.assign(row, updates, { updated_at: new Date().toISOString() });
+      return row ?? { id };
+    },
+    supabaseDeleteCharacter: async (id) => {
+      localStore.__characters = ((localStore.__characters as Record<string, unknown>[] | undefined) ?? [])
+        .filter((r) => r.id !== id);
+      localStore.__costumes = ((localStore.__costumes as Record<string, unknown>[] | undefined) ?? [])
+        .filter((r) => r.character_id !== id);
+    },
+    supabaseAddCostume: async (input) => {
+      const store = (localStore.__costumes as Record<string, unknown>[] | undefined)
+        ?? (localStore.__costumes = [] as Record<string, unknown>[]);
+      const now = new Date().toISOString();
+      const row = {
+        id: createUuid(), character_id: input.characterId, name: input.name, version_no: 1,
+        design_stage: 'waiting', rigging_stage: 'waiting', featured_image_url: null,
+        structure_tags: [], asset_tags: [], assignee: null, memo: null,
+        sort_order: store.filter((r) => r.character_id === input.characterId).length,
+        created_at: now, updated_at: now, created_by: input.createdBy ?? null,
+      };
+      store.push(row);
+      return row;
+    },
+    supabaseUpdateCostume: async (id, updates) => {
+      const store = (localStore.__costumes as Record<string, unknown>[] | undefined) ?? [];
+      const row = store.find((r) => r.id === id);
+      if (row) Object.assign(row, updates, { updated_at: new Date().toISOString() });
+      return row ?? { id };
+    },
+    supabaseDeleteCostume: async (id) => {
+      localStore.__costumes = ((localStore.__costumes as Record<string, unknown>[] | undefined) ?? [])
+        .filter((r) => r.id !== id);
+    },
+    supabaseLinkCharacterEpisode: async (episodeNumber, characterId) => {
+      seedMockCharacterData();
+      const store = localStore.__charEpMap as Record<string, unknown>[];
+      // UPSERT 패리티 — 이미 있으면 중복 추가하지 않음.
+      const existing = store.find((r) => r.episode_number === episodeNumber && r.character_id === characterId);
+      if (existing) return existing;
+      const row = {
+        id: createUuid(), episode_id: `mock-ep-${episodeNumber}`, character_id: characterId,
+        episode_number: episodeNumber, memo: null, costume_id: null, created_at: new Date().toISOString(),
+      };
+      store.push(row);
+      return row;
+    },
+    supabaseUnlinkCharacterEpisode: async (episodeNumber, characterId) => {
+      seedMockCharacterData();
+      localStore.__charEpMap = (localStore.__charEpMap as Record<string, unknown>[])
+        .filter((r) => !(r.episode_number === episodeNumber && r.character_id === characterId));
+    },
+    supabaseUpdateEpisodeCharacterMap: async (episodeNumber, characterId, updates) => {
+      seedMockCharacterData();
+      const store = localStore.__charEpMap as Record<string, unknown>[];
+      const row = store.find((r) => r.episode_number === episodeNumber && r.character_id === characterId);
+      if (!row) return;
+      if (updates.memo !== undefined) row.memo = updates.memo;
+      if (updates.costumeId !== undefined) row.costume_id = updates.costumeId;
+    },
+    storageUploadCharacterImage: async () => ({ ok: true, url: 'mock://character-image' }),
+    onCharacterBoardRealtime: noop,
   };
 
   (window as Window & typeof globalThis).electronAPI = mockAPI;

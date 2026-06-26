@@ -136,6 +136,10 @@ export interface SupabaseComment {
   sceneId: string;
   /** 한솔 결정 (v1.15.9): 정확한 씬 매칭용 UUID (catch-up 의 navigateToScene 에서 활용) */
   sceneUuid?: string | null;
+  /** 캐릭터 현황판 댓글이면 해당 캐릭터 id, 씬 댓글이면 null/undefined. */
+  characterId?: string | null;
+  /** 캐릭터 댓글이 특정 복장 맥락이면 복장 id (이번 스레드 분기엔 미사용, 컬럼만 보존). */
+  costumeId?: string | null;
   userId: string;
   userName: string;
   text: string;
@@ -1324,6 +1328,7 @@ export async function fetchMissedMentions(
       .select('*')
       .gt('created_at', since)
       .neq('user_id', userId)
+      .is('character_id', null)  // 캐릭터 댓글은 씬 멘션 catch-up 에서 제외(씬 네비게이션이 없어 깨진 알림 방지).
       .order('created_at', { ascending: false })
       .range(pageOffset, pageOffset + PAGE_SIZE - 1);
     if (error) throw new Error(`fetchMissedMentions failed: ${error.message}`);
@@ -1379,6 +1384,35 @@ export async function readCommentsForPart(partUuid: string): Promise<SupabaseCom
     // v1.18.0: 리비전 ↔ 씬 댓글 단일 흐름 — revision_id 가 NULL 이면 일반 씬 댓글, 값 있으면 리비전 맥락 댓글.
     revisionId: c.revision_id ?? null,
     // v1.24.0: 1단계 대댓글 부모 참조. NULL 이면 일반 댓글.
+    parentCommentId: c.parent_comment_id ?? null,
+  }));
+}
+
+/**
+ * 캐릭터별 댓글 읽기 (캐릭터 현황판 상세 스레드용).
+ * readCommentsForPart 미러 — 같은 comments 테이블, character_id 로 필터. part_id/scene_id 는 NULL.
+ */
+export async function readCommentsForCharacter(characterId: string): Promise<SupabaseComment[]> {
+  const { data, error } = await supabase
+    .from('comments')
+    .select('*')
+    .eq('character_id', characterId)
+    .order('created_at');
+  throwIfError(error);
+  return (data || []).map((c) => ({
+    id: c.id,
+    partId: c.part_id,
+    sceneId: c.scene_id,
+    characterId: c.character_id ?? null,
+    costumeId: c.costume_id ?? null,
+    userId: c.user_id,
+    userName: c.user_name,
+    text: c.text,
+    mentions: c.mentions || [],
+    images: c.images || [],
+    createdAt: c.created_at,
+    editedAt: c.edited_at,
+    revisionId: c.revision_id ?? null,
     parentCommentId: c.parent_comment_id ?? null,
   }));
 }
@@ -1481,7 +1515,37 @@ export async function addComment(
   revisionId: string | null = null,
   /** v1.24.0: 1단계 대댓글이면 부모 댓글 id, 일반 댓글이면 null. */
   parentCommentId: string | null = null,
+  /** 캐릭터 현황판 댓글이면 캐릭터 id. 값이 있으면 part_id/scene_id 대신 character_id 로 저장한다. */
+  characterId: string | null = null,
+  /** 캐릭터 댓글의 복장 맥락(선택). 이번 스레드 분기엔 미사용. */
+  costumeId: string | null = null,
 ): Promise<void> {
+  // v1.24.0 P1 #9 / P1 #7: parent_comment_id / revision_id 가 null 이면 payload 에서 키 자체 제거.
+  //   self-reference 차단 — 같은 id 가 부모로 들어오면 null 처리.
+  const safeParent = parentCommentId && parentCommentId !== commentId ? parentCommentId : null;
+
+  // 캐릭터 댓글 경로 — part_id/scene_id 없이 character_id 로 저장. 씬 UUID 해석/씬 broadcast 모두 스킵.
+  if (characterId) {
+    const characterPayload: Record<string, unknown> = {
+      id: commentId,
+      character_id: characterId,
+      user_id: userId,
+      user_name: userName,
+      text,
+      mentions,
+      images,
+      created_at: createdAt,
+    };
+    if (costumeId) characterPayload.costume_id = costumeId;
+    if (revisionId) characterPayload.revision_id = revisionId;
+    if (safeParent) characterPayload.parent_comment_id = safeParent;
+    const { error: charError } = await supabase.from('comments').insert(characterPayload);
+    throwIfError(charError);
+    // 캐릭터 댓글도 다른 창이 즉시 반응하도록 broadcast — sceneId 자리에 char:{id} 식별자 전달.
+    broadcastCommentAdded(`char:${characterId}`, userName, userId, text, mentions, commentId, safeParent, undefined, revisionId);
+    return;
+  }
+
   // 이슈 F(2026-04-23) + Codex P1(2차): 댓글 경로의 sceneId는 scene.no (=sort_order).
   // sort_order 정확 매칭으로 scene_number 표기 규칙과 무관하게 정확히 식별.
   // 씬을 못 찾으면 댓글 저장 자체를 거부(앞으로 고아 댓글 신규 생성 차단).
@@ -1493,10 +1557,6 @@ export async function addComment(
     throw new Error(`댓글 저장 실패: 씬을 찾을 수 없음 (partUuid=${partUuid}, sceneId=${sceneId})`);
   }
 
-  // v1.24.0 P1 #9: parent_comment_id / revision_id 가 null 이면 payload 에서 키 자체 제거 →
-  //   마이그레이션 미적용 환경(컬럼 없음)에서도 일반 댓글은 정상 작성 가능. 답글/리비전 댓글만 마이그 필요.
-  // 또한 self-reference 차단(P1 #7) — 같은 id 가 부모로 들어오면 null 처리.
-  const safeParent = parentCommentId && parentCommentId !== commentId ? parentCommentId : null;
   const insertPayload: Record<string, unknown> = {
     id: commentId,
     part_id: partUuid,
@@ -2774,7 +2834,9 @@ export type ActionType =
   | 'image_upload_storyboard' | 'image_upload_guide'
   | 'image_annotate_storyboard' | 'image_annotate_guide'
   // v1.29.0: 댓글 이모지 반응
-  | 'comment_reaction';
+  | 'comment_reaction'
+  // 캐릭터 현황판: 복장 디자인/리깅 단계 변경 + 리깅 완성 강조
+  | 'character_design_stage' | 'character_rigging_stage' | 'character_rigging_done';
 
 export interface ActivityRow {
   id: string;
@@ -3073,10 +3135,11 @@ async function fetchCommentContext(commentId: string): Promise<{
   episodeNumber?: number;
   dept?: string;
   commentPreview?: string;
+  characterId?: string;
 } | null> {
   const { data: comment, error } = await supabase
     .from('comments')
-    .select('user_id, user_name, scene_id, scene_uuid, part_id, text, revision_id')
+    .select('user_id, user_name, scene_id, scene_uuid, part_id, text, revision_id, character_id')
     .eq('id', commentId)
     .maybeSingle();
   if (error || !comment) return null;
@@ -3109,6 +3172,7 @@ async function fetchCommentContext(commentId: string): Promise<{
     episodeNumber,
     dept,
     commentPreview: (comment.text ?? '').slice(0, 30),
+    characterId: comment.character_id ?? undefined,
   };
 }
 
@@ -3139,6 +3203,9 @@ export async function addCommentReaction(
     console.warn('[addCommentReaction] 고아 reaction 감지 — comment 조회 실패:', commentId);
     return;
   }
+
+  // 캐릭터 댓글 반응은 씬 기반 활동/알림(씬 네비게이션) 경로가 없으므로 스킵 — 이모지 칩만 반영.
+  if (ctx.characterId) return;
 
   // 3) 활동 로그 INSERT — 자기 자신이어도 다른 사용자가 보는 최근 작업 위젯에 표시되도록.
   //   코덱스 10차 P1: activities 가 아니라 activity_log 테이블 + record_activity RPC 사용.
@@ -3668,6 +3735,384 @@ export function startCompositingStatesRealtime(
       },
     )
     .subscribe();
+  return () => {
+    supabase.removeChannel(channel);
+  };
+}
+
+// ─── 캐릭터 현황판 (캐릭터 / 복장 / 에피소드 매핑) ──────────────────
+// 컴포지팅 대시보드(v1.30.0) 의 load/upsert/realtime 3 종 패턴을 그대로 미러링.
+//   - characters: 전역 캐릭터 (BG/ACT 무관)
+//   - character_costumes: 캐릭터 1:N 복장 (버전·진행 단위)
+//   - episode_character_mapping: 캐릭터 N:M 에피소드
+
+export type CostumeDesignStageValue = 'waiting' | 'in_progress' | 'feedback' | 'done';
+export type CostumeRiggingStageValue = 'waiting' | 'vectorized' | 'rigging' | 'feedback' | 'done';
+
+export interface CharacterRow {
+  id: string;
+  name: string;
+  status: 'active' | 'archived';
+  memo: string | null;
+  sort_order: number;
+  created_at: string;
+  updated_at: string;
+  created_by: string | null;
+}
+
+export interface CharacterCostumeRow {
+  id: string;
+  character_id: string;
+  name: string;
+  version_no: number;
+  design_stage: CostumeDesignStageValue;
+  rigging_stage: CostumeRiggingStageValue;
+  featured_image_url: string | null;
+  structure_tags: string[];
+  asset_tags: string[];
+  assignee: string | null;
+  memo: string | null;
+  sort_order: number;
+  created_at: string;
+  updated_at: string;
+  created_by: string | null;
+}
+
+/** 캐릭터-에피소드 매핑 row. episode_number 는 episodes 조인으로 채워 렌더러가 매핑하기 쉽게 함. */
+export interface EpisodeCharacterMapRow {
+  id: string;
+  episode_id: string;
+  character_id: string;
+  episode_number: number | null;
+  /** 이 편에서의 주의점 메모 (episode_character_mapping.memo). */
+  memo: string | null;
+  /** 이 편에서 사용하는 복장 (episode_character_mapping.costume_id, FK character_costumes ON DELETE SET NULL). */
+  costume_id: string | null;
+  created_at: string;
+}
+
+/** PostgREST 1000 행 제한 회피 — .range() 페이지네이션 반복 로드 (project_postgrest_1000_row_cap). */
+async function loadAllRows<T>(
+  table: string,
+  select: string,
+  order: { column: string; ascending: boolean },
+): Promise<T[]> {
+  const PAGE = 1000;
+  const all: T[] = [];
+  let from = 0;
+  // eslint-disable-next-line no-constant-condition
+  while (true) {
+    const { data, error } = await supabase
+      .from(table)
+      .select(select)
+      .order(order.column, { ascending: order.ascending })
+      .range(from, from + PAGE - 1);
+    if (error) throw error;
+    const rows = (data ?? []) as T[];
+    all.push(...rows);
+    if (rows.length < PAGE) break;
+    from += PAGE;
+  }
+  return all;
+}
+
+/** 모든 캐릭터 (active + archived). 페이지네이션 반복. */
+export async function loadCharacters(): Promise<CharacterRow[]> {
+  return loadAllRows<CharacterRow>('characters', '*', { column: 'sort_order', ascending: true });
+}
+
+/** 모든 복장. 페이지네이션 반복. */
+export async function loadCharacterCostumes(): Promise<CharacterCostumeRow[]> {
+  return loadAllRows<CharacterCostumeRow>(
+    'character_costumes',
+    '*',
+    { column: 'sort_order', ascending: true },
+  );
+}
+
+/** 모든 캐릭터-에피소드 매핑 (episode_number 조인). 페이지네이션 반복. */
+export async function loadEpisodeCharacterMap(): Promise<EpisodeCharacterMapRow[]> {
+  const rows = await loadAllRows<{
+    id: string;
+    episode_id: string;
+    character_id: string;
+    memo: string | null;
+    costume_id: string | null;
+    created_at: string;
+    episodes: { episode_number: number } | null;
+  }>(
+    'episode_character_mapping',
+    'id, episode_id, character_id, memo, costume_id, created_at, episodes(episode_number)',
+    { column: 'created_at', ascending: true },
+  );
+  return rows.map((r) => ({
+    id: r.id,
+    episode_id: r.episode_id,
+    character_id: r.character_id,
+    episode_number: r.episodes?.episode_number ?? null,
+    memo: r.memo ?? null,
+    costume_id: r.costume_id ?? null,
+    created_at: r.created_at,
+  }));
+}
+
+/** 캐릭터 추가 (INSERT). sort_order 는 현재 최대값 +1. */
+export async function addCharacter(input: {
+  name: string;
+  memo?: string | null;
+  createdBy?: string | null;
+}): Promise<CharacterRow> {
+  const { data: maxRow } = await supabase
+    .from('characters')
+    .select('sort_order')
+    .order('sort_order', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  const nextOrder = ((maxRow?.sort_order as number | undefined) ?? -1) + 1;
+  const { data, error } = await supabase
+    .from('characters')
+    .insert({
+      name: input.name,
+      memo: input.memo ?? null,
+      sort_order: nextOrder,
+      created_by: input.createdBy ?? null,
+    })
+    .select('*')
+    .single();
+  if (error) throw error;
+  return data as CharacterRow;
+}
+
+/** 캐릭터 수정 (단일 update 쿼리 — 여러 컬럼 한 번에). */
+export async function updateCharacter(
+  id: string,
+  updates: Record<string, unknown>,
+): Promise<CharacterRow> {
+  const { data, error } = await supabase
+    .from('characters')
+    .update({ ...updates, updated_at: new Date().toISOString() })
+    .eq('id', id)
+    .select('*')
+    .single();
+  if (error) throw error;
+  return data as CharacterRow;
+}
+
+/** public URL 들에서 scene-images 스토리지 경로를 뽑아 일괄 삭제. legacy/비-Supabase URL 은 무시. 실패해도 삭제 흐름은 진행. */
+async function removeCharacterStorageByUrl(urls: (string | null | undefined)[]): Promise<void> {
+  const paths = urls
+    .map((u) => (typeof u === 'string' ? u.match(/\/storage\/v1\/object\/public\/scene-images\/(.+)$/)?.[1] : undefined))
+    .filter((p): p is string => !!p);
+  if (paths.length === 0) return;
+  const { error } = await supabase.storage.from('scene-images').remove(paths);
+  if (error) console.warn('[character-board] 스토리지 자산 정리 실패(무시하고 진행):', error.message);
+}
+
+/** 캐릭터 삭제. 복장/매핑/댓글은 FK cascade 로 자동 삭제 — cascade 전에 스토리지 자산을 먼저 정리한다. */
+export async function deleteCharacter(id: string): Promise<void> {
+  // 복장 대표 이미지 + 캐릭터 댓글 첨부 이미지를 cascade 전에 수집해 삭제(고아 파일 방지).
+  const [{ data: costumeRows }, { data: commentRows }] = await Promise.all([
+    supabase.from('character_costumes').select('featured_image_url').eq('character_id', id),
+    supabase.from('comments').select('images').eq('character_id', id),
+  ]);
+  const urls: (string | null | undefined)[] = [];
+  for (const r of costumeRows ?? []) urls.push((r as { featured_image_url?: string | null }).featured_image_url);
+  for (const r of commentRows ?? []) {
+    const imgs = (r as { images?: unknown }).images;
+    if (Array.isArray(imgs)) for (const u of imgs) if (typeof u === 'string') urls.push(u);
+  }
+  // DB row 삭제(cascade) 먼저 — 실패 시 throw 하고 스토리지는 건드리지 않아, 롤백된 row 가 깨진 URL 을 가리키지 않게 한다.
+  const { error } = await supabase.from('characters').delete().eq('id', id);
+  if (error) throw error;
+  // 삭제 성공 후에만 스토리지 자산 정리.
+  await removeCharacterStorageByUrl(urls);
+}
+
+/** 복장 추가 (INSERT). sort_order 는 해당 캐릭터 내 최대값 +1. */
+export async function addCharacterCostume(input: {
+  characterId: string;
+  name: string;
+  createdBy?: string | null;
+}): Promise<CharacterCostumeRow> {
+  const { data: maxRow } = await supabase
+    .from('character_costumes')
+    .select('sort_order')
+    .eq('character_id', input.characterId)
+    .order('sort_order', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  const nextOrder = ((maxRow?.sort_order as number | undefined) ?? -1) + 1;
+  const { data, error } = await supabase
+    .from('character_costumes')
+    .insert({
+      character_id: input.characterId,
+      name: input.name,
+      sort_order: nextOrder,
+      created_by: input.createdBy ?? null,
+    })
+    .select('*')
+    .single();
+  if (error) throw error;
+  return data as CharacterCostumeRow;
+}
+
+/** 복장 수정 (단일 update 쿼리 — design_stage/rigging_stage/version_no 등 여러 컬럼 한 번에). */
+export async function updateCharacterCostume(
+  id: string,
+  updates: Record<string, unknown>,
+): Promise<CharacterCostumeRow> {
+  // featured_image_url 교체 시 이전 객체를 정리하려고 기존 값을 먼저 읽어둔다(이미지 변경일 때만).
+  let prevImageUrl: string | null = null;
+  if ('featured_image_url' in updates) {
+    const { data: cur } = await supabase
+      .from('character_costumes')
+      .select('featured_image_url')
+      .eq('id', id)
+      .maybeSingle();
+    prevImageUrl = (cur as { featured_image_url?: string | null } | null)?.featured_image_url ?? null;
+  }
+  const { data, error } = await supabase
+    .from('character_costumes')
+    .update({ ...updates, updated_at: new Date().toISOString() })
+    .eq('id', id)
+    .select('*')
+    .single();
+  if (error) throw error;
+  // DB 업데이트 성공 후에만 이전 대표 이미지 정리(롤백 시 깨진 URL 방지). 실제로 바뀐 경우만.
+  const newImageUrl = (updates as { featured_image_url?: string | null }).featured_image_url ?? null;
+  if (prevImageUrl && prevImageUrl !== newImageUrl) {
+    await removeCharacterStorageByUrl([prevImageUrl]);
+  }
+  return data as CharacterCostumeRow;
+}
+
+/** 복장 삭제. 삭제 전 대표 이미지 스토리지 객체를 정리해 고아 파일을 방지한다. */
+export async function deleteCharacterCostume(id: string): Promise<void> {
+  const { data: row } = await supabase
+    .from('character_costumes')
+    .select('featured_image_url')
+    .eq('id', id)
+    .maybeSingle();
+  const { error } = await supabase.from('character_costumes').delete().eq('id', id);
+  if (error) throw error;
+  // 삭제 성공 후에만 대표 이미지 객체 정리.
+  await removeCharacterStorageByUrl([(row as { featured_image_url?: string | null } | null)?.featured_image_url]);
+}
+
+/** 캐릭터-에피소드 연결 (UPSERT, onConflict 'episode_id,character_id'). episodeNumber → episode_id 해석. */
+export async function linkCharacterEpisode(
+  episodeNumber: number,
+  characterId: string,
+  createdBy?: string | null,
+): Promise<EpisodeCharacterMapRow> {
+  const { data: ep, error: epErr } = await supabase
+    .from('episodes')
+    .select('id, episode_number')
+    .eq('episode_number', episodeNumber)
+    .maybeSingle();
+  if (epErr) throw epErr;
+  if (!ep) throw new Error(`에피소드 ${episodeNumber} 를 찾을 수 없습니다`);
+  const { data, error } = await supabase
+    .from('episode_character_mapping')
+    .upsert(
+      { episode_id: ep.id as string, character_id: characterId, created_by: createdBy ?? null },
+      { onConflict: 'episode_id,character_id' },
+    )
+    .select('*')
+    .single();
+  if (error) throw error;
+  return {
+    id: data.id as string,
+    episode_id: data.episode_id as string,
+    character_id: data.character_id as string,
+    episode_number: ep.episode_number as number,
+    memo: (data.memo ?? null) as string | null,
+    costume_id: (data.costume_id ?? null) as string | null,
+    created_at: data.created_at as string,
+  };
+}
+
+/** 캐릭터-에피소드 연결 해제. episodeNumber → episode_id 해석 후 삭제. */
+export async function unlinkCharacterEpisode(
+  episodeNumber: number,
+  characterId: string,
+): Promise<void> {
+  const { data: ep, error: epErr } = await supabase
+    .from('episodes')
+    .select('id')
+    .eq('episode_number', episodeNumber)
+    .maybeSingle();
+  if (epErr) throw epErr;
+  if (!ep) return;
+  const { error } = await supabase
+    .from('episode_character_mapping')
+    .delete()
+    .eq('episode_id', ep.id as string)
+    .eq('character_id', characterId);
+  if (error) throw error;
+}
+
+/**
+ * 캐릭터-에피소드 매핑의 이 편 전용 필드 수정 (memo / costume_id).
+ * (episode_number → episode_id 해석 후 episode_id & character_id 조건으로 update.)
+ * memo / costumeId 둘 중 전달된 것만 update. costumeId === null 이면 복장 선택 해제.
+ */
+export async function updateEpisodeCharacterMapping(
+  episodeNumber: number,
+  characterId: string,
+  updates: { memo?: string | null; costumeId?: string | null },
+): Promise<void> {
+  const { data: ep, error: epErr } = await supabase
+    .from('episodes')
+    .select('id')
+    .eq('episode_number', episodeNumber)
+    .maybeSingle();
+  if (epErr) throw epErr;
+  if (!ep) throw new Error(`에피소드 ${episodeNumber} 를 찾을 수 없습니다`);
+  const patch: Record<string, unknown> = {};
+  if (updates.memo !== undefined) patch.memo = updates.memo;
+  if (updates.costumeId !== undefined) patch.costume_id = updates.costumeId;
+  if (Object.keys(patch).length === 0) return;
+  const { error } = await supabase
+    .from('episode_character_mapping')
+    .update(patch)
+    .eq('episode_id', ep.id as string)
+    .eq('character_id', characterId);
+  if (error) throw error;
+}
+
+/**
+ * 캐릭터 현황판 Realtime 구독 — 메인 프로세스에서 한 번 호출.
+ * 한 채널 'public:character_board' 에서 세 테이블 postgres_changes 구독.
+ * payload 에 table 판별자 포함 → 렌더러가 어느 엔티티 변경인지 구분.
+ *
+ * cleanup 함수 반환.
+ */
+export function startCharacterBoardRealtime(
+  broadcast: (payload: {
+    table: 'characters' | 'character_costumes' | 'episode_character_mapping';
+    eventType: 'INSERT' | 'UPDATE' | 'DELETE';
+    row: Record<string, unknown> | null;
+    old: Record<string, unknown> | null;
+  }) => void,
+): () => void {
+  const tables = ['characters', 'character_costumes', 'episode_character_mapping'] as const;
+  let channel = supabase.channel('public:character_board');
+  for (const table of tables) {
+    channel = channel.on(
+      'postgres_changes',
+      { event: '*', schema: 'public', table },
+      (payload) => {
+        broadcast({
+          table,
+          eventType: payload.eventType as 'INSERT' | 'UPDATE' | 'DELETE',
+          row: (payload.new ?? null) as Record<string, unknown> | null,
+          old: (payload.old ?? null) as Record<string, unknown> | null,
+        });
+      },
+    );
+  }
+  channel.subscribe();
   return () => {
     supabase.removeChannel(channel);
   };

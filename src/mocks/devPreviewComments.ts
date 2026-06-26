@@ -7,6 +7,9 @@ export interface DevPreviewCommentRow {
   id: string;
   partId: string;
   sceneId: string;
+  /** 캐릭터 현황판 댓글이면 캐릭터 id (씬 댓글은 undefined/null). */
+  characterId?: string | null;
+  costumeId?: string | null;
   userId: string;
   userName: string;
   text: string;

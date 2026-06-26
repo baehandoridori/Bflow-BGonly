@@ -17,6 +17,7 @@ const VacationView = lazy(() => import('@/views/VacationView').then(m => ({ defa
 const CompositingView = lazy(() => import('@/views/CompositingView')); // default export — 기존 리테이크 보드 (v1.30.0~ 'compositing-revisions' 로 이관)
 const CompositingDashboardView = lazy(() => import('@/views/CompositingDashboardView')); // v1.30.0+ 새 현황 대시보드
 const RetakeHubView = lazy(() => import('@/views/RetakeHubView')); // 리테이크 허브 5단계 — 감독 세트 허브
+const CharacterBoardView = lazy(() => import('@/views/CharacterBoardView')); // 캐릭터 현황판 (게이팅)
 const SettingsView = lazy(() => import('@/views/SettingsView').then(m => ({ default: m.SettingsView })));
 import { SpotlightSearch } from '@/components/spotlight/SpotlightSearch';
 import { LoginScreen } from '@/components/auth/LoginScreen';
@@ -52,6 +53,7 @@ import { WelcomeToast } from '@/components/WelcomeToast';
 import { UpdateCenterModal } from '@/components/update/UpdateCenterModal';
 import { getGreeting, isFirstLogin, markFirstLoginShown } from '@/utils/greetings';
 import { useGlobalShortcuts } from '@/hooks/useGlobalShortcuts';
+import { useCharacterBoardAccess } from '@/hooks/useCharacterBoardAccess';
 import { installEditableFocusRecovery } from '@/utils/editableFocus';
 import { DEFAULT_GAS_IMAGE_URL, DEFAULT_VACATION_URL } from '@/config';
 import { Toaster, toast as sonnerToast } from 'sonner';
@@ -107,6 +109,9 @@ export default function App() {
     isAdminMode, setAdminMode,
     showPasswordChange, showUserManager, setShowUserManager,
   } = useAuthStore();
+
+  // 캐릭터 현황판 접근 권한 — 사이드바 메뉴뿐 아니라 뷰 렌더도 게이팅(공유 PC에서 뷰가 잔존해 다음 사용자에게 노출되는 것 방지).
+  const hasCharacterBoardAccess = useCharacterBoardAccess();
 
   // Sonner 토스트 브릿지: 기존 setToast 호출을 Sonner로 전달
   const setStoreToast = useAppStore((s) => s.setToast);
@@ -2032,6 +2037,13 @@ export default function App() {
           revisionId?: string | null;
         };
         const me = useAuthStore.getState().currentUser;
+        // 캐릭터 댓글 broadcast(sceneId='char:{id}') 는 씬 알림 네비게이션이 없음 → 멘션/답글 알림 스킵, 캐시만 무효화.
+        //   (캐릭터 현황판 상세에서 직접 확인. 씬 알림으로 잘못 흘러가 깨진 이동 링크가 뜨던 문제 차단.)
+        if (typeof commentSceneNumber === 'string' && commentSceneNumber.startsWith('char:')) {
+          invalidatePartCache();
+          window.dispatchEvent(new Event('bflow:comments-invalidated'));
+          return;
+        }
         if (commentRevisionId) {
           dispatchRevisionCommentNotification({
             id: commentCid,
@@ -2128,6 +2140,21 @@ export default function App() {
       }
 
       if (data.event === 'data-change') {
+        const changedTable = (data.payload as { table?: string } | undefined)?.table;
+        if (changedTable === 'users') {
+          // 권한/사용자 변경 → 사용자 목록 재로드 + 현재 세션 role 갱신(관리자 승격·강등을 재시작 없이 즉시 반영).
+          loadUsers().then((freshUsers) => {
+            setUsers(freshUsers);
+            const me = useAuthStore.getState().currentUser;
+            if (me) {
+              const updated = freshUsers.find((u) => u.id === me.id);
+              if (updated && updated.role !== me.role) {
+                useAuthStore.getState().setCurrentUser({ ...me, role: updated.role });
+              }
+            }
+          }).catch((e) => console.warn('[Broadcast] users 변경 재로드 실패:', e));
+          return;
+        }
         // 구조적 변경 (씬/파트/에피소드 추가/삭제) → 디바운스 full reload
         if (reloadTimer) clearTimeout(reloadTimer);
         reloadTimer = setTimeout(() => {
@@ -2458,6 +2485,8 @@ export default function App() {
           return <CompositingView />;
         case 'retake-hub':
           return <RetakeHubView />;
+        case 'character-board':
+          return hasCharacterBoardAccess ? <CharacterBoardView /> : <Dashboard />;
         case 'settings':
           return <SettingsView />;
         default:
