@@ -24,6 +24,7 @@ import {
   type CostumeRiggingStage,
 } from '@/types';
 import { uploadCharacterImage } from '@/services/supabaseService';
+import { deleteImage } from '@/services/storageService';
 import { resizeBlob } from '@/utils/imageUtils';
 import { cn } from '@/utils/cn';
 import { EpisodeAssetBoard } from './EpisodeAssetBoard';
@@ -310,6 +311,11 @@ function FeaturedImageSlot({
       if (!res.ok || !res.url) throw new Error(res.error ?? '업로드 실패');
       // 이전 대표 이미지 정리는 서버(updateCharacterCostume)가 DB 업데이트 성공 후 처리 — 롤백 시 깨진 URL 방지.
       await updateCostumeField(costume.id, { featuredImageUrl: res.url });
+      // 업로드는 됐는데 DB 반영이 실패(롤백)하면 방금 올린 파일이 고아가 됨 → 정리.
+      const saved = useCharacterBoardStore.getState().costumes.find((c) => c.id === costume.id)?.featuredImageUrl;
+      if (saved !== res.url) {
+        deleteImage(res.url).catch((e) => console.warn('[character-board] 실패한 업로드 정리:', e));
+      }
     } catch (err) {
       console.error('[character-board] 이미지 업로드 실패:', err);
       toast.error('이미지 업로드에 실패했어요');
