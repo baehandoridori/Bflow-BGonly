@@ -364,6 +364,25 @@ function FeaturedImageSlot({
   );
 }
 
+/** 복장 메모 — 키 입력마다 저장 말고 blur 때 한 번만(동시 쓰기 경합·텍스트 유실 방지). */
+function CostumeMemoInput({ value, onCommit }: { value: string; onCommit: (next: string) => void }) {
+  const [draft, setDraft] = useState(value);
+  const focused = useRef(false);
+  useEffect(() => { if (!focused.current) setDraft(value); }, [value]);
+  return (
+    <textarea
+      value={draft}
+      onChange={(e) => setDraft(e.target.value)}
+      onFocus={() => { focused.current = true; }}
+      onBlur={() => { focused.current = false; if (draft !== value) onCommit(draft); }}
+      placeholder="이 디자인 메모…"
+      aria-label="디자인 메모"
+      rows={3}
+      className="w-full bg-bg-border/20 border border-bg-border rounded-lg px-2.5 py-2 text-xs text-text-primary outline-none focus:border-accent/50 resize-none leading-relaxed"
+    />
+  );
+}
+
 /** 이미지 아래 — 이 복장이 무슨 디자인인지(이름, 편집 가능) + 디자인별 메모. */
 function CostumeIdentity({ costume }: { costume: CharacterCostume }) {
   const updateCostumeField = useCharacterBoardStore((s) => s.updateCostumeField);
@@ -400,13 +419,9 @@ function CostumeIdentity({ costume }: { costume: CharacterCostume }) {
           </>
         )}
       </div>
-      <textarea
+      <CostumeMemoInput
         value={costume.memo ?? ''}
-        onChange={(e) => updateCostumeField(costume.id, { memo: e.target.value || null })}
-        placeholder="이 디자인 메모…"
-        aria-label="디자인 메모"
-        rows={3}
-        className="w-full bg-bg-border/20 border border-bg-border rounded-lg px-2.5 py-2 text-xs text-text-primary outline-none focus:border-accent/50 resize-none leading-relaxed"
+        onCommit={(next) => updateCostumeField(costume.id, { memo: next.trim() ? next : null })}
       />
     </div>
   );

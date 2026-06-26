@@ -1590,7 +1590,8 @@ export function CommentPanel({
         try { URL.revokeObjectURL(item.previewUrl); } catch { /* ignore */ }
       });
 
-      if (mentions.length > 0 && currentUser.slackId) {
+      // 캐릭터 스레드 답글은 씬 deeplink 가 없으므로 슬랙 웹훅 스킵(상위 작성 경로와 동일 가드).
+      if (!characterCommentKey && mentions.length > 0 && currentUser.slackId) {
         const { sheetName: threadSheetName, sceneId: threadSceneId } = parseSceneKey(targetSceneKey);
         const parts = threadSheetName.match(/^EP(\d+)_([A-Z])_/);
         const epLabel = parts ? `EP.${parts[1].padStart(2, '0')}` : threadSheetName;

@@ -49,6 +49,15 @@ function topRiggingStage(costumes: CharacterCostume[]): CostumeRiggingStage | nu
   return best >= 0 ? COSTUME_RIGGING_STAGES[best] : null;
 }
 
+/** 이 편이 특정 복장을 쓰면 그 복장의 리깅 단계, 복장 미정이면 전체 중 최고(대략 표시). */
+function episodeRiggingStage(costumes: CharacterCostume[], costumeId: string | null): CostumeRiggingStage | null {
+  if (costumeId) {
+    const picked = costumes.find((c) => c.id === costumeId);
+    if (picked) return picked.riggingStage;
+  }
+  return topRiggingStage(costumes);
+}
+
 function StaticTag({ tag }: { tag: string }) {
   const c = tagColor(tag);
   return (
@@ -96,18 +105,20 @@ function MemoInput({ value, onCommit }: { value: string; onCommit: (next: string
 function EpisodeCharRow({
   character,
   costumes,
-  costumeName,
+  costumeId,
   selected,
   onSelect,
 }: {
   character: Character;
   costumes: CharacterCostume[];
-  costumeName: string | null;
+  costumeId: string | null;
   selected: boolean;
   onSelect: () => void;
 }) {
   const thumb = characterThumb(costumes);
-  const rigging = topRiggingStage(costumes);
+  const selectedCostume = costumeId ? costumes.find((c) => c.id === costumeId) ?? null : null;
+  const costumeName = selectedCostume?.name ?? null;
+  const rigging = episodeRiggingStage(costumes, costumeId);
   return (
     <button
       type="button"
@@ -164,7 +175,7 @@ function EpisodeCharDetail({
   const selectedCostume = costumes.find((c) => c.id === costumeId) ?? null;
   const hero = selectedCostume?.featuredImageUrl ?? characterThumb(costumes);
   const tags = unionTags(costumes);
-  const rigging = topRiggingStage(costumes);
+  const rigging = episodeRiggingStage(costumes, costumeId);
 
   return (
     <div className="flex flex-col h-full min-h-0">
@@ -379,10 +390,9 @@ export function EpisodeAssetBoard({ onOpenCharacter }: { onOpenCharacter?: (id: 
 
   const selectedChar = linkedCharacters.find((c) => c.id === selectedCharId) ?? null;
 
-  function costumeNameFor(characterId: string): string | null {
+  function costumeIdFor(characterId: string): string | null {
     const link = (episodeLinks.get(characterId) ?? []).find((l) => l.episodeNumber === selectedEp);
-    if (!link?.costumeId) return null;
-    return (byCharacter.get(characterId) ?? []).find((c) => c.id === link.costumeId)?.name ?? null;
+    return link?.costumeId ?? null;
   }
 
   if (sortedEpisodes.length === 0) {
@@ -429,7 +439,7 @@ export function EpisodeAssetBoard({ onOpenCharacter }: { onOpenCharacter?: (id: 
                   key={c.id}
                   character={c}
                   costumes={byCharacter.get(c.id) ?? []}
-                  costumeName={costumeNameFor(c.id)}
+                  costumeId={costumeIdFor(c.id)}
                   selected={c.id === selectedCharId}
                   onSelect={() => setSelectedCharId(c.id)}
                 />
