@@ -419,8 +419,11 @@ export const useCharacterBoardStore = create<CharacterBoardStore>((set, get) => 
       const incoming = rowToCharacter(row);
       set((s) => {
         const existing = s.characters.find((c) => c.id === incoming.id);
-        // episodeIds 는 매핑 테이블 소관 — 기존 값 보존.
-        const merged = { ...incoming, episodeIds: existing?.episodeIds ?? [] };
+        // episodeIds 는 매핑 테이블 소관 — 기존 값 보존. 신규 캐릭터인데 매핑이 먼저 도착했으면 episodeLinks 에서 파생.
+        const linkEpisodeIds = (s.episodeLinks.get(incoming.id) ?? [])
+          .map((l) => l.episodeNumber)
+          .sort((a, b) => a - b);
+        const merged = { ...incoming, episodeIds: existing?.episodeIds ?? linkEpisodeIds };
         return {
           characters: existing
             ? s.characters.map((c) => (c.id === incoming.id ? merged : c))
