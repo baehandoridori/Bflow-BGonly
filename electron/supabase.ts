@@ -1328,6 +1328,7 @@ export async function fetchMissedMentions(
       .select('*')
       .gt('created_at', since)
       .neq('user_id', userId)
+      .is('character_id', null)  // 캐릭터 댓글은 씬 멘션 catch-up 에서 제외(씬 네비게이션이 없어 깨진 알림 방지).
       .order('created_at', { ascending: false })
       .range(pageOffset, pageOffset + PAGE_SIZE - 1);
     if (error) throw new Error(`fetchMissedMentions failed: ${error.message}`);

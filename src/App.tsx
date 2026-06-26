@@ -53,6 +53,7 @@ import { WelcomeToast } from '@/components/WelcomeToast';
 import { UpdateCenterModal } from '@/components/update/UpdateCenterModal';
 import { getGreeting, isFirstLogin, markFirstLoginShown } from '@/utils/greetings';
 import { useGlobalShortcuts } from '@/hooks/useGlobalShortcuts';
+import { useCharacterBoardAccess } from '@/hooks/useCharacterBoardAccess';
 import { installEditableFocusRecovery } from '@/utils/editableFocus';
 import { DEFAULT_GAS_IMAGE_URL, DEFAULT_VACATION_URL } from '@/config';
 import { Toaster, toast as sonnerToast } from 'sonner';
@@ -108,6 +109,9 @@ export default function App() {
     isAdminMode, setAdminMode,
     showPasswordChange, showUserManager, setShowUserManager,
   } = useAuthStore();
+
+  // 캐릭터 현황판 접근 권한 — 사이드바 메뉴뿐 아니라 뷰 렌더도 게이팅(공유 PC에서 뷰가 잔존해 다음 사용자에게 노출되는 것 방지).
+  const hasCharacterBoardAccess = useCharacterBoardAccess();
 
   // Sonner 토스트 브릿지: 기존 setToast 호출을 Sonner로 전달
   const setStoreToast = useAppStore((s) => s.setToast);
@@ -2467,7 +2471,7 @@ export default function App() {
         case 'retake-hub':
           return <RetakeHubView />;
         case 'character-board':
-          return <CharacterBoardView />;
+          return hasCharacterBoardAccess ? <CharacterBoardView /> : <Dashboard />;
         case 'settings':
           return <SettingsView />;
         default:
