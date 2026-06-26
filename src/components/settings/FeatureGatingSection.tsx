@@ -48,6 +48,13 @@ function parseConfig(raw: unknown): FeatureAccessConfig {
   }
 }
 
+/** 두 접근 설정이 같은지 — 롤백이 더 나중 저장을 덮지 않도록 비교용. */
+function sameAccess(a: FeatureAccessConfig, b: FeatureAccessConfig): boolean {
+  return a.allowAdmin === b.allowAdmin
+    && a.userIds.length === b.userIds.length
+    && a.userIds.every((id) => b.userIds.includes(id));
+}
+
 function FeatureRow({ featureKey, label }: { featureKey: string; label: string }) {
   const allUsers = useAuthStore((s) => s.users);
   const [config, setConfig] = useState<FeatureAccessConfig | null>(null);
@@ -96,7 +103,8 @@ function FeatureRow({ featureKey, label }: { featureKey: string; label: string }
       window.dispatchEvent(new Event('bflow:feature-access-changed'));
     } catch (err) {
       console.error('[FeatureGatingSection] 저장 실패:', err);
-      setConfig(prev);
+      // 더 나중 저장이 이미 다른 값으로 덮었으면(superseded) 되돌리지 않음 — 실패한 이 저장의 낙관값일 때만 롤백.
+      setConfig((cur) => (cur && sameAccess(cur, next) ? prev : cur));
       toast.error('기능 노출 설정 저장에 실패했어요');
     } finally {
       setSaving(false);

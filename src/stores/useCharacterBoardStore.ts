@@ -507,13 +507,30 @@ async function applyCostumeUpdate(
   logContext?: CostumeActivityLogContext,
 ): Promise<void> {
   const prev = get().costumes;
+  const prevCostume = prev.find((c) => c.id === id);
   const next = prev.map((c) => (c.id === id ? { ...c, ...updates } : c));
   set({ costumes: next, byCharacter: buildByCharacter(next) });
   try {
     await svcUpdateCostume(id, updates, logContext);
   } catch (err) {
     console.error('[character-board] updateCostume 실패:', err);
-    set({ costumes: prev, byCharacter: buildByCharacter(prev) });
+    // 전체 스냅샷을 되돌리면 그 사이 성공한 다른 업데이트/실시간 머지를 덮어쓴다.
+    //   이 업데이트가 바꾼 필드만, 그것도 아직 우리 낙관값 그대로일 때만(더 나중 편집이 없을 때) 이전 값으로 되돌린다.
+    if (prevCostume) {
+      const cur = get().costumes;
+      const updRec = updates as unknown as Record<string, unknown>;
+      const prevRec = prevCostume as unknown as Record<string, unknown>;
+      const reverted = cur.map((c) => {
+        if (c.id !== id) return c;
+        const curRec = c as unknown as Record<string, unknown>;
+        const restored: Record<string, unknown> = { ...curRec };
+        for (const k of Object.keys(updates)) {
+          if (curRec[k] === updRec[k]) restored[k] = prevRec[k];
+        }
+        return restored as unknown as CharacterCostume;
+      });
+      set({ costumes: reverted, byCharacter: buildByCharacter(reverted) });
+    }
     toast.error(errorMsg);
   }
 }
