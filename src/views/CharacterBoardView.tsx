@@ -383,6 +383,25 @@ function CostumeMemoInput({ value, onCommit }: { value: string; onCommit: (next:
   );
 }
 
+/** 담당자 — 키 입력마다 저장 말고 blur/Enter 때 한 번만(동시 쓰기 경합·이름 잘림 방지). */
+function CostumeAssigneeInput({ value, onCommit }: { value: string; onCommit: (next: string) => void }) {
+  const [draft, setDraft] = useState(value);
+  const focused = useRef(false);
+  useEffect(() => { if (!focused.current) setDraft(value); }, [value]);
+  return (
+    <input
+      value={draft}
+      onChange={(e) => setDraft(e.target.value)}
+      onFocus={() => { focused.current = true; }}
+      onBlur={() => { focused.current = false; if (draft !== value) onCommit(draft); }}
+      onKeyDown={(e) => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); }}
+      placeholder="담당자"
+      aria-label="담당자"
+      className="bg-transparent border border-bg-border rounded-md px-2 py-1.5 text-sm text-text-primary outline-none focus:border-accent/50 w-44"
+    />
+  );
+}
+
 /** 이미지 아래 — 이 복장이 무슨 디자인인지(이름, 편집 가능) + 디자인별 메모. */
 function CostumeIdentity({ costume }: { costume: CharacterCostume }) {
   const updateCostumeField = useCharacterBoardStore((s) => s.updateCostumeField);
@@ -469,12 +488,9 @@ function CostumeDetail({ costume }: { costume: CharacterCostume }) {
         </div>
         <div className="flex flex-col gap-1.5">
           <div className="text-xs text-text-secondary">담당자</div>
-          <input
+          <CostumeAssigneeInput
             value={costume.assignee ?? ''}
-            onChange={(e) => updateCostumeField(costume.id, { assignee: e.target.value || null })}
-            placeholder="담당자"
-            aria-label="담당자"
-            className="bg-transparent border border-bg-border rounded-md px-2 py-1.5 text-sm text-text-primary outline-none focus:border-accent/50 w-44"
+            onCommit={(next) => updateCostumeField(costume.id, { assignee: next.trim() ? next : null })}
           />
         </div>
       </div>

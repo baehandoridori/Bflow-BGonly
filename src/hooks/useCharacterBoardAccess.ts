@@ -44,10 +44,18 @@ export function useCharacterBoardAccess(): boolean {
 
   useEffect(() => {
     let cancelled = false;
-    readMetadataFromSupabase('feature-access', 'character-board')
-      .then((row) => { if (!cancelled) setConfig(parseConfig(row)); })
-      .catch(() => { if (!cancelled) setConfig({ userIds: [], allowAdmin: false }); }); // 실패 시 차단(fail-closed).
-    return () => { cancelled = true; };
+    const load = () => {
+      readMetadataFromSupabase('feature-access', 'character-board')
+        .then((row) => { if (!cancelled) setConfig(parseConfig(row)); })
+        .catch(() => { if (!cancelled) setConfig({ userIds: [], allowAdmin: false }); }); // 실패 시 차단(fail-closed).
+    };
+    load();
+    // 권한·노출(metadata) 변경 브로드캐스트 → 즉시 재조회. 실행 중 클라이언트도 회수/부여를 재시작 없이 반영.
+    const unsub = window.electronAPI?.onSupabaseBroadcast?.((event: unknown) => {
+      const e = event as { event?: string; payload?: { table?: string } } | null;
+      if (e?.event === 'data-change' && e.payload?.table === 'metadata') load();
+    });
+    return () => { cancelled = true; if (unsub) unsub(); };
   }, []);
 
   // 서버 확인 전(config === null) 에는 차단 — stale grant 노출 방지.
