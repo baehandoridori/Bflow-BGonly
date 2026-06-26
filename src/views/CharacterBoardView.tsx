@@ -653,7 +653,11 @@ function CharacterDetailPanel({
   const shownImage = activeCostume?.featuredImageUrl ?? fallbackImage;
 
   const handleAddCostume = async () => {
-    const created = await addCostume(character.id, `복장 ${costumes.length + 1}`);
+    // 중간 복장 삭제 후에도 UNIQUE(character_id, name) 충돌하지 않도록 안 쓰는 번호 생성.
+    const used = new Set(costumes.map((c) => c.name));
+    let n = costumes.length + 1;
+    while (used.has(`복장 ${n}`)) n++;
+    const created = await addCostume(character.id, `복장 ${n}`);
     if (created) setActiveCostumeId(created.id);
   };
 

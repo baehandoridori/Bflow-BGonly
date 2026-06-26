@@ -2033,6 +2033,13 @@ export default function App() {
           revisionId?: string | null;
         };
         const me = useAuthStore.getState().currentUser;
+        // 캐릭터 댓글 broadcast(sceneId='char:{id}') 는 씬 알림 네비게이션이 없음 → 멘션/답글 알림 스킵, 캐시만 무효화.
+        //   (캐릭터 현황판 상세에서 직접 확인. 씬 알림으로 잘못 흘러가 깨진 이동 링크가 뜨던 문제 차단.)
+        if (typeof commentSceneNumber === 'string' && commentSceneNumber.startsWith('char:')) {
+          invalidatePartCache();
+          window.dispatchEvent(new Event('bflow:comments-invalidated'));
+          return;
+        }
         if (commentRevisionId) {
           dispatchRevisionCommentNotification({
             id: commentCid,
