@@ -24,7 +24,6 @@ import {
   type CostumeRiggingStage,
 } from '@/types';
 import { uploadCharacterImage } from '@/services/supabaseService';
-import { deleteImage } from '@/services/storageService';
 import { resizeBlob } from '@/utils/imageUtils';
 import { cn } from '@/utils/cn';
 import { EpisodeAssetBoard } from './EpisodeAssetBoard';
@@ -305,16 +304,12 @@ function FeaturedImageSlot({
   const handleUpload = useCallback(async (file: File) => {
     if (!costume) { toast.error('먼저 디자인(복장)을 추가해주세요'); return; }
     setUploading(true);
-    const prevUrl = costume.featuredImageUrl ?? null;
     try {
       const base64 = await resizeBlob(file, 800, 0.8);
       const res = await uploadCharacterImage(character.id, costume.id, base64);
       if (!res.ok || !res.url) throw new Error(res.error ?? '업로드 실패');
+      // 이전 대표 이미지 정리는 서버(updateCharacterCostume)가 DB 업데이트 성공 후 처리 — 롤백 시 깨진 URL 방지.
       await updateCostumeField(costume.id, { featuredImageUrl: res.url });
-      // 교체 성공 시 이전 대표 이미지 객체 정리(고아 파일 방지). 새 URL과 다를 때만.
-      if (prevUrl && prevUrl !== res.url) {
-        deleteImage(prevUrl).catch((e) => console.warn('[character-board] 이전 대표 이미지 정리 실패:', e));
-      }
     } catch (err) {
       console.error('[character-board] 이미지 업로드 실패:', err);
       toast.error('이미지 업로드에 실패했어요');

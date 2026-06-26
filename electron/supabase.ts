@@ -3921,10 +3921,11 @@ export async function deleteCharacter(id: string): Promise<void> {
     const imgs = (r as { images?: unknown }).images;
     if (Array.isArray(imgs)) for (const u of imgs) if (typeof u === 'string') urls.push(u);
   }
-  await removeCharacterStorageByUrl(urls);
-
+  // DB row 삭제(cascade) 먼저 — 실패 시 throw 하고 스토리지는 건드리지 않아, 롤백된 row 가 깨진 URL 을 가리키지 않게 한다.
   const { error } = await supabase.from('characters').delete().eq('id', id);
   if (error) throw error;
+  // 삭제 성공 후에만 스토리지 자산 정리.
+  await removeCharacterStorageByUrl(urls);
 }
 
 /** 복장 추가 (INSERT). sort_order 는 해당 캐릭터 내 최대값 +1. */
@@ -3960,6 +3961,16 @@ export async function updateCharacterCostume(
   id: string,
   updates: Record<string, unknown>,
 ): Promise<CharacterCostumeRow> {
+  // featured_image_url 교체 시 이전 객체를 정리하려고 기존 값을 먼저 읽어둔다(이미지 변경일 때만).
+  let prevImageUrl: string | null = null;
+  if ('featured_image_url' in updates) {
+    const { data: cur } = await supabase
+      .from('character_costumes')
+      .select('featured_image_url')
+      .eq('id', id)
+      .maybeSingle();
+    prevImageUrl = (cur as { featured_image_url?: string | null } | null)?.featured_image_url ?? null;
+  }
   const { data, error } = await supabase
     .from('character_costumes')
     .update({ ...updates, updated_at: new Date().toISOString() })
@@ -3967,6 +3978,11 @@ export async function updateCharacterCostume(
     .select('*')
     .single();
   if (error) throw error;
+  // DB 업데이트 성공 후에만 이전 대표 이미지 정리(롤백 시 깨진 URL 방지). 실제로 바뀐 경우만.
+  const newImageUrl = (updates as { featured_image_url?: string | null }).featured_image_url ?? null;
+  if (prevImageUrl && prevImageUrl !== newImageUrl) {
+    await removeCharacterStorageByUrl([prevImageUrl]);
+  }
   return data as CharacterCostumeRow;
 }
 
@@ -3977,10 +3993,10 @@ export async function deleteCharacterCostume(id: string): Promise<void> {
     .select('featured_image_url')
     .eq('id', id)
     .maybeSingle();
-  await removeCharacterStorageByUrl([(row as { featured_image_url?: string | null } | null)?.featured_image_url]);
-
   const { error } = await supabase.from('character_costumes').delete().eq('id', id);
   if (error) throw error;
+  // 삭제 성공 후에만 대표 이미지 객체 정리.
+  await removeCharacterStorageByUrl([(row as { featured_image_url?: string | null } | null)?.featured_image_url]);
 }
 
 /** 캐릭터-에피소드 연결 (UPSERT, onConflict 'episode_id,character_id'). episodeNumber → episode_id 해석. */
