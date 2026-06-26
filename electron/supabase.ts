@@ -3135,10 +3135,11 @@ async function fetchCommentContext(commentId: string): Promise<{
   episodeNumber?: number;
   dept?: string;
   commentPreview?: string;
+  characterId?: string;
 } | null> {
   const { data: comment, error } = await supabase
     .from('comments')
-    .select('user_id, user_name, scene_id, scene_uuid, part_id, text, revision_id')
+    .select('user_id, user_name, scene_id, scene_uuid, part_id, text, revision_id, character_id')
     .eq('id', commentId)
     .maybeSingle();
   if (error || !comment) return null;
@@ -3171,6 +3172,7 @@ async function fetchCommentContext(commentId: string): Promise<{
     episodeNumber,
     dept,
     commentPreview: (comment.text ?? '').slice(0, 30),
+    characterId: comment.character_id ?? undefined,
   };
 }
 
@@ -3201,6 +3203,9 @@ export async function addCommentReaction(
     console.warn('[addCommentReaction] 고아 reaction 감지 — comment 조회 실패:', commentId);
     return;
   }
+
+  // 캐릭터 댓글 반응은 씬 기반 활동/알림(씬 네비게이션) 경로가 없으므로 스킵 — 이모지 칩만 반영.
+  if (ctx.characterId) return;
 
   // 3) 활동 로그 INSERT — 자기 자신이어도 다른 사용자가 보는 최근 작업 위젯에 표시되도록.
   //   코덱스 10차 P1: activities 가 아니라 activity_log 테이블 + record_activity RPC 사용.

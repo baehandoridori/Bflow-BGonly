@@ -2140,6 +2140,21 @@ export default function App() {
       }
 
       if (data.event === 'data-change') {
+        const changedTable = (data.payload as { table?: string } | undefined)?.table;
+        if (changedTable === 'users') {
+          // 권한/사용자 변경 → 사용자 목록 재로드 + 현재 세션 role 갱신(관리자 승격·강등을 재시작 없이 즉시 반영).
+          loadUsers().then((freshUsers) => {
+            setUsers(freshUsers);
+            const me = useAuthStore.getState().currentUser;
+            if (me) {
+              const updated = freshUsers.find((u) => u.id === me.id);
+              if (updated && updated.role !== me.role) {
+                useAuthStore.getState().setCurrentUser({ ...me, role: updated.role });
+              }
+            }
+          }).catch((e) => console.warn('[Broadcast] users 변경 재로드 실패:', e));
+          return;
+        }
         // 구조적 변경 (씬/파트/에피소드 추가/삭제) → 디바운스 full reload
         if (reloadTimer) clearTimeout(reloadTimer);
         reloadTimer = setTimeout(() => {
