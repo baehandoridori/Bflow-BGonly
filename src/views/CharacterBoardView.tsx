@@ -28,6 +28,8 @@ import { resizeBlob } from '@/utils/imageUtils';
 import { cn } from '@/utils/cn';
 import { EpisodeAssetBoard } from './EpisodeAssetBoard';
 import { tagColor } from '@/utils/tagColor';
+import { CommentPanel } from '@/components/scenes/CommentPanel';
+import { CommentPanelErrorBoundary } from '@/components/common/CommentPanelErrorBoundary';
 
 type BoardTab = 'board' | 'episode-assets';
 
@@ -749,6 +751,20 @@ function CharacterDetailPanel({
                 복장이 없습니다. "디자인 추가"로 첫 복장을 만들어보세요.
               </div>
             )}
+          </div>
+        </div>
+
+        {/* 이 캐릭터에 대한 이야기 — 캐릭터 단위 댓글 스레드 (씬 댓글 시스템 재사용). */}
+        <div className="mt-6">
+          <div className="text-xs text-text-secondary mb-2">이 캐릭터에 대한 이야기</div>
+          <div className="rounded-xl border border-bg-border bg-bg-card/40 overflow-hidden" style={{ height: 460 }}>
+            <CommentPanelErrorBoundary panelId="character" key={character.id}>
+              <CommentPanel
+                sceneKey={`char:${character.id}`}
+                characterThread={{ characterId: character.id, characterName: character.name }}
+                sceneLabel={character.name}
+              />
+            </CommentPanelErrorBoundary>
           </div>
         </div>
       </div>

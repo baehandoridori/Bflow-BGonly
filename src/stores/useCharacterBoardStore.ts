@@ -232,10 +232,14 @@ export const useCharacterBoardStore = create<CharacterBoardStore>((set, get) => 
   deleteCharacter: async (id) => {
     const prevChars = get().characters;
     const prevCostumes = get().costumes;
+    const prevLinks = get().episodeLinks;
+    const nextCostumes = prevCostumes.filter((c) => c.characterId !== id);
+    const nextLinks = new Map(prevLinks); nextLinks.delete(id);
     set({
       characters: prevChars.filter((c) => c.id !== id),
-      costumes: prevCostumes.filter((c) => c.characterId !== id),
-      byCharacter: buildByCharacter(prevCostumes.filter((c) => c.characterId !== id)),
+      costumes: nextCostumes,
+      byCharacter: buildByCharacter(nextCostumes),
+      episodeLinks: nextLinks,
     });
     try {
       await svcDeleteCharacter(id);
@@ -245,6 +249,7 @@ export const useCharacterBoardStore = create<CharacterBoardStore>((set, get) => 
         characters: prevChars,
         costumes: prevCostumes,
         byCharacter: buildByCharacter(prevCostumes),
+        episodeLinks: prevLinks,
       });
       toast.error('캐릭터 삭제에 실패했어요');
     }
@@ -394,10 +399,12 @@ export const useCharacterBoardStore = create<CharacterBoardStore>((set, get) => 
         if (!id) return;
         set((s) => {
           const costumes = s.costumes.filter((c) => c.characterId !== id);
+          const episodeLinks = new Map(s.episodeLinks); episodeLinks.delete(id);
           return {
             characters: s.characters.filter((c) => c.id !== id),
             costumes,
             byCharacter: buildByCharacter(costumes),
+            episodeLinks,
           };
         });
         return;

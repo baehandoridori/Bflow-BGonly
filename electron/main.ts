@@ -1243,6 +1243,7 @@ import {
   updateUser as sbUpdateUser,
   deleteUser as sbDeleteUser,
   readCommentsForPart as sbReadComments,
+  readCommentsForCharacter as sbReadCommentsForCharacter,
   readCommentReadStates as sbReadCommentReadStates,
   upsertCommentReadState as sbUpsertCommentReadState,
   fetchMissedMentions as sbFetchMissedMentions,
@@ -1317,6 +1318,10 @@ import {
 import type { SupabaseUser, BulkStageUpdate, BulkFieldUpdate } from './supabase';
 import { setupRealtimeSubscription, teardownRealtime } from './realtime';
 import { recordActivity, getActivity, channelToTable, channelToAction } from './activityLogger';
+
+// Realtime 구독 cleanup 핸들 — 앱 종료(teardownRealtime) 시 해제해 채널 누수 방지.
+let characterBoardRealtimeCleanup: (() => void) | null = null;
+let compositingStatesRealtimeCleanup: (() => void) | null = null;
 
 // ─── Supabase IPC 에러 래퍼 ───
 function wrapIpc<T extends unknown[], R>(
@@ -1844,6 +1849,11 @@ ipcMain.handle('supabase:read-comments', wrapIpc(async (_e: unknown, partUuid: s
   return sbReadComments(partUuid);
 }));
 
+// 캐릭터 현황판 상세 스레드 — 캐릭터별 댓글 읽기.
+ipcMain.handle('supabase:read-comments-for-character', wrapIpc(async (_e: unknown, characterId: string) => {
+  return sbReadCommentsForCharacter(characterId);
+}));
+
 ipcMain.handle('supabase:read-comment-read-states', wrapIpc(async (_e: unknown, userId: string) => {
   return sbReadCommentReadStates(userId);
 }));
@@ -1869,8 +1879,11 @@ ipcMain.handle('supabase:fetch-missed-mentions', wrapIpc(async (
 }));
 ipcMain.handle('supabase:add-comment', wrapIpc(async (_e: unknown, commentId: string, partUuid: string, sceneId: string,
   userId: string, userName: string, text: string, mentions: string[], createdAt: string, images: string[] = [],
-  revisionId: string | null = null, parentCommentId: string | null = null) => {
-  await sbAddComment(commentId, partUuid, sceneId, userId, userName, text, mentions, createdAt, images, revisionId, parentCommentId);
+  revisionId: string | null = null, parentCommentId: string | null = null,
+  characterId: string | null = null, costumeId: string | null = null) => {
+  await sbAddComment(commentId, partUuid, sceneId, userId, userName, text, mentions, createdAt, images, revisionId, parentCommentId, characterId, costumeId);
+  // 캐릭터 댓글은 씬 기반 활동 기록 경로를 타지 않는다(part/scene 이 없음).
+  if (characterId) return;
   // 활동 기록 — partUuid 로 부서/에피소드 + scene UUID 자동 조회
   // (sceneId 가 TEXT 형식이라 scenes 테이블 조회로 UUID 변환 — 그룹화 정확성 + 부서 필터 통과)
   if (currentActivityUser) {
@@ -2535,7 +2548,7 @@ function startSupabaseRealtime() {
 
   // 3) v1.30.0: 컴포지팅 단계 상태 Realtime 구독
   // spec: docs/superpowers/specs/2026-05-21-compositing-dashboard-design.md
-  sbStartCompositingStatesRealtime((payload) => {
+  compositingStatesRealtimeCleanup = sbStartCompositingStatesRealtime((payload) => {
     if (mainWindow && !mainWindow.isDestroyed()) {
       mainWindow.webContents.send('compositing-states:realtime', payload);
     }
@@ -2545,7 +2558,7 @@ function startSupabaseRealtime() {
   });
 
   // 4) 캐릭터 현황판 Realtime 구독 (characters / character_costumes / episode_character_mapping)
-  sbStartCharacterBoardRealtime((payload) => {
+  characterBoardRealtimeCleanup = sbStartCharacterBoardRealtime((payload) => {
     if (mainWindow && !mainWindow.isDestroyed()) {
       mainWindow.webContents.send('character-board:realtime', payload);
     }
@@ -4163,6 +4176,8 @@ app.on('before-quit', (e) => {
   const watchCleanup = gcal.stopAllWatches().catch(() => {});
 
   // Supabase Realtime 정리
+  try { characterBoardRealtimeCleanup?.(); characterBoardRealtimeCleanup = null; } catch { /* ignore */ }
+  try { compositingStatesRealtimeCleanup?.(); compositingStatesRealtimeCleanup = null; } catch { /* ignore */ }
   teardownRealtime();
 
   // 위젯 위치 즉시 저장 (closed 이벤트보다 먼저 실행)

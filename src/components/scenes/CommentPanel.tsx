@@ -8,6 +8,8 @@ import { useAppStore } from '@/stores/useAppStore';
 import { useRevisionStore } from '@/stores/useRevisionStore';
 import {
   getComments,
+  getCommentsForCharacter,
+  buildCharacterCommentKey,
   addComment,
   updateComment,
   deleteComment,
@@ -69,8 +71,13 @@ export interface CommentInlineEvent {
 }
 
 interface CommentPanelProps {
-  /** 기본 sceneKey. 새 댓글은 항상 이 키에 저장된다 */
+  /** 기본 sceneKey. 새 댓글은 항상 이 키에 저장된다. 캐릭터 스레드 모드면 무시되고 character 경로로 저장된다. */
   sceneKey: string;
+  /**
+   * 캐릭터 현황판 상세 스레드 모드. 값이 있으면 댓글 로드/작성을 캐릭터(character_id) 경로로 처리한다.
+   * 씬(sceneKey/secondarySceneKey) 경로는 이 prop 이 있을 때 전혀 사용되지 않는다.
+   */
+  characterThread?: { characterId: string; characterName?: string };
   /** 통합 뷰 전용 — 이 키의 댓글도 함께 보여주되, 저장은 primary(sceneKey)에만 한다 */
   secondarySceneKey?: string;
   /** 사용자별 읽음 상태 저장에 쓰는 canonical 씬 대화 키 */
@@ -282,6 +289,7 @@ function ThreadReplyButton({
 
 export function CommentPanel({
   sceneKey,
+  characterThread,
   secondarySceneKey,
   sceneThreadKey,
   onCountChange,
@@ -306,8 +314,17 @@ export function CommentPanel({
   const revisions = useRevisionStore((s) => s.revisions);
   const userNames = useMemo(() => users.map((u) => u.name), [users]);
 
-  const { sheetName, sceneId } = useMemo(() => parseSceneKey(sceneKey), [sceneKey]);
-  const effectiveSceneThreadKey = sceneThreadKey ?? sceneKey;
+  // 캐릭터 스레드 모드 — 이 키가 있으면 모든 댓글 로드/작성이 character 경로로 흐른다.
+  const characterId = characterThread?.characterId ?? null;
+  const characterCommentKey = useMemo(
+    () => (characterId ? buildCharacterCommentKey(characterId) : null),
+    [characterId],
+  );
+  // 새 댓글이 저장될 키 — 캐릭터 모드면 char:{id}, 아니면 씬 키. addComment/대댓글/스레드가 공통으로 쓴다.
+  const primaryStorageKey = characterCommentKey ?? sceneKey;
+
+  const { sheetName, sceneId } = useMemo(() => parseSceneKey(primaryStorageKey), [primaryStorageKey]);
+  const effectiveSceneThreadKey = characterCommentKey ?? sceneThreadKey ?? sceneKey;
   const sceneKeyRef = useRef(sceneKey);
   sceneKeyRef.current = sceneKey;
 
@@ -364,7 +381,7 @@ export function CommentPanel({
     setThreadSubmitting(false);
     threadSubmitRequestRef.current = null;
     setThreadMentionTarget(null);
-  }, [sceneKey]);
+  }, [primaryStorageKey]);
   useEffect(() => {
     setThreadInput('');
     threadInputValueRef.current = '';
@@ -593,12 +610,17 @@ export function CommentPanel({
   );
   const quickRevisionHasAttachments = quickRevisionActive && attachedImages.length > 0;
 
-  // 댓글 로드 — primary + optional secondary 시간순 병합 (기존 로직)
+  // 댓글 로드 — primary + optional secondary 시간순 병합 (기존 로직).
+  // 캐릭터 스레드 모드는 character 경로로만 로드하고 secondary 는 무시한다 (씬 키 경로 미사용).
   const loadComments = useCallback(() => {
-    const primaryPromise = getComments(sceneKey).then((list) =>
-      list.map<SceneCommentWithSource>((c) => ({ ...c, _sourceKey: sceneKey })),
-    );
-    const secondaryPromise = secondarySceneKey
+    const primaryPromise = characterId
+      ? getCommentsForCharacter(characterId).then((list) =>
+          list.map<SceneCommentWithSource>((c) => ({ ...c, _sourceKey: characterCommentKey ?? undefined })),
+        )
+      : getComments(sceneKey).then((list) =>
+          list.map<SceneCommentWithSource>((c) => ({ ...c, _sourceKey: sceneKey })),
+        );
+    const secondaryPromise = !characterId && secondarySceneKey
       ? getComments(secondarySceneKey).then((list) =>
           list.map<SceneCommentWithSource>((c) => ({ ...c, _sourceKey: secondarySceneKey })),
         )
@@ -620,7 +642,7 @@ export function CommentPanel({
       const ids = deduped.map((c) => c.id);
       fetchReactionsBulk(ids).then((map) => setReactionsByCommentId(map));
     });
-  }, [sceneKey, secondarySceneKey]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [sceneKey, secondarySceneKey, characterId, characterCommentKey]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => { loadComments(); }, [loadComments]);
 
@@ -1238,7 +1260,7 @@ export function CommentPanel({
       ?? replyParent?._sourceKey
       ?? replyTarget?.storageKey
       ?? replyTarget?._sourceKey
-      ?? sceneKey;
+      ?? primaryStorageKey;
     const comment: SceneCommentWithSource = {
       id: createUuid(),
       userId: currentUser.id,
@@ -1296,8 +1318,8 @@ export function CommentPanel({
         try { URL.revokeObjectURL(a.previewUrl); } catch { /* ignore */ }
       });
 
-      // 슬랙 멘션 웹훅 (기존 로직 보존)
-      if (mentions.length > 0 && currentUser.slackId) {
+      // 슬랙 멘션 웹훅 (기존 로직 보존) — 캐릭터 댓글은 씬 deeplink 가 없으므로 스킵.
+      if (!characterCommentKey && mentions.length > 0 && currentUser.slackId) {
         const parts = sheetName.match(/^EP(\d+)_([A-Z])_/);
         const epLabel = parts ? `EP.${parts[1].padStart(2, '0')}` : sheetName;
         const partLabel = parts ? `${parts[2]}파트` : '';
@@ -1371,7 +1393,7 @@ export function CommentPanel({
   const handleEdit = async (commentId: string) => {
     if (!editText.trim()) return;
     const target = comments.find((c) => c.id === commentId);
-    const targetKey = target?._sourceKey ?? sceneKey;
+    const targetKey = target?.storageKey ?? target?._sourceKey ?? primaryStorageKey;
     const mentions = extractMentions(editText, userNames);
     const existingImages = target?.images;
     const prevComments = [...comments];
@@ -1396,7 +1418,7 @@ export function CommentPanel({
   // 댓글 삭제 (낙관적)
   const handleDelete = async (commentId: string) => {
     const target = comments.find((c) => c.id === commentId);
-    const targetKey = target?._sourceKey ?? sceneKey;
+    const targetKey = target?.storageKey ?? target?._sourceKey ?? primaryStorageKey;
     const prevComments = [...comments];
     const next = comments.filter(c => c.id !== commentId);
 
@@ -1512,7 +1534,7 @@ export function CommentPanel({
     const text = threadInput.trim();
     const submittedThreadAttached = threadAttachedImages;
     const submittedThreadImageUrls = threadUploadedImageUrls;
-    const targetSceneKey = threadRoot?.storageKey ?? threadRoot?._sourceKey ?? sceneKey;
+    const targetSceneKey = threadRoot?.storageKey ?? threadRoot?._sourceKey ?? primaryStorageKey;
     const mentions = extractMentions(text, userNames);
     const threadMentionReplyTarget = buildCommentReplyTarget(comments, threadMentionTarget);
     const threadMentionTargetInCurrentThread =

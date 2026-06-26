@@ -278,6 +278,66 @@ export async function getComments(sceneKey: string): Promise<SceneComment[]> {
   return [...(all[sceneKey] ?? [])];
 }
 
+// ─── 캐릭터 현황판 댓글 (캐릭터 단위 스레드) ─────────────────
+//
+// 씬 댓글(part_id+scene_id)과 같은 comments 테이블/같은 SceneComment 모양을 재사용하되,
+// character_id 로만 묶인다. 씬 경로(parseSceneKey/loadPartComments/getComments)는 일절 건드리지 않는다.
+// CommentPanel 의 _sourceKey 플러밍과 호환되도록 캐릭터 스레드는 `char:{characterId}` sentinel 키를 쓴다.
+
+const CHARACTER_KEY_PREFIX = 'char:';
+
+export function buildCharacterCommentKey(characterId: string): string {
+  return `${CHARACTER_KEY_PREFIX}${characterId}`;
+}
+
+export function isCharacterCommentKey(key: string): boolean {
+  return key.startsWith(CHARACTER_KEY_PREFIX);
+}
+
+function parseCharacterCommentKey(key: string): string | null {
+  return key.startsWith(CHARACTER_KEY_PREFIX) ? key.slice(CHARACTER_KEY_PREFIX.length) : null;
+}
+
+interface RawCharacterCommentRow {
+  id: string;
+  userId: string;
+  userName: string;
+  text: string;
+  mentions?: string[];
+  images?: string[];
+  createdAt: string;
+  editedAt?: string | null;
+  revisionId?: string | null;
+  parentCommentId?: string | null;
+}
+
+/** 캐릭터별 댓글 조회 — Supabase(IPC) 경로. mock/preview 도 같은 IPC 핸들을 구현한다. */
+export async function getCommentsForCharacter(characterId: string): Promise<SceneComment[]> {
+  if (!characterId) return [];
+  const reader = window.electronAPI?.supabaseReadCommentsForCharacter;
+  if (!reader) return [];
+  try {
+    const rows = (await reader(characterId)) as RawCharacterCommentRow[];
+    const storageKey = buildCharacterCommentKey(characterId);
+    return (rows ?? []).map((c) => ({
+      id: c.id,
+      userId: c.userId,
+      userName: c.userName,
+      text: c.text,
+      mentions: c.mentions ?? [],
+      images: c.images,
+      createdAt: c.createdAt,
+      editedAt: c.editedAt || undefined,
+      revisionId: c.revisionId ?? null,
+      parentCommentId: c.parentCommentId ?? null,
+      storageKey,
+    }));
+  } catch (err) {
+    console.warn('[댓글] 캐릭터 댓글 로드 실패:', err);
+    return [];
+  }
+}
+
 export async function getCommentStoreForPart(sheetName: string): Promise<CommentsStore> {
   if (sheetsMode) return loadPartComments(sheetName);
 
@@ -291,6 +351,22 @@ export async function getCommentStoreForPart(sheetName: string): Promise<Comment
 }
 
 export async function addComment(sceneKey: string, comment: SceneComment): Promise<void> {
+  // 캐릭터 스레드 — char:{characterId} sentinel 키면 character_id 경로로 저장.
+  // 씬 분기(parseSceneKey/sheetsMode/local)는 아래 그대로 두고 여기서 일찍 분기한다.
+  const characterId = parseCharacterCommentKey(sceneKey);
+  if (characterId) {
+    await window.electronAPI.supabaseAddComment(
+      comment.id, '', '',
+      comment.userId, comment.userName, comment.text,
+      comment.mentions, comment.createdAt, comment.images ?? [],
+      comment.revisionId ?? null,
+      comment.parentCommentId ?? null,
+      characterId,
+      null,
+    );
+    window.dispatchEvent(new CustomEvent('bflow:comments-invalidated', { detail: { characterId } }));
+    return;
+  }
   if (sheetsMode) {
     const { sheetName, sceneId } = parseSceneKey(sceneKey);
     // Supabase: sheetName → part UUID 해석
@@ -346,6 +422,15 @@ export async function updateComment(
   const imagesPatch: Pick<SceneComment, 'images'> | Record<string, never> =
     images !== undefined ? { images } : {};
 
+  // 캐릭터 스레드 댓글 — commentId 기준 Supabase 수정. 패널은 invalidation 으로 리로드.
+  const editCharacterId = parseCharacterCommentKey(sceneKey);
+  if (editCharacterId) {
+    await window.electronAPI.supabaseEditComment(commentId, text, mentions, images);
+    void imagesPatch; // 캐릭터 경로는 캐시 패치 없이 리로드로 반영.
+    window.dispatchEvent(new CustomEvent('bflow:comments-invalidated', { detail: { characterId: editCharacterId } }));
+    return;
+  }
+
   if (sheetsMode) {
     const { sheetName, sceneId } = parseSceneKey(sceneKey);
     await window.electronAPI.supabaseEditComment(commentId, text, mentions, images);
@@ -372,6 +457,13 @@ export async function updateComment(
 }
 
 export async function deleteComment(sceneKey: string, commentId: string): Promise<void> {
+  // 캐릭터 스레드 댓글 — commentId 기준 Supabase 삭제. 패널은 invalidation 으로 리로드.
+  const deleteCharacterId = parseCharacterCommentKey(sceneKey);
+  if (deleteCharacterId) {
+    await window.electronAPI.supabaseDeleteComment(commentId);
+    window.dispatchEvent(new CustomEvent('bflow:comments-invalidated', { detail: { characterId: deleteCharacterId } }));
+    return;
+  }
   if (sheetsMode) {
     const { sheetName, sceneId } = parseSceneKey(sceneKey);
     await window.electronAPI.supabaseDeleteComment(commentId);

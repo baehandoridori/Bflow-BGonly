@@ -675,7 +675,8 @@ export function installDevElectronAPI(): void {
       if (updates.isActingSupervisor !== undefined) user.isActingSupervisor = updates.isActingSupervisor as boolean;
     },
     supabaseDeleteUser: async () => {},
-    supabaseReadComments: async (partUuid) => getMockCommentRows().filter((comment) => comment.partId === partUuid),
+    supabaseReadComments: async (partUuid) => getMockCommentRows().filter((comment) => comment.partId === partUuid && !comment.characterId),
+    supabaseReadCommentsForCharacter: async (characterId) => getMockCommentRows().filter((comment) => comment.characterId === characterId),
     supabaseReadCommentReadStates: async (userId) => getMockCommentReadStates(userId),
     supabaseUpsertCommentReadState: async (userId, sceneThreadKey, lastReadAt) => {
       const stateRows = getMockCommentReadStates(userId);
@@ -690,12 +691,15 @@ export function installDevElectronAPI(): void {
       localStore.__commentReadStateRows = stateRows;
     },
     supabaseFetchMissedMentions: async () => [],
-    supabaseAddComment: async (commentId, partUuid, sceneId, userId, userName, text, mentions, createdAt, images, revisionId, parentCommentId) => {
+    supabaseAddComment: async (commentId, partUuid, sceneId, userId, userName, text, mentions, createdAt, images, revisionId, parentCommentId, characterId, costumeId) => {
       const comments = getMockCommentRows();
       comments.push({
         id: commentId,
-        partId: partUuid,
-        sceneId,
+        // 캐릭터 댓글이면 part/scene 비우고 character_id 채움 (라이브 DB 동작 미러).
+        partId: characterId ? '' : partUuid,
+        sceneId: characterId ? '' : sceneId,
+        characterId: characterId ?? null,
+        costumeId: costumeId ?? null,
         userId,
         userName,
         text,

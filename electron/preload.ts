@@ -187,6 +187,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.invoke('supabase:delete-user', userId),
   supabaseReadComments: (partUuid: string) =>
     ipcRenderer.invoke('supabase:read-comments', partUuid),
+  supabaseReadCommentsForCharacter: (characterId: string) =>
+    ipcRenderer.invoke('supabase:read-comments-for-character', characterId),
   supabaseReadCommentReadStates: (userId: string) =>
     ipcRenderer.invoke('supabase:read-comment-read-states', userId),
   supabaseUpsertCommentReadState: (userId: string, sceneThreadKey: string, lastReadAt: string) =>
@@ -196,8 +198,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.invoke('supabase:fetch-missed-mentions', userId, userName, since, limit),
   supabaseAddComment: (commentId: string, partUuid: string, sceneId: string,
     userId: string, userName: string, text: string, mentions: string[], createdAt: string, images: string[] = [],
-    revisionId: string | null = null, parentCommentId: string | null = null) =>
-    ipcRenderer.invoke('supabase:add-comment', commentId, partUuid, sceneId, userId, userName, text, mentions, createdAt, images, revisionId, parentCommentId),
+    revisionId: string | null = null, parentCommentId: string | null = null,
+    characterId: string | null = null, costumeId: string | null = null) =>
+    ipcRenderer.invoke('supabase:add-comment', commentId, partUuid, sceneId, userId, userName, text, mentions, createdAt, images, revisionId, parentCommentId, characterId, costumeId),
   supabaseEditComment: (commentId: string, text: string, mentions: string[], images?: string[]) =>
     ipcRenderer.invoke('supabase:edit-comment', commentId, text, mentions, images),
   supabaseDeleteComment: (commentId: string) =>

@@ -136,6 +136,10 @@ export interface SupabaseComment {
   sceneId: string;
   /** 한솔 결정 (v1.15.9): 정확한 씬 매칭용 UUID (catch-up 의 navigateToScene 에서 활용) */
   sceneUuid?: string | null;
+  /** 캐릭터 현황판 댓글이면 해당 캐릭터 id, 씬 댓글이면 null/undefined. */
+  characterId?: string | null;
+  /** 캐릭터 댓글이 특정 복장 맥락이면 복장 id (이번 스레드 분기엔 미사용, 컬럼만 보존). */
+  costumeId?: string | null;
   userId: string;
   userName: string;
   text: string;
@@ -1383,6 +1387,35 @@ export async function readCommentsForPart(partUuid: string): Promise<SupabaseCom
   }));
 }
 
+/**
+ * 캐릭터별 댓글 읽기 (캐릭터 현황판 상세 스레드용).
+ * readCommentsForPart 미러 — 같은 comments 테이블, character_id 로 필터. part_id/scene_id 는 NULL.
+ */
+export async function readCommentsForCharacter(characterId: string): Promise<SupabaseComment[]> {
+  const { data, error } = await supabase
+    .from('comments')
+    .select('*')
+    .eq('character_id', characterId)
+    .order('created_at');
+  throwIfError(error);
+  return (data || []).map((c) => ({
+    id: c.id,
+    partId: c.part_id,
+    sceneId: c.scene_id,
+    characterId: c.character_id ?? null,
+    costumeId: c.costume_id ?? null,
+    userId: c.user_id,
+    userName: c.user_name,
+    text: c.text,
+    mentions: c.mentions || [],
+    images: c.images || [],
+    createdAt: c.created_at,
+    editedAt: c.edited_at,
+    revisionId: c.revision_id ?? null,
+    parentCommentId: c.parent_comment_id ?? null,
+  }));
+}
+
 export async function readCommentReadStates(userId: string): Promise<CommentReadStateRow[]> {
   const safeUserId = userId.trim();
   if (!safeUserId) return [];
@@ -1481,7 +1514,37 @@ export async function addComment(
   revisionId: string | null = null,
   /** v1.24.0: 1단계 대댓글이면 부모 댓글 id, 일반 댓글이면 null. */
   parentCommentId: string | null = null,
+  /** 캐릭터 현황판 댓글이면 캐릭터 id. 값이 있으면 part_id/scene_id 대신 character_id 로 저장한다. */
+  characterId: string | null = null,
+  /** 캐릭터 댓글의 복장 맥락(선택). 이번 스레드 분기엔 미사용. */
+  costumeId: string | null = null,
 ): Promise<void> {
+  // v1.24.0 P1 #9 / P1 #7: parent_comment_id / revision_id 가 null 이면 payload 에서 키 자체 제거.
+  //   self-reference 차단 — 같은 id 가 부모로 들어오면 null 처리.
+  const safeParent = parentCommentId && parentCommentId !== commentId ? parentCommentId : null;
+
+  // 캐릭터 댓글 경로 — part_id/scene_id 없이 character_id 로 저장. 씬 UUID 해석/씬 broadcast 모두 스킵.
+  if (characterId) {
+    const characterPayload: Record<string, unknown> = {
+      id: commentId,
+      character_id: characterId,
+      user_id: userId,
+      user_name: userName,
+      text,
+      mentions,
+      images,
+      created_at: createdAt,
+    };
+    if (costumeId) characterPayload.costume_id = costumeId;
+    if (revisionId) characterPayload.revision_id = revisionId;
+    if (safeParent) characterPayload.parent_comment_id = safeParent;
+    const { error: charError } = await supabase.from('comments').insert(characterPayload);
+    throwIfError(charError);
+    // 캐릭터 댓글도 다른 창이 즉시 반응하도록 broadcast — sceneId 자리에 char:{id} 식별자 전달.
+    broadcastCommentAdded(`char:${characterId}`, userName, userId, text, mentions, commentId, safeParent, undefined, revisionId);
+    return;
+  }
+
   // 이슈 F(2026-04-23) + Codex P1(2차): 댓글 경로의 sceneId는 scene.no (=sort_order).
   // sort_order 정확 매칭으로 scene_number 표기 규칙과 무관하게 정확히 식별.
   // 씬을 못 찾으면 댓글 저장 자체를 거부(앞으로 고아 댓글 신규 생성 차단).
@@ -1493,10 +1556,6 @@ export async function addComment(
     throw new Error(`댓글 저장 실패: 씬을 찾을 수 없음 (partUuid=${partUuid}, sceneId=${sceneId})`);
   }
 
-  // v1.24.0 P1 #9: parent_comment_id / revision_id 가 null 이면 payload 에서 키 자체 제거 →
-  //   마이그레이션 미적용 환경(컬럼 없음)에서도 일반 댓글은 정상 작성 가능. 답글/리비전 댓글만 마이그 필요.
-  // 또한 self-reference 차단(P1 #7) — 같은 id 가 부모로 들어오면 null 처리.
-  const safeParent = parentCommentId && parentCommentId !== commentId ? parentCommentId : null;
   const insertPayload: Record<string, unknown> = {
     id: commentId,
     part_id: partUuid,
