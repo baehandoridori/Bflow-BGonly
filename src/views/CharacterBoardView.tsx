@@ -924,6 +924,8 @@ function CharacterGrid({ onAdd, pendingOpenId, onConsumeOpen }: { onAdd: () => v
   const characters = useCharacterBoardStore((s) => s.characters);
   const byCharacter = useCharacterBoardStore((s) => s.byCharacter);
   const loaded = useCharacterBoardStore((s) => s.loaded);
+  const loadError = useCharacterBoardStore((s) => s.loadError);
+  const reload = useCharacterBoardStore((s) => s.load);
 
   const [detailId, setDetailId] = useState<string | null>(null);
   const [query, setQuery] = useState('');
@@ -966,6 +968,20 @@ function CharacterGrid({ onAdd, pendingOpenId, onConsumeOpen }: { onAdd: () => v
   }
 
   if (!loaded) {
+    if (loadError) {
+      return (
+        <div className="flex flex-col items-center justify-center gap-3 h-40 text-center">
+          <span className="text-sm text-text-secondary">캐릭터 현황판을 불러오지 못했어요.</span>
+          <button
+            type="button"
+            onClick={() => { void reload(); }}
+            className="px-3 py-1.5 rounded-lg border border-bg-border text-xs text-text-primary hover:border-accent/50 hover:bg-bg-border/30 transition-colors cursor-pointer"
+          >
+            다시 시도
+          </button>
+        </div>
+      );
+    }
     return (
       <div className="flex items-center justify-center h-40">
         <div className="w-6 h-6 border-2 border-accent border-t-transparent rounded-full animate-spin" />

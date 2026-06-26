@@ -50,12 +50,19 @@ export function useCharacterBoardAccess(): boolean {
         .catch(() => { if (!cancelled) setConfig({ userIds: [], allowAdmin: false }); }); // 실패 시 차단(fail-closed).
     };
     load();
-    // 권한·노출(metadata) 변경 브로드캐스트 → 즉시 재조회. 실행 중 클라이언트도 회수/부여를 재시작 없이 반영.
+    // 변경한 본인 클라이언트용 — broadcast self-delivery 가 없어 자기 변경은 로컬 이벤트로 받는다.
+    const onLocalChange = () => load();
+    window.addEventListener('bflow:feature-access-changed', onLocalChange);
+    // 다른 클라이언트의 권한·노출(metadata) 변경 브로드캐스트 → 즉시 재조회(회수/부여를 재시작 없이 반영).
     const unsub = window.electronAPI?.onSupabaseBroadcast?.((event: unknown) => {
       const e = event as { event?: string; payload?: { table?: string } } | null;
       if (e?.event === 'data-change' && e.payload?.table === 'metadata') load();
     });
-    return () => { cancelled = true; if (unsub) unsub(); };
+    return () => {
+      cancelled = true;
+      window.removeEventListener('bflow:feature-access-changed', onLocalChange);
+      if (unsub) unsub();
+    };
   }, []);
 
   // 서버 확인 전(config === null) 에는 차단 — stale grant 노출 방지.

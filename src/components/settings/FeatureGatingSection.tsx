@@ -91,6 +91,9 @@ function FeatureRow({ featureKey, label }: { featureKey: string; label: string }
     writeChainRef.current = run;
     try {
       await run;
+      // 변경한 본인 클라이언트는 broadcast self-delivery(self:false)가 없어 자기 metadata 이벤트를 못 받음
+      //   → 로컬 이벤트로 게이트 hook 을 즉시 갱신(자기를 추가/관리자 포함 켰을 때 메뉴 바로 노출).
+      window.dispatchEvent(new Event('bflow:feature-access-changed'));
     } catch (err) {
       console.error('[FeatureGatingSection] 저장 실패:', err);
       setConfig(prev);

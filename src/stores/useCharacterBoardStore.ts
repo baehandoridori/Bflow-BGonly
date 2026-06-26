@@ -98,6 +98,8 @@ interface CharacterBoardStore {
   episodeLinks: Map<string, EpisodeCharacterLink[]>;
   loaded: boolean;
   loading: boolean;
+  /** 초기 로드 실패 — UI 가 무한 스피너 대신 에러+재시도를 보이도록. */
+  loadError: boolean;
 
   load: () => Promise<void>;
   startRealtime: () => () => void;
@@ -146,10 +148,11 @@ export const useCharacterBoardStore = create<CharacterBoardStore>((set, get) => 
   episodeLinks: new Map(),
   loaded: false,
   loading: false,
+  loadError: false,
 
   load: async () => {
     if (get().loading) return;
-    set({ loading: true });
+    set({ loading: true, loadError: false });
     try {
       const [characters, costumes, mappings] = await Promise.all([
         svcLoadCharacters(),
@@ -174,10 +177,11 @@ export const useCharacterBoardStore = create<CharacterBoardStore>((set, get) => 
         episodeLinks: buildEpisodeLinks(mappings),
         loaded: true,
         loading: false,
+        loadError: false,
       });
     } catch (err) {
       console.error('[character-board] load 실패:', err);
-      set({ loading: false });
+      set({ loading: false, loadError: true });
       toast.error('캐릭터 현황판을 불러오지 못했어요');
     }
   },
