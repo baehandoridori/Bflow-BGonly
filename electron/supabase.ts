@@ -3898,8 +3898,31 @@ export async function updateCharacter(
   return data as CharacterRow;
 }
 
-/** 캐릭터 삭제. 복장/매핑은 FK cascade 로 자동 삭제. */
+/** public URL 들에서 scene-images 스토리지 경로를 뽑아 일괄 삭제. legacy/비-Supabase URL 은 무시. 실패해도 삭제 흐름은 진행. */
+async function removeCharacterStorageByUrl(urls: (string | null | undefined)[]): Promise<void> {
+  const paths = urls
+    .map((u) => (typeof u === 'string' ? u.match(/\/storage\/v1\/object\/public\/scene-images\/(.+)$/)?.[1] : undefined))
+    .filter((p): p is string => !!p);
+  if (paths.length === 0) return;
+  const { error } = await supabase.storage.from('scene-images').remove(paths);
+  if (error) console.warn('[character-board] 스토리지 자산 정리 실패(무시하고 진행):', error.message);
+}
+
+/** 캐릭터 삭제. 복장/매핑/댓글은 FK cascade 로 자동 삭제 — cascade 전에 스토리지 자산을 먼저 정리한다. */
 export async function deleteCharacter(id: string): Promise<void> {
+  // 복장 대표 이미지 + 캐릭터 댓글 첨부 이미지를 cascade 전에 수집해 삭제(고아 파일 방지).
+  const [{ data: costumeRows }, { data: commentRows }] = await Promise.all([
+    supabase.from('character_costumes').select('featured_image_url').eq('character_id', id),
+    supabase.from('comments').select('images').eq('character_id', id),
+  ]);
+  const urls: (string | null | undefined)[] = [];
+  for (const r of costumeRows ?? []) urls.push((r as { featured_image_url?: string | null }).featured_image_url);
+  for (const r of commentRows ?? []) {
+    const imgs = (r as { images?: unknown }).images;
+    if (Array.isArray(imgs)) for (const u of imgs) if (typeof u === 'string') urls.push(u);
+  }
+  await removeCharacterStorageByUrl(urls);
+
   const { error } = await supabase.from('characters').delete().eq('id', id);
   if (error) throw error;
 }
@@ -3947,8 +3970,15 @@ export async function updateCharacterCostume(
   return data as CharacterCostumeRow;
 }
 
-/** 복장 삭제. */
+/** 복장 삭제. 삭제 전 대표 이미지 스토리지 객체를 정리해 고아 파일을 방지한다. */
 export async function deleteCharacterCostume(id: string): Promise<void> {
+  const { data: row } = await supabase
+    .from('character_costumes')
+    .select('featured_image_url')
+    .eq('id', id)
+    .maybeSingle();
+  await removeCharacterStorageByUrl([(row as { featured_image_url?: string | null } | null)?.featured_image_url]);
+
   const { error } = await supabase.from('character_costumes').delete().eq('id', id);
   if (error) throw error;
 }
