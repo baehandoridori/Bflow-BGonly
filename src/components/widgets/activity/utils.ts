@@ -30,6 +30,14 @@ export const RETAKE_BURST_ACTIONS: ReadonlySet<ActionType> = new Set([
   'revision_reassign',
 ]);
 
+/** 캐릭터 활동 — sceneId/episodeNumber 가 null 이라 sceneId 그룹화로는 서로 다른 복장이 한 그룹에 뭉친다.
+ *  detail 의 characterId + costumeName(캐릭터 내 유니크)으로 복장 단위 구분. */
+const CHARACTER_ACTIVITY_ACTIONS: ReadonlySet<ActionType> = new Set([
+  'character_design_stage',
+  'character_rigging_stage',
+  'character_rigging_done',
+]);
+
 const CROSS_SCENE_GROUPABLE_ACTIONS: ReadonlySet<ActionType> = new Set([
   ...MULTI_SCENE_ACTIONS,
   ...RETAKE_BURST_ACTIONS,
@@ -99,6 +107,13 @@ export function groupActivities(items: Activity[]): FeedItem[] {
     // 기본은 sceneId 일치. 단, 일괄 작업과 리테이크 연속 처리처럼 사용자가 같은 흐름에서
     // 여러 씬을 빠르게 처리하는 액션은 sceneId 가 달라도 5분 묶음으로 정리한다.
     if (!CROSS_SCENE_GROUPABLE_ACTIONS.has(a.actionType) && a.sceneId !== b.sceneId) return false;
+    // 캐릭터 활동은 sceneId 가 null 이라 위 검사를 통과 → 복장 단위(characterId+costumeName)로 추가 구분.
+    if (CHARACTER_ACTIVITY_ACTIONS.has(a.actionType)) {
+      const da2 = a.detail as { characterId?: unknown; costumeName?: unknown } | null;
+      const db2 = b.detail as { characterId?: unknown; costumeName?: unknown } | null;
+      if ((da2?.characterId ?? null) !== (db2?.characterId ?? null)) return false;
+      if ((da2?.costumeName ?? null) !== (db2?.costumeName ?? null)) return false;
+    }
     const da = new Date(a.createdAt).getTime();
     const db = new Date(b.createdAt).getTime();
     return Math.abs(da - db) <= GROUP_WINDOW_MS;
