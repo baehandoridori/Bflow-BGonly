@@ -24,9 +24,13 @@ function parseSheetName(sheetName: string): { ep: string; partId: string; dept: 
 }
 
 function buildPath(sheetName: string, sceneId: string, imageType: string, ext: 'jpg' | 'png'): string {
-  const { ep, partId, dept } = parseSheetName(sheetName);
   // 8자리 hex random suffix로 같은 ms 내 충돌 방지
   const uniq = `${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
+  // 캐릭터 댓글 이미지 — sheetName='char', sceneId=characterId. 씬 EP 경로 규칙(parseSheetName) 대신 캐릭터 경로로.
+  if (sheetName === 'char') {
+    return `characters/${sceneId}/comments/${imageType}_${uniq}.${ext}`;
+  }
+  const { ep, partId, dept } = parseSheetName(sheetName);
   return `${ep}/${partId}/${dept}/${sceneId}/${imageType}_${uniq}.${ext}`;
 }
 
