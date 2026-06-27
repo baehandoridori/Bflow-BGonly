@@ -12,7 +12,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { toast } from 'sonner';
-import { Plus, X, Image as ImageIcon, Trash2, Pencil, Search, User, Check, Maximize2, Upload } from 'lucide-react';
+import { Plus, X, Image as ImageIcon, Trash2, Pencil, Search, User, Check, Maximize2, Upload, MessageSquare } from 'lucide-react';
 import { useCharacterBoardStore } from '@/stores/useCharacterBoardStore';
 import { useDataStore } from '@/stores/useDataStore';
 import {
@@ -29,8 +29,7 @@ import { resizeBlob } from '@/utils/imageUtils';
 import { cn } from '@/utils/cn';
 import { EpisodeAssetBoard } from './EpisodeAssetBoard';
 import { tagColor } from '@/utils/tagColor';
-import { CommentPanel } from '@/components/scenes/CommentPanel';
-import { CommentPanelErrorBoundary } from '@/components/common/CommentPanelErrorBoundary';
+import { CommentPanelResizable } from '@/components/scenes/CommentPanelResizable';
 
 type BoardTab = 'board' | 'episode-assets';
 
@@ -630,9 +629,15 @@ function CostumeThumbCard({
 function CharacterDetailPanel({
   character,
   onClose,
+  commentOpen,
+  onToggleComment,
+  commentCount,
 }: {
   character: Character;
   onClose: () => void;
+  commentOpen: boolean;
+  onToggleComment: () => void;
+  commentCount: number;
 }) {
   const byCharacter = useCharacterBoardStore((s) => s.byCharacter);
   const addCostume = useCharacterBoardStore((s) => s.addCostume);
@@ -712,6 +717,18 @@ function CharacterDetailPanel({
           )}
         </div>
         <div className="flex items-center gap-2 shrink-0">
+          <button
+            type="button"
+            onClick={onToggleComment}
+            aria-pressed={commentOpen}
+            title={commentOpen ? '댓글 닫기' : '댓글 열기'}
+            className={cn(
+              'flex items-center gap-1 text-sm px-2 py-1 rounded-md transition-colors cursor-pointer',
+              commentOpen ? 'bg-accent/15 text-accent' : 'text-text-secondary hover:text-text-primary',
+            )}
+          >
+            <MessageSquare size={14} /> 댓글{commentCount > 0 ? ` ${commentCount}` : ''}
+          </button>
           <button
             type="button"
             onClick={() => { if (window.confirm(`'${character.name}' 캐릭터를 삭제할까요? 복장도 함께 삭제됩니다.`)) deleteCharacter(character.id); }}
@@ -795,20 +812,6 @@ function CharacterDetailPanel({
             )}
           </div>
         </div>
-
-        {/* 이 캐릭터에 대한 이야기 — 캐릭터 단위 댓글 스레드 (씬 댓글 시스템 재사용). */}
-        <div className="mt-6">
-          <div className="text-xs text-text-secondary mb-2">이 캐릭터에 대한 이야기</div>
-          <div className="rounded-xl border border-bg-border bg-bg-card/40 overflow-hidden" style={{ height: 460 }}>
-            <CommentPanelErrorBoundary panelId="character" key={character.id}>
-              <CommentPanel
-                sceneKey={`char:${character.id}`}
-                characterThread={{ characterId: character.id, characterName: character.name }}
-                sceneLabel={character.name}
-              />
-            </CommentPanelErrorBoundary>
-          </div>
-        </div>
       </div>
 
       {lightbox && <ImageLightbox url={lightbox} alt={character.name} onClose={() => setLightbox(null)} />}
@@ -830,6 +833,11 @@ function CharacterDetailModal({
   const activeCharacters = useMemo(() => characters.filter((c) => c.status !== 'archived'), [characters]);
   const [selectedId, setSelectedId] = useState(initialCharacterId);
 
+  const [commentOpen, setCommentOpen] = useState(true);
+  const [commentCount, setCommentCount] = useState(0);
+  // 캐릭터를 바꾸면 댓글 수 배지를 리셋(새 캐릭터 패널이 onCountChange 로 다시 채움).
+  useEffect(() => { setCommentCount(0); }, [selectedId]);
+
   const selected = activeCharacters.find((c) => c.id === selectedId) ?? null;
   useEffect(() => {
     if (selected) return;
@@ -845,35 +853,64 @@ function CharacterDetailModal({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-overlay/60 backdrop-blur-sm p-4" onClick={onClose}>
-      <div
-        className="relative flex bg-bg-card border border-bg-border overflow-hidden w-full max-w-5xl h-[88vh]"
-        style={{ borderRadius: 18, boxShadow: '0 40px 80px rgba(0,0,0,0.5)' }}
-        onClick={(e) => e.stopPropagation()}
-      >
-        {/* 배경 글로우 */}
-        <div aria-hidden className="absolute inset-0 overflow-hidden pointer-events-none z-0">
-          <div className="absolute" style={{ top: -100, left: -100, width: 400, height: 400, borderRadius: 999, background: 'radial-gradient(circle, rgb(var(--color-accent) / 0.16) 0%, transparent 60%)', filter: 'blur(40px)' }} />
-          <div className="absolute" style={{ bottom: -150, right: -100, width: 500, height: 500, borderRadius: 999, background: 'radial-gradient(circle, rgb(var(--color-accent-sub) / 0.12) 0%, transparent 60%)', filter: 'blur(50px)' }} />
+      <div className="flex items-stretch gap-3 h-[88vh] max-w-full" onClick={(e) => e.stopPropagation()}>
+        <div
+          className="relative flex bg-bg-card border border-bg-border overflow-hidden w-[1024px] min-w-0 max-w-full h-full"
+          style={{ borderRadius: 18, boxShadow: '0 40px 80px rgba(0,0,0,0.5)' }}
+        >
+          {/* 배경 글로우 */}
+          <div aria-hidden className="absolute inset-0 overflow-hidden pointer-events-none z-0">
+            <div className="absolute" style={{ top: -100, left: -100, width: 400, height: 400, borderRadius: 999, background: 'radial-gradient(circle, rgb(var(--color-accent) / 0.16) 0%, transparent 60%)', filter: 'blur(40px)' }} />
+            <div className="absolute" style={{ bottom: -150, right: -100, width: 500, height: 500, borderRadius: 999, background: 'radial-gradient(circle, rgb(var(--color-accent-sub) / 0.12) 0%, transparent 60%)', filter: 'blur(50px)' }} />
+          </div>
+
+          {/* 좌측 목록 */}
+          <aside className="relative z-[1] w-[200px] shrink-0 border-r border-bg-border/60 flex flex-col min-h-0">
+            <div className="px-3 py-3 border-b border-bg-border/40 shrink-0">
+              <button type="button" onClick={onClose} className="flex items-center gap-1.5 text-sm text-text-secondary hover:text-text-primary cursor-pointer">
+                <X size={15} /> 닫기
+              </button>
+            </div>
+            <div className="flex-1 min-h-0 overflow-y-auto py-1.5">
+              {activeCharacters.map((c) => (
+                <CharacterListRow key={c.id} character={c} costumes={byCharacter.get(c.id) ?? []} selected={c.id === selectedId} onSelect={() => setSelectedId(c.id)} />
+              ))}
+            </div>
+          </aside>
+
+          {/* 우측 상세 */}
+          <main className="relative z-[1] flex-1 min-w-0">
+            {selected && (
+              <CharacterDetailPanel
+                character={selected}
+                onClose={onClose}
+                commentOpen={commentOpen}
+                onToggleComment={() => setCommentOpen((v) => !v)}
+                commentCount={commentCount}
+              />
+            )}
+          </main>
         </div>
 
-        {/* 좌측 목록 */}
-        <aside className="relative z-[1] w-[200px] shrink-0 border-r border-bg-border/60 flex flex-col min-h-0">
-          <div className="px-3 py-3 border-b border-bg-border/40 shrink-0">
-            <button type="button" onClick={onClose} className="flex items-center gap-1.5 text-sm text-text-secondary hover:text-text-primary cursor-pointer">
-              <X size={15} /> 닫기
-            </button>
-          </div>
-          <div className="flex-1 min-h-0 overflow-y-auto py-1.5">
-            {activeCharacters.map((c) => (
-              <CharacterListRow key={c.id} character={c} costumes={byCharacter.get(c.id) ?? []} selected={c.id === selectedId} onSelect={() => setSelectedId(c.id)} />
-            ))}
-          </div>
-        </aside>
-
-        {/* 우측 상세 */}
-        <main className="relative z-[1] flex-1 min-w-0">
-          {selected && <CharacterDetailPanel character={selected} onClose={onClose} />}
-        </main>
+        {/* 댓글 패널 — 씬 상세모달과 동일한 리사이즈 패널(char:{id} 스레드). 열기/닫기 + 드래그 너비 조절. */}
+        {commentOpen && selected && (
+          <CommentPanelResizable
+            key={selected.id}
+            sceneKey={`char:${selected.id}`}
+            characterThread={{ characterId: selected.id, characterName: selected.name }}
+            headerTitle="이 캐릭터에 대한 이야기"
+            sceneLabel={selected.name}
+            commentCount={commentCount}
+            onCountChange={setCommentCount}
+            heightClass="h-full"
+            className="rounded-[18px]"
+            headerRight={
+              <button type="button" onClick={() => setCommentOpen(false)} aria-label="댓글 닫기" title="댓글 닫기" className="text-text-secondary hover:text-text-primary cursor-pointer">
+                <X size={15} />
+              </button>
+            }
+          />
+        )}
       </div>
     </div>
   );
