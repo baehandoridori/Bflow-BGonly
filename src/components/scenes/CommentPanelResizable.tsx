@@ -55,6 +55,8 @@ interface CommentPanelResizableProps {
   onHashClick?: React.ComponentProps<typeof CommentPanel>['onHashClick'];
   /** 4c PR3: #씬·#파트·#화 칩 우클릭 메뉴. */
   onHashContextMenu?: React.ComponentProps<typeof CommentPanel>['onHashContextMenu'];
+  /** 캐릭터 현황판 — 씬 대신 캐릭터 댓글 스레드(char:{id} 키)로 동작. */
+  characterThread?: React.ComponentProps<typeof CommentPanel>['characterThread'];
 }
 
 export function CommentPanelResizable(props: CommentPanelResizableProps) {
@@ -76,6 +78,7 @@ export function CommentPanelResizable(props: CommentPanelResizableProps) {
     headerRight,
     onHashClick,
     onHashContextMenu,
+    characterThread,
   } = props;
 
   const { width, setWidth, isUserOverride } = useCommentPanelWidth(commentCount);
@@ -291,6 +294,7 @@ export function CommentPanelResizable(props: CommentPanelResizableProps) {
           quickRevision={quickRevision}
           onHashClick={onHashClick}
           onHashContextMenu={onHashContextMenu}
+          characterThread={characterThread}
           onThreadPanelOpenChange={setThreadPanelOpen}
           threadWidth={effectiveThreadWidth}
           threadResizeActive={threadDragging}
