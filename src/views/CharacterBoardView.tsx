@@ -853,9 +853,9 @@ function CharacterDetailModal({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-overlay/60 backdrop-blur-sm p-4" onClick={onClose}>
-      <div className="flex items-stretch gap-3 h-[88vh] max-w-full" onClick={(e) => e.stopPropagation()}>
+      <div className="flex items-stretch gap-3 h-[88vh] max-w-full max-h-full overflow-x-auto overflow-y-hidden" onClick={(e) => e.stopPropagation()}>
         <div
-          className="relative flex bg-bg-card border border-bg-border overflow-hidden w-[1024px] min-w-0 max-w-full h-full"
+          className="relative flex bg-bg-card border border-bg-border overflow-hidden w-[1024px] shrink-0 h-full"
           style={{ borderRadius: 18, boxShadow: '0 40px 80px rgba(0,0,0,0.5)' }}
         >
           {/* 배경 글로우 */}
