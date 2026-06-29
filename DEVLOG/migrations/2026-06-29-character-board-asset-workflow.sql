@@ -22,6 +22,14 @@ ALTER TABLE character_costumes
 ALTER TABLE episodes
   ADD COLUMN IF NOT EXISTS reel_file_path TEXT;
 
+UPDATE character_costumes
+SET
+  design_assignee = COALESCE(design_assignee, assignee),
+  rigging_assignee = COALESCE(rigging_assignee, assignee)
+WHERE assignee IS NOT NULL
+  AND btrim(assignee) <> ''
+  AND (design_assignee IS NULL OR rigging_assignee IS NULL);
+
 COMMENT ON COLUMN characters.work_folder_path IS '캐릭터 기본 작업 폴더 경로. 실제 폴더 복사/생성 없음.';
 COMMENT ON COLUMN character_costumes.work_file_path IS '복장별 작업 파일 경로(.moho 등). 실제 파일 복사/생성 없음.';
 COMMENT ON COLUMN character_costumes.image_background IS '투명 PNG 표시 배경: transparent/black/white/checker.';

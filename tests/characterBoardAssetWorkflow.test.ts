@@ -79,6 +79,13 @@ test('renderer and electron Supabase mapping include new snake_case fields', () 
   }
 });
 
+test('legacy costume assignee remains visible in split assignee fields', () => {
+  assert.match(rendererSupabase, /designAssignee:\s*row\.design_assignee\s*\?\?\s*row\.assignee\s*\?\?\s*null/);
+  assert.match(rendererSupabase, /riggingAssignee:\s*row\.rigging_assignee\s*\?\?\s*row\.assignee\s*\?\?\s*null/);
+  assert.match(migration, /design_assignee\s*=\s*COALESCE\(design_assignee,\s*assignee\)/);
+  assert.match(migration, /rigging_assignee\s*=\s*COALESCE\(rigging_assignee,\s*assignee\)/);
+});
+
 test('character board is wired for image display, assignees, work links, and lightbox navigation', () => {
   for (const token of [
     'CharacterImageFrame',
