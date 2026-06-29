@@ -15,6 +15,7 @@ import { createPortal } from 'react-dom';
 import { motion } from 'framer-motion';
 import { Plus, X, CornerDownLeft, Layers } from 'lucide-react';
 import { cn } from '@/utils/cn';
+import { DEPARTMENT_CONFIGS } from '@/types';
 import { filterSceneCandidates } from '../quickAddUtils';
 import type { SceneKey, FlatScene } from '../types';
 
@@ -255,6 +256,7 @@ export function QuickAdd({
             filtered.map((cand, i) => {
               const f = cand.flat;
               const s = f.scene;
+              const deptCfg = DEPARTMENT_CONFIGS[f.department];
               const epLabel = episodeTitles[f.episodeNumber] || `EP.${String(f.episodeNumber).padStart(2, '0')}`;
               const sceneNum = s.sceneId.match(/\d+$/)?.[0]?.replace(/^0+/, '') || String(s.no ?? '');
               const prevEp = i > 0 ? filtered[i - 1].flat.episodeNumber : null;
@@ -286,6 +288,13 @@ export function QuickAdd({
                           aria-label="내 담당"
                         />
                       )}
+                    </span>
+                    {/* 부서(BG/ACT) — 같은 파트·번호에 BG/ACT 행이 공존할 수 있어 부서로 구분(P2) */}
+                    <span
+                      className="text-[9px] font-semibold px-1 rounded shrink-0"
+                      style={{ color: deptCfg.stageColors.png, backgroundColor: `${deptCfg.stageColors.png}1f` }}
+                    >
+                      {deptCfg.shortLabel}
                     </span>
                     <span className="text-[10px] text-text-secondary/45 shrink-0">{epLabel} &gt; {f.partId}</span>
                     <span className="text-[11px] font-mono text-accent shrink-0">#{sceneNum}</span>
