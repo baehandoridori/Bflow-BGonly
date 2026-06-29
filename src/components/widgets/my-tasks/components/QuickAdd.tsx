@@ -79,10 +79,14 @@ export function QuickAdd({
     }
   }, [open]);
 
-  // 활성 인덱스는 첫 '추가 가능' 후보로 초기화 — 이미 추가된(비활성) 항목에 하이라이트/Enter가 갇히지 않게.
+  // 활성 인덱스 초기화. 정확히 지목한 씬(exact)이 있으면 그걸 가리킨다(이미 추가됐어도) —
+  // '001'(=a001)을 쳤는데 a001이 이미 추가된 경우, 다른 추가 가능 씬으로 active가 넘어가
+  // Enter 시 엉뚱한 씬이 추가되는 것을 막는다. exact가 없으면 첫 '추가 가능' 후보로.
   useEffect(() => {
-    const i = filtered.findIndex((c) => !c.alreadyAdded);
-    setActive(i >= 0 ? i : 0);
+    const exactIdx = filtered.findIndex((c) => c.exact);
+    if (exactIdx >= 0) { setActive(exactIdx); return; }
+    const addableIdx = filtered.findIndex((c) => !c.alreadyAdded);
+    setActive(addableIdx >= 0 ? addableIdx : 0);
   }, [filtered]);
 
   // 드롭다운 위치 계산 (아래 공간 부족 시 위로 플립)
@@ -180,12 +184,17 @@ export function QuickAdd({
     if (e.key === 'Enter') {
       e.preventDefault();
       if (filtered.length > 0) {
-        // 활성 항목이 추가 가능하면 그걸, 아니면 첫 추가 가능 항목을 추가.
-        // 매칭이 전부 '추가됨'이면 no-op('추가됨' 라벨이 피드백) — 개인할일로 오삽입하지 않는다.
-        const target = filtered[active] && !filtered[active].alreadyAdded
-          ? filtered[active]
-          : filtered.find((c) => !c.alreadyAdded);
-        if (target) commitScene(target);
+        const item = filtered[active];
+        if (item && !item.alreadyAdded) {
+          // 활성 항목이 추가 가능하면 추가(정확/접두 무관).
+          commitScene(item);
+        } else if (item && item.exact) {
+          // 정확히 지목한 씬이 이미 추가됨 → 다른 씬을 대신 넣지 않고 no-op('추가됨' 피드백).
+        } else {
+          // 그 외엔 첫 추가 가능 항목. 전부 '추가됨'이면 no-op.
+          const firstAddable = filtered.find((c) => !c.alreadyAdded);
+          if (firstAddable) commitScene(firstAddable);
+        }
       } else if (query) {
         commitPersonal();
       }

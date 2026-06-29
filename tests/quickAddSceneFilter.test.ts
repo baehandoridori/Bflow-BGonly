@@ -103,6 +103,31 @@ test('추가 가능한 씬이 추가됨 항목보다 먼저 와서 limit에 안 
   assert.equal(r[0].alreadyAdded, false);
 });
 
+test('0 패딩 정확 입력은 해당 씬을 정확 매칭·최우선한다(P2)', () => {
+  const cands = [flat('a001', { assignee: '배한솔' }), flat('a010'), flat('a100')];
+  const added = new Set<SceneKey>([cands[0].key]); // a001 이미 추가됨
+  const r = filterSceneCandidates(cands, '001', '배한솔', added);
+  // a001 이 exact 로 맨 앞(이미 추가됐어도) — a010/a100 로 대체되지 않음
+  assert.equal(r[0].flat.scene.sceneId, 'a001');
+  assert.equal(r[0].exact, true);
+  assert.equal(r[0].alreadyAdded, true);
+  assert.ok(r.slice(1).every((c) => !c.exact));
+});
+
+test('순수 숫자(0 패딩 아님)는 정확 매칭이 아니라 접두 매칭', () => {
+  const cands = [flat('a001'), flat('a010'), flat('a100')];
+  const r = filterSceneCandidates(cands, '1', '배한솔', NONE);
+  // '1' 은 a001 의 raw '001' 과 달라 exact 아님 → 전부 접두 매칭
+  assert.ok(r.every((c) => !c.exact));
+});
+
+test('전체 sceneId 입력은 exact', () => {
+  const cands = [flat('a001'), flat('a010')];
+  const r = filterSceneCandidates(cands, 'a001', '배한솔', NONE);
+  assert.equal(r[0].flat.scene.sceneId, 'a001');
+  assert.equal(r[0].exact, true);
+});
+
 test('limit 적용', () => {
   const cands = Array.from({ length: 20 }, (_, i) => flat(`a${String(i + 1).padStart(3, '0')}`));
   const r = filterSceneCandidates(cands, 'a', '배한솔', NONE, 8);
