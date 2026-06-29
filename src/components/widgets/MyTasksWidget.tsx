@@ -15,6 +15,7 @@ import { createUuid } from '@/utils/createUuid';
 import type { SceneKey, PersonalTodo, FlatScene } from './my-tasks/types';
 import { makeKey } from './my-tasks/types';
 import { useMyTasksData, scenePct } from './my-tasks/hooks/useMyTasksData';
+import { ModalPortal } from './my-tasks/components/ModalPortal';
 
 /* ─── 할 일 추가 모달 (작업 + 개인) ──────────── */
 function AddTaskModal({
@@ -100,17 +101,10 @@ function AddTaskModal({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-overlay/50 backdrop-blur-sm" onClick={onClose}>
-      <motion.div
-        initial={{ opacity: 0, scale: 0.95 }}
-        animate={{ opacity: 1, scale: 1 }}
-        exit={{ opacity: 0, scale: 0.95 }}
-        className="bg-bg-card border border-bg-border/50 rounded-2xl shadow-2xl w-[520px] max-h-[70vh] flex flex-col overflow-hidden"
-        onClick={(e) => e.stopPropagation()}
-      >
+    <ModalPortal onClose={onClose} labelledBy="add-task-title">
         {/* 헤더 */}
         <div className="flex items-center justify-between px-4 py-3 border-b border-bg-border/30">
-          <span className="text-sm font-semibold text-text-primary">할 일 추가</span>
+          <span id="add-task-title" className="text-sm font-semibold text-text-primary">할 일 추가</span>
           <button onClick={onClose} className="p-1 hover:bg-bg-border/20 rounded-md cursor-pointer"><X size={16} /></button>
         </div>
 
@@ -330,8 +324,7 @@ function AddTaskModal({
             </div>
           </>
         )}
-      </motion.div>
-    </div>
+    </ModalPortal>
   );
 }
 
