@@ -87,6 +87,10 @@ test('legacy costume assignee remains visible in split assignee fields', () => {
   assert.match(rendererSupabase, /riggingAssignee:\s*hasRiggingAssigneeColumn\s*\?\s*row\.rigging_assignee\s*\?\?\s*null\s*:\s*row\.assignee\s*\?\?\s*null/);
   assert.match(migration, /design_assignee\s*=\s*COALESCE\(design_assignee,\s*assignee\)/);
   assert.match(migration, /rigging_assignee\s*=\s*COALESCE\(rigging_assignee,\s*assignee\)/);
+  assert.ok(migration.includes('UPDATE character_costumes\n  SET design_assignee'), 'June migration must refresh delete_user_cascade for design assignees');
+  assert.ok(migration.includes('UPDATE character_costumes\n  SET rigging_assignee'), 'June migration must refresh delete_user_cascade for rigging assignees');
+  assert.ok(migration.includes("regexp_split_to_array(design_assignee, '[[:space:]]*,[[:space:]]*')"), 'June migration must handle comma-separated design assignees');
+  assert.ok(migration.includes("regexp_split_to_array(rigging_assignee, '[[:space:]]*,[[:space:]]*')"), 'June migration must handle comma-separated rigging assignees');
 });
 
 test('character board is wired for image display, assignees, work links, and lightbox navigation', () => {

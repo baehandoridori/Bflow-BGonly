@@ -26,36 +26,6 @@ BEGIN
   UPDATE scenes         SET assignee = NULL WHERE assignee = v_user_name;
   UPDATE comp_revisions SET assignee = NULL WHERE assignee = v_user_name;
 
-  -- 복장 담당자는 AssigneeMultiSelect 값처럼 "A, B" 형태가 될 수 있어
-  -- 삭제 대상 이름만 제거하고 남는 담당자가 없으면 NULL 로 정리한다.
-  UPDATE character_costumes
-  SET design_assignee = NULLIF(array_to_string(ARRAY(
-    SELECT btrim(assignee_name)
-    FROM unnest(regexp_split_to_array(design_assignee, '[[:space:]]*,[[:space:]]*')) AS assignee_name
-    WHERE btrim(assignee_name) <> ''
-      AND btrim(assignee_name) <> v_user_name
-  ), ', '), '')
-  WHERE design_assignee IS NOT NULL
-    AND EXISTS (
-      SELECT 1
-      FROM unnest(regexp_split_to_array(design_assignee, '[[:space:]]*,[[:space:]]*')) AS assignee_name
-      WHERE btrim(assignee_name) = v_user_name
-    );
-
-  UPDATE character_costumes
-  SET rigging_assignee = NULLIF(array_to_string(ARRAY(
-    SELECT btrim(assignee_name)
-    FROM unnest(regexp_split_to_array(rigging_assignee, '[[:space:]]*,[[:space:]]*')) AS assignee_name
-    WHERE btrim(assignee_name) <> ''
-      AND btrim(assignee_name) <> v_user_name
-  ), ', '), '')
-  WHERE rigging_assignee IS NOT NULL
-    AND EXISTS (
-      SELECT 1
-      FROM unnest(regexp_split_to_array(rigging_assignee, '[[:space:]]*,[[:space:]]*')) AS assignee_name
-      WHERE btrim(assignee_name) = v_user_name
-    );
-
   -- 3) 개인 데이터 삭제 — FK 막힘 해제 + 개인 데이터 cleanup
   DELETE FROM personal_todos          WHERE user_id = p_user_id;
   DELETE FROM task_views              WHERE user_id = p_user_id;
@@ -69,4 +39,4 @@ END;
 $$;
 
 COMMENT ON FUNCTION public.delete_user_cascade(TEXT) IS
-  '사용자 삭제 + 종속 정리 atomic RPC. 씬/리테이크/복장 담당자 비우기 / 개인 데이터(personal_todos·task_views·memos·private_calendar_events) 삭제 / users 삭제를 한 트랜잭션으로. comments·activity_log 는 역사 기록으로 보존.';
+  '사용자 삭제 + 종속 정리 atomic RPC. assignee 비우기 / 개인 데이터(personal_todos·task_views·memos·private_calendar_events) 삭제 / users 삭제를 한 트랜잭션으로. comments·activity_log 는 역사 기록으로 보존.';
