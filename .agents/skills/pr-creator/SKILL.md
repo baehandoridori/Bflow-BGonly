@@ -19,10 +19,11 @@ GitHub PR을 체계적이고 읽기 쉽게 작성하는 스킬.
 
 PR 작성을 요청받으면, 먼저 아래 정보를 수집한다.
 
-**브랜치 확인:**
+**기본 브랜치와 현재 브랜치 확인:**
 ```bash
+BASE_BRANCH=$(gh repo view --json defaultBranchRef --jq '.defaultBranchRef.name')
 git branch --show-current
-git log --oneline main..HEAD
+git log --oneline "$BASE_BRANCH..HEAD"
 ```
 
 **최신 태그 확인:**
@@ -37,7 +38,8 @@ git log $(git describe --tags --abbrev=0 2>/dev/null || git rev-list --max-paren
 
 **변경된 파일 목록:**
 ```bash
-git diff --stat main..HEAD
+BASE_BRANCH=$(gh repo view --json defaultBranchRef --jq '.defaultBranchRef.name')
+git diff --stat "$BASE_BRANCH..HEAD"
 ```
 
 태그가 아예 없는 프로젝트라면 전체 커밋을 기준으로 분석하되, 버전은 `v0.1.0`부터 시작하도록 제안한다.
@@ -60,11 +62,9 @@ git diff --stat main..HEAD
 현재 최신 태그: v1.3.2
 커밋 분석: feat 2건, fix 3건
 → 제안 버전: v1.4.0
-
-이 버전으로 진행할까요?
 ```
 
-사용자가 다른 버전을 원하면 그걸 따른다. 현재 대화에서 PR 생성 권한이 명시되어 있으면 별도 확인 없이 PR을 생성한다.
+사용자가 다른 버전을 원하면 그걸 따른다. 현재 대화에서 PR 생성 권한이 명시되어 있으면 버전 제안 뒤에도 별도 확인 없이 PR을 생성한다.
 
 ### 3단계: PR 제목 작성
 
@@ -238,20 +238,16 @@ npm test -- --grep "FrameNavigator"
 
 ## PR 생성 실행
 
-본문 작성이 완료되면 현재 대화에서 PR 생성 권한이 이미 명시되어 있는지 확인한다. 권한이 명시되어 있으면 제목과 본문을 기록으로 남기고 바로 생성한다.
+본문 작성이 완료되면 현재 대화에서 PR 생성 권한이 이미 명시되어 있는지 확인한다. 권한이 명시되어 있으면 제목과 본문을 기록으로 남기고 사용자에게 재확인을 받지 않고 바로 생성한다.
 
-`gh pr create`를 실행한다:
+확인한 기본 브랜치를 `--base`에 넣어 `gh pr create`를 실행한다. 분석 단계의 쉘 변수는 이어지지 않을 수 있으므로, PR 생성 명령과 같은 블록 안에서 기본 브랜치를 다시 확인한다:
 
 ```bash
+BASE_BRANCH=$(gh repo view --json defaultBranchRef --jq '.defaultBranchRef.name')
 gh pr create \
   --title "[제목]" \
   --body "[본문]" \
-  --base main
-```
-
-base 브랜치가 `main`이 아닐 수 있으니, 사용자에게 확인하거나 리포지토리의 기본 브랜치를 확인한다:
-```bash
-gh repo view --json defaultBranchRef --jq '.defaultBranchRef.name'
+  --base "$BASE_BRANCH"
 ```
 
 ---
