@@ -20,7 +20,9 @@ test('assignee completion note input lets users choose completion alarm recipien
 
   assert.match(input, /RevisionRecipientPicker/);
   assert.match(input, /notifyDefaultIds/);
-  assert.match(input, /onConfirm\(value\.trim\(\),\s*notifyIds\)/);
+  assert.match(input, /selectedNotifyIds/);
+  assert.match(input, /onSubmit=\{\(\)\s*=>\s*onConfirm\(value\.trim\(\),\s*selectedNotifyIds\)\}/);
+  assert.match(input, /onClick=\{\(\)\s*=>\s*onConfirm\(value\.trim\(\),\s*selectedNotifyIds\)\}/);
   assert.match(panel, /notifyDefaultIds=\{completionNotifyDefaults/);
   assert.match(row, /notifyDefaultIds=\{completionNotifyDefaults/);
 });

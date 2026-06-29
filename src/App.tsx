@@ -83,6 +83,7 @@ import {
   buildNotificationSceneDisplayLabel,
   buildNotificationSceneDisplayLabelFromSceneKey,
 } from '@/utils/notificationEpisodeLabels';
+import { isGeneralRevisionSceneKey } from '@/utils/revisionGeneral';
 import { isRecentSelfRevisionAction } from '@/stores/useRevisionStore';
 import type { UpdateInfo } from '@/types';
 
@@ -1863,12 +1864,14 @@ export default function App() {
         if (!dedupeNotification(dedupeKey)) return;
 
         const ds = useDataStore.getState();
-        const sceneLabel = p.sceneKey
+        const sceneKey = p.sceneKey;
+        const isGeneralRetakeCompletion = !sceneKey || isGeneralRevisionSceneKey(sceneKey);
+        const sceneLabel = !isGeneralRetakeCompletion
           ? (buildNotificationSceneDisplayLabelFromSceneKey(
-            p.sceneKey,
+            sceneKey,
             ds.episodeTitles,
             ds.episodes,
-          ) || p.sceneKey.split(':').pop() || p.sceneKey)
+          ) || sceneKey.split(':').pop() || sceneKey)
           : '전반 항목';
         const notePreview = p.note?.trim()
           ? (p.note.trim().length > 60 ? p.note.trim().slice(0, 60) + '...' : p.note.trim())
@@ -1881,9 +1884,9 @@ export default function App() {
           body: notePreview
             ? `${p.senderName || '담당자'}님이 ${revisionLabel} 담당을 완료했습니다. ${notePreview}`
             : `${p.senderName || '담당자'}님이 ${revisionLabel} 담당을 완료했습니다.`,
-          metadata: p.sceneKey
+          metadata: !isGeneralRetakeCompletion
             ? {
-                sceneName: p.sceneKey,
+                sceneName: sceneKey,
                 revisionId: p.revisionId,
                 revisionAction: 'assignee_done',
               } as Record<string, unknown>

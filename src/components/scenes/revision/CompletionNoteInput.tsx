@@ -24,6 +24,7 @@ export function CompletionNoteInput({ initialValue = '', notifyDefaultIds, onCon
   const { currentUser, users } = useAuthStore();
   const showNotifyPicker = Array.isArray(notifyDefaultIds);
   const checkedCount = notifyIds.length;
+  const selectedNotifyIds = showNotifyPicker ? notifyIds : undefined;
   const confirmLabel = showNotifyPicker
     ? checkedCount > 0 ? `완료 + 알림 (${checkedCount}명)` : '알림 없이 완료'
     : '완료';
@@ -40,7 +41,7 @@ export function CompletionNoteInput({ initialValue = '', notifyDefaultIds, onCon
         users={users}
         enableHashtag
         submitOn="ctrl-enter"
-        onSubmit={() => onConfirm(value.trim())}
+        onSubmit={() => onConfirm(value.trim(), selectedNotifyIds)}
         onCancel={onCancel}
         autoFocus
         placeholder="완료 결과·파일 경로(G:\...)를 적어주세요 — 비워도 됩니다. (@이름으로 멘션)"
@@ -72,7 +73,7 @@ export function CompletionNoteInput({ initialValue = '', notifyDefaultIds, onCon
         </button>
         <button
           type="button"
-          onClick={() => onConfirm(value.trim(), notifyIds)}
+          onClick={() => onConfirm(value.trim(), selectedNotifyIds)}
           className="inline-flex items-center gap-1 px-3 py-1 text-[11px] font-bold rounded-md bg-accent text-white hover:opacity-90 cursor-pointer transition-opacity"
         >
           <Check size={12} strokeWidth={2.6} />

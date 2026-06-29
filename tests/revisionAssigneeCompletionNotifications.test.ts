@@ -54,6 +54,11 @@ test('retake completion notifications use a selected-recipient broadcast path', 
   assert.match(main, /supabase:dispatch-retake-assignee-completion-notification/);
   assert.match(broadcast, /retake-assignee-completion/);
   assert.match(app, /retake-assignee-completion/);
+  assert.match(app, /isGeneralRevisionSceneKey/);
+  assert.match(app, /const sceneKey = p\.sceneKey;/);
+  assert.match(app, /const isGeneralRetakeCompletion = !sceneKey \|\| isGeneralRevisionSceneKey\(sceneKey\);/);
+  assert.match(app, /metadata: !isGeneralRetakeCompletion/);
   assert.match(app, /revisionAction:\s*'assignee_done'/);
+  assert.match(app, /retakeHubSetId:\s*p\.setId \?\? undefined/);
   assert.match(store, /dispatchRetakeAssigneeCompletionNotification/);
 });
