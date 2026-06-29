@@ -130,6 +130,43 @@ async function migrateLocalStorageToSupabase(userId: string): Promise<void> {
       localStorage.removeItem(migratedKey); // 완료 후 추적 키 제거
     }
 
+    // 커스텀 뷰 개인 할일 평탄화: VIEWS_KEY 삭제 전에 각 뷰의 personalTodos를 assigned로 올림
+    // (PR 1에서 커스텀 뷰 제거 — 아직 Supabase 마이그레이션 안 한 사용자 데이터 보호)
+    const rawViews = localStorage.getItem(VIEWS_KEY);
+    if (rawViews) {
+      try {
+        const views: Array<{ personalTodos?: PersonalTodo[] }> = JSON.parse(rawViews);
+        // 이미 마이그레이션한 assigned todos의 id 집합
+        const rawTodosForDedup = localStorage.getItem(ASSIGNED_TODOS_KEY);
+        const assignedIds = new Set<string>(
+          rawTodosForDedup ? JSON.parse(rawTodosForDedup).map((t: PersonalTodo) => t.id) : [],
+        );
+        const seenIds = new Set<string>();
+        let viewTodoSortIndex = assignedIds.size; // assigned todos 뒤에 이어 붙임
+        for (const view of views) {
+          for (const todo of view?.personalTodos ?? []) {
+            if (!todo?.id) continue;
+            if (assignedIds.has(todo.id) || seenIds.has(todo.id)) continue; // id 기준 중복 제거
+            seenIds.add(todo.id);
+            await supabaseService.upsertTodo(userId, {
+              id: todo.id,
+              title: todo.title,
+              memo: todo.memo,
+              completed: todo.completed,
+              startDate: todo.startDate ?? null,
+              endDate: todo.endDate ?? null,
+              addToCalendar: todo.addToCalendar,
+              sortOrder: viewTodoSortIndex++,
+              createdAt: todo.createdAt,
+            });
+          }
+        }
+      } catch (viewErr) {
+        console.warn('[MyTasks] 커스텀 뷰 개인 할일 평탄화 실패 — 기존 데이터 보호를 위해 마이그레이션 중단:', viewErr);
+        throw viewErr; // catch 블록으로 올려 MIGRATION_DONE_KEY 마커 미설정 → 다음 실행 시 재시도
+      }
+    }
+
     const rawSceneKeys = localStorage.getItem(ASSIGNED_SCENES_KEY);
     const sceneKeys = rawSceneKeys ? JSON.parse(rawSceneKeys) : [];
     if (sceneKeys.length > 0) {
