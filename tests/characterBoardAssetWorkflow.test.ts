@@ -88,8 +88,8 @@ test('legacy costume assignee remains visible in split assignee fields', () => {
   assert.match(rendererSupabase, /riggingAssignee:\s*hasRiggingAssigneeColumn\s*\?\s*row\.rigging_assignee\s*\?\?\s*null\s*:\s*row\.assignee\s*\?\?\s*null/);
   assert.match(migration, /design_assignee\s*=\s*COALESCE\(design_assignee,\s*assignee\)/);
   assert.match(migration, /rigging_assignee\s*=\s*COALESCE\(rigging_assignee,\s*assignee\)/);
-  assert.ok(migration.includes('UPDATE character_costumes\n  SET design_assignee'), 'June migration must refresh delete_user_cascade for design assignees');
-  assert.ok(migration.includes('UPDATE character_costumes\n  SET rigging_assignee'), 'June migration must refresh delete_user_cascade for rigging assignees');
+  assert.match(migration, /UPDATE character_costumes\r?\n\s+SET design_assignee/, 'June migration must refresh delete_user_cascade for design assignees');
+  assert.match(migration, /UPDATE character_costumes\r?\n\s+SET rigging_assignee/, 'June migration must refresh delete_user_cascade for rigging assignees');
   assert.ok(migration.includes("regexp_split_to_array(design_assignee, '[[:space:]]*,[[:space:]]*')"), 'June migration must handle comma-separated design assignees');
   assert.ok(migration.includes("regexp_split_to_array(rigging_assignee, '[[:space:]]*,[[:space:]]*')"), 'June migration must handle comma-separated rigging assignees');
 });
@@ -100,9 +100,9 @@ test('character board is wired for image display, assignees, work links, and lig
     'CharacterImageContextMenu',
     'CharacterImageFitEditor',
     'CharacterImageLightbox',
-    'AssigneeMultiSelect',
-    'externalSelected',
-    '이름 직접 추가',
+    'AssigneeNamePicker',
+    'setModalOpen',
+    'placeholder="이름 입력"',
     'const shownCostume = activeCostume;',
     '디자인 담당자',
     '리깅 담당자',
@@ -118,7 +118,10 @@ test('character board is wired for image display, assignees, work links, and lig
   assert.ok(characterBoard.includes('if (!saved) return;'));
   assert.ok(characterBoard.includes('useCharacterBoardStore.getState().characters.find'));
   assert.match(readFileSync('src/components/characters/CharacterImageFrame.tsx', 'utf8'), /translate\(\$\{normalized\.x\}%, \$\{normalized\.y\}%\)/);
-  assert.match(readFileSync('src/components/characters/CharacterImageFitEditor.tsx', 'utf8'), /stopImmediatePropagation/);
+  const fitEditorSource = readFileSync('src/components/characters/CharacterImageFitEditor.tsx', 'utf8');
+  assert.match(fitEditorSource, /stopImmediatePropagation/);
+  assert.match(fitEditorSource, /data-fit-handle/);
+  assert.match(fitEditorSource, /cropFrameRef/);
   assert.match(characterImageLightbox, /initialCostumeIdRef/);
   assert.match(characterImageLightbox, /currentCostumeId/);
   assert.match(characterImageLightbox, /findIndex\(\(entry\) => entry\.costumeId === currentCostumeId\)/);
