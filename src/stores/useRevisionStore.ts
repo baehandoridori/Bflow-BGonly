@@ -239,18 +239,23 @@ export const useRevisionStore = create<RevisionState>((set, get) => ({
     const cur = get().revisions.find((r) => r.id === rev.id) ?? rev;
     if (cur.finalResolvedAt) return; // 최종완료 상태에선 담당 전이 차단 (spec §6.2)
     const now = new Date().toISOString();
+    const recipients = buildRevisionAssigneeCompletionNotifyUserIds({
+      notifyUserIds: cur.notifyUserIds,
+      requesterId: cur.requesterId,
+      selectedUserIds: notifyUserIds,
+      completerId: userId,
+    });
     const states = completeAssignee(cur.assigneeStates ?? {}, userId, note, now);
+    states[userId] = {
+      ...states[userId],
+      completionNotifyUserIds: recipients,
+      completedByName: completerName || userId,
+    };
     const status = deriveRevisionStatus(cur.assigneeIds ?? [], states, cur.finalResolvedAt);
     get().updateRevisionOptimistic(rev.id, rev.sceneKey, { assigneeStates: states, status, updatedAt: now });
     markSelfFromStatus(rev.id, status);
     try {
-      await revisionService.completeAssigneeWork(cur, userId, note);
-      const recipients = buildRevisionAssigneeCompletionNotifyUserIds({
-        notifyUserIds: cur.notifyUserIds,
-        requesterId: cur.requesterId,
-        selectedUserIds: notifyUserIds,
-        completerId: userId,
-      });
+      await revisionService.completeAssigneeWork(cur, userId, note, recipients, completerName || userId, now);
       if (recipients.length > 0) {
         await revisionService.dispatchRetakeAssigneeCompletionNotification({
           revisionId: cur.id,

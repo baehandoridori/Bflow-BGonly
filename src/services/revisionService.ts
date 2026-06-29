@@ -691,9 +691,21 @@ export async function startAssigneeWork(rev: CompRevision, userId: string): Prom
 }
 
 /** 담당자 본인 완료 (멘트 포함). */
-export async function completeAssigneeWork(rev: CompRevision, userId: string, note: string): Promise<void> {
-  const now = new Date().toISOString();
+export async function completeAssigneeWork(
+  rev: CompRevision,
+  userId: string,
+  note: string,
+  completionNotifyUserIds: string[] = [],
+  completerName?: string,
+  completedAt: string = new Date().toISOString(),
+): Promise<void> {
+  const now = completedAt;
   const states = completeAssignee(await freshAssigneeStates(rev), userId, note, now);
+  states[userId] = {
+    ...states[userId],
+    completionNotifyUserIds,
+    completedByName: completerName || userId,
+  };
   const status = deriveRevisionStatus(rev.assigneeIds ?? [], states, rev.finalResolvedAt);
   await persistRevisionWorkflow(rev,
     { assigneeStates: JSON.stringify(states), status, updatedAt: now },

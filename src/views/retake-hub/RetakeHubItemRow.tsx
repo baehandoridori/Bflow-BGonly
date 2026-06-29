@@ -150,6 +150,7 @@ export function RetakeHubItemRow({ revision, allUsers, sideBarClass, reLabel }: 
     navigateToSceneView({
       episodeNumber: target.episodeNumber,
       partId: target.partId,
+      department: 'all',
       highlightSceneId: target.sceneName,
       modalRequest: {
         sceneUuid: target.sceneUuid,
@@ -158,6 +159,7 @@ export function RetakeHubItemRow({ revision, allUsers, sideBarClass, reLabel }: 
         partId: target.partId,
         initialTab: 'revisions',
         focusRevisionId: revision.id,
+        forceDeptFilter: 'all',
       },
     });
     return true;

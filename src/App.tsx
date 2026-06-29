@@ -86,7 +86,7 @@ import {
 } from '@/utils/notificationEpisodeLabels';
 import { isGeneralRevisionSceneKey } from '@/utils/revisionGeneral';
 import { isRecentSelfRevisionAction } from '@/stores/useRevisionStore';
-import type { UpdateInfo } from '@/types';
+import type { RevisionAssigneeState, UpdateInfo } from '@/types';
 
 // Lazy chunk 로드 실패(네트워크 끊김, 빌드 artifact 누락) 시 블랭크 스크린 방지용 ErrorBoundary.
 // 이 컴포넌트 자체는 파일 외부로 분리하지 않고 로컬에 유지 — 인증 모달/메인 뷰 한정으로만 사용.
@@ -119,6 +119,42 @@ function markLocalFeedbackJumpAsRead(payload: { kind?: string; notificationId?: 
       : n.metadata?.feedbackNotificationId === notificationId
   );
   if (target && !target.isRead) store.markAsRead(target.id);
+}
+
+function resolveLatestAssigneeCompletionFallback(
+  assigneeStates?: Record<string, RevisionAssigneeState> | null,
+): {
+  userId: string;
+  senderName: string;
+  notifyUserIds: string[];
+  note?: string;
+  doneAt?: string;
+} | null {
+  if (!assigneeStates || typeof assigneeStates !== 'object') return null;
+  let latest: {
+    userId: string;
+    senderName: string;
+    notifyUserIds: string[];
+    note?: string;
+    doneAt?: string;
+  } | null = null;
+
+  for (const [userId, state] of Object.entries(assigneeStates)) {
+    if (state?.state !== 'done') continue;
+    if (!Array.isArray(state.completionNotifyUserIds)) continue;
+    const candidate = {
+      userId,
+      senderName: state.completedByName || userId,
+      notifyUserIds: state.completionNotifyUserIds.filter((id): id is string => typeof id === 'string' && id.trim().length > 0),
+      note: state.note,
+      doneAt: state.doneAt,
+    };
+    if (!latest || (candidate.doneAt ?? '') > (latest.doneAt ?? '')) {
+      latest = candidate;
+    }
+  }
+
+  return latest;
 }
 
 export default function App() {
@@ -1625,13 +1661,12 @@ export default function App() {
             revision_no?: number;
             resolved_by?: string | null;
             notify_user_ids?: string[] | null;
+            assignee_states?: Record<string, RevisionAssigneeState> | null;
             set_id?: string | null;
             updated_at?: string | null;
             resolved_at?: string | null;
           };
           const oldRow = payload.old as { status?: string } | undefined;
-          const targets = Array.isArray(newRow.notify_user_ids) ? newRow.notify_user_ids : [];
-          if (!targets.includes(me.id)) return;
 
           // 상태 변경 detect — old.status !== new.status 일 때만 알림
           if (!oldRow || oldRow.status === newRow.status) return;
@@ -1643,15 +1678,20 @@ export default function App() {
 
           let action: 'in_progress' | 'assignee_done' | 'resolve';
           let titlePrefix: string;
+          let fallbackCompletion: ReturnType<typeof resolveLatestAssigneeCompletionFallback> = null;
+          const targets = Array.isArray(newRow.notify_user_ids) ? newRow.notify_user_ids : [];
           if (newRow.status === 'in_progress') {
+            if (!targets.includes(me.id)) return;
             action = 'in_progress';
             titlePrefix = '리테이크 진행중';
           } else if (newRow.status === 'assignee_done') {
-            // 리테이크 허브 2단계: 담당 전원 완료 → 최종 완료 대기
-            // 담당 완료 알림은 완료멘트 입력 UI의 선택 수신자 broadcast 경로에서 보낸다.
-            // 여기서 notify_user_ids 전체에 자동 발송하면 사용자가 완료 시 해제한 대상에게도 중복 알림이 간다.
-            return;
+            fallbackCompletion = resolveLatestAssigneeCompletionFallback(newRow.assignee_states);
+            if (!fallbackCompletion?.notifyUserIds.includes(me.id)) return;
+            if (fallbackCompletion.userId === me.id) return;
+            action = 'assignee_done';
+            titlePrefix = '리테이크 담당 완료';
           } else if (newRow.status === 'resolved') {
+            if (!targets.includes(me.id)) return;
             action = 'resolve';
             titlePrefix = '리테이크 완료';
           } else {
@@ -1679,12 +1719,23 @@ export default function App() {
             const setTitle = newRow.set_id
               ? useRevisionSetStore.getState().sets.find((s) => s.id === newRow.set_id)?.title
               : undefined;
+            const notePreview = fallbackCompletion?.note?.trim()
+              ? (fallbackCompletion.note.trim().length > 60 ? fallbackCompletion.note.trim().slice(0, 60) + '...' : fallbackCompletion.note.trim())
+              : undefined;
             dispatchNotification({
               type: 'revision',
               title: `${titlePrefix} — ${setTitle || '전반 항목'}`,
+              body: fallbackCompletion
+                ? notePreview
+                  ? `${fallbackCompletion.senderName}님이 담당을 완료했습니다. ${notePreview}`
+                  : `${fallbackCompletion.senderName}님이 담당을 완료했습니다.`
+                : undefined,
               metadata: {
                 revisionId: newRow.id,
                 revisionAction: action,
+                revisionEventId: fallbackCompletion
+                  ? `${fallbackCompletion.userId}:${fallbackCompletion.doneAt ?? newRow.updated_at ?? ''}`
+                  : undefined,
                 retakeHubSetId: newRow.set_id ?? undefined,
               } as Record<string, unknown>,
             }, notiSettings);
@@ -1698,14 +1749,25 @@ export default function App() {
           ) || sceneKey.split(':').pop() || sceneKey;
           // 코덱스 P1 fix (2026-05-05): INSERT 분기와 동일 — sceneId(UUID) 우선,
           // sceneName 은 sceneKey 전체 보존 (last-token reuse 충돌 방지).
+          const notePreview = fallbackCompletion?.note?.trim()
+            ? (fallbackCompletion.note.trim().length > 60 ? fallbackCompletion.note.trim().slice(0, 60) + '...' : fallbackCompletion.note.trim())
+            : undefined;
           dispatchNotification({
             type: 'revision',
             title: `${titlePrefix} — ${sceneNameForLabel}`,
+            body: fallbackCompletion
+              ? notePreview
+                ? `${fallbackCompletion.senderName}님이 담당을 완료했습니다. ${notePreview}`
+                : `${fallbackCompletion.senderName}님이 담당을 완료했습니다.`
+              : undefined,
             metadata: {
               sceneId: newRow.scene_uuid,
               sceneName: sceneKey,
               revisionId: newRow.id,
               revisionAction: action,
+              revisionEventId: fallbackCompletion
+                ? `${fallbackCompletion.userId}:${fallbackCompletion.doneAt ?? newRow.updated_at ?? ''}`
+                : undefined,
             } as Record<string, unknown>,
           }, notiSettings);
           return;

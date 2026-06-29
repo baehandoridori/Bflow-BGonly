@@ -322,6 +322,8 @@ export interface RevisionAssigneeState {
   note?: string;        // 담당자 완료 멘트(파일경로 등)
   startedAt?: string;   // ISO 8601
   doneAt?: string;      // ISO 8601
+  completionNotifyUserIds?: string[]; // 담당 완료 알림 선택 대상(realtime fallback용)
+  completedByName?: string; // 담당 완료자 표시명(realtime fallback용)
 }
 
 export interface CompRevision {

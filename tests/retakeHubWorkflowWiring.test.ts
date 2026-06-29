@@ -9,8 +9,10 @@ test('retake hub rows open the scene detail modal on ctrl-click with the revisio
   assert.match(row, /event\.ctrlKey\s*\|\|\s*event\.metaKey/);
   assert.match(row, /resolveNotificationSceneTarget/);
   assert.match(row, /navigateToSceneView\(\{/);
+  assert.match(row, /department:\s*'all'/);
   assert.match(row, /initialTab:\s*'revisions'/);
   assert.match(row, /focusRevisionId:\s*revision\.id/);
+  assert.match(row, /forceDeptFilter:\s*'all'/);
 });
 
 test('assignee completion note input lets users choose completion alarm recipients', () => {

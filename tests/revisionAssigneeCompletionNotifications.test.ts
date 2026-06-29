@@ -49,6 +49,7 @@ test('retake completion notifications use a selected-recipient broadcast path', 
   const broadcast = readFileSync('electron/broadcast.ts', 'utf8');
   const app = readFileSync('src/App.tsx', 'utf8');
   const store = readFileSync('src/stores/useRevisionStore.ts', 'utf8');
+  const service = readFileSync('src/services/revisionService.ts', 'utf8');
 
   assert.match(preload, /supabaseDispatchRetakeAssigneeCompletionNotification/);
   assert.match(main, /supabase:dispatch-retake-assignee-completion-notification/);
@@ -65,6 +66,11 @@ test('retake completion notifications use a selected-recipient broadcast path', 
   assert.match(app, /sceneName:\s*sceneTarget\?\.sceneName \?\? sceneKey/);
   assert.match(app, /revisionAction:\s*'assignee_done'/);
   assert.match(app, /revisionEventId/);
+  assert.match(app, /resolveLatestAssigneeCompletionFallback/);
+  assert.match(app, /fallbackCompletion = resolveLatestAssigneeCompletionFallback\(newRow\.assignee_states\)/);
   assert.match(app, /retakeHubSetId:\s*p\.setId \?\? undefined/);
+  assert.match(store, /completionNotifyUserIds:\s*recipients/);
   assert.match(store, /dispatchRetakeAssigneeCompletionNotification/);
+  assert.match(service, /completionNotifyUserIds:\s*string\[\] = \[\]/);
+  assert.match(service, /completedByName:\s*completerName \|\| userId/);
 });
