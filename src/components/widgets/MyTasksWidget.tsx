@@ -19,6 +19,8 @@ import { useMyTasksData, scenePct } from './my-tasks/hooks/useMyTasksData';
 import { ModalPortal } from './my-tasks/components/ModalPortal';
 import { TodoDetailModal } from './my-tasks/components/TodoDetailModal';
 import { SceneDetailModal } from './my-tasks/components/SceneDetailModal';
+import { DonutHero } from './my-tasks/components/DonutHero';
+import { QuickAdd } from './my-tasks/components/QuickAdd';
 
 /* ─── 할 일 추가 모달 (작업 + 개인) ──────────── */
 function AddTaskModal({
@@ -566,6 +568,7 @@ export function MyTasksWidget() {
     episodeTitles,
     currentUser,
     loadTimedOut,
+    allFlat,
     pendingScenes,
     doneScenes,
     pendingPersonalTodos,
@@ -588,6 +591,8 @@ export function MyTasksWidget() {
   const [showPicker, setShowPicker] = useState(false);
   const [filterDone, setFilterDone] = useState(false);
   const [showDone, setShowDone] = useState(false);
+  const [showQuickAdd, setShowQuickAdd] = useState(false);
+  const [donutCollapsed, setDonutCollapsed] = useState(false);
 
   // 상세 모달: id 만 보관하고 실제 todo 는 스토어 목록에서 매 렌더 재추출 → 편집 후 stale 값 방지
   const [selectedTodoId, setSelectedTodoId] = useState<string | null>(null);
@@ -631,6 +636,19 @@ export function MyTasksWidget() {
       });
     }
     setSelectedSceneKey(null);
+  };
+
+  // QuickAdd 일반 텍스트 → 개인 할일(일정 없이). 훅은 PersonalTodo 객체를 받으므로 어댑터로 변환.
+  const handleQuickAddPersonal = (title: string) => {
+    const t = title.trim();
+    if (!t) return;
+    addPersonalTodo({
+      id: createUuid(),
+      title: t,
+      memo: '',
+      completed: false,
+      createdAt: new Date().toISOString(),
+    });
   };
 
   // 팝업에서 모달이 하나라도 열려 있는지 — 열려 있으면 창을 모달이 들어갈 만큼 키운다.
@@ -745,34 +763,53 @@ export function MyTasksWidget() {
       title="내 할일"
       icon={<CheckSquare size={14} />}
       headerRight={
-        <button
-          onClick={() => setFilterDone(!filterDone)}
-          className={cn(
-            'p-0.5 cursor-pointer transition-colors',
-            filterDone ? 'text-accent' : 'text-text-secondary/40 hover:text-text-secondary',
-          )}
-          title={filterDone ? '전체 표시' : '미완료만'}
-        >
-          <ListFilter size={11} />
-        </button>
+        <>
+          <button
+            onClick={() => setShowQuickAdd((v) => !v)}
+            data-quickadd-toggle
+            className={cn(
+              'p-0.5 cursor-pointer transition-colors',
+              showQuickAdd ? 'text-accent' : 'text-text-secondary/40 hover:text-text-secondary',
+            )}
+            title="할일 추가"
+          >
+            <Plus size={12} />
+          </button>
+          <button
+            onClick={() => setFilterDone(!filterDone)}
+            className={cn(
+              'p-0.5 cursor-pointer transition-colors',
+              filterDone ? 'text-accent' : 'text-text-secondary/40 hover:text-text-secondary',
+            )}
+            title={filterDone ? '전체 표시' : '미완료만'}
+          >
+            <ListFilter size={11} />
+          </button>
+        </>
       }
     >
       <div className="flex flex-col h-full gap-0">
-        {/* 요약 바 */}
-        <div className="flex items-center gap-2 px-1 pt-2 pb-1">
-          <div className="flex-1 h-1.5 rounded-full bg-bg-border/20 overflow-hidden">
-            <motion.div
-              className="h-full rounded-full"
-              style={{ backgroundColor: stats.pct >= 100 ? '#00B894' : stats.pct >= 50 ? '#FDCB6E' : '#6C5CE7' }}
-              initial={{ width: 0 }}
-              animate={{ width: `${Math.min(stats.pct, 100)}%` }}
-              transition={{ duration: 0.5 }}
+        {/* 진행 히어로 (도넛) + 빠른 추가 */}
+        <DonutHero
+          stats={stats}
+          collapsed={donutCollapsed}
+          onToggleCollapse={() => setDonutCollapsed((v) => !v)}
+        />
+        <AnimatePresence>
+          {showQuickAdd && (
+            <QuickAdd
+              open={showQuickAdd}
+              onClose={() => setShowQuickAdd(false)}
+              candidates={allFlat}
+              episodeTitles={episodeTitles}
+              existingKeys={existingKeys}
+              currentUserName={currentUser.name}
+              onAddScene={(key) => addScenes([key])}
+              onAddPersonalTodo={handleQuickAddPersonal}
+              onOpenFullPicker={() => { setShowQuickAdd(false); setShowPicker(true); }}
             />
-          </div>
-          <span className="text-[11px] tabular-nums text-text-secondary/50 shrink-0">
-            {stats.fullyDone}/{stats.total} ({Math.round(stats.pct)}%)
-          </span>
-        </div>
+          )}
+        </AnimatePresence>
 
         {/* 메인 리스트 */}
         <div className="flex-1 overflow-auto -mx-1 px-1">
@@ -851,14 +888,6 @@ export function MyTasksWidget() {
           )}
         </div>
 
-        {/* 할일 추가 버튼 */}
-        <button
-          onClick={() => setShowPicker(true)}
-          className="flex items-center justify-center gap-1.5 w-full py-1.5 text-[11px] text-text-secondary/50 border border-dashed border-bg-border rounded-lg hover:border-accent hover:text-accent hover:bg-accent/5 cursor-pointer transition-colors mt-1"
-        >
-          <Plus size={11} />
-          내 할일 추가
-        </button>
       </div>
 
       <AnimatePresence>
@@ -867,7 +896,7 @@ export function MyTasksWidget() {
             episodes={episodes}
             episodeTitles={episodeTitles}
             existingKeys={existingKeys}
-            defaultMode="personal"
+            defaultMode="scene"
             onAddScenes={addScenes}
             onAddPersonalTodo={addPersonalTodo}
             onClose={() => setShowPicker(false)}

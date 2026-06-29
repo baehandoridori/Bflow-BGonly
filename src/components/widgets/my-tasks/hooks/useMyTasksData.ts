@@ -22,6 +22,8 @@ import {
 import * as supabaseService from '@/services/supabaseService';
 import type { SceneKey, PersonalTodo, TaskView, FlatScene, StageSaveBaseline } from '../types';
 import { createStageSaveBaseline } from '../types';
+import { computeMyTasksStats } from '../statsUtils';
+import type { MyTasksStats } from '../statsUtils';
 
 const SAVE_FAIL_MESSAGE = '저장에 실패했어요. 잠시 후 다시 시도해주세요.';
 
@@ -337,13 +339,15 @@ export interface UseMyTasksDataResult {
   currentUser: ReturnType<typeof useAuthStore.getState>['currentUser'];
   loadTimedOut: boolean;
   // 파생 상태
+  /** 전체 에피소드 평탄화(QuickAdd 자동완성 후보용 — 재구독 회피) */
+  allFlat: FlatScene[];
   allViewScenes: FlatScene[];
   pendingScenes: FlatScene[];
   doneScenes: FlatScene[];
   activePersonalTodos: PersonalTodo[];
   pendingPersonalTodos: PersonalTodo[];
   donePersonalTodos: PersonalTodo[];
-  stats: { total: number; fullyDone: number; pct: number };
+  stats: MyTasksStats;
   existingKeys: Set<SceneKey>;
   assignedSceneKeySet: Set<SceneKey>;
   highlightTodoId: string | null;
@@ -568,20 +572,14 @@ export function useMyTasksData(isPopup: boolean): UseMyTasksDataResult {
   const pendingPersonalTodos = useMemo(() => activePersonalTodos.filter((t) => !t.completed), [activePersonalTodos]);
   const donePersonalTodos = useMemo(() => activePersonalTodos.filter((t) => t.completed), [activePersonalTodos]);
 
-  const stats = useMemo(() => {
-    const sceneTotal = allViewScenes.length;
-    const personalTotal = activePersonalTodos.length;
-    const total = sceneTotal + personalTotal;
-    const sceneStages = sceneTotal * 4;
-    const sceneChecked = allViewScenes.reduce((s, f) => s + [f.scene.lo, f.scene.done, f.scene.review, f.scene.png].filter(Boolean).length, 0);
-    const personalDone = donePersonalTodos.length;
-    const fullyDone = doneScenes.length + personalDone;
-    // 씬: 4단계 가중, 개인 할일: 1단계 가중
-    const totalWeight = sceneStages + personalTotal;
-    const checkedWeight = sceneChecked + personalDone;
-    const pct = totalWeight > 0 ? (checkedWeight / totalWeight) * 100 : 0;
-    return { total, fullyDone, pct };
-  }, [allViewScenes, doneScenes, activePersonalTodos, donePersonalTodos]);
+  // 통계는 순수 함수(statsUtils)로 위임 — 단계별/오늘 마친 씬 포함, 단위 테스트로 회귀 보호.
+  // done/pending 분리는 함수 내부에서 하므로 allViewScenes + activePersonalTodos 만 넘긴다.
+  // new Date()는 deps에 없다 → '오늘 마친 씬' 카운트의 자정 롤오버는 다음 데이터 변경
+  // (토글/추가/realtime 수신) 시 갱신된다. B flow는 변경이 잦아 실사용 영향은 미미.
+  const stats = useMemo(
+    () => computeMyTasksStats(allViewScenes, activePersonalTodos, new Date()),
+    [allViewScenes, activePersonalTodos],
+  );
 
   // 토글 핸들러 (씬 단계 순차 토글)
   const handleSceneToggle = useCallback(async (flat: FlatScene, stage: Stage) => {
@@ -1033,6 +1031,7 @@ export function useMyTasksData(isPopup: boolean): UseMyTasksDataResult {
     episodeTitles,
     currentUser,
     loadTimedOut,
+    allFlat,
     allViewScenes,
     pendingScenes,
     doneScenes,
