@@ -800,6 +800,8 @@ export function rowToCharacter(row: any): Character {
 
 /** DB row(snake_case) → 도메인 CharacterCostume(camelCase). */
 export function rowToCostume(row: any): CharacterCostume {
+  const hasDesignAssigneeColumn = Object.prototype.hasOwnProperty.call(row, 'design_assignee');
+  const hasRiggingAssigneeColumn = Object.prototype.hasOwnProperty.call(row, 'rigging_assignee');
   return {
     id: row.id,
     characterId: row.character_id,
@@ -813,8 +815,8 @@ export function rowToCostume(row: any): CharacterCostume {
     imageFit: normalizeCharacterImageFit(row.image_fit),
     structureTags: Array.isArray(row.structure_tags) ? row.structure_tags : [],
     assetTags: Array.isArray(row.asset_tags) ? row.asset_tags : [],
-    designAssignee: row.design_assignee ?? row.assignee ?? null,
-    riggingAssignee: row.rigging_assignee ?? row.assignee ?? null,
+    designAssignee: hasDesignAssigneeColumn ? row.design_assignee ?? null : row.assignee ?? null,
+    riggingAssignee: hasRiggingAssigneeColumn ? row.rigging_assignee ?? null : row.assignee ?? null,
     assignee: row.assignee ?? null,
     memo: row.memo ?? null,
     sortOrder: row.sort_order ?? 0,
