@@ -375,10 +375,23 @@ const EditableSceneRow = forwardRef<HTMLDivElement, EditableSceneRowProps>(funct
         pct >= 100 ? 'bg-green-500/5 opacity-60' : 'hover:bg-bg-border/8',
       )}
     >
-      {/* 씬 정보 — 2줄 구조 (클릭 시 상세 모달) */}
-      <button
-        type="button"
-        onClick={() => onOpenDetail(flat)}
+      {/* 씬 정보 — 2줄 구조 (클릭 시 상세 모달)
+       * 메모 안 경로(PathBadge)·멘션·#태그 칩은 자체 <button>/clickable 이라
+       * 행 본문을 <button>으로 두면 button-in-button 무효 DOM이 된다 → div[role=button]로 처리.
+       * 칩들은 각자 stopPropagation 하지만, 안전하게 인터랙티브 자식 클릭은 행 핸들러에서 무시한다. */}
+      <div
+        role="button"
+        tabIndex={0}
+        onClick={(e) => {
+          if ((e.target as HTMLElement).closest('button, a')) return;
+          onOpenDetail(flat);
+        }}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault();
+            onOpenDetail(flat);
+          }
+        }}
         className="flex flex-col min-w-0 flex-1 gap-0.5 text-left cursor-pointer rounded px-0.5 -mx-0.5 hover:bg-bg-border/10 transition-colors"
         title="클릭하여 상세 보기/편집"
       >
@@ -391,7 +404,7 @@ const EditableSceneRow = forwardRef<HTMLDivElement, EditableSceneRowProps>(funct
             {s.memo ? <EntityText text={s.memo} userNames={users.map((u) => u.name)} onHashClick={navigateToHashTarget} /> : s.sceneId}
           </span>
         </div>
-      </button>
+      </div>
 
       {/* 미니 프로세스 트랙 */}
       <div className="flex bg-bg-primary rounded-md p-0.5 border border-bg-border gap-0.5 shrink-0">
@@ -484,10 +497,23 @@ function PersonalTodoContent({
       {/* 개인 라벨 */}
       <span className="text-[11px] font-bold text-accent shrink-0">::ᅠ개인</span>
 
-      {/* 제목/메모 — 클릭 시 상세 모달 (확정 B: 날짜·캘린더 UI 미노출) */}
-      <button
-        type="button"
-        onClick={() => onOpenDetail(todo)}
+      {/* 제목/메모 — 클릭 시 상세 모달 (확정 B: 날짜·캘린더 UI 미노출)
+       * 메모 안 경로(PathBadge)·멘션·#태그 칩은 자체 <button>/clickable 이라
+       * 행 본문을 <button>으로 두면 button-in-button 무효 DOM이 된다 → div[role=button]로 처리.
+       * 칩들은 각자 stopPropagation 하지만, 안전하게 인터랙티브 자식 클릭은 행 핸들러에서 무시한다. */}
+      <div
+        role="button"
+        tabIndex={0}
+        onClick={(e) => {
+          if ((e.target as HTMLElement).closest('button, a')) return;
+          onOpenDetail(todo);
+        }}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault();
+            onOpenDetail(todo);
+          }
+        }}
         className="flex flex-col min-w-0 flex-1 gap-0.5 text-left cursor-pointer rounded px-0.5 -mx-0.5 hover:bg-bg-border/10 transition-colors"
         title="클릭하여 상세 보기/편집"
       >
@@ -502,7 +528,7 @@ function PersonalTodoContent({
         {todo.memo && (
           <span className="text-[11px] text-text-secondary/50 truncate"><EntityText text={todo.memo} userNames={users.map((u) => u.name)} onHashClick={navigateToHashTarget} /></span>
         )}
-      </button>
+      </div>
 
       {/* 체크박스 (오른쪽) */}
       <button
@@ -605,10 +631,15 @@ export function MyTasksWidget() {
     setSelectedSceneKey(null);
   };
 
+  // 팝업에서 모달이 하나라도 열려 있는지 — 열려 있으면 창을 모달이 들어갈 만큼 키운다.
+  const anyModalOpen = showPicker || selectedTodoId != null || selectedSceneKey != null;
+
   // 팝업에서 완료 섹션 접기/펼치기 시 창 크기 조절
+  // 모달이 열려 있는 동안에는 아래 모달-리사이즈 effect가 창을 키우므로, 이 effect는 건너뛴다
+  // (둘이 같은 창을 서로 다른 크기로 잡으려 다투지 않도록 분리).
   const baseSizeRef = useRef<{ width: number; height: number } | null>(null);
   useEffect(() => {
-    if (!isPopup || !widgetId) return;
+    if (!isPopup || !widgetId || anyModalOpen) return;
     (async () => {
       if (!baseSizeRef.current) {
         const size = await window.electronAPI?.widgetGetSize?.(widgetId);
@@ -624,7 +655,39 @@ export function MyTasksWidget() {
         window.electronAPI?.widgetResize?.(widgetId, base.width, base.height);
       }
     })();
-  }, [showDone, doneScenes.length, isPopup, widgetId]);
+  }, [showDone, doneScenes.length, isPopup, widgetId, anyModalOpen]);
+
+  // 팝업에서 모달이 열릴 때 창이 작으면 모달이 들어갈 만큼 키우고, 닫히면 직전 크기로 복원.
+  // (대시보드는 모달이 document.body 포털로 떠 화면 전체를 쓰므로 손대지 않는다 — isPopup 일 때만.)
+  // 키우기 직전의 실제 창 크기를 별도 ref에 담아 두고 닫힐 때 정확히 그 크기로 되돌린다 →
+  // 완료 섹션 펼침으로 이미 커져 있던 경우에도 baseSizeRef를 건드리지 않고 공존한다.
+  const MODAL_MIN_W = 520;
+  const MODAL_MIN_H = 640;
+  const preModalSizeRef = useRef<{ width: number; height: number } | null>(null);
+  useEffect(() => {
+    if (!isPopup || !widgetId) return;
+    (async () => {
+      if (anyModalOpen) {
+        // 모달 연속 전환(하나 닫고 다른 하나 열기) 시 첫 모달의 pre-modal 크기를 유지.
+        if (!preModalSizeRef.current) {
+          const size = await window.electronAPI?.widgetGetSize?.(widgetId);
+          if (!size) return;
+          preModalSizeRef.current = size;
+          // 현재보다 작을 때만 키운다(사용자가 더 크게 키운 창은 줄이지 않는다).
+          const w = Math.max(size.width, MODAL_MIN_W);
+          const h = Math.max(size.height, MODAL_MIN_H);
+          if (w !== size.width || h !== size.height) {
+            window.electronAPI?.widgetResize?.(widgetId, w, h);
+          }
+        }
+      } else if (preModalSizeRef.current) {
+        // 모든 모달이 닫혔다 → 키우기 직전 크기로 정확히 복원.
+        const prev = preModalSizeRef.current;
+        preModalSizeRef.current = null;
+        window.electronAPI?.widgetResize?.(widgetId, prev.width, prev.height);
+      }
+    })();
+  }, [anyModalOpen, isPopup, widgetId]);
 
   // 행 렌더 헬퍼
   const renderRow = (flat: FlatScene) => {
