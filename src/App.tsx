@@ -1609,7 +1609,7 @@ export default function App() {
           const sceneKey = row.scene_id || '';
           // '전반'(씬 미지정) 항목은 씬 컨텍스트가 없다 → 세트 제목으로 알리고, 클릭은 리테이크 허브로(코덱스 P2).
           //   (씬 필드가 비어 있어 기존 씬 라벨/씬 점프 경로는 빈 제목 + 이동 불가가 된다.)
-          if (!sceneKey) {
+          if (!sceneKey || isGeneralRevisionSceneKey(sceneKey)) {
             const setTitle = row.set_id
               ? useRevisionSetStore.getState().sets.find((s) => s.id === row.set_id)?.title
               : undefined;
@@ -1668,6 +1668,69 @@ export default function App() {
           };
           const oldRow = payload.old as { status?: string } | undefined;
 
+          const dispatchAssigneeCompletionFallback = (
+            completion: ReturnType<typeof resolveLatestAssigneeCompletionFallback>,
+          ): boolean => {
+            if (!completion || !newRow.id) return false;
+            if (!completion.notifyUserIds.includes(me.id)) return false;
+            if (completion.userId === me.id) return false;
+
+            const completionStamp = completion.doneAt ?? newRow.updated_at ?? '';
+            const dedupeKey = `revision:${newRow.id}:assignee_done:${completionStamp}`;
+            if (!dedupeNotification(dedupeKey)) return true;
+
+            const sceneKey = newRow.scene_id || '';
+            const notePreview = completion.note?.trim()
+              ? (completion.note.trim().length > 60 ? completion.note.trim().slice(0, 60) + '...' : completion.note.trim())
+              : undefined;
+            const body = notePreview
+              ? `${completion.senderName}님이 담당을 완료했습니다. ${notePreview}`
+              : `${completion.senderName}님이 담당을 완료했습니다.`;
+            const revisionEventId = `${completion.userId}:${completionStamp}`;
+
+            if (!sceneKey || isGeneralRevisionSceneKey(sceneKey)) {
+              const setTitle = newRow.set_id
+                ? useRevisionSetStore.getState().sets.find((s) => s.id === newRow.set_id)?.title
+                : undefined;
+              dispatchNotification({
+                type: 'revision',
+                title: `리테이크 담당 완료 — ${setTitle || '전반 항목'}`,
+                body,
+                metadata: {
+                  revisionId: newRow.id,
+                  revisionAction: 'assignee_done',
+                  revisionEventId,
+                  retakeHubSetId: newRow.set_id ?? undefined,
+                } as Record<string, unknown>,
+              }, notiSettings);
+              return true;
+            }
+
+            const dataState = useDataStore.getState();
+            const sceneNameForLabel = buildNotificationSceneDisplayLabelFromSceneKey(
+              sceneKey,
+              dataState.episodeTitles,
+              dataState.episodes,
+            ) || sceneKey.split(':').pop() || sceneKey;
+            dispatchNotification({
+              type: 'revision',
+              title: `리테이크 담당 완료 — ${sceneNameForLabel}`,
+              body,
+              metadata: {
+                sceneId: newRow.scene_uuid,
+                sceneName: sceneKey,
+                revisionId: newRow.id,
+                revisionAction: 'assignee_done',
+                revisionEventId,
+              } as Record<string, unknown>,
+            }, notiSettings);
+            return true;
+          };
+
+          if (newRow.status !== 'assignee_done') {
+            dispatchAssigneeCompletionFallback(resolveLatestAssigneeCompletionFallback(newRow.assignee_states));
+          }
+
           // 상태 변경 detect — old.status !== new.status 일 때만 알림
           if (!oldRow || oldRow.status === newRow.status) return;
           // 최종완료 되돌리기(resolved → 비resolved)는 알림 보내지 않음 (open 복귀와 동일 무알림 정책).
@@ -1715,7 +1778,7 @@ export default function App() {
 
           const sceneKey = newRow.scene_id || '';
           // '전반' 항목 상태 변경 — 씬 컨텍스트 없음 → 세트 제목 + 클릭 시 허브로(코덱스 P2, INSERT 분기와 동일).
-          if (!sceneKey) {
+          if (!sceneKey || isGeneralRevisionSceneKey(sceneKey)) {
             const setTitle = newRow.set_id
               ? useRevisionSetStore.getState().sets.find((s) => s.id === newRow.set_id)?.title
               : undefined;
