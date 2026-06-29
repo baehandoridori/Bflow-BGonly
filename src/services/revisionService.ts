@@ -609,6 +609,9 @@ export async function updateRevisionStatus(
 export interface RetakeAssigneeCompletionNotificationPayload {
   revisionId: string;
   sceneKey: string;
+  sceneUuid?: string;
+  sheetName?: string;
+  department?: 'bg' | 'acting';
   setId?: string | null;
   revisionNo: number;
   senderId: string;

@@ -121,34 +121,59 @@ function markLocalFeedbackJumpAsRead(payload: { kind?: string; notificationId?: 
   if (target && !target.isRead) store.markAsRead(target.id);
 }
 
-function resolveLatestAssigneeCompletionFallback(
-  assigneeStates?: Record<string, RevisionAssigneeState> | null,
-): {
+type AssigneeCompletionFallback = {
   userId: string;
   senderName: string;
   notifyUserIds: string[];
   note?: string;
   doneAt?: string;
-} | null {
+};
+
+function buildAssigneeCompletionFallbackCandidate(
+  userId: string,
+  state: RevisionAssigneeState | undefined,
+): AssigneeCompletionFallback | null {
+  if (state?.state !== 'done') return null;
+  if (!Array.isArray(state.completionNotifyUserIds)) return null;
+  return {
+    userId,
+    senderName: state.completedByName || userId,
+    notifyUserIds: state.completionNotifyUserIds.filter((id): id is string => typeof id === 'string' && id.trim().length > 0),
+    note: state.note,
+    doneAt: state.doneAt,
+  };
+}
+
+function resolveLatestAssigneeCompletionFallback(
+  assigneeStates?: Record<string, RevisionAssigneeState> | null,
+): AssigneeCompletionFallback | null {
   if (!assigneeStates || typeof assigneeStates !== 'object') return null;
-  let latest: {
-    userId: string;
-    senderName: string;
-    notifyUserIds: string[];
-    note?: string;
-    doneAt?: string;
-  } | null = null;
+  let latest: AssigneeCompletionFallback | null = null;
 
   for (const [userId, state] of Object.entries(assigneeStates)) {
-    if (state?.state !== 'done') continue;
-    if (!Array.isArray(state.completionNotifyUserIds)) continue;
-    const candidate = {
-      userId,
-      senderName: state.completedByName || userId,
-      notifyUserIds: state.completionNotifyUserIds.filter((id): id is string => typeof id === 'string' && id.trim().length > 0),
-      note: state.note,
-      doneAt: state.doneAt,
-    };
+    const candidate = buildAssigneeCompletionFallbackCandidate(userId, state);
+    if (!candidate) continue;
+    if (!latest || (candidate.doneAt ?? '') > (latest.doneAt ?? '')) {
+      latest = candidate;
+    }
+  }
+
+  return latest;
+}
+
+function resolveNewAssigneeCompletionFallback(
+  nextStates?: Record<string, RevisionAssigneeState> | null,
+  previousStates?: Record<string, RevisionAssigneeState> | null,
+): AssigneeCompletionFallback | null {
+  if (!nextStates || typeof nextStates !== 'object') return null;
+  if (!previousStates || typeof previousStates !== 'object') return null;
+  let latest: AssigneeCompletionFallback | null = null;
+
+  for (const [userId, state] of Object.entries(nextStates)) {
+    const candidate = buildAssigneeCompletionFallbackCandidate(userId, state);
+    if (!candidate) continue;
+    const previous = previousStates?.[userId];
+    if (previous?.state === 'done' && previous.doneAt === state.doneAt) continue;
     if (!latest || (candidate.doneAt ?? '') > (latest.doneAt ?? '')) {
       latest = candidate;
     }
@@ -1658,6 +1683,7 @@ export default function App() {
             scene_uuid?: string;
             requester_id?: string;
             status?: string;
+            department?: 'bg' | 'acting' | null;
             revision_no?: number;
             resolved_by?: string | null;
             notify_user_ids?: string[] | null;
@@ -1666,10 +1692,13 @@ export default function App() {
             updated_at?: string | null;
             resolved_at?: string | null;
           };
-          const oldRow = payload.old as { status?: string } | undefined;
+          const oldRow = payload.old as {
+            status?: string;
+            assignee_states?: Record<string, RevisionAssigneeState> | null;
+          } | undefined;
 
           const dispatchAssigneeCompletionFallback = (
-            completion: ReturnType<typeof resolveLatestAssigneeCompletionFallback>,
+            completion: AssigneeCompletionFallback | null,
           ): boolean => {
             if (!completion || !newRow.id) return false;
             if (!completion.notifyUserIds.includes(me.id)) return false;
@@ -1707,18 +1736,26 @@ export default function App() {
             }
 
             const dataState = useDataStore.getState();
+            const sceneTarget = resolveNotificationSceneTarget({
+              sceneId: newRow.scene_uuid,
+              sceneName: sceneKey,
+              department: newRow.department,
+            }, dataState.episodes);
             const sceneNameForLabel = buildNotificationSceneDisplayLabelFromSceneKey(
               sceneKey,
               dataState.episodeTitles,
               dataState.episodes,
-            ) || sceneKey.split(':').pop() || sceneKey;
+            ) || sceneTarget?.sceneName || sceneKey.split(':').pop() || sceneKey;
             dispatchNotification({
               type: 'revision',
               title: `리테이크 담당 완료 — ${sceneNameForLabel}`,
               body,
               metadata: {
-                sceneId: newRow.scene_uuid,
-                sceneName: sceneKey,
+                sceneId: sceneTarget?.sceneUuid ?? newRow.scene_uuid,
+                sceneName: sceneTarget?.sceneName ?? sceneKey,
+                sheetName: sceneTarget?.sheetName,
+                partId: sceneTarget?.partId,
+                department: newRow.department,
                 revisionId: newRow.id,
                 revisionAction: 'assignee_done',
                 revisionEventId,
@@ -1728,7 +1765,10 @@ export default function App() {
           };
 
           if (newRow.status !== 'assignee_done') {
-            dispatchAssigneeCompletionFallback(resolveLatestAssigneeCompletionFallback(newRow.assignee_states));
+            dispatchAssigneeCompletionFallback(resolveNewAssigneeCompletionFallback(
+              newRow.assignee_states,
+              oldRow?.assignee_states,
+            ));
           }
 
           // 상태 변경 detect — old.status !== new.status 일 때만 알림
@@ -1748,7 +1788,10 @@ export default function App() {
             action = 'in_progress';
             titlePrefix = '리테이크 진행중';
           } else if (newRow.status === 'assignee_done') {
-            fallbackCompletion = resolveLatestAssigneeCompletionFallback(newRow.assignee_states);
+            fallbackCompletion = resolveNewAssigneeCompletionFallback(
+              newRow.assignee_states,
+              oldRow?.assignee_states,
+            ) ?? resolveLatestAssigneeCompletionFallback(newRow.assignee_states);
             if (!fallbackCompletion?.notifyUserIds.includes(me.id)) return;
             if (fallbackCompletion.userId === me.id) return;
             action = 'assignee_done';
@@ -1805,11 +1848,16 @@ export default function App() {
             return;
           }
           const dataState = useDataStore.getState();
+          const sceneTarget = resolveNotificationSceneTarget({
+            sceneId: newRow.scene_uuid,
+            sceneName: sceneKey,
+            department: newRow.department,
+          }, dataState.episodes);
           const sceneNameForLabel = buildNotificationSceneDisplayLabelFromSceneKey(
             sceneKey,
             dataState.episodeTitles,
             dataState.episodes,
-          ) || sceneKey.split(':').pop() || sceneKey;
+          ) || sceneTarget?.sceneName || sceneKey.split(':').pop() || sceneKey;
           // 코덱스 P1 fix (2026-05-05): INSERT 분기와 동일 — sceneId(UUID) 우선,
           // sceneName 은 sceneKey 전체 보존 (last-token reuse 충돌 방지).
           const notePreview = fallbackCompletion?.note?.trim()
@@ -1824,8 +1872,11 @@ export default function App() {
                 : `${fallbackCompletion.senderName}님이 담당을 완료했습니다.`
               : undefined,
             metadata: {
-              sceneId: newRow.scene_uuid,
-              sceneName: sceneKey,
+              sceneId: sceneTarget?.sceneUuid ?? newRow.scene_uuid,
+              sceneName: sceneTarget?.sceneName ?? sceneKey,
+              sheetName: sceneTarget?.sheetName,
+              partId: sceneTarget?.partId,
+              department: newRow.department,
               revisionId: newRow.id,
               revisionAction: action,
               revisionEventId: fallbackCompletion
@@ -1973,6 +2024,9 @@ export default function App() {
         const p = e.payload as {
           revisionId?: string;
           sceneKey?: string;
+          sceneUuid?: string;
+          sheetName?: string;
+          department?: 'bg' | 'acting' | null;
           setId?: string | null;
           revisionNo?: number;
           senderId?: string;
@@ -1995,7 +2049,12 @@ export default function App() {
         const sceneKey = p.sceneKey;
         const isGeneralRetakeCompletion = !sceneKey || isGeneralRevisionSceneKey(sceneKey);
         const sceneTarget = !isGeneralRetakeCompletion
-          ? resolveNotificationSceneTarget({ sceneName: sceneKey }, ds.episodes)
+          ? resolveNotificationSceneTarget({
+            sceneId: p.sceneUuid,
+            sceneName: sceneKey,
+            sheetName: p.sheetName,
+            department: p.department,
+          }, ds.episodes)
           : null;
         const sceneLabel = !isGeneralRetakeCompletion
           ? (sceneTarget?.sceneName || buildNotificationSceneDisplayLabelFromSceneKey(
@@ -2022,6 +2081,7 @@ export default function App() {
                 sceneName: sceneTarget?.sceneName ?? sceneKey,
                 sheetName: sceneTarget?.sheetName,
                 partId: sceneTarget?.partId,
+                department: p.department,
                 revisionId: p.revisionId,
                 revisionAction: 'assignee_done',
                 revisionEventId,

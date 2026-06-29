@@ -149,6 +149,26 @@ test('revision scene-key notifications resolve normalized numeric scene numbers 
   );
 });
 
+test('revision scene-key notifications honor department hints when BG and acting share a scene id', () => {
+  assert.deepEqual(
+    resolveNotificationSceneTarget(
+      {
+        sceneName: 'EP02:B:b018',
+        department: 'acting',
+        revisionId: 'revision-acting',
+      },
+      episodes,
+    ),
+    {
+      episodeNumber: 2,
+      partId: 'B',
+      sheetName: 'EP02_B_ACT',
+      sceneUuid: 'scene-act-duplicate-uuid',
+      sceneName: 'b018',
+    },
+  );
+});
+
 test('feedback catch-up resolves by sheet name when scene UUID is missing and scene names are reused', () => {
   assert.deepEqual(
     resolveNotificationSceneTarget(

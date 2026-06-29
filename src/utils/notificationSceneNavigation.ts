@@ -6,6 +6,7 @@ export interface NotificationSceneMetadata {
   sceneName?: string;
   sheetName?: string;
   partId?: string;
+  department?: 'bg' | 'acting' | null;
   commentId?: string;
   commentSceneId?: string;
   commentPartId?: string;
@@ -58,6 +59,10 @@ const PRESERVE_CURRENT_DEPT_FILTER_TYPES = new Set<string>([
 
 function asString(value: unknown): string | undefined {
   return typeof value === 'string' && value.trim() ? value.trim() : undefined;
+}
+
+function asDepartment(value: unknown): 'bg' | 'acting' | undefined {
+  return value === 'bg' || value === 'acting' ? value : undefined;
 }
 
 function buildTarget(
@@ -141,7 +146,11 @@ function parseSceneKey(sceneKey: string): {
   return { episodeKey, episodeNumber, partId, sceneName };
 }
 
-function findBySceneKey(episodes: Episode[], sceneKey: string | undefined): NotificationSceneTarget | null {
+function findBySceneKey(
+  episodes: Episode[],
+  sceneKey: string | undefined,
+  departmentHint?: 'bg' | 'acting',
+): NotificationSceneTarget | null {
   if (!sceneKey || !sceneKey.includes(':')) return null;
   const parsed = parseSceneKey(sceneKey);
   if (!parsed) return null;
@@ -152,6 +161,7 @@ function findBySceneKey(episodes: Episode[], sceneKey: string | undefined): Noti
     if (ep.episodeNumber !== parsed.episodeNumber) continue;
     for (const part of ep.parts) {
       if (part.partId.trim().toLowerCase() !== normalizedPart) continue;
+      if (departmentHint && part.department !== departmentHint) continue;
       const siblingSceneIds = part.scenes.map((candidate) => candidate.sceneId);
       const targetLookupKeys = new Set(buildRevisionSceneKeyLookupKeys(sceneKey, { siblingSceneIds }));
       const scene = part.scenes.find((candidate) => {
@@ -277,6 +287,7 @@ export function resolveNotificationSceneTarget(
   const sceneUuid = asString(metadata.sceneId);
   const sceneName = asString(metadata.sceneName);
   const sheetName = asString(metadata.sheetName);
+  const departmentHint = asDepartment(metadata.department);
   const commentSceneId = asString(metadata.commentSceneId);
   const commentPartId = asString(metadata.commentPartId);
 
@@ -284,7 +295,7 @@ export function resolveNotificationSceneTarget(
     (sceneUuid ? findBySceneUuid(episodes, sceneUuid) : null) ||
     findByCommentStorage(episodes, commentPartId, commentSceneId) ||
     findBySheetContext(episodes, sheetName, commentSceneId ?? sceneName) ||
-    findBySceneKey(episodes, sceneName) ||
+    findBySceneKey(episodes, sceneName, departmentHint) ||
     findUniqueBySceneName(episodes, sceneName) ||
     (sceneUuid ? findUniqueBySceneName(episodes, sceneUuid) : null)
   );
