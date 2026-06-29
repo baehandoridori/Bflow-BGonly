@@ -1788,10 +1788,12 @@ export default function App() {
             action = 'in_progress';
             titlePrefix = '리테이크 진행중';
           } else if (newRow.status === 'assignee_done') {
-            fallbackCompletion = resolveNewAssigneeCompletionFallback(
+            const newlyCompletedAssignee = resolveNewAssigneeCompletionFallback(
               newRow.assignee_states,
               oldRow?.assignee_states,
-            ) ?? resolveLatestAssigneeCompletionFallback(newRow.assignee_states);
+            );
+            fallbackCompletion = newlyCompletedAssignee
+              ?? (oldRow?.assignee_states ? null : resolveLatestAssigneeCompletionFallback(newRow.assignee_states));
             if (!fallbackCompletion?.notifyUserIds.includes(me.id)) return;
             if (fallbackCompletion.userId === me.id) return;
             action = 'assignee_done';

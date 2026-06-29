@@ -73,7 +73,7 @@ test('retake completion notifications use a selected-recipient broadcast path', 
   assert.match(app, /resolveLatestAssigneeCompletionFallback/);
   assert.match(app, /resolveNewAssigneeCompletionFallback/);
   assert.match(app, /oldRow\?\.assignee_states/);
-  assert.match(app, /\?\? resolveLatestAssigneeCompletionFallback\(newRow\.assignee_states\)/);
+  assert.match(app, /oldRow\?\.assignee_states \? null : resolveLatestAssigneeCompletionFallback\(newRow\.assignee_states\)/);
   assert.match(app, /retakeHubSetId:\s*p\.setId \?\? undefined/);
   assert.match(store, /resolveNotificationSceneTarget/);
   assert.match(store, /sceneUuid:\s*sceneTarget\?\.sceneUuid/);
