@@ -21,7 +21,13 @@ import { normalizeSceneIdKey } from '../utils/sceneIdKey';
 import { normalizePartIdKey } from '../utils/partId';
 import { buildRevisionNotificationUserIds } from '../utils/revisionNotificationRecipients';
 import {
-  startAssignee, completeAssignee, revertAssignee, deriveRevisionStatus, sanitizeAssignees,
+  startAssignee,
+  completeAssignee,
+  revertAssignee,
+  deriveRevisionStatus,
+  sanitizeAssignees,
+  sanitizeRequiredAssignees,
+  normalizeRevisionDescription,
 } from '../utils/revisionWorkflow';
 import { nextGeneralRevisionNo } from '../utils/revisionGeneral';
 import { createUuid } from '../utils/createUuid';
@@ -441,6 +447,7 @@ export interface CreateRevisionServiceInput {
 }
 
 export async function createRevision(input: CreateRevisionServiceInput): Promise<CompRevision> {
+  const description = normalizeRevisionDescription(input.description);
   const isGeneral = !input.sceneKey?.trim();
   // 전반 항목도 lookup 헬퍼가 만드는 정규형('::')으로 키를 잡는다. 그래야 이후 상태/담당/삭제 변경이
   // getRevisionLookupSceneKeys(rev.sceneKey) 로 같은 버킷을 찾는다(코덱스 P2 — '' 로 저장하면
@@ -460,7 +467,7 @@ export async function createRevision(input: CreateRevisionServiceInput): Promise
   });
   // 담당자 지정(2단계): 불변식 assignee_ids ⊆ notify_user_ids 복원 후 초기 status 파생.
   // (담당자 있어도 전원 pending 이라 보통 'open'. status 는 읽을 때 mapRevision 이 재파생하는 캐시값.)
-  const { assigneeIds, assigneeStates } = sanitizeAssignees(input.assigneeIds ?? [], {}, notifyUserIds);
+  const { assigneeIds, assigneeStates } = sanitizeRequiredAssignees(input.assigneeIds ?? [], {}, notifyUserIds);
   const initialStatus = deriveRevisionStatus(assigneeIds, assigneeStates, undefined);
 
   if (sheetsMode) {
@@ -474,7 +481,7 @@ export async function createRevision(input: CreateRevisionServiceInput): Promise
       revisionNo,
       status: initialStatus,
       priority,
-      description: input.description,
+      description,
       frameNo: undefined,
       imageUrl: input.imageUrl,
       department,
@@ -495,7 +502,7 @@ export async function createRevision(input: CreateRevisionServiceInput): Promise
     // 전반(허브 '전반' 항목)은 normalizedSceneKey 가 '' 라 서버에서 씬 해석을 건너뛰고 scene_id=null 로 저장.
     await window.electronAPI.supabaseAddRevision(
       id, '', isGeneral ? '' : normalizedSceneKey, revisionNo, initialStatus, priority,
-      input.description, '', input.imageUrl || '', department || '', input.lookupDepartment || department || '',
+      description, '', input.imageUrl || '', department || '', input.lookupDepartment || department || '',
       input.requesterId, input.requesterName, '', now,
       JSON.stringify(notifyUserIds),
       JSON.stringify(assigneeIds),
@@ -520,7 +527,7 @@ export async function createRevision(input: CreateRevisionServiceInput): Promise
     revisionNo,
     status: initialStatus,
     priority,
-    description: input.description,
+    description,
     frameNo: undefined,
     imageUrl: input.imageUrl,
     department,
@@ -606,6 +613,28 @@ export async function updateRevisionStatus(
   await saveLocal(all);
 }
 
+export interface RetakeAssigneeCompletionNotificationPayload {
+  revisionId: string;
+  sceneKey: string;
+  sceneUuid?: string;
+  sheetName?: string;
+  department?: 'bg' | 'acting';
+  setId?: string | null;
+  revisionNo: number;
+  senderId: string;
+  senderName: string;
+  recipients: string[];
+  note?: string;
+  status: RevisionStatus;
+  updatedAt: string;
+}
+
+export async function dispatchRetakeAssigneeCompletionNotification(
+  payload: RetakeAssigneeCompletionNotificationPayload,
+): Promise<void> {
+  await window.electronAPI.supabaseDispatchRetakeAssigneeCompletionNotification(payload);
+}
+
 // ─── 담당 워크플로우 (리테이크 허브 1단계, 2단계에서 local mode 지원 추가) ─────────────
 // 모두 deriveRevisionStatus 로 status 를 파생해 저장한다.
 // supabaseUpdateRevision 은 Record<string,string> 만 받으므로 객체/배열은 JSON 문자열로 직렬화한다.
@@ -645,6 +674,23 @@ async function persistRevisionWorkflow(
   await saveLocal(all);
 }
 
+export interface UpdateRevisionDetailsInput {
+  description: string;
+}
+
+export async function updateRevisionDetails(
+  rev: CompRevision,
+  input: UpdateRevisionDetailsInput,
+): Promise<Partial<CompRevision>> {
+  const now = new Date().toISOString();
+  const patch = {
+    description: normalizeRevisionDescription(input.description),
+    updatedAt: now,
+  };
+  await persistRevisionWorkflow(rev, patch, patch);
+  return patch;
+}
+
 /**
  * 담당 상태 전이 직전 서버 최신 assignee_states 를 읽어 merge base 로 쓴다 (Codex P1 — 동시 완료 lost update 방지).
  * store 의 client 스냅샷이 realtime 전파 전이라 stale 할 수 있으므로, write 직전 서버 권위값으로 base 를 다시 잡는다.
@@ -672,9 +718,21 @@ export async function startAssigneeWork(rev: CompRevision, userId: string): Prom
 }
 
 /** 담당자 본인 완료 (멘트 포함). */
-export async function completeAssigneeWork(rev: CompRevision, userId: string, note: string): Promise<void> {
-  const now = new Date().toISOString();
+export async function completeAssigneeWork(
+  rev: CompRevision,
+  userId: string,
+  note: string,
+  completionNotifyUserIds: string[] = [],
+  completerName?: string,
+  completedAt: string = new Date().toISOString(),
+): Promise<void> {
+  const now = completedAt;
   const states = completeAssignee(await freshAssigneeStates(rev), userId, note, now);
+  states[userId] = {
+    ...states[userId],
+    completionNotifyUserIds,
+    completedByName: completerName || userId,
+  };
   const status = deriveRevisionStatus(rev.assigneeIds ?? [], states, rev.finalResolvedAt);
   await persistRevisionWorkflow(rev,
     { assigneeStates: JSON.stringify(states), status, updatedAt: now },
@@ -684,7 +742,7 @@ export async function completeAssigneeWork(rev: CompRevision, userId: string, no
 /** 담당자 재배정 (요청자/컴포지터급). assigneeIds 는 notify 의 부분집합으로 sanitize. */
 export async function reassignRevision(rev: CompRevision, nextAssigneeIds: string[]): Promise<void> {
   const now = new Date().toISOString();
-  const { assigneeIds, assigneeStates } = sanitizeAssignees(
+  const { assigneeIds, assigneeStates } = sanitizeRequiredAssignees(
     nextAssigneeIds, rev.assigneeStates ?? {}, rev.notifyUserIds ?? [],
   );
   // 담당 (재)배정은 담당 워크플로우 (재)시작이다 — 백필/레거시로 남은 final 잔재를 clear 한다 (Codex P1).

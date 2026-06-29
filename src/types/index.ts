@@ -322,6 +322,8 @@ export interface RevisionAssigneeState {
   note?: string;        // 담당자 완료 멘트(파일경로 등)
   startedAt?: string;   // ISO 8601
   doneAt?: string;      // ISO 8601
+  completionNotifyUserIds?: string[]; // 담당 완료 알림 선택 대상(realtime fallback용)
+  completedByName?: string; // 담당 완료자 표시명(realtime fallback용)
 }
 
 export interface CompRevision {
@@ -945,6 +947,22 @@ export interface ElectronAPI {
     feedbackRound: number;
     recipients: string[];
     message?: string;
+  }) => Promise<void>;
+  /** 리테이크 담당 완료 알림 디스패치 — 선택된 수신자에게 broadcast */
+  supabaseDispatchRetakeAssigneeCompletionNotification: (payload: {
+    revisionId: string;
+    sceneKey: string;
+    sceneUuid?: string;
+    sheetName?: string;
+    department?: 'bg' | 'acting';
+    setId?: string | null;
+    revisionNo: number;
+    senderId: string;
+    senderName: string;
+    recipients: string[];
+    note?: string;
+    status: RevisionStatus;
+    updatedAt: string;
   }) => Promise<void>;
   /** v1.25.5 로그인 catch-up — 마지막 본 시각 이후 미읽음 액팅 피드백 알림 일괄 조회.
    *  before: 페이지네이션 — created_at < before 만 가져옴. */

@@ -36,6 +36,20 @@ const episodes = [
             review: false,
             png: false,
           },
+          {
+            id: 'scene-bg-020-uuid',
+            no: 7,
+            sceneId: 'b020',
+            memo: '',
+            storyboardUrl: '',
+            guideUrl: '',
+            assignee: '한솔',
+            layoutId: '',
+            lo: false,
+            done: false,
+            review: false,
+            png: false,
+          },
         ],
       },
       {
@@ -112,6 +126,45 @@ test('mention notification resolves legacy EP:part:sceneName metadata without re
       sheetName: 'EP02_B_ACT',
       sceneUuid: 'scene-act-uuid',
       sceneName: 'b018_act',
+    },
+  );
+});
+
+test('revision scene-key notifications resolve normalized numeric scene numbers by scene id, not sort order', () => {
+  assert.deepEqual(
+    resolveNotificationSceneTarget(
+      {
+        sceneName: 'EP02:B:20',
+        revisionId: 'revision-1',
+      },
+      episodes,
+    ),
+    {
+      episodeNumber: 2,
+      partId: 'B',
+      sheetName: 'EP02_B_BG',
+      sceneUuid: 'scene-bg-020-uuid',
+      sceneName: 'b020',
+    },
+  );
+});
+
+test('revision scene-key notifications honor department hints when BG and acting share a scene id', () => {
+  assert.deepEqual(
+    resolveNotificationSceneTarget(
+      {
+        sceneName: 'EP02:B:b018',
+        department: 'acting',
+        revisionId: 'revision-acting',
+      },
+      episodes,
+    ),
+    {
+      episodeNumber: 2,
+      partId: 'B',
+      sheetName: 'EP02_B_ACT',
+      sceneUuid: 'scene-act-duplicate-uuid',
+      sceneName: 'b018',
     },
   );
 });

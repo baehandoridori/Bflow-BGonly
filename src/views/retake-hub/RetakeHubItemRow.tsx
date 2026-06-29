@@ -10,23 +10,28 @@
  * 부서(BG/ACT) 라벨은 노출하지 않는다.
  */
 
-import { useMemo, useState } from 'react';
+import { useMemo, useState, type MouseEvent } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Users as UsersIcon, UserPlus, FolderMinus, Trash2 } from 'lucide-react';
+import { Users as UsersIcon, UserPlus, FolderMinus, Trash2, Pencil } from 'lucide-react';
 import { toast as sonnerToast } from 'sonner';
 import type { CompRevision, AppUser } from '@/types';
 import { useAuthStore } from '@/stores/useAuthStore';
 import { useAppStore } from '@/stores/useAppStore';
+import { useDataStore } from '@/stores/useDataStore';
 import { useRevisionStore } from '@/stores/useRevisionStore';
 import { removeFromSet } from '@/services/revisionSetService';
 import { ConfirmDialog } from '@/components/common/ConfirmDialog';
 import { STATUS_CONFIG } from '@/constants/revision';
 import { EntityText } from '@/components/common/EntityText';
+import { EntityAwareInput } from '@/components/common/EntityAwareInput';
 import { avatarColor } from '@/utils/avatarColor';
 import { isGeneralRevisionSceneKey } from '@/utils/revisionGeneral';
 import { navigateToHashTarget } from '@/utils/hashNavigation';
 import { canActAsAssignee, canReassignRevision, canFinalResolveRevision } from '@/utils/revisionWorkflow';
+import { buildRevisionAssigneeCompletionNotifyUserIds } from '@/utils/revisionNotificationRecipients';
 import { summarizeAssignees, collectAssigneeNotes, canShowFinalResolveBar } from '@/utils/revisionCardView';
+import { resolveNotificationSceneTarget } from '@/utils/notificationSceneNavigation';
+import { navigateToSceneView } from '@/utils/sceneNavigationAction';
 import { AssigneeChipRow } from '@/components/scenes/revision/AssigneeChipRow';
 import { CompletionNoteInput } from '@/components/scenes/revision/CompletionNoteInput';
 import { FinalResolveBar } from '@/components/scenes/revision/FinalResolveBar';
@@ -43,6 +48,7 @@ interface Props {
 export function RetakeHubItemRow({ revision, allUsers, sideBarClass, reLabel }: Props) {
   const currentUser = useAuthStore((s) => s.currentUser);
   const { setView, setHighlightUserName } = useAppStore();
+  const episodes = useDataStore((s) => s.episodes);
 
   const startAssignee = useRevisionStore((s) => s.startAssignee);
   const completeAssignee = useRevisionStore((s) => s.completeAssignee);
@@ -52,6 +58,7 @@ export function RetakeHubItemRow({ revision, allUsers, sideBarClass, reLabel }: 
   const revertFinalResolve = useRevisionStore((s) => s.revertFinalResolve);
   const updateStatus = useRevisionStore((s) => s.updateStatus);
   const deleteRevision = useRevisionStore((s) => s.deleteRevision);
+  const updateDetails = useRevisionStore((s) => s.updateDetails);
 
   // '전반'(씬 미지정) 항목은 setId 가 유일한 표시 앵커라, 세트에서 빼면 어디서도 안 보이는 고아가 된다.
   // → 전반 항목은 '빼기' 대신 삭제로 처리한다(코덱스 P2).
@@ -61,6 +68,9 @@ export function RetakeHubItemRow({ revision, allUsers, sideBarClass, reLabel }: 
   const [noteEditingFor, setNoteEditingFor] = useState<string | null>(null);
   const [reassigning, setReassigning] = useState(false);
   const [removing, setRemoving] = useState(false);
+  const [editingDescription, setEditingDescription] = useState(false);
+  const [descriptionDraft, setDescriptionDraft] = useState(revision.description);
+  const [savingDescription, setSavingDescription] = useState(false);
 
   const entityUserNames = useMemo(() => allUsers.map((u) => u.name), [allUsers]);
   const handleEntityMentionClick = (name: string) => { setHighlightUserName(name); setView('team'); };
@@ -74,6 +84,16 @@ export function RetakeHubItemRow({ revision, allUsers, sideBarClass, reLabel }: 
   const canAct = canActAsAssignee(currentUser, revision);
   const canReassign = canReassignRevision(currentUser, revision);
   const canFinal = canFinalResolveRevision(currentUser, revision);
+  const canEditDescription = canReassign;
+  const currentAssigneeState = currentUser && assigneeIds.includes(currentUser.id)
+    ? (assigneeStates[currentUser.id]?.state ?? 'pending')
+    : null;
+  const statusPillActionLabel = currentAssigneeState === 'pending'
+    ? '진행 중'
+    : currentAssigneeState === 'in_progress'
+      ? '담당 완료'
+      : null;
+  const canUseStatusPillAction = !!statusPillActionLabel && canAct && !revision.finalResolvedAt;
 
   const nameOf = (id: string) => allUsers.find((u) => u.id === id)?.name ?? id;
 
@@ -97,14 +117,23 @@ export function RetakeHubItemRow({ revision, allUsers, sideBarClass, reLabel }: 
   );
 
   const statusCfg = STATUS_CONFIG[revision.status];
+  const completionNotifyDefaults = useMemo(
+    () => buildRevisionAssigneeCompletionNotifyUserIds({
+      notifyUserIds: revision.notifyUserIds,
+      requesterId: revision.requesterId,
+      completerId: noteEditingFor ?? currentUser?.id,
+    }),
+    [revision.notifyUserIds, revision.requesterId, noteEditingFor, currentUser?.id],
+  );
 
   const handleCompleteClick = (uid: string) => {
     setReassigning(false);
     setNoteEditingFor(uid);
+    setExpanded(true);
   };
-  const handleNoteConfirm = (note: string) => {
+  const handleNoteConfirm = (note: string, notifyIds?: string[]) => {
     if (!noteEditingFor) return;
-    completeAssignee(revision, noteEditingFor, note);
+    completeAssignee(revision, noteEditingFor, note, notifyIds, currentUser?.name ?? nameOf(noteEditingFor));
     setNoteEditingFor(null);
   };
   const handleReassignConfirm = (ids: string[]) => {
@@ -113,6 +142,75 @@ export function RetakeHubItemRow({ revision, allUsers, sideBarClass, reLabel }: 
   };
   const handleFinalResolve = () => {
     if (currentUser) finalResolve(revision, currentUser.name);
+  };
+  const handleDescriptionSave = async () => {
+    const nextDescription = descriptionDraft.trim();
+    if (!nextDescription) return;
+    if (nextDescription === revision.description.trim()) {
+      setEditingDescription(false);
+      setDescriptionDraft(revision.description);
+      return;
+    }
+    setSavingDescription(true);
+    try {
+      await updateDetails(revision, { description: nextDescription });
+      setEditingDescription(false);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : '잠시 후 다시 시도해주세요.';
+      sonnerToast.error('리테이크 내용을 수정하지 못했어요', { description: msg });
+    } finally {
+      setSavingDescription(false);
+    }
+  };
+  const handleOpenRevisionScene = () => {
+    if (isGeneral) {
+      sonnerToast.info('전반 항목은 연결된 씬이 없어 현재 허브에서 확인해주세요.');
+      return false;
+    }
+    const target = resolveNotificationSceneTarget({
+      sceneName: revision.sceneKey,
+      department: revision.department,
+    }, episodes);
+    if (!target) {
+      sonnerToast.error('연결된 씬을 찾지 못했어요.');
+      return false;
+    }
+    navigateToSceneView({
+      episodeNumber: target.episodeNumber,
+      partId: target.partId,
+      department: 'all',
+      highlightSceneId: target.sceneName,
+      modalRequest: {
+        sceneUuid: target.sceneUuid,
+        sceneName: target.sceneName,
+        episodeNumber: target.episodeNumber,
+        partId: target.partId,
+        initialTab: 'revisions',
+        focusRevisionId: revision.id,
+        forceDeptFilter: 'all',
+      },
+    });
+    return true;
+  };
+  const handleRowClickCapture = (event: MouseEvent<HTMLDivElement>) => {
+    const target = event.target instanceof HTMLElement ? event.target : null;
+    if (target?.closest('[data-retake-hub-status-action]')) return;
+    if (event.ctrlKey || event.metaKey) {
+      event.preventDefault();
+      event.stopPropagation();
+      handleOpenRevisionScene();
+      return;
+    }
+    setExpanded((v) => !v);
+  };
+  const handleStatusPillAction = (event: MouseEvent<HTMLButtonElement>) => {
+    event.stopPropagation();
+    if (!canUseStatusPillAction || !currentUser) return;
+    if (currentAssigneeState === 'pending') {
+      startAssignee(revision, currentUser.id);
+    } else if (currentAssigneeState === 'in_progress') {
+      handleCompleteClick(currentUser.id);
+    }
   };
 
   // 세트에서 빼기 (스펙 §9.4) — 씬 매인 항목은 setId 만 해제(씬 패널엔 남음). 마지막 항목이 빠지면
@@ -169,7 +267,7 @@ export function RetakeHubItemRow({ revision, allUsers, sideBarClass, reLabel }: 
         tabIndex={0}
         // capture 단계로 토글 — EntityText 의 멘션/#칩·PathBadge 가 bubble 단계에서 stopPropagation 하므로,
         //   내용이 칩 위주여도 행 어디를 눌러도 펼쳐지게 한다(칩은 자체 동작도 수행). (코덱스 P3)
-        onClickCapture={() => setExpanded((v) => !v)}
+        onClickCapture={handleRowClickCapture}
         onKeyDown={(e) => {
           if ((e.key === 'Enter' || e.key === ' ') && e.target === e.currentTarget) {
             e.preventDefault();
@@ -215,12 +313,25 @@ export function RetakeHubItemRow({ revision, allUsers, sideBarClass, reLabel }: 
         </span>
 
         {/* 진행 상태 라벨 */}
-        <span
-          className="shrink-0 text-[10px] font-semibold px-2 py-0.5 rounded-full mr-1"
-          style={{ color: statusCfg.color, background: statusCfg.bg }}
-        >
-          {statusCfg.label}
-        </span>
+        {canUseStatusPillAction ? (
+          <button
+            type="button"
+            data-retake-hub-status-action={currentAssigneeState}
+            onClick={handleStatusPillAction}
+            className="shrink-0 text-[10px] font-semibold px-2 py-0.5 rounded-full mr-1 cursor-pointer hover:brightness-110 transition"
+            style={{ color: statusCfg.color, background: statusCfg.bg }}
+            title={currentAssigneeState === 'pending' ? '내 담당 작업을 진행 중으로 바꾸기' : '내 담당 완료 처리'}
+          >
+            {statusPillActionLabel}
+          </button>
+        ) : (
+          <span
+            className="shrink-0 text-[10px] font-semibold px-2 py-0.5 rounded-full mr-1"
+            style={{ color: statusCfg.color, background: statusCfg.bg }}
+          >
+            {statusCfg.label}
+          </span>
+        )}
       </div>
 
       {/* ─── 인라인 확장 ─── */}
@@ -236,14 +347,67 @@ export function RetakeHubItemRow({ revision, allUsers, sideBarClass, reLabel }: 
           >
             <div className="px-3 pb-3 pt-1 space-y-2 border-t border-bg-border/40">
               {/* 전체 내용(잘림 없이) */}
-              <p className="text-[13px] text-text-primary leading-relaxed whitespace-pre-wrap pt-2">
-                <EntityText
-                  text={revision.description}
-                  userNames={entityUserNames}
-                  onMentionClick={handleEntityMentionClick}
-                  onHashClick={navigateToHashTarget}
-                />
-              </p>
+              <div className="pt-2">
+                {editingDescription ? (
+                  <div className="rounded-lg border border-accent/35 bg-bg-primary/70 p-2 space-y-2" onClick={(e) => e.stopPropagation()}>
+                    <EntityAwareInput
+                      multiline
+                      value={descriptionDraft}
+                      onChange={setDescriptionDraft}
+                      users={allUsers}
+                      enableHashtag
+                      submitOn="ctrl-enter"
+                      onSubmit={handleDescriptionSave}
+                      onCancel={() => { setEditingDescription(false); setDescriptionDraft(revision.description); }}
+                      className="w-full min-h-[72px] px-3 py-2 text-[13px] bg-bg-primary/80 border border-bg-border/60 rounded-lg text-text-primary placeholder:text-text-secondary/50 resize-y focus:outline-none focus:border-accent/60"
+                    />
+                    <div className="flex justify-end gap-2">
+                      <button
+                        type="button"
+                        onClick={() => { setEditingDescription(false); setDescriptionDraft(revision.description); }}
+                        className="px-2.5 py-1 text-[11px] font-semibold text-text-secondary hover:text-text-primary cursor-pointer"
+                      >
+                        취소
+                      </button>
+                      <button
+                        type="button"
+                        onClick={handleDescriptionSave}
+                        disabled={!descriptionDraft.trim() || savingDescription}
+                        className="px-3 py-1 text-[11px] font-bold rounded-md bg-accent text-white hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
+                      >
+                        {savingDescription ? '저장 중…' : '내용 저장'}
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="flex items-start gap-2">
+                    <p className="min-w-0 flex-1 text-[13px] text-text-primary leading-relaxed whitespace-pre-wrap">
+                      <EntityText
+                        text={revision.description}
+                        userNames={entityUserNames}
+                        onMentionClick={handleEntityMentionClick}
+                        onHashClick={navigateToHashTarget}
+                      />
+                    </p>
+                    {canEditDescription && (
+                      <button
+                        type="button"
+                        data-retake-edit-description
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setDescriptionDraft(revision.description);
+                          setEditingDescription(true);
+                        }}
+                        className="shrink-0 inline-flex items-center gap-1 rounded-md border border-bg-border/45 bg-bg-primary/55 px-2 py-1 text-[10px] font-semibold text-text-secondary/75 hover:border-accent/35 hover:bg-accent/10 hover:text-accent-sub cursor-pointer transition-all"
+                        title="내용 수정"
+                      >
+                        <Pencil size={11} />
+                        내용 수정
+                      </button>
+                    )}
+                  </div>
+                )}
+              </div>
 
               {revision.imageUrl && (
                 <img
@@ -278,6 +442,7 @@ export function RetakeHubItemRow({ revision, allUsers, sideBarClass, reLabel }: 
                       >
                         <CompletionNoteInput
                           initialValue={assigneeStates[noteEditingFor]?.note ?? ''}
+                          notifyDefaultIds={completionNotifyDefaults}
                           onConfirm={handleNoteConfirm}
                           onCancel={() => setNoteEditingFor(null)}
                         />

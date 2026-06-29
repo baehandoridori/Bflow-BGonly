@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect, useMemo, useCallback, memo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Plus, Check, CheckCheck, Clock, Circle, ImagePlus, X, Trash2, MessageSquareWarning, Bell, Undo2, UserPlus, Users } from 'lucide-react';
+import { Plus, Check, CheckCheck, Clock, Circle, ImagePlus, X, Trash2, MessageSquareWarning, Bell, Undo2, UserPlus, Users, Pencil } from 'lucide-react';
 import { toast as sonnerToast } from 'sonner';
 import { ConfirmDialog } from '@/components/common/ConfirmDialog';
 import { useAuthStore } from '@/stores/useAuthStore';
@@ -23,6 +23,7 @@ import { navigateToHashTarget } from '@/utils/hashNavigation';
 import type { HashTarget } from '@/utils/hashEntity';
 import { CompactIconLabel } from '@/components/common/CompactIconLabel';
 import { canActAsAssignee, canReassignRevision, canFinalResolveRevision } from '@/utils/revisionWorkflow';
+import { buildRevisionAssigneeCompletionNotifyUserIds } from '@/utils/revisionNotificationRecipients';
 import { summarizeAssignees, collectAssigneeNotes, sideBarColorClass, canShowFinalResolveBar } from '@/utils/revisionCardView';
 import { AssigneeChipRow } from './revision/AssigneeChipRow';
 import { CompletionNoteInput } from './revision/CompletionNoteInput';
@@ -146,9 +147,13 @@ const RevisionCard = memo(function RevisionCard({
   const reassign = useRevisionStore((s) => s.reassign);
   const finalResolve = useRevisionStore((s) => s.finalResolve);
   const revertFinalResolve = useRevisionStore((s) => s.revertFinalResolve);
+  const updateDetails = useRevisionStore((s) => s.updateDetails);
 
   const [noteEditingFor, setNoteEditingFor] = useState<string | null>(null);
   const [reassigning, setReassigning] = useState(false);
+  const [editingDescription, setEditingDescription] = useState(false);
+  const [descriptionDraft, setDescriptionDraft] = useState(revision.description);
+  const [savingDescription, setSavingDescription] = useState(false);
 
   const canDelete = !!(
     currentUser && onDelete &&
@@ -174,6 +179,7 @@ const RevisionCard = memo(function RevisionCard({
   const canAct = canActAsAssignee(currentUser, revision);
   const canReassign = canReassignRevision(currentUser, revision);
   const canFinal = canFinalResolveRevision(currentUser, revision);
+  const canEditDescription = canReassign;
 
   const nameOf = (id: string) => allUsers.find((u) => u.id === id)?.name ?? id;
   const assigneeChips = useMemo(
@@ -194,9 +200,17 @@ const RevisionCard = memo(function RevisionCard({
     setReassigning(false);
     setNoteEditingFor(uid);
   };
-  const handleNoteConfirm = (note: string) => {
+  const completionNotifyDefaults = useMemo(
+    () => buildRevisionAssigneeCompletionNotifyUserIds({
+      notifyUserIds: revision.notifyUserIds,
+      requesterId: revision.requesterId,
+      completerId: noteEditingFor ?? currentUser?.id,
+    }),
+    [revision.notifyUserIds, revision.requesterId, noteEditingFor, currentUser?.id],
+  );
+  const handleNoteConfirm = (note: string, notifyIds?: string[]) => {
     if (!noteEditingFor) return;
-    completeAssignee(revision, noteEditingFor, note);
+    completeAssignee(revision, noteEditingFor, note, notifyIds, currentUser?.name ?? nameOf(noteEditingFor));
     setNoteEditingFor(null);
   };
   const handleReassignConfirm = (ids: string[]) => {
@@ -206,6 +220,29 @@ const RevisionCard = memo(function RevisionCard({
   const handleFinalResolve = () => {
     if (currentUser) finalResolve(revision, currentUser.name);
   };
+  const handleDescriptionSave = async () => {
+    const nextDescription = descriptionDraft.trim();
+    if (!nextDescription) return;
+    if (nextDescription === revision.description.trim()) {
+      setEditingDescription(false);
+      setDescriptionDraft(revision.description);
+      return;
+    }
+    setSavingDescription(true);
+    try {
+      await updateDetails(revision, { description: nextDescription });
+      setEditingDescription(false);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : '잠시 후 다시 시도해주세요.';
+      sonnerToast.error('리테이크 내용을 수정하지 못했어요', { description: msg });
+    } finally {
+      setSavingDescription(false);
+    }
+  };
+
+  useEffect(() => {
+    if (!editingDescription) setDescriptionDraft(revision.description);
+  }, [editingDescription, revision.description]);
 
   const openRevisionImage = () => {
     if (!revision.imageUrl) return;
@@ -278,15 +315,64 @@ const RevisionCard = memo(function RevisionCard({
       </div>
 
       {/* 설명 — G:\ 경로는 PathBadge 아이콘 버튼으로 자동 변환 (메모/댓글과 동일 패턴) */}
-      <p className="rev-card-description text-sm text-text-primary leading-relaxed mb-2 whitespace-pre-wrap">
-        <EntityText
-          text={revision.description}
-          userNames={entityUserNames}
-          onMentionClick={handleEntityMentionClick}
-          onHashClick={onHashClick ?? navigateToHashTarget}
-          onHashContextMenu={onHashContextMenu}
-        />
-      </p>
+      <div className="rev-card-description mb-2">
+        {editingDescription ? (
+          <div className="rounded-lg border border-accent/35 bg-bg-primary/70 p-2 space-y-2">
+            <EntityAwareInput
+              multiline
+              value={descriptionDraft}
+              onChange={setDescriptionDraft}
+              users={allUsers}
+              enableHashtag
+              submitOn="ctrl-enter"
+              onSubmit={handleDescriptionSave}
+              onCancel={() => { setEditingDescription(false); setDescriptionDraft(revision.description); }}
+              className="w-full min-h-[72px] px-3 py-2 text-[13px] bg-bg-primary/80 border border-bg-border/60 rounded-lg text-text-primary placeholder:text-text-secondary/50 resize-y focus:outline-none focus:border-accent/60"
+            />
+            <div className="flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => { setEditingDescription(false); setDescriptionDraft(revision.description); }}
+                className="px-2.5 py-1 text-[11px] font-semibold text-text-secondary hover:text-text-primary cursor-pointer"
+              >
+                취소
+              </button>
+              <button
+                type="button"
+                onClick={handleDescriptionSave}
+                disabled={!descriptionDraft.trim() || savingDescription}
+                className="px-3 py-1 text-[11px] font-bold rounded-md bg-accent text-white hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
+              >
+                {savingDescription ? '저장 중…' : '내용 저장'}
+              </button>
+            </div>
+          </div>
+        ) : (
+          <div className="flex items-start gap-2">
+            <p className="min-w-0 flex-1 text-sm text-text-primary leading-relaxed whitespace-pre-wrap">
+              <EntityText
+                text={revision.description}
+                userNames={entityUserNames}
+                onMentionClick={handleEntityMentionClick}
+                onHashClick={onHashClick ?? navigateToHashTarget}
+                onHashContextMenu={onHashContextMenu}
+              />
+            </p>
+            {canEditDescription && (
+              <button
+                type="button"
+                data-retake-edit-description
+                onClick={() => setEditingDescription(true)}
+                className="opacity-0 group-hover:opacity-100 shrink-0 inline-flex items-center gap-1 rounded-md border border-bg-border/45 bg-bg-primary/55 px-2 py-1 text-[10px] font-semibold text-text-secondary/75 hover:border-accent/35 hover:bg-accent/10 hover:text-accent-sub cursor-pointer transition-all"
+                title="내용 수정"
+              >
+                <Pencil size={11} />
+                내용 수정
+              </button>
+            )}
+          </div>
+        )}
+      </div>
 
       {/* 이미지 썸네일 */}
       {revision.imageUrl && (
@@ -342,6 +428,7 @@ const RevisionCard = memo(function RevisionCard({
               >
                 <CompletionNoteInput
                   initialValue={assigneeStates[noteEditingFor]?.note ?? ''}
+                  notifyDefaultIds={completionNotifyDefaults}
                   onConfirm={handleNoteConfirm}
                   onCancel={() => setNoteEditingFor(null)}
                 />
@@ -587,6 +674,7 @@ export function RevisionPanel({ sheetName, sceneId, siblingSceneIds, department,
   const [notifyIds, setNotifyIds] = useState<string[]>([]);
   const [formAssigneeIds, setFormAssigneeIds] = useState<string[]>([]);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const canSubmitRevision = !!currentUser && description.trim().length > 0 && formAssigneeIds.length > 0 && !submitting;
 
   // 자동 체크 대상자 — 모든 컴포지터 + 그 씬 담당자 (등록자 본인 제외).
   // v1.18.1 한솔 정정: 컴포지터는 부서로 나뉘지 않으므로 dept 인자 불필요.
@@ -618,6 +706,14 @@ export function RevisionPanel({ sheetName, sceneId, siblingSceneIds, department,
     onCountChange?.(getOpenCount(sceneKey));
   }, [sceneKey, revisions.length, getOpenCount, onCountChange]);
 
+  const resetCreateForm = () => {
+    setShowForm(false);
+    setDescription('');
+    setImagePreview(null);
+    setNotifyIds([]);
+    setFormAssigneeIds([]);
+  };
+
   const handleImageFile = async (file: File) => {
     try {
       const resized = await resizeBlob(file, 800, 0.8);
@@ -639,7 +735,7 @@ export function RevisionPanel({ sheetName, sceneId, siblingSceneIds, department,
   };
 
   const handleSubmit = async () => {
-    if (!description.trim() || !currentUser || submitting) return;
+    if (!canSubmitRevision || !currentUser) return;
     setSubmitting(true);
     try {
       await createRevision({
@@ -738,7 +834,7 @@ export function RevisionPanel({ sheetName, sceneId, siblingSceneIds, department,
                       <span className="text-[13px] font-bold text-text-primary">새 리테이크 등록</span>
                     </div>
                     <button
-                      onClick={() => { setShowForm(false); setDescription(''); setImagePreview(null); }}
+                      onClick={resetCreateForm}
                       className="text-text-secondary hover:text-text-primary text-base leading-none cursor-pointer"
                       title="닫기"
                     >
@@ -824,6 +920,11 @@ export function RevisionPanel({ sheetName, sceneId, siblingSceneIds, department,
                       enableAssignee
                       onAssigneesChange={setFormAssigneeIds}
                     />
+                    {formAssigneeIds.length === 0 && (
+                      <p className="mt-1.5 text-[11px] text-amber-400/90">
+                        담당자를 1명 이상 선택해야 리테이크를 등록할 수 있습니다.
+                      </p>
+                    )}
                   </div>
 
                   {/* 액션 바 */}
@@ -833,14 +934,14 @@ export function RevisionPanel({ sheetName, sceneId, siblingSceneIds, department,
                     </div>
                     <div className="flex gap-2">
                       <button
-                        onClick={() => { setShowForm(false); setDescription(''); setImagePreview(null); }}
+                        onClick={resetCreateForm}
                         className="px-3 py-1.5 text-xs font-semibold text-text-secondary hover:text-text-primary cursor-pointer transition-colors"
                       >
                         취소
                       </button>
                       <button
                         onClick={handleSubmit}
-                        disabled={!description.trim() || submitting}
+                        disabled={!canSubmitRevision}
                         className="px-4 py-1.5 text-xs font-bold rounded-md bg-accent text-white hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer transition-opacity"
                       >
                         {submitting ? '등록 중...' : '리테이크 등록'}

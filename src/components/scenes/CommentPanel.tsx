@@ -355,6 +355,7 @@ export function CommentPanel({
   const [attachedImages, setAttachedImages] = useState<AttachedImage[]>([]);
   const [quickRevisionPickerOpen, setQuickRevisionPickerOpen] = useState(false);
   const [quickRevisionNotifyIds, setQuickRevisionNotifyIds] = useState<string[]>([]);
+  const [quickRevisionAssigneeIds, setQuickRevisionAssigneeIds] = useState<string[]>([]);
 
 
   // v1.24.0: 답글 입력 모드 — 클릭 시 입력 카드 상단에 답글 컨텍스트 헤더 노출 + parentCommentId 채워서 저장.
@@ -596,9 +597,11 @@ export function CommentPanel({
   useEffect(() => {
     if (!quickRevisionActive) {
       setQuickRevisionPickerOpen(false);
+      setQuickRevisionAssigneeIds([]);
       return;
     }
     setQuickRevisionNotifyIds(quickRevisionDefaultRecipientIds);
+    setQuickRevisionAssigneeIds([]);
     setReplyTarget(null);
   }, [quickRevisionActive, quickRevisionDefaultRecipientKey]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -607,6 +610,12 @@ export function CommentPanel({
       .map((id) => users.find((user) => user.id === id))
       .filter((user): user is AppUser => !!user),
     [quickRevisionNotifyIds, users],
+  );
+  const quickRevisionAssigneeUsers = useMemo(
+    () => quickRevisionAssigneeIds
+      .map((id) => users.find((user) => user.id === id))
+      .filter((user): user is AppUser => !!user),
+    [quickRevisionAssigneeIds, users],
   );
   const quickRevisionHasAttachments = quickRevisionActive && attachedImages.length > 0;
 
@@ -1156,6 +1165,7 @@ export function CommentPanel({
       && !hasUploadingImage
       && quickRevisionDescription.length > 0
       && quickRevisionNotifyIds.length > 0
+      && quickRevisionAssigneeIds.length > 0
     : !submitting
       && !hasUploadingImage
       && (input.trim().length > 0 || uploadedImageUrls.length > 0);
@@ -1179,10 +1189,12 @@ export function CommentPanel({
           requesterId: currentUser.id,
           requesterName: currentUser.name,
           notifyUserIds: quickRevisionNotifyIds,
+          assigneeIds: quickRevisionAssigneeIds,
         });
         setInput('');
         inputValueRef.current = '';
         setQuickRevisionPickerOpen(false);
+        setQuickRevisionAssigneeIds([]);
         mention.close();
         hash.close();
         setReplyTarget(null);
@@ -1195,8 +1207,12 @@ export function CommentPanel({
           });
         });
         const targetNames = quickRevisionSelectedUsers.map((user) => user.name).join(', ');
+        const assigneeNames = quickRevisionAssigneeUsers.map((user) => user.name).join(', ');
         sonnerToast.success('리테이크를 등록했습니다', {
-          description: targetNames ? `${targetNames}에게 알림을 보냈습니다.` : undefined,
+          description: [
+            assigneeNames ? `담당: ${assigneeNames}` : '',
+            targetNames ? `알림: ${targetNames}` : '',
+          ].filter(Boolean).join(' · ') || undefined,
           duration: 2200,
         });
       } catch (err) {
@@ -2392,12 +2408,12 @@ export function CommentPanel({
                     onClick={() => setQuickRevisionPickerOpen((open) => !open)}
                     className="shrink-0 px-2.5 py-1.5 rounded-lg border border-bg-border/70 bg-bg-primary/35 text-[11.5px] font-bold text-text-primary hover:border-accent/50 hover:bg-accent/[0.10] transition-colors cursor-pointer"
                   >
-                    담당자 변경
+                    알림/담당 변경
                   </button>
                 </div>
 
                 <div className="flex flex-wrap items-center gap-1.5">
-                  <span className="text-[11px] font-bold text-text-secondary/80">알람 보낼 담당자</span>
+                  <span className="text-[11px] font-bold text-text-secondary/80">알림 받을 사람</span>
                   {quickRevisionSelectedUsers.length > 0 ? quickRevisionSelectedUsers.map((user) => (
                     <span
                       key={user.id}
@@ -2410,6 +2426,25 @@ export function CommentPanel({
                     </span>
                   )) : (
                     <span className="inline-flex items-center h-6 rounded-full border border-status-none/35 bg-status-none/10 px-2 text-[11.5px] text-status-none">
+                      선택 필요
+                    </span>
+                  )}
+                </div>
+
+                <div className="flex flex-wrap items-center gap-1.5">
+                  <span className="text-[11px] font-bold text-text-secondary/80">리테이크 담당자</span>
+                  {quickRevisionAssigneeUsers.length > 0 ? quickRevisionAssigneeUsers.map((user) => (
+                    <span
+                      key={user.id}
+                      className="inline-flex items-center gap-1.5 h-6 rounded-full border border-status-combine/45 bg-status-combine/15 pl-1 pr-2 text-[11.5px] text-text-primary"
+                    >
+                      <span className="w-4 h-4 rounded-full bg-status-combine/80 text-white text-[9px] font-bold inline-flex items-center justify-center">
+                        {user.name.charAt(0)}
+                      </span>
+                      {user.name}
+                    </span>
+                  )) : (
+                    <span className="inline-flex items-center h-6 rounded-full border border-amber-400/35 bg-amber-400/10 px-2 text-[11.5px] text-amber-300">
                       선택 필요
                     </span>
                   )}
@@ -2430,7 +2465,12 @@ export function CommentPanel({
                     defaultCheckedIds={quickRevisionDefaultRecipientIds}
                     excludeUserId={currentUser?.id || ''}
                     onChange={setQuickRevisionNotifyIds}
+                    enableAssignee
+                    onAssigneesChange={setQuickRevisionAssigneeIds}
                   />
+                  <div className="mt-1.5 text-[10px] text-text-secondary/55">
+                    알림 받을 사람을 고른 뒤 칩을 한 번 더 누르면 리테이크 담당자로 지정됩니다.
+                  </div>
                 </div>
               </div>
             </motion.div>
@@ -2569,7 +2609,9 @@ export function CommentPanel({
               title={
                 quickRevisionActive
                   ? quickRevisionNotifyIds.length === 0
-                      ? '알람 보낼 담당자를 선택해 주세요'
+                      ? '알림 받을 사람을 선택해 주세요'
+                      : quickRevisionAssigneeIds.length === 0
+                        ? '리테이크 담당자를 선택해 주세요'
                       : '리테이크 등록 (Enter)'
                   : hasUploadingImage ? '이미지 업로드 중...' : '전송 (Enter)'
               }

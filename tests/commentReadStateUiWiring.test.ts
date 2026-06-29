@@ -61,12 +61,23 @@ test('UnifiedSceneDetailModal passes canonical thread key as comment read-state 
 test('Scene detail comment panels expose /re quick revision context', () => {
   assert.match(commentPanel, /parseRevisionSlashCommand/);
   assert.match(commentPanel, /리테이크 빠른 등록/);
-  assert.match(commentPanel, /알람 보낼 담당자/);
+  assert.match(commentPanel, /알림 받을 사람/);
+  assert.match(commentPanel, /리테이크 담당자/);
   assert.match(commentPanel, /createRevision\(\{/);
   assert.match(resizable, /quickRevision\?: CommentPanelQuickRevisionContext/);
   assert.match(sceneDetailModal, /quickRevision=\{\{/);
   assert.match(sceneDetailModal, /context: department/);
   assert.match(unifiedSceneDetailModal, /context: selectedDepartment === 'bg' \|\| selectedDepartment === 'acting' \? selectedDepartment : 'all'/);
+});
+
+test('quick revision separates notification recipients from required retake assignees', () => {
+  assert.match(commentPanel, /const \[quickRevisionAssigneeIds, setQuickRevisionAssigneeIds\] = useState<string\[\]>\(\[\]\)/);
+  assert.match(commentPanel, /quickRevisionAssigneeIds\.length > 0/);
+  assert.match(commentPanel, /assigneeIds:\s*quickRevisionAssigneeIds/);
+  assert.doesNotMatch(commentPanel, /assigneeIds:\s*quickRevisionNotifyIds/);
+  assert.match(commentPanel, /enableAssignee/);
+  assert.match(commentPanel, /onAssigneesChange=\{setQuickRevisionAssigneeIds\}/);
+  assert.match(commentPanel, /리테이크 담당자를 선택해 주세요/);
 });
 
 test('quick revision recipient picker preserves manual unchecked users while typing', () => {

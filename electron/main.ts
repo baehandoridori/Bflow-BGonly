@@ -1211,8 +1211,8 @@ ipcMain.handle('whiteboard:write-shared', async (_event, data: unknown) => {
 
 // ─── IPC 핸들러: Supabase ────────────────────────────────────
 
-import { setupBroadcast, broadcastSceneUpdate, broadcastSceneFieldUpdate, broadcastDataChange, broadcastActingFeedbackRequest, broadcastSceneAssignmentNotification } from './broadcast';
-import type { FeedbackBroadcastPayload } from './broadcast';
+import { setupBroadcast, broadcastSceneUpdate, broadcastSceneFieldUpdate, broadcastDataChange, broadcastActingFeedbackRequest, broadcastSceneAssignmentNotification, broadcastRetakeAssigneeCompletion } from './broadcast';
+import type { FeedbackBroadcastPayload, RetakeAssigneeCompletionBroadcastPayload } from './broadcast';
 import {
   testConnection as supabaseTestConnection,
   readAllEpisodes as sbReadAllEpisodes,
@@ -2740,6 +2740,18 @@ ipcMain.handle('supabase:dispatch-feedback-notification', wrapIpc(async (
   // 2) 즉시 broadcast — 켜져있는 클라이언트는 실시간 수신.
   //    INSERT 결과의 (recipient_id → notification_id) 매핑 포함 → 수신자가 자기 row ID 로 markRead 가능.
   broadcastActingFeedbackRequest({ ...payload, notificationIdsByRecipient, notificationCreatedAtByRecipient });
+}));
+
+// 리테이크 담당 완료 알림 디스패치 — 완료멘트 입력 UI에서 선택한 수신자에게 실시간 알림.
+ipcMain.handle('supabase:dispatch-retake-assignee-completion-notification', wrapIpc(async (
+  _e: unknown,
+  payload: Omit<RetakeAssigneeCompletionBroadcastPayload, 'ts'>,
+) => {
+  const recipients = Array.isArray(payload.recipients)
+    ? Array.from(new Set(payload.recipients.filter((rid) => typeof rid === 'string' && rid.trim() && rid !== payload.senderId)))
+    : [];
+  if (recipients.length === 0) return;
+  broadcastRetakeAssigneeCompletion({ ...payload, recipients });
 }));
 
 // v1.25.5 로그인 catch-up — last_seen_at 이후 미읽음 알림 일괄 조회 (페이지네이션 before 지원)
