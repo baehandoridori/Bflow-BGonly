@@ -159,9 +159,80 @@
 - [x] 심층 리뷰(5렌즈+적대적 검증) 확정 4건(전부 low) 중 #2/#3/#4 반영, #1(팝업 캘린더 cross-window)은 별도 후속
 - [ ] (한솔 승인 시) PR 머지 → 빌드 → 배포
 
-### PR 3 — DonutHero + QuickAdd
-- `DonutHero.tsx`(4색 도넛 + stat + strip 접기, 카운트업은 PR 5), `QuickAdd.tsx`(+버튼 슬라이드 + 자동완성 드롭다운, 키보드 ↑↓/Enter/Esc, 일반텍스트→개인할일)
-- 자동완성 드롭다운 위젯 경계 넘는 fixed 위치 + 뷰포트 클램프
+## Chunk 3: PR 3 — DonutHero + QuickAdd (상단 헤더 교체) (착수 상세화 2026-06-30)
+
+**목표:** 위젯 상단의 단순 진행률 바를 컴팩트 4색 도넛 히어로로, 하단 `내 할일 추가` 버튼을 헤더 `+` 버튼 기반 QuickAdd(씬 자동완성 + 일반텍스트→개인할일)로 교체한다. 행/카드 재설계와 모션은 PR 4~5로 유지.
+
+**현재 상태(PR 2 직후):** 상단은 `요약 바`(가는 진행 바 + `fullyDone/total (pct%)`, `MyTasksWidget.tsx:761-775`). 추가는 하단 점선 `내 할일 추가` 버튼(`854-861`) → `AddTaskModal`(작업/개인 탭, 다중 씬 선택 피커 + 개인할일 폼, ModalPortal). 데이터 훅 `stats = { total, fullyDone, pct }`(씬 4단계 + 개인 1단계 가중). Widget 헤더는 `headerRight` 슬롯 제공(대시보드: title 우측 / 팝업: headerRight 있을 때만 미니헤더 렌더). 단계 통합색 `STAGE_COLORS`(lo #C4BCFA → png #6C5CE7), 부서별 색 `DEPARTMENT_CONFIGS[dept].stageColors`. 도넛 SVG 패턴 레퍼런스 `OverallProgressWidget.tsx:108-218`(circle + strokeDasharray/strokeDashoffset 세그먼트, rotate(-90)).
+
+**확정 디자인 결정 (목업 `concept-15-r2.html` 정리되어 부재 → 시안15 스펙·메모리 의도 기반. ★4-렌즈 계획 검토 2026-06-30 반영판. 도넛 표기/색·QuickAdd 발견성은 한솔 dev 시각 확인으로 최종 검증):**
+1. **도넛 = 내 씬 4단계 누적 진행.** 슬롯 = `sceneTotal × 4`, 단계별(lo/done/review/png) 체크 개수를 **뚜렷한 단계 4색 누적 세그먼트**로 그린다. ★색은 `STAGE_COLORS`(보라 명도 4톤 — 컴팩트 도넛서 구분 안 됨)가 아니라 **`ACTION_TYPE_COLOR`/CLAUDE.md 토큰과 동일한 뚜렷한 4색**: lo `#74B9FF`(파랑)·done `#A29BFE`(보라)·review `#FDCB6E`(노랑)·png `#00B894`(초록). DonutHero 내부 상수 `DONUT_STAGE_COLORS`로 정의(activity 결합 회피, 값만 공유). 세그먼트 사이 1~2px 트랙색 갭으로 경계 분리. **부서 혼합(BG/ACT)이어도 통합 단계색** — "도넛은 진행률 게이지이며 단계 색은 BG/ACT 공통의 단계 의미(준비→완료)를 나타낸다(부서 색 코드 아님)"로 결정 문서화.
+2. **도넛 중앙 = 완료 씬 `M / N`** (큰 M, 작게 `/N` 또는 `M/N 씬`). ★검토 반영: `stageProgressPct`(체크박스 57% 식)는 비개발자 멘탈모델과 어긋남 → 중앙 숫자로 강조하지 않는다. `stageProgressPct`는 **도넛 채움 정도(arc)로만** 시각화. 채움은 비반올림 실제값, 중앙 M/N은 완료 씬 정수 → 둘은 역할 분담(≤1% 표시 오차는 의도, "정확히 일치" 단언 삭제).
+3. **stat 라인** (도넛 아래/옆): `완료 M · 진행 K · 개인 P`(K=진행 중 씬, P=개인 할일 수).
+4. **"오늘 마친 씬 N개" 칩**: 씬 `completedAt`이 로컬 기준 오늘인 `doneScenes` 수. N>0일 때만 표시(#00B894 톤). ★검토 반영: (a) 문구를 "오늘 N개 완료"가 아니라 **"오늘 마친 씬 N개"**로 — 씬 한정·완료자 무관("내 목록 씬 중 오늘 완료된 수")임을 드러냄. (b) `completedAt` falsy/Invalid Date 가드 필수(`if(!c) return false; const d=new Date(c); if(isNaN(d.getTime())) return false;`). (c) 개인 할일은 `completedAt` 필드 없어 제외(스키마/마이그레이션은 PR 4~5), 레거시 미기록 씬도 제외됨 — 의도된 동작(주석·게이트 명시).
+5. **strip 접기**: 도넛 패널 접기 토글(chevron) → 한 줄 strip(가는 진행 바 + `M/N 씬 · X%`). 접힘 상태는 위젯 로컬 `useState`(영속 없음). 팝업 세로 공간 절약.
+6. **더블베젤 + 포커스카드 톤**: 도넛은 단일 링이 아니라 **트랙 링 + 진행 링의 이중 베젤**(시안15 "더블베젤" 의도). 컨테이너는 옅은 포커스카드 톤(테두리/배경 살짝 강조). 목업 부재 → 정확한 형태는 한솔 dev 시각 확인 게이트.
+7. **QuickAdd**: 헤더 `headerRight`에 `+` 버튼(기존 필터 버튼 옆, tooltip `할일 추가`). 클릭 → 도넛 아래 입력칸 슬라이드 등장(autofocus). 동작:
+   - 후보 = **MyTasksWidget이 `useAllEpisodesFlat()`로 가진 `allFlat`을 prop으로 전달**(★검토 반영: QuickAdd 자체 재구독 금지 — 씬 1225+ 이중 평탄화 회피. `useMyTasksData`가 `allFlat`을 반환하도록 추가하거나 MyTasksWidget에서 직접 호출해 내려줌).
+   - 자동완성: `sceneId.toLowerCase().includes` + 끝자리 번호 매칭, 상위 ~8개. **정렬·강조: '내 담당' 판정은 `useMyTasksData`와 동일한 콤마 분리 매칭**(`scene.assignee.split(',').some(s => s.trim() === currentUserName)`) — 공유 헬퍼 권장. 내 담당 우선 정렬 + 점/펄스 강조. **`existingKeys.has(key)`(이미 목록=비활성+`추가됨`)는 '내 담당'(강조)과 별개 개념으로 분리 처리.** 에피소드 구분 헤더(`episodeTitles`).
+   - 키보드: ↑↓ activeIndex, Enter=선택 항목 add(매칭 없으면 텍스트→개인할일), Esc/Tab 닫힘. ★**한글 IME 가드 필수**: onKeyDown 진입부 `if (e.nativeEvent.isComposing || e.keyCode === 229) return;`(Enter/↑/↓ 전부). 개인할일(한글) 조기 추가/중복 방지.
+   - 텍스트→개인할일: QuickAdd props `onAddPersonalTodo(title: string)`. ★부모(MyTasksWidget)가 어댑터로 `title`→`PersonalTodo` 객체(`createUuid`·`createdAt`·`completed:false`·`memo:''`·`addToCalendar:false`) 변환해 훅 `addPersonalTodo(객체)` 호출(시그니처 불일치 방지).
+   - 드롭다운 = **앵커드 포털**: 레퍼런스는 `AssigneeMultiSelect.tsx`(createPortal+`wrapRef.getBoundingClientRect()`+`position:fixed`+scroll/resize 재계산(capture=true)+외부클릭 mousedown+키보드+`onMouseDown preventDefault`로 외부클릭 중복 방지) **+ `GlassDropdown.tsx`**(아래 공간 부족 시 위로 여는 `shouldOpenUp` 클램프). ★ModalPortal(중앙 모달) 아님.
+   - ★클램프 스펙(구속력): (a) `dropdownMaxHeight = min(원하는높이, max(아래공간, 위공간) - 8)`, (b) 아래 공간 < 임계치면 입력칸 위로 띄움(bottom 기준), (c) 드롭다운 자체 `overflow-y:auto` + max-height, (d) 좌우 `min(left, vw - dropW - 8)`. Electron 팝업은 창 경계 밖 paint 불가(최소 280×200) → 세로 플립·내부 스크롤 없으면 잘림.
+   - footer/보조: `여러 씬 한번에 추가` → `onOpenFullPicker()`(AddTaskModal 오픈) 후 닫힘. ★발견성: 입력칸 옆 상시 보조 버튼으로도 노출(텍스트 입력 없이 도달). placeholder 힌트 `a001 입력 또는 메모…`.
+   - 기존 하단 점선 `내 할일 추가` 버튼 제거.
+8. **AddTaskModal 유지**: 다중 씬 선택 피커 회귀 없이 유지(QuickAdd 보조 버튼/footer로 진입). 개인 탭도 보존. `defaultMode`만 'scene'으로.
+9. **범위 밖(PR 4~5로 이월):** 카운트업/링버스트/stagger/뷰 크로스페이드 모션, `prefers-reduced-motion` 가드, 행/카드 재설계, 리스트⇄카드 토글, **강화 빈 상태**(PR 3은 최소 안내만). PR 3은 기본 `transition`(width/opacity/슬라이드)만.
+
+### Task 3.1: 데이터 훅 stats 확장 (비파괴) + 순수 함수 추출 + 단위 테스트
+**Files:** Create `src/components/widgets/my-tasks/statsUtils.ts`, Modify `useMyTasksData.ts`, Create `tests/myTasksStats.test.ts`
+**참조:** stats useMemo(`useMyTasksData.ts:571-584`), completedAt 기록(`601-630`)
+
+- [ ] **Step 1:** 순수 함수 `computeMyTasksStats(scenes, todos, now)`를 `statsUtils.ts`에 추출(★타입만 import — `node --test` type-strip 호환, 값 import/STAGES 미사용, 단계 필드 직접 접근). 반환: 기존 `total/fullyDone/pct` **유지** + `sceneTotal`·`doneSceneCount`·`pendingSceneCount`·`stageCounts{lo,done,review,png}`·`stageProgressPct`·`personalTotal`·`todayCompletedScenes`(completedAt falsy/Invalid 가드 + 로컬 오늘 비교).
+- [ ] **Step 2:** `useMyTasksData`의 stats useMemo가 `computeMyTasksStats` 호출하도록 교체(의존성에 doneScenes·allViewScenes·activePersonalTodos). `UseMyTasksDataResult.stats` 타입 확장. 기존 소비처(`MyTasksWidget.tsx:772` fullyDone/total/pct) 비파괴 확인.
+- [ ] **Step 3:** `tests/myTasksStats.test.ts`(node:test): sceneTotal=0/personalTotal>0 빈상태, completedAt falsy/Invalid 제외, stageProgressPct 산식, 로컬-오늘 경계. `package.json`의 `test:entity`(또는 신규 `test:mytasks` 체인)에 추가해 `build:vite`가 돌게.
+- [ ] **Step 4:** `npm run typecheck` + 새 테스트 통과.
+- [ ] **Step 5:** Commit `feat(my-tasks): 도넛용 통계 순수함수 추출 + 단계별/오늘완료 확장 + 단위 테스트`
+
+### Task 3.2: DonutHero 컴포넌트
+**Files:** Create `src/components/widgets/my-tasks/components/DonutHero.tsx`, Modify `MyTasksWidget.tsx`(상단 요약바 교체)
+**참조:** OverallProgressWidget 도넛 세그먼트(`108-218`, strokeDasharray/offset+rotate(-90)), SceneDetailModal 톤, `ACTION_TYPE_COLOR`(단계 4색 값)
+
+- [ ] **Step 1:** `DonutHero.tsx` 작성. props: `{ stats; collapsed; onToggleCollapse }`. 펼침: 컴팩트 SVG **더블베젤** 도넛(반경 ~34, strokeWidth ~8, 트랙 링 + 진행 링) — `DONUT_STAGE_COLORS`(lo #74B9FF·done #A29BFE·review #FDCB6E·png #00B894) 4색 누적 세그먼트(lo→done→review→png 순, 세그먼트 사이 1~2px 갭, 마지막만 round cap), 트랙 `bg-border`. **중앙 = `M/N`(완료/전체 씬)**. stat 라인(`완료 M · 진행 K · 개인 P`) + `todayCompletedScenes>0`이면 **"오늘 마친 씬 N개"** 칩(#00B894). 우상단 접기 chevron.
+- [ ] **Step 2:** 접힘(`collapsed`): 한 줄 strip — 가는 진행 바(stageProgressPct) + `M/N 씬 · X%` + 펼치기 chevron.
+- [ ] **Step 3:** 빈 상태(sceneTotal=0 && personalTotal=0): 옅은 안내(강화 빈상태는 PR 4). sceneTotal=0·personalTotal>0: 도넛 0/0 회색 + 개인 stat.
+- [ ] **Step 4:** `MyTasksWidget.tsx`에서 `요약 바`(761-775)를 `<DonutHero stats={stats} collapsed={donutCollapsed} onToggleCollapse={...}/>`로 교체. `donutCollapsed` 위젯 로컬 useState.
+- [ ] **Step 5:** `npm run typecheck` + `npm run build:vite` 통과.
+- [ ] **Step 6:** Commit `feat(my-tasks): 더블베젤 4색 단계 도넛 히어로(중앙 M/N) + 오늘 마친 씬 칩 + 접기 strip`
+
+### Task 3.3: QuickAdd 컴포넌트 (씬 자동완성 + 개인할일)
+**Files:** Create `src/components/widgets/my-tasks/components/QuickAdd.tsx`, Modify `MyTasksWidget.tsx`, (옵션) `statsUtils.ts`나 `types.ts`에 `isAssignedToMe`/`filterSceneCandidates` 헬퍼, Create `tests/quickAddSceneFilter.test.ts`
+**참조:** ★`AssigneeMultiSelect.tsx`(앵커 포털/키보드/외부클릭/scroll·resize 재계산) + `GlassDropdown.tsx`(위로 여는 클램프), `useAllEpisodesFlat`, `addScenes`/`addPersonalTodo`/`existingKeys`, 콤마 분리 매칭(`useMyTasksData.ts:548-552`)
+
+- [ ] **Step 1:** `QuickAdd.tsx` 작성. props: `{ open; onClose; candidates: FlatScene[]; episodeTitles; existingKeys; currentUserName; onAddScene(key); onAddPersonalTodo(title); onOpenFullPicker }`. ★`candidates`는 부모가 내려줌(자체 useAllEpisodesFlat 재구독 X). 입력 `value` 로컬 상태.
+- [ ] **Step 2:** 순수 함수 `filterSceneCandidates(candidates, query, currentUserName, existingKeys)` (statsUtils.ts 또는 quickAddUtils.ts, 타입만 import): includes+끝자리 번호 매칭, 내담당(콤마분리) 우선 정렬→EP→번호, 상위 8. 반환 항목에 `{ flat, isMine, alreadyAdded }`. `tests/quickAddSceneFilter.test.ts`(node:test): 끝자리 매칭(a001 vs '1'), 2인 담당 콤마 매칭, existingKeys 비활성, 정렬.
+- [ ] **Step 3:** 드롭다운 UI: 에피소드 구분 헤더, 내담당 점/펄스, alreadyAdded 비활성+`추가됨`. 키보드 ↑↓/Enter/Esc/Tab + ★한글 IME 가드(`isComposing||keyCode===229`). Enter=활성 항목 add 또는 매칭 없으면 `onAddPersonalTodo(value.trim())`.
+- [ ] **Step 4:** 앵커드 포털: `createPortal(document.body)`+`position:fixed`, 입력칸 `getBoundingClientRect`, ★세로 플립(아래공간 부족시 위)+`dropdownMaxHeight`+`overflow-y:auto`+좌우 클램프. scroll/resize 재계산(capture) 또는 닫기. 외부클릭 mousedown(입력/드롭다운 제외)+`onMouseDown preventDefault`.
+- [ ] **Step 5:** footer/보조 `여러 씬 한번에 추가` → `onOpenFullPicker()`. placeholder 힌트.
+- [ ] **Step 6:** `MyTasksWidget.tsx` 통합: `allFlat`(useAllEpisodesFlat 또는 훅 반환) 확보 → QuickAdd `candidates`. 헤더 `headerRight` `+` 버튼(`showQuickAdd` 토글, 필터 버튼과 공존, tooltip). 도넛 아래 `showQuickAdd && <QuickAdd.../>`. 하단 점선 버튼 제거. `onAddPersonalTodo`는 title→PersonalTodo 객체 어댑터. `onOpenFullPicker={()=>{setShowQuickAdd(false);setShowPicker(true);}}`. `AddTaskModal defaultMode="scene"`.
+- [ ] **Step 7:** `npm run typecheck` + 새 테스트 + `npm run build:vite` 통과.
+- [ ] **Step 8:** Commit `feat(my-tasks): QuickAdd — +버튼 슬라이드 + 씬 자동완성(앵커드 포털·IME 가드) + 개인할일`
+
+### Task 3.4: PR 3 검증 게이트 + 버전 + 업데이트 노트 + PR
+- [ ] **Step 1:** 전체 `npm run typecheck` + `npm run build:vite`(my-tasks 단위 테스트 포함) 통과.
+- [ ] **Step 2:** 회귀 확인(한솔 dev): 도넛 진행/중앙 M/N/오늘 마친 씬/접기/더블베젤, QuickAdd 자동완성·내담당강조·키보드·한글 입력 중 Enter 안전·개인할일·보조 다중추가 진입, 작은 팝업서 드롭다운 클램프(아래 없으면 위로), 기존 CRUD/토글/동기화.
+- [ ] **Step 3:** 버전 `package.json` **1.54.0 → 1.55.0**(기능 추가) + `DEVLOG/update-notes.json` 항목(비개발자 톤: "내 할일 위에 한눈에 보이는 진행 도넛 + 씬 이름만 쳐서 바로 추가").
+- [ ] **Step 4:** Commit → push → PR 생성(pr-creator). codex-review-loop → clean. 최종 심층 리뷰 → 빌드 → (승인된) 머지.
+
+### PR 3 검증 게이트
+- [ ] `npm run typecheck` 통과
+- [ ] `npm run build:vite` 통과(my-tasks 단위 테스트 포함)
+- [ ] 도넛 4색 단계 구분 보임 + 중앙 M/N + 채움/표기 역할분담, "오늘 마친 씬" 칩(completedAt 가드), 접기 strip, 더블베젤
+- [ ] QuickAdd 자동완성(내담당 콤마매칭 강조·existingKeys 비활성 분리)·키보드·한글 IME Enter 안전·개인할일 fallback·풀피커/보조 진입
+- [ ] 드롭다운 클램프 3종: 최소 팝업(280×200)에서 (i)안 잘림 (ii)내부 스크롤 (iii)아래 공간 없으면 위로
+- [ ] 팝업서 QuickAdd 입력칸이 리스트를 과도하게 가리지 않음
+- [ ] 기존 기능 회귀 없음(개인할일/씬 CRUD·토글·캘린더·크로스창)
+- [ ] (한솔 승인 시) PR 머지 → 빌드
 
 ### PR 4 — 행/카드 + 상세 모달 내용
 - `SceneRow.tsx`(4단계 칩 순차 토글, 동그라미 없음, 현재단계 n/4, 이동 버튼), `TodoRow.tsx`(Success Check 동그라미), `SceneCard.tsx`(썸네일 가이드>스보>없음)
