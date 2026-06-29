@@ -91,8 +91,36 @@ async function loadAssignedSceneKeysFromSupabase(userId: string): Promise<SceneK
   }
 }
 
+/**
+ * assigned 뷰의 씬 키를 Supabase에 저장한다.
+ *
+ * P1 안전 장치: 마이그레이션 완료 마커(userId별)가 설정된 경우에만 views를 빈 배열로
+ * 덮어써도 안전하다. 마커가 없는 경우(마이그레이션 미완료/실패)에는 기존 views를
+ * 읽어서 보존한 채로 저장하거나, 읽기조차 실패하면 씬 키 저장을 건너뛴다.
+ * 이렇게 하면 레거시 커스텀 뷰 데이터(views[].personalTodos, views[].sceneKeys)가
+ * 마이그레이션 완료 전에 영구 삭제되는 것을 막는다.
+ */
 async function saveAssignedSceneKeysToSupabase(userId: string, sceneKeys: SceneKey[]): Promise<void> {
-  await supabaseService.upsertTaskViews(userId, [], sceneKeys);
+  const migratedMarkerKey = `${CUSTOM_VIEW_TODOS_MIGRATED_KEY}_${userId}`;
+
+  // 마이그레이션이 확정 완료된 경우: views를 빈 배열로 비워도 안전
+  if (localStorage.getItem(migratedMarkerKey)) {
+    await supabaseService.upsertTaskViews(userId, [], sceneKeys);
+    return;
+  }
+
+  // 마이그레이션 미완료: 기존 views를 보존해야 한다
+  let existingViews: unknown[];
+  try {
+    const data = await supabaseService.readTaskViews(userId);
+    existingViews = (data?.views ?? []) as unknown[];
+  } catch (err) {
+    // 읽기 실패 → 데이터 손실 방지를 위해 씬키 저장을 건너뜀
+    console.warn('[MyTasks] 마이그레이션 미완료 상태에서 views 읽기 실패 — 씬키 저장 건너뜀(데이터 보호):', err);
+    return;
+  }
+
+  await supabaseService.upsertTaskViews(userId, existingViews, sceneKeys);
 }
 
 async function migrateLocalStorageToSupabase(userId: string): Promise<void> {
