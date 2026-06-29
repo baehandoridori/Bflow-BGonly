@@ -904,9 +904,11 @@ export function useMyTasksData(isPopup: boolean): UseMyTasksDataResult {
           await deleteCalEvent(calEventId);
           Object.assign(newTodo, { addToCalendar: false });
         } else {
-          // addToCalendar이 이미 true인 상태에서 title/date 변경 → 이벤트 업데이트
+          // addToCalendar이 이미 true인 상태에서 title/memo/date 변경 → 이벤트 업데이트
           const calUpdates: Record<string, string> = {};
           if (updates.title !== undefined) calUpdates.title = updates.title;
+          // 메모: 생성 시(addCalEvent의 memo: todo.memo)와 동일하게 raw 값 그대로 전달
+          if (updates.memo !== undefined) calUpdates.memo = updates.memo;
           // 날짜: 비워진 경우 다른 쪽 날짜로 채움 (캘린더 이벤트는 항상 날짜 필요)
           const todayFallback = new Date().toISOString().slice(0, 10);
           if ('startDate' in updates) calUpdates.startDate = updates.startDate || newTodo.endDate || todayFallback;

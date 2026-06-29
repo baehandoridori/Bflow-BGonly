@@ -32,6 +32,13 @@ test('native feedback toast jumps use the same notification scene navigation pat
   assert.match(app, /navigateNotificationToScene\(payload\.kind === 'assignment' \? 'scene_assignment' : 'acting_feedback'/);
 });
 
+test('widget popup scene-row jumps defer to the pending scene-modal path so a cold-start main window opens the detail modal after data loads', () => {
+  assert.match(app, /import \{ navigateToSceneView \} from '@\/utils\/sceneNavigationAction'/);
+  assert.match(app, /onWidgetNavigateMain\?\.\s*\(\(payload\) => \{/);
+  // 코덱스 4차 P2: 즉시 해석(navigateNotificationToScene) 대신 modalRequest 대기 경로로 라우팅.
+  assert.match(app, /navigateToSceneView\(\{[\s\S]*?modalRequest:\s*\{[\s\S]*?initialTab:\s*'detail'[\s\S]*?\}/);
+});
+
 test('toast shortcut actions mark the local notification as read before navigating', () => {
   assert.match(notificationHelper, /const notificationId = store\.addNotification\(/);
   assert.match(notificationHelper, /markAsRead\(notificationId\)/);

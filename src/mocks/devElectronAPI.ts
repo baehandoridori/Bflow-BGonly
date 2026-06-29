@@ -560,6 +560,8 @@ export function installDevElectronAPI(): void {
       console.log('[DEV] notifyFeedbackToast:', payload);
     },
     onFeedbackJumpToScene: noop,
+    widgetNavigateMain: async () => {},
+    onWidgetNavigateMain: noop,
 
     imageSave: async () => '/dev/mock-image.png',
     imageDelete: async () => true,

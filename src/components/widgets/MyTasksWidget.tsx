@@ -1,10 +1,11 @@
 import { useState, useEffect, useContext, useRef, forwardRef } from 'react';
-import { CheckSquare, Plus, X, Search, Check, ListFilter, Pencil, ChevronDown, PartyPopper, GripVertical, Calendar, CalendarDays } from 'lucide-react';
+import { CheckSquare, Plus, X, Search, Check, ListFilter, ExternalLink, ChevronDown, PartyPopper, GripVertical, Calendar } from 'lucide-react';
 import { motion, AnimatePresence, Reorder } from 'framer-motion';
 import { Widget, IsPopupContext, WidgetIdContext } from './Widget';
 import { EntityAwareInput } from '@/components/common/EntityAwareInput';
 import { EntityText } from '@/components/common/EntityText';
 import { navigateToHashTarget } from '@/utils/hashNavigation';
+import { navigateNotificationToScene } from '@/utils/notificationSceneAction';
 import { stripEntityTokens } from '@/utils/entityTokens';
 import { useAppStore } from '@/stores/useAppStore';
 import { useAuthStore } from '@/stores/useAuthStore';
@@ -15,6 +16,9 @@ import { createUuid } from '@/utils/createUuid';
 import type { SceneKey, PersonalTodo, FlatScene } from './my-tasks/types';
 import { makeKey } from './my-tasks/types';
 import { useMyTasksData, scenePct } from './my-tasks/hooks/useMyTasksData';
+import { ModalPortal } from './my-tasks/components/ModalPortal';
+import { TodoDetailModal } from './my-tasks/components/TodoDetailModal';
+import { SceneDetailModal } from './my-tasks/components/SceneDetailModal';
 
 /* ─── 할 일 추가 모달 (작업 + 개인) ──────────── */
 function AddTaskModal({
@@ -100,17 +104,10 @@ function AddTaskModal({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-overlay/50 backdrop-blur-sm" onClick={onClose}>
-      <motion.div
-        initial={{ opacity: 0, scale: 0.95 }}
-        animate={{ opacity: 1, scale: 1 }}
-        exit={{ opacity: 0, scale: 0.95 }}
-        className="bg-bg-card border border-bg-border/50 rounded-2xl shadow-2xl w-[520px] max-h-[70vh] flex flex-col overflow-hidden"
-        onClick={(e) => e.stopPropagation()}
-      >
+    <ModalPortal onClose={onClose} labelledBy="add-task-title">
         {/* 헤더 */}
         <div className="flex items-center justify-between px-4 py-3 border-b border-bg-border/30">
-          <span className="text-sm font-semibold text-text-primary">할 일 추가</span>
+          <span id="add-task-title" className="text-sm font-semibold text-text-primary">할 일 추가</span>
           <button onClick={onClose} className="p-1 hover:bg-bg-border/20 rounded-md cursor-pointer"><X size={16} /></button>
         </div>
 
@@ -330,12 +327,13 @@ function AddTaskModal({
             </div>
           </>
         )}
-      </motion.div>
-    </div>
+    </ModalPortal>
   );
 }
 
-/* ─── 인라인 편집 행 ──────────────────────────── */
+/* ─── 씬 행 (확정 C) ──────────────────────────────
+ * 인라인 메모 편집 제거 → 메모는 읽기 전용 표시. 본문 클릭 시 씬 상세 모달을 연다.
+ * 단계 토글·제거·본체 이동 버튼은 독립(stopPropagation)으로 모달을 열지 않는다. */
 interface EditableSceneRowProps {
   flat: FlatScene;
   deptCfg: typeof DEPARTMENT_CONFIGS['bg'];
@@ -345,7 +343,8 @@ interface EditableSceneRowProps {
   isRemovable: boolean;
   onToggle: (flat: FlatScene, stage: Stage) => void;
   onRemove: (key: SceneKey) => void;
-  onEditField: (flat: FlatScene, field: string, value: string) => void;
+  onOpenDetail: (flat: FlatScene) => void;
+  onNavigateToMain: (flat: FlatScene) => void;
 }
 
 const EditableSceneRow = forwardRef<HTMLDivElement, EditableSceneRowProps>(function EditableSceneRow({
@@ -357,29 +356,11 @@ const EditableSceneRow = forwardRef<HTMLDivElement, EditableSceneRowProps>(funct
   isRemovable,
   onToggle,
   onRemove,
-  onEditField,
+  onOpenDetail,
+  onNavigateToMain,
 }, ref) {
   const s = flat.scene;
-  const [editingField, setEditingField] = useState<string | null>(null);
-  const [editValue, setEditValue] = useState('');
-  const inputRef = useRef<HTMLInputElement>(null);
   const users = useAuthStore((s) => s.users);
-
-  const startEdit = (field: string, currentValue: string) => {
-    setEditingField(field);
-    setEditValue(currentValue);
-    setTimeout(() => inputRef.current?.focus(), 0);
-  };
-
-  const commitEdit = () => {
-    if (editingField && editValue !== undefined) {
-      const original = editingField === 'assignee' ? s.assignee : editingField === 'memo' ? s.memo : '';
-      if (editValue !== original) {
-        onEditField(flat, editingField, editValue);
-      }
-    }
-    setEditingField(null);
-  };
 
   return (
     <motion.div
@@ -394,37 +375,35 @@ const EditableSceneRow = forwardRef<HTMLDivElement, EditableSceneRowProps>(funct
         pct >= 100 ? 'bg-green-500/5 opacity-60' : 'hover:bg-bg-border/8',
       )}
     >
-      {/* 씬 정보 — 2줄 구조 */}
-      <div className="flex flex-col min-w-0 flex-1 gap-0.5">
+      {/* 씬 정보 — 2줄 구조 (클릭 시 상세 모달)
+       * 메모 안 경로(PathBadge)·멘션·#태그 칩은 자체 <button>/clickable 이라
+       * 행 본문을 <button>으로 두면 button-in-button 무효 DOM이 된다 → div[role=button]로 처리.
+       * 칩들은 각자 stopPropagation 하지만, 안전하게 인터랙티브 자식 클릭은 행 핸들러에서 무시한다. */}
+      <div
+        role="button"
+        tabIndex={0}
+        onClick={(e) => {
+          if ((e.target as HTMLElement).closest('button, a')) return;
+          onOpenDetail(flat);
+        }}
+        onKeyDown={(e) => {
+          if ((e.target as HTMLElement).closest('button, a')) return;
+          if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault();
+            onOpenDetail(flat);
+          }
+        }}
+        className="flex flex-col min-w-0 flex-1 gap-0.5 text-left cursor-pointer rounded px-0.5 -mx-0.5 hover:bg-bg-border/10 transition-colors"
+        title="클릭하여 상세 보기/편집"
+      >
         {/* 1줄: 컨텍스트 (에피소드 > 파트) */}
         <span className="text-[11px] text-text-secondary/40">{epLabel} &gt; {flat.partId}</span>
-        {/* 2줄: #번호 sceneId */}
+        {/* 2줄: #번호 sceneId / 메모 (읽기 전용) */}
         <div className="flex items-center gap-1">
           <span className="text-[12px] font-mono text-accent shrink-0">#{sceneNum}</span>
-          {editingField === 'memo' ? (
-            <div className="flex-1 min-w-0">
-              <EntityAwareInput
-                value={editValue}
-                onChange={setEditValue}
-                users={users}
-                enableHashtag
-                onBlur={commitEdit}
-                submitOn="enter"
-                onSubmit={commitEdit}
-                onCancel={() => setEditingField(null)}
-                autoFocus
-                className="w-full text-[13px] text-text-primary bg-bg-primary border border-accent/30 rounded px-1 py-0 outline-none"
-              />
-            </div>
-          ) : (
-            <span
-              className="text-[14px] font-semibold text-text-primary truncate cursor-pointer hover:text-accent transition-colors"
-              onDoubleClick={() => startEdit('memo', s.memo)}
-              title="더블클릭하여 메모 편집"
-            >
-              {s.memo ? <EntityText text={s.memo} userNames={users.map((u) => u.name)} onHashClick={navigateToHashTarget} /> : s.sceneId}
-            </span>
-          )}
+          <span className="text-[14px] font-semibold text-text-primary truncate">
+            {s.memo ? <EntityText text={s.memo} userNames={users.map((u) => u.name)} onHashClick={navigateToHashTarget} /> : s.sceneId}
+          </span>
         </div>
       </div>
 
@@ -438,7 +417,7 @@ const EditableSceneRow = forwardRef<HTMLDivElement, EditableSceneRowProps>(funct
           return (
             <button
               key={stage}
-              onClick={() => onToggle(flat, stage)}
+              onClick={(e) => { e.stopPropagation(); onToggle(flat, stage); }}
               title={deptCfg.stageLabels[stage]}
               className={cn(
                 'w-6 h-6 rounded text-[11px] font-medium flex items-center justify-center cursor-pointer transition-all',
@@ -458,20 +437,18 @@ const EditableSceneRow = forwardRef<HTMLDivElement, EditableSceneRowProps>(funct
         })}
       </div>
 
-      {/* 편집 / 제거 버튼 */}
+      {/* 본체 이동 / 제거 버튼 */}
       <div className="flex items-center gap-0.5 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">
-        {!editingField && (
-          <button
-            onClick={() => startEdit('memo', s.memo)}
-            className="p-0.5 text-text-secondary/20 hover:text-accent cursor-pointer"
-            title="편집"
-          >
-            <Pencil size={9} />
-          </button>
-        )}
+        <button
+          onClick={(e) => { e.stopPropagation(); onNavigateToMain(flat); }}
+          className="p-1 text-text-secondary/20 hover:text-accent cursor-pointer rounded transition-all"
+          title="본체 앱의 씬 상세로 이동"
+        >
+          <ExternalLink size={12} />
+        </button>
         {isRemovable && (
           <button
-            onClick={() => onRemove(flat.key)}
+            onClick={(e) => { e.stopPropagation(); onRemove(flat.key); }}
             className="p-1 text-red-400/60 hover:text-red-400 hover:bg-red-400/10 rounded cursor-pointer transition-all"
           >
             <X size={14} />
@@ -483,11 +460,13 @@ const EditableSceneRow = forwardRef<HTMLDivElement, EditableSceneRowProps>(funct
 });
 
 /* ─── 개인 할일 행 콘텐츠 ──────────────────────── */
+/* 확정 B: 날짜·캘린더·제목 편집은 행에서 제거하고 TodoDetailModal 에서만 제공한다.
+   행은 읽기 전용 표시 + 본문 클릭 시 상세 모달을 연다(체크박스/삭제/드래그는 독립). */
 function PersonalTodoContent({
   todo,
   onToggle,
   onRemove,
-  onUpdate,
+  onOpenDetail,
   showDragHandle,
   isHighlighted,
 }: {
@@ -495,57 +474,10 @@ function PersonalTodoContent({
   onToggle: (id: string) => void;
   onRemove: (id: string) => void;
   isHighlighted?: boolean;
-  onUpdate: (id: string, updates: Partial<PersonalTodo>) => void;
+  onOpenDetail: (todo: PersonalTodo) => void;
   showDragHandle?: boolean;
 }) {
-  const [editingTitle, setEditingTitle] = useState(false);
-  const [editTitle, setEditTitle] = useState(todo.title);
   const users = useAuthStore((s) => s.users);
-  const [editingDates, setEditingDates] = useState(false);
-  const [editStart, setEditStart] = useState(todo.startDate ?? '');
-  const [editEnd, setEditEnd] = useState(todo.endDate ?? '');
-  const titleInputRef = useRef<HTMLInputElement>(null);
-  const { setView } = useAppStore();
-
-  // 캘린더 뷰로 이동 (뷰 전환 후 마운트 대기)
-  const navigateToCalendar = (e: React.MouseEvent) => {
-    e.stopPropagation();
-    setView('schedule');
-    if (todo.startDate) {
-      // ScheduleView 마운트 후 이벤트 디스패치 (300ms 대기)
-      setTimeout(() => {
-        window.dispatchEvent(new CustomEvent('bflow:navigate-to-date', { detail: { date: todo.startDate, todoId: todo.id } }));
-      }, 300);
-    }
-  };
-
-  // 타이틀 편집 커밋
-  const commitTitle = () => {
-    setEditingTitle(false);
-    const trimmed = editTitle.trim();
-    if (trimmed && trimmed !== todo.title) {
-      onUpdate(todo.id, { title: trimmed });
-    } else {
-      setEditTitle(todo.title);
-    }
-  };
-
-  // 날짜 편집 커밋
-  const commitDates = () => {
-    setEditingDates(false);
-    if (editStart !== (todo.startDate ?? '') || editEnd !== (todo.endDate ?? '')) {
-      onUpdate(todo.id, {
-        startDate: editStart || undefined,
-        endDate: editEnd || undefined,
-      });
-    }
-  };
-
-  // addToCalendar 토글
-  const toggleCalendarLink = (e: React.MouseEvent) => {
-    e.stopPropagation();
-    onUpdate(todo.id, { addToCalendar: !todo.addToCalendar });
-  };
 
   return (
     <div
@@ -566,95 +498,43 @@ function PersonalTodoContent({
       {/* 개인 라벨 */}
       <span className="text-[11px] font-bold text-accent shrink-0">::ᅠ개인</span>
 
-      {/* 캘린더 연동 아이콘 */}
-      {todo.addToCalendar && (
-        <button
-          onClick={navigateToCalendar}
-          className="shrink-0 text-accent hover:text-accent/80 cursor-pointer transition-colors"
-          title="캘린더에서 보기"
+      {/* 제목/메모 — 클릭 시 상세 모달 (확정 B: 날짜·캘린더 UI 미노출)
+       * 메모 안 경로(PathBadge)·멘션·#태그 칩은 자체 <button>/clickable 이라
+       * 행 본문을 <button>으로 두면 button-in-button 무효 DOM이 된다 → div[role=button]로 처리.
+       * 칩들은 각자 stopPropagation 하지만, 안전하게 인터랙티브 자식 클릭은 행 핸들러에서 무시한다. */}
+      <div
+        role="button"
+        tabIndex={0}
+        onClick={(e) => {
+          if ((e.target as HTMLElement).closest('button, a')) return;
+          onOpenDetail(todo);
+        }}
+        onKeyDown={(e) => {
+          if ((e.target as HTMLElement).closest('button, a')) return;
+          if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault();
+            onOpenDetail(todo);
+          }
+        }}
+        className="flex flex-col min-w-0 flex-1 gap-0.5 text-left cursor-pointer rounded px-0.5 -mx-0.5 hover:bg-bg-border/10 transition-colors"
+        title="클릭하여 상세 보기/편집"
+      >
+        <span
+          className={cn(
+            'text-[13px] text-text-primary truncate',
+            todo.completed && 'line-through text-text-secondary/50',
+          )}
         >
-          <CalendarDays size={12} />
-        </button>
-      )}
-
-      {/* 제목/메모 */}
-      <div className="flex flex-col min-w-0 flex-1 gap-0.5">
-        {editingTitle ? (
-          <input
-            ref={titleInputRef}
-            value={editTitle}
-            onChange={(e) => setEditTitle(e.target.value)}
-            onBlur={commitTitle}
-            onKeyDown={(e) => { if (e.key === 'Enter') commitTitle(); if (e.key === 'Escape') { setEditTitle(todo.title); setEditingTitle(false); } }}
-            className="text-[13px] text-text-primary bg-bg-border/20 rounded px-1 py-0.5 outline-none border border-accent/40 w-full"
-            autoFocus
-          />
-        ) : (
-          <span
-            className={cn(
-              'text-[13px] text-text-primary truncate cursor-text hover:bg-bg-border/10 rounded px-0.5',
-              todo.completed && 'line-through text-text-secondary/50',
-            )}
-            onClick={() => { if (!todo.completed) { setEditTitle(todo.title); setEditingTitle(true); } }}
-            title="클릭하여 편집"
-          >
-            {todo.title}
-          </span>
-        )}
+          {todo.title}
+        </span>
         {todo.memo && (
           <span className="text-[11px] text-text-secondary/50 truncate"><EntityText text={todo.memo} userNames={users.map((u) => u.name)} onHashClick={navigateToHashTarget} /></span>
         )}
-        {editingDates ? (
-          <div className="flex items-center gap-1 text-[9px]" onClick={(e) => e.stopPropagation()}>
-            <input type="date" value={editStart} onChange={(e) => setEditStart(e.target.value)}
-              className="bg-bg-border/20 text-text-primary rounded px-1 py-0.5 outline-none border border-accent/40 text-[9px]" />
-            <span className="text-text-secondary/40">~</span>
-            <input type="date" value={editEnd} onChange={(e) => setEditEnd(e.target.value)}
-              className="bg-bg-border/20 text-text-primary rounded px-1 py-0.5 outline-none border border-accent/40 text-[9px]" />
-            <button onClick={commitDates} className="text-accent hover:text-accent/80 cursor-pointer"><Check size={10} /></button>
-            <button onClick={() => { setEditStart(todo.startDate ?? ''); setEditEnd(todo.endDate ?? ''); setEditingDates(false); }}
-              className="text-text-secondary/40 hover:text-text-secondary cursor-pointer"><X size={10} /></button>
-          </div>
-        ) : (todo.startDate || todo.endDate) ? (
-          <div
-            className="flex items-center gap-1 text-[9px] text-text-secondary/40 cursor-text hover:text-text-secondary/60"
-            onClick={() => { if (!todo.completed) { setEditStart(todo.startDate ?? ''); setEditEnd(todo.endDate ?? ''); setEditingDates(true); } }}
-            title="클릭하여 날짜 편집"
-          >
-            <Calendar size={8} />
-            <span>
-              {todo.startDate && new Date(todo.startDate + 'T00:00:00').toLocaleDateString('ko-KR', { month: 'short', day: 'numeric' })}
-              {todo.startDate && todo.endDate && ' ~ '}
-              {todo.endDate && new Date(todo.endDate + 'T00:00:00').toLocaleDateString('ko-KR', { month: 'short', day: 'numeric' })}
-            </span>
-          </div>
-        ) : !todo.completed ? (
-          <button
-            onClick={() => { setEditStart(''); setEditEnd(''); setEditingDates(true); }}
-            className="text-[9px] text-text-secondary/30 hover:text-text-secondary/50 cursor-pointer flex items-center gap-0.5"
-          >
-            <Calendar size={8} /> 날짜 추가
-          </button>
-        ) : null}
       </div>
-
-      {/* 캘린더 연동 토글 */}
-      <button
-        onClick={toggleCalendarLink}
-        className={cn(
-          'p-1 rounded cursor-pointer transition-all shrink-0',
-          todo.addToCalendar
-            ? 'text-accent bg-accent/10 hover:bg-accent/20'
-            : 'text-text-secondary/20 hover:text-text-secondary/50 opacity-0 group-hover:opacity-100',
-        )}
-        title={todo.addToCalendar ? '캘린더 연동 해제' : '캘린더에 추가'}
-      >
-        <CalendarDays size={12} />
-      </button>
 
       {/* 체크박스 (오른쪽) */}
       <button
-        onClick={() => onToggle(todo.id)}
+        onClick={(e) => { e.stopPropagation(); onToggle(todo.id); }}
         className={cn(
           'w-5 h-5 rounded-md border-2 flex items-center justify-center cursor-pointer transition-all shrink-0',
           todo.completed
@@ -667,7 +547,7 @@ function PersonalTodoContent({
 
       {/* 삭제 */}
       <button
-        onClick={() => onRemove(todo.id)}
+        onClick={(e) => { e.stopPropagation(); onRemove(todo.id); }}
         className="p-1 text-red-400/60 hover:text-red-400 hover:bg-red-400/10 rounded cursor-pointer opacity-0 group-hover:opacity-100 transition-all shrink-0"
       >
         <X size={14} />
@@ -709,10 +589,61 @@ export function MyTasksWidget() {
   const [filterDone, setFilterDone] = useState(false);
   const [showDone, setShowDone] = useState(false);
 
+  // 상세 모달: id 만 보관하고 실제 todo 는 스토어 목록에서 매 렌더 재추출 → 편집 후 stale 값 방지
+  const [selectedTodoId, setSelectedTodoId] = useState<string | null>(null);
+  const selectedTodo =
+    selectedTodoId == null
+      ? null
+      : pendingPersonalTodos.find((t) => t.id === selectedTodoId) ??
+        donePersonalTodos.find((t) => t.id === selectedTodoId) ??
+        null;
+  const openTodoDetail = (todo: PersonalTodo) => setSelectedTodoId(todo.id);
+
+  // 씬 상세 모달: key 만 보관하고 실제 FlatScene 은 매 렌더 재추출 → 편집/토글 후 stale 값 방지.
+  // 목록에서 사라지면(완료 이동/제거) selectedScene 이 null 이 되어 모달이 깔끔히 닫힌다.
+  const [selectedSceneKey, setSelectedSceneKey] = useState<SceneKey | null>(null);
+  const selectedScene =
+    selectedSceneKey == null
+      ? null
+      : pendingScenes.find((f) => f.key === selectedSceneKey) ??
+        doneScenes.find((f) => f.key === selectedSceneKey) ??
+        null;
+  const openSceneDetail = (flat: FlatScene) => setSelectedSceneKey(flat.key);
+
+  // 본체(메인 앱) 씬 상세로 이동 — 대시보드/팝업 분기.
+  // 대시보드: 위젯이 본체와 같은 창에 있으므로 알림 점프와 동일한 경로를 직접 호출.
+  // 팝업: 별도 창이므로 본체 창에 점프 신호를 보낸다(본체 App 이 동일 경로로 변환).
+  const navigateToMainScene = (flat: FlatScene) => {
+    const scene = flat.scene;
+    if (isPopup) {
+      window.electronAPI?.widgetNavigateMain?.({
+        sheetName: flat.sheetName,
+        sceneId: scene.sceneId,
+        sceneUuid: scene.id ?? '',
+        episodeNumber: flat.episodeNumber,
+        partId: flat.partId,
+      });
+    } else {
+      navigateNotificationToScene('scene_change', {
+        sceneId: scene.id,
+        sceneName: scene.sceneId,
+        sheetName: flat.sheetName,
+      });
+    }
+    setSelectedSceneKey(null);
+  };
+
+  // 팝업에서 모달이 하나라도 열려 있는지 — 열려 있으면 창을 모달이 들어갈 만큼 키운다.
+  // 원시 ID 가 아니라 라이브 선택 객체로 판단한다: 다른 창에서 해당 항목이 삭제되면
+  // selectedTodo/selectedScene 가 null → 모달이 닫히므로, 창 크기 복원 경로가 정상 동작한다.
+  const anyModalOpen = showPicker || selectedTodo != null || selectedScene != null;
+
   // 팝업에서 완료 섹션 접기/펼치기 시 창 크기 조절
+  // 모달이 열려 있는 동안에는 아래 모달-리사이즈 effect가 창을 키우므로, 이 effect는 건너뛴다
+  // (둘이 같은 창을 서로 다른 크기로 잡으려 다투지 않도록 분리).
   const baseSizeRef = useRef<{ width: number; height: number } | null>(null);
   useEffect(() => {
-    if (!isPopup || !widgetId) return;
+    if (!isPopup || !widgetId || anyModalOpen) return;
     (async () => {
       if (!baseSizeRef.current) {
         const size = await window.electronAPI?.widgetGetSize?.(widgetId);
@@ -728,7 +659,43 @@ export function MyTasksWidget() {
         window.electronAPI?.widgetResize?.(widgetId, base.width, base.height);
       }
     })();
-  }, [showDone, doneScenes.length, isPopup, widgetId]);
+  }, [showDone, doneScenes.length, isPopup, widgetId, anyModalOpen]);
+
+  // 팝업에서 모달이 열릴 때 창이 작으면 모달이 들어갈 만큼 키우고, 닫히면 직전 크기로 복원.
+  // (대시보드는 모달이 document.body 포털로 떠 화면 전체를 쓰므로 손대지 않는다 — isPopup 일 때만.)
+  // 키우기 직전의 실제 창 크기를 별도 ref에 담아 두고 닫힐 때 정확히 그 크기로 되돌린다 →
+  // 완료 섹션 펼침으로 이미 커져 있던 경우에도 baseSizeRef를 건드리지 않고 공존한다.
+  const MODAL_MIN_W = 520;
+  const MODAL_MIN_H = 640;
+  // 위치(x/y)까지 함께 캡처한다 → 화면 가장자리 근처에서 모달 크기로 커지며 창이 안쪽으로
+  // 밀린 경우에도, 닫을 때 원래 위치+크기로 정확히 복원해 위젯이 점점 밀리지 않게 한다.
+  const preModalBoundsRef = useRef<{ x: number; y: number; width: number; height: number } | null>(null);
+  useEffect(() => {
+    if (!isPopup || !widgetId) return;
+    (async () => {
+      if (anyModalOpen) {
+        // 모달 연속 전환(하나 닫고 다른 하나 열기) 시 첫 모달의 pre-modal bounds를 유지.
+        if (!preModalBoundsRef.current) {
+          const bounds = await window.electronAPI?.widgetGetSize?.(widgetId);
+          if (!bounds) return;
+          preModalBoundsRef.current = bounds;
+          // 현재보다 작을 때만 키운다(사용자가 더 크게 키운 창은 줄이지 않는다).
+          const w = Math.max(bounds.width, MODAL_MIN_W);
+          const h = Math.max(bounds.height, MODAL_MIN_H);
+          if (w !== bounds.width || h !== bounds.height) {
+            // 그로우는 위치를 넘기지 않아 메인 핸들러의 화면 클램프가 그대로 적용된다.
+            window.electronAPI?.widgetResize?.(widgetId, w, h);
+          }
+        }
+      } else if (preModalBoundsRef.current) {
+        // 모든 모달이 닫혔다 → 키우기 직전 위치+크기로 정확히 복원.
+        // 원래 화면 안에 있던 좌표이므로 메인 핸들러가 다시 클램프하지 않는다.
+        const prev = preModalBoundsRef.current;
+        preModalBoundsRef.current = null;
+        window.electronAPI?.widgetResize?.(widgetId, prev.width, prev.height, prev.x, prev.y);
+      }
+    })();
+  }, [anyModalOpen, isPopup, widgetId]);
 
   // 행 렌더 헬퍼
   const renderRow = (flat: FlatScene) => {
@@ -749,7 +716,8 @@ export function MyTasksWidget() {
         isRemovable={isRemovable}
         onToggle={handleSceneToggle}
         onRemove={removeScene}
-        onEditField={handleEditField}
+        onOpenDetail={openSceneDetail}
+        onNavigateToMain={navigateToMainScene}
       />
     );
   };
@@ -829,7 +797,7 @@ export function MyTasksWidget() {
                 <Reorder.Group axis="y" values={pendingPersonalTodos} onReorder={reorderPendingTodos} className="list-none p-0 m-0">
                   {pendingPersonalTodos.map((todo) => (
                     <Reorder.Item key={todo.id} value={todo} className="list-none">
-                      <PersonalTodoContent todo={todo} onToggle={togglePersonalTodo} onRemove={removePersonalTodo} onUpdate={updatePersonalTodo} showDragHandle isHighlighted={highlightTodoId === todo.id} />
+                      <PersonalTodoContent todo={todo} onToggle={togglePersonalTodo} onRemove={removePersonalTodo} onOpenDetail={openTodoDetail} showDragHandle isHighlighted={highlightTodoId === todo.id} />
                     </Reorder.Item>
                   ))}
                 </Reorder.Group>
@@ -871,7 +839,7 @@ export function MyTasksWidget() {
                             {doneScenes.map(renderRow)}
                           </AnimatePresence>
                           {donePersonalTodos.map((todo) => (
-                            <PersonalTodoContent key={todo.id} todo={todo} onToggle={togglePersonalTodo} onRemove={removePersonalTodo} onUpdate={updatePersonalTodo} isHighlighted={highlightTodoId === todo.id} />
+                            <PersonalTodoContent key={todo.id} todo={todo} onToggle={togglePersonalTodo} onRemove={removePersonalTodo} onOpenDetail={openTodoDetail} isHighlighted={highlightTodoId === todo.id} />
                           ))}
                         </div>
                       </motion.div>
@@ -903,6 +871,28 @@ export function MyTasksWidget() {
             onAddScenes={addScenes}
             onAddPersonalTodo={addPersonalTodo}
             onClose={() => setShowPicker(false)}
+          />
+        )}
+      </AnimatePresence>
+
+      <AnimatePresence>
+        {selectedTodo && (
+          <TodoDetailModal
+            todo={selectedTodo}
+            onUpdate={updatePersonalTodo}
+            onClose={() => setSelectedTodoId(null)}
+          />
+        )}
+      </AnimatePresence>
+
+      <AnimatePresence>
+        {selectedScene && (
+          <SceneDetailModal
+            flat={selectedScene}
+            onToggle={handleSceneToggle}
+            onEditField={handleEditField}
+            onNavigateToMain={navigateToMainScene}
+            onClose={() => setSelectedSceneKey(null)}
           />
         )}
       </AnimatePresence>

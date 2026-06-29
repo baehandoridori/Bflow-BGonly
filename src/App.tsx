@@ -65,6 +65,7 @@ import { useSceneWorkLinkStore } from '@/stores/useSceneWorkLinkStore';
 import { dispatchNotification, type NotificationSettings } from '@/utils/notificationHelper';
 import { useRevisionSetStore } from '@/stores/useRevisionSetStore';
 import { navigateNotificationToScene } from '@/utils/notificationSceneAction';
+import { navigateToSceneView } from '@/utils/sceneNavigationAction';
 import { resolveNotificationSceneTarget } from '@/utils/notificationSceneNavigation';
 import {
   beginCatchupRun,
@@ -2188,9 +2189,32 @@ export default function App() {
       });
     });
 
+    // 위젯 팝업의 씬 행 → 본체 씬 상세 열기 (detail 탭으로 모달 오픈)
+    // 코덱스 4차 P2: 자동 복원된 팝업이 막 떠서 아직 로딩 전인 본체 창에 이동을 보내면
+    // 즉시 해석(현재 비어 있는 episodes 기준) 시 대상 씬을 못 찾아 뷰만 전환되고 상세 모달이 안 열린다.
+    // 즉시 해석 대신 pendingSceneModalRequest(대기) 경로로 보내 ScenesView 가 데이터 로드 후 처리하게 한다.
+    const offWidgetNavigate = window.electronAPI.onWidgetNavigateMain?.((payload) => {
+      navigateToSceneView({
+        episodeNumber: payload.episodeNumber,
+        partId: payload.partId,
+        modalRequest: {
+          sceneUuid: payload.sceneUuid,
+          sceneName: payload.sceneId,
+          episodeNumber: payload.episodeNumber,
+          partId: payload.partId,
+          initialTab: 'detail',
+          // 코덱스 5차 P2: 본체의 현재 부서 필터에 의존하지 않도록 'all' 로 강제.
+          // ScenesView 는 selectedDepartment === 'all' 일 때만 merged 씬에서 UUID 를 찾으므로,
+          // 본체가 BG 인데 팝업에서 ACT 씬을 누르면(또는 반대) 못 찾거나 엉뚱한 부서로 열리던 문제 방지.
+          forceDeptFilter: 'all',
+        },
+      });
+    });
+
     return () => {
       offBroadcast?.();
       offJump?.();
+      offWidgetNavigate?.();
     };
   }, []);
 

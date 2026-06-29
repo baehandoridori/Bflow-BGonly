@@ -3516,19 +3516,51 @@ ipcMain.handle('widget:set-opacity', (_event, widgetId: string, opacity: number)
   }
 });
 
-ipcMain.handle('widget:resize', (_event, widgetId: string, width: number, height: number) => {
+ipcMain.handle('widget:resize', (_event, widgetId: string, width: number, height: number, x?: number, y?: number) => {
   const win = widgetWindows.get(widgetId);
   if (win && !win.isDestroyed()) {
     const bounds = win.getBounds();
-    win.setBounds({ x: bounds.x, y: bounds.y, width: Math.round(width), height: Math.round(height) }, true);
+    const w = Math.round(width);
+    const h = Math.round(height);
+    // x/y가 함께 주어지면 "정확한 위치+크기 복원" 경로다(모달 닫힘 시 모달 전 bounds 그대로 되돌리기).
+    // 이 좌표는 원래 화면 안에 있던 값이므로 클램프하지 않고 그대로 적용한다.
+    if (typeof x === 'number' && typeof y === 'number') {
+      win.setBounds({ x: Math.round(x), y: Math.round(y), width: w, height: h }, true);
+      return;
+    }
+    // 새 크기로 키운 뒤 창이 디스플레이 작업영역을 벗어나면 안쪽으로 밀어 넣는다.
+    // (오른쪽/아래 모서리 근처에서 모달 크기로 커지면 모달 하단/우측 컨트롤이 화면 밖으로 나가는 문제 방지)
+    const { workArea } = screen.getDisplayMatching({ x: bounds.x, y: bounds.y, width: w, height: h });
+    let cx = bounds.x;
+    let cy = bounds.y;
+    // 오른쪽/아래로 넘칠 때만 왼쪽/위로 이동 (작업영역보다 큰 창은 좌상단에 맞춘다).
+    if (cx + w > workArea.x + workArea.width) cx = workArea.x + workArea.width - w;
+    if (cy + h > workArea.y + workArea.height) cy = workArea.y + workArea.height - h;
+    // 좌상단이 작업영역 밖으로 밀려나지 않게 클램프.
+    if (cx < workArea.x) cx = workArea.x;
+    if (cy < workArea.y) cy = workArea.y;
+    win.setBounds({ x: cx, y: cy, width: w, height: h }, true);
+  }
+});
+
+// 위젯 팝업의 씬 행 → 본체 윈도우 포커스 + 해당 씬 상세 열기 (feedback:jump-to-scene 패턴 미러링)
+ipcMain.handle('widget:navigate-main', (_e, payload: {
+  sheetName: string; sceneId: string; sceneUuid: string;
+  episodeNumber?: number; partId?: string;
+}) => {
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.show();
+    mainWindow.focus();
+    mainWindow.webContents.send('widget:navigate-main', payload);
   }
 });
 
 ipcMain.handle('widget:get-size', (_event, widgetId: string) => {
   const win = widgetWindows.get(widgetId);
   if (win && !win.isDestroyed()) {
-    const [w, h] = win.getSize();
-    return { width: w, height: h };
+    // 크기뿐 아니라 위치(x/y)도 함께 반환 → 모달 닫힘 시 위치까지 정확히 복원할 수 있게.
+    const b = win.getBounds();
+    return { x: b.x, y: b.y, width: b.width, height: b.height };
   }
   return null;
 });

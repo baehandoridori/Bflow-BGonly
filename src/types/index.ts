@@ -881,8 +881,8 @@ export interface ElectronAPI {
   widgetOpenPopup?: (widgetId: string, title: string, extra?: Record<string, string>) => Promise<{ ok: boolean }>;
   widgetSetOpacity?: (widgetId: string, opacity: number) => Promise<void>;
   widgetClosePopup?: (widgetId: string) => Promise<void>;
-  widgetResize?: (widgetId: string, width: number, height: number) => Promise<void>;
-  widgetGetSize?: (widgetId: string) => Promise<{ width: number; height: number } | null>;
+  widgetResize?: (widgetId: string, width: number, height: number, x?: number, y?: number) => Promise<void>;
+  widgetGetSize?: (widgetId: string) => Promise<{ x: number; y: number; width: number; height: number } | null>;
   widgetCaptureBehind?: (widgetId: string) => Promise<string | null>;
   onWidgetFocusChange?: (callback: (focused: boolean) => void) => () => void;
   widgetSetAlwaysOnTop?: (widgetId: string, aot: boolean) => Promise<void>;
@@ -1050,6 +1050,18 @@ export interface ElectronAPI {
       sheetName: string; sceneId: string; sceneUuid: string;
       notificationId?: string;
       kind?: 'feedback' | 'assignment';
+    }) => void,
+  ) => () => void;
+  /** 위젯 팝업 → 본체 씬 상세 이동 — 팝업에서 본체로 점프 신호 전송 */
+  widgetNavigateMain?: (payload: {
+    sheetName: string; sceneId: string; sceneUuid: string;
+    episodeNumber?: number; partId?: string;
+  }) => Promise<void>;
+  /** 위젯 팝업 → 본체 씬 상세 이동 — 본체가 점프 신호 수신 */
+  onWidgetNavigateMain?: (
+    callback: (payload: {
+      sheetName: string; sceneId: string; sceneUuid: string;
+      episodeNumber?: number; partId?: string;
     }) => void,
   ) => () => void;
   supabaseBulkUpdateSceneStages: (updates: BulkStageUpdate[], updatedBy: string) => Promise<BulkUpdateResult[]>;
