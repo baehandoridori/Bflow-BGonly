@@ -12,6 +12,11 @@ import {
   type BflowStarNestSettings,
   type StarNestSettings,
 } from '@/utils/starNestSettings';
+import {
+  appendNavigationBackSnapshot,
+  createNavigationBackSnapshot,
+  type NavigationBackSnapshot,
+} from '@/utils/navigationBackStack';
 
 export type ViewMode = 'dashboard' | 'episode' | 'scenes' | 'assignee' | 'team' | 'calendar' | 'schedule' | 'vacation' | 'compositing' | 'compositing-revisions' | 'retake-hub' | 'character-board' | 'settings';
 // v1.30.0~ : 'compositing' = 새 컴포지팅 현황 대시보드 (CompositingDashboardView)
@@ -41,6 +46,12 @@ interface AppState {
   currentView: ViewMode;
   previousView: ViewMode | null;
   setView: (view: ViewMode) => void;
+
+  // 알림/링크/활동 피드 점프 뒤 돌아갈 화면 위치
+  navigationBackStack: NavigationBackSnapshot[];
+  pushNavigationBackTarget: () => void;
+  goBackNavigation: () => boolean;
+  clearNavigationBackStack: () => void;
 
   /**
    * 다른 뷰에서 씬 모달 자동 오픈을 요청할 때 사용 (코덱스 P1 fix, 2026-05-05).
@@ -227,6 +238,47 @@ export const useAppStore = create<AppState>((set) => ({
   currentView: 'dashboard',
   previousView: null,
   setView: (view) => set((s) => ({ currentView: view, previousView: s.currentView })),
+  navigationBackStack: [],
+  pushNavigationBackTarget: () => set((s) => {
+    const nextStack = appendNavigationBackSnapshot(
+      s.navigationBackStack,
+      createNavigationBackSnapshot(s),
+    );
+    if (nextStack === s.navigationBackStack) return {};
+    return { navigationBackStack: nextStack };
+  }),
+  goBackNavigation: () => {
+    let restored = false;
+    set((s) => {
+      const target = s.navigationBackStack[s.navigationBackStack.length - 1];
+      if (!target) return {};
+      restored = true;
+      return {
+        navigationBackStack: s.navigationBackStack.slice(0, -1),
+        currentView: target.currentView,
+        previousView: s.currentView,
+        selectedEpisode: target.selectedEpisode,
+        selectedPart: target.selectedPart,
+        selectedDepartment: target.selectedDepartment,
+        dashboardDeptFilter: target.dashboardDeptFilter,
+        episodeDashboardEp: target.episodeDashboardEp,
+        selectedAssignee: target.selectedAssignee,
+        searchQuery: target.searchQuery,
+        sortKey: target.sortKey,
+        sortDir: target.sortDir,
+        statusFilter: target.statusFilter,
+        sceneViewMode: target.sceneViewMode,
+        sceneGroupMode: target.sceneGroupMode,
+        settingsTab: target.settingsTab,
+        pendingSceneModalRequest: null,
+        highlightSceneId: null,
+        selectedSceneIds: new Set<string>(),
+        closeSceneModalSignal: s.closeSceneModalSignal + 1,
+      };
+    });
+    return restored;
+  },
+  clearNavigationBackStack: () => set({ navigationBackStack: [] }),
   pendingSceneModalRequest: null,
   setPendingSceneModalRequest: (req) => set({ pendingSceneModalRequest: req }),
 

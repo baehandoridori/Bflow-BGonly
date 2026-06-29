@@ -2096,6 +2096,7 @@ export function ScenesView() {
   const { setSelectedEpisode, setSelectedPart, setSelectedAssignee, setSearchQuery, setSelectedDepartment, setDashboardDeptFilter } = useAppStore();
   const { setSortKey, setSortDir, setStatusFilter, setSceneViewMode, setSceneGroupMode } = useAppStore();
   const { previousView, setView, highlightSceneId, setHighlightSceneId } = useAppStore();
+  const hasNavigationBackTarget = useAppStore((s) => s.navigationBackStack.length > 0);
   const { selectedSceneIds, toggleSelectedScene, setSelectedScenes, clearSelectedScenes } = useAppStore();
   // 일괄 액션 바를 콘텐츠 영역 정중앙(=사이드바 뺀 자리) 으로 보정. 사이드바 펼침/접힘에 동기.
   const sidebarExpanded = useAppStore((s) => s.sidebarExpanded);
@@ -5172,7 +5173,7 @@ export function ScenesView() {
     }
   };
 
-  const backLabel = previousView && previousView !== 'scenes' ? VIEW_LABELS[previousView] : null;
+  const backLabel = !hasNavigationBackTarget && previousView && previousView !== 'scenes' ? VIEW_LABELS[previousView] : null;
 
   // 트리뷰에서 에피소드+파트 동시 선택
   const handleTreeSelect = useCallback((epNum: number, partId: string | null) => {

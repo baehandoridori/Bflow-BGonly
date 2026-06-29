@@ -5,8 +5,8 @@
 // (이전 CustomEvent 패턴은 listener 등록 race 로 이벤트 손실 가능했음)
 
 import { ExternalLink } from 'lucide-react';
-import { useAppStore } from '@/stores/useAppStore';
 import { CompactIconLabel } from '@/components/common/CompactIconLabel';
+import { navigateToSceneView } from '@/utils/sceneNavigationAction';
 import { parseSceneKey } from './utils';
 
 interface Props {
@@ -24,23 +24,23 @@ export function SceneJumpButton({
   partId,
   sceneUuid,
 }: Props) {
-  const setView = useAppStore((s) => s.setView);
-  const setPendingSceneModalRequest = useAppStore((s) => s.setPendingSceneModalRequest);
-
   function handleJump(e: React.MouseEvent) {
     e.stopPropagation();
     const parsed = parseSceneKey(sceneKey);
     // ep 토큰은 보통 "EP01_A_BG" 같은 sheetName 인 경우가 많아 숫자만 파싱.
     const epNum = episodeNumber ?? (parseInt(parsed.ep.replace(/\D/g, ''), 10) || 0);
     // store 에 먼저 request 저장 → setView('scenes') → ScenesView 마운트 후 useEffect 가 처리.
-    setPendingSceneModalRequest({
+    navigateToSceneView({
       episodeNumber: epNum,
       partId: partId ?? parsed.part,
-      sceneUuid,
-      sceneName: parsed.sceneId,
-      initialTab: 'revisions',
+      modalRequest: {
+        episodeNumber: epNum,
+        partId: partId ?? parsed.part,
+        sceneUuid,
+        sceneName: parsed.sceneId,
+        initialTab: 'revisions',
+      },
     });
-    setView('scenes');
   }
 
   if (variant === 'link') {
