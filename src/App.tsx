@@ -2203,6 +2203,10 @@ export default function App() {
           episodeNumber: payload.episodeNumber,
           partId: payload.partId,
           initialTab: 'detail',
+          // 코덱스 5차 P2: 본체의 현재 부서 필터에 의존하지 않도록 'all' 로 강제.
+          // ScenesView 는 selectedDepartment === 'all' 일 때만 merged 씬에서 UUID 를 찾으므로,
+          // 본체가 BG 인데 팝업에서 ACT 씬을 누르면(또는 반대) 못 찾거나 엉뚱한 부서로 열리던 문제 방지.
+          forceDeptFilter: 'all',
         },
       });
     });
