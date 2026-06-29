@@ -3520,7 +3520,20 @@ ipcMain.handle('widget:resize', (_event, widgetId: string, width: number, height
   const win = widgetWindows.get(widgetId);
   if (win && !win.isDestroyed()) {
     const bounds = win.getBounds();
-    win.setBounds({ x: bounds.x, y: bounds.y, width: Math.round(width), height: Math.round(height) }, true);
+    const w = Math.round(width);
+    const h = Math.round(height);
+    // 새 크기로 키운 뒤 창이 디스플레이 작업영역을 벗어나면 안쪽으로 밀어 넣는다.
+    // (오른쪽/아래 모서리 근처에서 모달 크기로 커지면 모달 하단/우측 컨트롤이 화면 밖으로 나가는 문제 방지)
+    const { workArea } = screen.getDisplayMatching({ x: bounds.x, y: bounds.y, width: w, height: h });
+    let x = bounds.x;
+    let y = bounds.y;
+    // 오른쪽/아래로 넘칠 때만 왼쪽/위로 이동 (작업영역보다 큰 창은 좌상단에 맞춘다).
+    if (x + w > workArea.x + workArea.width) x = workArea.x + workArea.width - w;
+    if (y + h > workArea.y + workArea.height) y = workArea.y + workArea.height - h;
+    // 좌상단이 작업영역 밖으로 밀려나지 않게 클램프.
+    if (x < workArea.x) x = workArea.x;
+    if (y < workArea.y) y = workArea.y;
+    win.setBounds({ x, y, width: w, height: h }, true);
   }
 });
 

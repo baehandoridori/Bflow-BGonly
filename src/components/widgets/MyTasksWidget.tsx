@@ -387,6 +387,7 @@ const EditableSceneRow = forwardRef<HTMLDivElement, EditableSceneRowProps>(funct
           onOpenDetail(flat);
         }}
         onKeyDown={(e) => {
+          if ((e.target as HTMLElement).closest('button, a')) return;
           if (e.key === 'Enter' || e.key === ' ') {
             e.preventDefault();
             onOpenDetail(flat);
@@ -509,6 +510,7 @@ function PersonalTodoContent({
           onOpenDetail(todo);
         }}
         onKeyDown={(e) => {
+          if ((e.target as HTMLElement).closest('button, a')) return;
           if (e.key === 'Enter' || e.key === ' ') {
             e.preventDefault();
             onOpenDetail(todo);
