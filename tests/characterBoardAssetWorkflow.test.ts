@@ -14,6 +14,7 @@ const characterBoard = readFileSync('src/views/CharacterBoardView.tsx', 'utf8');
 const characterStore = readFileSync('src/stores/useCharacterBoardStore.ts', 'utf8');
 const episodeAssetBoard = readFileSync('src/views/EpisodeAssetBoard.tsx', 'utf8');
 const scenesView = readFileSync('src/views/ScenesView.tsx', 'utf8');
+const characterImageLightbox = readFileSync('src/components/characters/CharacterImageLightbox.tsx', 'utf8');
 const migration = readFileSync('DEVLOG/migrations/2026-06-29-character-board-asset-workflow.sql', 'utf8');
 
 test('character asset helpers derive parent folder and preserve existing character folder', () => {
@@ -118,6 +119,10 @@ test('character board is wired for image display, assignees, work links, and lig
   assert.ok(characterBoard.includes('useCharacterBoardStore.getState().characters.find'));
   assert.match(readFileSync('src/components/characters/CharacterImageFrame.tsx', 'utf8'), /translate\(\$\{normalized\.x\}%, \$\{normalized\.y\}%\)/);
   assert.match(readFileSync('src/components/characters/CharacterImageFitEditor.tsx', 'utf8'), /stopImmediatePropagation/);
+  assert.match(characterImageLightbox, /initialCostumeIdRef/);
+  assert.match(characterImageLightbox, /currentCostumeId/);
+  assert.match(characterImageLightbox, /findIndex\(\(entry\) => entry\.costumeId === currentCostumeId\)/);
+  assert.doesNotMatch(characterImageLightbox, /setIndex\(initialIndex\)/);
   assert.match(characterStore, /Promise<boolean>/);
   assert.match(characterStore, /return true;/);
   assert.match(characterStore, /return false;/);

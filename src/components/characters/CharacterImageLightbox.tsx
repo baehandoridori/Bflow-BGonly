@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { ChevronLeft, ChevronRight, Copy, Move, X } from 'lucide-react';
 import type { CharacterImageBackground, CharacterImageFit } from '@/types';
@@ -32,10 +32,26 @@ export function CharacterImageLightbox({
   }, [entries, initialCostumeId]);
   const [index, setIndex] = useState(initialIndex);
   const [fitEditorOpen, setFitEditorOpen] = useState(false);
+  const initialCostumeIdRef = useRef(initialCostumeId);
 
   useEffect(() => {
-    setIndex(initialIndex);
-  }, [initialIndex]);
+    setIndex((prev) => {
+      if (entries.length === 0) return 0;
+
+      if (initialCostumeIdRef.current !== initialCostumeId) {
+        initialCostumeIdRef.current = initialCostumeId;
+        return initialIndex;
+      }
+
+      const currentCostumeId = entries[prev]?.costumeId;
+      if (currentCostumeId) {
+        const currentIndex = entries.findIndex((entry) => entry.costumeId === currentCostumeId);
+        if (currentIndex >= 0) return currentIndex;
+      }
+
+      return Math.min(prev, entries.length - 1);
+    });
+  }, [entries, initialCostumeId, initialIndex]);
 
   const current = entries[index] ?? entries[0] ?? null;
   const go = (delta: number) => {
