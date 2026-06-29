@@ -71,7 +71,7 @@ export function CharacterImageFrame({
           draggable={false}
           className={cn('max-w-full max-h-full object-contain select-none will-change-transform', imgClassName)}
           style={{
-            transform: `translate(${normalized.x}px, ${normalized.y}px) scale(${sx}, ${sy})`,
+            transform: `translate(${normalized.x}%, ${normalized.y}%) scale(${sx}, ${sy})`,
             transformOrigin: 'center center',
           }}
         />

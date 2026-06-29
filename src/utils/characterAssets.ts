@@ -37,6 +37,10 @@ function clampScale(value: unknown, fallback: number): number {
   return Math.min(8, Math.max(0.25, finiteNumber(value, fallback)));
 }
 
+function clampOffsetPercent(value: unknown, fallback: number): number {
+  return Math.min(100, Math.max(-100, finiteNumber(value, fallback)));
+}
+
 export function normalizeCharacterImageFit(value: unknown): CharacterImageFit {
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
     return { ...DEFAULT_CHARACTER_IMAGE_FIT };
@@ -48,8 +52,8 @@ export function normalizeCharacterImageFit(value: unknown): CharacterImageFit {
     scale,
     scaleX: clampScale(record.scaleX, scale),
     scaleY: clampScale(record.scaleY, scale),
-    x: finiteNumber(record.x, DEFAULT_CHARACTER_IMAGE_FIT.x),
-    y: finiteNumber(record.y, DEFAULT_CHARACTER_IMAGE_FIT.y),
+    x: clampOffsetPercent(record.x, DEFAULT_CHARACTER_IMAGE_FIT.x),
+    y: clampOffsetPercent(record.y, DEFAULT_CHARACTER_IMAGE_FIT.y),
     lockAspect,
   };
 }

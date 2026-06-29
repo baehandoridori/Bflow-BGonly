@@ -40,12 +40,12 @@ test('character image fit defaults are stable and clamp unsafe values', () => {
     y: 0,
     lockAspect: true,
   });
-  assert.deepEqual(normalizeCharacterImageFit({ scale: -4, x: 'bad', y: 12, lockAspect: false }), {
+  assert.deepEqual(normalizeCharacterImageFit({ scale: -4, x: 'bad', y: 120, lockAspect: false }), {
     scale: 0.25,
     scaleX: 0.25,
     scaleY: 0.25,
     x: 0,
-    y: 12,
+    y: 100,
     lockAspect: false,
   });
 });
@@ -111,6 +111,8 @@ test('character board is wired for image display, assignees, work links, and lig
   assert.ok(characterBoard.includes("isPng ? 'image/png' : 'image/jpeg'"));
   assert.ok(characterBoard.includes('const saved = await updateCostumeField(targetCostume.id, { workFilePath: filePath });'));
   assert.ok(characterBoard.includes('if (!saved) return;'));
+  assert.match(readFileSync('src/components/characters/CharacterImageFrame.tsx', 'utf8'), /translate\(\$\{normalized\.x\}%, \$\{normalized\.y\}%\)/);
+  assert.match(readFileSync('src/components/characters/CharacterImageFitEditor.tsx', 'utf8'), /stopImmediatePropagation/);
   assert.match(characterStore, /Promise<boolean>/);
   assert.match(characterStore, /return true;/);
   assert.match(characterStore, /return false;/);

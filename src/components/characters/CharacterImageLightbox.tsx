@@ -46,13 +46,14 @@ export function CharacterImageLightbox({
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
+      if (fitEditorOpen) return;
       if (event.key === 'Escape') onClose();
       if (event.key === 'ArrowLeft') go(-1);
       if (event.key === 'ArrowRight') go(1);
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [entries.length, onClose]);
+  }, [entries.length, fitEditorOpen, onClose]);
 
   if (!current) return null;
 

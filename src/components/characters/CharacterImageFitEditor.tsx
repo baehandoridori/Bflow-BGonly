@@ -8,7 +8,7 @@ import {
 import { CharacterImageFrame } from './CharacterImageFrame';
 
 function clampMove(value: number): number {
-  return Math.min(220, Math.max(-220, value));
+  return Math.min(100, Math.max(-100, value));
 }
 
 function clampScale(value: number): number {
@@ -31,7 +31,8 @@ export function CharacterImageFitEditor({
   onClose: () => void;
 }) {
   const [draft, setDraft] = useState<CharacterImageFit>(() => normalizeCharacterImageFit(fit));
-  const dragRef = useRef<{ pointerId: number; startX: number; startY: number; baseX: number; baseY: number } | null>(null);
+  const frameRef = useRef<HTMLDivElement>(null);
+  const dragRef = useRef<{ pointerId: number; startX: number; startY: number; baseX: number; baseY: number; width: number; height: number } | null>(null);
 
   useEffect(() => {
     setDraft(normalizeCharacterImageFit(fit));
@@ -39,10 +40,13 @@ export function CharacterImageFitEditor({
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') onClose();
+      if (event.key !== 'Escape') return;
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      onClose();
     };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
+    window.addEventListener('keydown', onKey, { capture: true });
+    return () => window.removeEventListener('keydown', onKey, { capture: true });
   }, [onClose]);
 
   const setScale = (value: number) => {
@@ -59,12 +63,15 @@ export function CharacterImageFitEditor({
 
   const onPointerDown = (event: ReactPointerEvent<HTMLDivElement>) => {
     event.currentTarget.setPointerCapture(event.pointerId);
+    const rect = frameRef.current?.getBoundingClientRect();
     dragRef.current = {
       pointerId: event.pointerId,
       startX: event.clientX,
       startY: event.clientY,
       baseX: draft.x,
       baseY: draft.y,
+      width: Math.max(1, rect?.width ?? 1),
+      height: Math.max(1, rect?.height ?? 1),
     };
   };
 
@@ -73,8 +80,8 @@ export function CharacterImageFitEditor({
     if (!drag || drag.pointerId !== event.pointerId) return;
     setDraft((prev) => ({
       ...prev,
-      x: clampMove(drag.baseX + event.clientX - drag.startX),
-      y: clampMove(drag.baseY + event.clientY - drag.startY),
+      x: clampMove(drag.baseX + ((event.clientX - drag.startX) / drag.width) * 100),
+      y: clampMove(drag.baseY + ((event.clientY - drag.startY) / drag.height) * 100),
     }));
   };
 
@@ -100,6 +107,7 @@ export function CharacterImageFitEditor({
 
         <div className="grid gap-4 p-4 md:grid-cols-[minmax(260px,1fr)_260px]">
           <div
+            ref={frameRef}
             className="relative aspect-[3/4] min-h-[360px] overflow-hidden rounded-xl border border-bg-border cursor-grab active:cursor-grabbing"
             onPointerDown={onPointerDown}
             onPointerMove={onPointerMove}
@@ -179,22 +187,22 @@ export function CharacterImageFitEditor({
             )}
 
             <label className="flex flex-col gap-1.5 text-xs text-text-secondary">
-              가로 이동 {Math.round(draft.x)}px
+              가로 이동 {Math.round(draft.x)}%
               <input
                 type="range"
-                min={-220}
-                max={220}
+                min={-100}
+                max={100}
                 step={1}
                 value={draft.x}
                 onChange={(e) => setDraft((prev) => ({ ...prev, x: clampMove(Number(e.target.value)) }))}
               />
             </label>
             <label className="flex flex-col gap-1.5 text-xs text-text-secondary">
-              세로 이동 {Math.round(draft.y)}px
+              세로 이동 {Math.round(draft.y)}%
               <input
                 type="range"
-                min={-220}
-                max={220}
+                min={-100}
+                max={100}
                 step={1}
                 value={draft.y}
                 onChange={(e) => setDraft((prev) => ({ ...prev, y: clampMove(Number(e.target.value)) }))}
