@@ -139,13 +139,17 @@ function findBySceneKey(episodes: Episode[], sceneKey: string | undefined): Noti
   const parsed = parseSceneKey(sceneKey);
   if (!parsed) return null;
   const normalizedScene = parsed.sceneName.toLowerCase();
+  const numericSceneNo = Number(parsed.sceneName);
   const normalizedPart = parsed.partId.toLowerCase();
 
   for (const ep of episodes) {
     if (ep.episodeNumber !== parsed.episodeNumber) continue;
     for (const part of ep.parts) {
       if (part.partId.trim().toLowerCase() !== normalizedPart) continue;
-      const scene = part.scenes.find((candidate) => candidate.sceneId.trim().toLowerCase() === normalizedScene);
+      const scene = part.scenes.find((candidate) => {
+        if (Number.isFinite(numericSceneNo) && Number(candidate.no) === numericSceneNo) return true;
+        return candidate.sceneId.trim().toLowerCase() === normalizedScene;
+      });
       if (scene) return buildTarget(ep, part, scene);
     }
   }

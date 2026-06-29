@@ -116,6 +116,25 @@ test('mention notification resolves legacy EP:part:sceneName metadata without re
   );
 });
 
+test('revision scene-key notifications resolve normalized numeric scene numbers by scene order', () => {
+  assert.deepEqual(
+    resolveNotificationSceneTarget(
+      {
+        sceneName: 'EP02:B:18',
+        revisionId: 'revision-1',
+      },
+      episodes,
+    ),
+    {
+      episodeNumber: 2,
+      partId: 'B',
+      sheetName: 'EP02_B_BG',
+      sceneUuid: 'scene-bg-uuid',
+      sceneName: 'b018',
+    },
+  );
+});
+
 test('feedback catch-up resolves by sheet name when scene UUID is missing and scene names are reused', () => {
   assert.deepEqual(
     resolveNotificationSceneTarget(

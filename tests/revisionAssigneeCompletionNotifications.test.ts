@@ -57,7 +57,11 @@ test('retake completion notifications use a selected-recipient broadcast path', 
   assert.match(app, /isGeneralRevisionSceneKey/);
   assert.match(app, /const sceneKey = p\.sceneKey;/);
   assert.match(app, /const isGeneralRetakeCompletion = !sceneKey \|\| isGeneralRevisionSceneKey\(sceneKey\);/);
+  assert.match(app, /const sceneTarget = !isGeneralRetakeCompletion/);
+  assert.match(app, /resolveNotificationSceneTarget\(\{ sceneName: sceneKey \}, ds\.episodes\)/);
   assert.match(app, /metadata: !isGeneralRetakeCompletion/);
+  assert.match(app, /sceneId:\s*sceneTarget\?\.sceneUuid/);
+  assert.match(app, /sceneName:\s*sceneTarget\?\.sceneName \?\? sceneKey/);
   assert.match(app, /revisionAction:\s*'assignee_done'/);
   assert.match(app, /retakeHubSetId:\s*p\.setId \?\? undefined/);
   assert.match(store, /dispatchRetakeAssigneeCompletionNotification/);

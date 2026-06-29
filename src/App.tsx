@@ -65,6 +65,7 @@ import { useSceneWorkLinkStore } from '@/stores/useSceneWorkLinkStore';
 import { dispatchNotification, type NotificationSettings } from '@/utils/notificationHelper';
 import { useRevisionSetStore } from '@/stores/useRevisionSetStore';
 import { navigateNotificationToScene } from '@/utils/notificationSceneAction';
+import { resolveNotificationSceneTarget } from '@/utils/notificationSceneNavigation';
 import {
   beginCatchupRun,
   fetchCatchupPages,
@@ -1866,8 +1867,11 @@ export default function App() {
         const ds = useDataStore.getState();
         const sceneKey = p.sceneKey;
         const isGeneralRetakeCompletion = !sceneKey || isGeneralRevisionSceneKey(sceneKey);
+        const sceneTarget = !isGeneralRetakeCompletion
+          ? resolveNotificationSceneTarget({ sceneName: sceneKey }, ds.episodes)
+          : null;
         const sceneLabel = !isGeneralRetakeCompletion
-          ? (buildNotificationSceneDisplayLabelFromSceneKey(
+          ? (sceneTarget?.sceneName || buildNotificationSceneDisplayLabelFromSceneKey(
             sceneKey,
             ds.episodeTitles,
             ds.episodes,
@@ -1886,7 +1890,10 @@ export default function App() {
             : `${p.senderName || '담당자'}님이 ${revisionLabel} 담당을 완료했습니다.`,
           metadata: !isGeneralRetakeCompletion
             ? {
-                sceneName: sceneKey,
+                sceneId: sceneTarget?.sceneUuid,
+                sceneName: sceneTarget?.sceneName ?? sceneKey,
+                sheetName: sceneTarget?.sheetName,
+                partId: sceneTarget?.partId,
                 revisionId: p.revisionId,
                 revisionAction: 'assignee_done',
               } as Record<string, unknown>
