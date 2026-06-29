@@ -91,6 +91,7 @@ export interface SupabaseEpisodeData {
   episodeNumber: number;
   title: string;
   memo: string;
+  reelFilePath: string | null;
   parts: {
     partId: string;
     department: string;
@@ -289,7 +290,7 @@ export async function readAllEpisodes(): Promise<SupabaseEpisodeData[]> {
   // 1) 활성 에피소드
   const { data: episodes, error: epErr } = await supabase
     .from('episodes')
-    .select('id, episode_number, title, memo')
+    .select('id, episode_number, title, memo, reel_file_path')
     .eq('status', 'active')
     .order('episode_number');
   throwIfError(epErr);
@@ -386,6 +387,7 @@ export async function readAllEpisodes(): Promise<SupabaseEpisodeData[]> {
       episodeNumber: ep.episode_number,
       title: ep.title || '',
       memo: ep.memo || '',
+      reelFilePath: (ep as { reel_file_path?: string | null }).reel_file_path ?? null,
       parts: epParts.map((p) => {
         const partScenes = scenesByPart.get(p.id) || [];
         return {
@@ -3754,6 +3756,7 @@ export interface CharacterRow {
   name: string;
   status: 'active' | 'archived';
   memo: string | null;
+  work_folder_path: string | null;
   sort_order: number;
   created_at: string;
   updated_at: string;
@@ -3768,8 +3771,13 @@ export interface CharacterCostumeRow {
   design_stage: CostumeDesignStageValue;
   rigging_stage: CostumeRiggingStageValue;
   featured_image_url: string | null;
+  work_file_path: string | null;
+  image_background: 'transparent' | 'black' | 'white' | 'checker';
+  image_fit: { scale: number; scaleX?: number; scaleY?: number; x: number; y: number; lockAspect: boolean };
   structure_tags: string[];
   asset_tags: string[];
+  design_assignee: string | null;
+  rigging_assignee: string | null;
   assignee: string | null;
   memo: string | null;
   sort_order: number;
@@ -3896,6 +3904,19 @@ export async function updateCharacter(
     .single();
   if (error) throw error;
   return data as CharacterRow;
+}
+
+/** 에피소드 릴 파일 경로 수정. 실제 파일은 건드리지 않고 경로만 저장한다. */
+export async function updateEpisodeReelPath(
+  episodeNumber: number,
+  reelFilePath: string | null,
+): Promise<void> {
+  const { error } = await supabase
+    .from('episodes')
+    .update({ reel_file_path: reelFilePath, updated_at: new Date().toISOString() })
+    .eq('episode_number', episodeNumber);
+  if (error) throw error;
+  broadcastDataChange('episodes', 'UPDATE');
 }
 
 /** public URL 들에서 scene-images 스토리지 경로를 뽑아 일괄 삭제. legacy/비-Supabase URL 은 무시. 실패해도 삭제 흐름은 진행. */

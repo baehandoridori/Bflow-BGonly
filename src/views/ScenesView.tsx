@@ -7,7 +7,7 @@ import type { SortKey, StatusFilter, ViewMode } from '@/stores/useAppStore';
 import { STAGES, DEPARTMENTS, DEPARTMENT_CONFIGS, SCENE_PHASE_LABELS, SCENE_PHASES, SCENE_PHASE_LABELS_SHORT, SCENE_PHASE_COLORS } from '@/types';
 import type { Scene, Stage, Department, ScenesDeptFilter, MergedScene, ScenePhaseState, SceneAssigneeProgressMap, SceneWorkLink } from '@/types';
 import { FeedbackRequestModal } from '@/components/scenes/FeedbackRequestModal';
-import { updateScenePhaseInSupabase, dispatchActingFeedbackNotification } from '@/services/supabaseService';
+import { updateEpisodeReelPath, updateScenePhaseInSupabase, dispatchActingFeedbackNotification } from '@/services/supabaseService';
 import { sceneProgress, isFullyDone, progressGradient } from '@/utils/calcStats';
 import { normalizeSceneIdKey } from '@/utils/sceneIdKey';
 import { findPartById, getCanonicalPartIds, partIdMatches } from '@/utils/partId';
@@ -60,7 +60,7 @@ import { useUnifiedScenes } from '@/hooks/useUnifiedScenes';
 import { resolveReferenceMergedScene } from '@/utils/sceneReference';
 import { navigateToHashTarget } from '@/utils/hashNavigation';
 import type { HashTarget } from '@/utils/hashEntity';
-import { openWorkPath } from '@/services/sceneWorkLinkService';
+import { chooseWorkFile, openWorkPath } from '@/services/sceneWorkLinkService';
 import { loadPreferences, savePreferences, type UserPreferences } from '@/services/settingsService';
 import {
   persistLengthChangeAtomic,
@@ -119,6 +119,54 @@ function phaseFromStage(stage: Stage): ScenePhaseState {
   if (stage === 'done') return 'work';
   if (stage === 'review') return 'feedback';
   return 'done';
+}
+
+function EpisodeReelButton({ episodeNumber }: { episodeNumber: number | null }) {
+  const episodes = useDataStore((s) => s.episodes);
+  const setEpisodes = useDataStore((s) => s.setEpisodes);
+  const episode = episodeNumber == null
+    ? null
+    : episodes.find((item) => item.episodeNumber === episodeNumber) ?? null;
+
+  const handleClick = async () => {
+    if (!episode) return;
+    if (episode.reelFilePath) {
+      const res = await openWorkPath(episode.reelFilePath);
+      if (!res.ok) sonnerToast.error('릴 파일 열기에 실패했어요');
+      return;
+    }
+    const filePath = await chooseWorkFile();
+    if (!filePath) return;
+    const prev = useDataStore.getState().episodes;
+    setEpisodes(prev.map((item) => item.episodeNumber === episode.episodeNumber ? { ...item, reelFilePath: filePath } : item));
+    try {
+      await updateEpisodeReelPath(episode.episodeNumber, filePath);
+      sonnerToast.success('릴 파일 경로를 등록했어요');
+    } catch (err) {
+      console.error('[scenes] 릴 파일 경로 저장 실패:', err);
+      setEpisodes(prev);
+      sonnerToast.error('릴 파일 경로 저장에 실패했어요');
+    }
+  };
+
+  if (!episode) return null;
+
+  return (
+    <button
+      type="button"
+      onClick={handleClick}
+      title={episode.reelFilePath ?? '릴 파일 경로 등록'}
+      className={cn(
+        'flex items-center gap-1.5 px-3 py-2 rounded-lg border text-sm font-medium transition-colors',
+        episode.reelFilePath
+          ? 'border-[#00B89455] bg-[#00B8941a] text-[#00B894] hover:bg-[#00B89426]'
+          : 'border-bg-border text-text-secondary hover:text-text-primary hover:border-text-secondary/50',
+      )}
+    >
+      <Film size={15} />
+      <span>릴 보기</span>
+    </button>
+  );
 }
 
 function parseAssigneeNames(assignee: string | null | undefined): string[] {
@@ -5483,6 +5531,8 @@ export function ScenesView() {
               </span>
             </>
           )}
+
+          <EpisodeReelButton episodeNumber={selectedEpisode ?? currentEp?.episodeNumber ?? null} />
 
           <div className="ml-auto flex items-center">
             <button

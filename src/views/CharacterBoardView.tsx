@@ -10,26 +10,37 @@
  * 접근 권한은 사이드바에서 게이팅 (useCharacterBoardAccess).
  */
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react';
 import { toast } from 'sonner';
-import { Plus, X, Image as ImageIcon, Trash2, Pencil, Search, User, Check, Maximize2, Upload, MessageSquare } from 'lucide-react';
+import { Plus, X, Image as ImageIcon, Trash2, Pencil, Search, User, Check, Upload, MessageSquare, FolderOpen, FileText, Copy } from 'lucide-react';
 import { useCharacterBoardStore } from '@/stores/useCharacterBoardStore';
 import { useDataStore } from '@/stores/useDataStore';
+import { useAuthStore } from '@/stores/useAuthStore';
 import {
   COSTUME_DESIGN_STAGES,
   COSTUME_RIGGING_STAGES,
   type Character,
   type CharacterCostume,
+  type CharacterImageBackground,
+  type CharacterImageFit,
   type CostumeDesignStage,
   type CostumeRiggingStage,
 } from '@/types';
-import { uploadCharacterImage } from '@/services/supabaseService';
+import { updateEpisodeReelPath, uploadCharacterImage } from '@/services/supabaseService';
 import { deleteImage } from '@/services/storageService';
 import { resizeBlob } from '@/utils/imageUtils';
 import { cn } from '@/utils/cn';
 import { EpisodeAssetBoard } from './EpisodeAssetBoard';
 import { tagColor } from '@/utils/tagColor';
 import { CommentPanelResizable } from '@/components/scenes/CommentPanelResizable';
+import { CharacterImageFrame } from '@/components/characters/CharacterImageFrame';
+import { CharacterImageContextMenu } from '@/components/characters/CharacterImageContextMenu';
+import { CharacterImageFitEditor } from '@/components/characters/CharacterImageFitEditor';
+import { CharacterImageLightbox, type CharacterImageLightboxEntry } from '@/components/characters/CharacterImageLightbox';
+import { chooseWorkFile, chooseWorkFolder, openWorkPath } from '@/services/sceneWorkLinkService';
+import { copyImageToClipboard } from '@/utils/imageActions';
+import { getResolvedCharacterFolderAfterFilePick } from '@/utils/characterAssets';
+import { getUserColor } from '@/components/common/AssigneeSelect';
 
 type BoardTab = 'board' | 'episode-assets';
 
@@ -80,6 +91,169 @@ function TagPill({
       {tag}
     </button>
   );
+}
+
+function parseAssigneeNames(value: string | null | undefined): string[] {
+  return (value ?? '')
+    .split(',')
+    .map((name) => name.trim())
+    .filter(Boolean);
+}
+
+function formatAssigneeNames(names: string[]): string | null {
+  const unique = Array.from(new Set(names.map((name) => name.trim()).filter(Boolean)));
+  return unique.length > 0 ? unique.join(', ') : null;
+}
+
+function AssigneeMultiSelect({
+  label,
+  value,
+  onChange,
+}: {
+  label: string;
+  value: string | null;
+  onChange: (value: string | null) => void;
+}) {
+  const users = useAuthStore((s) => s.users);
+  const [draftName, setDraftName] = useState('');
+  const selected = parseAssigneeNames(value);
+  const selectedSet = new Set(selected);
+  const userNameSet = new Set(users.map((user) => user.name));
+  const externalSelected = selected.filter((name) => !userNameSet.has(name));
+  const toggle = (name: string) => {
+    const next = selectedSet.has(name)
+      ? selected.filter((item) => item !== name)
+      : [...selected, name];
+    onChange(formatAssigneeNames(next));
+  };
+  const addDraftName = () => {
+    const name = draftName.trim();
+    if (!name) return;
+    if (!selectedSet.has(name)) onChange(formatAssigneeNames([...selected, name]));
+    setDraftName('');
+  };
+
+  return (
+    <div className="flex flex-col gap-2 min-w-[220px]">
+      <div className="flex items-center justify-between gap-2">
+        <span className="text-xs text-text-secondary">{label}</span>
+        {selected.length > 0 && (
+          <button
+            type="button"
+            onClick={() => onChange(null)}
+            className="text-[11px] text-text-secondary/70 hover:text-text-primary"
+          >
+            해제
+          </button>
+        )}
+      </div>
+      <div className="flex flex-wrap gap-1.5 rounded-lg border border-bg-border bg-bg-border/10 p-2">
+        {users.length === 0 && externalSelected.length === 0 ? (
+          <span className="text-xs text-text-secondary/60">사용자 목록 없음</span>
+        ) : (
+          <>
+            {externalSelected.map((name) => {
+              const color = getUserColor(name);
+              return (
+                <button
+                  key={`external-${name}`}
+                  type="button"
+                  aria-pressed="true"
+                  title="사용자 목록에 없는 담당자"
+                  onClick={() => toggle(name)}
+                  className="px-2 py-1 rounded-full text-xs border border-dashed flex items-center gap-1.5 transition-colors"
+                  style={{ background: `${color}20`, borderColor: `${color}99`, color }}
+                >
+                  <span className="w-1.5 h-1.5 rounded-full" style={{ background: color }} />
+                  {name}
+                </button>
+              );
+            })}
+            {users.map((user) => {
+              const on = selectedSet.has(user.name);
+              const color = getUserColor(user.name);
+              return (
+                <button
+                  key={user.id}
+                  type="button"
+                  aria-pressed={on}
+                  onClick={() => toggle(user.name)}
+                  className="px-2 py-1 rounded-full text-xs border flex items-center gap-1.5 transition-colors"
+                  style={on
+                    ? { background: `${color}26`, borderColor: `${color}99`, color }
+                    : { background: 'transparent', borderColor: 'rgb(var(--color-bg-border))', color: 'rgb(var(--color-text-secondary))' }}
+                >
+                  <span className="w-1.5 h-1.5 rounded-full" style={{ background: color, opacity: on ? 1 : 0.5 }} />
+                  {user.name}
+                </button>
+              );
+            })}
+          </>
+        )}
+      </div>
+      <div className="flex gap-1.5">
+        <input
+          type="text"
+          value={draftName}
+          onChange={(event) => setDraftName(event.target.value)}
+          onKeyDown={(event) => {
+            if (event.key === 'Enter') {
+              event.preventDefault();
+              addDraftName();
+            }
+          }}
+          placeholder="이름 직접 추가"
+          className="min-w-0 flex-1 rounded-md border border-bg-border bg-bg-border/10 px-2 py-1 text-xs text-text-primary placeholder:text-text-secondary/50 outline-none focus:border-accent/70"
+        />
+        <button
+          type="button"
+          onClick={addDraftName}
+          disabled={!draftName.trim()}
+          className="rounded-md border border-bg-border px-2 text-text-secondary hover:text-text-primary disabled:opacity-40"
+          aria-label={`${label} 직접 추가`}
+        >
+          <Plus size={13} />
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function displayPathName(path: string | null | undefined): string {
+  const value = (path ?? '').trim();
+  if (!value) return '미등록';
+  const normalized = value.replace(/[\\/]+$/, '');
+  const index = Math.max(normalized.lastIndexOf('\\'), normalized.lastIndexOf('/'));
+  return index >= 0 ? normalized.slice(index + 1) : normalized;
+}
+
+async function openStoredPath(targetPath: string | null | undefined, label: string): Promise<void> {
+  const path = (targetPath ?? '').trim();
+  if (!path) {
+    toast.error(`${label} 경로가 등록되지 않았어요`);
+    return;
+  }
+  const res = await openWorkPath(path);
+  if (!res.ok) toast.error(`${label} 열기에 실패했어요`);
+}
+
+async function copyCharacterImage(url: string | null | undefined): Promise<void> {
+  if (!url) {
+    toast.error('복사할 이미지가 없어요');
+    return;
+  }
+  await copyImageToClipboard(url);
+}
+
+async function resolveFolderAfterFilePick(currentFolderPath: string | null, filePath: string): Promise<string> {
+  if (currentFolderPath?.trim()) return currentFolderPath;
+  try {
+    const dirname = await window.electronAPI?.pathDirname?.(filePath);
+    if (dirname) return dirname;
+  } catch {
+    // renderer fallback below
+  }
+  return getResolvedCharacterFolderAfterFilePick(currentFolderPath, filePath);
 }
 
 // ─── 단계 레일 ──────────────────────────────────
@@ -162,12 +336,14 @@ function CharacterCard({
   character,
   costumes,
   onOpen,
+  onContextMenu,
 }: {
   character: Character;
   costumes: CharacterCostume[];
   onOpen: () => void;
+  onContextMenu: (event: ReactMouseEvent<HTMLButtonElement>) => void;
 }) {
-  const featured = costumes.find((c) => c.featuredImageUrl)?.featuredImageUrl ?? null;
+  const featured = costumes.find((c) => c.featuredImageUrl) ?? null;
   const designDone = costumes.filter((c) => c.designStage === 'done').length;
   const riggingDone = costumes.filter((c) => c.riggingStage === 'done').length;
 
@@ -175,11 +351,18 @@ function CharacterCard({
     <button
       type="button"
       onClick={onOpen}
+      onContextMenu={onContextMenu}
       className="text-left bg-bg-card border border-bg-border rounded-xl overflow-hidden hover:border-accent/50 transition-colors duration-200 flex flex-col cursor-pointer"
     >
       <div className="aspect-[4/3] bg-bg-border/30 flex items-center justify-center overflow-hidden">
         {featured ? (
-          <img src={featured} alt={character.name} className="w-full h-full object-cover" />
+          <CharacterImageFrame
+            url={featured.featuredImageUrl}
+            alt={character.name}
+            background={featured.imageBackground}
+            fit={featured.imageFit}
+            className="w-full h-full"
+          />
         ) : (
           <ImageIcon size={28} className="text-text-secondary/40" />
         )}
@@ -289,30 +472,36 @@ function ImageLightbox({ url, alt, onClose }: { url: string; alt: string; onClos
 function FeaturedImageSlot({
   character,
   costume,
-  shownUrl,
+  shownCostume,
   onView,
+  onPickFolder,
+  onPickFile,
 }: {
   character: Character;
   costume: CharacterCostume | null;
-  shownUrl: string | null;
-  onView: (url: string) => void;
+  shownCostume: CharacterCostume | null;
+  onView: (costumeId: string) => void;
+  onPickFolder: () => void;
+  onPickFile: () => void;
 }) {
   const updateCostumeField = useCharacterBoardStore((s) => s.updateCostumeField);
   const fileRef = useRef<HTMLInputElement>(null);
   const [uploading, setUploading] = useState(false);
+  const [contextMenu, setContextMenu] = useState<{ x: number; y: number } | null>(null);
+  const [fitEditorOpen, setFitEditorOpen] = useState(false);
 
   const handleUpload = useCallback(async (file: File) => {
     if (!costume) { toast.error('먼저 디자인(복장)을 추가해주세요'); return; }
     setUploading(true);
     try {
-      const base64 = await resizeBlob(file, 800, 0.8);
+      const isPng = file.type === 'image/png' || file.name.toLowerCase().endsWith('.png');
+      const base64 = await resizeBlob(file, 800, isPng ? 0.92 : 0.8, isPng ? 'image/png' : 'image/jpeg');
       const res = await uploadCharacterImage(character.id, costume.id, base64);
       if (!res.ok || !res.url) throw new Error(res.error ?? '업로드 실패');
       // 이전 대표 이미지 정리는 서버(updateCharacterCostume)가 DB 업데이트 성공 후 처리 — 롤백 시 깨진 URL 방지.
-      await updateCostumeField(costume.id, { featuredImageUrl: res.url });
+      const saved = await updateCostumeField(costume.id, { featuredImageUrl: res.url });
       // 업로드는 됐는데 DB 반영이 실패(롤백)하면 방금 올린 파일이 고아가 됨 → 정리.
-      const saved = useCharacterBoardStore.getState().costumes.find((c) => c.id === costume.id)?.featuredImageUrl;
-      if (saved !== res.url) {
+      if (!saved) {
         deleteImage(res.url).catch((e) => console.warn('[character-board] 실패한 업로드 정리:', e));
       }
     } catch (err) {
@@ -323,33 +512,27 @@ function FeaturedImageSlot({
     }
   }, [character.id, costume, updateCostumeField]);
 
+  const shownUrl = shownCostume?.featuredImageUrl ?? null;
+  const shownBackground = shownCostume?.imageBackground ?? 'black';
+  const shownFit = shownCostume?.imageFit;
+
   return (
     <div className="w-[240px] shrink-0 flex flex-col gap-2">
-      <div
-        role={shownUrl ? 'button' : undefined}
-        tabIndex={shownUrl ? 0 : undefined}
-        aria-label={shownUrl ? '대표 이미지 크게 보기' : undefined}
+      <CharacterImageFrame
+        url={shownUrl}
+        alt={shownCostume?.name ?? character.name}
+        background={shownBackground}
+        fit={shownFit}
         className={cn(
-          'group relative aspect-[3/4] w-full rounded-xl bg-bg-border/30 border border-bg-border overflow-hidden flex items-center justify-center',
+          'group aspect-[3/4] w-full rounded-xl border border-bg-border',
           shownUrl ? 'cursor-zoom-in hover:border-accent/50 transition-colors' : '',
         )}
-        onClick={() => { if (shownUrl) onView(shownUrl); }}
-        onKeyDown={(e) => { if (shownUrl && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); onView(shownUrl); } }}
-      >
-        {shownUrl ? (
-          <>
-            <img src={shownUrl} alt={costume?.name ?? character.name} className="w-full h-full object-contain" />
-            <div className="absolute inset-0 bg-black/0 group-hover:bg-black/20 transition-colors flex items-center justify-center opacity-0 group-hover:opacity-100">
-              <Maximize2 size={20} className="text-white/90" />
-            </div>
-          </>
-        ) : (
-          <div className="flex flex-col items-center gap-1.5 text-text-secondary/50">
-            <ImageIcon size={28} />
-            <span className="text-[11px]">이미지 없음</span>
-          </div>
-        )}
-      </div>
+        onClick={shownUrl && shownCostume ? () => onView(shownCostume.id) : undefined}
+        onContextMenu={(event) => {
+          event.preventDefault();
+          setContextMenu({ x: event.clientX, y: event.clientY });
+        }}
+      />
       <button
         type="button"
         onClick={() => fileRef.current?.click()}
@@ -357,8 +540,34 @@ function FeaturedImageSlot({
         className="flex items-center justify-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-bg-border text-xs text-text-secondary hover:text-text-primary hover:border-text-secondary/50 transition-colors cursor-pointer disabled:opacity-50"
       >
         <Upload size={13} />
-        {uploading ? '업로드 중…' : shownUrl ? '이미지 바꾸기' : '이미지 추가'}
+        {uploading ? '업로드 중...' : shownUrl ? '이미지 바꾸기' : '이미지 추가'}
       </button>
+      <div className="grid grid-cols-3 gap-1.5">
+        <button
+          type="button"
+          onClick={character.workFolderPath ? () => openStoredPath(character.workFolderPath, '작업 폴더') : onPickFolder}
+          className="flex items-center justify-center gap-1 rounded-md border border-bg-border px-1.5 py-1 text-[11px] text-text-secondary hover:text-text-primary"
+          title={character.workFolderPath ?? '작업 폴더 등록'}
+        >
+          <FolderOpen size={12} /> 작업 폴더
+        </button>
+        <button
+          type="button"
+          onClick={shownCostume?.workFilePath ? () => openStoredPath(shownCostume.workFilePath, '작업 파일') : onPickFile}
+          className="flex items-center justify-center gap-1 rounded-md border border-bg-border px-1.5 py-1 text-[11px] text-text-secondary hover:text-text-primary"
+          title={shownCostume?.workFilePath ?? '작업 파일 등록'}
+        >
+          <FileText size={12} /> 작업 파일
+        </button>
+        <button
+          type="button"
+          disabled={!shownUrl}
+          onClick={() => copyCharacterImage(shownUrl)}
+          className="flex items-center justify-center gap-1 rounded-md border border-bg-border px-1.5 py-1 text-[11px] text-text-secondary hover:text-text-primary disabled:opacity-40"
+        >
+          <Copy size={12} /> 이미지 복사
+        </button>
+      </div>
       <input
         ref={fileRef}
         type="file"
@@ -366,6 +575,34 @@ function FeaturedImageSlot({
         className="hidden"
         onChange={(e) => { const f = e.target.files?.[0]; if (f) handleUpload(f); e.target.value = ''; }}
       />
+      {contextMenu && (
+        <CharacterImageContextMenu
+          x={contextMenu.x}
+          y={contextMenu.y}
+          background={shownBackground}
+          hasImage={!!shownUrl}
+          hasFolder={!!character.workFolderPath}
+          hasFile={!!shownCostume?.workFilePath}
+          onClose={() => setContextMenu(null)}
+          onBackground={(background: CharacterImageBackground) => {
+            if (shownCostume) void updateCostumeField(shownCostume.id, { imageBackground: background });
+          }}
+          onEditFit={() => setFitEditorOpen(true)}
+          onCopyImage={() => copyCharacterImage(shownUrl)}
+          onOpenFolder={() => openStoredPath(character.workFolderPath, '작업 폴더')}
+          onOpenFile={() => openStoredPath(shownCostume?.workFilePath, '작업 파일')}
+        />
+      )}
+      {fitEditorOpen && shownUrl && shownCostume && (
+        <CharacterImageFitEditor
+          url={shownUrl}
+          alt={shownCostume.name}
+          background={shownBackground}
+          fit={shownCostume.imageFit}
+          onCommit={(fit: CharacterImageFit) => updateCostumeField(shownCostume.id, { imageFit: fit })}
+          onClose={() => setFitEditorOpen(false)}
+        />
+      )}
     </div>
   );
 }
@@ -385,25 +622,6 @@ function CostumeMemoInput({ value, onCommit }: { value: string; onCommit: (next:
       aria-label="디자인 메모"
       rows={3}
       className="w-full bg-bg-border/20 border border-bg-border rounded-lg px-2.5 py-2 text-xs text-text-primary outline-none focus:border-accent/50 resize-none leading-relaxed"
-    />
-  );
-}
-
-/** 담당자 — 키 입력마다 저장 말고 blur/Enter 때 한 번만(동시 쓰기 경합·이름 잘림 방지). */
-function CostumeAssigneeInput({ value, onCommit }: { value: string; onCommit: (next: string) => void }) {
-  const [draft, setDraft] = useState(value);
-  const focused = useRef(false);
-  useEffect(() => { if (!focused.current) setDraft(value); }, [value]);
-  return (
-    <input
-      value={draft}
-      onChange={(e) => setDraft(e.target.value)}
-      onFocus={() => { focused.current = true; }}
-      onBlur={() => { focused.current = false; if (draft !== value) onCommit(draft); }}
-      onKeyDown={(e) => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); }}
-      placeholder="담당자"
-      aria-label="담당자"
-      className="bg-transparent border border-bg-border rounded-md px-2 py-1.5 text-sm text-text-primary outline-none focus:border-accent/50 w-44"
     />
   );
 }
@@ -452,8 +670,56 @@ function CostumeIdentity({ costume }: { costume: CharacterCostume }) {
   );
 }
 
+function PathActionRow({
+  label,
+  path,
+  onPick,
+  onOpen,
+}: {
+  label: string;
+  path: string | null;
+  onPick: () => void;
+  onOpen: () => void;
+}) {
+  return (
+    <div className="flex items-center justify-between gap-3 rounded-lg border border-bg-border/70 bg-bg-border/10 px-3 py-2">
+      <div className="min-w-0">
+        <div className="text-xs text-text-secondary">{label}</div>
+        <div className="text-sm text-text-primary truncate" title={path ?? undefined}>{displayPathName(path)}</div>
+      </div>
+      <div className="flex items-center gap-1.5 shrink-0">
+        <button
+          type="button"
+          onClick={onPick}
+          className="px-2 py-1 rounded-md border border-bg-border text-xs text-text-secondary hover:text-text-primary hover:border-text-secondary/50"
+        >
+          선택
+        </button>
+        <button
+          type="button"
+          disabled={!path}
+          onClick={onOpen}
+          className="px-2 py-1 rounded-md border border-bg-border text-xs text-text-secondary hover:text-text-primary hover:border-text-secondary/50 disabled:opacity-40"
+        >
+          열기
+        </button>
+      </div>
+    </div>
+  );
+}
+
 /** 선택 복장의 진행 상세 — 버전·담당자·단계 레일·태그. */
-function CostumeDetail({ costume }: { costume: CharacterCostume }) {
+function CostumeDetail({
+  character,
+  costume,
+  onPickFolder,
+  onPickFile,
+}: {
+  character: Character;
+  costume: CharacterCostume;
+  onPickFolder: () => void;
+  onPickFile: () => void;
+}) {
   const updateCostumeStage = useCharacterBoardStore((s) => s.updateCostumeStage);
   const updateCostumeField = useCharacterBoardStore((s) => s.updateCostumeField);
   const setCostumeTags = useCharacterBoardStore((s) => s.setCostumeTags);
@@ -492,13 +758,32 @@ function CostumeDetail({ costume }: { costume: CharacterCostume }) {
             </button>
           </div>
         </div>
-        <div className="flex flex-col gap-1.5">
-          <div className="text-xs text-text-secondary">담당자</div>
-          <CostumeAssigneeInput
-            value={costume.assignee ?? ''}
-            onCommit={(next) => updateCostumeField(costume.id, { assignee: next.trim() ? next : null })}
-          />
-        </div>
+        <AssigneeMultiSelect
+          label="디자인 담당자"
+          value={costume.designAssignee}
+          onChange={(next) => updateCostumeField(costume.id, { designAssignee: next })}
+        />
+        <AssigneeMultiSelect
+          label="리깅 담당자"
+          value={costume.riggingAssignee}
+          onChange={(next) => updateCostumeField(costume.id, { riggingAssignee: next })}
+        />
+      </div>
+
+      {/* 작업 경로 */}
+      <div className="grid gap-2 md:grid-cols-2">
+        <PathActionRow
+          label="작업 폴더"
+          path={character.workFolderPath}
+          onPick={onPickFolder}
+          onOpen={() => openStoredPath(character.workFolderPath, '작업 폴더')}
+        />
+        <PathActionRow
+          label="작업 파일"
+          path={costume.workFilePath}
+          onPick={onPickFile}
+          onOpen={() => openStoredPath(costume.workFilePath, '작업 파일')}
+        />
       </div>
 
       {/* 단계 레일 */}
@@ -583,11 +868,13 @@ function CostumeThumbCard({
   selected,
   onSelect,
   onDelete,
+  onImageContextMenu,
 }: {
   costume: CharacterCostume;
   selected: boolean;
   onSelect: () => void;
   onDelete: () => void;
+  onImageContextMenu: (event: ReactMouseEvent<HTMLDivElement>) => void;
 }) {
   return (
     <div
@@ -603,7 +890,18 @@ function CostumeThumbCard({
     >
       <div className="aspect-[3/4] w-full bg-bg-border/30 flex items-center justify-center overflow-hidden">
         {costume.featuredImageUrl ? (
-          <img src={costume.featuredImageUrl} alt={costume.name} className="w-full h-full object-cover" />
+          <CharacterImageFrame
+            url={costume.featuredImageUrl}
+            alt={costume.name}
+            background={costume.imageBackground}
+            fit={costume.imageFit}
+            className="w-full h-full"
+            onContextMenu={(event) => {
+              event.preventDefault();
+              event.stopPropagation();
+              onImageContextMenu(event);
+            }}
+          />
         ) : (
           <ImageIcon size={18} className="text-text-secondary/40" />
         )}
@@ -644,16 +942,21 @@ function CharacterDetailPanel({
   const deleteCostume = useCharacterBoardStore((s) => s.deleteCostume);
   const deleteCharacter = useCharacterBoardStore((s) => s.deleteCharacter);
   const renameCharacter = useCharacterBoardStore((s) => s.renameCharacter);
+  const updateCharacterFolder = useCharacterBoardStore((s) => s.updateCharacterFolder);
+  const updateCostumeField = useCharacterBoardStore((s) => s.updateCostumeField);
   const linkEpisode = useCharacterBoardStore((s) => s.linkEpisode);
   const unlinkEpisode = useCharacterBoardStore((s) => s.unlinkEpisode);
   const episodes = useDataStore((s) => s.episodes);
+  const setEpisodes = useDataStore((s) => s.setEpisodes);
   const getEpisodeDisplayName = useDataStore((s) => s.getEpisodeDisplayName);
 
   const costumes = byCharacter.get(character.id) ?? [];
   const [activeCostumeId, setActiveCostumeId] = useState<string | null>(costumes[0]?.id ?? null);
   const [editingName, setEditingName] = useState(false);
   const [nameDraft, setNameDraft] = useState(character.name);
-  const [lightbox, setLightbox] = useState<string | null>(null);
+  const [lightboxCostumeId, setLightboxCostumeId] = useState<string | null>(null);
+  const [imageMenu, setImageMenu] = useState<{ costumeId: string; x: number; y: number } | null>(null);
+  const [fitEditorCostumeId, setFitEditorCostumeId] = useState<string | null>(null);
 
   // 갤러리 휠 → 가로 스크롤.
   const galleryRef = useRef<HTMLDivElement>(null);
@@ -677,8 +980,59 @@ function CharacterDetailPanel({
   useEffect(() => { setEditingName(false); setNameDraft(character.name); }, [character.id, character.name]);
 
   const activeCostume = costumes.find((c) => c.id === activeCostumeId) ?? null;
-  const fallbackImage = costumes.find((c) => c.featuredImageUrl)?.featuredImageUrl ?? null;
-  const shownImage = activeCostume?.featuredImageUrl ?? fallbackImage;
+  const shownCostume = activeCostume;
+  const imageEntries: CharacterImageLightboxEntry[] = costumes
+    .filter((c) => !!c.featuredImageUrl)
+    .map((c) => ({
+      costumeId: c.id,
+      name: `${character.name} · ${c.name}`,
+      url: c.featuredImageUrl!,
+      background: c.imageBackground,
+      fit: c.imageFit,
+    }));
+  const menuCostume = imageMenu ? costumes.find((c) => c.id === imageMenu.costumeId) ?? null : null;
+  const fitEditorCostume = fitEditorCostumeId ? costumes.find((c) => c.id === fitEditorCostumeId) ?? null : null;
+
+  const handlePickFolder = useCallback(async () => {
+    const folder = await chooseWorkFolder();
+    if (!folder) return;
+    await updateCharacterFolder(character.id, folder);
+  }, [character.id, updateCharacterFolder]);
+
+  const handlePickFile = useCallback(async (targetCostume = activeCostume) => {
+    if (!targetCostume) {
+      toast.error('먼저 디자인(복장)을 선택해주세요');
+      return;
+    }
+    const filePath = await chooseWorkFile();
+    if (!filePath) return;
+    const saved = await updateCostumeField(targetCostume.id, { workFilePath: filePath });
+    if (!saved) return;
+    const latestFolderPath = useCharacterBoardStore.getState().characters.find((item) => item.id === character.id)?.workFolderPath ?? character.workFolderPath;
+    if (!latestFolderPath?.trim()) {
+      const folder = await resolveFolderAfterFilePick(latestFolderPath, filePath);
+      if (folder) await updateCharacterFolder(character.id, folder);
+    }
+  }, [activeCostume, character.id, character.workFolderPath, updateCharacterFolder, updateCostumeField]);
+
+  const handleEpisodeReel = useCallback(async (episode: typeof episodes[number]) => {
+    if (episode.reelFilePath) {
+      await openStoredPath(episode.reelFilePath, '릴 파일');
+      return;
+    }
+    const filePath = await chooseWorkFile();
+    if (!filePath) return;
+    const prev = useDataStore.getState().episodes;
+    setEpisodes(prev.map((item) => item.episodeNumber === episode.episodeNumber ? { ...item, reelFilePath: filePath } : item));
+    try {
+      await updateEpisodeReelPath(episode.episodeNumber, filePath);
+      toast.success('릴 파일 경로를 등록했어요');
+    } catch (err) {
+      console.error('[character-board] 릴 파일 경로 저장 실패:', err);
+      setEpisodes(prev);
+      toast.error('릴 파일 경로 저장에 실패했어요');
+    }
+  }, [episodes, setEpisodes]);
 
   const handleAddCostume = async () => {
     // 중간 복장 삭제 후에도 UNIQUE(character_id, name) 충돌하지 않도록 안 쓰는 번호 생성.
@@ -747,7 +1101,14 @@ function CharacterDetailPanel({
         <div className="flex gap-6 flex-col lg:flex-row">
           {/* 좌측: 큰 이미지 + 복장명 + 메모 */}
           <div className="flex flex-col gap-3">
-            <FeaturedImageSlot character={character} costume={activeCostume} shownUrl={shownImage} onView={(u) => setLightbox(u)} />
+            <FeaturedImageSlot
+              character={character}
+              costume={activeCostume}
+              shownCostume={shownCostume}
+              onView={(costumeId) => setLightboxCostumeId(costumeId)}
+              onPickFolder={handlePickFolder}
+              onPickFile={() => handlePickFile(activeCostume)}
+            />
             {activeCostume && <CostumeIdentity costume={activeCostume} />}
           </div>
 
@@ -764,6 +1125,11 @@ function CharacterDetailPanel({
                       key={ep.episodeNumber}
                       type="button"
                       onClick={() => (linked ? unlinkEpisode(character.id, ep.episodeNumber) : linkEpisode(character.id, ep.episodeNumber))}
+                      onContextMenu={(event) => {
+                        event.preventDefault();
+                        void handleEpisodeReel(ep);
+                      }}
+                      title={ep.reelFilePath ? '릴 파일 보기' : '릴 파일 등록'}
                       className={cn(
                         'px-2 py-0.5 rounded-md text-xs border transition-colors cursor-pointer',
                         linked ? 'bg-accent/20 text-accent border-accent/40' : 'text-text-secondary border-bg-border hover:text-text-primary',
@@ -788,6 +1154,10 @@ function CharacterDetailPanel({
                     selected={activeCostumeId === c.id}
                     onSelect={() => setActiveCostumeId(c.id)}
                     onDelete={() => deleteCostume(c.id)}
+                    onImageContextMenu={(event) => {
+                      setActiveCostumeId(c.id);
+                      setImageMenu({ costumeId: c.id, x: event.clientX, y: event.clientY });
+                    }}
                   />
                 ))}
                 <button
@@ -804,7 +1174,12 @@ function CharacterDetailPanel({
 
             {/* 선택 복장 진행 상세 */}
             {activeCostume ? (
-              <CostumeDetail costume={activeCostume} />
+              <CostumeDetail
+                character={character}
+                costume={activeCostume}
+                onPickFolder={handlePickFolder}
+                onPickFile={() => handlePickFile(activeCostume)}
+              />
             ) : (
               <div className="text-center text-text-secondary text-sm py-10 border border-dashed border-bg-border rounded-lg">
                 복장이 없습니다. "디자인 추가"로 첫 복장을 만들어보세요.
@@ -814,7 +1189,41 @@ function CharacterDetailPanel({
         </div>
       </div>
 
-      {lightbox && <ImageLightbox url={lightbox} alt={character.name} onClose={() => setLightbox(null)} />}
+      {imageMenu && menuCostume && (
+        <CharacterImageContextMenu
+          x={imageMenu.x}
+          y={imageMenu.y}
+          background={menuCostume.imageBackground}
+          hasImage={!!menuCostume.featuredImageUrl}
+          hasFolder={!!character.workFolderPath}
+          hasFile={!!menuCostume.workFilePath}
+          onClose={() => setImageMenu(null)}
+          onBackground={(background: CharacterImageBackground) => updateCostumeField(menuCostume.id, { imageBackground: background })}
+          onEditFit={() => setFitEditorCostumeId(menuCostume.id)}
+          onCopyImage={() => copyCharacterImage(menuCostume.featuredImageUrl)}
+          onOpenFolder={() => openStoredPath(character.workFolderPath, '작업 폴더')}
+          onOpenFile={() => openStoredPath(menuCostume.workFilePath, '작업 파일')}
+        />
+      )}
+      {fitEditorCostume?.featuredImageUrl && (
+        <CharacterImageFitEditor
+          url={fitEditorCostume.featuredImageUrl}
+          alt={fitEditorCostume.name}
+          background={fitEditorCostume.imageBackground}
+          fit={fitEditorCostume.imageFit}
+          onCommit={(fit: CharacterImageFit) => updateCostumeField(fitEditorCostume.id, { imageFit: fit })}
+          onClose={() => setFitEditorCostumeId(null)}
+        />
+      )}
+      {lightboxCostumeId && imageEntries.length > 0 && (
+        <CharacterImageLightbox
+          entries={imageEntries}
+          initialCostumeId={lightboxCostumeId}
+          onClose={() => setLightboxCostumeId(null)}
+          onFitCommit={(costumeId, fit) => updateCostumeField(costumeId, { imageFit: fit })}
+          onCopyImage={(url) => copyCharacterImage(url)}
+        />
+      )}
     </div>
   );
 }
@@ -1061,7 +1470,17 @@ function CharacterGrid({ onAdd, pendingOpenId, onConsumeOpen }: { onAdd: () => v
       ) : (
         <div className="grid grid-cols-[repeat(auto-fill,minmax(180px,1fr))] gap-4">
           {filtered.map((c) => (
-            <CharacterCard key={c.id} character={c} costumes={byCharacter.get(c.id) ?? []} onOpen={() => setDetailId(c.id)} />
+            <CharacterCard
+              key={c.id}
+              character={c}
+              costumes={byCharacter.get(c.id) ?? []}
+              onOpen={() => setDetailId(c.id)}
+              onContextMenu={(event) => {
+                event.preventDefault();
+                if (c.workFolderPath) void openStoredPath(c.workFolderPath, '작업 폴더');
+                else toast.info('상세 화면에서 작업 폴더를 먼저 등록해주세요');
+              }}
+            />
           ))}
         </div>
       )}

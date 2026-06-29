@@ -46,7 +46,7 @@ export async function downloadImage(url: string, fileName: string): Promise<void
   }
 }
 
-export async function copyImageToClipboard(url: string): Promise<void> {
+export async function copyImageToClipboard(url: string): Promise<boolean> {
   try {
     const blob = await fetchImageBlob(url);
 
@@ -71,12 +71,14 @@ export async function copyImageToClipboard(url: string): Promise<void> {
       );
       await navigator.clipboard.write([new ClipboardItem({ 'image/png': pngBlob })]);
       toast.success('클립보드에 이미지 복사됨');
+      return true;
     } finally {
       URL.revokeObjectURL(objectUrl);
     }
   } catch (err) {
     console.error('[copyImageToClipboard] 실패', err);
     toast.error('이미지 복사 실패');
+    return false;
   }
 }
 
