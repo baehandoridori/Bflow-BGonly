@@ -65,6 +65,7 @@ import { useSceneWorkLinkStore } from '@/stores/useSceneWorkLinkStore';
 import { dispatchNotification, type NotificationSettings } from '@/utils/notificationHelper';
 import { useRevisionSetStore } from '@/stores/useRevisionSetStore';
 import { navigateNotificationToScene } from '@/utils/notificationSceneAction';
+import { resolveNotificationSceneTarget } from '@/utils/notificationSceneNavigation';
 import {
   beginCatchupRun,
   fetchCatchupPages,
@@ -83,8 +84,9 @@ import {
   buildNotificationSceneDisplayLabel,
   buildNotificationSceneDisplayLabelFromSceneKey,
 } from '@/utils/notificationEpisodeLabels';
+import { isGeneralRevisionSceneKey } from '@/utils/revisionGeneral';
 import { isRecentSelfRevisionAction } from '@/stores/useRevisionStore';
-import type { UpdateInfo } from '@/types';
+import type { RevisionAssigneeState, UpdateInfo } from '@/types';
 
 // Lazy chunk 로드 실패(네트워크 끊김, 빌드 artifact 누락) 시 블랭크 스크린 방지용 ErrorBoundary.
 // 이 컴포넌트 자체는 파일 외부로 분리하지 않고 로컬에 유지 — 인증 모달/메인 뷰 한정으로만 사용.
@@ -117,6 +119,73 @@ function markLocalFeedbackJumpAsRead(payload: { kind?: string; notificationId?: 
       : n.metadata?.feedbackNotificationId === notificationId
   );
   if (target && !target.isRead) store.markAsRead(target.id);
+}
+
+type AssigneeCompletionFallback = {
+  userId: string;
+  senderName: string;
+  notifyUserIds: string[];
+  note?: string;
+  doneAt?: string;
+};
+
+function buildAssigneeCompletionFallbackCandidate(
+  userId: string,
+  state: RevisionAssigneeState | undefined,
+  fallbackNotifyUserIds?: string[],
+): AssigneeCompletionFallback | null {
+  if (state?.state !== 'done') return null;
+  const notifyUserIds = Array.isArray(state.completionNotifyUserIds)
+    ? state.completionNotifyUserIds
+    : fallbackNotifyUserIds;
+  if (!Array.isArray(notifyUserIds)) return null;
+  return {
+    userId,
+    senderName: state.completedByName || userId,
+    notifyUserIds: notifyUserIds.filter((id): id is string => typeof id === 'string' && id.trim().length > 0 && id !== userId),
+    note: state.note,
+    doneAt: state.doneAt,
+  };
+}
+
+function resolveLatestAssigneeCompletionFallback(
+  assigneeStates?: Record<string, RevisionAssigneeState> | null,
+  fallbackNotifyUserIds?: string[],
+): AssigneeCompletionFallback | null {
+  if (!assigneeStates || typeof assigneeStates !== 'object') return null;
+  let latest: AssigneeCompletionFallback | null = null;
+
+  for (const [userId, state] of Object.entries(assigneeStates)) {
+    const candidate = buildAssigneeCompletionFallbackCandidate(userId, state, fallbackNotifyUserIds);
+    if (!candidate) continue;
+    if (!latest || (candidate.doneAt ?? '') > (latest.doneAt ?? '')) {
+      latest = candidate;
+    }
+  }
+
+  return latest;
+}
+
+function resolveNewAssigneeCompletionFallback(
+  nextStates?: Record<string, RevisionAssigneeState> | null,
+  previousStates?: Record<string, RevisionAssigneeState> | null,
+  fallbackNotifyUserIds?: string[],
+): AssigneeCompletionFallback | null {
+  if (!nextStates || typeof nextStates !== 'object') return null;
+  if (!previousStates || typeof previousStates !== 'object') return null;
+  let latest: AssigneeCompletionFallback | null = null;
+
+  for (const [userId, state] of Object.entries(nextStates)) {
+    const candidate = buildAssigneeCompletionFallbackCandidate(userId, state, fallbackNotifyUserIds);
+    if (!candidate) continue;
+    const previous = previousStates?.[userId];
+    if (previous?.state === 'done' && previous.doneAt === state.doneAt) continue;
+    if (!latest || (candidate.doneAt ?? '') > (latest.doneAt ?? '')) {
+      latest = candidate;
+    }
+  }
+
+  return latest;
 }
 
 export default function App() {
@@ -1571,7 +1640,7 @@ export default function App() {
           const sceneKey = row.scene_id || '';
           // '전반'(씬 미지정) 항목은 씬 컨텍스트가 없다 → 세트 제목으로 알리고, 클릭은 리테이크 허브로(코덱스 P2).
           //   (씬 필드가 비어 있어 기존 씬 라벨/씬 점프 경로는 빈 제목 + 이동 불가가 된다.)
-          if (!sceneKey) {
+          if (!sceneKey || isGeneralRevisionSceneKey(sceneKey)) {
             const setTitle = row.set_id
               ? useRevisionSetStore.getState().sets.find((s) => s.id === row.set_id)?.title
               : undefined;
@@ -1620,16 +1689,93 @@ export default function App() {
             scene_uuid?: string;
             requester_id?: string;
             status?: string;
+            department?: 'bg' | 'acting' | null;
             revision_no?: number;
             resolved_by?: string | null;
             notify_user_ids?: string[] | null;
+            assignee_states?: Record<string, RevisionAssigneeState> | null;
             set_id?: string | null;
             updated_at?: string | null;
             resolved_at?: string | null;
           };
-          const oldRow = payload.old as { status?: string } | undefined;
-          const targets = Array.isArray(newRow.notify_user_ids) ? newRow.notify_user_ids : [];
-          if (!targets.includes(me.id)) return;
+          const oldRow = payload.old as {
+            status?: string;
+            assignee_states?: Record<string, RevisionAssigneeState> | null;
+          } | undefined;
+
+          const dispatchAssigneeCompletionFallback = (
+            completion: AssigneeCompletionFallback | null,
+          ): boolean => {
+            if (!completion || !newRow.id) return false;
+            if (!completion.notifyUserIds.includes(me.id)) return false;
+            if (completion.userId === me.id) return false;
+
+            const completionStamp = completion.doneAt ?? newRow.updated_at ?? '';
+            const dedupeKey = `revision:${newRow.id}:assignee_done:${completionStamp}`;
+            if (!dedupeNotification(dedupeKey)) return true;
+
+            const sceneKey = newRow.scene_id || '';
+            const notePreview = completion.note?.trim()
+              ? (completion.note.trim().length > 60 ? completion.note.trim().slice(0, 60) + '...' : completion.note.trim())
+              : undefined;
+            const body = notePreview
+              ? `${completion.senderName}님이 담당을 완료했습니다. ${notePreview}`
+              : `${completion.senderName}님이 담당을 완료했습니다.`;
+            const revisionEventId = `${completion.userId}:${completionStamp}`;
+
+            if (!sceneKey || isGeneralRevisionSceneKey(sceneKey)) {
+              const setTitle = newRow.set_id
+                ? useRevisionSetStore.getState().sets.find((s) => s.id === newRow.set_id)?.title
+                : undefined;
+              dispatchNotification({
+                type: 'revision',
+                title: `리테이크 담당 완료 — ${setTitle || '전반 항목'}`,
+                body,
+                metadata: {
+                  revisionId: newRow.id,
+                  revisionAction: 'assignee_done',
+                  revisionEventId,
+                  retakeHubSetId: newRow.set_id ?? undefined,
+                } as Record<string, unknown>,
+              }, notiSettings);
+              return true;
+            }
+
+            const dataState = useDataStore.getState();
+            const sceneTarget = resolveNotificationSceneTarget({
+              sceneId: newRow.scene_uuid,
+              sceneName: sceneKey,
+              department: newRow.department,
+            }, dataState.episodes);
+            const sceneNameForLabel = buildNotificationSceneDisplayLabelFromSceneKey(
+              sceneKey,
+              dataState.episodeTitles,
+              dataState.episodes,
+            ) || sceneTarget?.sceneName || sceneKey.split(':').pop() || sceneKey;
+            dispatchNotification({
+              type: 'revision',
+              title: `리테이크 담당 완료 — ${sceneNameForLabel}`,
+              body,
+              metadata: {
+                sceneId: sceneTarget?.sceneUuid ?? newRow.scene_uuid,
+                sceneName: sceneTarget?.sceneName ?? sceneKey,
+                sheetName: sceneTarget?.sheetName,
+                partId: sceneTarget?.partId,
+                department: newRow.department,
+                revisionId: newRow.id,
+                revisionAction: 'assignee_done',
+                revisionEventId,
+              } as Record<string, unknown>,
+            }, notiSettings);
+            return true;
+          };
+
+          if (newRow.status !== 'assignee_done') {
+            dispatchAssigneeCompletionFallback(resolveNewAssigneeCompletionFallback(
+              newRow.assignee_states,
+              oldRow?.assignee_states,
+            ));
+          }
 
           // 상태 변경 detect — old.status !== new.status 일 때만 알림
           if (!oldRow || oldRow.status === newRow.status) return;
@@ -1641,14 +1787,26 @@ export default function App() {
 
           let action: 'in_progress' | 'assignee_done' | 'resolve';
           let titlePrefix: string;
+          let fallbackCompletion: ReturnType<typeof resolveLatestAssigneeCompletionFallback> = null;
+          const targets = Array.isArray(newRow.notify_user_ids) ? newRow.notify_user_ids : [];
           if (newRow.status === 'in_progress') {
+            if (!targets.includes(me.id)) return;
             action = 'in_progress';
             titlePrefix = '리테이크 진행중';
           } else if (newRow.status === 'assignee_done') {
-            // 리테이크 허브 2단계: 담당 전원 완료 → 최종 완료 대기
+            const newlyCompletedAssignee = resolveNewAssigneeCompletionFallback(
+              newRow.assignee_states,
+              oldRow?.assignee_states,
+              targets,
+            );
+            fallbackCompletion = newlyCompletedAssignee
+              ?? (oldRow?.assignee_states ? null : resolveLatestAssigneeCompletionFallback(newRow.assignee_states, targets));
+            if (!fallbackCompletion?.notifyUserIds.includes(me.id)) return;
+            if (fallbackCompletion.userId === me.id) return;
             action = 'assignee_done';
             titlePrefix = '리테이크 담당 완료';
           } else if (newRow.status === 'resolved') {
+            if (!targets.includes(me.id)) return;
             action = 'resolve';
             titlePrefix = '리테이크 완료';
           } else {
@@ -1672,37 +1830,67 @@ export default function App() {
 
           const sceneKey = newRow.scene_id || '';
           // '전반' 항목 상태 변경 — 씬 컨텍스트 없음 → 세트 제목 + 클릭 시 허브로(코덱스 P2, INSERT 분기와 동일).
-          if (!sceneKey) {
+          if (!sceneKey || isGeneralRevisionSceneKey(sceneKey)) {
             const setTitle = newRow.set_id
               ? useRevisionSetStore.getState().sets.find((s) => s.id === newRow.set_id)?.title
+              : undefined;
+            const notePreview = fallbackCompletion?.note?.trim()
+              ? (fallbackCompletion.note.trim().length > 60 ? fallbackCompletion.note.trim().slice(0, 60) + '...' : fallbackCompletion.note.trim())
               : undefined;
             dispatchNotification({
               type: 'revision',
               title: `${titlePrefix} — ${setTitle || '전반 항목'}`,
+              body: fallbackCompletion
+                ? notePreview
+                  ? `${fallbackCompletion.senderName}님이 담당을 완료했습니다. ${notePreview}`
+                  : `${fallbackCompletion.senderName}님이 담당을 완료했습니다.`
+                : undefined,
               metadata: {
                 revisionId: newRow.id,
                 revisionAction: action,
+                revisionEventId: fallbackCompletion
+                  ? `${fallbackCompletion.userId}:${fallbackCompletion.doneAt ?? newRow.updated_at ?? ''}`
+                  : undefined,
                 retakeHubSetId: newRow.set_id ?? undefined,
               } as Record<string, unknown>,
             }, notiSettings);
             return;
           }
           const dataState = useDataStore.getState();
+          const sceneTarget = resolveNotificationSceneTarget({
+            sceneId: newRow.scene_uuid,
+            sceneName: sceneKey,
+            department: newRow.department,
+          }, dataState.episodes);
           const sceneNameForLabel = buildNotificationSceneDisplayLabelFromSceneKey(
             sceneKey,
             dataState.episodeTitles,
             dataState.episodes,
-          ) || sceneKey.split(':').pop() || sceneKey;
+          ) || sceneTarget?.sceneName || sceneKey.split(':').pop() || sceneKey;
           // 코덱스 P1 fix (2026-05-05): INSERT 분기와 동일 — sceneId(UUID) 우선,
           // sceneName 은 sceneKey 전체 보존 (last-token reuse 충돌 방지).
+          const notePreview = fallbackCompletion?.note?.trim()
+            ? (fallbackCompletion.note.trim().length > 60 ? fallbackCompletion.note.trim().slice(0, 60) + '...' : fallbackCompletion.note.trim())
+            : undefined;
           dispatchNotification({
             type: 'revision',
             title: `${titlePrefix} — ${sceneNameForLabel}`,
+            body: fallbackCompletion
+              ? notePreview
+                ? `${fallbackCompletion.senderName}님이 담당을 완료했습니다. ${notePreview}`
+                : `${fallbackCompletion.senderName}님이 담당을 완료했습니다.`
+              : undefined,
             metadata: {
-              sceneId: newRow.scene_uuid,
-              sceneName: sceneKey,
+              sceneId: sceneTarget?.sceneUuid ?? newRow.scene_uuid,
+              sceneName: sceneTarget?.sceneName ?? sceneKey,
+              sheetName: sceneTarget?.sheetName,
+              partId: sceneTarget?.partId,
+              department: newRow.department,
               revisionId: newRow.id,
               revisionAction: action,
+              revisionEventId: fallbackCompletion
+                ? `${fallbackCompletion.userId}:${fallbackCompletion.doneAt ?? newRow.updated_at ?? ''}`
+                : undefined,
             } as Record<string, unknown>,
           }, notiSettings);
           return;
@@ -1838,6 +2026,82 @@ export default function App() {
         }
         // broadcast 를 즉시 받았으므로 lastSeen 갱신 → 다음 로그인 catch-up 에서 중복 차단
         if (me?.id) setAssignmentLastSeenAt(me.id, ap.createdAt ?? new Date().toISOString());
+        return;
+      }
+
+      if (e?.event === 'retake-assignee-completion') {
+        const p = e.payload as {
+          revisionId?: string;
+          sceneKey?: string;
+          sceneUuid?: string;
+          sheetName?: string;
+          department?: 'bg' | 'acting' | null;
+          setId?: string | null;
+          revisionNo?: number;
+          senderId?: string;
+          senderName?: string;
+          recipients?: string[];
+          note?: string;
+          status?: string;
+          updatedAt?: string;
+        } | undefined;
+        const me = useAuthStore.getState().currentUser;
+        if (!p || !me?.id) return;
+        const notiSettings = notiSettingsRef.current;
+        if (notiSettings.commentNotify === false) return;
+        if (!Array.isArray(p.recipients) || !p.recipients.includes(me.id)) return;
+        if (p.senderId === me.id) return;
+        const dedupeKey = `revision:${p.revisionId ?? ''}:assignee_done:${p.updatedAt ?? ''}`;
+        if (!dedupeNotification(dedupeKey)) return;
+
+        const ds = useDataStore.getState();
+        const sceneKey = p.sceneKey;
+        const isGeneralRetakeCompletion = !sceneKey || isGeneralRevisionSceneKey(sceneKey);
+        const sceneTarget = !isGeneralRetakeCompletion
+          ? resolveNotificationSceneTarget({
+            sceneId: p.sceneUuid,
+            sceneName: sceneKey,
+            sheetName: p.sheetName,
+            department: p.department,
+          }, ds.episodes)
+          : null;
+        const sceneLabel = !isGeneralRetakeCompletion
+          ? (sceneTarget?.sceneName || buildNotificationSceneDisplayLabelFromSceneKey(
+            sceneKey,
+            ds.episodeTitles,
+            ds.episodes,
+          ) || sceneKey.split(':').pop() || sceneKey)
+          : '전반 항목';
+        const notePreview = p.note?.trim()
+          ? (p.note.trim().length > 60 ? p.note.trim().slice(0, 60) + '...' : p.note.trim())
+          : undefined;
+        const revisionLabel = Number.isFinite(p.revisionNo) ? `re#${p.revisionNo}` : '리테이크';
+        const revisionEventId = [p.senderId, p.updatedAt].filter(Boolean).join(':') || undefined;
+
+        dispatchNotification({
+          type: 'revision',
+          title: `리테이크 담당 완료 — ${sceneLabel}`,
+          body: notePreview
+            ? `${p.senderName || '담당자'}님이 ${revisionLabel} 담당을 완료했습니다. ${notePreview}`
+            : `${p.senderName || '담당자'}님이 ${revisionLabel} 담당을 완료했습니다.`,
+          metadata: !isGeneralRetakeCompletion
+            ? {
+                sceneId: sceneTarget?.sceneUuid ?? p.sceneUuid,
+                sceneName: sceneTarget?.sceneName ?? sceneKey,
+                sheetName: sceneTarget?.sheetName ?? p.sheetName,
+                partId: sceneTarget?.partId,
+                department: p.department,
+                revisionId: p.revisionId,
+                revisionAction: 'assignee_done',
+                revisionEventId,
+              } as Record<string, unknown>
+            : {
+                revisionId: p.revisionId,
+                revisionAction: 'assignee_done',
+                revisionEventId,
+                retakeHubSetId: p.setId ?? undefined,
+              } as Record<string, unknown>,
+        }, notiSettings);
         return;
       }
 

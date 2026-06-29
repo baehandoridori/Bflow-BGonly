@@ -606,6 +606,28 @@ export async function updateRevisionStatus(
   await saveLocal(all);
 }
 
+export interface RetakeAssigneeCompletionNotificationPayload {
+  revisionId: string;
+  sceneKey: string;
+  sceneUuid?: string;
+  sheetName?: string;
+  department?: 'bg' | 'acting';
+  setId?: string | null;
+  revisionNo: number;
+  senderId: string;
+  senderName: string;
+  recipients: string[];
+  note?: string;
+  status: RevisionStatus;
+  updatedAt: string;
+}
+
+export async function dispatchRetakeAssigneeCompletionNotification(
+  payload: RetakeAssigneeCompletionNotificationPayload,
+): Promise<void> {
+  await window.electronAPI.supabaseDispatchRetakeAssigneeCompletionNotification(payload);
+}
+
 // ─── 담당 워크플로우 (리테이크 허브 1단계, 2단계에서 local mode 지원 추가) ─────────────
 // 모두 deriveRevisionStatus 로 status 를 파생해 저장한다.
 // supabaseUpdateRevision 은 Record<string,string> 만 받으므로 객체/배열은 JSON 문자열로 직렬화한다.
@@ -672,9 +694,21 @@ export async function startAssigneeWork(rev: CompRevision, userId: string): Prom
 }
 
 /** 담당자 본인 완료 (멘트 포함). */
-export async function completeAssigneeWork(rev: CompRevision, userId: string, note: string): Promise<void> {
-  const now = new Date().toISOString();
+export async function completeAssigneeWork(
+  rev: CompRevision,
+  userId: string,
+  note: string,
+  completionNotifyUserIds: string[] = [],
+  completerName?: string,
+  completedAt: string = new Date().toISOString(),
+): Promise<void> {
+  const now = completedAt;
   const states = completeAssignee(await freshAssigneeStates(rev), userId, note, now);
+  states[userId] = {
+    ...states[userId],
+    completionNotifyUserIds,
+    completedByName: completerName || userId,
+  };
   const status = deriveRevisionStatus(rev.assigneeIds ?? [], states, rev.finalResolvedAt);
   await persistRevisionWorkflow(rev,
     { assigneeStates: JSON.stringify(states), status, updatedAt: now },

@@ -29,6 +29,9 @@ function createChannel(onReceive: BroadcastListener): RealtimeChannel {
     .on('broadcast', { event: 'acting-feedback-request' }, ({ payload }) => {
       onReceive('acting-feedback-request', payload as Record<string, unknown>);
     })
+    .on('broadcast', { event: 'retake-assignee-completion' }, ({ payload }) => {
+      onReceive('retake-assignee-completion', payload as Record<string, unknown>);
+    })
     .on('broadcast', { event: 'scene-assignment-notification' }, ({ payload }) => {
       onReceive('scene-assignment-notification', payload as Record<string, unknown>);
     })
@@ -191,6 +194,28 @@ export interface FeedbackBroadcastPayload {
 }
 export function broadcastActingFeedbackRequest(payload: Omit<FeedbackBroadcastPayload, 'ts'>): void {
   safeSend('acting-feedback-request', { ...payload, ts: Date.now() });
+}
+
+export interface RetakeAssigneeCompletionBroadcastPayload {
+  revisionId: string;
+  sceneKey: string;
+  sceneUuid?: string;
+  sheetName?: string;
+  department?: 'bg' | 'acting';
+  setId?: string | null;
+  revisionNo: number;
+  senderId: string;
+  senderName: string;
+  recipients: string[];
+  note?: string;
+  status: string;
+  updatedAt: string;
+  ts: number;
+}
+export function broadcastRetakeAssigneeCompletion(
+  payload: Omit<RetakeAssigneeCompletionBroadcastPayload, 'ts'>,
+): void {
+  safeSend('retake-assignee-completion', { ...payload, ts: Date.now() });
 }
 
 /** v1.25.8 씬 담당자 배정 알림 broadcast.

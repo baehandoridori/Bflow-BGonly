@@ -34,8 +34,12 @@ export function getNotificationIdentity(notification: NotificationIdentityInput)
 
   const revisionId = asNonEmptyString(metadataField(metadata, 'revisionId'));
   const revisionAction = asNonEmptyString(metadataField(metadata, 'revisionAction'));
+  const revisionEventId = asNonEmptyString(metadataField(metadata, 'revisionEventId'));
   if (type === 'revision' && revisionAction === 'comment' && commentId) {
     return `revision_comment:${revisionId ?? 'unknown'}:${commentId}`;
+  }
+  if (type === 'revision' && revisionId && revisionEventId) {
+    return `revision:${revisionId}:${revisionAction ?? 'update'}:${revisionEventId}`;
   }
   if (type === 'revision' && revisionId) {
     return `revision:${revisionId}:${revisionAction ?? 'update'}`;

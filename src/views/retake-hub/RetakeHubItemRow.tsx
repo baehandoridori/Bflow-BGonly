@@ -10,13 +10,14 @@
  * 부서(BG/ACT) 라벨은 노출하지 않는다.
  */
 
-import { useMemo, useState } from 'react';
+import { useMemo, useState, type MouseEvent } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Users as UsersIcon, UserPlus, FolderMinus, Trash2 } from 'lucide-react';
 import { toast as sonnerToast } from 'sonner';
 import type { CompRevision, AppUser } from '@/types';
 import { useAuthStore } from '@/stores/useAuthStore';
 import { useAppStore } from '@/stores/useAppStore';
+import { useDataStore } from '@/stores/useDataStore';
 import { useRevisionStore } from '@/stores/useRevisionStore';
 import { removeFromSet } from '@/services/revisionSetService';
 import { ConfirmDialog } from '@/components/common/ConfirmDialog';
@@ -26,7 +27,10 @@ import { avatarColor } from '@/utils/avatarColor';
 import { isGeneralRevisionSceneKey } from '@/utils/revisionGeneral';
 import { navigateToHashTarget } from '@/utils/hashNavigation';
 import { canActAsAssignee, canReassignRevision, canFinalResolveRevision } from '@/utils/revisionWorkflow';
+import { buildRevisionAssigneeCompletionNotifyUserIds } from '@/utils/revisionNotificationRecipients';
 import { summarizeAssignees, collectAssigneeNotes, canShowFinalResolveBar } from '@/utils/revisionCardView';
+import { resolveNotificationSceneTarget } from '@/utils/notificationSceneNavigation';
+import { navigateToSceneView } from '@/utils/sceneNavigationAction';
 import { AssigneeChipRow } from '@/components/scenes/revision/AssigneeChipRow';
 import { CompletionNoteInput } from '@/components/scenes/revision/CompletionNoteInput';
 import { FinalResolveBar } from '@/components/scenes/revision/FinalResolveBar';
@@ -43,6 +47,7 @@ interface Props {
 export function RetakeHubItemRow({ revision, allUsers, sideBarClass, reLabel }: Props) {
   const currentUser = useAuthStore((s) => s.currentUser);
   const { setView, setHighlightUserName } = useAppStore();
+  const episodes = useDataStore((s) => s.episodes);
 
   const startAssignee = useRevisionStore((s) => s.startAssignee);
   const completeAssignee = useRevisionStore((s) => s.completeAssignee);
@@ -74,6 +79,15 @@ export function RetakeHubItemRow({ revision, allUsers, sideBarClass, reLabel }: 
   const canAct = canActAsAssignee(currentUser, revision);
   const canReassign = canReassignRevision(currentUser, revision);
   const canFinal = canFinalResolveRevision(currentUser, revision);
+  const currentAssigneeState = currentUser && assigneeIds.includes(currentUser.id)
+    ? (assigneeStates[currentUser.id]?.state ?? 'pending')
+    : null;
+  const statusPillActionLabel = currentAssigneeState === 'pending'
+    ? '진행 중'
+    : currentAssigneeState === 'in_progress'
+      ? '담당 완료'
+      : null;
+  const canUseStatusPillAction = !!statusPillActionLabel && canAct && !revision.finalResolvedAt;
 
   const nameOf = (id: string) => allUsers.find((u) => u.id === id)?.name ?? id;
 
@@ -97,14 +111,23 @@ export function RetakeHubItemRow({ revision, allUsers, sideBarClass, reLabel }: 
   );
 
   const statusCfg = STATUS_CONFIG[revision.status];
+  const completionNotifyDefaults = useMemo(
+    () => buildRevisionAssigneeCompletionNotifyUserIds({
+      notifyUserIds: revision.notifyUserIds,
+      requesterId: revision.requesterId,
+      completerId: noteEditingFor ?? currentUser?.id,
+    }),
+    [revision.notifyUserIds, revision.requesterId, noteEditingFor, currentUser?.id],
+  );
 
   const handleCompleteClick = (uid: string) => {
     setReassigning(false);
     setNoteEditingFor(uid);
+    setExpanded(true);
   };
-  const handleNoteConfirm = (note: string) => {
+  const handleNoteConfirm = (note: string, notifyIds?: string[]) => {
     if (!noteEditingFor) return;
-    completeAssignee(revision, noteEditingFor, note);
+    completeAssignee(revision, noteEditingFor, note, notifyIds, currentUser?.name ?? nameOf(noteEditingFor));
     setNoteEditingFor(null);
   };
   const handleReassignConfirm = (ids: string[]) => {
@@ -113,6 +136,56 @@ export function RetakeHubItemRow({ revision, allUsers, sideBarClass, reLabel }: 
   };
   const handleFinalResolve = () => {
     if (currentUser) finalResolve(revision, currentUser.name);
+  };
+  const handleOpenRevisionScene = () => {
+    if (isGeneral) {
+      sonnerToast.info('전반 항목은 연결된 씬이 없어 현재 허브에서 확인해주세요.');
+      return false;
+    }
+    const target = resolveNotificationSceneTarget({
+      sceneName: revision.sceneKey,
+      department: revision.department,
+    }, episodes);
+    if (!target) {
+      sonnerToast.error('연결된 씬을 찾지 못했어요.');
+      return false;
+    }
+    navigateToSceneView({
+      episodeNumber: target.episodeNumber,
+      partId: target.partId,
+      department: 'all',
+      highlightSceneId: target.sceneName,
+      modalRequest: {
+        sceneUuid: target.sceneUuid,
+        sceneName: target.sceneName,
+        episodeNumber: target.episodeNumber,
+        partId: target.partId,
+        initialTab: 'revisions',
+        focusRevisionId: revision.id,
+        forceDeptFilter: 'all',
+      },
+    });
+    return true;
+  };
+  const handleRowClickCapture = (event: MouseEvent<HTMLDivElement>) => {
+    const target = event.target instanceof HTMLElement ? event.target : null;
+    if (target?.closest('[data-retake-hub-status-action]')) return;
+    if (event.ctrlKey || event.metaKey) {
+      event.preventDefault();
+      event.stopPropagation();
+      handleOpenRevisionScene();
+      return;
+    }
+    setExpanded((v) => !v);
+  };
+  const handleStatusPillAction = (event: MouseEvent<HTMLButtonElement>) => {
+    event.stopPropagation();
+    if (!canUseStatusPillAction || !currentUser) return;
+    if (currentAssigneeState === 'pending') {
+      startAssignee(revision, currentUser.id);
+    } else if (currentAssigneeState === 'in_progress') {
+      handleCompleteClick(currentUser.id);
+    }
   };
 
   // 세트에서 빼기 (스펙 §9.4) — 씬 매인 항목은 setId 만 해제(씬 패널엔 남음). 마지막 항목이 빠지면
@@ -169,7 +242,7 @@ export function RetakeHubItemRow({ revision, allUsers, sideBarClass, reLabel }: 
         tabIndex={0}
         // capture 단계로 토글 — EntityText 의 멘션/#칩·PathBadge 가 bubble 단계에서 stopPropagation 하므로,
         //   내용이 칩 위주여도 행 어디를 눌러도 펼쳐지게 한다(칩은 자체 동작도 수행). (코덱스 P3)
-        onClickCapture={() => setExpanded((v) => !v)}
+        onClickCapture={handleRowClickCapture}
         onKeyDown={(e) => {
           if ((e.key === 'Enter' || e.key === ' ') && e.target === e.currentTarget) {
             e.preventDefault();
@@ -215,12 +288,25 @@ export function RetakeHubItemRow({ revision, allUsers, sideBarClass, reLabel }: 
         </span>
 
         {/* 진행 상태 라벨 */}
-        <span
-          className="shrink-0 text-[10px] font-semibold px-2 py-0.5 rounded-full mr-1"
-          style={{ color: statusCfg.color, background: statusCfg.bg }}
-        >
-          {statusCfg.label}
-        </span>
+        {canUseStatusPillAction ? (
+          <button
+            type="button"
+            data-retake-hub-status-action={currentAssigneeState}
+            onClick={handleStatusPillAction}
+            className="shrink-0 text-[10px] font-semibold px-2 py-0.5 rounded-full mr-1 cursor-pointer hover:brightness-110 transition"
+            style={{ color: statusCfg.color, background: statusCfg.bg }}
+            title={currentAssigneeState === 'pending' ? '내 담당 작업을 진행 중으로 바꾸기' : '내 담당 완료 처리'}
+          >
+            {statusPillActionLabel}
+          </button>
+        ) : (
+          <span
+            className="shrink-0 text-[10px] font-semibold px-2 py-0.5 rounded-full mr-1"
+            style={{ color: statusCfg.color, background: statusCfg.bg }}
+          >
+            {statusCfg.label}
+          </span>
+        )}
       </div>
 
       {/* ─── 인라인 확장 ─── */}
@@ -278,6 +364,7 @@ export function RetakeHubItemRow({ revision, allUsers, sideBarClass, reLabel }: 
                       >
                         <CompletionNoteInput
                           initialValue={assigneeStates[noteEditingFor]?.note ?? ''}
+                          notifyDefaultIds={completionNotifyDefaults}
                           onConfirm={handleNoteConfirm}
                           onCancel={() => setNoteEditingFor(null)}
                         />
