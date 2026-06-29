@@ -606,6 +606,25 @@ export async function updateRevisionStatus(
   await saveLocal(all);
 }
 
+export interface RetakeAssigneeCompletionNotificationPayload {
+  revisionId: string;
+  sceneKey: string;
+  setId?: string | null;
+  revisionNo: number;
+  senderId: string;
+  senderName: string;
+  recipients: string[];
+  note?: string;
+  status: RevisionStatus;
+  updatedAt: string;
+}
+
+export async function dispatchRetakeAssigneeCompletionNotification(
+  payload: RetakeAssigneeCompletionNotificationPayload,
+): Promise<void> {
+  await window.electronAPI.supabaseDispatchRetakeAssigneeCompletionNotification(payload);
+}
+
 // ─── 담당 워크플로우 (리테이크 허브 1단계, 2단계에서 local mode 지원 추가) ─────────────
 // 모두 deriveRevisionStatus 로 status 를 파생해 저장한다.
 // supabaseUpdateRevision 은 Record<string,string> 만 받으므로 객체/배열은 JSON 문자열로 직렬화한다.

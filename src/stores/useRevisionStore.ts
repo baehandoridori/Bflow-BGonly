@@ -5,6 +5,7 @@ import { useDataStore } from '@/stores/useDataStore';
 import {
   startAssignee, completeAssignee, revertAssignee, deriveRevisionStatus, sanitizeAssignees,
 } from '@/utils/revisionWorkflow';
+import { buildRevisionAssigneeCompletionNotifyUserIds } from '@/utils/revisionNotificationRecipients';
 
 /**
  * v1.18.0: 리테이크 등록 input. 우선순위/프레임/담당자 입력 UI 가 폼에서 제거되어
@@ -53,7 +54,7 @@ interface RevisionState {
 
   // ─── 담당 워크플로우 (리테이크 허브 1단계) ─────────────
   startAssignee: (rev: CompRevision, userId: string) => Promise<void>;
-  completeAssignee: (rev: CompRevision, userId: string, note: string) => Promise<void>;
+  completeAssignee: (rev: CompRevision, userId: string, note: string, notifyUserIds?: string[], completerName?: string) => Promise<void>;
   reassign: (rev: CompRevision, nextAssigneeIds: string[]) => Promise<void>;
   finalResolve: (rev: CompRevision, byName: string) => Promise<void>;
   revertFinalResolve: (rev: CompRevision) => Promise<void>;
@@ -234,7 +235,7 @@ export const useRevisionStore = create<RevisionState>((set, get) => ({
     catch { await get().loadRevisions(); }
   },
 
-  completeAssignee: async (rev, userId, note) => {
+  completeAssignee: async (rev, userId, note, notifyUserIds, completerName) => {
     const cur = get().revisions.find((r) => r.id === rev.id) ?? rev;
     if (cur.finalResolvedAt) return; // 최종완료 상태에선 담당 전이 차단 (spec §6.2)
     const now = new Date().toISOString();
@@ -242,7 +243,29 @@ export const useRevisionStore = create<RevisionState>((set, get) => ({
     const status = deriveRevisionStatus(cur.assigneeIds ?? [], states, cur.finalResolvedAt);
     get().updateRevisionOptimistic(rev.id, rev.sceneKey, { assigneeStates: states, status, updatedAt: now });
     markSelfFromStatus(rev.id, status);
-    try { await revisionService.completeAssigneeWork(cur, userId, note); }
+    try {
+      await revisionService.completeAssigneeWork(cur, userId, note);
+      const recipients = buildRevisionAssigneeCompletionNotifyUserIds({
+        notifyUserIds: cur.notifyUserIds,
+        requesterId: cur.requesterId,
+        selectedUserIds: notifyUserIds,
+        completerId: userId,
+      });
+      if (recipients.length > 0) {
+        await revisionService.dispatchRetakeAssigneeCompletionNotification({
+          revisionId: cur.id,
+          sceneKey: cur.sceneKey,
+          setId: cur.setId ?? null,
+          revisionNo: cur.revisionNo,
+          senderId: userId,
+          senderName: completerName || userId,
+          recipients,
+          note,
+          status,
+          updatedAt: now,
+        });
+      }
+    }
     catch { await get().loadRevisions(); }
   },
 

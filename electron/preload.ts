@@ -140,6 +140,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // v1.25.0~ 액팅 피드백 알림 디스패치
   supabaseDispatchFeedbackNotification: (payload: unknown) =>
     ipcRenderer.invoke('supabase:dispatch-feedback-notification', payload),
+  // 리테이크 담당 완료 알림 디스패치
+  supabaseDispatchRetakeAssigneeCompletionNotification: (payload: unknown) =>
+    ipcRenderer.invoke('supabase:dispatch-retake-assignee-completion-notification', payload),
   // v1.25.5 로그인 catch-up — last_seen_at 이후 미읽음 액팅 피드백 알림 일괄 조회.
   //  before 옵션: 페이지네이션용 (created_at < before).
   supabaseFetchMissedFeedbackNotifications: (userId: string, since: string, limit?: number, before?: string) =>

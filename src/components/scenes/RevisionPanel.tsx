@@ -23,6 +23,7 @@ import { navigateToHashTarget } from '@/utils/hashNavigation';
 import type { HashTarget } from '@/utils/hashEntity';
 import { CompactIconLabel } from '@/components/common/CompactIconLabel';
 import { canActAsAssignee, canReassignRevision, canFinalResolveRevision } from '@/utils/revisionWorkflow';
+import { buildRevisionAssigneeCompletionNotifyUserIds } from '@/utils/revisionNotificationRecipients';
 import { summarizeAssignees, collectAssigneeNotes, sideBarColorClass, canShowFinalResolveBar } from '@/utils/revisionCardView';
 import { AssigneeChipRow } from './revision/AssigneeChipRow';
 import { CompletionNoteInput } from './revision/CompletionNoteInput';
@@ -194,9 +195,17 @@ const RevisionCard = memo(function RevisionCard({
     setReassigning(false);
     setNoteEditingFor(uid);
   };
-  const handleNoteConfirm = (note: string) => {
+  const completionNotifyDefaults = useMemo(
+    () => buildRevisionAssigneeCompletionNotifyUserIds({
+      notifyUserIds: revision.notifyUserIds,
+      requesterId: revision.requesterId,
+      completerId: noteEditingFor ?? currentUser?.id,
+    }),
+    [revision.notifyUserIds, revision.requesterId, noteEditingFor, currentUser?.id],
+  );
+  const handleNoteConfirm = (note: string, notifyIds?: string[]) => {
     if (!noteEditingFor) return;
-    completeAssignee(revision, noteEditingFor, note);
+    completeAssignee(revision, noteEditingFor, note, notifyIds, currentUser?.name ?? nameOf(noteEditingFor));
     setNoteEditingFor(null);
   };
   const handleReassignConfirm = (ids: string[]) => {
@@ -342,6 +351,7 @@ const RevisionCard = memo(function RevisionCard({
               >
                 <CompletionNoteInput
                   initialValue={assigneeStates[noteEditingFor]?.note ?? ''}
+                  notifyDefaultIds={completionNotifyDefaults}
                   onConfirm={handleNoteConfirm}
                   onCancel={() => setNoteEditingFor(null)}
                 />

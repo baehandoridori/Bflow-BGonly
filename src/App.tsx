@@ -1646,8 +1646,9 @@ export default function App() {
             titlePrefix = '리테이크 진행중';
           } else if (newRow.status === 'assignee_done') {
             // 리테이크 허브 2단계: 담당 전원 완료 → 최종 완료 대기
-            action = 'assignee_done';
-            titlePrefix = '리테이크 담당 완료';
+            // 담당 완료 알림은 완료멘트 입력 UI의 선택 수신자 broadcast 경로에서 보낸다.
+            // 여기서 notify_user_ids 전체에 자동 발송하면 사용자가 완료 시 해제한 대상에게도 중복 알림이 간다.
+            return;
           } else if (newRow.status === 'resolved') {
             action = 'resolve';
             titlePrefix = '리테이크 완료';
@@ -1838,6 +1839,60 @@ export default function App() {
         }
         // broadcast 를 즉시 받았으므로 lastSeen 갱신 → 다음 로그인 catch-up 에서 중복 차단
         if (me?.id) setAssignmentLastSeenAt(me.id, ap.createdAt ?? new Date().toISOString());
+        return;
+      }
+
+      if (e?.event === 'retake-assignee-completion') {
+        const p = e.payload as {
+          revisionId?: string;
+          sceneKey?: string;
+          setId?: string | null;
+          revisionNo?: number;
+          senderId?: string;
+          senderName?: string;
+          recipients?: string[];
+          note?: string;
+          status?: string;
+          updatedAt?: string;
+        } | undefined;
+        const me = useAuthStore.getState().currentUser;
+        if (!p || !me?.id) return;
+        if (!Array.isArray(p.recipients) || !p.recipients.includes(me.id)) return;
+        if (p.senderId === me.id) return;
+        const dedupeKey = `retake-assignee-completion:${p.revisionId ?? ''}:${p.senderId ?? ''}:${p.updatedAt ?? ''}`;
+        if (!dedupeNotification(dedupeKey)) return;
+
+        const ds = useDataStore.getState();
+        const sceneLabel = p.sceneKey
+          ? (buildNotificationSceneDisplayLabelFromSceneKey(
+            p.sceneKey,
+            ds.episodeTitles,
+            ds.episodes,
+          ) || p.sceneKey.split(':').pop() || p.sceneKey)
+          : '전반 항목';
+        const notePreview = p.note?.trim()
+          ? (p.note.trim().length > 60 ? p.note.trim().slice(0, 60) + '...' : p.note.trim())
+          : undefined;
+        const revisionLabel = Number.isFinite(p.revisionNo) ? `re#${p.revisionNo}` : '리테이크';
+
+        dispatchNotification({
+          type: 'revision',
+          title: `리테이크 담당 완료 — ${sceneLabel}`,
+          body: notePreview
+            ? `${p.senderName || '담당자'}님이 ${revisionLabel} 담당을 완료했습니다. ${notePreview}`
+            : `${p.senderName || '담당자'}님이 ${revisionLabel} 담당을 완료했습니다.`,
+          metadata: p.sceneKey
+            ? {
+                sceneName: p.sceneKey,
+                revisionId: p.revisionId,
+                revisionAction: 'assignee_done',
+              } as Record<string, unknown>
+            : {
+                revisionId: p.revisionId,
+                revisionAction: 'assignee_done',
+                retakeHubSetId: p.setId ?? undefined,
+              } as Record<string, unknown>,
+        }, notiSettingsRef.current);
         return;
       }
 

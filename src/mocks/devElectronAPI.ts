@@ -526,6 +526,9 @@ export function installDevElectronAPI(): void {
     supabaseDispatchFeedbackNotification: async (payload) => {
       console.log('[DEV] supabaseDispatchFeedbackNotification:', payload);
     },
+    supabaseDispatchRetakeAssigneeCompletionNotification: async (payload) => {
+      console.log('[DEV] supabaseDispatchRetakeAssigneeCompletionNotification:', payload);
+    },
     supabaseFetchMissedFeedbackNotifications: async (userId, since, limit, before) => {
       console.log('[DEV] supabaseFetchMissedFeedbackNotifications:', { userId, since, limit, before });
       return [];
