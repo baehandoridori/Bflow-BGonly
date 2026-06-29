@@ -468,6 +468,20 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.invoke('widget:close-popup', widgetId),
   widgetResize: (widgetId: string, width: number, height: number) =>
     ipcRenderer.invoke('widget:resize', widgetId, width, height),
+  // 위젯 팝업 → 본체 씬 상세 이동 (feedback:jump-to-scene 패턴 미러링)
+  widgetNavigateMain: (payload: unknown) =>
+    ipcRenderer.invoke('widget:navigate-main', payload),
+  onWidgetNavigateMain: (callback: (payload: {
+    sheetName: string; sceneId: string; sceneUuid: string;
+    episodeNumber?: number; partId?: string;
+  }) => void) => {
+    const handler = (_event: unknown, data: {
+      sheetName: string; sceneId: string; sceneUuid: string;
+      episodeNumber?: number; partId?: string;
+    }) => callback(data);
+    ipcRenderer.on('widget:navigate-main', handler);
+    return () => ipcRenderer.removeListener('widget:navigate-main', handler);
+  },
   widgetGetSize: (widgetId: string) =>
     ipcRenderer.invoke('widget:get-size', widgetId) as Promise<{ width: number; height: number } | null>,
   widgetCaptureBehind: (widgetId: string) =>

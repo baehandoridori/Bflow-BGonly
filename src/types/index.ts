@@ -1034,6 +1034,18 @@ export interface ElectronAPI {
       kind?: 'feedback' | 'assignment';
     }) => void,
   ) => () => void;
+  /** 위젯 팝업 → 본체 씬 상세 이동 — 팝업에서 본체로 점프 신호 전송 */
+  widgetNavigateMain?: (payload: {
+    sheetName: string; sceneId: string; sceneUuid: string;
+    episodeNumber?: number; partId?: string;
+  }) => Promise<void>;
+  /** 위젯 팝업 → 본체 씬 상세 이동 — 본체가 점프 신호 수신 */
+  onWidgetNavigateMain?: (
+    callback: (payload: {
+      sheetName: string; sceneId: string; sceneUuid: string;
+      episodeNumber?: number; partId?: string;
+    }) => void,
+  ) => () => void;
   supabaseBulkUpdateSceneStages: (updates: BulkStageUpdate[], updatedBy: string) => Promise<BulkUpdateResult[]>;
   supabaseBulkDeleteScenes: (sceneUuids: string[], deletedBy: string) => Promise<BulkUpdateResult[]>;
   supabaseBulkUpdateSceneFields: (updates: BulkFieldUpdate[], updatedBy: string) => Promise<BulkUpdateResult[]>;

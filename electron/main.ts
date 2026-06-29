@@ -3512,6 +3512,18 @@ ipcMain.handle('widget:resize', (_event, widgetId: string, width: number, height
   }
 });
 
+// 위젯 팝업의 씬 행 → 본체 윈도우 포커스 + 해당 씬 상세 열기 (feedback:jump-to-scene 패턴 미러링)
+ipcMain.handle('widget:navigate-main', (_e, payload: {
+  sheetName: string; sceneId: string; sceneUuid: string;
+  episodeNumber?: number; partId?: string;
+}) => {
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.show();
+    mainWindow.focus();
+    mainWindow.webContents.send('widget:navigate-main', payload);
+  }
+});
+
 ipcMain.handle('widget:get-size', (_event, widgetId: string) => {
   const win = widgetWindows.get(widgetId);
   if (win && !win.isDestroyed()) {

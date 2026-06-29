@@ -1924,9 +1924,19 @@ export default function App() {
       });
     });
 
+    // 위젯 팝업의 씬 행 → 본체 씬 상세 열기 (scene_change = detail 탭으로 모달 오픈)
+    const offWidgetNavigate = window.electronAPI.onWidgetNavigateMain?.((payload) => {
+      navigateNotificationToScene('scene_change', {
+        sceneId: payload.sceneUuid,
+        sceneName: payload.sceneId,
+        sheetName: payload.sheetName,
+      });
+    });
+
     return () => {
       offBroadcast?.();
       offJump?.();
+      offWidgetNavigate?.();
     };
   }, []);
 
