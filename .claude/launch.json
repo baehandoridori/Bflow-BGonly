@@ -5,7 +5,8 @@
       "name": "vite",
       "runtimeExecutable": "npm",
       "runtimeArgs": ["run", "dev"],
-      "port": 5173
+      "port": 5173,
+      "autoPort": true
     },
     {
       "name": "vite-preview",
@@ -55,6 +56,13 @@
       "runtimeExecutable": "python",
       "runtimeArgs": ["-m", "http.server", "5561"],
       "port": 5561
+    },
+    {
+      "name": "my-tasks-mockup",
+      "runtimeExecutable": "python",
+      "runtimeArgs": ["-m", "http.server", "5562", "--directory", ".superpowers/brainstorm/879-1782563792"],
+      "port": 5562,
+      "autoPort": true
     }
   ]
 }

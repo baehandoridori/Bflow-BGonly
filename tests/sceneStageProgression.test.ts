@@ -206,17 +206,17 @@ test('scene view uses sequential stage patches for single and bulk toggles', asy
 });
 
 test('task widget and compositing modal persist all changed background stages', async () => {
-  const myTasksWidget = await readFile(path.join(process.cwd(), 'src', 'components', 'widgets', 'MyTasksWidget.tsx'), 'utf-8');
+  const myTasksDataHook = await readFile(path.join(process.cwd(), 'src', 'components', 'widgets', 'my-tasks', 'hooks', 'useMyTasksData.ts'), 'utf-8');
   const compositingModal = await readFile(path.join(process.cwd(), 'src', 'views', 'compositing-dashboard', 'modal', 'CompositingSceneModal.tsx'), 'utf-8');
 
-  assert.match(myTasksWidget, /buildSequentialStagePatch\(scene, stage\)/);
-  assert.match(myTasksWidget, /getChangedSequentialStages\(scene, stagePatch\)/);
-  assert.match(myTasksWidget, /stageSaveBaselineRef/);
-  assert.match(myTasksWidget, /getChangedSequentialStages\(previousBaseline, stagePatch\)/);
-  assert.match(myTasksWidget, /persistSequentialStagePatchWithRollback\(queuedChangedStages/);
-  assert.match(myTasksWidget, /enqueueSequentialStageSave\(/);
-  assert.match(myTasksWidget, /persistSequentialStagePatchWithRollback\(/);
-  assert.doesNotMatch(myTasksWidget, /toggleSceneStage\(sheetName, scene\.sceneId, stage\)/);
+  assert.match(myTasksDataHook, /buildSequentialStagePatch\(scene, stage\)/);
+  assert.match(myTasksDataHook, /getChangedSequentialStages\(scene, stagePatch\)/);
+  assert.match(myTasksDataHook, /stageSaveBaselineRef/);
+  assert.match(myTasksDataHook, /getChangedSequentialStages\(previousBaseline, stagePatch\)/);
+  assert.match(myTasksDataHook, /persistSequentialStagePatchWithRollback\(queuedChangedStages/);
+  assert.match(myTasksDataHook, /enqueueSequentialStageSave\(/);
+  assert.match(myTasksDataHook, /persistSequentialStagePatchWithRollback\(/);
+  assert.doesNotMatch(myTasksDataHook, /toggleSceneStage\(sheetName, scene\.sceneId, stage\)/);
 
   assert.match(compositingModal, /buildSequentialStagePatch\(sc, stage\)/);
   assert.match(compositingModal, /getChangedSequentialStages\(sc, stagePatch\)/);
