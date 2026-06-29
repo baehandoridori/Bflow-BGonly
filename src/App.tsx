@@ -1925,7 +1925,7 @@ export default function App() {
         if (notiSettings.commentNotify === false) return;
         if (!Array.isArray(p.recipients) || !p.recipients.includes(me.id)) return;
         if (p.senderId === me.id) return;
-        const dedupeKey = `retake-assignee-completion:${p.revisionId ?? ''}:${p.senderId ?? ''}:${p.updatedAt ?? ''}`;
+        const dedupeKey = `revision:${p.revisionId ?? ''}:assignee_done:${p.updatedAt ?? ''}`;
         if (!dedupeNotification(dedupeKey)) return;
 
         const ds = useDataStore.getState();

@@ -56,6 +56,7 @@ test('retake completion notifications use a selected-recipient broadcast path', 
   assert.match(broadcast, /retake-assignee-completion/);
   assert.match(app, /retake-assignee-completion/);
   assert.match(app, /if \(notiSettings\.commentNotify === false\) return/);
+  assert.match(app, /const dedupeKey = `revision:\$\{p\.revisionId \?\? ''\}:assignee_done:\$\{p\.updatedAt \?\? ''\}`/);
   assert.match(app, /isGeneralRevisionSceneKey/);
   assert.match(app, /const sceneKey = p\.sceneKey;/);
   assert.match(app, /const isGeneralRetakeCompletion = !sceneKey \|\| isGeneralRevisionSceneKey\(sceneKey\);/);
