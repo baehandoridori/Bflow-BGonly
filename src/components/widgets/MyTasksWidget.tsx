@@ -21,58 +21,11 @@ import {
   isSequentialStageComplete,
   persistSequentialStagePatchWithRollback,
   SEQUENTIAL_STAGE_ORDER,
-  snapshotSequentialStages,
 } from '@/utils/sceneStageProgression';
-import type { SequentialStagePatch } from '@/utils/sceneStageProgression';
 import { updateEvent as updateCalEvent, deleteEvent as deleteCalEvent, addEvent as addCalEvent, findEventByTodoId } from '@/services/calendarService';
 import * as supabaseService from '@/services/supabaseService';
-
-/* ─── 타입 ──────────────────────────────────── */
-
-type SceneKey = string;
-const makeKey = (sheetName: string, sceneId: string): SceneKey => `${sheetName}:${sceneId}`;
-
-interface PersonalTodo {
-  id: string;
-  title: string;
-  memo: string;
-  completed: boolean;
-  createdAt: string;
-  startDate?: string;
-  endDate?: string;
-  addToCalendar?: boolean;
-}
-
-interface TaskView {
-  id: string;
-  name: string;
-  type: 'assigned' | 'custom';
-  sceneKeys: SceneKey[];
-  personalTodos: PersonalTodo[];
-}
-
-interface FlatScene {
-  scene: Scene;
-  sheetName: string;
-  sceneIndex: number;
-  episodeNumber: number;
-  partId: string;
-  department: Department;
-  key: SceneKey;
-}
-
-type StageSaveBaseline = SequentialStagePatch & {
-  completedBy?: string;
-  completedAt?: string;
-};
-
-function createStageSaveBaseline(scene: Scene | StageSaveBaseline): StageSaveBaseline {
-  return {
-    ...snapshotSequentialStages(scene),
-    completedBy: scene.completedBy ?? '',
-    completedAt: scene.completedAt ?? '',
-  };
-}
+import type { SceneKey, PersonalTodo, TaskView, FlatScene, StageSaveBaseline } from './my-tasks/types';
+import { makeKey, createStageSaveBaseline } from './my-tasks/types';
 
 /* ─── 기본 뷰 ──────────────────────────────── */
 const DEFAULT_VIEW: TaskView = { id: '__assigned', name: '내 할일', type: 'assigned', sceneKeys: [], personalTodos: [] };
