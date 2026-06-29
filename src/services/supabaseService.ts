@@ -12,6 +12,7 @@ import type {
   CommentReadStateRow,
 } from '../types';
 import { applyAssigneeProgressMetadata } from '../utils/assigneeProgress';
+import { normalizeCharacterImageBackground, normalizeCharacterImageFit } from '../utils/characterAssets';
 
 // 일괄 작업 타입 재노출 — 다른 렌더러 모듈에서 쉽게 참조 가능
 export type { BulkStageUpdate, BulkFieldUpdate, BulkUpdateResult };
@@ -28,7 +29,10 @@ export async function testSupabaseConnection(): Promise<{ ok: boolean; error?: s
 
 export async function readAllFromSupabase(): Promise<Episode[]> {
   const data = await window.electronAPI.supabaseReadAll();
-  return data as Episode[];
+  return (data as Array<Episode & { reel_file_path?: string | null }>).map((ep) => ({
+    ...ep,
+    reelFilePath: ep.reelFilePath ?? ep.reel_file_path ?? null,
+  }));
 }
 
 export async function addEpisodeToSupabase(episodeNumber: number, department?: string): Promise<void> {
@@ -45,6 +49,10 @@ export async function archiveEpisodeInSupabase(episodeNumber: number, archivedBy
 
 export async function unarchiveEpisodeInSupabase(episodeNumber: number): Promise<void> {
   await window.electronAPI.supabaseUnarchiveEpisode(episodeNumber);
+}
+
+export async function updateEpisodeReelPath(episodeNumber: number, reelFilePath: string | null): Promise<void> {
+  await window.electronAPI.supabaseUpdateEpisodeReelPath(episodeNumber, reelFilePath);
 }
 
 export async function readArchivedFromSupabase(): Promise<unknown[]> {
@@ -782,6 +790,7 @@ export function rowToCharacter(row: any): Character {
     name: row.name,
     status: (row.status ?? 'active') as Character['status'],
     memo: row.memo ?? null,
+    workFolderPath: row.work_folder_path ?? null,
     sortOrder: row.sort_order ?? 0,
     episodeIds: [],
     createdAt: row.created_at,
@@ -791,6 +800,8 @@ export function rowToCharacter(row: any): Character {
 
 /** DB row(snake_case) → 도메인 CharacterCostume(camelCase). */
 export function rowToCostume(row: any): CharacterCostume {
+  const hasDesignAssigneeColumn = Object.prototype.hasOwnProperty.call(row, 'design_assignee');
+  const hasRiggingAssigneeColumn = Object.prototype.hasOwnProperty.call(row, 'rigging_assignee');
   return {
     id: row.id,
     characterId: row.character_id,
@@ -799,8 +810,13 @@ export function rowToCostume(row: any): CharacterCostume {
     designStage: (row.design_stage ?? 'waiting') as CostumeDesignStage,
     riggingStage: (row.rigging_stage ?? 'waiting') as CostumeRiggingStage,
     featuredImageUrl: row.featured_image_url ?? null,
+    workFilePath: row.work_file_path ?? null,
+    imageBackground: normalizeCharacterImageBackground(row.image_background),
+    imageFit: normalizeCharacterImageFit(row.image_fit),
     structureTags: Array.isArray(row.structure_tags) ? row.structure_tags : [],
     assetTags: Array.isArray(row.asset_tags) ? row.asset_tags : [],
+    designAssignee: hasDesignAssigneeColumn ? row.design_assignee ?? null : row.assignee ?? null,
+    riggingAssignee: hasRiggingAssigneeColumn ? row.rigging_assignee ?? null : row.assignee ?? null,
     assignee: row.assignee ?? null,
     memo: row.memo ?? null,
     sortOrder: row.sort_order ?? 0,
@@ -876,8 +892,13 @@ export async function updateCharacterCostume(
     designStage: CostumeDesignStage;
     riggingStage: CostumeRiggingStage;
     featuredImageUrl: string | null;
+    workFilePath: string | null;
+    imageBackground: CharacterCostume['imageBackground'];
+    imageFit: CharacterCostume['imageFit'];
     structureTags: string[];
     assetTags: string[];
+    designAssignee: string | null;
+    riggingAssignee: string | null;
     assignee: string | null;
     memo: string | null;
     sortOrder: number;
@@ -894,8 +915,13 @@ export async function updateCharacterCostume(
   if (updates.designStage !== undefined) snake.design_stage = updates.designStage;
   if (updates.riggingStage !== undefined) snake.rigging_stage = updates.riggingStage;
   if (updates.featuredImageUrl !== undefined) snake.featured_image_url = updates.featuredImageUrl;
+  if (updates.workFilePath !== undefined) snake.work_file_path = updates.workFilePath;
+  if (updates.imageBackground !== undefined) snake.image_background = updates.imageBackground;
+  if (updates.imageFit !== undefined) snake.image_fit = updates.imageFit;
   if (updates.structureTags !== undefined) snake.structure_tags = updates.structureTags;
   if (updates.assetTags !== undefined) snake.asset_tags = updates.assetTags;
+  if (updates.designAssignee !== undefined) snake.design_assignee = updates.designAssignee;
+  if (updates.riggingAssignee !== undefined) snake.rigging_assignee = updates.riggingAssignee;
   if (updates.assignee !== undefined) snake.assignee = updates.assignee;
   if (updates.memo !== undefined) snake.memo = updates.memo;
   if (updates.sortOrder !== undefined) snake.sort_order = updates.sortOrder;

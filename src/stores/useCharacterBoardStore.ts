@@ -106,6 +106,7 @@ interface CharacterBoardStore {
 
   addCharacter: (name: string, memo?: string) => Promise<Character | null>;
   updateCharacterMemo: (id: string, memo: string) => Promise<void>;
+  updateCharacterFolder: (id: string, workFolderPath: string | null) => Promise<void>;
   renameCharacter: (id: string, name: string) => Promise<void>;
   deleteCharacter: (id: string) => Promise<void>;
 
@@ -120,8 +121,17 @@ interface CharacterBoardStore {
   updateCostumeField: (
     id: string,
     updates: Partial<Pick<CharacterCostume,
-      'name' | 'versionNo' | 'featuredImageUrl' | 'assignee' | 'memo'>>,
-  ) => Promise<void>;
+      | 'name'
+      | 'versionNo'
+      | 'featuredImageUrl'
+      | 'workFilePath'
+      | 'imageBackground'
+      | 'imageFit'
+      | 'assignee'
+      | 'designAssignee'
+      | 'riggingAssignee'
+      | 'memo'>>,
+  ) => Promise<boolean>;
   setCostumeTags: (id: string, kind: 'structure' | 'asset', tags: string[]) => Promise<void>;
   setVersion: (id: string, versionNo: number) => Promise<void>;
   deleteCostume: (id: string) => Promise<void>;
@@ -221,6 +231,18 @@ export const useCharacterBoardStore = create<CharacterBoardStore>((set, get) => 
     }
   },
 
+  updateCharacterFolder: async (id, workFolderPath) => {
+    const prev = get().characters;
+    set({ characters: prev.map((c) => (c.id === id ? { ...c, workFolderPath } : c)) });
+    try {
+      await svcUpdateCharacter(id, { work_folder_path: workFolderPath });
+    } catch (err) {
+      console.error('[character-board] updateCharacterFolder 실패:', err);
+      set({ characters: prev });
+      toast.error('작업 폴더 저장에 실패했어요');
+    }
+  },
+
   renameCharacter: async (id, name) => {
     const prev = get().characters;
     set({ characters: prev.map((c) => (c.id === id ? { ...c, name } : c)) });
@@ -305,9 +327,7 @@ export const useCharacterBoardStore = create<CharacterBoardStore>((set, get) => 
     await applyCostumeUpdate(set, get, id, updates, '단계 변경에 실패했어요', logContext);
   },
 
-  updateCostumeField: async (id, updates) => {
-    await applyCostumeUpdate(set, get, id, updates, '저장에 실패했어요');
-  },
+  updateCostumeField: async (id, updates) => applyCostumeUpdate(set, get, id, updates, '저장에 실패했어요'),
 
   setCostumeTags: async (id, kind, tags) => {
     const updates = kind === 'structure' ? { structureTags: tags } : { assetTags: tags };
@@ -505,13 +525,14 @@ async function applyCostumeUpdate(
   errorMsg: string,
   /** 단계 변경일 때만 — 메인이 활동 피드에 기록할 표시용 컨텍스트. */
   logContext?: CostumeActivityLogContext,
-): Promise<void> {
+): Promise<boolean> {
   const prev = get().costumes;
   const prevCostume = prev.find((c) => c.id === id);
   const next = prev.map((c) => (c.id === id ? { ...c, ...updates } : c));
   set({ costumes: next, byCharacter: buildByCharacter(next) });
   try {
     await svcUpdateCostume(id, updates, logContext);
+    return true;
   } catch (err) {
     console.error('[character-board] updateCostume 실패:', err);
     // 전체 스냅샷을 되돌리면 그 사이 성공한 다른 업데이트/실시간 머지를 덮어쓴다.
@@ -532,6 +553,7 @@ async function applyCostumeUpdate(
       set({ costumes: reverted, byCharacter: buildByCharacter(reverted) });
     }
     toast.error(errorMsg);
+    return false;
   }
 }
 

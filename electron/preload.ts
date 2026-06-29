@@ -14,6 +14,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.invoke('path:choose-folder') as Promise<string | null>,
   chooseFilePath: () =>
     ipcRenderer.invoke('path:choose-file') as Promise<string | null>,
+  pathDirname: (targetPath: string) =>
+    ipcRenderer.invoke('path:dirname', targetPath) as Promise<string>,
   pathExists: (targetPath: string) =>
     ipcRenderer.invoke('path:exists', targetPath) as Promise<boolean>,
 
@@ -108,6 +110,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.invoke('supabase:archive-episode', episodeNumber, archivedBy, archiveMemo),
   supabaseUnarchiveEpisode: (episodeNumber: number) =>
     ipcRenderer.invoke('supabase:unarchive-episode', episodeNumber),
+  supabaseUpdateEpisodeReelPath: (episodeNumber: number, reelFilePath: string | null) =>
+    ipcRenderer.invoke('supabase:update-episode-reel-path', episodeNumber, reelFilePath),
   supabaseReadArchived: () =>
     ipcRenderer.invoke('supabase:read-archived'),
   supabaseAddPart: (episodeNumber: number, partId: string, department?: string) =>

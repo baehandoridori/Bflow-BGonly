@@ -1124,6 +1124,11 @@ ipcMain.handle('path:choose-file', async () => {
   return result.filePaths[0] ?? null;
 });
 
+ipcMain.handle('path:dirname', async (_event, targetPath: string) => {
+  if (typeof targetPath !== 'string' || !targetPath.trim()) return '';
+  return path.dirname(targetPath.trim());
+});
+
 const PATH_EXISTS_TIMEOUT_MS = 1500;
 
 function pathExistsAsyncWithTimeout(targetPath: string): Promise<boolean> {
@@ -1220,6 +1225,7 @@ import {
   softDeleteEpisode as sbSoftDeleteEpisode,
   archiveEpisode as sbArchiveEpisode,
   unarchiveEpisode as sbUnarchiveEpisode,
+  updateEpisodeReelPath as sbUpdateEpisodeReelPath,
   readArchivedEpisodes as sbReadArchived,
   addPart as sbAddPart,
   softDeletePart as sbSoftDeletePart,
@@ -1519,6 +1525,9 @@ ipcMain.handle('supabase:archive-episode', wrapIpc(async (_e: unknown, episodeNu
 }));
 ipcMain.handle('supabase:unarchive-episode', wrapIpc(async (_e: unknown, episodeNumber: number) => {
   await sbUnarchiveEpisode(episodeNumber);
+}));
+ipcMain.handle('supabase:update-episode-reel-path', wrapIpc(async (_e: unknown, episodeNumber: number, reelFilePath: string | null) => {
+  await sbUpdateEpisodeReelPath(episodeNumber, reelFilePath);
 }));
 ipcMain.handle('supabase:read-archived', wrapIpc(async () => {
   return sbReadArchived();

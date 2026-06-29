@@ -14,6 +14,7 @@ test('delete_user_cascade migration records the full atomic user deletion policy
   assert.match(sql, /CREATE OR REPLACE FUNCTION public\.delete_user_cascade\(p_user_id TEXT\)/);
   assert.match(sql, /UPDATE scenes\s+SET assignee = NULL WHERE assignee = v_user_name;/);
   assert.match(sql, /UPDATE comp_revisions SET assignee = NULL WHERE assignee = v_user_name;/);
+  assert.doesNotMatch(sql, /character_costumes/, 'April migration must not reference tables introduced later');
 
   for (const table of ['personal_todos', 'task_views', 'memos', 'private_calendar_events']) {
     assert.match(sql, new RegExp(`DELETE FROM ${table}\\s+WHERE user_id = p_user_id;`));

@@ -176,6 +176,8 @@ export interface Character {
   name: string;
   status: 'active' | 'archived';
   memo: string | null;
+  /** 캐릭터 기본 작업 폴더. 실제 폴더를 만들거나 복사하지 않고 경로만 저장한다. */
+  workFolderPath: string | null;
   sortOrder: number;
   episodeIds: number[];        // 연결된 episodeNumber 목록 (매핑 테이블 조립)
   createdAt: string;
@@ -194,6 +196,23 @@ export interface EpisodeCharacterLink {
   costumeId: string | null;
 }
 
+export type CharacterImageBackground = 'transparent' | 'black' | 'white' | 'checker';
+
+export interface CharacterImageFit {
+  /** 1 = 원본 contain 기준. 실제 렌더러에서 clamp 한다. */
+  scale: number;
+  /** 비율 잠금 해제 시 가로 배율. 없으면 scale 을 쓴다. */
+  scaleX?: number;
+  /** 비율 잠금 해제 시 세로 배율. 없으면 scale 을 쓴다. */
+  scaleY?: number;
+  /** 표시 영역 기준 가로 이동 px. */
+  x: number;
+  /** 표시 영역 기준 세로 이동 px. */
+  y: number;
+  /** 상세 편집기에서 비율 잠금 여부. */
+  lockAspect: boolean;
+}
+
 /** 캐릭터 복장 (버전·진행 단위). character_costumes 테이블 1 row. */
 export interface CharacterCostume {
   id: string;                  // UUID
@@ -203,8 +222,16 @@ export interface CharacterCostume {
   designStage: CostumeDesignStage;
   riggingStage: CostumeRiggingStage;
   featuredImageUrl: string | null;
+  /** 이 복장에 연결된 작업 파일(.moho 등). */
+  workFilePath: string | null;
+  /** 투명 PNG 표시용 배경. */
+  imageBackground: CharacterImageBackground;
+  /** 썸네일/대표 이미지 표시 변환값. 원본 이미지는 수정하지 않는다. */
+  imageFit: CharacterImageFit;
   structureTags: string[];
   assetTags: string[];
+  designAssignee: string | null;
+  riggingAssignee: string | null;
   assignee: string | null;
   memo: string | null;
   sortOrder: number;
@@ -468,6 +495,8 @@ export interface Part {
 export interface Episode {
   episodeNumber: number;
   title: string; // 'EP.01'
+  /** 에피소드 릴 파일 경로. 없으면 null. */
+  reelFilePath?: string | null;
   parts: Part[];
 }
 
@@ -809,6 +838,7 @@ export interface ElectronAPI {
   shellOpenPath?: (targetPath: string) => Promise<{ ok: boolean; error?: string }>;
   chooseFolderPath?: () => Promise<string | null>;
   chooseFilePath?: () => Promise<string | null>;
+  pathDirname?: (targetPath: string) => Promise<string>;
   pathExists?: (targetPath: string) => Promise<boolean>;
   /** 외부 URL 을 기본 브라우저로 열기 (메모 링크 전용) */
   openExternal?: (url: string) => Promise<{ ok: boolean; error?: string }>;
@@ -903,6 +933,7 @@ export interface ElectronAPI {
   supabaseSoftDeleteEpisode: (episodeNumber: number) => Promise<void>;
   supabaseArchiveEpisode: (episodeNumber: number, archivedBy: string, archiveMemo: string) => Promise<void>;
   supabaseUnarchiveEpisode: (episodeNumber: number) => Promise<void>;
+  supabaseUpdateEpisodeReelPath: (episodeNumber: number, reelFilePath: string | null) => Promise<void>;
   supabaseReadArchived: () => Promise<unknown[]>;
   supabaseAddPart: (episodeNumber: number, partId: string, department?: string) => Promise<void>;
   supabaseSoftDeletePart: (sheetName: string) => Promise<void>;
