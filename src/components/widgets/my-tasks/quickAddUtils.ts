@@ -45,14 +45,17 @@ export function filterSceneCandidates(
 ): SceneCandidate[] {
   const q = query.trim().toLowerCase();
   if (!q) return [];
-  const qDigits = q.replace(/\D/g, '');
+  // 끝자리 번호 매칭은 '씬처럼 생긴' 순수 숫자 입력에만 적용한다(P2).
+  // '회의 1차', '10시 확인'처럼 숫자가 섞인 일반 메모가 씬 끝자리와 매칭돼
+  // 개인 할일 대신 씬이 추가되는 것을 막는다.
+  const numericQuery = /^\d+$/.test(q) ? q.replace(/^0+/, '') : null;
 
   const matched = candidates.filter((f) => {
     const id = f.scene.sceneId.toLowerCase();
     if (id.includes(q)) return true;
-    if (qDigits) {
+    if (numericQuery) {
       const tail = trailingNumber(f.scene.sceneId);
-      if (tail && tail.startsWith(qDigits)) return true;
+      if (tail && tail.startsWith(numericQuery)) return true;
     }
     return false;
   });
@@ -64,6 +67,9 @@ export function filterSceneCandidates(
   }));
 
   scored.sort((a, b) => {
+    // 추가 가능한 항목을 먼저 — 내 담당 씬은 보통 이미 추가돼 있어, '추가됨' 비활성 행이
+    // 상위 limit을 다 차지하면 추가 가능한 씬이 잘려나가고 Enter가 먹통이 된다(P3).
+    if (a.alreadyAdded !== b.alreadyAdded) return a.alreadyAdded ? 1 : -1;
     if (a.isMine !== b.isMine) return a.isMine ? -1 : 1;
     if (a.flat.episodeNumber !== b.flat.episodeNumber) return a.flat.episodeNumber - b.flat.episodeNumber;
     if (a.flat.partId !== b.flat.partId) return a.flat.partId.localeCompare(b.flat.partId);

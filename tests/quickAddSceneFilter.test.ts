@@ -82,6 +82,27 @@ test('에피소드 → 번호 정렬(담당 동일)', () => {
   );
 });
 
+test('숫자 섞인 일반 메모는 씬으로 오매칭되지 않는다(P2)', () => {
+  const cands = [flat('a001'), flat('a010'), flat('a100')];
+  // 공백·한글이 섞인 일반 메모 → 끝자리 숫자 매칭이 적용되지 않아 씬 후보 0
+  assert.deepEqual(filterSceneCandidates(cands, '회의 1차', '배한솔', NONE), []);
+  assert.deepEqual(filterSceneCandidates(cands, '10시 확인', '배한솔', NONE), []);
+  // 순수 숫자 입력은 여전히 끝자리 번호로 씬 매칭
+  assert.equal(filterSceneCandidates(cands, '1', '배한솔', NONE).length, 3);
+});
+
+test('추가 가능한 씬이 추가됨 항목보다 먼저 와서 limit에 안 잘린다(P3)', () => {
+  // a001~a008: 이미 추가됨(내 담당), a009: 추가 가능
+  const cands = Array.from({ length: 9 }, (_, i) =>
+    flat(`a${String(i + 1).padStart(3, '0')}`, { assignee: '배한솔' }),
+  );
+  const added = new Set<SceneKey>(cands.slice(0, 8).map((f) => f.key));
+  const r = filterSceneCandidates(cands, 'a00', '배한솔', added, 8);
+  // 추가 가능한 a009 가 상위(맨 앞)에 와서 limit(8) 안에 살아남아야 함
+  assert.equal(r[0].flat.scene.sceneId, 'a009');
+  assert.equal(r[0].alreadyAdded, false);
+});
+
 test('limit 적용', () => {
   const cands = Array.from({ length: 20 }, (_, i) => flat(`a${String(i + 1).padStart(3, '0')}`));
   const r = filterSceneCandidates(cands, 'a', '배한솔', NONE, 8);
