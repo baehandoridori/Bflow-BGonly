@@ -1179,6 +1179,7 @@ export function CommentPanel({
           requesterId: currentUser.id,
           requesterName: currentUser.name,
           notifyUserIds: quickRevisionNotifyIds,
+          assigneeIds: quickRevisionNotifyIds,
         });
         setInput('');
         inputValueRef.current = '';

@@ -32,7 +32,9 @@ export function AddRevisionForm({
   const [imagePreview, setImagePreview] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [notifyIds, setNotifyIds] = useState<string[]>([]);
+  const [assigneeIds, setAssigneeIds] = useState<string[]>([]);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const canSubmitRevision = !!currentUser && description.trim().length > 0 && assigneeIds.length > 0 && !submitting;
 
   // 자동 체크 대상자 — 모든 컴포지터 + 그 씬 담당자 (등록자 본인 제외).
   // RevisionPanel.tsx 의 defaultRecipients 와 동일 패턴.
@@ -66,7 +68,7 @@ export function AddRevisionForm({
   };
 
   const handleSubmit = async () => {
-    if (!description.trim() || !currentUser || submitting) return;
+    if (!canSubmitRevision || !currentUser) return;
     setSubmitting(true);
     try {
       await createRevision({
@@ -79,6 +81,7 @@ export function AddRevisionForm({
         requesterName: currentUser.name,
         // v1.19.4: RevisionRecipientPicker 가 계산한 알림 대상자 (자동 체크 ± 사용자 수정).
         notifyUserIds: notifyIds,
+        assigneeIds,
       });
       onClose();
     } catch (err) {
@@ -133,9 +136,9 @@ export function AddRevisionForm({
         {/* 알림 받을 사람 — v1.19.4: 컴포지터 + 그 씬 담당자 자동 체크 */}
         <div>
           <label className="text-[10px] font-bold uppercase tracking-wider text-text-secondary mb-1 block">
-            알림 받을 사람
+            알림 받을 사람 · 담당자
             <span className="text-text-secondary/50 font-normal normal-case ml-1">
-              — 자동 체크된 사람을 클릭하면 제외됩니다
+              — 담당자를 1명 이상 선택해야 등록됩니다
             </span>
           </label>
           <RevisionRecipientPicker
@@ -143,7 +146,14 @@ export function AddRevisionForm({
             defaultCheckedIds={defaultRecipients}
             excludeUserId={currentUser?.id || ''}
             onChange={setNotifyIds}
+            enableAssignee
+            onAssigneesChange={setAssigneeIds}
           />
+          {assigneeIds.length === 0 && (
+            <p className="mt-1.5 text-[11px] text-amber-400/90">
+              담당자를 1명 이상 선택해야 리테이크를 등록할 수 있습니다.
+            </p>
+          )}
         </div>
 
         {/* 액션 */}
@@ -175,7 +185,7 @@ export function AddRevisionForm({
             </button>
             <button
               onClick={handleSubmit}
-              disabled={!description.trim() || submitting}
+              disabled={!canSubmitRevision}
               className="px-4 py-1.5 text-[11px] font-medium rounded-lg text-white transition-all cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
               style={{ backgroundColor: '#6C5CE7' }}
             >
