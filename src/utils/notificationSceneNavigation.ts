@@ -1,4 +1,5 @@
 import type { Episode, ScenesDeptFilter } from '../types';
+import { buildRevisionSceneKeyLookupKeys } from './revisionSceneKey.ts';
 
 export interface NotificationSceneMetadata {
   sceneId?: string;
@@ -124,14 +125,20 @@ function findBySheetContext(
   return null;
 }
 
-function parseSceneKey(sceneKey: string): { episodeNumber: number; partId: string; sceneName: string } | null {
+function parseSceneKey(sceneKey: string): {
+  episodeKey: string;
+  episodeNumber: number;
+  partId: string;
+  sceneName: string;
+} | null {
   const parts = sceneKey.split(':');
   if (parts.length < 3) return null;
+  const episodeKey = parts[0].trim();
   const episodeNumber = Number(parts[0].replace(/\D/g, ''));
   const partId = parts[1]?.trim();
   const sceneName = parts.slice(2).join(':').trim();
-  if (!Number.isFinite(episodeNumber) || !partId || !sceneName) return null;
-  return { episodeNumber, partId, sceneName };
+  if (!episodeKey || !Number.isFinite(episodeNumber) || !partId || !sceneName) return null;
+  return { episodeKey, episodeNumber, partId, sceneName };
 }
 
 function findBySceneKey(episodes: Episode[], sceneKey: string | undefined): NotificationSceneTarget | null {
@@ -139,16 +146,21 @@ function findBySceneKey(episodes: Episode[], sceneKey: string | undefined): Noti
   const parsed = parseSceneKey(sceneKey);
   if (!parsed) return null;
   const normalizedScene = parsed.sceneName.toLowerCase();
-  const numericSceneNo = Number(parsed.sceneName);
   const normalizedPart = parsed.partId.toLowerCase();
 
   for (const ep of episodes) {
     if (ep.episodeNumber !== parsed.episodeNumber) continue;
     for (const part of ep.parts) {
       if (part.partId.trim().toLowerCase() !== normalizedPart) continue;
+      const siblingSceneIds = part.scenes.map((candidate) => candidate.sceneId);
+      const targetLookupKeys = new Set(buildRevisionSceneKeyLookupKeys(sceneKey, { siblingSceneIds }));
       const scene = part.scenes.find((candidate) => {
-        if (Number.isFinite(numericSceneNo) && Number(candidate.no) === numericSceneNo) return true;
-        return candidate.sceneId.trim().toLowerCase() === normalizedScene;
+        const candidateSceneKey = `${parsed.episodeKey}:${part.partId}:${candidate.sceneId}`;
+        const candidateLookupKeys = buildRevisionSceneKeyLookupKeys(candidateSceneKey, { siblingSceneIds });
+        return (
+          candidateLookupKeys.some((key) => targetLookupKeys.has(key)) ||
+          candidate.sceneId.trim().toLowerCase() === normalizedScene
+        );
       });
       if (scene) return buildTarget(ep, part, scene);
     }

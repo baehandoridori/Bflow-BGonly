@@ -48,6 +48,38 @@ test('comment and revision comment notifications dedupe by comment source id', (
   );
 });
 
+test('revision event id keeps separate assignee completion notifications distinct', () => {
+  assert.equal(
+    getNotificationIdentity({
+      type: 'revision',
+      metadata: {
+        revisionId: 'revision-1',
+        revisionAction: 'assignee_done',
+        revisionEventId: 'user-a:2026-06-29T07:00:00.000Z',
+      },
+    }),
+    'revision:revision-1:assignee_done:user-a:2026-06-29T07:00:00.000Z',
+  );
+  assert.notEqual(
+    getNotificationIdentity({
+      type: 'revision',
+      metadata: {
+        revisionId: 'revision-1',
+        revisionAction: 'assignee_done',
+        revisionEventId: 'user-a:2026-06-29T07:00:00.000Z',
+      },
+    }),
+    getNotificationIdentity({
+      type: 'revision',
+      metadata: {
+        revisionId: 'revision-1',
+        revisionAction: 'assignee_done',
+        revisionEventId: 'user-b:2026-06-29T07:05:00.000Z',
+      },
+    }),
+  );
+});
+
 test('prependNotificationDeduped preserves read state and local id for duplicate source notifications', () => {
   const existing = {
     id: 'local-existing',

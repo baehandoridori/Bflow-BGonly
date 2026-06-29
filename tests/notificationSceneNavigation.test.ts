@@ -36,6 +36,20 @@ const episodes = [
             review: false,
             png: false,
           },
+          {
+            id: 'scene-bg-020-uuid',
+            no: 7,
+            sceneId: 'b020',
+            memo: '',
+            storyboardUrl: '',
+            guideUrl: '',
+            assignee: '한솔',
+            layoutId: '',
+            lo: false,
+            done: false,
+            review: false,
+            png: false,
+          },
         ],
       },
       {
@@ -116,11 +130,11 @@ test('mention notification resolves legacy EP:part:sceneName metadata without re
   );
 });
 
-test('revision scene-key notifications resolve normalized numeric scene numbers by scene order', () => {
+test('revision scene-key notifications resolve normalized numeric scene numbers by scene id, not sort order', () => {
   assert.deepEqual(
     resolveNotificationSceneTarget(
       {
-        sceneName: 'EP02:B:18',
+        sceneName: 'EP02:B:20',
         revisionId: 'revision-1',
       },
       episodes,
@@ -129,8 +143,8 @@ test('revision scene-key notifications resolve normalized numeric scene numbers 
       episodeNumber: 2,
       partId: 'B',
       sheetName: 'EP02_B_BG',
-      sceneUuid: 'scene-bg-uuid',
-      sceneName: 'b018',
+      sceneUuid: 'scene-bg-020-uuid',
+      sceneName: 'b020',
     },
   );
 });

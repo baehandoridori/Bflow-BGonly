@@ -1859,6 +1859,8 @@ export default function App() {
         } | undefined;
         const me = useAuthStore.getState().currentUser;
         if (!p || !me?.id) return;
+        const notiSettings = notiSettingsRef.current;
+        if (notiSettings.commentNotify === false) return;
         if (!Array.isArray(p.recipients) || !p.recipients.includes(me.id)) return;
         if (p.senderId === me.id) return;
         const dedupeKey = `retake-assignee-completion:${p.revisionId ?? ''}:${p.senderId ?? ''}:${p.updatedAt ?? ''}`;
@@ -1881,6 +1883,7 @@ export default function App() {
           ? (p.note.trim().length > 60 ? p.note.trim().slice(0, 60) + '...' : p.note.trim())
           : undefined;
         const revisionLabel = Number.isFinite(p.revisionNo) ? `re#${p.revisionNo}` : '리테이크';
+        const revisionEventId = [p.senderId, p.updatedAt].filter(Boolean).join(':') || undefined;
 
         dispatchNotification({
           type: 'revision',
@@ -1896,13 +1899,15 @@ export default function App() {
                 partId: sceneTarget?.partId,
                 revisionId: p.revisionId,
                 revisionAction: 'assignee_done',
+                revisionEventId,
               } as Record<string, unknown>
             : {
                 revisionId: p.revisionId,
                 revisionAction: 'assignee_done',
+                revisionEventId,
                 retakeHubSetId: p.setId ?? undefined,
               } as Record<string, unknown>,
-        }, notiSettingsRef.current);
+        }, notiSettings);
         return;
       }
 
