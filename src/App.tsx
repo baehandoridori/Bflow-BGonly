@@ -132,13 +132,17 @@ type AssigneeCompletionFallback = {
 function buildAssigneeCompletionFallbackCandidate(
   userId: string,
   state: RevisionAssigneeState | undefined,
+  fallbackNotifyUserIds?: string[],
 ): AssigneeCompletionFallback | null {
   if (state?.state !== 'done') return null;
-  if (!Array.isArray(state.completionNotifyUserIds)) return null;
+  const notifyUserIds = Array.isArray(state.completionNotifyUserIds)
+    ? state.completionNotifyUserIds
+    : fallbackNotifyUserIds;
+  if (!Array.isArray(notifyUserIds)) return null;
   return {
     userId,
     senderName: state.completedByName || userId,
-    notifyUserIds: state.completionNotifyUserIds.filter((id): id is string => typeof id === 'string' && id.trim().length > 0),
+    notifyUserIds: notifyUserIds.filter((id): id is string => typeof id === 'string' && id.trim().length > 0 && id !== userId),
     note: state.note,
     doneAt: state.doneAt,
   };
@@ -146,12 +150,13 @@ function buildAssigneeCompletionFallbackCandidate(
 
 function resolveLatestAssigneeCompletionFallback(
   assigneeStates?: Record<string, RevisionAssigneeState> | null,
+  fallbackNotifyUserIds?: string[],
 ): AssigneeCompletionFallback | null {
   if (!assigneeStates || typeof assigneeStates !== 'object') return null;
   let latest: AssigneeCompletionFallback | null = null;
 
   for (const [userId, state] of Object.entries(assigneeStates)) {
-    const candidate = buildAssigneeCompletionFallbackCandidate(userId, state);
+    const candidate = buildAssigneeCompletionFallbackCandidate(userId, state, fallbackNotifyUserIds);
     if (!candidate) continue;
     if (!latest || (candidate.doneAt ?? '') > (latest.doneAt ?? '')) {
       latest = candidate;
@@ -164,13 +169,14 @@ function resolveLatestAssigneeCompletionFallback(
 function resolveNewAssigneeCompletionFallback(
   nextStates?: Record<string, RevisionAssigneeState> | null,
   previousStates?: Record<string, RevisionAssigneeState> | null,
+  fallbackNotifyUserIds?: string[],
 ): AssigneeCompletionFallback | null {
   if (!nextStates || typeof nextStates !== 'object') return null;
   if (!previousStates || typeof previousStates !== 'object') return null;
   let latest: AssigneeCompletionFallback | null = null;
 
   for (const [userId, state] of Object.entries(nextStates)) {
-    const candidate = buildAssigneeCompletionFallbackCandidate(userId, state);
+    const candidate = buildAssigneeCompletionFallbackCandidate(userId, state, fallbackNotifyUserIds);
     if (!candidate) continue;
     const previous = previousStates?.[userId];
     if (previous?.state === 'done' && previous.doneAt === state.doneAt) continue;
@@ -1791,9 +1797,10 @@ export default function App() {
             const newlyCompletedAssignee = resolveNewAssigneeCompletionFallback(
               newRow.assignee_states,
               oldRow?.assignee_states,
+              targets,
             );
             fallbackCompletion = newlyCompletedAssignee
-              ?? (oldRow?.assignee_states ? null : resolveLatestAssigneeCompletionFallback(newRow.assignee_states));
+              ?? (oldRow?.assignee_states ? null : resolveLatestAssigneeCompletionFallback(newRow.assignee_states, targets));
             if (!fallbackCompletion?.notifyUserIds.includes(me.id)) return;
             if (fallbackCompletion.userId === me.id) return;
             action = 'assignee_done';
@@ -2079,9 +2086,9 @@ export default function App() {
             : `${p.senderName || '담당자'}님이 ${revisionLabel} 담당을 완료했습니다.`,
           metadata: !isGeneralRetakeCompletion
             ? {
-                sceneId: sceneTarget?.sceneUuid,
+                sceneId: sceneTarget?.sceneUuid ?? p.sceneUuid,
                 sceneName: sceneTarget?.sceneName ?? sceneKey,
-                sheetName: sceneTarget?.sheetName,
+                sheetName: sceneTarget?.sheetName ?? p.sheetName,
                 partId: sceneTarget?.partId,
                 department: p.department,
                 revisionId: p.revisionId,
