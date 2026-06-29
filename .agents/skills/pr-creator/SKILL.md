@@ -38,6 +38,7 @@ git log $(git describe --tags --abbrev=0 2>/dev/null || git rev-list --max-paren
 
 **변경된 파일 목록:**
 ```bash
+BASE_BRANCH=$(gh repo view --json defaultBranchRef --jq '.defaultBranchRef.name')
 git diff --stat "$BASE_BRANCH..HEAD"
 ```
 
