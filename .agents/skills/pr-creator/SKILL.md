@@ -238,18 +238,19 @@ npm test -- --grep "FrameNavigator"
 
 본문 작성이 완료되면 현재 대화에서 PR 생성 권한이 이미 명시되어 있는지 확인한다. 권한이 명시되어 있으면 제목과 본문을 기록으로 남기고 사용자에게 재확인을 받지 않고 바로 생성한다.
 
-`gh pr create`를 실행한다:
+사용자에게 묻지 말고 리포지토리의 기본 브랜치를 먼저 확인한다:
+
+```bash
+BASE_BRANCH=$(gh repo view --json defaultBranchRef --jq '.defaultBranchRef.name')
+```
+
+확인한 기본 브랜치를 `--base`에 넣어 `gh pr create`를 실행한다:
 
 ```bash
 gh pr create \
   --title "[제목]" \
   --body "[본문]" \
-  --base main
-```
-
-base 브랜치가 `main`이 아닐 수 있으니, 사용자에게 묻지 말고 리포지토리의 기본 브랜치를 직접 확인한다:
-```bash
-gh repo view --json defaultBranchRef --jq '.defaultBranchRef.name'
+  --base "$BASE_BRANCH"
 ```
 
 ---
