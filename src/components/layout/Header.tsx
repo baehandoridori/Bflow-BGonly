@@ -1,4 +1,4 @@
-import { RefreshCw, Sun, Moon, Database, FileSpreadsheet, CheckCircle2 } from 'lucide-react';
+import { ArrowLeft, RefreshCw, Sun, Moon, Database, FileSpreadsheet, CheckCircle2 } from 'lucide-react';
 import { useAppStore } from '@/stores/useAppStore';
 import { useDataStore } from '@/stores/useDataStore';
 import { cn } from '@/utils/cn';
@@ -12,6 +12,8 @@ interface HeaderProps {
 export function Header({ onRefresh }: HeaderProps) {
   const { currentView, colorMode, toggleColorMode } = useAppStore();
   const activeDataSource = useAppStore((s) => s.activeDataSource);
+  const navigationBackTarget = useAppStore((s) => s.navigationBackStack[s.navigationBackStack.length - 1] ?? null);
+  const goBackNavigation = useAppStore((s) => s.goBackNavigation);
   const episodeDashboardEp = useAppStore((s) => s.episodeDashboardEp);
   const episodeTitles = useDataStore((s) => s.episodeTitles);
   const { isSyncing, lastSyncTime } = useDataStore();
@@ -38,7 +40,23 @@ export function Header({ onRefresh }: HeaderProps) {
   return (
     <header className="relative z-30 h-14 shrink-0 bg-bg-card border-b border-bg-border flex items-center justify-between px-6">
       {/* 왼쪽: 현재 뷰 제목 */}
-      <h1 className="text-lg font-semibold">{headerTitle}</h1>
+      <div className="flex min-w-0 items-center gap-3">
+        {navigationBackTarget && (
+          <button
+            type="button"
+            onClick={goBackNavigation}
+            title={`${navigationBackTarget.label}로 돌아가기`}
+            className={cn(
+              'inline-flex h-8 shrink-0 items-center gap-1.5 rounded-lg border border-accent/25 bg-accent/10 px-2.5',
+              'text-xs font-medium text-accent transition-colors hover:border-accent/40 hover:bg-accent/18',
+            )}
+          >
+            <ArrowLeft size={15} />
+            <span className="hidden sm:inline">돌아가기</span>
+          </button>
+        )}
+        <h1 className="truncate text-lg font-semibold">{headerTitle}</h1>
+      </div>
 
       {/* 오른쪽: 액션 버튼들 */}
       <div className="flex items-center gap-3">

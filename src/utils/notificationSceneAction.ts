@@ -47,7 +47,9 @@ export function navigateNotificationToScene(
   // '전반' 리테이크 알림 — 씬 컨텍스트가 없으므로 리테이크 허브로 보낸다(코덱스 P2).
   const retakeHubSetId = asString(metadataValue(metadata, 'retakeHubSetId'));
   if (type === 'revision' && retakeHubSetId) {
-    useAppStore.getState().setView('retake-hub');
+    const app = useAppStore.getState();
+    app.pushNavigationBackTarget();
+    app.setView('retake-hub');
     try {
       useRevisionSetStore.getState().select(retakeHubSetId);
     } catch {
@@ -73,6 +75,7 @@ export function navigateNotificationToScene(
         sceneId: s.sceneId,
       })),
     });
+    app.pushNavigationBackTarget();
     app.setView('scenes');
     app.setToast?.({
       type: 'warning',

@@ -12,6 +12,7 @@ export interface SceneViewNavigationRequest {
   modalRequest?: SceneNavigationModalRequest;
   resetFilters?: boolean;
   toastMessage?: string;
+  recordBackTarget?: boolean;
   /**
    * 현재 열려 있는 씬 상세 모달을 강제로 닫는다(#화·#파트 점프용, 4c 코덱스 4차 P2).
    * modalRequest 가 있으면(scene 점프 — 같은 호출에서 모달 reopen) 무시되어 회귀를 막는다.
@@ -29,10 +30,12 @@ export function navigateToSceneView({
   modalRequest,
   resetFilters = true,
   toastMessage,
+  recordBackTarget = true,
   closeModal = false,
 }: SceneViewNavigationRequest): void {
   const app = useAppStore.getState();
 
+  if (recordBackTarget) app.pushNavigationBackTarget();
   if (episodeNumber !== undefined) app.setSelectedEpisode(episodeNumber);
   if (partId !== undefined) app.setSelectedPart(partId);
   if (department) {

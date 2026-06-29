@@ -32,9 +32,24 @@ test('scene jumps from other views clear stale scene filters', async () => {
   for (const source of [assigneeView, teamView, calendarView, scheduleView]) {
     assert.match(source, /navigateToSceneView\(\{/);
   }
+  assert.match(action, /app\.pushNavigationBackTarget\(\)/);
   assert.match(action, /app\.setSelectedAssignee\(null\)/);
   assert.match(action, /app\.setSearchQuery\(''\)/);
   assert.match(action, /app\.setStatusFilter\('all'\)/);
+});
+
+test('external scene jumps surface a global navigation back button', async () => {
+  const header = await readRepoFile('src', 'components', 'layout', 'Header.tsx');
+  const app = await readRepoFile('src', 'App.tsx');
+  const activityFeed = await readRepoFile('src', 'components', 'widgets', 'activity', 'ActivityFeed.tsx');
+  const sceneJumpButton = await readRepoFile('src', 'views', 'compositing', 'SceneJumpButton.tsx');
+
+  assert.match(header, /navigationBackStack\[s\.navigationBackStack\.length - 1\]/);
+  assert.match(header, /goBackNavigation/);
+  assert.match(header, /돌아가기/);
+  assert.match(app, /app\.pushNavigationBackTarget\(\)/);
+  assert.match(activityFeed, /navigateToSceneView\(\{/);
+  assert.match(sceneJumpButton, /navigateToSceneView\(\{/);
 });
 
 test('notification navigation only applies an explicit modal department filter before opening scenes', async () => {

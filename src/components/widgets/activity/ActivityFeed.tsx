@@ -3,9 +3,9 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { Check, Eye, Sparkles, Pencil, MessageSquare, RotateCw, Plus, Trash2, User, Grid3x3, Image as ImageIcon, ChevronRight, Hourglass, Play, Bell } from 'lucide-react';
 import { useActivityStore } from '@/stores/useActivityStore';
 import { useAuthStore } from '@/stores/useAuthStore';
-import { useAppStore } from '@/stores/useAppStore';
 import { useDataStore } from '@/stores/useDataStore';
 import type { Activity, ActionType, Episode } from '@/types';
+import { navigateToSceneView } from '@/utils/sceneNavigationAction';
 import { groupActivities, formatRelativeTime, getActivityVerb } from './utils';
 import { ACTION_TYPE_COLOR, ACTION_TYPE_TO_GROUP } from './constants';
 import {
@@ -124,7 +124,6 @@ function FeedItemRow({ activity, isSelf, isInsideGroup, episodes, episodeTitles,
       console.warn('[ActivityFeed] navTarget 매칭 실패 — sceneId:', activity.sceneId, 'actionType:', activity.actionType);
       return;
     }
-    const app = useAppStore.getState();
     // v1.24.0: 댓글 활동이면 commentId 추출 → 모달 진입 시 자동 스크롤 + 펄스.
     // v1.29.0: 이모지 반응 활동도 같은 스크롤/펄스 시맨틱.
     let commentId: string | undefined;
@@ -146,15 +145,20 @@ function FeedItemRow({ activity, isSelf, isInsideGroup, episodes, episodeTitles,
       partId: navTarget.partId,
       commentId,
     });
-    app.setView('scenes');
-    app.setPendingSceneModalRequest({
-      sceneUuid: activity.sceneId ?? undefined,
-      sceneName: navTarget.sceneId,
+    navigateToSceneView({
       episodeNumber: navTarget.episodeNumber,
       partId: navTarget.partId,
-      initialTab: 'detail',
-      focusCommentId: commentId,
-      forceDeptFilter: 'all',
+      department: 'all',
+      highlightSceneId: navTarget.sceneId,
+      modalRequest: {
+        sceneUuid: activity.sceneId ?? undefined,
+        sceneName: navTarget.sceneId,
+        episodeNumber: navTarget.episodeNumber,
+        partId: navTarget.partId,
+        initialTab: 'detail',
+        focusCommentId: commentId,
+        forceDeptFilter: 'all',
+      },
     });
   }, [navTarget, activity]);
   return (

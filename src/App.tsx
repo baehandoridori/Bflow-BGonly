@@ -2484,7 +2484,9 @@ export default function App() {
     const cleanup = window.electronAPI.onDeepLink((data) => {
       console.log('[DeepLink] 수신:', data);
       setPendingDeepLink(data);
-      useAppStore.getState().setView('scenes');
+      const app = useAppStore.getState();
+      app.pushNavigationBackTarget();
+      app.setView('scenes');
     });
     return cleanup;
   }, [setPendingDeepLink]);
