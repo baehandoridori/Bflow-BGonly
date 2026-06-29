@@ -9,7 +9,7 @@
  * 이 모달의 todo prop 은 항상 최신 값을 반영한다(스냅샷 stale 방지).
  */
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { X, Calendar, CalendarDays } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { EntityAwareInput } from '@/components/common/EntityAwareInput';
@@ -83,9 +83,6 @@ export function TodoDetailModal({
     onClose();
   };
 
-  // 메모 입력 ref (blur 커밋용은 EntityAwareInput onBlur 로 처리)
-  const titleRef = useRef<HTMLInputElement>(null);
-
   return (
     <ModalPortal onClose={onClose} labelledBy="todo-detail-title" maxWidth={440}>
       {/* 헤더 */}
@@ -98,9 +95,9 @@ export function TodoDetailModal({
       <div className="flex flex-col gap-3 px-4 py-4 flex-1 overflow-auto">
         {/* 제목 */}
         <div>
-          <label className="text-[11px] text-text-secondary/60 mb-1.5 block">제목</label>
+          <label htmlFor="todo-detail-name" className="text-[11px] text-text-secondary/60 mb-1.5 block">제목</label>
           <input
-            ref={titleRef}
+            id="todo-detail-name"
             value={editTitle}
             onChange={(e) => setEditTitle(e.target.value)}
             onBlur={commitTitle}
@@ -118,6 +115,7 @@ export function TodoDetailModal({
           <label className="text-[11px] text-text-secondary/60 mb-1.5 block">메모</label>
           <EntityAwareInput
             multiline
+            aria-label="메모"
             value={editMemo}
             onChange={setEditMemo}
             onBlur={commitMemo}
@@ -133,9 +131,10 @@ export function TodoDetailModal({
         {/* 일정 */}
         <div className="flex gap-2">
           <div className="flex-1">
-            <label className="text-[11px] font-semibold text-text-secondary/60 tracking-wider block mb-1">시작일</label>
+            <label htmlFor="todo-detail-start" className="text-[11px] font-semibold text-text-secondary/60 tracking-wider block mb-1">시작일</label>
             <div className="relative">
               <input
+                id="todo-detail-start"
                 type="date"
                 value={todo.startDate ?? ''}
                 onChange={(e) => commitStart(e.target.value)}
@@ -146,9 +145,10 @@ export function TodoDetailModal({
             </div>
           </div>
           <div className="flex-1">
-            <label className="text-[11px] font-semibold text-text-secondary/60 tracking-wider block mb-1">종료일</label>
+            <label htmlFor="todo-detail-end" className="text-[11px] font-semibold text-text-secondary/60 tracking-wider block mb-1">종료일</label>
             <div className="relative">
               <input
+                id="todo-detail-end"
                 type="date"
                 value={todo.endDate ?? ''}
                 onChange={(e) => commitEnd(e.target.value)}
