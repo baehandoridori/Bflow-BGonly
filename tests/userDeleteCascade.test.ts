@@ -14,6 +14,10 @@ test('delete_user_cascade migration records the full atomic user deletion policy
   assert.match(sql, /CREATE OR REPLACE FUNCTION public\.delete_user_cascade\(p_user_id TEXT\)/);
   assert.match(sql, /UPDATE scenes\s+SET assignee = NULL WHERE assignee = v_user_name;/);
   assert.match(sql, /UPDATE comp_revisions SET assignee = NULL WHERE assignee = v_user_name;/);
+  assert.ok(sql.includes('UPDATE character_costumes\n  SET design_assignee'), 'design assignee cleanup must be part of the RPC');
+  assert.ok(sql.includes('UPDATE character_costumes\n  SET rigging_assignee'), 'rigging assignee cleanup must be part of the RPC');
+  assert.ok(sql.includes("regexp_split_to_array(design_assignee, '[[:space:]]*,[[:space:]]*')"), 'design assignee cleanup must handle comma-separated names');
+  assert.ok(sql.includes("regexp_split_to_array(rigging_assignee, '[[:space:]]*,[[:space:]]*')"), 'rigging assignee cleanup must handle comma-separated names');
 
   for (const table of ['personal_todos', 'task_views', 'memos', 'private_calendar_events']) {
     assert.match(sql, new RegExp(`DELETE FROM ${table}\\s+WHERE user_id = p_user_id;`));
