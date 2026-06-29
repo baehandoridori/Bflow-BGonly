@@ -8,6 +8,7 @@ test('retake hub rows open the scene detail modal on ctrl-click with the revisio
   assert.match(row, /handleRowClickCapture/);
   assert.match(row, /event\.ctrlKey\s*\|\|\s*event\.metaKey/);
   assert.match(row, /resolveNotificationSceneTarget/);
+  assert.match(row, /department:\s*revision\.department/);
   assert.match(row, /navigateToSceneView\(\{/);
   assert.match(row, /department:\s*'all'/);
   assert.match(row, /initialTab:\s*'revisions'/);

@@ -142,7 +142,10 @@ export function RetakeHubItemRow({ revision, allUsers, sideBarClass, reLabel }: 
       sonnerToast.info('전반 항목은 연결된 씬이 없어 현재 허브에서 확인해주세요.');
       return false;
     }
-    const target = resolveNotificationSceneTarget({ sceneName: revision.sceneKey }, episodes);
+    const target = resolveNotificationSceneTarget({
+      sceneName: revision.sceneKey,
+      department: revision.department,
+    }, episodes);
     if (!target) {
       sonnerToast.error('연결된 씬을 찾지 못했어요.');
       return false;
