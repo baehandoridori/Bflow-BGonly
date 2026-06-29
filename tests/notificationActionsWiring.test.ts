@@ -37,6 +37,8 @@ test('toast shortcut actions mark the local notification as read before navigati
   assert.match(notificationHelper, /markAsRead\(notificationId\)/);
   assert.match(notificationHelper, /hasNotificationActionTarget\(payload\.type,\s*payload\.metadata\)/);
   assert.match(notificationHelper, /retakeHubSetId/);
+  assert.match(notificationStore, /const storedNotification = identity/);
+  assert.match(notificationStore, /return storedNotification\?\.id \?\? notification\.id/);
 });
 
 test('all notification click paths mark domain read state before navigating', () => {

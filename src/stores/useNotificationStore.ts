@@ -170,7 +170,11 @@ export const useNotificationStore = create<NotificationState>((set, get) => ({
     const next = prependNotificationDeduped(get().notifications, notification, MAX_NOTIFICATIONS);
     setNotifications(set, next);
     persistToDisk(get().activeUserId, next);
-    return notification.id;
+    const identity = getNotificationIdentity(notification);
+    const storedNotification = identity
+      ? next.find((x) => getNotificationIdentity(x) === identity)
+      : next.find((x) => x.id === notification.id);
+    return storedNotification?.id ?? notification.id;
   },
 
   markAsRead: (id) => {
