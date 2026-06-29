@@ -76,6 +76,11 @@ export function ReassignInline({ candidates, currentAssigneeIds, onConfirm, onCa
         </div>
       )}
       <div className="flex items-center justify-end gap-2">
+        {selected.length === 0 && candidates.length > 0 && (
+          <span className="mr-auto text-[11px] text-amber-400/90">
+            담당자를 1명 이상 선택해주세요.
+          </span>
+        )}
         <button
           type="button"
           onClick={onCancel}
@@ -87,7 +92,8 @@ export function ReassignInline({ candidates, currentAssigneeIds, onConfirm, onCa
         <button
           type="button"
           onClick={() => onConfirm(selected)}
-          className="inline-flex items-center gap-1 px-3 py-1 text-[11px] font-bold rounded-md bg-accent text-white hover:opacity-90 cursor-pointer transition-opacity"
+          disabled={selected.length === 0}
+          className="inline-flex items-center gap-1 px-3 py-1 text-[11px] font-bold rounded-md bg-accent text-white hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer transition-opacity"
         >
           <Check size={12} strokeWidth={2.6} />
           적용

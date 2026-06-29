@@ -123,7 +123,7 @@ export function RevisionAddModal({ targetSet, episodes, episodeTitles, allUsers,
     );
   }, [mode, selectedScene, allUsers, currentUser, counterpartScene]);
 
-  const canSubmit = !!currentUser && description.trim().length > 0 && !submitting
+  const canSubmit = !!currentUser && description.trim().length > 0 && assigneeIds.length > 0 && !submitting
     && (mode === 'general' || !!selectedScene);
 
   // 에피소드 미고정 + 단일 에피소드면 자동 선택.
@@ -377,6 +377,11 @@ export function RevisionAddModal({ targetSet, episodes, episodeTitles, allUsers,
               />
             ) : (
               <span className="text-[11px] text-text-secondary/50">로그인 정보를 확인할 수 없습니다.</span>
+            )}
+            {currentUser && assigneeIds.length === 0 && (
+              <p className="mt-1.5 text-[11px] text-amber-400/90">
+                담당자를 1명 이상 선택해야 항목을 만들 수 있습니다.
+              </p>
             )}
           </div>
         </div>

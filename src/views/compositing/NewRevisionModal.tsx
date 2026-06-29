@@ -71,6 +71,7 @@ export default function NewRevisionModal({ open, onClose }: Props) {
   const [description, setDescription] = useState('');
   const [imagePreview, setImagePreview] = useState<string | null>(null);
   const [notifyIds, setNotifyIds] = useState<string[]>([]);
+  const [assigneeIds, setAssigneeIds] = useState<string[]>([]);
   const [submitting, setSubmitting] = useState(false);
 
   const sceneInputRef = useRef<HTMLInputElement>(null);
@@ -142,6 +143,7 @@ export default function NewRevisionModal({ open, onClose }: Props) {
     && selectedPart
     && selectedScene
     && description.trim()
+    && assigneeIds.length > 0
     && !submitting);
 
   // ── 자동 추론: 단일 EP/Part 자동 선택 ────
@@ -170,6 +172,7 @@ export default function NewRevisionModal({ open, onClose }: Props) {
     setDescription('');
     setImagePreview(null);
     setNotifyIds([]);
+    setAssigneeIds([]);
     setSubmitting(false);
   }, [open]);
 
@@ -279,6 +282,7 @@ export default function NewRevisionModal({ open, onClose }: Props) {
         requesterId: currentUser.id,
         requesterName: currentUser.name,
         notifyUserIds: notifyIds,
+        assigneeIds,
       });
       onClose();
     } catch (err) {
@@ -618,15 +622,15 @@ export default function NewRevisionModal({ open, onClose }: Props) {
               <span className="text-[11px] text-text-secondary/50">또는 본문에 Ctrl+V</span>
             </div>
 
-            {/* 알림 받을 사람 */}
+            {/* 알림 받을 사람 · 담당자 */}
             <div>
               <div className="flex items-center justify-between mb-2">
                 <div className="flex items-baseline gap-2">
                   <span className="text-[11px] font-bold uppercase tracking-wider text-text-secondary">
-                    알림 받을 사람
+                    알림 받을 사람 · 담당자
                   </span>
                   <span className="text-[10px] text-text-secondary/50 normal-case font-normal">
-                    자동 체크: 컴포지터 + 그 씬 담당자
+                    담당자를 1명 이상 선택해야 등록됩니다
                   </span>
                 </div>
               </div>
@@ -636,13 +640,20 @@ export default function NewRevisionModal({ open, onClose }: Props) {
                   defaultCheckedIds={defaultRecipients}
                   excludeUserId={currentUser.id}
                   onChange={setNotifyIds}
+                  enableAssignee
+                  onAssigneesChange={setAssigneeIds}
                 />
               ) : (
                 <span className="text-[11px] text-text-secondary/50">로그인 정보를 확인할 수 없습니다.</span>
               )}
               <div className="text-[10px] text-text-secondary/50 mt-1.5">
-                자동 체크된 사람도 클릭으로 해제할 수 있어요.
+                자동 체크된 사람도 클릭으로 해제할 수 있고, 담당 표식을 켜야 새 리테이크가 저장됩니다.
               </div>
+              {currentUser && assigneeIds.length === 0 && (
+                <p className="mt-1.5 text-[11px] text-amber-400/90">
+                  담당자를 1명 이상 선택해야 리테이크를 등록할 수 있습니다.
+                </p>
+              )}
             </div>
           </section>
         </div>

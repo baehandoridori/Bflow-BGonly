@@ -3,7 +3,13 @@ import type { CompRevision, Episode, RevisionStatus } from '@/types';
 import * as revisionService from '@/services/revisionService';
 import { useDataStore } from '@/stores/useDataStore';
 import {
-  startAssignee, completeAssignee, revertAssignee, deriveRevisionStatus, sanitizeAssignees,
+  startAssignee,
+  completeAssignee,
+  revertAssignee,
+  deriveRevisionStatus,
+  sanitizeAssignees,
+  sanitizeRequiredAssignees,
+  normalizeRevisionDescription,
 } from '@/utils/revisionWorkflow';
 import { buildRevisionAssigneeCompletionNotifyUserIds } from '@/utils/revisionNotificationRecipients';
 import {
@@ -48,6 +54,7 @@ interface RevisionState {
   deleteRevisionOptimistic: (id: string) => void;
 
   createRevision: (input: CreateRevisionInput) => Promise<CompRevision>;
+  updateDetails: (rev: CompRevision, input: { description: string }) => Promise<void>;
 
   updateStatus: (
     id: string,
@@ -176,6 +183,20 @@ export const useRevisionStore = create<RevisionState>((set, get) => ({
     return revision;
   },
 
+  updateDetails: async (rev, input) => {
+    const description = normalizeRevisionDescription(input.description);
+    const now = new Date().toISOString();
+    get().updateRevisionOptimistic(rev.id, rev.sceneKey, { description, updatedAt: now });
+    try {
+      const patch = await revisionService.updateRevisionDetails(rev, { description });
+      get().updateRevisionOptimistic(rev.id, rev.sceneKey, patch);
+    } catch (err) {
+      console.error('[리테이크 스토어] 내용 수정 실패:', err);
+      await get().loadRevisions();
+      throw err;
+    }
+  },
+
   deleteRevision: async (id, sceneKey) => {
     const setId = get().revisions.find((r) => r.id === id)?.setId;
     get().deleteRevisionOptimistic(id);
@@ -291,7 +312,7 @@ export const useRevisionStore = create<RevisionState>((set, get) => ({
 
   reassign: async (rev, nextAssigneeIds) => {
     const now = new Date().toISOString();
-    const { assigneeIds, assigneeStates } = sanitizeAssignees(nextAssigneeIds, rev.assigneeStates ?? {}, rev.notifyUserIds ?? []);
+    const { assigneeIds, assigneeStates } = sanitizeRequiredAssignees(nextAssigneeIds, rev.assigneeStates ?? {}, rev.notifyUserIds ?? []);
     // 담당 (재)배정 시 legacy/백필 final 잔재 clear (Codex P1) — final 무시로 파생 + 낙관 패치도 비움.
     const status = deriveRevisionStatus(assigneeIds, assigneeStates, null);
     get().updateRevisionOptimistic(rev.id, rev.sceneKey, { assigneeIds, assigneeStates, status, finalResolvedAt: undefined, finalResolvedBy: undefined, updatedAt: now });

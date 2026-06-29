@@ -52,6 +52,26 @@ export function sanitizeAssignees(
   return { assigneeIds: cleanIds, assigneeStates: cleanStates };
 }
 
+export function sanitizeRequiredAssignees(
+  assigneeIds: readonly string[],
+  assigneeStates: Readonly<Record<string, RevisionAssigneeState>>,
+  notifyUserIds: readonly string[],
+): { assigneeIds: string[]; assigneeStates: Record<string, RevisionAssigneeState> } {
+  const result = sanitizeAssignees(assigneeIds, assigneeStates, notifyUserIds);
+  if (result.assigneeIds.length === 0) {
+    throw new Error('리테이크 담당자를 1명 이상 선택해주세요.');
+  }
+  return result;
+}
+
+export function normalizeRevisionDescription(description: string): string {
+  const normalized = description.trim();
+  if (!normalized) {
+    throw new Error('리테이크 내용을 입력해주세요.');
+  }
+  return normalized;
+}
+
 // ─── 담당 상태 전이 ───────────────────────────
 
 type StateMap = Record<string, RevisionAssigneeState>;
