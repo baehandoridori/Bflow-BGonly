@@ -27,7 +27,9 @@ import {
 
 // ─── 상대 시간 포맷 ─────────────────────────────────
 function timeAgo(iso: string): string {
-  const diff = Date.now() - new Date(iso).getTime();
+  const time = new Date(iso).getTime();
+  if (!Number.isFinite(time)) return '방금 전';
+  const diff = Date.now() - time;
   const sec = Math.floor(diff / 1000);
   if (sec < 60) return '방금 전';
   const min = Math.floor(sec / 60);

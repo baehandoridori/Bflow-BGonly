@@ -1,6 +1,6 @@
 {
   "name": "bflow",
-  "version": "1.50.1",
+  "version": "1.50.2",
   "description": "B flow - Studio JBBJ 워크플로우 대시보드",
   "main": "dist-electron/main.js",
   "scripts": {
@@ -8,9 +8,10 @@
     "dev:renderer": "node scripts/dev-renderer.mjs",
     "typecheck": "tsc --noEmit && tsc -p tsconfig.node.json --noEmit",
     "test:auto-update": "node --test ./tests/autoUpdateHelperSwap.test.ts ./tests/autoUpdateManifest.test.ts ./tests/autoUpdateFailurePolicy.test.ts ./tests/autoUpdateInstallerFlow.test.ts ./tests/releaseNoteCategories.test.ts",
-    "test:entity": "node --test ./tests/mentionQuery.test.ts ./tests/entityTokens.test.ts ./tests/hashEntity.test.ts ./tests/hashtagQuery.test.ts ./tests/hashtagCandidates.test.ts ./tests/cutScene.test.ts ./tests/revisionSceneContext.test.ts ./tests/sceneReference.test.ts ./tests/cardSceneHelpers.test.ts ./tests/revisionSet.test.ts ./tests/revisionGeneral.test.ts ./tests/notificationActionsWiring.test.ts ./tests/notificationLastSeenWiring.test.ts ./tests/sceneNavigatorReferenceWiring.test.ts ./tests/activityFeedGrouping.test.ts ./tests/commentReactionActivityGrouping.test.ts ./tests/commentThreadSidePanelWiring.test.ts ./tests/createUuid.test.ts",
-    "build": "npm run typecheck && npm run test:auto-update && npm run test:entity && vite build && electron-builder && node scripts/generate-manifest.js",
-    "build:vite": "npm run typecheck && npm run test:auto-update && npm run test:entity && vite build && node scripts/generate-manifest.js --allow-missing-installer",
+    "test:notifications": "node --test ./tests/notificationActionsWiring.test.ts ./tests/notificationLastSeenWiring.test.ts ./tests/notificationCatchupTimestamp.test.ts ./tests/notificationUserScope.test.ts ./tests/notificationMultiAssigneeSceneChange.test.ts ./tests/notificationTimeAgo.test.ts ./tests/notificationSceneNavigation.test.ts ./tests/notificationIdentity.test.ts ./tests/notificationGrouping.test.ts ./tests/notificationCatchupRunner.test.ts ./tests/notificationEpisodeLabels.test.ts ./tests/devPreviewNotifications.test.ts ./tests/commentReadStateSchema.test.ts ./tests/commentReadStateService.test.ts ./tests/commentReadStateUiWiring.test.ts ./tests/commentReactionUtils.test.ts ./tests/commentReactionEmojiFormat.test.ts ./tests/commentReactionActivityGrouping.test.ts ./tests/revisionCommentRequesterNotifications.test.ts ./tests/recentActivityNavigation.test.ts ./tests/sceneNavigationFilterRobustness.test.ts",
+    "test:entity": "node --test ./tests/mentionQuery.test.ts ./tests/entityTokens.test.ts ./tests/hashEntity.test.ts ./tests/hashtagQuery.test.ts ./tests/hashtagCandidates.test.ts ./tests/cutScene.test.ts ./tests/revisionSceneContext.test.ts ./tests/sceneReference.test.ts ./tests/cardSceneHelpers.test.ts ./tests/revisionSet.test.ts ./tests/revisionGeneral.test.ts ./tests/sceneNavigatorReferenceWiring.test.ts ./tests/activityFeedGrouping.test.ts ./tests/commentThreadSidePanelWiring.test.ts ./tests/createUuid.test.ts",
+    "build": "npm run typecheck && npm run test:auto-update && npm run test:entity && npm run test:notifications && vite build && electron-builder && node scripts/generate-manifest.js",
+    "build:vite": "npm run typecheck && npm run test:auto-update && npm run test:entity && npm run test:notifications && vite build && node scripts/generate-manifest.js --allow-missing-installer",
     "preview": "vite preview",
     "electron:dev": "vite build && electron .",
     "lint": "eslint src --ext ts,tsx"
