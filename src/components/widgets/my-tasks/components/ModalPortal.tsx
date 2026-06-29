@@ -36,11 +36,19 @@ const FOCUSABLE_SELECTOR = [
 export function ModalPortal({ onClose, children, labelledBy, maxWidth = 520 }: ModalPortalProps) {
   const containerRef = useRef<HTMLDivElement>(null);
 
+  // ESC/백드롭 닫기 시, 포커스 중이던 입력칸의 onBlur(→커밋)가 먼저 실행되도록
+  // active 요소를 blur 한 뒤 닫는다. (X/닫기 버튼은 클릭 시 자연스레 blur 되지만
+  // ESC/백드롭은 그렇지 않아 진행 중이던 메모 편집이 조용히 사라지던 문제를 막는다.)
+  const requestClose = () => {
+    (document.activeElement as HTMLElement | null)?.blur?.();
+    onClose();
+  };
+
   // ESC 닫기 + Tab 포커스 트랩
   useEffect(() => {
     const handleKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
-        onClose();
+        requestClose();
         return;
       }
       if (e.key === 'Tab') {
@@ -74,14 +82,14 @@ export function ModalPortal({ onClose, children, labelledBy, maxWidth = 520 }: M
     return () => document.removeEventListener('keydown', handleKey);
   }, [onClose]);
 
-  // 마운트 시 모달로 포커스 이동, 언마운트 시 직전 포커스 복원
+  // 마운트 시 모달 컨테이너(다이얼로그)로 포커스 이동, 언마운트 시 직전 포커스 복원.
+  // 첫 포커스 가능 자식이 아니라 컨테이너(tabIndex={-1}) 자체에 포커스를 둔다 —
+  // 모달에 따라 첫 포커스 자식이 '본체 씬 상세로 이동' 같은 네비게이션 버튼이라,
+  // 반사적인 Enter/Space 가 의도치 않은 이동을 일으키던 문제를 막는다.
+  // (AddTaskModal 의 제목 입력 자동 포커스는 별도 setTimeout 으로 그대로 동작한다.)
   useEffect(() => {
     const previouslyFocused = document.activeElement as HTMLElement | null;
-    const container = containerRef.current;
-    if (container) {
-      const firstFocusable = container.querySelector<HTMLElement>(FOCUSABLE_SELECTOR);
-      (firstFocusable ?? container).focus();
-    }
+    containerRef.current?.focus();
     return () => {
       previouslyFocused?.focus?.();
     };
@@ -90,7 +98,7 @@ export function ModalPortal({ onClose, children, labelledBy, maxWidth = 520 }: M
   const content = (
     <div
       className="fixed inset-0 z-50 flex items-center justify-center bg-overlay/50 backdrop-blur-sm"
-      onClick={onClose}
+      onClick={requestClose}
     >
       <motion.div
         ref={containerRef}

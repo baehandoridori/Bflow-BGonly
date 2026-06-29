@@ -9,7 +9,7 @@
  * 이 모달의 todo prop 은 항상 최신 값을 반영한다(스냅샷 stale 방지).
  */
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { X, Calendar, CalendarDays } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { EntityAwareInput } from '@/components/common/EntityAwareInput';
@@ -37,9 +37,13 @@ export function TodoDetailModal({
   const [editTitle, setEditTitle] = useState(todo.title);
   const [editMemo, setEditMemo] = useState(todo.memo);
 
-  // todo 가 외부에서 바뀌면(스토어 재추출) 편집 중이 아닐 때 동기화
-  useEffect(() => { setEditTitle(todo.title); }, [todo.title]);
-  useEffect(() => { setEditMemo(todo.memo); }, [todo.memo]);
+  // 입력칸별 포커스 추적 — 외부 변경(캘린더 역동기화/실시간)이 입력 중인 값을 덮어쓰지 않게 가드.
+  const titleFocusedRef = useRef(false);
+  const memoFocusedRef = useRef(false);
+
+  // todo 가 외부에서 바뀌면(스토어 재추출) 동기화. 단, 해당 칸을 편집(포커스) 중이면 건너뛴다(클로버 방지).
+  useEffect(() => { if (!titleFocusedRef.current) setEditTitle(todo.title); }, [todo.title]);
+  useEffect(() => { if (!memoFocusedRef.current) setEditMemo(todo.memo); }, [todo.memo]);
 
   const commitTitle = () => {
     const trimmed = editTitle.trim();
@@ -100,7 +104,8 @@ export function TodoDetailModal({
             id="todo-detail-name"
             value={editTitle}
             onChange={(e) => setEditTitle(e.target.value)}
-            onBlur={commitTitle}
+            onFocus={() => { titleFocusedRef.current = true; }}
+            onBlur={() => { titleFocusedRef.current = false; commitTitle(); }}
             onKeyDown={(e) => {
               if (e.key === 'Enter') { commitTitle(); (e.target as HTMLInputElement).blur(); }
               if (e.key === 'Escape') { setEditTitle(todo.title); }
@@ -117,8 +122,10 @@ export function TodoDetailModal({
             multiline
             aria-label="메모"
             value={editMemo}
-            onChange={setEditMemo}
-            onBlur={commitMemo}
+            /* EntityAwareInput 은 onFocus 를 노출하지 않아, 입력(onChange) 시점에 '편집 중'으로 표시한다.
+               (외부 동기화 클로버는 사용자가 실제 타이핑 중일 때만 문제이므로 충분히 커버된다.) */
+            onChange={(v) => { memoFocusedRef.current = true; setEditMemo(v); }}
+            onBlur={() => { memoFocusedRef.current = false; commitMemo(); }}
             users={users}
             /* #태그 끔: 할일 메모는 캘린더 일정과 동기화돼(addToCalendar) 평문 경로로 표시되므로
                직렬화 토큰('[#a001](...)')이 노출된다(AddTaskModal 개인 메모와 동일 정책). */

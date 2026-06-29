@@ -12,7 +12,7 @@
  * 이 모달의 flat prop 은 항상 최신 값을 반영한다(스냅샷 stale 방지).
  */
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { X, ExternalLink, Image as ImageIcon } from 'lucide-react';
 import { EntityAwareInput } from '@/components/common/EntityAwareInput';
 import { EntityText } from '@/components/common/EntityText';
@@ -48,9 +48,10 @@ export function SceneDetailModal({
   const imageUrl = s.guideUrl || s.storyboardUrl;
 
   // 메모는 입력 중 로컬 상태로 두고 blur/Enter 에 커밋(매 키 입력마다 쓰기 방지).
-  // flat.scene.memo 가 외부에서 바뀌면(스토어 재추출) 동기화한다.
+  // flat.scene.memo 가 외부에서 바뀌면(스토어 재추출) 동기화하되, 편집(포커스) 중이면 건너뛴다(클로버 방지).
   const [editMemo, setEditMemo] = useState(s.memo);
-  useEffect(() => { setEditMemo(s.memo); }, [s.memo]);
+  const memoFocusedRef = useRef(false);
+  useEffect(() => { if (!memoFocusedRef.current) setEditMemo(s.memo); }, [s.memo]);
 
   const commitMemo = () => {
     if (editMemo !== s.memo) {
@@ -131,8 +132,10 @@ export function SceneDetailModal({
             multiline
             aria-label="메모"
             value={editMemo}
-            onChange={setEditMemo}
-            onBlur={commitMemo}
+            /* EntityAwareInput 은 onFocus 를 노출하지 않아, 입력(onChange) 시점에 '편집 중'으로 표시한다.
+               (외부 동기화 클로버는 사용자가 실제 타이핑 중일 때만 문제이므로 충분히 커버된다.) */
+            onChange={(v) => { memoFocusedRef.current = true; setEditMemo(v); }}
+            onBlur={() => { memoFocusedRef.current = false; commitMemo(); }}
             submitOn="ctrl-enter"
             onSubmit={commitMemo}
             users={users}

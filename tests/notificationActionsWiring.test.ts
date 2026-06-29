@@ -32,6 +32,11 @@ test('native feedback toast jumps use the same notification scene navigation pat
   assert.match(app, /navigateNotificationToScene\(payload\.kind === 'assignment' \? 'scene_assignment' : 'acting_feedback'/);
 });
 
+test('widget popup scene-row jumps reuse the same notification scene navigation path', () => {
+  assert.match(app, /onWidgetNavigateMain\?\.\s*\(\(payload\) => \{/);
+  assert.match(app, /navigateNotificationToScene\('scene_change'/);
+});
+
 test('toast shortcut actions mark the local notification as read before navigating', () => {
   assert.match(notificationHelper, /const notificationId = store\.addNotification\(/);
   assert.match(notificationHelper, /markAsRead\(notificationId\)/);
