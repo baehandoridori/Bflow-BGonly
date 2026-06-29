@@ -1,10 +1,11 @@
 import { useState, useEffect, useContext, useRef, forwardRef } from 'react';
-import { CheckSquare, Plus, X, Search, Check, ListFilter, Pencil, ChevronDown, PartyPopper, GripVertical, Calendar } from 'lucide-react';
+import { CheckSquare, Plus, X, Search, Check, ListFilter, ExternalLink, ChevronDown, PartyPopper, GripVertical, Calendar } from 'lucide-react';
 import { motion, AnimatePresence, Reorder } from 'framer-motion';
 import { Widget, IsPopupContext, WidgetIdContext } from './Widget';
 import { EntityAwareInput } from '@/components/common/EntityAwareInput';
 import { EntityText } from '@/components/common/EntityText';
 import { navigateToHashTarget } from '@/utils/hashNavigation';
+import { navigateNotificationToScene } from '@/utils/notificationSceneAction';
 import { stripEntityTokens } from '@/utils/entityTokens';
 import { useAppStore } from '@/stores/useAppStore';
 import { useAuthStore } from '@/stores/useAuthStore';
@@ -17,6 +18,7 @@ import { makeKey } from './my-tasks/types';
 import { useMyTasksData, scenePct } from './my-tasks/hooks/useMyTasksData';
 import { ModalPortal } from './my-tasks/components/ModalPortal';
 import { TodoDetailModal } from './my-tasks/components/TodoDetailModal';
+import { SceneDetailModal } from './my-tasks/components/SceneDetailModal';
 
 /* ─── 할 일 추가 모달 (작업 + 개인) ──────────── */
 function AddTaskModal({
@@ -329,7 +331,9 @@ function AddTaskModal({
   );
 }
 
-/* ─── 인라인 편집 행 ──────────────────────────── */
+/* ─── 씬 행 (확정 C) ──────────────────────────────
+ * 인라인 메모 편집 제거 → 메모는 읽기 전용 표시. 본문 클릭 시 씬 상세 모달을 연다.
+ * 단계 토글·제거·본체 이동 버튼은 독립(stopPropagation)으로 모달을 열지 않는다. */
 interface EditableSceneRowProps {
   flat: FlatScene;
   deptCfg: typeof DEPARTMENT_CONFIGS['bg'];
@@ -339,7 +343,8 @@ interface EditableSceneRowProps {
   isRemovable: boolean;
   onToggle: (flat: FlatScene, stage: Stage) => void;
   onRemove: (key: SceneKey) => void;
-  onEditField: (flat: FlatScene, field: string, value: string) => void;
+  onOpenDetail: (flat: FlatScene) => void;
+  onNavigateToMain: (flat: FlatScene) => void;
 }
 
 const EditableSceneRow = forwardRef<HTMLDivElement, EditableSceneRowProps>(function EditableSceneRow({
@@ -351,29 +356,11 @@ const EditableSceneRow = forwardRef<HTMLDivElement, EditableSceneRowProps>(funct
   isRemovable,
   onToggle,
   onRemove,
-  onEditField,
+  onOpenDetail,
+  onNavigateToMain,
 }, ref) {
   const s = flat.scene;
-  const [editingField, setEditingField] = useState<string | null>(null);
-  const [editValue, setEditValue] = useState('');
-  const inputRef = useRef<HTMLInputElement>(null);
   const users = useAuthStore((s) => s.users);
-
-  const startEdit = (field: string, currentValue: string) => {
-    setEditingField(field);
-    setEditValue(currentValue);
-    setTimeout(() => inputRef.current?.focus(), 0);
-  };
-
-  const commitEdit = () => {
-    if (editingField && editValue !== undefined) {
-      const original = editingField === 'assignee' ? s.assignee : editingField === 'memo' ? s.memo : '';
-      if (editValue !== original) {
-        onEditField(flat, editingField, editValue);
-      }
-    }
-    setEditingField(null);
-  };
 
   return (
     <motion.div
@@ -388,39 +375,23 @@ const EditableSceneRow = forwardRef<HTMLDivElement, EditableSceneRowProps>(funct
         pct >= 100 ? 'bg-green-500/5 opacity-60' : 'hover:bg-bg-border/8',
       )}
     >
-      {/* 씬 정보 — 2줄 구조 */}
-      <div className="flex flex-col min-w-0 flex-1 gap-0.5">
+      {/* 씬 정보 — 2줄 구조 (클릭 시 상세 모달) */}
+      <button
+        type="button"
+        onClick={() => onOpenDetail(flat)}
+        className="flex flex-col min-w-0 flex-1 gap-0.5 text-left cursor-pointer rounded px-0.5 -mx-0.5 hover:bg-bg-border/10 transition-colors"
+        title="클릭하여 상세 보기/편집"
+      >
         {/* 1줄: 컨텍스트 (에피소드 > 파트) */}
         <span className="text-[11px] text-text-secondary/40">{epLabel} &gt; {flat.partId}</span>
-        {/* 2줄: #번호 sceneId */}
+        {/* 2줄: #번호 sceneId / 메모 (읽기 전용) */}
         <div className="flex items-center gap-1">
           <span className="text-[12px] font-mono text-accent shrink-0">#{sceneNum}</span>
-          {editingField === 'memo' ? (
-            <div className="flex-1 min-w-0">
-              <EntityAwareInput
-                value={editValue}
-                onChange={setEditValue}
-                users={users}
-                enableHashtag
-                onBlur={commitEdit}
-                submitOn="enter"
-                onSubmit={commitEdit}
-                onCancel={() => setEditingField(null)}
-                autoFocus
-                className="w-full text-[13px] text-text-primary bg-bg-primary border border-accent/30 rounded px-1 py-0 outline-none"
-              />
-            </div>
-          ) : (
-            <span
-              className="text-[14px] font-semibold text-text-primary truncate cursor-pointer hover:text-accent transition-colors"
-              onDoubleClick={() => startEdit('memo', s.memo)}
-              title="더블클릭하여 메모 편집"
-            >
-              {s.memo ? <EntityText text={s.memo} userNames={users.map((u) => u.name)} onHashClick={navigateToHashTarget} /> : s.sceneId}
-            </span>
-          )}
+          <span className="text-[14px] font-semibold text-text-primary truncate">
+            {s.memo ? <EntityText text={s.memo} userNames={users.map((u) => u.name)} onHashClick={navigateToHashTarget} /> : s.sceneId}
+          </span>
         </div>
-      </div>
+      </button>
 
       {/* 미니 프로세스 트랙 */}
       <div className="flex bg-bg-primary rounded-md p-0.5 border border-bg-border gap-0.5 shrink-0">
@@ -432,7 +403,7 @@ const EditableSceneRow = forwardRef<HTMLDivElement, EditableSceneRowProps>(funct
           return (
             <button
               key={stage}
-              onClick={() => onToggle(flat, stage)}
+              onClick={(e) => { e.stopPropagation(); onToggle(flat, stage); }}
               title={deptCfg.stageLabels[stage]}
               className={cn(
                 'w-6 h-6 rounded text-[11px] font-medium flex items-center justify-center cursor-pointer transition-all',
@@ -452,20 +423,18 @@ const EditableSceneRow = forwardRef<HTMLDivElement, EditableSceneRowProps>(funct
         })}
       </div>
 
-      {/* 편집 / 제거 버튼 */}
+      {/* 본체 이동 / 제거 버튼 */}
       <div className="flex items-center gap-0.5 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">
-        {!editingField && (
-          <button
-            onClick={() => startEdit('memo', s.memo)}
-            className="p-0.5 text-text-secondary/20 hover:text-accent cursor-pointer"
-            title="편집"
-          >
-            <Pencil size={9} />
-          </button>
-        )}
+        <button
+          onClick={(e) => { e.stopPropagation(); onNavigateToMain(flat); }}
+          className="p-1 text-text-secondary/20 hover:text-accent cursor-pointer rounded transition-all"
+          title="본체 앱의 씬 상세로 이동"
+        >
+          <ExternalLink size={12} />
+        </button>
         {isRemovable && (
           <button
-            onClick={() => onRemove(flat.key)}
+            onClick={(e) => { e.stopPropagation(); onRemove(flat.key); }}
             className="p-1 text-red-400/60 hover:text-red-400 hover:bg-red-400/10 rounded cursor-pointer transition-all"
           >
             <X size={14} />
@@ -602,6 +571,40 @@ export function MyTasksWidget() {
         null;
   const openTodoDetail = (todo: PersonalTodo) => setSelectedTodoId(todo.id);
 
+  // 씬 상세 모달: key 만 보관하고 실제 FlatScene 은 매 렌더 재추출 → 편집/토글 후 stale 값 방지.
+  // 목록에서 사라지면(완료 이동/제거) selectedScene 이 null 이 되어 모달이 깔끔히 닫힌다.
+  const [selectedSceneKey, setSelectedSceneKey] = useState<SceneKey | null>(null);
+  const selectedScene =
+    selectedSceneKey == null
+      ? null
+      : pendingScenes.find((f) => f.key === selectedSceneKey) ??
+        doneScenes.find((f) => f.key === selectedSceneKey) ??
+        null;
+  const openSceneDetail = (flat: FlatScene) => setSelectedSceneKey(flat.key);
+
+  // 본체(메인 앱) 씬 상세로 이동 — 대시보드/팝업 분기.
+  // 대시보드: 위젯이 본체와 같은 창에 있으므로 알림 점프와 동일한 경로를 직접 호출.
+  // 팝업: 별도 창이므로 본체 창에 점프 신호를 보낸다(본체 App 이 동일 경로로 변환).
+  const navigateToMainScene = (flat: FlatScene) => {
+    const scene = flat.scene;
+    if (isPopup) {
+      window.electronAPI?.widgetNavigateMain?.({
+        sheetName: flat.sheetName,
+        sceneId: scene.sceneId,
+        sceneUuid: scene.id ?? '',
+        episodeNumber: flat.episodeNumber,
+        partId: flat.partId,
+      });
+    } else {
+      navigateNotificationToScene('scene_change', {
+        sceneId: scene.id,
+        sceneName: scene.sceneId,
+        sheetName: flat.sheetName,
+      });
+    }
+    setSelectedSceneKey(null);
+  };
+
   // 팝업에서 완료 섹션 접기/펼치기 시 창 크기 조절
   const baseSizeRef = useRef<{ width: number; height: number } | null>(null);
   useEffect(() => {
@@ -642,7 +645,8 @@ export function MyTasksWidget() {
         isRemovable={isRemovable}
         onToggle={handleSceneToggle}
         onRemove={removeScene}
-        onEditField={handleEditField}
+        onOpenDetail={openSceneDetail}
+        onNavigateToMain={navigateToMainScene}
       />
     );
   };
@@ -806,6 +810,18 @@ export function MyTasksWidget() {
             todo={selectedTodo}
             onUpdate={updatePersonalTodo}
             onClose={() => setSelectedTodoId(null)}
+          />
+        )}
+      </AnimatePresence>
+
+      <AnimatePresence>
+        {selectedScene && (
+          <SceneDetailModal
+            flat={selectedScene}
+            onToggle={handleSceneToggle}
+            onEditField={handleEditField}
+            onNavigateToMain={navigateToMainScene}
+            onClose={() => setSelectedSceneKey(null)}
           />
         )}
       </AnimatePresence>
