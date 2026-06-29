@@ -34,7 +34,11 @@ function todo(completed: boolean): PersonalTodo {
   return { id: `t_${Math.random()}`, title: 't', memo: '', completed, createdAt: '' };
 }
 
-const NOW = new Date('2026-06-30T10:00:00+09:00');
+// 시간대 안정성: NOW 와 completedAt 을 모두 '로컬' 컴포넌트로 구성해, 러너 TZ(UTC/KST 등)와
+// 무관하게 같은 로컬 달력일로 비교되도록 한다(computeMyTasksStats 의 toDateString 비교는 로컬 기준).
+const NOW = new Date(2026, 5, 30, 10, 0, 0);
+const TODAY_ISO = new Date(2026, 5, 30, 1, 0, 0).toISOString();
+const YESTERDAY_ISO = new Date(2026, 5, 29, 23, 0, 0).toISOString();
 
 test('빈 상태(씬 0·개인 0)는 0으로 안전하게 떨어진다', () => {
   const s = computeMyTasksStats([], [], NOW);
@@ -82,8 +86,8 @@ test('완전 완료 씬 카운트', () => {
 test('오늘 마친 씬: completedAt 오늘만 카운트, falsy/Invalid/타일 제외', () => {
   const full = { lo: true, done: true, review: true, png: true };
   const scenes = [
-    flat('a001', full, '2026-06-30T01:00:00+09:00'), // 오늘
-    flat('a002', full, '2026-06-29T23:00:00+09:00'), // 어제
+    flat('a001', full, TODAY_ISO),     // 오늘
+    flat('a002', full, YESTERDAY_ISO), // 어제
     flat('a003', full, ''),                          // 미기록(레거시) → 제외
     flat('a004', full, 'not-a-date'),                // Invalid → 제외
     flat('a005', { lo: true }),                      // 미완료 → 애초에 제외

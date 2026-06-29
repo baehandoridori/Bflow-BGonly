@@ -128,6 +128,17 @@ test('전체 sceneId 입력은 exact', () => {
   assert.equal(r[0].exact, true);
 });
 
+test('접미사 씬(a001b)도 번호로 매칭·정렬된다(P2)', () => {
+  // 숫자 '1' → a001, a001b(둘 다 number 1) 매칭, a002(number 2) 제외
+  const r1 = filterSceneCandidates([flat('a002'), flat('a001b'), flat('a001')], '1', '배한솔', NONE);
+  const ids1 = r1.map((c) => c.flat.scene.sceneId);
+  assert.ok(ids1.includes('a001') && ids1.includes('a001b'));
+  assert.ok(!ids1.includes('a002'));
+  // 같은 번호면 접미사 순: a001 < a001b
+  const r2 = filterSceneCandidates([flat('a001b'), flat('a001')], 'a00', '배한솔', NONE);
+  assert.deepEqual(r2.map((c) => c.flat.scene.sceneId), ['a001', 'a001b']);
+});
+
 test('limit 적용', () => {
   const cands = Array.from({ length: 20 }, (_, i) => flat(`a${String(i + 1).padStart(3, '0')}`));
   const r = filterSceneCandidates(cands, 'a', '배한솔', NONE, 8);

@@ -3,6 +3,7 @@
  *
  * UI 없이 매칭/정렬/'내 담당' 판정을 단위 테스트로 회귀 보호한다.
  * ⚠️ 타입만 import(`import type`) — node:test(type-strip)에서 `@/` alias 없이 실행.
+ *   (그래서 `@/utils/sceneSort`를 값으로 가져오지 않고, 동일한 접미사 인식 파싱을 인라인한다.)
  */
 import type { FlatScene, SceneKey } from './types';
 
@@ -25,16 +26,23 @@ export function isAssignedToMe(assignee: string | undefined | null, userName: st
   return assignee.split(',').some((s) => s.trim() === userName);
 }
 
-/** sceneId 끝자리 숫자(선행 0 제거). 예: 'a001' → '1', 'sc010b' → '10' */
-function trailingNumber(sceneId: string): string {
-  return sceneId.match(/\d+$/)?.[0]?.replace(/^0+/, '') || '';
+/**
+ * 씬 번호 파싱 — `src/utils/sceneSort.ts`의 parseSceneNumberSuffix와 동일 패턴.
+ * 'a001' → { raw:'001', num:1 }, 'a001b'(접미사) → { raw:'001', num:1 }, 'sc010B' → { raw:'010', num:10 }.
+ * 접미사가 붙은 씬도 끝자리 숫자를 정확히 뽑아 번호 매칭/정렬이 어긋나지 않게 한다.
+ */
+const SCENE_NUM_RE = /^(.*?)(\d+)([A-Za-z]*)$/;
+function sceneNumberParts(sceneId: string): { raw: string; num: number } {
+  const m = sceneId.match(SCENE_NUM_RE);
+  if (!m) return { raw: '', num: Number.NaN };
+  return { raw: m[2], num: Number.parseInt(m[2], 10) };
 }
 
 /**
  * 입력값으로 씬 후보를 필터·정렬한다.
  *
- * 매칭: sceneId 부분일치(소문자) 또는 입력 숫자가 끝자리 번호의 접두.
- * 정렬: 내 담당 우선 → 에피소드 → 파트 → 씬 번호.
+ * 매칭: sceneId 부분일치(소문자) 또는 (순수 숫자 입력일 때) 끝자리 번호 접두 일치.
+ * 정렬: 정확 매칭 → 추가 가능 → 내 담당 → 에피소드 → 파트 → 씬 번호(접미사 인식).
  *
  * @param limit 최대 후보 수(기본 8).
  */
@@ -59,7 +67,8 @@ export function filterSceneCandidates(
     const id = f.scene.sceneId.toLowerCase();
     if (id.includes(q)) return true;
     if (numericQuery) {
-      const tail = trailingNumber(f.scene.sceneId);
+      const { num } = sceneNumberParts(f.scene.sceneId);
+      const tail = Number.isFinite(num) ? String(num) : '';
       if (tail && tail.startsWith(numericQuery)) return true;
     }
     return false;
@@ -67,9 +76,9 @@ export function filterSceneCandidates(
 
   const scored: SceneCandidate[] = matched.map((f) => {
     const id = f.scene.sceneId.toLowerCase();
-    const rawTail = f.scene.sceneId.match(/\d+$/)?.[0] ?? '';
-    // 정확 매칭: 전체 sceneId 일치 또는 0 패딩 그대로의 끝자리 번호 일치.
-    const exact = id === q || (rawDigits !== null && rawTail !== '' && rawTail === rawDigits);
+    const { raw } = sceneNumberParts(f.scene.sceneId);
+    // 정확 매칭: 전체 sceneId 일치 또는 0 패딩 그대로의 끝자리 번호 일치(접미사 인식).
+    const exact = id === q || (rawDigits !== null && raw !== '' && raw === rawDigits);
     return {
       flat: f,
       isMine: isAssignedToMe(f.scene.assignee, currentUserName),
@@ -87,9 +96,11 @@ export function filterSceneCandidates(
     if (a.isMine !== b.isMine) return a.isMine ? -1 : 1;
     if (a.flat.episodeNumber !== b.flat.episodeNumber) return a.flat.episodeNumber - b.flat.episodeNumber;
     if (a.flat.partId !== b.flat.partId) return a.flat.partId.localeCompare(b.flat.partId);
-    const an = parseInt(a.flat.scene.sceneId.match(/\d+$/)?.[0] || '0', 10);
-    const bn = parseInt(b.flat.scene.sceneId.match(/\d+$/)?.[0] || '0', 10);
-    return an - bn;
+    // 씬 번호(접미사 인식): a001 < a001b < a002 < a010
+    const an = sceneNumberParts(a.flat.scene.sceneId).num;
+    const bn = sceneNumberParts(b.flat.scene.sceneId).num;
+    if (an !== bn) return (Number.isFinite(an) ? an : Infinity) - (Number.isFinite(bn) ? bn : Infinity);
+    return a.flat.scene.sceneId.localeCompare(b.flat.scene.sceneId, undefined, { numeric: true, sensitivity: 'base' });
   });
 
   return scored.slice(0, limit);
