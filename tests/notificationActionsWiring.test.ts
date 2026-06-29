@@ -57,7 +57,9 @@ test('manual read and deletion paths also sync durable domain read state', () =>
 });
 
 test('comment reaction upserts preserve local read state across realtime races', () => {
-  assert.match(notificationStore, /const existingRead = existingReaction\?\.isRead === true \|\| n\.isRead === true/);
+  assert.match(notificationStore, /const incomingReactionIsNewer =/);
+  assert.match(notificationStore, /incomingReactionAt > existingReactionAt/);
+  assert.match(notificationStore, /const existingRead = n\.isRead === true \|\| \(existingReaction\?\.isRead === true && !incomingReactionIsNewer\)/);
   assert.match(notificationStore, /\{ \.\.\.n, isRead: existingRead \}/);
 });
 

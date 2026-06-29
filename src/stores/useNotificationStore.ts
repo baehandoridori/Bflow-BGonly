@@ -255,7 +255,13 @@ export const useNotificationStore = create<NotificationState>((set, get) => ({
     const existingReaction = list.find((x) =>
       x.id === n.id || (!!identity && getNotificationIdentity(x) === identity)
     );
-    const existingRead = existingReaction?.isRead === true || n.isRead === true;
+    const existingReactionAt = existingReaction ? Date.parse(existingReaction.createdAt) : NaN;
+    const incomingReactionAt = Date.parse(n.createdAt);
+    const incomingReactionIsNewer =
+      Number.isFinite(existingReactionAt) &&
+      Number.isFinite(incomingReactionAt) &&
+      incomingReactionAt > existingReactionAt;
+    const existingRead = n.isRead === true || (existingReaction?.isRead === true && !incomingReactionIsNewer);
     const next = [
       { ...n, isRead: existingRead },
       ...list.filter((x) => x.id !== n.id && (!identity || getNotificationIdentity(x) !== identity)),
