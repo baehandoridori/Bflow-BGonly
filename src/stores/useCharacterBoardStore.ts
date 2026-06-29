@@ -106,6 +106,7 @@ interface CharacterBoardStore {
 
   addCharacter: (name: string, memo?: string) => Promise<Character | null>;
   updateCharacterMemo: (id: string, memo: string) => Promise<void>;
+  updateCharacterFolder: (id: string, workFolderPath: string | null) => Promise<void>;
   renameCharacter: (id: string, name: string) => Promise<void>;
   deleteCharacter: (id: string) => Promise<void>;
 
@@ -120,7 +121,16 @@ interface CharacterBoardStore {
   updateCostumeField: (
     id: string,
     updates: Partial<Pick<CharacterCostume,
-      'name' | 'versionNo' | 'featuredImageUrl' | 'assignee' | 'memo'>>,
+      | 'name'
+      | 'versionNo'
+      | 'featuredImageUrl'
+      | 'workFilePath'
+      | 'imageBackground'
+      | 'imageFit'
+      | 'assignee'
+      | 'designAssignee'
+      | 'riggingAssignee'
+      | 'memo'>>,
   ) => Promise<void>;
   setCostumeTags: (id: string, kind: 'structure' | 'asset', tags: string[]) => Promise<void>;
   setVersion: (id: string, versionNo: number) => Promise<void>;
@@ -218,6 +228,18 @@ export const useCharacterBoardStore = create<CharacterBoardStore>((set, get) => 
       console.error('[character-board] updateCharacterMemo 실패:', err);
       set({ characters: prev });
       toast.error('메모 저장에 실패했어요');
+    }
+  },
+
+  updateCharacterFolder: async (id, workFolderPath) => {
+    const prev = get().characters;
+    set({ characters: prev.map((c) => (c.id === id ? { ...c, workFolderPath } : c)) });
+    try {
+      await svcUpdateCharacter(id, { work_folder_path: workFolderPath });
+    } catch (err) {
+      console.error('[character-board] updateCharacterFolder 실패:', err);
+      set({ characters: prev });
+      toast.error('작업 폴더 저장에 실패했어요');
     }
   },
 

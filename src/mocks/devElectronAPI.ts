@@ -213,6 +213,8 @@ function emitMockActivityRealtime(row: MockActivityRow): void {
 // ─── 캐릭터 현황판 mock 시드 ──────────────────────────────
 // preview 에서 보드/검색/에피소드탭이 비지 않도록 샘플 2~3 캐릭터 + 복장 + 태그 + 에피소드 연결.
 const MOCK_CHARACTER_EP = 5; // MOCK_EPISODES 에 존재하는 유일 에피소드(EP05).
+const MOCK_CHARACTER_IMAGE_URL =
+  'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAGQAAABkCAYAAABw4pVUAAAByklEQVR4nO3asU7DMBRA0Wj//5e5DB1aQlhUoOAFR3DRbDTlVR9OZ2I0WPs557yvJzfAX8xMBAkxQkKMECRkZdyfA9w9a4qv1x6Aq66q+RzKPkc7tLR+TwsQICFGSIgREqJX6Au4KknyLe0r9DxaYt8MEhsiIERAiIAQASWf4Qk9LqHn8Q4tX7NQRBUBz40QASGCSuCFdgEp9JJC3sE7qYqGuW5lz0yIgBABIQJCBDXfCKW2D1hp+y5oWRn2wkSQt6ZpDCIgRECIgBAByR/FWlcjdv0o1rGxEit/c71aIyFEQIiAEAEhAtI6dQ1yObxj3+phynH8QwSECAgRECIgRECIgBABIQJCBBQm7DNkoVaOV1zvJa+jzTn9MoYICBEQIiBEQIhAk7o8LqEPdFx38HfTkN/kJDtCBIQICBEQIiBEQIgA5rSoR/TrRRxjz3B7EAEhAkIEhAgIERAioPAh4HJMY9bv4RKhBE4RASECEgKhxP/tOyoeOoQ9YnwoxGMyIgRCBIQICBEQIuBQibzhTxp7RPEMIhBAQIiBEQIiAEAGlXqEw+VjwheVDBIQICBEQIiBEQIiAwoRZK75p2T5EQIiAEAEhAkIEhAgIERAiIERAiIAQASFX9wI8QluMN0VIjgAAAABJRU5ErkJggg==';
 
 function seedMockCharacterData(): void {
   if (localStore.__characters !== undefined) return; // 이미 시드/조작됨
@@ -224,6 +226,7 @@ function seedMockCharacterData(): void {
     { id: 'mock-char-3', name: '혜원', memo: null },
   ].map((c, i) => ({
     id: c.id, name: c.name, status: 'active', memo: c.memo,
+    work_folder_path: 'G:\\공유 드라이브\\사우스 코리안 파크\\[]사코팍 캐릭터 세팅\\한솔',
     sort_order: i, created_at: now, updated_at: now, created_by: '1',
   }));
 
@@ -253,7 +256,14 @@ function seedMockCharacterData(): void {
     },
   ].map((c, i) => ({
     ...c,
-    featured_image_url: null, assignee: null, memo: null,
+    featured_image_url: MOCK_CHARACTER_IMAGE_URL,
+    work_file_path: 'G:\\공유 드라이브\\사우스 코리안 파크\\[]사코팍 캐릭터 세팅\\한솔\\[드라마 퀄리티] 한솔 SWver12.moho',
+    image_background: 'black',
+    image_fit: { scale: 1, scaleX: 1, scaleY: 1, x: 0, y: 0, lockAspect: true },
+    design_assignee: '허혜원',
+    rigging_assignee: '배한솔',
+    assignee: null,
+    memo: null,
     sort_order: i, created_at: now, updated_at: now, created_by: '1',
   }));
 
@@ -479,6 +489,11 @@ export function installDevElectronAPI(): void {
     ),
     chooseFolderPath: async () => 'G:\\공유 드라이브\\JBBJ\\A_014',
     chooseFilePath: async () => 'G:\\공유 드라이브\\JBBJ\\A_014\\main.psd',
+    pathDirname: async (targetPath: string) => {
+      const normalized = targetPath.trim().replace(/[\\/]+$/, '');
+      const index = Math.max(normalized.lastIndexOf('\\'), normalized.lastIndexOf('/'));
+      return index > 0 ? normalized.slice(0, index) : '';
+    },
     pathExists: async (targetPath: string) => !targetPath.includes('missing'),
 
     // v1.20.0: 사용자 폰트 — 개발 환경에선 stub (Electron dialog/fs 사용 불가)
@@ -602,6 +617,14 @@ export function installDevElectronAPI(): void {
     // v1.30.0: 컴포지팅 대시보드 시각 검증용 — MOCK_EPISODES 시드.
     // 운영(.exe)에는 영향 없음 (devElectronAPI 자체가 install skip).
     supabaseReadAll: async () => getMockEpisodes() as unknown as Record<string, unknown>[],
+    supabaseUpdateEpisodeReelPath: async (episodeNumber, reelFilePath) => {
+      const episodes = getMockEpisodes();
+      const episode = episodes.find((item) => item.episodeNumber === episodeNumber);
+      if (episode) {
+        (episode as Episode & { reelFilePath?: string | null }).reelFilePath = reelFilePath;
+        localStore.__mockEpisodes = episodes;
+      }
+    },
     supabaseAddEpisode: async () => {},
     supabaseSoftDeleteEpisode: async () => {},
     supabaseArchiveEpisode: async () => {},
@@ -1055,6 +1078,7 @@ export function installDevElectronAPI(): void {
       const now = new Date().toISOString();
       const row = {
         id: createUuid(), name: input.name, status: 'active', memo: input.memo ?? null,
+        work_folder_path: null,
         sort_order: store.length, created_at: now, updated_at: now, created_by: input.createdBy ?? null,
       };
       store.push(row);
@@ -1079,7 +1103,10 @@ export function installDevElectronAPI(): void {
       const row = {
         id: createUuid(), character_id: input.characterId, name: input.name, version_no: 1,
         design_stage: 'waiting', rigging_stage: 'waiting', featured_image_url: null,
-        structure_tags: [], asset_tags: [], assignee: null, memo: null,
+        work_file_path: null,
+        image_background: 'black',
+        image_fit: { scale: 1, scaleX: 1, scaleY: 1, x: 0, y: 0, lockAspect: true },
+        structure_tags: [], asset_tags: [], design_assignee: null, rigging_assignee: null, assignee: null, memo: null,
         sort_order: store.filter((r) => r.character_id === input.characterId).length,
         created_at: now, updated_at: now, created_by: input.createdBy ?? null,
       };

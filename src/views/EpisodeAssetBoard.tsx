@@ -13,7 +13,8 @@
  */
 
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Plus, X, Search, User, ImageOff, ArrowRight, Check } from 'lucide-react';
+import { Plus, X, Search, User, ImageOff, ArrowRight, Check, Film } from 'lucide-react';
+import { toast } from 'sonner';
 import { useCharacterBoardStore } from '@/stores/useCharacterBoardStore';
 import { useDataStore } from '@/stores/useDataStore';
 import {
@@ -24,6 +25,8 @@ import {
 } from '@/types';
 import { tagColor } from '@/utils/tagColor';
 import { cn } from '@/utils/cn';
+import { chooseWorkFile, openWorkPath } from '@/services/sceneWorkLinkService';
+import { updateEpisodeReelPath } from '@/services/supabaseService';
 
 const RIGGING_STAGE_META: Record<CostumeRiggingStage, { label: string; color: string }> = {
   waiting: { label: '대기', color: '#8B8DA3' },
@@ -358,6 +361,7 @@ export function EpisodeAssetBoard({ onOpenCharacter }: { onOpenCharacter?: (id: 
   const byCharacter = useCharacterBoardStore((s) => s.byCharacter);
   const episodeLinks = useCharacterBoardStore((s) => s.episodeLinks);
   const episodes = useDataStore((s) => s.episodes);
+  const setEpisodes = useDataStore((s) => s.setEpisodes);
   const getEpisodeDisplayName = useDataStore((s) => s.getEpisodeDisplayName);
 
   const sortedEpisodes = useMemo(() => [...episodes].sort((a, b) => a.episodeNumber - b.episodeNumber), [episodes]);
@@ -389,6 +393,28 @@ export function EpisodeAssetBoard({ onOpenCharacter }: { onOpenCharacter?: (id: 
   }, [linkedCharacters, selectedCharId]);
 
   const selectedChar = linkedCharacters.find((c) => c.id === selectedCharId) ?? null;
+  const selectedEpisode = sortedEpisodes.find((ep) => ep.episodeNumber === selectedEp) ?? null;
+
+  const handleEpisodeReel = async () => {
+    if (!selectedEpisode) return;
+    if (selectedEpisode.reelFilePath) {
+      const res = await openWorkPath(selectedEpisode.reelFilePath);
+      if (!res.ok) toast.error('릴 파일 열기에 실패했어요');
+      return;
+    }
+    const filePath = await chooseWorkFile();
+    if (!filePath) return;
+    const prev = episodes;
+    setEpisodes(prev.map((ep) => ep.episodeNumber === selectedEpisode.episodeNumber ? { ...ep, reelFilePath: filePath } : ep));
+    try {
+      await updateEpisodeReelPath(selectedEpisode.episodeNumber, filePath);
+      toast.success('릴 파일 경로를 등록했어요');
+    } catch (err) {
+      console.error('[episode-assets] 릴 파일 저장 실패:', err);
+      setEpisodes(prev);
+      toast.error('릴 파일 경로 저장에 실패했어요');
+    }
+  };
 
   function costumeIdFor(characterId: string): string | null {
     const link = (episodeLinks.get(characterId) ?? []).find((l) => l.episodeNumber === selectedEp);
@@ -414,6 +440,19 @@ export function EpisodeAssetBoard({ onOpenCharacter }: { onOpenCharacter?: (id: 
               <option key={ep.episodeNumber} value={ep.episodeNumber}>{getEpisodeDisplayName(ep)}</option>
             ))}
           </select>
+          <button
+            type="button"
+            onClick={handleEpisodeReel}
+            title={selectedEpisode?.reelFilePath ?? '릴 파일 등록'}
+            className={cn(
+              'flex items-center gap-1.5 px-3 py-2 rounded-lg border text-sm transition-colors cursor-pointer',
+              selectedEpisode?.reelFilePath
+                ? 'border-[#00B89455] bg-[#00B8941a] text-[#00B894]'
+                : 'border-bg-border text-text-secondary hover:text-text-primary hover:border-text-secondary/50',
+            )}
+          >
+            <Film size={15} /> 릴 파일
+          </button>
         </div>
         {selectedEp != null && (
           <button type="button" onClick={() => setAddOpen(true)} className="flex items-center gap-1.5 px-3 py-2 rounded-lg bg-accent text-white text-sm hover:opacity-90 cursor-pointer">
