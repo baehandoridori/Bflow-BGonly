@@ -208,17 +208,18 @@ async function migrateLocalStorageToSupabase(userId: string): Promise<void> {
  * assigned 할일에 id 기준으로 없는 것만 '내 할일'로 옮긴다.
  *
  * @param currentTodos 방금 로드한 assigned 할일 (id 기준 중복 제거에 사용)
- * @returns 새로 마이그레이션되어 state 에 합쳐야 할 할일 목록(서버 확정 id 반영).
- *          마이그레이션할 게 없으면 빈 배열. 읽기 실패 등 안전하게 스킵해야 하면 null.
+ * @returns 마이그레이션 결과 `{ todos, sceneKeys }`. todos는 새로 합칠 할일 목록(서버 확정 id 반영),
+ *          sceneKeys는 기존 + 커스텀 뷰 병합 후 값. 이미 마이그레이션됐거나 읽기 실패 시 null
+ *          (호출부는 null이면 기존 로드값을 그대로 state에 넣음).
  */
 async function migrateCustomViewTodosToAssigned(
   userId: string,
   currentTodos: PersonalTodo[],
-): Promise<PersonalTodo[] | null> {
+): Promise<{ todos: PersonalTodo[]; sceneKeys: SceneKey[] } | null> {
   // P2: 마커를 userId별로 분리 — 같은 PC의 여러 사용자가 각자 마이그레이션되도록
   const migratedMarkerKey = `${CUSTOM_VIEW_TODOS_MIGRATED_KEY}_${userId}`;
-  // 일회성: 이미 마이그레이션했으면 모을 게 없으므로 스킵
-  if (localStorage.getItem(migratedMarkerKey)) return [];
+  // 일회성: 이미 마이그레이션했으면 모을 게 없으므로 스킵 (sceneKeys는 로드된 값 그대로 → null 반환으로 알림)
+  if (localStorage.getItem(migratedMarkerKey)) return null;
 
   let data: { views: unknown[]; assignedSceneKeys: unknown[] } | null;
   try {
@@ -226,7 +227,7 @@ async function migrateCustomViewTodosToAssigned(
   } catch (err) {
     // 읽기 실패 시 기존 데이터 보호: 마이그레이션 스킵(마커도 남기지 않아 다음에 재시도)
     console.error('[MyTasks] 커스텀 뷰 할일 마이그레이션 읽기 실패 — 스킵:', err);
-    return null;
+    return null; // null = 안전 스킵, 호출부는 기존 로드값을 그대로 사용
   }
 
   const views = (data?.views ?? []) as TaskView[];
@@ -265,7 +266,8 @@ async function migrateCustomViewTodosToAssigned(
     }
     // 옮길 게 없어도 마커는 남겨 다음 로드에서 재시도하지 않게 함
     localStorage.setItem(migratedMarkerKey, 'true');
-    return [];
+    // mergedSceneKeys를 반환해 호출부가 state를 올바르게 설정하도록 함
+    return { todos: [], sceneKeys: mergedSceneKeys };
   }
 
   // 후보들을 personal_todos 로 저장 (기존 할일 뒤에 이어 붙임)
@@ -278,8 +280,9 @@ async function migrateCustomViewTodosToAssigned(
     }
   } catch (err) {
     // 저장 도중 실패: 지금까지 성공한 것은 반영하되, 마커/views 정리는 하지 않아 다음에 재시도
+    // sceneKeys는 아직 Supabase에 반영 안 됐을 수 있으므로 기존 assignedSceneKeys(병합 전)를 반환
     console.error('[MyTasks] 커스텀 뷰 할일 저장 실패 — 일부만 반영:', err);
-    return migrated;
+    return { todos: migrated, sceneKeys: existingAssignedSceneKeys };
   }
 
   // P1: 마이그레이션 성공 → views 를 비우고 커스텀 뷰 sceneKeys를 assignedSceneKeys에 병합
@@ -293,7 +296,7 @@ async function migrateCustomViewTodosToAssigned(
   }
 
   console.log(`[MyTasks] 커스텀 뷰 개인 할일 ${migrated.length}건, sceneKeys ${viewSceneKeys.length}건 → 내 할일로 마이그레이션 완료`);
-  return migrated;
+  return { todos: migrated, sceneKeys: mergedSceneKeys };
 }
 
 export interface UseMyTasksDataResult {
@@ -414,12 +417,16 @@ export function useMyTasksData(isPopup: boolean): UseMyTasksDataResult {
       }
       // 일회성 마이그레이션: 기존 커스텀 뷰에 남아 있던 개인 할일을 '내 할일'로 합침.
       // (DB 쓰기는 await로 먼저 끝내고, 합친 결과를 아래 가드 안에서 한 번에 setState)
-      // 읽기 실패 등 안전 스킵이 필요하면 null → 빈 배열로 처리(기존 데이터 보호).
-      const migratedTodos = (await migrateCustomViewTodosToAssigned(userId, todos)) ?? [];
-      const mergedTodos = migratedTodos.length > 0 ? [...todos, ...migratedTodos] : todos;
+      // 읽기 실패 등 안전 스킵이 필요하면 null → 기존 로드값을 그대로 사용(기존 데이터 보호).
+      const migrationResult = await migrateCustomViewTodosToAssigned(userId, todos);
+      const mergedTodos = migrationResult && migrationResult.todos.length > 0
+        ? [...todos, ...migrationResult.todos]
+        : todos;
+      // P1: 마이그레이션이 일어났으면 병합된 sceneKeys를 사용, 아니면 기존 로드값 그대로
+      const finalSceneKeys = migrationResult ? migrationResult.sceneKeys : sceneKeys;
       _externalDepth.current++;
       setAssignedTodos(mergedTodos);
-      setAssignedSceneKeys(sceneKeys);
+      setAssignedSceneKeys(finalSceneKeys);
       requestAnimationFrame(() => {
         _externalDepth.current = Math.max(0, _externalDepth.current - 1);
         _supabaseInitialized.current = true;
