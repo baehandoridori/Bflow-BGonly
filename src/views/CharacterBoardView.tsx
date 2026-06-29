@@ -1008,8 +1008,9 @@ function CharacterDetailPanel({
     if (!filePath) return;
     const saved = await updateCostumeField(targetCostume.id, { workFilePath: filePath });
     if (!saved) return;
-    if (!character.workFolderPath?.trim()) {
-      const folder = await resolveFolderAfterFilePick(character.workFolderPath, filePath);
+    const latestFolderPath = useCharacterBoardStore.getState().characters.find((item) => item.id === character.id)?.workFolderPath ?? character.workFolderPath;
+    if (!latestFolderPath?.trim()) {
+      const folder = await resolveFolderAfterFilePick(latestFolderPath, filePath);
       if (folder) await updateCharacterFolder(character.id, folder);
     }
   }, [activeCostume, character.id, character.workFolderPath, updateCharacterFolder, updateCostumeField]);
@@ -1021,7 +1022,7 @@ function CharacterDetailPanel({
     }
     const filePath = await chooseWorkFile();
     if (!filePath) return;
-    const prev = episodes;
+    const prev = useDataStore.getState().episodes;
     setEpisodes(prev.map((item) => item.episodeNumber === episode.episodeNumber ? { ...item, reelFilePath: filePath } : item));
     try {
       await updateEpisodeReelPath(episode.episodeNumber, filePath);

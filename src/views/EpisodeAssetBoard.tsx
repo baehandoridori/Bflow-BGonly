@@ -404,7 +404,7 @@ export function EpisodeAssetBoard({ onOpenCharacter }: { onOpenCharacter?: (id: 
     }
     const filePath = await chooseWorkFile();
     if (!filePath) return;
-    const prev = episodes;
+    const prev = useDataStore.getState().episodes;
     setEpisodes(prev.map((ep) => ep.episodeNumber === selectedEpisode.episodeNumber ? { ...ep, reelFilePath: filePath } : ep));
     try {
       await updateEpisodeReelPath(selectedEpisode.episodeNumber, filePath);

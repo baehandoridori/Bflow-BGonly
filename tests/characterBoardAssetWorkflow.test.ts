@@ -111,6 +111,7 @@ test('character board is wired for image display, assignees, work links, and lig
   assert.ok(characterBoard.includes("isPng ? 'image/png' : 'image/jpeg'"));
   assert.ok(characterBoard.includes('const saved = await updateCostumeField(targetCostume.id, { workFilePath: filePath });'));
   assert.ok(characterBoard.includes('if (!saved) return;'));
+  assert.ok(characterBoard.includes('useCharacterBoardStore.getState().characters.find'));
   assert.match(readFileSync('src/components/characters/CharacterImageFrame.tsx', 'utf8'), /translate\(\$\{normalized\.x\}%, \$\{normalized\.y\}%\)/);
   assert.match(readFileSync('src/components/characters/CharacterImageFitEditor.tsx', 'utf8'), /stopImmediatePropagation/);
   assert.match(characterStore, /Promise<boolean>/);
@@ -123,4 +124,7 @@ test('episode reel controls are available in episode assets, character board, an
   assert.match(characterBoard, /릴 파일 보기/);
   assert.match(scenesView, /EpisodeReelButton/);
   assert.match(scenesView, /릴 보기/);
+  assert.match(characterBoard, /useDataStore\.getState\(\)\.episodes/);
+  assert.match(episodeAssetBoard, /useDataStore\.getState\(\)\.episodes/);
+  assert.match(scenesView, /useDataStore\.getState\(\)\.episodes/);
 });

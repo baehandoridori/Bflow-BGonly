@@ -137,7 +137,7 @@ function EpisodeReelButton({ episodeNumber }: { episodeNumber: number | null }) 
     }
     const filePath = await chooseWorkFile();
     if (!filePath) return;
-    const prev = episodes;
+    const prev = useDataStore.getState().episodes;
     setEpisodes(prev.map((item) => item.episodeNumber === episode.episodeNumber ? { ...item, reelFilePath: filePath } : item));
     try {
       await updateEpisodeReelPath(episode.episodeNumber, filePath);
