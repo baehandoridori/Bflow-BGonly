@@ -115,13 +115,22 @@ function AssigneeMultiSelect({
   onChange: (value: string | null) => void;
 }) {
   const users = useAuthStore((s) => s.users);
+  const [draftName, setDraftName] = useState('');
   const selected = parseAssigneeNames(value);
   const selectedSet = new Set(selected);
+  const userNameSet = new Set(users.map((user) => user.name));
+  const externalSelected = selected.filter((name) => !userNameSet.has(name));
   const toggle = (name: string) => {
     const next = selectedSet.has(name)
       ? selected.filter((item) => item !== name)
       : [...selected, name];
     onChange(formatAssigneeNames(next));
+  };
+  const addDraftName = () => {
+    const name = draftName.trim();
+    if (!name) return;
+    if (!selectedSet.has(name)) onChange(formatAssigneeNames([...selected, name]));
+    setDraftName('');
   };
 
   return (
@@ -139,27 +148,72 @@ function AssigneeMultiSelect({
         )}
       </div>
       <div className="flex flex-wrap gap-1.5 rounded-lg border border-bg-border bg-bg-border/10 p-2">
-        {users.length === 0 ? (
+        {users.length === 0 && externalSelected.length === 0 ? (
           <span className="text-xs text-text-secondary/60">사용자 목록 없음</span>
-        ) : users.map((user) => {
-          const on = selectedSet.has(user.name);
-          const color = getUserColor(user.name);
-          return (
-            <button
-              key={user.id}
-              type="button"
-              aria-pressed={on}
-              onClick={() => toggle(user.name)}
-              className="px-2 py-1 rounded-full text-xs border flex items-center gap-1.5 transition-colors"
-              style={on
-                ? { background: `${color}26`, borderColor: `${color}99`, color }
-                : { background: 'transparent', borderColor: 'rgb(var(--color-bg-border))', color: 'rgb(var(--color-text-secondary))' }}
-            >
-              <span className="w-1.5 h-1.5 rounded-full" style={{ background: color, opacity: on ? 1 : 0.5 }} />
-              {user.name}
-            </button>
-          );
-        })}
+        ) : (
+          <>
+            {externalSelected.map((name) => {
+              const color = getUserColor(name);
+              return (
+                <button
+                  key={`external-${name}`}
+                  type="button"
+                  aria-pressed="true"
+                  title="사용자 목록에 없는 담당자"
+                  onClick={() => toggle(name)}
+                  className="px-2 py-1 rounded-full text-xs border border-dashed flex items-center gap-1.5 transition-colors"
+                  style={{ background: `${color}20`, borderColor: `${color}99`, color }}
+                >
+                  <span className="w-1.5 h-1.5 rounded-full" style={{ background: color }} />
+                  {name}
+                </button>
+              );
+            })}
+            {users.map((user) => {
+              const on = selectedSet.has(user.name);
+              const color = getUserColor(user.name);
+              return (
+                <button
+                  key={user.id}
+                  type="button"
+                  aria-pressed={on}
+                  onClick={() => toggle(user.name)}
+                  className="px-2 py-1 rounded-full text-xs border flex items-center gap-1.5 transition-colors"
+                  style={on
+                    ? { background: `${color}26`, borderColor: `${color}99`, color }
+                    : { background: 'transparent', borderColor: 'rgb(var(--color-bg-border))', color: 'rgb(var(--color-text-secondary))' }}
+                >
+                  <span className="w-1.5 h-1.5 rounded-full" style={{ background: color, opacity: on ? 1 : 0.5 }} />
+                  {user.name}
+                </button>
+              );
+            })}
+          </>
+        )}
+      </div>
+      <div className="flex gap-1.5">
+        <input
+          type="text"
+          value={draftName}
+          onChange={(event) => setDraftName(event.target.value)}
+          onKeyDown={(event) => {
+            if (event.key === 'Enter') {
+              event.preventDefault();
+              addDraftName();
+            }
+          }}
+          placeholder="이름 직접 추가"
+          className="min-w-0 flex-1 rounded-md border border-bg-border bg-bg-border/10 px-2 py-1 text-xs text-text-primary placeholder:text-text-secondary/50 outline-none focus:border-accent/70"
+        />
+        <button
+          type="button"
+          onClick={addDraftName}
+          disabled={!draftName.trim()}
+          className="rounded-md border border-bg-border px-2 text-text-secondary hover:text-text-primary disabled:opacity-40"
+          aria-label={`${label} 직접 추가`}
+        >
+          <Plus size={13} />
+        </button>
       </div>
     </div>
   );
@@ -926,8 +980,7 @@ function CharacterDetailPanel({
   useEffect(() => { setEditingName(false); setNameDraft(character.name); }, [character.id, character.name]);
 
   const activeCostume = costumes.find((c) => c.id === activeCostumeId) ?? null;
-  const fallbackCostume = costumes.find((c) => c.featuredImageUrl) ?? null;
-  const shownCostume = activeCostume?.featuredImageUrl ? activeCostume : fallbackCostume;
+  const shownCostume = activeCostume;
   const imageEntries: CharacterImageLightboxEntry[] = costumes
     .filter((c) => !!c.featuredImageUrl)
     .map((c) => ({

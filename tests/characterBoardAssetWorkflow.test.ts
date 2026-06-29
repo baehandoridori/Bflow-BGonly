@@ -95,6 +95,9 @@ test('character board is wired for image display, assignees, work links, and lig
     'CharacterImageFitEditor',
     'CharacterImageLightbox',
     'AssigneeMultiSelect',
+    'externalSelected',
+    '이름 직접 추가',
+    'const shownCostume = activeCostume;',
     '디자인 담당자',
     '리깅 담당자',
     '작업 폴더',
@@ -103,6 +106,7 @@ test('character board is wired for image display, assignees, work links, and lig
   ]) {
     assert.match(characterBoard, new RegExp(token), `CharacterBoardView missing ${token}`);
   }
+  assert.doesNotMatch(characterBoard, /fallbackCostume/);
 });
 
 test('episode reel controls are available in episode assets, character board, and scenes view', () => {
