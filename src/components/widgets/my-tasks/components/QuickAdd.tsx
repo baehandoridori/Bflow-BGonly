@@ -268,11 +268,10 @@ export function QuickAdd({
               const deptCfg = DEPARTMENT_CONFIGS[f.department];
               const epLabel = episodeTitles[f.episodeNumber] || `EP.${String(f.episodeNumber).padStart(2, '0')}`;
               const sceneNum = s.sceneId.match(/\d+$/)?.[0]?.replace(/^0+/, '') || String(s.no ?? '');
-              const prevEp = i > 0 ? filtered[i - 1].flat.episodeNumber : null;
-              const showDivider = i > 0 && prevEp !== f.episodeNumber;
+              // 에피소드 구분선은 두지 않는다 — 정렬이 정확매칭/추가가능/내담당 우선이라 에피소드가
+              // 연속 배치되지 않아 구분선이 오히려 오해를 준다. 각 행에 EP 라벨이 이미 표시된다.
               return (
                 <div key={f.key}>
-                  {showDivider && <div className="my-1 mx-2 border-t border-bg-border/30" />}
                   <button
                     type="button"
                     role="option"
