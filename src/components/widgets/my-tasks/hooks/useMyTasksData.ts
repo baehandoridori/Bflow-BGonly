@@ -260,12 +260,13 @@ async function migrateCustomViewTodosToAssigned(
     // 옮길 할일이 없어도 sceneKeys 병합은 필요할 수 있으므로 정리 시도
     try {
       await supabaseService.upsertTaskViews(userId, [], mergedSceneKeys);
+      // 저장 성공 후에만 마커 설정 — 실패 시 마커를 남기지 않아 다음 실행에서 재시도
+      localStorage.setItem(migratedMarkerKey, 'true');
     } catch (err) {
-      console.error('[MyTasks] 커스텀 뷰 sceneKeys 병합(빈 할일) 실패:', err);
-      // 정리 실패해도 마커는 남김 — 후속 씬키 save effect가 views를 [] 로 덮으면 자연 정리됨
+      console.error('[MyTasks] 커스텀 뷰 sceneKeys 병합(빈 할일) 실패 — 다음 실행에서 재시도:', err);
+      // 저장 실패 시 마커 미설정: 다음 실행에서 재시도 보장
+      return null;
     }
-    // 옮길 게 없어도 마커는 남겨 다음 로드에서 재시도하지 않게 함
-    localStorage.setItem(migratedMarkerKey, 'true');
     // mergedSceneKeys를 반환해 호출부가 state를 올바르게 설정하도록 함
     return { todos: [], sceneKeys: mergedSceneKeys };
   }
