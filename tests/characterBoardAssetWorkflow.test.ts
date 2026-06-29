@@ -11,6 +11,7 @@ const typeSource = readFileSync('src/types/index.ts', 'utf8');
 const rendererSupabase = readFileSync('src/services/supabaseService.ts', 'utf8');
 const electronSupabase = readFileSync('electron/supabase.ts', 'utf8');
 const characterBoard = readFileSync('src/views/CharacterBoardView.tsx', 'utf8');
+const characterStore = readFileSync('src/stores/useCharacterBoardStore.ts', 'utf8');
 const episodeAssetBoard = readFileSync('src/views/EpisodeAssetBoard.tsx', 'utf8');
 const scenesView = readFileSync('src/views/ScenesView.tsx', 'utf8');
 const migration = readFileSync('DEVLOG/migrations/2026-06-29-character-board-asset-workflow.sql', 'utf8');
@@ -107,6 +108,12 @@ test('character board is wired for image display, assignees, work links, and lig
     assert.match(characterBoard, new RegExp(token), `CharacterBoardView missing ${token}`);
   }
   assert.doesNotMatch(characterBoard, /fallbackCostume/);
+  assert.ok(characterBoard.includes("isPng ? 'image/png' : 'image/jpeg'"));
+  assert.ok(characterBoard.includes('const saved = await updateCostumeField(targetCostume.id, { workFilePath: filePath });'));
+  assert.ok(characterBoard.includes('if (!saved) return;'));
+  assert.match(characterStore, /Promise<boolean>/);
+  assert.match(characterStore, /return true;/);
+  assert.match(characterStore, /return false;/);
 });
 
 test('episode reel controls are available in episode assets, character board, and scenes view', () => {

@@ -131,7 +131,7 @@ interface CharacterBoardStore {
       | 'designAssignee'
       | 'riggingAssignee'
       | 'memo'>>,
-  ) => Promise<void>;
+  ) => Promise<boolean>;
   setCostumeTags: (id: string, kind: 'structure' | 'asset', tags: string[]) => Promise<void>;
   setVersion: (id: string, versionNo: number) => Promise<void>;
   deleteCostume: (id: string) => Promise<void>;
@@ -327,9 +327,7 @@ export const useCharacterBoardStore = create<CharacterBoardStore>((set, get) => 
     await applyCostumeUpdate(set, get, id, updates, '단계 변경에 실패했어요', logContext);
   },
 
-  updateCostumeField: async (id, updates) => {
-    await applyCostumeUpdate(set, get, id, updates, '저장에 실패했어요');
-  },
+  updateCostumeField: async (id, updates) => applyCostumeUpdate(set, get, id, updates, '저장에 실패했어요'),
 
   setCostumeTags: async (id, kind, tags) => {
     const updates = kind === 'structure' ? { structureTags: tags } : { assetTags: tags };
@@ -527,13 +525,14 @@ async function applyCostumeUpdate(
   errorMsg: string,
   /** 단계 변경일 때만 — 메인이 활동 피드에 기록할 표시용 컨텍스트. */
   logContext?: CostumeActivityLogContext,
-): Promise<void> {
+): Promise<boolean> {
   const prev = get().costumes;
   const prevCostume = prev.find((c) => c.id === id);
   const next = prev.map((c) => (c.id === id ? { ...c, ...updates } : c));
   set({ costumes: next, byCharacter: buildByCharacter(next) });
   try {
     await svcUpdateCostume(id, updates, logContext);
+    return true;
   } catch (err) {
     console.error('[character-board] updateCostume 실패:', err);
     // 전체 스냅샷을 되돌리면 그 사이 성공한 다른 업데이트/실시간 머지를 덮어쓴다.
@@ -554,6 +553,7 @@ async function applyCostumeUpdate(
       set({ costumes: reverted, byCharacter: buildByCharacter(reverted) });
     }
     toast.error(errorMsg);
+    return false;
   }
 }
 

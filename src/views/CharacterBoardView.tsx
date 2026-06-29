@@ -494,14 +494,14 @@ function FeaturedImageSlot({
     if (!costume) { toast.error('먼저 디자인(복장)을 추가해주세요'); return; }
     setUploading(true);
     try {
-      const base64 = await resizeBlob(file, 800, 0.8);
+      const isPng = file.type === 'image/png' || file.name.toLowerCase().endsWith('.png');
+      const base64 = await resizeBlob(file, 800, isPng ? 0.92 : 0.8, isPng ? 'image/png' : 'image/jpeg');
       const res = await uploadCharacterImage(character.id, costume.id, base64);
       if (!res.ok || !res.url) throw new Error(res.error ?? '업로드 실패');
       // 이전 대표 이미지 정리는 서버(updateCharacterCostume)가 DB 업데이트 성공 후 처리 — 롤백 시 깨진 URL 방지.
-      await updateCostumeField(costume.id, { featuredImageUrl: res.url });
+      const saved = await updateCostumeField(costume.id, { featuredImageUrl: res.url });
       // 업로드는 됐는데 DB 반영이 실패(롤백)하면 방금 올린 파일이 고아가 됨 → 정리.
-      const saved = useCharacterBoardStore.getState().costumes.find((c) => c.id === costume.id)?.featuredImageUrl;
-      if (saved !== res.url) {
+      if (!saved) {
         deleteImage(res.url).catch((e) => console.warn('[character-board] 실패한 업로드 정리:', e));
       }
     } catch (err) {
@@ -1006,7 +1006,8 @@ function CharacterDetailPanel({
     }
     const filePath = await chooseWorkFile();
     if (!filePath) return;
-    await updateCostumeField(targetCostume.id, { workFilePath: filePath });
+    const saved = await updateCostumeField(targetCostume.id, { workFilePath: filePath });
+    if (!saved) return;
     if (!character.workFolderPath?.trim()) {
       const folder = await resolveFolderAfterFilePick(character.workFolderPath, filePath);
       if (folder) await updateCharacterFolder(character.id, folder);
