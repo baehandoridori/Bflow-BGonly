@@ -130,12 +130,20 @@ async function migrateLocalStorageToSupabase(userId: string): Promise<void> {
       localStorage.removeItem(migratedKey); // 완료 후 추적 키 제거
     }
 
-    // 커스텀 뷰 개인 할일 평탄화: VIEWS_KEY 삭제 전에 각 뷰의 personalTodos를 assigned로 올림
+    // 커스텀 뷰 개인 할일 + sceneKeys 평탄화: VIEWS_KEY 삭제 전에 각 뷰의 데이터를 assigned로 올림
     // (PR 1에서 커스텀 뷰 제거 — 아직 Supabase 마이그레이션 안 한 사용자 데이터 보호)
+    // P1: 커스텀 뷰의 sceneKeys도 수집해 assigned sceneKeys에 union (씬 손실 방지)
     const rawViews = localStorage.getItem(VIEWS_KEY);
+    const viewSceneKeys: SceneKey[] = [];
     if (rawViews) {
       try {
-        const views: Array<{ personalTodos?: PersonalTodo[] }> = JSON.parse(rawViews);
+        const views: Array<{ personalTodos?: PersonalTodo[]; sceneKeys?: SceneKey[] }> = JSON.parse(rawViews);
+        // 커스텀 뷰의 sceneKeys를 모두 수집 (assigned sceneKeys와 나중에 union)
+        for (const view of views) {
+          for (const key of view?.sceneKeys ?? []) {
+            if (key) viewSceneKeys.push(key);
+          }
+        }
         // 이미 마이그레이션한 assigned todos의 id 집합
         const rawTodosForDedup = localStorage.getItem(ASSIGNED_TODOS_KEY);
         const assignedIds = new Set<string>(
@@ -167,10 +175,12 @@ async function migrateLocalStorageToSupabase(userId: string): Promise<void> {
       }
     }
 
+    // P1: assigned sceneKeys + 커스텀 뷰 sceneKeys union (중복 제거)
     const rawSceneKeys = localStorage.getItem(ASSIGNED_SCENES_KEY);
-    const sceneKeys = rawSceneKeys ? JSON.parse(rawSceneKeys) : [];
-    if (sceneKeys.length > 0) {
-      await supabaseService.upsertTaskViews(userId, [], sceneKeys);
+    const assignedSceneKeys: SceneKey[] = rawSceneKeys ? JSON.parse(rawSceneKeys) : [];
+    const mergedSceneKeys = [...new Set([...assignedSceneKeys, ...viewSceneKeys])];
+    if (mergedSceneKeys.length > 0) {
+      await supabaseService.upsertTaskViews(userId, [], mergedSceneKeys);
     }
 
     localStorage.setItem(MIGRATION_DONE_KEY, 'true');
@@ -205,8 +215,10 @@ async function migrateCustomViewTodosToAssigned(
   userId: string,
   currentTodos: PersonalTodo[],
 ): Promise<PersonalTodo[] | null> {
+  // P2: 마커를 userId별로 분리 — 같은 PC의 여러 사용자가 각자 마이그레이션되도록
+  const migratedMarkerKey = `${CUSTOM_VIEW_TODOS_MIGRATED_KEY}_${userId}`;
   // 일회성: 이미 마이그레이션했으면 모을 게 없으므로 스킵
-  if (localStorage.getItem(CUSTOM_VIEW_TODOS_MIGRATED_KEY)) return [];
+  if (localStorage.getItem(migratedMarkerKey)) return [];
 
   let data: { views: unknown[]; assignedSceneKeys: unknown[] } | null;
   try {
@@ -218,6 +230,16 @@ async function migrateCustomViewTodosToAssigned(
   }
 
   const views = (data?.views ?? []) as TaskView[];
+
+  // P1: 모든 커스텀 뷰의 sceneKeys를 수집해 assignedSceneKeys에 union (씬 손실 방지)
+  const existingAssignedSceneKeys = (data?.assignedSceneKeys ?? []) as SceneKey[];
+  const viewSceneKeys: SceneKey[] = [];
+  for (const view of views) {
+    for (const key of view?.sceneKeys ?? []) {
+      if (key) viewSceneKeys.push(key);
+    }
+  }
+  const mergedSceneKeys = [...new Set([...existingAssignedSceneKeys, ...viewSceneKeys])];
 
   // 모든 커스텀 뷰의 personalTodos 평탄화 + (뷰 내) id 중복 제거
   const existingIds = new Set(currentTodos.map((t) => t.id));
@@ -234,8 +256,15 @@ async function migrateCustomViewTodosToAssigned(
   }
 
   if (candidates.length === 0) {
+    // 옮길 할일이 없어도 sceneKeys 병합은 필요할 수 있으므로 정리 시도
+    try {
+      await supabaseService.upsertTaskViews(userId, [], mergedSceneKeys);
+    } catch (err) {
+      console.error('[MyTasks] 커스텀 뷰 sceneKeys 병합(빈 할일) 실패:', err);
+      // 정리 실패해도 마커는 남김 — 후속 씬키 save effect가 views를 [] 로 덮으면 자연 정리됨
+    }
     // 옮길 게 없어도 마커는 남겨 다음 로드에서 재시도하지 않게 함
-    localStorage.setItem(CUSTOM_VIEW_TODOS_MIGRATED_KEY, 'true');
+    localStorage.setItem(migratedMarkerKey, 'true');
     return [];
   }
 
@@ -253,17 +282,17 @@ async function migrateCustomViewTodosToAssigned(
     return migrated;
   }
 
-  // 마이그레이션 성공 → views 를 비워 정리 보장 (씬키는 보존)
+  // P1: 마이그레이션 성공 → views 를 비우고 커스텀 뷰 sceneKeys를 assignedSceneKeys에 병합
   try {
-    await supabaseService.upsertTaskViews(userId, [], (data?.assignedSceneKeys ?? []) as unknown[]);
-    localStorage.setItem(CUSTOM_VIEW_TODOS_MIGRATED_KEY, 'true');
+    await supabaseService.upsertTaskViews(userId, [], mergedSceneKeys);
+    localStorage.setItem(migratedMarkerKey, 'true');
   } catch (err) {
     // 정리 실패해도 할일 저장은 성공했고, 후속 씬키 save effect 가 views 를 [] 로 덮으므로
     // 데이터 손실은 없다. 마커만 남기지 않아 다음 기회에 정리 재시도.
-    console.error('[MyTasks] 커스텀 뷰 정리(views 비우기) 실패 — 후속 저장에서 자연 정리됨:', err);
+    console.error('[MyTasks] 커스텀 뷰 정리(views 비우기 + sceneKeys 병합) 실패 — 후속 저장에서 자연 정리됨:', err);
   }
 
-  console.log(`[MyTasks] 커스텀 뷰 개인 할일 ${migrated.length}건 → 내 할일로 마이그레이션 완료`);
+  console.log(`[MyTasks] 커스텀 뷰 개인 할일 ${migrated.length}건, sceneKeys ${viewSceneKeys.length}건 → 내 할일로 마이그레이션 완료`);
   return migrated;
 }
 
