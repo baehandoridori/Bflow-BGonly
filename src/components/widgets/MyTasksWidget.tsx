@@ -634,7 +634,9 @@ export function MyTasksWidget() {
   };
 
   // 팝업에서 모달이 하나라도 열려 있는지 — 열려 있으면 창을 모달이 들어갈 만큼 키운다.
-  const anyModalOpen = showPicker || selectedTodoId != null || selectedSceneKey != null;
+  // 원시 ID 가 아니라 라이브 선택 객체로 판단한다: 다른 창에서 해당 항목이 삭제되면
+  // selectedTodo/selectedScene 가 null → 모달이 닫히므로, 창 크기 복원 경로가 정상 동작한다.
+  const anyModalOpen = showPicker || selectedTodo != null || selectedScene != null;
 
   // 팝업에서 완료 섹션 접기/펼치기 시 창 크기 조절
   // 모달이 열려 있는 동안에는 아래 모달-리사이즈 effect가 창을 키우므로, 이 effect는 건너뛴다
