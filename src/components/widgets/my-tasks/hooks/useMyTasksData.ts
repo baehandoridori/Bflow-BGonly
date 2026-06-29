@@ -115,9 +115,10 @@ async function saveAssignedSceneKeysToSupabase(userId: string, sceneKeys: SceneK
     const data = await supabaseService.readTaskViews(userId);
     existingViews = (data?.views ?? []) as unknown[];
   } catch (err) {
-    // 읽기 실패 → 데이터 손실 방지를 위해 씬키 저장을 건너뜀
+    // 읽기 실패 → 데이터 손실 방지를 위해 upsert를 건너뜀(views 안 건드림)
+    // 호출처 catch가 toast.error를 띄워 사용자가 실패를 인지하도록 throw로 전파
     console.warn('[MyTasks] 마이그레이션 미완료 상태에서 views 읽기 실패 — 씬키 저장 건너뜀(데이터 보호):', err);
-    return;
+    throw err;
   }
 
   await supabaseService.upsertTaskViews(userId, existingViews, sceneKeys);
