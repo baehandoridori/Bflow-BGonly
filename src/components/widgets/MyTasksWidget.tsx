@@ -667,28 +667,32 @@ export function MyTasksWidget() {
   // 완료 섹션 펼침으로 이미 커져 있던 경우에도 baseSizeRef를 건드리지 않고 공존한다.
   const MODAL_MIN_W = 520;
   const MODAL_MIN_H = 640;
-  const preModalSizeRef = useRef<{ width: number; height: number } | null>(null);
+  // 위치(x/y)까지 함께 캡처한다 → 화면 가장자리 근처에서 모달 크기로 커지며 창이 안쪽으로
+  // 밀린 경우에도, 닫을 때 원래 위치+크기로 정확히 복원해 위젯이 점점 밀리지 않게 한다.
+  const preModalBoundsRef = useRef<{ x: number; y: number; width: number; height: number } | null>(null);
   useEffect(() => {
     if (!isPopup || !widgetId) return;
     (async () => {
       if (anyModalOpen) {
-        // 모달 연속 전환(하나 닫고 다른 하나 열기) 시 첫 모달의 pre-modal 크기를 유지.
-        if (!preModalSizeRef.current) {
-          const size = await window.electronAPI?.widgetGetSize?.(widgetId);
-          if (!size) return;
-          preModalSizeRef.current = size;
+        // 모달 연속 전환(하나 닫고 다른 하나 열기) 시 첫 모달의 pre-modal bounds를 유지.
+        if (!preModalBoundsRef.current) {
+          const bounds = await window.electronAPI?.widgetGetSize?.(widgetId);
+          if (!bounds) return;
+          preModalBoundsRef.current = bounds;
           // 현재보다 작을 때만 키운다(사용자가 더 크게 키운 창은 줄이지 않는다).
-          const w = Math.max(size.width, MODAL_MIN_W);
-          const h = Math.max(size.height, MODAL_MIN_H);
-          if (w !== size.width || h !== size.height) {
+          const w = Math.max(bounds.width, MODAL_MIN_W);
+          const h = Math.max(bounds.height, MODAL_MIN_H);
+          if (w !== bounds.width || h !== bounds.height) {
+            // 그로우는 위치를 넘기지 않아 메인 핸들러의 화면 클램프가 그대로 적용된다.
             window.electronAPI?.widgetResize?.(widgetId, w, h);
           }
         }
-      } else if (preModalSizeRef.current) {
-        // 모든 모달이 닫혔다 → 키우기 직전 크기로 정확히 복원.
-        const prev = preModalSizeRef.current;
-        preModalSizeRef.current = null;
-        window.electronAPI?.widgetResize?.(widgetId, prev.width, prev.height);
+      } else if (preModalBoundsRef.current) {
+        // 모든 모달이 닫혔다 → 키우기 직전 위치+크기로 정확히 복원.
+        // 원래 화면 안에 있던 좌표이므로 메인 핸들러가 다시 클램프하지 않는다.
+        const prev = preModalBoundsRef.current;
+        preModalBoundsRef.current = null;
+        window.electronAPI?.widgetResize?.(widgetId, prev.width, prev.height, prev.x, prev.y);
       }
     })();
   }, [anyModalOpen, isPopup, widgetId]);
