@@ -50,3 +50,23 @@ test('paged catch-up fetcher uses cursor pagination and reports cap without adva
   assert.deepEqual(result.rows.map((row) => row.id), ['n3', 'n2', 'n1', 'n0']);
   assert.equal(result.cappedOut, true);
 });
+
+test('catch-up rows are fed oldest-first when the notification store prepends each row', async () => {
+  assert.equal(existsSync(modulePath), true, 'notificationCatchupRunner.ts must exist');
+  const { orderCatchupRowsForPrepend } = await import('../src/utils/notificationCatchupRunner.ts');
+  const newestFirst = Array.from({ length: 55 }, (_, index) => ({
+    id: `n${54 - index}`,
+    createdAt: `2026-06-05T00:${String(54 - index).padStart(2, '0')}:00.000Z`,
+  }));
+
+  let list: typeof newestFirst = [];
+  for (const row of orderCatchupRowsForPrepend(newestFirst)) {
+    list = [row, ...list].slice(0, 50);
+  }
+
+  assert.deepEqual(
+    list.slice(0, 3).map((row) => row.id),
+    ['n54', 'n53', 'n52'],
+  );
+  assert.equal(list.some((row) => row.id === 'n0'), false);
+});

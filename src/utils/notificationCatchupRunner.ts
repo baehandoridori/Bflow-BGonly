@@ -59,3 +59,7 @@ export async function fetchCatchupPages<T>({
 
   return { rows, cappedOut };
 }
+
+export function orderCatchupRowsForPrepend<T>(rows: readonly T[]): T[] {
+  return [...rows].reverse();
+}

@@ -68,6 +68,7 @@ import { navigateNotificationToScene } from '@/utils/notificationSceneAction';
 import {
   beginCatchupRun,
   fetchCatchupPages,
+  orderCatchupRowsForPrepend,
   releaseCatchupRunOnError,
   resetCatchupRun,
 } from '@/utils/notificationCatchupRunner';
@@ -97,6 +98,25 @@ class LazyErrorBoundary extends Component<{ children: ReactNode; name: string },
     if (this.state.hasError) return null; // 모달/뷰가 뜨지 않는 편이 크래시보다 낫다
     return this.props.children;
   }
+}
+
+function isSceneAssignedToUser<T extends { assignee?: string | null }>(
+  scene: T | null | undefined,
+  userName: string,
+): scene is T {
+  return Boolean(scene && parseAssigneeList(scene.assignee).includes(userName));
+}
+
+function markLocalFeedbackJumpAsRead(payload: { kind?: string; notificationId?: string }) {
+  const notificationId = typeof payload.notificationId === 'string' ? payload.notificationId.trim() : '';
+  if (!notificationId) return;
+  const store = useNotificationStore.getState();
+  const target = store.notifications.find((n) =>
+    payload.kind === 'assignment'
+      ? n.metadata?.assignmentNotificationId === notificationId
+      : n.metadata?.feedbackNotificationId === notificationId
+  );
+  if (target && !target.isRead) store.markAsRead(target.id);
 }
 
 export default function App() {
@@ -557,9 +577,6 @@ export default function App() {
         // 초기에 호출하면 Toaster 가 아직 mount 안 된 상태(splash 화면 동안) 라 안 보이는데
         // lastSeenVersion 은 갱신되어 다음 실행에도 안 보임 — 한솔 v1.27.0 1차 보고.
 
-        // 알림 히스토리 로드
-        await useNotificationStore.getState().loadFromDisk();
-
         // 알림 설정 ref 업데이트
         if (savedPrefs?.notifications) {
           notiSettingsRef.current = {
@@ -808,6 +825,11 @@ export default function App() {
     }
   }, [currentUser, setUsers]);
 
+  const notificationUserId = currentUser?.id ?? null;
+  useEffect(() => {
+    void useNotificationStore.getState().loadFromDisk(notificationUserId);
+  }, [notificationUserId]);
+
   // 한솔 결정 (v1.15.5): 로그인 catch-up — last_seen_at 이후 받은 멘션 댓글을 알림 패널에 누적.
   // v1.15.6 진단 로그: 한솔 보고 "catch-up 실행 안 됨" — 단계별 콘솔 로그로 정확한 원인 파악.
   const catchupDoneUserIdRef = useRef<string | null>(null);
@@ -853,7 +875,7 @@ export default function App() {
         // scene_uuid 우선 + part_id+sceneNo fallback 으로 정확한 scene 찾아 metadata 채움.
         const ds = useDataStore.getState();
         const store = useNotificationStore.getState();
-        for (const c of missed) {
+        for (const c of orderCatchupRowsForPrepend(missed)) {
           // 1) scene_uuid 로 정확 매칭
           let scene = c.sceneUuid ? ds.findSceneByUuid(c.sceneUuid) : null;
           // 2) part_id + sceneNo 조합으로 fallback
@@ -874,6 +896,7 @@ export default function App() {
             type: 'mention',
             title: `${c.userName || '누군가'}님이 나를 태그했습니다`,
             body: c.text ? (c.text.length > 50 ? c.text.slice(0, 50) + '...' : c.text) : undefined,
+            createdAt: c.createdAt,
             // scene_uuid 없는 오래된 댓글도 part_uuid + sort_order 로 정확히 찾아갈 수 있게 storage hint 보존.
             metadata: {
               sceneId: scene?.id ?? c.sceneUuid ?? undefined,
@@ -942,7 +965,7 @@ export default function App() {
           return;
         }
         const store = useNotificationStore.getState();
-        for (const m of all) {
+        for (const m of orderCatchupRowsForPrepend(all)) {
           const ds = useDataStore.getState();
           const epLabel = buildNotificationSceneDisplayLabel({
             episodeNumber: m.episodeNumber,
@@ -955,6 +978,7 @@ export default function App() {
             type: 'acting_feedback',
             title: `${m.senderName}님이 피드백을 요청했습니다`,
             body: epLabel,
+            createdAt: m.createdAt,
             metadata: {
               sceneId: m.sceneUuid ?? undefined,
               sceneName: m.sceneId,
@@ -1024,7 +1048,7 @@ export default function App() {
           return;
         }
         const store = useNotificationStore.getState();
-        for (const m of all) {
+        for (const m of orderCatchupRowsForPrepend(all)) {
           const ds = useDataStore.getState();
           const epLabel = buildNotificationSceneDisplayLabel({
             episodeNumber: m.episodeNumber,
@@ -1038,6 +1062,7 @@ export default function App() {
             type: 'scene_assignment',
             title: `${m.senderName}님이 담당자로 지정했습니다`,
             body: epLabel,
+            createdAt: m.createdAt,
             metadata: {
               sceneId: m.sceneUuid,
               sceneName: m.sceneId,
@@ -1798,17 +1823,19 @@ export default function App() {
         }, { ...notiSettingsRef.current, osNotification: false });
         // Windows 네이티브 토스트 + 클릭 시 점프 (리테이크와 동일 sceneJump 경로 재사용)
         // 코덱스 3차 P2 fix: notificationId/kind 도 함께 전달 — 클릭으로 점프했을 때 jump 핸들러가 read_at 처리.
-        window.electronAPI.notifyFeedbackToast({
-          title: 'B flow — 담당자 배정',
-          body: `${ap.senderName}님이 ${epLabel} 담당자로 지정했습니다.`,
-          sceneJump: {
-            sheetName: ap.sheetName,
-            sceneId: ap.sceneId,
-            sceneUuid: ap.sceneUuid,
-            notificationId: ap.notificationId,
-            kind: 'assignment',
-          },
-        }).catch(() => { /* 토스트 실패 무시 */ });
+        if (notiSettingsRef.current.osNotification !== false) {
+          window.electronAPI.notifyFeedbackToast({
+            title: 'B flow — 담당자 배정',
+            body: `${ap.senderName}님이 ${epLabel} 담당자로 지정했습니다.`,
+            sceneJump: {
+              sheetName: ap.sheetName,
+              sceneId: ap.sceneId,
+              sceneUuid: ap.sceneUuid,
+              notificationId: ap.notificationId,
+              kind: 'assignment',
+            },
+          }).catch(() => { /* 토스트 실패 무시 */ });
+        }
         // broadcast 를 즉시 받았으므로 lastSeen 갱신 → 다음 로그인 catch-up 에서 중복 차단
         if (me?.id) setAssignmentLastSeenAt(me.id, ap.createdAt ?? new Date().toISOString());
         return;
@@ -1869,22 +1896,25 @@ export default function App() {
       }, { ...notiSettingsRef.current, osNotification: false });
       // Windows 네이티브 토스트 + 클릭 시 점프 (별도 흐름 — main 에서 sceneJump 처리)
       // 코덱스 3차 P2 fix: notificationId/kind 도 함께 전달 — feedback 토스트 클릭 후 read_at 처리.
-      window.electronAPI.notifyFeedbackToast({
-        title: 'B flow — 피드백 요청',
-        body: `${p.senderName}님이 ${epLabel} 검수를 요청했습니다.`,
-        sceneJump: {
-          sheetName: p.sheetName,
-          sceneId: p.sceneId,
-          sceneUuid: p.sceneUuid,
-          notificationId: myFeedbackNotificationId,
-          kind: 'feedback',
-        },
-      }).catch(() => { /* 토스트 실패는 무시 */ });
+      if (notiSettingsRef.current.osNotification !== false) {
+        window.electronAPI.notifyFeedbackToast({
+          title: 'B flow — 피드백 요청',
+          body: `${p.senderName}님이 ${epLabel} 검수를 요청했습니다.`,
+          sceneJump: {
+            sheetName: p.sheetName,
+            sceneId: p.sceneId,
+            sceneUuid: p.sceneUuid,
+            notificationId: myFeedbackNotificationId,
+            kind: 'feedback',
+          },
+        }).catch(() => { /* 토스트 실패는 무시 */ });
+      }
       // v1.25.5: broadcast 를 즉시 받았으므로 lastSeen 갱신 — 다음 로그인 catch-up 에서 중복 차단
       if (me?.id) setFeedbackLastSeenAt(me.id, myFeedbackCreatedAt ?? new Date().toISOString());
     });
 
     const offJump = window.electronAPI.onFeedbackJumpToScene?.((payload) => {
+      markLocalFeedbackJumpAsRead(payload);
       navigateNotificationToScene(payload.kind === 'assignment' ? 'scene_assignment' : 'acting_feedback', {
         sceneId: payload.sceneUuid,
         sceneName: payload.sceneId,
@@ -1919,7 +1949,7 @@ export default function App() {
           const me = useAuthStore.getState().currentUser;
           if (me && senderId && senderId !== me.id) {
             const scene = useDataStore.getState().findSceneByUuid(sceneUuid);
-            if (scene && scene.assignee === me.name) {
+            if (isSceneAssignedToUser(scene, me.name)) {
               const notiSettings = notiSettingsRef.current;
               if (notiSettings.sceneChange !== false) {
                 const stageLabel = stage === 'lo' ? 'LO' : stage === 'done' ? '완료' : stage === 'review' ? '검수' : stage === 'png' ? 'PNG' : stage;
@@ -1958,7 +1988,7 @@ export default function App() {
           const me = useAuthStore.getState().currentUser;
           if (me && senderId && senderId !== me.id) {
             const scene = useDataStore.getState().findSceneByUuid(sceneUuid);
-            if (scene && scene.assignee === me.name) {
+            if (isSceneAssignedToUser(scene, me.name)) {
               const notiSettings = notiSettingsRef.current;
               if (notiSettings.sceneChange !== false) {
                 const senderName = useAuthStore.getState().users.find((u) => u.id === senderId)?.name ?? '다른 사용자';
@@ -1991,7 +2021,7 @@ export default function App() {
           const me = useAuthStore.getState().currentUser;
           if (me && senderId && senderId !== me.id) {
             const scene = useDataStore.getState().findSceneByUuid(sceneUuid);
-            if (scene && scene.assignee === me.name) {
+            if (isSceneAssignedToUser(scene, me.name)) {
               const notiSettings = notiSettingsRef.current;
               if (notiSettings.sceneChange !== false) {
                 // v1.23.1 (#7): 누가 변경했는지 명시.

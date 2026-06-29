@@ -5,6 +5,7 @@ import {
   prependNotificationDeduped,
 } from '../utils/notificationIdentity';
 import { markNotificationDomainRead } from '../utils/notificationDomainRead';
+import { notificationFileNameForUser } from '../utils/notificationPersistence';
 
 // ─── 알림 타입 정의 ─────────────────────────────────
 /**
@@ -66,7 +67,8 @@ export interface AppNotification {
 }
 
 const MAX_NOTIFICATIONS = 50;
-const NOTIFICATIONS_FILE = 'notifications.json';
+
+type NotificationDraft = Omit<AppNotification, 'id' | 'createdAt' | 'isRead'> & { createdAt?: string };
 
 /** notifications 배열에서 unreadCount 파생 */
 function countUnread(notifications: AppNotification[]): number {
@@ -97,6 +99,7 @@ function setNotifications(
 }
 
 interface NotificationState {
+  activeUserId: string | null;
   notifications: AppNotification[];
   /** 파생 상태: notifications에서 계산 */
   readonly unreadCount: number;
@@ -105,14 +108,14 @@ interface NotificationState {
   panelOpen: boolean;
 
   // 액션
-  addNotification: (n: Omit<AppNotification, 'id' | 'createdAt' | 'isRead'>) => void;
+  addNotification: (n: NotificationDraft) => string;
   markAsRead: (id: string) => void;
   markAllAsRead: () => void;
   removeNotification: (id: string) => void;
   clearAll: () => void;
   setPanelOpen: (open: boolean) => void;
   togglePanel: () => void;
-  loadFromDisk: () => Promise<void>;
+  loadFromDisk: (userId: string | null) => Promise<void>;
   // v1.29.0: 이모지 반응 알림 — 묶음 UPSERT / 행 삭제 / catch-up
   upsertCommentReaction: (n: AppNotification) => void;
   removeNotificationById: (id: string) => void;
@@ -134,9 +137,10 @@ function generateId(): string {
   return Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
 }
 
-async function persistToDisk(notifications: AppNotification[]) {
+async function persistToDisk(userId: string | null, notifications: AppNotification[]) {
+  if (!userId) return;
   try {
-    await window.electronAPI?.writeSettings?.(NOTIFICATIONS_FILE, notifications);
+    await window.electronAPI?.writeSettings?.(notificationFileNameForUser(userId), notifications);
   } catch {
     // 저장 실패는 무시 (로컬 파일이라 크리티컬하지 않음)
   }
@@ -150,6 +154,7 @@ function syncDomainRead(notification: AppNotification) {
 }
 
 export const useNotificationStore = create<NotificationState>((set, get) => ({
+  activeUserId: null,
   notifications: [],
   unreadCount: 0,
   unreadMentionCount: 0,
@@ -160,11 +165,12 @@ export const useNotificationStore = create<NotificationState>((set, get) => ({
       ...n,
       id: generateId(),
       isRead: false,
-      createdAt: new Date().toISOString(),
+      createdAt: n.createdAt ?? new Date().toISOString(),
     };
     const next = prependNotificationDeduped(get().notifications, notification, MAX_NOTIFICATIONS);
     setNotifications(set, next);
-    persistToDisk(next);
+    persistToDisk(get().activeUserId, next);
+    return notification.id;
   },
 
   markAsRead: (id) => {
@@ -175,7 +181,7 @@ export const useNotificationStore = create<NotificationState>((set, get) => ({
       n.id === id ? { ...n, isRead: true } : n
     );
     setNotifications(set, next);
-    persistToDisk(next);
+    persistToDisk(get().activeUserId, next);
   },
 
   markAllAsRead: () => {
@@ -183,7 +189,7 @@ export const useNotificationStore = create<NotificationState>((set, get) => ({
     current.filter((n) => !n.isRead).forEach(syncDomainRead);
     const next = current.map((n) => ({ ...n, isRead: true }));
     setNotifications(set, next);
-    persistToDisk(next);
+    persistToDisk(get().activeUserId, next);
   },
 
   removeNotification: (id) => {
@@ -192,23 +198,46 @@ export const useNotificationStore = create<NotificationState>((set, get) => ({
     if (target) syncDomainRead(target);
     const next = current.filter((n) => n.id !== id);
     setNotifications(set, next);
-    persistToDisk(next);
+    persistToDisk(get().activeUserId, next);
   },
 
   clearAll: () => {
     get().notifications.forEach(syncDomainRead);
     setNotifications(set, []);
-    persistToDisk([]);
+    persistToDisk(get().activeUserId, []);
   },
 
   setPanelOpen: (open) => set({ panelOpen: open }),
   togglePanel: () => set((s) => ({ panelOpen: !s.panelOpen })),
 
-  loadFromDisk: async () => {
+  loadFromDisk: async (userId) => {
+    if (!userId) {
+      set({
+        activeUserId: null,
+        notifications: [],
+        unreadCount: 0,
+        unreadMentionCount: 0,
+      });
+      return;
+    }
+
+    if (get().activeUserId !== userId) {
+      set({
+        activeUserId: userId,
+        notifications: [],
+        unreadCount: 0,
+        unreadMentionCount: 0,
+      });
+    }
+
     try {
-      const data = await window.electronAPI?.readSettings?.(NOTIFICATIONS_FILE);
+      const data = await window.electronAPI?.readSettings?.(notificationFileNameForUser(userId));
+      if (get().activeUserId !== userId) return;
       if (Array.isArray(data)) {
-        const notifications = dedupeNotificationsByIdentity(data as AppNotification[], MAX_NOTIFICATIONS);
+        const notifications = dedupeNotificationsByIdentity(
+          [...get().notifications, ...(data as AppNotification[])],
+          MAX_NOTIFICATIONS,
+        );
         setNotifications(set, notifications);
       }
     } catch {
@@ -223,12 +252,16 @@ export const useNotificationStore = create<NotificationState>((set, get) => ({
   upsertCommentReaction: (n) => {
     const list = get().notifications;
     const identity = getNotificationIdentity(n);
+    const existingReaction = list.find((x) =>
+      x.id === n.id || (!!identity && getNotificationIdentity(x) === identity)
+    );
+    const existingRead = existingReaction?.isRead === true || n.isRead === true;
     const next = [
-      { ...n },
+      { ...n, isRead: existingRead },
       ...list.filter((x) => x.id !== n.id && (!identity || getNotificationIdentity(x) !== identity)),
     ].slice(0, MAX_NOTIFICATIONS);
     setNotifications(set, next);
-    persistToDisk(next);
+    persistToDisk(get().activeUserId, next);
   },
 
   // v1.29.0: 알림 행 단일 제거. id 없으면 no-op. removeNotification 과 동일 시맨틱이지만
@@ -238,7 +271,7 @@ export const useNotificationStore = create<NotificationState>((set, get) => ({
     if (!list.some((x) => x.id === id)) return;
     const next = list.filter((x) => x.id !== id);
     setNotifications(set, next);
-    persistToDisk(next);
+    persistToDisk(get().activeUserId, next);
   },
 
   // v1.29.0: catch-up 으로 받은 미읽음 묶음을 dedupe + prepend.
@@ -271,6 +304,6 @@ export const useNotificationStore = create<NotificationState>((set, get) => ({
 
     const merged: AppNotification[] = [...deduped, ...survivors].slice(0, MAX_NOTIFICATIONS);
     setNotifications(set, merged);
-    persistToDisk(merged);
+    persistToDisk(get().activeUserId, merged);
   },
 }));

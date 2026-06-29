@@ -28,7 +28,15 @@ test('native feedback toast jumps use the same notification scene navigation pat
   assert.match(app, /import \{ navigateNotificationToScene \} from '@\/utils\/notificationSceneAction'/);
   assert.doesNotMatch(app, /const jumpToFeedbackScene = /);
   assert.match(app, /onFeedbackJumpToScene\?\.\s*\(\(payload\) => \{/);
+  assert.match(app, /markLocalFeedbackJumpAsRead\(payload\)/);
   assert.match(app, /navigateNotificationToScene\(payload\.kind === 'assignment' \? 'scene_assignment' : 'acting_feedback'/);
+});
+
+test('toast shortcut actions mark the local notification as read before navigating', () => {
+  assert.match(notificationHelper, /const notificationId = store\.addNotification\(/);
+  assert.match(notificationHelper, /markAsRead\(notificationId\)/);
+  assert.match(notificationHelper, /hasNotificationActionTarget\(payload\.type,\s*payload\.metadata\)/);
+  assert.match(notificationHelper, /retakeHubSetId/);
 });
 
 test('all notification click paths mark domain read state before navigating', () => {
@@ -46,6 +54,15 @@ test('manual read and deletion paths also sync durable domain read state', () =>
   assert.match(notificationStore, /removeNotification: \(id\) => \{[\s\S]*if \(target\) syncDomainRead\(target\)/);
   assert.match(notificationStore, /clearAll: \(\) => \{[\s\S]*get\(\)\.notifications\.forEach\(syncDomainRead\)/);
   assert.doesNotMatch(notificationPanel, /markCommentReactionRead/);
+});
+
+test('comment reaction upserts preserve local read state across realtime races', () => {
+  assert.match(notificationStore, /const existingRead = existingReaction\?\.isRead === true \|\| n\.isRead === true/);
+  assert.match(notificationStore, /\{ \.\.\.n, isRead: existingRead \}/);
+});
+
+test('special native feedback toasts respect the OS notification setting', () => {
+  assert.match(app, /if \(notiSettingsRef\.current\.osNotification !== false\) \{\s*window\.electronAPI\.notifyFeedbackToast/);
 });
 
 test('notification action labels describe the actual destination', () => {
