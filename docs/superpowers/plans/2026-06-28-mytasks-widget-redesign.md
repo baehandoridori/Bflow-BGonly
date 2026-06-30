@@ -300,9 +300,67 @@
 - [ ] 기존 기능 회귀 없음(CRUD·토글·캘린더·크로스창·상세모달)
 - [ ] (한솔 승인 시) 머지 → 빌드 → 배포
 
-### PR 5 — 모션 + reduced-motion
-- stagger 진입(`--si`), Success Check 링버스트+confetti, 도넛 카운트업(rAF), strip 슬라이드, 뷰 크로스페이드, 자성 호버
-- `window.matchMedia('(prefers-reduced-motion: reduce)')` 전역 가드
+## Chunk 5: PR 5 — 모션 + prefers-reduced-motion 가드 (마지막, 착수 상세화 2026-07-01)
+
+**목표:** 시안15의 모션 폴리싱을 입힌다. **외부 의존성 없이 framer-motion만** 사용하고, **모든 신규 모션은 `prefers-reduced-motion` 가드**로 끈다(접근성·저사양). 생산성 위젯이므로 절제 — 과한 애니메이션 금지, 미세하고 빠르게.
+
+**현재 상태(PR 4 직후):** framer-motion 사용 중(`useReducedMotion` 가용 — function 확인). DonutHero(중앙 M/N 정적, segments는 CSS `transition-all duration-500`, strip는 `transition-[width]`), SceneRow(`motion.div` initial/animate/exit opacity + layout), TodoRow/TodoCard(원형 체크 정적), SceneCard(정적), StageChips(`transition-all`), QuickAdd(이미 slide motion), ModalPortal(scale/opacity exit). 완료 토글 = `togglePersonalTodo`(개인)/`handleSceneToggle`(씬). 뷰 전환 = `viewMode` state.
+
+**확정 디자인 결정 (시안15 §12 모션, framer-motion 한정, 전부 reduced-motion 가드):**
+1. **reduced-motion 가드 훅** `my-tasks/useMotion.ts`: framer-motion `useReducedMotion()` 래핑 → `reduce: boolean`. reduce면 신규 모션은 즉시/비활성. (window.matchMedia 직접 대신 framer-motion 훅 — SSR/일관성). 모든 신규 모션 컴포넌트가 이 값으로 게이트.
+2. **stagger 진입**: SceneRow/TodoRow/SceneCard/TodoCard 진입 fade+slide-up(y 6→0), `delay = clampStaggerDelay(index)`(상한 ~0.3s, 대량 리스트 폭주 방지). ★데이터 변경(토글/추가)마다 재-stagger 되지 않게 — 진입(initial→animate)에만, layout 애니메이션과 분리. reduce면 delay 0·slide 없음(opacity만 또는 즉시). `clampStaggerDelay` pure + node:test.
+3. **Success Check** `components/SuccessCheckCircle.tsx`: 개인 할일 완료 토글 시 원형 ring→check(scale spring) + ring-burst(확장·페이드 링 1회). **마지막 미완료 항목이 완료돼 진행 0이 되면 콘페티**(가벼운 DOM 조각 몇 개 fade-out, 라이브러리 없음). TodoRow/TodoCard 체크박스를 이 컴포넌트로 교체(완료→미완료 토글도 자연스럽게). reduce면 즉시 체크·burst/콘페티 없음.
+4. **도넛 카운트업 + 첫 페인트 sweep**: DonutHero 중앙 완료 수(M)를 값 변경 시 카운트업(framer-motion `useMotionValue`+`animate` 또는 작은 rAF 훅, 정수). arc는 mount sweep(0→현재). reduce면 즉시 값·sweep 없음.
+5. **strip 슬라이드 / 뷰 크로스페이드**: DonutHero 펼침↔strip 높이/opacity 전환(AnimatePresence). MyTasksWidget viewMode list↔card 크로스페이드(컨테이너 key=viewMode, 짧은 fade). reduce면 즉시 스왑.
+6. **자성 호버 글로우**: SceneRow/TodoRow/SceneCard/TodoCard `whileHover` 미세 scale(1.0→1.005~1.01)+옅은 글로우(box-shadow). reduce면 hover 모션 없음(색 hover만 유지).
+7. **칩 spring**: StageChips `whileTap` scale(0.9) + 색 transition(기존). reduce면 tap 모션 없음.
+8. **모달 퇴장**: ModalPortal 기존 scale/opacity exit 유지(이미 있음) — reduce 가드만 추가 검토(범위 작음, 선택).
+
+**★4-렌즈 검토 반영 (2026-07-01) — 구현 시 바인딩 (모션이 popLayout/Reorder/layout과 충돌 위험 → 강하게 제약):**
+- **A. reduce 게이트**: `const reduce = useReducedMotion() === true;`(framer-motion, null→false=모션 ON 기본). 모든 신규 모션은 `reduce`면 즉시/비활성.
+- **B. Stagger = 위젯 최초 mount 1회·opacity만**: `y`(slide)는 layout/popLayout 노드(SceneRow)에 **넣지 않는다**(layout+y 떨림). `mountedRef`로 첫 페인트 후 `delay=0` → 토글/완료이동/리오더로 행이 재마운트돼도 **재-stagger 없이 단순 fade**. `delayFn(index)=mountedRef.current ? 0 : clampStaggerDelay(index)`. index는 renderScene/renderPendingTodos/renderDoneTodos map에서 prop 전달.
+- **C. 자성 호버 = CSS box-shadow 글로우만**(framer `whileHover scale` 금지 — Reorder transform·layout 측정 충돌). Tailwind `hover:shadow-[...]`+`transition-shadow`. transform/scale 미사용 → 드래그·layout 안전. (reduce에서도 글로우는 '움직임' 아니라 허용, transition만 짧게)
+- **D. Success Check**: `SuccessCheckCircle`(TodoRow + SceneCard의 TodoCard **양쪽** 원형 체크 대체). 완료 시 ring→check scale spring. aria-pressed/title/onToggle(stopPropagation)/키보드 보존. reduce→즉시.
+  - **★최종 심층 리뷰 반영(2026-07-01)**: 당초 ring-burst 1회를 두려 했으나, 개인 할일을 완료하면 항목이 진행 리스트 → '완료 섹션'(별도 부모·기본 접힘)으로 즉시 이동 = React unmount→remount 라 인스턴스 내 false→true 전이를 관측할 수 없어 burst 가 보일 틈이 없다(dead code) → **ring-burst 제거**. 체크 spring 은 유지(완료 섹션 펼침 시 노출). 전체 완료 축하는 위젯 레벨 Confetti(진행 0 전이)가 담당 — 이쪽은 행 이동과 무관하게 정상 동작.
+- **E. 콘페티 = 사용자 의도 트리거만**: pending 0 '부수효과 감지' 금지. MyTasksWidget이 togglePersonalTodo/handleSceneToggle을 **래핑**해 `userCompleteRef` 세움 → effect가 `userCompleteRef && prevPending>0 && pending===0`일 때 1회. **첫 렌더 스킵(mountedRef)**, pending=씬+개인 전체(빈상태 축하 UI와 일관), 타이머 cleanup, reduce→생략. (필터/완료섹션접기/realtime/되돌리기 오발화 차단)
+- **F. 뷰 크로스페이드 = 생략**: list↔card 컨테이너를 key/AnimatePresence로 감싸면 내부 Reorder/popLayout 통째 재마운트(드래그 손실·재-stagger). **즉시 전환**으로 두고 문서화. (시안 의도지만 회귀 비용이 커 의도적 미적용)
+- **G. 도넛 카운트업**: 중앙 M만, effect deps=`stats.doneSceneCount`(원시값), ≤300ms, **첫 마운트는 즉시값**(sweep 없음), reduce→즉시. arc는 기존 CSS transition 유지(framer sweep 중복 금지). strip 숫자는 정적.
+- **H. 칩 whileTap**: StageChips는 평범한 button(layout/Reorder 무관) → `motion.button whileTap={{scale:0.9}}`. reduce→none.
+- **I. strip 전환**: DonutHero 펼침↔strip를 AnimatePresence(height/opacity)로(리스트와 격리 — 안전). reduce→즉시.
+- **J. 테스트**: `clampStaggerDelay`(reduce/상한/index) pure + `tests/myTasksMotion.test.ts`, test:entity 체인 등록.
+
+### Task 5.1: reduced-motion 훅 + stagger 진입
+**Files:** Create `my-tasks/useMotion.ts`·`my-tasks/motionUtils.ts`, Create `tests/myTasksMotion.test.ts`, Modify SceneRow/TodoRow/SceneCard(+TodoCard)
+- [ ] **Step 1:** `useMotion.ts` = `useReducedMotion()` 래핑 `useMotionPref(): { reduce: boolean }`. `motionUtils.ts` = pure `clampStaggerDelay(index, reduce): number`(reduce면 0, 아니면 `min(index*0.025, 0.3)`).
+- [ ] **Step 2:** SceneRow/TodoRow/SceneCard/TodoCard에 진입 모션(motion.div) + `index` prop으로 stagger delay. reduce 가드. (SceneRow는 이미 motion.div — y/stagger 추가, forwardRef·layout 유지.)
+- [ ] **Step 3:** `tests/myTasksMotion.test.ts`(node:test) — clampStaggerDelay reduce/상한/index. test:entity 체인 등록.
+- [ ] **Step 4:** typecheck + 새 테스트 + build:vite. Commit.
+
+### Task 5.2: Success Check + 콘페티
+**Files:** Create `components/SuccessCheckCircle.tsx`, Modify TodoRow/TodoCard(+MyTasksWidget 완료 콘페티 트리거 검토)
+- [ ] **Step 1:** `SuccessCheckCircle` — props `{ completed, onToggle, title }`. ring→check scale spring + 완료 전이 시 ring-burst. reduce 가드. TodoRow/TodoCard의 원형 체크 버튼 대체(동작/aria 보존).
+- [ ] **Step 2:** 콘페티 — 마지막 미완료 개인 할일 완료로 pending 0 전이 시 1회(가벼운 DOM, reduce면 생략). 위치는 위젯 또는 행. 과하지 않게.
+- [ ] **Step 3:** typecheck + build:vite. Commit.
+
+### Task 5.3: 도넛 카운트업/sweep + 크로스페이드 + 호버/칩
+**Files:** Modify DonutHero, MyTasksWidget, StageChips, SceneRow/TodoRow/카드
+- [ ] **Step 1:** DonutHero 카운트업(M) + arc mount sweep, reduce 가드.
+- [ ] **Step 2:** MyTasksWidget viewMode 크로스페이드(AnimatePresence key=viewMode) + DonutHero strip 전환, reduce 가드.
+- [ ] **Step 3:** 자성 호버(whileHover) 행/카드 + StageChips whileTap, reduce 가드.
+- [ ] **Step 4:** typecheck + build:vite. Commit.
+
+### Task 5.4: PR 5 검증 게이트 + 버전 + 노트 + PR
+- [ ] **Step 1:** typecheck + build:vite(테스트 포함) 통과.
+- [ ] **Step 2:** 회귀+모션 확인(한솔 dev): 진입 stagger, 완료 Success Check/콘페티, 도넛 카운트업, 뷰 크로스페이드, 호버, **OS reduced-motion ON 시 전부 즉시/비활성**.
+- [ ] **Step 3:** 버전 현재(1.57.1)→**1.58.0** + update-notes(비개발자 톤: "완료할 때 기분 좋은 효과, 부드러운 전환. 동작 줄이기 설정 존중").
+- [ ] **Step 4:** Commit → push → PR(pr-creator) → codex-review-loop → 최종 심층 리뷰 → 빌드 → 머지 → 배포.
+
+### PR 5 검증 게이트
+- [ ] `npm run typecheck` + `build:vite`(단위 테스트 포함) 통과
+- [ ] 모든 신규 모션이 `prefers-reduced-motion: reduce`에서 즉시/비활성 (★핵심)
+- [ ] stagger가 데이터 변경마다 재생되지 않음(진입만), 대량 리스트 delay 상한
+- [ ] Success Check/콘페티/카운트업/크로스페이드/호버 동작, 기능 회귀 없음
+- [ ] (한솔 승인 시) 머지 → 빌드 → 배포
 
 ---
 

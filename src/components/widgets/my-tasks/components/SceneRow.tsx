@@ -32,11 +32,16 @@ interface SceneRowProps {
   onRemove: (key: SceneKey) => void;
   onOpenDetail: (flat: FlatScene) => void;
   onNavigateToMain: (flat: FlatScene) => void;
+  /** 진입 stagger delay(초). 최초 마운트 1회만 >0, 이후 0(재-stagger 방지). */
+  enterDelay?: number;
+  /** 동작 줄이기 — true면 진입 모션 즉시. */
+  reduce?: boolean;
 }
 
 export const SceneRow = forwardRef<HTMLDivElement, SceneRowProps>(function SceneRow({
   flat, deptCfg, epLabel, sceneNum, pct, isRemovable,
   onToggle, onRemove, onOpenDetail, onNavigateToMain,
+  enterDelay = 0, reduce = false,
 }, ref) {
   const s = flat.scene;
   const users = useAuthStore((u) => u.users);
@@ -49,10 +54,12 @@ export const SceneRow = forwardRef<HTMLDivElement, SceneRowProps>(function Scene
       layout
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
-      exit={{ opacity: 0 }}
+      exit={{ opacity: 0, transition: { duration: reduce ? 0 : 0.15 } }}
+      transition={{ duration: reduce ? 0 : 0.25, delay: enterDelay }}
       className={cn(
-        'flex items-center gap-1.5 px-2 py-1.5 rounded-lg transition-colors group',
-        pct >= 100 ? 'bg-green-500/5 opacity-60' : 'hover:bg-bg-border/8',
+        // 자성 호버 글로우는 box-shadow(CSS)로만 — layout/transform 충돌 회피.
+        'flex items-center gap-1.5 px-2 py-1.5 rounded-lg group transition-[background-color,box-shadow]',
+        pct >= 100 ? 'bg-green-500/5 opacity-60' : 'hover:bg-bg-border/8 hover:shadow-[0_2px_14px_-4px_rgba(108,92,231,0.45)]',
       )}
     >
       <div
@@ -85,7 +92,7 @@ export const SceneRow = forwardRef<HTMLDivElement, SceneRowProps>(function Scene
         </div>
       </div>
 
-      <StageChips scene={s} deptCfg={deptCfg} onToggleStage={(stage) => onToggle(flat, stage)} />
+      <StageChips scene={s} deptCfg={deptCfg} onToggleStage={(stage) => onToggle(flat, stage)} reduce={reduce} />
 
       <div className="flex items-center gap-0.5 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">
         <button
