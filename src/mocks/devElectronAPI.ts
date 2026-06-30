@@ -213,8 +213,7 @@ function emitMockActivityRealtime(row: MockActivityRow): void {
 // ─── 캐릭터 현황판 mock 시드 ──────────────────────────────
 // preview 에서 보드/검색/에피소드탭이 비지 않도록 샘플 2~3 캐릭터 + 복장 + 태그 + 에피소드 연결.
 const MOCK_CHARACTER_EP = 5; // MOCK_EPISODES 에 존재하는 유일 에피소드(EP05).
-const MOCK_CHARACTER_IMAGE_URL =
-  'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAGQAAABkCAYAAABw4pVUAAAByklEQVR4nO3asU7DMBRA0Wj//5e5DB1aQlhUoOAFR3DRbDTlVR9OZ2I0WPs557yvJzfAX8xMBAkxQkKMECRkZdyfA9w9a4qv1x6Aq66q+RzKPkc7tLR+TwsQICFGSIgREqJX6Au4KknyLe0r9DxaYt8MEhsiIERAiIAQASWf4Qk9LqHn8Q4tX7NQRBUBz40QASGCSuCFdgEp9JJC3sE7qYqGuW5lz0yIgBABIQJCBDXfCKW2D1hp+y5oWRn2wkSQt6ZpDCIgRECIgBAByR/FWlcjdv0o1rGxEit/c71aIyFEQIiAEAEhAtI6dQ1yObxj3+phynH8QwSECAgRECIgRECIgBABIQJCBBQm7DNkoVaOV1zvJa+jzTn9MoYICBEQIiBEQIhAk7o8LqEPdFx38HfTkN/kJDtCBIQICBEQIiBEQIgA5rSoR/TrRRxjz3B7EAEhAkIEhAgIERAioPAh4HJMY9bv4RKhBE4RASECEgKhxP/tOyoeOoQ9YnwoxGMyIgRCBIQICBEQIuBQibzhTxp7RPEMIhBAQIiBEQIiAEAGlXqEw+VjwheVDBIQICBEQIiBEQIiAwoRZK75p2T5EQIiAEAEhAkIEhAgIERAiIERAiIAQASFX9wI8QluMN0VIjgAAAABJRU5ErkJggg==';
+const MOCK_CHARACTER_IMAGE_URL = '/splash/opening_image_cropped.png';
 
 function seedMockCharacterData(): void {
   if (localStore.__characters !== undefined) return; // 이미 시드/조작됨
