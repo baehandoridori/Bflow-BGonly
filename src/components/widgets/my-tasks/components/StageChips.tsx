@@ -11,6 +11,7 @@ import { STAGES } from '@/types';
 import type { Stage, Scene } from '@/types';
 import { DEPARTMENT_CONFIGS } from '@/types';
 import { cn } from '@/utils/cn';
+import { currentStageInfo } from '../stageInfo';
 
 interface StageChipsProps {
   scene: Scene;
@@ -21,12 +22,15 @@ interface StageChipsProps {
 
 export function StageChips({ scene, deptCfg, onToggleStage, size = 'sm' }: StageChipsProps) {
   const dim = size === 'md' ? 'w-7 h-7 text-[12px]' : 'w-6 h-6 text-[11px]';
+  // 강조 단계는 currentStageInfo 와 동일 기준으로 단 하나만 — 행/카드의 'n/4' 라벨과 일치하게
+  // (비연속 데이터에서 칩 여러 개가 강조되며 라벨과 어긋나던 불일치 제거 + 규칙 일원화).
+  const currentKey = currentStageInfo(scene).currentStageKey;
   return (
     <div className="flex bg-bg-primary rounded-md p-0.5 border border-bg-border gap-0.5 shrink-0 w-fit">
-      {STAGES.map((stage, i) => {
+      {STAGES.map((stage) => {
         const checked = scene[stage];
         const color = deptCfg.stageColors[stage];
-        const isCurrent = checked && (i === STAGES.length - 1 || !scene[STAGES[i + 1]]);
+        const isCurrent = checked && stage === currentKey;
         const label = deptCfg.stageLabels[stage][0];
         return (
           <button

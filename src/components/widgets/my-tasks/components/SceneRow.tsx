@@ -46,7 +46,6 @@ export const SceneRow = forwardRef<HTMLDivElement, SceneRowProps>(function Scene
   return (
     <motion.div
       ref={ref}
-      key={flat.key}
       layout
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
