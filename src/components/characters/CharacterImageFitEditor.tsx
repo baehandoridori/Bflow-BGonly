@@ -58,87 +58,71 @@ function fitToImageBox(fit: CharacterImageFit, base: Box): Box {
   };
 }
 
-function imageBoxToFit(box: Box, base: Box, lockAspect: boolean): CharacterImageFit {
-  const safeBaseWidth = Math.max(1, base.width);
-  const safeBaseHeight = Math.max(1, base.height);
-  const scaleX = clampScale(box.width / safeBaseWidth);
-  const scaleY = clampScale(box.height / safeBaseHeight);
-  const x = clampMove(((box.left + box.width / 2) - (base.left + base.width / 2)) / safeBaseWidth * 100);
-  const y = clampMove(((box.top + box.height / 2) - (base.top + base.height / 2)) / safeBaseHeight * 100);
-  const scale = lockAspect ? scaleX : (scaleX + scaleY) / 2;
+function scalesOf(fit: CharacterImageFit): { scaleX: number; scaleY: number } {
+  const normalized = normalizeCharacterImageFit(fit);
   return {
-    scale: clampScale(scale),
-    scaleX,
-    scaleY,
-    x,
-    y,
-    lockAspect,
+    scaleX: normalized.lockAspect ? normalized.scale : (normalized.scaleX ?? normalized.scale),
+    scaleY: normalized.lockAspect ? normalized.scale : (normalized.scaleY ?? normalized.scale),
   };
 }
 
-function resizeImageBox(start: Box, base: Box, handle: ResizeHandle, dx: number, dy: number, lockAspect: boolean): Box {
+function nextFitFromDrag(
+  startFit: CharacterImageFit,
+  handle: ResizeHandle,
+  dx: number,
+  dy: number,
+  base: Box,
+): CharacterImageFit {
+  const normalized = normalizeCharacterImageFit(startFit);
+  const safeBaseWidth = Math.max(1, base.width);
+  const safeBaseHeight = Math.max(1, base.height);
+
   if (handle === 'move') {
-    return { ...start, left: start.left + dx, top: start.top + dy };
+    return {
+      ...normalized,
+      x: clampMove(normalized.x + (dx / safeBaseWidth) * 100),
+      y: clampMove(normalized.y + (dy / safeBaseHeight) * 100),
+    };
   }
 
-  const baseMinWidth = Math.max(18, base.width * MIN_SCALE);
-  const baseMinHeight = Math.max(18, base.height * MIN_SCALE);
-  const baseMaxWidth = Math.max(baseMinWidth, base.width * MAX_SCALE);
-  const baseMaxHeight = Math.max(baseMinHeight, base.height * MAX_SCALE);
   const fromWest = handle.includes('w');
   const fromEast = handle.includes('e');
   const fromNorth = handle.includes('n');
   const fromSouth = handle.includes('s');
+  const { scaleX: startScaleX, scaleY: startScaleY } = scalesOf(normalized);
+  const deltaX = fromEast ? dx / safeBaseWidth : fromWest ? -dx / safeBaseWidth : 0;
+  const deltaY = fromSouth ? dy / safeBaseHeight : fromNorth ? -dy / safeBaseHeight : 0;
 
-  if (lockAspect) {
-    const aspect = Math.max(0.1, start.width / Math.max(1, start.height));
-    let nextWidth = start.width;
-    let nextHeight = start.height;
-
-    if (fromEast || fromWest) nextWidth = start.width + (fromEast ? dx : -dx);
-    if (fromNorth || fromSouth) nextHeight = start.height + (fromSouth ? dy : -dy);
-
-    const widthFromHeight = nextHeight * aspect;
-    const widthDelta = Math.abs(nextWidth - start.width);
-    const heightDelta = Math.abs(widthFromHeight - start.width);
-    const chosenWidth = clamp(widthDelta >= heightDelta ? nextWidth : widthFromHeight, baseMinWidth, baseMaxWidth);
-    const chosenHeight = clamp(chosenWidth / aspect, baseMinHeight, baseMaxHeight);
-
+  if (normalized.lockAspect) {
+    const primaryDelta = Math.abs(deltaX) >= Math.abs(deltaY) ? deltaX : deltaY;
+    const nextScale = clampScale(normalized.scale + primaryDelta);
     return {
-      width: chosenWidth,
-      height: chosenHeight,
-      left: fromWest ? start.left + start.width - chosenWidth : fromEast ? start.left : start.left + (start.width - chosenWidth) / 2,
-      top: fromNorth ? start.top + start.height - chosenHeight : fromSouth ? start.top : start.top + (start.height - chosenHeight) / 2,
+      ...normalized,
+      scale: nextScale,
+      scaleX: nextScale,
+      scaleY: nextScale,
     };
   }
 
-  let left = start.left;
-  let top = start.top;
-  let width = start.width;
-  let height = start.height;
-
-  if (fromEast) width = start.width + dx;
-  if (fromWest) width = start.width - dx;
-  if (fromSouth) height = start.height + dy;
-  if (fromNorth) height = start.height - dy;
-
-  width = clamp(width, baseMinWidth, baseMaxWidth);
-  height = clamp(height, baseMinHeight, baseMaxHeight);
-  if (fromWest) left = start.left + start.width - width;
-  if (fromNorth) top = start.top + start.height - height;
-
-  return { left, top, width, height };
+  const nextScaleX = fromEast || fromWest ? clampScale(startScaleX + deltaX) : startScaleX;
+  const nextScaleY = fromNorth || fromSouth ? clampScale(startScaleY + deltaY) : startScaleY;
+  return {
+    ...normalized,
+    scale: clampScale((nextScaleX + nextScaleY) / 2),
+    scaleX: nextScaleX,
+    scaleY: nextScaleY,
+  };
 }
 
 const HANDLE_META: Array<{ id: ResizeHandle; label: string; className: string }> = [
-  { id: 'n', label: '위쪽 늘리기', className: 'left-1/2 top-0 h-9 w-14 -translate-x-1/2 -translate-y-1/2 cursor-ns-resize' },
-  { id: 's', label: '아래쪽 늘리기', className: 'bottom-0 left-1/2 h-9 w-14 -translate-x-1/2 translate-y-1/2 cursor-ns-resize' },
-  { id: 'w', label: '왼쪽 늘리기', className: 'left-0 top-1/2 h-14 w-9 -translate-x-1/2 -translate-y-1/2 cursor-ew-resize' },
-  { id: 'e', label: '오른쪽 늘리기', className: 'right-0 top-1/2 h-14 w-9 translate-x-1/2 -translate-y-1/2 cursor-ew-resize' },
-  { id: 'nw', label: '왼쪽 위 모서리 늘리기', className: 'left-0 top-0 h-10 w-10 -translate-x-1/2 -translate-y-1/2 cursor-nwse-resize' },
-  { id: 'ne', label: '오른쪽 위 모서리 늘리기', className: 'right-0 top-0 h-10 w-10 translate-x-1/2 -translate-y-1/2 cursor-nesw-resize' },
-  { id: 'sw', label: '왼쪽 아래 모서리 늘리기', className: 'bottom-0 left-0 h-10 w-10 -translate-x-1/2 translate-y-1/2 cursor-nesw-resize' },
-  { id: 'se', label: '오른쪽 아래 모서리 늘리기', className: 'bottom-0 right-0 h-10 w-10 translate-x-1/2 translate-y-1/2 cursor-nwse-resize' },
+  { id: 'n', label: '이미지 위쪽 확대', className: 'left-1/2 top-0 h-9 w-14 -translate-x-1/2 -translate-y-1/2 cursor-ns-resize' },
+  { id: 's', label: '이미지 아래쪽 확대', className: 'bottom-0 left-1/2 h-9 w-14 -translate-x-1/2 translate-y-1/2 cursor-ns-resize' },
+  { id: 'w', label: '이미지 왼쪽 확대', className: 'left-0 top-1/2 h-14 w-9 -translate-x-1/2 -translate-y-1/2 cursor-ew-resize' },
+  { id: 'e', label: '이미지 오른쪽 확대', className: 'right-0 top-1/2 h-14 w-9 translate-x-1/2 -translate-y-1/2 cursor-ew-resize' },
+  { id: 'nw', label: '이미지 왼쪽 위 확대', className: 'left-0 top-0 h-10 w-10 -translate-x-1/2 -translate-y-1/2 cursor-nwse-resize' },
+  { id: 'ne', label: '이미지 오른쪽 위 확대', className: 'right-0 top-0 h-10 w-10 translate-x-1/2 -translate-y-1/2 cursor-nesw-resize' },
+  { id: 'sw', label: '이미지 왼쪽 아래 확대', className: 'bottom-0 left-0 h-10 w-10 -translate-x-1/2 translate-y-1/2 cursor-nesw-resize' },
+  { id: 'se', label: '이미지 오른쪽 아래 확대', className: 'bottom-0 right-0 h-10 w-10 translate-x-1/2 translate-y-1/2 cursor-nwse-resize' },
 ];
 
 export function CharacterImageFitEditor({
@@ -166,9 +150,8 @@ export function CharacterImageFitEditor({
     handle: ResizeHandle;
     startX: number;
     startY: number;
-    startBox: Box;
+    startFit: CharacterImageFit;
     baseBox: Box;
-    lockAspect: boolean;
   } | null>(null);
 
   useEffect(() => {
@@ -220,8 +203,7 @@ export function CharacterImageFitEditor({
     width: imageBox.width,
     height: imageBox.height,
   };
-  const scaleX = draft.lockAspect ? draft.scale : (draft.scaleX ?? draft.scale);
-  const scaleY = draft.lockAspect ? draft.scale : (draft.scaleY ?? draft.scale);
+  const { scaleX, scaleY } = scalesOf(draft);
 
   const beginInteraction = (handle: ResizeHandle, event: ReactPointerEvent<HTMLElement>) => {
     if (event.button !== 0) return;
@@ -233,24 +215,21 @@ export function CharacterImageFitEditor({
       handle,
       startX: event.clientX,
       startY: event.clientY,
-      startBox: imageBox,
+      startFit: normalizeCharacterImageFit(draft),
       baseBox,
-      lockAspect: draft.lockAspect,
     };
   };
 
   const onPointerMove = (event: ReactPointerEvent<HTMLDivElement>) => {
     const interaction = interactionRef.current;
     if (!interaction || interaction.pointerId !== event.pointerId) return;
-    const nextBox = resizeImageBox(
-      interaction.startBox,
-      interaction.baseBox,
+    setDraft(nextFitFromDrag(
+      interaction.startFit,
       interaction.handle,
       event.clientX - interaction.startX,
       event.clientY - interaction.startY,
-      interaction.lockAspect,
-    );
-    setDraft(imageBoxToFit(nextBox, interaction.baseBox, interaction.lockAspect));
+      interaction.baseBox,
+    ));
   };
 
   const endInteraction = (event: ReactPointerEvent<HTMLDivElement>) => {
@@ -265,7 +244,8 @@ export function CharacterImageFitEditor({
     setDraft((prev) => {
       const normalized = normalizeCharacterImageFit(prev);
       if (!lockAspect) return { ...normalized, lockAspect: false };
-      const nextScale = clampScale(((normalized.scaleX ?? normalized.scale) + (normalized.scaleY ?? normalized.scale)) / 2);
+      const { scaleX: currentScaleX, scaleY: currentScaleY } = scalesOf(normalized);
+      const nextScale = clampScale((currentScaleX + currentScaleY) / 2);
       return {
         ...normalized,
         lockAspect: true,
@@ -276,7 +256,7 @@ export function CharacterImageFitEditor({
     });
   };
 
-  const dimStyle = 'absolute bg-black/40 backdrop-blur-[2px]';
+  const dimStyle = 'absolute bg-black/25 backdrop-blur-[3px]';
 
   return (
     <div className="fixed inset-0 z-[90] flex items-center justify-center bg-black/70 p-5" onMouseDown={(e) => e.stopPropagation()}>
@@ -284,7 +264,7 @@ export function CharacterImageFitEditor({
         <div className="flex items-center justify-between border-b border-bg-border/70 px-4 py-3">
           <div>
             <div className="text-sm font-semibold text-text-primary">썸네일 맞추기</div>
-            <div className="text-xs text-text-secondary">이미지 박스의 위치와 크기를 실제 썸네일 영역에 맞춥니다.</div>
+            <div className="text-xs text-text-secondary">고정된 썸네일 박스 안에서 이미지를 이동하거나 확대합니다.</div>
           </div>
           <button type="button" aria-label="닫기" onClick={onClose} className="rounded-md p-1.5 text-text-secondary hover:text-text-primary">
             <X size={18} />
@@ -300,27 +280,20 @@ export function CharacterImageFitEditor({
             onPointerCancel={endInteraction}
             style={getCharacterImageBackgroundStyle(background)}
           >
-            <div
-              ref={cropFrameRef}
-              className="absolute left-1/2 top-1/2 h-[78%] max-h-[430px] aspect-[3/4] -translate-x-1/2 -translate-y-1/2"
-            />
             <img
               src={url}
-              alt={alt}
+              alt=""
+              aria-hidden
               draggable={false}
-              onLoad={(event) => {
-                const image = event.currentTarget;
-                setNaturalSize({
-                  width: Math.max(1, image.naturalWidth),
-                  height: Math.max(1, image.naturalHeight),
-                });
-              }}
-              className="absolute z-10 select-none object-fill outline outline-1 -outline-offset-1 outline-white/10"
+              className="pointer-events-none absolute z-10 select-none object-fill opacity-80"
               style={{
                 left: workspaceImageBox.left,
                 top: workspaceImageBox.top,
                 width: workspaceImageBox.width,
                 height: workspaceImageBox.height,
+                filter: 'blur(5px) brightness(0.62)',
+                transform: 'scale(1.015)',
+                transformOrigin: 'center center',
               }}
             />
 
@@ -330,31 +303,43 @@ export function CharacterImageFitEditor({
             <div className={dimStyle} style={{ left: cropRect.left + cropRect.width, top: cropRect.top, right: 0, height: cropRect.height }} />
 
             <div
-              className="pointer-events-none absolute z-30 rounded-xl shadow-[0_0_0_2px_rgba(255,255,255,0.9),0_0_0_9999px_rgba(0,0,0,0.08)]"
-              style={{ left: cropRect.left, top: cropRect.top, width: cropRect.width, height: cropRect.height }}
-            />
-
-            <div
-              className="absolute z-40 cursor-move rounded-lg border-2 border-accent bg-accent/5 shadow-[0_0_0_1px_rgba(0,0,0,0.45)]"
-              style={{
-                left: workspaceImageBox.left,
-                top: workspaceImageBox.top,
-                width: workspaceImageBox.width,
-                height: workspaceImageBox.height,
-              }}
-              onPointerDown={(event) => beginInteraction('move', event)}
+              ref={cropFrameRef}
+              className="absolute left-1/2 top-1/2 z-30 h-[78%] max-h-[430px] aspect-[3/4] -translate-x-1/2 -translate-y-1/2"
             >
-              <div className="pointer-events-none absolute left-2 top-2 rounded-md bg-black/55 px-2 py-1 text-[11px] font-medium text-white/85 tabular-nums">
-                {scaleX.toFixed(2)}x{draft.lockAspect ? '' : ` / ${scaleY.toFixed(2)}x`}
+              <div
+                className="absolute inset-0 cursor-move overflow-hidden rounded-xl bg-black/10 shadow-[0_0_0_2px_rgba(255,255,255,0.92),0_0_0_1px_rgba(0,0,0,0.55)_inset]"
+                onPointerDown={(event) => beginInteraction('move', event)}
+              >
+                <img
+                  src={url}
+                  alt={alt}
+                  draggable={false}
+                  onLoad={(event) => {
+                    const image = event.currentTarget;
+                    setNaturalSize({
+                      width: Math.max(1, image.naturalWidth),
+                      height: Math.max(1, image.naturalHeight),
+                    });
+                  }}
+                  className="absolute select-none object-fill outline outline-1 -outline-offset-1 outline-white/10"
+                  style={{
+                    left: imageBox.left,
+                    top: imageBox.top,
+                    width: imageBox.width,
+                    height: imageBox.height,
+                  }}
+                />
+                <div className="pointer-events-none absolute inset-0 bg-[linear-gradient(to_right,rgba(255,255,255,0.16)_1px,transparent_1px),linear-gradient(to_bottom,rgba(255,255,255,0.16)_1px,transparent_1px)] bg-[size:33.333%_33.333%]" />
               </div>
-              {HANDLE_META.map((handle) => (
+
+              {HANDLE_META.filter((handle) => handle.id !== 'move').map((handle) => (
                 <button
                   key={handle.id}
                   type="button"
                   aria-label={handle.label}
                   data-fit-handle={handle.id}
                   onPointerDown={(event) => beginInteraction(handle.id, event)}
-                  className={`absolute z-50 flex items-center justify-center ${handle.className}`}
+                  className={`absolute z-40 flex items-center justify-center ${handle.className}`}
                 >
                   <span className="h-3 w-3 rounded-full bg-white shadow-[0_0_0_2px_rgba(108,92,231,0.95),0_2px_8px_rgba(0,0,0,0.35)]" />
                 </button>
