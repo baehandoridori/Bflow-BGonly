@@ -121,7 +121,6 @@ test('character board is wired for image display, assignees, work links, and lig
   assert.ok(characterBoard.includes('useCharacterBoardStore.getState().characters.find'));
   assert.match(readFileSync('src/components/characters/CharacterImageFrame.tsx', 'utf8'), /translate\(\$\{normalized\.x\}%, \$\{normalized\.y\}%\)/);
   assert.match(fitEditorSource, /stopImmediatePropagation/);
-  assert.match(fitEditorSource, /data-fit-handle/);
   assert.match(fitEditorSource, /cropFrameRef/);
   assert.match(characterImageLightbox, /initialCostumeIdRef/);
   assert.match(characterImageLightbox, /currentCostumeId/);
@@ -173,14 +172,24 @@ test('character costume tags support palette toggles, custom input, store update
 test('character image fit editor keeps a fixed crop frame and moves/scales the image inside it', () => {
   assert.match(devMock, /MOCK_CHARACTER_IMAGE_URL = '\/splash\/opening_image_cropped\.png'/);
   assert.match(fitEditorSource, /function nextFitFromDrag/);
-  assert.match(fitEditorSource, /handle === 'move'/);
-  assert.match(fitEditorSource, /beginInteraction\('move', event\)/);
-  assert.match(fitEditorSource, /filter: 'blur\(5px\) brightness\(0\.62\)'/);
-  assert.match(fitEditorSource, /backdrop-blur-\[3px\]/);
+  assert.match(fitEditorSource, /onPointerDown=\{beginInteraction\}/);
+  assert.match(fitEditorSource, /filter: 'blur\(10px\) saturate\(0\.8\) brightness\(0\.58\)'/);
+  assert.match(fitEditorSource, /backdrop-blur-\[5px\]/);
   assert.match(fitEditorSource, /ref=\{cropFrameRef\}/);
-  assert.match(fitEditorSource, /data-fit-handle/);
   assert.match(fitEditorSource, /setDraft\(nextFitFromDrag/);
+  assert.match(fitEditorSource, /type="range"/);
+  assert.match(fitEditorSource, /aria-label="확대"/);
+  assert.match(fitEditorSource, /aria-label="가로 위치"/);
+  assert.match(fitEditorSource, /aria-label="세로 위치"/);
+  assert.match(fitEditorSource, /aria-pressed=\{draft\.lockAspect\}/);
+  assert.match(fitEditorSource, /function getFitImageTransformStyle/);
+  assert.match(fitEditorSource, /translate\(\$\{normalized\.x\}%, \$\{normalized\.y\}%\) scale\(\$\{scaleX\}, \$\{scaleY\}\)/);
+  assert.match(fitEditorSource, /object-contain/);
+  assert.doesNotMatch(fitEditorSource, /data-fit-handle/);
+  assert.doesNotMatch(fitEditorSource, /HANDLE_META/);
   assert.doesNotMatch(fitEditorSource, /function resizeImageBox/);
   assert.doesNotMatch(fitEditorSource, /function imageBoxToFit/);
+  assert.doesNotMatch(fitEditorSource, /function fitToImageBox/);
+  assert.doesNotMatch(fitEditorSource, /object-fill/);
   assert.doesNotMatch(fitEditorSource, /startBox/);
 });

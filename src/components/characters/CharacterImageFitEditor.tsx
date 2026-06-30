@@ -1,5 +1,12 @@
-import { useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react';
-import { RotateCcw, X } from 'lucide-react';
+import {
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type KeyboardEvent as ReactKeyboardEvent,
+  type PointerEvent as ReactPointerEvent,
+} from 'react';
+import { Lock, Minus, Move, Plus, RotateCcw, Unlock, X } from 'lucide-react';
 import type { CharacterImageBackground, CharacterImageFit } from '@/types';
 import {
   DEFAULT_CHARACTER_IMAGE_FIT,
@@ -8,10 +15,10 @@ import {
 import { getCharacterImageBackgroundStyle } from './CharacterImageFrame';
 
 type Box = { left: number; top: number; width: number; height: number };
-type ResizeHandle = 'move' | 'n' | 's' | 'e' | 'w' | 'ne' | 'nw' | 'se' | 'sw';
 
 const MIN_SCALE = 0.25;
 const MAX_SCALE = 8;
+const SCALE_STEP = 0.05;
 
 function clamp(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value));
@@ -42,22 +49,6 @@ function getContainedImageBox(frameWidth: number, frameHeight: number, naturalWi
   };
 }
 
-function fitToImageBox(fit: CharacterImageFit, base: Box): Box {
-  const normalized = normalizeCharacterImageFit(fit);
-  const scaleX = normalized.lockAspect ? normalized.scale : (normalized.scaleX ?? normalized.scale);
-  const scaleY = normalized.lockAspect ? normalized.scale : (normalized.scaleY ?? normalized.scale);
-  const width = base.width * scaleX;
-  const height = base.height * scaleY;
-  const centerX = base.left + base.width / 2 + (base.width * normalized.x) / 100;
-  const centerY = base.top + base.height / 2 + (base.height * normalized.y) / 100;
-  return {
-    left: centerX - width / 2,
-    top: centerY - height / 2,
-    width,
-    height,
-  };
-}
-
 function scalesOf(fit: CharacterImageFit): { scaleX: number; scaleY: number } {
   const normalized = normalizeCharacterImageFit(fit);
   return {
@@ -68,7 +59,6 @@ function scalesOf(fit: CharacterImageFit): { scaleX: number; scaleY: number } {
 
 function nextFitFromDrag(
   startFit: CharacterImageFit,
-  handle: ResizeHandle,
   dx: number,
   dy: number,
   base: Box,
@@ -77,53 +67,21 @@ function nextFitFromDrag(
   const safeBaseWidth = Math.max(1, base.width);
   const safeBaseHeight = Math.max(1, base.height);
 
-  if (handle === 'move') {
-    return {
-      ...normalized,
-      x: clampMove(normalized.x + (dx / safeBaseWidth) * 100),
-      y: clampMove(normalized.y + (dy / safeBaseHeight) * 100),
-    };
-  }
-
-  const fromWest = handle.includes('w');
-  const fromEast = handle.includes('e');
-  const fromNorth = handle.includes('n');
-  const fromSouth = handle.includes('s');
-  const { scaleX: startScaleX, scaleY: startScaleY } = scalesOf(normalized);
-  const deltaX = fromEast ? dx / safeBaseWidth : fromWest ? -dx / safeBaseWidth : 0;
-  const deltaY = fromSouth ? dy / safeBaseHeight : fromNorth ? -dy / safeBaseHeight : 0;
-
-  if (normalized.lockAspect) {
-    const primaryDelta = Math.abs(deltaX) >= Math.abs(deltaY) ? deltaX : deltaY;
-    const nextScale = clampScale(normalized.scale + primaryDelta);
-    return {
-      ...normalized,
-      scale: nextScale,
-      scaleX: nextScale,
-      scaleY: nextScale,
-    };
-  }
-
-  const nextScaleX = fromEast || fromWest ? clampScale(startScaleX + deltaX) : startScaleX;
-  const nextScaleY = fromNorth || fromSouth ? clampScale(startScaleY + deltaY) : startScaleY;
   return {
     ...normalized,
-    scale: clampScale((nextScaleX + nextScaleY) / 2),
-    scaleX: nextScaleX,
-    scaleY: nextScaleY,
+    x: clampMove(normalized.x + (dx / safeBaseWidth) * 100),
+    y: clampMove(normalized.y + (dy / safeBaseHeight) * 100),
   };
 }
 
-const HANDLE_META: Array<{ id: ResizeHandle; label: string; className: string }> = [
-  { id: 'n', label: '이미지 위쪽 확대', className: 'left-1/2 top-0 h-9 w-14 -translate-x-1/2 -translate-y-1/2 cursor-ns-resize' },
-  { id: 's', label: '이미지 아래쪽 확대', className: 'bottom-0 left-1/2 h-9 w-14 -translate-x-1/2 translate-y-1/2 cursor-ns-resize' },
-  { id: 'w', label: '이미지 왼쪽 확대', className: 'left-0 top-1/2 h-14 w-9 -translate-x-1/2 -translate-y-1/2 cursor-ew-resize' },
-  { id: 'e', label: '이미지 오른쪽 확대', className: 'right-0 top-1/2 h-14 w-9 translate-x-1/2 -translate-y-1/2 cursor-ew-resize' },
-  { id: 'nw', label: '이미지 왼쪽 위 확대', className: 'left-0 top-0 h-10 w-10 -translate-x-1/2 -translate-y-1/2 cursor-nwse-resize' },
-  { id: 'ne', label: '이미지 오른쪽 위 확대', className: 'right-0 top-0 h-10 w-10 translate-x-1/2 -translate-y-1/2 cursor-nesw-resize' },
-  { id: 'sw', label: '이미지 왼쪽 아래 확대', className: 'bottom-0 left-0 h-10 w-10 -translate-x-1/2 translate-y-1/2 cursor-nesw-resize' },
-  { id: 'se', label: '이미지 오른쪽 아래 확대', className: 'bottom-0 right-0 h-10 w-10 translate-x-1/2 translate-y-1/2 cursor-nwse-resize' },
-];
+function getFitImageTransformStyle(fit: CharacterImageFit) {
+  const normalized = normalizeCharacterImageFit(fit);
+  const { scaleX, scaleY } = scalesOf(normalized);
+  return {
+    transform: `translate(${normalized.x}%, ${normalized.y}%) scale(${scaleX}, ${scaleY})`,
+    transformOrigin: 'center center',
+  };
+}
 
 export function CharacterImageFitEditor({
   url,
@@ -143,11 +101,11 @@ export function CharacterImageFitEditor({
   const [draft, setDraft] = useState<CharacterImageFit>(() => normalizeCharacterImageFit(fit));
   const [naturalSize, setNaturalSize] = useState({ width: 1, height: 1 });
   const [cropRect, setCropRect] = useState<Box>({ left: 0, top: 0, width: 1, height: 1 });
+  const [isDragging, setIsDragging] = useState(false);
   const workspaceRef = useRef<HTMLDivElement>(null);
   const cropFrameRef = useRef<HTMLDivElement>(null);
   const interactionRef = useRef<{
     pointerId: number;
-    handle: ResizeHandle;
     startX: number;
     startY: number;
     startFit: CharacterImageFit;
@@ -196,23 +154,21 @@ export function CharacterImageFitEditor({
     () => getContainedImageBox(cropRect.width, cropRect.height, naturalSize.width, naturalSize.height),
     [cropRect.height, cropRect.width, naturalSize.height, naturalSize.width],
   );
-  const imageBox = useMemo(() => fitToImageBox(draft, baseBox), [baseBox, draft]);
-  const workspaceImageBox = {
-    left: cropRect.left + imageBox.left,
-    top: cropRect.top + imageBox.top,
-    width: imageBox.width,
-    height: imageBox.height,
-  };
   const { scaleX, scaleY } = scalesOf(draft);
+  const fitImageStyle = getFitImageTransformStyle(draft);
+  const blurredFitImageStyle = {
+    ...fitImageStyle,
+    filter: 'blur(10px) saturate(0.8) brightness(0.58)',
+  };
 
-  const beginInteraction = (handle: ResizeHandle, event: ReactPointerEvent<HTMLElement>) => {
+  const beginInteraction = (event: ReactPointerEvent<HTMLElement>) => {
     if (event.button !== 0) return;
     event.preventDefault();
     event.stopPropagation();
     workspaceRef.current?.setPointerCapture(event.pointerId);
+    setIsDragging(true);
     interactionRef.current = {
       pointerId: event.pointerId,
-      handle,
       startX: event.clientX,
       startY: event.clientY,
       startFit: normalizeCharacterImageFit(draft),
@@ -223,9 +179,9 @@ export function CharacterImageFitEditor({
   const onPointerMove = (event: ReactPointerEvent<HTMLDivElement>) => {
     const interaction = interactionRef.current;
     if (!interaction || interaction.pointerId !== event.pointerId) return;
+    event.preventDefault();
     setDraft(nextFitFromDrag(
       interaction.startFit,
-      interaction.handle,
       event.clientX - interaction.startX,
       event.clientY - interaction.startY,
       interaction.baseBox,
@@ -235,6 +191,7 @@ export function CharacterImageFitEditor({
   const endInteraction = (event: ReactPointerEvent<HTMLDivElement>) => {
     if (interactionRef.current?.pointerId !== event.pointerId) return;
     interactionRef.current = null;
+    setIsDragging(false);
     if (workspaceRef.current?.hasPointerCapture(event.pointerId)) {
       workspaceRef.current.releasePointerCapture(event.pointerId);
     }
@@ -256,46 +213,117 @@ export function CharacterImageFitEditor({
     });
   };
 
-  const dimStyle = 'absolute bg-black/25 backdrop-blur-[3px]';
+  const updateScale = (axis: 'both' | 'x' | 'y', value: number) => {
+    setDraft((prev) => {
+      const normalized = normalizeCharacterImageFit(prev);
+      const { scaleX: currentScaleX, scaleY: currentScaleY } = scalesOf(normalized);
+      const nextScaleX = axis === 'both' || axis === 'x' ? clampScale(value) : currentScaleX;
+      const nextScaleY = axis === 'both' || axis === 'y' ? clampScale(value) : currentScaleY;
+      if (normalized.lockAspect || axis === 'both') {
+        const nextScale = clampScale(value);
+        return {
+          ...normalized,
+          scale: nextScale,
+          scaleX: nextScale,
+          scaleY: nextScale,
+        };
+      }
+      return {
+        ...normalized,
+        scale: clampScale((nextScaleX + nextScaleY) / 2),
+        scaleX: nextScaleX,
+        scaleY: nextScaleY,
+      };
+    });
+  };
+
+  const nudgeScale = (delta: number) => {
+    setDraft((prev) => {
+      const normalized = normalizeCharacterImageFit(prev);
+      const { scaleX: currentScaleX, scaleY: currentScaleY } = scalesOf(normalized);
+      const nextScaleX = clampScale(currentScaleX + delta);
+      const nextScaleY = clampScale(currentScaleY + delta);
+      if (normalized.lockAspect) {
+        return {
+          ...normalized,
+          scale: nextScaleX,
+          scaleX: nextScaleX,
+          scaleY: nextScaleX,
+        };
+      }
+      return {
+        ...normalized,
+        scale: clampScale((nextScaleX + nextScaleY) / 2),
+        scaleX: nextScaleX,
+        scaleY: nextScaleY,
+      };
+    });
+  };
+
+  const updatePosition = (axis: 'x' | 'y', value: number) => {
+    setDraft((prev) => ({
+      ...normalizeCharacterImageFit(prev),
+      [axis]: clampMove(value),
+    }));
+  };
+
+  const onCropKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>) => {
+    const step = event.shiftKey ? 5 : 1;
+    if (event.key === 'ArrowLeft') {
+      event.preventDefault();
+      updatePosition('x', draft.x - step);
+    } else if (event.key === 'ArrowRight') {
+      event.preventDefault();
+      updatePosition('x', draft.x + step);
+    } else if (event.key === 'ArrowUp') {
+      event.preventDefault();
+      updatePosition('y', draft.y - step);
+    } else if (event.key === 'ArrowDown') {
+      event.preventDefault();
+      updatePosition('y', draft.y + step);
+    }
+  };
+
+  const dimStyle = 'absolute z-20 bg-black/28 backdrop-blur-[5px]';
+  const buttonChrome = 'flex min-h-10 min-w-10 items-center justify-center rounded-lg border border-bg-border/70 bg-bg-card/80 text-text-secondary shadow-sm hover:border-text-secondary/50 hover:text-text-primary active:scale-[0.96]';
+  const sliderClass = 'h-2 w-full cursor-pointer accent-accent';
+  const percentLabel = (value: number) => `${Math.round(value * 100)}%`;
 
   return (
     <div className="fixed inset-0 z-[90] flex items-center justify-center bg-black/70 p-5" onMouseDown={(e) => e.stopPropagation()}>
-      <div className="w-full max-w-5xl overflow-hidden rounded-2xl bg-bg-card shadow-2xl ring-1 ring-white/10">
+      <div className="max-h-[calc(100vh-32px)] w-full max-w-5xl overflow-hidden rounded-2xl bg-bg-card shadow-2xl ring-1 ring-white/10">
         <div className="flex items-center justify-between border-b border-bg-border/70 px-4 py-3">
-          <div>
+          <div className="min-w-0">
             <div className="text-sm font-semibold text-text-primary">썸네일 맞추기</div>
-            <div className="text-xs text-text-secondary">고정된 썸네일 박스 안에서 이미지를 이동하거나 확대합니다.</div>
+            <div className="truncate text-xs text-text-secondary" title={alt}>{alt}</div>
           </div>
           <button type="button" aria-label="닫기" onClick={onClose} className="rounded-md p-1.5 text-text-secondary hover:text-text-primary">
             <X size={18} />
           </button>
         </div>
 
-        <div className="grid gap-4 p-4 md:grid-cols-[minmax(360px,1fr)_240px]">
+        <div className="grid max-h-[calc(100vh-88px)] gap-4 overflow-y-auto p-4 md:grid-cols-[minmax(420px,1fr)_280px]">
           <div
             ref={workspaceRef}
-            className="relative min-h-[460px] overflow-hidden rounded-2xl bg-black/35"
+            className="relative min-h-[420px] touch-none overflow-hidden rounded-xl bg-black/40 shadow-inner"
             onPointerMove={onPointerMove}
             onPointerUp={endInteraction}
             onPointerCancel={endInteraction}
             style={getCharacterImageBackgroundStyle(background)}
           >
-            <img
-              src={url}
-              alt=""
+            <div
               aria-hidden
-              draggable={false}
-              className="pointer-events-none absolute z-10 select-none object-fill opacity-80"
-              style={{
-                left: workspaceImageBox.left,
-                top: workspaceImageBox.top,
-                width: workspaceImageBox.width,
-                height: workspaceImageBox.height,
-                filter: 'blur(5px) brightness(0.62)',
-                transform: 'scale(1.015)',
-                transformOrigin: 'center center',
-              }}
-            />
+              className="pointer-events-none absolute z-10 flex items-center justify-center overflow-visible"
+              style={{ left: cropRect.left, top: cropRect.top, width: cropRect.width, height: cropRect.height }}
+            >
+              <img
+                src={url}
+                alt=""
+                draggable={false}
+                className="max-h-full max-w-full select-none object-contain opacity-80 will-change-transform"
+                style={blurredFitImageStyle}
+              />
+            </div>
 
             <div className={dimStyle} style={{ left: 0, top: 0, right: 0, height: cropRect.top }} />
             <div className={dimStyle} style={{ left: 0, top: cropRect.top + cropRect.height, right: 0, bottom: 0 }} />
@@ -304,73 +332,149 @@ export function CharacterImageFitEditor({
 
             <div
               ref={cropFrameRef}
-              className="absolute left-1/2 top-1/2 z-30 h-[78%] max-h-[430px] aspect-[3/4] -translate-x-1/2 -translate-y-1/2"
+              className="absolute left-1/2 top-1/2 z-30 h-[72%] max-h-[390px] min-h-[280px] aspect-[3/4] -translate-x-1/2 -translate-y-1/2"
             >
               <div
-                className="absolute inset-0 cursor-move overflow-hidden rounded-xl bg-black/10 shadow-[0_0_0_2px_rgba(255,255,255,0.92),0_0_0_1px_rgba(0,0,0,0.55)_inset]"
-                onPointerDown={(event) => beginInteraction('move', event)}
+                aria-label="썸네일 이미지 위치"
+                tabIndex={0}
+                onKeyDown={onCropKeyDown}
+                className={`absolute inset-0 overflow-hidden rounded-xl bg-black/10 shadow-[0_0_0_2px_rgba(255,255,255,0.94),0_18px_50px_rgba(0,0,0,0.34),0_0_0_1px_rgba(0,0,0,0.58)_inset] outline-none focus-visible:ring-2 focus-visible:ring-accent/80 ${isDragging ? 'cursor-grabbing' : 'cursor-grab'}`}
+                onPointerDown={beginInteraction}
               >
-                <img
-                  src={url}
-                  alt={alt}
-                  draggable={false}
-                  onLoad={(event) => {
-                    const image = event.currentTarget;
-                    setNaturalSize({
-                      width: Math.max(1, image.naturalWidth),
-                      height: Math.max(1, image.naturalHeight),
-                    });
-                  }}
-                  className="absolute select-none object-fill outline outline-1 -outline-offset-1 outline-white/10"
-                  style={{
-                    left: imageBox.left,
-                    top: imageBox.top,
-                    width: imageBox.width,
-                    height: imageBox.height,
-                  }}
-                />
-                <div className="pointer-events-none absolute inset-0 bg-[linear-gradient(to_right,rgba(255,255,255,0.16)_1px,transparent_1px),linear-gradient(to_bottom,rgba(255,255,255,0.16)_1px,transparent_1px)] bg-[size:33.333%_33.333%]" />
+                <div className="absolute inset-0 flex items-center justify-center overflow-visible">
+                  <img
+                    src={url}
+                    alt={alt}
+                    draggable={false}
+                    onLoad={(event) => {
+                      const image = event.currentTarget;
+                      setNaturalSize({
+                        width: Math.max(1, image.naturalWidth),
+                        height: Math.max(1, image.naturalHeight),
+                      });
+                    }}
+                    className="max-h-full max-w-full select-none object-contain outline outline-1 -outline-offset-1 outline-white/10 will-change-transform"
+                    style={fitImageStyle}
+                  />
+                </div>
+                <div className="pointer-events-none absolute inset-0 bg-[linear-gradient(to_right,rgba(255,255,255,0.18)_1px,transparent_1px),linear-gradient(to_bottom,rgba(255,255,255,0.18)_1px,transparent_1px)] bg-[size:33.333%_33.333%]" />
               </div>
-
-              {HANDLE_META.filter((handle) => handle.id !== 'move').map((handle) => (
-                <button
-                  key={handle.id}
-                  type="button"
-                  aria-label={handle.label}
-                  data-fit-handle={handle.id}
-                  onPointerDown={(event) => beginInteraction(handle.id, event)}
-                  className={`absolute z-40 flex items-center justify-center ${handle.className}`}
-                >
-                  <span className="h-3 w-3 rounded-full bg-white shadow-[0_0_0_2px_rgba(108,92,231,0.95),0_2px_8px_rgba(0,0,0,0.35)]" />
-                </button>
-              ))}
+              <div className="pointer-events-none absolute -left-1 -top-1 h-7 w-7 rounded-tl-xl border-l-2 border-t-2 border-white" />
+              <div className="pointer-events-none absolute -right-1 -top-1 h-7 w-7 rounded-tr-xl border-r-2 border-t-2 border-white" />
+              <div className="pointer-events-none absolute -bottom-1 -left-1 h-7 w-7 rounded-bl-xl border-b-2 border-l-2 border-white" />
+              <div className="pointer-events-none absolute -bottom-1 -right-1 h-7 w-7 rounded-br-xl border-b-2 border-r-2 border-white" />
             </div>
           </div>
 
-          <div className="flex flex-col gap-4">
-            <label className="flex min-h-10 items-center gap-2 text-sm text-text-primary">
-              <input
-                type="checkbox"
-                checked={draft.lockAspect}
-                onChange={(e) => setLockAspect(e.target.checked)}
-              />
-              비율 잠금
-            </label>
-
-            <div className="rounded-xl bg-bg-border/10 p-3 text-xs text-text-secondary">
-              <div className="flex items-center justify-between gap-3">
-                <span>가로</span>
-                <span className="tabular-nums text-text-primary">{scaleX.toFixed(2)}x</span>
+          <div className="flex flex-col gap-3">
+            <div className="rounded-xl border border-bg-border/70 bg-bg-card/70 p-3">
+              <div className="flex items-center justify-between gap-3 text-xs text-text-secondary">
+                <span className="flex items-center gap-1.5 font-medium text-text-primary">
+                  <Move size={14} />
+                  확대
+                </span>
+                <span className="tabular-nums text-text-primary">
+                  {draft.lockAspect ? percentLabel(scaleX) : `${percentLabel(scaleX)} / ${percentLabel(scaleY)}`}
+                </span>
               </div>
-              <div className="mt-2 flex items-center justify-between gap-3">
-                <span>세로</span>
-                <span className="tabular-nums text-text-primary">{scaleY.toFixed(2)}x</span>
-              </div>
-              <div className="mt-2 flex items-center justify-between gap-3">
-                <span>위치</span>
-                <span className="tabular-nums text-text-primary">{Math.round(draft.x)}%, {Math.round(draft.y)}%</span>
+              <div className="mt-3 flex items-center gap-2">
+                <button type="button" aria-label="축소" onClick={() => nudgeScale(-SCALE_STEP)} className={buttonChrome}>
+                  <Minus size={15} />
+                </button>
+                {draft.lockAspect ? (
+                  <input
+                    aria-label="확대"
+                    type="range"
+                    min={MIN_SCALE}
+                    max={MAX_SCALE}
+                    step="0.01"
+                    value={scaleX}
+                    onChange={(event) => updateScale('both', Number(event.target.value))}
+                    className={sliderClass}
+                  />
+                ) : (
+                  <div className="grid flex-1 gap-2">
+                    <input
+                      aria-label="가로 확대"
+                      type="range"
+                      min={MIN_SCALE}
+                      max={MAX_SCALE}
+                      step="0.01"
+                      value={scaleX}
+                      onChange={(event) => updateScale('x', Number(event.target.value))}
+                      className={sliderClass}
+                    />
+                    <input
+                      aria-label="세로 확대"
+                      type="range"
+                      min={MIN_SCALE}
+                      max={MAX_SCALE}
+                      step="0.01"
+                      value={scaleY}
+                      onChange={(event) => updateScale('y', Number(event.target.value))}
+                      className={sliderClass}
+                    />
+                  </div>
+                )}
+                <button type="button" aria-label="확대" onClick={() => nudgeScale(SCALE_STEP)} className={buttonChrome}>
+                  <Plus size={15} />
+                </button>
               </div>
             </div>
+
+            <div className="rounded-xl border border-bg-border/70 bg-bg-card/70 p-3">
+              <div className="flex items-center justify-between gap-3 text-xs text-text-secondary">
+                <span className="font-medium text-text-primary">위치</span>
+                <span className="tabular-nums text-text-primary">{Math.round(draft.x)} / {Math.round(draft.y)}</span>
+              </div>
+              <div className="mt-3 grid gap-3 text-xs text-text-secondary">
+                <label>
+                  <div className="mb-1 flex items-center justify-between">
+                    <span>X</span>
+                    <span className="tabular-nums text-text-primary">{Math.round(draft.x)}</span>
+                  </div>
+                  <input
+                    aria-label="가로 위치"
+                    type="range"
+                    min="-100"
+                    max="100"
+                    step="1"
+                    value={draft.x}
+                    onChange={(event) => updatePosition('x', Number(event.target.value))}
+                    className={sliderClass}
+                  />
+                </label>
+                <label>
+                  <div className="mb-1 flex items-center justify-between">
+                    <span>Y</span>
+                    <span className="tabular-nums text-text-primary">{Math.round(draft.y)}</span>
+                  </div>
+                  <input
+                    aria-label="세로 위치"
+                    type="range"
+                    min="-100"
+                    max="100"
+                    step="1"
+                    value={draft.y}
+                    onChange={(event) => updatePosition('y', Number(event.target.value))}
+                    className={sliderClass}
+                  />
+                </label>
+              </div>
+            </div>
+
+            <button
+              type="button"
+              aria-pressed={draft.lockAspect}
+              onClick={() => setLockAspect(!draft.lockAspect)}
+              className="flex min-h-10 items-center justify-between rounded-xl border border-bg-border/70 bg-bg-card/70 px-3 py-2 text-sm text-text-primary hover:border-text-secondary/50 active:scale-[0.96]"
+            >
+              <span>비율</span>
+              <span className="flex items-center gap-1.5 text-xs text-text-secondary">
+                {draft.lockAspect ? <Lock size={14} /> : <Unlock size={14} />}
+                {draft.lockAspect ? '잠금' : '해제'}
+              </span>
+            </button>
 
             <div className="mt-auto flex items-center justify-between gap-2">
               <button
