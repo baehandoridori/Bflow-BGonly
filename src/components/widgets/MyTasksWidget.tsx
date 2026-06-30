@@ -526,11 +526,12 @@ export function MyTasksWidget() {
   };
 
   // 씬 섹션 컨테이너 — 리스트는 AnimatePresence(popLayout) 행, 카드는 그리드.
-  const renderSceneSection = (scenes: FlatScene[]) => (
-    viewMode === 'card'
+  const renderSceneSection = (scenes: FlatScene[]) => {
+    if (scenes.length === 0) return null; // 빈 grid wrapper 노드 방지(모드 간 대칭)
+    return viewMode === 'card'
       ? <div className="grid gap-2" style={CARD_GRID_STYLE}>{scenes.map(renderScene)}</div>
-      : <AnimatePresence mode="popLayout">{scenes.map(renderScene)}</AnimatePresence>
-  );
+      : <AnimatePresence mode="popLayout">{scenes.map(renderScene)}</AnimatePresence>;
+  };
 
   // 개인 할일(진행 중) — 리스트는 Reorder(드래그), 카드는 그리드(드래그 없음).
   const renderPendingTodos = () => {
@@ -556,8 +557,9 @@ export function MyTasksWidget() {
   };
 
   // 개인 할일(완료) — 드래그 없음(양 모드 공통).
-  const renderDoneTodos = () => (
-    viewMode === 'card'
+  const renderDoneTodos = () => {
+    if (donePersonalTodos.length === 0) return null; // 빈 grid wrapper 노드 방지(모드 간 대칭)
+    return viewMode === 'card'
       ? <div className="grid gap-2" style={CARD_GRID_STYLE}>
           {donePersonalTodos.map((todo) => (
             <TodoCard key={todo.id} todo={todo} onToggle={togglePersonalTodo} onRemove={removePersonalTodo} onOpenDetail={openTodoDetail} isHighlighted={highlightTodoId === todo.id} />
@@ -567,8 +569,8 @@ export function MyTasksWidget() {
           {donePersonalTodos.map((todo) => (
             <TodoRow key={todo.id} todo={todo} onToggle={togglePersonalTodo} onRemove={removePersonalTodo} onOpenDetail={openTodoDetail} isHighlighted={highlightTodoId === todo.id} />
           ))}
-        </>
-  );
+        </>;
+  };
 
   // 플로팅 위젯 창에서 메인 앱 로그인 전 → currentUser가 null인 상태로 렌더될 수 있음
   // (assigned 뷰는 currentUser.name과 assignee 매칭 → 빈 결과 방지 위해 로딩 표시)

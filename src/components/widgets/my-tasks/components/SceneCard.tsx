@@ -6,7 +6,7 @@
  * TodoCard: 이미지 없는 컴팩트 카드(::개인 라벨 + 좌측 원형 체크 + 제목/메모). isHighlighted 승계.
  * (이미지 카드와 텍스트 카드는 MyTasksWidget이 그리드 섹션을 나눠 섞지 않는다.)
  */
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { ExternalLink, X, Image as ImageIcon, Check } from 'lucide-react';
 import { DEPARTMENT_CONFIGS } from '@/types';
 import type { Stage } from '@/types';
@@ -36,6 +36,9 @@ export function SceneCard({
   const s = flat.scene;
   const [imgError, setImgError] = useState(false);
   const imageUrl = s.guideUrl || s.storyboardUrl; // 가이드 우선 > 스보
+  // 카드 인스턴스는 flat.key 로 고정 유지된다. 이미지 URL 이 실시간으로 바뀌면(가이드/스보 교체)
+  // 이전 URL 의 404 로 굳은 imgError 를 풀어 새 이미지를 다시 시도한다(영구 플레이스홀더 방지).
+  useEffect(() => { setImgError(false); }, [imageUrl]);
   const info = currentStageInfo(s);
   const stageLabel = info.currentStageKey ? deptCfg.stageLabels[info.currentStageKey] : null;
   const memoText = s.memo ? stripEntityTokens(s.memo) : '';
