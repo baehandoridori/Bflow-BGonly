@@ -54,7 +54,7 @@ export const SceneRow = forwardRef<HTMLDivElement, SceneRowProps>(function Scene
       layout
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
-      exit={{ opacity: 0, transition: { duration: 0.15 } }}
+      exit={{ opacity: 0, transition: { duration: reduce ? 0 : 0.15 } }}
       transition={{ duration: reduce ? 0 : 0.25, delay: enterDelay }}
       className={cn(
         // 자성 호버 글로우는 box-shadow(CSS)로만 — layout/transform 충돌 회피.

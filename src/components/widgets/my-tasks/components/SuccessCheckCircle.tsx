@@ -21,18 +21,23 @@ interface SuccessCheckCircleProps {
 
 export function SuccessCheckCircle({ completed, onToggle, title, reduce }: SuccessCheckCircleProps) {
   const prevCompleted = useRef(completed);
-  const [burst, setBurst] = useState(false);
+  // burstKey 증가로 트리거(매번 remount→재생). 리셋은 burstKey 종속 별도 effect 가 담당
+  // → 550ms 내 completed 토글 재실행으로 burst 가 고착되지 않는다.
+  const [burstKey, setBurstKey] = useState(0);
 
   useEffect(() => {
     // 완료 방향(false→true)으로 바뀐 순간에만 burst. 되돌리기/reduce는 제외.
     if (!prevCompleted.current && completed && !reduce) {
-      setBurst(true);
-      const t = setTimeout(() => setBurst(false), 550);
-      prevCompleted.current = completed;
-      return () => clearTimeout(t);
+      setBurstKey((k) => k + 1);
     }
     prevCompleted.current = completed;
   }, [completed, reduce]);
+
+  useEffect(() => {
+    if (burstKey === 0) return;
+    const t = setTimeout(() => setBurstKey(0), 550);
+    return () => clearTimeout(t);
+  }, [burstKey]);
 
   return (
     <button
@@ -45,10 +50,11 @@ export function SuccessCheckCircle({ completed, onToggle, title, reduce }: Succe
         completed ? 'bg-green-500 border-green-500 text-white' : 'border-bg-border/50 hover:border-accent',
       )}
     >
-      {/* ring-burst (완료 순간 1회) */}
+      {/* ring-burst (완료 순간 1회, burstKey remount 로 재생) */}
       <AnimatePresence>
-        {burst && (
+        {burstKey > 0 && (
           <motion.span
+            key={burstKey}
             className="absolute inset-0 rounded-full border-2 border-green-500 pointer-events-none"
             initial={{ scale: 1, opacity: 0.55 }}
             animate={{ scale: 2.3, opacity: 0 }}

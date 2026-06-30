@@ -387,32 +387,38 @@ export function MyTasksWidget() {
 
   // ── PR 5 모션 ──
   const { reduce } = useMotionPref();
-  // 진입 stagger 는 위젯 최초 마운트 1회만 — 이후(토글/완료이동/리오더 재마운트)는 delay 0(재-stagger 방지).
+  // 진입 stagger 는 '리스트가 처음 렌더되는 시점' 1회만 — 이후(토글/완료이동/리오더 재마운트)는 delay 0(재-stagger 방지).
+  // ★mount 가 아니라 currentUser 도착 기준으로 무장: 팝업 콜드스타트(로그인 전 로딩뷰가 먼저 commit)서도
+  //   리스트 첫 렌더에 stagger 가 살아있게 한다. (currentUser 없으면 early-return 으로 리스트가 안 그려짐)
   const mountedRef = useRef(false);
-  useEffect(() => { mountedRef.current = true; }, []);
+  useEffect(() => { if (currentUser) mountedRef.current = true; }, [currentUser]);
   const staggerDelay = (index: number) => clampStaggerDelay(index, reduce || mountedRef.current);
 
-  // 모든 할일 완료 축하 콘페티 — '사용자 완료 토글'이 진행(씬+개인) 0 전이를 일으킨 경우만 1회.
+  // 모든 할일 완료 축하 콘페티 — '사용자 완료 토글'이 진행(씬+개인) 0 전이를 일으킨 경우만.
   // 값 변경 부수효과(필터/완료섹션 접기/realtime 삭제/되돌리기)로는 발사하지 않는다. reduce면 생략.
-  const [celebrate, setCelebrate] = useState(false);
+  // celebrateKey 증가로 트리거(매번 remount→재생). 리셋은 발사 effect cleanup 이 아니라 celebrateKey
+  // 종속 별도 effect 가 담당 → 1초 내 재렌더로 고착되거나 다음 축하가 유실되지 않는다.
+  const [celebrateKey, setCelebrateKey] = useState(0);
   const userCompleteRef = useRef(false);
   const prevPendingRef = useRef<number | null>(null);
   const pendingCount = pendingScenes.length + pendingPersonalTodos.length;
   useEffect(() => {
     const prev = prevPendingRef.current;
     prevPendingRef.current = pendingCount;
-    if (prev == null) return;          // 첫 렌더 스킵(초기 0이어도 발사 안 함)
-    if (reduce) return;
+    if (prev == null || reduce) return;          // 첫 렌더 스킵(초기 0이어도 발사 안 함) / reduce 생략
     if (userCompleteRef.current && prev > 0 && pendingCount === 0) {
-      setCelebrate(true);
-      const t = setTimeout(() => setCelebrate(false), 1000);
-      return () => clearTimeout(t);
+      setCelebrateKey((k) => k + 1);
     }
   }, [pendingCount, reduce]);
-  // 사용자 완료 의도를 ~200ms 창으로만 무장(낙관적 업데이트 반영 후 effect 가 본다). realtime/필터 등은 제외.
+  useEffect(() => {
+    if (celebrateKey === 0) return;
+    const t = setTimeout(() => setCelebrateKey(0), 1000);
+    return () => clearTimeout(t);
+  }, [celebrateKey]);
+  // 사용자 완료 의도를 짧게(~120ms)만 무장(낙관적 업데이트는 즉시 반영). realtime/필터가 겹칠 여지를 줄인다.
   const armCompletion = () => {
     userCompleteRef.current = true;
-    setTimeout(() => { userCompleteRef.current = false; }, 200);
+    setTimeout(() => { userCompleteRef.current = false; }, 120);
   };
   const toggleTodoCelebrate = (id: string) => { armCompletion(); togglePersonalTodo(id); };
   const toggleSceneCelebrate = (flat: FlatScene, stage: Stage) => { armCompletion(); handleSceneToggle(flat, stage); };
@@ -672,7 +678,7 @@ export function MyTasksWidget() {
     >
       <div className="relative flex flex-col h-full gap-0">
         {/* 모든 할일 완료 축하 콘페티 (사용자 완료 토글로 진행 0 전이 시 1회, reduce면 생략) */}
-        {!reduce && celebrate && <Confetti />}
+        {!reduce && celebrateKey > 0 && <Confetti key={celebrateKey} />}
         {/* 진행 히어로 (도넛) + 빠른 추가 */}
         <DonutHero
           stats={stats}
