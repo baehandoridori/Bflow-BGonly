@@ -1,14 +1,16 @@
 /**
  * SuccessCheckCircle — 개인 할일 좌측 원형 체크 (PR 5 모션).
  *
- * 완료(false→true) 시 체크가 spring 으로 그려지고 ring-burst(확장·페이드 링)가 1회 인다.
- * 되돌리기(true→false)는 체크가 즉시 사라지고 burst 없음.
- * reduce(동작 줄이기)면 체크 즉시 표시·burst 없음.
+ * 완료(completed=true)일 때 체크가 spring 으로 그려진다(완료 섹션을 펼치면 보임).
+ * reduce(동작 줄이기)면 체크 즉시 표시.
+ *
+ * ★ring-burst 는 두지 않는다: 개인 할일을 완료하면 항목이 진행 리스트에서 '완료 섹션'(기본 접힘)으로
+ *   즉시 이동하는데, 이는 React 상 다른 부모 컨테이너로의 unmount→remount 라 인스턴스 내 false→true
+ *   전이를 관측할 수 없어 burst 가 보일 틈이 없다. 전체 완료 축하는 위젯 레벨 Confetti(진행 0 전이)가 담당한다.
  *
  * 기존 원형 체크 버튼의 동작/접근성(aria-pressed·title·stopPropagation·키보드)을 그대로 보존한다.
  */
-import { useRef, useState, useEffect } from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
+import { motion } from 'framer-motion';
 import { Check } from 'lucide-react';
 import { cn } from '@/utils/cn';
 
@@ -20,25 +22,6 @@ interface SuccessCheckCircleProps {
 }
 
 export function SuccessCheckCircle({ completed, onToggle, title, reduce }: SuccessCheckCircleProps) {
-  const prevCompleted = useRef(completed);
-  // burstKey 증가로 트리거(매번 remount→재생). 리셋은 burstKey 종속 별도 effect 가 담당
-  // → 550ms 내 completed 토글 재실행으로 burst 가 고착되지 않는다.
-  const [burstKey, setBurstKey] = useState(0);
-
-  useEffect(() => {
-    // 완료 방향(false→true)으로 바뀐 순간에만 burst. 되돌리기/reduce는 제외.
-    if (!prevCompleted.current && completed && !reduce) {
-      setBurstKey((k) => k + 1);
-    }
-    prevCompleted.current = completed;
-  }, [completed, reduce]);
-
-  useEffect(() => {
-    if (burstKey === 0) return;
-    const t = setTimeout(() => setBurstKey(0), 550);
-    return () => clearTimeout(t);
-  }, [burstKey]);
-
   return (
     <button
       type="button"
@@ -50,21 +33,6 @@ export function SuccessCheckCircle({ completed, onToggle, title, reduce }: Succe
         completed ? 'bg-green-500 border-green-500 text-white' : 'border-bg-border/50 hover:border-accent',
       )}
     >
-      {/* ring-burst (완료 순간 1회, burstKey remount 로 재생) */}
-      <AnimatePresence>
-        {burstKey > 0 && (
-          <motion.span
-            key={burstKey}
-            className="absolute inset-0 rounded-full border-2 border-green-500 pointer-events-none"
-            initial={{ scale: 1, opacity: 0.55 }}
-            animate={{ scale: 2.3, opacity: 0 }}
-            exit={{ opacity: 0 }}
-            transition={{ duration: 0.5, ease: 'easeOut' }}
-            aria-hidden
-          />
-        )}
-      </AnimatePresence>
-
       {completed && (
         reduce ? (
           <Check size={11} strokeWidth={3} />
