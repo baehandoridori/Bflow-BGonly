@@ -1,16 +1,14 @@
-import { useState, useEffect, useContext, useRef, forwardRef } from 'react';
-import { CheckSquare, Plus, X, Search, Check, ListFilter, ExternalLink, ChevronDown, PartyPopper, GripVertical, Calendar } from 'lucide-react';
+import { useState, useEffect, useContext, useRef } from 'react';
+import { CheckSquare, Plus, X, Search, Check, ListFilter, ChevronDown, PartyPopper, Calendar, List, LayoutGrid } from 'lucide-react';
 import { motion, AnimatePresence, Reorder } from 'framer-motion';
 import { Widget, IsPopupContext, WidgetIdContext } from './Widget';
 import { EntityAwareInput } from '@/components/common/EntityAwareInput';
-import { EntityText } from '@/components/common/EntityText';
-import { navigateToHashTarget } from '@/utils/hashNavigation';
 import { navigateNotificationToScene } from '@/utils/notificationSceneAction';
 import { stripEntityTokens } from '@/utils/entityTokens';
 import { useAppStore } from '@/stores/useAppStore';
 import { useAuthStore } from '@/stores/useAuthStore';
-import { DEPARTMENT_CONFIGS, STAGES } from '@/types';
-import type { Stage, Episode } from '@/types';
+import { DEPARTMENT_CONFIGS } from '@/types';
+import type { Episode } from '@/types';
 import { cn } from '@/utils/cn';
 import { createUuid } from '@/utils/createUuid';
 import type { SceneKey, PersonalTodo, FlatScene } from './my-tasks/types';
@@ -21,6 +19,9 @@ import { TodoDetailModal } from './my-tasks/components/TodoDetailModal';
 import { SceneDetailModal } from './my-tasks/components/SceneDetailModal';
 import { DonutHero } from './my-tasks/components/DonutHero';
 import { QuickAdd } from './my-tasks/components/QuickAdd';
+import { SceneRow } from './my-tasks/components/SceneRow';
+import { TodoRow } from './my-tasks/components/TodoRow';
+import { SceneCard, TodoCard } from './my-tasks/components/SceneCard';
 
 /* ─── 할 일 추가 모달 (작업 + 개인) ──────────── */
 function AddTaskModal({
@@ -333,230 +334,8 @@ function AddTaskModal({
   );
 }
 
-/* ─── 씬 행 (확정 C) ──────────────────────────────
- * 인라인 메모 편집 제거 → 메모는 읽기 전용 표시. 본문 클릭 시 씬 상세 모달을 연다.
- * 단계 토글·제거·본체 이동 버튼은 독립(stopPropagation)으로 모달을 열지 않는다. */
-interface EditableSceneRowProps {
-  flat: FlatScene;
-  deptCfg: typeof DEPARTMENT_CONFIGS['bg'];
-  epLabel: string;
-  sceneNum: string;
-  pct: number;
-  isRemovable: boolean;
-  onToggle: (flat: FlatScene, stage: Stage) => void;
-  onRemove: (key: SceneKey) => void;
-  onOpenDetail: (flat: FlatScene) => void;
-  onNavigateToMain: (flat: FlatScene) => void;
-}
-
-const EditableSceneRow = forwardRef<HTMLDivElement, EditableSceneRowProps>(function EditableSceneRow({
-  flat,
-  deptCfg,
-  epLabel,
-  sceneNum,
-  pct,
-  isRemovable,
-  onToggle,
-  onRemove,
-  onOpenDetail,
-  onNavigateToMain,
-}, ref) {
-  const s = flat.scene;
-  const users = useAuthStore((s) => s.users);
-
-  return (
-    <motion.div
-      ref={ref}
-      key={flat.key}
-      layout
-      initial={{ opacity: 0 }}
-      animate={{ opacity: 1 }}
-      exit={{ opacity: 0 }}
-      className={cn(
-        'flex items-center gap-1.5 px-2 py-1.5 rounded-lg transition-colors group',
-        pct >= 100 ? 'bg-green-500/5 opacity-60' : 'hover:bg-bg-border/8',
-      )}
-    >
-      {/* 씬 정보 — 2줄 구조 (클릭 시 상세 모달)
-       * 메모 안 경로(PathBadge)·멘션·#태그 칩은 자체 <button>/clickable 이라
-       * 행 본문을 <button>으로 두면 button-in-button 무효 DOM이 된다 → div[role=button]로 처리.
-       * 칩들은 각자 stopPropagation 하지만, 안전하게 인터랙티브 자식 클릭은 행 핸들러에서 무시한다. */}
-      <div
-        role="button"
-        tabIndex={0}
-        onClick={(e) => {
-          if ((e.target as HTMLElement).closest('button, a')) return;
-          onOpenDetail(flat);
-        }}
-        onKeyDown={(e) => {
-          if ((e.target as HTMLElement).closest('button, a')) return;
-          if (e.key === 'Enter' || e.key === ' ') {
-            e.preventDefault();
-            onOpenDetail(flat);
-          }
-        }}
-        className="flex flex-col min-w-0 flex-1 gap-0.5 text-left cursor-pointer rounded px-0.5 -mx-0.5 hover:bg-bg-border/10 transition-colors"
-        title="클릭하여 상세 보기/편집"
-      >
-        {/* 1줄: 컨텍스트 (에피소드 > 파트) */}
-        <span className="text-[11px] text-text-secondary/40">{epLabel} &gt; {flat.partId}</span>
-        {/* 2줄: #번호 sceneId / 메모 (읽기 전용) */}
-        <div className="flex items-center gap-1">
-          <span className="text-[12px] font-mono text-accent shrink-0">#{sceneNum}</span>
-          <span className="text-[14px] font-semibold text-text-primary truncate">
-            {s.memo ? <EntityText text={s.memo} userNames={users.map((u) => u.name)} onHashClick={navigateToHashTarget} /> : s.sceneId}
-          </span>
-        </div>
-      </div>
-
-      {/* 미니 프로세스 트랙 */}
-      <div className="flex bg-bg-primary rounded-md p-0.5 border border-bg-border gap-0.5 shrink-0">
-        {STAGES.map((stage, i) => {
-          const checked = s[stage];
-          const color = deptCfg.stageColors[stage];
-          const isCurrent = checked && (i === STAGES.length - 1 || !s[STAGES[i + 1]]);
-          const label = deptCfg.stageLabels[stage][0];
-          return (
-            <button
-              key={stage}
-              onClick={(e) => { e.stopPropagation(); onToggle(flat, stage); }}
-              title={deptCfg.stageLabels[stage]}
-              className={cn(
-                'w-6 h-6 rounded text-[11px] font-medium flex items-center justify-center cursor-pointer transition-all',
-                !checked && 'text-text-secondary/40 hover:text-text-secondary/70',
-              )}
-              style={
-                isCurrent
-                  ? { backgroundColor: color, color: '#000', fontWeight: 700 }
-                  : checked
-                  ? { backgroundColor: `${color}25`, color }
-                  : undefined
-              }
-            >
-              {label}
-            </button>
-          );
-        })}
-      </div>
-
-      {/* 본체 이동 / 제거 버튼 */}
-      <div className="flex items-center gap-0.5 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">
-        <button
-          onClick={(e) => { e.stopPropagation(); onNavigateToMain(flat); }}
-          className="p-1 text-text-secondary/20 hover:text-accent cursor-pointer rounded transition-all"
-          title="본체 앱의 씬 상세로 이동"
-        >
-          <ExternalLink size={12} />
-        </button>
-        {isRemovable && (
-          <button
-            onClick={(e) => { e.stopPropagation(); onRemove(flat.key); }}
-            className="p-1 text-red-400/60 hover:text-red-400 hover:bg-red-400/10 rounded cursor-pointer transition-all"
-          >
-            <X size={14} />
-          </button>
-        )}
-      </div>
-    </motion.div>
-  );
-});
-
-/* ─── 개인 할일 행 콘텐츠 ──────────────────────── */
-/* 확정 B: 날짜·캘린더·제목 편집은 행에서 제거하고 TodoDetailModal 에서만 제공한다.
-   행은 읽기 전용 표시 + 본문 클릭 시 상세 모달을 연다(체크박스/삭제/드래그는 독립). */
-function PersonalTodoContent({
-  todo,
-  onToggle,
-  onRemove,
-  onOpenDetail,
-  showDragHandle,
-  isHighlighted,
-}: {
-  todo: PersonalTodo;
-  onToggle: (id: string) => void;
-  onRemove: (id: string) => void;
-  isHighlighted?: boolean;
-  onOpenDetail: (todo: PersonalTodo) => void;
-  showDragHandle?: boolean;
-}) {
-  const users = useAuthStore((s) => s.users);
-
-  return (
-    <div
-      ref={isHighlighted ? (el: HTMLDivElement | null) => { el?.scrollIntoView({ behavior: 'smooth', block: 'center' }); } : undefined}
-      className={cn(
-        'flex items-center gap-1.5 px-2 py-1.5 rounded-lg transition-colors group',
-        todo.completed ? 'bg-green-500/5 opacity-60' : 'hover:bg-bg-border/8',
-        isHighlighted && 'ring-1 ring-accent/60 bg-accent/10 animate-pulse',
-      )}
-    >
-      {/* 드래그 핸들 */}
-      {showDragHandle && (
-        <div className="text-text-secondary/15 hover:text-text-secondary/40 cursor-grab active:cursor-grabbing shrink-0">
-          <GripVertical size={12} />
-        </div>
-      )}
-
-      {/* 개인 라벨 */}
-      <span className="text-[11px] font-bold text-accent shrink-0">::ᅠ개인</span>
-
-      {/* 제목/메모 — 클릭 시 상세 모달 (확정 B: 날짜·캘린더 UI 미노출)
-       * 메모 안 경로(PathBadge)·멘션·#태그 칩은 자체 <button>/clickable 이라
-       * 행 본문을 <button>으로 두면 button-in-button 무효 DOM이 된다 → div[role=button]로 처리.
-       * 칩들은 각자 stopPropagation 하지만, 안전하게 인터랙티브 자식 클릭은 행 핸들러에서 무시한다. */}
-      <div
-        role="button"
-        tabIndex={0}
-        onClick={(e) => {
-          if ((e.target as HTMLElement).closest('button, a')) return;
-          onOpenDetail(todo);
-        }}
-        onKeyDown={(e) => {
-          if ((e.target as HTMLElement).closest('button, a')) return;
-          if (e.key === 'Enter' || e.key === ' ') {
-            e.preventDefault();
-            onOpenDetail(todo);
-          }
-        }}
-        className="flex flex-col min-w-0 flex-1 gap-0.5 text-left cursor-pointer rounded px-0.5 -mx-0.5 hover:bg-bg-border/10 transition-colors"
-        title="클릭하여 상세 보기/편집"
-      >
-        <span
-          className={cn(
-            'text-[13px] text-text-primary truncate',
-            todo.completed && 'line-through text-text-secondary/50',
-          )}
-        >
-          {todo.title}
-        </span>
-        {todo.memo && (
-          <span className="text-[11px] text-text-secondary/50 truncate"><EntityText text={todo.memo} userNames={users.map((u) => u.name)} onHashClick={navigateToHashTarget} /></span>
-        )}
-      </div>
-
-      {/* 체크박스 (오른쪽) */}
-      <button
-        onClick={(e) => { e.stopPropagation(); onToggle(todo.id); }}
-        className={cn(
-          'w-5 h-5 rounded-md border-2 flex items-center justify-center cursor-pointer transition-all shrink-0',
-          todo.completed
-            ? 'bg-green-500 border-green-500 text-white'
-            : 'border-bg-border/50 hover:border-accent',
-        )}
-      >
-        {todo.completed && <Check size={10} />}
-      </button>
-
-      {/* 삭제 */}
-      <button
-        onClick={(e) => { e.stopPropagation(); onRemove(todo.id); }}
-        className="p-1 text-red-400/60 hover:text-red-400 hover:bg-red-400/10 rounded cursor-pointer opacity-0 group-hover:opacity-100 transition-all shrink-0"
-      >
-        <X size={14} />
-      </button>
-    </div>
-  );
-}
+/** 카드 뷰 그리드 컬럼 — 280px 팝업(가용 ~248px)서 1열로 graceful. */
+const CARD_GRID_STYLE = { gridTemplateColumns: 'repeat(auto-fill, minmax(132px, 1fr))' } as const;
 
 /* ─── 메인 위젯 ─────────────────────────────── */
 export function MyTasksWidget() {
@@ -593,6 +372,15 @@ export function MyTasksWidget() {
   const [showDone, setShowDone] = useState(false);
   const [showQuickAdd, setShowQuickAdd] = useState(false);
   const [donutCollapsed, setDonutCollapsed] = useState(false);
+  // 리스트 ⇄ 카드 뷰. localStorage 1키 영속(체감 큼·저비용). 기본 list.
+  const [viewMode, setViewMode] = useState<'list' | 'card'>(() => {
+    try { return localStorage.getItem('bflow_mytasks_view_mode') === 'card' ? 'card' : 'list'; } catch { return 'list'; }
+  });
+  const toggleViewMode = () => setViewMode((v) => {
+    const next = v === 'list' ? 'card' : 'list';
+    try { localStorage.setItem('bflow_mytasks_view_mode', next); } catch { /* 시크릿모드 등 무시 */ }
+    return next;
+  });
 
   // 상세 모달: id 만 보관하고 실제 todo 는 스토어 목록에서 매 렌더 재추출 → 편집 후 stale 값 방지
   const [selectedTodoId, setSelectedTodoId] = useState<string | null>(null);
@@ -659,6 +447,8 @@ export function MyTasksWidget() {
   // 팝업에서 완료 섹션 접기/펼치기 시 창 크기 조절
   // 모달이 열려 있는 동안에는 아래 모달-리사이즈 effect가 창을 키우므로, 이 effect는 건너뛴다
   // (둘이 같은 창을 서로 다른 크기로 잡으려 다투지 않도록 분리).
+  // ★카드 모드(viewMode==='card')에서는 행 높이(36px) 추정이 깨지므로 자동 grow 하지 않고
+  //   내부 스크롤에 맡긴다(잘림 없음).
   const baseSizeRef = useRef<{ width: number; height: number } | null>(null);
   useEffect(() => {
     if (!isPopup || !widgetId || anyModalOpen) return;
@@ -669,15 +459,15 @@ export function MyTasksWidget() {
       }
       if (!baseSizeRef.current) return;
       const base = baseSizeRef.current;
-      if (showDone && doneScenes.length > 0) {
-        // 완료 항목 수에 따라 높이 증가 (최대 300px 추가)
+      if (showDone && doneScenes.length > 0 && viewMode === 'list') {
+        // 완료 항목 수에 따라 높이 증가 (최대 300px 추가) — 리스트 모드 행 높이(36px) 가정
         const extra = Math.min(doneScenes.length * 36 + 32, 300);
         window.electronAPI?.widgetResize?.(widgetId, base.width, base.height + extra);
       } else {
         window.electronAPI?.widgetResize?.(widgetId, base.width, base.height);
       }
     })();
-  }, [showDone, doneScenes.length, isPopup, widgetId, anyModalOpen]);
+  }, [showDone, doneScenes.length, isPopup, widgetId, anyModalOpen, viewMode]);
 
   // 팝업에서 모달이 열릴 때 창이 작으면 모달이 들어갈 만큼 키우고, 닫히면 직전 크기로 복원.
   // (대시보드는 모달이 document.body 포털로 떠 화면 전체를 쓰므로 손대지 않는다 — isPopup 일 때만.)
@@ -715,29 +505,71 @@ export function MyTasksWidget() {
     })();
   }, [anyModalOpen, isPopup, widgetId]);
 
-  // 행 렌더 헬퍼
-  const renderRow = (flat: FlatScene) => {
+  // 씬 렌더 — viewMode 에 따라 SceneRow(리스트) / SceneCard(카드).
+  const renderScene = (flat: FlatScene) => {
     const s = flat.scene;
     const pct = scenePct(s);
     const deptCfg = DEPARTMENT_CONFIGS[flat.department];
     const epLabel = episodeTitles[flat.episodeNumber] || `EP.${String(flat.episodeNumber).padStart(2, '0')}`;
     const sceneNum = s.sceneId.match(/\d+$/)?.[0]?.replace(/^0+/, '') || String(s.no);
     const isRemovable = assignedSceneKeySet.has(flat.key);
+    const props = {
+      flat, deptCfg, epLabel, sceneNum, pct, isRemovable,
+      onToggle: handleSceneToggle,
+      onRemove: removeScene,
+      onOpenDetail: openSceneDetail,
+      onNavigateToMain: navigateToMainScene,
+    };
+    return viewMode === 'card'
+      ? <SceneCard key={flat.key} {...props} />
+      : <SceneRow key={flat.key} {...props} />;
+  };
+
+  // 씬 섹션 컨테이너 — 리스트는 AnimatePresence(popLayout) 행, 카드는 그리드.
+  const renderSceneSection = (scenes: FlatScene[]) => {
+    if (scenes.length === 0) return null; // 빈 grid wrapper 노드 방지(모드 간 대칭)
+    return viewMode === 'card'
+      ? <div className="grid gap-2" style={CARD_GRID_STYLE}>{scenes.map(renderScene)}</div>
+      : <AnimatePresence mode="popLayout">{scenes.map(renderScene)}</AnimatePresence>;
+  };
+
+  // 개인 할일(진행 중) — 리스트는 Reorder(드래그), 카드는 그리드(드래그 없음).
+  const renderPendingTodos = () => {
+    if (pendingPersonalTodos.length === 0) return null;
+    if (viewMode === 'card') {
+      return (
+        <div className="grid gap-2 mt-2" style={CARD_GRID_STYLE}>
+          {pendingPersonalTodos.map((todo) => (
+            <TodoCard key={todo.id} todo={todo} onToggle={togglePersonalTodo} onRemove={removePersonalTodo} onOpenDetail={openTodoDetail} isHighlighted={highlightTodoId === todo.id} />
+          ))}
+        </div>
+      );
+    }
     return (
-      <EditableSceneRow
-        key={flat.key}
-        flat={flat}
-        deptCfg={deptCfg}
-        epLabel={epLabel}
-        sceneNum={sceneNum}
-        pct={pct}
-        isRemovable={isRemovable}
-        onToggle={handleSceneToggle}
-        onRemove={removeScene}
-        onOpenDetail={openSceneDetail}
-        onNavigateToMain={navigateToMainScene}
-      />
+      <Reorder.Group axis="y" values={pendingPersonalTodos} onReorder={reorderPendingTodos} className="list-none p-0 m-0">
+        {pendingPersonalTodos.map((todo) => (
+          <Reorder.Item key={todo.id} value={todo} className="list-none">
+            <TodoRow todo={todo} onToggle={togglePersonalTodo} onRemove={removePersonalTodo} onOpenDetail={openTodoDetail} showDragHandle isHighlighted={highlightTodoId === todo.id} />
+          </Reorder.Item>
+        ))}
+      </Reorder.Group>
     );
+  };
+
+  // 개인 할일(완료) — 드래그 없음(양 모드 공통).
+  const renderDoneTodos = () => {
+    if (donePersonalTodos.length === 0) return null; // 빈 grid wrapper 노드 방지(모드 간 대칭)
+    return viewMode === 'card'
+      ? <div className="grid gap-2" style={CARD_GRID_STYLE}>
+          {donePersonalTodos.map((todo) => (
+            <TodoCard key={todo.id} todo={todo} onToggle={togglePersonalTodo} onRemove={removePersonalTodo} onOpenDetail={openTodoDetail} isHighlighted={highlightTodoId === todo.id} />
+          ))}
+        </div>
+      : <>
+          {donePersonalTodos.map((todo) => (
+            <TodoRow key={todo.id} todo={todo} onToggle={togglePersonalTodo} onRemove={removePersonalTodo} onOpenDetail={openTodoDetail} isHighlighted={highlightTodoId === todo.id} />
+          ))}
+        </>;
   };
 
   // 플로팅 위젯 창에서 메인 앱 로그인 전 → currentUser가 null인 상태로 렌더될 수 있음
@@ -758,6 +590,12 @@ export function MyTasksWidget() {
     );
   }
 
+  const allEmpty =
+    pendingScenes.length === 0 && pendingPersonalTodos.length === 0 &&
+    doneScenes.length === 0 && donePersonalTodos.length === 0;
+  const pendingEmpty = pendingScenes.length === 0 && pendingPersonalTodos.length === 0;
+  const hasDone = doneScenes.length > 0 || donePersonalTodos.length > 0;
+
   return (
     <Widget
       title="내 할일"
@@ -774,6 +612,13 @@ export function MyTasksWidget() {
             title="할일 추가"
           >
             <Plus size={12} />
+          </button>
+          <button
+            onClick={toggleViewMode}
+            className="p-0.5 text-text-secondary/40 hover:text-text-secondary cursor-pointer transition-colors"
+            title={viewMode === 'card' ? '리스트로 보기' : '카드로 보기'}
+          >
+            {viewMode === 'card' ? <List size={12} /> : <LayoutGrid size={12} />}
           </button>
           <button
             onClick={() => setFilterDone(!filterDone)}
@@ -813,35 +658,29 @@ export function MyTasksWidget() {
 
         {/* 메인 리스트 */}
         <div className="flex-1 overflow-auto -mx-1 px-1">
-          {/* 진행 중 항목 */}
-          {pendingScenes.length === 0 && pendingPersonalTodos.length === 0 && doneScenes.length === 0 && donePersonalTodos.length === 0 ? (
-            <div className="flex flex-col items-center justify-center h-full text-text-secondary/40 gap-1">
-              <CheckSquare size={24} className="opacity-30" />
-              <span className="text-[11px]">할당된 씬이 없습니다</span>
+          {allEmpty ? (
+            /* 강화 빈 상태 — 리스트 영역 전용(도넛은 자체 빈 표시 유지) */
+            <div className="flex flex-col items-center justify-center h-full text-center gap-1.5 px-4">
+              <CheckSquare size={26} className="opacity-30 text-text-secondary/40" />
+              <span className="text-[12px] font-medium text-text-secondary/55">아직 할 일이 없어요</span>
+              <span className="text-[11px] text-text-secondary/40">상단 <span className="text-accent font-semibold">＋</span> 버튼으로 씬이나 메모를 추가하세요</span>
             </div>
           ) : (
             <>
-              {pendingScenes.length === 0 && pendingPersonalTodos.length === 0 && (doneScenes.length > 0 || donePersonalTodos.length > 0) && (
+              {/* 진행 중 0 + 완료>0 → 완료 축하 */}
+              {pendingEmpty && hasDone && (
                 <div className="flex flex-col items-center justify-center py-4 text-text-secondary/40 gap-1">
                   <PartyPopper size={20} className="opacity-40 text-green-400" />
                   <span className="text-[11px] text-green-400/60">모든 할일 완료!</span>
                 </div>
               )}
-              <AnimatePresence mode="popLayout">
-                {pendingScenes.map(renderRow)}
-              </AnimatePresence>
-              {pendingPersonalTodos.length > 0 && (
-                <Reorder.Group axis="y" values={pendingPersonalTodos} onReorder={reorderPendingTodos} className="list-none p-0 m-0">
-                  {pendingPersonalTodos.map((todo) => (
-                    <Reorder.Item key={todo.id} value={todo} className="list-none">
-                      <PersonalTodoContent todo={todo} onToggle={togglePersonalTodo} onRemove={removePersonalTodo} onOpenDetail={openTodoDetail} showDragHandle isHighlighted={highlightTodoId === todo.id} />
-                    </Reorder.Item>
-                  ))}
-                </Reorder.Group>
-              )}
+
+              {/* 진행 중 — 씬 섹션, 개인 섹션(분리) */}
+              {renderSceneSection(pendingScenes)}
+              {renderPendingTodos()}
 
               {/* ─── 완료된 항목 섹션 ─── */}
-              {(doneScenes.length > 0 || donePersonalTodos.length > 0) && !filterDone && (
+              {hasDone && !filterDone && (
                 <div className="mt-2">
                   {/* 접기/펼치기 토글 */}
                   <button
@@ -872,12 +711,8 @@ export function MyTasksWidget() {
                         className="overflow-hidden"
                       >
                         <div className="flex flex-col gap-0.5 pt-1">
-                          <AnimatePresence mode="popLayout">
-                            {doneScenes.map(renderRow)}
-                          </AnimatePresence>
-                          {donePersonalTodos.map((todo) => (
-                            <PersonalTodoContent key={todo.id} todo={todo} onToggle={togglePersonalTodo} onRemove={removePersonalTodo} onOpenDetail={openTodoDetail} isHighlighted={highlightTodoId === todo.id} />
-                          ))}
+                          {renderSceneSection(doneScenes)}
+                          {renderDoneTodos()}
                         </div>
                       </motion.div>
                     )}
