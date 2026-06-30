@@ -234,10 +234,71 @@
 - [ ] 기존 기능 회귀 없음(개인할일/씬 CRUD·토글·캘린더·크로스창)
 - [ ] (한솔 승인 시) PR 머지 → 빌드
 
-### PR 4 — 행/카드 + 상세 모달 내용
-- `SceneRow.tsx`(4단계 칩 순차 토글, 동그라미 없음, 현재단계 n/4, 이동 버튼), `TodoRow.tsx`(Success Check 동그라미), `SceneCard.tsx`(썸네일 가이드>스보>없음)
-- 리스트⇄카드 토글. 빈 상태/완료 섹션 새 디자인
-- 상세 모달 내용 완성(씬 4단계 가로+이미지+메모, 개인할일 연계자/메모/날짜·캘린더)
+## Chunk 4: PR 4 — 행/카드 재설계 + 리스트⇄카드 토글 (착수 상세화 2026-06-30)
+
+**목표:** 리스트 아이템(씬/개인할일)을 시안15 톤으로 재설계하고, 카드 뷰 + 리스트⇄카드 토글을 추가한다. 행/카드 컴포넌트를 `my-tasks/components/`로 분리해 진입점을 더 가볍게. **모션(Success Check 링버스트·stagger·크로스페이드 등)은 PR 5** — PR 4는 정적 디자인 + 기본 transition만.
+
+**현재 상태(PR 3 직후):** `MyTasksWidget.tsx` 안에 `EditableSceneRow`(2줄: EP>파트 컨텍스트 + #번호/메모, 우측 4단계 트랙, hover 이동/제거, 클릭→SceneDetailModal)와 `PersonalTodoContent`(드래그핸들·::개인 라벨·제목/메모·**우측 체크박스**·삭제, 클릭→TodoDetailModal)가 인라인 정의. `renderRow`가 EditableSceneRow 사용. 리스트 구조: pendingScenes(renderRow) → pendingPersonalTodos(Reorder.Group) → 완료 섹션(collapsible). 상세모달(SceneDetailModal/TodoDetailModal)은 PR 2/3에서 기능 완성. 카드 패턴 레퍼런스: `src/views/compositing-dashboard/cards/SceneCard.tsx`(ImageSlot = `url ? <img object-cover loading=lazy> : 없음`, 이미지 URL 직접 src — `drive-img://` 포함 Electron 프로토콜이 처리). 씬 이미지 필드: `scene.guideUrl`/`scene.storyboardUrl`. 단계 색 `DEPARTMENT_CONFIGS[dept].stageColors`, 라벨 `stageLabels`.
+
+**확정 디자인 결정 (시안15 스펙·메모 기반, 한솔 dev 시각확인으로 검증):**
+1. **SceneRow** (`components/SceneRow.tsx`, EditableSceneRow에서 추출·재설계): 왼쪽 동그라미 **없음**(씬은 단계 칩이 진행 표시). 2줄(①EP>파트·#번호 컨텍스트 ②메모 or sceneId). 4단계 칩(LO/완료/검수/PNG) 순차 토글(`handleSceneToggle`). **현재 단계 미니라벨 "n/4"**(예: 검수까지 = 3/4) — `currentStageInfo` 순수함수로 계산. 본문 클릭→SceneDetailModal, hover→본체 이동(ExternalLink)+제거(X, isRemovable). 완료 씬(pct 100)은 살짝 흐림.
+2. **TodoRow** (`components/TodoRow.tsx`, PersonalTodoContent에서 추출·재설계): **왼쪽 동그라미 체크**(정적 — ring→check 애니메이션은 PR 5)로 이동(현재 우측 체크박스 → 좌측 원형). 드래그핸들·::개인 라벨·제목/메모(읽기)·hover 제거. 본문 클릭→TodoDetailModal.
+3. **SceneCard** (`components/SceneCard.tsx`, 신규): 카드 뷰용. 썸네일(**가이드>스보>없음**, `<img object-cover loading=lazy>`, 없으면 `ImageIcon` 플레이스홀더), 상단 EP>파트·#번호, 하단 4단계 칩(토글) + 현재단계 n/4. 클릭(본문/이미지)→상세모달, 칩=토글(stopPropagation), hover 이동/제거. 폭 유동(그리드 셀).
+4. **TodoCard** (카드 뷰용 개인할일, SceneCard.tsx 또는 TodoRow.tsx 내 변형): 이미지 없는 컴팩트 카드 — ::개인 라벨, 제목/메모, 모서리 동그라미 체크, 클릭→TodoDetailModal. SceneCard와 동일 그리드 셀 톤.
+5. **리스트⇄카드 토글**: 헤더 `headerRight`에 토글 버튼(`List`/`LayoutGrid` lucide, QuickAdd +·필터 버튼 옆). `viewMode: 'list'|'card'` 위젯 로컬 useState. **카드 모드**: pendingScenes→SceneCard, pendingPersonalTodos→TodoCard 를 반응형 그리드(`grid` + `repeat(auto-fill, minmax(~130px, 1fr))` 또는 grid-cols 반응). 완료 섹션도 동일 모드. **드래그 순서변경(Reorder)은 list 모드에서만** — 카드 그리드 DnD는 범위 밖(카드 모드에선 일반 그리드).
+6. **빈 상태 강화**: 아이콘 + "아직 할 일이 없어요" + 보조 안내("＋ 버튼으로 씬이나 메모를 추가하세요"). QuickAdd 유도.
+7. **완료 섹션**: 기존 collapsible 유지 + 톤 정리(카운트 칩·구분선). list/card 모드 모두 동작.
+8. **상세 모달 시각 폴리싱**: SceneDetailModal 4단계 가로 트랙·이미지·메모 여백 정리(기능은 이미 완성, 큰 변경 없음). TodoDetailModal 동일.
+9. **범위 밖(PR 5로 이월)**: Success Check 링버스트·콘페티, stagger 진입, 도넛 카운트업, 뷰 크로스페이드, 자성 호버, `prefers-reduced-motion` 가드. PR 4는 `transition` 기본(색/opacity/hover)만.
+
+**★4-렌즈 검토 반영 (2026-06-30) — 구현 시 바인딩:**
+- **A. SceneRow**: `forwardRef` 불필요(renderRow가 ref 미전달=죽은 계약) → 일반 함수 컴포넌트. 단 내부 루트 `motion.div`의 `layout` + `key={flat.key}` + `initial/animate/exit`(opacity) 그대로 보존 — 바깥 `AnimatePresence mode="popLayout"`와 함께 완료 이동/제거 애니메이션이 깨지지 않게(회귀 방지, PR5 모션 아님).
+- **B. TodoRow = 콘텐츠만 추출**. `Reorder.Group`/`Reorder.Item`(key={todo.id}·value={todo}·onReorder)은 MyTasksWidget에 그대로 유지. TodoRow를 Reorder.Item으로 만들지 말 것.
+- **C. isHighlighted 승계 필수**: TodoRow·TodoCard가 `isHighlighted` prop 받아 `scrollIntoView({block:'center'})` + ring 강조 수행. MyTasksWidget이 list/card 양쪽에서 `highlightTodoId===todo.id` 주입. (캘린더→할일 점프 회귀 방지 — 게이트 항목)
+- **D. currentStageInfo 정의 확정**: `{ doneCount: number, total: 4, currentStageKey: Stage|null }`. **"n/4"의 n = doneCount = 체크된 단계 수**(statsUtils의 checkedStageCount와 동일 산식 — 비연속/구멍 데이터에도 안전, 비개발자에겐 '4칸 중 켜진 칸'). `currentStageKey` = 마지막 연속 체크 단계(기존 isCurrent 규칙 `checked && (i===last || !s[next])`) — 강조 칩용. 테스트: 전무/전부/연속(lo+done)/비연속(lo+png)/역순.
+- **E. 칩 클릭 어포던스(정적)**: hover 시 칩 배경/커서 변화, 미체크 칩은 옅은/점선 테두리 '빈 슬롯', `title`=부서별 전체 라벨(기존 유지). 현재단계 n/4 미니라벨.
+- **F. 카드 그리드**: `grid` + `repeat(auto-fill, minmax(132px, 1fr))`, 280px 팝업(가용 ~248px)서 1열 graceful. **씬 그리드 / 개인 그리드 섹션 분리**(이미지 카드 ↔ 텍스트 카드 혼합 금지). 썸네일 `<img onError>`→ImageIcon 폴백. 카드 모드는 `Reorder` 미사용·드래그 핸들 비노출.
+- **G. 팝업 리사이즈**: 완료섹션 높이 추정 effect(`doneScenes.length*36+32`, MyTasksWidget.tsx 팝업 전용)의 deps에 `viewMode` 추가. card 모드에선 자동 grow 비활성(내부 스크롤로 잘림 방지). 모달 resize effect와 다툼 없게.
+- **H. viewMode**: 위젯 로컬 state + `localStorage` 1키 영속(`bflow_mytasks_view_mode`, 저비용·체감 큼). 기본 `'list'`. 토글은 QuickAdd 열림과 독립.
+- **I. 빈 상태**: 리스트 영역 전용(DonutHero는 PR3 자체 빈 표시 유지). 기존 4-조건 재사용. 완전 빈 vs '진행0·완료>0(완료 축하)' 분기.
+- **J. 테스트**: `tests/myTasksStageInfo.test.ts`를 `package.json` `test:entity` 체인 끝에 추가(build:vite가 돌게).
+- **K. 칩 라벨/색은 `deptCfg.stageLabels`/`stageColors`(부서별; ACT=대기/작업중/피드백/완료). 'LO/완료/검수/PNG'는 BG 예시.** 담당자 이름은 이미 행에 미표시(유지). (스펙 §3 'imageUrl' 표기는 guideUrl/storyboardUrl 오기 — 정정)
+
+### Task 4.1: 행 컴포넌트 추출·재설계 (list 모드) + 현재단계 순수함수
+**Files:** Create `components/SceneRow.tsx`·`components/TodoRow.tsx`·`stageInfo.ts`, Create `tests/myTasksStageInfo.test.ts`, Modify `MyTasksWidget.tsx`(EditableSceneRow/PersonalTodoContent 제거→import, renderRow 교체)
+- [ ] **Step 1:** 순수함수 `currentStageInfo(scene)` → `{ doneCount: number, total: 4, currentLabelKey: Stage|null }` (체크된 단계 수 + 현재(마지막 연속 체크) 단계). `stageInfo.ts`, 타입만 import, node:test.
+- [ ] **Step 2:** `SceneRow.tsx` = EditableSceneRow 이식 + 현재단계 "n/4" 미니라벨 추가 + 톤 정리. `TodoRow.tsx` = PersonalTodoContent 이식 + 체크박스를 **좌측 원형**으로 이동.
+- [ ] **Step 3:** `MyTasksWidget.tsx`에서 인라인 정의 제거, 새 파일 import. renderRow가 SceneRow 사용, Reorder.Item이 TodoRow 사용.
+- [ ] **Step 4:** `npm run typecheck` + 새 테스트 + `npm run build:vite` 통과.
+- [ ] **Step 5:** Commit `refactor(my-tasks): SceneRow/TodoRow 분리·재설계 + 현재단계 n/4`
+
+### Task 4.2: 카드 뷰 + 리스트⇄카드 토글
+**Files:** Create `components/SceneCard.tsx`(+ TodoCard), Modify `MyTasksWidget.tsx`
+- [ ] **Step 1:** `SceneCard.tsx` 작성(썸네일 가이드>스보, 4단계 칩 토글, 현재단계 n/4, 클릭→모달, hover 이동/제거) + `TodoCard`(이미지 없는 컴팩트).
+- [ ] **Step 2:** `MyTasksWidget.tsx`에 `viewMode` 상태 + 헤더 토글 버튼. 리스트 렌더를 `viewMode==='card'`이면 그리드(SceneCard/TodoCard), 아니면 기존 행. 완료 섹션도 분기. Reorder는 list 모드만.
+- [ ] **Step 3:** `npm run typecheck` + `npm run build:vite` 통과.
+- [ ] **Step 4:** Commit `feat(my-tasks): 리스트⇄카드 뷰 토글 + SceneCard/TodoCard`
+
+### Task 4.3: 빈 상태/완료 섹션 + 상세모달 폴리싱
+- [ ] **Step 1:** 강화 빈 상태(아이콘+안내+QuickAdd 유도). 완료 섹션 톤 정리(list/card 공통).
+- [ ] **Step 2:** SceneDetailModal/TodoDetailModal 여백·4단계 트랙 시각 폴리싱(기능 불변).
+- [ ] **Step 3:** `npm run typecheck` + `npm run build:vite` 통과.
+- [ ] **Step 4:** Commit `feat(my-tasks): 강화 빈 상태 + 완료 섹션/상세모달 시각 정리`
+
+### Task 4.4: PR 4 검증 게이트 + 버전 + 업데이트 노트 + PR
+- [ ] **Step 1:** 전체 `npm run typecheck` + `npm run build:vite`(my-tasks 단위테스트 포함) 통과.
+- [ ] **Step 2:** 회귀 확인(한솔 dev): 행/카드 토글, 씬 단계 토글·이동·제거, 개인할일 완료·드래그·삭제, 상세모달, 빈/완료 섹션, 작은 팝업서 카드 그리드.
+- [ ] **Step 3:** 버전 bump(현재 1.56.1 → **1.57.0**, 기능 추가) + `DEVLOG/update-notes.json`(비개발자 톤: "내 할일을 카드로도 볼 수 있고, 행/카드가 더 깔끔해졌어요").
+- [ ] **Step 4:** Commit → push → PR(pr-creator) → codex-review-loop clean → 최종 심층 리뷰 → 빌드 → 머지 → 배포.
+
+### PR 4 검증 게이트
+- [ ] `npm run typecheck` 통과
+- [ ] `npm run build:vite` 통과(단위테스트 포함)
+- [ ] SceneRow/TodoRow 재설계(씬=칩·동그라미X, 개인=좌측 원형 체크), 현재단계 n/4
+- [ ] 리스트⇄카드 토글, SceneCard 썸네일(가이드>스보>없음), 카드서 칩 토글/이동/제거
+- [ ] 강화 빈 상태, 완료 섹션 list/card 동작, 드래그는 list 모드만
+- [ ] 기존 기능 회귀 없음(CRUD·토글·캘린더·크로스창·상세모달)
+- [ ] (한솔 승인 시) 머지 → 빌드 → 배포
 
 ### PR 5 — 모션 + reduced-motion
 - stagger 진입(`--si`), Success Check 링버스트+confetti, 도넛 카운트업(rAF), strip 슬라이드, 뷰 크로스페이드, 자성 호버
