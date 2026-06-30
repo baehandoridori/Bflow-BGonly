@@ -15,6 +15,8 @@ const characterStore = readFileSync('src/stores/useCharacterBoardStore.ts', 'utf
 const episodeAssetBoard = readFileSync('src/views/EpisodeAssetBoard.tsx', 'utf8');
 const scenesView = readFileSync('src/views/ScenesView.tsx', 'utf8');
 const characterImageLightbox = readFileSync('src/components/characters/CharacterImageLightbox.tsx', 'utf8');
+const fitEditorSource = readFileSync('src/components/characters/CharacterImageFitEditor.tsx', 'utf8');
+const devMock = readFileSync('src/mocks/devElectronAPI.ts', 'utf8');
 const migration = readFileSync('DEVLOG/migrations/2026-06-29-character-board-asset-workflow.sql', 'utf8');
 
 test('character asset helpers derive parent folder and preserve existing character folder', () => {
@@ -118,7 +120,6 @@ test('character board is wired for image display, assignees, work links, and lig
   assert.ok(characterBoard.includes('if (!saved) return;'));
   assert.ok(characterBoard.includes('useCharacterBoardStore.getState().characters.find'));
   assert.match(readFileSync('src/components/characters/CharacterImageFrame.tsx', 'utf8'), /translate\(\$\{normalized\.x\}%, \$\{normalized\.y\}%\)/);
-  const fitEditorSource = readFileSync('src/components/characters/CharacterImageFitEditor.tsx', 'utf8');
   assert.match(fitEditorSource, /stopImmediatePropagation/);
   assert.match(fitEditorSource, /data-fit-handle/);
   assert.match(fitEditorSource, /cropFrameRef/);
@@ -129,6 +130,16 @@ test('character board is wired for image display, assignees, work links, and lig
   assert.match(characterStore, /Promise<boolean>/);
   assert.match(characterStore, /return true;/);
   assert.match(characterStore, /return false;/);
+  assert.match(characterBoard, /\/\* 단계 레일 \+ 담당자 \*\//);
+  assert.doesNotMatch(characterBoard, /\/\* 버전 \+ 담당자 \*\//);
+  assert.ok(
+    characterBoard.indexOf('label="디자인 단계"') < characterBoard.indexOf('label="디자인 담당자"'),
+    'design assignee should live with the design stage lane, not the version controls',
+  );
+  assert.ok(
+    characterBoard.indexOf('label="리깅 단계"') < characterBoard.indexOf('label="리깅 담당자"'),
+    'rigging assignee should live with the rigging stage lane, not the version controls',
+  );
 });
 
 test('episode reel controls are available in episode assets, character board, and scenes view', () => {
@@ -139,4 +150,37 @@ test('episode reel controls are available in episode assets, character board, an
   assert.match(characterBoard, /useDataStore\.getState\(\)\.episodes/);
   assert.match(episodeAssetBoard, /useDataStore\.getState\(\)\.episodes/);
   assert.match(scenesView, /useDataStore\.getState\(\)\.episodes/);
+});
+
+test('character costume tags support palette toggles, custom input, store updates, and Supabase persistence', () => {
+  assert.match(characterBoard, /const extra = tags\.filter\(\(t\) => !palette\.includes\(t\)\)/);
+  assert.match(characterBoard, /return \[\.\.\.palette, \.\.\.extra\];/);
+  assert.match(characterBoard, /if \(tags\.includes\(tag\)\) onChange\(tags\.filter\(\(t\) => t !== tag\)\);/);
+  assert.match(characterBoard, /else onChange\(\[\.\.\.tags, tag\]\);/);
+  assert.match(characterBoard, /const t = input\.trim\(\);/);
+  assert.match(characterBoard, /if \(!t \|\| tags\.includes\(t\)\) \{ setInput\(''\); return; \}/);
+  assert.match(characterBoard, /onKeyDown=\{\(e\) => \{ if \(e\.key === 'Enter'\)/);
+  assert.match(characterBoard, /onBlur=\{addCustom\}/);
+  assert.match(characterStore, /setCostumeTags:\s*async\s*\(id,\s*kind,\s*tags\)\s*=>/);
+  assert.match(characterStore, /kind === 'structure' \? \{ structureTags: tags \} : \{ assetTags: tags \}/);
+  assert.match(rendererSupabase, /snake\.structure_tags = updates\.structureTags/);
+  assert.match(rendererSupabase, /snake\.asset_tags = updates\.assetTags/);
+  assert.match(electronSupabase, /structure_tags: string\[\];/);
+  assert.match(electronSupabase, /asset_tags: string\[\];/);
+  assert.match(electronSupabase, /\.from\('character_costumes'\)[\s\S]*?\.update\(\{ \.\.\.updates, updated_at:/);
+});
+
+test('character image fit editor keeps a fixed crop frame and moves/scales the image inside it', () => {
+  assert.match(devMock, /MOCK_CHARACTER_IMAGE_URL = '\/splash\/opening_image_cropped\.png'/);
+  assert.match(fitEditorSource, /function nextFitFromDrag/);
+  assert.match(fitEditorSource, /handle === 'move'/);
+  assert.match(fitEditorSource, /beginInteraction\('move', event\)/);
+  assert.match(fitEditorSource, /filter: 'blur\(5px\) brightness\(0\.62\)'/);
+  assert.match(fitEditorSource, /backdrop-blur-\[3px\]/);
+  assert.match(fitEditorSource, /ref=\{cropFrameRef\}/);
+  assert.match(fitEditorSource, /data-fit-handle/);
+  assert.match(fitEditorSource, /setDraft\(nextFitFromDrag/);
+  assert.doesNotMatch(fitEditorSource, /function resizeImageBox/);
+  assert.doesNotMatch(fitEditorSource, /function imageBoxToFit/);
+  assert.doesNotMatch(fitEditorSource, /startBox/);
 });

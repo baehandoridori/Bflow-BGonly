@@ -10,7 +10,7 @@
  * 접근 권한은 사이드바에서 게이팅 (useCharacterBoardAccess).
  */
 
-import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent, type ReactNode } from 'react';
 import { toast } from 'sonner';
 import { Plus, X, Image as ImageIcon, Trash2, Pencil, Search, User, Check, Upload, MessageSquare, FolderOpen, FileText, Copy } from 'lucide-react';
 import { useCharacterBoardStore } from '@/stores/useCharacterBoardStore';
@@ -109,10 +109,12 @@ function AssigneeNamePicker({
   label,
   value,
   onChange,
+  variant = 'stack',
 }: {
   label: string;
   value: string | null;
   onChange: (value: string | null) => void;
+  variant?: 'stack' | 'inline';
 }) {
   const users = useAuthStore((s) => s.users);
   const [draftName, setDraftName] = useState('');
@@ -147,6 +149,100 @@ function AssigneeNamePicker({
     setDraftName('');
     setModalOpen(false);
   };
+
+  const modal = modalOpen && (
+    <div className="fixed inset-0 z-[85] flex items-center justify-center bg-black/55 p-4" onMouseDown={closeModal}>
+      <div className="w-full max-w-sm rounded-2xl bg-bg-card p-4 shadow-2xl ring-1 ring-white/10" onMouseDown={(event) => event.stopPropagation()}>
+        <div className="mb-3 flex items-start justify-between gap-3">
+          <div>
+            <div className="text-sm font-semibold text-text-primary">{label} 추가</div>
+            <div className="text-xs text-text-secondary">쉼표로 여러 이름을 한 번에 추가할 수 있어요</div>
+          </div>
+          <button type="button" aria-label="닫기" onClick={closeModal} className="rounded-lg p-2 text-text-secondary hover:bg-bg-border/30 hover:text-text-primary">
+            <X size={17} />
+          </button>
+        </div>
+        {selected.length > 0 && (
+          <div className="mb-3 flex flex-wrap gap-1.5">
+            {selected.map((name) => {
+              const color = getUserColor(name);
+              const isListedUser = userNameSet.has(name);
+              return (
+                <button
+                  key={name}
+                  type="button"
+                  title={isListedUser ? `${name} 제거` : `${name} 제거 (사용자 목록에 없는 이름)`}
+                  onClick={() => remove(name)}
+                  className="group flex min-h-8 items-center gap-1.5 rounded-full px-2.5 py-1 text-xs transition-[background-color,box-shadow] hover:bg-bg-border/25"
+                  style={{ color, boxShadow: `inset 0 0 0 1px ${color}${isListedUser ? '66' : '99'}` }}
+                >
+                  <span className="h-1.5 w-1.5 rounded-full" style={{ background: color }} />
+                  {name}
+                  <X size={12} className="text-text-secondary opacity-60 transition-opacity group-hover:opacity-100" />
+                </button>
+              );
+            })}
+          </div>
+        )}
+        <input
+          ref={inputRef}
+          type="text"
+          value={draftName}
+          onChange={(event) => setDraftName(event.target.value)}
+          onKeyDown={(event) => {
+            if (event.key === 'Enter') {
+              event.preventDefault();
+              addDraftName();
+            }
+            if (event.key === 'Escape') {
+              event.preventDefault();
+              closeModal();
+            }
+          }}
+          placeholder="이름 입력"
+          className="w-full rounded-xl border border-bg-border bg-bg-border/10 px-3 py-2 text-sm text-text-primary placeholder:text-text-secondary/50 outline-none focus:border-accent/70"
+        />
+        <div className="mt-4 flex justify-end gap-2">
+          <button type="button" onClick={closeModal} className="rounded-lg px-3 py-2 text-sm text-text-secondary hover:bg-bg-border/25 hover:text-text-primary">
+            취소
+          </button>
+          <button type="button" disabled={!draftName.trim()} onClick={addDraftName} className="rounded-lg bg-accent px-3 py-2 text-sm font-medium text-white hover:opacity-90 disabled:opacity-40">
+            추가
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+
+  if (variant === 'inline') {
+    const firstName = selected[0] ?? null;
+    const color = firstName ? getUserColor(firstName) : 'rgb(var(--color-text-secondary))';
+    const display = firstName
+      ? selected.length > 1
+        ? `${firstName} 외 ${selected.length - 1}`
+        : firstName
+      : '담당자 추가';
+    return (
+      <div className="flex items-center">
+        <button
+          type="button"
+          onClick={() => setModalOpen(true)}
+          title={label}
+          className={cn(
+            'flex min-h-8 max-w-[160px] items-center gap-1.5 rounded-full px-2.5 text-[11px] transition-[background-color,box-shadow,transform] active:scale-[0.96]',
+            selected.length > 0
+              ? 'bg-bg-border/20 text-text-primary shadow-[0_0_0_1px_rgba(255,255,255,0.08)] hover:bg-bg-border/35'
+              : 'bg-transparent text-text-secondary shadow-[0_0_0_1px_rgba(255,255,255,0.08)] hover:bg-bg-border/20 hover:text-text-primary',
+          )}
+          aria-label={`${label} 편집`}
+        >
+          <User size={12} className="shrink-0" style={{ color }} />
+          <span className="truncate">{display}</span>
+        </button>
+        {modal}
+      </div>
+    );
+  }
 
   return (
     <div className="flex min-w-[220px] flex-col gap-2">
@@ -192,47 +288,7 @@ function AssigneeNamePicker({
           <Plus size={13} /> 추가
         </button>
       </div>
-      {modalOpen && (
-        <div className="fixed inset-0 z-[85] flex items-center justify-center bg-black/55 p-4" onMouseDown={closeModal}>
-          <div className="w-full max-w-sm rounded-2xl bg-bg-card p-4 shadow-2xl ring-1 ring-white/10" onMouseDown={(event) => event.stopPropagation()}>
-            <div className="mb-3 flex items-center justify-between gap-3">
-              <div>
-                <div className="text-sm font-semibold text-text-primary">{label} 추가</div>
-                <div className="text-xs text-text-secondary">쉼표로 여러 이름을 한 번에 추가할 수 있어요</div>
-              </div>
-              <button type="button" aria-label="닫기" onClick={closeModal} className="rounded-lg p-2 text-text-secondary hover:bg-bg-border/30 hover:text-text-primary">
-                <X size={17} />
-              </button>
-            </div>
-            <input
-              ref={inputRef}
-              type="text"
-              value={draftName}
-              onChange={(event) => setDraftName(event.target.value)}
-              onKeyDown={(event) => {
-                if (event.key === 'Enter') {
-                  event.preventDefault();
-                  addDraftName();
-                }
-                if (event.key === 'Escape') {
-                  event.preventDefault();
-                  closeModal();
-                }
-              }}
-              placeholder="이름 입력"
-              className="w-full rounded-xl border border-bg-border bg-bg-border/10 px-3 py-2 text-sm text-text-primary placeholder:text-text-secondary/50 outline-none focus:border-accent/70"
-            />
-            <div className="mt-4 flex justify-end gap-2">
-              <button type="button" onClick={closeModal} className="rounded-lg px-3 py-2 text-sm text-text-secondary hover:bg-bg-border/25 hover:text-text-primary">
-                취소
-              </button>
-              <button type="button" disabled={!draftName.trim()} onClick={addDraftName} className="rounded-lg bg-accent px-3 py-2 text-sm font-medium text-white hover:opacity-90 disabled:opacity-40">
-                추가
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      {modal}
     </div>
   );
 }
@@ -282,20 +338,25 @@ function StageRail<T extends string>({
   meta,
   current,
   onSelect,
+  headerRight,
 }: {
   label: string;
   stages: readonly T[];
   meta: Record<T, { label: string; color: string }>;
   current: T;
   onSelect: (s: T) => void;
+  headerRight?: ReactNode;
 }) {
   const curIdx = Math.max(0, stages.indexOf(current));
   const curColor = meta[current].color;
   return (
     <div className="flex flex-col gap-2.5">
-      <div className="flex items-center justify-between">
-        <span className="text-xs text-text-secondary">{label}</span>
-        <span className="text-xs font-medium" style={{ color: curColor }}>{meta[current].label}</span>
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div className="flex items-center gap-2">
+          <span className="text-xs text-text-secondary">{label}</span>
+          <span className="text-xs font-medium" style={{ color: curColor }}>{meta[current].label}</span>
+        </div>
+        {headerRight}
       </div>
       <div className="flex items-start">
         {stages.map((s, i) => {
@@ -726,7 +787,7 @@ function PathActionRow({
   );
 }
 
-/** 선택 복장의 진행 상세 — 버전·담당자·단계 레일·태그. */
+/** 선택 복장의 진행 상세 — 버전·작업 경로·단계별 담당자·태그. */
 function CostumeDetail({
   character,
   costume,
@@ -745,7 +806,7 @@ function CostumeDetail({
 
   return (
     <div className="flex flex-col gap-5">
-      {/* 버전 + 담당자 */}
+      {/* 버전 */}
       <div className="flex flex-wrap items-end gap-6">
         <div className="flex flex-col gap-1.5">
           <div className="text-xs text-text-secondary">버전</div>
@@ -776,16 +837,6 @@ function CostumeDetail({
             </button>
           </div>
         </div>
-        <AssigneeNamePicker
-          label="디자인 담당자"
-          value={costume.designAssignee}
-          onChange={(next) => updateCostumeField(costume.id, { designAssignee: next })}
-        />
-        <AssigneeNamePicker
-          label="리깅 담당자"
-          value={costume.riggingAssignee}
-          onChange={(next) => updateCostumeField(costume.id, { riggingAssignee: next })}
-        />
       </div>
 
       {/* 작업 경로 */}
@@ -804,7 +855,7 @@ function CostumeDetail({
         />
       </div>
 
-      {/* 단계 레일 */}
+      {/* 단계 레일 + 담당자 */}
       <div className="flex flex-col gap-5 rounded-xl border border-bg-border/60 bg-bg-border/10 p-4">
         <StageRail
           label="디자인 단계"
@@ -812,6 +863,14 @@ function CostumeDetail({
           meta={DESIGN_STAGE_META}
           current={costume.designStage}
           onSelect={(s) => updateCostumeStage(costume.id, 'design', s)}
+          headerRight={
+            <AssigneeNamePicker
+              label="디자인 담당자"
+              value={costume.designAssignee}
+              onChange={(next) => updateCostumeField(costume.id, { designAssignee: next })}
+              variant="inline"
+            />
+          }
         />
         <div className="h-px bg-bg-border/50" />
         <StageRail
@@ -820,6 +879,14 @@ function CostumeDetail({
           meta={RIGGING_STAGE_META}
           current={costume.riggingStage}
           onSelect={(s) => updateCostumeStage(costume.id, 'rigging', s)}
+          headerRight={
+            <AssigneeNamePicker
+              label="리깅 담당자"
+              value={costume.riggingAssignee}
+              onChange={(next) => updateCostumeField(costume.id, { riggingAssignee: next })}
+              variant="inline"
+            />
+          }
         />
       </div>
 
