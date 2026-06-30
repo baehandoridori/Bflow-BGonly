@@ -7,13 +7,15 @@
  * (이미지 카드와 텍스트 카드는 MyTasksWidget이 그리드 섹션을 나눠 섞지 않는다.)
  */
 import { useState, useEffect } from 'react';
-import { ExternalLink, X, Image as ImageIcon, Check } from 'lucide-react';
+import { motion } from 'framer-motion';
+import { ExternalLink, X, Image as ImageIcon } from 'lucide-react';
 import { DEPARTMENT_CONFIGS } from '@/types';
 import type { Stage } from '@/types';
 import { stripEntityTokens } from '@/utils/entityTokens';
 import { cn } from '@/utils/cn';
 import type { SceneKey, FlatScene, PersonalTodo } from '../types';
 import { StageChips } from './StageChips';
+import { SuccessCheckCircle } from './SuccessCheckCircle';
 import { currentStageInfo } from '../stageInfo';
 
 interface SceneCardProps {
@@ -27,11 +29,14 @@ interface SceneCardProps {
   onRemove: (key: SceneKey) => void;
   onOpenDetail: (flat: FlatScene) => void;
   onNavigateToMain: (flat: FlatScene) => void;
+  enterDelay?: number;
+  reduce?: boolean;
 }
 
 export function SceneCard({
   flat, deptCfg, epLabel, sceneNum, pct, isRemovable,
   onToggle, onRemove, onOpenDetail, onNavigateToMain,
+  enterDelay = 0, reduce = false,
 }: SceneCardProps) {
   const s = flat.scene;
   const [imgError, setImgError] = useState(false);
@@ -44,10 +49,13 @@ export function SceneCard({
   const memoText = s.memo ? stripEntityTokens(s.memo) : '';
 
   return (
-    <div
+    <motion.div
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      transition={{ duration: reduce ? 0 : 0.25, delay: enterDelay }}
       className={cn(
-        'group relative flex flex-col rounded-lg border bg-bg-card overflow-hidden transition-colors',
-        pct >= 100 ? 'opacity-60 border-bg-border/30' : 'border-bg-border/40 hover:border-bg-border/70',
+        'group relative flex flex-col rounded-lg border bg-bg-card overflow-hidden transition-[border-color,box-shadow]',
+        pct >= 100 ? 'opacity-60 border-bg-border/30' : 'border-bg-border/40 hover:border-bg-border/70 hover:shadow-[0_4px_18px_-6px_rgba(108,92,231,0.5)]',
       )}
     >
       {/* 썸네일 (클릭 → 상세) */}
@@ -93,7 +101,7 @@ export function SceneCard({
 
       {/* 단계 칩 */}
       <div className="px-2 py-1.5">
-        <StageChips scene={s} deptCfg={deptCfg} onToggleStage={(stage) => onToggle(flat, stage)} />
+        <StageChips scene={s} deptCfg={deptCfg} onToggleStage={(stage) => onToggle(flat, stage)} reduce={reduce} />
       </div>
 
       {/* hover 액션 */}
@@ -114,7 +122,7 @@ export function SceneCard({
           </button>
         )}
       </div>
-    </div>
+    </motion.div>
   );
 }
 
@@ -124,31 +132,31 @@ interface TodoCardProps {
   onRemove: (id: string) => void;
   onOpenDetail: (todo: PersonalTodo) => void;
   isHighlighted?: boolean;
+  enterDelay?: number;
+  reduce?: boolean;
 }
 
-export function TodoCard({ todo, onToggle, onRemove, onOpenDetail, isHighlighted }: TodoCardProps) {
+export function TodoCard({ todo, onToggle, onRemove, onOpenDetail, isHighlighted, enterDelay = 0, reduce = false }: TodoCardProps) {
   const memoText = todo.memo ? stripEntityTokens(todo.memo) : '';
   return (
-    <div
+    <motion.div
       ref={isHighlighted ? (el: HTMLDivElement | null) => { el?.scrollIntoView({ behavior: 'smooth', block: 'center' }); } : undefined}
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      transition={{ duration: reduce ? 0 : 0.25, delay: enterDelay }}
       className={cn(
-        'group relative flex flex-col gap-1.5 rounded-lg border bg-bg-card p-2 min-h-[92px] transition-colors',
-        todo.completed ? 'opacity-60 border-bg-border/30' : 'border-bg-border/40 hover:border-bg-border/70',
+        'group relative flex flex-col gap-1.5 rounded-lg border bg-bg-card p-2 min-h-[92px] transition-[border-color,box-shadow]',
+        todo.completed ? 'opacity-60 border-bg-border/30' : 'border-bg-border/40 hover:border-bg-border/70 hover:shadow-[0_4px_18px_-6px_rgba(108,92,231,0.5)]',
         isHighlighted && 'ring-1 ring-accent/60 animate-pulse',
       )}
     >
       <div className="flex items-center gap-1.5">
-        <button
-          onClick={(e) => { e.stopPropagation(); onToggle(todo.id); }}
-          aria-pressed={todo.completed}
+        <SuccessCheckCircle
+          completed={todo.completed}
+          onToggle={() => onToggle(todo.id)}
           title={todo.completed ? '완료됨 · 누르면 해제' : '완료로 표시'}
-          className={cn(
-            'w-5 h-5 rounded-full border-2 flex items-center justify-center cursor-pointer transition-all shrink-0',
-            todo.completed ? 'bg-green-500 border-green-500 text-white' : 'border-bg-border/50 hover:border-accent',
-          )}
-        >
-          {todo.completed && <Check size={11} strokeWidth={3} />}
-        </button>
+          reduce={reduce}
+        />
         <span className="text-[10px] font-bold text-accent">::ᅠ개인</span>
         <button
           onClick={(e) => { e.stopPropagation(); onRemove(todo.id); }}
@@ -167,6 +175,6 @@ export function TodoCard({ todo, onToggle, onRemove, onOpenDetail, isHighlighted
         </span>
         {memoText && <span className="text-[10px] text-text-secondary/50 truncate">{memoText}</span>}
       </button>
-    </div>
+    </motion.div>
   );
 }

@@ -3,13 +3,14 @@
  *
  * - 더블베젤 도넛(트랙 링 + 진행 링): 내 씬의 단계 누적 진행을 뚜렷한 4색 세그먼트로.
  *   ★색은 단계 의미(준비→완료)를 나타내는 진행 게이지이며 부서 색 코드가 아니다.
- *   STAGE_COLORS(보라 명도 4톤)는 컴팩트 도넛서 구분이 안 돼, ACTION_TYPE_COLOR/
- *   디자인 토큰과 같은 뚜렷한 4색을 쓴다.
  * - 중앙 = 완료 씬 M / 전체 N (비개발자 멘탈모델: '몇 개 끝냈나'). 단계% 는 도넛 채움으로만.
  * - "오늘 마친 씬 N개" 칩 + 접으면 한 줄 strip.
  *
- * 카운트업/sweep 등 모션은 PR 5. 여기선 기본 transition 만.
+ * PR 5 모션: 중앙 M 카운트업(첫 마운트 즉시·reduce면 즉시), strip↔펼침 크로스페이드.
+ * arc 채움은 기존 CSS transition 유지(framer sweep 중복 금지). 전부 reduce 가드.
  */
+import { useState, useEffect, useRef } from 'react';
+import { motion, AnimatePresence } from 'framer-motion';
 import { ChevronUp, ChevronDown, PartyPopper } from 'lucide-react';
 import { cn } from '@/utils/cn';
 import type { MyTasksStats } from '../statsUtils';
@@ -24,43 +25,69 @@ const DONUT_STAGE_COLORS = {
 
 const STAGE_ORDER = ['lo', 'done', 'review', 'png'] as const;
 
+/** 정수 카운트업. 첫 마운트/ reduce / 동일값은 즉시, 그 외엔 ~300ms ease-out. */
+function useCountUp(target: number, reduce: boolean): number {
+  const [display, setDisplay] = useState(target);
+  const prev = useRef(target);
+  const first = useRef(true);
+  useEffect(() => {
+    if (first.current) { first.current = false; prev.current = target; setDisplay(target); return; }
+    if (reduce || target === prev.current) { prev.current = target; setDisplay(target); return; }
+    const from = prev.current;
+    const to = target;
+    prev.current = target;
+    const dur = 300;
+    const start = performance.now();
+    let raf = 0;
+    const tick = (now: number) => {
+      const t = Math.min((now - start) / dur, 1);
+      const eased = 1 - Math.pow(1 - t, 3);
+      setDisplay(Math.round(from + (to - from) * eased));
+      if (t < 1) raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, [target, reduce]);
+  return display;
+}
+
 interface DonutHeroProps {
   stats: MyTasksStats;
   collapsed: boolean;
   onToggleCollapse: () => void;
+  reduce?: boolean;
 }
 
-export function DonutHero({ stats, collapsed, onToggleCollapse }: DonutHeroProps) {
+export function DonutHero({ stats, collapsed, onToggleCollapse, reduce = false }: DonutHeroProps) {
   const { sceneTotal, doneSceneCount, pendingSceneCount, personalTotal, stageCounts, stageProgressPct, todayCompletedScenes } = stats;
   const pctRounded = Math.round(stageProgressPct);
+  const displayDone = useCountUp(doneSceneCount, reduce);
 
   // ── 접힘: 한 줄 strip ──
-  if (collapsed) {
-    return (
-      <div className="flex items-center gap-2 px-1 pt-2 pb-1.5">
-        <div className="flex-1 h-1.5 rounded-full bg-bg-border/20 overflow-hidden">
-          <div
-            className="h-full rounded-full transition-[width] duration-500"
-            style={{
-              width: `${Math.min(stageProgressPct, 100)}%`,
-              backgroundColor: stageProgressPct >= 100 ? DONUT_STAGE_COLORS.png : stageProgressPct >= 50 ? DONUT_STAGE_COLORS.review : '#6C5CE7',
-            }}
-          />
-        </div>
-        <span className="text-[11px] tabular-nums text-text-secondary/55 shrink-0">
-          {doneSceneCount}/{sceneTotal} 씬 · {pctRounded}%
-        </span>
-        <button
-          onClick={onToggleCollapse}
-          className="p-0.5 text-text-secondary/40 hover:text-text-secondary cursor-pointer transition-colors shrink-0"
-          title="펼치기"
-          aria-label="진행 요약 펼치기"
-        >
-          <ChevronDown size={13} />
-        </button>
+  const stripContent = (
+    <div className="flex items-center gap-2 px-1 pt-2 pb-1.5">
+      <div className="flex-1 h-1.5 rounded-full bg-bg-border/20 overflow-hidden">
+        <div
+          className="h-full rounded-full transition-[width] duration-500"
+          style={{
+            width: `${Math.min(stageProgressPct, 100)}%`,
+            backgroundColor: stageProgressPct >= 100 ? DONUT_STAGE_COLORS.png : stageProgressPct >= 50 ? DONUT_STAGE_COLORS.review : '#6C5CE7',
+          }}
+        />
       </div>
-    );
-  }
+      <span className="text-[11px] tabular-nums text-text-secondary/55 shrink-0">
+        {doneSceneCount}/{sceneTotal} 씬 · {pctRounded}%
+      </span>
+      <button
+        onClick={onToggleCollapse}
+        className="p-0.5 text-text-secondary/40 hover:text-text-secondary cursor-pointer transition-colors shrink-0"
+        title="펼치기"
+        aria-label="진행 요약 펼치기"
+      >
+        <ChevronDown size={13} />
+      </button>
+    </div>
+  );
 
   // ── 펼침: 더블베젤 도넛 ──
   const R = 36;
@@ -70,7 +97,6 @@ export function DonutHero({ stats, collapsed, onToggleCollapse }: DonutHeroProps
   const slots = sceneTotal * 4;
   const GAP = slots > 0 ? 2.5 : 0; // 세그먼트 경계 갭(px)
 
-  // 단계 누적 세그먼트 (lo→done→review→png). 각 세그먼트 길이 = 해당 단계 체크 수 / 슬롯.
   let acc = 0;
   const segments = STAGE_ORDER.map((stage) => {
     const frac = slots > 0 ? stageCounts[stage] / slots : 0;
@@ -89,15 +115,13 @@ export function DonutHero({ stats, collapsed, onToggleCollapse }: DonutHeroProps
 
   const allDone = sceneTotal > 0 && doneSceneCount === sceneTotal;
 
-  return (
+  const expandedContent = (
     <div className="flex items-center gap-3 px-1 pt-2 pb-2">
       {/* 도넛 */}
       <div className="relative shrink-0" style={{ width: SIZE, height: SIZE }}>
         <svg width={SIZE} height={SIZE}>
-          {/* 더블베젤: 바깥 옅은 링 + 트랙 링 */}
           <circle cx={SIZE / 2} cy={SIZE / 2} r={R + 4} fill="none" stroke="rgb(var(--color-bg-border) / 0.25)" strokeWidth={1.5} />
           <circle cx={SIZE / 2} cy={SIZE / 2} r={R} fill="none" stroke="rgb(var(--color-bg-border) / 0.55)" strokeWidth={SW} />
-          {/* 단계 누적 세그먼트 */}
           {segments.map((seg) => (
             <circle
               key={seg.stage}
@@ -115,11 +139,11 @@ export function DonutHero({ stats, collapsed, onToggleCollapse }: DonutHeroProps
             />
           ))}
         </svg>
-        {/* 중앙: 완료 M / 전체 N */}
+        {/* 중앙: 완료 M / 전체 N (M은 카운트업) */}
         <div className="absolute inset-0 flex flex-col items-center justify-center leading-none">
           {sceneTotal > 0 ? (
             <>
-              <span className="text-xl font-bold text-text-primary tabular-nums">{doneSceneCount}</span>
+              <span className="text-xl font-bold text-text-primary tabular-nums">{displayDone}</span>
               <span className="text-[10px] text-text-secondary/55 tabular-nums mt-0.5">/ {sceneTotal} 씬</span>
             </>
           ) : (
@@ -157,13 +181,9 @@ export function DonutHero({ stats, collapsed, onToggleCollapse }: DonutHeroProps
           </button>
         </div>
 
-        {/* 오늘 마친 씬 칩 */}
         {todayCompletedScenes > 0 && (
           <span
-            className={cn(
-              'inline-flex items-center gap-1 self-start px-2 py-0.5 rounded-full text-[10.5px] font-medium',
-              'border',
-            )}
+            className={cn('inline-flex items-center gap-1 self-start px-2 py-0.5 rounded-full text-[10.5px] font-medium', 'border')}
             style={{ backgroundColor: '#00B89418', color: '#00B894', borderColor: '#00B89440' }}
           >
             <span className="inline-block w-1.5 h-1.5 rounded-full" style={{ background: '#00B894' }} aria-hidden />
@@ -172,5 +192,20 @@ export function DonutHero({ stats, collapsed, onToggleCollapse }: DonutHeroProps
         )}
       </div>
     </div>
+  );
+
+  // strip ↔ 펼침 크로스페이드 (리스트와 격리 — 안전). 첫 마운트는 enter 없음(initial=false). reduce면 즉시.
+  return (
+    <AnimatePresence mode="wait" initial={false}>
+      <motion.div
+        key={collapsed ? 'strip' : 'expanded'}
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        exit={{ opacity: 0 }}
+        transition={{ duration: reduce ? 0 : 0.18 }}
+      >
+        {collapsed ? stripContent : expandedContent}
+      </motion.div>
+    </AnimatePresence>
   );
 }

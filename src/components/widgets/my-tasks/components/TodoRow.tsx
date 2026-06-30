@@ -1,17 +1,20 @@
 /**
  * TodoRow — '내 할일' 리스트 모드 개인 할일 행 (PR 4 재설계, PersonalTodoContent에서 추출).
  *
- * - ★왼쪽 동그라미 체크(정적; ring→check 애니메이션은 PR 5). 클릭=완료 토글.
+ * - ★왼쪽 동그라미 체크(SuccessCheckCircle — 완료 시 ring→check+버스트, PR 5). 클릭=완료 토글.
  * - 드래그 핸들·::개인 라벨·제목/메모(읽기). 본문 클릭 → 상세모달. hover 제거.
  * - ★isHighlighted 승계 필수: 캘린더→할일 점프 시 scrollIntoView + 강조 링(회귀 방지).
  * - ★Reorder.Item 의 '콘텐츠'만 담당한다. Reorder.Group/Item(value/onReorder)은 MyTasksWidget이 소유.
+ * - 진입 fade(stagger delay) + CSS 글로우 호버. 자성 호버는 transform 없이 box-shadow만(Reorder 충돌 회피).
  */
-import { Check, X, GripVertical } from 'lucide-react';
+import { X, GripVertical } from 'lucide-react';
+import { motion } from 'framer-motion';
 import { EntityText } from '@/components/common/EntityText';
 import { navigateToHashTarget } from '@/utils/hashNavigation';
 import { useAuthStore } from '@/stores/useAuthStore';
 import { cn } from '@/utils/cn';
 import type { PersonalTodo } from '../types';
+import { SuccessCheckCircle } from './SuccessCheckCircle';
 
 interface TodoRowProps {
   todo: PersonalTodo;
@@ -20,17 +23,22 @@ interface TodoRowProps {
   onOpenDetail: (todo: PersonalTodo) => void;
   showDragHandle?: boolean;
   isHighlighted?: boolean;
+  enterDelay?: number;
+  reduce?: boolean;
 }
 
-export function TodoRow({ todo, onToggle, onRemove, onOpenDetail, showDragHandle, isHighlighted }: TodoRowProps) {
+export function TodoRow({ todo, onToggle, onRemove, onOpenDetail, showDragHandle, isHighlighted, enterDelay = 0, reduce = false }: TodoRowProps) {
   const users = useAuthStore((s) => s.users);
 
   return (
-    <div
+    <motion.div
       ref={isHighlighted ? (el: HTMLDivElement | null) => { el?.scrollIntoView({ behavior: 'smooth', block: 'center' }); } : undefined}
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      transition={{ duration: reduce ? 0 : 0.25, delay: enterDelay }}
       className={cn(
-        'flex items-center gap-1.5 px-2 py-1.5 rounded-lg transition-colors group',
-        todo.completed ? 'bg-green-500/5 opacity-60' : 'hover:bg-bg-border/8',
+        'flex items-center gap-1.5 px-2 py-1.5 rounded-lg group transition-[background-color,box-shadow]',
+        todo.completed ? 'bg-green-500/5 opacity-60' : 'hover:bg-bg-border/8 hover:shadow-[0_2px_14px_-4px_rgba(108,92,231,0.45)]',
         isHighlighted && 'ring-1 ring-accent/60 bg-accent/10 animate-pulse',
       )}
     >
@@ -41,20 +49,13 @@ export function TodoRow({ todo, onToggle, onRemove, onOpenDetail, showDragHandle
         </div>
       )}
 
-      {/* 좌측 동그라미 체크 (개인 할일 — 씬과 구분되는 식별 요소) */}
-      <button
-        onClick={(e) => { e.stopPropagation(); onToggle(todo.id); }}
-        aria-pressed={todo.completed}
+      {/* 좌측 동그라미 체크 (완료 시 ring→check+버스트) */}
+      <SuccessCheckCircle
+        completed={todo.completed}
+        onToggle={() => onToggle(todo.id)}
         title={todo.completed ? '완료됨 · 누르면 해제' : '완료로 표시'}
-        className={cn(
-          'w-5 h-5 rounded-full border-2 flex items-center justify-center cursor-pointer transition-all shrink-0',
-          todo.completed
-            ? 'bg-green-500 border-green-500 text-white'
-            : 'border-bg-border/50 hover:border-accent',
-        )}
-      >
-        {todo.completed && <Check size={11} strokeWidth={3} />}
-      </button>
+        reduce={reduce}
+      />
 
       {/* 개인 라벨 */}
       <span className="text-[11px] font-bold text-accent shrink-0">::ᅠ개인</span>
@@ -91,6 +92,6 @@ export function TodoRow({ todo, onToggle, onRemove, onOpenDetail, showDragHandle
       >
         <X size={14} />
       </button>
-    </div>
+    </motion.div>
   );
 }
