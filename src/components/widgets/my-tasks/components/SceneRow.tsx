@@ -3,9 +3,12 @@
  *
  * - 왼쪽 동그라미 없음(씬은 단계 칩이 진행 표시). 2줄: ①EP>파트 + 현재단계 n/4 ②#번호/메모.
  * - 4단계 칩(StageChips) 순차 토글. 본문 클릭 → 상세모달. hover → 본체 이동/제거.
- * - ★forwardRef 불필요(renderRow가 ref 미전달). 단 motion.div layout/exit 는 보존 —
- *   바깥 AnimatePresence(popLayout)와 함께 완료 이동/제거 애니메이션이 깨지지 않게(회귀 방지).
+ * - ★forwardRef 로 root motion.div 에 ref 전달 필수: 바깥 AnimatePresence(mode="popLayout")가
+ *   퇴장 노드를 측정/pop 하려면 직속 자식이 ref 를 받아야 한다. renderRow 가 ref 를 명시적으로
+ *   넘기지 않아도 AnimatePresence 가 내부적으로 주입하므로, forwardRef 를 제거하면 퇴장/layout
+ *   애니메이션이 깨지고 ref 경고가 난다(코덱스 1차 P3).
  */
+import { forwardRef } from 'react';
 import { motion } from 'framer-motion';
 import { ExternalLink, X } from 'lucide-react';
 import { EntityText } from '@/components/common/EntityText';
@@ -31,10 +34,10 @@ interface SceneRowProps {
   onNavigateToMain: (flat: FlatScene) => void;
 }
 
-export function SceneRow({
+export const SceneRow = forwardRef<HTMLDivElement, SceneRowProps>(function SceneRow({
   flat, deptCfg, epLabel, sceneNum, pct, isRemovable,
   onToggle, onRemove, onOpenDetail, onNavigateToMain,
-}: SceneRowProps) {
+}, ref) {
   const s = flat.scene;
   const users = useAuthStore((u) => u.users);
   const info = currentStageInfo(s);
@@ -42,6 +45,7 @@ export function SceneRow({
 
   return (
     <motion.div
+      ref={ref}
       key={flat.key}
       layout
       initial={{ opacity: 0 }}
@@ -103,4 +107,4 @@ export function SceneRow({
       </div>
     </motion.div>
   );
-}
+});
