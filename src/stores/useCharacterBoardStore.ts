@@ -106,7 +106,7 @@ interface CharacterBoardStore {
 
   addCharacter: (name: string, memo?: string) => Promise<Character | null>;
   updateCharacterMemo: (id: string, memo: string) => Promise<void>;
-  updateCharacterFolder: (id: string, workFolderPath: string | null) => Promise<void>;
+  updateCharacterFolder: (id: string, workFolderPath: string | null) => Promise<boolean>;
   renameCharacter: (id: string, name: string) => Promise<void>;
   deleteCharacter: (id: string) => Promise<void>;
 
@@ -246,10 +246,12 @@ export const useCharacterBoardStore = create<CharacterBoardStore>((set, get) => 
     set({ characters: prev.map((c) => (c.id === id ? { ...c, workFolderPath } : c)) });
     try {
       await svcUpdateCharacter(id, { work_folder_path: workFolderPath });
+      return true;
     } catch (err) {
       console.error('[character-board] updateCharacterFolder 실패:', err);
       set({ characters: prev });
       toast.error('작업 폴더 저장에 실패했어요');
+      return false;
     }
   },
 

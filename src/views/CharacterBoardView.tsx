@@ -12,7 +12,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent, type ReactNode } from 'react';
 import { toast } from 'sonner';
-import { Plus, X, Image as ImageIcon, Trash2, Pencil, Search, User, Check, Upload, MessageSquare, Copy } from 'lucide-react';
+import { Plus, X, Image as ImageIcon, Trash2, Pencil, Search, User, Check, Upload, MessageSquare, Copy, Loader2 } from 'lucide-react';
 import { useCharacterBoardStore } from '@/stores/useCharacterBoardStore';
 import { useDataStore } from '@/stores/useDataStore';
 import { useAuthStore } from '@/stores/useAuthStore';
@@ -29,6 +29,7 @@ import {
 } from '@/types';
 import { updateEpisodeReelPath, uploadCharacterImage } from '@/services/supabaseService';
 import { deleteImage } from '@/services/storageService';
+import { createAndLinkCharacterFolder } from '@/services/characterFolderService';
 import { resizeBlob } from '@/utils/imageUtils';
 import { cn } from '@/utils/cn';
 import { EpisodeAssetBoard } from './EpisodeAssetBoard';
@@ -720,11 +721,15 @@ function PathActionRow({
   path,
   onPick,
   onOpen,
+  onCreate,
+  creating = false,
 }: {
   label: string;
   path: string | null;
   onPick: () => void;
   onOpen: () => void;
+  onCreate?: () => void;
+  creating?: boolean;
 }) {
   return (
     <div className="flex items-center justify-between gap-3 rounded-lg border border-bg-border/70 bg-bg-border/10 px-3 py-2">
@@ -733,21 +738,35 @@ function PathActionRow({
         <div className="text-sm text-text-primary truncate" title={path ?? undefined}>{displayPathName(path)}</div>
       </div>
       <div className="flex items-center gap-1.5 shrink-0">
+        {!path && onCreate && (
+          <button
+            type="button"
+            onClick={onCreate}
+            disabled={creating}
+            title="기준 경로에 캐릭터 이름으로 폴더를 만들어 연결"
+            className="inline-flex items-center gap-1 px-2 py-1 rounded-md border border-accent/40 text-xs text-accent hover:bg-accent/10 disabled:opacity-50"
+          >
+            {creating && <Loader2 size={11} className="animate-spin" />}
+            만들기
+          </button>
+        )}
         <button
           type="button"
           onClick={onPick}
-          className="px-2 py-1 rounded-md border border-bg-border text-xs text-text-secondary hover:text-text-primary hover:border-text-secondary/50"
+          disabled={creating}
+          className="px-2 py-1 rounded-md border border-bg-border text-xs text-text-secondary hover:text-text-primary hover:border-text-secondary/50 disabled:opacity-50"
         >
           선택
         </button>
-        <button
-          type="button"
-          disabled={!path}
-          onClick={onOpen}
-          className="px-2 py-1 rounded-md border border-bg-border text-xs text-text-secondary hover:text-text-primary hover:border-text-secondary/50 disabled:opacity-40"
-        >
-          열기
-        </button>
+        {path && (
+          <button
+            type="button"
+            onClick={onOpen}
+            className="px-2 py-1 rounded-md border border-bg-border text-xs text-text-secondary hover:text-text-primary hover:border-text-secondary/50"
+          >
+            열기
+          </button>
+        )}
       </div>
     </div>
   );
@@ -759,11 +778,15 @@ function CostumeDetail({
   costume,
   onPickFolder,
   onPickFile,
+  onCreateFolder,
+  creatingFolder,
 }: {
   character: Character;
   costume: CharacterCostume;
   onPickFolder: () => void;
   onPickFile: () => void;
+  onCreateFolder: () => void;
+  creatingFolder: boolean;
 }) {
   const updateCostumeStage = useCharacterBoardStore((s) => s.updateCostumeStage);
   const updateCostumeField = useCharacterBoardStore((s) => s.updateCostumeField);
@@ -812,6 +835,8 @@ function CostumeDetail({
           path={character.workFolderPath}
           onPick={onPickFolder}
           onOpen={() => openStoredPath(character.workFolderPath, '작업 폴더')}
+          onCreate={onCreateFolder}
+          creating={creatingFolder}
         />
         <PathActionRow
           label="작업 파일"
@@ -1008,6 +1033,7 @@ function CharacterDetailPanel({
   const [lightboxCostumeId, setLightboxCostumeId] = useState<string | null>(null);
   const [imageMenu, setImageMenu] = useState<{ costumeId: string; x: number; y: number } | null>(null);
   const [fitEditorCostumeId, setFitEditorCostumeId] = useState<string | null>(null);
+  const [creatingFolder, setCreatingFolder] = useState(false);
 
   // 갤러리 휠 → 가로 스크롤.
   const galleryRef = useRef<HTMLDivElement>(null);
@@ -1051,6 +1077,16 @@ function CharacterDetailPanel({
     if (!folder) return;
     await updateCharacterFolder(character.id, folder);
   }, [character.id, updateCharacterFolder]);
+
+  const handleCreateFolder = useCallback(async () => {
+    if (creatingFolder) return;
+    setCreatingFolder(true);
+    try {
+      await createAndLinkCharacterFolder(character, updateCharacterFolder);
+    } finally {
+      setCreatingFolder(false);
+    }
+  }, [character, creatingFolder, updateCharacterFolder]);
 
   const ensureCostume = useCallback(async () => {
     if (activeCostume) return activeCostume;
@@ -1232,6 +1268,8 @@ function CharacterDetailPanel({
                 costume={activeCostume}
                 onPickFolder={handlePickFolder}
                 onPickFile={() => handlePickFile(activeCostume)}
+                onCreateFolder={handleCreateFolder}
+                creatingFolder={creatingFolder}
               />
             ) : (
               <div className="text-center text-text-secondary text-sm py-10 border border-dashed border-bg-border rounded-lg">

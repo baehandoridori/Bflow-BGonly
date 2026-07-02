@@ -126,6 +126,12 @@ function getMockMetadataRows(): MockMetadataRow[] {
         value: '{"userIds":["1"],"allowAdmin":true}',
         updatedAt: '2026-06-05T00:00:00.000Z',
       },
+      {
+        type: 'character-board',
+        key: 'work-folder-root',
+        value: 'G:\\공유 드라이브\\사우스 코리안 파크\\[]사코팍 캐릭터 세팅',
+        updatedAt: '2026-06-05T00:00:00.000Z',
+      },
     ]) as MockMetadataRow[];
 }
 
@@ -488,6 +494,11 @@ export function installDevElectronAPI(): void {
     ),
     chooseFolderPath: async () => 'G:\\공유 드라이브\\JBBJ\\A_014',
     chooseFilePath: async () => 'G:\\공유 드라이브\\JBBJ\\A_014\\main.psd',
+    pathCreateFolder: async (parentPath: string, folderName: string) => ({
+      ok: true,
+      path: `${parentPath.replace(/[\\/]+$/, '')}\\${folderName.replace(/[\\/:*?"<>|]/g, '').trim() || '새 캐릭터'}`,
+      existed: false,
+    }),
     pathDirname: async (targetPath: string) => {
       const normalized = targetPath.trim().replace(/[\\/]+$/, '');
       const index = Math.max(normalized.lastIndexOf('\\'), normalized.lastIndexOf('/'));
