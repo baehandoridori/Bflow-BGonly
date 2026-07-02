@@ -12,7 +12,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent, type ReactNode } from 'react';
 import { toast } from 'sonner';
-import { Plus, X, Image as ImageIcon, Trash2, Pencil, Search, User, Check, Upload, MessageSquare, FolderOpen, FileText, Copy } from 'lucide-react';
+import { Plus, X, Image as ImageIcon, Trash2, Pencil, Search, User, Check, Upload, MessageSquare, Copy } from 'lucide-react';
 import { useCharacterBoardStore } from '@/stores/useCharacterBoardStore';
 import { useDataStore } from '@/stores/useDataStore';
 import { useAuthStore } from '@/stores/useAuthStore';
@@ -301,6 +301,13 @@ function displayPathName(path: string | null | undefined): string {
   return index >= 0 ? normalized.slice(index + 1) : normalized;
 }
 
+function nextCostumeName(costumes: CharacterCostume[]): string {
+  const used = new Set(costumes.map((c) => c.name));
+  let n = costumes.length + 1;
+  while (used.has(`복장 ${n}`)) n++;
+  return `복장 ${n}`;
+}
+
 async function openStoredPath(targetPath: string | null | undefined, label: string): Promise<void> {
   const path = (targetPath ?? '').trim();
   if (!path) {
@@ -528,15 +535,13 @@ function FeaturedImageSlot({
   costume,
   shownCostume,
   onView,
-  onPickFolder,
-  onPickFile,
+  onEnsureCostume,
 }: {
   character: Character;
   costume: CharacterCostume | null;
   shownCostume: CharacterCostume | null;
   onView: (costumeId: string) => void;
-  onPickFolder: () => void;
-  onPickFile: () => void;
+  onEnsureCostume: () => Promise<CharacterCostume | null>;
 }) {
   const updateCostumeField = useCharacterBoardStore((s) => s.updateCostumeField);
   const fileRef = useRef<HTMLInputElement>(null);
@@ -545,15 +550,16 @@ function FeaturedImageSlot({
   const [fitEditorOpen, setFitEditorOpen] = useState(false);
 
   const handleUpload = useCallback(async (file: File) => {
-    if (!costume) { toast.error('먼저 디자인(복장)을 추가해주세요'); return; }
+    const targetCostume = costume ?? await onEnsureCostume();
+    if (!targetCostume) return;
     setUploading(true);
     try {
       const isPng = file.type === 'image/png' || file.name.toLowerCase().endsWith('.png');
       const base64 = await resizeBlob(file, 800, isPng ? 0.92 : 0.8, isPng ? 'image/png' : 'image/jpeg');
-      const res = await uploadCharacterImage(character.id, costume.id, base64);
+      const res = await uploadCharacterImage(character.id, targetCostume.id, base64);
       if (!res.ok || !res.url) throw new Error(res.error ?? '업로드 실패');
       // 이전 대표 이미지 정리는 서버(updateCharacterCostume)가 DB 업데이트 성공 후 처리 — 롤백 시 깨진 URL 방지.
-      const saved = await updateCostumeField(costume.id, { featuredImageUrl: res.url });
+      const saved = await updateCostumeField(targetCostume.id, { featuredImageUrl: res.url });
       // 업로드는 됐는데 DB 반영이 실패(롤백)하면 방금 올린 파일이 고아가 됨 → 정리.
       if (!saved) {
         deleteImage(res.url).catch((e) => console.warn('[character-board] 실패한 업로드 정리:', e));
@@ -564,7 +570,7 @@ function FeaturedImageSlot({
     } finally {
       setUploading(false);
     }
-  }, [character.id, costume, updateCostumeField]);
+  }, [character.id, costume, onEnsureCostume, updateCostumeField]);
 
   const shownUrl = shownCostume?.featuredImageUrl ?? null;
   const shownBackground = shownCostume?.imageBackground ?? DEFAULT_CHARACTER_IMAGE_BACKGROUND;
@@ -587,39 +593,23 @@ function FeaturedImageSlot({
           setContextMenu({ x: event.clientX, y: event.clientY });
         }}
       />
-      <button
-        type="button"
-        onClick={() => fileRef.current?.click()}
-        disabled={uploading}
-        className="flex items-center justify-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-bg-border text-xs text-text-secondary hover:text-text-primary hover:border-text-secondary/50 transition-colors cursor-pointer disabled:opacity-50"
-      >
-        <Upload size={13} />
-        {uploading ? '업로드 중...' : shownUrl ? '이미지 바꾸기' : '이미지 추가'}
-      </button>
-      <div className="grid grid-cols-3 gap-1.5">
+      <div className="grid grid-cols-2 gap-1.5">
         <button
           type="button"
-          onClick={character.workFolderPath ? () => openStoredPath(character.workFolderPath, '작업 폴더') : onPickFolder}
-          className="flex items-center justify-center gap-1 rounded-md border border-bg-border px-1.5 py-1 text-[11px] text-text-secondary hover:text-text-primary"
-          title={character.workFolderPath ?? '작업 폴더 등록'}
+          onClick={() => fileRef.current?.click()}
+          disabled={uploading}
+          className="flex items-center justify-center gap-1.5 rounded-md border border-bg-border px-2.5 py-1.5 text-xs text-text-secondary hover:text-text-primary hover:border-text-secondary/50 transition-colors cursor-pointer disabled:opacity-50 whitespace-nowrap"
         >
-          <FolderOpen size={12} /> 작업 폴더
-        </button>
-        <button
-          type="button"
-          onClick={shownCostume?.workFilePath ? () => openStoredPath(shownCostume.workFilePath, '작업 파일') : onPickFile}
-          className="flex items-center justify-center gap-1 rounded-md border border-bg-border px-1.5 py-1 text-[11px] text-text-secondary hover:text-text-primary"
-          title={shownCostume?.workFilePath ?? '작업 파일 등록'}
-        >
-          <FileText size={12} /> 작업 파일
+          <Upload size={13} />
+          {uploading ? '업로드 중...' : shownUrl ? '이미지 바꾸기' : '이미지 추가'}
         </button>
         <button
           type="button"
           disabled={!shownUrl}
           onClick={() => copyCharacterImage(shownUrl)}
-          className="flex items-center justify-center gap-1 rounded-md border border-bg-border px-1.5 py-1 text-[11px] text-text-secondary hover:text-text-primary disabled:opacity-40"
+          className="flex items-center justify-center gap-1.5 rounded-md border border-bg-border px-2.5 py-1.5 text-xs text-text-secondary hover:text-text-primary hover:border-text-secondary/50 disabled:opacity-40 whitespace-nowrap"
         >
-          <Copy size={12} /> 이미지 복사
+          <Copy size={13} /> 이미지 복사
         </button>
       </div>
       <input
@@ -1061,11 +1051,16 @@ function CharacterDetailPanel({
     await updateCharacterFolder(character.id, folder);
   }, [character.id, updateCharacterFolder]);
 
+  const ensureCostume = useCallback(async () => {
+    if (activeCostume) return activeCostume;
+    const created = await addCostume(character.id, nextCostumeName(costumes));
+    if (created) setActiveCostumeId(created.id);
+    return created;
+  }, [activeCostume, addCostume, character.id, costumes]);
+
   const handlePickFile = useCallback(async (targetCostume = activeCostume) => {
-    if (!targetCostume) {
-      toast.error('먼저 디자인(복장)을 선택해주세요');
-      return;
-    }
+    targetCostume = targetCostume ?? await ensureCostume();
+    if (!targetCostume) return;
     const filePath = await chooseWorkFile();
     if (!filePath) return;
     const saved = await updateCostumeField(targetCostume.id, { workFilePath: filePath });
@@ -1075,7 +1070,7 @@ function CharacterDetailPanel({
       const folder = await resolveFolderAfterFilePick(latestFolderPath, filePath);
       if (folder) await updateCharacterFolder(character.id, folder);
     }
-  }, [activeCostume, character.id, character.workFolderPath, updateCharacterFolder, updateCostumeField]);
+  }, [activeCostume, character.id, character.workFolderPath, ensureCostume, updateCharacterFolder, updateCostumeField]);
 
   const handleEpisodeReel = useCallback(async (episode: typeof episodes[number]) => {
     if (episode.reelFilePath) {
@@ -1097,11 +1092,7 @@ function CharacterDetailPanel({
   }, [episodes, setEpisodes]);
 
   const handleAddCostume = async () => {
-    // 중간 복장 삭제 후에도 UNIQUE(character_id, name) 충돌하지 않도록 안 쓰는 번호 생성.
-    const used = new Set(costumes.map((c) => c.name));
-    let n = costumes.length + 1;
-    while (used.has(`복장 ${n}`)) n++;
-    const created = await addCostume(character.id, `복장 ${n}`);
+    const created = await addCostume(character.id, nextCostumeName(costumes));
     if (created) setActiveCostumeId(created.id);
   };
 
@@ -1168,8 +1159,7 @@ function CharacterDetailPanel({
               costume={activeCostume}
               shownCostume={shownCostume}
               onView={(costumeId) => setLightboxCostumeId(costumeId)}
-              onPickFolder={handlePickFolder}
-              onPickFile={() => handlePickFile(activeCostume)}
+              onEnsureCostume={ensureCostume}
             />
             {activeCostume && <CostumeIdentity costume={activeCostume} />}
           </div>
@@ -1444,6 +1434,7 @@ function CharacterGrid({ onAdd, pendingOpenId, onConsumeOpen }: { onAdd: () => v
   const [detailId, setDetailId] = useState<string | null>(null);
   const [query, setQuery] = useState('');
   const [activeTags, setActiveTags] = useState<string[]>([]);
+  const [cardMenu, setCardMenu] = useState<{ characterId: string; x: number; y: number } | null>(null);
 
   const detailCharacter = useMemo(() => characters.find((c) => c.id === detailId) ?? null, [characters, detailId]);
   useEffect(() => { if (detailId && !detailCharacter) setDetailId(null); }, [detailId, detailCharacter]);
@@ -1476,6 +1467,12 @@ function CharacterGrid({ onAdd, pendingOpenId, onConsumeOpen }: { onAdd: () => v
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeCharacters, query, activeTags, byCharacter]);
+  const cardMenuCharacter = cardMenu ? characters.find((c) => c.id === cardMenu.characterId) ?? null : null;
+  const cardMenuCostumes = cardMenuCharacter ? byCharacter.get(cardMenuCharacter.id) ?? [] : [];
+  const cardMenuFeatured = cardMenuCostumes.find((c) => c.featuredImageUrl) ?? null;
+  const cardMenuFileCostume = cardMenuFeatured?.workFilePath
+    ? cardMenuFeatured
+    : cardMenuCostumes.find((c) => c.workFilePath) ?? null;
 
   function toggleTag(tag: string) {
     setActiveTags((prev) => (prev.includes(tag) ? prev.filter((t) => t !== tag) : [...prev, tag]));
@@ -1539,12 +1536,28 @@ function CharacterGrid({ onAdd, pendingOpenId, onConsumeOpen }: { onAdd: () => v
               onOpen={() => setDetailId(c.id)}
               onContextMenu={(event) => {
                 event.preventDefault();
-                if (c.workFolderPath) void openStoredPath(c.workFolderPath, '작업 폴더');
-                else toast.info('상세 화면에서 작업 폴더를 먼저 등록해주세요');
+                setCardMenu({ characterId: c.id, x: event.clientX, y: event.clientY });
               }}
             />
           ))}
         </div>
+      )}
+
+      {cardMenu && cardMenuCharacter && (
+        <CharacterImageContextMenu
+          variant="card"
+          x={cardMenu.x}
+          y={cardMenu.y}
+          hasImage={!!cardMenuFeatured?.featuredImageUrl}
+          hasFolder={!!cardMenuCharacter.workFolderPath}
+          hasFile={!!cardMenuFileCostume?.workFilePath}
+          folderTitle={cardMenuCharacter.workFolderPath ?? '작업 폴더 미등록'}
+          fileTitle={cardMenuFileCostume?.workFilePath ?? '작업 파일 미등록'}
+          onClose={() => setCardMenu(null)}
+          onCopyImage={() => copyCharacterImage(cardMenuFeatured?.featuredImageUrl)}
+          onOpenFolder={() => openStoredPath(cardMenuCharacter.workFolderPath, '작업 폴더')}
+          onOpenFile={() => openStoredPath(cardMenuFileCostume?.workFilePath, '작업 파일')}
+        />
       )}
 
       {detailCharacter && <CharacterDetailModal initialCharacterId={detailCharacter.id} onClose={() => setDetailId(null)} />}

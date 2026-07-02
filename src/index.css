@@ -75,6 +75,16 @@
     color: rgb(var(--color-text-micro, var(--color-text-primary)));
   }
 
+  /* 라벨형 버튼은 글자 배율이 커져도 두 줄로 꺾이지 않게 유지한다.
+     본문형 버튼 안의 문단/line-clamp 요소는 기존처럼 여러 줄을 허용한다. */
+  button {
+    white-space: nowrap;
+  }
+  button [class*="line-clamp-"],
+  button p {
+    white-space: normal;
+  }
+
   /* input/textarea placeholder 가 사용자 글꼴·자간을 따라가도록 강제 inherit.
      Tailwind preflight 는 input 자체에만 font-family: inherit 을 적용하고
      ::placeholder 의 typography 는 Chromium UA 기본값에 의존 → 사용자가 추가한

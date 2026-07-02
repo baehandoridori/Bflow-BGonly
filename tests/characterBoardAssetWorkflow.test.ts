@@ -20,6 +20,7 @@ const characterImageLightbox = readFileSync('src/components/characters/Character
 const fitEditorSource = readFileSync('src/components/characters/CharacterImageFitEditor.tsx', 'utf8');
 const imageFrameSource = readFileSync('src/components/characters/CharacterImageFrame.tsx', 'utf8');
 const imageContextMenuSource = readFileSync('src/components/characters/CharacterImageContextMenu.tsx', 'utf8');
+const indexCss = readFileSync('src/index.css', 'utf8');
 const devMock = readFileSync('src/mocks/devElectronAPI.ts', 'utf8');
 const migration = readFileSync('DEVLOG/migrations/2026-06-29-character-board-asset-workflow.sql', 'utf8');
 const backgroundDefaultMigration = readFileSync('DEVLOG/migrations/2026-07-03-character-image-background-default.sql', 'utf8');
@@ -160,6 +161,54 @@ test('character board is wired for image display, assignees, work links, and lig
     characterBoard.indexOf('label="리깅 단계"') < characterBoard.indexOf('label="리깅 담당자"'),
     'rigging assignee should live with the rigging stage lane, not the version controls',
   );
+});
+
+test('character board creates a first costume automatically and keeps image actions focused', () => {
+  assert.match(characterStore, /svcAddCostume\(\{ characterId: created\.id, name: '복장 1', createdBy \}\)/);
+  assert.match(characterStore, /console\.warn\('\[character-board\] 첫 복장 자동 생성 실패:'/);
+  assert.match(characterBoard, /function nextCostumeName\(costumes: CharacterCostume\[\]\): string/);
+  assert.match(characterBoard, /const ensureCostume = useCallback\(async \(\) => \{/);
+  assert.match(characterBoard, /targetCostume = targetCostume \?\? await ensureCostume\(\);/);
+  assert.doesNotMatch(characterBoard, /먼저 디자인\(복장\)/);
+
+  const featuredSlot = characterBoard.match(/function FeaturedImageSlot\([\s\S]*?\r?\n}\r?\n\r?\n\/\*\* 복장 메모/);
+  assert.ok(featuredSlot, 'FeaturedImageSlot should remain locally inspectable');
+  assert.match(featuredSlot[0], /grid grid-cols-2/);
+  assert.match(featuredSlot[0], /이미지 추가/);
+  assert.match(featuredSlot[0], /이미지 바꾸기/);
+  assert.match(featuredSlot[0], /이미지 복사/);
+  const visibleButtonArea = featuredSlot[0].slice(
+    featuredSlot[0].indexOf('grid grid-cols-2'),
+    featuredSlot[0].indexOf('<input'),
+  );
+  assert.doesNotMatch(visibleButtonArea, /작업 폴더/);
+  assert.doesNotMatch(visibleButtonArea, /작업 파일/);
+});
+
+test('character card right click opens the compact work menu instead of opening a folder immediately', () => {
+  assert.match(characterBoard, /const \[cardMenu, setCardMenu\]/);
+  assert.match(characterBoard, /setCardMenu\(\{ characterId: c\.id, x: event\.clientX, y: event\.clientY \}\)/);
+  assert.doesNotMatch(characterBoard, /if \(c\.workFolderPath\) void openStoredPath\(c\.workFolderPath, '작업 폴더'\)/);
+  assert.match(characterBoard, /variant="card"/);
+  assert.match(characterBoard, /cardMenuFeatured\?\.featuredImageUrl/);
+  assert.match(characterBoard, /cardMenuFileCostume\?\.workFilePath/);
+
+  assert.match(imageContextMenuSource, /variant\?: 'full' \| 'card'/);
+  assert.match(imageContextMenuSource, /variant === 'card'/);
+  assert.ok(
+    imageContextMenuSource.indexOf('label="작업 폴더 열기"') <
+      imageContextMenuSource.indexOf('label="작업 파일 열기"'),
+  );
+  assert.ok(
+    imageContextMenuSource.indexOf('label="작업 파일 열기"') <
+      imageContextMenuSource.indexOf('label="이미지 복사"'),
+  );
+});
+
+test('global button label wrapping is prevented while multiline button content stays available', () => {
+  assert.match(indexCss, /button\s*\{\s*white-space:\s*nowrap;\s*\}/);
+  assert.match(indexCss, /button \[class\*="line-clamp-"\],\s*\n\s*button p\s*\{\s*white-space:\s*normal;\s*\}/);
+  assert.match(characterBoard, /whitespace-nowrap/);
 });
 
 test('character image lightbox shows costume versions and a bottom costume thumbnail strip', () => {
