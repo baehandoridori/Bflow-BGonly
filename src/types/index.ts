@@ -838,6 +838,16 @@ export interface ElectronAPI {
   shellOpenPath?: (targetPath: string) => Promise<{ ok: boolean; error?: string }>;
   chooseFolderPath?: () => Promise<string | null>;
   chooseFilePath?: () => Promise<string | null>;
+  pathCreateFolder?: (
+    parentPath: string,
+    folderName: string,
+  ) => Promise<{
+    ok: boolean;
+    path?: string;
+    existed?: boolean;
+    error?: string;
+    code?: 'parent-missing' | 'invalid-name' | 'permission' | 'unknown';
+  }>;
   pathDirname?: (targetPath: string) => Promise<string>;
   pathExists?: (targetPath: string) => Promise<boolean>;
   /** 외부 URL 을 기본 브라우저로 열기 (메모 링크 전용) */

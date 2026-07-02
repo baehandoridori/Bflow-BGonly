@@ -8,14 +8,20 @@ import {
   normalizeCharacterImageBackground,
   normalizeCharacterImageFit,
 } from '../src/utils/characterAssets.ts';
+import { resolveChildFolderPath, sanitizeWindowsFolderName } from '../electron/pathCreateFolder.ts';
 
 const typeSource = readFileSync('src/types/index.ts', 'utf8');
 const rendererSupabase = readFileSync('src/services/supabaseService.ts', 'utf8');
 const electronSupabase = readFileSync('electron/supabase.ts', 'utf8');
+const electronMain = readFileSync('electron/main.ts', 'utf8');
+const electronPreload = readFileSync('electron/preload.ts', 'utf8');
 const appStore = readFileSync('src/stores/useAppStore.ts', 'utf8');
 const spotlight = readFileSync('src/components/spotlight/SpotlightSearch.tsx', 'utf8');
 const characterBoard = readFileSync('src/views/CharacterBoardView.tsx', 'utf8');
 const characterStore = readFileSync('src/stores/useCharacterBoardStore.ts', 'utf8');
+const characterFolderService = readFileSync('src/services/characterFolderService.ts', 'utf8');
+const characterFolderRootSection = readFileSync('src/components/settings/CharacterFolderRootSection.tsx', 'utf8');
+const settingsView = readFileSync('src/views/SettingsView.tsx', 'utf8');
 const episodeAssetBoard = readFileSync('src/views/EpisodeAssetBoard.tsx', 'utf8');
 const scenesView = readFileSync('src/views/ScenesView.tsx', 'utf8');
 const characterImageLightbox = readFileSync('src/components/characters/CharacterImageLightbox.tsx', 'utf8');
@@ -39,6 +45,21 @@ test('character asset helpers derive parent folder and preserve existing charact
   assert.equal(
     getResolvedCharacterFolderAfterFilePick('G:\\show\\custom-folder', 'G:\\show\\char\\main.moho'),
     'G:\\show\\custom-folder',
+  );
+});
+
+test('character folder create path sanitizes names and never escapes the parent folder', () => {
+  assert.equal(sanitizeWindowsFolderName('A/B: C?'), 'AB C');
+  assert.equal(sanitizeWindowsFolderName('CON'), 'CON_');
+  assert.equal(sanitizeWindowsFolderName('bad. '), 'bad');
+  assert.equal(sanitizeWindowsFolderName('...'), '');
+
+  assert.equal(resolveChildFolderPath('G:\\show\\characters', '..'), null);
+  const resolved = resolveChildFolderPath('G:\\show\\characters', '..\\outside');
+  assert.ok(resolved);
+  assert.ok(
+    resolved.fullPath.toLowerCase().startsWith('g:\\show\\characters\\'),
+    `created path should stay under parent, got ${resolved.fullPath}`,
   );
 });
 
@@ -185,6 +206,39 @@ test('character board creates a first costume automatically and keeps image acti
   );
   assert.doesNotMatch(visibleButtonArea, /작업 폴더/);
   assert.doesNotMatch(visibleButtonArea, /작업 파일/);
+});
+
+test('character board can create and link a work folder from the configured team root', () => {
+  assert.match(electronMain, /import \{ resolveChildFolderPath \} from '\.\/pathCreateFolder'/);
+  assert.match(electronMain, /ipcMain\.handle\('path:create-folder'/);
+  assert.match(electronMain, /code: 'parent-missing'/);
+  assert.match(electronMain, /code: 'invalid-name'/);
+  assert.match(electronMain, /code: 'permission'/);
+  assert.match(electronMain, /existed: true/);
+
+  assert.match(electronPreload, /pathCreateFolder: \(parentPath: string, folderName: string\)/);
+  assert.match(typeSource, /pathCreateFolder\?: \(/);
+  assert.match(devMock, /key: 'work-folder-root'/);
+  assert.match(devMock, /pathCreateFolder: async \(parentPath: string, folderName: string\)/);
+
+  assert.match(characterFolderService, /CHARACTER_FOLDER_ROOT_META[\s\S]*type: 'character-board'[\s\S]*key: 'work-folder-root'/);
+  assert.match(characterFolderService, /function unwrapMetadataValue/);
+  assert.match(characterFolderService, /readMetadataFromSupabase\(CHARACTER_FOLDER_ROOT_META\.type, CHARACTER_FOLDER_ROOT_META\.key\)/);
+  assert.match(characterFolderService, /window\.electronAPI\.pathCreateFolder\(root, character\.name\)/);
+  assert.match(characterFolderService, /updateCharacterFolder\(character\.id, result\.path\)/);
+
+  assert.match(characterFolderRootSection, /readCharacterWorkFolderRoot/);
+  assert.match(characterFolderRootSection, /saveCharacterWorkFolderRoot/);
+  assert.match(characterFolderRootSection, /chooseFolderPath/);
+  assert.match(settingsView, /CharacterFolderRootSection/);
+
+  assert.match(characterStore, /updateCharacterFolder: \(id: string, workFolderPath: string \| null\) => Promise<boolean>/);
+  assert.match(characterStore, /await svcUpdateCharacter\(id, \{ work_folder_path: workFolderPath \}\);\r?\n\s*return true;/);
+  assert.match(characterBoard, /createAndLinkCharacterFolder/);
+  assert.match(characterBoard, /const \[creatingFolder, setCreatingFolder\]/);
+  assert.match(characterBoard, /onCreateFolder=\{handleCreateFolder\}/);
+  assert.match(characterBoard, /title="기준 경로에 캐릭터 이름으로 폴더를 만들어 연결"/);
+  assert.match(characterBoard, /!path && onCreate/);
 });
 
 test('character card right click opens the compact work menu instead of opening a folder immediately', () => {

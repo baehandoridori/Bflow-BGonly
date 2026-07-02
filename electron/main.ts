@@ -43,6 +43,7 @@ import {
 } from './autoUpdate/paths';
 import { isStaleSwapFailureForCurrentVersion } from './autoUpdate/failurePolicy';
 import { compareVersions, readManifest } from './autoUpdate/manifest';
+import { resolveChildFolderPath } from './pathCreateFolder';
 import {
   initVacation,
   isVacationConnected,
@@ -1122,6 +1123,54 @@ ipcMain.handle('path:choose-file', async () => {
   const result = await dialog.showOpenDialog({ properties: ['openFile'] });
   if (result.canceled) return null;
   return result.filePaths[0] ?? null;
+});
+
+ipcMain.handle('path:create-folder', async (_event, parentPath: string, folderName: string) => {
+  try {
+    if (typeof parentPath !== 'string' || !parentPath.trim()) {
+      return { ok: false, code: 'parent-missing', error: 'parent path is empty' };
+    }
+
+    const resolved = resolveChildFolderPath(parentPath, folderName);
+    if (!resolved) {
+      return { ok: false, code: 'invalid-name', error: 'folder name is invalid' };
+    }
+
+    let parentStat: fs.Stats;
+    try {
+      parentStat = await fs.promises.stat(resolved.parentPath);
+    } catch {
+      return { ok: false, code: 'parent-missing', error: 'parent path does not exist' };
+    }
+    if (!parentStat.isDirectory()) {
+      return { ok: false, code: 'parent-missing', error: 'parent path is not a directory' };
+    }
+
+    try {
+      const existing = await fs.promises.stat(resolved.fullPath);
+      if (existing.isDirectory()) {
+        return { ok: true, path: resolved.fullPath, existed: true };
+      }
+      return { ok: false, code: 'unknown', error: 'target already exists and is not a directory' };
+    } catch (err) {
+      const code = (err as NodeJS.ErrnoException)?.code;
+      if (code && code !== 'ENOENT') {
+        if (code === 'EPERM' || code === 'EACCES') {
+          return { ok: false, code: 'permission', error: String(err) };
+        }
+        return { ok: false, code: 'unknown', error: String(err) };
+      }
+    }
+
+    await fs.promises.mkdir(resolved.fullPath, { recursive: false });
+    return { ok: true, path: resolved.fullPath, existed: false };
+  } catch (err) {
+    const code = (err as NodeJS.ErrnoException)?.code;
+    if (code === 'EPERM' || code === 'EACCES') {
+      return { ok: false, code: 'permission', error: String(err) };
+    }
+    return { ok: false, code: 'unknown', error: String(err) };
+  }
 });
 
 ipcMain.handle('path:dirname', async (_event, targetPath: string) => {

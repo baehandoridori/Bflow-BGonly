@@ -14,6 +14,14 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.invoke('path:choose-folder') as Promise<string | null>,
   chooseFilePath: () =>
     ipcRenderer.invoke('path:choose-file') as Promise<string | null>,
+  pathCreateFolder: (parentPath: string, folderName: string) =>
+    ipcRenderer.invoke('path:create-folder', parentPath, folderName) as Promise<{
+      ok: boolean;
+      path?: string;
+      existed?: boolean;
+      error?: string;
+      code?: 'parent-missing' | 'invalid-name' | 'permission' | 'unknown';
+    }>,
   pathDirname: (targetPath: string) =>
     ipcRenderer.invoke('path:dirname', targetPath) as Promise<string>,
   pathExists: (targetPath: string) =>
