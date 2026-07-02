@@ -2,6 +2,7 @@ import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 're
 import { Copy, FolderOpen, Image as ImageIcon, Move, Palette } from 'lucide-react';
 import type { CharacterImageBackground } from '@/types';
 import { cn } from '@/utils/cn';
+import { CHARACTER_LAYER_CLASS } from '@/constants/characterLayers';
 
 const BACKGROUND_OPTIONS: { value: CharacterImageBackground; label: string }[] = [
   { value: 'transparent', label: '투명' },
@@ -117,12 +118,12 @@ export function CharacterImageContextMenu({
     <div
       ref={ref}
       role="menu"
-      className="fixed z-[80] w-56 overflow-hidden rounded-lg border border-bg-border bg-bg-card shadow-2xl"
+      className={`fixed ${CHARACTER_LAYER_CLASS.menu} w-56 overflow-hidden rounded-lg border border-bg-border bg-bg-card shadow-2xl`}
       style={{ left: position.left, top: position.top }}
     >
       {variant === 'full' && (
         <>
-          <div className="px-3 py-2 text-[11px] uppercase tracking-wide text-text-secondary/70 border-b border-bg-border/60 flex items-center gap-1.5">
+          <div className="px-3 py-2 text-[11px] uppercase tracking-wide text-text-secondary border-b border-bg-border/60 flex items-center gap-1.5">
             <Palette size={12} />
             배경 표기
           </div>

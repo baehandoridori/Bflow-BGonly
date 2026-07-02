@@ -13,6 +13,7 @@ import {
   normalizeCharacterImageFit,
 } from '@/utils/characterAssets';
 import { getCharacterImageBackgroundStyle } from './CharacterImageFrame';
+import { CHARACTER_LAYER_CLASS } from '@/constants/characterLayers';
 
 type Box = { left: number; top: number; width: number; height: number };
 
@@ -287,10 +288,11 @@ export function CharacterImageFitEditor({
   const dimStyle = 'absolute z-20 bg-black/28 backdrop-blur-[5px]';
   const buttonChrome = 'flex min-h-10 min-w-10 items-center justify-center rounded-lg border border-bg-border/70 bg-bg-card/80 text-text-secondary shadow-sm hover:border-text-secondary/50 hover:text-text-primary active:scale-[0.96]';
   const sliderClass = 'h-2 w-full cursor-pointer rounded-full accent-accent focus-visible:ring-2 focus-visible:ring-accent/70 focus-visible:ring-offset-1 focus-visible:ring-offset-bg-card';
+  const handleClass = 'pointer-events-none absolute h-7 w-7 border-black drop-shadow-[0_0_1px_rgba(255,255,255,0.95)]';
   const percentLabel = (value: number) => `${Math.round(value * 100)}%`;
 
   return (
-    <div className="fixed inset-0 z-[90] flex items-center justify-center bg-black/70 p-5" onMouseDown={(e) => e.stopPropagation()}>
+    <div className={`fixed inset-0 ${CHARACTER_LAYER_CLASS.editor} flex items-center justify-center bg-overlay/70 p-5`} onMouseDown={(e) => e.stopPropagation()}>
       <div className="max-h-[calc(100vh-32px)] w-full max-w-5xl overflow-hidden rounded-2xl bg-bg-card shadow-2xl ring-1 ring-white/10">
         <div className="flex items-center justify-between border-b border-bg-border/70 px-4 py-3">
           <div className="min-w-0">
@@ -338,7 +340,7 @@ export function CharacterImageFitEditor({
                 aria-label="썸네일 이미지 위치"
                 tabIndex={0}
                 onKeyDown={onCropKeyDown}
-                className={`absolute inset-0 overflow-hidden rounded-xl bg-black/10 shadow-[0_0_0_2px_rgba(255,255,255,0.94),0_18px_50px_rgba(0,0,0,0.34),0_0_0_1px_rgba(0,0,0,0.58)_inset] outline-none focus-visible:ring-2 focus-visible:ring-accent/80 ${isDragging ? 'cursor-grabbing' : 'cursor-grab'}`}
+                className={`absolute inset-0 overflow-hidden rounded-xl bg-black/10 shadow-[0_0_0_2px_rgba(0,0,0,0.72),0_0_0_4px_rgba(255,255,255,0.78),0_18px_50px_rgba(0,0,0,0.34),0_0_0_1px_rgba(0,0,0,0.58)_inset] outline-none focus-visible:ring-2 focus-visible:ring-accent/80 ${isDragging ? 'cursor-grabbing' : 'cursor-grab'}`}
                 onPointerDown={beginInteraction}
               >
                 <div className="absolute inset-0 flex items-center justify-center overflow-visible">
@@ -357,12 +359,12 @@ export function CharacterImageFitEditor({
                     style={fitImageStyle}
                   />
                 </div>
-                <div className="pointer-events-none absolute inset-0 bg-[linear-gradient(to_right,rgba(255,255,255,0.18)_1px,transparent_1px),linear-gradient(to_bottom,rgba(255,255,255,0.18)_1px,transparent_1px)] bg-[size:33.333%_33.333%]" />
+                <div className="pointer-events-none absolute inset-0 bg-[linear-gradient(to_right,rgba(0,0,0,0.22)_1px,transparent_1px),linear-gradient(to_bottom,rgba(0,0,0,0.22)_1px,transparent_1px),linear-gradient(to_right,rgba(255,255,255,0.26)_1px,transparent_1px),linear-gradient(to_bottom,rgba(255,255,255,0.26)_1px,transparent_1px)] bg-[size:33.333%_33.333%]" />
               </div>
-              <div className="pointer-events-none absolute -left-1 -top-1 h-7 w-7 rounded-tl-xl border-l-2 border-t-2 border-white" />
-              <div className="pointer-events-none absolute -right-1 -top-1 h-7 w-7 rounded-tr-xl border-r-2 border-t-2 border-white" />
-              <div className="pointer-events-none absolute -bottom-1 -left-1 h-7 w-7 rounded-bl-xl border-b-2 border-l-2 border-white" />
-              <div className="pointer-events-none absolute -bottom-1 -right-1 h-7 w-7 rounded-br-xl border-b-2 border-r-2 border-white" />
+              <div className={`${handleClass} -left-1 -top-1 rounded-tl-xl border-l-2 border-t-2`} />
+              <div className={`${handleClass} -right-1 -top-1 rounded-tr-xl border-r-2 border-t-2`} />
+              <div className={`${handleClass} -bottom-1 -left-1 rounded-bl-xl border-b-2 border-l-2`} />
+              <div className={`${handleClass} -bottom-1 -right-1 rounded-br-xl border-b-2 border-r-2`} />
             </div>
           </div>
 

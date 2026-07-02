@@ -277,6 +277,7 @@ export function getLightColors(themeId: string): ThemeColors {
 /** CSS 변수에 테마 적용 */
 export function applyTheme(colors: ThemeColors, colorMode?: 'dark' | 'light'): void {
   const root = document.documentElement;
+  const mode = colorMode ?? 'dark';
   root.style.setProperty('--color-bg-primary', colors.bgPrimary);
   root.style.setProperty('--color-bg-card', colors.bgCard);
   root.style.setProperty('--color-bg-border', colors.bgBorder);
@@ -285,7 +286,9 @@ export function applyTheme(colors: ThemeColors, colorMode?: 'dark' | 'light'): v
   root.style.setProperty('--color-accent', colors.accent);
   root.style.setProperty('--color-accent-sub', colors.accentSub);
   // 라이트/다크 모드 표시 (CSS/컴포넌트에서 참조 가능)
-  root.setAttribute('data-color-mode', colorMode ?? 'dark');
+  root.setAttribute('data-color-mode', mode);
+  root.classList.toggle('dark', mode === 'dark');
+  root.style.colorScheme = mode;
 }
 
 /** 저장용 테마 설정 */

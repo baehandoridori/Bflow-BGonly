@@ -2,7 +2,8 @@ import { useEffect, useMemo } from 'react';
 import { useCharacterBoardAccess } from '@/hooks/useCharacterBoardAccess';
 import { useAuthStore } from '@/stores/useAuthStore';
 import { useCharacterBoardStore } from '@/stores/useCharacterBoardStore';
-import { DESIGN_STAGE_META, RIGGING_STAGE_META, parseAssigneeNames } from '@/utils/characterStageMeta';
+import { parseAssigneeNames } from '@/utils/characterStageMeta';
+import { DESIGN_STAGE_META, RIGGING_STAGE_META, characterStageColor } from '@/constants/characterStages';
 import type { CharacterTaskItem } from '../types';
 
 export function useMyCharacterTasks(): {
@@ -44,7 +45,7 @@ export function useMyCharacterTasks(): {
             costumeName: costume.name,
             stage: costume.designStage,
             stageLabel: meta.label,
-            stageColor: meta.color,
+            stageColor: characterStageColor(meta),
             done: costume.designStage === 'done',
           });
         }
@@ -59,7 +60,7 @@ export function useMyCharacterTasks(): {
             costumeName: costume.name,
             stage: costume.riggingStage,
             stageLabel: meta.label,
-            stageColor: meta.color,
+            stageColor: characterStageColor(meta),
             done: costume.riggingStage === 'done',
           });
         }
