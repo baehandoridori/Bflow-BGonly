@@ -286,7 +286,7 @@ export function CharacterImageFitEditor({
 
   const dimStyle = 'absolute z-20 bg-black/28 backdrop-blur-[5px]';
   const buttonChrome = 'flex min-h-10 min-w-10 items-center justify-center rounded-lg border border-bg-border/70 bg-bg-card/80 text-text-secondary shadow-sm hover:border-text-secondary/50 hover:text-text-primary active:scale-[0.96]';
-  const sliderClass = 'h-2 w-full cursor-pointer accent-accent';
+  const sliderClass = 'h-2 w-full cursor-pointer rounded-full accent-accent focus-visible:ring-2 focus-visible:ring-accent/70 focus-visible:ring-offset-1 focus-visible:ring-offset-bg-card';
   const percentLabel = (value: number) => `${Math.round(value * 100)}%`;
 
   return (

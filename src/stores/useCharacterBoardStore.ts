@@ -108,6 +108,8 @@ interface CharacterBoardStore {
   addCharacter: (name: string, memo?: string) => Promise<Character | null>;
   updateCharacterMemo: (id: string, memo: string) => Promise<void>;
   updateCharacterFolder: (id: string, workFolderPath: string | null) => Promise<boolean>;
+  archiveCharacter: (id: string) => Promise<void>;
+  restoreCharacter: (id: string) => Promise<void>;
   renameCharacter: (id: string, name: string) => Promise<void>;
   deleteCharacter: (id: string) => Promise<void>;
 
@@ -290,6 +292,32 @@ export const useCharacterBoardStore = create<CharacterBoardStore>((set, get) => 
       console.error('[character-board] renameCharacter 실패:', err);
       set({ characters: prev });
       toast.error('이름 변경에 실패했어요');
+    }
+  },
+
+  archiveCharacter: async (id) => {
+    const prev = get().characters;
+    set({ characters: prev.map((c) => (c.id === id ? { ...c, status: 'archived' } : c)) });
+    try {
+      await svcUpdateCharacter(id, { status: 'archived' });
+      toast.success('캐릭터를 보관했어요');
+    } catch (err) {
+      console.error('[character-board] archiveCharacter 실패:', err);
+      set({ characters: prev });
+      toast.error('캐릭터 보관에 실패했어요');
+    }
+  },
+
+  restoreCharacter: async (id) => {
+    const prev = get().characters;
+    set({ characters: prev.map((c) => (c.id === id ? { ...c, status: 'active' } : c)) });
+    try {
+      await svcUpdateCharacter(id, { status: 'active' });
+      toast.success('캐릭터를 복원했어요');
+    } catch (err) {
+      console.error('[character-board] restoreCharacter 실패:', err);
+      set({ characters: prev });
+      toast.error('캐릭터 복원에 실패했어요');
     }
   },
 

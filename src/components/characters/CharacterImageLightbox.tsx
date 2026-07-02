@@ -69,18 +69,26 @@ export function CharacterImageLightbox({
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
       if (fitEditorOpen) return;
+      if (!['Escape', 'ArrowLeft', 'ArrowRight'].includes(event.key)) return;
+      event.preventDefault();
+      event.stopPropagation();
+      event.stopImmediatePropagation();
       if (event.key === 'Escape') onClose();
       if (event.key === 'ArrowLeft') go(-1);
       if (event.key === 'ArrowRight') go(1);
     };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
+    window.addEventListener('keydown', onKey, { capture: true });
+    return () => window.removeEventListener('keydown', onKey, { capture: true });
   }, [entries.length, fitEditorOpen, onClose]);
 
   if (!current) return null;
 
   return createPortal(
-    <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/85 p-5" onMouseDown={onClose}>
+    <div
+      data-character-lightbox
+      className="fixed inset-0 z-[70] flex items-center justify-center bg-black/85 p-5"
+      onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}
+    >
       <div className="relative flex h-full w-full max-w-6xl flex-col" onMouseDown={(e) => e.stopPropagation()}>
         <div className="mb-3 flex items-center justify-between gap-3 text-white">
           <div className="min-w-0">
