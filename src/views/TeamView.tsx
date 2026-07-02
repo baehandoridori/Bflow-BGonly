@@ -9,7 +9,7 @@ import { getSeniorityIndex } from '@/utils/seniorityOrder';
 import { DEPARTMENT_CONFIGS, STAGES } from '@/types';
 import type { Scene, Department, Stage, AppUser } from '@/types';
 import { cn } from '@/utils/cn';
-import { getUserColor } from '@/components/common/AssigneeSelect';
+import { getUserColor } from '@/utils/userColor';
 import { navigateToSceneView } from '@/utils/sceneNavigationAction';
 
 /* ────────────────────────────────────────────────

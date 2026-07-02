@@ -3,10 +3,13 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   DEFAULT_CHARACTER_IMAGE_BACKGROUND,
+  getCharacterImageFitTransformStyle,
+  getPathBaseName,
   getParentFolderPath,
   getResolvedCharacterFolderAfterFilePick,
   normalizeCharacterImageBackground,
   normalizeCharacterImageFit,
+  resolveCharacterImageFitScales,
 } from '../src/utils/characterAssets.ts';
 import { resolveChildFolderPath, sanitizeWindowsFolderName } from '../electron/pathCreateFolder.ts';
 
@@ -40,6 +43,7 @@ const characterImageLightbox = readFileSync('src/components/characters/Character
 const fitEditorSource = readFileSync('src/components/characters/CharacterImageFitEditor.tsx', 'utf8');
 const imageFrameSource = readFileSync('src/components/characters/CharacterImageFrame.tsx', 'utf8');
 const imageContextMenuSource = readFileSync('src/components/characters/CharacterImageContextMenu.tsx', 'utf8');
+const userColorSource = readFileSync('src/utils/userColor.ts', 'utf8');
 const indexCss = readFileSync('src/index.css', 'utf8');
 const devMock = readFileSync('src/mocks/devElectronAPI.ts', 'utf8');
 const migration = readFileSync('DEVLOG/migrations/2026-06-29-character-board-asset-workflow.sql', 'utf8');
@@ -50,6 +54,12 @@ test('character asset helpers derive parent folder and preserve existing charact
     getParentFolderPath('G:\\공유 드라이브\\사우스 코리안 파크\\[]사코팍 캐릭터 세팅\\찜질방 사장 캐릭터\\main.moho'),
     'G:\\공유 드라이브\\사우스 코리안 파크\\[]사코팍 캐릭터 세팅\\찜질방 사장 캐릭터',
   );
+  assert.equal(
+    getPathBaseName('G:\\공유 드라이브\\사우스 코리안 파크\\[]사코팍 캐릭터 세팅\\찜질방 사장 캐릭터\\'),
+    '찜질방 사장 캐릭터',
+  );
+  assert.equal(getPathBaseName('G:\\show\\char\\main.moho'), 'main.moho');
+  assert.equal(getPathBaseName(''), '');
   assert.equal(
     getResolvedCharacterFolderAfterFilePick('', 'G:\\show\\char\\main.moho'),
     'G:\\show\\char',
@@ -92,6 +102,18 @@ test('character image fit defaults are stable and clamp unsafe values', () => {
     y: 100,
     lockAspect: false,
   });
+  assert.deepEqual(
+    resolveCharacterImageFitScales({ scale: 2, scaleX: 3, scaleY: 4, x: 0, y: 0, lockAspect: true }),
+    { scaleX: 2, scaleY: 2 },
+  );
+  assert.deepEqual(
+    resolveCharacterImageFitScales({ scale: 2, scaleX: 3, scaleY: 4, x: 0, y: 0, lockAspect: false }),
+    { scaleX: 3, scaleY: 4 },
+  );
+  assert.deepEqual(
+    getCharacterImageFitTransformStyle({ scale: 2, scaleX: 3, scaleY: 4, x: 10, y: -20, lockAspect: false }),
+    { transform: 'translate(10%, -20%) scale(3, 4)', transformOrigin: 'center center' },
+  );
 });
 
 test('character image background defaults to transparent for new image workflows', () => {
@@ -122,6 +144,12 @@ test('character and costume domain types expose asset workflow fields', () => {
   }
 });
 
+test('shared user color helper is separated from assignee input UI', () => {
+  assert.match(userColorSource, /export function getUserColor\(name: string\): string/);
+  assert.match(characterBoard, /import \{ getUserColor \} from '@\/utils\/userColor'/);
+  assert.match(imageFrameSource, /getCharacterImageFitTransformStyle/);
+});
+
 test('renderer and electron Supabase mapping include new snake_case fields', () => {
   for (const token of [
     'work_folder_path',
@@ -136,6 +164,19 @@ test('renderer and electron Supabase mapping include new snake_case fields', () 
     assert.match(electronSupabase, new RegExp(token), `electron mapping missing ${token}`);
     assert.match(migration, new RegExp(token), `migration missing ${token}`);
   }
+});
+
+test('character costume IPC channels use explicit character-costume names', () => {
+  for (const channel of [
+    'supabase:add-character-costume',
+    'supabase:update-character-costume',
+    'supabase:delete-character-costume',
+  ]) {
+    assert.match(electronMain, new RegExp(channel), `main IPC missing ${channel}`);
+    assert.match(electronPreload, new RegExp(channel), `preload IPC missing ${channel}`);
+  }
+  assert.doesNotMatch(electronMain, /supabase:(add|update|delete)-costume/);
+  assert.doesNotMatch(electronPreload, /supabase:(add|update|delete)-costume/);
 });
 
 test('legacy costume assignee remains visible in split assignee fields', () => {
@@ -174,7 +215,7 @@ test('character board is wired for image display, assignees, work links, and lig
   assert.ok(characterBoard.includes('const saved = await updateCostumeField(targetCostume.id, { workFilePath: filePath });'));
   assert.ok(characterBoard.includes('if (!saved) return;'));
   assert.ok(characterBoard.includes('useCharacterBoardStore.getState().characters.find'));
-  assert.match(imageFrameSource, /translate\(\$\{normalized\.x\}%, \$\{normalized\.y\}%\)/);
+  assert.match(imageFrameSource, /getCharacterImageFitTransformStyle\(normalized\)/);
   assert.match(characterBoard, /aspect-\[3\/4\] bg-bg-border\/30 flex items-center justify-center overflow-hidden/);
   assert.doesNotMatch(characterBoard, /aspect-\[4\/3\]/);
   assert.match(fitEditorSource, /stopImmediatePropagation/);
@@ -415,6 +456,7 @@ test('character image lightbox shows costume versions and a bottom costume thumb
   const displayFrame = characterImageLightbox.match(/<CharacterImageFrame\s+url=\{current\.url\}[\s\S]*?\/>/);
   assert.ok(displayFrame, 'lightbox display frame should render the current image');
   assert.doesNotMatch(displayFrame[0], /fit=\{current\.fit\}/);
+  assert.match(displayFrame[0], /\beager\b/);
   assert.match(characterImageLightbox, /<CharacterImageFitEditor[\s\S]*?fit=\{current\.fit\}/);
   assert.match(characterImageLightbox, /versionNo:\s*number/);
   assert.match(characterBoard, /versionNo:\s*c\.versionNo/);
@@ -425,6 +467,8 @@ test('character image lightbox shows costume versions and a bottom costume thumb
   assert.match(characterImageLightbox, /aria-label="다음 복장 썸네일"/);
   assert.match(characterImageLightbox, /entry\.versionNo/);
   assert.match(characterImageLightbox, /setIndex\(entryIndex\)/);
+  assert.match(imageFrameSource, /loading=\{eager \? 'eager' : 'lazy'\}/);
+  assert.match(imageFrameSource, /decoding=\{eager \? 'auto' : 'async'\}/);
 });
 
 test('episode reel controls are available in episode assets, character board, and scenes view', () => {
@@ -468,8 +512,9 @@ test('character image fit editor keeps a fixed crop frame and moves/scales the i
   assert.match(fitEditorSource, /aria-label="가로 위치"/);
   assert.match(fitEditorSource, /aria-label="세로 위치"/);
   assert.match(fitEditorSource, /aria-pressed=\{draft\.lockAspect\}/);
-  assert.match(fitEditorSource, /function getFitImageTransformStyle/);
-  assert.match(fitEditorSource, /translate\(\$\{normalized\.x\}%, \$\{normalized\.y\}%\) scale\(\$\{scaleX\}, \$\{scaleY\}\)/);
+  assert.match(fitEditorSource, /getCharacterImageFitTransformStyle\(draft\)/);
+  assert.match(fitEditorSource, /resolveCharacterImageFitScales\(draft\)/);
+  assert.doesNotMatch(fitEditorSource, /function getFitImageTransformStyle/);
   assert.match(fitEditorSource, /object-contain/);
   assert.doesNotMatch(fitEditorSource, /data-fit-handle/);
   assert.doesNotMatch(fitEditorSource, /HANDLE_META/);

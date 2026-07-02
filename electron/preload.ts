@@ -627,11 +627,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
   supabaseDeleteCharacter: (id: string) =>
     ipcRenderer.invoke('supabase:delete-character', id),
   supabaseAddCostume: (input: { characterId: string; name: string; createdBy?: string | null }) =>
-    ipcRenderer.invoke('supabase:add-costume', input),
+    ipcRenderer.invoke('supabase:add-character-costume', input),
   supabaseUpdateCostume: (id: string, updates: Record<string, unknown>, logContext?: unknown) =>
-    ipcRenderer.invoke('supabase:update-costume', id, updates, logContext),
+    ipcRenderer.invoke('supabase:update-character-costume', id, updates, logContext),
   supabaseDeleteCostume: (id: string) =>
-    ipcRenderer.invoke('supabase:delete-costume', id),
+    ipcRenderer.invoke('supabase:delete-character-costume', id),
   supabaseLinkCharacterEpisode: (episodeNumber: number, characterId: string, createdBy?: string | null) =>
     ipcRenderer.invoke('supabase:link-character-episode', episodeNumber, characterId, createdBy),
   supabaseUnlinkCharacterEpisode: (episodeNumber: number, characterId: string) =>

@@ -4,6 +4,7 @@ import type { CharacterImageBackground, CharacterImageFit } from '@/types';
 import {
   DEFAULT_CHARACTER_IMAGE_BACKGROUND,
   DEFAULT_CHARACTER_IMAGE_FIT,
+  getCharacterImageFitTransformStyle,
   normalizeCharacterImageFit,
 } from '@/utils/characterAssets';
 import { cn } from '@/utils/cn';
@@ -35,6 +36,7 @@ export function CharacterImageFrame({
   className,
   imgClassName,
   placeholder,
+  eager = false,
   onClick,
   onContextMenu,
 }: {
@@ -45,12 +47,12 @@ export function CharacterImageFrame({
   className?: string;
   imgClassName?: string;
   placeholder?: ReactNode;
+  eager?: boolean;
   onClick?: () => void;
   onContextMenu?: React.MouseEventHandler<HTMLDivElement>;
 }) {
   const normalized = normalizeCharacterImageFit(fit);
-  const sx = normalized.lockAspect ? normalized.scale : (normalized.scaleX ?? normalized.scale);
-  const sy = normalized.lockAspect ? normalized.scale : (normalized.scaleY ?? normalized.scale);
+  const fitStyle = getCharacterImageFitTransformStyle(normalized);
 
   return (
     <div
@@ -73,11 +75,10 @@ export function CharacterImageFrame({
           src={url}
           alt={alt}
           draggable={false}
+          loading={eager ? 'eager' : 'lazy'}
+          decoding={eager ? 'auto' : 'async'}
           className={cn('max-w-full max-h-full object-contain select-none will-change-transform', imgClassName)}
-          style={{
-            transform: `translate(${normalized.x}%, ${normalized.y}%) scale(${sx}, ${sy})`,
-            transformOrigin: 'center center',
-          }}
+          style={fitStyle}
         />
       ) : (
         placeholder ?? (

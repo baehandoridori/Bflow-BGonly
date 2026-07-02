@@ -127,6 +127,7 @@ export function CharacterImageLightbox({
             url={current.url}
             alt={current.name}
             background={current.background}
+            eager
             className="absolute inset-0 rounded-xl"
           />
           {entries.length > 1 && (

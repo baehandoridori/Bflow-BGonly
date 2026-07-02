@@ -11,13 +11,42 @@ export const DEFAULT_CHARACTER_IMAGE_FIT: CharacterImageFit = {
   lockAspect: true,
 };
 
-export function getParentFolderPath(filePath: string): string {
-  const trimmed = filePath.trim();
-  if (!trimmed) return '';
+function splitPathAt(path: string): { normalized: string; index: number } {
+  const trimmed = path.trim();
+  if (!trimmed) return { normalized: '', index: -1 };
   const normalized = trimmed.replace(/[\\/]+$/, '');
   const idx = Math.max(normalized.lastIndexOf('\\'), normalized.lastIndexOf('/'));
-  if (idx <= 0) return '';
-  return normalized.slice(0, idx);
+  return { normalized, index: idx };
+}
+
+export function getParentFolderPath(filePath: string): string {
+  const { normalized, index } = splitPathAt(filePath);
+  if (index <= 0) return '';
+  return normalized.slice(0, index);
+}
+
+export function getPathBaseName(path: string | null | undefined): string {
+  const { normalized, index } = splitPathAt(path ?? '');
+  if (!normalized) return '';
+  if (index < 0) return normalized;
+  return normalized.slice(index + 1);
+}
+
+export function resolveCharacterImageFitScales(fit: CharacterImageFit): { scaleX: number; scaleY: number } {
+  const normalized = normalizeCharacterImageFit(fit);
+  return {
+    scaleX: normalized.lockAspect ? normalized.scale : (normalized.scaleX ?? normalized.scale),
+    scaleY: normalized.lockAspect ? normalized.scale : (normalized.scaleY ?? normalized.scale),
+  };
+}
+
+export function getCharacterImageFitTransformStyle(fit: CharacterImageFit): { transform: string; transformOrigin: string } {
+  const normalized = normalizeCharacterImageFit(fit);
+  const { scaleX, scaleY } = resolveCharacterImageFitScales(normalized);
+  return {
+    transform: `translate(${normalized.x}%, ${normalized.y}%) scale(${scaleX}, ${scaleY})`,
+    transformOrigin: 'center center',
+  };
 }
 
 export function getResolvedCharacterFolderAfterFilePick(
