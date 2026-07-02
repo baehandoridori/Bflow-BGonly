@@ -39,7 +39,7 @@ import { CharacterImageFitEditor } from '@/components/characters/CharacterImageF
 import { CharacterImageLightbox, type CharacterImageLightboxEntry } from '@/components/characters/CharacterImageLightbox';
 import { chooseWorkFile, chooseWorkFolder, openWorkPath } from '@/services/sceneWorkLinkService';
 import { copyImageToClipboard } from '@/utils/imageActions';
-import { getResolvedCharacterFolderAfterFilePick } from '@/utils/characterAssets';
+import { DEFAULT_CHARACTER_IMAGE_BACKGROUND, getResolvedCharacterFolderAfterFilePick } from '@/utils/characterAssets';
 import { getUserColor } from '@/components/common/AssigneeSelect';
 
 type BoardTab = 'board' | 'episode-assets';
@@ -433,7 +433,7 @@ function CharacterCard({
       onContextMenu={onContextMenu}
       className="text-left bg-bg-card border border-bg-border rounded-xl overflow-hidden hover:border-accent/50 transition-colors duration-200 flex flex-col cursor-pointer"
     >
-      <div className="aspect-[4/3] bg-bg-border/30 flex items-center justify-center overflow-hidden">
+      <div className="aspect-[3/4] bg-bg-border/30 flex items-center justify-center overflow-hidden">
         {featured ? (
           <CharacterImageFrame
             url={featured.featuredImageUrl}
@@ -522,31 +522,6 @@ function TagChipSection({
   );
 }
 
-/** 이미지 크게 보기 라이트박스. */
-function ImageLightbox({ url, alt, onClose }: { url: string; alt: string; onClose: () => void }) {
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [onClose]);
-  return (
-    <div
-      className="fixed inset-0 z-[60] flex items-center justify-center bg-black/80 p-8 cursor-zoom-out"
-      onClick={onClose}
-    >
-      <img src={url} alt={alt} className="max-w-full max-h-full object-contain rounded-lg" onClick={(e) => e.stopPropagation()} />
-      <button
-        type="button"
-        aria-label="닫기"
-        onClick={onClose}
-        className="absolute top-5 right-5 text-white/80 hover:text-white cursor-pointer"
-      >
-        <X size={24} />
-      </button>
-    </div>
-  );
-}
-
 /** 큰 대표 이미지 — 클릭=크게보기, 아래 별도 버튼으로 교체/추가. */
 function FeaturedImageSlot({
   character,
@@ -592,7 +567,7 @@ function FeaturedImageSlot({
   }, [character.id, costume, updateCostumeField]);
 
   const shownUrl = shownCostume?.featuredImageUrl ?? null;
-  const shownBackground = shownCostume?.imageBackground ?? 'black';
+  const shownBackground = shownCostume?.imageBackground ?? DEFAULT_CHARACTER_IMAGE_BACKGROUND;
   const shownFit = shownCostume?.imageFit;
 
   return (

@@ -4,9 +4,9 @@ import type { CharacterImageBackground } from '@/types';
 import { cn } from '@/utils/cn';
 
 const BACKGROUND_OPTIONS: { value: CharacterImageBackground; label: string }[] = [
+  { value: 'transparent', label: '투명' },
   { value: 'black', label: '검정' },
   { value: 'white', label: '흰색' },
-  { value: 'transparent', label: '투명' },
   { value: 'checker', label: '체커' },
 ];
 

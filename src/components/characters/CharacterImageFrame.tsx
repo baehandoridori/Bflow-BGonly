@@ -1,7 +1,11 @@
 import type { CSSProperties, ReactNode } from 'react';
 import { Image as ImageIcon } from 'lucide-react';
 import type { CharacterImageBackground, CharacterImageFit } from '@/types';
-import { DEFAULT_CHARACTER_IMAGE_FIT, normalizeCharacterImageFit } from '@/utils/characterAssets';
+import {
+  DEFAULT_CHARACTER_IMAGE_BACKGROUND,
+  DEFAULT_CHARACTER_IMAGE_FIT,
+  normalizeCharacterImageFit,
+} from '@/utils/characterAssets';
 import { cn } from '@/utils/cn';
 
 function backgroundStyle(background: CharacterImageBackground): CSSProperties {
@@ -26,7 +30,7 @@ export function getCharacterImageBackgroundStyle(background: CharacterImageBackg
 export function CharacterImageFrame({
   url,
   alt,
-  background = 'black',
+  background = DEFAULT_CHARACTER_IMAGE_BACKGROUND,
   fit = DEFAULT_CHARACTER_IMAGE_FIT,
   className,
   imgClassName,

@@ -1,6 +1,6 @@
 import type { CharacterImageFit, CharacterImageBackground } from '../types/index.ts';
 
-export const DEFAULT_CHARACTER_IMAGE_BACKGROUND: CharacterImageBackground = 'black';
+export const DEFAULT_CHARACTER_IMAGE_BACKGROUND: CharacterImageBackground = 'transparent';
 
 export const DEFAULT_CHARACTER_IMAGE_FIT: CharacterImageFit = {
   scale: 1,

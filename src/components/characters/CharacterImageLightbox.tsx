@@ -118,7 +118,6 @@ export function CharacterImageLightbox({
             url={current.url}
             alt={current.name}
             background={current.background}
-            fit={current.fit}
             className="absolute inset-0 rounded-xl"
           />
           {entries.length > 1 && (
