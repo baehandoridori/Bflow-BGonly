@@ -141,6 +141,18 @@ test('character board is wired for image display, assignees, work links, and lig
   );
 });
 
+test('character image lightbox shows costume versions and a bottom costume thumbnail strip', () => {
+  assert.match(characterImageLightbox, /versionNo:\s*number/);
+  assert.match(characterBoard, /versionNo:\s*c\.versionNo/);
+  assert.match(characterImageLightbox, /복장 버전/);
+  assert.match(characterImageLightbox, /v\{current\.versionNo\}/);
+  assert.match(characterImageLightbox, /aria-label="복장 썸네일 목록"/);
+  assert.match(characterImageLightbox, /aria-label="이전 복장 썸네일"/);
+  assert.match(characterImageLightbox, /aria-label="다음 복장 썸네일"/);
+  assert.match(characterImageLightbox, /entry\.versionNo/);
+  assert.match(characterImageLightbox, /setIndex\(entryIndex\)/);
+});
+
 test('episode reel controls are available in episode assets, character board, and scenes view', () => {
   assert.match(episodeAssetBoard, /릴 파일/);
   assert.match(characterBoard, /릴 파일 보기/);

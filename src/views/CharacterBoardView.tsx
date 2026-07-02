@@ -1071,6 +1071,8 @@ function CharacterDetailPanel({
     .map((c) => ({
       costumeId: c.id,
       name: `${character.name} · ${c.name}`,
+      costumeName: c.name,
+      versionNo: c.versionNo,
       url: c.featuredImageUrl!,
       background: c.imageBackground,
       fit: c.imageFit,

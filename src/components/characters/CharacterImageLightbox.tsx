@@ -8,6 +8,8 @@ import { CharacterImageFitEditor } from './CharacterImageFitEditor';
 export interface CharacterImageLightboxEntry {
   costumeId: string;
   name: string;
+  costumeName: string;
+  versionNo: number;
   url: string;
   background: CharacterImageBackground;
   fit: CharacterImageFit;
@@ -33,6 +35,7 @@ export function CharacterImageLightbox({
   const [index, setIndex] = useState(initialIndex);
   const [fitEditorOpen, setFitEditorOpen] = useState(false);
   const initialCostumeIdRef = useRef(initialCostumeId);
+  const thumbnailStripRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     setIndex((prev) => {
@@ -59,6 +62,9 @@ export function CharacterImageLightbox({
     setIndex((prev) => (prev + delta + entries.length) % entries.length);
     setFitEditorOpen(false);
   };
+  const scrollThumbnailStrip = (delta: number) => {
+    thumbnailStripRef.current?.scrollBy({ left: delta, behavior: 'smooth' });
+  };
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
@@ -78,7 +84,12 @@ export function CharacterImageLightbox({
       <div className="relative flex h-full w-full max-w-6xl flex-col" onMouseDown={(e) => e.stopPropagation()}>
         <div className="mb-3 flex items-center justify-between gap-3 text-white">
           <div className="min-w-0">
-            <div className="truncate text-base font-semibold">{current.name}</div>
+            <div className="flex min-w-0 flex-wrap items-center gap-2">
+              <div className="truncate text-base font-semibold">{current.name}</div>
+              <span className="shrink-0 rounded-full border border-white/15 bg-white/10 px-2 py-0.5 text-[11px] font-medium text-white/80">
+                복장 버전 v{current.versionNo}
+              </span>
+            </div>
             <div className="text-xs text-white/55">{index + 1} / {entries.length}</div>
           </div>
           <div className="flex items-center gap-1.5">
@@ -131,6 +142,75 @@ export function CharacterImageLightbox({
             </>
           )}
         </div>
+
+        {entries.length > 0 && (
+          <div className="mt-3 shrink-0 rounded-xl border border-white/10 bg-black/35 p-2.5">
+            <div className="mb-2 flex items-center justify-between gap-3">
+              <div className="min-w-0 text-xs text-white/60">
+                다른 복장
+                <span className="ml-2 text-white/35">{entries.length}개</span>
+              </div>
+              {entries.length > 1 && (
+                <div className="flex items-center gap-1">
+                  <button
+                    type="button"
+                    aria-label="이전 복장 썸네일"
+                    onClick={() => scrollThumbnailStrip(-220)}
+                    className="rounded-md border border-white/10 p-1.5 text-white/65 hover:bg-white/10 hover:text-white"
+                  >
+                    <ChevronLeft size={15} />
+                  </button>
+                  <button
+                    type="button"
+                    aria-label="다음 복장 썸네일"
+                    onClick={() => scrollThumbnailStrip(220)}
+                    className="rounded-md border border-white/10 p-1.5 text-white/65 hover:bg-white/10 hover:text-white"
+                  >
+                    <ChevronRight size={15} />
+                  </button>
+                </div>
+              )}
+            </div>
+            <div
+              ref={thumbnailStripRef}
+              aria-label="복장 썸네일 목록"
+              className="flex gap-2 overflow-x-auto pb-1"
+            >
+              {entries.map((entry, entryIndex) => {
+                const selected = entry.costumeId === current.costumeId;
+                return (
+                  <button
+                    key={entry.costumeId}
+                    type="button"
+                    onClick={() => {
+                      setIndex(entryIndex);
+                      setFitEditorOpen(false);
+                    }}
+                    aria-pressed={selected}
+                    title={`${entry.costumeName} · v${entry.versionNo}`}
+                    className={`flex w-[82px] shrink-0 flex-col overflow-hidden rounded-lg border text-left transition-colors active:scale-[0.98] ${
+                      selected
+                        ? 'border-accent bg-accent/15 shadow-[0_0_0_1px_rgba(108,92,231,0.45)]'
+                        : 'border-white/10 bg-white/[0.04] hover:border-white/25 hover:bg-white/[0.07]'
+                    }`}
+                  >
+                    <CharacterImageFrame
+                      url={entry.url}
+                      alt={entry.name}
+                      background={entry.background}
+                      fit={entry.fit}
+                      className="h-[82px] w-full"
+                    />
+                    <span className="min-w-0 px-2 py-1.5">
+                      <span className="block truncate text-[11px] font-medium text-white/80">{entry.costumeName}</span>
+                      <span className="mt-0.5 block text-[10px] text-white/45">v{entry.versionNo}</span>
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        )}
       </div>
 
       {fitEditorOpen && (
