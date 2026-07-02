@@ -1,8 +1,10 @@
 import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Search, Film, User, FileText, Zap, Hash, Layers, CalendarDays, StickyNote } from 'lucide-react';
+import { Search, Film, User, FileText, Zap, Hash, Layers, CalendarDays, StickyNote, Drama } from 'lucide-react';
 import { useDataStore } from '@/stores/useDataStore';
 import { useAppStore } from '@/stores/useAppStore';
+import { useCharacterBoardStore } from '@/stores/useCharacterBoardStore';
+import { useCharacterBoardAccess } from '@/hooks/useCharacterBoardAccess';
 import { sceneProgress } from '@/utils/calcStats';
 import { stripEntityTokens } from '@/utils/entityTokens';
 import { DEPARTMENT_CONFIGS } from '@/types';
@@ -15,7 +17,7 @@ import type { CalendarEvent } from '@/types/calendar';
 /* ────────────────────────────────────────────────
    타입
    ──────────────────────────────────────────────── */
-type ResultCategory = 'scene' | 'assignee' | 'episode' | 'part' | 'memo' | 'event' | 'action';
+type ResultCategory = 'scene' | 'assignee' | 'character' | 'episode' | 'part' | 'memo' | 'event' | 'action';
 
 interface SearchResult {
   id: string;
@@ -63,12 +65,13 @@ const CATEGORY_LABELS: Record<ResultCategory, string> = {
   assignee: '담당자',
   episode: '에피소드',
   part: '파트',
+  character: '캐릭터',
   memo: '메모',
   event: '캘린더 이벤트',
   action: '빠른 액션',
 };
 
-const CATEGORY_ORDER: ResultCategory[] = ['action', 'scene', 'part', 'assignee', 'episode', 'memo', 'event'];
+const CATEGORY_ORDER: ResultCategory[] = ['action', 'scene', 'part', 'assignee', 'character', 'episode', 'memo', 'event'];
 
 /* ────────────────────────────────────────────────
    미니 프로그레스 바
@@ -111,6 +114,12 @@ export function SpotlightSearch() {
   const [calEvents, setCalEvents] = useState<CalendarEvent[]>([]);
   useEffect(() => { getEvents().then(setCalEvents); }, []);
   const episodeMemos = useDataStore((s) => s.episodeMemos);
+  const hasCharacterBoardAccess = useCharacterBoardAccess();
+  const characters = useCharacterBoardStore((s) => s.characters);
+  const characterCostumesByCharacter = useCharacterBoardStore((s) => s.byCharacter);
+  const characterBoardLoaded = useCharacterBoardStore((s) => s.loaded);
+  const characterBoardLoading = useCharacterBoardStore((s) => s.loading);
+  const loadCharacterBoard = useCharacterBoardStore((s) => s.load);
   const [partMemos, setPartMemos] = useState<Record<string, string>>({});
   const [partReelWorkers, setPartReelWorkers] = useState<Record<string, string>>({});
   // 파트 메모/릴 담당 로드
@@ -148,7 +157,13 @@ export function SpotlightSearch() {
     setSceneGroupMode,
     setToast,
     setHighlightUserName,
+    setPendingCharacterBoardRequest,
   } = useAppStore();
+
+  useEffect(() => {
+    if (!isOpen || !hasCharacterBoardAccess || characterBoardLoaded || characterBoardLoading) return;
+    void loadCharacterBoard({ silent: true });
+  }, [characterBoardLoaded, characterBoardLoading, hasCharacterBoardAccess, isOpen, loadCharacterBoard]);
 
   /* ── 글로벌 단축키 (useGlobalShortcuts에서 커스텀 이벤트로 위임) ── */
   const isOpenRef = useRef(isOpen);
@@ -222,7 +237,7 @@ export function SpotlightSearch() {
 
     // 빈 쿼리 → 빠른 액션만 표시
     if (!query.trim()) {
-      return [
+      const quickActions: SearchResult[] = [
         {
           id: 'action-dashboard',
           category: 'action',
@@ -264,6 +279,17 @@ export function SpotlightSearch() {
           action: () => { setView('team'); close(); },
         },
       ];
+      if (hasCharacterBoardAccess) {
+        quickActions.push({
+          id: 'action-character-board',
+          category: 'action',
+          title: '캐릭터 현황판',
+          subtitle: '캐릭터별 복장과 리깅 진행 보기',
+          icon: <Drama size={16} />,
+          action: () => { setView('character-board'); close(); },
+        });
+      }
+      return quickActions;
     }
 
     const q = query.trim();
@@ -466,6 +492,45 @@ export function SpotlightSearch() {
       }
     }
 
+    // ── 캐릭터 검색 (권한 보유자만 로드/노출) ──
+    if (hasCharacterBoardAccess) {
+      for (const character of characters) {
+        if (character.status === 'archived') continue;
+        const costumes = characterCostumesByCharacter.get(character.id) ?? [];
+        const nameScore = fuzzyScore(q, character.name);
+        let tagScore = 0;
+        let matchedTag = '';
+        for (const costume of costumes) {
+          for (const tag of [...costume.structureTags, ...costume.assetTags]) {
+            const score = fuzzyScore(q, tag) * 0.8;
+            if (score > tagScore) {
+              tagScore = score;
+              matchedTag = tag;
+            }
+          }
+        }
+        const score = Math.max(nameScore, tagScore);
+        if (score > 0) {
+          const matchedByTag = tagScore > nameScore && matchedTag;
+          items.push({
+            id: `character-${character.id}`,
+            category: 'character',
+            title: character.name,
+            subtitle: matchedByTag
+              ? `태그 "${matchedTag}" · 복장 ${costumes.length}개`
+              : `복장 ${costumes.length}개 · ${character.episodeIds.length}편 등장`,
+            icon: <Drama size={16} />,
+            score,
+            action: () => {
+              setPendingCharacterBoardRequest({ characterId: character.id });
+              setView('character-board');
+              close();
+            },
+          });
+        }
+      }
+    }
+
     // ── 에피소드 검색 ──
     for (const ep of episodes) {
       const epDisplayName = epName(ep);
@@ -528,7 +593,21 @@ export function SpotlightSearch() {
     // 점수 내림차순 정렬, 상위 20개
     items.sort((a, b) => b.score - a.score);
     return items.slice(0, 20);
-  }, [query, episodes, calEvents, episodeMemos, partMemos, partReelWorkers, resetAndNavigate, setView, setToast]);
+  }, [
+    query,
+    episodes,
+    calEvents,
+    episodeMemos,
+    partMemos,
+    partReelWorkers,
+    hasCharacterBoardAccess,
+    characters,
+    characterCostumesByCharacter,
+    resetAndNavigate,
+    setPendingCharacterBoardRequest,
+    setView,
+    setToast,
+  ]);
 
   /* ── 카테고리별 그룹핑 ── */
   const grouped = useMemo(() => {
@@ -617,7 +696,7 @@ export function SpotlightSearch() {
                     value={query}
                     onChange={(e) => setQuery(e.target.value)}
                     onKeyDown={handleKeyDown}
-                    placeholder="씬번호, 담당자, 에피소드 검색..."
+                    placeholder={hasCharacterBoardAccess ? '씬번호, 담당자, 캐릭터, 에피소드 검색...' : '씬번호, 담당자, 에피소드 검색...'}
                     className="flex-1 bg-transparent text-text-primary text-base placeholder:text-text-secondary/60 outline-none"
                     autoComplete="off"
                     spellCheck={false}

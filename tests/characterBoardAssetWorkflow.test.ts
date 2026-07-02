@@ -12,6 +12,8 @@ import {
 const typeSource = readFileSync('src/types/index.ts', 'utf8');
 const rendererSupabase = readFileSync('src/services/supabaseService.ts', 'utf8');
 const electronSupabase = readFileSync('electron/supabase.ts', 'utf8');
+const appStore = readFileSync('src/stores/useAppStore.ts', 'utf8');
+const spotlight = readFileSync('src/components/spotlight/SpotlightSearch.tsx', 'utf8');
 const characterBoard = readFileSync('src/views/CharacterBoardView.tsx', 'utf8');
 const characterStore = readFileSync('src/stores/useCharacterBoardStore.ts', 'utf8');
 const episodeAssetBoard = readFileSync('src/views/EpisodeAssetBoard.tsx', 'utf8');
@@ -203,6 +205,33 @@ test('character card right click opens the compact work menu instead of opening 
     imageContextMenuSource.indexOf('label="작업 파일 열기"') <
       imageContextMenuSource.indexOf('label="이미지 복사"'),
   );
+});
+
+test('spotlight opens character board entries through a store-backed pending request', () => {
+  assert.match(appStore, /pendingCharacterBoardRequest:\s*\{ characterId: string \} \| null/);
+  assert.match(appStore, /setPendingCharacterBoardRequest:\s*\(req: AppState\['pendingCharacterBoardRequest'\]\) => void/);
+  assert.match(appStore, /pendingCharacterBoardRequest:\s*null/);
+  assert.match(appStore, /pendingCharacterBoardRequest:\s*null,\r?\n\s*highlightSceneId:\s*null/);
+
+  assert.match(characterStore, /load:\s*\(opts\?: \{ silent\?: boolean \}\) => Promise<void>/);
+  assert.match(characterStore, /load:\s*async\s*\(opts\)\s*=>/);
+  assert.match(characterStore, /if \(!opts\?\.silent\) toast\.error\('캐릭터 현황판을 불러오지 못했어요'\)/);
+
+  assert.match(spotlight, /type ResultCategory = 'scene' \| 'assignee' \| 'character'/);
+  assert.match(spotlight, /useCharacterBoardAccess\(\)/);
+  assert.match(spotlight, /if \(!isOpen \|\| !hasCharacterBoardAccess \|\| characterBoardLoaded \|\| characterBoardLoading\) return;/);
+  assert.match(spotlight, /void loadCharacterBoard\(\{ silent: true \}\)/);
+  assert.match(spotlight, /CATEGORY_ORDER[\s\S]*'character'/);
+  assert.match(spotlight, /character\.status === 'archived'/);
+  assert.match(spotlight, /fuzzyScore\(q, tag\) \* 0\.8/);
+  assert.match(spotlight, /setPendingCharacterBoardRequest\(\{ characterId: character\.id \}\)/);
+  assert.match(spotlight, /placeholder=\{hasCharacterBoardAccess \? '씬번호, 담당자, 캐릭터, 에피소드 검색\.\.\.'/);
+
+  assert.match(characterBoard, /pendingCharacterBoardRequest/);
+  assert.match(characterBoard, /if \(!pendingCharacterBoardRequest \|\| !loaded\) return;/);
+  assert.match(characterBoard, /setPendingOpenId\(pendingCharacterBoardRequest\.characterId\)/);
+  assert.match(characterBoard, /setPendingCharacterBoardRequest\(null\)/);
+  assert.ok(characterBoard.includes('key={`${detailCharacter.id}:${detailRequest.nonce}`}'));
 });
 
 test('global button label wrapping is prevented while multiline button content stays available', () => {

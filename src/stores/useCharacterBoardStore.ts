@@ -101,7 +101,7 @@ interface CharacterBoardStore {
   /** 초기 로드 실패 — UI 가 무한 스피너 대신 에러+재시도를 보이도록. */
   loadError: boolean;
 
-  load: () => Promise<void>;
+  load: (opts?: { silent?: boolean }) => Promise<void>;
   startRealtime: () => () => void;
 
   addCharacter: (name: string, memo?: string) => Promise<Character | null>;
@@ -160,7 +160,7 @@ export const useCharacterBoardStore = create<CharacterBoardStore>((set, get) => 
   loading: false,
   loadError: false,
 
-  load: async () => {
+  load: async (opts) => {
     if (get().loading) return;
     set({ loading: true, loadError: false });
     try {
@@ -192,7 +192,7 @@ export const useCharacterBoardStore = create<CharacterBoardStore>((set, get) => 
     } catch (err) {
       console.error('[character-board] load 실패:', err);
       set({ loading: false, loadError: true });
-      toast.error('캐릭터 현황판을 불러오지 못했어요');
+      if (!opts?.silent) toast.error('캐릭터 현황판을 불러오지 못했어요');
     }
   },
 

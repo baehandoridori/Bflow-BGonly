@@ -77,6 +77,13 @@ interface AppState {
   setPendingSceneModalRequest: (req: AppState['pendingSceneModalRequest']) => void;
 
   /**
+   * Spotlight/위젯 등 외부 표면에서 캐릭터 현황판 상세 오픈을 요청할 때 사용.
+   * lazy view 마운트 race를 피하기 위해 이벤트가 아니라 store 기반 요청으로 소비한다.
+   */
+  pendingCharacterBoardRequest: { characterId: string } | null;
+  setPendingCharacterBoardRequest: (req: AppState['pendingCharacterBoardRequest']) => void;
+
+  /**
    * #화·#파트 점프 시 열려 있는 씬 상세 모달을 강제로 닫는 신호(4c, 코덱스 4차 P2).
    * scene 점프는 pendingSceneModalRequest 로 모달을 교체하지만, part/episode 점프는
    * 모달을 열지 않으므로 기존에 떠 있던 상세 모달이 목적지를 가린다.
@@ -271,6 +278,7 @@ export const useAppStore = create<AppState>((set) => ({
         sceneGroupMode: target.sceneGroupMode,
         settingsTab: target.settingsTab,
         pendingSceneModalRequest: null,
+        pendingCharacterBoardRequest: null,
         highlightSceneId: null,
         selectedSceneIds: new Set<string>(),
         closeSceneModalSignal: s.closeSceneModalSignal + 1,
@@ -281,6 +289,8 @@ export const useAppStore = create<AppState>((set) => ({
   clearNavigationBackStack: () => set({ navigationBackStack: [] }),
   pendingSceneModalRequest: null,
   setPendingSceneModalRequest: (req) => set({ pendingSceneModalRequest: req }),
+  pendingCharacterBoardRequest: null,
+  setPendingCharacterBoardRequest: (req) => set({ pendingCharacterBoardRequest: req }),
 
   closeSceneModalSignal: 0,
   requestCloseSceneModal: () => set((s) => ({ closeSceneModalSignal: s.closeSceneModalSignal + 1 })),
