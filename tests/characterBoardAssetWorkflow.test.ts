@@ -2,8 +2,10 @@ import { readFileSync } from 'node:fs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
+  DEFAULT_CHARACTER_IMAGE_BACKGROUND,
   getParentFolderPath,
   getResolvedCharacterFolderAfterFilePick,
+  normalizeCharacterImageBackground,
   normalizeCharacterImageFit,
 } from '../src/utils/characterAssets.ts';
 
@@ -16,8 +18,11 @@ const episodeAssetBoard = readFileSync('src/views/EpisodeAssetBoard.tsx', 'utf8'
 const scenesView = readFileSync('src/views/ScenesView.tsx', 'utf8');
 const characterImageLightbox = readFileSync('src/components/characters/CharacterImageLightbox.tsx', 'utf8');
 const fitEditorSource = readFileSync('src/components/characters/CharacterImageFitEditor.tsx', 'utf8');
+const imageFrameSource = readFileSync('src/components/characters/CharacterImageFrame.tsx', 'utf8');
+const imageContextMenuSource = readFileSync('src/components/characters/CharacterImageContextMenu.tsx', 'utf8');
 const devMock = readFileSync('src/mocks/devElectronAPI.ts', 'utf8');
 const migration = readFileSync('DEVLOG/migrations/2026-06-29-character-board-asset-workflow.sql', 'utf8');
+const backgroundDefaultMigration = readFileSync('DEVLOG/migrations/2026-07-03-character-image-background-default.sql', 'utf8');
 
 test('character asset helpers derive parent folder and preserve existing character folder', () => {
   assert.equal(
@@ -51,6 +56,20 @@ test('character image fit defaults are stable and clamp unsafe values', () => {
     y: 100,
     lockAspect: false,
   });
+});
+
+test('character image background defaults to transparent for new image workflows', () => {
+  assert.equal(DEFAULT_CHARACTER_IMAGE_BACKGROUND, 'transparent');
+  assert.equal(normalizeCharacterImageBackground('bad-value'), 'transparent');
+  assert.match(backgroundDefaultMigration, /ALTER COLUMN image_background SET DEFAULT 'transparent'/);
+  assert.match(imageFrameSource, /background = DEFAULT_CHARACTER_IMAGE_BACKGROUND/);
+  assert.match(characterBoard, /shownCostume\?\.imageBackground \?\? DEFAULT_CHARACTER_IMAGE_BACKGROUND/);
+  assert.match(devMock, /image_background: 'transparent'/);
+  assert.ok(
+    imageContextMenuSource.indexOf("{ value: 'transparent', label: '투명' }") <
+      imageContextMenuSource.indexOf("{ value: 'black', label: '검정' }"),
+    'transparent should be the first background menu option',
+  );
 });
 
 test('character and costume domain types expose asset workflow fields', () => {
@@ -119,7 +138,9 @@ test('character board is wired for image display, assignees, work links, and lig
   assert.ok(characterBoard.includes('const saved = await updateCostumeField(targetCostume.id, { workFilePath: filePath });'));
   assert.ok(characterBoard.includes('if (!saved) return;'));
   assert.ok(characterBoard.includes('useCharacterBoardStore.getState().characters.find'));
-  assert.match(readFileSync('src/components/characters/CharacterImageFrame.tsx', 'utf8'), /translate\(\$\{normalized\.x\}%, \$\{normalized\.y\}%\)/);
+  assert.match(imageFrameSource, /translate\(\$\{normalized\.x\}%, \$\{normalized\.y\}%\)/);
+  assert.match(characterBoard, /aspect-\[3\/4\] bg-bg-border\/30 flex items-center justify-center overflow-hidden/);
+  assert.doesNotMatch(characterBoard, /aspect-\[4\/3\]/);
   assert.match(fitEditorSource, /stopImmediatePropagation/);
   assert.match(fitEditorSource, /cropFrameRef/);
   assert.match(characterImageLightbox, /initialCostumeIdRef/);
@@ -142,6 +163,10 @@ test('character board is wired for image display, assignees, work links, and lig
 });
 
 test('character image lightbox shows costume versions and a bottom costume thumbnail strip', () => {
+  const displayFrame = characterImageLightbox.match(/<CharacterImageFrame\s+url=\{current\.url\}[\s\S]*?\/>/);
+  assert.ok(displayFrame, 'lightbox display frame should render the current image');
+  assert.doesNotMatch(displayFrame[0], /fit=\{current\.fit\}/);
+  assert.match(characterImageLightbox, /<CharacterImageFitEditor[\s\S]*?fit=\{current\.fit\}/);
   assert.match(characterImageLightbox, /versionNo:\s*number/);
   assert.match(characterBoard, /versionNo:\s*c\.versionNo/);
   assert.match(characterImageLightbox, /복장 버전/);
