@@ -4,6 +4,7 @@ import { ChevronLeft, ChevronRight, Copy, Move, X } from 'lucide-react';
 import type { CharacterImageBackground, CharacterImageFit } from '@/types';
 import { CharacterImageFrame } from './CharacterImageFrame';
 import { CharacterImageFitEditor } from './CharacterImageFitEditor';
+import { CHARACTER_LAYER_CLASS } from '@/constants/characterLayers';
 
 export interface CharacterImageLightboxEntry {
   costumeId: string;
@@ -86,7 +87,7 @@ export function CharacterImageLightbox({
   return createPortal(
     <div
       data-character-lightbox
-      className="fixed inset-0 z-[70] flex items-center justify-center bg-black/85 p-5"
+      className={`fixed inset-0 ${CHARACTER_LAYER_CLASS.lightbox} flex items-center justify-center bg-black/85 p-5`}
       onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}
     >
       <div className="relative flex h-full w-full max-w-6xl flex-col" onMouseDown={(e) => e.stopPropagation()}>

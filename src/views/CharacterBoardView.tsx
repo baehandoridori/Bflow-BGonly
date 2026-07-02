@@ -43,7 +43,9 @@ import { copyImageToClipboard } from '@/utils/imageActions';
 import { DEFAULT_CHARACTER_IMAGE_BACKGROUND, getResolvedCharacterFolderAfterFilePick } from '@/utils/characterAssets';
 import { getUserColor } from '@/components/common/AssigneeSelect';
 import { ConfirmDialog } from '@/components/common/ConfirmDialog';
-import { DESIGN_STAGE_META, RIGGING_STAGE_META, parseAssigneeNames } from '@/utils/characterStageMeta';
+import { parseAssigneeNames } from '@/utils/characterStageMeta';
+import { DESIGN_STAGE_META, RIGGING_STAGE_META, characterStageColor, type CharacterStageMeta } from '@/constants/characterStages';
+import { CHARACTER_LAYER_CLASS } from '@/constants/characterLayers';
 
 type BoardTab = 'board' | 'episode-assets';
 
@@ -139,7 +141,7 @@ function AssigneeNamePicker({
   };
 
   const modal = modalOpen && (
-    <div className="fixed inset-0 z-[85] flex items-center justify-center bg-black/55 p-4" onMouseDown={closeModal}>
+    <div className={`fixed inset-0 ${CHARACTER_LAYER_CLASS.popover} flex items-center justify-center bg-overlay/55 p-4`} onMouseDown={closeModal}>
       <div
         ref={dialogRef}
         role="dialog"
@@ -249,7 +251,7 @@ function AssigneeNamePicker({
           <button
             type="button"
             onClick={() => onChange(null)}
-            className="text-[11px] text-text-secondary/70 hover:text-text-primary"
+            className="text-[11px] text-text-secondary hover:text-text-primary"
           >
             해제
           </button>
@@ -257,7 +259,7 @@ function AssigneeNamePicker({
       </div>
       <div className="flex min-h-10 flex-wrap items-center gap-1.5">
         {selected.length === 0 ? (
-          <span className="text-xs text-text-secondary/60">미지정</span>
+          <span className="text-xs text-text-secondary">미지정</span>
         ) : selected.map((name) => {
           const color = getUserColor(name);
           const isListedUser = userNameSet.has(name);
@@ -346,13 +348,13 @@ function StageRail<T extends string>({
 }: {
   label: string;
   stages: readonly T[];
-  meta: Record<T, { label: string; color: string }>;
+  meta: Record<T, CharacterStageMeta>;
   current: T;
   onSelect: (s: T) => void;
   headerRight?: ReactNode;
 }) {
   const curIdx = Math.max(0, stages.indexOf(current));
-  const curColor = meta[current].color;
+  const curColor = characterStageColor(meta[current]);
   return (
     <div className="flex flex-col gap-2.5">
       <div className="flex flex-wrap items-center justify-between gap-2">
@@ -385,7 +387,7 @@ function StageRail<T extends string>({
                   style={{
                     left: '-50%',
                     width: '100%',
-                    background: reached ? meta[stages[i - 1]].color : 'rgb(var(--color-bg-border))',
+                    background: reached ? characterStageColor(meta[stages[i - 1]]) : 'rgb(var(--color-bg-border))',
                   }}
                 />
               )}
@@ -393,9 +395,9 @@ function StageRail<T extends string>({
               <span
                 className="relative z-[1] w-[18px] h-[18px] rounded-full flex items-center justify-center transition-all duration-200"
                 style={{
-                  background: reached ? m.color : 'rgb(var(--color-bg-card))',
-                  border: `2px solid ${reached ? m.color : 'rgb(var(--color-bg-border))'}`,
-                  boxShadow: isCur ? `0 0 0 4px ${m.color}33` : 'none',
+                  background: reached ? characterStageColor(m) : 'rgb(var(--color-bg-card))',
+                  border: `2px solid ${reached ? characterStageColor(m) : 'rgb(var(--color-bg-border))'}`,
+                  boxShadow: isCur ? `0 0 0 4px ${characterStageColor(m, 0.2)}` : 'none',
                 }}
               >
                 {passed && <Check size={10} className="text-white" strokeWidth={3} />}
@@ -403,7 +405,7 @@ function StageRail<T extends string>({
               </span>
               <span
                 className="text-[11px] leading-tight text-center transition-colors"
-                style={{ color: isCur ? m.color : reached ? 'rgb(var(--color-text-secondary))' : 'rgb(var(--color-text-secondary) / 0.5)' }}
+                style={{ color: isCur ? characterStageColor(m) : reached ? 'rgb(var(--color-text-secondary))' : 'rgb(var(--color-text-secondary) / 0.72)' }}
               >
                 {m.label}
               </span>
@@ -455,15 +457,27 @@ function CharacterCard({
         <div className="flex items-center gap-2 text-xs text-text-secondary">
           <span>복장 {costumes.length}</span>
           {character.episodeIds.length > 0 && (
-            <span className="text-text-secondary/70">· EP {character.episodeIds.length}</span>
+            <span className="text-text-secondary">· EP {character.episodeIds.length}</span>
           )}
         </div>
         {costumes.length > 0 ? (
           <div className="flex items-center gap-1.5 text-[11px]">
-            <span className="px-1.5 py-0.5 rounded-md" style={{ backgroundColor: '#A29BFE22', color: '#A29BFE' }}>
+            <span
+              className="px-1.5 py-0.5 rounded-md"
+              style={{
+                backgroundColor: characterStageColor(DESIGN_STAGE_META.done, 0.14),
+                color: characterStageColor(DESIGN_STAGE_META.done),
+              }}
+            >
               디자인 {designDone}/{costumes.length}
             </span>
-            <span className="px-1.5 py-0.5 rounded-md" style={{ backgroundColor: '#00B89422', color: '#00B894' }}>
+            <span
+              className="px-1.5 py-0.5 rounded-md"
+              style={{
+                backgroundColor: characterStageColor(RIGGING_STAGE_META.done, 0.14),
+                color: characterStageColor(RIGGING_STAGE_META.done),
+              }}
+            >
               리깅 {riggingDone}/{costumes.length}
             </span>
           </div>
@@ -516,7 +530,7 @@ function TagChipSection({
           <TagPill key={tag} tag={tag} on={tags.includes(tag)} onClick={() => toggle(tag)} />
         ))}
         <div className="flex items-center gap-1">
-          <Plus size={12} className="text-text-secondary/60" aria-hidden />
+          <Plus size={12} className="text-text-secondary" aria-hidden />
           <input
             value={input}
             onChange={(e) => setInput(e.target.value)}
@@ -762,12 +776,12 @@ function CostumeIdentity({ costume }: { costume: CharacterCostume }) {
         ) : (
           <>
             <span className="text-sm font-medium text-text-primary truncate">{costume.name}</span>
-            <span className="text-[11px] text-text-secondary/70 shrink-0">v{costume.versionNo}</span>
+            <span className="text-[11px] text-text-secondary shrink-0">v{costume.versionNo}</span>
             <button
               type="button"
               aria-label="복장 이름 편집"
               onClick={() => { setDraft(costume.name); setEditing(true); }}
-              className="-m-1.5 rounded-md p-1.5 text-text-secondary/70 hover:bg-bg-border/30 hover:text-text-primary cursor-pointer shrink-0"
+              className="-m-1.5 rounded-md p-1.5 text-text-secondary hover:bg-bg-border/30 hover:text-text-primary cursor-pointer shrink-0"
             >
               <Pencil size={12} />
             </button>
@@ -1021,7 +1035,7 @@ function CharacterListRow({
   selected: boolean;
   onSelect: () => void;
 }) {
-  const thumb = costumes.find((c) => c.featuredImageUrl)?.featuredImageUrl ?? null;
+  const thumbCostume = costumes.find((c) => c.featuredImageUrl) ?? null;
   const ratio = riggingRatio(costumes);
   return (
     <button
@@ -1034,12 +1048,22 @@ function CharacterListRow({
       )}
     >
       <div className="w-8 h-8 rounded-md bg-bg-border/40 overflow-hidden flex items-center justify-center shrink-0">
-        {thumb ? <img src={thumb} alt="" className="w-full h-full object-cover" /> : <User size={15} className="text-text-secondary/50" />}
+        {thumbCostume ? (
+          <CharacterImageFrame
+            url={thumbCostume.featuredImageUrl}
+            alt=""
+            background={thumbCostume.imageBackground}
+            fit={thumbCostume.imageFit}
+            className="w-full h-full"
+          />
+        ) : (
+          <User size={15} className="text-text-secondary" />
+        )}
       </div>
       <div className="flex flex-col gap-1 min-w-0 flex-1">
         <div className={cn('text-sm truncate', selected ? 'text-text-primary font-medium' : 'text-text-secondary')}>{character.name}</div>
-        <div className="h-1 rounded-full bg-bg-border/60 overflow-hidden">
-          <div className="h-full rounded-full transition-[width] duration-300" style={{ width: `${Math.round(ratio * 100)}%`, backgroundColor: '#00B894' }} />
+        <div className="h-1 rounded-full bg-bg-border/60 overflow-hidden" title={`리깅 완료 ${Math.round(ratio * 100)}%`} aria-label={`리깅 완료 ${Math.round(ratio * 100)}%`}>
+          <div className="h-full rounded-full transition-[width] duration-300" style={{ width: `${Math.round(ratio * 100)}%`, backgroundColor: characterStageColor(RIGGING_STAGE_META.done) }} />
         </div>
       </div>
     </button>
@@ -1091,7 +1115,7 @@ function CostumeThumbCard({
       </div>
       <div className="flex items-center justify-between gap-1 px-2 py-1.5 bg-bg-card">
         <span className={cn('text-xs truncate', selected ? 'text-text-primary' : 'text-text-secondary')}>{costume.name}</span>
-        <span className="text-[10px] text-text-secondary/70 shrink-0">v{costume.versionNo}</span>
+        <span className="text-[10px] text-text-secondary shrink-0">v{costume.versionNo}</span>
       </div>
       <button
         type="button"
@@ -1105,7 +1129,7 @@ function CostumeThumbCard({
           });
           if (ok) await onDelete();
         }}
-        className="absolute top-1 right-1 rounded-md bg-black/40 p-1.5 text-white/80 opacity-0 transition-opacity hover:text-[#FF6B6B] focus-visible:opacity-100 group-hover:opacity-100 group-focus-within:opacity-100 cursor-pointer"
+        className="absolute top-1 right-1 rounded-md bg-black/40 p-1.5 text-white/80 opacity-0 transition-opacity hover:text-red-400 focus-visible:opacity-100 group-hover:opacity-100 group-focus-within:opacity-100 cursor-pointer"
       >
         <Trash2 size={13} />
       </button>
@@ -1335,7 +1359,7 @@ function CharacterDetailPanel({
               <button
                 type="button"
                 onClick={handleDeleteCharacter}
-                className="flex items-center gap-1 rounded-md px-2 py-1.5 text-sm text-text-secondary hover:bg-bg-border/30 hover:text-[#FF6B6B] cursor-pointer"
+                className="flex items-center gap-1 rounded-md px-2 py-1.5 text-sm text-text-secondary hover:bg-red-500/10 hover:text-red-400 cursor-pointer"
               >
                 <Trash2 size={14} /> 영구 삭제
               </button>
@@ -1422,7 +1446,7 @@ function CharacterDetailPanel({
                     </div>
                   );
                 })}
-                {episodes.length === 0 && <span className="text-xs text-text-secondary/60">등록된 에피소드가 없어요</span>}
+                {episodes.length === 0 && <span className="text-xs text-text-secondary">등록된 에피소드가 없어요</span>}
               </div>
             </div>
 
@@ -1531,6 +1555,7 @@ function CharacterDetailModal({
     [archivedMode, characters],
   );
   const [selectedId, setSelectedId] = useState(initialCharacterId);
+  const [listQuery, setListQuery] = useState('');
   const dialogRef = useRef<HTMLDivElement>(null);
   const modalFocus = useModalFocus(dialogRef, { autoFocus: true });
 
@@ -1539,6 +1564,11 @@ function CharacterDetailModal({
   // 캐릭터를 바꾸면 댓글 수 배지를 리셋(새 캐릭터 패널이 onCountChange 로 다시 채움).
   useEffect(() => { setCommentCount(0); }, [selectedId]);
 
+  const filteredListCharacters = useMemo(() => {
+    const q = listQuery.trim().toLowerCase();
+    if (!q) return visibleCharacters;
+    return visibleCharacters.filter((character) => character.name.toLowerCase().includes(q));
+  }, [listQuery, visibleCharacters]);
   const selected = visibleCharacters.find((c) => c.id === selectedId) ?? null;
   useEffect(() => {
     if (selected) return;
@@ -1558,7 +1588,7 @@ function CharacterDetailModal({
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-overlay/60 backdrop-blur-sm p-4"
+      className={`fixed inset-0 ${CHARACTER_LAYER_CLASS.modal} flex items-center justify-center bg-overlay/60 backdrop-blur-sm p-4`}
       onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}
     >
       <div
@@ -1586,9 +1616,20 @@ function CharacterDetailModal({
               <button type="button" onClick={onClose} className="flex items-center gap-1.5 text-sm text-text-secondary hover:text-text-primary cursor-pointer">
                 <X size={15} /> 닫기
               </button>
+              <div className="relative mt-3">
+                <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-text-secondary" />
+                <input
+                  value={listQuery}
+                  onChange={(event) => setListQuery(event.target.value)}
+                  placeholder="목록 검색"
+                  className="w-full rounded-lg border border-bg-border bg-bg-border/15 py-1.5 pl-7 pr-2 text-xs text-text-primary outline-none placeholder:text-text-secondary focus:border-accent/50"
+                />
+              </div>
             </div>
             <div className="flex-1 min-h-0 overflow-y-auto py-1.5">
-              {visibleCharacters.map((c) => (
+              {filteredListCharacters.length === 0 ? (
+                <div className="px-3 py-8 text-center text-xs text-text-secondary">검색 결과가 없어요.</div>
+              ) : filteredListCharacters.map((c) => (
                 <CharacterListRow key={c.id} character={c} costumes={byCharacter.get(c.id) ?? []} selected={c.id === selectedId} onSelect={() => setSelectedId(c.id)} />
               ))}
             </div>
@@ -1659,7 +1700,7 @@ function AddCharacterModal({ onClose }: { onClose: () => void }) {
   }, [onClose]);
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-6" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>
+    <div className={`fixed inset-0 ${CHARACTER_LAYER_CLASS.modal} flex items-center justify-center bg-overlay/50 p-6`} onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>
       <div
         ref={dialogRef}
         role="dialog"
@@ -1777,8 +1818,20 @@ function CharacterGrid({ onAdd, pendingOpenId, onConsumeOpen }: { onAdd: () => v
       );
     }
     return (
-      <div className="flex items-center justify-center h-40">
-        <div className="w-6 h-6 border-2 border-accent border-t-transparent rounded-full animate-spin" />
+      <div className="grid grid-cols-[repeat(auto-fill,minmax(180px,1fr))] gap-4">
+        {Array.from({ length: 6 }).map((_, index) => (
+          <div key={index} className="overflow-hidden rounded-xl border border-bg-border bg-bg-card">
+            <div className="aspect-[3/4] bg-bg-border/30 animate-pulse motion-reduce:animate-none" />
+            <div className="space-y-2 p-3">
+              <div className="h-4 w-3/4 rounded bg-bg-border/40 animate-pulse motion-reduce:animate-none" />
+              <div className="h-3 w-1/2 rounded bg-bg-border/30 animate-pulse motion-reduce:animate-none" />
+              <div className="flex gap-1.5">
+                <div className="h-5 w-16 rounded-md bg-bg-border/30 animate-pulse motion-reduce:animate-none" />
+                <div className="h-5 w-14 rounded-md bg-bg-border/30 animate-pulse motion-reduce:animate-none" />
+              </div>
+            </div>
+          </div>
+        ))}
       </div>
     );
   }
@@ -1788,7 +1841,7 @@ function CharacterGrid({ onAdd, pendingOpenId, onConsumeOpen }: { onAdd: () => v
       <div className="flex flex-col gap-2.5">
         <div className="flex items-center justify-between gap-3 flex-wrap">
           <div className="relative w-full max-w-xs">
-            <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-text-secondary/60" />
+            <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-text-secondary" />
             <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="이름으로 검색" className="w-full bg-bg-card border border-bg-border rounded-lg pl-8 pr-3 py-2 text-sm text-text-primary outline-none focus:border-accent/50" />
           </div>
           <div className="flex items-center gap-1.5">
@@ -1815,7 +1868,7 @@ function CharacterGrid({ onAdd, pendingOpenId, onConsumeOpen }: { onAdd: () => v
           <div className="flex flex-wrap items-center gap-1.5">
             {allTags.map((t) => <TagPill key={t} tag={t} on={activeTags.includes(t)} onClick={() => toggleTag(t)} />)}
             {activeTags.length > 0 && (
-              <button type="button" onClick={() => setActiveTags([])} className="text-xs text-text-secondary/70 hover:text-text-primary px-1.5 cursor-pointer">필터 해제</button>
+              <button type="button" onClick={() => setActiveTags([])} className="text-xs text-text-secondary hover:text-text-primary px-1.5 cursor-pointer">필터 해제</button>
             )}
           </div>
         )}
@@ -1834,7 +1887,17 @@ function CharacterGrid({ onAdd, pendingOpenId, onConsumeOpen }: { onAdd: () => v
           )}
         </div>
       ) : filtered.length === 0 ? (
-        <div className="text-center text-text-secondary py-16">조건에 맞는 캐릭터가 없어요. 검색어나 태그 필터를 바꿔보세요.</div>
+        <div className="flex flex-col items-center justify-center gap-3 py-16 text-center text-text-secondary">
+          <Search size={24} className="opacity-45" />
+          <div className="text-sm">조건에 맞는 캐릭터가 없어요.</div>
+          <button
+            type="button"
+            onClick={() => { setQuery(''); setActiveTags([]); }}
+            className="rounded-lg border border-bg-border px-3 py-2 text-sm text-text-primary hover:border-accent/50 hover:bg-bg-border/30"
+          >
+            검색·필터 초기화
+          </button>
+        </div>
       ) : (
         <div className="grid grid-cols-[repeat(auto-fill,minmax(180px,1fr))] gap-4">
           {filtered.map((c) => (

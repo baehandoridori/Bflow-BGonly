@@ -20,6 +20,10 @@ const spotlight = readFileSync('src/components/spotlight/SpotlightSearch.tsx', '
 const characterBoard = readFileSync('src/views/CharacterBoardView.tsx', 'utf8');
 const characterStore = readFileSync('src/stores/useCharacterBoardStore.ts', 'utf8');
 const characterStageMeta = readFileSync('src/utils/characterStageMeta.ts', 'utf8');
+const characterStageConstants = readFileSync('src/constants/characterStages.ts', 'utf8');
+const characterLayerConstants = readFileSync('src/constants/characterLayers.ts', 'utf8');
+const themeSource = readFileSync('src/themes.ts', 'utf8');
+const indexHtml = readFileSync('index.html', 'utf8');
 const characterFolderService = readFileSync('src/services/characterFolderService.ts', 'utf8');
 const characterFolderRootSection = readFileSync('src/components/settings/CharacterFolderRootSection.tsx', 'utf8');
 const settingsView = readFileSync('src/views/SettingsView.tsx', 'utf8');
@@ -297,10 +301,13 @@ test('spotlight opens character board entries through a store-backed pending req
 });
 
 test('my tasks widget includes assigned character design and rigging work', () => {
-  assert.match(characterStageMeta, /export const DESIGN_STAGE_META/);
-  assert.match(characterStageMeta, /export const RIGGING_STAGE_META/);
+  assert.match(characterStageConstants, /export const DESIGN_STAGE_META/);
+  assert.match(characterStageConstants, /export const RIGGING_STAGE_META/);
+  assert.match(characterStageConstants, /export function characterStageColor/);
   assert.match(characterStageMeta, /export function parseAssigneeNames/);
-  assert.match(characterBoard, /import \{ DESIGN_STAGE_META, RIGGING_STAGE_META, parseAssigneeNames \} from '@\/utils\/characterStageMeta'/);
+  assert.match(characterBoard, /import \{ parseAssigneeNames \} from '@\/utils\/characterStageMeta'/);
+  assert.match(characterBoard, /import \{ DESIGN_STAGE_META, RIGGING_STAGE_META, characterStageColor/);
+  assert.match(myCharacterTasks, /characterStageColor\(meta\)/);
 
   assert.match(characterStore, /ensureLoadedAndRealtime: \(opts\?: \{ silent\?: boolean \}\) => \(\) => void/);
   assert.match(characterStore, /let characterBoardRealtimeRefCount = 0/);
@@ -368,6 +375,34 @@ test('character board safety and accessibility interactions use app-native guard
   assert.match(characterBoard, /이미지 놓기/);
   assert.match(characterBoard, /window\.addEventListener\('paste', onPaste\)/);
   assert.match(fitEditorSource, /focus-visible:ring-2 focus-visible:ring-accent\/70/);
+});
+
+test('character board visual tokens support light mode and consistent layers', () => {
+  assert.match(indexCss, /--char-stage-progress: 116 185 255/);
+  assert.match(indexCss, /\[data-color-mode="light"\][\s\S]*--char-stage-progress: 46 134 222/);
+  assert.match(themeSource, /const mode = colorMode \?\? 'dark'/);
+  assert.match(themeSource, /root\.classList\.toggle\('dark', mode === 'dark'\)/);
+  assert.match(themeSource, /root\.style\.colorScheme = mode/);
+  assert.match(indexHtml, /#root \{[\s\S]*background: rgb\(var\(--color-bg-primary, 15 17 23\)\)/);
+  assert.match(characterStageConstants, /cssVar: '--char-stage-complete'/);
+  assert.match(characterBoard, /characterStageColor\(DESIGN_STAGE_META\.done/);
+  assert.match(characterBoard, /characterStageColor\(RIGGING_STAGE_META\.done/);
+  assert.match(episodeAssetBoard, /import \{ RIGGING_STAGE_META, characterStageColor \} from '@\/constants\/characterStages'/);
+  assert.match(episodeAssetBoard, /characterStageColor\(RIGGING_STAGE_META\[rigging\]\)/);
+  assert.doesNotMatch(characterBoard, /#A29BFE22|#00B89422|#FF6B6B/);
+  assert.doesNotMatch(episodeAssetBoard, /#8B8DA3|#74B9FF|#6C5CE7|#FDCB6E|#00B894|#FF6B6B/);
+
+  assert.match(characterLayerConstants, /modal: 'z-50'/);
+  assert.match(characterBoard, /CHARACTER_LAYER_CLASS\.modal/);
+  assert.match(imageContextMenuSource, /CHARACTER_LAYER_CLASS\.menu/);
+  assert.match(fitEditorSource, /CHARACTER_LAYER_CLASS\.editor/);
+  assert.match(characterImageLightbox, /CHARACTER_LAYER_CLASS\.lightbox/);
+
+  assert.match(fitEditorSource, /rgba\(0,0,0,0\.72\)/);
+  assert.match(fitEditorSource, /rgba\(255,255,255,0\.78\)/);
+  assert.match(characterBoard, /목록 검색/);
+  assert.match(characterBoard, /검색·필터 초기화/);
+  assert.match(characterBoard, /motion-reduce:animate-none/);
 });
 
 test('global button label wrapping is prevented while multiline button content stays available', () => {

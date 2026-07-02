@@ -28,14 +28,8 @@ import { cn } from '@/utils/cn';
 import { chooseWorkFile, openWorkPath } from '@/services/sceneWorkLinkService';
 import { updateEpisodeReelPath } from '@/services/supabaseService';
 import { ConfirmDialog } from '@/components/common/ConfirmDialog';
-
-const RIGGING_STAGE_META: Record<CostumeRiggingStage, { label: string; color: string }> = {
-  waiting: { label: '대기', color: '#8B8DA3' },
-  vectorized: { label: '벡터화', color: '#74B9FF' },
-  rigging: { label: '리깅', color: '#6C5CE7' },
-  feedback: { label: '피드백', color: '#FDCB6E' },
-  done: { label: '완성', color: '#00B894' },
-};
+import { RIGGING_STAGE_META, characterStageColor } from '@/constants/characterStages';
+import { CHARACTER_LAYER_CLASS } from '@/constants/characterLayers';
 
 function characterThumb(costumes: CharacterCostume[]): string | null {
   return costumes.find((c) => c.featuredImageUrl)?.featuredImageUrl ?? null;
@@ -77,12 +71,12 @@ function StaticTag({ tag }: { tag: string }) {
 
 function RiggingBadge({ stage }: { stage: CostumeRiggingStage | null }) {
   if (!stage) {
-    return <span className="px-2 py-0.5 rounded-full text-[11px] text-text-secondary/60 border border-bg-border">복장 없음</span>;
+    return <span className="px-2 py-0.5 rounded-full text-[11px] text-text-secondary border border-bg-border">복장 없음</span>;
   }
   const m = RIGGING_STAGE_META[stage];
   return (
-    <span className="px-2 py-0.5 rounded-full text-[11px] font-medium flex items-center gap-1.5" style={{ background: `${m.color}22`, color: m.color }}>
-      <span className="w-1.5 h-1.5 rounded-full" style={{ background: m.color }} />
+    <span className="px-2 py-0.5 rounded-full text-[11px] font-medium flex items-center gap-1.5" style={{ background: characterStageColor(m, 0.14), color: characterStageColor(m), border: `1px solid ${characterStageColor(m, 0.35)}` }}>
+      <span className="w-1.5 h-1.5 rounded-full" style={{ background: characterStageColor(m) }} />
       리깅 {m.label}
     </span>
   );
@@ -134,21 +128,21 @@ function EpisodeCharRow({
       )}
     >
       <div className="w-9 h-9 rounded-md bg-bg-border/40 overflow-hidden flex items-center justify-center shrink-0">
-        {thumb ? <img src={thumb} alt="" className="w-full h-full object-cover" /> : <User size={16} className="text-text-secondary/50" />}
+        {thumb ? <img src={thumb} alt="" className="w-full h-full object-cover" /> : <User size={16} className="text-text-secondary" />}
       </div>
       <div className="flex flex-col gap-0.5 min-w-0 flex-1">
         <div className={cn('text-sm truncate', selected ? 'text-text-primary font-medium' : 'text-text-secondary')}>
           {character.name}
-          {costumeName && <span className="text-text-secondary/60 font-normal"> · {costumeName}</span>}
+          {costumeName && <span className="text-text-secondary font-normal"> · {costumeName}</span>}
         </div>
         <div className="flex items-center gap-1.5 text-[10px]">
           {rigging ? (
             <>
-              <span className="w-1.5 h-1.5 rounded-full" style={{ background: RIGGING_STAGE_META[rigging].color }} />
-              <span style={{ color: RIGGING_STAGE_META[rigging].color }}>{RIGGING_STAGE_META[rigging].label}</span>
+              <span className="w-1.5 h-1.5 rounded-full" style={{ background: characterStageColor(RIGGING_STAGE_META[rigging]) }} />
+              <span style={{ color: characterStageColor(RIGGING_STAGE_META[rigging]) }}>{RIGGING_STAGE_META[rigging].label}</span>
             </>
           ) : (
-            <span className="text-text-secondary/50">복장 없음</span>
+            <span className="text-text-secondary">복장 없음</span>
           )}
         </div>
       </div>
@@ -199,7 +193,7 @@ function EpisodeCharDetail({
             });
             if (ok) await unlinkEpisode(character.id, episodeNumber);
           }}
-          className="text-text-secondary hover:text-[#FF6B6B] text-xs flex items-center gap-1 shrink-0 cursor-pointer"
+          className="text-text-secondary hover:text-red-400 text-xs flex items-center gap-1 shrink-0 cursor-pointer"
         >
           <X size={13} /> 제거
         </button>
@@ -230,7 +224,7 @@ function EpisodeCharDetail({
                   </button>
                 )}
               </div>
-              <div className="text-[11px] text-text-secondary/60 leading-relaxed">
+              <div className="text-[11px] text-text-secondary leading-relaxed">
                 진행 편집은 캐릭터 현황판에서 해요. 여기선 이 편 정보만 적습니다.
               </div>
             </div>
@@ -247,7 +241,7 @@ function EpisodeCharDetail({
         <div className="flex flex-col gap-2">
           <div className="text-xs text-text-secondary">이 편 복장</div>
           {costumes.length === 0 ? (
-            <div className="text-xs text-text-secondary/60 border border-dashed border-bg-border rounded-lg py-4 text-center">
+            <div className="text-xs text-text-secondary border border-dashed border-bg-border rounded-lg py-4 text-center">
               아직 복장이 없어요. 캐릭터 현황판에서 디자인을 추가하세요.
             </div>
           ) : (
@@ -324,14 +318,14 @@ function AddCharacterToEpisode({
   }, [candidates, query]);
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-6" onClick={onClose}>
+    <div className={`fixed inset-0 ${CHARACTER_LAYER_CLASS.modal} flex items-center justify-center bg-overlay/50 p-6`} onClick={onClose}>
       <div className="bg-bg-card border border-bg-border rounded-2xl w-full max-w-md p-5 flex flex-col gap-4 max-h-[80vh]" onClick={(e) => e.stopPropagation()}>
         <div className="flex items-center justify-between">
           <h2 className="text-lg font-semibold text-text-primary">등장 캐릭터 추가</h2>
           <button type="button" onClick={onClose} className="text-text-secondary hover:text-text-primary cursor-pointer"><X size={18} /></button>
         </div>
         <div className="relative">
-          <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-text-secondary/60" />
+          <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-text-secondary" />
           <input autoFocus value={query} onChange={(e) => setQuery(e.target.value)} placeholder="캐릭터 이름 검색" className="w-full bg-transparent border border-bg-border rounded-md pl-8 pr-3 py-2 text-text-primary outline-none focus:border-accent/50" />
         </div>
         <div className="flex flex-col gap-0.5 overflow-y-auto">
@@ -350,7 +344,7 @@ function AddCharacterToEpisode({
                   className="flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-sm text-text-primary hover:bg-accent/10 text-left cursor-pointer"
                 >
                   <div className="w-7 h-7 rounded-md bg-bg-border/40 overflow-hidden flex items-center justify-center shrink-0">
-                    {thumb ? <img src={thumb} alt="" className="w-full h-full object-cover" /> : <User size={14} className="text-text-secondary/50" />}
+                    {thumb ? <img src={thumb} alt="" className="w-full h-full object-cover" /> : <User size={14} className="text-text-secondary" />}
                   </div>
                   <span className="flex-1 min-w-0 truncate">{c.name}</span>
                   <Plus size={14} className="text-accent shrink-0" />
@@ -455,9 +449,18 @@ export function EpisodeAssetBoard({ onOpenCharacter }: { onOpenCharacter?: (id: 
             className={cn(
               'flex items-center gap-1.5 px-3 py-2 rounded-lg border text-sm transition-colors cursor-pointer',
               selectedEpisode?.reelFilePath
-                ? 'border-[#00B89455] bg-[#00B8941a] text-[#00B894]'
+                ? ''
                 : 'border-bg-border text-text-secondary hover:text-text-primary hover:border-text-secondary/50',
             )}
+            style={
+              selectedEpisode?.reelFilePath
+                ? {
+                    borderColor: characterStageColor(RIGGING_STAGE_META.done, 0.35),
+                    backgroundColor: characterStageColor(RIGGING_STAGE_META.done, 0.12),
+                    color: characterStageColor(RIGGING_STAGE_META.done),
+                  }
+                : undefined
+            }
           >
             <Film size={15} /> 릴 파일
           </button>

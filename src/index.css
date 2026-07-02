@@ -138,6 +138,14 @@
   --status-error:       #FF7675;   /* 오류 */
   --status-done:        #00B894;   /* 완료 */
 
+  /* 캐릭터 현황판 단계 색 — rgb triplet 형태라 alpha 합성이 가능하다. */
+  --char-stage-waiting: 139 141 163;
+  --char-stage-progress: 116 185 255;
+  --char-stage-rigging: 108 92 231;
+  --char-stage-feedback: 253 203 110;
+  --char-stage-done: 162 155 254;
+  --char-stage-complete: 0 184 148;
+
   /* 파트 색 (A·B·C·D) — A~D 외 파트는 회색 fallback (E, F, ... 도 시각 깨지지 않게) */
   --part-a: #FF9F43;   /* 주황 */
   --part-b: #74B9FF;   /* 파랑 */
@@ -191,6 +199,13 @@
   --status-adjust:      #C99224;
   --status-error:       #D74A4A;
   --status-done:        #00A589;
+
+  --char-stage-waiting: 107 114 128;
+  --char-stage-progress: 46 134 222;
+  --char-stage-rigging: 108 92 231;
+  --char-stage-feedback: 201 146 36;
+  --char-stage-done: 108 92 231;
+  --char-stage-complete: 0 165 137;
 
   /* 라이트 모드 파트 색 — 다크보다 살짝 진하게 */
   --part-a: #E08229;

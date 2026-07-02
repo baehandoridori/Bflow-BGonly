@@ -14,6 +14,10 @@ function kindLabel(kind: CharacterTaskItem['kind']): string {
   return kind === 'design' ? '디자인' : '리깅';
 }
 
+function colorMix(color: string, amount: number): string {
+  return `color-mix(in srgb, ${color} ${amount}%, transparent)`;
+}
+
 export function CharacterTaskRow({ task, onOpen, enterDelay = 0, reduce = false }: CharacterTaskViewProps) {
   const clickable = !!onOpen;
   return (
@@ -28,7 +32,7 @@ export function CharacterTaskRow({ task, onOpen, enterDelay = 0, reduce = false 
     >
       <span className={cn(
         'text-[11px] font-bold shrink-0',
-        task.kind === 'design' ? 'text-[#74B9FF]' : 'text-[#6C5CE7]',
+        task.kind === 'design' ? 'text-[rgb(var(--char-stage-progress))]' : 'text-[rgb(var(--char-stage-rigging))]',
       )}>
         :: {kindLabel(task.kind)}
       </span>
@@ -51,7 +55,7 @@ export function CharacterTaskRow({ task, onOpen, enterDelay = 0, reduce = false 
 
       <span
         className="px-1.5 py-0.5 rounded-full text-[10px] font-medium shrink-0"
-        style={{ color: task.stageColor, background: `${task.stageColor}1f`, border: `1px solid ${task.stageColor}55` }}
+        style={{ color: task.stageColor, background: colorMix(task.stageColor, 12), border: `1px solid ${colorMix(task.stageColor, 35)}` }}
       >
         {task.stageLabel}
       </span>
@@ -84,14 +88,14 @@ export function CharacterTaskCard({ task, onOpen, enterDelay = 0, reduce = false
     >
       <div className="flex items-center gap-1.5">
         <span className={cn(
-          'text-[10px] font-bold',
-          task.kind === 'design' ? 'text-[#74B9FF]' : 'text-[#6C5CE7]',
+        'text-[10px] font-bold',
+          task.kind === 'design' ? 'text-[rgb(var(--char-stage-progress))]' : 'text-[rgb(var(--char-stage-rigging))]',
         )}>
           :: {kindLabel(task.kind)}
         </span>
         <span
           className="ml-auto px-1.5 py-0.5 rounded-full text-[9px] font-medium shrink-0"
-          style={{ color: task.stageColor, background: `${task.stageColor}1f`, border: `1px solid ${task.stageColor}55` }}
+          style={{ color: task.stageColor, background: colorMix(task.stageColor, 12), border: `1px solid ${colorMix(task.stageColor, 35)}` }}
         >
           {task.stageLabel}
         </span>
