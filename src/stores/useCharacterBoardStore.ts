@@ -211,6 +211,16 @@ export const useCharacterBoardStore = create<CharacterBoardStore>((set, get) => 
         if (s.characters.some((c) => c.id === created.id)) return s;
         return { characters: [...s.characters, { ...created, episodeIds: [] }] };
       });
+      try {
+        const firstCostume = await svcAddCostume({ characterId: created.id, name: '복장 1', createdBy });
+        set((s) => {
+          if (s.costumes.some((c) => c.id === firstCostume.id)) return s;
+          const costumes = [...s.costumes, firstCostume];
+          return { costumes, byCharacter: buildByCharacter(costumes) };
+        });
+      } catch (costumeErr) {
+        console.warn('[character-board] 첫 복장 자동 생성 실패:', costumeErr);
+      }
       return created;
     } catch (err) {
       console.error('[character-board] addCharacter 실패:', err);
