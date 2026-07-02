@@ -2,7 +2,7 @@ import { useState, useRef, useEffect, useMemo, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import { X } from 'lucide-react';
 import { useAuthStore } from '@/stores/useAuthStore';
-import { getUserColor } from './AssigneeSelect';
+import { getUserColor } from '@/utils/userColor';
 
 /**
  * 다중 담당자 선택 — 칩 + 자동완성 (한솔 결정 2026-05-02).

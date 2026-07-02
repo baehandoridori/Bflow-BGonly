@@ -10,7 +10,9 @@ import { Lock, Minus, Move, Plus, RotateCcw, Unlock, X } from 'lucide-react';
 import type { CharacterImageBackground, CharacterImageFit } from '@/types';
 import {
   DEFAULT_CHARACTER_IMAGE_FIT,
+  getCharacterImageFitTransformStyle,
   normalizeCharacterImageFit,
+  resolveCharacterImageFitScales,
 } from '@/utils/characterAssets';
 import { getCharacterImageBackgroundStyle } from './CharacterImageFrame';
 import { CHARACTER_LAYER_CLASS } from '@/constants/characterLayers';
@@ -50,14 +52,6 @@ function getContainedImageBox(frameWidth: number, frameHeight: number, naturalWi
   };
 }
 
-function scalesOf(fit: CharacterImageFit): { scaleX: number; scaleY: number } {
-  const normalized = normalizeCharacterImageFit(fit);
-  return {
-    scaleX: normalized.lockAspect ? normalized.scale : (normalized.scaleX ?? normalized.scale),
-    scaleY: normalized.lockAspect ? normalized.scale : (normalized.scaleY ?? normalized.scale),
-  };
-}
-
 function nextFitFromDrag(
   startFit: CharacterImageFit,
   dx: number,
@@ -72,15 +66,6 @@ function nextFitFromDrag(
     ...normalized,
     x: clampMove(normalized.x + (dx / safeBaseWidth) * 100),
     y: clampMove(normalized.y + (dy / safeBaseHeight) * 100),
-  };
-}
-
-function getFitImageTransformStyle(fit: CharacterImageFit) {
-  const normalized = normalizeCharacterImageFit(fit);
-  const { scaleX, scaleY } = scalesOf(normalized);
-  return {
-    transform: `translate(${normalized.x}%, ${normalized.y}%) scale(${scaleX}, ${scaleY})`,
-    transformOrigin: 'center center',
   };
 }
 
@@ -155,8 +140,8 @@ export function CharacterImageFitEditor({
     () => getContainedImageBox(cropRect.width, cropRect.height, naturalSize.width, naturalSize.height),
     [cropRect.height, cropRect.width, naturalSize.height, naturalSize.width],
   );
-  const { scaleX, scaleY } = scalesOf(draft);
-  const fitImageStyle = getFitImageTransformStyle(draft);
+  const { scaleX, scaleY } = resolveCharacterImageFitScales(draft);
+  const fitImageStyle = getCharacterImageFitTransformStyle(draft);
   const blurredFitImageStyle = {
     ...fitImageStyle,
     filter: 'blur(10px) saturate(0.8) brightness(0.58)',
@@ -202,7 +187,7 @@ export function CharacterImageFitEditor({
     setDraft((prev) => {
       const normalized = normalizeCharacterImageFit(prev);
       if (!lockAspect) return { ...normalized, lockAspect: false };
-      const { scaleX: currentScaleX, scaleY: currentScaleY } = scalesOf(normalized);
+      const { scaleX: currentScaleX, scaleY: currentScaleY } = resolveCharacterImageFitScales(normalized);
       const nextScale = clampScale((currentScaleX + currentScaleY) / 2);
       return {
         ...normalized,
@@ -217,7 +202,7 @@ export function CharacterImageFitEditor({
   const updateScale = (axis: 'both' | 'x' | 'y', value: number) => {
     setDraft((prev) => {
       const normalized = normalizeCharacterImageFit(prev);
-      const { scaleX: currentScaleX, scaleY: currentScaleY } = scalesOf(normalized);
+      const { scaleX: currentScaleX, scaleY: currentScaleY } = resolveCharacterImageFitScales(normalized);
       const nextScaleX = axis === 'both' || axis === 'x' ? clampScale(value) : currentScaleX;
       const nextScaleY = axis === 'both' || axis === 'y' ? clampScale(value) : currentScaleY;
       if (normalized.lockAspect || axis === 'both') {
@@ -241,7 +226,7 @@ export function CharacterImageFitEditor({
   const nudgeScale = (delta: number) => {
     setDraft((prev) => {
       const normalized = normalizeCharacterImageFit(prev);
-      const { scaleX: currentScaleX, scaleY: currentScaleY } = scalesOf(normalized);
+      const { scaleX: currentScaleX, scaleY: currentScaleY } = resolveCharacterImageFitScales(normalized);
       const nextScaleX = clampScale(currentScaleX + delta);
       const nextScaleY = clampScale(currentScaleY + delta);
       if (normalized.lockAspect) {

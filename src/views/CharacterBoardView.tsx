@@ -40,8 +40,8 @@ import { CharacterImageFitEditor } from '@/components/characters/CharacterImageF
 import { CharacterImageLightbox, type CharacterImageLightboxEntry } from '@/components/characters/CharacterImageLightbox';
 import { chooseWorkFile, chooseWorkFolder, openWorkPath } from '@/services/sceneWorkLinkService';
 import { copyImageToClipboard } from '@/utils/imageActions';
-import { DEFAULT_CHARACTER_IMAGE_BACKGROUND, getResolvedCharacterFolderAfterFilePick } from '@/utils/characterAssets';
-import { getUserColor } from '@/components/common/AssigneeSelect';
+import { DEFAULT_CHARACTER_IMAGE_BACKGROUND, getPathBaseName, getResolvedCharacterFolderAfterFilePick } from '@/utils/characterAssets';
+import { getUserColor } from '@/utils/userColor';
 import { ConfirmDialog } from '@/components/common/ConfirmDialog';
 import { parseAssigneeNames } from '@/utils/characterStageMeta';
 import { DESIGN_STAGE_META, RIGGING_STAGE_META, characterStageColor, type CharacterStageMeta } from '@/constants/characterStages';
@@ -293,11 +293,7 @@ function AssigneeNamePicker({
 }
 
 function displayPathName(path: string | null | undefined): string {
-  const value = (path ?? '').trim();
-  if (!value) return '미등록';
-  const normalized = value.replace(/[\\/]+$/, '');
-  const index = Math.max(normalized.lastIndexOf('\\'), normalized.lastIndexOf('/'));
-  return index >= 0 ? normalized.slice(index + 1) : normalized;
+  return getPathBaseName(path) || '미등록';
 }
 
 function nextCostumeName(costumes: CharacterCostume[]): string {

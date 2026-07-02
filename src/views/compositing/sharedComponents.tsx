@@ -3,7 +3,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { ChevronDown, Clock, Circle, Check } from 'lucide-react';
-import { getUserColor } from '@/components/common/AssigneeSelect';
+import { getUserColor } from '@/utils/userColor';
 import { CompactIconLabel } from '@/components/common/CompactIconLabel';
 import { PRIORITY_CONFIG, STATUS_CONFIG } from '@/constants/revision';
 import { floatingGlassStyle } from '@/utils/glassStyles';

@@ -2921,14 +2921,14 @@ ipcMain.handle('supabase:delete-character', wrapIpc(async (
   return sbDeleteCharacter(id);
 }));
 
-ipcMain.handle('supabase:add-costume', wrapIpc(async (
+ipcMain.handle('supabase:add-character-costume', wrapIpc(async (
   _e: unknown,
   input: { characterId: string; name: string; createdBy?: string | null },
 ) => {
   return sbAddCharacterCostume(input);
 }));
 
-ipcMain.handle('supabase:update-costume', wrapIpc(async (
+ipcMain.handle('supabase:update-character-costume', wrapIpc(async (
   _e: unknown,
   id: string,
   updates: Record<string, unknown>,
@@ -2942,7 +2942,7 @@ ipcMain.handle('supabase:update-costume', wrapIpc(async (
   return row;
 }));
 
-ipcMain.handle('supabase:delete-costume', wrapIpc(async (
+ipcMain.handle('supabase:delete-character-costume', wrapIpc(async (
   _e: unknown,
   id: string,
 ) => {
