@@ -20,10 +20,11 @@ import {
   findEventByTodoId,
 } from '@/services/calendarService';
 import * as supabaseService from '@/services/supabaseService';
-import type { SceneKey, PersonalTodo, TaskView, FlatScene, StageSaveBaseline } from '../types';
+import type { CharacterTaskItem, SceneKey, PersonalTodo, TaskView, FlatScene, StageSaveBaseline } from '../types';
 import { createStageSaveBaseline } from '../types';
 import { computeMyTasksStats } from '../statsUtils';
 import type { MyTasksStats } from '../statsUtils';
+import { useMyCharacterTasks } from './useMyCharacterTasks';
 
 const SAVE_FAIL_MESSAGE = '저장에 실패했어요. 잠시 후 다시 시도해주세요.';
 
@@ -347,6 +348,8 @@ export interface UseMyTasksDataResult {
   activePersonalTodos: PersonalTodo[];
   pendingPersonalTodos: PersonalTodo[];
   donePersonalTodos: PersonalTodo[];
+  pendingCharacterTasks: CharacterTaskItem[];
+  doneCharacterTasks: CharacterTaskItem[];
   stats: MyTasksStats;
   existingKeys: Set<SceneKey>;
   assignedSceneKeySet: Set<SceneKey>;
@@ -375,6 +378,7 @@ export function useMyTasksData(isPopup: boolean): UseMyTasksDataResult {
   const episodes = useDataStore((s) => s.episodes);
   const updateSceneFieldOptimistic = useDataStore((s) => s.updateSceneFieldOptimistic);
   const currentUser = useAuthStore((s) => s.currentUser);
+  const { pendingCharacterTasks, doneCharacterTasks } = useMyCharacterTasks();
 
   const stageSaveQueueRef = useRef<Map<string, Promise<void>>>(new Map());
   const stageSaveBaselineRef = useRef<Map<string, StageSaveBaseline>>(new Map());
@@ -577,8 +581,8 @@ export function useMyTasksData(isPopup: boolean): UseMyTasksDataResult {
   // new Date()는 deps에 없다 → '오늘 마친 씬' 카운트의 자정 롤오버는 다음 데이터 변경
   // (토글/추가/realtime 수신) 시 갱신된다. B flow는 변경이 잦아 실사용 영향은 미미.
   const stats = useMemo(
-    () => computeMyTasksStats(allViewScenes, activePersonalTodos, new Date()),
-    [allViewScenes, activePersonalTodos],
+    () => computeMyTasksStats(allViewScenes, activePersonalTodos, new Date(), [...pendingCharacterTasks, ...doneCharacterTasks]),
+    [allViewScenes, activePersonalTodos, doneCharacterTasks, pendingCharacterTasks],
   );
 
   // 토글 핸들러 (씬 단계 순차 토글)
@@ -1038,6 +1042,8 @@ export function useMyTasksData(isPopup: boolean): UseMyTasksDataResult {
     activePersonalTodos,
     pendingPersonalTodos,
     donePersonalTodos,
+    pendingCharacterTasks,
+    doneCharacterTasks,
     stats,
     existingKeys,
     assignedSceneKeySet,

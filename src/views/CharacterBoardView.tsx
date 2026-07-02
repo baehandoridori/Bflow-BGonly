@@ -24,8 +24,6 @@ import {
   type CharacterCostume,
   type CharacterImageBackground,
   type CharacterImageFit,
-  type CostumeDesignStage,
-  type CostumeRiggingStage,
 } from '@/types';
 import { updateEpisodeReelPath, uploadCharacterImage } from '@/services/supabaseService';
 import { deleteImage } from '@/services/storageService';
@@ -43,24 +41,9 @@ import { chooseWorkFile, chooseWorkFolder, openWorkPath } from '@/services/scene
 import { copyImageToClipboard } from '@/utils/imageActions';
 import { DEFAULT_CHARACTER_IMAGE_BACKGROUND, getResolvedCharacterFolderAfterFilePick } from '@/utils/characterAssets';
 import { getUserColor } from '@/components/common/AssigneeSelect';
+import { DESIGN_STAGE_META, RIGGING_STAGE_META, parseAssigneeNames } from '@/utils/characterStageMeta';
 
 type BoardTab = 'board' | 'episode-assets';
-
-// 단계별 색 (씬 단계색 재사용):
-//   대기 #8B8DA3 / 진행·벡터화 #74B9FF / 리깅 #6C5CE7 / 피드백 #FDCB6E / 완료 #A29BFE / 완성 #00B894
-const DESIGN_STAGE_META: Record<CostumeDesignStage, { label: string; color: string }> = {
-  waiting: { label: '대기', color: '#8B8DA3' },
-  in_progress: { label: '진행 중', color: '#74B9FF' },
-  feedback: { label: '피드백', color: '#FDCB6E' },
-  done: { label: '완료', color: '#A29BFE' },
-};
-const RIGGING_STAGE_META: Record<CostumeRiggingStage, { label: string; color: string }> = {
-  waiting: { label: '대기', color: '#8B8DA3' },
-  vectorized: { label: '벡터화', color: '#74B9FF' },
-  rigging: { label: '리깅', color: '#6C5CE7' },
-  feedback: { label: '피드백', color: '#FDCB6E' },
-  done: { label: '완성', color: '#00B894' },
-};
 
 // 미리 정의된 태그 팔레트 — 토글 칩으로 노출.
 const STRUCTURE_TAG_PALETTE = ['얼굴각도 컨트롤러', '책가방 세트', '뒷모습', '앞모습 없음', '측면'] as const;
@@ -93,13 +76,6 @@ function TagPill({
       {tag}
     </button>
   );
-}
-
-function parseAssigneeNames(value: string | null | undefined): string[] {
-  return (value ?? '')
-    .split(',')
-    .map((name) => name.trim())
-    .filter(Boolean);
 }
 
 function formatAssigneeNames(names: string[]): string | null {
@@ -1614,9 +1590,8 @@ function CharacterGrid({ onAdd, pendingOpenId, onConsumeOpen }: { onAdd: () => v
 }
 
 export function CharacterBoardView() {
-  const load = useCharacterBoardStore((s) => s.load);
+  const ensureLoadedAndRealtime = useCharacterBoardStore((s) => s.ensureLoadedAndRealtime);
   const loaded = useCharacterBoardStore((s) => s.loaded);
-  const startRealtime = useCharacterBoardStore((s) => s.startRealtime);
   const pendingCharacterBoardRequest = useAppStore((s) => s.pendingCharacterBoardRequest);
   const setPendingCharacterBoardRequest = useAppStore((s) => s.setPendingCharacterBoardRequest);
 
@@ -1625,10 +1600,9 @@ export function CharacterBoardView() {
   const [pendingOpenId, setPendingOpenId] = useState<string | null>(null);
 
   useEffect(() => {
-    void load();
-    const stop = startRealtime();
-    return () => { stop(); };
-  }, [load, startRealtime]);
+    const release = ensureLoadedAndRealtime();
+    return () => { release(); };
+  }, [ensureLoadedAndRealtime]);
 
   useEffect(() => {
     if (!pendingCharacterBoardRequest || !loaded) return;

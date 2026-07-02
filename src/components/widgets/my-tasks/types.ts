@@ -1,6 +1,6 @@
 import { snapshotSequentialStages } from '@/utils/sceneStageProgression';
 import type { SequentialStagePatch } from '@/utils/sceneStageProgression';
-import type { Scene, Department } from '@/types';
+import type { Scene, Department, CostumeDesignStage, CostumeRiggingStage } from '@/types';
 
 /* ─── 타입 ──────────────────────────────────── */
 
@@ -34,6 +34,21 @@ export interface FlatScene {
   partId: string;
   department: Department;
   key: SceneKey;
+}
+
+export type CharacterTaskKind = 'design' | 'rigging';
+
+export interface CharacterTaskItem {
+  key: `char:${string}:${CharacterTaskKind}`;
+  kind: CharacterTaskKind;
+  characterId: string;
+  characterName: string;
+  costumeId: string;
+  costumeName: string;
+  stage: CostumeDesignStage | CostumeRiggingStage;
+  stageLabel: string;
+  stageColor: string;
+  done: boolean;
 }
 
 export type StageSaveBaseline = SequentialStagePatch & {

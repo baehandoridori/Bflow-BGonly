@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import { computeMyTasksStats } from '../src/components/widgets/my-tasks/statsUtils.ts';
-import type { FlatScene, PersonalTodo } from '../src/components/widgets/my-tasks/types.ts';
+import type { CharacterTaskItem, FlatScene, PersonalTodo } from '../src/components/widgets/my-tasks/types.ts';
 
 /** 단계/completedAt 만 지정해 FlatScene mock 을 만든다(나머지 필드는 산식에 무관). */
 function flat(
@@ -34,6 +34,21 @@ function todo(completed: boolean): PersonalTodo {
   return { id: `t_${Math.random()}`, title: 't', memo: '', completed, createdAt: '' };
 }
 
+function charTask(id: string, done: boolean): CharacterTaskItem {
+  return {
+    key: `char:${id}:design`,
+    kind: 'design',
+    characterId: `character_${id}`,
+    characterName: '찜질방 사장',
+    costumeId: id,
+    costumeName: '기본 복장',
+    stage: done ? 'done' : 'in_progress',
+    stageLabel: done ? '완료' : '진행 중',
+    stageColor: done ? '#A29BFE' : '#74B9FF',
+    done,
+  };
+}
+
 // 시간대 안정성: NOW 와 completedAt 을 모두 '로컬' 컴포넌트로 구성해, 러너 TZ(UTC/KST 등)와
 // 무관하게 같은 로컬 달력일로 비교되도록 한다(computeMyTasksStats 의 toDateString 비교는 로컬 기준).
 const NOW = new Date(2026, 5, 30, 10, 0, 0);
@@ -53,10 +68,23 @@ test('씬 0개 + 개인 할일만 있어도 개인 진행률이 반영된다', (
   const s = computeMyTasksStats([], [todo(true), todo(false)], NOW);
   assert.equal(s.sceneTotal, 0);
   assert.equal(s.personalTotal, 2);
+  assert.equal(s.characterTotal, 0);
   assert.equal(s.fullyDone, 1);
   assert.equal(s.total, 2);
   assert.equal(s.pct, 50); // 개인 2개 중 1개 완료 = 50%
   assert.equal(s.stageProgressPct, 0); // 씬 0개라 도넛 채움은 0
+});
+
+test('캐릭터 디자인/리깅 작업은 개인 할일처럼 1칸씩 통계에 반영된다', () => {
+  const s = computeMyTasksStats([], [], NOW, [charTask('c1', true), charTask('c2', false)]);
+  assert.equal(s.sceneTotal, 0);
+  assert.equal(s.personalTotal, 0);
+  assert.equal(s.characterTotal, 2);
+  assert.equal(s.doneCharacterCount, 1);
+  assert.equal(s.fullyDone, 1);
+  assert.equal(s.total, 2);
+  assert.equal(s.pct, 50);
+  assert.equal(s.stageProgressPct, 0);
 });
 
 test('단계 누적 카운트와 stageProgressPct 산식', () => {

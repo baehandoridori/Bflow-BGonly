@@ -19,11 +19,17 @@ const appStore = readFileSync('src/stores/useAppStore.ts', 'utf8');
 const spotlight = readFileSync('src/components/spotlight/SpotlightSearch.tsx', 'utf8');
 const characterBoard = readFileSync('src/views/CharacterBoardView.tsx', 'utf8');
 const characterStore = readFileSync('src/stores/useCharacterBoardStore.ts', 'utf8');
+const characterStageMeta = readFileSync('src/utils/characterStageMeta.ts', 'utf8');
 const characterFolderService = readFileSync('src/services/characterFolderService.ts', 'utf8');
 const characterFolderRootSection = readFileSync('src/components/settings/CharacterFolderRootSection.tsx', 'utf8');
 const settingsView = readFileSync('src/views/SettingsView.tsx', 'utf8');
 const episodeAssetBoard = readFileSync('src/views/EpisodeAssetBoard.tsx', 'utf8');
 const scenesView = readFileSync('src/views/ScenesView.tsx', 'utf8');
+const myTasksWidget = readFileSync('src/components/widgets/MyTasksWidget.tsx', 'utf8');
+const myTasksData = readFileSync('src/components/widgets/my-tasks/hooks/useMyTasksData.ts', 'utf8');
+const myCharacterTasks = readFileSync('src/components/widgets/my-tasks/hooks/useMyCharacterTasks.ts', 'utf8');
+const myTaskStats = readFileSync('src/components/widgets/my-tasks/statsUtils.ts', 'utf8');
+const characterTaskRow = readFileSync('src/components/widgets/my-tasks/components/CharacterTaskRow.tsx', 'utf8');
 const characterImageLightbox = readFileSync('src/components/characters/CharacterImageLightbox.tsx', 'utf8');
 const fitEditorSource = readFileSync('src/components/characters/CharacterImageFitEditor.tsx', 'utf8');
 const imageFrameSource = readFileSync('src/components/characters/CharacterImageFrame.tsx', 'utf8');
@@ -286,6 +292,41 @@ test('spotlight opens character board entries through a store-backed pending req
   assert.match(characterBoard, /setPendingOpenId\(pendingCharacterBoardRequest\.characterId\)/);
   assert.match(characterBoard, /setPendingCharacterBoardRequest\(null\)/);
   assert.ok(characterBoard.includes('key={`${detailCharacter.id}:${detailRequest.nonce}`}'));
+});
+
+test('my tasks widget includes assigned character design and rigging work', () => {
+  assert.match(characterStageMeta, /export const DESIGN_STAGE_META/);
+  assert.match(characterStageMeta, /export const RIGGING_STAGE_META/);
+  assert.match(characterStageMeta, /export function parseAssigneeNames/);
+  assert.match(characterBoard, /import \{ DESIGN_STAGE_META, RIGGING_STAGE_META, parseAssigneeNames \} from '@\/utils\/characterStageMeta'/);
+
+  assert.match(characterStore, /ensureLoadedAndRealtime: \(opts\?: \{ silent\?: boolean \}\) => \(\) => void/);
+  assert.match(characterStore, /let characterBoardRealtimeRefCount = 0/);
+  assert.match(characterStore, /if \(!state\.loaded && !state\.loading\)[\s\S]*?void state\.load\(opts\)/);
+  assert.match(characterStore, /stopCharacterBoardRealtime\?\.\(\)/);
+
+  assert.match(myCharacterTasks, /useCharacterBoardAccess\(\)/);
+  assert.match(myCharacterTasks, /if \(!hasCharacterBoardAccess \|\| !currentUser\) return;/);
+  assert.match(myCharacterTasks, /ensureLoadedAndRealtime\(\{ silent: true \}\)/);
+  assert.match(myCharacterTasks, /character\.status !== 'archived'/);
+  assert.ok(myCharacterTasks.includes('parseAssigneeNames(costume.designAssignee).some((name) => name === userName)'));
+  assert.ok(myCharacterTasks.includes('parseAssigneeNames(costume.riggingAssignee).some((name) => name === userName)'));
+  assert.match(myCharacterTasks, /key: `char:\$\{costume\.id\}:design`/);
+  assert.match(myCharacterTasks, /key: `char:\$\{costume\.id\}:rigging`/);
+
+  assert.match(myTasksData, /useMyCharacterTasks\(\)/);
+  assert.match(myTasksData, /\[\.\.\.pendingCharacterTasks, \.\.\.doneCharacterTasks\]/);
+  assert.match(myTaskStats, /characterTotal = characterTasks\.length/);
+  assert.match(myTaskStats, /doneCharacterCount = characterTasks\.reduce/);
+  assert.match(myTaskStats, /const total = sceneTotal \+ personalTotal \+ characterTotal/);
+
+  assert.match(myTasksWidget, /pendingScenes\.length \+ pendingPersonalTodos\.length \+ pendingCharacterTasks\.length/);
+  assert.match(myTasksWidget, /doneScenes\.length \+ donePersonalTodos\.length \+ doneCharacterTasks\.length/);
+  assert.match(myTasksWidget, /setPendingCharacterBoardRequest\(\{ characterId: task\.characterId \}\)/);
+  assert.match(myTasksWidget, /setView\('character-board'\)/);
+  assert.match(myTasksWidget, /renderCharacterTasks\(pendingCharacterTasks\)/);
+  assert.match(myTasksWidget, /renderCharacterTasks\(doneCharacterTasks\)/);
+  assert.match(characterTaskRow, /캐릭터 현황판에서 열기/);
 });
 
 test('global button label wrapping is prevented while multiline button content stays available', () => {
