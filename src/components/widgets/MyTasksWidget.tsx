@@ -11,7 +11,7 @@ import { DEPARTMENT_CONFIGS } from '@/types';
 import type { Episode, Stage } from '@/types';
 import { cn } from '@/utils/cn';
 import { createUuid } from '@/utils/createUuid';
-import type { SceneKey, PersonalTodo, FlatScene } from './my-tasks/types';
+import type { CharacterTaskItem, SceneKey, PersonalTodo, FlatScene } from './my-tasks/types';
 import { makeKey } from './my-tasks/types';
 import { useMyTasksData, scenePct } from './my-tasks/hooks/useMyTasksData';
 import { ModalPortal } from './my-tasks/components/ModalPortal';
@@ -22,6 +22,7 @@ import { QuickAdd } from './my-tasks/components/QuickAdd';
 import { SceneRow } from './my-tasks/components/SceneRow';
 import { TodoRow } from './my-tasks/components/TodoRow';
 import { SceneCard, TodoCard } from './my-tasks/components/SceneCard';
+import { CharacterTaskCard, CharacterTaskRow } from './my-tasks/components/CharacterTaskRow';
 import { Confetti } from './my-tasks/components/Confetti';
 import { useMotionPref } from './my-tasks/useMotion';
 import { clampStaggerDelay } from './my-tasks/motionUtils';
@@ -355,6 +356,8 @@ export function MyTasksWidget() {
     doneScenes,
     pendingPersonalTodos,
     donePersonalTodos,
+    pendingCharacterTasks,
+    doneCharacterTasks,
     stats,
     existingKeys,
     assignedSceneKeySet,
@@ -369,6 +372,8 @@ export function MyTasksWidget() {
     reorderPendingTodos,
     updatePersonalTodo,
   } = useMyTasksData(isPopup);
+  const setView = useAppStore((s) => s.setView);
+  const setPendingCharacterBoardRequest = useAppStore((s) => s.setPendingCharacterBoardRequest);
 
   const [showPicker, setShowPicker] = useState(false);
   const [filterDone, setFilterDone] = useState(false);
@@ -401,7 +406,8 @@ export function MyTasksWidget() {
   const [celebrateKey, setCelebrateKey] = useState(0);
   const userCompleteRef = useRef(false);
   const prevPendingRef = useRef<number | null>(null);
-  const pendingCount = pendingScenes.length + pendingPersonalTodos.length;
+  const pendingCount = pendingScenes.length + pendingPersonalTodos.length + pendingCharacterTasks.length;
+  const doneCount = doneScenes.length + donePersonalTodos.length + doneCharacterTasks.length;
   useEffect(() => {
     const prev = prevPendingRef.current;
     prevPendingRef.current = pendingCount;
@@ -467,6 +473,12 @@ export function MyTasksWidget() {
     setSelectedSceneKey(null);
   };
 
+  const navigateToCharacterTask = (task: CharacterTaskItem) => {
+    if (isPopup) return;
+    setPendingCharacterBoardRequest({ characterId: task.characterId });
+    setView('character-board');
+  };
+
   // QuickAdd 일반 텍스트 → 개인 할일(일정 없이). 훅은 PersonalTodo 객체를 받으므로 어댑터로 변환.
   const handleQuickAddPersonal = (title: string) => {
     const t = title.trim();
@@ -500,15 +512,15 @@ export function MyTasksWidget() {
       }
       if (!baseSizeRef.current) return;
       const base = baseSizeRef.current;
-      if (showDone && doneScenes.length > 0 && viewMode === 'list') {
+      if (showDone && doneCount > 0 && viewMode === 'list') {
         // 완료 항목 수에 따라 높이 증가 (최대 300px 추가) — 리스트 모드 행 높이(36px) 가정
-        const extra = Math.min(doneScenes.length * 36 + 32, 300);
+        const extra = Math.min(doneCount * 36 + 32, 300);
         window.electronAPI?.widgetResize?.(widgetId, base.width, base.height + extra);
       } else {
         window.electronAPI?.widgetResize?.(widgetId, base.width, base.height);
       }
     })();
-  }, [showDone, doneScenes.length, isPopup, widgetId, anyModalOpen, viewMode]);
+  }, [showDone, doneCount, isPopup, widgetId, anyModalOpen, viewMode]);
 
   // 팝업에서 모달이 열릴 때 창이 작으면 모달이 들어갈 만큼 키우고, 닫히면 직전 크기로 복원.
   // (대시보드는 모달이 document.body 포털로 떠 화면 전체를 쓰므로 손대지 않는다 — isPopup 일 때만.)
@@ -576,6 +588,22 @@ export function MyTasksWidget() {
       : <AnimatePresence mode="popLayout">{scenes.map(renderScene)}</AnimatePresence>;
   };
 
+  const renderCharacterTasks = (tasks: CharacterTaskItem[]) => {
+    if (tasks.length === 0) return null;
+    const onOpen = isPopup ? undefined : navigateToCharacterTask;
+    return viewMode === 'card'
+      ? <div className="grid gap-2 mt-2" style={CARD_GRID_STYLE}>
+          {tasks.map((task, i) => (
+            <CharacterTaskCard key={task.key} task={task} onOpen={onOpen} enterDelay={staggerDelay(i)} reduce={reduce} />
+          ))}
+        </div>
+      : <div className="flex flex-col gap-0.5">
+          {tasks.map((task, i) => (
+            <CharacterTaskRow key={task.key} task={task} onOpen={onOpen} enterDelay={staggerDelay(i)} reduce={reduce} />
+          ))}
+        </div>;
+  };
+
   // 개인 할일(진행 중) — 리스트는 Reorder(드래그), 카드는 그리드(드래그 없음).
   const renderPendingTodos = () => {
     if (pendingPersonalTodos.length === 0) return null;
@@ -635,9 +663,11 @@ export function MyTasksWidget() {
 
   const allEmpty =
     pendingScenes.length === 0 && pendingPersonalTodos.length === 0 &&
-    doneScenes.length === 0 && donePersonalTodos.length === 0;
-  const pendingEmpty = pendingScenes.length === 0 && pendingPersonalTodos.length === 0;
-  const hasDone = doneScenes.length > 0 || donePersonalTodos.length > 0;
+    pendingCharacterTasks.length === 0 &&
+    doneScenes.length === 0 && donePersonalTodos.length === 0 &&
+    doneCharacterTasks.length === 0;
+  const pendingEmpty = pendingScenes.length === 0 && pendingPersonalTodos.length === 0 && pendingCharacterTasks.length === 0;
+  const hasDone = doneScenes.length > 0 || donePersonalTodos.length > 0 || doneCharacterTasks.length > 0;
 
   return (
     <Widget
@@ -723,6 +753,7 @@ export function MyTasksWidget() {
 
               {/* 진행 중 — 씬 섹션, 개인 섹션(분리) */}
               {renderSceneSection(pendingScenes)}
+              {renderCharacterTasks(pendingCharacterTasks)}
               {renderPendingTodos()}
 
               {/* ─── 완료된 항목 섹션 ─── */}
@@ -741,7 +772,7 @@ export function MyTasksWidget() {
                     </motion.div>
                     <span className="font-medium">완료된 항목</span>
                     <span className="text-[9px] tabular-nums bg-bg-primary text-text-secondary/50 border border-bg-border px-1.5 py-0 rounded-full">
-                      {doneScenes.length + donePersonalTodos.length}
+                      {doneCount}
                     </span>
                     <div className="flex-1 h-px bg-bg-border/15 ml-1" />
                   </button>
@@ -758,6 +789,7 @@ export function MyTasksWidget() {
                       >
                         <div className="flex flex-col gap-0.5 pt-1">
                           {renderSceneSection(doneScenes)}
+                          {renderCharacterTasks(doneCharacterTasks)}
                           {renderDoneTodos()}
                         </div>
                       </motion.div>

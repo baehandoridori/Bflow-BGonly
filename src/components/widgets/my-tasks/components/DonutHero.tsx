@@ -59,7 +59,16 @@ interface DonutHeroProps {
 }
 
 export function DonutHero({ stats, collapsed, onToggleCollapse, reduce = false }: DonutHeroProps) {
-  const { sceneTotal, doneSceneCount, pendingSceneCount, personalTotal, stageCounts, stageProgressPct, todayCompletedScenes } = stats;
+  const {
+    sceneTotal,
+    doneSceneCount,
+    pendingSceneCount,
+    personalTotal,
+    characterTotal,
+    stageCounts,
+    stageProgressPct,
+    todayCompletedScenes,
+  } = stats;
   const pctRounded = Math.round(stageProgressPct);
   const displayDone = useCountUp(doneSceneCount, reduce);
 
@@ -77,6 +86,7 @@ export function DonutHero({ stats, collapsed, onToggleCollapse, reduce = false }
       </div>
       <span className="text-[11px] tabular-nums text-text-secondary/55 shrink-0">
         {doneSceneCount}/{sceneTotal} 씬 · {pctRounded}%
+        {characterTotal > 0 ? ` · 캐릭터 ${characterTotal}` : ''}
       </span>
       <button
         onClick={onToggleCollapse}
@@ -169,6 +179,7 @@ export function DonutHero({ stats, collapsed, onToggleCollapse, reduce = false }
             )}
             <span className="text-[11px] text-text-secondary/45 tabular-nums">
               개인 할일 {personalTotal}개
+              {characterTotal > 0 ? ` · 캐릭터 ${characterTotal}개` : ''}
             </span>
           </div>
           <button

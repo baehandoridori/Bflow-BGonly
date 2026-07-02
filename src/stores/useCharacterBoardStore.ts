@@ -103,6 +103,7 @@ interface CharacterBoardStore {
 
   load: (opts?: { silent?: boolean }) => Promise<void>;
   startRealtime: () => () => void;
+  ensureLoadedAndRealtime: (opts?: { silent?: boolean }) => () => void;
 
   addCharacter: (name: string, memo?: string) => Promise<Character | null>;
   updateCharacterMemo: (id: string, memo: string) => Promise<void>;
@@ -150,6 +151,9 @@ interface CharacterBoardStore {
     old: any | null;
   }) => void;
 }
+
+let characterBoardRealtimeRefCount = 0;
+let stopCharacterBoardRealtime: (() => void) | null = null;
 
 export const useCharacterBoardStore = create<CharacterBoardStore>((set, get) => ({
   characters: [],
@@ -199,6 +203,28 @@ export const useCharacterBoardStore = create<CharacterBoardStore>((set, get) => 
   startRealtime: () => subscribeCharacterBoardRealtime((payload) => {
     get().receiveRealtime(payload);
   }),
+
+  ensureLoadedAndRealtime: (opts) => {
+    const state = get();
+    if (!state.loaded && !state.loading) {
+      void state.load(opts);
+    }
+    if (characterBoardRealtimeRefCount === 0) {
+      stopCharacterBoardRealtime = state.startRealtime();
+    }
+    characterBoardRealtimeRefCount++;
+
+    let released = false;
+    return () => {
+      if (released) return;
+      released = true;
+      characterBoardRealtimeRefCount = Math.max(0, characterBoardRealtimeRefCount - 1);
+      if (characterBoardRealtimeRefCount === 0) {
+        stopCharacterBoardRealtime?.();
+        stopCharacterBoardRealtime = null;
+      }
+    };
+  },
 
   // ─── 캐릭터 ───
 

@@ -8,14 +8,14 @@
  * `@/` alias 해석 없이 그대로 실행되게 한다. 단계 필드(lo/done/review/png)는
  * 구조적으로 직접 접근한다.
  */
-import type { FlatScene, PersonalTodo } from './types';
+import type { CharacterTaskItem, FlatScene, PersonalTodo } from './types';
 
 export interface MyTasksStats {
-  /** 씬 + 개인 할일 총 개수 (기존 호환) */
+  /** 씬 + 개인 할일 + 캐릭터 작업 총 개수 */
   total: number;
-  /** 완전 완료된 항목 수 = 완료 씬 + 완료 개인 할일 (기존 호환) */
+  /** 완전 완료된 항목 수 = 완료 씬 + 완료 개인 할일 + 완료 캐릭터 작업 */
   fullyDone: number;
-  /** 씬 4단계 + 개인 1단계 가중 평균 진행률 (기존 호환) */
+  /** 씬 4단계 + 개인/캐릭터 1단계 가중 평균 진행률 */
   pct: number;
   /** 내 씬 총 개수 */
   sceneTotal: number;
@@ -29,6 +29,10 @@ export interface MyTasksStats {
   stageProgressPct: number;
   /** 개인 할일 총 개수 */
   personalTotal: number;
+  /** 캐릭터 디자인/리깅 작업 총 개수 */
+  characterTotal: number;
+  /** 완료된 캐릭터 디자인/리깅 작업 수 */
+  doneCharacterCount: number;
   /** 오늘(로컬) 마친 씬 수 — completedAt 기준, 완료자 무관 */
   todayCompletedScenes: number;
 }
@@ -44,11 +48,13 @@ function checkedStageCount(s: FlatScene['scene']): number {
  * @param scenes 내 씬(할당 + 수동 추가) 전체 — 완료/진행 분리는 내부에서 한다.
  * @param personalTodos 내 개인 할일 전체.
  * @param now '오늘' 판정 기준 시각(테스트 주입용).
+ * @param characterTasks 내 캐릭터 디자인/리깅 작업 전체.
  */
 export function computeMyTasksStats(
   scenes: FlatScene[],
   personalTodos: PersonalTodo[],
   now: Date,
+  characterTasks: CharacterTaskItem[] = [],
 ): MyTasksStats {
   const sceneTotal = scenes.length;
   const stageCounts = { lo: 0, done: 0, review: 0, png: 0 };
@@ -83,12 +89,14 @@ export function computeMyTasksStats(
 
   const personalTotal = personalTodos.length;
   const personalDone = personalTodos.reduce((n, t) => n + (t.completed ? 1 : 0), 0);
+  const characterTotal = characterTasks.length;
+  const doneCharacterCount = characterTasks.reduce((n, task) => n + (task.done ? 1 : 0), 0);
 
-  // 기존 호환 산식 (useMyTasksData.ts:571-584 와 동일): 씬 4단계 + 개인 1단계 가중
-  const total = sceneTotal + personalTotal;
-  const fullyDone = doneSceneCount + personalDone;
-  const totalWeight = stageSlots + personalTotal;
-  const checkedWeight = checkedStages + personalDone;
+  // 씬은 4단계, 개인 할일과 캐릭터 작업은 각 1단계로 계산한다.
+  const total = sceneTotal + personalTotal + characterTotal;
+  const fullyDone = doneSceneCount + personalDone + doneCharacterCount;
+  const totalWeight = stageSlots + personalTotal + characterTotal;
+  const checkedWeight = checkedStages + personalDone + doneCharacterCount;
   const pct = totalWeight > 0 ? (checkedWeight / totalWeight) * 100 : 0;
 
   return {
@@ -101,6 +109,8 @@ export function computeMyTasksStats(
     stageCounts,
     stageProgressPct,
     personalTotal,
+    characterTotal,
+    doneCharacterCount,
     todayCompletedScenes,
   };
 }
