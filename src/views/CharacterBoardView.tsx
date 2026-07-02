@@ -10,13 +10,14 @@
  * 접근 권한은 사이드바에서 게이팅 (useCharacterBoardAccess).
  */
 
-import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent, type ReactNode } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent, type ReactNode } from 'react';
 import { toast } from 'sonner';
-import { Plus, X, Image as ImageIcon, Trash2, Pencil, Search, User, Check, Upload, MessageSquare, Copy, Loader2 } from 'lucide-react';
+import { Archive, Film, Plus, X, Image as ImageIcon, Trash2, Pencil, Search, User, Check, Upload, MessageSquare, Copy, Loader2, RotateCcw } from 'lucide-react';
 import { useCharacterBoardStore } from '@/stores/useCharacterBoardStore';
 import { useDataStore } from '@/stores/useDataStore';
 import { useAuthStore } from '@/stores/useAuthStore';
 import { useAppStore } from '@/stores/useAppStore';
+import { useModalFocus } from '@/hooks/useModalFocus';
 import {
   COSTUME_DESIGN_STAGES,
   COSTUME_RIGGING_STAGES,
@@ -41,9 +42,16 @@ import { chooseWorkFile, chooseWorkFolder, openWorkPath } from '@/services/scene
 import { copyImageToClipboard } from '@/utils/imageActions';
 import { DEFAULT_CHARACTER_IMAGE_BACKGROUND, getResolvedCharacterFolderAfterFilePick } from '@/utils/characterAssets';
 import { getUserColor } from '@/components/common/AssigneeSelect';
+import { ConfirmDialog } from '@/components/common/ConfirmDialog';
 import { DESIGN_STAGE_META, RIGGING_STAGE_META, parseAssigneeNames } from '@/utils/characterStageMeta';
 
 type BoardTab = 'board' | 'episode-assets';
+
+function claimReactKey(event: ReactKeyboardEvent<HTMLElement>) {
+  event.preventDefault();
+  event.stopPropagation();
+  event.nativeEvent.stopImmediatePropagation?.();
+}
 
 // 미리 정의된 태그 팔레트 — 토글 칩으로 노출.
 const STRUCTURE_TAG_PALETTE = ['얼굴각도 컨트롤러', '책가방 세트', '뒷모습', '앞모습 없음', '측면'] as const;
@@ -98,6 +106,8 @@ function AssigneeNamePicker({
   const [draftName, setDraftName] = useState('');
   const [modalOpen, setModalOpen] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
+  const dialogRef = useRef<HTMLDivElement>(null);
+  const modalFocus = useModalFocus(dialogRef, { active: modalOpen, autoFocus: false });
   const selected = parseAssigneeNames(value);
   const userNameSet = useMemo(() => new Set(users.map((user) => user.name)), [users]);
   const closeModal = () => {
@@ -130,7 +140,16 @@ function AssigneeNamePicker({
 
   const modal = modalOpen && (
     <div className="fixed inset-0 z-[85] flex items-center justify-center bg-black/55 p-4" onMouseDown={closeModal}>
-      <div className="w-full max-w-sm rounded-2xl bg-bg-card p-4 shadow-2xl ring-1 ring-white/10" onMouseDown={(event) => event.stopPropagation()}>
+      <div
+        ref={dialogRef}
+        role="dialog"
+        aria-modal="true"
+        aria-label={`${label} 추가`}
+        tabIndex={-1}
+        onKeyDown={modalFocus.onKeyDown}
+        className="w-full max-w-sm rounded-2xl bg-bg-card p-4 shadow-2xl ring-1 ring-white/10"
+        onMouseDown={(event) => event.stopPropagation()}
+      >
         <div className="mb-3 flex items-start justify-between gap-3">
           <div>
             <div className="text-sm font-semibold text-text-primary">{label} 추가</div>
@@ -173,7 +192,7 @@ function AssigneeNamePicker({
               addDraftName();
             }
             if (event.key === 'Escape') {
-              event.preventDefault();
+              claimReactKey(event);
               closeModal();
             }
           }}
@@ -439,14 +458,20 @@ function CharacterCard({
             <span className="text-text-secondary/70">· EP {character.episodeIds.length}</span>
           )}
         </div>
-        <div className="flex items-center gap-1.5 text-[11px]">
-          <span className="px-1.5 py-0.5 rounded-md" style={{ backgroundColor: '#A29BFE22', color: '#A29BFE' }}>
-            디자인 {designDone}/{costumes.length}
-          </span>
-          <span className="px-1.5 py-0.5 rounded-md" style={{ backgroundColor: '#00B89422', color: '#00B894' }}>
-            리깅 {riggingDone}/{costumes.length}
-          </span>
-        </div>
+        {costumes.length > 0 ? (
+          <div className="flex items-center gap-1.5 text-[11px]">
+            <span className="px-1.5 py-0.5 rounded-md" style={{ backgroundColor: '#A29BFE22', color: '#A29BFE' }}>
+              디자인 {designDone}/{costumes.length}
+            </span>
+            <span className="px-1.5 py-0.5 rounded-md" style={{ backgroundColor: '#00B89422', color: '#00B894' }}>
+              리깅 {riggingDone}/{costumes.length}
+            </span>
+          </div>
+        ) : (
+          <div className="inline-flex self-start rounded-md bg-bg-border/30 px-1.5 py-0.5 text-[11px] text-text-secondary">
+            복장을 추가해주세요
+          </div>
+        )}
       </div>
     </button>
   );
@@ -526,10 +551,19 @@ function FeaturedImageSlot({
   const [uploading, setUploading] = useState(false);
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number } | null>(null);
   const [fitEditorOpen, setFitEditorOpen] = useState(false);
+  const [draggingImage, setDraggingImage] = useState(false);
 
   const handleUpload = useCallback(async (file: File) => {
     const targetCostume = costume ?? await onEnsureCostume();
     if (!targetCostume) return;
+    if (targetCostume.featuredImageUrl) {
+      const ok = await ConfirmDialog.show({
+        message: '현재 이미지를 새 이미지로 바꿀까요?\n이전 이미지는 복구할 수 없어요.',
+        confirmLabel: '바꾸기',
+        tone: 'danger',
+      });
+      if (!ok) return;
+    }
     setUploading(true);
     try {
       const isPng = file.type === 'image/png' || file.name.toLowerCase().endsWith('.png');
@@ -550,27 +584,75 @@ function FeaturedImageSlot({
     }
   }, [character.id, costume, onEnsureCostume, updateCostumeField]);
 
+  const uploadFileIfImage = useCallback((file: File | null | undefined) => {
+    if (!file) return;
+    if (!file.type.startsWith('image/')) {
+      toast.info('이미지 파일만 올릴 수 있어요');
+      return;
+    }
+    void handleUpload(file);
+  }, [handleUpload]);
+
+  useEffect(() => {
+    const onPaste = (event: ClipboardEvent) => {
+      if (uploading || contextMenu || fitEditorOpen || document.querySelector('[data-character-lightbox]')) return;
+      const target = event.target;
+      if (target instanceof HTMLElement && target.closest('input, textarea, [contenteditable="true"]')) return;
+      const item = Array.from(event.clipboardData?.items ?? []).find((entry) => entry.type.startsWith('image/'));
+      const file = item?.getAsFile();
+      if (!file) return;
+      event.preventDefault();
+      uploadFileIfImage(file);
+    };
+    window.addEventListener('paste', onPaste);
+    return () => window.removeEventListener('paste', onPaste);
+  }, [contextMenu, fitEditorOpen, uploadFileIfImage, uploading]);
+
   const shownUrl = shownCostume?.featuredImageUrl ?? null;
   const shownBackground = shownCostume?.imageBackground ?? DEFAULT_CHARACTER_IMAGE_BACKGROUND;
   const shownFit = shownCostume?.imageFit;
 
   return (
     <div className="w-[240px] shrink-0 flex flex-col gap-2">
-      <CharacterImageFrame
-        url={shownUrl}
-        alt={shownCostume?.name ?? character.name}
-        background={shownBackground}
-        fit={shownFit}
+      <div
         className={cn(
-          'group aspect-[3/4] w-full rounded-xl border border-bg-border',
+          'relative aspect-[3/4] w-full rounded-xl border border-bg-border transition-colors',
           shownUrl ? 'cursor-zoom-in hover:border-accent/50 transition-colors' : '',
+          draggingImage && 'border-accent bg-accent/10',
         )}
-        onClick={shownUrl && shownCostume ? () => onView(shownCostume.id) : undefined}
-        onContextMenu={(event) => {
+        onDragOver={(event) => {
+          if (!Array.from(event.dataTransfer.types).includes('Files')) return;
           event.preventDefault();
-          setContextMenu({ x: event.clientX, y: event.clientY });
+          setDraggingImage(true);
         }}
-      />
+        onDragLeave={(event) => {
+          if (event.currentTarget.contains(event.relatedTarget as Node | null)) return;
+          setDraggingImage(false);
+        }}
+        onDrop={(event) => {
+          event.preventDefault();
+          setDraggingImage(false);
+          uploadFileIfImage(event.dataTransfer.files?.[0]);
+        }}
+      >
+        <CharacterImageFrame
+          url={shownUrl}
+          alt={shownCostume?.name ?? character.name}
+          background={shownBackground}
+          fit={shownFit}
+          className="h-full w-full rounded-xl"
+          onClick={shownUrl && shownCostume ? () => onView(shownCostume.id) : undefined}
+          onContextMenu={(event) => {
+            event.preventDefault();
+            setContextMenu({ x: event.clientX, y: event.clientY });
+          }}
+        />
+        {draggingImage && (
+          <div className="pointer-events-none absolute inset-0 flex items-center justify-center rounded-xl bg-accent/15 text-xs font-medium text-accent ring-1 ring-accent/60">
+            이미지 놓기
+          </div>
+        )}
+      </div>
       <div className="grid grid-cols-2 gap-1.5">
         <button
           type="button"
@@ -602,6 +684,7 @@ function FeaturedImageSlot({
           x={contextMenu.x}
           y={contextMenu.y}
           background={shownBackground}
+          canSetBackground={!!shownCostume}
           hasImage={!!shownUrl}
           hasFolder={!!character.workFolderPath}
           hasFile={!!shownCostume?.workFilePath}
@@ -665,7 +748,14 @@ function CostumeIdentity({ costume }: { costume: CharacterCostume }) {
             value={draft}
             onChange={(e) => setDraft(e.target.value)}
             onBlur={() => { setEditing(false); const t = draft.trim(); if (t && t !== costume.name) updateCostumeField(costume.id, { name: t }); }}
-            onKeyDown={(e) => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); if (e.key === 'Escape') { setDraft(costume.name); setEditing(false); } }}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') (e.target as HTMLInputElement).blur();
+              if (e.key === 'Escape') {
+                claimReactKey(e);
+                setDraft(costume.name);
+                setEditing(false);
+              }
+            }}
             aria-label="복장 이름"
             className="flex-1 min-w-0 bg-transparent border border-accent/50 rounded-md px-1.5 py-0.5 text-sm font-medium text-text-primary outline-none"
           />
@@ -677,7 +767,7 @@ function CostumeIdentity({ costume }: { costume: CharacterCostume }) {
               type="button"
               aria-label="복장 이름 편집"
               onClick={() => { setDraft(costume.name); setEditing(true); }}
-              className="text-text-secondary/70 hover:text-text-primary cursor-pointer shrink-0"
+              className="-m-1.5 rounded-md p-1.5 text-text-secondary/70 hover:bg-bg-border/30 hover:text-text-primary cursor-pointer shrink-0"
             >
               <Pencil size={12} />
             </button>
@@ -720,7 +810,7 @@ function PathActionRow({
             onClick={onCreate}
             disabled={creating}
             title="기준 경로에 캐릭터 이름으로 폴더를 만들어 연결"
-            className="inline-flex items-center gap-1 px-2 py-1 rounded-md border border-accent/40 text-xs text-accent hover:bg-accent/10 disabled:opacity-50"
+            className="inline-flex items-center gap-1 rounded-md border border-accent/40 px-2 py-1.5 text-xs text-accent hover:bg-accent/10 disabled:opacity-50"
           >
             {creating && <Loader2 size={11} className="animate-spin" />}
             만들기
@@ -730,7 +820,7 @@ function PathActionRow({
           type="button"
           onClick={onPick}
           disabled={creating}
-          className="px-2 py-1 rounded-md border border-bg-border text-xs text-text-secondary hover:text-text-primary hover:border-text-secondary/50 disabled:opacity-50"
+          className="rounded-md border border-bg-border px-2 py-1.5 text-xs text-text-secondary hover:text-text-primary hover:border-text-secondary/50 disabled:opacity-50"
         >
           선택
         </button>
@@ -738,13 +828,61 @@ function PathActionRow({
           <button
             type="button"
             onClick={onOpen}
-            className="px-2 py-1 rounded-md border border-bg-border text-xs text-text-secondary hover:text-text-primary hover:border-text-secondary/50"
+            className="rounded-md border border-bg-border px-2 py-1.5 text-xs text-text-secondary hover:text-text-primary hover:border-text-secondary/50"
           >
             열기
           </button>
         )}
       </div>
     </div>
+  );
+}
+
+function VersionNumberInput({
+  value,
+  onCommit,
+}: {
+  value: number;
+  onCommit: (next: number) => void;
+}) {
+  const [draft, setDraft] = useState(String(value));
+  const focused = useRef(false);
+
+  useEffect(() => {
+    if (!focused.current) setDraft(String(value));
+  }, [value]);
+
+  const commit = () => {
+    focused.current = false;
+    const n = Number(draft);
+    const next = Number.isFinite(n) ? Math.max(1, Math.floor(n)) : value;
+    setDraft(String(next));
+    if (next !== value) onCommit(next);
+  };
+
+  return (
+    <input
+      type="number"
+      min={1}
+      value={draft}
+      aria-label="버전 번호"
+      onFocus={() => { focused.current = true; }}
+      onChange={(event) => setDraft(event.target.value)}
+      onBlur={commit}
+      onKeyDown={(event) => {
+        if (event.key === 'Enter') {
+          event.preventDefault();
+          (event.target as HTMLInputElement).blur();
+        }
+        if (event.key === 'Escape') {
+          claimReactKey(event);
+          focused.current = false;
+          setDraft(String(value));
+          (event.target as HTMLInputElement).blur();
+        }
+      }}
+      className="w-14 rounded-md border border-bg-border bg-transparent px-1 py-1 text-center text-text-primary outline-none focus:border-accent/50"
+    />
   );
 }
 
@@ -779,23 +917,16 @@ function CostumeDetail({
             <button
               type="button"
               aria-label="버전 내리기"
-              className="w-7 h-7 rounded-md border border-bg-border text-text-primary hover:bg-bg-border/40 cursor-pointer"
+              className="h-8 w-8 rounded-md border border-bg-border text-text-primary hover:bg-bg-border/40 cursor-pointer"
               onClick={() => setVersion(costume.id, Math.max(1, Math.floor(costume.versionNo) - 1))}
             >
               −
             </button>
-            <input
-              type="number"
-              min={1}
-              value={costume.versionNo}
-              aria-label="버전 번호"
-              onChange={(e) => { const n = Number(e.target.value); if (Number.isFinite(n) && n >= 1) setVersion(costume.id, Math.floor(n)); }}
-              className="w-14 text-center bg-transparent border border-bg-border rounded-md px-1 py-1 text-text-primary outline-none focus:border-accent/50"
-            />
+            <VersionNumberInput value={costume.versionNo} onCommit={(next) => setVersion(costume.id, next)} />
             <button
               type="button"
               aria-label="버전 올리기"
-              className="w-7 h-7 rounded-md border border-bg-border text-text-primary hover:bg-bg-border/40 cursor-pointer"
+              className="h-8 w-8 rounded-md border border-bg-border text-text-primary hover:bg-bg-border/40 cursor-pointer"
               onClick={() => setVersion(costume.id, Math.floor(costume.versionNo) + 1)}
             >
               +
@@ -925,7 +1056,7 @@ function CostumeThumbCard({
   costume: CharacterCostume;
   selected: boolean;
   onSelect: () => void;
-  onDelete: () => void;
+  onDelete: () => void | Promise<void>;
   onImageContextMenu: (event: ReactMouseEvent<HTMLDivElement>) => void;
 }) {
   return (
@@ -962,15 +1093,22 @@ function CostumeThumbCard({
         <span className={cn('text-xs truncate', selected ? 'text-text-primary' : 'text-text-secondary')}>{costume.name}</span>
         <span className="text-[10px] text-text-secondary/70 shrink-0">v{costume.versionNo}</span>
       </div>
-      <span
-        role="button"
-        tabIndex={-1}
+      <button
+        type="button"
         aria-label={`${costume.name} 삭제`}
-        onClick={(e) => { e.stopPropagation(); if (window.confirm(`'${costume.name}' 복장을 삭제할까요?`)) onDelete(); }}
-        className="absolute top-1 right-1 opacity-0 group-hover:opacity-100 p-1 rounded-md bg-black/40 text-white/80 hover:text-[#FF6B6B] transition-opacity cursor-pointer"
+        onClick={async (e) => {
+          e.stopPropagation();
+          const ok = await ConfirmDialog.show({
+            message: `'${costume.name}' 복장을 삭제할까요?\n대표 이미지와 작업 파일 연결도 함께 삭제됩니다.`,
+            confirmLabel: '삭제',
+            tone: 'danger',
+          });
+          if (ok) await onDelete();
+        }}
+        className="absolute top-1 right-1 rounded-md bg-black/40 p-1.5 text-white/80 opacity-0 transition-opacity hover:text-[#FF6B6B] focus-visible:opacity-100 group-hover:opacity-100 group-focus-within:opacity-100 cursor-pointer"
       >
-        <X size={12} />
-      </span>
+        <Trash2 size={13} />
+      </button>
     </div>
   );
 }
@@ -993,6 +1131,8 @@ function CharacterDetailPanel({
   const addCostume = useCharacterBoardStore((s) => s.addCostume);
   const deleteCostume = useCharacterBoardStore((s) => s.deleteCostume);
   const deleteCharacter = useCharacterBoardStore((s) => s.deleteCharacter);
+  const archiveCharacter = useCharacterBoardStore((s) => s.archiveCharacter);
+  const restoreCharacter = useCharacterBoardStore((s) => s.restoreCharacter);
   const renameCharacter = useCharacterBoardStore((s) => s.renameCharacter);
   const updateCharacterFolder = useCharacterBoardStore((s) => s.updateCharacterFolder);
   const updateCostumeField = useCharacterBoardStore((s) => s.updateCostumeField);
@@ -1017,9 +1157,11 @@ function CharacterDetailPanel({
     const el = galleryRef.current;
     if (!el) return;
     const onWheel = (e: WheelEvent) => {
-      if (e.deltaY === 0) return;
+      const canScroll = el.scrollWidth > el.clientWidth;
+      if (!canScroll || e.deltaY === 0 || e.shiftKey) return;
+      const before = el.scrollLeft;
       el.scrollLeft += e.deltaY;
-      e.preventDefault();
+      if (el.scrollLeft !== before) e.preventDefault();
     };
     el.addEventListener('wheel', onWheel, { passive: false });
     return () => el.removeEventListener('wheel', onWheel);
@@ -1109,6 +1251,31 @@ function CharacterDetailPanel({
     if (created) setActiveCostumeId(created.id);
   };
 
+  const handleArchiveCharacter = async () => {
+    const ok = await ConfirmDialog.show({
+      message: `'${character.name}' 캐릭터를 보관할까요?\n보관된 캐릭터는 기본 목록과 검색에서 숨겨지고, 보관 목록에서 다시 복원할 수 있어요.`,
+      confirmLabel: '보관',
+      tone: 'danger',
+    });
+    if (ok) await archiveCharacter(character.id);
+  };
+
+  const handleRestoreCharacter = async () => {
+    await restoreCharacter(character.id);
+  };
+
+  const handleDeleteCharacter = async () => {
+    const ok = await ConfirmDialog.show({
+      message: `'${character.name}' 캐릭터를 영구 삭제할까요?\n복장, 대표 이미지, 작업 파일 연결, 댓글과 첨부 이미지도 함께 사라집니다.`,
+      confirmLabel: '영구 삭제',
+      tone: 'danger',
+    });
+    if (ok) {
+      await deleteCharacter(character.id);
+      onClose();
+    }
+  };
+
   return (
     <div className="flex flex-col h-full min-h-0">
       {/* 헤더 (글래스) */}
@@ -1123,14 +1290,21 @@ function CharacterDetailPanel({
               value={nameDraft}
               onChange={(e) => setNameDraft(e.target.value)}
               onBlur={() => { setEditingName(false); if (nameDraft.trim() && nameDraft !== character.name) renameCharacter(character.id, nameDraft.trim()); }}
-              onKeyDown={(e) => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); }}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') (e.target as HTMLInputElement).blur();
+                if (e.key === 'Escape') {
+                  claimReactKey(e);
+                  setNameDraft(character.name);
+                  setEditingName(false);
+                }
+              }}
               aria-label="캐릭터 이름"
               className="bg-transparent border border-accent/50 rounded-md px-2 py-1 text-lg font-semibold text-text-primary outline-none"
             />
           ) : (
             <>
               <h2 className="text-lg font-semibold text-text-primary truncate">{character.name}</h2>
-              <button type="button" aria-label="이름 편집" onClick={() => { setNameDraft(character.name); setEditingName(true); }} className="text-text-secondary hover:text-text-primary cursor-pointer">
+              <button type="button" aria-label="이름 편집" onClick={() => { setNameDraft(character.name); setEditingName(true); }} className="-m-1.5 rounded-md p-1.5 text-text-secondary hover:bg-bg-border/30 hover:text-text-primary cursor-pointer">
                 <Pencil size={14} />
               </button>
             </>
@@ -1149,14 +1323,33 @@ function CharacterDetailPanel({
           >
             <MessageSquare size={14} /> 댓글{commentCount > 0 ? ` ${commentCount}` : ''}
           </button>
-          <button
-            type="button"
-            onClick={() => { if (window.confirm(`'${character.name}' 캐릭터를 삭제할까요? 복장도 함께 삭제됩니다.`)) deleteCharacter(character.id); }}
-            className="text-text-secondary hover:text-[#FF6B6B] flex items-center gap-1 text-sm cursor-pointer"
-          >
-            <Trash2 size={14} /> 삭제
-          </button>
-          <button type="button" aria-label="닫기" onClick={onClose} className="text-text-secondary hover:text-text-primary cursor-pointer">
+          {character.status === 'archived' ? (
+            <>
+              <button
+                type="button"
+                onClick={handleRestoreCharacter}
+                className="flex items-center gap-1 rounded-md px-2 py-1.5 text-sm text-text-secondary hover:bg-bg-border/30 hover:text-text-primary cursor-pointer"
+              >
+                <RotateCcw size={14} /> 복원
+              </button>
+              <button
+                type="button"
+                onClick={handleDeleteCharacter}
+                className="flex items-center gap-1 rounded-md px-2 py-1.5 text-sm text-text-secondary hover:bg-bg-border/30 hover:text-[#FF6B6B] cursor-pointer"
+              >
+                <Trash2 size={14} /> 영구 삭제
+              </button>
+            </>
+          ) : (
+            <button
+              type="button"
+              onClick={handleArchiveCharacter}
+              className="flex items-center gap-1 rounded-md px-2 py-1.5 text-sm text-text-secondary hover:bg-bg-border/30 hover:text-[#FFB86B] cursor-pointer"
+            >
+              <Archive size={14} /> 보관
+            </button>
+          )}
+          <button type="button" aria-label="닫기" onClick={onClose} className="-m-1.5 rounded-md p-1.5 text-text-secondary hover:bg-bg-border/30 hover:text-text-primary cursor-pointer">
             <X size={18} />
           </button>
         </div>
@@ -1186,22 +1379,47 @@ function CharacterDetailPanel({
                 {episodes.map((ep) => {
                   const linked = character.episodeIds.includes(ep.episodeNumber);
                   return (
-                    <button
-                      key={ep.episodeNumber}
-                      type="button"
-                      onClick={() => (linked ? unlinkEpisode(character.id, ep.episodeNumber) : linkEpisode(character.id, ep.episodeNumber))}
-                      onContextMenu={(event) => {
-                        event.preventDefault();
-                        void handleEpisodeReel(ep);
-                      }}
-                      title={ep.reelFilePath ? '릴 파일 보기' : '릴 파일 등록'}
-                      className={cn(
-                        'px-2 py-0.5 rounded-md text-xs border transition-colors cursor-pointer',
-                        linked ? 'bg-accent/20 text-accent border-accent/40' : 'text-text-secondary border-bg-border hover:text-text-primary',
-                      )}
-                    >
-                      {getEpisodeDisplayName(ep)}
-                    </button>
+                    <div key={ep.episodeNumber} className="flex items-center gap-1">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (linked) {
+                            void unlinkEpisode(character.id, ep.episodeNumber);
+                            toast.info('에피소드 연결을 해제했어요', {
+                              action: {
+                                label: '실행 취소',
+                                onClick: () => { void linkEpisode(character.id, ep.episodeNumber); },
+                              },
+                            });
+                          } else {
+                            void linkEpisode(character.id, ep.episodeNumber);
+                          }
+                        }}
+                        onContextMenu={(event) => {
+                          event.preventDefault();
+                          void handleEpisodeReel(ep);
+                        }}
+                        title={linked ? '클릭: 연결 해제 · 우클릭: 릴 파일' : '클릭: 이 에피소드에 연결 · 우클릭: 릴 파일'}
+                        className={cn(
+                          'min-h-7 rounded-md border px-2 py-1 text-xs transition-colors cursor-pointer',
+                          linked ? 'bg-accent/20 text-accent border-accent/40' : 'text-text-secondary border-bg-border hover:text-text-primary',
+                        )}
+                      >
+                        {getEpisodeDisplayName(ep)}
+                      </button>
+                      <button
+                        type="button"
+                        aria-label={`${getEpisodeDisplayName(ep)} 릴 파일 ${ep.reelFilePath ? '보기' : '등록'}`}
+                        title={ep.reelFilePath ? '릴 파일 보기' : '릴 파일 등록'}
+                        onClick={() => { void handleEpisodeReel(ep); }}
+                        className={cn(
+                          'flex min-h-7 min-w-7 items-center justify-center rounded-md border text-text-secondary transition-colors hover:text-text-primary',
+                          ep.reelFilePath ? 'border-bg-border bg-bg-border/15' : 'border-dashed border-bg-border/80',
+                        )}
+                      >
+                        <Film size={13} />
+                      </button>
+                    </div>
                   );
                 })}
                 {episodes.length === 0 && <span className="text-xs text-text-secondary/60">등록된 에피소드가 없어요</span>}
@@ -1210,7 +1428,7 @@ function CharacterDetailPanel({
 
             {/* 복장 갤러리 */}
             <div className="flex flex-col gap-2">
-              <div className="text-xs text-text-secondary">디자인 (복장)</div>
+              <div className="text-xs text-text-secondary">복장</div>
               <div ref={galleryRef} className="flex items-stretch gap-2.5 overflow-x-auto pb-1">
                 {costumes.map((c) => (
                   <CostumeThumbCard
@@ -1232,7 +1450,7 @@ function CharacterDetailPanel({
                   className="w-[104px] shrink-0 aspect-[3/4] flex flex-col items-center justify-center gap-1.5 rounded-lg border border-dashed border-bg-border text-text-secondary hover:text-accent hover:border-accent/50 transition-colors cursor-pointer"
                 >
                   <Plus size={20} />
-                  <span className="text-xs">디자인 추가</span>
+                  <span className="text-xs">복장 추가</span>
                 </button>
               </div>
             </div>
@@ -1249,7 +1467,7 @@ function CharacterDetailPanel({
               />
             ) : (
               <div className="text-center text-text-secondary text-sm py-10 border border-dashed border-bg-border rounded-lg">
-                복장이 없습니다. "디자인 추가"로 첫 복장을 만들어보세요.
+                복장이 없습니다. "복장 추가"로 첫 복장을 만들어보세요.
               </div>
             )}
           </div>
@@ -1298,40 +1516,62 @@ function CharacterDetailPanel({
 /** 카드 클릭 → 오버레이 + 좌측 목록 / 우측 상세. */
 function CharacterDetailModal({
   initialCharacterId,
+  archivedMode = false,
   onClose,
 }: {
   initialCharacterId: string;
+  archivedMode?: boolean;
   onClose: () => void;
 }) {
   const characters = useCharacterBoardStore((s) => s.characters);
   const byCharacter = useCharacterBoardStore((s) => s.byCharacter);
 
-  const activeCharacters = useMemo(() => characters.filter((c) => c.status !== 'archived'), [characters]);
+  const visibleCharacters = useMemo(
+    () => characters.filter((c) => (archivedMode ? c.status === 'archived' : c.status !== 'archived')),
+    [archivedMode, characters],
+  );
   const [selectedId, setSelectedId] = useState(initialCharacterId);
+  const dialogRef = useRef<HTMLDivElement>(null);
+  const modalFocus = useModalFocus(dialogRef, { autoFocus: true });
 
-  const [commentOpen, setCommentOpen] = useState(true);
+  const [commentOpen, setCommentOpen] = useState(() => window.innerWidth >= 1440);
   const [commentCount, setCommentCount] = useState(0);
   // 캐릭터를 바꾸면 댓글 수 배지를 리셋(새 캐릭터 패널이 onCountChange 로 다시 채움).
   useEffect(() => { setCommentCount(0); }, [selectedId]);
 
-  const selected = activeCharacters.find((c) => c.id === selectedId) ?? null;
+  const selected = visibleCharacters.find((c) => c.id === selectedId) ?? null;
   useEffect(() => {
     if (selected) return;
-    if (activeCharacters.length > 0) setSelectedId(activeCharacters[0].id);
+    if (visibleCharacters.length > 0) setSelectedId(visibleCharacters[0].id);
     else onClose();
-  }, [selected, activeCharacters, onClose]);
+  }, [selected, visibleCharacters, onClose]);
 
   useEffect(() => {
-    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return;
+      e.preventDefault();
+      onClose();
+    };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, [onClose]);
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-overlay/60 backdrop-blur-sm p-4" onClick={onClose}>
-      <div className="flex items-stretch gap-3 h-[88vh] max-w-full max-h-full overflow-x-auto overflow-y-hidden" onClick={(e) => e.stopPropagation()}>
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-overlay/60 backdrop-blur-sm p-4"
+      onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}
+    >
+      <div
+        ref={dialogRef}
+        role="dialog"
+        aria-modal="true"
+        aria-label={archivedMode ? '보관된 캐릭터 상세' : '캐릭터 상세'}
+        tabIndex={-1}
+        onKeyDown={modalFocus.onKeyDown}
+        className="flex h-[88vh] max-h-full max-w-full items-stretch gap-3 overflow-x-auto overflow-y-hidden outline-none"
+      >
         <div
-          className="relative flex bg-bg-card border border-bg-border overflow-hidden w-[1024px] shrink-0 h-full"
+          className="relative flex h-full w-[min(1024px,calc(100vw-2rem))] shrink-0 overflow-hidden border border-bg-border bg-bg-card"
           style={{ borderRadius: 18, boxShadow: '0 40px 80px rgba(0,0,0,0.5)' }}
         >
           {/* 배경 글로우 */}
@@ -1341,14 +1581,14 @@ function CharacterDetailModal({
           </div>
 
           {/* 좌측 목록 */}
-          <aside className="relative z-[1] w-[200px] shrink-0 border-r border-bg-border/60 flex flex-col min-h-0">
+          <aside className="relative z-[1] hidden w-[200px] shrink-0 border-r border-bg-border/60 lg:flex flex-col min-h-0">
             <div className="px-3 py-3 border-b border-bg-border/40 shrink-0">
               <button type="button" onClick={onClose} className="flex items-center gap-1.5 text-sm text-text-secondary hover:text-text-primary cursor-pointer">
                 <X size={15} /> 닫기
               </button>
             </div>
             <div className="flex-1 min-h-0 overflow-y-auto py-1.5">
-              {activeCharacters.map((c) => (
+              {visibleCharacters.map((c) => (
                 <CharacterListRow key={c.id} character={c} costumes={byCharacter.get(c.id) ?? []} selected={c.id === selectedId} onSelect={() => setSelectedId(c.id)} />
               ))}
             </div>
@@ -1397,6 +1637,8 @@ function AddCharacterModal({ onClose }: { onClose: () => void }) {
   const [name, setName] = useState('');
   const [memo, setMemo] = useState('');
   const [saving, setSaving] = useState(false);
+  const dialogRef = useRef<HTMLDivElement>(null);
+  const modalFocus = useModalFocus(dialogRef, { autoFocus: false });
 
   const submit = async () => {
     if (!name.trim() || saving) return;
@@ -1406,9 +1648,27 @@ function AddCharacterModal({ onClose }: { onClose: () => void }) {
     if (created) onClose();
   };
 
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') return;
+      event.preventDefault();
+      onClose();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [onClose]);
+
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-6" onClick={onClose}>
-      <div className="bg-bg-card border border-bg-border rounded-2xl w-full max-w-md p-5 flex flex-col gap-4" onClick={(e) => e.stopPropagation()}>
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-6" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>
+      <div
+        ref={dialogRef}
+        role="dialog"
+        aria-modal="true"
+        aria-label="캐릭터 추가"
+        tabIndex={-1}
+        onKeyDown={modalFocus.onKeyDown}
+        className="bg-bg-card border border-bg-border rounded-2xl w-full max-w-md p-5 flex flex-col gap-4 outline-none"
+      >
         <h2 className="text-lg font-semibold text-text-primary">캐릭터 추가</h2>
         <div className="flex flex-col gap-1.5">
           <span className="text-xs text-text-secondary">이름</span>
@@ -1450,6 +1710,7 @@ function CharacterGrid({ onAdd, pendingOpenId, onConsumeOpen }: { onAdd: () => v
   const [query, setQuery] = useState('');
   const [activeTags, setActiveTags] = useState<string[]>([]);
   const [cardMenu, setCardMenu] = useState<{ characterId: string; x: number; y: number } | null>(null);
+  const [showArchived, setShowArchived] = useState(false);
 
   const detailCharacter = useMemo(() => characters.find((c) => c.id === detailRequest?.id) ?? null, [characters, detailRequest?.id]);
   useEffect(() => { if (detailRequest && !detailCharacter) setDetailRequest(null); }, [detailRequest, detailCharacter]);
@@ -1457,12 +1718,16 @@ function CharacterGrid({ onAdd, pendingOpenId, onConsumeOpen }: { onAdd: () => v
   // 에피소드 에셋 탭의 '캐릭터 현황판에서 보기' → 해당 캐릭터 상세 자동 오픈.
   useEffect(() => {
     if (pendingOpenId) {
+      const pendingCharacter = characters.find((c) => c.id === pendingOpenId);
+      if (pendingCharacter?.status === 'archived') setShowArchived(true);
       setDetailRequest((prev) => ({ id: pendingOpenId, nonce: (prev?.nonce ?? 0) + 1 }));
       onConsumeOpen?.();
     }
-  }, [pendingOpenId, onConsumeOpen]);
+  }, [characters, pendingOpenId, onConsumeOpen]);
 
   const activeCharacters = useMemo(() => characters.filter((c) => c.status !== 'archived'), [characters]);
+  const archivedCharacters = useMemo(() => characters.filter((c) => c.status === 'archived'), [characters]);
+  const visibleCharacters = showArchived ? archivedCharacters : activeCharacters;
 
   const allTags = useMemo(() => {
     const set = new Set<string>();
@@ -1478,13 +1743,13 @@ function CharacterGrid({ onAdd, pendingOpenId, onConsumeOpen }: { onAdd: () => v
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
-    return activeCharacters.filter((c) => {
+    return visibleCharacters.filter((c) => {
       if (q && !c.name.toLowerCase().includes(q)) return false;
       if (activeTags.length > 0) { const tags = characterTags(c.id); if (!activeTags.every((t) => tags.has(t))) return false; }
       return true;
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeCharacters, query, activeTags, byCharacter]);
+  }, [visibleCharacters, query, activeTags, byCharacter]);
   const cardMenuCharacter = cardMenu ? characters.find((c) => c.id === cardMenu.characterId) ?? null : null;
   const cardMenuCostumes = cardMenuCharacter ? byCharacter.get(cardMenuCharacter.id) ?? [] : [];
   const cardMenuFeatured = cardMenuCostumes.find((c) => c.featuredImageUrl) ?? null;
@@ -1526,9 +1791,25 @@ function CharacterGrid({ onAdd, pendingOpenId, onConsumeOpen }: { onAdd: () => v
             <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-text-secondary/60" />
             <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="이름으로 검색" className="w-full bg-bg-card border border-bg-border rounded-lg pl-8 pr-3 py-2 text-sm text-text-primary outline-none focus:border-accent/50" />
           </div>
-          <button type="button" onClick={onAdd} className="flex items-center gap-1.5 px-3 py-2 rounded-lg bg-accent text-white text-sm hover:opacity-90 shrink-0 cursor-pointer">
-            <Plus size={16} /> 캐릭터 추가
-          </button>
+          <div className="flex items-center gap-1.5">
+            {archivedCharacters.length > 0 && (
+              <button
+                type="button"
+                onClick={() => setShowArchived((value) => !value)}
+                className={cn(
+                  'flex items-center gap-1.5 rounded-lg border px-3 py-2 text-sm transition-colors shrink-0 cursor-pointer',
+                  showArchived
+                    ? 'border-accent/50 bg-accent/15 text-accent'
+                    : 'border-bg-border text-text-secondary hover:border-text-secondary/40 hover:text-text-primary',
+                )}
+              >
+                <Archive size={15} /> 보관 {archivedCharacters.length}
+              </button>
+            )}
+            <button type="button" onClick={onAdd} className="flex items-center gap-1.5 px-3 py-2 rounded-lg bg-accent text-white text-sm hover:opacity-90 shrink-0 cursor-pointer">
+              <Plus size={16} /> 캐릭터 추가
+            </button>
+          </div>
         </div>
         {allTags.length > 0 && (
           <div className="flex flex-wrap items-center gap-1.5">
@@ -1540,8 +1821,18 @@ function CharacterGrid({ onAdd, pendingOpenId, onConsumeOpen }: { onAdd: () => v
         )}
       </div>
 
-      {activeCharacters.length === 0 ? (
-        <div className="text-center text-text-secondary py-16">아직 캐릭터가 없습니다. "캐릭터 추가"로 시작해보세요.</div>
+      {visibleCharacters.length === 0 ? (
+        <div className="flex flex-col items-center justify-center gap-3 py-16 text-center text-text-secondary">
+          <ImageIcon size={28} className="opacity-35" />
+          <div className="text-sm">
+            {showArchived ? '보관된 캐릭터가 없어요.' : '아직 캐릭터가 없습니다.'}
+          </div>
+          {!showArchived && (
+            <button type="button" onClick={onAdd} className="flex items-center gap-1.5 rounded-lg bg-accent px-3 py-2 text-sm text-white hover:opacity-90">
+              <Plus size={15} /> 캐릭터 추가
+            </button>
+          )}
+        </div>
       ) : filtered.length === 0 ? (
         <div className="text-center text-text-secondary py-16">조건에 맞는 캐릭터가 없어요. 검색어나 태그 필터를 바꿔보세요.</div>
       ) : (
@@ -1582,6 +1873,7 @@ function CharacterGrid({ onAdd, pendingOpenId, onConsumeOpen }: { onAdd: () => v
         <CharacterDetailModal
           key={`${detailCharacter.id}:${detailRequest.nonce}`}
           initialCharacterId={detailCharacter.id}
+          archivedMode={showArchived}
           onClose={() => setDetailRequest(null)}
         />
       )}

@@ -26,6 +26,7 @@ function MenuButton({
   return (
     <button
       type="button"
+      role="menuitem"
       disabled={disabled}
       title={title}
       onClick={onClick}
@@ -42,6 +43,7 @@ export function CharacterImageContextMenu({
   y,
   variant = 'full',
   background,
+  canSetBackground = true,
   hasImage,
   hasFolder,
   hasFile,
@@ -58,6 +60,7 @@ export function CharacterImageContextMenu({
   y: number;
   variant?: 'full' | 'card';
   background?: CharacterImageBackground;
+  canSetBackground?: boolean;
   hasImage: boolean;
   hasFolder: boolean;
   hasFile: boolean;
@@ -79,13 +82,24 @@ export function CharacterImageContextMenu({
       onClose();
     };
     const onKey = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') onClose();
+      if (event.key !== 'Escape') return;
+      event.preventDefault();
+      event.stopPropagation();
+      event.stopImmediatePropagation();
+      onClose();
     };
+    const close = () => onClose();
     window.addEventListener('pointerdown', onPointer);
-    window.addEventListener('keydown', onKey);
+    window.addEventListener('keydown', onKey, { capture: true });
+    window.addEventListener('wheel', close, { capture: true, passive: true });
+    window.addEventListener('resize', close);
+    window.addEventListener('blur', close);
     return () => {
       window.removeEventListener('pointerdown', onPointer);
-      window.removeEventListener('keydown', onKey);
+      window.removeEventListener('keydown', onKey, { capture: true });
+      window.removeEventListener('wheel', close, { capture: true });
+      window.removeEventListener('resize', close);
+      window.removeEventListener('blur', close);
     };
   }, [onClose]);
 
@@ -102,6 +116,7 @@ export function CharacterImageContextMenu({
   return (
     <div
       ref={ref}
+      role="menu"
       className="fixed z-[80] w-56 overflow-hidden rounded-lg border border-bg-border bg-bg-card shadow-2xl"
       style={{ left: position.left, top: position.top }}
     >
@@ -116,12 +131,15 @@ export function CharacterImageContextMenu({
               <button
                 key={item.value}
                 type="button"
+                role="menuitem"
+                disabled={!canSetBackground}
                 onClick={() => { onBackground?.(item.value); onClose(); }}
                 className={cn(
                   'px-2 py-1.5 rounded-md text-xs border transition-colors',
                   background === item.value
                     ? 'border-accent bg-accent/15 text-accent'
                     : 'border-bg-border text-text-secondary hover:text-text-primary hover:border-text-secondary/40',
+                  !canSetBackground && 'opacity-40 hover:text-text-secondary hover:border-bg-border',
                 )}
               >
                 {item.label}

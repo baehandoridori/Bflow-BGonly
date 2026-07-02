@@ -27,6 +27,7 @@ import { tagColor } from '@/utils/tagColor';
 import { cn } from '@/utils/cn';
 import { chooseWorkFile, openWorkPath } from '@/services/sceneWorkLinkService';
 import { updateEpisodeReelPath } from '@/services/supabaseService';
+import { ConfirmDialog } from '@/components/common/ConfirmDialog';
 
 const RIGGING_STAGE_META: Record<CostumeRiggingStage, { label: string; color: string }> = {
   waiting: { label: '대기', color: '#8B8DA3' },
@@ -190,7 +191,14 @@ function EpisodeCharDetail({
         </div>
         <button
           type="button"
-          onClick={() => { if (window.confirm(`'${character.name}' 를 이 에피소드에서 제거할까요?`)) unlinkEpisode(character.id, episodeNumber); }}
+          onClick={async () => {
+            const ok = await ConfirmDialog.show({
+              message: `'${character.name}' 캐릭터를 이 에피소드에서 제거할까요?`,
+              confirmLabel: '제거',
+              tone: 'danger',
+            });
+            if (ok) await unlinkEpisode(character.id, episodeNumber);
+          }}
           className="text-text-secondary hover:text-[#FF6B6B] text-xs flex items-center gap-1 shrink-0 cursor-pointer"
         >
           <X size={13} /> 제거

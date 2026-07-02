@@ -30,6 +30,8 @@ const myTasksData = readFileSync('src/components/widgets/my-tasks/hooks/useMyTas
 const myCharacterTasks = readFileSync('src/components/widgets/my-tasks/hooks/useMyCharacterTasks.ts', 'utf8');
 const myTaskStats = readFileSync('src/components/widgets/my-tasks/statsUtils.ts', 'utf8');
 const characterTaskRow = readFileSync('src/components/widgets/my-tasks/components/CharacterTaskRow.tsx', 'utf8');
+const confirmDialog = readFileSync('src/components/common/ConfirmDialog.tsx', 'utf8');
+const modalFocusHook = readFileSync('src/hooks/useModalFocus.ts', 'utf8');
 const characterImageLightbox = readFileSync('src/components/characters/CharacterImageLightbox.tsx', 'utf8');
 const fitEditorSource = readFileSync('src/components/characters/CharacterImageFitEditor.tsx', 'utf8');
 const imageFrameSource = readFileSync('src/components/characters/CharacterImageFrame.tsx', 'utf8');
@@ -327,6 +329,45 @@ test('my tasks widget includes assigned character design and rigging work', () =
   assert.match(myTasksWidget, /renderCharacterTasks\(pendingCharacterTasks\)/);
   assert.match(myTasksWidget, /renderCharacterTasks\(doneCharacterTasks\)/);
   assert.match(characterTaskRow, /캐릭터 현황판에서 열기/);
+});
+
+test('character board safety and accessibility interactions use app-native guards', () => {
+  assert.doesNotMatch(characterBoard, /window\.confirm/);
+  assert.doesNotMatch(episodeAssetBoard, /window\.confirm/);
+  assert.match(characterBoard, /ConfirmDialog\.show/);
+  assert.match(episodeAssetBoard, /ConfirmDialog\.show/);
+  assert.match(confirmDialog, /window\.addEventListener\('keydown', onKey, \{ capture: true \}\)/);
+  assert.match(confirmDialog, /stopImmediatePropagation/);
+
+  assert.match(characterStore, /archiveCharacter: \(id: string\) => Promise<void>/);
+  assert.match(characterStore, /restoreCharacter: \(id: string\) => Promise<void>/);
+  assert.match(characterStore, /status: 'archived'/);
+  assert.match(characterStore, /status: 'active'/);
+  assert.match(characterBoard, /보관 목록에서 다시 복원/);
+  assert.match(characterBoard, /보관 \{archivedCharacters\.length\}/);
+  assert.match(characterBoard, /영구 삭제/);
+
+  assert.match(modalFocusHook, /FOCUSABLE_SELECTOR/);
+  assert.match(characterBoard, /useModalFocus/);
+  assert.match(characterBoard, /role="dialog"/);
+  assert.match(characterBoard, /aria-modal="true"/);
+  assert.match(characterBoard, /event\.target === event\.currentTarget/);
+  assert.match(characterBoard, /claimReactKey\(e\)/);
+  assert.match(characterImageLightbox, /window\.addEventListener\('keydown', onKey, \{ capture: true \}\)/);
+  assert.match(characterImageLightbox, /stopImmediatePropagation/);
+  assert.match(imageContextMenuSource, /window\.addEventListener\('keydown', onKey, \{ capture: true \}\)/);
+  assert.match(imageContextMenuSource, /window\.addEventListener\('wheel', close/);
+  assert.match(imageContextMenuSource, /role="menu"/);
+  assert.match(imageContextMenuSource, /canSetBackground/);
+
+  assert.match(characterBoard, /VersionNumberInput/);
+  assert.match(characterBoard, /onBlur=\{commit\}/);
+  assert.match(characterBoard, /h-8 w-8 rounded-md/);
+  assert.match(characterBoard, /group-focus-within:opacity-100/);
+  assert.match(characterBoard, /에피소드 연결을 해제했어요/);
+  assert.match(characterBoard, /이미지 놓기/);
+  assert.match(characterBoard, /window\.addEventListener\('paste', onPaste\)/);
+  assert.match(fitEditorSource, /focus-visible:ring-2 focus-visible:ring-accent\/70/);
 });
 
 test('global button label wrapping is prevented while multiline button content stays available', () => {
