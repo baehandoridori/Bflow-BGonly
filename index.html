@@ -4,15 +4,52 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>B flow</title>
+    <style>
+      html,
+      body,
+      #root {
+        min-height: 100%;
+        margin: 0;
+        background: #0f1117;
+        color: #e8e8ee;
+      }
+
+      body {
+        background: rgb(var(--color-bg-primary, 15 17 23));
+        color: rgb(var(--color-text-primary, 232 232 238));
+      }
+
+      .initial-loading-screen {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        min-height: 100vh;
+        flex-direction: column;
+        gap: 12px;
+        background: #0f1117;
+        color: #e8e8ee;
+        font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      }
+
+      .initial-loading-title {
+        font-size: 24px;
+        font-weight: 700;
+      }
+
+      .initial-loading-text {
+        color: #8b8da3;
+        font-size: 14px;
+      }
+    </style>
   </head>
   <!-- v1.20.x: font-family를 inline에서 제거 — index.css의 var(--font-family)가 즉시 반영되도록.
        이전엔 inline style의 specificity가 높아 글꼴 칩 클릭 시 즉시 업데이트 안 되던 버그(한솔님 보고). -->
-  <body style="margin:0; background: rgb(var(--color-bg-primary)); color: rgb(var(--color-text-primary));">
+  <body>
     <div id="root">
       <!-- React 마운트 전 로딩 표시 — 마운트 성공 시 React가 교체함 -->
-      <div style="display:flex; align-items:center; justify-content:center; height:100vh; flex-direction:column; gap:12px;">
-        <div style="font-size:24px; font-weight:bold;">B flow</div>
-        <div style="color:#8B8DA3; font-size:14px;">로딩 중...</div>
+      <div class="initial-loading-screen">
+        <div class="initial-loading-title">B flow</div>
+        <div class="initial-loading-text">로딩 중...</div>
       </div>
     </div>
     <div id="error-display" style="display:none; position:fixed; bottom:20px; left:20px; right:20px; background:#FF6B6B; color:#fff; padding:16px; border-radius:8px; font-size:13px; z-index:9999; white-space:pre-wrap;"></div>
