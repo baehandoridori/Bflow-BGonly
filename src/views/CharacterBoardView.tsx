@@ -16,6 +16,7 @@ import { Plus, X, Image as ImageIcon, Trash2, Pencil, Search, User, Check, Uploa
 import { useCharacterBoardStore } from '@/stores/useCharacterBoardStore';
 import { useDataStore } from '@/stores/useDataStore';
 import { useAuthStore } from '@/stores/useAuthStore';
+import { useAppStore } from '@/stores/useAppStore';
 import {
   COSTUME_DESIGN_STAGES,
   COSTUME_RIGGING_STAGES,
@@ -1431,17 +1432,20 @@ function CharacterGrid({ onAdd, pendingOpenId, onConsumeOpen }: { onAdd: () => v
   const loadError = useCharacterBoardStore((s) => s.loadError);
   const reload = useCharacterBoardStore((s) => s.load);
 
-  const [detailId, setDetailId] = useState<string | null>(null);
+  const [detailRequest, setDetailRequest] = useState<{ id: string; nonce: number } | null>(null);
   const [query, setQuery] = useState('');
   const [activeTags, setActiveTags] = useState<string[]>([]);
   const [cardMenu, setCardMenu] = useState<{ characterId: string; x: number; y: number } | null>(null);
 
-  const detailCharacter = useMemo(() => characters.find((c) => c.id === detailId) ?? null, [characters, detailId]);
-  useEffect(() => { if (detailId && !detailCharacter) setDetailId(null); }, [detailId, detailCharacter]);
+  const detailCharacter = useMemo(() => characters.find((c) => c.id === detailRequest?.id) ?? null, [characters, detailRequest?.id]);
+  useEffect(() => { if (detailRequest && !detailCharacter) setDetailRequest(null); }, [detailRequest, detailCharacter]);
 
   // 에피소드 에셋 탭의 '캐릭터 현황판에서 보기' → 해당 캐릭터 상세 자동 오픈.
   useEffect(() => {
-    if (pendingOpenId) { setDetailId(pendingOpenId); onConsumeOpen?.(); }
+    if (pendingOpenId) {
+      setDetailRequest((prev) => ({ id: pendingOpenId, nonce: (prev?.nonce ?? 0) + 1 }));
+      onConsumeOpen?.();
+    }
   }, [pendingOpenId, onConsumeOpen]);
 
   const activeCharacters = useMemo(() => characters.filter((c) => c.status !== 'archived'), [characters]);
@@ -1533,7 +1537,7 @@ function CharacterGrid({ onAdd, pendingOpenId, onConsumeOpen }: { onAdd: () => v
               key={c.id}
               character={c}
               costumes={byCharacter.get(c.id) ?? []}
-              onOpen={() => setDetailId(c.id)}
+              onOpen={() => setDetailRequest((prev) => ({ id: c.id, nonce: (prev?.nonce ?? 0) + 1 }))}
               onContextMenu={(event) => {
                 event.preventDefault();
                 setCardMenu({ characterId: c.id, x: event.clientX, y: event.clientY });
@@ -1560,14 +1564,23 @@ function CharacterGrid({ onAdd, pendingOpenId, onConsumeOpen }: { onAdd: () => v
         />
       )}
 
-      {detailCharacter && <CharacterDetailModal initialCharacterId={detailCharacter.id} onClose={() => setDetailId(null)} />}
+      {detailCharacter && detailRequest && (
+        <CharacterDetailModal
+          key={`${detailCharacter.id}:${detailRequest.nonce}`}
+          initialCharacterId={detailCharacter.id}
+          onClose={() => setDetailRequest(null)}
+        />
+      )}
     </div>
   );
 }
 
 export function CharacterBoardView() {
   const load = useCharacterBoardStore((s) => s.load);
+  const loaded = useCharacterBoardStore((s) => s.loaded);
   const startRealtime = useCharacterBoardStore((s) => s.startRealtime);
+  const pendingCharacterBoardRequest = useAppStore((s) => s.pendingCharacterBoardRequest);
+  const setPendingCharacterBoardRequest = useAppStore((s) => s.setPendingCharacterBoardRequest);
 
   const [tab, setTab] = useState<BoardTab>('board');
   const [addOpen, setAddOpen] = useState(false);
@@ -1578,6 +1591,17 @@ export function CharacterBoardView() {
     const stop = startRealtime();
     return () => { stop(); };
   }, [load, startRealtime]);
+
+  useEffect(() => {
+    if (!pendingCharacterBoardRequest || !loaded) return;
+    setTab('board');
+    setPendingOpenId(pendingCharacterBoardRequest.characterId);
+    setPendingCharacterBoardRequest(null);
+  }, [loaded, pendingCharacterBoardRequest, setPendingCharacterBoardRequest]);
+
+  useEffect(() => () => {
+    setPendingCharacterBoardRequest(null);
+  }, [setPendingCharacterBoardRequest]);
 
   return (
     <div className="h-full overflow-y-auto p-6">
