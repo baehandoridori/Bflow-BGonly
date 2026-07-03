@@ -573,6 +573,7 @@ test('character board hardening covers image failures, drafts, realtime races, a
   assert.match(characterBoard, /const costumeMemoDraftCache = new Map<string, string>\(\)/);
   assert.match(characterBoard, /function CostumeMemoInput\(\{[\s\S]*?draftKey/);
   assert.match(characterBoard, /focused\.current && latestDraft !== valueRef\.current/);
+  assert.match(characterBoard, /costumeMemoDraftCache\.get\(draftKey\) === next[\s\S]*?costumeMemoDraftCache\.delete\(draftKey\)/);
   assert.match(characterBoard, /onBlur=\{commit\}/);
   assert.match(characterBoard, /key=\{costume\.id\}/);
 
@@ -587,6 +588,7 @@ test('character board hardening covers image failures, drafts, realtime races, a
   assert.match(characterStore, /mergeEpisodeLinkPatchWithPending/);
   assert.match(characterStore, /window\.electronAPI\?\.onSupabaseStatus/);
   assert.match(characterStore, /window\.addEventListener\('online', catchUp\)/);
+  assert.match(electronSupabase, /status === 'CLOSED' \|\| status === 'CHANNEL_ERROR' \|\| status === 'TIMED_OUT'/);
 
   assert.match(characterStore, /function compareCharacters/);
   assert.match(characterStore, /function compareCostumes/);

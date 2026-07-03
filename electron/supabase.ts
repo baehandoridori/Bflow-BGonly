@@ -4167,8 +4167,8 @@ export function startCharacterBoardRealtime(
       onStatus?.(status);
       if (status === 'SUBSCRIBED') {
         retry.reset();
-      } else if (status === 'CLOSED' || status === 'CHANNEL_ERROR') {
-        // 채널 단독 장애도 지수 백오프로 재구독 (bflow-realtime 채널과 동일 패턴).
+      } else if (status === 'CLOSED' || status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
+        // 채널 단독 장애/초기 구독 타임아웃도 지수 백오프로 재구독 (bflow-realtime 채널과 동일 패턴).
         const scheduled = retry.schedule(connect);
         if (!scheduled) console.warn('[character-board] realtime 재시도 한도 초과 — 구독 중단');
       }

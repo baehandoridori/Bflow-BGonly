@@ -514,7 +514,9 @@ function CostumeMemoInput({
     if (focused.current && latestDraft !== valueRef.current) {
       const result = onCommitRef.current(latestDraft);
       void Promise.resolve(result).then((ok) => {
-        if (ok !== false) costumeMemoDraftCache.delete(draftKey);
+        if (ok !== false && costumeMemoDraftCache.get(draftKey) === latestDraft) {
+          costumeMemoDraftCache.delete(draftKey);
+        }
       });
       return;
     }
@@ -532,8 +534,10 @@ function CostumeMemoInput({
     }
     const result = onCommitRef.current(next);
     void Promise.resolve(result).then((ok) => {
-      // 실패(false) 시 캐시를 유지해 입력 텍스트를 보존 — 다시 포커스 아웃하면 재시도된다.
-      if (ok !== false) costumeMemoDraftCache.delete(draftKey);
+      // 실패(false)나 더 최신 초안이 있으면 캐시를 유지 — 다시 포커스 아웃하면 재시도된다.
+      if (ok !== false && costumeMemoDraftCache.get(draftKey) === next) {
+        costumeMemoDraftCache.delete(draftKey);
+      }
     });
   }, [draftKey]);
 
