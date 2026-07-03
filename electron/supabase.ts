@@ -4124,11 +4124,24 @@ export function startCharacterBoardRealtime(
       'postgres_changes',
       { event: '*', schema: 'public', table },
       (payload) => {
-        broadcast({
-          table,
-          eventType: payload.eventType as 'INSERT' | 'UPDATE' | 'DELETE',
-          row: (payload.new ?? null) as Record<string, unknown> | null,
-          old: (payload.old ?? null) as Record<string, unknown> | null,
+        void (async () => {
+          const row = (payload.new ?? null) as Record<string, unknown> | null;
+          const old = (payload.old ?? null) as Record<string, unknown> | null;
+          const enriched = await enrichEpisodeCharacterMappingPayload(table, row, old);
+          broadcast({
+            table,
+            eventType: payload.eventType as 'INSERT' | 'UPDATE' | 'DELETE',
+            row: enriched.row,
+            old: enriched.old,
+          });
+        })().catch((err) => {
+          console.warn('[character-board] realtime payload enrich 실패:', err);
+          broadcast({
+            table,
+            eventType: payload.eventType as 'INSERT' | 'UPDATE' | 'DELETE',
+            row: (payload.new ?? null) as Record<string, unknown> | null,
+            old: (payload.old ?? null) as Record<string, unknown> | null,
+          });
         });
       },
     );
@@ -4137,4 +4150,26 @@ export function startCharacterBoardRealtime(
   return () => {
     supabase.removeChannel(channel);
   };
+}
+
+async function enrichEpisodeCharacterMappingPayload(
+  table: 'characters' | 'character_costumes' | 'episode_character_mapping',
+  row: Record<string, unknown> | null,
+  old: Record<string, unknown> | null,
+): Promise<{ row: Record<string, unknown> | null; old: Record<string, unknown> | null }> {
+  if (table !== 'episode_character_mapping') return { row, old };
+  const episodeId = (row?.episode_id ?? old?.episode_id) as string | undefined;
+  if (!episodeId) return { row, old };
+
+  const { data, error } = await supabase
+    .from('episodes')
+    .select('episode_number')
+    .eq('id', episodeId)
+    .maybeSingle();
+  if (error || typeof data?.episode_number !== 'number') return { row, old };
+
+  const attach = (value: Record<string, unknown> | null) => (
+    value ? { ...value, episode_number: data.episode_number as number } : value
+  );
+  return { row: attach(row), old: attach(old) };
 }

@@ -90,6 +90,19 @@ function buildEpisodeLinks(mappings: RawMapping[]): Map<string, EpisodeCharacter
   return map;
 }
 
+function rowToRealtimeMapping(row: any | null): RawMapping | null {
+  if (!row || typeof row !== 'object') return null;
+  const characterId = typeof row.character_id === 'string' ? row.character_id : null;
+  const episodeNumber = typeof row.episode_number === 'number' ? row.episode_number : null;
+  if (!characterId || episodeNumber == null) return null;
+  return {
+    characterId,
+    episodeNumber,
+    memo: typeof row.memo === 'string' ? row.memo : null,
+    costumeId: typeof row.costume_id === 'string' ? row.costume_id : null,
+  };
+}
+
 interface CharacterBoardStore {
   characters: Character[];
   costumes: CharacterCostume[];
@@ -106,7 +119,6 @@ interface CharacterBoardStore {
   ensureLoadedAndRealtime: (opts?: { silent?: boolean }) => () => void;
 
   addCharacter: (name: string, memo?: string) => Promise<Character | null>;
-  updateCharacterMemo: (id: string, memo: string) => Promise<void>;
   updateCharacterFolder: (id: string, workFolderPath: string | null) => Promise<boolean>;
   archiveCharacter: (id: string) => Promise<void>;
   restoreCharacter: (id: string) => Promise<void>;
@@ -257,67 +269,25 @@ export const useCharacterBoardStore = create<CharacterBoardStore>((set, get) => 
     }
   },
 
-  updateCharacterMemo: async (id, memo) => {
-    const prev = get().characters;
-    set({ characters: prev.map((c) => (c.id === id ? { ...c, memo } : c)) });
-    try {
-      await svcUpdateCharacter(id, { memo });
-    } catch (err) {
-      console.error('[character-board] updateCharacterMemo 실패:', err);
-      set({ characters: prev });
-      toast.error('메모 저장에 실패했어요');
-    }
-  },
-
   updateCharacterFolder: async (id, workFolderPath) => {
-    const prev = get().characters;
-    set({ characters: prev.map((c) => (c.id === id ? { ...c, workFolderPath } : c)) });
-    try {
-      await svcUpdateCharacter(id, { work_folder_path: workFolderPath });
-      return true;
-    } catch (err) {
-      console.error('[character-board] updateCharacterFolder 실패:', err);
-      set({ characters: prev });
-      toast.error('작업 폴더 저장에 실패했어요');
-      return false;
-    }
+    return applyCharacterUpdate(set, get, id, { workFolderPath }, { work_folder_path: workFolderPath }, '작업 폴더 저장에 실패했어요');
   },
 
   renameCharacter: async (id, name) => {
-    const prev = get().characters;
-    set({ characters: prev.map((c) => (c.id === id ? { ...c, name } : c)) });
-    try {
-      await svcUpdateCharacter(id, { name });
-    } catch (err) {
-      console.error('[character-board] renameCharacter 실패:', err);
-      set({ characters: prev });
-      toast.error('이름 변경에 실패했어요');
-    }
+    await applyCharacterUpdate(set, get, id, { name }, { name }, '이름 변경에 실패했어요');
   },
 
   archiveCharacter: async (id) => {
-    const prev = get().characters;
-    set({ characters: prev.map((c) => (c.id === id ? { ...c, status: 'archived' } : c)) });
-    try {
-      await svcUpdateCharacter(id, { status: 'archived' });
+    const saved = await applyCharacterUpdate(set, get, id, { status: 'archived' }, { status: 'archived' }, '캐릭터 보관에 실패했어요');
+    if (saved) {
       toast.success('캐릭터를 보관했어요');
-    } catch (err) {
-      console.error('[character-board] archiveCharacter 실패:', err);
-      set({ characters: prev });
-      toast.error('캐릭터 보관에 실패했어요');
     }
   },
 
   restoreCharacter: async (id) => {
-    const prev = get().characters;
-    set({ characters: prev.map((c) => (c.id === id ? { ...c, status: 'active' } : c)) });
-    try {
-      await svcUpdateCharacter(id, { status: 'active' });
+    const saved = await applyCharacterUpdate(set, get, id, { status: 'active' }, { status: 'active' }, '캐릭터 복원에 실패했어요');
+    if (saved) {
       toast.success('캐릭터를 복원했어요');
-    } catch (err) {
-      console.error('[character-board] restoreCharacter 실패:', err);
-      set({ characters: prev });
-      toast.error('캐릭터 복원에 실패했어요');
     }
   },
 
@@ -325,6 +295,9 @@ export const useCharacterBoardStore = create<CharacterBoardStore>((set, get) => 
     const prevChars = get().characters;
     const prevCostumes = get().costumes;
     const prevLinks = get().episodeLinks;
+    const removedCharacter = prevChars.find((c) => c.id === id) ?? null;
+    const removedCostumes = prevCostumes.filter((c) => c.characterId === id);
+    const removedLinks = prevLinks.get(id)?.slice() ?? null;
     const nextCostumes = prevCostumes.filter((c) => c.characterId !== id);
     const nextLinks = new Map(prevLinks); nextLinks.delete(id);
     set({
@@ -337,11 +310,23 @@ export const useCharacterBoardStore = create<CharacterBoardStore>((set, get) => 
       await svcDeleteCharacter(id);
     } catch (err) {
       console.error('[character-board] deleteCharacter 실패:', err);
-      set({
-        characters: prevChars,
-        costumes: prevCostumes,
-        byCharacter: buildByCharacter(prevCostumes),
-        episodeLinks: prevLinks,
+      set((s) => {
+        const characters = removedCharacter && !s.characters.some((c) => c.id === id)
+          ? [...s.characters, removedCharacter].sort((a, b) => a.sortOrder - b.sortOrder)
+          : s.characters;
+        const existingCostumeIds = new Set(s.costumes.map((c) => c.id));
+        const missingCostumes = removedCostumes.filter((c) => !existingCostumeIds.has(c.id));
+        const costumes = missingCostumes.length > 0
+          ? [...s.costumes, ...missingCostumes].sort((a, b) => a.sortOrder - b.sortOrder)
+          : s.costumes;
+        const episodeLinks = new Map(s.episodeLinks);
+        if (removedLinks && !episodeLinks.has(id)) episodeLinks.set(id, removedLinks);
+        return {
+          characters,
+          costumes,
+          byCharacter: buildByCharacter(costumes),
+          episodeLinks,
+        };
       });
       toast.error('캐릭터 삭제에 실패했어요');
     }
@@ -406,13 +391,18 @@ export const useCharacterBoardStore = create<CharacterBoardStore>((set, get) => 
 
   deleteCostume: async (id) => {
     const prev = get().costumes;
+    const removed = prev.find((c) => c.id === id) ?? null;
     const next = prev.filter((c) => c.id !== id);
     set({ costumes: next, byCharacter: buildByCharacter(next) });
     try {
       await svcDeleteCostume(id);
     } catch (err) {
       console.error('[character-board] deleteCostume 실패:', err);
-      set({ costumes: prev, byCharacter: buildByCharacter(prev) });
+      set((s) => {
+        if (!removed || s.costumes.some((c) => c.id === id)) return s;
+        const costumes = [...s.costumes, removed].sort((a, b) => a.sortOrder - b.sortOrder);
+        return { costumes, byCharacter: buildByCharacter(costumes) };
+      });
       toast.error('복장 삭제에 실패했어요');
     }
   },
@@ -420,63 +410,71 @@ export const useCharacterBoardStore = create<CharacterBoardStore>((set, get) => 
   // ─── 에피소드 매핑 ───
 
   linkEpisode: async (characterId, episodeNumber) => {
-    const prevChars = get().characters;
-    const prevLinks = get().episodeLinks;
     set({
-      characters: prevChars.map((c) =>
-        c.id === characterId && !c.episodeIds.includes(episodeNumber)
-          ? { ...c, episodeIds: [...c.episodeIds, episodeNumber].sort((a, b) => a - b) }
-          : c),
-      episodeLinks: upsertLink(prevLinks, characterId, episodeNumber, {}),
+      characters: setCharacterEpisodePresence(get().characters, characterId, episodeNumber, true),
+      episodeLinks: upsertLink(get().episodeLinks, characterId, episodeNumber, {}),
     });
     try {
       await svcLinkEpisode(episodeNumber, characterId, useAuthStore.getState().currentUser?.id ?? null);
     } catch (err) {
       console.error('[character-board] linkEpisode 실패:', err);
-      set({ characters: prevChars, episodeLinks: prevLinks });
+      set((s) => {
+        const currentLink = s.episodeLinks.get(characterId)?.find((l) => l.episodeNumber === episodeNumber);
+        const shouldRemove = !currentLink || (!currentLink.memo && !currentLink.costumeId);
+        return {
+          characters: shouldRemove ? setCharacterEpisodePresence(s.characters, characterId, episodeNumber, false) : s.characters,
+          episodeLinks: shouldRemove ? removeLink(s.episodeLinks, characterId, episodeNumber) : s.episodeLinks,
+        };
+      });
       toast.error('에피소드 연결에 실패했어요');
     }
   },
 
   unlinkEpisode: async (characterId, episodeNumber) => {
-    const prevChars = get().characters;
-    const prevLinks = get().episodeLinks;
+    const previousLink = get().episodeLinks.get(characterId)?.find((l) => l.episodeNumber === episodeNumber) ?? null;
     set({
-      characters: prevChars.map((c) =>
-        c.id === characterId
-          ? { ...c, episodeIds: c.episodeIds.filter((e) => e !== episodeNumber) }
-          : c),
-      episodeLinks: removeLink(prevLinks, characterId, episodeNumber),
+      characters: setCharacterEpisodePresence(get().characters, characterId, episodeNumber, false),
+      episodeLinks: removeLink(get().episodeLinks, characterId, episodeNumber),
     });
     try {
       await svcUnlinkEpisode(episodeNumber, characterId);
     } catch (err) {
       console.error('[character-board] unlinkEpisode 실패:', err);
-      set({ characters: prevChars, episodeLinks: prevLinks });
+      set((s) => ({
+        characters: setCharacterEpisodePresence(s.characters, characterId, episodeNumber, true),
+        episodeLinks: upsertLink(s.episodeLinks, characterId, episodeNumber, {
+          memo: previousLink?.memo ?? null,
+          costumeId: previousLink?.costumeId ?? null,
+        }),
+      }));
       toast.error('에피소드 연결 해제에 실패했어요');
     }
   },
 
   setEpisodeMemo: async (characterId, episodeNumber, memo) => {
-    const prevLinks = get().episodeLinks;
-    set({ episodeLinks: upsertLink(prevLinks, characterId, episodeNumber, { memo }) });
+    const previousLink = get().episodeLinks.get(characterId)?.find((l) => l.episodeNumber === episodeNumber) ?? null;
+    set({ episodeLinks: upsertLink(get().episodeLinks, characterId, episodeNumber, { memo }) });
     try {
       await svcUpdateEpisodeMapping(episodeNumber, characterId, { memo });
     } catch (err) {
       console.error('[character-board] setEpisodeMemo 실패:', err);
-      set({ episodeLinks: prevLinks });
+      set((s) => ({
+        episodeLinks: revertLinkFieldIfUnchanged(s.episodeLinks, characterId, episodeNumber, 'memo', memo, previousLink),
+      }));
       toast.error('이 편 메모 저장에 실패했어요');
     }
   },
 
   setEpisodeCostume: async (characterId, episodeNumber, costumeId) => {
-    const prevLinks = get().episodeLinks;
-    set({ episodeLinks: upsertLink(prevLinks, characterId, episodeNumber, { costumeId }) });
+    const previousLink = get().episodeLinks.get(characterId)?.find((l) => l.episodeNumber === episodeNumber) ?? null;
+    set({ episodeLinks: upsertLink(get().episodeLinks, characterId, episodeNumber, { costumeId }) });
     try {
       await svcUpdateEpisodeMapping(episodeNumber, characterId, { costumeId });
     } catch (err) {
       console.error('[character-board] setEpisodeCostume 실패:', err);
-      set({ episodeLinks: prevLinks });
+      set((s) => ({
+        episodeLinks: revertLinkFieldIfUnchanged(s.episodeLinks, characterId, episodeNumber, 'costumeId', costumeId, previousLink),
+      }));
       toast.error('이 편 복장 선택에 실패했어요');
     }
   },
@@ -542,10 +540,25 @@ export const useCharacterBoardStore = create<CharacterBoardStore>((set, get) => 
     }
 
     if (table === 'episode_character_mapping') {
-      // episode_number 는 payload row 에 없음(테이블 컬럼 아님) → 전체 매핑 재로드는 과함.
-      // 낙관적 업데이트로 이미 로컬 반영됨. 다른 사용자 변경만 누락될 수 있어
-      // 가벼운 매핑 재조립을 위해 episodeIds 전체 리로드.
-      void reloadEpisodeMappings(set, get);
+      const mapping = rowToRealtimeMapping(eventType === 'DELETE' ? old : row);
+      if (!mapping) {
+        void reloadEpisodeMappings(set, get);
+        return;
+      }
+      if (eventType === 'DELETE') {
+        set((s) => ({
+          characters: setCharacterEpisodePresence(s.characters, mapping.characterId, mapping.episodeNumber, false),
+          episodeLinks: removeLink(s.episodeLinks, mapping.characterId, mapping.episodeNumber),
+        }));
+        return;
+      }
+      set((s) => ({
+        characters: setCharacterEpisodePresence(s.characters, mapping.characterId, mapping.episodeNumber, true),
+        episodeLinks: upsertLink(s.episodeLinks, mapping.characterId, mapping.episodeNumber, {
+          memo: mapping.memo,
+          costumeId: mapping.costumeId,
+        }),
+      }));
     }
   },
 }));
@@ -578,8 +591,92 @@ function removeLink(
 ): Map<string, EpisodeCharacterLink[]> {
   const next = new Map(links);
   const arr = (next.get(characterId) ?? []).filter((l) => l.episodeNumber !== episodeNumber);
-  next.set(characterId, arr);
+  if (arr.length > 0) next.set(characterId, arr);
+  else next.delete(characterId);
   return next;
+}
+
+function setCharacterEpisodePresence(
+  characters: Character[],
+  characterId: string,
+  episodeNumber: number,
+  present: boolean,
+): Character[] {
+  return characters.map((c) => {
+    if (c.id !== characterId) return c;
+    const hasEpisode = c.episodeIds.includes(episodeNumber);
+    if (present) {
+      if (hasEpisode) return c;
+      return { ...c, episodeIds: [...c.episodeIds, episodeNumber].sort((a, b) => a - b) };
+    }
+    if (!hasEpisode) return c;
+    return { ...c, episodeIds: c.episodeIds.filter((e) => e !== episodeNumber) };
+  });
+}
+
+function revertLinkFieldIfUnchanged<K extends 'memo' | 'costumeId'>(
+  links: Map<string, EpisodeCharacterLink[]>,
+  characterId: string,
+  episodeNumber: number,
+  field: K,
+  optimisticValue: EpisodeCharacterLink[K],
+  previousLink: EpisodeCharacterLink | null,
+): Map<string, EpisodeCharacterLink[]> {
+  const arr = links.get(characterId);
+  if (!arr) return links;
+  const idx = arr.findIndex((l) => l.episodeNumber === episodeNumber);
+  if (idx < 0 || arr[idx][field] !== optimisticValue) return links;
+
+  const restored = {
+    ...arr[idx],
+    [field]: previousLink ? previousLink[field] : null,
+  };
+  if (!previousLink && !restored.memo && !restored.costumeId) {
+    return removeLink(links, characterId, episodeNumber);
+  }
+
+  const next = new Map(links);
+  const nextArr = arr.slice();
+  nextArr[idx] = restored;
+  next.set(characterId, nextArr);
+  return next;
+}
+
+/** 캐릭터 부분 업데이트 공통 헬퍼 — 낙관적 반영 후 단일 update, 실패 시 필드 단위 롤백. */
+async function applyCharacterUpdate(
+  set: (partial: Partial<CharacterBoardStore>) => void,
+  get: () => CharacterBoardStore,
+  id: string,
+  updates: Partial<Character>,
+  dbUpdates: Record<string, unknown>,
+  errorMsg: string,
+): Promise<boolean> {
+  const prev = get().characters;
+  const prevCharacter = prev.find((c) => c.id === id);
+  set({ characters: prev.map((c) => (c.id === id ? { ...c, ...updates } : c)) });
+  try {
+    await svcUpdateCharacter(id, dbUpdates);
+    return true;
+  } catch (err) {
+    console.error('[character-board] updateCharacter 실패:', err);
+    if (prevCharacter) {
+      const cur = get().characters;
+      const updRec = updates as Record<string, unknown>;
+      const prevRec = prevCharacter as unknown as Record<string, unknown>;
+      const reverted = cur.map((c) => {
+        if (c.id !== id) return c;
+        const curRec = c as unknown as Record<string, unknown>;
+        const restored: Record<string, unknown> = { ...curRec };
+        for (const k of Object.keys(updates)) {
+          if (curRec[k] === updRec[k]) restored[k] = prevRec[k];
+        }
+        return restored as unknown as Character;
+      });
+      set({ characters: reverted });
+    }
+    toast.error(errorMsg);
+    return false;
+  }
 }
 
 /** 복장 부분 업데이트 공통 헬퍼 — 낙관적 반영 후 단일 update, 실패 시 롤백. */
