@@ -1105,6 +1105,10 @@ export interface ElectronAPI {
       episodeNumber?: number; partId?: string;
     }) => void,
   ) => () => void;
+  /** 위젯 팝업 → 본체 캘린더 날짜 이동 — 팝업에서 본체로 점프 신호 전송 */
+  widgetNavigateToDate?: (payload: { date: string; todoId: string }) => Promise<void>;
+  /** 위젯 팝업 → 본체 캘린더 날짜 이동 — 본체가 점프 신호 수신 */
+  onWidgetNavigateToDate?: (callback: (payload: { date: string; todoId: string }) => void) => () => void;
   supabaseBulkUpdateSceneStages: (updates: BulkStageUpdate[], updatedBy: string) => Promise<BulkUpdateResult[]>;
   supabaseBulkDeleteScenes: (sceneUuids: string[], deletedBy: string) => Promise<BulkUpdateResult[]>;
   supabaseBulkUpdateSceneFields: (updates: BulkFieldUpdate[], updatedBy: string) => Promise<BulkUpdateResult[]>;
