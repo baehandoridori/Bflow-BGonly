@@ -3,12 +3,14 @@
  *
  * - characters: 전역 캐릭터 (episodeIds 조립 완료 상태)
  * - costumes: 모든 복장 (캐릭터 무관 평면 배열)
- * - byCharacter: characterId → 복장 배열 (파생, load/머지 시 재계산)
+ * - byCharacter: characterId → 복장 배열 (파생 — rebuildByCharacter 가 구조적 공유로 재계산)
  *
  * 모든 변경은 컴포지팅 대시보드(useCompositingDashboardStore)와 동일하게
  *   낙관적 업데이트 → IPC 동기화 → 실패 시 롤백 패턴.
  * Realtime 수신(세 테이블)은 receiveRealtime 로 머지.
  *
+ * 순수 계산(정렬·머지·pending 보호)은 characterBoardStoreHelpers 로 분리 —
+ * 이 파일에는 zustand state, pending 버킷(Map 3종), IPC 호출 흐름, 롤백 정책만 남긴다.
  * 데이터를 useDataStore 에 두지 않고 피처 전용 store 로 자급 — 컴포지팅 store 패턴 미러링.
  */
 
@@ -16,6 +18,18 @@ import { create } from 'zustand';
 import type {
   Character, CharacterCostume, EpisodeCharacterLink, CostumeActivityLogContext,
 } from '@/types';
+import {
+  buildEpisodeLinks,
+  mergeEpisodeLinkPatchWithPending,
+  mergeIncomingWithPending,
+  pendingLinkKey,
+  rebuildByCharacter,
+  rowToRealtimeMapping,
+  sortCharacters,
+  sortCostumes,
+  trackPendingFields,
+} from '@/stores/characterBoardStoreHelpers';
+import type { PendingLocalField } from '@/stores/characterBoardStoreHelpers';
 import {
   loadCharacters as svcLoadCharacters,
   loadCharacterCostumes as svcLoadCostumes,
@@ -51,158 +65,13 @@ const RIGGING_STAGE_LABEL: Record<CharacterCostume['riggingStage'], string> = {
   done: '완성',
 };
 
-type PendingLocalField = { value: unknown; expiresAt: number };
-const PENDING_LOCAL_FIELD_MS = 15_000;
+// 낙관적 쓰기 보호용 pending 버킷 3종 — 이 모듈(store)이 소유하고,
+// 순수 머지 함수(characterBoardStoreHelpers)에 파라미터로 넘긴다.
 const pendingCharacterFields = new Map<string, Map<string, PendingLocalField>>();
 const pendingCostumeFields = new Map<string, Map<string, PendingLocalField>>();
 const pendingEpisodeLinkFields = new Map<string, Map<string, PendingLocalField>>();
 
-function buildByCharacter(costumes: CharacterCostume[]): Map<string, CharacterCostume[]> {
-  const map = new Map<string, CharacterCostume[]>();
-  for (const c of costumes) {
-    const arr = map.get(c.characterId);
-    if (arr) arr.push(c);
-    else map.set(c.characterId, [c]);
-  }
-  for (const arr of map.values()) {
-    arr.sort(compareCostumes);
-  }
-  return map;
-}
-
-function compareNullableText(a: string | null | undefined, b: string | null | undefined): number {
-  return String(a ?? '').localeCompare(String(b ?? ''));
-}
-
-function compareCharacters(a: Character, b: Character): number {
-  return a.sortOrder - b.sortOrder
-    || compareNullableText(a.createdAt, b.createdAt)
-    || compareNullableText(a.name, b.name)
-    || compareNullableText(a.id, b.id);
-}
-
-function compareCostumes(a: CharacterCostume, b: CharacterCostume): number {
-  return a.sortOrder - b.sortOrder
-    || compareNullableText(a.createdAt, b.createdAt)
-    || compareNullableText(a.name, b.name)
-    || compareNullableText(a.id, b.id);
-}
-
-function sortCharacters(characters: Character[]): Character[] {
-  return characters.slice().sort(compareCharacters);
-}
-
-function sortCostumes(costumes: CharacterCostume[]): CharacterCostume[] {
-  return costumes.slice().sort(compareCostumes);
-}
-
-type RawMapping = {
-  characterId: string;
-  episodeNumber: number;
-  memo: string | null;
-  costumeId: string | null;
-};
-
-/** 매핑 목록 → characterId → EpisodeCharacterLink[] (episodeNumber 오름차순). */
-function buildEpisodeLinks(mappings: RawMapping[]): Map<string, EpisodeCharacterLink[]> {
-  const map = new Map<string, EpisodeCharacterLink[]>();
-  for (const m of mappings) {
-    const link: EpisodeCharacterLink = {
-      episodeNumber: m.episodeNumber,
-      memo: m.memo ?? null,
-      costumeId: m.costumeId ?? null,
-    };
-    const arr = map.get(m.characterId);
-    if (arr) arr.push(link);
-    else map.set(m.characterId, [link]);
-  }
-  for (const arr of map.values()) {
-    arr.sort((a, b) => a.episodeNumber - b.episodeNumber);
-  }
-  return map;
-}
-
-function rowToRealtimeMapping(row: any | null): RawMapping | null {
-  if (!row || typeof row !== 'object') return null;
-  const characterId = typeof row.character_id === 'string' ? row.character_id : null;
-  const episodeNumber = typeof row.episode_number === 'number' ? row.episode_number : null;
-  if (!characterId || episodeNumber == null) return null;
-  return {
-    characterId,
-    episodeNumber,
-    memo: typeof row.memo === 'string' ? row.memo : null,
-    costumeId: typeof row.costume_id === 'string' ? row.costume_id : null,
-  };
-}
-
-function pendingLinkKey(characterId: string, episodeNumber: number): string {
-  return `${characterId}:${episodeNumber}`;
-}
-
-function valuesEqual(a: unknown, b: unknown): boolean {
-  if (Object.is(a, b)) return true;
-  if (!a || !b || typeof a !== 'object' || typeof b !== 'object') return false;
-  try {
-    return JSON.stringify(a) === JSON.stringify(b);
-  } catch {
-    return false;
-  }
-}
-
-function cleanupPending(bucket: Map<string, Map<string, PendingLocalField>>, id: string) {
-  const fields = bucket.get(id);
-  if (!fields) return;
-  const now = Date.now();
-  for (const [field, pending] of fields) {
-    if (pending.expiresAt <= now) fields.delete(field);
-  }
-  if (fields.size === 0) bucket.delete(id);
-}
-
-function trackPendingFields(
-  bucket: Map<string, Map<string, PendingLocalField>>,
-  id: string,
-  updates: Record<string, unknown>,
-) {
-  cleanupPending(bucket, id);
-  let fields = bucket.get(id);
-  if (!fields) {
-    fields = new Map();
-    bucket.set(id, fields);
-  }
-  const expiresAt = Date.now() + PENDING_LOCAL_FIELD_MS;
-  for (const [field, value] of Object.entries(updates)) {
-    fields.set(field, { value, expiresAt });
-  }
-}
-
-function mergeIncomingWithPending<T extends { id: string; updatedAt?: string | null }>(
-  bucket: Map<string, Map<string, PendingLocalField>>,
-  existing: T | undefined,
-  incoming: T,
-): T {
-  if (existing && incoming.updatedAt && existing.updatedAt && Date.parse(incoming.updatedAt) < Date.parse(existing.updatedAt)) {
-    return existing;
-  }
-
-  cleanupPending(bucket, incoming.id);
-  const fields = bucket.get(incoming.id);
-  if (!existing || !fields) return incoming;
-
-  const merged = { ...incoming } as Record<string, unknown>;
-  const existingRecord = existing as unknown as Record<string, unknown>;
-  const incomingRecord = incoming as unknown as Record<string, unknown>;
-  for (const [field, pending] of fields) {
-    if (valuesEqual(incomingRecord[field], pending.value)) {
-      fields.delete(field);
-    } else if (valuesEqual(existingRecord[field], pending.value)) {
-      merged[field] = existingRecord[field];
-    }
-  }
-  if (fields.size === 0) bucket.delete(incoming.id);
-  return merged as T;
-}
-
+/** 에피소드 링크 pending 버킷에 얇게 묶인 편의 래퍼 — 전역 버킷 의존이라 store 에 남긴다. */
 function trackPendingEpisodeLinkField<K extends 'memo' | 'costumeId'>(
   characterId: string,
   episodeNumber: number,
@@ -210,33 +79,6 @@ function trackPendingEpisodeLinkField<K extends 'memo' | 'costumeId'>(
   value: EpisodeCharacterLink[K],
 ) {
   trackPendingFields(pendingEpisodeLinkFields, pendingLinkKey(characterId, episodeNumber), { [field]: value });
-}
-
-function mergeEpisodeLinkPatchWithPending(
-  links: Map<string, EpisodeCharacterLink[]>,
-  characterId: string,
-  episodeNumber: number,
-  patch: Partial<Pick<EpisodeCharacterLink, 'memo' | 'costumeId'>>,
-): Partial<Pick<EpisodeCharacterLink, 'memo' | 'costumeId'>> {
-  const key = pendingLinkKey(characterId, episodeNumber);
-  cleanupPending(pendingEpisodeLinkFields, key);
-  const fields = pendingEpisodeLinkFields.get(key);
-  if (!fields) return patch;
-
-  const current = links.get(characterId)?.find((link) => link.episodeNumber === episodeNumber) ?? null;
-  if (!current) return patch;
-
-  const merged = { ...patch } as Record<string, unknown>;
-  for (const [field, pending] of fields) {
-    const incoming = merged[field];
-    if (valuesEqual(incoming, pending.value)) {
-      fields.delete(field);
-    } else if (valuesEqual((current as unknown as Record<string, unknown>)[field], pending.value)) {
-      merged[field] = (current as unknown as Record<string, unknown>)[field];
-    }
-  }
-  if (fields.size === 0) pendingEpisodeLinkFields.delete(key);
-  return merged as Partial<Pick<EpisodeCharacterLink, 'memo' | 'costumeId'>>;
 }
 
 interface CharacterBoardStore {
@@ -297,8 +139,8 @@ interface CharacterBoardStore {
   receiveRealtime: (payload: {
     table: 'characters' | 'character_costumes' | 'episode_character_mapping';
     eventType: 'INSERT' | 'UPDATE' | 'DELETE';
-    row: any | null;
-    old: any | null;
+    row: Record<string, unknown> | null;
+    old: Record<string, unknown> | null;
   }) => void;
 }
 
@@ -350,7 +192,7 @@ export const useCharacterBoardStore = create<CharacterBoardStore>((set, get) => 
       for (const [characterId, links] of freshLinks) {
         for (let i = 0; i < links.length; i++) {
           const link = links[i];
-          const patched = mergeEpisodeLinkPatchWithPending(prev.episodeLinks, characterId, link.episodeNumber, {
+          const patched = mergeEpisodeLinkPatchWithPending(pendingEpisodeLinkFields, prev.episodeLinks, characterId, link.episodeNumber, {
             memo: link.memo,
             costumeId: link.costumeId,
           });
@@ -360,7 +202,7 @@ export const useCharacterBoardStore = create<CharacterBoardStore>((set, get) => 
       set({
         characters: assembled,
         costumes: sortedCostumes,
-        byCharacter: buildByCharacter(sortedCostumes),
+        byCharacter: rebuildByCharacter(prev.byCharacter, sortedCostumes),
         episodeLinks: freshLinks,
         loaded: true,
         loading: false,
@@ -440,7 +282,7 @@ export const useCharacterBoardStore = create<CharacterBoardStore>((set, get) => 
         set((s) => {
           if (s.costumes.some((c) => c.id === firstCostume.id)) return s;
           const costumes = sortCostumes([...s.costumes, firstCostume]);
-          return { costumes, byCharacter: buildByCharacter(costumes) };
+          return { costumes, byCharacter: rebuildByCharacter(s.byCharacter, costumes) };
         });
       } catch (costumeErr) {
         console.warn('[character-board] 첫 복장 자동 생성 실패:', costumeErr);
@@ -487,7 +329,7 @@ export const useCharacterBoardStore = create<CharacterBoardStore>((set, get) => 
     set({
       characters: prevChars.filter((c) => c.id !== id),
       costumes: nextCostumes,
-      byCharacter: buildByCharacter(nextCostumes),
+      byCharacter: rebuildByCharacter(get().byCharacter, nextCostumes),
       episodeLinks: nextLinks,
     });
     try {
@@ -508,7 +350,7 @@ export const useCharacterBoardStore = create<CharacterBoardStore>((set, get) => 
         return {
           characters,
           costumes,
-          byCharacter: buildByCharacter(costumes),
+          byCharacter: rebuildByCharacter(s.byCharacter, costumes),
           episodeLinks,
         };
       });
@@ -525,7 +367,7 @@ export const useCharacterBoardStore = create<CharacterBoardStore>((set, get) => 
       set((s) => {
         if (s.costumes.some((c) => c.id === created.id)) return s;
         const costumes = sortCostumes([...s.costumes, created]);
-        return { costumes, byCharacter: buildByCharacter(costumes) };
+        return { costumes, byCharacter: rebuildByCharacter(s.byCharacter, costumes) };
       });
       return created;
     } catch (err) {
@@ -577,7 +419,7 @@ export const useCharacterBoardStore = create<CharacterBoardStore>((set, get) => 
     const prev = get().costumes;
     const removed = prev.find((c) => c.id === id) ?? null;
     const next = prev.filter((c) => c.id !== id);
-    set({ costumes: next, byCharacter: buildByCharacter(next) });
+    set({ costumes: next, byCharacter: rebuildByCharacter(get().byCharacter, next) });
     try {
       await svcDeleteCostume(id);
     } catch (err) {
@@ -585,7 +427,7 @@ export const useCharacterBoardStore = create<CharacterBoardStore>((set, get) => 
       set((s) => {
         if (!removed || s.costumes.some((c) => c.id === id)) return s;
         const costumes = sortCostumes([...s.costumes, removed]);
-        return { costumes, byCharacter: buildByCharacter(costumes) };
+        return { costumes, byCharacter: rebuildByCharacter(s.byCharacter, costumes) };
       });
       toast.error('복장 삭제에 실패했어요');
     }
@@ -672,14 +514,14 @@ export const useCharacterBoardStore = create<CharacterBoardStore>((set, get) => 
     if (table === 'characters') {
       if (eventType === 'DELETE') {
         const id = old?.id;
-        if (!id) return;
+        if (typeof id !== 'string' || !id) return;
         set((s) => {
           const costumes = s.costumes.filter((c) => c.characterId !== id);
           const episodeLinks = new Map(s.episodeLinks); episodeLinks.delete(id);
           return {
             characters: s.characters.filter((c) => c.id !== id),
             costumes,
-            byCharacter: buildByCharacter(costumes),
+            byCharacter: rebuildByCharacter(s.byCharacter, costumes),
             episodeLinks,
           };
         });
@@ -710,10 +552,10 @@ export const useCharacterBoardStore = create<CharacterBoardStore>((set, get) => 
     if (table === 'character_costumes') {
       if (eventType === 'DELETE') {
         const id = old?.id;
-        if (!id) return;
+        if (typeof id !== 'string' || !id) return;
         set((s) => {
           const costumes = s.costumes.filter((c) => c.id !== id);
-          return { costumes, byCharacter: buildByCharacter(costumes) };
+          return { costumes, byCharacter: rebuildByCharacter(s.byCharacter, costumes) };
         });
         return;
       }
@@ -726,7 +568,7 @@ export const useCharacterBoardStore = create<CharacterBoardStore>((set, get) => 
         const costumes = exists
           ? sortCostumes(s.costumes.map((c) => (c.id === incoming.id ? merged : c)))
           : sortCostumes([...s.costumes, merged]);
-        return { costumes, byCharacter: buildByCharacter(costumes) };
+        return { costumes, byCharacter: rebuildByCharacter(s.byCharacter, costumes) };
       });
       return;
     }
@@ -750,7 +592,7 @@ export const useCharacterBoardStore = create<CharacterBoardStore>((set, get) => 
           s.episodeLinks,
           mapping.characterId,
           mapping.episodeNumber,
-          mergeEpisodeLinkPatchWithPending(s.episodeLinks, mapping.characterId, mapping.episodeNumber, {
+          mergeEpisodeLinkPatchWithPending(pendingEpisodeLinkFields, s.episodeLinks, mapping.characterId, mapping.episodeNumber, {
             memo: mapping.memo,
             costumeId: mapping.costumeId,
           }),
@@ -891,7 +733,7 @@ async function applyCostumeUpdate(
   const prevCostume = prev.find((c) => c.id === id);
   trackPendingFields(pendingCostumeFields, id, updates as Record<string, unknown>);
   const next = prev.map((c) => (c.id === id ? { ...c, ...updates } : c));
-  set({ costumes: next, byCharacter: buildByCharacter(next) });
+  set({ costumes: next, byCharacter: rebuildByCharacter(get().byCharacter, next) });
   try {
     await svcUpdateCostume(id, updates, logContext);
     return true;
@@ -912,7 +754,7 @@ async function applyCostumeUpdate(
         }
         return restored as unknown as CharacterCostume;
       });
-      set({ costumes: reverted, byCharacter: buildByCharacter(reverted) });
+      set({ costumes: reverted, byCharacter: rebuildByCharacter(get().byCharacter, reverted) });
     }
     toast.error(errorMsg);
     return false;

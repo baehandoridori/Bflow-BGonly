@@ -8,6 +8,7 @@ import type {
   Activity, ActionGroup,
   CompositingState, CompositingStatus, CompositingErrorKind,
   Character, CharacterCostume, CostumeDesignStage, CostumeRiggingStage,
+  CharacterRow, CharacterCostumeRow,
   CostumeActivityLogContext,
   CommentReadStateRow,
 } from '../types';
@@ -784,7 +785,10 @@ export function subscribeCompositingStatesRealtime(
 // ─── 캐릭터 현황판 ────────────────────────────
 
 /** DB row(snake_case) → 도메인 Character(camelCase). episodeIds 는 caller 가 매핑으로 조립. */
-export function rowToCharacter(row: any): Character {
+export function rowToCharacter(rawRow: CharacterRow | Record<string, unknown>): Character {
+  // IPC/realtime 경계 신뢰 지점 — 구조는 CharacterRow(snake_case 컬럼)로 간주하고,
+  // 값 수준 보정(null/기본값)은 아래 fallback 이 담당한다.
+  const row = rawRow as CharacterRow;
   return {
     id: row.id,
     name: row.name,
@@ -799,7 +803,10 @@ export function rowToCharacter(row: any): Character {
 }
 
 /** DB row(snake_case) → 도메인 CharacterCostume(camelCase). */
-export function rowToCostume(row: any): CharacterCostume {
+export function rowToCostume(rawRow: CharacterCostumeRow | Record<string, unknown>): CharacterCostume {
+  // IPC/realtime 경계 신뢰 지점 — 구조는 CharacterCostumeRow(snake_case 컬럼)로 간주하고,
+  // 구버전 스키마 호환 fallback(assignee 승계 등)은 아래 로직이 담당한다.
+  const row = rawRow as CharacterCostumeRow;
   const hasDesignAssigneeColumn = Object.prototype.hasOwnProperty.call(row, 'design_assignee');
   const hasRiggingAssigneeColumn = Object.prototype.hasOwnProperty.call(row, 'rigging_assignee');
   return {
@@ -970,11 +977,11 @@ export function subscribeCharacterBoardRealtime(
   onChange: (payload: {
     table: 'characters' | 'character_costumes' | 'episode_character_mapping';
     eventType: 'INSERT' | 'UPDATE' | 'DELETE';
-    row: any | null;
-    old: any | null;
+    row: Record<string, unknown> | null;
+    old: Record<string, unknown> | null;
   }) => void,
 ): () => void {
-  return window.electronAPI.onCharacterBoardRealtime((payload: any) => {
+  return window.electronAPI.onCharacterBoardRealtime((payload) => {
     onChange(payload);
   });
 }
