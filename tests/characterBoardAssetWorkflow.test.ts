@@ -14,6 +14,7 @@ import {
 import { resolveChildFolderPath, sanitizeWindowsFolderName } from '../electron/pathCreateFolder.ts';
 
 const typeSource = readFileSync('src/types/index.ts', 'utf8');
+const appSource = readFileSync('src/App.tsx', 'utf8');
 const rendererSupabase = readFileSync('src/services/supabaseService.ts', 'utf8');
 const electronSupabase = readFileSync('electron/supabase.ts', 'utf8');
 const electronMain = readFileSync('electron/main.ts', 'utf8');
@@ -39,6 +40,7 @@ const myTaskStats = readFileSync('src/components/widgets/my-tasks/statsUtils.ts'
 const characterTaskRow = readFileSync('src/components/widgets/my-tasks/components/CharacterTaskRow.tsx', 'utf8');
 const confirmDialog = readFileSync('src/components/common/ConfirmDialog.tsx', 'utf8');
 const modalFocusHook = readFileSync('src/hooks/useModalFocus.ts', 'utf8');
+const accessHookSource = readFileSync('src/hooks/useCharacterBoardAccess.ts', 'utf8');
 const characterImageLightbox = readFileSync('src/components/characters/CharacterImageLightbox.tsx', 'utf8');
 const fitEditorSource = readFileSync('src/components/characters/CharacterImageFitEditor.tsx', 'utf8');
 const imageFrameSource = readFileSync('src/components/characters/CharacterImageFrame.tsx', 'utf8');
@@ -191,7 +193,7 @@ test('character episode mapping realtime merges single links when episode metada
   assert.match(characterStore, /const mapping = rowToRealtimeMapping\(eventType === 'DELETE' \? old : row\)/);
   assert.match(characterStore, /if \(!mapping\) \{[\s\S]*?void reloadEpisodeMappings\(set, get\)/);
   assert.match(characterStore, /eventType === 'DELETE'[\s\S]*?removeLink\(s\.episodeLinks, mapping\.characterId, mapping\.episodeNumber\)/);
-  assert.match(characterStore, /upsertLink\(s\.episodeLinks, mapping\.characterId, mapping\.episodeNumber/);
+  assert.match(characterStore, /upsertLink\(\s*s\.episodeLinks,\s*mapping\.characterId,\s*mapping\.episodeNumber/);
 });
 
 test('legacy costume assignee remains visible in split assignee fields', () => {
@@ -546,4 +548,51 @@ test('character image fit editor keeps a fixed crop frame and moves/scales the i
   assert.doesNotMatch(fitEditorSource, /function fitToImageBox/);
   assert.doesNotMatch(fitEditorSource, /object-fill/);
   assert.doesNotMatch(fitEditorSource, /startBox/);
+});
+
+test('character board hardening covers image failures, drafts, realtime races, and access gate states', () => {
+  assert.match(imageFrameSource, /const \[failed, setFailed\] = useState\(false\)/);
+  assert.match(imageFrameSource, /function withRetryNonce/);
+  assert.match(imageFrameSource, /onError=\{\(\) => setFailed\(true\)\}/);
+  assert.match(imageFrameSource, /이미지를 불러오지 못했어요/);
+  assert.match(imageFrameSource, /클릭해서 다시 시도/);
+
+  assert.match(characterBoard, /const costumeMemoDraftCache = new Map<string, string>\(\)/);
+  assert.match(characterBoard, /function CostumeMemoInput\(\{[\s\S]*?draftKey/);
+  assert.match(characterBoard, /focused\.current && latestDraft !== valueRef\.current/);
+  assert.match(characterBoard, /onBlur=\{commit\}/);
+  assert.match(characterBoard, /key=\{costume\.id\}/);
+
+  assert.match(characterStore, /const pendingCharacterFields = new Map/);
+  assert.match(characterStore, /const pendingCostumeFields = new Map/);
+  assert.match(characterStore, /const pendingEpisodeLinkFields = new Map/);
+  assert.match(characterStore, /function mergeIncomingWithPending/);
+  assert.match(characterStore, /trackPendingFields\(pendingCharacterFields, id, updates as Record<string, unknown>\)/);
+  assert.match(characterStore, /trackPendingFields\(pendingCostumeFields, id, updates as Record<string, unknown>\)/);
+  assert.match(characterStore, /trackPendingEpisodeLinkField\(characterId, episodeNumber, 'memo', memo\)/);
+  assert.match(characterStore, /trackPendingEpisodeLinkField\(characterId, episodeNumber, 'costumeId', costumeId\)/);
+  assert.match(characterStore, /mergeEpisodeLinkPatchWithPending/);
+  assert.match(characterStore, /window\.electronAPI\?\.onSupabaseStatus/);
+  assert.match(characterStore, /window\.addEventListener\('online', catchUp\)/);
+
+  assert.match(characterStore, /function compareCharacters/);
+  assert.match(characterStore, /function compareCostumes/);
+  assert.match(characterStore, /function sortCharacters/);
+  assert.match(characterStore, /function sortCostumes/);
+  assert.match(characterStore, /sortOrder - b\.sortOrder[\s\S]*?compareNullableText\(a\.createdAt, b\.createdAt\)/);
+
+  assert.match(accessHookSource, /export interface CharacterBoardAccessState/);
+  assert.match(accessHookSource, /export function useCharacterBoardAccessState/);
+  assert.match(accessHookSource, /loading: boolean/);
+  assert.match(accessHookSource, /error: boolean/);
+  assert.match(accessHookSource, /retry: \(\) => void/);
+  assert.match(accessHookSource, /export function useCharacterBoardAccess\(\): boolean/);
+  assert.match(appSource, /CharacterBoardAccessFallback/);
+  assert.match(appSource, /권한 정보를 확인하지 못했어요/);
+  assert.match(appSource, /다시 확인/);
+  assert.match(appSource, /useCharacterBoardAccessState/);
+  assert.doesNotMatch(appSource, /hasCharacterBoardAccess \? <CharacterBoardView \/> : <Dashboard \/>/);
+
+  assert.match(characterBoard, /실제 원본 작업 파일은 삭제하지 않아요/);
+  assert.match(characterBoard, /실제 작업 폴더와 원본 작업 파일은 삭제하지 않아요/);
 });

@@ -11,13 +11,20 @@
  * 사이드바 메뉴 노출 + 뷰 렌더(App.tsx) 양쪽이 이 플래그로 분기.
  */
 
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useAuthStore } from '@/stores/useAuthStore';
 import { readMetadataFromSupabase } from '@/services/supabaseService';
 
 interface FeatureAccessConfig {
   userIds: string[];
   allowAdmin: boolean;
+}
+
+export interface CharacterBoardAccessState {
+  allowed: boolean;
+  loading: boolean;
+  error: boolean;
+  retry: () => void;
 }
 
 function parseConfig(raw: unknown): FeatureAccessConfig {
@@ -38,17 +45,35 @@ function parseConfig(raw: unknown): FeatureAccessConfig {
   }
 }
 
-export function useCharacterBoardAccess(): boolean {
+export function useCharacterBoardAccessState(): CharacterBoardAccessState {
   const currentUser = useAuthStore((s) => s.currentUser);
   const [config, setConfig] = useState<FeatureAccessConfig | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(false);
+  const requestSeq = useRef(0);
+
+  const load = useCallback(() => {
+    const seq = requestSeq.current + 1;
+    requestSeq.current = seq;
+    setLoading(true);
+    setError(false);
+    readMetadataFromSupabase('feature-access', 'character-board')
+      .then((row) => {
+        if (requestSeq.current !== seq) return;
+        setConfig(parseConfig(row));
+        setError(false);
+      })
+      .catch(() => {
+        if (requestSeq.current !== seq) return;
+        setConfig(null);
+        setError(true);
+      })
+      .finally(() => {
+        if (requestSeq.current === seq) setLoading(false);
+      });
+  }, []);
 
   useEffect(() => {
-    let cancelled = false;
-    const load = () => {
-      readMetadataFromSupabase('feature-access', 'character-board')
-        .then((row) => { if (!cancelled) setConfig(parseConfig(row)); })
-        .catch(() => { if (!cancelled) setConfig({ userIds: [], allowAdmin: false }); }); // 실패 시 차단(fail-closed).
-    };
     load();
     // 변경한 본인 클라이언트용 — broadcast self-delivery 가 없어 자기 변경은 로컬 이벤트로 받는다.
     const onLocalChange = () => load();
@@ -59,15 +84,23 @@ export function useCharacterBoardAccess(): boolean {
       if (e?.event === 'data-change' && e.payload?.table === 'metadata') load();
     });
     return () => {
-      cancelled = true;
+      requestSeq.current += 1;
       window.removeEventListener('bflow:feature-access-changed', onLocalChange);
       if (unsub) unsub();
     };
-  }, []);
+  }, [load]);
 
   // 서버 확인 전(config === null) 에는 차단 — stale grant 노출 방지.
-  if (!currentUser || !config) return false;
-  if (config.userIds.includes(currentUser.id)) return true;
-  if (config.allowAdmin && currentUser.role === 'admin') return true;
-  return false;
+  const allowed = useMemo(() => {
+    if (!currentUser || !config) return false;
+    if (config.userIds.includes(currentUser.id)) return true;
+    if (config.allowAdmin && currentUser.role === 'admin') return true;
+    return false;
+  }, [config, currentUser]);
+
+  return { allowed, loading, error, retry: load };
+}
+
+export function useCharacterBoardAccess(): boolean {
+  return useCharacterBoardAccessState().allowed;
 }
