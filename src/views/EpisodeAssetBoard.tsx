@@ -14,7 +14,6 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Plus, X, Search, User, ImageOff, ArrowRight, Check, Film } from 'lucide-react';
-import { toast } from 'sonner';
 import { useCharacterBoardStore } from '@/stores/useCharacterBoardStore';
 import { useDataStore } from '@/stores/useDataStore';
 import {
@@ -25,11 +24,10 @@ import {
 } from '@/types';
 import { tagColor } from '@/utils/tagColor';
 import { cn } from '@/utils/cn';
-import { chooseWorkFile, openWorkPath } from '@/services/sceneWorkLinkService';
-import { updateEpisodeReelPath } from '@/services/supabaseService';
 import { ConfirmDialog } from '@/components/common/ConfirmDialog';
 import { RIGGING_STAGE_META, characterStageColor } from '@/constants/characterStages';
 import { CHARACTER_LAYER_CLASS } from '@/constants/characterLayers';
+import { openOrRegisterEpisodeReel } from '@/services/episodeReelActions';
 
 function characterThumb(costumes: CharacterCostume[]): string | null {
   return costumes.find((c) => c.featuredImageUrl)?.featuredImageUrl ?? null;
@@ -128,7 +126,7 @@ function EpisodeCharRow({
       )}
     >
       <div className="w-9 h-9 rounded-md bg-bg-border/40 overflow-hidden flex items-center justify-center shrink-0">
-        {thumb ? <img src={thumb} alt="" className="w-full h-full object-cover" /> : <User size={16} className="text-text-secondary" />}
+        {thumb ? <img src={thumb} alt="" className="w-full h-full object-cover" loading="lazy" decoding="async" /> : <User size={16} className="text-text-secondary" />}
       </div>
       <div className="flex flex-col gap-0.5 min-w-0 flex-1">
         <div className={cn('text-sm truncate', selected ? 'text-text-primary font-medium' : 'text-text-secondary')}>
@@ -204,7 +202,7 @@ function EpisodeCharDetail({
         <div className="flex gap-4">
           <div className="w-[150px] shrink-0 aspect-[3/4] rounded-xl bg-bg-border/30 border border-bg-border overflow-hidden flex items-center justify-center">
             {hero ? (
-              <img src={hero} alt={character.name} className="w-full h-full object-contain" />
+              <img src={hero} alt={character.name} className="w-full h-full object-contain" loading="lazy" decoding="async" />
             ) : (
               <ImageOff size={22} className="text-text-secondary/40" />
             )}
@@ -272,7 +270,7 @@ function EpisodeCharDetail({
                     )}
                   >
                     <div className="aspect-[3/4] w-full bg-bg-border/30 flex items-center justify-center overflow-hidden">
-                      {c.featuredImageUrl ? <img src={c.featuredImageUrl} alt={c.name} className="w-full h-full object-cover" /> : <User size={16} className="text-text-secondary/40" />}
+                      {c.featuredImageUrl ? <img src={c.featuredImageUrl} alt={c.name} className="w-full h-full object-cover" loading="lazy" decoding="async" /> : <User size={16} className="text-text-secondary/40" />}
                     </div>
                     <div className="px-1.5 py-1 bg-bg-card flex items-center justify-between gap-1">
                       <span className={cn('text-[11px] truncate', on ? 'text-text-primary' : 'text-text-secondary')}>{c.name}</span>
@@ -344,7 +342,7 @@ function AddCharacterToEpisode({
                   className="flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-sm text-text-primary hover:bg-accent/10 text-left cursor-pointer"
                 >
                   <div className="w-7 h-7 rounded-md bg-bg-border/40 overflow-hidden flex items-center justify-center shrink-0">
-                    {thumb ? <img src={thumb} alt="" className="w-full h-full object-cover" /> : <User size={14} className="text-text-secondary" />}
+                    {thumb ? <img src={thumb} alt="" className="w-full h-full object-cover" loading="lazy" decoding="async" /> : <User size={14} className="text-text-secondary" />}
                   </div>
                   <span className="flex-1 min-w-0 truncate">{c.name}</span>
                   <Plus size={14} className="text-accent shrink-0" />
@@ -399,23 +397,12 @@ export function EpisodeAssetBoard({ onOpenCharacter }: { onOpenCharacter?: (id: 
 
   const handleEpisodeReel = async () => {
     if (!selectedEpisode) return;
-    if (selectedEpisode.reelFilePath) {
-      const res = await openWorkPath(selectedEpisode.reelFilePath);
-      if (!res.ok) toast.error('릴 파일 열기에 실패했어요');
-      return;
-    }
-    const filePath = await chooseWorkFile();
-    if (!filePath) return;
-    const prev = useDataStore.getState().episodes;
-    setEpisodes(prev.map((ep) => ep.episodeNumber === selectedEpisode.episodeNumber ? { ...ep, reelFilePath: filePath } : ep));
-    try {
-      await updateEpisodeReelPath(selectedEpisode.episodeNumber, filePath);
-      toast.success('릴 파일 경로를 등록했어요');
-    } catch (err) {
-      console.error('[episode-assets] 릴 파일 저장 실패:', err);
-      setEpisodes(prev);
-      toast.error('릴 파일 경로 저장에 실패했어요');
-    }
+    await openOrRegisterEpisodeReel({
+      episode: selectedEpisode,
+      getEpisodes: () => useDataStore.getState().episodes,
+      setEpisodes,
+      logLabel: 'episode-assets',
+    });
   };
 
   function costumeIdFor(characterId: string): string | null {

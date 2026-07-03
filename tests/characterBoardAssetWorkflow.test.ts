@@ -43,6 +43,8 @@ const characterImageLightbox = readFileSync('src/components/characters/Character
 const fitEditorSource = readFileSync('src/components/characters/CharacterImageFitEditor.tsx', 'utf8');
 const imageFrameSource = readFileSync('src/components/characters/CharacterImageFrame.tsx', 'utf8');
 const imageContextMenuSource = readFileSync('src/components/characters/CharacterImageContextMenu.tsx', 'utf8');
+const assigneeNamePickerSource = readFileSync('src/components/characters/AssigneeNamePicker.tsx', 'utf8');
+const episodeReelActionsSource = readFileSync('src/services/episodeReelActions.ts', 'utf8');
 const userColorSource = readFileSync('src/utils/userColor.ts', 'utf8');
 const indexCss = readFileSync('src/index.css', 'utf8');
 const devMock = readFileSync('src/mocks/devElectronAPI.ts', 'utf8');
@@ -146,7 +148,8 @@ test('character and costume domain types expose asset workflow fields', () => {
 
 test('shared user color helper is separated from assignee input UI', () => {
   assert.match(userColorSource, /export function getUserColor\(name: string\): string/);
-  assert.match(characterBoard, /import \{ getUserColor \} from '@\/utils\/userColor'/);
+  assert.match(assigneeNamePickerSource, /import \{ getUserColor \} from '@\/utils\/userColor'/);
+  assert.doesNotMatch(characterBoard, /getUserColor/);
   assert.match(imageFrameSource, /getCharacterImageFitTransformStyle/);
 });
 
@@ -179,6 +182,18 @@ test('character costume IPC channels use explicit character-costume names', () =
   assert.doesNotMatch(electronPreload, /supabase:(add|update|delete)-costume/);
 });
 
+test('character episode mapping realtime merges single links when episode metadata is present', () => {
+  assert.match(electronSupabase, /enrichEpisodeCharacterMappingPayload/);
+  assert.match(electronSupabase, /\.from\('episodes'\)[\s\S]*?\.select\('episode_number'\)/);
+  assert.match(electronSupabase, /episode_number: data\.episode_number as number/);
+
+  assert.match(characterStore, /function rowToRealtimeMapping/);
+  assert.match(characterStore, /const mapping = rowToRealtimeMapping\(eventType === 'DELETE' \? old : row\)/);
+  assert.match(characterStore, /if \(!mapping\) \{[\s\S]*?void reloadEpisodeMappings\(set, get\)/);
+  assert.match(characterStore, /eventType === 'DELETE'[\s\S]*?removeLink\(s\.episodeLinks, mapping\.characterId, mapping\.episodeNumber\)/);
+  assert.match(characterStore, /upsertLink\(s\.episodeLinks, mapping\.characterId, mapping\.episodeNumber/);
+});
+
 test('legacy costume assignee remains visible in split assignee fields', () => {
   assert.match(rendererSupabase, /hasDesignAssigneeColumn\s*=\s*Object\.prototype\.hasOwnProperty\.call\(row,\s*'design_assignee'\)/);
   assert.match(rendererSupabase, /hasRiggingAssigneeColumn\s*=\s*Object\.prototype\.hasOwnProperty\.call\(row,\s*'rigging_assignee'\)/);
@@ -199,8 +214,6 @@ test('character board is wired for image display, assignees, work links, and lig
     'CharacterImageFitEditor',
     'CharacterImageLightbox',
     'AssigneeNamePicker',
-    'setModalOpen',
-    'placeholder="이름 입력"',
     'const shownCostume = activeCostume;',
     '디자인 담당자',
     '리깅 담당자',
@@ -210,6 +223,8 @@ test('character board is wired for image display, assignees, work links, and lig
   ]) {
     assert.match(characterBoard, new RegExp(token), `CharacterBoardView missing ${token}`);
   }
+  assert.match(assigneeNamePickerSource, /setModalOpen/);
+  assert.match(assigneeNamePickerSource, /placeholder="이름 입력"/);
   assert.doesNotMatch(characterBoard, /fallbackCostume/);
   assert.ok(characterBoard.includes("isPng ? 'image/png' : 'image/jpeg'"));
   assert.ok(characterBoard.includes('const saved = await updateCostumeField(targetCostume.id, { workFilePath: filePath });'));
@@ -286,7 +301,8 @@ test('character board can create and link a work folder from the configured team
   assert.match(settingsView, /CharacterFolderRootSection/);
 
   assert.match(characterStore, /updateCharacterFolder: \(id: string, workFolderPath: string \| null\) => Promise<boolean>/);
-  assert.match(characterStore, /await svcUpdateCharacter\(id, \{ work_folder_path: workFolderPath \}\);\r?\n\s*return true;/);
+  assert.match(characterStore, /applyCharacterUpdate\(set, get, id, \{ workFolderPath \}, \{ work_folder_path: workFolderPath \}/);
+  assert.match(characterStore, /await svcUpdateCharacter\(id, dbUpdates\)/);
   assert.match(characterBoard, /createAndLinkCharacterFolder/);
   assert.match(characterBoard, /const \[creatingFolder, setCreatingFolder\]/);
   assert.match(characterBoard, /onCreateFolder=\{handleCreateFolder\}/);
@@ -299,11 +315,13 @@ test('character card right click opens the compact work menu instead of opening 
   assert.match(characterBoard, /setCardMenu\(\{ characterId: c\.id, x: event\.clientX, y: event\.clientY \}\)/);
   assert.doesNotMatch(characterBoard, /if \(c\.workFolderPath\) void openStoredPath\(c\.workFolderPath, '작업 폴더'\)/);
   assert.match(characterBoard, /variant="card"/);
-  assert.match(characterBoard, /cardMenuFeatured\?\.featuredImageUrl/);
-  assert.match(characterBoard, /cardMenuFileCostume\?\.workFilePath/);
+  assert.match(characterBoard, /imageCostume=\{cardMenuFeatured\}/);
+  assert.match(characterBoard, /fileCostume=\{cardMenuFileCostume\}/);
 
   assert.match(imageContextMenuSource, /variant\?: 'full' \| 'card'/);
   assert.match(imageContextMenuSource, /variant === 'card'/);
+  assert.match(imageContextMenuSource, /copyCharacterImage\(imageCostume\?\.featuredImageUrl\)/);
+  assert.match(imageContextMenuSource, /openStoredCharacterPath\(character\.workFolderPath, '작업 폴더'\)/);
   assert.ok(
     imageContextMenuSource.indexOf('label="작업 폴더 열기"') <
       imageContextMenuSource.indexOf('label="작업 파일 열기"'),
@@ -346,7 +364,7 @@ test('my tasks widget includes assigned character design and rigging work', () =
   assert.match(characterStageConstants, /export const RIGGING_STAGE_META/);
   assert.match(characterStageConstants, /export function characterStageColor/);
   assert.match(characterStageMeta, /export function parseAssigneeNames/);
-  assert.match(characterBoard, /import \{ parseAssigneeNames \} from '@\/utils\/characterStageMeta'/);
+  assert.match(assigneeNamePickerSource, /import \{ parseAssigneeNames \} from '@\/utils\/characterStageMeta'/);
   assert.match(characterBoard, /import \{ DESIGN_STAGE_META, RIGGING_STAGE_META, characterStageColor/);
   assert.match(myCharacterTasks, /characterStageColor\(meta\)/);
 
@@ -476,6 +494,11 @@ test('episode reel controls are available in episode assets, character board, an
   assert.match(characterBoard, /릴 파일 보기/);
   assert.match(scenesView, /EpisodeReelButton/);
   assert.match(scenesView, /릴 보기/);
+  assert.match(characterBoard, /openOrRegisterEpisodeReel/);
+  assert.match(episodeAssetBoard, /openOrRegisterEpisodeReel/);
+  assert.match(episodeReelActionsSource, /chooseWorkFile/);
+  assert.match(episodeReelActionsSource, /openWorkPath/);
+  assert.match(episodeReelActionsSource, /updateEpisodeReelPath/);
   assert.match(characterBoard, /useDataStore\.getState\(\)\.episodes/);
   assert.match(episodeAssetBoard, /useDataStore\.getState\(\)\.episodes/);
   assert.match(scenesView, /useDataStore\.getState\(\)\.episodes/);

@@ -1,8 +1,9 @@
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 import { Copy, FolderOpen, Image as ImageIcon, Move, Palette } from 'lucide-react';
-import type { CharacterImageBackground } from '@/types';
+import type { Character, CharacterCostume, CharacterImageBackground } from '@/types';
 import { cn } from '@/utils/cn';
 import { CHARACTER_LAYER_CLASS } from '@/constants/characterLayers';
+import { copyCharacterImage, openStoredCharacterPath } from '@/services/characterPathActions';
 
 const BACKGROUND_OPTIONS: { value: CharacterImageBackground; label: string }[] = [
   { value: 'transparent', label: '투명' },
@@ -39,43 +40,38 @@ function MenuButton({
   );
 }
 
+type MenuImageCostume = Pick<CharacterCostume, 'id' | 'featuredImageUrl' | 'imageBackground' | 'workFilePath'>;
+
 export function CharacterImageContextMenu({
   x,
   y,
   variant = 'full',
-  background,
-  canSetBackground = true,
-  hasImage,
-  hasFolder,
-  hasFile,
-  folderTitle,
-  fileTitle,
+  character,
+  imageCostume,
+  fileCostume = imageCostume,
   onClose,
   onBackground,
   onEditFit,
-  onCopyImage,
-  onOpenFolder,
-  onOpenFile,
 }: {
   x: number;
   y: number;
   variant?: 'full' | 'card';
-  background?: CharacterImageBackground;
-  canSetBackground?: boolean;
-  hasImage: boolean;
-  hasFolder: boolean;
-  hasFile: boolean;
-  folderTitle?: string;
-  fileTitle?: string;
+  character: Pick<Character, 'workFolderPath'>;
+  imageCostume: MenuImageCostume | null | undefined;
+  fileCostume?: Pick<CharacterCostume, 'workFilePath'> | null | undefined;
   onClose: () => void;
-  onBackground?: (background: CharacterImageBackground) => void;
-  onEditFit?: () => void;
-  onCopyImage: () => void;
-  onOpenFolder: () => void;
-  onOpenFile: () => void;
+  onBackground?: (costumeId: string, background: CharacterImageBackground) => void;
+  onEditFit?: (costumeId: string) => void;
 }) {
   const ref = useRef<HTMLDivElement>(null);
   const [position, setPosition] = useState({ left: x, top: y });
+  const hasImage = !!imageCostume?.featuredImageUrl;
+  const hasFolder = !!character.workFolderPath;
+  const hasFile = !!fileCostume?.workFilePath;
+  const folderTitle = character.workFolderPath ?? '작업 폴더 미등록';
+  const fileTitle = fileCostume?.workFilePath ?? '작업 파일 미등록';
+  const canSetBackground = !!imageCostume && !!onBackground;
+  const background = imageCostume?.imageBackground;
 
   useEffect(() => {
     const onPointer = (event: PointerEvent) => {
@@ -134,7 +130,10 @@ export function CharacterImageContextMenu({
                 type="button"
                 role="menuitem"
                 disabled={!canSetBackground}
-                onClick={() => { onBackground?.(item.value); onClose(); }}
+                onClick={() => {
+                  if (imageCostume) onBackground?.(imageCostume.id, item.value);
+                  onClose();
+                }}
                 className={cn(
                   'px-2 py-1.5 rounded-md text-xs border transition-colors',
                   background === item.value
@@ -151,19 +150,27 @@ export function CharacterImageContextMenu({
       )}
       <div className={cn('py-1', variant === 'full' && 'border-t border-bg-border/60')}>
         {variant === 'full' && (
-          <MenuButton icon={<Move size={14} />} label="썸네일 맞추기" disabled={!hasImage} onClick={() => { onEditFit?.(); onClose(); }} />
+          <MenuButton
+            icon={<Move size={14} />}
+            label="썸네일 맞추기"
+            disabled={!hasImage}
+            onClick={() => {
+              if (imageCostume) onEditFit?.(imageCostume.id);
+              onClose();
+            }}
+          />
         )}
         {variant === 'card' ? (
           <>
-            <MenuButton icon={<FolderOpen size={14} />} label="작업 폴더 열기" title={folderTitle} disabled={!hasFolder} onClick={() => { onOpenFolder(); onClose(); }} />
-            <MenuButton icon={<ImageIcon size={14} />} label="작업 파일 열기" title={fileTitle} disabled={!hasFile} onClick={() => { onOpenFile(); onClose(); }} />
-            <MenuButton icon={<Copy size={14} />} label="이미지 복사" disabled={!hasImage} onClick={() => { onCopyImage(); onClose(); }} />
+            <MenuButton icon={<FolderOpen size={14} />} label="작업 폴더 열기" title={folderTitle} disabled={!hasFolder} onClick={() => { void openStoredCharacterPath(character.workFolderPath, '작업 폴더'); onClose(); }} />
+            <MenuButton icon={<ImageIcon size={14} />} label="작업 파일 열기" title={fileTitle} disabled={!hasFile} onClick={() => { void openStoredCharacterPath(fileCostume?.workFilePath, '작업 파일'); onClose(); }} />
+            <MenuButton icon={<Copy size={14} />} label="이미지 복사" disabled={!hasImage} onClick={() => { void copyCharacterImage(imageCostume?.featuredImageUrl); onClose(); }} />
           </>
         ) : (
           <>
-            <MenuButton icon={<Copy size={14} />} label="이미지 복사" disabled={!hasImage} onClick={() => { onCopyImage(); onClose(); }} />
-            <MenuButton icon={<FolderOpen size={14} />} label="작업 폴더 열기" title={folderTitle} disabled={!hasFolder} onClick={() => { onOpenFolder(); onClose(); }} />
-            <MenuButton icon={<ImageIcon size={14} />} label="작업 파일 열기" title={fileTitle} disabled={!hasFile} onClick={() => { onOpenFile(); onClose(); }} />
+            <MenuButton icon={<Copy size={14} />} label="이미지 복사" disabled={!hasImage} onClick={() => { void copyCharacterImage(imageCostume?.featuredImageUrl); onClose(); }} />
+            <MenuButton icon={<FolderOpen size={14} />} label="작업 폴더 열기" title={folderTitle} disabled={!hasFolder} onClick={() => { void openStoredCharacterPath(character.workFolderPath, '작업 폴더'); onClose(); }} />
+            <MenuButton icon={<ImageIcon size={14} />} label="작업 파일 열기" title={fileTitle} disabled={!hasFile} onClick={() => { void openStoredCharacterPath(fileCostume?.workFilePath, '작업 파일'); onClose(); }} />
           </>
         )}
       </div>
