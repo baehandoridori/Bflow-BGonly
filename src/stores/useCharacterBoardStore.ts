@@ -340,7 +340,9 @@ export const useCharacterBoardStore = create<CharacterBoardStore>((set, get) => 
           ...c,
           episodeIds: (epByChar.get(c.id) ?? []).slice().sort((a, b) => a - b),
         };
-        return mergeIncomingWithPending(pendingCharacterFields, prevCharacterById.get(c.id), withEpisodes);
+        const merged = mergeIncomingWithPending(pendingCharacterFields, prevCharacterById.get(c.id), withEpisodes);
+        // characters.updated_at 과 별개로 매핑 테이블에서 재조립한 episodeIds 는 항상 최신 load 결과를 쓴다.
+        return { ...merged, episodeIds: withEpisodes.episodeIds };
       }));
       const sortedCostumes = sortCostumes(costumes.map((c) =>
         mergeIncomingWithPending(pendingCostumeFields, prevCostumeById.get(c.id), c)));

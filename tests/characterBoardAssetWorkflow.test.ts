@@ -581,6 +581,7 @@ test('character board hardening covers image failures, drafts, realtime races, a
   assert.match(characterStore, /const pendingCostumeFields = new Map/);
   assert.match(characterStore, /const pendingEpisodeLinkFields = new Map/);
   assert.match(characterStore, /function mergeIncomingWithPending/);
+  assert.match(characterStore, /const merged = mergeIncomingWithPending\(pendingCharacterFields[\s\S]*?return \{ \.\.\.merged, episodeIds: withEpisodes\.episodeIds \}/);
   assert.match(characterStore, /trackPendingFields\(pendingCharacterFields, id, updates as Record<string, unknown>\)/);
   assert.match(characterStore, /trackPendingFields\(pendingCostumeFields, id, updates as Record<string, unknown>\)/);
   assert.match(characterStore, /trackPendingEpisodeLinkField\(characterId, episodeNumber, 'memo', memo\)/);
