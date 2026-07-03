@@ -22,14 +22,16 @@ import { ModalPortal } from './ModalPortal';
 export function TodoDetailModal({
   todo,
   onUpdate,
+  onNavigateToCalendar,
   onClose,
 }: {
   todo: PersonalTodo;
   onUpdate: (id: string, updates: Partial<PersonalTodo>) => void;
+  /** 캘린더(일정) 뷰로 이동 — 대시보드/팝업 분기는 부모(MyTasksWidget)가 소유한다. */
+  onNavigateToCalendar: (todo: PersonalTodo) => void;
   onClose: () => void;
 }) {
   const colorMode = useAppStore((s) => s.colorMode);
-  const setView = useAppStore((s) => s.setView);
   const users = useAuthStore((s) => s.users);
 
   // 제목/메모는 입력 중 로컬 상태로 두고 blur/Enter 에 커밋(매 키 입력마다 스토어 쓰기 방지).
@@ -76,14 +78,9 @@ export function TodoDetailModal({
     onUpdate(todo.id, { addToCalendar: !todo.addToCalendar });
   };
 
-  // 캘린더 뷰로 이동 (뷰 전환 후 ScheduleView 마운트 대기)
+  // 캘린더 뷰로 이동 — 실제 이동(대시보드 직접 경로 / 팝업 IPC)은 부모가 처리하고, 모달은 닫는다.
   const navigateToCalendar = () => {
-    setView('schedule');
-    if (todo.startDate) {
-      setTimeout(() => {
-        window.dispatchEvent(new CustomEvent('bflow:navigate-to-date', { detail: { date: todo.startDate, todoId: todo.id } }));
-      }, 300);
-    }
+    onNavigateToCalendar(todo);
     onClose();
   };
 

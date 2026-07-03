@@ -3613,6 +3613,15 @@ ipcMain.handle('widget:navigate-main', (_e, payload: {
   }
 });
 
+// 위젯 팝업의 개인 할일 → 본체 윈도우 포커스 + 캘린더(일정)의 해당 날짜로 이동 (widget:navigate-main 패턴 미러링)
+ipcMain.handle('widget:navigate-to-date', (_e, payload: { date: string; todoId: string }) => {
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.show();
+    mainWindow.focus();
+    mainWindow.webContents.send('widget:navigate-to-date', payload);
+  }
+});
+
 ipcMain.handle('widget:get-size', (_event, widgetId: string) => {
   const win = widgetWindows.get(widgetId);
   if (win && !win.isDestroyed()) {
