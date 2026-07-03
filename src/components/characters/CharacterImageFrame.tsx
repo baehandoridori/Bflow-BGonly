@@ -1,3 +1,11 @@
+/**
+ * 캐릭터 이미지 표시 프레임 — fit 적용 규칙 (R2):
+ *   - 축소 요약 표면(그리드 카드·복장 썸네일·상세 대표·좌측 목록 행·라이트박스 하단 스트립)은
+ *     fit(썸네일 구도)과 배경을 모두 적용한다.
+ *   - 원본 확인 표면(라이트박스 메인)은 fit 을 적용하지 않고(원본 그대로) 배경만 적용한다.
+ *   fit 은 3:4 크롭 프레임 기준으로 저작되므로, fit 을 적용하는 표면은 반드시 3:4 비율 컨테이너여야
+ *   편집기에서 맞춘 구도가 그대로 재현된다 (다른 비율에 적용하면 구도가 다르게 잘림).
+ */
 import { useEffect, useState, type CSSProperties, type ReactNode } from 'react';
 import { Image as ImageIcon, RefreshCw } from 'lucide-react';
 import type { CharacterImageBackground, CharacterImageFit } from '@/types';

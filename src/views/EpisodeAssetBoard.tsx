@@ -193,7 +193,7 @@ function EpisodeCharDetail({
           }}
           className="text-text-secondary hover:text-red-400 text-xs flex items-center gap-1 shrink-0 cursor-pointer"
         >
-          <X size={13} /> 제거
+          <X size={12} /> 제거
         </button>
       </div>
 
@@ -240,7 +240,7 @@ function EpisodeCharDetail({
           <div className="text-xs text-text-secondary">이 편 복장</div>
           {costumes.length === 0 ? (
             <div className="text-xs text-text-secondary border border-dashed border-bg-border rounded-lg py-4 text-center">
-              아직 복장이 없어요. 캐릭터 현황판에서 디자인을 추가하세요.
+              아직 복장이 없어요. 캐릭터 현황판에서 '복장 추가'로 만들어보세요.
             </div>
           ) : (
             <div className="flex items-stretch gap-2.5 overflow-x-auto pb-1">

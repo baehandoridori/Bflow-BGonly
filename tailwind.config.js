@@ -49,6 +49,10 @@ module.exports = {
           d: 'var(--part-d)',
         },
       },
+      borderRadius: {
+        // 대형 모달/사이드 패널 공용 radius — 임의값(rounded-[18px]) 대신 이 토큰 사용.
+        modal: '18px',
+      },
       keyframes: {
         'slide-down': {
           '0%': { opacity: '0', transform: 'translate(-50%, -12px)' },

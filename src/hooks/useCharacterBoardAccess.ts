@@ -45,16 +45,23 @@ function parseConfig(raw: unknown): FeatureAccessConfig {
   }
 }
 
+const ACCESS_AUTO_RETRY_DELAY_MS = 3_000;
+
 export function useCharacterBoardAccessState(): CharacterBoardAccessState {
   const currentUser = useAuthStore((s) => s.currentUser);
   const [config, setConfig] = useState<FeatureAccessConfig | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
   const requestSeq = useRef(0);
+  const retryTimerRef = useRef<number | null>(null);
 
-  const load = useCallback(() => {
+  const load = useCallback((opts?: { isAutoRetry?: boolean }) => {
     const seq = requestSeq.current + 1;
     requestSeq.current = seq;
+    if (retryTimerRef.current !== null) {
+      window.clearTimeout(retryTimerRef.current);
+      retryTimerRef.current = null;
+    }
     setLoading(true);
     setError(false);
     readMetadataFromSupabase('feature-access', 'character-board')
@@ -67,6 +74,14 @@ export function useCharacterBoardAccessState(): CharacterBoardAccessState {
         if (requestSeq.current !== seq) return;
         setConfig(null);
         setError(true);
+        // 앱 시작 직후 잠깐의 순단으로 권한자 메뉴가 통째로 사라지지 않게 1회 자동 재시도 (GAP-H).
+        //   fail-closed 는 유지 — 재시도 성공 전까지는 계속 차단 상태다.
+        if (!opts?.isAutoRetry) {
+          retryTimerRef.current = window.setTimeout(() => {
+            retryTimerRef.current = null;
+            if (requestSeq.current === seq) load({ isAutoRetry: true });
+          }, ACCESS_AUTO_RETRY_DELAY_MS);
+        }
       })
       .finally(() => {
         if (requestSeq.current === seq) setLoading(false);
@@ -85,6 +100,10 @@ export function useCharacterBoardAccessState(): CharacterBoardAccessState {
     });
     return () => {
       requestSeq.current += 1;
+      if (retryTimerRef.current !== null) {
+        window.clearTimeout(retryTimerRef.current);
+        retryTimerRef.current = null;
+      }
       window.removeEventListener('bflow:feature-access-changed', onLocalChange);
       if (unsub) unsub();
     };

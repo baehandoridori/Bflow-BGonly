@@ -69,8 +69,9 @@ export function useMyCharacterTasks(): {
     return tasks;
   }, [byCharacter, characters, currentUser?.name, hasCharacterBoardAccess]);
 
-  return {
+  // 매 렌더 새 배열 참조가 생기면 useMyTasksData 쪽 stats useMemo 가 무력화되므로 함께 메모한다.
+  return useMemo(() => ({
     pendingCharacterTasks: allTasks.filter((task) => !task.done),
     doneCharacterTasks: allTasks.filter((task) => task.done),
-  };
+  }), [allTasks]);
 }

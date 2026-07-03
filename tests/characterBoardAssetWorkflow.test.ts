@@ -125,7 +125,7 @@ test('character image background defaults to transparent for new image workflows
   assert.equal(normalizeCharacterImageBackground('bad-value'), 'transparent');
   assert.match(backgroundDefaultMigration, /ALTER COLUMN image_background SET DEFAULT 'transparent'/);
   assert.match(imageFrameSource, /background = DEFAULT_CHARACTER_IMAGE_BACKGROUND/);
-  assert.match(characterBoard, /shownCostume\?\.imageBackground \?\? DEFAULT_CHARACTER_IMAGE_BACKGROUND/);
+  assert.match(characterBoard, /costume\?\.imageBackground \?\? DEFAULT_CHARACTER_IMAGE_BACKGROUND/);
   assert.match(devMock, /image_background: 'transparent'/);
   assert.ok(
     imageContextMenuSource.indexOf("{ value: 'transparent', label: '투명' }") <
@@ -187,7 +187,10 @@ test('character costume IPC channels use explicit character-costume names', () =
 test('character episode mapping realtime merges single links when episode metadata is present', () => {
   assert.match(electronSupabase, /enrichEpisodeCharacterMappingPayload/);
   assert.match(electronSupabase, /\.from\('episodes'\)[\s\S]*?\.select\('episode_number'\)/);
-  assert.match(electronSupabase, /episode_number: data\.episode_number as number/);
+  assert.match(electronSupabase, /episode_number: episodeNumber as number/);
+  // enrich 는 채널 단위 promise 체인으로 직렬화 — 도착 순서 = 브로드캐스트 순서 (H-5).
+  assert.match(electronSupabase, /broadcastQueue = broadcastQueue\.then/);
+  assert.match(electronSupabase, /episodeNumberCache/);
 
   assert.match(characterStore, /function rowToRealtimeMapping/);
   assert.match(characterStore, /const mapping = rowToRealtimeMapping\(eventType === 'DELETE' \? old : row\)/);
@@ -216,7 +219,6 @@ test('character board is wired for image display, assignees, work links, and lig
     'CharacterImageFitEditor',
     'CharacterImageLightbox',
     'AssigneeNamePicker',
-    'const shownCostume = activeCostume;',
     '디자인 담당자',
     '리깅 담당자',
     '작업 폴더',
@@ -236,6 +238,9 @@ test('character board is wired for image display, assignees, work links, and lig
   assert.match(characterBoard, /aspect-\[3\/4\] bg-bg-border\/30 flex items-center justify-center overflow-hidden/);
   assert.doesNotMatch(characterBoard, /aspect-\[4\/3\]/);
   assert.match(fitEditorSource, /stopImmediatePropagation/);
+  // 이미지 로드 실패 시 안내가 있어야 편집기가 조용히 미초기화 상태로 남지 않는다 (GAP-A).
+  assert.match(fitEditorSource, /onError=\{\(\) => setLoadFailed\(true\)\}/);
+  assert.match(fitEditorSource, /이미지를 불러오지 못했어요/);
   assert.match(fitEditorSource, /cropFrameRef/);
   assert.match(characterImageLightbox, /initialCostumeIdRef/);
   assert.match(characterImageLightbox, /currentCostumeId/);
@@ -346,7 +351,10 @@ test('spotlight opens character board entries through a store-backed pending req
 
   assert.match(spotlight, /type ResultCategory = 'scene' \| 'assignee' \| 'character'/);
   assert.match(spotlight, /useCharacterBoardAccess\(\)/);
-  assert.match(spotlight, /if \(!isOpen \|\| !hasCharacterBoardAccess \|\| characterBoardLoaded \|\| characterBoardLoading\) return;/);
+  // 오픈당 1회만 로드 시도 — 실패 시 열려 있는 동안 무한 재시도 금지 (C-1).
+  assert.match(spotlight, /if \(!isOpen\) \{ characterLoadAttemptedRef\.current = false; return; \}/);
+  assert.match(spotlight, /if \(!hasCharacterBoardAccess \|\| characterBoardLoaded \|\| characterBoardLoading\) return;/);
+  assert.match(spotlight, /if \(characterLoadAttemptedRef\.current\) return;/);
   assert.match(spotlight, /void loadCharacterBoard\(\{ silent: true \}\)/);
   assert.match(spotlight, /CATEGORY_ORDER[\s\S]*'character'/);
   assert.match(spotlight, /character\.status === 'archived'/);
@@ -483,6 +491,11 @@ test('character image lightbox shows costume versions and a bottom costume thumb
   assert.match(characterImageLightbox, /복장 버전/);
   assert.match(characterImageLightbox, /v\{current\.versionNo\}/);
   assert.match(characterImageLightbox, /aria-label="복장 썸네일 목록"/);
+  // 스트립 썸네일은 fit 저작 비율(3:4) 프레임이어야 편집기 구도가 재현된다 (R2/T1).
+  const stripFrame = characterImageLightbox.match(/<CharacterImageFrame\s+url=\{entry\.url\}[\s\S]*?\/>/);
+  assert.ok(stripFrame, 'lightbox strip frame should render entry thumbnails');
+  assert.match(stripFrame[0], /fit=\{entry\.fit\}/);
+  assert.match(stripFrame[0], /aspect-\[3\/4\]/);
   assert.match(characterImageLightbox, /aria-label="이전 복장 썸네일"/);
   assert.match(characterImageLightbox, /aria-label="다음 복장 썸네일"/);
   assert.match(characterImageLightbox, /entry\.versionNo/);

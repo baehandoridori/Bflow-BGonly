@@ -1365,6 +1365,8 @@ export interface ElectronAPI {
     row: any | null;
     old: any | null;
   }) => void) => () => void;
+  /** character_board 채널 자체의 구독 상태 (SUBSCRIBED/CLOSED/CHANNEL_ERROR/TIMED_OUT). */
+  onCharacterBoardRealtimeStatus?: (cb: (status: string) => void) => () => void;
 }
 
 declare global {

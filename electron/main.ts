@@ -2623,6 +2623,14 @@ function startSupabaseRealtime() {
     for (const win of widgetWindows.values()) {
       if (!win.isDestroyed()) win.webContents.send('character-board:realtime', payload);
     }
+  }, (status) => {
+    // 채널 자체 상태 — 렌더러가 SUBSCRIBED(재합류) 시 catch-up 로드를 트리거한다.
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send('character-board:realtime-status', status);
+    }
+    for (const win of widgetWindows.values()) {
+      if (!win.isDestroyed()) win.webContents.send('character-board:realtime-status', status);
+    }
   });
 }
 

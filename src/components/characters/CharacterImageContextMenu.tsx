@@ -114,6 +114,7 @@ export function CharacterImageContextMenu({
     <div
       ref={ref}
       role="menu"
+      data-character-context-menu
       className={`fixed ${CHARACTER_LAYER_CLASS.menu} w-56 overflow-hidden rounded-lg border border-bg-border bg-bg-card shadow-2xl`}
       style={{ left: position.left, top: position.top }}
     >

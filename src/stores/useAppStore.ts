@@ -244,7 +244,13 @@ export const useAppStore = create<AppState>((set) => ({
 
   currentView: 'dashboard',
   previousView: null,
-  setView: (view) => set((s) => ({ currentView: view, previousView: s.currentView })),
+  setView: (view) => set((s) => ({
+    currentView: view,
+    previousView: s.currentView,
+    // 캐릭터 딥링크 요청은 현황판이 아닌 다른 뷰로 이동하는 순간 폐기 —
+    //   로드 지연 중 사이드바로 이탈한 미소비 요청이 나중에 예기치 않은 모달을 열지 않게 한다.
+    pendingCharacterBoardRequest: view === 'character-board' ? s.pendingCharacterBoardRequest : null,
+  })),
   navigationBackStack: [],
   pushNavigationBackTarget: () => set((s) => {
     const nextStack = appendNavigationBackSnapshot(

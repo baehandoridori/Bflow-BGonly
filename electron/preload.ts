@@ -648,4 +648,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.on('character-board:realtime', listener);
     return () => ipcRenderer.removeListener('character-board:realtime', listener);
   },
+  onCharacterBoardRealtimeStatus: (callback: (status: string) => void) => {
+    const listener = (_event: Electron.IpcRendererEvent, status: string) => callback(status);
+    ipcRenderer.on('character-board:realtime-status', listener);
+    return () => ipcRenderer.removeListener('character-board:realtime-status', listener);
+  },
 });

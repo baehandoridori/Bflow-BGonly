@@ -88,6 +88,8 @@ export function CharacterImageFitEditor({
   const [naturalSize, setNaturalSize] = useState({ width: 1, height: 1 });
   const [cropRect, setCropRect] = useState<Box>({ left: 0, top: 0, width: 1, height: 1 });
   const [isDragging, setIsDragging] = useState(false);
+  // 이미지 로드 실패 시 편집기가 영원히 미초기화 상태로 남지 않게 실패를 명시 (GAP-A).
+  const [loadFailed, setLoadFailed] = useState(false);
   const workspaceRef = useRef<HTMLDivElement>(null);
   const cropFrameRef = useRef<HTMLDivElement>(null);
   const interactionRef = useRef<{
@@ -277,7 +279,7 @@ export function CharacterImageFitEditor({
   const percentLabel = (value: number) => `${Math.round(value * 100)}%`;
 
   return (
-    <div className={`fixed inset-0 ${CHARACTER_LAYER_CLASS.editor} flex items-center justify-center bg-overlay/70 p-5`} onMouseDown={(e) => e.stopPropagation()}>
+    <div data-character-fit-editor className={`fixed inset-0 ${CHARACTER_LAYER_CLASS.editor} flex items-center justify-center bg-overlay/70 p-5`} onMouseDown={(e) => e.stopPropagation()}>
       <div className="max-h-[calc(100vh-32px)] w-full max-w-5xl overflow-hidden rounded-2xl bg-bg-card shadow-2xl ring-1 ring-white/10">
         <div className="flex items-center justify-between border-b border-bg-border/70 px-4 py-3">
           <div className="min-w-0">
@@ -335,11 +337,13 @@ export function CharacterImageFitEditor({
                     draggable={false}
                     onLoad={(event) => {
                       const image = event.currentTarget;
+                      setLoadFailed(false);
                       setNaturalSize({
                         width: Math.max(1, image.naturalWidth),
                         height: Math.max(1, image.naturalHeight),
                       });
                     }}
+                    onError={() => setLoadFailed(true)}
                     className="max-h-full max-w-full select-none object-contain outline outline-1 -outline-offset-1 outline-white/10 will-change-transform"
                     style={fitImageStyle}
                   />
@@ -351,6 +355,12 @@ export function CharacterImageFitEditor({
               <div className={`${handleClass} -bottom-1 -left-1 rounded-bl-xl border-b-2 border-l-2`} />
               <div className={`${handleClass} -bottom-1 -right-1 rounded-br-xl border-b-2 border-r-2`} />
             </div>
+            {loadFailed && (
+              <div className="absolute inset-0 z-40 flex flex-col items-center justify-center gap-1.5 bg-black/60 text-center">
+                <span className="text-sm font-medium text-white/90">이미지를 불러오지 못했어요</span>
+                <span className="text-xs text-white/60">창을 닫고 잠시 후 다시 시도해주세요</span>
+              </div>
+            )}
           </div>
 
           <div className="flex flex-col gap-3">
@@ -473,8 +483,9 @@ export function CharacterImageFitEditor({
               </button>
               <button
                 type="button"
+                disabled={loadFailed}
                 onClick={() => { onCommit(normalizeCharacterImageFit(draft)); onClose(); }}
-                className="min-h-10 rounded-lg bg-accent px-4 py-2 text-sm font-medium text-white hover:opacity-90 active:scale-[0.96]"
+                className="min-h-10 rounded-lg bg-accent px-4 py-2 text-sm font-medium text-white hover:opacity-90 active:scale-[0.96] disabled:opacity-40"
               >
                 적용
               </button>

@@ -51,7 +51,7 @@ export async function createAndLinkCharacterFolder(
     return false;
   }
 
-  const result = await window.electronAPI.pathCreateFolder(root, character.name);
+  const result: PathCreateFolderResult = await window.electronAPI.pathCreateFolder(root, character.name);
   if (!result.ok || !result.path) {
     switch (result.code) {
       case 'parent-missing':

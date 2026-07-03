@@ -160,8 +160,14 @@ export function SpotlightSearch() {
     setPendingCharacterBoardRequest,
   } = useAppStore();
 
+  // 오픈당 1회만 시도 — 실패(loadError) 시 열려 있는 동안 loading 토글로 재발화하는 무한 재시도 방지.
+  //   재오픈하면 ref가 리셋되어 다시 시도한다.
+  const characterLoadAttemptedRef = useRef(false);
   useEffect(() => {
-    if (!isOpen || !hasCharacterBoardAccess || characterBoardLoaded || characterBoardLoading) return;
+    if (!isOpen) { characterLoadAttemptedRef.current = false; return; }
+    if (!hasCharacterBoardAccess || characterBoardLoaded || characterBoardLoading) return;
+    if (characterLoadAttemptedRef.current) return;
+    characterLoadAttemptedRef.current = true;
     void loadCharacterBoard({ silent: true });
   }, [characterBoardLoaded, characterBoardLoading, hasCharacterBoardAccess, isOpen, loadCharacterBoard]);
 
