@@ -53,7 +53,7 @@ import { WelcomeToast } from '@/components/WelcomeToast';
 import { UpdateCenterModal } from '@/components/update/UpdateCenterModal';
 import { getGreeting, isFirstLogin, markFirstLoginShown } from '@/utils/greetings';
 import { useGlobalShortcuts } from '@/hooks/useGlobalShortcuts';
-import { useCharacterBoardAccess } from '@/hooks/useCharacterBoardAccess';
+import { useCharacterBoardAccessState } from '@/hooks/useCharacterBoardAccess';
 import { installEditableFocusRecovery } from '@/utils/editableFocus';
 import { DEFAULT_GAS_IMAGE_URL, DEFAULT_VACATION_URL } from '@/config';
 import { Toaster, toast as sonnerToast } from 'sonner';
@@ -101,6 +101,47 @@ class LazyErrorBoundary extends Component<{ children: ReactNode; name: string },
     if (this.state.hasError) return null; // 모달/뷰가 뜨지 않는 편이 크래시보다 낫다
     return this.props.children;
   }
+}
+
+function CharacterBoardAccessFallback({
+  loading,
+  error,
+  onRetry,
+}: {
+  loading: boolean;
+  error: boolean;
+  onRetry: () => void;
+}) {
+  const title = loading
+    ? '캐릭터 현황판 권한 확인 중'
+    : error
+      ? '권한 정보를 확인하지 못했어요'
+      : '캐릭터 현황판 권한이 없어요';
+  const description = loading
+    ? '서버에서 접근 가능 여부를 확인하고 있어요.'
+    : error
+      ? '네트워크나 Supabase 응답 문제일 수 있어요. 다시 확인할 수 있습니다.'
+      : '관리자 설정에서 캐릭터 현황판 접근 권한을 받아야 열 수 있어요.';
+
+  return (
+    <div className="flex h-full w-full items-center justify-center px-6">
+      <div className="w-full max-w-md rounded-2xl border border-bg-border bg-bg-card p-6 text-center shadow-xl">
+        <div className="text-base font-semibold text-text-primary">{title}</div>
+        <div className="mt-2 text-sm leading-relaxed text-text-secondary">{description}</div>
+        {loading ? (
+          <div className="mx-auto mt-5 h-6 w-6 rounded-full border-2 border-accent border-t-transparent animate-spin" />
+        ) : error ? (
+          <button
+            type="button"
+            onClick={onRetry}
+            className="mt-5 rounded-lg border border-bg-border px-4 py-2 text-sm text-text-primary hover:border-accent/60 hover:bg-accent/10"
+          >
+            다시 확인
+          </button>
+        ) : null}
+      </div>
+    </div>
+  );
 }
 
 function isSceneAssignedToUser<T extends { assignee?: string | null }>(
@@ -201,7 +242,8 @@ export default function App() {
   } = useAuthStore();
 
   // 캐릭터 현황판 접근 권한 — 사이드바 메뉴뿐 아니라 뷰 렌더도 게이팅(공유 PC에서 뷰가 잔존해 다음 사용자에게 노출되는 것 방지).
-  const hasCharacterBoardAccess = useCharacterBoardAccess();
+  const characterBoardAccess = useCharacterBoardAccessState();
+  const hasCharacterBoardAccess = characterBoardAccess.allowed;
 
   // Sonner 토스트 브릿지: 기존 setToast 호출을 Sonner로 전달
   const setStoreToast = useAppStore((s) => s.setToast);
@@ -2806,7 +2848,15 @@ export default function App() {
         case 'retake-hub':
           return <RetakeHubView />;
         case 'character-board':
-          return hasCharacterBoardAccess ? <CharacterBoardView /> : <Dashboard />;
+          return hasCharacterBoardAccess
+            ? <CharacterBoardView />
+            : (
+              <CharacterBoardAccessFallback
+                loading={characterBoardAccess.loading}
+                error={characterBoardAccess.error}
+                onRetry={characterBoardAccess.retry}
+              />
+            );
         case 'settings':
           return <SettingsView />;
         default:

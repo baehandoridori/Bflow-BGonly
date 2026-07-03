@@ -61,6 +61,7 @@ function claimReactKey(event: ReactKeyboardEvent<HTMLElement>) {
 // 미리 정의된 태그 팔레트 — 토글 칩으로 노출.
 const STRUCTURE_TAG_PALETTE = ['얼굴각도 컨트롤러', '책가방 세트', '뒷모습', '앞모습 없음', '측면'] as const;
 const ASSET_TAG_PALETTE = ['담배', '핸드폰', '가방', '안경', '모자'] as const;
+const costumeMemoDraftCache = new Map<string, string>();
 
 /** 태그별 고유색 토글 칩. on 이면 색 채움(틴트), off 면 회색 + 색 점. */
 function TagPill({
@@ -482,16 +483,56 @@ function FeaturedImageSlot({
 }
 
 /** 복장 메모 — 키 입력마다 저장 말고 blur 때 한 번만(동시 쓰기 경합·텍스트 유실 방지). */
-function CostumeMemoInput({ value, onCommit }: { value: string; onCommit: (next: string) => void }) {
-  const [draft, setDraft] = useState(value);
+function CostumeMemoInput({
+  draftKey,
+  value,
+  onCommit,
+}: {
+  draftKey: string;
+  value: string;
+  onCommit: (next: string) => void;
+}) {
+  const [draft, setDraft] = useState(() => costumeMemoDraftCache.get(draftKey) ?? value);
   const focused = useRef(false);
-  useEffect(() => { if (!focused.current) setDraft(value); }, [value]);
+  const draftRef = useRef(draft);
+  const valueRef = useRef(value);
+  const onCommitRef = useRef(onCommit);
+
+  useEffect(() => { draftRef.current = draft; }, [draft]);
+  useEffect(() => { valueRef.current = value; }, [value]);
+  useEffect(() => { onCommitRef.current = onCommit; }, [onCommit]);
+  useEffect(() => {
+    if (focused.current) return;
+    const cached = costumeMemoDraftCache.get(draftKey);
+    setDraft(cached ?? value);
+  }, [draftKey, value]);
+  useEffect(() => () => {
+    const latestDraft = draftRef.current;
+    costumeMemoDraftCache.delete(draftKey);
+    if (focused.current && latestDraft !== valueRef.current) {
+      onCommitRef.current(latestDraft);
+    }
+  }, [draftKey]);
+
+  const commit = useCallback(() => {
+    focused.current = false;
+    costumeMemoDraftCache.delete(draftKey);
+    const next = draftRef.current;
+    if (next !== valueRef.current) onCommitRef.current(next);
+  }, [draftKey]);
+
+  const updateDraft = (next: string) => {
+    setDraft(next);
+    draftRef.current = next;
+    if (focused.current) costumeMemoDraftCache.set(draftKey, next);
+  };
+
   return (
     <textarea
       value={draft}
-      onChange={(e) => setDraft(e.target.value)}
+      onChange={(e) => updateDraft(e.target.value)}
       onFocus={() => { focused.current = true; }}
-      onBlur={() => { focused.current = false; if (draft !== value) onCommit(draft); }}
+      onBlur={commit}
       placeholder="이 디자인 메모…"
       aria-label="디자인 메모"
       rows={3}
@@ -544,6 +585,8 @@ function CostumeIdentity({ costume }: { costume: CharacterCostume }) {
         )}
       </div>
       <CostumeMemoInput
+        key={costume.id}
+        draftKey={costume.id}
         value={costume.memo ?? ''}
         onCommit={(next) => updateCostumeField(costume.id, { memo: next.trim() ? next : null })}
       />
@@ -876,7 +919,7 @@ function CostumeThumbCard({
         onClick={async (e) => {
           e.stopPropagation();
           const ok = await ConfirmDialog.show({
-            message: `'${costume.name}' 복장을 삭제할까요?\n대표 이미지와 작업 파일 연결도 함께 삭제됩니다.`,
+            message: `'${costume.name}' 복장을 삭제할까요?\n대표 이미지, 진행 단계, 담당자, 태그와 작업 파일 연결이 함께 사라집니다.\n실제 원본 작업 파일은 삭제하지 않아요.`,
             confirmLabel: '삭제',
             tone: 'danger',
           });
@@ -1033,7 +1076,7 @@ function CharacterDetailPanel({
 
   const handleDeleteCharacter = async () => {
     const ok = await ConfirmDialog.show({
-      message: `'${character.name}' 캐릭터를 영구 삭제할까요?\n복장, 대표 이미지, 작업 파일 연결, 댓글과 첨부 이미지도 함께 사라집니다.`,
+      message: `'${character.name}' 캐릭터를 영구 삭제할까요?\n복장, 대표 이미지, 작업 파일 연결, 댓글과 첨부 이미지도 함께 사라집니다.\n실제 작업 폴더와 원본 작업 파일은 삭제하지 않아요.`,
       confirmLabel: '영구 삭제',
       tone: 'danger',
     });

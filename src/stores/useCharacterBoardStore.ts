@@ -51,6 +51,12 @@ const RIGGING_STAGE_LABEL: Record<CharacterCostume['riggingStage'], string> = {
   done: '완성',
 };
 
+type PendingLocalField = { value: unknown; expiresAt: number };
+const PENDING_LOCAL_FIELD_MS = 15_000;
+const pendingCharacterFields = new Map<string, Map<string, PendingLocalField>>();
+const pendingCostumeFields = new Map<string, Map<string, PendingLocalField>>();
+const pendingEpisodeLinkFields = new Map<string, Map<string, PendingLocalField>>();
+
 function buildByCharacter(costumes: CharacterCostume[]): Map<string, CharacterCostume[]> {
   const map = new Map<string, CharacterCostume[]>();
   for (const c of costumes) {
@@ -59,9 +65,35 @@ function buildByCharacter(costumes: CharacterCostume[]): Map<string, CharacterCo
     else map.set(c.characterId, [c]);
   }
   for (const arr of map.values()) {
-    arr.sort((a, b) => a.sortOrder - b.sortOrder);
+    arr.sort(compareCostumes);
   }
   return map;
+}
+
+function compareNullableText(a: string | null | undefined, b: string | null | undefined): number {
+  return String(a ?? '').localeCompare(String(b ?? ''));
+}
+
+function compareCharacters(a: Character, b: Character): number {
+  return a.sortOrder - b.sortOrder
+    || compareNullableText(a.createdAt, b.createdAt)
+    || compareNullableText(a.name, b.name)
+    || compareNullableText(a.id, b.id);
+}
+
+function compareCostumes(a: CharacterCostume, b: CharacterCostume): number {
+  return a.sortOrder - b.sortOrder
+    || compareNullableText(a.createdAt, b.createdAt)
+    || compareNullableText(a.name, b.name)
+    || compareNullableText(a.id, b.id);
+}
+
+function sortCharacters(characters: Character[]): Character[] {
+  return characters.slice().sort(compareCharacters);
+}
+
+function sortCostumes(costumes: CharacterCostume[]): CharacterCostume[] {
+  return costumes.slice().sort(compareCostumes);
 }
 
 type RawMapping = {
@@ -101,6 +133,110 @@ function rowToRealtimeMapping(row: any | null): RawMapping | null {
     memo: typeof row.memo === 'string' ? row.memo : null,
     costumeId: typeof row.costume_id === 'string' ? row.costume_id : null,
   };
+}
+
+function pendingLinkKey(characterId: string, episodeNumber: number): string {
+  return `${characterId}:${episodeNumber}`;
+}
+
+function valuesEqual(a: unknown, b: unknown): boolean {
+  if (Object.is(a, b)) return true;
+  if (!a || !b || typeof a !== 'object' || typeof b !== 'object') return false;
+  try {
+    return JSON.stringify(a) === JSON.stringify(b);
+  } catch {
+    return false;
+  }
+}
+
+function cleanupPending(bucket: Map<string, Map<string, PendingLocalField>>, id: string) {
+  const fields = bucket.get(id);
+  if (!fields) return;
+  const now = Date.now();
+  for (const [field, pending] of fields) {
+    if (pending.expiresAt <= now) fields.delete(field);
+  }
+  if (fields.size === 0) bucket.delete(id);
+}
+
+function trackPendingFields(
+  bucket: Map<string, Map<string, PendingLocalField>>,
+  id: string,
+  updates: Record<string, unknown>,
+) {
+  cleanupPending(bucket, id);
+  let fields = bucket.get(id);
+  if (!fields) {
+    fields = new Map();
+    bucket.set(id, fields);
+  }
+  const expiresAt = Date.now() + PENDING_LOCAL_FIELD_MS;
+  for (const [field, value] of Object.entries(updates)) {
+    fields.set(field, { value, expiresAt });
+  }
+}
+
+function mergeIncomingWithPending<T extends { id: string; updatedAt?: string | null }>(
+  bucket: Map<string, Map<string, PendingLocalField>>,
+  existing: T | undefined,
+  incoming: T,
+): T {
+  if (existing && incoming.updatedAt && existing.updatedAt && Date.parse(incoming.updatedAt) < Date.parse(existing.updatedAt)) {
+    return existing;
+  }
+
+  cleanupPending(bucket, incoming.id);
+  const fields = bucket.get(incoming.id);
+  if (!existing || !fields) return incoming;
+
+  const merged = { ...incoming } as Record<string, unknown>;
+  const existingRecord = existing as unknown as Record<string, unknown>;
+  const incomingRecord = incoming as unknown as Record<string, unknown>;
+  for (const [field, pending] of fields) {
+    if (valuesEqual(incomingRecord[field], pending.value)) {
+      fields.delete(field);
+    } else if (valuesEqual(existingRecord[field], pending.value)) {
+      merged[field] = existingRecord[field];
+    }
+  }
+  if (fields.size === 0) bucket.delete(incoming.id);
+  return merged as T;
+}
+
+function trackPendingEpisodeLinkField<K extends 'memo' | 'costumeId'>(
+  characterId: string,
+  episodeNumber: number,
+  field: K,
+  value: EpisodeCharacterLink[K],
+) {
+  trackPendingFields(pendingEpisodeLinkFields, pendingLinkKey(characterId, episodeNumber), { [field]: value });
+}
+
+function mergeEpisodeLinkPatchWithPending(
+  links: Map<string, EpisodeCharacterLink[]>,
+  characterId: string,
+  episodeNumber: number,
+  patch: Partial<Pick<EpisodeCharacterLink, 'memo' | 'costumeId'>>,
+): Partial<Pick<EpisodeCharacterLink, 'memo' | 'costumeId'>> {
+  const key = pendingLinkKey(characterId, episodeNumber);
+  cleanupPending(pendingEpisodeLinkFields, key);
+  const fields = pendingEpisodeLinkFields.get(key);
+  if (!fields) return patch;
+
+  const current = links.get(characterId)?.find((link) => link.episodeNumber === episodeNumber) ?? null;
+  if (!current) return patch;
+
+  const merged = { ...patch } as Record<string, unknown>;
+  for (const [field, pending] of fields) {
+    const incoming = merged[field];
+    if (valuesEqual(incoming, pending.value)) {
+      fields.delete(field);
+    } else if (valuesEqual((current as unknown as Record<string, unknown>)[field], pending.value)) {
+      merged[field] = (current as unknown as Record<string, unknown>)[field];
+    }
+  }
+  if (fields.size === 0) pendingEpisodeLinkFields.delete(key);
+  return merged as Partial<Pick<EpisodeCharacterLink, 'memo' | 'costumeId'>>;
 }
 
 interface CharacterBoardStore {
@@ -194,14 +330,15 @@ export const useCharacterBoardStore = create<CharacterBoardStore>((set, get) => 
         if (arr) arr.push(m.episodeNumber);
         else epByChar.set(m.characterId, [m.episodeNumber]);
       }
-      const assembled = characters.map((c) => ({
+      const assembled = sortCharacters(characters.map((c) => ({
         ...c,
         episodeIds: (epByChar.get(c.id) ?? []).slice().sort((a, b) => a - b),
-      }));
+      })));
+      const sortedCostumes = sortCostumes(costumes);
       set({
         characters: assembled,
-        costumes,
-        byCharacter: buildByCharacter(costumes),
+        costumes: sortedCostumes,
+        byCharacter: buildByCharacter(sortedCostumes),
         episodeLinks: buildEpisodeLinks(mappings),
         loaded: true,
         loading: false,
@@ -214,9 +351,23 @@ export const useCharacterBoardStore = create<CharacterBoardStore>((set, get) => 
     }
   },
 
-  startRealtime: () => subscribeCharacterBoardRealtime((payload) => {
-    get().receiveRealtime(payload);
-  }),
+  startRealtime: () => {
+    const stopRows = subscribeCharacterBoardRealtime((payload) => {
+      get().receiveRealtime(payload);
+    });
+    const catchUp = () => {
+      if (get().loaded && !get().loading) void get().load({ silent: true });
+    };
+    const stopStatus = window.electronAPI?.onSupabaseStatus?.((status) => {
+      if (status === 'SUBSCRIBED') catchUp();
+    });
+    window.addEventListener('online', catchUp);
+    return () => {
+      stopRows();
+      stopStatus?.();
+      window.removeEventListener('online', catchUp);
+    };
+  },
 
   ensureLoadedAndRealtime: (opts) => {
     const state = get();
@@ -249,13 +400,13 @@ export const useCharacterBoardStore = create<CharacterBoardStore>((set, get) => 
       // 서버 결과(정확한 id/sortOrder)로 머지 — realtime 도착 전 즉시 반영.
       set((s) => {
         if (s.characters.some((c) => c.id === created.id)) return s;
-        return { characters: [...s.characters, { ...created, episodeIds: [] }] };
+        return { characters: sortCharacters([...s.characters, { ...created, episodeIds: [] }]) };
       });
       try {
         const firstCostume = await svcAddCostume({ characterId: created.id, name: '복장 1', createdBy });
         set((s) => {
           if (s.costumes.some((c) => c.id === firstCostume.id)) return s;
-          const costumes = [...s.costumes, firstCostume];
+          const costumes = sortCostumes([...s.costumes, firstCostume]);
           return { costumes, byCharacter: buildByCharacter(costumes) };
         });
       } catch (costumeErr) {
@@ -312,12 +463,12 @@ export const useCharacterBoardStore = create<CharacterBoardStore>((set, get) => 
       console.error('[character-board] deleteCharacter 실패:', err);
       set((s) => {
         const characters = removedCharacter && !s.characters.some((c) => c.id === id)
-          ? [...s.characters, removedCharacter].sort((a, b) => a.sortOrder - b.sortOrder)
+          ? sortCharacters([...s.characters, removedCharacter])
           : s.characters;
         const existingCostumeIds = new Set(s.costumes.map((c) => c.id));
         const missingCostumes = removedCostumes.filter((c) => !existingCostumeIds.has(c.id));
         const costumes = missingCostumes.length > 0
-          ? [...s.costumes, ...missingCostumes].sort((a, b) => a.sortOrder - b.sortOrder)
+          ? sortCostumes([...s.costumes, ...missingCostumes])
           : s.costumes;
         const episodeLinks = new Map(s.episodeLinks);
         if (removedLinks && !episodeLinks.has(id)) episodeLinks.set(id, removedLinks);
@@ -340,7 +491,7 @@ export const useCharacterBoardStore = create<CharacterBoardStore>((set, get) => 
       const created = await svcAddCostume({ characterId, name, createdBy });
       set((s) => {
         if (s.costumes.some((c) => c.id === created.id)) return s;
-        const costumes = [...s.costumes, created];
+        const costumes = sortCostumes([...s.costumes, created]);
         return { costumes, byCharacter: buildByCharacter(costumes) };
       });
       return created;
@@ -400,7 +551,7 @@ export const useCharacterBoardStore = create<CharacterBoardStore>((set, get) => 
       console.error('[character-board] deleteCostume 실패:', err);
       set((s) => {
         if (!removed || s.costumes.some((c) => c.id === id)) return s;
-        const costumes = [...s.costumes, removed].sort((a, b) => a.sortOrder - b.sortOrder);
+        const costumes = sortCostumes([...s.costumes, removed]);
         return { costumes, byCharacter: buildByCharacter(costumes) };
       });
       toast.error('복장 삭제에 실패했어요');
@@ -453,6 +604,7 @@ export const useCharacterBoardStore = create<CharacterBoardStore>((set, get) => 
 
   setEpisodeMemo: async (characterId, episodeNumber, memo) => {
     const previousLink = get().episodeLinks.get(characterId)?.find((l) => l.episodeNumber === episodeNumber) ?? null;
+    trackPendingEpisodeLinkField(characterId, episodeNumber, 'memo', memo);
     set({ episodeLinks: upsertLink(get().episodeLinks, characterId, episodeNumber, { memo }) });
     try {
       await svcUpdateEpisodeMapping(episodeNumber, characterId, { memo });
@@ -467,6 +619,7 @@ export const useCharacterBoardStore = create<CharacterBoardStore>((set, get) => 
 
   setEpisodeCostume: async (characterId, episodeNumber, costumeId) => {
     const previousLink = get().episodeLinks.get(characterId)?.find((l) => l.episodeNumber === episodeNumber) ?? null;
+    trackPendingEpisodeLinkField(characterId, episodeNumber, 'costumeId', costumeId);
     set({ episodeLinks: upsertLink(get().episodeLinks, characterId, episodeNumber, { costumeId }) });
     try {
       await svcUpdateEpisodeMapping(episodeNumber, characterId, { costumeId });
@@ -507,11 +660,15 @@ export const useCharacterBoardStore = create<CharacterBoardStore>((set, get) => 
         const linkEpisodeIds = (s.episodeLinks.get(incoming.id) ?? [])
           .map((l) => l.episodeNumber)
           .sort((a, b) => a - b);
-        const merged = { ...incoming, episodeIds: existing?.episodeIds ?? linkEpisodeIds };
+        const merged = mergeIncomingWithPending(
+          pendingCharacterFields,
+          existing,
+          { ...incoming, episodeIds: existing?.episodeIds ?? linkEpisodeIds },
+        );
         return {
           characters: existing
-            ? s.characters.map((c) => (c.id === incoming.id ? merged : c))
-            : [...s.characters, merged],
+            ? sortCharacters(s.characters.map((c) => (c.id === incoming.id ? merged : c)))
+            : sortCharacters([...s.characters, merged]),
         };
       });
       return;
@@ -530,10 +687,12 @@ export const useCharacterBoardStore = create<CharacterBoardStore>((set, get) => 
       if (!row) return;
       const incoming = rowToCostume(row);
       set((s) => {
-        const exists = s.costumes.some((c) => c.id === incoming.id);
+        const existing = s.costumes.find((c) => c.id === incoming.id);
+        const merged = mergeIncomingWithPending(pendingCostumeFields, existing, incoming);
+        const exists = !!existing;
         const costumes = exists
-          ? s.costumes.map((c) => (c.id === incoming.id ? incoming : c))
-          : [...s.costumes, incoming];
+          ? sortCostumes(s.costumes.map((c) => (c.id === incoming.id ? merged : c)))
+          : sortCostumes([...s.costumes, merged]);
         return { costumes, byCharacter: buildByCharacter(costumes) };
       });
       return;
@@ -554,10 +713,15 @@ export const useCharacterBoardStore = create<CharacterBoardStore>((set, get) => 
       }
       set((s) => ({
         characters: setCharacterEpisodePresence(s.characters, mapping.characterId, mapping.episodeNumber, true),
-        episodeLinks: upsertLink(s.episodeLinks, mapping.characterId, mapping.episodeNumber, {
-          memo: mapping.memo,
-          costumeId: mapping.costumeId,
-        }),
+        episodeLinks: upsertLink(
+          s.episodeLinks,
+          mapping.characterId,
+          mapping.episodeNumber,
+          mergeEpisodeLinkPatchWithPending(s.episodeLinks, mapping.characterId, mapping.episodeNumber, {
+            memo: mapping.memo,
+            costumeId: mapping.costumeId,
+          }),
+        ),
       }));
     }
   },
@@ -653,6 +817,7 @@ async function applyCharacterUpdate(
 ): Promise<boolean> {
   const prev = get().characters;
   const prevCharacter = prev.find((c) => c.id === id);
+  trackPendingFields(pendingCharacterFields, id, updates as Record<string, unknown>);
   set({ characters: prev.map((c) => (c.id === id ? { ...c, ...updates } : c)) });
   try {
     await svcUpdateCharacter(id, dbUpdates);
@@ -691,6 +856,7 @@ async function applyCostumeUpdate(
 ): Promise<boolean> {
   const prev = get().costumes;
   const prevCostume = prev.find((c) => c.id === id);
+  trackPendingFields(pendingCostumeFields, id, updates as Record<string, unknown>);
   const next = prev.map((c) => (c.id === id ? { ...c, ...updates } : c));
   set({ costumes: next, byCharacter: buildByCharacter(next) });
   try {
