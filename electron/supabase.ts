@@ -6,6 +6,7 @@ import {
   broadcastCommentReactionNotification, broadcastCommentReactionNotificationRemoved, broadcastActivityRemoved,
 } from './broadcast';
 import { deleteImage as storageDeleteImage } from './storage';
+import { createRetryManager } from './retry-utils';
 
 // ─── 일괄 작업 타입 ─────────────────────────────
 
@@ -4116,39 +4117,72 @@ export function startCharacterBoardRealtime(
     row: Record<string, unknown> | null;
     old: Record<string, unknown> | null;
   }) => void,
+  /** 채널 구독 상태 통지 — 렌더러가 SUBSCRIBED(재합류) 시 catch-up 로드를 트리거하는 데 사용. */
+  onStatus?: (status: string) => void,
 ): () => void {
   const tables = ['characters', 'character_costumes', 'episode_character_mapping'] as const;
-  let channel = supabase.channel('public:character_board');
-  for (const table of tables) {
-    channel = channel.on(
-      'postgres_changes',
-      { event: '*', schema: 'public', table },
-      (payload) => {
-        void (async () => {
+  const retry = createRetryManager('CharacterBoardRealtime');
+  const episodeNumberCache = new Map<string, number>();
+  // 이벤트마다 독립 async 로 enrich 하면 완료 순서가 도착 순서와 어긋날 수 있어(늦은 select 가
+  // 나중 이벤트를 추월) 채널 단위 promise 체인으로 직렬화 — 도착 순서 = 브로드캐스트 순서 보장.
+  let broadcastQueue: Promise<void> = Promise.resolve();
+  let channel: ReturnType<typeof supabase.channel> | null = null;
+  let stopped = false;
+
+  const buildChannel = () => {
+    let ch = supabase.channel('public:character_board');
+    for (const table of tables) {
+      ch = ch.on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table },
+        (payload) => {
           const row = (payload.new ?? null) as Record<string, unknown> | null;
           const old = (payload.old ?? null) as Record<string, unknown> | null;
-          const enriched = await enrichEpisodeCharacterMappingPayload(table, row, old);
-          broadcast({
-            table,
-            eventType: payload.eventType as 'INSERT' | 'UPDATE' | 'DELETE',
-            row: enriched.row,
-            old: enriched.old,
+          const eventType = payload.eventType as 'INSERT' | 'UPDATE' | 'DELETE';
+          broadcastQueue = broadcastQueue.then(async () => {
+            try {
+              const enriched = await enrichEpisodeCharacterMappingPayload(table, row, old, episodeNumberCache);
+              broadcast({ table, eventType, row: enriched.row, old: enriched.old });
+            } catch (err) {
+              console.warn('[character-board] realtime payload enrich 실패:', err);
+              broadcast({ table, eventType, row, old });
+            }
           });
-        })().catch((err) => {
-          console.warn('[character-board] realtime payload enrich 실패:', err);
-          broadcast({
-            table,
-            eventType: payload.eventType as 'INSERT' | 'UPDATE' | 'DELETE',
-            row: (payload.new ?? null) as Record<string, unknown> | null,
-            old: (payload.old ?? null) as Record<string, unknown> | null,
-          });
-        });
-      },
-    );
-  }
-  channel.subscribe();
+        },
+      );
+    }
+    return ch;
+  };
+
+  const connect = () => {
+    if (stopped) return;
+    if (channel) {
+      supabase.removeChannel(channel);
+      channel = null;
+    }
+    const newChannel = buildChannel();
+    channel = newChannel;
+    newChannel.subscribe((status) => {
+      if (stopped || channel !== newChannel) return;
+      onStatus?.(status);
+      if (status === 'SUBSCRIBED') {
+        retry.reset();
+      } else if (status === 'CLOSED' || status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
+        // 채널 단독 장애/초기 구독 타임아웃도 지수 백오프로 재구독 (bflow-realtime 채널과 동일 패턴).
+        const scheduled = retry.schedule(connect);
+        if (!scheduled) console.warn('[character-board] realtime 재시도 한도 초과 — 구독 중단');
+      }
+    });
+  };
+
+  connect();
   return () => {
-    supabase.removeChannel(channel);
+    stopped = true;
+    retry.clear();
+    if (channel) {
+      supabase.removeChannel(channel);
+      channel = null;
+    }
   };
 }
 
@@ -4156,20 +4190,26 @@ async function enrichEpisodeCharacterMappingPayload(
   table: 'characters' | 'character_costumes' | 'episode_character_mapping',
   row: Record<string, unknown> | null,
   old: Record<string, unknown> | null,
+  episodeNumberCache?: Map<string, number>,
 ): Promise<{ row: Record<string, unknown> | null; old: Record<string, unknown> | null }> {
   if (table !== 'episode_character_mapping') return { row, old };
   const episodeId = (row?.episode_id ?? old?.episode_id) as string | undefined;
   if (!episodeId) return { row, old };
 
-  const { data, error } = await supabase
-    .from('episodes')
-    .select('episode_number')
-    .eq('id', episodeId)
-    .maybeSingle();
-  if (error || typeof data?.episode_number !== 'number') return { row, old };
+  let episodeNumber = episodeNumberCache?.get(episodeId);
+  if (typeof episodeNumber !== 'number') {
+    const { data, error } = await supabase
+      .from('episodes')
+      .select('episode_number')
+      .eq('id', episodeId)
+      .maybeSingle();
+    if (error || typeof data?.episode_number !== 'number') return { row, old };
+    episodeNumber = data.episode_number;
+    episodeNumberCache?.set(episodeId, episodeNumber);
+  }
 
   const attach = (value: Record<string, unknown> | null) => (
-    value ? { ...value, episode_number: data.episode_number as number } : value
+    value ? { ...value, episode_number: episodeNumber as number } : value
   );
   return { row: attach(row), old: attach(old) };
 }

@@ -110,7 +110,7 @@ export function AssigneeNamePicker({
                 <div className="text-xs text-text-secondary">쉼표로 여러 이름을 한 번에 추가할 수 있어요</div>
               </div>
               <button type="button" aria-label="닫기" onClick={closeModal} className="rounded-lg p-2 text-text-secondary hover:bg-bg-border/30 hover:text-text-primary">
-                <X size={17} />
+                <X size={18} />
               </button>
             </div>
             {selected.length > 0 && (

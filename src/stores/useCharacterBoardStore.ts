@@ -330,16 +330,38 @@ export const useCharacterBoardStore = create<CharacterBoardStore>((set, get) => 
         if (arr) arr.push(m.episodeNumber);
         else epByChar.set(m.characterId, [m.episodeNumber]);
       }
-      const assembled = sortCharacters(characters.map((c) => ({
-        ...c,
-        episodeIds: (epByChar.get(c.id) ?? []).slice().sort((a, b) => a - b),
-      })));
-      const sortedCostumes = sortCostumes(costumes);
+      // catch-up reload가 in-flight 낙관 쓰기를 되돌리지 않도록, realtime 머지와 동일하게
+      // pending 필드 보호를 거쳐 반영한다 (15초 TTL — applyCharacterUpdate/applyCostumeUpdate가 추적).
+      const prev = get();
+      const prevCharacterById = new Map(prev.characters.map((c) => [c.id, c]));
+      const prevCostumeById = new Map(prev.costumes.map((c) => [c.id, c]));
+      const assembled = sortCharacters(characters.map((c) => {
+        const withEpisodes = {
+          ...c,
+          episodeIds: (epByChar.get(c.id) ?? []).slice().sort((a, b) => a - b),
+        };
+        const merged = mergeIncomingWithPending(pendingCharacterFields, prevCharacterById.get(c.id), withEpisodes);
+        // characters.updated_at 과 별개로 매핑 테이블에서 재조립한 episodeIds 는 항상 최신 load 결과를 쓴다.
+        return { ...merged, episodeIds: withEpisodes.episodeIds };
+      }));
+      const sortedCostumes = sortCostumes(costumes.map((c) =>
+        mergeIncomingWithPending(pendingCostumeFields, prevCostumeById.get(c.id), c)));
+      const freshLinks = buildEpisodeLinks(mappings);
+      for (const [characterId, links] of freshLinks) {
+        for (let i = 0; i < links.length; i++) {
+          const link = links[i];
+          const patched = mergeEpisodeLinkPatchWithPending(prev.episodeLinks, characterId, link.episodeNumber, {
+            memo: link.memo,
+            costumeId: link.costumeId,
+          });
+          links[i] = { ...link, ...patched };
+        }
+      }
       set({
         characters: assembled,
         costumes: sortedCostumes,
         byCharacter: buildByCharacter(sortedCostumes),
-        episodeLinks: buildEpisodeLinks(mappings),
+        episodeLinks: freshLinks,
         loaded: true,
         loading: false,
         loadError: false,
@@ -356,15 +378,22 @@ export const useCharacterBoardStore = create<CharacterBoardStore>((set, get) => 
       get().receiveRealtime(payload);
     });
     const catchUp = () => {
-      if (get().loaded && !get().loading) void get().load({ silent: true });
+      // loadError 포함 — 위젯의 silent 초기 로드가 실패한 채 방치되지 않도록 재연결/온라인 복귀 시 재시도.
+      const s = get();
+      if (!s.loading && (s.loaded || s.loadError)) void s.load({ silent: true });
     };
     const stopStatus = window.electronAPI?.onSupabaseStatus?.((status) => {
+      if (status === 'SUBSCRIBED') catchUp();
+    });
+    // character_board 채널 자체의 재합류 — 이 채널만 단독으로 끊겼다 붙는 경우를 커버 (GAP-B).
+    const stopChannelStatus = window.electronAPI?.onCharacterBoardRealtimeStatus?.((status) => {
       if (status === 'SUBSCRIBED') catchUp();
     });
     window.addEventListener('online', catchUp);
     return () => {
       stopRows();
       stopStatus?.();
+      stopChannelStatus?.();
       window.removeEventListener('online', catchUp);
     };
   },
@@ -373,6 +402,10 @@ export const useCharacterBoardStore = create<CharacterBoardStore>((set, get) => 
     const state = get();
     if (!state.loaded && !state.loading) {
       void state.load(opts);
+    } else if (characterBoardRealtimeRefCount === 0 && state.loaded && !state.loading) {
+      // Realtime 미구독 구간(스포트라이트 선로드 등)에 쌓인 다른 사용자 변경 회수 —
+      // 이미 로드된 데이터로 구독을 새로 시작할 때 한 번 조용히 최신화한다.
+      void state.load({ silent: true });
     }
     if (characterBoardRealtimeRefCount === 0) {
       stopCharacterBoardRealtime = state.startRealtime();

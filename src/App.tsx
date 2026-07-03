@@ -120,7 +120,7 @@ function CharacterBoardAccessFallback({
   const description = loading
     ? '서버에서 접근 가능 여부를 확인하고 있어요.'
     : error
-      ? '네트워크나 Supabase 응답 문제일 수 있어요. 다시 확인할 수 있습니다.'
+      ? '인터넷 연결이 잠시 불안했을 수 있어요. 아래 버튼으로 다시 확인할 수 있어요.'
       : '관리자 설정에서 캐릭터 현황판 접근 권한을 받아야 열 수 있어요.';
 
   return (

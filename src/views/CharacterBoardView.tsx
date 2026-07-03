@@ -168,7 +168,7 @@ function StageRail<T extends string>({
               </span>
               <span
                 className="text-[11px] leading-tight text-center transition-colors"
-                style={{ color: isCur ? characterStageColor(m) : reached ? 'rgb(var(--color-text-secondary))' : 'rgb(var(--color-text-secondary) / 0.72)' }}
+                style={{ color: isCur ? characterStageColor(m) : 'rgb(var(--color-text-secondary))' }}
               >
                 {m.label}
               </span>
@@ -313,13 +313,11 @@ function TagChipSection({
 function FeaturedImageSlot({
   character,
   costume,
-  shownCostume,
   onView,
   onEnsureCostume,
 }: {
   character: Character;
   costume: CharacterCostume | null;
-  shownCostume: CharacterCostume | null;
   onView: (costumeId: string) => void;
   onEnsureCostume: () => Promise<CharacterCostume | null>;
 }) {
@@ -372,7 +370,11 @@ function FeaturedImageSlot({
 
   useEffect(() => {
     const onPaste = (event: ClipboardEvent) => {
-      if (uploading || contextMenu || fitEditorOpen || document.querySelector('[data-character-lightbox]')) return;
+      // 패널 레벨 오버레이(갤러리 우클릭 메뉴·썸네일 맞추기)는 로컬 상태로 알 수 없어 DOM 마커로 감지.
+      if (
+        uploading || contextMenu || fitEditorOpen
+        || document.querySelector('[data-character-lightbox], [data-character-fit-editor], [data-character-context-menu]')
+      ) return;
       const target = event.target;
       if (target instanceof HTMLElement && target.closest('input, textarea, [contenteditable="true"]')) return;
       const item = Array.from(event.clipboardData?.items ?? []).find((entry) => entry.type.startsWith('image/'));
@@ -385,9 +387,9 @@ function FeaturedImageSlot({
     return () => window.removeEventListener('paste', onPaste);
   }, [contextMenu, fitEditorOpen, uploadFileIfImage, uploading]);
 
-  const shownUrl = shownCostume?.featuredImageUrl ?? null;
-  const shownBackground = shownCostume?.imageBackground ?? DEFAULT_CHARACTER_IMAGE_BACKGROUND;
-  const shownFit = shownCostume?.imageFit;
+  const shownUrl = costume?.featuredImageUrl ?? null;
+  const shownBackground = costume?.imageBackground ?? DEFAULT_CHARACTER_IMAGE_BACKGROUND;
+  const shownFit = costume?.imageFit;
 
   return (
     <div className="w-[240px] shrink-0 flex flex-col gap-2">
@@ -414,11 +416,11 @@ function FeaturedImageSlot({
       >
         <CharacterImageFrame
           url={shownUrl}
-          alt={shownCostume?.name ?? character.name}
+          alt={costume?.name ?? character.name}
           background={shownBackground}
           fit={shownFit}
           className="h-full w-full rounded-xl"
-          onClick={shownUrl && shownCostume ? () => onView(shownCostume.id) : undefined}
+          onClick={shownUrl && costume ? () => onView(costume.id) : undefined}
           onContextMenu={(event) => {
             event.preventDefault();
             setContextMenu({ x: event.clientX, y: event.clientY });
@@ -461,20 +463,20 @@ function FeaturedImageSlot({
           x={contextMenu.x}
           y={contextMenu.y}
           character={character}
-          imageCostume={shownCostume}
-          fileCostume={shownCostume}
+          imageCostume={costume}
+          fileCostume={costume}
           onClose={() => setContextMenu(null)}
           onBackground={(costumeId, background) => { void updateCostumeField(costumeId, { imageBackground: background }); }}
           onEditFit={() => setFitEditorOpen(true)}
         />
       )}
-      {fitEditorOpen && shownUrl && shownCostume && (
+      {fitEditorOpen && shownUrl && costume && (
         <CharacterImageFitEditor
           url={shownUrl}
-          alt={shownCostume.name}
+          alt={costume.name}
           background={shownBackground}
-          fit={shownCostume.imageFit}
-          onCommit={(fit: CharacterImageFit) => updateCostumeField(shownCostume.id, { imageFit: fit })}
+          fit={costume.imageFit}
+          onCommit={(fit: CharacterImageFit) => updateCostumeField(costume.id, { imageFit: fit })}
           onClose={() => setFitEditorOpen(false)}
         />
       )}
@@ -490,7 +492,8 @@ function CostumeMemoInput({
 }: {
   draftKey: string;
   value: string;
-  onCommit: (next: string) => void;
+  /** false 를 resolve 하면 저장 실패 — 초안 캐시를 유지해 입력 텍스트를 보존한다 (GAP-B). */
+  onCommit: (next: string) => void | boolean | Promise<boolean | void>;
 }) {
   const [draft, setDraft] = useState(() => costumeMemoDraftCache.get(draftKey) ?? value);
   const focused = useRef(false);
@@ -508,17 +511,34 @@ function CostumeMemoInput({
   }, [draftKey, value]);
   useEffect(() => () => {
     const latestDraft = draftRef.current;
-    costumeMemoDraftCache.delete(draftKey);
     if (focused.current && latestDraft !== valueRef.current) {
-      onCommitRef.current(latestDraft);
+      const result = onCommitRef.current(latestDraft);
+      void Promise.resolve(result).then((ok) => {
+        if (ok !== false && costumeMemoDraftCache.get(draftKey) === latestDraft) {
+          costumeMemoDraftCache.delete(draftKey);
+        }
+      });
+      return;
     }
+    // 이전 커밋 실패로 남겨둔 초안은 유지 — 이미 저장된 값과 같은 캐시만 정리.
+    const cached = costumeMemoDraftCache.get(draftKey);
+    if (cached === undefined || cached === valueRef.current) costumeMemoDraftCache.delete(draftKey);
   }, [draftKey]);
 
   const commit = useCallback(() => {
     focused.current = false;
-    costumeMemoDraftCache.delete(draftKey);
     const next = draftRef.current;
-    if (next !== valueRef.current) onCommitRef.current(next);
+    if (next === valueRef.current) {
+      costumeMemoDraftCache.delete(draftKey);
+      return;
+    }
+    const result = onCommitRef.current(next);
+    void Promise.resolve(result).then((ok) => {
+      // 실패(false)나 더 최신 초안이 있으면 캐시를 유지 — 다시 포커스 아웃하면 재시도된다.
+      if (ok !== false && costumeMemoDraftCache.get(draftKey) === next) {
+        costumeMemoDraftCache.delete(draftKey);
+      }
+    });
   }, [draftKey]);
 
   const updateDraft = (next: string) => {
@@ -533,8 +553,8 @@ function CostumeMemoInput({
       onChange={(e) => updateDraft(e.target.value)}
       onFocus={() => { focused.current = true; }}
       onBlur={commit}
-      placeholder="이 디자인 메모…"
-      aria-label="디자인 메모"
+      placeholder="이 복장 메모…"
+      aria-label="복장 메모"
       rows={3}
       className="w-full bg-bg-border/20 border border-bg-border rounded-lg px-2.5 py-2 text-xs text-text-primary outline-none focus:border-accent/50 resize-none leading-relaxed"
     />
@@ -911,7 +931,7 @@ function CostumeThumbCard({
       </div>
       <div className="flex items-center justify-between gap-1 px-2 py-1.5 bg-bg-card">
         <span className={cn('text-xs truncate', selected ? 'text-text-primary' : 'text-text-secondary')}>{costume.name}</span>
-        <span className="text-[10px] text-text-secondary shrink-0">v{costume.versionNo}</span>
+        <span className="text-[11px] text-text-secondary shrink-0">v{costume.versionNo}</span>
       </div>
       <button
         type="button"
@@ -995,7 +1015,6 @@ function CharacterDetailPanel({
   useEffect(() => { setEditingName(false); setNameDraft(character.name); }, [character.id, character.name]);
 
   const activeCostume = costumes.find((c) => c.id === activeCostumeId) ?? null;
-  const shownCostume = activeCostume;
   const imageEntries: CharacterImageLightboxEntry[] = costumes
     .filter((c) => !!c.featuredImageUrl)
     .map((c) => ({
@@ -1173,7 +1192,6 @@ function CharacterDetailPanel({
             <FeaturedImageSlot
               character={character}
               costume={activeCostume}
-              shownCostume={shownCostume}
               onView={(costumeId) => setLightboxCostumeId(costumeId)}
               onEnsureCostume={ensureCostume}
             />
@@ -1256,7 +1274,7 @@ function CharacterDetailPanel({
                 <button
                   type="button"
                   onClick={handleAddCostume}
-                  aria-label="디자인 추가"
+                  aria-label="복장 추가"
                   className="w-[104px] shrink-0 aspect-[3/4] flex flex-col items-center justify-center gap-1.5 rounded-lg border border-dashed border-bg-border text-text-secondary hover:text-accent hover:border-accent/50 transition-colors cursor-pointer"
                 >
                   <Plus size={20} />
@@ -1323,19 +1341,31 @@ function CharacterDetailPanel({
 function CharacterDetailModal({
   initialCharacterId,
   archivedMode = false,
+  filteredIds,
   onClose,
 }: {
   initialCharacterId: string;
   archivedMode?: boolean;
+  /** 그리드의 검색·태그 필터 결과 — 있으면 좌측 목록이 같은 컨텍스트를 유지한다 (UX-6). */
+  filteredIds?: string[];
   onClose: () => void;
 }) {
   const characters = useCharacterBoardStore((s) => s.characters);
   const byCharacter = useCharacterBoardStore((s) => s.byCharacter);
 
-  const visibleCharacters = useMemo(
+  const allVisibleCharacters = useMemo(
     () => characters.filter((c) => (archivedMode ? c.status === 'archived' : c.status !== 'archived')),
     [archivedMode, characters],
   );
+  const [showAllList, setShowAllList] = useState(false);
+  const hasGridFilter = !!filteredIds && filteredIds.length > 0;
+  const visibleCharacters = useMemo(() => {
+    if (!hasGridFilter || showAllList) return allVisibleCharacters;
+    const order = new Map(filteredIds!.map((id, i) => [id, i]));
+    return allVisibleCharacters
+      .filter((c) => order.has(c.id))
+      .sort((a, b) => (order.get(a.id) ?? 0) - (order.get(b.id) ?? 0));
+  }, [allVisibleCharacters, filteredIds, hasGridFilter, showAllList]);
   const [selectedId, setSelectedId] = useState(initialCharacterId);
   const [listQuery, setListQuery] = useState('');
   const dialogRef = useRef<HTMLDivElement>(null);
@@ -1354,9 +1384,14 @@ function CharacterDetailModal({
   const selected = visibleCharacters.find((c) => c.id === selectedId) ?? null;
   useEffect(() => {
     if (selected) return;
+    // 선택 캐릭터가 그리드 필터 밖에 있으면(딥링크 진입 등) 목록을 전체 보기로 전환해 유지한다.
+    if (hasGridFilter && !showAllList && allVisibleCharacters.some((c) => c.id === selectedId)) {
+      setShowAllList(true);
+      return;
+    }
     if (visibleCharacters.length > 0) setSelectedId(visibleCharacters[0].id);
     else onClose();
-  }, [selected, visibleCharacters, onClose]);
+  }, [selected, selectedId, visibleCharacters, allVisibleCharacters, hasGridFilter, showAllList, onClose]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -1383,8 +1418,8 @@ function CharacterDetailModal({
         className="flex h-[88vh] max-h-full max-w-full items-stretch gap-3 overflow-x-auto overflow-y-hidden outline-none"
       >
         <div
-          className="relative flex h-full w-[min(1024px,calc(100vw-2rem))] shrink-0 overflow-hidden border border-bg-border bg-bg-card"
-          style={{ borderRadius: 18, boxShadow: '0 40px 80px rgba(0,0,0,0.5)' }}
+          className="relative flex h-full w-[min(1024px,calc(100vw-2rem))] shrink-0 overflow-hidden rounded-modal border border-bg-border bg-bg-card"
+          style={{ boxShadow: '0 40px 80px rgba(0,0,0,0.5)' }}
         >
           {/* 배경 글로우 */}
           <div aria-hidden className="absolute inset-0 overflow-hidden pointer-events-none z-0">
@@ -1396,7 +1431,7 @@ function CharacterDetailModal({
           <aside className="relative z-[1] hidden w-[200px] shrink-0 border-r border-bg-border/60 lg:flex flex-col min-h-0">
             <div className="px-3 py-3 border-b border-bg-border/40 shrink-0">
               <button type="button" onClick={onClose} className="flex items-center gap-1.5 text-sm text-text-secondary hover:text-text-primary cursor-pointer">
-                <X size={15} /> 닫기
+                <X size={18} /> 닫기
               </button>
               <div className="relative mt-3">
                 <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-text-secondary" />
@@ -1407,6 +1442,20 @@ function CharacterDetailModal({
                   className="w-full rounded-lg border border-bg-border bg-bg-border/15 py-1.5 pl-7 pr-2 text-xs text-text-primary outline-none placeholder:text-text-secondary focus:border-accent/50"
                 />
               </div>
+              {hasGridFilter && (
+                <div className="mt-2 flex items-center justify-between gap-2 text-[11px]">
+                  <span className="text-text-secondary truncate">
+                    {showAllList ? `전체 ${allVisibleCharacters.length}명` : `필터 결과 ${visibleCharacters.length}명`}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => setShowAllList((v) => !v)}
+                    className="shrink-0 text-accent hover:underline cursor-pointer whitespace-nowrap"
+                  >
+                    {showAllList ? '필터 결과만' : '전체 보기'}
+                  </button>
+                </div>
+              )}
             </div>
             <div className="flex-1 min-h-0 overflow-y-auto py-1.5">
               {filteredListCharacters.length === 0 ? (
@@ -1442,10 +1491,10 @@ function CharacterDetailModal({
             commentCount={commentCount}
             onCountChange={setCommentCount}
             heightClass="h-full"
-            className="rounded-[18px]"
+            className="rounded-modal"
             headerRight={
               <button type="button" onClick={() => setCommentOpen(false)} aria-label="댓글 닫기" title="댓글 닫기" className="text-text-secondary hover:text-text-primary cursor-pointer">
-                <X size={15} />
+                <X size={18} />
               </button>
             }
           />
@@ -1457,11 +1506,18 @@ function CharacterDetailModal({
 
 function AddCharacterModal({ onClose }: { onClose: () => void }) {
   const addCharacter = useCharacterBoardStore((s) => s.addCharacter);
+  const characters = useCharacterBoardStore((s) => s.characters);
   const [name, setName] = useState('');
   const [memo, setMemo] = useState('');
   const [saving, setSaving] = useState(false);
   const dialogRef = useRef<HTMLDivElement>(null);
   const modalFocus = useModalFocus(dialogRef, { autoFocus: false });
+  // 동시/중복 생성으로 같은 이름의 카드가 2장 생기는 사고 예방 — 경고만 하고 추가는 막지 않는다 (GAP-D).
+  const duplicateName = useMemo(() => {
+    const normalized = name.trim().toLowerCase();
+    if (!normalized) return null;
+    return characters.find((c) => c.name.trim().toLowerCase() === normalized) ?? null;
+  }, [characters, name]);
 
   const submit = async () => {
     if (!name.trim() || saving) return;
@@ -1496,6 +1552,13 @@ function AddCharacterModal({ onClose }: { onClose: () => void }) {
         <div className="flex flex-col gap-1.5">
           <span className="text-xs text-text-secondary">이름</span>
           <input autoFocus value={name} onChange={(e) => setName(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') submit(); }} placeholder="캐릭터 이름" className="bg-transparent border border-bg-border rounded-md px-3 py-2 text-text-primary outline-none focus:border-accent/50" />
+          {duplicateName && (
+            <span className="text-[11px]" style={{ color: 'rgb(var(--char-stage-feedback))' }}>
+              {duplicateName.status === 'archived'
+                ? '보관된 캐릭터 중에 같은 이름이 있어요 — 복원해서 쓸 수도 있어요.'
+                : '같은 이름의 캐릭터가 이미 있어요 — 그래도 추가할 수 있어요.'}
+            </span>
+          )}
         </div>
         <div className="flex flex-col gap-1.5">
           <span className="text-xs text-text-secondary">메모 (선택)</span>
@@ -1714,6 +1777,7 @@ function CharacterGrid({ onAdd, pendingOpenId, onConsumeOpen }: { onAdd: () => v
           key={`${detailCharacter.id}:${detailRequest.nonce}`}
           initialCharacterId={detailCharacter.id}
           archivedMode={showArchived}
+          filteredIds={query.trim() || activeTags.length > 0 ? filtered.map((c) => c.id) : undefined}
           onClose={() => setDetailRequest(null)}
         />
       )}
@@ -1743,9 +1807,8 @@ export function CharacterBoardView() {
     setPendingCharacterBoardRequest(null);
   }, [loaded, pendingCharacterBoardRequest, setPendingCharacterBoardRequest]);
 
-  useEffect(() => () => {
-    setPendingCharacterBoardRequest(null);
-  }, [setPendingCharacterBoardRequest]);
+  // 미소비 딥링크 요청 청소는 useAppStore.setView(다른 뷰로 이동 시)와 goBackNavigation이 담당 —
+  //   언마운트 cleanup 방식은 StrictMode 이중 마운트에서 정상 요청까지 지워 사용하지 않는다.
 
   return (
     <div className="h-full overflow-y-auto p-6">

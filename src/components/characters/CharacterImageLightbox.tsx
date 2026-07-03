@@ -122,6 +122,8 @@ export function CharacterImageLightbox({
           </div>
         </div>
 
+        {/* 원본 확인 표면(R2): 썸네일 구도(fit)를 의도적으로 전달하지 않는다 — 크게보기는 원본 그대로.
+            bg-black 암실 배경은 라이트 모드에서도 의도된 고정값(사진 뷰어 관례). */}
         <div className="relative min-h-0 flex-1 rounded-xl border border-white/10 bg-black/20">
           <CharacterImageFrame
             url={current.url}
@@ -199,16 +201,17 @@ export function CharacterImageLightbox({
                     title={`${entry.costumeName} · v${entry.versionNo}`}
                     className={`flex w-[82px] shrink-0 flex-col overflow-hidden rounded-lg border text-left transition-colors active:scale-[0.98] ${
                       selected
-                        ? 'border-accent bg-accent/15 shadow-[0_0_0_1px_rgba(108,92,231,0.45)]'
+                        ? 'border-accent bg-accent/15 shadow-[0_0_0_1px_rgb(var(--color-accent)/0.45)]'
                         : 'border-white/10 bg-white/[0.04] hover:border-white/25 hover:bg-white/[0.07]'
                     }`}
                   >
+                    {/* 축소 요약 표면(R2): fit 적용 — fit 저작 비율(3:4)과 동일한 프레임이어야 구도가 재현된다. */}
                     <CharacterImageFrame
                       url={entry.url}
                       alt={entry.name}
                       background={entry.background}
                       fit={entry.fit}
-                      className="h-[82px] w-full"
+                      className="aspect-[3/4] w-full"
                     />
                     <span className="min-w-0 px-2 py-1.5">
                       <span className="block truncate text-[11px] font-medium text-white/80">{entry.costumeName}</span>
