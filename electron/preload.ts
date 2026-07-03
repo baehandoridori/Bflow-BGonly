@@ -497,6 +497,14 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.on('widget:navigate-main', handler);
     return () => ipcRenderer.removeListener('widget:navigate-main', handler);
   },
+  // 위젯 팝업 → 본체 캘린더(일정) 날짜 이동 (widget:navigate-main 패턴 미러링)
+  widgetNavigateToDate: (payload: { date: string; todoId: string }) =>
+    ipcRenderer.invoke('widget:navigate-to-date', payload),
+  onWidgetNavigateToDate: (callback: (payload: { date: string; todoId: string }) => void) => {
+    const handler = (_event: unknown, data: { date: string; todoId: string }) => callback(data);
+    ipcRenderer.on('widget:navigate-to-date', handler);
+    return () => ipcRenderer.removeListener('widget:navigate-to-date', handler);
+  },
   widgetGetSize: (widgetId: string) =>
     ipcRenderer.invoke('widget:get-size', widgetId) as Promise<{ x: number; y: number; width: number; height: number } | null>,
   widgetCaptureBehind: (widgetId: string) =>

@@ -473,6 +473,25 @@ export function MyTasksWidget() {
     setSelectedSceneKey(null);
   };
 
+  // 개인 할일 → 본체 캘린더(일정)의 해당 날짜로 이동 — 대시보드/팝업 분기 (navigateToMainScene 패턴 미러링).
+  // 대시보드: 같은 창이므로 뷰 전환 + 이벤트 디스패치를 직접 수행.
+  // 팝업: 별도 창이라 setView·ScheduleView 가 없으므로 본체 창에 점프 신호를 보낸다(본체 App 이 동일 경로로 변환).
+  const navigateToCalendar = (todo: PersonalTodo) => {
+    if (isPopup) {
+      if (todo.startDate) {
+        window.electronAPI?.widgetNavigateToDate?.({ date: todo.startDate, todoId: todo.id });
+      }
+      return;
+    }
+    setView('schedule');
+    if (todo.startDate) {
+      // ScheduleView 마운트 후 이벤트 디스패치 (300ms 대기)
+      setTimeout(() => {
+        window.dispatchEvent(new CustomEvent('bflow:navigate-to-date', { detail: { date: todo.startDate, todoId: todo.id } }));
+      }, 300);
+    }
+  };
+
   const navigateToCharacterTask = (task: CharacterTaskItem) => {
     if (isPopup) return;
     setPendingCharacterBoardRequest({ characterId: task.characterId });
@@ -822,6 +841,7 @@ export function MyTasksWidget() {
           <TodoDetailModal
             todo={selectedTodo}
             onUpdate={updatePersonalTodo}
+            onNavigateToCalendar={navigateToCalendar}
             onClose={() => setSelectedTodoId(null)}
           />
         )}

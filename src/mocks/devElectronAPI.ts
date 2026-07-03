@@ -587,6 +587,8 @@ export function installDevElectronAPI(): void {
     onFeedbackJumpToScene: noop,
     widgetNavigateMain: async () => {},
     onWidgetNavigateMain: noop,
+    widgetNavigateToDate: async () => {},
+    onWidgetNavigateToDate: noop,
 
     imageSave: async () => '/dev/mock-image.png',
     imageDelete: async () => true,
