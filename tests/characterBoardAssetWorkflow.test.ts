@@ -29,6 +29,7 @@ const characterStageConstants = readFileSync('src/constants/characterStages.ts',
 const characterLayerConstants = readFileSync('src/constants/characterLayers.ts', 'utf8');
 const themeSource = readFileSync('src/themes.ts', 'utf8');
 const indexHtml = readFileSync('index.html', 'utf8');
+const sidebarSource = readFileSync('src/components/layout/Sidebar.tsx', 'utf8');
 const characterFolderService = readFileSync('src/services/characterFolderService.ts', 'utf8');
 const characterFolderRootSection = readFileSync('src/components/settings/CharacterFolderRootSection.tsx', 'utf8');
 const settingsView = readFileSync('src/views/SettingsView.tsx', 'utf8');
@@ -320,7 +321,7 @@ test('character board can create and link a work folder from the configured team
 
 test('character card right click opens the compact work menu instead of opening a folder immediately', () => {
   assert.match(characterBoard, /const \[cardMenu, setCardMenu\]/);
-  assert.match(characterBoard, /setCardMenu\(\{ characterId: c\.id, x: event\.clientX, y: event\.clientY \}\)/);
+  assert.match(characterBoard, /setCardMenu\(\{ characterId, x: event\.clientX, y: event\.clientY \}\)/);
   assert.doesNotMatch(characterBoard, /if \(c\.workFolderPath\) void openStoredPath\(c\.workFolderPath, '작업 폴더'\)/);
   assert.match(characterBoard, /variant="card"/);
   assert.match(characterBoard, /imageCostume=\{cardMenuFeatured\}/);
@@ -406,6 +407,56 @@ test('my tasks widget includes assigned character design and rigging work', () =
   assert.match(myTasksWidget, /renderCharacterTasks\(pendingCharacterTasks\)/);
   assert.match(myTasksWidget, /renderCharacterTasks\(doneCharacterTasks\)/);
   assert.match(characterTaskRow, /캐릭터 현황판에서 열기/);
+});
+
+test('character board cards, rows, and costume thumbs are memoized with stable callbacks', () => {
+  // CQ-6 2단계: memo 래핑 (store 의 rebuildByCharacter 구조적 공유가 전제).
+  assert.match(characterBoard, /const CharacterCard = memo\(function CharacterCard\(/);
+  assert.match(characterBoard, /const CharacterListRow = memo\(function CharacterListRow\(/);
+  assert.match(characterBoard, /const CostumeThumbCard = memo\(function CostumeThumbCard\(/);
+  // memo 실효 조건: map 안 항목별 인라인 클로저 대신 id 인자 안정 콜백 + 빈 배열 안정 참조.
+  assert.match(characterBoard, /const EMPTY_COSTUMES: CharacterCostume\[\] = \[\]/);
+  assert.match(characterBoard, /costumes=\{byCharacter\.get\(c\.id\) \?\? EMPTY_COSTUMES\}/);
+  assert.doesNotMatch(characterBoard, /byCharacter\.get\(c\.id\) \?\? \[\]\}/);
+  assert.match(characterBoard, /onOpen=\{openCharacterDetail\}/);
+  assert.match(characterBoard, /onContextMenu=\{openCardContextMenu\}/);
+  assert.match(characterBoard, /onSelect=\{setSelectedId\}/);
+  assert.match(characterBoard, /onSelect=\{setActiveCostumeId\}/);
+  assert.match(characterBoard, /onDelete=\{deleteCostume\}/);
+  assert.match(characterBoard, /onImageContextMenu=\{openCostumeImageMenu\}/);
+});
+
+test('character board motion sticks to transform/opacity, 200ms ease-out, and reduce guards', () => {
+  // MO-11/F-2: transition-all·width 트랜지션 금지 — 실제 바뀌는 속성만 애니메이션.
+  assert.doesNotMatch(characterBoard, /transition-all/);
+  assert.doesNotMatch(characterBoard, /transition-\[width\]/);
+  assert.match(characterBoard, /transition-colors duration-200 ease-out/);
+  assert.match(characterBoard, /transition-\[background-color,border-color,box-shadow\] duration-200 ease-out/);
+  // 목록 행 진행바 — width 대신 transform(scaleX + origin-left) 채움.
+  assert.match(characterBoard, /origin-left transition-transform duration-200 ease-out/);
+  assert.match(characterBoard, /scaleX\(\$\{ratio\}\)/);
+  // 상세 모달·라이트박스 진입 모션 + motion-reduce 가드. exit 모션 없음.
+  assert.match(indexCss, /@keyframes char-overlay-in/);
+  assert.match(indexCss, /@keyframes char-modal-in/);
+  assert.match(characterBoard, /animate-\[char-overlay-in_200ms_ease-out\] motion-reduce:animate-none/);
+  assert.match(characterBoard, /animate-\[char-modal-in_200ms_ease-out\] motion-reduce:animate-none/);
+  assert.match(characterImageLightbox, /animate-\[char-overlay-in_200ms_ease-out\] motion-reduce:animate-none/);
+  assert.match(characterImageLightbox, /animate-\[char-modal-in_200ms_ease-out\] motion-reduce:animate-none/);
+});
+
+test('sidebar keeps the character menu reachable for retry when the access lookup fails', () => {
+  // GAP-H/I-A5: error 시 숨김 대신 흐림 + 경고 점 + floating 툴팁 + 클릭=retry. 정상 차단·로딩은 기존대로 숨김.
+  assert.match(sidebarSource, /useCharacterBoardAccessState/);
+  assert.doesNotMatch(sidebarSource, /useCharacterBoardAccess\(\)/);
+  assert.match(sidebarSource, /characterAccess\.error && !characterAccess\.allowed/);
+  assert.match(sidebarSource, /item\.id !== 'character-board' \|\| characterAccess\.allowed \|\| characterAccessFailed/);
+  assert.match(sidebarSource, /characterAccess\.retry\(\)/);
+  assert.match(sidebarSource, /CharacterAccessRetryTip/);
+  assert.match(sidebarSource, /권한 정보를 확인하지 못했어요 — 클릭해서 다시 확인/);
+  // native title 금지 — 실패 상태에서는 title 을 비우고 floating 툴팁만 쓴다.
+  assert.match(sidebarSource, /title=\{isAccessRetryItem \|\| isVisuallyExpanded \? undefined : item\.label\}/);
+  // 경고 점 색은 하드코딩 hex 대신 캐릭터 경고 토큰.
+  assert.match(sidebarSource, /rgb\(var\(--char-stage-feedback\)\)/);
 });
 
 test('character board safety and accessibility interactions use app-native guards', () => {

@@ -10,7 +10,7 @@
  * 접근 권한은 사이드바에서 게이팅 (useCharacterBoardAccess).
  */
 
-import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent, type ReactNode } from 'react';
+import { memo, useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent, type ReactNode } from 'react';
 import { toast } from 'sonner';
 import { Archive, Film, Plus, X, Image as ImageIcon, Trash2, Pencil, Search, User, Check, Upload, MessageSquare, Copy, Loader2, RotateCcw } from 'lucide-react';
 import { useCharacterBoardStore } from '@/stores/useCharacterBoardStore';
@@ -62,6 +62,8 @@ function claimReactKey(event: ReactKeyboardEvent<HTMLElement>) {
 const STRUCTURE_TAG_PALETTE = ['얼굴각도 컨트롤러', '책가방 세트', '뒷모습', '앞모습 없음', '측면'] as const;
 const ASSET_TAG_PALETTE = ['담배', '핸드폰', '가방', '안경', '모자'] as const;
 const costumeMemoDraftCache = new Map<string, string>();
+// 복장 없는 캐릭터에 매 렌더 새 [] 를 만들면 memo 비교가 항상 실패한다 — 안정 참조 하나를 공유 (CQ-6).
+const EMPTY_COSTUMES: CharacterCostume[] = [];
 
 /** 태그별 고유색 토글 칩. on 이면 색 채움(틴트), off 면 회색 + 색 점. */
 function TagPill({
@@ -79,7 +81,7 @@ function TagPill({
       type="button"
       onClick={onClick}
       aria-pressed={on}
-      className="px-2.5 py-1 rounded-full text-xs border flex items-center gap-1.5 transition-all duration-150 cursor-pointer"
+      className="px-2.5 py-1 rounded-full text-xs border flex items-center gap-1.5 transition-colors duration-200 ease-out cursor-pointer"
       style={
         on
           ? { background: `${c}26`, borderColor: `${c}99`, color: c }
@@ -156,7 +158,7 @@ function StageRail<T extends string>({
               )}
               {/* 노드 */}
               <span
-                className="relative z-[1] w-[18px] h-[18px] rounded-full flex items-center justify-center transition-all duration-200"
+                className="relative z-[1] w-[18px] h-[18px] rounded-full flex items-center justify-center transition-[background-color,border-color,box-shadow] duration-200 ease-out"
                 style={{
                   background: reached ? characterStageColor(m) : 'rgb(var(--color-bg-card))',
                   border: `2px solid ${reached ? characterStageColor(m) : 'rgb(var(--color-bg-border))'}`,
@@ -180,7 +182,9 @@ function StageRail<T extends string>({
   );
 }
 
-function CharacterCard({
+// React.memo (CQ-6): store 가 미변경 캐릭터의 character/costumes 참조를 유지하므로(rebuildByCharacter 구조적 공유)
+//   콜백을 id 인자 안정 참조로 받으면 복장 하나 변경 시 다른 카드가 리렌더되지 않는다.
+const CharacterCard = memo(function CharacterCard({
   character,
   costumes,
   onOpen,
@@ -188,8 +192,8 @@ function CharacterCard({
 }: {
   character: Character;
   costumes: CharacterCostume[];
-  onOpen: () => void;
-  onContextMenu: (event: ReactMouseEvent<HTMLButtonElement>) => void;
+  onOpen: (characterId: string) => void;
+  onContextMenu: (characterId: string, event: ReactMouseEvent<HTMLButtonElement>) => void;
 }) {
   const featured = costumes.find((c) => c.featuredImageUrl) ?? null;
   const designDone = costumes.filter((c) => c.designStage === 'done').length;
@@ -198,8 +202,8 @@ function CharacterCard({
   return (
     <button
       type="button"
-      onClick={onOpen}
-      onContextMenu={onContextMenu}
+      onClick={() => onOpen(character.id)}
+      onContextMenu={(event) => onContextMenu(character.id, event)}
       className="text-left bg-bg-card border border-bg-border rounded-xl overflow-hidden hover:border-accent/50 transition-colors duration-200 flex flex-col cursor-pointer"
     >
       <div className="aspect-[3/4] bg-bg-border/30 flex items-center justify-center overflow-hidden">
@@ -252,7 +256,7 @@ function CharacterCard({
       </div>
     </button>
   );
-}
+});
 
 /** 미리 정의된 토글 칩(태그별 고유색) + 자유 추가. */
 function TagChipSection({
@@ -840,7 +844,8 @@ function riggingRatio(costumes: CharacterCostume[]): number {
   return costumes.filter((c) => c.riggingStage === 'done').length / costumes.length;
 }
 
-function CharacterListRow({
+// React.memo (CQ-6): onSelect 는 setState 디스패처 같은 안정 참조를 그대로 받는다 — 행 단위 인라인 클로저 금지.
+const CharacterListRow = memo(function CharacterListRow({
   character,
   costumes,
   selected,
@@ -849,14 +854,14 @@ function CharacterListRow({
   character: Character;
   costumes: CharacterCostume[];
   selected: boolean;
-  onSelect: () => void;
+  onSelect: (characterId: string) => void;
 }) {
   const thumbCostume = costumes.find((c) => c.featuredImageUrl) ?? null;
   const ratio = riggingRatio(costumes);
   return (
     <button
       type="button"
-      onClick={onSelect}
+      onClick={() => onSelect(character.id)}
       aria-pressed={selected}
       className={cn(
         'w-full flex items-center gap-2.5 px-3 py-2 text-left border-l-2 transition-colors cursor-pointer',
@@ -879,14 +884,16 @@ function CharacterListRow({
       <div className="flex flex-col gap-1 min-w-0 flex-1">
         <div className={cn('text-sm truncate', selected ? 'text-text-primary font-medium' : 'text-text-secondary')}>{character.name}</div>
         <div className="h-1 rounded-full bg-bg-border/60 overflow-hidden" title={`리깅 완료 ${Math.round(ratio * 100)}%`} aria-label={`리깅 완료 ${Math.round(ratio * 100)}%`}>
-          <div className="h-full rounded-full transition-[width] duration-300" style={{ width: `${Math.round(ratio * 100)}%`, backgroundColor: characterStageColor(RIGGING_STAGE_META.done) }} />
+          {/* width 트랜지션은 레이아웃 속성 — transform(scaleX) 채움으로 대체, 둥근 모양은 컨테이너 overflow-hidden 이 유지 (MO-11). */}
+          <div className="h-full w-full rounded-full origin-left transition-transform duration-200 ease-out" style={{ transform: `scaleX(${ratio})`, backgroundColor: characterStageColor(RIGGING_STAGE_META.done) }} />
         </div>
       </div>
     </button>
   );
-}
+});
 
-function CostumeThumbCard({
+// React.memo (CQ-6): 갤러리 map 의 복장별 인라인 클로저 대신 costumeId 인자 안정 콜백을 받는다.
+const CostumeThumbCard = memo(function CostumeThumbCard({
   costume,
   selected,
   onSelect,
@@ -895,16 +902,16 @@ function CostumeThumbCard({
 }: {
   costume: CharacterCostume;
   selected: boolean;
-  onSelect: () => void;
-  onDelete: () => void | Promise<void>;
-  onImageContextMenu: (event: ReactMouseEvent<HTMLDivElement>) => void;
+  onSelect: (costumeId: string) => void;
+  onDelete: (costumeId: string) => void | Promise<void>;
+  onImageContextMenu: (costumeId: string, event: ReactMouseEvent<HTMLDivElement>) => void;
 }) {
   return (
     <div
       role="button"
       tabIndex={0}
-      onClick={onSelect}
-      onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onSelect(); } }}
+      onClick={() => onSelect(costume.id)}
+      onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onSelect(costume.id); } }}
       aria-pressed={selected}
       className={cn(
         'group relative w-[104px] shrink-0 flex flex-col rounded-lg overflow-hidden border transition-colors cursor-pointer',
@@ -922,7 +929,7 @@ function CostumeThumbCard({
             onContextMenu={(event) => {
               event.preventDefault();
               event.stopPropagation();
-              onImageContextMenu(event);
+              onImageContextMenu(costume.id, event);
             }}
           />
         ) : (
@@ -943,7 +950,7 @@ function CostumeThumbCard({
             confirmLabel: '삭제',
             tone: 'danger',
           });
-          if (ok) await onDelete();
+          if (ok) await onDelete(costume.id);
         }}
         className="absolute top-1 right-1 rounded-md bg-black/40 p-1.5 text-white/80 opacity-0 transition-opacity hover:text-red-400 focus-visible:opacity-100 group-hover:opacity-100 group-focus-within:opacity-100 cursor-pointer"
       >
@@ -951,7 +958,7 @@ function CostumeThumbCard({
       </button>
     </div>
   );
-}
+});
 
 /** 우측 상세 패널. */
 function CharacterDetailPanel({
@@ -1079,6 +1086,12 @@ function CharacterDetailPanel({
     const created = await addCostume(character.id, nextCostumeName(costumes));
     if (created) setActiveCostumeId(created.id);
   };
+
+  // CostumeThumbCard(memo) 용 안정 콜백 — 갤러리 map 안 인라인 클로저는 memo 를 무력화한다 (CQ-6).
+  const openCostumeImageMenu = useCallback((costumeId: string, event: ReactMouseEvent<HTMLDivElement>) => {
+    setActiveCostumeId(costumeId);
+    setImageMenu({ costumeId, x: event.clientX, y: event.clientY });
+  }, []);
 
   const handleArchiveCharacter = async () => {
     const ok = await ConfirmDialog.show({
@@ -1263,12 +1276,9 @@ function CharacterDetailPanel({
                     key={c.id}
                     costume={c}
                     selected={activeCostumeId === c.id}
-                    onSelect={() => setActiveCostumeId(c.id)}
-                    onDelete={() => deleteCostume(c.id)}
-                    onImageContextMenu={(event) => {
-                      setActiveCostumeId(c.id);
-                      setImageMenu({ costumeId: c.id, x: event.clientX, y: event.clientY });
-                    }}
+                    onSelect={setActiveCostumeId}
+                    onDelete={deleteCostume}
+                    onImageContextMenu={openCostumeImageMenu}
                   />
                 ))}
                 <button
@@ -1405,7 +1415,8 @@ function CharacterDetailModal({
 
   return (
     <div
-      className={`fixed inset-0 ${CHARACTER_LAYER_CLASS.modal} flex items-center justify-center bg-overlay/60 backdrop-blur-sm p-4`}
+      /* 진입 모션(MO-11): 오버레이 fade + 내용 박스 미세 scale. exit 모션 없음(언마운트 즉시 — 과잉 금지). */
+      className={`fixed inset-0 ${CHARACTER_LAYER_CLASS.modal} flex items-center justify-center bg-overlay/60 backdrop-blur-sm p-4 animate-[char-overlay-in_200ms_ease-out] motion-reduce:animate-none`}
       onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}
     >
       <div
@@ -1415,7 +1426,7 @@ function CharacterDetailModal({
         aria-label={archivedMode ? '보관된 캐릭터 상세' : '캐릭터 상세'}
         tabIndex={-1}
         onKeyDown={modalFocus.onKeyDown}
-        className="flex h-[88vh] max-h-full max-w-full items-stretch gap-3 overflow-x-auto overflow-y-hidden outline-none"
+        className="flex h-[88vh] max-h-full max-w-full items-stretch gap-3 overflow-x-auto overflow-y-hidden outline-none animate-[char-modal-in_200ms_ease-out] motion-reduce:animate-none"
       >
         <div
           className="relative flex h-full w-[min(1024px,calc(100vw-2rem))] shrink-0 overflow-hidden rounded-modal border border-bg-border bg-bg-card"
@@ -1461,7 +1472,7 @@ function CharacterDetailModal({
               {filteredListCharacters.length === 0 ? (
                 <div className="px-3 py-8 text-center text-xs text-text-secondary">검색 결과가 없어요.</div>
               ) : filteredListCharacters.map((c) => (
-                <CharacterListRow key={c.id} character={c} costumes={byCharacter.get(c.id) ?? []} selected={c.id === selectedId} onSelect={() => setSelectedId(c.id)} />
+                <CharacterListRow key={c.id} character={c} costumes={byCharacter.get(c.id) ?? EMPTY_COSTUMES} selected={c.id === selectedId} onSelect={setSelectedId} />
               ))}
             </div>
           </aside>
@@ -1647,6 +1658,15 @@ function CharacterGrid({ onAdd, pendingOpenId, onConsumeOpen }: { onAdd: () => v
     setActiveTags((prev) => (prev.includes(tag) ? prev.filter((t) => t !== tag) : [...prev, tag]));
   }
 
+  // CharacterCard(memo) 용 안정 콜백 — 그리드 map 안 캐릭터별 인라인 클로저는 memo 를 무력화한다 (CQ-6).
+  const openCharacterDetail = useCallback((characterId: string) => {
+    setDetailRequest((prev) => ({ id: characterId, nonce: (prev?.nonce ?? 0) + 1 }));
+  }, []);
+  const openCardContextMenu = useCallback((characterId: string, event: ReactMouseEvent<HTMLButtonElement>) => {
+    event.preventDefault();
+    setCardMenu({ characterId, x: event.clientX, y: event.clientY });
+  }, []);
+
   if (!loaded) {
     if (loadError) {
       return (
@@ -1749,12 +1769,9 @@ function CharacterGrid({ onAdd, pendingOpenId, onConsumeOpen }: { onAdd: () => v
             <CharacterCard
               key={c.id}
               character={c}
-              costumes={byCharacter.get(c.id) ?? []}
-              onOpen={() => setDetailRequest((prev) => ({ id: c.id, nonce: (prev?.nonce ?? 0) + 1 }))}
-              onContextMenu={(event) => {
-                event.preventDefault();
-                setCardMenu({ characterId: c.id, x: event.clientX, y: event.clientY });
-              }}
+              costumes={byCharacter.get(c.id) ?? EMPTY_COSTUMES}
+              onOpen={openCharacterDetail}
+              onContextMenu={openCardContextMenu}
             />
           ))}
         </div>

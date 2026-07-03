@@ -1,10 +1,11 @@
 import { useState, useRef, useCallback, useMemo, useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import { LayoutDashboard, Film, List, Users, CircleUser, GanttChart, CalendarDays, Palmtree, Clapperboard, MessageSquareWarning, ListChecks, Drama, Settings, PanelLeft } from 'lucide-react';
 import { AnimatePresence } from 'framer-motion';
 import { useAppStore, type ViewMode } from '@/stores/useAppStore';
 import { useRevisionStore } from '@/stores/useRevisionStore';
 import { useDataStore } from '@/stores/useDataStore';
-import { useCharacterBoardAccess } from '@/hooks/useCharacterBoardAccess';
+import { useCharacterBoardAccessState } from '@/hooks/useCharacterBoardAccess';
 import { cn } from '@/utils/cn';
 import { SplashScreen } from '@/components/splash/SplashScreen';
 import { getPreset, rgbToHex } from '@/themes';
@@ -193,6 +194,60 @@ function LiquidGlassLogo({ onClick }: { onClick: () => void }) {
   );
 }
 
+/** GAP-H/I-A5: 캐릭터 메뉴 권한 확인 실패 안내 — VersionHoverTip 과 동일한 floating 툴팁 패턴.
+ *  사이드바가 overflow:hidden 이라 native title 대신 createPortal + getBoundingClientRect 로 body 에 렌더. */
+function CharacterAccessRetryTip({ show, anchorRef }: { show: boolean; anchorRef: React.RefObject<HTMLElement> }) {
+  const [pos, setPos] = useState<{ left: number; top: number } | null>(null);
+
+  useEffect(() => {
+    if (!show) return;
+    let frame: number | null = null;
+    const update = () => {
+      const rect = anchorRef.current?.getBoundingClientRect();
+      if (!rect) return;
+      const nextLeft = rect.right + 12;
+      const nextTop = rect.top + rect.height / 2;
+      setPos((prev) => (prev && prev.left === nextLeft && prev.top === nextTop ? prev : { left: nextLeft, top: nextTop }));
+    };
+    // 사이드바 호버 펼침 애니메이션 동안 anchor 가 계속 이동 — VersionHoverTip 과 동일하게 RAF 로 동기화.
+    const loop = () => {
+      update();
+      frame = requestAnimationFrame(loop);
+    };
+    update();
+    frame = requestAnimationFrame(loop);
+    window.addEventListener('scroll', update, true);
+    window.addEventListener('resize', update);
+    return () => {
+      if (frame !== null) cancelAnimationFrame(frame);
+      window.removeEventListener('scroll', update, true);
+      window.removeEventListener('resize', update);
+    };
+  }, [show, anchorRef]);
+
+  if (!pos) return null;
+
+  return createPortal(
+    <div
+      role="tooltip"
+      className={`fixed z-[10050] bg-bg-card/97 border border-bg-border rounded-[10px] px-3.5 py-2.5 max-w-[280px] shadow-[0_18px_40px_rgba(0,0,0,0.45)] text-[12px] text-text-primary leading-relaxed pointer-events-none transition-opacity duration-150 ${show ? 'opacity-100' : 'opacity-0'}`}
+      style={{ left: pos.left, top: pos.top, transform: 'translateY(-50%)' }}
+    >
+      {/* 좌측 화살표 */}
+      <div
+        className="absolute right-full top-1/2 -translate-y-1/2 w-0 h-0"
+        style={{
+          borderTop: '7px solid transparent',
+          borderBottom: '7px solid transparent',
+          borderRight: '8px solid rgb(var(--color-bg-border))',
+        }}
+      />
+      권한 정보를 확인하지 못했어요 — 클릭해서 다시 확인
+    </div>,
+    document.body,
+  );
+}
+
 export function Sidebar() {
   const { currentView, setView, sidebarExpanded, toggleSidebarExpanded } = useAppStore();
   const updateInfo = useAppStore((s) => s.updateInfo);
@@ -208,12 +263,27 @@ export function Sidebar() {
     }
     return n;
   }, [compositingStates]);
-  // 캐릭터 현황판 게이팅 — 허용 사용자가 아니면 메뉴 항목 자체를 숨김.
-  const canSeeCharacterBoard = useCharacterBoardAccess();
+  // 캐릭터 현황판 게이팅 — 허용 사용자가 아니면 메뉴 항목 자체를 숨김 (fail-closed).
+  //   예외(GAP-H/I-A5): 권한 '조회 실패'(error) 시에는 숨기는 대신 흐린 상태 + 경고 점으로 남겨
+  //   클릭으로 재확인(retry)할 수 있게 한다 — 순단 때 권한자 메뉴가 통째로 사라지면 재시도 UI 에 도달할 수 없다.
+  //   loading 중과 정상 차단(무권한)은 기존과 동일하게 숨김.
+  const characterAccess = useCharacterBoardAccessState();
+  const characterAccessFailed = characterAccess.error && !characterAccess.allowed;
   const navItems = useMemo(
-    () => NAV_ITEMS.filter((item) => item.id !== 'character-board' || canSeeCharacterBoard),
-    [canSeeCharacterBoard],
+    () => NAV_ITEMS.filter((item) => item.id !== 'character-board' || characterAccess.allowed || characterAccessFailed),
+    [characterAccess.allowed, characterAccessFailed],
   );
+  const [accessTipShow, setAccessTipShow] = useState(false);
+  const accessTipTimer = useRef<ReturnType<typeof setTimeout>>();
+  const accessAnchorRef = useRef<HTMLButtonElement>(null);
+  const handleAccessTipEnter = useCallback(() => {
+    if (accessTipTimer.current) clearTimeout(accessTipTimer.current);
+    accessTipTimer.current = setTimeout(() => setAccessTipShow(true), 250);
+  }, []);
+  const handleAccessTipLeave = useCallback(() => {
+    if (accessTipTimer.current) clearTimeout(accessTipTimer.current);
+    setAccessTipShow(false);
+  }, []);
   const [showSplash, setShowSplash] = useState(false);
   const [isHovered, setIsHovered] = useState(false);
   const hoverTimeoutRef = useRef<ReturnType<typeof setTimeout>>();
@@ -333,22 +403,45 @@ export function Sidebar() {
         </div>
 
         {/* 네비게이션 */}
-        {navItems.map((item) => (
+        {navItems.map((item) => {
+          // GAP-H: 권한 조회 실패 시 캐릭터 메뉴는 뷰 이동 대신 재확인(retry) 트리거가 된다.
+          const isAccessRetryItem = item.id === 'character-board' && characterAccessFailed;
+          return (
           <button
             key={item.id}
-            onClick={() => setView(item.id)}
-            title={isVisuallyExpanded ? undefined : item.label}
+            ref={isAccessRetryItem ? accessAnchorRef : undefined}
+            onClick={() => {
+              if (isAccessRetryItem) {
+                handleAccessTipLeave();
+                characterAccess.retry();
+              } else {
+                setView(item.id);
+              }
+            }}
+            onMouseEnter={isAccessRetryItem ? handleAccessTipEnter : undefined}
+            onMouseLeave={isAccessRetryItem ? handleAccessTipLeave : undefined}
+            title={isAccessRetryItem || isVisuallyExpanded ? undefined : item.label}
+            aria-label={isAccessRetryItem ? `${item.label} — 권한 정보를 확인하지 못했어요. 클릭해서 다시 확인` : undefined}
             className={cn(
               'flex items-center cursor-pointer shrink-0 h-10 mx-2 rounded-lg',
               'transition-colors duration-200',
-              currentView === item.id
-                ? 'bg-accent/20 text-accent'
-                : 'text-text-secondary hover:text-text-primary hover:bg-bg-border/50',
+              isAccessRetryItem
+                ? 'text-text-secondary/50 hover:text-text-secondary hover:bg-bg-border/30'
+                : currentView === item.id
+                  ? 'bg-accent/20 text-accent'
+                  : 'text-text-secondary hover:text-text-primary hover:bg-bg-border/50',
             )}
           >
             {/* 아이콘: 항상 w-12 내 중앙 → 펼침/접힘 무관 동일 위치 */}
             <span className="shrink-0 w-12 flex justify-center relative">
               {item.icon}
+              {isAccessRetryItem && (
+                <span
+                  aria-hidden="true"
+                  className="absolute -top-0.5 right-1.5 h-2.5 w-2.5 rounded-full border border-bg-card shadow-[0_0_0_1px_rgba(0,0,0,0.18)]"
+                  style={{ backgroundColor: 'rgb(var(--char-stage-feedback))' }}
+                />
+              )}
               {item.id === 'schedule' && (
                 <span
                   aria-label={getCalendarAuthLabel(calendarAuthState)}
@@ -399,7 +492,9 @@ export function Sidebar() {
               {item.label}
             </span>
           </button>
-        ))}
+          );
+        })}
+        <CharacterAccessRetryTip show={accessTipShow && characterAccessFailed} anchorRef={accessAnchorRef} />
 
         {/* 하단: 토글 + 버전 (항상 같은 위치)
             v1.27.0: 새 버전 배지를 사이드바 우측 contour 밖으로 돌출시키기 위해

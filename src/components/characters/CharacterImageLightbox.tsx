@@ -87,10 +87,11 @@ export function CharacterImageLightbox({
   return createPortal(
     <div
       data-character-lightbox
-      className={`fixed inset-0 ${CHARACTER_LAYER_CLASS.lightbox} flex items-center justify-center bg-black/85 p-5`}
+      /* 진입 모션(MO-11): 오버레이 fade + 내용 박스 미세 scale. exit 모션 없음(언마운트 즉시 — 과잉 금지). */
+      className={`fixed inset-0 ${CHARACTER_LAYER_CLASS.lightbox} flex items-center justify-center bg-black/85 p-5 animate-[char-overlay-in_200ms_ease-out] motion-reduce:animate-none`}
       onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}
     >
-      <div className="relative flex h-full w-full max-w-6xl flex-col" onMouseDown={(e) => e.stopPropagation()}>
+      <div className="relative flex h-full w-full max-w-6xl flex-col animate-[char-modal-in_200ms_ease-out] motion-reduce:animate-none" onMouseDown={(e) => e.stopPropagation()}>
         <div className="mb-3 flex items-center justify-between gap-3 text-white">
           <div className="min-w-0">
             <div className="flex min-w-0 flex-wrap items-center gap-2">

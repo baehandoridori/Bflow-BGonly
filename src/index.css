@@ -1493,3 +1493,17 @@ input[type="range"]::-webkit-slider-thumb {
     filter: none !important;
   }
 }
+
+/* ─── 캐릭터 현황판 오버레이 진입 모션 (MO-11/F-2) ───
+   오버레이=fade, 내용 박스=미세 scale(0.98→1)+fade — transform/opacity 만 사용, 200ms ease-out 통일.
+   exit 모션은 두지 않는다(언마운트 즉시 — 과잉 금지).
+   사용처: Tailwind arbitrary 값(animate-[char-overlay-in_200ms_ease-out] 등) + motion-reduce:animate-none 가드. */
+@keyframes char-overlay-in {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+@keyframes char-modal-in {
+  from { opacity: 0; transform: scale(0.98); }
+  to   { opacity: 1; transform: scale(1); }
+}
