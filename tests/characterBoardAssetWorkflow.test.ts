@@ -22,6 +22,24 @@ const electronPreload = readFileSync('electron/preload.ts', 'utf8');
 const appStore = readFileSync('src/stores/useAppStore.ts', 'utf8');
 const spotlight = readFileSync('src/components/spotlight/SpotlightSearch.tsx', 'utf8');
 const characterBoard = readFileSync('src/views/CharacterBoardView.tsx', 'utf8');
+const stageRailSource = readFileSync('src/components/characters/StageRail.tsx', 'utf8');
+const tagChipsSource = readFileSync('src/components/characters/TagChips.tsx', 'utf8');
+const characterCardSource = readFileSync('src/components/characters/CharacterCard.tsx', 'utf8');
+const featuredImageSlotSource = readFileSync('src/components/characters/FeaturedImageSlot.tsx', 'utf8');
+const costumeDetailSource = readFileSync('src/components/characters/CostumeDetail.tsx', 'utf8');
+const characterDetailModalSource = readFileSync('src/components/characters/CharacterDetailModal.tsx', 'utf8');
+const addCharacterModalSource = readFileSync('src/components/characters/AddCharacterModal.tsx', 'utf8');
+// 캐릭터 현황판 UI 전체(뷰 + 분리된 컴포넌트 파일) — 모놀리스 시절의 파일 전역 검사(금지 패턴 부재 등)를 보존하기 위한 결합 소스.
+const characterBoardAll = [
+  characterBoard,
+  stageRailSource,
+  tagChipsSource,
+  characterCardSource,
+  featuredImageSlotSource,
+  costumeDetailSource,
+  characterDetailModalSource,
+  addCharacterModalSource,
+].join('\n');
 const characterStore = readFileSync('src/stores/useCharacterBoardStore.ts', 'utf8');
 const characterStoreHelpers = readFileSync('src/stores/characterBoardStoreHelpers.ts', 'utf8');
 const characterStageMeta = readFileSync('src/utils/characterStageMeta.ts', 'utf8');
@@ -127,7 +145,7 @@ test('character image background defaults to transparent for new image workflows
   assert.equal(normalizeCharacterImageBackground('bad-value'), 'transparent');
   assert.match(backgroundDefaultMigration, /ALTER COLUMN image_background SET DEFAULT 'transparent'/);
   assert.match(imageFrameSource, /background = DEFAULT_CHARACTER_IMAGE_BACKGROUND/);
-  assert.match(characterBoard, /costume\?\.imageBackground \?\? DEFAULT_CHARACTER_IMAGE_BACKGROUND/);
+  assert.match(featuredImageSlotSource, /costume\?\.imageBackground \?\? DEFAULT_CHARACTER_IMAGE_BACKGROUND/);
   assert.match(devMock, /image_background: 'transparent'/);
   assert.ok(
     imageContextMenuSource.indexOf("{ value: 'transparent', label: '투명' }") <
@@ -153,7 +171,7 @@ test('character and costume domain types expose asset workflow fields', () => {
 test('shared user color helper is separated from assignee input UI', () => {
   assert.match(userColorSource, /export function getUserColor\(name: string\): string/);
   assert.match(assigneeNamePickerSource, /import \{ getUserColor \} from '@\/utils\/userColor'/);
-  assert.doesNotMatch(characterBoard, /getUserColor/);
+  assert.doesNotMatch(characterBoardAll, /getUserColor/);
   assert.match(imageFrameSource, /getCharacterImageFitTransformStyle/);
 });
 
@@ -227,18 +245,18 @@ test('character board is wired for image display, assignees, work links, and lig
     '작업 파일',
     '이미지 복사',
   ]) {
-    assert.match(characterBoard, new RegExp(token), `CharacterBoardView missing ${token}`);
+    assert.match(characterBoardAll, new RegExp(token), `character board sources missing ${token}`);
   }
   assert.match(assigneeNamePickerSource, /setModalOpen/);
   assert.match(assigneeNamePickerSource, /placeholder="이름 입력"/);
-  assert.doesNotMatch(characterBoard, /fallbackCostume/);
-  assert.ok(characterBoard.includes("isPng ? 'image/png' : 'image/jpeg'"));
-  assert.ok(characterBoard.includes('const saved = await updateCostumeField(targetCostume.id, { workFilePath: filePath });'));
-  assert.ok(characterBoard.includes('if (!saved) return;'));
-  assert.ok(characterBoard.includes('useCharacterBoardStore.getState().characters.find'));
+  assert.doesNotMatch(characterBoardAll, /fallbackCostume/);
+  assert.ok(featuredImageSlotSource.includes("isPng ? 'image/png' : 'image/jpeg'"));
+  assert.ok(characterDetailModalSource.includes('const saved = await updateCostumeField(targetCostume.id, { workFilePath: filePath });'));
+  assert.ok(characterDetailModalSource.includes('if (!saved) return;'));
+  assert.ok(characterDetailModalSource.includes('useCharacterBoardStore.getState().characters.find'));
   assert.match(imageFrameSource, /getCharacterImageFitTransformStyle\(normalized\)/);
-  assert.match(characterBoard, /aspect-\[3\/4\] bg-bg-border\/30 flex items-center justify-center overflow-hidden/);
-  assert.doesNotMatch(characterBoard, /aspect-\[4\/3\]/);
+  assert.match(characterCardSource, /aspect-\[3\/4\] bg-bg-border\/30 flex items-center justify-center overflow-hidden/);
+  assert.doesNotMatch(characterBoardAll, /aspect-\[4\/3\]/);
   assert.match(fitEditorSource, /stopImmediatePropagation/);
   // 이미지 로드 실패 시 안내가 있어야 편집기가 조용히 미초기화 상태로 남지 않는다 (GAP-A).
   assert.match(fitEditorSource, /onError=\{\(\) => setLoadFailed\(true\)\}/);
@@ -251,14 +269,14 @@ test('character board is wired for image display, assignees, work links, and lig
   assert.match(characterStore, /Promise<boolean>/);
   assert.match(characterStore, /return true;/);
   assert.match(characterStore, /return false;/);
-  assert.match(characterBoard, /\/\* 단계 레일 \+ 담당자 \*\//);
-  assert.doesNotMatch(characterBoard, /\/\* 버전 \+ 담당자 \*\//);
+  assert.match(costumeDetailSource, /\/\* 단계 레일 \+ 담당자 \*\//);
+  assert.doesNotMatch(characterBoardAll, /\/\* 버전 \+ 담당자 \*\//);
   assert.ok(
-    characterBoard.indexOf('label="디자인 단계"') < characterBoard.indexOf('label="디자인 담당자"'),
+    costumeDetailSource.indexOf('label="디자인 단계"') < costumeDetailSource.indexOf('label="디자인 담당자"'),
     'design assignee should live with the design stage lane, not the version controls',
   );
   assert.ok(
-    characterBoard.indexOf('label="리깅 단계"') < characterBoard.indexOf('label="리깅 담당자"'),
+    costumeDetailSource.indexOf('label="리깅 단계"') < costumeDetailSource.indexOf('label="리깅 담당자"'),
     'rigging assignee should live with the rigging stage lane, not the version controls',
   );
 });
@@ -266,12 +284,12 @@ test('character board is wired for image display, assignees, work links, and lig
 test('character board creates a first costume automatically and keeps image actions focused', () => {
   assert.match(characterStore, /svcAddCostume\(\{ characterId: created\.id, name: '복장 1', createdBy \}\)/);
   assert.match(characterStore, /console\.warn\('\[character-board\] 첫 복장 자동 생성 실패:'/);
-  assert.match(characterBoard, /function nextCostumeName\(costumes: CharacterCostume\[\]\): string/);
-  assert.match(characterBoard, /const ensureCostume = useCallback\(async \(\) => \{/);
-  assert.match(characterBoard, /targetCostume = targetCostume \?\? await ensureCostume\(\);/);
-  assert.doesNotMatch(characterBoard, /먼저 디자인\(복장\)/);
+  assert.match(characterDetailModalSource, /function nextCostumeName\(costumes: CharacterCostume\[\]\): string/);
+  assert.match(characterDetailModalSource, /const ensureCostume = useCallback\(async \(\) => \{/);
+  assert.match(characterDetailModalSource, /targetCostume = targetCostume \?\? await ensureCostume\(\);/);
+  assert.doesNotMatch(characterBoardAll, /먼저 디자인\(복장\)/);
 
-  const featuredSlot = characterBoard.match(/function FeaturedImageSlot\([\s\S]*?\r?\n}\r?\n\r?\n\/\*\* 복장 메모/);
+  const featuredSlot = featuredImageSlotSource.match(/function FeaturedImageSlot\([\s\S]*?\r?\n}\r?\n\r?\n\/\*\* 복장 메모/);
   assert.ok(featuredSlot, 'FeaturedImageSlot should remain locally inspectable');
   assert.match(featuredSlot[0], /grid grid-cols-2/);
   assert.match(featuredSlot[0], /이미지 추가/);
@@ -312,11 +330,11 @@ test('character board can create and link a work folder from the configured team
   assert.match(characterStore, /updateCharacterFolder: \(id: string, workFolderPath: string \| null\) => Promise<boolean>/);
   assert.match(characterStore, /applyCharacterUpdate\(set, get, id, \{ workFolderPath \}, \{ work_folder_path: workFolderPath \}/);
   assert.match(characterStore, /await svcUpdateCharacter\(id, dbUpdates\)/);
-  assert.match(characterBoard, /createAndLinkCharacterFolder/);
-  assert.match(characterBoard, /const \[creatingFolder, setCreatingFolder\]/);
-  assert.match(characterBoard, /onCreateFolder=\{handleCreateFolder\}/);
-  assert.match(characterBoard, /title="기준 경로에 캐릭터 이름으로 폴더를 만들어 연결"/);
-  assert.match(characterBoard, /!path && onCreate/);
+  assert.match(characterDetailModalSource, /createAndLinkCharacterFolder/);
+  assert.match(characterDetailModalSource, /const \[creatingFolder, setCreatingFolder\]/);
+  assert.match(characterDetailModalSource, /onCreateFolder=\{handleCreateFolder\}/);
+  assert.match(costumeDetailSource, /title="기준 경로에 캐릭터 이름으로 폴더를 만들어 연결"/);
+  assert.match(costumeDetailSource, /!path && onCreate/);
 });
 
 test('character card right click opens the compact work menu instead of opening a folder immediately', () => {
@@ -377,7 +395,7 @@ test('my tasks widget includes assigned character design and rigging work', () =
   assert.match(characterStageConstants, /export function characterStageColor/);
   assert.match(characterStageMeta, /export function parseAssigneeNames/);
   assert.match(assigneeNamePickerSource, /import \{ parseAssigneeNames \} from '@\/utils\/characterStageMeta'/);
-  assert.match(characterBoard, /import \{ DESIGN_STAGE_META, RIGGING_STAGE_META, characterStageColor/);
+  assert.match(characterCardSource, /import \{ DESIGN_STAGE_META, RIGGING_STAGE_META, characterStageColor/);
   assert.match(myCharacterTasks, /characterStageColor\(meta\)/);
 
   assert.match(characterStore, /ensureLoadedAndRealtime: \(opts\?: \{ silent\?: boolean \}\) => \(\) => void/);
@@ -411,35 +429,36 @@ test('my tasks widget includes assigned character design and rigging work', () =
 
 test('character board cards, rows, and costume thumbs are memoized with stable callbacks', () => {
   // CQ-6 2단계: memo 래핑 (store 의 rebuildByCharacter 구조적 공유가 전제).
-  assert.match(characterBoard, /const CharacterCard = memo\(function CharacterCard\(/);
-  assert.match(characterBoard, /const CharacterListRow = memo\(function CharacterListRow\(/);
-  assert.match(characterBoard, /const CostumeThumbCard = memo\(function CostumeThumbCard\(/);
+  assert.match(characterCardSource, /const CharacterCard = memo\(function CharacterCard\(/);
+  assert.match(characterDetailModalSource, /const CharacterListRow = memo\(function CharacterListRow\(/);
+  assert.match(characterDetailModalSource, /const CostumeThumbCard = memo\(function CostumeThumbCard\(/);
   // memo 실효 조건: map 안 항목별 인라인 클로저 대신 id 인자 안정 콜백 + 빈 배열 안정 참조.
-  assert.match(characterBoard, /const EMPTY_COSTUMES: CharacterCostume\[\] = \[\]/);
+  assert.match(characterCardSource, /const EMPTY_COSTUMES: CharacterCostume\[\] = \[\]/);
   assert.match(characterBoard, /costumes=\{byCharacter\.get\(c\.id\) \?\? EMPTY_COSTUMES\}/);
-  assert.doesNotMatch(characterBoard, /byCharacter\.get\(c\.id\) \?\? \[\]\}/);
+  assert.match(characterDetailModalSource, /costumes=\{byCharacter\.get\(c\.id\) \?\? EMPTY_COSTUMES\}/);
+  assert.doesNotMatch(characterBoardAll, /byCharacter\.get\(c\.id\) \?\? \[\]\}/);
   assert.match(characterBoard, /onOpen=\{openCharacterDetail\}/);
   assert.match(characterBoard, /onContextMenu=\{openCardContextMenu\}/);
-  assert.match(characterBoard, /onSelect=\{setSelectedId\}/);
-  assert.match(characterBoard, /onSelect=\{setActiveCostumeId\}/);
-  assert.match(characterBoard, /onDelete=\{deleteCostume\}/);
-  assert.match(characterBoard, /onImageContextMenu=\{openCostumeImageMenu\}/);
+  assert.match(characterDetailModalSource, /onSelect=\{setSelectedId\}/);
+  assert.match(characterDetailModalSource, /onSelect=\{setActiveCostumeId\}/);
+  assert.match(characterDetailModalSource, /onDelete=\{deleteCostume\}/);
+  assert.match(characterDetailModalSource, /onImageContextMenu=\{openCostumeImageMenu\}/);
 });
 
 test('character board motion sticks to transform/opacity, 200ms ease-out, and reduce guards', () => {
   // MO-11/F-2: transition-all·width 트랜지션 금지 — 실제 바뀌는 속성만 애니메이션.
-  assert.doesNotMatch(characterBoard, /transition-all/);
-  assert.doesNotMatch(characterBoard, /transition-\[width\]/);
-  assert.match(characterBoard, /transition-colors duration-200 ease-out/);
-  assert.match(characterBoard, /transition-\[background-color,border-color,box-shadow\] duration-200 ease-out/);
+  assert.doesNotMatch(characterBoardAll, /transition-all/);
+  assert.doesNotMatch(characterBoardAll, /transition-\[width\]/);
+  assert.match(tagChipsSource, /transition-colors duration-200 ease-out/);
+  assert.match(stageRailSource, /transition-\[background-color,border-color,box-shadow\] duration-200 ease-out/);
   // 목록 행 진행바 — width 대신 transform(scaleX + origin-left) 채움.
-  assert.match(characterBoard, /origin-left transition-transform duration-200 ease-out/);
-  assert.match(characterBoard, /scaleX\(\$\{ratio\}\)/);
+  assert.match(characterDetailModalSource, /origin-left transition-transform duration-200 ease-out/);
+  assert.match(characterDetailModalSource, /scaleX\(\$\{ratio\}\)/);
   // 상세 모달·라이트박스 진입 모션 + motion-reduce 가드. exit 모션 없음.
   assert.match(indexCss, /@keyframes char-overlay-in/);
   assert.match(indexCss, /@keyframes char-modal-in/);
-  assert.match(characterBoard, /animate-\[char-overlay-in_200ms_ease-out\] motion-reduce:animate-none/);
-  assert.match(characterBoard, /animate-\[char-modal-in_200ms_ease-out\] motion-reduce:animate-none/);
+  assert.match(characterDetailModalSource, /animate-\[char-overlay-in_200ms_ease-out\] motion-reduce:animate-none/);
+  assert.match(characterDetailModalSource, /animate-\[char-modal-in_200ms_ease-out\] motion-reduce:animate-none/);
   assert.match(characterImageLightbox, /animate-\[char-overlay-in_200ms_ease-out\] motion-reduce:animate-none/);
   assert.match(characterImageLightbox, /animate-\[char-modal-in_200ms_ease-out\] motion-reduce:animate-none/);
 });
@@ -460,9 +479,10 @@ test('sidebar keeps the character menu reachable for retry when the access looku
 });
 
 test('character board safety and accessibility interactions use app-native guards', () => {
-  assert.doesNotMatch(characterBoard, /window\.confirm/);
+  assert.doesNotMatch(characterBoardAll, /window\.confirm/);
   assert.doesNotMatch(episodeAssetBoard, /window\.confirm/);
-  assert.match(characterBoard, /ConfirmDialog\.show/);
+  assert.match(featuredImageSlotSource, /ConfirmDialog\.show/);
+  assert.match(characterDetailModalSource, /ConfirmDialog\.show/);
   assert.match(episodeAssetBoard, /ConfirmDialog\.show/);
   assert.match(confirmDialog, /window\.addEventListener\('keydown', onKey, \{ capture: true \}\)/);
   assert.match(confirmDialog, /stopImmediatePropagation/);
@@ -471,16 +491,21 @@ test('character board safety and accessibility interactions use app-native guard
   assert.match(characterStore, /restoreCharacter: \(id: string\) => Promise<void>/);
   assert.match(characterStore, /status: 'archived'/);
   assert.match(characterStore, /status: 'active'/);
-  assert.match(characterBoard, /보관 목록에서 다시 복원/);
+  assert.match(characterDetailModalSource, /보관 목록에서 다시 복원/);
   assert.match(characterBoard, /보관 \{archivedCharacters\.length\}/);
-  assert.match(characterBoard, /영구 삭제/);
+  assert.match(characterDetailModalSource, /영구 삭제/);
 
   assert.match(modalFocusHook, /FOCUSABLE_SELECTOR/);
-  assert.match(characterBoard, /useModalFocus/);
-  assert.match(characterBoard, /role="dialog"/);
-  assert.match(characterBoard, /aria-modal="true"/);
-  assert.match(characterBoard, /event\.target === event\.currentTarget/);
-  assert.match(characterBoard, /claimReactKey\(e\)/);
+  assert.match(characterDetailModalSource, /useModalFocus/);
+  assert.match(addCharacterModalSource, /useModalFocus/);
+  assert.match(characterDetailModalSource, /role="dialog"/);
+  assert.match(addCharacterModalSource, /role="dialog"/);
+  assert.match(characterDetailModalSource, /aria-modal="true"/);
+  assert.match(addCharacterModalSource, /aria-modal="true"/);
+  assert.match(characterDetailModalSource, /event\.target === event\.currentTarget/);
+  assert.match(addCharacterModalSource, /event\.target === event\.currentTarget/);
+  assert.match(featuredImageSlotSource, /claimReactKey\(e\)/);
+  assert.match(characterDetailModalSource, /claimReactKey\(e\)/);
   assert.match(characterImageLightbox, /window\.addEventListener\('keydown', onKey, \{ capture: true \}\)/);
   assert.match(characterImageLightbox, /stopImmediatePropagation/);
   assert.match(imageContextMenuSource, /window\.addEventListener\('keydown', onKey, \{ capture: true \}\)/);
@@ -488,13 +513,13 @@ test('character board safety and accessibility interactions use app-native guard
   assert.match(imageContextMenuSource, /role="menu"/);
   assert.match(imageContextMenuSource, /canSetBackground/);
 
-  assert.match(characterBoard, /VersionNumberInput/);
-  assert.match(characterBoard, /onBlur=\{commit\}/);
-  assert.match(characterBoard, /h-8 w-8 rounded-md/);
-  assert.match(characterBoard, /group-focus-within:opacity-100/);
-  assert.match(characterBoard, /에피소드 연결을 해제했어요/);
-  assert.match(characterBoard, /이미지 놓기/);
-  assert.match(characterBoard, /window\.addEventListener\('paste', onPaste\)/);
+  assert.match(costumeDetailSource, /VersionNumberInput/);
+  assert.match(costumeDetailSource, /onBlur=\{commit\}/);
+  assert.match(costumeDetailSource, /h-8 w-8 rounded-md/);
+  assert.match(characterDetailModalSource, /group-focus-within:opacity-100/);
+  assert.match(characterDetailModalSource, /에피소드 연결을 해제했어요/);
+  assert.match(featuredImageSlotSource, /이미지 놓기/);
+  assert.match(featuredImageSlotSource, /window\.addEventListener\('paste', onPaste\)/);
   assert.match(fitEditorSource, /focus-visible:ring-2 focus-visible:ring-accent\/70/);
 });
 
@@ -506,22 +531,23 @@ test('character board visual tokens support light mode and consistent layers', (
   assert.match(themeSource, /root\.style\.colorScheme = mode/);
   assert.match(indexHtml, /#root \{[\s\S]*background: rgb\(var\(--color-bg-primary, 15 17 23\)\)/);
   assert.match(characterStageConstants, /cssVar: '--char-stage-complete'/);
-  assert.match(characterBoard, /characterStageColor\(DESIGN_STAGE_META\.done/);
-  assert.match(characterBoard, /characterStageColor\(RIGGING_STAGE_META\.done/);
+  assert.match(characterCardSource, /characterStageColor\(DESIGN_STAGE_META\.done/);
+  assert.match(characterCardSource, /characterStageColor\(RIGGING_STAGE_META\.done/);
   assert.match(episodeAssetBoard, /import \{ RIGGING_STAGE_META, characterStageColor \} from '@\/constants\/characterStages'/);
   assert.match(episodeAssetBoard, /characterStageColor\(RIGGING_STAGE_META\[rigging\]\)/);
-  assert.doesNotMatch(characterBoard, /#A29BFE22|#00B89422|#FF6B6B/);
+  assert.doesNotMatch(characterBoardAll, /#A29BFE22|#00B89422|#FF6B6B/);
   assert.doesNotMatch(episodeAssetBoard, /#8B8DA3|#74B9FF|#6C5CE7|#FDCB6E|#00B894|#FF6B6B/);
 
   assert.match(characterLayerConstants, /modal: 'z-50'/);
-  assert.match(characterBoard, /CHARACTER_LAYER_CLASS\.modal/);
+  assert.match(characterDetailModalSource, /CHARACTER_LAYER_CLASS\.modal/);
+  assert.match(addCharacterModalSource, /CHARACTER_LAYER_CLASS\.modal/);
   assert.match(imageContextMenuSource, /CHARACTER_LAYER_CLASS\.menu/);
   assert.match(fitEditorSource, /CHARACTER_LAYER_CLASS\.editor/);
   assert.match(characterImageLightbox, /CHARACTER_LAYER_CLASS\.lightbox/);
 
   assert.match(fitEditorSource, /rgba\(0,0,0,0\.72\)/);
   assert.match(fitEditorSource, /rgba\(255,255,255,0\.78\)/);
-  assert.match(characterBoard, /목록 검색/);
+  assert.match(characterDetailModalSource, /목록 검색/);
   assert.match(characterBoard, /검색·필터 초기화/);
   assert.match(characterBoard, /motion-reduce:animate-none/);
 });
@@ -529,7 +555,7 @@ test('character board visual tokens support light mode and consistent layers', (
 test('global button label wrapping is prevented while multiline button content stays available', () => {
   assert.match(indexCss, /button\s*\{\s*white-space:\s*nowrap;\s*\}/);
   assert.match(indexCss, /button \[class\*="line-clamp-"\],\s*\n\s*button p\s*\{\s*white-space:\s*normal;\s*\}/);
-  assert.match(characterBoard, /whitespace-nowrap/);
+  assert.match(featuredImageSlotSource, /whitespace-nowrap/);
 });
 
 test('character image lightbox shows costume versions and a bottom costume thumbnail strip', () => {
@@ -539,7 +565,7 @@ test('character image lightbox shows costume versions and a bottom costume thumb
   assert.match(displayFrame[0], /\beager\b/);
   assert.match(characterImageLightbox, /<CharacterImageFitEditor[\s\S]*?fit=\{current\.fit\}/);
   assert.match(characterImageLightbox, /versionNo:\s*number/);
-  assert.match(characterBoard, /versionNo:\s*c\.versionNo/);
+  assert.match(characterDetailModalSource, /versionNo:\s*c\.versionNo/);
   assert.match(characterImageLightbox, /복장 버전/);
   assert.match(characterImageLightbox, /v\{current\.versionNo\}/);
   assert.match(characterImageLightbox, /aria-label="복장 썸네일 목록"/);
@@ -558,28 +584,28 @@ test('character image lightbox shows costume versions and a bottom costume thumb
 
 test('episode reel controls are available in episode assets, character board, and scenes view', () => {
   assert.match(episodeAssetBoard, /릴 파일/);
-  assert.match(characterBoard, /릴 파일 보기/);
+  assert.match(characterDetailModalSource, /릴 파일 보기/);
   assert.match(scenesView, /EpisodeReelButton/);
   assert.match(scenesView, /릴 보기/);
-  assert.match(characterBoard, /openOrRegisterEpisodeReel/);
+  assert.match(characterDetailModalSource, /openOrRegisterEpisodeReel/);
   assert.match(episodeAssetBoard, /openOrRegisterEpisodeReel/);
   assert.match(episodeReelActionsSource, /chooseWorkFile/);
   assert.match(episodeReelActionsSource, /openWorkPath/);
   assert.match(episodeReelActionsSource, /updateEpisodeReelPath/);
-  assert.match(characterBoard, /useDataStore\.getState\(\)\.episodes/);
+  assert.match(characterDetailModalSource, /useDataStore\.getState\(\)\.episodes/);
   assert.match(episodeAssetBoard, /useDataStore\.getState\(\)\.episodes/);
   assert.match(scenesView, /useDataStore\.getState\(\)\.episodes/);
 });
 
 test('character costume tags support palette toggles, custom input, store updates, and Supabase persistence', () => {
-  assert.match(characterBoard, /const extra = tags\.filter\(\(t\) => !palette\.includes\(t\)\)/);
-  assert.match(characterBoard, /return \[\.\.\.palette, \.\.\.extra\];/);
-  assert.match(characterBoard, /if \(tags\.includes\(tag\)\) onChange\(tags\.filter\(\(t\) => t !== tag\)\);/);
-  assert.match(characterBoard, /else onChange\(\[\.\.\.tags, tag\]\);/);
-  assert.match(characterBoard, /const t = input\.trim\(\);/);
-  assert.match(characterBoard, /if \(!t \|\| tags\.includes\(t\)\) \{ setInput\(''\); return; \}/);
-  assert.match(characterBoard, /onKeyDown=\{\(e\) => \{ if \(e\.key === 'Enter'\)/);
-  assert.match(characterBoard, /onBlur=\{addCustom\}/);
+  assert.match(tagChipsSource, /const extra = tags\.filter\(\(t\) => !palette\.includes\(t\)\)/);
+  assert.match(tagChipsSource, /return \[\.\.\.palette, \.\.\.extra\];/);
+  assert.match(tagChipsSource, /if \(tags\.includes\(tag\)\) onChange\(tags\.filter\(\(t\) => t !== tag\)\);/);
+  assert.match(tagChipsSource, /else onChange\(\[\.\.\.tags, tag\]\);/);
+  assert.match(tagChipsSource, /const t = input\.trim\(\);/);
+  assert.match(tagChipsSource, /if \(!t \|\| tags\.includes\(t\)\) \{ setInput\(''\); return; \}/);
+  assert.match(tagChipsSource, /onKeyDown=\{\(e\) => \{ if \(e\.key === 'Enter'\)/);
+  assert.match(tagChipsSource, /onBlur=\{addCustom\}/);
   assert.match(characterStore, /setCostumeTags:\s*async\s*\(id,\s*kind,\s*tags\)\s*=>/);
   assert.match(characterStore, /kind === 'structure' \? \{ structureTags: tags \} : \{ assetTags: tags \}/);
   assert.match(rendererSupabase, /snake\.structure_tags = updates\.structureTags/);
@@ -622,12 +648,12 @@ test('character board hardening covers image failures, drafts, realtime races, a
   assert.match(imageFrameSource, /이미지를 불러오지 못했어요/);
   assert.match(imageFrameSource, /클릭해서 다시 시도/);
 
-  assert.match(characterBoard, /const costumeMemoDraftCache = new Map<string, string>\(\)/);
-  assert.match(characterBoard, /function CostumeMemoInput\(\{[\s\S]*?draftKey/);
-  assert.match(characterBoard, /focused\.current && latestDraft !== valueRef\.current/);
-  assert.match(characterBoard, /costumeMemoDraftCache\.get\(draftKey\) === next[\s\S]*?costumeMemoDraftCache\.delete\(draftKey\)/);
-  assert.match(characterBoard, /onBlur=\{commit\}/);
-  assert.match(characterBoard, /key=\{costume\.id\}/);
+  assert.match(featuredImageSlotSource, /const costumeMemoDraftCache = new Map<string, string>\(\)/);
+  assert.match(featuredImageSlotSource, /function CostumeMemoInput\(\{[\s\S]*?draftKey/);
+  assert.match(featuredImageSlotSource, /focused\.current && latestDraft !== valueRef\.current/);
+  assert.match(featuredImageSlotSource, /costumeMemoDraftCache\.get\(draftKey\) === next[\s\S]*?costumeMemoDraftCache\.delete\(draftKey\)/);
+  assert.match(featuredImageSlotSource, /onBlur=\{commit\}/);
+  assert.match(featuredImageSlotSource, /key=\{costume\.id\}/);
 
   assert.match(characterStore, /const pendingCharacterFields = new Map/);
   assert.match(characterStore, /const pendingCostumeFields = new Map/);
@@ -661,6 +687,6 @@ test('character board hardening covers image failures, drafts, realtime races, a
   assert.match(appSource, /useCharacterBoardAccessState/);
   assert.doesNotMatch(appSource, /hasCharacterBoardAccess \? <CharacterBoardView \/> : <Dashboard \/>/);
 
-  assert.match(characterBoard, /실제 원본 작업 파일은 삭제하지 않아요/);
-  assert.match(characterBoard, /실제 작업 폴더와 원본 작업 파일은 삭제하지 않아요/);
+  assert.match(characterDetailModalSource, /실제 원본 작업 파일은 삭제하지 않아요/);
+  assert.match(characterDetailModalSource, /실제 작업 폴더와 원본 작업 파일은 삭제하지 않아요/);
 });
