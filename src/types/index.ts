@@ -255,6 +255,54 @@ export interface CostumeActivityLogContext {
   stageLabel: string;
 }
 
+/**
+ * characters 테이블 DB row (snake_case) — IPC/realtime 경계 표현.
+ * electron/supabase.ts 의 CharacterRow 와 중복 정의 (electron ↔ src 는 서로 import 하지 않는 관행).
+ * 값 수준 보정(null/기본값 fallback)은 rowToCharacter 가 담당하므로 미보장 필드는 null 허용으로 선언.
+ */
+export interface CharacterRow {
+  id: string;
+  name: string;
+  status: 'active' | 'archived' | null;
+  memo: string | null;
+  work_folder_path: string | null;
+  sort_order: number | null;
+  created_at: string;
+  updated_at: string;
+  created_by?: string | null;
+}
+
+/**
+ * character_costumes 테이블 DB row (snake_case) — IPC/realtime 경계 표현.
+ * electron/supabase.ts 의 CharacterCostumeRow 와 중복 정의 (경계 양쪽 중복 정의 관행).
+ * JSONB/배열 컬럼은 값을 신뢰할 수 없어 unknown — rowToCostume 의 normalize/Array.isArray 가드가 정규화.
+ */
+export interface CharacterCostumeRow {
+  id: string;
+  character_id: string;
+  name: string;
+  version_no: number | null;
+  design_stage: CostumeDesignStage | null;
+  rigging_stage: CostumeRiggingStage | null;
+  featured_image_url: string | null;
+  work_file_path: string | null;
+  /** 4값 CHECK 컬럼이지만 구버전/이상값 호환 — normalizeCharacterImageBackground 가 정규화. */
+  image_background: unknown;
+  /** JSONB — normalizeCharacterImageFit 가 정규화. */
+  image_fit: unknown;
+  structure_tags: unknown;
+  asset_tags: unknown;
+  /** 구버전 스키마엔 없던 컬럼 — 부재 시 rowToCostume 이 assignee 로 fallback. */
+  design_assignee?: string | null;
+  rigging_assignee?: string | null;
+  assignee: string | null;
+  memo: string | null;
+  sort_order: number | null;
+  created_at: string;
+  updated_at: string;
+  created_by?: string | null;
+}
+
 // ─── 씬 ──────────────────────────────────────
 
 export type SceneWorkLinkDepartment = 'bg' | 'acting';
@@ -1366,8 +1414,8 @@ export interface ElectronAPI {
   onCharacterBoardRealtime: (cb: (payload: {
     table: 'characters' | 'character_costumes' | 'episode_character_mapping';
     eventType: 'INSERT' | 'UPDATE' | 'DELETE';
-    row: any | null;
-    old: any | null;
+    row: Record<string, unknown> | null;
+    old: Record<string, unknown> | null;
   }) => void) => () => void;
   /** character_board 채널 자체의 구독 상태 (SUBSCRIBED/CLOSED/CHANNEL_ERROR/TIMED_OUT). */
   onCharacterBoardRealtimeStatus?: (cb: (status: string) => void) => () => void;

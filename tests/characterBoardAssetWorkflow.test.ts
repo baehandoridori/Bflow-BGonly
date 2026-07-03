@@ -23,6 +23,7 @@ const appStore = readFileSync('src/stores/useAppStore.ts', 'utf8');
 const spotlight = readFileSync('src/components/spotlight/SpotlightSearch.tsx', 'utf8');
 const characterBoard = readFileSync('src/views/CharacterBoardView.tsx', 'utf8');
 const characterStore = readFileSync('src/stores/useCharacterBoardStore.ts', 'utf8');
+const characterStoreHelpers = readFileSync('src/stores/characterBoardStoreHelpers.ts', 'utf8');
 const characterStageMeta = readFileSync('src/utils/characterStageMeta.ts', 'utf8');
 const characterStageConstants = readFileSync('src/constants/characterStages.ts', 'utf8');
 const characterLayerConstants = readFileSync('src/constants/characterLayers.ts', 'utf8');
@@ -192,7 +193,7 @@ test('character episode mapping realtime merges single links when episode metada
   assert.match(electronSupabase, /broadcastQueue = broadcastQueue\.then/);
   assert.match(electronSupabase, /episodeNumberCache/);
 
-  assert.match(characterStore, /function rowToRealtimeMapping/);
+  assert.match(characterStoreHelpers, /function rowToRealtimeMapping/);
   assert.match(characterStore, /const mapping = rowToRealtimeMapping\(eventType === 'DELETE' \? old : row\)/);
   assert.match(characterStore, /if \(!mapping\) \{[\s\S]*?void reloadEpisodeMappings\(set, get\)/);
   assert.match(characterStore, /eventType === 'DELETE'[\s\S]*?removeLink\(s\.episodeLinks, mapping\.characterId, mapping\.episodeNumber\)/);
@@ -580,7 +581,7 @@ test('character board hardening covers image failures, drafts, realtime races, a
   assert.match(characterStore, /const pendingCharacterFields = new Map/);
   assert.match(characterStore, /const pendingCostumeFields = new Map/);
   assert.match(characterStore, /const pendingEpisodeLinkFields = new Map/);
-  assert.match(characterStore, /function mergeIncomingWithPending/);
+  assert.match(characterStoreHelpers, /function mergeIncomingWithPending/);
   assert.match(characterStore, /const merged = mergeIncomingWithPending\(pendingCharacterFields[\s\S]*?return \{ \.\.\.merged, episodeIds: withEpisodes\.episodeIds \}/);
   assert.match(characterStore, /trackPendingFields\(pendingCharacterFields, id, updates as Record<string, unknown>\)/);
   assert.match(characterStore, /trackPendingFields\(pendingCostumeFields, id, updates as Record<string, unknown>\)/);
@@ -591,11 +592,11 @@ test('character board hardening covers image failures, drafts, realtime races, a
   assert.match(characterStore, /window\.addEventListener\('online', catchUp\)/);
   assert.match(electronSupabase, /status === 'CLOSED' \|\| status === 'CHANNEL_ERROR' \|\| status === 'TIMED_OUT'/);
 
-  assert.match(characterStore, /function compareCharacters/);
-  assert.match(characterStore, /function compareCostumes/);
-  assert.match(characterStore, /function sortCharacters/);
-  assert.match(characterStore, /function sortCostumes/);
-  assert.match(characterStore, /sortOrder - b\.sortOrder[\s\S]*?compareNullableText\(a\.createdAt, b\.createdAt\)/);
+  assert.match(characterStoreHelpers, /function compareCharacters/);
+  assert.match(characterStoreHelpers, /function compareCostumes/);
+  assert.match(characterStoreHelpers, /function sortCharacters/);
+  assert.match(characterStoreHelpers, /function sortCostumes/);
+  assert.match(characterStoreHelpers, /sortOrder - b\.sortOrder[\s\S]*?compareNullableText\(a\.createdAt, b\.createdAt\)/);
 
   assert.match(accessHookSource, /export interface CharacterBoardAccessState/);
   assert.match(accessHookSource, /export function useCharacterBoardAccessState/);
