@@ -352,7 +352,8 @@ tr.editing-beam-row {
   isolation: isolate;
   animation: editing-beam-row-rainbow 5.5s linear infinite;
 }
-/* 좌측 액센트 바 — .scene-row-highlighted 의 td:first-child::before 방식 재사용 */
+/* 좌측 액센트 바 — .scene-row-highlighted 의 td:first-child 바 방식을 참고하되,
+   그쪽 ::before 와 겹치지 않게 ::after 를 사용한다 */
 tr.editing-beam-row > td:first-child::after {
   content: '';
   position: absolute;
