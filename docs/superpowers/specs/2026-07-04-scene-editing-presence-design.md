@@ -75,6 +75,8 @@
 - 책임: (U1 결과 → U2 resolve) 로 **로컬 사용자가 지금 편집 중인 sceneUuid 집합**을 만들고, 변할 때만 Supabase에 track한다.
 - 구현: `bflow-realtime` 채널(기존)에서 `channel.track({ userId, username, editingSceneUuids: string[], updatedAt })`.
   - 추가 회선 없음(같은 채널에 presence 얹기). presence key = userId(사용자당 1 연결).
+- **연결 소유권(중요)**: `track()`은 **메인 프로세스만** 호출한다(메인이 유일한 Supabase 연결 보유). 렌더러/위젯 창은 절대 track하지 않는다 — 같은 userId로 두 연결이 생기면 한쪽이 다른 쪽의 `editingSceneUuids`를 덮어쓸 수 있으므로 금지.
+- **페이로드 크기**: `editingSceneUuids`는 활성 탭이 1개이므로 사실상 원소 1개(콜리전 시에만 소수). presence 페이로드는 항상 작음 — 크기 한계 우려 없음.
 - 디바운스: 최소 발행 간격(예: 1.5초)으로 탭 빠른 전환 시 과발행 방지.
 - 재연결: 소켓 재구독 시 현재 집합으로 재track.
 
@@ -152,7 +154,7 @@
 | 탭 빠른 전환 | U3 디바운스로 과발행 방지. |
 | Supabase 연결 끊김 | presence 자동 소멸(타 클라이언트 `leave`). 재연결 시 현재 집합 재track. |
 | 앱/ B flow 강제 종료 | 소켓 종료 → 자동 소멸(유령 없음). |
-| 위젯 팝업 창 | `broadcastSupabasePresence`가 `widgetWindows`에도 전달(기존 realtime 패턴 동일). |
+| 위젯 팝업 창 | `broadcastSupabasePresence`가 `widgetWindows`에도 스냅샷 전달(기존 realtime 패턴 동일). 단 현재 위젯들(전체 진행률·단계별 등)은 씬 카드/행을 렌더하지 않아 무지개를 그릴 표면이 없음 — 전달은 안전한 단순화이자 향후 대비이며, 지금은 소비 UI 없음. |
 | 무료 플랜 회선 수 | 기존 `bflow-realtime` 채널 재사용 → **추가 회선 0**. |
 
 ---
@@ -180,7 +182,7 @@
 
 - **PR0 (문서)**: 이 설계 문서 + 구현 계획 문서. 자체 검수 + 한솔 검토.
 - **PR1 — 감지 엔진(main)**: U1(`parseMohoTitles` 순수 코어 + PowerShell 폴러, win32 가드) + U2(씬 링크 인덱스, 콜리전 규칙). 단위 테스트. UI 없음(내부 이벤트/로그로 검증). PowerShell 프로세스명 실측 확인 포함.
-- **PR2 — 프레즌스 전송(main+renderer 배선)**: U3(track) + U4(수신·스냅샷) + IPC(`supabase:presence-event`, preload) + U5(`useEditingPresenceStore` + 선택자). 임시 개발용 표시로 종단 검증.
+- **PR2 — 프레즌스 전송(main+renderer 배선)**: U3(track) + U4(수신·스냅샷) + IPC(`supabase:presence-event`, preload) + U5(`useEditingPresenceStore` + 선택자). **완료 기준(검증 가능)**: 개발 전용 오버레이(예: 화면 구석에 `sceneUuid → [이름]` 목록을 텍스트로 렌더, `import.meta.env.DEV` 가드)를 붙여 미리보기 모드 2계정으로 — A가 연동 파일 열기 → B의 오버레이에 A 이름이 해당 sceneUuid로 나타나고, 닫으면 사라짐을 확인. 이 오버레이는 PR3에서 실제 UI로 대체·제거.
 - **PR3 — UI**: U6/U7(무지개 테두리 + 이름표) 카드·시트·모달 적용, 다크/라이트, 모션 최소화, 다중 편집자/경고 톤, 자기 제외. 컴포넌트 테스트.
 - **PR4 — 마무리**: 테스트 보강, 접근성/성능 점검, `DEVLOG/update-notes.json`(비개발자 톤) 추가, 버전 상향(신규 기능 → **1.71.0**), 최종 코드리뷰 + `npm run build`. 머지.
 
