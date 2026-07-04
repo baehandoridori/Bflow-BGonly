@@ -17,14 +17,51 @@ export interface RealtimeCallbacks {
   onSceneWorkLinkChange?: (payload: ChangePayload) => void;
   onActivityInsert: (payload: ChangePayload) => void;
   onStatusChange: (status: string) => void;
+  /** Supabase presence sync/join/leave — 전체 presence 상태 스냅샷 전달 */
+  onPresenceSync?: (state: Record<string, unknown[]>) => void;
 }
 
 let channel: RealtimeChannel | null = null;
 let savedCallbacks: RealtimeCallbacks | null = null;
+// 마지막으로 track한 presence 페이로드 — 재연결(SUBSCRIBED) 시 최신 채널로 재track.
+let lastPresencePayload: unknown | null = null;
+// 현재 채널이 SUBSCRIBED(join 완료) 상태인지. join 전 track()은 reject → unhandled rejection이 되므로 게이트로 막는다.
+let isSubscribed = false;
+// presence track 실패(비-ok status/reject) 시 바운드 재시도 타이머. 항상 최신 payload를 재track.
+let presenceTrackRetryTimer: NodeJS.Timeout | null = null;
 const retry = createRetryManager('Realtime');
 
+/**
+ * 현재 채널로 lastPresencePayload를 track 시도.
+ * Supabase channel.track()은 push 실패를 reject가 아니라 'error'/'timed out' status로 resolve하므로,
+ * status !== 'ok' 이거나 reject면 바운드 재시도를 예약한다(성공을 놓치지 않기 위함).
+ */
+function attemptTrackPresence(): void {
+  if (!isSubscribed || !channel || lastPresencePayload == null) return;
+  channel.track(lastPresencePayload as Record<string, unknown>)
+    .then((status) => { if (status !== 'ok') scheduleTrackPresenceRetry(); })
+    .catch(() => scheduleTrackPresenceRetry());
+}
+
+/** 재시도 예약(항상 하나의 pending 재시도만). 최신 lastPresencePayload로 재시도해 수렴. */
+function scheduleTrackPresenceRetry(): void {
+  if (presenceTrackRetryTimer) return;
+  presenceTrackRetryTimer = setTimeout(() => {
+    presenceTrackRetryTimer = null;
+    attemptTrackPresence();
+  }, 2000);
+}
+
+/** pending 재시도 타이머 정리. */
+function clearTrackPresenceRetry(): void {
+  if (presenceTrackRetryTimer) {
+    clearTimeout(presenceTrackRetryTimer);
+    presenceTrackRetryTimer = null;
+  }
+}
+
 function createChannel(callbacks: RealtimeCallbacks): RealtimeChannel {
-  return supabase
+  const built = supabase
     .channel('bflow-realtime')
     .on(
       'postgres_changes',
@@ -90,6 +127,14 @@ function createChannel(callbacks: RealtimeCallbacks): RealtimeChannel {
         callbacks.onActivityInsert(payload);
       },
     );
+  // presence 는 와일드카드('*') 미지원 → sync/join/leave 3개 이벤트를 개별 구독.
+  // 각 이벤트마다 전체 상태를 다시 병합하도록 스냅샷을 넘긴다.
+  const emitPresence = () => callbacks.onPresenceSync?.(built.presenceState() as Record<string, unknown[]>);
+  built
+    .on('presence', { event: 'sync' }, emitPresence)
+    .on('presence', { event: 'join' }, emitPresence)
+    .on('presence', { event: 'leave' }, emitPresence);
+  return built;
 }
 
 function scheduleRetry(): void {
@@ -112,6 +157,8 @@ function reconnect(callbacks: RealtimeCallbacks): void {
 
   const newChannel = createChannel(callbacks);
   channel = newChannel;
+  // 새 채널은 아직 join 전 → track 금지 상태로 초기화.
+  isSubscribed = false;
 
   newChannel.subscribe((status) => {
     // 이미 교체된 채널의 콜백은 무시 (stale 방지)
@@ -123,11 +170,17 @@ function reconnect(callbacks: RealtimeCallbacks): void {
     if (status === 'SUBSCRIBED') {
       // 연결 성공 — 재시도 카운터 초기화
       retry.reset();
+      isSubscribed = true;
+      // 재연결 시 최신 채널로 presence 재track (끊긴 사이 유실 방지). 비-ok status는 바운드 재시도.
+      clearTrackPresenceRetry();
+      attemptTrackPresence();
     } else if (status === 'TIMED_OUT') {
       // 타임아웃 — CLOSED로 이어지므로 여기서는 로그만
       console.log('[Realtime] 연결 시간 초과, CLOSED 전환 대기...');
     } else if (status === 'CLOSED' || status === 'CHANNEL_ERROR') {
-      // 연결 끊김 — 재시도 스케줄
+      // 연결 끊김 — join 무효화 + pending 재시도 정리 후 재연결 스케줄
+      isSubscribed = false;
+      clearTrackPresenceRetry();
       scheduleRetry();
     }
   });
@@ -146,9 +199,25 @@ export function setupRealtimeSubscription(callbacks: RealtimeCallbacks): () => v
   };
 }
 
+/**
+ * presence 페이로드를 항상 현재(최신) 채널로 track.
+ * 마지막 페이로드를 모듈 스코프에 저장해 재연결(SUBSCRIBED) 시 재track한다.
+ * `channel`은 reconnect마다 교체되는 모듈 스코프 변수 → 호출 시점의 최신 채널 사용.
+ * join(SUBSCRIBED) 전에는 저장만 하고 SUBSCRIBED 핸들러가 재track한다.
+ * 새 payload가 오면 pending 재시도를 대체(항상 최신 상태로 수렴, 무한 루프 없음).
+ */
+export function trackPresence(payload: unknown): void {
+  lastPresencePayload = payload;
+  clearTrackPresenceRetry();
+  attemptTrackPresence();
+}
+
 /** Realtime 구독 해제 */
 export function teardownRealtime(): void {
   savedCallbacks = null;
+  lastPresencePayload = null;
+  isSubscribed = false;
+  clearTrackPresenceRetry();
   retry.clear();
   if (channel) {
     supabase.removeChannel(channel);

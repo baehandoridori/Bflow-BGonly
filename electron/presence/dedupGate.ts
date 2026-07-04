@@ -1,0 +1,25 @@
+// electron/presence/dedupGate.ts
+// 순수 상태 헬퍼: 직전 값과 다를 때만 emit 허용. reset()으로 dedup 기억을 비워
+// 같은 값이라도 다음 호출에서 다시 emit 되게 한다(로그아웃→재로그인 재방송 등).
+// prev=null 은 "아직 emit 안 함" 상태. 빈 문자열('' = Moho 없음) 키와도 충돌하지 않는다.
+
+export interface DedupGate {
+  /** 직전 emit된 값과 다르면 true(그리고 기억 갱신). 같으면 false. */
+  shouldEmit: (key: string) => boolean;
+  /** dedup 기억 초기화 — 다음 shouldEmit은 값이 같아도 true. */
+  reset: () => void;
+}
+
+export function createDedupGate(): DedupGate {
+  let prev: string | null = null;
+  return {
+    shouldEmit(key: string): boolean {
+      if (prev !== null && key === prev) return false;
+      prev = key;
+      return true;
+    },
+    reset(): void {
+      prev = null;
+    },
+  };
+}
