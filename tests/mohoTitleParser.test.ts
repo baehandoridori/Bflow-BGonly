@@ -24,3 +24,6 @@ test('버전 표기가 붙은 앱 접미사도 제거', () => {
 test('파일명에 대시가 있어도 확장자 앞까지 보존', () => {
   assert.deepEqual(parseMohoTitles(['ep2-b030-retake.moho -Moho']), ['ep2-b030-retake.moho']);
 });
+test('제목에 경로가 포함돼도 basename만 취함(sceneLinkIndex 계약 정합)', () => {
+  assert.deepEqual(parseMohoTitles(['C:\\proj\\ep2\\b030.moho -Moho']), ['b030.moho']);
+});

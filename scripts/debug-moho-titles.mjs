@@ -3,11 +3,12 @@
 import { spawn } from 'child_process';
 const args = [
   '-NoProfile', '-NonInteractive', '-Command',
-  "Get-Process -Name *moho* -ErrorAction SilentlyContinue | Select-Object Id, ProcessName, MainWindowTitle | Format-Table -AutoSize",
+  "[Console]::OutputEncoding=[Text.Encoding]::UTF8; Get-Process -Name *moho* -ErrorAction SilentlyContinue | Select-Object Id, ProcessName, MainWindowTitle | Format-Table -AutoSize",
 ];
 const ps = spawn('powershell.exe', args, { windowsHide: true });
 let out = '';
-ps.stdout.on('data', (d) => { out += d.toString(); });
+ps.stdout.setEncoding('utf8');
+ps.stdout.on('data', (d) => { out += d; });
 ps.stderr.on('data', (d) => process.stderr.write(d));
 ps.on('close', () => {
   console.log('=== Get-Process *moho* ===');
