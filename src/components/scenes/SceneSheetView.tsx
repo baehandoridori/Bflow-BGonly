@@ -33,6 +33,10 @@ import { getSceneWorkLinkSlots } from '@/utils/sceneWorkLinks';
 import { loadPreferences, savePreferences } from '@/services/settingsService';
 import { SceneContextMenu } from './SceneContextMenu';
 import { SceneWorkLinkBadges } from './SceneWorkLinkBadges';
+import { EditingNameLabels } from './EditingNameLabels';
+import { useEditingPresenceStore } from '@/stores/useEditingPresenceStore';
+import { editingBeamRowClassName, selectEditorsForScenes } from '@/utils/editingPresence';
+import { useAuthStore } from '@/stores/useAuthStore';
 import {
   persistLengthChangeIndependent,
   saveLengthChangeField,
@@ -508,6 +512,10 @@ export function SceneSheetView({
   const episodes = useDataStore((s) => s.episodes);
   const episodeTitles = useDataStore((s) => s.episodeTitles);
   const linkMap = useSceneWorkLinkStore((s) => s.linkMap);
+  // 실시간 편집 프레즌스 — 스냅샷과 현재 사용자 id를 한 번만 구독하고,
+  // 행별 편집자는 순수 선택자로 계산(rules-of-hooks 준수: map 안에서 훅 호출 금지).
+  const presenceByScene = useEditingPresenceStore((s) => s.byScene);
+  const presenceExcludeUserId = useAuthStore((s) => s.currentUser?.id ?? null);
   const revisionCountBySceneId = useMemo(() => {
     if (!sheetName) return new Map<string, number>();
     let siblings: string[] = [];
@@ -894,6 +902,8 @@ export function SceneSheetView({
               const commentCount = commentCounts[commentKey] ?? 0;
               const isUnreadComment = commentUnreadByKey?.[commentKey] ?? false;
               const openRevCount = revisionCountBySceneId.get(scene.sceneId) ?? 0;
+              // 실시간 편집 프레즌스 — 이 행 씬 파일을 지금 열어둔 다른 팀원(자기 제외)
+              const editingUsers = selectEditorsForScenes(presenceByScene, [scene.id], presenceExcludeUserId);
 
               return (
                 <Fragment key={selectionId}>
@@ -928,6 +938,8 @@ export function SceneSheetView({
                       openRevCount > 0 && 'sheet-row-revision-open',
                       isLayoutMode && !isLastInGroup && 'scene-row-group-mid',
                       isLayoutMode && isLastInGroup && 'scene-row-group-last',
+                      // 실시간 편집 프레즌스 — 행 무지개 테두리(<tr> box-shadow 링, div wrapper 없음)
+                      editingBeamRowClassName(editingUsers),
                     )}
                     onClick={(e) => {
                       if ((e.ctrlKey || e.metaKey) && onCtrlClick) {
@@ -961,6 +973,8 @@ export function SceneSheetView({
                           L#{scene.layoutId}
                         </span>
                       )}
+                      {/* 실시간 편집 프레즌스 — 이름칩(최대 2 + +N) */}
+                      <EditingNameLabels editors={editingUsers} max={2} className="flex-shrink-0" />
                     </div>
                   </td>
                   <td className="px-1 py-1.5">
