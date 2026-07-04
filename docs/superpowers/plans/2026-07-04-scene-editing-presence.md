@@ -22,6 +22,7 @@
 
 **import 관례:**
 - **electron/ 신규 소스는 기존 관례를 따라 `import { spawn } from 'child_process'`, `import path from 'path'` (node: 접두사 없음).** 테스트만 `node:test`/`node:assert/strict` 사용(기존 테스트 관례).
+- **electron/ 소스 간(source-to-source) import는 확장자 없이** 쓴다 (예: `from './types'`, `from '../supabase'`). `tsconfig.node.json`은 `allowImportingTsExtensions`가 없어 `.ts` 확장자 import가 `TS5097`로 실패한다. **테스트 파일(tests/)만** 소스를 `.ts` 확장자로 import한다(두 tsconfig include 밖 + `node --test` 타입스트리핑이 실제 경로 필요). src/ 렌더러 코드는 `@/` alias(확장자 없음) 사용. (PR1에서 확인된 사항.)
 
 **공유 타입 (renderer↔main 경계):**
 - 이 저장소는 electron과 src가 별도 tsconfig 프로젝트다(`tsconfig.json` include: `['src']`, `tsconfig.node.json` include: `['vite.config.ts','electron']`). `SceneWorkLink`가 electron/src 양쪽에 병렬 정의된 것과 동일한 관례를 따른다.
@@ -465,7 +466,7 @@ test('편집 씬 없으면 빈 스냅샷', () => {
 
 ```ts
 // electron/presence/presenceMerge.ts
-import type { EditingPresencePayload, EditingPresenceSnapshot, EditingUser } from './types.ts';
+import type { EditingPresencePayload, EditingPresenceSnapshot, EditingUser } from './types';
 
 type PresenceState = Record<string, EditingPresencePayload[]>;
 
@@ -656,11 +657,11 @@ git commit -m "realtime: presence sync/join/leave + trackPresence(최신채널)+
 
 ```ts
 // electron/presence/editingPresenceService.ts
-import type { SupabaseSceneWorkLink } from '../supabase.ts';
-import type { EditingPresenceSnapshot, EditingPresencePayload } from './types.ts';
-import { buildPrimaryFileBasenameIndex, resolveScenesForBasenames } from './sceneLinkIndex.ts';
-import { startMohoTitlePolling } from './mohoWindowPoller.ts';
-import { mergePresenceState } from './presenceMerge.ts';
+import type { SupabaseSceneWorkLink } from '../supabase';
+import type { EditingPresenceSnapshot, EditingPresencePayload } from './types';
+import { buildPrimaryFileBasenameIndex, resolveScenesForBasenames } from './sceneLinkIndex';
+import { startMohoTitlePolling } from './mohoWindowPoller';
+import { mergePresenceState } from './presenceMerge';
 
 export interface EditingPresenceDeps {
   getCurrentUser: () => { userId: string; username: string } | null;
