@@ -1,6 +1,7 @@
 // electron/presence/mohoWindowPoller.ts
 import { spawn } from 'child_process';
 import { parseMohoTitles } from './mohoTitleParser';
+import { createDedupGate } from './dedupGate';
 
 /**
  * 모든 Moho 인스턴스의 MainWindowTitle을 한 줄씩 출력하는 PS 명령 인자.
@@ -39,24 +40,34 @@ export function pollMohoActiveBasenames(): Promise<string[]> {
   });
 }
 
-/** 주기 폴링 시작. basename 집합이 달라질 때만 onChange. @returns 중단 함수 */
+export interface MohoTitlePolling {
+  /** 폴링 중단. */
+  stop: () => void;
+  /** dedup 기억 리셋 + 즉시 재폴링 — 파일 집합이 동일해도 다음 tick에서 onChange 재발생. */
+  reset: () => void;
+}
+
+/** 주기 폴링 시작. basename 집합이 달라질 때만 onChange. reset()으로 재방송 강제. */
 export function startMohoTitlePolling(opts: {
   intervalMs?: number;
   onChange: (basenames: string[]) => void;
-}): () => void {
+}): MohoTitlePolling {
   const intervalMs = opts.intervalMs ?? 4000;
-  let prevKey = '__init__';
+  const gate = createDedupGate();
   let stopped = false;
   let timer: NodeJS.Timeout | null = null;
   const tick = async () => {
     const basenames = await pollMohoActiveBasenames();
     if (stopped) return;
     const key = [...basenames].sort().join('|');
-    if (key !== prevKey) { prevKey = key; opts.onChange(basenames); }
+    if (gate.shouldEmit(key)) opts.onChange(basenames);
   };
   if (process.platform === 'win32') {
     void tick();
     timer = setInterval(() => { void tick(); }, intervalMs);
   }
-  return () => { stopped = true; if (timer) clearInterval(timer); };
+  return {
+    stop: () => { stopped = true; if (timer) clearInterval(timer); },
+    reset: () => { gate.reset(); if (!stopped && process.platform === 'win32') void tick(); },
+  };
 }

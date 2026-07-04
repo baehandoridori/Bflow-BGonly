@@ -1375,13 +1375,14 @@ import type { SupabaseUser, BulkStageUpdate, BulkFieldUpdate } from './supabase'
 import { setupRealtimeSubscription, teardownRealtime, trackPresence } from './realtime';
 import { recordActivity, getActivity, channelToTable, channelToAction } from './activityLogger';
 import { startEditingPresenceService, receivePresence } from './presence/editingPresenceService';
+import type { EditingPresenceHandle } from './presence/editingPresenceService';
 import type { EditingPresenceSnapshot, EditingPresencePayload } from './presence/types';
 
 // Realtime 구독 cleanup 핸들 — 앱 종료(teardownRealtime) 시 해제해 채널 누수 방지.
 let characterBoardRealtimeCleanup: (() => void) | null = null;
 let compositingStatesRealtimeCleanup: (() => void) | null = null;
-// 실시간 편집 프레즌스 서비스 중단 핸들 + 전체 씬 작업링크 캐시.
-let stopEditingPresence: (() => void) | null = null;
+// 실시간 편집 프레즌스 서비스 핸들 + 전체 씬 작업링크 캐시.
+let editingPresence: EditingPresenceHandle | null = null;
 let sceneWorkLinkCache: SupabaseSceneWorkLink[] = [];
 
 // ─── Supabase IPC 에러 래퍼 ───
@@ -1425,11 +1426,17 @@ let currentActivityUser: { id: string; name: string } | null = null;
 ipcMain.handle('auth:set-current-user', (_e, user: { id: string; name: string } | null) => {
   const prev = currentActivityUser;
   currentActivityUser = user;
+  const identityChanged = (prev?.id ?? null) !== (user?.id ?? null);
   // 로그아웃(사용자 → null): 내가 편집 중이라는 표시를 즉시 비운다(빈 씬 목록 track).
   if (prev && !user) {
     try {
       trackPresence({ userId: prev.id, username: prev.name, editingSceneUuids: [], updatedAt: new Date().toISOString() });
     } catch { /* ignore */ }
+  }
+  // 신원 변경(로그아웃/로그인/계정 전환): dedup 기억 리셋 → 같은 Moho 파일이 열린 채여도
+  // 다음 폴에서 새 신원으로 재track(공유 로그인 PC에서 "재로그인했는데 편집중 표시 안 됨" 방지).
+  if (identityChanged) {
+    try { editingPresence?.reset(); } catch { /* ignore */ }
   }
 });
 
@@ -2669,9 +2676,9 @@ async function refreshSceneWorkLinkCache(): Promise<void> {
 
 // 프레즌스 서비스 기동: 캐시 최초 로드 후 폴러 시작. 중복 기동 방지.
 async function startEditingPresence(): Promise<void> {
-  if (stopEditingPresence) return;
+  if (editingPresence) return;
   await refreshSceneWorkLinkCache();
-  stopEditingPresence = startEditingPresenceService({
+  editingPresence = startEditingPresenceService({
     getCurrentUser: () => currentActivityUser
       ? { userId: currentActivityUser.id, username: currentActivityUser.name }
       : null,
@@ -2685,8 +2692,8 @@ async function startEditingPresence(): Promise<void> {
 
 // 프레즌스 서비스 중단(앱 종료 시).
 function stopEditingPresenceService(): void {
-  try { stopEditingPresence?.(); } catch { /* ignore */ }
-  stopEditingPresence = null;
+  try { editingPresence?.stop(); } catch { /* ignore */ }
+  editingPresence = null;
 }
 
 function broadcastSupabaseEvent(table: string, payload: unknown) {
