@@ -1269,6 +1269,7 @@ export interface ElectronAPI {
     => Promise<Array<{ startTs: number; count: number }>>;
   supabaseGetRealtimeStatus: () => Promise<string>;
   onSupabaseRealtime: (callback: (event: unknown) => void) => () => void;
+  onSupabasePresence: (callback: (snapshot: unknown) => void) => () => void;
   onSupabaseStatus: (callback: (status: string) => void) => () => void;
   onSupabaseBroadcast: (callback: (event: unknown) => void) => () => void;
   // 슬랙 웹훅

@@ -962,6 +962,7 @@ export function installDevElectronAPI(): void {
     supabaseGetActivity: async () => [],
     supabaseGetRealtimeStatus: async () => 'CONNECTING',
     onSupabaseRealtime: noop,
+    onSupabasePresence: noop,
     onSupabaseStatus: noop,
     onSupabaseBroadcast: noop,
 

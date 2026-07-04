@@ -1319,6 +1319,7 @@ import {
   upsertSceneWorkLink as sbUpsertSceneWorkLink,
   deleteSceneWorkLink as sbDeleteSceneWorkLink,
   type SceneWorkLinkInput,
+  type SupabaseSceneWorkLink,
   readAllMetadata as sbReadAllMetadata,
   readMetadata as sbReadMetadata,
   writeMetadata as sbWriteMetadata,
@@ -1371,12 +1372,17 @@ import {
   startCharacterBoardRealtime as sbStartCharacterBoardRealtime,
 } from './supabase';
 import type { SupabaseUser, BulkStageUpdate, BulkFieldUpdate } from './supabase';
-import { setupRealtimeSubscription, teardownRealtime } from './realtime';
+import { setupRealtimeSubscription, teardownRealtime, trackPresence } from './realtime';
 import { recordActivity, getActivity, channelToTable, channelToAction } from './activityLogger';
+import { startEditingPresenceService, receivePresence } from './presence/editingPresenceService';
+import type { EditingPresenceSnapshot, EditingPresencePayload } from './presence/types';
 
 // Realtime 구독 cleanup 핸들 — 앱 종료(teardownRealtime) 시 해제해 채널 누수 방지.
 let characterBoardRealtimeCleanup: (() => void) | null = null;
 let compositingStatesRealtimeCleanup: (() => void) | null = null;
+// 실시간 편집 프레즌스 서비스 중단 핸들 + 전체 씬 작업링크 캐시.
+let stopEditingPresence: (() => void) | null = null;
+let sceneWorkLinkCache: SupabaseSceneWorkLink[] = [];
 
 // ─── Supabase IPC 에러 래퍼 ───
 function wrapIpc<T extends unknown[], R>(
@@ -1417,7 +1423,14 @@ function wrapIpc<T extends unknown[], R>(
 let currentActivityUser: { id: string; name: string } | null = null;
 
 ipcMain.handle('auth:set-current-user', (_e, user: { id: string; name: string } | null) => {
+  const prev = currentActivityUser;
   currentActivityUser = user;
+  // 로그아웃(사용자 → null): 내가 편집 중이라는 표시를 즉시 비운다(빈 씬 목록 track).
+  if (prev && !user) {
+    try {
+      trackPresence({ userId: prev.id, username: prev.name, editingSceneUuids: [], updatedAt: new Date().toISOString() });
+    } catch { /* ignore */ }
+  }
 });
 
 import { supabase as supabaseClient, recordActivityLog as sbRecordActivityLog } from './supabase';
@@ -2568,7 +2581,15 @@ function startSupabaseRealtime() {
     onRevisionSetChange: (payload) => broadcastSupabaseEvent('comp_revision_sets', payload),
     onEpisodeChange: (payload) => broadcastSupabaseEvent('episodes', payload),
     onPartChange: (payload) => broadcastSupabaseEvent('parts', payload),
-    onSceneWorkLinkChange: (payload) => broadcastSupabaseEvent('scene_work_links', payload),
+    onSceneWorkLinkChange: (payload) => {
+      broadcastSupabaseEvent('scene_work_links', payload);
+      // 프레즌스 basename→씬 매칭에 쓰는 캐시를 최신화(전체 재로드).
+      void refreshSceneWorkLinkCache();
+    },
+    onPresenceSync: (state) => receivePresence(
+      state as Record<string, EditingPresencePayload[]>,
+      broadcastSupabasePresence,
+    ),
     onActivityInsert: (payload) => {
       // 활동 기록은 INSERT 만 추적, 모든 윈도우에 전파
       const row = payload.new;
@@ -2632,6 +2653,40 @@ function startSupabaseRealtime() {
       if (!win.isDestroyed()) win.webContents.send('character-board:realtime-status', status);
     }
   });
+
+  // 5) 실시간 편집 프레즌스 — Moho 창 제목 폴링 → track / presence 수신 → broadcast.
+  void startEditingPresence();
+}
+
+// 전체 씬 작업링크를 다시 읽어 프레즌스 캐시를 최신화. 실패 시 기존 캐시 유지.
+async function refreshSceneWorkLinkCache(): Promise<void> {
+  try {
+    sceneWorkLinkCache = await sbReadSceneWorkLinks();
+  } catch (err) {
+    console.warn('[presence] scene_work_links 캐시 갱신 실패:', err);
+  }
+}
+
+// 프레즌스 서비스 기동: 캐시 최초 로드 후 폴러 시작. 중복 기동 방지.
+async function startEditingPresence(): Promise<void> {
+  if (stopEditingPresence) return;
+  await refreshSceneWorkLinkCache();
+  stopEditingPresence = startEditingPresenceService({
+    getCurrentUser: () => currentActivityUser
+      ? { userId: currentActivityUser.id, username: currentActivityUser.name }
+      : null,
+    getWorkLinks: () => sceneWorkLinkCache,
+    track: (p) => trackPresence(p),
+    broadcast: broadcastSupabasePresence,
+    now: () => new Date().toISOString(),
+    logCollision: (b) => console.warn('[presence] 파일명 충돌(동명 다른 폴더):', b),
+  });
+}
+
+// 프레즌스 서비스 중단(앱 종료 시).
+function stopEditingPresenceService(): void {
+  try { stopEditingPresence?.(); } catch { /* ignore */ }
+  stopEditingPresence = null;
 }
 
 function broadcastSupabaseEvent(table: string, payload: unknown) {
@@ -2641,6 +2696,16 @@ function broadcastSupabaseEvent(table: string, payload: unknown) {
   }
   for (const win of widgetWindows.values()) {
     if (!win.isDestroyed()) win.webContents.send('supabase:realtime-event', event);
+  }
+}
+
+// 실시간 편집 프레즌스 스냅샷을 모든 윈도우에 전달.
+function broadcastSupabasePresence(snapshot: EditingPresenceSnapshot) {
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.webContents.send('supabase:presence-event', snapshot);
+  }
+  for (const win of widgetWindows.values()) {
+    if (!win.isDestroyed()) win.webContents.send('supabase:presence-event', snapshot);
   }
 }
 
@@ -4297,6 +4362,7 @@ app.on('before-quit', (e) => {
   // Supabase Realtime 정리
   try { characterBoardRealtimeCleanup?.(); characterBoardRealtimeCleanup = null; } catch { /* ignore */ }
   try { compositingStatesRealtimeCleanup?.(); compositingStatesRealtimeCleanup = null; } catch { /* ignore */ }
+  stopEditingPresenceService();
   teardownRealtime();
 
   // 위젯 위치 즉시 저장 (closed 이벤트보다 먼저 실행)
