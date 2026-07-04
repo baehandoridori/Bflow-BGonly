@@ -297,3 +297,210 @@ html.is-resizing .unified-scene-sheet *::after {
 .sheet-row-revision-open:hover {
   background: linear-gradient(90deg, rgb(var(--color-accent) / 0.14) 0%, rgb(var(--color-accent) / 0.04) 5%);
 }
+
+/* ─────────────────────────────────────────────
+ * 실시간 편집 프레즌스 (v1.71.0) — "지금 이 씬 파일을 작업 중"
+ * 회전 무지개 테두리(카드/모달용 div) + 행 테두리(<tr>) + 이름표 + 배너.
+ * 기존 회전 conic 패턴(--scene-effect-angle @property + scene-effect-rotate
+ * keyframe, 위 lines 8-13 / 74-76)과 mask-composite 링 기법(.scene-num-glow-wrap
+ * ::before, lines 25-48)을 그대로 재사용한다.
+ * ───────────────────────────────────────────── */
+
+/* ── 카드/모달용: 요소에 직접 붙는 회전 무지개 테두리 (래퍼 아님) ──
+ * .scene-num-glow-wrap::before 와 동일한 conic + mask-composite exclude 기법.
+ * 요소 자신에 position:relative 만 부여하고 ::before 로 링을 그린다.
+ */
+.editing-beam {
+  position: relative;
+}
+.editing-beam::before {
+  content: '';
+  position: absolute;
+  inset: -2px;
+  border-radius: inherit;
+  padding: 2px;
+  background: conic-gradient(
+    from var(--scene-effect-angle),
+    #ff6b6b, #fdcb6e, #4ade80, #38bdf8, #a78bfa, #f472b6, #ff6b6b
+  );
+  -webkit-mask:
+    linear-gradient(#000 0 0) content-box,
+    linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+          mask-composite: exclude;
+  animation: scene-effect-rotate 5.5s linear infinite;
+  pointer-events: none;
+  z-index: 3;
+}
+/* 2명 이상 동시 편집 — 붉은 기 무지개(경고 톤) */
+.editing-beam.editing-beam--warn::before {
+  background: conic-gradient(
+    from var(--scene-effect-angle),
+    #ff4d4d, #ff6b6b, #fdcb6e, #ff6b6b, #ff4d4d, #f472b6, #ff4d4d
+  );
+}
+
+/* ── 시트 <tr>용: <div> wrapper 없이 행에 링 ──
+ * <tr> 은 <div> 로 감쌀 수 없고, <tr>::after 의 inset/padding 링은 테이블
+ * 레이아웃에서 행 높이/정렬을 깨기 쉽다. 그래서 이미 <tr> 에서 검증된
+ * .scene-row-highlighted(lines 95-119) 와 동일하게 position:relative +
+ * isolation + box-shadow(inset) 회전 링으로 그린다. 색상 각도만 conic 대신
+ * box-shadow 를 keyframe 으로 순환시켜 무지개 흐름을 흉내낸다.
+ */
+tr.editing-beam-row {
+  position: relative;
+  isolation: isolate;
+  animation: editing-beam-row-rainbow 5.5s linear infinite;
+}
+/* 좌측 액센트 바 — .scene-row-highlighted 의 td:first-child::before 방식 재사용 */
+tr.editing-beam-row > td:first-child::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 3px;
+  background: linear-gradient(180deg, #38bdf8, #a78bfa, #f472b6, #fdcb6e, #38bdf8);
+  background-size: 100% 300%;
+  animation: editing-beam-row-bar 5.5s linear infinite;
+  pointer-events: none;
+  z-index: 2;
+}
+tr.editing-beam-row.editing-beam-row--warn {
+  animation: editing-beam-row-rainbow-warn 5.5s linear infinite;
+}
+tr.editing-beam-row.editing-beam-row--warn > td:first-child::after {
+  background: linear-gradient(180deg, #ff4d4d, #f472b6, #ff6b6b, #ff4d4d);
+  background-size: 100% 300%;
+}
+
+@keyframes editing-beam-row-rainbow {
+  0%   { box-shadow: inset 0 0 0 1.5px rgba(56, 189, 248, 0.55); }
+  33%  { box-shadow: inset 0 0 0 1.5px rgba(167, 139, 250, 0.55); }
+  66%  { box-shadow: inset 0 0 0 1.5px rgba(244, 114, 182, 0.55); }
+  100% { box-shadow: inset 0 0 0 1.5px rgba(56, 189, 248, 0.55); }
+}
+@keyframes editing-beam-row-rainbow-warn {
+  0%   { box-shadow: inset 0 0 0 1.5px rgba(255, 77, 77, 0.6); }
+  50%  { box-shadow: inset 0 0 0 1.5px rgba(244, 114, 182, 0.6); }
+  100% { box-shadow: inset 0 0 0 1.5px rgba(255, 77, 77, 0.6); }
+}
+@keyframes editing-beam-row-bar {
+  0%   { background-position: 0 0%; }
+  100% { background-position: 0 100%; }
+}
+
+/* ── 무지개 이름표(카드/시트 코너 + 배너 안) ──
+ * 작은 알약: 같은 conic + mask 링 기법(작은 padding) + 내부는 테마 토큰 배경
+ * (다크/라이트 자동) + 라이브 점(blink). 목업 톤 이식.
+ */
+.editing-namelabel {
+  position: relative;
+  display: inline-flex;
+  border-radius: 999px;
+  padding: 1.5px;
+  isolation: isolate;
+  vertical-align: middle;
+}
+.editing-namelabel::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: 999px;
+  padding: 1.5px;
+  background: conic-gradient(
+    from var(--scene-effect-angle),
+    #ff6b6b, #fdcb6e, #4ade80, #38bdf8, #a78bfa, #f472b6, #ff6b6b
+  );
+  -webkit-mask:
+    linear-gradient(#000 0 0) content-box,
+    linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+          mask-composite: exclude;
+  animation: scene-effect-rotate 5.5s linear infinite;
+  pointer-events: none;
+  z-index: 0;
+}
+.editing-namelabel__inner {
+  position: relative;
+  z-index: 1;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 1.5px 8px;
+  border-radius: 999px;
+  background: rgb(var(--color-bg-card));
+  color: rgb(var(--color-text-primary));
+  font-size: 10.5px;
+  font-weight: 700;
+  line-height: 1.4;
+  white-space: nowrap;
+}
+.editing-namelabel__dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  flex-shrink: 0;
+  background: #4ade80;
+  box-shadow: 0 0 5px rgba(74, 222, 128, 0.9);
+  animation: editing-namelabel-blink 1.6s ease-in-out infinite;
+}
+
+@keyframes editing-namelabel-blink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.35; }
+}
+
+/* ── 상세 모달 배너 (링 없이 연한 무지개 스트립) ── */
+.editing-banner {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 12px 20px 4px;
+  padding: 8px 12px;
+  border-radius: 10px;
+  border: 1px solid rgb(var(--color-bg-border) / 0.6);
+  background:
+    linear-gradient(
+      90deg,
+      rgba(56, 189, 248, 0.12),
+      rgba(167, 139, 250, 0.12) 45%,
+      rgba(244, 114, 182, 0.12)
+    ),
+    rgb(var(--color-bg-card));
+}
+.editing-banner__text {
+  font-size: 12px;
+  font-weight: 600;
+  color: rgb(var(--color-text-secondary));
+}
+.editing-banner.editing-banner--warn {
+  border-color: rgba(255, 77, 77, 0.45);
+  background:
+    linear-gradient(
+      90deg,
+      rgba(255, 77, 77, 0.14),
+      rgba(244, 114, 182, 0.12) 55%,
+      rgba(255, 118, 117, 0.14)
+    ),
+    rgb(var(--color-bg-card));
+}
+
+/* prefers-reduced-motion: 모든 프레즌스 회전/점멸 정지 (기존 is-resizing 가드와 동일 톤) */
+@media (prefers-reduced-motion: reduce) {
+  .editing-beam::before,
+  .editing-namelabel::before {
+    animation: none;
+  }
+  tr.editing-beam-row,
+  tr.editing-beam-row.editing-beam-row--warn {
+    animation: none;
+    box-shadow: inset 0 0 0 1.5px rgba(167, 139, 250, 0.55);
+  }
+  tr.editing-beam-row > td:first-child::after {
+    animation: none;
+  }
+  .editing-namelabel__dot {
+    animation: none;
+  }
+}
