@@ -1445,6 +1445,13 @@ export default function App() {
   useEffect(() => {
     const off = window.electronAPI?.onSupabasePresence?.((snap) =>
       useEditingPresenceStore.getState().applyPresenceSnapshot(snap as EditingPresenceSnapshot));
+    // 마운트 시 현재 스냅샷 replay — 리로드/새 창이 마지막 sync 이후 구독해도 현재 편집자를 즉시 반영.
+    // 단, 이미 실시간 이벤트가 들어와 스토어가 채워졌다면 stale replay로 덮지 않는다.
+    window.electronAPI?.getPresenceSnapshot?.().then((snap) => {
+      if (Object.keys(useEditingPresenceStore.getState().byScene).length === 0) {
+        useEditingPresenceStore.getState().applyPresenceSnapshot((snap ?? {}) as EditingPresenceSnapshot);
+      }
+    }).catch(() => { /* ignore */ });
     return () => off?.();
   }, []);
 

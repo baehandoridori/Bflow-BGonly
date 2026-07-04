@@ -1384,6 +1384,8 @@ let compositingStatesRealtimeCleanup: (() => void) | null = null;
 // 실시간 편집 프레즌스 서비스 핸들 + 전체 씬 작업링크 캐시.
 let editingPresence: EditingPresenceHandle | null = null;
 let sceneWorkLinkCache: SupabaseSceneWorkLink[] = [];
+// 마지막 병합 프레즌스 스냅샷 — 새 렌더러/창이 마운트 시 replay로 현재 편집자를 즉시 반영.
+let lastPresenceSnapshot: EditingPresenceSnapshot = {};
 
 // ─── Supabase IPC 에러 래퍼 ───
 function wrapIpc<T extends unknown[], R>(
@@ -2714,6 +2716,8 @@ function broadcastSupabaseEvent(table: string, payload: unknown) {
 
 // 실시간 편집 프레즌스 스냅샷을 모든 윈도우에 전달.
 function broadcastSupabasePresence(snapshot: EditingPresenceSnapshot) {
+  // 마지막 스냅샷 캐시 — 나중에 마운트하는 렌더러/창이 replay로 즉시 현재 편집자를 본다.
+  lastPresenceSnapshot = snapshot;
   if (mainWindow && !mainWindow.isDestroyed()) {
     mainWindow.webContents.send('supabase:presence-event', snapshot);
   }
@@ -2721,6 +2725,9 @@ function broadcastSupabasePresence(snapshot: EditingPresenceSnapshot) {
     if (!win.isDestroyed()) win.webContents.send('supabase:presence-event', snapshot);
   }
 }
+
+// 렌더러 마운트 시 현재 프레즌스 스냅샷 replay(리로드/새 창이 마지막 sync 이후 구독해도 빈 상태로 시작하지 않게).
+ipcMain.handle('presence:get-snapshot', () => lastPresenceSnapshot);
 
 // ─── IPC 핸들러: Google Sheets 연동 (Apps Script 웹 앱) ─────
 

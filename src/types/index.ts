@@ -1270,6 +1270,7 @@ export interface ElectronAPI {
   supabaseGetRealtimeStatus: () => Promise<string>;
   onSupabaseRealtime: (callback: (event: unknown) => void) => () => void;
   onSupabasePresence: (callback: (snapshot: unknown) => void) => () => void;
+  getPresenceSnapshot: () => Promise<unknown>;
   onSupabaseStatus: (callback: (status: string) => void) => () => void;
   onSupabaseBroadcast: (callback: (event: unknown) => void) => () => void;
   // 슬랙 웹훅

@@ -361,6 +361,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.on('supabase:presence-event', handler);
     return () => ipcRenderer.removeListener('supabase:presence-event', handler);
   },
+  // 마운트 시 현재 프레즌스 스냅샷 replay 조회 (리로드/새 창 대응)
+  getPresenceSnapshot: () => ipcRenderer.invoke('presence:get-snapshot'),
   onSupabaseStatus: (callback: (status: string) => void) => {
     const handler = (_event: unknown, status: string) => callback(status);
     ipcRenderer.on('supabase:status', handler);
