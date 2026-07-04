@@ -733,9 +733,9 @@ onSupabasePresence: (callback: (snapshot: unknown) => void) => {
 ```ts
 onSupabasePresence: (callback: (snapshot: unknown) => void) => () => void;
 ```
-`src/mocks/devElectronAPI.ts`(:488 `mockAPI`)에:
+`src/mocks/devElectronAPI.ts`(:488 `mockAPI`)에 주변 관례(`noop`, :44 = `() => () => {}`)에 맞춰:
 ```ts
-onSupabasePresence: () => () => {},
+onSupabasePresence: noop,
 ```
 
 - [ ] **Step 3: main.ts broadcast + 배선**
@@ -747,9 +747,9 @@ function broadcastSupabasePresence(snapshot: EditingPresenceSnapshot) {
   for (const win of widgetWindows.values()) if (!win.isDestroyed()) win.webContents.send('supabase:presence-event', snapshot);
 }
 ```
-- 모듈 스코프: `let sceneWorkLinkCache: SupabaseSceneWorkLink[] = [];` 초기 로드 시 `sceneWorkLinkCache = await readSceneWorkLinks();`, 기존 `onSceneWorkLinkChange`(main.ts:2571 부근)에서 갱신.
+- 모듈 스코프: `let sceneWorkLinkCache: SupabaseSceneWorkLink[] = [];` 초기 로드 시 `sceneWorkLinkCache = await sbReadSceneWorkLinks();` (main.ts:1318에서 `readSceneWorkLinks`가 `sbReadSceneWorkLinks`로 alias import됨 — 실제 alias 확인해 사용), 기존 `onSceneWorkLinkChange`(main.ts:2571 부근)에서 갱신.
 - realtime 셋업 콜백에 `onPresenceSync: (state) => receivePresence(state as Record<string, EditingPresencePayload[]>, broadcastSupabasePresence)` 추가.
-- import: `startEditingPresenceService`, `receivePresence`, `trackPresence`(realtime).
+- import: `startEditingPresenceService`, `receivePresence`(from `./presence/editingPresenceService`), `trackPresence`(from `./realtime`), 그리고 **타입** `import type { EditingPresenceSnapshot, EditingPresencePayload } from './presence/types'` (broadcast 시그니처·receivePresence 캐스트에 필요; 없으면 TS2304).
 - 세션 확정 후:
 ```ts
 const stopPresence = startEditingPresenceService({
@@ -886,7 +886,7 @@ git commit -m "프레즌스 렌더러 스토어·구독·개발 오버레이 배
     #FF6B6B, #FDCB6E, #4ADE80, #38BDF8, #A78BFA, #F472B6, #FF6B6B);
   -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
   -webkit-mask-composite: xor; mask-composite: exclude;
-  animation: scene-effect-spin 5.5s linear infinite; /* 기존 keyframe 이름에 맞춰 조정 */
+  animation: scene-effect-rotate 5.5s linear infinite; /* 기존 keyframe 이름에 맞춰 조정 */
   pointer-events: none;
 }
 .editing-beam.editing-beam--warn::before {
@@ -977,7 +977,7 @@ tr.editing-beam-row::after {
   background: conic-gradient(from var(--scene-effect-angle, 0deg), #FF6B6B,#FDCB6E,#4ADE80,#38BDF8,#A78BFA,#F472B6,#FF6B6B);
   -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
   -webkit-mask-composite: xor; mask-composite: exclude;
-  animation: scene-effect-spin 5.5s linear infinite; pointer-events: none;
+  animation: scene-effect-rotate 5.5s linear infinite; pointer-events: none;
 }
 tr.editing-beam-row.editing-beam-row--warn::after { /* 붉은 기 무지개 */ }
 @media (prefers-reduced-motion: reduce) { tr.editing-beam-row::after { animation: none; } }
@@ -988,7 +988,7 @@ tr.editing-beam-row.editing-beam-row--warn::after { /* 붉은 기 무지개 */ }
 
 행 렌더 지점: `const editors = useSceneEditingPresence([bgSceneUuid, actSceneUuid]);` → `<tr className={cn(...기존, editingBeamRowClassName(editors))}>`. 행의 적절한 셀(예: 우측 상태 셀) 안에 `<EditingNameLabels editors={editors} max={2} />`.
 
-- [ ] **Step 3: 검증(미리보기)** — 주입으로 해당 행 무지개 + 칩, 정렬/행높이 안 깨짐 확인. 2명 경고 톤. reduced-motion 정지.
+- [ ] **Step 3: 검증(미리보기)** — 주입으로 확인: (a) 행 링이 **실제로 회전**하는지, (b) `<tr>::after` 링이 **행 높이/정렬을 깨지 않는지** — 깨지면 mask-padding 대신 기존 `.scene-row-highlighted`처럼 **box-shadow 방식으로 폴백**, (c) 우측 이름칩 표시, (d) 2명 경고 톤, (e) reduced-motion에서 **정지**. (CSS는 typecheck/node --test가 못 잡으니 이 육안 확인이 유일한 게이트.)
 - [ ] **Step 4: 커밋**
 
 ```bash

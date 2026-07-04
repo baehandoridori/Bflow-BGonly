@@ -91,7 +91,7 @@
 - 선택자 훅: `useSceneEditingPresence(sceneUuid?: string | null): EditingUser[]` — 해당 씬의 편집자 목록, **현재 로그인 사용자는 제외**(자기 화면엔 자기 표시 안 함).
 
 **U6. 표시 컴포넌트 (renderer)**
-- `EditingPresenceBeam` — 자식(카드/행/모달 본체)을 회전 무지개 테두리로 감싸는 wrapper. 편집자 0명이면 아무 효과 없이 자식 그대로 통과(레이아웃 불변). 2명 이상이면 경고 톤(붉은 기 도는 무지개) variant.
+- 회전 무지개 테두리 — 편집자 0명이면 효과 없음(레이아웃 불변), 2명 이상이면 경고 톤(붉은 기) variant. **구현은 wrapper `<div>`가 아니라 CSS 클래스로 적용**한다(계획서 확정): 카드는 기존 `motion.div`에 `editing-beam` 클래스 직접 부여(Framer `layoutId` 간섭 회피), 테이블 행 `<tr>`은 `<div>`로 감쌀 수 없으므로 기존 `.scene-row-highlighted`처럼 행 pseudo-element(`editing-beam-row`)로 그린다. 모달은 링 없이 배너만.
 - `EditingNameLabels` — 무지개 이름표. 카드/시트: 최대 2개 나란히 + 초과분 `+N`. 모달 배너: 전원 나열.
 - 적용 지점:
   - 카드: `UnifiedSceneCard.tsx` 최상위 `motion.div`(`data-scene-id`) 를 `EditingPresenceBeam`으로 감싸고, 기존 `SceneWorkLinkBadges`와 겹치지 않는 코너에 `EditingNameLabels` 배치. sceneUuid는 `bgScene?.id`/`actScene?.id`(둘 중 편집자 있는 부서).
