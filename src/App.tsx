@@ -1442,12 +1442,17 @@ export default function App() {
 
   // 실시간 편집 프레즌스: 메인이 병합한 스냅샷을 받아 스토어에 반영.
   useEffect(() => {
-    const off = window.electronAPI?.onSupabasePresence?.((snap) =>
-      useEditingPresenceStore.getState().applyPresenceSnapshot(snap as EditingPresenceSnapshot));
+    // 마운트 replay가 도착하기 전에 실시간 이벤트가 먼저 오면, 더 오래된 replay로 덮지 않는다.
+    // (스토어 empty 체크로는 'leave 로 방금 비워짐'과 '아직 미수신'을 구분 못 해 유령이 되살아날 수 있음)
+    let liveEventSeen = false;
+    const off = window.electronAPI?.onSupabasePresence?.((snap) => {
+      liveEventSeen = true;
+      useEditingPresenceStore.getState().applyPresenceSnapshot(snap as EditingPresenceSnapshot);
+    });
     // 마운트 시 현재 스냅샷 replay — 리로드/새 창이 마지막 sync 이후 구독해도 현재 편집자를 즉시 반영.
-    // 단, 이미 실시간 이벤트가 들어와 스토어가 채워졌다면 stale replay로 덮지 않는다.
+    // 단, 그 사이 실시간 이벤트를 한 번이라도 받았다면(=더 최신) replay 는 적용하지 않는다.
     window.electronAPI?.getPresenceSnapshot?.().then((snap) => {
-      if (Object.keys(useEditingPresenceStore.getState().byScene).length === 0) {
+      if (!liveEventSeen) {
         useEditingPresenceStore.getState().applyPresenceSnapshot((snap ?? {}) as EditingPresenceSnapshot);
       }
     }).catch(() => { /* ignore */ });
