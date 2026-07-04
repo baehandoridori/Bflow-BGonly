@@ -322,6 +322,12 @@ export interface SceneWorkLink {
   updatedAt: string;
 }
 
+// ─── 실시간 편집 프레즌스 (main ↔ renderer 경계 공유 타입) ───
+// electron/presence/types.ts 와 구조적으로 동일하게 유지 (IPC는 평문 JSON).
+export interface EditingUser { userId: string; username: string; }
+/** sceneUuid -> 그 씬을 편집 중인 사용자들 */
+export type EditingPresenceSnapshot = Record<string, EditingUser[]>;
+
 export interface Scene {
   id?: string;   // Supabase UUID (Sheets 모드에서는 undefined)
   no: number;
