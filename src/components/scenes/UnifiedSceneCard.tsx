@@ -29,6 +29,9 @@ import { StageSegmentToggle, stageIcon } from './StageSegmentToggle';
 import { RevisionCornerFlag } from './RevisionCornerFlag';
 import { AssigneeProgressStack } from './AssigneeProgressStack';
 import { SceneWorkLinkBadges } from './SceneWorkLinkBadges';
+import { EditingNameLabels } from './EditingNameLabels';
+import { useSceneEditingPresence } from '@/stores/useEditingPresenceStore';
+import { editingBeamClassName } from '@/utils/editingPresence';
 import { hasMultiAssigneeProgress } from '@/utils/assigneeProgress';
 import {
   persistLengthChangeAtomic,
@@ -114,6 +117,8 @@ export function UnifiedSceneCard({
   const users = useAuthStore((s) => s.users);
   const userNames = useMemo(() => users.map((u) => u.name), [users]);
   const linkMap = useSceneWorkLinkStore((s) => s.linkMap);
+  // 실시간 편집 프레즌스 — 이 씬 파일을 지금 열어둔 다른 팀원(자기 제외)
+  const editingUsers = useSceneEditingPresence([bgScene?.id, actScene?.id]);
   const episodeName = useDataStore((s) => {
     const sheetName = bgSheetName ?? actSheetName;
     if (!sheetName) return undefined;
@@ -293,6 +298,8 @@ export function UnifiedSceneCard({
         isHighlighted && 'scene-highlight',
         isSelected && 'scene-card-selected',
         cardWholePendingClass,
+        // 실시간 편집 프레즌스 — 회전 무지개 테두리(래퍼 없이 클래스만)
+        editingBeamClassName(editingUsers),
       )}
       style={{
         overflow: 'visible',
@@ -308,6 +315,12 @@ export function UnifiedSceneCard({
       } : {})}
     >
         {isHighlighted && <div className="scene-highlight-bg" />}
+
+        {/* 실시간 편집 프레즌스 — 무지개 이름표(좌상단, 링크 배지와 겹치지 않게) */}
+        <EditingNameLabels
+          editors={editingUsers}
+          className="absolute -top-3 left-3 z-20"
+        />
 
         <SceneWorkLinkBadges
           bgSceneUuid={bgScene?.id}
