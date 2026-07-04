@@ -50,6 +50,9 @@ import {
   normalizeStarNestSettings,
 } from '@/utils/starNestSettings';
 import { WelcomeToast } from '@/components/WelcomeToast';
+import { useEditingPresenceStore } from '@/stores/useEditingPresenceStore';
+import { EditingPresenceDebugOverlay } from '@/components/dev/EditingPresenceDebugOverlay';
+import type { EditingPresenceSnapshot } from '@/types';
 import { UpdateCenterModal } from '@/components/update/UpdateCenterModal';
 import { getGreeting, isFirstLogin, markFirstLoginShown } from '@/utils/greetings';
 import { useGlobalShortcuts } from '@/hooks/useGlobalShortcuts';
@@ -1437,6 +1440,13 @@ export default function App() {
   }, [authReady, loadData]);
 
   // onSheetChanged 리스너 삭제됨 — Supabase Realtime이 대체 (M-3)
+
+  // 실시간 편집 프레즌스: 메인이 병합한 스냅샷을 받아 스토어에 반영.
+  useEffect(() => {
+    const off = window.electronAPI?.onSupabasePresence?.((snap) =>
+      useEditingPresenceStore.getState().applyPresenceSnapshot(snap as EditingPresenceSnapshot));
+    return () => off?.();
+  }, []);
 
   // Supabase Realtime: DB 변경 감지 → delta 직접 적용 또는 full reload
   useEffect(() => {
@@ -3044,6 +3054,9 @@ export default function App() {
       {greetingToast && !welcomeUser && (
         <WelcomeToast message={greetingToast} onDismiss={() => setGreetingToast(null)} />
       )}
+
+      {/* 실시간 편집 프레즌스 개발용 종단 검증 오버레이 (PR3에서 제거) */}
+      {import.meta.env.DEV && <EditingPresenceDebugOverlay />}
 
       {/* 종료 대기 오버레이 (Phase 0-5) */}
       {savingBeforeQuit && (
