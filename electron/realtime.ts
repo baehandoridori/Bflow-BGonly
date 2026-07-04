@@ -25,6 +25,8 @@ let channel: RealtimeChannel | null = null;
 let savedCallbacks: RealtimeCallbacks | null = null;
 // 마지막으로 track한 presence 페이로드 — 재연결(SUBSCRIBED) 시 최신 채널로 재track.
 let lastPresencePayload: unknown | null = null;
+// 현재 채널이 SUBSCRIBED(join 완료) 상태인지. join 전 track()은 reject → unhandled rejection이 되므로 게이트로 막는다.
+let isSubscribed = false;
 const retry = createRetryManager('Realtime');
 
 function createChannel(callbacks: RealtimeCallbacks): RealtimeChannel {
@@ -124,6 +126,8 @@ function reconnect(callbacks: RealtimeCallbacks): void {
 
   const newChannel = createChannel(callbacks);
   channel = newChannel;
+  // 새 채널은 아직 join 전 → track 금지 상태로 초기화.
+  isSubscribed = false;
 
   newChannel.subscribe((status) => {
     // 이미 교체된 채널의 콜백은 무시 (stale 방지)
@@ -135,15 +139,17 @@ function reconnect(callbacks: RealtimeCallbacks): void {
     if (status === 'SUBSCRIBED') {
       // 연결 성공 — 재시도 카운터 초기화
       retry.reset();
-      // 재연결 시 최신 채널로 presence 재track (끊긴 사이 유실 방지).
+      isSubscribed = true;
+      // 재연결 시 최신 채널로 presence 재track (끊긴 사이 유실 방지). track()은 reject 가능 → 삼킴.
       if (lastPresencePayload) {
-        void newChannel.track(lastPresencePayload as Record<string, unknown>);
+        void newChannel.track(lastPresencePayload as Record<string, unknown>).catch(() => {});
       }
     } else if (status === 'TIMED_OUT') {
       // 타임아웃 — CLOSED로 이어지므로 여기서는 로그만
       console.log('[Realtime] 연결 시간 초과, CLOSED 전환 대기...');
     } else if (status === 'CLOSED' || status === 'CHANNEL_ERROR') {
-      // 연결 끊김 — 재시도 스케줄
+      // 연결 끊김 — join 무효화 후 재시도 스케줄
+      isSubscribed = false;
       scheduleRetry();
     }
   });
@@ -166,16 +172,21 @@ export function setupRealtimeSubscription(callbacks: RealtimeCallbacks): () => v
  * presence 페이로드를 항상 현재(최신) 채널로 track.
  * 마지막 페이로드를 모듈 스코프에 저장해 재연결(SUBSCRIBED) 시 재track한다.
  * `channel`은 reconnect마다 교체되는 모듈 스코프 변수 → 호출 시점의 최신 채널 사용.
+ * join(SUBSCRIBED) 전에는 track()이 reject → unhandled rejection이 되므로 저장만 하고,
+ * SUBSCRIBED 핸들러가 lastPresencePayload로 재track한다. join 후 호출도 reject는 삼킨다.
  */
 export function trackPresence(payload: unknown): void {
   lastPresencePayload = payload;
-  void channel?.track(payload as Record<string, unknown>);
+  if (isSubscribed && channel) {
+    void channel.track(payload as Record<string, unknown>).catch(() => {});
+  }
 }
 
 /** Realtime 구독 해제 */
 export function teardownRealtime(): void {
   savedCallbacks = null;
   lastPresencePayload = null;
+  isSubscribed = false;
   retry.clear();
   if (channel) {
     supabase.removeChannel(channel);
