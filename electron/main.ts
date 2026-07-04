@@ -2590,8 +2590,14 @@ function startSupabaseRealtime() {
     onPartChange: (payload) => broadcastSupabaseEvent('parts', payload),
     onSceneWorkLinkChange: (payload) => {
       broadcastSupabaseEvent('scene_work_links', payload);
-      // 프레즌스 basename→씬 매칭에 쓰는 캐시를 최신화(전체 재로드).
-      void refreshSceneWorkLinkCache();
+      // 프레즌스 basename→씬 매칭에 쓰는 캐시를 최신화(전체 재로드) 후 재평가.
+      // 이미 Moho 파일이 열린 상태에서 primary_file 링크가 추가/이름변경/삭제되면
+      // 창 집합(basename)은 그대로라 poller가 onChange를 안 띄운다 → reset()으로 dedup을
+      // 비우고 즉시 재폴링해, 신선한 캐시로 인덱스를 재구성하고 새 sceneUuids를 재track한다.
+      // (신선한 캐시를 쓰도록 refresh 완료 후 reset — 그 전 reset은 stale 캐시로 재평가됨)
+      void refreshSceneWorkLinkCache().then(() => {
+        try { editingPresence?.reset(); } catch { /* ignore */ }
+      });
     },
     onPresenceSync: (state) => receivePresence(
       state as Record<string, EditingPresencePayload[]>,
