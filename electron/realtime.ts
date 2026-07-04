@@ -17,14 +17,18 @@ export interface RealtimeCallbacks {
   onSceneWorkLinkChange?: (payload: ChangePayload) => void;
   onActivityInsert: (payload: ChangePayload) => void;
   onStatusChange: (status: string) => void;
+  /** Supabase presence sync/join/leave — 전체 presence 상태 스냅샷 전달 */
+  onPresenceSync?: (state: Record<string, unknown[]>) => void;
 }
 
 let channel: RealtimeChannel | null = null;
 let savedCallbacks: RealtimeCallbacks | null = null;
+// 마지막으로 track한 presence 페이로드 — 재연결(SUBSCRIBED) 시 최신 채널로 재track.
+let lastPresencePayload: unknown | null = null;
 const retry = createRetryManager('Realtime');
 
 function createChannel(callbacks: RealtimeCallbacks): RealtimeChannel {
-  return supabase
+  const built = supabase
     .channel('bflow-realtime')
     .on(
       'postgres_changes',
@@ -90,6 +94,14 @@ function createChannel(callbacks: RealtimeCallbacks): RealtimeChannel {
         callbacks.onActivityInsert(payload);
       },
     );
+  // presence 는 와일드카드('*') 미지원 → sync/join/leave 3개 이벤트를 개별 구독.
+  // 각 이벤트마다 전체 상태를 다시 병합하도록 스냅샷을 넘긴다.
+  const emitPresence = () => callbacks.onPresenceSync?.(built.presenceState() as Record<string, unknown[]>);
+  built
+    .on('presence', { event: 'sync' }, emitPresence)
+    .on('presence', { event: 'join' }, emitPresence)
+    .on('presence', { event: 'leave' }, emitPresence);
+  return built;
 }
 
 function scheduleRetry(): void {
@@ -123,6 +135,10 @@ function reconnect(callbacks: RealtimeCallbacks): void {
     if (status === 'SUBSCRIBED') {
       // 연결 성공 — 재시도 카운터 초기화
       retry.reset();
+      // 재연결 시 최신 채널로 presence 재track (끊긴 사이 유실 방지).
+      if (lastPresencePayload) {
+        void newChannel.track(lastPresencePayload as Record<string, unknown>);
+      }
     } else if (status === 'TIMED_OUT') {
       // 타임아웃 — CLOSED로 이어지므로 여기서는 로그만
       console.log('[Realtime] 연결 시간 초과, CLOSED 전환 대기...');
@@ -146,9 +162,20 @@ export function setupRealtimeSubscription(callbacks: RealtimeCallbacks): () => v
   };
 }
 
+/**
+ * presence 페이로드를 항상 현재(최신) 채널로 track.
+ * 마지막 페이로드를 모듈 스코프에 저장해 재연결(SUBSCRIBED) 시 재track한다.
+ * `channel`은 reconnect마다 교체되는 모듈 스코프 변수 → 호출 시점의 최신 채널 사용.
+ */
+export function trackPresence(payload: unknown): void {
+  lastPresencePayload = payload;
+  void channel?.track(payload as Record<string, unknown>);
+}
+
 /** Realtime 구독 해제 */
 export function teardownRealtime(): void {
   savedCallbacks = null;
+  lastPresencePayload = null;
   retry.clear();
   if (channel) {
     supabase.removeChannel(channel);
