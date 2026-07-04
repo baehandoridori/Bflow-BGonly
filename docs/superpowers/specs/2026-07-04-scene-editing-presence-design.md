@@ -81,7 +81,7 @@
 - 재연결: 소켓 재구독 시 현재 집합으로 재track.
 
 **U4. 프레즌스 수신기 (main)**
-- 책임: `channel.on('presence', { event: '*' }, ...)` 및 `presenceState()`로 **전체 프레즌스**를 받아 **sceneUuid → EditingUser[]** 맵으로 합치고, 렌더러/위젯으로 전달한다.
+- 책임: `channel.on('presence', ...)` **sync/join/leave 3개 이벤트**(Supabase presence는 `'*'` 와일드카드 미지원) 및 `presenceState()`로 **전체 프레즌스**를 받아 **sceneUuid → EditingUser[]** 맵으로 합치고, 렌더러/위젯으로 전달한다.
 - 전달: 기존 `broadcastSupabaseEvent` 패턴을 본뜬 `broadcastSupabasePresence(snapshot)` — IPC 채널 `'supabase:presence-event'`로 `mainWindow` + 모든 `widgetWindows`에 **전체 스냅샷**을 보낸다(델타 아님, 단순·안전).
 - `EditingUser` = `{ userId: string; username: string }`.
 
