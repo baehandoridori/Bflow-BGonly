@@ -539,7 +539,7 @@ function DeptSection({
   const completionTintEnabled = useAppStore((s) => s.completionTintEnabled);
   const isDeptDone = !!scene && isFullyDone(scene);
   // 실시간 편집 프레즌스 — 이 부서 씬을 지금 열어둔 다른 팀원(자기 제외).
-  // DeptSection 은 bg/act 정확히 2번만 호출되므로 여기서 훅 호출은 rules-of-hooks 안전.
+  // 훅은 early return 앞에서 무조건 top-level 로 호출하므로 rules-of-hooks 안전.
   const deptEditors = useSceneEditingPresence([scene?.id]);
 
   // stage-toggle 작업에서 이 씬의 targetStage 셀에만 pending/failed 스타일 적용
