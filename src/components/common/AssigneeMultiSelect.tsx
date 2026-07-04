@@ -272,7 +272,7 @@ export function AssigneeChip({
   const fs = size === 'sm' ? 11 : 12;
   return (
     <span
-      className="inline-flex items-center gap-1 rounded-full px-2 font-medium tabular-nums"
+      className="inline-flex shrink-0 items-center gap-1 whitespace-nowrap rounded-full px-2 font-medium tabular-nums"
       style={{
         background: `${color}1f`,
         color,
