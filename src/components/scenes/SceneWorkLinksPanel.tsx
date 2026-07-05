@@ -22,6 +22,7 @@ import {
   openWorkPath,
   pathExists as checkPathExists,
 } from '@/services/sceneWorkLinkService';
+import { saveWorkLinkPathGuarded } from '@/services/sceneWorkLinkActions';
 import { cn } from '@/utils/cn';
 import {
   getUniqueSceneUuids,
@@ -170,7 +171,6 @@ function WorkLinkRow({
   link?: SceneWorkLink;
 }) {
   const currentUser = useAuthStore((state) => state.currentUser);
-  const upsertLink = useSceneWorkLinkStore((state) => state.upsertLink);
   const deleteLink = useSceneWorkLinkStore((state) => state.deleteLink);
   const [menuOpen, setMenuOpen] = useState(false);
   // P2-A: 드롭다운 메뉴를 body 로 portal — 인라인 상세 모달의 overflow-hidden 부서 섹션에서 잘리지 않게.
@@ -258,19 +258,21 @@ function WorkLinkRow({
     if (!scene?.id || !trimmed) return;
     setSaving(true);
     try {
-      await upsertLink({
+      // 공용 가드 경유 — 지금 빈 슬롯으로 보일 때('연결')만 로딩 레이스 대비 재확인.
+      // 이미 링크가 보이는 '변경'(link truthy)은 사용자가 아는 상태라 confirm 스킵.
+      // upsert/toast/에러 처리는 가드 안에서 수행.
+      const saved = await saveWorkLinkPathGuarded({
         sceneUuid: scene.id,
         department,
         linkKind,
         path: trimmed,
         userId: currentUser?.id ?? null,
+        confirmIfExists: !link,
       });
-      setPasteOpen(false);
-      setMenuOpen(false);
-      toast.success(link ? '작업 링크를 변경했습니다' : '작업 링크를 연결했습니다');
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      toast.error(`작업 링크 저장 실패: ${message}`);
+      if (saved) {
+        setPasteOpen(false);
+        setMenuOpen(false);
+      }
     } finally {
       setSaving(false);
     }
