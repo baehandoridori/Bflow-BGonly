@@ -117,8 +117,9 @@ export function UnifiedSceneCard({
   const users = useAuthStore((s) => s.users);
   const userNames = useMemo(() => users.map((u) => u.name), [users]);
   const linkMap = useSceneWorkLinkStore((s) => s.linkMap);
-  // 실시간 편집 프레즌스 — 이 씬 파일을 지금 열어둔 다른 팀원(자기 제외)
-  const editingUsers = useSceneEditingPresence([bgScene?.id, actScene?.id]);
+  // 실시간 편집 프레즌스 — 카드 전체 링은 BG/ACT 유니온으로(어느 부서든 편집 중이면 글로우).
+  // 이름표는 부서별로 DeptSection 안에서 개별 표시(위치로 어느 부서인지 구분).
+  const unionEditors = useSceneEditingPresence([bgScene?.id, actScene?.id]);
   const episodeName = useDataStore((s) => {
     const sheetName = bgSheetName ?? actSheetName;
     if (!sheetName) return undefined;
@@ -298,8 +299,8 @@ export function UnifiedSceneCard({
         isHighlighted && 'scene-highlight',
         isSelected && 'scene-card-selected',
         cardWholePendingClass,
-        // 실시간 편집 프레즌스 — 회전 무지개 테두리(래퍼 없이 클래스만)
-        editingBeamClassName(editingUsers),
+        // 실시간 편집 프레즌스 — 회전 무지개 테두리(래퍼 없이 클래스만, BG/ACT 유니온)
+        editingBeamClassName(unionEditors),
       )}
       style={{
         overflow: 'visible',
@@ -315,12 +316,6 @@ export function UnifiedSceneCard({
       } : {})}
     >
         {isHighlighted && <div className="scene-highlight-bg" />}
-
-        {/* 실시간 편집 프레즌스 — 무지개 이름표(좌상단, 링크 배지와 겹치지 않게) */}
-        <EditingNameLabels
-          editors={editingUsers}
-          className="absolute -top-3 left-3 z-20"
-        />
 
         <SceneWorkLinkBadges
           bgSceneUuid={bgScene?.id}
@@ -543,6 +538,9 @@ function DeptSection({
   const cfg = DEPARTMENT_CONFIGS[dept];
   const completionTintEnabled = useAppStore((s) => s.completionTintEnabled);
   const isDeptDone = !!scene && isFullyDone(scene);
+  // 실시간 편집 프레즌스 — 이 부서 씬을 지금 열어둔 다른 팀원(자기 제외).
+  // 훅은 early return 앞에서 무조건 top-level 로 호출하므로 rules-of-hooks 안전.
+  const deptEditors = useSceneEditingPresence([scene?.id]);
 
   // stage-toggle 작업에서 이 씬의 targetStage 셀에만 pending/failed 스타일 적용
   const stageCellPendingClass = (stage: Stage): string => {
@@ -587,17 +585,19 @@ function DeptSection({
   return (
     <div className="group/dept">
       <div className="flex items-center justify-between mb-1.5">
-        <div className="flex items-center gap-1.5">
+        <div className="flex min-w-0 items-center gap-1.5">
           <span className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: cfg.color }} />
-          <span className="text-xs font-semibold" style={{ color: cfg.color }}>{cfg.shortLabel}</span>
+          <span className="text-xs font-semibold shrink-0" style={{ color: cfg.color }}>{cfg.shortLabel}</span>
           {completionTintEnabled && isDeptDone && (
-            <span className="scene-completion-dept-done rounded-full px-1.5 py-0.5 text-[9px] font-semibold leading-none">
+            <span className="scene-completion-dept-done shrink-0 whitespace-nowrap rounded-full px-1.5 py-0.5 text-[9px] font-semibold leading-none">
               완료
             </span>
           )}
+          {/* 실시간 편집 프레즌스 — 이 부서 이름표(위치로 BG/ACT 구분) */}
+          <EditingNameLabels editors={deptEditors} className="min-w-0 shrink" />
         </div>
-        <div className="flex items-center gap-1.5">
-          <span className="min-w-0 text-xs text-text-secondary">
+        <div className="flex shrink-0 items-center gap-1.5">
+          <span className="whitespace-nowrap text-xs text-text-secondary">
             {searchQuery ? (
               <HighlightText text={scene.assignee || '-'} query={searchQuery} />
             ) : scene.assignee ? (

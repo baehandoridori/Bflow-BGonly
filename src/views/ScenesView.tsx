@@ -901,6 +901,9 @@ import {
 } from '@/utils/bulkOperations';
 import { ContextMenu, useContextMenu } from '@/components/ui/ContextMenu';
 import { cn } from '@/utils/cn';
+import { EditingNameLabels } from '@/components/scenes/EditingNameLabels';
+import { useSceneEditingPresence } from '@/stores/useEditingPresenceStore';
+import { editingBeamClassName } from '@/utils/editingPresence';
 import { Confetti } from '@/components/ui/Confetti';
 import { SceneDetailModal } from '@/components/scenes/SceneDetailModal';
 import { GlassDropdown } from '@/components/common/GlassDropdown';
@@ -946,6 +949,8 @@ interface SceneCardProps {
 function SceneCard({ scene, sceneIndex, celebrating, department, isHighlighted, isSelected, searchQuery, commentCount = 0, hasUnreadComments = false, revisionCount = 0, selectionId, sheetName, fallbackStoryboardUrl, fallbackGuideUrl, onToggle, onActPhaseStateClick, onActFeedbackRequest, onActRoundBump, onAssigneeStageToggle, onAssigneeActPhaseStateClick, onAssigneeActFeedbackRequest, onAssigneeActRoundBump, onDelete, onOpenDetail, onCelebrationEnd, onCtrlClick, onShiftClick }: SceneCardProps) {
   const deptConfig = DEPARTMENT_CONFIGS[department];
   const completionTintEnabled = useAppStore((s) => s.completionTintEnabled);
+  // 실시간 편집 프레즌스 — 이 씬 파일을 지금 열어둔 다른 팀원(자기 제외). 단일 부서라 부서 모호성 없음.
+  const editingUsers = useSceneEditingPresence([scene?.id]);
   const pct = sceneProgress(scene);
   const isComplete = isFullyDone(scene);
   const storyboardUrl = scene.storyboardUrl || fallbackStoryboardUrl || '';
@@ -1022,6 +1027,8 @@ function SceneCard({ scene, sceneIndex, celebrating, department, isHighlighted, 
         completionTintEnabled && isComplete && 'scene-completion-tint-card',
         isHighlighted && 'scene-highlight',
         isSelected && 'scene-card-selected',
+        // 실시간 편집 프레즌스 — 회전 무지개 테두리(래퍼 없이 클래스만)
+        editingBeamClassName(editingUsers),
       )}
       style={{
         overflow: 'visible',
@@ -1038,6 +1045,12 @@ function SceneCard({ scene, sceneIndex, celebrating, department, isHighlighted, 
     >
       {/* 하이라이트 배경 오버레이 */}
       {isHighlighted && <div className="scene-highlight-bg" />}
+
+      {/* 실시간 편집 프레즌스 — 무지개 이름표(좌상단, 링크 배지와 겹치지 않게) */}
+      <EditingNameLabels
+        editors={editingUsers}
+        className="absolute -top-3 left-3 z-20"
+      />
 
       <SceneWorkLinkBadges
         bgSceneUuid={department === 'bg' ? scene.id : null}
