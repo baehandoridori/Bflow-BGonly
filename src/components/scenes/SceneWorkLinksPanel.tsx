@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import {
   AlertTriangle,
   Clipboard,
@@ -172,6 +173,10 @@ function WorkLinkRow({
   const upsertLink = useSceneWorkLinkStore((state) => state.upsertLink);
   const deleteLink = useSceneWorkLinkStore((state) => state.deleteLink);
   const [menuOpen, setMenuOpen] = useState(false);
+  // P2-A: 드롭다운 메뉴를 body 로 portal — 인라인 상세 모달의 overflow-hidden 부서 섹션에서 잘리지 않게.
+  const menuTriggerRef = useRef<HTMLButtonElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
+  const [menuPos, setMenuPos] = useState<{ top: number; left: number } | null>(null);
   const [pasteOpen, setPasteOpen] = useState(false);
   const [draftPath, setDraftPath] = useState('');
   const [saving, setSaving] = useState(false);
@@ -201,6 +206,52 @@ function WorkLinkRow({
     });
     return () => { cancelled = true; };
   }, [link?.path]);
+
+  // P2-A: 포털 메뉴 위치 계산 — 트리거 버튼 rect 기준 우측 정렬로 아래에 띄우고,
+  // 화면 하단을 넘치면 위로 뒤집는다. 스크롤/리사이즈 시 재계산, 바깥 클릭/Esc 로 닫음.
+  const MENU_WIDTH = 160;
+  const MENU_HEIGHT = 84;
+  useLayoutEffect(() => {
+    if (!menuOpen) {
+      setMenuPos(null);
+      return;
+    }
+    const compute = () => {
+      const trigger = menuTriggerRef.current;
+      if (!trigger) return;
+      const rect = trigger.getBoundingClientRect();
+      const left = Math.max(8, Math.min(rect.right - MENU_WIDTH, window.innerWidth - MENU_WIDTH - 8));
+      const openUp = rect.bottom + 4 + MENU_HEIGHT > window.innerHeight;
+      const top = openUp ? rect.top - 4 - MENU_HEIGHT : rect.bottom + 4;
+      setMenuPos({ top: Math.max(8, top), left });
+    };
+    compute();
+    const handleScroll = () => compute();
+    window.addEventListener('scroll', handleScroll, true);
+    window.addEventListener('resize', handleScroll);
+    return () => {
+      window.removeEventListener('scroll', handleScroll, true);
+      window.removeEventListener('resize', handleScroll);
+    };
+  }, [menuOpen]);
+
+  useEffect(() => {
+    if (!menuOpen) return;
+    const handleDown = (event: MouseEvent) => {
+      const target = event.target as Node;
+      if (menuRef.current?.contains(target) || menuTriggerRef.current?.contains(target)) return;
+      setMenuOpen(false);
+    };
+    const handleKey = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setMenuOpen(false);
+    };
+    document.addEventListener('mousedown', handleDown);
+    document.addEventListener('keydown', handleKey);
+    return () => {
+      document.removeEventListener('mousedown', handleDown);
+      document.removeEventListener('keydown', handleKey);
+    };
+  }, [menuOpen]);
 
   const savePath = async (nextPath: string) => {
     const trimmed = nextPath.trim();
@@ -313,6 +364,7 @@ function WorkLinkRow({
                 </button>
               )}
               <button
+                ref={menuTriggerRef}
                 type="button"
                 onClick={() => setMenuOpen((value) => !value)}
                 disabled={!canEdit || saving}
@@ -339,8 +391,12 @@ function WorkLinkRow({
                 </button>
               )}
 
-              {menuOpen && (
-                <div className="absolute right-0 top-8 z-30 w-40 overflow-hidden rounded-md border border-bg-border bg-bg-card shadow-xl">
+              {menuOpen && menuPos && createPortal(
+                <div
+                  ref={menuRef}
+                  style={{ position: 'fixed', top: menuPos.top, left: menuPos.left, width: MENU_WIDTH, zIndex: 9999 }}
+                  className="overflow-hidden rounded-md border border-bg-border bg-bg-card shadow-xl"
+                >
                   <button
                     type="button"
                     onClick={handleChoose}
@@ -357,7 +413,8 @@ function WorkLinkRow({
                     <Clipboard size={13} aria-hidden />
                     경로 붙여넣기
                   </button>
-                </div>
+                </div>,
+                document.body,
               )}
             </div>
           </div>
