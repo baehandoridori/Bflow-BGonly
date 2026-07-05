@@ -110,32 +110,37 @@ export function SceneWorkLinksPanel({
   );
 }
 
-function DepartmentBlock({
+export function DepartmentBlock({
   department,
   scene,
   folder,
   primaryFile,
+  hideHeader = false,
 }: {
   department: SceneWorkLinkDepartment;
   scene: Scene | null;
   folder?: SceneWorkLink;
   primaryFile?: SceneWorkLink;
+  /** 상세 모달 부서 섹션처럼 이미 부서명이 보이는 곳에서는 자체 부서 헤더를 숨긴다. */
+  hideHeader?: boolean;
 }) {
   const meta = DEPT_META[department];
   return (
-    <div className="px-3.5 py-3">
-      <div className="mb-2 flex items-center gap-2">
-        <span
-          className="inline-flex h-5 min-w-9 items-center justify-center rounded px-1.5 text-[10px] font-bold"
-          style={{
-            color: meta.tone,
-            backgroundColor: `color-mix(in oklab, ${meta.tone} 15%, transparent)`,
-          }}
-        >
-          {meta.shortLabel}
-        </span>
-        <span className="text-[11.5px] font-medium text-text-primary">{meta.label}</span>
-      </div>
+    <div className={hideHeader ? undefined : 'px-3.5 py-3'}>
+      {!hideHeader && (
+        <div className="mb-2 flex items-center gap-2">
+          <span
+            className="inline-flex h-5 min-w-9 items-center justify-center rounded px-1.5 text-[10px] font-bold"
+            style={{
+              color: meta.tone,
+              backgroundColor: `color-mix(in oklab, ${meta.tone} 15%, transparent)`,
+            }}
+          >
+            {meta.shortLabel}
+          </span>
+          <span className="text-[11.5px] font-medium text-text-primary">{meta.label}</span>
+        </div>
+      )}
 
       <div className="grid gap-2 md:grid-cols-2">
         <WorkLinkRow department={department} scene={scene} linkKind="folder" link={folder} />

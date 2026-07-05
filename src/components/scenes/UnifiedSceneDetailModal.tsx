@@ -32,7 +32,10 @@ import { CommentPanelResizable } from './CommentPanelResizable';
 import { RevisionPanel } from './RevisionPanel';
 import { EntityHashContextMenu } from './EntityHashContextMenu';
 import { SceneFilesTab } from './SceneFilesTab';
+import { DepartmentBlock } from './SceneWorkLinksPanel';
 import { SceneHistoryTab } from './SceneHistoryTab';
+import { useSceneWorkLinkStore } from '@/stores/useSceneWorkLinkStore';
+import { getSceneWorkLinkSlots } from '@/utils/sceneWorkLinks';
 import { useSceneActivities } from '@/hooks/useSceneActivities';
 import { describeActivity, deptPrefix } from './activityLabels';
 import { useRevisionStore } from '@/stores/useRevisionStore';
@@ -271,11 +274,6 @@ export function UnifiedSceneDetailModal({
     : '';
   const sceneThreadKey = revisionSceneKey ? buildSceneThreadKeyFromRevisionKey(revisionSceneKey) : '';
   const openRevCount = useRevisionStore((s) => revisionSceneKey ? s.getOpenCount(revisionSceneKey) : 0);
-  const visibleWorkLinkDepartments = selectedDepartment === 'bg'
-    ? ['bg'] as const
-    : selectedDepartment === 'acting'
-      ? ['acting'] as const
-      : ['bg', 'acting'] as const;
 
   // UI state — v1.18.0: initialTab 으로 외부에서 시작 탭 지정 가능 (알림 클릭 시 'revisions' 등)
   const [tab, setTab] = useState<TabKey>(initialTab ?? 'detail');
@@ -1043,8 +1041,6 @@ export function UnifiedSceneDetailModal({
                     {tab === 'files' && revisionSceneKey && (
                       <SceneFilesTab
                         bgScene={bgScene}
-                        actScene={actScene}
-                        visibleDepartments={[...visibleWorkLinkDepartments]}
                         primaryCommentKey={primaryCommentKey}
                         secondaryCommentKey={secondaryCommentKey || undefined}
                         revisionSceneKey={revisionSceneKey}
@@ -1375,6 +1371,8 @@ function DeptSection({
 }) {
   const cfg = DEPARTMENT_CONFIGS[dept];
   const visualColor = deptVisualColor(dept);
+  const workLinkMap = useSceneWorkLinkStore((s) => s.linkMap);
+  const workLinkSlots = getSceneWorkLinkSlots(workLinkMap, scene?.id, dept);
   const canUseAssigneeProgressStack = hasMultiAssigneeProgress(scene) && (
     dept === 'acting'
       ? Boolean(onAssigneeActPhaseStateClick && onAssigneeActFeedbackRequest && onAssigneeActRoundBump)
@@ -1495,6 +1493,18 @@ function DeptSection({
         onHashClick={onHashClick}
         onHashContextMenu={onHashContextMenu}
       />
+
+      {/* 제작 파일 연동 — 부서 섹션 안에 인라인. 헤더는 위 부서 라벨과 중복이라 숨김. */}
+      <div className="border-t border-bg-border/40 pt-3">
+        <span className="mb-2 block text-xs text-text-secondary">작업 링크</span>
+        <DepartmentBlock
+          department={dept}
+          scene={scene}
+          folder={workLinkSlots.folder}
+          primaryFile={workLinkSlots.primaryFile}
+          hideHeader
+        />
+      </div>
     </div>
   );
 }
