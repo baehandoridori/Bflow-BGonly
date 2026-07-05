@@ -20,6 +20,7 @@ import { useRevisionStore } from '@/stores/useRevisionStore';
 import { useSceneWorkLinkStore } from '@/stores/useSceneWorkLinkStore';
 import { buildSceneKey } from '@/services/revisionService';
 import { openWorkPath } from '@/services/sceneWorkLinkService';
+import { chooseAndLinkWorkPath } from '@/services/sceneWorkLinkActions';
 import { getSceneWorkLinkSlots } from '@/utils/sceneWorkLinks';
 import { LengthIcon } from './LengthIcon';
 import { SceneContextMenu } from './SceneContextMenu';
@@ -907,6 +908,12 @@ export function UnifiedSceneSheetView({
       toast.error(link.linkKind === 'folder' ? '이 PC에서 폴더를 찾을 수 없음' : '이 PC에서 파일을 찾을 수 없음');
     }
   }, []);
+  const getAddWorkLinkHandlerForMerged = useCallback((merged: MergedScene) => {
+    return async (department: 'bg' | 'acting', linkKind: 'folder' | 'primary_file') => {
+      const scene = department === 'bg' ? merged.bgScene : merged.actScene;
+      await chooseAndLinkWorkPath({ sceneUuid: scene?.id, department, linkKind, userId: presenceExcludeUserId });
+    };
+  }, [presenceExcludeUserId]);
 
   return (
     <motion.div
@@ -1430,6 +1437,7 @@ export function UnifiedSceneSheetView({
             episodeName: getEpisodeNameForMerged(ctxMenu.merged),
             departments: getWorkLinkDepartmentsForMerged(ctxMenu.merged),
             onOpen: handleOpenWorkLink,
+            onAdd: getAddWorkLinkHandlerForMerged(ctxMenu.merged),
           }}
         />,
         document.body,

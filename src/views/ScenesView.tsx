@@ -61,6 +61,7 @@ import { resolveReferenceMergedScene } from '@/utils/sceneReference';
 import { navigateToHashTarget } from '@/utils/hashNavigation';
 import type { HashTarget } from '@/utils/hashEntity';
 import { chooseWorkFile, openWorkPath } from '@/services/sceneWorkLinkService';
+import { chooseAndLinkWorkPath } from '@/services/sceneWorkLinkActions';
 import { loadPreferences, savePreferences, type UserPreferences } from '@/services/settingsService';
 import {
   persistLengthChangeAtomic,
@@ -960,6 +961,7 @@ function SceneCard({ scene, sceneIndex, celebrating, department, isHighlighted, 
   const episodes = useDataStore((s) => s.episodes);
   const episodeTitles = useDataStore((s) => s.episodeTitles);
   const linkMap = useSceneWorkLinkStore((s) => s.linkMap);
+  const cardUserId = useAuthStore((s) => s.currentUser?.id ?? null);
   const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number } | null>(null);
   const lengthChangeInFlightRef = useRef(false);
 
@@ -984,6 +986,9 @@ function SceneCard({ scene, sceneIndex, celebrating, department, isHighlighted, 
       sonnerToast.error(link.linkKind === 'folder' ? '이 PC에서 폴더를 찾을 수 없음' : '이 PC에서 파일을 찾을 수 없음');
     }
   }, []);
+  const handleAddWorkLink = useCallback(async (dept: 'bg' | 'acting', linkKind: 'folder' | 'primary_file') => {
+    await chooseAndLinkWorkPath({ sceneUuid: scene.id, department: dept, linkKind, userId: cardUserId });
+  }, [scene.id, cardUserId]);
   const handleSetLengthChange = useCallback(async (value: 'LD' | 'SD' | null) => {
     if (!scene.id || lengthChangeInFlightRef.current) return;
     lengthChangeInFlightRef.current = true;
@@ -1219,6 +1224,7 @@ function SceneCard({ scene, sceneIndex, celebrating, department, isHighlighted, 
             episodeName,
             departments: workLinkDepartments,
             onOpen: handleOpenWorkLink,
+            onAdd: handleAddWorkLink,
           }}
         />,
         document.body,
