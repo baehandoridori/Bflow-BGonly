@@ -9,6 +9,18 @@ test('표준 제목에서 basename(확장자 포함, 소문자) 추출', () => {
 test('미저장 표시 * 와 대소문자 처리', () => {
   assert.deepEqual(parseMohoTitles(['B030-피드백.MOHO* -Moho']), ['b030-피드백.moho']);
 });
+test('편집 중 앞쪽 미저장 별표(* + 공백)도 제거', () => {
+  // 실측(한솔): 편집 중이면 제목 앞에 "* "가 붙는다 → 정작 작업 중일 때 감지되어야 한다.
+  assert.deepEqual(parseMohoTitles(['* b030.moho -Moho']), ['b030.moho']);
+  assert.deepEqual(parseMohoTitles(['*b030.moho -Moho']), ['b030.moho']);
+  assert.deepEqual(parseMohoTitles(['*  b030-피드백.moho -Moho']), ['b030-피드백.moho']);
+});
+test('앞쪽 별표 + 경로 포함이어도 basename만', () => {
+  assert.deepEqual(parseMohoTitles(['* C:\\proj\\ep2\\b030.moho -Moho']), ['b030.moho']);
+});
+test('별표만 있고 파일명 없으면 무시', () => {
+  assert.deepEqual(parseMohoTitles(['* -Moho', '*', '  *  ']), []);
+});
 test('여러 Moho 인스턴스(여러 줄)와 중복 제거', () => {
   assert.deepEqual(
     parseMohoTitles(['b030.moho -Moho', 'b031-다시.moho -Moho', 'b030.moho -Moho']),
