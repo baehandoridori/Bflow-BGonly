@@ -331,22 +331,22 @@ function WorkLinkRow({
             <Icon size={14} aria-hidden />
             <span className="text-[11.5px] font-medium">{kindMeta.label}</span>
           </div>
-          <button
-            ref={menuTriggerRef}
-            type="button"
-            onClick={() => setMenuOpen((value) => !value)}
-            disabled={!canEdit || saving}
-            className={cn(
-              'inline-flex h-7 items-center gap-1 rounded-md px-3 text-[11px] font-medium transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-accent/45',
-              canEdit
-                ? 'bg-white/6 text-text-primary hover:bg-white/10 cursor-pointer'
-                : 'bg-white/4 text-text-secondary/40 cursor-not-allowed',
-            )}
-            title={canEdit ? '경로 연결' : '씬 데이터 없음'}
-          >
-            {saving ? <Loader2 size={12} className="animate-spin" aria-hidden /> : <Link2 size={12} aria-hidden />}
-            연결
-          </button>
+          {canEdit ? (
+            <button
+              ref={menuTriggerRef}
+              type="button"
+              onClick={() => setMenuOpen((value) => !value)}
+              disabled={saving}
+              className="inline-flex h-7 items-center gap-1 rounded-md bg-white/6 px-3 text-[11px] font-medium text-text-primary transition-colors duration-200 hover:bg-white/10 cursor-pointer focus:outline-none focus:ring-2 focus:ring-accent/45 disabled:opacity-45"
+              title="경로 연결"
+            >
+              {saving ? <Loader2 size={12} className="animate-spin" aria-hidden /> : <Link2 size={12} aria-hidden />}
+              연결
+            </button>
+          ) : (
+            /* 씬 UUID 누락 등으로 연결 불가 — 사유를 텍스트로 노출(툴팁 의존 X) */
+            <span className="text-[10.5px] text-text-secondary/45">씬 데이터 없음</span>
+          )}
         </div>
       ) : (
         /* ── 채워진 슬롯: 아이콘 | 라벨+경로 + 아이콘 버튼(열기/수정/해제) 왼쪽 아래 ── */
