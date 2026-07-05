@@ -908,12 +908,14 @@ export function UnifiedSceneSheetView({
       toast.error(link.linkKind === 'folder' ? '이 PC에서 폴더를 찾을 수 없음' : '이 PC에서 파일을 찾을 수 없음');
     }
   }, []);
+  // 워크링크 작성자 id — 값은 현재 사용자 id 로, presenceExcludeUserId 와 동일하지만 의미(작성자)를 명확히.
+  const currentUserId = presenceExcludeUserId;
   const getAddWorkLinkHandlerForMerged = useCallback((merged: MergedScene) => {
     return async (department: 'bg' | 'acting', linkKind: 'folder' | 'primary_file') => {
       const scene = department === 'bg' ? merged.bgScene : merged.actScene;
-      await chooseAndLinkWorkPath({ sceneUuid: scene?.id, department, linkKind, userId: presenceExcludeUserId });
+      await chooseAndLinkWorkPath({ sceneUuid: scene?.id, department, linkKind, userId: currentUserId });
     };
-  }, [presenceExcludeUserId]);
+  }, [currentUserId]);
 
   return (
     <motion.div
