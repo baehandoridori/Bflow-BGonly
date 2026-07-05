@@ -338,7 +338,6 @@ function WorkLinkRow({
         </span>
 
         <div className="min-w-0 flex-1">
-          <div className="flex min-h-7 items-start justify-between gap-2">
             <div className="min-w-0">
               <div className="text-[11.5px] font-medium text-text-primary">{kindMeta.label}</div>
               <div
@@ -352,7 +351,7 @@ function WorkLinkRow({
               </div>
             </div>
 
-            <div className="relative flex shrink-0 items-center gap-1">
+            <div className="relative mt-2 flex items-center justify-end gap-1">
               {link && (
                 <button
                   type="button"
@@ -419,7 +418,6 @@ function WorkLinkRow({
                 document.body,
               )}
             </div>
-          </div>
 
           {warningKeys.length > 0 && (
             <div className="mt-2 flex flex-wrap gap-1">
