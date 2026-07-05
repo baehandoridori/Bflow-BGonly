@@ -340,6 +340,39 @@ html.is-resizing .unified-scene-sheet *::after {
   );
 }
 
+/* ── 상세 모달 패널용: 안쪽(inset:0) 회전 무지개 링 ──
+ * .editing-beam 은 ::before inset:-2px 로 바깥에 링을 그려 overflow:hidden/스크롤
+ * 컨테이너(모달 본체)에서 잘리거나 스크롤을 따라 흐른다. 모달은 링을 안쪽 가장자리에
+ * 붙여(inset:0) 클리핑·스크롤 영향 없이 표시한다. 비스크롤 요소에 적용할 것. */
+.editing-beam-modal {
+  position: relative;
+}
+.editing-beam-modal::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  padding: 2px;
+  background: conic-gradient(
+    from var(--scene-effect-angle),
+    #ff6b6b, #fdcb6e, #4ade80, #38bdf8, #a78bfa, #f472b6, #ff6b6b
+  );
+  -webkit-mask:
+    linear-gradient(#000 0 0) content-box,
+    linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+          mask-composite: exclude;
+  animation: scene-effect-rotate 5.5s linear infinite;
+  pointer-events: none;
+  z-index: 30;
+}
+.editing-beam-modal.editing-beam-modal--warn::before {
+  background: conic-gradient(
+    from var(--scene-effect-angle),
+    #ff4d4d, #ff6b6b, #fdcb6e, #ff6b6b, #ff4d4d, #f472b6, #ff4d4d
+  );
+}
+
 /* ── 시트 <tr>용: <div> wrapper 없이 행에 링 ──
  * <tr> 은 <div> 로 감쌀 수 없고, <tr>::after 의 inset/padding 링은 테이블
  * 레이아웃에서 행 높이/정렬을 깨기 쉽다. 그래서 이미 <tr> 에서 검증된
@@ -490,6 +523,7 @@ tr.editing-beam-row.editing-beam-row--warn > td:first-child::after {
 /* prefers-reduced-motion: 모든 프레즌스 회전/점멸 정지 (기존 is-resizing 가드와 동일 톤) */
 @media (prefers-reduced-motion: reduce) {
   .editing-beam::before,
+  .editing-beam-modal::before,
   .editing-namelabel::before {
     animation: none;
   }

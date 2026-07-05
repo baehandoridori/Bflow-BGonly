@@ -77,6 +77,12 @@ export function editingBeamRowClass(hasEditors: boolean, warn: boolean): string 
   return warn ? 'editing-beam-row editing-beam-row--warn' : 'editing-beam-row';
 }
 
+/** 상세 모달 패널(비스크롤)용 안쪽 무지개 링 클래스 — 편집자 유무와 경고를 독립 신호로 받음. */
+export function editingModalBeamClass(hasEditors: boolean, warn: boolean): string {
+  if (!hasEditors) return '';
+  return warn ? 'editing-beam-modal editing-beam-modal--warn' : 'editing-beam-modal';
+}
+
 /** 단일 씬(파일) 편집자 배열로 무지개 테두리 클래스 (경고=같은 파일 2명+). */
 export function editingBeamClassName(editors: EditingUser[]): string {
   return editingBeamClass(editors.length > 0, isWarnPresence(editors));

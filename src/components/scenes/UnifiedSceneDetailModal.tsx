@@ -52,6 +52,7 @@ import { AssigneeProgressStack } from './AssigneeProgressStack';
 import { hasMultiAssigneeProgress } from '@/utils/assigneeProgress';
 import { EditingPresenceBanner } from './EditingPresenceBanner';
 import { useSceneEditingPresence, useSceneCollisionWarn } from '@/stores/useEditingPresenceStore';
+import { editingModalBeamClass } from '@/utils/editingPresence';
 
 /**
  * 전체 뷰(BG+ACT 통합) 전용 상세 모달.
@@ -738,6 +739,8 @@ export function UnifiedSceneDetailModal({
         'relative flex flex-col bg-bg-card border border-bg-border overflow-hidden',
         bodyWidthClass,
         bodyHeightClass,
+        // 실시간 편집 프레즌스 — 모달 본체 전체를 회전 무지개 링으로 감쌈(안쪽 링, 스크롤 영향 없음)
+        editingModalBeamClass(editingUsers.length > 0, editingCollision),
       )}
       style={{ borderRadius: 18, boxShadow: '0 40px 80px rgba(0,0,0,0.5)' }}
     >

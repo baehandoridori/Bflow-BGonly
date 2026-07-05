@@ -326,6 +326,12 @@ export function UnifiedSceneCard({
     >
         {isHighlighted && <div className="scene-highlight-bg" />}
 
+        {/* 실시간 편집 프레즌스 — 무지개 이름표(좌상단, 개별 BG/ACT 카드와 동일 위치). BG/ACT 유니온. */}
+        <EditingNameLabels
+          editors={unionEditors}
+          className="absolute -top-3 left-3 z-20"
+        />
+
         <SceneWorkLinkBadges
           bgSceneUuid={bgScene?.id}
           actSceneUuid={actScene?.id}
@@ -548,9 +554,6 @@ function DeptSection({
   const cfg = DEPARTMENT_CONFIGS[dept];
   const completionTintEnabled = useAppStore((s) => s.completionTintEnabled);
   const isDeptDone = !!scene && isFullyDone(scene);
-  // 실시간 편집 프레즌스 — 이 부서 씬을 지금 열어둔 다른 팀원(자기 제외).
-  // 훅은 early return 앞에서 무조건 top-level 로 호출하므로 rules-of-hooks 안전.
-  const deptEditors = useSceneEditingPresence([scene?.id]);
 
   // stage-toggle 작업에서 이 씬의 targetStage 셀에만 pending/failed 스타일 적용
   const stageCellPendingClass = (stage: Stage): string => {
@@ -603,8 +606,6 @@ function DeptSection({
               완료
             </span>
           )}
-          {/* 실시간 편집 프레즌스 — 이 부서 이름표(위치로 BG/ACT 구분) */}
-          <EditingNameLabels editors={deptEditors} className="min-w-0 shrink" />
         </div>
         <div className="flex shrink-0 items-center gap-1.5">
           <span className="whitespace-nowrap text-xs text-text-secondary">
