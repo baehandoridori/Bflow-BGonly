@@ -20,6 +20,7 @@ import { useRevisionStore } from '@/stores/useRevisionStore';
 import { useSceneWorkLinkStore } from '@/stores/useSceneWorkLinkStore';
 import { buildSceneKey } from '@/services/revisionService';
 import { openWorkPath } from '@/services/sceneWorkLinkService';
+import { chooseAndLinkWorkPath } from '@/services/sceneWorkLinkActions';
 import { getSceneWorkLinkSlots } from '@/utils/sceneWorkLinks';
 import { LengthIcon } from './LengthIcon';
 import { SceneContextMenu } from './SceneContextMenu';
@@ -898,6 +899,7 @@ export function UnifiedSceneSheetView({
         department,
         folder: slots.folder,
         primaryFile: slots.primaryFile,
+        hasScene: !!scene?.id,
       };
     });
   }, [linkMap, selectedDepartment]);
@@ -907,6 +909,14 @@ export function UnifiedSceneSheetView({
       toast.error(link.linkKind === 'folder' ? '이 PC에서 폴더를 찾을 수 없음' : '이 PC에서 파일을 찾을 수 없음');
     }
   }, []);
+  // 워크링크 작성자 id — 값은 현재 사용자 id 로, presenceExcludeUserId 와 동일하지만 의미(작성자)를 명확히.
+  const currentUserId = presenceExcludeUserId;
+  const getAddWorkLinkHandlerForMerged = useCallback((merged: MergedScene) => {
+    return async (department: 'bg' | 'acting', linkKind: 'folder' | 'primary_file') => {
+      const scene = department === 'bg' ? merged.bgScene : merged.actScene;
+      await chooseAndLinkWorkPath({ sceneUuid: scene?.id, department, linkKind, userId: currentUserId });
+    };
+  }, [currentUserId]);
 
   return (
     <motion.div
@@ -1430,6 +1440,7 @@ export function UnifiedSceneSheetView({
             episodeName: getEpisodeNameForMerged(ctxMenu.merged),
             departments: getWorkLinkDepartmentsForMerged(ctxMenu.merged),
             onOpen: handleOpenWorkLink,
+            onAdd: getAddWorkLinkHandlerForMerged(ctxMenu.merged),
           }}
         />,
         document.body,

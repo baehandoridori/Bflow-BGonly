@@ -12,6 +12,7 @@ import { useRevisionStore } from '@/stores/useRevisionStore';
 import { useSceneWorkLinkStore } from '@/stores/useSceneWorkLinkStore';
 import { buildSceneKey } from '@/services/revisionService';
 import { openWorkPath } from '@/services/sceneWorkLinkService';
+import { chooseAndLinkWorkPath } from '@/services/sceneWorkLinkActions';
 import { isFullyDone } from '@/utils/calcStats';
 import { cn } from '@/utils/cn';
 import { buildSingleSceneSelectionId } from '@/utils/sceneSelectionId';
@@ -760,6 +761,7 @@ export function SceneSheetView({
       department,
       folder: slots.folder,
       primaryFile: slots.primaryFile,
+      hasScene: !!scene?.id,
     }];
   }, [department, linkMap]);
   const handleOpenWorkLink = useCallback(async (link: SceneWorkLink) => {
@@ -768,6 +770,11 @@ export function SceneSheetView({
       toast.error(link.linkKind === 'folder' ? '이 PC에서 폴더를 찾을 수 없음' : '이 PC에서 파일을 찾을 수 없음');
     }
   }, []);
+  const getAddWorkLinkHandlerForScene = useCallback((scene: Scene) => {
+    return async (dept: 'bg' | 'acting', linkKind: 'folder' | 'primary_file') => {
+      await chooseAndLinkWorkPath({ sceneUuid: scene?.id, department: dept, linkKind, userId: presenceExcludeUserId });
+    };
+  }, [presenceExcludeUserId]);
   const handleSetLengthChange = useCallback(async (scene: Scene, value: 'LD' | 'SD' | null) => {
     if (!scene.id || lengthChangeInFlightRef.current.has(scene.id)) return;
     lengthChangeInFlightRef.current.add(scene.id);
@@ -1098,6 +1105,7 @@ export function SceneSheetView({
             episodeName,
             departments: getWorkLinkDepartmentsForScene(ctxMenu.scene),
             onOpen: handleOpenWorkLink,
+            onAdd: getAddWorkLinkHandlerForScene(ctxMenu.scene),
           }}
         />,
         document.body,

@@ -22,6 +22,7 @@ import { useAuthStore } from '@/stores/useAuthStore';
 import { useSceneWorkLinkStore } from '@/stores/useSceneWorkLinkStore';
 import { buildSceneKey } from '@/services/revisionService';
 import { openWorkPath } from '@/services/sceneWorkLinkService';
+import { chooseAndLinkWorkPath } from '@/services/sceneWorkLinkActions';
 import { getSceneWorkLinkSlots } from '@/utils/sceneWorkLinks';
 import { LengthIcon } from './LengthIcon';
 import { SceneContextMenu } from './SceneContextMenu';
@@ -115,6 +116,7 @@ export function UnifiedSceneCard({
   const completionTintEnabled = useAppStore((s) => s.completionTintEnabled);
   const selectedDepartment = useAppStore((s) => s.selectedDepartment);
   const users = useAuthStore((s) => s.users);
+  const currentUser = useAuthStore((s) => s.currentUser);
   const userNames = useMemo(() => users.map((u) => u.name), [users]);
   const linkMap = useSceneWorkLinkStore((s) => s.linkMap);
   // 실시간 편집 프레즌스 — 카드 전체 링은 BG/ACT 유니온으로(어느 부서든 편집 중이면 글로우).
@@ -273,6 +275,7 @@ export function UnifiedSceneCard({
         department,
         folder: slots.folder,
         primaryFile: slots.primaryFile,
+        hasScene: !!scene?.id,
       };
     });
   }, [actScene, bgScene, linkMap, selectedDepartment]);
@@ -281,6 +284,10 @@ export function UnifiedSceneCard({
     if (!result.ok) {
       toast.error(link.linkKind === 'folder' ? '이 PC에서 폴더를 찾을 수 없음' : '이 PC에서 파일을 찾을 수 없음');
     }
+  };
+  const handleAddWorkLink = async (department: 'bg' | 'acting', linkKind: 'folder' | 'primary_file') => {
+    const scene = department === 'bg' ? bgScene : actScene;
+    await chooseAndLinkWorkPath({ sceneUuid: scene?.id, department, linkKind, userId: currentUser?.id });
   };
 
   return (
@@ -491,6 +498,7 @@ export function UnifiedSceneCard({
               episodeName,
               departments: workLinkDepartments,
               onOpen: handleOpenWorkLink,
+              onAdd: handleAddWorkLink,
             }}
           />,
           document.body,

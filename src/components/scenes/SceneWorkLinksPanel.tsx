@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import {
   AlertTriangle,
   Clipboard,
@@ -21,6 +22,7 @@ import {
   openWorkPath,
   pathExists as checkPathExists,
 } from '@/services/sceneWorkLinkService';
+import { saveWorkLinkPathGuarded } from '@/services/sceneWorkLinkActions';
 import { cn } from '@/utils/cn';
 import {
   getUniqueSceneUuids,
@@ -110,34 +112,46 @@ export function SceneWorkLinksPanel({
   );
 }
 
-function DepartmentBlock({
+export function DepartmentBlock({
   department,
   scene,
   folder,
   primaryFile,
+  hideHeader = false,
+  singleColumn = false,
 }: {
   department: SceneWorkLinkDepartment;
   scene: Scene | null;
   folder?: SceneWorkLink;
   primaryFile?: SceneWorkLink;
+  /** 상세 모달 부서 섹션처럼 이미 부서명이 보이는 곳에서는 자체 부서 헤더를 숨긴다. */
+  hideHeader?: boolean;
+  /**
+   * 좁은 컨테이너(상세 모달 2칼럼 부서 섹션)에서는 folder/file 를 세로 단일 칼럼으로 스택.
+   * md: 반응형은 뷰포트 기준이라 좁은 모달 칼럼에서도 2칼럼이 적용돼 글자가 뭉개지므로,
+   * 인라인 컨텍스트에선 명시적으로 1칼럼 강제.
+   */
+  singleColumn?: boolean;
 }) {
   const meta = DEPT_META[department];
   return (
-    <div className="px-3.5 py-3">
-      <div className="mb-2 flex items-center gap-2">
-        <span
-          className="inline-flex h-5 min-w-9 items-center justify-center rounded px-1.5 text-[10px] font-bold"
-          style={{
-            color: meta.tone,
-            backgroundColor: `color-mix(in oklab, ${meta.tone} 15%, transparent)`,
-          }}
-        >
-          {meta.shortLabel}
-        </span>
-        <span className="text-[11.5px] font-medium text-text-primary">{meta.label}</span>
-      </div>
+    <div className={hideHeader ? undefined : 'px-3.5 py-3'}>
+      {!hideHeader && (
+        <div className="mb-2 flex items-center gap-2">
+          <span
+            className="inline-flex h-5 min-w-9 items-center justify-center rounded px-1.5 text-[10px] font-bold"
+            style={{
+              color: meta.tone,
+              backgroundColor: `color-mix(in oklab, ${meta.tone} 15%, transparent)`,
+            }}
+          >
+            {meta.shortLabel}
+          </span>
+          <span className="text-[11.5px] font-medium text-text-primary">{meta.label}</span>
+        </div>
+      )}
 
-      <div className="grid gap-2 md:grid-cols-2">
+      <div className={cn('grid gap-2', !singleColumn && 'md:grid-cols-2')}>
         <WorkLinkRow department={department} scene={scene} linkKind="folder" link={folder} />
         <WorkLinkRow department={department} scene={scene} linkKind="primary_file" link={primaryFile} />
       </div>
@@ -157,9 +171,12 @@ function WorkLinkRow({
   link?: SceneWorkLink;
 }) {
   const currentUser = useAuthStore((state) => state.currentUser);
-  const upsertLink = useSceneWorkLinkStore((state) => state.upsertLink);
   const deleteLink = useSceneWorkLinkStore((state) => state.deleteLink);
   const [menuOpen, setMenuOpen] = useState(false);
+  // P2-A: 드롭다운 메뉴를 body 로 portal — 인라인 상세 모달의 overflow-hidden 부서 섹션에서 잘리지 않게.
+  const menuTriggerRef = useRef<HTMLButtonElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
+  const [menuPos, setMenuPos] = useState<{ top: number; left: number } | null>(null);
   const [pasteOpen, setPasteOpen] = useState(false);
   const [draftPath, setDraftPath] = useState('');
   const [saving, setSaving] = useState(false);
@@ -190,24 +207,72 @@ function WorkLinkRow({
     return () => { cancelled = true; };
   }, [link?.path]);
 
+  // P2-A: 포털 메뉴 위치 계산 — 트리거 버튼 rect 기준 우측 정렬로 아래에 띄우고,
+  // 화면 하단을 넘치면 위로 뒤집는다. 스크롤/리사이즈 시 재계산, 바깥 클릭/Esc 로 닫음.
+  const MENU_WIDTH = 160;
+  const MENU_HEIGHT = 84;
+  useLayoutEffect(() => {
+    if (!menuOpen) {
+      setMenuPos(null);
+      return;
+    }
+    const compute = () => {
+      const trigger = menuTriggerRef.current;
+      if (!trigger) return;
+      const rect = trigger.getBoundingClientRect();
+      const left = Math.max(8, Math.min(rect.right - MENU_WIDTH, window.innerWidth - MENU_WIDTH - 8));
+      const openUp = rect.bottom + 4 + MENU_HEIGHT > window.innerHeight;
+      const top = openUp ? rect.top - 4 - MENU_HEIGHT : rect.bottom + 4;
+      setMenuPos({ top: Math.max(8, top), left });
+    };
+    compute();
+    const handleScroll = () => compute();
+    window.addEventListener('scroll', handleScroll, true);
+    window.addEventListener('resize', handleScroll);
+    return () => {
+      window.removeEventListener('scroll', handleScroll, true);
+      window.removeEventListener('resize', handleScroll);
+    };
+  }, [menuOpen]);
+
+  useEffect(() => {
+    if (!menuOpen) return;
+    const handleDown = (event: MouseEvent) => {
+      const target = event.target as Node;
+      if (menuRef.current?.contains(target) || menuTriggerRef.current?.contains(target)) return;
+      setMenuOpen(false);
+    };
+    const handleKey = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setMenuOpen(false);
+    };
+    document.addEventListener('mousedown', handleDown);
+    document.addEventListener('keydown', handleKey);
+    return () => {
+      document.removeEventListener('mousedown', handleDown);
+      document.removeEventListener('keydown', handleKey);
+    };
+  }, [menuOpen]);
+
   const savePath = async (nextPath: string) => {
     const trimmed = nextPath.trim();
     if (!scene?.id || !trimmed) return;
     setSaving(true);
     try {
-      await upsertLink({
+      // 공용 가드 경유 — 지금 빈 슬롯으로 보일 때('연결')만 로딩 레이스 대비 재확인.
+      // 이미 링크가 보이는 '변경'(link truthy)은 사용자가 아는 상태라 confirm 스킵.
+      // upsert/toast/에러 처리는 가드 안에서 수행.
+      const saved = await saveWorkLinkPathGuarded({
         sceneUuid: scene.id,
         department,
         linkKind,
         path: trimmed,
         userId: currentUser?.id ?? null,
+        confirmIfExists: !link,
       });
-      setPasteOpen(false);
-      setMenuOpen(false);
-      toast.success(link ? '작업 링크를 변경했습니다' : '작업 링크를 연결했습니다');
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      toast.error(`작업 링크 저장 실패: ${message}`);
+      if (saved) {
+        setPasteOpen(false);
+        setMenuOpen(false);
+      }
     } finally {
       setSaving(false);
     }
@@ -301,6 +366,7 @@ function WorkLinkRow({
                 </button>
               )}
               <button
+                ref={menuTriggerRef}
                 type="button"
                 onClick={() => setMenuOpen((value) => !value)}
                 disabled={!canEdit || saving}
@@ -327,8 +393,12 @@ function WorkLinkRow({
                 </button>
               )}
 
-              {menuOpen && (
-                <div className="absolute right-0 top-8 z-30 w-40 overflow-hidden rounded-md border border-bg-border bg-bg-card shadow-xl">
+              {menuOpen && menuPos && createPortal(
+                <div
+                  ref={menuRef}
+                  style={{ position: 'fixed', top: menuPos.top, left: menuPos.left, width: MENU_WIDTH, zIndex: 9999 }}
+                  className="overflow-hidden rounded-md border border-bg-border bg-bg-card shadow-xl"
+                >
                   <button
                     type="button"
                     onClick={handleChoose}
@@ -345,7 +415,8 @@ function WorkLinkRow({
                     <Clipboard size={13} aria-hidden />
                     경로 붙여넣기
                   </button>
-                </div>
+                </div>,
+                document.body,
               )}
             </div>
           </div>

@@ -28,8 +28,12 @@ export interface SceneContextMenuProps {
       department: 'bg' | 'acting';
       folder?: SceneWorkLink;
       primaryFile?: SceneWorkLink;
+      /** 이 부서에 실제 씬이 존재하는지. 없으면 빈 슬롯 "연결"을 활성화하지 않는다 (클릭 먹통 방지). */
+      hasScene?: boolean;
     }>;
     onOpen: (link: SceneWorkLink) => void;
+    /** 빈 슬롯에서 "연결" 클릭 시 폴더/파일 선택창을 열어 링크를 추가한다. */
+    onAdd?: (department: 'bg' | 'acting', linkKind: 'folder' | 'primary_file') => void | Promise<void>;
   };
 }
 
@@ -92,10 +96,17 @@ export function SceneContextMenu({ x, y, current, onSelect, onClose, sceneLabel,
                 department={item.department}
                 folder={item.folder}
                 primaryFile={item.primaryFile}
+                hasScene={item.hasScene ?? true}
                 onOpen={(link) => {
                   workLinks.onOpen(link);
                   onClose();
                 }}
+                onAdd={workLinks.onAdd
+                  ? (department, linkKind) => {
+                      void workLinks.onAdd?.(department, linkKind);
+                      onClose();
+                    }
+                  : undefined}
               />
             ))}
           </div>
@@ -148,12 +159,16 @@ function WorkLinkDepartmentMenu({
   department,
   folder,
   primaryFile,
+  hasScene,
   onOpen,
+  onAdd,
 }: {
   department: 'bg' | 'acting';
   folder?: SceneWorkLink;
   primaryFile?: SceneWorkLink;
+  hasScene: boolean;
   onOpen: (link: SceneWorkLink) => void;
+  onAdd?: (department: 'bg' | 'acting', linkKind: 'folder' | 'primary_file') => void;
 }) {
   const label = department === 'bg' ? '배경' : '액팅';
   const tone = department === 'bg' ? 'text-accent-sub' : 'text-[#F09A87]';
@@ -161,51 +176,75 @@ function WorkLinkDepartmentMenu({
     <div>
       <div className={`px-2.5 py-0.5 text-[10.5px] font-bold ${tone}`}>{label}</div>
       <WorkLinkMenuItem
+        department={department}
+        linkKind="folder"
         icon={<Folder size={13} aria-hidden />}
-        label="작업 폴더 열기"
+        openLabel="작업 폴더 열기"
+        addLabel="작업 폴더 연결"
         link={folder}
+        hasScene={hasScene}
         onOpen={onOpen}
+        onAdd={onAdd}
       />
       <WorkLinkMenuItem
+        department={department}
+        linkKind="primary_file"
         icon={<File size={13} aria-hidden />}
-        label="작업 파일 열기"
+        openLabel="작업 파일 열기"
+        addLabel="대표 파일 연결"
         link={primaryFile}
+        hasScene={hasScene}
         onOpen={onOpen}
+        onAdd={onAdd}
       />
     </div>
   );
 }
 
 function WorkLinkMenuItem({
+  department,
+  linkKind,
   icon,
-  label,
+  openLabel,
+  addLabel,
   link,
+  hasScene,
   onOpen,
+  onAdd,
 }: {
+  department: 'bg' | 'acting';
+  linkKind: 'folder' | 'primary_file';
   icon: React.ReactNode;
-  label: string;
+  openLabel: string;
+  addLabel: string;
   link?: SceneWorkLink;
+  hasScene: boolean;
   onOpen: (link: SceneWorkLink) => void;
+  onAdd?: (department: 'bg' | 'acting', linkKind: 'folder' | 'primary_file') => void;
 }) {
+  // 연결된 슬롯 = "열기", 빈 슬롯 = "연결" (선택창 열기).
+  // 부서 씬이 없으면(예: BG만 있는 병합 씬의 ACT) sceneUuid 가 없어 클릭 먹통 → 비활성.
+  const canAdd = !link && !!onAdd && hasScene;
+  const interactive = !!link || canAdd;
   return (
     <button
       role="menuitem"
-      disabled={!link}
+      disabled={!interactive}
       onClick={(e) => {
-        if (!link) return;
+        if (!interactive) return;
         e.stopPropagation();
-        onOpen(link);
+        if (link) onOpen(link);
+        else onAdd?.(department, linkKind);
       }}
       className={[
         'w-full flex items-center gap-2.5 px-2.5 py-1.5 rounded-md text-[12px] text-left transition-colors',
-        link
+        interactive
           ? 'text-text-primary hover:bg-accent/10 hover:text-accent cursor-pointer'
           : 'text-text-secondary/35 cursor-not-allowed',
       ].join(' ')}
     >
       <span className="inline-flex w-[22px] justify-center flex-shrink-0">{icon}</span>
-      <span className="min-w-0 flex-1 truncate">{label}</span>
-      {!link && <span className="text-[10px] text-text-secondary/35">파일 탭에서 연결</span>}
+      <span className="min-w-0 flex-1 truncate">{link ? openLabel : addLabel}</span>
     </button>
   );
 }
