@@ -2,8 +2,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  selectEditorsForScenes, formatEditorLabels, isWarnPresence,
-  editorDisplayName, editingBeamClassName, editingBeamRowClassName,
+  selectEditorsForScenes, formatEditorLabels, isWarnPresence, hasSceneCollision,
+  editorDisplayName, editingBeamClass, editingBeamRowClass,
+  editingBeamClassName, editingBeamRowClassName,
 } from '../src/utils/editingPresence.ts';
 
 const snap = {
@@ -52,10 +53,40 @@ test('경고 판정: 2명 이상', () => {
   assert.equal(isWarnPresence([{ userId: 'a', username: 'A' }]), false);
   assert.equal(isWarnPresence([{ userId: 'a', username: 'A' }, { userId: 'b', username: 'B' }]), true);
 });
-test('beam 클래스: 0명 빈 문자열, 1명 base, 2명 warn', () => {
+test('beam 클래스(단일 씬): 0명 빈 문자열, 1명 base, 2명 warn', () => {
   assert.equal(editingBeamClassName([]), '');
   assert.equal(editingBeamClassName([{ userId: 'a', username: 'A' }]), 'editing-beam');
   assert.equal(editingBeamClassName([{ userId: 'a', username: 'A' }, { userId: 'b', username: 'B' }]), 'editing-beam editing-beam--warn');
   assert.equal(editingBeamRowClassName([{ userId: 'a', username: 'A' }]), 'editing-beam-row');
   assert.equal(editingBeamRowClassName([{ userId: 'a', username: 'A' }, { userId: 'b', username: 'B' }]), 'editing-beam-row editing-beam-row--warn');
+});
+
+// ── 통합(유니온) 거짓충돌 방지 ──
+const unionSnap = {
+  bg: [{ userId: 'me', username: '나' }],                                             // 내가 BG 만 열어둠
+  act: [{ userId: 'other', username: '김민수' }],                                     // 팀원이 ACT 만 열어둠
+  both: [{ userId: 'me', username: '나' }, { userId: 'other', username: '김민수' }],  // 한 파일에 둘
+};
+test('hasSceneCollision: 서로 다른 파일 1명씩은 충돌 아님, 한 파일 2명+면 충돌', () => {
+  assert.equal(hasSceneCollision(unionSnap, ['bg', 'act']), false); // 유니온 2명이지만 파일별 1명 → 거짓충돌 아님
+  assert.equal(hasSceneCollision(unionSnap, ['both']), true);       // 한 파일에 2명 → 실제 충돌
+  assert.equal(hasSceneCollision(unionSnap, ['bg']), false);
+  assert.equal(hasSceneCollision(unionSnap, ['both', 'act']), true);
+  assert.equal(hasSceneCollision(unionSnap, [null, undefined]), false);
+  assert.equal(hasSceneCollision(unionSnap, ['nope']), false);
+});
+test('editingBeamClass/Row: 편집자 유무·경고 독립 신호', () => {
+  assert.equal(editingBeamClass(false, false), '');
+  assert.equal(editingBeamClass(false, true), '');   // 편집자 없으면 경고여도 빈 문자열
+  assert.equal(editingBeamClass(true, false), 'editing-beam');
+  assert.equal(editingBeamClass(true, true), 'editing-beam editing-beam--warn');
+  assert.equal(editingBeamRowClass(false, true), '');
+  assert.equal(editingBeamRowClass(true, false), 'editing-beam-row');
+  assert.equal(editingBeamRowClass(true, true), 'editing-beam-row editing-beam-row--warn');
+});
+test('통합 카드 시나리오: 나 BG + 팀원 ACT → 글로우는 있지만 경고 아님', () => {
+  const union = selectEditorsForScenes(unionSnap, ['bg', 'act'], 'me');
+  assert.equal(union.length, 2); // 유니온 이름표는 둘 다
+  const warn = hasSceneCollision(unionSnap, ['bg', 'act']);
+  assert.equal(editingBeamClass(union.length > 0, warn), 'editing-beam'); // 경고 아님
 });

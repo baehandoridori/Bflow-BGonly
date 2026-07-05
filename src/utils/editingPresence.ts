@@ -44,19 +44,45 @@ export function editorDisplayName(editor: PresenceEditor): string {
   return editor.isSelf ? '나' : editor.username;
 }
 
-/** 2명 이상 동시 편집이면 경고 톤 (자기 자신 포함 — 나+타인이면 실제 충돌) */
+/** 단일 파일 기준 2명 이상 동시 편집이면 경고 톤 (자기 자신 포함 — 나+타인이면 실제 충돌) */
 export function isWarnPresence(editors: EditingUser[]): boolean {
   return editors.length >= 2;
 }
 
-/** div/motion.div 요소에 붙일 무지개 테두리 클래스 (편집자 0명이면 '') */
-export function editingBeamClassName(editors: EditingUser[]): string {
-  if (!editors.length) return '';
-  return isWarnPresence(editors) ? 'editing-beam editing-beam--warn' : 'editing-beam';
+/**
+ * 파일별 충돌 판정: 주어진 씬(파일) 중 "하나라도" 2명 이상이 동시에 열고 있으면 true.
+ * 통합 카드/행처럼 BG·ACT 여러 파일을 한 요소로 묶을 때, 서로 다른 파일을 한 명씩
+ * 열어둔 상황(유니온 2명)을 거짓 충돌로 경고하지 않기 위함.
+ * (snapshot[uuid] 는 userId 로 이미 dedupe 되어 있음 — mergePresenceState)
+ */
+export function hasSceneCollision(
+  snapshot: EditingPresenceSnapshot,
+  sceneUuids: Array<string | null | undefined>,
+): boolean {
+  for (const uuid of sceneUuids) {
+    if (uuid && (snapshot[uuid]?.length ?? 0) >= 2) return true;
+  }
+  return false;
 }
 
-/** 테이블 <tr>에 붙일 행 전용 무지개 테두리 클래스 (편집자 0명이면 '') */
+/** div/motion.div 요소용 무지개 테두리 클래스 — 편집자 유무와 경고를 독립 신호로 받음. */
+export function editingBeamClass(hasEditors: boolean, warn: boolean): string {
+  if (!hasEditors) return '';
+  return warn ? 'editing-beam editing-beam--warn' : 'editing-beam';
+}
+
+/** 테이블 <tr>용 행 전용 무지개 테두리 클래스 — 편집자 유무와 경고를 독립 신호로 받음. */
+export function editingBeamRowClass(hasEditors: boolean, warn: boolean): string {
+  if (!hasEditors) return '';
+  return warn ? 'editing-beam-row editing-beam-row--warn' : 'editing-beam-row';
+}
+
+/** 단일 씬(파일) 편집자 배열로 무지개 테두리 클래스 (경고=같은 파일 2명+). */
+export function editingBeamClassName(editors: EditingUser[]): string {
+  return editingBeamClass(editors.length > 0, isWarnPresence(editors));
+}
+
+/** 단일 씬(파일) 편집자 배열로 행 무지개 테두리 클래스. */
 export function editingBeamRowClassName(editors: EditingUser[]): string {
-  if (!editors.length) return '';
-  return isWarnPresence(editors) ? 'editing-beam-row editing-beam-row--warn' : 'editing-beam-row';
+  return editingBeamRowClass(editors.length > 0, isWarnPresence(editors));
 }

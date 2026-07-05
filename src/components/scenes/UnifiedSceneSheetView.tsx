@@ -38,7 +38,7 @@ import { AssigneeProgressStack } from './AssigneeProgressStack';
 import { SceneWorkLinkBadges } from './SceneWorkLinkBadges';
 import { EditingNameLabels } from './EditingNameLabels';
 import { useEditingPresenceStore } from '@/stores/useEditingPresenceStore';
-import { editingBeamRowClassName, selectEditorsForScenes } from '@/utils/editingPresence';
+import { editingBeamRowClass, hasSceneCollision, selectEditorsForScenes } from '@/utils/editingPresence';
 import { hasMultiAssigneeProgress } from '@/utils/assigneeProgress';
 import { loadPreferences, savePreferences } from '@/services/settingsService';
 import {
@@ -1138,12 +1138,14 @@ export function UnifiedSceneSheetView({
               const openRevCount = revisionCountByMergedKey.get(mergedKey) ?? 0;
               const isMergedComplete = !!bgScene && !!actScene && isFullyDone(bgScene) && isFullyDone(actScene);
 
-              // 실시간 편집 프레즌스 — 이 행 씬 파일을 지금 열어둔 다른 팀원(자기 제외)
+              // 실시간 편집 프레즌스 — 이 행 씬 파일을 지금 열어둔 팀원(자기 포함, 이름표·글로우용 유니온)
               const editingUsers = selectEditorsForScenes(
                 presenceByScene,
                 [bgScene?.id, actScene?.id],
                 presenceExcludeUserId,
               );
+              // 경고 톤은 "한 파일에 2명+"일 때만 (BG 1명 + ACT 1명 유니온을 거짓 충돌로 경고하지 않음).
+              const editingCollision = hasSceneCollision(presenceByScene, [bgScene?.id, actScene?.id]);
 
               return (
                 <Fragment key={mergedKey}>
@@ -1179,7 +1181,7 @@ export function UnifiedSceneSheetView({
                       // v1.18.0: 미해결 리테이크 행 — 액센트 좌측 강조 (셀 배지와 함께 시각적 anchor)
                       openRevCount > 0 && 'sheet-row-revision-open',
                       // 실시간 편집 프레즌스 — 행 무지개 테두리(<tr> box-shadow 링, div wrapper 없음)
-                      editingBeamRowClassName(editingUsers),
+                      editingBeamRowClass(editingUsers.length > 0, editingCollision),
                     )}
                     onClick={(e) => {
                       if ((e.ctrlKey || e.metaKey) && onCtrlClick) {
