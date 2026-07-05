@@ -35,7 +35,7 @@ import { SceneFilesTab } from './SceneFilesTab';
 import { DepartmentBlock } from './SceneWorkLinksPanel';
 import { SceneHistoryTab } from './SceneHistoryTab';
 import { useSceneWorkLinkStore } from '@/stores/useSceneWorkLinkStore';
-import { getSceneWorkLinkSlots } from '@/utils/sceneWorkLinks';
+import { getSceneWorkLinkSlots, getUniqueSceneUuids } from '@/utils/sceneWorkLinks';
 import { useSceneActivities } from '@/hooks/useSceneActivities';
 import { describeActivity, deptPrefix } from './activityLabels';
 import { useRevisionStore } from '@/stores/useRevisionStore';
@@ -274,6 +274,22 @@ export function UnifiedSceneDetailModal({
     : '';
   const sceneThreadKey = revisionSceneKey ? buildSceneThreadKeyFromRevisionKey(revisionSceneKey) : '';
   const openRevCount = useRevisionStore((s) => revisionSceneKey ? s.getOpenCount(revisionSceneKey) : 0);
+
+  // 작업 링크 로드 — 모달이 현재 보이는 파트 밖 씬(도킹 참조 등)으로 열리면 ScenesView 의 배치 로드에
+  // 그 씬이 없어 linkMap 이 비어있다. 그대로 두면 기존 DB 링크가 "연결된 경로 없음" 으로 보여
+  // '연결' 시 못 본 링크를 덮어쓸 위험이 있으므로, 모달 열릴 때 해당 씬 링크를 한 번 로드한다.
+  // (부서별 DeptSection 이 아닌 모달 본체에서 한 번만 — 중복 로드 방지.)
+  const loadForSceneUuids = useSceneWorkLinkStore((s) => s.loadForSceneUuids);
+  const workLinkSceneUuidKey = useMemo(
+    () => getUniqueSceneUuids([bgScene, actScene]).join('|'),
+    [bgScene, actScene],
+  );
+  useEffect(() => {
+    if (!workLinkSceneUuidKey) return;
+    void loadForSceneUuids(workLinkSceneUuidKey.split('|').filter(Boolean)).catch((err) => {
+      console.warn('[UnifiedSceneDetailModal] 작업 링크 로드 실패', err);
+    });
+  }, [loadForSceneUuids, workLinkSceneUuidKey]);
 
   // UI state — v1.18.0: initialTab 으로 외부에서 시작 탭 지정 가능 (알림 클릭 시 'revisions' 등)
   const [tab, setTab] = useState<TabKey>(initialTab ?? 'detail');
