@@ -1503,6 +1503,7 @@ function DeptSection({
           folder={workLinkSlots.folder}
           primaryFile={workLinkSlots.primaryFile}
           hideHeader
+          singleColumn
         />
       </div>
     </div>

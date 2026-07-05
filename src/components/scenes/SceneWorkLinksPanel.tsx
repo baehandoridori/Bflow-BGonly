@@ -116,6 +116,7 @@ export function DepartmentBlock({
   folder,
   primaryFile,
   hideHeader = false,
+  singleColumn = false,
 }: {
   department: SceneWorkLinkDepartment;
   scene: Scene | null;
@@ -123,6 +124,12 @@ export function DepartmentBlock({
   primaryFile?: SceneWorkLink;
   /** 상세 모달 부서 섹션처럼 이미 부서명이 보이는 곳에서는 자체 부서 헤더를 숨긴다. */
   hideHeader?: boolean;
+  /**
+   * 좁은 컨테이너(상세 모달 2칼럼 부서 섹션)에서는 folder/file 를 세로 단일 칼럼으로 스택.
+   * md: 반응형은 뷰포트 기준이라 좁은 모달 칼럼에서도 2칼럼이 적용돼 글자가 뭉개지므로,
+   * 인라인 컨텍스트에선 명시적으로 1칼럼 강제.
+   */
+  singleColumn?: boolean;
 }) {
   const meta = DEPT_META[department];
   return (
@@ -142,7 +149,7 @@ export function DepartmentBlock({
         </div>
       )}
 
-      <div className="grid gap-2 md:grid-cols-2">
+      <div className={cn('grid gap-2', !singleColumn && 'md:grid-cols-2')}>
         <WorkLinkRow department={department} scene={scene} linkKind="folder" link={folder} />
         <WorkLinkRow department={department} scene={scene} linkKind="primary_file" link={primaryFile} />
       </div>
