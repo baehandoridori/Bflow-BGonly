@@ -31,8 +31,8 @@ import { RevisionCornerFlag } from './RevisionCornerFlag';
 import { AssigneeProgressStack } from './AssigneeProgressStack';
 import { SceneWorkLinkBadges } from './SceneWorkLinkBadges';
 import { EditingNameLabels } from './EditingNameLabels';
-import { useSceneEditingPresence } from '@/stores/useEditingPresenceStore';
-import { editingBeamClassName } from '@/utils/editingPresence';
+import { useSceneEditingPresence, useSceneCollisionWarn } from '@/stores/useEditingPresenceStore';
+import { editingBeamClass } from '@/utils/editingPresence';
 import { hasMultiAssigneeProgress } from '@/utils/assigneeProgress';
 import {
   persistLengthChangeAtomic,
@@ -122,6 +122,8 @@ export function UnifiedSceneCard({
   // 실시간 편집 프레즌스 — 카드 전체 링은 BG/ACT 유니온으로(어느 부서든 편집 중이면 글로우).
   // 이름표는 부서별로 DeptSection 안에서 개별 표시(위치로 어느 부서인지 구분).
   const unionEditors = useSceneEditingPresence([bgScene?.id, actScene?.id]);
+  // 경고 톤은 "한 파일에 2명+"일 때만 (BG 1명 + ACT 1명 유니온을 거짓 충돌로 경고하지 않음).
+  const collisionWarn = useSceneCollisionWarn([bgScene?.id, actScene?.id]);
   const episodeName = useDataStore((s) => {
     const sheetName = bgSheetName ?? actSheetName;
     if (!sheetName) return undefined;
@@ -307,7 +309,7 @@ export function UnifiedSceneCard({
         isSelected && 'scene-card-selected',
         cardWholePendingClass,
         // 실시간 편집 프레즌스 — 회전 무지개 테두리(래퍼 없이 클래스만, BG/ACT 유니온)
-        editingBeamClassName(unionEditors),
+        editingBeamClass(unionEditors.length > 0, collisionWarn),
       )}
       style={{
         overflow: 'visible',

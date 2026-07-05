@@ -51,7 +51,7 @@ import { useOptimisticSceneImageUrl } from '@/hooks/useOptimisticSceneImageUrl';
 import { AssigneeProgressStack } from './AssigneeProgressStack';
 import { hasMultiAssigneeProgress } from '@/utils/assigneeProgress';
 import { EditingPresenceBanner } from './EditingPresenceBanner';
-import { useSceneEditingPresence } from '@/stores/useEditingPresenceStore';
+import { useSceneEditingPresence, useSceneCollisionWarn } from '@/stores/useEditingPresenceStore';
 
 /**
  * 전체 뷰(BG+ACT 통합) 전용 상세 모달.
@@ -451,8 +451,10 @@ export function UnifiedSceneDetailModal({
   // 모든 탭 + 댓글창 인라인이 공유하는 활동 데이터 — 모달이 단일 owner.
   const sceneActivities = useSceneActivities([bgScene?.id, actScene?.id], 200);
 
-  // 실시간 편집 프레즌스 — 이 씬 파일을 지금 열어둔 다른 팀원(자기 제외)
+  // 실시간 편집 프레즌스 — 이 씬 파일을 지금 열어둔 팀원(자기 포함, 배너 나열용 유니온)
   const editingUsers = useSceneEditingPresence([bgScene?.id, actScene?.id]);
+  // 경고 톤은 "한 파일에 2명+"일 때만 (나 BG + 팀원 ACT 유니온을 거짓 충돌로 경고하지 않음).
+  const editingCollision = useSceneCollisionWarn([bgScene?.id, actScene?.id]);
 
   // 댓글 패널 인라인 — 한솔 결정 (2026-05-02): "큰 이벤트만". 단계 개별 토글/담당자/레이아웃은 제외.
   // 추가: Scene.completedAt + completedBy 로 "단계 전부 완료" derive (activity_log 별도 actionType 없음).
@@ -951,7 +953,7 @@ export function UnifiedSceneDetailModal({
                     {tab === 'detail' && (
                       <>
                         {/* 실시간 편집 프레즌스 배너 — 링 없이 배너만 (제목 아래 본체 상단) */}
-                        <EditingPresenceBanner editors={editingUsers} />
+                        <EditingPresenceBanner editors={editingUsers} warn={editingCollision} />
                         {/* 이미지 (BG 기준) */}
                         {primaryScene && (
                           <div className="grid grid-cols-2 gap-3 px-5 pt-4 pb-2">
