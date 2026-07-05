@@ -40,6 +40,8 @@ import { useRevisionStore } from '@/stores/useRevisionStore';
 import { useAppStore } from '@/stores/useAppStore';
 import { useDataStore } from '@/stores/useDataStore';
 import { useAuthStore } from '@/stores/useAuthStore';
+import { useSceneEditingPresence } from '@/stores/useEditingPresenceStore';
+import { editingModalBeamClass, isWarnPresence } from '@/utils/editingPresence';
 import { buildSceneKey } from '@/services/revisionService';
 import { buildSceneThreadKeyFromRevisionKey } from '@/utils/commentThreadKey';
 import { formatStamp, formatTime } from '@/utils/formatTime';
@@ -494,6 +496,8 @@ export function SceneDetailModal({
 }: SceneDetailModalProps) {
   const [imageLoading, setImageLoading] = useState<string | null>(null);
   const [showImageModal, setShowImageModal] = useState(false);
+  // 실시간 편집 프레즌스 — 이 씬(단일 파일) 편집자. 모달 본체 전체를 회전 무지개 링으로 감쌈.
+  const editingUsers = useSceneEditingPresence([scene.id]);
   const sceneActivities = useSceneActivities([scene.id], 200);
   const memoAuthorMeta = useMemo(
     () => findLatestMemoActivity(sceneActivities, scene.id),
@@ -953,7 +957,13 @@ export function SceneDetailModal({
           className="relative flex gap-3 items-stretch max-w-full max-h-full overflow-x-auto overflow-y-hidden pb-1"
           onClick={(e) => e.stopPropagation()}
         >
-            {/* 모달 본체 */}
+            {/* 모달 본체 — 프레즌스 빔 래퍼(비스크롤): 스크롤은 안쪽 본체에서, 링은 래퍼 가장자리에 고정 */}
+            <div
+              className={cn(
+                'relative flex rounded-2xl',
+                editingModalBeamClass(editingUsers.length > 0, isWarnPresence(editingUsers)),
+              )}
+            >
             <motion.div
               key="detail-modal"
               initial={{ opacity: 0, scale: 0.95, y: 16 }}
@@ -1206,6 +1216,7 @@ export function SceneDetailModal({
                 </div>
               )}
             </motion.div>
+            </div>
 
             {/* ── 컴포지팅 리테이크 탭 버튼 ── */}
             <AnimatePresence>
