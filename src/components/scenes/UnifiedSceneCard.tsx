@@ -275,6 +275,7 @@ export function UnifiedSceneCard({
         department,
         folder: slots.folder,
         primaryFile: slots.primaryFile,
+        hasScene: !!scene?.id,
       };
     });
   }, [actScene, bgScene, linkMap, selectedDepartment]);

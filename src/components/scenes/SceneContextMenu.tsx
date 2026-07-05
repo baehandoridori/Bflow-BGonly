@@ -28,6 +28,8 @@ export interface SceneContextMenuProps {
       department: 'bg' | 'acting';
       folder?: SceneWorkLink;
       primaryFile?: SceneWorkLink;
+      /** 이 부서에 실제 씬이 존재하는지. 없으면 빈 슬롯 "연결"을 활성화하지 않는다 (클릭 먹통 방지). */
+      hasScene?: boolean;
     }>;
     onOpen: (link: SceneWorkLink) => void;
     /** 빈 슬롯에서 "연결" 클릭 시 폴더/파일 선택창을 열어 링크를 추가한다. */
@@ -94,6 +96,7 @@ export function SceneContextMenu({ x, y, current, onSelect, onClose, sceneLabel,
                 department={item.department}
                 folder={item.folder}
                 primaryFile={item.primaryFile}
+                hasScene={item.hasScene ?? true}
                 onOpen={(link) => {
                   workLinks.onOpen(link);
                   onClose();
@@ -156,12 +159,14 @@ function WorkLinkDepartmentMenu({
   department,
   folder,
   primaryFile,
+  hasScene,
   onOpen,
   onAdd,
 }: {
   department: 'bg' | 'acting';
   folder?: SceneWorkLink;
   primaryFile?: SceneWorkLink;
+  hasScene: boolean;
   onOpen: (link: SceneWorkLink) => void;
   onAdd?: (department: 'bg' | 'acting', linkKind: 'folder' | 'primary_file') => void;
 }) {
@@ -177,6 +182,7 @@ function WorkLinkDepartmentMenu({
         openLabel="작업 폴더 열기"
         addLabel="작업 폴더 연결"
         link={folder}
+        hasScene={hasScene}
         onOpen={onOpen}
         onAdd={onAdd}
       />
@@ -187,6 +193,7 @@ function WorkLinkDepartmentMenu({
         openLabel="작업 파일 열기"
         addLabel="대표 파일 연결"
         link={primaryFile}
+        hasScene={hasScene}
         onOpen={onOpen}
         onAdd={onAdd}
       />
@@ -201,6 +208,7 @@ function WorkLinkMenuItem({
   openLabel,
   addLabel,
   link,
+  hasScene,
   onOpen,
   onAdd,
 }: {
@@ -210,11 +218,13 @@ function WorkLinkMenuItem({
   openLabel: string;
   addLabel: string;
   link?: SceneWorkLink;
+  hasScene: boolean;
   onOpen: (link: SceneWorkLink) => void;
   onAdd?: (department: 'bg' | 'acting', linkKind: 'folder' | 'primary_file') => void;
 }) {
-  // 연결된 슬롯 = "열기", 빈 슬롯 = "연결" (선택창 열기). onAdd 미제공 시 빈 슬롯은 비활성.
-  const canAdd = !link && !!onAdd;
+  // 연결된 슬롯 = "열기", 빈 슬롯 = "연결" (선택창 열기).
+  // 부서 씬이 없으면(예: BG만 있는 병합 씬의 ACT) sceneUuid 가 없어 클릭 먹통 → 비활성.
+  const canAdd = !link && !!onAdd && hasScene;
   const interactive = !!link || canAdd;
   return (
     <button

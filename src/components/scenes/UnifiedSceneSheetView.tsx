@@ -899,6 +899,7 @@ export function UnifiedSceneSheetView({
         department,
         folder: slots.folder,
         primaryFile: slots.primaryFile,
+        hasScene: !!scene?.id,
       };
     });
   }, [linkMap, selectedDepartment]);

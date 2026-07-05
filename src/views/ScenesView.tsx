@@ -979,7 +979,8 @@ function SceneCard({ scene, sceneIndex, celebrating, department, isHighlighted, 
     department,
     folder: workLinkSlots.folder,
     primaryFile: workLinkSlots.primaryFile,
-  }], [department, workLinkSlots.folder, workLinkSlots.primaryFile]);
+    hasScene: !!scene.id,
+  }], [department, workLinkSlots.folder, workLinkSlots.primaryFile, scene.id]);
   const handleOpenWorkLink = useCallback(async (link: SceneWorkLink) => {
     const result = await openWorkPath(link.path);
     if (!result.ok) {
