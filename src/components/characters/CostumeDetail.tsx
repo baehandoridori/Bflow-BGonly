@@ -67,6 +67,7 @@ function PathActionRow({
           <button
             type="button"
             onClick={onOpen}
+            title={path}
             className="rounded-md border border-bg-border px-2 py-1.5 text-xs text-text-secondary hover:text-text-primary hover:border-text-secondary/50"
           >
             열기

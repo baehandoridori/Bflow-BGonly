@@ -84,6 +84,13 @@ interface AppState {
   setPendingCharacterBoardRequest: (req: AppState['pendingCharacterBoardRequest']) => void;
 
   /**
+   * 사이드바 '캐릭터' 항목의 '+' 등 외부 표면에서 캐릭터 추가 창 열기를 요청할 때 사용.
+   * 뷰 전환 race 를 피해 store 기반으로 소비한다 (pendingCharacterBoardRequest 와 동일 패턴).
+   */
+  pendingCharacterAddRequest: boolean;
+  setPendingCharacterAddRequest: (v: boolean) => void;
+
+  /**
    * #화·#파트 점프 시 열려 있는 씬 상세 모달을 강제로 닫는 신호(4c, 코덱스 4차 P2).
    * scene 점프는 pendingSceneModalRequest 로 모달을 교체하지만, part/episode 점프는
    * 모달을 열지 않으므로 기존에 떠 있던 상세 모달이 목적지를 가린다.
@@ -250,6 +257,7 @@ export const useAppStore = create<AppState>((set) => ({
     // 캐릭터 딥링크 요청은 현황판이 아닌 다른 뷰로 이동하는 순간 폐기 —
     //   로드 지연 중 사이드바로 이탈한 미소비 요청이 나중에 예기치 않은 모달을 열지 않게 한다.
     pendingCharacterBoardRequest: view === 'character-board' ? s.pendingCharacterBoardRequest : null,
+    pendingCharacterAddRequest: view === 'character-board' ? s.pendingCharacterAddRequest : false,
   })),
   navigationBackStack: [],
   pushNavigationBackTarget: () => set((s) => {
@@ -284,6 +292,7 @@ export const useAppStore = create<AppState>((set) => ({
         sceneGroupMode: target.sceneGroupMode,
         settingsTab: target.settingsTab,
         pendingSceneModalRequest: null,
+        pendingCharacterAddRequest: false,
         pendingCharacterBoardRequest: null,
         highlightSceneId: null,
         selectedSceneIds: new Set<string>(),
@@ -297,6 +306,8 @@ export const useAppStore = create<AppState>((set) => ({
   setPendingSceneModalRequest: (req) => set({ pendingSceneModalRequest: req }),
   pendingCharacterBoardRequest: null,
   setPendingCharacterBoardRequest: (req) => set({ pendingCharacterBoardRequest: req }),
+  pendingCharacterAddRequest: false,
+  setPendingCharacterAddRequest: (v) => set({ pendingCharacterAddRequest: v }),
 
   closeSceneModalSignal: 0,
   requestCloseSceneModal: () => set((s) => ({ closeSceneModalSignal: s.closeSceneModalSignal + 1 })),

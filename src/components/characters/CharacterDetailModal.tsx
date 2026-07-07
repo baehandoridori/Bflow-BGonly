@@ -1,7 +1,8 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react';
 import { toast } from 'sonner';
-import { Archive, Film, Plus, X, Image as ImageIcon, Trash2, Pencil, Search, User, MessageSquare, RotateCcw } from 'lucide-react';
+import { Archive, Film, Plus, X, Image as ImageIcon, Trash2, Pencil, Search, User, MessageSquare, RotateCcw, GripVertical } from 'lucide-react';
 import { useCharacterBoardStore } from '@/stores/useCharacterBoardStore';
+import { moveCostumeInOrder } from '@/stores/characterBoardStoreHelpers';
 import { useDataStore } from '@/stores/useDataStore';
 import { useModalFocus } from '@/hooks/useModalFocus';
 import type { Character, CharacterCostume, CharacterImageFit } from '@/types';
@@ -25,13 +26,7 @@ import {
   resolveFolderAfterCharacterFilePick,
 } from '@/services/characterPathActions';
 import { openOrRegisterEpisodeReel } from '@/services/episodeReelActions';
-
-function nextCostumeName(costumes: CharacterCostume[]): string {
-  const used = new Set(costumes.map((c) => c.name));
-  let n = costumes.length + 1;
-  while (used.has(`복장 ${n}`)) n++;
-  return `복장 ${n}`;
-}
+import { costumeNameForNew } from '@/utils/characterCostumeName';
 
 function riggingRatio(costumes: CharacterCostume[]): number {
   if (costumes.length === 0) return 0;
@@ -90,28 +85,49 @@ const CharacterListRow = memo(function CharacterListRow({
 const CostumeThumbCard = memo(function CostumeThumbCard({
   costume,
   selected,
+  dragging,
   onSelect,
   onDelete,
   onImageContextMenu,
+  onDragStartCostume,
+  onDropCostume,
+  onDragEndCostume,
 }: {
   costume: CharacterCostume;
   selected: boolean;
+  dragging: boolean;
   onSelect: (costumeId: string) => void;
   onDelete: (costumeId: string) => void | Promise<void>;
   onImageContextMenu: (costumeId: string, event: ReactMouseEvent<HTMLDivElement>) => void;
+  onDragStartCostume: (costumeId: string) => void;
+  onDropCostume: (costumeId: string) => void;
+  onDragEndCostume: () => void;
 }) {
   return (
     <div
       role="button"
       tabIndex={0}
+      draggable
+      onDragStart={(e) => { e.dataTransfer.effectAllowed = 'move'; onDragStartCostume(costume.id); }}
+      onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; }}
+      onDrop={(e) => { e.preventDefault(); onDropCostume(costume.id); }}
+      onDragEnd={onDragEndCostume}
       onClick={() => onSelect(costume.id)}
       onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onSelect(costume.id); } }}
       aria-pressed={selected}
+      title="드래그해서 순서 바꾸기"
       className={cn(
         'group relative w-[104px] shrink-0 flex flex-col rounded-lg overflow-hidden border transition-colors cursor-pointer',
         selected ? 'border-accent ring-1 ring-accent/40' : 'border-bg-border hover:border-text-secondary/50',
+        dragging && 'opacity-40',
       )}
     >
+      <div
+        aria-hidden="true"
+        className="pointer-events-none absolute left-1 top-1 z-[1] rounded bg-black/40 p-0.5 text-white/80 opacity-0 transition-opacity group-hover:opacity-100"
+      >
+        <GripVertical size={12} />
+      </div>
       <div className="aspect-[3/4] w-full bg-bg-border/30 flex items-center justify-center overflow-hidden">
         {costume.featuredImageUrl ? (
           <CharacterImageFrame
@@ -157,12 +173,14 @@ const CostumeThumbCard = memo(function CostumeThumbCard({
 /** 우측 상세 패널. */
 function CharacterDetailPanel({
   character,
+  initialCostumeId,
   onClose,
   commentOpen,
   onToggleComment,
   commentCount,
 }: {
   character: Character;
+  initialCostumeId?: string;
   onClose: () => void;
   commentOpen: boolean;
   onToggleComment: () => void;
@@ -171,6 +189,7 @@ function CharacterDetailPanel({
   const byCharacter = useCharacterBoardStore((s) => s.byCharacter);
   const addCostume = useCharacterBoardStore((s) => s.addCostume);
   const deleteCostume = useCharacterBoardStore((s) => s.deleteCostume);
+  const reorderCostumes = useCharacterBoardStore((s) => s.reorderCostumes);
   const deleteCharacter = useCharacterBoardStore((s) => s.deleteCharacter);
   const archiveCharacter = useCharacterBoardStore((s) => s.archiveCharacter);
   const restoreCharacter = useCharacterBoardStore((s) => s.restoreCharacter);
@@ -184,7 +203,10 @@ function CharacterDetailPanel({
   const getEpisodeDisplayName = useDataStore((s) => s.getEpisodeDisplayName);
 
   const costumes = byCharacter.get(character.id) ?? [];
-  const [activeCostumeId, setActiveCostumeId] = useState<string | null>(costumes[0]?.id ?? null);
+  // B8: 카드에서 휠로 넘겨 보던 복장이 있으면 그 복장으로 열린다(초기 캐릭터 한정 — 이후 다른 캐릭터로 바꾸면 아래 효과가 첫 복장으로 리셋).
+  const [activeCostumeId, setActiveCostumeId] = useState<string | null>(() => (
+    initialCostumeId && costumes.some((c) => c.id === initialCostumeId) ? initialCostumeId : costumes[0]?.id ?? null
+  ));
   const [editingName, setEditingName] = useState(false);
   const [nameDraft, setNameDraft] = useState(character.name);
   const [lightboxCostumeId, setLightboxCostumeId] = useState<string | null>(null);
@@ -248,7 +270,7 @@ function CharacterDetailPanel({
 
   const ensureCostume = useCallback(async () => {
     if (activeCostume) return activeCostume;
-    const created = await addCostume(character.id, nextCostumeName(costumes));
+    const created = await addCostume(character.id, costumeNameForNew(costumes));
     if (created) setActiveCostumeId(created.id);
     return created;
   }, [activeCostume, addCostume, character.id, costumes]);
@@ -277,7 +299,7 @@ function CharacterDetailPanel({
   }, [setEpisodes]);
 
   const handleAddCostume = async () => {
-    const created = await addCostume(character.id, nextCostumeName(costumes));
+    const created = await addCostume(character.id, costumeNameForNew(costumes));
     if (created) setActiveCostumeId(created.id);
   };
 
@@ -286,6 +308,27 @@ function CharacterDetailPanel({
     setActiveCostumeId(costumeId);
     setImageMenu({ costumeId, x: event.clientX, y: event.clientY });
   }, []);
+
+  // B10: 복장 드래그 재배치 — 콜백을 안정 참조로(memo 유지), 최신 순서는 store 에서 재조회.
+  const [draggingCostumeId, setDraggingCostumeId] = useState<string | null>(null);
+  const draggingCostumeIdRef = useRef<string | null>(null);
+  const handleCostumeDragStart = useCallback((costumeId: string) => {
+    draggingCostumeIdRef.current = costumeId;
+    setDraggingCostumeId(costumeId);
+  }, []);
+  const handleCostumeDragEnd = useCallback(() => {
+    draggingCostumeIdRef.current = null;
+    setDraggingCostumeId(null);
+  }, []);
+  const handleCostumeDrop = useCallback((targetId: string) => {
+    const dragId = draggingCostumeIdRef.current;
+    draggingCostumeIdRef.current = null;
+    setDraggingCostumeId(null);
+    if (!dragId || dragId === targetId) return;
+    const currentIds = (useCharacterBoardStore.getState().byCharacter.get(character.id) ?? []).map((c) => c.id);
+    // 드래그 방향에 따라 대상 앞/뒤로 삽입 — 바로 다음 항목 드롭이 no-op 되지 않게.
+    void reorderCostumes(character.id, moveCostumeInOrder(currentIds, dragId, targetId));
+  }, [character.id, reorderCostumes]);
 
   const handleArchiveCharacter = async () => {
     const ok = await ConfirmDialog.show({
@@ -470,9 +513,13 @@ function CharacterDetailPanel({
                     key={c.id}
                     costume={c}
                     selected={activeCostumeId === c.id}
+                    dragging={draggingCostumeId === c.id}
                     onSelect={setActiveCostumeId}
                     onDelete={deleteCostume}
                     onImageContextMenu={openCostumeImageMenu}
+                    onDragStartCostume={handleCostumeDragStart}
+                    onDropCostume={handleCostumeDrop}
+                    onDragEndCostume={handleCostumeDragEnd}
                   />
                 ))}
                 <button
@@ -544,11 +591,14 @@ function CharacterDetailPanel({
 /** 카드 클릭 → 오버레이 + 좌측 목록 / 우측 상세. */
 export function CharacterDetailModal({
   initialCharacterId,
+  initialCostumeId,
   archivedMode = false,
   filteredIds,
   onClose,
 }: {
   initialCharacterId: string;
+  /** 카드에서 휠로 넘겨 보던 복장 — 열릴 때 이 복장을 선택 (B8). */
+  initialCostumeId?: string;
   archivedMode?: boolean;
   /** 그리드의 검색·태그 필터 결과 — 있으면 좌측 목록이 같은 컨텍스트를 유지한다 (UX-6). */
   filteredIds?: string[];
@@ -676,6 +726,7 @@ export function CharacterDetailModal({
             {selected && (
               <CharacterDetailPanel
                 character={selected}
+                initialCostumeId={selected.id === initialCharacterId ? initialCostumeId : undefined}
                 onClose={onClose}
                 commentOpen={commentOpen}
                 onToggleComment={() => setCommentOpen((v) => !v)}

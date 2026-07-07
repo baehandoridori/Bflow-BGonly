@@ -2,8 +2,9 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { useCharacterBoardStore } from '@/stores/useCharacterBoardStore';
 import { useModalFocus } from '@/hooks/useModalFocus';
 import { CHARACTER_LAYER_CLASS } from '@/constants/characterLayers';
+import type { Character } from '@/types';
 
-export function AddCharacterModal({ onClose }: { onClose: () => void }) {
+export function AddCharacterModal({ onClose, onCreated }: { onClose: () => void; onCreated?: (character: Character) => void }) {
   const addCharacter = useCharacterBoardStore((s) => s.addCharacter);
   const characters = useCharacterBoardStore((s) => s.characters);
   const [name, setName] = useState('');
@@ -19,11 +20,12 @@ export function AddCharacterModal({ onClose }: { onClose: () => void }) {
   }, [characters, name]);
 
   const submit = async () => {
-    if (!name.trim() || saving) return;
+    if (saving) return;
     setSaving(true);
-    const created = await addCharacter(name.trim(), memo.trim() || undefined);
+    // 이름을 비워도 추가 가능 — store 가 임시 이름을 부여하고, 이미지 추가 시 파일 이름으로 자동 채운다 (B4).
+    const created = await addCharacter(name, memo.trim() || undefined);
     setSaving(false);
-    if (created) onClose();
+    if (created) { onCreated?.(created); onClose(); }
   };
 
   useEffect(() => {
@@ -50,12 +52,16 @@ export function AddCharacterModal({ onClose }: { onClose: () => void }) {
         <h2 className="text-lg font-semibold text-text-primary">캐릭터 추가</h2>
         <div className="flex flex-col gap-1.5">
           <span className="text-xs text-text-secondary">이름</span>
-          <input autoFocus value={name} onChange={(e) => setName(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') submit(); }} placeholder="캐릭터 이름" className="bg-transparent border border-bg-border rounded-md px-3 py-2 text-text-primary outline-none focus:border-accent/50" />
-          {duplicateName && (
+          <input autoFocus value={name} onChange={(e) => setName(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') submit(); }} placeholder="캐릭터 이름 (비워도 돼요)" className="bg-transparent border border-bg-border rounded-md px-3 py-2 text-text-primary outline-none focus:border-accent/50" />
+          {duplicateName ? (
             <span className="text-[11px]" style={{ color: 'rgb(var(--char-stage-feedback))' }}>
               {duplicateName.status === 'archived'
                 ? '보관된 캐릭터 중에 같은 이름이 있어요 — 복원해서 쓸 수도 있어요.'
                 : '같은 이름의 캐릭터가 이미 있어요 — 그래도 추가할 수 있어요.'}
+            </span>
+          ) : (
+            <span className="text-[11px] text-text-secondary">
+              이름은 나중에 지어도 돼요. 대표 이미지를 넣으면 파일 이름으로 자동으로 채워져요.
             </span>
           )}
         </div>
@@ -65,7 +71,7 @@ export function AddCharacterModal({ onClose }: { onClose: () => void }) {
         </div>
         <div className="flex justify-end gap-2">
           <button type="button" onClick={onClose} className="px-3 py-1.5 rounded-lg text-sm text-text-secondary hover:bg-bg-border/40 cursor-pointer">취소</button>
-          <button type="button" onClick={submit} disabled={!name.trim() || saving} className="px-3 py-1.5 rounded-lg text-sm bg-accent text-white disabled:opacity-50 cursor-pointer">추가</button>
+          <button type="button" onClick={submit} disabled={saving} className="px-3 py-1.5 rounded-lg text-sm bg-accent text-white disabled:opacity-50 cursor-pointer">추가</button>
         </div>
       </div>
     </div>

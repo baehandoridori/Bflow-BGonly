@@ -14,6 +14,7 @@ import { DEFAULT_CHARACTER_IMAGE_BACKGROUND } from '@/utils/characterAssets';
 import { claimReactKey } from '@/utils/claimReactKey';
 import { ConfirmDialog } from '@/components/common/ConfirmDialog';
 import { copyCharacterImage } from '@/services/characterPathActions';
+import { deriveCharacterNameFromFileName, isTempCharacterName } from '@/utils/characterName';
 
 const costumeMemoDraftCache = new Map<string, string>();
 
@@ -30,13 +31,14 @@ export function FeaturedImageSlot({
   onEnsureCostume: () => Promise<CharacterCostume | null>;
 }) {
   const updateCostumeField = useCharacterBoardStore((s) => s.updateCostumeField);
+  const renameCharacter = useCharacterBoardStore((s) => s.renameCharacter);
   const fileRef = useRef<HTMLInputElement>(null);
   const [uploading, setUploading] = useState(false);
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number } | null>(null);
   const [fitEditorOpen, setFitEditorOpen] = useState(false);
   const [draggingImage, setDraggingImage] = useState(false);
 
-  const handleUpload = useCallback(async (file: File) => {
+  const handleUpload = useCallback(async (file: File, opts?: { autoName?: boolean }) => {
     const targetCostume = costume ?? await onEnsureCostume();
     if (!targetCostume) return;
     if (targetCostume.featuredImageUrl) {
@@ -58,6 +60,17 @@ export function FeaturedImageSlot({
       // 업로드는 됐는데 DB 반영이 실패(롤백)하면 방금 올린 파일이 고아가 됨 → 정리.
       if (!saved) {
         deleteImage(res.url).catch((e) => console.warn('[character-board] 실패한 업로드 정리:', e));
+        return;
+      }
+      // 임시 이름 캐릭터에 파일선택/드래그로 이미지를 넣으면 파일 이름으로 자동 지정 (B4).
+      //   붙여넣기(opts.autoName=false)는 image.png 같은 일반명이라 제외.
+      //   최신 이름을 store 에서 재조회 — 업로드 대기 중 다른 사용자가 이름을 지었을 수 있다(stale-closure 방지).
+      if (opts?.autoName) {
+        const latestName = useCharacterBoardStore.getState().characters.find((c) => c.id === character.id)?.name ?? '';
+        if (isTempCharacterName(latestName)) {
+          const derived = deriveCharacterNameFromFileName(file.name);
+          if (derived && derived !== latestName) void renameCharacter(character.id, derived);
+        }
       }
     } catch (err) {
       console.error('[character-board] 이미지 업로드 실패:', err);
@@ -65,15 +78,15 @@ export function FeaturedImageSlot({
     } finally {
       setUploading(false);
     }
-  }, [character.id, costume, onEnsureCostume, updateCostumeField]);
+  }, [character.id, costume, onEnsureCostume, updateCostumeField, renameCharacter]);
 
-  const uploadFileIfImage = useCallback((file: File | null | undefined) => {
+  const uploadFileIfImage = useCallback((file: File | null | undefined, opts?: { autoName?: boolean }) => {
     if (!file) return;
     if (!file.type.startsWith('image/')) {
       toast.info('이미지 파일만 올릴 수 있어요');
       return;
     }
-    void handleUpload(file);
+    void handleUpload(file, opts);
   }, [handleUpload]);
 
   useEffect(() => {
@@ -89,7 +102,8 @@ export function FeaturedImageSlot({
       const file = item?.getAsFile();
       if (!file) return;
       event.preventDefault();
-      uploadFileIfImage(file);
+      // 붙여넣기 이미지는 파일 이름이 대개 image.png 같은 일반명 → 자동 이름 지정 제외.
+      uploadFileIfImage(file, { autoName: false });
     };
     window.addEventListener('paste', onPaste);
     return () => window.removeEventListener('paste', onPaste);
@@ -119,7 +133,7 @@ export function FeaturedImageSlot({
         onDrop={(event) => {
           event.preventDefault();
           setDraggingImage(false);
-          uploadFileIfImage(event.dataTransfer.files?.[0]);
+          uploadFileIfImage(event.dataTransfer.files?.[0], { autoName: true });
         }}
       >
         <CharacterImageFrame
@@ -164,7 +178,7 @@ export function FeaturedImageSlot({
         type="file"
         accept="image/*"
         className="hidden"
-        onChange={(e) => { const f = e.target.files?.[0]; if (f) handleUpload(f); e.target.value = ''; }}
+        onChange={(e) => { const f = e.target.files?.[0]; if (f) handleUpload(f, { autoName: true }); e.target.value = ''; }}
       />
       {contextMenu && (
         <CharacterImageContextMenu

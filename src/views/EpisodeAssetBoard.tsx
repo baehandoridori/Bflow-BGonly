@@ -25,6 +25,7 @@ import {
 import { tagColor } from '@/utils/tagColor';
 import { cn } from '@/utils/cn';
 import { ConfirmDialog } from '@/components/common/ConfirmDialog';
+import { CharacterImageFrame } from '@/components/characters/CharacterImageFrame';
 import { RIGGING_STAGE_META, characterStageColor } from '@/constants/characterStages';
 import { CHARACTER_LAYER_CLASS } from '@/constants/characterLayers';
 import { openOrRegisterEpisodeReel } from '@/services/episodeReelActions';
@@ -270,7 +271,10 @@ function EpisodeCharDetail({
                     )}
                   >
                     <div className="aspect-[3/4] w-full bg-bg-border/30 flex items-center justify-center overflow-hidden">
-                      {c.featuredImageUrl ? <img src={c.featuredImageUrl} alt={c.name} className="w-full h-full object-cover" loading="lazy" decoding="async" /> : <User size={16} className="text-text-secondary/40" />}
+                      {/* 세로로 긴 이미지가 상하로 잘리지 않도록 카드와 동일한 fit(3:4 contain + 저작 구도)로 표시 (B3). */}
+                      {c.featuredImageUrl ? (
+                        <CharacterImageFrame url={c.featuredImageUrl} alt={c.name} background={c.imageBackground} fit={c.imageFit} className="w-full h-full" />
+                      ) : <User size={16} className="text-text-secondary/40" />}
                     </div>
                     <div className="px-1.5 py-1 bg-bg-card flex items-center justify-between gap-1">
                       <span className={cn('text-[11px] truncate', on ? 'text-text-primary' : 'text-text-secondary')}>{c.name}</span>
