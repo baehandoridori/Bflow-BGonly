@@ -130,6 +130,16 @@ test('side thread has its own composer and main composer stays top-level', () =>
   assert.match(commentPanel, /onClick=\{handleSubmit\}/);
 });
 
+test('retake side thread composer supports explicit user mentions', () => {
+  assert.match(commentPanel, /const threadMention = useMentionAutocomplete\(\{/);
+  assert.match(commentPanel, /onChange: \(next\) => \{ setThreadInput\(next\); threadInputValueRef\.current = next; \}/);
+  assert.match(commentPanel, /inputRef:\s*threadInputRef/);
+  assert.match(commentPanel, /threadMention\.active/);
+  assert.match(commentPanel, /onPick=\{threadMention\.select\}/);
+  assert.match(commentPanel, /threadMention\.refresh\(\)/);
+  assert.match(commentPanel, /if \(threadMention\.onKeyDown\(event\)\) return/);
+});
+
 test('CommentPanel mounted ref is restored after development remount checks', () => {
   assert.match(commentPanel, /const mountedRef = useRef\(true\)/);
   assert.match(commentPanel, /useEffect\(\(\) => \{\s*mountedRef\.current = true;\s*return \(\) => \{ mountedRef\.current = false; \};\s*\}, \[\]\)/);
@@ -181,6 +191,14 @@ test('retake comments always keep their re badge in main and side thread views',
   assert.match(revisionCommentThread, /import \{ RevisionCommentBadge \} from '\.\/RevisionCommentBadge';/);
   assert.match(revisionCommentThread, /revisionId=\{c\.revisionId \?\? revisionId\}/);
   assert.match(revisionCommentThread, /<RevisionCommentBadge revisionId=\{revisionId\} \/>/);
+});
+
+test('main comment flow keeps comments from the same retake thread visually adjacent', () => {
+  assert.match(commentPanel, /orderCommentsForThreadedMainFlow/);
+  assert.match(commentPanel, /const isRetakeThreadFollowup = !!commentRevisionId && prevRevisionId === commentRevisionId/);
+  assert.match(commentPanel, /isRetakeThreadFollowup && 'comment-retake-thread-followup'/);
+  assert.match(commentPanel, /const commentSortKeys = buildThreadedCommentMainFlowKeys\(comments\)/);
+  assert.match(commentPanel, /commentSortKeys\.get\(a\.comment\.id\)/);
 });
 
 test('side thread submit state is released by request id', () => {
