@@ -282,9 +282,12 @@ test('character board is wired for image display, assignees, work links, and lig
 });
 
 test('character board creates a first costume automatically and keeps image actions focused', () => {
-  assert.match(characterStore, /svcAddCostume\(\{ characterId: created\.id, name: '복장 1', createdBy \}\)/);
+  // 첫 복장은 공용 유틸의 기본 명칭('기본 복장'), 이후 복장은 costumeNameForNew 로 '복장 N'.
+  assert.match(characterStore, /svcAddCostume\(\{ characterId: created\.id, name: DEFAULT_COSTUME_NAME, createdBy \}\)/);
+  assert.match(characterStore, /import \{ DEFAULT_COSTUME_NAME \} from '@\/utils\/characterCostumeName'/);
   assert.match(characterStore, /console\.warn\('\[character-board\] 첫 복장 자동 생성 실패:'/);
-  assert.match(characterDetailModalSource, /function nextCostumeName\(costumes: CharacterCostume\[\]\): string/);
+  assert.match(characterDetailModalSource, /import \{ costumeNameForNew \} from '@\/utils\/characterCostumeName'/);
+  assert.match(characterDetailModalSource, /await addCostume\(character\.id, costumeNameForNew\(costumes\)\)/);
   assert.match(characterDetailModalSource, /const ensureCostume = useCallback\(async \(\) => \{/);
   assert.match(characterDetailModalSource, /targetCostume = targetCostume \?\? await ensureCostume\(\);/);
   assert.doesNotMatch(characterBoardAll, /먼저 디자인\(복장\)/);
@@ -339,7 +342,7 @@ test('character board can create and link a work folder from the configured team
 
 test('character card right click opens the compact work menu instead of opening a folder immediately', () => {
   assert.match(characterBoard, /const \[cardMenu, setCardMenu\]/);
-  assert.match(characterBoard, /setCardMenu\(\{ characterId, x: event\.clientX, y: event\.clientY \}\)/);
+  assert.match(characterBoard, /setCardMenu\(\{ characterId, x: event\.clientX, y: event\.clientY, costumeId \}\)/);
   assert.doesNotMatch(characterBoard, /if \(c\.workFolderPath\) void openStoredPath\(c\.workFolderPath, '작업 폴더'\)/);
   assert.match(characterBoard, /variant="card"/);
   assert.match(characterBoard, /imageCostume=\{cardMenuFeatured\}/);

@@ -1,6 +1,6 @@
 import { useState, useRef, useCallback, useMemo, useEffect } from 'react';
 import { createPortal } from 'react-dom';
-import { LayoutDashboard, Film, List, Users, CircleUser, GanttChart, CalendarDays, Palmtree, Clapperboard, MessageSquareWarning, ListChecks, Drama, Settings, PanelLeft } from 'lucide-react';
+import { LayoutDashboard, Film, List, Users, CircleUser, GanttChart, CalendarDays, Palmtree, Clapperboard, MessageSquareWarning, ListChecks, Drama, Settings, PanelLeft, Plus } from 'lucide-react';
 import { AnimatePresence } from 'framer-motion';
 import { useAppStore, type ViewMode } from '@/stores/useAppStore';
 import { useRevisionStore } from '@/stores/useRevisionStore';
@@ -250,6 +250,7 @@ function CharacterAccessRetryTip({ show, anchorRef }: { show: boolean; anchorRef
 
 export function Sidebar() {
   const { currentView, setView, sidebarExpanded, toggleSidebarExpanded } = useAppStore();
+  const setPendingCharacterAddRequest = useAppStore((s) => s.setPendingCharacterAddRequest);
   const updateInfo = useAppStore((s) => s.updateInfo);
   const setUpdateCenterOpen = useAppStore((s) => s.setUpdateCenterOpen);
   const totalOpenRevisions = useRevisionStore((s) => s.totalOpenRevisionCount);
@@ -406,9 +407,10 @@ export function Sidebar() {
         {navItems.map((item) => {
           // GAP-H: 권한 조회 실패 시 캐릭터 메뉴는 뷰 이동 대신 재확인(retry) 트리거가 된다.
           const isAccessRetryItem = item.id === 'character-board' && characterAccessFailed;
-          return (
+          // B6: 권한 있는 캐릭터 항목엔 펼침/hover 시 '+' 로 바로 추가 창을 연다.
+          const isCharacterAddItem = item.id === 'character-board' && characterAccess.allowed && !characterAccessFailed;
+          const navButton = (
           <button
-            key={item.id}
             ref={isAccessRetryItem ? accessAnchorRef : undefined}
             onClick={() => {
               if (isAccessRetryItem) {
@@ -493,6 +495,25 @@ export function Sidebar() {
             </span>
           </button>
           );
+          if (isCharacterAddItem) {
+            return (
+              <div key={item.id} className="relative">
+                {navButton}
+                {isVisuallyExpanded && (
+                  <button
+                    type="button"
+                    aria-label="캐릭터 추가"
+                    title="캐릭터 추가"
+                    onClick={(e) => { e.stopPropagation(); setView('character-board'); setPendingCharacterAddRequest(true); }}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 flex h-6 w-6 items-center justify-center rounded-md text-text-secondary hover:text-accent hover:bg-accent/15 transition-colors cursor-pointer"
+                  >
+                    <Plus size={15} />
+                  </button>
+                )}
+              </div>
+            );
+          }
+          return <div key={item.id} className="contents">{navButton}</div>;
         })}
         <CharacterAccessRetryTip show={accessTipShow && characterAccessFailed} anchorRef={accessAnchorRef} />
 

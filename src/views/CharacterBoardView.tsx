@@ -43,10 +43,10 @@ function CharacterGrid({ onAdd, pendingOpenId, onConsumeOpen }: { onAdd: () => v
   const loadError = useCharacterBoardStore((s) => s.loadError);
   const reload = useCharacterBoardStore((s) => s.load);
 
-  const [detailRequest, setDetailRequest] = useState<{ id: string; nonce: number } | null>(null);
+  const [detailRequest, setDetailRequest] = useState<{ id: string; nonce: number; costumeId?: string } | null>(null);
   const [query, setQuery] = useState('');
   const [activeTags, setActiveTags] = useState<string[]>([]);
-  const [cardMenu, setCardMenu] = useState<{ characterId: string; x: number; y: number } | null>(null);
+  const [cardMenu, setCardMenu] = useState<{ characterId: string; x: number; y: number; costumeId?: string } | null>(null);
   const [showArchived, setShowArchived] = useState(false);
 
   const detailCharacter = useMemo(() => characters.find((c) => c.id === detailRequest?.id) ?? null, [characters, detailRequest?.id]);
@@ -89,7 +89,9 @@ function CharacterGrid({ onAdd, pendingOpenId, onConsumeOpen }: { onAdd: () => v
   }, [visibleCharacters, query, activeTags, byCharacter]);
   const cardMenuCharacter = cardMenu ? characters.find((c) => c.id === cardMenu.characterId) ?? null : null;
   const cardMenuCostumes = cardMenuCharacter ? byCharacter.get(cardMenuCharacter.id) ?? [] : [];
-  const cardMenuFeatured = cardMenuCostumes.find((c) => c.featuredImageUrl) ?? null;
+  // 카드에서 휠로 넘겨 보던 복장이 있으면 그 복장을 우클릭 메뉴 대상(이미지 복사 등)으로 우선한다 (B8).
+  const cardMenuWheeled = cardMenu?.costumeId ? cardMenuCostumes.find((c) => c.id === cardMenu.costumeId) ?? null : null;
+  const cardMenuFeatured = (cardMenuWheeled?.featuredImageUrl ? cardMenuWheeled : cardMenuCostumes.find((c) => c.featuredImageUrl)) ?? null;
   const cardMenuFileCostume = cardMenuFeatured?.workFilePath
     ? cardMenuFeatured
     : cardMenuCostumes.find((c) => c.workFilePath) ?? null;
@@ -99,12 +101,12 @@ function CharacterGrid({ onAdd, pendingOpenId, onConsumeOpen }: { onAdd: () => v
   }
 
   // CharacterCard(memo) 용 안정 콜백 — 그리드 map 안 캐릭터별 인라인 클로저는 memo 를 무력화한다 (CQ-6).
-  const openCharacterDetail = useCallback((characterId: string) => {
-    setDetailRequest((prev) => ({ id: characterId, nonce: (prev?.nonce ?? 0) + 1 }));
+  const openCharacterDetail = useCallback((characterId: string, costumeId?: string) => {
+    setDetailRequest((prev) => ({ id: characterId, nonce: (prev?.nonce ?? 0) + 1, costumeId }));
   }, []);
-  const openCardContextMenu = useCallback((characterId: string, event: ReactMouseEvent<HTMLButtonElement>) => {
+  const openCardContextMenu = useCallback((characterId: string, event: ReactMouseEvent<HTMLButtonElement>, costumeId?: string) => {
     event.preventDefault();
-    setCardMenu({ characterId, x: event.clientX, y: event.clientY });
+    setCardMenu({ characterId, x: event.clientX, y: event.clientY, costumeId });
   }, []);
 
   if (!loaded) {
@@ -233,6 +235,7 @@ function CharacterGrid({ onAdd, pendingOpenId, onConsumeOpen }: { onAdd: () => v
         <CharacterDetailModal
           key={`${detailCharacter.id}:${detailRequest.nonce}`}
           initialCharacterId={detailCharacter.id}
+          initialCostumeId={detailRequest.costumeId}
           archivedMode={showArchived}
           filteredIds={query.trim() || activeTags.length > 0 ? filtered.map((c) => c.id) : undefined}
           onClose={() => setDetailRequest(null)}
@@ -247,6 +250,8 @@ export function CharacterBoardView() {
   const loaded = useCharacterBoardStore((s) => s.loaded);
   const pendingCharacterBoardRequest = useAppStore((s) => s.pendingCharacterBoardRequest);
   const setPendingCharacterBoardRequest = useAppStore((s) => s.setPendingCharacterBoardRequest);
+  const pendingCharacterAddRequest = useAppStore((s) => s.pendingCharacterAddRequest);
+  const setPendingCharacterAddRequest = useAppStore((s) => s.setPendingCharacterAddRequest);
 
   const [tab, setTab] = useState<BoardTab>('board');
   const [addOpen, setAddOpen] = useState(false);
@@ -263,6 +268,14 @@ export function CharacterBoardView() {
     setPendingOpenId(pendingCharacterBoardRequest.characterId);
     setPendingCharacterBoardRequest(null);
   }, [loaded, pendingCharacterBoardRequest, setPendingCharacterBoardRequest]);
+
+  // 사이드바 '+' 등에서 캐릭터 추가 창 열기 요청 — 데이터 로드와 무관(모달은 데이터 불필요).
+  useEffect(() => {
+    if (!pendingCharacterAddRequest) return;
+    setTab('board');
+    setAddOpen(true);
+    setPendingCharacterAddRequest(false);
+  }, [pendingCharacterAddRequest, setPendingCharacterAddRequest]);
 
   // 미소비 딥링크 요청 청소는 useAppStore.setView(다른 뷰로 이동 시)와 goBackNavigation이 담당 —
   //   언마운트 cleanup 방식은 StrictMode 이중 마운트에서 정상 요청까지 지워 사용하지 않는다.
@@ -288,7 +301,12 @@ export function CharacterBoardView() {
         <EpisodeAssetBoard onOpenCharacter={(id) => { setTab('board'); setPendingOpenId(id); }} />
       )}
 
-      {addOpen && <AddCharacterModal onClose={() => setAddOpen(false)} />}
+      {addOpen && (
+        <AddCharacterModal
+          onClose={() => setAddOpen(false)}
+          onCreated={(c) => { setTab('board'); setPendingOpenId(c.id); }}
+        />
+      )}
     </div>
   );
 }

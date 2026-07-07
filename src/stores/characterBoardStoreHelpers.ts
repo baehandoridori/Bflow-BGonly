@@ -79,6 +79,45 @@ export function sortCostumes(costumes: CharacterCostume[]): CharacterCostume[] {
   return costumes.slice().sort(compareCostumes);
 }
 
+/**
+ * 복장 드래그 재배치(B10): orderedIds 순서대로 sortOrder 를 0..n-1 재부여하고,
+ * 값이 바뀐 복장만 { id, sortOrder } 로 돌려준다(불필요한 쓰기 최소화).
+ * orderedIds 에 없는 복장은 건드리지 않는다.
+ */
+export function reorderedCostumeSortOrders(
+  costumes: ReadonlyArray<{ id: string; sortOrder: number }>,
+  orderedIds: ReadonlyArray<string>,
+): Array<{ id: string; sortOrder: number }> {
+  const byId = new Map(costumes.map((c) => [c.id, c]));
+  const changes: Array<{ id: string; sortOrder: number }> = [];
+  orderedIds.forEach((id, index) => {
+    const current = byId.get(id);
+    if (current && current.sortOrder !== index) changes.push({ id, sortOrder: index });
+  });
+  return changes;
+}
+
+/**
+ * 드래그로 dragId 를 targetId 위치로 옮긴 새 순서 배열(B10).
+ * 방향에 따라 삽입 위치를 정한다 — 아래로 드래그(from<to)면 대상 '뒤', 위로면 대상 '앞'.
+ * (대상 '앞' 고정이면 바로 다음 항목으로 드롭 시 원위치로 돌아가 no-op 이 되는 버그.)
+ */
+export function moveCostumeInOrder(
+  orderedIds: ReadonlyArray<string>,
+  dragId: string,
+  targetId: string,
+): string[] {
+  const ids = orderedIds.slice();
+  if (dragId === targetId) return ids;
+  const from = ids.indexOf(dragId);
+  const to = ids.indexOf(targetId);
+  if (from < 0 || to < 0) return ids;
+  ids.splice(from, 1);
+  const newTargetIdx = ids.indexOf(targetId);
+  ids.splice(from < to ? newTargetIdx + 1 : newTargetIdx, 0, dragId);
+  return ids;
+}
+
 export type RawMapping = {
   characterId: string;
   episodeNumber: number;

@@ -24,6 +24,7 @@ import {
   mergeIncomingWithPending,
   pendingLinkKey,
   rebuildByCharacter,
+  reorderedCostumeSortOrders,
   rowToRealtimeMapping,
   sortCharacters,
   sortCostumes,
@@ -48,6 +49,8 @@ import {
   subscribeCharacterBoardRealtime,
 } from '@/services/supabaseService';
 import { useAuthStore } from '@/stores/useAuthStore';
+import { DEFAULT_COSTUME_NAME } from '@/utils/characterCostumeName';
+import { nextTempCharacterName } from '@/utils/characterName';
 import { toast } from 'sonner';
 
 /** 단계 값 → 활동 피드에 표시할 사람이 읽는 단계 이름. */
@@ -128,6 +131,8 @@ interface CharacterBoardStore {
   setCostumeTags: (id: string, kind: 'structure' | 'asset', tags: string[]) => Promise<void>;
   setVersion: (id: string, versionNo: number) => Promise<void>;
   deleteCostume: (id: string) => Promise<void>;
+  /** 복장 순서 드래그 재배치 — 낙관적 sortOrder 재부여 + 변경분만 저장, 실패 시 롤백. */
+  reorderCostumes: (characterId: string, orderedIds: string[]) => Promise<void>;
 
   linkEpisode: (characterId: string, episodeNumber: number) => Promise<void>;
   unlinkEpisode: (characterId: string, episodeNumber: number) => Promise<void>;
@@ -270,15 +275,17 @@ export const useCharacterBoardStore = create<CharacterBoardStore>((set, get) => 
 
   addCharacter: async (name, memo) => {
     const createdBy = useAuthStore.getState().currentUser?.id ?? null;
+    // 이름 없이 추가하면 표시 가능한 임시 이름을 부여한다(B4) — 빈 문자열은 목록·댓글·나의할일에서 빈칸으로 샌다.
+    const finalName = name.trim() || nextTempCharacterName(get().characters.map((c) => c.name));
     try {
-      const created = await svcAddCharacter({ name, memo: memo ?? null, createdBy });
+      const created = await svcAddCharacter({ name: finalName, memo: memo ?? null, createdBy });
       // 서버 결과(정확한 id/sortOrder)로 머지 — realtime 도착 전 즉시 반영.
       set((s) => {
         if (s.characters.some((c) => c.id === created.id)) return s;
         return { characters: sortCharacters([...s.characters, { ...created, episodeIds: [] }]) };
       });
       try {
-        const firstCostume = await svcAddCostume({ characterId: created.id, name: '복장 1', createdBy });
+        const firstCostume = await svcAddCostume({ characterId: created.id, name: DEFAULT_COSTUME_NAME, createdBy });
         set((s) => {
           if (s.costumes.some((c) => c.id === firstCostume.id)) return s;
           const costumes = sortCostumes([...s.costumes, firstCostume]);
@@ -430,6 +437,34 @@ export const useCharacterBoardStore = create<CharacterBoardStore>((set, get) => 
         return { costumes, byCharacter: rebuildByCharacter(s.byCharacter, costumes) };
       });
       toast.error('복장 삭제에 실패했어요');
+    }
+  },
+
+  reorderCostumes: async (characterId, orderedIds) => {
+    const prevCostumes = get().costumes;
+    const charCostumes = prevCostumes.filter((c) => c.characterId === characterId);
+    const changes = reorderedCostumeSortOrders(charCostumes, orderedIds);
+    if (changes.length === 0) return;
+    const changeMap = new Map(changes.map((ch) => [ch.id, ch.sortOrder]));
+    const prevSortById = new Map(charCostumes.map((c) => [c.id, c.sortOrder]));
+    // 낙관적 반영 + pending 보호(재연결 catch-up·실시간 에코가 순서를 되돌리지 않게, 다른 필드 update 와 동일 패턴).
+    for (const ch of changes) trackPendingFields(pendingCostumeFields, ch.id, { sortOrder: ch.sortOrder });
+    const next = prevCostumes.map((c) => (changeMap.has(c.id) ? { ...c, sortOrder: changeMap.get(c.id)! } : c));
+    set({ costumes: sortCostumes(next), byCharacter: rebuildByCharacter(get().byCharacter, next) });
+    try {
+      await Promise.all(changes.map((ch) => svcUpdateCostume(ch.id, { sortOrder: ch.sortOrder })));
+    } catch (err) {
+      console.error('[character-board] reorderCostumes 실패:', err);
+      // 아직 우리 낙관값 그대로인 복장만 이전 순서로 되돌린다(그 사이 다른 편집·실시간 반영은 보존).
+      set((s) => {
+        const reverted = s.costumes.map((c) => {
+          if (!changeMap.has(c.id) || c.sortOrder !== changeMap.get(c.id)) return c;
+          const prevSort = prevSortById.get(c.id);
+          return prevSort === undefined ? c : { ...c, sortOrder: prevSort };
+        });
+        return { costumes: sortCostumes(reverted), byCharacter: rebuildByCharacter(s.byCharacter, reverted) };
+      });
+      toast.error('복장 순서 변경 저장에 실패했어요');
     }
   },
 
