@@ -51,7 +51,11 @@ import {
   parseRevisionSlashCommand,
   type RevisionSlashContext,
 } from '@/utils/revisionSlashCommand';
-import { buildCommentReplyTarget } from '@/utils/commentThreading';
+import {
+  buildCommentReplyTarget,
+  buildThreadedCommentMainFlowKeys,
+  orderCommentsForThreadedMainFlow,
+} from '@/utils/commentThreading';
 import { createUuid } from '@/utils/createUuid';
 import { AttachmentImageLightbox } from './AttachmentImageLightbox';
 import { toast as sonnerToast } from 'sonner';
@@ -349,6 +353,7 @@ export function CommentPanel({
   const [focused, setFocused] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [threadInput, setThreadInput] = useState('');
+  const [threadInputScrollTop, setThreadInputScrollTop] = useState(0);
   const [threadSubmitting, setThreadSubmitting] = useState(false);
   const [threadMentionTarget, setThreadMentionTarget] = useState<SceneCommentWithSource | null>(null);
   const [threadAttachedImages, setThreadAttachedImages] = useState<AttachedImage[]>([]);
@@ -923,6 +928,11 @@ export function CommentPanel({
     users,
     inputRef,
   });
+  const threadMention = useMentionAutocomplete({
+    onChange: (next) => { setThreadInput(next); threadInputValueRef.current = next; },
+    users,
+    inputRef: threadInputRef,
+  });
   // 4c: #태그 자동완성 — @멘션 옆에 나란히 공존(EntityAwareInput 패턴). users 불필요(episodes 자체 구독).
   const hash = useHashtagAutocomplete({
     onChange: (next) => { setInput(next); inputValueRef.current = next; },
@@ -932,6 +942,9 @@ export function CommentPanel({
   useEffect(() => {
     if (replyTarget) { mention.close(); hash.close(); }
   }, [replyTarget, mention.close, hash.close]);
+  useEffect(() => {
+    threadMention.close();
+  }, [activeThreadRootId, activeRevisionThreadId, threadMention.close]);
   // Codex P2 8차(2026-04-29): unmount 후 upload 완료 race 처리 — React 가 unmounted component 의 setState 를
   // drop 하므로 setAttachedImages updater 안의 side-effect (deleteImage) 도 실행 안 됨 → orphan.
   // mountedRef 로 unmount 여부를 직접 확인해 그 케이스에서 storage 즉시 정리.
@@ -1596,6 +1609,7 @@ export function CommentPanel({
       }
       setThreadInput('');
       threadInputValueRef.current = '';
+      threadMention.close();
       setThreadAttachedImages([]);
       threadAttachedImagesRef.current = [];
 
@@ -1679,18 +1693,14 @@ export function CommentPanel({
     );
   }, [visibleComments, topLevelComments]);
 
-  /** 메인 흐름 = topLevel + orphan replies. 시간순 정렬은 mergeFeed 가 처리. */
+  /** 메인 흐름 = topLevel + orphan replies. 같은 리테이크 댓글은 한 스레드처럼 붙여 표시한다. */
   const mainFlowComments = useMemo(
-    () => [...topLevelComments, ...orphanReplies].sort(
-      (a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime(),
-    ),
+    () => orderCommentsForThreadedMainFlow([...topLevelComments, ...orphanReplies]),
     [topLevelComments, orphanReplies],
   );
 
   const orderedVisibleComments = useMemo(
-    () => [...visibleComments].sort(
-      (a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime(),
-    ),
+    () => orderCommentsForThreadedMainFlow(visibleComments),
     [visibleComments],
   );
   const mainFeedNodes = useMemo(
@@ -1967,6 +1977,7 @@ export function CommentPanel({
               const commentRevisionId = comment.revisionId ?? null;
               // v1.24.0: 묶음 — 같은 사용자가 연속이면 메타 숨김 (Slack 스타일).
               // 리테이크 댓글은 각각의 re# 맥락이 핵심이라 작성자가 같아도 묶지 않는다.
+              const isRetakeThreadFollowup = !!commentRevisionId && prevRevisionId === commentRevisionId;
               const isGroupedWithPrev = prevUserId === comment.userId && !prevRevisionId && !commentRevisionId;
               prevUserId = comment.userId;
               prevRevisionId = commentRevisionId;
@@ -2010,6 +2021,7 @@ export function CommentPanel({
                   mentionsMe && 'pl-2',
                   isFocused && 'comment-target-pulse',
                   isGroupedWithPrev && 'comment-grouped-with-prev',
+                  isRetakeThreadFollowup && 'comment-retake-thread-followup',
                 )}
                 style={mentionsMe ? { borderLeft: '4px solid rgb(var(--color-accent))', borderRadius: 4 } : undefined}
               >
@@ -2683,6 +2695,7 @@ export function CommentPanel({
                 onClick={() => {
                   if (activeThreadRoot) setLastThreadRootId(activeThreadRoot.id);
                   setThreadMentionTarget(null);
+                  threadMention.close();
                   setActiveThreadRootId(null);
                   setActiveRevisionThreadId(null);
                 }}
@@ -2829,7 +2842,7 @@ export function CommentPanel({
 
             <div className="shrink-0 border-t border-bg-border bg-bg-primary/80 px-3 py-3">
               <div
-                className="rounded-lg border border-bg-border/80 bg-bg-card/70 p-2 transition-colors focus-within:border-accent/50"
+                className="relative rounded-lg border border-bg-border/80 bg-bg-card/70 p-2 transition-colors focus-within:border-accent/50"
                 onDragEnter={(event) => {
                   if (Array.from(event.dataTransfer?.types || []).includes('Files')) {
                     event.preventDefault();
@@ -2842,6 +2855,14 @@ export function CommentPanel({
                 }}
                 onDrop={handleThreadDrop}
               >
+                {threadMention.active && (
+                  <MentionDropdown
+                    items={threadMention.items}
+                    index={threadMention.index}
+                    onPick={threadMention.select}
+                    positionClassName="left-2 right-2"
+                  />
+                )}
                 {threadMentionTarget && (!activeThreadRoot || threadMentionTarget.id !== activeThreadRoot.id) && (
                   <div className="mb-1.5 flex items-center gap-1.5 px-1 text-[10.5px] font-medium text-accent">
                     <CornerDownRight size={11} />
@@ -2881,25 +2902,38 @@ export function CommentPanel({
                     ))}
                   </div>
                 )}
-                <textarea
-                  ref={threadInputRef}
-                  data-comment-thread-input
-                  value={threadInput}
-                  onChange={(event) => {
-                    setThreadInput(event.target.value);
-                    threadInputValueRef.current = event.target.value;
-                  }}
-                  onKeyDown={(event) => {
-                    if (event.key === 'Enter' && !event.shiftKey) {
-                      event.preventDefault();
-                      handleThreadSubmit();
-                    }
-                  }}
-                  onPaste={handleThreadPaste}
-                  placeholder={activeRevisionThreadId ? '리테이크에 댓글 입력... (Ctrl+V / 드래그로 이미지)' : '스레드에 댓글 입력... (Ctrl+V / 드래그로 이미지)'}
-                  rows={2}
-                  className="block min-h-[44px] w-full resize-none bg-transparent px-1 py-0.5 text-[11.5px] leading-relaxed text-text-primary outline-none placeholder:text-text-secondary/45"
-                />
+                <div className="relative">
+                  <EntityHighlightOverlay
+                    text={threadInput}
+                    userNames={userNames}
+                    scrollTop={threadInputScrollTop}
+                    className="block min-h-[44px] w-full px-1 py-0.5 text-[11.5px] leading-relaxed"
+                  />
+                  <textarea
+                    ref={threadInputRef}
+                    data-comment-thread-input
+                    value={threadInput}
+                    onChange={(event) => {
+                      setThreadInput(event.target.value);
+                      threadInputValueRef.current = event.target.value;
+                      threadMention.refresh();
+                    }}
+                    onClick={() => threadMention.refresh()}
+                    onSelect={() => threadMention.refresh()}
+                    onScroll={(event) => setThreadInputScrollTop(event.currentTarget.scrollTop)}
+                    onKeyDown={(event) => {
+                      if (threadMention.onKeyDown(event)) return;
+                      if (event.key === 'Enter' && !event.shiftKey) {
+                        event.preventDefault();
+                        handleThreadSubmit();
+                      }
+                    }}
+                    onPaste={handleThreadPaste}
+                    placeholder={activeRevisionThreadId ? '리테이크에 댓글 입력... (Ctrl+V / 드래그로 이미지)' : '스레드에 댓글 입력... (Ctrl+V / 드래그로 이미지)'}
+                    rows={2}
+                    className="relative block min-h-[44px] w-full resize-none bg-transparent px-1 py-0.5 text-[11.5px] leading-relaxed text-text-primary outline-none placeholder:text-text-secondary/45"
+                  />
+                </div>
                 <input
                   ref={threadFileInputRef}
                   type="file"
@@ -3146,14 +3180,27 @@ function mergeFeed(
   comments: SceneCommentWithSource[],
   events: CommentInlineEvent[],
 ): FeedNode[] {
+  const commentSortKeys = buildThreadedCommentMainFlowKeys(comments);
   const nodes: FeedNode[] = [
     ...comments.map<FeedNode>((c) => ({ kind: 'comment', comment: c })),
     ...events.map<FeedNode>((e) => ({ kind: 'event', event: e })),
   ];
   nodes.sort((a, b) => {
-    const ta = a.kind === 'comment' ? a.comment.createdAt : a.event.at;
-    const tb = b.kind === 'comment' ? b.comment.createdAt : b.event.at;
-    return new Date(ta).getTime() - new Date(tb).getTime();
+    const aKey = a.kind === 'comment'
+      ? commentSortKeys.get(a.comment.id)
+      : { timeMs: Date.parse(a.event.at), order: Number.MAX_SAFE_INTEGER };
+    const bKey = b.kind === 'comment'
+      ? commentSortKeys.get(b.comment.id)
+      : { timeMs: Date.parse(b.event.at), order: Number.MAX_SAFE_INTEGER };
+    const aTimeMs = Number.isFinite(aKey?.timeMs) ? aKey!.timeMs : 0;
+    const bTimeMs = Number.isFinite(bKey?.timeMs) ? bKey!.timeMs : 0;
+    if (aTimeMs !== bTimeMs) return aTimeMs - bTimeMs;
+    if (a.kind === 'comment' && b.kind === 'comment') {
+      return (aKey?.order ?? 0) - (bKey?.order ?? 0);
+    }
+    if (a.kind === 'comment') return -1;
+    if (b.kind === 'comment') return 1;
+    return 0;
   });
   return nodes;
 }
