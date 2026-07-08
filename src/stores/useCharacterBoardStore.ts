@@ -557,14 +557,8 @@ export const useCharacterBoardStore = create<CharacterBoardStore>((set, get) => 
         const costumeImages = sortCostumeImages([...s.costumeImages, created]);
         return { costumeImages, imagesByCostume: rebuildImagesByCostume(s.imagesByCostume, costumeImages) };
       });
-      // primary 로 추가됐으면 featured_* 를 이 이미지로 동기화(무마이그레이션 호환 유지).
-      if (created.isPrimary) {
-        await get().updateCostumeField(costumeId, {
-          featuredImageUrl: created.url,
-          imageBackground: created.imageBackground,
-          imageFit: created.imageFit,
-        });
-      }
+      // featured_* 동기화는 DB 트리거(trg_sync_costume_featured_image)가 담당 — 앱이 featured 를 직접 쓰지 않는다.
+      //   (다중 이미지 모델에서 앱 featured 쓰기는 이전 primary 파일을 스토리지에서 지워버리는 P1 을 유발.)
       return created;
     } catch (err) {
       console.error('[character-board] addCostumeImage 실패:', err);
@@ -591,13 +585,8 @@ export const useCharacterBoardStore = create<CharacterBoardStore>((set, get) => 
       imagesByCostume: rebuildImagesByCostume(get().imagesByCostume, optimistic),
     });
     try {
+      // featured_* 동기화는 DB 트리거가 담당(앱이 featured 를 직접 안 씀 → 이전 primary 파일 보존).
       await svcSetPrimaryImage(costumeId, imageId);
-      // 대표 교체 → featured_* 동기화(카드/썸네일/라이트박스 등 기존 소비처 무변경 유지).
-      await get().updateCostumeField(costumeId, {
-        featuredImageUrl: target.url,
-        imageBackground: target.imageBackground,
-        imageFit: target.imageFit,
-      });
     } catch (err) {
       console.error('[character-board] setPrimaryImage 실패:', err);
       // 아직 우리 낙관값 그대로인 이미지만 이전 primary 상태로 되돌린다.
@@ -618,17 +607,8 @@ export const useCharacterBoardStore = create<CharacterBoardStore>((set, get) => 
   },
 
   updateCostumeImageField: async (imageId, updates) => {
-    const saved = await applyCostumeImageUpdate(set, get, imageId, updates, '이미지 저장에 실패했어요');
-    if (!saved) return false;
-    // primary 이미지의 배경/맞춤이 바뀌면 featured_* 도 함께 반영.
-    const img = get().costumeImages.find((i) => i.id === imageId);
-    if (img?.isPrimary && (updates.imageBackground !== undefined || updates.imageFit !== undefined)) {
-      const featured: Parameters<CharacterBoardStore['updateCostumeField']>[1] = {};
-      if (updates.imageBackground !== undefined) featured.imageBackground = img.imageBackground;
-      if (updates.imageFit !== undefined) featured.imageFit = img.imageFit;
-      await get().updateCostumeField(img.costumeId, featured);
-    }
-    return true;
+    // primary 이미지의 배경/맞춤 변경도 featured_* 로는 DB 트리거가 반영한다(앱 featured 쓰기 없음).
+    return applyCostumeImageUpdate(set, get, imageId, updates, '이미지 저장에 실패했어요');
   },
 
   reorderCostumeImages: async (costumeId, orderedIds) => {
@@ -677,14 +657,10 @@ export const useCharacterBoardStore = create<CharacterBoardStore>((set, get) => 
     try {
       await svcDeleteCostumeImage(imageId);
       if (wasPrimary) {
-        // 대표를 지웠으면 남은 이미지 중 최소 순서를 새 대표로(setPrimaryImage 가 featured_* 도 동기화).
+        // 대표를 지웠으면 남은 이미지 중 최소 순서를 새 대표로 지정(featured_* 는 트리거가 반영).
+        //   남은 이미지가 없으면 트리거가 이미 featured 를 비웠으므로 앱이 따로 쓸 필요 없다.
         const remaining = sortCostumeImages(get().costumeImages.filter((i) => i.costumeId === costumeId));
-        if (remaining.length > 0) {
-          await get().setPrimaryImage(remaining[0].id);
-        } else {
-          // 남은 이미지 없음 → featured 비움(카드가 빈 상태로 정상 표시).
-          await get().updateCostumeField(costumeId, { featuredImageUrl: null });
-        }
+        if (remaining.length > 0) await get().setPrimaryImage(remaining[0].id);
       }
     } catch (err) {
       console.error('[character-board] deleteCostumeImage 실패:', err);

@@ -128,10 +128,20 @@ test('costume-images: store 상태+액션 + featured 동기화(무마이그레�
   assert.match(store, /setPrimaryImage: async \(imageId\)/);
   assert.match(store, /reorderCostumeImages: async \(costumeId, orderedIds\)/);
   assert.match(store, /deleteCostumeImage: async \(imageId\)/);
-  // primary 추가/지정/삭제 시 featured_* 로 반영.
-  assert.match(store, /updateCostumeField\(costumeId, \{\s*featuredImageUrl: created\.url/);
-  assert.match(store, /featuredImageUrl: target\.url/);
-  assert.match(store, /updateCostumeField\(costumeId, \{ featuredImageUrl: null \}\)/);
+  // featured_* 동기화는 DB 트리거가 담당 — 앱이 featured 를 직접 쓰지 않는다(코덱스 P1/P2: 이전 primary 파일 보존·동기화 실패 방지).
+  assert.doesNotMatch(store, /featuredImageUrl: created\.url/);
+  assert.doesNotMatch(store, /featuredImageUrl: target\.url/);
+  assert.doesNotMatch(store, /updateCostumeField\(costumeId, \{ featuredImageUrl: null \}\)/);
+  assert.match(store, /DB 트리거/);
   // realtime 분기 존재.
   assert.match(store, /table === 'character_costume_images'/);
+});
+
+test('costume-images: featured 동기화 트리거 마이그레이션(스토리지 삭제 우회)', () => {
+  const mig = readFileSync('DEVLOG/migrations/2026-07-08-costume-images-sync-trigger.sql', 'utf8');
+  assert.match(mig, /CREATE OR REPLACE FUNCTION sync_costume_featured_image\(\)/);
+  assert.match(mig, /AFTER INSERT OR UPDATE OR DELETE ON character_costume_images/);
+  // primary 없으면 featured=NULL, 바뀔 때만 갱신(IS DISTINCT FROM).
+  assert.match(mig, /WHERE costume_id = v_costume_id AND is_primary = true/);
+  assert.match(mig, /featured_image_url IS DISTINCT FROM v_url/);
 });
