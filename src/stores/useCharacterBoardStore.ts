@@ -557,8 +557,9 @@ export const useCharacterBoardStore = create<CharacterBoardStore>((set, get) => 
         const costumeImages = sortCostumeImages([...s.costumeImages, created]);
         return { costumeImages, imagesByCostume: rebuildImagesByCostume(s.imagesByCostume, costumeImages) };
       });
-      // featured_* 동기화는 DB 트리거(trg_sync_costume_featured_image)가 담당 — 앱이 featured 를 직접 쓰지 않는다.
-      //   (다중 이미지 모델에서 앱 featured 쓰기는 이전 primary 파일을 스토리지에서 지워버리는 P1 을 유발.)
+      // featured_* 의 DB 확정은 트리거(trg_sync_costume_featured_image)가 담당(앱이 featured 를 직접 안 씀 → 이전 primary 파일 보존).
+      //   단, mock/preview·전파 지연 대비 로컬 featured 는 즉시 반영한다(코덱스 P2).
+      if (created.isPrimary) applyFeaturedLocal(set, get, costumeId, created.url, created.imageBackground, created.imageFit);
       return created;
     } catch (err) {
       console.error('[character-board] addCostumeImage 실패:', err);
@@ -571,6 +572,7 @@ export const useCharacterBoardStore = create<CharacterBoardStore>((set, get) => 
     const target = get().costumeImages.find((i) => i.id === imageId);
     if (!target) return;
     const { costumeId } = target;
+    const prevCostume = get().costumes.find((c) => c.id === costumeId) ?? null;
     const prevPrimaryById = new Map(
       get().costumeImages.filter((i) => i.costumeId === costumeId).map((i) => [i.id, i.isPrimary]),
     );
@@ -584,11 +586,13 @@ export const useCharacterBoardStore = create<CharacterBoardStore>((set, get) => 
       costumeImages: sortCostumeImages(optimistic),
       imagesByCostume: rebuildImagesByCostume(get().imagesByCostume, optimistic),
     });
+    // 로컬 featured 즉시 반영(DB 는 트리거가 확정). mock/preview·지연 대비(코덱스 P2).
+    applyFeaturedLocal(set, get, costumeId, target.url, target.imageBackground, target.imageFit);
     try {
-      // featured_* 동기화는 DB 트리거가 담당(앱이 featured 를 직접 안 씀 → 이전 primary 파일 보존).
       await svcSetPrimaryImage(costumeId, imageId);
     } catch (err) {
       console.error('[character-board] setPrimaryImage 실패:', err);
+      if (prevCostume) applyFeaturedLocal(set, get, costumeId, prevCostume.featuredImageUrl, prevCostume.imageBackground, prevCostume.imageFit);
       // 아직 우리 낙관값 그대로인 이미지만 이전 primary 상태로 되돌린다.
       set((s) => {
         const reverted = s.costumeImages.map((i) => {
@@ -607,8 +611,17 @@ export const useCharacterBoardStore = create<CharacterBoardStore>((set, get) => 
   },
 
   updateCostumeImageField: async (imageId, updates) => {
-    // primary 이미지의 배경/맞춤 변경도 featured_* 로는 DB 트리거가 반영한다(앱 featured 쓰기 없음).
-    return applyCostumeImageUpdate(set, get, imageId, updates, '이미지 저장에 실패했어요');
+    const saved = await applyCostumeImageUpdate(set, get, imageId, updates, '이미지 저장에 실패했어요');
+    if (saved) {
+      // primary 이미지의 배경/맞춤 변경 시 로컬 featured 도 즉시 반영(DB 는 트리거가 확정, 코덱스 P2).
+      const img = get().costumeImages.find((i) => i.id === imageId);
+      if (img?.isPrimary && (updates.imageBackground !== undefined || updates.imageFit !== undefined)) {
+        applyFeaturedLocal(set, get, img.costumeId, img.url,
+          updates.imageBackground !== undefined ? img.imageBackground : undefined,
+          updates.imageFit !== undefined ? img.imageFit : undefined);
+      }
+    }
+    return saved;
   },
 
   reorderCostumeImages: async (costumeId, orderedIds) => {
@@ -661,6 +674,7 @@ export const useCharacterBoardStore = create<CharacterBoardStore>((set, get) => 
         //   남은 이미지가 없으면 트리거가 이미 featured 를 비웠으므로 앱이 따로 쓸 필요 없다.
         const remaining = sortCostumeImages(get().costumeImages.filter((i) => i.costumeId === costumeId));
         if (remaining.length > 0) await get().setPrimaryImage(remaining[0].id);
+        else applyFeaturedLocal(set, get, costumeId, null); // 남은 이미지 없음 → 로컬 featured 비움(DB 는 트리거가 이미 비움).
       }
     } catch (err) {
       console.error('[character-board] deleteCostumeImage 실패:', err);
@@ -1071,6 +1085,36 @@ async function applyCostumeImageUpdate(
     toast.error(errorMsg);
     return false;
   }
+}
+
+/**
+ * primary 이미지 변경을 로컬 costumes.featured_* 에 즉시 반영(DB 쓰기 아님 — DB 트리거가 DB 를 확정).
+ * mock/preview(realtime noop)·전파 지연에도 카드/썸네일이 곧바로 갱신되게 하고,
+ * pending 으로 트리거발 realtime UPDATE 가 이 값을 되돌리지 않게 15초간 보호한다(코덱스 P2).
+ */
+function applyFeaturedLocal(
+  set: (partial: Partial<CharacterBoardStore>) => void,
+  get: () => CharacterBoardStore,
+  costumeId: string,
+  url: string | null,
+  background?: CharacterCostume['imageBackground'],
+  imageFit?: CharacterCostume['imageFit'],
+): void {
+  const prev = get().costumes;
+  if (!prev.some((c) => c.id === costumeId)) return;
+  const pending: Record<string, unknown> = { featuredImageUrl: url };
+  if (background !== undefined) pending.imageBackground = background;
+  if (imageFit !== undefined) pending.imageFit = imageFit;
+  trackPendingFields(pendingCostumeFields, costumeId, pending);
+  const next = prev.map((c) => (c.id === costumeId
+    ? {
+        ...c,
+        featuredImageUrl: url,
+        ...(background !== undefined ? { imageBackground: background } : {}),
+        ...(imageFit !== undefined ? { imageFit } : {}),
+      }
+    : c));
+  set({ costumes: next, byCharacter: rebuildByCharacter(get().byCharacter, next) });
 }
 
 /** 다른 사용자의 에피소드 매핑 변경 수신 시 episodeIds 만 가볍게 재조립. */
