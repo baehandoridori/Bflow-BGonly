@@ -677,8 +677,15 @@ export const useCharacterBoardStore = create<CharacterBoardStore>((set, get) => 
         // 대표를 지웠으면 남은 이미지 중 최소 순서를 새 대표로 지정(featured_* 는 트리거가 반영).
         //   남은 이미지가 없으면 트리거가 이미 featured 를 비웠으므로 앱이 따로 쓸 필요 없다.
         const remaining = sortCostumeImages(get().costumeImages.filter((i) => i.costumeId === costumeId));
-        if (remaining.length > 0) await get().setPrimaryImage(remaining[0].id);
-        else applyFeaturedLocal(set, get, costumeId, null); // 남은 이미지 없음 → 로컬 featured 비움(DB 는 트리거가 이미 비움).
+        if (remaining.length > 0) {
+          // 먼저 로컬 featured 를 비운 뒤 승격한다. 이러면 승격이 실패해도 setPrimaryImage 의 롤백이
+          //   '방금 삭제된 이미지 URL' 이 아니라 '빈 상태'로 되돌아가 카드가 깨진 이미지를 가리키지 않는다(코덱스 P2).
+          //   (삭제 직후 DB featured 는 트리거가 이미 NULL 로 만들어 둔 상태다.)
+          applyFeaturedLocal(set, get, costumeId, null);
+          await get().setPrimaryImage(remaining[0].id);
+        } else {
+          applyFeaturedLocal(set, get, costumeId, null); // 남은 이미지 없음 → 로컬 featured 비움(DB 는 트리거가 이미 비움).
+        }
       }
     } catch (err) {
       console.error('[character-board] deleteCostumeImage 실패:', err);

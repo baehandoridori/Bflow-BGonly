@@ -161,7 +161,7 @@ test('costume-images P2 수정: 원자 RPC + 라이트박스 선택이미지 + m
   const rpcMig = readFileSync('DEVLOG/migrations/2026-07-08-costume-image-set-primary-rpc.sql', 'utf8');
   assert.match(rpcMig, /CREATE OR REPLACE FUNCTION set_primary_costume_image\(p_image_id UUID\)/);
   const detailModal = readFileSync('src/components/characters/CharacterDetailModal.tsx', 'utf8');
-  assert.match(detailModal, /const \[lightboxImage, setLightboxImage\]/);
+  assert.match(detailModal, /const \[lightboxImageId, setLightboxImageId\]/);
   assert.match(detailModal, /override\?\.url \?\? c\.featuredImageUrl!/);
   const slot = readFileSync('src/components/characters/FeaturedImageSlot.tsx', 'utf8');
   assert.match(slot, /onView\(costume\.id, \{ id: selectedImage\.id, url: selectedImage\.url/);
@@ -206,4 +206,23 @@ test('costume-images 5차: 썸네일 컨텍스트메뉴 배경/맞추기도 대�
   assert.match(detailModal, /if \(img\) updateCostumeImageField\(img\.id, \{ imageBackground: background \}\)/);
   // 맞추기(fit) 편집기도 이미지 행 기준으로 읽고 쓴다.
   assert.match(detailModal, /onCommit=\{\(fit: CharacterImageFit\) => updateCostumeImageField\(fitEditorImage\.id, \{ imageFit: fit \}\)\}/);
+});
+
+test('costume-images 6차: 대표 이미지 삭제 시 승격 실패해도 삭제된 이미지로 featured 복구 안 함', () => {
+  const store = readFileSync('src/stores/useCharacterBoardStore.ts', 'utf8');
+  // 승격 전에 로컬 featured 를 비워 setPrimaryImage 롤백 대상이 '빈 상태'가 되게 한다(코덱스 P2).
+  assert.match(store, /applyFeaturedLocal\(set, get, costumeId, null\);\s*\n\s*await get\(\)\.setPrimaryImage\(remaining\[0\]\.id\)/);
+});
+
+test('costume-images 6차: 라이트박스 override 는 live imagesByCostume 에서 id 로 해석(스냅샷 금지)', () => {
+  const detailModal = readFileSync('src/components/characters/CharacterDetailModal.tsx', 'utf8');
+  // 스냅샷 상태 대신 id 만 보관.
+  assert.match(detailModal, /const \[lightboxImageId, setLightboxImageId\]/);
+  assert.doesNotMatch(detailModal, /const \[lightboxImage, setLightboxImage\]/);
+  // override 를 live 목록에서 id 로 찾는다.
+  assert.match(detailModal, /const override = c\.id === lightboxCostumeId && lightboxImageId/);
+  assert.match(detailModal, /costumeImgs\.find\(\(i\) => i\.id === lightboxImageId\)/);
+  // fit/background 를 이미지 행 필드에서 읽는다.
+  assert.match(detailModal, /background: override\?\.imageBackground \?\? c\.imageBackground/);
+  assert.match(detailModal, /fit: override\?\.imageFit \?\? c\.imageFit/);
 });

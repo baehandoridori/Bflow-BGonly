@@ -5,7 +5,7 @@ import { useCharacterBoardStore } from '@/stores/useCharacterBoardStore';
 import { moveCostumeInOrder } from '@/stores/characterBoardStoreHelpers';
 import { useDataStore } from '@/stores/useDataStore';
 import { useModalFocus } from '@/hooks/useModalFocus';
-import type { Character, CharacterCostume, CharacterImageBackground, CharacterImageFit } from '@/types';
+import type { Character, CharacterCostume, CharacterImageFit } from '@/types';
 import { createAndLinkCharacterFolder } from '@/services/characterFolderService';
 import { cn } from '@/utils/cn';
 import { CommentPanelResizable } from '@/components/scenes/CommentPanelResizable';
@@ -213,7 +213,9 @@ function CharacterDetailPanel({
   const [nameDraft, setNameDraft] = useState(character.name);
   const [lightboxCostumeId, setLightboxCostumeId] = useState<string | null>(null);
   // 갤러리에서 고른 (비대표일 수 있는) 이미지로 라이트박스를 열기 위한 오버라이드 (코덱스 P2).
-  const [lightboxImage, setLightboxImage] = useState<{ id: string; url: string; background: CharacterImageBackground; fit: CharacterImageFit } | null>(null);
+  // 라이트박스에서 고른(비대표) 이미지의 id 만 보관하고, 값은 live imagesByCostume 에서 해석한다.
+  //   스냅샷을 들고 있으면 fit 을 편집·저장한 뒤에도 낡은 값이 남아 다음 편집이 덮어쓴다(코덱스 P2).
+  const [lightboxImageId, setLightboxImageId] = useState<string | null>(null);
   const [imageMenu, setImageMenu] = useState<{ costumeId: string; x: number; y: number } | null>(null);
   const [fitEditorCostumeId, setFitEditorCostumeId] = useState<string | null>(null);
   const [creatingFolder, setCreatingFolder] = useState(false);
@@ -245,10 +247,13 @@ function CharacterDetailPanel({
   const imageEntries: CharacterImageLightboxEntry[] = costumes
     .filter((c) => !!c.featuredImageUrl)
     .map((c) => {
-      // 갤러리에서 고른 비대표 이미지로 열렸으면 그 이미지로 표시(코덱스 P2). 그 외엔 대표(featured).
-      const override = c.id === lightboxCostumeId ? lightboxImage : null;
       const costumeImgs = imagesByCostume.get(c.id) ?? [];
       const primaryImg = costumeImgs.find((i) => i.isPrimary) ?? costumeImgs[0] ?? null;
+      // 갤러리에서 고른 비대표 이미지로 열렸으면 그 이미지로 표시(코덱스 P2). id 로 live 상태에서 해석해
+      //   fit 편집 직후에도 최신 값을 쓰게 한다. 그 외엔 대표(featured).
+      const override = c.id === lightboxCostumeId && lightboxImageId
+        ? costumeImgs.find((i) => i.id === lightboxImageId) ?? null
+        : null;
       return {
         costumeId: c.id,
         // 썸네일 맞추기가 대표가 아닌 '표시 중인 그 이미지'의 fit 을 갱신하도록 imageId 를 실는다(코덱스 P2).
@@ -257,8 +262,8 @@ function CharacterDetailPanel({
         costumeName: c.name,
         versionNo: c.versionNo,
         url: override?.url ?? c.featuredImageUrl!,
-        background: override?.background ?? c.imageBackground,
-        fit: override?.fit ?? c.imageFit,
+        background: override?.imageBackground ?? c.imageBackground,
+        fit: override?.imageFit ?? c.imageFit,
       };
     });
   const menuCostume = imageMenu ? costumes.find((c) => c.id === imageMenu.costumeId) ?? null : null;
@@ -461,7 +466,7 @@ function CharacterDetailPanel({
             <FeaturedImageSlot
               character={character}
               costume={activeCostume}
-              onView={(costumeId, image) => { setLightboxCostumeId(costumeId); setLightboxImage(image ?? null); }}
+              onView={(costumeId, image) => { setLightboxCostumeId(costumeId); setLightboxImageId(image?.id ?? null); }}
               onEnsureCostume={ensureCostume}
             />
             {activeCostume && <CostumeIdentity costume={activeCostume} />}
@@ -601,7 +606,7 @@ function CharacterDetailPanel({
         <CharacterImageLightbox
           entries={imageEntries}
           initialCostumeId={lightboxCostumeId}
-          onClose={() => { setLightboxCostumeId(null); setLightboxImage(null); }}
+          onClose={() => { setLightboxCostumeId(null); setLightboxImageId(null); }}
           onFitCommit={(imageId, fit) => updateCostumeImageField(imageId, { imageFit: fit })}
           onCopyImage={(url) => copyCharacterImage(url)}
         />
