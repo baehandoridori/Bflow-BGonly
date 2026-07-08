@@ -83,9 +83,9 @@ test('costume-images: electron/supabase 로더+CRUD+setPrimary (clear 먼저) + 
   assert.match(electronSupabase, /export async function addCostumeImage\(/);
   assert.match(electronSupabase, /export async function updateCostumeImage\(/);
   assert.match(electronSupabase, /export async function deleteCostumeImage\(/);
-  assert.match(electronSupabase, /export async function setPrimaryCostumeImage\(costumeId: string, imageId: string\)/);
-  // setPrimary: is_primary=false 로 clear 를 먼저(부분 유니크 위반 방지).
-  assert.match(electronSupabase, /\.update\(\{ is_primary: false[\s\S]*?\.update\(\{ is_primary: true/);
+  assert.match(electronSupabase, /export async function setPrimaryCostumeImage\(_costumeId: string, imageId: string\)/);
+  // setPrimary: clear+set 원자화 RPC 호출(2쿼리 부분실패로 primary 없는 상태 남는 코덱스 P2 방지).
+  assert.match(electronSupabase, /supabase\.rpc\('set_primary_costume_image', \{ p_image_id: imageId \}\)/);
   // image_fit 은 NOT NULL — insert 시 기본값 채움.
   assert.match(electronSupabase, /image_fit: input\.imageFit \?\? DEFAULT_COSTUME_IMAGE_FIT/);
   // realtime tables 배열에 신규 테이블 포함.
@@ -155,4 +155,17 @@ test('costume-images: featured 동기화 트리거 마이그레이션(스토리�
   // primary 없으면 featured=NULL, 바뀔 때만 갱신(IS DISTINCT FROM).
   assert.match(mig, /WHERE costume_id = v_costume_id AND is_primary = true/);
   assert.match(mig, /featured_image_url IS DISTINCT FROM v_url/);
+});
+
+test('costume-images P2 수정: 원자 RPC + 라이트박스 선택이미지 + mock featured 동기화', () => {
+  const rpcMig = readFileSync('DEVLOG/migrations/2026-07-08-costume-image-set-primary-rpc.sql', 'utf8');
+  assert.match(rpcMig, /CREATE OR REPLACE FUNCTION set_primary_costume_image\(p_image_id UUID\)/);
+  const detailModal = readFileSync('src/components/characters/CharacterDetailModal.tsx', 'utf8');
+  assert.match(detailModal, /const \[lightboxImage, setLightboxImage\]/);
+  assert.match(detailModal, /override\?\.url \?\? c\.featuredImageUrl!/);
+  const slot = readFileSync('src/components/characters/FeaturedImageSlot.tsx', 'utf8');
+  assert.match(slot, /onView\(costume\.id, \{ url: selectedImage\.url/);
+  const mock = readFileSync('src/mocks/devElectronAPI.ts', 'utf8');
+  assert.match(mock, /function mockSyncCostumeFeatured/);
+  assert.match(mock, /mockSyncCostumeFeatured\(costumeId\)/);
 });

@@ -4138,22 +4138,13 @@ export async function deleteCostumeImage(id: string): Promise<void> {
 }
 
 /**
- * 복장 대표 이미지 지정 — 같은 복장의 is_primary 를 먼저 모두 해제한 뒤 대상만 true 로.
- * clear 를 먼저 하는 이유: 부분 유니크 (costume_id) WHERE is_primary 위반을 피하기 위해.
+ * 복장 대표 이미지 지정 — clear+set 을 한 트랜잭션(RPC set_primary_costume_image)으로 원자 처리.
+ * 앱 2쿼리 방식은 set 실패/0행 시 대표 없는 상태로 남아 트리거가 featured 를 비우는 문제(코덱스 P2)가 있어 RPC 로 전환.
+ * costumeId 는 호출부 시그니처 호환을 위해 유지하나 RPC 가 imageId 로 복장을 찾으므로 사용하지 않는다.
  */
-export async function setPrimaryCostumeImage(costumeId: string, imageId: string): Promise<void> {
-  const now = new Date().toISOString();
-  const { error: clearErr } = await supabase
-    .from('character_costume_images')
-    .update({ is_primary: false, updated_at: now })
-    .eq('costume_id', costumeId)
-    .eq('is_primary', true);
-  if (clearErr) throw clearErr;
-  const { error: setErr } = await supabase
-    .from('character_costume_images')
-    .update({ is_primary: true, updated_at: now })
-    .eq('id', imageId);
-  if (setErr) throw setErr;
+export async function setPrimaryCostumeImage(_costumeId: string, imageId: string): Promise<void> {
+  const { error } = await supabase.rpc('set_primary_costume_image', { p_image_id: imageId });
+  if (error) throw error;
 }
 
 /** 캐릭터-에피소드 연결 (UPSERT, onConflict 'episode_id,character_id'). episodeNumber → episode_id 해석. */

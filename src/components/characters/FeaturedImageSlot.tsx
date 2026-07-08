@@ -348,7 +348,7 @@ export function FeaturedImageSlot({
 }: {
   character: Character;
   costume: CharacterCostume | null;
-  onView: (costumeId: string) => void;
+  onView: (costumeId: string, image?: { url: string; background: CharacterImageBackground; fit: CharacterImageFit }) => void;
   onEnsureCostume: () => Promise<CharacterCostume | null>;
 }) {
   const imagesByCostume = useCharacterBoardStore((s) => s.imagesByCostume);
@@ -517,7 +517,7 @@ export function FeaturedImageSlot({
               background={selectedImage.imageBackground}
               fit={selectedImage.imageFit}
               className="h-full w-full rounded-xl"
-              onClick={costume ? () => onView(costume.id) : undefined}
+              onClick={costume ? () => onView(costume.id, { url: selectedImage.url, background: selectedImage.imageBackground, fit: selectedImage.imageFit }) : undefined}
               onContextMenu={(event) => {
                 event.preventDefault();
                 setImageMenu({ x: event.clientX, y: event.clientY });

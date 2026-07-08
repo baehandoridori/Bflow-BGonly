@@ -5,7 +5,7 @@ import { useCharacterBoardStore } from '@/stores/useCharacterBoardStore';
 import { moveCostumeInOrder } from '@/stores/characterBoardStoreHelpers';
 import { useDataStore } from '@/stores/useDataStore';
 import { useModalFocus } from '@/hooks/useModalFocus';
-import type { Character, CharacterCostume, CharacterImageFit } from '@/types';
+import type { Character, CharacterCostume, CharacterImageBackground, CharacterImageFit } from '@/types';
 import { createAndLinkCharacterFolder } from '@/services/characterFolderService';
 import { cn } from '@/utils/cn';
 import { CommentPanelResizable } from '@/components/scenes/CommentPanelResizable';
@@ -210,6 +210,8 @@ function CharacterDetailPanel({
   const [editingName, setEditingName] = useState(false);
   const [nameDraft, setNameDraft] = useState(character.name);
   const [lightboxCostumeId, setLightboxCostumeId] = useState<string | null>(null);
+  // 갤러리에서 고른 (비대표일 수 있는) 이미지로 라이트박스를 열기 위한 오버라이드 (코덱스 P2).
+  const [lightboxImage, setLightboxImage] = useState<{ url: string; background: CharacterImageBackground; fit: CharacterImageFit } | null>(null);
   const [imageMenu, setImageMenu] = useState<{ costumeId: string; x: number; y: number } | null>(null);
   const [fitEditorCostumeId, setFitEditorCostumeId] = useState<string | null>(null);
   const [creatingFolder, setCreatingFolder] = useState(false);
@@ -240,15 +242,19 @@ function CharacterDetailPanel({
   const activeCostume = costumes.find((c) => c.id === activeCostumeId) ?? null;
   const imageEntries: CharacterImageLightboxEntry[] = costumes
     .filter((c) => !!c.featuredImageUrl)
-    .map((c) => ({
-      costumeId: c.id,
-      name: `${character.name} · ${c.name}`,
-      costumeName: c.name,
-      versionNo: c.versionNo,
-      url: c.featuredImageUrl!,
-      background: c.imageBackground,
-      fit: c.imageFit,
-    }));
+    .map((c) => {
+      // 갤러리에서 고른 비대표 이미지로 열렸으면 그 이미지로 표시(코덱스 P2). 그 외엔 대표(featured).
+      const override = c.id === lightboxCostumeId ? lightboxImage : null;
+      return {
+        costumeId: c.id,
+        name: `${character.name} · ${c.name}`,
+        costumeName: c.name,
+        versionNo: c.versionNo,
+        url: override?.url ?? c.featuredImageUrl!,
+        background: override?.background ?? c.imageBackground,
+        fit: override?.fit ?? c.imageFit,
+      };
+    });
   const menuCostume = imageMenu ? costumes.find((c) => c.id === imageMenu.costumeId) ?? null : null;
   const fitEditorCostume = fitEditorCostumeId ? costumes.find((c) => c.id === fitEditorCostumeId) ?? null : null;
 
@@ -442,7 +448,7 @@ function CharacterDetailPanel({
             <FeaturedImageSlot
               character={character}
               costume={activeCostume}
-              onView={(costumeId) => setLightboxCostumeId(costumeId)}
+              onView={(costumeId, image) => { setLightboxCostumeId(costumeId); setLightboxImage(image ?? null); }}
               onEnsureCostume={ensureCostume}
             />
             {activeCostume && <CostumeIdentity costume={activeCostume} />}
@@ -579,7 +585,7 @@ function CharacterDetailPanel({
         <CharacterImageLightbox
           entries={imageEntries}
           initialCostumeId={lightboxCostumeId}
-          onClose={() => setLightboxCostumeId(null)}
+          onClose={() => { setLightboxCostumeId(null); setLightboxImage(null); }}
           onFitCommit={(costumeId, fit) => updateCostumeField(costumeId, { imageFit: fit })}
           onCopyImage={(url) => copyCharacterImage(url)}
         />
