@@ -156,4 +156,5 @@ A5(디자인+최종 2슬롯), B12(복장 다중이미지 — A5 흡수 가능), 
 - 2026-07-08: **Tier 1 7종 전부 구현 완료**. 신규 유틸 2(characterCostumeName·characterName) + 순수 헬퍼 2(reorderedCostumeSortOrders·moveCostumeInOrder) + 테스트 4파일. `test:character` 신설·build 게이트 편입. 소스-문자열 앵커 갱신(assetWorkflow :285/287/342).
 - 2026-07-08: **적대적 코드리뷰** → B10 드래그 "바로 다음 항목 드롭 no-op" HIGH 버그 발견 → 방향별 삽입(moveCostumeInOrder)으로 수정·회귀 테스트 추가. 나머지 9포인트 클린.
 - 2026-07-08: **최종 게이트 통과** — build:vite: auto-update 29 + entity 163 + notifications 142 + presence 33 + character 60 = 427 테스트 + vite build 성공. (프리뷰 시각검증은 이 환경 loopback HTTP 불가 → 이전 배치와 동일하게 자동화 테스트+코드리뷰로 갈음, 한솔 실앱 dogfood.)
-- 2026-07-08: v1.74.0 update-notes 7항목 작성, 버전 1.73.2→1.74.0. 커밋→PR→빌드→배포 진행.
+- 2026-07-08: v1.74.0 update-notes 7항목 작성, 버전 1.73.2→1.74.0.
+- 2026-07-08: **배포 완료** — 커밋 fec4c86 → PR #206 머지(299fb99) → C:\Bflow-BGonly main ff → npm run build(BFLOW-Setup.exe 200,181,338 bytes) → G드라이브 robocopy(exit 3=정상, manifest 제외) → manifest 마지막 → **SHA-256 3종 로컬↔원격 일치, 원격 manifest·latest.yml=1.74.0**. 1.73.1→1.74.0 라이브. codex-review-loop 미실시(내부 리뷰 3건 갈음).

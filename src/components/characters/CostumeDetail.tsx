@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
 import { Loader2 } from 'lucide-react';
+import { cn } from '@/utils/cn';
 import { useCharacterBoardStore } from '@/stores/useCharacterBoardStore';
+import { useDataStore } from '@/stores/useDataStore';
 import {
   COSTUME_DESIGN_STAGES,
   COSTUME_RIGGING_STAGES,
@@ -146,6 +148,13 @@ export function CostumeDetail({
   const updateCostumeField = useCharacterBoardStore((s) => s.updateCostumeField);
   const setCostumeTags = useCharacterBoardStore((s) => s.setCostumeTags);
   const setVersion = useCharacterBoardStore((s) => s.setVersion);
+  const episodeLinks = useCharacterBoardStore((s) => s.episodeLinks);
+  const setEpisodeCostume = useCharacterBoardStore((s) => s.setEpisodeCostume);
+  const episodes = useDataStore((s) => s.episodes);
+  const getEpisodeDisplayName = useDataStore((s) => s.getEpisodeDisplayName);
+
+  // 이 캐릭터가 출연하는 에피소드 각각에 대해, 그 편이 '이 복장'을 쓰는지(costumeId 일치) 토글 (B2).
+  const charLinks = episodeLinks.get(character.id) ?? [];
 
   return (
     <div className="flex flex-col gap-5">
@@ -191,6 +200,48 @@ export function CostumeDetail({
           onPick={onPickFile}
           onOpen={() => openStoredCharacterPath(costume.workFilePath, '작업 파일')}
         />
+      </div>
+
+      {/* 이 복장이 출연하는 에피소드 (B2) — 캐릭터가 출연하는 에피소드 중 이 편에 이 복장을 쓰는 것 토글 */}
+      <div className="flex flex-col gap-1.5">
+        <div className="text-xs text-text-secondary">이 복장이 출연하는 에피소드</div>
+        {character.episodeIds.length === 0 ? (
+          <div className="text-[11px] text-text-secondary/80">
+            먼저 위 '출연 에피소드'에서 이 캐릭터를 에피소드에 연결하면, 그 편에 어떤 복장을 쓰는지 여기서 고를 수 있어요.
+          </div>
+        ) : (
+          <div className="flex flex-wrap gap-1.5">
+            {character.episodeIds.map((epNum) => {
+              const ep = episodes.find((e) => e.episodeNumber === epNum);
+              const link = charLinks.find((l) => l.episodeNumber === epNum);
+              const on = link?.costumeId === costume.id;
+              const takenByOther = !!link?.costumeId && link.costumeId !== costume.id;
+              return (
+                <button
+                  key={epNum}
+                  type="button"
+                  onClick={() => setEpisodeCostume(character.id, epNum, on ? null : costume.id)}
+                  aria-pressed={on}
+                  title={on
+                    ? '이 편에서 이 복장을 쓰는 중 — 클릭하면 해제'
+                    : takenByOther
+                      ? '이 편엔 다른 복장이 지정돼 있어요 — 클릭하면 이 복장으로 바꿔요'
+                      : '클릭하면 이 편에 이 복장을 지정해요'}
+                  className={cn(
+                    'min-h-7 rounded-md border px-2 py-1 text-xs transition-colors cursor-pointer',
+                    on
+                      ? 'bg-accent/20 text-accent border-accent/40'
+                      : takenByOther
+                        ? 'border-dashed border-bg-border text-text-secondary/60 hover:text-text-primary'
+                        : 'text-text-secondary border-bg-border hover:text-text-primary',
+                  )}
+                >
+                  {ep ? getEpisodeDisplayName(ep) : `EP${epNum}`}
+                </button>
+              );
+            })}
+          </div>
+        )}
       </div>
 
       {/* 단계 레일 + 담당자 */}
