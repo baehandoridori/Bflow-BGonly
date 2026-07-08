@@ -14,11 +14,17 @@ export const CharacterCard = memo(function CharacterCard({
   costumes,
   onOpen,
   onContextMenu,
+  imageHeightPx,
+  referenceUnset,
 }: {
   character: Character;
   costumes: CharacterCostume[];
   onOpen: (characterId: string, costumeId?: string) => void;
   onContextMenu: (characterId: string, event: ReactMouseEvent<HTMLButtonElement>, costumeId?: string) => void;
+  /** '키 비교 보기' 모드에서만 지정 — 이미지 박스 높이(px). 있으면 카드가 이 높이로 표시(너비는 3:4 종속). (T2-3) */
+  imageHeightPx?: number;
+  /** 키 비교 보기 모드인데 이 캐릭터의 기준 키가 미설정이면 true → 배지 표시. */
+  referenceUnset?: boolean;
 }) {
   const designDone = costumes.filter((c) => c.designStage === 'done').length;
   const riggingDone = costumes.filter((c) => c.riggingStage === 'done').length;
@@ -58,9 +64,10 @@ export const CharacterCard = memo(function CharacterCard({
       type="button"
       onClick={() => onOpen(character.id, shown?.id)}
       onContextMenu={(event) => onContextMenu(character.id, event, shown?.id)}
+      style={imageHeightPx ? { width: Math.round(imageHeightPx * 3 / 4) } : undefined}
       className="text-left bg-bg-card border border-bg-border rounded-xl overflow-hidden hover:border-accent/50 transition-colors duration-200 flex flex-col cursor-pointer"
     >
-      <div ref={imageRef} className="relative aspect-[3/4] bg-bg-border/30 flex items-center justify-center overflow-hidden">
+      <div ref={imageRef} style={imageHeightPx ? { height: imageHeightPx } : undefined} className="relative aspect-[3/4] bg-bg-border/30 flex items-center justify-center overflow-hidden">
         {shown ? (
           <CharacterImageFrame
             url={shown.featuredImageUrl}
@@ -82,6 +89,9 @@ export const CharacterCard = memo(function CharacterCard({
               />
             ))}
           </div>
+        )}
+        {referenceUnset && (
+          <span className="pointer-events-none absolute left-1 top-1 rounded bg-black/50 px-1.5 py-0.5 text-[10px] text-white/80">키 미설정</span>
         )}
       </div>
       <div className="p-3 flex flex-col gap-2">

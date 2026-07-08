@@ -1,7 +1,29 @@
 import { motion } from 'framer-motion';
 import { ExternalLink } from 'lucide-react';
 import { cn } from '@/utils/cn';
+import { describeDueDate, todayLocalISO, type DueTone } from '@/utils/dueDateBadge';
 import type { CharacterTaskItem } from '../types';
+
+const DUE_TONE_CLASS: Record<DueTone, string> = {
+  overdue: 'text-[rgb(var(--char-stage-feedback))] bg-[rgb(var(--char-stage-feedback)/0.16)]',
+  today: 'text-[rgb(var(--char-stage-feedback))] bg-[rgb(var(--char-stage-feedback)/0.16)]',
+  soon: 'text-[rgb(var(--char-stage-progress))] bg-[rgb(var(--char-stage-progress)/0.14)]',
+  normal: 'text-text-secondary/70 bg-bg-border/40',
+};
+
+/** 마감 배지 — 미완료 태스크에만 표시. (T2-4) */
+function DueBadge({ dueDate, className }: { dueDate: string | null; className?: string }) {
+  const info = describeDueDate(dueDate, todayLocalISO());
+  if (!info) return null;
+  return (
+    <span
+      className={cn('px-1.5 py-0.5 rounded-full font-medium shrink-0', DUE_TONE_CLASS[info.tone], className)}
+      title={`마감일 ${dueDate}`}
+    >
+      {info.label}
+    </span>
+  );
+}
 
 interface CharacterTaskViewProps {
   task: CharacterTaskItem;
@@ -53,6 +75,8 @@ export function CharacterTaskRow({ task, onOpen, enterDelay = 0, reduce = false 
         <span className="text-[11px] text-text-secondary/50 truncate">{task.costumeName}</span>
       </button>
 
+      {!task.done && <DueBadge dueDate={task.dueDate} className="text-[10px]" />}
+
       <span
         className="px-1.5 py-0.5 rounded-full text-[10px] font-medium shrink-0"
         style={{ color: task.stageColor, background: colorMix(task.stageColor, 12), border: `1px solid ${colorMix(task.stageColor, 35)}` }}
@@ -93,8 +117,9 @@ export function CharacterTaskCard({ task, onOpen, enterDelay = 0, reduce = false
         )}>
           :: {kindLabel(task.kind)}
         </span>
+        {!task.done && <DueBadge dueDate={task.dueDate} className="ml-auto text-[9px]" />}
         <span
-          className="ml-auto px-1.5 py-0.5 rounded-full text-[9px] font-medium shrink-0"
+          className={cn('px-1.5 py-0.5 rounded-full text-[9px] font-medium shrink-0', task.done && 'ml-auto')}
           style={{ color: task.stageColor, background: colorMix(task.stageColor, 12), border: `1px solid ${colorMix(task.stageColor, 35)}` }}
         >
           {task.stageLabel}

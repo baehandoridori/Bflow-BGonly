@@ -232,6 +232,7 @@ function seedMockCharacterData(): void {
   ].map((c, i) => ({
     id: c.id, name: c.name, status: 'active', memo: c.memo,
     work_folder_path: 'G:\\공유 드라이브\\사우스 코리안 파크\\[]사코팍 캐릭터 세팅\\한솔',
+    reference_height_px: [500, 600, 650][i] ?? null, // T2-3: 키 비교 보기 샘플
     sort_order: i, created_at: now, updated_at: now, created_by: '1',
   }));
 
@@ -269,6 +270,7 @@ function seedMockCharacterData(): void {
     rigging_assignee: '배한솔',
     assignee: null,
     memo: null,
+    due_date: [null, '2026-07-10', null, '2026-07-06'][i] ?? null, // T2-4: 마감 배지 샘플
     sort_order: i, created_at: now, updated_at: now, created_by: '1',
   }));
 
