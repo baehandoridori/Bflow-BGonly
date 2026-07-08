@@ -16,24 +16,29 @@
 
 import { create } from 'zustand';
 import type {
-  Character, CharacterCostume, EpisodeCharacterLink, CostumeActivityLogContext,
+  Character, CharacterCostume, CharacterCostumeImage, CostumeImageRole,
+  EpisodeCharacterLink, CostumeActivityLogContext,
 } from '@/types';
 import {
   buildEpisodeLinks,
+  buildImagesByCostume,
   mergeEpisodeLinkPatchWithPending,
   mergeIncomingWithPending,
   pendingLinkKey,
   rebuildByCharacter,
+  rebuildImagesByCostume,
   reorderedCostumeSortOrders,
   rowToRealtimeMapping,
   sortCharacters,
   sortCostumes,
+  sortCostumeImages,
   trackPendingFields,
 } from '@/stores/characterBoardStoreHelpers';
 import type { PendingLocalField } from '@/stores/characterBoardStoreHelpers';
 import {
   loadCharacters as svcLoadCharacters,
   loadCharacterCostumes as svcLoadCostumes,
+  loadCharacterCostumeImages as svcLoadCostumeImages,
   loadEpisodeCharacterMap as svcLoadMap,
   addCharacter as svcAddCharacter,
   updateCharacter as svcUpdateCharacter,
@@ -41,11 +46,16 @@ import {
   addCharacterCostume as svcAddCostume,
   updateCharacterCostume as svcUpdateCostume,
   deleteCharacterCostume as svcDeleteCostume,
+  addCharacterCostumeImage as svcAddCostumeImage,
+  updateCharacterCostumeImage as svcUpdateCostumeImage,
+  deleteCharacterCostumeImage as svcDeleteCostumeImage,
+  setPrimaryCostumeImage as svcSetPrimaryImage,
   linkCharacterEpisode as svcLinkEpisode,
   unlinkCharacterEpisode as svcUnlinkEpisode,
   updateEpisodeCharacterMapping as svcUpdateEpisodeMapping,
   rowToCharacter,
   rowToCostume,
+  rowToCostumeImage,
   subscribeCharacterBoardRealtime,
 } from '@/services/supabaseService';
 import { useAuthStore } from '@/stores/useAuthStore';
@@ -72,6 +82,7 @@ const RIGGING_STAGE_LABEL: Record<CharacterCostume['riggingStage'], string> = {
 // 순수 머지 함수(characterBoardStoreHelpers)에 파라미터로 넘긴다.
 const pendingCharacterFields = new Map<string, Map<string, PendingLocalField>>();
 const pendingCostumeFields = new Map<string, Map<string, PendingLocalField>>();
+const pendingCostumeImageFields = new Map<string, Map<string, PendingLocalField>>();
 const pendingEpisodeLinkFields = new Map<string, Map<string, PendingLocalField>>();
 
 /** 에피소드 링크 pending 버킷에 얇게 묶인 편의 래퍼 — 전역 버킷 의존이라 store 에 남긴다. */
@@ -88,6 +99,10 @@ interface CharacterBoardStore {
   characters: Character[];
   costumes: CharacterCostume[];
   byCharacter: Map<string, CharacterCostume[]>;
+  /** 모든 복장 이미지 (복장 무관 평면 배열). */
+  costumeImages: CharacterCostumeImage[];
+  /** costumeId → 이 복장의 이미지 배열 (파생 — rebuildImagesByCostume 가 구조적 공유로 재계산). */
+  imagesByCostume: Map<string, CharacterCostumeImage[]>;
   /** characterId → 이 캐릭터의 에피소드 연결 상세(메모/복장). episodeIds 와 병렬 유지. */
   episodeLinks: Map<string, EpisodeCharacterLink[]>;
   loaded: boolean;
@@ -137,6 +152,21 @@ interface CharacterBoardStore {
   /** 복장 순서 드래그 재배치 — 낙관적 sortOrder 재부여 + 변경분만 저장, 실패 시 롤백. */
   reorderCostumes: (characterId: string, orderedIds: string[]) => Promise<void>;
 
+  // ─── 복장 다중 이미지 ───
+  /** 이미지 추가 — 복장의 첫 이미지면 primary 로 지정하고 featured_* 동기화. */
+  addCostumeImage: (costumeId: string, url: string, role?: CostumeImageRole) => Promise<CharacterCostumeImage | null>;
+  /** 대표 이미지 지정 — 같은 복장 이미지들의 primary 갱신 + featured_* 동기화. */
+  setPrimaryImage: (imageId: string) => Promise<void>;
+  /** 이미지 부분 필드 수정 — primary 이미지의 배경/맞춤 변경 시 featured_* 동기화. */
+  updateCostumeImageField: (
+    imageId: string,
+    updates: Partial<Pick<CharacterCostumeImage, 'role' | 'label' | 'imageBackground' | 'imageFit'>>,
+  ) => Promise<boolean>;
+  /** 이미지 순서 드래그 재배치 — reorderCostumes 미러. */
+  reorderCostumeImages: (costumeId: string, orderedIds: string[]) => Promise<void>;
+  /** 이미지 삭제 — primary 삭제 시 남은 이미지 중 최소 순서를 새 primary 로(없으면 featured 비움). */
+  deleteCostumeImage: (imageId: string) => Promise<void>;
+
   linkEpisode: (characterId: string, episodeNumber: number) => Promise<void>;
   unlinkEpisode: (characterId: string, episodeNumber: number) => Promise<void>;
   /** 이 편 주의점 메모 — 낙관적 업데이트. */
@@ -145,7 +175,7 @@ interface CharacterBoardStore {
   setEpisodeCostume: (characterId: string, episodeNumber: number, costumeId: string | null) => Promise<void>;
 
   receiveRealtime: (payload: {
-    table: 'characters' | 'character_costumes' | 'episode_character_mapping';
+    table: 'characters' | 'character_costumes' | 'character_costume_images' | 'episode_character_mapping';
     eventType: 'INSERT' | 'UPDATE' | 'DELETE';
     row: Record<string, unknown> | null;
     old: Record<string, unknown> | null;
@@ -159,6 +189,8 @@ export const useCharacterBoardStore = create<CharacterBoardStore>((set, get) => 
   characters: [],
   costumes: [],
   byCharacter: new Map(),
+  costumeImages: [],
+  imagesByCostume: new Map(),
   episodeLinks: new Map(),
   loaded: false,
   loading: false,
@@ -168,10 +200,11 @@ export const useCharacterBoardStore = create<CharacterBoardStore>((set, get) => 
     if (get().loading) return;
     set({ loading: true, loadError: false });
     try {
-      const [characters, costumes, mappings] = await Promise.all([
+      const [characters, costumes, mappings, costumeImages] = await Promise.all([
         svcLoadCharacters(),
         svcLoadCostumes(),
         svcLoadMap(),
+        svcLoadCostumeImages(),
       ]);
       // episodeIds 조립
       const epByChar = new Map<string, number[]>();
@@ -185,6 +218,7 @@ export const useCharacterBoardStore = create<CharacterBoardStore>((set, get) => 
       const prev = get();
       const prevCharacterById = new Map(prev.characters.map((c) => [c.id, c]));
       const prevCostumeById = new Map(prev.costumes.map((c) => [c.id, c]));
+      const prevCostumeImageById = new Map(prev.costumeImages.map((i) => [i.id, i]));
       const assembled = sortCharacters(characters.map((c) => {
         const withEpisodes = {
           ...c,
@@ -196,6 +230,8 @@ export const useCharacterBoardStore = create<CharacterBoardStore>((set, get) => 
       }));
       const sortedCostumes = sortCostumes(costumes.map((c) =>
         mergeIncomingWithPending(pendingCostumeFields, prevCostumeById.get(c.id), c)));
+      const sortedImages = sortCostumeImages(costumeImages.map((i) =>
+        mergeIncomingWithPending(pendingCostumeImageFields, prevCostumeImageById.get(i.id), i)));
       const freshLinks = buildEpisodeLinks(mappings);
       for (const [characterId, links] of freshLinks) {
         for (let i = 0; i < links.length; i++) {
@@ -211,6 +247,8 @@ export const useCharacterBoardStore = create<CharacterBoardStore>((set, get) => 
         characters: assembled,
         costumes: sortedCostumes,
         byCharacter: rebuildByCharacter(prev.byCharacter, sortedCostumes),
+        costumeImages: sortedImages,
+        imagesByCostume: rebuildImagesByCostume(prev.imagesByCostume, sortedImages),
         episodeLinks: freshLinks,
         loaded: true,
         loading: false,
@@ -334,16 +372,22 @@ export const useCharacterBoardStore = create<CharacterBoardStore>((set, get) => 
   deleteCharacter: async (id) => {
     const prevChars = get().characters;
     const prevCostumes = get().costumes;
+    const prevImages = get().costumeImages;
     const prevLinks = get().episodeLinks;
     const removedCharacter = prevChars.find((c) => c.id === id) ?? null;
     const removedCostumes = prevCostumes.filter((c) => c.characterId === id);
+    const removedCostumeIds = new Set(removedCostumes.map((c) => c.id));
+    const removedImages = prevImages.filter((i) => removedCostumeIds.has(i.costumeId));
     const removedLinks = prevLinks.get(id)?.slice() ?? null;
     const nextCostumes = prevCostumes.filter((c) => c.characterId !== id);
+    const nextImages = prevImages.filter((i) => !removedCostumeIds.has(i.costumeId));
     const nextLinks = new Map(prevLinks); nextLinks.delete(id);
     set({
       characters: prevChars.filter((c) => c.id !== id),
       costumes: nextCostumes,
       byCharacter: rebuildByCharacter(get().byCharacter, nextCostumes),
+      costumeImages: nextImages,
+      imagesByCostume: rebuildImagesByCostume(get().imagesByCostume, nextImages),
       episodeLinks: nextLinks,
     });
     try {
@@ -359,12 +403,19 @@ export const useCharacterBoardStore = create<CharacterBoardStore>((set, get) => 
         const costumes = missingCostumes.length > 0
           ? sortCostumes([...s.costumes, ...missingCostumes])
           : s.costumes;
+        const existingImageIds = new Set(s.costumeImages.map((i) => i.id));
+        const missingImages = removedImages.filter((i) => !existingImageIds.has(i.id));
+        const costumeImages = missingImages.length > 0
+          ? sortCostumeImages([...s.costumeImages, ...missingImages])
+          : s.costumeImages;
         const episodeLinks = new Map(s.episodeLinks);
         if (removedLinks && !episodeLinks.has(id)) episodeLinks.set(id, removedLinks);
         return {
           characters,
           costumes,
           byCharacter: rebuildByCharacter(s.byCharacter, costumes),
+          costumeImages,
+          imagesByCostume: rebuildImagesByCostume(s.imagesByCostume, costumeImages),
           episodeLinks,
         };
       });
@@ -431,9 +482,17 @@ export const useCharacterBoardStore = create<CharacterBoardStore>((set, get) => 
 
   deleteCostume: async (id) => {
     const prev = get().costumes;
+    const prevImages = get().costumeImages;
     const removed = prev.find((c) => c.id === id) ?? null;
+    const removedImages = prevImages.filter((i) => i.costumeId === id);
     const next = prev.filter((c) => c.id !== id);
-    set({ costumes: next, byCharacter: rebuildByCharacter(get().byCharacter, next) });
+    const nextImages = prevImages.filter((i) => i.costumeId !== id);
+    set({
+      costumes: next,
+      byCharacter: rebuildByCharacter(get().byCharacter, next),
+      costumeImages: nextImages,
+      imagesByCostume: rebuildImagesByCostume(get().imagesByCostume, nextImages),
+    });
     try {
       await svcDeleteCostume(id);
     } catch (err) {
@@ -441,7 +500,17 @@ export const useCharacterBoardStore = create<CharacterBoardStore>((set, get) => 
       set((s) => {
         if (!removed || s.costumes.some((c) => c.id === id)) return s;
         const costumes = sortCostumes([...s.costumes, removed]);
-        return { costumes, byCharacter: rebuildByCharacter(s.byCharacter, costumes) };
+        const existingImageIds = new Set(s.costumeImages.map((i) => i.id));
+        const missingImages = removedImages.filter((i) => !existingImageIds.has(i.id));
+        const costumeImages = missingImages.length > 0
+          ? sortCostumeImages([...s.costumeImages, ...missingImages])
+          : s.costumeImages;
+        return {
+          costumes,
+          byCharacter: rebuildByCharacter(s.byCharacter, costumes),
+          costumeImages,
+          imagesByCostume: rebuildImagesByCostume(s.imagesByCostume, costumeImages),
+        };
       });
       toast.error('복장 삭제에 실패했어요');
     }
@@ -472,6 +541,159 @@ export const useCharacterBoardStore = create<CharacterBoardStore>((set, get) => 
         return { costumes: sortCostumes(reverted), byCharacter: rebuildByCharacter(s.byCharacter, reverted) };
       });
       toast.error('복장 순서 변경 저장에 실패했어요');
+    }
+  },
+
+  // ─── 복장 다중 이미지 ───
+
+  addCostumeImage: async (costumeId, url, role = 'design') => {
+    const createdBy = useAuthStore.getState().currentUser?.id ?? null;
+    // 복장의 첫 이미지면 대표(primary)로 지정 — 기존 단일 이미지 소비처가 이 값을 계속 읽는다.
+    const isPrimary = (get().imagesByCostume.get(costumeId)?.length ?? 0) === 0;
+    try {
+      const created = await svcAddCostumeImage({ costumeId, url, role, isPrimary, createdBy });
+      set((s) => {
+        if (s.costumeImages.some((i) => i.id === created.id)) return s;
+        const costumeImages = sortCostumeImages([...s.costumeImages, created]);
+        return { costumeImages, imagesByCostume: rebuildImagesByCostume(s.imagesByCostume, costumeImages) };
+      });
+      // primary 로 추가됐으면 featured_* 를 이 이미지로 동기화(무마이그레이션 호환 유지).
+      if (created.isPrimary) {
+        await get().updateCostumeField(costumeId, {
+          featuredImageUrl: created.url,
+          imageBackground: created.imageBackground,
+          imageFit: created.imageFit,
+        });
+      }
+      return created;
+    } catch (err) {
+      console.error('[character-board] addCostumeImage 실패:', err);
+      toast.error('이미지 추가에 실패했어요');
+      return null;
+    }
+  },
+
+  setPrimaryImage: async (imageId) => {
+    const target = get().costumeImages.find((i) => i.id === imageId);
+    if (!target) return;
+    const { costumeId } = target;
+    const prevPrimaryById = new Map(
+      get().costumeImages.filter((i) => i.costumeId === costumeId).map((i) => [i.id, i.isPrimary]),
+    );
+    // 낙관 반영 — 같은 복장 이미지들의 is_primary 를 대상만 true 로. pending 으로 realtime 에코/재로드 보호.
+    for (const id of prevPrimaryById.keys()) {
+      trackPendingFields(pendingCostumeImageFields, id, { isPrimary: id === imageId });
+    }
+    const optimistic = get().costumeImages.map((i) =>
+      i.costumeId === costumeId ? { ...i, isPrimary: i.id === imageId } : i);
+    set({
+      costumeImages: sortCostumeImages(optimistic),
+      imagesByCostume: rebuildImagesByCostume(get().imagesByCostume, optimistic),
+    });
+    try {
+      await svcSetPrimaryImage(costumeId, imageId);
+      // 대표 교체 → featured_* 동기화(카드/썸네일/라이트박스 등 기존 소비처 무변경 유지).
+      await get().updateCostumeField(costumeId, {
+        featuredImageUrl: target.url,
+        imageBackground: target.imageBackground,
+        imageFit: target.imageFit,
+      });
+    } catch (err) {
+      console.error('[character-board] setPrimaryImage 실패:', err);
+      // 아직 우리 낙관값 그대로인 이미지만 이전 primary 상태로 되돌린다.
+      set((s) => {
+        const reverted = s.costumeImages.map((i) => {
+          if (i.costumeId !== costumeId) return i;
+          const prev = prevPrimaryById.get(i.id);
+          if (prev === undefined || i.isPrimary !== (i.id === imageId)) return i;
+          return { ...i, isPrimary: prev };
+        });
+        return {
+          costumeImages: sortCostumeImages(reverted),
+          imagesByCostume: rebuildImagesByCostume(s.imagesByCostume, reverted),
+        };
+      });
+      toast.error('대표 이미지 지정에 실패했어요');
+    }
+  },
+
+  updateCostumeImageField: async (imageId, updates) => {
+    const saved = await applyCostumeImageUpdate(set, get, imageId, updates, '이미지 저장에 실패했어요');
+    if (!saved) return false;
+    // primary 이미지의 배경/맞춤이 바뀌면 featured_* 도 함께 반영.
+    const img = get().costumeImages.find((i) => i.id === imageId);
+    if (img?.isPrimary && (updates.imageBackground !== undefined || updates.imageFit !== undefined)) {
+      const featured: Parameters<CharacterBoardStore['updateCostumeField']>[1] = {};
+      if (updates.imageBackground !== undefined) featured.imageBackground = img.imageBackground;
+      if (updates.imageFit !== undefined) featured.imageFit = img.imageFit;
+      await get().updateCostumeField(img.costumeId, featured);
+    }
+    return true;
+  },
+
+  reorderCostumeImages: async (costumeId, orderedIds) => {
+    const prevImages = get().costumeImages;
+    const costumeImgs = prevImages.filter((i) => i.costumeId === costumeId);
+    const changes = reorderedCostumeSortOrders(costumeImgs, orderedIds);
+    if (changes.length === 0) return;
+    const changeMap = new Map(changes.map((ch) => [ch.id, ch.sortOrder]));
+    const prevSortById = new Map(costumeImgs.map((i) => [i.id, i.sortOrder]));
+    for (const ch of changes) trackPendingFields(pendingCostumeImageFields, ch.id, { sortOrder: ch.sortOrder });
+    const next = prevImages.map((i) => (changeMap.has(i.id) ? { ...i, sortOrder: changeMap.get(i.id)! } : i));
+    set({
+      costumeImages: sortCostumeImages(next),
+      imagesByCostume: rebuildImagesByCostume(get().imagesByCostume, next),
+    });
+    try {
+      await Promise.all(changes.map((ch) => svcUpdateCostumeImage(ch.id, { sortOrder: ch.sortOrder })));
+    } catch (err) {
+      console.error('[character-board] reorderCostumeImages 실패:', err);
+      set((s) => {
+        const reverted = s.costumeImages.map((i) => {
+          if (!changeMap.has(i.id) || i.sortOrder !== changeMap.get(i.id)) return i;
+          const prevSort = prevSortById.get(i.id);
+          return prevSort === undefined ? i : { ...i, sortOrder: prevSort };
+        });
+        return {
+          costumeImages: sortCostumeImages(reverted),
+          imagesByCostume: rebuildImagesByCostume(s.imagesByCostume, reverted),
+        };
+      });
+      toast.error('이미지 순서 변경 저장에 실패했어요');
+    }
+  },
+
+  deleteCostumeImage: async (imageId) => {
+    const prev = get().costumeImages;
+    const removed = prev.find((i) => i.id === imageId) ?? null;
+    if (!removed) return;
+    const { costumeId } = removed;
+    const wasPrimary = removed.isPrimary;
+    const next = prev.filter((i) => i.id !== imageId);
+    set({
+      costumeImages: next,
+      imagesByCostume: rebuildImagesByCostume(get().imagesByCostume, next),
+    });
+    try {
+      await svcDeleteCostumeImage(imageId);
+      if (wasPrimary) {
+        // 대표를 지웠으면 남은 이미지 중 최소 순서를 새 대표로(setPrimaryImage 가 featured_* 도 동기화).
+        const remaining = sortCostumeImages(get().costumeImages.filter((i) => i.costumeId === costumeId));
+        if (remaining.length > 0) {
+          await get().setPrimaryImage(remaining[0].id);
+        } else {
+          // 남은 이미지 없음 → featured 비움(카드가 빈 상태로 정상 표시).
+          await get().updateCostumeField(costumeId, { featuredImageUrl: null });
+        }
+      }
+    } catch (err) {
+      console.error('[character-board] deleteCostumeImage 실패:', err);
+      set((s) => {
+        if (s.costumeImages.some((i) => i.id === imageId)) return s;
+        const restored = sortCostumeImages([...s.costumeImages, removed]);
+        return { costumeImages: restored, imagesByCostume: rebuildImagesByCostume(s.imagesByCostume, restored) };
+      });
+      toast.error('이미지 삭제에 실패했어요');
     }
   },
 
@@ -558,12 +780,16 @@ export const useCharacterBoardStore = create<CharacterBoardStore>((set, get) => 
         const id = old?.id;
         if (typeof id !== 'string' || !id) return;
         set((s) => {
+          const removedCostumeIds = new Set(s.costumes.filter((c) => c.characterId === id).map((c) => c.id));
           const costumes = s.costumes.filter((c) => c.characterId !== id);
+          const costumeImages = s.costumeImages.filter((i) => !removedCostumeIds.has(i.costumeId));
           const episodeLinks = new Map(s.episodeLinks); episodeLinks.delete(id);
           return {
             characters: s.characters.filter((c) => c.id !== id),
             costumes,
             byCharacter: rebuildByCharacter(s.byCharacter, costumes),
+            costumeImages,
+            imagesByCostume: rebuildImagesByCostume(s.imagesByCostume, costumeImages),
             episodeLinks,
           };
         });
@@ -597,7 +823,13 @@ export const useCharacterBoardStore = create<CharacterBoardStore>((set, get) => 
         if (typeof id !== 'string' || !id) return;
         set((s) => {
           const costumes = s.costumes.filter((c) => c.id !== id);
-          return { costumes, byCharacter: rebuildByCharacter(s.byCharacter, costumes) };
+          const costumeImages = s.costumeImages.filter((i) => i.costumeId !== id);
+          return {
+            costumes,
+            byCharacter: rebuildByCharacter(s.byCharacter, costumes),
+            costumeImages,
+            imagesByCostume: rebuildImagesByCostume(s.imagesByCostume, costumeImages),
+          };
         });
         return;
       }
@@ -611,6 +843,29 @@ export const useCharacterBoardStore = create<CharacterBoardStore>((set, get) => 
           ? sortCostumes(s.costumes.map((c) => (c.id === incoming.id ? merged : c)))
           : sortCostumes([...s.costumes, merged]);
         return { costumes, byCharacter: rebuildByCharacter(s.byCharacter, costumes) };
+      });
+      return;
+    }
+
+    if (table === 'character_costume_images') {
+      if (eventType === 'DELETE') {
+        const id = old?.id;
+        if (typeof id !== 'string' || !id) return;
+        set((s) => {
+          const costumeImages = s.costumeImages.filter((i) => i.id !== id);
+          return { costumeImages, imagesByCostume: rebuildImagesByCostume(s.imagesByCostume, costumeImages) };
+        });
+        return;
+      }
+      if (!row) return;
+      const incoming = rowToCostumeImage(row);
+      set((s) => {
+        const existing = s.costumeImages.find((i) => i.id === incoming.id);
+        const merged = mergeIncomingWithPending(pendingCostumeImageFields, existing, incoming);
+        const costumeImages = existing
+          ? sortCostumeImages(s.costumeImages.map((i) => (i.id === incoming.id ? merged : i)))
+          : sortCostumeImages([...s.costumeImages, merged]);
+        return { costumeImages, imagesByCostume: rebuildImagesByCostume(s.imagesByCostume, costumeImages) };
       });
       return;
     }
@@ -797,6 +1052,45 @@ async function applyCostumeUpdate(
         return restored as unknown as CharacterCostume;
       });
       set({ costumes: reverted, byCharacter: rebuildByCharacter(get().byCharacter, reverted) });
+    }
+    toast.error(errorMsg);
+    return false;
+  }
+}
+
+/** 복장 이미지 부분 업데이트 공통 헬퍼 — 낙관적 반영 후 단일 update, 실패 시 필드 단위 롤백. applyCostumeUpdate 미러. */
+async function applyCostumeImageUpdate(
+  set: (partial: Partial<CharacterBoardStore>) => void,
+  get: () => CharacterBoardStore,
+  id: string,
+  updates: Partial<Pick<CharacterCostumeImage, 'role' | 'label' | 'imageBackground' | 'imageFit' | 'isPrimary' | 'sortOrder'>>,
+  errorMsg: string,
+): Promise<boolean> {
+  const prev = get().costumeImages;
+  const prevImage = prev.find((i) => i.id === id);
+  trackPendingFields(pendingCostumeImageFields, id, updates as Record<string, unknown>);
+  const next = prev.map((i) => (i.id === id ? { ...i, ...updates } : i));
+  set({ costumeImages: sortCostumeImages(next), imagesByCostume: rebuildImagesByCostume(get().imagesByCostume, next) });
+  try {
+    await svcUpdateCostumeImage(id, updates);
+    return true;
+  } catch (err) {
+    console.error('[character-board] updateCostumeImage 실패:', err);
+    // 이 업데이트가 바꾼 필드만, 아직 우리 낙관값 그대로일 때만 이전 값으로 되돌린다(중간 편집·실시간 머지 보존).
+    if (prevImage) {
+      const cur = get().costumeImages;
+      const updRec = updates as unknown as Record<string, unknown>;
+      const prevRec = prevImage as unknown as Record<string, unknown>;
+      const reverted = cur.map((i) => {
+        if (i.id !== id) return i;
+        const curRec = i as unknown as Record<string, unknown>;
+        const restored: Record<string, unknown> = { ...curRec };
+        for (const k of Object.keys(updates)) {
+          if (curRec[k] === updRec[k]) restored[k] = prevRec[k];
+        }
+        return restored as unknown as CharacterCostumeImage;
+      });
+      set({ costumeImages: sortCostumeImages(reverted), imagesByCostume: rebuildImagesByCostume(get().imagesByCostume, reverted) });
     }
     toast.error(errorMsg);
     return false;

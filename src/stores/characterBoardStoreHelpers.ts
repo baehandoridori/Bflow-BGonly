@@ -9,7 +9,7 @@
  * 여기 함수들은 버킷을 파라미터로 받아서만 동작한다.
  */
 
-import type { Character, CharacterCostume, EpisodeCharacterLink } from '@/types';
+import type { Character, CharacterCostume, CharacterCostumeImage, EpisodeCharacterLink } from '@/types';
 
 /** 낙관적 쓰기 직후 realtime echo/재로드가 로컬 변경을 되돌리지 않도록 보호하는 필드 단위 항목. */
 export type PendingLocalField = { value: unknown; expiresAt: number };
@@ -71,12 +71,58 @@ export function compareCostumes(a: CharacterCostume, b: CharacterCostume): numbe
     || compareNullableText(a.id, b.id);
 }
 
+export function compareCostumeImages(a: CharacterCostumeImage, b: CharacterCostumeImage): number {
+  return a.sortOrder - b.sortOrder
+    || compareNullableText(a.createdAt, b.createdAt)
+    || compareNullableText(a.id, b.id);
+}
+
 export function sortCharacters(characters: Character[]): Character[] {
   return characters.slice().sort(compareCharacters);
 }
 
 export function sortCostumes(costumes: CharacterCostume[]): CharacterCostume[] {
   return costumes.slice().sort(compareCostumes);
+}
+
+export function sortCostumeImages(images: CharacterCostumeImage[]): CharacterCostumeImage[] {
+  return images.slice().sort(compareCostumeImages);
+}
+
+/** costumeId → 이미지 배열 (sort_order 오름차순). buildByCharacter 와 동일 구조. */
+export function buildImagesByCostume(images: CharacterCostumeImage[]): Map<string, CharacterCostumeImage[]> {
+  const map = new Map<string, CharacterCostumeImage[]>();
+  for (const img of images) {
+    const arr = map.get(img.costumeId);
+    if (arr) arr.push(img);
+    else map.set(img.costumeId, [img]);
+  }
+  for (const arr of map.values()) {
+    arr.sort(compareCostumeImages);
+  }
+  return map;
+}
+
+/**
+ * imagesByCostume 파생 Map 재계산 + 구조적 공유 (rebuildByCharacter 미러).
+ * 변경 없는 복장의 이미지 배열 참조를 유지해 React.memo 가 실효하도록.
+ */
+export function rebuildImagesByCostume(
+  prev: Map<string, CharacterCostumeImage[]>,
+  images: CharacterCostumeImage[],
+): Map<string, CharacterCostumeImage[]> {
+  const next = buildImagesByCostume(images);
+  if (prev.size === 0) return next;
+  for (const [costumeId, arr] of next) {
+    const prevArr = prev.get(costumeId);
+    if (!prevArr || prevArr.length !== arr.length) continue;
+    let same = true;
+    for (let i = 0; i < arr.length; i++) {
+      if (arr[i] !== prevArr[i]) { same = false; break; }
+    }
+    if (same) next.set(costumeId, prevArr);
+  }
+  return next;
 }
 
 /**

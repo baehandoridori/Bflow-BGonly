@@ -200,8 +200,10 @@ test('character costume IPC channels use explicit character-costume names', () =
     assert.match(electronMain, new RegExp(channel), `main IPC missing ${channel}`);
     assert.match(electronPreload, new RegExp(channel), `preload IPC missing ${channel}`);
   }
-  assert.doesNotMatch(electronMain, /supabase:(add|update|delete)-costume/);
-  assert.doesNotMatch(electronPreload, /supabase:(add|update|delete)-costume/);
+  // 복장(costume) 엔티티는 반드시 명시적 character-costume 네이밍을 쓴다 — 애매한 bare `costume` 금지.
+  // 단, 별도 엔티티인 복장 이미지(costume-image) 채널은 예외로 허용(negative lookahead).
+  assert.doesNotMatch(electronMain, /supabase:(add|update|delete)-costume(?!-image)/);
+  assert.doesNotMatch(electronPreload, /supabase:(add|update|delete)-costume(?!-image)/);
 });
 
 test('character episode mapping realtime merges single links when episode metadata is present', () => {

@@ -243,6 +243,36 @@ export interface CharacterCostume {
   updatedAt: string;
 }
 
+/** 복장 이미지 역할 — 한 복장이 여러 이미지를 가질 때 용도 구분. */
+export type CostumeImageRole =
+  | 'design'   // 디자인 시안
+  | 'final'    // 최종본
+  | 'variant'; // 변형/파생
+
+export const COSTUME_IMAGE_ROLES: CostumeImageRole[] = ['design', 'final', 'variant'];
+
+/**
+ * 복장이 갖는 개별 이미지 (다중 이미지 모델). character_costume_images 테이블 1 row.
+ * primary 이미지의 값(url/배경/맞춤)은 앱(store)이 character_costumes.featured_* 로 반영해
+ * 기존 단일 이미지 소비처(카드/썸네일/라이트박스/에피소드에셋/나의할일)를 무변경 유지한다.
+ */
+export interface CharacterCostumeImage {
+  id: string;                  // UUID
+  costumeId: string;
+  url: string;
+  role: CostumeImageRole;
+  label: string | null;
+  /** 투명 PNG 표시용 배경. */
+  imageBackground: CharacterImageBackground;
+  /** 썸네일/대표 이미지 표시 변환값. 원본 이미지는 수정하지 않는다. */
+  imageFit: CharacterImageFit;
+  /** 이 복장의 대표 이미지 여부. costume 당 최대 1개(부분 유니크). */
+  isPrimary: boolean;
+  sortOrder: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
 /**
  * 복장 단계 변경을 활동 피드에 기록할 때 렌더러 → 메인으로 넘기는 표시용 컨텍스트.
  * "누가" 변경했는지(신원)는 메인의 세션 사용자에서 가져오므로 여기에 담지 않는다.
@@ -303,6 +333,28 @@ export interface CharacterCostumeRow {
   assignee: string | null;
   memo: string | null;
   due_date?: string | null;
+  sort_order: number | null;
+  created_at: string;
+  updated_at: string;
+  created_by?: string | null;
+}
+
+/**
+ * character_costume_images 테이블 DB row (snake_case) — IPC/realtime 경계 표현.
+ * electron/supabase.ts 의 CharacterCostumeImageRow 와 중복 정의 (경계 양쪽 중복 정의 관행).
+ * JSONB/CHECK 컬럼은 값을 신뢰할 수 없어 unknown — rowToCostumeImage 의 normalize 가드가 정규화.
+ */
+export interface CharacterCostumeImageRow {
+  id: string;
+  costume_id: string;
+  url: string;
+  role: CostumeImageRole | null;
+  label: string | null;
+  /** 4값 CHECK 컬럼이지만 구버전/이상값 호환 — normalizeCharacterImageBackground 가 정규화. */
+  image_background: unknown;
+  /** JSONB — normalizeCharacterImageFit 가 정규화. */
+  image_fit: unknown;
+  is_primary: boolean | null;
   sort_order: number | null;
   created_at: string;
   updated_at: string;
@@ -1425,8 +1477,23 @@ export interface ElectronAPI {
     updates: { memo?: string | null; costumeId?: string | null },
   ) => Promise<void>;
   storageUploadCharacterImage: (characterId: string, costumeId: string, base64Data: string) => Promise<{ ok: boolean; url?: string; error?: string }>;
+  // ─── 복장 다중 이미지 (character_costume_images) ───
+  supabaseLoadCostumeImages: () => Promise<any[]>;
+  supabaseAddCostumeImage: (input: {
+    costumeId: string;
+    url: string;
+    role?: CostumeImageRole;
+    imageBackground?: CharacterImageBackground;
+    imageFit?: CharacterImageFit;
+    isPrimary?: boolean;
+    sortOrder?: number;
+    createdBy?: string | null;
+  }) => Promise<any>;
+  supabaseUpdateCostumeImage: (id: string, updates: Record<string, unknown>) => Promise<any>;
+  supabaseDeleteCostumeImage: (id: string) => Promise<void>;
+  supabaseSetPrimaryCostumeImage: (costumeId: string, imageId: string) => Promise<void>;
   onCharacterBoardRealtime: (cb: (payload: {
-    table: 'characters' | 'character_costumes' | 'episode_character_mapping';
+    table: 'characters' | 'character_costumes' | 'character_costume_images' | 'episode_character_mapping';
     eventType: 'INSERT' | 'UPDATE' | 'DELETE';
     row: Record<string, unknown> | null;
     old: Record<string, unknown> | null;

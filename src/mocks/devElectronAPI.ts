@@ -286,8 +286,25 @@ function seedMockCharacterData(): void {
     },
   ];
 
+  // 복장 다중 이미지 시드 — 각 mock 복장의 featured_image_url 을 대표(primary) 이미지 1장으로.
+  const costumeImages = costumes.map((c) => ({
+    id: `mock-cimg-${c.id}`,
+    costume_id: c.id,
+    url: c.featured_image_url,
+    role: 'design',
+    label: null,
+    image_background: c.image_background,
+    image_fit: c.image_fit,
+    is_primary: true,
+    sort_order: 0,
+    created_at: now,
+    updated_at: now,
+    created_by: '1',
+  }));
+
   localStore.__characters = chars;
   localStore.__costumes = costumes;
+  localStore.__costumeImages = costumeImages;
   localStore.__charEpMap = charEpMap;
 }
 
@@ -1107,10 +1124,16 @@ export function installDevElectronAPI(): void {
       return row ?? { id };
     },
     supabaseDeleteCharacter: async (id) => {
+      const removedCostumeIds = new Set(
+        ((localStore.__costumes as Record<string, unknown>[] | undefined) ?? [])
+          .filter((r) => r.character_id === id).map((r) => r.id),
+      );
       localStore.__characters = ((localStore.__characters as Record<string, unknown>[] | undefined) ?? [])
         .filter((r) => r.id !== id);
       localStore.__costumes = ((localStore.__costumes as Record<string, unknown>[] | undefined) ?? [])
         .filter((r) => r.character_id !== id);
+      localStore.__costumeImages = ((localStore.__costumeImages as Record<string, unknown>[] | undefined) ?? [])
+        .filter((r) => !removedCostumeIds.has(r.costume_id));
     },
     supabaseAddCostume: async (input) => {
       const store = (localStore.__costumes as Record<string, unknown>[] | undefined)
@@ -1138,6 +1161,8 @@ export function installDevElectronAPI(): void {
     supabaseDeleteCostume: async (id) => {
       localStore.__costumes = ((localStore.__costumes as Record<string, unknown>[] | undefined) ?? [])
         .filter((r) => r.id !== id);
+      localStore.__costumeImages = ((localStore.__costumeImages as Record<string, unknown>[] | undefined) ?? [])
+        .filter((r) => r.costume_id !== id);
     },
     supabaseLinkCharacterEpisode: async (episodeNumber, characterId) => {
       seedMockCharacterData();
@@ -1166,6 +1191,44 @@ export function installDevElectronAPI(): void {
       if (updates.costumeId !== undefined) row.costume_id = updates.costumeId;
     },
     storageUploadCharacterImage: async () => ({ ok: true, url: 'mock://character-image' }),
+    // ─── 복장 다중 이미지 (mock) ───
+    supabaseLoadCostumeImages: async () => {
+      seedMockCharacterData();
+      return localStore.__costumeImages as unknown[];
+    },
+    supabaseAddCostumeImage: async (input) => {
+      const store = (localStore.__costumeImages as Record<string, unknown>[] | undefined)
+        ?? (localStore.__costumeImages = [] as Record<string, unknown>[]);
+      const now = new Date().toISOString();
+      const siblings = store.filter((r) => r.costume_id === input.costumeId);
+      const row = {
+        id: createUuid(), costume_id: input.costumeId, url: input.url,
+        role: input.role ?? 'design', label: null,
+        image_background: input.imageBackground ?? 'transparent',
+        image_fit: input.imageFit ?? { scale: 1, scaleX: 1, scaleY: 1, x: 0, y: 0, lockAspect: true },
+        is_primary: input.isPrimary ?? false,
+        sort_order: input.sortOrder ?? siblings.length,
+        created_at: now, updated_at: now, created_by: input.createdBy ?? null,
+      };
+      store.push(row);
+      return row;
+    },
+    supabaseUpdateCostumeImage: async (id, updates) => {
+      const store = (localStore.__costumeImages as Record<string, unknown>[] | undefined) ?? [];
+      const row = store.find((r) => r.id === id);
+      if (row) Object.assign(row, updates, { updated_at: new Date().toISOString() });
+      return row ?? { id };
+    },
+    supabaseDeleteCostumeImage: async (id) => {
+      localStore.__costumeImages = ((localStore.__costumeImages as Record<string, unknown>[] | undefined) ?? [])
+        .filter((r) => r.id !== id);
+    },
+    supabaseSetPrimaryCostumeImage: async (costumeId, imageId) => {
+      const store = (localStore.__costumeImages as Record<string, unknown>[] | undefined) ?? [];
+      for (const r of store) {
+        if (r.costume_id === costumeId) r.is_primary = r.id === imageId;
+      }
+    },
     onCharacterBoardRealtime: noop,
   };
 
