@@ -34,7 +34,7 @@ test('B4: 이름 없이 추가 — 임시 이름 부여 + 파일명 자동 지�
   assert.match(featuredSlot, /deriveCharacterNameFromFileName\(file\.name\)/);
   assert.match(featuredSlot, /uploadFileIfImage\(file, \{ autoName: false \}\)/); // 붙여넣기
   assert.match(featuredSlot, /uploadFileIfImage\(event\.dataTransfer\.files\?\.\[0\], \{ autoName: true \}\)/); // 드롭
-  assert.match(featuredSlot, /handleUpload\(f, \{ autoName: true \}\)/); // 파일선택
+  assert.match(featuredSlot, /handleUpload\(f, \{ autoName: true, role: pendingRoleRef\.current \}\)/); // 파일선택
   // 추가 후 카드 오픈
   assert.match(boardView, /onCreated=\{\(c\) => \{ setTab\('board'\); setPendingOpenId\(c\.id\); \}\}/);
 });

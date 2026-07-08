@@ -10,6 +10,7 @@ const types = readFileSync('src/types/index.ts', 'utf8');
 const rendererSupabase = readFileSync('src/services/supabaseService.ts', 'utf8');
 const electronSupabase = readFileSync('electron/supabase.ts', 'utf8');
 const store = readFileSync('src/stores/useCharacterBoardStore.ts', 'utf8');
+const featuredImageSlot = readFileSync('src/components/characters/FeaturedImageSlot.tsx', 'utf8');
 const boardView = readFileSync('src/views/CharacterBoardView.tsx', 'utf8');
 const card = readFileSync('src/components/characters/CharacterCard.tsx', 'utf8');
 const charTaskRow = readFileSync('src/components/widgets/my-tasks/components/CharacterTaskRow.tsx', 'utf8');
@@ -135,6 +136,16 @@ test('costume-images: store 상태+액션 + featured 동기화(무마이그레�
   assert.match(store, /DB 트리거/);
   // realtime 분기 존재.
   assert.match(store, /table === 'character_costume_images'/);
+});
+
+test('costume-images: FeaturedImageSlot 갤러리 배선 + featured 직접 쓰기 제거(P1)', () => {
+  // store 는 primary 변경을 로컬 featured 에 즉시 반영하는 헬퍼를 갖는다(DB 확정은 트리거 담당).
+  assert.match(store, /function applyFeaturedLocal/);
+  // 슬롯은 다중 이미지 모델(imagesByCostume + addCostumeImage)로 업로드/표시한다.
+  assert.match(featuredImageSlot, /imagesByCostume/);
+  assert.match(featuredImageSlot, /addCostumeImage\(/);
+  // 슬롯이 featured_image_url 을 직접 쓰면 예전 primary 파일이 지워짐(P1) — 이 경로 제거를 고정.
+  assert.doesNotMatch(featuredImageSlot, /updateCostumeField\([^)]*featuredImageUrl/);
 });
 
 test('costume-images: featured 동기화 트리거 마이그레이션(스토리지 삭제 우회)', () => {

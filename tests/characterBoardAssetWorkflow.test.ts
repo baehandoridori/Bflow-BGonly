@@ -145,7 +145,7 @@ test('character image background defaults to transparent for new image workflows
   assert.equal(normalizeCharacterImageBackground('bad-value'), 'transparent');
   assert.match(backgroundDefaultMigration, /ALTER COLUMN image_background SET DEFAULT 'transparent'/);
   assert.match(imageFrameSource, /background = DEFAULT_CHARACTER_IMAGE_BACKGROUND/);
-  assert.match(featuredImageSlotSource, /costume\?\.imageBackground \?\? DEFAULT_CHARACTER_IMAGE_BACKGROUND/);
+  assert.match(featuredImageSlotSource, /background=\{selectedImage\.imageBackground\}/);
   assert.match(devMock, /image_background: 'transparent'/);
   assert.ok(
     imageContextMenuSource.indexOf("{ value: 'transparent', label: '투명' }") <
@@ -296,12 +296,12 @@ test('character board creates a first costume automatically and keeps image acti
 
   const featuredSlot = featuredImageSlotSource.match(/function FeaturedImageSlot\([\s\S]*?\r?\n}\r?\n\r?\n\/\*\* 복장 메모/);
   assert.ok(featuredSlot, 'FeaturedImageSlot should remain locally inspectable');
-  assert.match(featuredSlot[0], /grid grid-cols-2/);
+  assert.match(featuredSlot[0], /grid grid-cols-\[1fr_1fr_auto\]/);
   assert.match(featuredSlot[0], /이미지 추가/);
-  assert.match(featuredSlot[0], /이미지 바꾸기/);
-  assert.match(featuredSlot[0], /이미지 복사/);
+  assert.match(featuredSlot[0], /대표/);
+  assert.match(featuredSlot[0], /복사/);
   const visibleButtonArea = featuredSlot[0].slice(
-    featuredSlot[0].indexOf('grid grid-cols-2'),
+    featuredSlot[0].indexOf('grid grid-cols-[1fr_1fr_auto]'),
     featuredSlot[0].indexOf('<input'),
   );
   assert.doesNotMatch(visibleButtonArea, /작업 폴더/);
