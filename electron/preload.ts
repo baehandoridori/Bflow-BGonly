@@ -659,6 +659,24 @@ contextBridge.exposeInMainWorld('electronAPI', {
   ) => ipcRenderer.invoke('supabase:update-episode-character-map', episodeNumber, characterId, updates),
   storageUploadCharacterImage: (characterId: string, costumeId: string, base64Data: string) =>
     ipcRenderer.invoke('storage:upload-character-image', characterId, costumeId, base64Data),
+  // ─── 복장 다중 이미지 ───
+  supabaseLoadCostumeImages: () => ipcRenderer.invoke('supabase:load-costume-images'),
+  supabaseAddCostumeImage: (input: {
+    costumeId: string;
+    url: string;
+    role?: 'design' | 'final' | 'variant';
+    imageBackground?: 'transparent' | 'black' | 'white' | 'checker';
+    imageFit?: unknown;
+    isPrimary?: boolean;
+    sortOrder?: number;
+    createdBy?: string | null;
+  }) => ipcRenderer.invoke('supabase:add-costume-image', input),
+  supabaseUpdateCostumeImage: (id: string, updates: Record<string, unknown>) =>
+    ipcRenderer.invoke('supabase:update-costume-image', id, updates),
+  supabaseDeleteCostumeImage: (id: string) =>
+    ipcRenderer.invoke('supabase:delete-costume-image', id),
+  supabaseSetPrimaryCostumeImage: (costumeId: string, imageId: string) =>
+    ipcRenderer.invoke('supabase:set-primary-costume-image', costumeId, imageId),
   onCharacterBoardRealtime: (callback: (payload: unknown) => void) => {
     const listener = (_event: Electron.IpcRendererEvent, payload: unknown) => callback(payload);
     ipcRenderer.on('character-board:realtime', listener);

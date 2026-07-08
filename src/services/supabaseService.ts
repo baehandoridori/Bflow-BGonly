@@ -9,6 +9,8 @@ import type {
   CompositingState, CompositingStatus, CompositingErrorKind,
   Character, CharacterCostume, CostumeDesignStage, CostumeRiggingStage,
   CharacterRow, CharacterCostumeRow,
+  CharacterCostumeImage, CharacterCostumeImageRow, CostumeImageRole,
+  CharacterImageBackground, CharacterImageFit,
   CostumeActivityLogContext,
   CommentReadStateRow,
 } from '../types';
@@ -944,6 +946,77 @@ export async function deleteCharacterCostume(id: string): Promise<void> {
   await window.electronAPI.supabaseDeleteCostume(id);
 }
 
+// ─── 복장 다중 이미지 (character_costume_images) ───
+
+/** DB row(snake_case) → 도메인 CharacterCostumeImage(camelCase). 배경/맞춤 값은 정규화기로 보정. */
+export function rowToCostumeImage(rawRow: CharacterCostumeImageRow | Record<string, unknown>): CharacterCostumeImage {
+  const row = rawRow as CharacterCostumeImageRow;
+  return {
+    id: row.id,
+    costumeId: row.costume_id,
+    url: row.url,
+    role: (row.role ?? 'design') as CostumeImageRole,
+    label: row.label ?? null,
+    imageBackground: normalizeCharacterImageBackground(row.image_background),
+    imageFit: normalizeCharacterImageFit(row.image_fit),
+    isPrimary: row.is_primary === true,
+    sortOrder: row.sort_order ?? 0,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
+export async function loadCharacterCostumeImages(): Promise<CharacterCostumeImage[]> {
+  const rows = await window.electronAPI.supabaseLoadCostumeImages();
+  return (rows ?? []).map(rowToCostumeImage);
+}
+
+export async function addCharacterCostumeImage(input: {
+  costumeId: string;
+  url: string;
+  role?: CostumeImageRole;
+  imageBackground?: CharacterImageBackground;
+  imageFit?: CharacterImageFit;
+  isPrimary?: boolean;
+  sortOrder?: number;
+  createdBy?: string | null;
+}): Promise<CharacterCostumeImage> {
+  const row = await window.electronAPI.supabaseAddCostumeImage(input);
+  return rowToCostumeImage(row);
+}
+
+/** 복장 이미지 부분 수정 — camelCase 부분 업데이트를 snake_case 컬럼으로 매핑해 단일 update. */
+export async function updateCharacterCostumeImage(
+  id: string,
+  updates: Partial<{
+    role: CostumeImageRole;
+    label: string | null;
+    imageBackground: CharacterImageBackground;
+    imageFit: CharacterImageFit;
+    isPrimary: boolean;
+    sortOrder: number;
+  }>,
+): Promise<CharacterCostumeImage> {
+  const snake: Record<string, unknown> = {};
+  if (updates.role !== undefined) snake.role = updates.role;
+  if (updates.label !== undefined) snake.label = updates.label;
+  if (updates.imageBackground !== undefined) snake.image_background = updates.imageBackground;
+  if (updates.imageFit !== undefined) snake.image_fit = updates.imageFit;
+  if (updates.isPrimary !== undefined) snake.is_primary = updates.isPrimary;
+  if (updates.sortOrder !== undefined) snake.sort_order = updates.sortOrder;
+  const row = await window.electronAPI.supabaseUpdateCostumeImage(id, snake);
+  return rowToCostumeImage(row);
+}
+
+export async function deleteCharacterCostumeImage(id: string): Promise<void> {
+  await window.electronAPI.supabaseDeleteCostumeImage(id);
+}
+
+/** 복장 대표 이미지 지정 — 같은 복장의 나머지 이미지 primary 해제 후 대상만 지정(메인에서 clear 먼저). */
+export async function setPrimaryCostumeImage(costumeId: string, imageId: string): Promise<void> {
+  await window.electronAPI.supabaseSetPrimaryCostumeImage(costumeId, imageId);
+}
+
 export async function linkCharacterEpisode(
   episodeNumber: number,
   characterId: string,
@@ -979,7 +1052,7 @@ export async function uploadCharacterImage(
  */
 export function subscribeCharacterBoardRealtime(
   onChange: (payload: {
-    table: 'characters' | 'character_costumes' | 'episode_character_mapping';
+    table: 'characters' | 'character_costumes' | 'character_costume_images' | 'episode_character_mapping';
     eventType: 'INSERT' | 'UPDATE' | 'DELETE';
     row: Record<string, unknown> | null;
     old: Record<string, unknown> | null;

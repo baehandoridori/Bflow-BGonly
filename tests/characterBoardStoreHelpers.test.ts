@@ -9,19 +9,23 @@
  */
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import type { Character, CharacterCostume, EpisodeCharacterLink } from '../src/types/index.ts';
+import type { Character, CharacterCostume, CharacterCostumeImage, EpisodeCharacterLink } from '../src/types/index.ts';
 import {
   buildByCharacter,
   buildEpisodeLinks,
+  buildImagesByCostume,
   compareCharacters,
   compareCostumes,
+  compareCostumeImages,
   mergeEpisodeLinkPatchWithPending,
   mergeIncomingWithPending,
   pendingLinkKey,
   rebuildByCharacter,
+  rebuildImagesByCostume,
   rowToRealtimeMapping,
   sortCharacters,
   sortCostumes,
+  sortCostumeImages,
   trackPendingFields,
 } from '../src/stores/characterBoardStoreHelpers.ts';
 import type { PendingLocalField } from '../src/stores/characterBoardStoreHelpers.ts';
@@ -44,6 +48,21 @@ function makeCostume(over: Partial<CharacterCostume> & { id: string; characterId
     riggingAssignee: null,
     assignee: null,
     memo: null,
+    sortOrder: 0,
+    createdAt: '2026-07-01T00:00:00Z',
+    updatedAt: '2026-07-01T00:00:00Z',
+    ...over,
+  };
+}
+
+function makeImage(over: Partial<CharacterCostumeImage> & { id: string; costumeId: string }): CharacterCostumeImage {
+  return {
+    url: `https://example/${over.id}.png`,
+    role: 'design',
+    label: null,
+    imageBackground: 'transparent',
+    imageFit: { scale: 1, scaleX: 1, scaleY: 1, x: 0, y: 0, lockAspect: true },
+    isPrimary: false,
     sortOrder: 0,
     createdAt: '2026-07-01T00:00:00Z',
     updatedAt: '2026-07-01T00:00:00Z',
@@ -102,6 +121,48 @@ test('rebuildByCharacter reuses previous array references for unchanged characte
   assert.notEqual(withAdded.get('ch2'), next.get('ch2'));
   assert.equal(withAdded.get('ch1'), next.get('ch1'));
   assert.equal(withAdded.get('ch3'), next.get('ch3'));
+});
+
+// ─── buildImagesByCostume / rebuildImagesByCostume (구조적 공유) ───
+
+test('buildImagesByCostume groups images per costume in sortOrder order', () => {
+  const i1b = makeImage({ id: 'i1b', costumeId: 'co1', sortOrder: 1 });
+  const i1a = makeImage({ id: 'i1a', costumeId: 'co1', sortOrder: 0 });
+  const i2a = makeImage({ id: 'i2a', costumeId: 'co2', sortOrder: 0 });
+  const map = buildImagesByCostume([i1b, i1a, i2a]);
+  assert.deepEqual([...map.keys()].sort(), ['co1', 'co2']);
+  assert.deepEqual(map.get('co1')!.map((i) => i.id), ['i1a', 'i1b']);
+  assert.deepEqual(map.get('co2')!.map((i) => i.id), ['i2a']);
+  assert.deepEqual(sortCostumeImages([i1b, i1a]).map((i) => i.id), ['i1a', 'i1b']);
+});
+
+test('rebuildImagesByCostume reuses previous array references for unchanged costumes only', () => {
+  const i1a = makeImage({ id: 'i1a', costumeId: 'co1', sortOrder: 0 });
+  const i1b = makeImage({ id: 'i1b', costumeId: 'co1', sortOrder: 1 });
+  const i2a = makeImage({ id: 'i2a', costumeId: 'co2', sortOrder: 0 });
+  const prev = rebuildImagesByCostume(new Map(), [i1a, i1b, i2a]);
+
+  const i1aChanged = { ...i1a, isPrimary: true };
+  const next = rebuildImagesByCostume(prev, [i1aChanged, i1b, i2a]);
+  assert.notEqual(next.get('co1'), prev.get('co1'), 'changed costume gets a fresh array');
+  assert.equal(next.get('co1')![0].isPrimary, true);
+  assert.equal(next.get('co2'), prev.get('co2'), 'unchanged costume array reference reused');
+
+  // 길이 변화(추가)는 해당 복장만 새 배열.
+  const withAdded = rebuildImagesByCostume(next, [i1aChanged, i1b, i2a, makeImage({ id: 'i2b', costumeId: 'co2', sortOrder: 1 })]);
+  assert.notEqual(withAdded.get('co2'), next.get('co2'));
+  assert.equal(withAdded.get('co1'), next.get('co1'));
+});
+
+test('compareCostumeImages falls back sortOrder → createdAt → id', () => {
+  assert.ok(compareCostumeImages(
+    makeImage({ id: 'x', costumeId: 'co1', sortOrder: 0 }),
+    makeImage({ id: 'y', costumeId: 'co1', sortOrder: 1 }),
+  ) < 0);
+  assert.ok(compareCostumeImages(
+    makeImage({ id: 'a', costumeId: 'co1', sortOrder: 1, createdAt: '2026-01-01T00:00:00Z' }),
+    makeImage({ id: 'b', costumeId: 'co1', sortOrder: 1, createdAt: '2026-01-01T00:00:00Z' }),
+  ) < 0, 'id is the final tiebreaker');
 });
 
 // ─── mergeIncomingWithPending ───

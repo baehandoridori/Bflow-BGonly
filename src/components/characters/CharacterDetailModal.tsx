@@ -187,6 +187,8 @@ function CharacterDetailPanel({
   commentCount: number;
 }) {
   const byCharacter = useCharacterBoardStore((s) => s.byCharacter);
+  const imagesByCostume = useCharacterBoardStore((s) => s.imagesByCostume);
+  const updateCostumeImageField = useCharacterBoardStore((s) => s.updateCostumeImageField);
   const addCostume = useCharacterBoardStore((s) => s.addCostume);
   const deleteCostume = useCharacterBoardStore((s) => s.deleteCostume);
   const reorderCostumes = useCharacterBoardStore((s) => s.reorderCostumes);
@@ -210,6 +212,10 @@ function CharacterDetailPanel({
   const [editingName, setEditingName] = useState(false);
   const [nameDraft, setNameDraft] = useState(character.name);
   const [lightboxCostumeId, setLightboxCostumeId] = useState<string | null>(null);
+  // 갤러리에서 고른 (비대표일 수 있는) 이미지로 라이트박스를 열기 위한 오버라이드 (코덱스 P2).
+  // 라이트박스에서 고른(비대표) 이미지의 id 만 보관하고, 값은 live imagesByCostume 에서 해석한다.
+  //   스냅샷을 들고 있으면 fit 을 편집·저장한 뒤에도 낡은 값이 남아 다음 편집이 덮어쓴다(코덱스 P2).
+  const [lightboxImageId, setLightboxImageId] = useState<string | null>(null);
   const [imageMenu, setImageMenu] = useState<{ costumeId: string; x: number; y: number } | null>(null);
   const [fitEditorCostumeId, setFitEditorCostumeId] = useState<string | null>(null);
   const [creatingFolder, setCreatingFolder] = useState(false);
@@ -240,17 +246,35 @@ function CharacterDetailPanel({
   const activeCostume = costumes.find((c) => c.id === activeCostumeId) ?? null;
   const imageEntries: CharacterImageLightboxEntry[] = costumes
     .filter((c) => !!c.featuredImageUrl)
-    .map((c) => ({
-      costumeId: c.id,
-      name: `${character.name} · ${c.name}`,
-      costumeName: c.name,
-      versionNo: c.versionNo,
-      url: c.featuredImageUrl!,
-      background: c.imageBackground,
-      fit: c.imageFit,
-    }));
+    .map((c) => {
+      const costumeImgs = imagesByCostume.get(c.id) ?? [];
+      const primaryImg = costumeImgs.find((i) => i.isPrimary) ?? costumeImgs[0] ?? null;
+      // 갤러리에서 고른 비대표 이미지로 열렸으면 그 이미지로 표시(코덱스 P2). id 로 live 상태에서 해석해
+      //   fit 편집 직후에도 최신 값을 쓰게 한다. 그 외엔 대표(featured).
+      const override = c.id === lightboxCostumeId && lightboxImageId
+        ? costumeImgs.find((i) => i.id === lightboxImageId) ?? null
+        : null;
+      return {
+        costumeId: c.id,
+        // 썸네일 맞추기가 대표가 아닌 '표시 중인 그 이미지'의 fit 을 갱신하도록 imageId 를 실는다(코덱스 P2).
+        imageId: override?.id ?? primaryImg?.id,
+        name: `${character.name} · ${c.name}`,
+        costumeName: c.name,
+        versionNo: c.versionNo,
+        url: override?.url ?? c.featuredImageUrl!,
+        background: override?.imageBackground ?? c.imageBackground,
+        fit: override?.imageFit ?? c.imageFit,
+      };
+    });
   const menuCostume = imageMenu ? costumes.find((c) => c.id === imageMenu.costumeId) ?? null : null;
   const fitEditorCostume = fitEditorCostumeId ? costumes.find((c) => c.id === fitEditorCostumeId) ?? null : null;
+  // 썸네일 컨텍스트메뉴의 배경/맞추기는 이미지 행이 진실(트리거가 대표 이미지 기준으로 featured 를 확정)이므로
+  //   복장이 아니라 대표 이미지 행으로 저장한다(코덱스 P2 — 안 그러면 편집이 즉시 어긋나고 다음 동기화에 덮인다).
+  const primaryImageOf = (costumeId: string) => {
+    const imgs = imagesByCostume.get(costumeId) ?? [];
+    return imgs.find((i) => i.isPrimary) ?? imgs[0] ?? null;
+  };
+  const fitEditorImage = fitEditorCostumeId ? primaryImageOf(fitEditorCostumeId) : null;
 
   const handlePickFolder = useCallback(async () => {
     const folder = await chooseWorkFolder();
@@ -442,7 +466,7 @@ function CharacterDetailPanel({
             <FeaturedImageSlot
               character={character}
               costume={activeCostume}
-              onView={(costumeId) => setLightboxCostumeId(costumeId)}
+              onView={(costumeId, image) => { setLightboxCostumeId(costumeId); setLightboxImageId(image?.id ?? null); }}
               onEnsureCostume={ensureCostume}
             />
             {activeCostume && <CostumeIdentity costume={activeCostume} />}
@@ -561,17 +585,20 @@ function CharacterDetailPanel({
           imageCostume={menuCostume}
           fileCostume={menuCostume}
           onClose={() => setImageMenu(null)}
-          onBackground={(costumeId, background) => updateCostumeField(costumeId, { imageBackground: background })}
+          onBackground={(costumeId, background) => {
+            const img = primaryImageOf(costumeId);
+            if (img) updateCostumeImageField(img.id, { imageBackground: background });
+          }}
           onEditFit={(costumeId) => setFitEditorCostumeId(costumeId)}
         />
       )}
-      {fitEditorCostume?.featuredImageUrl && (
+      {fitEditorImage && fitEditorCostume && (
         <CharacterImageFitEditor
-          url={fitEditorCostume.featuredImageUrl}
+          url={fitEditorImage.url}
           alt={fitEditorCostume.name}
-          background={fitEditorCostume.imageBackground}
-          fit={fitEditorCostume.imageFit}
-          onCommit={(fit: CharacterImageFit) => updateCostumeField(fitEditorCostume.id, { imageFit: fit })}
+          background={fitEditorImage.imageBackground}
+          fit={fitEditorImage.imageFit}
+          onCommit={(fit: CharacterImageFit) => updateCostumeImageField(fitEditorImage.id, { imageFit: fit })}
           onClose={() => setFitEditorCostumeId(null)}
         />
       )}
@@ -579,8 +606,8 @@ function CharacterDetailPanel({
         <CharacterImageLightbox
           entries={imageEntries}
           initialCostumeId={lightboxCostumeId}
-          onClose={() => setLightboxCostumeId(null)}
-          onFitCommit={(costumeId, fit) => updateCostumeField(costumeId, { imageFit: fit })}
+          onClose={() => { setLightboxCostumeId(null); setLightboxImageId(null); }}
+          onFitCommit={(imageId, fit) => updateCostumeImageField(imageId, { imageFit: fit })}
           onCopyImage={(url) => copyCharacterImage(url)}
         />
       )}

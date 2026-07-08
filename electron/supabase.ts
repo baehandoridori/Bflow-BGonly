@@ -3789,6 +3789,25 @@ export interface CharacterCostumeRow {
   created_by: string | null;
 }
 
+/** 복장 개별 이미지 row. 한 복장이 여러 이미지를 가질 때 각 이미지 1 row. */
+export interface CharacterCostumeImageRow {
+  id: string;
+  costume_id: string;
+  url: string;
+  role: 'design' | 'final' | 'variant';
+  label: string | null;
+  image_background: 'transparent' | 'black' | 'white' | 'checker';
+  image_fit: { scale: number; scaleX?: number; scaleY?: number; x: number; y: number; lockAspect: boolean };
+  is_primary: boolean;
+  sort_order: number;
+  created_at: string;
+  updated_at: string;
+  created_by: string | null;
+}
+
+/** image_fit 은 NOT NULL(기본값 없음) — insert 시 반드시 채운다. renderer 의 DEFAULT_CHARACTER_IMAGE_FIT 미러(electron↔src 는 서로 import 안 함). */
+const DEFAULT_COSTUME_IMAGE_FIT = { scale: 1, scaleX: 1, scaleY: 1, x: 0, y: 0, lockAspect: true } as const;
+
 /** 캐릭터-에피소드 매핑 row. episode_number 는 episodes 조인으로 채워 렌더러가 매핑하기 쉽게 함. */
 export interface EpisodeCharacterMapRow {
   id: string;
@@ -3836,6 +3855,15 @@ export async function loadCharacters(): Promise<CharacterRow[]> {
 export async function loadCharacterCostumes(): Promise<CharacterCostumeRow[]> {
   return loadAllRows<CharacterCostumeRow>(
     'character_costumes',
+    '*',
+    { column: 'sort_order', ascending: true },
+  );
+}
+
+/** 모든 복장 이미지. 페이지네이션 반복 (sort_order asc). */
+export async function loadCharacterCostumeImages(): Promise<CharacterCostumeImageRow[]> {
+  return loadAllRows<CharacterCostumeImageRow>(
+    'character_costume_images',
     '*',
     { column: 'sort_order', ascending: true },
   );
@@ -3932,15 +3960,28 @@ async function removeCharacterStorageByUrl(urls: (string | null | undefined)[]):
   if (error) console.warn('[character-board] 스토리지 자산 정리 실패(무시하고 진행):', error.message);
 }
 
-/** 캐릭터 삭제. 복장/매핑/댓글은 FK cascade 로 자동 삭제 — cascade 전에 스토리지 자산을 먼저 정리한다. */
+/** 캐릭터 삭제. 복장/매핑/댓글/복장이미지는 FK cascade 로 자동 삭제 — cascade 전에 스토리지 자산을 먼저 정리한다. */
 export async function deleteCharacter(id: string): Promise<void> {
-  // 복장 대표 이미지 + 캐릭터 댓글 첨부 이미지를 cascade 전에 수집해 삭제(고아 파일 방지).
+  // 복장 대표 이미지 + 복장 다중 이미지 + 캐릭터 댓글 첨부 이미지를 cascade 전에 수집해 삭제(고아 파일 방지).
   const [{ data: costumeRows }, { data: commentRows }] = await Promise.all([
-    supabase.from('character_costumes').select('featured_image_url').eq('character_id', id),
+    supabase.from('character_costumes').select('id, featured_image_url').eq('character_id', id),
     supabase.from('comments').select('images').eq('character_id', id),
   ]);
   const urls: (string | null | undefined)[] = [];
-  for (const r of costumeRows ?? []) urls.push((r as { featured_image_url?: string | null }).featured_image_url);
+  const costumeIds: string[] = [];
+  for (const r of costumeRows ?? []) {
+    const row = r as { id?: string; featured_image_url?: string | null };
+    urls.push(row.featured_image_url);
+    if (typeof row.id === 'string') costumeIds.push(row.id);
+  }
+  // 복장 다중 이미지 — costume_id → character 직접 FK 가 없으므로 복장 id 로 조회(cascade 로 행은 지워지므로 URL 만 사전 수집).
+  if (costumeIds.length > 0) {
+    const { data: imageRows } = await supabase
+      .from('character_costume_images')
+      .select('url')
+      .in('costume_id', costumeIds);
+    for (const r of imageRows ?? []) urls.push((r as { url?: string | null }).url);
+  }
   for (const r of commentRows ?? []) {
     const imgs = (r as { images?: unknown }).images;
     if (Array.isArray(imgs)) for (const u of imgs) if (typeof u === 'string') urls.push(u);
@@ -4010,17 +4051,113 @@ export async function updateCharacterCostume(
   return data as CharacterCostumeRow;
 }
 
-/** 복장 삭제. 삭제 전 대표 이미지 스토리지 객체를 정리해 고아 파일을 방지한다. */
+/** 복장 삭제. 삭제 전 대표 이미지 + 복장 다중 이미지 스토리지 객체를 정리해 고아 파일을 방지한다. */
 export async function deleteCharacterCostume(id: string): Promise<void> {
-  const { data: row } = await supabase
-    .from('character_costumes')
-    .select('featured_image_url')
-    .eq('id', id)
-    .maybeSingle();
+  const [{ data: row }, { data: imageRows }] = await Promise.all([
+    supabase.from('character_costumes').select('featured_image_url').eq('id', id).maybeSingle(),
+    // 복장 다중 이미지는 cascade 로 지워지므로, 삭제 전에 URL 을 모아 스토리지에서 정리.
+    supabase.from('character_costume_images').select('url').eq('costume_id', id),
+  ]);
   const { error } = await supabase.from('character_costumes').delete().eq('id', id);
   if (error) throw error;
-  // 삭제 성공 후에만 대표 이미지 객체 정리.
-  await removeCharacterStorageByUrl([(row as { featured_image_url?: string | null } | null)?.featured_image_url]);
+  // 삭제 성공 후에만 대표 이미지 + 복장 이미지 객체 정리.
+  const urls: (string | null | undefined)[] = [(row as { featured_image_url?: string | null } | null)?.featured_image_url];
+  for (const r of imageRows ?? []) urls.push((r as { url?: string | null }).url);
+  await removeCharacterStorageByUrl(urls);
+}
+
+// ─── 복장 다중 이미지 (character_costume_images) ──────────────────
+// primary 이미지 값의 featured_* 반영은 앱(store) 이 담당한다 (DB 트리거/RPC 없음).
+
+/** 복장 이미지 추가 (INSERT). sort_order 미지정 시 해당 복장 내 최대값 +1. */
+export async function addCostumeImage(input: {
+  costumeId: string;
+  url: string;
+  role?: 'design' | 'final' | 'variant';
+  imageBackground?: 'transparent' | 'black' | 'white' | 'checker';
+  imageFit?: unknown;
+  isPrimary?: boolean;
+  sortOrder?: number;
+  createdBy?: string | null;
+}): Promise<CharacterCostumeImageRow> {
+  let sortOrder = input.sortOrder;
+  if (sortOrder === undefined) {
+    const { data: maxRow } = await supabase
+      .from('character_costume_images')
+      .select('sort_order')
+      .eq('costume_id', input.costumeId)
+      .order('sort_order', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    sortOrder = ((maxRow?.sort_order as number | undefined) ?? -1) + 1;
+  }
+  const insert: Record<string, unknown> = {
+    costume_id: input.costumeId,
+    url: input.url,
+    role: input.role ?? 'design',
+    image_fit: input.imageFit ?? DEFAULT_COSTUME_IMAGE_FIT,
+    is_primary: input.isPrimary ?? false,
+    sort_order: sortOrder,
+    created_by: input.createdBy ?? null,
+  };
+  if (input.imageBackground !== undefined) insert.image_background = input.imageBackground;
+  const { data, error } = await supabase
+    .from('character_costume_images')
+    .insert(insert)
+    .select('*')
+    .single();
+  if (error) {
+    // 첫 이미지 primary 경합(코덱스 P2): 다른 클라이언트가 먼저 대표를 넣어 부분 유니크(23505)를 위반하면,
+    //   대표 없이(비대표) 재시도해 실패 토스트 없이 이미지를 추가한다.
+    if (insert.is_primary === true && (error as { code?: string }).code === '23505') {
+      const { data: retryData, error: retryErr } = await supabase
+        .from('character_costume_images')
+        .insert({ ...insert, is_primary: false })
+        .select('*')
+        .single();
+      if (retryErr) throw retryErr;
+      return retryData as CharacterCostumeImageRow;
+    }
+    throw error;
+  }
+  return data as CharacterCostumeImageRow;
+}
+
+/** 복장 이미지 수정 (단일 update 쿼리 — role/label/image_background/image_fit/is_primary/sort_order 등). */
+export async function updateCostumeImage(
+  id: string,
+  updates: Record<string, unknown>,
+): Promise<CharacterCostumeImageRow> {
+  const { data, error } = await supabase
+    .from('character_costume_images')
+    .update({ ...updates, updated_at: new Date().toISOString() })
+    .eq('id', id)
+    .select('*')
+    .single();
+  if (error) throw error;
+  return data as CharacterCostumeImageRow;
+}
+
+/** 복장 이미지 삭제. 삭제 전 url 을 조회해 DB 삭제 후 스토리지 객체를 정리한다. */
+export async function deleteCostumeImage(id: string): Promise<void> {
+  const { data: row } = await supabase
+    .from('character_costume_images')
+    .select('url')
+    .eq('id', id)
+    .maybeSingle();
+  const { error } = await supabase.from('character_costume_images').delete().eq('id', id);
+  if (error) throw error;
+  await removeCharacterStorageByUrl([(row as { url?: string | null } | null)?.url]);
+}
+
+/**
+ * 복장 대표 이미지 지정 — clear+set 을 한 트랜잭션(RPC set_primary_costume_image)으로 원자 처리.
+ * 앱 2쿼리 방식은 set 실패/0행 시 대표 없는 상태로 남아 트리거가 featured 를 비우는 문제(코덱스 P2)가 있어 RPC 로 전환.
+ * costumeId 는 호출부 시그니처 호환을 위해 유지하나 RPC 가 imageId 로 복장을 찾으므로 사용하지 않는다.
+ */
+export async function setPrimaryCostumeImage(_costumeId: string, imageId: string): Promise<void> {
+  const { error } = await supabase.rpc('set_primary_costume_image', { p_image_id: imageId });
+  if (error) throw error;
 }
 
 /** 캐릭터-에피소드 연결 (UPSERT, onConflict 'episode_id,character_id'). episodeNumber → episode_id 해석. */
@@ -4114,7 +4251,7 @@ export async function updateEpisodeCharacterMapping(
  */
 export function startCharacterBoardRealtime(
   broadcast: (payload: {
-    table: 'characters' | 'character_costumes' | 'episode_character_mapping';
+    table: 'characters' | 'character_costumes' | 'character_costume_images' | 'episode_character_mapping';
     eventType: 'INSERT' | 'UPDATE' | 'DELETE';
     row: Record<string, unknown> | null;
     old: Record<string, unknown> | null;
@@ -4122,7 +4259,7 @@ export function startCharacterBoardRealtime(
   /** 채널 구독 상태 통지 — 렌더러가 SUBSCRIBED(재합류) 시 catch-up 로드를 트리거하는 데 사용. */
   onStatus?: (status: string) => void,
 ): () => void {
-  const tables = ['characters', 'character_costumes', 'episode_character_mapping'] as const;
+  const tables = ['characters', 'character_costumes', 'character_costume_images', 'episode_character_mapping'] as const;
   const retry = createRetryManager('CharacterBoardRealtime');
   const episodeNumberCache = new Map<string, number>();
   // 이벤트마다 독립 async 로 enrich 하면 완료 순서가 도착 순서와 어긋날 수 있어(늦은 select 가
@@ -4189,7 +4326,7 @@ export function startCharacterBoardRealtime(
 }
 
 async function enrichEpisodeCharacterMappingPayload(
-  table: 'characters' | 'character_costumes' | 'episode_character_mapping',
+  table: 'characters' | 'character_costumes' | 'character_costume_images' | 'episode_character_mapping',
   row: Record<string, unknown> | null,
   old: Record<string, unknown> | null,
   episodeNumberCache?: Map<string, number>,

@@ -1366,6 +1366,11 @@ import {
   addCharacterCostume as sbAddCharacterCostume,
   updateCharacterCostume as sbUpdateCharacterCostume,
   deleteCharacterCostume as sbDeleteCharacterCostume,
+  loadCharacterCostumeImages as sbLoadCharacterCostumeImages,
+  addCostumeImage as sbAddCostumeImage,
+  updateCostumeImage as sbUpdateCostumeImage,
+  deleteCostumeImage as sbDeleteCostumeImage,
+  setPrimaryCostumeImage as sbSetPrimaryCostumeImage,
   linkCharacterEpisode as sbLinkCharacterEpisode,
   unlinkCharacterEpisode as sbUnlinkCharacterEpisode,
   updateEpisodeCharacterMapping as sbUpdateEpisodeCharacterMapping,
@@ -2651,7 +2656,7 @@ function startSupabaseRealtime() {
     }
   });
 
-  // 4) 캐릭터 현황판 Realtime 구독 (characters / character_costumes / episode_character_mapping)
+  // 4) 캐릭터 현황판 Realtime 구독 (characters / character_costumes / character_costume_images / episode_character_mapping)
   characterBoardRealtimeCleanup = sbStartCharacterBoardRealtime((payload) => {
     if (mainWindow && !mainWindow.isDestroyed()) {
       mainWindow.webContents.send('character-board:realtime', payload);
@@ -3040,6 +3045,51 @@ ipcMain.handle('supabase:delete-character-costume', wrapIpc(async (
   id: string,
 ) => {
   return sbDeleteCharacterCostume(id);
+}));
+
+// ─── 복장 다중 이미지 (character_costume_images) ───
+
+ipcMain.handle('supabase:load-costume-images', wrapIpc(async () => {
+  return sbLoadCharacterCostumeImages();
+}));
+
+ipcMain.handle('supabase:add-costume-image', wrapIpc(async (
+  _e: unknown,
+  input: {
+    costumeId: string;
+    url: string;
+    role?: 'design' | 'final' | 'variant';
+    imageBackground?: 'transparent' | 'black' | 'white' | 'checker';
+    imageFit?: unknown;
+    isPrimary?: boolean;
+    sortOrder?: number;
+    createdBy?: string | null;
+  },
+) => {
+  return sbAddCostumeImage(input);
+}));
+
+ipcMain.handle('supabase:update-costume-image', wrapIpc(async (
+  _e: unknown,
+  id: string,
+  updates: Record<string, unknown>,
+) => {
+  return sbUpdateCostumeImage(id, updates);
+}));
+
+ipcMain.handle('supabase:delete-costume-image', wrapIpc(async (
+  _e: unknown,
+  id: string,
+) => {
+  return sbDeleteCostumeImage(id);
+}));
+
+ipcMain.handle('supabase:set-primary-costume-image', wrapIpc(async (
+  _e: unknown,
+  costumeId: string,
+  imageId: string,
+) => {
+  return sbSetPrimaryCostumeImage(costumeId, imageId);
 }));
 
 ipcMain.handle('supabase:link-character-episode', wrapIpc(async (
