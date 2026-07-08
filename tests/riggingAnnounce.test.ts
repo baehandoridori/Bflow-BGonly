@@ -56,6 +56,8 @@ test('B11 UI: CostumeDetail 버튼 + 모달 배선, 모달은 대표 기본선�
   // 전송은 서비스 경유(title 포함).
   assert.match(modal, /sendRiggingAnnounce\(/);
   assert.match(modal, /title: title\.trim\(\)/);
+  // 복장이 여럿일 때 구분되도록 CH_name 은 '캐릭터 · 복장' (코덱스 P2, 한솔 결정).
+  assert.match(modal, /characterName: `\$\{character\.name\} · \$\{costume\.name\}`/);
   // Escape 는 최상단 모달 패턴 — 부모 상세 모달까지 닫히지 않게 capture + stopImmediatePropagation (코덱스 P2).
   assert.match(modal, /event\.stopImmediatePropagation\(\)/);
   assert.match(modal, /addEventListener\('keydown', onKey, \{ capture: true \}\)/);

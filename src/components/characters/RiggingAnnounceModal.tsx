@@ -79,8 +79,9 @@ export function RiggingAnnounceModal({
     setSending(true);
     try {
       await sendRiggingAnnounce({
+        // 복장이 여러 개인 캐릭터도 어떤 복장인지 구분되도록 '캐릭터 · 복장'으로 보낸다(코덱스 P2, 한솔 결정).
+        characterName: `${character.name} · ${costume.name}`,
         title: title.trim(),
-        characterName: character.name,
         folderPath: character.workFolderPath,
         notes,
         imageUrl: selectedImage?.url ?? null,
