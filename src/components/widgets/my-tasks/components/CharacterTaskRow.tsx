@@ -1,7 +1,7 @@
 import { motion } from 'framer-motion';
 import { ExternalLink } from 'lucide-react';
 import { cn } from '@/utils/cn';
-import { describeDueDate, type DueTone } from '@/utils/dueDateBadge';
+import { describeDueDate, todayLocalISO, type DueTone } from '@/utils/dueDateBadge';
 import type { CharacterTaskItem } from '../types';
 
 const DUE_TONE_CLASS: Record<DueTone, string> = {
@@ -13,7 +13,7 @@ const DUE_TONE_CLASS: Record<DueTone, string> = {
 
 /** 마감 배지 — 미완료 태스크에만 표시. (T2-4) */
 function DueBadge({ dueDate, className }: { dueDate: string | null; className?: string }) {
-  const info = describeDueDate(dueDate, new Date().toISOString().slice(0, 10));
+  const info = describeDueDate(dueDate, todayLocalISO());
   if (!info) return null;
   return (
     <span

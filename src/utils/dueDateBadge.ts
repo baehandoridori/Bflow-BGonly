@@ -4,6 +4,14 @@
  */
 export type DueTone = 'overdue' | 'today' | 'soon' | 'normal';
 
+/**
+ * 오늘의 '로컬 달력 날짜'(YYYY-MM-DD). 마감일은 날짜만 있으므로 UTC(toISOString)가 아닌
+ * 사용자 로컬 자정 기준으로 비교해야 KST 새벽에 D-1/지남이 하루 어긋나지 않는다.
+ */
+export function todayLocalISO(now: Date = new Date()): string {
+  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+}
+
 /** dueDate(YYYY-MM-DD) 와 todayISO 를 비교해 배지 라벨/톤을 만든다. 미설정/파싱실패면 null. */
 export function describeDueDate(
   dueDate: string | null | undefined,
