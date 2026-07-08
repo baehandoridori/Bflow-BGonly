@@ -148,10 +148,30 @@ export function CostumeDetail({
   const updateCostumeField = useCharacterBoardStore((s) => s.updateCostumeField);
   const setCostumeTags = useCharacterBoardStore((s) => s.setCostumeTags);
   const setVersion = useCharacterBoardStore((s) => s.setVersion);
+  const setCharacterReferenceHeight = useCharacterBoardStore((s) => s.setCharacterReferenceHeight);
   const episodeLinks = useCharacterBoardStore((s) => s.episodeLinks);
   const setEpisodeCostume = useCharacterBoardStore((s) => s.setEpisodeCostume);
   const episodes = useDataStore((s) => s.episodes);
   const getEpisodeDisplayName = useDataStore((s) => s.getEpisodeDisplayName);
+
+  // 기준 키(캐릭터 레벨)는 blur 때 커밋 — 입력 중 매 키 저장 방지.
+  const [heightDraft, setHeightDraft] = useState(character.referenceHeightPx?.toString() ?? '');
+  const heightFocused = useRef(false);
+  useEffect(() => { if (!heightFocused.current) setHeightDraft(character.referenceHeightPx?.toString() ?? ''); }, [character.id, character.referenceHeightPx]);
+  const commitHeight = () => {
+    heightFocused.current = false;
+    const t = heightDraft.trim();
+    if (t === '') {
+      setHeightDraft('');
+      if (character.referenceHeightPx !== null) void setCharacterReferenceHeight(character.id, null);
+      return;
+    }
+    const n = Number(t);
+    if (!Number.isFinite(n)) { setHeightDraft(character.referenceHeightPx?.toString() ?? ''); return; }
+    const next = Math.max(1, Math.min(4999, Math.floor(n)));
+    setHeightDraft(String(next));
+    if (next !== character.referenceHeightPx) void setCharacterReferenceHeight(character.id, next);
+  };
 
   // 이 캐릭터가 출연하는 에피소드 각각에 대해, 그 편이 '이 복장'을 쓰는지(costumeId 일치) 토글 (B2).
   const charLinks = episodeLinks.get(character.id) ?? [];
@@ -181,6 +201,37 @@ export function CostumeDetail({
               +
             </button>
           </div>
+        </div>
+
+        {/* 마감일 (복장 단위, T2-4) */}
+        <div className="flex flex-col gap-1.5">
+          <div className="text-xs text-text-secondary">마감일</div>
+          <input
+            type="date"
+            value={costume.dueDate ?? ''}
+            onChange={(e) => updateCostumeField(costume.id, { dueDate: e.target.value || null })}
+            aria-label="복장 마감일"
+            className="h-8 rounded-md border border-bg-border bg-transparent px-2 text-sm text-text-primary outline-none focus:border-accent/50 [color-scheme:dark]"
+          />
+        </div>
+
+        {/* 기준 키 (캐릭터 단위, T2-3) — 나열 시 상대 크기 비교용 */}
+        <div className="flex flex-col gap-1.5">
+          <div className="text-xs text-text-secondary" title="캐릭터 나열(키 비교 보기)에서 상대 크기 기준으로 쓰는 값이에요. 실제 이미지 픽셀과 무관.">기준 키(px)</div>
+          <input
+            type="number"
+            min={1}
+            max={4999}
+            inputMode="numeric"
+            value={heightDraft}
+            onChange={(e) => { setHeightDraft(e.target.value); }}
+            onFocus={() => { heightFocused.current = true; }}
+            onBlur={commitHeight}
+            onKeyDown={(e) => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); }}
+            placeholder="예: 600"
+            aria-label="캐릭터 기준 키(px)"
+            className="h-8 w-24 rounded-md border border-bg-border bg-transparent px-2 text-sm text-text-primary outline-none focus:border-accent/50"
+          />
         </div>
       </div>
 

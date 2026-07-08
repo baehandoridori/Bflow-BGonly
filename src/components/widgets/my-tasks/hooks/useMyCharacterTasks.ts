@@ -47,6 +47,7 @@ export function useMyCharacterTasks(): {
             stageLabel: meta.label,
             stageColor: characterStageColor(meta),
             done: costume.designStage === 'done',
+            dueDate: costume.dueDate,
           });
         }
         if (parseAssigneeNames(costume.riggingAssignee).some((name) => name === userName)) {
@@ -62,6 +63,7 @@ export function useMyCharacterTasks(): {
             stageLabel: meta.label,
             stageColor: characterStageColor(meta),
             done: costume.riggingStage === 'done',
+            dueDate: costume.dueDate,
           });
         }
       }

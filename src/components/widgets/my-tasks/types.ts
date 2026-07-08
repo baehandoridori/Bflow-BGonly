@@ -49,6 +49,8 @@ export interface CharacterTaskItem {
   stageLabel: string;
   stageColor: string;
   done: boolean;
+  /** 복장 마감일(YYYY-MM-DD) — 배지 표시용. null=미설정. (T2-4) */
+  dueDate: string | null;
 }
 
 export type StageSaveBaseline = SequentialStagePatch & {

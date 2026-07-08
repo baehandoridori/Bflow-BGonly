@@ -178,6 +178,8 @@ export interface Character {
   memo: string | null;
   /** 캐릭터 기본 작업 폴더. 실제 폴더를 만들거나 복사하지 않고 경로만 저장한다. */
   workFolderPath: string | null;
+  /** 캐릭터 나열 시 상대 크기 비교 기준값(스튜디오 임의 단위, 실제 업로드 픽셀과 무관). null=균일 표시. (T2-3) */
+  referenceHeightPx: number | null;
   sortOrder: number;
   episodeIds: number[];        // 연결된 episodeNumber 목록 (매핑 테이블 조립)
   createdAt: string;
@@ -234,6 +236,8 @@ export interface CharacterCostume {
   riggingAssignee: string | null;
   assignee: string | null;
   memo: string | null;
+  /** 복장 작업 마감일(YYYY-MM-DD). null=일정 미설정. (T2-4) */
+  dueDate: string | null;
   sortOrder: number;
   createdAt: string;
   updatedAt: string;
@@ -266,6 +270,7 @@ export interface CharacterRow {
   status: 'active' | 'archived' | null;
   memo: string | null;
   work_folder_path: string | null;
+  reference_height_px?: number | null;
   sort_order: number | null;
   created_at: string;
   updated_at: string;
@@ -297,6 +302,7 @@ export interface CharacterCostumeRow {
   rigging_assignee?: string | null;
   assignee: string | null;
   memo: string | null;
+  due_date?: string | null;
   sort_order: number | null;
   created_at: string;
   updated_at: string;

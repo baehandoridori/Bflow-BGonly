@@ -101,6 +101,8 @@ interface CharacterBoardStore {
 
   addCharacter: (name: string, memo?: string) => Promise<Character | null>;
   updateCharacterFolder: (id: string, workFolderPath: string | null) => Promise<boolean>;
+  /** 캐릭터 기준 키(px) 저장 — 나열 시 상대 크기 비교용 (T2-3). */
+  setCharacterReferenceHeight: (id: string, referenceHeightPx: number | null) => Promise<boolean>;
   archiveCharacter: (id: string) => Promise<void>;
   restoreCharacter: (id: string) => Promise<void>;
   renameCharacter: (id: string, name: string) => Promise<void>;
@@ -126,7 +128,8 @@ interface CharacterBoardStore {
       | 'assignee'
       | 'designAssignee'
       | 'riggingAssignee'
-      | 'memo'>>,
+      | 'memo'
+      | 'dueDate'>>,
   ) => Promise<boolean>;
   setCostumeTags: (id: string, kind: 'structure' | 'asset', tags: string[]) => Promise<void>;
   setVersion: (id: string, versionNo: number) => Promise<void>;
@@ -304,6 +307,10 @@ export const useCharacterBoardStore = create<CharacterBoardStore>((set, get) => 
 
   updateCharacterFolder: async (id, workFolderPath) => {
     return applyCharacterUpdate(set, get, id, { workFolderPath }, { work_folder_path: workFolderPath }, '작업 폴더 저장에 실패했어요');
+  },
+
+  setCharacterReferenceHeight: async (id, referenceHeightPx) => {
+    return applyCharacterUpdate(set, get, id, { referenceHeightPx }, { reference_height_px: referenceHeightPx }, '키 저장에 실패했어요');
   },
 
   renameCharacter: async (id, name) => {

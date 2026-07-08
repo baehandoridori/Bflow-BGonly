@@ -11,7 +11,7 @@
  */
 
 import { useCallback, useEffect, useMemo, useState, type MouseEvent as ReactMouseEvent } from 'react';
-import { Archive, Plus, Image as ImageIcon, Search } from 'lucide-react';
+import { Archive, Plus, Image as ImageIcon, Search, Ruler } from 'lucide-react';
 import { useCharacterBoardStore } from '@/stores/useCharacterBoardStore';
 import { useAppStore } from '@/stores/useAppStore';
 import { cn } from '@/utils/cn';
@@ -48,6 +48,7 @@ function CharacterGrid({ onAdd, pendingOpenId, onConsumeOpen }: { onAdd: () => v
   const [activeTags, setActiveTags] = useState<string[]>([]);
   const [cardMenu, setCardMenu] = useState<{ characterId: string; x: number; y: number; costumeId?: string } | null>(null);
   const [showArchived, setShowArchived] = useState(false);
+  const [heightCompareMode, setHeightCompareMode] = useState(false); // '키 비교 보기'(T2-3)
 
   const detailCharacter = useMemo(() => characters.find((c) => c.id === detailRequest?.id) ?? null, [characters, detailRequest?.id]);
   useEffect(() => { if (detailRequest && !detailCharacter) setDetailRequest(null); }, [detailRequest, detailCharacter]);
@@ -87,6 +88,13 @@ function CharacterGrid({ onAdd, pendingOpenId, onConsumeOpen }: { onAdd: () => v
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [visibleCharacters, query, activeTags, byCharacter]);
+  // 키 비교 보기: 가시 캐릭터 중 기준 키 최댓값을 300px 에 매핑, 나머지는 비례(clamp 90~300). 미설정은 기본 170.
+  const maxReferenceHeight = useMemo(() => {
+    let m = 0;
+    for (const c of filtered) if (c.referenceHeightPx && c.referenceHeightPx > m) m = c.referenceHeightPx;
+    return m;
+  }, [filtered]);
+
   const cardMenuCharacter = cardMenu ? characters.find((c) => c.id === cardMenu.characterId) ?? null : null;
   const cardMenuCostumes = cardMenuCharacter ? byCharacter.get(cardMenuCharacter.id) ?? [] : [];
   // 카드에서 휠로 넘겨 보던 복장이 있으면 그 복장을 우클릭 메뉴 대상(이미지 복사 등)으로 우선한다 (B8).
@@ -152,6 +160,19 @@ function CharacterGrid({ onAdd, pendingOpenId, onConsumeOpen }: { onAdd: () => v
             <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="이름으로 검색" className="w-full bg-bg-card border border-bg-border rounded-lg pl-8 pr-3 py-2 text-sm text-text-primary outline-none focus:border-accent/50" />
           </div>
           <div className="flex items-center gap-1.5">
+            <button
+              type="button"
+              onClick={() => setHeightCompareMode((v) => !v)}
+              title="캐릭터를 기준 키(px)에 맞춰 크기 비교로 나열해요"
+              className={cn(
+                'flex items-center gap-1.5 rounded-lg border px-3 py-2 text-sm transition-colors shrink-0 cursor-pointer',
+                heightCompareMode
+                  ? 'border-accent/50 bg-accent/15 text-accent'
+                  : 'border-bg-border text-text-secondary hover:border-text-secondary/40 hover:text-text-primary',
+              )}
+            >
+              <Ruler size={15} /> 키 비교 보기
+            </button>
             {archivedCharacters.length > 0 && (
               <button
                 type="button"
@@ -206,7 +227,7 @@ function CharacterGrid({ onAdd, pendingOpenId, onConsumeOpen }: { onAdd: () => v
           </button>
         </div>
       ) : (
-        <div className="grid grid-cols-[repeat(auto-fill,minmax(180px,1fr))] gap-4">
+        <div className={heightCompareMode ? 'flex flex-wrap items-end gap-4' : 'grid grid-cols-[repeat(auto-fill,minmax(180px,1fr))] gap-4'}>
           {filtered.map((c) => (
             <CharacterCard
               key={c.id}
@@ -214,6 +235,12 @@ function CharacterGrid({ onAdd, pendingOpenId, onConsumeOpen }: { onAdd: () => v
               costumes={byCharacter.get(c.id) ?? EMPTY_COSTUMES}
               onOpen={openCharacterDetail}
               onContextMenu={openCardContextMenu}
+              imageHeightPx={heightCompareMode
+                ? (c.referenceHeightPx && maxReferenceHeight
+                    ? Math.max(90, Math.min(300, Math.round((300 * c.referenceHeightPx) / maxReferenceHeight)))
+                    : 170)
+                : undefined}
+              referenceUnset={heightCompareMode && !c.referenceHeightPx}
             />
           ))}
         </div>

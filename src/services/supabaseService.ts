@@ -795,6 +795,7 @@ export function rowToCharacter(rawRow: CharacterRow | Record<string, unknown>): 
     status: (row.status ?? 'active') as Character['status'],
     memo: row.memo ?? null,
     workFolderPath: row.work_folder_path ?? null,
+    referenceHeightPx: row.reference_height_px ?? null,
     sortOrder: row.sort_order ?? 0,
     episodeIds: [],
     createdAt: row.created_at,
@@ -826,6 +827,7 @@ export function rowToCostume(rawRow: CharacterCostumeRow | Record<string, unknow
     riggingAssignee: hasRiggingAssigneeColumn ? row.rigging_assignee ?? null : row.assignee ?? null,
     assignee: row.assignee ?? null,
     memo: row.memo ?? null,
+    dueDate: row.due_date ?? null,
     sortOrder: row.sort_order ?? 0,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
@@ -908,6 +910,7 @@ export async function updateCharacterCostume(
     riggingAssignee: string | null;
     assignee: string | null;
     memo: string | null;
+    dueDate: string | null;
     sortOrder: number;
   }>,
   /**
@@ -931,6 +934,7 @@ export async function updateCharacterCostume(
   if (updates.riggingAssignee !== undefined) snake.rigging_assignee = updates.riggingAssignee;
   if (updates.assignee !== undefined) snake.assignee = updates.assignee;
   if (updates.memo !== undefined) snake.memo = updates.memo;
+  if (updates.dueDate !== undefined) snake.due_date = updates.dueDate;
   if (updates.sortOrder !== undefined) snake.sort_order = updates.sortOrder;
   const row = await window.electronAPI.supabaseUpdateCostume(id, snake, logContext);
   return rowToCostume(row);

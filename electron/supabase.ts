@@ -3758,6 +3758,7 @@ export interface CharacterRow {
   status: 'active' | 'archived';
   memo: string | null;
   work_folder_path: string | null;
+  reference_height_px: number | null;
   sort_order: number;
   created_at: string;
   updated_at: string;
@@ -3781,6 +3782,7 @@ export interface CharacterCostumeRow {
   rigging_assignee: string | null;
   assignee: string | null;
   memo: string | null;
+  due_date: string | null;
   sort_order: number;
   created_at: string;
   updated_at: string;
