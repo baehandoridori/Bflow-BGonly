@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { Loader2 } from 'lucide-react';
+import { Loader2, Megaphone } from 'lucide-react';
 import { cn } from '@/utils/cn';
 import { useCharacterBoardStore } from '@/stores/useCharacterBoardStore';
 import { useDataStore } from '@/stores/useDataStore';
@@ -11,6 +11,7 @@ import {
 } from '@/types';
 import { AssigneeNamePicker } from '@/components/characters/AssigneeNamePicker';
 import { StageRail } from '@/components/characters/StageRail';
+import { RiggingAnnounceModal } from '@/components/characters/RiggingAnnounceModal';
 import { TagChipSection } from '@/components/characters/TagChips';
 import { claimReactKey } from '@/utils/claimReactKey';
 import { DESIGN_STAGE_META, RIGGING_STAGE_META } from '@/constants/characterStages';
@@ -176,6 +177,8 @@ export function CostumeDetail({
   // 이 캐릭터가 출연하는 에피소드 각각에 대해, 그 편이 '이 복장'을 쓰는지(costumeId 일치) 토글 (B2).
   const charLinks = episodeLinks.get(character.id) ?? [];
 
+  const [announceOpen, setAnnounceOpen] = useState(false);
+
   return (
     <div className="flex flex-col gap-5">
       {/* 버전 */}
@@ -326,6 +329,14 @@ export function CostumeDetail({
             />
           }
         />
+        {/* 리깅 완성 슬랙 공지 (B11) — 아무 때나 눌러 완성 공지를 보낸다. */}
+        <button
+          type="button"
+          onClick={() => setAnnounceOpen(true)}
+          className="self-start inline-flex items-center gap-1.5 rounded-lg border border-accent/40 px-3 py-1.5 text-xs font-medium text-accent hover:bg-accent/10"
+        >
+          <Megaphone size={13} /> 리깅 완성 공지
+        </button>
       </div>
 
       {/* 태그 */}
@@ -341,6 +352,14 @@ export function CostumeDetail({
         tags={costume.assetTags}
         onChange={(next) => setCostumeTags(costume.id, 'asset', next)}
       />
+
+      {announceOpen && (
+        <RiggingAnnounceModal
+          character={character}
+          costume={costume}
+          onClose={() => setAnnounceOpen(false)}
+        />
+      )}
     </div>
   );
 }

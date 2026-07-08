@@ -1561,15 +1561,10 @@ async function logCostumeStageActivity(ctx?: CostumeActivityLogContext | null): 
     });
 
     if (isRiggingDone) {
-      // ── 완성(리깅 done) 작업공지 연결 자리 ───────────────────────────────────────
-      // TODO(slack): 작업공지 슬랙 채널 연결 — 웹훅이 준비되면 여기서 쏜다.
-      //   아직 작업공지용 webhook URL 이 없어 코드로 전송하지 않는다 (한솔 결정).
-      //   기존 sendSlackWebhook / slackWebhookService 패턴을 그대로 따른다. 보낼 payload 예시:
-      //   sendSlackWebhook({
-      //     text: `${ctx.characterName} · ${ctx.costumeName} 리깅 완성`,
-      //     // blocks: [{ type: 'section', text: { type: 'mrkdwn',
-      //     //   text: `*${ctx.characterName}* 캐릭터의 *${ctx.costumeName}* 리깅이 완성되었어요 🎉 (by ${currentActivityUser.name})` } }],
-      //   });
+      // ── 완성(리깅 done) 활동 기록만 남긴다 ───────────────────────────────────────
+      // 슬랙 작업공지는 자동 전송하지 않는다 (한솔 결정 B11): 리깅 담당자가 캐릭터 상세의
+      //   '리깅 완성 공지' 버튼 → 모달에서 비고/이미지를 확인해 수동으로 보낸다
+      //   (renderer → slack:send-rigging-webhook, SLACK_RIGGING_WEBHOOK_URL). 여기서는 피드 기록만.
       //
       // TODO(공지위젯): 추후 '공지사항' 위젯에 완성 공지 push.
       //   완성 공지 위젯이 생기면 이 지점에서 위젯 피드로도 push 한다 (현재는 placeholder).
@@ -2571,18 +2566,29 @@ ipcMain.handle('gcal:ensure-watch', wrapIpc(async (_e: unknown, calendarId: stri
 
 // ─── Slack Webhook ───
 const SLACK_WEBHOOK_URL = 'https://hooks.slack.com/triggers/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';
+// 리깅 완성 작업공지용 워크플로 트리거(멘션용과 별개 워크플로). 변수: CH_name / Path / bigo / image.
+const SLACK_RIGGING_WEBHOOK_URL = 'https://hooks.slack.com/triggers/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';
 
-ipcMain.handle('slack:send-webhook', wrapIpc(async (_e: unknown, payload: Record<string, string>) => {
-  console.log('[Slack Webhook] 요청 페이로드:', JSON.stringify(payload));
-  const res = await fetch(SLACK_WEBHOOK_URL, {
+async function postSlackWebhook(url: string, payload: Record<string, string>, tag: string): Promise<{ ok: boolean }> {
+  console.log(`[${tag}] 요청 페이로드:`, JSON.stringify(payload));
+  const res = await fetch(url, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(payload),
   });
   const body = await res.text();
-  console.log('[Slack Webhook] 응답:', res.status, body);
+  console.log(`[${tag}] 응답:`, res.status, body);
   if (!res.ok) throw new Error(`Slack webhook failed: ${res.status} — ${body}`);
   return { ok: true };
+}
+
+ipcMain.handle('slack:send-webhook', wrapIpc(async (_e: unknown, payload: Record<string, string>) => {
+  return postSlackWebhook(SLACK_WEBHOOK_URL, payload, 'Slack Webhook');
+}));
+
+// 리깅 완성 공지 전송(캐릭터 상세 → 완성 공지 모달). 워크플로가 CH_name/Path/bigo/image 변수를 메시지로 조립.
+ipcMain.handle('slack:send-rigging-webhook', wrapIpc(async (_e: unknown, payload: Record<string, string>) => {
+  return postSlackWebhook(SLACK_RIGGING_WEBHOOK_URL, payload, 'Slack Rigging Webhook');
 }));
 
 // ─── Realtime 구독 (앱 시작 시 자동 설정) ───
