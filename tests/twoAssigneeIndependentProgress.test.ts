@@ -38,6 +38,15 @@ test('shared progress stack uses compact icon controls and roomier detail contro
   assert.match(source, /h-9/);
 });
 
+test('compact assignee round badge keeps the round label on one line', () => {
+  const source = readFileSync(stackPath, 'utf8');
+  assert.match(source, /data-assignee-progress-round/);
+  assert.match(source, /whitespace-nowrap/);
+  assert.match(source, /min-w-\[3\.25rem\]/);
+  assert.match(source, /grid-cols-\[minmax\(56px,76px\)_minmax\(84px,1fr\)_2\.25rem\]/);
+  assert.match(source, /h-3\.5 w-3\.5/);
+});
+
 test('whole-scene and bulk actions persist all assignee progress together', () => {
   const util = readFileSync(progressUtilPath, 'utf8');
   const scenesView = readFileSync('src/views/ScenesView.tsx', 'utf8');

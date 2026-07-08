@@ -56,19 +56,20 @@ export function AssigneeProgressStack({
           department === 'acting' && activeState === 'work' ? (
             <div
               className={cn(
-                'inline-flex shrink-0 items-center gap-1 rounded-full bg-blue-400/15 font-bold text-blue-300',
-                compact ? 'px-1 text-[9px]' : 'px-2 py-0.5 text-[11px]',
+                'inline-flex max-w-full shrink-0 items-center gap-1 overflow-hidden rounded-full bg-blue-400/15 font-bold leading-none text-blue-300 whitespace-nowrap',
+                compact ? 'h-5 min-w-[3.25rem] justify-center px-1 text-[9px]' : 'px-2 py-0.5 text-[11px]',
               )}
               data-assignee-progress-round
+              title={`${entry.progress.workRound || 1}차`}
             >
-              <span className="tabular-nums">{entry.progress.workRound || 1}차</span>
+              <span className="shrink-0 whitespace-nowrap tabular-nums leading-none">{entry.progress.workRound || 1}차</span>
               {onAssigneeRoundBump && (
-                <span className="inline-flex items-center rounded-full bg-black/15">
+                <span className="inline-flex shrink-0 items-center rounded-full bg-black/15">
                   <button
                     type="button"
                     className={cn(
                       'inline-flex items-center justify-center rounded-full hover:bg-black/20 disabled:cursor-not-allowed disabled:opacity-30',
-                      compact ? 'h-4 w-4' : 'h-5 w-5',
+                      compact ? 'h-3.5 w-3.5' : 'h-5 w-5',
                     )}
                     disabled={(entry.progress.workRound || 1) <= 1}
                     onClick={(e) => {
@@ -84,7 +85,7 @@ export function AssigneeProgressStack({
                     type="button"
                     className={cn(
                       'inline-flex items-center justify-center rounded-full hover:bg-black/20',
-                      compact ? 'h-4 w-4' : 'h-5 w-5',
+                      compact ? 'h-3.5 w-3.5' : 'h-5 w-5',
                     )}
                     onClick={(e) => {
                       e.stopPropagation();
@@ -224,10 +225,10 @@ export function AssigneeProgressStack({
         return (
           <div
             key={entry.name}
-            className="grid min-w-0 grid-cols-[minmax(48px,72px)_minmax(88px,1fr)_2.25rem] items-center gap-1.5"
+            className="grid min-w-0 grid-cols-[minmax(56px,76px)_minmax(84px,1fr)_2.25rem] items-center gap-1.5"
             data-assignee-progress-name={entry.name}
           >
-            <div className="min-w-0">
+            <div className="flex min-w-0 flex-col items-start gap-0.5 overflow-hidden">
               <div className="truncate text-[10px] font-semibold text-text-primary">
                 {entry.name}
               </div>
