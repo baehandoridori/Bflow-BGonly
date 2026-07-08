@@ -1,7 +1,7 @@
 /**
  * 캐릭터 현황판 Tier 2 배선 고정 테스트. 소스-문자열 검사 — 리팩터 시 앵커 동반 갱신.
  */
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
@@ -209,14 +209,20 @@ test('costume-images 5차: 썸네일 컨텍스트메뉴 배경/맞추기도 대�
 });
 
 test('costume-images 6차: 대표 삭제 후 승격은 DB 트리거가 원자적으로(앱 2단계 쿼리 제거)', () => {
-  // 트리거가 대표 없고 남은 이미지 있으면 최소 순서를 자동 승격 — 삭제와 같은 트랜잭션.
-  const mig = readFileSync('DEVLOG/migrations/2026-07-08-costume-featured-autopromote.sql', 'utf8');
-  assert.match(mig, /CREATE OR REPLACE FUNCTION sync_costume_featured_image\(\)/);
+  // 자동 승격은 '최종' 트리거 정의 파일(파일명 정렬상 마지막)에 통합 — 순서대로 적용해도 mirror-only 에 안 덮인다(코덱스 P2).
+  const migDir = 'DEVLOG/migrations';
+  const triggerFiles = readdirSync(migDir)
+    .filter((f) => f.startsWith('2026-07-08') && /costume/.test(f))
+    .filter((f) => /CREATE OR REPLACE FUNCTION sync_costume_featured_image/.test(readFileSync(`${migDir}/${f}`, 'utf8')))
+    .sort();
+  // 트리거를 정의하는 마이그레이션은 정확히 1개여야 한다(중복/순서 덮어쓰기 방지).
+  assert.equal(triggerFiles.length, 1, `트리거 정의 파일은 1개여야 함: ${triggerFiles.join(', ')}`);
+  const mig = readFileSync(`${migDir}/${triggerFiles[0]}`, 'utf8');
   // 자동 승격은 DELETE 에서만 — set_primary RPC 의 clear UPDATE 순간 승격해 23505 나는 회귀 방지.
   assert.match(mig, /IF TG_OP = 'DELETE' AND v_primary_count = 0 THEN/);
   assert.match(mig, /ORDER BY sort_order ASC, created_at ASC/);
   assert.match(mig, /UPDATE character_costume_images SET is_primary = true WHERE id = v_promote_id/);
-  assert.doesNotMatch(mig, /DROP\s+(TABLE|COLUMN|TRIGGER)/i);
+  assert.doesNotMatch(mig, /DROP\s+(TABLE|COLUMN)/i);
   // 앱 delete 흐름은 별도 승격 쿼리(setPrimaryImage) 를 delete 안에서 호출하지 않고 로컬만 낙관 반영.
   const store = readFileSync('src/stores/useCharacterBoardStore.ts', 'utf8');
   const deleteBlock = store.slice(store.indexOf('deleteCostumeImage: async'), store.indexOf('linkEpisode: async'));
