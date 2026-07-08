@@ -188,3 +188,22 @@ test('costume-images 4차: primary insert 경합 시 23505 를 비대표로 재�
   assert.match(electronSupabase, /23505/);
   assert.match(electronSupabase, /is_primary: false/);
 });
+
+test('costume-images 5차: setPrimary 는 바뀌는 행(대상+직전대표)만 pending 표시', () => {
+  const store = readFileSync('src/stores/useCharacterBoardStore.ts', 'utf8');
+  // 직전 대표만 추려서 pending — 모든 형제 순회 후 무조건 trackPending 하던 코드 제거(코덱스 P2).
+  assert.match(store, /const prevPrimaryId = \[\.\.\.prevPrimaryById\]\.find\(\(\[, isP\]\) => isP\)\?\.\[0\] \?\? null/);
+  assert.match(store, /trackPendingFields\(pendingCostumeImageFields, imageId, \{ isPrimary: true \}\)/);
+  assert.match(store, /if \(prevPrimaryId && prevPrimaryId !== imageId\)/);
+  assert.doesNotMatch(store, /for \(const id of prevPrimaryById\.keys\(\)\)/);
+});
+
+test('costume-images 5차: 썸네일 컨텍스트메뉴 배경/맞추기도 대표 이미지 행으로 저장', () => {
+  const detailModal = readFileSync('src/components/characters/CharacterDetailModal.tsx', 'utf8');
+  assert.match(detailModal, /const primaryImageOf = \(costumeId: string\)/);
+  assert.match(detailModal, /const fitEditorImage = fitEditorCostumeId \? primaryImageOf\(fitEditorCostumeId\) : null/);
+  // 배경 변경 → 대표 이미지 행.
+  assert.match(detailModal, /if \(img\) updateCostumeImageField\(img\.id, \{ imageBackground: background \}\)/);
+  // 맞추기(fit) 편집기도 이미지 행 기준으로 읽고 쓴다.
+  assert.match(detailModal, /onCommit=\{\(fit: CharacterImageFit\) => updateCostumeImageField\(fitEditorImage\.id, \{ imageFit: fit \}\)\}/);
+});

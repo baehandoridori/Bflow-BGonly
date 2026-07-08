@@ -263,6 +263,13 @@ function CharacterDetailPanel({
     });
   const menuCostume = imageMenu ? costumes.find((c) => c.id === imageMenu.costumeId) ?? null : null;
   const fitEditorCostume = fitEditorCostumeId ? costumes.find((c) => c.id === fitEditorCostumeId) ?? null : null;
+  // 썸네일 컨텍스트메뉴의 배경/맞추기는 이미지 행이 진실(트리거가 대표 이미지 기준으로 featured 를 확정)이므로
+  //   복장이 아니라 대표 이미지 행으로 저장한다(코덱스 P2 — 안 그러면 편집이 즉시 어긋나고 다음 동기화에 덮인다).
+  const primaryImageOf = (costumeId: string) => {
+    const imgs = imagesByCostume.get(costumeId) ?? [];
+    return imgs.find((i) => i.isPrimary) ?? imgs[0] ?? null;
+  };
+  const fitEditorImage = fitEditorCostumeId ? primaryImageOf(fitEditorCostumeId) : null;
 
   const handlePickFolder = useCallback(async () => {
     const folder = await chooseWorkFolder();
@@ -573,17 +580,20 @@ function CharacterDetailPanel({
           imageCostume={menuCostume}
           fileCostume={menuCostume}
           onClose={() => setImageMenu(null)}
-          onBackground={(costumeId, background) => updateCostumeField(costumeId, { imageBackground: background })}
+          onBackground={(costumeId, background) => {
+            const img = primaryImageOf(costumeId);
+            if (img) updateCostumeImageField(img.id, { imageBackground: background });
+          }}
           onEditFit={(costumeId) => setFitEditorCostumeId(costumeId)}
         />
       )}
-      {fitEditorCostume?.featuredImageUrl && (
+      {fitEditorImage && fitEditorCostume && (
         <CharacterImageFitEditor
-          url={fitEditorCostume.featuredImageUrl}
+          url={fitEditorImage.url}
           alt={fitEditorCostume.name}
-          background={fitEditorCostume.imageBackground}
-          fit={fitEditorCostume.imageFit}
-          onCommit={(fit: CharacterImageFit) => updateCostumeField(fitEditorCostume.id, { imageFit: fit })}
+          background={fitEditorImage.imageBackground}
+          fit={fitEditorImage.imageFit}
+          onCommit={(fit: CharacterImageFit) => updateCostumeImageField(fitEditorImage.id, { imageFit: fit })}
           onClose={() => setFitEditorCostumeId(null)}
         />
       )}

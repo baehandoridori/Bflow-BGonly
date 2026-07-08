@@ -576,9 +576,13 @@ export const useCharacterBoardStore = create<CharacterBoardStore>((set, get) => 
     const prevPrimaryById = new Map(
       get().costumeImages.filter((i) => i.costumeId === costumeId).map((i) => [i.id, i.isPrimary]),
     );
-    // 낙관 반영 — 같은 복장 이미지들의 is_primary 를 대상만 true 로. pending 으로 realtime 에코/재로드 보호.
-    for (const id of prevPrimaryById.keys()) {
-      trackPendingFields(pendingCostumeImageFields, id, { isPrimary: id === imageId });
+    // 낙관 반영 — 대상만 대표(true)로. 실제로 바뀌는 행(대상 + 직전 대표)만 pending 으로 보호한다.
+    //   그대로 false 인 형제까지 pending 표시하면, 그 사이 다른 사용자가 그 형제를 대표로 올린 realtime true 를
+    //   mergeIncomingWithPending 이 "로컬 false == pending false" 로 보고 떨궈 재로드 전까지 낡은 대표가 남는다(코덱스 P2).
+    const prevPrimaryId = [...prevPrimaryById].find(([, isP]) => isP)?.[0] ?? null;
+    trackPendingFields(pendingCostumeImageFields, imageId, { isPrimary: true });
+    if (prevPrimaryId && prevPrimaryId !== imageId) {
+      trackPendingFields(pendingCostumeImageFields, prevPrimaryId, { isPrimary: false });
     }
     const optimistic = get().costumeImages.map((i) =>
       i.costumeId === costumeId ? { ...i, isPrimary: i.id === imageId } : i);
