@@ -187,6 +187,8 @@ function CharacterDetailPanel({
   commentCount: number;
 }) {
   const byCharacter = useCharacterBoardStore((s) => s.byCharacter);
+  const imagesByCostume = useCharacterBoardStore((s) => s.imagesByCostume);
+  const updateCostumeImageField = useCharacterBoardStore((s) => s.updateCostumeImageField);
   const addCostume = useCharacterBoardStore((s) => s.addCostume);
   const deleteCostume = useCharacterBoardStore((s) => s.deleteCostume);
   const reorderCostumes = useCharacterBoardStore((s) => s.reorderCostumes);
@@ -211,7 +213,7 @@ function CharacterDetailPanel({
   const [nameDraft, setNameDraft] = useState(character.name);
   const [lightboxCostumeId, setLightboxCostumeId] = useState<string | null>(null);
   // 갤러리에서 고른 (비대표일 수 있는) 이미지로 라이트박스를 열기 위한 오버라이드 (코덱스 P2).
-  const [lightboxImage, setLightboxImage] = useState<{ url: string; background: CharacterImageBackground; fit: CharacterImageFit } | null>(null);
+  const [lightboxImage, setLightboxImage] = useState<{ id: string; url: string; background: CharacterImageBackground; fit: CharacterImageFit } | null>(null);
   const [imageMenu, setImageMenu] = useState<{ costumeId: string; x: number; y: number } | null>(null);
   const [fitEditorCostumeId, setFitEditorCostumeId] = useState<string | null>(null);
   const [creatingFolder, setCreatingFolder] = useState(false);
@@ -245,8 +247,12 @@ function CharacterDetailPanel({
     .map((c) => {
       // 갤러리에서 고른 비대표 이미지로 열렸으면 그 이미지로 표시(코덱스 P2). 그 외엔 대표(featured).
       const override = c.id === lightboxCostumeId ? lightboxImage : null;
+      const costumeImgs = imagesByCostume.get(c.id) ?? [];
+      const primaryImg = costumeImgs.find((i) => i.isPrimary) ?? costumeImgs[0] ?? null;
       return {
         costumeId: c.id,
+        // 썸네일 맞추기가 대표가 아닌 '표시 중인 그 이미지'의 fit 을 갱신하도록 imageId 를 실는다(코덱스 P2).
+        imageId: override?.id ?? primaryImg?.id,
         name: `${character.name} · ${c.name}`,
         costumeName: c.name,
         versionNo: c.versionNo,
@@ -586,7 +592,7 @@ function CharacterDetailPanel({
           entries={imageEntries}
           initialCostumeId={lightboxCostumeId}
           onClose={() => { setLightboxCostumeId(null); setLightboxImage(null); }}
-          onFitCommit={(costumeId, fit) => updateCostumeField(costumeId, { imageFit: fit })}
+          onFitCommit={(imageId, fit) => updateCostumeImageField(imageId, { imageFit: fit })}
           onCopyImage={(url) => copyCharacterImage(url)}
         />
       )}

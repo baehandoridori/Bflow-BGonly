@@ -4106,7 +4106,20 @@ export async function addCostumeImage(input: {
     .insert(insert)
     .select('*')
     .single();
-  if (error) throw error;
+  if (error) {
+    // 첫 이미지 primary 경합(코덱스 P2): 다른 클라이언트가 먼저 대표를 넣어 부분 유니크(23505)를 위반하면,
+    //   대표 없이(비대표) 재시도해 실패 토스트 없이 이미지를 추가한다.
+    if (insert.is_primary === true && (error as { code?: string }).code === '23505') {
+      const { data: retryData, error: retryErr } = await supabase
+        .from('character_costume_images')
+        .insert({ ...insert, is_primary: false })
+        .select('*')
+        .single();
+      if (retryErr) throw retryErr;
+      return retryData as CharacterCostumeImageRow;
+    }
+    throw error;
+  }
   return data as CharacterCostumeImageRow;
 }
 

@@ -8,6 +8,8 @@ import { CHARACTER_LAYER_CLASS } from '@/constants/characterLayers';
 
 export interface CharacterImageLightboxEntry {
   costumeId: string;
+  /** 실제 표시 이미지의 id — 썸네일 맞추기가 이 이미지의 fit 을 갱신하도록(대표가 아닌 이미지도 정확히). */
+  imageId?: string;
   name: string;
   costumeName: string;
   versionNo: number;
@@ -26,7 +28,7 @@ export function CharacterImageLightbox({
   entries: CharacterImageLightboxEntry[];
   initialCostumeId: string | null;
   onClose: () => void;
-  onFitCommit: (costumeId: string, fit: CharacterImageFit) => void;
+  onFitCommit: (imageId: string, fit: CharacterImageFit) => void;
   onCopyImage: (url: string) => void;
 }) {
   const initialIndex = useMemo(() => {
@@ -232,7 +234,7 @@ export function CharacterImageLightbox({
           alt={current.name}
           background={current.background}
           fit={current.fit}
-          onCommit={(next) => onFitCommit(current.costumeId, next)}
+          onCommit={(next) => { if (current.imageId) onFitCommit(current.imageId, next); }}
           onClose={() => setFitEditorOpen(false)}
         />
       )}

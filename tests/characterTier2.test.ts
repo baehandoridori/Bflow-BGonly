@@ -164,8 +164,27 @@ test('costume-images P2 수정: 원자 RPC + 라이트박스 선택이미지 + m
   assert.match(detailModal, /const \[lightboxImage, setLightboxImage\]/);
   assert.match(detailModal, /override\?\.url \?\? c\.featuredImageUrl!/);
   const slot = readFileSync('src/components/characters/FeaturedImageSlot.tsx', 'utf8');
-  assert.match(slot, /onView\(costume\.id, \{ url: selectedImage\.url/);
+  assert.match(slot, /onView\(costume\.id, \{ id: selectedImage\.id, url: selectedImage\.url/);
   const mock = readFileSync('src/mocks/devElectronAPI.ts', 'utf8');
   assert.match(mock, /function mockSyncCostumeFeatured/);
   assert.match(mock, /mockSyncCostumeFeatured\(costumeId\)/);
+});
+
+test('costume-images 4차: 라이트박스 fit 은 대표복장이 아니라 표시 이미지에 저장(imageId 배선)', () => {
+  const lightbox = readFileSync('src/components/characters/CharacterImageLightbox.tsx', 'utf8');
+  // 엔트리가 표시 이미지 id 를 싣고, fit 커밋이 그 imageId 로 넘어간다.
+  assert.match(lightbox, /imageId\?: string;/);
+  assert.match(lightbox, /onFitCommit: \(imageId: string, fit: CharacterImageFit\) => void;/);
+  assert.match(lightbox, /if \(current\.imageId\) onFitCommit\(current\.imageId, next\)/);
+  const detailModal = readFileSync('src/components/characters/CharacterDetailModal.tsx', 'utf8');
+  // 대표복장(image_fit) 이 아니라 실제 이미지 행(image_fit)을 갱신.
+  assert.match(detailModal, /imageId: override\?\.id \?\? primaryImg\?\.id/);
+  assert.match(detailModal, /onFitCommit=\{\(imageId, fit\) => updateCostumeImageField\(imageId, \{ imageFit: fit \}\)\}/);
+});
+
+test('costume-images 4차: primary insert 경합 시 23505 를 비대표로 재시도', () => {
+  const electronSupabase = readFileSync('electron/supabase.ts', 'utf8');
+  // 부분 unique (costume_id) WHERE is_primary 위반(23505) 이면 비대표로 재삽입해 UI 멈춤 방지.
+  assert.match(electronSupabase, /23505/);
+  assert.match(electronSupabase, /is_primary: false/);
 });
