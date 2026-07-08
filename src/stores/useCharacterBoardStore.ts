@@ -674,15 +674,17 @@ export const useCharacterBoardStore = create<CharacterBoardStore>((set, get) => 
     try {
       await svcDeleteCostumeImage(imageId);
       if (wasPrimary) {
-        // 대표를 지웠으면 남은 이미지 중 최소 순서를 새 대표로 지정(featured_* 는 트리거가 반영).
-        //   남은 이미지가 없으면 트리거가 이미 featured 를 비웠으므로 앱이 따로 쓸 필요 없다.
+        // 대표를 지웠을 때 DB 승격은 트리거가 삭제와 '같은 트랜잭션'에서 원자적으로 처리한다(코덱스 P2):
+        //   대표가 없고 남은 이미지가 있으면 최소 순서를 자동 승격 → 삭제 한 번으로 대표 유지 보장(2-step 경합 제거).
+        //   앱은 별도 승격 쿼리를 보내지 않고, 깜빡임만 없애기 위해 로컬을 낙관 반영한다(트리거 결과와 동일).
         const remaining = sortCostumeImages(get().costumeImages.filter((i) => i.costumeId === costumeId));
         if (remaining.length > 0) {
-          // 먼저 로컬 featured 를 비운 뒤 승격한다. 이러면 승격이 실패해도 setPrimaryImage 의 롤백이
-          //   '방금 삭제된 이미지 URL' 이 아니라 '빈 상태'로 되돌아가 카드가 깨진 이미지를 가리키지 않는다(코덱스 P2).
-          //   (삭제 직후 DB featured 는 트리거가 이미 NULL 로 만들어 둔 상태다.)
-          applyFeaturedLocal(set, get, costumeId, null);
-          await get().setPrimaryImage(remaining[0].id);
+          const promote = remaining[0];
+          trackPendingFields(pendingCostumeImageFields, promote.id, { isPrimary: true });
+          const promoted = get().costumeImages.map((i) =>
+            i.costumeId === costumeId ? { ...i, isPrimary: i.id === promote.id } : i);
+          set({ costumeImages: sortCostumeImages(promoted), imagesByCostume: rebuildImagesByCostume(get().imagesByCostume, promoted) });
+          applyFeaturedLocal(set, get, costumeId, promote.url, promote.imageBackground, promote.imageFit);
         } else {
           applyFeaturedLocal(set, get, costumeId, null); // 남은 이미지 없음 → 로컬 featured 비움(DB 는 트리거가 이미 비움).
         }

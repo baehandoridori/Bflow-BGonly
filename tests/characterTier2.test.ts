@@ -208,10 +208,24 @@ test('costume-images 5차: 썸네일 컨텍스트메뉴 배경/맞추기도 대�
   assert.match(detailModal, /onCommit=\{\(fit: CharacterImageFit\) => updateCostumeImageField\(fitEditorImage\.id, \{ imageFit: fit \}\)\}/);
 });
 
-test('costume-images 6차: 대표 이미지 삭제 시 승격 실패해도 삭제된 이미지로 featured 복구 안 함', () => {
+test('costume-images 6차: 대표 삭제 후 승격은 DB 트리거가 원자적으로(앱 2단계 쿼리 제거)', () => {
+  // 트리거가 대표 없고 남은 이미지 있으면 최소 순서를 자동 승격 — 삭제와 같은 트랜잭션.
+  const mig = readFileSync('DEVLOG/migrations/2026-07-08-costume-featured-autopromote.sql', 'utf8');
+  assert.match(mig, /CREATE OR REPLACE FUNCTION sync_costume_featured_image\(\)/);
+  // 자동 승격은 DELETE 에서만 — set_primary RPC 의 clear UPDATE 순간 승격해 23505 나는 회귀 방지.
+  assert.match(mig, /IF TG_OP = 'DELETE' AND v_primary_count = 0 THEN/);
+  assert.match(mig, /ORDER BY sort_order ASC, created_at ASC/);
+  assert.match(mig, /UPDATE character_costume_images SET is_primary = true WHERE id = v_promote_id/);
+  assert.doesNotMatch(mig, /DROP\s+(TABLE|COLUMN|TRIGGER)/i);
+  // 앱 delete 흐름은 별도 승격 쿼리(setPrimaryImage) 를 delete 안에서 호출하지 않고 로컬만 낙관 반영.
   const store = readFileSync('src/stores/useCharacterBoardStore.ts', 'utf8');
-  // 승격 전에 로컬 featured 를 비워 setPrimaryImage 롤백 대상이 '빈 상태'가 되게 한다(코덱스 P2).
-  assert.match(store, /applyFeaturedLocal\(set, get, costumeId, null\);\s*\n\s*await get\(\)\.setPrimaryImage\(remaining\[0\]\.id\)/);
+  const deleteBlock = store.slice(store.indexOf('deleteCostumeImage: async'), store.indexOf('linkEpisode: async'));
+  assert.doesNotMatch(deleteBlock, /setPrimaryImage/);
+  assert.match(deleteBlock, /trackPendingFields\(pendingCostumeImageFields, promote\.id, \{ isPrimary: true \}\)/);
+  // mock 도 자동 승격(프리뷰 일관).
+  const mock = readFileSync('src/mocks/devElectronAPI.ts', 'utf8');
+  assert.match(mock, /if \(!primary && images\.length > 0\)/);
+  assert.match(mock, /promote\.is_primary = true/);
 });
 
 test('costume-images 6차: 라이트박스 override 는 live imagesByCostume 에서 id 로 해석(스냅샷 금지)', () => {

@@ -315,10 +315,18 @@ function seedMockCharacterData(): void {
 function mockSyncCostumeFeatured(costumeId: string): void {
   const images = ((localStore.__costumeImages as Record<string, unknown>[] | undefined) ?? [])
     .filter((r) => r.costume_id === costumeId);
-  const primary = images.find((r) => r.is_primary) ?? null;
   const costume = ((localStore.__costumes as Record<string, unknown>[] | undefined) ?? [])
     .find((c) => c.id === costumeId);
   if (!costume) return;
+  // 대표가 없는데 남은 이미지가 있으면 최소 순서를 자동 승격(라이브 트리거와 동일 — 대표 삭제 후 featured 유실 방지, 코덱스 P2).
+  let primary = images.find((r) => r.is_primary) ?? null;
+  if (!primary && images.length > 0) {
+    const promote = [...images].sort(
+      (a, b) => ((a.sort_order as number) ?? 0) - ((b.sort_order as number) ?? 0),
+    )[0];
+    promote.is_primary = true;
+    primary = promote;
+  }
   costume.featured_image_url = primary ? primary.url : null;
   if (primary) {
     costume.image_background = primary.image_background;
