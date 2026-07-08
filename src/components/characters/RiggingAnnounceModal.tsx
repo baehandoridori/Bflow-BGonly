@@ -51,13 +51,16 @@ export function RiggingAnnounceModal({
   const modalFocus = useModalFocus(dialogRef, { autoFocus: false });
 
   useEffect(() => {
+    // 최상단 모달 패턴(capture + stopImmediatePropagation) — 부모 CharacterDetailModal 의 Escape 리스너까지
+    //   함께 발동해 상세 뷰가 닫히며 작성 내용이 날아가는 것을 막는다(코덱스 P2).
     const onKey = (event: KeyboardEvent) => {
       if (event.key !== 'Escape') return;
       event.preventDefault();
+      event.stopImmediatePropagation();
       onClose();
     };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
+    window.addEventListener('keydown', onKey, { capture: true });
+    return () => window.removeEventListener('keydown', onKey, { capture: true });
   }, [onClose]);
 
   const notes = rows.map((r) => r.text);
