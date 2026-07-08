@@ -95,6 +95,19 @@ function CharacterGrid({ onAdd, pendingOpenId, onConsumeOpen }: { onAdd: () => v
     return m;
   }, [filtered]);
 
+  // 키 비교 모드에서는 실제 키 라인업이 되도록 기준 키 오름차순 정렬(미설정은 뒤로). 일반 모드는 기존 순서.
+  const displayCharacters = useMemo(() => {
+    if (!heightCompareMode) return filtered;
+    return filtered.slice().sort((a, b) => {
+      const ha = a.referenceHeightPx;
+      const hb = b.referenceHeightPx;
+      if (ha == null && hb == null) return 0;
+      if (ha == null) return 1;
+      if (hb == null) return -1;
+      return ha - hb;
+    });
+  }, [filtered, heightCompareMode]);
+
   const cardMenuCharacter = cardMenu ? characters.find((c) => c.id === cardMenu.characterId) ?? null : null;
   const cardMenuCostumes = cardMenuCharacter ? byCharacter.get(cardMenuCharacter.id) ?? [] : [];
   // 카드에서 휠로 넘겨 보던 복장이 있으면 그 복장을 우클릭 메뉴 대상(이미지 복사 등)으로 우선한다 (B8).
@@ -228,7 +241,7 @@ function CharacterGrid({ onAdd, pendingOpenId, onConsumeOpen }: { onAdd: () => v
         </div>
       ) : (
         <div className={heightCompareMode ? 'flex flex-wrap items-end gap-4' : 'grid grid-cols-[repeat(auto-fill,minmax(180px,1fr))] gap-4'}>
-          {filtered.map((c) => (
+          {displayCharacters.map((c) => (
             <CharacterCard
               key={c.id}
               character={c}

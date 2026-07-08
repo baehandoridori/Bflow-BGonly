@@ -47,6 +47,9 @@ test('T2-3: 캐릭터 기준 키(reference_height_px) — 필드·매퍼·store�
   assert.match(costumeDetail, /setCharacterReferenceHeight\(character\.id/);
   assert.match(boardView, /키 비교 보기/);
   assert.match(boardView, /const maxReferenceHeight = useMemo/);
+  // 키 비교 모드에서 기준 키 순으로 정렬(코덱스 P2).
+  assert.match(boardView, /const displayCharacters = useMemo/);
+  assert.match(boardView, /displayCharacters\.map/);
   assert.match(boardView, /imageHeightPx=\{heightCompareMode/);
   assert.match(card, /imageHeightPx\?: number/);
   assert.match(card, /style=\{imageHeightPx \? \{ height: imageHeightPx \} : undefined\}/);
