@@ -1333,6 +1333,8 @@ export interface ElectronAPI {
   onSupabaseBroadcast: (callback: (event: unknown) => void) => () => void;
   // 슬랙 웹훅
   sendSlackWebhook: (payload: Record<string, string>) => Promise<{ ok: boolean }>;
+  // 리깅 완성 공지 웹훅
+  sendRiggingWebhook: (payload: Record<string, string>) => Promise<{ ok: boolean }>;
   // 딥링크
   onDeepLink: (callback: (data: { sheetName: string; sceneId: string }) => void) => () => void;
 

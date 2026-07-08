@@ -341,6 +341,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // 슬랙 웹훅
   sendSlackWebhook: (payload: Record<string, string>) =>
     ipcRenderer.invoke('slack:send-webhook', payload),
+  // 리깅 완성 공지 웹훅
+  sendRiggingWebhook: (payload: Record<string, string>) =>
+    ipcRenderer.invoke('slack:send-rigging-webhook', payload),
 
   // 딥링크 수신 (bflow://scene/...)
   onDeepLink: (callback: (data: { sheetName: string; sceneId: string }) => void) => {

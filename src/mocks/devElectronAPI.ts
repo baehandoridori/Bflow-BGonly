@@ -1030,6 +1030,10 @@ export function installDevElectronAPI(): void {
       console.log('[DEV 슬랙 웹훅] 페이로드:', JSON.stringify(payload, null, 2));
       return { ok: true };
     },
+    sendRiggingWebhook: async (payload: Record<string, string>) => {
+      console.log('[DEV 리깅 공지 웹훅] 페이로드:', JSON.stringify(payload, null, 2));
+      return { ok: true };
+    },
     onDeepLink: noop,
 
     // ─── Google Calendar mock ───
