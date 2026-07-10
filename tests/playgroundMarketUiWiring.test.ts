@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 
 test('market home preserves the approved information order', () => {
   const source = readFileSync('src/views/playground/market/MarketHome.tsx', 'utf8');
@@ -167,4 +167,84 @@ test('order dialog refuses to close while its mutation is running', () => {
   assert.match(handler, /submitting\s*\|\|\s*mutating/);
   assert.match(handler, /주문 저장이 끝날 때까지/);
   assert.match(source, /onClose=\{closeOrderDialog\}/);
+});
+
+test('account stays a 520px single column with simple rows and no chart', () => {
+  const source = readFileSync('src/views/playground/market/MarketAccountView.tsx', 'utf8');
+  assert.match(source, /max-w-\[520px\]/);
+  for (const label of ['투자 계좌', '총자산', '넣기', '빼기', '쓸 수 있는 포인트', '현재 내 투자 현황', '내 투자 실적']) {
+    assert.match(source, new RegExp(label));
+  }
+  assert.doesNotMatch(source, /MarketPriceChart|price-chart|7일|전체 기간/);
+  assert.doesNotMatch(source, /한솔님의 투자 계좌/);
+});
+
+test('account side menu exposes only Assets as implemented', () => {
+  const source = readFileSync('src/views/playground/market/MarketAccountView.tsx', 'utf8');
+  for (const label of ['자산', '거래내역', '주문내역', '수익분석', '계좌관리']) assert.match(source, new RegExp(label));
+  assert.match(source, /<button[\s\S]*?aria-current="page"[\s\S]*?>[\s\S]*?자산/);
+  assert.match(source, /aria-disabled="true"/);
+  assert.match(source, /준비 중/);
+});
+
+test('account wires separate deposit and withdrawal dialogs to stable opener refs', () => {
+  const dialogPath = 'src/views/playground/market/PointTransferDialog.tsx';
+  assert.equal(existsSync(dialogPath), true, 'PointTransferDialog must exist');
+  const account = readFileSync('src/views/playground/market/MarketAccountView.tsx', 'utf8');
+  const dialog = readFileSync(dialogPath, 'utf8');
+
+  assert.match(account, /depositOpenerRef/);
+  assert.match(account, /withdrawalOpenerRef/);
+  assert.match(account, /ref=\{depositOpenerRef\}/);
+  assert.match(account, /ref=\{withdrawalOpenerRef\}/);
+  assert.match(account, /direction="wallet-to-broker"/);
+  assert.match(account, /direction="broker-to-wallet"/);
+  assert.equal((account.match(/<PointTransferDialog\b/g) ?? []).length, 2);
+
+  assert.match(dialog, /MarketActionDialog/);
+  assert.match(dialog, /TRANSFER_PRESETS\s*=\s*\[1000,\s*5000\]/);
+  for (const label of ['투자 계좌에 포인트 넣기', '투자 계좌에서 포인트 빼기', '포인트 지갑 잔액', '꺼낼 수 있는 예수금', '이동 후 예수금', '이동 후 포인트 지갑', '수수료가 없고 투자 실적에는 포함되지 않아요', '투자 중인 포인트는 주식을 판 뒤 뺄 수 있어요']) {
+    assert.match(dialog, new RegExp(label));
+  }
+  assert.match(dialog, /type="number"/);
+  assert.match(dialog, /min="1"/);
+  assert.match(dialog, /step="1"/);
+  assert.match(dialog, /inputMode="numeric"/);
+  assert.match(dialog, /aria-live="polite"/);
+  assert.doesNotMatch(dialog, /applyMarketCommand/);
+});
+
+test('point transfer revalidates before one request id and blocks duplicate submission', () => {
+  const dialogPath = 'src/views/playground/market/PointTransferDialog.tsx';
+  assert.equal(existsSync(dialogPath), true, 'PointTransferDialog must exist');
+  const source = readFileSync(dialogPath, 'utf8');
+  const start = source.indexOf('const submitTransfer');
+  const end = source.indexOf('const closeTransferDialog', start);
+  assert.ok(start >= 0 && end > start);
+  const handler = source.slice(start, end);
+
+  const latestSnapshot = handler.indexOf('useMarketPreviewStore.getState().visible');
+  const validate = handler.indexOf('validateMarketCommand');
+  const createRequestId = handler.indexOf('crypto.randomUUID()');
+  const execute = handler.indexOf('await execute(command)');
+  assert.ok(latestSnapshot >= 0 && latestSnapshot < validate);
+  assert.ok(validate < createRequestId && createRequestId < execute);
+  assert.equal((handler.match(/await execute\(command\)/g) ?? []).length, 1);
+  assert.match(handler, /submitLockRef\.current/);
+  assert.match(handler, /submitting/);
+  assert.match(handler, /mutating/);
+
+  const closeStart = source.indexOf('const closeTransferDialog');
+  const closeEnd = source.indexOf('\n  };', closeStart);
+  assert.ok(closeStart >= 0 && closeEnd > closeStart);
+  assert.match(source.slice(closeStart, closeEnd), /submitting\s*\|\|\s*mutating/);
+  assert.match(source, /submitting\s*\|\|\s*mutating\s*\?\s*confirmed\s*\?\?\s*visible\s*:\s*visible/);
+});
+
+test('point transfer only shows a projected balance for a valid amount', () => {
+  const source = readFileSync('src/views/playground/market/PointTransferDialog.tsx', 'utf8');
+  assert.match(
+    source,
+    /const resultBalance = summary\s*&&\s*validation === null\s*&&\s*amountIsValidInteger/,
+  );
 });
