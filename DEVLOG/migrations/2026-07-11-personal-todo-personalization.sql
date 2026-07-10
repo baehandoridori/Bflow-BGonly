@@ -151,12 +151,29 @@ BEGIN
     RAISE EXCEPTION 'Todo patch must be a JSON object' USING ERRCODE = '22023';
   END IF;
 
+  -- 모든 user-scoped mutation은 같은 transaction lock을 사용한다.
+  PERFORM pg_advisory_xact_lock(hashtextextended(p_user_id, 0));
+
+  SELECT todo.*
+  INTO v_todo
+  FROM public.personal_todos AS todo
+  WHERE todo.id = p_todo_id
+    AND todo.user_id = p_user_id
+  FOR UPDATE;
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'Personal todo not found' USING ERRCODE = 'P0002';
+  END IF;
+
+  IF p_patch ? 'pinned' THEN
+    RAISE EXCEPTION 'pinned changes require an order mutation' USING ERRCODE = '22023';
+  END IF;
+
   IF EXISTS (
     SELECT 1
     FROM jsonb_object_keys(p_patch) AS patch_key(key)
     WHERE patch_key.key <> ALL (ARRAY[
       'title', 'memo', 'start_date', 'end_date', 'add_to_calendar',
-      'status', 'priority', 'pinned', 'label_ids'
+      'status', 'priority', 'label_ids'
     ]::text[])
   ) THEN
     RAISE EXCEPTION 'Todo patch contains unsupported fields' USING ERRCODE = '22023';
@@ -164,6 +181,15 @@ BEGIN
 
   IF p_patch ? 'title' AND NULLIF(btrim(p_patch ->> 'title'), '') IS NULL THEN
     RAISE EXCEPTION 'Todo title must not be empty' USING ERRCODE = '22023';
+  END IF;
+
+  IF p_patch ? 'status' THEN
+    IF v_todo.status = 'done' OR p_patch ->> 'status' = 'done' THEN
+      RAISE EXCEPTION 'done boundary changes require a status mutation' USING ERRCODE = '22023';
+    END IF;
+    IF p_patch ->> 'status' NOT IN ('todo', 'doing') THEN
+      RAISE EXCEPTION 'Todo patch status must be todo or doing' USING ERRCODE = '22023';
+    END IF;
   END IF;
 
   IF p_patch ? 'label_ids' THEN
@@ -195,15 +221,7 @@ BEGIN
       RAISE EXCEPTION 'label_ids must be unique' USING ERRCODE = '22023';
     END IF;
   ELSE
-    SELECT todo.label_ids
-    INTO v_label_ids
-    FROM public.personal_todos AS todo
-    WHERE todo.id = p_todo_id
-      AND todo.user_id = p_user_id;
-
-    IF NOT FOUND THEN
-      RAISE EXCEPTION 'Personal todo not found' USING ERRCODE = 'P0002';
-    END IF;
+    v_label_ids := v_todo.label_ids;
   END IF;
 
   UPDATE public.personal_todos AS todo
@@ -224,7 +242,6 @@ BEGIN
     END,
     status = CASE WHEN p_patch ? 'status' THEN p_patch ->> 'status' ELSE todo.status END,
     priority = CASE WHEN p_patch ? 'priority' THEN p_patch ->> 'priority' ELSE todo.priority END,
-    pinned = CASE WHEN p_patch ? 'pinned' THEN (p_patch ->> 'pinned')::boolean ELSE todo.pinned END,
     label_ids = v_label_ids,
     updated_at = now()
   WHERE todo.id = p_todo_id
@@ -255,9 +272,13 @@ DECLARE
   v_mutation_type text;
   v_payload jsonb;
   v_todo_id uuid;
+  v_existing_owner text;
   v_affected_id uuid;
+  v_inserted_id uuid;
   v_server_count integer;
   v_next_sort_order integer;
+  v_reindexed_count integer;
+  v_final_ids uuid[];
 BEGIN
   IF p_mutation IS NULL OR jsonb_typeof(p_mutation) <> 'object' THEN
     RAISE EXCEPTION 'Todo mutation must be a JSON object' USING ERRCODE = '22023';
@@ -265,6 +286,9 @@ BEGIN
   IF p_ordered_ids IS NULL THEN
     RAISE EXCEPTION 'ordered ids are required' USING ERRCODE = '22023';
   END IF;
+
+  -- 같은 사용자의 patch/order/label mutation을 DB transaction 단위로 직렬화한다.
+  PERFORM pg_advisory_xact_lock(hashtextextended(p_user_id, 0));
 
   IF cardinality(p_ordered_ids) <> (
     SELECT COUNT(DISTINCT ordered_id)::integer
@@ -286,44 +310,120 @@ BEGIN
         RAISE EXCEPTION 'add mutation requires todo id and title' USING ERRCODE = '22023';
       END IF;
 
-      SELECT COALESCE(MAX(todo.sort_order), -1) + 1
-      INTO v_next_sort_order
+      -- UUID는 idempotency key다. 같은 user의 기존 행이면 first committed row wins.
+      SELECT todo.user_id
+      INTO v_existing_owner
       FROM public.personal_todos AS todo
-      WHERE todo.user_id = p_user_id;
+      WHERE todo.id = v_todo_id;
 
-      INSERT INTO public.personal_todos (id, user_id, title, sort_order)
-      VALUES (v_todo_id, p_user_id, btrim(v_payload ->> 'title'), v_next_sort_order);
+      IF FOUND THEN
+        IF v_existing_owner IS DISTINCT FROM p_user_id THEN
+          RAISE EXCEPTION 'Todo id belongs to another user' USING ERRCODE = '42501';
+        END IF;
+      ELSE
+        IF v_payload ? 'status' AND v_payload ->> 'status' NOT IN ('todo', 'doing', 'done') THEN
+          RAISE EXCEPTION 'add mutation has an invalid status' USING ERRCODE = '22023';
+        END IF;
+        IF v_payload ? 'pinned' AND jsonb_typeof(v_payload -> 'pinned') <> 'boolean' THEN
+          RAISE EXCEPTION 'add mutation pinned must be boolean' USING ERRCODE = '22023';
+        END IF;
 
-      PERFORM public.patch_personal_todo(v_todo_id, p_user_id, v_payload - 'id');
+        SELECT COALESCE(MAX(todo.sort_order), -1) + 1
+        INTO v_next_sort_order
+        FROM public.personal_todos AS todo
+        WHERE todo.user_id = p_user_id;
+
+        INSERT INTO public.personal_todos (id, user_id, title, sort_order)
+        VALUES (v_todo_id, p_user_id, btrim(v_payload ->> 'title'), v_next_sort_order)
+        ON CONFLICT (id) DO NOTHING
+        RETURNING id INTO v_inserted_id;
+
+        IF NOT FOUND THEN
+          SELECT todo.user_id
+          INTO v_existing_owner
+          FROM public.personal_todos AS todo
+          WHERE todo.id = v_todo_id;
+          IF v_existing_owner IS DISTINCT FROM p_user_id THEN
+            RAISE EXCEPTION 'Todo id belongs to another user' USING ERRCODE = '42501';
+          END IF;
+        ELSE
+          PERFORM public.patch_personal_todo(
+            v_todo_id,
+            p_user_id,
+            v_payload - ARRAY['id', 'status', 'pinned']
+          );
+
+          UPDATE public.personal_todos AS todo
+          SET status = CASE WHEN v_payload ? 'status' THEN v_payload ->> 'status' ELSE todo.status END,
+              pinned = CASE WHEN v_payload ? 'pinned' THEN (v_payload ->> 'pinned')::boolean ELSE todo.pinned END,
+              updated_at = now()
+          WHERE todo.id = v_todo_id
+            AND todo.user_id = p_user_id
+          RETURNING todo.id INTO v_affected_id;
+          IF NOT FOUND THEN
+            RAISE EXCEPTION 'Added personal todo disappeared' USING ERRCODE = 'P0001';
+          END IF;
+        END IF;
+      END IF;
 
     WHEN 'delete' THEN
       v_todo_id := NULLIF(p_mutation ->> 'todo_id', '')::uuid;
+      IF v_todo_id IS NULL THEN
+        RAISE EXCEPTION 'delete mutation requires todo_id' USING ERRCODE = '22023';
+      END IF;
       DELETE FROM public.personal_todos AS todo
       WHERE todo.id = v_todo_id
         AND todo.user_id = p_user_id
       RETURNING todo.id INTO v_affected_id;
       IF NOT FOUND THEN
-        RAISE EXCEPTION 'Personal todo not found' USING ERRCODE = 'P0002';
+        SELECT todo.user_id
+        INTO v_existing_owner
+        FROM public.personal_todos AS todo
+        WHERE todo.id = v_todo_id;
+        IF FOUND AND v_existing_owner IS DISTINCT FROM p_user_id THEN
+          RAISE EXCEPTION 'Todo id belongs to another user' USING ERRCODE = '42501';
+        END IF;
+        -- 이미 없는 same-user delete는 response-loss retry로 보고 만족된 것으로 처리한다.
       END IF;
 
     WHEN 'pin' THEN
       v_todo_id := NULLIF(p_mutation ->> 'todo_id', '')::uuid;
+      IF v_todo_id IS NULL THEN
+        RAISE EXCEPTION 'pin mutation requires todo_id' USING ERRCODE = '22023';
+      END IF;
       IF jsonb_typeof(p_mutation -> 'pinned') <> 'boolean' THEN
         RAISE EXCEPTION 'pin mutation requires a boolean pinned value' USING ERRCODE = '22023';
       END IF;
-      PERFORM public.patch_personal_todo(
-        v_todo_id,
-        p_user_id,
-        jsonb_build_object('pinned', (p_mutation ->> 'pinned')::boolean)
-      );
+      UPDATE public.personal_todos AS todo
+      SET pinned = (p_mutation ->> 'pinned')::boolean,
+          updated_at = now()
+      WHERE todo.id = v_todo_id
+        AND todo.user_id = p_user_id
+      RETURNING todo.id INTO v_affected_id;
+      IF NOT FOUND THEN
+        IF EXISTS (SELECT 1 FROM public.personal_todos AS todo WHERE todo.id = v_todo_id) THEN
+          RAISE EXCEPTION 'Todo id belongs to another user' USING ERRCODE = '42501';
+        END IF;
+        RAISE EXCEPTION 'Personal todo not found' USING ERRCODE = 'P0002';
+      END IF;
 
     WHEN 'status' THEN
       v_todo_id := NULLIF(p_mutation ->> 'todo_id', '')::uuid;
-      PERFORM public.patch_personal_todo(
-        v_todo_id,
-        p_user_id,
-        jsonb_build_object('status', p_mutation ->> 'status')
-      );
+      IF v_todo_id IS NULL OR p_mutation ->> 'status' NOT IN ('todo', 'doing', 'done') THEN
+        RAISE EXCEPTION 'status mutation requires todo_id and canonical status' USING ERRCODE = '22023';
+      END IF;
+      UPDATE public.personal_todos AS todo
+      SET status = p_mutation ->> 'status',
+          updated_at = now()
+      WHERE todo.id = v_todo_id
+        AND todo.user_id = p_user_id
+      RETURNING todo.id INTO v_affected_id;
+      IF NOT FOUND THEN
+        IF EXISTS (SELECT 1 FROM public.personal_todos AS todo WHERE todo.id = v_todo_id) THEN
+          RAISE EXCEPTION 'Todo id belongs to another user' USING ERRCODE = '42501';
+        END IF;
+        RAISE EXCEPTION 'Personal todo not found' USING ERRCODE = 'P0002';
+      END IF;
 
     WHEN 'reorder' THEN
       PERFORM 1;
@@ -369,6 +469,19 @@ BEGIN
   WHERE todo.id = requested.todo_id
     AND todo.user_id = p_user_id;
 
+  GET DIAGNOSTICS v_reindexed_count = ROW_COUNT;
+  IF v_reindexed_count <> v_server_count THEN
+    RAISE EXCEPTION 'Not every personal todo was reindexed' USING ERRCODE = 'P0001';
+  END IF;
+
+  SELECT COALESCE(array_agg(todo.id ORDER BY todo.sort_order), ARRAY[]::uuid[])
+  INTO v_final_ids
+  FROM public.personal_todos AS todo
+  WHERE todo.user_id = p_user_id;
+  IF v_final_ids IS DISTINCT FROM p_ordered_ids THEN
+    RAISE EXCEPTION 'Final personal todo order does not match ordered ids' USING ERRCODE = 'P0001';
+  END IF;
+
   RETURN QUERY
   SELECT todo.*
   FROM public.personal_todos AS todo
@@ -379,30 +492,39 @@ $$;
 
 -- 6) atomic label create/reuse/attach and owner-scoped label update ----------
 
+DROP FUNCTION IF EXISTS public.create_or_reuse_personal_todo_label_and_attach(uuid, text, text, text);
+
 CREATE OR REPLACE FUNCTION public.create_or_reuse_personal_todo_label_and_attach(
   p_todo_id uuid,
   p_user_id text,
   p_name text,
   p_color_key text
 )
-RETURNS public.personal_todo_labels
+RETURNS jsonb
 LANGUAGE plpgsql
 SECURITY INVOKER
 SET search_path = public, pg_temp
 AS $$
 DECLARE
   v_label public.personal_todo_labels%ROWTYPE;
+  v_todo public.personal_todos%ROWTYPE;
 BEGIN
   IF NULLIF(btrim(p_name), '') IS NULL THEN
     RAISE EXCEPTION 'Label name must not be empty' USING ERRCODE = '22023';
   END IF;
 
-  PERFORM 1
+  PERFORM pg_advisory_xact_lock(hashtextextended(p_user_id, 0));
+
+  SELECT todo.*
+  INTO v_todo
   FROM public.personal_todos AS todo
   WHERE todo.id = p_todo_id
-    AND todo.user_id = p_user_id;
-  IF NOT FOUND THEN
-    RAISE EXCEPTION 'Personal todo not found' USING ERRCODE = 'P0002';
+    AND todo.user_id = p_user_id
+  FOR UPDATE;
+  IF NOT FOUND AND EXISTS (
+    SELECT 1 FROM public.personal_todos AS todo WHERE todo.id = p_todo_id
+  ) THEN
+    RAISE EXCEPTION 'Todo id belongs to another user' USING ERRCODE = '42501';
   END IF;
 
   INSERT INTO public.personal_todo_labels (user_id, name, color_key)
@@ -422,16 +544,22 @@ BEGIN
     RAISE EXCEPTION 'Unable to create or reuse label' USING ERRCODE = 'P0001';
   END IF;
 
-  UPDATE public.personal_todos AS todo
-  SET label_ids = CASE
-        WHEN v_label.id = ANY (todo.label_ids) THEN todo.label_ids
-        ELSE array_append(todo.label_ids, v_label.id)
-      END,
-      updated_at = now()
-  WHERE todo.id = p_todo_id
-    AND todo.user_id = p_user_id;
+  IF v_todo.id IS NOT NULL THEN
+    UPDATE public.personal_todos AS todo
+    SET label_ids = CASE
+          WHEN v_label.id = ANY (todo.label_ids) THEN todo.label_ids
+          ELSE array_append(todo.label_ids, v_label.id)
+        END,
+        updated_at = now()
+    WHERE todo.id = p_todo_id
+      AND todo.user_id = p_user_id
+    RETURNING todo.* INTO v_todo;
+  END IF;
 
-  RETURN v_label;
+  RETURN jsonb_build_object(
+    'label', to_jsonb(v_label),
+    'todo', CASE WHEN v_todo.id IS NULL THEN 'null'::jsonb ELSE to_jsonb(v_todo) END
+  );
 END
 $$;
 
@@ -451,6 +579,9 @@ BEGIN
   IF p_patch IS NULL OR jsonb_typeof(p_patch) <> 'object' THEN
     RAISE EXCEPTION 'Label patch must be a JSON object' USING ERRCODE = '22023';
   END IF;
+
+  PERFORM pg_advisory_xact_lock(hashtextextended(p_user_id, 0));
+
   IF EXISTS (
     SELECT 1
     FROM jsonb_object_keys(p_patch) AS patch_key(key)

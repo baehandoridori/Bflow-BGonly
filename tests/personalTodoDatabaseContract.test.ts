@@ -11,6 +11,7 @@ const migrationPath = path.join(
   'migrations',
   '2026-07-11-personal-todo-personalization.sql',
 );
+const runtimeFixturePath = path.join(root, 'tests', 'fixtures', 'personalTodoDatabaseRuntime.sql');
 
 function readMigration(): string {
   return readFileSync(migrationPath, 'utf8');
@@ -69,6 +70,15 @@ test('patch RPC scopes writes to the owner and preserves validated label order',
   assert.match(definition, /label\.user_id\s*=\s*p_user_id/i);
   assert.match(
     definition,
+    /IF\s+p_patch\s*\?\s*'pinned'\s+THEN[\s\S]*?RAISE EXCEPTION 'pinned changes require an order mutation'/i,
+  );
+  assert.match(
+    definition,
+    /IF\s+p_patch\s*\?\s*'status'[\s\S]*?v_todo\.status\s*=\s*'done'[\s\S]*?p_patch\s*->>\s*'status'\s*=\s*'done'[\s\S]*?RAISE EXCEPTION 'done boundary changes require a status mutation'/i,
+  );
+  assert.doesNotMatch(definition, /pinned\s*=\s*CASE\s+WHEN\s+p_patch/i);
+  assert.match(
+    definition,
     /WHERE\s+todo\.id\s*=\s*p_todo_id\s+AND\s+todo\.user_id\s*=\s*p_user_id/i,
   );
 });
@@ -90,6 +100,34 @@ test('order RPC validates unique owned full-set ids before reindexing every row'
   }
   assert.match(definition, /WITH ORDINALITY\s+AS\s+requested\s*\(todo_id,\s*ord\)/i);
   assert.match(definition, /SET\s+sort_order\s*=\s*requested\.ord\s*-\s*1/i);
+  assert.match(definition, /ON CONFLICT\s*\(id\)\s+DO NOTHING/i);
+  assert.match(definition, /first committed row wins/i);
+  assert.match(definition, /v_existing_owner\s+IS DISTINCT FROM\s+p_user_id/i);
+  assert.match(definition, /GET DIAGNOSTICS\s+v_reindexed_count\s*=\s*ROW_COUNT/i);
+  assert.match(definition, /array_agg\(todo\.id\s+ORDER BY\s+todo\.sort_order\)/i);
+});
+
+test('every owner-scoped RPC takes the same per-user transaction lock before table access', () => {
+  const sql = readMigration();
+  const rpcNames = [
+    'patch_personal_todo',
+    'mutate_personal_todo_order',
+    'create_or_reuse_personal_todo_label_and_attach',
+    'update_personal_todo_label',
+  ];
+
+  for (const rpcName of rpcNames) {
+    const definition = functionDefinition(sql, rpcName);
+    const lockIndex = definition.search(
+      /PERFORM\s+pg_advisory_xact_lock\s*\(\s*hashtextextended\s*\(\s*p_user_id\s*,\s*0\s*\)\s*\)/i,
+    );
+    const firstTableAccessIndex = definition.search(/\b(?:FROM|UPDATE|INSERT INTO|DELETE FROM)\s+public\./i);
+    assert.notEqual(lockIndex, -1, `${rpcName} must take the per-user transaction lock`);
+    assert.ok(
+      firstTableAccessIndex === -1 || lockIndex < firstTableAccessIndex,
+      `${rpcName} must lock before reading or mutating tables`,
+    );
+  }
 });
 
 test('label schema is user-owned, cascade-cleaned, normalized, and non-deletable by clients', () => {
@@ -130,9 +168,35 @@ test('label mutations enforce user ownership and attach without reordering exist
     assert.match(definition, /SECURITY INVOKER/i);
     assert.match(definition, /user_id\s*=\s*p_user_id/i);
   }
+  assert.match(createAndAttach, /RETURNS\s+jsonb/i);
+  assert.match(createAndAttach, /WHERE\s+todo\.id\s*=\s*p_todo_id[\s\S]*?FOR UPDATE/i);
   assert.match(createAndAttach, /array_append\s*\(todo\.label_ids,\s*v_label\.id\)/i);
   assert.match(createAndAttach, /v_label\.id\s*=\s*ANY\s*\(todo\.label_ids\)/i);
+  assert.match(createAndAttach, /RETURNING\s+todo\.\*\s+INTO\s+v_todo/i);
+  assert.match(
+    createAndAttach,
+    /jsonb_build_object\s*\(\s*'label'\s*,\s*to_jsonb\(v_label\)\s*,\s*'todo'\s*,[\s\S]*?'null'::jsonb/i,
+  );
   assert.match(updateLabel, /label\.id\s*=\s*p_label_id/i);
+});
+
+test('saved PostgreSQL runtime fixture retains concurrency and response-loss regressions', () => {
+  const fixture = readFileSync(runtimeFixturePath, 'utf8');
+
+  for (const regressionTag of [
+    'patch_pinned_bypass_rejected',
+    'patch_done_boundary_rejected',
+    'per_user_transaction_lock',
+    'add_response_loss_retry',
+    'delete_response_loss_retry',
+    'foreign_mutation_rejected',
+    'attach_after_delete_returns_null_todo',
+    'full_row_set_reindexed',
+  ]) {
+    assert.match(fixture, new RegExp(`REGRESSION: ${regressionTag}`, 'i'));
+  }
+  assert.match(fixture, /\\ir\s+\.\.\/\.\.\/DEVLOG\/migrations\/2026-07-11-personal-todo-personalization\.sql/i);
+  assert.match(fixture, /current_database\(\)\s*<>\s*'bflow_task2_test'/i);
 });
 
 test('all public RPCs are invoker functions with PUBLIC execute revoked', () => {
