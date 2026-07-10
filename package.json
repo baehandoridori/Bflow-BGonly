@@ -1,6 +1,6 @@
 {
   "name": "bflow",
-  "version": "1.77.0",
+  "version": "1.77.1",
   "description": "B flow - Studio JBBJ 워크플로우 대시보드",
   "main": "dist-electron/main.js",
   "scripts": {
@@ -12,8 +12,9 @@
     "test:entity": "node --test ./tests/mentionQuery.test.ts ./tests/entityTokens.test.ts ./tests/hashEntity.test.ts ./tests/hashtagQuery.test.ts ./tests/hashtagCandidates.test.ts ./tests/cutScene.test.ts ./tests/revisionSceneContext.test.ts ./tests/sceneReference.test.ts ./tests/cardSceneHelpers.test.ts ./tests/revisionSet.test.ts ./tests/revisionGeneral.test.ts ./tests/sceneNavigatorReferenceWiring.test.ts ./tests/activityFeedGrouping.test.ts ./tests/commentThreadSidePanelWiring.test.ts ./tests/createUuid.test.ts ./tests/myTasksStats.test.ts ./tests/quickAddSceneFilter.test.ts ./tests/myTasksStageInfo.test.ts ./tests/myTasksMotion.test.ts",
     "test:presence": "node --test ./tests/mohoTitleParser.test.ts ./tests/sceneLinkIndex.test.ts ./tests/presenceMerge.test.ts ./tests/editingPresenceSelectors.test.ts ./tests/presenceDedupGate.test.ts",
     "test:character": "node --test ./tests/characterBoardStoreHelpers.test.ts ./tests/characterBoardAssetWorkflow.test.ts ./tests/characterCostumeName.test.ts ./tests/characterName.test.ts ./tests/characterCostumeReorder.test.ts ./tests/characterFeedbackBatch.test.ts ./tests/characterTier2.test.ts ./tests/dueDateBadge.test.ts ./tests/riggingAnnounce.test.ts",
-    "build": "npm run typecheck && npm run test:auto-update && npm run test:entity && npm run test:notifications && npm run test:presence && npm run test:character && vite build && electron-builder && node scripts/generate-manifest.js",
-    "build:vite": "npm run typecheck && npm run test:auto-update && npm run test:entity && npm run test:notifications && npm run test:presence && npm run test:character && vite build && node scripts/generate-manifest.js --allow-missing-installer",
+    "test:ui": "node --test ./tests/sidebarNavVisibility.test.ts",
+    "build": "npm run typecheck && npm run test:auto-update && npm run test:entity && npm run test:notifications && npm run test:presence && npm run test:character && npm run test:ui && vite build && electron-builder && node scripts/generate-manifest.js",
+    "build:vite": "npm run typecheck && npm run test:auto-update && npm run test:entity && npm run test:notifications && npm run test:presence && npm run test:character && npm run test:ui && vite build && node scripts/generate-manifest.js --allow-missing-installer",
     "preview": "vite preview",
     "electron:dev": "vite build && electron .",
     "lint": "eslint src --ext ts,tsx"
