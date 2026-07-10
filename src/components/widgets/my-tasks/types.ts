@@ -7,11 +7,26 @@ import type { Scene, Department, CostumeDesignStage, CostumeRiggingStage } from 
 export type SceneKey = string;
 export const makeKey = (sheetName: string, sceneId: string): SceneKey => `${sheetName}:${sceneId}`;
 
+export type PersonalTodoStatus = 'todo' | 'doing' | 'done';
+export type PersonalTodoPriority = 'high' | 'medium' | 'low' | 'none';
+export type PersonalTodoLabelColorKey = 'violet' | 'blue' | 'green' | 'yellow' | 'orange' | 'red' | 'pink' | 'gray';
+
+export interface PersonalTodoLabel {
+  id: string;
+  name: string;
+  colorKey: PersonalTodoLabelColorKey;
+  createdAt: string;
+}
+
 export interface PersonalTodo {
   id: string;
   title: string;
   memo: string;
+  status: PersonalTodoStatus;
   completed: boolean;
+  priority: PersonalTodoPriority;
+  pinned: boolean;
+  labelIds: string[];
   createdAt: string;
   startDate?: string;
   endDate?: string;

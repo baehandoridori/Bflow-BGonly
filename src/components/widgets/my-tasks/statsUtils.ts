@@ -88,7 +88,7 @@ export function computeMyTasksStats(
   const stageProgressPct = stageSlots > 0 ? (checkedStages / stageSlots) * 100 : 0;
 
   const personalTotal = personalTodos.length;
-  const personalDone = personalTodos.reduce((n, t) => n + (t.completed ? 1 : 0), 0);
+  const personalDone = personalTodos.reduce((n, t) => n + (t.status === 'done' ? 1 : 0), 0);
   const characterTotal = characterTasks.length;
   const doneCharacterCount = characterTasks.reduce((n, task) => n + (task.done ? 1 : 0), 0);
 
