@@ -47,6 +47,7 @@ function getMockUsers(): PreviewUser[] {
 let previewCanonicalUserId: string | null = null;
 let previewCanonicalEpoch = 0;
 let previewRememberedUserId: string | null = null;
+const PREVIEW_REMEMBERED_USER_KEY = 'bflow:preview:remembered-user';
 let previewTodoStore: PersonalTodoPreviewStore | null = null;
 const previewTodoCommitListeners = new Set<(payload: unknown) => void>();
 
@@ -76,6 +77,23 @@ function previewCanonicalPayload() {
     session: { userId: user.id, userName: user.name, loggedInAt: new Date().toISOString() },
     epoch: previewCanonicalEpoch,
   };
+}
+
+function readRememberedPreviewUser(): string | null {
+  if (previewRememberedUserId) return previewRememberedUserId;
+  try {
+    if (typeof window !== 'undefined') return window.localStorage.getItem(PREVIEW_REMEMBERED_USER_KEY);
+  } catch { /* private browsing/localStorage disabled — in-memory fallback remains valid */ }
+  return null;
+}
+
+function writeRememberedPreviewUser(userId: string | null): void {
+  previewRememberedUserId = userId;
+  try {
+    if (typeof window === 'undefined') return;
+    if (userId) window.localStorage.setItem(PREVIEW_REMEMBERED_USER_KEY, userId);
+    else window.localStorage.removeItem(PREVIEW_REMEMBERED_USER_KEY);
+  } catch { /* private browsing/localStorage disabled */ }
 }
 
 const noop = () => () => {};
@@ -1067,7 +1085,7 @@ export function installDevElectronAPI(): void {
 
     // ─── Personal Todos / Task Views mock ───
     ensureCanonicalSession: async () => {
-      if (!previewCanonicalUserId && previewRememberedUserId) previewCanonicalUserId = previewRememberedUserId;
+      if (!previewCanonicalUserId) previewCanonicalUserId = readRememberedPreviewUser();
       return { ok: true, payload: previewCanonicalPayload() };
     },
     loginCanonicalSession: async (input) => {
@@ -1077,12 +1095,12 @@ export function installDevElectronAPI(): void {
       }
       if (previewCanonicalUserId !== user.id) previewCanonicalEpoch++;
       previewCanonicalUserId = user.id;
-      previewRememberedUserId = input.rememberMe === false ? null : user.id;
+      writeRememberedPreviewUser(input.rememberMe === false ? null : user.id);
       return { ok: true, payload: previewCanonicalPayload() };
     },
     restoreCanonicalSession: async () => {
-      if (!previewCanonicalUserId && previewRememberedUserId) {
-        previewCanonicalUserId = previewRememberedUserId;
+      if (!previewCanonicalUserId && readRememberedPreviewUser()) {
+        previewCanonicalUserId = readRememberedPreviewUser();
         previewCanonicalEpoch++;
       }
       return { ok: true, payload: previewCanonicalPayload() };
@@ -1090,7 +1108,7 @@ export function installDevElectronAPI(): void {
     logoutCanonicalSession: async () => {
       if (previewCanonicalUserId) previewCanonicalEpoch++;
       previewCanonicalUserId = null;
-      previewRememberedUserId = null;
+      writeRememberedPreviewUser(null);
       return { ok: true, payload: previewCanonicalPayload() };
     },
     refreshCanonicalUser: async () => ({ ok: true, payload: previewCanonicalPayload() }),
