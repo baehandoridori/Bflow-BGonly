@@ -1,9 +1,47 @@
 import type { Holding, MarketCommand, MarketSnapshot, MarketStock, MarketTrend, PricePoint } from './types';
 
 export const SHARE_SCALE = 1_000_000;
+const UNSAFE_BUY_QUANTITY_MESSAGE = '주문 수량을 안전하게 계산할 수 없어요';
 
 export function holdingValuePoints(holding: Holding, pricePoints: number): number {
   return Math.round((holding.quantityMicros * pricePoints) / SHARE_SCALE);
+}
+
+function getSafeBuyQuantityMicros(
+  holding: Holding | undefined,
+  pricePoints: number,
+  spentPoints: number,
+): number | null {
+  const currentQuantityMicros = holding?.quantityMicros ?? 0;
+  const currentCostBasisPoints = holding?.costBasisPoints ?? 0;
+  const targetCostBasisPoints = currentCostBasisPoints + spentPoints;
+  if (
+    !Number.isSafeInteger(currentQuantityMicros)
+    || currentQuantityMicros < 0
+    || !Number.isSafeInteger(currentCostBasisPoints)
+    || currentCostBasisPoints < 0
+    || !Number.isSafeInteger(currentQuantityMicros * pricePoints)
+    || !Number.isSafeInteger(targetCostBasisPoints)
+  ) return null;
+
+  const currentValuePoints = holding ? holdingValuePoints(holding, pricePoints) : 0;
+  const targetValuePoints = currentValuePoints + spentPoints;
+  const scaledTargetValue = targetValuePoints * SHARE_SCALE;
+  if (!Number.isSafeInteger(targetValuePoints) || !Number.isSafeInteger(scaledTargetValue)) return null;
+
+  const targetQuantityMicros = Math.round(scaledTargetValue / pricePoints);
+  const addedQuantityMicros = targetQuantityMicros - currentQuantityMicros;
+  if (
+    !Number.isSafeInteger(targetQuantityMicros)
+    || !Number.isSafeInteger(addedQuantityMicros)
+    || addedQuantityMicros <= 0
+    || !Number.isSafeInteger(targetQuantityMicros * pricePoints)
+    || !Number.isSafeInteger(targetQuantityMicros * 10000)
+    || !Number.isSafeInteger(targetCostBasisPoints * targetValuePoints)
+  ) return null;
+
+  const projectedValuePoints = Math.round((targetQuantityMicros * pricePoints) / SHARE_SCALE);
+  return projectedValuePoints === targetValuePoints ? addedQuantityMicros : null;
 }
 
 export function getStockQuote(stock: Pick<MarketStock, 'pricePoints' | 'previousClosePoints'>) {
@@ -88,7 +126,7 @@ export function getAccountSummary(snapshot: MarketSnapshot) {
 }
 
 export function validateMarketCommand(snapshot: MarketSnapshot, command: MarketCommand): string | null {
-  if ('points' in command && (!Number.isInteger(command.points) || command.points <= 0)) return '1P 이상 입력해 주세요';
+  if ('points' in command && (!Number.isSafeInteger(command.points) || command.points <= 0)) return '1P 이상 입력해 주세요';
   if (command.kind === 'favorite') return snapshot.stocks.some((stock) => stock.id === command.stockId) ? null : '종목을 찾지 못했어요';
   if (command.kind === 'read-reason') return snapshot.stocks.some((stock) => stock.id === command.stockId) ? null : '종목을 찾지 못했어요';
   if (command.kind === 'transfer') {
@@ -100,7 +138,13 @@ export function validateMarketCommand(snapshot: MarketSnapshot, command: MarketC
   const stock = snapshot.stocks.find((item) => item.id === command.stockId);
   if (!stock) return '종목을 찾지 못했어요';
   if (!Number.isSafeInteger(stock.pricePoints) || stock.pricePoints <= 0) return '현재 가격을 확인할 수 없어요';
-  if (command.kind === 'buy') return command.points <= snapshot.account.cashPoints ? null : '예수금이 부족해요';
+  if (command.kind === 'buy') {
+    if (command.points > snapshot.account.cashPoints) return '예수금이 부족해요';
+    const holding = snapshot.account.holdings.find((item) => item.stockId === command.stockId);
+    return getSafeBuyQuantityMicros(holding, stock.pricePoints, command.points) === null
+      ? UNSAFE_BUY_QUANTITY_MESSAGE
+      : null;
+  }
   if (!Number.isInteger(command.ratioBps) || command.ratioBps < 100 || command.ratioBps > 10000) return '1%부터 100%까지 입력해 주세요';
   if (command.ratioBps % 100 !== 0) return '매도 비율은 1% 단위로 입력해 주세요';
   const holding = snapshot.account.holdings.find((item) => item.stockId === command.stockId);
@@ -140,7 +184,8 @@ export function applyMarketCommand(snapshot: MarketSnapshot, command: MarketComm
   const existing = next.account.holdings.find((item) => item.stockId === command.stockId);
 
   if (command.kind === 'buy') {
-    const quantityMicros = Math.max(1, Math.round((command.points * SHARE_SCALE) / stock.pricePoints));
+    const quantityMicros = getSafeBuyQuantityMicros(existing, stock.pricePoints, command.points);
+    if (quantityMicros === null) throw new Error(UNSAFE_BUY_QUANTITY_MESSAGE);
     const spentPoints = command.points;
     if (existing) {
       existing.quantityMicros += quantityMicros;

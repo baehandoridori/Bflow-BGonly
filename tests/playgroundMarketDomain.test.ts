@@ -109,6 +109,36 @@ test('invalid commands explain why the action is unavailable', () => {
   }), '종목을 찾지 못했어요');
 });
 
+test('point commands reject unsafe integers before balance and quantity math', () => {
+  const snapshot = createMarketPreviewSeed();
+  const unsafePoints = Number.MAX_SAFE_INTEGER + 1;
+  assert.equal(validateMarketCommand(snapshot, {
+    kind: 'transfer', requestId: 'unsafe-transfer', direction: 'wallet-to-broker', points: unsafePoints,
+  }), '1P 이상 입력해 주세요');
+  assert.equal(validateMarketCommand(snapshot, {
+    kind: 'buy', requestId: 'unsafe-buy', stockId: 'jbbj', points: unsafePoints,
+  }), '1P 이상 입력해 주세요');
+
+  snapshot.account.cashPoints = Number.MAX_SAFE_INTEGER;
+  assert.equal(validateMarketCommand(snapshot, {
+    kind: 'buy', requestId: 'unsafe-quantity', stockId: 'google-drive', points: Number.MAX_SAFE_INTEGER,
+  }), '주문 수량을 안전하게 계산할 수 없어요');
+
+  const unsafeSellQuantity = createMarketPreviewSeed();
+  unsafeSellQuantity.account.cashPoints = 1_000_000;
+  unsafeSellQuantity.stocks.find((stock) => stock.id === 'google-drive')!.pricePoints = 1;
+  assert.equal(validateMarketCommand(unsafeSellQuantity, {
+    kind: 'buy', requestId: 'unsafe-sell-quantity', stockId: 'google-drive', points: 1_000_000,
+  }), '주문 수량을 안전하게 계산할 수 없어요');
+
+  const unsafeCostAllocation = createMarketPreviewSeed();
+  unsafeCostAllocation.account.cashPoints = 100_000_000;
+  unsafeCostAllocation.stocks.find((stock) => stock.id === 'google-drive')!.pricePoints = 1_000_000;
+  assert.equal(validateMarketCommand(unsafeCostAllocation, {
+    kind: 'buy', requestId: 'unsafe-cost-allocation', stockId: 'google-drive', points: 100_000_000,
+  }), '주문 수량을 안전하게 계산할 수 없어요');
+});
+
 test('buy and sell use integer micro-shares', () => {
   const seed = createMarketPreviewSeed();
   const bought = applyMarketCommand(seed, {
@@ -122,6 +152,34 @@ test('buy and sell use integer micro-shares', () => {
   });
   const remaining = sold.account.holdings.find((item) => item.stockId === 'google-drive');
   assert.ok(remaining && Number.isInteger(remaining.quantityMicros));
+});
+
+test('repeated one-point buys and full liquidation conserve every stock account result', () => {
+  for (const stock of createMarketPreviewSeed().stocks) {
+    let snapshot = createMarketPreviewSeed();
+    const before = getAccountSummary(snapshot);
+    const buyCount = snapshot.account.cashPoints;
+    for (let count = 0; count < buyCount; count += 1) {
+      snapshot = applyMarketCommand(snapshot, {
+        kind: 'buy', requestId: `${stock.id}-tiny-buy-${count}`, stockId: stock.id, points: 1,
+      });
+      const afterBuy = getAccountSummary(snapshot);
+      assert.equal(afterBuy.totalAssetsPoints, before.totalAssetsPoints, `${stock.id}: assets drifted at buy ${count + 1}`);
+      assert.equal(afterBuy.monthlyTotalPnlPoints, before.monthlyTotalPnlPoints, `${stock.id}: P&L drifted at buy ${count + 1}`);
+    }
+
+    const afterBuys = getAccountSummary(snapshot);
+    assert.equal(afterBuys.totalAssetsPoints, before.totalAssetsPoints, `${stock.id}: assets drifted after buys`);
+    assert.equal(afterBuys.monthlyTotalPnlPoints, before.monthlyTotalPnlPoints, `${stock.id}: P&L drifted after buys`);
+
+    snapshot = applyMarketCommand(snapshot, {
+      kind: 'sell', requestId: `${stock.id}-full-liquidation`, stockId: stock.id, ratioBps: 10000,
+    });
+    const afterSale = getAccountSummary(snapshot);
+    assert.equal(snapshot.account.holdings.some((holding) => holding.stockId === stock.id), false);
+    assert.equal(afterSale.totalAssetsPoints, before.totalAssetsPoints, `${stock.id}: assets drifted after sale`);
+    assert.equal(afterSale.monthlyTotalPnlPoints, before.monthlyTotalPnlPoints, `${stock.id}: P&L drifted after sale`);
+  }
 });
 
 test('full sale removes the holding and conserves cash and cost basis', () => {
