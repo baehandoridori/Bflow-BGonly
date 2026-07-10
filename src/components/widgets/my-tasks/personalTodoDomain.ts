@@ -126,6 +126,22 @@ export function reassemblePersonalTodos(groups: PersonalTodoGroups): PersonalTod
   return todos;
 }
 
+/** Move one optimistic todo to the tail of the canonical target group. */
+export function movePersonalTodoToGroupTail(todos: PersonalTodo[], updatedTodo: PersonalTodo): PersonalTodo[] {
+  const groups = splitPersonalTodos(todos);
+  groups.pinned = groups.pinned.filter((todo) => todo.id !== updatedTodo.id);
+  groups.normal = groups.normal.filter((todo) => todo.id !== updatedTodo.id);
+  groups.done = groups.done.filter((todo) => todo.id !== updatedTodo.id);
+
+  const targetGroup = updatedTodo.status === 'done'
+    ? groups.done
+    : updatedTodo.pinned
+      ? groups.pinned
+      : groups.normal;
+  targetGroup.push(updatedTodo);
+  return reassemblePersonalTodos(groups);
+}
+
 export function getTodoNextAction(status: PersonalTodoStatus): PersonalTodoNextAction {
   return NEXT_ACTIONS[status];
 }

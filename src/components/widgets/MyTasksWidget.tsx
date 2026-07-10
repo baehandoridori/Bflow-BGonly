@@ -21,8 +21,11 @@ import { SceneDetailModal } from './my-tasks/components/SceneDetailModal';
 import { DonutHero } from './my-tasks/components/DonutHero';
 import { QuickAdd } from './my-tasks/components/QuickAdd';
 import { SceneRow } from './my-tasks/components/SceneRow';
-import { TodoRow } from './my-tasks/components/TodoRow';
-import { SceneCard, TodoCard } from './my-tasks/components/SceneCard';
+import { SceneCard } from './my-tasks/components/SceneCard';
+import { TodoCard } from './my-tasks/components/TodoCard';
+import { PinnedTodoSection } from './my-tasks/components/PinnedTodoSection';
+import { SortableTodoRow, TodoRow } from './my-tasks/components/TodoRow';
+import type { PersonalTodoSyncState } from './my-tasks/components/TodoMetadata';
 import { CharacterTaskCard, CharacterTaskRow } from './my-tasks/components/CharacterTaskRow';
 import { Confetti } from './my-tasks/components/Confetti';
 import { useMotionPref } from './my-tasks/useMotion';
@@ -357,6 +360,11 @@ export function MyTasksWidget() {
     doneScenes,
     pendingPersonalTodos,
     donePersonalTodos,
+    activePersonalTodos,
+    personalTodoLabels,
+    pinnedPersonalTodos,
+    normalPersonalTodos,
+    personalTodoSyncState,
     pendingCharacterTasks,
     doneCharacterTasks,
     stats,
@@ -368,10 +376,13 @@ export function MyTasksWidget() {
     addScenes,
     removeScene,
     addPersonalTodo,
-    togglePersonalTodo,
     removePersonalTodo,
     reorderPendingTodos,
+    reorderPinnedTodos,
     updatePersonalTodo,
+    setPersonalTodoStatus,
+    setPersonalTodoPinned,
+    retryPersonalTodoSync,
   } = useMyTasksData(isPopup);
   const setView = useAppStore((s) => s.setView);
   const setPendingCharacterBoardRequest = useAppStore((s) => s.setPendingCharacterBoardRequest);
@@ -405,7 +416,9 @@ export function MyTasksWidget() {
   // celebrateKey 증가로 트리거(매번 remount→재생). 리셋은 발사 effect cleanup 이 아니라 celebrateKey
   // 종속 별도 effect 가 담당 → 1초 내 재렌더로 고착되거나 다음 축하가 유실되지 않는다.
   const [celebrateKey, setCelebrateKey] = useState(0);
+  const [completionCommitVersion, setCompletionCommitVersion] = useState(0);
   const userCompleteRef = useRef(false);
+  const pendingCompletionRef = useRef(false);
   const prevPendingRef = useRef<number | null>(null);
   const pendingCount = pendingScenes.length + pendingPersonalTodos.length + pendingCharacterTasks.length;
   const doneCount = doneScenes.length + donePersonalTodos.length + doneCharacterTasks.length;
@@ -413,10 +426,13 @@ export function MyTasksWidget() {
     const prev = prevPendingRef.current;
     prevPendingRef.current = pendingCount;
     if (prev == null || reduce) return;          // 첫 렌더 스킵(초기 0이어도 발사 안 함) / reduce 생략
-    if (userCompleteRef.current && prev > 0 && pendingCount === 0) {
+    const committedPersonalCompletion = pendingCompletionRef.current && pendingCount === 0;
+    const completedSceneWork = userCompleteRef.current && prev > 0 && pendingCount === 0;
+    if (committedPersonalCompletion || completedSceneWork) {
       setCelebrateKey((k) => k + 1);
+      pendingCompletionRef.current = false;
     }
-  }, [pendingCount, reduce]);
+  }, [pendingCount, completionCommitVersion, reduce]);
   useEffect(() => {
     if (celebrateKey === 0) return;
     const t = setTimeout(() => setCelebrateKey(0), 1000);
@@ -427,7 +443,6 @@ export function MyTasksWidget() {
     userCompleteRef.current = true;
     setTimeout(() => { userCompleteRef.current = false; }, 120);
   };
-  const toggleTodoCelebrate = (id: string) => { armCompletion(); togglePersonalTodo(id); };
   const toggleSceneCelebrate = (flat: FlatScene, stage: Stage) => { armCompletion(); handleSceneToggle(flat, stage); };
 
   // 상세 모달: id 만 보관하고 실제 todo 는 스토어 목록에서 매 렌더 재추출 → 편집 후 stale 값 방지
@@ -435,10 +450,23 @@ export function MyTasksWidget() {
   const selectedTodo =
     selectedTodoId == null
       ? null
-      : pendingPersonalTodos.find((t) => t.id === selectedTodoId) ??
-        donePersonalTodos.find((t) => t.id === selectedTodoId) ??
+      : activePersonalTodos.find((t) => t.id === selectedTodoId) ??
         null;
   const openTodoDetail = (todo: PersonalTodo) => setSelectedTodoId(todo.id);
+  const resolveTodoLabels = (todo: PersonalTodo) => {
+    return personalTodoLabels.filter((label) => todo.labelIds.includes(label.id));
+  };
+  const handleTodoNextStatus = (todoId: string, status: PersonalTodo['status']) => {
+    const wasPending = pendingCount > 0;
+    void setPersonalTodoStatus(todoId, status).then((committed) => {
+      if (status !== 'done') return;
+      pendingCompletionRef.current = committed && wasPending;
+      setCompletionCommitVersion((version) => version + 1);
+    });
+  };
+  const handleTodoPinned = (todoId: string, pinned: boolean) => {
+    void setPersonalTodoPinned(todoId, pinned);
+  };
 
   // 씬 상세 모달: key 만 보관하고 실제 FlatScene 은 매 렌더 재추출 → 편집/토글 후 stale 값 방지.
   // 목록에서 사라지면(완료 이동/제거) selectedScene 이 null 이 되어 모달이 깔끔히 닫힌다.
@@ -624,24 +652,48 @@ export function MyTasksWidget() {
         </div>;
   };
 
-  // 개인 할일(진행 중) — 리스트는 Reorder(드래그), 카드는 그리드(드래그 없음).
+  const renderTodoCard = (todo: PersonalTodo, index: number) => (
+    <TodoCard
+      key={todo.id}
+      todo={todo}
+      resolvedLabels={resolveTodoLabels(todo)}
+      syncState={personalTodoSyncState}
+      onNextStatus={handleTodoNextStatus}
+      onTogglePinned={handleTodoPinned}
+      onRetrySync={retryPersonalTodoSync}
+      onDelete={removePersonalTodo}
+      onOpen={openTodoDetail}
+      isHighlighted={highlightTodoId === todo.id}
+      enterDelay={staggerDelay(index)}
+      reduce={reduce}
+    />
+  );
+
+  // 개인 할일(일반) — 고정 할일은 PinnedTodoSection에서 별도 순서를 갖는다.
   const renderPendingTodos = () => {
-    if (pendingPersonalTodos.length === 0) return null;
+    if (normalPersonalTodos.length === 0) return null;
     if (viewMode === 'card') {
-      return (
-        <div className="grid gap-2 mt-2" style={CARD_GRID_STYLE}>
-          {pendingPersonalTodos.map((todo, i) => (
-            <TodoCard key={todo.id} todo={todo} onToggle={toggleTodoCelebrate} onRemove={removePersonalTodo} onOpenDetail={openTodoDetail} isHighlighted={highlightTodoId === todo.id} enterDelay={staggerDelay(i)} reduce={reduce} />
-          ))}
-        </div>
-      );
+      return <div className="grid gap-2 mt-2" style={CARD_GRID_STYLE}>{normalPersonalTodos.map(renderTodoCard)}</div>;
     }
     return (
-      <Reorder.Group axis="y" values={pendingPersonalTodos} onReorder={reorderPendingTodos} className="list-none p-0 m-0">
-        {pendingPersonalTodos.map((todo, i) => (
-          <Reorder.Item key={todo.id} value={todo} className="list-none">
-            <TodoRow todo={todo} onToggle={toggleTodoCelebrate} onRemove={removePersonalTodo} onOpenDetail={openTodoDetail} showDragHandle isHighlighted={highlightTodoId === todo.id} enterDelay={staggerDelay(i)} reduce={reduce} />
-          </Reorder.Item>
+      <Reorder.Group axis="y" values={normalPersonalTodos} onReorder={(next) => { if (personalTodoSyncState !== 'sync-needed') reorderPendingTodos(next); }} className={cn('list-none p-0 m-0', personalTodoSyncState === 'sync-needed' && 'opacity-70')}>
+        {normalPersonalTodos.map((todo, index) => (
+          <SortableTodoRow
+            key={todo.id}
+            value={todo}
+            todo={todo}
+            resolvedLabels={resolveTodoLabels(todo)}
+            syncState={personalTodoSyncState}
+            onNextStatus={handleTodoNextStatus}
+            onTogglePinned={handleTodoPinned}
+            onRetrySync={retryPersonalTodoSync}
+            onDelete={removePersonalTodo}
+            onOpen={openTodoDetail}
+            showDragHandle={personalTodoSyncState !== 'sync-needed'}
+            isHighlighted={highlightTodoId === todo.id}
+            enterDelay={staggerDelay(index)}
+            reduce={reduce}
+          />
         ))}
       </Reorder.Group>
     );
@@ -652,16 +704,15 @@ export function MyTasksWidget() {
     if (donePersonalTodos.length === 0) return null; // 빈 grid wrapper 노드 방지(모드 간 대칭)
     return viewMode === 'card'
       ? <div className="grid gap-2" style={CARD_GRID_STYLE}>
-          {donePersonalTodos.map((todo, i) => (
-            <TodoCard key={todo.id} todo={todo} onToggle={toggleTodoCelebrate} onRemove={removePersonalTodo} onOpenDetail={openTodoDetail} isHighlighted={highlightTodoId === todo.id} enterDelay={staggerDelay(i)} reduce={reduce} />
-          ))}
+          {donePersonalTodos.map(renderTodoCard)}
         </div>
       : <>
           {donePersonalTodos.map((todo, i) => (
-            <TodoRow key={todo.id} todo={todo} onToggle={toggleTodoCelebrate} onRemove={removePersonalTodo} onOpenDetail={openTodoDetail} isHighlighted={highlightTodoId === todo.id} enterDelay={staggerDelay(i)} reduce={reduce} />
+            <TodoRow key={todo.id} todo={todo} resolvedLabels={resolveTodoLabels(todo)} syncState={personalTodoSyncState} onNextStatus={handleTodoNextStatus} onTogglePinned={handleTodoPinned} onRetrySync={retryPersonalTodoSync} onDelete={removePersonalTodo} onOpen={openTodoDetail} isHighlighted={highlightTodoId === todo.id} enterDelay={staggerDelay(i)} reduce={reduce} />
           ))}
         </>;
   };
+  const sceneTodos = pendingScenes;
 
   // 플로팅 위젯 창에서 메인 앱 로그인 전 → currentUser가 null인 상태로 렌더될 수 있음
   // (assigned 뷰는 currentUser.name과 assignee 매칭 → 빈 결과 방지 위해 로딩 표시)
@@ -772,7 +823,25 @@ export function MyTasksWidget() {
               )}
 
               {/* 진행 중 — 씬 섹션, 개인 섹션(분리) */}
-              {renderSceneSection(pendingScenes)}
+              <PinnedTodoSection
+                todos={pinnedPersonalTodos}
+                labels={personalTodoLabels}
+                syncState={personalTodoSyncState}
+                viewMode={viewMode}
+                reorderDisabled={personalTodoSyncState === 'sync-needed'}
+                onReorder={reorderPinnedTodos}
+                onNextStatus={handleTodoNextStatus}
+                onTogglePinned={handleTodoPinned}
+                onDelete={removePersonalTodo}
+                onOpen={openTodoDetail}
+                onRetrySync={retryPersonalTodoSync}
+                highlightedId={highlightTodoId}
+                staggerDelay={staggerDelay}
+                reduce={reduce}
+              />
+              {sceneTodos.length > 0 && (viewMode === 'card'
+                ? <div className="grid gap-2" style={CARD_GRID_STYLE}>{sceneTodos.map(renderScene)}</div>
+                : <AnimatePresence mode="popLayout">{sceneTodos.map(renderScene)}</AnimatePresence>)}
               {renderCharacterTasks(pendingCharacterTasks)}
               {renderPendingTodos()}
 

@@ -9,7 +9,7 @@ import type {
   MainPersonalTodoStatus,
 } from '@/types';
 import type { PersonalTodo, PersonalTodoLabel, PersonalTodoPriority } from '../types';
-import { applyPersonalTodoStatus, normalizePersonalTodo, splitPersonalTodos } from '../personalTodoDomain';
+import { applyPersonalTodoStatus, movePersonalTodoToGroupTail, normalizePersonalTodo, splitPersonalTodos } from '../personalTodoDomain';
 import {
   clearLegacyPersonalTodoStorage,
   collectLegacyPersonalTodos,
@@ -54,8 +54,8 @@ export interface UsePersonalTodosResult {
   syncNeeded: boolean;
   addTodo: (todo: PersonalTodo) => Promise<void>;
   patchTodo: (todoId: string, patch: Partial<PersonalTodo>) => Promise<void>;
-  setStatus: (todoId: string, status: MainPersonalTodoStatus) => Promise<void>;
-  setPinned: (todoId: string, pinned: boolean) => Promise<void>;
+  setStatus: (todoId: string, status: MainPersonalTodoStatus) => Promise<boolean>;
+  setPinned: (todoId: string, pinned: boolean) => Promise<boolean>;
   reorderGroup: (group: 'pinned' | 'normal' | 'done', reordered: PersonalTodo[]) => Promise<void>;
   deleteTodo: (todoId: string) => Promise<void>;
   createAndAttachLabel: (input: { todoId: string; name: string; colorKey: PersonalTodoLabel['colorKey'] }) => Promise<void>;
@@ -265,6 +265,7 @@ export function usePersonalTodos(): UsePersonalTodosResult {
     pendingIntentsRef.current.set(key, intent);
     mutationStateRef.current.pendingTodoIds = new Set([...pendingIntentsRef.current.values()].filter((item) => !item.key.startsWith('label:')).map((item) => item.key));
     setTodos(optimisticTodos); setLabels(optimisticLabels);
+    let committed = false;
     const accept = (result: MainPersonalTodoResult<unknown>) => {
       if (!result.ok) throw asError(result);
       let baseline = { ...confirmedBaselineRef.current };
@@ -300,41 +301,51 @@ export function usePersonalTodos(): UsePersonalTodosResult {
         retried = true;
         result = await execute();
       }
-      if (!isCurrentIntent()) return;
+      if (!isCurrentIntent()) return committed;
       if (!result.ok && result.kind === 'unknown' && !retried) {
         retried = true;
         result = await execute();
       }
-      if (!isCurrentIntent()) return;
+      if (!isCurrentIntent()) return committed;
       if (!result.ok && result.kind === 'unknown') {
         const authoritative = await readAuthoritative(loadGenerationRef.current, epoch);
         if (authoritative) {
-        if (isCurrentIntent()) publishBaseline(authoritative, true);
+        if (isCurrentIntent()) {
+          publishBaseline(authoritative, true);
+          committed = true;
+        }
         } else {
           mutationStateRef.current.orderSyncNeeded = order;
           setSyncNeeded(true);
         }
       } else {
         const baseline = accept(result);
-        if (isCurrentIntent()) publishBaseline(baseline, true);
+        if (isCurrentIntent()) {
+          publishBaseline(baseline, true);
+          committed = true;
+        }
       }
     } catch (error) {
       if (isUnknown(error)) {
         const authoritative = await readAuthoritative(loadGenerationRef.current, epoch);
-        if (!isCurrentIntent()) return;
-        if (authoritative) publishBaseline(authoritative, true);
+        if (!isCurrentIntent()) return committed;
+        if (authoritative) {
+          publishBaseline(authoritative, true);
+          committed = true;
+        }
         else { mutationStateRef.current.orderSyncNeeded = order; setSyncNeeded(true); }
       } else if (isCurrentIntent()) {
         publishBaseline(confirmedBaselineRef.current, true);
       }
     } finally {
-      if (!isCurrentIntent()) return;
+      if (!isCurrentIntent()) return committed;
       if (pendingIntentsRef.current.get(key)?.serial === intent.serial) pendingIntentsRef.current.delete(key);
       mutationStateRef.current.pendingTodoIds = new Set([...pendingIntentsRef.current.keys()].filter((item) => !item.startsWith('label:')));
       mutationStateRef.current.pendingLabelIds = new Set([...pendingIntentsRef.current.keys()].filter((item) => item.startsWith('label:')));
       const latest = [...pendingIntentsRef.current.values()].sort((a, b) => a.serial - b.serial).at(-1);
       if (latest) { setTodos(latest.todos); setLabels(latest.labels); }
       else { setTodos(confirmedBaselineRef.current.todos); setLabels(confirmedBaselineRef.current.labels); }
+      return committed;
     }
   }, [currentUser?.id, publishBaseline, readAuthoritative]);
 
@@ -362,15 +373,17 @@ export function usePersonalTodos(): UsePersonalTodosResult {
 
   const setStatus = useCallback(async (todoId: string, status: MainPersonalTodoStatus) => {
     const current = todos.find((todo) => todo.id === todoId);
-    if (!current) return;
+    if (!current) return false;
     const nextTodo = applyPersonalTodoStatus(current, status);
-    const next = todos.map((todo) => todo.id === todoId ? nextTodo : todo);
-    await runMutation(makePersonalTodoMutationKey('todo', todoId, serialRef.current + 1), next, labels, () => api().mutatePersonalTodoOrder({ type: 'setStatusAndOrder', todoId, status }, next.map((todo) => todo.id)), true);
+    const next = movePersonalTodoToGroupTail(todos, nextTodo);
+    return runMutation(makePersonalTodoMutationKey('todo', todoId, serialRef.current + 1), next, labels, () => api().mutatePersonalTodoOrder({ type: 'setStatusAndOrder', todoId, status }, next.map((todo) => todo.id)), true);
   }, [labels, runMutation, todos]);
 
   const setPinned = useCallback(async (todoId: string, pinned: boolean) => {
-    const next = todos.map((todo) => todo.id === todoId ? { ...todo, pinned } : todo);
-    await runMutation(makePersonalTodoMutationKey('todo', todoId, serialRef.current + 1), next, labels, () => api().mutatePersonalTodoOrder({ type: 'setPinned', todoId, pinned }, next.map((todo) => todo.id)), true);
+    const current = todos.find((todo) => todo.id === todoId);
+    if (!current) return false;
+    const next = movePersonalTodoToGroupTail(todos, { ...current, pinned });
+    return runMutation(makePersonalTodoMutationKey('todo', todoId, serialRef.current + 1), next, labels, () => api().mutatePersonalTodoOrder({ type: 'setPinned', todoId, pinned }, next.map((todo) => todo.id)), true);
   }, [labels, runMutation, todos]);
 
   const reorderGroup = useCallback(async (group: 'pinned' | 'normal' | 'done', reordered: PersonalTodo[]) => {

@@ -13,13 +13,14 @@ import {
   SEQUENTIAL_STAGE_ORDER,
 } from '@/utils/sceneStageProgression';
 import * as supabaseService from '@/services/supabaseService';
-import type { CharacterTaskItem, SceneKey, PersonalTodo, FlatScene, StageSaveBaseline } from '../types';
+import type { CharacterTaskItem, SceneKey, PersonalTodo, PersonalTodoLabel, FlatScene, StageSaveBaseline, PersonalTodoStatus } from '../types';
 import { createStageSaveBaseline } from '../types';
 import { computeMyTasksStats } from '../statsUtils';
 import type { MyTasksStats } from '../statsUtils';
 import { hasPersonalTodoMigrationRun } from '../personalTodoMigration';
 import { useMyCharacterTasks } from './useMyCharacterTasks';
 import { usePersonalTodos } from './usePersonalTodos';
+import type { PersonalTodoSyncState } from '../components/TodoMetadata';
 
 const SAVE_FAIL_MESSAGE = '저장에 실패했어요. 잠시 후 다시 시도해주세요.';
 
@@ -76,6 +77,10 @@ export interface UseMyTasksDataResult {
   pendingScenes: FlatScene[];
   doneScenes: FlatScene[];
   activePersonalTodos: PersonalTodo[];
+  personalTodoLabels: PersonalTodoLabel[];
+  pinnedPersonalTodos: PersonalTodo[];
+  normalPersonalTodos: PersonalTodo[];
+  personalTodoSyncState: PersonalTodoSyncState;
   pendingPersonalTodos: PersonalTodo[];
   donePersonalTodos: PersonalTodo[];
   pendingCharacterTasks: CharacterTaskItem[];
@@ -93,7 +98,11 @@ export interface UseMyTasksDataResult {
   togglePersonalTodo: (todoId: string) => void;
   removePersonalTodo: (todoId: string) => Promise<void>;
   reorderPendingTodos: (reordered: PersonalTodo[]) => void;
+  reorderPinnedTodos: (reordered: PersonalTodo[]) => void;
   updatePersonalTodo: (todoId: string, updates: Partial<PersonalTodo>) => Promise<void>;
+  setPersonalTodoStatus: (todoId: string, status: PersonalTodoStatus) => Promise<boolean>;
+  setPersonalTodoPinned: (todoId: string, pinned: boolean) => Promise<void>;
+  retryPersonalTodoSync: () => Promise<void>;
 }
 
 /**
@@ -222,6 +231,11 @@ export function useMyTasksData(isPopup: boolean): UseMyTasksDataResult {
   const activePersonalTodos = personalTodos.todos;
   const pendingPersonalTodos = personalTodos.todos.filter((todo) => todo.status !== 'done');
   const donePersonalTodos = personalTodos.doneTodos;
+  const personalTodoSyncState: PersonalTodoSyncState = personalTodos.loading
+    ? 'pending'
+    : personalTodos.syncNeeded
+      ? 'sync-needed'
+      : 'idle';
 
   // 통계는 순수 함수(statsUtils)로 위임 — 단계별/오늘 마친 씬 포함, 단위 테스트로 회귀 보호.
   // done/pending 분리는 함수 내부에서 하므로 allViewScenes + activePersonalTodos 만 넘긴다.
@@ -392,6 +406,20 @@ export function useMyTasksData(isPopup: boolean): UseMyTasksDataResult {
   const reorderPendingTodos = useCallback((reordered: PersonalTodo[]) => {
     void personalTodos.reorderGroup('normal', reordered);
   }, [personalTodos.reorderGroup]);
+  const reorderPinnedTodos = useCallback((reordered: PersonalTodo[]) => {
+    void personalTodos.reorderGroup('pinned', reordered);
+  }, [personalTodos.reorderGroup]);
+
+  const setPersonalTodoStatus = useCallback(async (todoId: string, status: PersonalTodoStatus) => {
+    const committed = await personalTodos.setStatus(todoId, status);
+    broadcastTodoChange();
+    return committed;
+  }, [broadcastTodoChange, personalTodos.setStatus]);
+
+  const setPersonalTodoPinned = useCallback(async (todoId: string, pinned: boolean) => {
+    await personalTodos.setPinned(todoId, pinned);
+    broadcastTodoChange();
+  }, [broadcastTodoChange, personalTodos.setPinned]);
 
   const updatePersonalTodo = useCallback(async (todoId: string, updates: Partial<PersonalTodo>) => {
     await personalTodos.patchTodo(todoId, updates);
@@ -430,6 +458,10 @@ export function useMyTasksData(isPopup: boolean): UseMyTasksDataResult {
     pendingScenes,
     doneScenes,
     activePersonalTodos,
+    personalTodoLabels: personalTodos.labels,
+    pinnedPersonalTodos: personalTodos.pinnedTodos,
+    normalPersonalTodos: personalTodos.normalTodos,
+    personalTodoSyncState,
     pendingPersonalTodos,
     donePersonalTodos,
     pendingCharacterTasks,
@@ -446,6 +478,10 @@ export function useMyTasksData(isPopup: boolean): UseMyTasksDataResult {
     togglePersonalTodo,
     removePersonalTodo,
     reorderPendingTodos,
+    reorderPinnedTodos,
     updatePersonalTodo,
+    setPersonalTodoStatus,
+    setPersonalTodoPinned,
+    retryPersonalTodoSync: personalTodos.retrySync,
   };
 }

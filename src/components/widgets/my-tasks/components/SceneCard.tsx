@@ -3,7 +3,7 @@
  *
  * SceneCard: 썸네일(가이드 > 스보 > 없음, onError 폴백) + EP>파트 오버레이 + #번호/메모 +
  *   4단계 칩(StageChips) 토글. 본문/이미지 클릭 → 상세모달. hover → 본체 이동/제거.
- * TodoCard: 이미지 없는 컴팩트 카드(::개인 라벨 + 좌측 원형 체크 + 제목/메모). isHighlighted 승계.
+ * TodoCard는 별도 컴포넌트에서 이미지 없는 개인 할일 카드를 담당한다.
  * (이미지 카드와 텍스트 카드는 MyTasksWidget이 그리드 섹션을 나눠 섞지 않는다.)
  */
 import { useState, useEffect } from 'react';
@@ -15,7 +15,6 @@ import { stripEntityTokens } from '@/utils/entityTokens';
 import { cn } from '@/utils/cn';
 import type { SceneKey, FlatScene, PersonalTodo } from '../types';
 import { StageChips } from './StageChips';
-import { SuccessCheckCircle } from './SuccessCheckCircle';
 import { currentStageInfo } from '../stageInfo';
 
 interface SceneCardProps {
@@ -32,7 +31,6 @@ interface SceneCardProps {
   enterDelay?: number;
   reduce?: boolean;
 }
-
 export function SceneCard({
   flat, deptCfg, epLabel, sceneNum, pct, isRemovable,
   onToggle, onRemove, onOpenDetail, onNavigateToMain,
@@ -122,59 +120,6 @@ export function SceneCard({
           </button>
         )}
       </div>
-    </motion.div>
-  );
-}
-
-interface TodoCardProps {
-  todo: PersonalTodo;
-  onToggle: (id: string) => void;
-  onRemove: (id: string) => void;
-  onOpenDetail: (todo: PersonalTodo) => void;
-  isHighlighted?: boolean;
-  enterDelay?: number;
-  reduce?: boolean;
-}
-
-export function TodoCard({ todo, onToggle, onRemove, onOpenDetail, isHighlighted, enterDelay = 0, reduce = false }: TodoCardProps) {
-  const memoText = todo.memo ? stripEntityTokens(todo.memo) : '';
-  return (
-    <motion.div
-      ref={isHighlighted ? (el: HTMLDivElement | null) => { el?.scrollIntoView({ behavior: 'smooth', block: 'center' }); } : undefined}
-      initial={{ opacity: 0 }}
-      animate={{ opacity: 1 }}
-      transition={{ duration: reduce ? 0 : 0.25, delay: enterDelay }}
-      className={cn(
-        'group relative flex flex-col gap-1.5 rounded-lg border bg-bg-card p-2 min-h-[92px] transition-[border-color,box-shadow]',
-        todo.completed ? 'opacity-60 border-bg-border/30' : 'border-bg-border/40 hover:border-bg-border/70 hover:shadow-[0_4px_18px_-6px_rgba(108,92,231,0.5)]',
-        isHighlighted && 'ring-1 ring-accent/60 animate-pulse',
-      )}
-    >
-      <div className="flex items-center gap-1.5">
-        <SuccessCheckCircle
-          completed={todo.completed}
-          onToggle={() => onToggle(todo.id)}
-          title={todo.completed ? '완료됨 · 누르면 해제' : '완료로 표시'}
-          reduce={reduce}
-        />
-        <span className="text-[10px] font-bold text-accent">::ᅠ개인</span>
-        <button
-          onClick={(e) => { e.stopPropagation(); onRemove(todo.id); }}
-          className="ml-auto p-1 text-red-400/60 hover:text-red-400 rounded cursor-pointer opacity-0 group-hover:opacity-100 transition-all shrink-0"
-        >
-          <X size={12} />
-        </button>
-      </div>
-      <button
-        type="button"
-        onClick={() => onOpenDetail(todo)}
-        className="flex flex-col gap-0.5 text-left cursor-pointer flex-1 min-w-0"
-      >
-        <span className={cn('text-[12px] text-text-primary line-clamp-2', todo.completed && 'line-through text-text-secondary/50')}>
-          {todo.title}
-        </span>
-        {memoText && <span className="text-[10px] text-text-secondary/50 truncate">{memoText}</span>}
-      </button>
     </motion.div>
   );
 }

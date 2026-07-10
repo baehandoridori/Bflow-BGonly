@@ -7,6 +7,7 @@ import {
   createPersonalTodo,
   getPriorityPresentation,
   getTodoNextAction,
+  movePersonalTodoToGroupTail,
   normalizePersonalTodo,
   reassemblePersonalTodos,
   splitPersonalTodos,
@@ -80,6 +81,29 @@ test('reassemblePersonalTodos uses group order and removes duplicate ids', () =>
     reassemblePersonalTodos({ pinned: [pinned], normal: [duplicate, normal], done: [done] }).map((todo) => todo.id),
     ['pinned', 'normal', 'done'],
   );
+});
+
+test('status and pin transitions append the todo to its target group tail', () => {
+  const pinned = normalizePersonalTodo({ id: 'pinned', title: 'Pinned', pinned: true });
+  const normal = normalizePersonalTodo({ id: 'normal', title: 'Normal' });
+  const done = normalizePersonalTodo({ id: 'done', title: 'Done', status: 'done' });
+  const pinnedAtTail = movePersonalTodoToGroupTail(
+    [pinned, normal],
+    { ...normal, pinned: true },
+  );
+  assert.deepEqual(pinnedAtTail.map((todo) => todo.id), ['pinned', 'normal']);
+
+  const doneAtTail = movePersonalTodoToGroupTail(
+    [...pinnedAtTail, done],
+    { ...pinnedAtTail[0], status: 'done', completed: true },
+  );
+  assert.deepEqual(doneAtTail.map((todo) => todo.id), ['normal', 'done', 'pinned']);
+
+  const reopenedAtNormalTail = movePersonalTodoToGroupTail(
+    doneAtTail,
+    { ...doneAtTail[2], status: 'todo', completed: false, pinned: false },
+  );
+  assert.deepEqual(reopenedAtNormalTail.map((todo) => todo.id), ['normal', 'pinned', 'done']);
 });
 
 test('priority values never reorder input through split and reassemble', () => {
