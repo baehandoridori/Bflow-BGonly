@@ -598,38 +598,76 @@ export function onSupabaseStatusChange(callback: (status: string) => void): () =
 
 // ─── Personal Todos ──────────────────────────────
 
-export async function readTodos(userId: string) {
-  return window.electronAPI.supabaseReadTodos(userId);
+function unwrapPersonalTodoResult<T>(result: import('@/types').MainPersonalTodoResult<T>): T {
+  if (result.ok) return result.data;
+  const error = new Error(result.message) as Error & { kind: import('@/types').MainPersonalTodoFailureKind; code: string; retryable: boolean };
+  error.kind = result.kind;
+  error.code = result.code;
+  error.retryable = result.retryable;
+  throw error;
 }
 
-export async function upsertTodo(userId: string, todo: {
-  id?: string;
-  title: string;
-  memo: string;
-  completed: boolean;
-  startDate?: string | null;
-  endDate?: string | null;
-  addToCalendar?: boolean;
-  sortOrder?: number;
-  createdAt?: string;
-}): Promise<string> {
-  return window.electronAPI.supabaseUpsertTodo(userId, todo);
+export async function ensureCanonicalSession() {
+  return window.electronAPI.ensureCanonicalSession();
 }
 
-export async function deleteTodo(todoId: string): Promise<void> {
-  return window.electronAPI.supabaseDeleteTodo(todoId);
+export async function readPersonalTodos() {
+  return unwrapPersonalTodoResult(await window.electronAPI.readPersonalTodos());
 }
 
-export async function readTaskViews(userId: string) {
-  return window.electronAPI.supabaseReadTaskViews(userId);
+export const readTodos = readPersonalTodos;
+
+export async function readPersonalTodoLabels() {
+  return unwrapPersonalTodoResult(await window.electronAPI.readPersonalTodoLabels());
+}
+
+export async function createPersonalTodo(input: Parameters<NonNullable<typeof window.electronAPI>['createPersonalTodo']>[0]) {
+  return unwrapPersonalTodoResult(await window.electronAPI.createPersonalTodo(input));
+}
+
+export async function patchPersonalTodo(todoId: string, patch: import('@/types').MainPersonalTodoPatch) {
+  return unwrapPersonalTodoResult(await window.electronAPI.patchPersonalTodo(todoId, patch));
+}
+
+export async function applyCalendarToTodoPatch(todoId: string, patch: import('@/types').MainCalendarTodoPatch) {
+  return unwrapPersonalTodoResult(await window.electronAPI.applyCalendarToTodoPatch(todoId, patch));
+}
+
+export async function mutatePersonalTodoOrder(
+  mutation: Parameters<NonNullable<typeof window.electronAPI>['mutatePersonalTodoOrder']>[0],
+  orderedIds: string[],
+) {
+  return unwrapPersonalTodoResult(await window.electronAPI.mutatePersonalTodoOrder(mutation, orderedIds));
+}
+
+export async function deletePersonalTodo(todoId: string) {
+  return unwrapPersonalTodoResult(await window.electronAPI.deletePersonalTodo(todoId));
+}
+
+export const deleteTodo = deletePersonalTodo;
+
+export async function createOrReusePersonalTodoLabelAndAttach(
+  input: Parameters<NonNullable<typeof window.electronAPI>['createOrReusePersonalTodoLabelAndAttach']>[0],
+) {
+  return unwrapPersonalTodoResult(await window.electronAPI.createOrReusePersonalTodoLabelAndAttach(input));
+}
+
+export async function updatePersonalTodoLabel(
+  labelId: string,
+  patch: Parameters<NonNullable<typeof window.electronAPI>['updatePersonalTodoLabel']>[1],
+) {
+  return unwrapPersonalTodoResult(await window.electronAPI.updatePersonalTodoLabel(labelId, patch));
+}
+
+export async function readTaskViews() {
+  return unwrapPersonalTodoResult(await window.electronAPI.readLegacyTaskViews());
 }
 
 export async function upsertTaskViews(
-  userId: string,
   views: unknown[],
   assignedSceneKeys: unknown[],
 ): Promise<void> {
-  return window.electronAPI.supabaseUpsertTaskViews(userId, views, assignedSceneKeys);
+  unwrapPersonalTodoResult(await window.electronAPI.upsertLegacyTaskViews(views, assignedSceneKeys));
 }
 
 // ─── Memos ──────────────────────────────

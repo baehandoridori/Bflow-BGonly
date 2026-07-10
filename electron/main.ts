@@ -18,6 +18,10 @@ import { uploadImage as driveUploadImage, setImageUploadUrl } from './drive-imag
 import { uploadImage as storageUploadImage, deleteImage as storageDeleteImage, uploadCharacterImage as storageUploadCharacterImage } from './storage';
 // v1.20.0: 사용자 폰트 IPC + bflow-font:// custom protocol
 import { registerFontProtocol, registerFontIpcHandlers } from './fontIpc';
+import { PersonalTodoService } from './personalTodoService';
+import type { PersonalTodoCreateInput, PersonalTodoOrderMutation, PersonalTodoPatch, CalendarTodoPatch, PersonalTodoLabelColorKey } from './personalTodoService';
+import { SessionManager } from './sessionManager';
+import type { RememberedAuthSession, SessionUserRecord } from './sessionManager';
 // v1.21.0: 자동 업데이트 시스템 (G드라이브 → 로컬 PC 본체로 swap)
 import {
   runFirstInstallIfNeeded,
@@ -1324,8 +1328,12 @@ import {
   readMetadata as sbReadMetadata,
   writeMetadata as sbWriteMetadata,
   readTodos as sbReadTodos,
-  upsertTodo as sbUpsertTodo,
-  deleteTodo as sbDeleteTodo,
+  readTodo as sbReadTodo,
+  readTodoLabels as sbReadTodoLabels,
+  patchPersonalTodo as sbPatchPersonalTodo,
+  mutatePersonalTodoOrder as sbMutatePersonalTodoOrder,
+  createOrReusePersonalTodoLabelAndAttach as sbCreateOrReusePersonalTodoLabelAndAttach,
+  updatePersonalTodoLabel as sbUpdatePersonalTodoLabel,
   readTaskViews as sbReadTaskViews,
   upsertTaskViews as sbUpsertTaskViews,
   readMemo as sbReadMemo,
@@ -1426,11 +1434,10 @@ function wrapIpc<T extends unknown[], R>(
 }
 
 // ─── 활동 기록 헬퍼 ───
-// 렌더러가 useAuthStore 변경 시 'auth:set-current-user' 로 알려준다.
-// 메인은 이 정보로 자동 활동 기록 (mutation 핸들러에서 1줄 호출).
+// main-verified canonical session과 활동 기록 identity를 함께 갱신한다.
 let currentActivityUser: { id: string; name: string } | null = null;
 
-ipcMain.handle('auth:set-current-user', (_e, user: { id: string; name: string } | null) => {
+function setCanonicalActivityUser(user: { id: string; name: string } | null): void {
   const prev = currentActivityUser;
   currentActivityUser = user;
   const identityChanged = (prev?.id ?? null) !== (user?.id ?? null);
@@ -1445,6 +1452,71 @@ ipcMain.handle('auth:set-current-user', (_e, user: { id: string; name: string } 
   if (identityChanged) {
     try { editingPresence?.reset(); } catch { /* ignore */ }
   }
+}
+
+function readLocalUsersForSession(): SessionUserRecord[] {
+  migrateLegacyUsersFileIfNeeded();
+  try {
+    const raw = fs.readFileSync(getUsersFilePath(), { encoding: 'utf-8' });
+    const parsed = JSON.parse(Buffer.from(raw, 'base64').toString('utf-8')) as { users?: SessionUserRecord[] };
+    return Array.isArray(parsed.users) ? parsed.users : [];
+  } catch {
+    return [];
+  }
+}
+
+async function writeRememberedAuthSession(session: RememberedAuthSession | null): Promise<void> {
+  const authPath = path.join(getDataPath(), 'auth.json');
+  ensureDir(path.dirname(authPath));
+  const tempPath = `${authPath}.tmp`;
+  await fs.promises.writeFile(tempPath, JSON.stringify(session, null, 2), { encoding: 'utf-8' });
+  await fs.promises.rename(tempPath, authPath);
+}
+
+let sessionManager: SessionManager;
+const personalTodoService = new PersonalTodoService({
+  persistence: {
+    readTodos: sbReadTodos,
+    readTodo: sbReadTodo,
+    readLabels: sbReadTodoLabels,
+    patchTodo: sbPatchPersonalTodo,
+    mutateOrder: sbMutatePersonalTodoOrder,
+    createOrReuseLabelAndAttach: sbCreateOrReusePersonalTodoLabelAndAttach,
+    updateLabel: sbUpdatePersonalTodoLabel,
+    readTaskViews: sbReadTaskViews,
+    upsertTaskViews: sbUpsertTaskViews,
+  },
+  getCanonicalSession: () => ({
+    userId: sessionManager?.getCanonicalUserId() ?? null,
+    epoch: sessionManager?.getEpoch() ?? 0,
+  }),
+  onCommit: (payload) => broadcastToAllWindows('personal-todo:commit', payload),
+});
+
+sessionManager = new SessionManager({
+  readUsers: async () => {
+    try {
+      const users = await sbReadUsers();
+      if (users.length > 0) return users as unknown as SessionUserRecord[];
+    } catch (error) {
+      console.warn('[auth] Supabase 사용자 검증 실패 — 로컬 사용자 저장소 확인:', error);
+    }
+    return readLocalUsersForSession();
+  },
+  readRememberedSession: async () => {
+    try {
+      const raw = await fs.promises.readFile(path.join(getDataPath(), 'auth.json'), { encoding: 'utf-8' });
+      return JSON.parse(raw) as RememberedAuthSession | null;
+    } catch { return null; }
+  },
+  writeRememberedSession: writeRememberedAuthSession,
+  drainPersonalDataQueue: (userId) => personalTodoService.drainUser(userId),
+  flushCalendarJournal: async () => {},
+  setActivityUser: setCanonicalActivityUser,
+  broadcast: (payload) => {
+    lastKnownSession = payload;
+    broadcastToAllWindows('session:changed', payload);
+  },
 });
 
 import { supabase as supabaseClient, recordActivityLog as sbRecordActivityLog } from './supabase';
@@ -2428,27 +2500,27 @@ ipcMain.handle('supabase:get-activity', async (
 // 과거 onStatusChange 이벤트를 놓치지 않도록 최신 상태를 조회.
 ipcMain.handle('supabase:get-realtime-status', () => currentRealtimeStatus);
 
-// ─── Personal Todos IPC ──────────────────────────────
+// ─── Personal Todos IPC (main canonical session owns userId) ───
 
-ipcMain.handle('supabase:read-todos', wrapIpc(async (_e: unknown, userId: string) => {
-  return sbReadTodos(userId);
-}));
-
-ipcMain.handle('supabase:upsert-todo', wrapIpc(async (_e: unknown, userId: string, todo: unknown) => {
-  return sbUpsertTodo(userId, todo as Parameters<typeof sbUpsertTodo>[1]);
-}));
-
-ipcMain.handle('supabase:delete-todo', wrapIpc(async (_e: unknown, todoId: string) => {
-  return sbDeleteTodo(todoId);
-}));
-
-ipcMain.handle('supabase:read-task-views', wrapIpc(async (_e: unknown, userId: string) => {
-  return sbReadTaskViews(userId);
-}));
-
-ipcMain.handle('supabase:upsert-task-views', wrapIpc(async (_e: unknown, userId: string, views: unknown[], sceneKeys: unknown[]) => {
-  return sbUpsertTaskViews(userId, views, sceneKeys);
-}));
+ipcMain.handle('personal-todo:read', (_e, epoch?: number) => personalTodoService.readTodos(epoch));
+ipcMain.handle('personal-todo:read-labels', (_e, epoch?: number) => personalTodoService.readLabels(epoch));
+ipcMain.handle('personal-todo:create', (_e, input: PersonalTodoCreateInput, epoch?: number) =>
+  personalTodoService.createTodo(input, epoch));
+ipcMain.handle('personal-todo:patch', (_e, todoId: string, patch: PersonalTodoPatch, epoch?: number) =>
+  personalTodoService.patchTodo(todoId, patch, epoch));
+ipcMain.handle('personal-todo:calendar-patch', (_e, todoId: string, patch: CalendarTodoPatch, epoch?: number) =>
+  personalTodoService.applyCalendarPatch(todoId, patch, epoch));
+ipcMain.handle('personal-todo:mutate-order', (_e, mutation: PersonalTodoOrderMutation, orderedIds: string[], epoch?: number) =>
+  personalTodoService.mutateOrder(mutation, orderedIds, epoch));
+ipcMain.handle('personal-todo:delete', (_e, todoId: string, epoch?: number) =>
+  personalTodoService.deleteTodo(todoId, epoch));
+ipcMain.handle('personal-todo:create-label-attach', (_e, input: { todoId: string; name: string; colorKey: PersonalTodoLabelColorKey }, epoch?: number) =>
+  personalTodoService.createOrReuseLabelAndAttach(input, epoch));
+ipcMain.handle('personal-todo:update-label', (_e, labelId: string, patch: { name?: string; colorKey?: PersonalTodoLabelColorKey }, epoch?: number) =>
+  personalTodoService.updateLabel(labelId, patch, epoch));
+ipcMain.handle('personal-todo:read-task-views', (_e, epoch?: number) => personalTodoService.readTaskViews(epoch));
+ipcMain.handle('personal-todo:upsert-task-views', (_e, views: unknown[], sceneKeys: unknown[], epoch?: number) =>
+  personalTodoService.upsertTaskViews(views, sceneKeys, epoch));
 
 // ─── Memos IPC ──────────────────────────────
 
@@ -3184,8 +3256,16 @@ ipcMain.handle('preferences:broadcast-change', (_event, payload: unknown) => {
   return { ok: true };
 });
 
-ipcMain.handle('session:broadcast-change', (_event, payload: unknown) => {
-  lastKnownSession = payload;
+ipcMain.handle('auth:login-session', (_event, input: { name: string; password: string; rememberMe?: boolean }) =>
+  sessionManager.login(input));
+ipcMain.handle('auth:restore-session', () => sessionManager.restore());
+ipcMain.handle('auth:ensure-canonical-session', () => sessionManager.ensure());
+ipcMain.handle('auth:logout-session', () => sessionManager.logout());
+ipcMain.handle('auth:refresh-canonical-user', () => sessionManager.refreshCurrentUser());
+
+// Legacy notification channel no longer accepts renderer session data.
+ipcMain.handle('session:broadcast-change', () => {
+  const payload = sessionManager.getCurrentPayload();
   broadcastToAllWindows('session:changed', payload);
   return { ok: true };
 });
@@ -3193,9 +3273,7 @@ ipcMain.handle('session:broadcast-change', (_event, payload: unknown) => {
 // 팝업이 onSessionChanged 구독 등록 후 명시적으로 재전송을 요청 — ready-to-show 타이밍 miss 방어.
 // event.sender.send로 요청한 창에만 전송 (broadcast 아님). lastKnownSession이 null이면 무응답.
 ipcMain.handle('session:request-current', (event) => {
-  if (lastKnownSession !== null) {
-    event.sender.send('session:changed', lastKnownSession);
-  }
+  event.sender.send('session:changed', sessionManager.getCurrentPayload());
   return { ok: true };
 });
 
@@ -4431,6 +4509,7 @@ app.whenReady().then(async () => {
 app.on('before-quit', (e) => {
   if (isQuitting) return;
   isQuitting = true;
+  personalTodoService.beginQuitting();
 
   // GCal Watch 채널 중지 (5초 타임아웃)
   const watchCleanup = gcal.stopAllWatches().catch(() => {});
@@ -4455,7 +4534,8 @@ app.on('before-quit', (e) => {
 
   const sheetsPending = getPendingOpsCount();
   const vacPending = getVacPendingOpsCount();
-  const totalPending = sheetsPending + vacPending;
+  const personalPending = personalTodoService.getPendingCount();
+  const totalPending = sheetsPending + vacPending + personalPending;
   // 자동 업데이트 installer 적용이 있으면 어떤 분기든 e.preventDefault + 비동기 chain 끝에 적용.
   // 기존 fire-and-forget 분기도 installer helper spawn 시점까지 대기 — race 위험 제거.
   e.preventDefault();
@@ -4476,18 +4556,22 @@ app.on('before-quit', (e) => {
   (async () => {
     try {
       if (totalPending > 0) {
-        const [, sheetsDone, vacDone] = await Promise.all([
+        const [, sheetsDone, vacDone, personalDone] = await Promise.all([
           watchWithTimeout,
           waitForAllPendingOps(15000),
           waitForVacPendingOps(60000),
+          personalTodoService.waitForIdle(15000),
         ]);
-        if (!sheetsDone || !vacDone) {
+        if (!sheetsDone || !vacDone || !personalDone) {
           console.warn('[종료] 타임아웃 — 일부 작업이 완료되지 않았을 수 있습니다');
         } else {
           console.log('[종료] 저장 완료, 앱을 종료합니다');
         }
       } else {
-        await watchWithTimeout.catch(() => { /* noop */ });
+        await Promise.all([
+          watchWithTimeout.catch(() => { /* noop */ }),
+          personalTodoService.waitForIdle(15000),
+        ]);
       }
 
       // ★ 자동 업데이트 적용 (마지막 step)

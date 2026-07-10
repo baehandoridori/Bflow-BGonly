@@ -7,6 +7,12 @@ import {
 } from './broadcast';
 import { deleteImage as storageDeleteImage } from './storage';
 import { createRetryManager } from './retry-utils';
+import type {
+  PersonalTodoLabelColorKey,
+  PersonalTodoLabelRecord,
+  PersonalTodoPatch,
+  PersonalTodoRecord,
+} from './personalTodoService';
 
 // ─── 일괄 작업 타입 ─────────────────────────────
 
@@ -2636,87 +2642,164 @@ async function resolvePartId(sheetName: string): Promise<string | null> {
 
 // ─── Personal Todos ──────────────────────────────
 
-export interface SupabaseTodo {
-  id: string;
-  userId: string;
-  title: string;
-  memo: string;
-  completed: boolean;
-  startDate: string | null;
-  endDate: string | null;
-  addToCalendar: boolean;
-  sortOrder: number;
-  createdAt: string;
-  updatedAt: string;
+function mapPersonalTodoRow(row: Record<string, any>): PersonalTodoRecord {
+  const status = (row.status ?? (row.completed ? 'done' : 'todo')) as PersonalTodoRecord['status'];
+  return {
+    id: row.id,
+    userId: row.user_id,
+    title: row.title,
+    memo: row.memo ?? '',
+    status,
+    completed: status === 'done',
+    priority: row.priority ?? 'none',
+    pinned: row.pinned === true,
+    labelIds: Array.isArray(row.label_ids) ? row.label_ids : [],
+    startDate: row.start_date ?? null,
+    endDate: row.end_date ?? null,
+    addToCalendar: row.add_to_calendar === true,
+    sortOrder: row.sort_order ?? 0,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
 }
 
-export async function readTodos(userId: string): Promise<SupabaseTodo[]> {
+function mapPersonalTodoLabelRow(row: Record<string, any>): PersonalTodoLabelRecord {
+  return {
+    id: row.id,
+    name: row.name,
+    colorKey: row.color_key,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
+function toPersonalTodoDbPatch(patch: PersonalTodoPatch): Record<string, unknown> {
+  const mapped: Record<string, unknown> = {};
+  if (patch.title !== undefined) mapped.title = patch.title;
+  if (patch.memo !== undefined) mapped.memo = patch.memo;
+  if (patch.startDate !== undefined) mapped.start_date = patch.startDate;
+  if (patch.endDate !== undefined) mapped.end_date = patch.endDate;
+  if (patch.addToCalendar !== undefined) mapped.add_to_calendar = patch.addToCalendar;
+  if (patch.status !== undefined) mapped.status = patch.status;
+  if (patch.priority !== undefined) mapped.priority = patch.priority;
+  if (patch.labelIds !== undefined) mapped.label_ids = [...new Set(patch.labelIds)];
+  return mapped;
+}
+
+function toDbMutation(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(toDbMutation);
+  if (!value || typeof value !== 'object') return value;
+  const source = value as Record<string, unknown>;
+  const mapped: Record<string, unknown> = {};
+  for (const [key, item] of Object.entries(source)) {
+    const dbKey = ({
+      todoId: 'todo_id', startDate: 'start_date', endDate: 'end_date',
+      addToCalendar: 'add_to_calendar', labelIds: 'label_ids',
+    } as Record<string, string>)[key] ?? key;
+    mapped[dbKey] = toDbMutation(item);
+  }
+  return mapped;
+}
+
+function unwrapRpcRow(value: unknown): Record<string, any> {
+  const row = Array.isArray(value) ? value[0] : value;
+  if (!row || typeof row !== 'object') throw new Error('Personal todo RPC returned no row');
+  return row as Record<string, any>;
+}
+
+export async function readTodos(userId: string): Promise<PersonalTodoRecord[]> {
   const { data, error } = await supabase
     .from('personal_todos')
     .select('*')
     .eq('user_id', userId)
     .order('sort_order');
   throwIfError(error);
-  return (data || []).map((r) => ({
-    id: r.id,
-    userId: r.user_id,
-    title: r.title,
-    memo: r.memo || '',
-    completed: r.completed,
-    startDate: r.start_date,
-    endDate: r.end_date,
-    addToCalendar: r.add_to_calendar,
-    sortOrder: r.sort_order ?? 0,
-    createdAt: r.created_at,
-    updatedAt: r.updated_at,
-  }));
+  return (data || []).map(mapPersonalTodoRow);
 }
 
-export async function upsertTodo(
+export async function readTodo(
   userId: string,
-  todo: {
-    id?: string;
-    title: string;
-    memo: string;
-    completed: boolean;
-    startDate?: string | null;
-    endDate?: string | null;
-    addToCalendar?: boolean;
-    sortOrder?: number;
-    createdAt?: string;
-  },
-): Promise<string> {
-  const now = new Date().toISOString();
-  // UUID 형식 검증: 기존 localStorage ID (ptodo_*)는 UUID가 아니므로 새 ID 생성
-  const isValidUuid = todo.id && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(todo.id);
-  const row = {
-    ...(isValidUuid ? { id: todo.id } : {}),
-    user_id: userId,
-    title: todo.title,
-    memo: todo.memo,
-    completed: todo.completed,
-    start_date: todo.startDate ?? null,
-    end_date: todo.endDate ?? null,
-    add_to_calendar: todo.addToCalendar ?? false,
-    sort_order: todo.sortOrder ?? 0,
-    created_at: todo.createdAt ?? now,
-    updated_at: now,
-  };
+  todoId: string,
+): Promise<PersonalTodoRecord | null> {
   const { data, error } = await supabase
     .from('personal_todos')
-    .upsert(row, { onConflict: 'id' })
-    .select('id')
-    .single();
+    .select('*')
+    .eq('user_id', userId)
+    .eq('id', todoId)
+    .maybeSingle();
   throwIfError(error);
-  return data!.id;
+  return data ? mapPersonalTodoRow(data) : null;
 }
 
-export async function deleteTodo(todoId: string): Promise<void> {
-  const { error } = await supabase
-    .from('personal_todos')
-    .delete()
-    .eq('id', todoId);
+export async function readTodoLabels(userId: string): Promise<PersonalTodoLabelRecord[]> {
+  const { data, error } = await supabase
+    .from('personal_todo_labels')
+    .select('*')
+    .eq('user_id', userId)
+    .order('name')
+    .order('created_at')
+    .order('id');
   throwIfError(error);
+  return (data || []).map(mapPersonalTodoLabelRow);
+}
+
+export async function patchPersonalTodo(userId: string, todoId: string, patch: PersonalTodoPatch): Promise<PersonalTodoRecord> {
+  const { data, error } = await supabase.rpc('patch_personal_todo', {
+    p_todo_id: todoId,
+    p_user_id: userId,
+    p_patch: toPersonalTodoDbPatch(patch),
+  });
+  throwIfError(error);
+  return mapPersonalTodoRow(unwrapRpcRow(data));
+}
+
+export async function mutatePersonalTodoOrder(
+  userId: string,
+  mutation: Record<string, unknown>,
+  orderedIds: string[],
+): Promise<PersonalTodoRecord[]> {
+  const { data, error } = await supabase.rpc('mutate_personal_todo_order', {
+    p_user_id: userId,
+    p_mutation: toDbMutation(mutation),
+    p_ordered_ids: orderedIds,
+  });
+  throwIfError(error);
+  return ((data ?? []) as Record<string, any>[]).map(mapPersonalTodoRow);
+}
+
+export async function createOrReusePersonalTodoLabelAndAttach(
+  userId: string,
+  input: { todoId: string; name: string; colorKey: PersonalTodoLabelColorKey },
+): Promise<{ label: PersonalTodoLabelRecord; todo: PersonalTodoRecord | null }> {
+  const { data, error } = await supabase.rpc('create_or_reuse_personal_todo_label_and_attach', {
+    p_todo_id: input.todoId,
+    p_user_id: userId,
+    p_name: input.name,
+    p_color_key: input.colorKey,
+  });
+  throwIfError(error);
+  const response = unwrapRpcRow(data);
+  return {
+    label: mapPersonalTodoLabelRow(response.label),
+    todo: response.todo ? mapPersonalTodoRow(response.todo) : null,
+  };
+}
+
+export async function updatePersonalTodoLabel(
+  userId: string,
+  labelId: string,
+  patch: { name?: string; colorKey?: PersonalTodoLabelColorKey },
+): Promise<PersonalTodoLabelRecord> {
+  const dbPatch: Record<string, unknown> = {};
+  if (patch.name !== undefined) dbPatch.name = patch.name;
+  if (patch.colorKey !== undefined) dbPatch.color_key = patch.colorKey;
+  const { data, error } = await supabase.rpc('update_personal_todo_label', {
+    p_label_id: labelId,
+    p_user_id: userId,
+    p_patch: dbPatch,
+  });
+  throwIfError(error);
+  return mapPersonalTodoLabelRow(unwrapRpcRow(data));
 }
 
 // ─── Task Views ──────────────────────────────

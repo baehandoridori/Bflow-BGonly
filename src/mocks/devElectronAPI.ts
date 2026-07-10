@@ -1014,11 +1014,23 @@ export function installDevElectronAPI(): void {
     onSupabaseBroadcast: noop,
 
     // ─── Personal Todos / Task Views mock ───
-    supabaseReadTodos: async () => [],
-    supabaseUpsertTodo: async () => 'mock-id',
-    supabaseDeleteTodo: async () => {},
-    supabaseReadTaskViews: async () => null,
-    supabaseUpsertTaskViews: async () => {},
+    ensureCanonicalSession: async () => ({ ok: true, payload: { user: null, session: null, epoch: 0 } }),
+    loginCanonicalSession: async () => ({ ok: false, payload: { user: null, session: null, epoch: 0 }, error: 'preview session unavailable' }),
+    restoreCanonicalSession: async () => ({ ok: true, payload: { user: null, session: null, epoch: 0 } }),
+    logoutCanonicalSession: async () => ({ ok: true, payload: { user: null, session: null, epoch: 0 } }),
+    refreshCanonicalUser: async () => ({ ok: true, payload: { user: null, session: null, epoch: 0 } }),
+    readPersonalTodos: async () => ({ ok: true, data: [] }),
+    readPersonalTodoLabels: async () => ({ ok: true, data: [] }),
+    createPersonalTodo: async () => ({ ok: true, data: [] }),
+    patchPersonalTodo: async () => ({ ok: false, kind: 'rejected', code: 'NOT_FOUND', message: 'not found', retryable: false }),
+    applyCalendarToTodoPatch: async () => ({ ok: false, kind: 'rejected', code: 'NOT_FOUND', message: 'not found', retryable: false }),
+    mutatePersonalTodoOrder: async () => ({ ok: true, data: [] }),
+    deletePersonalTodo: async () => ({ ok: true, data: [] }),
+    createOrReusePersonalTodoLabelAndAttach: async () => ({ ok: false, kind: 'rejected', code: 'NOT_FOUND', message: 'not found', retryable: false }),
+    updatePersonalTodoLabel: async () => ({ ok: false, kind: 'rejected', code: 'NOT_FOUND', message: 'not found', retryable: false }),
+    readLegacyTaskViews: async () => ({ ok: true, data: null }),
+    upsertLegacyTaskViews: async () => ({ ok: true, data: undefined }),
+    onPersonalTodoCommit: noop,
 
     // ─── Memos mock ───
     supabaseReadMemo: async () => null,
@@ -1072,7 +1084,6 @@ export function installDevElectronAPI(): void {
     onVacationPendingChanged: noop,
 
     // ─── 활동 기록 (mock 은 빈 결과) ─────────────
-    authSetCurrentUser: async () => {},
     activityList: async (opts) => filterMockActivities(opts),
     activityStats: async () => [],
     activityStatsV2: async () => [],

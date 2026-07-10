@@ -47,7 +47,9 @@ const CUSTOM_VIEW_TODOS_MIGRATED_KEY = 'bflow_customview_todos_migrated';
 
 async function loadTodosFromSupabase(userId: string): Promise<PersonalTodo[] | null> {
   try {
-    const rows = await supabaseService.readTodos(userId);
+    void userId;
+    await supabaseService.ensureCanonicalSession();
+    const rows = await supabaseService.readTodos();
     return rows.map(normalizePersonalTodo);
   } catch (err) {
     console.error('[MyTasks] Supabase 할일 로드 실패:', err);
@@ -57,17 +59,46 @@ async function loadTodosFromSupabase(userId: string): Promise<PersonalTodo[] | n
 
 /** Supabase에 할일 저장. 서버에서 확정된 UUID를 반환 (로컬 ID가 ptodo_* 등이면 새 UUID 생성) */
 async function saveTodoToSupabase(userId: string, todo: PersonalTodo, sortOrder?: number): Promise<string> {
-  return supabaseService.upsertTodo(userId, {
-    id: todo.id,
-    title: todo.title,
-    memo: todo.memo,
-    completed: todo.completed,
-    startDate: todo.startDate ?? null,
-    endDate: todo.endDate ?? null,
-    addToCalendar: todo.addToCalendar,
-    sortOrder: sortOrder ?? 0,
-    createdAt: todo.createdAt,
-  });
+  void userId;
+  const rows = await supabaseService.readTodos();
+  const existing = rows.find((row) => row.id === todo.id);
+  const targetStatus = todo.completed ? 'done' : todo.status === 'done' ? 'todo' : todo.status;
+  if (!existing) {
+    const canonical = await supabaseService.createPersonalTodo({
+      id: todo.id,
+      title: todo.title,
+      memo: todo.memo,
+      status: targetStatus,
+      priority: todo.priority,
+      pinned: todo.pinned,
+      labelIds: todo.labelIds,
+      startDate: todo.startDate ?? null,
+      endDate: todo.endDate ?? null,
+      addToCalendar: todo.addToCalendar,
+    });
+    return canonical.find((row) => row.id === todo.id)?.id ?? todo.id;
+  }
+  if (existing.status !== targetStatus && (existing.status === 'done' || targetStatus === 'done')) {
+    const ids = rows.map((row) => row.id);
+    await supabaseService.mutatePersonalTodoOrder({ type: 'status', todoId: todo.id, status: targetStatus }, ids);
+  } else {
+    await supabaseService.patchPersonalTodo(todo.id, {
+      title: todo.title,
+      memo: todo.memo,
+      status: targetStatus,
+      priority: todo.priority,
+      labelIds: todo.labelIds,
+      startDate: todo.startDate ?? null,
+      endDate: todo.endDate ?? null,
+      addToCalendar: todo.addToCalendar ?? false,
+    });
+  }
+  if (sortOrder !== undefined) {
+    const currentIds = rows.map((row) => row.id).filter((id) => id !== todo.id);
+    currentIds.splice(Math.max(0, Math.min(sortOrder, currentIds.length)), 0, todo.id);
+    await supabaseService.mutatePersonalTodoOrder({ type: 'reorder' }, currentIds);
+  }
+  return todo.id;
 }
 
 async function deleteTodoFromSupabase(todoId: string): Promise<void> {
@@ -77,7 +108,7 @@ async function deleteTodoFromSupabase(todoId: string): Promise<void> {
 /** assigned 뷰에서 수동 추가한 씬 키만 저장 (기존 커스텀뷰 todos는 init에서 마이그레이션 후 비움) */
 async function loadAssignedSceneKeysFromSupabase(userId: string): Promise<SceneKey[] | null> {
   try {
-    const data = await supabaseService.readTaskViews(userId);
+    const data = await supabaseService.readTaskViews();
     if (!data) return [];
     return data.assignedSceneKeys as SceneKey[];
   } catch (err) {
@@ -100,14 +131,14 @@ async function saveAssignedSceneKeysToSupabase(userId: string, sceneKeys: SceneK
 
   // 마이그레이션이 확정 완료된 경우: views를 빈 배열로 비워도 안전
   if (localStorage.getItem(migratedMarkerKey)) {
-    await supabaseService.upsertTaskViews(userId, [], sceneKeys);
+    await supabaseService.upsertTaskViews([], sceneKeys);
     return;
   }
 
   // 마이그레이션 미완료: 기존 views를 보존해야 한다
   let existingViews: unknown[];
   try {
-    const data = await supabaseService.readTaskViews(userId);
+    const data = await supabaseService.readTaskViews();
     existingViews = (data?.views ?? []) as unknown[];
   } catch (err) {
     // 읽기 실패 → 데이터 손실 방지를 위해 upsert를 건너뜀(views 안 건드림)
@@ -116,7 +147,7 @@ async function saveAssignedSceneKeysToSupabase(userId: string, sceneKeys: SceneK
     throw err;
   }
 
-  await supabaseService.upsertTaskViews(userId, existingViews, sceneKeys);
+  await supabaseService.upsertTaskViews(existingViews, sceneKeys);
 }
 
 async function migrateLocalStorageToSupabase(userId: string): Promise<void> {
@@ -137,16 +168,10 @@ async function migrateLocalStorageToSupabase(userId: string): Promise<void> {
       for (let i = 0; i < todos.length; i++) {
         if (migratedSet.has(i)) continue; // 이미 마이그레이션된 항목 스킵
         const todo = todos[i];
-        await supabaseService.upsertTodo(userId, {
-          title: todo.title,
-          memo: todo.memo,
-          completed: todo.completed,
-          startDate: todo.startDate ?? null,
-          endDate: todo.endDate ?? null,
-          addToCalendar: todo.addToCalendar,
-          sortOrder: i,
-          createdAt: todo.createdAt,
-        });
+        await saveTodoToSupabase(userId, normalizePersonalTodo({
+          ...todo,
+          id: /^[0-9a-f-]{36}$/i.test(todo.id) ? todo.id : createUuid(),
+        }), i);
         migratedSet.add(i);
         localStorage.setItem(migratedKey, JSON.stringify([...migratedSet]));
       }
@@ -180,17 +205,10 @@ async function migrateLocalStorageToSupabase(userId: string): Promise<void> {
             if (!todo?.id) continue;
             if (assignedIds.has(todo.id) || seenIds.has(todo.id)) continue; // id 기준 중복 제거
             seenIds.add(todo.id);
-            await supabaseService.upsertTodo(userId, {
-              id: todo.id,
-              title: todo.title,
-              memo: todo.memo,
-              completed: todo.completed,
-              startDate: todo.startDate ?? null,
-              endDate: todo.endDate ?? null,
-              addToCalendar: todo.addToCalendar,
-              sortOrder: viewTodoSortIndex++,
-              createdAt: todo.createdAt,
-            });
+            await saveTodoToSupabase(userId, normalizePersonalTodo({
+              ...todo,
+              id: /^[0-9a-f-]{36}$/i.test(todo.id) ? todo.id : createUuid(),
+            }), viewTodoSortIndex++);
           }
         }
       } catch (viewErr) {
@@ -204,7 +222,7 @@ async function migrateLocalStorageToSupabase(userId: string): Promise<void> {
     const assignedSceneKeys: SceneKey[] = rawSceneKeys ? JSON.parse(rawSceneKeys) : [];
     const mergedSceneKeys = [...new Set([...assignedSceneKeys, ...viewSceneKeys])];
     if (mergedSceneKeys.length > 0) {
-      await supabaseService.upsertTaskViews(userId, [], mergedSceneKeys);
+      await supabaseService.upsertTaskViews([], mergedSceneKeys);
     }
 
     localStorage.setItem(MIGRATION_DONE_KEY, 'true');
@@ -247,7 +265,7 @@ async function migrateCustomViewTodosToAssigned(
 
   let data: { views: unknown[]; assignedSceneKeys: unknown[] } | null;
   try {
-    data = await supabaseService.readTaskViews(userId);
+    data = await supabaseService.readTaskViews();
   } catch (err) {
     // 읽기 실패 시 기존 데이터 보호: 마이그레이션 스킵(마커도 남기지 않아 다음에 재시도)
     console.error('[MyTasks] 커스텀 뷰 할일 마이그레이션 읽기 실패 — 스킵:', err);
@@ -283,7 +301,7 @@ async function migrateCustomViewTodosToAssigned(
   if (candidates.length === 0) {
     // 옮길 할일이 없어도 sceneKeys 병합은 필요할 수 있으므로 정리 시도
     try {
-      await supabaseService.upsertTaskViews(userId, [], mergedSceneKeys);
+      await supabaseService.upsertTaskViews([], mergedSceneKeys);
       // 저장 성공 후에만 마커 설정 — 실패 시 마커를 남기지 않아 다음 실행에서 재시도
       localStorage.setItem(migratedMarkerKey, 'true');
     } catch (err) {
@@ -312,7 +330,7 @@ async function migrateCustomViewTodosToAssigned(
 
   // P1: 마이그레이션 성공 → views 를 비우고 커스텀 뷰 sceneKeys를 assignedSceneKeys에 병합
   try {
-    await supabaseService.upsertTaskViews(userId, [], mergedSceneKeys);
+    await supabaseService.upsertTaskViews([], mergedSceneKeys);
     localStorage.setItem(migratedMarkerKey, 'true');
   } catch (err) {
     // 정리 실패해도 할일 저장은 성공했고, 후속 씬키 save effect 가 views 를 [] 로 덮으므로

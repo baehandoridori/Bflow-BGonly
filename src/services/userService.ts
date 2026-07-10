@@ -10,7 +10,6 @@
 import type { AppUser, UsersFile, AuthSession } from '@/types';
 import { createUuid } from '@/utils/createUuid';
 
-const AUTH_FILE = 'auth.json'; // APPDATA 로컬 저장
 const DEFAULT_PASSWORD = '1234';
 
 // ─── 모드 관리 ──────────────────────────────────
@@ -159,64 +158,26 @@ export async function login(
   password: string,
   rememberMe: boolean = true,
 ): Promise<{ ok: boolean; user?: AppUser; error?: string }> {
-  const users = await loadUsers();
-  const user = users.find((u) => u.name === name);
-  if (!user) return { ok: false, error: '등록되지 않은 사용자입니다.' };
-  if (user.password !== password) return { ok: false, error: '비밀번호가 일치하지 않습니다.' };
-
-  // 세션 저장 (rememberMe 활성 시에만)
-  if (rememberMe) {
-    const session: AuthSession = {
-      userId: user.id,
-      userName: user.name,
-      loggedInAt: new Date().toISOString(),
-    };
-    await window.electronAPI.writeSettings(AUTH_FILE, session);
-  } else {
-    await window.electronAPI.writeSettings(AUTH_FILE, null);
-  }
-  return { ok: true, user };
+  const result = await window.electronAPI.loginCanonicalSession({ name, password, rememberMe });
+  const user = result.payload.user;
+  return result.ok && user
+    ? { ok: true, user: { ...user, password: '' } as AppUser }
+    : { ok: false, error: result.error ?? '로그인에 실패했습니다.' };
 }
 
 export async function logout(): Promise<void> {
-  await window.electronAPI.writeSettings(AUTH_FILE, null);
+  const result = await window.electronAPI.logoutCanonicalSession();
+  if (!result.ok) throw new Error(result.error ?? '로그아웃에 실패했습니다.');
 }
 
 export async function loadSession(): Promise<{ session: AuthSession | null; user: AppUser | null }> {
-  let session: AuthSession | null = null;
-  try {
-    session = (await window.electronAPI.readSettings(AUTH_FILE)) as AuthSession | null;
-  } catch (err) {
-    console.warn('[auth] auth.json 읽기 실패:', err);
-    return { session: null, user: null };
-  }
-  if (!session) {
-    console.info('[auth] auth.json 미존재 — 로그인 필요');
-    return { session: null, user: null };
-  }
-  if (!session.userId) {
-    console.warn('[auth] session.userId 누락 — 세션 무효', session);
-    return { session: null, user: null };
-  }
-  let users: AppUser[];
-  try {
-    users = await loadUsers();
-  } catch (err) {
-    // loadUsers 실패도 복구 가능한 시나리오로 취급 → 앱 초기화 전체 실패 방지
-    console.warn('[auth] 사용자 목록 로드 실패 — 세션 복원 불가:', err);
-    return { session: null, user: null };
-  }
-  const user = users.find((u) => u.id === session!.userId) ?? null;
-  if (!user) {
-    console.warn('[auth] 세션 userId에 매칭되는 사용자 없음 — 세션 유지, user만 null', { sessionUserId: session.userId, userCount: users.length });
-    // auth.json 을 null 로 덮어쓰지 않는다. sheetsMode=false 상태의 로컬 폴백(SEED_USER만)
-    // 매칭 실패가 많은데, logout() 을 호출하면 Supabase 연결 직전에 세션이 파괴되어
-    // 재시도 경로(App.tsx init)에서도 복원할 수 없게 된다. 실제로 삭제된 사용자라면
-    // 다음 로그인 시 새 userId 로 auth.json 이 덮어써진다.
-    return { session: null, user: null };
-  }
-  console.info('[auth] 세션 복원 성공', { userId: user.id, name: user.name });
-  return { session, user };
+  const result = await window.electronAPI.restoreCanonicalSession();
+  const user = result.payload.user;
+  if (!result.ok || !user) return { session: null, user: null };
+  return {
+    session: result.payload.session,
+    user: { ...user, password: '' } as AppUser,
+  };
 }
 
 export function isInitialPassword(user: AppUser): boolean {

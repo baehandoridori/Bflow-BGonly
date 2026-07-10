@@ -1160,110 +1160,28 @@ function TodayView({
    ═══════════════════════════════════════════════════ */
 
 async function syncCalendarToTodo(todoId: string, calEvent: CalendarEvent) {
-  const userId = useAuthStore.getState().currentUser?.id;
-  if (!userId) return;
-
   const supabaseService = await import('@/services/supabaseService');
-
-  // 1) 기본 뷰의 할일(personal_todos)에서 찾기
   try {
-    const todos = await supabaseService.readTodos(userId);
-    const matched = todos.find((t: any) => t.id === todoId);
-    if (matched) {
-      await supabaseService.upsertTodo(userId, {
-        id: matched.id,
-        title: calEvent.title,
-        memo: calEvent.memo,
-        completed: matched.completed,
-        startDate: calEvent.startDate || null,
-        endDate: calEvent.endDate || null,
-        addToCalendar: matched.addToCalendar,
-        sortOrder: matched.sortOrder,
-        createdAt: matched.createdAt,
-      });
-      window.dispatchEvent(new Event('bflow:todos-changed'));
-      window.dispatchEvent(new CustomEvent('bflow:calendar-changed', { detail: { eventId: calEvent.id, action: 'update' } }));
-      return;
-    }
+    await supabaseService.applyCalendarToTodoPatch(todoId, {
+      title: calEvent.title,
+      memo: calEvent.memo,
+      startDate: calEvent.startDate || null,
+      endDate: calEvent.endDate || null,
+      addToCalendar: true,
+    });
+    window.dispatchEvent(new Event('bflow:todos-changed'));
   } catch (err) {
     console.warn('[ScheduleView] 할일 역동기화 실패:', err);
-  }
-
-  // 2) 커스텀 뷰의 personalTodos에서 찾기 → task_views에 저장
-  try {
-    const viewsData = await supabaseService.readTaskViews(userId);
-    if (!viewsData) return;
-    const views = viewsData.views as any[];
-    let mutated = false;
-    for (const view of views) {
-      if (!view.personalTodos) continue;
-      const idx = view.personalTodos.findIndex((t: any) => t.id === todoId);
-      if (idx >= 0) {
-        view.personalTodos[idx] = { ...view.personalTodos[idx], title: calEvent.title, memo: calEvent.memo, startDate: calEvent.startDate, endDate: calEvent.endDate };
-        mutated = true;
-        break;
-      }
-    }
-    if (mutated) {
-      await supabaseService.upsertTaskViews(userId, views, viewsData.assignedSceneKeys as any[]);
-      window.dispatchEvent(new Event('bflow:todos-changed'));
-      window.dispatchEvent(new CustomEvent('bflow:calendar-changed', { detail: { eventId: calEvent.id, action: 'update' } }));
-    }
-  } catch (err) {
-    console.warn('[ScheduleView] 뷰 할일 역동기화 실패:', err);
   }
 }
 
 async function unlinkTodoFromCalendar(todoId: string) {
-  const userId = useAuthStore.getState().currentUser?.id;
-  if (!userId) return;
-
   const supabaseService = await import('@/services/supabaseService');
-
-  // 1) 기본 뷰의 할일
   try {
-    const todos = await supabaseService.readTodos(userId);
-    const matched = todos.find((t: any) => t.id === todoId);
-    if (matched) {
-      await supabaseService.upsertTodo(userId, {
-        id: matched.id,
-        title: matched.title,
-        memo: matched.memo,
-        completed: matched.completed,
-        startDate: matched.startDate,
-        endDate: matched.endDate,
-        addToCalendar: false,
-        sortOrder: matched.sortOrder,
-        createdAt: matched.createdAt,
-      });
-      window.dispatchEvent(new Event('bflow:todos-changed'));
-      return;
-    }
+    await supabaseService.applyCalendarToTodoPatch(todoId, { addToCalendar: false });
+    window.dispatchEvent(new Event('bflow:todos-changed'));
   } catch (err) {
     console.warn('[ScheduleView] 할일 링크 해제 실패:', err);
-  }
-
-  // 2) 커스텀 뷰
-  try {
-    const viewsData = await supabaseService.readTaskViews(userId);
-    if (!viewsData) return;
-    const views = viewsData.views as any[];
-    let mutated = false;
-    for (const view of views) {
-      if (!view.personalTodos) continue;
-      const idx = view.personalTodos.findIndex((t: any) => t.id === todoId);
-      if (idx >= 0) {
-        view.personalTodos[idx] = { ...view.personalTodos[idx], addToCalendar: false };
-        mutated = true;
-        break;
-      }
-    }
-    if (mutated) {
-      await supabaseService.upsertTaskViews(userId, views, viewsData.assignedSceneKeys as any[]);
-      window.dispatchEvent(new Event('bflow:todos-changed'));
-    }
-  } catch (err) {
-    console.warn('[ScheduleView] 뷰 할일 링크 해제 실패:', err);
   }
 }
 

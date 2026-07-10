@@ -1,5 +1,13 @@
 import { contextBridge, ipcRenderer, webUtils } from 'electron';
 import type { BulkStageUpdate, BulkFieldUpdate, BulkUpdateResult } from './supabase';
+import type { CalendarTodoPatch, PersonalTodoCreateInput, PersonalTodoLabelColorKey, PersonalTodoOrderMutation, PersonalTodoPatch } from './personalTodoService';
+import type { SessionActionResult } from './sessionManager';
+
+let canonicalSessionEpoch = 0;
+function rememberSessionEpoch(result: SessionActionResult): SessionActionResult {
+  if (result?.payload && typeof result.payload.epoch === 'number') canonicalSessionEpoch = result.payload.epoch;
+  return result;
+}
 
 contextBridge.exposeInMainWorld('electronAPI', {
   // 앱 설정
@@ -284,23 +292,43 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.invoke('supabase:get-activity', opts) as Promise<Array<{ startTs: number; count: number }>>,
   supabaseGetRealtimeStatus: () =>
     ipcRenderer.invoke('supabase:get-realtime-status') as Promise<string>,
-  // ─── Personal Todos / Task Views ──────────────────
-  supabaseReadTodos: (userId: string) => ipcRenderer.invoke('supabase:read-todos', userId),
-  supabaseUpsertTodo: (userId: string, todo: unknown) => ipcRenderer.invoke('supabase:upsert-todo', userId, todo),
-  supabaseDeleteTodo: (todoId: string) => ipcRenderer.invoke('supabase:delete-todo', todoId),
-  supabaseReadTaskViews: (userId: string) => ipcRenderer.invoke('supabase:read-task-views', userId),
-  supabaseUpsertTaskViews: (userId: string, views: unknown[], sceneKeys: unknown[]) =>
-    ipcRenderer.invoke('supabase:upsert-task-views', userId, views, sceneKeys),
+  // ─── Personal Todos / Task Views (ownership stays in main) ──
+  ensureCanonicalSession: () =>
+    ipcRenderer.invoke('auth:ensure-canonical-session').then(rememberSessionEpoch),
+  loginCanonicalSession: (input: { name: string; password: string; rememberMe?: boolean }) =>
+    ipcRenderer.invoke('auth:login-session', input).then(rememberSessionEpoch),
+  restoreCanonicalSession: () =>
+    ipcRenderer.invoke('auth:restore-session').then(rememberSessionEpoch),
+  logoutCanonicalSession: () =>
+    ipcRenderer.invoke('auth:logout-session').then(rememberSessionEpoch),
+  refreshCanonicalUser: () =>
+    ipcRenderer.invoke('auth:refresh-canonical-user').then(rememberSessionEpoch),
+  readPersonalTodos: () => ipcRenderer.invoke('personal-todo:read', canonicalSessionEpoch),
+  readPersonalTodoLabels: () => ipcRenderer.invoke('personal-todo:read-labels', canonicalSessionEpoch),
+  createPersonalTodo: (input: PersonalTodoCreateInput) => ipcRenderer.invoke('personal-todo:create', input, canonicalSessionEpoch),
+  patchPersonalTodo: (todoId: string, patch: PersonalTodoPatch) => ipcRenderer.invoke('personal-todo:patch', todoId, patch, canonicalSessionEpoch),
+  applyCalendarToTodoPatch: (todoId: string, patch: CalendarTodoPatch) => ipcRenderer.invoke('personal-todo:calendar-patch', todoId, patch, canonicalSessionEpoch),
+  mutatePersonalTodoOrder: (mutation: PersonalTodoOrderMutation, orderedIds: string[]) =>
+    ipcRenderer.invoke('personal-todo:mutate-order', mutation, orderedIds, canonicalSessionEpoch),
+  deletePersonalTodo: (todoId: string) => ipcRenderer.invoke('personal-todo:delete', todoId, canonicalSessionEpoch),
+  createOrReusePersonalTodoLabelAndAttach: (input: { todoId: string; name: string; colorKey: PersonalTodoLabelColorKey }) =>
+    ipcRenderer.invoke('personal-todo:create-label-attach', input, canonicalSessionEpoch),
+  updatePersonalTodoLabel: (labelId: string, patch: { name?: string; colorKey?: PersonalTodoLabelColorKey }) =>
+    ipcRenderer.invoke('personal-todo:update-label', labelId, patch, canonicalSessionEpoch),
+  readLegacyTaskViews: () => ipcRenderer.invoke('personal-todo:read-task-views', canonicalSessionEpoch),
+  upsertLegacyTaskViews: (views: unknown[], sceneKeys: unknown[]) =>
+    ipcRenderer.invoke('personal-todo:upsert-task-views', views, sceneKeys, canonicalSessionEpoch),
+  onPersonalTodoCommit: (callback: (payload: unknown) => void) => {
+    const listener = (_event: Electron.IpcRendererEvent, payload: unknown) => callback(payload);
+    ipcRenderer.on('personal-todo:commit', listener);
+    return () => ipcRenderer.removeListener('personal-todo:commit', listener);
+  },
   supabaseReadMemo: (userId: string, widgetId: string) =>
     ipcRenderer.invoke('supabase:read-memo', userId, widgetId),
   supabaseUpsertMemo: (userId: string, widgetId: string, data: unknown) =>
     ipcRenderer.invoke('supabase:upsert-memo', userId, widgetId, data),
   supabaseReadAllMemos: (userId: string) =>
     ipcRenderer.invoke('supabase:read-all-memos', userId),
-
-  // 활동 기록 — 메인에 currentUser 알리기 (mutation 자동 기록 시 사용)
-  authSetCurrentUser: (user: { id: string; name: string } | null) =>
-    ipcRenderer.invoke('auth:set-current-user', user),
 
   // 활동 기록 (activity_log)
   activityList: (opts: {
@@ -563,7 +591,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.invoke('session:request-current'),
 
   onSessionChanged: (callback: (payload: unknown) => void) => {
-    const listener = (_event: Electron.IpcRendererEvent, payload: unknown) => callback(payload);
+    const listener = (_event: Electron.IpcRendererEvent, payload: unknown) => {
+      const epoch = (payload as { epoch?: unknown } | null)?.epoch;
+      if (typeof epoch === 'number') canonicalSessionEpoch = epoch;
+      callback(payload);
+    };
     ipcRenderer.on('session:changed', listener);
     return () => ipcRenderer.removeListener('session:changed', listener);
   },

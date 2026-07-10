@@ -1,0 +1,176 @@
+export interface SessionUserRecord extends Record<string, unknown> {
+  id: string;
+  name: string;
+  password?: string;
+}
+
+export interface SanitizedSessionUser extends Record<string, unknown> {
+  id: string;
+  name: string;
+}
+
+export interface RememberedAuthSession {
+  userId: string;
+  userName: string;
+  loggedInAt: string;
+}
+
+export interface CanonicalSessionPayload {
+  user: SanitizedSessionUser | null;
+  session: RememberedAuthSession | null;
+  epoch: number;
+}
+
+export interface SessionActionResult {
+  ok: boolean;
+  payload: CanonicalSessionPayload;
+  error?: string;
+}
+
+export interface SessionManagerDependencies {
+  readUsers(): Promise<SessionUserRecord[]>;
+  readRememberedSession(): Promise<RememberedAuthSession | null>;
+  writeRememberedSession(session: RememberedAuthSession | null): Promise<void>;
+  drainPersonalDataQueue(userId: string): Promise<void>;
+  flushCalendarJournal(): Promise<void>;
+  setActivityUser(user: { id: string; name: string } | null): void;
+  broadcast(payload: CanonicalSessionPayload): void;
+}
+
+export function sanitizeSessionUser(user: SessionUserRecord): SanitizedSessionUser {
+  const { password: _password, ...sanitized } = user;
+  return sanitized as SanitizedSessionUser;
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+/**
+ * The only authority for the personal-data owner. Login input contains a
+ * password, but every stored/broadcast payload is sanitized before leaving the
+ * main process.
+ */
+export class SessionManager {
+  private payload: CanonicalSessionPayload = { user: null, session: null, epoch: 0 };
+  private transitionTail: Promise<void> = Promise.resolve();
+  private readonly dependencies: SessionManagerDependencies;
+
+  constructor(dependencies: SessionManagerDependencies) { this.dependencies = dependencies; }
+
+  getCurrentPayload(): CanonicalSessionPayload {
+    return {
+      ...this.payload,
+      user: this.payload.user ? { ...this.payload.user } : null,
+      session: this.payload.session ? { ...this.payload.session } : null,
+    };
+  }
+
+  getCanonicalUserId(): string | null {
+    return this.payload.user?.id ?? null;
+  }
+
+  getEpoch(): number {
+    return this.payload.epoch;
+  }
+
+  private serialize<T>(operation: () => Promise<T>): Promise<T> {
+    const result = this.transitionTail.then(operation, operation);
+    this.transitionTail = result.then(() => undefined, () => undefined);
+    return result;
+  }
+
+  private async prepareTransition(nextUserId: string | null): Promise<void> {
+    const currentUserId = this.getCanonicalUserId();
+    if (currentUserId && currentUserId !== nextUserId) {
+      await this.dependencies.drainPersonalDataQueue(currentUserId);
+      await this.dependencies.flushCalendarJournal();
+    }
+  }
+
+  private publish(user: SessionUserRecord | null, session: RememberedAuthSession | null): CanonicalSessionPayload {
+    const previousId = this.getCanonicalUserId();
+    const nextUser = user ? sanitizeSessionUser(user) : null;
+    const nextId = nextUser?.id ?? null;
+    const nextEpoch = previousId === nextId ? this.payload.epoch : this.payload.epoch + 1;
+    this.payload = { user: nextUser, session, epoch: nextEpoch };
+    this.dependencies.setActivityUser(nextUser ? { id: nextUser.id, name: nextUser.name } : null);
+    this.dependencies.broadcast(this.getCurrentPayload());
+    return this.getCurrentPayload();
+  }
+
+  login(input: { name: string; password: string; rememberMe?: boolean }): Promise<SessionActionResult> {
+    return this.serialize(async () => {
+      try {
+        const users = await this.dependencies.readUsers();
+        const user = users.find((candidate) => candidate.name === input.name);
+        if (!user) return { ok: false, payload: this.getCurrentPayload(), error: '등록되지 않은 사용자입니다.' };
+        if (user.password !== input.password) {
+          return { ok: false, payload: this.getCurrentPayload(), error: '비밀번호가 일치하지 않습니다.' };
+        }
+        await this.prepareTransition(user.id);
+        const session: RememberedAuthSession = {
+          userId: user.id,
+          userName: user.name,
+          loggedInAt: new Date().toISOString(),
+        };
+        await this.dependencies.writeRememberedSession(input.rememberMe === false ? null : session);
+        return { ok: true, payload: this.publish(user, session) };
+      } catch (error) {
+        return { ok: false, payload: this.getCurrentPayload(), error: errorMessage(error) };
+      }
+    });
+  }
+
+  restore(): Promise<SessionActionResult> {
+    return this.serialize(async () => {
+      try {
+        if (this.getCanonicalUserId()) return { ok: true, payload: this.getCurrentPayload() };
+        const remembered = await this.dependencies.readRememberedSession();
+        if (!remembered?.userId) return { ok: true, payload: this.getCurrentPayload() };
+        const users = await this.dependencies.readUsers();
+        const user = users.find((candidate) => candidate.id === remembered.userId);
+        if (!user) return { ok: false, payload: this.getCurrentPayload(), error: '저장된 사용자를 찾을 수 없습니다.' };
+        return { ok: true, payload: this.publish(user, remembered) };
+      } catch (error) {
+        return { ok: false, payload: this.getCurrentPayload(), error: errorMessage(error) };
+      }
+    });
+  }
+
+  ensure(): Promise<SessionActionResult> {
+    if (this.getCanonicalUserId()) return Promise.resolve({ ok: true, payload: this.getCurrentPayload() });
+    return this.restore();
+  }
+
+  logout(): Promise<SessionActionResult> {
+    return this.serialize(async () => {
+      try {
+        await this.prepareTransition(null);
+        await this.dependencies.writeRememberedSession(null);
+        return { ok: true, payload: this.publish(null, null) };
+      } catch (error) {
+        return { ok: false, payload: this.getCurrentPayload(), error: errorMessage(error) };
+      }
+    });
+  }
+
+  refreshCurrentUser(): Promise<SessionActionResult> {
+    return this.serialize(async () => {
+      try {
+        const currentId = this.getCanonicalUserId();
+        if (!currentId) return { ok: true, payload: this.getCurrentPayload() };
+        const users = await this.dependencies.readUsers();
+        const user = users.find((candidate) => candidate.id === currentId);
+        if (!user) {
+          await this.prepareTransition(null);
+          await this.dependencies.writeRememberedSession(null);
+          return { ok: true, payload: this.publish(null, null) };
+        }
+        return { ok: true, payload: this.publish(user, this.payload.session) };
+      } catch (error) {
+        return { ok: false, payload: this.getCurrentPayload(), error: errorMessage(error) };
+      }
+    });
+  }
+}
