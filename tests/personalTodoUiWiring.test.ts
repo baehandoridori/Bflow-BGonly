@@ -88,3 +88,9 @@ test('label picker secondary actions keep visible focus rings', () => {
   assert.match(picker, /onClick=\{\(\) => void submitEdit\(\)\}[\s\S]*focus-visible:ring/);
   assert.match(picker, /setCreateOpen\(false\)[\s\S]*focus-visible:ring/);
 });
+
+test('nested picker Escape keeps focus inside picker before modal close', () => {
+  const picker = read('src/components/widgets/my-tasks/components/TodoLabelPicker.tsx');
+  assert.match(picker, /setEditingId\(null\);\s*rootRef\.current\?\.focus\(\)/);
+  assert.match(picker, /setCreateOpen\(false\);\s*setCreateName\(''\);\s*rootRef\.current\?\.focus\(\)/);
+});

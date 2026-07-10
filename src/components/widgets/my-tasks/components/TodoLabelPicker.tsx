@@ -133,9 +133,11 @@ export function TodoLabelPicker({
     event.stopPropagation();
     if (editingId) {
       setEditingId(null);
+      rootRef.current?.focus();
     } else if (createOpen) {
       setCreateOpen(false);
       setCreateName('');
+      rootRef.current?.focus();
     } else {
       onClose();
     }
