@@ -77,7 +77,7 @@ function defaultSeed(userId: string): MainPersonalTodo[] {
       id: `preview-${userId}-todo-2`, title: '완료된 프리뷰 할일', memo: '', status: 'done', completed: true,
       priority: 'none', pinned: false, labelIds: [], createdAt: SEED_TIME,
     }, userId, 1),
-  ];
+  ].map((todo) => ({ ...todo, updatedAt: SEED_TIME }));
 }
 
 export interface PersonalTodoPreviewStore {
@@ -133,8 +133,13 @@ export function createPersonalTodoPreviewStore(
       })) as MainPersonalTodo[];
     } catch { return []; }
   };
-  const writeRows = (rows: MainPersonalTodo[]) => {
-    storage.setItem(todoKey, JSON.stringify(rows.map((row, index) => ({ ...row, userId, sortOrder: index, updatedAt: now() }))));
+  const writeRows = (rows: MainPersonalTodo[], deterministic = false) => {
+    storage.setItem(todoKey, JSON.stringify(rows.map((row, index) => ({
+      ...row,
+      userId,
+      sortOrder: index,
+      updatedAt: deterministic ? (row.updatedAt || SEED_TIME) : now(),
+    }))));
     notify();
   };
   const readLabelRows = (): MainPersonalTodoLabel[] => {
@@ -156,7 +161,7 @@ export function createPersonalTodoPreviewStore(
     replaceTodos: (todos) => writeRows(todos.map((todo, index) => toMainTodo(todo, userId, index))),
     replaceLabels: (labels) => writeLabelRows(labels.map((label) => ({ ...label, updatedAt: now() }))),
     seedDeterministic: () => {
-      if (readRows().length === 0) writeRows(defaultSeed(userId));
+      if (readRows().length === 0) writeRows(defaultSeed(userId), true);
     },
     reset: () => { storage.removeItem(todoKey); storage.removeItem(labelKey); notify(); },
     subscribe: (listener) => { listeners.add(listener); return () => listeners.delete(listener); },
@@ -183,16 +188,22 @@ export function createPersonalTodoPreviewStore(
       const rows = readRows();
       const target = rows.find((row) => row.id === todoId);
       if (!target) throw new Error('not found');
-      const next = toMainTodo(normalizePersonalTodo({ ...toRendererTodo(target), ...patch, startDate: patch.startDate ?? undefined, endDate: patch.endDate ?? undefined, status: patch.status ?? target.status, completed: (patch.status ?? target.status) === 'done' }), userId, target.sortOrder);
+      const merged: Record<string, unknown> = { ...toRendererTodo(target) };
+      for (const [key, value] of Object.entries(patch)) if (value !== undefined) merged[key] = value;
+      const next = toMainTodo(normalizePersonalTodo({ ...merged, status: patch.status ?? target.status, completed: (patch.status ?? target.status) === 'done' }), userId, target.sortOrder);
       writeRows(rows.map((row) => row.id === todoId ? next : row));
       return readRows().find((row) => row.id === todoId)!;
     },
     applyCalendarToTodoPatch: (todoId, patch) => {
-      const allowed: MainPersonalTodoPatch = { title: patch.title, memo: patch.memo, startDate: patch.startDate, endDate: patch.endDate, addToCalendar: patch.addToCalendar };
       const rows = readRows();
       const target = rows.find((row) => row.id === todoId);
       if (!target) throw new Error('not found');
-      const next = toMainTodo(normalizePersonalTodo({ ...toRendererTodo(target), ...allowed, startDate: allowed.startDate ?? undefined, endDate: allowed.endDate ?? undefined }), userId, target.sortOrder);
+      const merged: Record<string, unknown> = { ...toRendererTodo(target) };
+      const allowed: MainCalendarTodoPatch = patch;
+      for (const key of ['title', 'memo', 'startDate', 'endDate', 'addToCalendar'] as const) {
+        if (allowed[key] !== undefined) merged[key] = allowed[key] ?? undefined;
+      }
+      const next = toMainTodo(normalizePersonalTodo(merged), userId, target.sortOrder);
       writeRows(rows.map((row) => row.id === todoId ? next : row));
       return readRows().find((row) => row.id === todoId)!;
     },

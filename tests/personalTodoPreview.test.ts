@@ -30,7 +30,10 @@ test('preview store has deterministic seed and reset helpers', () => {
   store.seedDeterministic();
   const seeded = store.readTodos();
   assert.ok(seeded.length > 0);
+  const firstSnapshot = JSON.stringify(seeded);
   store.replaceTodos([]);
+  store.seedDeterministic();
+  assert.equal(JSON.stringify(store.readTodos()), firstSnapshot);
   resetPersonalTodoPreview(storage);
   assert.deepEqual(createPersonalTodoPreviewStore(storage, 'alice').readTodos(), []);
 });
@@ -82,4 +85,27 @@ test('scene-key persistence preserves legacy task views before migration marker'
   const source = readFileSync('src/components/widgets/my-tasks/hooks/useMyTasksData.ts', 'utf8');
   assert.match(source, /hasPersonalTodoMigrationRun/);
   assert.match(source, /upsertTaskViews\(existing\?\.views \?\? \[\], sceneKeys\)/);
+});
+
+test('todo calendar creation supplies dates and unknown outcomes retry once', () => {
+  const source = readFileSync('src/components/widgets/my-tasks/hooks/usePersonalTodos.ts', 'utf8');
+  assert.match(source, /const persistedTodo = todo\.addToCalendar/);
+  assert.match(source, /let retried = false/);
+  assert.match(source, /&& !retried/);
+});
+
+test('empty global legacy storage does not mark a second user as migrated', () => {
+  const source = readFileSync('src/components/widgets/my-tasks/hooks/usePersonalTodos.ts', 'utf8');
+  assert.match(source, /migration\.todos\.length === 0 && migration\.sceneKeys\.length === 0/);
+  assert.match(source, /do not mark this user as migrated/i);
+});
+
+test('preview partial patches preserve omitted todo and calendar fields', () => {
+  const storage = createMemoryStorage();
+  const store = createPersonalTodoPreviewStore(storage, 'alice');
+  store.replaceTodos([createPersonalTodo({ id: 'todo-1', title: '원래 제목', memo: '메모', startDate: '2026-07-01', endDate: '2026-07-02', addToCalendar: true })]);
+  const patched = store.patchTodo('todo-1', { memo: '새 메모' });
+  assert.deepEqual({ title: patched.title, memo: patched.memo, startDate: patched.startDate, endDate: patched.endDate }, { title: '원래 제목', memo: '새 메모', startDate: '2026-07-01', endDate: '2026-07-02' });
+  const calendarPatched = store.applyCalendarToTodoPatch('todo-1', { addToCalendar: false });
+  assert.deepEqual({ title: calendarPatched.title, memo: calendarPatched.memo, startDate: calendarPatched.startDate, endDate: calendarPatched.endDate, addToCalendar: calendarPatched.addToCalendar }, { title: '원래 제목', memo: '새 메모', startDate: '2026-07-01', endDate: '2026-07-02', addToCalendar: false });
 });

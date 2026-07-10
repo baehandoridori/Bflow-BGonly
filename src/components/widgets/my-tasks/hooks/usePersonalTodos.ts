@@ -160,6 +160,9 @@ export function usePersonalTodos(): UsePersonalTodosResult {
     })) return;
     if (!legacyResult.ok) return;
     const migration = collectLegacyPersonalTodos(localStorage, legacyResult.ok && legacyResult.data ? legacyResult.data.views : []);
+    // Legacy storage predates user scoping. If another user already consumed
+    // the global keys, do not mark this user as migrated from an empty read.
+    if (migration.todos.length === 0 && migration.sceneKeys.length === 0) return;
     for (const todo of migration.todos) {
       if (!isPersonalTodoIntentCurrent({ epoch, userId, generation }, { epoch: sessionEpochRef.current, userId: useAuthStore.getState().currentUser?.id ?? null, generation: loadGenerationRef.current })) return;
       const result = await api().createPersonalTodo(toMainInput(todo));
@@ -206,8 +209,8 @@ export function usePersonalTodos(): UsePersonalTodosResult {
       const canonicalUserId = session.payload.user?.id ?? null;
       if (session.payload.epoch > sessionEpochRef.current || canonicalUserId !== userIdRef.current) {
         sessionEpochRef.current = Math.max(sessionEpochRef.current, session.payload.epoch);
-        mutationStateRef.current.sessionEpoch = sessionEpochRef.current;
       }
+      mutationStateRef.current.sessionEpoch = sessionEpochRef.current;
       if (canonicalUserId !== userId) {
         publishBaseline({ todos: [], labels: [] }, false);
         setLoading(false);
@@ -287,16 +290,21 @@ export function usePersonalTodos(): UsePersonalTodosResult {
     });
     try {
       let result: MainPersonalTodoResult<unknown>;
+      let retried = false;
       try {
         result = await execute();
       } catch (error) {
         if (!isUnknown(error)) throw error;
         // IPC can reject instead of returning a typed unknown result. Treat
         // that shape exactly like the bridge result and retry once.
+        retried = true;
         result = await execute();
       }
       if (!isCurrentIntent()) return;
-      if (!result.ok && result.kind === 'unknown') result = await execute();
+      if (!result.ok && result.kind === 'unknown' && !retried) {
+        retried = true;
+        result = await execute();
+      }
       if (!isCurrentIntent()) return;
       if (!result.ok && result.kind === 'unknown') {
         const authoritative = await readAuthoritative(loadGenerationRef.current, epoch);
@@ -331,8 +339,11 @@ export function usePersonalTodos(): UsePersonalTodosResult {
   }, [currentUser?.id, publishBaseline, readAuthoritative]);
 
   const addTodo = useCallback(async (todo: PersonalTodo) => {
-    const next = [...todos, todo];
-    await runMutation(makePersonalTodoMutationKey('todo', todo.id, serialRef.current + 1), next, labels, () => api().createPersonalTodo(toMainInput(todo)), false);
+    const persistedTodo = todo.addToCalendar && !todo.startDate && !todo.endDate
+      ? { ...todo, startDate: new Date().toISOString().slice(0, 10), endDate: new Date().toISOString().slice(0, 10) }
+      : todo;
+    const next = [...todos, persistedTodo];
+    await runMutation(makePersonalTodoMutationKey('todo', persistedTodo.id, serialRef.current + 1), next, labels, () => api().createPersonalTodo(toMainInput(persistedTodo)), false);
   }, [labels, runMutation, todos]);
 
   const patchTodo = useCallback(async (todoId: string, patch: Partial<PersonalTodo>) => {
