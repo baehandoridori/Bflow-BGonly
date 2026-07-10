@@ -63,6 +63,7 @@ export function TodoCard({ todo, resolvedLabels = [], syncState = 'idle', onNext
           <button
             type="button"
             onClick={() => openDetail?.(todo)}
+            data-personal-todo-memo-preview
             className="text-[10px] text-text-secondary/50 truncate text-left cursor-pointer"
             title="클릭하여 상세 보기/편집"
           >

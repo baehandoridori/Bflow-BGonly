@@ -89,10 +89,11 @@ export function TodoRow({
         </button>
         {todo.memo && (
           <div
-            onClick={(event) => {
+          onClick={(event) => {
               if ((event.target as HTMLElement).closest('button, a')) return;
               openDetail?.(todo);
             }}
+            data-personal-todo-memo-preview
             className="text-[11px] text-text-secondary/50 truncate cursor-pointer"
             title="클릭하여 상세 보기/편집"
           >

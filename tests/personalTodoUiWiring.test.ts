@@ -4,6 +4,13 @@ import test from 'node:test';
 
 const read = (path: string) => readFileSync(path, 'utf8');
 
+test('widget keeps add visible and reveals completed calendar targets', () => {
+  const source = read('src/components/widgets/MyTasksWidget.tsx');
+  assert.match(source, /aria-label=["']개인 할일 추가["']/);
+  assert.match(source, /setShowDone\(true\)/);
+  assert.match(source, /setFilterDone\(false\)/);
+});
+
 test('pinned personal section renders before scene and character work', () => {
   const source = read('src/components/widgets/MyTasksWidget.tsx');
   assert.ok(source.indexOf('<PinnedTodoSection') < source.indexOf('sceneTodos.map'));

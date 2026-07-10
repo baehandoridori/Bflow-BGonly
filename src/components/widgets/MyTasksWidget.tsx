@@ -524,6 +524,20 @@ export function MyTasksWidget() {
     }
   };
 
+  // 캘린더의 "할일로 이동" 신호는 완료 항목도 바로 찾을 수 있게 한다.
+  // 완료 필터를 먼저 해제하고 섹션을 펼치면 hook의 highlight 상태가 마운트된 행에
+  // 전달되어 행 자체가 스크롤·강조된다.
+  useEffect(() => {
+    const handler = (event: Event) => {
+      const todoId = (event as CustomEvent<{ todoId?: string }>).detail?.todoId;
+      if (!todoId || !donePersonalTodos.some((todo) => todo.id === todoId)) return;
+      setFilterDone(false);
+      setShowDone(true);
+    };
+    window.addEventListener('bflow:navigate-to-todo', handler);
+    return () => window.removeEventListener('bflow:navigate-to-todo', handler);
+  }, [donePersonalTodos]);
+
   const navigateToCharacterTask = (task: CharacterTaskItem) => {
     if (isPopup) return;
     setPendingCharacterBoardRequest({ characterId: task.characterId });
@@ -747,18 +761,19 @@ export function MyTasksWidget() {
     <Widget
       title="내 할일"
       icon={<CheckSquare size={14} />}
-      headerRight={
-        <>
-          <button
-            onClick={() => setShowQuickAdd((v) => !v)}
-            data-quickadd-toggle
-            className={cn(
-              'p-0.5 cursor-pointer transition-colors',
-              showQuickAdd ? 'text-accent' : 'text-text-secondary/40 hover:text-text-secondary',
-            )}
-            title="할일 추가"
-          >
-            <Plus size={12} />
+          headerRight={
+            <>
+              <button
+                onClick={() => setShowQuickAdd((v) => !v)}
+                data-quickadd-toggle
+                className={cn(
+                  'inline-flex min-h-8 min-w-8 items-center justify-center rounded-md cursor-pointer transition-colors',
+                  showQuickAdd ? 'bg-accent/15 text-accent' : 'text-accent hover:bg-accent/10',
+                )}
+                aria-label="개인 할일 추가"
+                title="할일 추가"
+              >
+                <Plus size={14} />
           </button>
           <button
             onClick={toggleViewMode}
@@ -780,7 +795,7 @@ export function MyTasksWidget() {
         </>
       }
     >
-      <div className="relative flex flex-col h-full gap-0">
+          <div className="my-tasks-widget-content relative flex flex-col h-full gap-0">
         {/* 모든 할일 완료 축하 콘페티 (사용자 완료 토글로 진행 0 전이 시 1회, reduce면 생략) */}
         {!reduce && celebrateKey > 0 && <Confetti key={celebrateKey} />}
         {/* 진행 히어로 (도넛) + 빠른 추가 */}

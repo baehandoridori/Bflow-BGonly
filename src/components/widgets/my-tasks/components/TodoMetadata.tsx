@@ -59,8 +59,8 @@ export function TodoMetadata({ todo, resolvedLabels, syncState = 'idle', onToggl
       </span>
       <span className="text-text-secondary/35" aria-hidden="true">·</span>
       <span className="text-text-secondary/60 shrink-0">{statusLabels[todo.status]}</span>
-      {labels.map((label) => (
-        <span key={label.id} className={cn('px-1 py-0.5 rounded truncate max-w-[92px]', labelClass[label.colorKey])} title={label.name}>
+      {labels.map((label, index) => (
+        <span key={label.id} data-personal-todo-label-index={index} className={cn('px-1 py-0.5 rounded truncate max-w-[92px]', labelClass[label.colorKey])} title={label.name}>
           {label.name}
         </span>
       ))}

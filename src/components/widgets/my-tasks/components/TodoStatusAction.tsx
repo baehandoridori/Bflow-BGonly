@@ -13,12 +13,12 @@ interface TodoStatusActionProps {
 export function TodoStatusAction({ status, disabled = false, syncState = 'idle', onAction, onRetry }: TodoStatusActionProps) {
   const next = getTodoNextAction(status);
   return (
-    <div className="flex items-center gap-1 shrink-0">
+    <div className="flex items-center gap-1 shrink-0" data-personal-todo-status-action>
       <button
         type="button"
         onClick={(event) => { event.stopPropagation(); onAction(); }}
         disabled={disabled}
-        className="px-1.5 py-1 rounded border border-accent/30 text-accent/85 hover:bg-accent/10 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer text-[10px] font-medium whitespace-nowrap"
+        className="min-w-[56px] px-1.5 py-1 rounded border border-accent/30 text-accent/85 hover:bg-accent/10 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer text-[10px] font-medium whitespace-nowrap"
         aria-label={`다음 상태: ${next.label}`}
       >
         {next.label}
