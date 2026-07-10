@@ -13,6 +13,7 @@ import { cn } from '@/utils/cn';
 import { createUuid } from '@/utils/createUuid';
 import type { CharacterTaskItem, SceneKey, PersonalTodo, FlatScene } from './my-tasks/types';
 import { makeKey } from './my-tasks/types';
+import { createPersonalTodo } from './my-tasks/personalTodoDomain';
 import { useMyTasksData, scenePct } from './my-tasks/hooks/useMyTasksData';
 import { ModalPortal } from './my-tasks/components/ModalPortal';
 import { TodoDetailModal } from './my-tasks/components/TodoDetailModal';
@@ -97,7 +98,7 @@ function AddTaskModal({
 
   const handleAddPersonalTodo = () => {
     if (!todoTitle.trim()) return;
-    onAddPersonalTodo({
+    onAddPersonalTodo(createPersonalTodo({
       id: createUuid(),
       title: todoTitle.trim(),
       memo: todoMemo.trim(),
@@ -106,7 +107,7 @@ function AddTaskModal({
       startDate: todoStartDate || undefined,
       endDate: todoEndDate || undefined,
       addToCalendar: todoAddToCalendar || undefined,
-    });
+    }));
     onClose();
   };
 
@@ -502,13 +503,13 @@ export function MyTasksWidget() {
   const handleQuickAddPersonal = (title: string) => {
     const t = title.trim();
     if (!t) return;
-    addPersonalTodo({
+    addPersonalTodo(createPersonalTodo({
       id: createUuid(),
       title: t,
       memo: '',
       completed: false,
       createdAt: new Date().toISOString(),
-    });
+    }));
   };
 
   // 팝업에서 모달이 하나라도 열려 있는지 — 열려 있으면 창을 모달이 들어갈 만큼 키운다.

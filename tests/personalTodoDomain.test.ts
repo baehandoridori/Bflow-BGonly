@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 
 import {
   applyPersonalTodoStatus,
@@ -78,6 +79,39 @@ test('reassemblePersonalTodos uses group order and removes duplicate ids', () =>
   assert.deepEqual(
     reassemblePersonalTodos({ pinned: [pinned], normal: [duplicate, normal], done: [done] }).map((todo) => todo.id),
     ['pinned', 'normal', 'done'],
+  );
+});
+
+test('priority values never reorder input through split and reassemble', () => {
+  const todos = [
+    normalizePersonalTodo({ id: 'low', title: 'Low', priority: 'low' }),
+    normalizePersonalTodo({ id: 'high', title: 'High', priority: 'high' }),
+    normalizePersonalTodo({ id: 'none', title: 'None', priority: 'none' }),
+    normalizePersonalTodo({ id: 'medium', title: 'Medium', priority: 'medium' }),
+  ];
+
+  assert.deepEqual(
+    reassemblePersonalTodos(splitPersonalTodos(todos)).map((todo) => todo.id),
+    ['low', 'high', 'none', 'medium'],
+  );
+});
+
+test('runtime load and creation paths use the canonical personal todo boundary', () => {
+  const dataHook = readFileSync(
+    new URL('../src/components/widgets/my-tasks/hooks/useMyTasksData.ts', import.meta.url),
+    'utf8',
+  );
+  const widget = readFileSync(
+    new URL('../src/components/widgets/MyTasksWidget.tsx', import.meta.url),
+    'utf8',
+  );
+
+  assert.match(dataHook, /import \{ normalizePersonalTodo \} from '\.\.\/personalTodoDomain';/);
+  assert.match(dataHook, /return rows\.map\(normalizePersonalTodo\);/);
+  assert.match(widget, /import \{ createPersonalTodo \} from '\.\/my-tasks\/personalTodoDomain';/);
+  assert.equal(
+    widget.match(/(?:onAddPersonalTodo|addPersonalTodo)\(createPersonalTodo\(\{/g)?.length,
+    2,
   );
 });
 

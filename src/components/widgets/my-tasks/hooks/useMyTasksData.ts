@@ -22,6 +22,7 @@ import {
 import * as supabaseService from '@/services/supabaseService';
 import type { CharacterTaskItem, SceneKey, PersonalTodo, TaskView, FlatScene, StageSaveBaseline } from '../types';
 import { createStageSaveBaseline } from '../types';
+import { normalizePersonalTodo } from '../personalTodoDomain';
 import { computeMyTasksStats } from '../statsUtils';
 import type { MyTasksStats } from '../statsUtils';
 import { useMyCharacterTasks } from './useMyCharacterTasks';
@@ -47,16 +48,7 @@ const CUSTOM_VIEW_TODOS_MIGRATED_KEY = 'bflow_customview_todos_migrated';
 async function loadTodosFromSupabase(userId: string): Promise<PersonalTodo[] | null> {
   try {
     const rows = await supabaseService.readTodos(userId);
-    return rows.map((r: any) => ({
-      id: r.id,
-      title: r.title,
-      memo: r.memo,
-      completed: r.completed,
-      createdAt: r.createdAt,
-      startDate: r.startDate ?? undefined,
-      endDate: r.endDate ?? undefined,
-      addToCalendar: r.addToCalendar,
-    }));
+    return rows.map(normalizePersonalTodo);
   } catch (err) {
     console.error('[MyTasks] Supabase 할일 로드 실패:', err);
     return null;
