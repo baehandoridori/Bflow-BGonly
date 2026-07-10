@@ -30,8 +30,18 @@ function flat(
   } as unknown as FlatScene;
 }
 
-function todo(completed: boolean): PersonalTodo {
-  return { id: `t_${Math.random()}`, title: 't', memo: '', completed, createdAt: '' };
+function todo(status: PersonalTodo['status'], completed = status === 'done'): PersonalTodo {
+  return {
+    id: `t_${Math.random()}`,
+    title: 't',
+    memo: '',
+    status,
+    completed,
+    priority: 'none',
+    pinned: false,
+    labelIds: [],
+    createdAt: '',
+  };
 }
 
 function charTask(id: string, done: boolean): CharacterTaskItem {
@@ -65,7 +75,7 @@ test('빈 상태(씬 0·개인 0)는 0으로 안전하게 떨어진다', () => {
 });
 
 test('씬 0개 + 개인 할일만 있어도 개인 진행률이 반영된다', () => {
-  const s = computeMyTasksStats([], [todo(true), todo(false)], NOW);
+  const s = computeMyTasksStats([], [todo('done'), todo('todo')], NOW);
   assert.equal(s.sceneTotal, 0);
   assert.equal(s.personalTotal, 2);
   assert.equal(s.characterTotal, 0);
@@ -73,6 +83,16 @@ test('씬 0개 + 개인 할일만 있어도 개인 진행률이 반영된다', (
   assert.equal(s.total, 2);
   assert.equal(s.pct, 50); // 개인 2개 중 1개 완료 = 50%
   assert.equal(s.stageProgressPct, 0); // 씬 0개라 도넛 채움은 0
+});
+
+test('개인 할일은 doing을 미완료로, done만 완료로 계산한다', () => {
+  const doing = computeMyTasksStats([], [todo('doing', true)], NOW);
+  assert.equal(doing.fullyDone, 0);
+  assert.equal(doing.pct, 0);
+
+  const done = computeMyTasksStats([], [todo('done', false)], NOW);
+  assert.equal(done.fullyDone, 1);
+  assert.equal(done.pct, 100);
 });
 
 test('캐릭터 디자인/리깅 작업은 개인 할일처럼 1칸씩 통계에 반영된다', () => {

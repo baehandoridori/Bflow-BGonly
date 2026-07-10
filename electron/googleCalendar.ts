@@ -276,6 +276,7 @@ export async function listCalendars(): Promise<Array<{ id: string; summary: stri
 // ─── 이벤트 CRUD ──────────────────────────────
 
 export interface GCalEventInput {
+  id?: string;
   summary: string;
   description?: string;
   startDate: string;       // YYYY-MM-DD (종일) 또는 ISO datetime
@@ -297,6 +298,7 @@ export async function insertEvent(calendarId: string, input: GCalEventInput): Pr
   const res = await getCalendarApi().events.insert({
     calendarId,
     requestBody: {
+      id: input.id,
       summary: input.summary,
       description: input.description,
       start: isAllDay ? { date: input.startDate } : { dateTime: input.startDate },

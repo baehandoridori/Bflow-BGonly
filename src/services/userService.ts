@@ -4,14 +4,12 @@
  * Phase 0-4: Google Sheets _USERS 탭 동기화
  * - 시트 연결 시: _USERS 탭에서 읽기/쓰기
  * - 미연결 시: 로컬 users.dat 폴백
- * - 비밀번호: Base64 인코딩 (양방향 — 비밀번호 찾기 가능)
+ * - 비밀번호 검증/변경은 메인 프로세스만 수행하며 렌더러 목록에는 노출하지 않음
  */
 
-import type { AppUser, UsersFile, AuthSession } from '@/types';
+import type { AppUser, AuthSession, PublicUserDirectory } from '@/types';
 import { createUuid } from '@/utils/createUuid';
-
-const AUTH_FILE = 'auth.json'; // APPDATA 로컬 저장
-const DEFAULT_PASSWORD = '1234';
+import { selectVisibleUsers } from './userDirectoryPolicy';
 
 // ─── 모드 관리 ──────────────────────────────────
 
@@ -22,15 +20,13 @@ export function setUsersSheetsMode(enabled: boolean): void {
 }
 
 // ─── 최초 사용자 (파일이 없을 때 자동 시드) ────
-// 비밀번호는 코드에 하드코딩하지 않는다 (production 번들에 평문 노출 방지).
-// 빈 사용자 목록에서 시드되더라도 빈 password 로는 로그인 매칭 불가 → Supabase Studio 에서 별도 설정.
-// 실 운영은 Supabase 사용자 row 가 살아있어 이 시드 fallback 자체가 거의 호출되지 않으므로 영향 없음.
+// 실 운영은 Supabase 사용자 row가 기준이며, 이 객체는 목록 표시용 fallback일 뿐
+// 로그인 자격 증명을 만들거나 변경하지 않는다.
 
 const SEED_USER: AppUser = {
   id: '00000000-0000-0000-0000-000000000001',
   name: '배한솔',
   slackId: 'U05DFV9UAN5',
-  password: '',
   isInitialPassword: true,
   createdAt: '2025-01-01T00:00:00.000Z',
   role: 'admin',
@@ -39,12 +35,12 @@ const SEED_USER: AppUser = {
 // ─── 사용자 목록 ─────────────────────────────────
 
 export async function loadUsers(): Promise<AppUser[]> {
+  let remoteDirectory: PublicUserDirectory | null = null;
   if (sheetsMode) {
     try {
-      const rawUsers = await window.electronAPI.supabaseReadUsers();
-      const users = rawUsers as AppUser[];
-      if (users.length > 0) {
-        return users.map(u => ({
+      remoteDirectory = await window.electronAPI.supabaseReadUsers();
+      if (remoteDirectory.status === 'authoritative' || remoteDirectory.users.length > 0) {
+        return selectVisibleUsers(remoteDirectory, []).map(u => ({
           ...u,
           hireDate: u.hireDate || undefined,
           birthday: u.birthday || undefined,
@@ -60,20 +56,13 @@ export async function loadUsers(): Promise<AppUser[]> {
   try {
     const data = await window.electronAPI.usersRead();
     if (data && Array.isArray(data.users) && data.users.length > 0) {
-      return data.users;
+      return selectVisibleUsers(remoteDirectory, data.users);
     }
   } catch (err) {
     console.error('[사용자] 로드 실패:', err);
   }
   // 파일 없거나 비어있으면 최초 사용자 시드
-  const seeded = [{ ...SEED_USER }];
-  await saveUsers(seeded);
-  return seeded;
-}
-
-export async function saveUsers(users: AppUser[]): Promise<void> {
-  const data: UsersFile = { users };
-  await window.electronAPI.usersWrite(data);
+  return [{ ...SEED_USER }];
 }
 
 export async function addUser(
@@ -84,7 +73,6 @@ export async function addUser(
     id: createUuid(),
     name,
     slackId,
-    password: DEFAULT_PASSWORD,
     isInitialPassword: true,
     createdAt: new Date().toISOString(),
     hireDate,
@@ -95,32 +83,25 @@ export async function addUser(
   if (sheetsMode) {
     try {
       await window.electronAPI.supabaseAddUser(newUser);
+      return newUser;
     } catch (err) {
-      console.error('[사용자] 시트 추가 실패:', err);
+      console.error('[사용자] 시트 추가 실패, 로컬 폴백:', err);
     }
-    // 시트에서 다시 로드하여 로컬에 동기화 (중복 방지)
-    const users = await loadUsers();
-    await saveUsers(users);
-    return newUser;
   }
 
-  // 로컬 전용 모드
-  const users = await loadUsers();
-  users.push(newUser);
-  await saveUsers(users);
-  return newUser;
+  return window.electronAPI.createLocalUser({ name, slackId, hireDate, birthday });
 }
 
 export async function deleteUser(userId: string): Promise<void> {
   if (sheetsMode) {
     try {
       await window.electronAPI.supabaseDeleteUser(userId);
+      return;
     } catch (err) {
-      console.error('[사용자] 시트 삭제 실패:', err);
+      console.error('[사용자] 시트 삭제 실패, 로컬 폴백:', err);
     }
   }
-  const users = await loadUsers();
-  await saveUsers(users.filter((u) => u.id !== userId));
+  await window.electronAPI.deleteLocalUser(userId);
 }
 
 export async function changePassword(
@@ -128,28 +109,8 @@ export async function changePassword(
   currentPw: string,
   newPw: string
 ): Promise<{ ok: boolean; error?: string }> {
-  const users = await loadUsers();
-  const user = users.find((u) => u.id === userId);
-  if (!user) return { ok: false, error: '사용자를 찾을 수 없습니다.' };
-  if (user.password !== currentPw) return { ok: false, error: '현재 비밀번호가 일치하지 않습니다.' };
-
-  user.password = newPw;
-  user.isInitialPassword = false;
-  await saveUsers(users);
-
-  // 시트에도 반영
-  if (sheetsMode) {
-    try {
-      await window.electronAPI.supabaseUpdateUser(userId, {
-        password: newPw,
-        isInitialPassword: 'false',
-      });
-    } catch (err) {
-      console.error('[사용자] 시트 비밀번호 변경 실패:', err);
-    }
-  }
-
-  return { ok: true };
+  void userId;
+  return window.electronAPI.changeOwnPassword({ currentPassword: currentPw, newPassword: newPw });
 }
 
 // ─── 로그인 / 세션 (APPDATA 로컬) ───────────
@@ -159,64 +120,26 @@ export async function login(
   password: string,
   rememberMe: boolean = true,
 ): Promise<{ ok: boolean; user?: AppUser; error?: string }> {
-  const users = await loadUsers();
-  const user = users.find((u) => u.name === name);
-  if (!user) return { ok: false, error: '등록되지 않은 사용자입니다.' };
-  if (user.password !== password) return { ok: false, error: '비밀번호가 일치하지 않습니다.' };
-
-  // 세션 저장 (rememberMe 활성 시에만)
-  if (rememberMe) {
-    const session: AuthSession = {
-      userId: user.id,
-      userName: user.name,
-      loggedInAt: new Date().toISOString(),
-    };
-    await window.electronAPI.writeSettings(AUTH_FILE, session);
-  } else {
-    await window.electronAPI.writeSettings(AUTH_FILE, null);
-  }
-  return { ok: true, user };
+  const result = await window.electronAPI.loginCanonicalSession({ name, password, rememberMe });
+  const user = result.payload.user;
+  return result.ok && user
+    ? { ok: true, user }
+    : { ok: false, error: result.error ?? '로그인에 실패했습니다.' };
 }
 
 export async function logout(): Promise<void> {
-  await window.electronAPI.writeSettings(AUTH_FILE, null);
+  const result = await window.electronAPI.logoutCanonicalSession();
+  if (!result.ok) throw new Error(result.error ?? '로그아웃에 실패했습니다.');
 }
 
 export async function loadSession(): Promise<{ session: AuthSession | null; user: AppUser | null }> {
-  let session: AuthSession | null = null;
-  try {
-    session = (await window.electronAPI.readSettings(AUTH_FILE)) as AuthSession | null;
-  } catch (err) {
-    console.warn('[auth] auth.json 읽기 실패:', err);
-    return { session: null, user: null };
-  }
-  if (!session) {
-    console.info('[auth] auth.json 미존재 — 로그인 필요');
-    return { session: null, user: null };
-  }
-  if (!session.userId) {
-    console.warn('[auth] session.userId 누락 — 세션 무효', session);
-    return { session: null, user: null };
-  }
-  let users: AppUser[];
-  try {
-    users = await loadUsers();
-  } catch (err) {
-    // loadUsers 실패도 복구 가능한 시나리오로 취급 → 앱 초기화 전체 실패 방지
-    console.warn('[auth] 사용자 목록 로드 실패 — 세션 복원 불가:', err);
-    return { session: null, user: null };
-  }
-  const user = users.find((u) => u.id === session!.userId) ?? null;
-  if (!user) {
-    console.warn('[auth] 세션 userId에 매칭되는 사용자 없음 — 세션 유지, user만 null', { sessionUserId: session.userId, userCount: users.length });
-    // auth.json 을 null 로 덮어쓰지 않는다. sheetsMode=false 상태의 로컬 폴백(SEED_USER만)
-    // 매칭 실패가 많은데, logout() 을 호출하면 Supabase 연결 직전에 세션이 파괴되어
-    // 재시도 경로(App.tsx init)에서도 복원할 수 없게 된다. 실제로 삭제된 사용자라면
-    // 다음 로그인 시 새 userId 로 auth.json 이 덮어써진다.
-    return { session: null, user: null };
-  }
-  console.info('[auth] 세션 복원 성공', { userId: user.id, name: user.name });
-  return { session, user };
+  const result = await window.electronAPI.restoreCanonicalSession();
+  const user = result.payload.user;
+  if (!result.ok || !user) return { session: null, user: null };
+  return {
+    session: result.payload.session,
+    user,
+  };
 }
 
 export function isInitialPassword(user: AppUser): boolean {
@@ -249,8 +172,8 @@ export async function setIsCompositor(
  * 어드민 섹션의 verify 단계에서만 사용 (일반 로딩은 loadUsers 그대로).
  */
 export async function fetchFreshUsersFromSupabase(): Promise<AppUser[]> {
-  const raw = await window.electronAPI.supabaseReadUsers();
-  const users = raw as AppUser[];
+  const directory = await window.electronAPI.supabaseReadUsers();
+  const users = directory.users;
   return users.map((u) => ({
     ...u,
     hireDate: u.hireDate || undefined,
@@ -332,7 +255,7 @@ export async function migrateUsersToSheets(): Promise<void> {
 
   try {
     // Supabase에 이미 사용자가 있는지 확인
-    const existingUsers = (await window.electronAPI.supabaseReadUsers()) as AppUser[];
+    const existingUsers = (await window.electronAPI.supabaseReadUsers()).users;
     if (existingUsers.length > 0) return; // 이미 있으면 무시
 
     // 로컬 사용자 로드

@@ -15,8 +15,11 @@ import {
 } from './devPreviewComments';
 import { normalizeSceneIdKey } from '@/utils/sceneIdKey';
 import { createUuid } from '@/utils/createUuid';
+import { createPersonalTodoPreviewStore, PERSONAL_TODO_PREVIEW_SESSION_KEY, type PersonalTodoPreviewStore } from './personalTodoPreviewStore';
 
-const MOCK_USERS: AppUser[] = [
+type PreviewUser = AppUser & { password: string };
+
+const MOCK_USERS: PreviewUser[] = [
   { id: '1', name: '배한솔', slackId: 'U05DFV9UAN5', password: '1234', isInitialPassword: false, createdAt: '2025-01-01T00:00:00Z', role: 'admin' },
   { id: '2', name: '장삐쭈', slackId: 'U03MM2C4F4Z', password: '1234', isInitialPassword: true, createdAt: '2025-01-01T00:00:00Z', role: 'user' },
   { id: '3', name: '허혜원', slackId: 'U03M1Q37LDU', password: '1234', isInitialPassword: true, createdAt: '2025-01-01T00:00:00Z', role: 'user' },
@@ -36,9 +39,59 @@ const localStore: Record<string, unknown> = {};
 const COMMENTS_FILE = 'comments.json';
 
 /** 변경 가능한 mock 사용자 목록 — role 토글 등 update 를 반영하기 위해 MOCK_USERS 복제본 사용. */
-function getMockUsers(): AppUser[] {
-  return (localStore.__users as AppUser[] | undefined)
-    ?? (localStore.__users = MOCK_USERS.map((u) => ({ ...u }))) as AppUser[];
+function getMockUsers(): PreviewUser[] {
+  return (localStore.__users as PreviewUser[] | undefined)
+    ?? (localStore.__users = MOCK_USERS.map((u) => ({ ...u }))) as PreviewUser[];
+}
+
+let previewCanonicalUserId: string | null = null;
+let previewCanonicalEpoch = 0;
+let previewRememberedUserId: string | null = null;
+let previewTodoStore: PersonalTodoPreviewStore | null = null;
+const previewTodoCommitListeners = new Set<(payload: unknown) => void>();
+
+function getPreviewTodoStore(): PersonalTodoPreviewStore | null {
+  if (!previewCanonicalUserId) return null;
+  if (!previewTodoStore || previewTodoStore.userId !== previewCanonicalUserId) {
+    previewTodoStore = createPersonalTodoPreviewStore(undefined, previewCanonicalUserId);
+    previewTodoStore.subscribe(() => {
+      const payload = { userId: previewCanonicalUserId, epoch: previewCanonicalEpoch };
+      previewTodoCommitListeners.forEach((listener) => listener(payload));
+    });
+  }
+  return previewTodoStore;
+}
+
+function previewNoSession<T>(data: T): { ok: false; kind: 'rejected'; code: string; message: string; retryable: false } {
+  void data;
+  return { ok: false, kind: 'rejected', code: 'AUTH_REQUIRED', message: '로그인이 필요합니다.', retryable: false };
+}
+
+function previewCanonicalPayload() {
+  const source = previewCanonicalUserId ? getMockUsers().find((user) => user.id === previewCanonicalUserId) : null;
+  if (!source) return { user: null, session: null, epoch: previewCanonicalEpoch };
+  const { password: _password, ...user } = source;
+  return {
+    user,
+    session: { userId: user.id, userName: user.name, loggedInAt: new Date().toISOString() },
+    epoch: previewCanonicalEpoch,
+  };
+}
+
+function readRememberedPreviewUser(): string | null {
+  try {
+    if (typeof window !== 'undefined') return window.localStorage.getItem(PERSONAL_TODO_PREVIEW_SESSION_KEY) ?? null;
+  } catch { /* private browsing/localStorage disabled — in-memory fallback remains valid */ }
+  return previewRememberedUserId;
+}
+
+function writeRememberedPreviewUser(userId: string | null): void {
+  previewRememberedUserId = userId;
+  try {
+    if (typeof window === 'undefined') return;
+    if (userId) window.localStorage.setItem(PERSONAL_TODO_PREVIEW_SESSION_KEY, userId);
+    else window.localStorage.removeItem(PERSONAL_TODO_PREVIEW_SESSION_KEY);
+  } catch { /* private browsing/localStorage disabled */ }
 }
 
 const noop = () => () => {};
@@ -164,7 +217,7 @@ const activityRealtimeCallbacks = new Set<(row: MockActivityRow) => void>();
 
 export function hasUsableElectronAPI(api: Partial<ElectronAPI> | undefined): boolean {
   return typeof api?.usersRead === 'function'
-    && typeof api?.usersWrite === 'function'
+    && typeof api?.createLocalUser === 'function'
     && typeof api?.readSettings === 'function'
     && typeof api?.writeSettings === 'function'
     && typeof api?.supabaseTestConnection === 'function'
@@ -567,11 +620,23 @@ export function installDevElectronAPI(): void {
     usersRead: async () => ({
       users: getMockUsers().map(u => ({
         id: u.id, name: u.name, slackId: u.slackId,
-        password: u.password, isInitialPassword: u.isInitialPassword,
+        isInitialPassword: u.isInitialPassword,
         createdAt: u.createdAt, role: u.role,
       })),
     }),
-    usersWrite: async () => true,
+    ...({ usersWrite: async () => true } as Partial<ElectronAPI>),
+    createLocalUser: async (input) => {
+      const user: PreviewUser = {
+        id: createUuid(), ...input, password: '1234', isInitialPassword: true,
+        createdAt: new Date().toISOString(), role: 'user',
+      };
+      getMockUsers().push(user);
+      const { password: _password, ...publicUser } = user;
+      return publicUser;
+    },
+    deleteLocalUser: async (userId) => {
+      localStore.__users = getMockUsers().filter((user) => user.id !== userId);
+    },
 
     readSettings: async (fileName: string) => localStore[fileName] ?? null,
     writeSettings: async (fileName: string, data: unknown) => { localStore[fileName] = data; return true; },
@@ -744,13 +809,16 @@ export function installDevElectronAPI(): void {
     supabaseBulkDeleteScenes: async (sceneUuids) => sceneUuids.map((id) => ({ sceneUuid: id, success: true })),
     supabaseBulkUpdateSceneFields: async (updates) => updates.map((u) => ({ sceneUuid: u.sceneUuid, success: true })),
     supabaseUpdateSceneField: async () => {},
-    supabaseReadUsers: async () => getMockUsers().map(u => ({
-      id: u.id, name: u.name, slack_id: u.slackId,
-      password: u.password, is_initial_password: u.isInitialPassword,
-      created_at: u.createdAt, role: u.role,
-      is_compositor: u.isCompositor ?? false,
-      is_acting_supervisor: u.isActingSupervisor ?? false,
-    })),
+    supabaseReadUsers: async () => ({
+      status: 'authoritative',
+      users: getMockUsers().map(u => ({
+        id: u.id, name: u.name, slackId: u.slackId,
+        isInitialPassword: u.isInitialPassword,
+        createdAt: u.createdAt, role: u.role,
+        isCompositor: u.isCompositor ?? false,
+        isActingSupervisor: u.isActingSupervisor ?? false,
+      })),
+    }),
     supabaseAddUser: async () => {},
     supabaseUpdateUser: async (userId, updates) => {
       // role / boolean 토글 등을 mock 사용자 목록에 반영 (preview 검증용).
@@ -1014,11 +1082,90 @@ export function installDevElectronAPI(): void {
     onSupabaseBroadcast: noop,
 
     // ─── Personal Todos / Task Views mock ───
-    supabaseReadTodos: async () => [],
-    supabaseUpsertTodo: async () => 'mock-id',
-    supabaseDeleteTodo: async () => {},
-    supabaseReadTaskViews: async () => null,
-    supabaseUpsertTaskViews: async () => {},
+    ensureCanonicalSession: async () => {
+      if (!previewCanonicalUserId) previewCanonicalUserId = readRememberedPreviewUser();
+      return { ok: true, payload: previewCanonicalPayload() };
+    },
+    loginCanonicalSession: async (input) => {
+      const user = getMockUsers().find((candidate) => candidate.name === input.name);
+      if (!user || user.password !== input.password) {
+        return { ok: false, payload: previewCanonicalPayload(), error: '이름 또는 비밀번호가 일치하지 않습니다.' };
+      }
+      if (previewCanonicalUserId !== user.id) previewCanonicalEpoch++;
+      previewCanonicalUserId = user.id;
+      writeRememberedPreviewUser(input.rememberMe === false ? null : user.id);
+      return { ok: true, payload: previewCanonicalPayload() };
+    },
+    restoreCanonicalSession: async () => {
+      if (!previewCanonicalUserId && readRememberedPreviewUser()) {
+        previewCanonicalUserId = readRememberedPreviewUser();
+        previewCanonicalEpoch++;
+      }
+      return { ok: true, payload: previewCanonicalPayload() };
+    },
+    logoutCanonicalSession: async () => {
+      if (previewCanonicalUserId) previewCanonicalEpoch++;
+      previewCanonicalUserId = null;
+      writeRememberedPreviewUser(null);
+      return { ok: true, payload: previewCanonicalPayload() };
+    },
+    refreshCanonicalUser: async () => ({ ok: true, payload: previewCanonicalPayload() }),
+    changeOwnPassword: async (input) => {
+      const user = getMockUsers().find((candidate) => candidate.id === previewCanonicalUserId);
+      if (!user) return { ok: false, error: '로그인이 필요합니다.' };
+      if (user.password !== input.currentPassword) return { ok: false, error: '현재 비밀번호가 일치하지 않습니다.' };
+      user.password = input.newPassword;
+      user.isInitialPassword = false;
+      return { ok: true };
+    },
+    readPersonalTodos: async () => {
+      const store = getPreviewTodoStore();
+      return store ? { ok: true as const, data: store.readTodos().map((todo, sortOrder) => ({ ...todo, userId: store.userId, startDate: todo.startDate ?? null, endDate: todo.endDate ?? null, addToCalendar: todo.addToCalendar ?? false, sortOrder, updatedAt: todo.createdAt })) } : previewNoSession([]);
+    },
+    readPersonalTodoLabels: async () => {
+      const store = getPreviewTodoStore();
+      return store ? { ok: true as const, data: store.readLabels().map((label) => ({ ...label, updatedAt: label.createdAt })) } : previewNoSession([]);
+    },
+    createPersonalTodo: async (input) => {
+      const store = getPreviewTodoStore();
+      return store ? { ok: true as const, data: store.createTodo(input) } : previewNoSession([]);
+    },
+    patchPersonalTodo: async (todoId, patch) => {
+      const store = getPreviewTodoStore();
+      try { return store ? { ok: true as const, data: store.patchTodo(todoId, patch) } : previewNoSession(null); }
+      catch { return { ok: false as const, kind: 'rejected' as const, code: 'NOT_FOUND', message: 'not found', retryable: false as const }; }
+    },
+    applyCalendarToTodoPatch: async (todoId, patch) => {
+      const store = getPreviewTodoStore();
+      try { return store ? { ok: true as const, data: store.applyCalendarToTodoPatch(todoId, patch) } : previewNoSession(null); }
+      catch { return { ok: false as const, kind: 'rejected' as const, code: 'NOT_FOUND', message: 'not found', retryable: false as const }; }
+    },
+    mutatePersonalTodoOrder: async (mutation, orderedIds) => {
+      const store = getPreviewTodoStore();
+      try { return store ? { ok: true as const, data: store.mutateOrder(mutation, orderedIds) } : previewNoSession([]); }
+      catch { return { ok: false as const, kind: 'rejected' as const, code: 'NOT_FOUND', message: 'not found', retryable: false as const }; }
+    },
+    deletePersonalTodo: async (todoId) => {
+      const store = getPreviewTodoStore();
+      return store ? { ok: true as const, data: store.deleteTodo(todoId) } : previewNoSession([]);
+    },
+    createOrReusePersonalTodoLabelAndAttach: async (input) => {
+      const store = getPreviewTodoStore();
+      try { return store ? { ok: true as const, data: store.createOrReuseLabelAndAttach(input) } : previewNoSession(null); }
+      catch { return { ok: false as const, kind: 'rejected' as const, code: 'NOT_FOUND', message: 'not found', retryable: false as const }; }
+    },
+    updatePersonalTodoLabel: async (labelId, patch) => {
+      const store = getPreviewTodoStore();
+      try { return store ? { ok: true as const, data: store.updateLabel(labelId, patch) } : previewNoSession(null); }
+      catch { return { ok: false as const, kind: 'rejected' as const, code: 'NOT_FOUND', message: 'not found', retryable: false as const }; }
+    },
+    readLegacyTaskViews: async () => ({ ok: true, data: null }),
+    upsertLegacyTaskViews: async () => ({ ok: true, data: undefined }),
+    retryPersonalTodoCalendar: async () => ({ ok: true as const, data: undefined }),
+    onPersonalTodoCommit: (callback) => {
+      previewTodoCommitListeners.add(callback);
+      return () => previewTodoCommitListeners.delete(callback);
+    },
 
     // ─── Memos mock ───
     supabaseReadMemo: async () => null,
@@ -1041,6 +1188,7 @@ export function installDevElectronAPI(): void {
     gcalStartAuth: async () => {},
     gcalSaveCredentials: async () => {},
     gcalHasCredentials: async () => false,
+    gcalSaveLocalSettings: async () => {},
     gcalSignOut: async () => {},
     gcalListCalendars: async () => [],
     gcalFullSync: async () => [],
@@ -1072,7 +1220,6 @@ export function installDevElectronAPI(): void {
     onVacationPendingChanged: noop,
 
     // ─── 활동 기록 (mock 은 빈 결과) ─────────────
-    authSetCurrentUser: async () => {},
     activityList: async (opts) => filterMockActivities(opts),
     activityStats: async () => [],
     activityStatsV2: async () => [],

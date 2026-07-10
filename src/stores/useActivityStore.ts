@@ -466,9 +466,6 @@ export const useActivityStore = create<ActivityState>((set, get) => ({
  * App.tsx 에서 한 번만 호출.
  */
 export function bindActivityStoreToAuth() {
-  // 현재 user 즉시 한 번 동기화
-  const user = useAuthStore.getState().currentUser;
-  if (user) {
-    window.electronAPI?.authSetCurrentUser?.({ id: user.id, name: user.name });
-  }
+  // 활동 identity는 main-owned canonical session이 함께 갱신한다.
+  void useAuthStore.getState().currentUser;
 }

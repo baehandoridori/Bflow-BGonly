@@ -60,7 +60,7 @@ export function UserManagerModal() {
 
     // 낙관적: 즉시 UI에 추가
     const tempId = `temp-${Date.now()}`;
-    const tempUser = { id: tempId, name: name.trim(), role: 'user' as const, slackId: slackId.trim(), password: '', createdAt: new Date().toISOString(), hireDate: hireDate.trim() || undefined, birthday: birthday.trim() || undefined, isInitialPassword: true };
+    const tempUser = { id: tempId, name: name.trim(), role: 'user' as const, slackId: slackId.trim(), createdAt: new Date().toISOString(), hireDate: hireDate.trim() || undefined, birthday: birthday.trim() || undefined, isInitialPassword: true };
     const prevUsers = [...users];
     setUsers([...users, tempUser]);
     setName('');

@@ -4,6 +4,7 @@ import * as gcal from './googleCalendar';
 import { pathToFileURL } from 'url';
 import path from 'path';
 import fs from 'fs';
+import { randomUUID } from 'node:crypto';
 import {
   initSheets,
   isConnected,
@@ -18,6 +19,13 @@ import { uploadImage as driveUploadImage, setImageUploadUrl } from './drive-imag
 import { uploadImage as storageUploadImage, deleteImage as storageDeleteImage, uploadCharacterImage as storageUploadCharacterImage } from './storage';
 // v1.20.0: 사용자 폰트 IPC + bflow-font:// custom protocol
 import { registerFontProtocol, registerFontIpcHandlers } from './fontIpc';
+import { PersonalTodoService } from './personalTodoService';
+import type { PersonalTodoCreateInput, PersonalTodoOrderMutation, PersonalTodoPatch, CalendarTodoPatch, PersonalTodoLabelColorKey } from './personalTodoService';
+import { PersonalTodoRecoveryJournal } from './personalTodoRecoveryJournal';
+import { PersonalTodoCalendarSync, PERSONAL_TODO_GOOGLE_LINK_KEY, PERSONAL_TODO_GOOGLE_USER_KEY } from './personalTodoCalendarSync';
+import type { LinkedPersonalTodoCalendarEvent, PersonalTodoCalendarAdapter } from './personalTodoCalendarSync';
+import { SessionManager } from './sessionManager';
+import type { RememberedAuthSession, SessionUserRecord } from './sessionManager';
 // v1.21.0: 자동 업데이트 시스템 (G드라이브 → 로컬 PC 본체로 swap)
 import {
   runFirstInstallIfNeeded,
@@ -1048,21 +1056,26 @@ ipcMain.handle('users:read', () => {
     if (!fs.existsSync(filePath)) return null;
     const raw = fs.readFileSync(filePath, { encoding: 'utf-8' });
     const json = Buffer.from(raw, 'base64').toString('utf-8');
-    return JSON.parse(json);
+    const parsed = JSON.parse(json) as { users?: SessionUserRecord[] };
+    return { users: (parsed.users ?? []).map(sanitizePublicUser) };
   } catch {
     return null;
   }
 });
 
-ipcMain.handle('users:write', (_event, data: unknown) => {
-  migrateLegacyUsersFileIfNeeded();
-  const filePath = getUsersFilePath();
-  const dir = path.dirname(filePath);
-  ensureDir(dir);
-  const json = JSON.stringify(data, null, 2);
-  const encoded = Buffer.from(json, 'utf-8').toString('base64');
-  fs.writeFileSync(filePath, encoded, { encoding: 'utf-8' });
-  return true;
+ipcMain.handle('users:create', (_event, input: { name: string; slackId: string; hireDate?: string; birthday?: string }) => {
+  const users = readLocalUsersForSession();
+  const created: SessionUserRecord = {
+    id: randomUUID(), name: input.name.trim(), slackId: input.slackId.trim(), password: '1234',
+    hireDate: input.hireDate || '', birthday: input.birthday || '', role: 'user',
+    isInitialPassword: true, createdAt: new Date().toISOString(),
+  };
+  writeLocalUsersForSession([...users, created]);
+  return sanitizePublicUser(created);
+});
+
+ipcMain.handle('users:delete', (_event, userId: string) => {
+  writeLocalUsersForSession(readLocalUsersForSession().filter((user) => user.id !== userId));
 });
 
 // ─── IPC 핸들러: 설정 ────────────────────────────────────────
@@ -1324,8 +1337,13 @@ import {
   readMetadata as sbReadMetadata,
   writeMetadata as sbWriteMetadata,
   readTodos as sbReadTodos,
-  upsertTodo as sbUpsertTodo,
-  deleteTodo as sbDeleteTodo,
+  readTodo as sbReadTodo,
+  readTodoLabels as sbReadTodoLabels,
+  patchPersonalTodo as sbPatchPersonalTodo,
+  mutatePersonalTodoOrder as sbMutatePersonalTodoOrder,
+  createOrReusePersonalTodoLabelAndAttach as sbCreateOrReusePersonalTodoLabelAndAttach,
+  updatePersonalTodoLabel as sbUpdatePersonalTodoLabel,
+  compensatePersonalTodoCalendarPatch as sbCompensatePersonalTodoCalendarPatch,
   readTaskViews as sbReadTaskViews,
   upsertTaskViews as sbUpsertTaskViews,
   readMemo as sbReadMemo,
@@ -1426,11 +1444,10 @@ function wrapIpc<T extends unknown[], R>(
 }
 
 // ─── 활동 기록 헬퍼 ───
-// 렌더러가 useAuthStore 변경 시 'auth:set-current-user' 로 알려준다.
-// 메인은 이 정보로 자동 활동 기록 (mutation 핸들러에서 1줄 호출).
+// main-verified canonical session과 활동 기록 identity를 함께 갱신한다.
 let currentActivityUser: { id: string; name: string } | null = null;
 
-ipcMain.handle('auth:set-current-user', (_e, user: { id: string; name: string } | null) => {
+function setCanonicalActivityUser(user: { id: string; name: string } | null): void {
   const prev = currentActivityUser;
   currentActivityUser = user;
   const identityChanged = (prev?.id ?? null) !== (user?.id ?? null);
@@ -1445,6 +1462,212 @@ ipcMain.handle('auth:set-current-user', (_e, user: { id: string; name: string } 
   if (identityChanged) {
     try { editingPresence?.reset(); } catch { /* ignore */ }
   }
+}
+
+function readLocalUsersForSession(): SessionUserRecord[] {
+  migrateLegacyUsersFileIfNeeded();
+  try {
+    const raw = fs.readFileSync(getUsersFilePath(), { encoding: 'utf-8' });
+    const parsed = JSON.parse(Buffer.from(raw, 'base64').toString('utf-8')) as { users?: SessionUserRecord[] };
+    return Array.isArray(parsed.users) ? parsed.users : [];
+  } catch {
+    return [];
+  }
+}
+
+function writeLocalUsersForSession(users: SessionUserRecord[]): void {
+  migrateLegacyUsersFileIfNeeded();
+  ensureDir(path.dirname(getUsersFilePath()));
+  const encoded = Buffer.from(JSON.stringify({ users }, null, 2), 'utf-8').toString('base64');
+  fs.writeFileSync(getUsersFilePath(), encoded, { encoding: 'utf-8' });
+}
+
+function sanitizePublicUser<T extends { password?: unknown }>(user: T): Omit<T, 'password'> {
+  const { password: _password, ...publicUser } = user;
+  return publicUser;
+}
+
+async function writeRememberedAuthSession(session: RememberedAuthSession | null): Promise<void> {
+  const authPath = path.join(getDataPath(), 'auth.json');
+  ensureDir(path.dirname(authPath));
+  const tempPath = `${authPath}.tmp`;
+  await fs.promises.writeFile(tempPath, JSON.stringify(session, null, 2), { encoding: 'utf-8' });
+  await fs.promises.rename(tempPath, authPath);
+}
+
+function addCalendarDay(date: string): string {
+  const value = new Date(`${date}T00:00:00Z`);
+  value.setUTCDate(value.getUTCDate() + 1);
+  return value.toISOString().slice(0, 10);
+}
+
+function subtractCalendarDay(date: string): string {
+  const value = new Date(`${date}T00:00:00Z`);
+  value.setUTCDate(value.getUTCDate() - 1);
+  return value.toISOString().slice(0, 10);
+}
+
+function mainCalendarEvent(event: any, calendarId: string): LinkedPersonalTodoCalendarEvent | null {
+  if (!event?.id || event.status === 'cancelled') return null;
+  const startDate = event.start?.date ?? event.start?.dateTime?.slice(0, 10);
+  const rawEnd = event.end?.date ?? event.end?.dateTime?.slice(0, 10);
+  if (!startDate || !rawEnd) return null;
+  return {
+    id: event.id,
+    calendarId,
+    title: event.summary ?? '',
+    memo: event.description ?? '',
+    startDate,
+    endDate: event.end?.date ? subtractCalendarDay(rawEnd) : rawEnd,
+  };
+}
+
+const personalTodoCalendarAdapter: PersonalTodoCalendarAdapter = {
+  resolveTargetCalendarId: async () => {
+    try {
+      const settings = JSON.parse(await fs.promises.readFile(path.join(getDataPath(), 'gcal-local-settings.json'), 'utf8')) as { personalCalendarId?: string };
+      if (settings.personalCalendarId) return settings.personalCalendarId;
+    } catch { /* use Google primary calendar */ }
+    const calendars = await gcal.listCalendars();
+    return calendars.find((calendar) => calendar.primary)?.id ?? calendars[0]?.id ?? null;
+  },
+  resolveCandidateCalendarIds: async () => {
+    const calendars = await gcal.listCalendars();
+    const ids = calendars.map((calendar) => calendar.id).filter((id): id is string => Boolean(id));
+    try {
+      const settings = JSON.parse(await fs.promises.readFile(path.join(getDataPath(), 'gcal-local-settings.json'), 'utf8')) as { personalCalendarId?: string };
+      if (settings.personalCalendarId) ids.push(settings.personalCalendarId);
+    } catch { /* calendar list remains authoritative */ }
+    return [...new Set(ids)];
+  },
+  findLinkedEvents: async (userId, todoId, candidateCalendarIds) => {
+    const found: LinkedPersonalTodoCalendarEvent[] = [];
+    for (const calendarId of [...new Set(candidateCalendarIds.filter(Boolean))]) {
+      const events = await gcal.fullSync(calendarId);
+      for (const event of events) {
+        const meta = event.extendedProperties?.private ?? {};
+        if (meta[PERSONAL_TODO_GOOGLE_LINK_KEY] !== todoId) continue;
+        const eventUserId = meta[PERSONAL_TODO_GOOGLE_USER_KEY];
+        if (eventUserId && eventUserId !== userId) continue;
+        const mapped = mainCalendarEvent(event, calendarId);
+        if (mapped) found.push(mapped);
+      }
+    }
+    return found;
+  },
+  insertLinkedEvent: async ({ calendarId, eventId, userId, todo }) => {
+    const startDate = todo.startDate ?? todo.endDate!;
+    const endDate = todo.endDate ?? todo.startDate!;
+    const id = await gcal.insertEvent(calendarId, {
+      id: eventId,
+      summary: todo.title,
+      description: todo.memo,
+      startDate,
+      endDate: addCalendarDay(endDate),
+      extendedProperties: {
+        // CalendarService uses bflow_type to keep B flow-created events editable.
+        bflow_type: 'custom',
+        [PERSONAL_TODO_GOOGLE_LINK_KEY]: todo.id,
+        [PERSONAL_TODO_GOOGLE_USER_KEY]: userId,
+      },
+      visibility: 'private',
+    });
+    return { id, calendarId, title: todo.title, memo: todo.memo, startDate, endDate };
+  },
+  updateLinkedEvent: async (event, todo, userId) => {
+    const startDate = todo.startDate ?? todo.endDate!;
+    const endDate = todo.endDate ?? todo.startDate!;
+    await gcal.updateEvent(event.calendarId, event.id, {
+      summary: todo.title,
+      description: todo.memo,
+      startDate,
+      endDate: addCalendarDay(endDate),
+      extendedProperties: {
+        bflow_type: 'custom',
+        [PERSONAL_TODO_GOOGLE_LINK_KEY]: todo.id,
+        [PERSONAL_TODO_GOOGLE_USER_KEY]: userId,
+      },
+      visibility: 'private',
+    });
+    return { ...event, title: todo.title, memo: todo.memo, startDate, endDate };
+  },
+  deleteLinkedEvent: (event) => gcal.deleteEvent(event.calendarId, event.id),
+};
+
+const personalTodoRecoveryJournal = new PersonalTodoRecoveryJournal(
+  path.join(getDataPath(), 'personal-calendar-recovery.json'),
+);
+
+let sessionManager: SessionManager;
+let personalTodoService: PersonalTodoService;
+const personalTodoCalendarSync = new PersonalTodoCalendarSync({
+  journal: personalTodoRecoveryJournal,
+  adapter: personalTodoCalendarAdapter,
+  readTodo: sbReadTodo,
+  compensateTodo: async (userId, todoId, previous, expectedUpdatedAt) => {
+    const compensated = await sbCompensatePersonalTodoCalendarPatch(userId, todoId, previous, expectedUpdatedAt);
+    if (compensated) broadcastToAllWindows('personal-todo:commit', { userId, kind: 'todo', todo: compensated });
+    return compensated;
+  },
+  trackPending: (promise) => personalTodoService.pending.track(promise),
+  onCalendarCommit: (payload) => broadcastToAllWindows('calendar:changed', payload),
+});
+
+personalTodoService = new PersonalTodoService({
+  persistence: {
+    readTodos: sbReadTodos,
+    readTodo: sbReadTodo,
+    readLabels: sbReadTodoLabels,
+    patchTodo: sbPatchPersonalTodo,
+    mutateOrder: sbMutatePersonalTodoOrder,
+    createOrReuseLabelAndAttach: sbCreateOrReusePersonalTodoLabelAndAttach,
+    updateLabel: sbUpdatePersonalTodoLabel,
+    readTaskViews: sbReadTaskViews,
+    upsertTaskViews: sbUpsertTaskViews,
+  },
+  getCanonicalSession: () => ({
+    userId: sessionManager?.getCanonicalUserId() ?? null,
+    epoch: sessionManager?.getEpoch() ?? 0,
+  }),
+  calendar: personalTodoCalendarSync,
+  onCommit: (payload) => broadcastToAllWindows('personal-todo:commit', payload),
+});
+
+sessionManager = new SessionManager({
+  readUsers: async () => {
+    try {
+      const users = await sbReadUsers();
+      return { users: users as unknown as SessionUserRecord[], status: 'authoritative' as const };
+    } catch (error) {
+      console.warn('[auth] Supabase 사용자 검증 실패 — 로컬 사용자 저장소 확인:', error);
+    }
+    const fallbackUsers = readLocalUsersForSession();
+    return {
+      users: fallbackUsers,
+      status: fallbackUsers.length > 0 ? 'fallback' as const : 'remote-unavailable' as const,
+    };
+  },
+  readRememberedSession: async () => {
+    try {
+      const raw = await fs.promises.readFile(path.join(getDataPath(), 'auth.json'), { encoding: 'utf-8' });
+      return JSON.parse(raw) as RememberedAuthSession | null;
+    } catch { return null; }
+  },
+  writeRememberedSession: writeRememberedAuthSession,
+  beginPersonalDataTransition: (userId, epoch) => personalTodoService.beginSessionTransition(userId, epoch),
+  endPersonalDataTransition: (userId, epoch) => personalTodoService.endSessionTransition(userId, epoch),
+  drainPersonalDataQueue: (userId) => personalTodoService.drainUser(userId),
+  flushCalendarJournal: () => personalTodoCalendarSync.flushJournal(),
+  setActivityUser: setCanonicalActivityUser,
+  broadcast: (payload) => {
+    lastKnownSession = payload;
+    broadcastToAllWindows('session:changed', payload);
+    if (payload.user) {
+      void personalTodoCalendarSync.recover(payload.user.id).catch((error) => {
+        console.warn('[personal-todo] calendar recovery deferred:', error);
+      });
+    }
+  },
 });
 
 import { supabase as supabaseClient, recordActivityLog as sbRecordActivityLog } from './supabase';
@@ -1912,16 +2135,22 @@ ipcMain.handle('supabase:mark-assignment-notification-read', wrapIpc(async (
 
 // ─── Users ───
 ipcMain.handle('supabase:read-users', wrapIpc(async () => {
-  return sbReadUsers();
+  return {
+    status: 'authoritative',
+    users: (await sbReadUsers()).map(sanitizePublicUser),
+  };
 }));
 ipcMain.handle('supabase:add-user', wrapIpc(async (_e: unknown, user: SupabaseUser) => {
-  await sbAddUser(user);
+  await sbAddUser({ ...user, password: '1234', isInitialPassword: true });
 }));
 ipcMain.handle('supabase:update-user', wrapIpc(async (_e: unknown, userId: string, updates: Record<string, string | boolean | null>) => {
-  await sbUpdateUser(userId, updates);
+  const { password: _password, isInitialPassword: _initialPassword, ...safeUpdates } = updates;
+  await sbUpdateUser(userId, safeUpdates);
+  if (sessionManager?.getCanonicalUserId() === userId) await sessionManager.refreshCurrentUser();
 }));
 ipcMain.handle('supabase:delete-user', wrapIpc(async (_e: unknown, userId: string) => {
   await sbDeleteUser(userId);
+  if (sessionManager?.getCanonicalUserId() === userId) await sessionManager.refreshCurrentUser();
 }));
 
 // ─── Comments ───
@@ -2428,27 +2657,48 @@ ipcMain.handle('supabase:get-activity', async (
 // 과거 onStatusChange 이벤트를 놓치지 않도록 최신 상태를 조회.
 ipcMain.handle('supabase:get-realtime-status', () => currentRealtimeStatus);
 
-// ─── Personal Todos IPC ──────────────────────────────
+// ─── Personal Todos IPC (main canonical session owns userId) ───
 
-ipcMain.handle('supabase:read-todos', wrapIpc(async (_e: unknown, userId: string) => {
-  return sbReadTodos(userId);
-}));
-
-ipcMain.handle('supabase:upsert-todo', wrapIpc(async (_e: unknown, userId: string, todo: unknown) => {
-  return sbUpsertTodo(userId, todo as Parameters<typeof sbUpsertTodo>[1]);
-}));
-
-ipcMain.handle('supabase:delete-todo', wrapIpc(async (_e: unknown, todoId: string) => {
-  return sbDeleteTodo(todoId);
-}));
-
-ipcMain.handle('supabase:read-task-views', wrapIpc(async (_e: unknown, userId: string) => {
-  return sbReadTaskViews(userId);
-}));
-
-ipcMain.handle('supabase:upsert-task-views', wrapIpc(async (_e: unknown, userId: string, views: unknown[], sceneKeys: unknown[]) => {
-  return sbUpsertTaskViews(userId, views, sceneKeys);
-}));
+ipcMain.handle('personal-todo:read', (_e, epoch?: number) => personalTodoService.readTodos(epoch));
+ipcMain.handle('personal-todo:read-labels', (_e, epoch?: number) => personalTodoService.readLabels(epoch));
+ipcMain.handle('personal-todo:create', (_e, input: PersonalTodoCreateInput, epoch?: number) =>
+  personalTodoService.createTodo(input, epoch));
+ipcMain.handle('personal-todo:patch', (_e, todoId: string, patch: PersonalTodoPatch, epoch?: number) =>
+  personalTodoService.patchTodo(todoId, patch, epoch));
+ipcMain.handle('personal-todo:calendar-patch', (_e, todoId: string, patch: CalendarTodoPatch, epoch?: number) =>
+  personalTodoService.applyCalendarPatch(todoId, patch, epoch));
+ipcMain.handle('personal-todo:mutate-order', (_e, mutation: PersonalTodoOrderMutation, orderedIds: string[], epoch?: number) =>
+  personalTodoService.mutateOrder(mutation, orderedIds, epoch));
+ipcMain.handle('personal-todo:delete', (_e, todoId: string, epoch?: number) =>
+  personalTodoService.deleteTodo(todoId, epoch));
+ipcMain.handle('personal-todo:create-label-attach', (_e, input: { todoId: string; name: string; colorKey: PersonalTodoLabelColorKey }, epoch?: number) =>
+  personalTodoService.createOrReuseLabelAndAttach(input, epoch));
+ipcMain.handle('personal-todo:update-label', (_e, labelId: string, patch: { name?: string; colorKey?: PersonalTodoLabelColorKey }, epoch?: number) =>
+  personalTodoService.updateLabel(labelId, patch, epoch));
+ipcMain.handle('personal-todo:read-task-views', (_e, epoch?: number) => personalTodoService.readTaskViews(epoch));
+ipcMain.handle('personal-todo:upsert-task-views', (_e, views: unknown[], sceneKeys: unknown[], epoch?: number) =>
+  personalTodoService.upsertTaskViews(views, sceneKeys, epoch));
+ipcMain.handle('personal-todo:retry-calendar', async () => {
+  const userId = sessionManager?.getCanonicalUserId();
+  if (!userId) {
+    return { ok: false as const, kind: 'stale' as const, code: 'NO_SESSION', message: '로그인이 필요합니다.', retryable: true as const };
+  }
+  try {
+    const resolved = await personalTodoCalendarSync.recover(userId);
+    if (!resolved) {
+      return { ok: false as const, kind: 'unknown' as const, code: 'CALENDAR_SYNC_NEEDED', message: '캘린더 동기화가 아직 완료되지 않았습니다.', retryable: true as const };
+    }
+    return { ok: true as const, data: undefined };
+  } catch (error) {
+    return {
+      ok: false as const,
+      kind: 'unknown' as const,
+      code: (error as { code?: string })?.code ?? 'CALENDAR_RECOVERY_FAILED',
+      message: String((error as { message?: string })?.message ?? error),
+      retryable: true as const,
+    };
+  }
+});
 
 // ─── Memos IPC ──────────────────────────────
 
@@ -2522,6 +2772,8 @@ ipcMain.handle('gcal:is-authenticated', wrapIpc(async () => {
 
 ipcMain.handle('gcal:start-auth', wrapIpc(async () => {
   await gcal.startAuth();
+  const userId = sessionManager?.getCanonicalUserId();
+  if (userId) await personalTodoCalendarSync.recover(userId);
 }));
 
 ipcMain.handle('gcal:save-credentials', wrapIpc(async (_e: unknown, clientId: string, clientSecret: string) => {
@@ -2531,6 +2783,18 @@ ipcMain.handle('gcal:save-credentials', wrapIpc(async (_e: unknown, clientId: st
 ipcMain.handle('gcal:has-credentials', wrapIpc(async () => {
   return gcal.hasCredentialsSet();
 }));
+
+ipcMain.handle('gcal:save-local-settings', async (_event, settings: { personalCalendarId?: string | null; lastSyncAt?: string | null }) => {
+  const payload = {
+    personalCalendarId: settings?.personalCalendarId ?? null,
+    lastSyncAt: settings?.lastSyncAt ?? null,
+  };
+  await fs.promises.writeFile(
+    path.join(getDataPath(), 'gcal-local-settings.json'),
+    JSON.stringify(payload),
+    'utf8',
+  );
+});
 
 ipcMain.handle('gcal:sign-out', wrapIpc(async () => {
   await gcal.signOut();
@@ -3184,8 +3448,49 @@ ipcMain.handle('preferences:broadcast-change', (_event, payload: unknown) => {
   return { ok: true };
 });
 
-ipcMain.handle('session:broadcast-change', (_event, payload: unknown) => {
-  lastKnownSession = payload;
+ipcMain.handle('auth:login-session', (_event, input: { name: string; password: string; rememberMe?: boolean }) =>
+  sessionManager.login(input));
+ipcMain.handle('auth:restore-session', () => sessionManager.restore());
+ipcMain.handle('auth:ensure-canonical-session', () => sessionManager.ensure());
+ipcMain.handle('auth:logout-session', () => sessionManager.logout());
+ipcMain.handle('auth:refresh-canonical-user', () => sessionManager.refreshCurrentUser());
+ipcMain.handle('auth:change-own-password', async (_event, input: { currentPassword: string; newPassword: string }) => {
+  try {
+    const userId = sessionManager.getCanonicalUserId();
+    if (!userId) return { ok: false, error: '로그인이 필요합니다.' };
+    if (!input.newPassword) return { ok: false, error: '새 비밀번호를 입력해주세요.' };
+
+    let source: 'supabase' | 'local' = 'local';
+    let users: SessionUserRecord[] = [];
+    try {
+      const remoteUsers = await sbReadUsers();
+      if (remoteUsers.some((user) => user.id === userId)) {
+        source = 'supabase';
+        users = remoteUsers as unknown as SessionUserRecord[];
+      }
+    } catch { /* local fallback below */ }
+    if (users.length === 0) users = readLocalUsersForSession();
+    const user = users.find((candidate) => candidate.id === userId);
+    if (!user) return { ok: false, error: '사용자를 찾을 수 없습니다.' };
+    if (user.password !== input.currentPassword) return { ok: false, error: '현재 비밀번호가 일치하지 않습니다.' };
+
+    if (source === 'supabase') {
+      await sbUpdateUser(userId, { password: input.newPassword, isInitialPassword: false });
+    } else {
+      writeLocalUsersForSession(users.map((candidate) => candidate.id === userId
+        ? { ...candidate, password: input.newPassword, isInitialPassword: false }
+        : candidate));
+    }
+    await sessionManager.refreshCurrentUser();
+    return { ok: true };
+  } catch (error) {
+    return { ok: false, error: error instanceof Error ? error.message : String(error) };
+  }
+});
+
+// Legacy notification channel no longer accepts renderer session data.
+ipcMain.handle('session:broadcast-change', () => {
+  const payload = sessionManager.getCurrentPayload();
   broadcastToAllWindows('session:changed', payload);
   return { ok: true };
 });
@@ -3193,9 +3498,7 @@ ipcMain.handle('session:broadcast-change', (_event, payload: unknown) => {
 // 팝업이 onSessionChanged 구독 등록 후 명시적으로 재전송을 요청 — ready-to-show 타이밍 miss 방어.
 // event.sender.send로 요청한 창에만 전송 (broadcast 아님). lastKnownSession이 null이면 무응답.
 ipcMain.handle('session:request-current', (event) => {
-  if (lastKnownSession !== null) {
-    event.sender.send('session:changed', lastKnownSession);
-  }
+  event.sender.send('session:changed', sessionManager.getCurrentPayload());
   return { ok: true };
 });
 
@@ -4431,6 +4734,7 @@ app.whenReady().then(async () => {
 app.on('before-quit', (e) => {
   if (isQuitting) return;
   isQuitting = true;
+  personalTodoService.beginQuitting();
 
   // GCal Watch 채널 중지 (5초 타임아웃)
   const watchCleanup = gcal.stopAllWatches().catch(() => {});
@@ -4455,7 +4759,8 @@ app.on('before-quit', (e) => {
 
   const sheetsPending = getPendingOpsCount();
   const vacPending = getVacPendingOpsCount();
-  const totalPending = sheetsPending + vacPending;
+  const personalPending = personalTodoService.getPendingCount();
+  const totalPending = sheetsPending + vacPending + personalPending;
   // 자동 업데이트 installer 적용이 있으면 어떤 분기든 e.preventDefault + 비동기 chain 끝에 적용.
   // 기존 fire-and-forget 분기도 installer helper spawn 시점까지 대기 — race 위험 제거.
   e.preventDefault();
@@ -4476,18 +4781,22 @@ app.on('before-quit', (e) => {
   (async () => {
     try {
       if (totalPending > 0) {
-        const [, sheetsDone, vacDone] = await Promise.all([
+        const [, sheetsDone, vacDone, personalDone] = await Promise.all([
           watchWithTimeout,
           waitForAllPendingOps(15000),
           waitForVacPendingOps(60000),
+          personalTodoService.waitForIdle(15000),
         ]);
-        if (!sheetsDone || !vacDone) {
+        if (!sheetsDone || !vacDone || !personalDone) {
           console.warn('[종료] 타임아웃 — 일부 작업이 완료되지 않았을 수 있습니다');
         } else {
           console.log('[종료] 저장 완료, 앱을 종료합니다');
         }
       } else {
-        await watchWithTimeout.catch(() => { /* noop */ });
+        await Promise.all([
+          watchWithTimeout.catch(() => { /* noop */ }),
+          personalTodoService.waitForIdle(15000),
+        ]);
       }
 
       // ★ 자동 업데이트 적용 (마지막 step)

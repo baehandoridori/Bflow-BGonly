@@ -88,7 +88,9 @@ export function computeMyTasksStats(
   const stageProgressPct = stageSlots > 0 ? (checkedStages / stageSlots) * 100 : 0;
 
   const personalTotal = personalTodos.length;
-  const personalDone = personalTodos.reduce((n, t) => n + (t.completed ? 1 : 0), 0);
+  // 완료 여부의 단일 기준은 canonical status다. 레거시 completed 플래그는
+  // normalizePersonalTodo에서만 status로 변환되며 통계 산식에는 사용하지 않는다.
+  const personalDone = personalTodos.filter((todo) => todo.status === 'done').length;
   const characterTotal = characterTasks.length;
   const doneCharacterCount = characterTasks.reduce((n, task) => n + (task.done ? 1 : 0), 0);
 

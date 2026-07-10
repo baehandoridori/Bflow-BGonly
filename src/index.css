@@ -470,6 +470,35 @@ body.theme-ready svg {
   }
 }
 
+/* ─── 내 할일 위젯 반응형 개인 할일 ─── */
+.my-tasks-widget-content {
+  container-type: inline-size;
+  container-name: my-tasks-widget;
+}
+
+[data-personal-todo-status-action] {
+  min-width: 56px;
+}
+
+@container my-tasks-widget (min-width: 340px) {
+  [data-personal-todo-label-index="0"],
+  [data-personal-todo-label-index="1"] {
+    display: inline-block;
+  }
+}
+
+@container my-tasks-widget (max-width: 339px) {
+  /* 좁은 팝업에서는 두 번째 레이블과 메모 미리보기만 접어 제목·액션을 보존한다. */
+  [data-personal-todo-label-index="1"],
+  [data-personal-todo-memo-preview] {
+    display: none;
+  }
+
+  [data-personal-todo-status-action] {
+    min-width: 56px;
+  }
+}
+
 .sheet-column-resizer {
   position: absolute;
   top: 6px;

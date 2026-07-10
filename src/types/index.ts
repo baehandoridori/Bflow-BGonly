@@ -519,7 +519,6 @@ export interface AppUser {
   id: string;          // UUID
   name: string;
   slackId: string;
-  password: string;    // base64 인코딩된 JSON 내 평문 (내부 툴)
   isInitialPassword: boolean;
   createdAt: string;   // ISO 8601
   hireDate?: string;   // Phase 0-4: 입사일 (YYYY-MM-DD)
@@ -541,11 +540,52 @@ export interface UsersFile {
   users: AppUser[];
 }
 
+export interface PublicUserDirectory {
+  status: 'authoritative' | 'fallback' | 'remote-unavailable';
+  users: AppUser[];
+}
+
 export interface AuthSession {
   userId: string;
   userName: string;
   loggedInAt: string;  // ISO 8601
 }
+
+export type CanonicalSessionUser = AppUser;
+export interface CanonicalSessionPayload {
+  user: CanonicalSessionUser | null;
+  session: AuthSession | null;
+  epoch: number;
+}
+export interface CanonicalSessionResult {
+  ok: boolean;
+  payload: CanonicalSessionPayload;
+  error?: string;
+}
+
+export type MainPersonalTodoStatus = 'todo' | 'doing' | 'done';
+export type MainPersonalTodoPriority = 'high' | 'medium' | 'low' | 'none';
+export type MainPersonalTodoLabelColorKey = 'violet' | 'blue' | 'green' | 'yellow' | 'orange' | 'red' | 'pink' | 'gray';
+export interface MainPersonalTodo {
+  id: string; userId: string; title: string; memo: string; status: MainPersonalTodoStatus;
+  completed: boolean; priority: MainPersonalTodoPriority; pinned: boolean; labelIds: string[];
+  startDate: string | null; endDate: string | null; addToCalendar: boolean; sortOrder: number;
+  createdAt: string; updatedAt: string;
+}
+export interface MainPersonalTodoLabel {
+  id: string; name: string; colorKey: MainPersonalTodoLabelColorKey; createdAt: string; updatedAt: string;
+}
+export interface MainPersonalTodoPatch {
+  title?: string; memo?: string; startDate?: string | null; endDate?: string | null;
+  addToCalendar?: boolean; priority?: MainPersonalTodoPriority; labelIds?: string[]; status?: MainPersonalTodoStatus;
+}
+export type MainPersonalTodoCreateInput = Pick<MainPersonalTodo, 'id' | 'title'> & Partial<Pick<MainPersonalTodo,
+  'memo' | 'status' | 'priority' | 'pinned' | 'labelIds' | 'startDate' | 'endDate' | 'addToCalendar'>>;
+export type MainCalendarTodoPatch = Pick<MainPersonalTodoPatch, 'title' | 'memo' | 'startDate' | 'endDate' | 'addToCalendar'>;
+export type MainPersonalTodoFailureKind = 'rejected' | 'unknown' | 'stale' | 'quitting';
+export type MainPersonalTodoResult<T> = { ok: true; data: T } | {
+  ok: false; kind: MainPersonalTodoFailureKind; code: string; message: string; retryable: boolean;
+};
 
 // ─── 댓글 이모지 리액션 (v1.26.0+) ──────────
 
@@ -967,7 +1007,8 @@ export interface ElectronAPI {
 
   // 사용자 파일 (exe 옆 또는 test-data/ 옆, base64 인코딩 JSON)
   usersRead: () => Promise<UsersFile | null>;
-  usersWrite: (data: UsersFile) => Promise<boolean>;
+  createLocalUser: (input: { name: string; slackId: string; hireDate?: string; birthday?: string }) => Promise<AppUser>;
+  deleteLocalUser: (userId: string) => Promise<void>;
   readSettings: (fileName: string) => Promise<unknown | null>;
   writeSettings: (fileName: string, data: unknown) => Promise<boolean>;
   onDataChanged: (callback: (delta?: SheetDelta) => void) => () => void;
@@ -1225,7 +1266,7 @@ export interface ElectronAPI {
   supabaseBulkDeleteScenes: (sceneUuids: string[], deletedBy: string) => Promise<BulkUpdateResult[]>;
   supabaseBulkUpdateSceneFields: (updates: BulkFieldUpdate[], updatedBy: string) => Promise<BulkUpdateResult[]>;
   supabaseUpdateSceneField: (sceneUuid: string, field: string, value: string, senderId?: string) => Promise<void>;
-  supabaseReadUsers: () => Promise<unknown[]>;
+  supabaseReadUsers: () => Promise<PublicUserDirectory>;
   supabaseAddUser: (user: unknown) => Promise<void>;
   supabaseUpdateUser: (userId: string, updates: Record<string, string | boolean | null>) => Promise<void>;
   supabaseDeleteUser: (userId: string) => Promise<void>;
@@ -1338,19 +1379,30 @@ export interface ElectronAPI {
   // 딥링크
   onDeepLink: (callback: (data: { sheetName: string; sceneId: string }) => void) => () => void;
 
-  // ─── Personal Todos / Task Views ──────────────────
-  supabaseReadTodos: (userId: string) => Promise<any[]>;
-  supabaseUpsertTodo: (userId: string, todo: unknown) => Promise<string>;
-  supabaseDeleteTodo: (todoId: string) => Promise<void>;
-  supabaseReadTaskViews: (userId: string) => Promise<any>;
-  supabaseUpsertTaskViews: (userId: string, views: unknown[], sceneKeys: unknown[]) => Promise<void>;
+  // ─── Personal Todos / Task Views (main-owned session) ──
+  ensureCanonicalSession: () => Promise<CanonicalSessionResult>;
+  loginCanonicalSession: (input: { name: string; password: string; rememberMe?: boolean }) => Promise<CanonicalSessionResult>;
+  restoreCanonicalSession: () => Promise<CanonicalSessionResult>;
+  logoutCanonicalSession: () => Promise<CanonicalSessionResult>;
+  refreshCanonicalUser: () => Promise<CanonicalSessionResult>;
+  changeOwnPassword: (input: { currentPassword: string; newPassword: string }) => Promise<{ ok: boolean; error?: string }>;
+  readPersonalTodos: () => Promise<MainPersonalTodoResult<MainPersonalTodo[]>>;
+  readPersonalTodoLabels: () => Promise<MainPersonalTodoResult<MainPersonalTodoLabel[]>>;
+  createPersonalTodo: (input: MainPersonalTodoCreateInput) => Promise<MainPersonalTodoResult<MainPersonalTodo[]>>;
+  patchPersonalTodo: (todoId: string, patch: MainPersonalTodoPatch) => Promise<MainPersonalTodoResult<MainPersonalTodo>>;
+  applyCalendarToTodoPatch: (todoId: string, patch: MainCalendarTodoPatch) => Promise<MainPersonalTodoResult<MainPersonalTodo>>;
+  mutatePersonalTodoOrder: (mutation: { type: 'reorder' } | { type: 'pin' | 'setPinned'; todoId: string; pinned: boolean } | { type: 'status' | 'setStatusAndOrder'; todoId: string; status: MainPersonalTodoStatus }, orderedIds: string[]) => Promise<MainPersonalTodoResult<MainPersonalTodo[]>>;
+  deletePersonalTodo: (todoId: string) => Promise<MainPersonalTodoResult<MainPersonalTodo[]>>;
+  createOrReusePersonalTodoLabelAndAttach: (input: { todoId: string; name: string; colorKey: MainPersonalTodoLabelColorKey }) => Promise<MainPersonalTodoResult<{ label: MainPersonalTodoLabel; todo: MainPersonalTodo | null }>>;
+  updatePersonalTodoLabel: (labelId: string, patch: { name?: string; colorKey?: MainPersonalTodoLabelColorKey }) => Promise<MainPersonalTodoResult<MainPersonalTodoLabel>>;
+  readLegacyTaskViews: () => Promise<MainPersonalTodoResult<{ views: unknown[]; assignedSceneKeys: unknown[] } | null>>;
+  upsertLegacyTaskViews: (views: unknown[], sceneKeys: unknown[]) => Promise<MainPersonalTodoResult<void>>;
+  retryPersonalTodoCalendar: () => Promise<MainPersonalTodoResult<void>>;
+  onPersonalTodoCommit: (cb: (payload: unknown) => void) => () => void;
   // ─── Memos ───────────────────────────────
   supabaseReadMemo: (userId: string, widgetId: string) => Promise<any>;
   supabaseUpsertMemo: (userId: string, widgetId: string, data: unknown) => Promise<void>;
   supabaseReadAllMemos: (userId: string) => Promise<any[]>;
-
-  // ─── 활동 기록 — currentUser 동기화 ─────────
-  authSetCurrentUser: (user: { id: string; name: string } | null) => Promise<void>;
 
   // ─── 활동 기록 (activity_log) ──────────────
   activityList: (opts: {
@@ -1433,6 +1485,7 @@ export interface ElectronAPI {
   gcalStartAuth: () => Promise<void>;
   gcalSaveCredentials: (clientId: string, clientSecret: string) => Promise<void>;
   gcalHasCredentials: () => Promise<boolean>;
+  gcalSaveLocalSettings: (settings: { personalCalendarId?: string | null; lastSyncAt?: string | null }) => Promise<void>;
   gcalSignOut: () => Promise<void>;
   gcalListCalendars: () => Promise<Array<{ id: string; summary: string; primary: boolean }>>;
   gcalFullSync: (calendarId: string) => Promise<any[]>;

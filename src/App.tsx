@@ -336,13 +336,6 @@ export default function App() {
     return () => { cleanup?.(); };
   }, [setUpdateInfo]);
 
-  // currentUser 변경 시 메인 프로세스에 동기화 (활동 기록 자동 user_id/user_name 사용)
-  useEffect(() => {
-    window.electronAPI?.authSetCurrentUser?.(
-      currentUser ? { id: currentUser.id, name: currentUser.name } : null,
-    );
-  }, [currentUser]);
-
   // 활동(activity_log) 글로벌 구독 + 초기 로드 — 로그인 후 1번.
   // RecentActivityWidget 의 자체 구독은 idempotent 처리되어 중복 호출 안전.
   // 한솔 결정 (2026-05-02): Realtime 을 위젯 lifecycle 에 묶지 말고 App 전역에서 항상 구독 →
@@ -828,10 +821,11 @@ export default function App() {
           }
         }
 
-        // Supabase/Sheets 연결 후 사용자 목록 재로드 + 세션 재복원
+        // Supabase/Sheets 연결 후 사용자 목록을 항상 재로드하고 세션을 재복원한다.
         // (위에서 sheetsMode=false 상태로 로컬 users.dat를 읽었으므로,
-        //  Supabase 사용자 ID와 달라 세션 복원이 실패할 수 있음)
-        if (useAppStore.getState().dataConnected && !useAuthStore.getState().currentUser) {
+        //  세션이 먼저 복원된 경우에도 mentions/관리 화면이 오래된 디렉터리를
+        //  계속 들고 있지 않도록 연결된 저장소의 사용자 목록으로 교체한다.)
+        if (useAppStore.getState().dataConnected) {
           const freshUsers = await loadUsers();
           setUsers(freshUsers);
           if (rememberMe) {
@@ -898,39 +892,6 @@ export default function App() {
       // localStorage 사용 불가 환경(시크릿 모드 등) — silent skip
     }
   }, [authReady, currentUser]);
-
-  // 세션 변경 브로드캐스트: currentUser 변화를 모든 위젯 창에 전파
-  // (로그인/세션 복원/로그아웃/비밀번호 변경 등 모든 setCurrentUser 경로 공통)
-  // 로그인: user truthy → { user } 브로드캐스트
-  // 로그아웃: null → { user: null } 명시적 브로드캐스트 (위젯 창이 currentUser를 null로 재설정)
-  // 첫 실행 시 이미 로그인된 사용자(loadSession 복원 등)가 있으면 broadcast —
-  // 플로팅 위젯이 이미 열려 있는 경우 초기 사용자 상태를 전파하기 위함.
-  const prevBroadcastUserRef = useRef<typeof currentUser | undefined>(undefined);
-  useEffect(() => {
-    const prev = prevBroadcastUserRef.current;
-    prevBroadcastUserRef.current = currentUser;
-
-    // 첫 실행: currentUser가 이미 있다면 broadcast (플로팅 위젯이 이미 열려 있을 수 있음)
-    if (prev === undefined) {
-      if (currentUser) {
-        window.electronAPI?.sessionBroadcastChange?.({ user: currentUser });
-      }
-      return;
-    }
-
-    // 동일 사용자 + 동일 필드면 스킵.
-    // id만 비교하면 같은 유저의 필드 변경(비밀번호 변경, isInitialPassword, role, name 등)이 전파되지 않아
-    // 팝업/위젯 창이 stale currentUser를 유지하게 됨. AppUser는 평탄 data 구조(types/index.ts:114)라
-    // JSON.stringify 동등성으로 안전하게 비교 가능.
-    const isSameUser =
-      (prev === null && currentUser === null) ||
-      (prev != null &&
-        currentUser != null &&
-        JSON.stringify(prev) === JSON.stringify(currentUser));
-    if (isSameUser) return;
-
-    window.electronAPI?.sessionBroadcastChange?.({ user: currentUser ?? null });
-  }, [currentUser]);
 
   // 사용자 변경 시 목록 리로드
   useEffect(() => {
@@ -2701,7 +2662,19 @@ export default function App() {
   // 무한 루프 방지: 송신자 제외는 메인 프로세스에서 처리됨
   useEffect(() => {
     const cleanup = window.electronAPI?.onCalendarChanged?.((payload) => {
-      window.dispatchEvent(new CustomEvent('bflow:calendar-changed', { detail: payload }));
+      const detail = payload && typeof payload === 'object' ? payload as { action?: string } : {};
+      const refresh = async () => {
+        if (detail.action === 'upsert' || detail.action === 'delete') {
+          try {
+            const { syncAll } = await import('@/services/calendarService');
+            await syncAll({ broadcast: false });
+          } catch (error) {
+            console.warn('[Broadcast] 개인 할일 캘린더 캐시 갱신 실패:', error);
+          }
+        }
+        window.dispatchEvent(new CustomEvent('bflow:calendar-changed', { detail: payload }));
+      };
+      void refresh();
     });
     return () => { cleanup?.(); };
   }, []);
