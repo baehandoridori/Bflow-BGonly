@@ -23,6 +23,7 @@ import { normalizePersonalTodo } from '../personalTodoDomain';
 import { computeMyTasksStats } from '../statsUtils';
 import type { MyTasksStats } from '../statsUtils';
 import { useMyCharacterTasks } from './useMyCharacterTasks';
+import { PersonalTodoLoadGate } from './personalTodoLoadGate';
 
 const SAVE_FAIL_MESSAGE = '저장에 실패했어요. 잠시 후 다시 시도해주세요.';
 
@@ -389,7 +390,7 @@ export function useMyTasksData(isPopup: boolean): UseMyTasksDataResult {
 
   const stageSaveQueueRef = useRef<Map<string, Promise<void>>>(new Map());
   const stageSaveBaselineRef = useRef<Map<string, StageSaveBaseline>>(new Map());
-  const loadGenerationRef = useRef(0);
+  const loadGateRef = useRef(new PersonalTodoLoadGate());
 
   // 데이터 변경 알림: 팝업에서는 쿨다운 래퍼, 대시보드에서는 직접 호출
   const notifyChange = useCallback(async () => {
@@ -443,7 +444,8 @@ export function useMyTasksData(isPopup: boolean): UseMyTasksDataResult {
   // Supabase 초기화: 마이그레이션 후 데이터 로드
   useEffect(() => {
     if (!currentUser?.id) return;
-    const loadGeneration = ++loadGenerationRef.current;
+    const loadGate = loadGateRef.current;
+    const loadGeneration = loadGate.beginInitialLoad();
     // 사용자 전환 시 이전 사용자 상태가 새 사용자 ID로 저장되는 것을 방지
     // save effect가 로드 완료 전에 실행되지 않도록 초기화 플래그를 즉시 해제
     _supabaseInitialized.current = false;
@@ -466,21 +468,37 @@ export function useMyTasksData(isPopup: boolean): UseMyTasksDataResult {
       // (DB 쓰기는 await로 먼저 끝내고, 합친 결과를 아래 가드 안에서 한 번에 setState)
       // 읽기 실패 등 안전 스킵이 필요하면 null → 기존 로드값을 그대로 사용(기존 데이터 보호).
       const migrationResult = await migrateCustomViewTodosToAssigned(userId, todos);
-      if (loadGeneration !== loadGenerationRef.current || useAuthStore.getState().currentUser?.id !== userId) return;
-      const mergedTodos = migrationResult && migrationResult.todos.length > 0
+      if (!loadGate.isCurrent(loadGeneration) || useAuthStore.getState().currentUser?.id !== userId) return;
+      let mergedTodos = migrationResult && migrationResult.todos.length > 0
         ? [...todos, ...migrationResult.todos]
         : todos;
       // P1: 마이그레이션이 일어났으면 병합된 sceneKeys를 사용, 아니면 기존 로드값 그대로
-      const finalSceneKeys = migrationResult ? migrationResult.sceneKeys : sceneKeys;
+      let finalSceneKeys = migrationResult ? migrationResult.sceneKeys : sceneKeys;
+      if (loadGate.consumeDeferredCommit(loadGeneration)) {
+        const [freshTodos, freshSceneKeys] = await Promise.all([
+          loadTodosFromSupabase(userId),
+          loadAssignedSceneKeysFromSupabase(userId),
+        ]);
+        if (freshTodos === null || freshSceneKeys === null) return;
+        mergedTodos = freshTodos;
+        finalSceneKeys = freshSceneKeys;
+      }
+      if (!loadGate.isCurrent(loadGeneration) || useAuthStore.getState().currentUser?.id !== userId) return;
+      if (!loadGate.finishInitialLoad(loadGeneration)) return;
       _externalDepth.current++;
       setAssignedTodos(mergedTodos);
       setAssignedSceneKeys(finalSceneKeys);
       requestAnimationFrame(() => {
         _externalDepth.current = Math.max(0, _externalDepth.current - 1);
-        _supabaseInitialized.current = true;
+        if (loadGate.canPersistSceneKeys && useAuthStore.getState().currentUser?.id === userId) {
+          _supabaseInitialized.current = true;
+        }
       });
     })();
-    return () => { loadGenerationRef.current++; };
+    return () => {
+      loadGate.cancel();
+      _supabaseInitialized.current = false;
+    };
   }, [currentUser?.id]);
 
   // Supabase 저장: 씬키 변경 시 Supabase에 반영
@@ -503,13 +521,14 @@ export function useMyTasksData(isPopup: boolean): UseMyTasksDataResult {
     const handler = () => {
       if (!currentUser?.id) return;
       const userId = currentUser.id;
-      const loadGeneration = ++loadGenerationRef.current;
+      const loadGeneration = loadGateRef.current.noteAuthoritativeCommit();
+      if (loadGeneration === null) return;
       _externalDepth.current++;
       Promise.all([
         loadTodosFromSupabase(userId),
         loadAssignedSceneKeysFromSupabase(userId),
       ]).then(([todos, sceneKeys]) => {
-        if (loadGeneration !== loadGenerationRef.current || useAuthStore.getState().currentUser?.id !== userId) {
+        if (!loadGateRef.current.isCurrent(loadGeneration) || useAuthStore.getState().currentUser?.id !== userId) {
           _externalDepth.current = Math.max(0, _externalDepth.current - 1);
           return;
         }
@@ -535,7 +554,7 @@ export function useMyTasksData(isPopup: boolean): UseMyTasksDataResult {
       handler();
     });
     return () => {
-      loadGenerationRef.current++;
+      loadGateRef.current.cancel();
       window.removeEventListener('bflow:todos-changed', handler);
       ipcCleanup?.();
       commitCleanup?.();

@@ -301,7 +301,7 @@ test('public renderer user reads and contracts never expose or replace plaintext
 test('my tasks consumes main personal-todo commits and cancels stale session loads', () => {
   const hook = readFileSync('src/components/widgets/my-tasks/hooks/useMyTasksData.ts', 'utf8');
   assert.match(hook, /onPersonalTodoCommit/);
-  assert.match(hook, /loadGenerationRef/);
+  assert.match(hook, /PersonalTodoLoadGate/);
   assert.match(hook, /payload\.userId[^\n]*currentUser/);
 });
 
@@ -319,4 +319,46 @@ test('user profile mutations refresh and broadcast the canonical main-owned prof
   assert.match(main, /supabase:update-user[\s\S]{0,500}refreshCurrentUser/);
   assert.match(main, /auth:change-own-password[\s\S]{0,2500}refreshCurrentUser/);
   assert.match(userService, /changeOwnPassword/);
+});
+
+test('commit during initial todo migration is folded into authoritative load and scene-key saves stay enabled', async () => {
+  const { PersonalTodoLoadGate } = await import('../src/components/widgets/my-tasks/hooks/personalTodoLoadGate.ts');
+  const gate = new PersonalTodoLoadGate();
+  const initialToken = gate.beginInitialLoad();
+
+  assert.equal(gate.noteAuthoritativeCommit(), null, 'commit must be deferred while migration is running');
+  assert.equal(gate.consumeDeferredCommit(initialToken), true, 'initial loader must perform a final authoritative reload');
+  assert.equal(gate.finishInitialLoad(initialToken), true);
+  assert.equal(gate.canPersistSceneKeys, true);
+
+  let sceneKeySaves = 0;
+  if (gate.canPersistSceneKeys) sceneKeySaves++;
+  assert.equal(sceneKeySaves, 1, 'scene-key persistence must remain enabled after the deferred commit reload');
+});
+
+test('transient remote user outage cannot clear a verified canonical session', async () => {
+  const { SessionManager } = await import('../electron/sessionManager.ts');
+  const alice = { id: 'alice', name: 'Alice', password: 'secret', role: 'user' };
+  let userRead = { status: 'authoritative' as const | 'remote-unavailable', users: [alice] };
+  const rememberedWrites: Array<{ userId: string } | null> = [];
+  const broadcasts: Array<{ user: { id: string } | null }> = [];
+  const manager = new SessionManager({
+    readUsers: async () => userRead,
+    readRememberedSession: async () => null,
+    writeRememberedSession: async (session) => { rememberedWrites.push(session); },
+    beginPersonalDataTransition: () => undefined,
+    endPersonalDataTransition: () => undefined,
+    drainPersonalDataQueue: async () => undefined,
+    flushCalendarJournal: async () => undefined,
+    setActivityUser: () => undefined,
+    broadcast: (payload) => { broadcasts.push(payload as { user: { id: string } | null }); },
+  });
+
+  assert.equal((await manager.login({ name: 'Alice', password: 'secret' })).ok, true);
+  userRead = { status: 'remote-unavailable', users: [] };
+  const refreshed = await manager.refreshCurrentUser();
+  assert.equal(refreshed.ok, true);
+  assert.equal(refreshed.payload.user?.id, 'alice');
+  assert.equal(rememberedWrites.some((entry) => entry === null), false);
+  assert.equal(broadcasts.at(-1)?.user?.id, 'alice');
 });

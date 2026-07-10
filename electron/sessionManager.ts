@@ -27,8 +27,14 @@ export interface SessionActionResult {
   error?: string;
 }
 
+export type SessionUserDirectoryStatus = 'authoritative' | 'fallback' | 'remote-unavailable';
+export interface SessionUserDirectoryResult {
+  users: SessionUserRecord[];
+  status: SessionUserDirectoryStatus;
+}
+
 export interface SessionManagerDependencies {
-  readUsers(): Promise<SessionUserRecord[]>;
+  readUsers(): Promise<SessionUserDirectoryResult>;
   readRememberedSession(): Promise<RememberedAuthSession | null>;
   writeRememberedSession(session: RememberedAuthSession | null): Promise<void>;
   drainPersonalDataQueue(userId: string): Promise<void>;
@@ -117,7 +123,7 @@ export class SessionManager {
   login(input: { name: string; password: string; rememberMe?: boolean }): Promise<SessionActionResult> {
     return this.serialize(async () => {
       try {
-        const users = await this.dependencies.readUsers();
+        const { users } = await this.dependencies.readUsers();
         const user = users.find((candidate) => candidate.name === input.name);
         if (!user) return { ok: false, payload: this.getCurrentPayload(), error: '등록되지 않은 사용자입니다.' };
         if (user.password !== input.password) {
@@ -147,11 +153,15 @@ export class SessionManager {
         if (this.getCanonicalUserId()) return { ok: true, payload: this.getCurrentPayload() };
         const remembered = await this.dependencies.readRememberedSession();
         if (!remembered?.userId) return { ok: true, payload: this.getCurrentPayload() };
-        const users = await this.dependencies.readUsers();
+        const directory = await this.dependencies.readUsers();
+        const users = directory.users;
         const user = users.find((candidate) => candidate.id === remembered.userId);
         if (!user) {
-          await this.dependencies.writeRememberedSession(null);
-          return { ok: false, payload: this.getCurrentPayload(), error: '저장된 사용자를 찾을 수 없습니다.' };
+          if (directory.status === 'authoritative') {
+            await this.dependencies.writeRememberedSession(null);
+            return { ok: false, payload: this.getCurrentPayload(), error: '저장된 사용자를 찾을 수 없습니다.' };
+          }
+          return { ok: false, payload: this.getCurrentPayload(), error: '사용자 정보를 일시적으로 확인할 수 없습니다.' };
         }
         return { ok: true, payload: this.publish(user, remembered) };
       } catch (error) {
@@ -186,9 +196,13 @@ export class SessionManager {
       try {
         const currentId = this.getCanonicalUserId();
         if (!currentId) return { ok: true, payload: this.getCurrentPayload() };
-        const users = await this.dependencies.readUsers();
+        const directory = await this.dependencies.readUsers();
+        const users = directory.users;
         const user = users.find((candidate) => candidate.id === currentId);
         if (!user) {
+          if (directory.status !== 'authoritative') {
+            return { ok: true, payload: this.getCurrentPayload() };
+          }
           const transition = await this.prepareTransition(null);
           try {
             await this.dependencies.writeRememberedSession(null);

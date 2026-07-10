@@ -1634,11 +1634,15 @@ sessionManager = new SessionManager({
   readUsers: async () => {
     try {
       const users = await sbReadUsers();
-      if (users.length > 0) return users as unknown as SessionUserRecord[];
+      return { users: users as unknown as SessionUserRecord[], status: 'authoritative' as const };
     } catch (error) {
       console.warn('[auth] Supabase 사용자 검증 실패 — 로컬 사용자 저장소 확인:', error);
     }
-    return readLocalUsersForSession();
+    const fallbackUsers = readLocalUsersForSession();
+    return {
+      users: fallbackUsers,
+      status: fallbackUsers.length > 0 ? 'fallback' as const : 'remote-unavailable' as const,
+    };
   },
   readRememberedSession: async () => {
     try {
