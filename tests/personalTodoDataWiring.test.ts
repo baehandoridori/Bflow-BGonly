@@ -142,6 +142,8 @@ test('main wires the recovery journal and calendar worker into live todo intents
   assert.match(main, /personalTodoService\.waitForIdle\(15000\)/);
   assert.match(google, /id:\s*input\.id/);
   assert.match(main, /bflow_type:\s*'custom'[\s\S]{0,180}PERSONAL_TODO_GOOGLE_LINK_KEY/);
+  assert.match(main, /personal-todo:retry-calendar[\s\S]{0,500}personalTodoCalendarSync\.recover/);
+  assert.match(readFileSync('electron/preload.ts', 'utf8'), /retryPersonalTodoCalendar/);
 });
 
 test('committed-but-response-lost keeps the calendar intent and reconciles from owner-scoped read-back', async () => {

@@ -6,6 +6,7 @@ export const PERSONAL_TODO_MIGRATION_MARKER = 'bflow_personal_todo_migration_v2'
 const LEGACY_ASSIGNED_TODOS_KEY = 'bflow_assigned_personal_todos';
 const LEGACY_SCENE_KEYS_KEY = 'bflow_assigned_scene_keys';
 const LEGACY_VIEWS_KEY = 'bflow_my_task_views';
+const LEGACY_ID_MAP_KEY = 'bflow_personal_todo_legacy_id_map_v1';
 
 export interface LegacyPersonalTodoMigration {
   todos: PersonalTodo[];
@@ -40,6 +41,16 @@ function parseArray(raw: string | null): unknown[] {
   try { const value = JSON.parse(raw); return Array.isArray(value) ? value : []; } catch { return []; }
 }
 
+function readLegacyIdMap(storage: Pick<Storage, 'getItem'>): Record<string, string> {
+  const raw = storage.getItem(LEGACY_ID_MAP_KEY);
+  if (!raw) return {};
+  try {
+    const value = JSON.parse(raw) as unknown;
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
+    return Object.fromEntries(Object.entries(value).filter(([key, id]) => typeof key === 'string' && isCanonicalPersonalTodoId(id)));
+  } catch { return {}; }
+}
+
 export function isCanonicalPersonalTodoId(id: unknown): id is string {
   return typeof id === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(id.trim());
 }
@@ -50,7 +61,7 @@ export function isCanonicalPersonalTodoId(id: unknown): id is string {
  * dates, and calendar links are not lost during migration.
  */
 export function collectLegacyPersonalTodos(
-  storage: Pick<Storage, 'getItem'> | null | undefined,
+  storage: (Pick<Storage, 'getItem'> & Partial<Pick<Storage, 'setItem'>>) | null | undefined,
   taskViews: unknown[] = [],
 ): LegacyPersonalTodoMigration {
   const candidates: unknown[] = [
@@ -65,15 +76,26 @@ export function collectLegacyPersonalTodos(
   sceneKeys.push(...parseArray(storage?.getItem(LEGACY_SCENE_KEYS_KEY) ?? null).filter((key): key is string => typeof key === 'string'));
 
   const seenLegacyIds = new Set<string>();
+  const legacyIdMap = readLegacyIdMap(storage ?? { getItem: () => null });
+  let legacyIdMapChanged = false;
   const todos: PersonalTodo[] = [];
   for (const raw of candidates) {
     const normalized = normalizePersonalTodo(raw);
     const legacyId = normalized.id.trim();
     if (legacyId && seenLegacyIds.has(legacyId)) continue;
     if (legacyId) seenLegacyIds.add(legacyId);
-    const id = isCanonicalPersonalTodoId(normalized.id) ? normalized.id : createUuid();
+    let id = normalized.id;
+    if (!isCanonicalPersonalTodoId(id)) {
+      const mapped = legacyIdMap[legacyId];
+      id = mapped ?? createUuid();
+      if (!mapped && legacyId) {
+        legacyIdMap[legacyId] = id;
+        legacyIdMapChanged = true;
+      }
+    }
     todos.push({ ...normalized, id });
   }
+  if (legacyIdMapChanged) storage?.setItem?.(LEGACY_ID_MAP_KEY, JSON.stringify(legacyIdMap));
   return { todos, sceneKeys: [...new Set(sceneKeys)] };
 }
 

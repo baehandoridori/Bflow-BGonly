@@ -251,6 +251,17 @@ export function usePersonalTodos(): UsePersonalTodosResult {
     return cleanup;
   }, [publishBaseline, readAuthoritative]);
 
+  useEffect(() => {
+    const cleanup = api().onCalendarChanged((payload) => {
+      const event = (payload ?? {}) as { userId?: string; action?: string };
+      if (event.userId && event.userId !== userIdRef.current) return;
+      if (event.action !== 'sync-needed') return;
+      mutationStateRef.current.orderSyncNeeded = true;
+      setSyncNeeded(true);
+    });
+    return cleanup;
+  }, []);
+
   const runMutation = useCallback(async (
     key: string,
     optimisticTodos: PersonalTodo[],
@@ -445,6 +456,11 @@ export function usePersonalTodos(): UsePersonalTodosResult {
   }, [labels, runMutation, todos]);
 
   const retrySync = useCallback(async () => {
+    const calendarRetry = await api().retryPersonalTodoCalendar();
+    if (!calendarRetry.ok) {
+      setSyncNeeded(true);
+      return;
+    }
     const baseline = await readAuthoritative(loadGenerationRef.current, sessionEpochRef.current);
     if (!baseline) return;
     publishBaseline(baseline, false);

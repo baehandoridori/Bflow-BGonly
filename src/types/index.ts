@@ -1397,6 +1397,7 @@ export interface ElectronAPI {
   updatePersonalTodoLabel: (labelId: string, patch: { name?: string; colorKey?: MainPersonalTodoLabelColorKey }) => Promise<MainPersonalTodoResult<MainPersonalTodoLabel>>;
   readLegacyTaskViews: () => Promise<MainPersonalTodoResult<{ views: unknown[]; assignedSceneKeys: unknown[] } | null>>;
   upsertLegacyTaskViews: (views: unknown[], sceneKeys: unknown[]) => Promise<MainPersonalTodoResult<void>>;
+  retryPersonalTodoCalendar: () => Promise<MainPersonalTodoResult<void>>;
   onPersonalTodoCommit: (cb: (payload: unknown) => void) => () => void;
   // ─── Memos ───────────────────────────────
   supabaseReadMemo: (userId: string, widgetId: string) => Promise<any>;

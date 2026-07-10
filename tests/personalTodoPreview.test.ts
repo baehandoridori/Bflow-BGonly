@@ -68,6 +68,15 @@ test('legacy migration deduplicates the same non-UUID id before conversion', () 
   assert.equal(migration.todos.length, 1);
 });
 
+test('legacy migration keeps the generated UUID stable across retries', () => {
+  const storage = createMemoryStorage({
+    bflow_assigned_personal_todos: JSON.stringify([{ id: 'ptodo_retry', title: 'retry me' }]),
+  });
+  const first = collectLegacyPersonalTodos(storage, []);
+  const second = collectLegacyPersonalTodos(storage, []);
+  assert.equal(second.todos[0]?.id, first.todos[0]?.id);
+});
+
 test('stale mutation identity is rejected after session/generation changes', () => {
   assert.equal(isPersonalTodoIntentCurrent(
     { epoch: 1, userId: 'alice', generation: 3 },

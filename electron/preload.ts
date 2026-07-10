@@ -322,6 +322,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   readLegacyTaskViews: () => ipcRenderer.invoke('personal-todo:read-task-views', canonicalSessionEpoch),
   upsertLegacyTaskViews: (views: unknown[], sceneKeys: unknown[]) =>
     ipcRenderer.invoke('personal-todo:upsert-task-views', views, sceneKeys, canonicalSessionEpoch),
+  retryPersonalTodoCalendar: () =>
+    ipcRenderer.invoke('personal-todo:retry-calendar'),
   onPersonalTodoCommit: (callback: (payload: unknown) => void) => {
     const listener = (_event: Electron.IpcRendererEvent, payload: unknown) => callback(payload);
     ipcRenderer.on('personal-todo:commit', listener);

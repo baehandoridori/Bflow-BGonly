@@ -2678,6 +2678,24 @@ ipcMain.handle('personal-todo:update-label', (_e, labelId: string, patch: { name
 ipcMain.handle('personal-todo:read-task-views', (_e, epoch?: number) => personalTodoService.readTaskViews(epoch));
 ipcMain.handle('personal-todo:upsert-task-views', (_e, views: unknown[], sceneKeys: unknown[], epoch?: number) =>
   personalTodoService.upsertTaskViews(views, sceneKeys, epoch));
+ipcMain.handle('personal-todo:retry-calendar', async () => {
+  const userId = sessionManager?.getCanonicalUserId();
+  if (!userId) {
+    return { ok: false as const, kind: 'stale' as const, code: 'NO_SESSION', message: '로그인이 필요합니다.', retryable: true as const };
+  }
+  try {
+    await personalTodoCalendarSync.recover(userId);
+    return { ok: true as const, data: undefined };
+  } catch (error) {
+    return {
+      ok: false as const,
+      kind: 'unknown' as const,
+      code: (error as { code?: string })?.code ?? 'CALENDAR_RECOVERY_FAILED',
+      message: String((error as { message?: string })?.message ?? error),
+      retryable: true as const,
+    };
+  }
+});
 
 // ─── Memos IPC ──────────────────────────────
 

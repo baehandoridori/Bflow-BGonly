@@ -1161,6 +1161,7 @@ export function installDevElectronAPI(): void {
     },
     readLegacyTaskViews: async () => ({ ok: true, data: null }),
     upsertLegacyTaskViews: async () => ({ ok: true, data: undefined }),
+    retryPersonalTodoCalendar: async () => ({ ok: true as const, data: undefined }),
     onPersonalTodoCommit: (callback) => {
       previewTodoCommitListeners.add(callback);
       return () => previewTodoCommitListeners.delete(callback);

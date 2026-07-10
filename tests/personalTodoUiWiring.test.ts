@@ -85,6 +85,13 @@ test('partial todo edits do not replay stale row fields or status through the pa
   assert.doesNotMatch(hook, /status:\s*nextTodo\.status/);
 });
 
+test('calendar recovery failures surface as a personal todo sync-needed state', () => {
+  const hook = read('src/components/widgets/my-tasks/hooks/usePersonalTodos.ts');
+  assert.match(hook, /onCalendarChanged/);
+  assert.match(hook, /event\.action !== 'sync-needed'/);
+  assert.match(hook, /retryPersonalTodoCalendar/);
+});
+
 test('detail modal exposes personal properties and bounded auto-grow memo', () => {
   const modal = read('src/components/widgets/my-tasks/components/TodoDetailModal.tsx');
   assert.match(modal, /상단 고정/);
