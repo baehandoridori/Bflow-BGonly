@@ -142,6 +142,17 @@ export function movePersonalTodoToGroupTail(todos: PersonalTodo[], updatedTodo: 
   return reassemblePersonalTodos(groups);
 }
 
+export function personalTodoOrderMatches(actual: PersonalTodo[], expected: PersonalTodo[]): boolean {
+  if (actual.length !== expected.length) return false;
+  return expected.every((todo, index) => {
+    const candidate = actual[index];
+    return candidate.id === todo.id
+      && candidate.status === todo.status
+      && candidate.completed === todo.completed
+      && candidate.pinned === todo.pinned;
+  });
+}
+
 export function getTodoNextAction(status: PersonalTodoStatus): PersonalTodoNextAction {
   return NEXT_ACTIONS[status];
 }

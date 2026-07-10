@@ -8,6 +8,7 @@ import {
   getPriorityPresentation,
   getTodoNextAction,
   movePersonalTodoToGroupTail,
+  personalTodoOrderMatches,
   normalizePersonalTodo,
   reassemblePersonalTodos,
   splitPersonalTodos,
@@ -104,6 +105,16 @@ test('status and pin transitions append the todo to its target group tail', () =
     { ...doneAtTail[2], status: 'todo', completed: false, pinned: false },
   );
   assert.deepEqual(reopenedAtNormalTail.map((todo) => todo.id), ['normal', 'pinned', 'done']);
+});
+
+test('unknown order reconciliation only commits when status and order echo the target', () => {
+  const target = [
+    normalizePersonalTodo({ id: 'a', title: 'A', status: 'done', pinned: false }),
+    normalizePersonalTodo({ id: 'b', title: 'B', status: 'todo', pinned: true }),
+  ];
+  assert.equal(personalTodoOrderMatches(target, target), true);
+  assert.equal(personalTodoOrderMatches(target, [{ ...target[0], status: 'doing' }, target[1]]), false);
+  assert.equal(personalTodoOrderMatches(target, [target[1], target[0]]), false);
 });
 
 test('priority values never reorder input through split and reassemble', () => {

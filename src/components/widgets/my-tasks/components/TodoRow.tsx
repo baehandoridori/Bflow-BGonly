@@ -77,29 +77,28 @@ export function TodoRow({
       )}
 
       <div className="flex flex-col min-w-0 flex-1 gap-0.5">
-        <div
-          role="button"
-          tabIndex={0}
-          onClick={(event) => {
-            if ((event.target as HTMLElement).closest('button, a')) return;
-            openDetail?.(todo);
-          }}
-          onKeyDown={(event) => {
-            if ((event.target as HTMLElement).closest('button, a')) return;
-            if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); openDetail?.(todo); }
-          }}
+        <button
+          type="button"
+          onClick={() => openDetail?.(todo)}
           className="flex flex-col min-w-0 text-left cursor-pointer rounded px-0.5 -mx-0.5 hover:bg-bg-border/10 transition-colors"
           title="클릭하여 상세 보기/편집"
         >
           <span className={cn('text-[13px] text-text-primary truncate', todo.completed && 'line-through text-text-secondary/50')}>
             {todo.title}
           </span>
-          {todo.memo && (
-            <span className="text-[11px] text-text-secondary/50 truncate">
-              <EntityText text={todo.memo} userNames={users.map((user) => user.name)} onHashClick={navigateToHashTarget} />
-            </span>
-          )}
-        </div>
+        </button>
+        {todo.memo && (
+          <div
+            onClick={(event) => {
+              if ((event.target as HTMLElement).closest('button, a')) return;
+              openDetail?.(todo);
+            }}
+            className="text-[11px] text-text-secondary/50 truncate cursor-pointer"
+            title="클릭하여 상세 보기/편집"
+          >
+            <EntityText text={todo.memo} userNames={users.map((user) => user.name)} onHashClick={navigateToHashTarget} />
+          </div>
+        )}
         <TodoMetadata todo={todo} resolvedLabels={resolvedLabels} syncState={syncState} onTogglePinned={onTogglePinned} compact />
       </div>
 

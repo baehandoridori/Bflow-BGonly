@@ -9,7 +9,7 @@ import type {
   MainPersonalTodoStatus,
 } from '@/types';
 import type { PersonalTodo, PersonalTodoLabel, PersonalTodoPriority } from '../types';
-import { applyPersonalTodoStatus, movePersonalTodoToGroupTail, normalizePersonalTodo, splitPersonalTodos } from '../personalTodoDomain';
+import { applyPersonalTodoStatus, movePersonalTodoToGroupTail, normalizePersonalTodo, personalTodoOrderMatches, splitPersonalTodos } from '../personalTodoDomain';
 import {
   clearLegacyPersonalTodoStorage,
   collectLegacyPersonalTodos,
@@ -289,6 +289,7 @@ export function usePersonalTodos(): UsePersonalTodosResult {
       userId: useAuthStore.getState().currentUser?.id ?? null,
       generation: loadGenerationRef.current,
     });
+    const authoritativeMatchesIntent = (baseline: ConfirmedBaseline) => !order || personalTodoOrderMatches(baseline.todos, optimisticTodos);
     try {
       let result: MainPersonalTodoResult<unknown>;
       let retried = false;
@@ -309,12 +310,14 @@ export function usePersonalTodos(): UsePersonalTodosResult {
       if (!isCurrentIntent()) return committed;
       if (!result.ok && result.kind === 'unknown') {
         const authoritative = await readAuthoritative(loadGenerationRef.current, epoch);
-        if (authoritative) {
-        if (isCurrentIntent()) {
+        if (authoritative && isCurrentIntent() && authoritativeMatchesIntent(authoritative)) {
           publishBaseline(authoritative, true);
           committed = true;
-        }
-        } else {
+        } else if (authoritative && isCurrentIntent()) {
+          publishBaseline(authoritative, true);
+          mutationStateRef.current.orderSyncNeeded = true;
+          setSyncNeeded(true);
+        } else if (!authoritative) {
           mutationStateRef.current.orderSyncNeeded = order;
           setSyncNeeded(true);
         }
@@ -329,11 +332,14 @@ export function usePersonalTodos(): UsePersonalTodosResult {
       if (isUnknown(error)) {
         const authoritative = await readAuthoritative(loadGenerationRef.current, epoch);
         if (!isCurrentIntent()) return committed;
-        if (authoritative) {
+        if (authoritative && authoritativeMatchesIntent(authoritative)) {
           publishBaseline(authoritative, true);
           committed = true;
-        }
-        else { mutationStateRef.current.orderSyncNeeded = order; setSyncNeeded(true); }
+        } else if (authoritative) {
+          publishBaseline(authoritative, true);
+          mutationStateRef.current.orderSyncNeeded = true;
+          setSyncNeeded(true);
+        } else { mutationStateRef.current.orderSyncNeeded = order; setSyncNeeded(true); }
       } else if (isCurrentIntent()) {
         publishBaseline(confirmedBaselineRef.current, true);
       }
@@ -392,7 +398,10 @@ export function usePersonalTodos(): UsePersonalTodosResult {
     // surface. Split that list back into pinned/normal buckets before writing
     // the canonical order so a pinned row is never duplicated.
     if (group === 'normal') {
-      groups.pinned = reordered.filter((todo) => todo.pinned);
+      // The current widget sends normalTodos only; preserve the pinned bucket
+      // in that case. Keep the legacy combined-list compatibility when a
+      // pinned item is present in the payload.
+      if (reordered.some((todo) => todo.pinned)) groups.pinned = reordered.filter((todo) => todo.pinned);
       groups.normal = reordered.filter((todo) => !todo.pinned);
     } else {
       groups[group] = reordered;

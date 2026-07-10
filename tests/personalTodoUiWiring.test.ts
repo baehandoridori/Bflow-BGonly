@@ -40,10 +40,7 @@ test('metadata keeps controls outside the title/memo click target', () => {
   const row = read('src/components/widgets/my-tasks/components/TodoRow.tsx');
   assert.match(row, /<TodoMetadata[\s\S]*onTogglePinned/);
   assert.match(row, /<TodoMetadata[\s\S]*\/>/);
-  const roleStart = row.indexOf('role="button"');
-  const metadataStart = row.indexOf('<TodoMetadata');
-  assert.ok(roleStart >= 0 && metadataStart > roleStart);
-  assert.doesNotMatch(row.slice(roleStart, metadataStart), /<TodoMetadata/);
+  assert.doesNotMatch(row, /role="button"/);
 });
 
 test('priority metadata has a color token and an accessible pin state', () => {
@@ -59,4 +56,9 @@ test('personal completion celebration waits for a committed status action', () =
   const widget = read('src/components/widgets/MyTasksWidget.tsx');
   assert.doesNotMatch(widget, /if \(status === 'done'\) armCompletion\(\)/);
   assert.match(widget, /setPersonalTodoStatus\(todoId, status\)\.then/);
+});
+
+test('normal-only reorder keeps the existing pinned bucket intact', () => {
+  const hook = read('src/components/widgets/my-tasks/hooks/usePersonalTodos.ts');
+  assert.match(hook, /if \(reordered\.some\(\(todo\) => todo\.pinned\)\) groups\.pinned/);
 });
