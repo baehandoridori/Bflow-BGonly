@@ -2,6 +2,7 @@ import { lazy, Suspense, useEffect, useCallback, useState, useRef, Component, ty
 import { MainLayout } from '@/components/layout/MainLayout';
 import { useAppStore } from '@/stores/useAppStore';
 import { resolveAllowedView } from '@/features/playground/featureFlag';
+import { PlaygroundEntryOverlay } from '@/features/playground/transition/PlaygroundEntryOverlay';
 import { useDataStore } from '@/stores/useDataStore';
 import { useAuthStore } from '@/stores/useAuthStore';
 import { useActivityStore } from '@/stores/useActivityStore';
@@ -2990,6 +2991,7 @@ export default function App() {
       <SvgIconDefs />
       <GradientBackdrop intensity="normal" enabled={globalGradientEnabled} />
       <MainLayout onRefresh={loadData}>{renderView()}</MainLayout>
+      <PlaygroundEntryOverlay />
       <SpotlightSearch />
       <GlobalTooltipProvider />
 

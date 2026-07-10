@@ -9,6 +9,8 @@ import { useAuthStore } from '@/stores/useAuthStore';
 import { useCharacterBoardAccessState } from '@/hooks/useCharacterBoardAccess';
 import { isNavItemHiddenForUser } from './navVisibility';
 import { isPlaygroundPreviewEnabled } from '@/features/playground/featureFlag';
+import { originFromActivation } from '@/features/playground/transition/dotWipeMath';
+import { usePlaygroundEntryStore } from '@/features/playground/transition/usePlaygroundEntryStore';
 import { cn } from '@/utils/cn';
 import { SplashScreen } from '@/components/splash/SplashScreen';
 import { getPreset, rgbToHex } from '@/themes';
@@ -254,6 +256,7 @@ function CharacterAccessRetryTip({ show, anchorRef }: { show: boolean; anchorRef
 
 export function Sidebar() {
   const { currentView, setView, sidebarExpanded, toggleSidebarExpanded } = useAppStore();
+  const requestPlaygroundEntry = usePlaygroundEntryStore((state) => state.request);
   const setPendingCharacterAddRequest = useAppStore((s) => s.setPendingCharacterAddRequest);
   const updateInfo = useAppStore((s) => s.updateInfo);
   const setUpdateCenterOpen = useAppStore((s) => s.setUpdateCenterOpen);
@@ -421,10 +424,17 @@ export function Sidebar() {
           const navButton = (
           <button
             ref={isAccessRetryItem ? accessAnchorRef : undefined}
-            onClick={() => {
+            onClick={(event) => {
               if (isAccessRetryItem) {
                 handleAccessTipLeave();
                 characterAccess.retry();
+              } else if (item.id === 'playground') {
+                requestPlaygroundEntry(originFromActivation(
+                  event.clientX,
+                  event.clientY,
+                  event.detail,
+                  event.currentTarget.getBoundingClientRect(),
+                ));
               } else {
                 setView(item.id);
               }
