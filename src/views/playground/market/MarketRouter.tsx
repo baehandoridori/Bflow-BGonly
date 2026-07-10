@@ -1,7 +1,6 @@
 import { useEffect } from 'react';
 
 import type { MarketRoute, PlaygroundAction } from '@/features/playground/routes';
-import type { Point } from '@/features/playground/transition/dotWipeMath';
 import { useMarketPreviewStore } from '@/features/playground/market/useMarketPreviewStore';
 import { MarketAccountView } from './MarketAccountView';
 import { MarketDataBoundary } from './MarketDataBoundary';
@@ -12,7 +11,7 @@ import { StockDetailView } from './StockDetailView';
 interface MarketRouterProps {
   route: MarketRoute;
   onNavigate(action: PlaygroundAction): void;
-  onExit(origin: Point): void;
+  onExit(): void;
 }
 
 export function MarketRouter({ route, onNavigate, onExit }: MarketRouterProps) {

@@ -1,8 +1,6 @@
-import type { MouseEvent } from 'react';
 import { ArrowLeft, Gamepad2 } from 'lucide-react';
 
 import type { PreviewGame } from '@/features/playground/routes';
-import { originFromActivation, type Point } from '@/features/playground/transition/dotWipeMath';
 
 const GAME_LABELS: Record<PreviewGame, string> = {
   tetris: '테트리스',
@@ -12,16 +10,7 @@ const GAME_LABELS: Record<PreviewGame, string> = {
 
 interface ComingSoonGameProps {
   game: PreviewGame;
-  onBack(origin: Point): void;
-}
-
-function getOrigin(event: MouseEvent<HTMLButtonElement>): Point {
-  return originFromActivation(
-    event.clientX,
-    event.clientY,
-    event.detail,
-    event.currentTarget.getBoundingClientRect(),
-  );
+  onBack(): void;
 }
 
 export function ComingSoonGame({ game, onBack }: ComingSoonGameProps) {
@@ -40,7 +29,7 @@ export function ComingSoonGame({ game, onBack }: ComingSoonGameProps) {
         </p>
         <button
           type="button"
-          onClick={(event) => onBack(getOrigin(event))}
+          onClick={onBack}
           className="mt-8 inline-flex min-h-11 cursor-pointer items-center justify-center gap-2 rounded-xl bg-accent px-5 py-3 text-sm font-semibold text-on-accent transition-colors duration-200 hover:bg-accent/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 focus-visible:ring-offset-bg-card"
         >
           <ArrowLeft aria-hidden="true" size={18} />

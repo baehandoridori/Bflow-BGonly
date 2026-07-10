@@ -57,19 +57,19 @@ export default function PlaygroundView() {
       </h1>
       {route.kind === 'lobby' && <PlaygroundLobby onMove={move} />}
       {route.kind === 'house' && (
-        <JbbjHouse onBack={(origin) => move({ kind: 'go-lobby' }, origin)} />
+        <JbbjHouse onBack={() => move({ kind: 'go-lobby' })} />
       )}
       {route.kind === 'coming-soon' && (
         <ComingSoonGame
           game={route.game}
-          onBack={(origin) => move({ kind: 'go-lobby' }, origin)}
+          onBack={() => move({ kind: 'go-lobby' })}
         />
       )}
       {route.kind === 'market' && (
         <MarketRouter
           route={route.page}
           onNavigate={(action) => move(action)}
-          onExit={(origin) => move({ kind: 'go-lobby' }, origin)}
+          onExit={() => move({ kind: 'go-lobby' })}
         />
       )}
       {wipe && (

@@ -5,18 +5,16 @@ import {
   useRef,
   useState,
   type KeyboardEvent,
-  type MouseEvent,
 } from 'react';
 import { ArrowLeft, Landmark, Search, UserRound } from 'lucide-react';
 
 import type { MarketRoute, PlaygroundAction } from '@/features/playground/routes';
-import { originFromActivation, type Point } from '@/features/playground/transition/dotWipeMath';
 import { useMarketPreviewStore } from '@/features/playground/market/useMarketPreviewStore';
 
 interface MarketNavProps {
   active: MarketRoute['kind'];
   onNavigate(action: PlaygroundAction): void;
-  onExit(origin: Point): void;
+  onExit(): void;
 }
 
 interface SearchResult {
@@ -24,15 +22,6 @@ interface SearchResult {
   stockId: string;
   label: string;
   description: string;
-}
-
-function exitOrigin(event: MouseEvent<HTMLButtonElement>): Point {
-  return originFromActivation(
-    event.clientX,
-    event.clientY,
-    event.detail,
-    event.currentTarget.getBoundingClientRect(),
-  );
 }
 
 export function MarketNav({ active, onNavigate, onExit }: MarketNavProps) {
@@ -145,7 +134,7 @@ export function MarketNav({ active, onNavigate, onExit }: MarketNavProps) {
           </div>
           <button
             type="button"
-            onClick={(event) => onExit(exitOrigin(event))}
+            onClick={onExit}
             className="inline-flex min-h-11 shrink-0 cursor-pointer items-center gap-2 rounded-xl px-3 py-2 text-sm font-semibold text-text-secondary transition-colors duration-200 hover:bg-bg-border/45 hover:text-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
           >
             <ArrowLeft aria-hidden="true" size={17} />

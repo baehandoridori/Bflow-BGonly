@@ -31,3 +31,44 @@ test('market search follows the keyboard combobox contract', () => {
     assert.match(source, new RegExp(contract));
   }
 });
+
+test('reason selection navigates immediately while persistence settles in the background', () => {
+  const source = readFileSync('src/views/playground/market/MarketHome.tsx', 'utf8');
+  const start = source.indexOf('const openStockAfterReadingReason');
+  const end = source.indexOf('\n  };', start);
+  assert.ok(start >= 0 && end > start);
+  const handler = source.slice(start, end);
+
+  assert.doesNotMatch(handler, /\basync\b|\bawait\b/);
+  assert.match(handler, /\.catch\(\(\) => undefined\)/);
+  assert.ok(handler.indexOf('execute({') < handler.indexOf('onOpenStock(stockId)'));
+});
+
+test('destination returns are immediate while lobby cards retain origin wipes', () => {
+  const playground = readFileSync('src/views/PlaygroundView.tsx', 'utf8');
+  const lobby = readFileSync('src/views/playground/PlaygroundLobby.tsx', 'utf8');
+  const house = readFileSync('src/views/playground/JbbjHouse.tsx', 'utf8');
+  const comingSoon = readFileSync('src/views/playground/ComingSoonGame.tsx', 'utf8');
+  const marketNav = readFileSync('src/views/playground/market/MarketNav.tsx', 'utf8');
+
+  assert.match(playground, /<JbbjHouse onBack=\{\(\) => move\(\{ kind: 'go-lobby' \}\)\} \/>/);
+  assert.match(playground, /onBack=\{\(\) => move\(\{ kind: 'go-lobby' \}\)\}/);
+  assert.match(playground, /onExit=\{\(\) => move\(\{ kind: 'go-lobby' \}\)\}/);
+  assert.match(house, /onClick=\{onBack\}/);
+  assert.match(comingSoon, /onClick=\{onBack\}/);
+  assert.match(marketNav, /onClick=\{onExit\}/);
+  for (const source of [house, comingSoon, marketNav]) {
+    assert.doesNotMatch(source, /originFromActivation/);
+  }
+  assert.match(lobby, /originFromActivation/);
+  assert.match(lobby, /onMove\(actionFor\(item\), activationOrigin\(event\)\)/);
+});
+
+test('completed mission disclosure summary has a 44px padded target', () => {
+  const source = readFileSync('src/views/playground/market/MarketHome.tsx', 'utf8');
+  const className = source.match(/<summary className="([^"]+)"/)?.[1] ?? '';
+
+  assert.match(className, /\bmin-h-11\b/);
+  assert.match(className, /\bpx-\d+\b/);
+  assert.match(className, /\bpy-\d+\b/);
+});

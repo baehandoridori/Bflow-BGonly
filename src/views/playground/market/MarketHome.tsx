@@ -65,13 +65,13 @@ export function MarketHome({ focusAllStocksRequestId, onOpenStock }: MarketHomeP
     });
   };
 
-  const openStockAfterReadingReason = async (stockId: string) => {
+  const openStockAfterReadingReason = (stockId: string) => {
     if (mutating) return;
-    await execute({
+    void execute({
       kind: 'read-reason',
       requestId: crypto.randomUUID(),
       stockId,
-    });
+    }).catch(() => undefined);
     onOpenStock(stockId);
   };
 
@@ -228,7 +228,7 @@ export function MarketHome({ focusAllStocksRequestId, onOpenStock }: MarketHomeP
           </div>
           {snapshot.beginnerMission === 'complete' ? (
             <details className="mt-4 rounded-2xl border border-bg-border bg-bg-card px-5 py-4">
-              <summary className="cursor-pointer text-sm font-semibold text-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent">
+              <summary className="flex min-h-11 cursor-pointer items-center rounded-xl px-2 py-2 text-sm font-semibold text-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent">
                 <span className="inline-flex items-center gap-2">
                   <CheckCircle2 aria-hidden="true" size={18} className="text-accent-sub" />
                   첫 투자 둘러보기를 마쳤어요
