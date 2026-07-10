@@ -72,3 +72,19 @@ test('detail modal exposes personal properties and bounded auto-grow memo', () =
   assert.match(modal, /autoGrowMaxRows=\{10\}/);
   assert.match(modal, /autoGrowMaxContainerRatio=\{0\.4\}/);
 });
+
+test('label picker restores trigger focus and reacts to container resize', () => {
+  const picker = read('src/components/widgets/my-tasks/components/TodoLabelPicker.tsx');
+  const input = read('src/components/common/EntityAwareInput.tsx');
+  assert.match(picker, /rootRef\.current\?\.focus\(\)/);
+  assert.match(picker, /previouslyFocused\?\.focus\?\.\(\)/);
+  assert.match(input, /ResizeObserver/);
+  assert.match(input, /addEventListener\('resize'/);
+});
+
+test('label picker secondary actions keep visible focus rings', () => {
+  const picker = read('src/components/widgets/my-tasks/components/TodoLabelPicker.tsx');
+  assert.match(picker, /onClick=\{\(\) => setEditingId\(null\)\}[\s\S]*focus-visible:ring/);
+  assert.match(picker, /onClick=\{\(\) => void submitEdit\(\)\}[\s\S]*focus-visible:ring/);
+  assert.match(picker, /setCreateOpen\(false\)[\s\S]*focus-visible:ring/);
+});

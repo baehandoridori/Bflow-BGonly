@@ -86,25 +86,39 @@ export function EntityAwareInput({
     if (!autoGrow || !multiline) return;
     const el = inputRef.current as HTMLTextAreaElement | null;
     if (!el) return;
-    el.style.height = 'auto';
-    // 기존 autoGrow 호출은 이전과 동일하게 내용 높이만큼 확장한다. 새 제한
-    // 옵션을 넘긴 입력칸만 줄 수/컨테이너 비율로 경계를 적용한다.
-    const computed = window.getComputedStyle(el);
-    const lineHeight = Number.parseFloat(computed.lineHeight) || Number.parseFloat(computed.fontSize) * 1.4 || 20;
-    const minHeight = autoGrowMinRows && autoGrowMinRows > 0
-      ? autoGrowMinRows * lineHeight
-      : 0;
+    const resize = () => {
+      el.style.height = 'auto';
+      // 기존 autoGrow 호출은 이전과 동일하게 내용 높이만큼 확장한다. 새 제한
+      // 옵션을 넘긴 입력칸만 줄 수/컨테이너 비율로 경계를 적용한다.
+      const computed = window.getComputedStyle(el);
+      const lineHeight = Number.parseFloat(computed.lineHeight) || Number.parseFloat(computed.fontSize) * 1.4 || 20;
+      const minHeight = autoGrowMinRows && autoGrowMinRows > 0
+        ? autoGrowMinRows * lineHeight
+        : 0;
+      const dialog = el.closest<HTMLElement>('[role="dialog"]');
+      const ratioHeight = autoGrowMaxContainerRatio && autoGrowMaxContainerRatio > 0 && autoGrowMaxContainerRatio <= 1
+        ? (dialog?.clientHeight || document.documentElement.clientHeight) * autoGrowMaxContainerRatio
+        : Number.POSITIVE_INFINITY;
+      const rowHeight = autoGrowMaxRows && autoGrowMaxRows > 0 ? autoGrowMaxRows * lineHeight : Number.POSITIVE_INFINITY;
+      const maxHeight = Math.min(ratioHeight, rowHeight);
+      const bounded = Number.isFinite(maxHeight);
+      const targetHeight = Math.max(el.scrollHeight, minHeight);
+      el.style.height = `${bounded ? Math.min(targetHeight, maxHeight) : targetHeight}px`;
+      if (bounded) el.style.overflowY = targetHeight > maxHeight ? 'auto' : 'hidden';
+      else el.style.overflowY = '';
+    };
+
+    resize();
     const dialog = el.closest<HTMLElement>('[role="dialog"]');
-    const ratioHeight = autoGrowMaxContainerRatio && autoGrowMaxContainerRatio > 0 && autoGrowMaxContainerRatio <= 1
-      ? (dialog?.clientHeight || document.documentElement.clientHeight) * autoGrowMaxContainerRatio
-      : Number.POSITIVE_INFINITY;
-    const rowHeight = autoGrowMaxRows && autoGrowMaxRows > 0 ? autoGrowMaxRows * lineHeight : Number.POSITIVE_INFINITY;
-    const maxHeight = Math.min(ratioHeight, rowHeight);
-    const bounded = Number.isFinite(maxHeight);
-    const targetHeight = Math.max(el.scrollHeight, minHeight);
-    el.style.height = `${bounded ? Math.min(targetHeight, maxHeight) : targetHeight}px`;
-    if (bounded) el.style.overflowY = targetHeight > maxHeight ? 'auto' : 'hidden';
-    else el.style.overflowY = '';
+    const observer = typeof ResizeObserver !== 'undefined' && dialog
+      ? new ResizeObserver(resize)
+      : null;
+    if (observer && dialog) observer.observe(dialog);
+    window.addEventListener('resize', resize);
+    return () => {
+      observer?.disconnect();
+      window.removeEventListener('resize', resize);
+    };
   }, [value, multiline, autoGrow, autoGrowMinRows, autoGrowMaxRows, autoGrowMaxContainerRatio]);
 
   const handleKeyDown = (e: KeyboardEvent) => {

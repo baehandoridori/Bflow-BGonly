@@ -74,6 +74,14 @@ export function TodoLabelPicker({
   const selectedSet = useMemo(() => new Set(selectedLabelIds), [selectedLabelIds]);
   const sortedLabels = useMemo(() => sortTodoLabels(labels, selectedLabelIds), [labels, selectedLabelIds]);
 
+  // picker가 열리는 순간 내부 다이얼로그를 포커스하고, 첫 Escape/닫기 후
+  // 트리거(모달의 + 레이블 버튼)로 포커스를 돌려 키보드 흐름을 보존한다.
+  useEffect(() => {
+    const previouslyFocused = document.activeElement as HTMLElement | null;
+    rootRef.current?.focus();
+    return () => { previouslyFocused?.focus?.(); };
+  }, []);
+
   useEffect(() => {
     if (createOpen) createInputRef.current?.focus();
   }, [createOpen]);
@@ -171,8 +179,8 @@ export function TodoLabelPicker({
                     />
                     <Palette value={editColor} onChange={setEditColor} />
                     <div className="flex justify-end gap-1">
-                      <button type="button" onClick={() => setEditingId(null)} className="rounded px-2 py-1 text-[10px] text-text-secondary hover:bg-bg-border/20">취소</button>
-                      <button type="button" onClick={() => void submitEdit()} disabled={saving} className="rounded bg-accent px-2 py-1 text-[10px] text-on-accent disabled:opacity-50">저장</button>
+                      <button type="button" onClick={() => setEditingId(null)} className="rounded px-2 py-1 text-[10px] text-text-secondary hover:bg-bg-border/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/60">취소</button>
+                      <button type="button" onClick={() => void submitEdit()} disabled={saving} className="rounded bg-accent px-2 py-1 text-[10px] text-on-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/60 disabled:opacity-50">저장</button>
                     </div>
                   </div>
                 ) : (
@@ -215,8 +223,8 @@ export function TodoLabelPicker({
             {createName.trim().length > 24 && <p className="mt-1 text-[10px] text-red-300">레이블은 24자 이내로 입력하세요.</p>}
             {duplicateName(createName) && <p className="mt-1 text-[10px] text-red-300">같은 이름의 레이블이 이미 있어요.</p>}
             <div className="mt-1.5 flex justify-end gap-1">
-              <button type="button" onClick={() => { setCreateOpen(false); setCreateName(''); }} className="rounded px-2 py-1 text-[10px] text-text-secondary hover:bg-bg-border/20">취소</button>
-              <button type="button" onClick={() => void submitCreate()} disabled={saving || !createName.trim() || createName.trim().length > 24 || duplicateName(createName)} className="rounded bg-accent px-2 py-1 text-[10px] text-on-accent disabled:opacity-50">{saving ? '저장 중…' : '추가'}</button>
+              <button type="button" onClick={() => { setCreateOpen(false); setCreateName(''); }} className="rounded px-2 py-1 text-[10px] text-text-secondary hover:bg-bg-border/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/60">취소</button>
+              <button type="button" onClick={() => void submitCreate()} disabled={saving || !createName.trim() || createName.trim().length > 24 || duplicateName(createName)} className="rounded bg-accent px-2 py-1 text-[10px] text-on-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/60 disabled:opacity-50">{saving ? '저장 중…' : '추가'}</button>
             </div>
           </div>
         ) : (
