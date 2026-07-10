@@ -47,6 +47,7 @@ interface PendingIntent {
 export interface UsePersonalTodosResult {
   todos: PersonalTodo[];
   labels: PersonalTodoLabel[];
+  pendingLabelIds: ReadonlySet<string>;
   pinnedTodos: PersonalTodo[];
   normalTodos: PersonalTodo[];
   doneTodos: PersonalTodo[];
@@ -110,6 +111,7 @@ export function usePersonalTodos(): UsePersonalTodosResult {
   const currentUser = useAuthStore((state) => state.currentUser);
   const [todos, setTodos] = useState<PersonalTodo[]>([]);
   const [labels, setLabels] = useState<PersonalTodoLabel[]>([]);
+  const [pendingLabelIds, setPendingLabelIds] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState(true);
   const [syncNeeded, setSyncNeeded] = useState(false);
 
@@ -189,6 +191,7 @@ export function usePersonalTodos(): UsePersonalTodosResult {
     pendingIntentsRef.current.clear();
     mutationStateRef.current.pendingTodoIds.clear();
     mutationStateRef.current.pendingLabelIds.clear();
+    setPendingLabelIds(new Set());
     if (previousUserId !== userId) {
       confirmedBaselineRef.current = { todos: [], labels: [] };
       mutationStateRef.current.confirmedTodos = [];
@@ -264,6 +267,7 @@ export function usePersonalTodos(): UsePersonalTodosResult {
     const intent: PendingIntent = { key, serial: ++serialRef.current, epoch, todos: optimisticTodos, labels: optimisticLabels, order };
     pendingIntentsRef.current.set(key, intent);
     mutationStateRef.current.pendingTodoIds = new Set([...pendingIntentsRef.current.values()].filter((item) => !item.key.startsWith('label:')).map((item) => item.key));
+    setPendingLabelIds(new Set([...pendingIntentsRef.current.keys()].filter((item) => item.startsWith('label:')).map((item) => item.slice('label:'.length))));
     setTodos(optimisticTodos); setLabels(optimisticLabels);
     let committed = false;
     const accept = (result: MainPersonalTodoResult<unknown>) => {
@@ -348,6 +352,7 @@ export function usePersonalTodos(): UsePersonalTodosResult {
       if (pendingIntentsRef.current.get(key)?.serial === intent.serial) pendingIntentsRef.current.delete(key);
       mutationStateRef.current.pendingTodoIds = new Set([...pendingIntentsRef.current.keys()].filter((item) => !item.startsWith('label:')));
       mutationStateRef.current.pendingLabelIds = new Set([...pendingIntentsRef.current.keys()].filter((item) => item.startsWith('label:')));
+      setPendingLabelIds(new Set([...pendingIntentsRef.current.keys()].filter((item) => item.startsWith('label:')).map((item) => item.slice('label:'.length))));
       const latest = [...pendingIntentsRef.current.values()].sort((a, b) => a.serial - b.serial).at(-1);
       if (latest) { setTodos(latest.todos); setLabels(latest.labels); }
       else { setTodos(confirmedBaselineRef.current.todos); setLabels(confirmedBaselineRef.current.labels); }
@@ -441,7 +446,7 @@ export function usePersonalTodos(): UsePersonalTodosResult {
   const visibleLabels = sessionAligned ? labels : [];
   const groups = useMemo(() => splitPersonalTodos(visibleTodos), [visibleTodos]);
   return {
-    todos: visibleTodos, labels: visibleLabels,
+    todos: visibleTodos, labels: visibleLabels, pendingLabelIds,
     pinnedTodos: groups.pinned,
     normalTodos: groups.normal,
     doneTodos: groups.done,

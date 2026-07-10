@@ -362,6 +362,7 @@ export function MyTasksWidget() {
     donePersonalTodos,
     activePersonalTodos,
     personalTodoLabels,
+    pendingLabelIds,
     pinnedPersonalTodos,
     normalPersonalTodos,
     personalTodoSyncState,
@@ -382,6 +383,8 @@ export function MyTasksWidget() {
     updatePersonalTodo,
     setPersonalTodoStatus,
     setPersonalTodoPinned,
+    createAndAttachPersonalTodoLabel,
+    updatePersonalTodoLabel,
     retryPersonalTodoSync,
   } = useMyTasksData(isPopup);
   const setView = useAppStore((s) => s.setView);
@@ -910,7 +913,13 @@ export function MyTasksWidget() {
         {selectedTodo && (
           <TodoDetailModal
             todo={selectedTodo}
+            labels={personalTodoLabels}
+            pendingLabelIds={pendingLabelIds}
             onUpdate={updatePersonalTodo}
+            onSetStatus={setPersonalTodoStatus}
+            onSetPinned={setPersonalTodoPinned}
+            onCreateLabel={createAndAttachPersonalTodoLabel}
+            onUpdateLabel={updatePersonalTodoLabel}
             onNavigateToCalendar={navigateToCalendar}
             onClose={() => setSelectedTodoId(null)}
           />

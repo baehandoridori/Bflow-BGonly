@@ -33,12 +33,20 @@ interface Props {
    * 훅은 항상 호출하고(React 훅 순서 유지) 키핸들·드롭다운에서만 게이트한다.
    */
   enableHashtag?: boolean;
+  /** plural alias kept for personal-task callers; both spellings are opt-in only. */
+  enableHashtags?: boolean;
   /**
    * multiline 일 때 내용 높이에 맞춰 자동 확장(opt-in, 기본 끔). 긴 메모가 작은 칸에 갇히지 않고 큰 상태로 시작.
    * 공용 컴포넌트라 무조건 켜면, resize-y(수동 드래그 리사이즈) 입력칸들의 수동 높이가 매 입력마다 덮어써지는
    * 회귀가 생긴다 → 자동 확장을 원하는 칸만 켜고, 켠 칸은 resize-none 권장(수동/자동 충돌 방지).
    */
   autoGrow?: boolean;
+  /** autoGrow textarea의 최소 표시 줄 수(지정하지 않으면 기존 rows/브라우저 기본값 유지). */
+  autoGrowMinRows?: number;
+  /** autoGrow textarea의 최대 표시 줄 수. 지정하면 초과 내용은 내부 스크롤로 보존한다. */
+  autoGrowMaxRows?: number;
+  /** 모달/패널 높이에 대한 autoGrow 최대 비율(0~1). */
+  autoGrowMaxContainerRatio?: number;
   'aria-label'?: string;
 }
 
@@ -51,7 +59,7 @@ interface Props {
 export function EntityAwareInput({
   value, onChange, users, multiline, placeholder, className, rows, autoFocus,
   dropdownPositionClassName, submitOn = 'none', onSubmit, onCancel, onPaste, onBlur,
-  enableHashtag, autoGrow, 'aria-label': ariaLabel,
+  enableHashtag, enableHashtags, autoGrow, autoGrowMinRows, autoGrowMaxRows, autoGrowMaxContainerRatio, 'aria-label': ariaLabel,
 }: Props) {
   const inputRef = useRef<HTMLInputElement | HTMLTextAreaElement>(null);
   const [scroll, setScroll] = useState({ top: 0, left: 0 });
@@ -67,7 +75,7 @@ export function EntityAwareInput({
   });
   // #태그는 opt-in(기본 끔) — enableHashtag === true 로 명시한 입력칸(표시 측 EntityText+onHashClick)에서만 켠다.
   // 끈 입력칸에선 키핸들·드롭다운만 게이트, 훅 호출 자체는 항상(훅 순서 유지).
-  const hashEnabled = enableHashtag === true;
+  const hashEnabled = enableHashtag === true || enableHashtags === true;
   // @멘션·#태그 둘 다 DOM 을 직접 읽어 갱신. active 는 한쪽만(키핸들에서 mention 우선).
   // refresh 는 무해(상태만 갱신, hashEnabled 시 드롭다운 미표시)하므로 게이트 불필요.
   const refreshAll = () => { mention.refresh(); hash.refresh(); };
@@ -79,8 +87,25 @@ export function EntityAwareInput({
     const el = inputRef.current as HTMLTextAreaElement | null;
     if (!el) return;
     el.style.height = 'auto';
-    el.style.height = `${el.scrollHeight}px`;
-  }, [value, multiline, autoGrow]);
+    // 기존 autoGrow 호출은 이전과 동일하게 내용 높이만큼 확장한다. 새 제한
+    // 옵션을 넘긴 입력칸만 줄 수/컨테이너 비율로 경계를 적용한다.
+    const computed = window.getComputedStyle(el);
+    const lineHeight = Number.parseFloat(computed.lineHeight) || Number.parseFloat(computed.fontSize) * 1.4 || 20;
+    const minHeight = autoGrowMinRows && autoGrowMinRows > 0
+      ? autoGrowMinRows * lineHeight
+      : 0;
+    const dialog = el.closest<HTMLElement>('[role="dialog"]');
+    const ratioHeight = autoGrowMaxContainerRatio && autoGrowMaxContainerRatio > 0 && autoGrowMaxContainerRatio <= 1
+      ? (dialog?.clientHeight || document.documentElement.clientHeight) * autoGrowMaxContainerRatio
+      : Number.POSITIVE_INFINITY;
+    const rowHeight = autoGrowMaxRows && autoGrowMaxRows > 0 ? autoGrowMaxRows * lineHeight : Number.POSITIVE_INFINITY;
+    const maxHeight = Math.min(ratioHeight, rowHeight);
+    const bounded = Number.isFinite(maxHeight);
+    const targetHeight = Math.max(el.scrollHeight, minHeight);
+    el.style.height = `${bounded ? Math.min(targetHeight, maxHeight) : targetHeight}px`;
+    if (bounded) el.style.overflowY = targetHeight > maxHeight ? 'auto' : 'hidden';
+    else el.style.overflowY = '';
+  }, [value, multiline, autoGrow, autoGrowMinRows, autoGrowMaxRows, autoGrowMaxContainerRatio]);
 
   const handleKeyDown = (e: KeyboardEvent) => {
     if (mention.onKeyDown(e)) return;

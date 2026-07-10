@@ -62,3 +62,13 @@ test('normal-only reorder keeps the existing pinned bucket intact', () => {
   const hook = read('src/components/widgets/my-tasks/hooks/usePersonalTodos.ts');
   assert.match(hook, /if \(reordered\.some\(\(todo\) => todo\.pinned\)\) groups\.pinned/);
 });
+
+test('detail modal exposes personal properties and bounded auto-grow memo', () => {
+  const modal = read('src/components/widgets/my-tasks/components/TodoDetailModal.tsx');
+  assert.match(modal, /상단 고정/);
+  assert.match(modal, /할 일/);
+  assert.match(modal, /진행 중/);
+  assert.match(modal, /완료/);
+  assert.match(modal, /autoGrowMaxRows=\{10\}/);
+  assert.match(modal, /autoGrowMaxContainerRatio=\{0\.4\}/);
+});

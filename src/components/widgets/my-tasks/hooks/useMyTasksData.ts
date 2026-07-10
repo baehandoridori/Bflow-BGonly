@@ -78,6 +78,7 @@ export interface UseMyTasksDataResult {
   doneScenes: FlatScene[];
   activePersonalTodos: PersonalTodo[];
   personalTodoLabels: PersonalTodoLabel[];
+  pendingLabelIds: ReadonlySet<string>;
   pinnedPersonalTodos: PersonalTodo[];
   normalPersonalTodos: PersonalTodo[];
   personalTodoSyncState: PersonalTodoSyncState;
@@ -102,6 +103,8 @@ export interface UseMyTasksDataResult {
   updatePersonalTodo: (todoId: string, updates: Partial<PersonalTodo>) => Promise<void>;
   setPersonalTodoStatus: (todoId: string, status: PersonalTodoStatus) => Promise<boolean>;
   setPersonalTodoPinned: (todoId: string, pinned: boolean) => Promise<void>;
+  createAndAttachPersonalTodoLabel: (input: { todoId: string; name: string; colorKey: PersonalTodoLabel['colorKey'] }) => Promise<void>;
+  updatePersonalTodoLabel: (labelId: string, patch: { name?: string; colorKey?: PersonalTodoLabel['colorKey'] }) => Promise<void>;
   retryPersonalTodoSync: () => Promise<void>;
 }
 
@@ -426,6 +429,16 @@ export function useMyTasksData(isPopup: boolean): UseMyTasksDataResult {
     broadcastTodoChange();
   }, [broadcastTodoChange, personalTodos.patchTodo]);
 
+  const createAndAttachPersonalTodoLabel = useCallback(async (input: { todoId: string; name: string; colorKey: PersonalTodoLabel['colorKey'] }) => {
+    await personalTodos.createAndAttachLabel(input);
+    broadcastTodoChange();
+  }, [broadcastTodoChange, personalTodos.createAndAttachLabel]);
+
+  const updatePersonalTodoLabel = useCallback(async (labelId: string, patch: { name?: string; colorKey?: PersonalTodoLabel['colorKey'] }) => {
+    await personalTodos.updateLabel(labelId, patch);
+    broadcastTodoChange();
+  }, [broadcastTodoChange, personalTodos.updateLabel]);
+
   // 캘린더 → 할일 네비게이션: 해당 할일 하이라이트
   const [highlightTodoId, setHighlightTodoId] = useState<string | null>(null);
   const highlightTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -459,6 +472,7 @@ export function useMyTasksData(isPopup: boolean): UseMyTasksDataResult {
     doneScenes,
     activePersonalTodos,
     personalTodoLabels: personalTodos.labels,
+    pendingLabelIds: personalTodos.pendingLabelIds,
     pinnedPersonalTodos: personalTodos.pinnedTodos,
     normalPersonalTodos: personalTodos.normalTodos,
     personalTodoSyncState,
@@ -482,6 +496,8 @@ export function useMyTasksData(isPopup: boolean): UseMyTasksDataResult {
     updatePersonalTodo,
     setPersonalTodoStatus,
     setPersonalTodoPinned,
+    createAndAttachPersonalTodoLabel,
+    updatePersonalTodoLabel,
     retryPersonalTodoSync: personalTodos.retrySync,
   };
 }
