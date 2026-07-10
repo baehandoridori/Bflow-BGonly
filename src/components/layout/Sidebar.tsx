@@ -1,6 +1,6 @@
 import { useState, useRef, useCallback, useMemo, useEffect } from 'react';
 import { createPortal } from 'react-dom';
-import { LayoutDashboard, Film, List, Users, CircleUser, GanttChart, CalendarDays, Palmtree, Clapperboard, MessageSquareWarning, ListChecks, Drama, Settings, PanelLeft, Plus } from 'lucide-react';
+import { LayoutDashboard, Film, List, Users, CircleUser, GanttChart, CalendarDays, Palmtree, Clapperboard, MessageSquareWarning, ListChecks, Drama, Gamepad2, Settings, PanelLeft, Plus } from 'lucide-react';
 import { AnimatePresence } from 'framer-motion';
 import { useAppStore, type ViewMode } from '@/stores/useAppStore';
 import { useRevisionStore } from '@/stores/useRevisionStore';
@@ -8,6 +8,7 @@ import { useDataStore } from '@/stores/useDataStore';
 import { useAuthStore } from '@/stores/useAuthStore';
 import { useCharacterBoardAccessState } from '@/hooks/useCharacterBoardAccess';
 import { isNavItemHiddenForUser } from './navVisibility';
+import { isPlaygroundPreviewEnabled } from '@/features/playground/featureFlag';
 import { cn } from '@/utils/cn';
 import { SplashScreen } from '@/components/splash/SplashScreen';
 import { getPreset, rgbToHex } from '@/themes';
@@ -54,6 +55,7 @@ const NAV_ITEMS: { id: ViewMode; label: string; icon: React.ReactNode }[] = [
   { id: 'retake-hub', label: '리테이크 허브', icon: <ListChecks size={20} /> },
   // 캐릭터 현황판 — 게이팅 허용 사용자에게만 노출 (Sidebar 가 access 플래그로 필터).
   { id: 'character-board', label: '캐릭터', icon: <Drama size={20} /> },
+  { id: 'playground', label: '배플레이그라운드', icon: <Gamepad2 size={20} /> },
   { id: 'settings', label: '설정', icon: <Settings size={20} /> },
 ];
 
@@ -276,6 +278,7 @@ export function Sidebar() {
   const navItems = useMemo(
     () =>
       NAV_ITEMS.filter((item) => item.id !== 'character-board' || characterAccess.allowed || characterAccessFailed)
+        .filter((item) => item.id !== 'playground' || isPlaygroundPreviewEnabled())
         // 휴가 탭 등: 지정된 사용자에게는 숨김
         .filter((item) => !isNavItemHiddenForUser(item.id, currentUserName)),
     [characterAccess.allowed, characterAccessFailed, currentUserName],

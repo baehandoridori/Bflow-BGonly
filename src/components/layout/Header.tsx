@@ -25,6 +25,7 @@ export function Header({ onRefresh }: HeaderProps) {
     assignee: '인원별 현황',
     calendar: '타임라인',
     vacation: '휴가 관리',
+    playground: '배플레이그라운드',
     settings: '설정',
   };
 

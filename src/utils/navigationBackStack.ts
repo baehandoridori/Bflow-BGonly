@@ -45,6 +45,7 @@ const VIEW_LABELS: Record<ViewMode, string> = {
   'compositing-revisions': '피드백 허브',
   'retake-hub': '리테이크 허브',
   'character-board': '캐릭터 보드',
+  playground: '배플레이그라운드',
   settings: '설정',
 };
 
