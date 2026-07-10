@@ -7,11 +7,11 @@ export function holdingValuePoints(holding: Holding, pricePoints: number): numbe
   return Math.round((holding.quantityMicros * pricePoints) / SHARE_SCALE);
 }
 
-function getSafeBuyQuantityMicros(
+export function getBuyProjection(
   holding: Holding | undefined,
   pricePoints: number,
   spentPoints: number,
-): number | null {
+): { purchasedQuantityMicros: number } | null {
   const currentQuantityMicros = holding?.quantityMicros ?? 0;
   const currentCostBasisPoints = holding?.costBasisPoints ?? 0;
   const targetCostBasisPoints = currentCostBasisPoints + spentPoints;
@@ -41,7 +41,9 @@ function getSafeBuyQuantityMicros(
   ) return null;
 
   const projectedValuePoints = Math.round((targetQuantityMicros * pricePoints) / SHARE_SCALE);
-  return projectedValuePoints === targetValuePoints ? addedQuantityMicros : null;
+  return projectedValuePoints === targetValuePoints
+    ? { purchasedQuantityMicros: addedQuantityMicros }
+    : null;
 }
 
 export function getStockQuote(stock: Pick<MarketStock, 'pricePoints' | 'previousClosePoints'>) {
@@ -79,6 +81,27 @@ export function getNumericGeometry(
     x: (index / (values.length - 1)) * width,
     y: height - ((value - min) / (max - min)) * height,
   }));
+}
+
+export function getChartGeometry(
+  series: PricePoint[],
+  width: number,
+  height: number,
+  domain?: { min: number; max: number },
+) {
+  return getNumericGeometry(series.map((point) => point.pricePoints), width, height, domain);
+}
+
+export function getChartHoverBands(points: Array<{ x: number }>, width: number) {
+  return points.map((point, index) => {
+    const left = index === 0
+      ? 0
+      : Math.max(0, Math.min(width, (points[index - 1].x + point.x) / 2));
+    const right = index === points.length - 1
+      ? width
+      : Math.max(0, Math.min(width, (point.x + points[index + 1].x) / 2));
+    return { x: left, width: Math.max(0, right - left) };
+  });
 }
 
 export function getSellProjection(holding: Holding, pricePoints: number, ratioBps: number) {
@@ -141,7 +164,7 @@ export function validateMarketCommand(snapshot: MarketSnapshot, command: MarketC
   if (command.kind === 'buy') {
     if (command.points > snapshot.account.cashPoints) return '예수금이 부족해요';
     const holding = snapshot.account.holdings.find((item) => item.stockId === command.stockId);
-    return getSafeBuyQuantityMicros(holding, stock.pricePoints, command.points) === null
+    return getBuyProjection(holding, stock.pricePoints, command.points) === null
       ? UNSAFE_BUY_QUANTITY_MESSAGE
       : null;
   }
@@ -184,14 +207,18 @@ export function applyMarketCommand(snapshot: MarketSnapshot, command: MarketComm
   const existing = next.account.holdings.find((item) => item.stockId === command.stockId);
 
   if (command.kind === 'buy') {
-    const quantityMicros = getSafeBuyQuantityMicros(existing, stock.pricePoints, command.points);
-    if (quantityMicros === null) throw new Error(UNSAFE_BUY_QUANTITY_MESSAGE);
+    const projection = getBuyProjection(existing, stock.pricePoints, command.points);
+    if (projection === null) throw new Error(UNSAFE_BUY_QUANTITY_MESSAGE);
     const spentPoints = command.points;
     if (existing) {
-      existing.quantityMicros += quantityMicros;
+      existing.quantityMicros += projection.purchasedQuantityMicros;
       existing.costBasisPoints += spentPoints;
     } else {
-      next.account.holdings.push({ stockId: stock.id, quantityMicros, costBasisPoints: spentPoints });
+      next.account.holdings.push({
+        stockId: stock.id,
+        quantityMicros: projection.purchasedQuantityMicros,
+        costBasisPoints: spentPoints,
+      });
     }
     next.account.cashPoints -= spentPoints;
     if (next.beginnerMission === 'first-order') next.beginnerMission = 'complete';

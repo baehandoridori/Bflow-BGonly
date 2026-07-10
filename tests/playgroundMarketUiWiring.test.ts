@@ -72,3 +72,78 @@ test('completed mission disclosure summary has a 44px padded target', () => {
   assert.match(className, /\bpx-\d+\b/);
   assert.match(className, /\bpy-\d+\b/);
 });
+
+test('stock detail uses the approved beginner-first order', () => {
+  const source = readFileSync('src/views/playground/market/StockDetailView.tsx', 'utf8');
+  const labels = ['회사 한 줄 설명', '현재 가격과 오늘의 변화', '오늘 움직인 이유', '가격 그래프', '내 보유 상태', '간편 주문', '최근 소식'];
+  const positions = labels.map((label) => source.indexOf(label));
+  assert.ok(positions.every((position) => position >= 0));
+  assert.deepEqual([...positions].sort((a, b) => a - b), positions);
+  for (const forbidden of ['PER', 'PBR', '체결 강도', '호가창']) assert.doesNotMatch(source, new RegExp(forbidden));
+});
+
+test('market dialog is portalled, labelled, inert and focus-safe', () => {
+  const source = readFileSync('src/views/playground/market/MarketActionDialog.tsx', 'utf8');
+  assert.match(source, /createPortal/);
+  assert.match(source, /aria-labelledby/);
+  assert.match(source, /aria-describedby/);
+  assert.match(source, /\.inert\s*=\s*true/);
+  assert.match(source, /openerRef\.current.*focus/);
+});
+
+test('detail chart and order panel keep the approved source contracts', () => {
+  const chart = readFileSync('src/views/playground/market/MarketPriceChart.tsx', 'utf8');
+  const order = readFileSync('src/views/playground/market/MarketOrderPanel.tsx', 'utf8');
+  for (const label of ['오늘', '1주', '1개월', '전체', '가격 정보가 아직 없어요']) {
+    assert.match(chart, new RegExp(label));
+  }
+  assert.match(chart, /getChartGeometry\([^)]*720[^)]*280/s);
+  assert.match(chart, /text-market-up/);
+  assert.match(chart, /text-market-down/);
+  assert.match(chart, /text-market-flat/);
+  assert.doesNotMatch(chart, /#[0-9a-f]{3,8}/i);
+
+  for (const label of ['현재 가격으로 바로 사기', '100P', '500P', '1,000P', '최대', '25%', '50%', '전부', '직접 입력', '원하는 가격에 주문하기']) {
+    assert.match(order, new RegExp(label));
+  }
+  assert.match(order, /validateMarketCommand/);
+  assert.match(order, /getSellProjection/);
+  assert.match(order, /getBuyProjection/);
+  assert.doesNotMatch(order, /applyMarketCommand/);
+});
+
+test('stock detail xl shell contains both fixed columns, gap and horizontal padding', () => {
+  const source = readFileSync('src/views/playground/market/StockDetailView.tsx', 'utf8');
+  assert.match(source, /xl:max-w-\[1200px\]/);
+  assert.match(source, /xl:grid-cols-\[minmax\(0,760px\)_360px\]/);
+  assert.match(source, /xl:gap-x-6/);
+});
+
+test('easy order revalidates frozen confirmation before creating a request id', () => {
+  const source = readFileSync('src/views/playground/market/MarketOrderPanel.tsx', 'utf8');
+  const start = source.indexOf('const confirmEasyOrder');
+  const end = source.indexOf('const openLimitOrder', start);
+  assert.ok(start >= 0 && end > start);
+  const handler = source.slice(start, end);
+
+  const latestSnapshot = handler.indexOf('useMarketPreviewStore.getState().visible');
+  const validate = handler.indexOf('validateMarketCommand');
+  const createRequestId = handler.indexOf('crypto.randomUUID()');
+  const execute = handler.indexOf('await execute(command)');
+  assert.ok(latestSnapshot >= 0 && latestSnapshot < validate);
+  assert.ok(validate < createRequestId && createRequestId < execute);
+  assert.match(handler, /getBuyProjection/);
+  assert.match(handler, /getSellProjection/);
+  assert.match(handler, /확인 내용을 새로 고쳤어요/);
+});
+
+test('order dialog refuses to close while its mutation is running', () => {
+  const source = readFileSync('src/views/playground/market/MarketOrderPanel.tsx', 'utf8');
+  const start = source.indexOf('const closeOrderDialog');
+  const end = source.indexOf('\n  };', start);
+  assert.ok(start >= 0 && end > start);
+  const handler = source.slice(start, end);
+  assert.match(handler, /submitting\s*\|\|\s*mutating/);
+  assert.match(handler, /주문 저장이 끝날 때까지/);
+  assert.match(source, /onClose=\{closeOrderDialog\}/);
+});

@@ -4,9 +4,14 @@ import assert from 'node:assert/strict';
 import {
   applyMarketCommand,
   getAccountSummary,
+  getBuyProjection,
+  getChartGeometry,
+  getChartHoverBands,
   getSellProjection,
+  getSharedReturnDomain,
   getStockQuote,
   holdingValuePoints,
+  toReturnSeries,
   validateMarketCommand,
 } from '../src/features/playground/market/domain.ts';
 import { createMarketPreviewSeed } from '../src/features/playground/market/seed.ts';
@@ -280,4 +285,51 @@ test('buy rejects a non-positive or unsafe quote before quantity math', () => {
       kind: 'buy', requestId: 'bad-quote', stockId: snapshot.stocks[0].id, points: 100,
     }), '현재 가격을 확인할 수 없어요');
   }
+});
+
+test('chart geometry uses the local price domain and handles one point', () => {
+  assert.deepEqual(getChartGeometry([{ at: 'a', pricePoints: 500 }], 100, 40), [{ x: 50, y: 20 }]);
+  const points = getChartGeometry([
+    { at: 'a', pricePoints: 100 }, { at: 'b', pricePoints: 200 }, { at: 'c', pricePoints: 150 },
+  ], 100, 40);
+  assert.deepEqual(points, [{ x: 0, y: 40 }, { x: 50, y: 0 }, { x: 100, y: 20 }]);
+  assert.deepEqual(getChartGeometry([
+    { at: 'a', pricePoints: 610 }, { at: 'b', pricePoints: 610 },
+  ], 100, 40), [{ x: 0, y: 20 }, { x: 100, y: 20 }]);
+});
+
+test('chart hover bands meet halfway between the visible points', () => {
+  assert.deepEqual(getChartHoverBands([], 720), []);
+  assert.deepEqual(getChartHoverBands([{ x: 360 }], 720), [{ x: 0, width: 720 }]);
+  assert.deepEqual(getChartHoverBands([{ x: 12 }, { x: 360 }, { x: 708 }], 720), [
+    { x: 0, width: 186 },
+    { x: 186, width: 348 },
+    { x: 534, width: 186 },
+  ]);
+});
+
+test('compact sparklines share one normalized return domain', () => {
+  const stocks = createMarketPreviewSeed().stocks.slice(0, 2);
+  const returns = stocks.map((stock) => toReturnSeries(stock.series.today));
+  const allReturns = returns.flat();
+  assert.deepEqual(getSharedReturnDomain(returns), {
+    min: Math.min(...allReturns), max: Math.max(...allReturns),
+  });
+});
+
+test('buy preview quantity is the exact quantity added by execution math', () => {
+  const snapshot = createMarketPreviewSeed();
+  const stock = snapshot.stocks.find((item) => item.id === 'jbbj')!;
+  const holding = snapshot.account.holdings.find((item) => item.stockId === stock.id)!;
+  const projection = getBuyProjection(holding, stock.pricePoints, 100);
+  assert.ok(projection);
+
+  const bought = applyMarketCommand(snapshot, {
+    kind: 'buy', requestId: 'projection-buy', stockId: stock.id, points: 100,
+  });
+  const nextHolding = bought.account.holdings.find((item) => item.stockId === stock.id)!;
+  assert.equal(
+    nextHolding.quantityMicros - holding.quantityMicros,
+    projection.purchasedQuantityMicros,
+  );
 });
