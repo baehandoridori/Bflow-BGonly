@@ -1,10 +1,15 @@
 import { useEffect, useRef } from 'react';
+import { createPortal } from 'react-dom';
 
 import {
+  FrameCadenceSampler,
+  TransitionCallbackGate,
+  getOrCreateParticleBuffers,
   getHiddenTransitionAction,
   getParticleBudget,
   getTransitionFrame,
 } from './dotWipeMath';
+import type { ParticleBufferCache } from './dotWipeMath';
 import type { DotWipeRequest } from './usePlaygroundEntryStore';
 
 export interface DotWipeTransitionProps {
@@ -17,6 +22,7 @@ export interface DotWipeTransitionProps {
 const MAX_DPR = 1.5;
 const SAFETY_TIMEOUT_MS = 1800;
 const REDUCED_MOTION_TOTAL_MS = 220;
+const TRANSITION_LAYER_Z_INDEX = 2147483647;
 
 export function DotWipeTransition({
   request,
@@ -29,6 +35,8 @@ export function DotWipeTransition({
   const committedRef = useRef(false);
   const finishedRef = useRef(false);
   const initializedRequestIdRef = useRef<number | null>(null);
+  const particleBuffersRef = useRef<ParticleBufferCache | null>(null);
+  const callbackGateRef = useRef<{ requestId: number; gate: TransitionCallbackGate } | null>(null);
   const onCoveredRef = useRef(onCovered);
   const onFinishedRef = useRef(onFinished);
 
@@ -41,7 +49,11 @@ export function DotWipeTransition({
       committedRef.current = false;
       finishedRef.current = false;
     }
-    if (finishedRef.current) return;
+    if (callbackGateRef.current?.requestId !== request.id) {
+      callbackGateRef.current = { requestId: request.id, gate: new TransitionCallbackGate() };
+    }
+    const callbackGate = callbackGateRef.current.gate;
+    if (finishedRef.current || callbackGate.hasFinished) return;
 
     const canvas = canvasRef.current;
     const overlay = overlayRef.current;
@@ -53,10 +65,9 @@ export function DotWipeTransition({
       Math.max(1, window.innerHeight),
       reducedMotion,
     );
-    const xs = new Float32Array(budget);
-    const ys = new Float32Array(budget);
-    const sizes = new Float32Array(budget);
-    const delays = new Float32Array(budget);
+    const buffers = getOrCreateParticleBuffers(particleBuffersRef.current, request.id, budget);
+    particleBuffersRef.current = buffers;
+    const { xs, ys, sizes, delays } = buffers;
     const context = canvas.getContext('2d');
 
     const themeBackground = window
@@ -125,19 +136,17 @@ export function DotWipeTransition({
 
     updateCanvasLayout();
 
-    let frameSamples = 0;
-    let slowFrameSamples = 0;
     let rafId = 0;
     let disposed = false;
 
     const commitOnce = () => {
-      if (committedRef.current) return;
+      if (!callbackGate.tryCommit()) return;
       committedRef.current = true;
       onCoveredRef.current();
     };
 
     const finishOnce = () => {
-      if (finishedRef.current) return;
+      if (!callbackGate.tryFinish()) return;
       finishedRef.current = true;
       onFinishedRef.current();
     };
@@ -221,6 +230,7 @@ export function DotWipeTransition({
     } else {
       context.fillStyle = fillColor;
       const startedAt = performance.now();
+      const cadenceSampler = new FrameCadenceSampler(startedAt);
 
       const renderFrame = (now: number) => {
         if (disposed || finishedRef.current) return;
@@ -234,7 +244,11 @@ export function DotWipeTransition({
           return;
         }
 
-        const drawStartedAt = performance.now();
+        if (cadenceSampler.sample(now)) {
+          degradedMode = true;
+          activeBudget = Math.max(1, Math.floor(activeBudget / 2));
+        }
+
         const degraded = activeBudget < particleCount;
         const stride = degraded ? 2 : 1;
         const sizeBoost = degraded ? 2.15 : 1;
@@ -250,15 +264,6 @@ export function DotWipeTransition({
           const eased = localProgress * localProgress * (3 - 2 * localProgress);
           const size = sizes[index] * eased * sizeBoost;
           context.fillRect(xs[index] - size / 2, ys[index] - size / 2, size, size);
-        }
-
-        if (frameSamples < 3) {
-          frameSamples += 1;
-          if (performance.now() - drawStartedAt > 24) slowFrameSamples += 1;
-          if (frameSamples === 3 && slowFrameSamples === 3) {
-            degradedMode = true;
-            activeBudget = Math.max(1, Math.floor(activeBudget / 2));
-          }
         }
 
         rafId = window.requestAnimationFrame(renderFrame);
@@ -278,10 +283,11 @@ export function DotWipeTransition({
     };
   }, [request.id, request.origin.x, request.origin.y]);
 
-  return (
+  return createPortal(
     <div
       ref={overlayRef}
-      className="fixed inset-0 z-[10000] isolate overflow-hidden"
+      className="pointer-events-auto fixed inset-0 isolate overflow-hidden"
+      style={{ zIndex: TRANSITION_LAYER_Z_INDEX }}
       aria-label={label}
     >
       <canvas
@@ -298,6 +304,7 @@ export function DotWipeTransition({
           {label}
         </span>
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }
