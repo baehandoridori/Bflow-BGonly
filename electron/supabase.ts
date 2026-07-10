@@ -2753,6 +2753,32 @@ export async function patchPersonalTodo(userId: string, todoId: string, patch: P
   return mapPersonalTodoRow(unwrapRpcRow(data));
 }
 
+export async function compensatePersonalTodoCalendarPatch(
+  userId: string,
+  todoId: string,
+  previous: Record<string, unknown>,
+  expectedUpdatedAt: string,
+): Promise<PersonalTodoRecord | null> {
+  const row = {
+    title: previous.title,
+    memo: previous.memo,
+    start_date: previous.startDate ?? null,
+    end_date: previous.endDate ?? null,
+    add_to_calendar: previous.addToCalendar === true,
+    updated_at: new Date().toISOString(),
+  };
+  const { data, error } = await supabase
+    .from('personal_todos')
+    .update(row)
+    .eq('user_id', userId)
+    .eq('id', todoId)
+    .eq('updated_at', expectedUpdatedAt)
+    .select('*')
+    .maybeSingle();
+  throwIfError(error);
+  return data ? mapPersonalTodoRow(data) : null;
+}
+
 export async function mutatePersonalTodoOrder(
   userId: string,
   mutation: Record<string, unknown>,

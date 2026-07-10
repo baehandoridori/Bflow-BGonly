@@ -20,6 +20,9 @@ import { uploadImage as storageUploadImage, deleteImage as storageDeleteImage, u
 import { registerFontProtocol, registerFontIpcHandlers } from './fontIpc';
 import { PersonalTodoService } from './personalTodoService';
 import type { PersonalTodoCreateInput, PersonalTodoOrderMutation, PersonalTodoPatch, CalendarTodoPatch, PersonalTodoLabelColorKey } from './personalTodoService';
+import { PersonalTodoRecoveryJournal } from './personalTodoRecoveryJournal';
+import { PersonalTodoCalendarSync, PERSONAL_TODO_GOOGLE_LINK_KEY, PERSONAL_TODO_GOOGLE_USER_KEY } from './personalTodoCalendarSync';
+import type { LinkedPersonalTodoCalendarEvent, PersonalTodoCalendarAdapter } from './personalTodoCalendarSync';
 import { SessionManager } from './sessionManager';
 import type { RememberedAuthSession, SessionUserRecord } from './sessionManager';
 // v1.21.0: 자동 업데이트 시스템 (G드라이브 → 로컬 PC 본체로 swap)
@@ -1334,6 +1337,7 @@ import {
   mutatePersonalTodoOrder as sbMutatePersonalTodoOrder,
   createOrReusePersonalTodoLabelAndAttach as sbCreateOrReusePersonalTodoLabelAndAttach,
   updatePersonalTodoLabel as sbUpdatePersonalTodoLabel,
+  compensatePersonalTodoCalendarPatch as sbCompensatePersonalTodoCalendarPatch,
   readTaskViews as sbReadTaskViews,
   upsertTaskViews as sbUpsertTaskViews,
   readMemo as sbReadMemo,
@@ -1473,8 +1477,113 @@ async function writeRememberedAuthSession(session: RememberedAuthSession | null)
   await fs.promises.rename(tempPath, authPath);
 }
 
+function addCalendarDay(date: string): string {
+  const value = new Date(`${date}T00:00:00Z`);
+  value.setUTCDate(value.getUTCDate() + 1);
+  return value.toISOString().slice(0, 10);
+}
+
+function subtractCalendarDay(date: string): string {
+  const value = new Date(`${date}T00:00:00Z`);
+  value.setUTCDate(value.getUTCDate() - 1);
+  return value.toISOString().slice(0, 10);
+}
+
+function mainCalendarEvent(event: any, calendarId: string): LinkedPersonalTodoCalendarEvent | null {
+  if (!event?.id || event.status === 'cancelled') return null;
+  const startDate = event.start?.date ?? event.start?.dateTime?.slice(0, 10);
+  const rawEnd = event.end?.date ?? event.end?.dateTime?.slice(0, 10);
+  if (!startDate || !rawEnd) return null;
+  return {
+    id: event.id,
+    calendarId,
+    title: event.summary ?? '',
+    memo: event.description ?? '',
+    startDate,
+    endDate: event.end?.date ? subtractCalendarDay(rawEnd) : rawEnd,
+  };
+}
+
+const personalTodoCalendarAdapter: PersonalTodoCalendarAdapter = {
+  resolveTargetCalendarId: async () => {
+    try {
+      const settings = JSON.parse(await fs.promises.readFile(path.join(getDataPath(), 'gcal-local-settings.json'), 'utf8')) as { personalCalendarId?: string };
+      if (settings.personalCalendarId) return settings.personalCalendarId;
+    } catch { /* use Google primary calendar */ }
+    const calendars = await gcal.listCalendars();
+    return calendars.find((calendar) => calendar.primary)?.id ?? calendars[0]?.id ?? null;
+  },
+  findLinkedEvents: async (userId, todoId, candidateCalendarIds) => {
+    const found: LinkedPersonalTodoCalendarEvent[] = [];
+    for (const calendarId of [...new Set(candidateCalendarIds.filter(Boolean))]) {
+      const events = await gcal.fullSync(calendarId);
+      for (const event of events) {
+        const meta = event.extendedProperties?.private ?? {};
+        if (meta[PERSONAL_TODO_GOOGLE_LINK_KEY] !== todoId) continue;
+        const eventUserId = meta[PERSONAL_TODO_GOOGLE_USER_KEY];
+        if (eventUserId && eventUserId !== userId) continue;
+        const mapped = mainCalendarEvent(event, calendarId);
+        if (mapped) found.push(mapped);
+      }
+    }
+    return found;
+  },
+  insertLinkedEvent: async ({ calendarId, eventId, userId, todo }) => {
+    const startDate = todo.startDate ?? todo.endDate!;
+    const endDate = todo.endDate ?? todo.startDate!;
+    const id = await gcal.insertEvent(calendarId, {
+      id: eventId,
+      summary: todo.title,
+      description: todo.memo,
+      startDate,
+      endDate: addCalendarDay(endDate),
+      extendedProperties: {
+        [PERSONAL_TODO_GOOGLE_LINK_KEY]: todo.id,
+        [PERSONAL_TODO_GOOGLE_USER_KEY]: userId,
+      },
+      visibility: 'private',
+    });
+    return { id, calendarId, title: todo.title, memo: todo.memo, startDate, endDate };
+  },
+  updateLinkedEvent: async (event, todo, userId) => {
+    const startDate = todo.startDate ?? todo.endDate!;
+    const endDate = todo.endDate ?? todo.startDate!;
+    await gcal.updateEvent(event.calendarId, event.id, {
+      summary: todo.title,
+      description: todo.memo,
+      startDate,
+      endDate: addCalendarDay(endDate),
+      extendedProperties: {
+        [PERSONAL_TODO_GOOGLE_LINK_KEY]: todo.id,
+        [PERSONAL_TODO_GOOGLE_USER_KEY]: userId,
+      },
+      visibility: 'private',
+    });
+    return { ...event, title: todo.title, memo: todo.memo, startDate, endDate };
+  },
+  deleteLinkedEvent: (event) => gcal.deleteEvent(event.calendarId, event.id),
+};
+
+const personalTodoRecoveryJournal = new PersonalTodoRecoveryJournal(
+  path.join(getDataPath(), 'personal-calendar-recovery.json'),
+);
+
 let sessionManager: SessionManager;
-const personalTodoService = new PersonalTodoService({
+let personalTodoService: PersonalTodoService;
+const personalTodoCalendarSync = new PersonalTodoCalendarSync({
+  journal: personalTodoRecoveryJournal,
+  adapter: personalTodoCalendarAdapter,
+  readTodo: sbReadTodo,
+  compensateTodo: async (userId, todoId, previous, expectedUpdatedAt) => {
+    const compensated = await sbCompensatePersonalTodoCalendarPatch(userId, todoId, previous, expectedUpdatedAt);
+    if (compensated) broadcastToAllWindows('personal-todo:commit', { userId, kind: 'todo', todo: compensated });
+    return compensated;
+  },
+  trackPending: (promise) => personalTodoService.pending.track(promise),
+  onCalendarCommit: (payload) => broadcastToAllWindows('calendar:changed', payload),
+});
+
+personalTodoService = new PersonalTodoService({
   persistence: {
     readTodos: sbReadTodos,
     readTodo: sbReadTodo,
@@ -1490,6 +1599,7 @@ const personalTodoService = new PersonalTodoService({
     userId: sessionManager?.getCanonicalUserId() ?? null,
     epoch: sessionManager?.getEpoch() ?? 0,
   }),
+  calendar: personalTodoCalendarSync,
   onCommit: (payload) => broadcastToAllWindows('personal-todo:commit', payload),
 });
 
@@ -1511,11 +1621,16 @@ sessionManager = new SessionManager({
   },
   writeRememberedSession: writeRememberedAuthSession,
   drainPersonalDataQueue: (userId) => personalTodoService.drainUser(userId),
-  flushCalendarJournal: async () => {},
+  flushCalendarJournal: () => personalTodoCalendarSync.flushJournal(),
   setActivityUser: setCanonicalActivityUser,
   broadcast: (payload) => {
     lastKnownSession = payload;
     broadcastToAllWindows('session:changed', payload);
+    if (payload.user) {
+      void personalTodoCalendarSync.recover(payload.user.id).catch((error) => {
+        console.warn('[personal-todo] calendar recovery deferred:', error);
+      });
+    }
   },
 });
 

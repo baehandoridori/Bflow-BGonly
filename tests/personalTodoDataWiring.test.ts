@@ -129,3 +129,13 @@ test('session payload sanitization never returns a password', async () => {
   assert.equal('password' in sanitized, false);
   assert.deepEqual(sanitized, { id: 'alice', name: 'Alice', role: 'user' });
 });
+
+test('main wires the recovery journal and calendar worker into live todo intents', () => {
+  const main = readFileSync('electron/main.ts', 'utf8');
+  const google = readFileSync('electron/googleCalendar.ts', 'utf8');
+  assert.match(main, /personal-calendar-recovery\.json/);
+  assert.match(main, /calendar:\s*personalTodoCalendarSync/);
+  assert.match(main, /personalTodoCalendarSync\.recover/);
+  assert.match(main, /personalTodoService\.waitForIdle\(15000\)/);
+  assert.match(google, /id:\s*input\.id/);
+});

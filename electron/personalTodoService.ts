@@ -87,8 +87,10 @@ export interface PersonalTodoPersistence {
 
 export interface PersonalTodoCalendarCoordinator {
   receive(userId: string, todoId: string, patch: PersonalTodoPatch): Promise<{ operationId: string }>;
+  receiveDeletion(userId: string, todoId: string): Promise<{ operationId: string }>;
   markPrepared(operationId: string, previousCanonical: PersonalTodoRecord | null): Promise<void>;
   markDbCommitted(operationId: string, canonical: PersonalTodoRecord): Promise<void>;
+  markDbDeleted(operationId: string, previousCanonical: PersonalTodoRecord): Promise<void>;
   markAborted(operationId: string): Promise<void>;
   flushJournal(): Promise<void>;
 }
@@ -255,6 +257,7 @@ export class PersonalTodoService {
   readonly queue = createPersonalTodoMutationQueue();
   private quitting = false;
   private readonly dependencies: PersonalTodoServiceDependencies;
+  private readonly intakesByUser = new Map<string, Set<Promise<unknown>>>();
 
   constructor(dependencies: PersonalTodoServiceDependencies) { this.dependencies = dependencies; }
 
@@ -271,6 +274,17 @@ export class PersonalTodoService {
   }
 
   private success<T>(data: T): PersonalTodoApiResult<T> { return { ok: true, data }; }
+
+  private trackUserIntake<T>(userId: string, promise: Promise<T>): Promise<T> {
+    const set = this.intakesByUser.get(userId) ?? new Set<Promise<unknown>>();
+    set.add(promise);
+    this.intakesByUser.set(userId, set);
+    promise.finally(() => {
+      set.delete(promise);
+      if (set.size === 0 && this.intakesByUser.get(userId) === set) this.intakesByUser.delete(userId);
+    }).catch(() => { /* caller observes the original promise */ });
+    return this.pending.track(promise);
+  }
 
   private read<T>(expectedEpoch: number | undefined, operation: (userId: string) => Promise<T>): Promise<PersonalTodoApiResult<T>> {
     let captured: { userId: string };
@@ -354,7 +368,7 @@ export class PersonalTodoService {
         }
       });
     })();
-    return this.pending.track(intake).then((data) => this.success(data), failureResult);
+    return this.trackUserIntake(captured.userId, intake).then((data) => this.success(data), failureResult);
   }
 
   applyCalendarPatch(todoId: string, patch: CalendarTodoPatch, expectedEpoch?: number): Promise<PersonalTodoApiResult<PersonalTodoRecord>> {
@@ -376,16 +390,33 @@ export class PersonalTodoService {
   }
 
   deleteTodo(todoId: string, expectedEpoch?: number): Promise<PersonalTodoApiResult<PersonalTodoRecord[]>> {
-    return this.mutate(expectedEpoch, async (userId) => {
-      const current = await this.dependencies.persistence.readTodos(userId);
-      const canonical = await this.dependencies.persistence.mutateOrder(
-        userId,
-        { type: 'delete', todo_id: todoId },
-        current.filter((todo) => todo.id !== todoId).map((todo) => todo.id),
-      );
-      this.dependencies.onCommit?.({ userId, kind: 'todos', todos: canonical });
-      return canonical;
-    });
+    let captured: { userId: string };
+    try { captured = this.capture(expectedEpoch); } catch (error) { return Promise.resolve(failureResult(error)); }
+    const intake = (async () => {
+      const operation = this.dependencies.calendar
+        ? await this.dependencies.calendar.receiveDeletion(captured.userId, todoId)
+        : null;
+      return this.queue.enqueue(captured.userId, async () => {
+        const current = await this.dependencies.persistence.readTodos(captured.userId);
+        const previous = current.find((todo) => todo.id === todoId) ?? null;
+        try {
+          if (operation) await this.dependencies.calendar!.markPrepared(operation.operationId, previous);
+          const canonical = await this.dependencies.persistence.mutateOrder(
+            captured.userId,
+            { type: 'delete', todo_id: todoId },
+            current.filter((todo) => todo.id !== todoId).map((todo) => todo.id),
+          );
+          if (operation && previous) await this.dependencies.calendar!.markDbDeleted(operation.operationId, previous);
+          else if (operation) await this.dependencies.calendar!.markAborted(operation.operationId);
+          this.dependencies.onCommit?.({ userId: captured.userId, kind: 'todos', todos: canonical });
+          return canonical;
+        } catch (error) {
+          if (operation) await this.dependencies.calendar!.markAborted(operation.operationId);
+          throw error;
+        }
+      });
+    })();
+    return this.trackUserIntake(captured.userId, intake).then((data) => this.success(data), failureResult);
   }
 
   createOrReuseLabelAndAttach(input: { todoId: string; name: string; colorKey: PersonalTodoLabelColorKey }, expectedEpoch?: number) {
@@ -415,7 +446,15 @@ export class PersonalTodoService {
     });
   }
 
-  drainUser(userId: string): Promise<void> { return this.queue.drain(userId); }
+  async drainUser(userId: string): Promise<void> {
+    while (true) {
+      const intakes = this.intakesByUser.get(userId);
+      if (intakes?.size) await Promise.allSettled([...intakes]);
+      await this.queue.drain(userId);
+      if (!this.intakesByUser.has(userId) && this.queue.pendingUsers() === 0) return;
+      if (!this.intakesByUser.has(userId)) return;
+    }
+  }
   waitForIdle(timeoutMs: number): Promise<boolean> { return this.pending.waitForIdle(timeoutMs); }
   getPendingCount(): number { return this.pending.pendingCount; }
 }
