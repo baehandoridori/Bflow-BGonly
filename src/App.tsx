@@ -2663,12 +2663,18 @@ export default function App() {
   useEffect(() => {
     const cleanup = window.electronAPI?.onCalendarChanged?.((payload) => {
       const detail = payload && typeof payload === 'object' ? payload as { action?: string } : {};
-      if (detail.action === 'upsert' || detail.action === 'delete') {
-        import('@/services/calendarService').then(({ syncAll }) => syncAll({ broadcast: false })).catch((error) => {
-          console.warn('[Broadcast] 개인 할일 캘린더 캐시 갱신 실패:', error);
-        });
-      }
-      window.dispatchEvent(new CustomEvent('bflow:calendar-changed', { detail: payload }));
+      const refresh = async () => {
+        if (detail.action === 'upsert' || detail.action === 'delete') {
+          try {
+            const { syncAll } = await import('@/services/calendarService');
+            await syncAll({ broadcast: false });
+          } catch (error) {
+            console.warn('[Broadcast] 개인 할일 캘린더 캐시 갱신 실패:', error);
+          }
+        }
+        window.dispatchEvent(new CustomEvent('bflow:calendar-changed', { detail: payload }));
+      };
+      void refresh();
     });
     return () => { cleanup?.(); };
   }, []);

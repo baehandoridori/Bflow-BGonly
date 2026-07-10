@@ -305,7 +305,7 @@ export class PersonalTodoCalendarSync {
     });
   }
 
-  private async recoverEntries(userId: string): Promise<void> {
+  private async recoverEntries(userId: string): Promise<boolean> {
     const entries = (await this.dependencies.journal.read()).filter((entry) => entry.userId === userId);
     for (const entry of entries) {
       if (entry.phase === 'aborted') {
@@ -329,9 +329,11 @@ export class PersonalTodoCalendarSync {
       }
       await this.enqueue(entry.operationId);
     }
+    const remaining = await this.dependencies.journal.read();
+    return !remaining.some((entry) => entry.userId === userId && recoveryPhaseNeedsAttention(entry.phase));
   }
 
-  recover(userId: string): Promise<void> {
+  recover(userId: string): Promise<boolean> {
     const recovery = this.recoverEntries(userId);
     return this.dependencies.trackPending ? this.dependencies.trackPending(recovery) : recovery;
   }

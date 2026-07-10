@@ -2684,7 +2684,10 @@ ipcMain.handle('personal-todo:retry-calendar', async () => {
     return { ok: false as const, kind: 'stale' as const, code: 'NO_SESSION', message: '로그인이 필요합니다.', retryable: true as const };
   }
   try {
-    await personalTodoCalendarSync.recover(userId);
+    const resolved = await personalTodoCalendarSync.recover(userId);
+    if (!resolved) {
+      return { ok: false as const, kind: 'unknown' as const, code: 'CALENDAR_SYNC_NEEDED', message: '캘린더 동기화가 아직 완료되지 않았습니다.', retryable: true as const };
+    }
     return { ok: true as const, data: undefined };
   } catch (error) {
     return {
