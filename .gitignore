@@ -10,5 +10,6 @@ test-data/
 __pycache__/
 .mcp.json
 .claude/worktrees/
+.worktrees/
 .superpowers/
 .pr-body.md
