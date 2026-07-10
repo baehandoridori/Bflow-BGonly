@@ -308,7 +308,7 @@ export function usePersonalTodos(): UsePersonalTodosResult {
         }
       } else {
         const baseline = accept(result);
-        if (isCurrentIntent() && userIdRef.current === currentUser?.id) publishBaseline(baseline, true);
+        if (isCurrentIntent()) publishBaseline(baseline, true);
       }
     } catch (error) {
       if (isUnknown(error)) {
