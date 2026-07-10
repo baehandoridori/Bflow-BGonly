@@ -5,7 +5,9 @@ import { AnimatePresence } from 'framer-motion';
 import { useAppStore, type ViewMode } from '@/stores/useAppStore';
 import { useRevisionStore } from '@/stores/useRevisionStore';
 import { useDataStore } from '@/stores/useDataStore';
+import { useAuthStore } from '@/stores/useAuthStore';
 import { useCharacterBoardAccessState } from '@/hooks/useCharacterBoardAccess';
+import { isNavItemHiddenForUser } from './navVisibility';
 import { cn } from '@/utils/cn';
 import { SplashScreen } from '@/components/splash/SplashScreen';
 import { getPreset, rgbToHex } from '@/themes';
@@ -270,9 +272,13 @@ export function Sidebar() {
   //   loading 중과 정상 차단(무권한)은 기존과 동일하게 숨김.
   const characterAccess = useCharacterBoardAccessState();
   const characterAccessFailed = characterAccess.error && !characterAccess.allowed;
+  const currentUserName = useAuthStore((s) => s.currentUser?.name);
   const navItems = useMemo(
-    () => NAV_ITEMS.filter((item) => item.id !== 'character-board' || characterAccess.allowed || characterAccessFailed),
-    [characterAccess.allowed, characterAccessFailed],
+    () =>
+      NAV_ITEMS.filter((item) => item.id !== 'character-board' || characterAccess.allowed || characterAccessFailed)
+        // 휴가 탭 등: 지정된 사용자에게는 숨김
+        .filter((item) => !isNavItemHiddenForUser(item.id, currentUserName)),
+    [characterAccess.allowed, characterAccessFailed, currentUserName],
   );
   const [accessTipShow, setAccessTipShow] = useState(false);
   const accessTipTimer = useRef<ReturnType<typeof setTimeout>>();
