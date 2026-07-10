@@ -308,7 +308,15 @@ export function usePersonalTodos(): UsePersonalTodosResult {
 
   const reorderGroup = useCallback(async (group: 'pinned' | 'normal' | 'done', reordered: PersonalTodo[]) => {
     const groups = splitPersonalTodos(todos);
-    groups[group] = reordered;
+    // The legacy widget sends one combined pending list for the normal drag
+    // surface. Split that list back into pinned/normal buckets before writing
+    // the canonical order so a pinned row is never duplicated.
+    if (group === 'normal') {
+      groups.pinned = reordered.filter((todo) => todo.pinned);
+      groups.normal = reordered.filter((todo) => !todo.pinned);
+    } else {
+      groups[group] = reordered;
+    }
     const next = [...groups.pinned, ...groups.normal, ...groups.done];
     await runMutation('order', next, labels, () => api().mutatePersonalTodoOrder({ type: 'reorder' }, next.map((todo) => todo.id)), true);
   }, [labels, runMutation, todos]);
