@@ -1,6 +1,6 @@
-import { createUuid } from '../../../utils/createUuid';
+import { createUuid } from '../../../utils/createUuid.ts';
 import type { PersonalTodo, SceneKey, TaskView } from './types';
-import { normalizePersonalTodo } from './personalTodoDomain';
+import { normalizePersonalTodo } from './personalTodoDomain.ts';
 
 export const PERSONAL_TODO_MIGRATION_MARKER = 'bflow_personal_todo_migration_v2';
 const LEGACY_ASSIGNED_TODOS_KEY = 'bflow_assigned_personal_todos';
@@ -12,13 +12,32 @@ export interface LegacyPersonalTodoMigration {
   sceneKeys: SceneKey[];
 }
 
+export interface PersonalTodoIntentIdentity {
+  epoch: number;
+  userId: string | null;
+  generation: number;
+}
+
+export function isPersonalTodoIntentCurrent(
+  intent: PersonalTodoIntentIdentity,
+  current: PersonalTodoIntentIdentity,
+): boolean {
+  return intent.epoch === current.epoch
+    && intent.userId === current.userId
+    && intent.generation === current.generation;
+}
+
+export function makePersonalTodoMutationKey(kind: 'todo' | 'label' | 'order', id: string, serial: number): string {
+  return `${kind}:${id}:${serial}`;
+}
+
 function parseArray(raw: string | null): unknown[] {
   if (!raw) return [];
   try { const value = JSON.parse(raw); return Array.isArray(value) ? value : []; } catch { return []; }
 }
 
-function validTodoId(id: unknown): id is string {
-  return typeof id === 'string' && id.trim().length > 0;
+export function isCanonicalPersonalTodoId(id: unknown): id is string {
+  return typeof id === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(id.trim());
 }
 
 /**
@@ -45,7 +64,7 @@ export function collectLegacyPersonalTodos(
   const todos: PersonalTodo[] = [];
   for (const raw of candidates) {
     const normalized = normalizePersonalTodo(raw);
-    const id = validTodoId(normalized.id) ? normalized.id : createUuid();
+    const id = isCanonicalPersonalTodoId(normalized.id) ? normalized.id : createUuid();
     if (seen.has(id)) continue;
     seen.add(id);
     todos.push({ ...normalized, id });

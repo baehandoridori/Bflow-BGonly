@@ -29,6 +29,7 @@ const TODO_KEY_PREFIX = 'bflow:preview:personal-todos:';
 const LABEL_KEY_PREFIX = 'bflow:preview:personal-todo-labels:';
 const PREVIEW_EPOCH_KEY = 'bflow:preview:canonical-session-epoch';
 const SESSION_KEY = 'bflow:preview:canonical-session';
+export const PERSONAL_TODO_PREVIEW_SESSION_KEY = 'bflow:preview:remembered-user';
 const SEED_TIME = '2026-01-01T00:00:00.000Z';
 const previewStorageKeys = new WeakMap<object, Set<string>>();
 
@@ -237,7 +238,7 @@ export function createPersonalTodoPreviewStore(
 }
 
 export function resetPersonalTodoPreview(storage: PreviewStorage = browserStorage()): void {
-  for (const key of [PREVIEW_EPOCH_KEY, SESSION_KEY]) storage.removeItem(key);
+  for (const key of [PREVIEW_EPOCH_KEY, SESSION_KEY, PERSONAL_TODO_PREVIEW_SESSION_KEY]) storage.removeItem(key);
   for (const key of previewStorageKeys.get(storage) ?? []) storage.removeItem(key);
 }
 
@@ -251,9 +252,27 @@ export function createPreviewSessionController(storage: PreviewStorage = browser
   });
   const bump = () => storage.setItem(PREVIEW_EPOCH_KEY, String(readEpoch() + 1));
   return {
-    ensure: () => payload(),
-    login: (userId: string) => { if (currentUserId !== userId) bump(); currentUserId = userId; storage.setItem(SESSION_KEY, userId); return payload(); },
-    restore: () => { currentUserId = storage.getItem(SESSION_KEY); if (currentUserId) bump(); return payload(); },
-    logout: () => { if (currentUserId) bump(); currentUserId = null; return payload(); },
+    ensure: () => {
+      if (!currentUserId) currentUserId = storage.getItem(SESSION_KEY);
+      return payload();
+    },
+    login: (userId: string, rememberMe = true) => {
+      if (currentUserId !== userId) bump();
+      currentUserId = userId;
+      if (rememberMe) storage.setItem(SESSION_KEY, userId);
+      else storage.removeItem(SESSION_KEY);
+      return payload();
+    },
+    restore: () => {
+      const remembered = storage.getItem(SESSION_KEY);
+      if (remembered && remembered !== currentUserId) { bump(); currentUserId = remembered; }
+      return payload();
+    },
+    logout: () => {
+      if (currentUserId) bump();
+      currentUserId = null;
+      storage.removeItem(SESSION_KEY);
+      return payload();
+    },
   };
 }

@@ -14,7 +14,10 @@ import {
   clearLegacyPersonalTodoStorage,
   collectLegacyPersonalTodos,
   hasPersonalTodoMigrationRun,
+  isPersonalTodoIntentCurrent,
+  makePersonalTodoMutationKey,
   markPersonalTodoMigrationDone,
+  type PersonalTodoIntentIdentity,
 } from '../personalTodoMigration';
 
 interface ConfirmedBaseline {
@@ -134,38 +137,61 @@ export function usePersonalTodos(): UsePersonalTodosResult {
   const readAuthoritative = useCallback(async (generation: number, epoch: number): Promise<ConfirmedBaseline | null> => {
     const [todoResult, labelResult] = await Promise.all([api().readPersonalTodos(), api().readPersonalTodoLabels()]);
     if (!todoResult.ok || !labelResult.ok) return null;
-    if (generation !== loadGenerationRef.current || epoch !== sessionEpochRef.current || userIdRef.current !== currentUser?.id) return null;
+    const liveUserId = useAuthStore.getState().currentUser?.id ?? null;
+    if (generation !== loadGenerationRef.current || epoch !== sessionEpochRef.current || userIdRef.current !== liveUserId) return null;
     return {
       todos: todoResult.data.map(toRendererTodo),
       labels: labelResult.data.map(toRendererLabel),
     };
   }, [currentUser?.id]);
 
-  const migrateLegacy = useCallback(async (userId: string, epoch: number) => {
+  const migrateLegacy = useCallback(async (userId: string, epoch: number, generation: number) => {
     if (typeof localStorage === 'undefined' || hasPersonalTodoMigrationRun(localStorage, userId)) return;
+    if (!isPersonalTodoIntentCurrent({ epoch, userId, generation }, {
+      epoch: sessionEpochRef.current,
+      userId: useAuthStore.getState().currentUser?.id ?? null,
+      generation: loadGenerationRef.current,
+    })) return;
     const legacyResult = await api().readLegacyTaskViews();
+    if (!isPersonalTodoIntentCurrent({ epoch, userId, generation }, {
+      epoch: sessionEpochRef.current,
+      userId: useAuthStore.getState().currentUser?.id ?? null,
+      generation: loadGenerationRef.current,
+    })) return;
+    if (!legacyResult.ok) return;
     const migration = collectLegacyPersonalTodos(localStorage, legacyResult.ok && legacyResult.data ? legacyResult.data.views : []);
     for (const todo of migration.todos) {
+      if (!isPersonalTodoIntentCurrent({ epoch, userId, generation }, { epoch: sessionEpochRef.current, userId: useAuthStore.getState().currentUser?.id ?? null, generation: loadGenerationRef.current })) return;
       const result = await api().createPersonalTodo(toMainInput(todo));
-      if (!result.ok && result.kind !== 'rejected') throw asError(result);
+      if (!result.ok) throw asError(result);
     }
     if (migration.sceneKeys.length > 0) {
+      if (!isPersonalTodoIntentCurrent({ epoch, userId, generation }, { epoch: sessionEpochRef.current, userId: useAuthStore.getState().currentUser?.id ?? null, generation: loadGenerationRef.current })) return;
       const sceneResult = await api().upsertLegacyTaskViews([], migration.sceneKeys);
       if (!sceneResult.ok) throw asError(sceneResult);
     }
-    if (epoch !== sessionEpochRef.current) return;
+    if (!isPersonalTodoIntentCurrent({ epoch, userId, generation }, { epoch: sessionEpochRef.current, userId: useAuthStore.getState().currentUser?.id ?? null, generation: loadGenerationRef.current })) return;
     markPersonalTodoMigrationDone(localStorage, userId);
     clearLegacyPersonalTodoStorage(localStorage);
   }, []);
 
   useEffect(() => {
     let disposed = false;
-    const generation = ++loadGenerationRef.current;
     const userId = currentUser?.id ?? null;
+    const previousUserId = userIdRef.current;
+    const generation = ++loadGenerationRef.current;
+    if (previousUserId !== userId) sessionEpochRef.current += 1;
     userIdRef.current = userId;
     pendingIntentsRef.current.clear();
     mutationStateRef.current.pendingTodoIds.clear();
     mutationStateRef.current.pendingLabelIds.clear();
+    if (previousUserId !== userId) {
+      confirmedBaselineRef.current = { todos: [], labels: [] };
+      mutationStateRef.current.confirmedTodos = [];
+      mutationStateRef.current.confirmedLabels = [];
+      setTodos([]);
+      setLabels([]);
+    }
     setSyncNeeded(false);
     setLoading(true);
     if (!userId) {
@@ -178,9 +204,9 @@ export function usePersonalTodos(): UsePersonalTodosResult {
       const session = await api().ensureCanonicalSession();
       if (disposed || generation !== loadGenerationRef.current) return;
       const canonicalUserId = session.payload.user?.id ?? null;
-      if (session.payload.epoch !== sessionEpochRef.current || canonicalUserId !== userIdRef.current) {
-        sessionEpochRef.current = session.payload.epoch;
-        mutationStateRef.current.sessionEpoch = session.payload.epoch;
+      if (session.payload.epoch > sessionEpochRef.current || canonicalUserId !== userIdRef.current) {
+        sessionEpochRef.current = Math.max(sessionEpochRef.current, session.payload.epoch);
+        mutationStateRef.current.sessionEpoch = sessionEpochRef.current;
       }
       if (canonicalUserId !== userId) {
         publishBaseline({ todos: [], labels: [] }, false);
@@ -188,7 +214,7 @@ export function usePersonalTodos(): UsePersonalTodosResult {
         return;
       }
       try {
-        await migrateLegacy(userId, sessionEpochRef.current);
+        await migrateLegacy(userId, sessionEpochRef.current, generation);
         const baseline = await readAuthoritative(generation, sessionEpochRef.current);
         if (!baseline || disposed) return;
         publishBaseline(baseline, false);
@@ -206,7 +232,10 @@ export function usePersonalTodos(): UsePersonalTodosResult {
     const cleanup = api().onPersonalTodoCommit((payload) => {
       const event = (payload ?? {}) as { userId?: string; epoch?: number };
       if (event.userId && event.userId !== userIdRef.current) return;
-      if (event.epoch !== undefined && event.epoch !== sessionEpochRef.current) return;
+      if (event.epoch !== undefined && event.epoch > sessionEpochRef.current) {
+        sessionEpochRef.current = event.epoch;
+        mutationStateRef.current.sessionEpoch = event.epoch;
+      }
       const generation = loadGenerationRef.current;
       const epoch = sessionEpochRef.current;
       readAuthoritative(generation, epoch).then((baseline) => {
@@ -223,7 +252,12 @@ export function usePersonalTodos(): UsePersonalTodosResult {
     execute: () => Promise<MainPersonalTodoResult<unknown>>,
     order = false,
   ) => {
-    const epoch = sessionEpochRef.current;
+    const intentIdentity: PersonalTodoIntentIdentity = {
+      epoch: sessionEpochRef.current,
+      userId: userIdRef.current,
+      generation: loadGenerationRef.current,
+    };
+    const epoch = intentIdentity.epoch;
     const intent: PendingIntent = { key, serial: ++serialRef.current, epoch, todos: optimisticTodos, labels: optimisticLabels, order };
     pendingIntentsRef.current.set(key, intent);
     mutationStateRef.current.pendingTodoIds = new Set([...pendingIntentsRef.current.values()].filter((item) => !item.key.startsWith('label:')).map((item) => item.key));
@@ -246,31 +280,48 @@ export function usePersonalTodos(): UsePersonalTodosResult {
       }
       return baseline;
     };
+    const isCurrentIntent = () => isPersonalTodoIntentCurrent(intentIdentity, {
+      epoch: sessionEpochRef.current,
+      userId: useAuthStore.getState().currentUser?.id ?? null,
+      generation: loadGenerationRef.current,
+    });
     try {
-      let result = await execute();
+      let result: MainPersonalTodoResult<unknown>;
+      try {
+        result = await execute();
+      } catch (error) {
+        if (!isUnknown(error)) throw error;
+        // IPC can reject instead of returning a typed unknown result. Treat
+        // that shape exactly like the bridge result and retry once.
+        result = await execute();
+      }
+      if (!isCurrentIntent()) return;
       if (!result.ok && result.kind === 'unknown') result = await execute();
+      if (!isCurrentIntent()) return;
       if (!result.ok && result.kind === 'unknown') {
         const authoritative = await readAuthoritative(loadGenerationRef.current, epoch);
         if (authoritative) {
-          if (epoch === sessionEpochRef.current) publishBaseline(authoritative, true);
+        if (isCurrentIntent()) publishBaseline(authoritative, true);
         } else {
           mutationStateRef.current.orderSyncNeeded = order;
           setSyncNeeded(true);
         }
       } else {
         const baseline = accept(result);
-        if (epoch === sessionEpochRef.current && userIdRef.current === currentUser?.id) publishBaseline(baseline, true);
+        if (isCurrentIntent() && userIdRef.current === currentUser?.id) publishBaseline(baseline, true);
       }
     } catch (error) {
       if (isUnknown(error)) {
         const authoritative = await readAuthoritative(loadGenerationRef.current, epoch);
+        if (!isCurrentIntent()) return;
         if (authoritative) publishBaseline(authoritative, true);
         else { mutationStateRef.current.orderSyncNeeded = order; setSyncNeeded(true); }
-      } else if (epoch === sessionEpochRef.current) {
+      } else if (isCurrentIntent()) {
         publishBaseline(confirmedBaselineRef.current, true);
       }
     } finally {
-      pendingIntentsRef.current.delete(key);
+      if (!isCurrentIntent()) return;
+      if (pendingIntentsRef.current.get(key)?.serial === intent.serial) pendingIntentsRef.current.delete(key);
       mutationStateRef.current.pendingTodoIds = new Set([...pendingIntentsRef.current.keys()].filter((item) => !item.startsWith('label:')));
       mutationStateRef.current.pendingLabelIds = new Set([...pendingIntentsRef.current.keys()].filter((item) => item.startsWith('label:')));
       const latest = [...pendingIntentsRef.current.values()].sort((a, b) => a.serial - b.serial).at(-1);
@@ -281,16 +332,21 @@ export function usePersonalTodos(): UsePersonalTodosResult {
 
   const addTodo = useCallback(async (todo: PersonalTodo) => {
     const next = [...todos, todo];
-    await runMutation(`todo:${todo.id}:${serialRef.current + 1}`, next, labels, () => api().createPersonalTodo(toMainInput(todo)), false);
+    await runMutation(makePersonalTodoMutationKey('todo', todo.id, serialRef.current + 1), next, labels, () => api().createPersonalTodo(toMainInput(todo)), false);
   }, [labels, runMutation, todos]);
 
   const patchTodo = useCallback(async (todoId: string, patch: Partial<PersonalTodo>) => {
     const current = todos.find((todo) => todo.id === todoId);
     if (!current) return;
     const nextTodo = normalizePersonalTodo({ ...current, ...patch, status: patch.status ?? current.status, completed: (patch.status ?? current.status) === 'done' });
+    if (nextTodo.addToCalendar && !nextTodo.startDate && !nextTodo.endDate) {
+      const today = new Date().toISOString().slice(0, 10);
+      nextTodo.startDate = today;
+      nextTodo.endDate = today;
+    }
     const next = todos.map((todo) => todo.id === todoId ? nextTodo : todo);
     const bridgePatch: MainPersonalTodoPatch = { ...patch, status: nextTodo.status, title: nextTodo.title, memo: nextTodo.memo, priority: nextTodo.priority as PersonalTodoPriority, labelIds: nextTodo.labelIds, startDate: nextTodo.startDate ?? null, endDate: nextTodo.endDate ?? null, addToCalendar: nextTodo.addToCalendar ?? false };
-    await runMutation(`todo:${todoId}:${serialRef.current + 1}`, next, labels, () => api().patchPersonalTodo(todoId, bridgePatch), false);
+    await runMutation(makePersonalTodoMutationKey('todo', todoId, serialRef.current + 1), next, labels, () => api().patchPersonalTodo(todoId, bridgePatch), false);
   }, [labels, runMutation, todos]);
 
   const setStatus = useCallback(async (todoId: string, status: MainPersonalTodoStatus) => {
@@ -298,12 +354,12 @@ export function usePersonalTodos(): UsePersonalTodosResult {
     if (!current) return;
     const nextTodo = applyPersonalTodoStatus(current, status);
     const next = todos.map((todo) => todo.id === todoId ? nextTodo : todo);
-    await runMutation(`todo:${todoId}:${serialRef.current + 1}`, next, labels, () => api().mutatePersonalTodoOrder({ type: 'setStatusAndOrder', todoId, status }, next.map((todo) => todo.id)), true);
+    await runMutation(makePersonalTodoMutationKey('todo', todoId, serialRef.current + 1), next, labels, () => api().mutatePersonalTodoOrder({ type: 'setStatusAndOrder', todoId, status }, next.map((todo) => todo.id)), true);
   }, [labels, runMutation, todos]);
 
   const setPinned = useCallback(async (todoId: string, pinned: boolean) => {
     const next = todos.map((todo) => todo.id === todoId ? { ...todo, pinned } : todo);
-    await runMutation(`todo:${todoId}:${serialRef.current + 1}`, next, labels, () => api().mutatePersonalTodoOrder({ type: 'setPinned', todoId, pinned }, next.map((todo) => todo.id)), true);
+    await runMutation(makePersonalTodoMutationKey('todo', todoId, serialRef.current + 1), next, labels, () => api().mutatePersonalTodoOrder({ type: 'setPinned', todoId, pinned }, next.map((todo) => todo.id)), true);
   }, [labels, runMutation, todos]);
 
   const reorderGroup = useCallback(async (group: 'pinned' | 'normal' | 'done', reordered: PersonalTodo[]) => {
@@ -318,23 +374,23 @@ export function usePersonalTodos(): UsePersonalTodosResult {
       groups[group] = reordered;
     }
     const next = [...groups.pinned, ...groups.normal, ...groups.done];
-    await runMutation('order', next, labels, () => api().mutatePersonalTodoOrder({ type: 'reorder' }, next.map((todo) => todo.id)), true);
+    await runMutation(makePersonalTodoMutationKey('order', 'all', serialRef.current + 1), next, labels, () => api().mutatePersonalTodoOrder({ type: 'reorder' }, next.map((todo) => todo.id)), true);
   }, [labels, runMutation, todos]);
 
   const deleteTodo = useCallback(async (todoId: string) => {
-    await runMutation(`todo:${todoId}:${serialRef.current + 1}`, todos.filter((todo) => todo.id !== todoId), labels, () => api().deletePersonalTodo(todoId), false);
+    await runMutation(makePersonalTodoMutationKey('todo', todoId, serialRef.current + 1), todos.filter((todo) => todo.id !== todoId), labels, () => api().deletePersonalTodo(todoId), false);
   }, [labels, runMutation, todos]);
 
   const createAndAttachLabel = useCallback(async (input: { todoId: string; name: string; colorKey: PersonalTodoLabel['colorKey'] }) => {
     const optimisticLabel: PersonalTodoLabel = { id: `pending-label-${Date.now()}`, name: input.name, colorKey: input.colorKey, createdAt: new Date().toISOString() };
     const nextLabels = [...labels, optimisticLabel];
     const nextTodos = todos.map((todo) => todo.id === input.todoId ? { ...todo, labelIds: [...new Set([...todo.labelIds, optimisticLabel.id])] } : todo);
-    await runMutation(`label:${optimisticLabel.id}`, nextTodos, nextLabels, () => api().createOrReusePersonalTodoLabelAndAttach(input), false);
+    await runMutation(makePersonalTodoMutationKey('label', optimisticLabel.id, serialRef.current + 1), nextTodos, nextLabels, () => api().createOrReusePersonalTodoLabelAndAttach(input), false);
   }, [labels, runMutation, todos]);
 
   const updateLabel = useCallback(async (labelId: string, patch: { name?: string; colorKey?: PersonalTodoLabel['colorKey'] }) => {
     const nextLabels = labels.map((label) => label.id === labelId ? { ...label, ...patch } : label);
-    await runMutation(`label:${labelId}`, todos, nextLabels, () => api().updatePersonalTodoLabel(labelId, patch), false);
+    await runMutation(makePersonalTodoMutationKey('label', labelId, serialRef.current + 1), todos, nextLabels, () => api().updatePersonalTodoLabel(labelId, patch), false);
   }, [labels, runMutation, todos]);
 
   const retrySync = useCallback(async () => {
@@ -345,9 +401,14 @@ export function usePersonalTodos(): UsePersonalTodosResult {
     setSyncNeeded(false);
   }, [publishBaseline, readAuthoritative]);
 
-  const groups = useMemo(() => splitPersonalTodos(todos), [todos]);
+  // Effects run after render; hide the previous user's rows during that short
+  // transition window instead of painting them under the new session.
+  const sessionAligned = (currentUser?.id ?? null) === userIdRef.current;
+  const visibleTodos = sessionAligned ? todos : [];
+  const visibleLabels = sessionAligned ? labels : [];
+  const groups = useMemo(() => splitPersonalTodos(visibleTodos), [visibleTodos]);
   return {
-    todos, labels,
+    todos: visibleTodos, labels: visibleLabels,
     pinnedTodos: groups.pinned,
     normalTodos: groups.normal,
     doneTodos: groups.done,

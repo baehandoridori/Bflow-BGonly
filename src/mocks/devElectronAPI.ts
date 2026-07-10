@@ -15,7 +15,7 @@ import {
 } from './devPreviewComments';
 import { normalizeSceneIdKey } from '@/utils/sceneIdKey';
 import { createUuid } from '@/utils/createUuid';
-import { createPersonalTodoPreviewStore, type PersonalTodoPreviewStore } from './personalTodoPreviewStore';
+import { createPersonalTodoPreviewStore, PERSONAL_TODO_PREVIEW_SESSION_KEY, type PersonalTodoPreviewStore } from './personalTodoPreviewStore';
 
 type PreviewUser = AppUser & { password: string };
 
@@ -47,7 +47,6 @@ function getMockUsers(): PreviewUser[] {
 let previewCanonicalUserId: string | null = null;
 let previewCanonicalEpoch = 0;
 let previewRememberedUserId: string | null = null;
-const PREVIEW_REMEMBERED_USER_KEY = 'bflow:preview:remembered-user';
 let previewTodoStore: PersonalTodoPreviewStore | null = null;
 const previewTodoCommitListeners = new Set<(payload: unknown) => void>();
 
@@ -80,19 +79,18 @@ function previewCanonicalPayload() {
 }
 
 function readRememberedPreviewUser(): string | null {
-  if (previewRememberedUserId) return previewRememberedUserId;
   try {
-    if (typeof window !== 'undefined') return window.localStorage.getItem(PREVIEW_REMEMBERED_USER_KEY);
+    if (typeof window !== 'undefined') return window.localStorage.getItem(PERSONAL_TODO_PREVIEW_SESSION_KEY) ?? null;
   } catch { /* private browsing/localStorage disabled — in-memory fallback remains valid */ }
-  return null;
+  return previewRememberedUserId;
 }
 
 function writeRememberedPreviewUser(userId: string | null): void {
   previewRememberedUserId = userId;
   try {
     if (typeof window === 'undefined') return;
-    if (userId) window.localStorage.setItem(PREVIEW_REMEMBERED_USER_KEY, userId);
-    else window.localStorage.removeItem(PREVIEW_REMEMBERED_USER_KEY);
+    if (userId) window.localStorage.setItem(PERSONAL_TODO_PREVIEW_SESSION_KEY, userId);
+    else window.localStorage.removeItem(PERSONAL_TODO_PREVIEW_SESSION_KEY);
   } catch { /* private browsing/localStorage disabled */ }
 }
 

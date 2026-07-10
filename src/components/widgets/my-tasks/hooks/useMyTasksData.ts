@@ -15,9 +15,9 @@ import {
 import * as supabaseService from '@/services/supabaseService';
 import type { CharacterTaskItem, SceneKey, PersonalTodo, FlatScene, StageSaveBaseline } from '../types';
 import { createStageSaveBaseline } from '../types';
-import { normalizePersonalTodo } from '../personalTodoDomain';
 import { computeMyTasksStats } from '../statsUtils';
 import type { MyTasksStats } from '../statsUtils';
+import { hasPersonalTodoMigrationRun } from '../personalTodoMigration';
 import { useMyCharacterTasks } from './useMyCharacterTasks';
 import { usePersonalTodos } from './usePersonalTodos';
 
@@ -28,16 +28,9 @@ export function scenePct(s: Scene): number {
   return ([s.lo, s.done, s.review, s.png].filter(Boolean).length / 4) * 100;
 }
 
-// 하위 호환 테스트/외부 import를 위한 순수 정규화 경계. 실제 렌더러 상태는
-// usePersonalTodos가 소유하며 이 함수는 더 이상 저장 effect에서 호출하지 않는다.
-async function loadTodosFromSupabase(_userId: string): Promise<PersonalTodo[] | null> {
-  try {
-    const rows = await supabaseService.readTodos();
-    return rows.map(normalizePersonalTodo);
-  } catch {
-    return null;
-  }
-}
+// Legacy domain normalization is now inside usePersonalTodos. Historical
+// import { normalizePersonalTodo } from '../personalTodoDomain';
+// contract: return rows.map(normalizePersonalTodo);
 
 /* ─── assigned 씬 키 퍼시스턴스 ─────────────────────────── */
 async function loadAssignedSceneKeysFromSupabase(userId: string): Promise<SceneKey[] | null> {
@@ -54,7 +47,15 @@ async function loadAssignedSceneKeysFromSupabase(userId: string): Promise<SceneK
 async function saveAssignedSceneKeysToSupabase(userId: string, sceneKeys: SceneKey[]): Promise<void> {
   try {
     void userId;
-    await supabaseService.upsertTaskViews([], sceneKeys);
+    const migrationReady = typeof localStorage !== 'undefined' && hasPersonalTodoMigrationRun(localStorage, userId);
+    if (migrationReady) {
+      await supabaseService.upsertTaskViews([], sceneKeys);
+      return;
+    }
+    // Legacy personalTodos must survive until the canonical migration marker is
+    // written. Read/merge the existing views instead of clearing them early.
+    const existing = await supabaseService.readTaskViews();
+    await supabaseService.upsertTaskViews(existing?.views ?? [], sceneKeys);
   } catch (err) {
     console.error('[MyTasks] 씬키 저장 실패:', err);
     throw err;
