@@ -499,6 +499,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   gcalSaveCredentials: (clientId: string, clientSecret: string) =>
     ipcRenderer.invoke('gcal:save-credentials', clientId, clientSecret),
   gcalHasCredentials: () => ipcRenderer.invoke('gcal:has-credentials') as Promise<boolean>,
+  gcalSaveLocalSettings: (settings: { personalCalendarId?: string | null; lastSyncAt?: string | null }) =>
+    ipcRenderer.invoke('gcal:save-local-settings', settings),
   gcalSignOut: () => ipcRenderer.invoke('gcal:sign-out'),
   gcalListCalendars: () => ipcRenderer.invoke('gcal:list-calendars'),
   gcalFullSync: (calendarId: string) => ipcRenderer.invoke('gcal:full-sync', calendarId),

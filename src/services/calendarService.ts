@@ -56,6 +56,9 @@ function getLocalSettings(): GCalLocalSettings {
 
 function saveLocalSettings(settings: GCalLocalSettings): void {
   localStorage.setItem(GCAL_LOCAL_SETTINGS_KEY, JSON.stringify(settings));
+  void window.electronAPI?.gcalSaveLocalSettings?.(settings).catch((error) => {
+    console.warn('[Calendar] 메인 프로세스 개인 캘린더 설정 저장 실패:', error);
+  });
 }
 
 /** 로컬 설정 일부 업데이트 (personalCalendarId, lastSyncAt) */
@@ -99,6 +102,10 @@ export async function getGCalSettings(): Promise<GCalSettings> {
   }
 
   const local = getLocalSettings();
+  // Main-side personal-todo calendar sync reads the same setting from the
+  // app-data file; mirror existing renderer settings before it resolves a
+  // target calendar (important after upgrading from the localStorage-only path).
+  saveLocalSettings(local);
   return {
     teamCalendarId: cachedTeamCalendarId ?? null,
     personalCalendarId: local.personalCalendarId,
@@ -223,7 +230,7 @@ export async function getEvents(): Promise<CalendarEvent[]> {
 }
 
 /** 전체 동기화 (앱 시작 시 호출) */
-export async function syncAll(): Promise<CalendarEvent[]> {
+export async function syncAll(options: { broadcast?: boolean } = {}): Promise<CalendarEvent[]> {
   // legacy 로컬 이벤트를 먼저 로드 (syncAll이 getEvents보다 먼저 호출될 수 있으므로)
   await loadLegacyEvents();
 
@@ -275,7 +282,7 @@ export async function syncAll(): Promise<CalendarEvent[]> {
 
   // GCal에 없는 이벤트는 캐시에서도 제거 (legacy 로컬 이벤트 미지원)
   eventCache = [...events];
-  broadcastCalendarChange();
+  if (options.broadcast !== false) broadcastCalendarChange();
 
   // Watch 채널 등록 (실시간 동기화용)
   // 비동기로 실행 — sync 완료를 블로킹하지 않음

@@ -2781,6 +2781,18 @@ ipcMain.handle('gcal:has-credentials', wrapIpc(async () => {
   return gcal.hasCredentialsSet();
 }));
 
+ipcMain.handle('gcal:save-local-settings', async (_event, settings: { personalCalendarId?: string | null; lastSyncAt?: string | null }) => {
+  const payload = {
+    personalCalendarId: settings?.personalCalendarId ?? null,
+    lastSyncAt: settings?.lastSyncAt ?? null,
+  };
+  await fs.promises.writeFile(
+    path.join(getDataPath(), 'gcal-local-settings.json'),
+    JSON.stringify(payload),
+    'utf8',
+  );
+});
+
 ipcMain.handle('gcal:sign-out', wrapIpc(async () => {
   await gcal.signOut();
 }));

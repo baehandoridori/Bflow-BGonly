@@ -1188,6 +1188,7 @@ export function installDevElectronAPI(): void {
     gcalStartAuth: async () => {},
     gcalSaveCredentials: async () => {},
     gcalHasCredentials: async () => false,
+    gcalSaveLocalSettings: async () => {},
     gcalSignOut: async () => {},
     gcalListCalendars: async () => [],
     gcalFullSync: async () => [],

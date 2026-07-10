@@ -1485,6 +1485,7 @@ export interface ElectronAPI {
   gcalStartAuth: () => Promise<void>;
   gcalSaveCredentials: (clientId: string, clientSecret: string) => Promise<void>;
   gcalHasCredentials: () => Promise<boolean>;
+  gcalSaveLocalSettings: (settings: { personalCalendarId?: string | null; lastSyncAt?: string | null }) => Promise<void>;
   gcalSignOut: () => Promise<void>;
   gcalListCalendars: () => Promise<Array<{ id: string; summary: string; primary: boolean }>>;
   gcalFullSync: (calendarId: string) => Promise<any[]>;
