@@ -15,6 +15,7 @@ import {
 } from './devPreviewComments';
 import { normalizeSceneIdKey } from '@/utils/sceneIdKey';
 import { createUuid } from '@/utils/createUuid';
+import { createPersonalTodoPreviewStore, type PersonalTodoPreviewStore } from './personalTodoPreviewStore';
 
 type PreviewUser = AppUser & { password: string };
 
@@ -46,6 +47,25 @@ function getMockUsers(): PreviewUser[] {
 let previewCanonicalUserId: string | null = null;
 let previewCanonicalEpoch = 0;
 let previewRememberedUserId: string | null = null;
+let previewTodoStore: PersonalTodoPreviewStore | null = null;
+const previewTodoCommitListeners = new Set<(payload: unknown) => void>();
+
+function getPreviewTodoStore(): PersonalTodoPreviewStore | null {
+  if (!previewCanonicalUserId) return null;
+  if (!previewTodoStore || previewTodoStore.userId !== previewCanonicalUserId) {
+    previewTodoStore = createPersonalTodoPreviewStore(undefined, previewCanonicalUserId);
+    previewTodoStore.subscribe(() => {
+      const payload = { userId: previewCanonicalUserId, epoch: previewCanonicalEpoch };
+      previewTodoCommitListeners.forEach((listener) => listener(payload));
+    });
+  }
+  return previewTodoStore;
+}
+
+function previewNoSession<T>(data: T): { ok: false; kind: 'rejected'; code: string; message: string; retryable: false } {
+  void data;
+  return { ok: false, kind: 'rejected', code: 'AUTH_REQUIRED', message: '로그인이 필요합니다.', retryable: false };
+}
 
 function previewCanonicalPayload() {
   const source = previewCanonicalUserId ? getMockUsers().find((user) => user.id === previewCanonicalUserId) : null;
@@ -588,6 +608,7 @@ export function installDevElectronAPI(): void {
         createdAt: u.createdAt, role: u.role,
       })),
     }),
+    ...({ usersWrite: async () => true } as Partial<ElectronAPI>),
     createLocalUser: async (input) => {
       const user: PreviewUser = {
         id: createUuid(), ...input, password: '1234', isInitialPassword: true,
@@ -1081,18 +1102,53 @@ export function installDevElectronAPI(): void {
       user.isInitialPassword = false;
       return { ok: true };
     },
-    readPersonalTodos: async () => ({ ok: true, data: [] }),
-    readPersonalTodoLabels: async () => ({ ok: true, data: [] }),
-    createPersonalTodo: async () => ({ ok: true, data: [] }),
-    patchPersonalTodo: async () => ({ ok: false, kind: 'rejected', code: 'NOT_FOUND', message: 'not found', retryable: false }),
-    applyCalendarToTodoPatch: async () => ({ ok: false, kind: 'rejected', code: 'NOT_FOUND', message: 'not found', retryable: false }),
-    mutatePersonalTodoOrder: async () => ({ ok: true, data: [] }),
-    deletePersonalTodo: async () => ({ ok: true, data: [] }),
-    createOrReusePersonalTodoLabelAndAttach: async () => ({ ok: false, kind: 'rejected', code: 'NOT_FOUND', message: 'not found', retryable: false }),
-    updatePersonalTodoLabel: async () => ({ ok: false, kind: 'rejected', code: 'NOT_FOUND', message: 'not found', retryable: false }),
+    readPersonalTodos: async () => {
+      const store = getPreviewTodoStore();
+      return store ? { ok: true as const, data: store.readTodos().map((todo, sortOrder) => ({ ...todo, userId: store.userId, startDate: todo.startDate ?? null, endDate: todo.endDate ?? null, addToCalendar: todo.addToCalendar ?? false, sortOrder, updatedAt: todo.createdAt })) } : previewNoSession([]);
+    },
+    readPersonalTodoLabels: async () => {
+      const store = getPreviewTodoStore();
+      return store ? { ok: true as const, data: store.readLabels().map((label) => ({ ...label, updatedAt: label.createdAt })) } : previewNoSession([]);
+    },
+    createPersonalTodo: async (input) => {
+      const store = getPreviewTodoStore();
+      return store ? { ok: true as const, data: store.createTodo(input) } : previewNoSession([]);
+    },
+    patchPersonalTodo: async (todoId, patch) => {
+      const store = getPreviewTodoStore();
+      try { return store ? { ok: true as const, data: store.patchTodo(todoId, patch) } : previewNoSession(null); }
+      catch { return { ok: false as const, kind: 'rejected' as const, code: 'NOT_FOUND', message: 'not found', retryable: false as const }; }
+    },
+    applyCalendarToTodoPatch: async (todoId, patch) => {
+      const store = getPreviewTodoStore();
+      try { return store ? { ok: true as const, data: store.applyCalendarToTodoPatch(todoId, patch) } : previewNoSession(null); }
+      catch { return { ok: false as const, kind: 'rejected' as const, code: 'NOT_FOUND', message: 'not found', retryable: false as const }; }
+    },
+    mutatePersonalTodoOrder: async (mutation, orderedIds) => {
+      const store = getPreviewTodoStore();
+      try { return store ? { ok: true as const, data: store.mutateOrder(mutation, orderedIds) } : previewNoSession([]); }
+      catch { return { ok: false as const, kind: 'rejected' as const, code: 'NOT_FOUND', message: 'not found', retryable: false as const }; }
+    },
+    deletePersonalTodo: async (todoId) => {
+      const store = getPreviewTodoStore();
+      return store ? { ok: true as const, data: store.deleteTodo(todoId) } : previewNoSession([]);
+    },
+    createOrReusePersonalTodoLabelAndAttach: async (input) => {
+      const store = getPreviewTodoStore();
+      try { return store ? { ok: true as const, data: store.createOrReuseLabelAndAttach(input) } : previewNoSession(null); }
+      catch { return { ok: false as const, kind: 'rejected' as const, code: 'NOT_FOUND', message: 'not found', retryable: false as const }; }
+    },
+    updatePersonalTodoLabel: async (labelId, patch) => {
+      const store = getPreviewTodoStore();
+      try { return store ? { ok: true as const, data: store.updateLabel(labelId, patch) } : previewNoSession(null); }
+      catch { return { ok: false as const, kind: 'rejected' as const, code: 'NOT_FOUND', message: 'not found', retryable: false as const }; }
+    },
     readLegacyTaskViews: async () => ({ ok: true, data: null }),
     upsertLegacyTaskViews: async () => ({ ok: true, data: undefined }),
-    onPersonalTodoCommit: noop,
+    onPersonalTodoCommit: (callback) => {
+      previewTodoCommitListeners.add(callback);
+      return () => previewTodoCommitListeners.delete(callback);
+    },
 
     // ─── Memos mock ───
     supabaseReadMemo: async () => null,
