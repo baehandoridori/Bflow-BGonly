@@ -474,11 +474,12 @@ export function useMyTasksData(isPopup: boolean): UseMyTasksDataResult {
         : todos;
       // P1: 마이그레이션이 일어났으면 병합된 sceneKeys를 사용, 아니면 기존 로드값 그대로
       let finalSceneKeys = migrationResult ? migrationResult.sceneKeys : sceneKeys;
-      if (loadGate.consumeDeferredCommit(loadGeneration)) {
-        const [freshTodos, freshSceneKeys] = await Promise.all([
+      const deferredReload = await loadGate.drainDeferredCommits(loadGeneration, () => Promise.all([
           loadTodosFromSupabase(userId),
           loadAssignedSceneKeysFromSupabase(userId),
-        ]);
+        ]));
+      if (deferredReload) {
+        const [freshTodos, freshSceneKeys] = deferredReload;
         if (freshTodos === null || freshSceneKeys === null) return;
         mergedTodos = freshTodos;
         finalSceneKeys = freshSceneKeys;

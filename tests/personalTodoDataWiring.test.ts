@@ -336,6 +336,36 @@ test('commit during initial todo migration is folded into authoritative load and
   assert.equal(sceneKeySaves, 1, 'scene-key persistence must remain enabled after the deferred commit reload');
 });
 
+test('commit arriving during the final authoritative reload schedules one more reload before initialization finishes', async () => {
+  const { PersonalTodoLoadGate } = await import('../src/components/widgets/my-tasks/hooks/personalTodoLoadGate.ts');
+  const gate = new PersonalTodoLoadGate();
+  const initialToken = gate.beginInitialLoad();
+  let releaseFirstReload!: () => void;
+  const firstReloadGate = new Promise<void>((resolve) => { releaseFirstReload = resolve; });
+  let reloadCount = 0;
+
+  gate.noteAuthoritativeCommit();
+  const draining = gate.drainDeferredCommits(initialToken, async () => {
+    reloadCount++;
+    if (reloadCount === 1) await firstReloadGate;
+    return reloadCount;
+  });
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  gate.noteAuthoritativeCommit();
+  releaseFirstReload();
+
+  assert.equal(await draining, 2);
+  assert.equal(reloadCount, 2);
+  assert.equal(gate.finishInitialLoad(initialToken), true);
+});
+
+test('authoritative empty remote users never fall back to stale local users', async () => {
+  const { selectVisibleUsers } = await import('../src/services/userDirectoryPolicy.ts');
+  const localUsers = [{ id: 'local-alice', name: 'Local Alice' }];
+  const visible = selectVisibleUsers({ status: 'authoritative', users: [] }, localUsers);
+  assert.deepEqual(visible, []);
+});
+
 test('transient remote user outage cannot clear a verified canonical session', async () => {
   const { SessionManager } = await import('../electron/sessionManager.ts');
   const alice = { id: 'alice', name: 'Alice', password: 'secret', role: 'user' };

@@ -540,6 +540,11 @@ export interface UsersFile {
   users: AppUser[];
 }
 
+export interface PublicUserDirectory {
+  status: 'authoritative' | 'fallback' | 'remote-unavailable';
+  users: AppUser[];
+}
+
 export interface AuthSession {
   userId: string;
   userName: string;
@@ -1261,7 +1266,7 @@ export interface ElectronAPI {
   supabaseBulkDeleteScenes: (sceneUuids: string[], deletedBy: string) => Promise<BulkUpdateResult[]>;
   supabaseBulkUpdateSceneFields: (updates: BulkFieldUpdate[], updatedBy: string) => Promise<BulkUpdateResult[]>;
   supabaseUpdateSceneField: (sceneUuid: string, field: string, value: string, senderId?: string) => Promise<void>;
-  supabaseReadUsers: () => Promise<unknown[]>;
+  supabaseReadUsers: () => Promise<PublicUserDirectory>;
   supabaseAddUser: (user: unknown) => Promise<void>;
   supabaseUpdateUser: (userId: string, updates: Record<string, string | boolean | null>) => Promise<void>;
   supabaseDeleteUser: (userId: string) => Promise<void>;

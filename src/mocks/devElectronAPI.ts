@@ -772,13 +772,16 @@ export function installDevElectronAPI(): void {
     supabaseBulkDeleteScenes: async (sceneUuids) => sceneUuids.map((id) => ({ sceneUuid: id, success: true })),
     supabaseBulkUpdateSceneFields: async (updates) => updates.map((u) => ({ sceneUuid: u.sceneUuid, success: true })),
     supabaseUpdateSceneField: async () => {},
-    supabaseReadUsers: async () => getMockUsers().map(u => ({
-      id: u.id, name: u.name, slack_id: u.slackId,
-      is_initial_password: u.isInitialPassword,
-      created_at: u.createdAt, role: u.role,
-      is_compositor: u.isCompositor ?? false,
-      is_acting_supervisor: u.isActingSupervisor ?? false,
-    })),
+    supabaseReadUsers: async () => ({
+      status: 'authoritative',
+      users: getMockUsers().map(u => ({
+        id: u.id, name: u.name, slackId: u.slackId,
+        isInitialPassword: u.isInitialPassword,
+        createdAt: u.createdAt, role: u.role,
+        isCompositor: u.isCompositor ?? false,
+        isActingSupervisor: u.isActingSupervisor ?? false,
+      })),
+    }),
     supabaseAddUser: async () => {},
     supabaseUpdateUser: async (userId, updates) => {
       // role / boolean 토글 등을 mock 사용자 목록에 반영 (preview 검증용).

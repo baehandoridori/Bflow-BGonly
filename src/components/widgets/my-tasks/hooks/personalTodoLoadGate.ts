@@ -36,6 +36,14 @@ export class PersonalTodoLoadGate {
     return deferred;
   }
 
+  async drainDeferredCommits<T>(token: number, reload: () => Promise<T>): Promise<T | undefined> {
+    let latest: T | undefined;
+    while (this.consumeDeferredCommit(token)) {
+      latest = await reload();
+    }
+    return latest;
+  }
+
   isCurrent(token: number): boolean {
     return token === this.generation;
   }

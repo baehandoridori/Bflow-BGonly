@@ -13,6 +13,7 @@ import type {
   CharacterImageBackground, CharacterImageFit,
   CostumeActivityLogContext,
   CommentReadStateRow,
+  PublicUserDirectory,
 } from '../types';
 import { applyAssigneeProgressMetadata } from '../utils/assigneeProgress';
 import { normalizeCharacterImageBackground, normalizeCharacterImageFit } from '../utils/characterAssets';
@@ -210,7 +211,7 @@ export async function updateSceneFieldInSupabase(sceneUuid: string, field: strin
 
 // ─── Users ──────────────────────────────────────
 
-export async function readUsersFromSupabase(): Promise<unknown[]> {
+export async function readUsersFromSupabase(): Promise<PublicUserDirectory> {
   return window.electronAPI.supabaseReadUsers();
 }
 

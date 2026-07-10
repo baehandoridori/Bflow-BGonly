@@ -2132,7 +2132,10 @@ ipcMain.handle('supabase:mark-assignment-notification-read', wrapIpc(async (
 
 // ─── Users ───
 ipcMain.handle('supabase:read-users', wrapIpc(async () => {
-  return (await sbReadUsers()).map(sanitizePublicUser);
+  return {
+    status: 'authoritative',
+    users: (await sbReadUsers()).map(sanitizePublicUser),
+  };
 }));
 ipcMain.handle('supabase:add-user', wrapIpc(async (_e: unknown, user: SupabaseUser) => {
   await sbAddUser({ ...user, password: '1234', isInitialPassword: true });

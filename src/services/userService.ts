@@ -7,8 +7,9 @@
  * - 비밀번호 검증/변경은 메인 프로세스만 수행하며 렌더러 목록에는 노출하지 않음
  */
 
-import type { AppUser, AuthSession } from '@/types';
+import type { AppUser, AuthSession, PublicUserDirectory } from '@/types';
 import { createUuid } from '@/utils/createUuid';
+import { selectVisibleUsers } from './userDirectoryPolicy';
 
 // ─── 모드 관리 ──────────────────────────────────
 
@@ -34,12 +35,12 @@ const SEED_USER: AppUser = {
 // ─── 사용자 목록 ─────────────────────────────────
 
 export async function loadUsers(): Promise<AppUser[]> {
+  let remoteDirectory: PublicUserDirectory | null = null;
   if (sheetsMode) {
     try {
-      const rawUsers = await window.electronAPI.supabaseReadUsers();
-      const users = rawUsers as AppUser[];
-      if (users.length > 0) {
-        return users.map(u => ({
+      remoteDirectory = await window.electronAPI.supabaseReadUsers();
+      if (remoteDirectory.status === 'authoritative' || remoteDirectory.users.length > 0) {
+        return selectVisibleUsers(remoteDirectory, []).map(u => ({
           ...u,
           hireDate: u.hireDate || undefined,
           birthday: u.birthday || undefined,
@@ -55,7 +56,7 @@ export async function loadUsers(): Promise<AppUser[]> {
   try {
     const data = await window.electronAPI.usersRead();
     if (data && Array.isArray(data.users) && data.users.length > 0) {
-      return data.users;
+      return selectVisibleUsers(remoteDirectory, data.users);
     }
   } catch (err) {
     console.error('[사용자] 로드 실패:', err);
@@ -171,8 +172,8 @@ export async function setIsCompositor(
  * 어드민 섹션의 verify 단계에서만 사용 (일반 로딩은 loadUsers 그대로).
  */
 export async function fetchFreshUsersFromSupabase(): Promise<AppUser[]> {
-  const raw = await window.electronAPI.supabaseReadUsers();
-  const users = raw as AppUser[];
+  const directory = await window.electronAPI.supabaseReadUsers();
+  const users = directory.users;
   return users.map((u) => ({
     ...u,
     hireDate: u.hireDate || undefined,
@@ -254,7 +255,7 @@ export async function migrateUsersToSheets(): Promise<void> {
 
   try {
     // Supabase에 이미 사용자가 있는지 확인
-    const existingUsers = (await window.electronAPI.supabaseReadUsers()) as AppUser[];
+    const existingUsers = (await window.electronAPI.supabaseReadUsers()).users;
     if (existingUsers.length > 0) return; // 이미 있으면 무시
 
     // 로컬 사용자 로드
