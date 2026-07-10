@@ -31,6 +31,10 @@ export function makePersonalTodoMutationKey(kind: 'todo' | 'label' | 'order', id
   return `${kind}:${id}:${serial}`;
 }
 
+export function advancePersonalTodoSessionEpoch(previousUserId: string | null, nextUserId: string | null, epoch: number): number {
+  return previousUserId === nextUserId ? epoch : epoch + 1;
+}
+
 function parseArray(raw: string | null): unknown[] {
   if (!raw) return [];
   try { const value = JSON.parse(raw); return Array.isArray(value) ? value : []; } catch { return []; }
@@ -60,13 +64,14 @@ export function collectLegacyPersonalTodos(
   }
   sceneKeys.push(...parseArray(storage?.getItem(LEGACY_SCENE_KEYS_KEY) ?? null).filter((key): key is string => typeof key === 'string'));
 
-  const seen = new Set<string>();
+  const seenLegacyIds = new Set<string>();
   const todos: PersonalTodo[] = [];
   for (const raw of candidates) {
     const normalized = normalizePersonalTodo(raw);
+    const legacyId = normalized.id.trim();
+    if (legacyId && seenLegacyIds.has(legacyId)) continue;
+    if (legacyId) seenLegacyIds.add(legacyId);
     const id = isCanonicalPersonalTodoId(normalized.id) ? normalized.id : createUuid();
-    if (seen.has(id)) continue;
-    seen.add(id);
     todos.push({ ...normalized, id });
   }
   return { todos, sceneKeys: [...new Set(sceneKeys)] };

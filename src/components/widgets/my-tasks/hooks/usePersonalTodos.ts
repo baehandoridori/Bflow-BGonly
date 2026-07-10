@@ -13,6 +13,7 @@ import { applyPersonalTodoStatus, normalizePersonalTodo, splitPersonalTodos } fr
 import {
   clearLegacyPersonalTodoStorage,
   collectLegacyPersonalTodos,
+  advancePersonalTodoSessionEpoch,
   hasPersonalTodoMigrationRun,
   isPersonalTodoIntentCurrent,
   makePersonalTodoMutationKey,
@@ -183,7 +184,7 @@ export function usePersonalTodos(): UsePersonalTodosResult {
     const userId = currentUser?.id ?? null;
     const previousUserId = userIdRef.current;
     const generation = ++loadGenerationRef.current;
-    if (previousUserId !== userId) sessionEpochRef.current += 1;
+    sessionEpochRef.current = advancePersonalTodoSessionEpoch(previousUserId, userId, sessionEpochRef.current);
     userIdRef.current = userId;
     pendingIntentsRef.current.clear();
     mutationStateRef.current.pendingTodoIds.clear();
@@ -198,7 +199,6 @@ export function usePersonalTodos(): UsePersonalTodosResult {
     setSyncNeeded(false);
     setLoading(true);
     if (!userId) {
-      sessionEpochRef.current++;
       publishBaseline({ todos: [], labels: [] }, false);
       setLoading(false);
       return () => { disposed = true; };

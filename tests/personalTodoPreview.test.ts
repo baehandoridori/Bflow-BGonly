@@ -9,7 +9,7 @@ import {
   resetPersonalTodoPreview,
 } from '../src/mocks/personalTodoPreviewStore.ts';
 import { createPersonalTodo } from '../src/components/widgets/my-tasks/personalTodoDomain.ts';
-import { collectLegacyPersonalTodos, isCanonicalPersonalTodoId } from '../src/components/widgets/my-tasks/personalTodoMigration.ts';
+import { advancePersonalTodoSessionEpoch, collectLegacyPersonalTodos, isCanonicalPersonalTodoId } from '../src/components/widgets/my-tasks/personalTodoMigration.ts';
 import { isPersonalTodoIntentCurrent, makePersonalTodoMutationKey } from '../src/components/widgets/my-tasks/personalTodoMigration.ts';
 
 test('preview storage is isolated by canonical user and shared by windows', () => {
@@ -60,6 +60,14 @@ test('legacy migration converts non-UUID ids while preserving calendar fields', 
   );
 });
 
+test('legacy migration deduplicates the same non-UUID id before conversion', () => {
+  const storage = createMemoryStorage({
+    bflow_assigned_personal_todos: JSON.stringify([{ id: 'ptodo_same', title: 'assigned' }]),
+  });
+  const migration = collectLegacyPersonalTodos(storage, [{ personalTodos: [{ id: 'ptodo_same', title: 'view copy' }] }]);
+  assert.equal(migration.todos.length, 1);
+});
+
 test('stale mutation identity is rejected after session/generation changes', () => {
   assert.equal(isPersonalTodoIntentCurrent(
     { epoch: 1, userId: 'alice', generation: 3 },
@@ -98,6 +106,12 @@ test('empty global legacy storage does not mark a second user as migrated', () =
   const source = readFileSync('src/components/widgets/my-tasks/hooks/usePersonalTodos.ts', 'utf8');
   assert.match(source, /migration\.todos\.length === 0 && migration\.sceneKeys\.length === 0/);
   assert.match(source, /do not mark this user as migrated/i);
+});
+
+test('logout and re-login advance the session epoch exactly once per transition', () => {
+  const loggedOut = advancePersonalTodoSessionEpoch('alice', null, 1);
+  assert.equal(loggedOut, 2);
+  assert.equal(advancePersonalTodoSessionEpoch(null, 'alice', loggedOut), 3);
 });
 
 test('preview partial patches preserve omitted todo and calendar fields', () => {
