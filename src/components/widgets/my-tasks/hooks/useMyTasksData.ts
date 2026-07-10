@@ -14,9 +14,6 @@ import {
   SEQUENTIAL_STAGE_ORDER,
 } from '@/utils/sceneStageProgression';
 import {
-  updateEvent as updateCalEvent,
-  deleteEvent as deleteCalEvent,
-  addEvent as addCalEvent,
   findEventByTodoId,
 } from '@/services/calendarService';
 import * as supabaseService from '@/services/supabaseService';
@@ -497,33 +494,6 @@ export function useMyTasksData(isPopup: boolean): UseMyTasksDataResult {
     broadcastTodoChange();
   }, [assignedSceneKeys]);
 
-  useEffect(() => {
-    if (!_supabaseInitialized.current || !currentUser?.id) return;
-    if (_externalDepth.current > 0) return;
-    const userId = currentUser.id;
-    // assignedTodos 전체를 재저장 (순서 포함)
-    // 반환된 UUID가 기존 ID와 다르면 로컬 state 갱신 (ptodo_* → UUID 전환)
-    assignedTodos.forEach((todo, i) => {
-      saveTodoToSupabase(userId, todo, i).then((returnedId) => {
-        if (returnedId && returnedId !== todo.id) {
-          _pendingIdMap.current.set(todo.id, returnedId);
-          _externalDepth.current++;
-          setAssignedTodos((prev) =>
-            prev.map((t) => (t.id === todo.id ? { ...t, id: returnedId } : t)),
-          );
-          requestAnimationFrame(() => { _externalDepth.current = Math.max(0, _externalDepth.current - 1); });
-        }
-      }).catch((err) => {
-        const msg = String(err);
-        if (!msg.includes('foreign key constraint')) {
-          console.error('[MyTasks] 할일 저장 실패:', err);
-          toast.error(SAVE_FAIL_MESSAGE);
-        }
-      });
-    });
-    broadcastTodoChange();
-  }, [assignedTodos]);
-
   // 다른 창에서 할일이 변경되면 Supabase에서 다시 읽기
   useEffect(() => {
     const handler = () => {
@@ -732,61 +702,35 @@ export function useMyTasksData(isPopup: boolean): UseMyTasksDataResult {
 
   // ─── 개인 할일 조작 ─────────────────────
   const addPersonalTodo = useCallback(async (todo: PersonalTodo) => {
+    const today = new Date().toISOString().slice(0, 10);
+    const persistedTodo = todo.addToCalendar && !todo.startDate && !todo.endDate
+      ? { ...todo, startDate: today, endDate: today }
+      : todo;
     // _externalDepth 카운터로 useEffect 재저장 방지 (여기서 직접 저장하므로)
     _externalDepth.current++;
-    setAssignedTodos((prev) => [...prev, todo]);
+    setAssignedTodos((prev) => [...prev, persistedTodo]);
     requestAnimationFrame(() => { _externalDepth.current = Math.max(0, _externalDepth.current - 1); });
     // 다른 창에 할일 추가 알림 (effect가 _externalDepth로 스킵되므로 수동 호출)
     broadcastTodoChange();
     // Supabase 저장 (낙관적: 상태 반영 후 비동기 저장)
     if (currentUser?.id) {
-      saveTodoToSupabase(currentUser.id, todo, assignedTodos.length).then(async (returnedId) => {
-        if (returnedId && returnedId !== todo.id) {
+      saveTodoToSupabase(currentUser.id, persistedTodo, assignedTodos.length).then(async (returnedId) => {
+        if (returnedId && returnedId !== persistedTodo.id) {
           // 서버 응답 전에 이미 삭제되었으면 → 서버에서도 삭제
-          if (_deletedBeforeSync.current.has(todo.id)) {
-            _deletedBeforeSync.current.delete(todo.id);
+          if (_deletedBeforeSync.current.has(persistedTodo.id)) {
+            _deletedBeforeSync.current.delete(persistedTodo.id);
             deleteTodoFromSupabase(returnedId).catch(() => {});
             return;
           }
-          _pendingIdMap.current.set(todo.id, returnedId);
+          _pendingIdMap.current.set(persistedTodo.id, returnedId);
           _externalDepth.current++;
-          setAssignedTodos((prev) => prev.map((t) => t.id === todo.id ? { ...t, id: returnedId } : t));
+          setAssignedTodos((prev) => prev.map((t) => t.id === persistedTodo.id ? { ...t, id: returnedId } : t));
           requestAnimationFrame(() => { _externalDepth.current = Math.max(0, _externalDepth.current - 1); });
-          // 캘린더 이벤트의 linkedTodoId도 갱신 (old ID → new UUID)
-          if (todo.addToCalendar) {
-            try {
-              const calEvent = await findEventByTodoId(todo.id);
-              if (calEvent) {
-                await updateCalEvent(calEvent.id, { linkedTodoId: returnedId });
-              }
-            } catch { /* 캘린더 미연결 시 무시 */ }
-          }
         }
       }).catch((err) => {
         console.error('[MyTasks] 할일 추가 저장 실패:', err);
         toast.error(SAVE_FAIL_MESSAGE);
       });
-    }
-    // 캘린더 연동: addToCalendar가 true이고 날짜가 있으면 캘린더 이벤트 생성
-    if (todo.addToCalendar && (todo.startDate || todo.endDate)) {
-      try {
-        const startDate = todo.startDate || todo.endDate!;
-        const endDate = todo.endDate || todo.startDate!;
-        await addCalEvent({
-          id: `cal_${todo.id}`,
-          title: todo.title,
-          memo: todo.memo,
-          color: '#6C5CE7',
-          type: 'custom',
-          startDate,
-          endDate,
-          createdBy: currentUser?.name ?? '알 수 없음',
-          createdAt: new Date().toISOString(),
-          linkedTodoId: todo.id,
-        });
-      } catch (err) {
-        console.error('[MyTasks] 캘린더 이벤트 추가 실패:', err);
-      }
     }
   }, [assignedTodos, currentUser, broadcastTodoChange]);
 
@@ -827,12 +771,6 @@ export function useMyTasksData(isPopup: boolean): UseMyTasksDataResult {
         toast.error(SAVE_FAIL_MESSAGE);
       });
     }
-    // 캘린더 이벤트도 삭제 (없으면 no-op)
-    try {
-      await deleteCalEvent(`cal_${todoId}`);
-    } catch (err) {
-      console.error('[MyTasks] 캘린더 이벤트 삭제 실패:', err);
-    }
   }, [currentUser]);
 
   const reorderPendingTodos = useCallback((reordered: PersonalTodo[]) => {
@@ -844,12 +782,9 @@ export function useMyTasksData(isPopup: boolean): UseMyTasksDataResult {
     requestAnimationFrame(() => { _externalDepth.current = Math.max(0, _externalDepth.current - 1); });
     // Supabase: 순서 변경 저장 (debounce 없이 바로 저장)
     if (currentUser?.id) {
-      const userId = currentUser.id;
-      newList.forEach((todo, i) => {
-        saveTodoToSupabase(userId, todo, i).catch((err) => {
-          console.error('[MyTasks] 할일 순서 저장 실패:', err);
-          toast.error(SAVE_FAIL_MESSAGE);
-        });
+      supabaseService.mutatePersonalTodoOrder({ type: 'reorder' }, newList.map((todo) => todo.id)).catch((err) => {
+        console.error('[MyTasks] 할일 순서 저장 실패:', err);
+        toast.error(SAVE_FAIL_MESSAGE);
       });
     }
   }, [activePersonalTodos, currentUser]);
@@ -861,6 +796,11 @@ export function useMyTasksData(isPopup: boolean): UseMyTasksDataResult {
     if (!oldTodo) return;
 
     const newTodo = { ...oldTodo, ...updates };
+    if (newTodo.addToCalendar && !newTodo.startDate && !newTodo.endDate) {
+      const today = new Date().toISOString().slice(0, 10);
+      newTodo.startDate = today;
+      newTodo.endDate = today;
+    }
 
     // 낙관적 UI 업데이트 + Supabase 저장
     const updater = (todos: PersonalTodo[]) => todos.map((t) => t.id === todoId ? newTodo : t);
@@ -878,61 +818,6 @@ export function useMyTasksData(isPopup: boolean): UseMyTasksDataResult {
     });
     requestAnimationFrame(() => { _externalDepth.current = Math.max(0, _externalDepth.current - 1); });
 
-    // 캘린더 동기화
-    const calEventId = `cal_${todoId}`;
-    try {
-      if (updates.addToCalendar !== undefined) {
-        if (updates.addToCalendar && !oldTodo.addToCalendar) {
-          // 캘린더 연동 ON → 이벤트 생성 (날짜 없으면 오늘로 fallback + 할일에도 저장)
-          const todayStr = new Date().toISOString().slice(0, 10);
-          const startDate = newTodo.startDate || newTodo.endDate || todayStr;
-          const endDate = newTodo.endDate || newTodo.startDate || startDate;
-          if (!newTodo.startDate || !newTodo.endDate) {
-            // 할일 자체에도 fallback 날짜 저장
-            const dateUpdates: Partial<PersonalTodo> = {};
-            if (!newTodo.startDate) dateUpdates.startDate = startDate;
-            if (!newTodo.endDate) dateUpdates.endDate = endDate;
-            Object.assign(newTodo, dateUpdates);
-          }
-          await addCalEvent({
-            id: calEventId,
-            title: newTodo.title,
-            memo: newTodo.memo,
-            color: '#6C5CE7',
-            type: 'custom',
-            startDate,
-            endDate,
-            createdBy: currentUser?.name ?? '알 수 없음',
-            createdAt: new Date().toISOString(),
-            linkedTodoId: todoId,
-          });
-        } else if (!updates.addToCalendar && oldTodo.addToCalendar) {
-          // 캘린더 연동 OFF → 이벤트 삭제
-          await deleteCalEvent(calEventId);
-        }
-      } else if (newTodo.addToCalendar) {
-        // 날짜가 비워졌으면 캘린더 연동 해제
-        if (!newTodo.startDate && !newTodo.endDate) {
-          await deleteCalEvent(calEventId);
-          Object.assign(newTodo, { addToCalendar: false });
-        } else {
-          // addToCalendar이 이미 true인 상태에서 title/memo/date 변경 → 이벤트 업데이트
-          const calUpdates: Record<string, string> = {};
-          if (updates.title !== undefined) calUpdates.title = updates.title;
-          // 메모: 생성 시(addCalEvent의 memo: todo.memo)와 동일하게 raw 값 그대로 전달
-          if (updates.memo !== undefined) calUpdates.memo = updates.memo;
-          // 날짜: 비워진 경우 다른 쪽 날짜로 채움 (캘린더 이벤트는 항상 날짜 필요)
-          const todayFallback = new Date().toISOString().slice(0, 10);
-          if ('startDate' in updates) calUpdates.startDate = updates.startDate || newTodo.endDate || todayFallback;
-          if ('endDate' in updates) calUpdates.endDate = updates.endDate || newTodo.startDate || todayFallback;
-          if (Object.keys(calUpdates).length > 0) {
-            await updateCalEvent(calEventId, calUpdates);
-          }
-        }
-      }
-    } catch (err) {
-      console.error('[MyTasks] 캘린더 동기화 실패:', err);
-    }
   }, [assignedTodos, currentUser]);
 
   // ─── 캘린더 변경 리스너 (역방향 동기화) ─────────────────────
@@ -952,6 +837,13 @@ export function useMyTasksData(isPopup: boolean): UseMyTasksDataResult {
         for (const calEvent of linkedEvents) {
           const tid = calEvent.linkedTodoId!;
           setAssignedTodos((prev) => prev.map((t) => t.id === tid ? todoUpdater(t, calEvent) : t));
+          supabaseService.applyCalendarToTodoPatch(tid, {
+            title: calEvent.title,
+            memo: calEvent.memo,
+            startDate: calEvent.startDate,
+            endDate: calEvent.endDate,
+            addToCalendar: true,
+          }).catch(() => {});
         }
         return;
       }
@@ -980,10 +872,7 @@ export function useMyTasksData(isPopup: boolean): UseMyTasksDataResult {
         _externalDepth.current++;
         setAssignedTodos((prev) => {
           const newList = calUpdater(prev);
-          const updated = newList.find((t) => t.id === todoId);
-          if (updated && currentUser?.id) {
-            saveTodoToSupabase(currentUser.id, updated, newList.indexOf(updated)).catch(() => {});
-          }
+          supabaseService.applyCalendarToTodoPatch(todoId!, { addToCalendar: false }).catch(() => {});
           return newList;
         });
         requestAnimationFrame(() => { _externalDepth.current = Math.max(0, _externalDepth.current - 1); });
@@ -1004,10 +893,13 @@ export function useMyTasksData(isPopup: boolean): UseMyTasksDataResult {
           _externalDepth.current++;
           setAssignedTodos((prev) => {
             const newList = calUpdater(prev);
-            const updated = newList.find((t) => t.id === todoId);
-            if (updated && currentUser?.id) {
-              saveTodoToSupabase(currentUser.id, updated, newList.indexOf(updated)).catch(() => {});
-            }
+            supabaseService.applyCalendarToTodoPatch(todoId!, {
+              title: calEvent.title,
+              memo: calEvent.memo,
+              startDate: calEvent.startDate,
+              endDate: calEvent.endDate,
+              addToCalendar: true,
+            }).catch(() => {});
             return newList;
           });
           requestAnimationFrame(() => { _externalDepth.current = Math.max(0, _externalDepth.current - 1); });

@@ -11,8 +11,11 @@ test('renderer bridge does not accept user ownership input', () => {
 
 test('calendar reverse sync uses an allowlisted DB-only patch', () => {
   const source = readFileSync('src/views/ScheduleView.tsx', 'utf8');
+  const hook = readFileSync('src/components/widgets/my-tasks/hooks/useMyTasksData.ts', 'utf8');
   assert.match(source, /applyCalendarToTodoPatch/);
   assert.doesNotMatch(source, /readTodos\([\s\S]{0,900}upsertTodo/);
+  assert.match(hook, /applyCalendarToTodoPatch/);
+  assert.doesNotMatch(hook, /addEvent as addCalEvent/);
 });
 
 test('main personal todo safety boundaries are isolated into testable modules', () => {
