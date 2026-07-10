@@ -32,6 +32,8 @@ export interface SessionManagerDependencies {
   readRememberedSession(): Promise<RememberedAuthSession | null>;
   writeRememberedSession(session: RememberedAuthSession | null): Promise<void>;
   drainPersonalDataQueue(userId: string): Promise<void>;
+  beginPersonalDataTransition(userId: string, epoch: number): void;
+  endPersonalDataTransition(userId: string, epoch: number): void;
   flushCalendarJournal(): Promise<void>;
   setActivityUser(user: { id: string; name: string } | null): void;
   broadcast(payload: CanonicalSessionPayload): void;
@@ -80,12 +82,25 @@ export class SessionManager {
     return result;
   }
 
-  private async prepareTransition(nextUserId: string | null): Promise<void> {
+  private async prepareTransition(nextUserId: string | null): Promise<{ userId: string; epoch: number } | null> {
     const currentUserId = this.getCanonicalUserId();
     if (currentUserId && currentUserId !== nextUserId) {
-      await this.dependencies.drainPersonalDataQueue(currentUserId);
-      await this.dependencies.flushCalendarJournal();
+      const transition = { userId: currentUserId, epoch: this.getEpoch() };
+      this.dependencies.beginPersonalDataTransition(transition.userId, transition.epoch);
+      try {
+        await this.dependencies.drainPersonalDataQueue(currentUserId);
+        await this.dependencies.flushCalendarJournal();
+      } catch (error) {
+        this.dependencies.endPersonalDataTransition(transition.userId, transition.epoch);
+        throw error;
+      }
+      return transition;
     }
+    return null;
+  }
+
+  private finishTransition(transition: { userId: string; epoch: number } | null): void {
+    if (transition) this.dependencies.endPersonalDataTransition(transition.userId, transition.epoch);
   }
 
   private publish(user: SessionUserRecord | null, session: RememberedAuthSession | null): CanonicalSessionPayload {
@@ -108,14 +123,18 @@ export class SessionManager {
         if (user.password !== input.password) {
           return { ok: false, payload: this.getCurrentPayload(), error: '비밀번호가 일치하지 않습니다.' };
         }
-        await this.prepareTransition(user.id);
+        const transition = await this.prepareTransition(user.id);
         const session: RememberedAuthSession = {
           userId: user.id,
           userName: user.name,
           loggedInAt: new Date().toISOString(),
         };
-        await this.dependencies.writeRememberedSession(input.rememberMe === false ? null : session);
-        return { ok: true, payload: this.publish(user, session) };
+        try {
+          await this.dependencies.writeRememberedSession(input.rememberMe === false ? null : session);
+          return { ok: true, payload: this.publish(user, session) };
+        } finally {
+          this.finishTransition(transition);
+        }
       } catch (error) {
         return { ok: false, payload: this.getCurrentPayload(), error: errorMessage(error) };
       }
@@ -130,7 +149,10 @@ export class SessionManager {
         if (!remembered?.userId) return { ok: true, payload: this.getCurrentPayload() };
         const users = await this.dependencies.readUsers();
         const user = users.find((candidate) => candidate.id === remembered.userId);
-        if (!user) return { ok: false, payload: this.getCurrentPayload(), error: '저장된 사용자를 찾을 수 없습니다.' };
+        if (!user) {
+          await this.dependencies.writeRememberedSession(null);
+          return { ok: false, payload: this.getCurrentPayload(), error: '저장된 사용자를 찾을 수 없습니다.' };
+        }
         return { ok: true, payload: this.publish(user, remembered) };
       } catch (error) {
         return { ok: false, payload: this.getCurrentPayload(), error: errorMessage(error) };
@@ -146,9 +168,13 @@ export class SessionManager {
   logout(): Promise<SessionActionResult> {
     return this.serialize(async () => {
       try {
-        await this.prepareTransition(null);
-        await this.dependencies.writeRememberedSession(null);
-        return { ok: true, payload: this.publish(null, null) };
+        const transition = await this.prepareTransition(null);
+        try {
+          await this.dependencies.writeRememberedSession(null);
+          return { ok: true, payload: this.publish(null, null) };
+        } finally {
+          this.finishTransition(transition);
+        }
       } catch (error) {
         return { ok: false, payload: this.getCurrentPayload(), error: errorMessage(error) };
       }
@@ -163,9 +189,13 @@ export class SessionManager {
         const users = await this.dependencies.readUsers();
         const user = users.find((candidate) => candidate.id === currentId);
         if (!user) {
-          await this.prepareTransition(null);
-          await this.dependencies.writeRememberedSession(null);
-          return { ok: true, payload: this.publish(null, null) };
+          const transition = await this.prepareTransition(null);
+          try {
+            await this.dependencies.writeRememberedSession(null);
+            return { ok: true, payload: this.publish(null, null) };
+          } finally {
+            this.finishTransition(transition);
+          }
         }
         return { ok: true, payload: this.publish(user, this.payload.session) };
       } catch (error) {

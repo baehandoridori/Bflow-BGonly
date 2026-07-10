@@ -142,3 +142,78 @@ test('main wires the recovery journal and calendar worker into live todo intents
   assert.match(main, /personalTodoService\.waitForIdle\(15000\)/);
   assert.match(google, /id:\s*input\.id/);
 });
+
+test('committed-but-response-lost keeps the calendar intent and reconciles from owner-scoped read-back', async () => {
+  const { PersonalTodoService } = await import('../electron/personalTodoService.ts');
+  const todo = {
+    id: 'todo-1', userId: 'alice', title: 'before', memo: '', status: 'todo' as const,
+    completed: false, priority: 'none' as const, pinned: false, labelIds: [],
+    startDate: '2026-07-11', endDate: '2026-07-11', addToCalendar: true,
+    sortOrder: 0, createdAt: '1', updatedAt: '1',
+  };
+  let stored = { ...todo };
+  const calls: string[] = [];
+  const service = new PersonalTodoService({
+    getCanonicalSession: () => ({ userId: 'alice', epoch: 1 }),
+    persistence: {
+      readTodos: async () => [stored],
+      readTodo: async (userId, todoId) => userId === 'alice' && todoId === stored.id ? stored : null,
+      readLabels: async () => [],
+      patchTodo: async (_userId, _todoId, patch) => {
+        stored = { ...stored, ...patch, updatedAt: '2' };
+        throw Object.assign(new Error('connection lost after commit'), { code: 'ECONNRESET' });
+      },
+      mutateOrder: async () => [stored],
+      createOrReuseLabelAndAttach: async () => { throw new Error('unused'); },
+      updateLabel: async () => { throw new Error('unused'); },
+      readTaskViews: async () => null,
+      upsertTaskViews: async () => undefined,
+    },
+    calendar: {
+      receive: async () => ({ operationId: 'op-1' }),
+      receiveDeletion: async () => ({ operationId: 'op-delete' }),
+      markPrepared: async () => { calls.push('prepared'); },
+      markDbCommitted: async () => { calls.push('db-committed'); },
+      markDbDeleted: async () => { calls.push('db-deleted'); },
+      markUnknown: async () => { calls.push('unknown'); },
+      markAborted: async () => { calls.push('aborted'); },
+      flushJournal: async () => undefined,
+    },
+  });
+
+  const result = await service.patchTodo('todo-1', { title: 'after' }, 1);
+  assert.equal(result.ok, true);
+  assert.deepEqual(calls, ['prepared', 'db-committed']);
+});
+
+test('session transition closes old-user intake and suppresses results captured before the epoch change', async () => {
+  const { PersonalTodoService } = await import('../electron/personalTodoService.ts');
+  let session = { userId: 'alice' as string | null, epoch: 1 };
+  let releaseRead!: () => void;
+  const readGate = new Promise<void>((resolve) => { releaseRead = resolve; });
+  const service = new PersonalTodoService({
+    getCanonicalSession: () => session,
+    persistence: {
+      readTodos: async () => { await readGate; return []; },
+      readTodo: async () => null,
+      readLabels: async () => [],
+      patchTodo: async () => { throw new Error('unused'); },
+      mutateOrder: async () => [],
+      createOrReuseLabelAndAttach: async () => { throw new Error('unused'); },
+      updateLabel: async () => { throw new Error('unused'); },
+      readTaskViews: async () => null,
+      upsertTaskViews: async () => undefined,
+    },
+  });
+
+  const accepted = service.readTodos(1);
+  service.beginSessionTransition('alice', 1);
+  const rejectedDuringDrain = await service.readLabels(1);
+  assert.equal(rejectedDuringDrain.ok, false);
+  if (!rejectedDuringDrain.ok) assert.equal(rejectedDuringDrain.kind, 'stale');
+  session = { userId: 'bob', epoch: 2 };
+  releaseRead();
+  const staleResult = await accepted;
+  assert.equal(staleResult.ok, false);
+  if (!staleResult.ok) assert.equal(staleResult.kind, 'stale');
+});

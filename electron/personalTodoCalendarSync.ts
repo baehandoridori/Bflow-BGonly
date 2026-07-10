@@ -157,6 +157,11 @@ export class PersonalTodoCalendarSync {
     void this.enqueue(operationId).catch(() => { /* journal preserves the unresolved intent */ });
   }
 
+  async markUnknown(operationId: string): Promise<void> {
+    const entry = await this.dependencies.journal.get(operationId);
+    if (entry) await this.setUnknown(entry);
+  }
+
   async markAborted(operationId: string): Promise<void> {
     await this.dependencies.journal.updatePhase(operationId, 'aborted');
     await this.dependencies.journal.remove(operationId);

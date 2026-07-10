@@ -1620,6 +1620,8 @@ sessionManager = new SessionManager({
     } catch { return null; }
   },
   writeRememberedSession: writeRememberedAuthSession,
+  beginPersonalDataTransition: (userId, epoch) => personalTodoService.beginSessionTransition(userId, epoch),
+  endPersonalDataTransition: (userId, epoch) => personalTodoService.endSessionTransition(userId, epoch),
   drainPersonalDataQueue: (userId) => personalTodoService.drainUser(userId),
   flushCalendarJournal: () => personalTodoCalendarSync.flushJournal(),
   setActivityUser: setCanonicalActivityUser,

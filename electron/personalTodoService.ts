@@ -64,6 +64,7 @@ export type PersonalTodoFailureKind = 'rejected' | 'unknown' | 'stale' | 'quitti
 export type PersonalTodoApiResult<T> =
   | { ok: true; data: T }
   | { ok: false; kind: PersonalTodoFailureKind; code: string; message: string; retryable: boolean };
+type PersonalTodoApiFailure = Extract<PersonalTodoApiResult<never>, { ok: false }>;
 
 export interface PersonalTodoCommitPayload {
   userId: string;
@@ -91,6 +92,7 @@ export interface PersonalTodoCalendarCoordinator {
   markPrepared(operationId: string, previousCanonical: PersonalTodoRecord | null): Promise<void>;
   markDbCommitted(operationId: string, canonical: PersonalTodoRecord): Promise<void>;
   markDbDeleted(operationId: string, previousCanonical: PersonalTodoRecord): Promise<void>;
+  markUnknown(operationId: string): Promise<void>;
   markAborted(operationId: string): Promise<void>;
   flushJournal(): Promise<void>;
 }
@@ -206,7 +208,7 @@ class PersonalTodoIntentError extends Error {
   }
 }
 
-function failureResult(error: unknown): PersonalTodoApiResult<never> {
+function failureResult(error: unknown): PersonalTodoApiFailure {
   if (error instanceof PersonalTodoIntentError) {
     return { ok: false, kind: error.kind, code: error.code, message: error.message, retryable: error.kind !== 'rejected' };
   }
@@ -222,6 +224,16 @@ function failureResult(error: unknown): PersonalTodoApiResult<never> {
   return { ok: false, kind: 'unknown', code, message, retryable: true };
 }
 
+function isConfirmedRejection(error: unknown): boolean {
+  const result = failureResult(error);
+  return !result.ok && result.kind === 'rejected';
+}
+
+function todoMatchesPatch(todo: PersonalTodoRecord, patch: PersonalTodoPatch): boolean {
+  return Object.entries(patch).every(([key, value]) =>
+    (todo as unknown as Record<string, unknown>)[key] === value);
+}
+
 function groupRank(todo: Pick<PersonalTodoRecord, 'status' | 'pinned'>): number {
   if (todo.status === 'done') return 2;
   return todo.pinned ? 0 : 1;
@@ -232,6 +244,13 @@ function orderedIdsWithAdded(rows: PersonalTodoRecord[], input: PersonalTodoCrea
   const result: string[] = [];
   let inserted = false;
   for (const row of rows) {
+    if (row.id === input.id) {
+      if (!inserted) {
+        result.push(input.id);
+        inserted = true;
+      }
+      continue;
+    }
     const rank = groupRank(row);
     if (!inserted && rank > targetRank) {
       result.push(input.id);
@@ -258,10 +277,19 @@ export class PersonalTodoService {
   private quitting = false;
   private readonly dependencies: PersonalTodoServiceDependencies;
   private readonly intakesByUser = new Map<string, Set<Promise<unknown>>>();
+  private readonly transitioningSessions = new Set<string>();
 
   constructor(dependencies: PersonalTodoServiceDependencies) { this.dependencies = dependencies; }
 
   beginQuitting(): void { this.quitting = true; }
+
+  beginSessionTransition(userId: string, epoch: number): void {
+    this.transitioningSessions.add(`${userId}\u0000${epoch}`);
+  }
+
+  endSessionTransition(userId: string, epoch: number): void {
+    this.transitioningSessions.delete(`${userId}\u0000${epoch}`);
+  }
 
   private capture(expectedEpoch?: number): { userId: string; epoch: number } {
     if (this.quitting) throw new PersonalTodoIntentError('quitting', 'APP_QUITTING', 'App is quitting');
@@ -270,7 +298,17 @@ export class PersonalTodoService {
     if (expectedEpoch !== undefined && expectedEpoch !== session.epoch) {
       throw new PersonalTodoIntentError('stale', 'STALE_SESSION', 'Renderer session is stale');
     }
+    if (this.transitioningSessions.has(`${session.userId}\u0000${session.epoch}`)) {
+      throw new PersonalTodoIntentError('stale', 'SESSION_TRANSITIONING', 'Canonical session is transitioning');
+    }
     return { userId: session.userId, epoch: session.epoch };
+  }
+
+  private assertCurrent(captured: { userId: string; epoch: number }): void {
+    const current = this.dependencies.getCanonicalSession();
+    if (current.userId !== captured.userId || current.epoch !== captured.epoch) {
+      throw new PersonalTodoIntentError('stale', 'STALE_SESSION_RESULT', 'Result belongs to a previous canonical session');
+    }
   }
 
   private success<T>(data: T): PersonalTodoApiResult<T> { return { ok: true, data }; }
@@ -287,16 +325,22 @@ export class PersonalTodoService {
   }
 
   private read<T>(expectedEpoch: number | undefined, operation: (userId: string) => Promise<T>): Promise<PersonalTodoApiResult<T>> {
-    let captured: { userId: string };
+    let captured: { userId: string; epoch: number };
     try { captured = this.capture(expectedEpoch); } catch (error) { return Promise.resolve(failureResult(error)); }
-    return operation(captured.userId).then((data) => this.success(data), failureResult);
+    return operation(captured.userId).then((data) => {
+      this.assertCurrent(captured);
+      return this.success(data);
+    }).catch(failureResult);
   }
 
   private mutate<T>(expectedEpoch: number | undefined, operation: (userId: string) => Promise<T>): Promise<PersonalTodoApiResult<T>> {
-    let captured: { userId: string };
+    let captured: { userId: string; epoch: number };
     try { captured = this.capture(expectedEpoch); } catch (error) { return Promise.resolve(failureResult(error)); }
     const queued = this.queue.enqueue(captured.userId, () => operation(captured.userId));
-    return this.pending.track(queued).then((data) => this.success(data), failureResult);
+    return this.pending.track(queued).then((data) => {
+      this.assertCurrent(captured);
+      return this.success(data);
+    }).catch(failureResult);
   }
 
   readTodos(expectedEpoch?: number): Promise<PersonalTodoApiResult<PersonalTodoRecord[]>> {
@@ -338,7 +382,20 @@ export class PersonalTodoService {
         this.dependencies.onCommit?.({ userId, kind: 'todos', todos: canonical });
         return canonical;
       } catch (error) {
-        if (operationId) await this.dependencies.calendar!.markAborted(operationId);
+        if (operationId) {
+          if (isConfirmedRejection(error)) {
+            await this.dependencies.calendar!.markAborted(operationId);
+          } else {
+            const readBack = await this.dependencies.persistence.readTodo(userId, input.id).catch(() => null);
+            if (readBack && todoMatchesPatch(readBack, mutation.todo)) {
+              await this.dependencies.calendar!.markDbCommitted(operationId, readBack);
+              const canonical = await this.dependencies.persistence.readTodos(userId).catch(() => [readBack]);
+              this.dependencies.onCommit?.({ userId, kind: 'todos', todos: canonical });
+              return canonical;
+            }
+            await this.dependencies.calendar!.markUnknown(operationId);
+          }
+        }
         throw error;
       }
     });
@@ -347,7 +404,7 @@ export class PersonalTodoService {
   patchTodo(todoId: string, patch: PersonalTodoPatch, expectedEpoch?: number): Promise<PersonalTodoApiResult<PersonalTodoRecord>> {
     let validated: PersonalTodoPatch;
     try { validated = validatePersonalTodoPatch(patch); } catch (error) { return Promise.resolve(failureResult(new PersonalTodoIntentError('rejected', 'INVALID_PATCH', String(error)))); }
-    let captured: { userId: string };
+    let captured: { userId: string; epoch: number };
     try { captured = this.capture(expectedEpoch); } catch (error) { return Promise.resolve(failureResult(error)); }
     const intake = (async () => {
       const operation = this.dependencies.calendar
@@ -363,12 +420,27 @@ export class PersonalTodoService {
           this.dependencies.onCommit?.({ userId: captured.userId, kind: 'todo', todo: canonical });
           return canonical;
         } catch (error) {
-          if (operation) await this.dependencies.calendar!.markAborted(operation.operationId);
+          if (operation) {
+            if (isConfirmedRejection(error)) {
+              await this.dependencies.calendar!.markAborted(operation.operationId);
+            } else {
+              const readBack = await this.dependencies.persistence.readTodo(captured.userId, todoId).catch(() => null);
+              if (readBack && todoMatchesPatch(readBack, validated)) {
+                await this.dependencies.calendar!.markDbCommitted(operation.operationId, readBack);
+                this.dependencies.onCommit?.({ userId: captured.userId, kind: 'todo', todo: readBack });
+                return readBack;
+              }
+              await this.dependencies.calendar!.markUnknown(operation.operationId);
+            }
+          }
           throw error;
         }
       });
     })();
-    return this.trackUserIntake(captured.userId, intake).then((data) => this.success(data), failureResult);
+    return this.trackUserIntake(captured.userId, intake).then((data) => {
+      this.assertCurrent(captured);
+      return this.success(data);
+    }).catch(failureResult);
   }
 
   applyCalendarPatch(todoId: string, patch: CalendarTodoPatch, expectedEpoch?: number): Promise<PersonalTodoApiResult<PersonalTodoRecord>> {
@@ -390,7 +462,7 @@ export class PersonalTodoService {
   }
 
   deleteTodo(todoId: string, expectedEpoch?: number): Promise<PersonalTodoApiResult<PersonalTodoRecord[]>> {
-    let captured: { userId: string };
+    let captured: { userId: string; epoch: number };
     try { captured = this.capture(expectedEpoch); } catch (error) { return Promise.resolve(failureResult(error)); }
     const intake = (async () => {
       const operation = this.dependencies.calendar
@@ -411,12 +483,28 @@ export class PersonalTodoService {
           this.dependencies.onCommit?.({ userId: captured.userId, kind: 'todos', todos: canonical });
           return canonical;
         } catch (error) {
-          if (operation) await this.dependencies.calendar!.markAborted(operation.operationId);
+          if (operation) {
+            if (isConfirmedRejection(error)) {
+              await this.dependencies.calendar!.markAborted(operation.operationId);
+            } else {
+              const readBack = await this.dependencies.persistence.readTodo(captured.userId, todoId).catch(() => previous);
+              if (!readBack && previous) {
+                await this.dependencies.calendar!.markDbDeleted(operation.operationId, previous);
+                const canonical = current.filter((todo) => todo.id !== todoId);
+                this.dependencies.onCommit?.({ userId: captured.userId, kind: 'todos', todos: canonical });
+                return canonical;
+              }
+              await this.dependencies.calendar!.markUnknown(operation.operationId);
+            }
+          }
           throw error;
         }
       });
     })();
-    return this.trackUserIntake(captured.userId, intake).then((data) => this.success(data), failureResult);
+    return this.trackUserIntake(captured.userId, intake).then((data) => {
+      this.assertCurrent(captured);
+      return this.success(data);
+    }).catch(failureResult);
   }
 
   createOrReuseLabelAndAttach(input: { todoId: string; name: string; colorKey: PersonalTodoLabelColorKey }, expectedEpoch?: number) {
