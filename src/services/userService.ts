@@ -4,13 +4,11 @@
  * Phase 0-4: Google Sheets _USERS 탭 동기화
  * - 시트 연결 시: _USERS 탭에서 읽기/쓰기
  * - 미연결 시: 로컬 users.dat 폴백
- * - 비밀번호: Base64 인코딩 (양방향 — 비밀번호 찾기 가능)
+ * - 비밀번호 검증/변경은 메인 프로세스만 수행하며 렌더러 목록에는 노출하지 않음
  */
 
-import type { AppUser, UsersFile, AuthSession } from '@/types';
+import type { AppUser, AuthSession } from '@/types';
 import { createUuid } from '@/utils/createUuid';
-
-const DEFAULT_PASSWORD = '1234';
 
 // ─── 모드 관리 ──────────────────────────────────
 
@@ -21,15 +19,13 @@ export function setUsersSheetsMode(enabled: boolean): void {
 }
 
 // ─── 최초 사용자 (파일이 없을 때 자동 시드) ────
-// 비밀번호는 코드에 하드코딩하지 않는다 (production 번들에 평문 노출 방지).
-// 빈 사용자 목록에서 시드되더라도 빈 password 로는 로그인 매칭 불가 → Supabase Studio 에서 별도 설정.
-// 실 운영은 Supabase 사용자 row 가 살아있어 이 시드 fallback 자체가 거의 호출되지 않으므로 영향 없음.
+// 실 운영은 Supabase 사용자 row가 기준이며, 이 객체는 목록 표시용 fallback일 뿐
+// 로그인 자격 증명을 만들거나 변경하지 않는다.
 
 const SEED_USER: AppUser = {
   id: '00000000-0000-0000-0000-000000000001',
   name: '배한솔',
   slackId: 'U05DFV9UAN5',
-  password: '',
   isInitialPassword: true,
   createdAt: '2025-01-01T00:00:00.000Z',
   role: 'admin',
@@ -65,14 +61,7 @@ export async function loadUsers(): Promise<AppUser[]> {
     console.error('[사용자] 로드 실패:', err);
   }
   // 파일 없거나 비어있으면 최초 사용자 시드
-  const seeded = [{ ...SEED_USER }];
-  await saveUsers(seeded);
-  return seeded;
-}
-
-export async function saveUsers(users: AppUser[]): Promise<void> {
-  const data: UsersFile = { users };
-  await window.electronAPI.usersWrite(data);
+  return [{ ...SEED_USER }];
 }
 
 export async function addUser(
@@ -83,7 +72,6 @@ export async function addUser(
     id: createUuid(),
     name,
     slackId,
-    password: DEFAULT_PASSWORD,
     isInitialPassword: true,
     createdAt: new Date().toISOString(),
     hireDate,
@@ -94,32 +82,25 @@ export async function addUser(
   if (sheetsMode) {
     try {
       await window.electronAPI.supabaseAddUser(newUser);
+      return newUser;
     } catch (err) {
-      console.error('[사용자] 시트 추가 실패:', err);
+      console.error('[사용자] 시트 추가 실패, 로컬 폴백:', err);
     }
-    // 시트에서 다시 로드하여 로컬에 동기화 (중복 방지)
-    const users = await loadUsers();
-    await saveUsers(users);
-    return newUser;
   }
 
-  // 로컬 전용 모드
-  const users = await loadUsers();
-  users.push(newUser);
-  await saveUsers(users);
-  return newUser;
+  return window.electronAPI.createLocalUser({ name, slackId, hireDate, birthday });
 }
 
 export async function deleteUser(userId: string): Promise<void> {
   if (sheetsMode) {
     try {
       await window.electronAPI.supabaseDeleteUser(userId);
+      return;
     } catch (err) {
-      console.error('[사용자] 시트 삭제 실패:', err);
+      console.error('[사용자] 시트 삭제 실패, 로컬 폴백:', err);
     }
   }
-  const users = await loadUsers();
-  await saveUsers(users.filter((u) => u.id !== userId));
+  await window.electronAPI.deleteLocalUser(userId);
 }
 
 export async function changePassword(
@@ -127,28 +108,8 @@ export async function changePassword(
   currentPw: string,
   newPw: string
 ): Promise<{ ok: boolean; error?: string }> {
-  const users = await loadUsers();
-  const user = users.find((u) => u.id === userId);
-  if (!user) return { ok: false, error: '사용자를 찾을 수 없습니다.' };
-  if (user.password !== currentPw) return { ok: false, error: '현재 비밀번호가 일치하지 않습니다.' };
-
-  user.password = newPw;
-  user.isInitialPassword = false;
-  await saveUsers(users);
-
-  // 시트에도 반영
-  if (sheetsMode) {
-    try {
-      await window.electronAPI.supabaseUpdateUser(userId, {
-        password: newPw,
-        isInitialPassword: 'false',
-      });
-    } catch (err) {
-      console.error('[사용자] 시트 비밀번호 변경 실패:', err);
-    }
-  }
-
-  return { ok: true };
+  void userId;
+  return window.electronAPI.changeOwnPassword({ currentPassword: currentPw, newPassword: newPw });
 }
 
 // ─── 로그인 / 세션 (APPDATA 로컬) ───────────
@@ -161,7 +122,7 @@ export async function login(
   const result = await window.electronAPI.loginCanonicalSession({ name, password, rememberMe });
   const user = result.payload.user;
   return result.ok && user
-    ? { ok: true, user: { ...user, password: '' } as AppUser }
+    ? { ok: true, user }
     : { ok: false, error: result.error ?? '로그인에 실패했습니다.' };
 }
 
@@ -176,7 +137,7 @@ export async function loadSession(): Promise<{ session: AuthSession | null; user
   if (!result.ok || !user) return { session: null, user: null };
   return {
     session: result.payload.session,
-    user: { ...user, password: '' } as AppUser,
+    user,
   };
 }
 

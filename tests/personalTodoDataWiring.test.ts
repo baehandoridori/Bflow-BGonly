@@ -186,6 +186,44 @@ test('committed-but-response-lost keeps the calendar intent and reconciles from 
   assert.deepEqual(calls, ['prepared', 'db-committed']);
 });
 
+test('delete committed before response loss still advances the linked calendar deletion', async () => {
+  const { PersonalTodoService } = await import('../electron/personalTodoService.ts');
+  const todo = {
+    id: 'todo-delete', userId: 'alice', title: 'delete me', memo: '', status: 'todo' as const,
+    completed: false, priority: 'none' as const, pinned: false, labelIds: [],
+    startDate: '2026-07-11', endDate: '2026-07-11', addToCalendar: true,
+    sortOrder: 0, createdAt: '1', updatedAt: '1',
+  };
+  let stored: typeof todo | null = todo;
+  const calls: string[] = [];
+  const service = new PersonalTodoService({
+    getCanonicalSession: () => ({ userId: 'alice', epoch: 1 }),
+    persistence: {
+      readTodos: async () => stored ? [stored] : [], readTodo: async () => stored,
+      readLabels: async () => [], patchTodo: async () => { throw new Error('unused'); },
+      mutateOrder: async () => {
+        stored = null;
+        throw Object.assign(new Error('connection lost after delete'), { code: 'ECONNRESET' });
+      },
+      createOrReuseLabelAndAttach: async () => { throw new Error('unused'); },
+      updateLabel: async () => { throw new Error('unused'); }, readTaskViews: async () => null,
+      upsertTaskViews: async () => undefined,
+    },
+    calendar: {
+      receive: async () => ({ operationId: 'unused' }),
+      receiveDeletion: async () => ({ operationId: 'op-delete' }),
+      markPrepared: async () => { calls.push('prepared'); },
+      markDbCommitted: async () => { calls.push('db-committed'); },
+      markDbDeleted: async () => { calls.push('db-deleted'); },
+      markUnknown: async () => { calls.push('unknown'); },
+      markAborted: async () => { calls.push('aborted'); }, flushJournal: async () => undefined,
+    },
+  });
+  const result = await service.deleteTodo(todo.id, 1);
+  assert.equal(result.ok, true);
+  assert.deepEqual(calls, ['prepared', 'db-deleted']);
+});
+
 test('session transition closes old-user intake and suppresses results captured before the epoch change', async () => {
   const { PersonalTodoService } = await import('../electron/personalTodoService.ts');
   let session = { userId: 'alice' as string | null, epoch: 1 };
@@ -216,4 +254,69 @@ test('session transition closes old-user intake and suppresses results captured 
   const staleResult = await accepted;
   assert.equal(staleResult.ok, false);
   if (!staleResult.ok) assert.equal(staleResult.kind, 'stale');
+});
+
+test('create retry keeps each todo id exactly once in the authoritative order', async () => {
+  const { PersonalTodoService } = await import('../electron/personalTodoService.ts');
+  const existing = {
+    id: 'same-id', userId: 'alice', title: 'already committed', memo: '', status: 'todo' as const,
+    completed: false, priority: 'none' as const, pinned: false, labelIds: [], startDate: null,
+    endDate: null, addToCalendar: false, sortOrder: 0, createdAt: '1', updatedAt: '1',
+  };
+  let orderedIds: string[] = [];
+  const service = new PersonalTodoService({
+    getCanonicalSession: () => ({ userId: 'alice', epoch: 1 }),
+    persistence: {
+      readTodos: async () => [existing], readTodo: async () => existing, readLabels: async () => [],
+      patchTodo: async () => existing,
+      mutateOrder: async (_userId, _mutation, ids) => { orderedIds = ids; return [existing]; },
+      createOrReuseLabelAndAttach: async () => { throw new Error('unused'); },
+      updateLabel: async () => { throw new Error('unused'); }, readTaskViews: async () => null,
+      upsertTaskViews: async () => undefined,
+    },
+  });
+  await service.createTodo({ id: 'same-id', title: 'retry' }, 1);
+  assert.deepEqual(orderedIds, ['same-id']);
+});
+
+test('dev preview canonical login restore and logout are functional and password-free', () => {
+  const source = readFileSync('src/mocks/devElectronAPI.ts', 'utf8');
+  assert.doesNotMatch(source, /preview session unavailable/);
+  assert.match(source, /loginCanonicalSession:[\s\S]{0,1000}input\.password/);
+  assert.match(source, /restoreCanonicalSession:[\s\S]{0,500}previewCanonical/);
+  assert.match(source, /logoutCanonicalSession:[\s\S]{0,500}previewCanonical/);
+});
+
+test('public renderer user reads and contracts never expose or replace plaintext passwords', () => {
+  const preload = readFileSync('electron/preload.ts', 'utf8');
+  const types = readFileSync('src/types/index.ts', 'utf8');
+  const main = readFileSync('electron/main.ts', 'utf8');
+  const appUser = types.slice(types.indexOf('export interface AppUser'), types.indexOf('export interface AuthSession'));
+  assert.doesNotMatch(appUser, /password\s*:/);
+  assert.doesNotMatch(preload, /usersWrite:/);
+  assert.match(main, /sanitizePublicUser/);
+  assert.match(preload, /changeOwnPassword/);
+});
+
+test('my tasks consumes main personal-todo commits and cancels stale session loads', () => {
+  const hook = readFileSync('src/components/widgets/my-tasks/hooks/useMyTasksData.ts', 'utf8');
+  assert.match(hook, /onPersonalTodoCommit/);
+  assert.match(hook, /loadGenerationRef/);
+  assert.match(hook, /payload\.userId[^\n]*currentUser/);
+});
+
+test('calendar recovery searches both previous and current candidate calendars', () => {
+  const sync = readFileSync('electron/personalTodoCalendarSync.ts', 'utf8');
+  const main = readFileSync('electron/main.ts', 'utf8');
+  assert.match(sync, /resolveCandidateCalendarIds/);
+  assert.match(sync, /candidateSourceCalendarIds/);
+  assert.match(main, /resolveCandidateCalendarIds:[\s\S]{0,700}listCalendars/);
+});
+
+test('user profile mutations refresh and broadcast the canonical main-owned profile', () => {
+  const main = readFileSync('electron/main.ts', 'utf8');
+  const userService = readFileSync('src/services/userService.ts', 'utf8');
+  assert.match(main, /supabase:update-user[\s\S]{0,500}refreshCurrentUser/);
+  assert.match(main, /auth:change-own-password[\s\S]{0,2500}refreshCurrentUser/);
+  assert.match(userService, /changeOwnPassword/);
 });

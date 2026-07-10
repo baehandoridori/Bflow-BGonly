@@ -41,7 +41,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
 
   // 사용자 파일 (base64 인코딩 JSON — exe 옆 또는 test-data/)
   usersRead: () => ipcRenderer.invoke('users:read'),
-  usersWrite: (data: unknown) => ipcRenderer.invoke('users:write', data),
+  createLocalUser: (input: { name: string; slackId: string; hireDate?: string; birthday?: string }) =>
+    ipcRenderer.invoke('users:create', input),
+  deleteLocalUser: (userId: string) => ipcRenderer.invoke('users:delete', userId),
 
   // 개인 설정 (AppData)
   readSettings: (fileName: string) => ipcRenderer.invoke('settings:read', fileName),
@@ -303,6 +305,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.invoke('auth:logout-session').then(rememberSessionEpoch),
   refreshCanonicalUser: () =>
     ipcRenderer.invoke('auth:refresh-canonical-user').then(rememberSessionEpoch),
+  changeOwnPassword: (input: { currentPassword: string; newPassword: string }) =>
+    ipcRenderer.invoke('auth:change-own-password', input),
   readPersonalTodos: () => ipcRenderer.invoke('personal-todo:read', canonicalSessionEpoch),
   readPersonalTodoLabels: () => ipcRenderer.invoke('personal-todo:read-labels', canonicalSessionEpoch),
   createPersonalTodo: (input: PersonalTodoCreateInput) => ipcRenderer.invoke('personal-todo:create', input, canonicalSessionEpoch),

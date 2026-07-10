@@ -389,6 +389,7 @@ export function useMyTasksData(isPopup: boolean): UseMyTasksDataResult {
 
   const stageSaveQueueRef = useRef<Map<string, Promise<void>>>(new Map());
   const stageSaveBaselineRef = useRef<Map<string, StageSaveBaseline>>(new Map());
+  const loadGenerationRef = useRef(0);
 
   // 데이터 변경 알림: 팝업에서는 쿨다운 래퍼, 대시보드에서는 직접 호출
   const notifyChange = useCallback(async () => {
@@ -442,6 +443,7 @@ export function useMyTasksData(isPopup: boolean): UseMyTasksDataResult {
   // Supabase 초기화: 마이그레이션 후 데이터 로드
   useEffect(() => {
     if (!currentUser?.id) return;
+    const loadGeneration = ++loadGenerationRef.current;
     // 사용자 전환 시 이전 사용자 상태가 새 사용자 ID로 저장되는 것을 방지
     // save effect가 로드 완료 전에 실행되지 않도록 초기화 플래그를 즉시 해제
     _supabaseInitialized.current = false;
@@ -464,6 +466,7 @@ export function useMyTasksData(isPopup: boolean): UseMyTasksDataResult {
       // (DB 쓰기는 await로 먼저 끝내고, 합친 결과를 아래 가드 안에서 한 번에 setState)
       // 읽기 실패 등 안전 스킵이 필요하면 null → 기존 로드값을 그대로 사용(기존 데이터 보호).
       const migrationResult = await migrateCustomViewTodosToAssigned(userId, todos);
+      if (loadGeneration !== loadGenerationRef.current || useAuthStore.getState().currentUser?.id !== userId) return;
       const mergedTodos = migrationResult && migrationResult.todos.length > 0
         ? [...todos, ...migrationResult.todos]
         : todos;
@@ -477,6 +480,7 @@ export function useMyTasksData(isPopup: boolean): UseMyTasksDataResult {
         _supabaseInitialized.current = true;
       });
     })();
+    return () => { loadGenerationRef.current++; };
   }, [currentUser?.id]);
 
   // Supabase 저장: 씬키 변경 시 Supabase에 반영
@@ -499,11 +503,16 @@ export function useMyTasksData(isPopup: boolean): UseMyTasksDataResult {
     const handler = () => {
       if (!currentUser?.id) return;
       const userId = currentUser.id;
+      const loadGeneration = ++loadGenerationRef.current;
       _externalDepth.current++;
       Promise.all([
         loadTodosFromSupabase(userId),
         loadAssignedSceneKeysFromSupabase(userId),
       ]).then(([todos, sceneKeys]) => {
+        if (loadGeneration !== loadGenerationRef.current || useAuthStore.getState().currentUser?.id !== userId) {
+          _externalDepth.current = Math.max(0, _externalDepth.current - 1);
+          return;
+        }
         if (todos === null || sceneKeys === null) {
           console.warn('[MyTasks] 크로스 창 리로드 실패 — 서버 데이터 덮어쓰기 방지를 위해 상태 갱신 건너뜀');
           _externalDepth.current = Math.max(0, _externalDepth.current - 1);
@@ -520,9 +529,16 @@ export function useMyTasksData(isPopup: boolean): UseMyTasksDataResult {
         handler();
       }
     });
+    const commitCleanup = window.electronAPI?.onPersonalTodoCommit?.((rawPayload) => {
+      const payload = rawPayload as { userId?: string };
+      if (payload.userId !== currentUser?.id) return;
+      handler();
+    });
     return () => {
+      loadGenerationRef.current++;
       window.removeEventListener('bflow:todos-changed', handler);
       ipcCleanup?.();
+      commitCleanup?.();
     };
   }, [currentUser?.id]);
 

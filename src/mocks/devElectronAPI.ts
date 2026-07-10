@@ -16,7 +16,9 @@ import {
 import { normalizeSceneIdKey } from '@/utils/sceneIdKey';
 import { createUuid } from '@/utils/createUuid';
 
-const MOCK_USERS: AppUser[] = [
+type PreviewUser = AppUser & { password: string };
+
+const MOCK_USERS: PreviewUser[] = [
   { id: '1', name: '배한솔', slackId: 'U05DFV9UAN5', password: '1234', isInitialPassword: false, createdAt: '2025-01-01T00:00:00Z', role: 'admin' },
   { id: '2', name: '장삐쭈', slackId: 'U03MM2C4F4Z', password: '1234', isInitialPassword: true, createdAt: '2025-01-01T00:00:00Z', role: 'user' },
   { id: '3', name: '허혜원', slackId: 'U03M1Q37LDU', password: '1234', isInitialPassword: true, createdAt: '2025-01-01T00:00:00Z', role: 'user' },
@@ -36,9 +38,24 @@ const localStore: Record<string, unknown> = {};
 const COMMENTS_FILE = 'comments.json';
 
 /** 변경 가능한 mock 사용자 목록 — role 토글 등 update 를 반영하기 위해 MOCK_USERS 복제본 사용. */
-function getMockUsers(): AppUser[] {
-  return (localStore.__users as AppUser[] | undefined)
-    ?? (localStore.__users = MOCK_USERS.map((u) => ({ ...u }))) as AppUser[];
+function getMockUsers(): PreviewUser[] {
+  return (localStore.__users as PreviewUser[] | undefined)
+    ?? (localStore.__users = MOCK_USERS.map((u) => ({ ...u }))) as PreviewUser[];
+}
+
+let previewCanonicalUserId: string | null = null;
+let previewCanonicalEpoch = 0;
+let previewRememberedUserId: string | null = null;
+
+function previewCanonicalPayload() {
+  const source = previewCanonicalUserId ? getMockUsers().find((user) => user.id === previewCanonicalUserId) : null;
+  if (!source) return { user: null, session: null, epoch: previewCanonicalEpoch };
+  const { password: _password, ...user } = source;
+  return {
+    user,
+    session: { userId: user.id, userName: user.name, loggedInAt: new Date().toISOString() },
+    epoch: previewCanonicalEpoch,
+  };
 }
 
 const noop = () => () => {};
@@ -164,7 +181,7 @@ const activityRealtimeCallbacks = new Set<(row: MockActivityRow) => void>();
 
 export function hasUsableElectronAPI(api: Partial<ElectronAPI> | undefined): boolean {
   return typeof api?.usersRead === 'function'
-    && typeof api?.usersWrite === 'function'
+    && typeof api?.createLocalUser === 'function'
     && typeof api?.readSettings === 'function'
     && typeof api?.writeSettings === 'function'
     && typeof api?.supabaseTestConnection === 'function'
@@ -567,11 +584,22 @@ export function installDevElectronAPI(): void {
     usersRead: async () => ({
       users: getMockUsers().map(u => ({
         id: u.id, name: u.name, slackId: u.slackId,
-        password: u.password, isInitialPassword: u.isInitialPassword,
+        isInitialPassword: u.isInitialPassword,
         createdAt: u.createdAt, role: u.role,
       })),
     }),
-    usersWrite: async () => true,
+    createLocalUser: async (input) => {
+      const user: PreviewUser = {
+        id: createUuid(), ...input, password: '1234', isInitialPassword: true,
+        createdAt: new Date().toISOString(), role: 'user',
+      };
+      getMockUsers().push(user);
+      const { password: _password, ...publicUser } = user;
+      return publicUser;
+    },
+    deleteLocalUser: async (userId) => {
+      localStore.__users = getMockUsers().filter((user) => user.id !== userId);
+    },
 
     readSettings: async (fileName: string) => localStore[fileName] ?? null,
     writeSettings: async (fileName: string, data: unknown) => { localStore[fileName] = data; return true; },
@@ -746,7 +774,7 @@ export function installDevElectronAPI(): void {
     supabaseUpdateSceneField: async () => {},
     supabaseReadUsers: async () => getMockUsers().map(u => ({
       id: u.id, name: u.name, slack_id: u.slackId,
-      password: u.password, is_initial_password: u.isInitialPassword,
+      is_initial_password: u.isInitialPassword,
       created_at: u.createdAt, role: u.role,
       is_compositor: u.isCompositor ?? false,
       is_acting_supervisor: u.isActingSupervisor ?? false,
@@ -1014,11 +1042,42 @@ export function installDevElectronAPI(): void {
     onSupabaseBroadcast: noop,
 
     // ─── Personal Todos / Task Views mock ───
-    ensureCanonicalSession: async () => ({ ok: true, payload: { user: null, session: null, epoch: 0 } }),
-    loginCanonicalSession: async () => ({ ok: false, payload: { user: null, session: null, epoch: 0 }, error: 'preview session unavailable' }),
-    restoreCanonicalSession: async () => ({ ok: true, payload: { user: null, session: null, epoch: 0 } }),
-    logoutCanonicalSession: async () => ({ ok: true, payload: { user: null, session: null, epoch: 0 } }),
-    refreshCanonicalUser: async () => ({ ok: true, payload: { user: null, session: null, epoch: 0 } }),
+    ensureCanonicalSession: async () => {
+      if (!previewCanonicalUserId && previewRememberedUserId) previewCanonicalUserId = previewRememberedUserId;
+      return { ok: true, payload: previewCanonicalPayload() };
+    },
+    loginCanonicalSession: async (input) => {
+      const user = getMockUsers().find((candidate) => candidate.name === input.name);
+      if (!user || user.password !== input.password) {
+        return { ok: false, payload: previewCanonicalPayload(), error: '이름 또는 비밀번호가 일치하지 않습니다.' };
+      }
+      if (previewCanonicalUserId !== user.id) previewCanonicalEpoch++;
+      previewCanonicalUserId = user.id;
+      previewRememberedUserId = input.rememberMe === false ? null : user.id;
+      return { ok: true, payload: previewCanonicalPayload() };
+    },
+    restoreCanonicalSession: async () => {
+      if (!previewCanonicalUserId && previewRememberedUserId) {
+        previewCanonicalUserId = previewRememberedUserId;
+        previewCanonicalEpoch++;
+      }
+      return { ok: true, payload: previewCanonicalPayload() };
+    },
+    logoutCanonicalSession: async () => {
+      if (previewCanonicalUserId) previewCanonicalEpoch++;
+      previewCanonicalUserId = null;
+      previewRememberedUserId = null;
+      return { ok: true, payload: previewCanonicalPayload() };
+    },
+    refreshCanonicalUser: async () => ({ ok: true, payload: previewCanonicalPayload() }),
+    changeOwnPassword: async (input) => {
+      const user = getMockUsers().find((candidate) => candidate.id === previewCanonicalUserId);
+      if (!user) return { ok: false, error: '로그인이 필요합니다.' };
+      if (user.password !== input.currentPassword) return { ok: false, error: '현재 비밀번호가 일치하지 않습니다.' };
+      user.password = input.newPassword;
+      user.isInitialPassword = false;
+      return { ok: true };
+    },
     readPersonalTodos: async () => ({ ok: true, data: [] }),
     readPersonalTodoLabels: async () => ({ ok: true, data: [] }),
     createPersonalTodo: async () => ({ ok: true, data: [] }),

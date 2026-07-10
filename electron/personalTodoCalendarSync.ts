@@ -22,6 +22,7 @@ export interface LinkedPersonalTodoCalendarEvent {
 
 export interface PersonalTodoCalendarAdapter {
   resolveTargetCalendarId(userId: string): Promise<string | null>;
+  resolveCandidateCalendarIds(userId: string): Promise<string[]>;
   findLinkedEvents(userId: string, todoId: string, candidateCalendarIds: string[]): Promise<LinkedPersonalTodoCalendarEvent[]>;
   insertLinkedEvent(input: {
     calendarId: string;
@@ -110,7 +111,7 @@ export class PersonalTodoCalendarSync {
 
   constructor(dependencies: PersonalTodoCalendarSyncDependencies) { this.dependencies = dependencies; }
 
-  receive(userId: string, todoId: string, patch: PersonalTodoPatch): Promise<PersonalTodoRecoveryEntry> {
+  async receive(userId: string, todoId: string, patch: PersonalTodoPatch): Promise<PersonalTodoRecoveryEntry> {
     const now = new Date().toISOString();
     const entry: PersonalTodoRecoveryEntry = {
       operationId: randomUUID(),
@@ -126,7 +127,8 @@ export class PersonalTodoCalendarSync {
       createdAt: now,
       updatedAt: now,
     };
-    return this.dependencies.journal.upsert(entry).then(() => entry);
+    await this.dependencies.journal.upsert(entry);
+    return entry;
   }
 
   receiveDeletion(userId: string, todoId: string): Promise<PersonalTodoRecoveryEntry> {
@@ -234,20 +236,27 @@ export class PersonalTodoCalendarSync {
       return;
     }
 
-    let targetCalendarId = entry.targetCalendarId;
-    if (!targetCalendarId) {
-      const resolvedTarget = await this.attempt(entry, this.dependencies.adapter.resolveTargetCalendarId(entry.userId));
-      if (resolvedTarget === CALENDAR_UNKNOWN) return;
-      targetCalendarId = resolvedTarget;
-      if (targetCalendarId === null) {
-        if (todo.addToCalendar) await this.compensate(entry);
-        else await this.dependencies.journal.remove(entry.operationId);
-        return;
-      }
-      await this.dependencies.journal.updatePhase(entry.operationId, entry.phase, { targetCalendarId });
+    const resolvedTarget = await this.attempt(entry, this.dependencies.adapter.resolveTargetCalendarId(entry.userId));
+    if (resolvedTarget === CALENDAR_UNKNOWN) return;
+    const resolvedCandidates = await this.attempt(entry, this.dependencies.adapter.resolveCandidateCalendarIds(entry.userId));
+    if (resolvedCandidates === CALENDAR_UNKNOWN) return;
+    const targetCalendarId = resolvedTarget ?? entry.targetCalendarId;
+    if (targetCalendarId === null) {
+      if (todo.addToCalendar) await this.compensate(entry);
+      else await this.dependencies.journal.remove(entry.operationId);
+      return;
     }
 
-    const candidateIds = [...new Set([targetCalendarId, ...entry.candidateSourceCalendarIds])];
+    const candidateIds = [...new Set([
+      targetCalendarId,
+      ...(entry.targetCalendarId ? [entry.targetCalendarId] : []),
+      ...entry.candidateSourceCalendarIds,
+      ...resolvedCandidates,
+    ])];
+    await this.dependencies.journal.updatePhase(entry.operationId, entry.phase, {
+      targetCalendarId,
+      candidateSourceCalendarIds: candidateIds,
+    });
     const events = await this.attempt(
       entry,
       this.dependencies.adapter.findLinkedEvents(entry.userId, entry.todoId, candidateIds),
@@ -296,22 +305,21 @@ export class PersonalTodoCalendarSync {
     });
   }
 
-  async recover(userId: string): Promise<void> {
+  private async recoverEntries(userId: string): Promise<void> {
     const entries = (await this.dependencies.journal.read()).filter((entry) => entry.userId === userId);
     for (const entry of entries) {
       if (entry.phase === 'aborted') {
         await this.dependencies.journal.remove(entry.operationId);
         continue;
       }
-      if (entry.phase === 'received' || entry.phase === 'prepared') {
+      if (entry.phase === 'received' || entry.phase === 'prepared' || entry.phase === 'calendar_unknown') {
         const current = await this.dependencies.readTodo(entry.userId, entry.todoId);
         if (!current && entry.desiredPatch.__deleted === true && entry.previousCanonical) {
           await this.dependencies.journal.updatePhase(entry.operationId, 'db_committed', {
             dbCommittedUpdatedAt: (entry.previousCanonical.updatedAt as string | undefined) ?? entry.updatedAt,
           });
         } else if (!current || !todoMatchesPatch(current, entry.desiredPatch)) {
-          await this.dependencies.journal.updatePhase(entry.operationId, 'aborted');
-          await this.dependencies.journal.remove(entry.operationId);
+          await this.dependencies.journal.updatePhase(entry.operationId, 'calendar_unknown');
           continue;
         } else {
           await this.dependencies.journal.updatePhase(entry.operationId, 'db_committed', {
@@ -321,6 +329,11 @@ export class PersonalTodoCalendarSync {
       }
       await this.enqueue(entry.operationId);
     }
+  }
+
+  recover(userId: string): Promise<void> {
+    const recovery = this.recoverEntries(userId);
+    return this.dependencies.trackPending ? this.dependencies.trackPending(recovery) : recovery;
   }
 
   async flushJournal(): Promise<void> {

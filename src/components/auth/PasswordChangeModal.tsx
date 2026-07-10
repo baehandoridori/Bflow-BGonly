@@ -30,7 +30,7 @@ export function PasswordChangeModal() {
 
     if (result.ok) {
       // 로컬 유저 정보 갱신
-      setCurrentUser({ ...currentUser, password: newPw, isInitialPassword: false });
+      setCurrentUser({ ...currentUser, isInitialPassword: false });
       const updated = await loadUsers();
       setUsers(updated);
       setShowPasswordChange(false);

@@ -4,6 +4,7 @@ import * as gcal from './googleCalendar';
 import { pathToFileURL } from 'url';
 import path from 'path';
 import fs from 'fs';
+import { randomUUID } from 'node:crypto';
 import {
   initSheets,
   isConnected,
@@ -1055,21 +1056,26 @@ ipcMain.handle('users:read', () => {
     if (!fs.existsSync(filePath)) return null;
     const raw = fs.readFileSync(filePath, { encoding: 'utf-8' });
     const json = Buffer.from(raw, 'base64').toString('utf-8');
-    return JSON.parse(json);
+    const parsed = JSON.parse(json) as { users?: SessionUserRecord[] };
+    return { users: (parsed.users ?? []).map(sanitizePublicUser) };
   } catch {
     return null;
   }
 });
 
-ipcMain.handle('users:write', (_event, data: unknown) => {
-  migrateLegacyUsersFileIfNeeded();
-  const filePath = getUsersFilePath();
-  const dir = path.dirname(filePath);
-  ensureDir(dir);
-  const json = JSON.stringify(data, null, 2);
-  const encoded = Buffer.from(json, 'utf-8').toString('base64');
-  fs.writeFileSync(filePath, encoded, { encoding: 'utf-8' });
-  return true;
+ipcMain.handle('users:create', (_event, input: { name: string; slackId: string; hireDate?: string; birthday?: string }) => {
+  const users = readLocalUsersForSession();
+  const created: SessionUserRecord = {
+    id: randomUUID(), name: input.name.trim(), slackId: input.slackId.trim(), password: '1234',
+    hireDate: input.hireDate || '', birthday: input.birthday || '', role: 'user',
+    isInitialPassword: true, createdAt: new Date().toISOString(),
+  };
+  writeLocalUsersForSession([...users, created]);
+  return sanitizePublicUser(created);
+});
+
+ipcMain.handle('users:delete', (_event, userId: string) => {
+  writeLocalUsersForSession(readLocalUsersForSession().filter((user) => user.id !== userId));
 });
 
 // ─── IPC 핸들러: 설정 ────────────────────────────────────────
@@ -1469,6 +1475,18 @@ function readLocalUsersForSession(): SessionUserRecord[] {
   }
 }
 
+function writeLocalUsersForSession(users: SessionUserRecord[]): void {
+  migrateLegacyUsersFileIfNeeded();
+  ensureDir(path.dirname(getUsersFilePath()));
+  const encoded = Buffer.from(JSON.stringify({ users }, null, 2), 'utf-8').toString('base64');
+  fs.writeFileSync(getUsersFilePath(), encoded, { encoding: 'utf-8' });
+}
+
+function sanitizePublicUser<T extends { password?: unknown }>(user: T): Omit<T, 'password'> {
+  const { password: _password, ...publicUser } = user;
+  return publicUser;
+}
+
 async function writeRememberedAuthSession(session: RememberedAuthSession | null): Promise<void> {
   const authPath = path.join(getDataPath(), 'auth.json');
   ensureDir(path.dirname(authPath));
@@ -1512,6 +1530,15 @@ const personalTodoCalendarAdapter: PersonalTodoCalendarAdapter = {
     } catch { /* use Google primary calendar */ }
     const calendars = await gcal.listCalendars();
     return calendars.find((calendar) => calendar.primary)?.id ?? calendars[0]?.id ?? null;
+  },
+  resolveCandidateCalendarIds: async () => {
+    const calendars = await gcal.listCalendars();
+    const ids = calendars.map((calendar) => calendar.id).filter((id): id is string => Boolean(id));
+    try {
+      const settings = JSON.parse(await fs.promises.readFile(path.join(getDataPath(), 'gcal-local-settings.json'), 'utf8')) as { personalCalendarId?: string };
+      if (settings.personalCalendarId) ids.push(settings.personalCalendarId);
+    } catch { /* calendar list remains authoritative */ }
+    return [...new Set(ids)];
   },
   findLinkedEvents: async (userId, todoId, candidateCalendarIds) => {
     const found: LinkedPersonalTodoCalendarEvent[] = [];
@@ -2101,16 +2128,19 @@ ipcMain.handle('supabase:mark-assignment-notification-read', wrapIpc(async (
 
 // ─── Users ───
 ipcMain.handle('supabase:read-users', wrapIpc(async () => {
-  return sbReadUsers();
+  return (await sbReadUsers()).map(sanitizePublicUser);
 }));
 ipcMain.handle('supabase:add-user', wrapIpc(async (_e: unknown, user: SupabaseUser) => {
-  await sbAddUser(user);
+  await sbAddUser({ ...user, password: '1234', isInitialPassword: true });
 }));
 ipcMain.handle('supabase:update-user', wrapIpc(async (_e: unknown, userId: string, updates: Record<string, string | boolean | null>) => {
-  await sbUpdateUser(userId, updates);
+  const { password: _password, isInitialPassword: _initialPassword, ...safeUpdates } = updates;
+  await sbUpdateUser(userId, safeUpdates);
+  if (sessionManager?.getCanonicalUserId() === userId) await sessionManager.refreshCurrentUser();
 }));
 ipcMain.handle('supabase:delete-user', wrapIpc(async (_e: unknown, userId: string) => {
   await sbDeleteUser(userId);
+  if (sessionManager?.getCanonicalUserId() === userId) await sessionManager.refreshCurrentUser();
 }));
 
 // ─── Comments ───
@@ -2711,6 +2741,8 @@ ipcMain.handle('gcal:is-authenticated', wrapIpc(async () => {
 
 ipcMain.handle('gcal:start-auth', wrapIpc(async () => {
   await gcal.startAuth();
+  const userId = sessionManager?.getCanonicalUserId();
+  if (userId) await personalTodoCalendarSync.recover(userId);
 }));
 
 ipcMain.handle('gcal:save-credentials', wrapIpc(async (_e: unknown, clientId: string, clientSecret: string) => {
@@ -3379,6 +3411,39 @@ ipcMain.handle('auth:restore-session', () => sessionManager.restore());
 ipcMain.handle('auth:ensure-canonical-session', () => sessionManager.ensure());
 ipcMain.handle('auth:logout-session', () => sessionManager.logout());
 ipcMain.handle('auth:refresh-canonical-user', () => sessionManager.refreshCurrentUser());
+ipcMain.handle('auth:change-own-password', async (_event, input: { currentPassword: string; newPassword: string }) => {
+  try {
+    const userId = sessionManager.getCanonicalUserId();
+    if (!userId) return { ok: false, error: '로그인이 필요합니다.' };
+    if (!input.newPassword) return { ok: false, error: '새 비밀번호를 입력해주세요.' };
+
+    let source: 'supabase' | 'local' = 'local';
+    let users: SessionUserRecord[] = [];
+    try {
+      const remoteUsers = await sbReadUsers();
+      if (remoteUsers.some((user) => user.id === userId)) {
+        source = 'supabase';
+        users = remoteUsers as unknown as SessionUserRecord[];
+      }
+    } catch { /* local fallback below */ }
+    if (users.length === 0) users = readLocalUsersForSession();
+    const user = users.find((candidate) => candidate.id === userId);
+    if (!user) return { ok: false, error: '사용자를 찾을 수 없습니다.' };
+    if (user.password !== input.currentPassword) return { ok: false, error: '현재 비밀번호가 일치하지 않습니다.' };
+
+    if (source === 'supabase') {
+      await sbUpdateUser(userId, { password: input.newPassword, isInitialPassword: false });
+    } else {
+      writeLocalUsersForSession(users.map((candidate) => candidate.id === userId
+        ? { ...candidate, password: input.newPassword, isInitialPassword: false }
+        : candidate));
+    }
+    await sessionManager.refreshCurrentUser();
+    return { ok: true };
+  } catch (error) {
+    return { ok: false, error: error instanceof Error ? error.message : String(error) };
+  }
+});
 
 // Legacy notification channel no longer accepts renderer session data.
 ipcMain.handle('session:broadcast-change', () => {

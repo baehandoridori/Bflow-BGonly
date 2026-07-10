@@ -519,7 +519,6 @@ export interface AppUser {
   id: string;          // UUID
   name: string;
   slackId: string;
-  password: string;    // base64 인코딩된 JSON 내 평문 (내부 툴)
   isInitialPassword: boolean;
   createdAt: string;   // ISO 8601
   hireDate?: string;   // Phase 0-4: 입사일 (YYYY-MM-DD)
@@ -547,7 +546,7 @@ export interface AuthSession {
   loggedInAt: string;  // ISO 8601
 }
 
-export type CanonicalSessionUser = Omit<AppUser, 'password'>;
+export type CanonicalSessionUser = AppUser;
 export interface CanonicalSessionPayload {
   user: CanonicalSessionUser | null;
   session: AuthSession | null;
@@ -1003,7 +1002,8 @@ export interface ElectronAPI {
 
   // 사용자 파일 (exe 옆 또는 test-data/ 옆, base64 인코딩 JSON)
   usersRead: () => Promise<UsersFile | null>;
-  usersWrite: (data: UsersFile) => Promise<boolean>;
+  createLocalUser: (input: { name: string; slackId: string; hireDate?: string; birthday?: string }) => Promise<AppUser>;
+  deleteLocalUser: (userId: string) => Promise<void>;
   readSettings: (fileName: string) => Promise<unknown | null>;
   writeSettings: (fileName: string, data: unknown) => Promise<boolean>;
   onDataChanged: (callback: (delta?: SheetDelta) => void) => () => void;
@@ -1380,6 +1380,7 @@ export interface ElectronAPI {
   restoreCanonicalSession: () => Promise<CanonicalSessionResult>;
   logoutCanonicalSession: () => Promise<CanonicalSessionResult>;
   refreshCanonicalUser: () => Promise<CanonicalSessionResult>;
+  changeOwnPassword: (input: { currentPassword: string; newPassword: string }) => Promise<{ ok: boolean; error?: string }>;
   readPersonalTodos: () => Promise<MainPersonalTodoResult<MainPersonalTodo[]>>;
   readPersonalTodoLabels: () => Promise<MainPersonalTodoResult<MainPersonalTodoLabel[]>>;
   createPersonalTodo: (input: MainPersonalTodoCreateInput) => Promise<MainPersonalTodoResult<MainPersonalTodo[]>>;
