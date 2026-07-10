@@ -11,6 +11,13 @@ test('widget keeps add visible and reveals completed calendar targets', () => {
   assert.match(source, /setFilterDone\(false\)/);
 });
 
+test('calendar todo navigation is queued until completed todos load', () => {
+  const source = read('src/components/widgets/MyTasksWidget.tsx');
+  assert.match(source, /pendingNavigateTodoIdRef/);
+  assert.match(source, /pendingNavigateTodoIdRef\.current\s*=\s*todoId/);
+  assert.match(source, /pendingNavigateTodoIdRef\.current[\s\S]*donePersonalTodos\.some/);
+});
+
 test('pinned personal section renders before scene and character work', () => {
   const source = read('src/components/widgets/MyTasksWidget.tsx');
   assert.ok(source.indexOf('<PinnedTodoSection') < source.indexOf('sceneTodos.map'));

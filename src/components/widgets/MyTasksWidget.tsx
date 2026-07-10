@@ -526,17 +526,31 @@ export function MyTasksWidget() {
 
   // 캘린더의 "할일로 이동" 신호는 완료 항목도 바로 찾을 수 있게 한다.
   // 완료 필터를 먼저 해제하고 섹션을 펼치면 hook의 highlight 상태가 마운트된 행에
-  // 전달되어 행 자체가 스크롤·강조된다.
+  // 전달되어 행 자체가 스크롤·강조된다. 대시보드 전환 직후에는 개인 할일이 아직
+  // 로드되지 않았을 수 있으므로 ID를 잠시 보관했다가 완료 목록이 채워진 뒤 재적용한다.
+  const pendingNavigateTodoIdRef = useRef<string | null>(null);
+  const donePersonalTodosRef = useRef(donePersonalTodos);
+  useEffect(() => {
+    donePersonalTodosRef.current = donePersonalTodos;
+    const todoId = pendingNavigateTodoIdRef.current;
+    if (!todoId || !donePersonalTodos.some((todo) => todo.id === todoId)) return;
+    pendingNavigateTodoIdRef.current = null;
+    setFilterDone(false);
+    setShowDone(true);
+  }, [donePersonalTodos]);
   useEffect(() => {
     const handler = (event: Event) => {
       const todoId = (event as CustomEvent<{ todoId?: string }>).detail?.todoId;
-      if (!todoId || !donePersonalTodos.some((todo) => todo.id === todoId)) return;
+      if (!todoId) return;
+      pendingNavigateTodoIdRef.current = todoId;
+      if (!donePersonalTodosRef.current.some((todo) => todo.id === todoId)) return;
+      pendingNavigateTodoIdRef.current = null;
       setFilterDone(false);
       setShowDone(true);
     };
     window.addEventListener('bflow:navigate-to-todo', handler);
     return () => window.removeEventListener('bflow:navigate-to-todo', handler);
-  }, [donePersonalTodos]);
+  }, []);
 
   const navigateToCharacterTask = (task: CharacterTaskItem) => {
     if (isPopup) return;
