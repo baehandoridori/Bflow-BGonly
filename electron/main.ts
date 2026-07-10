@@ -1565,6 +1565,8 @@ const personalTodoCalendarAdapter: PersonalTodoCalendarAdapter = {
       startDate,
       endDate: addCalendarDay(endDate),
       extendedProperties: {
+        // CalendarService uses bflow_type to keep B flow-created events editable.
+        bflow_type: 'custom',
         [PERSONAL_TODO_GOOGLE_LINK_KEY]: todo.id,
         [PERSONAL_TODO_GOOGLE_USER_KEY]: userId,
       },
@@ -1581,6 +1583,7 @@ const personalTodoCalendarAdapter: PersonalTodoCalendarAdapter = {
       startDate,
       endDate: addCalendarDay(endDate),
       extendedProperties: {
+        bflow_type: 'custom',
         [PERSONAL_TODO_GOOGLE_LINK_KEY]: todo.id,
         [PERSONAL_TODO_GOOGLE_USER_KEY]: userId,
       },

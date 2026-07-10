@@ -821,10 +821,11 @@ export default function App() {
           }
         }
 
-        // Supabase/Sheets 연결 후 사용자 목록 재로드 + 세션 재복원
+        // Supabase/Sheets 연결 후 사용자 목록을 항상 재로드하고 세션을 재복원한다.
         // (위에서 sheetsMode=false 상태로 로컬 users.dat를 읽었으므로,
-        //  Supabase 사용자 ID와 달라 세션 복원이 실패할 수 있음)
-        if (useAppStore.getState().dataConnected && !useAuthStore.getState().currentUser) {
+        //  세션이 먼저 복원된 경우에도 mentions/관리 화면이 오래된 디렉터리를
+        //  계속 들고 있지 않도록 연결된 저장소의 사용자 목록으로 교체한다.)
+        if (useAppStore.getState().dataConnected) {
           const freshUsers = await loadUsers();
           setUsers(freshUsers);
           if (rememberMe) {

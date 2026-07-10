@@ -230,8 +230,16 @@ function isConfirmedRejection(error: unknown): boolean {
 }
 
 function todoMatchesPatch(todo: PersonalTodoRecord, patch: PersonalTodoPatch): boolean {
-  return Object.entries(patch).every(([key, value]) =>
-    (todo as unknown as Record<string, unknown>)[key] === value);
+  return Object.entries(patch).every(([key, value]) => {
+    const current = (todo as unknown as Record<string, unknown>)[key];
+    if (Array.isArray(current) || Array.isArray(value)) {
+      return Array.isArray(current)
+        && Array.isArray(value)
+        && current.length === value.length
+        && current.every((item, index) => item === value[index]);
+    }
+    return current === value;
+  });
 }
 
 function groupRank(todo: Pick<PersonalTodoRecord, 'status' | 'pinned'>): number {

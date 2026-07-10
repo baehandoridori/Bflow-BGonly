@@ -141,6 +141,7 @@ test('main wires the recovery journal and calendar worker into live todo intents
   assert.match(main, /personalTodoCalendarSync\.recover/);
   assert.match(main, /personalTodoService\.waitForIdle\(15000\)/);
   assert.match(google, /id:\s*input\.id/);
+  assert.match(main, /bflow_type:\s*'custom'[\s\S]{0,180}PERSONAL_TODO_GOOGLE_LINK_KEY/);
 });
 
 test('committed-but-response-lost keeps the calendar intent and reconciles from owner-scoped read-back', async () => {
@@ -160,7 +161,7 @@ test('committed-but-response-lost keeps the calendar intent and reconciles from 
       readTodo: async (userId, todoId) => userId === 'alice' && todoId === stored.id ? stored : null,
       readLabels: async () => [],
       patchTodo: async (_userId, _todoId, patch) => {
-        stored = { ...stored, ...patch, updatedAt: '2' };
+        stored = { ...stored, ...patch, labelIds: patch.labelIds ? [...patch.labelIds] : stored.labelIds, updatedAt: '2' };
         throw Object.assign(new Error('connection lost after commit'), { code: 'ECONNRESET' });
       },
       mutateOrder: async () => [stored],
@@ -181,7 +182,7 @@ test('committed-but-response-lost keeps the calendar intent and reconciles from 
     },
   });
 
-  const result = await service.patchTodo('todo-1', { title: 'after' }, 1);
+  const result = await service.patchTodo('todo-1', { title: 'after', labelIds: ['label-1'] }, 1);
   assert.equal(result.ok, true);
   assert.deepEqual(calls, ['prepared', 'db-committed']);
 });
