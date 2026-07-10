@@ -77,6 +77,14 @@ test('normal-only reorder keeps the existing pinned bucket intact', () => {
   assert.match(hook, /if \(reordered\.some\(\(todo\) => todo\.pinned\)\) groups\.pinned/);
 });
 
+test('partial todo edits do not replay stale row fields or status through the patch RPC', () => {
+  const hook = read('src/components/widgets/my-tasks/hooks/usePersonalTodos.ts');
+  assert.match(hook, /const bridgePatch: MainPersonalTodoPatch = \{\};/);
+  assert.match(hook, /if \(has\('title'\)\) bridgePatch\.title/);
+  assert.match(hook, /if \(has\('labelIds'\)\) bridgePatch\.labelIds/);
+  assert.doesNotMatch(hook, /status:\s*nextTodo\.status/);
+});
+
 test('detail modal exposes personal properties and bounded auto-grow memo', () => {
   const modal = read('src/components/widgets/my-tasks/components/TodoDetailModal.tsx');
   assert.match(modal, /상단 고정/);

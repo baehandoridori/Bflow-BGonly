@@ -372,13 +372,26 @@ export function usePersonalTodos(): UsePersonalTodosResult {
     const current = todos.find((todo) => todo.id === todoId);
     if (!current) return;
     const nextTodo = normalizePersonalTodo({ ...current, ...patch, status: patch.status ?? current.status, completed: (patch.status ?? current.status) === 'done' });
+    const hasCalendarDateDefaults = nextTodo.addToCalendar && !nextTodo.startDate && !nextTodo.endDate;
     if (nextTodo.addToCalendar && !nextTodo.startDate && !nextTodo.endDate) {
       const today = new Date().toISOString().slice(0, 10);
       nextTodo.startDate = today;
       nextTodo.endDate = today;
     }
     const next = todos.map((todo) => todo.id === todoId ? nextTodo : todo);
-    const bridgePatch: MainPersonalTodoPatch = { ...patch, status: nextTodo.status, title: nextTodo.title, memo: nextTodo.memo, priority: nextTodo.priority as PersonalTodoPriority, labelIds: nextTodo.labelIds, startDate: nextTodo.startDate ?? null, endDate: nextTodo.endDate ?? null, addToCalendar: nextTodo.addToCalendar ?? false };
+    const has = (key: keyof PersonalTodo) => Object.prototype.hasOwnProperty.call(patch, key);
+    const bridgePatch: MainPersonalTodoPatch = {};
+    // Send only fields changed by this editor. Re-sending the whole stale row
+    // could overwrite another window's edit, and status changes must go through
+    // the order/status RPC so done-boundary rules remain intact.
+    if (has('title')) bridgePatch.title = nextTodo.title;
+    if (has('memo')) bridgePatch.memo = nextTodo.memo;
+    if (has('priority')) bridgePatch.priority = nextTodo.priority as PersonalTodoPriority;
+    if (has('labelIds')) bridgePatch.labelIds = [...nextTodo.labelIds];
+    if (has('addToCalendar')) bridgePatch.addToCalendar = nextTodo.addToCalendar ?? false;
+    if (has('startDate') || hasCalendarDateDefaults) bridgePatch.startDate = nextTodo.startDate ?? null;
+    if (has('endDate') || hasCalendarDateDefaults) bridgePatch.endDate = nextTodo.endDate ?? null;
+    if (Object.keys(bridgePatch).length === 0) return;
     await runMutation(makePersonalTodoMutationKey('todo', todoId, serialRef.current + 1), next, labels, () => api().patchPersonalTodo(todoId, bridgePatch), false);
   }, [labels, runMutation, todos]);
 
