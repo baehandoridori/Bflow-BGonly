@@ -1,4 +1,5 @@
 import { lazy, Suspense, useEffect, useCallback, useState, useRef, Component, type ReactNode, type ErrorInfo } from 'react';
+import { createPortal } from 'react-dom';
 import { MainLayout } from '@/components/layout/MainLayout';
 import { useAppStore } from '@/stores/useAppStore';
 import { resolveAllowedView } from '@/features/playground/featureFlag';
@@ -3017,22 +3018,25 @@ export default function App() {
       <ConfirmDialogHost />
       <UpdateCenterModal />
 
-      {/* Sonner 토스트 — 테마 색상 연동 + 스르륵 애니메이션 + 호버 펼침 */}
-      <Toaster
-        theme={colorMode === 'light' ? 'light' : 'dark'}
-        position={toastPosition}
-        duration={toastDuration}
-        toastOptions={{
-          className: 'bflow-toast',
-          style: {
-            fontSize: '13px',
-          },
-        }}
-        gap={8}
-        visibleToasts={5}
-        expand={false}
-        closeButton
-      />
+      {/* Sonner 토스트 — 대화상자가 #root를 inert 처리해도 알림은 body에서 유지 */}
+      {typeof document !== 'undefined' && createPortal(
+        <Toaster
+          theme={colorMode === 'light' ? 'light' : 'dark'}
+          position={toastPosition}
+          duration={toastDuration}
+          toastOptions={{
+            className: 'bflow-toast',
+            style: {
+              fontSize: '13px',
+            },
+          }}
+          gap={8}
+          visibleToasts={5}
+          expand={false}
+          closeButton
+        />,
+        document.body,
+      )}
 
       {/* 환영 팝업 (로그인 직후) */}
       {welcomeUser && (

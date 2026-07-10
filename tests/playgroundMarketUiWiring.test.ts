@@ -91,6 +91,27 @@ test('market dialog is portalled, labelled, inert and focus-safe', () => {
   assert.match(source, /openerRef\.current.*focus/);
 });
 
+test('global order toaster is portalled beyond the dialog inert root boundary', () => {
+  const app = readFileSync('src/App.tsx', 'utf8');
+  const dialog = readFileSync('src/views/playground/market/MarketActionDialog.tsx', 'utf8');
+  const order = readFileSync('src/views/playground/market/MarketOrderPanel.tsx', 'utf8');
+
+  assert.match(dialog, /document\.getElementById\(['"]root['"]\)/);
+  assert.match(dialog, /root\.inert\s*=\s*true/);
+  assert.match(dialog, /root\.setAttribute\(['"]aria-hidden['"],\s*['"]true['"]\)/);
+  assert.equal((app.match(/<Toaster\b/g) ?? []).length, 1);
+  assert.match(
+    app,
+    /createPortal\(\s*<Toaster\b[\s\S]*?\/>\s*,\s*document\.body\s*,?\s*\)/,
+  );
+
+  assert.match(order, /toast\.success\(/);
+  assert.match(order, /toast\.error\(/);
+  assert.equal((order.match(
+    /<p className="mt-3 min-h-5 text-sm font-semibold text-text-primary" aria-live="polite">\s*\{dialogError \?\? storeError \?\? ''\}\s*<\/p>/g,
+  ) ?? []).length, 2);
+});
+
 test('detail chart and order panel keep the approved source contracts', () => {
   const chart = readFileSync('src/views/playground/market/MarketPriceChart.tsx', 'utf8');
   const order = readFileSync('src/views/playground/market/MarketOrderPanel.tsx', 'utf8');
