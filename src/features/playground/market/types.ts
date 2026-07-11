@@ -1,6 +1,38 @@
 export type MarketPeriod = 'today' | 'week' | 'month' | 'all';
 export type MarketTrend = 'up' | 'down' | 'flat';
 
+export type MarketBarInterval = '1m' | '5m' | '10m' | '15m' | '1h' | '1d';
+export type MarketChartRange = 'today' | 'week' | 'month' | 'six-months' | 'all';
+export type MarketChartStyle = 'line' | 'candlestick';
+export type MarketEventKind = 'news' | 'shock-up' | 'shock-down' | 'trend' | 'halt';
+
+export interface MarketInstrumentProfile {
+  stockId: string;
+  basePriceWon: number;
+  volatilityBps: number;
+  phase: number;
+}
+
+export interface MarketAdminEvent {
+  id: string;
+  stockId: string;
+  kind: MarketEventKind;
+  title: string;
+  impactBps: number;
+  startsAt: string;
+  endsAt: string | null;
+  revision: number;
+}
+
+export interface MarketCandle {
+  startsAt: string;
+  openWon: number;
+  highWon: number;
+  lowWon: number;
+  closeWon: number;
+  newsIds: string[];
+}
+
 export interface PricePoint {
   at: string;
   pricePoints: number;
