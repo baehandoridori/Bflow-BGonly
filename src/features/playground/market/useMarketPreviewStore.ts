@@ -98,7 +98,7 @@ interface MarketPreviewState {
 export function createMarketPreviewStore(
   gateway: MarketPreviewGateway,
 ): UseBoundStore<StoreApi<MarketPreviewState>> {
-  let loadGeneration = 0;
+  let stateGeneration = 0;
   let pendingAdminSequence = 0;
   return create<MarketPreviewState>((set, get) => ({
     confirmed: null,
@@ -111,7 +111,7 @@ export function createMarketPreviewStore(
     error: null,
     sessionKey: null,
     async load(requestedSessionKey = '__default-market-session__') {
-      const generation = ++loadGeneration;
+      const generation = ++stateGeneration;
       const sessionChanged = get().sessionKey !== requestedSessionKey;
       set({
         loading: true,
@@ -129,7 +129,7 @@ export function createMarketPreviewStore(
       });
       try {
         const snapshot = await gateway.read();
-        if (generation !== loadGeneration || get().sessionKey !== requestedSessionKey) return;
+        if (generation !== stateGeneration || get().sessionKey !== requestedSessionKey) return;
         set({
           confirmed: snapshot,
           visible: snapshot,
@@ -140,7 +140,7 @@ export function createMarketPreviewStore(
           pendingValueCommand: null,
         });
       } catch {
-        if (generation !== loadGeneration || get().sessionKey !== requestedSessionKey) return;
+        if (generation !== stateGeneration || get().sessionKey !== requestedSessionKey) return;
         set({
           loading: false,
           mutating: false,
@@ -181,9 +181,10 @@ export function createMarketPreviewStore(
         ? visible
         : applyMarketCommand(visible, command, currentPriceWon);
       const operationSessionKey = get().sessionKey;
-      const operationLoadGeneration = loadGeneration;
+      const operationGeneration = ++stateGeneration;
       set({
         visible: projected,
+        loading: false,
         mutating: true,
         pendingValueCommand: valueCommand
           ? structuredClone(pendingValueCommand ?? valueCommand)
@@ -194,7 +195,7 @@ export function createMarketPreviewStore(
         const confirmed = await gateway.execute(command);
         if (
           get().sessionKey !== operationSessionKey
-          || loadGeneration !== operationLoadGeneration
+          || stateGeneration !== operationGeneration
         ) return false;
         set({
           confirmed,
@@ -207,7 +208,7 @@ export function createMarketPreviewStore(
       } catch (error) {
         if (
           get().sessionKey !== operationSessionKey
-          || loadGeneration !== operationLoadGeneration
+          || stateGeneration !== operationGeneration
         ) return false;
         const knownValueRejection = valueCommand !== null && isKnownMarketValueRejection(error);
         const rejectionMessage = marketCommandFailureMessage(error);
@@ -218,7 +219,7 @@ export function createMarketPreviewStore(
           } catch {
             if (
               get().sessionKey !== operationSessionKey
-              || loadGeneration !== operationLoadGeneration
+              || stateGeneration !== operationGeneration
             ) return false;
             set({
               visible: get().confirmed,
@@ -231,7 +232,7 @@ export function createMarketPreviewStore(
           }
           if (
             get().sessionKey !== operationSessionKey
-            || loadGeneration !== operationLoadGeneration
+            || stateGeneration !== operationGeneration
           ) return false;
           set({
             confirmed: authoritative,
@@ -280,9 +281,10 @@ export function createMarketPreviewStore(
       }
 
       const operationSessionKey = get().sessionKey;
-      const operationLoadGeneration = loadGeneration;
+      const operationGeneration = ++stateGeneration;
       set({
         visible: projected,
+        loading: false,
         mutating: true,
         adminWriteUncertain: false,
         error: null,
@@ -290,7 +292,10 @@ export function createMarketPreviewStore(
       try {
         // 관리자 RPC에는 request id가 없으므로 응답 유실 시 자동 재시도하지 않는다.
         const confirmed = await gateway.createAdminEvent(input);
-        if (get().sessionKey !== operationSessionKey) return false;
+        if (
+          get().sessionKey !== operationSessionKey
+          || stateGeneration !== operationGeneration
+        ) return false;
         set({
           confirmed,
           visible: confirmed,
@@ -301,7 +306,7 @@ export function createMarketPreviewStore(
       } catch {
         if (
           get().sessionKey !== operationSessionKey
-          || loadGeneration !== operationLoadGeneration
+          || stateGeneration !== operationGeneration
         ) return false;
         let authoritative: MarketSnapshot;
         try {
@@ -309,7 +314,7 @@ export function createMarketPreviewStore(
         } catch {
           if (
             get().sessionKey !== operationSessionKey
-            || loadGeneration !== operationLoadGeneration
+            || stateGeneration !== operationGeneration
           ) return false;
           set({
             visible: get().confirmed,
@@ -321,7 +326,7 @@ export function createMarketPreviewStore(
         }
         if (
           get().sessionKey !== operationSessionKey
-          || loadGeneration !== operationLoadGeneration
+          || stateGeneration !== operationGeneration
         ) return false;
         const applied = matchingAdminEventCount(authoritative, input) > baselineMatchCount;
         set({
@@ -353,9 +358,10 @@ export function createMarketPreviewStore(
       }
 
       const operationSessionKey = get().sessionKey;
-      const operationLoadGeneration = loadGeneration;
+      const operationGeneration = ++stateGeneration;
       set({
         visible: projected,
+        loading: false,
         mutating: true,
         adminWriteUncertain: false,
         error: null,
@@ -363,7 +369,10 @@ export function createMarketPreviewStore(
       try {
         // 삭제 역시 비멱등 RPC이므로 호출은 한 번만 수행한다.
         const confirmed = await gateway.deleteAdminEvent(eventId);
-        if (get().sessionKey !== operationSessionKey) return false;
+        if (
+          get().sessionKey !== operationSessionKey
+          || stateGeneration !== operationGeneration
+        ) return false;
         set({
           confirmed,
           visible: confirmed,
@@ -374,7 +383,7 @@ export function createMarketPreviewStore(
       } catch {
         if (
           get().sessionKey !== operationSessionKey
-          || loadGeneration !== operationLoadGeneration
+          || stateGeneration !== operationGeneration
         ) return false;
         let authoritative: MarketSnapshot;
         try {
@@ -382,7 +391,7 @@ export function createMarketPreviewStore(
         } catch {
           if (
             get().sessionKey !== operationSessionKey
-            || loadGeneration !== operationLoadGeneration
+            || stateGeneration !== operationGeneration
           ) return false;
           set({
             visible: get().confirmed,
@@ -394,7 +403,7 @@ export function createMarketPreviewStore(
         }
         if (
           get().sessionKey !== operationSessionKey
-          || loadGeneration !== operationLoadGeneration
+          || stateGeneration !== operationGeneration
         ) return false;
         const applied = !authoritative.adminEvents.some((event) => event.id === eventId);
         set({

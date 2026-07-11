@@ -210,6 +210,89 @@ test('same-session explicit load clears mutating immediately and wins over a lat
   assert.equal(store.getState().mutating, false);
 });
 
+test('an execute started after an old same-user load keeps its newer snapshot and error', async () => {
+  const canonical = createMarketPreviewGateway({ latencyMs: 0 });
+  const initial = await canonical.read();
+  let readCalls = 0;
+  let resolveOldLoad!: (snapshot: MarketSnapshot) => void;
+  const oldLoadResult = new Promise<MarketSnapshot>((resolve) => {
+    resolveOldLoad = resolve;
+  });
+  const gateway: MarketPreviewGateway = {
+    read: async () => {
+      readCalls += 1;
+      return readCalls === 1 ? structuredClone(initial) : oldLoadResult;
+    },
+    execute: (command) => canonical.execute(command),
+    createAdminEvent: (input) => canonical.createAdminEvent(input),
+    deleteAdminEvent: (eventId) => canonical.deleteAdminEvent(eventId),
+  };
+  const store = createMarketPreviewStore(gateway);
+  await store.getState().load('hansol');
+
+  const oldLoad = store.getState().load('hansol');
+  assert.equal(await store.getState().execute({
+    kind: 'favorite', requestId: 'favorite-after-old-load', stockId: 'adobe', wished: true,
+  }), true);
+  const committed = structuredClone(store.getState().confirmed);
+  assert.ok(committed);
+  assert.equal(committed.favoriteStockIds.includes('adobe'), true);
+
+  assert.equal(await store.getState().execute({
+    kind: 'transfer', requestId: 'invalid-after-favorite', direction: 'wallet-to-broker', points: 0,
+  }), false);
+  const mutationError = store.getState().error;
+  assert.ok(mutationError);
+
+  resolveOldLoad(structuredClone(initial));
+  await oldLoad;
+  assert.deepEqual(store.getState().confirmed, committed);
+  assert.deepEqual(store.getState().visible, committed);
+  assert.equal(store.getState().error, mutationError, 'a stale load must not clear a newer error');
+  assert.equal(store.getState().loading, false);
+});
+
+test('an admin mutation started after an old same-user load keeps its event and error', async () => {
+  const canonical = createMarketPreviewGateway({ latencyMs: 0 });
+  const initial = await canonical.read();
+  const input: MarketAdminEventInput = {
+    stockId: 'jbbj', kind: 'news', title: '오래된 로드 뒤 저장', impactBps: 90,
+    startsAt: '2026-07-12T00:00:00.000Z', endsAt: '2026-07-12T01:00:00.000Z',
+  };
+  let readCalls = 0;
+  let resolveOldLoad!: (snapshot: MarketSnapshot) => void;
+  const oldLoadResult = new Promise<MarketSnapshot>((resolve) => {
+    resolveOldLoad = resolve;
+  });
+  const gateway: MarketPreviewGateway = {
+    read: async () => {
+      readCalls += 1;
+      return readCalls === 1 ? structuredClone(initial) : oldLoadResult;
+    },
+    execute: (command) => canonical.execute(command),
+    createAdminEvent: (eventInput) => canonical.createAdminEvent(eventInput),
+    deleteAdminEvent: (eventId) => canonical.deleteAdminEvent(eventId),
+  };
+  const store = createMarketPreviewStore(gateway);
+  await store.getState().load('hansol');
+
+  const oldLoad = store.getState().load('hansol');
+  assert.equal(await store.getState().createAdminEvent(input), true);
+  const committed = structuredClone(store.getState().confirmed);
+  assert.ok(committed?.adminEvents.some((event) => event.title === input.title));
+
+  assert.equal(await store.getState().deleteAdminEvent('missing-event'), false);
+  const mutationError = store.getState().error;
+  assert.match(mutationError ?? '', /찾지 못했어요/);
+
+  resolveOldLoad(structuredClone(initial));
+  await oldLoad;
+  assert.deepEqual(store.getState().confirmed, committed);
+  assert.deepEqual(store.getState().visible, committed);
+  assert.equal(store.getState().error, mutationError, 'a stale load must not clear a newer admin error');
+  assert.equal(store.getState().loading, false);
+});
+
 test('canonical halt rejection survives an Electron or database error prefix', async () => {
   const canonical = createMarketPreviewGateway({ latencyMs: 0 });
   const gateway: MarketPreviewGateway = {
