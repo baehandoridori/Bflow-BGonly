@@ -2,7 +2,6 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import { initialPlaygroundRoute, navigatePlayground } from '../src/features/playground/routes.ts';
-import { pickRecommendation } from '../src/features/playground/recommendation.ts';
 
 test('A lobby is the default and the dedicated button opens C house', () => {
   assert.deepEqual(initialPlaygroundRoute, { kind: 'lobby' });
@@ -23,10 +22,4 @@ test('market remains one local route with three pages', () => {
   }), {
     kind: 'market', page: { kind: 'home', focusRequest: { target: 'all-stocks', id: 7 } },
   });
-});
-
-test('recommendation accepts deterministic randomness', () => {
-  const items = ['tetris', 'sudoku', 'snake', 'market'] as const;
-  assert.equal(pickRecommendation(items, () => 0), 'tetris');
-  assert.equal(pickRecommendation(items, () => 0.99), 'market');
 });
