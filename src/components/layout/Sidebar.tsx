@@ -8,7 +8,7 @@ import { useDataStore } from '@/stores/useDataStore';
 import { useAuthStore } from '@/stores/useAuthStore';
 import { useCharacterBoardAccessState } from '@/hooks/useCharacterBoardAccess';
 import { isNavItemHiddenForUser } from './navVisibility';
-import { isPlaygroundPreviewEnabled } from '@/features/playground/featureFlag';
+import { canAccessPlayground } from '@/features/playground/featureFlag';
 import { originFromActivation } from '@/features/playground/transition/dotWipeMath';
 import { usePlaygroundEntryStore } from '@/features/playground/transition/usePlaygroundEntryStore';
 import { cn } from '@/utils/cn';
@@ -281,7 +281,7 @@ export function Sidebar() {
   const navItems = useMemo(
     () =>
       NAV_ITEMS.filter((item) => item.id !== 'character-board' || characterAccess.allowed || characterAccessFailed)
-        .filter((item) => item.id !== 'playground' || isPlaygroundPreviewEnabled())
+        .filter((item) => item.id !== 'playground' || canAccessPlayground(currentUserName))
         // 휴가 탭 등: 지정된 사용자에게는 숨김
         .filter((item) => !isNavItemHiddenForUser(item.id, currentUserName)),
     [characterAccess.allowed, characterAccessFailed, currentUserName],

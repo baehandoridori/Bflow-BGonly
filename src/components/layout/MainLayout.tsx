@@ -1,7 +1,8 @@
 import { Sidebar } from './Sidebar';
 import { Header } from './Header';
 import { useAppStore } from '@/stores/useAppStore';
-import { isPlaygroundPreviewEnabled } from '@/features/playground/featureFlag';
+import { useAuthStore } from '@/stores/useAuthStore';
+import { canAccessPlayground } from '@/features/playground/featureFlag';
 
 interface MainLayoutProps {
   children: React.ReactNode;
@@ -10,7 +11,8 @@ interface MainLayoutProps {
 
 export function MainLayout({ children, onRefresh }: MainLayoutProps) {
   const currentView = useAppStore((state) => state.currentView);
-  const immersive = currentView === 'playground' && isPlaygroundPreviewEnabled();
+  const currentUserName = useAuthStore((state) => state.currentUser?.name);
+  const immersive = currentView === 'playground' && canAccessPlayground(currentUserName);
 
   return (
     <div className="flex h-screen w-screen overflow-hidden">

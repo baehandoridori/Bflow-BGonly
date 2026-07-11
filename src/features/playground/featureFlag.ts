@@ -1,14 +1,9 @@
 import type { ViewMode } from '@/stores/useAppStore';
 
-export interface PlaygroundPreviewEnv {
-  DEV?: boolean;
-  VITE_ENABLE_PLAYGROUND_PREVIEW?: string;
-}
+const PLAYGROUND_ALLOWED_USER_NAMES = new Set(['배한솔']);
 
-export function isPlaygroundPreviewEnabled(
-  env: PlaygroundPreviewEnv = import.meta.env,
-): boolean {
-  return env.DEV === true || env.VITE_ENABLE_PLAYGROUND_PREVIEW === 'true';
+export function canAccessPlayground(userName: unknown): boolean {
+  return typeof userName === 'string' && PLAYGROUND_ALLOWED_USER_NAMES.has(userName);
 }
 
 const KNOWN_VIEWS = new Set<ViewMode>([
@@ -18,9 +13,9 @@ const KNOWN_VIEWS = new Set<ViewMode>([
 
 export function resolveAllowedView(
   value: unknown,
-  env: PlaygroundPreviewEnv = import.meta.env,
+  userName: unknown,
 ): ViewMode {
   if (typeof value !== 'string' || !KNOWN_VIEWS.has(value as ViewMode)) return 'dashboard';
-  if (value === 'playground' && !isPlaygroundPreviewEnabled(env)) return 'dashboard';
+  if (value === 'playground' && !canAccessPlayground(userName)) return 'dashboard';
   return value as ViewMode;
 }

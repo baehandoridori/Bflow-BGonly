@@ -671,7 +671,10 @@ export default function App() {
 
         // 기본 시작 뷰 로드
         if (savedPrefs?.defaultView) {
-          useAppStore.getState().setView(resolveAllowedView(savedPrefs.defaultView));
+          useAppStore.getState().setView(resolveAllowedView(
+            savedPrefs.defaultView,
+            useAuthStore.getState().currentUser?.name,
+          ));
         }
 
         // 토스트 설정 로드
@@ -2833,7 +2836,7 @@ export default function App() {
   }, [setPendingDeepLink]);
 
   const setView = useAppStore((state) => state.setView);
-  const safeCurrentView = resolveAllowedView(currentView);
+  const safeCurrentView = resolveAllowedView(currentView, currentUser?.name);
   useEffect(() => {
     if (safeCurrentView !== currentView) setView(safeCurrentView);
   }, [currentView, safeCurrentView, setView]);
