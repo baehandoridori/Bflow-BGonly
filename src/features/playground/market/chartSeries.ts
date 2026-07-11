@@ -10,6 +10,7 @@ import type {
 const MINUTE_MS = 60_000;
 const MAX_RETURNED_CANDLES = 600;
 const MAX_CACHED_CANDLES = 8192;
+const MAX_CACHED_AGGREGATED_CANDLES = 4096;
 const MAX_CACHED_REQUESTS = 128;
 
 const INTERVAL_MS: Record<MarketBarInterval, number> = {
@@ -37,7 +38,12 @@ export interface BuildMinuteCandlesRequest {
   events: readonly MarketAdminEvent[];
 }
 
+export interface BuildCandlesRequest extends BuildMinuteCandlesRequest {
+  interval: MarketBarInterval;
+}
+
 const completedCandleCache = new Map<string, MarketCandle>();
+const completedAggregatedCandleCache = new Map<string, MarketCandle>();
 const completedRequestCache = new Map<string, MarketCandle[]>();
 
 function cloneCandle(candle: MarketCandle): MarketCandle {
@@ -77,29 +83,57 @@ function eventFingerprint(profile: MarketInstrumentProfile, events: readonly Mar
     .join('|');
 }
 
-function overlapsInterval(event: MarketAdminEvent, intervalStartMs: number, intervalEndMs: number): boolean {
+function overlapsInterval(
+  event: MarketAdminEvent,
+  intervalStartMs: number,
+  intervalEndMs: number,
+  includeIntervalEnd: boolean,
+): boolean {
   const eventStartMs = Date.parse(event.startsAt);
   const eventEndMs = event.endsAt === null ? Number.POSITIVE_INFINITY : Date.parse(event.endsAt);
   if (!Number.isFinite(eventStartMs) || Number.isNaN(eventEndMs) || eventEndMs <= eventStartMs) {
     return false;
   }
-  return eventStartMs < intervalEndMs && eventEndMs > intervalStartMs;
+  const startsWithinInterval = includeIntervalEnd
+    ? eventStartMs <= intervalEndMs
+    : eventStartMs < intervalEndMs;
+  return startsWithinInterval && eventEndMs > intervalStartMs;
 }
 
 function buildOneMinuteCandle(
   profile: MarketInstrumentProfile,
   minuteStartMs: number,
   lastSampleSecond: number,
+  eventOverlapEndMs: number,
+  includeEventAtOverlapEnd: boolean,
   events: readonly MarketAdminEvent[],
 ): MarketCandle {
+  if (
+    profile.volatilityBps === 0
+    && events.every((event) => event.stockId !== profile.stockId)
+  ) {
+    const priceWon = getLivePriceWon(profile, minuteStartMs, events);
+    return {
+      startsAt: new Date(minuteStartMs).toISOString(),
+      openWon: priceWon,
+      highWon: priceWon,
+      lowWon: priceWon,
+      closeWon: priceWon,
+      newsIds: [],
+    };
+  }
   const prices = Array.from({ length: lastSampleSecond + 1 }, (_, second) => (
     getLivePriceWon(profile, minuteStartMs + second * 1000, events)
   ));
-  const sampledIntervalEndMs = minuteStartMs + (lastSampleSecond + 1) * 1000;
   const newsIds = events
     .filter((event) => (
       event.stockId === profile.stockId
-      && overlapsInterval(event, minuteStartMs, sampledIntervalEndMs)
+      && overlapsInterval(
+        event,
+        minuteStartMs,
+        eventOverlapEndMs,
+        includeEventAtOverlapEnd,
+      )
     ))
     .map((event) => event.id)
     .filter((eventId, index, allIds) => allIds.indexOf(eventId) === index)
@@ -164,6 +198,14 @@ export function buildMinuteCandles(
   nowMsOrEvents?: number | readonly MarketAdminEvent[],
 ): MarketCandle[] {
   const request = normalizeRequest(requestOrProfile, startMs, endMs, eventsOrNowMs, nowMsOrEvents);
+  return buildMinuteCandlesForRequest(request, MAX_RETURNED_CANDLES);
+}
+
+function buildMinuteCandlesForRequest(
+  request: BuildMinuteCandlesRequest,
+  maximumReturnedCandles: number | null,
+  cacheCompletedRequest = true,
+): MarketCandle[] {
   if (![request.startMs, request.endMs, request.nowMs].every(Number.isFinite)) {
     throw new RangeError('candle timestamps must be finite');
   }
@@ -174,16 +216,18 @@ export function buildMinuteCandles(
   const visibleLastMinuteMs = Math.floor(request.nowMs / MINUTE_MS) * MINUTE_MS;
   const lastMinuteMs = Math.min(requestedLastMinuteMs, visibleLastMinuteMs);
   if (lastMinuteMs < requestedFirstMinuteMs) return [];
-  const firstMinuteMs = Math.max(
-    requestedFirstMinuteMs,
-    lastMinuteMs - (MAX_RETURNED_CANDLES - 1) * MINUTE_MS,
-  );
+  const firstMinuteMs = maximumReturnedCandles === null
+    ? requestedFirstMinuteMs
+    : Math.max(
+      requestedFirstMinuteMs,
+      lastMinuteMs - (maximumReturnedCandles - 1) * MINUTE_MS,
+    );
   const profileKey = profileFingerprint(request.profile);
   const eventsKey = eventFingerprint(request.profile, request.events);
   const isCompletedRequest = lastMinuteMs + MINUTE_MS <= request.nowMs;
   const requestKey = [profileKey, firstMinuteMs, lastMinuteMs, '1m', eventsKey].join('::');
 
-  if (isCompletedRequest) {
+  if (isCompletedRequest && cacheCompletedRequest) {
     const cachedRequest = completedRequestCache.get(requestKey);
     if (cachedRequest) return cloneCandles(cachedRequest);
   }
@@ -205,6 +249,8 @@ export function buildMinuteCandles(
       request.profile,
       minuteStartMs,
       lastSampleSecond,
+      isCompletedMinute ? minuteStartMs + MINUTE_MS : request.nowMs,
+      !isCompletedMinute,
       request.events,
     );
     candles.push(candle);
@@ -213,10 +259,79 @@ export function buildMinuteCandles(
     }
   }
 
-  if (isCompletedRequest) {
+  if (isCompletedRequest && cacheCompletedRequest) {
     setBoundedCache(completedRequestCache, requestKey, cloneCandles(candles), MAX_CACHED_REQUESTS);
   }
   return candles;
+}
+
+export function buildCandles(request: BuildCandlesRequest): MarketCandle[] {
+  if (request.interval === '1m') return buildMinuteCandles(request);
+  if (![request.startMs, request.endMs, request.nowMs].every(Number.isFinite)) {
+    throw new RangeError('candle timestamps must be finite');
+  }
+  if (request.endMs <= request.startMs || request.nowMs < request.startMs) return [];
+
+  const intervalMs = INTERVAL_MS[request.interval];
+  const requestedFirstMinuteMs = Math.floor(request.startMs / MINUTE_MS) * MINUTE_MS;
+  const requestedLastMinuteMs = Math.floor((request.endMs - 1) / MINUTE_MS) * MINUTE_MS;
+  const visibleLastMinuteMs = Math.floor(request.nowMs / MINUTE_MS) * MINUTE_MS;
+  const lastMinuteMs = Math.min(requestedLastMinuteMs, visibleLastMinuteMs);
+  if (lastMinuteMs < requestedFirstMinuteMs) return [];
+
+  const requestedFirstBucketMs = Math.floor(requestedFirstMinuteMs / intervalMs) * intervalMs;
+  const lastBucketMs = Math.floor(lastMinuteMs / intervalMs) * intervalMs;
+  const firstBucketMs = Math.max(
+    requestedFirstBucketMs,
+    lastBucketMs - (MAX_RETURNED_CANDLES - 1) * intervalMs,
+  );
+  const profileKey = profileFingerprint(request.profile);
+  const eventsKey = eventFingerprint(request.profile, request.events);
+  const result: MarketCandle[] = [];
+
+  for (let bucketStartMs = firstBucketMs; bucketStartMs <= lastBucketMs; bucketStartMs += intervalMs) {
+    const bucketEndMs = bucketStartMs + intervalMs;
+    const sourceStartMs = Math.max(request.startMs, bucketStartMs);
+    const sourceEndMs = Math.min(request.endMs, bucketEndMs);
+    if (sourceEndMs <= sourceStartMs) continue;
+
+    const isCompletedBucket = bucketEndMs <= request.nowMs;
+    const aggregatedKey = [
+      profileKey,
+      sourceStartMs,
+      sourceEndMs,
+      request.interval,
+      eventsKey,
+    ].join('::');
+    const cachedCandle = isCompletedBucket
+      ? completedAggregatedCandleCache.get(aggregatedKey)
+      : undefined;
+    if (cachedCandle) {
+      result.push(cloneCandle(cachedCandle));
+      continue;
+    }
+
+    const sourceCandles = buildMinuteCandlesForRequest({
+      profile: request.profile,
+      startMs: sourceStartMs,
+      endMs: sourceEndMs,
+      nowMs: request.nowMs,
+      events: request.events,
+    }, null, false);
+    const aggregated = aggregateCandles(sourceCandles, request.interval)[0];
+    if (!aggregated) continue;
+    result.push(aggregated);
+    if (isCompletedBucket) {
+      setBoundedCache(
+        completedAggregatedCandleCache,
+        aggregatedKey,
+        cloneCandle(aggregated),
+        MAX_CACHED_AGGREGATED_CANDLES,
+      );
+    }
+  }
+
+  return result.slice(-MAX_RETURNED_CANDLES);
 }
 
 export function aggregateCandles(

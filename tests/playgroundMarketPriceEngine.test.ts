@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 
 import {
   aggregateCandles,
+  buildCandles,
   buildMinuteCandles,
   resolveIntervalForRange,
 } from '../src/features/playground/market/chartSeries.ts';
@@ -18,6 +19,13 @@ const PROFILE: MarketInstrumentProfile = {
   stockId: 'jbbj',
   basePriceWon: 1842,
   volatilityBps: 180,
+  phase: 0.37,
+};
+
+const CONSTANT_PROFILE: MarketInstrumentProfile = {
+  stockId: 'constant',
+  basePriceWon: 1842,
+  volatilityBps: 0,
   phase: 0.37,
 };
 
@@ -211,6 +219,32 @@ test('a forming candle does not reveal an event before its start second', () => 
   assert.deepEqual(atEvent[0].newsIds, ['future-news']);
 });
 
+test('a forming candle uses the exact millisecond now for event overlap', () => {
+  const minuteStartMs = Date.parse('2026-07-11T12:00:00Z');
+  const eventStartsMs = minuteStartMs + 29_500;
+  const fractionalEvent: MarketAdminEvent = {
+    id: 'fractional-news',
+    stockId: PROFILE.stockId,
+    kind: 'news',
+    title: '밀리초 경계 소식',
+    impactBps: 100,
+    startsAt: new Date(eventStartsMs).toISOString(),
+    endsAt: new Date(minuteStartMs + 60_000).toISOString(),
+    revision: 1,
+  };
+  const buildAt = (nowMs: number) => buildMinuteCandles({
+    profile: PROFILE,
+    startMs: minuteStartMs,
+    endMs: minuteStartMs + 60_000,
+    nowMs,
+    events: [fractionalEvent],
+  })[0].newsIds;
+
+  assert.deepEqual(buildAt(minuteStartMs + 29_100), []);
+  assert.deepEqual(buildAt(eventStartsMs), ['fractional-news']);
+  assert.deepEqual(buildAt(eventStartsMs + 1), ['fractional-news']);
+});
+
 test('candle builders return at most the latest six hundred bars', () => {
   const startMs = Date.parse('2026-07-01T00:00:00Z');
   const candles = buildMinuteCandles({
@@ -231,4 +265,61 @@ test('candle builders return at most the latest six hundred bars', () => {
     closeWon: 1,
     newsIds: [],
   })), '1m').length, 600);
+});
+
+test('integrated hourly candles preserve all forty-eight requested hours', () => {
+  const startMs = Date.parse('2026-07-01T00:00:00Z');
+  const endMs = startMs + 48 * 60 * 60_000;
+  const candles = buildCandles({
+    profile: PROFILE,
+    startMs,
+    endMs,
+    nowMs: endMs,
+    events: [],
+    interval: '1h',
+  });
+
+  assert.equal(candles.length, 48);
+  assert.equal(candles[0].startsAt, new Date(startMs).toISOString());
+  assert.equal(candles.at(-1)?.startsAt, new Date(endMs - 60 * 60_000).toISOString());
+});
+
+test('integrated monthly candles apply the six-hundred cap after hourly aggregation', () => {
+  const startMs = Date.parse('2026-06-01T00:00:00Z');
+  const endMs = startMs + 30 * 24 * 60 * 60_000;
+  const candles = buildCandles({
+    profile: CONSTANT_PROFILE,
+    startMs,
+    endMs,
+    nowMs: endMs,
+    events: [],
+    interval: '1h',
+  });
+
+  assert.equal(candles.length, 600);
+  assert.equal(candles[0].startsAt, new Date(startMs + 120 * 60 * 60_000).toISOString());
+  assert.equal(candles.at(-1)?.startsAt, new Date(endMs - 60 * 60_000).toISOString());
+  assert.ok(candles.every((candle) => (
+    candle.openWon === CONSTANT_PROFILE.basePriceWon
+    && candle.highWon === CONSTANT_PROFILE.basePriceWon
+    && candle.lowWon === CONSTANT_PROFILE.basePriceWon
+    && candle.closeWon === CONSTANT_PROFILE.basePriceWon
+  )));
+});
+
+test('integrated daily candles preserve the full six-month source range', () => {
+  const startMs = Date.parse('2026-01-01T00:00:00Z');
+  const endMs = startMs + 180 * 24 * 60 * 60_000;
+  const candles = buildCandles({
+    profile: CONSTANT_PROFILE,
+    startMs,
+    endMs,
+    nowMs: endMs,
+    events: [],
+    interval: '1d',
+  });
+
+  assert.equal(candles.length, 180);
+  assert.equal(candles[0].startsAt, new Date(startMs).toISOString());
+  assert.equal(candles.at(-1)?.startsAt, new Date(endMs - 24 * 60 * 60_000).toISOString());
 });
