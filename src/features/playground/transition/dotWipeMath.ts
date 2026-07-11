@@ -19,7 +19,14 @@ export interface ParticleBufferCache {
 
 export const COVER_MS = 500;
 export const TOTAL_MS = 1200;
+export const REDUCED_MOTION_TOTAL_MS = 220;
 const SLOW_FRAME_THRESHOLD_MS = 24;
+
+export interface ReducedMotionFrame {
+  opacity: number;
+  shouldCommit: boolean;
+  shouldFinish: boolean;
+}
 
 export class FrameCadenceSampler {
   private previousTimestamp: number;
@@ -111,6 +118,22 @@ export function getTransitionFrame(elapsedMs: number): TransitionFrame {
     };
   }
   return { phase: 'covering', progress: Math.max(0, elapsedMs / COVER_MS), shouldCommit: false };
+}
+
+export function getReducedMotionFrame(elapsedMs: number): ReducedMotionFrame {
+  const elapsed = Math.max(0, elapsedMs);
+  const midpoint = REDUCED_MOTION_TOTAL_MS / 2;
+  if (elapsed >= REDUCED_MOTION_TOTAL_MS) {
+    return { opacity: 0, shouldCommit: true, shouldFinish: true };
+  }
+  if (elapsed >= midpoint) {
+    return {
+      opacity: 1 - (elapsed - midpoint) / midpoint,
+      shouldCommit: true,
+      shouldFinish: false,
+    };
+  }
+  return { opacity: elapsed / midpoint, shouldCommit: false, shouldFinish: false };
 }
 
 export function getHiddenTransitionAction(alreadyCommitted: boolean) {

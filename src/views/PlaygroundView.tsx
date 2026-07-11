@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 
 import {
+  getPlaygroundReturnSurface,
   initialPlaygroundRoute,
   navigatePlayground,
   type PlaygroundAction,
@@ -8,6 +9,7 @@ import {
 } from '@/features/playground/routes';
 import type { Point } from '@/features/playground/transition/dotWipeMath';
 import { DotWipeTransition } from '@/features/playground/transition/DotWipeTransition';
+import { getPlaygroundNavigationTransition } from '@/features/playground/transition/playgroundTransitionPolicy';
 import type { DotWipeRequest } from '@/features/playground/transition/usePlaygroundEntryStore';
 import { useMarketPreviewStore } from '@/features/playground/market/useMarketPreviewStore';
 import { ComingSoonGame } from './playground/ComingSoonGame';
@@ -40,14 +42,20 @@ export default function PlaygroundView() {
   }, [route, wipe]);
 
   const move = (action: PlaygroundAction, origin?: Point) => {
-    if (!origin) {
+    const transition = getPlaygroundNavigationTransition(action);
+    if (transition.mode !== 'dot') {
       setRoute((current) => navigatePlayground(current, action));
       return;
     }
     if (wipe || transitionInFlight.current) return;
     transitionInFlight.current = true;
     pendingAction.current = action;
-    setWipe({ id: ++sequence.current, origin });
+    setWipe({
+      id: ++sequence.current,
+      origin: origin ?? { x: window.innerWidth / 2, y: window.innerHeight / 2 },
+      target: transition.target,
+      returnTo: getPlaygroundReturnSurface(route),
+    });
   };
 
   return (

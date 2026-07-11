@@ -14,7 +14,6 @@ export function PlaygroundEntryOverlay() {
   return (
     <DotWipeTransition
       request={active}
-      label="지금은 쉬는 시간!"
       onCovered={() => {
         if (committedId.current === active.id) return;
         committedId.current = active.id;

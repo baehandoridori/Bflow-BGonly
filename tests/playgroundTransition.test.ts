@@ -6,12 +6,18 @@ import {
   FrameCadenceSampler,
   TransitionCallbackGate,
   getOrCreateParticleBuffers,
+  getReducedMotionFrame,
   getParticleBudget,
   getHiddenTransitionAction,
   getTransitionFrame,
   originFromActivation,
   originFromRect,
 } from '../src/features/playground/transition/dotWipeMath.ts';
+import {
+  getDotWipePresentation,
+  getPlaygroundNavigationTransition,
+} from '../src/features/playground/transition/playgroundTransitionPolicy.ts';
+import { usePlaygroundEntryStore } from '../src/features/playground/transition/usePlaygroundEntryStore.ts';
 
 test('sidebar button center becomes the particle origin', () => {
   assert.deepEqual(originFromRect({ left: 10, top: 20, width: 40, height: 30 }), { x: 30, y: 35 });
@@ -30,6 +36,98 @@ test('particle budget is capped and reduced motion creates no particles', () => 
   assert.equal(getParticleBudget(3840, 2160, true), 0);
   assert.ok(getParticleBudget(3840, 2160, false) <= 12000);
   assert.ok(getParticleBudget(1280, 720, false) >= 4000);
+});
+
+test('only game and market entry use target-specific dot wipes', () => {
+  assert.deepEqual(getPlaygroundNavigationTransition({ kind: 'open-house' }), { mode: 'surface' });
+  assert.deepEqual(getPlaygroundNavigationTransition({ kind: 'go-lobby' }), { mode: 'surface' });
+  assert.deepEqual(getPlaygroundNavigationTransition({ kind: 'return-to-source' }), { mode: 'surface' });
+  assert.deepEqual(getPlaygroundNavigationTransition({ kind: 'open-game', game: 'snake' }), {
+    mode: 'dot', target: 'snake',
+  });
+  assert.deepEqual(getPlaygroundNavigationTransition({ kind: 'open-market' }), {
+    mode: 'dot', target: 'market',
+  });
+  assert.deepEqual(getPlaygroundNavigationTransition({ kind: 'open-account' }), { mode: 'none' });
+});
+
+test('dot target copy and palette are exact', () => {
+  const palette = { cover: '#07090d', text: '#ffffff', accent: '#45e0b5' };
+  assert.deepEqual(getDotWipePresentation('playground-entry'), {
+    eyebrow: null,
+    label: '지금은 쉬는 시간!',
+    accessibleLabel: '지금은 쉬는 시간!',
+    palette,
+  });
+  assert.deepEqual(getDotWipePresentation('tetris'), {
+    eyebrow: 'BAE PLAYGROUND',
+    label: 'LOADING TETRIS',
+    accessibleLabel: 'BAE PLAYGROUND / LOADING TETRIS',
+    palette,
+  });
+  assert.deepEqual(getDotWipePresentation('snake'), {
+    eyebrow: 'BAE PLAYGROUND',
+    label: 'LOADING SNAKE',
+    accessibleLabel: 'BAE PLAYGROUND / LOADING SNAKE',
+    palette,
+  });
+  assert.deepEqual(getDotWipePresentation('sudoku'), {
+    eyebrow: 'BAE PLAYGROUND',
+    label: 'LOADING SUDOKU',
+    accessibleLabel: 'BAE PLAYGROUND / LOADING SUDOKU',
+    palette,
+  });
+  assert.deepEqual(getDotWipePresentation('market'), {
+    eyebrow: 'BAE PLAYGROUND',
+    label: 'OPENING JBBJ MARKET',
+    accessibleLabel: 'BAE PLAYGROUND / OPENING JBBJ MARKET',
+    palette,
+  });
+});
+
+test('reduced motion is a zero-particle 220ms crossfade', () => {
+  assert.equal(getParticleBudget(3840, 2160, true), 0);
+  assert.deepEqual(getReducedMotionFrame(0), {
+    opacity: 0, shouldCommit: false, shouldFinish: false,
+  });
+  assert.deepEqual(getReducedMotionFrame(55), {
+    opacity: 0.5, shouldCommit: false, shouldFinish: false,
+  });
+  assert.deepEqual(getReducedMotionFrame(110), {
+    opacity: 1, shouldCommit: true, shouldFinish: false,
+  });
+  assert.deepEqual(getReducedMotionFrame(165), {
+    opacity: 0.5, shouldCommit: true, shouldFinish: false,
+  });
+  assert.deepEqual(getReducedMotionFrame(220), {
+    opacity: 0, shouldCommit: true, shouldFinish: true,
+  });
+});
+
+test('entry request atomically stores origin, target and return surface', () => {
+  usePlaygroundEntryStore.setState({ active: null });
+  const origin = { x: 73, y: 91 };
+
+  usePlaygroundEntryStore.getState().request(origin);
+
+  const active = usePlaygroundEntryStore.getState().active;
+  assert.ok(active);
+  assert.deepEqual(active, {
+    id: active.id,
+    origin,
+    target: 'playground-entry',
+    returnTo: 'lobby',
+  });
+  usePlaygroundEntryStore.getState().finish(active.id);
+  assert.equal(usePlaygroundEntryStore.getState().active, null);
+});
+
+test('Playground controller atomically captures target and return surface for dot requests', () => {
+  const source = readFileSync('src/views/PlaygroundView.tsx', 'utf8');
+  assert.match(source, /getPlaygroundNavigationTransition/);
+  assert.match(source, /getPlaygroundReturnSurface/);
+  assert.match(source, /target:\s*transition\.target/);
+  assert.match(source, /returnTo:\s*getPlaygroundReturnSurface\(route\)/);
 });
 
 test('a hidden window fast-forwards instead of abandoning an active overlay', () => {

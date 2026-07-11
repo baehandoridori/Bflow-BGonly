@@ -7,29 +7,29 @@ import {
   getOrCreateParticleBuffers,
   getHiddenTransitionAction,
   getParticleBudget,
+  getReducedMotionFrame,
   getTransitionFrame,
 } from './dotWipeMath';
 import type { ParticleBufferCache } from './dotWipeMath';
+import { getDotWipePresentation } from './playgroundTransitionPolicy';
 import type { DotWipeRequest } from './usePlaygroundEntryStore';
 
 export interface DotWipeTransitionProps {
   request: DotWipeRequest;
-  label?: string;
   onCovered: () => void;
   onFinished: () => void;
 }
 
 const MAX_DPR = 1.5;
 const SAFETY_TIMEOUT_MS = 1800;
-const REDUCED_MOTION_TOTAL_MS = 220;
 const TRANSITION_LAYER_Z_INDEX = 2147483647;
 
 export function DotWipeTransition({
   request,
-  label = '지금은 쉬는 시간!',
   onCovered,
   onFinished,
 }: DotWipeTransitionProps) {
+  const presentation = getDotWipePresentation(request.target);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const overlayRef = useRef<HTMLDivElement>(null);
   const committedRef = useRef(false);
@@ -70,13 +70,7 @@ export function DotWipeTransition({
     const { xs, ys, sizes, delays } = buffers;
     const context = canvas.getContext('2d');
 
-    const themeBackground = window
-      .getComputedStyle(document.documentElement)
-      .getPropertyValue('--color-bg-primary')
-      .trim();
-    const fillColor = themeBackground
-      ? `rgb(${themeBackground})`
-      : window.getComputedStyle(document.body).backgroundColor || 'Canvas';
+    const fillColor = presentation.palette.cover;
 
     let width = Math.max(1, window.innerWidth);
     let height = Math.max(1, window.innerHeight);
@@ -205,22 +199,16 @@ export function DotWipeTransition({
       overlay.style.backgroundColor = fillColor;
       overlay.style.opacity = '0';
       const startedAt = performance.now();
-      const midpoint = REDUCED_MOTION_TOTAL_MS / 2;
 
-      const renderReducedMotionFrame = (now: number) => {
+      const renderReducedMotionFrame = () => {
         if (disposed || finishedRef.current) return;
-        const elapsed = Math.max(0, now - startedAt);
-        if (elapsed >= midpoint) commitOnce();
-        if (elapsed >= REDUCED_MOTION_TOTAL_MS) {
-          overlay.style.opacity = '0';
+        const frame = getReducedMotionFrame(performance.now() - startedAt);
+        overlay.style.opacity = String(frame.opacity);
+        if (frame.shouldCommit) commitOnce();
+        if (frame.shouldFinish) {
           finishOnce();
           return;
         }
-        overlay.style.opacity = String(
-          elapsed <= midpoint
-            ? elapsed / midpoint
-            : 1 - (elapsed - midpoint) / midpoint,
-        );
         rafId = window.requestAnimationFrame(renderReducedMotionFrame);
       };
 
@@ -281,14 +269,21 @@ export function DotWipeTransition({
       window.removeEventListener('resize', handleViewportChange);
       resolutionQuery.removeEventListener('change', handleResolutionChange);
     };
-  }, [request.id, request.origin.x, request.origin.y]);
+  }, [
+    presentation.palette.accent,
+    presentation.palette.cover,
+    presentation.palette.text,
+    request.id,
+    request.origin.x,
+    request.origin.y,
+    request.target,
+  ]);
 
   return createPortal(
     <div
       ref={overlayRef}
       className="pointer-events-auto fixed inset-0 isolate overflow-hidden"
       style={{ zIndex: TRANSITION_LAYER_Z_INDEX }}
-      aria-label={label}
     >
       <canvas
         ref={canvasRef}
@@ -298,11 +293,23 @@ export function DotWipeTransition({
       <div
         role="status"
         aria-live="polite"
-        className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center"
+        aria-label={presentation.accessibleLabel}
+        className="pointer-events-none absolute inset-0 z-10 grid place-content-center text-center"
       >
-        <span className="rounded-full border border-accent/30 bg-bg-card/90 px-5 py-2.5 text-sm font-semibold tracking-[0.08em] text-text-primary shadow-xl backdrop-blur-sm">
-          {label}
-        </span>
+        {presentation.eyebrow && (
+          <span
+            className="font-mono text-[10px] font-bold tracking-[0.16em]"
+            style={{ color: presentation.palette.accent }}
+          >
+            {presentation.eyebrow}
+          </span>
+        )}
+        <strong
+          className="mt-2 text-2xl tracking-[-0.04em]"
+          style={{ color: presentation.palette.text }}
+        >
+          {presentation.label}
+        </strong>
       </div>
     </div>,
     document.body,
