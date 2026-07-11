@@ -114,7 +114,7 @@ test('reason selection navigates immediately while persistence settles in the ba
   assert.ok(handler.indexOf('execute({') < handler.indexOf('onOpenStock(stockId)'));
 });
 
-test('destination returns preserve their source while lobby and house cards retain origin wipes', () => {
+test('destination returns use the common history Back while lobby and house cards retain origin wipes', () => {
   const playground = readFileSync('src/views/PlaygroundView.tsx', 'utf8');
   const lobby = readFileSync('src/views/playground/PlaygroundLobby.tsx', 'utf8');
   const activation = readFileSync('src/views/playground/playgroundActivation.ts', 'utf8');
@@ -126,13 +126,13 @@ test('destination returns preserve their source while lobby and house cards reta
 
   assert.match(playground, /getPlaygroundMovePlan/);
   assert.match(playground, /\.\.\.plan\.request/);
-  assert.match(playground, /route\.kind === 'house'[\s\S]*?onBack:\s*\(\) => move\(\{ kind: 'go-lobby' \}\)/);
+  assert.match(playground, /route\.kind === 'house'[\s\S]*?onBack:\s*requestBack/);
   assert.match(playground, /returnLabel=\{route\.returnTo === 'house' \? 'JBBJ 하우스' : '게임 로비'\}/);
-  assert.match(playground, /onBack=\{\(\) => move\(\{ kind: 'return-to-source' \}\)\}/);
-  assert.match(playground, /onExit=\{\(\) => move\(\{ kind: 'return-to-source' \}\)\}/);
+  assert.match(playground, /onBack=\{requestBack\}/);
+  assert.match(playground, /<MarketRouter[\s\S]*?onBack=\{requestBack\}/);
   assert.match(house, /pointFromButtonActivation\(event\)/);
   assert.match(comingSoon, /onClick=\{onBack\}/);
-  assert.match(marketNav, /onClick=\{onExit\}/);
+  assert.match(marketNav, /onClick=\{onBack\}/);
   for (const source of [comingSoon, marketNav]) {
     assert.doesNotMatch(source, /originFromActivation/);
   }

@@ -304,6 +304,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.invoke('market:create-admin-event', input) as Promise<MarketRemoteState>,
   marketDeleteAdminEvent: (eventId: string) =>
     ipcRenderer.invoke('market:delete-admin-event', eventId) as Promise<MarketRemoteState>,
+  onPlaygroundNativeBack: (callback: () => void) => {
+    const handler = () => callback();
+    ipcRenderer.on('playground:native-back', handler);
+    return () => ipcRenderer.removeListener('playground:native-back', handler);
+  },
   // ─── Personal Todos / Task Views (ownership stays in main) ──
   ensureCanonicalSession: () =>
     ipcRenderer.invoke('auth:ensure-canonical-session').then(rememberSessionEpoch),

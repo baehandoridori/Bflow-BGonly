@@ -8,6 +8,8 @@ import {
 import { createPortal } from 'react-dom';
 import { X } from 'lucide-react';
 
+import { usePlaygroundBackInterceptor } from '../PlaygroundBackProvider';
+
 interface MarketActionDialogProps {
   open: boolean;
   title: string;
@@ -45,6 +47,8 @@ export function MarketActionDialog({
   const descriptionId = useId();
   const panelRef = useRef<HTMLDivElement>(null);
   const onCloseRef = useRef(onClose);
+
+  usePlaygroundBackInterceptor(open, () => onCloseRef.current());
 
   useEffect(() => {
     onCloseRef.current = onClose;

@@ -140,6 +140,7 @@ export function MarketOrderPanel({ controller }: MarketOrderPanelProps) {
       </button>
 
       <button
+        id="order-open-account"
         type="button"
         disabled={controlsDisabled}
         onClick={controller.onOpenAccount}

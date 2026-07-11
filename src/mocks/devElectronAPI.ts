@@ -1125,6 +1125,7 @@ export function installDevElectronAPI(): void {
     marketDeleteAdminEvent: async (eventId) => toMarketRemoteState(
       await getPreviewMarketGateway().deleteAdminEvent(eventId),
     ),
+    onPlaygroundNativeBack: noop,
 
     // ─── Personal Todos / Task Views mock ───
     ensureCanonicalSession: async () => {

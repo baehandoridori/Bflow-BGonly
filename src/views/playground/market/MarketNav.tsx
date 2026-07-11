@@ -14,7 +14,7 @@ import { useMarketPreviewStore } from '@/features/playground/market/useMarketPre
 interface MarketNavProps {
   active: MarketRoute['kind'];
   onNavigate(action: PlaygroundAction): void;
-  onExit(): void;
+  onBack(): void;
 }
 
 interface SearchResult {
@@ -24,7 +24,7 @@ interface SearchResult {
   description: string;
 }
 
-export function MarketNav({ active, onNavigate, onExit }: MarketNavProps) {
+export function MarketNav({ active, onNavigate, onBack }: MarketNavProps) {
   const snapshot = useMarketPreviewStore((state) => state.visible);
   const [query, setQuery] = useState('');
   const [open, setOpen] = useState(false);
@@ -134,17 +134,18 @@ export function MarketNav({ active, onNavigate, onExit }: MarketNavProps) {
           </div>
           <button
             type="button"
-            onClick={onExit}
+            onClick={onBack}
             className="inline-flex min-h-11 shrink-0 cursor-pointer items-center gap-2 rounded-xl px-3 py-2 text-sm font-semibold text-text-secondary transition-colors duration-200 hover:bg-bg-border/45 hover:text-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
           >
             <ArrowLeft aria-hidden="true" size={17} />
-            놀이터로
+            {active === 'home' ? '놀이터로' : '뒤로'}
           </button>
         </div>
 
         <div className="flex min-w-0 flex-col gap-3 lg:flex-row lg:items-center">
           <div className="flex min-w-0 flex-wrap items-center gap-1">
             <button
+              id="market-nav-home"
               type="button"
               aria-current={active === 'home' ? 'page' : undefined}
               onClick={() => onNavigate({ kind: 'market-home' })}
@@ -153,6 +154,7 @@ export function MarketNav({ active, onNavigate, onExit }: MarketNavProps) {
               시장 홈
             </button>
             <button
+              id="market-nav-browse"
               type="button"
               onClick={() => {
                 browseRequestId.current += 1;
@@ -166,6 +168,7 @@ export function MarketNav({ active, onNavigate, onExit }: MarketNavProps) {
               종목 둘러보기
             </button>
             <button
+              id="market-nav-account"
               type="button"
               aria-current={active === 'account' ? 'page' : undefined}
               onClick={() => onNavigate({ kind: 'open-account' })}

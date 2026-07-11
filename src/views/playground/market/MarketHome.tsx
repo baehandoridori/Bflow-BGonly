@@ -208,6 +208,7 @@ export function MarketHome({
               return (
                 <button
                   key={item.id}
+                  id={`market-news-open-${item.id}`}
                   type="button"
                   disabled={mutating}
                   onClick={() => void openStockAfterReadingReason(item.stockId)}
@@ -265,6 +266,7 @@ export function MarketHome({
             </details>
           ) : (
             <button
+              id="beginner-mission-open"
               type="button"
               disabled={mutating}
               onClick={runMissionAction}

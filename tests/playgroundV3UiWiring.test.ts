@@ -219,13 +219,13 @@ test('house and game preparation use the real Shell with source-aware returns', 
   assert.match(source, /route\.kind === 'house' && \(\s*<PlaygroundShell/);
   assert.match(source, /titleId:\s*'playground-house-title'/);
   assert.match(source, /title:\s*'JBBJ 하우스'/);
-  assert.match(source, /onBack:\s*\(\) => move\(\{ kind: 'go-lobby' \}\)/);
+  assert.match(source, /onBack:\s*requestBack/);
   assert.match(source, /<JbbjHouse[\s\S]*?ranking=\{ranking\}/);
   assert.match(source, /route\.kind === 'coming-soon' && \(\s*<PlaygroundShell/);
   assert.match(source, /game=\{GAME_DEFINITIONS\[route\.game\]\}/);
   assert.match(source, /returnLabel=\{route\.returnTo === 'house' \? 'JBBJ 하우스' : '게임 로비'\}/);
-  assert.match(source, /onBack=\{\(\) => move\(\{ kind: 'return-to-source' \}\)\}/);
-  assert.match(source, /onExit=\{\(\) => move\(\{ kind: 'return-to-source' \}\)\}/);
+  assert.match(source, /onBack=\{requestBack\}/);
+  assert.match(source, /<MarketRouter[\s\S]*?onBack=\{requestBack\}/);
 });
 
 test('house and game actions keep 44px targets, visible focus and Korean copy at 14px or larger', () => {
@@ -285,10 +285,11 @@ test('PlaygroundView wires the approved lobby through the store-aware root only'
 
 test('Playground root leaves theme ownership to the local shell and market surface', () => {
   const source = readFileSync('src/views/PlaygroundView.tsx', 'utf8');
-  const rootClass = source.match(/return \(\s*<section className="([^"]+)"/)?.[1] ?? '';
+  const rootClass = source.match(/<section className="([^"]+)" aria-labelledby="playground-title"/)?.[1] ?? '';
 
   assert.notEqual(rootClass, '');
   assert.doesNotMatch(rootClass, /\bbg-bg-primary\b|\btext-text-primary\b/);
+  assert.match(source, /<PlaygroundBackProvider registry=\{backInterceptors\}>/);
   assert.match(source, /<PlaygroundShell/);
   assert.match(source, /<MarketRouter/);
 });

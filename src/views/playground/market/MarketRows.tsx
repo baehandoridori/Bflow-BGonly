@@ -192,6 +192,7 @@ export function FavoriteStockCard({
   return (
     <article className="relative min-w-0 rounded-2xl border border-bg-border bg-bg-card">
       <button
+        id={`stock-card-open-${stock.id}`}
         type="button"
         disabled={mutating}
         onClick={onOpen}

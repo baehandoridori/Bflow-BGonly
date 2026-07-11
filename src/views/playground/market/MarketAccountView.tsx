@@ -170,6 +170,7 @@ export function MarketAccountView({
                   return (
                     <button
                       key={holding.stockId}
+                      id={`account-holding-open-${holding.stockId}`}
                       type="button"
                       onClick={() => onOpenStock(holding.stockId)}
                       className="flex min-h-[72px] w-full min-w-0 cursor-pointer items-center justify-between gap-4 whitespace-normal py-4 text-left transition-colors duration-200 hover:bg-bg-border/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent"
@@ -193,6 +194,7 @@ export function MarketAccountView({
               <div className="mt-4 rounded-2xl border border-bg-border bg-bg-card p-5">
                 <p className="text-sm text-text-secondary">아직 보유한 주식이 없어요</p>
                 <button
+                  id="account-browse-stocks"
                   type="button"
                   onClick={onOpenMarketHome}
                   className="mt-4 min-h-11 cursor-pointer rounded-xl bg-accent px-4 py-2 text-sm font-bold text-on-accent transition-colors duration-200 hover:bg-accent/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"

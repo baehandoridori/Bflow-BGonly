@@ -802,6 +802,18 @@ function createWindow(): void {
     },
   });
 
+  const windowForPlaygroundBack = mainWindow;
+  const handlePlaygroundAppCommand = (_event: Electron.Event, command: string) => {
+    if (command !== 'browser-backward') return;
+    if (!windowForPlaygroundBack.isDestroyed()) {
+      windowForPlaygroundBack.webContents.send('playground:native-back');
+    }
+  };
+  windowForPlaygroundBack.on('app-command', handlePlaygroundAppCommand);
+  windowForPlaygroundBack.once('closed', () => {
+    windowForPlaygroundBack.removeListener('app-command', handlePlaygroundAppCommand);
+  });
+
   // 저장된 최대화/전체화면 상태 복원
   if (b?.isMaximized) mainWindow.maximize();
   if (b?.isFullScreen) mainWindow.setFullScreen(true);

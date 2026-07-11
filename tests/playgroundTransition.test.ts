@@ -186,19 +186,17 @@ test('Playground controller consumes the executable move plan for dot requests',
   assert.match(source, /\.\.\.plan\.request/);
   assert.match(source, /pendingAction\.current = action/);
   assert.match(source, /transitionInFlight\.current = true/);
-  assert.match(
-    moveBody,
-    /setRoute\(\(current\) => \{[\s\S]*getPlaygroundMovePlan\(\s*current,/,
-  );
-  assert.match(moveBody, /if \(wipe \|\| transitionInFlight\.current\) return;/);
+  assert.match(moveBody, /getPlaygroundMovePlan\(\s*routeRef\.current,/);
+  assert.match(moveBody, /if \(plan\.mode !== 'dot'\) \{\s*commitNavigation\(action\);/);
+  assert.match(moveBody, /if \(transitionInFlight\.current\) return;/);
   assert.ok(
-    moveBody.indexOf('if (wipe || transitionInFlight.current) return;')
+    moveBody.indexOf('if (transitionInFlight.current) return;')
       < moveBody.indexOf('getPlaygroundMovePlan('),
     'the in-flight lock must reject every navigation mode before planning',
   );
   assert.match(
     source,
-    /onCovered=\{\(\) => \{[\s\S]*pendingAction\.current[\s\S]*navigatePlayground/,
+    /onCovered=\{\(\) => \{[\s\S]*pendingAction\.current[\s\S]*commitNavigation\(action\)/,
   );
   assert.match(
     source,

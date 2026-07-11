@@ -72,3 +72,80 @@ test('profile cannot save Playground as a default view', () => {
   // Playground is deliberately absent: stale/manual defaults are discarded fail-closed before auth.
   assert.doesNotMatch(viewOptions, /value:\s*'playground'/);
 });
+
+test('main window forwards only Windows browser Back and cleans the exact instance listener', () => {
+  const main = readFileSync('electron/main.ts', 'utf8');
+  assert.match(main, /const windowForPlaygroundBack = mainWindow;/);
+  assert.match(main, /windowForPlaygroundBack\.on\('app-command', handlePlaygroundAppCommand\)/);
+  assert.match(main, /command !== 'browser-backward'/);
+  assert.match(main, /windowForPlaygroundBack\.webContents\.send\('playground:native-back'\)/);
+  assert.match(main, /windowForPlaygroundBack\.once\('closed',[\s\S]*?removeListener\('app-command', handlePlaygroundAppCommand\)/);
+  assert.doesNotMatch(main, /popupWin\.on\('app-command'/);
+});
+
+test('preload native Back subscription has a disposer and is represented by type and preview mock', () => {
+  const preload = readFileSync('electron/preload.ts', 'utf8');
+  const types = readFileSync('src/types/index.ts', 'utf8');
+  const mock = readFileSync('src/mocks/devElectronAPI.ts', 'utf8');
+  assert.match(preload, /onPlaygroundNativeBack:\s*\(callback:[\s\S]*?ipcRenderer\.on\('playground:native-back', handler\)[\s\S]*?removeListener\('playground:native-back', handler\)/);
+  assert.match(types, /onPlaygroundNativeBack\?:\s*\(callback:\s*\(\) => void\) => \(\) => void/);
+  assert.match(mock, /onPlaygroundNativeBack:\s*noop/);
+});
+
+test('Playground owns one local Back controller for visible and native Back actions', () => {
+  const view = readFileSync('src/views/PlaygroundView.tsx', 'utf8');
+  const nativeBack = readFileSync('src/features/playground/nativeBackBridge.ts', 'utf8');
+  const marketNav = readFileSync('src/views/playground/market/MarketNav.tsx', 'utf8');
+  const marketRouter = readFileSync('src/views/playground/market/MarketRouter.tsx', 'utf8');
+  assert.match(view, /historyRef\s*=\s*useRef\(createPlaygroundHistory\(initialPlaygroundRoute\)\)/);
+  assert.match(view, /const requestBack = \(\) =>/);
+  assert.match(view, /requestBackRef\.current\(\)/);
+  assert.match(view, /subscribePlaygroundNativeBack\([\s\S]*?return dispose/);
+  assert.match(nativeBack, /window\.electronAPI\?\.onPlaygroundNativeBack\?\.\(listener\)/);
+  assert.match(view, /onBack=\{requestBack\}/);
+  assert.match(marketRouter, /onBack:\s*\(\) => void/);
+  assert.match(marketNav, /onClick=\{onBack\}/);
+  assert.doesNotMatch(view, /navigationBackStack/);
+  assert.doesNotMatch(marketRouter, /navigationBackStack/);
+});
+
+test('dot navigation commits history only after coverage and market restore targets real scrollers', () => {
+  const view = readFileSync('src/views/PlaygroundView.tsx', 'utf8');
+  const router = readFileSync('src/views/playground/market/MarketRouter.tsx', 'utf8');
+  const rows = readFileSync('src/views/playground/market/MarketRows.tsx', 'utf8');
+  const account = readFileSync('src/views/playground/market/MarketAccountView.tsx', 'utf8');
+  assert.match(view, /onCovered=\{\(\) => \{[\s\S]*?commitNavigation\(action\)/);
+  assert.match(view, /data-market-page-scroll-container/);
+  assert.match(router, /data-market-page-scroll-container/);
+  assert.match(router, /data-market-scroll-container/);
+  assert.match(router, /market-page-title/);
+  assert.match(rows, /id=\{`stock-card-open-\$\{stock\.id\}`\}/);
+  assert.match(account, /id=\{`account-holding-open-\$\{holding\.stockId\}`\}/);
+});
+
+test('all shared market action dialogs register one top Back interceptor', () => {
+  const provider = readFileSync('src/views/playground/PlaygroundBackProvider.tsx', 'utf8');
+  const dialog = readFileSync('src/views/playground/market/MarketActionDialog.tsx', 'utf8');
+  assert.match(provider, /usePlaygroundBackInterceptor/);
+  assert.match(dialog, /usePlaygroundBackInterceptor\(open,/);
+});
+
+test('persistent market openers have stable focus restoration ids', () => {
+  const nav = readFileSync('src/views/playground/market/MarketNav.tsx', 'utf8');
+  const home = readFileSync('src/views/playground/market/MarketHome.tsx', 'utf8');
+  const stock = readFileSync('src/views/playground/market/StockDetailView.tsx', 'utf8');
+  const account = readFileSync('src/views/playground/market/MarketAccountView.tsx', 'utf8');
+  const orderPanel = readFileSync('src/views/playground/market/MarketOrderPanel.tsx', 'utf8');
+  for (const id of ['market-nav-home', 'market-nav-browse', 'market-nav-account']) {
+    assert.match(nav, new RegExp(`id=["']${id}["']`));
+  }
+  assert.match(home, /id=\{`market-news-open-\$\{item\.id\}`\}/);
+  assert.match(home, /id="beginner-mission-open"/);
+  assert.match(stock, /id="stock-open-market-home"/);
+  assert.match(stock, /id="stock-open-account"/);
+  assert.match(account, /id="account-browse-stocks"/);
+  assert.match(
+    orderPanel,
+    /<button(?:(?!<\/button>)[\s\S])*id="order-open-account"(?:(?!<\/button>)[\s\S])*onClick=\{controller\.onOpenAccount\}/,
+  );
+});

@@ -25,6 +25,35 @@ export type PlaygroundAction =
 
 export const initialPlaygroundRoute: PlaygroundRoute = { kind: 'lobby' };
 
+export function getPlaygroundRouteIdentity(route: PlaygroundRoute): string {
+  if (route.kind === 'lobby' || route.kind === 'house') {
+    return JSON.stringify([route.kind]);
+  }
+  if (route.kind === 'coming-soon') {
+    return JSON.stringify([route.kind, route.game, route.returnTo]);
+  }
+  if (route.page.kind === 'stock') {
+    return JSON.stringify([route.kind, route.page.kind, route.page.stockId, route.returnTo]);
+  }
+  return JSON.stringify([route.kind, route.page.kind, route.returnTo]);
+}
+
+export function arePlaygroundRoutesSameSurface(
+  left: PlaygroundRoute,
+  right: PlaygroundRoute,
+): boolean {
+  return getPlaygroundRouteIdentity(left) === getPlaygroundRouteIdentity(right);
+}
+
+export function shouldReplacePlaygroundNavigation(
+  action: PlaygroundAction,
+  current: PlaygroundRoute,
+  next: PlaygroundRoute,
+): boolean {
+  if (action.kind === 'market-home' && action.focusRequest) return true;
+  return arePlaygroundRoutesSameSurface(current, next);
+}
+
 export function getPlaygroundReturnSurface(route: PlaygroundRoute): PlaygroundReturnSurface {
   if (route.kind === 'house') return 'house';
   if (route.kind === 'coming-soon' || route.kind === 'market') return route.returnTo;

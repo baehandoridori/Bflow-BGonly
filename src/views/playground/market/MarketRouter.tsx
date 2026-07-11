@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 
 import type { MarketRoute, PlaygroundAction } from '@/features/playground/routes';
+import type { PlaygroundMarketRestoreRequest } from '@/features/playground/history';
 import { buildMarketQuoteWonByStockId } from '@/features/playground/market/marketQuote';
 import { useMarketClock } from '@/features/playground/market/useMarketClock';
 import { useMarketPreviewStore } from '@/features/playground/market/useMarketPreviewStore';
@@ -18,7 +19,8 @@ import { useMarketOrderController } from './useMarketOrderController';
 interface MarketRouterProps {
   route: MarketRoute;
   onNavigate(action: PlaygroundAction): void;
-  onExit(): void;
+  onBack: () => void;
+  restoreRequest: PlaygroundMarketRestoreRequest | null;
   authorizedHansol: boolean;
 }
 
@@ -86,7 +88,13 @@ function MarketStockRoute({
   );
 }
 
-export function MarketRouter({ route, onNavigate, onExit, authorizedHansol }: MarketRouterProps) {
+export function MarketRouter({
+  route,
+  onNavigate,
+  onBack,
+  restoreRequest,
+  authorizedHansol,
+}: MarketRouterProps) {
   const visibleSnapshot = useMarketPreviewStore((state) => state.visible);
   const hasVisibleSnapshot = visibleSnapshot !== null;
   const nowMs = useMarketClock();
@@ -98,14 +106,31 @@ export function MarketRouter({ route, onNavigate, onExit, authorizedHansol }: Ma
 
   useEffect(() => {
     if (!hasVisibleSnapshot) return;
+    if (restoreRequest) return;
     if (route.kind === 'home' && route.focusRequest?.target === 'all-stocks') return;
     const frame = requestAnimationFrame(() => document.getElementById('market-page-title')?.focus());
     return () => cancelAnimationFrame(frame);
-  }, [hasVisibleSnapshot, route]);
+  }, [hasVisibleSnapshot, restoreRequest, route]);
+
+  useEffect(() => {
+    if (!hasVisibleSnapshot || !restoreRequest) return;
+    const frame = requestAnimationFrame(() => {
+      const selector = route.kind === 'stock'
+        ? '[data-market-scroll-container]'
+        : '[data-market-page-scroll-container]';
+      const scroller = document.querySelector<HTMLElement>(selector);
+      if (scroller) scroller.scrollTop = restoreRequest.scrollTop;
+      const opener = restoreRequest.openerId
+        ? document.getElementById(restoreRequest.openerId)
+        : null;
+      (opener ?? document.getElementById('market-page-title'))?.focus();
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [hasVisibleSnapshot, restoreRequest, route.kind]);
 
   return (
     <div className="flex h-full min-w-0 flex-col overflow-hidden bg-bg-primary">
-      <MarketNav active={route.kind} onNavigate={onNavigate} onExit={onExit} />
+      <MarketNav active={route.kind} onNavigate={onNavigate} onBack={onBack} />
       <MarketDataBoundary loadingVariant={selectMarketLoadingVariant(route)}>
         {route.kind === 'stock' ? (
           <MarketStockRoute
@@ -116,7 +141,7 @@ export function MarketRouter({ route, onNavigate, onExit, authorizedHansol }: Ma
             onOpenMarketHome={() => onNavigate({ kind: 'market-home' })}
           />
         ) : (
-          <div className="h-full min-h-0 overflow-y-auto">
+          <div data-market-page-scroll-container className="h-full min-h-0 overflow-y-auto">
             {route.kind === 'home' && (
               <MarketHome
                 focusAllStocksRequestId={route.focusRequest?.target === 'all-stocks'

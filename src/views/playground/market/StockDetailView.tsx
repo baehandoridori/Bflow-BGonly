@@ -88,6 +88,7 @@ export function StockDetailView({
         </h1>
         <p className="mt-3 text-sm leading-6 text-text-secondary">시장 홈에서 다른 회사를 다시 선택해 주세요.</p>
         <button
+          id="stock-open-market-home"
           type="button"
           onClick={onOpenMarketHome}
           className="mt-6 inline-flex min-h-11 cursor-pointer items-center gap-2 rounded-xl bg-accent px-4 py-2.5 text-sm font-semibold text-on-accent transition-colors duration-200 hover:bg-accent/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
@@ -137,6 +138,7 @@ export function StockDetailView({
         >
           <div className="flex flex-wrap items-center gap-2">
             <button
+              id="stock-open-market-home"
               type="button"
               onClick={onOpenMarketHome}
               className="inline-flex min-h-11 cursor-pointer items-center gap-2 rounded-xl border border-bg-border px-3 py-2 text-sm font-semibold text-text-secondary transition-colors duration-200 hover:bg-bg-border/35 hover:text-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
@@ -145,6 +147,7 @@ export function StockDetailView({
               시장 홈
             </button>
             <button
+              id="stock-open-account"
               type="button"
               onClick={onOpenAccount}
               className="inline-flex min-h-11 cursor-pointer items-center gap-2 rounded-xl border border-bg-border px-3 py-2 text-sm font-semibold text-text-secondary transition-colors duration-200 hover:bg-bg-border/35 hover:text-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"

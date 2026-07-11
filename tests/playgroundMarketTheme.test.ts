@@ -50,10 +50,12 @@ test('preview feature only reaches browser persistence through the injected stor
   const storageAdapter = 'src/features/playground/market/localStorageGateway.ts';
   const bridgeAdapter = 'src/features/playground/market/gateway.ts';
   const chartPreferenceAdapter = 'src/features/playground/market/useMarketChartPreference.ts';
+  const nativeBackAdapter = 'src/features/playground/nativeBackBridge.ts';
   for (const file of files.filter((file) => (
     file !== storageAdapter
     && file !== bridgeAdapter
     && file !== chartPreferenceAdapter
+    && file !== nativeBackAdapter
   ))) {
     const source = readFileSync(file, 'utf8');
     assert.doesNotMatch(
@@ -80,4 +82,7 @@ test('preview feature only reaches browser persistence through the injected stor
   assert.match(chartPreference, /bflow:playground-market:chart-style:v2/);
   assert.match(chartPreference, /window\.localStorage/);
   assert.doesNotMatch(chartPreference, /cashWon|holding|account/i);
+  const nativeBack = readFileSync(nativeBackAdapter, 'utf8');
+  assert.match(nativeBack, /window\.electronAPI\?\.onPlaygroundNativeBack/);
+  assert.doesNotMatch(nativeBack, /localStorage|sessionStorage|indexedDB|ipcRenderer|from\s+['"]electron['"]|createClient\(|@supabase|@\/services\//i);
 });

@@ -1379,6 +1379,7 @@ export interface ElectronAPI {
   marketExecute: (command: MarketCommand) => Promise<MarketRemoteState>;
   marketCreateAdminEvent: (input: MarketAdminEventInput) => Promise<MarketRemoteState>;
   marketDeleteAdminEvent: (eventId: string) => Promise<MarketRemoteState>;
+  onPlaygroundNativeBack?: (callback: () => void) => () => void;
   // 슬랙 웹훅
   sendSlackWebhook: (payload: Record<string, string>) => Promise<{ ok: boolean }>;
   // 리깅 완성 공지 웹훅
