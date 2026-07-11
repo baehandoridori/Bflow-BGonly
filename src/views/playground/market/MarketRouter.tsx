@@ -6,6 +6,7 @@ import { MarketAccountView } from './MarketAccountView';
 import { MarketDataBoundary } from './MarketDataBoundary';
 import { MarketHome } from './MarketHome';
 import { MarketNav } from './MarketNav';
+import { selectMarketLoadingVariant } from './marketDataBoundaryView';
 import { StockDetailView } from './StockDetailView';
 
 interface MarketRouterProps {
@@ -27,7 +28,7 @@ export function MarketRouter({ route, onNavigate, onExit }: MarketRouterProps) {
   return (
     <div className="flex h-full min-w-0 flex-col overflow-hidden bg-bg-primary">
       <MarketNav active={route.kind} onNavigate={onNavigate} onExit={onExit} />
-      <MarketDataBoundary loadingVariant={route.kind === 'account' ? 'account' : 'market'}>
+      <MarketDataBoundary loadingVariant={selectMarketLoadingVariant(route)}>
         <div className="h-full min-h-0 overflow-y-auto">
           {route.kind === 'home' && (
             <MarketHome

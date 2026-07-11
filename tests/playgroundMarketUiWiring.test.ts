@@ -1,6 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { existsSync, readFileSync } from 'node:fs';
+import { createElement } from 'react';
+import { renderToStaticMarkup } from 'react-dom/server';
 
 test('market home preserves the approved information order', () => {
   const source = readFileSync('src/views/playground/market/MarketHome.tsx', 'utf8');
@@ -25,32 +27,72 @@ test('market shell has a stable loading and retry boundary', () => {
   assert.match(source, /aria-live="polite"/);
 });
 
-test('account route selects a 184px by 520px account-shaped loading skeleton', () => {
-  const boundary = readFileSync('src/views/playground/market/MarketDataBoundary.tsx', 'utf8');
+test('market routes select the loading skeleton variant used by MarketRouter', async () => {
+  const helperPath = 'src/views/playground/market/marketDataBoundaryView.ts';
+  assert.equal(existsSync(helperPath), true, 'executable market boundary helpers must exist');
+  const { selectMarketLoadingVariant } = await import(
+    '../src/views/playground/market/marketDataBoundaryView.ts'
+  );
   const router = readFileSync('src/views/playground/market/MarketRouter.tsx', 'utf8');
 
-  assert.match(
-    router,
-    /<MarketDataBoundary loadingVariant=\{route\.kind === 'account' \? 'account' : 'market'\}>/,
+  assert.equal(selectMarketLoadingVariant({ kind: 'account' }), 'account');
+  assert.equal(selectMarketLoadingVariant({ kind: 'home' }), 'market');
+  assert.equal(selectMarketLoadingVariant({ kind: 'stock', stockId: 'jbbj-test' }), 'market');
+  assert.match(router, /selectMarketLoadingVariant\(route\)/);
+});
+
+test('production loading skeletons render the account dimensions and generic fallback', async () => {
+  const helperPath = 'src/views/playground/market/marketDataBoundaryView.ts';
+  assert.equal(existsSync(helperPath), true, 'executable market boundary helpers must exist');
+  const { MarketLoadingSkeleton } = await import(
+    '../src/views/playground/market/marketDataBoundaryView.ts'
   );
 
-  const skeletonStart = boundary.indexOf('function MarketAccountSkeleton');
-  const skeletonEnd = boundary.indexOf('\nexport function MarketDataBoundary', skeletonStart);
-  assert.ok(skeletonStart >= 0 && skeletonEnd > skeletonStart);
-  const accountSkeleton = boundary.slice(skeletonStart, skeletonEnd);
+  const accountMarkup = renderToStaticMarkup(createElement(MarketLoadingSkeleton, {
+    variant: 'account',
+  }));
+  const marketMarkup = renderToStaticMarkup(createElement(MarketLoadingSkeleton, {
+    variant: 'market',
+  }));
 
-  assert.match(
-    accountSkeleton,
-    /grid w-full max-w-\[980px\] grid-cols-1[\s\S]*lg:grid-cols-\[184px_minmax\(0,1fr\)\]/,
-  );
-  assert.match(accountSkeleton, /w-full max-w-\[520px\]/);
+  assert.match(accountMarkup, /max-w-\[980px\]/);
+  assert.match(accountMarkup, /lg:grid-cols-\[184px_minmax\(0,1fr\)\]/);
+  assert.match(accountMarkup, /max-w-\[520px\]/);
+  const accountMenu = accountMarkup.match(/<nav[^>]*>[\s\S]*?<\/nav>/)?.[0] ?? '';
+  assert.match(accountMenu, /self-start/);
+  assert.equal((accountMenu.match(/min-h-11/g) ?? []).length, 5);
   for (const rowHeight of ['min-h-11', 'min-h-16', 'min-h-[72px]', 'min-h-12']) {
-    assert.match(accountSkeleton, new RegExp(rowHeight.replace(/[\[\]]/g, '\\$&')));
+    assert.match(accountMarkup, new RegExp(rowHeight.replace(/[\[\]]/g, '\\$&')));
   }
-  assert.match(accountSkeleton, /animate-pulse/);
-  assert.match(accountSkeleton, /motion-reduce:animate-none/);
-  assert.match(boundary, /loadingVariant === 'account'\s*\?\s*<MarketAccountSkeleton \/>/);
-  assert.match(boundary, /max-w-5xl animate-pulse space-y-6 motion-reduce:animate-none/);
+  assert.match(accountMarkup, /animate-pulse/);
+  assert.match(accountMarkup, /motion-reduce:animate-none/);
+
+  assert.match(marketMarkup, /max-w-5xl/);
+  for (const height of ['h-28', 'h-48', 'h-72']) assert.match(marketMarkup, new RegExp(height));
+  assert.doesNotMatch(marketMarkup, /max-w-\[980px\]|max-w-\[520px\]|min-h-\[72px\]/);
+});
+
+test('market boundary resolver chooses retry error, loading, and visible content', async () => {
+  const helperPath = 'src/views/playground/market/marketDataBoundaryView.ts';
+  assert.equal(existsSync(helperPath), true, 'executable market boundary helpers must exist');
+  const { resolveMarketBoundaryState } = await import(
+    '../src/views/playground/market/marketDataBoundaryView.ts'
+  );
+  const boundary = readFileSync('src/views/playground/market/MarketDataBoundary.tsx', 'utf8');
+
+  assert.equal(resolveMarketBoundaryState({ hasVisibleSnapshot: false, error: null }), 'loading');
+  assert.equal(
+    resolveMarketBoundaryState({ hasVisibleSnapshot: false, error: 'load failed' }),
+    'error',
+  );
+  assert.equal(resolveMarketBoundaryState({ hasVisibleSnapshot: true, error: null }), 'content');
+  assert.equal(
+    resolveMarketBoundaryState({ hasVisibleSnapshot: true, error: 'mutation failed' }),
+    'content',
+  );
+  assert.match(boundary, /resolveMarketBoundaryState\(/);
+  assert.match(boundary, /boundaryState === 'error'/);
+  assert.match(boundary, /boundaryState === 'loading'/);
 });
 
 test('market search follows the keyboard combobox contract', () => {
@@ -295,4 +337,45 @@ test('point transfer failure keeps its inline error and also raises a global toa
   assert.match(failurePath, /toast\.error\(message\)/);
   assert.ok(failurePath.indexOf('setLocalError(message)') < failurePath.indexOf('toast.error(message)'));
   assert.match(source, /aria-live="polite"[\s\S]*\{displayedError \?\? ''\}/);
+});
+
+test('allowed point transfer close clears local and shared errors while blocked close stays open', async () => {
+  const helperPath = 'src/views/playground/market/pointTransferDialogState.ts';
+  assert.equal(existsSync(helperPath), true, 'executable point transfer close helper must exist');
+  const { requestPointTransferDialogClose } = await import(
+    '../src/views/playground/market/pointTransferDialogState.ts'
+  );
+  const source = readFileSync('src/views/playground/market/PointTransferDialog.tsx', 'utf8');
+  const allowedEvents: string[] = [];
+
+  const allowed = requestPointTransferDialogClose({
+    blocked: false,
+    setLocalError: (message) => allowedEvents.push(`local:${String(message)}`),
+    clearError: () => allowedEvents.push('store:clear'),
+    onClose: () => allowedEvents.push('dialog:close'),
+  });
+  assert.equal(allowed, true);
+  assert.deepEqual(allowedEvents, ['local:null', 'store:clear', 'dialog:close']);
+
+  const blockedEvents: string[] = [];
+  const blocked = requestPointTransferDialogClose({
+    blocked: true,
+    setLocalError: (message) => blockedEvents.push(`local:${String(message)}`),
+    clearError: () => blockedEvents.push('store:clear'),
+    onClose: () => blockedEvents.push('dialog:close'),
+  });
+  assert.equal(blocked, false);
+  assert.deepEqual(blockedEvents, ['local:포인트 이동이 끝날 때까지 잠시 기다려 주세요.']);
+
+  const submitStart = source.indexOf('const submitTransfer');
+  const closeStart = source.indexOf('const closeTransferDialog', submitStart);
+  const successStart = source.indexOf('if (succeeded)', submitStart);
+  assert.ok(submitStart >= 0 && successStart > submitStart && closeStart > successStart);
+  const successClose = source.slice(successStart, closeStart);
+  assert.match(successClose, /requestPointTransferDialogClose\(/);
+  assert.doesNotMatch(successClose, /\bonClose\(\)/);
+
+  const closeEnd = source.indexOf('\n  };', closeStart);
+  assert.ok(closeEnd > closeStart);
+  assert.match(source.slice(closeStart, closeEnd), /requestPointTransferDialogClose\(/);
 });

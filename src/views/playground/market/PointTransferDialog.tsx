@@ -12,6 +12,7 @@ import { getAccountSummary, validateMarketCommand } from '@/features/playground/
 import type { MarketCommand } from '@/features/playground/market/types';
 import { useMarketPreviewStore } from '@/features/playground/market/useMarketPreviewStore';
 import { MarketActionDialog } from './MarketActionDialog';
+import { requestPointTransferDialogClose } from './pointTransferDialogState';
 
 interface PointTransferDialogProps {
   direction: 'wallet-to-broker' | 'broker-to-wallet';
@@ -125,7 +126,12 @@ export function PointTransferDialog({
     setSubmitting(false);
 
     if (succeeded) {
-      onClose();
+      requestPointTransferDialogClose({
+        blocked: false,
+        setLocalError,
+        clearError,
+        onClose,
+      });
       return;
     }
 
@@ -136,12 +142,12 @@ export function PointTransferDialog({
   };
 
   const closeTransferDialog = () => {
-    if (submitting || mutating) {
-      setLocalError('포인트 이동이 끝날 때까지 잠시 기다려 주세요.');
-      return;
-    }
-    setLocalError(null);
-    onClose();
+    requestPointTransferDialogClose({
+      blocked: submitting || mutating,
+      setLocalError,
+      clearError,
+      onClose,
+    });
   };
 
   return (
