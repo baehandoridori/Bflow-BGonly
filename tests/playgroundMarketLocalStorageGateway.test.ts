@@ -1,7 +1,16 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { createMarketLocalStorageGateway } from '../src/features/playground/market/localStorageGateway.ts';
+import {
+  createMarketLocalStorageGateway,
+  MarketStorageReadError,
+} from '../src/features/playground/market/localStorageGateway.ts';
+import type {
+  Holding,
+  MarketNews,
+  MarketSnapshot,
+  MarketStock,
+} from '../src/features/playground/market/types.ts';
 
 class FakeStorage implements Storage {
   private readonly values = new Map<string, string>();
@@ -32,6 +41,47 @@ class FakeStorage implements Storage {
 }
 
 const STORAGE_KEY = 'bflow:playground-market:v2:hansol-preview';
+
+interface PersistedFixture {
+  version: 2;
+  snapshot: MarketSnapshot;
+  requestFingerprints: Record<string, string>;
+  updatedAtMs: number;
+}
+
+function createGateway(storage: Storage) {
+  return createMarketLocalStorageGateway({
+    userId: 'hansol-preview',
+    storage,
+    now: () => 1_720_000_000_000,
+    latencyMs: 0,
+  });
+}
+
+function isRetryableStorageError(error: unknown): boolean {
+  return (
+    error instanceof MarketStorageReadError
+    && error.message === '저장된 시장 정보를 읽지 못했어요. 다시 시도해 주세요.'
+    && error.retryable === true
+  );
+}
+
+async function assertJsonValidCorruptionRejected(
+  mutate: (persisted: PersistedFixture) => void,
+): Promise<void> {
+  const storage = new FakeStorage();
+  const gateway = createGateway(storage);
+  await gateway.read();
+  const persisted = JSON.parse(storage.getItem(STORAGE_KEY)!) as PersistedFixture;
+  mutate(persisted);
+  const corruptedRaw = JSON.stringify(persisted);
+  storage.setItem(STORAGE_KEY, corruptedRaw);
+  const originalLength = storage.length;
+
+  await assert.rejects(() => gateway.read(), isRetryableStorageError);
+  assert.equal(storage.getItem(STORAGE_KEY), corruptedRaw, 'corrupt payload must not be replaced by a new grant');
+  assert.equal(storage.length, originalLength, 'failed read must not add another account key');
+}
 
 test('first read creates the approved account under the user-scoped v2 key', async () => {
   const storage = new FakeStorage();
@@ -132,4 +182,100 @@ test('corrupt JSON exposes a retryable read error without granting another accou
     ),
   );
   assert.equal(storage.getItem(STORAGE_KEY), '{not-json');
+});
+
+test('JSON-valid null holding is rejected without overwriting storage or regranting points', async () => {
+  await assertJsonValidCorruptionRejected((persisted) => {
+    persisted.snapshot.account.holdings = [null as unknown as Holding];
+  });
+});
+
+test('unknown stock holdings and duplicate holdings are rejected', async () => {
+  const cases: Array<(persisted: PersistedFixture) => void> = [
+    (persisted) => {
+      persisted.snapshot.account.holdings = [{
+        stockId: 'unknown-stock', quantityShares: 1, costBasisWon: 100,
+      }];
+    },
+    (persisted) => {
+      persisted.snapshot.account.holdings = [
+        { stockId: 'jbbj', quantityShares: 1, costBasisWon: 100 },
+        { stockId: 'jbbj', quantityShares: 2, costBasisWon: 200 },
+      ];
+    },
+  ];
+  for (const mutate of cases) await assertJsonValidCorruptionRejected(mutate);
+});
+
+test('nonpositive, fractional and unsafe holding quantities are rejected', async () => {
+  for (const quantityShares of [0, -1, 1.5, Number.MAX_SAFE_INTEGER + 1]) {
+    await assertJsonValidCorruptionRejected((persisted) => {
+      persisted.snapshot.account.holdings = [{
+        stockId: 'jbbj', quantityShares, costBasisWon: 100,
+      }];
+    });
+  }
+});
+
+test('negative, fractional and unsafe account balances are rejected', async () => {
+  const cases: Array<(persisted: PersistedFixture) => void> = [
+    (persisted) => { persisted.snapshot.account.walletPoints = -1; },
+    (persisted) => { persisted.snapshot.account.lifetimeEarnedPoints = Number.MAX_SAFE_INTEGER + 1; },
+    (persisted) => { persisted.snapshot.account.cashWon = 0.5; },
+    (persisted) => { persisted.snapshot.account.realizedPnlThisMonthWon = Number.MAX_SAFE_INTEGER + 1; },
+    (persisted) => { persisted.snapshot.account.unrealizedPnlAtMonthStartWon = 1.5; },
+  ];
+  for (const mutate of cases) await assertJsonValidCorruptionRejected(mutate);
+});
+
+test('negative safe PnL remains a valid persisted account state', async () => {
+  const storage = new FakeStorage();
+  const gateway = createGateway(storage);
+  await gateway.read();
+  const persisted = JSON.parse(storage.getItem(STORAGE_KEY)!) as PersistedFixture;
+  persisted.snapshot.account.realizedPnlThisMonthWon = -100;
+  persisted.snapshot.account.unrealizedPnlAtMonthStartWon = -50;
+  storage.setItem(STORAGE_KEY, JSON.stringify(persisted));
+
+  const restored = await gateway.read();
+  assert.equal(restored.account.realizedPnlThisMonthWon, -100);
+  assert.equal(restored.account.unrealizedPnlAtMonthStartWon, -50);
+});
+
+test('malformed stocks, price points and duplicate stock IDs are rejected', async () => {
+  const cases: Array<(persisted: PersistedFixture) => void> = [
+    (persisted) => { persisted.snapshot.stocks[0] = null as unknown as MarketStock; },
+    (persisted) => { persisted.snapshot.stocks[0].name = ''; },
+    (persisted) => { persisted.snapshot.stocks[0].referencePriceWon = 1.5; },
+    (persisted) => { persisted.snapshot.stocks[0].series.today[0].priceWon = 0; },
+    (persisted) => { persisted.snapshot.stocks[0].series.today[0].at = ''; },
+    (persisted) => { persisted.snapshot.stocks[1].id = persisted.snapshot.stocks[0].id; },
+  ];
+  for (const mutate of cases) await assertJsonValidCorruptionRejected(mutate);
+});
+
+test('malformed news and favorite stock references are rejected', async () => {
+  const cases: Array<(persisted: PersistedFixture) => void> = [
+    (persisted) => { persisted.snapshot.news[0] = null as unknown as MarketNews; },
+    (persisted) => { persisted.snapshot.news[0].title = ''; },
+    (persisted) => { persisted.snapshot.news[0].stockId = 'unknown-stock'; },
+    (persisted) => { persisted.snapshot.favoriteStockIds = [null as unknown as string]; },
+    (persisted) => { persisted.snapshot.favoriteStockIds = ['unknown-stock']; },
+    (persisted) => { persisted.snapshot.favoriteStockIds = ['jbbj', 'jbbj']; },
+  ];
+  for (const mutate of cases) await assertJsonValidCorruptionRejected(mutate);
+});
+
+test('persisted metadata and request fingerprints require safe integer and string pairs', async () => {
+  const cases: Array<(persisted: PersistedFixture) => void> = [
+    (persisted) => { persisted.snapshot.revision = 1.5; },
+    (persisted) => { persisted.updatedAtMs = -1; },
+    (persisted) => {
+      persisted.requestFingerprints = { bad: 42 as unknown as string };
+    },
+    (persisted) => {
+      persisted.requestFingerprints = [] as unknown as Record<string, string>;
+    },
+  ];
+  for (const mutate of cases) await assertJsonValidCorruptionRejected(mutate);
 });

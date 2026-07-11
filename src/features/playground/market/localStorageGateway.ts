@@ -4,10 +4,19 @@ import {
   type MarketPreviewGateway,
 } from './previewGateway.ts';
 import { createMarketPreviewSeed } from './seed.ts';
-import type { MarketCommand, MarketSnapshot } from './types';
+import type {
+  Holding,
+  MarketCommand,
+  MarketNews,
+  MarketSnapshot,
+  MarketStock,
+  PricePoint,
+} from './types';
 
 const STORAGE_KEY_PREFIX = 'bflow:playground-market:v2:';
 const READ_ERROR_MESSAGE = '저장된 시장 정보를 읽지 못했어요. 다시 시도해 주세요.';
+const MARKET_PERIODS = ['today', 'week', 'month', 'all'] as const;
+const BEGINNER_MISSIONS = new Set(['favorite', 'reason', 'first-order', 'complete']);
 
 interface PersistedMarketPreview {
   version: 2;
@@ -44,25 +53,126 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
-function hasPersistedSnapshotShape(value: unknown): value is MarketSnapshot {
-  if (!isRecord(value) || !isRecord(value.account)) return false;
-  const { account } = value;
+function isNonEmptyString(value: unknown): value is string {
+  return typeof value === 'string' && value.length > 0;
+}
+
+function isPositiveSafeInteger(value: unknown): value is number {
+  return Number.isSafeInteger(value) && Number(value) > 0;
+}
+
+function isNonNegativeSafeInteger(value: unknown): value is number {
+  return Number.isSafeInteger(value) && Number(value) >= 0;
+}
+
+function isSafeInteger(value: unknown): value is number {
+  return Number.isSafeInteger(value);
+}
+
+function hasUniqueValues(values: readonly string[]): boolean {
+  return new Set(values).size === values.length;
+}
+
+function isPricePoint(value: unknown): value is PricePoint {
   return (
-    Number.isSafeInteger(value.revision)
-    && value.marketOpenLabel === '24시간 열림'
-    && Array.isArray(value.stocks)
-    && Array.isArray(value.news)
-    && Array.isArray(value.favoriteStockIds)
-    && ['favorite', 'reason', 'first-order', 'complete'].includes(String(value.beginnerMission))
-    && Number.isSafeInteger(account.walletPoints)
-    && Number(account.walletPoints) >= 0
-    && Number.isSafeInteger(account.lifetimeEarnedPoints)
-    && Number(account.lifetimeEarnedPoints) >= 0
-    && Number.isSafeInteger(account.cashWon)
-    && Number(account.cashWon) >= 0
-    && Number.isSafeInteger(account.realizedPnlThisMonthWon)
-    && Number.isSafeInteger(account.unrealizedPnlAtMonthStartWon)
-    && Array.isArray(account.holdings)
+    isRecord(value)
+    && isNonEmptyString(value.at)
+    && isPositiveSafeInteger(value.priceWon)
+    && (value.newsId === undefined || isNonEmptyString(value.newsId))
+  );
+}
+
+function isMarketStock(value: unknown): value is MarketStock {
+  const series = isRecord(value) ? value.series : undefined;
+  if (
+    !isRecord(value)
+    || !isNonEmptyString(value.id)
+    || !isNonEmptyString(value.name)
+    || !isNonEmptyString(value.symbol)
+    || !isNonEmptyString(value.character)
+    || !isNonEmptyString(value.description)
+    || !isNonEmptyString(value.reason)
+    || !isPositiveSafeInteger(value.referencePriceWon)
+    || !isPositiveSafeInteger(value.previousCloseWon)
+    || !isRecord(series)
+  ) return false;
+  return MARKET_PERIODS.every((period) => (
+    Array.isArray(series[period])
+    && series[period].every(isPricePoint)
+  ));
+}
+
+function isMarketNews(value: unknown): value is MarketNews {
+  return (
+    isRecord(value)
+    && isNonEmptyString(value.id)
+    && isNonEmptyString(value.stockId)
+    && isNonEmptyString(value.title)
+    && isNonEmptyString(value.summary)
+    && isNonEmptyString(value.publishedAt)
+  );
+}
+
+function isHolding(value: unknown, stockIds: ReadonlySet<string>): value is Holding {
+  return (
+    isRecord(value)
+    && isNonEmptyString(value.stockId)
+    && stockIds.has(value.stockId)
+    && isPositiveSafeInteger(value.quantityShares)
+    && isNonNegativeSafeInteger(value.costBasisWon)
+  );
+}
+
+function hasValidAccount(value: unknown, stockIds: ReadonlySet<string>): boolean {
+  if (
+    !isRecord(value)
+    || !isNonNegativeSafeInteger(value.walletPoints)
+    || !isNonNegativeSafeInteger(value.lifetimeEarnedPoints)
+    || !isNonNegativeSafeInteger(value.cashWon)
+    || !isSafeInteger(value.realizedPnlThisMonthWon)
+    || !isSafeInteger(value.unrealizedPnlAtMonthStartWon)
+    || !Array.isArray(value.holdings)
+    || !value.holdings.every((holding) => isHolding(holding, stockIds))
+  ) return false;
+  return hasUniqueValues(value.holdings.map((holding) => holding.stockId));
+}
+
+function hasPersistedSnapshotShape(value: unknown): value is MarketSnapshot {
+  if (
+    !isRecord(value)
+    || !isNonNegativeSafeInteger(value.revision)
+    || value.marketOpenLabel !== '24시간 열림'
+    || !Array.isArray(value.stocks)
+    || value.stocks.length === 0
+    || !value.stocks.every(isMarketStock)
+    || !Array.isArray(value.news)
+    || !value.news.every(isMarketNews)
+    || !Array.isArray(value.favoriteStockIds)
+    || !value.favoriteStockIds.every(isNonEmptyString)
+    || typeof value.beginnerMission !== 'string'
+    || !BEGINNER_MISSIONS.has(value.beginnerMission)
+  ) return false;
+
+  const stockIds = value.stocks.map((stock) => stock.id);
+  if (!hasUniqueValues(stockIds)) return false;
+  const stockIdSet = new Set(stockIds);
+  const newsIds = value.news.map((news) => news.id);
+  if (
+    !hasUniqueValues(newsIds)
+    || value.news.some((news) => !stockIdSet.has(news.stockId))
+    || !hasUniqueValues(value.favoriteStockIds)
+    || value.favoriteStockIds.some((stockId) => !stockIdSet.has(stockId))
+  ) return false;
+
+  return hasValidAccount(value.account, stockIdSet);
+}
+
+function hasStringFingerprintPairs(value: unknown): value is Record<string, string> {
+  return (
+    isRecord(value)
+    && Object.entries(value).every(([key, fingerprint]) => (
+      typeof key === 'string' && typeof fingerprint === 'string'
+    ))
   );
 }
 
@@ -72,9 +182,8 @@ function parsePersistedMarketPreview(raw: string): PersistedMarketPreview {
     !isRecord(parsed)
     || parsed.version !== 2
     || !hasPersistedSnapshotShape(parsed.snapshot)
-    || !isRecord(parsed.requestFingerprints)
-    || !Object.values(parsed.requestFingerprints).every((value) => typeof value === 'string')
-    || !Number.isSafeInteger(parsed.updatedAtMs)
+    || !hasStringFingerprintPairs(parsed.requestFingerprints)
+    || !isNonNegativeSafeInteger(parsed.updatedAtMs)
   ) {
     throw new Error('invalid market preview storage shape');
   }
