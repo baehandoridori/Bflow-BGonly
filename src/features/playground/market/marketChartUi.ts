@@ -13,9 +13,15 @@ export function nearestMarketCandleIndex(
   pointerX: number,
   width: number,
   candleCount: number,
+  plotPadding = 0,
 ): number {
   if (candleCount <= 1) return 0;
-  const ratio = width > 0 ? Math.min(1, Math.max(0, pointerX / width)) : 1;
+  const safeWidth = Math.max(0, width);
+  const safePadding = Math.min(Math.max(0, plotPadding), safeWidth / 2);
+  const plotWidth = safeWidth - safePadding * 2;
+  const ratio = plotWidth > 0
+    ? Math.min(1, Math.max(0, (pointerX - safePadding) / plotWidth))
+    : 0;
   return Math.round(ratio * (candleCount - 1));
 }
 

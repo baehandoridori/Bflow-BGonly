@@ -14,6 +14,7 @@ const INTERVAL_MS: Readonly<Record<'1h' | '1d', number>> = {
   '1d': 24 * 60 * MINUTE_MS,
 };
 const MAX_COMPLETED_DISPLAY_BARS = 8192;
+const EXTREMA_PROBE_COUNT = 24;
 
 export type MarketDisplayPriceSampler = (
   profile: MarketInstrumentProfile,
@@ -53,11 +54,9 @@ function profileFingerprint(profile: MarketInstrumentProfile): string {
 }
 
 function eventFingerprint(
-  stockId: string,
   events: readonly MarketAdminEvent[],
 ): string {
   return events
-    .filter((event) => event.stockId === stockId)
     .map((event) => [
       event.id,
       event.revision,
@@ -106,7 +105,12 @@ function buildRepresentativeBar(
   sourceEndMs: number,
 ): MarketCandle {
   const isCompleted = bucketEndMs <= request.nowMs;
-  const eventsKey = eventFingerprint(request.profile.stockId, request.events);
+  const overlapEndMs = isCompleted ? sourceEndMs : Math.min(sourceEndMs, request.nowMs);
+  const relevantEvents = request.events.filter((event) => (
+    event.stockId === request.profile.stockId
+    && eventOverlaps(event, sourceStartMs, overlapEndMs, !isCompleted)
+  ));
+  const eventsKey = eventFingerprint(relevantEvents);
   const cacheKey = [
     profileFingerprint(request.profile),
     sourceStartMs,
@@ -118,39 +122,29 @@ function buildRepresentativeBar(
   const cached = isCompleted ? completedDisplayBarCache.get(cacheKey) : undefined;
   if (cached) return cloneCandle(cached);
 
-  const openWon = sampler(request.profile, sourceStartMs, request.events);
-  let highWon = openWon;
-  let lowWon = openWon;
-  let closeWon = openWon;
-  for (
-    let minuteStartMs = sourceStartMs;
-    minuteStartMs < sourceEndMs;
-    minuteStartMs += MINUTE_MS
-  ) {
-    const representativeCloseMs = Math.min(
-      minuteStartMs + MINUTE_MS - 1000,
-      sourceEndMs - 1,
-      request.nowMs,
+  const closeSampleMs = Math.min(sourceEndMs - 1, request.nowMs);
+  const sampleTimes = new Set<number>([sourceStartMs, closeSampleMs]);
+  const sampleSpanMs = Math.max(0, closeSampleMs - sourceStartMs);
+  for (let probe = 1; probe <= EXTREMA_PROBE_COUNT; probe += 1) {
+    sampleTimes.add(
+      sourceStartMs
+      + Math.floor((sampleSpanMs * probe) / (EXTREMA_PROBE_COUNT + 1)),
     );
-    closeWon = sampler(request.profile, representativeCloseMs, request.events);
-    highWon = Math.max(highWon, closeWon);
-    lowWon = Math.min(lowWon, closeWon);
   }
-
-  const overlapEndMs = isCompleted ? sourceEndMs : Math.min(sourceEndMs, request.nowMs);
-  const newsIds = request.events
-    .filter((event) => (
-      event.stockId === request.profile.stockId
-      && eventOverlaps(event, sourceStartMs, overlapEndMs, !isCompleted)
-    ))
+  const prices = [...sampleTimes]
+    .sort((left, right) => left - right)
+    .map((sampleMs) => sampler(request.profile, sampleMs, relevantEvents));
+  const openWon = prices[0];
+  const closeWon = prices.at(-1)!;
+  const newsIds = relevantEvents
     .map((event) => event.id)
     .filter((eventId, index, allIds) => allIds.indexOf(eventId) === index)
     .sort();
   const candle: MarketCandle = {
     startsAt: new Date(bucketStartMs).toISOString(),
     openWon,
-    highWon,
-    lowWon,
+    highWon: Math.max(...prices),
+    lowWon: Math.min(...prices),
     closeWon,
     newsIds,
   };

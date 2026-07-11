@@ -51,28 +51,88 @@ test('long-range display candles stay within a representative sampler budget', a
   assert.equal(existsSync(DISPLAY_SERIES_PATH), true, 'display candle fast path must exist');
   const displaySeries = await import('../src/features/playground/market/marketDisplaySeries.ts');
   const endMs = Date.parse('2026-07-12T00:00:00Z');
+  const startMs = endMs - 600 * 24 * 60 * 60_000;
+  const events = Array.from({ length: 10 }, (_, index) => ({
+    id: `budget-event-${index}`,
+    stockId: 'display-budget-profile',
+    kind: 'trend' as const,
+    title: `장기 이벤트 ${index}`,
+    impactBps: index + 1,
+    startsAt: new Date(startMs).toISOString(),
+    endsAt: new Date(endMs).toISOString(),
+    revision: 1,
+  }));
   let sampleCalls = 0;
-  const candles = displaySeries.buildMarketDisplayCandles({
+  const request = {
     profile: {
       stockId: 'display-budget-profile',
       basePriceWon: 1000,
       volatilityBps: 100,
       phase: 0.25,
     },
-    startMs: endMs - 600 * 24 * 60 * 60_000,
+    startMs,
     endMs,
     nowMs: endMs - 1,
-    events: [],
-    interval: '1d',
+    events,
+    interval: '1d' as const,
     samplePriceWon: (_profile: unknown, atMs: number) => {
       sampleCalls += 1;
       return 1000 + Math.floor((atMs / 60_000) % 11);
     },
-  });
+  };
+  const candles = displaySeries.buildMarketDisplayCandles(request);
+  const firstCallCount = sampleCalls;
+  sampleCalls = 0;
+  displaySeries.buildMarketDisplayCandles(request);
 
   assert.equal(candles.length, 600);
-  assert.ok(sampleCalls <= 600 * (1440 + 1), `used ${sampleCalls} representative samples`);
-  assert.ok(sampleCalls > 600, 'each daily candle still samples its minute closes');
+  assert.ok(firstCallCount <= 600 * 26, `first call used ${firstCallCount} samples`);
+  assert.ok(firstCallCount >= 600 * 2, 'each bar keeps at least open and close samples');
+  assert.ok(sampleCalls <= 26, `cached repeat used ${sampleCalls} samples`);
+});
+
+test('a future event does not invalidate completed historical display bars', async () => {
+  const { buildMarketDisplayCandles } = await import(
+    '../src/features/playground/market/marketDisplaySeries.ts'
+  );
+  const startMs = Date.parse('2026-07-09T00:00:00Z');
+  const endMs = Date.parse('2026-07-11T00:00:00Z');
+  let sampleCalls = 0;
+  const samplePriceWon = (_profile: unknown, atMs: number) => {
+    sampleCalls += 1;
+    return 1000 + Math.floor((atMs - startMs) / 60_000) % 17;
+  };
+  const request = {
+    profile: {
+      stockId: 'future-event-cache-profile',
+      basePriceWon: 1000,
+      volatilityBps: 100,
+      phase: 0.5,
+    },
+    startMs,
+    endMs,
+    nowMs: endMs + 24 * 60 * 60_000,
+    events: [],
+    interval: '1d' as const,
+    samplePriceWon,
+  };
+  buildMarketDisplayCandles(request);
+  sampleCalls = 0;
+  buildMarketDisplayCandles({
+    ...request,
+    events: [{
+      id: 'future-only',
+      stockId: request.profile.stockId,
+      kind: 'shock-up',
+      title: '과거 봉 뒤에 시작하는 이벤트',
+      impactBps: 1000,
+      startsAt: new Date(endMs + 2 * 24 * 60 * 60_000).toISOString(),
+      endsAt: new Date(endMs + 3 * 24 * 60 * 60_000).toISOString(),
+      revision: 1,
+    }],
+  });
+
+  assert.equal(sampleCalls, 0);
 });
 
 test('completed display bars are cached but the forming bar is resampled', async () => {
@@ -129,9 +189,14 @@ test('chart UI helpers cap bars, select the nearest bar, and describe OHLC text'
   const limited = chartUi.limitMarketChartCandles(candles);
   assert.equal(limited.length, 600);
   assert.equal(limited[0].startsAt, candles[5].startsAt);
-  assert.equal(chartUi.nearestMarketCandleIndex(-10, 100, 5), 0);
-  assert.equal(chartUi.nearestMarketCandleIndex(50, 100, 5), 2);
-  assert.equal(chartUi.nearestMarketCandleIndex(120, 100, 5), 4);
+  assert.equal(chartUi.nearestMarketCandleIndex(-10, 100, 5, 10), 0);
+  assert.equal(chartUi.nearestMarketCandleIndex(10, 100, 5, 10), 0);
+  assert.equal(chartUi.nearestMarketCandleIndex(50, 100, 5, 10), 2);
+  assert.equal(chartUi.nearestMarketCandleIndex(90, 100, 5, 10), 4);
+  assert.equal(chartUi.nearestMarketCandleIndex(120, 100, 5, 10), 4);
+  assert.equal(chartUi.nearestMarketCandleIndex(14, 720, 600, 14), 0);
+  assert.equal(chartUi.nearestMarketCandleIndex(360, 720, 600, 14), 300);
+  assert.equal(chartUi.nearestMarketCandleIndex(706, 720, 600, 14), 599);
 
   const summary = chartUi.formatMarketCandleSummary('JBBJ', candles[0]);
   for (const text of ['JBBJ', '7월', '시가 1,000원', '고가 1,020원', '저가 980원', '종가 1,010원']) {
@@ -158,9 +223,25 @@ test('canvas uses DPR, semantic theme colors, and one keyboard range summary', (
   assert.doesNotMatch(source, /#[0-9a-f]{3,8}/i);
   assert.equal((source.match(/type="range"/g) ?? []).length, 1);
   assert.match(source, /aria-valuetext=\{selectedSummary\}/);
-  assert.match(source, /aria-live="polite"/);
   assert.match(source, /onPointerMove/);
+  assert.match(source, /nearestMarketCandleIndex\([^)]*CHART_PADDING/s);
   assert.match(source, /limitMarketChartCandles\(candles\)/);
+});
+
+test('canvas only announces OHLC after pointer or keyboard interaction', () => {
+  const source = readFileSync(CANVAS_PATH, 'utf8');
+  const liveRegion = source.match(
+    /<p[^>]*aria-live="polite"[^>]*>[\s\S]*?\{([A-Za-z]+Summary)\}[\s\S]*?<\/p>/,
+  );
+
+  assert.ok(liveRegion, 'one polite live region must remain for user selections');
+  assert.equal(liveRegion[1], 'announcedSummary');
+  assert.match(source, /const \[announcedSummary, setAnnouncedSummary\]/);
+  assert.match(source, /setAnnouncedSummary\(/);
+  assert.doesNotMatch(
+    source,
+    /<p className="mt-3 min-h-12[^>]*aria-live="polite"/,
+  );
 });
 
 test('chart controls expose every approved style, interval, and range label', () => {

@@ -36,6 +36,7 @@ export function MarketChartCanvas({ stockName, candles, style }: MarketChartCanv
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const visibleCandles = useMemo(() => limitMarketChartCandles(candles), [candles]);
   const [selectedIndex, setSelectedIndex] = useState(() => Math.max(0, visibleCandles.length - 1));
+  const [announcedSummary, setAnnouncedSummary] = useState('');
   const tracksLatestRef = useRef(true);
   const lastIndex = Math.max(0, visibleCandles.length - 1);
   const selectedCandle = visibleCandles[Math.min(selectedIndex, lastIndex)] ?? null;
@@ -196,10 +197,23 @@ export function MarketChartCanvas({ stockName, candles, style }: MarketChartCanv
     return () => observer.disconnect();
   }, [lastIndex, selectedCandle, selectedIndex, style, visibleCandles]);
 
-  const selectFromPointer = (pointerX: number, width: number) => {
-    const nextIndex = nearestMarketCandleIndex(pointerX, width, visibleCandles.length);
+  const selectCandle = (nextIndex: number, announce: boolean) => {
     tracksLatestRef.current = nextIndex === lastIndex;
     setSelectedIndex(nextIndex);
+    const nextCandle = visibleCandles[nextIndex];
+    if (announce && nextCandle) {
+      setAnnouncedSummary(formatMarketCandleSummary(stockName, nextCandle));
+    }
+  };
+
+  const selectFromPointer = (pointerX: number, width: number) => {
+    const nextIndex = nearestMarketCandleIndex(
+      pointerX,
+      width,
+      visibleCandles.length,
+      CHART_PADDING,
+    );
+    selectCandle(nextIndex, true);
   };
 
   return (
@@ -221,8 +235,7 @@ export function MarketChartCanvas({ stockName, candles, style }: MarketChartCanv
           aria-valuetext={selectedSummary}
           onChange={(event) => {
             const nextIndex = Number(event.currentTarget.value);
-            tracksLatestRef.current = nextIndex === lastIndex;
-            setSelectedIndex(nextIndex);
+            selectCandle(nextIndex, true);
           }}
           onPointerMove={(event) => {
             const bounds = event.currentTarget.getBoundingClientRect();
@@ -235,8 +248,11 @@ export function MarketChartCanvas({ stockName, candles, style }: MarketChartCanv
           className="absolute inset-0 h-full w-full cursor-crosshair opacity-0 focus:opacity-0 disabled:cursor-default"
         />
       </div>
-      <p className="mt-3 min-h-12 text-sm leading-6 text-text-secondary" aria-live="polite">
+      <p className="mt-3 min-h-12 text-sm leading-6 text-text-secondary">
         {selectedSummary}
+      </p>
+      <p className="sr-only" aria-live="polite" aria-atomic="true">
+        {announcedSummary}
       </p>
     </div>
   );
