@@ -1,64 +1,111 @@
 import type { Holding, MarketCommand, MarketSnapshot, MarketStock, MarketTrend, PricePoint } from './types';
 
-export const SHARE_SCALE = 1_000_000;
-const UNSAFE_BUY_QUANTITY_MESSAGE = '주문 수량을 안전하게 계산할 수 없어요';
+const INVALID_POINTS_MESSAGE = '1P 이상 안전한 정수로 입력해 주세요';
+const INVALID_SHARES_MESSAGE = '1주 이상 안전한 정수로 입력해 주세요';
+const INVALID_PRICE_MESSAGE = '현재 가격을 확인할 수 없어요';
+const UNSAFE_ORDER_TOTAL_MESSAGE = '주문 금액을 안전하게 계산할 수 없어요';
+const UNSAFE_BALANCE_MESSAGE = '잔액을 안전하게 계산할 수 없어요';
+const MAX_SAFE_BIGINT = BigInt(Number.MAX_SAFE_INTEGER);
+const MIN_SAFE_BIGINT = -MAX_SAFE_BIGINT;
 
-export function holdingValuePoints(holding: Holding, pricePoints: number): number {
-  return Math.round((holding.quantityMicros * pricePoints) / SHARE_SCALE);
+function isPositiveSafeInteger(value: number): boolean {
+  return Number.isSafeInteger(value) && value > 0;
 }
 
-export function getBuyProjection(
-  holding: Holding | undefined,
-  pricePoints: number,
-  spentPoints: number,
-): { purchasedQuantityMicros: number } | null {
-  const currentQuantityMicros = holding?.quantityMicros ?? 0;
-  const currentCostBasisPoints = holding?.costBasisPoints ?? 0;
-  const targetCostBasisPoints = currentCostBasisPoints + spentPoints;
-  if (
-    !Number.isSafeInteger(currentQuantityMicros)
-    || currentQuantityMicros < 0
-    || !Number.isSafeInteger(currentCostBasisPoints)
-    || currentCostBasisPoints < 0
-    || !Number.isSafeInteger(currentQuantityMicros * pricePoints)
-    || !Number.isSafeInteger(targetCostBasisPoints)
-  ) return null;
-
-  const currentValuePoints = holding ? holdingValuePoints(holding, pricePoints) : 0;
-  const targetValuePoints = currentValuePoints + spentPoints;
-  const scaledTargetValue = targetValuePoints * SHARE_SCALE;
-  if (!Number.isSafeInteger(targetValuePoints) || !Number.isSafeInteger(scaledTargetValue)) return null;
-
-  const targetQuantityMicros = Math.round(scaledTargetValue / pricePoints);
-  const addedQuantityMicros = targetQuantityMicros - currentQuantityMicros;
-  if (
-    !Number.isSafeInteger(targetQuantityMicros)
-    || !Number.isSafeInteger(addedQuantityMicros)
-    || addedQuantityMicros <= 0
-    || !Number.isSafeInteger(targetQuantityMicros * pricePoints)
-    || !Number.isSafeInteger(targetQuantityMicros * 10000)
-    || !Number.isSafeInteger(targetCostBasisPoints * targetValuePoints)
-  ) return null;
-
-  const projectedValuePoints = Math.round((targetQuantityMicros * pricePoints) / SHARE_SCALE);
-  return projectedValuePoints === targetValuePoints
-    ? { purchasedQuantityMicros: addedQuantityMicros }
-    : null;
+function isNonNegativeSafeInteger(value: number): boolean {
+  return Number.isSafeInteger(value) && value >= 0;
 }
 
-export function getStockQuote(stock: Pick<MarketStock, 'pricePoints' | 'previousClosePoints'>) {
-  const changePoints = stock.pricePoints - stock.previousClosePoints;
-  const changeRate = stock.previousClosePoints > 0
-    ? Math.round((changePoints / stock.previousClosePoints) * 1000) / 10
+function safeSum(...values: number[]): number | null {
+  const sum = values.reduce((total, value) => total + value, 0);
+  return Number.isSafeInteger(sum) ? sum : null;
+}
+
+function safeAddAndSubtract(base: number, added: number, subtracted: number): number | null {
+  if (![base, added, subtracted].every(Number.isSafeInteger)) return null;
+  const result = BigInt(base) + BigInt(added) - BigInt(subtracted);
+  return result >= MIN_SAFE_BIGINT && result <= MAX_SAFE_BIGINT ? Number(result) : null;
+}
+
+function effectiveOrderPriceWon(
+  command: Extract<MarketCommand, { kind: 'buy' | 'sell' }>,
+  currentPriceWon?: number,
+): number {
+  return currentPriceWon ?? command.quotedPriceWon;
+}
+
+function proportionalCostBasisWon(
+  costBasisWon: number,
+  soldQuantityShares: number,
+  totalQuantityShares: number,
+): number {
+  if (soldQuantityShares === totalQuantityShares) return costBasisWon;
+  const numerator = BigInt(costBasisWon) * BigInt(soldQuantityShares);
+  const denominator = BigInt(totalQuantityShares);
+  const quotient = numerator / denominator;
+  const remainder = numerator % denominator;
+  return Number(quotient + (remainder * 2n >= denominator ? 1n : 0n));
+}
+
+export function holdingValueWon(holding: Holding, priceWon: number): number {
+  const valueWon = holding.quantityShares * priceWon;
+  if (
+    !isNonNegativeSafeInteger(holding.quantityShares)
+    || !isNonNegativeSafeInteger(priceWon)
+    || !Number.isSafeInteger(valueWon)
+  ) {
+    throw new Error(UNSAFE_ORDER_TOTAL_MESSAGE);
+  }
+  return valueWon;
+}
+
+export function getBuyCostWon(quantityShares: number, priceWon: number): number {
+  const costWon = quantityShares * priceWon;
+  if (
+    !isPositiveSafeInteger(quantityShares)
+    || !isPositiveSafeInteger(priceWon)
+    || !Number.isSafeInteger(costWon)
+  ) {
+    throw new Error(UNSAFE_ORDER_TOTAL_MESSAGE);
+  }
+  return costWon;
+}
+
+export function maxBuyableShares(cashWon: number, priceWon: number): number {
+  if (!isNonNegativeSafeInteger(cashWon) || !isPositiveSafeInteger(priceWon)) return 0;
+  return Math.floor(cashWon / priceWon);
+}
+
+export function getSellProjection(
+  holding: Holding,
+  priceWon: number,
+  quantityShares: number | 'all',
+) {
+  const soldQuantityShares = quantityShares === 'all' ? holding.quantityShares : quantityShares;
+  const proceedsWon = getBuyCostWon(soldQuantityShares, priceWon);
+  const soldCostBasisWon = proportionalCostBasisWon(
+    holding.costBasisWon,
+    soldQuantityShares,
+    holding.quantityShares,
+  );
+  return { soldQuantityShares, proceedsWon, soldCostBasisWon };
+}
+
+export function getStockQuote(
+  stock: Pick<MarketStock, 'referencePriceWon' | 'previousCloseWon'>,
+) {
+  const changeWon = stock.referencePriceWon - stock.previousCloseWon;
+  const changeRate = stock.previousCloseWon > 0
+    ? Math.round((changeWon / stock.previousCloseWon) * 1000) / 10
     : 0;
-  const trend: MarketTrend = changePoints > 0 ? 'up' : changePoints < 0 ? 'down' : 'flat';
-  return { changePoints, changeRate, trend };
+  const trend: MarketTrend = changeWon > 0 ? 'up' : changeWon < 0 ? 'down' : 'flat';
+  return { changeWon, changeRate, trend };
 }
 
 export function toReturnSeries(series: PricePoint[]): number[] {
-  const first = series[0]?.pricePoints ?? 0;
+  const first = series[0]?.priceWon ?? 0;
   if (first <= 0) return series.map(() => 0);
-  return series.map((point) => ((point.pricePoints - first) / first) * 100);
+  return series.map((point) => ((point.priceWon - first) / first) * 100);
 }
 
 export function getSharedReturnDomain(seriesGroups: number[][]) {
@@ -89,7 +136,7 @@ export function getChartGeometry(
   height: number,
   domain?: { min: number; max: number },
 ) {
-  return getNumericGeometry(series.map((point) => point.pricePoints), width, height, domain);
+  return getNumericGeometry(series.map((point) => point.priceWon), width, height, domain);
 }
 
 export function getChartHoverBands(points: Array<{ x: number }>, width: number) {
@@ -104,81 +151,126 @@ export function getChartHoverBands(points: Array<{ x: number }>, width: number) 
   });
 }
 
-export function getSellProjection(holding: Holding, pricePoints: number, ratioBps: number) {
-  let soldQuantityMicros = ratioBps === 10000
-    ? holding.quantityMicros
-    : Math.max(1, Math.floor((holding.quantityMicros * ratioBps) / 10000));
-  const currentValuePoints = holdingValuePoints(holding, pricePoints);
-  let remainingQuantityMicros = holding.quantityMicros - soldQuantityMicros;
-  const remainingValuePoints = remainingQuantityMicros === 0
-    ? 0
-    : holdingValuePoints({ ...holding, quantityMicros: remainingQuantityMicros }, pricePoints);
-  if (remainingQuantityMicros > 0 && remainingValuePoints === 0) {
-    soldQuantityMicros = holding.quantityMicros;
-    remainingQuantityMicros = 0;
-  }
-  const remainingCostPoints = remainingQuantityMicros === 0
-    ? 0
-    : currentValuePoints > 0
-      ? Math.round((holding.costBasisPoints * remainingValuePoints) / currentValuePoints)
-      : Math.round((holding.costBasisPoints * remainingQuantityMicros) / holding.quantityMicros);
-  const proceedsPoints = currentValuePoints - remainingValuePoints;
-  const soldCostPoints = holding.costBasisPoints - remainingCostPoints;
-  return { soldQuantityMicros, proceedsPoints, soldCostPoints };
-}
-
 export function getAccountSummary(snapshot: MarketSnapshot) {
-  const holdingsValuePoints = snapshot.account.holdings.reduce((sum, holding) => {
+  const holdingsValueWon = snapshot.account.holdings.reduce((sum, holding) => {
     const stock = snapshot.stocks.find((item) => item.id === holding.stockId);
-    return sum + (stock ? holdingValuePoints(holding, stock.pricePoints) : 0);
+    const valueWon = stock ? holdingValueWon(holding, stock.referencePriceWon) : 0;
+    const next = safeSum(sum, valueWon);
+    if (next === null) throw new Error(UNSAFE_BALANCE_MESSAGE);
+    return next;
   }, 0);
-  const totalCost = snapshot.account.holdings.reduce((sum, holding) => sum + holding.costBasisPoints, 0);
-  const unrealizedPnlPoints = holdingsValuePoints - totalCost;
-  const realizedPnlPoints = snapshot.account.realizedPnlThisMonthPoints;
-  const monthlyUnrealizedChangePoints = unrealizedPnlPoints - snapshot.account.unrealizedPnlAtMonthStartPoints;
+  const totalCostBasisWon = snapshot.account.holdings.reduce((sum, holding) => {
+    const next = safeSum(sum, holding.costBasisWon);
+    if (next === null) throw new Error(UNSAFE_BALANCE_MESSAGE);
+    return next;
+  }, 0);
+  const totalAssetsWon = safeSum(snapshot.account.cashWon, holdingsValueWon);
+  if (totalAssetsWon === null) throw new Error(UNSAFE_BALANCE_MESSAGE);
+  const unrealizedPnlWon = holdingsValueWon - totalCostBasisWon;
+  const realizedPnlWon = snapshot.account.realizedPnlThisMonthWon;
+  const monthlyUnrealizedChangeWon = unrealizedPnlWon - snapshot.account.unrealizedPnlAtMonthStartWon;
+  const monthlyTotalPnlWon = realizedPnlWon + monthlyUnrealizedChangeWon;
+  if (
+    !Number.isSafeInteger(unrealizedPnlWon)
+    || !Number.isSafeInteger(monthlyUnrealizedChangeWon)
+    || !Number.isSafeInteger(monthlyTotalPnlWon)
+  ) throw new Error(UNSAFE_BALANCE_MESSAGE);
   return {
     walletPoints: snapshot.account.walletPoints,
-    cashPoints: snapshot.account.cashPoints,
-    holdingsValuePoints,
-    totalAssetsPoints: snapshot.account.cashPoints + holdingsValuePoints,
-    realizedPnlPoints,
-    unrealizedPnlPoints,
-    monthlyUnrealizedChangePoints,
-    monthlyTotalPnlPoints: realizedPnlPoints + monthlyUnrealizedChangePoints,
+    lifetimeEarnedPoints: snapshot.account.lifetimeEarnedPoints,
+    cashWon: snapshot.account.cashWon,
+    holdingsValueWon,
+    totalAssetsWon,
+    realizedPnlWon,
+    unrealizedPnlWon,
+    monthlyUnrealizedChangeWon,
+    monthlyTotalPnlWon,
   };
 }
 
-export function validateMarketCommand(snapshot: MarketSnapshot, command: MarketCommand): string | null {
-  if ('points' in command && (!Number.isSafeInteger(command.points) || command.points <= 0)) return '1P 이상 입력해 주세요';
-  if (command.kind === 'favorite') return snapshot.stocks.some((stock) => stock.id === command.stockId) ? null : '종목을 찾지 못했어요';
-  if (command.kind === 'read-reason') return snapshot.stocks.some((stock) => stock.id === command.stockId) ? null : '종목을 찾지 못했어요';
-  if (command.kind === 'transfer') {
-    const available = command.direction === 'wallet-to-broker' ? snapshot.account.walletPoints : snapshot.account.cashPoints;
-    return command.points <= available ? null : command.direction === 'wallet-to-broker'
-      ? '포인트 지갑 잔액이 부족해요'
-      : '꺼낼 수 있는 예수금이 부족해요';
-  }
-  const stock = snapshot.stocks.find((item) => item.id === command.stockId);
-  if (!stock) return '종목을 찾지 못했어요';
-  if (!Number.isSafeInteger(stock.pricePoints) || stock.pricePoints <= 0) return '현재 가격을 확인할 수 없어요';
-  if (command.kind === 'buy') {
-    if (command.points > snapshot.account.cashPoints) return '예수금이 부족해요';
-    const holding = snapshot.account.holdings.find((item) => item.stockId === command.stockId);
-    return getBuyProjection(holding, stock.pricePoints, command.points) === null
-      ? UNSAFE_BUY_QUANTITY_MESSAGE
-      : null;
-  }
-  if (!Number.isInteger(command.ratioBps) || command.ratioBps < 100 || command.ratioBps > 10000) return '1%부터 100%까지 입력해 주세요';
-  if (command.ratioBps % 100 !== 0) return '매도 비율은 1% 단위로 입력해 주세요';
-  const holding = snapshot.account.holdings.find((item) => item.stockId === command.stockId);
-  if (!holding?.quantityMicros) return '보유한 주식이 없어요';
-  return getSellProjection(holding, stock.pricePoints, command.ratioBps).proceedsPoints >= 1
-    ? null
-    : '받을 포인트가 1P보다 작아요. 더 큰 비율을 선택해 주세요';
+function validateHolding(holding: Holding): string | null {
+  if (!isPositiveSafeInteger(holding.quantityShares)) return '보유 수량을 확인할 수 없어요';
+  if (!isNonNegativeSafeInteger(holding.costBasisWon)) return '보유 원가를 확인할 수 없어요';
+  return null;
 }
 
-export function applyMarketCommand(snapshot: MarketSnapshot, command: MarketCommand): MarketSnapshot {
-  const error = validateMarketCommand(snapshot, command);
+export function validateMarketCommand(
+  snapshot: MarketSnapshot,
+  command: MarketCommand,
+  currentPriceWon?: number,
+): string | null {
+  if (command.kind === 'favorite' || command.kind === 'read-reason') {
+    return snapshot.stocks.some((stock) => stock.id === command.stockId) ? null : '종목을 찾지 못했어요';
+  }
+
+  if (command.kind === 'transfer') {
+    if (!isPositiveSafeInteger(command.points)) return INVALID_POINTS_MESSAGE;
+    const available = command.direction === 'wallet-to-broker'
+      ? snapshot.account.walletPoints
+      : snapshot.account.cashWon;
+    if (command.points > available) {
+      return command.direction === 'wallet-to-broker'
+        ? '포인트 지갑 잔액이 부족해요'
+        : '꺼낼 수 있는 예수금이 부족해요';
+    }
+    const destination = command.direction === 'wallet-to-broker'
+      ? snapshot.account.cashWon
+      : snapshot.account.walletPoints;
+    return safeSum(destination, command.points) === null ? UNSAFE_BALANCE_MESSAGE : null;
+  }
+
+  if (!snapshot.stocks.some((stock) => stock.id === command.stockId)) return '종목을 찾지 못했어요';
+  const priceWon = effectiveOrderPriceWon(command, currentPriceWon);
+  if (!isPositiveSafeInteger(priceWon)) return INVALID_PRICE_MESSAGE;
+
+  if (command.kind === 'buy') {
+    if (!isPositiveSafeInteger(command.quantityShares)) return INVALID_SHARES_MESSAGE;
+    const costWon = command.quantityShares * priceWon;
+    if (!Number.isSafeInteger(costWon)) return UNSAFE_ORDER_TOTAL_MESSAGE;
+    if (costWon > snapshot.account.cashWon) return '예수금이 부족해요';
+    const holding = snapshot.account.holdings.find((item) => item.stockId === command.stockId);
+    if (holding) {
+      const holdingError = validateHolding(holding);
+      if (holdingError) return holdingError;
+      if (safeSum(holding.quantityShares, command.quantityShares) === null) return '보유 수량을 안전하게 계산할 수 없어요';
+      if (safeSum(holding.costBasisWon, costWon) === null) return '보유 원가를 안전하게 계산할 수 없어요';
+    }
+    return null;
+  }
+
+  if (command.quantityShares !== 'all' && !isPositiveSafeInteger(command.quantityShares)) {
+    return INVALID_SHARES_MESSAGE;
+  }
+  const holding = snapshot.account.holdings.find((item) => item.stockId === command.stockId);
+  if (!holding) return '보유한 주식이 없어요';
+  const holdingError = validateHolding(holding);
+  if (holdingError) return holdingError;
+  const soldQuantityShares = command.quantityShares === 'all'
+    ? holding.quantityShares
+    : command.quantityShares;
+  if (soldQuantityShares > holding.quantityShares) return '보유 주식 수량이 부족해요';
+  const proceedsWon = soldQuantityShares * priceWon;
+  if (!Number.isSafeInteger(proceedsWon)) return UNSAFE_ORDER_TOTAL_MESSAGE;
+  const soldCostBasisWon = proportionalCostBasisWon(
+    holding.costBasisWon,
+    soldQuantityShares,
+    holding.quantityShares,
+  );
+  if (safeSum(snapshot.account.cashWon, proceedsWon) === null) return UNSAFE_BALANCE_MESSAGE;
+  const realizedPnlWon = safeAddAndSubtract(
+    snapshot.account.realizedPnlThisMonthWon,
+    proceedsWon,
+    soldCostBasisWon,
+  );
+  return realizedPnlWon === null ? UNSAFE_BALANCE_MESSAGE : null;
+}
+
+export function applyMarketCommand(
+  snapshot: MarketSnapshot,
+  command: MarketCommand,
+  currentPriceWon?: number,
+): MarketSnapshot {
+  const error = validateMarketCommand(snapshot, command, currentPriceWon);
   if (error) throw new Error(error);
   const next = structuredClone(snapshot);
   next.revision += 1;
@@ -197,39 +289,49 @@ export function applyMarketCommand(snapshot: MarketSnapshot, command: MarketComm
   }
 
   if (command.kind === 'transfer') {
-    const sign = command.direction === 'wallet-to-broker' ? 1 : -1;
-    next.account.walletPoints -= sign * command.points;
-    next.account.cashPoints += sign * command.points;
+    if (command.direction === 'wallet-to-broker') {
+      next.account.walletPoints -= command.points;
+      next.account.cashWon += command.points;
+    } else {
+      next.account.walletPoints += command.points;
+      next.account.cashWon -= command.points;
+    }
     return next;
   }
 
-  const stock = next.stocks.find((item) => item.id === command.stockId)!;
+  const priceWon = effectiveOrderPriceWon(command, currentPriceWon);
   const existing = next.account.holdings.find((item) => item.stockId === command.stockId);
 
   if (command.kind === 'buy') {
-    const projection = getBuyProjection(existing, stock.pricePoints, command.points);
-    if (projection === null) throw new Error(UNSAFE_BUY_QUANTITY_MESSAGE);
-    const spentPoints = command.points;
+    const costWon = getBuyCostWon(command.quantityShares, priceWon);
     if (existing) {
-      existing.quantityMicros += projection.purchasedQuantityMicros;
-      existing.costBasisPoints += spentPoints;
+      existing.quantityShares += command.quantityShares;
+      existing.costBasisWon += costWon;
     } else {
       next.account.holdings.push({
-        stockId: stock.id,
-        quantityMicros: projection.purchasedQuantityMicros,
-        costBasisPoints: spentPoints,
+        stockId: command.stockId,
+        quantityShares: command.quantityShares,
+        costBasisWon: costWon,
       });
     }
-    next.account.cashPoints -= spentPoints;
+    next.account.cashWon -= costWon;
     if (next.beginnerMission === 'first-order') next.beginnerMission = 'complete';
     return next;
   }
 
-  const projection = getSellProjection(existing!, stock.pricePoints, command.ratioBps);
-  existing!.quantityMicros -= projection.soldQuantityMicros;
-  existing!.costBasisPoints -= projection.soldCostPoints;
-  next.account.cashPoints += projection.proceedsPoints;
-  next.account.realizedPnlThisMonthPoints += projection.proceedsPoints - projection.soldCostPoints;
-  if (existing!.quantityMicros <= 0) next.account.holdings = next.account.holdings.filter((item) => item !== existing);
+  const projection = getSellProjection(existing!, priceWon, command.quantityShares);
+  existing!.quantityShares -= projection.soldQuantityShares;
+  existing!.costBasisWon -= projection.soldCostBasisWon;
+  next.account.cashWon += projection.proceedsWon;
+  const realizedPnlWon = safeAddAndSubtract(
+    next.account.realizedPnlThisMonthWon,
+    projection.proceedsWon,
+    projection.soldCostBasisWon,
+  );
+  if (realizedPnlWon === null) throw new Error(UNSAFE_BALANCE_MESSAGE);
+  next.account.realizedPnlThisMonthWon = realizedPnlWon;
+  if (existing!.quantityShares === 0) {
+    next.account.holdings = next.account.holdings.filter((item) => item.stockId !== command.stockId);
+  }
   return next;
 }

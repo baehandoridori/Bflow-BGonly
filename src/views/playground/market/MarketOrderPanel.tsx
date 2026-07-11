@@ -3,12 +3,15 @@ import { ArrowLeft, Check, WalletCards } from 'lucide-react';
 import { toast } from 'sonner';
 
 import {
-  getBuyProjection,
+  getBuyCostWon,
   getSellProjection,
-  SHARE_SCALE,
+  maxBuyableShares,
   validateMarketCommand,
 } from '@/features/playground/market/domain';
+import { formatShares, formatWon } from '@/features/playground/market/format';
 import type {
+  Holding,
+  MarketCommand,
   MarketSnapshot,
   MarketStock,
 } from '@/features/playground/market/types';
@@ -22,30 +25,19 @@ interface MarketOrderPanelProps {
 }
 
 type OrderSide = 'buy' | 'sell';
-const BUY_PRESETS = [100, 500, 1000] as const;
-const SELL_PRESETS = [2500, 5000, 10000] as const;
-
-const BUY_PRESET_LABELS: Record<(typeof BUY_PRESETS)[number], string> = {
-  100: '100P',
-  500: '500P',
-  1000: '1,000P',
-};
-const SELL_PRESET_LABELS: Record<(typeof SELL_PRESETS)[number], string> = {
-  2500: '25%',
-  5000: '50%',
-  10000: '전부',
-};
+const SHARE_PRESETS = [1, 5, 10] as const;
 const LIMIT_PREVIEW_TOAST = '지정가 입력 흐름을 확인했어요. 실제 예약과 체결은 운영 시세 엔진 연결 후 활성화돼요.';
 
-type BuyChoice = (typeof BUY_PRESETS)[number] | 'max';
-type SellChoice = (typeof SELL_PRESETS)[number] | 'custom';
-type LimitBudgetChoice = (typeof BUY_PRESETS)[number] | 'custom';
+type SharePreset = (typeof SHARE_PRESETS)[number];
+type BuyChoice = SharePreset | 'max';
+type SellChoice = SharePreset | 'all' | 'custom';
+type LimitQuantityChoice = SharePreset | 'custom';
 
 interface LimitDraft {
   side: OrderSide;
   desiredPriceInput: string;
-  budgetChoice: LimitBudgetChoice;
-  customBudgetInput: string;
+  quantityChoice: LimitQuantityChoice;
+  customQuantityInput: string;
 }
 
 type DialogState =
@@ -53,57 +45,46 @@ type DialogState =
     kind: 'buy-confirm';
     stockId: string;
     stockName: string;
-    pricePoints: number;
-    points: number;
-    purchasedQuantityMicros: number;
-    remainingCashPoints: number;
+    priceWon: number;
+    quantityShares: number;
+    totalWon: number;
+    remainingCashWon: number;
   }
   | {
     kind: 'sell-confirm';
     stockId: string;
     stockName: string;
-    pricePoints: number;
-    ratioBps: number;
-    soldQuantityMicros: number;
-    proceedsPoints: number;
-    remainingQuantityMicros: number;
+    priceWon: number;
+    quantityShares: number | 'all';
+    soldQuantityShares: number;
+    proceedsWon: number;
+    remainingQuantityShares: number;
   }
   | { kind: 'limit-edit'; draft: LimitDraft }
   | {
     kind: 'limit-review';
     draft: LimitDraft;
-    desiredPricePoints: number;
-    budgetPoints: number;
-    estimatedQuantityMicros: number;
+    desiredPriceWon: number;
+    quantityShares: number;
+    estimatedTotalWon: number;
   };
 
-function formatPoints(points: number): string {
-  return `${points.toLocaleString('ko-KR')}P`;
-}
-
-function formatShares(quantityMicros: number): string {
-  return (quantityMicros / SHARE_SCALE).toLocaleString('ko-KR', {
-    minimumFractionDigits: 0,
-    maximumFractionDigits: 6,
-  });
-}
-
-function selectedLimitBudget(draft: LimitDraft): number {
-  return draft.budgetChoice === 'custom'
-    ? Number(draft.customBudgetInput)
-    : draft.budgetChoice;
+function selectedLimitQuantity(draft: LimitDraft): number {
+  return draft.quantityChoice === 'custom'
+    ? Number(draft.customQuantityInput)
+    : draft.quantityChoice;
 }
 
 function limitDraftError(draft: LimitDraft): string | null {
-  const desiredPricePoints = Number(draft.desiredPriceInput);
-  const budgetPoints = selectedLimitBudget(draft);
-  if (!Number.isSafeInteger(desiredPricePoints) || desiredPricePoints <= 0) {
-    return '원하는 가격을 1P 이상 정수로 입력해 주세요';
+  const desiredPriceWon = Number(draft.desiredPriceInput);
+  const quantityShares = selectedLimitQuantity(draft);
+  if (!Number.isSafeInteger(desiredPriceWon) || desiredPriceWon <= 0) {
+    return '원하는 가격을 1원 이상 정수로 입력해 주세요';
   }
-  if (!Number.isSafeInteger(budgetPoints) || budgetPoints <= 0) {
-    return '주문 금액을 1P 이상 정수로 입력해 주세요';
+  if (!Number.isSafeInteger(quantityShares) || quantityShares <= 0) {
+    return '주문 수량을 1주 이상 정수로 입력해 주세요';
   }
-  if (!Number.isSafeInteger(budgetPoints * SHARE_SCALE)) {
+  if (!Number.isSafeInteger(desiredPriceWon * quantityShares)) {
     return '주문 금액이 너무 커요';
   }
   return null;
@@ -120,6 +101,23 @@ function isLimitDialog(dialog: DialogState | null): boolean {
   return dialog?.kind === 'limit-edit' || dialog?.kind === 'limit-review';
 }
 
+function selectedSellQuantity(
+  choice: SellChoice,
+  customInput: string,
+): number | 'all' {
+  if (choice === 'all') return 'all';
+  if (choice === 'custom') return Number(customInput);
+  return choice;
+}
+
+function projectSale(
+  holding: Holding | undefined,
+  priceWon: number,
+  quantityShares: number | 'all',
+) {
+  return holding ? getSellProjection(holding, priceWon, quantityShares) : null;
+}
+
 export function MarketOrderPanel({ stock, snapshot, onOpenAccount }: MarketOrderPanelProps) {
   const visible = useMarketPreviewStore((state) => state.visible);
   const mutating = useMarketPreviewStore((state) => state.mutating);
@@ -131,9 +129,9 @@ export function MarketOrderPanel({ stock, snapshot, onOpenAccount }: MarketOrder
   const holding = currentSnapshot.account.holdings.find((item) => item.stockId === stock.id);
 
   const [side, setSide] = useState<OrderSide>('buy');
-  const [buyChoice, setBuyChoice] = useState<BuyChoice>(100);
-  const [sellChoice, setSellChoice] = useState<SellChoice>(2500);
-  const [customSellPercent, setCustomSellPercent] = useState('25');
+  const [buyChoice, setBuyChoice] = useState<BuyChoice>(1);
+  const [sellChoice, setSellChoice] = useState<SellChoice>(1);
+  const [customSellShares, setCustomSellShares] = useState('1');
   const [dialog, setDialog] = useState<DialogState | null>(null);
   const [localError, setLocalError] = useState<string | null>(null);
   const [dialogError, setDialogError] = useState<string | null>(null);
@@ -142,20 +140,31 @@ export function MarketOrderPanel({ stock, snapshot, onOpenAccount }: MarketOrder
   const limitOrderOpenerRef = useRef<HTMLButtonElement>(null);
   const submitLockRef = useRef(false);
 
-  const buyPoints = buyChoice === 'max' ? currentSnapshot.account.cashPoints : buyChoice;
-  const customPercent = Number(customSellPercent);
-  const sellRatioBps = sellChoice === 'custom' ? customPercent * 100 : sellChoice;
-  const buyValidation = validateMarketCommand(currentSnapshot, {
-    kind: 'buy', requestId: 'preview', stockId: stock.id, points: buyPoints,
-  });
-  const sellValidation = validateMarketCommand(currentSnapshot, {
-    kind: 'sell', requestId: 'preview', stockId: stock.id, ratioBps: sellRatioBps,
-  });
-  const buyProjection = buyValidation === null
-    ? getBuyProjection(holding, currentStock.pricePoints, buyPoints)
+  const buyQuantityShares = buyChoice === 'max'
+    ? maxBuyableShares(currentSnapshot.account.cashWon, currentStock.referencePriceWon)
+    : buyChoice;
+  const sellQuantityShares = selectedSellQuantity(sellChoice, customSellShares);
+  const buyCommand: MarketCommand = {
+    kind: 'buy',
+    requestId: 'preview',
+    stockId: stock.id,
+    quantityShares: buyQuantityShares,
+    quotedPriceWon: currentStock.referencePriceWon,
+  };
+  const sellCommand: MarketCommand = {
+    kind: 'sell',
+    requestId: 'preview',
+    stockId: stock.id,
+    quantityShares: sellQuantityShares,
+    quotedPriceWon: currentStock.referencePriceWon,
+  };
+  const buyValidation = validateMarketCommand(currentSnapshot, buyCommand);
+  const sellValidation = validateMarketCommand(currentSnapshot, sellCommand);
+  const buyCostWon = buyValidation === null
+    ? getBuyCostWon(buyQuantityShares, currentStock.referencePriceWon)
     : null;
-  const sellProjection = sellValidation === null && holding
-    ? getSellProjection(holding, currentStock.pricePoints, sellRatioBps)
+  const sellProjection = sellValidation === null
+    ? projectSale(holding, currentStock.referencePriceWon, sellQuantityShares)
     : null;
   const activeValidation = side === 'buy' ? buyValidation : sellValidation;
   const displayedError = localError ?? activeValidation;
@@ -182,47 +191,61 @@ export function MarketOrderPanel({ stock, snapshot, onOpenAccount }: MarketOrder
     const latestHolding = latest.account.holdings.find((item) => item.stockId === stock.id);
 
     if (side === 'buy') {
-      const points = buyChoice === 'max' ? latest.account.cashPoints : buyChoice;
-      const validation = validateMarketCommand(latest, {
-        kind: 'buy', requestId: 'preview', stockId: stock.id, points,
-      });
-      const projection = validation === null
-        ? getBuyProjection(latestHolding, latestStock.pricePoints, points)
-        : null;
-      if (validation || !projection) {
-        setLocalError(validation ?? '주문 수량을 안전하게 계산할 수 없어요');
+      const quantityShares = buyChoice === 'max'
+        ? maxBuyableShares(latest.account.cashWon, latestStock.referencePriceWon)
+        : buyChoice;
+      const command: MarketCommand = {
+        kind: 'buy',
+        requestId: 'preview',
+        stockId: stock.id,
+        quantityShares,
+        quotedPriceWon: latestStock.referencePriceWon,
+      };
+      const validation = validateMarketCommand(latest, command);
+      if (validation) {
+        setLocalError(validation);
         return;
       }
+      const totalWon = getBuyCostWon(quantityShares, latestStock.referencePriceWon);
       setDialog({
         kind: 'buy-confirm',
         stockId: stock.id,
         stockName: latestStock.name,
-        pricePoints: latestStock.pricePoints,
-        points,
-        purchasedQuantityMicros: projection.purchasedQuantityMicros,
-        remainingCashPoints: latest.account.cashPoints - points,
+        priceWon: latestStock.referencePriceWon,
+        quantityShares,
+        totalWon,
+        remainingCashWon: latest.account.cashWon - totalWon,
       });
       return;
     }
 
-    const ratioBps = sellChoice === 'custom' ? Number(customSellPercent) * 100 : sellChoice;
-    const validation = validateMarketCommand(latest, {
-      kind: 'sell', requestId: 'preview', stockId: stock.id, ratioBps,
-    });
+    const quantityShares = selectedSellQuantity(sellChoice, customSellShares);
+    const command: MarketCommand = {
+      kind: 'sell',
+      requestId: 'preview',
+      stockId: stock.id,
+      quantityShares,
+      quotedPriceWon: latestStock.referencePriceWon,
+    };
+    const validation = validateMarketCommand(latest, command);
     if (validation || !latestHolding) {
       setLocalError(validation ?? '보유한 주식이 없어요');
       return;
     }
-    const projection = getSellProjection(latestHolding, latestStock.pricePoints, ratioBps);
+    const projection = getSellProjection(
+      latestHolding,
+      latestStock.referencePriceWon,
+      quantityShares,
+    );
     setDialog({
       kind: 'sell-confirm',
       stockId: stock.id,
       stockName: latestStock.name,
-      pricePoints: latestStock.pricePoints,
-      ratioBps,
-      soldQuantityMicros: projection.soldQuantityMicros,
-      proceedsPoints: projection.proceedsPoints,
-      remainingQuantityMicros: latestHolding.quantityMicros - projection.soldQuantityMicros,
+      priceWon: latestStock.referencePriceWon,
+      quantityShares,
+      soldQuantityShares: projection.soldQuantityShares,
+      proceedsWon: projection.proceedsWon,
+      remainingQuantityShares: latestHolding.quantityShares - projection.soldQuantityShares,
     });
   };
 
@@ -244,52 +267,64 @@ export function MarketOrderPanel({ stock, snapshot, onOpenAccount }: MarketOrder
     const latestHolding = latest.account.holdings.find((item) => item.stockId === dialog.stockId);
 
     if (dialog.kind === 'buy-confirm') {
-      const validation = validateMarketCommand(latest, {
-        kind: 'buy', requestId: 'preview', stockId: dialog.stockId, points: dialog.points,
-      });
-      const projection = validation === null
-        ? getBuyProjection(latestHolding, latestStock.pricePoints, dialog.points)
-        : null;
-      if (validation || !projection) {
-        setDialogError(validation ?? '주문 수량을 안전하게 계산할 수 없어요');
+      const previewCommand: MarketCommand = {
+        kind: 'buy',
+        requestId: 'preview',
+        stockId: dialog.stockId,
+        quantityShares: dialog.quantityShares,
+        quotedPriceWon: latestStock.referencePriceWon,
+      };
+      const validation = validateMarketCommand(latest, previewCommand);
+      if (validation) {
+        setDialogError(validation);
         return;
       }
+      const totalWon = getBuyCostWon(dialog.quantityShares, latestStock.referencePriceWon);
       const refreshed: DialogState = {
         ...dialog,
-        pricePoints: latestStock.pricePoints,
-        purchasedQuantityMicros: projection.purchasedQuantityMicros,
-        remainingCashPoints: latest.account.cashPoints - dialog.points,
+        priceWon: latestStock.referencePriceWon,
+        totalWon,
+        remainingCashWon: latest.account.cashWon - totalWon,
       };
       if (
-        refreshed.pricePoints !== dialog.pricePoints
-        || refreshed.purchasedQuantityMicros !== dialog.purchasedQuantityMicros
-        || refreshed.remainingCashPoints !== dialog.remainingCashPoints
+        refreshed.priceWon !== dialog.priceWon
+        || refreshed.totalWon !== dialog.totalWon
+        || refreshed.remainingCashWon !== dialog.remainingCashWon
       ) {
         setDialog(refreshed);
         setDialogError(refreshedMessage);
         return;
       }
     } else {
-      const validation = validateMarketCommand(latest, {
-        kind: 'sell', requestId: 'preview', stockId: dialog.stockId, ratioBps: dialog.ratioBps,
-      });
+      const previewCommand: MarketCommand = {
+        kind: 'sell',
+        requestId: 'preview',
+        stockId: dialog.stockId,
+        quantityShares: dialog.quantityShares,
+        quotedPriceWon: latestStock.referencePriceWon,
+      };
+      const validation = validateMarketCommand(latest, previewCommand);
       if (validation || !latestHolding) {
         setDialogError(validation ?? '보유한 주식이 없어요');
         return;
       }
-      const projection = getSellProjection(latestHolding, latestStock.pricePoints, dialog.ratioBps);
+      const projection = getSellProjection(
+        latestHolding,
+        latestStock.referencePriceWon,
+        dialog.quantityShares,
+      );
       const refreshed: DialogState = {
         ...dialog,
-        pricePoints: latestStock.pricePoints,
-        soldQuantityMicros: projection.soldQuantityMicros,
-        proceedsPoints: projection.proceedsPoints,
-        remainingQuantityMicros: latestHolding.quantityMicros - projection.soldQuantityMicros,
+        priceWon: latestStock.referencePriceWon,
+        soldQuantityShares: projection.soldQuantityShares,
+        proceedsWon: projection.proceedsWon,
+        remainingQuantityShares: latestHolding.quantityShares - projection.soldQuantityShares,
       };
       if (
-        refreshed.pricePoints !== dialog.pricePoints
-        || refreshed.soldQuantityMicros !== dialog.soldQuantityMicros
-        || refreshed.proceedsPoints !== dialog.proceedsPoints
-        || refreshed.remainingQuantityMicros !== dialog.remainingQuantityMicros
+        refreshed.priceWon !== dialog.priceWon
+        || refreshed.soldQuantityShares !== dialog.soldQuantityShares
+        || refreshed.proceedsWon !== dialog.proceedsWon
+        || refreshed.remainingQuantityShares !== dialog.remainingQuantityShares
       ) {
         setDialog(refreshed);
         setDialogError(refreshedMessage);
@@ -301,18 +336,20 @@ export function MarketOrderPanel({ stock, snapshot, onOpenAccount }: MarketOrder
     setSubmitting(true);
     setDialogError(null);
     clearError();
-    const command = dialog.kind === 'buy-confirm'
+    const command: MarketCommand = dialog.kind === 'buy-confirm'
       ? {
-        kind: 'buy' as const,
+        kind: 'buy',
         requestId: crypto.randomUUID(),
         stockId: dialog.stockId,
-        points: dialog.points,
+        quantityShares: dialog.quantityShares,
+        quotedPriceWon: dialog.priceWon,
       }
       : {
-        kind: 'sell' as const,
+        kind: 'sell',
         requestId: crypto.randomUUID(),
         stockId: dialog.stockId,
-        ratioBps: dialog.ratioBps,
+        quantityShares: dialog.quantityShares,
+        quotedPriceWon: dialog.priceWon,
       };
     const succeeded = await execute(command);
     submitLockRef.current = false;
@@ -320,8 +357,8 @@ export function MarketOrderPanel({ stock, snapshot, onOpenAccount }: MarketOrder
 
     if (succeeded) {
       toast.success(dialog.kind === 'buy-confirm'
-        ? `${dialog.stockName}을 ${formatPoints(dialog.points)} 샀어요.`
-        : `${dialog.stockName}을 팔아 ${formatPoints(dialog.proceedsPoints)} 받았어요.`);
+        ? `${dialog.stockName} ${formatShares(dialog.quantityShares)}를 ${formatWon(dialog.totalWon)}에 샀어요.`
+        : `${dialog.stockName} ${formatShares(dialog.soldQuantityShares)}를 팔아 ${formatWon(dialog.proceedsWon)} 받았어요.`);
       setDialog(null);
       return;
     }
@@ -348,9 +385,9 @@ export function MarketOrderPanel({ stock, snapshot, onOpenAccount }: MarketOrder
       kind: 'limit-edit',
       draft: {
         side,
-        desiredPriceInput: String(currentStock.pricePoints),
-        budgetChoice: 100,
-        customBudgetInput: '100',
+        desiredPriceInput: String(currentStock.referencePriceWon),
+        quantityChoice: 1,
+        customQuantityInput: '1',
       },
     });
   };
@@ -369,15 +406,14 @@ export function MarketOrderPanel({ stock, snapshot, onOpenAccount }: MarketOrder
       setDialogError(error);
       return;
     }
-    const desiredPricePoints = Number(dialog.draft.desiredPriceInput);
-    const budgetPoints = selectedLimitBudget(dialog.draft);
-    const estimatedQuantityMicros = Math.floor((budgetPoints * SHARE_SCALE) / desiredPricePoints);
+    const desiredPriceWon = Number(dialog.draft.desiredPriceInput);
+    const quantityShares = selectedLimitQuantity(dialog.draft);
     setDialog({
       kind: 'limit-review',
       draft: dialog.draft,
-      desiredPricePoints,
-      budgetPoints,
-      estimatedQuantityMicros,
+      desiredPriceWon,
+      quantityShares,
+      estimatedTotalWon: getBuyCostWon(quantityShares, desiredPriceWon),
     });
     setDialogError(null);
   };
@@ -392,8 +428,8 @@ export function MarketOrderPanel({ stock, snapshot, onOpenAccount }: MarketOrder
   return (
     <div className="min-w-0">
       <p className="text-sm leading-6 text-text-secondary">
-        현재 가격 <strong className="tabular-nums text-text-primary">{formatPoints(currentStock.pricePoints)}</strong>
-        {' · '}쓸 수 있는 예수금 <strong className="tabular-nums text-text-primary">{formatPoints(currentSnapshot.account.cashPoints)}</strong>
+        현재 가격 <strong className="tabular-nums text-text-primary">{formatWon(currentStock.referencePriceWon)}</strong>
+        {' · '}쓸 수 있는 예수금 <strong className="tabular-nums text-text-primary">{formatWon(currentSnapshot.account.cashWon)}</strong>
       </p>
 
       <fieldset disabled={controlsDisabled} className="mt-5 min-w-0 disabled:opacity-60">
@@ -419,18 +455,18 @@ export function MarketOrderPanel({ stock, snapshot, onOpenAccount }: MarketOrder
           <div className="mt-5">
             <p className="text-sm font-bold text-text-primary">현재 가격으로 바로 사기</p>
             <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-4 xl:grid-cols-2">
-              {BUY_PRESETS.map((points) => (
+              {SHARE_PRESETS.map((quantityShares) => (
                 <button
-                  key={points}
+                  key={quantityShares}
                   type="button"
-                  aria-pressed={buyChoice === points}
+                  aria-pressed={buyChoice === quantityShares}
                   onClick={() => {
-                    setBuyChoice(points);
+                    setBuyChoice(quantityShares);
                     clearFeedback();
                   }}
                   className="min-h-11 cursor-pointer rounded-xl border border-bg-border px-3 py-2 text-sm font-semibold text-text-secondary transition-colors duration-200 hover:bg-bg-border/35 hover:text-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent aria-pressed:border-accent aria-pressed:bg-accent/10 aria-pressed:text-text-primary"
                 >
-                  {BUY_PRESET_LABELS[points]}
+                  {formatShares(quantityShares)}
                 </button>
               ))}
               <button
@@ -447,17 +483,17 @@ export function MarketOrderPanel({ stock, snapshot, onOpenAccount }: MarketOrder
             </div>
             <dl className="mt-4 space-y-3 rounded-xl bg-bg-primary/45 p-4 text-sm">
               <div className="flex items-center justify-between gap-4">
-                <dt className="text-text-secondary">예상 구매 수량</dt>
+                <dt className="text-text-secondary">구매 수량</dt>
                 <dd className="font-semibold tabular-nums text-text-primary">
-                  {buyProjection ? `${formatShares(buyProjection.purchasedQuantityMicros)}주` : '확인 필요'}
+                  {buyValidation === null ? formatShares(buyQuantityShares) : '확인 필요'}
                 </dd>
               </div>
               <div className="flex items-center justify-between gap-4">
                 <dt className="text-text-secondary">구매 후 남는 예수금</dt>
                 <dd className="font-semibold tabular-nums text-text-primary">
-                  {buyValidation === null
-                    ? formatPoints(currentSnapshot.account.cashPoints - buyPoints)
-                    : '확인 필요'}
+                  {buyCostWon === null
+                    ? '확인 필요'
+                    : formatWon(currentSnapshot.account.cashWon - buyCostWon)}
                 </dd>
               </div>
             </dl>
@@ -465,22 +501,34 @@ export function MarketOrderPanel({ stock, snapshot, onOpenAccount }: MarketOrder
         ) : (
           <div className="mt-5">
             <p className="text-sm font-bold text-text-primary">보유한 주식에서 골라 팔기</p>
-            <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-4 xl:grid-cols-2">
-              {SELL_PRESETS.map((ratioBps) => (
+            <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-5 xl:grid-cols-2">
+              {SHARE_PRESETS.map((quantityShares) => (
                 <button
-                  key={ratioBps}
+                  key={quantityShares}
                   type="button"
                   disabled={!holding}
-                  aria-pressed={sellChoice === ratioBps}
+                  aria-pressed={sellChoice === quantityShares}
                   onClick={() => {
-                    setSellChoice(ratioBps);
+                    setSellChoice(quantityShares);
                     clearFeedback();
                   }}
                   className="min-h-11 cursor-pointer rounded-xl border border-bg-border px-3 py-2 text-sm font-semibold text-text-secondary transition-colors duration-200 hover:bg-bg-border/35 hover:text-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent aria-pressed:border-accent aria-pressed:bg-accent/10 aria-pressed:text-text-primary disabled:cursor-not-allowed disabled:opacity-45"
                 >
-                  {SELL_PRESET_LABELS[ratioBps]}
+                  {formatShares(quantityShares)}
                 </button>
               ))}
+              <button
+                type="button"
+                disabled={!holding}
+                aria-pressed={sellChoice === 'all'}
+                onClick={() => {
+                  setSellChoice('all');
+                  clearFeedback();
+                }}
+                className="min-h-11 cursor-pointer rounded-xl border border-bg-border px-3 py-2 text-sm font-semibold text-text-secondary transition-colors duration-200 hover:bg-bg-border/35 hover:text-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent aria-pressed:border-accent aria-pressed:bg-accent/10 aria-pressed:text-text-primary disabled:cursor-not-allowed disabled:opacity-45"
+              >
+                전부
+              </button>
               <button
                 type="button"
                 disabled={!holding}
@@ -496,25 +544,24 @@ export function MarketOrderPanel({ stock, snapshot, onOpenAccount }: MarketOrder
             </div>
             {sellChoice === 'custom' && (
               <div className="mt-3">
-                <label htmlFor="market-custom-sell-percent" className="text-sm font-semibold text-text-primary">
-                  팔 비율
+                <label htmlFor="market-custom-sell-shares" className="text-sm font-semibold text-text-primary">
+                  팔 수량
                 </label>
                 <div className="relative mt-2">
                   <input
-                    id="market-custom-sell-percent"
+                    id="market-custom-sell-shares"
                     type="number"
                     inputMode="numeric"
                     min="1"
-                    max="100"
                     step="1"
-                    value={customSellPercent}
+                    value={customSellShares}
                     onChange={(event) => {
-                      setCustomSellPercent(event.target.value);
+                      setCustomSellShares(event.target.value);
                       clearFeedback();
                     }}
                     className="min-h-11 w-full rounded-xl border border-bg-border bg-bg-primary/45 px-3 py-2 pr-10 text-base tabular-nums text-text-primary outline-none transition-colors duration-200 focus:border-accent focus:ring-2 focus:ring-accent/30"
                   />
-                  <span className="pointer-events-none absolute inset-y-0 right-3 flex items-center text-sm text-text-secondary">%</span>
+                  <span className="pointer-events-none absolute inset-y-0 right-3 flex items-center text-sm text-text-secondary">주</span>
                 </div>
               </div>
             )}
@@ -522,13 +569,13 @@ export function MarketOrderPanel({ stock, snapshot, onOpenAccount }: MarketOrder
               <div className="flex items-center justify-between gap-4">
                 <dt className="text-text-secondary">예상 판매 수량</dt>
                 <dd className="font-semibold tabular-nums text-text-primary">
-                  {sellProjection ? `${formatShares(sellProjection.soldQuantityMicros)}주` : '확인 필요'}
+                  {sellProjection ? formatShares(sellProjection.soldQuantityShares) : '확인 필요'}
                 </dd>
               </div>
               <div className="flex items-center justify-between gap-4">
                 <dt className="text-text-secondary">판매 후 받을 예수금</dt>
                 <dd className="font-semibold tabular-nums text-text-primary">
-                  {sellProjection ? formatPoints(sellProjection.proceedsPoints) : '확인 필요'}
+                  {sellProjection ? formatWon(sellProjection.proceedsWon) : '확인 필요'}
                 </dd>
               </div>
             </dl>
@@ -553,8 +600,8 @@ export function MarketOrderPanel({ stock, snapshot, onOpenAccount }: MarketOrder
         className="mt-2 min-h-12 w-full cursor-pointer rounded-xl bg-accent px-4 py-3 text-sm font-bold text-on-accent transition-colors duration-200 hover:bg-accent/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 focus-visible:ring-offset-bg-card disabled:cursor-not-allowed disabled:opacity-50"
       >
         {activeValidation ?? (side === 'buy'
-          ? `${formatPoints(buyPoints)} 사기`
-          : `${formatShares(sellProjection?.soldQuantityMicros ?? 0)}주 팔기`)}
+          ? `${formatShares(buyQuantityShares)} 사기`
+          : `${formatShares(sellProjection?.soldQuantityShares ?? 0)} 팔기`)}
       </button>
 
       <button
@@ -586,8 +633,8 @@ export function MarketOrderPanel({ stock, snapshot, onOpenAccount }: MarketOrder
         open={dialog !== null}
         title={orderDialogTitle(dialog)}
         description={isLimitDialog(dialog)
-          ? '원하는 가격과 주문 금액을 입력한 뒤, 실제로 저장하지 않는 검토 화면을 확인합니다.'
-          : '최종 주문 전에 금액과 예상 수량을 확인합니다.'}
+          ? '원하는 가격과 정수 주식 수량을 입력한 뒤, 실제로 저장하지 않는 검토 화면을 확인합니다.'
+          : '최종 주문 전에 가격, 수량과 예상 합계를 확인합니다.'}
         openerRef={dialogOpenerRef}
         onClose={closeOrderDialog}
       >
@@ -595,10 +642,10 @@ export function MarketOrderPanel({ stock, snapshot, onOpenAccount }: MarketOrder
           <div>
             <dl className="space-y-3 rounded-2xl bg-bg-primary/45 p-4 text-sm">
               <div className="flex justify-between gap-4"><dt className="text-text-secondary">회사</dt><dd className="font-semibold text-text-primary">{dialog.stockName}</dd></div>
-              <div className="flex justify-between gap-4"><dt className="text-text-secondary">현재 가격</dt><dd className="font-semibold tabular-nums text-text-primary">{formatPoints(dialog.pricePoints)}</dd></div>
-              <div className="flex justify-between gap-4"><dt className="text-text-secondary">살 금액</dt><dd className="font-semibold tabular-nums text-text-primary">{formatPoints(dialog.points)}</dd></div>
-              <div className="flex justify-between gap-4"><dt className="text-text-secondary">예상 구매 수량</dt><dd className="font-semibold tabular-nums text-text-primary">{formatShares(dialog.purchasedQuantityMicros)}주</dd></div>
-              <div className="flex justify-between gap-4"><dt className="text-text-secondary">구매 후 예수금</dt><dd className="font-semibold tabular-nums text-text-primary">{formatPoints(dialog.remainingCashPoints)}</dd></div>
+              <div className="flex justify-between gap-4"><dt className="text-text-secondary">현재 가격</dt><dd className="font-semibold tabular-nums text-text-primary">{formatWon(dialog.priceWon)}</dd></div>
+              <div className="flex justify-between gap-4"><dt className="text-text-secondary">살 수량</dt><dd className="font-semibold tabular-nums text-text-primary">{formatShares(dialog.quantityShares)}</dd></div>
+              <div className="flex justify-between gap-4"><dt className="text-text-secondary">주문 합계</dt><dd className="font-semibold tabular-nums text-text-primary">{formatWon(dialog.totalWon)}</dd></div>
+              <div className="flex justify-between gap-4"><dt className="text-text-secondary">구매 후 예수금</dt><dd className="font-semibold tabular-nums text-text-primary">{formatWon(dialog.remainingCashWon)}</dd></div>
             </dl>
             <p className="mt-3 min-h-5 text-sm font-semibold text-text-primary" aria-live="polite">
               {dialogError ?? storeError ?? ''}
@@ -609,7 +656,7 @@ export function MarketOrderPanel({ stock, snapshot, onOpenAccount }: MarketOrder
               onClick={() => void confirmEasyOrder()}
               className="mt-2 min-h-12 w-full cursor-pointer rounded-xl bg-accent px-4 py-3 text-sm font-bold text-on-accent transition-colors duration-200 hover:bg-accent/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent disabled:cursor-not-allowed disabled:opacity-50"
             >
-              {submitting ? '주문을 저장하는 중…' : `${formatPoints(dialog.points)} 사기`}
+              {submitting ? '주문을 저장하는 중…' : `${formatShares(dialog.quantityShares)} 사기`}
             </button>
           </div>
         )}
@@ -618,10 +665,10 @@ export function MarketOrderPanel({ stock, snapshot, onOpenAccount }: MarketOrder
           <div>
             <dl className="space-y-3 rounded-2xl bg-bg-primary/45 p-4 text-sm">
               <div className="flex justify-between gap-4"><dt className="text-text-secondary">회사</dt><dd className="font-semibold text-text-primary">{dialog.stockName}</dd></div>
-              <div className="flex justify-between gap-4"><dt className="text-text-secondary">현재 가격</dt><dd className="font-semibold tabular-nums text-text-primary">{formatPoints(dialog.pricePoints)}</dd></div>
-              <div className="flex justify-between gap-4"><dt className="text-text-secondary">팔 수량</dt><dd className="font-semibold tabular-nums text-text-primary">{formatShares(dialog.soldQuantityMicros)}주</dd></div>
-              <div className="flex justify-between gap-4"><dt className="text-text-secondary">판매 후 받을 예수금</dt><dd className="font-semibold tabular-nums text-text-primary">{formatPoints(dialog.proceedsPoints)}</dd></div>
-              <div className="flex justify-between gap-4"><dt className="text-text-secondary">판매 후 남는 수량</dt><dd className="font-semibold tabular-nums text-text-primary">{formatShares(dialog.remainingQuantityMicros)}주</dd></div>
+              <div className="flex justify-between gap-4"><dt className="text-text-secondary">현재 가격</dt><dd className="font-semibold tabular-nums text-text-primary">{formatWon(dialog.priceWon)}</dd></div>
+              <div className="flex justify-between gap-4"><dt className="text-text-secondary">팔 수량</dt><dd className="font-semibold tabular-nums text-text-primary">{formatShares(dialog.soldQuantityShares)}</dd></div>
+              <div className="flex justify-between gap-4"><dt className="text-text-secondary">판매 후 받을 예수금</dt><dd className="font-semibold tabular-nums text-text-primary">{formatWon(dialog.proceedsWon)}</dd></div>
+              <div className="flex justify-between gap-4"><dt className="text-text-secondary">판매 후 남는 수량</dt><dd className="font-semibold tabular-nums text-text-primary">{formatShares(dialog.remainingQuantityShares)}</dd></div>
             </dl>
             <p className="mt-3 min-h-5 text-sm font-semibold text-text-primary" aria-live="polite">
               {dialogError ?? storeError ?? ''}
@@ -632,7 +679,7 @@ export function MarketOrderPanel({ stock, snapshot, onOpenAccount }: MarketOrder
               onClick={() => void confirmEasyOrder()}
               className="mt-2 min-h-12 w-full cursor-pointer rounded-xl bg-accent px-4 py-3 text-sm font-bold text-on-accent transition-colors duration-200 hover:bg-accent/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent disabled:cursor-not-allowed disabled:opacity-50"
             >
-              {submitting ? '주문을 저장하는 중…' : `${formatShares(dialog.soldQuantityMicros)}주 팔기`}
+              {submitting ? '주문을 저장하는 중…' : `${formatShares(dialog.soldQuantityShares)} 팔기`}
             </button>
           </div>
         )}
@@ -668,39 +715,39 @@ export function MarketOrderPanel({ stock, snapshot, onOpenAccount }: MarketOrder
               className="mt-2 min-h-11 w-full rounded-xl border border-bg-border bg-bg-primary/45 px-3 py-2 text-base tabular-nums text-text-primary outline-none transition-colors duration-200 focus:border-accent focus:ring-2 focus:ring-accent/30"
             />
 
-            <p className="mt-5 text-sm font-semibold text-text-primary">주문 금액</p>
+            <p className="mt-5 text-sm font-semibold text-text-primary">주문 수량</p>
             <div className="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-4">
-              {BUY_PRESETS.map((points) => (
+              {SHARE_PRESETS.map((quantityShares) => (
                 <button
-                  key={points}
+                  key={quantityShares}
                   type="button"
-                  aria-pressed={dialog.draft.budgetChoice === points}
-                  onClick={() => updateLimitDraft({ budgetChoice: points })}
+                  aria-pressed={dialog.draft.quantityChoice === quantityShares}
+                  onClick={() => updateLimitDraft({ quantityChoice: quantityShares })}
                   className="min-h-11 cursor-pointer rounded-xl border border-bg-border px-2 py-2 text-sm font-semibold text-text-secondary transition-colors duration-200 hover:bg-bg-border/35 hover:text-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent aria-pressed:border-accent aria-pressed:bg-accent/10 aria-pressed:text-text-primary"
                 >
-                  {BUY_PRESET_LABELS[points]}
+                  {formatShares(quantityShares)}
                 </button>
               ))}
               <button
                 type="button"
-                aria-pressed={dialog.draft.budgetChoice === 'custom'}
-                onClick={() => updateLimitDraft({ budgetChoice: 'custom' })}
+                aria-pressed={dialog.draft.quantityChoice === 'custom'}
+                onClick={() => updateLimitDraft({ quantityChoice: 'custom' })}
                 className="min-h-11 cursor-pointer rounded-xl border border-bg-border px-2 py-2 text-sm font-semibold text-text-secondary transition-colors duration-200 hover:bg-bg-border/35 hover:text-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent aria-pressed:border-accent aria-pressed:bg-accent/10 aria-pressed:text-text-primary"
               >
                 직접 입력
               </button>
             </div>
-            {dialog.draft.budgetChoice === 'custom' && (
+            {dialog.draft.quantityChoice === 'custom' && (
               <div className="mt-3">
-                <label htmlFor="market-limit-budget" className="text-sm font-semibold text-text-primary">직접 입력할 금액</label>
+                <label htmlFor="market-limit-quantity" className="text-sm font-semibold text-text-primary">직접 입력할 수량</label>
                 <input
-                  id="market-limit-budget"
+                  id="market-limit-quantity"
                   type="number"
                   inputMode="numeric"
                   min="1"
                   step="1"
-                  value={dialog.draft.customBudgetInput}
-                  onChange={(event) => updateLimitDraft({ customBudgetInput: event.target.value })}
+                  value={dialog.draft.customQuantityInput}
+                  onChange={(event) => updateLimitDraft({ customQuantityInput: event.target.value })}
                   className="mt-2 min-h-11 w-full rounded-xl border border-bg-border bg-bg-primary/45 px-3 py-2 text-base tabular-nums text-text-primary outline-none transition-colors duration-200 focus:border-accent focus:ring-2 focus:ring-accent/30"
                 />
               </div>
@@ -725,10 +772,10 @@ export function MarketOrderPanel({ stock, snapshot, onOpenAccount }: MarketOrder
                 {dialog.draft.side === 'buy' ? '사기' : '팔기'} · 실제 저장되지 않는 미리보기
               </p>
               <p className="mt-3 text-base font-bold leading-7 text-text-primary">
-                가격이 {formatPoints(dialog.desiredPricePoints)}가 되면 {formatPoints(dialog.budgetPoints)}만큼 자동으로 주문
+                가격이 {formatWon(dialog.desiredPriceWon)}가 되면 {formatShares(dialog.quantityShares)} 주문
               </p>
               <p className="mt-2 text-sm text-text-secondary">
-                예상 수량 {formatShares(dialog.estimatedQuantityMicros)}주
+                예상 합계 {formatWon(dialog.estimatedTotalWon)}
               </p>
             </div>
             <p className="mt-3 text-sm leading-6 text-text-secondary">

@@ -269,13 +269,14 @@ test('PlaygroundView wires the approved lobby through the store-aware root only'
   assert.match(source, /advanceRecommendation/);
   assert.match(source, /buildPointRanking/);
   assert.match(source, /visible\?\.account\.walletPoints \?\? null/);
-  assert.match(source, /visible\?\.account\.cashPoints \?\? null/);
+  assert.match(source, /visible\?\.account\.lifetimeEarnedPoints \?\? null/);
+  assert.match(source, /visible\?\.account\.cashWon \?\? null/);
   assert.match(source, /route\.kind === 'lobby' && \(\s*<PlaygroundShell/);
   assert.match(source, /<PlaygroundLobby/);
   assert.match(source, /recommendation=\{recommendation\.current\}/);
   assert.match(source, /onShuffle=\{\(\) => setRecommendation/);
   assert.match(source, /ranking=\{ranking\}/);
-  assert.match(source, /marketCashPoints=\{marketCashPoints\}/);
+  assert.match(source, /marketCashWon=\{marketCashWon\}/);
   assert.match(source, /<JbbjHouse/);
   assert.match(source, /<ComingSoonGame/);
   assert.match(source, /<MarketRouter/);

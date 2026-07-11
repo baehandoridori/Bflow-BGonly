@@ -33,12 +33,14 @@ export default function PlaygroundView() {
   const loadMarket = useMarketPreviewStore((state) => state.load);
   const userName = currentUser?.name.trim() || '팀원';
   const walletPoints = visible?.account.walletPoints ?? null;
-  const marketCashPoints = visible?.account.cashPoints ?? null;
+  const lifetimeEarnedPoints = visible?.account.lifetimeEarnedPoints ?? null;
+  const marketCashWon = visible?.account.cashWon ?? null;
   const ranking = useMemo(() => buildPointRanking({
     id: currentUser?.id ?? 'preview-user',
     name: userName,
-    points: walletPoints,
-  }), [currentUser?.id, userName, walletPoints]);
+    walletPoints,
+    lifetimeEarnedPoints,
+  }), [currentUser?.id, lifetimeEarnedPoints, userName, walletPoints]);
 
   useEffect(() => {
     const state = useMarketPreviewStore.getState();
@@ -100,7 +102,7 @@ export default function PlaygroundView() {
             userName={userName}
             recommendation={recommendation.current}
             ranking={ranking}
-            marketCashPoints={marketCashPoints}
+            marketCashWon={marketCashWon}
             onShuffle={() => setRecommendation((current) => advanceRecommendation(current))}
             onPlayGame={(game, origin) => move({ kind: 'open-game', game }, origin)}
             onOpenMarket={(origin) => move({ kind: 'open-market' }, origin)}

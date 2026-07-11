@@ -4,6 +4,7 @@ import {
   getChartGeometry,
   getChartHoverBands,
 } from '@/features/playground/market/domain';
+import { formatWon } from '@/features/playground/market/format';
 import type {
   MarketPeriod,
   MarketStock,
@@ -28,13 +29,9 @@ const CHART_WIDTH = 720;
 const CHART_HEIGHT = 280;
 const VISUAL_PADDING = 12;
 
-function formatPoints(points: number): string {
-  return `${points.toLocaleString('ko-KR')}P`;
-}
-
 function trendForSeries(series: PricePoint[]): MarketTrend {
-  const first = series[0]?.pricePoints;
-  const current = series.at(-1)?.pricePoints;
+  const first = series[0]?.priceWon;
+  const current = series.at(-1)?.priceWon;
   if (first === undefined || current === undefined || first === current) return 'flat';
   return current > first ? 'up' : 'down';
 }
@@ -47,8 +44,8 @@ function trendClass(trend: MarketTrend): string {
 
 function trendSentence(trend: MarketTrend, start: number, current: number): string {
   const difference = Math.abs(current - start);
-  if (trend === 'up') return `${formatPoints(difference)} 상승했어요.`;
-  if (trend === 'down') return `${formatPoints(difference)} 하락했어요.`;
+  if (trend === 'up') return `${formatWon(difference)} 상승했어요.`;
+  if (trend === 'down') return `${formatWon(difference)} 하락했어요.`;
   return '가격 변화 없이 보합이에요.';
 }
 
@@ -105,8 +102,8 @@ export function MarketPriceChart({ stock, period, onPeriodChange }: MarketPriceC
     x: VISUAL_PADDING + (point.x / CHART_WIDTH) * (CHART_WIDTH - VISUAL_PADDING * 2),
     y: VISUAL_PADDING + (point.y / CHART_HEIGHT) * (CHART_HEIGHT - VISUAL_PADDING * 2),
   }));
-  const startPrice = series[0].pricePoints;
-  const currentPrice = series.at(-1)?.pricePoints ?? startPrice;
+  const startPrice = series[0].priceWon;
+  const currentPrice = series.at(-1)?.priceWon ?? startPrice;
   const trend = trendForSeries(series);
   const colorClass = trendClass(trend);
   const linePath = geometry.map((point, index) => (
@@ -117,7 +114,7 @@ export function MarketPriceChart({ stock, period, onPeriodChange }: MarketPriceC
     : '';
   const hoveredPoint = hoveredIndex === null ? null : series[hoveredIndex];
   const hoverBands = getChartHoverBands(geometry, CHART_WIDTH);
-  const ariaLabel = `${stock.name} ${periodLabel} 가격 그래프. 시작 가격 ${formatPoints(startPrice)}, 현재 가격 ${formatPoints(currentPrice)}. ${trendSentence(trend, startPrice, currentPrice)}`;
+  const ariaLabel = `${stock.name} ${periodLabel} 가격 그래프. 시작 가격 ${formatWon(startPrice)}, 현재 가격 ${formatWon(currentPrice)}. ${trendSentence(trend, startPrice, currentPrice)}`;
 
   return (
     <div>
@@ -125,11 +122,11 @@ export function MarketPriceChart({ stock, period, onPeriodChange }: MarketPriceC
       <div className="mt-4 flex items-end justify-between gap-4 text-sm">
         <div>
           <p className="text-xs text-text-secondary">기간 시작 가격</p>
-          <p className="mt-1 font-semibold tabular-nums text-text-primary">{formatPoints(startPrice)}</p>
+          <p className="mt-1 font-semibold tabular-nums text-text-primary">{formatWon(startPrice)}</p>
         </div>
         <div className="text-right">
           <p className="text-xs text-text-secondary">현재 가격</p>
-          <p className="mt-1 font-semibold tabular-nums text-text-primary">{formatPoints(currentPrice)}</p>
+          <p className="mt-1 font-semibold tabular-nums text-text-primary">{formatWon(currentPrice)}</p>
         </div>
       </div>
 
@@ -206,7 +203,7 @@ export function MarketPriceChart({ stock, period, onPeriodChange }: MarketPriceC
 
       <p className="mt-2 min-h-6 text-sm text-text-secondary" aria-live="polite">
         {hoveredPoint
-          ? `${formatHoveredTime(hoveredPoint, period)} · ${formatPoints(hoveredPoint.pricePoints)}${hoveredPoint.newsId ? ' · 소식이 공개된 시점' : ''}`
+          ? `${formatHoveredTime(hoveredPoint, period)} · ${formatWon(hoveredPoint.priceWon)}${hoveredPoint.newsId ? ' · 소식이 공개된 시점' : ''}`
           : '그래프 위를 가리키면 그때의 가격을 볼 수 있어요.'}
       </p>
     </div>

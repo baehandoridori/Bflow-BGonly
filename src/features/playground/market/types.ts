@@ -35,7 +35,7 @@ export interface MarketCandle {
 
 export interface PricePoint {
   at: string;
-  pricePoints: number;
+  priceWon: number;
   newsId?: string;
 }
 
@@ -53,23 +53,24 @@ export interface MarketStock {
   symbol: string;
   character: string;
   description: string;
-  pricePoints: number;
-  previousClosePoints: number;
+  referencePriceWon: number;
+  previousCloseWon: number;
   reason: string;
   series: Record<MarketPeriod, PricePoint[]>;
 }
 
 export interface Holding {
   stockId: string;
-  quantityMicros: number;
-  costBasisPoints: number;
+  quantityShares: number;
+  costBasisWon: number;
 }
 
 export interface MarketAccount {
   walletPoints: number;
-  cashPoints: number;
-  realizedPnlThisMonthPoints: number;
-  unrealizedPnlAtMonthStartPoints: number;
+  lifetimeEarnedPoints: number;
+  cashWon: number;
+  realizedPnlThisMonthWon: number;
+  unrealizedPnlAtMonthStartWon: number;
   holdings: Holding[];
 }
 
@@ -87,5 +88,5 @@ export type MarketCommand =
   | { kind: 'favorite'; requestId: string; stockId: string; wished: boolean }
   | { kind: 'read-reason'; requestId: string; stockId: string }
   | { kind: 'transfer'; requestId: string; direction: 'wallet-to-broker' | 'broker-to-wallet'; points: number }
-  | { kind: 'buy'; requestId: string; stockId: string; points: number }
-  | { kind: 'sell'; requestId: string; stockId: string; ratioBps: number };
+  | { kind: 'buy'; requestId: string; stockId: string; quantityShares: number; quotedPriceWon: number }
+  | { kind: 'sell'; requestId: string; stockId: string; quantityShares: number | 'all'; quotedPriceWon: number };

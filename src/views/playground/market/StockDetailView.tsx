@@ -1,7 +1,8 @@
 import { useState } from 'react';
 import { ArrowLeft, Briefcase, Star } from 'lucide-react';
 
-import { getStockQuote, holdingValuePoints } from '@/features/playground/market/domain';
+import { getStockQuote, holdingValueWon } from '@/features/playground/market/domain';
+import { formatShares, formatWon } from '@/features/playground/market/format';
 import type {
   MarketPeriod,
   MarketStock,
@@ -17,10 +18,6 @@ interface StockDetailViewProps {
   onOpenMarketHome(): void;
 }
 
-function formatPoints(points: number): string {
-  return `${points.toLocaleString('ko-KR')}P`;
-}
-
 function trendClass(trend: MarketTrend): string {
   if (trend === 'up') return 'text-market-up';
   if (trend === 'down') return 'text-market-down';
@@ -32,20 +29,20 @@ function movementSummary(stock: MarketStock) {
   if (quote.trend === 'up') {
     return {
       quote,
-      compact: `▲ +${formatPoints(quote.changePoints)} (+${quote.changeRate.toFixed(1)}%)`,
-      sentence: `오늘 ${formatPoints(quote.changePoints)}, ${quote.changeRate.toFixed(1)}% 올랐어요`,
+      compact: `▲ +${formatWon(quote.changeWon)} (+${quote.changeRate.toFixed(1)}%)`,
+      sentence: `오늘 ${formatWon(quote.changeWon)}, ${quote.changeRate.toFixed(1)}% 올랐어요`,
     };
   }
   if (quote.trend === 'down') {
     return {
       quote,
-      compact: `▼ -${formatPoints(Math.abs(quote.changePoints))} (${quote.changeRate.toFixed(1)}%)`,
-      sentence: `오늘 ${formatPoints(Math.abs(quote.changePoints))}, ${Math.abs(quote.changeRate).toFixed(1)}% 내렸어요`,
+      compact: `▼ -${formatWon(Math.abs(quote.changeWon))} (${quote.changeRate.toFixed(1)}%)`,
+      sentence: `오늘 ${formatWon(Math.abs(quote.changeWon))}, ${Math.abs(quote.changeRate).toFixed(1)}% 내렸어요`,
     };
   }
   return {
     quote,
-    compact: '― ±0P (0.0%)',
+    compact: '― ±0원 (0.0%)',
     sentence: '오늘 가격 변화 없이 보합이에요',
   };
 }
@@ -92,10 +89,10 @@ export function StockDetailView({ stockId, onOpenAccount, onOpenMarketHome }: St
   const movement = movementSummary(stock);
   const wished = snapshot.favoriteStockIds.includes(stock.id);
   const holding = snapshot.account.holdings.find((item) => item.stockId === stock.id);
-  const currentHoldingValue = holding ? holdingValuePoints(holding, stock.pricePoints) : 0;
-  const holdingPnl = holding ? currentHoldingValue - holding.costBasisPoints : 0;
-  const holdingPnlRate = holding && holding.costBasisPoints > 0
-    ? (holdingPnl / holding.costBasisPoints) * 100
+  const currentHoldingValue = holding ? holdingValueWon(holding, stock.referencePriceWon) : 0;
+  const holdingPnl = holding ? currentHoldingValue - holding.costBasisWon : 0;
+  const holdingPnlRate = holding && holding.costBasisWon > 0
+    ? (holdingPnl / holding.costBasisWon) * 100
     : 0;
   const relatedNews = snapshot.news.filter((item) => item.stockId === stock.id);
 
@@ -162,7 +159,7 @@ export function StockDetailView({ stockId, onOpenAccount, onOpenMarketHome }: St
           >
             {stock.name}
           </h1>
-          <p className="mt-5 text-4xl font-bold tabular-nums text-text-primary">{formatPoints(stock.pricePoints)}</p>
+          <p className="mt-5 text-4xl font-bold tabular-nums text-text-primary">{formatWon(stock.referencePriceWon)}</p>
           <p className={`mt-3 text-base font-bold tabular-nums ${trendClass(movement.quote.trend)}`}>
             {movement.compact}
           </p>
@@ -196,18 +193,22 @@ export function StockDetailView({ stockId, onOpenAccount, onOpenMarketHome }: St
             <>
               <dl className="mt-4 divide-y divide-bg-border text-sm">
                 <div className="flex items-center justify-between gap-4 py-3 first:pt-0">
-                  <dt className="text-text-secondary">투자한 포인트</dt>
-                  <dd className="font-semibold tabular-nums text-text-primary">{formatPoints(holding.costBasisPoints)}</dd>
+                  <dt className="text-text-secondary">보유 수량</dt>
+                  <dd className="font-semibold tabular-nums text-text-primary">{formatShares(holding.quantityShares)}</dd>
+                </div>
+                <div className="flex items-center justify-between gap-4 py-3">
+                  <dt className="text-text-secondary">투자 원금</dt>
+                  <dd className="font-semibold tabular-nums text-text-primary">{formatWon(holding.costBasisWon)}</dd>
                 </div>
                 <div className="flex items-center justify-between gap-4 py-3">
                   <dt className="text-text-secondary">현재 가치</dt>
-                  <dd className="font-semibold tabular-nums text-text-primary">{formatPoints(currentHoldingValue)}</dd>
+                  <dd className="font-semibold tabular-nums text-text-primary">{formatWon(currentHoldingValue)}</dd>
                 </div>
                 <div className="flex items-center justify-between gap-4 py-3 last:pb-0">
                   <dt className="text-text-secondary">평가손익</dt>
                   <dd className={`font-semibold tabular-nums ${trendClass(holdingPnl > 0 ? 'up' : holdingPnl < 0 ? 'down' : 'flat')}`}>
                     {holdingPnl > 0 ? '▲ +' : holdingPnl < 0 ? '▼ -' : '― ±'}
-                    {formatPoints(Math.abs(holdingPnl))}
+                    {formatWon(Math.abs(holdingPnl))}
                     {' · '}
                     {holdingPnl > 0 ? '+' : holdingPnl < 0 ? '-' : '±'}{Math.abs(holdingPnlRate).toFixed(1)}%
                   </dd>
@@ -218,7 +219,7 @@ export function StockDetailView({ stockId, onOpenAccount, onOpenMarketHome }: St
           ) : (
             <div className="mt-4 rounded-xl bg-bg-primary/45 p-4">
               <p className="font-semibold text-text-primary">아직 보유하지 않음</p>
-              <p className="mt-1 text-sm text-text-secondary">100P부터 시작할 수 있어요</p>
+              <p className="mt-1 text-sm text-text-secondary">예수금을 옮긴 뒤 1주부터 시작할 수 있어요</p>
             </div>
           )}
         </section>
@@ -229,7 +230,7 @@ export function StockDetailView({ stockId, onOpenAccount, onOpenMarketHome }: St
         >
           <h2 id="easy-order-heading" className="text-lg font-bold text-text-primary">간편 주문</h2>
           <p className="mt-2 text-xs leading-5 text-text-secondary">
-            회사 확인 → 이유와 그래프 확인 → 부담 없는 포인트로 시작
+            회사 확인 → 이유와 그래프 확인 → 원하는 정수 주식 수량으로 시작
           </p>
           <div className="mt-5">
             <MarketOrderPanel stock={stock} snapshot={snapshot} onOpenAccount={onOpenAccount} />

@@ -19,7 +19,7 @@ function wait(ms: number) {
     : new Promise<void>((resolve) => setTimeout(resolve, ms));
 }
 
-function fingerprintMarketCommand(command: MarketCommand): string {
+export function fingerprintMarketCommand(command: MarketCommand): string {
   switch (command.kind) {
     case 'favorite':
       return JSON.stringify([command.kind, command.stockId, command.wished]);
@@ -28,9 +28,19 @@ function fingerprintMarketCommand(command: MarketCommand): string {
     case 'transfer':
       return JSON.stringify([command.kind, command.direction, command.points]);
     case 'buy':
-      return JSON.stringify([command.kind, command.stockId, command.points]);
+      return JSON.stringify([
+        command.kind,
+        command.stockId,
+        command.quantityShares,
+        command.quotedPriceWon,
+      ]);
     case 'sell':
-      return JSON.stringify([command.kind, command.stockId, command.ratioBps]);
+      return JSON.stringify([
+        command.kind,
+        command.stockId,
+        command.quantityShares,
+        command.quotedPriceWon,
+      ]);
   }
   const exhaustive: never = command;
   return exhaustive;

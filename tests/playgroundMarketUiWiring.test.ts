@@ -204,12 +204,17 @@ test('detail chart and order panel keep the approved source contracts', () => {
   assert.match(chart, /text-market-flat/);
   assert.doesNotMatch(chart, /#[0-9a-f]{3,8}/i);
 
-  for (const label of ['현재 가격으로 바로 사기', '100P', '500P', '1,000P', '최대', '25%', '50%', '전부', '직접 입력', '원하는 가격에 주문하기']) {
+  for (const label of ['현재 가격으로 바로 사기', '최대', '전부', '직접 입력', '원하는 가격에 주문하기']) {
     assert.match(order, new RegExp(label));
   }
+  assert.match(order, /SHARE_PRESETS\s*=\s*\[1,\s*5,\s*10\]/);
   assert.match(order, /validateMarketCommand/);
   assert.match(order, /getSellProjection/);
-  assert.match(order, /getBuyProjection/);
+  assert.match(order, /getBuyCostWon/);
+  assert.match(order, /maxBuyableShares/);
+  assert.match(order, /formatWon/);
+  assert.match(order, /formatShares/);
+  assert.doesNotMatch(order, /getBuyProjection|SHARE_SCALE|ratioBps|quantityMicros|pricePoints/);
   assert.doesNotMatch(order, /applyMarketCommand/);
 });
 
@@ -233,9 +238,34 @@ test('easy order revalidates frozen confirmation before creating a request id', 
   const execute = handler.indexOf('await execute(command)');
   assert.ok(latestSnapshot >= 0 && latestSnapshot < validate);
   assert.ok(validate < createRequestId && createRequestId < execute);
-  assert.match(handler, /getBuyProjection/);
+  assert.match(handler, /getBuyCostWon/);
   assert.match(handler, /getSellProjection/);
   assert.match(handler, /확인 내용을 새로 고쳤어요/);
+});
+
+test('market views centralize P, won and whole-share formatting without point-priced stock copy', () => {
+  const files = [
+    'src/views/playground/market/MarketRows.tsx',
+    'src/views/playground/market/MarketPriceChart.tsx',
+    'src/views/playground/market/StockDetailView.tsx',
+    'src/views/playground/market/MarketOrderPanel.tsx',
+    'src/views/playground/market/MarketAccountView.tsx',
+    'src/views/playground/market/PointTransferDialog.tsx',
+  ];
+  const sources = files.map((file) => readFileSync(file, 'utf8'));
+  for (const source of sources) {
+    assert.doesNotMatch(source, /pricePoints|cashPoints|costBasisPoints|quantityMicros/);
+  }
+  assert.match(sources[0], /formatWon/);
+  assert.match(sources[1], /formatWon/);
+  assert.match(sources[2], /formatWon/);
+  assert.match(sources[3], /formatWon/);
+  assert.match(sources[3], /formatShares/);
+  assert.match(sources[4], /formatPoints/);
+  assert.match(sources[4], /formatWon/);
+  assert.match(sources[4], /formatShares/);
+  assert.match(sources[5], /formatPoints/);
+  assert.match(sources[5], /formatWon/);
 });
 
 test('order dialog refuses to close while its mutation is running', () => {
@@ -252,9 +282,11 @@ test('order dialog refuses to close while its mutation is running', () => {
 test('account stays a 520px single column with simple rows and no chart', () => {
   const source = readFileSync('src/views/playground/market/MarketAccountView.tsx', 'utf8');
   assert.match(source, /max-w-\[520px\]/);
-  for (const label of ['투자 계좌', '총자산', '넣기', '빼기', '쓸 수 있는 포인트', '현재 내 투자 현황', '내 투자 실적']) {
+  for (const label of ['투자 계좌', '총자산', '넣기', '빼기', '포인트 지갑', '현재 내 투자 현황', '내 투자 실적']) {
     assert.match(source, new RegExp(label));
   }
+  assert.match(source, /아직 보유한 주식이 없어요/);
+  assert.match(source, /종목 둘러보기/);
   assert.doesNotMatch(source, /MarketPriceChart|price-chart|7일|전체 기간/);
   assert.doesNotMatch(source, /한솔님의 투자 계좌/);
 });
@@ -283,7 +315,7 @@ test('account wires separate deposit and withdrawal dialogs to stable opener ref
 
   assert.match(dialog, /MarketActionDialog/);
   assert.match(dialog, /TRANSFER_PRESETS\s*=\s*\[1000,\s*5000\]/);
-  for (const label of ['투자 계좌에 포인트 넣기', '투자 계좌에서 포인트 빼기', '포인트 지갑 잔액', '꺼낼 수 있는 예수금', '이동 후 예수금', '이동 후 포인트 지갑', '수수료가 없고 투자 실적에는 포함되지 않아요', '투자 중인 포인트는 주식을 판 뒤 뺄 수 있어요']) {
+  for (const label of ['투자 계좌에 포인트 넣기', '투자 계좌에서 포인트 빼기', '포인트 지갑 잔액', '꺼낼 수 있는 예수금', '이동 후 예수금', '이동 후 포인트 지갑', '1P = 1원', '수수료가 없고 투자 실적에는 포함되지 않아요', '투자 중인 포인트는 주식을 판 뒤 뺄 수 있어요']) {
     assert.match(dialog, new RegExp(label));
   }
   assert.match(dialog, /type="number"/);

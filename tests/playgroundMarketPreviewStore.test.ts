@@ -11,8 +11,8 @@ test('each gateway starts from a deterministic isolated seed', async () => {
   const second = await secondGateway.read();
 
   assert.deepEqual(first, second);
-  first.account.cashPoints = -1;
-  assert.equal((await firstGateway.read()).account.cashPoints, 3640);
+  first.account.cashWon = -1;
+  assert.equal((await firstGateway.read()).account.cashWon, 0);
 
   await firstGateway.execute({
     kind: 'favorite', requestId: 'isolated', stockId: 'adobe', wished: true,
@@ -28,14 +28,14 @@ test('successful transfer is optimistic and converges visible and confirmed snap
     kind: 'transfer', requestId: 'ok-1', direction: 'wallet-to-broker', points: 1000,
   });
 
-  assert.equal(store.getState().visible?.account.cashPoints, 4640);
-  assert.equal(store.getState().confirmed?.account.cashPoints, 3640);
+  assert.equal(store.getState().visible?.account.cashWon, 1000);
+  assert.equal(store.getState().confirmed?.account.cashWon, 0);
   assert.equal(store.getState().mutating, true);
 
   const result = await pending;
   assert.equal(result, true);
-  assert.equal(store.getState().visible?.account.cashPoints, 4640);
-  assert.equal(store.getState().confirmed?.account.cashPoints, 4640);
+  assert.equal(store.getState().visible?.account.cashWon, 1000);
+  assert.equal(store.getState().confirmed?.account.cashWon, 1000);
   assert.equal(store.getState().mutating, false);
 });
 
@@ -93,8 +93,8 @@ test('the same request id returns the latest canonical snapshot across A to B to
     kind: commandA.kind,
   });
 
-  assert.equal(first.account.cashPoints, 4640);
-  assert.equal(retryA.account.cashPoints, 4640);
+  assert.equal(first.account.cashWon, 1000);
+  assert.equal(retryA.account.cashWon, 1000);
   assert.equal(retryA.revision, afterB.revision);
   assert.ok(retryA.favoriteStockIds.includes('adobe'));
   await assert.rejects(
@@ -111,7 +111,7 @@ test('validation errors do not enter the mutation gate or change canonical state
   const before = structuredClone(store.getState().confirmed);
 
   const result = await store.getState().execute({
-    kind: 'transfer', requestId: 'invalid', direction: 'wallet-to-broker', points: 999999,
+    kind: 'transfer', requestId: 'invalid', direction: 'wallet-to-broker', points: 1_000_001,
   });
 
   assert.equal(result, false);
@@ -131,4 +131,60 @@ test('read failure exposes a retryable initial error without a fake snapshot', a
   assert.equal(store.getState().confirmed, null);
   assert.equal(store.getState().loading, false);
   assert.equal(store.getState().error, '시장 정보를 불러오지 못했어요.');
+});
+
+test('account snapshots never absorb the one-second clock or live quote map', async () => {
+  const store = createMarketPreviewStore(createMarketPreviewGateway({ latencyMs: 0 }));
+  await store.getState().load();
+
+  const { confirmed, visible } = store.getState();
+  assert.ok(confirmed && visible);
+  assert.equal('nowMs' in confirmed, false);
+  assert.equal('nowMs' in visible, false);
+  assert.equal('quoteWonByStockId' in confirmed, false);
+  assert.equal('quoteWonByStockId' in visible, false);
+});
+
+test('in-memory request fingerprints include whole-share quantity and quoted won price', async () => {
+  const gateway = createMarketPreviewGateway({ latencyMs: 0 });
+  await gateway.execute({
+    kind: 'transfer', requestId: 'fund-order', direction: 'wallet-to-broker', points: 10_000,
+  });
+  const command = {
+    kind: 'buy',
+    requestId: 'whole-share-order',
+    stockId: 'jbbj',
+    quantityShares: 2,
+    quotedPriceWon: 1_842,
+  } as const;
+  const bought = await gateway.execute(command);
+  const retry = await gateway.execute({ ...command });
+  assert.deepEqual(retry, bought);
+  await assert.rejects(
+    () => gateway.execute({ ...command, quotedPriceWon: 1_843 }),
+    /request id conflict/,
+  );
+});
+
+test('an explicit current quote affects only the optimistic calculation before canonical convergence', async () => {
+  const store = createMarketPreviewStore(createMarketPreviewGateway({ latencyMs: 20 }));
+  await store.getState().load();
+  await store.getState().execute({
+    kind: 'transfer', requestId: 'fund-current-quote', direction: 'wallet-to-broker', points: 10_000,
+  });
+
+  const pending = store.getState().execute({
+    kind: 'buy',
+    requestId: 'buy-current-quote',
+    stockId: 'jbbj',
+    quantityShares: 2,
+    quotedPriceWon: 1_842,
+  }, 2_000);
+  assert.equal(store.getState().visible?.account.cashWon, 6_000);
+  assert.equal(store.getState().confirmed?.account.cashWon, 10_000);
+  assert.equal('quoteWonByStockId' in store.getState(), false);
+
+  assert.equal(await pending, true);
+  assert.equal(store.getState().visible?.account.cashWon, 6_316);
+  assert.equal(store.getState().confirmed?.account.cashWon, 6_316);
 });

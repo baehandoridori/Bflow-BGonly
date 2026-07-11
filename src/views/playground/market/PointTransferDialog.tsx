@@ -9,6 +9,7 @@ import {
 import { toast } from 'sonner';
 
 import { getAccountSummary, validateMarketCommand } from '@/features/playground/market/domain';
+import { formatPoints, formatWon } from '@/features/playground/market/format';
 import type { MarketCommand } from '@/features/playground/market/types';
 import { useMarketPreviewStore } from '@/features/playground/market/useMarketPreviewStore';
 import { MarketActionDialog } from './MarketActionDialog';
@@ -22,10 +23,6 @@ interface PointTransferDialogProps {
 }
 
 const TRANSFER_PRESETS = [1000, 5000] as const;
-
-function formatPoints(points: number): string {
-  return `${points.toLocaleString('ko-KR')}P`;
-}
 
 export function PointTransferDialog({
   direction,
@@ -54,7 +51,7 @@ export function PointTransferDialog({
   const balanceSnapshot = submitting || mutating ? confirmed ?? visible : visible;
   const summary = balanceSnapshot ? getAccountSummary(balanceSnapshot) : null;
   const sourceBalance = summary
-    ? (isDeposit ? summary.walletPoints : summary.cashPoints)
+    ? (isDeposit ? summary.walletPoints : summary.cashWon)
     : 0;
   const amount = Number(amountInput);
   const amountIsValidInteger = Number.isSafeInteger(amount) && amount > 0;
@@ -68,7 +65,7 @@ export function PointTransferDialog({
     ? validateMarketCommand(balanceSnapshot, previewCommand)
     : '계좌 정보를 불러오지 못했어요';
   const resultBalance = summary && validation === null && amountIsValidInteger
-    ? (isDeposit ? summary.cashPoints : summary.walletPoints) + amount
+    ? (isDeposit ? summary.cashWon : summary.walletPoints) + amount
     : null;
   const displayedError = localError ?? validation ?? storeError;
 
@@ -162,7 +159,9 @@ export function PointTransferDialog({
         <div className="rounded-2xl bg-bg-primary/45 p-4">
           <div className="flex items-center justify-between gap-4 text-sm">
             <span className="text-text-secondary">{sourceLabel}</span>
-            <strong className="tabular-nums text-text-primary">{formatPoints(sourceBalance)}</strong>
+            <strong className="tabular-nums text-text-primary">
+              {isDeposit ? formatPoints(sourceBalance) : formatWon(sourceBalance)}
+            </strong>
           </div>
         </div>
 
@@ -214,11 +213,14 @@ export function PointTransferDialog({
         <div className="mt-5 flex items-center justify-between gap-4 border-t border-bg-border pt-4 text-sm">
           <span className="text-text-secondary">{resultLabel}</span>
           <strong className="tabular-nums text-text-primary">
-            {resultBalance === null ? '—' : formatPoints(resultBalance)}
+            {resultBalance === null
+              ? '—'
+              : isDeposit ? formatWon(resultBalance) : formatPoints(resultBalance)}
           </strong>
         </div>
 
         <div className="mt-4 space-y-1 text-xs leading-5 text-text-secondary">
+          <p>1P = 1원</p>
           <p>수수료가 없고 투자 실적에는 포함되지 않아요</p>
           <p>투자 중인 포인트는 주식을 판 뒤 뺄 수 있어요</p>
         </div>

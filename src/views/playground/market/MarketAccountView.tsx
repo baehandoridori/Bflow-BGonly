@@ -1,7 +1,8 @@
 import { useRef, useState } from 'react';
 import { WalletCards } from 'lucide-react';
 
-import { getAccountSummary, holdingValuePoints } from '@/features/playground/market/domain';
+import { getAccountSummary, holdingValueWon } from '@/features/playground/market/domain';
+import { formatPoints, formatShares, formatWon } from '@/features/playground/market/format';
 import { useMarketPreviewStore } from '@/features/playground/market/useMarketPreviewStore';
 import { useAuthStore } from '@/stores/useAuthStore';
 import { PointTransferDialog } from './PointTransferDialog';
@@ -15,13 +16,9 @@ type TransferDirection = 'wallet-to-broker' | 'broker-to-wallet';
 
 const PENDING_ACCOUNT_MENU_ITEMS = ['거래내역', '주문내역', '수익분석', '계좌관리'] as const;
 
-function formatPoints(points: number): string {
-  return `${points.toLocaleString('ko-KR')}P`;
-}
-
-function signedPoints(points: number): string {
-  if (points === 0) return '±0P';
-  return `${points > 0 ? '+' : '-'}${formatPoints(Math.abs(points))}`;
+function signedWon(won: number): string {
+  if (won === 0) return '±0원';
+  return `${won > 0 ? '+' : '-'}${formatWon(Math.abs(won))}`;
 }
 
 function resultClass(points: number): string {
@@ -92,12 +89,12 @@ export function MarketAccountView({ onOpenStock, onOpenMarketHome }: MarketAccou
               <p className="text-sm font-semibold text-text-secondary">총자산</p>
             </div>
             <p className="mt-2 text-4xl font-bold tabular-nums text-text-primary">
-              {formatPoints(summary.totalAssetsPoints)}
+              {formatWon(summary.totalAssetsWon)}
             </p>
 
             <div className="mt-5 flex flex-wrap items-center justify-between gap-4 border-t border-bg-border pt-5">
               <p className="min-w-0 text-sm text-text-secondary">
-                포인트 지갑 잔액{' '}
+                포인트 지갑{' '}
                 <strong className="whitespace-nowrap font-semibold tabular-nums text-text-primary">
                   {formatPoints(summary.walletPoints)}
                 </strong>
@@ -127,17 +124,17 @@ export function MarketAccountView({ onOpenStock, onOpenMarketHome }: MarketAccou
 
           <section className="border-t border-bg-border pt-7" aria-labelledby="available-cash-heading">
             <h2 id="available-cash-heading" className="text-lg font-bold text-text-primary">
-              쓸 수 있는 포인트
+              쓸 수 있는 예수금
             </h2>
             <div className="mt-4 flex min-h-16 items-center justify-between gap-5">
               <div className="min-w-0">
-                <p className="font-semibold text-text-primary">내 포인트 예수금</p>
+                <p className="font-semibold text-text-primary">내 원화 예수금</p>
                 <p className="mt-1 text-sm leading-6 text-text-secondary">
-                  주식을 바로 살 수 있는 포인트
+                  주식을 바로 살 수 있는 원화
                 </p>
               </div>
               <p className="shrink-0 text-xl font-bold tabular-nums text-text-primary">
-                {formatPoints(summary.cashPoints)}
+                {formatWon(summary.cashWon)}
               </p>
             </div>
           </section>
@@ -151,10 +148,10 @@ export function MarketAccountView({ onOpenStock, onOpenMarketHome }: MarketAccou
                 {snapshot.account.holdings.map((holding) => {
                   const stock = snapshot.stocks.find((item) => item.id === holding.stockId);
                   if (!stock) return null;
-                  const value = holdingValuePoints(holding, stock.pricePoints);
-                  const pnl = value - holding.costBasisPoints;
-                  const rate = holding.costBasisPoints > 0
-                    ? (pnl / holding.costBasisPoints) * 100
+                  const value = holdingValueWon(holding, stock.referencePriceWon);
+                  const pnl = value - holding.costBasisWon;
+                  const rate = holding.costBasisWon > 0
+                    ? (pnl / holding.costBasisWon) * 100
                     : 0;
                   return (
                     <button
@@ -164,14 +161,14 @@ export function MarketAccountView({ onOpenStock, onOpenMarketHome }: MarketAccou
                       className="flex min-h-[72px] w-full min-w-0 cursor-pointer items-center justify-between gap-4 whitespace-normal py-4 text-left transition-colors duration-200 hover:bg-bg-border/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent"
                     >
                       <span className="min-w-0 truncate font-semibold text-text-primary">
-                        {stock.name}
+                        {stock.name} · {formatShares(holding.quantityShares)}
                       </span>
                       <span className="shrink-0 text-right">
                         <span className="block font-semibold tabular-nums text-text-primary">
-                          {formatPoints(value)}
+                          {formatWon(value)}
                         </span>
                         <span className={`mt-1 block text-sm font-semibold tabular-nums ${resultClass(pnl)}`}>
-                          {signedPoints(pnl)} · {signedRate(pnl, rate)}
+                          {signedWon(pnl)} · {signedRate(pnl, rate)}
                         </span>
                       </span>
                     </button>
@@ -186,7 +183,7 @@ export function MarketAccountView({ onOpenStock, onOpenMarketHome }: MarketAccou
                   onClick={onOpenMarketHome}
                   className="mt-4 min-h-11 cursor-pointer rounded-xl bg-accent px-4 py-2 text-sm font-bold text-on-accent transition-colors duration-200 hover:bg-accent/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
                 >
-                  시장 홈에서 주식 둘러보기
+                  종목 둘러보기
                 </button>
               </div>
             )}
@@ -200,20 +197,20 @@ export function MarketAccountView({ onOpenStock, onOpenMarketHome }: MarketAccou
             <dl className="mt-4 divide-y divide-bg-border text-sm">
               <div className="flex min-h-12 items-center justify-between gap-5 py-3 first:pt-0">
                 <dt className="text-text-secondary">이번 달 전체 결과</dt>
-                <dd className={`font-semibold tabular-nums ${resultClass(summary.monthlyTotalPnlPoints)}`}>
-                  {signedPoints(summary.monthlyTotalPnlPoints)}
+                <dd className={`font-semibold tabular-nums ${resultClass(summary.monthlyTotalPnlWon)}`}>
+                  {signedWon(summary.monthlyTotalPnlWon)}
                 </dd>
               </div>
               <div className="flex min-h-12 items-center justify-between gap-5 py-3">
                 <dt className="text-text-secondary">확정된 결과</dt>
-                <dd className={`font-semibold tabular-nums ${resultClass(summary.realizedPnlPoints)}`}>
-                  {signedPoints(summary.realizedPnlPoints)}
+                <dd className={`font-semibold tabular-nums ${resultClass(summary.realizedPnlWon)}`}>
+                  {signedWon(summary.realizedPnlWon)}
                 </dd>
               </div>
               <div className="flex min-h-12 items-center justify-between gap-5 py-3 last:pb-0">
                 <dt className="text-text-secondary">보유 중 변화</dt>
-                <dd className={`font-semibold tabular-nums ${resultClass(summary.monthlyUnrealizedChangePoints)}`}>
-                  {signedPoints(summary.monthlyUnrealizedChangePoints)}
+                <dd className={`font-semibold tabular-nums ${resultClass(summary.monthlyUnrealizedChangeWon)}`}>
+                  {signedWon(summary.monthlyUnrealizedChangeWon)}
                 </dd>
               </div>
             </dl>

@@ -7,6 +7,7 @@ import {
   getStockQuote,
   toReturnSeries,
 } from '@/features/playground/market/domain';
+import { formatWon } from '@/features/playground/market/format';
 import type { MarketStock, MarketTrend } from '@/features/playground/market/types';
 import { useMarketPreviewStore } from '@/features/playground/market/useMarketPreviewStore';
 
@@ -52,17 +53,13 @@ export function MarketRowsScaleProvider({ stocks, children }: MarketRowsScalePro
   );
 }
 
-function formatPoints(points: number): string {
-  return `${points.toLocaleString('ko-KR')}P`;
-}
-
 function quoteText(stock: MarketStock) {
   const quote = getStockQuote(stock);
   if (quote.trend === 'up') {
     return {
       ...quote,
       marker: '▲',
-      amount: `+${formatPoints(quote.changePoints)}`,
+      amount: `+${formatWon(quote.changeWon)}`,
       rate: `+${quote.changeRate.toFixed(1)}%`,
       wording: '상승',
     };
@@ -71,7 +68,7 @@ function quoteText(stock: MarketStock) {
     return {
       ...quote,
       marker: '▼',
-      amount: `-${formatPoints(Math.abs(quote.changePoints))}`,
+      amount: `-${formatWon(Math.abs(quote.changeWon))}`,
       rate: `${quote.changeRate.toFixed(1)}%`,
       wording: '하락',
     };
@@ -79,7 +76,7 @@ function quoteText(stock: MarketStock) {
   return {
     ...quote,
     marker: '―',
-    amount: '±0P',
+    amount: '±0원',
     rate: '0.0%',
     wording: '보합',
   };
@@ -113,13 +110,13 @@ function AccessibleSparkline({ stock }: { stock: MarketStock }) {
   }));
   const points = geometry.map((point) => `${point.x.toFixed(1)},${point.y.toFixed(1)}`).join(' ');
   const quote = quoteText(stock);
-  const first = series[0]?.pricePoints ?? stock.pricePoints;
+  const first = series[0]?.priceWon ?? stock.referencePriceWon;
 
   return (
     <svg
       viewBox={`0 0 ${width} ${height}`}
       role="img"
-      aria-label={`${stock.name} 오늘 가격 그래프. ${formatPoints(first)}에서 ${formatPoints(stock.pricePoints)}로 ${quote.wording}했어요.`}
+      aria-label={`${stock.name} 오늘 가격 그래프. ${formatWon(first)}에서 ${formatWon(stock.referencePriceWon)}로 ${quote.wording}했어요.`}
       className={`h-14 w-full min-w-28 ${trendClass(quote.trend)}`}
       preserveAspectRatio="none"
     >
@@ -186,7 +183,7 @@ export function FavoriteStockCard({
           <span className="mt-1 block text-sm text-text-secondary">{stock.symbol} · {stock.character}</span>
         </span>
         <span className="mt-5 block text-2xl font-bold tabular-nums text-text-primary">
-          {formatPoints(stock.pricePoints)}
+          {formatWon(stock.referencePriceWon)}
         </span>
         <span className={`mt-1 block text-sm font-semibold tabular-nums ${trendClass(quote.trend)}`}>
           {quote.marker} {quote.amount} · {quote.rate} {quote.wording}
@@ -232,7 +229,7 @@ export function StockListRow({
         </span>
         <span className="min-w-0">
           <span className="block text-base font-bold tabular-nums text-text-primary">
-            {formatPoints(stock.pricePoints)}
+            {formatWon(stock.referencePriceWon)}
           </span>
           <span className={`mt-1 block text-sm font-semibold tabular-nums ${trendClass(quote.trend)}`}>
             {quote.marker} {quote.amount} · {quote.rate} {quote.wording}

@@ -14,7 +14,7 @@ interface MarketPreviewState {
   mutating: boolean;
   error: string | null;
   load(): Promise<void>;
-  execute(command: MarketCommand): Promise<boolean>;
+  execute(command: MarketCommand, currentPriceWon?: number): Promise<boolean>;
   clearError(): void;
 }
 
@@ -36,17 +36,17 @@ export function createMarketPreviewStore(
         set({ loading: false, error: '시장 정보를 불러오지 못했어요.' });
       }
     },
-    async execute(command) {
+    async execute(command, currentPriceWon) {
       const { visible, mutating } = get();
       if (!visible || mutating) return false;
 
-      const validation = validateMarketCommand(visible, command);
+      const validation = validateMarketCommand(visible, command, currentPriceWon);
       if (validation) {
         set({ error: validation });
         return false;
       }
 
-      const projected = applyMarketCommand(visible, command);
+      const projected = applyMarketCommand(visible, command, currentPriceWon);
       set({ visible: projected, mutating: true, error: null });
       try {
         const confirmed = await gateway.execute(command);

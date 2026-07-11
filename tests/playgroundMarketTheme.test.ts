@@ -32,7 +32,7 @@ test('new market components do not hardcode hex colors', () => {
   for (const file of files) assert.doesNotMatch(readFileSync(file, 'utf8'), /#[0-9a-f]{3,8}\b/i, file);
 });
 
-test('preview feature cannot reach production persistence APIs', () => {
+test('preview feature only reaches browser persistence through the injected storage adapter', () => {
   const collect = (dir: string): string[] => readdirSync(dir).flatMap((name) => {
     const path = `${dir}/${name}`;
     return statSync(path).isDirectory() ? collect(path) : [path];
@@ -43,7 +43,8 @@ test('preview feature cannot reach production persistence APIs', () => {
     ...collect('src/views/playground'),
   ]
     .filter((file) => /\.tsx?$/.test(file));
-  for (const file of files) {
+  const storageAdapter = 'src/features/playground/market/localStorageGateway.ts';
+  for (const file of files.filter((file) => file !== storageAdapter)) {
     const source = readFileSync(file, 'utf8');
     assert.doesNotMatch(
       source,
@@ -51,4 +52,12 @@ test('preview feature cannot reach production persistence APIs', () => {
       file,
     );
   }
+  const adapter = readFileSync(storageAdapter, 'utf8');
+  assert.match(adapter, /storage:\s*Storage/);
+  assert.match(adapter, /options\.storage\.getItem/);
+  assert.match(adapter, /options\.storage\.setItem/);
+  assert.doesNotMatch(
+    adapter,
+    /window\.electronAPI|window\.localStorage|globalThis\.localStorage|sessionStorage|indexedDB|ipcRenderer|from\s+['"]electron['"]|createClient\(|@supabase|@\/services\//i,
+  );
 });
