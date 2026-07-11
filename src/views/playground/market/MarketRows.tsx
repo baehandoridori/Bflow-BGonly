@@ -86,8 +86,9 @@ function quoteText(stock: MarketStock) {
 }
 
 function trendClass(trend: MarketTrend): string {
-  if (trend === 'up' || trend === 'down') return 'text-text-primary';
-  return 'text-text-secondary';
+  if (trend === 'up') return 'text-market-up';
+  if (trend === 'down') return 'text-market-down';
+  return 'text-market-flat';
 }
 
 function AccessibleSparkline({ stock }: { stock: MarketStock }) {

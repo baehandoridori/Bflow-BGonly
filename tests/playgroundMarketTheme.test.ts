@@ -11,6 +11,13 @@ test('market semantic colors exist in CSS and Tailwind', () => {
   }
 });
 
+test('market rows map every trend to its semantic color class', () => {
+  const source = readFileSync('src/views/playground/market/MarketRows.tsx', 'utf8');
+  assert.match(source, /if \(trend === 'up'\) return 'text-market-up';/);
+  assert.match(source, /if \(trend === 'down'\) return 'text-market-down';/);
+  assert.match(source, /return 'text-market-flat';/);
+});
+
 test('new market components do not hardcode hex colors', () => {
   const files = [
     'src/views/playground/market/MarketNav.tsx',
