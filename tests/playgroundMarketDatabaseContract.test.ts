@@ -211,7 +211,7 @@ test('execute RPC preserves idempotent replay and rejects active halts in both o
   }
 });
 
-test('read RPC probes committed requests under the same lock and fingerprint as execute', () => {
+test('read RPC serializes every authorized account snapshot and request probe under the execute lock', () => {
   const sql = readMigration();
   const read = functionDefinition(sql, 'playground_market_read');
   const execute = functionDefinition(sql, 'playground_market_execute');
@@ -224,10 +224,36 @@ test('read RPC probes committed requests under the same lock and fingerprint as 
     read,
     /p_request_id\s+IS\s+NOT\s+NULL\s+OR\s+p_kind\s+IS\s+NOT\s+NULL\s+OR\s+p_payload\s+IS\s+NOT\s+NULL[\s\S]*?p_request_id\s+IS\s+NULL\s+OR\s+p_kind\s+IS\s+NULL\s+OR\s+p_payload\s+IS\s+NULL/i,
   );
-  const advisoryLock = read.search(/pg_advisory_xact_lock\s*\(\s*hashtextextended\s*\(\s*p_user_id::text\s*,\s*0\s*\)\s*\)/i);
-  const firstTableAccess = read.search(/\b(?:FROM|UPDATE|INSERT INTO|DELETE FROM)\s+public\./i);
-  assert.notEqual(advisoryLock, -1, 'request probe must take the same per-user advisory lock');
-  assert.ok(advisoryLock < firstTableAccess, 'request probe lock must precede every table access');
+  const advisoryLockPattern = /PERFORM\s+pg_advisory_xact_lock\s*\(\s*hashtextextended\s*\(\s*p_user_id::text\s*,\s*0\s*\)\s*\)\s*;/gi;
+  const advisoryLocks = [...read.matchAll(advisoryLockPattern)];
+  assert.equal(advisoryLocks.length, 1, 'read must acquire the per-user lock exactly once');
+  const advisoryLock = advisoryLocks[0]?.index ?? -1;
+  const probeValidationEnd = read.search(/v_request_probe\s*:=\s*'missing'\s*;\s*END IF\s*;/i);
+  assert.notEqual(probeValidationEnd, -1, 'read must retain the optional request-probe branch');
+  const canonicalAuthorization = /IF NOT EXISTS\s*\([\s\S]*?FROM public\.users[\s\S]*?market access is limited to canonical Hansol[\s\S]*?END IF\s*;/i.exec(read);
+  assert.ok(canonicalAuthorization, 'read must retain canonical Hansol authorization');
+  const canonicalAuthorizationEnd = (canonicalAuthorization.index ?? -1) + canonicalAuthorization[0].length;
+
+  assert.ok(
+    advisoryLock > probeValidationEnd,
+    'the account lock must be unconditional, outside the optional request-probe validation branch',
+  );
+  assert.ok(
+    advisoryLock >= canonicalAuthorizationEnd,
+    'read must authorize canonical Hansol before allowing an arbitrary user id to take a lock',
+  );
+
+  for (const table of [
+    'playground_value_ledger',
+    'playground_wallet_accounts',
+    'playground_brokerage_accounts',
+    'playground_market_holdings',
+    'playground_market_events',
+  ]) {
+    const firstRead = read.search(new RegExp(`FROM\\s+public\\.${table}\\b`, 'i'));
+    assert.notEqual(firstRead, -1, `${table} must remain part of the market snapshot`);
+    assert.ok(advisoryLock < firstRead, `read must lock before selecting ${table}`);
+  }
 
   const fingerprintPattern = /encode\s*\(\s*sha256\s*\(\s*convert_to\s*\(\s*p_kind\s*\|\|\s*E?'\\n'\s*\|\|\s*p_payload::text\s*,\s*'UTF8'\s*\)\s*\)\s*,\s*'hex'\s*\)/i;
   assert.match(read, fingerprintPattern, 'read probe must use the execute fingerprint');

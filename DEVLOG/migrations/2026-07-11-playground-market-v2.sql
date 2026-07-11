@@ -262,7 +262,6 @@ BEGIN
       RAISE EXCEPTION 'market command payload is invalid' USING ERRCODE = '22023';
     END IF;
 
-    PERFORM pg_advisory_xact_lock(hashtextextended(p_user_id::text, 0));
     v_fingerprint := encode(
       sha256(convert_to(p_kind || E'\n' || p_payload::text, 'UTF8')),
       'hex'
@@ -288,6 +287,8 @@ BEGIN
   ) THEN
     RAISE EXCEPTION 'market access is limited to canonical Hansol' USING ERRCODE = '42501';
   END IF;
+
+  PERFORM pg_advisory_xact_lock(hashtextextended(p_user_id::text, 0));
 
   IF v_request_probe IS NOT NULL THEN
     SELECT ledger.payload_fingerprint
