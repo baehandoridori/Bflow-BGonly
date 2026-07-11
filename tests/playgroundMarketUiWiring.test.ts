@@ -114,7 +114,7 @@ test('reason selection navigates immediately while persistence settles in the ba
   assert.ok(handler.indexOf('execute({') < handler.indexOf('onOpenStock(stockId)'));
 });
 
-test('destination returns are immediate while lobby cards retain origin wipes', () => {
+test('destination returns preserve their source while lobby and house cards retain origin wipes', () => {
   const playground = readFileSync('src/views/PlaygroundView.tsx', 'utf8');
   const lobby = readFileSync('src/views/playground/PlaygroundLobby.tsx', 'utf8');
   const activation = readFileSync('src/views/playground/playgroundActivation.ts', 'utf8');
@@ -124,18 +124,20 @@ test('destination returns are immediate while lobby cards retain origin wipes', 
   const comingSoon = readFileSync('src/views/playground/ComingSoonGame.tsx', 'utf8');
   const marketNav = readFileSync('src/views/playground/market/MarketNav.tsx', 'utf8');
 
-  assert.match(playground, /<JbbjHouse onBack=\{\(\) => move\(\{ kind: 'go-lobby' \}\)\} \/>/);
-  assert.match(playground, /onBack=\{\(\) => move\(\{ kind: 'go-lobby' \}\)\}/);
-  assert.match(playground, /onExit=\{\(\) => move\(\{ kind: 'go-lobby' \}\)\}/);
-  assert.match(house, /onClick=\{onBack\}/);
+  assert.match(playground, /route\.kind === 'house'[\s\S]*?onBack:\s*\(\) => move\(\{ kind: 'go-lobby' \}\)/);
+  assert.match(playground, /returnLabel=\{route\.returnTo === 'house' \? 'JBBJ 하우스' : '게임 로비'\}/);
+  assert.match(playground, /onBack=\{\(\) => move\(\{ kind: 'return-to-source' \}\)\}/);
+  assert.match(playground, /onExit=\{\(\) => move\(\{ kind: 'return-to-source' \}\)\}/);
+  assert.match(house, /pointFromButtonActivation\(event\)/);
   assert.match(comingSoon, /onClick=\{onBack\}/);
   assert.match(marketNav, /onClick=\{onExit\}/);
-  for (const source of [house, comingSoon, marketNav]) {
+  for (const source of [comingSoon, marketNav]) {
     assert.doesNotMatch(source, /originFromActivation/);
   }
   assert.match(activation, /originFromActivation/);
   assert.match(card, /pointFromButtonActivation\(event\)/);
   assert.match(hero, /pointFromButtonActivation\(event\)/);
+  assert.match(house, /pointFromButtonActivation\(event\)/);
   assert.match(lobby, /onPlayGame\(entry\.gameId,\s*origin\)/);
   assert.match(lobby, /onOpenMarket\(origin\)/);
 });

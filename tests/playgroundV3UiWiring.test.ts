@@ -152,6 +152,80 @@ test('lobby actions keep 44px targets, visible focus and Korean copy at 14px or 
   }
 });
 
+test('C house restores challenge, podium and exactly five dock entries', async () => {
+  const house = readFileSync('src/views/playground/JbbjHouse.tsx', 'utf8');
+  const { HOUSE_DOCK_ENTRIES } = await import('../src/features/playground/catalog.ts');
+
+  assert.equal(HOUSE_DOCK_ENTRIES.length, 5);
+  assert.match(house, /data-pg-house/);
+  assert.match(house, /data-pg-challenge/);
+  assert.match(house, /TEAM CHALLENGE/);
+  assert.match(house, /68,400/);
+  assert.match(house, /data-pg-podium/);
+  assert.match(house, /HOUSE_DOCK_ENTRIES\.map/);
+  assert.match(house, /data-pg-dock-entry/);
+  assert.match(house, /프리뷰 챌린지/);
+  assert.match(house, /entry\.kind === 'disabled'[\s\S]*?<div[\s\S]*?aria-disabled="true"/);
+  assert.match(house, /pointFromButtonActivation\(event\)/);
+  assert.doesNotMatch(house, /useMarketPreviewStore/);
+});
+
+test('game preparation screen renders dedicated art and source-aware return copy', () => {
+  const source = readFileSync('src/views/playground/ComingSoonGame.tsx', 'utf8');
+
+  assert.match(source, /data-pg-game-stage/);
+  assert.match(source, /PlaygroundGameArt/);
+  assert.match(source, /returnLabel/);
+  assert.match(source, /game\.stageReward/);
+  assert.match(source, /게임 준비 중/);
+  assert.doesNotMatch(source, /START GAME|게임 시작/);
+});
+
+test('house and game preparation use the real Shell with source-aware returns', () => {
+  const source = readFileSync('src/views/PlaygroundView.tsx', 'utf8');
+
+  assert.match(source, /route\.kind === 'house' && \(\s*<PlaygroundShell/);
+  assert.match(source, /titleId:\s*'playground-house-title'/);
+  assert.match(source, /title:\s*'JBBJ 하우스'/);
+  assert.match(source, /onBack:\s*\(\) => move\(\{ kind: 'go-lobby' \}\)/);
+  assert.match(source, /<JbbjHouse[\s\S]*?ranking=\{ranking\}/);
+  assert.match(source, /route\.kind === 'coming-soon' && \(\s*<PlaygroundShell/);
+  assert.match(source, /game=\{GAME_DEFINITIONS\[route\.game\]\}/);
+  assert.match(source, /returnLabel=\{route\.returnTo === 'house' \? 'JBBJ 하우스' : '게임 로비'\}/);
+  assert.match(source, /onBack=\{\(\) => move\(\{ kind: 'return-to-source' \}\)\}/);
+  assert.match(source, /onExit=\{\(\) => move\(\{ kind: 'return-to-source' \}\)\}/);
+});
+
+test('house and game actions keep 44px targets, visible focus and Korean copy at 14px or larger', () => {
+  const css = readFileSync('src/views/playground/playground.css', 'utf8');
+
+  assert.match(css, /\.pg-dock\s*{[^}]*min-height:\s*(?:[5-9][0-9]|[1-9][0-9]{2,})px/);
+  assert.match(css, /\.pg-game-screen__back\s*{[^}]*min-height:\s*44px/);
+  assert.match(css, /\.playground-shell button:focus-visible\s*{[^}]*outline:\s*3px solid/);
+
+  for (const selector of [
+    '.pg-challenge p',
+    '.pg-challenge__preview',
+    '.pg-challenge__progress',
+    '.pg-podium h3',
+    '.pg-podium li',
+    '.pg-podium__me',
+    '.pg-dock b',
+    '.pg-dock small',
+    '.pg-game-screen__info p',
+    '.pg-tag--soon',
+    '.pg-game-screen__back',
+  ]) {
+    const escapedSelector = selector.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const blocks = [...css.matchAll(new RegExp(`${escapedSelector}\\s*\\{([^}]*)\\}`, 'g'))];
+    const fontSizes = blocks.flatMap((block) => (
+      [...block[1].matchAll(/font-size:\s*([0-9.]+)px/g)].map((match) => Number(match[1]))
+    ));
+    assert.ok(fontSizes.length > 0, `${selector} must define a pixel font-size`);
+    assert.ok(fontSizes.every((fontSize) => fontSize >= 14), `${selector} must stay at or above 14px`);
+  }
+});
+
 test('PlaygroundView wires the approved lobby through the store-aware root only', () => {
   const source = readFileSync('src/views/PlaygroundView.tsx', 'utf8');
   const recommendation = readFileSync('src/features/playground/recommendation.ts', 'utf8');

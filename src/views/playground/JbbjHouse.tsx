@@ -1,48 +1,148 @@
-import { Armchair, ArrowLeft, Coins } from 'lucide-react';
+import { Landmark } from 'lucide-react';
 
-import { useMarketPreviewStore } from '@/features/playground/market/useMarketPreviewStore';
+import {
+  GAME_DEFINITIONS,
+  HOUSE_DOCK_ENTRIES,
+  type PlaygroundDockEntry,
+} from '@/features/playground/catalog';
+import type { PointRankingEntry, PointRankingModel } from '@/features/playground/ranking';
+import type { PreviewGame } from '@/features/playground/routes';
+import type { Point } from '@/features/playground/transition/dotWipeMath';
+import { PlaygroundGameArt } from './PlaygroundGameArt';
+import { pointFromButtonActivation } from './playgroundActivation';
 
-interface JbbjHouseProps {
-  onBack(): void;
+export interface JbbjHouseProps {
+  ranking: PointRankingModel;
+  onPlayGame: (game: PreviewGame, origin: Point) => void;
+  onOpenMarket: (origin: Point) => void;
 }
 
-export function JbbjHouse({ onBack }: JbbjHouseProps) {
-  const walletPoints = useMarketPreviewStore((state) => state.visible?.account.walletPoints ?? null);
+export function JbbjHouse({ ranking, onPlayGame, onOpenMarket }: JbbjHouseProps) {
+  const rankedPodium = ranking.entries
+    .filter((entry) => entry.points !== null)
+    .slice(0, 3);
+  const podium = [rankedPodium[1], rankedPodium[0], rankedPodium[2]]
+    .filter((entry): entry is PointRankingEntry => entry !== undefined);
+
+  const activate = (entry: PlaygroundDockEntry, origin: Point) => {
+    if (entry.kind === 'game') {
+      onPlayGame(entry.gameId, origin);
+      return;
+    }
+    if (entry.kind === 'market') onOpenMarket(origin);
+  };
 
   return (
-    <div className="flex h-full overflow-y-auto px-5 py-8 sm:px-8">
-      <div className="m-auto w-full max-w-2xl rounded-3xl border border-bg-border bg-bg-card p-6 shadow-xl sm:p-10">
-        <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-accent/10 text-accent-sub">
-          <Armchair aria-hidden="true" size={28} />
+    <section className="pg-house" data-pg-house>
+      <header className="pg-house__intro">
+        <div>
+          <small>WELCOME TO JBBJ HOUSE</small>
+          <h3>지금, 네 명이 놀고 있어요.</h3>
         </div>
-        <p className="mt-7 text-sm font-semibold tracking-[0.14em] text-text-secondary">CALM LOUNGE</p>
-        <h2 id="playground-house-title" tabIndex={-1} className="mt-2 text-3xl font-bold text-text-primary outline-none">
-          JBBJ 하우스
-        </h2>
-        <p className="mt-4 max-w-xl text-base leading-7 text-text-secondary">
-          잠깐 속도를 늦추고 쉬어 가는 조용한 라운지예요. 모은 포인트를 확인하고 다음 놀이를 천천히 골라보세요.
-        </p>
+        <span className="pg-house__online">
+          <i className="pg-online-dot" aria-hidden="true" />
+          4 PLAYERS ONLINE
+        </span>
+      </header>
 
-        <section className="mt-8 rounded-2xl border border-bg-border bg-bg-primary/45 p-5" aria-labelledby="house-point-heading">
-          <div className="flex items-center gap-3 text-text-secondary">
-            <Coins aria-hidden="true" size={20} />
-            <h3 id="house-point-heading" className="text-sm font-medium">현재 포인트 잔액</h3>
-          </div>
-          <p className="mt-3 text-3xl font-bold tabular-nums text-text-primary">
-            {walletPoints === null ? '확인 중' : `${walletPoints.toLocaleString('ko-KR')}P`}
+      <div className="pg-house__grid">
+        <article className="pg-challenge" data-pg-challenge>
+          <span className="pg-tag pg-tag--live">TEAM CHALLENGE</span>
+          <h3>오늘 안에 테트리스<br />합계 100,000점</h3>
+          <p>
+            팀원들의 기록을 합쳐 목표를 달성하면 참여자 전원에게
+            60 포인트를 지급합니다.
           </p>
-          <p className="mt-2 text-sm text-text-secondary">여기서는 잔액만 편안하게 확인할 수 있어요.</p>
-        </section>
+          <span className="pg-challenge__preview">프리뷰 챌린지</span>
+          <div className="pg-challenge__progress">
+            <span>현재 68,400점</span>
+            <span>68%</span>
+          </div>
+          <div
+            className="pg-challenge__track"
+            role="progressbar"
+            aria-label="프리뷰 챌린지 진행률"
+            aria-valuemin={0}
+            aria-valuemax={100}
+            aria-valuenow={68}
+          >
+            <i />
+          </div>
+        </article>
 
-        <button
-          type="button"
-          onClick={onBack}
-          className="mt-8 inline-flex min-h-11 cursor-pointer items-center justify-center gap-2 rounded-xl bg-accent px-5 py-3 text-sm font-semibold text-on-accent transition-colors duration-200 hover:bg-accent/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 focus-visible:ring-offset-bg-card"
-        >
-          <ArrowLeft aria-hidden="true" size={18} />
-          놀이터로 돌아가기
-        </button>
+        <aside className="pg-podium" data-pg-podium aria-label="포인트 명예의 전당">
+          <h3>포인트 명예의 전당</h3>
+          <ol>
+            {podium.map((entry) => (
+              <li key={entry.id} className={entry.rank === 1 ? 'is-first' : ''}>
+                <span aria-hidden="true">{entry.name.slice(0, 1)}</span>
+                <b>{entry.name}</b>
+                <small>{entry.points!.toLocaleString('ko-KR')} P</small>
+              </li>
+            ))}
+          </ol>
+          <div className="pg-podium__me">
+            <b>
+              {ranking.current.rank === null
+                ? '—'
+                : String(ranking.current.rank).padStart(2, '0')}
+            </b>
+            <span>{ranking.current.name} · 나</span>
+            <span>
+              {ranking.current.points === null
+                ? '— P'
+                : `${ranking.current.points.toLocaleString('ko-KR')} P`}
+            </span>
+          </div>
+        </aside>
       </div>
-    </div>
+
+      <div className="pg-house__dock" aria-label="JBBJ 하우스 게임 도크">
+        {HOUSE_DOCK_ENTRIES.map((entry) => {
+          const key = entry.kind === 'game' ? entry.gameId : entry.id;
+
+          if (entry.kind === 'disabled') {
+            return (
+              <div
+                key={key}
+                data-pg-dock-entry
+                className="pg-dock is-disabled"
+                aria-disabled="true"
+              >
+                <span className="pg-dock__icon" aria-hidden="true">777</span>
+                <span>
+                  <b>{entry.label}</b>
+                  <small>{entry.status}</small>
+                </span>
+              </div>
+            );
+          }
+
+          const game = entry.kind === 'game' ? GAME_DEFINITIONS[entry.gameId] : null;
+          const label = entry.kind === 'game' ? game!.koName : entry.label;
+          const status = entry.kind === 'game' ? '플레이 준비 중' : '시장 열기';
+
+          return (
+            <button
+              key={key}
+              type="button"
+              data-pg-dock-entry
+              className="pg-dock"
+              onClick={(event) => activate(entry, pointFromButtonActivation(event))}
+            >
+              <span className="pg-dock__icon">
+                {game
+                  ? <PlaygroundGameArt game={game.id} variant="icon" />
+                  : <Landmark aria-hidden="true" size={21} />}
+              </span>
+              <span>
+                <b>{label}</b>
+                <small>{status}</small>
+              </span>
+            </button>
+          );
+        })}
+      </div>
+    </section>
   );
 }

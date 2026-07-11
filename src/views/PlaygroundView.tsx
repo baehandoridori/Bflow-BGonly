@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 
+import { GAME_DEFINITIONS } from '@/features/playground/catalog';
 import { advanceRecommendation, createRecommendationSession } from '@/features/playground/recommendation';
 import { buildPointRanking } from '@/features/playground/ranking';
 import {
@@ -103,19 +104,50 @@ export default function PlaygroundView() {
         </PlaygroundShell>
       )}
       {route.kind === 'house' && (
-        <JbbjHouse onBack={() => move({ kind: 'go-lobby' })} />
+        <PlaygroundShell
+          header={{
+            titleId: 'playground-house-title',
+            title: 'JBBJ 하우스',
+            description: '팀 챌린지와 함께 노는 공간',
+            backLabel: '게임 로비',
+            onBack: () => move({ kind: 'go-lobby' }),
+            showHouse: false,
+            ranking,
+          }}
+          surfaceKey="house"
+        >
+          <JbbjHouse
+            ranking={ranking}
+            onPlayGame={(game, origin) => move({ kind: 'open-game', game }, origin)}
+            onOpenMarket={(origin) => move({ kind: 'open-market' }, origin)}
+          />
+        </PlaygroundShell>
       )}
       {route.kind === 'coming-soon' && (
-        <ComingSoonGame
-          game={route.game}
-          onBack={() => move({ kind: 'go-lobby' })}
-        />
+        <PlaygroundShell
+          header={{
+            titleId: 'playground-game-title',
+            title: GAME_DEFINITIONS[route.game].koName,
+            description: '기록과 보상 규칙을 준비하고 있어요',
+            backLabel: route.returnTo === 'house' ? 'JBBJ 하우스' : '게임 로비',
+            onBack: () => move({ kind: 'return-to-source' }),
+            showHouse: false,
+            ranking,
+          }}
+          surfaceKey={`coming-soon-${route.game}`}
+        >
+          <ComingSoonGame
+            game={GAME_DEFINITIONS[route.game]}
+            returnLabel={route.returnTo === 'house' ? 'JBBJ 하우스' : '게임 로비'}
+            onBack={() => move({ kind: 'return-to-source' })}
+          />
+        </PlaygroundShell>
       )}
       {route.kind === 'market' && (
         <MarketRouter
           route={route.page}
           onNavigate={(action) => move(action)}
-          onExit={() => move({ kind: 'go-lobby' })}
+          onExit={() => move({ kind: 'return-to-source' })}
         />
       )}
       {wipe && (
