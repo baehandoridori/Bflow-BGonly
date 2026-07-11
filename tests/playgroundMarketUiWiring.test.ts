@@ -117,6 +117,9 @@ test('reason selection navigates immediately while persistence settles in the ba
 test('destination returns are immediate while lobby cards retain origin wipes', () => {
   const playground = readFileSync('src/views/PlaygroundView.tsx', 'utf8');
   const lobby = readFileSync('src/views/playground/PlaygroundLobby.tsx', 'utf8');
+  const activation = readFileSync('src/views/playground/playgroundActivation.ts', 'utf8');
+  const card = readFileSync('src/views/playground/PlaygroundGameCard.tsx', 'utf8');
+  const hero = readFileSync('src/views/playground/PlaygroundRecommendationHero.tsx', 'utf8');
   const house = readFileSync('src/views/playground/JbbjHouse.tsx', 'utf8');
   const comingSoon = readFileSync('src/views/playground/ComingSoonGame.tsx', 'utf8');
   const marketNav = readFileSync('src/views/playground/market/MarketNav.tsx', 'utf8');
@@ -130,8 +133,11 @@ test('destination returns are immediate while lobby cards retain origin wipes', 
   for (const source of [house, comingSoon, marketNav]) {
     assert.doesNotMatch(source, /originFromActivation/);
   }
-  assert.match(lobby, /originFromActivation/);
-  assert.match(lobby, /onMove\(actionFor\(item\), activationOrigin\(event\)\)/);
+  assert.match(activation, /originFromActivation/);
+  assert.match(card, /pointFromButtonActivation\(event\)/);
+  assert.match(hero, /pointFromButtonActivation\(event\)/);
+  assert.match(lobby, /onPlayGame\(entry\.gameId,\s*origin\)/);
+  assert.match(lobby, /onOpenMarket\(origin\)/);
 });
 
 test('completed mission disclosure summary has a 44px padded target', () => {

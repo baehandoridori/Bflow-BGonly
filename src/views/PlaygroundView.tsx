@@ -1,5 +1,7 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 
+import { advanceRecommendation, createRecommendationSession } from '@/features/playground/recommendation';
+import { buildPointRanking } from '@/features/playground/ranking';
 import {
   getPlaygroundReturnSurface,
   initialPlaygroundRoute,
@@ -12,18 +14,31 @@ import { DotWipeTransition } from '@/features/playground/transition/DotWipeTrans
 import { getPlaygroundNavigationTransition } from '@/features/playground/transition/playgroundTransitionPolicy';
 import type { DotWipeRequest } from '@/features/playground/transition/usePlaygroundEntryStore';
 import { useMarketPreviewStore } from '@/features/playground/market/useMarketPreviewStore';
+import { useAuthStore } from '@/stores/useAuthStore';
 import { ComingSoonGame } from './playground/ComingSoonGame';
 import { JbbjHouse } from './playground/JbbjHouse';
 import { PlaygroundLobby } from './playground/PlaygroundLobby';
+import { PlaygroundShell } from './playground/PlaygroundShell';
 import { MarketRouter } from './playground/market/MarketRouter';
 
 export default function PlaygroundView() {
   const [route, setRoute] = useState<PlaygroundRoute>(initialPlaygroundRoute);
+  const [recommendation, setRecommendation] = useState(createRecommendationSession);
   const [wipe, setWipe] = useState<DotWipeRequest | null>(null);
   const pendingAction = useRef<PlaygroundAction | null>(null);
   const transitionInFlight = useRef(false);
   const sequence = useRef(0);
+  const currentUser = useAuthStore((state) => state.currentUser);
+  const visible = useMarketPreviewStore((state) => state.visible);
   const loadMarket = useMarketPreviewStore((state) => state.load);
+  const userName = currentUser?.name.trim() || '팀원';
+  const walletPoints = visible?.account.walletPoints ?? null;
+  const marketCashPoints = visible?.account.cashPoints ?? null;
+  const ranking = useMemo(() => buildPointRanking({
+    id: currentUser?.id ?? 'preview-user',
+    name: userName,
+    points: walletPoints,
+  }), [currentUser?.id, userName, walletPoints]);
 
   useEffect(() => {
     const state = useMarketPreviewStore.getState();
@@ -63,7 +78,30 @@ export default function PlaygroundView() {
       <h1 id="playground-title" tabIndex={-1} className="sr-only outline-none">
         배플레이그라운드
       </h1>
-      {route.kind === 'lobby' && <PlaygroundLobby onMove={move} />}
+      {route.kind === 'lobby' && (
+        <PlaygroundShell
+          header={{
+            titleId: 'playground-lobby-title',
+            title: '배플레이그라운드',
+            description: '입장할 때마다 추천 게임이 달라집니다',
+            showHouse: true,
+            onOpenHouse: () => move({ kind: 'open-house' }),
+            ranking,
+          }}
+          surfaceKey="lobby"
+        >
+          <PlaygroundLobby
+            userName={userName}
+            recommendation={recommendation.current}
+            ranking={ranking}
+            marketCashPoints={marketCashPoints}
+            onShuffle={() => setRecommendation((current) => advanceRecommendation(current))}
+            onPlayGame={(game, origin) => move({ kind: 'open-game', game }, origin)}
+            onOpenMarket={(origin) => move({ kind: 'open-market' }, origin)}
+            onOpenHouse={() => move({ kind: 'open-house' })}
+          />
+        </PlaygroundShell>
+      )}
       {route.kind === 'house' && (
         <JbbjHouse onBack={() => move({ kind: 'go-lobby' })} />
       )}
