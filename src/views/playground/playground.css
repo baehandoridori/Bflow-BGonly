@@ -60,7 +60,7 @@
   overflow: hidden;
   color: rgb(var(--pg-text));
   font-size: 14px;
-  font-weight: 750;
+  font-weight: 700;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -231,6 +231,7 @@
   margin: 7px 0 0;
   color: rgb(var(--pg-text));
   font-size: clamp(24px, 2.5cqw, 34px);
+  font-weight: 700;
   letter-spacing: -.045em;
 }
 
@@ -315,6 +316,7 @@
   margin: 14px 0 9px;
   color: rgb(var(--pg-text));
   font-size: clamp(38px, 4.3cqw, 58px);
+  font-weight: 700;
   line-height: .88;
   letter-spacing: -.065em;
 }
@@ -560,6 +562,7 @@
 .pg-ranking__head h3 {
   margin: 0;
   font-size: 15px;
+  font-weight: 700;
 }
 
 .pg-ranking__head span {
@@ -715,6 +718,7 @@
 .pg-house__intro h3 {
   margin: 7px 0 0;
   font-size: clamp(28px, 3cqw, 40px);
+  font-weight: 700;
   letter-spacing: -.05em;
 }
 
@@ -761,6 +765,7 @@
   z-index: 1;
   margin: 17px 0 9px;
   font-size: clamp(30px, 3.5cqw, 48px);
+  font-weight: 700;
   line-height: .96;
   letter-spacing: -.06em;
 }
@@ -814,6 +819,7 @@
 .pg-podium h3 {
   margin: 0 0 16px;
   font-size: 15px;
+  font-weight: 700;
 }
 
 .pg-podium ol {
@@ -967,6 +973,7 @@
 .pg-game-screen__info h3 {
   margin: 12px 0 10px;
   font-size: clamp(48px, 6cqw, 82px);
+  font-weight: 700;
   line-height: .86;
   letter-spacing: -.075em;
 }

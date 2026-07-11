@@ -25,6 +25,30 @@ test('Playground owns a local header and named inline-size container', () => {
   assert.match(css, /@media \(prefers-reduced-motion: reduce\)/);
 });
 
+test('Playground headings restore the approved 700 weight after Tailwind reset', () => {
+  const css = readFileSync('src/views/playground/playground.css', 'utf8');
+
+  for (const selector of [
+    '.pg-header__copy h2',
+    '.pg-welcome h3',
+    '.pg-hero h3',
+    '.pg-ranking__head h3',
+    '.pg-house__intro h3',
+    '.pg-challenge h3',
+    '.pg-podium h3',
+    '.pg-game-screen__info h3',
+  ]) {
+    const escapedSelector = selector.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const blocks = [...css.matchAll(new RegExp(`${escapedSelector}\\s*\\{([^}]*)\\}`, 'g'))];
+    const fontWeights = blocks.flatMap((block) => (
+      [...block[1].matchAll(/font-weight:\s*([0-9]+)/g)].map((match) => Number(match[1]))
+    ));
+
+    assert.ok(fontWeights.includes(700), `${selector} must explicitly define font-weight: 700`);
+    assert.ok(fontWeights.every((fontWeight) => fontWeight === 700), `${selector} must stay at 700`);
+  }
+});
+
 test('compact back control keeps an accessible name when its visible label is hidden', () => {
   const header = readFileSync('src/views/playground/PlaygroundHeader.tsx', 'utf8');
   assert.match(header, /className="pg-header__back"[^>]*aria-label=\{backLabel\}/);
