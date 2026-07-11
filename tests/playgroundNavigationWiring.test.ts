@@ -2,7 +2,11 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 
-import { canAccessPlayground, resolveAllowedView } from '../src/features/playground/featureFlag.ts';
+import {
+  canAccessPlayground,
+  isExplicitPlaygroundPreviewMode,
+  resolveAllowedView,
+} from '../src/features/playground/featureFlag.ts';
 import { getNavigationBackLabel, type NavigationBackSourceState } from '../src/utils/navigationBackStack.ts';
 
 const baseState: NavigationBackSourceState = {
@@ -22,20 +26,78 @@ const baseState: NavigationBackSourceState = {
   settingsTab: null,
 };
 
-test('playground access is fail-closed to 배한솔 only', () => {
-  assert.equal(canAccessPlayground('배한솔'), true);
-  for (const blocked of ['다른 사용자', '', ' 배한솔 ', null, undefined, 1234]) {
-    assert.equal(canAccessPlayground(blocked), false);
-    assert.equal(resolveAllowedView('playground', blocked), 'dashboard');
+const canonicalHansol = {
+  id: 'fcc4b438-2696-4e88-a03f-d6f34e73e08f',
+  name: '배한솔',
+};
+
+test('playground production access requires the exact canonical Hansol identity', () => {
+  assert.equal(canAccessPlayground(canonicalHansol, false), true);
+  assert.equal(canAccessPlayground({ ...canonicalHansol, name: '배한솔' }, false), true);
+
+  const blocked = [
+    { ...canonicalHansol, id: 'another-user-id' },
+    { ...canonicalHansol, id: ` ${canonicalHansol.id}` },
+    { ...canonicalHansol, name: '다른 사용자' },
+    { ...canonicalHansol, name: ' 배한솔 ' },
+    { id: canonicalHansol.id },
+    { name: canonicalHansol.name },
+    null,
+    undefined,
+  ];
+  for (const user of blocked) {
+    assert.equal(canAccessPlayground(user, false), false);
+    assert.equal(resolveAllowedView('playground', user, false), 'dashboard');
   }
-  assert.equal(resolveAllowedView('playground', '배한솔'), 'playground');
-  assert.equal(resolveAllowedView('not-a-view', '배한솔'), 'dashboard');
+
+  assert.equal(resolveAllowedView('playground', canonicalHansol, false), 'playground');
+  assert.equal(resolveAllowedView('not-a-view', canonicalHansol, false), 'dashboard');
+});
+
+test('preview Hansol identity is allowed only in an explicit preview context', () => {
+  const previewHansol = { id: '1', name: '배한솔' };
+  assert.equal(canAccessPlayground(previewHansol, false), false);
+  assert.equal(canAccessPlayground(previewHansol, true), true);
+  assert.equal(canAccessPlayground({ id: '1', name: '다른 사용자' }, true), false);
+  assert.equal(canAccessPlayground({ id: 1, name: '배한솔' }, true), false);
+});
+
+test('runtime preview detection requires both the installed mock marker and preview=1', () => {
+  const originalWindow = Object.getOwnPropertyDescriptor(globalThis, 'window');
+  const originalDocument = Object.getOwnPropertyDescriptor(globalThis, 'document');
+
+  const setPreviewContext = (search: string, marker?: string) => {
+    Object.defineProperty(globalThis, 'window', {
+      configurable: true,
+      value: { location: { search } },
+    });
+    Object.defineProperty(globalThis, 'document', {
+      configurable: true,
+      value: { documentElement: { dataset: { devElectronApi: marker } } },
+    });
+  };
+
+  try {
+    setPreviewContext('?preview=1', 'installed');
+    assert.equal(isExplicitPlaygroundPreviewMode(), true);
+    setPreviewContext('?preview=feedback-hub', 'installed');
+    assert.equal(isExplicitPlaygroundPreviewMode(), false);
+    setPreviewContext('?preview=1');
+    assert.equal(isExplicitPlaygroundPreviewMode(), false);
+    setPreviewContext('', 'installed');
+    assert.equal(isExplicitPlaygroundPreviewMode(), false);
+  } finally {
+    if (originalWindow) Object.defineProperty(globalThis, 'window', originalWindow);
+    else Reflect.deleteProperty(globalThis, 'window');
+    if (originalDocument) Object.defineProperty(globalThis, 'document', originalDocument);
+    else Reflect.deleteProperty(globalThis, 'document');
+  }
 });
 
 test('playground view follows authenticated user transitions', () => {
-  const userNames: unknown[] = [undefined, '배한솔', '다른 사용자'];
+  const users = [undefined, canonicalHansol, { id: 'another-user-id', name: '배한솔' }];
   assert.deepEqual(
-    userNames.map((userName) => resolveAllowedView('playground', userName)),
+    users.map((user) => resolveAllowedView('playground', user, false)),
     ['dashboard', 'playground', 'dashboard'],
   );
 });
@@ -49,20 +111,27 @@ test('sidebar, app and layout wire one global playground route', () => {
   const sidebar = readFileSync('src/components/layout/Sidebar.tsx', 'utf8');
   const app = readFileSync('src/App.tsx', 'utf8');
   const layout = readFileSync('src/components/layout/MainLayout.tsx', 'utf8');
+  const playground = readFileSync('src/views/PlaygroundView.tsx', 'utf8');
   assert.doesNotMatch(featureFlag, /VITE_ENABLE_PLAYGROUND_PREVIEW|import\.meta\.env/);
+  assert.match(featureFlag, /document\.documentElement\.dataset\.devElectronApi === 'installed'/);
+  assert.match(featureFlag, /new URLSearchParams\(window\.location\.search\)\.get\('preview'\) === '1'/);
   assert.match(sidebar, /id:\s*'playground'.*배플레이그라운드/);
-  assert.match(sidebar, /canAccessPlayground\(currentUserName\)/);
+  assert.match(sidebar, /canAccessPlayground\(currentUser\)/);
   assert.match(app, /lazy\(\(\) => import\('@\/views\/PlaygroundView'\)\)/);
   assert.match(app, /case 'playground':/);
   assert.match(
     app,
-    /resolveAllowedView\(\s*savedPrefs\.defaultView,\s*useAuthStore\.getState\(\)\.currentUser\?\.name,\s*\)/,
+    /resolveAllowedView\(\s*savedPrefs\.defaultView,\s*useAuthStore\.getState\(\)\.currentUser,\s*\)/,
   );
-  assert.match(app, /resolveAllowedView\(currentView, currentUser\?\.name\)/);
+  assert.match(app, /resolveAllowedView\(currentView, currentUser\)/);
+  assert.match(app, /<PlaygroundView authorizedHansol=\{canAccessPlayground\(currentUser\)\} \/>/);
   assert.match(
     layout,
-    /const immersive = currentView === 'playground' && canAccessPlayground\(currentUserName\);/,
+    /const immersive = currentView === 'playground' && canAccessPlayground\(currentUser\);/,
   );
+  assert.match(playground, /authorizedHansol:\s*boolean/);
+  assert.match(playground, /authorizedHansol=\{authorizedHansol\}/);
+  assert.doesNotMatch(playground, /currentUser\?\.name\.trim\(\) === '배한솔'/);
 });
 
 test('profile cannot save Playground as a default view', () => {

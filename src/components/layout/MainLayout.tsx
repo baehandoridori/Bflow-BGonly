@@ -11,8 +11,8 @@ interface MainLayoutProps {
 
 export function MainLayout({ children, onRefresh }: MainLayoutProps) {
   const currentView = useAppStore((state) => state.currentView);
-  const currentUserName = useAuthStore((state) => state.currentUser?.name);
-  const immersive = currentView === 'playground' && canAccessPlayground(currentUserName);
+  const currentUser = useAuthStore((state) => state.currentUser);
+  const immersive = currentView === 'playground' && canAccessPlayground(currentUser);
 
   return (
     <div className="flex h-screen w-screen overflow-hidden">

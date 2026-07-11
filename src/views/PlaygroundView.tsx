@@ -43,7 +43,11 @@ function marketScrollSelector(route: PlaygroundRoute): string | null {
     : '[data-market-page-scroll-container]';
 }
 
-export default function PlaygroundView() {
+interface PlaygroundViewProps {
+  authorizedHansol: boolean;
+}
+
+export default function PlaygroundView({ authorizedHansol }: PlaygroundViewProps) {
   const [route, setRoute] = useState<PlaygroundRoute>(initialPlaygroundRoute);
   const [recommendation, setRecommendation] = useState(createRecommendationSession);
   const [wipe, setWipe] = useState<DotWipeRequest | null>(null);
@@ -267,7 +271,7 @@ export default function PlaygroundView() {
         {route.kind === 'market' && (
           <MarketRouter
             route={route.page}
-            authorizedHansol={currentUser?.name.trim() === '배한솔'}
+            authorizedHansol={authorizedHansol}
             restoreRequest={marketRestoreRequest}
             onNavigate={(action) => move(action)}
             onBack={requestBack}
