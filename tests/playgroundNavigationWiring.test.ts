@@ -7,6 +7,7 @@ import {
   isExplicitPlaygroundPreviewMode,
   resolveAllowedView,
 } from '../src/features/playground/featureFlag.ts';
+import { resolveHeaderTitle } from '../src/components/layout/headerTitle.ts';
 import { getNavigationBackLabel, type NavigationBackSourceState } from '../src/utils/navigationBackStack.ts';
 
 const baseState: NavigationBackSourceState = {
@@ -102,6 +103,33 @@ test('playground view follows authenticated user transitions', () => {
   );
 });
 
+test('an unauthorized stale playground view is synchronously presented only as dashboard', () => {
+  const safeView = resolveAllowedView(
+    'playground',
+    { id: 'another-user-id', name: '배한솔' },
+    false,
+  );
+  const immersive = safeView === 'playground';
+  assert.equal(safeView, 'dashboard');
+  assert.equal(immersive, false, 'the immersive Playground shell must stay disabled');
+  assert.equal(resolveHeaderTitle(safeView, null, {}), '전체 현황 대시보드');
+
+  const app = readFileSync('src/App.tsx', 'utf8');
+  const layout = readFileSync('src/components/layout/MainLayout.tsx', 'utf8');
+  const header = readFileSync('src/components/layout/Header.tsx', 'utf8');
+  assert.match(app, /switch \(safeCurrentView\)/);
+  assert.match(app, /<MainLayout activeView=\{safeCurrentView\} onRefresh=\{loadData\}>/);
+  assert.match(layout, /const immersive = activeView === 'playground';/);
+  assert.match(layout, /<Header activeView=\{activeView\} onRefresh=\{onRefresh\} \/>/);
+  assert.match(header, /resolveHeaderTitle\(activeView, episodeDashboardEp, episodeTitles\)/);
+  assert.doesNotMatch(header, /const \{\s*currentView[\s,}]/);
+});
+
+test('the isolated feedback preview supplies its restricted active view to MainLayout', () => {
+  const preview = readFileSync('src/views/FeedbackHubPreviewApp.tsx', 'utf8');
+  assert.match(preview, /<MainLayout activeView=\{currentView\} onRefresh=\{seedFeedbackHubPreview\}>/);
+});
+
 test('playground has a stable navigation label', () => {
   assert.equal(getNavigationBackLabel(baseState), '배플레이그라운드');
 });
@@ -111,6 +139,7 @@ test('sidebar, app and layout wire one global playground route', () => {
   const sidebar = readFileSync('src/components/layout/Sidebar.tsx', 'utf8');
   const app = readFileSync('src/App.tsx', 'utf8');
   const layout = readFileSync('src/components/layout/MainLayout.tsx', 'utf8');
+  const header = readFileSync('src/components/layout/Header.tsx', 'utf8');
   const playground = readFileSync('src/views/PlaygroundView.tsx', 'utf8');
   assert.doesNotMatch(featureFlag, /VITE_ENABLE_PLAYGROUND_PREVIEW|import\.meta\.env/);
   assert.match(featureFlag, /document\.documentElement\.dataset\.devElectronApi === 'installed'/);
@@ -125,10 +154,12 @@ test('sidebar, app and layout wire one global playground route', () => {
   );
   assert.match(app, /resolveAllowedView\(currentView, currentUser\)/);
   assert.match(app, /<PlaygroundView authorizedHansol=\{canAccessPlayground\(currentUser\)\} \/>/);
-  assert.match(
-    layout,
-    /const immersive = currentView === 'playground' && canAccessPlayground\(currentUser\);/,
-  );
+  assert.match(app, /<MainLayout activeView=\{safeCurrentView\} onRefresh=\{loadData\}>/);
+  assert.match(layout, /activeView:\s*ViewMode/);
+  assert.match(layout, /const immersive = activeView === 'playground';/);
+  assert.match(layout, /<Header activeView=\{activeView\} onRefresh=\{onRefresh\} \/>/);
+  assert.match(header, /activeView:\s*ViewMode/);
+  assert.doesNotMatch(layout, /canAccessPlayground|useAuthStore/);
   assert.match(playground, /authorizedHansol:\s*boolean/);
   assert.match(playground, /authorizedHansol=\{authorizedHansol\}/);
   assert.doesNotMatch(playground, /currentUser\?\.name\.trim\(\) === '배한솔'/);

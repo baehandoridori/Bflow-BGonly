@@ -2994,7 +2994,7 @@ export default function App() {
     <>
       <SvgIconDefs />
       <GradientBackdrop intensity="normal" enabled={globalGradientEnabled} />
-      <MainLayout onRefresh={loadData}>{renderView()}</MainLayout>
+      <MainLayout activeView={safeCurrentView} onRefresh={loadData}>{renderView()}</MainLayout>
       <PlaygroundEntryOverlay />
       <SpotlightSearch />
       <GlobalTooltipProvider />
