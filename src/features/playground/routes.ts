@@ -46,11 +46,10 @@ export function arePlaygroundRoutesSameSurface(
 }
 
 export function shouldReplacePlaygroundNavigation(
-  action: PlaygroundAction,
+  _action: PlaygroundAction,
   current: PlaygroundRoute,
   next: PlaygroundRoute,
 ): boolean {
-  if (action.kind === 'market-home' && action.focusRequest) return true;
   return arePlaygroundRoutesSameSurface(current, next);
 }
 

@@ -79,6 +79,50 @@ test('a home focus request replaces the top without replaying the same surface o
   assert.deepEqual(history.back(), house);
 });
 
+test('a focus request from stock pushes home so Back returns to the stock', () => {
+  const history = createPlaygroundHistory(lobby);
+  history.push(marketHome);
+  history.push(stock);
+  const focusedHome: PlaygroundRoute = {
+    ...marketHome,
+    page: { kind: 'home', focusRequest: { target: 'all-stocks', id: 18 } },
+  };
+
+  assert.equal(
+    shouldReplacePlaygroundNavigation(
+      { kind: 'market-home', focusRequest: { target: 'all-stocks', id: 18 } },
+      stock,
+      focusedHome,
+    ),
+    false,
+  );
+  history.push(focusedHome);
+
+  assert.deepEqual(history.back(), stock);
+});
+
+test('a focus request from account pushes home so Back returns to the account', () => {
+  const history = createPlaygroundHistory(lobby);
+  history.push(marketHome);
+  history.push(account);
+  const focusedHome: PlaygroundRoute = {
+    ...marketHome,
+    page: { kind: 'home', focusRequest: { target: 'all-stocks', id: 19 } },
+  };
+
+  assert.equal(
+    shouldReplacePlaygroundNavigation(
+      { kind: 'market-home', focusRequest: { target: 'all-stocks', id: 19 } },
+      account,
+      focusedHome,
+    ),
+    false,
+  );
+  history.push(focusedHome);
+
+  assert.deepEqual(history.back(), account);
+});
+
 test('route identity keeps stock and provenance differences but ignores focus commands', () => {
   const focusedHome: PlaygroundRoute = {
     ...marketHome,
