@@ -23,7 +23,7 @@
 - UI 컴포넌트에 store를 직접 연결하지 않는다. `PlaygroundView`가 props로 전달한다.
 - 실제 게임 로직, 슬롯 베팅, 실시간 랭킹/접속자/챌린지 백엔드는 범위 밖이다.
 - 새 dependency와 package version bump를 추가하지 않는다.
-- 코드 변경 뒤 focused tests, `npm run test:playground`, `npm run typecheck`, `npm run build:vite`를 통과한다.
+- Tasks 1~6은 각각 focused tests, `npm run test:playground`, `npm run typecheck`를 통과한다. Task 7은 추가로 `npm run build:vite`를 통과한다.
 - 커밋은 한국어로 작성하고 각 Task의 명시된 파일만 stage한다.
 
 ## File Map
@@ -384,9 +384,11 @@ Run:
 
 ```powershell
 node --test ./tests/playgroundPresentation.test.ts ./tests/playgroundRoutes.test.ts
+npm run test:playground
+npm run typecheck
 ```
 
-Expected: presentation and existing route assertions PASS. `npm run test:playground` also stays green because the v3 UI test is not registered until its Task 3 implementation exists.
+Expected: presentation, full Playground gate and TypeScript PASS. The v3 UI test is not registered until its Task 3 implementation exists.
 
 Commit:
 
@@ -688,9 +690,11 @@ Run:
 
 ```powershell
 node --test ./tests/playgroundRoutes.test.ts ./tests/playgroundTransition.test.ts
+npm run test:playground
+npm run typecheck
 ```
 
-Expected: all route, transition, exactly-once, hidden-window, DPR and reduced-motion tests PASS.
+Expected: all route, transition, exactly-once, hidden-window, DPR, reduced-motion, full Playground and TypeScript checks PASS.
 
 Commit:
 
@@ -1024,10 +1028,11 @@ Add `./tests/playgroundV3UiWiring.test.ts` to `test:playground` immediately afte
 
 ```powershell
 node --test ./tests/playgroundV3UiWiring.test.ts
+npm run test:playground
 npm run typecheck
 ```
 
-Expected: shell/CSS contract PASS and TypeScript PASS.
+Expected: shell/CSS contract, full Playground gate and TypeScript PASS.
 
 - [ ] **Step 7: Commit**
 
@@ -1399,10 +1404,11 @@ Run:
 
 ```powershell
 node --test ./tests/playgroundPresentation.test.ts ./tests/playgroundV3UiWiring.test.ts
+npm run test:playground
 npm run typecheck
 ```
 
-Expected: all catalog/ranking/lobby structure contracts PASS and TypeScript PASS.
+Expected: all catalog/ranking/lobby structure contracts, full Playground gate and TypeScript PASS.
 
 Commit:
 
@@ -1622,10 +1628,11 @@ Run:
 
 ```powershell
 node --test ./tests/playgroundV3UiWiring.test.ts
+npm run test:playground
 npm run typecheck
 ```
 
-Expected: House/game-stage structural contracts and TypeScript PASS.
+Expected: House/game-stage structural contracts, full Playground gate and TypeScript PASS.
 
 Commit:
 
