@@ -58,6 +58,70 @@ test('failed mutation restores the confirmed snapshot', async () => {
   assert.equal(store.getState().error, '저장하지 못했어요. 이전 상태로 되돌렸어요.');
 });
 
+test('canonical quote change survives an Electron IPC error prefix and keeps rollback actionable', async () => {
+  const canonical = createMarketPreviewGateway({ latencyMs: 0 });
+  const gateway: MarketPreviewGateway = {
+    read: () => canonical.read(),
+    execute: async (command) => {
+      if (command.kind === 'buy') {
+        throw new Error(
+          "Error invoking remote method 'market:execute': Error: 가격이 바뀌었어요. 현재 가격을 확인하고 다시 주문해 주세요.",
+        );
+      }
+      return canonical.execute(command);
+    },
+    createAdminEvent: (input) => canonical.createAdminEvent(input),
+    deleteAdminEvent: (eventId) => canonical.deleteAdminEvent(eventId),
+  };
+  const store = createMarketPreviewStore(gateway);
+  await store.getState().load();
+  await store.getState().execute({
+    kind: 'transfer', requestId: 'fund-quote-error', direction: 'wallet-to-broker', points: 10_000,
+  });
+  const before = structuredClone(store.getState().confirmed);
+
+  const result = await store.getState().execute({
+    kind: 'buy', requestId: 'quote-changed', stockId: 'jbbj', quantityShares: 1,
+    quotedPriceWon: 1_842,
+  }, 1_842);
+
+  assert.equal(result, false);
+  assert.deepEqual(store.getState().visible, before);
+  assert.deepEqual(store.getState().confirmed, before);
+  assert.equal(
+    store.getState().error,
+    '가격이 바뀌었어요. 현재 가격을 확인하고 다시 주문해 주세요.',
+  );
+});
+
+test('canonical halt rejection survives an Electron or database error prefix', async () => {
+  const canonical = createMarketPreviewGateway({ latencyMs: 0 });
+  const gateway: MarketPreviewGateway = {
+    read: () => canonical.read(),
+    execute: async (command) => {
+      if (command.kind === 'buy') {
+        throw new Error(
+          "Error invoking remote method 'market:execute': Error: market trading is halted for this stock",
+        );
+      }
+      return canonical.execute(command);
+    },
+    createAdminEvent: (input) => canonical.createAdminEvent(input),
+    deleteAdminEvent: (eventId) => canonical.deleteAdminEvent(eventId),
+  };
+  const store = createMarketPreviewStore(gateway);
+  await store.getState().load();
+  await store.getState().execute({
+    kind: 'transfer', requestId: 'fund-halt-error', direction: 'wallet-to-broker', points: 10_000,
+  });
+
+  assert.equal(await store.getState().execute({
+    kind: 'buy', requestId: 'halt-error', stockId: 'jbbj', quantityShares: 1,
+    quotedPriceWon: 1_842,
+  }, 1_842), false);
+  assert.equal(store.getState().error, '현재 거래가 정지되어 주문할 수 없어요.');
+});
+
 test('a second mutation is blocked until the first is confirmed', async () => {
   const gateway = createMarketPreviewGateway({ latencyMs: 20 });
   const store = createMarketPreviewStore(gateway);
@@ -247,7 +311,7 @@ test('admin event delete rolls back on failure and blocks a duplicate mutation',
   assert.deepEqual(store.getState().visible, seeded);
   assert.deepEqual(store.getState().confirmed, seeded);
   assert.equal(store.getState().mutating, false);
-  assert.match(store.getState().error ?? '', /되돌렸어요/);
+  assert.match(store.getState().error ?? '', /서버에서 종료되지 않았어요/);
 });
 
 test('admin mutation response from an old market session is ignored without retry', async () => {
@@ -281,4 +345,182 @@ test('admin mutation response from an old market session is ignored without retr
   assert.equal(store.getState().sessionKey, 'second-user');
   assert.equal(store.getState().visible?.revision, 99);
   assert.equal(store.getState().mutating, false);
+});
+
+test('admin create response loss reconciles by read without retrying the write', async () => {
+  const canonical = createMarketPreviewGateway({ latencyMs: 0 });
+  const input: MarketAdminEventInput = {
+    stockId: 'jbbj', kind: 'news', title: '응답 유실 소식', impactBps: 90,
+    startsAt: '2026-07-11T00:00:00.000Z', endsAt: '2026-07-11T01:00:00.000Z',
+  };
+  let createCalls = 0;
+  let readCalls = 0;
+  const gateway: MarketPreviewGateway = {
+    read: async () => { readCalls += 1; return canonical.read(); },
+    execute: (command) => canonical.execute(command),
+    createAdminEvent: async (nextInput) => {
+      createCalls += 1;
+      await canonical.createAdminEvent(nextInput);
+      throw new Error('response lost after commit');
+    },
+    deleteAdminEvent: (eventId) => canonical.deleteAdminEvent(eventId),
+  };
+  const store = createMarketPreviewStore(gateway);
+  await store.getState().load('hansol');
+
+  assert.equal(await store.getState().createAdminEvent(input), true);
+  assert.equal(createCalls, 1);
+  assert.equal(readCalls, 2, 'initial load plus one authoritative reconcile read');
+  assert.equal(store.getState().visible?.adminEvents.filter((event) => event.title === input.title).length, 1);
+  assert.equal(store.getState().error, null);
+  assert.equal(store.getState().adminWriteUncertain, false);
+});
+
+test('admin delete response loss reconciles target absence without retrying the write', async () => {
+  const canonical = createMarketPreviewGateway({ latencyMs: 0 });
+  const seeded = await canonical.createAdminEvent({
+    stockId: 'jbbj', kind: 'trend', title: '삭제 응답 유실', impactBps: 80,
+    startsAt: '2026-07-11T00:00:00.000Z', endsAt: '2026-07-11T01:00:00.000Z',
+  });
+  const eventId = seeded.adminEvents[0].id;
+  let deleteCalls = 0;
+  let readCalls = 0;
+  const gateway: MarketPreviewGateway = {
+    read: async () => { readCalls += 1; return canonical.read(); },
+    execute: (command) => canonical.execute(command),
+    createAdminEvent: (input) => canonical.createAdminEvent(input),
+    deleteAdminEvent: async (targetId) => {
+      deleteCalls += 1;
+      await canonical.deleteAdminEvent(targetId);
+      throw new Error('response lost after delete');
+    },
+  };
+  const store = createMarketPreviewStore(gateway);
+  await store.getState().load('hansol');
+
+  assert.equal(await store.getState().deleteAdminEvent(eventId), true);
+  assert.equal(deleteCalls, 1);
+  assert.equal(readCalls, 2);
+  assert.equal(store.getState().visible?.adminEvents.some((event) => event.id === eventId), false);
+  assert.equal(store.getState().error, null);
+  assert.equal(store.getState().adminWriteUncertain, false);
+});
+
+test('unknown admin write result blocks duplicate writes until a successful reload', async () => {
+  const canonical = createMarketPreviewGateway({ latencyMs: 0 });
+  const input: MarketAdminEventInput = {
+    stockId: 'jbbj', kind: 'news', title: '결과 불명 소식', impactBps: 70,
+    startsAt: '2026-07-11T00:00:00.000Z', endsAt: '2026-07-11T01:00:00.000Z',
+  };
+  let createCalls = 0;
+  let failReads = false;
+  const gateway: MarketPreviewGateway = {
+    read: async () => {
+      if (failReads) throw new Error('reconcile read unavailable');
+      return canonical.read();
+    },
+    execute: (command) => canonical.execute(command),
+    createAdminEvent: async () => {
+      createCalls += 1;
+      failReads = true;
+      throw new Error('write result unknown');
+    },
+    deleteAdminEvent: (eventId) => canonical.deleteAdminEvent(eventId),
+  };
+  const store = createMarketPreviewStore(gateway);
+  await store.getState().load('hansol');
+
+  assert.equal(await store.getState().createAdminEvent(input), false);
+  assert.equal(store.getState().adminWriteUncertain, true);
+  assert.match(store.getState().error ?? '', /결과를 확인할 수 없어|다시 불러/);
+  assert.equal(await store.getState().createAdminEvent(input), false);
+  assert.equal(createCalls, 1, 'uncertain state must block a duplicate non-idempotent write');
+
+  await store.getState().load('hansol');
+  assert.equal(store.getState().adminWriteUncertain, true, 'failed reload keeps the safety lock');
+  failReads = false;
+  await store.getState().load('hansol');
+  assert.equal(store.getState().adminWriteUncertain, false);
+  assert.equal(store.getState().error, null);
+});
+
+test('admin reconcile response from a stale session cannot replace the new session', async () => {
+  const first = await createMarketPreviewGateway({ latencyMs: 0 }).read();
+  const second = structuredClone(first);
+  second.revision = 77;
+  let activeRead = first;
+  let rejectWrite!: (error: Error) => void;
+  let releaseReconcile!: (snapshot: MarketSnapshot) => void;
+  let writeRejected = false;
+  let reconcileStarted = false;
+  const gateway: MarketPreviewGateway = {
+    read: async () => {
+      if (writeRejected && !reconcileStarted) {
+        reconcileStarted = true;
+        return new Promise((resolve) => { releaseReconcile = resolve; });
+      }
+      return structuredClone(activeRead);
+    },
+    execute: async () => { throw new Error('unused'); },
+    createAdminEvent: () => new Promise((_resolve, reject) => { rejectWrite = reject; }),
+    deleteAdminEvent: async () => { throw new Error('unused'); },
+  };
+  const store = createMarketPreviewStore(gateway);
+  await store.getState().load('first-user');
+  const pending = store.getState().createAdminEvent({
+    stockId: 'jbbj', kind: 'news', title: '오래된 응답', impactBps: 20,
+    startsAt: '2026-07-11T00:00:00.000Z', endsAt: '2026-07-11T01:00:00.000Z',
+  });
+  writeRejected = true;
+  rejectWrite(new Error('response lost'));
+  await new Promise<void>((resolve) => setImmediate(resolve));
+  assert.equal(reconcileStarted, true, 'failed write must begin one reconcile read');
+  activeRead = second;
+  await store.getState().load('second-user');
+  releaseReconcile(first);
+
+  assert.equal(await pending, false);
+  assert.equal(store.getState().sessionKey, 'second-user');
+  assert.equal(store.getState().visible?.revision, 77);
+  assert.equal(store.getState().adminWriteUncertain, false);
+});
+
+test('failed admin reconcile cannot overwrite a newer reload in the same session', async () => {
+  const first = await createMarketPreviewGateway({ latencyMs: 0 }).read();
+  const refreshed = structuredClone(first);
+  refreshed.revision = 88;
+  let rejectWrite!: (error: Error) => void;
+  let rejectReconcile!: (error: Error) => void;
+  let writeRejected = false;
+  let reconcileStarted = false;
+  const gateway: MarketPreviewGateway = {
+    read: async () => {
+      if (writeRejected && !reconcileStarted) {
+        reconcileStarted = true;
+        return new Promise((_resolve, reject) => { rejectReconcile = reject; });
+      }
+      return reconcileStarted ? structuredClone(refreshed) : structuredClone(first);
+    },
+    execute: async () => { throw new Error('unused'); },
+    createAdminEvent: () => new Promise((_resolve, reject) => { rejectWrite = reject; }),
+    deleteAdminEvent: async () => { throw new Error('unused'); },
+  };
+  const store = createMarketPreviewStore(gateway);
+  await store.getState().load('same-user');
+  const pending = store.getState().createAdminEvent({
+    stockId: 'jbbj', kind: 'news', title: '같은 세션 최신화', impactBps: 20,
+    startsAt: '2026-07-11T00:00:00.000Z', endsAt: '2026-07-11T01:00:00.000Z',
+  });
+  writeRejected = true;
+  rejectWrite(new Error('response lost'));
+  await new Promise<void>((resolve) => setImmediate(resolve));
+  assert.equal(reconcileStarted, true);
+
+  await store.getState().load('same-user');
+  rejectReconcile(new Error('old reconcile failed'));
+  assert.equal(await pending, false);
+  assert.equal(store.getState().visible?.revision, 88);
+  assert.equal(store.getState().confirmed?.revision, 88);
+  assert.equal(store.getState().adminWriteUncertain, false);
+  assert.equal(store.getState().error, null);
 });

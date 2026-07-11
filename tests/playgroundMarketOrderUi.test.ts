@@ -39,6 +39,20 @@ test('market router mounts one controller and keeps the mobile dock outside its 
   assert.match(actionDialog, /focusKey/);
 });
 
+test('xl transition retargets dialog focus before closing an open mobile order surface', () => {
+  const router = readFileSync('src/views/playground/market/MarketRouter.tsx', 'utf8');
+  const detail = readFileSync('src/views/playground/market/StockDetailView.tsx', 'utf8');
+  const effectStart = router.indexOf('previousDesktopOrderLayout');
+  const effectEnd = router.indexOf('\n  },', effectStart);
+  assert.ok(effectStart >= 0 && effectEnd > effectStart);
+  const transitionEffect = router.slice(effectStart, effectEnd);
+  const retarget = transitionEffect.indexOf('controller.openerRef.current');
+  const close = transitionEffect.indexOf('controller.close()');
+  assert.ok(retarget >= 0 && retarget < close, 'focus target must change before dialog close');
+  assert.match(transitionEffect, /easy-order-heading|market-page-title/);
+  assert.match(detail, /id="easy-order-heading"[^>]*tabIndex=\{-1\}/);
+});
+
 test('desktop and mobile order surfaces share exact whole-share presets', () => {
   const source = readFileSync('src/views/playground/market/MarketOrderPanel.tsx', 'utf8');
   const controller = readFileSync('src/views/playground/market/useMarketOrderController.ts', 'utf8');
@@ -71,6 +85,14 @@ test('order controller freezes six fields, revalidates drift, blocks halts and c
   assert.match(source, /다시 확인/);
   assert.equal((source.match(/crypto\.randomUUID\(\)/g) ?? []).length, 1);
   assert.equal((source.match(/await execute\(/g) ?? []).length, 1);
+  const failurePath = source.slice(source.indexOf('const succeeded = await execute'));
+  const failedOrderOnly = failurePath.slice(
+    failurePath.indexOf('const message'),
+    failurePath.indexOf('const close'),
+  );
+  assert.match(failedOrderOnly, /useMarketPreviewStore\.getState\(\)\.error/);
+  assert.match(failedOrderOnly, /다시 확인해 주세요/);
+  assert.doesNotMatch(failedOrderOnly, /setSurface\(null\)/);
 
   const { freezeMarketOrder, frozenOrdersMatch, isStockTradingHalted } = await import(
     '../src/views/playground/market/useMarketOrderController.ts'
@@ -150,6 +172,9 @@ test('authorized Hansol alone gets the compact market admin dialog', () => {
   assert.match(panel, /disabled=\{saving/);
   assert.match(panel, /효과 종료/);
   assert.match(panel, /기록도 삭제/);
+  assert.match(panel, /adminWriteUncertain/);
+  assert.match(panel, /시장 정보 다시 확인/);
+  assert.match(panel, /load\(sessionKey/);
 });
 
 test('market admin form enforces halt end-or-indefinite and preserves signed impact', async () => {

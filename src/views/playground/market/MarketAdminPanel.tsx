@@ -3,7 +3,10 @@ import { Settings2, Trash2 } from 'lucide-react';
 import { toast } from 'sonner';
 
 import type { MarketEventKind } from '@/features/playground/market/types';
-import { useMarketPreviewStore } from '@/features/playground/market/useMarketPreviewStore';
+import {
+  ADMIN_WRITE_UNCERTAIN_MESSAGE,
+  useMarketPreviewStore,
+} from '@/features/playground/market/useMarketPreviewStore';
 import { MarketActionDialog } from './MarketActionDialog';
 import {
   buildMarketAdminEventInput,
@@ -58,7 +61,11 @@ function eventIsActive(startsAt: string, endsAt: string | null, nowMs: number): 
 export function MarketAdminPanel({ authorizedHansol }: MarketAdminPanelProps) {
   const snapshot = useMarketPreviewStore((state) => state.visible);
   const mutating = useMarketPreviewStore((state) => state.mutating);
+  const loading = useMarketPreviewStore((state) => state.loading);
+  const adminWriteUncertain = useMarketPreviewStore((state) => state.adminWriteUncertain);
+  const sessionKey = useMarketPreviewStore((state) => state.sessionKey);
   const storeError = useMarketPreviewStore((state) => state.error);
+  const load = useMarketPreviewStore((state) => state.load);
   const createAdminEvent = useMarketPreviewStore((state) => state.createAdminEvent);
   const deleteAdminEvent = useMarketPreviewStore((state) => state.deleteAdminEvent);
   const clearError = useMarketPreviewStore((state) => state.clearError);
@@ -130,6 +137,14 @@ export function MarketAdminPanel({ authorizedHansol }: MarketAdminPanelProps) {
     toast.error(message);
   };
 
+  const reloadAuthoritativeState = async () => {
+    if (saving || mutating || loading) return;
+    setSaving(true);
+    setLocalError(null);
+    await load(sessionKey ?? undefined);
+    setSaving(false);
+  };
+
   return (
     <>
       <button
@@ -149,7 +164,22 @@ export function MarketAdminPanel({ authorizedHansol }: MarketAdminPanelProps) {
         onClose={close}
       >
         <form onSubmit={(event) => void submit(event)}>
-          <fieldset disabled={saving || mutating} className="min-w-0 disabled:opacity-60">
+          {adminWriteUncertain && (
+            <div className="mb-5 rounded-2xl border border-market-news/45 bg-market-news/10 p-4" role="alert">
+              <p className="text-sm font-semibold leading-6 text-text-primary">
+                {ADMIN_WRITE_UNCERTAIN_MESSAGE}
+              </p>
+              <button
+                type="button"
+                disabled={saving || mutating || loading}
+                onClick={() => void reloadAuthoritativeState()}
+                className="mt-3 min-h-11 w-full cursor-pointer rounded-xl border border-bg-border px-4 py-2 text-sm font-bold text-text-primary transition-colors duration-200 motion-reduce:transition-none hover:bg-bg-border/35 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                시장 정보 다시 확인
+              </button>
+            </div>
+          )}
+          <fieldset disabled={saving || mutating || adminWriteUncertain} className="min-w-0 disabled:opacity-60">
             <legend className="sr-only">시장 이벤트 입력</legend>
             <p className="text-sm font-semibold text-text-primary">빠른 설정</p>
             <div className="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-3">
@@ -251,7 +281,7 @@ export function MarketAdminPanel({ authorizedHansol }: MarketAdminPanelProps) {
           </p>
           <button
             type="submit"
-            disabled={saving || mutating}
+            disabled={saving || mutating || adminWriteUncertain}
             className="mt-2 min-h-12 w-full cursor-pointer rounded-xl bg-accent px-4 py-3 text-sm font-bold text-on-accent transition-colors duration-200 motion-reduce:transition-none hover:bg-accent/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent disabled:cursor-not-allowed disabled:opacity-50"
           >
             {saving ? '저장하는 중…' : '시장에 적용하기'}
@@ -270,7 +300,7 @@ export function MarketAdminPanel({ authorizedHansol }: MarketAdminPanelProps) {
                   </span>
                   <button
                     type="button"
-                    disabled={saving || mutating}
+                    disabled={saving || mutating || adminWriteUncertain}
                     onClick={() => void remove(event.id)}
                     className="inline-flex min-h-11 w-full cursor-pointer items-center justify-center gap-2 rounded-xl border border-bg-border px-3 py-2 text-xs font-semibold text-text-secondary transition-colors duration-200 motion-reduce:transition-none hover:bg-bg-border/35 hover:text-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent disabled:cursor-not-allowed disabled:opacity-50 sm:w-auto sm:shrink-0"
                     aria-label={`${event.title} 효과 종료 및 기록 삭제`}

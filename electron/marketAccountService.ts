@@ -283,6 +283,23 @@ export function parseMarketRemoteState(value: unknown): MarketRemoteState {
 
 class MarketSessionError extends Error {}
 class MarketQuoteChangedError extends Error {}
+class MarketTradingHaltedError extends Error {}
+
+function hasActiveTradingHalt(
+  events: readonly MarketAdminEvent[],
+  stockId: string,
+  nowMs: number,
+): boolean {
+  return events.some((event) => {
+    if (event.stockId !== stockId || event.kind !== 'halt') return false;
+    const startsAtMs = Date.parse(event.startsAt);
+    const endsAtMs = event.endsAt === null ? Number.POSITIVE_INFINITY : Date.parse(event.endsAt);
+    return Number.isFinite(startsAtMs)
+      && !Number.isNaN(endsAtMs)
+      && startsAtMs <= nowMs
+      && nowMs < endsAtMs;
+  });
+}
 
 function errorCode(error: unknown): string {
   return isRecord(error) && typeof error.code === 'string' ? error.code : '';
@@ -294,7 +311,11 @@ function errorText(error: unknown): string {
 }
 
 function friendlyPersistenceError(operation: 'read' | 'write', error: unknown): Error {
-  if (error instanceof MarketSessionError || error instanceof MarketQuoteChangedError) return error;
+  if (
+    error instanceof MarketSessionError
+    || error instanceof MarketQuoteChangedError
+    || error instanceof MarketTradingHaltedError
+  ) return error;
   const code = errorCode(error);
   const message = errorText(error);
   if (/42501/.test(code) || /canonical Hansol|limited to canonical Hansol|access/i.test(message)) {
@@ -302,6 +323,9 @@ function friendlyPersistenceError(operation: 'read' | 'write', error: unknown): 
   }
   if (/23505/.test(code) || /request id conflict/i.test(message)) {
     return new Error('같은 요청이 다른 내용으로 다시 들어왔어요. 새로고침 후 다시 시도해 주세요.');
+  }
+  if (/market trading is halted|거래.*정지|halted/i.test(message)) {
+    return new MarketTradingHaltedError('현재 거래가 정지되어 주문할 수 없어요.');
   }
   if (/insufficient|잔액|보유/i.test(message)) {
     return new Error('잔액이나 보유 수량이 달라졌어요. 새로고침 후 다시 확인해 주세요.');
@@ -446,6 +470,9 @@ export class MarketAccountService {
           throw new Error('market request probe is unavailable');
         }
         const currentSecondMs = Math.floor(this.dependencies.getNowMs() / 1000) * 1000;
+        if (hasActiveTradingHalt(current.adminEvents, normalizedCommand.stockId, currentSecondMs)) {
+          throw new MarketTradingHaltedError('현재 거래가 정지되어 주문할 수 없어요.');
+        }
         const canonicalQuoteWon = this.dependencies.resolveCanonicalQuote(
           normalizedCommand.stockId,
           currentSecondMs,

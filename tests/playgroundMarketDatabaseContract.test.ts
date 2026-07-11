@@ -191,6 +191,26 @@ test('execute RPC owns idempotency, locking, command validation, and atomic ledg
   assert.match(definition, /INSERT INTO public\.playground_value_ledger/i);
 });
 
+test('execute RPC preserves idempotent replay and rejects active halts in both order branches', () => {
+  const definition = functionDefinition(readMigration(), 'playground_market_execute');
+  const replayReturn = definition.search(/IF FOUND THEN[\s\S]*?RETURN public\.playground_market_read\(p_user_id\)/i);
+  const haltChecks = [...definition.matchAll(
+    /FROM public\.playground_market_events[\s\S]*?kind\s*=\s*'halt'[\s\S]*?starts_at\s*<=\s*now\(\)[\s\S]*?ends_at\s+IS\s+NULL[\s\S]*?ends_at\s*>\s*now\(\)/gi,
+  )];
+  assert.equal(haltChecks.length, 2, 'buy and sell must each enforce the active halt at the DB boundary');
+  assert.ok(replayReturn >= 0 && replayReturn < (haltChecks[0]?.index ?? -1));
+
+  const buyBranch = definition.slice(
+    definition.search(/WHEN\s+'buy'\s+THEN/i),
+    definition.search(/WHEN\s+'sell'\s+THEN/i),
+  );
+  const sellBranch = definition.slice(definition.search(/WHEN\s+'sell'\s+THEN/i));
+  for (const branch of [buyBranch, sellBranch]) {
+    assert.match(branch, /market trading is halted for this stock/i);
+    assert.match(branch, /RAISE EXCEPTION[\s\S]*?ERRCODE\s*=\s*'P0001'/i);
+  }
+});
+
 test('read RPC probes committed requests under the same lock and fingerprint as execute', () => {
   const sql = readMigration();
   const read = functionDefinition(sql, 'playground_market_read');

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 
 import type { MarketRoute, PlaygroundAction } from '@/features/playground/routes';
 import { buildMarketQuoteWonByStockId } from '@/features/playground/market/marketQuote';
@@ -58,8 +58,15 @@ function MarketStockRoute({
     nowMs,
     onOpenAccount,
   });
+  const previousDesktopOrderLayout = useRef(desktopOrderLayout);
   useEffect(() => {
-    if (desktopOrderLayout && controller.surface === 'mobile-order') controller.close();
+    const becameDesktop = desktopOrderLayout && !previousDesktopOrderLayout.current;
+    previousDesktopOrderLayout.current = desktopOrderLayout;
+    if (!becameDesktop || controller.surface === null) return;
+    const focusTarget = document.getElementById('easy-order-heading')
+      ?? document.getElementById('market-page-title');
+    if (focusTarget) controller.openerRef.current = focusTarget;
+    controller.close();
   }, [controller.surface, desktopOrderLayout]);
   return (
     <div className="relative flex h-full min-h-0 flex-col">

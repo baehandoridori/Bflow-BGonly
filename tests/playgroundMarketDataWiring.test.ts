@@ -373,6 +373,80 @@ test('market service rejects a manipulated quote before persistence and persists
   );
 });
 
+test('market service rejects an active halt before quote resolution or order persistence', async () => {
+  const { MarketAccountService } = await import('../electron/marketAccountService.ts');
+  const nowMs = Date.parse('2026-07-11T12:00:30.789Z');
+  const activeHalt: MarketAdminEvent = {
+    id: 'halt-active',
+    stockId: 'jbbj',
+    kind: 'halt',
+    title: '거래 정지',
+    impactBps: 0,
+    startsAt: '2026-07-11T12:00:00.000Z',
+    endsAt: '2026-07-11T12:01:00.000Z',
+    revision: 2,
+  };
+  let resolverCalls = 0;
+  let executeCalls = 0;
+  const service = new MarketAccountService({
+    getCanonicalSession: () => ({
+      userId: HANSOL_ID, epoch: 1, name: '배한솔', slackId: 'U05DFV9UAN5',
+    }),
+    getNowMs: () => nowMs,
+    resolveCanonicalQuote: () => { resolverCalls += 1; return 1_842; },
+    persistence: {
+      read: async () => remoteState({ adminEvents: [activeHalt], requestProbe: 'missing' }),
+      execute: async () => { executeCalls += 1; return remoteState({ revision: 2 }); },
+      createAdminEvent: async () => remoteState(),
+      deleteAdminEvent: async () => remoteState(),
+    },
+    logger: { error: () => undefined },
+  });
+
+  for (const command of [
+    { kind: 'buy', requestId: 'halted-buy', stockId: 'jbbj', quantityShares: 1, quotedPriceWon: 1_842 },
+    { kind: 'sell', requestId: 'halted-sell', stockId: 'jbbj', quantityShares: 1, quotedPriceWon: 1_842 },
+  ] as const) {
+    await assert.rejects(service.execute(command), {
+      message: '현재 거래가 정지되어 주문할 수 없어요.',
+    });
+  }
+  assert.equal(resolverCalls, 0);
+  assert.equal(executeCalls, 0);
+});
+
+test('market service returns an idempotent replay before a newly active halt check', async () => {
+  const { MarketAccountService } = await import('../electron/marketAccountService.ts');
+  const activeHalt: MarketAdminEvent = {
+    id: 'halt-after-commit', stockId: 'jbbj', kind: 'halt', title: '체결 뒤 정지', impactBps: 0,
+    startsAt: '2026-07-11T12:00:00.000Z', endsAt: null, revision: 3,
+  };
+  let resolverCalls = 0;
+  let executeCalls = 0;
+  const service = new MarketAccountService({
+    getCanonicalSession: () => ({
+      userId: HANSOL_ID, epoch: 1, name: '배한솔', slackId: 'U05DFV9UAN5',
+    }),
+    getNowMs: () => Date.parse('2026-07-11T12:00:30Z'),
+    resolveCanonicalQuote: () => { resolverCalls += 1; return 1_842; },
+    persistence: {
+      read: async () => remoteState({ revision: 3, adminEvents: [activeHalt], requestProbe: 'same' }),
+      execute: async () => { executeCalls += 1; return remoteState(); },
+      createAdminEvent: async () => remoteState(),
+      deleteAdminEvent: async () => remoteState(),
+    },
+    logger: { error: () => undefined },
+  });
+
+  const replayed = await service.execute({
+    kind: 'buy', requestId: 'already-committed', stockId: 'jbbj', quantityShares: 1,
+    quotedPriceWon: 1_842,
+  });
+  assert.equal(replayed.revision, 3);
+  assert.equal(resolverCalls, 0);
+  assert.equal(executeCalls, 0);
+});
+
 test('market service revalidates authorization after quote read and immediately before order persistence', async () => {
   const { MarketAccountService } = await import('../electron/marketAccountService.ts');
   const nowMs = Date.parse('2026-07-11T12:00:30Z');

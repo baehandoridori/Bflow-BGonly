@@ -597,6 +597,16 @@ BEGIN
       IF v_stock_id NOT IN ('jbbj', 'youtube', 'meta-comedy', 'netflix', 'adobe', 'wacom', 'slack', 'google-drive') THEN
         RAISE EXCEPTION 'market stock was not found' USING ERRCODE = '22023';
       END IF;
+      IF EXISTS (
+        SELECT 1
+        FROM public.playground_market_events AS market_event
+        WHERE market_event.stock_id = v_stock_id
+          AND market_event.kind = 'halt'
+          AND market_event.starts_at <= now()
+          AND (market_event.ends_at IS NULL OR market_event.ends_at > now())
+      ) THEN
+        RAISE EXCEPTION 'market trading is halted for this stock' USING ERRCODE = 'P0001';
+      END IF;
       v_raw := p_payload ->> 'quantityShares';
       IF v_raw !~ '^[0-9]+$' OR length(v_raw) > 16 THEN
         RAISE EXCEPTION 'share quantity must be a positive safe integer' USING ERRCODE = '22023';
@@ -666,6 +676,16 @@ BEGIN
       v_stock_id := p_payload ->> 'stockId';
       IF v_stock_id NOT IN ('jbbj', 'youtube', 'meta-comedy', 'netflix', 'adobe', 'wacom', 'slack', 'google-drive') THEN
         RAISE EXCEPTION 'market stock was not found' USING ERRCODE = '22023';
+      END IF;
+      IF EXISTS (
+        SELECT 1
+        FROM public.playground_market_events AS market_event
+        WHERE market_event.stock_id = v_stock_id
+          AND market_event.kind = 'halt'
+          AND market_event.starts_at <= now()
+          AND (market_event.ends_at IS NULL OR market_event.ends_at > now())
+      ) THEN
+        RAISE EXCEPTION 'market trading is halted for this stock' USING ERRCODE = 'P0001';
       END IF;
       v_raw := p_payload ->> 'quotedPriceWon';
       IF v_raw !~ '^[0-9]+$' OR length(v_raw) > 16 THEN

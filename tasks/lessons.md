@@ -436,3 +436,19 @@ PR #116 에서 12 라운드 (P1×3, P2×6, P3×2) 끝에 silent-done. Monitor �
 - UI 계획은 문구뿐 아니라 주요 영역, 열 비율, 정보 밀도, 전환 규칙, 반응형 붕괴 지점까지 acceptance criteria로 기록한다.
 - 구현 후에는 현재 화면만 보는 것이 아니라 승인 목업과 1440·1024·390px 화면을 직접 나란히 비교한다.
 - 구조 검증 테스트는 핵심 layout anchor와 상호작용 계약을 실행 가능한 형태로 확인하고, 텍스트 존재 테스트만으로 시각 완료를 판단하지 않는다.
+
+---
+
+## 2026-07-12: 비멱등 쓰기의 응답 유실은 단순 실패나 rollback으로 단정하면 안 된다
+
+### 증상
+
+- 관리자 이벤트 생성·삭제 RPC가 서버 반영 뒤 응답만 유실해도 renderer가 이전 snapshot으로 되돌리고 실패로 표시했다.
+- 사용자가 같은 생성을 다시 누르면 중복 이벤트가 생길 수 있었고, UI의 거래정지는 직접 IPC/RPC 체결을 막지 못했다.
+
+### 교훈
+
+- request ID가 없는 비멱등 write는 자동 재시도하지 않는다. 실패 뒤 idempotent read 한 번으로 authoritative 상태를 확인해 의도한 변화가 이미 반영됐는지 판정한다.
+- read까지 실패해 결과를 모르면 해당 write 종류를 잠그고, 성공한 reload 전에는 같은 작업을 다시 보내지 않는다. 오래된 reconcile은 session key와 load generation 양쪽으로 차단한다.
+- domain 오류는 Electron IPC prefix가 붙어도 핵심 문구를 정규화해 보존한다. 가격 변경·거래정지를 일반 저장 실패로 덮지 않는다.
+- UI 차단은 편의 기능일 뿐 신뢰 경계가 아니다. 거래정지처럼 체결 규칙인 조건은 Electron service와 DB RPC 양쪽에서 검사하고, idempotent replay 판정은 그 검사보다 먼저 유지한다.

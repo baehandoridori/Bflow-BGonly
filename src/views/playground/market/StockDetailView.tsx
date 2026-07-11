@@ -253,7 +253,7 @@ export function StockDetailView({
             aria-labelledby="easy-order-heading"
             className="min-w-0 rounded-2xl border border-bg-border bg-bg-card p-5 sm:p-6 xl:sticky xl:top-4 xl:max-h-[calc(100dvh-10rem)] xl:self-start xl:overflow-y-auto xl:[grid-area:order]"
           >
-            <h2 id="easy-order-heading" className="text-lg font-bold text-text-primary">간편 주문</h2>
+            <h2 id="easy-order-heading" tabIndex={-1} className="text-lg font-bold text-text-primary outline-none">간편 주문</h2>
             <p className="mt-2 text-xs leading-5 text-text-secondary">
               회사 확인 → 이유와 그래프 확인 → 원하는 정수 주식 수량으로 시작
             </p>
