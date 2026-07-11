@@ -407,6 +407,8 @@ git commit -m "승인 목업과 플레이그라운드 로비 모델 고정"
 - Modify: `src/features/playground/transition/usePlaygroundEntryStore.ts`
 - Modify: `src/features/playground/transition/dotWipeMath.ts`
 - Modify: `src/features/playground/transition/DotWipeTransition.tsx`
+- Modify: `src/features/playground/transition/PlaygroundEntryOverlay.tsx`
+- Modify: `src/views/PlaygroundView.tsx` (required call-site bridge only)
 - Modify: `tests/playgroundRoutes.test.ts`
 - Modify: `tests/playgroundTransition.test.ts`
 
@@ -588,10 +590,16 @@ Update `src/features/playground/transition/usePlaygroundEntryStore.ts`:
 
 ```ts
 import { create } from 'zustand';
+import type { PlaygroundReturnSurface } from '../routes';
 import type { Point } from './dotWipeMath';
 import type { DotWipeTarget } from './playgroundTransitionPolicy';
 
-export interface DotWipeRequest { id: number; origin: Point; target: DotWipeTarget }
+export interface DotWipeRequest {
+  id: number;
+  origin: Point;
+  target: DotWipeTarget;
+  returnTo: PlaygroundReturnSurface;
+}
 
 interface PlaygroundEntryState {
   active: DotWipeRequest | null;
@@ -603,7 +611,14 @@ export const usePlaygroundEntryStore = create<PlaygroundEntryState>((set, get) =
   active: null,
   request(origin) {
     if (get().active) return;
-    set({ active: { id: Date.now(), origin, target: 'playground-entry' } });
+    set({
+      active: {
+        id: Date.now(),
+        origin,
+        target: 'playground-entry',
+        returnTo: 'lobby',
+      },
+    });
   },
   finish(id) {
     if (get().active?.id === id) set({ active: null });
@@ -611,7 +626,12 @@ export const usePlaygroundEntryStore = create<PlaygroundEntryState>((set, get) =
 }));
 ```
 
-Internal requests created by `PlaygroundView` in Task 6 must include the target from `getPlaygroundNavigationTransition()`.
+Internal requests created by `PlaygroundView` must capture both the target from
+`getPlaygroundNavigationTransition()` and the current source from
+`getPlaygroundReturnSurface(route)` in the same object. Because these fields are
+required, Task 2 also performs the minimum call-site bridge in `PlaygroundView`
+and removes the obsolete `label` prop from `PlaygroundEntryOverlay`; Task 6 still
+owns the complete composition-root rewrite.
 
 - [ ] **Step 6: Extract reduced-motion timing into a pure function**
 
@@ -1667,6 +1687,7 @@ test('Playground controller preserves source-aware return and policy-driven tran
   assert.match(source, /advanceRecommendation/);
   assert.match(source, /buildPointRanking/);
   assert.match(source, /target:\s*transition\.target/);
+  assert.match(source, /returnTo:\s*getPlaygroundReturnSurface\(route\)/);
   assert.match(source, /onExit=\{\(\) => move\(\{ kind: 'return-to-source' \}\)\}/);
   assert.match(source, /returnLabel=\{route\.returnTo === 'house' \? 'JBBJ 하우스' : '게임 로비'\}/);
   assert.match(source, /<PlaygroundShell/);
@@ -1706,7 +1727,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { GAME_DEFINITIONS } from '@/features/playground/catalog';
 import { advanceRecommendation, createRecommendationSession } from '@/features/playground/recommendation';
 import { buildPointRanking } from '@/features/playground/ranking';
-import { initialPlaygroundRoute, navigatePlayground, type PlaygroundAction, type PlaygroundRoute } from '@/features/playground/routes';
+import { getPlaygroundReturnSurface, initialPlaygroundRoute, navigatePlayground, type PlaygroundAction, type PlaygroundRoute } from '@/features/playground/routes';
 import { DotWipeTransition } from '@/features/playground/transition/DotWipeTransition';
 import type { Point } from '@/features/playground/transition/dotWipeMath';
 import { getPlaygroundNavigationTransition } from '@/features/playground/transition/playgroundTransitionPolicy';
@@ -1761,6 +1782,7 @@ export default function PlaygroundView() {
       id: ++sequence.current,
       origin: origin ?? { x: window.innerWidth / 2, y: window.innerHeight / 2 },
       target: transition.target,
+      returnTo: getPlaygroundReturnSurface(route),
     });
   };
 
