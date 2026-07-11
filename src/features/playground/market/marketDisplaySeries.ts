@@ -86,6 +86,34 @@ function eventOverlaps(
   return startsBeforeEnd && eventEndMs > rangeStartMs;
 }
 
+function haltDependencyStart(
+  events: readonly MarketAdminEvent[],
+  stockId: string,
+  rangeStartMs: number,
+  rangeEndMs: number,
+  includeRangeEnd: boolean,
+): number {
+  let dependencyStartMs = rangeStartMs;
+  while (true) {
+    let nextDependencyStartMs = dependencyStartMs;
+    for (const event of events) {
+      if (
+        event.stockId !== stockId
+        || event.kind !== 'halt'
+        || !eventOverlaps(event, dependencyStartMs, rangeEndMs, includeRangeEnd)
+      ) {
+        continue;
+      }
+      nextDependencyStartMs = Math.min(
+        nextDependencyStartMs,
+        Date.parse(event.startsAt) - 1000,
+      );
+    }
+    if (nextDependencyStartMs === dependencyStartMs) return dependencyStartMs;
+    dependencyStartMs = nextDependencyStartMs;
+  }
+}
+
 function setCompletedDisplayBar(key: string, candle: MarketCandle): void {
   if (completedDisplayBarCache.has(key)) completedDisplayBarCache.delete(key);
   completedDisplayBarCache.set(key, cloneCandle(candle));
@@ -106,11 +134,19 @@ function buildRepresentativeBar(
 ): MarketCandle {
   const isCompleted = bucketEndMs <= request.nowMs;
   const overlapEndMs = isCompleted ? sourceEndMs : Math.min(sourceEndMs, request.nowMs);
-  const relevantEvents = request.events.filter((event) => (
+  const includeRangeEnd = !isCompleted;
+  const dependencyStartMs = haltDependencyStart(
+    request.events,
+    request.profile.stockId,
+    sourceStartMs,
+    overlapEndMs,
+    includeRangeEnd,
+  );
+  const priceEvents = request.events.filter((event) => (
     event.stockId === request.profile.stockId
-    && eventOverlaps(event, sourceStartMs, overlapEndMs, !isCompleted)
+    && eventOverlaps(event, dependencyStartMs, overlapEndMs, includeRangeEnd)
   ));
-  const eventsKey = eventFingerprint(relevantEvents);
+  const eventsKey = eventFingerprint(priceEvents);
   const cacheKey = [
     profileFingerprint(request.profile),
     sourceStartMs,
@@ -133,10 +169,16 @@ function buildRepresentativeBar(
   }
   const prices = [...sampleTimes]
     .sort((left, right) => left - right)
-    .map((sampleMs) => sampler(request.profile, sampleMs, relevantEvents));
+    .map((sampleMs) => sampler(request.profile, sampleMs, priceEvents));
   const openWon = prices[0];
   const closeWon = prices.at(-1)!;
-  const newsIds = relevantEvents
+  const newsIds = priceEvents
+    .filter((event) => eventOverlaps(
+      event,
+      sourceStartMs,
+      overlapEndMs,
+      includeRangeEnd,
+    ))
     .map((event) => event.id)
     .filter((eventId, index, allIds) => allIds.indexOf(eventId) === index)
     .sort();

@@ -135,6 +135,127 @@ test('a future event does not invalidate completed historical display bars', asy
   assert.equal(sampleCalls, 0);
 });
 
+test('a display candle matches the exact price frozen by an overlapping halt', async () => {
+  const { buildMarketDisplayCandles } = await import(
+    '../src/features/playground/market/marketDisplaySeries.ts'
+  );
+  const { getLivePriceWon } = await import(
+    '../src/features/playground/market/livePriceEngine.ts'
+  );
+  const profile = {
+    stockId: 'halt-dependency-profile',
+    basePriceWon: 1000,
+    volatilityBps: 0,
+    phase: 0,
+  };
+  const events = [{
+    id: 'frozen-price-shock',
+    stockId: profile.stockId,
+    kind: 'shock-up' as const,
+    title: '정지 직전 상승',
+    impactBps: 1000,
+    startsAt: '2026-07-11T00:00:00Z',
+    endsAt: '2026-07-11T02:00:00Z',
+    revision: 1,
+  }, {
+    id: 'long-halt',
+    stockId: profile.stockId,
+    kind: 'halt' as const,
+    title: '장기 거래 정지',
+    impactBps: 0,
+    startsAt: '2026-07-11T01:00:00Z',
+    endsAt: '2026-07-14T00:00:00Z',
+    revision: 1,
+  }];
+  const startMs = Date.parse('2026-07-12T00:00:00Z');
+  const endMs = Date.parse('2026-07-13T00:00:00Z');
+  const exactPriceWon = getLivePriceWon(profile, startMs, events);
+  const candle = buildMarketDisplayCandles({
+    profile,
+    startMs,
+    endMs,
+    nowMs: endMs,
+    events,
+    interval: '1d',
+  })[0];
+
+  assert.equal(exactPriceWon, 1100);
+  assert.deepEqual(
+    [candle.openWon, candle.highWon, candle.lowWon, candle.closeWon],
+    [exactPriceWon, exactPriceWon, exactPriceWon, exactPriceWon],
+  );
+  assert.deepEqual(candle.newsIds, ['long-halt']);
+});
+
+test('recursive halt dependencies invalidate only the affected completed display bar', async () => {
+  const { buildMarketDisplayCandles } = await import(
+    '../src/features/playground/market/marketDisplaySeries.ts'
+  );
+  const { getLivePriceWon } = await import(
+    '../src/features/playground/market/livePriceEngine.ts'
+  );
+  const profile = {
+    stockId: 'recursive-halt-dependency-profile',
+    basePriceWon: 1000,
+    volatilityBps: 0,
+    phase: 0,
+  };
+  const shock = {
+    id: 'recursive-frozen-price-shock',
+    stockId: profile.stockId,
+    kind: 'shock-up' as const,
+    title: '연쇄 정지 직전 상승',
+    impactBps: 1000,
+    startsAt: '2026-07-11T00:00:00Z',
+    endsAt: '2026-07-11T02:00:00Z',
+    revision: 1,
+  };
+  const halts = [{
+    id: 'early-halt',
+    stockId: profile.stockId,
+    kind: 'halt' as const,
+    title: '첫 거래 정지',
+    impactBps: 0,
+    startsAt: '2026-07-11T01:00:00Z',
+    endsAt: '2026-07-11T04:00:00Z',
+    revision: 1,
+  }, {
+    id: 'late-halt',
+    stockId: profile.stockId,
+    kind: 'halt' as const,
+    title: '연장 거래 정지',
+    impactBps: 0,
+    startsAt: '2026-07-11T03:00:00Z',
+    endsAt: '2026-07-14T00:00:00Z',
+    revision: 1,
+  }];
+  const startMs = Date.parse('2026-07-12T00:00:00Z');
+  const endMs = Date.parse('2026-07-13T00:00:00Z');
+  const buildClose = (impactBps: number, revision: number) => {
+    const events = [{ ...shock, impactBps, revision }, ...halts];
+    const exactPriceWon = getLivePriceWon(profile, startMs, events);
+    const candle = buildMarketDisplayCandles({
+      profile,
+      startMs,
+      endMs,
+      nowMs: endMs,
+      events,
+      interval: '1d',
+    })[0];
+    assert.deepEqual(candle.newsIds, ['late-halt']);
+    return { exactPriceWon, displayPriceWon: candle.closeWon };
+  };
+
+  assert.deepEqual(buildClose(1000, 1), {
+    exactPriceWon: 1100,
+    displayPriceWon: 1100,
+  });
+  assert.deepEqual(buildClose(2000, 2), {
+    exactPriceWon: 1200,
+    displayPriceWon: 1200,
+  });
+});
+
 test('completed display bars are cached but the forming bar is resampled', async () => {
   assert.equal(existsSync(DISPLAY_SERIES_PATH), true, 'display candle fast path must exist');
   const { buildMarketDisplayCandles } = await import(
