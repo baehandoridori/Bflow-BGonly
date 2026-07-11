@@ -90,7 +90,7 @@ test('order controller freezes six fields, revalidates drift, blocks halts and c
     failurePath.indexOf('const message'),
     failurePath.indexOf('const close'),
   );
-  assert.match(failedOrderOnly, /useMarketPreviewStore\.getState\(\)\.error/);
+  assert.match(failedOrderOnly, /latestState\.error/);
   assert.match(failedOrderOnly, /다시 확인해 주세요/);
   assert.doesNotMatch(failedOrderOnly, /setSurface\(null\)/);
 
@@ -149,6 +149,44 @@ test('order controller freezes six fields, revalidates drift, blocks halts and c
     id: 'halt-live', stockId: 'jbbj', kind: 'halt', title: '점검', impactBps: 0,
     startsAt: '2026-07-11T00:00:00.000Z', endsAt: null, revision: 2,
   }], 'jbbj', Date.parse('2026-07-11T00:01:00.000Z')), true);
+});
+
+test('shared pending request helper preserves the exact command and frozen UI details', async () => {
+  const helperPath = 'src/features/playground/market/pendingValueRequest.ts';
+  assert.equal(existsSync(helperPath), true, 'shared pending value request helper must exist');
+  const {
+    createPendingMarketValueRequest,
+    retryPendingMarketValueCommand,
+  } = await import('../src/features/playground/market/pendingValueRequest.ts');
+  const { fingerprintMarketCommand } = await import(
+    '../src/features/playground/market/previewGateway.ts'
+  );
+  const command = {
+    kind: 'buy', requestId: 'preserved-id', stockId: 'jbbj', quantityShares: 7,
+    quotedPriceWon: 1_842,
+  } as const;
+  const details = { quantityShares: 7, quotedPriceWon: 1_842, label: '최대' };
+  const pending = createPendingMarketValueRequest(command, details);
+  const retry = retryPendingMarketValueCommand(pending);
+
+  assert.deepEqual(retry, command);
+  assert.notEqual(retry, command);
+  assert.deepEqual(pending.details, details);
+  assert.equal(pending.fingerprint, fingerprintMarketCommand(command));
+});
+
+test('order and point transfer use one pending lifecycle instead of minting retry ids', () => {
+  const controller = readFileSync('src/views/playground/market/useMarketOrderController.ts', 'utf8');
+  const dialogs = readFileSync('src/views/playground/market/MarketOrderDialogs.tsx', 'utf8');
+  const transfer = readFileSync('src/views/playground/market/PointTransferDialog.tsx', 'utf8');
+  for (const source of [controller, transfer]) {
+    assert.match(source, /createPendingMarketValueRequest/);
+    assert.match(source, /retryPendingMarketValueCommand/);
+    assert.match(source, /pendingValueCommand/);
+    assert.match(source, /다시 불러/);
+  }
+  assert.match(dialogs, /주문 결과 다시 확인/);
+  assert.match(transfer, /이동 결과 다시 확인/);
 });
 
 test('authorized Hansol alone gets the compact market admin dialog', () => {

@@ -10,6 +10,12 @@ import { toast } from 'sonner';
 
 import { getAccountSummary, validateMarketCommand } from '@/features/playground/market/domain';
 import { formatPoints, formatWon } from '@/features/playground/market/format';
+import {
+  createPendingMarketValueRequest,
+  retryPendingMarketValueCommand,
+  sameMarketValueCommand,
+  type PendingMarketValueRequest,
+} from '@/features/playground/market/pendingValueRequest';
 import type { MarketCommand } from '@/features/playground/market/types';
 import { useMarketPreviewStore } from '@/features/playground/market/useMarketPreviewStore';
 import { MarketActionDialog } from './MarketActionDialog';
@@ -24,6 +30,15 @@ interface PointTransferDialogProps {
 
 const TRANSFER_PRESETS = [1000, 5000] as const;
 
+interface PendingTransferDetails {
+  direction: 'wallet-to-broker' | 'broker-to-wallet';
+  points: number;
+  sourceBalance: number;
+  destinationBalance: number;
+}
+
+type PendingTransferRequest = PendingMarketValueRequest<PendingTransferDetails>;
+
 export function PointTransferDialog({
   direction,
   open,
@@ -33,12 +48,18 @@ export function PointTransferDialog({
   const visible = useMarketPreviewStore((state) => state.visible);
   const confirmed = useMarketPreviewStore((state) => state.confirmed);
   const mutating = useMarketPreviewStore((state) => state.mutating);
+  const loading = useMarketPreviewStore((state) => state.loading);
+  const pendingValueCommand = useMarketPreviewStore((state) => state.pendingValueCommand);
+  const sessionKey = useMarketPreviewStore((state) => state.sessionKey);
   const storeError = useMarketPreviewStore((state) => state.error);
+  const load = useMarketPreviewStore((state) => state.load);
   const execute = useMarketPreviewStore((state) => state.execute);
   const clearError = useMarketPreviewStore((state) => state.clearError);
   const [amountInput, setAmountInput] = useState('1000');
   const [localError, setLocalError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const [pendingTransfer, setPendingTransfer] = useState<PendingTransferRequest | null>(null);
+  const [pendingTransferUncertain, setPendingTransferUncertain] = useState(false);
   const submitLockRef = useRef(false);
   const amountInputId = useId();
 
@@ -47,8 +68,14 @@ export function PointTransferDialog({
   const sourceLabel = isDeposit ? '포인트 지갑 잔액' : '꺼낼 수 있는 예수금';
   const resultLabel = isDeposit ? '이동 후 예수금' : '이동 후 포인트 지갑';
   const actionLabel = isDeposit ? '넣기' : '빼기';
-  const controlsDisabled = submitting || mutating;
-  const balanceSnapshot = submitting || mutating ? confirmed ?? visible : visible;
+  const pendingResolution = pendingTransferUncertain;
+  const pendingCommandMismatch = pendingValueCommand !== null
+    && (pendingTransfer === null
+      || !sameMarketValueCommand(pendingValueCommand, pendingTransfer.command));
+  const controlsDisabled = submitting || mutating || loading || pendingValueCommand !== null;
+  const balanceSnapshot = submitting || mutating || pendingResolution
+    ? confirmed ?? visible
+    : visible;
   const summary = balanceSnapshot ? getAccountSummary(balanceSnapshot) : null;
   const sourceBalance = summary
     ? (isDeposit ? summary.walletPoints : summary.cashWon)
@@ -71,7 +98,10 @@ export function PointTransferDialog({
 
   useEffect(() => {
     if (!open) return;
+    if (useMarketPreviewStore.getState().pendingValueCommand !== null) return;
     setAmountInput('1000');
+    setPendingTransfer(null);
+    setPendingTransferUncertain(false);
     setLocalError(null);
     clearError();
   }, [clearError, direction, open]);
@@ -88,41 +118,77 @@ export function PointTransferDialog({
 
   const submitTransfer = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    if (submitting || mutating || submitLockRef.current) return;
+    if (submitting || mutating || loading || submitLockRef.current) return;
 
-    const latest = useMarketPreviewStore.getState().visible;
-    if (!latest) {
-      setLocalError('계좌 정보를 불러오지 못했어요');
-      return;
-    }
+    let attempt = pendingTransfer;
+    if (!attempt) {
+      if (useMarketPreviewStore.getState().pendingValueCommand !== null) {
+        setLocalError('이전 거래 결과를 먼저 확인하거나 계좌 정보를 다시 불러와 주세요.');
+        return;
+      }
+      const latest = useMarketPreviewStore.getState().visible;
+      if (!latest) {
+        setLocalError('계좌 정보를 불러오지 못했어요');
+        return;
+      }
 
-    const points = Number(amountInput);
-    const validationMessage = validateMarketCommand(latest, {
-      kind: 'transfer',
-      requestId: 'preview',
-      direction,
-      points,
-    });
-    if (validationMessage) {
-      setLocalError(validationMessage);
-      return;
+      const points = Number(amountInput);
+      const validationMessage = validateMarketCommand(latest, {
+        kind: 'transfer',
+        requestId: 'preview',
+        direction,
+        points,
+      });
+      if (validationMessage) {
+        setLocalError(validationMessage);
+        return;
+      }
+
+      const latestSummary = getAccountSummary(latest);
+      const sourceBalance = direction === 'wallet-to-broker'
+        ? latestSummary.walletPoints
+        : latestSummary.cashWon;
+      const destinationBalance = direction === 'wallet-to-broker'
+        ? latestSummary.cashWon
+        : latestSummary.walletPoints;
+      attempt = createPendingMarketValueRequest({
+        kind: 'transfer',
+        requestId: crypto.randomUUID(),
+        direction,
+        points,
+      }, {
+        direction,
+        points,
+        sourceBalance,
+        destinationBalance,
+      });
+      setPendingTransfer(attempt);
+      setPendingTransferUncertain(false);
     }
 
     submitLockRef.current = true;
     setSubmitting(true);
     setLocalError(null);
     clearError();
-    const command: MarketCommand = {
-      kind: 'transfer',
-      requestId: crypto.randomUUID(),
-      direction,
-      points,
-    };
+    const command = retryPendingMarketValueCommand(attempt);
+    if (command.kind !== 'transfer') {
+      submitLockRef.current = false;
+      setSubmitting(false);
+      setPendingTransfer(null);
+      setPendingTransferUncertain(false);
+      setLocalError('포인트 이동 정보를 다시 확인해 주세요.');
+      return;
+    }
     const succeeded = await execute(command);
     submitLockRef.current = false;
     setSubmitting(false);
 
     if (succeeded) {
+      toast.success(
+        `${formatPoints(attempt.details.points)}를 ${attempt.details.direction === 'wallet-to-broker' ? '투자 계좌에 넣었어요.' : '포인트 지갑으로 뺐어요.'}`,
+      );
+      setPendingTransfer(null);
+      setPendingTransferUncertain(false);
       requestPointTransferDialogClose({
         blocked: false,
         setLocalError,
@@ -132,15 +198,50 @@ export function PointTransferDialog({
       return;
     }
 
-    const message = useMarketPreviewStore.getState().error
+    const latestState = useMarketPreviewStore.getState();
+    if (latestState.pendingValueCommand === null) {
+      setPendingTransfer(null);
+      setPendingTransferUncertain(false);
+    } else {
+      setPendingTransferUncertain(true);
+    }
+    const message = latestState.error
       ?? '포인트를 이동하지 못했어요. 다시 확인해 주세요.';
     setLocalError(message);
     toast.error(message);
   };
 
   const closeTransferDialog = () => {
+    if (pendingTransfer || pendingValueCommand) {
+      setLocalError('이동 결과를 확인하거나 계좌 정보를 다시 불러온 뒤 닫아 주세요.');
+      return;
+    }
     requestPointTransferDialogClose({
-      blocked: submitting || mutating,
+      blocked: submitting || mutating || loading,
+      setLocalError,
+      clearError,
+      onClose,
+    });
+  };
+
+  const reloadPendingTransfer = async () => {
+    if (!pendingTransfer || submitting || mutating || loading || submitLockRef.current) return;
+    submitLockRef.current = true;
+    setSubmitting(true);
+    setLocalError(null);
+    await load(sessionKey ?? undefined);
+    submitLockRef.current = false;
+    setSubmitting(false);
+    const latestState = useMarketPreviewStore.getState();
+    if (latestState.pendingValueCommand !== null) {
+      setLocalError(latestState.error ?? '계좌 정보를 다시 불러오지 못했어요.');
+      return;
+    }
+    setPendingTransfer(null);
+    setPendingTransferUncertain(false);
+    toast.info('최신 포인트 지갑과 투자 계좌를 다시 불러왔어요.');
+    requestPointTransferDialogClose({
+      blocked: false,
       setLocalError,
       clearError,
       onClose,
@@ -228,15 +329,32 @@ export function PointTransferDialog({
         <p className="mt-3 min-h-5 text-sm font-semibold text-text-primary" aria-live="polite">
           {displayedError ?? ''}
         </p>
+        {pendingResolution && (
+          <p className="mt-1 text-xs leading-5 text-text-secondary">
+            이동 결과를 받지 못했어요. 같은 요청을 다시 확인하면 포인트가 중복으로 이동하지 않아요.
+          </p>
+        )}
         <button
           type="submit"
-          disabled={controlsDisabled || validation !== null}
+          disabled={submitting || mutating || loading || pendingCommandMismatch || (!pendingTransfer && validation !== null)}
           className="mt-2 min-h-12 w-full cursor-pointer rounded-xl bg-accent px-4 py-3 text-sm font-bold text-on-accent transition-colors duration-200 hover:bg-accent/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent disabled:cursor-not-allowed disabled:opacity-50"
         >
           {submitting
-            ? '포인트 이동 중…'
-            : `${amountIsValidInteger ? formatPoints(amount) : '0P'} ${actionLabel}`}
+            ? pendingResolution ? '이동 결과를 확인하는 중…' : '포인트 이동 중…'
+            : pendingResolution
+              ? '이동 결과 다시 확인'
+              : `${amountIsValidInteger ? formatPoints(amount) : '0P'} ${actionLabel}`}
         </button>
+        {pendingResolution && (
+          <button
+            type="button"
+            disabled={submitting || mutating || loading}
+            onClick={() => void reloadPendingTransfer()}
+            className="mt-2 min-h-11 w-full cursor-pointer rounded-xl border border-bg-border px-4 py-2 text-sm font-semibold text-text-secondary transition-colors duration-200 hover:bg-bg-border/35 hover:text-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            계좌 정보 다시 불러오기
+          </button>
+        )}
       </form>
     </MarketActionDialog>
   );

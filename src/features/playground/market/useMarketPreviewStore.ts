@@ -3,6 +3,11 @@ import { create, type StoreApi, type UseBoundStore } from 'zustand';
 import { applyMarketCommand, validateMarketCommand } from './domain.ts';
 import { createMarketGateway } from './gateway.ts';
 import {
+  isMarketValueCommand,
+  sameMarketValueCommand,
+  type MarketValueCommand,
+} from './pendingValueRequest.ts';
+import {
   addPreviewAdminEvent,
   removePreviewAdminEvent,
   type MarketPreviewGateway,
@@ -17,6 +22,8 @@ import type {
 export const MARKET_QUOTE_CHANGED_MESSAGE = '가격이 바뀌었어요. 현재 가격을 확인하고 다시 주문해 주세요.';
 export const MARKET_TRADING_HALTED_MESSAGE = '현재 거래가 정지되어 주문할 수 없어요.';
 export const ADMIN_WRITE_UNCERTAIN_MESSAGE = '저장 결과를 확인할 수 없어 같은 작업을 다시 할 수 없어요. 시장 정보를 다시 불러와 확인해 주세요.';
+export const VALUE_WRITE_AMBIGUOUS_MESSAGE = '거래 결과를 확인하지 못했어요. 같은 요청으로 결과를 다시 확인하거나 시장 정보를 다시 불러와 주세요.';
+export const VALUE_PENDING_BLOCK_MESSAGE = '이전 거래 결과를 먼저 확인해야 새 거래를 시작할 수 있어요.';
 
 function errorText(error: unknown): string {
   if (error instanceof Error) return error.message;
@@ -36,6 +43,14 @@ export function marketCommandFailureMessage(error: unknown): string {
     return MARKET_TRADING_HALTED_MESSAGE;
   }
   return '저장하지 못했어요. 이전 상태로 되돌렸어요.';
+}
+
+export function isKnownMarketValueRejection(error: unknown): boolean {
+  const message = errorText(error);
+  return message.includes(MARKET_QUOTE_CHANGED_MESSAGE)
+    || /market trading is halted|현재 거래가 정지|거래.*정지/i.test(message)
+    || /request id conflict|같은 요청이 다른 내용/i.test(message)
+    || /배한솔 계정|잔액이나 보유 수량|입력한 거래 내용|포인트 지갑 잔액|예수금이 부족|보유.*부족/i.test(message);
 }
 
 function sameInstant(left: string | null, right: string | null): boolean {
@@ -68,6 +83,7 @@ interface MarketPreviewState {
   loading: boolean;
   mutating: boolean;
   adminWriteUncertain: boolean;
+  pendingValueCommand: MarketValueCommand | null;
   error: string | null;
   sessionKey: string | null;
   load(sessionKey?: string): Promise<void>;
@@ -88,6 +104,7 @@ export function createMarketPreviewStore(
     loading: false,
     mutating: false,
     adminWriteUncertain: false,
+    pendingValueCommand: null,
     error: null,
     sessionKey: null,
     async load(requestedSessionKey = '__default-market-session__') {
@@ -102,6 +119,7 @@ export function createMarketPreviewStore(
           visible: null,
           mutating: false,
           adminWriteUncertain: false,
+          pendingValueCommand: null,
         } : {}),
       });
       try {
@@ -113,6 +131,7 @@ export function createMarketPreviewStore(
           loading: false,
           mutating: false,
           adminWriteUncertain: false,
+          pendingValueCommand: null,
         });
       } catch {
         if (generation !== loadGeneration || get().sessionKey !== requestedSessionKey) return;
@@ -121,34 +140,67 @@ export function createMarketPreviewStore(
           mutating: false,
           error: get().adminWriteUncertain
             ? ADMIN_WRITE_UNCERTAIN_MESSAGE
-            : '시장 정보를 불러오지 못했어요.',
+            : get().pendingValueCommand
+              ? VALUE_WRITE_AMBIGUOUS_MESSAGE
+              : '시장 정보를 불러오지 못했어요.',
         });
       }
     },
     async execute(command, currentPriceWon) {
-      const { visible, mutating } = get();
+      const { visible, mutating, pendingValueCommand } = get();
       if (!visible || mutating) return false;
+      const valueCommand = isMarketValueCommand(command) ? command : null;
+      const retryingPending = pendingValueCommand !== null
+        && valueCommand !== null
+        && sameMarketValueCommand(pendingValueCommand, valueCommand);
 
-      const validation = validateMarketCommand(visible, command, currentPriceWon);
-      if (validation) {
-        set({ error: validation });
+      if (pendingValueCommand && !retryingPending) {
+        set({ error: VALUE_PENDING_BLOCK_MESSAGE });
         return false;
       }
 
-      const projected = applyMarketCommand(visible, command, currentPriceWon);
+      if (!retryingPending) {
+        const validation = validateMarketCommand(visible, command, currentPriceWon);
+        if (validation) {
+          set({ error: validation });
+          return false;
+        }
+      }
+
+      const projected = retryingPending
+        ? visible
+        : applyMarketCommand(visible, command, currentPriceWon);
       const operationSessionKey = get().sessionKey;
-      set({ visible: projected, mutating: true, error: null });
+      set({
+        visible: projected,
+        mutating: true,
+        pendingValueCommand: valueCommand
+          ? structuredClone(pendingValueCommand ?? valueCommand)
+          : null,
+        error: null,
+      });
       try {
         const confirmed = await gateway.execute(command);
         if (get().sessionKey !== operationSessionKey) return false;
-        set({ confirmed, visible: confirmed, mutating: false });
+        set({
+          confirmed,
+          visible: confirmed,
+          mutating: false,
+          pendingValueCommand: null,
+        });
         return true;
       } catch (error) {
         if (get().sessionKey !== operationSessionKey) return false;
+        const knownValueRejection = valueCommand !== null && isKnownMarketValueRejection(error);
         set({
           visible: get().confirmed,
           mutating: false,
-          error: marketCommandFailureMessage(error),
+          pendingValueCommand: valueCommand && !knownValueRejection
+            ? structuredClone(pendingValueCommand ?? valueCommand)
+            : null,
+          error: valueCommand && !knownValueRejection
+            ? VALUE_WRITE_AMBIGUOUS_MESSAGE
+            : marketCommandFailureMessage(error),
         });
         return false;
       }

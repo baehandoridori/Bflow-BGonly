@@ -1,10 +1,21 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { createMarketPreviewGateway } from '../src/features/playground/market/previewGateway.ts';
+import {
+  createMarketPreviewGateway,
+  fingerprintMarketCommand,
+} from '../src/features/playground/market/previewGateway.ts';
+import {
+  createPendingMarketValueRequest,
+  retryPendingMarketValueCommand,
+} from '../src/features/playground/market/pendingValueRequest.ts';
 import { createMarketPreviewStore } from '../src/features/playground/market/useMarketPreviewStore.ts';
 import type { MarketPreviewGateway } from '../src/features/playground/market/previewGateway.ts';
-import type { MarketAdminEventInput, MarketSnapshot } from '../src/features/playground/market/types.ts';
+import type {
+  MarketAdminEventInput,
+  MarketCommand,
+  MarketSnapshot,
+} from '../src/features/playground/market/types.ts';
 
 test('each gateway starts from a deterministic isolated seed', async () => {
   const firstGateway = createMarketPreviewGateway({ latencyMs: 0 });
@@ -41,7 +52,7 @@ test('successful transfer is optimistic and converges visible and confirmed snap
   assert.equal(store.getState().mutating, false);
 });
 
-test('failed mutation restores the confirmed snapshot', async () => {
+test('ambiguous value mutation restores confirmed state and preserves its exact request', async () => {
   const gateway = createMarketPreviewGateway({ latencyMs: 0, failRequestIds: new Set(['fail-1']) });
   const store = createMarketPreviewStore(gateway);
   await store.getState().load();
@@ -55,7 +66,10 @@ test('failed mutation restores the confirmed snapshot', async () => {
   assert.deepEqual(store.getState().visible, before);
   assert.deepEqual(store.getState().confirmed, before);
   assert.equal(store.getState().mutating, false);
-  assert.equal(store.getState().error, '저장하지 못했어요. 이전 상태로 되돌렸어요.');
+  assert.match(store.getState().error ?? '', /같은 요청|결과.*확인/);
+  assert.deepEqual(store.getState().pendingValueCommand, {
+    kind: 'transfer', requestId: 'fail-1', direction: 'wallet-to-broker', points: 1000,
+  });
 });
 
 test('canonical quote change survives an Electron IPC error prefix and keeps rollback actionable', async () => {
@@ -120,6 +134,117 @@ test('canonical halt rejection survives an Electron or database error prefix', a
     quotedPriceWon: 1_842,
   }, 1_842), false);
   assert.equal(store.getState().error, '현재 거래가 정지되어 주문할 수 없어요.');
+  assert.equal(store.getState().pendingValueCommand, null);
+});
+
+test('buy response-loss retry reuses one request id and moves cash and shares exactly once', async () => {
+  const canonical = createMarketPreviewGateway({ latencyMs: 0 });
+  await canonical.execute({
+    kind: 'transfer', requestId: 'fund-buy-response-loss', direction: 'wallet-to-broker', points: 10_000,
+  });
+  const calls: MarketCommand[] = [];
+  let loseFirstBuyResponse = true;
+  const gateway: MarketPreviewGateway = {
+    read: () => canonical.read(),
+    execute: async (command) => {
+      calls.push(structuredClone(command));
+      const result = await canonical.execute(command);
+      if (command.kind === 'buy' && loseFirstBuyResponse) {
+        loseFirstBuyResponse = false;
+        throw new Error('transport closed after buy commit');
+      }
+      return result;
+    },
+    createAdminEvent: (input) => canonical.createAdminEvent(input),
+    deleteAdminEvent: (eventId) => canonical.deleteAdminEvent(eventId),
+  };
+  const store = createMarketPreviewStore(gateway);
+  await store.getState().load('hansol');
+  const pending = createPendingMarketValueRequest({
+    kind: 'buy', requestId: 'stable-buy-request', stockId: 'jbbj', quantityShares: 2,
+    quotedPriceWon: 1_842,
+  }, { quantityShares: 2, quotedPriceWon: 1_842 });
+  const command = retryPendingMarketValueCommand(pending);
+
+  assert.equal(await store.getState().execute(command, 1_842), false);
+  assert.deepEqual(store.getState().pendingValueCommand, command);
+  assert.match(store.getState().error ?? '', /같은 요청|결과.*확인/);
+  assert.equal(await store.getState().execute({ ...command, requestId: 'new-buy-request' }, 1_842), false);
+  assert.equal(calls.length, 1, 'a different request must be blocked while the first result is unknown');
+
+  assert.equal(await store.getState().execute(retryPendingMarketValueCommand(pending), 1), true);
+  assert.equal(calls.length, 2);
+  assert.equal(calls[0].requestId, calls[1].requestId);
+  assert.equal(fingerprintMarketCommand(calls[0]), fingerprintMarketCommand(calls[1]));
+  assert.equal(store.getState().pendingValueCommand, null);
+  const authoritative = await canonical.read();
+  assert.equal(authoritative.account.cashWon, 10_000 - (2 * 1_842));
+  assert.deepEqual(authoritative.account.holdings, [{
+    stockId: 'jbbj', quantityShares: 2, costBasisWon: 2 * 1_842,
+  }]);
+});
+
+test('point transfer response-loss retry reuses exact direction, points and request id once', async () => {
+  const canonical = createMarketPreviewGateway({ latencyMs: 0 });
+  const calls: MarketCommand[] = [];
+  let loseFirstTransferResponse = true;
+  const gateway: MarketPreviewGateway = {
+    read: () => canonical.read(),
+    execute: async (command) => {
+      calls.push(structuredClone(command));
+      const result = await canonical.execute(command);
+      if (command.kind === 'transfer' && loseFirstTransferResponse) {
+        loseFirstTransferResponse = false;
+        throw new Error('transport closed after transfer commit');
+      }
+      return result;
+    },
+    createAdminEvent: (input) => canonical.createAdminEvent(input),
+    deleteAdminEvent: (eventId) => canonical.deleteAdminEvent(eventId),
+  };
+  const store = createMarketPreviewStore(gateway);
+  await store.getState().load('hansol');
+  const pending = createPendingMarketValueRequest({
+    kind: 'transfer', requestId: 'stable-transfer-request', direction: 'wallet-to-broker', points: 5_000,
+  }, { direction: 'wallet-to-broker', points: 5_000 });
+  const command = retryPendingMarketValueCommand(pending);
+
+  assert.equal(await store.getState().execute(command), false);
+  assert.deepEqual(store.getState().pendingValueCommand, command);
+  assert.equal(await store.getState().execute(retryPendingMarketValueCommand(pending)), true);
+  assert.equal(calls.length, 2);
+  assert.equal(calls[0].requestId, calls[1].requestId);
+  assert.equal(fingerprintMarketCommand(calls[0]), fingerprintMarketCommand(calls[1]));
+  const authoritative = await canonical.read();
+  assert.equal(authoritative.account.walletPoints, 995_000);
+  assert.equal(authoritative.account.cashWon, 5_000);
+  assert.equal(store.getState().pendingValueCommand, null);
+});
+
+test('authoritative reload clears an ambiguous value request without resending it', async () => {
+  const canonical = createMarketPreviewGateway({ latencyMs: 0 });
+  let writeCalls = 0;
+  const gateway: MarketPreviewGateway = {
+    read: () => canonical.read(),
+    execute: async (command) => {
+      writeCalls += 1;
+      await canonical.execute(command);
+      throw new Error('response lost');
+    },
+    createAdminEvent: (input) => canonical.createAdminEvent(input),
+    deleteAdminEvent: (eventId) => canonical.deleteAdminEvent(eventId),
+  };
+  const store = createMarketPreviewStore(gateway);
+  await store.getState().load('hansol');
+  assert.equal(await store.getState().execute({
+    kind: 'transfer', requestId: 'reload-transfer-request', direction: 'wallet-to-broker', points: 1_000,
+  }), false);
+  assert.ok(store.getState().pendingValueCommand);
+
+  await store.getState().load('hansol');
+  assert.equal(writeCalls, 1);
+  assert.equal(store.getState().pendingValueCommand, null);
+  assert.equal(store.getState().visible?.account.cashWon, 1_000);
 });
 
 test('a second mutation is blocked until the first is confirmed', async () => {

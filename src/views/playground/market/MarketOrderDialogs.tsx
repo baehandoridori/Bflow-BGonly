@@ -68,16 +68,33 @@ export function MarketOrderDialogs({ controller }: MarketOrderDialogsProps) {
           <p className="mt-3 min-h-5 text-sm font-semibold text-text-primary" aria-live="polite">
             {controller.error ?? ''}
           </p>
+          {controller.pendingResolution && (
+            <p className="mt-1 text-xs leading-5 text-text-secondary">
+              주문 결과를 받지 못했어요. 같은 주문을 다시 확인하면 중복 주문 없이 결과만 확인합니다.
+            </p>
+          )}
           <button
             type="button"
-            disabled={controller.controlsDisabled || controller.halted}
+            disabled={controller.confirmDisabled}
             onClick={() => void controller.confirm()}
             className="mt-2 min-h-12 w-full cursor-pointer rounded-xl bg-accent px-4 py-3 text-sm font-bold text-on-accent transition-colors duration-200 motion-reduce:transition-none hover:bg-accent/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent disabled:cursor-not-allowed disabled:opacity-50"
           >
             {controller.submitting
-              ? '주문을 저장하는 중…'
-              : `${formatShares(confirmation.quantityShares)} ${confirmation.side === 'buy' ? '사기' : '팔기'}`}
+              ? controller.pendingResolution ? '주문 결과를 확인하는 중…' : '주문을 저장하는 중…'
+              : controller.pendingResolution
+                ? '주문 결과 다시 확인'
+                : `${formatShares(confirmation.quantityShares)} ${confirmation.side === 'buy' ? '사기' : '팔기'}`}
           </button>
+          {controller.pendingResolution && (
+            <button
+              type="button"
+              disabled={controller.submitting}
+              onClick={() => void controller.reloadPending()}
+              className="mt-2 min-h-11 w-full cursor-pointer rounded-xl border border-bg-border px-4 py-2 text-sm font-semibold text-text-secondary transition-colors duration-200 motion-reduce:transition-none hover:bg-bg-border/35 hover:text-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              시장 정보 다시 불러오기
+            </button>
+          )}
         </div>
       )}
 

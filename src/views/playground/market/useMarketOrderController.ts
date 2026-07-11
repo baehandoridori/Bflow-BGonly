@@ -6,9 +6,15 @@ import {
   validateMarketCommand,
 } from '../../../features/playground/market/domain.ts';
 import { formatShares, formatWon } from '../../../features/playground/market/format.ts';
+import {
+  createPendingMarketValueRequest,
+  retryPendingMarketValueCommand,
+  sameMarketValueCommand,
+  type MarketValueCommand,
+  type PendingMarketValueRequest,
+} from '../../../features/playground/market/pendingValueRequest.ts';
 import type {
   MarketAdminEvent,
-  MarketCommand,
   MarketSnapshot,
   MarketStock,
 } from '../../../features/playground/market/types.ts';
@@ -42,6 +48,14 @@ export interface MarketLimitReview {
   estimatedTotalWon: number;
 }
 
+interface PendingOrderDetails {
+  frozen: FrozenMarketOrder;
+  stockName: string;
+  choice: MarketShareChoice;
+}
+
+type PendingOrderRequest = PendingMarketValueRequest<PendingOrderDetails>;
+
 interface FreezeMarketOrderOptions {
   snapshot: MarketSnapshot;
   stock: MarketStock;
@@ -71,6 +85,8 @@ export interface MarketOrderController {
   limitReview: MarketLimitReview | null;
   halted: boolean;
   controlsDisabled: boolean;
+  confirmDisabled: boolean;
+  pendingResolution: boolean;
   submitting: boolean;
   validation: string | null;
   error: string | null;
@@ -81,6 +97,7 @@ export interface MarketOrderController {
   openSheet(side: MarketOrderSide, opener: HTMLElement): void;
   openConfirmation(opener?: HTMLElement): void;
   confirm(): Promise<void>;
+  reloadPending(): Promise<void>;
   close(): boolean;
   openLimit(opener?: HTMLElement): void;
   updateLimitDraft(patch: Partial<MarketLimitDraft>): void;
@@ -152,7 +169,7 @@ function frozenOrderCommand(
   stockId: string,
   frozen: FrozenMarketOrder,
   requestId: string,
-): MarketCommand {
+): MarketValueCommand {
   return {
     kind: frozen.side,
     requestId,
@@ -183,7 +200,11 @@ export function useMarketOrderController({
 }: UseMarketOrderControllerOptions): MarketOrderController {
   const snapshot = useMarketPreviewStore((state) => state.visible);
   const mutating = useMarketPreviewStore((state) => state.mutating);
+  const loading = useMarketPreviewStore((state) => state.loading);
+  const pendingValueCommand = useMarketPreviewStore((state) => state.pendingValueCommand);
+  const sessionKey = useMarketPreviewStore((state) => state.sessionKey);
   const storeError = useMarketPreviewStore((state) => state.error);
+  const load = useMarketPreviewStore((state) => state.load);
   const execute = useMarketPreviewStore((state) => state.execute);
   const clearError = useMarketPreviewStore((state) => state.clearError);
   const stock = snapshot?.stocks.find((item) => item.id === stockId) ?? null;
@@ -193,6 +214,8 @@ export function useMarketOrderController({
   const [surface, setSurface] = useState<MarketOrderSurface>(null);
   const [confirmation, setConfirmation] = useState<FrozenMarketOrder | null>(null);
   const [confirmationChoice, setConfirmationChoice] = useState<MarketShareChoice>(1);
+  const [pendingOrder, setPendingOrder] = useState<PendingOrderRequest | null>(null);
+  const [pendingOrderUncertain, setPendingOrderUncertain] = useState(false);
   const [localError, setLocalError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [limitDraft, setLimitDraft] = useState<MarketLimitDraft>({
@@ -226,7 +249,20 @@ export function useMarketOrderController({
       currentPriceWon,
     );
   }, [currentPriceWon, frozenPreview, halted, snapshot, stock]);
-  const controlsDisabled = mutating || submitting || !snapshot || !stock;
+  const pendingResolution = pendingOrderUncertain;
+  const pendingCommandMismatch = pendingValueCommand !== null
+    && (pendingOrder === null
+      || !sameMarketValueCommand(pendingValueCommand, pendingOrder.command));
+  const controlsDisabled = mutating
+    || submitting
+    || pendingValueCommand !== null
+    || !snapshot
+    || !stock;
+  const confirmDisabled = mutating
+    || submitting
+    || loading
+    || pendingCommandMismatch
+    || (pendingOrder === null && halted);
 
   const clearFeedback = () => {
     setLocalError(null);
@@ -302,65 +338,105 @@ export function useMarketOrderController({
   };
 
   const confirm = async () => {
-    if (!confirmation || submitLockRef.current || controlsDisabled) return;
-    const latest = useMarketPreviewStore.getState().visible;
-    const latestStock = latest?.stocks.find((item) => item.id === stockId);
-    if (!latest || !latestStock) {
-      setLocalError('종목을 찾지 못했어요.');
-      return;
-    }
-    if (isStockTradingHalted(latest.adminEvents, stockId, nowMs)) {
-      setLocalError('거래가 멈춰 주문할 수 없어요.');
-      return;
-    }
-    const refreshed = freezeMarketOrder({
-      snapshot: latest,
-      stock: latestStock,
-      side: confirmation.side,
-      choice: confirmationChoice,
-      customSharesInput: String(confirmation.quantityShares),
-      quotedPriceWon: currentPriceWon,
-    });
-    const error = validateMarketCommand(
-      latest,
-      frozenOrderCommand(stockId, refreshed, 'preview'),
-      currentPriceWon,
-    );
-    if (error) {
-      setLocalError(error);
-      return;
-    }
-    if (!frozenOrdersMatch(confirmation, refreshed)) {
-      setConfirmation(refreshed);
-      setLocalError('가격이나 잔액이 바뀌어 내용을 새로 고쳤어요. 다시 확인해 주세요.');
-      return;
+    if (!confirmation || submitLockRef.current || confirmDisabled) return;
+    let attempt = pendingOrder;
+    if (!attempt) {
+      const latest = useMarketPreviewStore.getState().visible;
+      const latestStock = latest?.stocks.find((item) => item.id === stockId);
+      if (!latest || !latestStock) {
+        setLocalError('종목을 찾지 못했어요.');
+        return;
+      }
+      if (isStockTradingHalted(latest.adminEvents, stockId, nowMs)) {
+        setLocalError('거래가 멈춰 주문할 수 없어요.');
+        return;
+      }
+      const refreshed = freezeMarketOrder({
+        snapshot: latest,
+        stock: latestStock,
+        side: confirmation.side,
+        choice: confirmationChoice,
+        customSharesInput: String(confirmation.quantityShares),
+        quotedPriceWon: currentPriceWon,
+      });
+      const error = validateMarketCommand(
+        latest,
+        frozenOrderCommand(stockId, refreshed, 'preview'),
+        currentPriceWon,
+      );
+      if (error) {
+        setLocalError(error);
+        return;
+      }
+      if (!frozenOrdersMatch(confirmation, refreshed)) {
+        setConfirmation(refreshed);
+        setLocalError('가격이나 잔액이 바뀌어 내용을 새로 고쳤어요. 다시 확인해 주세요.');
+        return;
+      }
+      attempt = createPendingMarketValueRequest(
+        frozenOrderCommand(stockId, refreshed, crypto.randomUUID()),
+        { frozen: refreshed, stockName: latestStock.name, choice: confirmationChoice },
+      );
+      setPendingOrder(attempt);
+      setPendingOrderUncertain(false);
     }
 
     submitLockRef.current = true;
     setSubmitting(true);
     setLocalError(null);
     clearError();
-    const command = frozenOrderCommand(stockId, refreshed, crypto.randomUUID());
-    const succeeded = await execute(command, refreshed.quotedPriceWon);
+    const command = retryPendingMarketValueCommand(attempt);
+    if (command.kind !== 'buy' && command.kind !== 'sell') {
+      submitLockRef.current = false;
+      setSubmitting(false);
+      setPendingOrder(null);
+      setPendingOrderUncertain(false);
+      setLocalError('주문 정보를 다시 확인해 주세요.');
+      return;
+    }
+    const succeeded = await execute(command, command.quotedPriceWon);
     submitLockRef.current = false;
     setSubmitting(false);
     if (succeeded) {
       toast.success(
-        `${latestStock.name} ${formatShares(refreshed.quantityShares)}를 ${refreshed.side === 'buy' ? '사서' : '팔아'} ${formatWon(refreshed.estimatedTotalWon)} 주문을 마쳤어요.`,
+        `${attempt.details.stockName} ${formatShares(attempt.details.frozen.quantityShares)}를 ${attempt.details.frozen.side === 'buy' ? '사서' : '팔아'} ${formatWon(attempt.details.frozen.estimatedTotalWon)} 주문을 마쳤어요.`,
       );
+      setPendingOrder(null);
+      setPendingOrderUncertain(false);
       setConfirmation(null);
       setSurface(null);
       return;
     }
-    const message = useMarketPreviewStore.getState().error
+    const latestState = useMarketPreviewStore.getState();
+    if (latestState.pendingValueCommand === null) {
+      setPendingOrder(null);
+      setPendingOrderUncertain(false);
+      const latest = latestState.visible;
+      const latestStock = latest?.stocks.find((item) => item.id === stockId);
+      if (latest && latestStock) {
+        setConfirmation(freezeMarketOrder({
+          snapshot: latest,
+          stock: latestStock,
+          side: attempt.details.frozen.side,
+          choice: attempt.details.choice,
+          customSharesInput: String(attempt.details.frozen.quantityShares),
+          quotedPriceWon: currentPriceWon,
+        }));
+      }
+    } else {
+      setPendingOrderUncertain(true);
+    }
+    const message = latestState.error
       ?? '주문을 완료하지 못했어요. 다시 확인해 주세요.';
     setLocalError(message);
     toast.error(message);
   };
 
   const close = (): boolean => {
-    if (controlsDisabled) {
-      setLocalError('주문 저장이 끝날 때까지 잠시 기다려 주세요.');
+    if (mutating || submitting || loading || pendingOrder || pendingValueCommand) {
+      setLocalError(pendingOrder || pendingValueCommand
+        ? '이전 주문 결과를 확인하거나 시장 정보를 다시 불러온 뒤 닫아 주세요.'
+        : '주문 저장이 끝날 때까지 잠시 기다려 주세요.');
       return false;
     }
     setSurface(null);
@@ -368,6 +444,24 @@ export function useMarketOrderController({
     setLimitReview(null);
     clearFeedback();
     return true;
+  };
+
+  const reloadPending = async () => {
+    if (!pendingOrder || mutating || submitting || loading) return;
+    setSubmitting(true);
+    setLocalError(null);
+    await load(sessionKey ?? undefined);
+    setSubmitting(false);
+    const latestState = useMarketPreviewStore.getState();
+    if (latestState.pendingValueCommand !== null) {
+      setLocalError(latestState.error ?? '시장 정보를 다시 불러오지 못했어요.');
+      return;
+    }
+    setPendingOrder(null);
+    setPendingOrderUncertain(false);
+    setConfirmation(null);
+    setSurface(null);
+    toast.info('최신 계좌와 보유 상태를 다시 불러왔어요.');
   };
 
   const openLimit = (opener?: HTMLElement) => {
@@ -426,6 +520,8 @@ export function useMarketOrderController({
     limitReview,
     halted,
     controlsDisabled,
+    confirmDisabled,
+    pendingResolution,
     submitting,
     validation,
     error: localError ?? storeError,
@@ -436,6 +532,7 @@ export function useMarketOrderController({
     openSheet,
     openConfirmation,
     confirm,
+    reloadPending,
     close,
     openLimit,
     updateLimitDraft,

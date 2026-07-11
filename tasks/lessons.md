@@ -452,3 +452,19 @@ PR #116 에서 12 라운드 (P1×3, P2×6, P3×2) 끝에 silent-done. Monitor �
 - read까지 실패해 결과를 모르면 해당 write 종류를 잠그고, 성공한 reload 전에는 같은 작업을 다시 보내지 않는다. 오래된 reconcile은 session key와 load generation 양쪽으로 차단한다.
 - domain 오류는 Electron IPC prefix가 붙어도 핵심 문구를 정규화해 보존한다. 가격 변경·거래정지를 일반 저장 실패로 덮지 않는다.
 - UI 차단은 편의 기능일 뿐 신뢰 경계가 아니다. 거래정지처럼 체결 규칙인 조건은 Electron service와 DB RPC 양쪽에서 검사하고, idempotent replay 판정은 그 검사보다 먼저 유지한다.
+
+---
+
+## 2026-07-12: 멱등 키는 버튼 클릭이 아니라 하나의 거래 의도에 묶는다
+
+### 증상
+
+- 주문·포인트 이동 결과를 받지 못한 뒤 사용자가 다시 확인 버튼을 누르면 UI가 새 request ID를 만들었다.
+- 서버가 첫 요청을 이미 반영한 상태라면 DB의 멱등 처리를 우회해 같은 거래가 두 번 체결될 수 있었다.
+
+### 교훈
+
+- 금액·주식 수량을 바꾸는 요청은 최초 확인 순간에 request ID, command fingerprint, 화면에 보여 준 가격·수량을 함께 동결한다.
+- 결과가 불명확하면 새 요청을 만들지 않고 같은 command를 그대로 재전송한다. 다른 거래와 창 닫기는 동일 요청의 성공 또는 authoritative reload 전까지 잠근다.
+- 가격 변경·거래정지처럼 서버가 명확히 거절한 경우에만 pending을 버리고 최신 정보로 새 확인 절차를 시작한다.
+- 테스트는 단순히 UUID 호출 횟수만 세지 말고, 서버 반영 뒤 응답만 유실하는 fake gateway에서 재시도 request ID와 fingerprint가 같고 잔액·보유량이 정확히 한 번만 바뀌는지 검증한다.

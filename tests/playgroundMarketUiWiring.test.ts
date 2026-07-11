@@ -237,7 +237,7 @@ test('easy order revalidates frozen confirmation before creating a request id', 
   const latestSnapshot = handler.indexOf('useMarketPreviewStore.getState().visible');
   const validate = handler.indexOf('validateMarketCommand');
   const createRequestId = handler.indexOf('crypto.randomUUID()');
-  const execute = handler.indexOf('await execute(command, refreshed.quotedPriceWon)');
+  const execute = handler.indexOf('await execute(command, command.quotedPriceWon)');
   assert.ok(latestSnapshot >= 0 && latestSnapshot < validate);
   assert.ok(validate < createRequestId && createRequestId < execute);
   assert.match(handler, /freezeMarketOrder/);
@@ -277,7 +277,8 @@ test('order dialog refuses to close while its mutation is running', () => {
   const end = source.indexOf('\n  };', start);
   assert.ok(start >= 0 && end > start);
   const handler = source.slice(start, end);
-  assert.match(handler, /controlsDisabled/);
+  assert.match(handler, /pendingOrder/);
+  assert.match(handler, /pendingValueCommand/);
   assert.match(handler, /주문 저장이 끝날 때까지/);
   assert.match(dialogs, /onClose=\{controller\.close\}/);
 });
@@ -352,8 +353,9 @@ test('point transfer revalidates before one request id and blocks duplicate subm
   const closeStart = source.indexOf('const closeTransferDialog');
   const closeEnd = source.indexOf('\n  };', closeStart);
   assert.ok(closeStart >= 0 && closeEnd > closeStart);
-  assert.match(source.slice(closeStart, closeEnd), /submitting\s*\|\|\s*mutating/);
-  assert.match(source, /submitting\s*\|\|\s*mutating\s*\?\s*confirmed\s*\?\?\s*visible\s*:\s*visible/);
+  assert.match(source.slice(closeStart, closeEnd), /pendingTransfer\s*\|\|\s*pendingValueCommand/);
+  assert.match(source.slice(closeStart, closeEnd), /submitting\s*\|\|\s*mutating\s*\|\|\s*loading/);
+  assert.match(source, /submitting\s*\|\|\s*mutating\s*\|\|\s*pendingResolution/);
 });
 
 test('point transfer only shows a projected balance for a valid amount', () => {
@@ -377,7 +379,7 @@ test('point transfer failure keeps its inline error and also raises a global toa
   const failurePath = submitHandler.slice(failureStart);
 
   assert.equal((failurePath.match(/const message\s*=/g) ?? []).length, 1);
-  assert.match(failurePath, /const message\s*=\s*useMarketPreviewStore\.getState\(\)\.error/);
+  assert.match(failurePath, /const message\s*=\s*latestState\.error/);
   assert.match(failurePath, /setLocalError\(message\)/);
   assert.match(failurePath, /toast\.error\(message\)/);
   assert.ok(failurePath.indexOf('setLocalError(message)') < failurePath.indexOf('toast.error(message)'));
