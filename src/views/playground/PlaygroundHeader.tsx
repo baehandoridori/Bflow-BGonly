@@ -27,7 +27,12 @@ export function PlaygroundHeader({
     <header className="pg-header" data-pg-header>
       <div className="pg-header__identity">
         {backLabel && onBack && (
-          <button type="button" className="pg-header__back" onClick={onBack}>
+          <button
+            type="button"
+            className="pg-header__back"
+            aria-label={backLabel}
+            onClick={onBack}
+          >
             <ArrowLeft aria-hidden="true" size={16} />
             <span>{backLabel}</span>
           </button>
