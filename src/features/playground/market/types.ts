@@ -24,6 +24,15 @@ export interface MarketAdminEvent {
   revision: number;
 }
 
+export interface MarketAdminEventInput {
+  stockId: string;
+  kind: MarketEventKind;
+  title: string;
+  impactBps: number;
+  startsAt: string;
+  endsAt: string | null;
+}
+
 export interface MarketCandle {
   startsAt: string;
   openWon: number;
@@ -74,6 +83,14 @@ export interface MarketAccount {
   holdings: Holding[];
 }
 
+export interface MarketRemoteState {
+  revision: number;
+  account: MarketAccount;
+  favoriteStockIds: string[];
+  beginnerMission: 'favorite' | 'reason' | 'first-order' | 'complete';
+  adminEvents: MarketAdminEvent[];
+}
+
 export interface MarketSnapshot {
   revision: number;
   marketOpenLabel: '24시간 열림';
@@ -82,6 +99,7 @@ export interface MarketSnapshot {
   favoriteStockIds: string[];
   account: MarketAccount;
   beginnerMission: 'favorite' | 'reason' | 'first-order' | 'complete';
+  adminEvents: MarketAdminEvent[];
 }
 
 export type MarketCommand =

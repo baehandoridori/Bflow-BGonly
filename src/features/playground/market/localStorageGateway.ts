@@ -1,11 +1,15 @@
 import { applyMarketCommand } from './domain.ts';
 import {
+  addPreviewAdminEvent,
   fingerprintMarketCommand,
+  removePreviewAdminEvent,
   type MarketPreviewGateway,
 } from './previewGateway.ts';
 import { createMarketPreviewSeed } from './seed.ts';
 import type {
   Holding,
+  MarketAdminEvent,
+  MarketAdminEventInput,
   MarketCommand,
   MarketNews,
   MarketSnapshot,
@@ -17,6 +21,7 @@ const STORAGE_KEY_PREFIX = 'bflow:playground-market:v2:';
 const READ_ERROR_MESSAGE = '저장된 시장 정보를 읽지 못했어요. 다시 시도해 주세요.';
 const MARKET_PERIODS = ['today', 'week', 'month', 'all'] as const;
 const BEGINNER_MISSIONS = new Set(['favorite', 'reason', 'first-order', 'complete']);
+const MARKET_EVENT_KINDS = new Set(['news', 'shock-up', 'shock-down', 'trend', 'halt']);
 
 interface PersistedMarketPreview {
   version: 2;
@@ -123,6 +128,22 @@ function isHolding(value: unknown, stockIds: ReadonlySet<string>): value is Hold
   );
 }
 
+function isMarketAdminEvent(value: unknown, stockIds: ReadonlySet<string>): value is MarketAdminEvent {
+  return (
+    isRecord(value)
+    && isNonEmptyString(value.id)
+    && isNonEmptyString(value.stockId)
+    && stockIds.has(value.stockId)
+    && typeof value.kind === 'string'
+    && MARKET_EVENT_KINDS.has(value.kind)
+    && isNonEmptyString(value.title)
+    && isSafeInteger(value.impactBps)
+    && isNonEmptyString(value.startsAt)
+    && (value.endsAt === null || isNonEmptyString(value.endsAt))
+    && isPositiveSafeInteger(value.revision)
+  );
+}
+
 function hasValidAccount(value: unknown, stockIds: ReadonlySet<string>): boolean {
   if (
     !isRecord(value)
@@ -162,6 +183,9 @@ function hasPersistedSnapshotShape(value: unknown): value is MarketSnapshot {
     || value.news.some((news) => !stockIdSet.has(news.stockId))
     || !hasUniqueValues(value.favoriteStockIds)
     || value.favoriteStockIds.some((stockId) => !stockIdSet.has(stockId))
+    || !Array.isArray(value.adminEvents)
+    || !value.adminEvents.every((event) => isMarketAdminEvent(event, stockIdSet))
+    || !hasUniqueValues(value.adminEvents.map((event) => event.id))
   ) return false;
 
   return hasValidAccount(value.account, stockIdSet);
@@ -178,16 +202,22 @@ function hasStringFingerprintPairs(value: unknown): value is Record<string, stri
 
 function parsePersistedMarketPreview(raw: string): PersistedMarketPreview {
   const parsed: unknown = JSON.parse(raw);
+  const normalizedSnapshot = isRecord(parsed) && isRecord(parsed.snapshot)
+    ? {
+        ...parsed.snapshot,
+        adminEvents: parsed.snapshot.adminEvents === undefined ? [] : parsed.snapshot.adminEvents,
+      }
+    : null;
   if (
     !isRecord(parsed)
     || parsed.version !== 2
-    || !hasPersistedSnapshotShape(parsed.snapshot)
+    || !hasPersistedSnapshotShape(normalizedSnapshot)
     || !hasStringFingerprintPairs(parsed.requestFingerprints)
     || !isNonNegativeSafeInteger(parsed.updatedAtMs)
   ) {
     throw new Error('invalid market preview storage shape');
   }
-  return parsed as unknown as PersistedMarketPreview;
+  return { ...parsed, snapshot: normalizedSnapshot } as unknown as PersistedMarketPreview;
 }
 
 function clonePersistedState(state: PersistedMarketPreview): PersistedMarketPreview {
@@ -265,6 +295,24 @@ export function createMarketLocalStorageGateway(
         [command.requestId]: fingerprint,
       };
       save(snapshot, requestFingerprints);
+      return structuredClone(snapshot);
+    },
+    async createAdminEvent(input: MarketAdminEventInput) {
+      await wait(latencyMs);
+      const persisted = readOrCreate();
+      const snapshot = addPreviewAdminEvent(
+        persisted.snapshot,
+        input,
+        `local-event-${options.now()}-${persisted.snapshot.revision + 1}`,
+      );
+      save(snapshot, persisted.requestFingerprints);
+      return structuredClone(snapshot);
+    },
+    async deleteAdminEvent(eventId: string) {
+      await wait(latencyMs);
+      const persisted = readOrCreate();
+      const snapshot = removePreviewAdminEvent(persisted.snapshot, eventId);
+      save(snapshot, persisted.requestFingerprints);
       return structuredClone(snapshot);
     },
   };

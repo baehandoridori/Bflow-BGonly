@@ -1,3 +1,5 @@
+import type { MarketAdminEventInput, MarketCommand, MarketRemoteState } from '../features/playground/market/types';
+
 // ─── 부서 (Department) ──────────────────────
 
 export type Department = 'bg' | 'acting';
@@ -1372,6 +1374,11 @@ export interface ElectronAPI {
   getPresenceSnapshot: () => Promise<unknown>;
   onSupabaseStatus: (callback: (status: string) => void) => () => void;
   onSupabaseBroadcast: (callback: (event: unknown) => void) => () => void;
+  // ─── Playground market (main-owned canonical session) ──
+  marketRead: () => Promise<MarketRemoteState>;
+  marketExecute: (command: MarketCommand) => Promise<MarketRemoteState>;
+  marketCreateAdminEvent: (input: MarketAdminEventInput) => Promise<MarketRemoteState>;
+  marketDeleteAdminEvent: (eventId: string) => Promise<MarketRemoteState>;
   // 슬랙 웹훅
   sendSlackWebhook: (payload: Record<string, string>) => Promise<{ ok: boolean }>;
   // 리깅 완성 공지 웹훅

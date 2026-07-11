@@ -1,10 +1,8 @@
 import { create, type StoreApi, type UseBoundStore } from 'zustand';
 
 import { applyMarketCommand, validateMarketCommand } from './domain.ts';
-import {
-  createMarketPreviewGateway,
-  type MarketPreviewGateway,
-} from './previewGateway.ts';
+import { createMarketGateway } from './gateway.ts';
+import type { MarketPreviewGateway } from './previewGateway.ts';
 import type { MarketCommand, MarketSnapshot } from './types';
 
 interface MarketPreviewState {
@@ -13,7 +11,8 @@ interface MarketPreviewState {
   loading: boolean;
   mutating: boolean;
   error: string | null;
-  load(): Promise<void>;
+  sessionKey: string | null;
+  load(sessionKey?: string): Promise<void>;
   execute(command: MarketCommand, currentPriceWon?: number): Promise<boolean>;
   clearError(): void;
 }
@@ -21,18 +20,29 @@ interface MarketPreviewState {
 export function createMarketPreviewStore(
   gateway: MarketPreviewGateway,
 ): UseBoundStore<StoreApi<MarketPreviewState>> {
+  let loadGeneration = 0;
   return create<MarketPreviewState>((set, get) => ({
     confirmed: null,
     visible: null,
     loading: false,
     mutating: false,
     error: null,
-    async load() {
-      set({ loading: true, error: null });
+    sessionKey: null,
+    async load(requestedSessionKey = '__default-market-session__') {
+      const generation = ++loadGeneration;
+      const sessionChanged = get().sessionKey !== requestedSessionKey;
+      set({
+        loading: true,
+        error: null,
+        sessionKey: requestedSessionKey,
+        ...(sessionChanged ? { confirmed: null, visible: null, mutating: false } : {}),
+      });
       try {
         const snapshot = await gateway.read();
+        if (generation !== loadGeneration || get().sessionKey !== requestedSessionKey) return;
         set({ confirmed: snapshot, visible: snapshot, loading: false });
       } catch {
+        if (generation !== loadGeneration || get().sessionKey !== requestedSessionKey) return;
         set({ loading: false, error: '시장 정보를 불러오지 못했어요.' });
       }
     },
@@ -47,12 +57,15 @@ export function createMarketPreviewStore(
       }
 
       const projected = applyMarketCommand(visible, command, currentPriceWon);
+      const operationSessionKey = get().sessionKey;
       set({ visible: projected, mutating: true, error: null });
       try {
         const confirmed = await gateway.execute(command);
+        if (get().sessionKey !== operationSessionKey) return false;
         set({ confirmed, visible: confirmed, mutating: false });
         return true;
       } catch {
+        if (get().sessionKey !== operationSessionKey) return false;
         set({
           visible: get().confirmed,
           mutating: false,
@@ -67,4 +80,4 @@ export function createMarketPreviewStore(
   }));
 }
 
-export const useMarketPreviewStore = createMarketPreviewStore(createMarketPreviewGateway());
+export const useMarketPreviewStore = createMarketPreviewStore(createMarketGateway());

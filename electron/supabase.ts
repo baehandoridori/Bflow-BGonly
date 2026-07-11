@@ -13,6 +13,10 @@ import type {
   PersonalTodoPatch,
   PersonalTodoRecord,
 } from './personalTodoService';
+import type {
+  MarketAdminEventInput,
+  MarketCommand,
+} from './marketAccountService';
 
 // ─── 일괄 작업 타입 ─────────────────────────────
 
@@ -2826,6 +2830,77 @@ export async function updatePersonalTodoLabel(
   });
   throwIfError(error);
   return mapPersonalTodoLabelRow(unwrapRpcRow(data));
+}
+
+// ─── Playground market account RPCs ──────────────────────────
+
+function marketCommandPayload(command: MarketCommand): Record<string, unknown> {
+  switch (command.kind) {
+    case 'favorite':
+      return { stockId: command.stockId, wished: command.wished };
+    case 'read-reason':
+      return { stockId: command.stockId };
+    case 'transfer':
+      return { direction: command.direction, points: command.points };
+    case 'buy':
+    case 'sell':
+      return {
+        stockId: command.stockId,
+        quantityShares: command.quantityShares,
+        quotedPriceWon: command.quotedPriceWon,
+      };
+  }
+}
+
+export async function readPlaygroundMarketState(userId: string): Promise<unknown> {
+  const { data, error } = await supabase.rpc('playground_market_read', {
+    p_user_id: userId,
+  });
+  if (error) throw error;
+  return data;
+}
+
+export async function executePlaygroundMarketCommand(
+  userId: string,
+  command: MarketCommand,
+): Promise<unknown> {
+  const { data, error } = await supabase.rpc('playground_market_execute', {
+    p_user_id: userId,
+    p_request_id: command.requestId,
+    p_kind: command.kind,
+    p_payload: marketCommandPayload(command),
+  });
+  if (error) throw error;
+  return data;
+}
+
+export async function createPlaygroundMarketEvent(
+  userId: string,
+  input: MarketAdminEventInput,
+): Promise<unknown> {
+  const { data, error } = await supabase.rpc('playground_market_create_event', {
+    p_user_id: userId,
+    p_stock_id: input.stockId,
+    p_kind: input.kind,
+    p_title: input.title,
+    p_impact_bps: input.impactBps,
+    p_starts_at: input.startsAt,
+    p_ends_at: input.endsAt,
+  });
+  if (error) throw error;
+  return data;
+}
+
+export async function deletePlaygroundMarketEvent(
+  userId: string,
+  eventId: string,
+): Promise<unknown> {
+  const { data, error } = await supabase.rpc('playground_market_delete_event', {
+    p_user_id: userId,
+    p_event_id: eventId,
+  });
+  if (error) throw error;
+  return data;
 }
 
 // ─── Task Views ──────────────────────────────

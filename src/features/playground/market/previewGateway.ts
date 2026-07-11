@@ -1,10 +1,12 @@
 import { applyMarketCommand } from './domain.ts';
 import { createMarketPreviewSeed } from './seed.ts';
-import type { MarketCommand, MarketSnapshot } from './types';
+import type { MarketAdminEventInput, MarketCommand, MarketSnapshot } from './types';
 
 export interface MarketPreviewGateway {
   read(): Promise<MarketSnapshot>;
   execute(command: MarketCommand): Promise<MarketSnapshot>;
+  createAdminEvent(input: MarketAdminEventInput): Promise<MarketSnapshot>;
+  deleteAdminEvent(eventId: string): Promise<MarketSnapshot>;
 }
 
 export interface MarketPreviewGatewayOptions {
@@ -46,12 +48,58 @@ export function fingerprintMarketCommand(command: MarketCommand): string {
   return exhaustive;
 }
 
+export function addPreviewAdminEvent(
+  snapshot: MarketSnapshot,
+  input: MarketAdminEventInput,
+  eventId: string,
+): MarketSnapshot {
+  const stockExists = snapshot.stocks.some((stock) => stock.id === input.stockId);
+  const startsAtMs = Date.parse(input.startsAt);
+  const endsAtMs = input.endsAt === null ? null : Date.parse(input.endsAt);
+  if (
+    !stockExists
+    || !input.title.trim()
+    || !Number.isSafeInteger(input.impactBps)
+    || !Number.isFinite(startsAtMs)
+    || (endsAtMs !== null && (!Number.isFinite(endsAtMs) || endsAtMs <= startsAtMs))
+  ) {
+    throw new Error('시장 이벤트 입력을 확인해 주세요.');
+  }
+  const next = structuredClone(snapshot);
+  next.revision += 1;
+  next.adminEvents.push({
+    id: eventId,
+    stockId: input.stockId,
+    kind: input.kind,
+    title: input.title.trim(),
+    impactBps: input.impactBps,
+    startsAt: input.startsAt,
+    endsAt: input.endsAt,
+    revision: next.revision,
+  });
+  return next;
+}
+
+export function removePreviewAdminEvent(
+  snapshot: MarketSnapshot,
+  eventId: string,
+): MarketSnapshot {
+  if (!snapshot.adminEvents.some((event) => event.id === eventId)) {
+    throw new Error('삭제할 시장 이벤트를 찾지 못했어요.');
+  }
+  const next = structuredClone(snapshot);
+  next.revision += 1;
+  next.adminEvents = next.adminEvents.filter((event) => event.id !== eventId);
+  return next;
+}
+
 export function createMarketPreviewGateway(
   options: MarketPreviewGatewayOptions = {},
 ): MarketPreviewGateway {
   let snapshot = createMarketPreviewSeed();
   const latencyMs = options.latencyMs ?? 180;
   const fingerprintByRequestId = new Map<string, string>();
+  let eventSequence = 0;
 
   return {
     async read() {
@@ -74,6 +122,16 @@ export function createMarketPreviewGateway(
 
       snapshot = applyMarketCommand(snapshot, command);
       fingerprintByRequestId.set(command.requestId, fingerprint);
+      return structuredClone(snapshot);
+    },
+    async createAdminEvent(input) {
+      await wait(latencyMs);
+      snapshot = addPreviewAdminEvent(snapshot, input, `preview-event-${++eventSequence}`);
+      return structuredClone(snapshot);
+    },
+    async deleteAdminEvent(eventId) {
+      await wait(latencyMs);
+      snapshot = removePreviewAdminEvent(snapshot, eventId);
       return structuredClone(snapshot);
     },
   };

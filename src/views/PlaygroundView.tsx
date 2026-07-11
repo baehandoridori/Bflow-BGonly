@@ -43,9 +43,9 @@ export default function PlaygroundView() {
   }), [currentUser?.id, lifetimeEarnedPoints, userName, walletPoints]);
 
   useEffect(() => {
-    const state = useMarketPreviewStore.getState();
-    if (!state.visible && !state.loading) void loadMarket();
-  }, [loadMarket]);
+    if (!currentUser?.id) return;
+    void loadMarket(currentUser.id);
+  }, [currentUser?.id, loadMarket]);
 
   useEffect(() => {
     if (wipe || route.kind === 'market') return;

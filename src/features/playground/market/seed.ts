@@ -99,6 +99,7 @@ export function createMarketPreviewSeed(): MarketSnapshot {
       holdings: [],
     },
     beginnerMission: 'reason',
+    adminEvents: [],
   };
   const summary = getAccountSummary(snapshot);
   const pricesAreValid = stocks.every((stock) => (

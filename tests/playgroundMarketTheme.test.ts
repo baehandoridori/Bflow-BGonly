@@ -44,7 +44,8 @@ test('preview feature only reaches browser persistence through the injected stor
   ]
     .filter((file) => /\.tsx?$/.test(file));
   const storageAdapter = 'src/features/playground/market/localStorageGateway.ts';
-  for (const file of files.filter((file) => file !== storageAdapter)) {
+  const bridgeAdapter = 'src/features/playground/market/gateway.ts';
+  for (const file of files.filter((file) => file !== storageAdapter && file !== bridgeAdapter)) {
     const source = readFileSync(file, 'utf8');
     assert.doesNotMatch(
       source,
@@ -59,5 +60,11 @@ test('preview feature only reaches browser persistence through the injected stor
   assert.doesNotMatch(
     adapter,
     /window\.electronAPI|window\.localStorage|globalThis\.localStorage|sessionStorage|indexedDB|ipcRenderer|from\s+['"]electron['"]|createClient\(|@supabase|@\/services\//i,
+  );
+  const bridge = readFileSync(bridgeAdapter, 'utf8');
+  assert.match(bridge, /window\.electronAPI/);
+  assert.doesNotMatch(
+    bridge,
+    /window\.localStorage|globalThis\.localStorage|sessionStorage|indexedDB|ipcRenderer|from\s+['"]electron['"]|createClient\(|@supabase|@\/services\//i,
   );
 });

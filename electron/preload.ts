@@ -2,6 +2,7 @@ import { contextBridge, ipcRenderer, webUtils } from 'electron';
 import type { BulkStageUpdate, BulkFieldUpdate, BulkUpdateResult } from './supabase';
 import type { CalendarTodoPatch, PersonalTodoCreateInput, PersonalTodoLabelColorKey, PersonalTodoOrderMutation, PersonalTodoPatch } from './personalTodoService';
 import type { SessionActionResult } from './sessionManager';
+import type { MarketAdminEventInput, MarketCommand, MarketRemoteState } from './marketAccountService';
 
 let canonicalSessionEpoch = 0;
 function rememberSessionEpoch(result: SessionActionResult): SessionActionResult {
@@ -294,6 +295,15 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.invoke('supabase:get-activity', opts) as Promise<Array<{ startTs: number; count: number }>>,
   supabaseGetRealtimeStatus: () =>
     ipcRenderer.invoke('supabase:get-realtime-status') as Promise<string>,
+  // ─── Playground market (canonical ownership stays in main) ──
+  marketRead: () =>
+    ipcRenderer.invoke('market:read') as Promise<MarketRemoteState>,
+  marketExecute: (command: MarketCommand) =>
+    ipcRenderer.invoke('market:execute', command) as Promise<MarketRemoteState>,
+  marketCreateAdminEvent: (input: MarketAdminEventInput) =>
+    ipcRenderer.invoke('market:create-admin-event', input) as Promise<MarketRemoteState>,
+  marketDeleteAdminEvent: (eventId: string) =>
+    ipcRenderer.invoke('market:delete-admin-event', eventId) as Promise<MarketRemoteState>,
   // ─── Personal Todos / Task Views (ownership stays in main) ──
   ensureCanonicalSession: () =>
     ipcRenderer.invoke('auth:ensure-canonical-session').then(rememberSessionEpoch),

@@ -16,6 +16,9 @@ import {
 import { normalizeSceneIdKey } from '@/utils/sceneIdKey';
 import { createUuid } from '@/utils/createUuid';
 import { createPersonalTodoPreviewStore, PERSONAL_TODO_PREVIEW_SESSION_KEY, type PersonalTodoPreviewStore } from './personalTodoPreviewStore';
+import { createMarketLocalStorageGateway } from '@/features/playground/market/localStorageGateway';
+import type { MarketPreviewGateway } from '@/features/playground/market/previewGateway';
+import type { MarketRemoteState, MarketSnapshot } from '@/features/playground/market/types';
 
 type PreviewUser = AppUser & { password: string };
 
@@ -48,6 +51,8 @@ let previewCanonicalUserId: string | null = null;
 let previewCanonicalEpoch = 0;
 let previewRememberedUserId: string | null = null;
 let previewTodoStore: PersonalTodoPreviewStore | null = null;
+let previewMarketGateway: MarketPreviewGateway | null = null;
+let previewMarketUserId: string | null = null;
 const previewTodoCommitListeners = new Set<(payload: unknown) => void>();
 
 function getPreviewTodoStore(): PersonalTodoPreviewStore | null {
@@ -60,6 +65,34 @@ function getPreviewTodoStore(): PersonalTodoPreviewStore | null {
     });
   }
   return previewTodoStore;
+}
+
+function toMarketRemoteState(snapshot: MarketSnapshot): MarketRemoteState {
+  return {
+    revision: snapshot.revision,
+    account: structuredClone(snapshot.account),
+    favoriteStockIds: [...snapshot.favoriteStockIds],
+    beginnerMission: snapshot.beginnerMission,
+    adminEvents: structuredClone(snapshot.adminEvents),
+  };
+}
+
+function getPreviewMarketGateway(): MarketPreviewGateway {
+  const user = previewCanonicalUserId
+    ? getMockUsers().find((candidate) => candidate.id === previewCanonicalUserId)
+    : null;
+  if (user?.name !== '배한솔' || user.slackId !== 'U05DFV9UAN5') {
+    throw new Error('배한솔 프리뷰 계정에서만 모의투자를 이용할 수 있어요.');
+  }
+  if (!previewMarketGateway || previewMarketUserId !== user.id) {
+    previewMarketUserId = user.id;
+    previewMarketGateway = createMarketLocalStorageGateway({
+      userId: user.id,
+      storage: window.localStorage,
+      now: () => Date.now(),
+    });
+  }
+  return previewMarketGateway;
 }
 
 function previewNoSession<T>(data: T): { ok: false; kind: 'rejected'; code: string; message: string; retryable: false } {
@@ -1080,6 +1113,18 @@ export function installDevElectronAPI(): void {
     getPresenceSnapshot: async () => ({}),
     onSupabaseStatus: noop,
     onSupabaseBroadcast: noop,
+
+    // ─── Playground market mock (same user-scoped localStorage adapter) ───
+    marketRead: async () => toMarketRemoteState(await getPreviewMarketGateway().read()),
+    marketExecute: async (command) => toMarketRemoteState(
+      await getPreviewMarketGateway().execute(command),
+    ),
+    marketCreateAdminEvent: async (input) => toMarketRemoteState(
+      await getPreviewMarketGateway().createAdminEvent(input),
+    ),
+    marketDeleteAdminEvent: async (eventId) => toMarketRemoteState(
+      await getPreviewMarketGateway().deleteAdminEvent(eventId),
+    ),
 
     // ─── Personal Todos / Task Views mock ───
     ensureCanonicalSession: async () => {
