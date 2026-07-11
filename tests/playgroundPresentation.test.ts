@@ -39,20 +39,34 @@ test('one shuffled bag shows all three games before refill', () => {
 });
 
 test('ranking is dynamic, deterministic, and never invents zero while unavailable', () => {
-  const fourth = buildPointRanking({ id: 'me', name: '한솔', points: 2480 });
+  const fourth = buildPointRanking({ id: 'me', name: '한솔', walletPoints: 2480, lifetimeEarnedPoints: 2480 });
   assert.equal(fourth.current.rank, 4);
   assert.equal(fourth.statusText, '앞 순위까지 340P 남았어요');
 
-  const first = buildPointRanking({ id: 'me', name: '한솔', points: 5000 });
+  const first = buildPointRanking({ id: 'me', name: '한솔', walletPoints: 5000, lifetimeEarnedPoints: 5000 });
   assert.equal(first.current.rank, 1);
   assert.equal(first.statusText, '현재 포인트 1위예요');
 
-  const tied = buildPointRanking({ id: 'me', name: '한솔', points: 2820 });
+  const tied = buildPointRanking({ id: 'me', name: '한솔', walletPoints: 2820, lifetimeEarnedPoints: 2820 });
   assert.match(tied.statusText, /동점이에요/);
 
-  const unavailable = buildPointRanking({ id: 'me', name: '한솔', points: null });
+  const unavailable = buildPointRanking({ id: 'me', name: '한솔', walletPoints: null, lifetimeEarnedPoints: null });
   assert.equal(unavailable.status, 'unavailable');
   assert.equal(unavailable.balanceLabel, '— P');
   assert.equal(unavailable.current.rank, null);
   assert.equal(unavailable.entries.filter((entry) => entry.points !== null).length, 4);
+});
+
+test('ranking uses lifetime earned points while the balance label uses the current wallet', () => {
+  const beforeTransfer = buildPointRanking({
+    id: 'me', name: '한솔', walletPoints: 1_000_000, lifetimeEarnedPoints: 1_000_000,
+  });
+  const afterTransfer = buildPointRanking({
+    id: 'me', name: '한솔', walletPoints: 990_000, lifetimeEarnedPoints: 1_000_000,
+  });
+
+  assert.equal(afterTransfer.current.points, beforeTransfer.current.points);
+  assert.equal(afterTransfer.current.rank, beforeTransfer.current.rank);
+  assert.equal(beforeTransfer.balanceLabel, '1,000,000 P');
+  assert.equal(afterTransfer.balanceLabel, '990,000 P');
 });

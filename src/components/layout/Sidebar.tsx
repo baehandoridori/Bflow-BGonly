@@ -277,14 +277,15 @@ export function Sidebar() {
   //   loading 중과 정상 차단(무권한)은 기존과 동일하게 숨김.
   const characterAccess = useCharacterBoardAccessState();
   const characterAccessFailed = characterAccess.error && !characterAccess.allowed;
-  const currentUserName = useAuthStore((s) => s.currentUser?.name);
+  const currentUser = useAuthStore((s) => s.currentUser);
+  const currentUserName = currentUser?.name;
   const navItems = useMemo(
     () =>
       NAV_ITEMS.filter((item) => item.id !== 'character-board' || characterAccess.allowed || characterAccessFailed)
-        .filter((item) => item.id !== 'playground' || canAccessPlayground(currentUserName))
+        .filter((item) => item.id !== 'playground' || canAccessPlayground(currentUser))
         // 휴가 탭 등: 지정된 사용자에게는 숨김
         .filter((item) => !isNavItemHiddenForUser(item.id, currentUserName)),
-    [characterAccess.allowed, characterAccessFailed, currentUserName],
+    [characterAccess.allowed, characterAccessFailed, currentUser, currentUserName],
   );
   const [accessTipShow, setAccessTipShow] = useState(false);
   const accessTipTimer = useRef<ReturnType<typeof setTimeout>>();

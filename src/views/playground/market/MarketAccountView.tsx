@@ -1,12 +1,14 @@
 import { useRef, useState } from 'react';
 import { WalletCards } from 'lucide-react';
 
-import { getAccountSummary, holdingValuePoints } from '@/features/playground/market/domain';
+import { getAccountSummary, holdingValueWon } from '@/features/playground/market/domain';
+import { formatPoints, formatShares, formatWon } from '@/features/playground/market/format';
 import { useMarketPreviewStore } from '@/features/playground/market/useMarketPreviewStore';
 import { useAuthStore } from '@/stores/useAuthStore';
 import { PointTransferDialog } from './PointTransferDialog';
 
 interface MarketAccountViewProps {
+  quoteWonByStockId: Readonly<Record<string, number>>;
   onOpenStock(stockId: string): void;
   onOpenMarketHome(): void;
 }
@@ -15,13 +17,9 @@ type TransferDirection = 'wallet-to-broker' | 'broker-to-wallet';
 
 const PENDING_ACCOUNT_MENU_ITEMS = ['거래내역', '주문내역', '수익분석', '계좌관리'] as const;
 
-function formatPoints(points: number): string {
-  return `${points.toLocaleString('ko-KR')}P`;
-}
-
-function signedPoints(points: number): string {
-  if (points === 0) return '±0P';
-  return `${points > 0 ? '+' : '-'}${formatPoints(Math.abs(points))}`;
+function signedWon(won: number): string {
+  if (won === 0) return '±0원';
+  return `${won > 0 ? '+' : '-'}${formatWon(Math.abs(won))}`;
 }
 
 function resultClass(points: number): string {
@@ -35,9 +33,17 @@ function signedRate(points: number, rate: number): string {
   return `${points > 0 ? '+' : '-'}${Math.abs(rate).toFixed(1)}% ${points > 0 ? '상승' : '하락'}`;
 }
 
-export function MarketAccountView({ onOpenStock, onOpenMarketHome }: MarketAccountViewProps) {
+export function MarketAccountView({
+  quoteWonByStockId,
+  onOpenStock,
+  onOpenMarketHome,
+}: MarketAccountViewProps) {
   const snapshot = useMarketPreviewStore((state) => state.visible);
   const mutating = useMarketPreviewStore((state) => state.mutating);
+  const loading = useMarketPreviewStore((state) => state.loading);
+  const valueRefreshRequired = useMarketPreviewStore((state) => state.valueRefreshRequired);
+  const sessionKey = useMarketPreviewStore((state) => state.sessionKey);
+  const load = useMarketPreviewStore((state) => state.load);
   const currentUser = useAuthStore((state) => state.currentUser);
   const [transferDirection, setTransferDirection] = useState<TransferDirection | null>(null);
   const depositOpenerRef = useRef<HTMLButtonElement>(null);
@@ -45,7 +51,13 @@ export function MarketAccountView({ onOpenStock, onOpenMarketHome }: MarketAccou
 
   if (!snapshot) return null;
 
-  const summary = getAccountSummary(snapshot);
+  const summary = getAccountSummary({
+    ...snapshot,
+    stocks: snapshot.stocks.map((stock) => ({
+      ...stock,
+      referencePriceWon: quoteWonByStockId[stock.id] ?? stock.referencePriceWon,
+    })),
+  });
   const accountTitle = currentUser?.name
     ? `${currentUser.name}님의 투자 계좌`
     : '내 투자 계좌';
@@ -92,21 +104,22 @@ export function MarketAccountView({ onOpenStock, onOpenMarketHome }: MarketAccou
               <p className="text-sm font-semibold text-text-secondary">총자산</p>
             </div>
             <p className="mt-2 text-4xl font-bold tabular-nums text-text-primary">
-              {formatPoints(summary.totalAssetsPoints)}
+              {formatWon(summary.totalAssetsWon)}
             </p>
 
             <div className="mt-5 flex flex-wrap items-center justify-between gap-4 border-t border-bg-border pt-5">
               <p className="min-w-0 text-sm text-text-secondary">
-                포인트 지갑 잔액{' '}
+                포인트 지갑{' '}
                 <strong className="whitespace-nowrap font-semibold tabular-nums text-text-primary">
                   {formatPoints(summary.walletPoints)}
                 </strong>
+                <span className="ml-2 whitespace-nowrap text-xs">1P = 1원</span>
               </p>
               <div className="flex shrink-0 gap-2">
                 <button
                   ref={depositOpenerRef}
                   type="button"
-                  disabled={mutating}
+                  disabled={mutating || valueRefreshRequired}
                   onClick={() => setTransferDirection('wallet-to-broker')}
                   className="min-h-11 cursor-pointer rounded-xl bg-accent px-4 py-2 text-sm font-bold text-on-accent transition-colors duration-200 hover:bg-accent/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent disabled:cursor-not-allowed disabled:opacity-50"
                 >
@@ -115,7 +128,7 @@ export function MarketAccountView({ onOpenStock, onOpenMarketHome }: MarketAccou
                 <button
                   ref={withdrawalOpenerRef}
                   type="button"
-                  disabled={mutating}
+                  disabled={mutating || valueRefreshRequired}
                   onClick={() => setTransferDirection('broker-to-wallet')}
                   className="min-h-11 cursor-pointer rounded-xl border border-bg-border px-4 py-2 text-sm font-bold text-text-primary transition-colors duration-200 hover:bg-bg-border/35 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent disabled:cursor-not-allowed disabled:opacity-50"
                 >
@@ -123,21 +136,37 @@ export function MarketAccountView({ onOpenStock, onOpenMarketHome }: MarketAccou
                 </button>
               </div>
             </div>
+            {valueRefreshRequired && (
+              <div
+                role="alert"
+                className="mt-3 rounded-xl border border-bg-border bg-bg-card px-4 py-3 text-sm text-text-secondary"
+              >
+                <p>최신 잔액을 확인한 뒤 포인트를 다시 이동할 수 있어요.</p>
+                <button
+                  type="button"
+                  disabled={loading}
+                  onClick={() => void load(sessionKey ?? undefined)}
+                  className="mt-2 min-h-10 cursor-pointer rounded-xl border border-bg-border px-3 py-2 font-semibold text-text-primary transition-colors duration-200 hover:bg-bg-border/35 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  최신 계좌 정보 다시 불러오기
+                </button>
+              </div>
+            )}
           </header>
 
           <section className="border-t border-bg-border pt-7" aria-labelledby="available-cash-heading">
             <h2 id="available-cash-heading" className="text-lg font-bold text-text-primary">
-              쓸 수 있는 포인트
+              쓸 수 있는 예수금
             </h2>
             <div className="mt-4 flex min-h-16 items-center justify-between gap-5">
               <div className="min-w-0">
-                <p className="font-semibold text-text-primary">내 포인트 예수금</p>
+                <p className="font-semibold text-text-primary">내 원화 예수금</p>
                 <p className="mt-1 text-sm leading-6 text-text-secondary">
-                  주식을 바로 살 수 있는 포인트
+                  주식을 바로 살 수 있는 원화
                 </p>
               </div>
               <p className="shrink-0 text-xl font-bold tabular-nums text-text-primary">
-                {formatPoints(summary.cashPoints)}
+                {formatWon(summary.cashWon)}
               </p>
             </div>
           </section>
@@ -151,27 +180,30 @@ export function MarketAccountView({ onOpenStock, onOpenMarketHome }: MarketAccou
                 {snapshot.account.holdings.map((holding) => {
                   const stock = snapshot.stocks.find((item) => item.id === holding.stockId);
                   if (!stock) return null;
-                  const value = holdingValuePoints(holding, stock.pricePoints);
-                  const pnl = value - holding.costBasisPoints;
-                  const rate = holding.costBasisPoints > 0
-                    ? (pnl / holding.costBasisPoints) * 100
+                  const currentPriceWon = quoteWonByStockId[holding.stockId]
+                    ?? stock.referencePriceWon;
+                  const value = holdingValueWon(holding, currentPriceWon);
+                  const pnl = value - holding.costBasisWon;
+                  const rate = holding.costBasisWon > 0
+                    ? (pnl / holding.costBasisWon) * 100
                     : 0;
                   return (
                     <button
                       key={holding.stockId}
+                      id={`account-holding-open-${holding.stockId}`}
                       type="button"
                       onClick={() => onOpenStock(holding.stockId)}
                       className="flex min-h-[72px] w-full min-w-0 cursor-pointer items-center justify-between gap-4 whitespace-normal py-4 text-left transition-colors duration-200 hover:bg-bg-border/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent"
                     >
                       <span className="min-w-0 truncate font-semibold text-text-primary">
-                        {stock.name}
+                        {stock.name} · {formatShares(holding.quantityShares)}
                       </span>
                       <span className="shrink-0 text-right">
-                        <span className="block font-semibold tabular-nums text-text-primary">
-                          {formatPoints(value)}
+                        <span className="block font-semibold tabular-nums text-text-primary transition-colors duration-200 motion-reduce:transition-none">
+                          {formatWon(value)}
                         </span>
                         <span className={`mt-1 block text-sm font-semibold tabular-nums ${resultClass(pnl)}`}>
-                          {signedPoints(pnl)} · {signedRate(pnl, rate)}
+                          {signedWon(pnl)} · {signedRate(pnl, rate)}
                         </span>
                       </span>
                     </button>
@@ -182,11 +214,12 @@ export function MarketAccountView({ onOpenStock, onOpenMarketHome }: MarketAccou
               <div className="mt-4 rounded-2xl border border-bg-border bg-bg-card p-5">
                 <p className="text-sm text-text-secondary">아직 보유한 주식이 없어요</p>
                 <button
+                  id="account-browse-stocks"
                   type="button"
                   onClick={onOpenMarketHome}
                   className="mt-4 min-h-11 cursor-pointer rounded-xl bg-accent px-4 py-2 text-sm font-bold text-on-accent transition-colors duration-200 hover:bg-accent/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
                 >
-                  시장 홈에서 주식 둘러보기
+                  종목 둘러보기
                 </button>
               </div>
             )}
@@ -200,20 +233,20 @@ export function MarketAccountView({ onOpenStock, onOpenMarketHome }: MarketAccou
             <dl className="mt-4 divide-y divide-bg-border text-sm">
               <div className="flex min-h-12 items-center justify-between gap-5 py-3 first:pt-0">
                 <dt className="text-text-secondary">이번 달 전체 결과</dt>
-                <dd className={`font-semibold tabular-nums ${resultClass(summary.monthlyTotalPnlPoints)}`}>
-                  {signedPoints(summary.monthlyTotalPnlPoints)}
+                <dd className={`font-semibold tabular-nums ${resultClass(summary.monthlyTotalPnlWon)}`}>
+                  {signedWon(summary.monthlyTotalPnlWon)}
                 </dd>
               </div>
               <div className="flex min-h-12 items-center justify-between gap-5 py-3">
                 <dt className="text-text-secondary">확정된 결과</dt>
-                <dd className={`font-semibold tabular-nums ${resultClass(summary.realizedPnlPoints)}`}>
-                  {signedPoints(summary.realizedPnlPoints)}
+                <dd className={`font-semibold tabular-nums ${resultClass(summary.realizedPnlWon)}`}>
+                  {signedWon(summary.realizedPnlWon)}
                 </dd>
               </div>
               <div className="flex min-h-12 items-center justify-between gap-5 py-3 last:pb-0">
                 <dt className="text-text-secondary">보유 중 변화</dt>
-                <dd className={`font-semibold tabular-nums ${resultClass(summary.monthlyUnrealizedChangePoints)}`}>
-                  {signedPoints(summary.monthlyUnrealizedChangePoints)}
+                <dd className={`font-semibold tabular-nums ${resultClass(summary.monthlyUnrealizedChangeWon)}`}>
+                  {signedWon(summary.monthlyUnrealizedChangeWon)}
                 </dd>
               </div>
             </dl>

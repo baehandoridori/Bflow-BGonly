@@ -1,10 +1,12 @@
 import { applyMarketCommand } from './domain.ts';
 import { createMarketPreviewSeed } from './seed.ts';
-import type { MarketCommand, MarketSnapshot } from './types';
+import type { MarketAdminEventInput, MarketCommand, MarketSnapshot } from './types';
 
 export interface MarketPreviewGateway {
   read(): Promise<MarketSnapshot>;
   execute(command: MarketCommand): Promise<MarketSnapshot>;
+  createAdminEvent(input: MarketAdminEventInput): Promise<MarketSnapshot>;
+  deleteAdminEvent(eventId: string): Promise<MarketSnapshot>;
 }
 
 export interface MarketPreviewGatewayOptions {
@@ -19,7 +21,7 @@ function wait(ms: number) {
     : new Promise<void>((resolve) => setTimeout(resolve, ms));
 }
 
-function fingerprintMarketCommand(command: MarketCommand): string {
+export function fingerprintMarketCommand(command: MarketCommand): string {
   switch (command.kind) {
     case 'favorite':
       return JSON.stringify([command.kind, command.stockId, command.wished]);
@@ -28,12 +30,69 @@ function fingerprintMarketCommand(command: MarketCommand): string {
     case 'transfer':
       return JSON.stringify([command.kind, command.direction, command.points]);
     case 'buy':
-      return JSON.stringify([command.kind, command.stockId, command.points]);
+      return JSON.stringify([
+        command.kind,
+        command.stockId,
+        command.quantityShares,
+        command.quotedPriceWon,
+        command.quotedRevision,
+      ]);
     case 'sell':
-      return JSON.stringify([command.kind, command.stockId, command.ratioBps]);
+      return JSON.stringify([
+        command.kind,
+        command.stockId,
+        command.quantityShares,
+        command.quotedPriceWon,
+        command.quotedRevision,
+      ]);
   }
   const exhaustive: never = command;
   return exhaustive;
+}
+
+export function addPreviewAdminEvent(
+  snapshot: MarketSnapshot,
+  input: MarketAdminEventInput,
+  eventId: string,
+): MarketSnapshot {
+  const stockExists = snapshot.stocks.some((stock) => stock.id === input.stockId);
+  const startsAtMs = Date.parse(input.startsAt);
+  const endsAtMs = input.endsAt === null ? null : Date.parse(input.endsAt);
+  if (
+    !stockExists
+    || !input.title.trim()
+    || !Number.isSafeInteger(input.impactBps)
+    || !Number.isFinite(startsAtMs)
+    || (endsAtMs !== null && (!Number.isFinite(endsAtMs) || endsAtMs <= startsAtMs))
+  ) {
+    throw new Error('시장 이벤트 입력을 확인해 주세요.');
+  }
+  const next = structuredClone(snapshot);
+  next.revision += 1;
+  next.adminEvents.push({
+    id: eventId,
+    stockId: input.stockId,
+    kind: input.kind,
+    title: input.title.trim(),
+    impactBps: input.impactBps,
+    startsAt: input.startsAt,
+    endsAt: input.endsAt,
+    revision: next.revision,
+  });
+  return next;
+}
+
+export function removePreviewAdminEvent(
+  snapshot: MarketSnapshot,
+  eventId: string,
+): MarketSnapshot {
+  if (!snapshot.adminEvents.some((event) => event.id === eventId)) {
+    throw new Error('삭제할 시장 이벤트를 찾지 못했어요.');
+  }
+  const next = structuredClone(snapshot);
+  next.revision += 1;
+  next.adminEvents = next.adminEvents.filter((event) => event.id !== eventId);
+  return next;
 }
 
 export function createMarketPreviewGateway(
@@ -42,6 +101,7 @@ export function createMarketPreviewGateway(
   let snapshot = createMarketPreviewSeed();
   const latencyMs = options.latencyMs ?? 180;
   const fingerprintByRequestId = new Map<string, string>();
+  let eventSequence = 0;
 
   return {
     async read() {
@@ -64,6 +124,16 @@ export function createMarketPreviewGateway(
 
       snapshot = applyMarketCommand(snapshot, command);
       fingerprintByRequestId.set(command.requestId, fingerprint);
+      return structuredClone(snapshot);
+    },
+    async createAdminEvent(input) {
+      await wait(latencyMs);
+      snapshot = addPreviewAdminEvent(snapshot, input, `preview-event-${++eventSequence}`);
+      return structuredClone(snapshot);
+    },
+    async deleteAdminEvent(eventId) {
+      await wait(latencyMs);
+      snapshot = removePreviewAdminEvent(snapshot, eventId);
       return structuredClone(snapshot);
     },
   };

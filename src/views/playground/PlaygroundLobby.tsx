@@ -14,7 +14,7 @@ export interface PlaygroundLobbyProps {
   userName: string;
   recommendation: PreviewGame;
   ranking: PointRankingModel;
-  marketCashPoints: number | null;
+  marketCashWon: number | null;
   onShuffle: () => void;
   onPlayGame: (game: PreviewGame, origin: Point) => void;
   onOpenMarket: (origin: Point) => void;
@@ -60,7 +60,7 @@ export function PlaygroundLobby(props: PlaygroundLobbyProps) {
             <PlaygroundGameCard
               key={entry.kind === 'game' ? entry.gameId : entry.id}
               entry={entry}
-              marketCashPoints={props.marketCashPoints}
+              marketCashWon={props.marketCashWon}
               onActivate={activate}
             />
           ))}

@@ -1,16 +1,18 @@
 import { ArrowLeft, RefreshCw, Sun, Moon, Database, FileSpreadsheet, CheckCircle2 } from 'lucide-react';
-import { useAppStore } from '@/stores/useAppStore';
+import { useAppStore, type ViewMode } from '@/stores/useAppStore';
 import { useDataStore } from '@/stores/useDataStore';
 import { cn } from '@/utils/cn';
 import { UserMenu } from '@/components/auth/UserMenu';
 import { NotificationBell } from '@/components/NotificationPanel';
+import { resolveHeaderTitle } from './headerTitle';
 
 interface HeaderProps {
+  activeView: ViewMode;
   onRefresh: () => void;
 }
 
-export function Header({ onRefresh }: HeaderProps) {
-  const { currentView, colorMode, toggleColorMode } = useAppStore();
+export function Header({ activeView, onRefresh }: HeaderProps) {
+  const { colorMode, toggleColorMode } = useAppStore();
   const activeDataSource = useAppStore((s) => s.activeDataSource);
   const navigationBackTarget = useAppStore((s) => s.navigationBackStack[s.navigationBackStack.length - 1] ?? null);
   const goBackNavigation = useAppStore((s) => s.goBackNavigation);
@@ -18,21 +20,7 @@ export function Header({ onRefresh }: HeaderProps) {
   const episodeTitles = useDataStore((s) => s.episodeTitles);
   const { isSyncing, lastSyncTime } = useDataStore();
 
-  const VIEW_TITLES: Record<string, string> = {
-    dashboard: '전체 현황 대시보드',
-    episode: '에피소드별 현황',
-    scenes: '씬 목록',
-    assignee: '인원별 현황',
-    calendar: '타임라인',
-    vacation: '휴가 관리',
-    playground: '배플레이그라운드',
-    settings: '설정',
-  };
-
-  // 에피소드 대시보드 모드일 때 제목 변경
-  const headerTitle = currentView === 'dashboard' && episodeDashboardEp !== null
-    ? `${episodeTitles[episodeDashboardEp] || `EP.${String(episodeDashboardEp).padStart(2, '0')}`} 대시보드`
-    : (VIEW_TITLES[currentView] ?? '');
+  const headerTitle = resolveHeaderTitle(activeView, episodeDashboardEp, episodeTitles);
 
   const lastSyncLabel = lastSyncTime
     ? `마지막 동기화: ${new Date(lastSyncTime).toLocaleTimeString('ko-KR')}`

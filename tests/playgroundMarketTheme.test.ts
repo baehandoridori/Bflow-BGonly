@@ -26,13 +26,17 @@ test('new market components do not hardcode hex colors', () => {
     'src/views/playground/market/StockDetailView.tsx',
     'src/views/playground/market/MarketPriceChart.tsx',
     'src/views/playground/market/MarketOrderPanel.tsx',
+    'src/views/playground/market/MarketOrderDialogs.tsx',
+    'src/views/playground/market/MarketMobileOrderDock.tsx',
+    'src/views/playground/market/MarketAdminPanel.tsx',
+    'src/views/playground/market/useMarketOrderController.ts',
     'src/views/playground/market/MarketAccountView.tsx',
     'src/views/playground/market/PointTransferDialog.tsx',
   ];
   for (const file of files) assert.doesNotMatch(readFileSync(file, 'utf8'), /#[0-9a-f]{3,8}\b/i, file);
 });
 
-test('preview feature cannot reach production persistence APIs', () => {
+test('preview feature only reaches browser persistence through the injected storage adapter', () => {
   const collect = (dir: string): string[] => readdirSync(dir).flatMap((name) => {
     const path = `${dir}/${name}`;
     return statSync(path).isDirectory() ? collect(path) : [path];
@@ -43,7 +47,16 @@ test('preview feature cannot reach production persistence APIs', () => {
     ...collect('src/views/playground'),
   ]
     .filter((file) => /\.tsx?$/.test(file));
-  for (const file of files) {
+  const storageAdapter = 'src/features/playground/market/localStorageGateway.ts';
+  const bridgeAdapter = 'src/features/playground/market/gateway.ts';
+  const chartPreferenceAdapter = 'src/features/playground/market/useMarketChartPreference.ts';
+  const nativeBackAdapter = 'src/features/playground/nativeBackBridge.ts';
+  for (const file of files.filter((file) => (
+    file !== storageAdapter
+    && file !== bridgeAdapter
+    && file !== chartPreferenceAdapter
+    && file !== nativeBackAdapter
+  ))) {
     const source = readFileSync(file, 'utf8');
     assert.doesNotMatch(
       source,
@@ -51,4 +64,25 @@ test('preview feature cannot reach production persistence APIs', () => {
       file,
     );
   }
+  const adapter = readFileSync(storageAdapter, 'utf8');
+  assert.match(adapter, /storage:\s*Storage/);
+  assert.match(adapter, /options\.storage\.getItem/);
+  assert.match(adapter, /options\.storage\.setItem/);
+  assert.doesNotMatch(
+    adapter,
+    /window\.electronAPI|window\.localStorage|globalThis\.localStorage|sessionStorage|indexedDB|ipcRenderer|from\s+['"]electron['"]|createClient\(|@supabase|@\/services\//i,
+  );
+  const bridge = readFileSync(bridgeAdapter, 'utf8');
+  assert.match(bridge, /window\.electronAPI/);
+  assert.doesNotMatch(
+    bridge,
+    /window\.localStorage|globalThis\.localStorage|sessionStorage|indexedDB|ipcRenderer|from\s+['"]electron['"]|createClient\(|@supabase|@\/services\//i,
+  );
+  const chartPreference = readFileSync(chartPreferenceAdapter, 'utf8');
+  assert.match(chartPreference, /bflow:playground-market:chart-style:v2/);
+  assert.match(chartPreference, /window\.localStorage/);
+  assert.doesNotMatch(chartPreference, /cashWon|holding|account/i);
+  const nativeBack = readFileSync(nativeBackAdapter, 'utf8');
+  assert.match(nativeBack, /window\.electronAPI\?\.onPlaygroundNativeBack/);
+  assert.doesNotMatch(nativeBack, /localStorage|sessionStorage|indexedDB|ipcRenderer|from\s+['"]electron['"]|createClient\(|@supabase|@\/services\//i);
 });

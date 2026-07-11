@@ -609,7 +609,7 @@ export function FeedbackHubPreviewApp() {
     <>
       <SvgIconDefs />
       <GradientBackdrop enabled intensity="normal" />
-      <MainLayout onRefresh={seedFeedbackHubPreview}>
+      <MainLayout activeView={currentView} onRefresh={seedFeedbackHubPreview}>
         {currentView === 'scenes' ? (
           <ScenesView />
         ) : (

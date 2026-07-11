@@ -26,24 +26,37 @@ const collator = new Intl.Collator('ko-KR');
 export function buildPointRanking(user: {
   id: string;
   name: string;
-  points: number | null;
+  walletPoints: number | null;
+  lifetimeEarnedPoints: number | null;
 }): PointRankingModel {
-  if (user.points === null) {
+  const balanceLabel = user.walletPoints === null
+    ? '— P'
+    : `${user.walletPoints.toLocaleString('ko-KR')} P`;
+  if (user.lifetimeEarnedPoints === null) {
     const teammates = TEAMMATES.map((entry, index) => ({
       ...entry, rank: index + 1, isCurrentUser: false,
     }));
     const current: PointRankingEntry = {
-      ...user, rank: null, isCurrentUser: true,
+      id: user.id,
+      name: user.name,
+      points: null,
+      rank: null,
+      isCurrentUser: true,
     };
     return {
       status: 'unavailable', entries: [...teammates, current], current,
-      balanceLabel: '— P', rankLabel: '순위 계산 중', statusText: '순위 계산 중',
+      balanceLabel, rankLabel: '순위 계산 중', statusText: '순위 계산 중',
     };
   }
 
   const sorted = [
     ...TEAMMATES.map((entry) => ({ ...entry, isCurrentUser: false })),
-    { ...user, points: user.points, isCurrentUser: true },
+    {
+      id: user.id,
+      name: user.name,
+      points: user.lifetimeEarnedPoints,
+      isCurrentUser: true,
+    },
   ].sort((left, right) => (
     right.points - left.points || collator.compare(left.id, right.id)
   ));
@@ -58,7 +71,7 @@ export function buildPointRanking(user: {
       : `앞 순위까지 ${(previous!.points! - current.points!).toLocaleString('ko-KR')}P 남았어요`;
   return {
     status: 'ready', entries, current,
-    balanceLabel: `${user.points.toLocaleString('ko-KR')} P`,
+    balanceLabel,
     rankLabel: `#${current.rank}`,
     statusText,
   };

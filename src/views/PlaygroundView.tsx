@@ -1,11 +1,20 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 
+import { createBackInterceptionStack } from '@/features/playground/backInterception';
 import { GAME_DEFINITIONS } from '@/features/playground/catalog';
+import {
+  createPlaygroundHistory,
+  requestPlaygroundBack,
+  type PlaygroundMarketRestoreRequest,
+} from '@/features/playground/history';
 import { advanceRecommendation, createRecommendationSession } from '@/features/playground/recommendation';
 import { buildPointRanking } from '@/features/playground/ranking';
+import { subscribePlaygroundNativeBack } from '@/features/playground/nativeBackBridge';
 import {
+  getPlaygroundRouteIdentity,
   initialPlaygroundRoute,
   navigatePlayground,
+  shouldReplacePlaygroundNavigation,
   type PlaygroundAction,
   type PlaygroundRoute,
 } from '@/features/playground/routes';
@@ -17,33 +26,146 @@ import { useMarketPreviewStore } from '@/features/playground/market/useMarketPre
 import { useAuthStore } from '@/stores/useAuthStore';
 import { ComingSoonGame } from './playground/ComingSoonGame';
 import { JbbjHouse } from './playground/JbbjHouse';
+import { PlaygroundBackProvider } from './playground/PlaygroundBackProvider';
 import { PlaygroundLobby } from './playground/PlaygroundLobby';
 import { PlaygroundShell } from './playground/PlaygroundShell';
 import { MarketRouter } from './playground/market/MarketRouter';
 
-export default function PlaygroundView() {
+interface StoredMarketSurface {
+  scrollTop: number;
+  openerId: string | null;
+}
+
+function marketScrollSelector(route: PlaygroundRoute): string | null {
+  if (route.kind !== 'market') return null;
+  return route.page.kind === 'stock'
+    ? '[data-market-scroll-container]'
+    : '[data-market-page-scroll-container]';
+}
+
+interface PlaygroundViewProps {
+  authorizedHansol: boolean;
+}
+
+export default function PlaygroundView({ authorizedHansol }: PlaygroundViewProps) {
   const [route, setRoute] = useState<PlaygroundRoute>(initialPlaygroundRoute);
   const [recommendation, setRecommendation] = useState(createRecommendationSession);
   const [wipe, setWipe] = useState<DotWipeRequest | null>(null);
+  const [marketRestoreRequest, setMarketRestoreRequest] = useState<PlaygroundMarketRestoreRequest | null>(null);
+  const historyRef = useRef(createPlaygroundHistory(initialPlaygroundRoute));
+  const routeRef = useRef<PlaygroundRoute>(initialPlaygroundRoute);
   const pendingAction = useRef<PlaygroundAction | null>(null);
   const transitionInFlight = useRef(false);
   const sequence = useRef(0);
+  const restoreSequence = useRef(0);
+  const marketSurfaceState = useRef(new Map<string, StoredMarketSurface>());
+  const backInterceptors = useRef(createBackInterceptionStack()).current;
+  const requestBackRef = useRef<() => void>(() => undefined);
   const currentUser = useAuthStore((state) => state.currentUser);
+  const currentUserId = currentUser?.id ?? null;
+  const userScopeRef = useRef(currentUserId);
   const visible = useMarketPreviewStore((state) => state.visible);
   const loadMarket = useMarketPreviewStore((state) => state.load);
   const userName = currentUser?.name.trim() || '팀원';
   const walletPoints = visible?.account.walletPoints ?? null;
-  const marketCashPoints = visible?.account.cashPoints ?? null;
+  const lifetimeEarnedPoints = visible?.account.lifetimeEarnedPoints ?? null;
+  const marketCashWon = visible?.account.cashWon ?? null;
   const ranking = useMemo(() => buildPointRanking({
     id: currentUser?.id ?? 'preview-user',
     name: userName,
-    points: walletPoints,
-  }), [currentUser?.id, userName, walletPoints]);
+    walletPoints,
+    lifetimeEarnedPoints,
+  }), [currentUser?.id, lifetimeEarnedPoints, userName, walletPoints]);
+
+  const captureMarketSurface = (targetRoute: PlaygroundRoute) => {
+    const selector = marketScrollSelector(targetRoute);
+    if (!selector) return;
+    const scroller = document.querySelector<HTMLElement>(selector);
+    const active = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    marketSurfaceState.current.set(getPlaygroundRouteIdentity(targetRoute), {
+      scrollTop: scroller?.scrollTop ?? 0,
+      openerId: active?.id || null,
+    });
+  };
+
+  const restoreRequestFor = (targetRoute: PlaygroundRoute): PlaygroundMarketRestoreRequest | null => {
+    if (targetRoute.kind !== 'market') return null;
+    const stored = marketSurfaceState.current.get(getPlaygroundRouteIdentity(targetRoute));
+    if (!stored) return null;
+    return { id: ++restoreSequence.current, ...stored };
+  };
+
+  const renderRoute = (
+    nextRoute: PlaygroundRoute,
+    restoreRequest: PlaygroundMarketRestoreRequest | null = null,
+  ) => {
+    routeRef.current = nextRoute;
+    setMarketRestoreRequest(restoreRequest);
+    setRoute(nextRoute);
+  };
+
+  const commitNavigation = (action: PlaygroundAction) => {
+    const current = historyRef.current.current();
+    captureMarketSurface(current);
+    const next = navigatePlayground(current, action);
+    if (shouldReplacePlaygroundNavigation(action, current, next)) {
+      historyRef.current.replace(next);
+    } else {
+      historyRef.current.push(next);
+    }
+    renderRoute(next);
+  };
+
+  const requestBack = () => {
+    const result = requestPlaygroundBack({
+      history: historyRef.current,
+      interceptOverlay: () => backInterceptors.interceptTop(),
+      mutating: useMarketPreviewStore.getState().mutating,
+      transitioning: transitionInFlight.current,
+      beforeNavigate: () => captureMarketSurface(historyRef.current.current()),
+    });
+    if (result.kind === 'navigated') {
+      renderRoute(result.route, restoreRequestFor(result.route));
+      return;
+    }
+    if (result.kind !== 'empty') return;
+
+    const current = historyRef.current.current();
+    const fallback = current.kind === 'house'
+      ? navigatePlayground(current, { kind: 'go-lobby' })
+      : current.kind === 'coming-soon' || current.kind === 'market'
+        ? navigatePlayground(current, { kind: 'return-to-source' })
+        : null;
+    if (!fallback) return;
+    historyRef.current.replace(fallback);
+    renderRoute(fallback, restoreRequestFor(fallback));
+  };
+  requestBackRef.current = requestBack;
 
   useEffect(() => {
-    const state = useMarketPreviewStore.getState();
-    if (!state.visible && !state.loading) void loadMarket();
-  }, [loadMarket]);
+    if (!currentUser?.id) return;
+    void loadMarket(currentUser.id);
+  }, [currentUser?.id, loadMarket]);
+
+  useEffect(() => {
+    if (userScopeRef.current === currentUserId) return;
+    userScopeRef.current = currentUserId;
+    historyRef.current = createPlaygroundHistory(initialPlaygroundRoute);
+    routeRef.current = initialPlaygroundRoute;
+    pendingAction.current = null;
+    transitionInFlight.current = false;
+    marketSurfaceState.current.clear();
+    setMarketRestoreRequest(null);
+    setWipe(null);
+    setRoute(initialPlaygroundRoute);
+  }, [currentUserId]);
+
+  useEffect(() => {
+    const dispose = subscribePlaygroundNativeBack(() => requestBackRef.current());
+    return dispose;
+  }, []);
+
+  useEffect(() => () => backInterceptors.clear(), [backInterceptors]);
 
   useEffect(() => {
     if (wipe || route.kind === 'market') return;
@@ -57,18 +179,15 @@ export default function PlaygroundView() {
   }, [route, wipe]);
 
   const move = (action: PlaygroundAction, origin?: Point) => {
-    if (wipe || transitionInFlight.current) return;
+    if (transitionInFlight.current) return;
     const resolvedOrigin = origin ?? { x: window.innerWidth / 2, y: window.innerHeight / 2 };
     const plan = getPlaygroundMovePlan(
-      route,
+      routeRef.current,
       action,
       resolvedOrigin,
     );
     if (plan.mode !== 'dot') {
-      setRoute((current) => {
-        const currentPlan = getPlaygroundMovePlan(current, action, resolvedOrigin);
-        return currentPlan.mode === 'dot' ? current : currentPlan.route;
-      });
+      commitNavigation(action);
       return;
     }
     transitionInFlight.current = true;
@@ -80,96 +199,102 @@ export default function PlaygroundView() {
   };
 
   return (
-    <section className="relative h-full overflow-hidden" aria-labelledby="playground-title">
-      <h1 id="playground-title" tabIndex={-1} className="sr-only outline-none">
-        배플레이그라운드
-      </h1>
-      {route.kind === 'lobby' && (
-        <PlaygroundShell
-          header={{
-            titleId: 'playground-lobby-title',
-            title: '배플레이그라운드',
-            description: '입장할 때마다 추천 게임이 달라집니다',
-            showHouse: true,
-            onOpenHouse: () => move({ kind: 'open-house' }),
-            ranking,
-          }}
-          surfaceKey="lobby"
-        >
-          <PlaygroundLobby
-            userName={userName}
-            recommendation={recommendation.current}
-            ranking={ranking}
-            marketCashPoints={marketCashPoints}
-            onShuffle={() => setRecommendation((current) => advanceRecommendation(current))}
-            onPlayGame={(game, origin) => move({ kind: 'open-game', game }, origin)}
-            onOpenMarket={(origin) => move({ kind: 'open-market' }, origin)}
-            onOpenHouse={() => move({ kind: 'open-house' })}
+    <PlaygroundBackProvider registry={backInterceptors}>
+      <section className="relative h-full overflow-hidden" aria-labelledby="playground-title">
+        <h1 id="playground-title" tabIndex={-1} className="sr-only outline-none">
+          배플레이그라운드
+        </h1>
+        {route.kind === 'lobby' && (
+          <PlaygroundShell
+            header={{
+              titleId: 'playground-lobby-title',
+              title: '배플레이그라운드',
+              description: '입장할 때마다 추천 게임이 달라집니다',
+              showHouse: true,
+              onOpenHouse: () => move({ kind: 'open-house' }),
+              ranking,
+            }}
+            surfaceKey="lobby"
+          >
+            <PlaygroundLobby
+              userName={userName}
+              recommendation={recommendation.current}
+              ranking={ranking}
+              marketCashWon={marketCashWon}
+              onShuffle={() => setRecommendation((current) => advanceRecommendation(current))}
+              onPlayGame={(game, origin) => move({ kind: 'open-game', game }, origin)}
+              onOpenMarket={(origin) => move({ kind: 'open-market' }, origin)}
+              onOpenHouse={() => move({ kind: 'open-house' })}
+            />
+          </PlaygroundShell>
+        )}
+        {route.kind === 'house' && (
+          <PlaygroundShell
+            header={{
+              titleId: 'playground-house-title',
+              title: 'JBBJ 하우스',
+              description: '팀 챌린지와 함께 노는 공간',
+              backLabel: '게임 로비',
+              onBack: requestBack,
+              showHouse: false,
+              ranking,
+            }}
+            surfaceKey="house"
+          >
+            <JbbjHouse
+              ranking={ranking}
+              onPlayGame={(game, origin) => move({ kind: 'open-game', game }, origin)}
+              onOpenMarket={(origin) => move({ kind: 'open-market' }, origin)}
+            />
+          </PlaygroundShell>
+        )}
+        {route.kind === 'coming-soon' && (
+          <PlaygroundShell
+            header={{
+              titleId: 'playground-game-title',
+              title: GAME_DEFINITIONS[route.game].koName,
+              description: '기록과 보상 규칙을 준비하고 있어요',
+              backLabel: route.returnTo === 'house' ? 'JBBJ 하우스' : '게임 로비',
+              onBack: requestBack,
+              showHouse: false,
+              ranking,
+            }}
+            surfaceKey={`coming-soon-${route.game}`}
+          >
+            <ComingSoonGame
+              game={GAME_DEFINITIONS[route.game]}
+              returnLabel={route.returnTo === 'house' ? 'JBBJ 하우스' : '게임 로비'}
+              onBack={requestBack}
+            />
+          </PlaygroundShell>
+        )}
+        {route.kind === 'market' && (
+          <MarketRouter
+            route={route.page}
+            authorizedHansol={authorizedHansol}
+            restoreRequest={marketRestoreRequest}
+            onNavigate={(action) => move(action)}
+            onBack={requestBack}
           />
-        </PlaygroundShell>
-      )}
-      {route.kind === 'house' && (
-        <PlaygroundShell
-          header={{
-            titleId: 'playground-house-title',
-            title: 'JBBJ 하우스',
-            description: '팀 챌린지와 함께 노는 공간',
-            backLabel: '게임 로비',
-            onBack: () => move({ kind: 'go-lobby' }),
-            showHouse: false,
-            ranking,
-          }}
-          surfaceKey="house"
-        >
-          <JbbjHouse
-            ranking={ranking}
-            onPlayGame={(game, origin) => move({ kind: 'open-game', game }, origin)}
-            onOpenMarket={(origin) => move({ kind: 'open-market' }, origin)}
+        )}
+        {wipe && (
+          <DotWipeTransition
+            request={wipe}
+            onCovered={() => {
+              const action = pendingAction.current;
+              if (action) {
+                pendingAction.current = null;
+                commitNavigation(action);
+              }
+            }}
+            onFinished={() => {
+              pendingAction.current = null;
+              transitionInFlight.current = false;
+              setWipe(null);
+            }}
           />
-        </PlaygroundShell>
-      )}
-      {route.kind === 'coming-soon' && (
-        <PlaygroundShell
-          header={{
-            titleId: 'playground-game-title',
-            title: GAME_DEFINITIONS[route.game].koName,
-            description: '기록과 보상 규칙을 준비하고 있어요',
-            backLabel: route.returnTo === 'house' ? 'JBBJ 하우스' : '게임 로비',
-            onBack: () => move({ kind: 'return-to-source' }),
-            showHouse: false,
-            ranking,
-          }}
-          surfaceKey={`coming-soon-${route.game}`}
-        >
-          <ComingSoonGame
-            game={GAME_DEFINITIONS[route.game]}
-            returnLabel={route.returnTo === 'house' ? 'JBBJ 하우스' : '게임 로비'}
-            onBack={() => move({ kind: 'return-to-source' })}
-          />
-        </PlaygroundShell>
-      )}
-      {route.kind === 'market' && (
-        <MarketRouter
-          route={route.page}
-          onNavigate={(action) => move(action)}
-          onExit={() => move({ kind: 'return-to-source' })}
-        />
-      )}
-      {wipe && (
-        <DotWipeTransition
-          request={wipe}
-          onCovered={() => {
-            if (pendingAction.current) {
-              setRoute((current) => navigatePlayground(current, pendingAction.current!));
-            }
-          }}
-          onFinished={() => {
-            pendingAction.current = null;
-            transitionInFlight.current = false;
-            setWipe(null);
-          }}
-        />
-      )}
-    </section>
+        )}
+      </section>
+    </PlaygroundBackProvider>
   );
 }

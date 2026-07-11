@@ -4,19 +4,20 @@ import {
   GAME_DEFINITIONS,
   type PlaygroundQuickEntry,
 } from '@/features/playground/catalog';
+import { formatWon } from '@/features/playground/market/format';
 import type { Point } from '@/features/playground/transition/dotWipeMath';
 import { PlaygroundGameArt } from './PlaygroundGameArt';
 import { pointFromButtonActivation } from './playgroundActivation';
 
 export interface PlaygroundGameCardProps {
   entry: PlaygroundQuickEntry;
-  marketCashPoints: number | null;
+  marketCashWon: number | null;
   onActivate: (entry: PlaygroundQuickEntry, origin: Point) => void;
 }
 
 export function PlaygroundGameCard({
   entry,
-  marketCashPoints,
+  marketCashWon,
   onActivate,
 }: PlaygroundGameCardProps) {
   const game = entry.kind === 'game' ? GAME_DEFINITIONS[entry.gameId] : null;
@@ -25,9 +26,9 @@ export function PlaygroundGameCard({
   const badge = entry.kind === 'game' ? game!.quickReward : 'OPEN';
   const detail = entry.kind === 'game'
     ? game!.quickRecord
-    : marketCashPoints === null
+    : marketCashWon === null
       ? '예수금 확인 중'
-      : `예수금 ${marketCashPoints.toLocaleString('ko-KR')} P`;
+      : `예수금 ${formatWon(marketCashWon)}`;
 
   return (
     <button

@@ -1,214 +1,204 @@
-import { useId, useState } from 'react';
+import { useMemo, useState } from 'react';
 
-import {
-  getChartGeometry,
-  getChartHoverBands,
-} from '@/features/playground/market/domain';
+import { resolveIntervalForRange } from '@/features/playground/market/chartSeries';
+import { formatWon } from '@/features/playground/market/format';
+import { MARKET_INSTRUMENT_PROFILES } from '@/features/playground/market/livePriceEngine';
+import { buildMarketDisplayCandles } from '@/features/playground/market/marketDisplaySeries';
 import type {
-  MarketPeriod,
+  MarketAdminEvent,
+  MarketBarInterval,
+  MarketChartRange,
+  MarketChartStyle,
   MarketStock,
-  MarketTrend,
-  PricePoint,
 } from '@/features/playground/market/types';
+import { MarketChartCanvas } from './MarketChartCanvas';
 
 interface MarketPriceChartProps {
   stock: MarketStock;
-  period: MarketPeriod;
-  onPeriodChange(period: MarketPeriod): void;
+  events: readonly MarketAdminEvent[];
+  nowMs: number;
+  style: MarketChartStyle;
+  interval: MarketBarInterval;
+  range: MarketChartRange;
+  onStyleChange(style: MarketChartStyle): void;
+  onIntervalChange(interval: MarketBarInterval): void;
+  onRangeChange(range: MarketChartRange): void;
 }
 
-const PERIODS: Array<{ value: MarketPeriod; label: string }> = [
+const DAY_MS = 24 * 60 * 60 * 1000;
+const KOREA_OFFSET_MS = 9 * 60 * 60 * 1000;
+
+const STYLES: ReadonlyArray<{ value: MarketChartStyle; label: string }> = [
+  { value: 'line', label: '선' },
+  { value: 'candlestick', label: '캔들' },
+];
+
+const INTERVALS: ReadonlyArray<{ value: MarketBarInterval; label: string }> = [
+  { value: '1m', label: '1분' },
+  { value: '5m', label: '5분' },
+  { value: '10m', label: '10분' },
+  { value: '15m', label: '15분' },
+  { value: '1h', label: '1시간' },
+  { value: '1d', label: '1일' },
+];
+
+const RANGES: ReadonlyArray<{ value: MarketChartRange; label: string }> = [
   { value: 'today', label: '오늘' },
   { value: 'week', label: '1주' },
   { value: 'month', label: '1개월' },
+  { value: 'six-months', label: '6개월' },
   { value: 'all', label: '전체' },
 ];
 
-const CHART_WIDTH = 720;
-const CHART_HEIGHT = 280;
-const VISUAL_PADDING = 12;
-
-function formatPoints(points: number): string {
-  return `${points.toLocaleString('ko-KR')}P`;
+function chartStartMs(range: MarketChartRange, nowMs: number): number {
+  if (range === 'today') {
+    return Math.floor((nowMs + KOREA_OFFSET_MS) / DAY_MS) * DAY_MS - KOREA_OFFSET_MS;
+  }
+  if (range === 'week') return nowMs - 7 * DAY_MS;
+  if (range === 'month') return nowMs - 30 * DAY_MS;
+  if (range === 'six-months') return nowMs - 180 * DAY_MS;
+  return nowMs - 600 * DAY_MS;
 }
 
-function trendForSeries(series: PricePoint[]): MarketTrend {
-  const first = series[0]?.pricePoints;
-  const current = series.at(-1)?.pricePoints;
-  if (first === undefined || current === undefined || first === current) return 'flat';
-  return current > first ? 'up' : 'down';
+function intervalLabel(value: MarketBarInterval): string {
+  return INTERVALS.find((item) => item.value === value)?.label ?? value;
 }
 
-function trendClass(trend: MarketTrend): string {
-  if (trend === 'up') return 'text-market-up';
-  if (trend === 'down') return 'text-market-down';
-  return 'text-market-flat';
-}
+export function MarketPriceChart({
+  stock,
+  events,
+  nowMs,
+  style,
+  interval,
+  range,
+  onStyleChange,
+  onIntervalChange,
+  onRangeChange,
+}: MarketPriceChartProps) {
+  const [announcement, setAnnouncement] = useState('');
+  const profile = MARKET_INSTRUMENT_PROFILES[stock.id];
+  const candles = useMemo(() => {
+    if (!profile) return [];
+    const builtCandles = buildMarketDisplayCandles({
+      profile,
+      startMs: chartStartMs(range, nowMs),
+      endMs: nowMs + 1,
+      nowMs,
+      events,
+      interval,
+    });
+    const latestCandle = builtCandles.at(-1);
+    if (!latestCandle) return builtCandles;
+    return [
+      ...builtCandles.slice(0, -1),
+      {
+        ...latestCandle,
+        closeWon: stock.referencePriceWon,
+        highWon: Math.max(latestCandle.highWon, stock.referencePriceWon),
+        lowWon: Math.min(latestCandle.lowWon, stock.referencePriceWon),
+      },
+    ];
+  }, [events, interval, nowMs, profile, range, stock.referencePriceWon]);
+  const startPriceWon = candles[0]?.openWon ?? stock.referencePriceWon;
+  const currentPriceWon = candles.at(-1)?.closeWon ?? stock.referencePriceWon;
 
-function trendSentence(trend: MarketTrend, start: number, current: number): string {
-  const difference = Math.abs(current - start);
-  if (trend === 'up') return `${formatPoints(difference)} 상승했어요.`;
-  if (trend === 'down') return `${formatPoints(difference)} 하락했어요.`;
-  return '가격 변화 없이 보합이에요.';
-}
+  const selectRange = (nextRange: MarketChartRange) => {
+    const effectiveInterval = resolveIntervalForRange(nextRange, interval);
+    onRangeChange(nextRange);
+    if (effectiveInterval !== interval) {
+      onIntervalChange(effectiveInterval);
+      setAnnouncement(`${RANGES.find((item) => item.value === nextRange)?.label ?? nextRange} 기간에 맞춰 ${intervalLabel(effectiveInterval)} 간격으로 바꿨어요.`);
+    }
+  };
 
-function formatHoveredTime(point: PricePoint, period: MarketPeriod): string {
-  const date = new Date(point.at);
-  if (Number.isNaN(date.getTime())) return point.at;
-  return new Intl.DateTimeFormat('ko-KR', period === 'today'
-    ? { hour: 'numeric', minute: '2-digit' }
-    : { month: 'short', day: 'numeric' }).format(date);
-}
+  const selectInterval = (requestedInterval: MarketBarInterval) => {
+    const effectiveInterval = resolveIntervalForRange(range, requestedInterval);
+    onIntervalChange(effectiveInterval);
+    setAnnouncement(effectiveInterval === requestedInterval
+      ? `${intervalLabel(effectiveInterval)} 간격으로 바꿨어요.`
+      : `선택한 기간에는 ${intervalLabel(effectiveInterval)} 간격이 가장 촘촘해요.`);
+  };
 
-export function MarketPriceChart({ stock, period, onPeriodChange }: MarketPriceChartProps) {
-  const gradientId = `market-price-${useId().replace(/:/g, '')}`;
-  const [hoveredIndex, setHoveredIndex] = useState<number | null>(null);
-  const series = stock.series[period];
-  const periodLabel = PERIODS.find((item) => item.value === period)?.label ?? period;
+  return (
+    <div>
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
+        <div>
+          <p className="text-xs font-semibold text-text-secondary">차트 모양</p>
+          <div className="mt-2 grid grid-cols-2 gap-2" aria-label="차트 모양">
+            {STYLES.map((item) => (
+              <button
+                key={item.value}
+                type="button"
+                aria-pressed={style === item.value}
+                onClick={() => onStyleChange(item.value)}
+                className="min-h-11 cursor-pointer rounded-xl border border-bg-border px-4 py-2 text-sm font-semibold text-text-secondary transition-colors duration-200 motion-reduce:transition-none hover:bg-bg-border/35 hover:text-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent aria-pressed:border-accent aria-pressed:bg-accent/10 aria-pressed:text-text-primary"
+              >
+                {item.label}
+              </button>
+            ))}
+          </div>
+        </div>
+        <dl className="flex items-end justify-between gap-6 text-sm sm:justify-end">
+          <div>
+            <dt className="text-xs text-text-secondary">기간 시작</dt>
+            <dd className="mt-1 font-semibold tabular-nums text-text-primary">{formatWon(startPriceWon)}</dd>
+          </div>
+          <div className="text-right">
+            <dt className="text-xs text-text-secondary">현재</dt>
+            <dd className="mt-1 font-semibold tabular-nums text-text-primary">{formatWon(currentPriceWon)}</dd>
+          </div>
+        </dl>
+      </div>
 
-  const tabs = (
-    <div className="grid grid-cols-4 gap-2" aria-label="가격 그래프 기간">
-      {PERIODS.map((item) => (
-        <button
-          key={item.value}
-          type="button"
-          aria-pressed={period === item.value}
-          onClick={() => {
-            setHoveredIndex(null);
-            onPeriodChange(item.value);
-          }}
-          className="min-h-11 cursor-pointer rounded-xl border border-bg-border px-2 py-2 text-sm font-semibold text-text-secondary transition-colors duration-200 hover:bg-bg-border/35 hover:text-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent aria-pressed:border-accent aria-pressed:bg-accent/10 aria-pressed:text-text-primary"
-        >
-          {item.label}
-        </button>
-      ))}
-    </div>
-  );
-
-  if (series.length === 0) {
-    return (
-      <div>
-        {tabs}
+      {candles.length > 0 ? (
+        <div className="mt-4">
+          <MarketChartCanvas stockName={stock.name} candles={candles} style={style} />
+        </div>
+      ) : (
         <div
           role="img"
-          aria-label={`${stock.name} ${periodLabel} 가격 정보가 아직 없어요.`}
+          aria-label={`${stock.name} 가격 정보가 아직 없어요.`}
           className="mt-4 flex min-h-56 items-center justify-center rounded-2xl border border-dashed border-bg-border bg-bg-primary/40 px-5 text-center text-sm text-text-secondary"
         >
           가격 정보가 아직 없어요
         </div>
-      </div>
-    );
-  }
+      )}
 
-  const rawGeometry = getChartGeometry(stock.series[period], 720, 280);
-  const geometry = rawGeometry.map((point) => ({
-    x: VISUAL_PADDING + (point.x / CHART_WIDTH) * (CHART_WIDTH - VISUAL_PADDING * 2),
-    y: VISUAL_PADDING + (point.y / CHART_HEIGHT) * (CHART_HEIGHT - VISUAL_PADDING * 2),
-  }));
-  const startPrice = series[0].pricePoints;
-  const currentPrice = series.at(-1)?.pricePoints ?? startPrice;
-  const trend = trendForSeries(series);
-  const colorClass = trendClass(trend);
-  const linePath = geometry.map((point, index) => (
-    `${index === 0 ? 'M' : 'L'} ${point.x.toFixed(2)} ${point.y.toFixed(2)}`
-  )).join(' ');
-  const areaPath = geometry.length > 1
-    ? `${linePath} L ${geometry.at(-1)!.x.toFixed(2)} ${(CHART_HEIGHT - VISUAL_PADDING).toFixed(2)} L ${geometry[0].x.toFixed(2)} ${(CHART_HEIGHT - VISUAL_PADDING).toFixed(2)} Z`
-    : '';
-  const hoveredPoint = hoveredIndex === null ? null : series[hoveredIndex];
-  const hoverBands = getChartHoverBands(geometry, CHART_WIDTH);
-  const ariaLabel = `${stock.name} ${periodLabel} 가격 그래프. 시작 가격 ${formatPoints(startPrice)}, 현재 가격 ${formatPoints(currentPrice)}. ${trendSentence(trend, startPrice, currentPrice)}`;
-
-  return (
-    <div>
-      {tabs}
-      <div className="mt-4 flex items-end justify-between gap-4 text-sm">
-        <div>
-          <p className="text-xs text-text-secondary">기간 시작 가격</p>
-          <p className="mt-1 font-semibold tabular-nums text-text-primary">{formatPoints(startPrice)}</p>
-        </div>
-        <div className="text-right">
-          <p className="text-xs text-text-secondary">현재 가격</p>
-          <p className="mt-1 font-semibold tabular-nums text-text-primary">{formatPoints(currentPrice)}</p>
-        </div>
-      </div>
-
-      <div className={`mt-3 overflow-hidden rounded-2xl border border-bg-border bg-bg-primary/40 p-2 ${colorClass}`}>
-        <svg
-          viewBox={`0 0 ${CHART_WIDTH} ${CHART_HEIGHT}`}
-          role="img"
-          aria-label={ariaLabel}
-          className="block h-auto w-full max-w-full"
-          onMouseLeave={() => setHoveredIndex(null)}
-        >
-          <title>{ariaLabel}</title>
-          <defs>
-            <linearGradient id={gradientId} x1="0" y1="0" x2="0" y2="1">
-              <stop offset="0%" stopColor="currentColor" stopOpacity="0.22" />
-              <stop offset="100%" stopColor="currentColor" stopOpacity="0" />
-            </linearGradient>
-          </defs>
-
-          {areaPath && <path d={areaPath} fill={`url(#${gradientId})`} aria-hidden="true" />}
-          {geometry.length === 1 ? (
-            <circle
-              cx={geometry[0].x}
-              cy={geometry[0].y}
-              r="6"
-              fill="currentColor"
-              aria-hidden="true"
-            />
-          ) : (
-            <path
-              d={linePath}
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="4"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              vectorEffect="non-scaling-stroke"
-              aria-hidden="true"
-            />
-          )}
-
-          {series.map((point, index) => point.newsId ? (
-            <g key={point.newsId} className="pointer-events-none text-accent-sub" aria-hidden="true">
-              <line
-                x1={geometry[index].x}
-                x2={geometry[index].x}
-                y1={VISUAL_PADDING}
-                y2={CHART_HEIGHT - VISUAL_PADDING}
-                stroke="currentColor"
-                strokeWidth="2"
-                strokeDasharray="5 6"
-                opacity="0.7"
-                vectorEffect="non-scaling-stroke"
-              />
-              <circle cx={geometry[index].x} cy={geometry[index].y} r="7" fill="currentColor" />
-            </g>
-          ) : null)}
-
-          {series.map((point, index) => (
-            <rect
-              key={`${point.at}-${index}`}
-              x={hoverBands[index].x}
-              y="0"
-              width={hoverBands[index].width}
-              height={CHART_HEIGHT}
-              fill="transparent"
-              onMouseEnter={() => setHoveredIndex(index)}
-              onPointerDown={() => setHoveredIndex(index)}
-              aria-hidden="true"
-            />
+      <div className="mt-5">
+        <p className="text-xs font-semibold text-text-secondary">간격</p>
+        <div className="mt-2 grid grid-cols-3 gap-2 sm:grid-cols-6" aria-label="가격 차트 간격">
+          {INTERVALS.map((item) => (
+            <button
+              key={item.value}
+              type="button"
+              aria-pressed={interval === item.value}
+              onClick={() => selectInterval(item.value)}
+              className="min-h-11 cursor-pointer rounded-xl border border-bg-border px-2 py-2 text-sm font-semibold text-text-secondary transition-colors duration-200 motion-reduce:transition-none hover:bg-bg-border/35 hover:text-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent aria-pressed:border-accent aria-pressed:bg-accent/10 aria-pressed:text-text-primary"
+            >
+              {item.label}
+            </button>
           ))}
-        </svg>
+        </div>
       </div>
 
-      <p className="mt-2 min-h-6 text-sm text-text-secondary" aria-live="polite">
-        {hoveredPoint
-          ? `${formatHoveredTime(hoveredPoint, period)} · ${formatPoints(hoveredPoint.pricePoints)}${hoveredPoint.newsId ? ' · 소식이 공개된 시점' : ''}`
-          : '그래프 위를 가리키면 그때의 가격을 볼 수 있어요.'}
-      </p>
+      <div className="mt-4">
+        <p className="text-xs font-semibold text-text-secondary">기간</p>
+        <div className="mt-2 grid grid-cols-3 gap-2 sm:grid-cols-5" aria-label="가격 차트 기간">
+          {RANGES.map((item) => (
+            <button
+              key={item.value}
+              type="button"
+              aria-pressed={range === item.value}
+              onClick={() => selectRange(item.value)}
+              className="min-h-11 cursor-pointer rounded-xl border border-bg-border px-2 py-2 text-sm font-semibold text-text-secondary transition-colors duration-200 motion-reduce:transition-none hover:bg-bg-border/35 hover:text-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent aria-pressed:border-accent aria-pressed:bg-accent/10 aria-pressed:text-text-primary"
+            >
+              {item.label}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <p className="sr-only" aria-live="polite">{announcement}</p>
     </div>
   );
 }

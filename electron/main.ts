@@ -21,6 +21,9 @@ import { uploadImage as storageUploadImage, deleteImage as storageDeleteImage, u
 import { registerFontProtocol, registerFontIpcHandlers } from './fontIpc';
 import { PersonalTodoService } from './personalTodoService';
 import type { PersonalTodoCreateInput, PersonalTodoOrderMutation, PersonalTodoPatch, CalendarTodoPatch, PersonalTodoLabelColorKey } from './personalTodoService';
+import { MarketAccountService } from './marketAccountService';
+import type { MarketAdminEventInput, MarketCommand } from './marketAccountService';
+import { getCanonicalMarketQuoteWon } from '../shared/playgroundMarketPrice.mjs';
 import { PersonalTodoRecoveryJournal } from './personalTodoRecoveryJournal';
 import { PersonalTodoCalendarSync, PERSONAL_TODO_GOOGLE_LINK_KEY, PERSONAL_TODO_GOOGLE_USER_KEY } from './personalTodoCalendarSync';
 import type { LinkedPersonalTodoCalendarEvent, PersonalTodoCalendarAdapter } from './personalTodoCalendarSync';
@@ -799,6 +802,18 @@ function createWindow(): void {
     },
   });
 
+  const windowForPlaygroundBack = mainWindow;
+  const handlePlaygroundAppCommand = (_event: Electron.Event, command: string) => {
+    if (command !== 'browser-backward') return;
+    if (!windowForPlaygroundBack.isDestroyed()) {
+      windowForPlaygroundBack.webContents.send('playground:native-back');
+    }
+  };
+  windowForPlaygroundBack.on('app-command', handlePlaygroundAppCommand);
+  windowForPlaygroundBack.once('closed', () => {
+    windowForPlaygroundBack.removeListener('app-command', handlePlaygroundAppCommand);
+  });
+
   // 저장된 최대화/전체화면 상태 복원
   if (b?.isMaximized) mainWindow.maximize();
   if (b?.isFullScreen) mainWindow.setFullScreen(true);
@@ -1346,6 +1361,10 @@ import {
   compensatePersonalTodoCalendarPatch as sbCompensatePersonalTodoCalendarPatch,
   readTaskViews as sbReadTaskViews,
   upsertTaskViews as sbUpsertTaskViews,
+  readPlaygroundMarketState as sbReadPlaygroundMarketState,
+  executePlaygroundMarketCommand as sbExecutePlaygroundMarketCommand,
+  createPlaygroundMarketEvent as sbCreatePlaygroundMarketEvent,
+  deletePlaygroundMarketEvent as sbDeletePlaygroundMarketEvent,
   readMemo as sbReadMemo,
   upsertMemo as sbUpsertMemo,
   readAllMemos as sbReadAllMemos,
@@ -1600,6 +1619,7 @@ const personalTodoRecoveryJournal = new PersonalTodoRecoveryJournal(
 
 let sessionManager: SessionManager;
 let personalTodoService: PersonalTodoService;
+let marketAccountService: MarketAccountService;
 const personalTodoCalendarSync = new PersonalTodoCalendarSync({
   journal: personalTodoRecoveryJournal,
   adapter: personalTodoCalendarAdapter,
@@ -1633,6 +1653,26 @@ personalTodoService = new PersonalTodoService({
   onCommit: (payload) => broadcastToAllWindows('personal-todo:commit', payload),
 });
 
+marketAccountService = new MarketAccountService({
+  getNowMs: Date.now,
+  resolveCanonicalQuote: getCanonicalMarketQuoteWon,
+  persistence: {
+    read: sbReadPlaygroundMarketState,
+    execute: sbExecutePlaygroundMarketCommand,
+    createAdminEvent: sbCreatePlaygroundMarketEvent,
+    deleteAdminEvent: sbDeletePlaygroundMarketEvent,
+  },
+  getCanonicalSession: () => {
+    const user = sessionManager?.getCurrentPayload().user;
+    return {
+      userId: sessionManager?.getCanonicalUserId() ?? null,
+      epoch: sessionManager?.getEpoch() ?? 0,
+      name: user?.name ?? null,
+      slackId: typeof user?.slackId === 'string' ? user.slackId : null,
+    };
+  },
+});
+
 sessionManager = new SessionManager({
   readUsers: async () => {
     try {
@@ -1654,9 +1694,20 @@ sessionManager = new SessionManager({
     } catch { return null; }
   },
   writeRememberedSession: writeRememberedAuthSession,
-  beginPersonalDataTransition: (userId, epoch) => personalTodoService.beginSessionTransition(userId, epoch),
-  endPersonalDataTransition: (userId, epoch) => personalTodoService.endSessionTransition(userId, epoch),
-  drainPersonalDataQueue: (userId) => personalTodoService.drainUser(userId),
+  beginPersonalDataTransition: (userId, epoch) => {
+    personalTodoService.beginSessionTransition(userId, epoch);
+    marketAccountService.beginSessionTransition(userId, epoch);
+  },
+  endPersonalDataTransition: (userId, epoch) => {
+    personalTodoService.endSessionTransition(userId, epoch);
+    marketAccountService.endSessionTransition(userId, epoch);
+  },
+  drainPersonalDataQueue: async (userId) => {
+    await Promise.all([
+      personalTodoService.drainUser(userId),
+      marketAccountService.drainUser(userId),
+    ]);
+  },
   flushCalendarJournal: () => personalTodoCalendarSync.flushJournal(),
   setActivityUser: setCanonicalActivityUser,
   broadcast: (payload) => {
@@ -2656,6 +2707,45 @@ ipcMain.handle('supabase:get-activity', async (
 // Realtime 현재 상태 getter — Codex 리뷰 #7 P2: 늦게 마운트된 렌더러가
 // 과거 onStatusChange 이벤트를 놓치지 않도록 최신 상태를 조회.
 ipcMain.handle('supabase:get-realtime-status', () => currentRealtimeStatus);
+
+// ─── Playground market IPC (renderer never supplies ownership) ───
+
+async function ensureCanonicalMarketAccess(): Promise<{ userId: string; epoch: number }> {
+  const ensured = await sessionManager.ensure();
+  const userId = sessionManager.getCanonicalUserId();
+  const epoch = sessionManager.getEpoch();
+  const user = ensured.payload.user;
+  const slackId = typeof user?.slackId === 'string' ? user.slackId : null;
+  if (
+    !ensured.ok
+    || !user
+    || !userId
+    || user.id !== userId
+    || ensured.payload.epoch !== epoch
+    || user.name !== '배한솔'
+    || slackId !== 'U05DFV9UAN5'
+  ) {
+    throw new Error('배한솔 계정에서만 모의투자를 이용할 수 있어요.');
+  }
+  return { userId, epoch };
+}
+
+ipcMain.handle('market:read', async () => {
+  await ensureCanonicalMarketAccess();
+  return marketAccountService.read();
+});
+ipcMain.handle('market:execute', async (_event, command: MarketCommand) => {
+  await ensureCanonicalMarketAccess();
+  return marketAccountService.execute(command);
+});
+ipcMain.handle('market:create-admin-event', async (_event, input: MarketAdminEventInput) => {
+  await ensureCanonicalMarketAccess();
+  return marketAccountService.createAdminEvent(input);
+});
+ipcMain.handle('market:delete-admin-event', async (_event, eventId: string) => {
+  await ensureCanonicalMarketAccess();
+  return marketAccountService.deleteAdminEvent(eventId);
+});
 
 // ─── Personal Todos IPC (main canonical session owns userId) ───
 
@@ -4735,6 +4825,7 @@ app.on('before-quit', (e) => {
   if (isQuitting) return;
   isQuitting = true;
   personalTodoService.beginQuitting();
+  marketAccountService.beginQuitting();
 
   // GCal Watch 채널 중지 (5초 타임아웃)
   const watchCleanup = gcal.stopAllWatches().catch(() => {});
@@ -4760,14 +4851,15 @@ app.on('before-quit', (e) => {
   const sheetsPending = getPendingOpsCount();
   const vacPending = getVacPendingOpsCount();
   const personalPending = personalTodoService.getPendingCount();
-  const totalPending = sheetsPending + vacPending + personalPending;
+  const marketPending = marketAccountService.getPendingCount();
+  const totalPending = sheetsPending + vacPending + personalPending + marketPending;
   // 자동 업데이트 installer 적용이 있으면 어떤 분기든 e.preventDefault + 비동기 chain 끝에 적용.
   // 기존 fire-and-forget 분기도 installer helper spawn 시점까지 대기 — race 위험 제거.
   e.preventDefault();
 
   // 메인 윈도우에 "저장 중" 알림 (pending 작업이 있는 경우만 의미 있음)
   if (totalPending > 0) {
-    console.log(`[종료] ${totalPending}개 작업 대기 중 (시트: ${sheetsPending}, 휴가: ${vacPending})... 완료 후 종료합니다.`);
+    console.log(`[종료] ${totalPending}개 작업 대기 중 (시트: ${sheetsPending}, 휴가: ${vacPending}, 모의투자: ${marketPending})... 완료 후 종료합니다.`);
     if (mainWindow && !mainWindow.isDestroyed()) {
       mainWindow.webContents.send('app:saving-before-quit', totalPending);
     }
@@ -4781,13 +4873,14 @@ app.on('before-quit', (e) => {
   (async () => {
     try {
       if (totalPending > 0) {
-        const [, sheetsDone, vacDone, personalDone] = await Promise.all([
+        const [, sheetsDone, vacDone, personalDone, marketDone] = await Promise.all([
           watchWithTimeout,
           waitForAllPendingOps(15000),
           waitForVacPendingOps(60000),
           personalTodoService.waitForIdle(15000),
+          marketAccountService.waitForIdle(15000),
         ]);
-        if (!sheetsDone || !vacDone || !personalDone) {
+        if (!sheetsDone || !vacDone || !personalDone || !marketDone) {
           console.warn('[종료] 타임아웃 — 일부 작업이 완료되지 않았을 수 있습니다');
         } else {
           console.log('[종료] 저장 완료, 앱을 종료합니다');
@@ -4796,6 +4889,7 @@ app.on('before-quit', (e) => {
         await Promise.all([
           watchWithTimeout.catch(() => { /* noop */ }),
           personalTodoService.waitForIdle(15000),
+          marketAccountService.waitForIdle(15000),
         ]);
       }
 

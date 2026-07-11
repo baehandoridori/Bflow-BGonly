@@ -7,11 +7,13 @@ import {
   getStockQuote,
   toReturnSeries,
 } from '@/features/playground/market/domain';
+import { formatWon } from '@/features/playground/market/format';
 import type { MarketStock, MarketTrend } from '@/features/playground/market/types';
 import { useMarketPreviewStore } from '@/features/playground/market/useMarketPreviewStore';
 
 export interface FavoriteStockCardProps {
   stock: MarketStock;
+  currentPriceWon: number;
   wished: boolean;
   onOpen(): void;
   onToggleFavorite(): void;
@@ -26,14 +28,28 @@ interface MarketRowsScale {
 
 interface MarketRowsScaleProviderProps {
   stocks: MarketStock[];
+  quoteWonByStockId: Readonly<Record<string, number>>;
   children: ReactNode;
 }
 
 const MarketRowsScaleContext = createContext<MarketRowsScale | null>(null);
 
-export function MarketRowsScaleProvider({ stocks, children }: MarketRowsScaleProviderProps) {
+function todaySeriesAtQuote(stock: MarketStock, currentPriceWon: number) {
+  return stock.series.today.map((point, index, points) => (
+    index === points.length - 1 ? { ...point, priceWon: currentPriceWon } : point
+  ));
+}
+
+export function MarketRowsScaleProvider({
+  stocks,
+  quoteWonByStockId,
+  children,
+}: MarketRowsScaleProviderProps) {
   const scale = useMemo<MarketRowsScale>(() => {
-    const seriesGroups = stocks.map((stock) => toReturnSeries(stock.series.today));
+    const seriesGroups = stocks.map((stock) => toReturnSeries(todaySeriesAtQuote(
+      stock,
+      quoteWonByStockId[stock.id] ?? stock.referencePriceWon,
+    )));
     const timestamps = stocks.flatMap((stock) => (
       stock.series.today.map((point) => Date.parse(point.at)).filter(Number.isFinite)
     ));
@@ -43,7 +59,7 @@ export function MarketRowsScaleProvider({ stocks, children }: MarketRowsScalePro
         ? { min: Math.min(...timestamps), max: Math.max(...timestamps) }
         : { min: 0, max: 1 },
     };
-  }, [stocks]);
+  }, [quoteWonByStockId, stocks]);
 
   return (
     <MarketRowsScaleContext.Provider value={scale}>
@@ -52,17 +68,13 @@ export function MarketRowsScaleProvider({ stocks, children }: MarketRowsScalePro
   );
 }
 
-function formatPoints(points: number): string {
-  return `${points.toLocaleString('ko-KR')}P`;
-}
-
-function quoteText(stock: MarketStock) {
-  const quote = getStockQuote(stock);
+function quoteText(stock: MarketStock, currentPriceWon: number) {
+  const quote = getStockQuote({ ...stock, referencePriceWon: currentPriceWon });
   if (quote.trend === 'up') {
     return {
       ...quote,
       marker: '▲',
-      amount: `+${formatPoints(quote.changePoints)}`,
+      amount: `+${formatWon(quote.changeWon)}`,
       rate: `+${quote.changeRate.toFixed(1)}%`,
       wording: '상승',
     };
@@ -71,7 +83,7 @@ function quoteText(stock: MarketStock) {
     return {
       ...quote,
       marker: '▼',
-      amount: `-${formatPoints(Math.abs(quote.changePoints))}`,
+      amount: `-${formatWon(Math.abs(quote.changeWon))}`,
       rate: `${quote.changeRate.toFixed(1)}%`,
       wording: '하락',
     };
@@ -79,7 +91,7 @@ function quoteText(stock: MarketStock) {
   return {
     ...quote,
     marker: '―',
-    amount: '±0P',
+    amount: '±0원',
     rate: '0.0%',
     wording: '보합',
   };
@@ -91,9 +103,12 @@ function trendClass(trend: MarketTrend): string {
   return 'text-market-flat';
 }
 
-function AccessibleSparkline({ stock }: { stock: MarketStock }) {
+function AccessibleSparkline({
+  stock,
+  currentPriceWon,
+}: Pick<FavoriteStockCardProps, 'stock' | 'currentPriceWon'>) {
   const shared = useContext(MarketRowsScaleContext);
-  const series = stock.series.today;
+  const series = todaySeriesAtQuote(stock, currentPriceWon);
   const returnSeries = toReturnSeries(series);
   const returnDomain = shared?.returnDomain ?? getSharedReturnDomain([returnSeries]);
   const parsedTimes = series.map((point) => Date.parse(point.at));
@@ -112,14 +127,14 @@ function AccessibleSparkline({ stock }: { stock: MarketStock }) {
     y: point.y,
   }));
   const points = geometry.map((point) => `${point.x.toFixed(1)},${point.y.toFixed(1)}`).join(' ');
-  const quote = quoteText(stock);
-  const first = series[0]?.pricePoints ?? stock.pricePoints;
+  const quote = quoteText(stock, currentPriceWon);
+  const first = series[0]?.priceWon ?? stock.referencePriceWon;
 
   return (
     <svg
       viewBox={`0 0 ${width} ${height}`}
       role="img"
-      aria-label={`${stock.name} 오늘 가격 그래프. ${formatPoints(first)}에서 ${formatPoints(stock.pricePoints)}로 ${quote.wording}했어요.`}
+      aria-label={`${stock.name} 오늘 가격 그래프. ${formatWon(first)}에서 ${formatWon(currentPriceWon)}로 ${quote.wording}했어요.`}
       className={`h-14 w-full min-w-28 ${trendClass(quote.trend)}`}
       preserveAspectRatio="none"
     >
@@ -166,16 +181,18 @@ function FavoriteButton({
 
 export function FavoriteStockCard({
   stock,
+  currentPriceWon,
   wished,
   onOpen,
   onToggleFavorite,
 }: FavoriteStockCardProps) {
-  const quote = quoteText(stock);
+  const quote = quoteText(stock, currentPriceWon);
   const mutating = useMarketPreviewStore((state) => state.mutating);
 
   return (
     <article className="relative min-w-0 rounded-2xl border border-bg-border bg-bg-card">
       <button
+        id={`stock-card-open-${stock.id}`}
         type="button"
         disabled={mutating}
         onClick={onOpen}
@@ -185,14 +202,14 @@ export function FavoriteStockCard({
           <span className="block truncate text-lg font-bold text-text-primary">{stock.name}</span>
           <span className="mt-1 block text-sm text-text-secondary">{stock.symbol} · {stock.character}</span>
         </span>
-        <span className="mt-5 block text-2xl font-bold tabular-nums text-text-primary">
-          {formatPoints(stock.pricePoints)}
+        <span className="mt-5 block text-2xl font-bold tabular-nums text-text-primary transition-colors duration-200 motion-reduce:transition-none">
+          {formatWon(currentPriceWon)}
         </span>
         <span className={`mt-1 block text-sm font-semibold tabular-nums ${trendClass(quote.trend)}`}>
           {quote.marker} {quote.amount} · {quote.rate} {quote.wording}
         </span>
         <span className="mt-4 block">
-          <AccessibleSparkline stock={stock} />
+          <AccessibleSparkline stock={stock} currentPriceWon={currentPriceWon} />
         </span>
         <span className="mt-4 block text-sm leading-6 text-text-secondary">
           {stock.reason}
@@ -210,11 +227,12 @@ export function FavoriteStockCard({
 
 export function StockListRow({
   stock,
+  currentPriceWon,
   wished,
   onOpen,
   onToggleFavorite,
 }: StockListRowProps) {
-  const quote = quoteText(stock);
+  const quote = quoteText(stock, currentPriceWon);
   const mutating = useMarketPreviewStore((state) => state.mutating);
 
   return (
@@ -231,15 +249,15 @@ export function StockListRow({
           <span className="mt-1 block text-sm text-text-secondary">{stock.symbol} · {stock.character}</span>
         </span>
         <span className="min-w-0">
-          <span className="block text-base font-bold tabular-nums text-text-primary">
-            {formatPoints(stock.pricePoints)}
+          <span className="block text-base font-bold tabular-nums text-text-primary transition-colors duration-200 motion-reduce:transition-none">
+            {formatWon(currentPriceWon)}
           </span>
           <span className={`mt-1 block text-sm font-semibold tabular-nums ${trendClass(quote.trend)}`}>
             {quote.marker} {quote.amount} · {quote.rate} {quote.wording}
           </span>
         </span>
         <span className="min-w-0">
-          <AccessibleSparkline stock={stock} />
+          <AccessibleSparkline stock={stock} currentPriceWon={currentPriceWon} />
         </span>
         <span className="min-w-0 text-sm leading-6 text-text-secondary">
           {stock.reason}

@@ -2,7 +2,7 @@ import { lazy, Suspense, useEffect, useCallback, useState, useRef, Component, ty
 import { createPortal } from 'react-dom';
 import { MainLayout } from '@/components/layout/MainLayout';
 import { useAppStore } from '@/stores/useAppStore';
-import { resolveAllowedView } from '@/features/playground/featureFlag';
+import { canAccessPlayground, resolveAllowedView } from '@/features/playground/featureFlag';
 import { PlaygroundEntryOverlay } from '@/features/playground/transition/PlaygroundEntryOverlay';
 import { useDataStore } from '@/stores/useDataStore';
 import { useAuthStore } from '@/stores/useAuthStore';
@@ -673,7 +673,7 @@ export default function App() {
         if (savedPrefs?.defaultView) {
           useAppStore.getState().setView(resolveAllowedView(
             savedPrefs.defaultView,
-            useAuthStore.getState().currentUser?.name,
+            useAuthStore.getState().currentUser,
           ));
         }
 
@@ -2836,7 +2836,7 @@ export default function App() {
   }, [setPendingDeepLink]);
 
   const setView = useAppStore((state) => state.setView);
-  const safeCurrentView = resolveAllowedView(currentView, currentUser?.name);
+  const safeCurrentView = resolveAllowedView(currentView, currentUser);
   useEffect(() => {
     if (safeCurrentView !== currentView) setView(safeCurrentView);
   }, [currentView, safeCurrentView, setView]);
@@ -2878,7 +2878,7 @@ export default function App() {
               />
             );
         case 'playground':
-          return <PlaygroundView />;
+          return <PlaygroundView authorizedHansol={canAccessPlayground(currentUser)} />;
         case 'settings':
           return <SettingsView />;
         default:
@@ -2994,7 +2994,7 @@ export default function App() {
     <>
       <SvgIconDefs />
       <GradientBackdrop intensity="normal" enabled={globalGradientEnabled} />
-      <MainLayout onRefresh={loadData}>{renderView()}</MainLayout>
+      <MainLayout activeView={safeCurrentView} onRefresh={loadData}>{renderView()}</MainLayout>
       <PlaygroundEntryOverlay />
       <SpotlightSearch />
       <GlobalTooltipProvider />
