@@ -2,6 +2,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { existsSync, readFileSync } from 'node:fs';
 
+import type { MarketAdminEvent } from '../src/features/playground/market/types.ts';
+
 test('stock detail puts the sticky order card in the first desktop row', () => {
   const source = readFileSync('src/views/playground/market/StockDetailView.tsx', 'utf8');
 
@@ -230,6 +232,63 @@ test('authorized Hansol alone gets the compact market admin dialog', () => {
   assert.match(panel, /adminWriteUncertain/);
   assert.match(panel, /시장 정보 다시 확인/);
   assert.match(panel, /load\(sessionKey/);
+  assert.match(panel, /selectManageableMarketAdminEvents/);
+  assert.match(panel, /row\.status === 'scheduled'/);
+  assert.match(panel, /예정/);
+  assert.match(panel, /formatMarketAdminEventStart/);
+  assert.match(panel, /시간 확인 필요/);
+  assert.match(
+    panel,
+    /manageableEvents\.map\(\(row\)[\s\S]*disabled=\{saving \|\| mutating \|\| adminWriteUncertain\}/,
+  );
+});
+
+test('admin event selector keeps active and scheduled rows, drops expired rows, and leaves invalid rows deletable', async () => {
+  const selectorPath = 'src/views/playground/market/marketAdminEventList.ts';
+  assert.equal(existsSync(selectorPath), true, 'admin event list selector must exist');
+  const {
+    formatMarketAdminEventStart,
+    selectManageableMarketAdminEvents,
+  } = await import('../src/views/playground/market/marketAdminEventList.ts');
+  const nowMs = Date.parse('2026-07-12T00:00:00.000Z');
+  const event = (
+    id: string,
+    startsAt: string,
+    endsAt: string | null,
+  ): MarketAdminEvent => ({
+    id,
+    stockId: 'jbbj',
+    kind: 'news',
+    title: id,
+    impactBps: 100,
+    startsAt,
+    endsAt,
+    revision: 1,
+  });
+  const rows = selectManageableMarketAdminEvents([
+    event('scheduled-late', '2026-07-12T03:00:00.000Z', '2026-07-12T04:00:00.000Z'),
+    event('expired', '2026-07-11T20:00:00.000Z', '2026-07-12T00:00:00.000Z'),
+    event('invalid-start', 'not-a-date', null),
+    event('active-recent', '2026-07-11T23:00:00.000Z', '2026-07-12T01:00:00.000Z'),
+    event('scheduled-early', '2026-07-12T01:00:00.000Z', null),
+    event('active-old', '2026-07-11T22:00:00.000Z', null),
+    event('invalid-end', '2026-07-12T02:00:00.000Z', 'bad-end'),
+  ], nowMs);
+
+  assert.deepEqual(rows.map((row) => [row.event.id, row.status]), [
+    ['active-old', 'active'],
+    ['active-recent', 'active'],
+    ['scheduled-early', 'scheduled'],
+    ['scheduled-late', 'scheduled'],
+    ['invalid-end', 'invalid'],
+    ['invalid-start', 'invalid'],
+  ]);
+  assert.equal(rows.some((row) => row.event.id === 'expired'), false);
+  const scheduled = rows.find((row) => row.event.id === 'scheduled-early');
+  assert.ok(scheduled && scheduled.startsAtMs !== null);
+  assert.match(formatMarketAdminEventStart(scheduled.startsAtMs), /\d{1,2}:\d{2}/);
+  assert.equal(formatMarketAdminEventStart(Number.NaN), '시간 확인 필요');
+  assert.equal(formatMarketAdminEventStart(Number.MAX_VALUE), '시간 확인 필요');
 });
 
 test('market admin form enforces halt end-or-indefinite and preserves signed impact', async () => {

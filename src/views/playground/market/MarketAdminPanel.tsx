@@ -13,6 +13,10 @@ import {
   toLocalDateTimeInput,
   type MarketAdminEventDraft,
 } from './marketAdminEventForm';
+import {
+  formatMarketAdminEventStart,
+  selectManageableMarketAdminEvents,
+} from './marketAdminEventList';
 
 interface MarketAdminPanelProps {
   authorizedHansol: boolean;
@@ -52,12 +56,6 @@ function draftFromPreset(preset: AdminPreset, stockId: string): MarketAdminEvent
   };
 }
 
-function eventIsActive(startsAt: string, endsAt: string | null, nowMs: number): boolean {
-  const startMs = Date.parse(startsAt);
-  const endMs = endsAt === null ? Number.POSITIVE_INFINITY : Date.parse(endsAt);
-  return Number.isFinite(startMs) && !Number.isNaN(endMs) && startMs <= nowMs && nowMs < endMs;
-}
-
 export function MarketAdminPanel({ authorizedHansol }: MarketAdminPanelProps) {
   const snapshot = useMarketPreviewStore((state) => state.visible);
   const mutating = useMarketPreviewStore((state) => state.mutating);
@@ -79,9 +77,7 @@ export function MarketAdminPanel({ authorizedHansol }: MarketAdminPanelProps) {
 
   if (!authorizedHansol) return null;
   if (!snapshot) return null;
-  const activeEvents = snapshot.adminEvents.filter((event) => (
-    eventIsActive(event.startsAt, event.endsAt, Date.now())
-  ));
+  const manageableEvents = selectManageableMarketAdminEvents(snapshot.adminEvents, Date.now());
 
   const selectPreset = (preset: AdminPreset) => {
     setDraft(draftFromPreset(preset, draft.stockId));
@@ -289,30 +285,40 @@ export function MarketAdminPanel({ authorizedHansol }: MarketAdminPanelProps) {
         </form>
 
         <section className="mt-6 border-t border-bg-border pt-5" aria-labelledby="active-market-events-heading">
-          <h3 id="active-market-events-heading" className="text-sm font-bold text-text-primary">현재 적용 중</h3>
-          {activeEvents.length > 0 ? (
+          <h3 id="active-market-events-heading" className="text-sm font-bold text-text-primary">적용 중 · 예정</h3>
+          {manageableEvents.length > 0 ? (
             <ul className="mt-3 space-y-2">
-              {activeEvents.map((event) => (
-                <li key={event.id} className="flex min-w-0 flex-col items-stretch justify-between gap-3 rounded-xl bg-bg-primary/45 p-3 sm:flex-row sm:items-center">
-                  <span className="min-w-0">
-                    <span className="block truncate text-sm font-semibold text-text-primary">{event.title}</span>
-                    <span className="mt-1 block text-xs text-text-secondary">{event.kind} · {event.impactBps > 0 ? '+' : ''}{event.impactBps}bp</span>
-                  </span>
-                  <button
-                    type="button"
-                    disabled={saving || mutating || adminWriteUncertain}
-                    onClick={() => void remove(event.id)}
-                    className="inline-flex min-h-11 w-full cursor-pointer items-center justify-center gap-2 rounded-xl border border-bg-border px-3 py-2 text-xs font-semibold text-text-secondary transition-colors duration-200 motion-reduce:transition-none hover:bg-bg-border/35 hover:text-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent disabled:cursor-not-allowed disabled:opacity-50 sm:w-auto sm:shrink-0"
-                    aria-label={`${event.title} 효과 종료 및 기록 삭제`}
-                  >
-                    <Trash2 aria-hidden="true" size={16} />
-                    효과 종료 · 기록도 삭제
-                  </button>
-                </li>
-              ))}
+              {manageableEvents.map((row) => {
+                const event = row.event;
+                return (
+                  <li key={event.id} className="flex min-w-0 flex-col items-stretch justify-between gap-3 rounded-xl bg-bg-primary/45 p-3 sm:flex-row sm:items-center">
+                    <span className="min-w-0">
+                      <span className="block truncate text-sm font-semibold text-text-primary">{event.title}</span>
+                      <span className="mt-1 block text-xs font-semibold text-text-primary">
+                        {row.status === 'active'
+                          ? '적용 중'
+                          : row.status === 'scheduled' && row.startsAtMs !== null
+                            ? `예정 · ${formatMarketAdminEventStart(row.startsAtMs)}`
+                            : '시간 확인 필요'}
+                      </span>
+                      <span className="mt-1 block text-xs text-text-secondary">{event.kind} · {event.impactBps > 0 ? '+' : ''}{event.impactBps}bp</span>
+                    </span>
+                    <button
+                      type="button"
+                      disabled={saving || mutating || adminWriteUncertain}
+                      onClick={() => void remove(event.id)}
+                      className="inline-flex min-h-11 w-full cursor-pointer items-center justify-center gap-2 rounded-xl border border-bg-border px-3 py-2 text-xs font-semibold text-text-secondary transition-colors duration-200 motion-reduce:transition-none hover:bg-bg-border/35 hover:text-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent disabled:cursor-not-allowed disabled:opacity-50 sm:w-auto sm:shrink-0"
+                      aria-label={`${event.title} 효과 종료 및 기록 삭제`}
+                    >
+                      <Trash2 aria-hidden="true" size={16} />
+                      효과 종료 · 기록도 삭제
+                    </button>
+                  </li>
+                );
+              })}
             </ul>
           ) : (
-            <p className="mt-3 text-sm text-text-secondary">현재 적용 중인 이벤트가 없어요.</p>
+            <p className="mt-3 text-sm text-text-secondary">적용 중이거나 예정된 이벤트가 없어요.</p>
           )}
         </section>
       </MarketActionDialog>
