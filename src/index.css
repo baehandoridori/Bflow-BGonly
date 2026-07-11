@@ -108,6 +108,10 @@
   --color-text-secondary: 139 141 163;
   --color-accent: 108 92 231;
   --color-accent-sub: 162 155 254;
+  --color-market-up: 244 124 103;
+  --color-market-down: 100 160 235;
+  --color-market-flat: 157 163 173;
+  --color-market-news: 164 142 255;
 
   /* 시멘틱: 오버레이/모달 배경 */
   --color-overlay: 0 0 0;
@@ -183,6 +187,10 @@
   --color-shadow: 0 0 0;
   --shadow-alpha: 0.12;
   --color-on-accent: 255 255 255;
+  --color-market-up: 174 52 40;
+  --color-market-down: 47 111 187;
+  --color-market-flat: 92 99 110;
+  --color-market-news: 103 80 197;
   /* 라이트 모드 길이 변경 색 (대비 강화) */
   --color-length-up: 5 150 105;      /* #059669 emerald-600 */
   --color-length-down: 220 38 38;     /* #DC2626 red-600 */
