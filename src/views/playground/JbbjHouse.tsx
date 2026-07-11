@@ -75,6 +75,7 @@ export function JbbjHouse({ ranking, onPlayGame, onOpenMarket }: JbbjHouseProps)
           <ol>
             {podium.map((entry) => (
               <li key={entry.id} className={entry.rank === 1 ? 'is-first' : ''}>
+                <span className="sr-only">{entry.rank}위</span>
                 <span aria-hidden="true">{entry.name.slice(0, 1)}</span>
                 <b>{entry.name}</b>
                 <small>{entry.points!.toLocaleString('ko-KR')} P</small>

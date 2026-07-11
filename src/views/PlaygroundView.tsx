@@ -4,7 +4,6 @@ import { GAME_DEFINITIONS } from '@/features/playground/catalog';
 import { advanceRecommendation, createRecommendationSession } from '@/features/playground/recommendation';
 import { buildPointRanking } from '@/features/playground/ranking';
 import {
-  getPlaygroundReturnSurface,
   initialPlaygroundRoute,
   navigatePlayground,
   type PlaygroundAction,
@@ -12,7 +11,7 @@ import {
 } from '@/features/playground/routes';
 import type { Point } from '@/features/playground/transition/dotWipeMath';
 import { DotWipeTransition } from '@/features/playground/transition/DotWipeTransition';
-import { getPlaygroundNavigationTransition } from '@/features/playground/transition/playgroundTransitionPolicy';
+import { getPlaygroundMovePlan } from '@/features/playground/transition/playgroundTransitionPolicy';
 import type { DotWipeRequest } from '@/features/playground/transition/usePlaygroundEntryStore';
 import { useMarketPreviewStore } from '@/features/playground/market/useMarketPreviewStore';
 import { useAuthStore } from '@/stores/useAuthStore';
@@ -58,24 +57,30 @@ export default function PlaygroundView() {
   }, [route, wipe]);
 
   const move = (action: PlaygroundAction, origin?: Point) => {
-    const transition = getPlaygroundNavigationTransition(action);
-    if (transition.mode !== 'dot') {
-      setRoute((current) => navigatePlayground(current, action));
+    if (wipe || transitionInFlight.current) return;
+    const resolvedOrigin = origin ?? { x: window.innerWidth / 2, y: window.innerHeight / 2 };
+    const plan = getPlaygroundMovePlan(
+      route,
+      action,
+      resolvedOrigin,
+    );
+    if (plan.mode !== 'dot') {
+      setRoute((current) => {
+        const currentPlan = getPlaygroundMovePlan(current, action, resolvedOrigin);
+        return currentPlan.mode === 'dot' ? current : currentPlan.route;
+      });
       return;
     }
-    if (wipe || transitionInFlight.current) return;
     transitionInFlight.current = true;
     pendingAction.current = action;
     setWipe({
       id: ++sequence.current,
-      origin: origin ?? { x: window.innerWidth / 2, y: window.innerHeight / 2 },
-      target: transition.target,
-      returnTo: getPlaygroundReturnSurface(route),
+      ...plan.request,
     });
   };
 
   return (
-    <section className="relative h-full overflow-hidden bg-bg-primary text-text-primary" aria-labelledby="playground-title">
+    <section className="relative h-full overflow-hidden" aria-labelledby="playground-title">
       <h1 id="playground-title" tabIndex={-1} className="sr-only outline-none">
         배플레이그라운드
       </h1>

@@ -1,4 +1,12 @@
-import type { PlaygroundAction, PreviewGame } from '../routes';
+import {
+  getPlaygroundReturnSurface,
+  navigatePlayground,
+  type PlaygroundAction,
+  type PlaygroundReturnSurface,
+  type PlaygroundRoute,
+  type PreviewGame,
+} from '../routes.ts';
+import type { Point } from './dotWipeMath';
 
 export type DotWipeTarget = 'playground-entry' | PreviewGame | 'market';
 
@@ -13,6 +21,17 @@ export type PlaygroundNavigationTransition =
   | { mode: 'dot'; target: Exclude<DotWipeTarget, 'playground-entry'> }
   | { mode: 'surface' }
   | { mode: 'none' };
+
+export type PlaygroundMovePlan =
+  | {
+    mode: 'dot';
+    request: {
+      origin: Point;
+      target: Exclude<DotWipeTarget, 'playground-entry'>;
+      returnTo: PlaygroundReturnSurface;
+    };
+  }
+  | { mode: 'surface' | 'none'; route: PlaygroundRoute };
 
 const PALETTE = { cover: '#07090d', text: '#ffffff', accent: '#45e0b5' } as const;
 
@@ -46,4 +65,26 @@ export function getPlaygroundNavigationTransition(
     return { mode: 'surface' };
   }
   return { mode: 'none' };
+}
+
+export function getPlaygroundMovePlan(
+  route: PlaygroundRoute,
+  action: PlaygroundAction,
+  origin: Point,
+): PlaygroundMovePlan {
+  const transition = getPlaygroundNavigationTransition(action);
+  if (transition.mode === 'dot') {
+    return {
+      mode: 'dot',
+      request: {
+        origin,
+        target: transition.target,
+        returnTo: getPlaygroundReturnSurface(route),
+      },
+    };
+  }
+  return {
+    mode: transition.mode,
+    route: navigatePlayground(route, action),
+  };
 }

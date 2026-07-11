@@ -14,6 +14,7 @@ import {
   originFromRect,
 } from '../src/features/playground/transition/dotWipeMath.ts';
 import {
+  getPlaygroundMovePlan,
   getDotWipePresentation,
   getPlaygroundNavigationTransition,
 } from '../src/features/playground/transition/playgroundTransitionPolicy.ts';
@@ -49,6 +50,59 @@ test('only game and market entry use target-specific dot wipes', () => {
     mode: 'dot', target: 'market',
   });
   assert.deepEqual(getPlaygroundNavigationTransition({ kind: 'open-account' }), { mode: 'none' });
+});
+
+test('house game entry produces one atomic dot request for its source', () => {
+  const origin = { x: 73, y: 91 };
+
+  assert.deepEqual(
+    getPlaygroundMovePlan(
+      { kind: 'house' },
+      { kind: 'open-game', game: 'tetris' },
+      origin,
+    ),
+    {
+      mode: 'dot',
+      request: { origin, target: 'tetris', returnTo: 'house' },
+    },
+  );
+});
+
+test('house entry and source return produce immediate surface routes', () => {
+  assert.deepEqual(
+    getPlaygroundMovePlan(
+      { kind: 'lobby' },
+      { kind: 'open-house' },
+      { x: 0, y: 0 },
+    ),
+    { mode: 'surface', route: { kind: 'house' } },
+  );
+  assert.deepEqual(
+    getPlaygroundMovePlan(
+      { kind: 'coming-soon', game: 'snake', returnTo: 'house' },
+      { kind: 'return-to-source' },
+      { x: 0, y: 0 },
+    ),
+    { mode: 'surface', route: { kind: 'house' } },
+  );
+});
+
+test('market internal movement skips the dot and preserves its return surface', () => {
+  assert.deepEqual(
+    getPlaygroundMovePlan(
+      { kind: 'market', page: { kind: 'home' }, returnTo: 'house' },
+      { kind: 'open-stock', stockId: 'jbbj' },
+      { x: 0, y: 0 },
+    ),
+    {
+      mode: 'none',
+      route: {
+        kind: 'market',
+        page: { kind: 'stock', stockId: 'jbbj' },
+        returnTo: 'house',
+      },
+    },
+  );
 });
 
 test('dot target copy and palette are exact', () => {
@@ -122,12 +176,34 @@ test('entry request atomically stores origin, target and return surface', () => 
   assert.equal(usePlaygroundEntryStore.getState().active, null);
 });
 
-test('Playground controller atomically captures target and return surface for dot requests', () => {
+test('Playground controller consumes the executable move plan for dot requests', () => {
   const source = readFileSync('src/views/PlaygroundView.tsx', 'utf8');
-  assert.match(source, /getPlaygroundNavigationTransition/);
-  assert.match(source, /getPlaygroundReturnSurface/);
-  assert.match(source, /target:\s*transition\.target/);
-  assert.match(source, /returnTo:\s*getPlaygroundReturnSurface\(route\)/);
+  const moveBody = source.match(
+    /const move = \(action: PlaygroundAction, origin\?: Point\) => \{([\s\S]*?)\n  \};/,
+  )?.[1] ?? '';
+
+  assert.match(source, /getPlaygroundMovePlan/);
+  assert.match(source, /\.\.\.plan\.request/);
+  assert.match(source, /pendingAction\.current = action/);
+  assert.match(source, /transitionInFlight\.current = true/);
+  assert.match(
+    moveBody,
+    /setRoute\(\(current\) => \{[\s\S]*getPlaygroundMovePlan\(\s*current,/,
+  );
+  assert.match(moveBody, /if \(wipe \|\| transitionInFlight\.current\) return;/);
+  assert.ok(
+    moveBody.indexOf('if (wipe || transitionInFlight.current) return;')
+      < moveBody.indexOf('getPlaygroundMovePlan('),
+    'the in-flight lock must reject every navigation mode before planning',
+  );
+  assert.match(
+    source,
+    /onCovered=\{\(\) => \{[\s\S]*pendingAction\.current[\s\S]*navigatePlayground/,
+  );
+  assert.match(
+    source,
+    /onFinished=\{\(\) => \{\s*pendingAction\.current = null;\s*transitionInFlight\.current = false;\s*setWipe\(null\);/,
+  );
 });
 
 test('a hidden window fast-forwards instead of abandoning an active overlay', () => {

@@ -34,7 +34,7 @@ export function PlaygroundLobby(props: PlaygroundLobbyProps) {
       role="region"
       aria-label="게임 로비와 JBBJ 하우스"
     >
-      <main className="pg-lobby__main">
+      <section className="pg-lobby__main">
         <header className="pg-welcome">
           <div>
             <small>PLAY · REST · COMPETE</small>
@@ -65,7 +65,7 @@ export function PlaygroundLobby(props: PlaygroundLobbyProps) {
             />
           ))}
         </div>
-      </main>
+      </section>
       <PlaygroundRankingRail ranking={props.ranking} onOpenHouse={props.onOpenHouse} />
     </div>
   );

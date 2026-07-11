@@ -71,6 +71,8 @@ test('A lobby keeps the approved hero, four quick cards, ranking rail and non-ne
   const css = readFileSync('src/views/playground/playground.css', 'utf8');
 
   assert.match(lobby, /data-pg-lobby/);
+  assert.match(lobby, /<section className="pg-lobby__main">/);
+  assert.doesNotMatch(lobby, /<main\b/);
   assert.match(lobby, /QUICK_ENTRIES\.map/);
   assert.match(hero, /<section[^>]*data-pg-hero/);
   assert.match(hero, /바로 플레이/);
@@ -95,6 +97,10 @@ test('only PlaygroundView may read auth and market stores', () => {
     'src/views/playground/PlaygroundRankingRail.tsx',
     'src/views/playground/PlaygroundGameArt.tsx',
     'src/views/playground/playgroundActivation.ts',
+    'src/views/playground/PlaygroundShell.tsx',
+    'src/views/playground/PlaygroundHeader.tsx',
+    'src/views/playground/JbbjHouse.tsx',
+    'src/views/playground/ComingSoonGame.tsx',
   ]) {
     assert.equal(existsSync(file), true, `${file} must exist`);
     const source = readFileSync(file, 'utf8');
@@ -162,6 +168,8 @@ test('C house restores challenge, podium and exactly five dock entries', async (
   assert.match(house, /TEAM CHALLENGE/);
   assert.match(house, /68,400/);
   assert.match(house, /data-pg-podium/);
+  assert.match(house, /\[rankedPodium\[1\], rankedPodium\[0\], rankedPodium\[2\]\]/);
+  assert.match(house, /<span className="sr-only">\{entry\.rank\}위<\/span>/);
   assert.match(house, /HOUSE_DOCK_ENTRIES\.map/);
   assert.match(house, /data-pg-dock-entry/);
   assert.match(house, /프리뷰 챌린지/);
@@ -232,6 +240,7 @@ test('PlaygroundView wires the approved lobby through the store-aware root only'
 
   assert.match(source, /useAuthStore/);
   assert.match(source, /useMarketPreviewStore/);
+  assert.match(source, /currentUser\?\.name\.trim\(\) \|\| '팀원'/);
   assert.match(source, /useState\(createRecommendationSession\)/);
   assert.match(source, /advanceRecommendation/);
   assert.match(source, /buildPointRanking/);
@@ -247,4 +256,14 @@ test('PlaygroundView wires the approved lobby through the store-aware root only'
   assert.match(source, /<ComingSoonGame/);
   assert.match(source, /<MarketRouter/);
   assert.doesNotMatch(recommendation, /export function pickRecommendation/);
+});
+
+test('Playground root leaves theme ownership to the local shell and market surface', () => {
+  const source = readFileSync('src/views/PlaygroundView.tsx', 'utf8');
+  const rootClass = source.match(/return \(\s*<section className="([^"]+)"/)?.[1] ?? '';
+
+  assert.notEqual(rootClass, '');
+  assert.doesNotMatch(rootClass, /\bbg-bg-primary\b|\btext-text-primary\b/);
+  assert.match(source, /<PlaygroundShell/);
+  assert.match(source, /<MarketRouter/);
 });

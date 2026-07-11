@@ -124,6 +124,8 @@ test('destination returns preserve their source while lobby and house cards reta
   const comingSoon = readFileSync('src/views/playground/ComingSoonGame.tsx', 'utf8');
   const marketNav = readFileSync('src/views/playground/market/MarketNav.tsx', 'utf8');
 
+  assert.match(playground, /getPlaygroundMovePlan/);
+  assert.match(playground, /\.\.\.plan\.request/);
   assert.match(playground, /route\.kind === 'house'[\s\S]*?onBack:\s*\(\) => move\(\{ kind: 'go-lobby' \}\)/);
   assert.match(playground, /returnLabel=\{route\.returnTo === 'house' \? 'JBBJ 하우스' : '게임 로비'\}/);
   assert.match(playground, /onBack=\{\(\) => move\(\{ kind: 'return-to-source' \}\)\}/);
