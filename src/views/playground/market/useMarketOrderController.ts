@@ -30,6 +30,7 @@ export interface FrozenMarketOrder {
   side: MarketOrderSide;
   quantityShares: number;
   quotedPriceWon: number;
+  quotedRevision: number;
   estimatedTotalWon: number;
   availableCashWon: number;
   availableShares: number;
@@ -87,6 +88,7 @@ export interface MarketOrderController {
   controlsDisabled: boolean;
   confirmDisabled: boolean;
   pendingResolution: boolean;
+  refreshRequired: boolean;
   submitting: boolean;
   validation: string | null;
   error: string | null;
@@ -134,6 +136,7 @@ export function freezeMarketOrder({
     side,
     quantityShares,
     quotedPriceWon,
+    quotedRevision: snapshot.revision,
     estimatedTotalWon: safeOrderTotal(quantityShares, quotedPriceWon),
     availableCashWon: snapshot.account.cashWon,
     availableShares,
@@ -160,6 +163,7 @@ export function frozenOrdersMatch(left: FrozenMarketOrder, right: FrozenMarketOr
   return left.side === right.side
     && left.quantityShares === right.quantityShares
     && left.quotedPriceWon === right.quotedPriceWon
+    && left.quotedRevision === right.quotedRevision
     && left.estimatedTotalWon === right.estimatedTotalWon
     && left.availableCashWon === right.availableCashWon
     && left.availableShares === right.availableShares;
@@ -176,6 +180,7 @@ function frozenOrderCommand(
     stockId,
     quantityShares: frozen.quantityShares,
     quotedPriceWon: frozen.quotedPriceWon,
+    quotedRevision: frozen.quotedRevision,
   };
 }
 
@@ -202,6 +207,7 @@ export function useMarketOrderController({
   const mutating = useMarketPreviewStore((state) => state.mutating);
   const loading = useMarketPreviewStore((state) => state.loading);
   const pendingValueCommand = useMarketPreviewStore((state) => state.pendingValueCommand);
+  const valueRefreshRequired = useMarketPreviewStore((state) => state.valueRefreshRequired);
   const sessionKey = useMarketPreviewStore((state) => state.sessionKey);
   const storeError = useMarketPreviewStore((state) => state.error);
   const load = useMarketPreviewStore((state) => state.load);
@@ -250,18 +256,21 @@ export function useMarketOrderController({
     );
   }, [currentPriceWon, frozenPreview, halted, snapshot, stock]);
   const pendingResolution = pendingOrderUncertain;
+  const refreshRequired = valueRefreshRequired;
   const pendingCommandMismatch = pendingValueCommand !== null
     && (pendingOrder === null
       || !sameMarketValueCommand(pendingValueCommand, pendingOrder.command));
   const controlsDisabled = mutating
     || submitting
     || pendingValueCommand !== null
+    || valueRefreshRequired
     || !snapshot
     || !stock;
   const confirmDisabled = mutating
     || submitting
     || loading
     || pendingCommandMismatch
+    || valueRefreshRequired
     || (pendingOrder === null && halted);
 
   const clearFeedback = () => {
@@ -433,8 +442,8 @@ export function useMarketOrderController({
   };
 
   const close = (): boolean => {
-    if (mutating || submitting || loading || pendingOrder || pendingValueCommand) {
-      setLocalError(pendingOrder || pendingValueCommand
+    if (mutating || submitting || loading || pendingOrder || pendingValueCommand || valueRefreshRequired) {
+      setLocalError(pendingOrder || pendingValueCommand || valueRefreshRequired
         ? '이전 주문 결과를 확인하거나 시장 정보를 다시 불러온 뒤 닫아 주세요.'
         : '주문 저장이 끝날 때까지 잠시 기다려 주세요.');
       return false;
@@ -447,13 +456,13 @@ export function useMarketOrderController({
   };
 
   const reloadPending = async () => {
-    if (!pendingOrder || mutating || submitting || loading) return;
+    if ((!pendingOrder && !valueRefreshRequired) || mutating || submitting || loading) return;
     setSubmitting(true);
     setLocalError(null);
     await load(sessionKey ?? undefined);
     setSubmitting(false);
     const latestState = useMarketPreviewStore.getState();
-    if (latestState.pendingValueCommand !== null) {
+    if (latestState.pendingValueCommand !== null || latestState.valueRefreshRequired) {
       setLocalError(latestState.error ?? '시장 정보를 다시 불러오지 못했어요.');
       return;
     }
@@ -522,6 +531,7 @@ export function useMarketOrderController({
     controlsDisabled,
     confirmDisabled,
     pendingResolution,
+    refreshRequired,
     submitting,
     validation,
     error: localError ?? storeError,

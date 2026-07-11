@@ -24,6 +24,7 @@ export const MARKET_TRADING_HALTED_MESSAGE = '현재 거래가 정지되어 주�
 export const ADMIN_WRITE_UNCERTAIN_MESSAGE = '저장 결과를 확인할 수 없어 같은 작업을 다시 할 수 없어요. 시장 정보를 다시 불러와 확인해 주세요.';
 export const VALUE_WRITE_AMBIGUOUS_MESSAGE = '거래 결과를 확인하지 못했어요. 같은 요청으로 결과를 다시 확인하거나 시장 정보를 다시 불러와 주세요.';
 export const VALUE_PENDING_BLOCK_MESSAGE = '이전 거래 결과를 먼저 확인해야 새 거래를 시작할 수 있어요.';
+export const VALUE_REFRESH_REQUIRED_MESSAGE = '최신 시장 정보를 다시 불러오기 전에는 새 거래를 시작할 수 없어요.';
 
 function errorText(error: unknown): string {
   if (error instanceof Error) return error.message;
@@ -83,6 +84,7 @@ interface MarketPreviewState {
   loading: boolean;
   mutating: boolean;
   adminWriteUncertain: boolean;
+  valueRefreshRequired: boolean;
   pendingValueCommand: MarketValueCommand | null;
   error: string | null;
   sessionKey: string | null;
@@ -104,6 +106,7 @@ export function createMarketPreviewStore(
     loading: false,
     mutating: false,
     adminWriteUncertain: false,
+    valueRefreshRequired: false,
     pendingValueCommand: null,
     error: null,
     sessionKey: null,
@@ -112,6 +115,7 @@ export function createMarketPreviewStore(
       const sessionChanged = get().sessionKey !== requestedSessionKey;
       set({
         loading: true,
+        mutating: false,
         error: null,
         sessionKey: requestedSessionKey,
         ...(sessionChanged ? {
@@ -119,6 +123,7 @@ export function createMarketPreviewStore(
           visible: null,
           mutating: false,
           adminWriteUncertain: false,
+          valueRefreshRequired: false,
           pendingValueCommand: null,
         } : {}),
       });
@@ -131,6 +136,7 @@ export function createMarketPreviewStore(
           loading: false,
           mutating: false,
           adminWriteUncertain: false,
+          valueRefreshRequired: false,
           pendingValueCommand: null,
         });
       } catch {
@@ -147,8 +153,12 @@ export function createMarketPreviewStore(
       }
     },
     async execute(command, currentPriceWon) {
-      const { visible, mutating, pendingValueCommand } = get();
+      const { visible, mutating, pendingValueCommand, valueRefreshRequired } = get();
       if (!visible || mutating) return false;
+      if (valueRefreshRequired) {
+        set({ error: VALUE_REFRESH_REQUIRED_MESSAGE });
+        return false;
+      }
       const valueCommand = isMarketValueCommand(command) ? command : null;
       const retryingPending = pendingValueCommand !== null
         && valueCommand !== null
@@ -171,6 +181,7 @@ export function createMarketPreviewStore(
         ? visible
         : applyMarketCommand(visible, command, currentPriceWon);
       const operationSessionKey = get().sessionKey;
+      const operationLoadGeneration = loadGeneration;
       set({
         visible: projected,
         mutating: true,
@@ -181,26 +192,66 @@ export function createMarketPreviewStore(
       });
       try {
         const confirmed = await gateway.execute(command);
-        if (get().sessionKey !== operationSessionKey) return false;
+        if (
+          get().sessionKey !== operationSessionKey
+          || loadGeneration !== operationLoadGeneration
+        ) return false;
         set({
           confirmed,
           visible: confirmed,
           mutating: false,
+          valueRefreshRequired: false,
           pendingValueCommand: null,
         });
         return true;
       } catch (error) {
-        if (get().sessionKey !== operationSessionKey) return false;
+        if (
+          get().sessionKey !== operationSessionKey
+          || loadGeneration !== operationLoadGeneration
+        ) return false;
         const knownValueRejection = valueCommand !== null && isKnownMarketValueRejection(error);
+        const rejectionMessage = marketCommandFailureMessage(error);
+        if (knownValueRejection) {
+          let authoritative: MarketSnapshot;
+          try {
+            authoritative = await gateway.read();
+          } catch {
+            if (
+              get().sessionKey !== operationSessionKey
+              || loadGeneration !== operationLoadGeneration
+            ) return false;
+            set({
+              visible: get().confirmed,
+              mutating: false,
+              valueRefreshRequired: true,
+              pendingValueCommand: null,
+              error: rejectionMessage,
+            });
+            return false;
+          }
+          if (
+            get().sessionKey !== operationSessionKey
+            || loadGeneration !== operationLoadGeneration
+          ) return false;
+          set({
+            confirmed: authoritative,
+            visible: authoritative,
+            mutating: false,
+            valueRefreshRequired: false,
+            pendingValueCommand: null,
+            error: rejectionMessage,
+          });
+          return false;
+        }
         set({
           visible: get().confirmed,
           mutating: false,
-          pendingValueCommand: valueCommand && !knownValueRejection
+          pendingValueCommand: valueCommand
             ? structuredClone(pendingValueCommand ?? valueCommand)
             : null,
-          error: valueCommand && !knownValueRejection
+          error: valueCommand
             ? VALUE_WRITE_AMBIGUOUS_MESSAGE
-            : marketCommandFailureMessage(error),
+            : rejectionMessage,
         });
         return false;
       }

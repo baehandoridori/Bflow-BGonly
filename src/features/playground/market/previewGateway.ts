@@ -35,6 +35,7 @@ export function fingerprintMarketCommand(command: MarketCommand): string {
         command.stockId,
         command.quantityShares,
         command.quotedPriceWon,
+        command.quotedRevision,
       ]);
     case 'sell':
       return JSON.stringify([
@@ -42,6 +43,7 @@ export function fingerprintMarketCommand(command: MarketCommand): string {
         command.stockId,
         command.quantityShares,
         command.quotedPriceWon,
+        command.quotedRevision,
       ]);
   }
   const exhaustive: never = command;

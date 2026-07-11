@@ -398,6 +398,7 @@ DECLARE
   v_amount bigint;
   v_quantity bigint;
   v_price bigint;
+  v_quoted_revision bigint;
   v_order_total bigint;
   v_order_total_numeric numeric;
   v_sold_cost_basis bigint;
@@ -588,9 +589,10 @@ BEGIN
       IF jsonb_typeof(p_payload -> 'stockId') IS DISTINCT FROM 'string'
         OR jsonb_typeof(p_payload -> 'quantityShares') IS DISTINCT FROM 'number'
         OR jsonb_typeof(p_payload -> 'quotedPriceWon') IS DISTINCT FROM 'number'
+        OR jsonb_typeof(p_payload -> 'quotedRevision') IS DISTINCT FROM 'number'
         OR EXISTS (
           SELECT 1 FROM jsonb_object_keys(p_payload) AS keys(payload_key)
-          WHERE payload_key NOT IN ('stockId', 'quantityShares', 'quotedPriceWon')
+          WHERE payload_key NOT IN ('stockId', 'quantityShares', 'quotedPriceWon', 'quotedRevision')
         ) THEN
         RAISE EXCEPTION 'buy payload is invalid' USING ERRCODE = '22023';
       END IF;
@@ -618,8 +620,18 @@ BEGIN
         RAISE EXCEPTION 'quoted price must be a positive safe integer' USING ERRCODE = '22023';
       END IF;
       v_price := v_raw::bigint;
-      IF v_quantity <= 0 OR v_quantity > v_max_safe OR v_price <= 0 OR v_price > v_max_safe THEN
+      v_raw := p_payload ->> 'quotedRevision';
+      IF v_raw !~ '^[0-9]+$' OR length(v_raw) > 16 THEN
+        RAISE EXCEPTION 'quoted revision must be a positive safe integer' USING ERRCODE = '22023';
+      END IF;
+      v_quoted_revision := v_raw::bigint;
+      IF v_quantity <= 0 OR v_quantity > v_max_safe
+        OR v_price <= 0 OR v_price > v_max_safe
+        OR v_quoted_revision <= 0 OR v_quoted_revision > v_max_safe THEN
         RAISE EXCEPTION 'order values must be positive safe integers' USING ERRCODE = '22023';
+      END IF;
+      IF v_quoted_revision IS DISTINCT FROM v_broker.revision THEN
+        RAISE EXCEPTION '가격이 바뀌었어요. 현재 가격을 확인하고 다시 주문해 주세요.' USING ERRCODE = 'P0001';
       END IF;
       v_order_total_numeric := v_quantity::numeric * v_price::numeric;
       IF v_order_total_numeric > v_max_safe THEN
@@ -668,9 +680,10 @@ BEGIN
     WHEN 'sell' THEN
       IF jsonb_typeof(p_payload -> 'stockId') IS DISTINCT FROM 'string'
         OR jsonb_typeof(p_payload -> 'quotedPriceWon') IS DISTINCT FROM 'number'
+        OR jsonb_typeof(p_payload -> 'quotedRevision') IS DISTINCT FROM 'number'
         OR EXISTS (
           SELECT 1 FROM jsonb_object_keys(p_payload) AS keys(payload_key)
-          WHERE payload_key NOT IN ('stockId', 'quantityShares', 'quotedPriceWon')
+          WHERE payload_key NOT IN ('stockId', 'quantityShares', 'quotedPriceWon', 'quotedRevision')
         ) THEN
         RAISE EXCEPTION 'sell payload is invalid' USING ERRCODE = '22023';
       END IF;
@@ -693,8 +706,17 @@ BEGIN
         RAISE EXCEPTION 'quoted price must be a positive safe integer' USING ERRCODE = '22023';
       END IF;
       v_price := v_raw::bigint;
-      IF v_price <= 0 OR v_price > v_max_safe THEN
+      v_raw := p_payload ->> 'quotedRevision';
+      IF v_raw !~ '^[0-9]+$' OR length(v_raw) > 16 THEN
+        RAISE EXCEPTION 'quoted revision must be a positive safe integer' USING ERRCODE = '22023';
+      END IF;
+      v_quoted_revision := v_raw::bigint;
+      IF v_price <= 0 OR v_price > v_max_safe
+        OR v_quoted_revision <= 0 OR v_quoted_revision > v_max_safe THEN
         RAISE EXCEPTION 'quoted price must be a positive safe integer' USING ERRCODE = '22023';
+      END IF;
+      IF v_quoted_revision IS DISTINCT FROM v_broker.revision THEN
+        RAISE EXCEPTION '가격이 바뀌었어요. 현재 가격을 확인하고 다시 주문해 주세요.' USING ERRCODE = 'P0001';
       END IF;
 
       SELECT holding.*

@@ -39,8 +39,8 @@ export type MarketCommand =
   | { kind: 'favorite'; requestId: string; stockId: string; wished: boolean }
   | { kind: 'read-reason'; requestId: string; stockId: string }
   | { kind: 'transfer'; requestId: string; direction: 'wallet-to-broker' | 'broker-to-wallet'; points: number }
-  | { kind: 'buy'; requestId: string; stockId: string; quantityShares: number; quotedPriceWon: number }
-  | { kind: 'sell'; requestId: string; stockId: string; quantityShares: number | 'all'; quotedPriceWon: number };
+  | { kind: 'buy'; requestId: string; stockId: string; quantityShares: number; quotedPriceWon: number; quotedRevision: number }
+  | { kind: 'sell'; requestId: string; stockId: string; quantityShares: number | 'all'; quotedPriceWon: number; quotedRevision: number };
 
 export type MarketRequestProbe = 'missing' | 'same' | 'conflict';
 
@@ -285,6 +285,8 @@ class MarketSessionError extends Error {}
 class MarketQuoteChangedError extends Error {}
 class MarketTradingHaltedError extends Error {}
 
+const MARKET_QUOTE_CHANGED_MESSAGE = '가격이 바뀌었어요. 현재 가격을 확인하고 다시 주문해 주세요.';
+
 function hasActiveTradingHalt(
   events: readonly MarketAdminEvent[],
   stockId: string,
@@ -326,6 +328,9 @@ function friendlyPersistenceError(operation: 'read' | 'write', error: unknown): 
   }
   if (/market trading is halted|거래.*정지|halted/i.test(message)) {
     return new MarketTradingHaltedError('현재 거래가 정지되어 주문할 수 없어요.');
+  }
+  if (/market quote changed|가격이 바뀌었어요\. 현재 가격을 확인하고 다시 주문해 주세요\./i.test(message)) {
+    return new MarketQuoteChangedError(MARKET_QUOTE_CHANGED_MESSAGE);
   }
   if (/insufficient|잔액|보유/i.test(message)) {
     return new Error('잔액이나 보유 수량이 달라졌어요. 새로고침 후 다시 확인해 주세요.');
@@ -469,6 +474,13 @@ export class MarketAccountService {
         if (current.requestProbe !== 'missing') {
           throw new Error('market request probe is unavailable');
         }
+        if (
+          !Number.isSafeInteger(normalizedCommand.quotedRevision)
+          || normalizedCommand.quotedRevision <= 0
+          || normalizedCommand.quotedRevision !== current.revision
+        ) {
+          throw new MarketQuoteChangedError(MARKET_QUOTE_CHANGED_MESSAGE);
+        }
         const currentSecondMs = Math.floor(this.dependencies.getNowMs() / 1000) * 1000;
         if (hasActiveTradingHalt(current.adminEvents, normalizedCommand.stockId, currentSecondMs)) {
           throw new MarketTradingHaltedError('현재 거래가 정지되어 주문할 수 없어요.');
@@ -484,7 +496,7 @@ export class MarketAccountService {
           || normalizedCommand.quotedPriceWon !== canonicalQuoteWon
         ) {
           throw new MarketQuoteChangedError(
-            '가격이 바뀌었어요. 현재 가격을 확인하고 다시 주문해 주세요.',
+            MARKET_QUOTE_CHANGED_MESSAGE,
           );
         }
         canonicalCommand = { ...normalizedCommand, quotedPriceWon: canonicalQuoteWon };

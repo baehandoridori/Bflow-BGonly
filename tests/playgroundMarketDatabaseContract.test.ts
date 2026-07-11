@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
@@ -10,6 +10,12 @@ const migrationPath = path.join(
   'DEVLOG',
   'migrations',
   '2026-07-11-playground-market-v2.sql',
+);
+const quotedRevisionHotfixPath = path.join(
+  root,
+  'DEVLOG',
+  'migrations',
+  '2026-07-12-playground-market-quoted-revision-hotfix.sql',
 );
 
 function readMigration(): string {
@@ -177,6 +183,7 @@ test('execute RPC owns idempotency, locking, command validation, and atomic ledg
     ['points', 'number'],
     ['quantityShares', 'number'],
     ['quotedPriceWon', 'number'],
+    ['quotedRevision', 'number'],
   ]) {
     assert.match(
       definition,
@@ -189,6 +196,55 @@ test('execute RPC owns idempotency, locking, command validation, and atomic ledg
   }
   assert.match(definition, /9007199254740991/);
   assert.match(definition, /INSERT INTO public\.playground_value_ledger/i);
+});
+
+function assertQuotedRevisionGuard(definition: string): void {
+  const replayReturn = definition.search(
+    /IF FOUND THEN[\s\S]*?RETURN public\.playground_market_read\(p_user_id\)/i,
+  );
+  assert.notEqual(replayReturn, -1, 'idempotent replay must remain explicit');
+
+  const buyBranch = definition.slice(
+    definition.search(/WHEN\s+'buy'\s+THEN/i),
+    definition.search(/WHEN\s+'sell'\s+THEN/i),
+  );
+  const sellBranch = definition.slice(definition.search(/WHEN\s+'sell'\s+THEN/i));
+  for (const [side, branch] of [['buy', buyBranch], ['sell', sellBranch]] as const) {
+    assert.match(
+      branch,
+      /payload_key\s+NOT IN\s*\(\s*'stockId'\s*,\s*'quantityShares'\s*,\s*'quotedPriceWon'\s*,\s*'quotedRevision'\s*\)/i,
+      `${side} must allow exactly the quoted revision key with the existing order keys`,
+    );
+    assert.match(
+      branch,
+      /jsonb_typeof\(p_payload\s*->\s*'quotedRevision'\)\s+IS DISTINCT FROM\s+'number'/i,
+      `${side} must require a numeric quoted revision`,
+    );
+    const revisionCompare = branch.search(
+      /v_quoted_revision\s+IS DISTINCT FROM\s+v_broker\.revision/i,
+    );
+    const firstMutation = branch.search(
+      /(?:INSERT INTO|UPDATE|DELETE FROM)\s+public\.(?:playground_market_holdings|playground_brokerage_accounts)/i,
+    );
+    assert.notEqual(revisionCompare, -1, `${side} must compare the locked brokerage revision`);
+    assert.notEqual(firstMutation, -1, `${side} mutation must remain present`);
+    assert.ok(replayReturn < definition.indexOf(branch), `${side} revision check must occur after replay`);
+    assert.ok(revisionCompare < firstMutation, `${side} revision check must occur before mutation`);
+    assert.match(branch, /가격이 바뀌었어요\. 현재 가격을 확인하고 다시 주문해 주세요\./);
+  }
+}
+
+test('fresh and live-hotfix execute RPCs reject a stale quoted revision after replay and before mutation', () => {
+  const freshDefinition = functionDefinition(readMigration(), 'playground_market_execute');
+  assertQuotedRevisionGuard(freshDefinition);
+
+  assert.equal(existsSync(quotedRevisionHotfixPath), true, 'live DB needs a separate idempotent hotfix migration');
+  if (!existsSync(quotedRevisionHotfixPath)) return;
+  const hotfixDefinition = functionDefinition(
+    readFileSync(quotedRevisionHotfixPath, 'utf8'),
+    'playground_market_execute',
+  );
+  assertQuotedRevisionGuard(hotfixDefinition);
 });
 
 test('execute RPC preserves idempotent replay and rejects active halts in both order branches', () => {

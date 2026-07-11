@@ -67,7 +67,7 @@ test('desktop and mobile order surfaces share exact whole-share presets', () => 
   assert.doesNotMatch(source, /useMarketOrderController\(|useMarketPreviewStore/);
 });
 
-test('order controller freezes six fields, revalidates drift, blocks halts and creates one request id', async () => {
+test('order controller freezes snapshot revision with the quote, revalidates drift, blocks halts and creates one request id', async () => {
   const helperPath = 'src/views/playground/market/useMarketOrderController.ts';
   assert.equal(existsSync(helperPath), true, 'shared order controller must exist');
   const source = readFileSync(helperPath, 'utf8');
@@ -76,6 +76,7 @@ test('order controller freezes six fields, revalidates drift, blocks halts and c
     'side',
     'quantityShares',
     'quotedPriceWon',
+    'quotedRevision',
     'estimatedTotalWon',
     'availableCashWon',
     'availableShares',
@@ -116,6 +117,7 @@ test('order controller freezes six fields, revalidates drift, blocks halts and c
     side: 'buy',
     quantityShares: 3,
     quotedPriceWon: 3_000,
+    quotedRevision: snapshot.revision,
     estimatedTotalWon: 9_000,
     availableCashWon: 10_000,
     availableShares: 7,
@@ -131,6 +133,7 @@ test('order controller freezes six fields, revalidates drift, blocks halts and c
     side: 'sell',
     quantityShares: 7,
     quotedPriceWon: 3_000,
+    quotedRevision: snapshot.revision,
     estimatedTotalWon: 21_000,
     availableCashWon: 10_000,
     availableShares: 7,
@@ -145,6 +148,7 @@ test('order controller freezes six fields, revalidates drift, blocks halts and c
   });
   assert.equal(frozenOrdersMatch(frozen, { ...frozen }), true);
   assert.equal(frozenOrdersMatch(frozen, { ...frozen, availableCashWon: 9_999 }), false);
+  assert.equal(frozenOrdersMatch(frozen, { ...frozen, quotedRevision: frozen.quotedRevision + 1 }), false);
   assert.equal(isStockTradingHalted([{
     id: 'halt-live', stockId: 'jbbj', kind: 'halt', title: '점검', impactBps: 0,
     startsAt: '2026-07-11T00:00:00.000Z', endsAt: null, revision: 2,
@@ -163,7 +167,7 @@ test('shared pending request helper preserves the exact command and frozen UI de
   );
   const command = {
     kind: 'buy', requestId: 'preserved-id', stockId: 'jbbj', quantityShares: 7,
-    quotedPriceWon: 1_842,
+    quotedPriceWon: 1_842, quotedRevision: 4,
   } as const;
   const details = { quantityShares: 7, quotedPriceWon: 1_842, label: '최대' };
   const pending = createPendingMarketValueRequest(command, details);
@@ -173,12 +177,17 @@ test('shared pending request helper preserves the exact command and frozen UI de
   assert.notEqual(retry, command);
   assert.deepEqual(pending.details, details);
   assert.equal(pending.fingerprint, fingerprintMarketCommand(command));
+  assert.notEqual(
+    fingerprintMarketCommand(command),
+    fingerprintMarketCommand({ ...command, quotedRevision: command.quotedRevision + 1 }),
+  );
 });
 
 test('order and point transfer use one pending lifecycle instead of minting retry ids', () => {
   const controller = readFileSync('src/views/playground/market/useMarketOrderController.ts', 'utf8');
   const dialogs = readFileSync('src/views/playground/market/MarketOrderDialogs.tsx', 'utf8');
   const transfer = readFileSync('src/views/playground/market/PointTransferDialog.tsx', 'utf8');
+  const account = readFileSync('src/views/playground/market/MarketAccountView.tsx', 'utf8');
   for (const source of [controller, transfer]) {
     assert.match(source, /createPendingMarketValueRequest/);
     assert.match(source, /retryPendingMarketValueCommand/);
@@ -187,6 +196,14 @@ test('order and point transfer use one pending lifecycle instead of minting retr
   }
   assert.match(dialogs, /주문 결과 다시 확인/);
   assert.match(transfer, /이동 결과 다시 확인/);
+  assert.match(transfer, /const valueRefreshRequired = useMarketPreviewStore/);
+  assert.match(transfer, /pendingTransfer\s*\|\|\s*pendingValueCommand\s*\|\|\s*valueRefreshRequired/);
+  assert.match(transfer, /!pendingTransfer\s*&&\s*!valueRefreshRequired/);
+  assert.match(transfer, /pendingResolution\s*\|\|\s*valueRefreshRequired/);
+  assert.match(account, /const valueRefreshRequired = useMarketPreviewStore/);
+  assert.match(account, /disabled=\{mutating\s*\|\|\s*valueRefreshRequired\}/);
+  assert.match(account, /load\(sessionKey\s*\?\?\s*undefined\)/);
+  assert.match(account, /최신 계좌 정보 다시 불러오기/);
 });
 
 test('authorized Hansol alone gets the compact market admin dialog', () => {

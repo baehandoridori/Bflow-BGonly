@@ -220,6 +220,10 @@ export function validateMarketCommand(
   }
 
   if (!snapshot.stocks.some((stock) => stock.id === command.stockId)) return '종목을 찾지 못했어요';
+  if (
+    !isPositiveSafeInteger(command.quotedRevision)
+    || command.quotedRevision !== snapshot.revision
+  ) return '가격이 바뀌었어요. 현재 가격을 확인하고 다시 주문해 주세요.';
   const priceWon = effectiveOrderPriceWon(command, currentPriceWon);
   if (!isPositiveSafeInteger(priceWon)) return INVALID_PRICE_MESSAGE;
 

@@ -72,12 +72,21 @@ test('ambiguous value mutation restores confirmed state and preserves its exact 
   });
 });
 
-test('canonical quote change survives an Electron IPC error prefix and keeps rollback actionable', async () => {
+test('canonical quote or revision rejection refreshes authoritative events without retrying the write', async () => {
   const canonical = createMarketPreviewGateway({ latencyMs: 0 });
+  let authoritativeOverride: MarketSnapshot | null = null;
+  let readCalls = 0;
+  let buyCalls = 0;
   const gateway: MarketPreviewGateway = {
-    read: () => canonical.read(),
+    read: async () => {
+      readCalls += 1;
+      return authoritativeOverride
+        ? structuredClone(authoritativeOverride)
+        : canonical.read();
+    },
     execute: async (command) => {
       if (command.kind === 'buy') {
+        buyCalls += 1;
         throw new Error(
           "Error invoking remote method 'market:execute': Error: 가격이 바뀌었어요. 현재 가격을 확인하고 다시 주문해 주세요.",
         );
@@ -93,19 +102,112 @@ test('canonical quote change survives an Electron IPC error prefix and keeps rol
     kind: 'transfer', requestId: 'fund-quote-error', direction: 'wallet-to-broker', points: 10_000,
   });
   const before = structuredClone(store.getState().confirmed);
+  assert.ok(before);
+  const refreshed = structuredClone(before);
+  refreshed.revision += 1;
+  refreshed.adminEvents.push({
+    id: 'race-shock', stockId: 'jbbj', kind: 'shock-up', title: '주문 직전 호재', impactBps: 500,
+    startsAt: '2026-07-11T00:00:00.000Z', endsAt: null, revision: refreshed.revision,
+  });
+  authoritativeOverride = refreshed;
 
   const result = await store.getState().execute({
     kind: 'buy', requestId: 'quote-changed', stockId: 'jbbj', quantityShares: 1,
-    quotedPriceWon: 1_842,
+    quotedPriceWon: 1_842, quotedRevision: before.revision,
   }, 1_842);
 
   assert.equal(result, false);
-  assert.deepEqual(store.getState().visible, before);
-  assert.deepEqual(store.getState().confirmed, before);
+  assert.deepEqual(store.getState().visible, refreshed);
+  assert.deepEqual(store.getState().confirmed, refreshed);
+  assert.equal(readCalls, 2, 'initial load plus one authoritative rejection refresh');
+  assert.equal(buyCalls, 1, 'a definite rejection must never retry the write');
   assert.equal(
     store.getState().error,
     '가격이 바뀌었어요. 현재 가격을 확인하고 다시 주문해 주세요.',
   );
+});
+
+test('failed rejection refresh blocks another value write until an explicit load succeeds', async () => {
+  const canonical = createMarketPreviewGateway({ latencyMs: 0 });
+  let failRefresh = false;
+  let buyCalls = 0;
+  const gateway: MarketPreviewGateway = {
+    read: async () => {
+      if (failRefresh) throw new Error('authoritative read unavailable');
+      return canonical.read();
+    },
+    execute: async (command) => {
+      if (command.kind === 'buy') {
+        buyCalls += 1;
+        failRefresh = true;
+        throw new Error('가격이 바뀌었어요. 현재 가격을 확인하고 다시 주문해 주세요.');
+      }
+      return canonical.execute(command);
+    },
+    createAdminEvent: (input) => canonical.createAdminEvent(input),
+    deleteAdminEvent: (eventId) => canonical.deleteAdminEvent(eventId),
+  };
+  const store = createMarketPreviewStore(gateway);
+  await store.getState().load('hansol');
+  await store.getState().execute({
+    kind: 'transfer', requestId: 'fund-refresh-failure', direction: 'wallet-to-broker', points: 10_000,
+  });
+  const revision = store.getState().visible!.revision;
+  const command = {
+    kind: 'buy', requestId: 'refresh-failed-buy', stockId: 'jbbj', quantityShares: 1,
+    quotedPriceWon: 1_842, quotedRevision: revision,
+  } as const;
+
+  assert.equal(await store.getState().execute(command, 1_842), false);
+  assert.equal(store.getState().valueRefreshRequired, true);
+  assert.equal(store.getState().pendingValueCommand, null, 'known rejection stays distinct from ambiguous response loss');
+  assert.equal(await store.getState().execute({ ...command, requestId: 'must-not-write' }, 1_842), false);
+  assert.equal(buyCalls, 1, 'refresh failure must block a second write');
+
+  failRefresh = false;
+  await store.getState().load('hansol');
+  assert.equal(store.getState().valueRefreshRequired, false);
+});
+
+test('same-session explicit load clears mutating immediately and wins over a late execute result', async () => {
+  const canonical = createMarketPreviewGateway({ latencyMs: 0 });
+  const initial = await canonical.read();
+  const staleExecuteResult = await canonical.execute({
+    kind: 'transfer', requestId: 'stale-execute', direction: 'wallet-to-broker', points: 1000,
+  });
+  const newest = structuredClone(staleExecuteResult);
+  newest.revision += 10;
+  newest.account.walletPoints -= 500;
+  newest.account.cashWon += 500;
+
+  let readCalls = 0;
+  let resolveExecute!: (snapshot: MarketSnapshot) => void;
+  const lateExecute = new Promise<MarketSnapshot>((resolve) => {
+    resolveExecute = resolve;
+  });
+  const gateway: MarketPreviewGateway = {
+    read: async () => structuredClone(readCalls++ === 0 ? initial : newest),
+    execute: async () => lateExecute,
+    createAdminEvent: (input) => canonical.createAdminEvent(input),
+    deleteAdminEvent: (eventId) => canonical.deleteAdminEvent(eventId),
+  };
+  const store = createMarketPreviewStore(gateway);
+  await store.getState().load('hansol');
+
+  const staleMutation = store.getState().execute({
+    kind: 'transfer', requestId: 'late-response', direction: 'wallet-to-broker', points: 1000,
+  });
+  assert.equal(store.getState().mutating, true);
+
+  const explicitReload = store.getState().load('hansol');
+  assert.equal(store.getState().mutating, false, 'an explicit reload must release the old mutation lock');
+  await explicitReload;
+  resolveExecute(structuredClone(staleExecuteResult));
+
+  assert.equal(await staleMutation, false, 'a completion from before the reload is stale');
+  assert.deepEqual(store.getState().visible, newest);
+  assert.deepEqual(store.getState().confirmed, newest);
+  assert.equal(store.getState().mutating, false);
 });
 
 test('canonical halt rejection survives an Electron or database error prefix', async () => {
@@ -131,7 +233,7 @@ test('canonical halt rejection survives an Electron or database error prefix', a
 
   assert.equal(await store.getState().execute({
     kind: 'buy', requestId: 'halt-error', stockId: 'jbbj', quantityShares: 1,
-    quotedPriceWon: 1_842,
+    quotedPriceWon: 1_842, quotedRevision: store.getState().visible!.revision,
   }, 1_842), false);
   assert.equal(store.getState().error, '현재 거래가 정지되어 주문할 수 없어요.');
   assert.equal(store.getState().pendingValueCommand, null);
@@ -162,7 +264,7 @@ test('buy response-loss retry reuses one request id and moves cash and shares ex
   await store.getState().load('hansol');
   const pending = createPendingMarketValueRequest({
     kind: 'buy', requestId: 'stable-buy-request', stockId: 'jbbj', quantityShares: 2,
-    quotedPriceWon: 1_842,
+    quotedPriceWon: 1_842, quotedRevision: store.getState().visible!.revision,
   }, { quantityShares: 2, quotedPriceWon: 1_842 });
   const command = retryPendingMarketValueCommand(pending);
 
@@ -336,7 +438,7 @@ test('account snapshots never absorb the one-second clock or live quote map', as
   assert.equal('quoteWonByStockId' in visible, false);
 });
 
-test('in-memory request fingerprints include whole-share quantity and quoted won price', async () => {
+test('in-memory request fingerprints include whole-share quantity, quote, and quoted revision', async () => {
   const gateway = createMarketPreviewGateway({ latencyMs: 0 });
   await gateway.execute({
     kind: 'transfer', requestId: 'fund-order', direction: 'wallet-to-broker', points: 10_000,
@@ -347,12 +449,17 @@ test('in-memory request fingerprints include whole-share quantity and quoted won
     stockId: 'jbbj',
     quantityShares: 2,
     quotedPriceWon: 1_842,
+    quotedRevision: 2,
   } as const;
   const bought = await gateway.execute(command);
   const retry = await gateway.execute({ ...command });
   assert.deepEqual(retry, bought);
   await assert.rejects(
     () => gateway.execute({ ...command, quotedPriceWon: 1_843 }),
+    /request id conflict/,
+  );
+  await assert.rejects(
+    () => gateway.execute({ ...command, quotedRevision: 3 }),
     /request id conflict/,
   );
 });
@@ -370,6 +477,7 @@ test('an explicit current quote affects only the optimistic calculation before c
     stockId: 'jbbj',
     quantityShares: 2,
     quotedPriceWon: 1_842,
+    quotedRevision: store.getState().visible!.revision,
   }, 2_000);
   assert.equal(store.getState().visible?.account.cashWon, 6_000);
   assert.equal(store.getState().confirmed?.account.cashWon, 10_000);

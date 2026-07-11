@@ -109,5 +109,5 @@ export type MarketCommand =
   | { kind: 'favorite'; requestId: string; stockId: string; wished: boolean }
   | { kind: 'read-reason'; requestId: string; stockId: string }
   | { kind: 'transfer'; requestId: string; direction: 'wallet-to-broker' | 'broker-to-wallet'; points: number }
-  | { kind: 'buy'; requestId: string; stockId: string; quantityShares: number; quotedPriceWon: number }
-  | { kind: 'sell'; requestId: string; stockId: string; quantityShares: number | 'all'; quotedPriceWon: number };
+  | { kind: 'buy'; requestId: string; stockId: string; quantityShares: number; quotedPriceWon: number; quotedRevision: number }
+  | { kind: 'sell'; requestId: string; stockId: string; quantityShares: number | 'all'; quotedPriceWon: number; quotedRevision: number };

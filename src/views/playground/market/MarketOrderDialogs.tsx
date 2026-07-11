@@ -68,9 +68,11 @@ export function MarketOrderDialogs({ controller }: MarketOrderDialogsProps) {
           <p className="mt-3 min-h-5 text-sm font-semibold text-text-primary" aria-live="polite">
             {controller.error ?? ''}
           </p>
-          {controller.pendingResolution && (
+          {(controller.pendingResolution || controller.refreshRequired) && (
             <p className="mt-1 text-xs leading-5 text-text-secondary">
-              주문 결과를 받지 못했어요. 같은 주문을 다시 확인하면 중복 주문 없이 결과만 확인합니다.
+              {controller.refreshRequired
+                ? '최신 가격과 시장 이벤트를 확인해야 새 주문을 만들 수 있어요.'
+                : '주문 결과를 받지 못했어요. 같은 주문을 다시 확인하면 중복 주문 없이 결과만 확인합니다.'}
             </p>
           )}
           <button
@@ -85,7 +87,7 @@ export function MarketOrderDialogs({ controller }: MarketOrderDialogsProps) {
                 ? '주문 결과 다시 확인'
                 : `${formatShares(confirmation.quantityShares)} ${confirmation.side === 'buy' ? '사기' : '팔기'}`}
           </button>
-          {controller.pendingResolution && (
+          {(controller.pendingResolution || controller.refreshRequired) && (
             <button
               type="button"
               disabled={controller.submitting}

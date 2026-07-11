@@ -2848,6 +2848,7 @@ function marketCommandPayload(command: MarketCommand): Record<string, unknown> {
         stockId: command.stockId,
         quantityShares: command.quantityShares,
         quotedPriceWon: command.quotedPriceWon,
+        quotedRevision: command.quotedRevision,
       };
   }
 }

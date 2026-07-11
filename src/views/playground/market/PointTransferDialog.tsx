@@ -17,7 +17,10 @@ import {
   type PendingMarketValueRequest,
 } from '@/features/playground/market/pendingValueRequest';
 import type { MarketCommand } from '@/features/playground/market/types';
-import { useMarketPreviewStore } from '@/features/playground/market/useMarketPreviewStore';
+import {
+  useMarketPreviewStore,
+  VALUE_REFRESH_REQUIRED_MESSAGE,
+} from '@/features/playground/market/useMarketPreviewStore';
 import { MarketActionDialog } from './MarketActionDialog';
 import { requestPointTransferDialogClose } from './pointTransferDialogState';
 
@@ -49,6 +52,7 @@ export function PointTransferDialog({
   const confirmed = useMarketPreviewStore((state) => state.confirmed);
   const mutating = useMarketPreviewStore((state) => state.mutating);
   const loading = useMarketPreviewStore((state) => state.loading);
+  const valueRefreshRequired = useMarketPreviewStore((state) => state.valueRefreshRequired);
   const pendingValueCommand = useMarketPreviewStore((state) => state.pendingValueCommand);
   const sessionKey = useMarketPreviewStore((state) => state.sessionKey);
   const storeError = useMarketPreviewStore((state) => state.error);
@@ -72,8 +76,12 @@ export function PointTransferDialog({
   const pendingCommandMismatch = pendingValueCommand !== null
     && (pendingTransfer === null
       || !sameMarketValueCommand(pendingValueCommand, pendingTransfer.command));
-  const controlsDisabled = submitting || mutating || loading || pendingValueCommand !== null;
-  const balanceSnapshot = submitting || mutating || pendingResolution
+  const controlsDisabled = submitting
+    || mutating
+    || loading
+    || pendingValueCommand !== null
+    || valueRefreshRequired;
+  const balanceSnapshot = submitting || mutating || pendingResolution || valueRefreshRequired
     ? confirmed ?? visible
     : visible;
   const summary = balanceSnapshot ? getAccountSummary(balanceSnapshot) : null;
@@ -98,13 +106,14 @@ export function PointTransferDialog({
 
   useEffect(() => {
     if (!open) return;
-    if (useMarketPreviewStore.getState().pendingValueCommand !== null) return;
+    const state = useMarketPreviewStore.getState();
+    if (state.pendingValueCommand !== null || state.valueRefreshRequired) return;
     setAmountInput('1000');
     setPendingTransfer(null);
     setPendingTransferUncertain(false);
     setLocalError(null);
     clearError();
-  }, [clearError, direction, open]);
+  }, [clearError, direction, open, valueRefreshRequired]);
 
   const clearFeedback = () => {
     setLocalError(null);
@@ -119,6 +128,11 @@ export function PointTransferDialog({
   const submitTransfer = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (submitting || mutating || loading || submitLockRef.current) return;
+
+    if (useMarketPreviewStore.getState().valueRefreshRequired) {
+      setLocalError(VALUE_REFRESH_REQUIRED_MESSAGE);
+      return;
+    }
 
     let attempt = pendingTransfer;
     if (!attempt) {
@@ -212,7 +226,7 @@ export function PointTransferDialog({
   };
 
   const closeTransferDialog = () => {
-    if (pendingTransfer || pendingValueCommand) {
+    if (pendingTransfer || pendingValueCommand || valueRefreshRequired) {
       setLocalError('이동 결과를 확인하거나 계좌 정보를 다시 불러온 뒤 닫아 주세요.');
       return;
     }
@@ -225,7 +239,13 @@ export function PointTransferDialog({
   };
 
   const reloadPendingTransfer = async () => {
-    if (!pendingTransfer || submitting || mutating || loading || submitLockRef.current) return;
+    if (
+      (!pendingTransfer && !valueRefreshRequired)
+      || submitting
+      || mutating
+      || loading
+      || submitLockRef.current
+    ) return;
     submitLockRef.current = true;
     setSubmitting(true);
     setLocalError(null);
@@ -233,7 +253,7 @@ export function PointTransferDialog({
     submitLockRef.current = false;
     setSubmitting(false);
     const latestState = useMarketPreviewStore.getState();
-    if (latestState.pendingValueCommand !== null) {
+    if (latestState.pendingValueCommand !== null || latestState.valueRefreshRequired) {
       setLocalError(latestState.error ?? '계좌 정보를 다시 불러오지 못했어요.');
       return;
     }
@@ -329,14 +349,16 @@ export function PointTransferDialog({
         <p className="mt-3 min-h-5 text-sm font-semibold text-text-primary" aria-live="polite">
           {displayedError ?? ''}
         </p>
-        {pendingResolution && (
+        {(pendingResolution || valueRefreshRequired) && (
           <p className="mt-1 text-xs leading-5 text-text-secondary">
-            이동 결과를 받지 못했어요. 같은 요청을 다시 확인하면 포인트가 중복으로 이동하지 않아요.
+            {pendingResolution
+              ? '이동 결과를 받지 못했어요. 같은 요청을 다시 확인하면 포인트가 중복으로 이동하지 않아요.'
+              : '서버의 최신 잔액을 확인해야 다음 포인트 이동을 안전하게 시작할 수 있어요.'}
           </p>
         )}
         <button
           type="submit"
-          disabled={submitting || mutating || loading || pendingCommandMismatch || (!pendingTransfer && validation !== null)}
+          disabled={submitting || mutating || loading || valueRefreshRequired || pendingCommandMismatch || (!pendingTransfer && validation !== null)}
           className="mt-2 min-h-12 w-full cursor-pointer rounded-xl bg-accent px-4 py-3 text-sm font-bold text-on-accent transition-colors duration-200 hover:bg-accent/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent disabled:cursor-not-allowed disabled:opacity-50"
         >
           {submitting
@@ -345,7 +367,7 @@ export function PointTransferDialog({
               ? '이동 결과 다시 확인'
               : `${amountIsValidInteger ? formatPoints(amount) : '0P'} ${actionLabel}`}
         </button>
-        {pendingResolution && (
+        {(pendingResolution || valueRefreshRequired) && (
           <button
             type="button"
             disabled={submitting || mutating || loading}

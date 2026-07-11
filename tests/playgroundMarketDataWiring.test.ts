@@ -354,6 +354,7 @@ test('market service rejects a manipulated quote before persistence and persists
       stockId: 'jbbj',
       quantityShares: 1,
       quotedPriceWon: 1,
+      quotedRevision: 1,
     }),
     { message: '가격이 바뀌었어요. 현재 가격을 확인하고 다시 주문해 주세요.' },
   );
@@ -365,12 +366,41 @@ test('market service rejects a manipulated quote before persistence and persists
     stockId: 'jbbj',
     quantityShares: 1,
     quotedPriceWon: canonicalQuoteWon,
+    quotedRevision: 1,
   });
   assert.equal(persisted.length, 1);
   assert.equal(
     (persisted[0] as Extract<MarketCommand, { kind: 'buy' }>).quotedPriceWon,
     canonicalQuoteWon,
   );
+});
+
+test('market service rejects a quote when the account or admin-event revision changed after the UI froze it', async () => {
+  const { MarketAccountService } = await import('../electron/marketAccountService.ts');
+  let executeCalls = 0;
+  const service = new MarketAccountService({
+    getCanonicalSession: () => ({
+      userId: HANSOL_ID, epoch: 1, name: '배한솔', slackId: 'U05DFV9UAN5',
+    }),
+    getNowMs: () => Date.parse('2026-07-11T12:00:30Z'),
+    resolveCanonicalQuote: () => 1_842,
+    persistence: {
+      read: async () => remoteState({ revision: 2, requestProbe: 'missing' }),
+      execute: async () => { executeCalls += 1; return remoteState({ revision: 3 }); },
+      createAdminEvent: async () => remoteState(),
+      deleteAdminEvent: async () => remoteState(),
+    },
+    logger: { error: () => undefined },
+  });
+
+  await assert.rejects(
+    service.execute({
+      kind: 'buy', requestId: 'revision-race', stockId: 'jbbj', quantityShares: 1,
+      quotedPriceWon: 1_842, quotedRevision: 1,
+    } as MarketCommand),
+    { message: '가격이 바뀌었어요. 현재 가격을 확인하고 다시 주문해 주세요.' },
+  );
+  assert.equal(executeCalls, 0, 'stale revision must be rejected before the execute RPC');
 });
 
 test('market service rejects an active halt before quote resolution or order persistence', async () => {
@@ -404,8 +434,8 @@ test('market service rejects an active halt before quote resolution or order per
   });
 
   for (const command of [
-    { kind: 'buy', requestId: 'halted-buy', stockId: 'jbbj', quantityShares: 1, quotedPriceWon: 1_842 },
-    { kind: 'sell', requestId: 'halted-sell', stockId: 'jbbj', quantityShares: 1, quotedPriceWon: 1_842 },
+    { kind: 'buy', requestId: 'halted-buy', stockId: 'jbbj', quantityShares: 1, quotedPriceWon: 1_842, quotedRevision: 1 },
+    { kind: 'sell', requestId: 'halted-sell', stockId: 'jbbj', quantityShares: 1, quotedPriceWon: 1_842, quotedRevision: 1 },
   ] as const) {
     await assert.rejects(service.execute(command), {
       message: '현재 거래가 정지되어 주문할 수 없어요.',
@@ -440,7 +470,7 @@ test('market service returns an idempotent replay before a newly active halt che
 
   const replayed = await service.execute({
     kind: 'buy', requestId: 'already-committed', stockId: 'jbbj', quantityShares: 1,
-    quotedPriceWon: 1_842,
+    quotedPriceWon: 1_842, quotedRevision: 1,
   });
   assert.equal(replayed.revision, 3);
   assert.equal(resolverCalls, 0);
@@ -496,6 +526,7 @@ test('market service revalidates authorization after quote read and immediately 
     stockId: 'jbbj',
     quantityShares: 1,
     quotedPriceWon: canonicalQuoteWon,
+    quotedRevision: 1,
   });
   await readStarted;
   session = { ...session, name: '권한이 바뀐 사용자' };
@@ -519,12 +550,13 @@ test('response-loss retry probes idempotency before changed clock or events can 
   let mutationCount = 0;
   let resolverCalls = 0;
   const initialQuoteWon = getLivePriceWon(profile, Math.floor(clockMs / 1000) * 1000, adminEvents);
-  const original: MarketCommand = {
+  const original: Extract<MarketCommand, { kind: 'buy' }> = {
     kind: 'buy',
     requestId: 'lost-response-order',
     stockId: 'jbbj',
     quantityShares: 2,
     quotedPriceWon: initialQuoteWon,
+    quotedRevision: 1,
   };
   const probeState = (probe?: MarketCommand): unknown => {
     let requestProbe: 'missing' | 'same' | 'conflict' | undefined;
@@ -598,7 +630,7 @@ test('response-loss retry probes idempotency before changed clock or events can 
     { message: '가격이 바뀌었어요. 현재 가격을 확인하고 다시 주문해 주세요.' },
   );
   assert.equal(mutationCount, 1, 'new request with an old quote must never mutate');
-  assert.equal(resolverCalls, 2);
+  assert.equal(resolverCalls, 1, 'a stale quoted revision must fail before quote resolution');
 });
 
 test('Electron hydration, store, detail quote, order command, and main resolver share one aligned price', async () => {
@@ -686,6 +718,7 @@ test('Electron hydration, store, detail quote, order command, and main resolver 
     stockId: 'jbbj',
     quantityShares: 1,
     quotedPriceWon: detailQuoteWon,
+    quotedRevision: snapshot.revision,
   };
   assert.equal(await store.getState().execute(command, detailQuoteWon), true);
   assert.equal(persisted.length, 1);
@@ -812,6 +845,7 @@ test('main, preload, renderer types, dev preview, and store expose ownership-fre
   assert.match(marketRouter, /useMarketOrderController\(\{[\s\S]*currentPriceWon/);
   assert.match(orderPanel, /controller:\s*MarketOrderController/);
   assert.match(orderController, /quotedPriceWon:\s*currentPriceWon/);
+  assert.match(orderController, /quotedRevision:\s*snapshot\.revision/);
   assert.doesNotMatch(orderController, /quotedPriceWon:\s*(?:current|latest)Stock\.referencePriceWon/);
 
   for (const apiName of ['marketRead', 'marketExecute', 'marketCreateAdminEvent', 'marketDeleteAdminEvent']) {
@@ -831,6 +865,7 @@ test('main, preload, renderer types, dev preview, and store expose ownership-fre
   assert.match(supabase, /p_request_id:\s*probe\?\.requestId\s*\?\?\s*null/);
   assert.match(supabase, /p_kind:\s*probe\?\.kind\s*\?\?\s*null/);
   assert.match(supabase, /p_payload:\s*probe\s*\?\s*marketCommandPayload\(probe\)\s*:\s*null/);
+  assert.match(supabase, /quotedRevision:\s*command\.quotedRevision/);
   assert.match(supabase, /playground_market_execute/);
   assert.match(supabase, /playground_market_create_event/);
   assert.match(supabase, /playground_market_delete_event/);

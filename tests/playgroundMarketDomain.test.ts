@@ -68,6 +68,7 @@ test('buying three whole shares at 1,842 won spends exactly 5,526 won', () => {
     stockId: 'jbbj',
     quantityShares: 3,
     quotedPriceWon: 1_842,
+    quotedRevision: 2,
   });
 
   assert.equal(getBuyCostWon(3, 1_842), 5_526);
@@ -87,6 +88,7 @@ test('selling two shares returns quoted proceeds and keeps integer proportional 
     stockId: 'jbbj',
     quantityShares: 3,
     quotedPriceWon: 1_842,
+    quotedRevision: 2,
   });
   const holding = bought.account.holdings[0];
   const projection = getSellProjection(holding, 2_000, 2);
@@ -102,6 +104,7 @@ test('selling two shares returns quoted proceeds and keeps integer proportional 
     stockId: 'jbbj',
     quantityShares: 2,
     quotedPriceWon: 2_000,
+    quotedRevision: 3,
   });
   assert.equal(sold.account.cashWon, 8_474);
   assert.equal(sold.account.realizedPnlThisMonthWon, 316);
@@ -121,6 +124,7 @@ test('selling all removes the holding and allocates all remaining cost basis', (
     stockId: 'jbbj',
     quantityShares: 3,
     quotedPriceWon: 1_842,
+    quotedRevision: 2,
   });
   const projection = getSellProjection(bought.account.holdings[0], 1_900, 'all');
   assert.deepEqual(projection, {
@@ -135,6 +139,7 @@ test('selling all removes the holding and allocates all remaining cost basis', (
     stockId: 'jbbj',
     quantityShares: 'all',
     quotedPriceWon: 1_900,
+    quotedRevision: 3,
   });
   assert.equal(sold.account.holdings.length, 0);
   assert.equal(sold.account.cashWon, 10_174);
@@ -151,6 +156,7 @@ test('realized PnL rejects a final unsafe result even when JS rounding looks saf
     stockId: 'jbbj',
     quantityShares: 'all',
     quotedPriceWon: 2,
+    quotedRevision: 1,
   };
 
   assert.equal(validateMarketCommand(snapshot, command), '잔액을 안전하게 계산할 수 없어요');
@@ -166,6 +172,7 @@ test('zero, negative, fractional and unsafe share quantities fail validation', (
       stockId: 'jbbj',
       quantityShares,
       quotedPriceWon: 1_842,
+      quotedRevision: 2,
     }), '1주 이상 안전한 정수로 입력해 주세요');
     assert.equal(validateMarketCommand(snapshot, {
       kind: 'sell',
@@ -173,6 +180,7 @@ test('zero, negative, fractional and unsafe share quantities fail validation', (
       stockId: 'jbbj',
       quantityShares,
       quotedPriceWon: 1_842,
+      quotedRevision: 2,
     }), '1주 이상 안전한 정수로 입력해 주세요');
   }
 });
@@ -182,16 +190,20 @@ test('orders reject invalid prices, unsafe multiplication and unavailable balanc
   for (const quotedPriceWon of [0, -1, 1.5, Number.MAX_SAFE_INTEGER + 1]) {
     assert.equal(validateMarketCommand(snapshot, {
       kind: 'buy', requestId: `bad-price-${quotedPriceWon}`, stockId: 'jbbj', quantityShares: 1, quotedPriceWon,
+      quotedRevision: 2,
     }), '현재 가격을 확인할 수 없어요');
   }
   assert.equal(validateMarketCommand(snapshot, {
     kind: 'buy', requestId: 'unsafe-total', stockId: 'jbbj', quantityShares: Number.MAX_SAFE_INTEGER, quotedPriceWon: 2,
+    quotedRevision: 2,
   }), '주문 금액을 안전하게 계산할 수 없어요');
   assert.equal(validateMarketCommand(snapshot, {
     kind: 'buy', requestId: 'too-expensive', stockId: 'jbbj', quantityShares: 6, quotedPriceWon: 1_842,
+    quotedRevision: 2,
   }), '예수금이 부족해요');
   assert.equal(validateMarketCommand(snapshot, {
     kind: 'sell', requestId: 'no-holding', stockId: 'jbbj', quantityShares: 1, quotedPriceWon: 1_842,
+    quotedRevision: 2,
   }), '보유한 주식이 없어요');
 });
 
@@ -203,6 +215,7 @@ test('the explicit current price overrides the command quote for optimistic calc
     stockId: 'jbbj',
     quantityShares: 2,
     quotedPriceWon: 1_842,
+    quotedRevision: 2,
   };
   const bought = applyMarketCommand(snapshot, command, 2_000);
   assert.equal(bought.account.cashWon, 6_000);
@@ -243,6 +256,7 @@ test('beginner mission advances through favorite, reason, then first whole-share
   });
   const ordered = applyMarketCommand(funded, {
     kind: 'buy', requestId: 'buy-mission', stockId: 'adobe', quantityShares: 1, quotedPriceWon: 770,
+    quotedRevision: 4,
   });
   assert.equal(ordered.beginnerMission, 'complete');
 });
@@ -250,6 +264,7 @@ test('beginner mission advances through favorite, reason, then first whole-share
 test('monthly profit subtracts the month-start unrealized baseline', () => {
   const snapshot = applyMarketCommand(withBrokerCash(10_000), {
     kind: 'buy', requestId: 'buy-for-summary', stockId: 'jbbj', quantityShares: 2, quotedPriceWon: 1_800,
+    quotedRevision: 2,
   });
   snapshot.account.unrealizedPnlAtMonthStartWon = 20;
   const summary = getAccountSummary(snapshot);

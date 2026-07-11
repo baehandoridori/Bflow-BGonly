@@ -40,6 +40,10 @@ export function MarketAccountView({
 }: MarketAccountViewProps) {
   const snapshot = useMarketPreviewStore((state) => state.visible);
   const mutating = useMarketPreviewStore((state) => state.mutating);
+  const loading = useMarketPreviewStore((state) => state.loading);
+  const valueRefreshRequired = useMarketPreviewStore((state) => state.valueRefreshRequired);
+  const sessionKey = useMarketPreviewStore((state) => state.sessionKey);
+  const load = useMarketPreviewStore((state) => state.load);
   const currentUser = useAuthStore((state) => state.currentUser);
   const [transferDirection, setTransferDirection] = useState<TransferDirection | null>(null);
   const depositOpenerRef = useRef<HTMLButtonElement>(null);
@@ -115,7 +119,7 @@ export function MarketAccountView({
                 <button
                   ref={depositOpenerRef}
                   type="button"
-                  disabled={mutating}
+                  disabled={mutating || valueRefreshRequired}
                   onClick={() => setTransferDirection('wallet-to-broker')}
                   className="min-h-11 cursor-pointer rounded-xl bg-accent px-4 py-2 text-sm font-bold text-on-accent transition-colors duration-200 hover:bg-accent/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent disabled:cursor-not-allowed disabled:opacity-50"
                 >
@@ -124,7 +128,7 @@ export function MarketAccountView({
                 <button
                   ref={withdrawalOpenerRef}
                   type="button"
-                  disabled={mutating}
+                  disabled={mutating || valueRefreshRequired}
                   onClick={() => setTransferDirection('broker-to-wallet')}
                   className="min-h-11 cursor-pointer rounded-xl border border-bg-border px-4 py-2 text-sm font-bold text-text-primary transition-colors duration-200 hover:bg-bg-border/35 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent disabled:cursor-not-allowed disabled:opacity-50"
                 >
@@ -132,6 +136,22 @@ export function MarketAccountView({
                 </button>
               </div>
             </div>
+            {valueRefreshRequired && (
+              <div
+                role="alert"
+                className="mt-3 rounded-xl border border-bg-border bg-bg-card px-4 py-3 text-sm text-text-secondary"
+              >
+                <p>최신 잔액을 확인한 뒤 포인트를 다시 이동할 수 있어요.</p>
+                <button
+                  type="button"
+                  disabled={loading}
+                  onClick={() => void load(sessionKey ?? undefined)}
+                  className="mt-2 min-h-10 cursor-pointer rounded-xl border border-bg-border px-3 py-2 font-semibold text-text-primary transition-colors duration-200 hover:bg-bg-border/35 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  최신 계좌 정보 다시 불러오기
+                </button>
+              </div>
+            )}
           </header>
 
           <section className="border-t border-bg-border pt-7" aria-labelledby="available-cash-heading">
