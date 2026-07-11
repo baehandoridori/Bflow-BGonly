@@ -138,7 +138,7 @@ export function MarketNav({ active, onNavigate, onBack }: MarketNavProps) {
             className="inline-flex min-h-11 shrink-0 cursor-pointer items-center gap-2 rounded-xl px-3 py-2 text-sm font-semibold text-text-secondary transition-colors duration-200 hover:bg-bg-border/45 hover:text-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
           >
             <ArrowLeft aria-hidden="true" size={17} />
-            {active === 'home' ? '놀이터로' : '뒤로'}
+            뒤로
           </button>
         </div>
 

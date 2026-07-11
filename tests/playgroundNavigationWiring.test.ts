@@ -209,6 +209,20 @@ test('Playground owns one local Back controller for visible and native Back acti
   assert.doesNotMatch(marketRouter, /navigationBackStack/);
 });
 
+test('market common Back button stays destination-neutral when local history target is unknown', () => {
+  const source = readFileSync('src/views/playground/market/MarketNav.tsx', 'utf8');
+  const backButton = source.match(
+    /<button(?:(?!<\/button>)[\s\S])*onClick=\{onBack\}(?:(?!<\/button>)[\s\S])*<\/button>/,
+  )?.[0] ?? '';
+
+  assert.notEqual(backButton, '');
+  assert.match(backButton, /type="button"/);
+  assert.match(backButton, /\bmin-h-11\b/);
+  assert.match(backButton, /<ArrowLeft aria-hidden="true"/);
+  assert.match(backButton, /<ArrowLeft[^>]*\/>\s*뒤로\s*<\/button>/);
+  assert.doesNotMatch(backButton, /active\s*===\s*'home'|놀이터로/);
+});
+
 test('dot navigation commits history only after coverage and market restore targets real scrollers', () => {
   const view = readFileSync('src/views/PlaygroundView.tsx', 'utf8');
   const router = readFileSync('src/views/playground/market/MarketRouter.tsx', 'utf8');
