@@ -93,7 +93,7 @@ Also assert a `halt` event freezes prices throughout its interval and a positive
 
 - [ ] **Step 2: Run the price-engine test and verify RED**
 
-Run: `node --test ./tests/playgroundMarketPriceEngine.test.ts`  
+Run: `node --test ./tests/playgroundMarketPriceEngine.test.ts`
 Expected: FAIL because `livePriceEngine.ts` and exported types do not exist.
 
 - [ ] **Step 3: Implement continuous deterministic prices**
@@ -113,7 +113,7 @@ assert.equal(resolveIntervalForRange('all', '1h'), '1d');
 
 - [ ] **Step 5: Run the new OHLC tests and verify RED**
 
-Run: `node --test ./tests/playgroundMarketPriceEngine.test.ts`  
+Run: `node --test ./tests/playgroundMarketPriceEngine.test.ts`
 Expected: FAIL on missing candle/aggregation functions.
 
 - [ ] **Step 6: Implement candle generation and aggregation**
@@ -122,7 +122,7 @@ Generate no more than 600 returned candles. Preserve event IDs in any candle who
 
 - [ ] **Step 7: Add the test file to `test:playground` and verify GREEN**
 
-Run: `npm run test:playground`  
+Run: `npm run test:playground`
 Expected: all existing 100 tests plus the new price tests pass.
 
 - [ ] **Step 8: Commit**
@@ -198,7 +198,7 @@ Assert `buy 3 shares at 1,842 won` spends `5,526원`, adds exactly 3 shares, and
 
 - [ ] **Step 2: Run domain tests and verify RED**
 
-Run: `node --test ./tests/playgroundMarketDomain.test.ts`  
+Run: `node --test ./tests/playgroundMarketDomain.test.ts`
 Expected: FAIL because the old micro-share/point command API is still present.
 
 - [ ] **Step 3: Implement the new account domain**
@@ -215,7 +215,7 @@ Use an injected `Storage` fake. Assert the first read creates the approved accou
 
 - [ ] **Step 6: Run local gateway tests and verify RED**
 
-Run: `node --test ./tests/playgroundMarketLocalStorageGateway.test.ts`  
+Run: `node --test ./tests/playgroundMarketLocalStorageGateway.test.ts`
 Expected: FAIL because `localStorageGateway.ts` does not exist.
 
 - [ ] **Step 7: Implement the preview-only localStorage gateway**
@@ -303,7 +303,7 @@ Assert the migration defines:
 
 - [ ] **Step 2: Run database contract test and verify RED**
 
-Run: `node --test ./tests/playgroundMarketDatabaseContract.test.ts`  
+Run: `node --test ./tests/playgroundMarketDatabaseContract.test.ts`
 Expected: FAIL because the migration does not exist.
 
 - [ ] **Step 3: Implement the migration**
@@ -316,7 +316,7 @@ Assert IPC handlers never accept a renderer-supplied user ID; they call `session
 
 - [ ] **Step 5: Run data wiring test and verify RED**
 
-Run: `node --test ./tests/playgroundMarketDataWiring.test.ts`  
+Run: `node --test ./tests/playgroundMarketDataWiring.test.ts`
 Expected: FAIL because service, IPC, preload, and type APIs are absent.
 
 - [ ] **Step 6: Implement main-owned market service and Supabase wrappers**
@@ -364,7 +364,7 @@ Assert first style is `line`, stored `candlestick` is restored, invalid storage 
 
 - [ ] **Step 2: Run chart UI tests and verify RED**
 
-Run: `node --test ./tests/playgroundMarketChartUi.test.ts`  
+Run: `node --test ./tests/playgroundMarketChartUi.test.ts`
 Expected: FAIL because hooks/canvas and controls do not exist.
 
 - [ ] **Step 3: Implement a visibility-aware one-second clock**
@@ -423,7 +423,7 @@ Assert the detail grid places the order aside in the first desktop row, uses `xl
 
 - [ ] **Step 2: Run order UI test and verify RED**
 
-Run: `node --test ./tests/playgroundMarketOrderUi.test.ts`  
+Run: `node --test ./tests/playgroundMarketOrderUi.test.ts`
 Expected: FAIL against the current non-sticky amount/ratio UI.
 
 - [ ] **Step 3: Implement shared whole-share order controller**
@@ -444,7 +444,7 @@ Assert only an authorized Hansol prop renders `시장 관리`; event form requir
 
 - [ ] **Step 7: Run admin UI tests and verify RED**
 
-Run: `node --test ./tests/playgroundMarketOrderUi.test.ts`  
+Run: `node --test ./tests/playgroundMarketOrderUi.test.ts`
 Expected: FAIL on absent admin panel.
 
 - [ ] **Step 8: Implement the admin panel**
@@ -491,7 +491,7 @@ Assert `lobby → house → market home → stock → account` backs up in rever
 
 - [ ] **Step 2: Run history tests and verify RED**
 
-Run: `node --test ./tests/playgroundHistory.test.ts`  
+Run: `node --test ./tests/playgroundHistory.test.ts`
 Expected: FAIL because the history module is absent.
 
 - [ ] **Step 3: Implement local history and controller wiring**
@@ -504,7 +504,7 @@ Assert BrowserWindow listens for `app-command`, filters exact `browser-backward`
 
 - [ ] **Step 5: Run navigation wiring tests and verify RED**
 
-Run: `node --test ./tests/playgroundNavigationWiring.test.ts`  
+Run: `node --test ./tests/playgroundNavigationWiring.test.ts`
 Expected: FAIL on missing app-command/IPC subscription.
 
 - [ ] **Step 6: Implement native back bridge and common Back action**
@@ -545,7 +545,7 @@ Assert exact canonical ID/name is allowed; same name with another ID is denied; 
 
 - [ ] **Step 2: Run access tests and verify RED**
 
-Run: `node --test ./tests/playgroundNavigationWiring.test.ts`  
+Run: `node --test ./tests/playgroundNavigationWiring.test.ts`
 Expected: FAIL because the current helper is name-only.
 
 - [ ] **Step 3: Implement the canonical access gate**
