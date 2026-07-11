@@ -191,6 +191,29 @@ test('execute RPC owns idempotency, locking, command validation, and atomic ledg
   assert.match(definition, /INSERT INTO public\.playground_value_ledger/i);
 });
 
+test('request IDs are canonical raw strings bounded to two hundred characters in table and RPC', () => {
+  const sql = readMigration();
+  const ledger = tableDefinition(sql, 'playground_value_ledger');
+  const execute = functionDefinition(sql, 'playground_market_execute');
+
+  assert.match(ledger, /char_length\s*\(request_id\)\s+BETWEEN\s+1\s+AND\s+200/i);
+  assert.match(ledger, /char_length\s*\(btrim\s*\(request_id\)\)\s+BETWEEN\s+1\s+AND\s+200/i);
+  assert.match(ledger, /request_id\s*=\s*btrim\s*\(request_id\)/i);
+  assert.match(execute, /char_length\s*\(p_request_id\)\s+NOT\s+BETWEEN\s+1\s+AND\s+200/i);
+  assert.match(execute, /char_length\s*\(btrim\s*\(p_request_id\)\)\s+NOT\s+BETWEEN\s+1\s+AND\s+200/i);
+  assert.match(execute, /p_request_id\s+IS\s+DISTINCT\s+FROM\s+btrim\s*\(p_request_id\)/i);
+});
+
+test('migration documents the accepted test-only anon RPC trust boundary', () => {
+  const sql = readMigration();
+
+  assert.match(sql, /ACCEPTED TEST-ONLY THREAT MODEL/i);
+  assert.match(sql, /가상 포인트|fake|non-monetary/i);
+  assert.match(sql, /anon[\s\S]*?직접[\s\S]*?RPC|direct[\s\S]*?RPC/i);
+  assert.match(sql, /Electron main[\s\S]*?신뢰 경계|trust boundary/i);
+  assert.match(sql, /Supabase Auth[\s\S]*?(?:팀 공개|team-wide|확장 전)/i);
+});
+
 test('admin event RPCs re-verify the unique canonical Hansol identity before writes', () => {
   const sql = readMigration();
 

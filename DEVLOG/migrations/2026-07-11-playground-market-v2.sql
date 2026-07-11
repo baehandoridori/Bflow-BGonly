@@ -8,6 +8,15 @@
 --   DB의 정확한 배한솔 name + Slack ID 한 행을 다시 확인한다.
 -- - user UUID를 migration에 박지 않고 public.users의 canonical 행에서 가져온다.
 -- - 모든 금액/수량은 JavaScript Number.MAX_SAFE_INTEGER 범위의 정수만 다룬다.
+--
+-- ACCEPTED TEST-ONLY THREAT MODEL:
+-- - anon은 API 역할일 뿐 실제 RPC 호출자의 사용자 신원을 인증하지 않는다.
+-- - 아래 name/Slack/p_user_id 확인은 대상 행이 배한솔인지 확인할 뿐이며,
+--   anon 키와 canonical UUID를 아는 외부 호출자는 Electron main을 우회해 직접 RPC를 호출할 수 있다.
+-- - 이 잔여 위험은 실제 금전 가치가 없는 배한솔 한 명의 가상 포인트 테스트에서만 수용한다.
+-- - 공식 Electron main의 canonical SessionManager를 현재 앱 신뢰 경계로 둔다.
+-- - Supabase Auth 또는 검증된 서버 인증은 팀 공개나 실제 가치·민감 데이터로 확장 전 필수다.
+-- - 배포 앱에서 추출 가능한 가짜 비밀값은 보안 경계로 추가하지 않는다.
 -- ============================================================
 
 BEGIN;
@@ -79,7 +88,12 @@ CREATE TABLE IF NOT EXISTS public.playground_value_ledger (
   response_state jsonb,
   created_at timestamptz NOT NULL DEFAULT now(),
   UNIQUE (user_id, request_id),
-  CONSTRAINT playground_ledger_request_id_valid CHECK (length(btrim(request_id)) BETWEEN 1 AND 200),
+  CONSTRAINT playground_ledger_request_id_valid CHECK (
+    char_length(request_id) BETWEEN 1 AND 200
+    AND char_length(btrim(request_id)) BETWEEN 1 AND 200
+    AND request_id = btrim(request_id)
+    AND request_id !~ '^[[:space:]]|[[:space:]]$'
+  ),
   CONSTRAINT playground_ledger_kind_valid CHECK (
     kind IN ('initial-grant', 'favorite', 'read-reason', 'transfer', 'buy', 'sell')
   ),
@@ -363,7 +377,11 @@ BEGIN
     RAISE EXCEPTION 'market access is limited to canonical Hansol' USING ERRCODE = '42501';
   END IF;
 
-  IF p_request_id IS NULL OR length(btrim(p_request_id)) NOT BETWEEN 1 AND 200 THEN
+  IF p_request_id IS NULL
+    OR char_length(p_request_id) NOT BETWEEN 1 AND 200
+    OR char_length(btrim(p_request_id)) NOT BETWEEN 1 AND 200
+    OR p_request_id IS DISTINCT FROM btrim(p_request_id)
+    OR p_request_id ~ '^[[:space:]]|[[:space:]]$' THEN
     RAISE EXCEPTION 'market request id is invalid' USING ERRCODE = '22023';
   END IF;
   IF p_kind IS NULL OR p_kind NOT IN ('favorite', 'read-reason', 'transfer', 'buy', 'sell') THEN
@@ -866,6 +884,8 @@ REVOKE EXECUTE ON FUNCTION public.playground_market_execute(uuid, text, text, js
 REVOKE EXECUTE ON FUNCTION public.playground_market_create_event(uuid, text, text, text, integer, timestamptz, timestamptz) FROM anon, authenticated;
 REVOKE EXECUTE ON FUNCTION public.playground_market_delete_event(uuid, uuid) FROM anon, authenticated;
 
+-- 위 ACCEPTED TEST-ONLY THREAT MODEL에 따라 단일 사용자 가상 포인트 시험 기간에만
+-- anon RPC를 공개한다. Supabase Auth 기반 소유권 검증 전에는 팀 전체에 확장하지 않는다.
 GRANT EXECUTE ON FUNCTION public.playground_market_read(uuid) TO anon;
 GRANT EXECUTE ON FUNCTION public.playground_market_execute(uuid, text, text, jsonb) TO anon;
 GRANT EXECUTE ON FUNCTION public.playground_market_create_event(uuid, text, text, text, integer, timestamptz, timestamptz) TO anon;

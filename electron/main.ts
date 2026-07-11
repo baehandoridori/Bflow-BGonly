@@ -23,6 +23,7 @@ import { PersonalTodoService } from './personalTodoService';
 import type { PersonalTodoCreateInput, PersonalTodoOrderMutation, PersonalTodoPatch, CalendarTodoPatch, PersonalTodoLabelColorKey } from './personalTodoService';
 import { MarketAccountService } from './marketAccountService';
 import type { MarketAdminEventInput, MarketCommand } from './marketAccountService';
+import { getCanonicalMarketQuoteWon } from '../shared/playgroundMarketPrice.mjs';
 import { PersonalTodoRecoveryJournal } from './personalTodoRecoveryJournal';
 import { PersonalTodoCalendarSync, PERSONAL_TODO_GOOGLE_LINK_KEY, PERSONAL_TODO_GOOGLE_USER_KEY } from './personalTodoCalendarSync';
 import type { LinkedPersonalTodoCalendarEvent, PersonalTodoCalendarAdapter } from './personalTodoCalendarSync';
@@ -1641,6 +1642,8 @@ personalTodoService = new PersonalTodoService({
 });
 
 marketAccountService = new MarketAccountService({
+  getNowMs: Date.now,
+  resolveCanonicalQuote: getCanonicalMarketQuoteWon,
   persistence: {
     read: sbReadPlaygroundMarketState,
     execute: sbExecutePlaygroundMarketCommand,

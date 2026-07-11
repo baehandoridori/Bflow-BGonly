@@ -3,10 +3,12 @@ import { existsSync, readFileSync } from 'node:fs';
 import test from 'node:test';
 
 import type {
+  MarketAdminEvent,
   MarketAdminEventInput,
   MarketCommand,
   MarketRemoteState,
 } from '../src/features/playground/market/types.ts';
+import { getLivePriceWon } from '../src/features/playground/market/livePriceEngine.ts';
 
 const HANSOL_ID = 'fcc4b438-2696-4e88-a03f-d6f34e73e08f';
 
@@ -132,6 +134,8 @@ test('market service rejects non-Hansol sessions and stale read completion', asy
   };
   const service = new MarketAccountService({
     getCanonicalSession: () => session,
+    getNowMs: Date.now,
+    resolveCanonicalQuote: () => { throw new Error('unexpected quote resolution'); },
     persistence,
     logger: { error: () => undefined },
   });
@@ -160,6 +164,8 @@ test('market service serializes mutations, rejects stale completion, and logs or
   const firstGate = new Promise<void>((resolve) => { releaseFirst = resolve; });
   const service = new MarketAccountService({
     getCanonicalSession: () => session,
+    getNowMs: Date.now,
+    resolveCanonicalQuote: () => { throw new Error('unexpected quote resolution'); },
     persistence: {
       read: async () => remoteState(),
       execute: async (_userId: string, command: MarketCommand) => {
@@ -198,6 +204,231 @@ test('market service serializes mutations, rejects stale completion, and logs or
     /저장|불러오|다시/,
   );
   assert.equal((logged.at(-1) as { code?: string })?.code, 'ECONNREFUSED');
+});
+
+test('market service revalidates the full Hansol authorization fingerprint around queued persistence', async () => {
+  const { MarketAccountService } = await import('../electron/marketAccountService.ts');
+  let session = {
+    userId: HANSOL_ID,
+    epoch: 11,
+    name: '배한솔',
+    slackId: 'U05DFV9UAN5',
+  };
+  const calls: string[] = [];
+  let releaseFirst!: () => void;
+  const firstGate = new Promise<void>((resolve) => { releaseFirst = resolve; });
+  const service = new MarketAccountService({
+    getCanonicalSession: () => session,
+    getNowMs: Date.now,
+    resolveCanonicalQuote: () => { throw new Error('unexpected quote resolution'); },
+    persistence: {
+      read: async () => remoteState(),
+      execute: async (_userId: string, command: MarketCommand) => {
+        calls.push(command.requestId);
+        if (command.requestId === 'fingerprint-first') await firstGate;
+        return remoteState({ revision: 2 });
+      },
+      createAdminEvent: async () => remoteState(),
+      deleteAdminEvent: async () => remoteState(),
+    },
+    logger: { error: () => undefined },
+  });
+
+  const first = service.execute({
+    kind: 'favorite', requestId: 'fingerprint-first', stockId: 'jbbj', wished: true,
+  }).then(() => null, (error: unknown) => error);
+  const second = service.execute({
+    kind: 'read-reason', requestId: 'fingerprint-second', stockId: 'jbbj',
+  }).then(() => null, (error: unknown) => error);
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.deepEqual(calls, ['fingerprint-first']);
+
+  session = { ...session, slackId: '권한이-바뀐-Slack' };
+  releaseFirst();
+  const [firstOutcome, secondOutcome] = await Promise.all([first, second]);
+
+  assert.ok(firstOutcome instanceof Error, '진행 중 권한 변경은 완료 응답을 거절해야 한다');
+  assert.match(firstOutcome.message, /배한솔|권한|세션|이전/);
+  assert.ok(secondOutcome instanceof Error, '대기 중 권한 변경은 DB 호출 전에 거절해야 한다');
+  assert.match(secondOutcome.message, /배한솔|권한|세션|이전/);
+  assert.deepEqual(calls, ['fingerprint-first']);
+});
+
+test('market service rejects non-canonical or oversized request IDs before persistence', async () => {
+  const { MarketAccountService } = await import('../electron/marketAccountService.ts');
+  const persistedRequestIds: string[] = [];
+  const service = new MarketAccountService({
+    getCanonicalSession: () => ({
+      userId: HANSOL_ID,
+      epoch: 1,
+      name: '배한솔',
+      slackId: 'U05DFV9UAN5',
+    }),
+    getNowMs: Date.now,
+    resolveCanonicalQuote: () => { throw new Error('unexpected quote resolution'); },
+    persistence: {
+      read: async () => remoteState(),
+      execute: async (_userId: string, command: MarketCommand) => {
+        persistedRequestIds.push(command.requestId);
+        return remoteState({ revision: 2 });
+      },
+      createAdminEvent: async () => remoteState(),
+      deleteAdminEvent: async () => remoteState(),
+    },
+    logger: { error: () => undefined },
+  });
+
+  for (const requestId of ['', ' 앞공백', '뒤공백 ', 'x'.repeat(201)]) {
+    await assert.rejects(
+      service.execute({ kind: 'favorite', requestId, stockId: 'jbbj', wished: true }),
+      /요청.*ID|공백|200/,
+    );
+  }
+  await assert.rejects(
+    service.execute({
+      kind: 'favorite',
+      requestId: 123 as unknown as string,
+      stockId: 'jbbj',
+      wished: true,
+    }),
+    /요청.*ID|문자열/,
+  );
+  assert.deepEqual(persistedRequestIds, []);
+
+  const exactLimit = 'r'.repeat(200);
+  await service.execute({ kind: 'favorite', requestId: exactLimit, stockId: 'jbbj', wished: true });
+  assert.deepEqual(persistedRequestIds, [exactLimit]);
+});
+
+test('market service rejects a manipulated quote before persistence and persists only the canonical quote', async () => {
+  const { MarketAccountService } = await import('../electron/marketAccountService.ts');
+  const nowMs = Date.parse('2026-07-11T12:00:30Z');
+  const clockMs = nowMs + 789;
+  const event: MarketAdminEvent = {
+    id: 'shock-1',
+    stockId: 'jbbj',
+    kind: 'shock-up',
+    title: '상승 충격',
+    impactBps: 1200,
+    startsAt: '2026-07-11T12:00:00Z',
+    endsAt: '2026-07-11T12:01:00Z',
+    revision: 1,
+  };
+  const profile = {
+    stockId: 'jbbj',
+    basePriceWon: 1842,
+    volatilityBps: 180,
+    phase: 0.37,
+  };
+  const canonicalQuoteWon = getLivePriceWon(profile, nowMs, [event]);
+  const persisted: MarketCommand[] = [];
+  const service = new MarketAccountService({
+    getCanonicalSession: () => ({
+      userId: HANSOL_ID,
+      epoch: 1,
+      name: '배한솔',
+      slackId: 'U05DFV9UAN5',
+    }),
+    getNowMs: () => clockMs,
+    resolveCanonicalQuote: (stockId: string, atMs: number, events: readonly MarketAdminEvent[]) => {
+      assert.equal(stockId, 'jbbj');
+      assert.equal(atMs, nowMs, 'canonical quote clock must use the current UTC second');
+      return getLivePriceWon(profile, atMs, events);
+    },
+    persistence: {
+      read: async () => remoteState({ adminEvents: [event] }),
+      execute: async (_userId: string, command: MarketCommand) => {
+        persisted.push(command);
+        return remoteState({ revision: 2, adminEvents: [event] });
+      },
+      createAdminEvent: async () => remoteState(),
+      deleteAdminEvent: async () => remoteState(),
+    },
+    logger: { error: () => undefined },
+  });
+
+  await assert.rejects(
+    service.execute({
+      kind: 'buy',
+      requestId: 'tampered-quote',
+      stockId: 'jbbj',
+      quantityShares: 1,
+      quotedPriceWon: 1,
+    }),
+    { message: '가격이 바뀌었어요. 현재 가격을 확인하고 다시 주문해 주세요.' },
+  );
+  assert.equal(persisted.length, 0, '1원 조작 주문은 persistence에 도달하면 안 된다');
+
+  await service.execute({
+    kind: 'buy',
+    requestId: 'canonical-quote',
+    stockId: 'jbbj',
+    quantityShares: 1,
+    quotedPriceWon: canonicalQuoteWon,
+  });
+  assert.equal(persisted.length, 1);
+  assert.equal(
+    (persisted[0] as Extract<MarketCommand, { kind: 'buy' }>).quotedPriceWon,
+    canonicalQuoteWon,
+  );
+});
+
+test('market service revalidates authorization after quote read and immediately before order persistence', async () => {
+  const { MarketAccountService } = await import('../electron/marketAccountService.ts');
+  const nowMs = Date.parse('2026-07-11T12:00:30Z');
+  const profile = {
+    stockId: 'jbbj',
+    basePriceWon: 1842,
+    volatilityBps: 180,
+    phase: 0.37,
+  };
+  const canonicalQuoteWon = getLivePriceWon(profile, nowMs, []);
+  let session = {
+    userId: HANSOL_ID,
+    epoch: 1,
+    name: '배한솔',
+    slackId: 'U05DFV9UAN5',
+  };
+  let markReadStarted!: () => void;
+  const readStarted = new Promise<void>((resolve) => { markReadStarted = resolve; });
+  let releaseRead!: () => void;
+  const readGate = new Promise<void>((resolve) => { releaseRead = resolve; });
+  let executeCalls = 0;
+  const service = new MarketAccountService({
+    getCanonicalSession: () => session,
+    getNowMs: () => nowMs,
+    resolveCanonicalQuote: (_stockId: string, atMs: number, events: readonly MarketAdminEvent[]) => (
+      getLivePriceWon(profile, atMs, events)
+    ),
+    persistence: {
+      read: async () => {
+        markReadStarted();
+        await readGate;
+        return remoteState();
+      },
+      execute: async () => {
+        executeCalls += 1;
+        return remoteState({ revision: 2 });
+      },
+      createAdminEvent: async () => remoteState(),
+      deleteAdminEvent: async () => remoteState(),
+    },
+    logger: { error: () => undefined },
+  });
+
+  const pending = service.execute({
+    kind: 'buy',
+    requestId: 'permission-change-during-quote',
+    stockId: 'jbbj',
+    quantityShares: 1,
+    quotedPriceWon: canonicalQuoteWon,
+  });
+  await readStarted;
+  session = { ...session, name: '권한이 바뀐 사용자' };
+  releaseRead();
+
+  await assert.rejects(pending, /배한솔|권한|세션|이전/);
+  assert.equal(executeCalls, 0, '권한이 바뀐 주문은 quote read 뒤 write에 도달하면 안 된다');
 });
 
 test('Electron gateway hydrates remote account state while preserving static market content', async () => {
@@ -275,6 +506,8 @@ test('main, preload, renderer types, dev preview, and store expose ownership-fre
   const preload = readFileSync('electron/preload.ts', 'utf8');
   const types = readFileSync('src/types/index.ts', 'utf8');
   const supabase = readFileSync('electron/supabase.ts', 'utf8');
+  const livePriceEngine = readFileSync('src/features/playground/market/livePriceEngine.ts', 'utf8');
+  const nodeTsconfig = readFileSync('tsconfig.node.json', 'utf8');
   const devApi = readFileSync('src/mocks/devElectronAPI.ts', 'utf8');
   const store = readFileSync('src/features/playground/market/useMarketPreviewStore.ts', 'utf8');
   const playground = readFileSync('src/views/PlaygroundView.tsx', 'utf8');
@@ -297,6 +530,12 @@ test('main, preload, renderer types, dev preview, and store expose ownership-fre
   assert.match(main, /marketAccountService\.beginQuitting\(\)/);
   assert.match(main, /marketAccountService\.getPendingCount\(\)/);
   assert.match(main, /marketAccountService\.waitForIdle\(15000\)/);
+  assert.match(main, /resolveCanonicalQuote:\s*getCanonicalMarketQuoteWon/);
+  assert.match(main, /getNowMs:\s*Date\.now/);
+  assert.match(livePriceEngine, /shared\/playgroundMarketPrice\.mjs/);
+  assert.doesNotMatch(nodeTsconfig, /"shared"/);
+  assert.equal(existsSync('shared/playgroundMarketPrice.mjs'), true);
+  assert.equal(existsSync('shared/playgroundMarketPrice.d.mts'), true);
 
   for (const apiName of ['marketRead', 'marketExecute', 'marketCreateAdminEvent', 'marketDeleteAdminEvent']) {
     assert.match(preload, new RegExp(`${apiName}:`));

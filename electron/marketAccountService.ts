@@ -75,6 +75,13 @@ export interface MarketCanonicalSession {
   slackId?: string | null;
 }
 
+interface MarketAuthorizationFingerprint {
+  userId: string;
+  epoch: number;
+  name: string;
+  slackId: string;
+}
+
 export interface MarketPersistence {
   read(userId: string): Promise<unknown>;
   execute(userId: string, command: MarketCommand): Promise<unknown>;
@@ -84,6 +91,12 @@ export interface MarketPersistence {
 
 export interface MarketAccountServiceDependencies {
   getCanonicalSession(): MarketCanonicalSession;
+  getNowMs(): number;
+  resolveCanonicalQuote(
+    stockId: string,
+    nowMs: number,
+    events: readonly MarketAdminEvent[],
+  ): number;
   persistence: MarketPersistence;
   logger?: Pick<Console, 'error'>;
 }
@@ -144,6 +157,20 @@ export function parseSafeMarketInteger(value: unknown, label: string): number {
     throw new Error(`${label} 값이 안전한 정수 범위를 벗어났어요.`);
   }
   return Number(parsed);
+}
+
+export function normalizeMarketRequestId(value: unknown): string {
+  if (typeof value !== 'string') {
+    throw new Error('모의투자 요청 ID는 문자열이어야 해요.');
+  }
+  if (value.length < 1 || value.length > 200) {
+    throw new Error('모의투자 요청 ID는 1~200자로 입력해 주세요.');
+  }
+  const normalized = value.trim();
+  if (normalized.length < 1 || normalized.length > 200 || normalized !== value) {
+    throw new Error('모의투자 요청 ID 앞뒤에 공백을 넣을 수 없어요.');
+  }
+  return normalized;
 }
 
 function parseNonNegativeInteger(value: unknown, label: string): number {
@@ -242,6 +269,7 @@ export function parseMarketRemoteState(value: unknown): MarketRemoteState {
 }
 
 class MarketSessionError extends Error {}
+class MarketQuoteChangedError extends Error {}
 
 function errorCode(error: unknown): string {
   return isRecord(error) && typeof error.code === 'string' ? error.code : '';
@@ -253,6 +281,7 @@ function errorText(error: unknown): string {
 }
 
 function friendlyPersistenceError(operation: 'read' | 'write', error: unknown): Error {
+  if (error instanceof MarketSessionError || error instanceof MarketQuoteChangedError) return error;
   const code = errorCode(error);
   const message = errorText(error);
   if (/42501/.test(code) || /canonical Hansol|limited to canonical Hansol|access/i.test(message)) {
@@ -297,7 +326,7 @@ export class MarketAccountService {
     this.transitioningSessions.delete(`${userId}\u0000${epoch}`);
   }
 
-  private capture(): { userId: string; epoch: number } {
+  private capture(): MarketAuthorizationFingerprint {
     if (this.quitting) throw new MarketSessionError('앱이 종료 중이라 새 거래를 시작할 수 없어요.');
     const session = this.dependencies.getCanonicalSession();
     if (!session.userId || !UUID_PATTERN.test(session.userId)) {
@@ -309,13 +338,23 @@ export class MarketAccountService {
     if (this.transitioningSessions.has(`${session.userId}\u0000${session.epoch}`)) {
       throw new MarketSessionError('사용자 세션이 바뀌는 중이에요. 잠시 후 다시 시도해 주세요.');
     }
-    return { userId: session.userId, epoch: session.epoch };
+    return {
+      userId: session.userId,
+      epoch: session.epoch,
+      name: session.name,
+      slackId: session.slackId,
+    };
   }
 
-  private assertCurrent(captured: { userId: string; epoch: number }): void {
+  private assertCurrent(captured: MarketAuthorizationFingerprint): void {
     const current = this.dependencies.getCanonicalSession();
-    if (current.userId !== captured.userId || current.epoch !== captured.epoch) {
-      throw new MarketSessionError('이전 사용자 세션의 결과라 화면에 반영하지 않았어요.');
+    if (
+      current.userId !== captured.userId
+      || current.epoch !== captured.epoch
+      || current.name !== captured.name
+      || current.slackId !== captured.slackId
+    ) {
+      throw new MarketSessionError('모의투자 권한이나 사용자 세션이 바뀌어 결과를 반영하지 않았어요.');
     }
   }
 
@@ -356,9 +395,18 @@ export class MarketAccountService {
     return this.track(captured.userId, request);
   }
 
-  private mutate(work: (userId: string) => Promise<unknown>): Promise<MarketRemoteState> {
+  private mutate(
+    work: (userId: string, revalidateAuthorization: () => void) => Promise<unknown>,
+  ): Promise<MarketRemoteState> {
     const captured = this.capture();
-    const queued = this.queue.enqueue(captured.userId, () => this.persist('write', () => work(captured.userId)));
+    const revalidateAuthorization = () => this.assertCurrent(captured);
+    const queued = this.queue.enqueue(captured.userId, () => {
+      revalidateAuthorization();
+      return this.persist(
+        'write',
+        () => work(captured.userId, revalidateAuthorization),
+      );
+    });
     const request = queued.then((state) => {
       this.assertCurrent(captured);
       return state;
@@ -367,7 +415,37 @@ export class MarketAccountService {
   }
 
   async execute(command: MarketCommand): Promise<MarketRemoteState> {
-    return this.mutate((userId) => this.dependencies.persistence.execute(userId, command));
+    const requestId = normalizeMarketRequestId(
+      isRecord(command) ? command.requestId : undefined,
+    );
+    const normalizedCommand = { ...command, requestId } as MarketCommand;
+    return this.mutate(async (userId, revalidateAuthorization) => {
+      let canonicalCommand = normalizedCommand;
+      if (normalizedCommand.kind === 'buy' || normalizedCommand.kind === 'sell') {
+        const current = await this.persist(
+          'read',
+          () => this.dependencies.persistence.read(userId),
+        );
+        const currentSecondMs = Math.floor(this.dependencies.getNowMs() / 1000) * 1000;
+        const canonicalQuoteWon = this.dependencies.resolveCanonicalQuote(
+          normalizedCommand.stockId,
+          currentSecondMs,
+          current.adminEvents,
+        );
+        if (
+          !Number.isSafeInteger(canonicalQuoteWon)
+          || canonicalQuoteWon <= 0
+          || normalizedCommand.quotedPriceWon !== canonicalQuoteWon
+        ) {
+          throw new MarketQuoteChangedError(
+            '가격이 바뀌었어요. 현재 가격을 확인하고 다시 주문해 주세요.',
+          );
+        }
+        canonicalCommand = { ...normalizedCommand, quotedPriceWon: canonicalQuoteWon };
+        revalidateAuthorization();
+      }
+      return this.dependencies.persistence.execute(userId, canonicalCommand);
+    });
   }
 
   async createAdminEvent(input: MarketAdminEventInput): Promise<MarketRemoteState> {
