@@ -16,6 +16,10 @@ module.exports = {
         },
         accent: 'rgb(var(--color-accent) / <alpha-value>)',
         'accent-sub': 'rgb(var(--color-accent-sub) / <alpha-value>)',
+        'market-up': 'rgb(var(--color-market-up) / <alpha-value>)',
+        'market-down': 'rgb(var(--color-market-down) / <alpha-value>)',
+        'market-flat': 'rgb(var(--color-market-flat) / <alpha-value>)',
+        'market-news': 'rgb(var(--color-market-news) / <alpha-value>)',
         // 씬 길이 변경 (LD/SD)
         'length-up': 'rgb(var(--color-length-up) / <alpha-value>)',
         'length-down': 'rgb(var(--color-length-down) / <alpha-value>)',

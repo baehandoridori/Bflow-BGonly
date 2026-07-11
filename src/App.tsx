@@ -1,6 +1,9 @@
 import { lazy, Suspense, useEffect, useCallback, useState, useRef, Component, type ReactNode, type ErrorInfo } from 'react';
+import { createPortal } from 'react-dom';
 import { MainLayout } from '@/components/layout/MainLayout';
-import { useAppStore, type ViewMode } from '@/stores/useAppStore';
+import { useAppStore } from '@/stores/useAppStore';
+import { resolveAllowedView } from '@/features/playground/featureFlag';
+import { PlaygroundEntryOverlay } from '@/features/playground/transition/PlaygroundEntryOverlay';
 import { useDataStore } from '@/stores/useDataStore';
 import { useAuthStore } from '@/stores/useAuthStore';
 import { useActivityStore } from '@/stores/useActivityStore';
@@ -18,6 +21,7 @@ const CompositingView = lazy(() => import('@/views/CompositingView')); // defaul
 const CompositingDashboardView = lazy(() => import('@/views/CompositingDashboardView')); // v1.30.0+ 새 현황 대시보드
 const RetakeHubView = lazy(() => import('@/views/RetakeHubView')); // 리테이크 허브 5단계 — 감독 세트 허브
 const CharacterBoardView = lazy(() => import('@/views/CharacterBoardView')); // 캐릭터 현황판 (게이팅)
+const PlaygroundView = lazy(() => import('@/views/PlaygroundView'));
 const SettingsView = lazy(() => import('@/views/SettingsView').then(m => ({ default: m.SettingsView })));
 import { SpotlightSearch } from '@/components/spotlight/SpotlightSearch';
 import { LoginScreen } from '@/components/auth/LoginScreen';
@@ -667,7 +671,10 @@ export default function App() {
 
         // 기본 시작 뷰 로드
         if (savedPrefs?.defaultView) {
-          useAppStore.getState().setView(savedPrefs.defaultView as ViewMode);
+          useAppStore.getState().setView(resolveAllowedView(
+            savedPrefs.defaultView,
+            useAuthStore.getState().currentUser?.name,
+          ));
         }
 
         // 토스트 설정 로드
@@ -2828,10 +2835,16 @@ export default function App() {
     return cleanup;
   }, [setPendingDeepLink]);
 
+  const setView = useAppStore((state) => state.setView);
+  const safeCurrentView = resolveAllowedView(currentView, currentUser?.name);
+  useEffect(() => {
+    if (safeCurrentView !== currentView) setView(safeCurrentView);
+  }, [currentView, safeCurrentView, setView]);
+
   // 뷰 렌더링
   const renderView = () => {
     const view = (() => {
-      switch (currentView) {
+      switch (safeCurrentView) {
         case 'dashboard':
           return <Dashboard />;
         case 'scenes':
@@ -2864,6 +2877,8 @@ export default function App() {
                 onRetry={characterBoardAccess.retry}
               />
             );
+        case 'playground':
+          return <PlaygroundView />;
         case 'settings':
           return <SettingsView />;
         default:
@@ -2980,6 +2995,7 @@ export default function App() {
       <SvgIconDefs />
       <GradientBackdrop intensity="normal" enabled={globalGradientEnabled} />
       <MainLayout onRefresh={loadData}>{renderView()}</MainLayout>
+      <PlaygroundEntryOverlay />
       <SpotlightSearch />
       <GlobalTooltipProvider />
 
@@ -3005,22 +3021,25 @@ export default function App() {
       <ConfirmDialogHost />
       <UpdateCenterModal />
 
-      {/* Sonner 토스트 — 테마 색상 연동 + 스르륵 애니메이션 + 호버 펼침 */}
-      <Toaster
-        theme={colorMode === 'light' ? 'light' : 'dark'}
-        position={toastPosition}
-        duration={toastDuration}
-        toastOptions={{
-          className: 'bflow-toast',
-          style: {
-            fontSize: '13px',
-          },
-        }}
-        gap={8}
-        visibleToasts={5}
-        expand={false}
-        closeButton
-      />
+      {/* Sonner 토스트 — 대화상자가 #root를 inert 처리해도 알림은 body에서 유지 */}
+      {typeof document !== 'undefined' && createPortal(
+        <Toaster
+          theme={colorMode === 'light' ? 'light' : 'dark'}
+          position={toastPosition}
+          duration={toastDuration}
+          toastOptions={{
+            className: 'bflow-toast',
+            style: {
+              fontSize: '13px',
+            },
+          }}
+          gap={8}
+          visibleToasts={5}
+          expand={false}
+          closeButton
+        />,
+        document.body,
+      )}
 
       {/* 환영 팝업 (로그인 직후) */}
       {welcomeUser && (
