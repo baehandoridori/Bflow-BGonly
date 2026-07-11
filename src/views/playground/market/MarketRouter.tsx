@@ -1,6 +1,8 @@
-import { useEffect } from 'react';
+import { useEffect, useMemo } from 'react';
 
 import type { MarketRoute, PlaygroundAction } from '@/features/playground/routes';
+import { buildMarketQuoteWonByStockId } from '@/features/playground/market/marketQuote';
+import { useMarketClock } from '@/features/playground/market/useMarketClock';
 import { useMarketPreviewStore } from '@/features/playground/market/useMarketPreviewStore';
 import { MarketAccountView } from './MarketAccountView';
 import { MarketDataBoundary } from './MarketDataBoundary';
@@ -16,7 +18,14 @@ interface MarketRouterProps {
 }
 
 export function MarketRouter({ route, onNavigate, onExit }: MarketRouterProps) {
-  const hasVisibleSnapshot = useMarketPreviewStore((state) => state.visible !== null);
+  const visibleSnapshot = useMarketPreviewStore((state) => state.visible);
+  const hasVisibleSnapshot = visibleSnapshot !== null;
+  const nowMs = useMarketClock();
+  const quoteWonByStockId = useMemo(() => (
+    visibleSnapshot
+      ? buildMarketQuoteWonByStockId(visibleSnapshot, nowMs)
+      : {}
+  ), [nowMs, visibleSnapshot]);
 
   useEffect(() => {
     if (!hasVisibleSnapshot) return;
@@ -35,18 +44,22 @@ export function MarketRouter({ route, onNavigate, onExit }: MarketRouterProps) {
               focusAllStocksRequestId={route.focusRequest?.target === 'all-stocks'
                 ? route.focusRequest.id
                 : null}
+              quoteWonByStockId={quoteWonByStockId}
               onOpenStock={(stockId) => onNavigate({ kind: 'open-stock', stockId })}
             />
           )}
           {route.kind === 'stock' && (
             <StockDetailView
               stockId={route.stockId}
+              nowMs={nowMs}
+              currentPriceWon={quoteWonByStockId[route.stockId]}
               onOpenAccount={() => onNavigate({ kind: 'open-account' })}
               onOpenMarketHome={() => onNavigate({ kind: 'market-home' })}
             />
           )}
           {route.kind === 'account' && (
             <MarketAccountView
+              quoteWonByStockId={quoteWonByStockId}
               onOpenStock={(stockId) => onNavigate({ kind: 'open-stock', stockId })}
               onOpenMarketHome={() => onNavigate({ kind: 'market-home' })}
             />

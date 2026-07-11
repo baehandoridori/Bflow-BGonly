@@ -3,19 +3,21 @@ import { ArrowLeft, Briefcase, Star } from 'lucide-react';
 
 import { getStockQuote, holdingValueWon } from '@/features/playground/market/domain';
 import { formatShares, formatWon } from '@/features/playground/market/format';
-import { getMarketSnapshotQuoteWon } from '@/features/playground/market/marketQuote';
 import type {
-  MarketPeriod,
+  MarketBarInterval,
+  MarketChartRange,
   MarketStock,
   MarketTrend,
 } from '@/features/playground/market/types';
+import { useMarketChartPreference } from '@/features/playground/market/useMarketChartPreference';
 import { useMarketPreviewStore } from '@/features/playground/market/useMarketPreviewStore';
-import { useMarketClock } from '@/features/playground/market/useMarketClock';
 import { MarketOrderPanel } from './MarketOrderPanel';
 import { MarketPriceChart } from './MarketPriceChart';
 
 interface StockDetailViewProps {
   stockId: string;
+  nowMs: number;
+  currentPriceWon?: number;
   onOpenAccount(): void;
   onOpenMarketHome(): void;
 }
@@ -60,12 +62,19 @@ function formatNewsDate(value: string): string {
   }).format(date);
 }
 
-export function StockDetailView({ stockId, onOpenAccount, onOpenMarketHome }: StockDetailViewProps) {
+export function StockDetailView({
+  stockId,
+  nowMs,
+  currentPriceWon: quotedPriceWon,
+  onOpenAccount,
+  onOpenMarketHome,
+}: StockDetailViewProps) {
   const snapshot = useMarketPreviewStore((state) => state.visible);
   const mutating = useMarketPreviewStore((state) => state.mutating);
   const execute = useMarketPreviewStore((state) => state.execute);
-  const [period, setPeriod] = useState<MarketPeriod>('today');
-  const nowMs = useMarketClock();
+  const [chartStyle, setChartStyle] = useMarketChartPreference();
+  const [chartInterval, setChartInterval] = useState<MarketBarInterval>('1m');
+  const [chartRange, setChartRange] = useState<MarketChartRange>('today');
 
   if (!snapshot) return null;
 
@@ -89,7 +98,7 @@ export function StockDetailView({ stockId, onOpenAccount, onOpenMarketHome }: St
     );
   }
 
-  const currentPriceWon = getMarketSnapshotQuoteWon(snapshot, stock.id, nowMs);
+  const currentPriceWon = quotedPriceWon ?? stock.referencePriceWon;
   const movement = movementSummary({ ...stock, referencePriceWon: currentPriceWon });
   const wished = snapshot.favoriteStockIds.includes(stock.id);
   const holding = snapshot.account.holdings.find((item) => item.stockId === stock.id);
@@ -163,7 +172,7 @@ export function StockDetailView({ stockId, onOpenAccount, onOpenMarketHome }: St
           >
             {stock.name}
           </h1>
-          <p className="mt-5 text-4xl font-bold tabular-nums text-text-primary">{formatWon(currentPriceWon)}</p>
+          <p className="mt-5 text-4xl font-bold tabular-nums text-text-primary transition-colors duration-200 motion-reduce:transition-none">{formatWon(currentPriceWon)}</p>
           <p className={`mt-3 text-base font-bold tabular-nums ${trendClass(movement.quote.trend)}`}>
             {movement.compact}
           </p>
@@ -184,7 +193,17 @@ export function StockDetailView({ stockId, onOpenAccount, onOpenMarketHome }: St
         >
           <h2 id="price-chart-heading" className="text-lg font-bold text-text-primary">가격 그래프</h2>
           <div className="mt-5">
-            <MarketPriceChart stock={stock} period={period} onPeriodChange={setPeriod} />
+            <MarketPriceChart
+              stock={{ ...stock, referencePriceWon: currentPriceWon }}
+              events={snapshot.adminEvents}
+              nowMs={nowMs}
+              style={chartStyle}
+              interval={chartInterval}
+              range={chartRange}
+              onStyleChange={setChartStyle}
+              onIntervalChange={setChartInterval}
+              onRangeChange={setChartRange}
+            />
           </div>
         </section>
 

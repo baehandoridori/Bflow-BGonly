@@ -13,6 +13,7 @@ export function useMarketClock(): number {
     let timer: ReturnType<typeof setTimeout> | null = null;
 
     const schedule = () => {
+      if (document.visibilityState !== 'visible') return;
       const current = Date.now();
       timer = setTimeout(() => {
         setNowMs(alignMarketSecond(Date.now()));
@@ -20,9 +21,10 @@ export function useMarketClock(): number {
       }, delayUntilNextSecond(current));
     };
     const handleVisibility = () => {
+      if (timer) clearTimeout(timer);
+      timer = null;
       if (document.visibilityState !== 'visible') return;
       setNowMs(alignMarketSecond(Date.now()));
-      if (timer) clearTimeout(timer);
       schedule();
     };
 

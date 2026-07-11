@@ -8,6 +8,7 @@ import { useAuthStore } from '@/stores/useAuthStore';
 import { PointTransferDialog } from './PointTransferDialog';
 
 interface MarketAccountViewProps {
+  quoteWonByStockId: Readonly<Record<string, number>>;
   onOpenStock(stockId: string): void;
   onOpenMarketHome(): void;
 }
@@ -32,7 +33,11 @@ function signedRate(points: number, rate: number): string {
   return `${points > 0 ? '+' : '-'}${Math.abs(rate).toFixed(1)}% ${points > 0 ? '상승' : '하락'}`;
 }
 
-export function MarketAccountView({ onOpenStock, onOpenMarketHome }: MarketAccountViewProps) {
+export function MarketAccountView({
+  quoteWonByStockId,
+  onOpenStock,
+  onOpenMarketHome,
+}: MarketAccountViewProps) {
   const snapshot = useMarketPreviewStore((state) => state.visible);
   const mutating = useMarketPreviewStore((state) => state.mutating);
   const currentUser = useAuthStore((state) => state.currentUser);
@@ -42,7 +47,13 @@ export function MarketAccountView({ onOpenStock, onOpenMarketHome }: MarketAccou
 
   if (!snapshot) return null;
 
-  const summary = getAccountSummary(snapshot);
+  const summary = getAccountSummary({
+    ...snapshot,
+    stocks: snapshot.stocks.map((stock) => ({
+      ...stock,
+      referencePriceWon: quoteWonByStockId[stock.id] ?? stock.referencePriceWon,
+    })),
+  });
   const accountTitle = currentUser?.name
     ? `${currentUser.name}님의 투자 계좌`
     : '내 투자 계좌';
@@ -148,7 +159,9 @@ export function MarketAccountView({ onOpenStock, onOpenMarketHome }: MarketAccou
                 {snapshot.account.holdings.map((holding) => {
                   const stock = snapshot.stocks.find((item) => item.id === holding.stockId);
                   if (!stock) return null;
-                  const value = holdingValueWon(holding, stock.referencePriceWon);
+                  const currentPriceWon = quoteWonByStockId[holding.stockId]
+                    ?? stock.referencePriceWon;
+                  const value = holdingValueWon(holding, currentPriceWon);
                   const pnl = value - holding.costBasisWon;
                   const rate = holding.costBasisWon > 0
                     ? (pnl / holding.costBasisWon) * 100
@@ -164,7 +177,7 @@ export function MarketAccountView({ onOpenStock, onOpenMarketHome }: MarketAccou
                         {stock.name} · {formatShares(holding.quantityShares)}
                       </span>
                       <span className="shrink-0 text-right">
-                        <span className="block font-semibold tabular-nums text-text-primary">
+                        <span className="block font-semibold tabular-nums text-text-primary transition-colors duration-200 motion-reduce:transition-none">
                           {formatWon(value)}
                         </span>
                         <span className={`mt-1 block text-sm font-semibold tabular-nums ${resultClass(pnl)}`}>

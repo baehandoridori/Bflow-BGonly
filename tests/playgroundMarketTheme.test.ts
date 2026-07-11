@@ -45,7 +45,12 @@ test('preview feature only reaches browser persistence through the injected stor
     .filter((file) => /\.tsx?$/.test(file));
   const storageAdapter = 'src/features/playground/market/localStorageGateway.ts';
   const bridgeAdapter = 'src/features/playground/market/gateway.ts';
-  for (const file of files.filter((file) => file !== storageAdapter && file !== bridgeAdapter)) {
+  const chartPreferenceAdapter = 'src/features/playground/market/useMarketChartPreference.ts';
+  for (const file of files.filter((file) => (
+    file !== storageAdapter
+    && file !== bridgeAdapter
+    && file !== chartPreferenceAdapter
+  ))) {
     const source = readFileSync(file, 'utf8');
     assert.doesNotMatch(
       source,
@@ -67,4 +72,8 @@ test('preview feature only reaches browser persistence through the injected stor
     bridge,
     /window\.localStorage|globalThis\.localStorage|sessionStorage|indexedDB|ipcRenderer|from\s+['"]electron['"]|createClient\(|@supabase|@\/services\//i,
   );
+  const chartPreference = readFileSync(chartPreferenceAdapter, 'utf8');
+  assert.match(chartPreference, /bflow:playground-market:chart-style:v2/);
+  assert.match(chartPreference, /window\.localStorage/);
+  assert.doesNotMatch(chartPreference, /cashWon|holding|account/i);
 });

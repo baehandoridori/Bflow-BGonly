@@ -194,15 +194,18 @@ test('global order toaster is portalled beyond the dialog inert root boundary', 
 
 test('detail chart and order panel keep the approved source contracts', () => {
   const chart = readFileSync('src/views/playground/market/MarketPriceChart.tsx', 'utf8');
+  const canvas = readFileSync('src/views/playground/market/MarketChartCanvas.tsx', 'utf8');
   const order = readFileSync('src/views/playground/market/MarketOrderPanel.tsx', 'utf8');
-  for (const label of ['오늘', '1주', '1개월', '전체', '가격 정보가 아직 없어요']) {
+  for (const label of ['선', '캔들', '1분', '5분', '10분', '15분', '1시간', '1일', '오늘', '1주', '1개월', '6개월', '전체', '가격 정보가 아직 없어요']) {
     assert.match(chart, new RegExp(label));
   }
-  assert.match(chart, /getChartGeometry\([^)]*720[^)]*280/s);
-  assert.match(chart, /text-market-up/);
-  assert.match(chart, /text-market-down/);
-  assert.match(chart, /text-market-flat/);
+  assert.match(chart, /MarketChartCanvas/);
+  assert.match(chart, /buildMarketDisplayCandles/);
+  assert.match(canvas, /getComputedStyle/);
+  assert.match(canvas, /window\.devicePixelRatio/);
+  assert.match(canvas, /type="range"/);
   assert.doesNotMatch(chart, /#[0-9a-f]{3,8}/i);
+  assert.doesNotMatch(canvas, /#[0-9a-f]{3,8}/i);
 
   for (const label of ['현재 가격으로 바로 사기', '최대', '전부', '직접 입력', '원하는 가격에 주문하기']) {
     assert.match(order, new RegExp(label));

@@ -17,3 +17,14 @@ export function getMarketSnapshotQuoteWon(
     snapshot.adminEvents,
   );
 }
+
+export function buildMarketQuoteWonByStockId(
+  snapshot: Pick<MarketSnapshot, 'stocks' | 'adminEvents'>,
+  nowMs: number,
+): Readonly<Record<string, number>> {
+  const alignedNowMs = alignMarketSecond(nowMs);
+  return Object.fromEntries(snapshot.stocks.map((stock) => [
+    stock.id,
+    getCanonicalMarketQuoteWon(stock.id, alignedNowMs, snapshot.adminEvents),
+  ]));
+}

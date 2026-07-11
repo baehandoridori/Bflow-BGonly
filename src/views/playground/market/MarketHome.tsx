@@ -12,14 +12,21 @@ import {
 
 interface MarketHomeProps {
   focusAllStocksRequestId: number | null;
+  quoteWonByStockId: Readonly<Record<string, number>>;
   onOpenStock(stockId: string): void;
 }
 
 const RECOMMENDED_IDS = ['jbbj', 'youtube', 'wacom'];
 
-function marketCounts(stocks: MarketStock[]) {
+function marketCounts(
+  stocks: MarketStock[],
+  quoteWonByStockId: Readonly<Record<string, number>>,
+) {
   return stocks.reduce((counts, stock) => {
-    const trend = getStockQuote(stock).trend;
+    const trend = getStockQuote({
+      ...stock,
+      referencePriceWon: quoteWonByStockId[stock.id] ?? stock.referencePriceWon,
+    }).trend;
     counts[trend] += 1;
     return counts;
   }, { up: 0, down: 0, flat: 0 });
@@ -31,7 +38,11 @@ function missionLabel(snapshot: MarketSnapshot): string {
   return '100P로 첫 주문 연습하기';
 }
 
-export function MarketHome({ focusAllStocksRequestId, onOpenStock }: MarketHomeProps) {
+export function MarketHome({
+  focusAllStocksRequestId,
+  quoteWonByStockId,
+  onOpenStock,
+}: MarketHomeProps) {
   const snapshot = useMarketPreviewStore((state) => state.visible);
   const mutating = useMarketPreviewStore((state) => state.mutating);
   const execute = useMarketPreviewStore((state) => state.execute);
@@ -53,7 +64,7 @@ export function MarketHome({ focusAllStocksRequestId, onOpenStock }: MarketHomeP
     : RECOMMENDED_IDS
       .map((id) => snapshot.stocks.find((stock) => stock.id === id))
       .filter((stock): stock is MarketStock => Boolean(stock));
-  const counts = marketCounts(snapshot.stocks);
+  const counts = marketCounts(snapshot.stocks, quoteWonByStockId);
 
   const toggleFavorite = (stock: MarketStock) => {
     if (mutating) return;
@@ -106,7 +117,10 @@ export function MarketHome({ focusAllStocksRequestId, onOpenStock }: MarketHomeP
         JBBJ 시장 홈
       </h1>
 
-      <MarketRowsScaleProvider stocks={snapshot.stocks}>
+      <MarketRowsScaleProvider
+        stocks={snapshot.stocks}
+        quoteWonByStockId={quoteWonByStockId}
+      >
         <section className="mt-7 rounded-2xl border border-bg-border bg-bg-card p-5 sm:p-6" aria-labelledby="market-today-heading">
           <div className="flex min-w-0 flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
             <div className="min-w-0">
@@ -160,6 +174,7 @@ export function MarketHome({ focusAllStocksRequestId, onOpenStock }: MarketHomeP
               <FavoriteStockCard
                 key={stock.id}
                 stock={stock}
+                currentPriceWon={quoteWonByStockId[stock.id] ?? stock.referencePriceWon}
                 wished={wished.has(stock.id)}
                 onOpen={() => void openStockAfterReadingReason(stock.id)}
                 onToggleFavorite={() => toggleFavorite(stock)}
@@ -178,7 +193,10 @@ export function MarketHome({ focusAllStocksRequestId, onOpenStock }: MarketHomeP
           <div className="mt-4 grid min-w-0 grid-cols-1 gap-3 lg:grid-cols-3">
             {snapshot.news.slice(0, 3).map((item) => {
               const stock = snapshot.stocks.find((candidate) => candidate.id === item.stockId);
-              const quote = stock ? getStockQuote(stock) : null;
+              const quote = stock ? getStockQuote({
+                ...stock,
+                referencePriceWon: quoteWonByStockId[stock.id] ?? stock.referencePriceWon,
+              }) : null;
               return (
                 <button
                   key={item.id}
@@ -212,6 +230,7 @@ export function MarketHome({ focusAllStocksRequestId, onOpenStock }: MarketHomeP
               <div key={stock.id} className="min-w-0">
                 <StockListRow
                   stock={stock}
+                  currentPriceWon={quoteWonByStockId[stock.id] ?? stock.referencePriceWon}
                   wished={wished.has(stock.id)}
                   onOpen={() => void openStockAfterReadingReason(stock.id)}
                   onToggleFavorite={() => toggleFavorite(stock)}

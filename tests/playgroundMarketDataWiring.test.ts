@@ -697,6 +697,7 @@ test('main, preload, renderer types, dev preview, and store expose ownership-fre
   const types = readFileSync('src/types/index.ts', 'utf8');
   const supabase = readFileSync('electron/supabase.ts', 'utf8');
   const livePriceEngine = readFileSync('src/features/playground/market/livePriceEngine.ts', 'utf8');
+  const marketRouter = readFileSync('src/views/playground/market/MarketRouter.tsx', 'utf8');
   const stockDetail = readFileSync('src/views/playground/market/StockDetailView.tsx', 'utf8');
   const orderPanel = readFileSync('src/views/playground/market/MarketOrderPanel.tsx', 'utf8');
   const nodeTsconfig = readFileSync('tsconfig.node.json', 'utf8');
@@ -728,8 +729,10 @@ test('main, preload, renderer types, dev preview, and store expose ownership-fre
   assert.doesNotMatch(nodeTsconfig, /"shared"/);
   assert.equal(existsSync('shared/playgroundMarketPrice.mjs'), true);
   assert.equal(existsSync('shared/playgroundMarketPrice.d.mts'), true);
-  assert.match(stockDetail, /useMarketClock\(\)/);
-  assert.match(stockDetail, /getMarketSnapshotQuoteWon\(snapshot,\s*stock\.id,\s*nowMs\)/);
+  assert.match(marketRouter, /useMarketClock\(\)/);
+  assert.match(marketRouter, /buildMarketQuoteWonByStockId\(visibleSnapshot,\s*nowMs\)/);
+  assert.doesNotMatch(stockDetail, /useMarketClock|getMarketSnapshotQuoteWon/);
+  assert.match(stockDetail, /currentPriceWon:\s*quotedPriceWon/);
   assert.match(stockDetail, /currentPriceWon=\{currentPriceWon\}/);
   assert.match(orderPanel, /currentPriceWon:\s*number/);
   assert.match(orderPanel, /quotedPriceWon:\s*currentPriceWon/);
