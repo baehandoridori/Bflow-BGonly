@@ -2,8 +2,12 @@ import { create, type StoreApi, type UseBoundStore } from 'zustand';
 
 import { applyMarketCommand, validateMarketCommand } from './domain.ts';
 import { createMarketGateway } from './gateway.ts';
-import type { MarketPreviewGateway } from './previewGateway.ts';
-import type { MarketCommand, MarketSnapshot } from './types';
+import {
+  addPreviewAdminEvent,
+  removePreviewAdminEvent,
+  type MarketPreviewGateway,
+} from './previewGateway.ts';
+import type { MarketAdminEventInput, MarketCommand, MarketSnapshot } from './types';
 
 interface MarketPreviewState {
   confirmed: MarketSnapshot | null;
@@ -14,6 +18,8 @@ interface MarketPreviewState {
   sessionKey: string | null;
   load(sessionKey?: string): Promise<void>;
   execute(command: MarketCommand, currentPriceWon?: number): Promise<boolean>;
+  createAdminEvent(input: MarketAdminEventInput): Promise<boolean>;
+  deleteAdminEvent(eventId: string): Promise<boolean>;
   clearError(): void;
 }
 
@@ -21,6 +27,7 @@ export function createMarketPreviewStore(
   gateway: MarketPreviewGateway,
 ): UseBoundStore<StoreApi<MarketPreviewState>> {
   let loadGeneration = 0;
+  let pendingAdminSequence = 0;
   return create<MarketPreviewState>((set, get) => ({
     confirmed: null,
     visible: null,
@@ -70,6 +77,71 @@ export function createMarketPreviewStore(
           visible: get().confirmed,
           mutating: false,
           error: '저장하지 못했어요. 이전 상태로 되돌렸어요.',
+        });
+        return false;
+      }
+    },
+    async createAdminEvent(input) {
+      const { visible, mutating } = get();
+      if (!visible || mutating) return false;
+
+      let projected: MarketSnapshot;
+      try {
+        pendingAdminSequence += 1;
+        projected = addPreviewAdminEvent(
+          visible,
+          input,
+          `pending-event-${pendingAdminSequence}`,
+        );
+      } catch {
+        set({ error: '시장 이벤트 입력을 확인해 주세요.' });
+        return false;
+      }
+
+      const operationSessionKey = get().sessionKey;
+      set({ visible: projected, mutating: true, error: null });
+      try {
+        // 관리자 RPC에는 request id가 없으므로 응답 유실 시 자동 재시도하지 않는다.
+        const confirmed = await gateway.createAdminEvent(input);
+        if (get().sessionKey !== operationSessionKey) return false;
+        set({ confirmed, visible: confirmed, mutating: false });
+        return true;
+      } catch {
+        if (get().sessionKey !== operationSessionKey) return false;
+        set({
+          visible: get().confirmed,
+          mutating: false,
+          error: '시장 이벤트를 저장하지 못했어요. 이전 상태로 되돌렸어요.',
+        });
+        return false;
+      }
+    },
+    async deleteAdminEvent(eventId) {
+      const { visible, mutating } = get();
+      if (!visible || mutating) return false;
+
+      let projected: MarketSnapshot;
+      try {
+        projected = removePreviewAdminEvent(visible, eventId);
+      } catch {
+        set({ error: '종료할 시장 이벤트를 찾지 못했어요.' });
+        return false;
+      }
+
+      const operationSessionKey = get().sessionKey;
+      set({ visible: projected, mutating: true, error: null });
+      try {
+        // 삭제 역시 비멱등 RPC이므로 호출은 한 번만 수행한다.
+        const confirmed = await gateway.deleteAdminEvent(eventId);
+        if (get().sessionKey !== operationSessionKey) return false;
+        set({ confirmed, visible: confirmed, mutating: false });
+        return true;
+      } catch {
+        if (get().sessionKey !== operationSessionKey) return false;
+        set({
+          visible: get().confirmed,
+          mutating: false,
+          error: '시장 이벤트를 종료하지 못했어요. 이전 상태로 되돌렸어요.',
         });
         return false;
       }

@@ -3,6 +3,8 @@ import assert from 'node:assert/strict';
 
 import { createMarketPreviewGateway } from '../src/features/playground/market/previewGateway.ts';
 import { createMarketPreviewStore } from '../src/features/playground/market/useMarketPreviewStore.ts';
+import type { MarketPreviewGateway } from '../src/features/playground/market/previewGateway.ts';
+import type { MarketAdminEventInput, MarketSnapshot } from '../src/features/playground/market/types.ts';
 
 test('each gateway starts from a deterministic isolated seed', async () => {
   const firstGateway = createMarketPreviewGateway({ latencyMs: 0 });
@@ -187,4 +189,96 @@ test('an explicit current quote affects only the optimistic calculation before c
   assert.equal(await pending, true);
   assert.equal(store.getState().visible?.account.cashWon, 6_316);
   assert.equal(store.getState().confirmed?.account.cashWon, 6_316);
+});
+
+test('admin event creation is optimistic and converges to the authoritative snapshot', async () => {
+  const canonical = createMarketPreviewGateway({ latencyMs: 0 });
+  let releaseCreate!: (snapshot: MarketSnapshot) => void;
+  const gateway: MarketPreviewGateway = {
+    read: () => canonical.read(),
+    execute: (command) => canonical.execute(command),
+    createAdminEvent: () => new Promise((resolve) => { releaseCreate = resolve; }),
+    deleteAdminEvent: (eventId) => canonical.deleteAdminEvent(eventId),
+  };
+  const store = createMarketPreviewStore(gateway);
+  await store.getState().load('hansol');
+  const input: MarketAdminEventInput = {
+    stockId: 'jbbj', kind: 'news', title: '새 소식', impactBps: 100,
+    startsAt: '2026-07-11T00:00:00.000Z', endsAt: '2026-07-11T01:00:00.000Z',
+  };
+
+  assert.equal(typeof store.getState().createAdminEvent, 'function');
+  const pending = store.getState().createAdminEvent(input);
+  assert.equal(store.getState().mutating, true);
+  assert.equal(store.getState().visible?.adminEvents.at(-1)?.title, '새 소식');
+  assert.match(store.getState().visible?.adminEvents.at(-1)?.id ?? '', /^pending-event-/);
+
+  const authoritative = await canonical.createAdminEvent(input);
+  releaseCreate(authoritative);
+  assert.equal(await pending, true);
+  assert.deepEqual(store.getState().visible, authoritative);
+  assert.deepEqual(store.getState().confirmed, authoritative);
+});
+
+test('admin event delete rolls back on failure and blocks a duplicate mutation', async () => {
+  const canonical = createMarketPreviewGateway({ latencyMs: 0 });
+  const input: MarketAdminEventInput = {
+    stockId: 'jbbj', kind: 'trend', title: '상승 흐름', impactBps: 80,
+    startsAt: '2026-07-11T00:00:00.000Z', endsAt: '2026-07-11T01:00:00.000Z',
+  };
+  const seeded = await canonical.createAdminEvent(input);
+  const eventId = seeded.adminEvents[0].id;
+  let rejectDelete!: (error: Error) => void;
+  const gateway: MarketPreviewGateway = {
+    read: () => canonical.read(),
+    execute: (command) => canonical.execute(command),
+    createAdminEvent: (nextInput) => canonical.createAdminEvent(nextInput),
+    deleteAdminEvent: () => new Promise((_resolve, reject) => { rejectDelete = reject; }),
+  };
+  const store = createMarketPreviewStore(gateway);
+  await store.getState().load('hansol');
+
+  assert.equal(typeof store.getState().deleteAdminEvent, 'function');
+  const pending = store.getState().deleteAdminEvent(eventId);
+  assert.equal(store.getState().visible?.adminEvents.length, 0);
+  assert.equal(await store.getState().deleteAdminEvent(eventId), false);
+  rejectDelete(new Error('network lost'));
+  assert.equal(await pending, false);
+  assert.deepEqual(store.getState().visible, seeded);
+  assert.deepEqual(store.getState().confirmed, seeded);
+  assert.equal(store.getState().mutating, false);
+  assert.match(store.getState().error ?? '', /되돌렸어요/);
+});
+
+test('admin mutation response from an old market session is ignored without retry', async () => {
+  const first = await createMarketPreviewGateway({ latencyMs: 0 }).read();
+  const second = structuredClone(first);
+  second.revision = 99;
+  let activeRead = first;
+  let releaseCreate!: (snapshot: MarketSnapshot) => void;
+  let createCalls = 0;
+  const gateway: MarketPreviewGateway = {
+    read: async () => structuredClone(activeRead),
+    execute: async () => { throw new Error('unused'); },
+    createAdminEvent: () => {
+      createCalls += 1;
+      return new Promise((resolve) => { releaseCreate = resolve; });
+    },
+    deleteAdminEvent: async () => { throw new Error('unused'); },
+  };
+  const store = createMarketPreviewStore(gateway);
+  await store.getState().load('first-user');
+  const pending = store.getState().createAdminEvent({
+    stockId: 'jbbj', kind: 'halt', title: '점검', impactBps: 0,
+    startsAt: '2026-07-11T00:00:00.000Z', endsAt: null,
+  });
+  activeRead = second;
+  await store.getState().load('second-user');
+  releaseCreate(first);
+
+  assert.equal(await pending, false);
+  assert.equal(createCalls, 1);
+  assert.equal(store.getState().sessionKey, 'second-user');
+  assert.equal(store.getState().visible?.revision, 99);
+  assert.equal(store.getState().mutating, false);
 });

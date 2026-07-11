@@ -12,6 +12,7 @@ interface MarketActionDialogProps {
   open: boolean;
   title: string;
   description?: string;
+  focusKey?: string | number | null;
   openerRef: RefObject<HTMLElement>;
   children: ReactNode;
   onClose(): void;
@@ -35,6 +36,7 @@ export function MarketActionDialog({
   open,
   title,
   description,
+  focusKey,
   openerRef,
   children,
   onClose,
@@ -60,12 +62,6 @@ export function MarketActionDialog({
       root.inert = true;
       root.setAttribute('aria-hidden', 'true');
     }
-
-    const focusFrame = requestAnimationFrame(() => {
-      const panel = panelRef.current;
-      if (!panel) return;
-      (enabledControls(panel)[0] ?? panel).focus();
-    });
 
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
@@ -98,7 +94,6 @@ export function MarketActionDialog({
 
     document.addEventListener('keydown', handleKeyDown);
     return () => {
-      cancelAnimationFrame(focusFrame);
       document.removeEventListener('keydown', handleKeyDown);
       if (root) {
         root.inert = false;
@@ -108,6 +103,16 @@ export function MarketActionDialog({
       else if (previouslyFocused && document.contains(previouslyFocused)) previouslyFocused.focus();
     };
   }, [open, openerRef]);
+
+  useEffect(() => {
+    if (!open || typeof document === 'undefined') return;
+    const focusFrame = requestAnimationFrame(() => {
+      const panel = panelRef.current;
+      if (!panel) return;
+      (enabledControls(panel)[0] ?? panel).focus();
+    });
+    return () => cancelAnimationFrame(focusFrame);
+  }, [focusKey, open]);
 
   if (!open || typeof document === 'undefined') return null;
 

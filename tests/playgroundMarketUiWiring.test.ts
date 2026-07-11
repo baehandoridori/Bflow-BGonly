@@ -174,7 +174,8 @@ test('market dialog is portalled, labelled, inert and focus-safe', () => {
 test('global order toaster is portalled beyond the dialog inert root boundary', () => {
   const app = readFileSync('src/App.tsx', 'utf8');
   const dialog = readFileSync('src/views/playground/market/MarketActionDialog.tsx', 'utf8');
-  const order = readFileSync('src/views/playground/market/MarketOrderPanel.tsx', 'utf8');
+  const order = readFileSync('src/views/playground/market/useMarketOrderController.ts', 'utf8');
+  const orderDialogs = readFileSync('src/views/playground/market/MarketOrderDialogs.tsx', 'utf8');
 
   assert.match(dialog, /document\.getElementById\(['"]root['"]\)/);
   assert.match(dialog, /root\.inert\s*=\s*true/);
@@ -187,15 +188,15 @@ test('global order toaster is portalled beyond the dialog inert root boundary', 
 
   assert.match(order, /toast\.success\(/);
   assert.match(order, /toast\.error\(/);
-  assert.equal((order.match(
-    /<p className="mt-3 min-h-5 text-sm font-semibold text-text-primary" aria-live="polite">\s*\{dialogError \?\? storeError \?\? ''\}\s*<\/p>/g,
-  ) ?? []).length, 2);
+  assert.match(orderDialogs, /aria-live="polite"/);
+  assert.match(orderDialogs, /\{controller\.error \?\? ''\}/);
 });
 
 test('detail chart and order panel keep the approved source contracts', () => {
   const chart = readFileSync('src/views/playground/market/MarketPriceChart.tsx', 'utf8');
   const canvas = readFileSync('src/views/playground/market/MarketChartCanvas.tsx', 'utf8');
   const order = readFileSync('src/views/playground/market/MarketOrderPanel.tsx', 'utf8');
+  const controller = readFileSync('src/views/playground/market/useMarketOrderController.ts', 'utf8');
   for (const label of ['선', '캔들', '1분', '5분', '10분', '15분', '1시간', '1일', '오늘', '1주', '1개월', '6개월', '전체', '가격 정보가 아직 없어요']) {
     assert.match(chart, new RegExp(label));
   }
@@ -207,14 +208,12 @@ test('detail chart and order panel keep the approved source contracts', () => {
   assert.doesNotMatch(chart, /#[0-9a-f]{3,8}/i);
   assert.doesNotMatch(canvas, /#[0-9a-f]{3,8}/i);
 
-  for (const label of ['현재 가격으로 바로 사기', '최대', '전부', '직접 입력', '원하는 가격에 주문하기']) {
+  for (const label of ['현재 가격으로 바로 사기', '1주', '5주', '10주', '최대', '직접 입력', '원하는 가격에 주문하기']) {
     assert.match(order, new RegExp(label));
   }
-  assert.match(order, /SHARE_PRESETS\s*=\s*\[1,\s*5,\s*10\]/);
-  assert.match(order, /validateMarketCommand/);
-  assert.match(order, /getSellProjection/);
-  assert.match(order, /getBuyCostWon/);
-  assert.match(order, /maxBuyableShares/);
+  assert.match(controller, /MARKET_SHARE_CHOICES\s*=\s*\[1,\s*5,\s*10,\s*'max',\s*'custom'\]/);
+  assert.match(controller, /validateMarketCommand/);
+  assert.match(controller, /maxBuyableShares/);
   assert.match(order, /formatWon/);
   assert.match(order, /formatShares/);
   assert.doesNotMatch(order, /getBuyProjection|SHARE_SCALE|ratioBps|quantityMicros|pricePoints/);
@@ -229,21 +228,21 @@ test('stock detail xl shell contains both fixed columns, gap and horizontal padd
 });
 
 test('easy order revalidates frozen confirmation before creating a request id', () => {
-  const source = readFileSync('src/views/playground/market/MarketOrderPanel.tsx', 'utf8');
-  const start = source.indexOf('const confirmEasyOrder');
-  const end = source.indexOf('const openLimitOrder', start);
+  const source = readFileSync('src/views/playground/market/useMarketOrderController.ts', 'utf8');
+  const start = source.indexOf('const confirm = async');
+  const end = source.indexOf('const close', start);
   assert.ok(start >= 0 && end > start);
   const handler = source.slice(start, end);
 
   const latestSnapshot = handler.indexOf('useMarketPreviewStore.getState().visible');
   const validate = handler.indexOf('validateMarketCommand');
   const createRequestId = handler.indexOf('crypto.randomUUID()');
-  const execute = handler.indexOf('await execute(command, dialog.priceWon)');
+  const execute = handler.indexOf('await execute(command, refreshed.quotedPriceWon)');
   assert.ok(latestSnapshot >= 0 && latestSnapshot < validate);
   assert.ok(validate < createRequestId && createRequestId < execute);
-  assert.match(handler, /getBuyCostWon/);
-  assert.match(handler, /getSellProjection/);
-  assert.match(handler, /확인 내용을 새로 고쳤어요/);
+  assert.match(handler, /freezeMarketOrder/);
+  assert.match(handler, /frozenOrdersMatch/);
+  assert.match(handler, /다시 확인해 주세요/);
 });
 
 test('market views centralize P, won and whole-share formatting without point-priced stock copy', () => {
@@ -272,14 +271,15 @@ test('market views centralize P, won and whole-share formatting without point-pr
 });
 
 test('order dialog refuses to close while its mutation is running', () => {
-  const source = readFileSync('src/views/playground/market/MarketOrderPanel.tsx', 'utf8');
-  const start = source.indexOf('const closeOrderDialog');
+  const source = readFileSync('src/views/playground/market/useMarketOrderController.ts', 'utf8');
+  const dialogs = readFileSync('src/views/playground/market/MarketOrderDialogs.tsx', 'utf8');
+  const start = source.indexOf('const close =');
   const end = source.indexOf('\n  };', start);
   assert.ok(start >= 0 && end > start);
   const handler = source.slice(start, end);
-  assert.match(handler, /submitting\s*\|\|\s*mutating/);
+  assert.match(handler, /controlsDisabled/);
   assert.match(handler, /주문 저장이 끝날 때까지/);
-  assert.match(source, /onClose=\{closeOrderDialog\}/);
+  assert.match(dialogs, /onClose=\{controller\.close\}/);
 });
 
 test('account stays a 520px single column with simple rows and no chart', () => {

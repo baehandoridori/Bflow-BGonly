@@ -429,7 +429,7 @@ test('one immutable live quote map is shared by market routes', async () => {
   assert.match(router, /useMarketClock\(\)/);
   assert.match(router, /useMemo\(/);
   assert.match(router, /<MarketHome[\s\S]*quoteWonByStockId=\{quoteWonByStockId\}/);
-  assert.match(router, /<StockDetailView[\s\S]*currentPriceWon=\{quoteWonByStockId\[route\.stockId\]/);
+  assert.match(router, /<MarketStockRoute[\s\S]*currentPriceWon=\{quoteWonByStockId\[route\.stockId\]/);
   assert.match(router, /<MarketAccountView[\s\S]*quoteWonByStockId=\{quoteWonByStockId\}/);
 
   const detail = readFileSync('src/views/playground/market/StockDetailView.tsx', 'utf8');
@@ -437,7 +437,9 @@ test('one immutable live quote map is shared by market routes', async () => {
   assert.doesNotMatch(detail, /useMarketClock|getMarketSnapshotQuoteWon/);
   assert.match(detail, /currentPriceWon/);
   assert.match(detail, /nowMs/);
-  assert.match(detail, /<MarketOrderPanel[\s\S]*currentPriceWon=\{currentPriceWon\}/);
+  assert.match(router, /useMarketOrderController\(\{[\s\S]*currentPriceWon/);
+  assert.match(router, /<StockDetailView[\s\S]*currentPriceWon=\{currentPriceWon\}/);
+  assert.match(router, /<MarketOrderPanel controller=\{controller\}/);
   assert.match(chart, /closeWon:\s*stock\.referencePriceWon/);
 
   const account = readFileSync('src/views/playground/market/MarketAccountView.tsx', 'utf8');

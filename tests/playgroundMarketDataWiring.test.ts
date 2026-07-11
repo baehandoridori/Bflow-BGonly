@@ -700,6 +700,7 @@ test('main, preload, renderer types, dev preview, and store expose ownership-fre
   const marketRouter = readFileSync('src/views/playground/market/MarketRouter.tsx', 'utf8');
   const stockDetail = readFileSync('src/views/playground/market/StockDetailView.tsx', 'utf8');
   const orderPanel = readFileSync('src/views/playground/market/MarketOrderPanel.tsx', 'utf8');
+  const orderController = readFileSync('src/views/playground/market/useMarketOrderController.ts', 'utf8');
   const nodeTsconfig = readFileSync('tsconfig.node.json', 'utf8');
   const devApi = readFileSync('src/mocks/devElectronAPI.ts', 'utf8');
   const store = readFileSync('src/features/playground/market/useMarketPreviewStore.ts', 'utf8');
@@ -733,10 +734,11 @@ test('main, preload, renderer types, dev preview, and store expose ownership-fre
   assert.match(marketRouter, /buildMarketQuoteWonByStockId\(visibleSnapshot,\s*nowMs\)/);
   assert.doesNotMatch(stockDetail, /useMarketClock|getMarketSnapshotQuoteWon/);
   assert.match(stockDetail, /currentPriceWon:\s*quotedPriceWon/);
-  assert.match(stockDetail, /currentPriceWon=\{currentPriceWon\}/);
-  assert.match(orderPanel, /currentPriceWon:\s*number/);
-  assert.match(orderPanel, /quotedPriceWon:\s*currentPriceWon/);
-  assert.doesNotMatch(orderPanel, /quotedPriceWon:\s*(?:current|latest)Stock\.referencePriceWon/);
+  assert.match(marketRouter, /<StockDetailView[\s\S]*currentPriceWon=\{currentPriceWon\}/);
+  assert.match(marketRouter, /useMarketOrderController\(\{[\s\S]*currentPriceWon/);
+  assert.match(orderPanel, /controller:\s*MarketOrderController/);
+  assert.match(orderController, /quotedPriceWon:\s*currentPriceWon/);
+  assert.doesNotMatch(orderController, /quotedPriceWon:\s*(?:current|latest)Stock\.referencePriceWon/);
 
   for (const apiName of ['marketRead', 'marketExecute', 'marketCreateAdminEvent', 'marketDeleteAdminEvent']) {
     assert.match(preload, new RegExp(`${apiName}:`));

@@ -153,6 +153,7 @@ export default function PlaygroundView() {
       {route.kind === 'market' && (
         <MarketRouter
           route={route.page}
+          authorizedHansol={currentUser?.name.trim() === '배한솔'}
           onNavigate={(action) => move(action)}
           onExit={() => move({ kind: 'return-to-source' })}
         />

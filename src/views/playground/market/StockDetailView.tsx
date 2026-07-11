@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, type ReactNode } from 'react';
 import { ArrowLeft, Briefcase, Star } from 'lucide-react';
 
 import { getStockQuote, holdingValueWon } from '@/features/playground/market/domain';
@@ -11,13 +11,13 @@ import type {
 } from '@/features/playground/market/types';
 import { useMarketChartPreference } from '@/features/playground/market/useMarketChartPreference';
 import { useMarketPreviewStore } from '@/features/playground/market/useMarketPreviewStore';
-import { MarketOrderPanel } from './MarketOrderPanel';
 import { MarketPriceChart } from './MarketPriceChart';
 
 interface StockDetailViewProps {
   stockId: string;
   nowMs: number;
   currentPriceWon?: number;
+  orderPanel?: ReactNode;
   onOpenAccount(): void;
   onOpenMarketHome(): void;
 }
@@ -66,6 +66,7 @@ export function StockDetailView({
   stockId,
   nowMs,
   currentPriceWon: quotedPriceWon,
+  orderPanel,
   onOpenAccount,
   onOpenMarketHome,
 }: StockDetailViewProps) {
@@ -120,8 +121,8 @@ export function StockDetailView({
   };
 
   return (
-    <div className="mx-auto w-full max-w-[760px] px-5 py-7 sm:px-7 sm:py-9 xl:max-w-[1200px]">
-      <div className="flex min-w-0 flex-col gap-4 xl:grid xl:grid-cols-[minmax(0,760px)_360px] xl:gap-x-6 xl:gap-y-4 xl:[grid-template-areas:'company_.'_'price_.'_'reason_.'_'chart_.'_'holding_order'_'news_order']">
+    <div className="mx-auto w-full max-w-[760px] px-5 pt-7 pb-[calc(7.5rem+env(safe-area-inset-bottom))] sm:px-7 sm:pt-9 xl:max-w-[1200px] xl:pb-9">
+      <div className="flex min-w-0 flex-col gap-4 xl:grid xl:grid-cols-[minmax(0,760px)_360px] xl:gap-x-6 xl:gap-y-4 xl:[grid-template-areas:'company_order'_'price_order'_'reason_order'_'chart_order'_'holding_.'_'news_.']">
         <section
           aria-label="회사 한 줄 설명"
           className="min-w-0 rounded-2xl border border-bg-border bg-bg-card p-5 sm:p-6 xl:[grid-area:company]"
@@ -247,23 +248,18 @@ export function StockDetailView({
           )}
         </section>
 
-        <aside
-          aria-labelledby="easy-order-heading"
-          className="min-w-0 rounded-2xl border border-bg-border bg-bg-card p-5 sm:p-6 xl:self-start xl:[grid-area:order]"
-        >
-          <h2 id="easy-order-heading" className="text-lg font-bold text-text-primary">간편 주문</h2>
-          <p className="mt-2 text-xs leading-5 text-text-secondary">
-            회사 확인 → 이유와 그래프 확인 → 원하는 정수 주식 수량으로 시작
-          </p>
-          <div className="mt-5">
-            <MarketOrderPanel
-              stock={stock}
-              snapshot={snapshot}
-              currentPriceWon={currentPriceWon}
-              onOpenAccount={onOpenAccount}
-            />
-          </div>
-        </aside>
+        {orderPanel && (
+          <aside
+            aria-labelledby="easy-order-heading"
+            className="min-w-0 rounded-2xl border border-bg-border bg-bg-card p-5 sm:p-6 xl:sticky xl:top-4 xl:max-h-[calc(100dvh-10rem)] xl:self-start xl:overflow-y-auto xl:[grid-area:order]"
+          >
+            <h2 id="easy-order-heading" className="text-lg font-bold text-text-primary">간편 주문</h2>
+            <p className="mt-2 text-xs leading-5 text-text-secondary">
+              회사 확인 → 이유와 그래프 확인 → 원하는 정수 주식 수량으로 시작
+            </p>
+            <div className="mt-5">{orderPanel}</div>
+          </aside>
+        )}
 
         <section
           aria-labelledby="recent-news-heading"

@@ -1,0 +1,189 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { existsSync, readFileSync } from 'node:fs';
+
+test('stock detail puts the sticky order card in the first desktop row', () => {
+  const source = readFileSync('src/views/playground/market/StockDetailView.tsx', 'utf8');
+
+  assert.match(source, /grid-template-areas:[^\n]*'company_order'/);
+  assert.match(source, /xl:sticky/);
+  assert.match(source, /xl:top-/);
+  assert.match(source, /xl:max-h-\[calc\(100dvh-/);
+  assert.match(source, /xl:overflow-y-auto/);
+  assert.match(source, /pb-\[calc\([^\]]*env\(safe-area-inset-bottom\)[^\]]*\)\]/);
+});
+
+test('market router mounts one controller and keeps the mobile dock outside its scroll container', () => {
+  const router = readFileSync('src/views/playground/market/MarketRouter.tsx', 'utf8');
+  const dockPath = 'src/views/playground/market/MarketMobileOrderDock.tsx';
+  const dialogPath = 'src/views/playground/market/MarketOrderDialogs.tsx';
+
+  assert.equal(existsSync(dockPath), true, 'mobile order dock must exist');
+  assert.equal(existsSync(dialogPath), true, 'one shared order dialog host must exist');
+  assert.equal((router.match(/useMarketOrderController\(/g) ?? []).length, 1);
+  assert.equal((router.match(/<MarketOrderDialogs\b/g) ?? []).length, 1);
+  assert.equal((router.match(/<MarketMobileOrderDock\b/g) ?? []).length, 1);
+  assert.match(router, /data-market-scroll-container/);
+  assert.match(router, /data-market-scroll-container[\s\S]*?<\/div>\s*\{!desktopOrderLayout && <MarketMobileOrderDock/);
+
+  const dock = existsSync(dockPath) ? readFileSync(dockPath, 'utf8') : '';
+  for (const label of ['사기', '팔기']) assert.match(dock, new RegExp(label));
+  assert.match(dock, /fixed/);
+  assert.match(dock, /xl:hidden/);
+  assert.match(dock, /safe-area-inset-bottom/);
+  assert.match(dock, /min-h-11/);
+
+  const dialogs = readFileSync(dialogPath, 'utf8');
+  const actionDialog = readFileSync('src/views/playground/market/MarketActionDialog.tsx', 'utf8');
+  assert.match(dialogs, /focusKey=\{controller\.surface/);
+  assert.match(actionDialog, /focusKey/);
+});
+
+test('desktop and mobile order surfaces share exact whole-share presets', () => {
+  const source = readFileSync('src/views/playground/market/MarketOrderPanel.tsx', 'utf8');
+  const controller = readFileSync('src/views/playground/market/useMarketOrderController.ts', 'utf8');
+
+  assert.match(controller, /MARKET_SHARE_CHOICES\s*=\s*\[1,\s*5,\s*10,\s*'max',\s*'custom'\]/);
+  for (const label of ['1주', '5주', '10주', '최대', '직접 입력']) {
+    assert.match(source, new RegExp(label));
+  }
+  for (const legacy of ['100P', '500P', '1,000P', '전부', '25%', '50%', '100%']) {
+    assert.doesNotMatch(source, new RegExp(legacy.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
+  }
+  assert.doesNotMatch(source, /useMarketOrderController\(|useMarketPreviewStore/);
+});
+
+test('order controller freezes six fields, revalidates drift, blocks halts and creates one request id', async () => {
+  const helperPath = 'src/views/playground/market/useMarketOrderController.ts';
+  assert.equal(existsSync(helperPath), true, 'shared order controller must exist');
+  const source = readFileSync(helperPath, 'utf8');
+
+  for (const field of [
+    'side',
+    'quantityShares',
+    'quotedPriceWon',
+    'estimatedTotalWon',
+    'availableCashWon',
+    'availableShares',
+  ]) assert.match(source, new RegExp(field));
+  assert.match(source, /maxBuyableShares/);
+  assert.match(source, /isStockTradingHalted/);
+  assert.match(source, /다시 확인/);
+  assert.equal((source.match(/crypto\.randomUUID\(\)/g) ?? []).length, 1);
+  assert.equal((source.match(/await execute\(/g) ?? []).length, 1);
+
+  const { freezeMarketOrder, frozenOrdersMatch, isStockTradingHalted } = await import(
+    '../src/views/playground/market/useMarketOrderController.ts'
+  );
+  const { createMarketPreviewSeed } = await import(
+    '../src/features/playground/market/seed.ts'
+  );
+  const snapshot = createMarketPreviewSeed();
+  snapshot.account.cashWon = 10_000;
+  snapshot.account.holdings = [{ stockId: 'jbbj', quantityShares: 7, costBasisWon: 7_000 }];
+  const stock = snapshot.stocks.find((item) => item.id === 'jbbj')!;
+
+  assert.deepEqual(freezeMarketOrder({
+    snapshot,
+    stock,
+    side: 'buy',
+    choice: 'max',
+    customSharesInput: '1',
+    quotedPriceWon: 3_000,
+  }), {
+    side: 'buy',
+    quantityShares: 3,
+    quotedPriceWon: 3_000,
+    estimatedTotalWon: 9_000,
+    availableCashWon: 10_000,
+    availableShares: 7,
+  });
+  assert.deepEqual(freezeMarketOrder({
+    snapshot,
+    stock,
+    side: 'sell',
+    choice: 'max',
+    customSharesInput: '1',
+    quotedPriceWon: 3_000,
+  }), {
+    side: 'sell',
+    quantityShares: 7,
+    quotedPriceWon: 3_000,
+    estimatedTotalWon: 21_000,
+    availableCashWon: 10_000,
+    availableShares: 7,
+  });
+  const frozen = freezeMarketOrder({
+    snapshot,
+    stock,
+    side: 'buy',
+    choice: 1,
+    customSharesInput: '1',
+    quotedPriceWon: 3_000,
+  });
+  assert.equal(frozenOrdersMatch(frozen, { ...frozen }), true);
+  assert.equal(frozenOrdersMatch(frozen, { ...frozen, availableCashWon: 9_999 }), false);
+  assert.equal(isStockTradingHalted([{
+    id: 'halt-live', stockId: 'jbbj', kind: 'halt', title: '점검', impactBps: 0,
+    startsAt: '2026-07-11T00:00:00.000Z', endsAt: null, revision: 2,
+  }], 'jbbj', Date.parse('2026-07-11T00:01:00.000Z')), true);
+});
+
+test('authorized Hansol alone gets the compact market admin dialog', () => {
+  const home = readFileSync('src/views/playground/market/MarketHome.tsx', 'utf8');
+  const panelPath = 'src/views/playground/market/MarketAdminPanel.tsx';
+  assert.equal(existsSync(panelPath), true, 'market admin panel must exist');
+  const panel = existsSync(panelPath) ? readFileSync(panelPath, 'utf8') : '';
+
+  assert.match(home, /authorizedHansol/);
+  assert.match(home, /authorizedHansol\s*&&\s*\(/);
+  assert.match(home, /<MarketAdminPanel/);
+  assert.match(panel, /if \(!authorizedHansol\) return null/);
+  assert.match(panel, /시장 관리/);
+  for (const preset of ['호재 뉴스', '악재 뉴스', '상승 충격', '하락 충격', '상승 추세', '하락 추세', '거래 정지']) {
+    assert.match(panel, new RegExp(preset));
+  }
+  for (const input of ['stockId', 'kind', 'title', 'impactBps', 'startsAt', 'endsAt', 'indefinite']) {
+    assert.match(panel, new RegExp(input));
+  }
+  assert.match(panel, /saving/);
+  assert.match(panel, /disabled=\{saving/);
+  assert.match(panel, /효과 종료/);
+  assert.match(panel, /기록도 삭제/);
+});
+
+test('market admin form enforces halt end-or-indefinite and preserves signed impact', async () => {
+  const helperPath = 'src/views/playground/market/marketAdminEventForm.ts';
+  assert.equal(existsSync(helperPath), true, 'admin event form helper must exist');
+  const { buildMarketAdminEventInput } = await import(
+    '../src/views/playground/market/marketAdminEventForm.ts'
+  );
+
+  const missingEnd = buildMarketAdminEventInput({
+    stockId: 'jbbj', kind: 'halt', title: '점검', impactBpsInput: '0',
+    startsAtInput: '2026-07-11T10:00', endsAtInput: '', indefinite: false,
+  });
+  assert.equal(missingEnd.input, null);
+  assert.match(missingEnd.error ?? '', /종료 시간|무기한/);
+
+  const trend = buildMarketAdminEventInput({
+    stockId: 'jbbj', kind: 'trend', title: '천천히 하락', impactBpsInput: '-125',
+    startsAtInput: '2026-07-11T10:00', endsAtInput: '2026-07-11T11:00', indefinite: false,
+  });
+  assert.equal(trend.error, null);
+  assert.equal(trend.input?.impactBps, -125);
+  assert.ok(trend.input?.startsAt.endsWith('Z'));
+});
+
+test('account and transfer explain point-to-won conversion and projected balances', () => {
+  const account = readFileSync('src/views/playground/market/MarketAccountView.tsx', 'utf8');
+  const transfer = readFileSync('src/views/playground/market/PointTransferDialog.tsx', 'utf8');
+
+  assert.match(account, /max-w-\[520px\]/);
+  assert.match(account, /1P = 1원/);
+  assert.match(account, /아직 보유한 주식이 없어요/);
+  assert.match(account, /종목 둘러보기/);
+  for (const label of ['이동 후 예수금', '이동 후 포인트 지갑', 'formatWon', 'formatPoints']) {
+    assert.match(transfer, new RegExp(label));
+  }
+});

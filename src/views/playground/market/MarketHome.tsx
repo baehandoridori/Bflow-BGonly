@@ -9,10 +9,12 @@ import {
   MarketRowsScaleProvider,
   StockListRow,
 } from './MarketRows';
+import { MarketAdminPanel } from './MarketAdminPanel';
 
 interface MarketHomeProps {
   focusAllStocksRequestId: number | null;
   quoteWonByStockId: Readonly<Record<string, number>>;
+  authorizedHansol: boolean;
   onOpenStock(stockId: string): void;
 }
 
@@ -41,6 +43,7 @@ function missionLabel(snapshot: MarketSnapshot): string {
 export function MarketHome({
   focusAllStocksRequestId,
   quoteWonByStockId,
+  authorizedHansol,
   onOpenStock,
 }: MarketHomeProps) {
   const snapshot = useMarketPreviewStore((state) => state.visible);
@@ -113,9 +116,14 @@ export function MarketHome({
 
   return (
     <div className="mx-auto w-full max-w-6xl px-5 py-7 sm:px-7 sm:py-9">
-      <h1 id="market-page-title" tabIndex={-1} className="text-3xl font-bold tracking-tight text-text-primary outline-none">
-        JBBJ 시장 홈
-      </h1>
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <h1 id="market-page-title" tabIndex={-1} className="text-3xl font-bold tracking-tight text-text-primary outline-none">
+          JBBJ 시장 홈
+        </h1>
+        {authorizedHansol && (
+          <MarketAdminPanel authorizedHansol={authorizedHansol} />
+        )}
+      </div>
 
       <MarketRowsScaleProvider
         stocks={snapshot.stocks}

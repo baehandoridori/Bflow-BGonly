@@ -109,6 +109,7 @@ export function MarketAccountView({
                 <strong className="whitespace-nowrap font-semibold tabular-nums text-text-primary">
                   {formatPoints(summary.walletPoints)}
                 </strong>
+                <span className="ml-2 whitespace-nowrap text-xs">1P = 1원</span>
               </p>
               <div className="flex shrink-0 gap-2">
                 <button

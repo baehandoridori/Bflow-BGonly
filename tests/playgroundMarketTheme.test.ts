@@ -26,6 +26,10 @@ test('new market components do not hardcode hex colors', () => {
     'src/views/playground/market/StockDetailView.tsx',
     'src/views/playground/market/MarketPriceChart.tsx',
     'src/views/playground/market/MarketOrderPanel.tsx',
+    'src/views/playground/market/MarketOrderDialogs.tsx',
+    'src/views/playground/market/MarketMobileOrderDock.tsx',
+    'src/views/playground/market/MarketAdminPanel.tsx',
+    'src/views/playground/market/useMarketOrderController.ts',
     'src/views/playground/market/MarketAccountView.tsx',
     'src/views/playground/market/PointTransferDialog.tsx',
   ];
