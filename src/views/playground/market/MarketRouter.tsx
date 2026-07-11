@@ -27,7 +27,7 @@ export function MarketRouter({ route, onNavigate, onExit }: MarketRouterProps) {
   return (
     <div className="flex h-full min-w-0 flex-col overflow-hidden bg-bg-primary">
       <MarketNav active={route.kind} onNavigate={onNavigate} onExit={onExit} />
-      <MarketDataBoundary>
+      <MarketDataBoundary loadingVariant={route.kind === 'account' ? 'account' : 'market'}>
         <div className="h-full min-h-0 overflow-y-auto">
           {route.kind === 'home' && (
             <MarketHome

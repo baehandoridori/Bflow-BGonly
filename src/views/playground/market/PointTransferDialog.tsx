@@ -6,6 +6,7 @@ import {
   type FormEvent,
   type RefObject,
 } from 'react';
+import { toast } from 'sonner';
 
 import { getAccountSummary, validateMarketCommand } from '@/features/playground/market/domain';
 import type { MarketCommand } from '@/features/playground/market/types';
@@ -128,10 +129,10 @@ export function PointTransferDialog({
       return;
     }
 
-    setLocalError(
-      useMarketPreviewStore.getState().error
-        ?? '포인트를 이동하지 못했어요. 다시 확인해 주세요.',
-    );
+    const message = useMarketPreviewStore.getState().error
+      ?? '포인트를 이동하지 못했어요. 다시 확인해 주세요.';
+    setLocalError(message);
+    toast.error(message);
   };
 
   const closeTransferDialog = () => {

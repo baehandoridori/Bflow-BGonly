@@ -25,6 +25,34 @@ test('market shell has a stable loading and retry boundary', () => {
   assert.match(source, /aria-live="polite"/);
 });
 
+test('account route selects a 184px by 520px account-shaped loading skeleton', () => {
+  const boundary = readFileSync('src/views/playground/market/MarketDataBoundary.tsx', 'utf8');
+  const router = readFileSync('src/views/playground/market/MarketRouter.tsx', 'utf8');
+
+  assert.match(
+    router,
+    /<MarketDataBoundary loadingVariant=\{route\.kind === 'account' \? 'account' : 'market'\}>/,
+  );
+
+  const skeletonStart = boundary.indexOf('function MarketAccountSkeleton');
+  const skeletonEnd = boundary.indexOf('\nexport function MarketDataBoundary', skeletonStart);
+  assert.ok(skeletonStart >= 0 && skeletonEnd > skeletonStart);
+  const accountSkeleton = boundary.slice(skeletonStart, skeletonEnd);
+
+  assert.match(
+    accountSkeleton,
+    /grid w-full max-w-\[980px\] grid-cols-1[\s\S]*lg:grid-cols-\[184px_minmax\(0,1fr\)\]/,
+  );
+  assert.match(accountSkeleton, /w-full max-w-\[520px\]/);
+  for (const rowHeight of ['min-h-11', 'min-h-16', 'min-h-[72px]', 'min-h-12']) {
+    assert.match(accountSkeleton, new RegExp(rowHeight.replace(/[\[\]]/g, '\\$&')));
+  }
+  assert.match(accountSkeleton, /animate-pulse/);
+  assert.match(accountSkeleton, /motion-reduce:animate-none/);
+  assert.match(boundary, /loadingVariant === 'account'\s*\?\s*<MarketAccountSkeleton \/>/);
+  assert.match(boundary, /max-w-5xl animate-pulse space-y-6 motion-reduce:animate-none/);
+});
+
 test('market search follows the keyboard combobox contract', () => {
   const source = readFileSync('src/views/playground/market/MarketNav.tsx', 'utf8');
   for (const contract of ['role="combobox"', 'aria-activedescendant', 'role="listbox"', 'role="option"', 'ArrowDown', 'ArrowUp', 'Enter', 'Escape', 'aria-live="polite"']) {
@@ -247,4 +275,24 @@ test('point transfer only shows a projected balance for a valid amount', () => {
     source,
     /const resultBalance = summary\s*&&\s*validation === null\s*&&\s*amountIsValidInteger/,
   );
+});
+
+test('point transfer failure keeps its inline error and also raises a global toast', () => {
+  const source = readFileSync('src/views/playground/market/PointTransferDialog.tsx', 'utf8');
+  assert.match(source, /import \{ toast \} from 'sonner';/);
+
+  const submitStart = source.indexOf('const submitTransfer');
+  const closeStart = source.indexOf('const closeTransferDialog', submitStart);
+  assert.ok(submitStart >= 0 && closeStart > submitStart);
+  const submitHandler = source.slice(submitStart, closeStart);
+  const failureStart = submitHandler.indexOf('if (succeeded)');
+  assert.ok(failureStart >= 0);
+  const failurePath = submitHandler.slice(failureStart);
+
+  assert.equal((failurePath.match(/const message\s*=/g) ?? []).length, 1);
+  assert.match(failurePath, /const message\s*=\s*useMarketPreviewStore\.getState\(\)\.error/);
+  assert.match(failurePath, /setLocalError\(message\)/);
+  assert.match(failurePath, /toast\.error\(message\)/);
+  assert.ok(failurePath.indexOf('setLocalError(message)') < failurePath.indexOf('toast.error(message)'));
+  assert.match(source, /aria-live="polite"[\s\S]*\{displayedError \?\? ''\}/);
 });
