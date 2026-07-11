@@ -34,7 +34,7 @@ const TABLES = [
 ] as const;
 
 const RPC_SIGNATURES = [
-  ['playground_market_read', 'uuid'],
+  ['playground_market_read', 'uuid, text, text, jsonb'],
   ['playground_market_execute', 'uuid, text, text, jsonb'],
   ['playground_market_create_event', 'uuid, text, text, text, integer, timestamptz, timestamptz'],
   ['playground_market_delete_event', 'uuid, uuid'],
@@ -189,6 +189,36 @@ test('execute RPC owns idempotency, locking, command validation, and atomic ledg
   }
   assert.match(definition, /9007199254740991/);
   assert.match(definition, /INSERT INTO public\.playground_value_ledger/i);
+});
+
+test('read RPC probes committed requests under the same lock and fingerprint as execute', () => {
+  const sql = readMigration();
+  const read = functionDefinition(sql, 'playground_market_read');
+  const execute = functionDefinition(sql, 'playground_market_execute');
+
+  assert.match(
+    read,
+    /playground_market_read\s*\(\s*p_user_id\s+uuid\s*,\s*p_request_id\s+text\s+DEFAULT\s+NULL\s*,\s*p_kind\s+text\s+DEFAULT\s+NULL\s*,\s*p_payload\s+jsonb\s+DEFAULT\s+NULL\s*\)/i,
+  );
+  assert.match(
+    read,
+    /p_request_id\s+IS\s+NOT\s+NULL\s+OR\s+p_kind\s+IS\s+NOT\s+NULL\s+OR\s+p_payload\s+IS\s+NOT\s+NULL[\s\S]*?p_request_id\s+IS\s+NULL\s+OR\s+p_kind\s+IS\s+NULL\s+OR\s+p_payload\s+IS\s+NULL/i,
+  );
+  const advisoryLock = read.search(/pg_advisory_xact_lock\s*\(\s*hashtextextended\s*\(\s*p_user_id::text\s*,\s*0\s*\)\s*\)/i);
+  const firstTableAccess = read.search(/\b(?:FROM|UPDATE|INSERT INTO|DELETE FROM)\s+public\./i);
+  assert.notEqual(advisoryLock, -1, 'request probe must take the same per-user advisory lock');
+  assert.ok(advisoryLock < firstTableAccess, 'request probe lock must precede every table access');
+
+  const fingerprintPattern = /encode\s*\(\s*sha256\s*\(\s*convert_to\s*\(\s*p_kind\s*\|\|\s*E?'\\n'\s*\|\|\s*p_payload::text\s*,\s*'UTF8'\s*\)\s*\)\s*,\s*'hex'\s*\)/i;
+  assert.match(read, fingerprintPattern, 'read probe must use the execute fingerprint');
+  assert.match(execute, fingerprintPattern, 'execute must retain the shared fingerprint expression');
+  assert.match(read, /FROM public\.playground_value_ledger[\s\S]*?user_id\s*=\s*p_user_id::text[\s\S]*?request_id\s*=\s*p_request_id/i);
+  for (const status of ['missing', 'same', 'conflict']) {
+    assert.match(read, new RegExp(`'${status}'`, 'i'));
+  }
+  assert.match(read, /'requestProbe'\s*,\s*v_request_probe/i);
+  assert.doesNotMatch(read, /response_state/i, 'probe must return freshly-read current state');
+  assert.match(sql, /DROP FUNCTION IF EXISTS public\.playground_market_read\(uuid\)/i);
 });
 
 test('request IDs are canonical raw strings bounded to two hundred characters in table and RPC', () => {

@@ -235,7 +235,7 @@ test('easy order revalidates frozen confirmation before creating a request id', 
   const latestSnapshot = handler.indexOf('useMarketPreviewStore.getState().visible');
   const validate = handler.indexOf('validateMarketCommand');
   const createRequestId = handler.indexOf('crypto.randomUUID()');
-  const execute = handler.indexOf('await execute(command)');
+  const execute = handler.indexOf('await execute(command, dialog.priceWon)');
   assert.ok(latestSnapshot >= 0 && latestSnapshot < validate);
   assert.ok(validate < createRequestId && createRequestId < execute);
   assert.match(handler, /getBuyCostWon/);

@@ -217,7 +217,16 @@ BEGIN
 END
 $$;
 
-CREATE OR REPLACE FUNCTION public.playground_market_read(p_user_id uuid)
+-- 인자 타입 변경은 CREATE OR REPLACE로 기존 (uuid) 함수를 대체하지 않고 overload를
+-- 만들기 때문에, 단일 공개 RPC 이름을 유지하도록 이전 draft 시그니처를 먼저 제거한다.
+DROP FUNCTION IF EXISTS public.playground_market_read(uuid);
+
+CREATE OR REPLACE FUNCTION public.playground_market_read(
+  p_user_id uuid,
+  p_request_id text DEFAULT NULL,
+  p_kind text DEFAULT NULL,
+  p_payload jsonb DEFAULT NULL
+)
 RETURNS jsonb
 LANGUAGE plpgsql
 SECURITY DEFINER
@@ -229,7 +238,38 @@ DECLARE
   v_broker public.playground_brokerage_accounts%ROWTYPE;
   v_holdings jsonb;
   v_events jsonb;
+  v_existing_fingerprint text;
+  v_fingerprint text;
+  v_request_probe text;
 BEGIN
+  IF p_user_id IS NULL THEN
+    RAISE EXCEPTION 'market user is required' USING ERRCODE = '22023';
+  END IF;
+  IF p_request_id IS NOT NULL OR p_kind IS NOT NULL OR p_payload IS NOT NULL THEN
+    IF p_request_id IS NULL OR p_kind IS NULL OR p_payload IS NULL THEN
+      RAISE EXCEPTION 'market request probe is incomplete' USING ERRCODE = '22023';
+    END IF;
+    IF char_length(p_request_id) NOT BETWEEN 1 AND 200
+      OR char_length(btrim(p_request_id)) NOT BETWEEN 1 AND 200
+      OR p_request_id IS DISTINCT FROM btrim(p_request_id)
+      OR p_request_id ~ '^[[:space:]]|[[:space:]]$' THEN
+      RAISE EXCEPTION 'market request id is invalid' USING ERRCODE = '22023';
+    END IF;
+    IF p_kind NOT IN ('favorite', 'read-reason', 'transfer', 'buy', 'sell') THEN
+      RAISE EXCEPTION 'market command kind is invalid' USING ERRCODE = '22023';
+    END IF;
+    IF jsonb_typeof(p_payload) <> 'object' THEN
+      RAISE EXCEPTION 'market command payload is invalid' USING ERRCODE = '22023';
+    END IF;
+
+    PERFORM pg_advisory_xact_lock(hashtextextended(p_user_id::text, 0));
+    v_fingerprint := encode(
+      sha256(convert_to(p_kind || E'\n' || p_payload::text, 'UTF8')),
+      'hex'
+    );
+    v_request_probe := 'missing';
+  END IF;
+
   SELECT COUNT(*)
   INTO v_match_count
   FROM public.users
@@ -247,6 +287,20 @@ BEGIN
       AND users.slack_id = 'U05DFV9UAN5'
   ) THEN
     RAISE EXCEPTION 'market access is limited to canonical Hansol' USING ERRCODE = '42501';
+  END IF;
+
+  IF v_request_probe IS NOT NULL THEN
+    SELECT ledger.payload_fingerprint
+    INTO v_existing_fingerprint
+    FROM public.playground_value_ledger AS ledger
+    WHERE ledger.user_id = p_user_id::text
+      AND ledger.request_id = p_request_id;
+    IF FOUND THEN
+      v_request_probe := CASE
+        WHEN v_existing_fingerprint IS NOT DISTINCT FROM v_fingerprint THEN 'same'
+        ELSE 'conflict'
+      END;
+    END IF;
   END IF;
 
   SELECT wallet.*
@@ -311,7 +365,8 @@ BEGIN
     ),
     'favoriteStockIds', to_jsonb(v_broker.favorite_stock_ids),
     'beginnerMission', v_broker.beginner_mission,
-    'adminEvents', v_events
+    'adminEvents', v_events,
+    'requestProbe', v_request_probe
   );
 END
 $$;
@@ -874,19 +929,19 @@ END
 $$;
 
 -- SECURITY DEFINER 함수는 생성 즉시 PUBLIC EXECUTE가 생기므로 먼저 회수한다.
-REVOKE EXECUTE ON FUNCTION public.playground_market_read(uuid) FROM PUBLIC;
+REVOKE EXECUTE ON FUNCTION public.playground_market_read(uuid, text, text, jsonb) FROM PUBLIC;
 REVOKE EXECUTE ON FUNCTION public.playground_market_execute(uuid, text, text, jsonb) FROM PUBLIC;
 REVOKE EXECUTE ON FUNCTION public.playground_market_create_event(uuid, text, text, text, integer, timestamptz, timestamptz) FROM PUBLIC;
 REVOKE EXECUTE ON FUNCTION public.playground_market_delete_event(uuid, uuid) FROM PUBLIC;
 
-REVOKE EXECUTE ON FUNCTION public.playground_market_read(uuid) FROM anon, authenticated;
+REVOKE EXECUTE ON FUNCTION public.playground_market_read(uuid, text, text, jsonb) FROM anon, authenticated;
 REVOKE EXECUTE ON FUNCTION public.playground_market_execute(uuid, text, text, jsonb) FROM anon, authenticated;
 REVOKE EXECUTE ON FUNCTION public.playground_market_create_event(uuid, text, text, text, integer, timestamptz, timestamptz) FROM anon, authenticated;
 REVOKE EXECUTE ON FUNCTION public.playground_market_delete_event(uuid, uuid) FROM anon, authenticated;
 
 -- 위 ACCEPTED TEST-ONLY THREAT MODEL에 따라 단일 사용자 가상 포인트 시험 기간에만
 -- anon RPC를 공개한다. Supabase Auth 기반 소유권 검증 전에는 팀 전체에 확장하지 않는다.
-GRANT EXECUTE ON FUNCTION public.playground_market_read(uuid) TO anon;
+GRANT EXECUTE ON FUNCTION public.playground_market_read(uuid, text, text, jsonb) TO anon;
 GRANT EXECUTE ON FUNCTION public.playground_market_execute(uuid, text, text, jsonb) TO anon;
 GRANT EXECUTE ON FUNCTION public.playground_market_create_event(uuid, text, text, text, integer, timestamptz, timestamptz) TO anon;
 GRANT EXECUTE ON FUNCTION public.playground_market_delete_event(uuid, uuid) TO anon;

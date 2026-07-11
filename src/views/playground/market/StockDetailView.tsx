@@ -3,12 +3,14 @@ import { ArrowLeft, Briefcase, Star } from 'lucide-react';
 
 import { getStockQuote, holdingValueWon } from '@/features/playground/market/domain';
 import { formatShares, formatWon } from '@/features/playground/market/format';
+import { getMarketSnapshotQuoteWon } from '@/features/playground/market/marketQuote';
 import type {
   MarketPeriod,
   MarketStock,
   MarketTrend,
 } from '@/features/playground/market/types';
 import { useMarketPreviewStore } from '@/features/playground/market/useMarketPreviewStore';
+import { useMarketClock } from '@/features/playground/market/useMarketClock';
 import { MarketOrderPanel } from './MarketOrderPanel';
 import { MarketPriceChart } from './MarketPriceChart';
 
@@ -63,6 +65,7 @@ export function StockDetailView({ stockId, onOpenAccount, onOpenMarketHome }: St
   const mutating = useMarketPreviewStore((state) => state.mutating);
   const execute = useMarketPreviewStore((state) => state.execute);
   const [period, setPeriod] = useState<MarketPeriod>('today');
+  const nowMs = useMarketClock();
 
   if (!snapshot) return null;
 
@@ -86,10 +89,11 @@ export function StockDetailView({ stockId, onOpenAccount, onOpenMarketHome }: St
     );
   }
 
-  const movement = movementSummary(stock);
+  const currentPriceWon = getMarketSnapshotQuoteWon(snapshot, stock.id, nowMs);
+  const movement = movementSummary({ ...stock, referencePriceWon: currentPriceWon });
   const wished = snapshot.favoriteStockIds.includes(stock.id);
   const holding = snapshot.account.holdings.find((item) => item.stockId === stock.id);
-  const currentHoldingValue = holding ? holdingValueWon(holding, stock.referencePriceWon) : 0;
+  const currentHoldingValue = holding ? holdingValueWon(holding, currentPriceWon) : 0;
   const holdingPnl = holding ? currentHoldingValue - holding.costBasisWon : 0;
   const holdingPnlRate = holding && holding.costBasisWon > 0
     ? (holdingPnl / holding.costBasisWon) * 100
@@ -159,7 +163,7 @@ export function StockDetailView({ stockId, onOpenAccount, onOpenMarketHome }: St
           >
             {stock.name}
           </h1>
-          <p className="mt-5 text-4xl font-bold tabular-nums text-text-primary">{formatWon(stock.referencePriceWon)}</p>
+          <p className="mt-5 text-4xl font-bold tabular-nums text-text-primary">{formatWon(currentPriceWon)}</p>
           <p className={`mt-3 text-base font-bold tabular-nums ${trendClass(movement.quote.trend)}`}>
             {movement.compact}
           </p>
@@ -233,7 +237,12 @@ export function StockDetailView({ stockId, onOpenAccount, onOpenMarketHome }: St
             회사 확인 → 이유와 그래프 확인 → 원하는 정수 주식 수량으로 시작
           </p>
           <div className="mt-5">
-            <MarketOrderPanel stock={stock} snapshot={snapshot} onOpenAccount={onOpenAccount} />
+            <MarketOrderPanel
+              stock={stock}
+              snapshot={snapshot}
+              currentPriceWon={currentPriceWon}
+              onOpenAccount={onOpenAccount}
+            />
           </div>
         </aside>
 

@@ -21,6 +21,7 @@ import { MarketActionDialog } from './MarketActionDialog';
 interface MarketOrderPanelProps {
   stock: MarketStock;
   snapshot: MarketSnapshot;
+  currentPriceWon: number;
   onOpenAccount(): void;
 }
 
@@ -118,14 +119,18 @@ function projectSale(
   return holding ? getSellProjection(holding, priceWon, quantityShares) : null;
 }
 
-export function MarketOrderPanel({ stock, snapshot, onOpenAccount }: MarketOrderPanelProps) {
+export function MarketOrderPanel({
+  stock,
+  snapshot,
+  currentPriceWon,
+  onOpenAccount,
+}: MarketOrderPanelProps) {
   const visible = useMarketPreviewStore((state) => state.visible);
   const mutating = useMarketPreviewStore((state) => state.mutating);
   const storeError = useMarketPreviewStore((state) => state.error);
   const execute = useMarketPreviewStore((state) => state.execute);
   const clearError = useMarketPreviewStore((state) => state.clearError);
   const currentSnapshot = visible ?? snapshot;
-  const currentStock = currentSnapshot.stocks.find((item) => item.id === stock.id) ?? stock;
   const holding = currentSnapshot.account.holdings.find((item) => item.stockId === stock.id);
 
   const [side, setSide] = useState<OrderSide>('buy');
@@ -141,7 +146,7 @@ export function MarketOrderPanel({ stock, snapshot, onOpenAccount }: MarketOrder
   const submitLockRef = useRef(false);
 
   const buyQuantityShares = buyChoice === 'max'
-    ? maxBuyableShares(currentSnapshot.account.cashWon, currentStock.referencePriceWon)
+    ? maxBuyableShares(currentSnapshot.account.cashWon, currentPriceWon)
     : buyChoice;
   const sellQuantityShares = selectedSellQuantity(sellChoice, customSellShares);
   const buyCommand: MarketCommand = {
@@ -149,22 +154,22 @@ export function MarketOrderPanel({ stock, snapshot, onOpenAccount }: MarketOrder
     requestId: 'preview',
     stockId: stock.id,
     quantityShares: buyQuantityShares,
-    quotedPriceWon: currentStock.referencePriceWon,
+    quotedPriceWon: currentPriceWon,
   };
   const sellCommand: MarketCommand = {
     kind: 'sell',
     requestId: 'preview',
     stockId: stock.id,
     quantityShares: sellQuantityShares,
-    quotedPriceWon: currentStock.referencePriceWon,
+    quotedPriceWon: currentPriceWon,
   };
   const buyValidation = validateMarketCommand(currentSnapshot, buyCommand);
   const sellValidation = validateMarketCommand(currentSnapshot, sellCommand);
   const buyCostWon = buyValidation === null
-    ? getBuyCostWon(buyQuantityShares, currentStock.referencePriceWon)
+    ? getBuyCostWon(buyQuantityShares, currentPriceWon)
     : null;
   const sellProjection = sellValidation === null
-    ? projectSale(holding, currentStock.referencePriceWon, sellQuantityShares)
+    ? projectSale(holding, currentPriceWon, sellQuantityShares)
     : null;
   const activeValidation = side === 'buy' ? buyValidation : sellValidation;
   const displayedError = localError ?? activeValidation;
@@ -192,26 +197,26 @@ export function MarketOrderPanel({ stock, snapshot, onOpenAccount }: MarketOrder
 
     if (side === 'buy') {
       const quantityShares = buyChoice === 'max'
-        ? maxBuyableShares(latest.account.cashWon, latestStock.referencePriceWon)
+        ? maxBuyableShares(latest.account.cashWon, currentPriceWon)
         : buyChoice;
       const command: MarketCommand = {
         kind: 'buy',
         requestId: 'preview',
         stockId: stock.id,
         quantityShares,
-        quotedPriceWon: latestStock.referencePriceWon,
+        quotedPriceWon: currentPriceWon,
       };
       const validation = validateMarketCommand(latest, command);
       if (validation) {
         setLocalError(validation);
         return;
       }
-      const totalWon = getBuyCostWon(quantityShares, latestStock.referencePriceWon);
+      const totalWon = getBuyCostWon(quantityShares, currentPriceWon);
       setDialog({
         kind: 'buy-confirm',
         stockId: stock.id,
         stockName: latestStock.name,
-        priceWon: latestStock.referencePriceWon,
+        priceWon: currentPriceWon,
         quantityShares,
         totalWon,
         remainingCashWon: latest.account.cashWon - totalWon,
@@ -225,7 +230,7 @@ export function MarketOrderPanel({ stock, snapshot, onOpenAccount }: MarketOrder
       requestId: 'preview',
       stockId: stock.id,
       quantityShares,
-      quotedPriceWon: latestStock.referencePriceWon,
+      quotedPriceWon: currentPriceWon,
     };
     const validation = validateMarketCommand(latest, command);
     if (validation || !latestHolding) {
@@ -234,14 +239,14 @@ export function MarketOrderPanel({ stock, snapshot, onOpenAccount }: MarketOrder
     }
     const projection = getSellProjection(
       latestHolding,
-      latestStock.referencePriceWon,
+      currentPriceWon,
       quantityShares,
     );
     setDialog({
       kind: 'sell-confirm',
       stockId: stock.id,
       stockName: latestStock.name,
-      priceWon: latestStock.referencePriceWon,
+      priceWon: currentPriceWon,
       quantityShares,
       soldQuantityShares: projection.soldQuantityShares,
       proceedsWon: projection.proceedsWon,
@@ -272,17 +277,17 @@ export function MarketOrderPanel({ stock, snapshot, onOpenAccount }: MarketOrder
         requestId: 'preview',
         stockId: dialog.stockId,
         quantityShares: dialog.quantityShares,
-        quotedPriceWon: latestStock.referencePriceWon,
+        quotedPriceWon: currentPriceWon,
       };
       const validation = validateMarketCommand(latest, previewCommand);
       if (validation) {
         setDialogError(validation);
         return;
       }
-      const totalWon = getBuyCostWon(dialog.quantityShares, latestStock.referencePriceWon);
+      const totalWon = getBuyCostWon(dialog.quantityShares, currentPriceWon);
       const refreshed: DialogState = {
         ...dialog,
-        priceWon: latestStock.referencePriceWon,
+        priceWon: currentPriceWon,
         totalWon,
         remainingCashWon: latest.account.cashWon - totalWon,
       };
@@ -301,7 +306,7 @@ export function MarketOrderPanel({ stock, snapshot, onOpenAccount }: MarketOrder
         requestId: 'preview',
         stockId: dialog.stockId,
         quantityShares: dialog.quantityShares,
-        quotedPriceWon: latestStock.referencePriceWon,
+        quotedPriceWon: currentPriceWon,
       };
       const validation = validateMarketCommand(latest, previewCommand);
       if (validation || !latestHolding) {
@@ -310,12 +315,12 @@ export function MarketOrderPanel({ stock, snapshot, onOpenAccount }: MarketOrder
       }
       const projection = getSellProjection(
         latestHolding,
-        latestStock.referencePriceWon,
+        currentPriceWon,
         dialog.quantityShares,
       );
       const refreshed: DialogState = {
         ...dialog,
-        priceWon: latestStock.referencePriceWon,
+        priceWon: currentPriceWon,
         soldQuantityShares: projection.soldQuantityShares,
         proceedsWon: projection.proceedsWon,
         remainingQuantityShares: latestHolding.quantityShares - projection.soldQuantityShares,
@@ -351,7 +356,7 @@ export function MarketOrderPanel({ stock, snapshot, onOpenAccount }: MarketOrder
         quantityShares: dialog.quantityShares,
         quotedPriceWon: dialog.priceWon,
       };
-    const succeeded = await execute(command);
+    const succeeded = await execute(command, dialog.priceWon);
     submitLockRef.current = false;
     setSubmitting(false);
 
@@ -385,7 +390,7 @@ export function MarketOrderPanel({ stock, snapshot, onOpenAccount }: MarketOrder
       kind: 'limit-edit',
       draft: {
         side,
-        desiredPriceInput: String(currentStock.referencePriceWon),
+        desiredPriceInput: String(currentPriceWon),
         quantityChoice: 1,
         customQuantityInput: '1',
       },
@@ -428,7 +433,7 @@ export function MarketOrderPanel({ stock, snapshot, onOpenAccount }: MarketOrder
   return (
     <div className="min-w-0">
       <p className="text-sm leading-6 text-text-secondary">
-        현재 가격 <strong className="tabular-nums text-text-primary">{formatWon(currentStock.referencePriceWon)}</strong>
+        현재 가격 <strong className="tabular-nums text-text-primary">{formatWon(currentPriceWon)}</strong>
         {' · '}쓸 수 있는 예수금 <strong className="tabular-nums text-text-primary">{formatWon(currentSnapshot.account.cashWon)}</strong>
       </p>
 

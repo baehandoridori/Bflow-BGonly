@@ -336,7 +336,7 @@ test('market service rejects a manipulated quote before persistence and persists
       return getLivePriceWon(profile, atMs, events);
     },
     persistence: {
-      read: async () => remoteState({ adminEvents: [event] }),
+      read: async () => remoteState({ adminEvents: [event], requestProbe: 'missing' }),
       execute: async (_userId: string, command: MarketCommand) => {
         persisted.push(command);
         return remoteState({ revision: 2, adminEvents: [event] });
@@ -404,7 +404,7 @@ test('market service revalidates authorization after quote read and immediately 
       read: async () => {
         markReadStarted();
         await readGate;
-        return remoteState();
+        return remoteState({ requestProbe: 'missing' });
       },
       execute: async () => {
         executeCalls += 1;
@@ -429,6 +429,196 @@ test('market service revalidates authorization after quote read and immediately 
 
   await assert.rejects(pending, /배한솔|권한|세션|이전/);
   assert.equal(executeCalls, 0, '권한이 바뀐 주문은 quote read 뒤 write에 도달하면 안 된다');
+});
+
+test('response-loss retry probes idempotency before changed clock or events can stale the old quote', async () => {
+  const { MarketAccountService } = await import('../electron/marketAccountService.ts');
+  const profile = {
+    stockId: 'jbbj',
+    basePriceWon: 1842,
+    volatilityBps: 180,
+    phase: 0.37,
+  };
+  let clockMs = Date.parse('2026-07-11T12:00:30.789Z');
+  let adminEvents: MarketAdminEvent[] = [];
+  let committed: MarketCommand | null = null;
+  let mutationCount = 0;
+  let resolverCalls = 0;
+  const initialQuoteWon = getLivePriceWon(profile, Math.floor(clockMs / 1000) * 1000, adminEvents);
+  const original: MarketCommand = {
+    kind: 'buy',
+    requestId: 'lost-response-order',
+    stockId: 'jbbj',
+    quantityShares: 2,
+    quotedPriceWon: initialQuoteWon,
+  };
+  const probeState = (probe?: MarketCommand): unknown => {
+    let requestProbe: 'missing' | 'same' | 'conflict' | undefined;
+    if (probe) {
+      if (!committed) requestProbe = 'missing';
+      else if (probe.requestId !== committed.requestId) requestProbe = 'missing';
+      else requestProbe = JSON.stringify(probe) === JSON.stringify(committed) ? 'same' : 'conflict';
+    }
+    return {
+      ...remoteState({ revision: committed ? 2 : 1, adminEvents }),
+      ...(requestProbe ? { requestProbe } : {}),
+    };
+  };
+  const service = new MarketAccountService({
+    getCanonicalSession: () => ({
+      userId: HANSOL_ID,
+      epoch: 1,
+      name: '배한솔',
+      slackId: 'U05DFV9UAN5',
+    }),
+    getNowMs: () => clockMs,
+    resolveCanonicalQuote: (_stockId: string, atMs: number, events: readonly MarketAdminEvent[]) => {
+      resolverCalls += 1;
+      return getLivePriceWon(profile, atMs, events);
+    },
+    persistence: {
+      read: async (_userId: string, probe?: MarketCommand) => probeState(probe),
+      execute: async (_userId: string, command: MarketCommand) => {
+        mutationCount += 1;
+        committed = command;
+        throw new Error('simulated response loss after commit');
+      },
+      createAdminEvent: async () => probeState(),
+      deleteAdminEvent: async () => probeState(),
+    },
+    logger: { error: () => undefined },
+  });
+
+  await assert.rejects(service.execute(original));
+  assert.equal(mutationCount, 1, 'first call committed exactly once before its response was lost');
+  assert.equal(resolverCalls, 1);
+
+  clockMs = Date.parse('2026-07-11T12:00:51.111Z');
+  adminEvents = [{
+    id: 'retry-price-shock',
+    stockId: 'jbbj',
+    kind: 'shock-up',
+    title: '응답 유실 뒤 발생한 급등',
+    impactBps: 5000,
+    startsAt: '2026-07-11T12:00:40Z',
+    endsAt: '2026-07-11T12:01:40Z',
+    revision: 2,
+  }];
+  const changedQuoteWon = getLivePriceWon(profile, Math.floor(clockMs / 1000) * 1000, adminEvents);
+  assert.notEqual(changedQuoteWon, initialQuoteWon, 'retry scenario must actually make the old quote stale');
+
+  const recovered = await service.execute(original);
+  assert.equal(recovered.revision, 2);
+  assert.equal(mutationCount, 1, 'same retry must return current state without a second mutation');
+  assert.equal(resolverCalls, 1, 'same retry must be decided before current quote freshness');
+
+  await assert.rejects(
+    service.execute({ ...original, quantityShares: 3 }),
+    /같은 요청이 다른 내용|새로고침/,
+  );
+  assert.equal(mutationCount, 1);
+  assert.equal(resolverCalls, 1, 'conflict must also be decided before quote freshness');
+
+  await assert.rejects(
+    service.execute({ ...original, requestId: 'new-stale-order' }),
+    { message: '가격이 바뀌었어요. 현재 가격을 확인하고 다시 주문해 주세요.' },
+  );
+  assert.equal(mutationCount, 1, 'new request with an old quote must never mutate');
+  assert.equal(resolverCalls, 2);
+});
+
+test('Electron hydration, store, detail quote, order command, and main resolver share one aligned price', async () => {
+  const { createElectronMarketGateway } = await import('../src/features/playground/market/electronGateway.ts');
+  const { createMarketPreviewStore } = await import('../src/features/playground/market/useMarketPreviewStore.ts');
+  const {
+    alignMarketSecond,
+    getMarketSnapshotQuoteWon,
+  } = await import('../src/features/playground/market/marketQuote.ts');
+  const { MarketAccountService } = await import('../electron/marketAccountService.ts');
+  const clockMs = Date.parse('2026-07-11T12:00:30.789Z');
+  const alignedNowMs = alignMarketSecond(clockMs);
+  const event: MarketAdminEvent = {
+    id: 'renderer-shock-1',
+    stockId: 'jbbj',
+    kind: 'shock-up',
+    title: '렌더러와 main이 함께 쓰는 호재',
+    impactBps: 1200,
+    startsAt: '2026-07-11T12:00:00Z',
+    endsAt: '2026-07-11T12:01:00Z',
+    revision: 2,
+  };
+  const databaseState = remoteState({
+    revision: 2,
+    account: {
+      ...remoteState().account,
+      walletPoints: 990_000,
+      cashWon: 10_000,
+    },
+    adminEvents: [event],
+  });
+  const persisted: MarketCommand[] = [];
+  const service = new MarketAccountService({
+    getCanonicalSession: () => ({
+      userId: HANSOL_ID,
+      epoch: 1,
+      name: '배한솔',
+      slackId: 'U05DFV9UAN5',
+    }),
+    getNowMs: () => clockMs,
+    resolveCanonicalQuote: (stockId: string, nowMs: number, events: readonly MarketAdminEvent[]) => (
+      getLivePriceWon(
+        { stockId, basePriceWon: 1842, volatilityBps: 180, phase: 0.37 },
+        nowMs,
+        events,
+      )
+    ),
+    persistence: {
+      read: async (_userId: string, probe?: MarketCommand) => (
+        probe ? { ...databaseState, requestProbe: 'missing' as const } : databaseState
+      ),
+      execute: async (_userId: string, command: MarketCommand) => {
+        persisted.push(command);
+        return { ...databaseState, revision: 3 };
+      },
+      createAdminEvent: async () => databaseState,
+      deleteAdminEvent: async () => databaseState,
+    },
+    logger: { error: () => undefined },
+  });
+  const gateway = createElectronMarketGateway({
+    marketRead: () => service.read(),
+    marketExecute: (command: MarketCommand) => service.execute(command),
+    marketCreateAdminEvent: async () => databaseState,
+    marketDeleteAdminEvent: async () => databaseState,
+  });
+  const store = createMarketPreviewStore(gateway);
+
+  await store.getState().load('hansol-session');
+  const snapshot = store.getState().visible;
+  assert.ok(snapshot);
+  const detailQuoteWon = getMarketSnapshotQuoteWon(snapshot, 'jbbj', clockMs);
+  assert.equal(
+    detailQuoteWon,
+    getLivePriceWon(
+      { stockId: 'jbbj', basePriceWon: 1842, volatilityBps: 180, phase: 0.37 },
+      alignedNowMs,
+      [event],
+    ),
+  );
+
+  const command: MarketCommand = {
+    kind: 'buy',
+    requestId: 'renderer-main-shared-quote',
+    stockId: 'jbbj',
+    quantityShares: 1,
+    quotedPriceWon: detailQuoteWon,
+  };
+  assert.equal(await store.getState().execute(command, detailQuoteWon), true);
+  assert.equal(persisted.length, 1);
+  assert.equal(
+    (persisted[0] as Extract<MarketCommand, { kind: 'buy' }>).quotedPriceWon,
+    detailQuoteWon,
+  );
 });
 
 test('Electron gateway hydrates remote account state while preserving static market content', async () => {
@@ -507,6 +697,8 @@ test('main, preload, renderer types, dev preview, and store expose ownership-fre
   const types = readFileSync('src/types/index.ts', 'utf8');
   const supabase = readFileSync('electron/supabase.ts', 'utf8');
   const livePriceEngine = readFileSync('src/features/playground/market/livePriceEngine.ts', 'utf8');
+  const stockDetail = readFileSync('src/views/playground/market/StockDetailView.tsx', 'utf8');
+  const orderPanel = readFileSync('src/views/playground/market/MarketOrderPanel.tsx', 'utf8');
   const nodeTsconfig = readFileSync('tsconfig.node.json', 'utf8');
   const devApi = readFileSync('src/mocks/devElectronAPI.ts', 'utf8');
   const store = readFileSync('src/features/playground/market/useMarketPreviewStore.ts', 'utf8');
@@ -536,6 +728,12 @@ test('main, preload, renderer types, dev preview, and store expose ownership-fre
   assert.doesNotMatch(nodeTsconfig, /"shared"/);
   assert.equal(existsSync('shared/playgroundMarketPrice.mjs'), true);
   assert.equal(existsSync('shared/playgroundMarketPrice.d.mts'), true);
+  assert.match(stockDetail, /useMarketClock\(\)/);
+  assert.match(stockDetail, /getMarketSnapshotQuoteWon\(snapshot,\s*stock\.id,\s*nowMs\)/);
+  assert.match(stockDetail, /currentPriceWon=\{currentPriceWon\}/);
+  assert.match(orderPanel, /currentPriceWon:\s*number/);
+  assert.match(orderPanel, /quotedPriceWon:\s*currentPriceWon/);
+  assert.doesNotMatch(orderPanel, /quotedPriceWon:\s*(?:current|latest)Stock\.referencePriceWon/);
 
   for (const apiName of ['marketRead', 'marketExecute', 'marketCreateAdminEvent', 'marketDeleteAdminEvent']) {
     assert.match(preload, new RegExp(`${apiName}:`));
@@ -550,6 +748,10 @@ test('main, preload, renderer types, dev preview, and store expose ownership-fre
   assert.match(devApi, /createMarketLocalStorageGateway/);
 
   assert.match(supabase, /playground_market_read/);
+  assert.match(supabase, /readPlaygroundMarketState\(\s*userId:\s*string,\s*probe\?:\s*MarketCommand/);
+  assert.match(supabase, /p_request_id:\s*probe\?\.requestId\s*\?\?\s*null/);
+  assert.match(supabase, /p_kind:\s*probe\?\.kind\s*\?\?\s*null/);
+  assert.match(supabase, /p_payload:\s*probe\s*\?\s*marketCommandPayload\(probe\)\s*:\s*null/);
   assert.match(supabase, /playground_market_execute/);
   assert.match(supabase, /playground_market_create_event/);
   assert.match(supabase, /playground_market_delete_event/);

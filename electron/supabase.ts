@@ -2852,9 +2852,15 @@ function marketCommandPayload(command: MarketCommand): Record<string, unknown> {
   }
 }
 
-export async function readPlaygroundMarketState(userId: string): Promise<unknown> {
+export async function readPlaygroundMarketState(
+  userId: string,
+  probe?: MarketCommand,
+): Promise<unknown> {
   const { data, error } = await supabase.rpc('playground_market_read', {
     p_user_id: userId,
+    p_request_id: probe?.requestId ?? null,
+    p_kind: probe?.kind ?? null,
+    p_payload: probe ? marketCommandPayload(probe) : null,
   });
   if (error) throw error;
   return data;

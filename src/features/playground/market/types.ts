@@ -83,12 +83,15 @@ export interface MarketAccount {
   holdings: Holding[];
 }
 
+export type MarketRequestProbe = 'missing' | 'same' | 'conflict';
+
 export interface MarketRemoteState {
   revision: number;
   account: MarketAccount;
   favoriteStockIds: string[];
   beginnerMission: 'favorite' | 'reason' | 'first-order' | 'complete';
   adminEvents: MarketAdminEvent[];
+  requestProbe?: MarketRequestProbe;
 }
 
 export interface MarketSnapshot {

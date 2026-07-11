@@ -42,12 +42,15 @@ export type MarketCommand =
   | { kind: 'buy'; requestId: string; stockId: string; quantityShares: number; quotedPriceWon: number }
   | { kind: 'sell'; requestId: string; stockId: string; quantityShares: number | 'all'; quotedPriceWon: number };
 
+export type MarketRequestProbe = 'missing' | 'same' | 'conflict';
+
 export interface MarketRemoteState {
   revision: number;
   account: MarketAccount;
   favoriteStockIds: string[];
   beginnerMission: 'favorite' | 'reason' | 'first-order' | 'complete';
   adminEvents: MarketAdminEvent[];
+  requestProbe?: MarketRequestProbe;
 }
 
 const HANSOL_NAME = '배한솔';
@@ -65,6 +68,7 @@ const STOCK_IDS = new Set([
 ]);
 const EVENT_KINDS = new Set<MarketEventKind>(['news', 'shock-up', 'shock-down', 'trend', 'halt']);
 const BEGINNER_MISSIONS = new Set(['favorite', 'reason', 'first-order', 'complete']);
+const REQUEST_PROBES = new Set<MarketRequestProbe>(['missing', 'same', 'conflict']);
 const MAX_SAFE_BIGINT = BigInt(Number.MAX_SAFE_INTEGER);
 const MIN_SAFE_BIGINT = -MAX_SAFE_BIGINT;
 
@@ -83,7 +87,7 @@ interface MarketAuthorizationFingerprint {
 }
 
 export interface MarketPersistence {
-  read(userId: string): Promise<unknown>;
+  read(userId: string, probe?: MarketCommand): Promise<unknown>;
   execute(userId: string, command: MarketCommand): Promise<unknown>;
   createAdminEvent(userId: string, input: MarketAdminEventInput): Promise<unknown>;
   deleteAdminEvent(userId: string, eventId: string): Promise<unknown>;
@@ -242,6 +246,14 @@ export function parseMarketRemoteState(value: unknown): MarketRemoteState {
   }
   const beginnerMission = parseString(value.beginnerMission, '초보 미션');
   if (!BEGINNER_MISSIONS.has(beginnerMission)) throw new Error('초보 미션 정보를 확인할 수 없어요.');
+  let requestProbe: MarketRequestProbe | undefined;
+  if (value.requestProbe !== undefined && value.requestProbe !== null) {
+    const parsedRequestProbe = parseString(value.requestProbe, '요청 확인 결과') as MarketRequestProbe;
+    if (!REQUEST_PROBES.has(parsedRequestProbe)) {
+      throw new Error('요청 확인 결과를 확인할 수 없어요.');
+    }
+    requestProbe = parsedRequestProbe;
+  }
   const adminEvents = eventsRaw.map(parseAdminEvent);
   if (new Set(adminEvents.map((event) => event.id)).size !== adminEvents.length) {
     throw new Error('시장 이벤트가 중복되어 있어요.');
@@ -265,6 +277,7 @@ export function parseMarketRemoteState(value: unknown): MarketRemoteState {
     favoriteStockIds,
     beginnerMission: beginnerMission as MarketRemoteState['beginnerMission'],
     adminEvents,
+    ...(requestProbe ? { requestProbe } : {}),
   };
 }
 
@@ -424,8 +437,14 @@ export class MarketAccountService {
       if (normalizedCommand.kind === 'buy' || normalizedCommand.kind === 'sell') {
         const current = await this.persist(
           'read',
-          () => this.dependencies.persistence.read(userId),
+          () => this.dependencies.persistence.read(userId, normalizedCommand),
         );
+        revalidateAuthorization();
+        if (current.requestProbe === 'same') return current;
+        if (current.requestProbe === 'conflict') throw new Error('request id conflict');
+        if (current.requestProbe !== 'missing') {
+          throw new Error('market request probe is unavailable');
+        }
         const currentSecondMs = Math.floor(this.dependencies.getNowMs() / 1000) * 1000;
         const canonicalQuoteWon = this.dependencies.resolveCanonicalQuote(
           normalizedCommand.stockId,
