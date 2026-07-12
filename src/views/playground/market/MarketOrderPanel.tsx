@@ -141,6 +141,7 @@ export function MarketOrderPanel({ controller }: MarketOrderPanelProps) {
             disabled={controller.controlsDisabled}
             aria-pressed={controller.selectedChoice === choice}
             aria-label={choice === 'max' ? '구매 가능한 최대' : MARKET_SHARE_CHOICE_LABELS[choice]}
+            aria-describedby={choice === 'max' ? 'market-order-max-help' : undefined}
             title={choice === 'max' ? '구매 가능한 최대 수량' : undefined}
             onClick={() => controller.selectChoice(choice)}
             className={`${controlClass} min-h-11 rounded-lg border border-bg-border px-2 py-2 text-sm font-semibold text-text-secondary hover:bg-bg-border/35 hover:text-text-primary aria-pressed:border-text-secondary aria-pressed:bg-bg-border/60 aria-pressed:text-text-primary`}
@@ -149,6 +150,10 @@ export function MarketOrderPanel({ controller }: MarketOrderPanelProps) {
           </button>
         ))}
       </div>
+
+      <p id="market-order-max-help" className="mt-2 text-xs leading-5 text-text-secondary">
+        최대는 구매 가능한 수량 기준이에요.
+      </p>
 
       <dl
         data-market-order-section="availability"

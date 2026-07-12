@@ -36,10 +36,19 @@ const dialogBackdropClass = 'fixed inset-0 z-[100] flex items-end justify-center
 const sheetBackdropClass = 'fixed inset-0 z-[100] flex items-end justify-center overflow-y-auto bg-bg-primary/80 p-0 backdrop-blur-sm xl:items-center xl:p-5';
 const dialogPanelClass = 'max-h-[calc(100dvh-1rem)] w-full max-w-lg overscroll-contain overflow-y-auto rounded-t-3xl border border-bg-border bg-bg-card p-5 pb-[calc(1.25rem+env(safe-area-inset-bottom))] text-text-primary shadow-2xl outline-none sm:max-h-[90dvh] sm:rounded-3xl sm:p-6 sm:pb-6';
 const sheetPanelClass = 'max-h-[calc(100dvh-1rem)] w-full max-w-lg overscroll-contain overflow-y-auto rounded-t-3xl border border-bg-border bg-bg-card p-5 pb-[calc(1.25rem+env(safe-area-inset-bottom))] text-text-primary shadow-2xl outline-none xl:max-h-[90dvh] xl:rounded-3xl xl:p-6 xl:pb-6';
+const RESTORE_FOCUS_FALLBACK_IDS = [
+  'easy-order-heading',
+  'market-order-quantity',
+  'market-page-title',
+] as const;
 
 function enabledControls(container: HTMLElement): HTMLElement[] {
   return Array.from(container.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR))
-    .filter((element) => element.getAttribute('aria-hidden') !== 'true' && element.offsetParent !== null);
+    .filter((element) => (
+      element.getAttribute('aria-hidden') !== 'true'
+      && element.offsetParent !== null
+      && !element.matches(':disabled')
+    ));
 }
 
 function canReceiveProgrammaticFocus(container: HTMLElement, element: HTMLElement | null): element is HTMLElement {
@@ -48,6 +57,28 @@ function canReceiveProgrammaticFocus(container: HTMLElement, element: HTMLElemen
     && element.offsetParent !== null
     && element.getAttribute('aria-hidden') !== 'true'
     && !element.matches(':disabled');
+}
+
+function canRestoreDialogFocus(element: HTMLElement | null): element is HTMLElement {
+  return element !== null
+    && document.contains(element)
+    && element.offsetParent !== null
+    && element.getAttribute('aria-hidden') !== 'true'
+    && !element.matches(':disabled')
+    && (element.matches(FOCUSABLE_SELECTOR) || element.hasAttribute('tabindex'));
+}
+
+function restoreDialogFocus(
+  opener: HTMLElement | null,
+  previouslyFocused: HTMLElement | null,
+): void {
+  const stableFallback = RESTORE_FOCUS_FALLBACK_IDS
+    .map((id) => document.getElementById(id))
+    .find(canRestoreDialogFocus) ?? null;
+  const target = canRestoreDialogFocus(opener)
+    ? opener
+    : stableFallback ?? (canRestoreDialogFocus(previouslyFocused) ? previouslyFocused : null);
+  target?.focus();
 }
 
 export function MarketActionDialog({
@@ -131,8 +162,7 @@ export function MarketActionDialog({
         root.removeAttribute('aria-hidden');
       }
       document.body.style.overflow = previousBodyOverflow;
-      if (openerRef.current && document.contains(openerRef.current)) openerRef.current.focus();
-      else if (previouslyFocused && document.contains(previouslyFocused)) previouslyFocused.focus();
+      restoreDialogFocus(openerRef.current, previouslyFocused);
     };
   }, [open, openerRef]);
 

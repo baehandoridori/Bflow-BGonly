@@ -74,6 +74,11 @@ test('desktop and mobile order surfaces share one labelled quantity input and ex
   assert.match(source, /controller\.stepQuantity\(-1\)/);
   assert.match(source, /controller\.stepQuantity\(1\)/);
   assert.match(source, /aria-label=\{choice === 'max' \? '구매 가능한 최대'/);
+  assert.match(source, /aria-describedby=\{choice === 'max' \? 'market-order-max-help'/);
+  assert.match(
+    source,
+    /id="market-order-max-help"[^>]*>\s*최대는 구매 가능한 수량 기준이에요\./,
+  );
   assert.doesNotMatch(source, /직접 입력|choice === 'custom'|selectSide\(/);
   for (const legacy of ['100P', '500P', '1,000P', '전부', '25%', '50%', '100%']) {
     assert.doesNotMatch(source, new RegExp(legacy.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
@@ -87,6 +92,11 @@ test('quick order panel keeps the approved information order and independent sid
   const positions = sections.map((section) => source.indexOf(`data-market-order-section="${section}"`));
   assert.ok(positions.every((position) => position >= 0), 'every quick-order section must be marked');
   assert.deepEqual([...positions].sort((a, b) => a - b), positions);
+  const maxHelp = source.indexOf('id="market-order-max-help"');
+  assert.ok(
+    positions[2] < maxHelp && maxHelp < positions[3],
+    'the max-buyable helper must stay between presets and availability',
+  );
 
   for (const label of [
     '현재 가격', '예수금', '판매 가능', '구매 가능', '판매 예상 금액', '구매 예상 금액',
@@ -144,6 +154,15 @@ test('one quantity builds independent buy and sell validation and the stepper ne
   assert.equal(controller.resolveMarketShareChoiceQuantity('max', 5), 5);
   assert.equal(controller.resolveMarketShareChoiceQuantity('max', 0), 1);
   assert.equal(controller.resolveMarketShareChoiceQuantity(10, 5), 10);
+
+  snapshot.account.cashWon = 0;
+  const zeroCashMax = controller.resolveMarketShareChoiceQuantity('max', 0);
+  const zeroCashPreview = controller.getMarketOrderPreviewState({
+    snapshot, stock, quantityShares: zeroCashMax, quotedPriceWon: 1_842,
+  });
+  assert.equal(zeroCashMax, 1);
+  assert.equal(zeroCashPreview.previewBySide.buy.quantityShares, 1);
+  assert.equal(zeroCashPreview.validationBySide.buy, '예수금이 부족해요');
 });
 
 test('shared max always means max buyable and opening either sheet side preserves the common quantity', async () => {

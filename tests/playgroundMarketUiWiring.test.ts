@@ -188,11 +188,11 @@ test('home rows and detail consume the shared engine quote context instead of se
 
 test('market dialog is portalled, labelled, inert and focus-safe', () => {
   const source = readFileSync('src/views/playground/market/MarketActionDialog.tsx', 'utf8');
+  const orderPanel = readFileSync('src/views/playground/market/MarketOrderPanel.tsx', 'utf8');
   assert.match(source, /createPortal/);
   assert.match(source, /aria-labelledby/);
   assert.match(source, /aria-describedby/);
   assert.match(source, /\.inert\s*=\s*true/);
-  assert.match(source, /openerRef\.current.*focus/);
   assert.match(source, /document\.body\.style\.overflow/);
   assert.match(source, /document\.body\.style\.overflow\s*=\s*['"]hidden['"]/);
   assert.match(source, /document\.body\.style\.overflow\s*=\s*previousBodyOverflow/);
@@ -203,6 +203,31 @@ test('market dialog is portalled, labelled, inert and focus-safe', () => {
   assert.match(source, /initialFocusFallbackId/);
   assert.match(source, /const activeControl = active instanceof HTMLElement[\s\S]*?controls\.includes\(active\)/);
   assert.match(source, /if \(activeControl === null\)/);
+  assert.match(source, /if \(controls\.length === 0\)[\s\S]*?panel\.focus\(\)/);
+  assert.match(source, /\(event\.shiftKey \? last : first\)\.focus\(\)/);
+  assert.match(source, /activeControl === first[\s\S]*?last\.focus\(\)/);
+  assert.match(source, /activeControl === last[\s\S]*?first\.focus\(\)/);
+  assert.match(source, /aria-label="대화상자 닫기"/);
+  assert.match(orderPanel, /<fieldset[\s\S]*?disabled=\{controller\.controlsDisabled\}/);
+
+  const enabledControlsSource = source.slice(
+    source.indexOf('function enabledControls'),
+    source.indexOf('function canReceiveProgrammaticFocus'),
+  );
+  assert.match(enabledControlsSource, /!element\.matches\(':disabled'\)/);
+
+  const restoreFocusSource = source.slice(
+    source.indexOf('const RESTORE_FOCUS_FALLBACK_IDS'),
+    source.indexOf('export function MarketActionDialog'),
+  );
+  for (const fallbackId of ['easy-order-heading', 'market-order-quantity', 'market-page-title']) {
+    assert.match(restoreFocusSource, new RegExp(`['"]${fallbackId}['"]`));
+  }
+  assert.match(restoreFocusSource, /document\.contains\(element\)/);
+  assert.match(restoreFocusSource, /!element\.matches\(':disabled'\)/);
+  assert.match(restoreFocusSource, /canRestoreDialogFocus\(opener\)/);
+  assert.match(restoreFocusSource, /target\?\.focus\(\)/);
+  assert.match(source, /restoreDialogFocus\(openerRef\.current, previouslyFocused\)/);
 });
 
 test('global order toaster is portalled beyond the dialog inert root boundary', () => {
