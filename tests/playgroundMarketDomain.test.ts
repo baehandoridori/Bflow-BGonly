@@ -7,6 +7,7 @@ import {
   getBuyCostWon,
   getChartGeometry,
   getChartHoverBands,
+  getMarketHoldingSummary,
   getSellProjection,
   getSharedReturnDomain,
   getStockQuote,
@@ -79,6 +80,34 @@ test('buying three whole shares at 1,842 won spends exactly 5,526 won', () => {
     costBasisWon: 5_526,
   }]);
   assert.equal(holdingValueWon(bought.account.holdings[0], 1_842), 5_526);
+});
+
+test('holding summary reports rounded average price, market value and unrealized return safely', () => {
+  assert.deepEqual(getMarketHoldingSummary({
+    stockId: 'jbbj', quantityShares: 4, costBasisWon: 6_760,
+  }, 1_842), {
+    averagePriceWon: 1_690,
+    marketValueWon: 7_368,
+    unrealizedPnlWon: 608,
+    unrealizedPnlRate: (608 / 6_760) * 100,
+  });
+  assert.equal(getMarketHoldingSummary({
+    stockId: 'jbbj', quantityShares: 4, costBasisWon: 6_762,
+  }, 1_842).averagePriceWon, 1_691);
+  assert.deepEqual(getMarketHoldingSummary(undefined, 1_842), {
+    averagePriceWon: null,
+    marketValueWon: 0,
+    unrealizedPnlWon: 0,
+    unrealizedPnlRate: null,
+  });
+  assert.deepEqual(getMarketHoldingSummary({
+    stockId: 'jbbj', quantityShares: 0, costBasisWon: 0,
+  }, 1_842), {
+    averagePriceWon: null,
+    marketValueWon: 0,
+    unrealizedPnlWon: 0,
+    unrealizedPnlRate: null,
+  });
 });
 
 test('selling two shares returns quoted proceeds and keeps integer proportional cost and PnL', () => {

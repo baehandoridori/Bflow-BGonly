@@ -229,7 +229,9 @@ test('detail chart and order panel keep the approved source contracts', () => {
   for (const label of ['현재 가격으로 바로 사기', '1주', '5주', '10주', '최대', '직접 입력', '원하는 가격에 주문하기']) {
     assert.match(order, new RegExp(label));
   }
-  assert.match(controller, /MARKET_SHARE_CHOICES\s*=\s*\[1,\s*5,\s*10,\s*'max',\s*'custom'\]/);
+  assert.match(controller, /MARKET_SHARE_CHOICES\s*=\s*\[1,\s*5,\s*10,\s*'max'\]/);
+  assert.match(controller, /quantityInput/);
+  assert.match(controller, /setQuantityInput/);
   assert.match(controller, /validateMarketCommand/);
   assert.match(controller, /maxBuyableShares/);
   assert.match(order, /formatWon/);

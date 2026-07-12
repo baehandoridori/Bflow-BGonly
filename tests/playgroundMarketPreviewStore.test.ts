@@ -369,6 +369,58 @@ test('buy response-loss retry reuses one request id and moves cash and shares ex
   }]);
 });
 
+test('sell response-loss retry reuses one request id and moves cash and shares exactly once', async () => {
+  const canonical = createMarketPreviewGateway({ latencyMs: 0 });
+  await canonical.execute({
+    kind: 'transfer', requestId: 'fund-sell-response-loss', direction: 'wallet-to-broker', points: 10_000,
+  });
+  await canonical.execute({
+    kind: 'buy', requestId: 'seed-sell-response-loss', stockId: 'jbbj', quantityShares: 4,
+    quotedPriceWon: 1_842, quotedRevision: 2,
+  });
+  const calls: MarketCommand[] = [];
+  let loseFirstSellResponse = true;
+  const gateway: MarketPreviewGateway = {
+    read: () => canonical.read(),
+    execute: async (command) => {
+      calls.push(structuredClone(command));
+      const result = await canonical.execute(command);
+      if (command.kind === 'sell' && loseFirstSellResponse) {
+        loseFirstSellResponse = false;
+        throw new Error('transport closed after sell commit');
+      }
+      return result;
+    },
+    createAdminEvent: (input) => canonical.createAdminEvent(input),
+    deleteAdminEvent: (eventId) => canonical.deleteAdminEvent(eventId),
+  };
+  const store = createMarketPreviewStore(gateway);
+  await store.getState().load('hansol');
+  const pending = createPendingMarketValueRequest({
+    kind: 'sell', requestId: 'stable-sell-request', stockId: 'jbbj', quantityShares: 2,
+    quotedPriceWon: 2_000, quotedRevision: store.getState().visible!.revision,
+  }, { quantityShares: 2, quotedPriceWon: 2_000 });
+  const command = retryPendingMarketValueCommand(pending);
+
+  assert.equal(await store.getState().execute(command, 2_000), false);
+  assert.deepEqual(store.getState().pendingValueCommand, command);
+  assert.match(store.getState().error ?? '', /같은 요청|결과.*확인/);
+  assert.equal(await store.getState().execute({ ...command, requestId: 'new-sell-request' }, 2_000), false);
+  assert.equal(calls.length, 1, 'a different request must be blocked while the first result is unknown');
+
+  assert.equal(await store.getState().execute(retryPendingMarketValueCommand(pending), 1), true);
+  assert.equal(calls.length, 2);
+  assert.equal(calls[0].requestId, calls[1].requestId);
+  assert.equal(fingerprintMarketCommand(calls[0]), fingerprintMarketCommand(calls[1]));
+  assert.equal(store.getState().pendingValueCommand, null);
+  const authoritative = await canonical.read();
+  assert.equal(authoritative.account.cashWon, 6_632);
+  assert.equal(authoritative.account.realizedPnlThisMonthWon, 316);
+  assert.deepEqual(authoritative.account.holdings, [{
+    stockId: 'jbbj', quantityShares: 2, costBasisWon: 2 * 1_842,
+  }]);
+});
+
 test('point transfer response-loss retry reuses exact direction, points and request id once', async () => {
   const canonical = createMarketPreviewGateway({ latencyMs: 0 });
   const calls: MarketCommand[] = [];

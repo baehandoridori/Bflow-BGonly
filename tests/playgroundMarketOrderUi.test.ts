@@ -59,7 +59,7 @@ test('desktop and mobile order surfaces share exact whole-share presets', () => 
   const source = readFileSync('src/views/playground/market/MarketOrderPanel.tsx', 'utf8');
   const controller = readFileSync('src/views/playground/market/useMarketOrderController.ts', 'utf8');
 
-  assert.match(controller, /MARKET_SHARE_CHOICES\s*=\s*\[1,\s*5,\s*10,\s*'max',\s*'custom'\]/);
+  assert.match(controller, /MARKET_SHARE_CHOICES\s*=\s*\[1,\s*5,\s*10,\s*'max'\]/);
   for (const label of ['1주', '5주', '10주', '최대', '직접 입력']) {
     assert.match(source, new RegExp(label));
   }
@@ -67,6 +67,47 @@ test('desktop and mobile order surfaces share exact whole-share presets', () => 
     assert.doesNotMatch(source, new RegExp(legacy.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
   }
   assert.doesNotMatch(source, /useMarketOrderController\(|useMarketPreviewStore/);
+});
+
+test('one quantity builds independent buy and sell validation and the stepper never drops below one share', async () => {
+  const controller = await import('../src/views/playground/market/useMarketOrderController.ts');
+  assert.equal(typeof controller.getMarketOrderPreviewState, 'function');
+  assert.equal(typeof controller.stepMarketQuantityInput, 'function');
+  assert.equal(typeof controller.resolveMarketShareChoiceQuantity, 'function');
+
+  const { createMarketPreviewSeed } = await import(
+    '../src/features/playground/market/seed.ts'
+  );
+  const snapshot = createMarketPreviewSeed();
+  snapshot.account.cashWon = 10_000;
+  snapshot.account.holdings = [{ stockId: 'jbbj', quantityShares: 1, costBasisWon: 1_700 }];
+  const stock = snapshot.stocks.find((item) => item.id === 'jbbj')!;
+  const holdingLimited = controller.getMarketOrderPreviewState({
+    snapshot, stock, quantityShares: 2, quotedPriceWon: 1_842,
+  });
+
+  assert.equal(holdingLimited.previewBySide.buy.quantityShares, 2);
+  assert.equal(holdingLimited.previewBySide.sell.quantityShares, 2);
+  assert.equal(holdingLimited.validationBySide.buy, null);
+  assert.equal(holdingLimited.validationBySide.sell, '보유 주식 수량이 부족해요');
+  assert.equal(holdingLimited.availableBuyShares, 5);
+  assert.equal(holdingLimited.availableSellShares, 1);
+
+  snapshot.account.cashWon = 1_000;
+  snapshot.account.holdings = [{ stockId: 'jbbj', quantityShares: 5, costBasisWon: 8_500 }];
+  const cashLimited = controller.getMarketOrderPreviewState({
+    snapshot, stock, quantityShares: 2, quotedPriceWon: 1_842,
+  });
+  assert.equal(cashLimited.validationBySide.buy, '예수금이 부족해요');
+  assert.equal(cashLimited.validationBySide.sell, null);
+
+  assert.equal(controller.stepMarketQuantityInput('1', -1), '1');
+  assert.equal(controller.stepMarketQuantityInput('2', -1), '1');
+  assert.equal(controller.stepMarketQuantityInput('1', 1), '2');
+  assert.equal(controller.stepMarketQuantityInput('', -1), '1');
+  assert.equal(controller.resolveMarketShareChoiceQuantity('max', 'buy', 5, 1), 5);
+  assert.equal(controller.resolveMarketShareChoiceQuantity('max', 'sell', 5, 1), 1);
+  assert.equal(controller.resolveMarketShareChoiceQuantity(10, 'sell', 5, 1), 10);
 });
 
 test('order controller freezes snapshot revision with the quote, revalidates drift, blocks halts and creates one request id', async () => {
@@ -112,8 +153,7 @@ test('order controller freezes snapshot revision with the quote, revalidates dri
     snapshot,
     stock,
     side: 'buy',
-    choice: 'max',
-    customSharesInput: '1',
+    quantityShares: 3,
     quotedPriceWon: 3_000,
   }), {
     side: 'buy',
@@ -128,8 +168,7 @@ test('order controller freezes snapshot revision with the quote, revalidates dri
     snapshot,
     stock,
     side: 'sell',
-    choice: 'max',
-    customSharesInput: '1',
+    quantityShares: 7,
     quotedPriceWon: 3_000,
   }), {
     side: 'sell',
@@ -144,13 +183,23 @@ test('order controller freezes snapshot revision with the quote, revalidates dri
     snapshot,
     stock,
     side: 'buy',
-    choice: 1,
-    customSharesInput: '1',
+    quantityShares: 1,
     quotedPriceWon: 3_000,
   });
   assert.equal(frozenOrdersMatch(frozen, { ...frozen }), true);
   assert.equal(frozenOrdersMatch(frozen, { ...frozen, availableCashWon: 9_999 }), false);
   assert.equal(frozenOrdersMatch(frozen, { ...frozen, quotedRevision: frozen.quotedRevision + 1 }), false);
+  assert.equal(freezeMarketOrder({
+    snapshot, stock, side: 'sell', quantityShares: 2, quotedPriceWon: 3_000,
+  }).side, 'sell');
+  assert.equal(freezeMarketOrder({
+    snapshot, stock, side: 'buy', quantityShares: 2, quotedPriceWon: 3_000,
+  }).side, 'buy');
+  const openConfirmationStart = source.indexOf('const openConfirmation =');
+  const openConfirmationEnd = source.indexOf('\n  const confirm =', openConfirmationStart);
+  const openConfirmationSource = source.slice(openConfirmationStart, openConfirmationEnd);
+  assert.match(openConfirmationSource, /setSide\(nextSide\)/);
+  assert.match(openConfirmationSource, /side:\s*nextSide/);
   assert.equal(isStockTradingHalted([{
     id: 'halt-live', stockId: 'jbbj', kind: 'halt', title: '점검', impactBps: 0,
     startsAt: '2026-07-11T00:00:00.000Z', endsAt: null, revision: 2,
