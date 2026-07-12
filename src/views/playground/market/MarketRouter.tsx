@@ -2,7 +2,8 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 
 import type { MarketRoute, PlaygroundAction } from '@/features/playground/routes';
 import type { PlaygroundMarketRestoreRequest } from '@/features/playground/history';
-import { buildMarketQuoteWonByStockId } from '@/features/playground/market/marketQuote';
+import { buildMarketQuoteContext } from '@/features/playground/market/marketQuote';
+import type { MarketQuoteContext } from '@/features/playground/market/types';
 import { useMarketClock } from '@/features/playground/market/useMarketClock';
 import { useMarketPreviewStore } from '@/features/playground/market/useMarketPreviewStore';
 import { MarketAccountView } from './MarketAccountView';
@@ -27,10 +28,16 @@ interface MarketRouterProps {
 interface MarketStockRouteProps {
   stockId: string;
   nowMs: number;
-  currentPriceWon: number;
+  quoteContext: MarketQuoteContext;
   onOpenAccount(): void;
   onOpenMarketHome(): void;
 }
+
+const EMPTY_QUOTE_CONTEXT: MarketQuoteContext = {
+  quoteWonByStockId: {},
+  previousCloseWonByStockId: {},
+  sparklineByStockId: {},
+};
 
 function useDesktopOrderLayout(): boolean {
   const [desktop, setDesktop] = useState(() => (
@@ -49,11 +56,12 @@ function useDesktopOrderLayout(): boolean {
 function MarketStockRoute({
   stockId,
   nowMs,
-  currentPriceWon,
+  quoteContext,
   onOpenAccount,
   onOpenMarketHome,
 }: MarketStockRouteProps) {
   const desktopOrderLayout = useDesktopOrderLayout();
+  const currentPriceWon = quoteContext.quoteWonByStockId[stockId] ?? 1;
   const controller = useMarketOrderController({
     stockId,
     currentPriceWon,
@@ -76,7 +84,7 @@ function MarketStockRoute({
         <StockDetailView
           stockId={stockId}
           nowMs={nowMs}
-          currentPriceWon={currentPriceWon}
+          quoteContext={quoteContext}
           orderPanel={desktopOrderLayout ? <MarketOrderPanel controller={controller} /> : null}
           onOpenAccount={onOpenAccount}
           onOpenMarketHome={onOpenMarketHome}
@@ -98,10 +106,10 @@ export function MarketRouter({
   const visibleSnapshot = useMarketPreviewStore((state) => state.visible);
   const hasVisibleSnapshot = visibleSnapshot !== null;
   const nowMs = useMarketClock();
-  const quoteWonByStockId = useMemo(() => (
+  const quoteContext = useMemo(() => (
     visibleSnapshot
-      ? buildMarketQuoteWonByStockId(visibleSnapshot, nowMs)
-      : {}
+      ? buildMarketQuoteContext(visibleSnapshot, nowMs)
+      : EMPTY_QUOTE_CONTEXT
   ), [nowMs, visibleSnapshot]);
 
   useEffect(() => {
@@ -136,7 +144,7 @@ export function MarketRouter({
           <MarketStockRoute
             stockId={route.stockId}
             nowMs={nowMs}
-            currentPriceWon={quoteWonByStockId[route.stockId] ?? 1}
+            quoteContext={quoteContext}
             onOpenAccount={() => onNavigate({ kind: 'open-account' })}
             onOpenMarketHome={() => onNavigate({ kind: 'market-home' })}
           />
@@ -147,14 +155,14 @@ export function MarketRouter({
                 focusAllStocksRequestId={route.focusRequest?.target === 'all-stocks'
                   ? route.focusRequest.id
                   : null}
-                quoteWonByStockId={quoteWonByStockId}
+                quoteContext={quoteContext}
                 authorizedHansol={authorizedHansol}
                 onOpenStock={(stockId) => onNavigate({ kind: 'open-stock', stockId })}
               />
             )}
             {route.kind === 'account' && (
               <MarketAccountView
-                quoteWonByStockId={quoteWonByStockId}
+                quoteWonByStockId={quoteContext.quoteWonByStockId}
                 onOpenStock={(stockId) => onNavigate({ kind: 'open-stock', stockId })}
                 onOpenMarketHome={() => onNavigate({ kind: 'market-home' })}
               />

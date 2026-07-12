@@ -1,5 +1,5 @@
-import { buildCandles } from './chartSeries.ts';
-import { getLivePriceWon } from './livePriceEngine.ts';
+import { aggregateCandles, buildCandles, buildMinuteCandles } from './chartSeries.ts';
+import { getMarketDailyCheckpoint, getMarketMinuteBar } from './livePriceEngine.ts';
 import { MAX_MARKET_CHART_BARS } from './marketChartUi.ts';
 import type {
   MarketAdminEvent,
@@ -9,18 +9,9 @@ import type {
 } from './types.ts';
 
 const MINUTE_MS = 60_000;
-const INTERVAL_MS: Readonly<Record<'1h' | '1d', number>> = {
-  '1h': 60 * MINUTE_MS,
-  '1d': 24 * 60 * MINUTE_MS,
-};
-const MAX_COMPLETED_DISPLAY_BARS = 8192;
-const EXTREMA_PROBE_COUNT = 24;
-
-export type MarketDisplayPriceSampler = (
-  profile: MarketInstrumentProfile,
-  nowMs: number,
-  events: readonly MarketAdminEvent[],
-) => number;
+const DAY_MS = 24 * 60 * MINUTE_MS;
+const MAX_COMPLETED_DISPLAY_BARS = 4096;
+const PROGRESSIVE_PUBLISH_INTERVAL = 8;
 
 export interface BuildMarketDisplayCandlesRequest {
   profile: MarketInstrumentProfile;
@@ -29,34 +20,52 @@ export interface BuildMarketDisplayCandlesRequest {
   nowMs: number;
   events: readonly MarketAdminEvent[];
   interval: MarketBarInterval;
-  samplePriceWon?: MarketDisplayPriceSampler;
+}
+
+export interface BuildMarketDisplayCandlesProgressivelyOptions {
+  signal?: Pick<AbortSignal, 'aborted'>;
+  onProgress?(candles: readonly MarketCandle[]): void;
+  yieldControl?(): Promise<void>;
+}
+
+interface DailyBucketWindow {
+  requestedFirstMinuteMs: number;
+  firstBucketMs: number;
+  lastBucketMs: number;
 }
 
 const completedDisplayBarCache = new Map<string, MarketCandle>();
-const samplerIds = new WeakMap<MarketDisplayPriceSampler, number>();
-let nextSamplerId = 1;
 
 function cloneCandle(candle: MarketCandle): MarketCandle {
   return { ...candle, newsIds: [...candle.newsIds] };
 }
 
-function samplerId(sampler: MarketDisplayPriceSampler): number {
-  const existing = samplerIds.get(sampler);
-  if (existing !== undefined) return existing;
-  const created = nextSamplerId;
-  nextSamplerId += 1;
-  samplerIds.set(sampler, created);
-  return created;
-}
-
 function profileFingerprint(profile: MarketInstrumentProfile): string {
-  return [profile.stockId, profile.basePriceWon, profile.volatilityBps, profile.phase].join(':');
+  return [
+    profile.stockId,
+    profile.basePriceWon,
+    profile.volatilityBps,
+    profile.phase,
+    profile.sectorId ?? '',
+    profile.marketBeta ?? '',
+    profile.sectorBeta ?? '',
+    profile.idiosyncraticVolatilityBps ?? '',
+    profile.longTermDriftBps ?? '',
+    profile.baseMinuteVolume ?? '',
+    profile.jumpSensitivity ?? '',
+  ].join(':');
 }
 
-function eventFingerprint(
+function completedDayEventFingerprint(
+  profile: MarketInstrumentProfile,
+  bucketEndMs: number,
   events: readonly MarketAdminEvent[],
 ): string {
   return events
+    .filter((event) => (
+      event.stockId === profile.stockId
+      && Date.parse(event.startsAt) < bucketEndMs
+    ))
     .map((event) => [
       event.id,
       event.revision,
@@ -69,49 +78,57 @@ function eventFingerprint(
     .join('|');
 }
 
-function eventOverlaps(
-  event: MarketAdminEvent,
+function newsIdsForRange(
+  profile: MarketInstrumentProfile,
   rangeStartMs: number,
   rangeEndMs: number,
-  includeRangeEnd: boolean,
-): boolean {
-  const eventStartMs = Date.parse(event.startsAt);
-  const eventEndMs = event.endsAt === null ? Number.POSITIVE_INFINITY : Date.parse(event.endsAt);
-  if (!Number.isFinite(eventStartMs) || Number.isNaN(eventEndMs) || eventEndMs <= eventStartMs) {
-    return false;
-  }
-  const startsBeforeEnd = includeRangeEnd
-    ? eventStartMs <= rangeEndMs
-    : eventStartMs < rangeEndMs;
-  return startsBeforeEnd && eventEndMs > rangeStartMs;
+  events: readonly MarketAdminEvent[],
+): string[] {
+  return events
+    .filter((event) => {
+      if (event.stockId !== profile.stockId) return false;
+      const eventStartMs = Date.parse(event.startsAt);
+      const eventEndMs = event.endsAt === null
+        ? Number.POSITIVE_INFINITY
+        : Date.parse(event.endsAt);
+      return Number.isFinite(eventStartMs)
+        && !Number.isNaN(eventEndMs)
+        && eventEndMs > rangeStartMs
+        && eventStartMs < rangeEndMs;
+    })
+    .map((event) => event.id)
+    .filter((eventId, index, allIds) => allIds.indexOf(eventId) === index)
+    .sort();
 }
 
-function haltDependencyStart(
-  events: readonly MarketAdminEvent[],
-  stockId: string,
+function isFullyHaltedRange(
+  profile: MarketInstrumentProfile,
   rangeStartMs: number,
   rangeEndMs: number,
-  includeRangeEnd: boolean,
-): number {
-  let dependencyStartMs = rangeStartMs;
-  while (true) {
-    let nextDependencyStartMs = dependencyStartMs;
-    for (const event of events) {
-      if (
-        event.stockId !== stockId
-        || event.kind !== 'halt'
-        || !eventOverlaps(event, dependencyStartMs, rangeEndMs, includeRangeEnd)
-      ) {
-        continue;
-      }
-      nextDependencyStartMs = Math.min(
-        nextDependencyStartMs,
-        Date.parse(event.startsAt) - 1000,
-      );
-    }
-    if (nextDependencyStartMs === dependencyStartMs) return dependencyStartMs;
-    dependencyStartMs = nextDependencyStartMs;
+  events: readonly MarketAdminEvent[],
+): boolean {
+  const intervals = events
+    .filter((event) => event.stockId === profile.stockId && event.kind === 'halt')
+    .map((event) => ({
+      startMs: Math.max(rangeStartMs, Date.parse(event.startsAt)),
+      endMs: Math.min(
+        rangeEndMs,
+        event.endsAt === null ? Number.POSITIVE_INFINITY : Date.parse(event.endsAt),
+      ),
+    }))
+    .filter((interval) => (
+      Number.isFinite(interval.startMs)
+      && !Number.isNaN(interval.endMs)
+      && interval.endMs > interval.startMs
+    ))
+    .sort((left, right) => left.startMs - right.startMs);
+  let coveredUntilMs = rangeStartMs;
+  for (const interval of intervals) {
+    if (interval.startMs > coveredUntilMs) return false;
+    coveredUntilMs = Math.max(coveredUntilMs, interval.endMs);
+    if (coveredUntilMs >= rangeEndMs) return true;
   }
+  return false;
 }
 
 function setCompletedDisplayBar(key: string, candle: MarketCandle): void {
@@ -124,80 +141,122 @@ function setCompletedDisplayBar(key: string, candle: MarketCandle): void {
   }
 }
 
-function buildRepresentativeBar(
+function buildCompletedDailyCandle(
   request: BuildMarketDisplayCandlesRequest,
-  sampler: MarketDisplayPriceSampler,
   bucketStartMs: number,
-  bucketEndMs: number,
-  sourceStartMs: number,
-  sourceEndMs: number,
 ): MarketCandle {
-  const isCompleted = bucketEndMs <= request.nowMs;
-  const overlapEndMs = isCompleted ? sourceEndMs : Math.min(sourceEndMs, request.nowMs);
-  const includeRangeEnd = !isCompleted;
-  const dependencyStartMs = haltDependencyStart(
-    request.events,
-    request.profile.stockId,
-    sourceStartMs,
-    overlapEndMs,
-    includeRangeEnd,
-  );
-  const priceEvents = request.events.filter((event) => (
-    event.stockId === request.profile.stockId
-    && eventOverlaps(event, dependencyStartMs, overlapEndMs, includeRangeEnd)
-  ));
-  const eventsKey = eventFingerprint(priceEvents);
+  const bucketEndMs = bucketStartMs + DAY_MS;
   const cacheKey = [
     profileFingerprint(request.profile),
-    sourceStartMs,
-    sourceEndMs,
-    request.interval,
-    eventsKey,
-    samplerId(sampler),
+    bucketStartMs,
+    completedDayEventFingerprint(request.profile, bucketEndMs, request.events),
   ].join('::');
-  const cached = isCompleted ? completedDisplayBarCache.get(cacheKey) : undefined;
+  const cached = completedDisplayBarCache.get(cacheKey);
   if (cached) return cloneCandle(cached);
 
-  const closeSampleMs = Math.min(sourceEndMs - 1, request.nowMs);
-  const sampleTimes = new Set<number>([sourceStartMs, closeSampleMs]);
-  const sampleSpanMs = Math.max(0, closeSampleMs - sourceStartMs);
-  for (let probe = 1; probe <= EXTREMA_PROBE_COUNT; probe += 1) {
-    sampleTimes.add(
-      sourceStartMs
-      + Math.floor((sampleSpanMs * probe) / (EXTREMA_PROBE_COUNT + 1)),
-    );
-  }
-  const prices = [...sampleTimes]
-    .sort((left, right) => left - right)
-    .map((sampleMs) => sampler(request.profile, sampleMs, priceEvents));
-  const openWon = prices[0];
-  const closeWon = prices.at(-1)!;
-  const newsIds = priceEvents
-    .filter((event) => eventOverlaps(
-      event,
-      sourceStartMs,
-      overlapEndMs,
-      includeRangeEnd,
-    ))
-    .map((event) => event.id)
-    .filter((eventId, index, allIds) => allIds.indexOf(eventId) === index)
-    .sort();
+  const checkpoint = getMarketDailyCheckpoint(
+    request.profile,
+    bucketStartMs,
+    request.events,
+  );
+  const fullHaltBar = isFullyHaltedRange(
+    request.profile,
+    bucketStartMs,
+    bucketEndMs,
+    request.events,
+  )
+    ? getMarketMinuteBar(
+      request.profile,
+      bucketStartMs,
+      bucketStartMs + MINUTE_MS - 1,
+      request.events,
+    )
+    : null;
   const candle: MarketCandle = {
     startsAt: new Date(bucketStartMs).toISOString(),
-    openWon,
-    highWon: Math.max(...prices),
-    lowWon: Math.min(...prices),
-    closeWon,
-    newsIds,
+    openWon: fullHaltBar?.openWon ?? checkpoint.openWon,
+    highWon: fullHaltBar?.highWon ?? checkpoint.highWon,
+    lowWon: fullHaltBar?.lowWon ?? checkpoint.lowWon,
+    closeWon: fullHaltBar?.closeWon ?? checkpoint.closeWon,
+    volumeShares: fullHaltBar?.volumeShares ?? checkpoint.volumeShares,
+    newsIds: newsIdsForRange(
+      request.profile,
+      bucketStartMs,
+      bucketEndMs,
+      request.events,
+    ),
   };
-  if (isCompleted) setCompletedDisplayBar(cacheKey, candle);
+  setCompletedDisplayBar(cacheKey, candle);
   return candle;
+}
+
+function buildPartialDailyCandle(
+  request: BuildMarketDisplayCandlesRequest,
+  sourceStartMs: number,
+  sourceEndMs: number,
+): MarketCandle | undefined {
+  const minuteCandles = buildMinuteCandles({
+    profile: request.profile,
+    startMs: sourceStartMs,
+    endMs: sourceEndMs,
+    nowMs: request.nowMs,
+    events: request.events,
+  });
+  return aggregateCandles(minuteCandles, '1d')[0];
+}
+
+function resolveDailyBucketWindow(
+  request: BuildMarketDisplayCandlesRequest,
+): DailyBucketWindow | null {
+  if (![request.startMs, request.endMs, request.nowMs].every(Number.isFinite)) {
+    throw new RangeError('display candle timestamps must be finite');
+  }
+  if (request.endMs <= request.startMs || request.nowMs < request.startMs) return null;
+
+  const requestedFirstMinuteMs = Math.floor(request.startMs / MINUTE_MS) * MINUTE_MS;
+  const requestedLastMinuteMs = Math.floor((request.endMs - 1) / MINUTE_MS) * MINUTE_MS;
+  const visibleLastMinuteMs = Math.floor(request.nowMs / MINUTE_MS) * MINUTE_MS;
+  const lastMinuteMs = Math.min(requestedLastMinuteMs, visibleLastMinuteMs);
+  if (lastMinuteMs < requestedFirstMinuteMs) return null;
+
+  const requestedFirstBucketMs = Math.floor(requestedFirstMinuteMs / DAY_MS) * DAY_MS;
+  const lastBucketMs = Math.floor(lastMinuteMs / DAY_MS) * DAY_MS;
+  return {
+    requestedFirstMinuteMs,
+    firstBucketMs: Math.max(
+      requestedFirstBucketMs,
+      lastBucketMs - (MAX_MARKET_CHART_BARS - 1) * DAY_MS,
+    ),
+    lastBucketMs,
+  };
+}
+
+function buildDailyBucketCandle(
+  request: BuildMarketDisplayCandlesRequest,
+  requestedFirstMinuteMs: number,
+  bucketStartMs: number,
+): MarketCandle | undefined {
+  const bucketEndMs = bucketStartMs + DAY_MS;
+  const sourceStartMs = Math.max(requestedFirstMinuteMs, bucketStartMs);
+  const sourceEndMs = Math.min(request.endMs, bucketEndMs, request.nowMs + 1);
+  if (sourceEndMs <= sourceStartMs) return undefined;
+
+  const usesFullCompletedDay = sourceStartMs === bucketStartMs
+    && sourceEndMs >= bucketEndMs
+    && bucketEndMs <= request.nowMs;
+  return usesFullCompletedDay
+    ? buildCompletedDailyCandle(request, bucketStartMs)
+    : buildPartialDailyCandle(request, sourceStartMs, sourceEndMs);
+}
+
+function yieldToMainThread(): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, 0));
 }
 
 export function buildMarketDisplayCandles(
   request: BuildMarketDisplayCandlesRequest,
 ): MarketCandle[] {
-  if (request.interval !== '1h' && request.interval !== '1d') {
+  if (request.interval !== '1d') {
     return buildCandles({
       profile: request.profile,
       startMs: request.startMs,
@@ -207,45 +266,60 @@ export function buildMarketDisplayCandles(
       interval: request.interval,
     });
   }
-  if (![request.startMs, request.endMs, request.nowMs].every(Number.isFinite)) {
-    throw new RangeError('display candle timestamps must be finite');
-  }
-  if (request.endMs <= request.startMs || request.nowMs < request.startMs) return [];
-
-  const intervalMs = INTERVAL_MS[request.interval];
-  const requestedFirstMinuteMs = Math.floor(request.startMs / MINUTE_MS) * MINUTE_MS;
-  const requestedLastMinuteMs = Math.floor((request.endMs - 1) / MINUTE_MS) * MINUTE_MS;
-  const visibleLastMinuteMs = Math.floor(request.nowMs / MINUTE_MS) * MINUTE_MS;
-  const lastMinuteMs = Math.min(requestedLastMinuteMs, visibleLastMinuteMs);
-  if (lastMinuteMs < requestedFirstMinuteMs) return [];
-
-  const requestedFirstBucketMs = Math.floor(requestedFirstMinuteMs / intervalMs) * intervalMs;
-  const lastBucketMs = Math.floor(lastMinuteMs / intervalMs) * intervalMs;
-  const firstBucketMs = Math.max(
-    requestedFirstBucketMs,
-    lastBucketMs - (MAX_MARKET_CHART_BARS - 1) * intervalMs,
-  );
-  const sampler = request.samplePriceWon ?? getLivePriceWon;
+  const window = resolveDailyBucketWindow(request);
+  if (!window) return [];
   const result: MarketCandle[] = [];
 
   for (
-    let bucketStartMs = firstBucketMs;
-    bucketStartMs <= lastBucketMs;
-    bucketStartMs += intervalMs
+    let bucketStartMs = window.firstBucketMs;
+    bucketStartMs <= window.lastBucketMs;
+    bucketStartMs += DAY_MS
   ) {
-    const bucketEndMs = bucketStartMs + intervalMs;
-    const sourceStartMs = Math.max(requestedFirstMinuteMs, bucketStartMs);
-    const sourceEndMs = Math.min(request.endMs, bucketEndMs, request.nowMs + 1);
-    if (sourceEndMs <= sourceStartMs) continue;
-    result.push(buildRepresentativeBar(
+    const candle = buildDailyBucketCandle(
       request,
-      sampler,
+      window.requestedFirstMinuteMs,
       bucketStartMs,
-      bucketEndMs,
-      sourceStartMs,
-      sourceEndMs,
-    ));
+    );
+    if (candle) result.push(candle);
   }
 
+  return result.slice(-MAX_MARKET_CHART_BARS);
+}
+
+export async function buildMarketDisplayCandlesProgressively(
+  request: BuildMarketDisplayCandlesRequest,
+  options: BuildMarketDisplayCandlesProgressivelyOptions = {},
+): Promise<MarketCandle[]> {
+  const yieldControl = options.yieldControl ?? yieldToMainThread;
+  await yieldControl();
+  if (options.signal?.aborted) return [];
+  if (request.interval !== '1d') return buildMarketDisplayCandles(request);
+
+  const window = resolveDailyBucketWindow(request);
+  if (!window) return [];
+  const result: MarketCandle[] = [];
+  let processedBuckets = 0;
+  for (
+    let bucketStartMs = window.lastBucketMs;
+    bucketStartMs >= window.firstBucketMs;
+    bucketStartMs -= DAY_MS
+  ) {
+    if (options.signal?.aborted) return result;
+    const candle = buildDailyBucketCandle(
+      request,
+      window.requestedFirstMinuteMs,
+      bucketStartMs,
+    );
+    if (candle) result.unshift(candle);
+    processedBuckets += 1;
+    if (
+      processedBuckets === 1
+      || processedBuckets % PROGRESSIVE_PUBLISH_INTERVAL === 0
+      || bucketStartMs === window.firstBucketMs
+    ) {
+      options.onProgress?.(result.map(cloneCandle));
+    }
+    await yieldControl();
+  }
   return result.slice(-MAX_MARKET_CHART_BARS);
 }

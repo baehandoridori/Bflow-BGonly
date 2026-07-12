@@ -162,6 +162,24 @@ test('stock detail uses the approved beginner-first order', () => {
   for (const forbidden of ['PER', 'PBR', '체결 강도', '호가창']) assert.doesNotMatch(source, new RegExp(forbidden));
 });
 
+test('home rows and detail consume the shared engine quote context instead of seed history', () => {
+  const router = readFileSync('src/views/playground/market/MarketRouter.tsx', 'utf8');
+  const home = readFileSync('src/views/playground/market/MarketHome.tsx', 'utf8');
+  const rows = readFileSync('src/views/playground/market/MarketRows.tsx', 'utf8');
+  const detail = readFileSync('src/views/playground/market/StockDetailView.tsx', 'utf8');
+  const seed = readFileSync('src/features/playground/market/seed.ts', 'utf8');
+
+  assert.equal((router.match(/buildMarketQuoteContext\(/g) ?? []).length, 1);
+  assert.match(home, /quoteContext/);
+  assert.match(rows, /sparklineByStockId/);
+  assert.match(detail, /previousCloseWonByStockId/);
+  assert.doesNotMatch(rows, /todaySeriesAtQuote|stock\.series\.today/);
+  assert.doesNotMatch(home, /stock\.series\.|stock\.previousCloseWon/);
+  assert.doesNotMatch(detail, /stock\.series\.|stock\.previousCloseWon/);
+  assert.match(seed, /fallback/i);
+  assert.doesNotMatch(seed, /getStockQuote/);
+});
+
 test('market dialog is portalled, labelled, inert and focus-safe', () => {
   const source = readFileSync('src/views/playground/market/MarketActionDialog.tsx', 'utf8');
   assert.match(source, /createPortal/);

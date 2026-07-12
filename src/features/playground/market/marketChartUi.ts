@@ -1,7 +1,7 @@
 import { formatWon } from './format.ts';
 import type { MarketCandle } from './types';
 
-export const MAX_MARKET_CHART_BARS = 600;
+export const MAX_MARKET_CHART_BARS = 1500;
 
 export function limitMarketChartCandles(
   candles: readonly MarketCandle[],

@@ -110,6 +110,19 @@ function getMarketMinuteBar(
   );
 }
 
+function candle(overrides: Partial<MarketCandle> = {}): MarketCandle {
+  return {
+    startsAt: '2026-07-11T12:00:00.000Z',
+    openWon: 1000,
+    highWon: 1010,
+    lowWon: 990,
+    closeWon: 1005,
+    volumeShares: 0,
+    newsIds: [],
+    ...overrides,
+  };
+}
+
 function logReturns(values: readonly number[]): number[] {
   return values.slice(1).map((value, index) => Math.log(value / values[index]));
 }
@@ -189,11 +202,14 @@ test('a positive shock raises the affected quote', () => {
   );
 });
 
-test('a completed minute candle samples second zero through second fifty-nine', () => {
+test('a completed minute candle uses the canonical engine OHLCV bar', () => {
   const minuteStartMs = Date.parse('2026-07-11T12:00:00Z');
-  const samples = Array.from({ length: 60 }, (_, second) => (
-    getLivePriceWon(PROFILE, minuteStartMs + second * 1000, [])
-  ));
+  const engineBar = getMarketMinuteBar(
+    PROFILE,
+    minuteStartMs,
+    minuteStartMs + 59_999,
+    [],
+  );
   const candles = buildMinuteCandles({
     profile: PROFILE,
     startMs: minuteStartMs,
@@ -205,12 +221,21 @@ test('a completed minute candle samples second zero through second fifty-nine', 
   assert.equal(candles.length, 1);
   assert.deepEqual(candles[0], {
     startsAt: new Date(minuteStartMs).toISOString(),
-    openWon: samples[0],
-    highWon: Math.max(...samples),
-    lowWon: Math.min(...samples),
-    closeWon: samples[59],
+    ...engineBar,
     newsIds: [],
   });
+});
+
+test('aggregateCandles sums child volume', () => {
+  const source = [
+    candle({ volumeShares: 120 }),
+    candle({
+      startsAt: '2026-07-11T12:01:00.000Z',
+      volumeShares: 80,
+    }),
+  ];
+
+  assert.equal(aggregateCandles(source, '5m')[0]?.volumeShares, 200);
 });
 
 test('aggregation keeps first open, extrema, last close, and event IDs', () => {
@@ -221,6 +246,7 @@ test('aggregation keeps first open, extrema, last close, and event IDs', () => {
     highWon: 2000 + minute,
     lowWon: 900 - minute,
     closeWon: 1500 + minute,
+    volumeShares: minute + 1,
     newsIds: minute === 0 || minute === 1 ? ['event-1'] : minute === 59 ? ['event-2'] : [],
   }));
 
@@ -241,12 +267,18 @@ test('aggregation keeps first open, extrema, last close, and event IDs', () => {
     assert.equal(aggregated[0].highWon, Math.max(...firstGroup.map((candle) => candle.highWon)), interval);
     assert.equal(aggregated[0].lowWon, Math.min(...firstGroup.map((candle) => candle.lowWon)), interval);
     assert.equal(aggregated[0].closeWon, firstGroup.at(-1)?.closeWon, interval);
+    assert.equal(
+      aggregated[0].volumeShares,
+      firstGroup.reduce((sum, candle) => sum + candle.volumeShares, 0),
+      interval,
+    );
   }
   assert.deepEqual(aggregateCandles(minuteCandles, '1h')[0].newsIds, ['event-1', 'event-2']);
 });
 
 test('range compatibility promotes intervals that would be too dense', () => {
   assert.equal(resolveIntervalForRange('today', '1m'), '1m');
+  assert.equal(resolveIntervalForRange('1m', 'week'), '10m');
   assert.equal(resolveIntervalForRange('month', '1m'), '1h');
   assert.equal(resolveIntervalForRange('six-months', '15m'), '1d');
   assert.equal(resolveIntervalForRange('all', '1h'), '1d');
@@ -347,26 +379,27 @@ test('a forming candle uses the exact millisecond now for event overlap', () => 
   assert.deepEqual(buildAt(eventStartsMs + 1), ['fractional-news']);
 });
 
-test('candle builders return at most the latest six hundred bars', () => {
+test('candle builders return at most the latest fifteen hundred bars', () => {
   const startMs = Date.parse('2026-07-01T00:00:00Z');
   const candles = buildMinuteCandles({
     profile: PROFILE,
     startMs,
-    endMs: startMs + 601 * 60_000,
-    nowMs: startMs + 601 * 60_000,
+    endMs: startMs + 1501 * 60_000,
+    nowMs: startMs + 1501 * 60_000,
     events: [],
   });
 
-  assert.equal(candles.length, 600);
+  assert.equal(candles.length, 1500);
   assert.equal(candles[0].startsAt, new Date(startMs + 60_000).toISOString());
-  assert.equal(aggregateCandles(Array.from({ length: 601 }, (_, minute) => ({
+  assert.equal(aggregateCandles(Array.from({ length: 1501 }, (_, minute) => ({
     startsAt: new Date(startMs + minute * 60_000).toISOString(),
     openWon: 1,
     highWon: 1,
     lowWon: 1,
     closeWon: 1,
+    volumeShares: 1,
     newsIds: [],
-  })), '1m').length, 600);
+  })), '1m').length, 1500);
 });
 
 test('integrated hourly candles preserve all forty-eight requested hours', () => {
@@ -386,7 +419,7 @@ test('integrated hourly candles preserve all forty-eight requested hours', () =>
   assert.equal(candles.at(-1)?.startsAt, new Date(endMs - 60 * 60_000).toISOString());
 });
 
-test('integrated monthly candles apply the six-hundred cap after hourly aggregation', () => {
+test('integrated monthly candles preserve all seven hundred twenty hourly bars', () => {
   const startMs = Date.parse('2026-06-01T00:00:00Z');
   const endMs = startMs + 30 * 24 * 60 * 60_000;
   const candles = buildCandles({
@@ -398,8 +431,8 @@ test('integrated monthly candles apply the six-hundred cap after hourly aggregat
     interval: '1h',
   });
 
-  assert.equal(candles.length, 600);
-  assert.equal(candles[0].startsAt, new Date(startMs + 120 * 60 * 60_000).toISOString());
+  assert.equal(candles.length, 720);
+  assert.equal(candles[0].startsAt, new Date(startMs).toISOString());
   assert.equal(candles.at(-1)?.startsAt, new Date(endMs - 60 * 60_000).toISOString());
   assert.ok(candles.every((candle) => (
     candle.openWon === CONSTANT_PROFILE.basePriceWon

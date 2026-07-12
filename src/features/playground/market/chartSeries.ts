@@ -1,4 +1,4 @@
-import { getLivePriceWon } from './livePriceEngine.ts';
+import { getMarketMinuteBar } from './livePriceEngine.ts';
 import type {
   MarketAdminEvent,
   MarketBarInterval,
@@ -8,7 +8,7 @@ import type {
 } from './types';
 
 const MINUTE_MS = 60_000;
-const MAX_RETURNED_CANDLES = 600;
+const MAX_RETURNED_CANDLES = 1500;
 const MAX_CACHED_CANDLES = 8192;
 const MAX_CACHED_AGGREGATED_CANDLES = 4096;
 const MAX_CACHED_REQUESTS = 128;
@@ -24,7 +24,7 @@ const INTERVAL_MS: Record<MarketBarInterval, number> = {
 
 const MIN_INTERVAL_BY_RANGE: Record<MarketChartRange, MarketBarInterval> = {
   today: '1m',
-  week: '15m',
+  week: '10m',
   month: '1h',
   'six-months': '1d',
   all: '1d',
@@ -65,7 +65,19 @@ function setBoundedCache<T>(cache: Map<string, T>, key: string, value: T, maximu
 }
 
 function profileFingerprint(profile: MarketInstrumentProfile): string {
-  return [profile.stockId, profile.basePriceWon, profile.volatilityBps, profile.phase].join(':');
+  return [
+    profile.stockId,
+    profile.basePriceWon,
+    profile.volatilityBps,
+    profile.phase,
+    profile.sectorId ?? '',
+    profile.marketBeta ?? '',
+    profile.sectorBeta ?? '',
+    profile.idiosyncraticVolatilityBps ?? '',
+    profile.longTermDriftBps ?? '',
+    profile.baseMinuteVolume ?? '',
+    profile.jumpSensitivity ?? '',
+  ].join(':');
 }
 
 function eventFingerprint(profile: MarketInstrumentProfile, events: readonly MarketAdminEvent[]): string {
@@ -103,28 +115,17 @@ function overlapsInterval(
 function buildOneMinuteCandle(
   profile: MarketInstrumentProfile,
   minuteStartMs: number,
-  lastSampleSecond: number,
+  observedUntilMs: number,
   eventOverlapEndMs: number,
   includeEventAtOverlapEnd: boolean,
   events: readonly MarketAdminEvent[],
 ): MarketCandle {
-  if (
-    profile.volatilityBps === 0
-    && events.every((event) => event.stockId !== profile.stockId)
-  ) {
-    const priceWon = getLivePriceWon(profile, minuteStartMs, events);
-    return {
-      startsAt: new Date(minuteStartMs).toISOString(),
-      openWon: priceWon,
-      highWon: priceWon,
-      lowWon: priceWon,
-      closeWon: priceWon,
-      newsIds: [],
-    };
-  }
-  const prices = Array.from({ length: lastSampleSecond + 1 }, (_, second) => (
-    getLivePriceWon(profile, minuteStartMs + second * 1000, events)
-  ));
+  const minuteBar = getMarketMinuteBar(
+    profile,
+    minuteStartMs,
+    observedUntilMs,
+    events,
+  );
   const newsIds = events
     .filter((event) => (
       event.stockId === profile.stockId
@@ -140,10 +141,7 @@ function buildOneMinuteCandle(
     .sort();
   return {
     startsAt: new Date(minuteStartMs).toISOString(),
-    openWon: prices[0],
-    highWon: Math.max(...prices),
-    lowWon: Math.min(...prices),
-    closeWon: prices.at(-1)!,
+    ...minuteBar,
     newsIds,
   };
 }
@@ -242,13 +240,12 @@ function buildMinuteCandlesForRequest(
       continue;
     }
 
-    const lastSampleSecond = isCompletedMinute
-      ? 59
-      : Math.min(59, Math.max(0, Math.floor((request.nowMs - minuteStartMs) / 1000)));
     const candle = buildOneMinuteCandle(
       request.profile,
       minuteStartMs,
-      lastSampleSecond,
+      isCompletedMinute
+        ? minuteStartMs + MINUTE_MS - 1
+        : Math.min(request.nowMs, minuteStartMs + MINUTE_MS - 1),
       isCompletedMinute ? minuteStartMs + MINUTE_MS : request.nowMs,
       !isCompletedMinute,
       request.events,
@@ -359,6 +356,7 @@ export function aggregateCandles(
     previous.highWon = Math.max(previous.highWon, candle.highWon);
     previous.lowWon = Math.min(previous.lowWon, candle.lowWon);
     previous.closeWon = candle.closeWon;
+    previous.volumeShares += candle.volumeShares;
     previous.newsIds = [...new Set([...previous.newsIds, ...candle.newsIds])];
   }
 
@@ -368,7 +366,25 @@ export function aggregateCandles(
 export function resolveIntervalForRange(
   range: MarketChartRange,
   requestedInterval: MarketBarInterval,
+): MarketBarInterval;
+export function resolveIntervalForRange(
+  requestedInterval: MarketBarInterval,
+  range: MarketChartRange,
+): MarketBarInterval;
+export function resolveIntervalForRange(
+  first: MarketChartRange | MarketBarInterval,
+  second: MarketChartRange | MarketBarInterval,
 ): MarketBarInterval {
+  const range = first === 'today'
+    || first === 'week'
+    || first === 'month'
+    || first === 'six-months'
+    || first === 'all'
+    ? first
+    : second as MarketChartRange;
+  const requestedInterval = range === first
+    ? second as MarketBarInterval
+    : first as MarketBarInterval;
   const minimumInterval = MIN_INTERVAL_BY_RANGE[range];
   return INTERVAL_MS[requestedInterval] < INTERVAL_MS[minimumInterval]
     ? minimumInterval

@@ -1,12 +1,16 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 
 import { resolveIntervalForRange } from '@/features/playground/market/chartSeries';
 import { formatWon } from '@/features/playground/market/format';
 import { MARKET_INSTRUMENT_PROFILES } from '@/features/playground/market/livePriceEngine';
-import { buildMarketDisplayCandles } from '@/features/playground/market/marketDisplaySeries';
+import {
+  buildMarketDisplayCandles,
+  buildMarketDisplayCandlesProgressively,
+} from '@/features/playground/market/marketDisplaySeries';
 import type {
   MarketAdminEvent,
   MarketBarInterval,
+  MarketCandle,
   MarketChartRange,
   MarketChartStyle,
   MarketStock,
@@ -23,6 +27,11 @@ interface MarketPriceChartProps {
   onStyleChange(style: MarketChartStyle): void;
   onIntervalChange(interval: MarketBarInterval): void;
   onRangeChange(range: MarketChartRange): void;
+}
+
+interface ProgressiveDailyState {
+  requestKey: string;
+  candles: MarketCandle[];
 }
 
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -64,6 +73,24 @@ function intervalLabel(value: MarketBarInterval): string {
   return INTERVALS.find((item) => item.value === value)?.label ?? value;
 }
 
+function dailyEventFingerprint(
+  stockId: string | undefined,
+  events: readonly MarketAdminEvent[],
+): string {
+  return events
+    .filter((event) => event.stockId === stockId)
+    .map((event) => [
+      event.id,
+      event.revision,
+      event.kind,
+      event.impactBps,
+      event.startsAt,
+      event.endsAt ?? '',
+    ].join(':'))
+    .sort()
+    .join('|');
+}
+
 export function MarketPriceChart({
   stock,
   events,
@@ -76,10 +103,78 @@ export function MarketPriceChart({
   onRangeChange,
 }: MarketPriceChartProps) {
   const [announcement, setAnnouncement] = useState('');
+  const [progressiveDailyState, setProgressiveDailyState] = useState<ProgressiveDailyState>({
+    requestKey: '',
+    candles: [],
+  });
   const profile = MARKET_INSTRUMENT_PROFILES[stock.id];
-  const candles = useMemo(() => {
-    if (!profile) return [];
-    const builtCandles = buildMarketDisplayCandles({
+  const currentUtcDayStartMs = Math.floor(nowMs / DAY_MS) * DAY_MS;
+  const chartRangeStartMs = chartStartMs(range, nowMs);
+  const currentDailyStartMs = Math.max(currentUtcDayStartMs, chartRangeStartMs);
+  const progressiveRangeStartMs = range === 'today'
+    ? chartRangeStartMs
+    : Math.floor(chartRangeStartMs / DAY_MS) * DAY_MS;
+  const progressiveRequestKey = [
+    profile?.stockId ?? '',
+    range,
+    progressiveRangeStartMs,
+    currentUtcDayStartMs,
+    dailyEventFingerprint(profile?.stockId, events),
+  ].join('::');
+
+  useEffect(() => {
+    if (!profile || interval !== '1d') return undefined;
+    const controller = new AbortController();
+    void buildMarketDisplayCandlesProgressively({
+      profile,
+      startMs: progressiveRangeStartMs,
+      endMs: currentUtcDayStartMs,
+      nowMs: currentUtcDayStartMs,
+      events,
+      interval,
+    }, {
+      signal: controller.signal,
+      onProgress: (nextCandles) => {
+        if (!controller.signal.aborted) {
+          setProgressiveDailyState({
+            requestKey: progressiveRequestKey,
+            candles: [...nextCandles],
+          });
+        }
+      },
+    }).then((nextCandles) => {
+      if (!controller.signal.aborted) {
+        setProgressiveDailyState({
+          requestKey: progressiveRequestKey,
+          candles: nextCandles,
+        });
+      }
+    });
+    return () => controller.abort();
+  }, [
+    currentUtcDayStartMs,
+    events,
+    interval,
+    profile,
+    progressiveRangeStartMs,
+    progressiveRequestKey,
+  ]);
+
+  const currentDailyCandles = useMemo(() => {
+    if (!profile || interval !== '1d') return [];
+    return buildMarketDisplayCandles({
+      profile,
+      startMs: currentDailyStartMs,
+      endMs: nowMs + 1,
+      nowMs,
+      events,
+      interval,
+    });
+  }, [currentDailyStartMs, events, interval, nowMs, profile]);
+
+  const immediateCandles = useMemo(() => {
+    if (!profile || interval === '1d') return [];
+    return buildMarketDisplayCandles({
       profile,
       startMs: chartStartMs(range, nowMs),
       endMs: nowMs + 1,
@@ -87,6 +182,16 @@ export function MarketPriceChart({
       events,
       interval,
     });
+  }, [events, interval, nowMs, profile, range]);
+  const progressiveHistoricalCandles = progressiveDailyState.requestKey === progressiveRequestKey
+    ? progressiveDailyState.candles
+    : [];
+  const dailyCandles = useMemo(() => [
+    ...progressiveHistoricalCandles,
+    ...currentDailyCandles,
+  ], [currentDailyCandles, progressiveHistoricalCandles]);
+  const builtCandles = interval === '1d' ? dailyCandles : immediateCandles;
+  const candles = useMemo(() => {
     const latestCandle = builtCandles.at(-1);
     if (!latestCandle) return builtCandles;
     return [
@@ -98,7 +203,7 @@ export function MarketPriceChart({
         lowWon: Math.min(latestCandle.lowWon, stock.referencePriceWon),
       },
     ];
-  }, [events, interval, nowMs, profile, range, stock.referencePriceWon]);
+  }, [builtCandles, stock.referencePriceWon]);
   const startPriceWon = candles[0]?.openWon ?? stock.referencePriceWon;
   const currentPriceWon = candles.at(-1)?.closeWon ?? stock.referencePriceWon;
 

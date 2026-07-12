@@ -6,7 +6,7 @@ import { formatShares, formatWon } from '@/features/playground/market/format';
 import type {
   MarketBarInterval,
   MarketChartRange,
-  MarketStock,
+  MarketQuoteContext,
   MarketTrend,
 } from '@/features/playground/market/types';
 import { useMarketChartPreference } from '@/features/playground/market/useMarketChartPreference';
@@ -16,7 +16,7 @@ import { MarketPriceChart } from './MarketPriceChart';
 interface StockDetailViewProps {
   stockId: string;
   nowMs: number;
-  currentPriceWon?: number;
+  quoteContext: MarketQuoteContext;
   orderPanel?: ReactNode;
   onOpenAccount(): void;
   onOpenMarketHome(): void;
@@ -28,8 +28,11 @@ function trendClass(trend: MarketTrend): string {
   return 'text-market-flat';
 }
 
-function movementSummary(stock: MarketStock) {
-  const quote = getStockQuote(stock);
+function movementSummary(currentPriceWon: number, previousCloseWon: number) {
+  const quote = getStockQuote({
+    referencePriceWon: currentPriceWon,
+    previousCloseWon,
+  });
   if (quote.trend === 'up') {
     return {
       quote,
@@ -65,7 +68,7 @@ function formatNewsDate(value: string): string {
 export function StockDetailView({
   stockId,
   nowMs,
-  currentPriceWon: quotedPriceWon,
+  quoteContext,
   orderPanel,
   onOpenAccount,
   onOpenMarketHome,
@@ -100,8 +103,10 @@ export function StockDetailView({
     );
   }
 
-  const currentPriceWon = quotedPriceWon ?? stock.referencePriceWon;
-  const movement = movementSummary({ ...stock, referencePriceWon: currentPriceWon });
+  const currentPriceWon = quoteContext.quoteWonByStockId[stock.id] ?? 1;
+  const previousCloseWon = quoteContext.previousCloseWonByStockId[stock.id]
+    ?? currentPriceWon;
+  const movement = movementSummary(currentPriceWon, previousCloseWon);
   const wished = snapshot.favoriteStockIds.includes(stock.id);
   const holding = snapshot.account.holdings.find((item) => item.stockId === stock.id);
   const currentHoldingValue = holding ? holdingValueWon(holding, currentPriceWon) : 0;
