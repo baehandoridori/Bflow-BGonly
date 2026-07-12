@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync, readdirSync, statSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
 
 test('market semantic colors exist in CSS and Tailwind', () => {
   const css = readFileSync('src/index.css', 'utf8');
@@ -44,6 +44,7 @@ test('new market components do not hardcode hex colors', () => {
     'src/views/playground/market/MarketRows.tsx',
     'src/views/playground/market/StockDetailView.tsx',
     'src/views/playground/market/MarketPriceChart.tsx',
+    'src/views/playground/market/MarketInteractiveChart.tsx',
     'src/views/playground/market/MarketOrderPanel.tsx',
     'src/views/playground/market/MarketOrderDialogs.tsx',
     'src/views/playground/market/MarketMobileOrderDock.tsx',
@@ -52,7 +53,26 @@ test('new market components do not hardcode hex colors', () => {
     'src/views/playground/market/MarketAccountView.tsx',
     'src/views/playground/market/PointTransferDialog.tsx',
   ];
-  for (const file of files) assert.doesNotMatch(readFileSync(file, 'utf8'), /#[0-9a-f]{3,8}\b/i, file);
+  for (const file of files) {
+    assert.equal(existsSync(file), true, `${file} must exist`);
+    assert.doesNotMatch(readFileSync(file, 'utf8'), /#[0-9a-f]{3,8}\b/i, file);
+  }
+});
+
+test('interactive market chart controls keep semantic themes and accessible restrained motion', () => {
+  const chart = readFileSync('src/views/playground/market/MarketPriceChart.tsx', 'utf8');
+  const interactivePath = 'src/views/playground/market/MarketInteractiveChart.tsx';
+  assert.equal(existsSync(interactivePath), true, 'interactive market chart must exist');
+  const interactive = readFileSync(interactivePath, 'utf8');
+
+  for (const source of [chart, interactive]) {
+    assert.match(source, /bg-bg-(?:primary|card)|border-bg-border/);
+    assert.match(source, /text-text-(?:primary|secondary)/);
+    assert.match(source, /focus-visible:(?:outline-none|ring-2)/);
+    assert.match(source, /motion-reduce:transition-none/);
+  }
+  assert.match(chart, /min-h-11/);
+  assert.match(interactive, /min-h-11/);
 });
 
 test('preview feature only reaches browser persistence through the injected storage adapter', () => {

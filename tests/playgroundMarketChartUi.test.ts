@@ -13,7 +13,7 @@ import { createMarketPreviewSeed } from '../src/features/playground/market/seed.
 const PREFERENCE_PATH = 'src/features/playground/market/useMarketChartPreference.ts';
 const CHART_UI_PATH = 'src/features/playground/market/marketChartUi.ts';
 const DISPLAY_SERIES_PATH = 'src/features/playground/market/marketDisplaySeries.ts';
-const CANVAS_PATH = 'src/views/playground/market/MarketChartCanvas.tsx';
+const INTERACTIVE_CHART_PATH = 'src/views/playground/market/MarketInteractiveChart.tsx';
 const PRICE_CHART_PATH = 'src/views/playground/market/MarketPriceChart.tsx';
 
 test('chart style starts as line, restores candlestick, and ignores invalid storage', async () => {
@@ -42,6 +42,8 @@ test('chart style starts as line, restores candlestick, and ignores invalid stor
     'bflow:playground-market:chart-style:v2',
     'candlestick',
   ]]);
+  preference.writeMarketChartStyle(storage, 'week' as never);
+  assert.equal(writes.length, 1, 'intervals and ranges must never enter the style key');
   assert.doesNotMatch(JSON.stringify(writes), /account|cashWon|holding/i);
 });
 
@@ -958,67 +960,72 @@ test('chart UI helpers cap bars, select the nearest bar, and describe OHLC text'
   }
 });
 
-test('canvas uses DPR, semantic theme colors, and one keyboard range summary', () => {
-  assert.equal(existsSync(CANVAS_PATH), true, 'market chart canvas must exist');
-  const source = readFileSync(CANVAS_PATH, 'utf8');
+test('React chart boundary owns one adapter, resize observer, render path, and ordered cleanup', () => {
+  assert.equal(existsSync(INTERACTIVE_CHART_PATH), true, 'interactive market chart must exist');
+  const source = readFileSync(INTERACTIVE_CHART_PATH, 'utf8');
 
-  assert.match(source, /<canvas/);
-  assert.match(source, /window\.devicePixelRatio/);
+  assert.equal((source.match(/createMarketChartAdapter\(/g) ?? []).length, 1);
+  assert.equal((source.match(/new ResizeObserver\(/g) ?? []).length, 1);
+  assert.match(source, /observer\.observe\(/);
+  assert.match(source, /adapter\.render\(\{[\s\S]*?candles,[\s\S]*?style,[\s\S]*?fitContent/s);
+  assert.match(source, /onCrosshairCandle/);
+  assert.match(source, /interval/);
+  assert.match(source, /range/);
+  const disconnect = source.indexOf('observer?.disconnect()');
+  const destroy = source.indexOf('adapter?.destroy()');
+  assert.ok(disconnect >= 0 && disconnect < destroy, 'observer disconnects before adapter destroy');
+  assert.equal((source.match(/adapter\?\.destroy\(\)/g) ?? []).length, 1);
+});
+
+test('interactive chart uses semantic theme colors and recovers locally with a retry key', () => {
+  assert.equal(existsSync(INTERACTIVE_CHART_PATH), true, 'interactive market chart must exist');
+  const source = readFileSync(INTERACTIVE_CHART_PATH, 'utf8');
+
   assert.match(source, /getComputedStyle\(/);
   for (const token of [
+    '--color-bg-primary',
     '--color-market-up',
     '--color-market-down',
     '--color-market-flat',
-    '--color-market-news',
     '--color-bg-border',
+    '--color-text-secondary',
   ]) {
     assert.match(source, new RegExp(token));
   }
   assert.doesNotMatch(source, /#[0-9a-f]{3,8}/i);
-  assert.equal((source.match(/type="range"/g) ?? []).length, 1);
-  assert.match(source, /aria-valuetext=\{selectedSummary\}/);
-  assert.match(source, /onPointerMove/);
-  assert.match(source, /nearestMarketCandleIndex\([^)]*CHART_PADDING/s);
-  assert.match(source, /limitMarketChartCandles\(candles\)/);
+  assert.match(source, /retryKey/);
+  assert.match(source, /차트를 불러오지 못했어요/);
+  assert.match(source, /차트 다시 불러오기/);
+  assert.match(source, /role="alert"/);
+  assert.match(source, /fitContent\(\)/);
+  assert.match(source, /onDoubleClick/);
 });
 
-test('canvas only announces OHLC after pointer or keyboard interaction', () => {
-  const source = readFileSync(CANVAS_PATH, 'utf8');
-  const liveRegion = source.match(
-    /<p[^>]*aria-live="polite"[^>]*>[\s\S]*?\{([A-Za-z]+Summary)\}[\s\S]*?<\/p>/,
-  );
-
-  assert.ok(liveRegion, 'one polite live region must remain for user selections');
-  assert.equal(liveRegion[1], 'announcedSummary');
-  assert.match(source, /const \[announcedSummary, setAnnouncedSummary\]/);
-  assert.match(source, /setAnnouncedSummary\(/);
-  assert.doesNotMatch(
-    source,
-    /<p className="mt-3 min-h-12[^>]*aria-live="polite"/,
-  );
-});
-
-test('chart controls expose every approved style, interval, and range label', () => {
-  const source = readFileSync('src/views/playground/market/MarketPriceChart.tsx', 'utf8');
-  for (const label of [
-    '선',
-    '캔들',
-    '1분',
-    '5분',
-    '10분',
-    '15분',
-    '1시간',
-    '1일',
-    '오늘',
-    '1주',
-    '1개월',
-    '6개월',
-    '전체',
-  ]) {
-    assert.match(source, new RegExp(`['\"]${label}['\"]`));
+test('price chart owns three labelled selects, selected OHLCV live text, and reset', () => {
+  const source = readFileSync(PRICE_CHART_PATH, 'utf8');
+  const options = [
+    ['1m', '1분'], ['5m', '5분'], ['10m', '10분'], ['15m', '15분'], ['1h', '1시간'], ['1d', '1일'],
+    ['today', '오늘'], ['week', '1주'], ['month', '1개월'], ['six-months', '6개월'], ['all', '전체'],
+    ['line', '선'], ['candlestick', '캔들'],
+  ];
+  for (const [value, label] of options) {
+    assert.match(source, new RegExp(`['\"]${value}['\"]\\s*,\\s*['\"]${label}['\"]`));
   }
-  assert.match(source, /resolveIntervalForRange/);
+  assert.equal((source.match(/<select\b/g) ?? []).length, 3);
+  for (const label of ['차트 모양', '간격', '기간']) {
+    assert.match(source, new RegExp(`<label[^>]*>${label}<\\/label>`));
+    assert.match(source, new RegExp(`aria-label=[\"'{]${label}`));
+  }
+  for (const field of ['시간', '시가', '고가', '저가', '종가', '거래량']) {
+    assert.match(source, new RegExp(field));
+  }
+  assert.match(source, /onSelectedCandle/);
   assert.match(source, /aria-live="polite"/);
+  assert.match(source, /resolveIntervalForRange/);
+  assert.match(source, /차트 초기화/);
+  assert.match(source, /resetKey/);
+  assert.match(source, /min-h-11/);
+  assert.match(source, /focus-visible:ring-2/);
   assert.match(source, /motion-reduce:transition-none/);
 });
 

@@ -256,19 +256,23 @@ test('global order toaster is portalled beyond the dialog inert root boundary', 
 
 test('detail chart and order panel keep the approved source contracts', () => {
   const chart = readFileSync('src/views/playground/market/MarketPriceChart.tsx', 'utf8');
-  const canvas = readFileSync('src/views/playground/market/MarketChartCanvas.tsx', 'utf8');
+  const interactivePath = 'src/views/playground/market/MarketInteractiveChart.tsx';
+  assert.equal(existsSync(interactivePath), true, 'Lightweight Charts React boundary must exist');
+  const interactive = readFileSync(interactivePath, 'utf8');
   const order = readFileSync('src/views/playground/market/MarketOrderPanel.tsx', 'utf8');
   const controller = readFileSync('src/views/playground/market/useMarketOrderController.ts', 'utf8');
   for (const label of ['선', '캔들', '1분', '5분', '10분', '15분', '1시간', '1일', '오늘', '1주', '1개월', '6개월', '전체', '가격 정보가 아직 없어요']) {
     assert.match(chart, new RegExp(label));
   }
-  assert.match(chart, /MarketChartCanvas/);
+  assert.match(chart, /MarketInteractiveChart/);
   assert.match(chart, /buildMarketDisplayCandles/);
-  assert.match(canvas, /getComputedStyle/);
-  assert.match(canvas, /window\.devicePixelRatio/);
-  assert.match(canvas, /type="range"/);
+  assert.match(interactive, /createMarketChartAdapter/);
+  assert.match(interactive, /차트를 불러오지 못했어요/);
+  assert.match(interactive, /차트 다시 불러오기/);
+  assert.equal(existsSync('src/views/playground/market/MarketChartCanvas.tsx'), false);
+  assert.doesNotMatch(interactive, /<canvas|type="range"|onPointerMove|nearestMarketCandleIndex/);
   assert.doesNotMatch(chart, /#[0-9a-f]{3,8}/i);
-  assert.doesNotMatch(canvas, /#[0-9a-f]{3,8}/i);
+  assert.doesNotMatch(interactive, /#[0-9a-f]{3,8}/i);
 
   for (const label of [
     '몇 주 주문할까요?', '1주', '5주', '10주', '최대',
