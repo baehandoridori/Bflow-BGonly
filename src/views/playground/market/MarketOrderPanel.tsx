@@ -1,5 +1,6 @@
-import { WalletCards } from 'lucide-react';
+import { Minus, Plus, WalletCards } from 'lucide-react';
 
+import { getMarketHoldingSummary } from '@/features/playground/market/domain';
 import { formatShares, formatWon } from '@/features/playground/market/format';
 import {
   MARKET_SHARE_CHOICES,
@@ -16,151 +17,273 @@ const MARKET_SHARE_CHOICE_LABELS: Record<MarketShareChoice, string> = {
   5: '5주',
   10: '10주',
   max: '최대',
-  custom: '직접 입력',
 };
 
-export function MarketOrderPanel({ controller }: MarketOrderPanelProps) {
-  const {
-    snapshot,
-    stock,
-    side,
-    choice,
-    customSharesInput,
-    frozenPreview,
-    halted,
-    controlsDisabled,
-    validation,
-    error,
-  } = controller;
-  if (!snapshot || !stock || !frozenPreview) return null;
+function signedWon(value: number): string {
+  if (value > 0) return `+${formatWon(value)}`;
+  if (value < 0) return `-${formatWon(Math.abs(value))}`;
+  return `±${formatWon(0)}`;
+}
 
-  const projectedCashWon = side === 'buy'
-    ? frozenPreview.availableCashWon - frozenPreview.estimatedTotalWon
-    : frozenPreview.availableCashWon + frozenPreview.estimatedTotalWon;
-  const projectedShares = side === 'buy'
-    ? frozenPreview.availableShares + frozenPreview.quantityShares
-    : frozenPreview.availableShares - frozenPreview.quantityShares;
+function signedRate(value: number): string {
+  if (value > 0) return `+${value.toFixed(2)}%`;
+  if (value < 0) return `-${Math.abs(value).toFixed(2)}%`;
+  return '±0.00%';
+}
+
+export function MarketOrderPanel({ controller }: MarketOrderPanelProps) {
+  const { snapshot, stock } = controller;
+  const preview = controller.previewBySide.buy ?? controller.previewBySide.sell;
+  if (!snapshot || !stock || !preview) return null;
+
+  const holding = snapshot.account.holdings.find((item) => item.stockId === stock.id);
+  const holdingSummary = getMarketHoldingSummary(holding, preview.quotedPriceWon);
+  const holdingQuantity = holding?.quantityShares ?? 0;
+  const pnlTone = holdingSummary.unrealizedPnlWon > 0
+    ? 'text-market-up'
+    : holdingSummary.unrealizedPnlWon < 0
+      ? 'text-market-down'
+      : 'text-market-flat';
+  const sellReason = controller.validationBySide.sell
+    ?? (controller.controlsDisabled
+      ? controller.error ?? '주문 정보를 확인하는 중이에요.'
+      : '이 수량을 판매할 수 있어요.');
+  const buyReason = controller.validationBySide.buy
+    ?? (controller.controlsDisabled
+      ? controller.error ?? '주문 정보를 확인하는 중이에요.'
+      : '이 수량을 구매할 수 있어요.');
+
+  const controlClass = 'cursor-pointer transition-[background-color,border-color,color,opacity,transform] duration-150 ease-out motion-reduce:transition-none active:scale-[0.96] disabled:cursor-not-allowed disabled:opacity-50 disabled:transform-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 focus-visible:ring-offset-bg-card';
 
   return (
     <div className="min-w-0">
-      <p className="text-sm leading-6 text-text-secondary">
-        현재 가격 <strong className="tabular-nums text-text-primary">{formatWon(frozenPreview.quotedPriceWon)}</strong>
-        {' · '}예수금 <strong className="tabular-nums text-text-primary">{formatWon(snapshot.account.cashWon)}</strong>
-      </p>
-
-      <fieldset disabled={controlsDisabled || halted} className="mt-5 min-w-0 disabled:opacity-60">
-        <legend className="sr-only">간편 주문 종류와 수량</legend>
-        <div className="grid grid-cols-2 rounded-xl bg-bg-primary/55 p-1">
-          {(['buy', 'sell'] as const).map((item) => (
-            <button
-              key={item}
-              type="button"
-              aria-pressed={side === item}
-              onClick={() => controller.selectSide(item)}
-              className="min-h-11 cursor-pointer rounded-lg px-3 py-2 text-sm font-bold text-text-secondary transition-colors duration-200 motion-reduce:transition-none hover:text-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent aria-pressed:bg-bg-card aria-pressed:text-text-primary"
-            >
-              {item === 'buy' ? '사기' : '팔기'}
-            </button>
-          ))}
+      <section
+        data-market-order-section="quote"
+        aria-label="현재 가격과 예수금"
+        className="grid grid-cols-2 gap-3 rounded-xl bg-bg-primary/45 p-3"
+      >
+        <div>
+          <p className="text-xs font-semibold text-text-secondary">현재 가격</p>
+          <p className="mt-1 text-base font-bold tabular-nums text-text-primary">
+            {formatWon(preview.quotedPriceWon)}
+          </p>
         </div>
-
-        <p className="mt-5 text-sm font-bold text-text-primary">
-          {side === 'buy' ? '현재 가격으로 바로 사기' : '보유한 주식에서 골라 팔기'}
-        </p>
-        <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-5 xl:grid-cols-2">
-          {MARKET_SHARE_CHOICES.map((item) => (
-            <button
-              key={String(item)}
-              type="button"
-              aria-pressed={choice === item}
-              onClick={() => controller.selectChoice(item)}
-              className="min-h-11 cursor-pointer rounded-xl border border-bg-border px-3 py-2 text-sm font-semibold text-text-secondary transition-colors duration-200 motion-reduce:transition-none hover:bg-bg-border/35 hover:text-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent aria-pressed:border-accent aria-pressed:bg-accent/10 aria-pressed:text-text-primary"
-            >
-              {MARKET_SHARE_CHOICE_LABELS[item]}
-            </button>
-          ))}
+        <div className="text-right">
+          <p className="text-xs font-semibold text-text-secondary">예수금</p>
+          <p className="mt-1 text-base font-bold tabular-nums text-text-primary">
+            {formatWon(snapshot.account.cashWon)}
+          </p>
         </div>
+        <button
+          id="order-open-account"
+          type="button"
+          disabled={controller.controlsDisabled}
+          onClick={controller.onOpenAccount}
+          className={`${controlClass} col-span-2 inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-lg border border-bg-border px-3 py-2 text-sm font-semibold text-text-secondary hover:bg-bg-border/35 hover:text-text-primary`}
+        >
+          <WalletCards aria-hidden="true" size={17} />
+          내 계좌에서 예수금 확인
+        </button>
+      </section>
 
-        {choice === 'custom' && (
-          <div className="mt-3">
-            <label htmlFor="market-custom-order-shares" className="text-sm font-semibold text-text-primary">
-              {side === 'buy' ? '살 수량' : '팔 수량'}
-            </label>
-            <div className="relative mt-2">
-              <input
-                id="market-custom-order-shares"
-                type="number"
-                inputMode="numeric"
-                min="1"
-                step="1"
-                value={customSharesInput}
-                onChange={(event) => controller.setCustomSharesInput(event.target.value)}
-                className="min-h-11 w-full rounded-xl border border-bg-border bg-bg-primary/45 px-3 py-2 pr-10 text-base tabular-nums text-text-primary outline-none transition-colors duration-200 motion-reduce:transition-none focus:border-accent focus:ring-2 focus:ring-accent/30"
-              />
-              <span className="pointer-events-none absolute inset-y-0 right-3 flex items-center text-sm text-text-secondary">주</span>
-            </div>
+      <fieldset
+        data-market-order-section="quantity"
+        disabled={controller.controlsDisabled}
+        className="mt-4 min-w-0 disabled:opacity-60"
+      >
+        <legend className="text-sm font-bold text-text-primary">몇 주 주문할까요?</legend>
+        <label htmlFor="market-order-quantity" className="mt-2 block text-xs font-semibold text-text-secondary">
+          주문 수량
+        </label>
+        <div className="mt-2 grid min-h-12 grid-cols-[44px_minmax(0,1fr)_44px] overflow-hidden rounded-xl border border-bg-border bg-bg-primary/45 focus-within:border-accent focus-within:ring-2 focus-within:ring-accent/30">
+          <button
+            type="button"
+            onClick={() => controller.stepQuantity(-1)}
+            aria-label="수량 1주 빼기"
+            className={`${controlClass} inline-flex min-h-11 min-w-11 items-center justify-center text-text-secondary hover:bg-bg-border/35 hover:text-text-primary`}
+          >
+            <Minus aria-hidden="true" size={18} />
+          </button>
+          <div className="flex min-w-0 items-center justify-center gap-1 border-x border-bg-border px-2">
+            <input
+              id="market-order-quantity"
+              type="number"
+              inputMode="numeric"
+              min="1"
+              step="1"
+              value={controller.quantityInput}
+              onChange={(event) => controller.setQuantityInput(event.target.value)}
+              className="min-h-11 min-w-0 flex-1 bg-transparent text-center text-lg font-bold tabular-nums text-text-primary outline-none"
+            />
+            <span className="shrink-0 text-sm text-text-secondary" aria-hidden="true">주</span>
           </div>
-        )}
+          <button
+            type="button"
+            onClick={() => controller.stepQuantity(1)}
+            aria-label="수량 1주 더하기"
+            className={`${controlClass} inline-flex min-h-11 min-w-11 items-center justify-center text-text-secondary hover:bg-bg-border/35 hover:text-text-primary`}
+          >
+            <Plus aria-hidden="true" size={18} />
+          </button>
+        </div>
       </fieldset>
 
-      <dl className="mt-4 space-y-3 rounded-xl bg-bg-primary/45 p-4 text-sm">
-        <div className="flex items-center justify-between gap-4">
-          <dt className="text-text-secondary">{side === 'buy' ? '예상 주문 금액' : '예상 받을 금액'}</dt>
-          <dd className="font-semibold tabular-nums text-text-primary">
-            {validation === null ? formatWon(frozenPreview.estimatedTotalWon) : '확인 필요'}
+      <div
+        data-market-order-section="presets"
+        role="group"
+        aria-label="빠른 수량 선택"
+        className="mt-2 grid grid-cols-4 gap-2"
+      >
+        {MARKET_SHARE_CHOICES.map((choice) => (
+          <button
+            key={String(choice)}
+            type="button"
+            disabled={controller.controlsDisabled}
+            aria-pressed={controller.selectedChoice === choice}
+            aria-label={choice === 'max' ? '구매 가능한 최대' : MARKET_SHARE_CHOICE_LABELS[choice]}
+            title={choice === 'max' ? '구매 가능한 최대 수량' : undefined}
+            onClick={() => controller.selectChoice(choice)}
+            className={`${controlClass} min-h-11 rounded-lg border border-bg-border px-2 py-2 text-sm font-semibold text-text-secondary hover:bg-bg-border/35 hover:text-text-primary aria-pressed:border-text-secondary aria-pressed:bg-bg-border/60 aria-pressed:text-text-primary`}
+          >
+            {MARKET_SHARE_CHOICE_LABELS[choice]}
+          </button>
+        ))}
+      </div>
+
+      <dl
+        data-market-order-section="availability"
+        className="mt-4 grid grid-cols-2 gap-3 rounded-xl bg-bg-primary/45 p-3 text-sm"
+      >
+        <div>
+          <dt className="text-xs font-semibold text-text-secondary">판매 가능</dt>
+          <dd className="mt-1 font-bold tabular-nums text-market-down">
+            {formatShares(controller.availableSellShares)}
           </dd>
         </div>
-        <div className="flex items-center justify-between gap-4">
-          <dt className="text-text-secondary">주문 후 예수금</dt>
-          <dd className="font-semibold tabular-nums text-text-primary">
-            {validation === null ? formatWon(projectedCashWon) : '확인 필요'}
-          </dd>
-        </div>
-        <div className="flex items-center justify-between gap-4">
-          <dt className="text-text-secondary">주문 후 보유 수량</dt>
-          <dd className="font-semibold tabular-nums text-text-primary">
-            {validation === null ? formatShares(projectedShares) : '확인 필요'}
+        <div className="text-right">
+          <dt className="text-xs font-semibold text-text-secondary">구매 가능</dt>
+          <dd className="mt-1 font-bold tabular-nums text-market-up">
+            {formatShares(controller.availableBuyShares)}
           </dd>
         </div>
       </dl>
 
-      <p id="market-order-error" className="mt-3 min-h-5 text-sm font-semibold text-text-primary" aria-live="polite">
-        {halted ? '현재 거래가 잠시 멈췄어요.' : error ?? validation ?? ''}
-      </p>
-      <button
-        type="button"
-        disabled={controlsDisabled || validation !== null || halted}
-        onClick={(event) => controller.openConfirmation(event.currentTarget)}
-        aria-describedby="market-order-error"
-        className="mt-2 min-h-12 w-full cursor-pointer rounded-xl bg-accent px-4 py-3 text-sm font-bold text-on-accent transition-colors duration-200 motion-reduce:transition-none hover:bg-accent/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 focus-visible:ring-offset-bg-card disabled:cursor-not-allowed disabled:opacity-50"
+      <dl
+        data-market-order-section="estimates"
+        className="mt-3 grid grid-cols-2 gap-3 rounded-xl bg-bg-primary/45 p-3 text-sm"
       >
-        {halted
-          ? '거래 정지 중'
-          : validation ?? `${formatShares(frozenPreview.quantityShares)} ${side === 'buy' ? '사기' : '팔기'}`}
-      </button>
+        <div>
+          <dt className="text-xs font-semibold text-text-secondary">판매 예상 금액</dt>
+          <dd className="mt-1 font-bold tabular-nums text-text-primary">
+            {formatWon(controller.previewBySide.sell?.estimatedTotalWon ?? 0)}
+          </dd>
+        </div>
+        <div className="text-right">
+          <dt className="text-xs font-semibold text-text-secondary">구매 예상 금액</dt>
+          <dd className="mt-1 font-bold tabular-nums text-text-primary">
+            {formatWon(controller.previewBySide.buy?.estimatedTotalWon ?? 0)}
+          </dd>
+        </div>
+      </dl>
 
-      <button
-        id="order-open-account"
-        type="button"
-        disabled={controlsDisabled}
-        onClick={controller.onOpenAccount}
-        className="mt-2 inline-flex min-h-11 w-full cursor-pointer items-center justify-center gap-2 rounded-xl px-3 py-2 text-sm font-semibold text-text-secondary transition-colors duration-200 motion-reduce:transition-none hover:bg-bg-border/35 hover:text-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent disabled:cursor-not-allowed disabled:opacity-50"
+      <section
+        data-market-order-section="actions"
+        aria-label="현재가 주문 선택"
+        className="mt-3 grid grid-cols-2 gap-2"
       >
-        <WalletCards aria-hidden="true" size={18} />
-        내 계좌에서 예수금 확인
-      </button>
+        <div className="min-w-0">
+          <button
+            id="market-order-sell-action"
+            type="button"
+            disabled={controller.controlsDisabled || controller.validationBySide.sell !== null}
+            onClick={(event) => controller.openConfirmation('sell', event.currentTarget)}
+            aria-describedby="market-order-sell-reason"
+            className={`${controlClass} min-h-12 w-full rounded-xl bg-market-down px-3 py-3 text-sm font-extrabold text-bg-primary hover:bg-market-down/90`}
+          >
+            현재가 팔기
+          </button>
+          <p
+            id="market-order-sell-reason"
+            tabIndex={-1}
+            className="mt-2 text-xs leading-5 text-text-secondary"
+            aria-live="polite"
+          >
+            {sellReason}
+          </p>
+        </div>
+        <div className="min-w-0">
+          <button
+            id="market-order-buy-action"
+            type="button"
+            disabled={controller.controlsDisabled || controller.validationBySide.buy !== null}
+            onClick={(event) => controller.openConfirmation('buy', event.currentTarget)}
+            aria-describedby="market-order-buy-reason"
+            className={`${controlClass} min-h-12 w-full rounded-xl bg-market-up px-3 py-3 text-sm font-extrabold text-bg-primary hover:bg-market-up/90`}
+          >
+            현재가 사기
+          </button>
+          <p
+            id="market-order-buy-reason"
+            tabIndex={-1}
+            className="mt-2 text-xs leading-5 text-text-secondary"
+            aria-live="polite"
+          >
+            {buyReason}
+          </p>
+        </div>
+      </section>
 
-      <div className="mt-5 border-t border-bg-border pt-5">
-        <button
-          type="button"
-          disabled={controlsDisabled}
-          onClick={(event) => controller.openLimit(event.currentTarget)}
-          className="min-h-11 w-full cursor-pointer rounded-xl px-3 py-2 text-sm font-semibold text-text-secondary transition-colors duration-200 motion-reduce:transition-none hover:bg-bg-border/35 hover:text-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent disabled:cursor-not-allowed disabled:opacity-50"
-        >
-          원하는 가격에 주문하기
-        </button>
-        <p className="mt-2 text-xs leading-5 text-text-secondary">지정가 주문은 입력과 확인 모양만 미리 볼 수 있어요.</p>
-      </div>
+      <section
+        data-market-order-section="holding"
+        aria-labelledby="market-order-holding-heading"
+        className="mt-4 border-t border-bg-border pt-4"
+      >
+        <h3 id="market-order-holding-heading" className="text-sm font-bold text-text-primary">내 보유 요약</h3>
+        {holdingSummary.averagePriceWon === null ? (
+          <p className="mt-3 rounded-xl bg-bg-primary/45 p-3 text-sm font-semibold text-text-primary">
+            아직 보유한 주식이 없어요
+          </p>
+        ) : (
+          <dl className="mt-2 space-y-2 text-sm">
+            <div className="flex items-start justify-between gap-4 py-1">
+              <dt className="text-text-secondary">내 주식 평균</dt>
+              <dd className="font-semibold tabular-nums text-text-primary">
+                {formatWon(holdingSummary.averagePriceWon)}
+              </dd>
+            </div>
+            <div className="flex items-start justify-between gap-4 py-1">
+              <dt className="text-text-secondary">현재 손익</dt>
+              <dd className={`text-right font-semibold tabular-nums ${pnlTone}`}>
+                <span className="block">{signedWon(holdingSummary.unrealizedPnlWon)}</span>
+                <span className="block text-xs">{signedRate(holdingSummary.unrealizedPnlRate ?? 0)}</span>
+              </dd>
+            </div>
+          </dl>
+        )}
+        <dl className="mt-2 space-y-2 text-sm">
+          <div className="flex items-start justify-between gap-4 py-1">
+            <dt className="text-text-secondary">보유 수량</dt>
+            <dd className="font-semibold tabular-nums text-text-primary">{formatShares(holdingQuantity)}</dd>
+          </div>
+          <div className="flex items-start justify-between gap-4 py-1">
+            <dt className="text-text-secondary">현재 평가금</dt>
+            <dd className="font-semibold tabular-nums text-text-primary">
+              {formatWon(holdingSummary.marketValueWon)}
+            </dd>
+          </div>
+        </dl>
+      </section>
+
+      <section data-market-order-section="note" className="mt-4 text-center">
+        {controller.error && (
+          <p className="mb-2 text-sm font-semibold text-text-primary" role="status" aria-live="polite">
+            {controller.error}
+          </p>
+        )}
+        <p className="text-xs leading-5 text-text-secondary">
+          실제 주문 전에는 현재 가격과 수량을 한 번 더 확인합니다.
+        </p>
+      </section>
     </div>
   );
 }

@@ -4,10 +4,11 @@ import { existsSync, readFileSync } from 'node:fs';
 
 import type { MarketAdminEvent } from '../src/features/playground/market/types.ts';
 
-test('stock detail puts the sticky order card in the first desktop row', () => {
+test('stock detail uses the approved 1280px two-column layout with a scrollable sticky order card', () => {
   const source = readFileSync('src/views/playground/market/StockDetailView.tsx', 'utf8');
 
-  assert.match(source, /grid-template-areas:[^\n]*'company_order'/);
+  assert.match(source, /xl:grid-cols-\[minmax\(0,1fr\)_360px\]/);
+  assert.match(source, /grid-template-areas:[^\n]*'summary_order'/);
   assert.match(source, /xl:sticky/);
   assert.match(source, /xl:top-/);
   assert.match(source, /xl:max-h-\[calc\(100dvh-/);
@@ -29,7 +30,11 @@ test('market router mounts one controller and keeps the mobile dock outside its 
   assert.match(router, /data-market-scroll-container[\s\S]*?<\/div>\s*\{!desktopOrderLayout && <MarketMobileOrderDock/);
 
   const dock = existsSync(dockPath) ? readFileSync(dockPath, 'utf8') : '';
-  for (const label of ['사기', '팔기']) assert.match(dock, new RegExp(label));
+  const sell = dock.indexOf('현재가 팔기');
+  const buy = dock.indexOf('현재가 사기');
+  assert.ok(sell >= 0 && sell < buy, 'mobile dock must keep sell before buy');
+  assert.match(dock, /controller\.openSheet\(event\.currentTarget,\s*'sell'\)/);
+  assert.match(dock, /controller\.openSheet\(event\.currentTarget,\s*'buy'\)/);
   assert.match(dock, /fixed/);
   assert.match(dock, /xl:hidden/);
   assert.match(dock, /safe-area-inset-bottom/);
@@ -55,18 +60,49 @@ test('xl transition retargets dialog focus before closing an open mobile order s
   assert.match(detail, /id="easy-order-heading"[^>]*tabIndex=\{-1\}/);
 });
 
-test('desktop and mobile order surfaces share exact whole-share presets', () => {
+test('desktop and mobile order surfaces share one labelled quantity input and exact presets', () => {
   const source = readFileSync('src/views/playground/market/MarketOrderPanel.tsx', 'utf8');
   const controller = readFileSync('src/views/playground/market/useMarketOrderController.ts', 'utf8');
 
   assert.match(controller, /MARKET_SHARE_CHOICES\s*=\s*\[1,\s*5,\s*10,\s*'max'\]/);
-  for (const label of ['1주', '5주', '10주', '최대', '직접 입력']) {
+  for (const label of ['1주', '5주', '10주', '최대']) {
     assert.match(source, new RegExp(label));
   }
+  assert.match(source, /<label htmlFor="market-order-quantity"/);
+  assert.match(source, /id="market-order-quantity"/);
+  assert.match(source, /controller\.setQuantityInput\(event\.target\.value\)/);
+  assert.match(source, /controller\.stepQuantity\(-1\)/);
+  assert.match(source, /controller\.stepQuantity\(1\)/);
+  assert.match(source, /aria-label=\{choice === 'max' \? '구매 가능한 최대'/);
+  assert.doesNotMatch(source, /직접 입력|choice === 'custom'|selectSide\(/);
   for (const legacy of ['100P', '500P', '1,000P', '전부', '25%', '50%', '100%']) {
     assert.doesNotMatch(source, new RegExp(legacy.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
   }
   assert.doesNotMatch(source, /useMarketOrderController\(|useMarketPreviewStore/);
+});
+
+test('quick order panel keeps the approved information order and independent side actions', () => {
+  const source = readFileSync('src/views/playground/market/MarketOrderPanel.tsx', 'utf8');
+  const sections = ['quote', 'quantity', 'presets', 'availability', 'estimates', 'actions', 'holding', 'note'];
+  const positions = sections.map((section) => source.indexOf(`data-market-order-section="${section}"`));
+  assert.ok(positions.every((position) => position >= 0), 'every quick-order section must be marked');
+  assert.deepEqual([...positions].sort((a, b) => a - b), positions);
+
+  for (const label of [
+    '현재 가격', '예수금', '판매 가능', '구매 가능', '판매 예상 금액', '구매 예상 금액',
+    '현재가 팔기', '현재가 사기', '내 주식 평균', '현재 손익', '보유 수량', '현재 평가금',
+    '아직 보유한 주식이 없어요', '실제 주문 전에는 현재 가격과 수량을 한 번 더 확인합니다.',
+  ]) assert.match(source, new RegExp(label));
+
+  assert.match(source, /id="market-order-sell-action"[\s\S]*?disabled=\{controller\.controlsDisabled\s*\|\|\s*controller\.validationBySide\.sell !== null\}/);
+  assert.match(source, /id="market-order-buy-action"[\s\S]*?disabled=\{controller\.controlsDisabled\s*\|\|\s*controller\.validationBySide\.buy !== null\}/);
+  assert.match(source, /controller\.openConfirmation\('sell',\s*event\.currentTarget\)/);
+  assert.match(source, /controller\.openConfirmation\('buy',\s*event\.currentTarget\)/);
+  assert.match(source, /aria-describedby="market-order-sell-reason"/);
+  assert.match(source, /aria-describedby="market-order-buy-reason"/);
+  assert.match(source, /bg-market-down/);
+  assert.match(source, /bg-market-up/);
+  assert.doesNotMatch(source, /openLimit|원하는 가격에 주문하기|지정가 주문|bg-accent\b/);
 });
 
 test('one quantity builds independent buy and sell validation and the stepper never drops below one share', async () => {
@@ -105,39 +141,38 @@ test('one quantity builds independent buy and sell validation and the stepper ne
   assert.equal(controller.stepMarketQuantityInput('2', -1), '1');
   assert.equal(controller.stepMarketQuantityInput('1', 1), '2');
   assert.equal(controller.stepMarketQuantityInput('', -1), '1');
-  assert.equal(controller.resolveMarketShareChoiceQuantity('max', 'buy', 5, 1), 5);
-  assert.equal(controller.resolveMarketShareChoiceQuantity('max', 'sell', 5, 1), 1);
-  assert.equal(controller.resolveMarketShareChoiceQuantity(10, 'sell', 5, 1), 10);
+  assert.equal(controller.resolveMarketShareChoiceQuantity('max', 5), 5);
+  assert.equal(controller.resolveMarketShareChoiceQuantity('max', 0), 1);
+  assert.equal(controller.resolveMarketShareChoiceQuantity(10, 5), 10);
 });
 
-test('selected max follows selectSide and openSheet preferred-side changes in both directions', async () => {
+test('shared max always means max buyable and opening either sheet side preserves the common quantity', async () => {
   const controller = await import('../src/views/playground/market/useMarketOrderController.ts');
-  assert.equal(typeof controller.transitionMarketOrderSide, 'function');
-
-  assert.deepEqual(controller.transitionMarketOrderSide({
-    nextSide: 'sell', selectedChoice: 'max', quantityInput: '5',
-    availableBuyShares: 5, availableSellShares: 1,
-  }), { side: 'sell', quantityInput: '1' });
-  assert.deepEqual(controller.transitionMarketOrderSide({
-    nextSide: 'buy', selectedChoice: 'max', quantityInput: '1',
-    availableBuyShares: 5, availableSellShares: 1,
-  }), { side: 'buy', quantityInput: '5' });
-  assert.deepEqual(controller.transitionMarketOrderSide({
-    nextSide: 'sell', selectedChoice: 5, quantityInput: '5',
-    availableBuyShares: 9, availableSellShares: 2,
-  }), { side: 'sell', quantityInput: '5' });
+  assert.equal(controller.resolveMarketShareChoiceQuantity('max', 5), 5);
+  assert.equal(controller.resolveMarketShareChoiceQuantity('max', 9), 9);
+  assert.equal('transitionMarketOrderSide' in controller, false);
 
   const source = readFileSync('src/views/playground/market/useMarketOrderController.ts', 'utf8');
-  const selectSideSource = source.slice(
-    source.indexOf('const selectSide ='),
-    source.indexOf('const selectChoice ='),
-  );
   const openSheetSource = source.slice(
     source.indexOf('const openSheet ='),
     source.indexOf('const openConfirmation ='),
   );
-  assert.match(selectSideSource, /applySideChange\(nextSide\)/);
-  assert.match(openSheetSource, /applySideChange\(nextSide\)/);
+  assert.match(openSheetSource, /setSide\(preferredSide \?\? side\)/);
+  assert.doesNotMatch(openSheetSource, /setQuantityInputState|applySideChange|transitionMarketOrderSide/);
+  const controllerInterface = source.slice(
+    source.indexOf('export interface MarketOrderController'),
+    source.indexOf('function safeOrderTotal'),
+  );
+  for (const legacyAlias of [
+    /\n\s+choice:/,
+    /customSharesInput:/,
+    /frozenPreview:/,
+    /\n\s+validation:/,
+    /selectSide\(/,
+    /setCustomSharesInput\(/,
+  ]) assert.doesNotMatch(controllerInterface, legacyAlias);
+  assert.equal((controllerInterface.match(/openSheet\(/g) ?? []).length, 1);
+  assert.equal((controllerInterface.match(/openConfirmation\(/g) ?? []).length, 1);
 });
 
 test('order controller freezes snapshot revision with the quote, revalidates drift, blocks halts and creates one request id', async () => {

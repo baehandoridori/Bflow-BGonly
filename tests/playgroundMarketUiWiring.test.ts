@@ -153,12 +153,18 @@ test('completed mission disclosure summary has a 44px padded target', () => {
   assert.match(className, /\bpy-\d+\b/);
 });
 
-test('stock detail uses the approved beginner-first order', () => {
+test('stock detail merges company price change and reason before chart, holding and news', () => {
   const source = readFileSync('src/views/playground/market/StockDetailView.tsx', 'utf8');
-  const labels = ['회사 한 줄 설명', '현재 가격과 오늘의 변화', '오늘 움직인 이유', '가격 그래프', '내 보유 상태', '간편 주문', '최근 소식'];
-  const positions = labels.map((label) => source.indexOf(label));
+  const sections = ['summary', 'chart', 'holding', 'news'];
+  const positions = sections.map((section) => source.indexOf(`data-market-detail-section="${section}"`));
   assert.ok(positions.every((position) => position >= 0));
   assert.deepEqual([...positions].sort((a, b) => a - b), positions);
+  const orderAside = source.indexOf('aria-labelledby="easy-order-heading"');
+  assert.ok(positions.at(-1)! < orderAside, 'desktop sidebar must follow all left-column content in DOM order');
+  for (const label of ['오늘 움직인 이유', '가격 그래프', '내 보유 상태', '빠른주문', '최근 소식']) {
+    assert.match(source, new RegExp(label));
+  }
+  assert.doesNotMatch(source, /aria-label="회사 한 줄 설명"|aria-label="현재 가격과 오늘의 변화"/);
   for (const forbidden of ['PER', 'PBR', '체결 강도', '호가창']) assert.doesNotMatch(source, new RegExp(forbidden));
 });
 
@@ -187,6 +193,16 @@ test('market dialog is portalled, labelled, inert and focus-safe', () => {
   assert.match(source, /aria-describedby/);
   assert.match(source, /\.inert\s*=\s*true/);
   assert.match(source, /openerRef\.current.*focus/);
+  assert.match(source, /document\.body\.style\.overflow/);
+  assert.match(source, /document\.body\.style\.overflow\s*=\s*['"]hidden['"]/);
+  assert.match(source, /document\.body\.style\.overflow\s*=\s*previousBodyOverflow/);
+  assert.match(source, /event\.key === 'Escape'/);
+  assert.match(source, /usePlaygroundBackInterceptor/);
+  assert.match(source, /FOCUSABLE_SELECTOR/);
+  assert.match(source, /presentation === 'sheet'/);
+  assert.match(source, /initialFocusFallbackId/);
+  assert.match(source, /const activeControl = active instanceof HTMLElement[\s\S]*?controls\.includes\(active\)/);
+  assert.match(source, /if \(activeControl === null\)/);
 });
 
 test('global order toaster is portalled beyond the dialog inert root boundary', () => {
@@ -207,7 +223,10 @@ test('global order toaster is portalled beyond the dialog inert root boundary', 
   assert.match(order, /toast\.success\(/);
   assert.match(order, /toast\.error\(/);
   assert.match(orderDialogs, /aria-live="polite"/);
-  assert.match(orderDialogs, /\{controller\.error \?\? ''\}/);
+  assert.match(order, /confirmDisabledReason/);
+  assert.match(orderDialogs, /controller\.error \?\? controller\.confirmDisabledReason \?\? ''/);
+  assert.match(orderDialogs, /id="market-confirm-disabled-reason"/);
+  assert.match(orderDialogs, /aria-describedby="market-confirm-disabled-reason"/);
 });
 
 test('detail chart and order panel keep the approved source contracts', () => {
@@ -226,8 +245,15 @@ test('detail chart and order panel keep the approved source contracts', () => {
   assert.doesNotMatch(chart, /#[0-9a-f]{3,8}/i);
   assert.doesNotMatch(canvas, /#[0-9a-f]{3,8}/i);
 
-  for (const label of ['현재 가격으로 바로 사기', '1주', '5주', '10주', '최대', '직접 입력', '원하는 가격에 주문하기']) {
+  for (const label of [
+    '몇 주 주문할까요?', '1주', '5주', '10주', '최대',
+    '판매 가능', '구매 가능', '판매 예상 금액', '구매 예상 금액',
+    '현재가 팔기', '현재가 사기', '내 주식 평균', '현재 손익', '보유 수량', '현재 평가금',
+  ]) {
     assert.match(order, new RegExp(label));
+  }
+  for (const removed of ['현재 가격으로 바로 사기', '직접 입력', '원하는 가격에 주문하기', '지정가 주문']) {
+    assert.doesNotMatch(order, new RegExp(removed));
   }
   assert.match(controller, /MARKET_SHARE_CHOICES\s*=\s*\[1,\s*5,\s*10,\s*'max'\]/);
   assert.match(controller, /quantityInput/);
@@ -240,11 +266,44 @@ test('detail chart and order panel keep the approved source contracts', () => {
   assert.doesNotMatch(order, /applyMarketCommand/);
 });
 
-test('stock detail xl shell contains both fixed columns, gap and horizontal padding', () => {
+test('stock detail and router switch at 1280px between fluid plus 360px and the fixed dock', () => {
   const source = readFileSync('src/views/playground/market/StockDetailView.tsx', 'utf8');
+  const router = readFileSync('src/views/playground/market/MarketRouter.tsx', 'utf8');
+  const dock = readFileSync('src/views/playground/market/MarketMobileOrderDock.tsx', 'utf8');
   assert.match(source, /xl:max-w-\[1200px\]/);
-  assert.match(source, /xl:grid-cols-\[minmax\(0,760px\)_360px\]/);
+  assert.match(source, /xl:grid-cols-\[minmax\(0,1fr\)_360px\]/);
   assert.match(source, /xl:gap-x-6/);
+  assert.match(source, /pb-\[calc\([^\]]*env\(safe-area-inset-bottom\)[^\]]*\)\]/);
+  assert.match(router, /matchMedia\(['"]\(min-width: 1280px\)['"]\)/);
+  assert.match(dock, /grid-cols-2/);
+  assert.match(dock, /safe-area-inset-(?:left|right|bottom)/);
+  assert.match(dock, /role="status"/);
+  assert.match(dock, /aria-describedby=\{disabledReason/);
+});
+
+test('mobile order sheet uses the shared panel and preferred side only for description and focus', () => {
+  const dialogs = readFileSync('src/views/playground/market/MarketOrderDialogs.tsx', 'utf8');
+  const actionDialog = readFileSync('src/views/playground/market/MarketActionDialog.tsx', 'utf8');
+
+  assert.equal((dialogs.match(/<MarketOrderPanel\b/g) ?? []).length, 1);
+  assert.match(dialogs, /controller\.side === 'sell'/);
+  assert.match(dialogs, /initialFocusId=\{controller\.surface === 'mobile-order'/);
+  assert.match(dialogs, /initialFocusFallbackId=\{controller\.surface === 'mobile-order'/);
+  assert.match(dialogs, /presentation=\{controller\.surface === 'mobile-order' \? 'sheet' : 'dialog'\}/);
+  assert.match(dialogs, /market-order-sell-action/);
+  assert.match(dialogs, /market-order-buy-action/);
+  assert.match(dialogs, /market-order-sell-reason/);
+  assert.match(dialogs, /market-order-buy-reason/);
+  assert.match(actionDialog, /initialFocusId/);
+  assert.match(actionDialog, /initialFocusFallbackId/);
+  assert.match(actionDialog, /document\.getElementById\(initialFocusId\)/);
+  assert.match(actionDialog, /document\.getElementById\(initialFocusFallbackId\)/);
+  assert.match(actionDialog, /const sheetBackdropClass = ['"][^'"]*items-end[^'"]*xl:items-center/);
+  assert.match(actionDialog, /const sheetPanelClass = ['"][^'"]*rounded-t-3xl[^'"]*safe-area-inset-bottom[^'"]*xl:rounded-3xl/);
+
+  const panel = readFileSync('src/views/playground/market/MarketOrderPanel.tsx', 'utf8');
+  assert.match(panel, /id="market-order-sell-reason"[\s\S]*?tabIndex=\{-1\}/);
+  assert.match(panel, /id="market-order-buy-reason"[\s\S]*?tabIndex=\{-1\}/);
 });
 
 test('easy order revalidates frozen confirmation before creating a request id', () => {

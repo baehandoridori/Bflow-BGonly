@@ -18,6 +18,25 @@ test('market rows map every trend to its semantic color class', () => {
   assert.match(source, /return 'text-market-flat';/);
 });
 
+test('quick order actions use sell-down then buy-up semantics with restrained motion', () => {
+  const panel = readFileSync('src/views/playground/market/MarketOrderPanel.tsx', 'utf8');
+  const dock = readFileSync('src/views/playground/market/MarketMobileOrderDock.tsx', 'utf8');
+  const sellPanel = panel.indexOf('id="market-order-sell-action"');
+  const buyPanel = panel.indexOf('id="market-order-buy-action"');
+  const sellDock = dock.indexOf('현재가 팔기');
+  const buyDock = dock.indexOf('현재가 사기');
+
+  assert.ok(sellPanel >= 0 && sellPanel < buyPanel);
+  assert.ok(sellDock >= 0 && sellDock < buyDock);
+  for (const source of [panel, dock]) {
+    assert.match(source, /bg-market-down/);
+    assert.match(source, /bg-market-up/);
+    assert.match(source, /duration-(?:150|200)/);
+    assert.match(source, /motion-reduce:transition-none/);
+    assert.doesNotMatch(source, /transition-all|\btransition\s/);
+  }
+});
+
 test('new market components do not hardcode hex colors', () => {
   const files = [
     'src/views/playground/market/MarketNav.tsx',

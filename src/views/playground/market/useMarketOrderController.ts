@@ -24,7 +24,7 @@ export const MARKET_SHARE_CHOICES = [1, 5, 10, 'max'] as const;
 
 export type MarketOrderSide = 'buy' | 'sell';
 type MarketSharePresetChoice = (typeof MARKET_SHARE_CHOICES)[number];
-export type MarketShareChoice = MarketSharePresetChoice | 'custom';
+export type MarketShareChoice = MarketSharePresetChoice;
 export type MarketOrderSurface = 'mobile-order' | 'confirm' | 'limit-edit' | 'limit-review' | null;
 type MarketOrderBySide<T> = Record<MarketOrderSide, T>;
 
@@ -92,9 +92,6 @@ export interface MarketOrderController {
   setQuantityInput(value: string): void;
   stepQuantity(delta: -1 | 1): void;
   side: MarketOrderSide;
-  choice: MarketShareChoice;
-  customSharesInput: string;
-  frozenPreview: FrozenMarketOrder | null;
   confirmation: FrozenMarketOrder | null;
   surface: MarketOrderSurface;
   limitDraft: MarketLimitDraft;
@@ -102,19 +99,15 @@ export interface MarketOrderController {
   halted: boolean;
   controlsDisabled: boolean;
   confirmDisabled: boolean;
+  confirmDisabledReason: string | null;
   pendingResolution: boolean;
   refreshRequired: boolean;
   submitting: boolean;
-  validation: string | null;
   error: string | null;
   openerRef: MutableRefObject<HTMLElement | null>;
-  selectSide(side: MarketOrderSide): void;
   selectChoice(choice: MarketShareChoice): void;
-  setCustomSharesInput(value: string): void;
   openSheet(opener: HTMLElement, preferredSide?: MarketOrderSide): void;
-  openSheet(side: MarketOrderSide, opener: HTMLElement): void;
   openConfirmation(side: MarketOrderSide, opener?: HTMLElement): void;
-  openConfirmation(opener?: HTMLElement): void;
   confirm(): Promise<void>;
   reloadPending(): Promise<void>;
   close(): boolean;
@@ -234,41 +227,10 @@ export function stepMarketQuantityInput(value: string, delta: -1 | 1): string {
 
 export function resolveMarketShareChoiceQuantity(
   choice: MarketSharePresetChoice,
-  side: MarketOrderSide,
   availableBuyShares: number,
-  availableSellShares: number,
 ): number {
   if (choice !== 'max') return choice;
-  const availableShares = side === 'buy' ? availableBuyShares : availableSellShares;
-  return Math.max(1, availableShares);
-}
-
-interface MarketOrderSideTransitionOptions {
-  nextSide: MarketOrderSide;
-  selectedChoice: MarketShareChoice | null;
-  quantityInput: string;
-  availableBuyShares: number;
-  availableSellShares: number;
-}
-
-export function transitionMarketOrderSide({
-  nextSide,
-  selectedChoice,
-  quantityInput,
-  availableBuyShares,
-  availableSellShares,
-}: MarketOrderSideTransitionOptions) {
-  return {
-    side: nextSide,
-    quantityInput: selectedChoice === 'max'
-      ? String(resolveMarketShareChoiceQuantity(
-          'max',
-          nextSide,
-          availableBuyShares,
-          availableSellShares,
-        ))
-      : quantityInput,
-  };
+  return Math.max(1, availableBuyShares);
 }
 
 function limitDraftError(draft: MarketLimitDraft): string | null {
@@ -339,10 +301,6 @@ export function useMarketOrderController({
       : orderPreviewState.validationBySide;
   const availableBuyShares = orderPreviewState?.availableBuyShares ?? 0;
   const availableSellShares = orderPreviewState?.availableSellShares ?? 0;
-  const choice: MarketShareChoice = selectedChoice ?? 'custom';
-  const customSharesInput = quantityInput;
-  const frozenPreview = previewBySide[side];
-  const validation = validationBySide[side];
   const pendingResolution = pendingOrderUncertain;
   const refreshRequired = valueRefreshRequired;
   const pendingCommandMismatch = pendingValueCommand !== null
@@ -360,6 +318,13 @@ export function useMarketOrderController({
     || pendingCommandMismatch
     || valueRefreshRequired
     || (pendingOrder === null && halted);
+  const confirmDisabledReason = pendingOrder === null && halted
+    ? '현재 거래가 잠시 멈춰 주문을 확인할 수 없어요.'
+    : valueRefreshRequired
+      ? '최신 가격과 시장 정보를 다시 불러온 뒤 주문을 확인해 주세요.'
+      : pendingCommandMismatch
+        ? '이전 주문 결과를 확인한 뒤 새 주문을 진행해 주세요.'
+        : null;
 
   const clearFeedback = () => {
     setLocalError(null);
@@ -370,36 +335,11 @@ export function useMarketOrderController({
     if (opener && surface === null) openerRef.current = opener;
   };
 
-  const applySideChange = (nextSide: MarketOrderSide) => {
-    const next = transitionMarketOrderSide({
-      nextSide,
-      selectedChoice,
-      quantityInput,
-      availableBuyShares,
-      availableSellShares,
-    });
-    setSide(next.side);
-    setQuantityInputState(next.quantityInput);
-  };
-
-  const selectSide = (nextSide: MarketOrderSide) => {
-    if (controlsDisabled) return;
-    applySideChange(nextSide);
-    clearFeedback();
-  };
-
   const selectChoice = (nextChoice: MarketShareChoice) => {
     if (controlsDisabled) return;
-    if (nextChoice === 'custom') {
-      setSelectedChoice(null);
-      clearFeedback();
-      return;
-    }
     const quantityShares = resolveMarketShareChoiceQuantity(
       nextChoice,
-      side,
       availableBuyShares,
-      availableSellShares,
     );
     setQuantityInputState(String(quantityShares));
     setSelectedChoice(nextChoice);
@@ -419,32 +359,22 @@ export function useMarketOrderController({
     clearFeedback();
   };
 
-  const setCustomSharesInput = setQuantityInput;
-
   const openSheet = (
-    openerOrSide: HTMLElement | MarketOrderSide,
-    preferredSideOrOpener?: MarketOrderSide | HTMLElement,
+    opener: HTMLElement,
+    preferredSide?: MarketOrderSide,
   ) => {
     if (controlsDisabled) return;
-    const nextSide = typeof openerOrSide === 'string'
-      ? openerOrSide
-      : typeof preferredSideOrOpener === 'string' ? preferredSideOrOpener : side;
-    const opener = typeof openerOrSide === 'string'
-      ? preferredSideOrOpener as HTMLElement
-      : openerOrSide;
     openerRef.current = opener;
-    applySideChange(nextSide);
+    setSide(preferredSide ?? side);
     setSurface('mobile-order');
     clearFeedback();
   };
 
   const openConfirmation = (
-    nextSideOrOpener: MarketOrderSide | HTMLElement = side,
-    maybeOpener?: HTMLElement,
+    nextSide: MarketOrderSide,
+    opener?: HTMLElement,
   ) => {
     if (controlsDisabled) return;
-    const nextSide = typeof nextSideOrOpener === 'string' ? nextSideOrOpener : side;
-    const opener = typeof nextSideOrOpener === 'string' ? maybeOpener : nextSideOrOpener;
     setSide(nextSide);
     clearFeedback();
     rememberOpener(opener);
@@ -659,9 +589,6 @@ export function useMarketOrderController({
     setQuantityInput,
     stepQuantity,
     side,
-    choice,
-    customSharesInput,
-    frozenPreview,
     confirmation,
     surface,
     limitDraft,
@@ -669,15 +596,13 @@ export function useMarketOrderController({
     halted,
     controlsDisabled,
     confirmDisabled,
+    confirmDisabledReason,
     pendingResolution,
     refreshRequired,
     submitting,
-    validation,
     error: localError ?? storeError,
     openerRef,
-    selectSide,
     selectChoice,
-    setCustomSharesInput,
     openSheet,
     openConfirmation,
     confirm,
