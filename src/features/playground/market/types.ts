@@ -11,6 +11,13 @@ export interface MarketInstrumentProfile {
   basePriceWon: number;
   volatilityBps: number;
   phase: number;
+  sectorId?: 'studio' | 'platform' | 'creative-tools' | 'collaboration';
+  marketBeta?: number;
+  sectorBeta?: number;
+  idiosyncraticVolatilityBps?: number;
+  longTermDriftBps?: number;
+  baseMinuteVolume?: number;
+  jumpSensitivity?: number;
 }
 
 export interface MarketAdminEvent {
@@ -39,6 +46,7 @@ export interface MarketCandle {
   highWon: number;
   lowWon: number;
   closeWon: number;
+  volumeShares: number;
   newsIds: string[];
 }
 
@@ -46,6 +54,12 @@ export interface PricePoint {
   at: string;
   priceWon: number;
   newsId?: string;
+}
+
+export interface MarketQuoteContext {
+  quoteWonByStockId: Readonly<Record<string, number>>;
+  previousCloseWonByStockId: Readonly<Record<string, number>>;
+  sparklineByStockId: Readonly<Record<string, PricePoint[]>>;
 }
 
 export interface MarketNews {

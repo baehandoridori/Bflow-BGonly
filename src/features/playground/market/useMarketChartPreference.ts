@@ -9,14 +9,17 @@ export interface MarketChartStyleStorage {
   setItem(key: string, value: string): void;
 }
 
+function isMarketChartStyle(value: unknown): value is MarketChartStyle {
+  return value === 'line' || value === 'candlestick';
+}
+
 export function readMarketChartStyle(
   storage: Pick<MarketChartStyleStorage, 'getItem'> | null | undefined,
 ): MarketChartStyle {
   if (!storage) return 'line';
   try {
-    return storage.getItem(MARKET_CHART_STYLE_STORAGE_KEY) === 'candlestick'
-      ? 'candlestick'
-      : 'line';
+    const savedStyle = storage.getItem(MARKET_CHART_STYLE_STORAGE_KEY);
+    return isMarketChartStyle(savedStyle) ? savedStyle : 'line';
   } catch {
     return 'line';
   }
@@ -26,7 +29,7 @@ export function writeMarketChartStyle(
   storage: Pick<MarketChartStyleStorage, 'setItem'> | null | undefined,
   style: MarketChartStyle,
 ): void {
-  if (!storage) return;
+  if (!storage || !isMarketChartStyle(style)) return;
   try {
     storage.setItem(MARKET_CHART_STYLE_STORAGE_KEY, style);
   } catch {

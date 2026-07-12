@@ -8,12 +8,16 @@ import {
   toReturnSeries,
 } from '@/features/playground/market/domain';
 import { formatWon } from '@/features/playground/market/format';
-import type { MarketStock, MarketTrend } from '@/features/playground/market/types';
+import type {
+  MarketQuoteContext,
+  MarketStock,
+  MarketTrend,
+} from '@/features/playground/market/types';
 import { useMarketPreviewStore } from '@/features/playground/market/useMarketPreviewStore';
 
 export interface FavoriteStockCardProps {
   stock: MarketStock;
-  currentPriceWon: number;
+  quoteContext: MarketQuoteContext;
   wished: boolean;
   onOpen(): void;
   onToggleFavorite(): void;
@@ -28,30 +32,25 @@ interface MarketRowsScale {
 
 interface MarketRowsScaleProviderProps {
   stocks: MarketStock[];
-  quoteWonByStockId: Readonly<Record<string, number>>;
+  quoteContext: MarketQuoteContext;
   children: ReactNode;
 }
 
 const MarketRowsScaleContext = createContext<MarketRowsScale | null>(null);
 
-function todaySeriesAtQuote(stock: MarketStock, currentPriceWon: number) {
-  return stock.series.today.map((point, index, points) => (
-    index === points.length - 1 ? { ...point, priceWon: currentPriceWon } : point
-  ));
-}
-
 export function MarketRowsScaleProvider({
   stocks,
-  quoteWonByStockId,
+  quoteContext,
   children,
 }: MarketRowsScaleProviderProps) {
   const scale = useMemo<MarketRowsScale>(() => {
-    const seriesGroups = stocks.map((stock) => toReturnSeries(todaySeriesAtQuote(
-      stock,
-      quoteWonByStockId[stock.id] ?? stock.referencePriceWon,
-    )));
+    const seriesGroups = stocks.map((stock) => toReturnSeries([
+      ...(quoteContext.sparklineByStockId[stock.id] ?? []),
+    ]));
     const timestamps = stocks.flatMap((stock) => (
-      stock.series.today.map((point) => Date.parse(point.at)).filter(Number.isFinite)
+      (quoteContext.sparklineByStockId[stock.id] ?? [])
+        .map((point) => Date.parse(point.at))
+        .filter(Number.isFinite)
     ));
     return {
       returnDomain: getSharedReturnDomain(seriesGroups),
@@ -59,7 +58,7 @@ export function MarketRowsScaleProvider({
         ? { min: Math.min(...timestamps), max: Math.max(...timestamps) }
         : { min: 0, max: 1 },
     };
-  }, [quoteWonByStockId, stocks]);
+  }, [quoteContext, stocks]);
 
   return (
     <MarketRowsScaleContext.Provider value={scale}>
@@ -68,8 +67,11 @@ export function MarketRowsScaleProvider({
   );
 }
 
-function quoteText(stock: MarketStock, currentPriceWon: number) {
-  const quote = getStockQuote({ ...stock, referencePriceWon: currentPriceWon });
+function quoteText(currentPriceWon: number, previousCloseWon: number) {
+  const quote = getStockQuote({
+    referencePriceWon: currentPriceWon,
+    previousCloseWon,
+  });
   if (quote.trend === 'up') {
     return {
       ...quote,
@@ -105,11 +107,14 @@ function trendClass(trend: MarketTrend): string {
 
 function AccessibleSparkline({
   stock,
-  currentPriceWon,
-}: Pick<FavoriteStockCardProps, 'stock' | 'currentPriceWon'>) {
+  quoteContext,
+}: Pick<FavoriteStockCardProps, 'stock' | 'quoteContext'>) {
   const shared = useContext(MarketRowsScaleContext);
-  const series = todaySeriesAtQuote(stock, currentPriceWon);
-  const returnSeries = toReturnSeries(series);
+  const currentPriceWon = quoteContext.quoteWonByStockId[stock.id] ?? 1;
+  const previousCloseWon = quoteContext.previousCloseWonByStockId[stock.id]
+    ?? currentPriceWon;
+  const series = quoteContext.sparklineByStockId[stock.id] ?? [];
+  const returnSeries = toReturnSeries([...series]);
   const returnDomain = shared?.returnDomain ?? getSharedReturnDomain([returnSeries]);
   const parsedTimes = series.map((point) => Date.parse(point.at));
   const localTimes = parsedTimes.filter(Number.isFinite);
@@ -127,8 +132,8 @@ function AccessibleSparkline({
     y: point.y,
   }));
   const points = geometry.map((point) => `${point.x.toFixed(1)},${point.y.toFixed(1)}`).join(' ');
-  const quote = quoteText(stock, currentPriceWon);
-  const first = series[0]?.priceWon ?? stock.referencePriceWon;
+  const quote = quoteText(currentPriceWon, previousCloseWon);
+  const first = series[0]?.priceWon ?? currentPriceWon;
 
   return (
     <svg
@@ -181,12 +186,15 @@ function FavoriteButton({
 
 export function FavoriteStockCard({
   stock,
-  currentPriceWon,
+  quoteContext,
   wished,
   onOpen,
   onToggleFavorite,
 }: FavoriteStockCardProps) {
-  const quote = quoteText(stock, currentPriceWon);
+  const currentPriceWon = quoteContext.quoteWonByStockId[stock.id] ?? 1;
+  const previousCloseWon = quoteContext.previousCloseWonByStockId[stock.id]
+    ?? currentPriceWon;
+  const quote = quoteText(currentPriceWon, previousCloseWon);
   const mutating = useMarketPreviewStore((state) => state.mutating);
 
   return (
@@ -209,7 +217,7 @@ export function FavoriteStockCard({
           {quote.marker} {quote.amount} · {quote.rate} {quote.wording}
         </span>
         <span className="mt-4 block">
-          <AccessibleSparkline stock={stock} currentPriceWon={currentPriceWon} />
+          <AccessibleSparkline stock={stock} quoteContext={quoteContext} />
         </span>
         <span className="mt-4 block text-sm leading-6 text-text-secondary">
           {stock.reason}
@@ -227,12 +235,15 @@ export function FavoriteStockCard({
 
 export function StockListRow({
   stock,
-  currentPriceWon,
+  quoteContext,
   wished,
   onOpen,
   onToggleFavorite,
 }: StockListRowProps) {
-  const quote = quoteText(stock, currentPriceWon);
+  const currentPriceWon = quoteContext.quoteWonByStockId[stock.id] ?? 1;
+  const previousCloseWon = quoteContext.previousCloseWonByStockId[stock.id]
+    ?? currentPriceWon;
+  const quote = quoteText(currentPriceWon, previousCloseWon);
   const mutating = useMarketPreviewStore((state) => state.mutating);
 
   return (
@@ -257,7 +268,7 @@ export function StockListRow({
           </span>
         </span>
         <span className="min-w-0">
-          <AccessibleSparkline stock={stock} currentPriceWon={currentPriceWon} />
+          <AccessibleSparkline stock={stock} quoteContext={quoteContext} />
         </span>
         <span className="min-w-0 text-sm leading-6 text-text-secondary">
           {stock.reason}

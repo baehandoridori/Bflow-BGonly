@@ -4,10 +4,11 @@ import { existsSync, readFileSync } from 'node:fs';
 
 import type { MarketAdminEvent } from '../src/features/playground/market/types.ts';
 
-test('stock detail puts the sticky order card in the first desktop row', () => {
+test('stock detail uses the approved 1280px two-column layout with a scrollable sticky order card', () => {
   const source = readFileSync('src/views/playground/market/StockDetailView.tsx', 'utf8');
 
-  assert.match(source, /grid-template-areas:[^\n]*'company_order'/);
+  assert.match(source, /xl:grid-cols-\[minmax\(0,1fr\)_360px\]/);
+  assert.match(source, /grid-template-areas:[^\n]*'summary_order'/);
   assert.match(source, /xl:sticky/);
   assert.match(source, /xl:top-/);
   assert.match(source, /xl:max-h-\[calc\(100dvh-/);
@@ -29,7 +30,11 @@ test('market router mounts one controller and keeps the mobile dock outside its 
   assert.match(router, /data-market-scroll-container[\s\S]*?<\/div>\s*\{!desktopOrderLayout && <MarketMobileOrderDock/);
 
   const dock = existsSync(dockPath) ? readFileSync(dockPath, 'utf8') : '';
-  for (const label of ['사기', '팔기']) assert.match(dock, new RegExp(label));
+  const sell = dock.indexOf('현재가 팔기');
+  const buy = dock.indexOf('현재가 사기');
+  assert.ok(sell >= 0 && sell < buy, 'mobile dock must keep sell before buy');
+  assert.match(dock, /controller\.openSheet\(event\.currentTarget,\s*'sell'\)/);
+  assert.match(dock, /controller\.openSheet\(event\.currentTarget,\s*'buy'\)/);
   assert.match(dock, /fixed/);
   assert.match(dock, /xl:hidden/);
   assert.match(dock, /safe-area-inset-bottom/);
@@ -39,6 +44,18 @@ test('market router mounts one controller and keeps the mobile dock outside its 
   const actionDialog = readFileSync('src/views/playground/market/MarketActionDialog.tsx', 'utf8');
   assert.match(dialogs, /focusKey=\{controller\.surface/);
   assert.match(actionDialog, /focusKey/);
+});
+
+test('mobile order dock blocks both entry buttons during a trading halt without coupling side validation', () => {
+  const dock = readFileSync('src/views/playground/market/MarketMobileOrderDock.tsx', 'utf8');
+
+  assert.match(
+    dock,
+    /const dockDisabled = controller\.controlsDisabled\s*\|\|\s*controller\.halted;/,
+  );
+  assert.equal((dock.match(/disabled=\{dockDisabled\}/g) ?? []).length, 2);
+  assert.match(dock, /controller\.halted\s*\?\s*'현재 거래가 잠시 멈췄어요\.'/);
+  assert.doesNotMatch(dock, /validationBySide/);
 });
 
 test('xl transition retargets dialog focus before closing an open mobile order surface', () => {
@@ -55,18 +72,183 @@ test('xl transition retargets dialog focus before closing an open mobile order s
   assert.match(detail, /id="easy-order-heading"[^>]*tabIndex=\{-1\}/);
 });
 
-test('desktop and mobile order surfaces share exact whole-share presets', () => {
+test('desktop and mobile order surfaces share one labelled quantity input and exact presets', () => {
   const source = readFileSync('src/views/playground/market/MarketOrderPanel.tsx', 'utf8');
   const controller = readFileSync('src/views/playground/market/useMarketOrderController.ts', 'utf8');
 
-  assert.match(controller, /MARKET_SHARE_CHOICES\s*=\s*\[1,\s*5,\s*10,\s*'max',\s*'custom'\]/);
-  for (const label of ['1주', '5주', '10주', '최대', '직접 입력']) {
+  assert.match(controller, /MARKET_SHARE_CHOICES\s*=\s*\[1,\s*5,\s*10,\s*'max'\]/);
+  for (const label of ['1주', '5주', '10주', '최대']) {
     assert.match(source, new RegExp(label));
   }
+  assert.match(source, /<label htmlFor="market-order-quantity"/);
+  assert.match(source, /id="market-order-quantity"/);
+  assert.match(source, /controller\.setQuantityInput\(event\.target\.value\)/);
+  assert.match(source, /controller\.stepQuantity\(-1\)/);
+  assert.match(source, /controller\.stepQuantity\(1\)/);
+  assert.match(source, /aria-label=\{choice === 'max' \? '구매 가능한 최대'/);
+  assert.match(source, /aria-describedby=\{choice === 'max' \? 'market-order-max-help'/);
+  assert.match(
+    source,
+    /id="market-order-max-help"[^>]*>\s*최대는 구매 가능한 수량 기준이에요\./,
+  );
+  assert.doesNotMatch(source, /직접 입력|choice === 'custom'|selectSide\(/);
   for (const legacy of ['100P', '500P', '1,000P', '전부', '25%', '50%', '100%']) {
     assert.doesNotMatch(source, new RegExp(legacy.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
   }
   assert.doesNotMatch(source, /useMarketOrderController\(|useMarketPreviewStore/);
+});
+
+test('quick order panel keeps the approved information order and independent side actions', () => {
+  const source = readFileSync('src/views/playground/market/MarketOrderPanel.tsx', 'utf8');
+  const sections = ['quote', 'quantity', 'presets', 'availability', 'estimates', 'actions', 'holding', 'note'];
+  const positions = sections.map((section) => source.indexOf(`data-market-order-section="${section}"`));
+  assert.ok(positions.every((position) => position >= 0), 'every quick-order section must be marked');
+  assert.deepEqual([...positions].sort((a, b) => a - b), positions);
+  const maxHelp = source.indexOf('id="market-order-max-help"');
+  assert.ok(
+    positions[2] < maxHelp && maxHelp < positions[3],
+    'the max-buyable helper must stay between presets and availability',
+  );
+
+  for (const label of [
+    '현재 가격', '예수금', '판매 가능', '구매 가능', '판매 예상 금액', '구매 예상 금액',
+    '현재가 팔기', '현재가 사기', '내 주식 평균', '현재 손익', '보유 수량', '현재 평가금',
+    '아직 보유한 주식이 없어요', '실제 주문 전에는 현재 가격과 수량을 한 번 더 확인합니다.',
+  ]) assert.match(source, new RegExp(label));
+
+  assert.match(source, /id="market-order-sell-action"[\s\S]*?disabled=\{controller\.controlsDisabled\s*\|\|\s*controller\.validationBySide\.sell !== null\}/);
+  assert.match(source, /id="market-order-buy-action"[\s\S]*?disabled=\{controller\.controlsDisabled\s*\|\|\s*controller\.validationBySide\.buy !== null\}/);
+  assert.match(source, /controller\.openConfirmation\('sell',\s*event\.currentTarget\)/);
+  assert.match(source, /controller\.openConfirmation\('buy',\s*event\.currentTarget\)/);
+  assert.match(source, /aria-describedby="market-order-sell-reason"/);
+  assert.match(source, /aria-describedby="market-order-buy-reason"/);
+  assert.match(source, /bg-market-down/);
+  assert.match(source, /bg-market-up/);
+  assert.doesNotMatch(source, /openLimit|원하는 가격에 주문하기|지정가 주문|bg-accent\b/);
+});
+
+test('one quantity builds independent buy and sell validation and the stepper never drops below one share', async () => {
+  const controller = await import('../src/views/playground/market/useMarketOrderController.ts');
+  assert.equal(typeof controller.getMarketOrderPreviewState, 'function');
+  assert.equal(typeof controller.stepMarketQuantityInput, 'function');
+  assert.equal(typeof controller.resolveMarketShareChoiceQuantity, 'function');
+
+  const { createMarketPreviewSeed } = await import(
+    '../src/features/playground/market/seed.ts'
+  );
+  const snapshot = createMarketPreviewSeed();
+  snapshot.account.cashWon = 10_000;
+  snapshot.account.holdings = [{ stockId: 'jbbj', quantityShares: 1, costBasisWon: 1_700 }];
+  const stock = snapshot.stocks.find((item) => item.id === 'jbbj')!;
+  const holdingLimited = controller.getMarketOrderPreviewState({
+    snapshot, stock, quantityShares: 2, quotedPriceWon: 1_842,
+  });
+
+  assert.equal(holdingLimited.previewBySide.buy.quantityShares, 2);
+  assert.equal(holdingLimited.previewBySide.sell.quantityShares, 2);
+  assert.equal(holdingLimited.validationBySide.buy, null);
+  assert.equal(holdingLimited.validationBySide.sell, '보유 주식 수량이 부족해요');
+  assert.equal(holdingLimited.availableBuyShares, 5);
+  assert.equal(holdingLimited.availableSellShares, 1);
+
+  snapshot.account.cashWon = 1_000;
+  snapshot.account.holdings = [{ stockId: 'jbbj', quantityShares: 5, costBasisWon: 8_500 }];
+  const cashLimited = controller.getMarketOrderPreviewState({
+    snapshot, stock, quantityShares: 2, quotedPriceWon: 1_842,
+  });
+  assert.equal(cashLimited.validationBySide.buy, '예수금이 부족해요');
+  assert.equal(cashLimited.validationBySide.sell, null);
+
+  assert.equal(controller.stepMarketQuantityInput('1', -1), '1');
+  assert.equal(controller.stepMarketQuantityInput('2', -1), '1');
+  assert.equal(controller.stepMarketQuantityInput('1', 1), '2');
+  assert.equal(controller.stepMarketQuantityInput('', -1), '1');
+  assert.equal(controller.resolveMarketShareChoiceQuantity('max', 5), 5);
+  assert.equal(controller.resolveMarketShareChoiceQuantity('max', 0), 1);
+  assert.equal(controller.resolveMarketShareChoiceQuantity(10, 5), 10);
+
+  snapshot.account.cashWon = 0;
+  const zeroCashMax = controller.resolveMarketShareChoiceQuantity('max', 0);
+  const zeroCashPreview = controller.getMarketOrderPreviewState({
+    snapshot, stock, quantityShares: zeroCashMax, quotedPriceWon: 1_842,
+  });
+  assert.equal(zeroCashMax, 1);
+  assert.equal(zeroCashPreview.previewBySide.buy.quantityShares, 1);
+  assert.equal(zeroCashPreview.validationBySide.buy, '예수금이 부족해요');
+});
+
+test('shared max always means max buyable and opening either sheet side preserves the common quantity', async () => {
+  const controller = await import('../src/views/playground/market/useMarketOrderController.ts');
+  assert.equal(controller.resolveMarketShareChoiceQuantity('max', 5), 5);
+  assert.equal(controller.resolveMarketShareChoiceQuantity('max', 9), 9);
+  assert.equal('transitionMarketOrderSide' in controller, false);
+
+  const source = readFileSync('src/views/playground/market/useMarketOrderController.ts', 'utf8');
+  const openSheetSource = source.slice(
+    source.indexOf('const openSheet ='),
+    source.indexOf('const openConfirmation ='),
+  );
+  assert.match(openSheetSource, /setSide\(preferredSide \?\? side\)/);
+  assert.doesNotMatch(openSheetSource, /setQuantityInputState|applySideChange|transitionMarketOrderSide/);
+  const controllerInterface = source.slice(
+    source.indexOf('export interface MarketOrderController'),
+    source.indexOf('function safeOrderTotal'),
+  );
+  for (const legacyAlias of [
+    /\n\s+choice:/,
+    /customSharesInput:/,
+    /frozenPreview:/,
+    /\n\s+validation:/,
+    /selectSide\(/,
+    /setCustomSharesInput\(/,
+  ]) assert.doesNotMatch(controllerInterface, legacyAlias);
+  assert.equal((controllerInterface.match(/openSheet\(/g) ?? []).length, 1);
+  assert.equal((controllerInterface.match(/openConfirmation\(/g) ?? []).length, 1);
+});
+
+test('selected max follows the latest buyable amount and clears safely at zero', async () => {
+  const controller = await import('../src/views/playground/market/useMarketOrderController.ts');
+  const selectedAtFive = controller.reconcileMarketMaxShareChoice({
+    selectedChoice: 'max',
+    quantityInput: '5',
+    availableBuyShares: 5,
+  });
+  const afterPriceIncrease = controller.reconcileMarketMaxShareChoice({
+    ...selectedAtFive,
+    availableBuyShares: 3,
+  });
+  const afterOneShareBuy = controller.reconcileMarketMaxShareChoice({
+    ...afterPriceIncrease,
+    availableBuyShares: 2,
+  });
+
+  assert.deepEqual(selectedAtFive, { selectedChoice: 'max', quantityInput: '5' });
+  assert.deepEqual(afterPriceIncrease, { selectedChoice: 'max', quantityInput: '3' });
+  assert.deepEqual(
+    afterOneShareBuy,
+    { selectedChoice: 'max', quantityInput: '2' },
+    'post-buy account changes must not retain the old max quantity',
+  );
+  assert.deepEqual(controller.reconcileMarketMaxShareChoice({
+    selectedChoice: 'max',
+    quantityInput: '2',
+    availableBuyShares: 0,
+  }), {
+    selectedChoice: null,
+    quantityInput: '1',
+  });
+  assert.deepEqual(controller.reconcileMarketMaxShareChoice({
+    selectedChoice: 5,
+    quantityInput: '5',
+    availableBuyShares: 2,
+  }), {
+    selectedChoice: 5,
+    quantityInput: '5',
+  });
+
+  const source = readFileSync('src/views/playground/market/useMarketOrderController.ts', 'utf8');
+  assert.match(source, /useEffect\(\(\) => \{[\s\S]*reconcileMarketMaxShareChoice/);
+  assert.match(source, /availableBuyShares/);
 });
 
 test('order controller freezes snapshot revision with the quote, revalidates drift, blocks halts and creates one request id', async () => {
@@ -112,8 +294,7 @@ test('order controller freezes snapshot revision with the quote, revalidates dri
     snapshot,
     stock,
     side: 'buy',
-    choice: 'max',
-    customSharesInput: '1',
+    quantityShares: 3,
     quotedPriceWon: 3_000,
   }), {
     side: 'buy',
@@ -128,8 +309,7 @@ test('order controller freezes snapshot revision with the quote, revalidates dri
     snapshot,
     stock,
     side: 'sell',
-    choice: 'max',
-    customSharesInput: '1',
+    quantityShares: 7,
     quotedPriceWon: 3_000,
   }), {
     side: 'sell',
@@ -144,13 +324,23 @@ test('order controller freezes snapshot revision with the quote, revalidates dri
     snapshot,
     stock,
     side: 'buy',
-    choice: 1,
-    customSharesInput: '1',
+    quantityShares: 1,
     quotedPriceWon: 3_000,
   });
   assert.equal(frozenOrdersMatch(frozen, { ...frozen }), true);
   assert.equal(frozenOrdersMatch(frozen, { ...frozen, availableCashWon: 9_999 }), false);
   assert.equal(frozenOrdersMatch(frozen, { ...frozen, quotedRevision: frozen.quotedRevision + 1 }), false);
+  assert.equal(freezeMarketOrder({
+    snapshot, stock, side: 'sell', quantityShares: 2, quotedPriceWon: 3_000,
+  }).side, 'sell');
+  assert.equal(freezeMarketOrder({
+    snapshot, stock, side: 'buy', quantityShares: 2, quotedPriceWon: 3_000,
+  }).side, 'buy');
+  const openConfirmationStart = source.indexOf('const openConfirmation =');
+  const openConfirmationEnd = source.indexOf('\n  const confirm =', openConfirmationStart);
+  const openConfirmationSource = source.slice(openConfirmationStart, openConfirmationEnd);
+  assert.match(openConfirmationSource, /setSide\(nextSide\)/);
+  assert.match(openConfirmationSource, /side:\s*nextSide/);
   assert.equal(isStockTradingHalted([{
     id: 'halt-live', stockId: 'jbbj', kind: 'halt', title: '점검', impactBps: 0,
     startsAt: '2026-07-11T00:00:00.000Z', endsAt: null, revision: 2,

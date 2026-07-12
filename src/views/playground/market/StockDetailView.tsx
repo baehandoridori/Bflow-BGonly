@@ -1,12 +1,12 @@
 import { useState, type ReactNode } from 'react';
 import { ArrowLeft, Briefcase, Star } from 'lucide-react';
 
-import { getStockQuote, holdingValueWon } from '@/features/playground/market/domain';
+import { getMarketHoldingSummary, getStockQuote } from '@/features/playground/market/domain';
 import { formatShares, formatWon } from '@/features/playground/market/format';
 import type {
   MarketBarInterval,
   MarketChartRange,
-  MarketStock,
+  MarketQuoteContext,
   MarketTrend,
 } from '@/features/playground/market/types';
 import { useMarketChartPreference } from '@/features/playground/market/useMarketChartPreference';
@@ -16,7 +16,7 @@ import { MarketPriceChart } from './MarketPriceChart';
 interface StockDetailViewProps {
   stockId: string;
   nowMs: number;
-  currentPriceWon?: number;
+  quoteContext: MarketQuoteContext;
   orderPanel?: ReactNode;
   onOpenAccount(): void;
   onOpenMarketHome(): void;
@@ -28,8 +28,11 @@ function trendClass(trend: MarketTrend): string {
   return 'text-market-flat';
 }
 
-function movementSummary(stock: MarketStock) {
-  const quote = getStockQuote(stock);
+function movementSummary(currentPriceWon: number, previousCloseWon: number) {
+  const quote = getStockQuote({
+    referencePriceWon: currentPriceWon,
+    previousCloseWon,
+  });
   if (quote.trend === 'up') {
     return {
       quote,
@@ -65,7 +68,7 @@ function formatNewsDate(value: string): string {
 export function StockDetailView({
   stockId,
   nowMs,
-  currentPriceWon: quotedPriceWon,
+  quoteContext,
   orderPanel,
   onOpenAccount,
   onOpenMarketHome,
@@ -100,15 +103,16 @@ export function StockDetailView({
     );
   }
 
-  const currentPriceWon = quotedPriceWon ?? stock.referencePriceWon;
-  const movement = movementSummary({ ...stock, referencePriceWon: currentPriceWon });
+  const currentPriceWon = quoteContext.quoteWonByStockId[stock.id] ?? 1;
+  const previousCloseWon = quoteContext.previousCloseWonByStockId[stock.id]
+    ?? currentPriceWon;
+  const movement = movementSummary(currentPriceWon, previousCloseWon);
   const wished = snapshot.favoriteStockIds.includes(stock.id);
   const holding = snapshot.account.holdings.find((item) => item.stockId === stock.id);
-  const currentHoldingValue = holding ? holdingValueWon(holding, currentPriceWon) : 0;
-  const holdingPnl = holding ? currentHoldingValue - holding.costBasisWon : 0;
-  const holdingPnlRate = holding && holding.costBasisWon > 0
-    ? (holdingPnl / holding.costBasisWon) * 100
-    : 0;
+  const holdingSummary = getMarketHoldingSummary(holding, currentPriceWon);
+  const currentHoldingValue = holdingSummary.marketValueWon;
+  const holdingPnl = holdingSummary.unrealizedPnlWon;
+  const holdingPnlRate = holdingSummary.unrealizedPnlRate ?? 0;
   const relatedNews = snapshot.news.filter((item) => item.stockId === stock.id);
 
   const toggleFavorite = () => {
@@ -123,25 +127,18 @@ export function StockDetailView({
 
   return (
     <div className="mx-auto w-full max-w-[760px] px-5 pt-7 pb-[calc(7.5rem+env(safe-area-inset-bottom))] sm:px-7 sm:pt-9 xl:max-w-[1200px] xl:pb-9">
-      <div className="flex min-w-0 flex-col gap-4 xl:grid xl:grid-cols-[minmax(0,760px)_360px] xl:gap-x-6 xl:gap-y-4 xl:[grid-template-areas:'company_order'_'price_order'_'reason_order'_'chart_order'_'holding_.'_'news_.']">
+      <div className="flex min-w-0 flex-col gap-4 xl:grid xl:grid-cols-[minmax(0,1fr)_360px] xl:items-start xl:gap-x-6 xl:gap-y-4 xl:[grid-template-areas:'summary_order'_'chart_order'_'holding_order'_'news_order']">
         <section
-          aria-label="회사 한 줄 설명"
-          className="min-w-0 rounded-2xl border border-bg-border bg-bg-card p-5 sm:p-6 xl:[grid-area:company]"
-        >
-          <p className="text-sm font-semibold text-text-secondary">회사 한 줄 설명</p>
-          <p className="mt-3 text-lg font-semibold leading-8 text-text-primary">{stock.description}</p>
-        </section>
-
-        <section
-          aria-label="현재 가격과 오늘의 변화"
-          className="min-w-0 rounded-2xl border border-bg-border bg-bg-card p-5 sm:p-6 xl:[grid-area:price]"
+          data-market-detail-section="summary"
+          aria-labelledby="market-page-title"
+          className="min-w-0 rounded-2xl border border-bg-border bg-bg-card p-5 sm:p-6 xl:[grid-area:summary]"
         >
           <div className="flex flex-wrap items-center gap-2">
             <button
               id="stock-open-market-home"
               type="button"
               onClick={onOpenMarketHome}
-              className="inline-flex min-h-11 cursor-pointer items-center gap-2 rounded-xl border border-bg-border px-3 py-2 text-sm font-semibold text-text-secondary transition-colors duration-200 hover:bg-bg-border/35 hover:text-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+              className="inline-flex min-h-11 cursor-pointer items-center gap-2 rounded-xl border border-bg-border px-3 py-2 text-sm font-semibold text-text-secondary transition-[background-color,color,transform] duration-150 ease-out motion-reduce:transition-none hover:bg-bg-border/35 hover:text-text-primary active:scale-[0.96] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
             >
               <ArrowLeft aria-hidden="true" size={17} />
               시장 홈
@@ -150,7 +147,7 @@ export function StockDetailView({
               id="stock-open-account"
               type="button"
               onClick={onOpenAccount}
-              className="inline-flex min-h-11 cursor-pointer items-center gap-2 rounded-xl border border-bg-border px-3 py-2 text-sm font-semibold text-text-secondary transition-colors duration-200 hover:bg-bg-border/35 hover:text-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+              className="inline-flex min-h-11 cursor-pointer items-center gap-2 rounded-xl border border-bg-border px-3 py-2 text-sm font-semibold text-text-secondary transition-[background-color,color,transform] duration-150 ease-out motion-reduce:transition-none hover:bg-bg-border/35 hover:text-text-primary active:scale-[0.96] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
             >
               <Briefcase aria-hidden="true" size={17} />
               내 계좌
@@ -161,7 +158,7 @@ export function StockDetailView({
               aria-pressed={wished}
               disabled={mutating}
               onClick={toggleFavorite}
-              className="ml-auto inline-flex h-11 min-w-11 cursor-pointer items-center justify-center gap-2 rounded-xl border border-bg-border px-3 text-sm font-semibold text-text-secondary transition-colors duration-200 hover:border-accent/60 hover:text-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent disabled:cursor-not-allowed disabled:opacity-50"
+              className="ml-auto inline-flex h-11 min-w-11 cursor-pointer items-center justify-center gap-2 rounded-xl border border-bg-border px-3 text-sm font-semibold text-text-secondary transition-[border-color,color,transform] duration-150 ease-out motion-reduce:transition-none hover:border-accent/60 hover:text-text-primary active:scale-[0.96] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent disabled:cursor-not-allowed disabled:opacity-50 disabled:transform-none"
             >
               <Star aria-hidden="true" size={18} fill={wished ? 'currentColor' : 'none'} />
               <span className="hidden sm:inline">찜</span>
@@ -172,26 +169,28 @@ export function StockDetailView({
           <h1
             id="market-page-title"
             tabIndex={-1}
-            className="mt-1 text-3xl font-bold tracking-tight text-text-primary outline-none"
+            className="mt-1 text-balance text-3xl font-bold tracking-tight text-text-primary outline-none"
           >
             {stock.name}
           </h1>
-          <p className="mt-5 text-4xl font-bold tabular-nums text-text-primary transition-colors duration-200 motion-reduce:transition-none">{formatWon(currentPriceWon)}</p>
-          <p className={`mt-3 text-base font-bold tabular-nums ${trendClass(movement.quote.trend)}`}>
-            {movement.compact}
-          </p>
+          <p className="mt-2 text-pretty text-sm leading-6 text-text-secondary">{stock.description}</p>
+          <div className="mt-5 flex flex-wrap items-baseline gap-x-4 gap-y-2">
+            <p className="text-4xl font-bold tabular-nums text-text-primary transition-colors duration-200 motion-reduce:transition-none">
+              {formatWon(currentPriceWon)}
+            </p>
+            <p className={`text-base font-bold tabular-nums ${trendClass(movement.quote.trend)}`}>
+              {movement.compact}
+            </p>
+          </div>
           <p className="mt-2 text-sm leading-6 text-text-secondary">{movement.sentence}</p>
+          <div className="mt-5 rounded-xl bg-accent/10 p-4">
+            <h2 id="price-reason-heading" className="text-sm font-bold text-accent">오늘 움직인 이유</h2>
+            <p className="mt-2 text-pretty text-sm leading-6 text-text-primary">{stock.reason}</p>
+          </div>
         </section>
 
         <section
-          aria-labelledby="price-reason-heading"
-          className="min-w-0 rounded-2xl border border-bg-border bg-bg-card p-5 sm:p-6 xl:[grid-area:reason]"
-        >
-          <h2 id="price-reason-heading" className="text-lg font-bold text-text-primary">오늘 움직인 이유</h2>
-          <p className="mt-3 text-base leading-7 text-text-primary">{stock.reason}</p>
-        </section>
-
-        <section
+          data-market-detail-section="chart"
           aria-labelledby="price-chart-heading"
           className="min-w-0 rounded-2xl border border-bg-border bg-bg-card p-5 sm:p-6 xl:[grid-area:chart]"
         >
@@ -212,6 +211,7 @@ export function StockDetailView({
         </section>
 
         <section
+          data-market-detail-section="holding"
           aria-labelledby="holding-heading"
           className="min-w-0 rounded-2xl border border-bg-border bg-bg-card p-5 sm:p-6 xl:[grid-area:holding]"
         >
@@ -251,20 +251,8 @@ export function StockDetailView({
           )}
         </section>
 
-        {orderPanel && (
-          <aside
-            aria-labelledby="easy-order-heading"
-            className="min-w-0 rounded-2xl border border-bg-border bg-bg-card p-5 sm:p-6 xl:sticky xl:top-4 xl:max-h-[calc(100dvh-10rem)] xl:self-start xl:overflow-y-auto xl:[grid-area:order]"
-          >
-            <h2 id="easy-order-heading" tabIndex={-1} className="text-lg font-bold text-text-primary outline-none">간편 주문</h2>
-            <p className="mt-2 text-xs leading-5 text-text-secondary">
-              회사 확인 → 이유와 그래프 확인 → 원하는 정수 주식 수량으로 시작
-            </p>
-            <div className="mt-5">{orderPanel}</div>
-          </aside>
-        )}
-
         <section
+          data-market-detail-section="news"
           aria-labelledby="recent-news-heading"
           className="min-w-0 rounded-2xl border border-bg-border bg-bg-card p-5 sm:p-6 xl:[grid-area:news]"
         >
@@ -285,6 +273,19 @@ export function StockDetailView({
             <p className="mt-3 text-sm text-text-secondary">최근 등록된 소식이 없어요.</p>
           )}
         </section>
+
+        {orderPanel && (
+          <aside
+            aria-labelledby="easy-order-heading"
+            className="min-w-0 rounded-2xl border border-bg-border bg-bg-card p-5 sm:p-6 xl:sticky xl:top-4 xl:max-h-[calc(100dvh-10rem)] xl:self-start xl:overflow-y-auto xl:[grid-area:order]"
+          >
+            <h2 id="easy-order-heading" tabIndex={-1} className="text-lg font-bold text-text-primary outline-none">빠른주문</h2>
+            <p className="mt-2 text-xs leading-5 text-text-secondary">
+              현재 가격과 공통 수량을 확인한 뒤 팔기 또는 사기를 선택하세요.
+            </p>
+            <div className="mt-5">{orderPanel}</div>
+          </aside>
+        )}
       </div>
     </div>
   );

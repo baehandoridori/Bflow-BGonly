@@ -10,7 +10,7 @@ interface MarketOrderDialogsProps {
 }
 
 function dialogTitle(controller: MarketOrderController): string {
-  if (controller.surface === 'mobile-order') return `${controller.stock?.name ?? '종목'} 주문`;
+  if (controller.surface === 'mobile-order') return `${controller.stock?.name ?? '종목'} 빠른주문`;
   if (controller.surface === 'confirm') return controller.confirmation?.side === 'buy'
     ? '사기 전에 한 번 확인해요'
     : '팔기 전에 한 번 확인해요';
@@ -27,11 +27,20 @@ export function MarketOrderDialogs({ controller }: MarketOrderDialogsProps) {
       open={controller.surface !== null}
       title={dialogTitle(controller)}
       description={controller.surface === 'mobile-order'
-        ? '정수 주식 수량을 고른 뒤 주문 내용을 확인합니다.'
+        ? `${controller.side === 'sell' ? '팔기' : '사기'} 버튼에서 열었어요. 같은 수량으로 팔기와 사기를 모두 확인할 수 있어요.`
         : controller.surface === 'confirm'
           ? '현재 가격, 수량, 예수금과 보유 수량을 마지막으로 확인합니다.'
           : '원하는 가격과 정수 주식 수량을 입력하는 미리보기입니다.'}
-      focusKey={controller.surface}
+      focusKey={controller.surface === 'mobile-order'
+        ? `${controller.surface}:${controller.side}`
+        : controller.surface}
+      initialFocusId={controller.surface === 'mobile-order'
+        ? controller.side === 'sell' ? 'market-order-sell-action' : 'market-order-buy-action'
+        : undefined}
+      initialFocusFallbackId={controller.surface === 'mobile-order'
+        ? controller.side === 'sell' ? 'market-order-sell-reason' : 'market-order-buy-reason'
+        : undefined}
+      presentation={controller.surface === 'mobile-order' ? 'sheet' : 'dialog'}
       openerRef={controller.openerRef}
       onClose={controller.close}
     >
@@ -65,8 +74,13 @@ export function MarketOrderDialogs({ controller }: MarketOrderDialogsProps) {
               <dd className="font-semibold tabular-nums text-text-primary">{formatShares(confirmation.availableShares)}</dd>
             </div>
           </dl>
-          <p className="mt-3 min-h-5 text-sm font-semibold text-text-primary" aria-live="polite">
-            {controller.error ?? ''}
+          <p
+            id="market-confirm-disabled-reason"
+            className="mt-3 min-h-5 text-sm font-semibold text-text-primary"
+            role="status"
+            aria-live="polite"
+          >
+            {controller.error ?? controller.confirmDisabledReason ?? ''}
           </p>
           {(controller.pendingResolution || controller.refreshRequired) && (
             <p className="mt-1 text-xs leading-5 text-text-secondary">
@@ -78,8 +92,9 @@ export function MarketOrderDialogs({ controller }: MarketOrderDialogsProps) {
           <button
             type="button"
             disabled={controller.confirmDisabled}
+            aria-describedby="market-confirm-disabled-reason"
             onClick={() => void controller.confirm()}
-            className="mt-2 min-h-12 w-full cursor-pointer rounded-xl bg-accent px-4 py-3 text-sm font-bold text-on-accent transition-colors duration-200 motion-reduce:transition-none hover:bg-accent/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent disabled:cursor-not-allowed disabled:opacity-50"
+            className={`mt-2 min-h-12 w-full cursor-pointer rounded-xl px-4 py-3 text-sm font-bold text-bg-primary transition-[background-color,opacity,transform] duration-150 ease-out motion-reduce:transition-none active:scale-[0.96] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent disabled:cursor-not-allowed disabled:opacity-50 disabled:transform-none ${confirmation.side === 'buy' ? 'bg-market-up hover:bg-market-up/90' : 'bg-market-down hover:bg-market-down/90'}`}
           >
             {controller.submitting
               ? controller.pendingResolution ? '주문 결과를 확인하는 중…' : '주문을 저장하는 중…'

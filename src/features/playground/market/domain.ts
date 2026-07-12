@@ -59,6 +59,38 @@ export function holdingValueWon(holding: Holding, priceWon: number): number {
   return valueWon;
 }
 
+export interface MarketHoldingSummary {
+  averagePriceWon: number | null;
+  marketValueWon: number;
+  unrealizedPnlWon: number;
+  unrealizedPnlRate: number | null;
+}
+
+export function getMarketHoldingSummary(
+  holding: Holding | null | undefined,
+  currentPriceWon: number,
+): MarketHoldingSummary {
+  if (!holding || holding.quantityShares <= 0) {
+    return {
+      averagePriceWon: null,
+      marketValueWon: 0,
+      unrealizedPnlWon: 0,
+      unrealizedPnlRate: null,
+    };
+  }
+
+  const marketValueWon = holdingValueWon(holding, currentPriceWon);
+  const unrealizedPnlWon = marketValueWon - holding.costBasisWon;
+  return {
+    averagePriceWon: Math.round(holding.costBasisWon / holding.quantityShares),
+    marketValueWon,
+    unrealizedPnlWon,
+    unrealizedPnlRate: holding.costBasisWon > 0
+      ? (unrealizedPnlWon / holding.costBasisWon) * 100
+      : null,
+  };
+}
+
 export function getBuyCostWon(quantityShares: number, priceWon: number): number {
   const costWon = quantityShares * priceWon;
   if (

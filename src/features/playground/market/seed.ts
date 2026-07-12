@@ -1,4 +1,4 @@
-import { getAccountSummary, getStockQuote } from './domain.ts';
+import { getAccountSummary } from './domain.ts';
 import type { MarketPeriod, MarketSnapshot, MarketStock, PricePoint } from './types';
 
 interface StockSeed {
@@ -33,7 +33,8 @@ const PERIOD_SPAN_MS: Record<MarketPeriod, number> = {
 const PREVIEW_END_MS = Date.parse('2026-07-11T19:00:00+09:00');
 const PREVIEW_NEWS_MS = Date.parse('2026-07-11T15:00:00+09:00');
 
-function makeSeries(stock: StockSeed, period: MarketPeriod): PricePoint[] {
+// Persisted snapshot compatibility only. Live market screens use MarketQuoteContext.
+function makeFallbackSeries(stock: StockSeed, period: MarketPeriod): PricePoint[] {
   const scaledChange = Math.round(
     (stock.referencePriceWon - stock.previousCloseWon) * PERIOD_SCALE[period],
   );
@@ -60,10 +61,10 @@ function toStock(input: StockSeed): MarketStock {
   return {
     ...input,
     series: {
-      today: makeSeries(input, 'today'),
-      week: makeSeries(input, 'week'),
-      month: makeSeries(input, 'month'),
-      all: makeSeries(input, 'all'),
+      today: makeFallbackSeries(input, 'today'),
+      week: makeFallbackSeries(input, 'week'),
+      month: makeFallbackSeries(input, 'month'),
+      all: makeFallbackSeries(input, 'all'),
     },
   };
 }
@@ -74,21 +75,13 @@ export function createMarketPreviewSeed(): MarketSnapshot {
     revision: 1,
     marketOpenLabel: '24시간 열림',
     stocks,
-    news: stocks.map((stock) => {
-      const quote = getStockQuote(stock);
-      const movement = quote.changeRate > 0
-        ? `${Math.abs(quote.changeRate)}% 올랐어요`
-        : quote.changeRate < 0
-          ? `${Math.abs(quote.changeRate)}% 내렸어요`
-          : '가격 변화가 없었어요';
-      return {
-        id: `${stock.id}-news`,
-        stockId: stock.id,
-        title: stock.reason,
-        summary: `${stock.name}은 오늘 ${movement}.`,
-        publishedAt: '2026-07-11T15:00:00+09:00',
-      };
-    }),
+    news: stocks.map((stock) => ({
+      id: `${stock.id}-news`,
+      stockId: stock.id,
+      title: stock.reason,
+      summary: `${stock.name}의 가격 흐름에 영향을 줄 수 있는 최근 소식이에요.`,
+      publishedAt: '2026-07-11T15:00:00+09:00',
+    })),
     favoriteStockIds: ['jbbj', 'youtube', 'wacom'],
     account: {
       walletPoints: 1_000_000,

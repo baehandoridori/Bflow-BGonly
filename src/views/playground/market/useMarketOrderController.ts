@@ -1,4 +1,10 @@
-import { useMemo, useRef, useState, type MutableRefObject } from 'react';
+import {
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type MutableRefObject,
+} from 'react';
 import { toast } from 'sonner';
 
 import {
@@ -20,11 +26,13 @@ import type {
 } from '../../../features/playground/market/types.ts';
 import { useMarketPreviewStore } from '../../../features/playground/market/useMarketPreviewStore.ts';
 
-export const MARKET_SHARE_CHOICES = [1, 5, 10, 'max', 'custom'] as const;
+export const MARKET_SHARE_CHOICES = [1, 5, 10, 'max'] as const;
 
 export type MarketOrderSide = 'buy' | 'sell';
-export type MarketShareChoice = (typeof MARKET_SHARE_CHOICES)[number];
+type MarketSharePresetChoice = (typeof MARKET_SHARE_CHOICES)[number];
+export type MarketShareChoice = MarketSharePresetChoice;
 export type MarketOrderSurface = 'mobile-order' | 'confirm' | 'limit-edit' | 'limit-review' | null;
+type MarketOrderBySide<T> = Record<MarketOrderSide, T>;
 
 export interface FrozenMarketOrder {
   side: MarketOrderSide;
@@ -52,7 +60,6 @@ export interface MarketLimitReview {
 interface PendingOrderDetails {
   frozen: FrozenMarketOrder;
   stockName: string;
-  choice: MarketShareChoice;
 }
 
 type PendingOrderRequest = PendingMarketValueRequest<PendingOrderDetails>;
@@ -61,8 +68,14 @@ interface FreezeMarketOrderOptions {
   snapshot: MarketSnapshot;
   stock: MarketStock;
   side: MarketOrderSide;
-  choice: MarketShareChoice;
-  customSharesInput: string;
+  quantityShares: number;
+  quotedPriceWon: number;
+}
+
+interface MarketOrderPreviewStateOptions {
+  snapshot: MarketSnapshot;
+  stock: MarketStock;
+  quantityShares: number;
   quotedPriceWon: number;
 }
 
@@ -76,10 +89,15 @@ interface UseMarketOrderControllerOptions {
 export interface MarketOrderController {
   stock: MarketStock | null;
   snapshot: MarketSnapshot | null;
+  quantityInput: string;
+  selectedChoice: MarketShareChoice | null;
+  previewBySide: MarketOrderBySide<FrozenMarketOrder | null>;
+  validationBySide: MarketOrderBySide<string | null>;
+  availableBuyShares: number;
+  availableSellShares: number;
+  setQuantityInput(value: string): void;
+  stepQuantity(delta: -1 | 1): void;
   side: MarketOrderSide;
-  choice: MarketShareChoice;
-  customSharesInput: string;
-  frozenPreview: FrozenMarketOrder | null;
   confirmation: FrozenMarketOrder | null;
   surface: MarketOrderSurface;
   limitDraft: MarketLimitDraft;
@@ -87,17 +105,15 @@ export interface MarketOrderController {
   halted: boolean;
   controlsDisabled: boolean;
   confirmDisabled: boolean;
+  confirmDisabledReason: string | null;
   pendingResolution: boolean;
   refreshRequired: boolean;
   submitting: boolean;
-  validation: string | null;
   error: string | null;
   openerRef: MutableRefObject<HTMLElement | null>;
-  selectSide(side: MarketOrderSide): void;
   selectChoice(choice: MarketShareChoice): void;
-  setCustomSharesInput(value: string): void;
-  openSheet(side: MarketOrderSide, opener: HTMLElement): void;
-  openConfirmation(opener?: HTMLElement): void;
+  openSheet(opener: HTMLElement, preferredSide?: MarketOrderSide): void;
+  openConfirmation(side: MarketOrderSide, opener?: HTMLElement): void;
   confirm(): Promise<void>;
   reloadPending(): Promise<void>;
   close(): boolean;
@@ -118,19 +134,11 @@ export function freezeMarketOrder({
   snapshot,
   stock,
   side,
-  choice,
-  customSharesInput,
+  quantityShares,
   quotedPriceWon,
 }: FreezeMarketOrderOptions): FrozenMarketOrder {
   const holding = snapshot.account.holdings.find((item) => item.stockId === stock.id);
   const availableShares = holding?.quantityShares ?? 0;
-  let quantityShares: number;
-  if (choice === 'custom') quantityShares = Number(customSharesInput);
-  else if (choice === 'max') {
-    quantityShares = side === 'buy'
-      ? maxBuyableShares(snapshot.account.cashWon, quotedPriceWon)
-      : availableShares;
-  } else quantityShares = choice;
 
   return {
     side,
@@ -184,6 +192,70 @@ function frozenOrderCommand(
   };
 }
 
+export function getMarketOrderPreviewState({
+  snapshot,
+  stock,
+  quantityShares,
+  quotedPriceWon,
+}: MarketOrderPreviewStateOptions) {
+  const previewBySide: MarketOrderBySide<FrozenMarketOrder> = {
+    buy: freezeMarketOrder({ snapshot, stock, side: 'buy', quantityShares, quotedPriceWon }),
+    sell: freezeMarketOrder({ snapshot, stock, side: 'sell', quantityShares, quotedPriceWon }),
+  };
+  const validationBySide: MarketOrderBySide<string | null> = {
+    buy: validateMarketCommand(
+      snapshot,
+      frozenOrderCommand(stock.id, previewBySide.buy, 'preview'),
+      quotedPriceWon,
+    ),
+    sell: validateMarketCommand(
+      snapshot,
+      frozenOrderCommand(stock.id, previewBySide.sell, 'preview'),
+      quotedPriceWon,
+    ),
+  };
+  const holding = snapshot.account.holdings.find((item) => item.stockId === stock.id);
+  return {
+    previewBySide,
+    validationBySide,
+    availableBuyShares: maxBuyableShares(snapshot.account.cashWon, quotedPriceWon),
+    availableSellShares: holding?.quantityShares ?? 0,
+  };
+}
+
+export function stepMarketQuantityInput(value: string, delta: -1 | 1): string {
+  const quantityShares = Number(value);
+  if (!Number.isSafeInteger(quantityShares) || quantityShares < 1) return '1';
+  const next = quantityShares + delta;
+  if (!Number.isSafeInteger(next)) return value;
+  return String(Math.max(1, next));
+}
+
+export function resolveMarketShareChoiceQuantity(
+  choice: MarketSharePresetChoice,
+  availableBuyShares: number,
+): number {
+  if (choice !== 'max') return choice;
+  return Math.max(1, availableBuyShares);
+}
+
+export function reconcileMarketMaxShareChoice({
+  selectedChoice,
+  quantityInput,
+  availableBuyShares,
+}: {
+  selectedChoice: MarketShareChoice | null;
+  quantityInput: string;
+  availableBuyShares: number;
+}): {
+  selectedChoice: MarketShareChoice | null;
+  quantityInput: string;
+} {
+  if (selectedChoice !== 'max') return { selectedChoice, quantityInput };
+  if (availableBuyShares <= 0) return { selectedChoice: null, quantityInput: '1' };
+  return { selectedChoice: 'max', quantityInput: String(availableBuyShares) };
+}
+
 function limitDraftError(draft: MarketLimitDraft): string | null {
   const desiredPriceWon = Number(draft.desiredPriceInput);
   const quantityShares = Number(draft.quantityInput);
@@ -215,11 +287,10 @@ export function useMarketOrderController({
   const clearError = useMarketPreviewStore((state) => state.clearError);
   const stock = snapshot?.stocks.find((item) => item.id === stockId) ?? null;
   const [side, setSide] = useState<MarketOrderSide>('buy');
-  const [choice, setChoice] = useState<MarketShareChoice>(1);
-  const [customSharesInput, setCustomSharesInputState] = useState('1');
+  const [quantityInput, setQuantityInputState] = useState('1');
+  const [selectedChoice, setSelectedChoice] = useState<MarketShareChoice | null>(1);
   const [surface, setSurface] = useState<MarketOrderSurface>(null);
   const [confirmation, setConfirmation] = useState<FrozenMarketOrder | null>(null);
-  const [confirmationChoice, setConfirmationChoice] = useState<MarketShareChoice>(1);
   const [pendingOrder, setPendingOrder] = useState<PendingOrderRequest | null>(null);
   const [pendingOrderUncertain, setPendingOrderUncertain] = useState(false);
   const [localError, setLocalError] = useState<string | null>(null);
@@ -234,27 +305,36 @@ export function useMarketOrderController({
   const halted = snapshot
     ? isStockTradingHalted(snapshot.adminEvents, stockId, nowMs)
     : false;
-  const frozenPreview = useMemo(() => (
+  const orderPreviewState = useMemo(() => (
     snapshot && stock
-      ? freezeMarketOrder({
+      ? getMarketOrderPreviewState({
           snapshot,
           stock,
-          side,
-          choice,
-          customSharesInput,
+          quantityShares: Number(quantityInput),
           quotedPriceWon: currentPriceWon,
         })
       : null
-  ), [choice, currentPriceWon, customSharesInput, side, snapshot, stock]);
-  const validation = useMemo(() => {
-    if (!snapshot || !stock || !frozenPreview) return '종목을 찾지 못했어요.';
-    if (halted) return '현재 거래가 잠시 멈췄어요.';
-    return validateMarketCommand(
-      snapshot,
-      frozenOrderCommand(stock.id, frozenPreview, 'preview'),
-      currentPriceWon,
-    );
-  }, [currentPriceWon, frozenPreview, halted, snapshot, stock]);
+  ), [currentPriceWon, quantityInput, snapshot, stock]);
+  const previewBySide: MarketOrderBySide<FrozenMarketOrder | null> = orderPreviewState?.previewBySide
+    ?? { buy: null, sell: null };
+  const validationBySide: MarketOrderBySide<string | null> = !orderPreviewState
+    ? { buy: '종목을 찾지 못했어요.', sell: '종목을 찾지 못했어요.' }
+    : halted
+      ? { buy: '현재 거래가 잠시 멈췄어요.', sell: '현재 거래가 잠시 멈췄어요.' }
+      : orderPreviewState.validationBySide;
+  const availableBuyShares = orderPreviewState?.availableBuyShares ?? 0;
+  const availableSellShares = orderPreviewState?.availableSellShares ?? 0;
+
+  useEffect(() => {
+    const next = reconcileMarketMaxShareChoice({
+      selectedChoice,
+      quantityInput,
+      availableBuyShares,
+    });
+    if (next.quantityInput !== quantityInput) setQuantityInputState(next.quantityInput);
+    if (next.selectedChoice !== selectedChoice) setSelectedChoice(next.selectedChoice);
+  }, [availableBuyShares, quantityInput, selectedChoice]);
+
   const pendingResolution = pendingOrderUncertain;
   const refreshRequired = valueRefreshRequired;
   const pendingCommandMismatch = pendingValueCommand !== null
@@ -272,6 +352,13 @@ export function useMarketOrderController({
     || pendingCommandMismatch
     || valueRefreshRequired
     || (pendingOrder === null && halted);
+  const confirmDisabledReason = pendingOrder === null && halted
+    ? '현재 거래가 잠시 멈춰 주문을 확인할 수 없어요.'
+    : valueRefreshRequired
+      ? '최신 가격과 시장 정보를 다시 불러온 뒤 주문을 확인해 주세요.'
+      : pendingCommandMismatch
+        ? '이전 주문 결과를 확인한 뒤 새 주문을 진행해 주세요.'
+        : null;
 
   const clearFeedback = () => {
     setLocalError(null);
@@ -282,35 +369,52 @@ export function useMarketOrderController({
     if (opener && surface === null) openerRef.current = opener;
   };
 
-  const selectSide = (nextSide: MarketOrderSide) => {
-    if (controlsDisabled) return;
-    setSide(nextSide);
-    setChoice(1);
-    clearFeedback();
-  };
-
   const selectChoice = (nextChoice: MarketShareChoice) => {
     if (controlsDisabled) return;
-    setChoice(nextChoice);
+    const quantityShares = resolveMarketShareChoiceQuantity(
+      nextChoice,
+      availableBuyShares,
+    );
+    const next = reconcileMarketMaxShareChoice({
+      selectedChoice: nextChoice,
+      quantityInput: String(quantityShares),
+      availableBuyShares,
+    });
+    setQuantityInputState(next.quantityInput);
+    setSelectedChoice(next.selectedChoice);
     clearFeedback();
   };
 
-  const setCustomSharesInput = (value: string) => {
-    setCustomSharesInputState(value);
+  const setQuantityInput = (value: string) => {
+    setQuantityInputState(value);
+    setSelectedChoice(null);
     clearFeedback();
   };
 
-  const openSheet = (nextSide: MarketOrderSide, opener: HTMLElement) => {
+  const stepQuantity = (delta: -1 | 1) => {
+    if (controlsDisabled) return;
+    setQuantityInputState((current) => stepMarketQuantityInput(current, delta));
+    setSelectedChoice(null);
+    clearFeedback();
+  };
+
+  const openSheet = (
+    opener: HTMLElement,
+    preferredSide?: MarketOrderSide,
+  ) => {
     if (controlsDisabled) return;
     openerRef.current = opener;
-    setSide(nextSide);
-    setChoice(1);
+    setSide(preferredSide ?? side);
     setSurface('mobile-order');
     clearFeedback();
   };
 
-  const openConfirmation = (opener?: HTMLElement) => {
+  const openConfirmation = (
+    nextSide: MarketOrderSide,
+    opener?: HTMLElement,
+  ) => {
     if (controlsDisabled) return;
+    setSide(nextSide);
     clearFeedback();
     rememberOpener(opener);
     const latest = useMarketPreviewStore.getState().visible;
@@ -326,9 +430,8 @@ export function useMarketOrderController({
     const frozen = freezeMarketOrder({
       snapshot: latest,
       stock: latestStock,
-      side,
-      choice,
-      customSharesInput,
+      side: nextSide,
+      quantityShares: Number(quantityInput),
       quotedPriceWon: currentPriceWon,
     });
     const error = validateMarketCommand(
@@ -341,7 +444,6 @@ export function useMarketOrderController({
       return;
     }
     setConfirmation(frozen);
-    setConfirmationChoice(choice);
     setLocalError(null);
     setSurface('confirm');
   };
@@ -364,8 +466,7 @@ export function useMarketOrderController({
         snapshot: latest,
         stock: latestStock,
         side: confirmation.side,
-        choice: confirmationChoice,
-        customSharesInput: String(confirmation.quantityShares),
+        quantityShares: confirmation.quantityShares,
         quotedPriceWon: currentPriceWon,
       });
       const error = validateMarketCommand(
@@ -384,7 +485,7 @@ export function useMarketOrderController({
       }
       attempt = createPendingMarketValueRequest(
         frozenOrderCommand(stockId, refreshed, crypto.randomUUID()),
-        { frozen: refreshed, stockName: latestStock.name, choice: confirmationChoice },
+        { frozen: refreshed, stockName: latestStock.name },
       );
       setPendingOrder(attempt);
       setPendingOrderUncertain(false);
@@ -427,8 +528,7 @@ export function useMarketOrderController({
           snapshot: latest,
           stock: latestStock,
           side: attempt.details.frozen.side,
-          choice: attempt.details.choice,
-          customSharesInput: String(attempt.details.frozen.quantityShares),
+          quantityShares: attempt.details.frozen.quantityShares,
           quotedPriceWon: currentPriceWon,
         }));
       }
@@ -519,10 +619,15 @@ export function useMarketOrderController({
   return {
     stock,
     snapshot,
+    quantityInput,
+    selectedChoice,
+    previewBySide,
+    validationBySide,
+    availableBuyShares,
+    availableSellShares,
+    setQuantityInput,
+    stepQuantity,
     side,
-    choice,
-    customSharesInput,
-    frozenPreview,
     confirmation,
     surface,
     limitDraft,
@@ -530,15 +635,13 @@ export function useMarketOrderController({
     halted,
     controlsDisabled,
     confirmDisabled,
+    confirmDisabledReason,
     pendingResolution,
     refreshRequired,
     submitting,
-    validation,
     error: localError ?? storeError,
     openerRef,
-    selectSide,
     selectChoice,
-    setCustomSharesInput,
     openSheet,
     openConfirmation,
     confirm,

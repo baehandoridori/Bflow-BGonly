@@ -4,6 +4,69 @@ import { existsSync, readFileSync } from 'node:fs';
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 
+test('playground market v3 release metadata stays aligned', () => {
+  const packageJson = JSON.parse(readFileSync('package.json', 'utf8'));
+  const packageLock = JSON.parse(readFileSync('package-lock.json', 'utf8'));
+  const updateNotes = JSON.parse(readFileSync('DEVLOG/update-notes.json', 'utf8'));
+
+  assert.equal(packageJson.version, '1.82.0');
+  assert.equal(packageLock.version, '1.82.0');
+  assert.equal(packageLock.packages[''].version, '1.82.0');
+  assert.equal(packageJson.dependencies['lightweight-charts'], '5.2.0');
+  assert.equal(packageLock.packages[''].dependencies['lightweight-charts'], '5.2.0');
+  assert.deepEqual(
+    updateNotes.slice(0, 4).map((note: { version: string }) => note.version),
+    ['1.82.0', '1.81.0', '1.80.0', '1.79.0'],
+  );
+
+  const latestNote = updateNotes[0];
+  assert.equal(latestNote.version, '1.82.0');
+  assert.equal(latestNote.title, 'JBBJ 모의투자가 더 쉽고 실제 시장처럼 움직여요');
+  const releaseCopy = latestNote.items
+    .flatMap((item: { summary: string; description: string }) => [item.summary, item.description])
+    .join('\n');
+  for (const phrase of [
+    '양방향 빠른주문',
+    '휠',
+    '드래그',
+    '핀치',
+    '거래량',
+    '장 전체',
+    '업종',
+    '종목',
+    '덜 인위',
+  ]) {
+    assert.match(releaseCopy, new RegExp(phrase));
+  }
+
+  assert.deepEqual(updateNotes[2], {
+    version: '1.80.0',
+    title: 'JBBJ 모의투자가 실제 시장처럼 움직여요',
+    items: [
+      {
+        category: 'feature',
+        summary: '실시간 선·캔들 차트로 시세 흐름을 살펴봐요',
+        description: '배한솔 테스트 계정에서 움직이는 시세를 선 또는 캔들로 바꿔 보고, 여러 시간 간격과 기간을 선택해 시장 흐름을 천천히 익힐 수 있어요. 다른 팀원에게는 아직 공개되지 않아요.',
+      },
+      {
+        category: 'ux',
+        summary: '1주부터 쉽게 주문하고 매수·매도 버튼을 놓치지 않아요',
+        description: '배한솔 테스트 계정에서 1주·5주·10주 단위로 주문할 수 있고, 화면을 내려도 매수·매도 조작부가 따라와요. 작은 화면에서는 아래쪽에 편하게 고정돼요.',
+      },
+      {
+        category: 'stability',
+        summary: '백만 포인트로 시작한 테스트 계좌 상태가 유지돼요',
+        description: '배한솔 테스트 계정에 처음 한 번만 백만 포인트가 지급되고, 증권계좌로 옮긴 금액과 보유 종목·거래 결과가 앱을 다시 열어도 유지돼요.',
+      },
+      {
+        category: 'ux',
+        summary: '화면과 마우스의 뒤로가기를 편하게 써요',
+        description: '배한솔 테스트 계정에서 화면 안의 뒤로가기 버튼과 마우스 뒤로가기가 같은 순서로 작동해, 종목·계좌·시장 사이를 더 쉽게 오갈 수 있어요.',
+      },
+    ],
+  });
+});
+
 test('market home preserves the approved information order', () => {
   const source = readFileSync('src/views/playground/market/MarketHome.tsx', 'utf8');
   const labels = ['오늘의 JBBJ 시장', '찜한 주식', '오늘 가격에 영향을 준 소식', '모든 주식', '초보 미션'];
@@ -153,22 +216,81 @@ test('completed mission disclosure summary has a 44px padded target', () => {
   assert.match(className, /\bpy-\d+\b/);
 });
 
-test('stock detail uses the approved beginner-first order', () => {
+test('stock detail merges company price change and reason before chart, holding and news', () => {
   const source = readFileSync('src/views/playground/market/StockDetailView.tsx', 'utf8');
-  const labels = ['회사 한 줄 설명', '현재 가격과 오늘의 변화', '오늘 움직인 이유', '가격 그래프', '내 보유 상태', '간편 주문', '최근 소식'];
-  const positions = labels.map((label) => source.indexOf(label));
+  const sections = ['summary', 'chart', 'holding', 'news'];
+  const positions = sections.map((section) => source.indexOf(`data-market-detail-section="${section}"`));
   assert.ok(positions.every((position) => position >= 0));
   assert.deepEqual([...positions].sort((a, b) => a - b), positions);
+  const orderAside = source.indexOf('aria-labelledby="easy-order-heading"');
+  assert.ok(positions.at(-1)! < orderAside, 'desktop sidebar must follow all left-column content in DOM order');
+  for (const label of ['오늘 움직인 이유', '가격 그래프', '내 보유 상태', '빠른주문', '최근 소식']) {
+    assert.match(source, new RegExp(label));
+  }
+  assert.doesNotMatch(source, /aria-label="회사 한 줄 설명"|aria-label="현재 가격과 오늘의 변화"/);
   for (const forbidden of ['PER', 'PBR', '체결 강도', '호가창']) assert.doesNotMatch(source, new RegExp(forbidden));
+});
+
+test('home rows and detail consume the shared engine quote context instead of seed history', () => {
+  const router = readFileSync('src/views/playground/market/MarketRouter.tsx', 'utf8');
+  const home = readFileSync('src/views/playground/market/MarketHome.tsx', 'utf8');
+  const rows = readFileSync('src/views/playground/market/MarketRows.tsx', 'utf8');
+  const detail = readFileSync('src/views/playground/market/StockDetailView.tsx', 'utf8');
+  const seed = readFileSync('src/features/playground/market/seed.ts', 'utf8');
+
+  assert.equal((router.match(/buildMarketQuoteContext\(/g) ?? []).length, 1);
+  assert.match(home, /quoteContext/);
+  assert.match(rows, /sparklineByStockId/);
+  assert.match(detail, /previousCloseWonByStockId/);
+  assert.doesNotMatch(rows, /todaySeriesAtQuote|stock\.series\.today/);
+  assert.doesNotMatch(home, /stock\.series\.|stock\.previousCloseWon/);
+  assert.doesNotMatch(detail, /stock\.series\.|stock\.previousCloseWon/);
+  assert.match(seed, /fallback/i);
+  assert.doesNotMatch(seed, /getStockQuote/);
 });
 
 test('market dialog is portalled, labelled, inert and focus-safe', () => {
   const source = readFileSync('src/views/playground/market/MarketActionDialog.tsx', 'utf8');
+  const orderPanel = readFileSync('src/views/playground/market/MarketOrderPanel.tsx', 'utf8');
   assert.match(source, /createPortal/);
   assert.match(source, /aria-labelledby/);
   assert.match(source, /aria-describedby/);
   assert.match(source, /\.inert\s*=\s*true/);
-  assert.match(source, /openerRef\.current.*focus/);
+  assert.match(source, /document\.body\.style\.overflow/);
+  assert.match(source, /document\.body\.style\.overflow\s*=\s*['"]hidden['"]/);
+  assert.match(source, /document\.body\.style\.overflow\s*=\s*previousBodyOverflow/);
+  assert.match(source, /event\.key === 'Escape'/);
+  assert.match(source, /usePlaygroundBackInterceptor/);
+  assert.match(source, /FOCUSABLE_SELECTOR/);
+  assert.match(source, /presentation === 'sheet'/);
+  assert.match(source, /initialFocusFallbackId/);
+  assert.match(source, /const activeControl = active instanceof HTMLElement[\s\S]*?controls\.includes\(active\)/);
+  assert.match(source, /if \(activeControl === null\)/);
+  assert.match(source, /if \(controls\.length === 0\)[\s\S]*?panel\.focus\(\)/);
+  assert.match(source, /\(event\.shiftKey \? last : first\)\.focus\(\)/);
+  assert.match(source, /activeControl === first[\s\S]*?last\.focus\(\)/);
+  assert.match(source, /activeControl === last[\s\S]*?first\.focus\(\)/);
+  assert.match(source, /aria-label="대화상자 닫기"/);
+  assert.match(orderPanel, /<fieldset[\s\S]*?disabled=\{controller\.controlsDisabled\}/);
+
+  const enabledControlsSource = source.slice(
+    source.indexOf('function enabledControls'),
+    source.indexOf('function canReceiveProgrammaticFocus'),
+  );
+  assert.match(enabledControlsSource, /!element\.matches\(':disabled'\)/);
+
+  const restoreFocusSource = source.slice(
+    source.indexOf('const RESTORE_FOCUS_FALLBACK_IDS'),
+    source.indexOf('export function MarketActionDialog'),
+  );
+  for (const fallbackId of ['easy-order-heading', 'market-order-quantity', 'market-page-title']) {
+    assert.match(restoreFocusSource, new RegExp(`['"]${fallbackId}['"]`));
+  }
+  assert.match(restoreFocusSource, /document\.contains\(element\)/);
+  assert.match(restoreFocusSource, /!element\.matches\(':disabled'\)/);
+  assert.match(restoreFocusSource, /canRestoreDialogFocus\(opener\)/);
+  assert.match(restoreFocusSource, /target\?\.focus\(\)/);
+  assert.match(source, /restoreDialogFocus\(openerRef\.current, previouslyFocused\)/);
 });
 
 test('global order toaster is portalled beyond the dialog inert root boundary', () => {
@@ -189,29 +311,45 @@ test('global order toaster is portalled beyond the dialog inert root boundary', 
   assert.match(order, /toast\.success\(/);
   assert.match(order, /toast\.error\(/);
   assert.match(orderDialogs, /aria-live="polite"/);
-  assert.match(orderDialogs, /\{controller\.error \?\? ''\}/);
+  assert.match(order, /confirmDisabledReason/);
+  assert.match(orderDialogs, /controller\.error \?\? controller\.confirmDisabledReason \?\? ''/);
+  assert.match(orderDialogs, /id="market-confirm-disabled-reason"/);
+  assert.match(orderDialogs, /aria-describedby="market-confirm-disabled-reason"/);
 });
 
 test('detail chart and order panel keep the approved source contracts', () => {
   const chart = readFileSync('src/views/playground/market/MarketPriceChart.tsx', 'utf8');
-  const canvas = readFileSync('src/views/playground/market/MarketChartCanvas.tsx', 'utf8');
+  const interactivePath = 'src/views/playground/market/MarketInteractiveChart.tsx';
+  assert.equal(existsSync(interactivePath), true, 'Lightweight Charts React boundary must exist');
+  const interactive = readFileSync(interactivePath, 'utf8');
   const order = readFileSync('src/views/playground/market/MarketOrderPanel.tsx', 'utf8');
   const controller = readFileSync('src/views/playground/market/useMarketOrderController.ts', 'utf8');
   for (const label of ['선', '캔들', '1분', '5분', '10분', '15분', '1시간', '1일', '오늘', '1주', '1개월', '6개월', '전체', '가격 정보가 아직 없어요']) {
     assert.match(chart, new RegExp(label));
   }
-  assert.match(chart, /MarketChartCanvas/);
+  assert.match(chart, /MarketInteractiveChart/);
   assert.match(chart, /buildMarketDisplayCandles/);
-  assert.match(canvas, /getComputedStyle/);
-  assert.match(canvas, /window\.devicePixelRatio/);
-  assert.match(canvas, /type="range"/);
+  assert.match(interactive, /createMarketChartAdapter/);
+  assert.match(interactive, /차트를 불러오지 못했어요/);
+  assert.match(interactive, /차트 다시 불러오기/);
+  assert.equal(existsSync('src/views/playground/market/MarketChartCanvas.tsx'), false);
+  assert.doesNotMatch(interactive, /<canvas|type="range"|onPointerMove|nearestMarketCandleIndex/);
   assert.doesNotMatch(chart, /#[0-9a-f]{3,8}/i);
-  assert.doesNotMatch(canvas, /#[0-9a-f]{3,8}/i);
+  assert.doesNotMatch(interactive, /#[0-9a-f]{3,8}/i);
 
-  for (const label of ['현재 가격으로 바로 사기', '1주', '5주', '10주', '최대', '직접 입력', '원하는 가격에 주문하기']) {
+  for (const label of [
+    '몇 주 주문할까요?', '1주', '5주', '10주', '최대',
+    '판매 가능', '구매 가능', '판매 예상 금액', '구매 예상 금액',
+    '현재가 팔기', '현재가 사기', '내 주식 평균', '현재 손익', '보유 수량', '현재 평가금',
+  ]) {
     assert.match(order, new RegExp(label));
   }
-  assert.match(controller, /MARKET_SHARE_CHOICES\s*=\s*\[1,\s*5,\s*10,\s*'max',\s*'custom'\]/);
+  for (const removed of ['현재 가격으로 바로 사기', '직접 입력', '원하는 가격에 주문하기', '지정가 주문']) {
+    assert.doesNotMatch(order, new RegExp(removed));
+  }
+  assert.match(controller, /MARKET_SHARE_CHOICES\s*=\s*\[1,\s*5,\s*10,\s*'max'\]/);
+  assert.match(controller, /quantityInput/);
+  assert.match(controller, /setQuantityInput/);
   assert.match(controller, /validateMarketCommand/);
   assert.match(controller, /maxBuyableShares/);
   assert.match(order, /formatWon/);
@@ -220,11 +358,44 @@ test('detail chart and order panel keep the approved source contracts', () => {
   assert.doesNotMatch(order, /applyMarketCommand/);
 });
 
-test('stock detail xl shell contains both fixed columns, gap and horizontal padding', () => {
+test('stock detail and router switch at 1280px between fluid plus 360px and the fixed dock', () => {
   const source = readFileSync('src/views/playground/market/StockDetailView.tsx', 'utf8');
+  const router = readFileSync('src/views/playground/market/MarketRouter.tsx', 'utf8');
+  const dock = readFileSync('src/views/playground/market/MarketMobileOrderDock.tsx', 'utf8');
   assert.match(source, /xl:max-w-\[1200px\]/);
-  assert.match(source, /xl:grid-cols-\[minmax\(0,760px\)_360px\]/);
+  assert.match(source, /xl:grid-cols-\[minmax\(0,1fr\)_360px\]/);
   assert.match(source, /xl:gap-x-6/);
+  assert.match(source, /pb-\[calc\([^\]]*env\(safe-area-inset-bottom\)[^\]]*\)\]/);
+  assert.match(router, /matchMedia\(['"]\(min-width: 1280px\)['"]\)/);
+  assert.match(dock, /grid-cols-2/);
+  assert.match(dock, /safe-area-inset-(?:left|right|bottom)/);
+  assert.match(dock, /role="status"/);
+  assert.match(dock, /aria-describedby=\{disabledReason/);
+});
+
+test('mobile order sheet uses the shared panel and preferred side only for description and focus', () => {
+  const dialogs = readFileSync('src/views/playground/market/MarketOrderDialogs.tsx', 'utf8');
+  const actionDialog = readFileSync('src/views/playground/market/MarketActionDialog.tsx', 'utf8');
+
+  assert.equal((dialogs.match(/<MarketOrderPanel\b/g) ?? []).length, 1);
+  assert.match(dialogs, /controller\.side === 'sell'/);
+  assert.match(dialogs, /initialFocusId=\{controller\.surface === 'mobile-order'/);
+  assert.match(dialogs, /initialFocusFallbackId=\{controller\.surface === 'mobile-order'/);
+  assert.match(dialogs, /presentation=\{controller\.surface === 'mobile-order' \? 'sheet' : 'dialog'\}/);
+  assert.match(dialogs, /market-order-sell-action/);
+  assert.match(dialogs, /market-order-buy-action/);
+  assert.match(dialogs, /market-order-sell-reason/);
+  assert.match(dialogs, /market-order-buy-reason/);
+  assert.match(actionDialog, /initialFocusId/);
+  assert.match(actionDialog, /initialFocusFallbackId/);
+  assert.match(actionDialog, /document\.getElementById\(initialFocusId\)/);
+  assert.match(actionDialog, /document\.getElementById\(initialFocusFallbackId\)/);
+  assert.match(actionDialog, /const sheetBackdropClass = ['"][^'"]*items-end[^'"]*xl:items-center/);
+  assert.match(actionDialog, /const sheetPanelClass = ['"][^'"]*rounded-t-3xl[^'"]*safe-area-inset-bottom[^'"]*xl:rounded-3xl/);
+
+  const panel = readFileSync('src/views/playground/market/MarketOrderPanel.tsx', 'utf8');
+  assert.match(panel, /id="market-order-sell-reason"[\s\S]*?tabIndex=\{-1\}/);
+  assert.match(panel, /id="market-order-buy-reason"[\s\S]*?tabIndex=\{-1\}/);
 });
 
 test('easy order revalidates frozen confirmation before creating a request id', () => {

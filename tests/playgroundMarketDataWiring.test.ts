@@ -838,10 +838,10 @@ test('main, preload, renderer types, dev preview, and store expose ownership-fre
   assert.equal(existsSync('shared/playgroundMarketPrice.mjs'), true);
   assert.equal(existsSync('shared/playgroundMarketPrice.d.mts'), true);
   assert.match(marketRouter, /useMarketClock\(\)/);
-  assert.match(marketRouter, /buildMarketQuoteWonByStockId\(visibleSnapshot,\s*nowMs\)/);
+  assert.match(marketRouter, /buildMarketQuoteContext\(visibleSnapshot,\s*nowMs\)/);
   assert.doesNotMatch(stockDetail, /useMarketClock|getMarketSnapshotQuoteWon/);
-  assert.match(stockDetail, /currentPriceWon:\s*quotedPriceWon/);
-  assert.match(marketRouter, /<StockDetailView[\s\S]*currentPriceWon=\{currentPriceWon\}/);
+  assert.match(stockDetail, /quoteContext\.previousCloseWonByStockId/);
+  assert.match(marketRouter, /<StockDetailView[\s\S]*quoteContext=\{quoteContext\}/);
   assert.match(marketRouter, /useMarketOrderController\(\{[\s\S]*currentPriceWon/);
   assert.match(orderPanel, /controller:\s*MarketOrderController/);
   assert.match(orderController, /quotedPriceWon:\s*currentPriceWon/);

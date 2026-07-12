@@ -2,7 +2,7 @@
 
 > **프로젝트**: Studio JBBJ 프로덕션 진행 현황 대시보드 (BG + 액팅)
 > **타입**: Electron + React + TypeScript 독립 앱
-> **현재 상태**: Phase 0-1~0-3 완료, Phase 1~2 완료, Phase 4-1~4-3 완료, Phase 6 Step 1~4 완료, Phase 7-1~7-5 완료, Phase 8-0~8-1, 8-3~8-5 완료
+> **현재 상태**: Phase 0-1~0-3 완료, Phase 1~2 완료, Phase 4-1~4-3 완료, Phase 6 Step 1~4 완료, Phase 7-1~7-5 완료, Phase 8-0~8-1, 8-3~8-5 완료, Playground v3 배한솔 한정 테스트 중
 > **로드맵**: `ROADMAP.md` 참조 | **세션 가이드**: `CONTEXT.md` 참조
 >
 > **이력**: 원래 BG(배경) 전용 현황판(`Bflow-BGonly`)으로 시작했으나, 액팅까지 포함한 통합 앱이 되면서 정식 명칭 **B flow**로 전환됨. 레포 이름(`Bflow-BGonly`)과 `app.name`은 기존 사용자 데이터 경로(`%APPDATA%\Bflow-BGonly\`) 호환을 위해 유지.
@@ -29,6 +29,13 @@ Supabase(PostgreSQL + Realtime)를 단일 진실의 원천(SSOT)으로 사용. G
 
 **동기화**: 체크박스 토글 → 로컬 즉시 반영(낙관적) → Supabase 저장 → 실패 시 롤백. 다른 사용자 변경은 Realtime WebSocket으로 수신.
 
+### 배플레이그라운드 v3 데이터 경계
+
+- **시세**: `shared/playgroundMarketModel.mjs`의 결정론 모델이 장 전체·업종·종목·이벤트 입력으로 로컬 계산한다. 실제 시장 API나 별도 시세 DB를 사용하지 않는다.
+- **화면과 체결**: renderer preview는 같은 공용 모델로 시세와 주문 확인값을 보여 주고, Electron의 `MarketAccountService`가 체결 직전 canonical 가격·거래정지·revision을 다시 검증한다.
+- **계좌**: 실제 앱의 예수금·보유 종목·거래 결과는 Supabase가 정본이다. 테스트 모드는 로컬 preview gateway로 같은 명령·rollback 계약을 지킨다.
+- **긴 차트**: 완료된 과거 봉만 제한된 cache에 재사용하고 점진 계산한다. 현재 진행 봉은 실제 시간으로 다시 계산하며 오래된 비동기 요청은 중단한다.
+
 ---
 
 ## 경로
@@ -50,7 +57,7 @@ Supabase(PostgreSQL + Realtime)를 단일 진실의 원천(SSOT)으로 사용. G
 
 ## 기술 스택
 
-Electron + React 18 + TypeScript + Tailwind CSS + Zustand + react-grid-layout + googleapis
+Electron + React 18 + TypeScript + Tailwind CSS + Zustand + react-grid-layout + Lightweight Charts 5.2.0 + googleapis
 
 ### 디자인 토큰
 
@@ -130,5 +137,5 @@ Electron + React 18 + TypeScript + Tailwind CSS + Zustand + react-grid-layout + 
 
 ---
 
-*문서 버전: 2026-05-08*
+*문서 버전: 2026-07-13*
 *작성: Codex × 한솔 (Studio JBBJ)*
