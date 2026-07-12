@@ -233,6 +233,12 @@
   user-select: none;
   -webkit-user-drag: none;
 }
+/* draggable 요소는 HTML5 드래그 허용 — 위 전역 -webkit-user-drag: none 이
+   UA 스타일의 [draggable="true"] → user-drag: element 매핑을 덮어써서
+   dragstart 자체가 발화하지 않기 때문에 명시적으로 복원해야 한다. */
+[draggable="true"] {
+  -webkit-user-drag: element;
+}
 /* 입력 필드는 텍스트 선택 허용 */
 input, textarea, select, [contenteditable="true"] {
   -webkit-user-select: text;

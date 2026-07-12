@@ -22,6 +22,7 @@ import { COSTUME_IMAGE_ROLES } from '@/types';
 import { uploadCharacterImage } from '@/services/supabaseService';
 import { deleteImage } from '@/services/storageService';
 import { resizeBlob } from '@/utils/imageUtils';
+import { dataUrlToFile } from '@/utils/dataUrlToFile';
 import { cn } from '@/utils/cn';
 import { CharacterImageFrame } from '@/components/characters/CharacterImageFrame';
 import { CharacterImageFitEditor } from '@/components/characters/CharacterImageFitEditor';
@@ -439,10 +440,20 @@ export function FeaturedImageSlot({
       if (target instanceof HTMLElement && target.closest('input, textarea, [contenteditable="true"]')) return;
       const item = Array.from(event.clipboardData?.items ?? []).find((entry) => entry.type.startsWith('image/'));
       const file = item?.getAsFile();
-      if (!file) return;
-      event.preventDefault();
-      // 붙여넣기 이미지는 파일 이름이 대개 image.png 같은 일반명 → 자동 이름 지정 제외. 역할은 기본 '디자인'.
-      uploadFileIfImage(file, { autoName: false });
+      if (file) {
+        event.preventDefault();
+        // 붙여넣기 이미지는 파일 이름이 대개 image.png 같은 일반명 → 자동 이름 지정 제외. 역할은 기본 '디자인'.
+        uploadFileIfImage(file, { autoName: false });
+        return;
+      }
+      // 탐색기 '파일 복사'는 clipboardData 에 안 실리는 환경이 있어 메인 프로세스에서 클립보드의 파일 경로('FileNameW')를 직접 읽는다.
+      void (async () => {
+        const pasted = await window.electronAPI.clipboardReadImageFile();
+        if (!pasted) return;
+        const pastedFile = dataUrlToFile(pasted.dataUrl, pasted.fileName);
+        // 실제 파일명이 있으므로 파일선택/드래그와 동일하게 임시 이름 캐릭터의 자동 이름 지정을 허용한다.
+        uploadFileIfImage(pastedFile, { autoName: true });
+      })();
     };
     window.addEventListener('paste', onPaste);
     return () => window.removeEventListener('paste', onPaste);
@@ -585,7 +596,7 @@ export function FeaturedImageSlot({
               onClick={openAddMenu}
               disabled={uploading}
               aria-label="이미지 추가"
-              title="이미지 추가"
+              title="이미지 추가 — 복사한 이미지를 Ctrl+V 로 붙여넣을 수도 있어요"
               className="w-14 shrink-0 aspect-[3/4] flex flex-col items-center justify-center gap-1 rounded-md border border-dashed border-bg-border text-text-secondary hover:text-accent hover:border-accent/50 transition-colors cursor-pointer disabled:opacity-50"
             >
               <Plus size={16} />
@@ -624,6 +635,7 @@ export function FeaturedImageSlot({
           >
             <Plus size={26} />
             <span className="text-xs">{uploading ? '추가 중...' : '이미지 추가'}</span>
+            {!uploading && <span className="text-[10px] text-text-secondary/70">클릭 · 드래그 · Ctrl+V</span>}
           </button>
           {draggingImage && (
             <div className="pointer-events-none absolute inset-0 flex items-center justify-center rounded-xl bg-accent/15 text-xs font-medium text-accent ring-1 ring-accent/60">

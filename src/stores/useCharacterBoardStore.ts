@@ -151,6 +151,7 @@ interface CharacterBoardStore {
   deleteCostume: (id: string) => Promise<void>;
   /** 복장 순서 드래그 재배치 — 낙관적 sortOrder 재부여 + 변경분만 저장, 실패 시 롤백. */
   reorderCostumes: (characterId: string, orderedIds: string[]) => Promise<void>;
+  reorderCharacters: (orderedIds: string[]) => Promise<void>;
 
   // ─── 복장 다중 이미지 ───
   /** 이미지 추가 — 복장의 첫 이미지면 primary 로 지정하고 featured_* 동기화. */
@@ -541,6 +542,31 @@ export const useCharacterBoardStore = create<CharacterBoardStore>((set, get) => 
         return { costumes: sortCostumes(reverted), byCharacter: rebuildByCharacter(s.byCharacter, reverted) };
       });
       toast.error('복장 순서 변경 저장에 실패했어요');
+    }
+  },
+
+  reorderCharacters: async (orderedIds) => {
+    const prev = get().characters;
+    const changes = reorderedCostumeSortOrders(prev, orderedIds);
+    if (changes.length === 0) return;
+    const changeMap = new Map(changes.map((ch) => [ch.id, ch.sortOrder]));
+    const prevSortById = new Map(prev.map((c) => [c.id, c.sortOrder]));
+    // 낙관적 반영 + pending 보호 — 복장 재배치(reorderCostumes)와 동일 패턴. 캐릭터 버킷 사용.
+    for (const ch of changes) trackPendingFields(pendingCharacterFields, ch.id, { sortOrder: ch.sortOrder });
+    set({ characters: sortCharacters(prev.map((c) => (changeMap.has(c.id) ? { ...c, sortOrder: changeMap.get(c.id)! } : c))) });
+    try {
+      await Promise.all(changes.map((ch) => svcUpdateCharacter(ch.id, { sort_order: ch.sortOrder })));
+    } catch (err) {
+      console.error('[character-board] reorderCharacters 실패:', err);
+      // 아직 우리 낙관값 그대로인 캐릭터만 이전 순서로 되돌린다(그 사이 다른 편집·실시간 반영은 보존).
+      set((s) => ({
+        characters: sortCharacters(s.characters.map((c) => {
+          if (!changeMap.has(c.id) || c.sortOrder !== changeMap.get(c.id)) return c;
+          const prevSort = prevSortById.get(c.id);
+          return prevSort === undefined ? c : { ...c, sortOrder: prevSort };
+        })),
+      }));
+      toast.error('캐릭터 순서 변경 저장에 실패했어요');
     }
   },
 

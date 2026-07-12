@@ -115,6 +115,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   imageGetDir: () => ipcRenderer.invoke('image:get-dir') as Promise<string>,
   clipboardReadImage: () =>
     ipcRenderer.invoke('clipboard:read-image') as Promise<string | null>,
+  clipboardReadImageFile: () => ipcRenderer.invoke('clipboard:read-image-file'),
 
   // ─── Supabase ──────────────────────────────────
   supabaseTestConnection: () =>

@@ -27,7 +27,7 @@
 - 모든 input/select/icon button은 보이는 label 또는 고유 `aria-label`, 44px 이상 target, visible focus ring을 갖고 선택 봉을 `aria-live`로 알린다.
 - 차트 실패가 현재가·주문·계좌를 막지 않으며 `차트를 표시하지 못했어요`와 `다시 시도` fallback을 제공한다.
 - 테스트 모드는 실제 앱과 같은 계산·상호작용을 제공한다.
-- 기능 버전은 `1.81.0`이며 package, lockfile, update notes, ROADMAP, CONTEXT, AGENTS를 함께 갱신한다.
+- 기능 버전은 선행 v1.81.0 릴리스와 통합한 `1.82.0`이며 package, lockfile, update notes, ROADMAP, CONTEXT, AGENTS를 함께 갱신한다.
 - 코드 변경 후 `npm run typecheck`, `npm run test:playground`, `npm run build:vite`를 통과한다. 정식 배포 요청이 없으므로 `npm run build`와 G드라이브 배포는 하지 않는다.
 - 기존 미추적 사용자 파일과 로그는 건드리지 않고 task별 정확한 경로만 stage한다.
 
@@ -569,7 +569,7 @@ git commit -m "확대·이동 가능한 거래량 차트 적용"
 
 - [ ] **Step 1: 문서 contract test 또는 source assertion을 먼저 실패하도록 갱신**
 
-기존 package/update-notes tests가 있으면 `1.81.0`과 새 note를 요구하도록 먼저 바꾸고 RED를 확인한다. 별도 test가 없으면 `tests/playgroundMarketUiWiring.test.ts`에 package version, update note headline, `lightweight-charts` dependency의 source contract를 추가한다.
+기존 package/update-notes tests가 있으면 최종 배포 버전 `1.82.0`과 새 note를 요구하도록 먼저 바꾸고 RED를 확인한다. 별도 test가 없으면 `tests/playgroundMarketUiWiring.test.ts`에 package version, update note headline, `lightweight-charts` dependency의 source contract를 추가한다.
 
 - [ ] **Step 2: RED 확인**
 
@@ -579,7 +579,7 @@ Expected: FAIL because version and user-facing update note are still 1.80.0.
 
 - [ ] **Step 3: 버전과 문서 갱신**
 
-`package.json`과 root lockfile version을 `1.81.0`으로 맞춘다. update note 첫 항목은 비개발자용으로 `양방향 빠른주문`, `휠 확대·드래그 이동·거래량`, `덜 인위적인 장세와 종목별 움직임`을 설명한다.
+`package.json`과 root lockfile version을 `1.82.0`으로 맞춘다. update note 첫 항목은 비개발자용으로 `양방향 빠른주문`, `휠 확대·드래그 이동·거래량`, `덜 인위적인 장세와 종목별 움직임`을 설명한다.
 
 `ROADMAP.md`에는 배플레이그라운드 모의시장 실사용 피드백 반영 완료를 추가하되 포인트·게임 점수 정책 미확정 항목은 완료 처리하지 않는다. `CONTEXT.md`에는 shared deterministic model → renderer preview → Electron canonical 재검증 흐름과 새 파일 map을 추가한다. `AGENTS.md`에는 Playground v3 상태, Lightweight Charts stack, 로컬 시세/Supabase 계좌 경계, 문서 버전 2026-07-13을 갱신한다.
 

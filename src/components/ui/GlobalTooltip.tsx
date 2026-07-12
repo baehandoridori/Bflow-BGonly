@@ -5,7 +5,7 @@
  * 이벤트 위임으로 동작하므로 기존 코드 수정 없이 적용 가능.
  */
 
-import { useEffect, useState, useRef, useCallback } from 'react';
+import { useEffect, useLayoutEffect, useState, useRef, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 
 interface TooltipState {
@@ -24,6 +24,21 @@ export function GlobalTooltipProvider() {
   const hideTimer = useRef<ReturnType<typeof setTimeout>>();
   const currentEl = useRef<HTMLElement | null>(null);
   const originalTitle = useRef<string>('');
+
+  const boxRef = useRef<HTMLDivElement | null>(null);
+  // 화면 가장자리에서 잘리지 않게 실측 폭으로 가로 보정.
+  // (첫 프레임은 보정 전 위치로 그려지지만 진입 페이드(120ms, opacity 0 시작)에 가려 체감 없음)
+  const [shiftX, setShiftX] = useState(0);
+  useLayoutEffect(() => {
+    if (!tooltip) { setShiftX(0); return; }
+    const width = boxRef.current?.offsetWidth ?? 0;
+    if (!width) { setShiftX(0); return; }
+    const half = width / 2;
+    const minX = 8 + half;
+    const maxX = Math.max(minX, window.innerWidth - 8 - half);
+    const target = Math.max(minX, Math.min(tooltip.x, maxX));
+    setShiftX(target - tooltip.x);
+  }, [tooltip]);
 
   const restoreTitle = useCallback(() => {
     if (currentEl.current && originalTitle.current) {
@@ -146,14 +161,15 @@ export function GlobalTooltipProvider() {
           transition={{ duration: 0.12, ease: [0.2, 0, 0, 1] }}
           className="fixed z-[99999] pointer-events-none"
           style={{
-            left: tooltip.x,
+            left: tooltip.x + shiftX,
             top: tooltip.y,
             transform: `translateX(-50%) translateY(${tooltip.position === 'top' ? '-100%' : '0'})`,
           }}
         >
           {/* 리퀴드글래스 컨테이너 — 라이트/다크 모두 테마 변수로 적응 */}
           <div
-            className="relative px-3 py-1.5 rounded-lg text-xs font-medium whitespace-nowrap max-w-[280px] overflow-hidden"
+            ref={boxRef}
+            className="relative px-3 py-1.5 rounded-lg text-xs font-medium whitespace-normal [overflow-wrap:anywhere] max-w-[min(480px,80vw)] overflow-hidden"
             style={{
               color: 'rgb(var(--color-tooltip-text))',
               background: 'linear-gradient(135deg, rgb(var(--color-tooltip-bg) / 0.94) 0%, rgb(var(--color-tooltip-bg) / 0.98) 100%)',
