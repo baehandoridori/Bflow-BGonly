@@ -1032,6 +1032,7 @@ export interface ElectronAPI {
   imageDelete: (fileName: string) => Promise<boolean>;
   imageGetDir: () => Promise<string>;
   clipboardReadImage: () => Promise<string | null>;
+  clipboardReadImageFile: () => Promise<{ fileName: string; dataUrl: string } | null>;
   // GAS 연결 (이미지 업로드용 Apps Script 웹 앱)
   sheetsConnect: (webAppUrl: string) => Promise<SheetsConnectResult>;
   sheetsIsConnected: () => Promise<boolean>;

@@ -55,6 +55,7 @@ import {
 import { isStaleSwapFailureForCurrentVersion } from './autoUpdate/failurePolicy';
 import { compareVersions, readManifest } from './autoUpdate/manifest';
 import { resolveChildFolderPath } from './pathCreateFolder';
+import { parseFileNameWBuffer, imageMimeForPath } from './clipboardFiles';
 import {
   initVacation,
   isVacationConnected,
@@ -3901,6 +3902,29 @@ ipcMain.handle('clipboard:read-image', () => {
   }
   const buffer = target.toJPEG(80);
   return `data:image/jpeg;base64,${buffer.toString('base64')}`;
+});
+
+// 탐색기에서 '파일 복사'(Ctrl+C)한 이미지 파일 읽기 — 'FileNameW'(CFSTR_FILENAMEW) 파싱 후 원본 바이트를 data URL 로.
+// ('CF_HDROP' 은 Electron readBuffer 로 못 읽는다 — §5.1 주의 박스 참조.)
+// clipboard.readImage() 경로는 JPEG 재인코딩으로 PNG 투명도가 소실되므로 반드시 파일 원본을 읽는다.
+const CLIPBOARD_IMAGE_FILE_MAX_BYTES = 30 * 1024 * 1024;
+ipcMain.handle('clipboard:read-image-file', async () => {
+  try {
+    const target = parseFileNameWBuffer(clipboard.readBuffer('FileNameW'));
+    if (!target) return null;
+    const mime = imageMimeForPath(target);
+    if (!mime) return null; // 첫 파일이 이미지가 아니면 무시 (psd/moho/txt 등)
+    const stat = await fs.promises.stat(target);
+    if (!stat.isFile() || stat.size > CLIPBOARD_IMAGE_FILE_MAX_BYTES) return null;
+    const data = await fs.promises.readFile(target);
+    return {
+      fileName: path.basename(target),
+      dataUrl: `data:${mime};base64,${data.toString('base64')}`,
+    };
+  } catch (err) {
+    console.warn('[clipboard] read-image-file 실패:', err);
+    return null;
+  }
 });
 
 // ─── IPC 핸들러: 위젯 팝업 윈도우 ──────────────────────────────
