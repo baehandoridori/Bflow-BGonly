@@ -1,0 +1,958 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>JBBJ 시장 빠른주문 · 차트 UX 목업</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #0f1117;
+      --surface: #141720;
+      --card: #1a1d27;
+      --card-strong: #20232f;
+      --line: #2d3041;
+      --line-soft: rgba(108, 112, 138, .22);
+      --text: #e8e8ee;
+      --text-soft: #a7a9ba;
+      --muted: #777b91;
+      --accent: #8c7cf4;
+      --accent-strong: #6c5ce7;
+      --buy: #f47c67;
+      --buy-hover: #ff907e;
+      --buy-soft: rgba(244, 124, 103, .16);
+      --sell: #64a0eb;
+      --sell-hover: #7db1f0;
+      --sell-soft: rgba(100, 160, 235, .16);
+      --positive: #f47c67;
+      --negative: #64a0eb;
+      --flat: #9da3b3;
+      --success: #4bc39a;
+      --shadow: 0 24px 70px rgba(0, 0, 0, .28);
+    }
+
+    * { box-sizing: border-box; }
+    html { min-width: 320px; background: var(--bg); }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      overflow-x: hidden;
+      color: var(--text);
+      background:
+        radial-gradient(circle at 12% -10%, rgba(108, 92, 231, .12), transparent 34rem),
+        var(--bg);
+      font-family: Pretendard, "Pretendard Variable", Inter, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      letter-spacing: -.015em;
+    }
+
+    button, input, select { font: inherit; }
+    button, select { cursor: pointer; }
+    button:focus-visible, input:focus-visible, select:focus-visible {
+      outline: 3px solid rgba(140, 124, 244, .42);
+      outline-offset: 2px;
+    }
+
+    .app-shell { min-height: 100vh; }
+    .playground-header {
+      position: sticky;
+      z-index: 20;
+      top: 0;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      min-height: 66px;
+      padding: 0 28px;
+      border-bottom: 1px solid var(--line-soft);
+      background: rgba(15, 17, 23, .92);
+      backdrop-filter: blur(18px);
+    }
+
+    .header-left, .header-right, .brand, .wallet, .nav-left, .market-links, .price-actions {
+      display: flex;
+      align-items: center;
+    }
+
+    .header-left { gap: 16px; }
+    .header-right { gap: 12px; }
+    .back-button, .icon-button {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-width: 42px;
+      height: 42px;
+      border: 1px solid var(--line);
+      border-radius: 13px;
+      color: var(--text-soft);
+      background: rgba(26, 29, 39, .72);
+    }
+    .back-button { gap: 8px; width: auto; padding: 0 13px; font-size: 13px; font-weight: 750; }
+    .back-button:hover, .icon-button:hover { color: var(--text); background: var(--card-strong); }
+    .brand-mark {
+      display: grid;
+      place-items: center;
+      width: 34px;
+      height: 34px;
+      border-radius: 12px;
+      background: linear-gradient(145deg, var(--accent), var(--accent-strong));
+      box-shadow: 0 8px 22px rgba(108, 92, 231, .26);
+      font-size: 12px;
+      font-weight: 900;
+    }
+    .brand-copy strong { display: block; font-size: 15px; }
+    .brand-copy span { display: block; margin-top: 3px; color: var(--muted); font-size: 11px; }
+    .wallet {
+      gap: 10px;
+      padding: 8px 12px;
+      border: 1px solid var(--line-soft);
+      border-radius: 13px;
+      background: rgba(26, 29, 39, .72);
+    }
+    .wallet-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--success); box-shadow: 0 0 0 5px rgba(75,195,154,.09); }
+    .wallet strong { display: block; font-size: 12px; }
+    .wallet span { display: block; margin-top: 2px; color: var(--muted); font-size: 10px; }
+    .mock-badge {
+      padding: 7px 10px;
+      border: 1px solid rgba(140, 124, 244, .28);
+      border-radius: 999px;
+      color: #c8c1ff;
+      background: rgba(108, 92, 231, .1);
+      font-size: 10px;
+      font-weight: 850;
+      letter-spacing: .05em;
+    }
+
+    .market-nav {
+      border-bottom: 1px solid var(--line-soft);
+      background: rgba(20, 23, 32, .82);
+    }
+    .market-nav-inner {
+      display: flex;
+      align-items: center;
+      gap: 22px;
+      width: min(1200px, calc(100% - 40px));
+      min-height: 70px;
+      margin: 0 auto;
+    }
+    .nav-left { gap: 9px; min-width: max-content; font-weight: 850; }
+    .landmark {
+      position: relative;
+      width: 22px;
+      height: 18px;
+      border-bottom: 3px solid var(--accent);
+    }
+    .landmark::before {
+      content: "";
+      position: absolute;
+      left: 1px;
+      top: 1px;
+      width: 20px;
+      height: 5px;
+      border-radius: 4px 4px 1px 1px;
+      background: var(--accent);
+      clip-path: polygon(50% 0, 100% 100%, 0 100%);
+    }
+    .landmark::after {
+      content: "";
+      position: absolute;
+      left: 4px;
+      top: 8px;
+      width: 3px;
+      height: 7px;
+      background: var(--accent);
+      box-shadow: 6px 0 var(--accent), 12px 0 var(--accent);
+    }
+    .market-links { gap: 4px; }
+    .market-links button {
+      min-height: 40px;
+      padding: 0 12px;
+      border: 0;
+      border-radius: 11px;
+      color: var(--text-soft);
+      background: transparent;
+      font-size: 13px;
+      font-weight: 750;
+    }
+    .market-links button:hover, .market-links button.active { color: var(--text); background: rgba(140, 124, 244, .12); }
+    .search {
+      position: relative;
+      width: min(330px, 34vw);
+      margin-left: auto;
+    }
+    .search::before {
+      content: "⌕";
+      position: absolute;
+      left: 13px;
+      top: 50%;
+      color: var(--muted);
+      transform: translateY(-54%);
+      font-size: 20px;
+    }
+    .search input {
+      width: 100%;
+      height: 42px;
+      padding: 0 13px 0 40px;
+      border: 1px solid var(--line);
+      border-radius: 13px;
+      color: var(--text);
+      background: rgba(15, 17, 23, .64);
+      outline: none;
+    }
+    .search input::placeholder { color: #6f7386; }
+
+    .page {
+      width: min(1200px, calc(100% - 40px));
+      margin: 0 auto;
+      padding: 24px 0 70px;
+    }
+    .detail-grid {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) 360px;
+      grid-template-areas:
+        "summary order"
+        "chart order"
+        "holding news";
+      gap: 18px 24px;
+      align-items: start;
+    }
+
+    .card {
+      min-width: 0;
+      border: 1px solid var(--line);
+      border-radius: 20px;
+      background: linear-gradient(150deg, rgba(30, 33, 44, .92), rgba(24, 27, 37, .96));
+      box-shadow: 0 14px 40px rgba(0, 0, 0, .12);
+    }
+    .summary-card { grid-area: summary; padding: 22px 24px; }
+    .summary-top { display: flex; align-items: flex-start; justify-content: space-between; gap: 18px; }
+    .company-meta { display: flex; align-items: center; gap: 11px; }
+    .company-logo {
+      display: grid;
+      place-items: center;
+      width: 42px;
+      height: 42px;
+      border-radius: 15px;
+      background: linear-gradient(145deg, var(--accent), #4f44a8);
+      color: #fff;
+      font-size: 11px;
+      font-weight: 900;
+      box-shadow: 0 10px 28px rgba(108, 92, 231, .2);
+    }
+    .company-meta h1 { margin: 0; font-size: 22px; letter-spacing: -.03em; }
+    .company-meta p { margin: 5px 0 0; color: var(--text-soft); font-size: 12px; }
+    .price-actions { gap: 7px; }
+    .price-area { margin-top: 20px; }
+    .price-row { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; }
+    .price-row strong { font-size: clamp(32px, 4vw, 46px); letter-spacing: -.045em; }
+    .price-change { color: var(--positive); font-size: 15px; font-weight: 850; font-variant-numeric: tabular-nums; }
+    .price-sub { margin: 7px 0 0; color: var(--text-soft); font-size: 12px; }
+    .reason {
+      display: flex;
+      align-items: center;
+      gap: 11px;
+      margin-top: 18px;
+      padding: 13px 15px;
+      border-radius: 14px;
+      color: #d7d3f7;
+      background: rgba(140, 124, 244, .09);
+      font-size: 12px;
+      line-height: 1.55;
+    }
+    .reason b { color: #bdb3ff; white-space: nowrap; }
+
+    .chart-card { grid-area: chart; overflow: hidden; }
+    .card-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      min-height: 60px;
+      padding: 0 20px;
+      border-bottom: 1px solid var(--line-soft);
+    }
+    .card-header h2 { margin: 0; font-size: 15px; }
+    .card-header p { margin: 4px 0 0; color: var(--muted); font-size: 10px; }
+    .chart-toolbar { display: flex; align-items: center; gap: 7px; flex-wrap: wrap; padding: 12px 16px; border-bottom: 1px solid var(--line-soft); }
+    .control-label { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); font-size: 10px; }
+    .chart-toolbar select {
+      height: 34px;
+      padding: 0 30px 0 10px;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      color: var(--text);
+      background: var(--card-strong);
+      font-size: 11px;
+      font-weight: 750;
+    }
+    .gesture-hint { display: flex; align-items: center; gap: 7px; margin-left: auto; color: var(--muted); font-size: 10px; }
+    .gesture-hint i { width: 6px; height: 6px; border-radius: 50%; background: var(--success); }
+    .reset-button {
+      width: 34px;
+      height: 34px;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      color: var(--text-soft);
+      background: var(--card-strong);
+    }
+    .reset-button:hover { color: var(--text); border-color: #474b61; }
+    .chart-wrap { position: relative; height: 420px; background: #13161e; }
+    #chart { display: block; width: 100%; height: 100%; touch-action: none; cursor: crosshair; }
+    .chart-legend {
+      position: absolute;
+      z-index: 3;
+      left: 16px;
+      top: 12px;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px 12px;
+      max-width: calc(100% - 95px);
+      color: #aeb2c1;
+      font-size: 10px;
+      font-variant-numeric: tabular-nums;
+      pointer-events: none;
+    }
+    .chart-legend b { color: var(--text); }
+    .chart-watermark {
+      position: absolute;
+      right: 13px;
+      bottom: 10px;
+      color: #626778;
+      font-size: 9px;
+      pointer-events: none;
+    }
+
+    .order-card {
+      position: sticky;
+      top: 84px;
+      grid-area: order;
+      overflow: hidden;
+      box-shadow: var(--shadow);
+    }
+    .order-card .card-header { padding: 0 18px; }
+    .live-dot { display: flex; align-items: center; gap: 7px; color: var(--muted); font-size: 10px; }
+    .live-dot i { width: 7px; height: 7px; border-radius: 50%; background: var(--success); box-shadow: 0 0 0 5px rgba(75,195,154,.08); }
+    .order-body { padding: 16px 18px 18px; }
+    .quote-strip {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 10px;
+      padding: 12px 13px;
+      border: 1px solid var(--line-soft);
+      border-radius: 13px;
+      background: rgba(15, 17, 23, .44);
+    }
+    .quote-strip span { display: block; color: var(--muted); font-size: 9px; }
+    .quote-strip strong { display: block; margin-top: 4px; font-size: 12px; font-variant-numeric: tabular-nums; }
+    .quote-strip > div:last-child { text-align: right; }
+    .order-label { margin: 16px 0 7px; color: var(--text-soft); font-size: 11px; font-weight: 800; }
+    .quantity-box {
+      display: grid;
+      grid-template-columns: 42px 1fr 42px;
+      align-items: center;
+      height: 50px;
+      overflow: hidden;
+      border: 1px solid #3a3e51;
+      border-radius: 13px;
+      background: rgba(15, 17, 23, .6);
+    }
+    .quantity-box button { height: 100%; border: 0; color: var(--text-soft); background: transparent; font-size: 20px; }
+    .quantity-box button:hover { color: var(--text); background: rgba(255,255,255,.035); }
+    .quantity-input-wrap { display: flex; align-items: baseline; justify-content: center; gap: 5px; }
+    .quantity-input-wrap input {
+      width: 78px;
+      border: 0;
+      color: var(--text);
+      background: transparent;
+      font-size: 20px;
+      font-weight: 900;
+      text-align: right;
+      outline: none;
+      font-variant-numeric: tabular-nums;
+    }
+    .quantity-input-wrap span { color: var(--text-soft); font-size: 11px; }
+    .preset-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 7px; margin-top: 8px; }
+    .preset-grid button {
+      min-height: 36px;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      color: var(--text-soft);
+      background: var(--card-strong);
+      font-size: 10px;
+      font-weight: 800;
+    }
+    .preset-grid button:hover, .preset-grid button.active { color: var(--text); border-color: var(--accent); background: rgba(140, 124, 244, .12); }
+    .availability {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 10px 14px;
+      margin-top: 15px;
+      padding: 13px;
+      border-radius: 13px;
+      background: rgba(15, 17, 23, .46);
+    }
+    .availability span { display: block; color: var(--muted); font-size: 9px; }
+    .availability strong { display: block; margin-top: 4px; font-size: 11px; font-variant-numeric: tabular-nums; }
+    .availability .sell-value { color: var(--sell); }
+    .availability .buy-value { color: var(--buy); }
+    .action-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 9px; margin-top: 12px; }
+    .trade-button {
+      min-height: 52px;
+      border: 1px solid transparent;
+      border-radius: 13px;
+      color: #fff;
+      font-size: 12px;
+      font-weight: 900;
+      transition: transform .16s ease, filter .16s ease, background .16s ease;
+    }
+    .trade-button:hover { transform: translateY(-1px); filter: brightness(1.08); }
+    .trade-button:active { transform: translateY(0) scale(.985); }
+    .trade-button:disabled { cursor: not-allowed; filter: grayscale(.4); opacity: .42; transform: none; }
+    .trade-button.sell { border-color: rgba(100,160,235,.22); background: #28558f; }
+    .trade-button.buy { border-color: rgba(244,124,103,.22); background: #8a3f42; }
+    .holding-box { margin-top: 15px; padding: 13px; border-top: 1px solid var(--line); }
+    .holding-row { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; padding: 6px 0; }
+    .holding-row span { color: var(--text-soft); font-size: 10px; }
+    .holding-row strong { text-align: right; font-size: 11px; font-variant-numeric: tabular-nums; }
+    .holding-row strong.positive { color: var(--positive); }
+    .order-note { margin: 10px 2px 0; color: var(--muted); font-size: 9px; line-height: 1.5; text-align: center; }
+
+    .holding-card { grid-area: holding; padding: 18px 20px; }
+    .news-card { grid-area: news; padding: 18px 20px; }
+    .lower-title { margin: 0 0 13px; font-size: 14px; }
+    .holding-inline { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; }
+    .holding-inline div { padding: 12px; border-radius: 12px; background: rgba(15,17,23,.42); }
+    .holding-inline span { display: block; color: var(--muted); font-size: 9px; }
+    .holding-inline strong { display: block; margin-top: 5px; font-size: 11px; }
+    .news-card p { margin: 0; color: var(--text-soft); font-size: 11px; line-height: 1.65; }
+    .news-card time { display: block; margin-top: 9px; color: var(--muted); font-size: 9px; }
+
+    .modal-backdrop {
+      position: fixed;
+      z-index: 100;
+      inset: 0;
+      display: none;
+      place-items: center;
+      padding: 20px;
+      background: rgba(4, 5, 8, .68);
+      backdrop-filter: blur(10px);
+    }
+    .modal-backdrop.show { display: grid; }
+    .confirm-modal {
+      width: min(430px, 100%);
+      overflow: hidden;
+      border: 1px solid #3b3f52;
+      border-radius: 22px;
+      background: #1b1e28;
+      box-shadow: 0 30px 90px rgba(0,0,0,.5);
+      animation: modal-in .2s ease both;
+    }
+    @keyframes modal-in { from { opacity: 0; transform: translateY(10px) scale(.98); } }
+    .modal-head { padding: 20px 22px 15px; }
+    .modal-head small { color: var(--muted); font-size: 10px; font-weight: 800; }
+    .modal-head h2 { margin: 7px 0 0; font-size: 21px; }
+    .modal-content { padding: 0 22px 20px; }
+    .modal-summary { padding: 14px; border-radius: 14px; background: #13161d; }
+    .modal-row { display: flex; justify-content: space-between; gap: 14px; padding: 7px 0; color: var(--text-soft); font-size: 11px; }
+    .modal-row strong { color: var(--text); font-variant-numeric: tabular-nums; }
+    .modal-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 9px; margin-top: 16px; }
+    .modal-actions button { min-height: 46px; border: 0; border-radius: 12px; color: var(--text); background: #2a2e3a; font-weight: 850; }
+    .modal-actions button.confirm-buy { background: #8a3f42; }
+    .modal-actions button.confirm-sell { background: #28558f; }
+
+    .toast {
+      position: fixed;
+      z-index: 130;
+      left: 50%;
+      bottom: 28px;
+      max-width: calc(100vw - 32px);
+      padding: 12px 16px;
+      border: 1px solid #41465a;
+      border-radius: 13px;
+      color: var(--text);
+      background: #282c38;
+      box-shadow: 0 15px 45px rgba(0,0,0,.38);
+      opacity: 0;
+      transform: translate(-50%, 12px);
+      transition: opacity .18s ease, transform .18s ease;
+      pointer-events: none;
+      font-size: 11px;
+    }
+    .toast.show { opacity: 1; transform: translate(-50%, 0); }
+
+    .mobile-dock { display: none; }
+
+    @media (max-width: 1040px) {
+      .detail-grid {
+        grid-template-columns: minmax(0, 1fr);
+        grid-template-areas: "summary" "chart" "holding" "news";
+      }
+      .order-card { display: none; }
+      .mobile-dock {
+        position: fixed;
+        z-index: 50;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 10px;
+        padding: 12px max(16px, env(safe-area-inset-right)) calc(12px + env(safe-area-inset-bottom)) max(16px, env(safe-area-inset-left));
+        border-top: 1px solid var(--line);
+        background: rgba(18, 20, 28, .94);
+        backdrop-filter: blur(18px);
+      }
+      .mobile-dock button { min-height: 50px; border: 0; border-radius: 13px; color: white; font-weight: 900; }
+      .mobile-dock .sell { background: #28558f; }
+      .mobile-dock .buy { background: #8a3f42; }
+      .page { padding-bottom: 110px; }
+    }
+
+    @media (max-width: 760px) {
+      .playground-header { padding: 0 15px; }
+      .brand-copy span, .mock-badge, .wallet span { display: none; }
+      .market-nav-inner { width: calc(100% - 28px); flex-wrap: wrap; gap: 9px 14px; padding: 11px 0; }
+      .market-links { order: 3; width: 100%; overflow-x: auto; }
+      .search { width: 180px; }
+      .page { width: calc(100% - 28px); padding-top: 14px; }
+      .summary-card { padding: 18px; }
+      .chart-wrap { height: 340px; }
+      .gesture-hint { display: none; }
+      .holding-inline { grid-template-columns: repeat(2, 1fr); }
+      .reason { align-items: flex-start; flex-direction: column; gap: 4px; }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after { scroll-behavior: auto !important; animation-duration: .01ms !important; transition-duration: .01ms !important; }
+    }
+  </style>
+</head>
+<body>
+  <div class="app-shell">
+    <header class="playground-header">
+      <div class="header-left">
+        <button class="back-button" type="button" onclick="showToast('게임 로비로 돌아가는 목업입니다')">← <span>게임 로비</span></button>
+        <div class="brand">
+          <span class="brand-mark">BF</span>
+          <div class="brand-copy"><strong>배플레이그라운드</strong><span>JBBJ 모의투자</span></div>
+        </div>
+      </div>
+      <div class="header-right">
+        <span class="mock-badge">CODEX PREVIEW · MOCKUP</span>
+        <div class="wallet"><i class="wallet-dot"></i><div><strong>504,480원</strong><span>증권계좌 예수금</span></div></div>
+      </div>
+    </header>
+
+    <nav class="market-nav" aria-label="JBBJ 시장 내비게이션">
+      <div class="market-nav-inner">
+        <div class="nav-left"><i class="landmark"></i><span>JBBJ 시장</span></div>
+        <div class="market-links">
+          <button type="button" onclick="showToast('시장 홈으로 이동하는 목업입니다')">시장 홈</button>
+          <button type="button" onclick="showToast('전체 종목 목록으로 이동하는 목업입니다')">종목 둘러보기</button>
+          <button type="button" onclick="showToast('내 계좌 화면으로 이동하는 목업입니다')">내 계좌</button>
+        </div>
+        <label class="search"><input type="search" placeholder="종목·뉴스 검색" aria-label="종목·뉴스 검색" /></label>
+      </div>
+    </nav>
+
+    <main class="page">
+      <div class="detail-grid">
+        <section class="card summary-card" aria-labelledby="stock-title">
+          <div class="summary-top">
+            <div class="company-meta">
+              <span class="company-logo">JB</span>
+              <div><h1 id="stock-title">JBBJ 스튜디오</h1><p>JBBJ · 성장형 · 애니메이션 제작 스튜디오</p></div>
+            </div>
+            <div class="price-actions">
+              <button class="icon-button" type="button" aria-label="가격 알림" onclick="showToast('가격 알림을 설정하는 목업입니다')">♢</button>
+              <button class="icon-button" type="button" aria-label="찜하기" onclick="this.textContent=this.textContent==='♥'?'♡':'♥'">♥</button>
+            </div>
+          </div>
+          <div class="price-area">
+            <div class="price-row"><strong>1,842원</strong><span class="price-change">+102원 · +5.86%</span></div>
+            <p class="price-sub">오늘 자정 기준 · 1초마다 현재 가격이 갱신돼요</p>
+          </div>
+          <div class="reason"><b>오늘 움직인 이유</b><span>신규 프로젝트 공개 기대감과 시장 전체의 상승 흐름이 함께 반영되고 있어요.</span></div>
+        </section>
+
+        <section class="card chart-card" aria-labelledby="chart-heading">
+          <header class="card-header">
+            <div><h2 id="chart-heading">가격 차트</h2><p>캔들과 거래량을 함께 확인할 수 있어요</p></div>
+          </header>
+          <div class="chart-toolbar">
+            <label class="control-label">간격
+              <select id="interval-select" aria-label="차트 간격">
+                <option value="1m">1분</option><option value="5m">5분</option><option value="10m">10분</option><option value="15m">15분</option><option value="1h">1시간</option><option value="1d">1일</option>
+              </select>
+            </label>
+            <label class="control-label">기간
+              <select id="range-select" aria-label="차트 기간">
+                <option value="today">오늘</option><option value="week">1주</option><option value="month">1개월</option><option value="six">6개월</option><option value="all">전체</option>
+              </select>
+            </label>
+            <label class="control-label">모양
+              <select id="style-select" aria-label="차트 모양">
+                <option value="candlestick">캔들</option><option value="line">선</option>
+              </select>
+            </label>
+            <div class="gesture-hint"><i></i><span>휠로 확대 · 드래그로 이동 · 더블클릭 초기화</span></div>
+            <button id="reset-chart" class="reset-button" type="button" aria-label="차트 위치 초기화">↺</button>
+          </div>
+          <div class="chart-wrap">
+            <div class="chart-legend" id="chart-legend"><b>JBBJ</b><span>시 1,824</span><span>고 1,851</span><span>저 1,817</span><span>종 1,842</span><span>거래량 5.74K</span></div>
+            <canvas id="chart" aria-label="JBBJ 가격 차트. 휠로 확대하거나 드래그해서 이동할 수 있습니다"></canvas>
+            <span class="chart-watermark">TradingView Lightweight Charts 적용 예정</span>
+          </div>
+        </section>
+
+        <aside class="card order-card" aria-labelledby="order-heading">
+          <header class="card-header">
+            <div><h2 id="order-heading">빠른주문</h2><p>수량을 정한 뒤 사기 또는 팔기를 선택하세요</p></div>
+            <span class="live-dot"><i></i>현재가</span>
+          </header>
+          <div class="order-body">
+            <div class="quote-strip"><div><span>현재 가격</span><strong>1,842원</strong></div><div><span>예수금</span><strong>504,480원</strong></div></div>
+
+            <p class="order-label">몇 주 주문할까요?</p>
+            <div class="quantity-box">
+              <button id="quantity-minus" type="button" aria-label="수량 1주 빼기">−</button>
+              <label class="quantity-input-wrap"><span class="sr-only"></span><input id="quantity" type="number" min="1" step="1" value="3" aria-label="주문 수량" /><span>주</span></label>
+              <button id="quantity-plus" type="button" aria-label="수량 1주 더하기">＋</button>
+            </div>
+            <div class="preset-grid" aria-label="빠른 수량 선택">
+              <button type="button" data-quantity="1">1주</button><button type="button" data-quantity="5">5주</button><button type="button" data-quantity="10">10주</button><button type="button" data-quantity="max">최대</button>
+            </div>
+
+            <div class="availability">
+              <div><span>판매 가능</span><strong class="sell-value">4주</strong></div>
+              <div><span>구매 가능</span><strong class="buy-value" id="buy-available">273주</strong></div>
+              <div><span>판매 예상</span><strong id="sell-estimate">5,526원</strong></div>
+              <div><span>구매 예상</span><strong id="buy-estimate">5,526원</strong></div>
+            </div>
+
+            <div class="action-grid">
+              <button id="sell-button" class="trade-button sell" type="button">현재가 팔기</button>
+              <button id="buy-button" class="trade-button buy" type="button">현재가 사기</button>
+            </div>
+
+            <div class="holding-box">
+              <div class="holding-row"><span>내 주식 평균</span><strong>1,690원</strong></div>
+              <div class="holding-row"><span>현재 수익</span><strong class="positive">+608원<br />+8.99%</strong></div>
+              <div class="holding-row"><span>보유 수량</span><strong>4주</strong></div>
+              <div class="holding-row"><span>현재 평가금</span><strong>7,368원</strong></div>
+            </div>
+            <p class="order-note" id="order-note">실제 주문 전에는 현재 가격과 수량을 한 번 더 확인합니다.</p>
+          </div>
+        </aside>
+
+        <section class="card holding-card" aria-labelledby="holding-title">
+          <h2 class="lower-title" id="holding-title">내 보유 상태</h2>
+          <div class="holding-inline"><div><span>보유 수량</span><strong>4주</strong></div><div><span>투자 원금</span><strong>6,760원</strong></div><div><span>현재 가치</span><strong>7,368원</strong></div><div><span>평가손익</span><strong class="price-change">+608원</strong></div></div>
+        </section>
+
+        <section class="card news-card" aria-labelledby="news-title">
+          <h2 class="lower-title" id="news-title">최근 소식</h2>
+          <p>신규 프로젝트 공개 일정이 가까워지면서 JBBJ 스튜디오에 대한 관심이 늘고 있어요.</p>
+          <time>오늘 오전 9:20</time>
+        </section>
+      </div>
+    </main>
+
+    <div class="mobile-dock"><button class="sell" type="button" onclick="openConfirm('sell')">현재가 팔기</button><button class="buy" type="button" onclick="openConfirm('buy')">현재가 사기</button></div>
+  </div>
+
+  <div class="modal-backdrop" id="modal" role="dialog" aria-modal="true" aria-labelledby="modal-title">
+    <div class="confirm-modal">
+      <div class="modal-head"><small>주문 최종 확인</small><h2 id="modal-title">JBBJ 3주 사기</h2></div>
+      <div class="modal-content">
+        <div class="modal-summary">
+          <div class="modal-row"><span>확인 가격</span><strong>1,842원</strong></div>
+          <div class="modal-row"><span>주문 수량</span><strong id="modal-quantity">3주</strong></div>
+          <div class="modal-row"><span>예상 합계</span><strong id="modal-total">5,526원</strong></div>
+          <div class="modal-row"><span id="modal-after-label">주문 후 예수금</span><strong id="modal-after">498,954원</strong></div>
+        </div>
+        <div class="modal-actions"><button type="button" onclick="closeConfirm()">돌아가기</button><button id="modal-confirm" class="confirm-buy" type="button">확인하고 사기</button></div>
+      </div>
+    </div>
+  </div>
+  <div class="toast" id="toast" role="status" aria-live="polite">목업 안내</div>
+
+  <script>
+    const PRICE = 1842;
+    const CASH = 504480;
+    const HOLDING = 4;
+    const chartCanvas = document.getElementById('chart');
+    const chartContext = chartCanvas.getContext('2d');
+    const legend = document.getElementById('chart-legend');
+    const quantityInput = document.getElementById('quantity');
+    const sellButton = document.getElementById('sell-button');
+    const buyButton = document.getElementById('buy-button');
+    const modal = document.getElementById('modal');
+    const toast = document.getElementById('toast');
+    let toastTimer = 0;
+    let activeSide = 'buy';
+    let dragging = false;
+    let dragStartX = 0;
+    let dragStartOffset = 0;
+    let visibleBars = 74;
+    let offsetBars = 0;
+    let pointer = null;
+    let series = [];
+
+    function formatWon(value) { return `${Math.round(value).toLocaleString('ko-KR')}원`; }
+    function clamp(value, minimum, maximum) { return Math.min(maximum, Math.max(minimum, value)); }
+    function showToast(message) {
+      toast.textContent = message;
+      toast.classList.add('show');
+      window.clearTimeout(toastTimer);
+      toastTimer = window.setTimeout(() => toast.classList.remove('show'), 2200);
+    }
+
+    function seededRandom(seed) {
+      let value = seed >>> 0;
+      return () => {
+        value ^= value << 13; value ^= value >>> 17; value ^= value << 5;
+        return (value >>> 0) / 4294967296;
+      };
+    }
+
+    function generateSeries(seed = 42013) {
+      const random = seededRandom(seed);
+      const next = [];
+      let previous = 1596;
+      let volatility = .0044;
+      for (let index = 0; index < 240; index += 1) {
+        const marketDrift = index < 50 ? -.00015 : index < 135 ? .00068 : index < 185 ? -.00022 : .00082;
+        const clusterTarget = index > 92 && index < 128 ? .012 : index > 188 ? .008 : .0044;
+        volatility = volatility * .91 + clusterTarget * .09;
+        const common = (random() - .5) * 2;
+        const company = (random() - .5) * 2;
+        const rareJump = random() > .974 ? (random() - .45) * .032 : 0;
+        const change = marketDrift + (common * .64 + company * .36) * volatility + rareJump;
+        const open = previous;
+        const close = Math.max(800, open * (1 + change));
+        const wick = Math.max(4, open * volatility * (.35 + random() * .55));
+        const high = Math.max(open, close) + wick * (.35 + random());
+        const low = Math.min(open, close) - wick * (.35 + random());
+        const volume = Math.round(950 + Math.abs(change) * 310000 + random() * 1600 + (index > 92 && index < 128 ? 2200 : 0));
+        next.push({ open, high, low, close, volume, label: `09:${String((index + 4) % 60).padStart(2, '0')}` });
+        previous = close;
+      }
+      const ratio = PRICE / next[next.length - 1].close;
+      return next.map((bar) => ({ ...bar, open: bar.open * ratio, high: bar.high * ratio, low: bar.low * ratio, close: bar.close * ratio }));
+    }
+
+    function resizeChart() {
+      const bounds = chartCanvas.getBoundingClientRect();
+      const ratio = Math.min(window.devicePixelRatio || 1, 2);
+      const width = Math.max(1, Math.round(bounds.width * ratio));
+      const height = Math.max(1, Math.round(bounds.height * ratio));
+      if (chartCanvas.width !== width || chartCanvas.height !== height) {
+        chartCanvas.width = width;
+        chartCanvas.height = height;
+      }
+      chartContext.setTransform(ratio, 0, 0, ratio, 0, 0);
+      drawChart();
+    }
+
+    function visibleSeries() {
+      const end = clamp(series.length - offsetBars, visibleBars, series.length);
+      const start = Math.max(0, end - visibleBars);
+      return { data: series.slice(start, end), start };
+    }
+
+    function drawChart() {
+      const bounds = chartCanvas.getBoundingClientRect();
+      const width = bounds.width;
+      const height = bounds.height;
+      if (!width || !height || !series.length) return;
+      const { data, start } = visibleSeries();
+      const plot = { left: 14, right: width - 64, top: 38, bottom: height - 94 };
+      const volumeTop = height - 72;
+      const volumeBottom = height - 24;
+      const prices = data.flatMap((bar) => [bar.high, bar.low]);
+      const minimum = Math.min(...prices);
+      const maximum = Math.max(...prices);
+      const range = Math.max(1, maximum - minimum);
+      const maxVolume = Math.max(...data.map((bar) => bar.volume), 1);
+      const barWidth = (plot.right - plot.left) / Math.max(1, data.length);
+      const bodyWidth = Math.max(2, Math.min(9, barWidth * .62));
+      const yFor = (price) => plot.top + ((maximum - price) / range) * (plot.bottom - plot.top);
+      chartContext.clearRect(0, 0, width, height);
+      chartContext.fillStyle = '#13161e';
+      chartContext.fillRect(0, 0, width, height);
+
+      chartContext.lineWidth = 1;
+      chartContext.strokeStyle = 'rgba(64,68,84,.42)';
+      chartContext.fillStyle = '#72788b';
+      chartContext.font = '10px Pretendard, system-ui';
+      chartContext.textAlign = 'left';
+      for (let grid = 0; grid <= 5; grid += 1) {
+        const y = plot.top + ((plot.bottom - plot.top) / 5) * grid;
+        chartContext.beginPath(); chartContext.moveTo(plot.left, y); chartContext.lineTo(plot.right, y); chartContext.stroke();
+        const price = maximum - (range / 5) * grid;
+        chartContext.fillText(Math.round(price).toLocaleString('ko-KR'), plot.right + 9, y + 3);
+      }
+      for (let grid = 0; grid <= 6; grid += 1) {
+        const x = plot.left + ((plot.right - plot.left) / 6) * grid;
+        chartContext.beginPath(); chartContext.moveTo(x, plot.top); chartContext.lineTo(x, volumeBottom); chartContext.stroke();
+      }
+      chartContext.strokeStyle = 'rgba(99,103,124,.72)';
+      chartContext.beginPath(); chartContext.moveTo(plot.left, volumeTop - 7); chartContext.lineTo(plot.right, volumeTop - 7); chartContext.stroke();
+
+      const style = document.getElementById('style-select').value;
+      if (style === 'line') {
+        chartContext.beginPath();
+        data.forEach((bar, index) => {
+          const x = plot.left + barWidth * (index + .5);
+          const y = yFor(bar.close);
+          if (index === 0) chartContext.moveTo(x, y); else chartContext.lineTo(x, y);
+        });
+        chartContext.lineWidth = 2;
+        chartContext.strokeStyle = '#f47c67';
+        chartContext.stroke();
+      } else {
+        data.forEach((bar, index) => {
+          const x = plot.left + barWidth * (index + .5);
+          const rising = bar.close >= bar.open;
+          const color = rising ? '#f47c67' : '#64a0eb';
+          const openY = yFor(bar.open);
+          const closeY = yFor(bar.close);
+          chartContext.strokeStyle = color;
+          chartContext.fillStyle = color;
+          chartContext.lineWidth = 1;
+          chartContext.beginPath(); chartContext.moveTo(x, yFor(bar.high)); chartContext.lineTo(x, yFor(bar.low)); chartContext.stroke();
+          chartContext.fillRect(x - bodyWidth / 2, Math.min(openY, closeY), bodyWidth, Math.max(2, Math.abs(closeY - openY)));
+        });
+      }
+
+      data.forEach((bar, index) => {
+        const x = plot.left + barWidth * (index + .5);
+        const rising = bar.close >= bar.open;
+        const color = rising ? 'rgba(244,124,103,.8)' : 'rgba(100,160,235,.8)';
+        const volumeHeight = (bar.volume / maxVolume) * (volumeBottom - volumeTop);
+        chartContext.fillStyle = color;
+        chartContext.fillRect(x - bodyWidth / 2, volumeBottom - volumeHeight, bodyWidth, volumeHeight);
+      });
+
+      chartContext.fillStyle = '#747a8d';
+      chartContext.font = '9px Pretendard, system-ui';
+      chartContext.textAlign = 'center';
+      const labelStep = Math.max(1, Math.floor(data.length / 5));
+      for (let index = 0; index < data.length; index += labelStep) {
+        const x = plot.left + barWidth * (index + .5);
+        chartContext.fillText(data[index].label, x, height - 8);
+      }
+
+      if (pointer && pointer.x >= plot.left && pointer.x <= plot.right && pointer.y >= plot.top && pointer.y <= volumeBottom) {
+        const localIndex = clamp(Math.floor((pointer.x - plot.left) / barWidth), 0, data.length - 1);
+        const bar = data[localIndex];
+        const x = plot.left + barWidth * (localIndex + .5);
+        chartContext.strokeStyle = 'rgba(201,204,217,.48)';
+        chartContext.setLineDash([4, 4]);
+        chartContext.beginPath(); chartContext.moveTo(x, plot.top); chartContext.lineTo(x, volumeBottom); chartContext.stroke();
+        chartContext.beginPath(); chartContext.moveTo(plot.left, pointer.y); chartContext.lineTo(plot.right, pointer.y); chartContext.stroke();
+        chartContext.setLineDash([]);
+        legend.innerHTML = `<b>JBBJ</b><span>시 ${Math.round(bar.open).toLocaleString('ko-KR')}</span><span>고 ${Math.round(bar.high).toLocaleString('ko-KR')}</span><span>저 ${Math.round(bar.low).toLocaleString('ko-KR')}</span><span>종 ${Math.round(bar.close).toLocaleString('ko-KR')}</span><span>거래량 ${bar.volume.toLocaleString('ko-KR')}</span>`;
+      } else {
+        const bar = data[data.length - 1];
+        legend.innerHTML = `<b>JBBJ</b><span>시 ${Math.round(bar.open).toLocaleString('ko-KR')}</span><span>고 ${Math.round(bar.high).toLocaleString('ko-KR')}</span><span>저 ${Math.round(bar.low).toLocaleString('ko-KR')}</span><span>종 ${Math.round(bar.close).toLocaleString('ko-KR')}</span><span>거래량 ${bar.volume.toLocaleString('ko-KR')}</span>`;
+      }
+      chartCanvas.dataset.visibleStart = String(start);
+    }
+
+    function resetChart() { visibleBars = 74; offsetBars = 0; pointer = null; drawChart(); showToast('차트 위치와 확대 비율을 초기화했어요'); }
+
+    chartCanvas.addEventListener('wheel', (event) => {
+      event.preventDefault();
+      const direction = event.deltaY > 0 ? 7 : -7;
+      visibleBars = clamp(visibleBars + direction, 22, Math.min(150, series.length));
+      offsetBars = clamp(offsetBars, 0, Math.max(0, series.length - visibleBars));
+      drawChart();
+    }, { passive: false });
+    chartCanvas.addEventListener('pointerdown', (event) => {
+      dragging = true; dragStartX = event.clientX; dragStartOffset = offsetBars; chartCanvas.setPointerCapture(event.pointerId); chartCanvas.style.cursor = 'grabbing';
+    });
+    chartCanvas.addEventListener('pointermove', (event) => {
+      const bounds = chartCanvas.getBoundingClientRect();
+      pointer = { x: event.clientX - bounds.left, y: event.clientY - bounds.top };
+      if (dragging) {
+        const barsPerPixel = visibleBars / Math.max(1, bounds.width - 78);
+        offsetBars = clamp(Math.round(dragStartOffset + (event.clientX - dragStartX) * barsPerPixel), 0, Math.max(0, series.length - visibleBars));
+      }
+      drawChart();
+    });
+    chartCanvas.addEventListener('pointerup', (event) => { dragging = false; chartCanvas.releasePointerCapture(event.pointerId); chartCanvas.style.cursor = 'crosshair'; });
+    chartCanvas.addEventListener('pointercancel', () => { dragging = false; chartCanvas.style.cursor = 'crosshair'; });
+    chartCanvas.addEventListener('pointerleave', () => { if (!dragging) { pointer = null; drawChart(); } });
+    chartCanvas.addEventListener('dblclick', resetChart);
+
+    function quantity() { return clamp(Math.floor(Number(quantityInput.value) || 1), 1, 999999); }
+    function setQuantity(value) { quantityInput.value = String(clamp(Math.floor(value), 1, 999999)); updateOrder(); }
+    function updateOrder() {
+      const shares = quantity();
+      quantityInput.value = String(shares);
+      const total = shares * PRICE;
+      document.getElementById('sell-estimate').textContent = formatWon(total);
+      document.getElementById('buy-estimate').textContent = formatWon(total);
+      sellButton.disabled = shares > HOLDING;
+      buyButton.disabled = total > CASH;
+      const note = document.getElementById('order-note');
+      note.textContent = shares > HOLDING
+        ? `팔 수 있는 수량은 ${HOLDING}주예요. 사기는 계속 가능해요.`
+        : total > CASH
+          ? '예수금보다 큰 주문이에요. 수량을 줄여 주세요.'
+          : '실제 주문 전에는 현재 가격과 수량을 한 번 더 확인합니다.';
+      document.querySelectorAll('[data-quantity]').forEach((button) => {
+        const value = button.dataset.quantity === 'max' ? Math.floor(CASH / PRICE) : Number(button.dataset.quantity);
+        button.classList.toggle('active', value === shares);
+      });
+    }
+
+    document.getElementById('quantity-minus').addEventListener('click', () => setQuantity(quantity() - 1));
+    document.getElementById('quantity-plus').addEventListener('click', () => setQuantity(quantity() + 1));
+    quantityInput.addEventListener('input', updateOrder);
+    document.querySelectorAll('[data-quantity]').forEach((button) => button.addEventListener('click', () => {
+      setQuantity(button.dataset.quantity === 'max' ? Math.floor(CASH / PRICE) : Number(button.dataset.quantity));
+    }));
+
+    function openConfirm(side) {
+      const shares = quantity();
+      const total = shares * PRICE;
+      if (side === 'sell' && shares > HOLDING) { showToast(`판매 가능한 수량은 ${HOLDING}주예요`); return; }
+      if (side === 'buy' && total > CASH) { showToast('예수금이 부족해요'); return; }
+      activeSide = side;
+      const isBuy = side === 'buy';
+      document.getElementById('modal-title').textContent = `JBBJ ${shares}주 ${isBuy ? '사기' : '팔기'}`;
+      document.getElementById('modal-quantity').textContent = `${shares.toLocaleString('ko-KR')}주`;
+      document.getElementById('modal-total').textContent = formatWon(total);
+      document.getElementById('modal-after-label').textContent = isBuy ? '주문 후 예수금' : '주문 후 보유 수량';
+      document.getElementById('modal-after').textContent = isBuy ? formatWon(CASH - total) : `${HOLDING - shares}주`;
+      const confirm = document.getElementById('modal-confirm');
+      confirm.textContent = `확인하고 ${isBuy ? '사기' : '팔기'}`;
+      confirm.className = isBuy ? 'confirm-buy' : 'confirm-sell';
+      modal.classList.add('show');
+      confirm.focus();
+    }
+    function closeConfirm() { modal.classList.remove('show'); }
+    sellButton.addEventListener('click', () => openConfirm('sell'));
+    buyButton.addEventListener('click', () => openConfirm('buy'));
+    document.getElementById('modal-confirm').addEventListener('click', () => { closeConfirm(); showToast(`목업 확인: ${quantity()}주 ${activeSide === 'buy' ? '사기' : '팔기'} 흐름입니다`); });
+    modal.addEventListener('click', (event) => { if (event.target === modal) closeConfirm(); });
+    document.addEventListener('keydown', (event) => { if (event.key === 'Escape') closeConfirm(); });
+
+    document.getElementById('reset-chart').addEventListener('click', resetChart);
+    document.getElementById('interval-select').addEventListener('change', (event) => {
+      series = generateSeries(42013 + event.target.selectedIndex * 913);
+      resetChart(); showToast(`${event.target.options[event.target.selectedIndex].text} 간격으로 바꿨어요`);
+    });
+    document.getElementById('range-select').addEventListener('change', (event) => {
+      visibleBars = ({ today: 74, week: 92, month: 112, six: 132, all: 150 })[event.target.value] || 74;
+      offsetBars = 0; drawChart(); showToast(`${event.target.options[event.target.selectedIndex].text} 기간으로 바꿨어요`);
+    });
+    document.getElementById('style-select').addEventListener('change', (event) => { drawChart(); showToast(`${event.target.options[event.target.selectedIndex].text} 차트로 바꿨어요`); });
+    window.addEventListener('resize', resizeChart);
+
+    series = generateSeries();
+    updateOrder();
+    resizeChart();
+  </script>
+</body>
+</html>
