@@ -127,7 +127,7 @@ test('keyboard candle selection clamps arrows and supports Home and End', async 
   );
 
   const interactiveChart = readFileSync(INTERACTIVE_CHART_PATH, 'utf8');
-  assert.match(interactiveChart, /tabIndex=\{0\}/);
+  assert.match(interactiveChart, /tabIndex=\{chartError\s*\?\s*-1\s*:\s*0\}/);
   assert.match(interactiveChart, /onKeyDown=/);
   assert.match(interactiveChart, /resolveMarketChartKeyboardIndex\(/);
   assert.match(interactiveChart, /selectedSeriesKeyRef/);
@@ -137,6 +137,44 @@ test('keyboard candle selection clamps arrows and supports Home and End', async 
     assert.match(interactiveChart, new RegExp(instruction));
   }
   assert.doesNotMatch(interactiveChart, /type="range"/);
+});
+
+test('chart reset moves keyboard selection to the latest candle before ArrowLeft', async () => {
+  const chartUi = await import('../src/features/playground/market/marketChartUi.ts');
+  assert.equal(typeof chartUi.resolveMarketChartResetSelection, 'function');
+  const candles = Array.from({ length: 7 }, (_, index) => ({
+    startsAt: `candle-${index + 1}`,
+  }));
+  let selectedIndex = 4;
+
+  const resetSelection = chartUi.resolveMarketChartResetSelection(candles);
+  selectedIndex = resetSelection.selectedIndex;
+
+  assert.deepEqual(resetSelection, {
+    selectedIndex: 6,
+    selectedCandle: candles[6],
+  });
+  assert.equal(
+    chartUi.resolveMarketChartKeyboardIndex(selectedIndex, candles.length, 'ArrowLeft'),
+    5,
+    'the first ArrowLeft after reset must move from latest to latest - 1',
+  );
+
+  const interactiveChart = readFileSync(INTERACTIVE_CHART_PATH, 'utf8');
+  assert.match(interactiveChart, /resolveMarketChartResetSelection\(candles\)/);
+  assert.match(interactiveChart, /selectedCandleStartsAtRef\.current\s*=\s*resetSelection\.selectedCandle\?\.startsAt\s*\?\?\s*null/);
+  assert.match(interactiveChart, /selectedSeriesKeyRef\.current\s*=\s*seriesKey/);
+  assert.match(interactiveChart, /selectedIndexRef\.current\s*=\s*resetSelection\.selectedIndex/);
+  assert.match(interactiveChart, /setSelectedIndex\(resetSelection\.selectedIndex\)/);
+  assert.match(interactiveChart, /selectedCandleCallbackRef\.current\(resetSelection\.selectedCandle\)/);
+});
+
+test('chart error overlay hides the underlying chart region from keyboard and accessibility order', () => {
+  const interactiveChart = readFileSync(INTERACTIVE_CHART_PATH, 'utf8');
+
+  assert.match(interactiveChart, /tabIndex=\{chartError\s*\?\s*-1\s*:\s*0\}/);
+  assert.match(interactiveChart, /aria-hidden=\{chartError\s*\?\s*true\s*:\s*undefined\}/);
+  assert.match(interactiveChart, /chartError\s*\?\s*\([\s\S]*?role="alert"[\s\S]*?<button[\s\S]*?차트 다시 불러오기/);
 });
 
 test('long-range display candles use exact daily engine checkpoints', async () => {

@@ -15,6 +15,7 @@ import {
 import {
   resolveMarketChartFitDecision,
   resolveMarketChartKeyboardIndex,
+  resolveMarketChartResetSelection,
   resolveMarketChartSelectedIndex,
 } from '@/features/playground/market/marketChartUi';
 import type {
@@ -235,12 +236,18 @@ export function MarketInteractiveChart({
   useEffect(() => {
     if (handledResetKeyRef.current === resetKey) return;
     handledResetKeyRef.current = resetKey;
+    const resetSelection = resolveMarketChartResetSelection(candles);
+    selectedCandleStartsAtRef.current = resetSelection.selectedCandle?.startsAt ?? null;
+    selectedSeriesKeyRef.current = seriesKey;
+    selectedIndexRef.current = resetSelection.selectedIndex;
+    setSelectedIndex(resetSelection.selectedIndex);
+    selectedCandleCallbackRef.current(resetSelection.selectedCandle);
     try {
       adapterRef.current?.fitContent();
     } catch {
       setChartError('차트를 불러오지 못했어요');
     }
-  }, [resetKey]);
+  }, [candles, resetKey, seriesKey]);
 
   const fitChartContent = () => {
     try {
@@ -278,7 +285,8 @@ export function MarketInteractiveChart({
         key={retryKey}
         ref={containerRef}
         role="region"
-        tabIndex={0}
+        tabIndex={chartError ? -1 : 0}
+        aria-hidden={chartError ? true : undefined}
         aria-label={`${stockName} 가격과 거래량 차트, ${selectedIndex + 1}/${candles.length}번째 봉`}
         aria-describedby="market-chart-keyboard-help"
         onKeyDown={selectCandleFromKeyboard}

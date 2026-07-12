@@ -33,6 +33,21 @@ export function resolveMarketChartKeyboardIndex(
   return null;
 }
 
+export interface MarketChartResetSelection<T> {
+  selectedIndex: number;
+  selectedCandle: T | null;
+}
+
+export function resolveMarketChartResetSelection<T>(
+  candles: readonly T[],
+): MarketChartResetSelection<T> {
+  const selectedIndex = Math.max(0, candles.length - 1);
+  return {
+    selectedIndex,
+    selectedCandle: candles[selectedIndex] ?? null,
+  };
+}
+
 export interface MarketChartSelectionDecision {
   selectedIndex: number;
   resetSelection: boolean;
