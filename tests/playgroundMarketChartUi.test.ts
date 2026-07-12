@@ -601,6 +601,331 @@ test('completed display bars are cached but the forming bar is resampled', async
   assert.ok((second.at(-1)?.volumeShares ?? -1) >= (first.at(-1)?.volumeShares ?? 0));
 });
 
+function createFakeLightweightChartsRuntime() {
+  const state = {
+    container: null as unknown,
+    createOptions: null as unknown,
+    chartApplyOptions: [] as unknown[],
+    resizeCalls: [] as Array<readonly [number, number]>,
+    series: [] as Array<{
+      definition: unknown;
+      options: unknown;
+      paneIndex: number | undefined;
+      setDataCalls: unknown[][];
+      updateCalls: unknown[];
+      applyOptionsCalls: unknown[];
+    }>,
+    removedSeries: [] as unknown[],
+    subscribeCalls: 0,
+    unsubscribeCalls: 0,
+    subscribedHandler: null as null | ((event: { time?: unknown }) => void),
+    unsubscribedHandler: null as null | ((event: { time?: unknown }) => void),
+    visibleLogicalRange: null as null | { from: number; to: number },
+    setVisibleLogicalRangeCalls: [] as Array<{ from: number; to: number }>,
+    fitContentCalls: 0,
+    removeCalls: 0,
+  };
+  const definitions = {
+    LineSeries: { kind: 'line' },
+    CandlestickSeries: { kind: 'candlestick' },
+    HistogramSeries: { kind: 'histogram' },
+  };
+  const timeScale = {
+    getVisibleLogicalRange() {
+      return state.visibleLogicalRange;
+    },
+    setVisibleLogicalRange(range: { from: number; to: number }) {
+      state.setVisibleLogicalRangeCalls.push(range);
+    },
+    fitContent() {
+      state.fitContentCalls += 1;
+    },
+  };
+  const chart = {
+    addSeries(definition: unknown, options: unknown, paneIndex?: number) {
+      const series = {
+        definition,
+        options,
+        paneIndex,
+        setDataCalls: [] as unknown[][],
+        updateCalls: [] as unknown[],
+        applyOptionsCalls: [] as unknown[],
+        setData(data: unknown[]) {
+          series.setDataCalls.push(data);
+        },
+        update(point: unknown) {
+          series.updateCalls.push(point);
+        },
+        applyOptions(nextOptions: unknown) {
+          series.applyOptionsCalls.push(nextOptions);
+        },
+      };
+      state.series.push(series);
+      return series;
+    },
+    removeSeries(series: unknown) {
+      state.removedSeries.push(series);
+    },
+    subscribeCrosshairMove(handler: (event: { time?: unknown }) => void) {
+      state.subscribeCalls += 1;
+      state.subscribedHandler = handler;
+    },
+    unsubscribeCrosshairMove(handler: (event: { time?: unknown }) => void) {
+      state.unsubscribeCalls += 1;
+      state.unsubscribedHandler = handler;
+    },
+    applyOptions(options: unknown) {
+      state.chartApplyOptions.push(options);
+    },
+    resize(width: number, height: number) {
+      state.resizeCalls.push([width, height]);
+    },
+    timeScale() {
+      return timeScale;
+    },
+    remove() {
+      state.removeCalls += 1;
+    },
+  };
+  const runtime = {
+    ...definitions,
+    createChart(container: unknown, options: unknown) {
+      state.container = container;
+      state.createOptions = options;
+      return chart;
+    },
+  };
+
+  return { chart, definitions, runtime, state };
+}
+
+const MARKET_CHART_THEME = {
+  backgroundColor: 'rgb(15 17 23)',
+  textColor: 'rgb(232 232 238)',
+  gridColor: 'rgb(45 48 65 / 0.55)',
+  borderColor: 'rgb(45 48 65)',
+  marketUpColor: 'rgb(244 124 103)',
+  marketDownColor: 'rgb(100 160 235)',
+  marketFlatColor: 'rgb(157 163 173)',
+};
+
+function createAdapterCandles() {
+  return [{
+    startsAt: '2026-07-13T00:00:00.900Z',
+    openWon: 1000,
+    highWon: 1120,
+    lowWon: 980,
+    closeWon: 1100,
+    volumeShares: 500,
+    newsIds: [],
+  }, {
+    startsAt: '2026-07-13T00:01:00.100Z',
+    openWon: 1100,
+    highWon: 1110,
+    lowWon: 1010,
+    closeWon: 1020,
+    volumeShares: 700,
+    newsIds: [],
+  }];
+}
+
+test('Lightweight Charts adapter configures v5 interactions and maps only safe UTC candles', async () => {
+  const { createMarketChartAdapter } = await import(
+    '../src/features/playground/market/marketChartAdapter.ts'
+  );
+  const fake = createFakeLightweightChartsRuntime();
+  const container = {} as HTMLElement;
+  const safeCandles = createAdapterCandles();
+  const candles = [...safeCandles, {
+    ...safeCandles[1],
+    startsAt: 'not-a-date',
+  }, {
+    ...safeCandles[1],
+    startsAt: '2026-07-13T00:02:00Z',
+    closeWon: Number.MAX_SAFE_INTEGER + 1,
+  }];
+  const adapter = createMarketChartAdapter({
+    container,
+    runtime: fake.runtime as never,
+    theme: MARKET_CHART_THEME,
+    onCrosshairCandle: () => {},
+  });
+
+  adapter.render({ candles, style: 'line', fitContent: false });
+
+  assert.equal(fake.state.container, container);
+  assert.deepEqual(fake.state.createOptions, {
+    layout: {
+      background: { type: 'solid', color: MARKET_CHART_THEME.backgroundColor },
+      textColor: MARKET_CHART_THEME.textColor,
+      attributionLogo: true,
+    },
+    grid: {
+      vertLines: { color: MARKET_CHART_THEME.gridColor },
+      horzLines: { color: MARKET_CHART_THEME.gridColor },
+    },
+    rightPriceScale: { borderColor: MARKET_CHART_THEME.borderColor },
+    timeScale: { borderColor: MARKET_CHART_THEME.borderColor },
+    handleScroll: {
+      mouseWheel: true,
+      pressedMouseMove: true,
+      horzTouchDrag: true,
+      vertTouchDrag: false,
+    },
+    handleScale: {
+      mouseWheel: true,
+      pinch: true,
+      axisPressedMouseMove: { time: true, price: true },
+      axisDoubleClickReset: true,
+    },
+  });
+  const lineSeries = fake.state.series.find(
+    (series) => series.definition === fake.definitions.LineSeries,
+  );
+  const volumeSeries = fake.state.series.find(
+    (series) => series.definition === fake.definitions.HistogramSeries,
+  );
+  assert.ok(lineSeries);
+  assert.ok(volumeSeries);
+  assert.equal(lineSeries.paneIndex, 0);
+  assert.equal(volumeSeries.paneIndex, 1);
+  assert.deepEqual(lineSeries.options, { color: MARKET_CHART_THEME.marketFlatColor });
+  assert.deepEqual(volumeSeries.options, {
+    priceFormat: { type: 'volume' },
+    priceScaleId: 'volume',
+  });
+  const times = safeCandles.map((candle) => Math.floor(Date.parse(candle.startsAt) / 1000));
+  assert.deepEqual(lineSeries.setDataCalls, [[
+    { time: times[0], value: 1100 },
+    { time: times[1], value: 1020 },
+  ]]);
+  assert.deepEqual(volumeSeries.setDataCalls, [[
+    { time: times[0], value: 500, color: MARKET_CHART_THEME.marketUpColor },
+    { time: times[1], value: 700, color: MARKET_CHART_THEME.marketDownColor },
+  ]]);
+});
+
+test('Lightweight Charts adapter updates the last bar and preserves range across style changes', async () => {
+  const { createMarketChartAdapter } = await import(
+    '../src/features/playground/market/marketChartAdapter.ts'
+  );
+  const fake = createFakeLightweightChartsRuntime();
+  const adapter = createMarketChartAdapter({
+    container: {} as HTMLElement,
+    runtime: fake.runtime as never,
+    theme: MARKET_CHART_THEME,
+    onCrosshairCandle: () => {},
+  });
+  const initial = createAdapterCandles();
+  adapter.render({ candles: initial, style: 'line', fitContent: false });
+  const lineSeries = fake.state.series.find(
+    (series) => series.definition === fake.definitions.LineSeries,
+  );
+  const volumeSeries = fake.state.series.find(
+    (series) => series.definition === fake.definitions.HistogramSeries,
+  );
+  assert.ok(lineSeries);
+  assert.ok(volumeSeries);
+
+  const updated = [initial[0], {
+    ...initial[1],
+    highWon: 1140,
+    closeWon: 1130,
+    volumeShares: 900,
+  }];
+  adapter.render({ candles: updated, style: 'line', fitContent: false });
+  const lastTime = Math.floor(Date.parse(updated[1].startsAt) / 1000);
+  assert.deepEqual(lineSeries.updateCalls, [{ time: lastTime, value: 1130 }]);
+  assert.deepEqual(volumeSeries.updateCalls, [{
+    time: lastTime,
+    value: 900,
+    color: MARKET_CHART_THEME.marketUpColor,
+  }]);
+  assert.equal(lineSeries.setDataCalls.length, 1);
+  assert.equal(volumeSeries.setDataCalls.length, 1);
+
+  fake.state.visibleLogicalRange = { from: 4.5, to: 18.5 };
+  adapter.render({ candles: updated, style: 'candlestick', fitContent: false });
+  const candlestickSeries = fake.state.series.find(
+    (series) => series.definition === fake.definitions.CandlestickSeries,
+  );
+  assert.ok(candlestickSeries);
+  assert.equal(candlestickSeries.paneIndex, 0);
+  assert.deepEqual(candlestickSeries.setDataCalls.at(-1), updated.map((candle) => ({
+    time: Math.floor(Date.parse(candle.startsAt) / 1000),
+    open: candle.openWon,
+    high: candle.highWon,
+    low: candle.lowWon,
+    close: candle.closeWon,
+  })));
+  assert.deepEqual(fake.state.removedSeries, [lineSeries]);
+  assert.deepEqual(fake.state.setVisibleLogicalRangeCalls, [{ from: 4.5, to: 18.5 }]);
+
+  const nextTheme = {
+    ...MARKET_CHART_THEME,
+    marketUpColor: 'rgb(200 20 10)',
+    marketDownColor: 'rgb(10 20 200)',
+  };
+  adapter.applyTheme(nextTheme);
+  assert.deepEqual(candlestickSeries.applyOptionsCalls.at(-1), {
+    upColor: nextTheme.marketUpColor,
+    downColor: nextTheme.marketDownColor,
+    borderUpColor: nextTheme.marketUpColor,
+    borderDownColor: nextTheme.marketDownColor,
+    wickUpColor: nextTheme.marketUpColor,
+    wickDownColor: nextTheme.marketDownColor,
+  });
+  assert.deepEqual(volumeSeries.setDataCalls.at(-1), updated.map((candle) => ({
+    time: Math.floor(Date.parse(candle.startsAt) / 1000),
+    value: candle.volumeShares,
+    color: candle.closeWon >= candle.openWon
+      ? nextTheme.marketUpColor
+      : nextTheme.marketDownColor,
+  })));
+
+  adapter.resize(960, 360);
+  adapter.fitContent();
+  adapter.render({ candles: updated, style: 'candlestick', fitContent: true });
+  assert.deepEqual(fake.state.resizeCalls, [[960, 360]]);
+  assert.equal(fake.state.fitContentCalls, 2);
+});
+
+test('Lightweight Charts adapter selects crosshair candles and destroys owned resources once', async () => {
+  const { createMarketChartAdapter } = await import(
+    '../src/features/playground/market/marketChartAdapter.ts'
+  );
+  const fake = createFakeLightweightChartsRuntime();
+  const selections: unknown[] = [];
+  const candles = createAdapterCandles();
+  const adapter = createMarketChartAdapter({
+    container: {} as HTMLElement,
+    runtime: fake.runtime as never,
+    theme: MARKET_CHART_THEME,
+    onCrosshairCandle: (candle) => selections.push(candle),
+  });
+  adapter.render({ candles, style: 'line', fitContent: false });
+  const selectedTime = Math.floor(Date.parse(candles[1].startsAt) / 1000);
+
+  assert.equal(fake.state.subscribeCalls, 1);
+  assert.ok(fake.state.subscribedHandler);
+  fake.state.subscribedHandler({ time: selectedTime });
+  fake.state.subscribedHandler({});
+  assert.deepEqual(selections, [candles[1], null]);
+
+  const ownedSeries = [...fake.state.series];
+  adapter.destroy();
+  adapter.destroy();
+  assert.equal(fake.state.unsubscribeCalls, 1);
+  assert.equal(fake.state.unsubscribedHandler, fake.state.subscribedHandler);
+  assert.equal(fake.state.removeCalls, 1);
+  for (const series of ownedSeries) {
+    assert.equal(
+      fake.state.removedSeries.filter((removed) => removed === series).length,
+      1,
+    );
+  }
+});
+
 test('chart UI helpers cap bars, select the nearest bar, and describe OHLC text', async () => {
   assert.equal(existsSync(CHART_UI_PATH), true, 'testable chart UI helpers must exist');
   const chartUi = await import('../src/features/playground/market/marketChartUi.ts');

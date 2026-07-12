@@ -3,6 +3,45 @@ import type { MarketCandle } from './types';
 
 export const MAX_MARKET_CHART_BARS = 1500;
 
+export interface SafeMarketChartCandle {
+  candle: MarketCandle;
+  utcSeconds: number;
+}
+
+function isSafePositiveInteger(value: number): boolean {
+  return Number.isSafeInteger(value) && value > 0;
+}
+
+export function toSafeMarketChartCandle(
+  candle: MarketCandle,
+): SafeMarketChartCandle | null {
+  const startsAtMs = Date.parse(candle.startsAt);
+  const utcSeconds = Math.floor(startsAtMs / 1000);
+  const safePrices = [
+    candle.openWon,
+    candle.highWon,
+    candle.lowWon,
+    candle.closeWon,
+  ].every(isSafePositiveInteger);
+  const safeVolume = Number.isSafeInteger(candle.volumeShares)
+    && candle.volumeShares >= 0;
+  const safeShape = candle.highWon >= Math.max(candle.openWon, candle.closeWon)
+    && candle.lowWon <= Math.min(candle.openWon, candle.closeWon)
+    && candle.highWon >= candle.lowWon;
+
+  if (
+    !Number.isFinite(startsAtMs)
+    || !Number.isSafeInteger(utcSeconds)
+    || !safePrices
+    || !safeVolume
+    || !safeShape
+  ) {
+    return null;
+  }
+
+  return { candle, utcSeconds };
+}
+
 export function limitMarketChartCandles(
   candles: readonly MarketCandle[],
 ): readonly MarketCandle[] {
