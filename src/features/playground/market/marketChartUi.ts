@@ -3,6 +3,58 @@ import type { MarketCandle } from './types';
 
 export const MAX_MARKET_CHART_BARS = 1500;
 
+export interface MarketChartFitDecision {
+  fitContent: boolean;
+  fittedKey: string | null;
+}
+
+export function resolveMarketChartFitDecision(
+  fittedKey: string | null,
+  completedSeriesKey: string | null,
+): MarketChartFitDecision {
+  if (completedSeriesKey === null || completedSeriesKey === fittedKey) {
+    return { fitContent: false, fittedKey };
+  }
+  return { fitContent: true, fittedKey: completedSeriesKey };
+}
+
+export function resolveMarketChartKeyboardIndex(
+  currentIndex: number,
+  candleCount: number,
+  key: string,
+): number | null {
+  if (candleCount <= 0) return null;
+  const lastIndex = candleCount - 1;
+  const safeCurrentIndex = Math.min(lastIndex, Math.max(0, currentIndex));
+  if (key === 'ArrowLeft') return Math.max(0, safeCurrentIndex - 1);
+  if (key === 'ArrowRight') return Math.min(lastIndex, safeCurrentIndex + 1);
+  if (key === 'Home') return 0;
+  if (key === 'End') return lastIndex;
+  return null;
+}
+
+export interface MarketChartSelectionDecision {
+  selectedIndex: number;
+  resetSelection: boolean;
+}
+
+export function resolveMarketChartSelectedIndex(
+  candles: readonly Pick<MarketCandle, 'startsAt'>[],
+  selectedStartsAt: string | null,
+  preserveSelection: boolean,
+): MarketChartSelectionDecision {
+  if (preserveSelection && selectedStartsAt !== null) {
+    const matchingIndex = candles.findIndex((candle) => candle.startsAt === selectedStartsAt);
+    if (matchingIndex >= 0) {
+      return { selectedIndex: matchingIndex, resetSelection: false };
+    }
+  }
+  return {
+    selectedIndex: Math.max(0, candles.length - 1),
+    resetSelection: !preserveSelection || selectedStartsAt !== null,
+  };
+}
+
 export interface SafeMarketChartCandle {
   candle: MarketCandle;
   utcSeconds: number;

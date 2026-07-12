@@ -56,6 +56,89 @@ test('range compatibility promotes overly dense intervals', () => {
   assert.equal(resolveIntervalForRange('all', '1m'), '1d');
 });
 
+test('progressive chart fit waits for completion and runs once per completed series key', async () => {
+  const chartUi = await import('../src/features/playground/market/marketChartUi.ts');
+  assert.equal(typeof chartUi.resolveMarketChartFitDecision, 'function');
+
+  assert.deepEqual(chartUi.resolveMarketChartFitDecision(null, null), {
+    fitContent: false,
+    fittedKey: null,
+  });
+  assert.deepEqual(chartUi.resolveMarketChartFitDecision(null, 'week-ready'), {
+    fitContent: true,
+    fittedKey: 'week-ready',
+  });
+  assert.deepEqual(chartUi.resolveMarketChartFitDecision('week-ready', null), {
+    fitContent: false,
+    fittedKey: 'week-ready',
+  });
+  assert.deepEqual(chartUi.resolveMarketChartFitDecision('week-ready', 'week-ready'), {
+    fitContent: false,
+    fittedKey: 'week-ready',
+  });
+  assert.deepEqual(chartUi.resolveMarketChartFitDecision('week-ready', 'month-ready'), {
+    fitContent: true,
+    fittedKey: 'month-ready',
+  });
+
+  const priceChart = readFileSync(PRICE_CHART_PATH, 'utf8');
+  const interactiveChart = readFileSync(INTERACTIVE_CHART_PATH, 'utf8');
+  assert.match(priceChart, /interface ProgressiveSeriesState[\s\S]*complete:\s*boolean/);
+  assert.match(priceChart, /complete:\s*false/);
+  assert.match(priceChart, /complete:\s*true/);
+  assert.match(priceChart, /fitContentKey=\{completedSeriesKey\}/);
+  assert.match(interactiveChart, /resolveMarketChartFitDecision/);
+  assert.match(interactiveChart, /fitContentKey:\s*string\s*\|\s*null/);
+  assert.doesNotMatch(interactiveChart, /renderedRangeRef/);
+});
+
+test('keyboard candle selection clamps arrows and supports Home and End', async () => {
+  const chartUi = await import('../src/features/playground/market/marketChartUi.ts');
+  assert.equal(typeof chartUi.resolveMarketChartKeyboardIndex, 'function');
+  assert.equal(chartUi.resolveMarketChartKeyboardIndex(2, 5, 'ArrowLeft'), 1);
+  assert.equal(chartUi.resolveMarketChartKeyboardIndex(2, 5, 'ArrowRight'), 3);
+  assert.equal(chartUi.resolveMarketChartKeyboardIndex(0, 5, 'ArrowLeft'), 0);
+  assert.equal(chartUi.resolveMarketChartKeyboardIndex(4, 5, 'ArrowRight'), 4);
+  assert.equal(chartUi.resolveMarketChartKeyboardIndex(3, 5, 'Home'), 0);
+  assert.equal(chartUi.resolveMarketChartKeyboardIndex(1, 5, 'End'), 4);
+  assert.equal(chartUi.resolveMarketChartKeyboardIndex(2, 5, 'Enter'), null);
+  assert.equal(chartUi.resolveMarketChartKeyboardIndex(0, 0, 'ArrowRight'), null);
+  assert.equal(typeof chartUi.resolveMarketChartSelectedIndex, 'function');
+  const selectionCandles = [
+    { startsAt: 'first' },
+    { startsAt: 'shared' },
+    { startsAt: 'latest' },
+  ] as never;
+  assert.deepEqual(
+    chartUi.resolveMarketChartSelectedIndex(selectionCandles, 'shared', true),
+    { selectedIndex: 1, resetSelection: false },
+  );
+  assert.deepEqual(
+    chartUi.resolveMarketChartSelectedIndex(selectionCandles, 'shared', false),
+    { selectedIndex: 2, resetSelection: true },
+  );
+  assert.deepEqual(
+    chartUi.resolveMarketChartSelectedIndex(selectionCandles, 'missing', true),
+    { selectedIndex: 2, resetSelection: true },
+  );
+  assert.deepEqual(
+    chartUi.resolveMarketChartSelectedIndex(selectionCandles, null, true),
+    { selectedIndex: 2, resetSelection: false },
+  );
+
+  const interactiveChart = readFileSync(INTERACTIVE_CHART_PATH, 'utf8');
+  assert.match(interactiveChart, /tabIndex=\{0\}/);
+  assert.match(interactiveChart, /onKeyDown=/);
+  assert.match(interactiveChart, /resolveMarketChartKeyboardIndex\(/);
+  assert.match(interactiveChart, /selectedSeriesKeyRef/);
+  assert.match(interactiveChart, /resolveMarketChartSelectedIndex\(/);
+  assert.match(interactiveChart, /aria-describedby="market-chart-keyboard-help"/);
+  for (const instruction of ['왼쪽', '오른쪽', 'Home', 'End']) {
+    assert.match(interactiveChart, new RegExp(instruction));
+  }
+  assert.doesNotMatch(interactiveChart, /type="range"/);
+});
+
 test('long-range display candles use exact daily engine checkpoints', async () => {
   assert.equal(existsSync(DISPLAY_SERIES_PATH), true, 'display candle fast path must exist');
   const displaySeries = await import('../src/features/playground/market/marketDisplaySeries.ts');
@@ -753,7 +836,7 @@ test('Lightweight Charts adapter configures v5 interactions and maps only safe U
     onCrosshairCandle: () => {},
   });
 
-  adapter.render({ candles, style: 'line', fitContent: false });
+  adapter.render({ candles, style: 'line', fitContent: false, seriesKey: 'test-series' });
 
   assert.equal(fake.state.container, container);
   assert.deepEqual(fake.state.createOptions, {
@@ -807,6 +890,52 @@ test('Lightweight Charts adapter configures v5 interactions and maps only safe U
   ]]);
 });
 
+test('Lightweight Charts adapter removes the chart when volume-series initialization throws', async () => {
+  const { createMarketChartAdapter } = await import(
+    '../src/features/playground/market/marketChartAdapter.ts'
+  );
+  const fake = createFakeLightweightChartsRuntime();
+  const originalAddSeries = fake.chart.addSeries.bind(fake.chart);
+  fake.chart.addSeries = (definition: unknown, options: unknown, paneIndex?: number) => {
+    if (definition === fake.definitions.HistogramSeries) {
+      throw new Error('volume init failed');
+    }
+    return originalAddSeries(definition, options, paneIndex);
+  };
+
+  assert.throws(() => createMarketChartAdapter({
+    container: {} as HTMLElement,
+    runtime: fake.runtime as never,
+    theme: MARKET_CHART_THEME,
+  }), /volume init failed/);
+  assert.equal(fake.state.subscribeCalls, 0);
+  assert.equal(fake.state.unsubscribeCalls, 0);
+  assert.equal(fake.state.removedSeries.length, 0);
+  assert.equal(fake.state.removeCalls, 1);
+});
+
+test('Lightweight Charts adapter cleans the volume series when crosshair subscription throws', async () => {
+  const { createMarketChartAdapter } = await import(
+    '../src/features/playground/market/marketChartAdapter.ts'
+  );
+  const fake = createFakeLightweightChartsRuntime();
+  fake.chart.subscribeCrosshairMove = (handler: (event: { time?: unknown }) => void) => {
+    fake.state.subscribeCalls += 1;
+    fake.state.subscribedHandler = handler;
+    throw new Error('subscribe init failed');
+  };
+
+  assert.throws(() => createMarketChartAdapter({
+    container: {} as HTMLElement,
+    runtime: fake.runtime as never,
+    theme: MARKET_CHART_THEME,
+  }), /subscribe init failed/);
+  assert.equal(fake.state.subscribeCalls, 1);
+  assert.equal(fake.state.unsubscribeCalls, 1);
+  assert.deepEqual(fake.state.removedSeries, [fake.state.series[0]]);
+  assert.equal(fake.state.removeCalls, 1);
+});
+
 test('Lightweight Charts adapter updates the last bar and preserves range across style changes', async () => {
   const { createMarketChartAdapter } = await import(
     '../src/features/playground/market/marketChartAdapter.ts'
@@ -819,7 +948,7 @@ test('Lightweight Charts adapter updates the last bar and preserves range across
     onCrosshairCandle: () => {},
   });
   const initial = createAdapterCandles();
-  adapter.render({ candles: initial, style: 'line', fitContent: false });
+  adapter.render({ candles: initial, style: 'line', fitContent: false, seriesKey: 'test-series' });
   const lineSeries = fake.state.series.find(
     (series) => series.definition === fake.definitions.LineSeries,
   );
@@ -835,7 +964,7 @@ test('Lightweight Charts adapter updates the last bar and preserves range across
     closeWon: 1130,
     volumeShares: 900,
   }];
-  adapter.render({ candles: updated, style: 'line', fitContent: false });
+  adapter.render({ candles: updated, style: 'line', fitContent: false, seriesKey: 'test-series' });
   const lastTime = Math.floor(Date.parse(updated[1].startsAt) / 1000);
   assert.deepEqual(lineSeries.updateCalls, [{ time: lastTime, value: 1130 }]);
   assert.deepEqual(volumeSeries.updateCalls, [{
@@ -847,7 +976,7 @@ test('Lightweight Charts adapter updates the last bar and preserves range across
   assert.equal(volumeSeries.setDataCalls.length, 1);
 
   fake.state.visibleLogicalRange = { from: 4.5, to: 18.5 };
-  adapter.render({ candles: updated, style: 'candlestick', fitContent: false });
+  adapter.render({ candles: updated, style: 'candlestick', fitContent: false, seriesKey: 'test-series' });
   const candlestickSeries = fake.state.series.find(
     (series) => series.definition === fake.definitions.CandlestickSeries,
   );
@@ -887,9 +1016,48 @@ test('Lightweight Charts adapter updates the last bar and preserves range across
 
   adapter.resize(960, 360);
   adapter.fitContent();
-  adapter.render({ candles: updated, style: 'candlestick', fitContent: true });
+  adapter.render({ candles: updated, style: 'candlestick', fitContent: true, seriesKey: 'test-series' });
   assert.deepEqual(fake.state.resizeCalls, [[960, 360]]);
   assert.equal(fake.state.fitContentCalls, 2);
+});
+
+test('Lightweight Charts adapter forces setData when the series identity changes', async () => {
+  const { createMarketChartAdapter } = await import(
+    '../src/features/playground/market/marketChartAdapter.ts'
+  );
+  const fake = createFakeLightweightChartsRuntime();
+  const adapter = createMarketChartAdapter({
+    container: {} as HTMLElement,
+    runtime: fake.runtime as never,
+    theme: MARKET_CHART_THEME,
+  });
+  const initial = createAdapterCandles();
+  const updated = [initial[0], {
+    ...initial[1],
+    highWon: 1150,
+    closeWon: 1140,
+  }];
+
+  adapter.render({
+    candles: initial,
+    style: 'line',
+    fitContent: false,
+    seriesKey: 'today::1m::request-a',
+  });
+  const lineSeries = fake.state.series.find(
+    (series) => series.definition === fake.definitions.LineSeries,
+  );
+  assert.ok(lineSeries);
+
+  adapter.render({
+    candles: updated,
+    style: 'line',
+    fitContent: false,
+    seriesKey: 'week::10m::request-b',
+  });
+
+  assert.equal(lineSeries.setDataCalls.length, 2);
+  assert.equal(lineSeries.updateCalls.length, 0);
 });
 
 test('Lightweight Charts adapter selects crosshair candles and destroys owned resources once', async () => {
@@ -905,7 +1073,7 @@ test('Lightweight Charts adapter selects crosshair candles and destroys owned re
     theme: MARKET_CHART_THEME,
     onCrosshairCandle: (candle) => selections.push(candle),
   });
-  adapter.render({ candles, style: 'line', fitContent: false });
+  adapter.render({ candles, style: 'line', fitContent: false, seriesKey: 'test-series' });
   const selectedTime = Math.floor(Date.parse(candles[1].startsAt) / 1000);
 
   assert.equal(fake.state.subscribeCalls, 1);
@@ -960,7 +1128,7 @@ test('chart UI helpers cap bars, select the nearest bar, and describe OHLC text'
   }
 });
 
-test('React chart boundary owns one adapter, resize observer, render path, and ordered cleanup', () => {
+test('React chart boundary owns one adapter, observers, keyed render path, and ordered cleanup', () => {
   assert.equal(existsSync(INTERACTIVE_CHART_PATH), true, 'interactive market chart must exist');
   const source = readFileSync(INTERACTIVE_CHART_PATH, 'utf8');
 
@@ -969,11 +1137,15 @@ test('React chart boundary owns one adapter, resize observer, render path, and o
   assert.match(source, /observer\.observe\(/);
   assert.match(source, /adapter\.render\(\{[\s\S]*?candles,[\s\S]*?style,[\s\S]*?fitContent/s);
   assert.match(source, /onCrosshairCandle/);
-  assert.match(source, /interval/);
-  assert.match(source, /range/);
+  assert.match(source, /seriesKey/);
+  assert.match(source, /fitContentKey/);
   const disconnect = source.indexOf('observer?.disconnect()');
+  const themeDisconnect = source.indexOf('themeObserver?.disconnect()');
   const destroy = source.indexOf('adapter?.destroy()');
-  assert.ok(disconnect >= 0 && disconnect < destroy, 'observer disconnects before adapter destroy');
+  assert.ok(
+    disconnect >= 0 && disconnect < themeDisconnect && themeDisconnect < destroy,
+    'resize and theme observers disconnect before adapter destroy',
+  );
   assert.equal((source.match(/adapter\?\.destroy\(\)/g) ?? []).length, 1);
 });
 
@@ -999,6 +1171,12 @@ test('interactive chart uses semantic theme colors and recovers locally with a r
   assert.match(source, /role="alert"/);
   assert.match(source, /fitContent\(\)/);
   assert.match(source, /onDoubleClick/);
+  assert.equal((source.match(/new MutationObserver\(/g) ?? []).length, 1);
+  assert.match(source, /themeObserver\.observe\(document\.documentElement/);
+  for (const attribute of ['class', 'style', 'data-color-mode']) {
+    assert.match(source, new RegExp(`['"]${attribute}['"]`));
+  }
+  assert.match(source, /themeObserver\?\.disconnect\(\)/);
 });
 
 test('price chart owns three labelled selects, selected OHLCV live text, and reset', () => {

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { type KeyboardEvent, useEffect, useRef, useState } from 'react';
 import {
   CandlestickSeries,
   createChart,
@@ -12,10 +12,13 @@ import {
   type MarketChartRuntime,
   type MarketChartTheme,
 } from '@/features/playground/market/marketChartAdapter';
+import {
+  resolveMarketChartFitDecision,
+  resolveMarketChartKeyboardIndex,
+  resolveMarketChartSelectedIndex,
+} from '@/features/playground/market/marketChartUi';
 import type {
-  MarketBarInterval,
   MarketCandle,
-  MarketChartRange,
   MarketChartStyle,
 } from '@/features/playground/market/types';
 
@@ -23,8 +26,8 @@ interface MarketInteractiveChartProps {
   stockName: string;
   candles: readonly MarketCandle[];
   style: MarketChartStyle;
-  interval: MarketBarInterval;
-  range: MarketChartRange;
+  seriesKey: string;
+  fitContentKey: string | null;
   resetKey: number;
   onSelectedCandle(candle: MarketCandle | null): void;
 }
@@ -70,20 +73,45 @@ export function MarketInteractiveChart({
   stockName,
   candles,
   style,
-  interval,
-  range,
+  seriesKey,
+  fitContentKey,
   resetKey,
   onSelectedCandle,
 }: MarketInteractiveChartProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const adapterRef = useRef<MarketChartAdapter | null>(null);
   const selectedCandleCallbackRef = useRef(onSelectedCandle);
-  const renderedRangeRef = useRef<MarketChartRange | null>(null);
+  const candlesRef = useRef(candles);
+  const selectedCandleStartsAtRef = useRef<string | null>(null);
+  const selectedSeriesKeyRef = useRef(seriesKey);
+  const initialSelectedIndex = Math.max(0, candles.length - 1);
+  const selectedIndexRef = useRef(initialSelectedIndex);
+  const [selectedIndex, setSelectedIndex] = useState(initialSelectedIndex);
+  const fittedContentKeyRef = useRef<string | null>(null);
   const renderedThemeKeyRef = useRef('');
   const handledResetKeyRef = useRef(resetKey);
   const [retryKey, setRetryKey] = useState(0);
   const [chartError, setChartError] = useState<string | null>(null);
   selectedCandleCallbackRef.current = onSelectedCandle;
+  candlesRef.current = candles;
+
+  useEffect(() => {
+    const selectedStartsAt = selectedCandleStartsAtRef.current;
+    const preserveSelection = selectedSeriesKeyRef.current === seriesKey;
+    const selectionDecision = resolveMarketChartSelectedIndex(
+      candles,
+      selectedStartsAt,
+      preserveSelection,
+    );
+    const nextIndex = selectionDecision.selectedIndex;
+    if (selectionDecision.resetSelection) {
+      selectedCandleStartsAtRef.current = null;
+    }
+    selectedSeriesKeyRef.current = seriesKey;
+    selectedIndexRef.current = nextIndex;
+    setSelectedIndex(nextIndex);
+    if (selectionDecision.resetSelection) selectedCandleCallbackRef.current(null);
+  }, [candles, seriesKey]);
 
   useEffect(() => {
     const container = containerRef.current;
@@ -91,6 +119,7 @@ export function MarketInteractiveChart({
 
     let adapter: MarketChartAdapter | null = null;
     let observer: ResizeObserver | null = null;
+    let themeObserver: MutationObserver | null = null;
     let cleaned = false;
     let active = true;
 
@@ -100,10 +129,22 @@ export function MarketInteractiveChart({
         container,
         runtime: LIGHTWEIGHT_CHARTS_RUNTIME,
         theme,
-        onCrosshairCandle: (candle) => selectedCandleCallbackRef.current(candle),
+        onCrosshairCandle: (candle) => {
+          const currentCandles = candlesRef.current;
+          const matchingIndex = candle === null
+            ? -1
+            : currentCandles.findIndex((item) => item.startsAt === candle.startsAt);
+          const nextIndex = matchingIndex >= 0
+            ? matchingIndex
+            : Math.max(0, currentCandles.length - 1);
+          selectedCandleStartsAtRef.current = candle?.startsAt ?? null;
+          selectedIndexRef.current = nextIndex;
+          setSelectedIndex(nextIndex);
+          selectedCandleCallbackRef.current(candle);
+        },
       });
       adapterRef.current = adapter;
-      renderedRangeRef.current = null;
+      fittedContentKeyRef.current = null;
       renderedThemeKeyRef.current = JSON.stringify(theme);
 
       const resize = (width: number, height: number) => {
@@ -128,6 +169,25 @@ export function MarketInteractiveChart({
         });
         observer.observe(container);
       }
+      if (typeof MutationObserver !== 'undefined') {
+        themeObserver = new MutationObserver(() => {
+          if (!active || !adapter) return;
+          try {
+            const nextTheme = readMarketChartTheme(container);
+            const nextThemeKey = JSON.stringify(nextTheme);
+            if (nextThemeKey !== renderedThemeKeyRef.current) {
+              adapter.applyTheme(nextTheme);
+              renderedThemeKeyRef.current = nextThemeKey;
+            }
+          } catch {
+            setChartError('차트를 불러오지 못했어요');
+          }
+        });
+        themeObserver.observe(document.documentElement, {
+          attributes: true,
+          attributeFilter: ['class', 'style', 'data-color-mode'],
+        });
+      }
       setChartError(null);
     } catch {
       setChartError('차트를 불러오지 못했어요');
@@ -138,6 +198,7 @@ export function MarketInteractiveChart({
       cleaned = true;
       active = false;
       observer?.disconnect();
+      themeObserver?.disconnect();
       if (adapterRef.current === adapter) adapterRef.current = null;
       adapter?.destroy();
     };
@@ -148,7 +209,10 @@ export function MarketInteractiveChart({
     const container = containerRef.current;
     if (!adapter || !container) return;
 
-    const fitContent = renderedRangeRef.current !== range;
+    const fitDecision = resolveMarketChartFitDecision(
+      fittedContentKeyRef.current,
+      fitContentKey,
+    );
     try {
       const theme = readMarketChartTheme(container);
       const themeKey = JSON.stringify(theme);
@@ -156,12 +220,17 @@ export function MarketInteractiveChart({
         adapter.applyTheme(theme);
         renderedThemeKeyRef.current = themeKey;
       }
-      adapter.render({ candles, style, fitContent });
-      renderedRangeRef.current = range;
+      adapter.render({
+        candles,
+        style,
+        fitContent: fitDecision.fitContent,
+        seriesKey,
+      });
+      fittedContentKeyRef.current = fitDecision.fittedKey;
     } catch {
       setChartError('차트를 불러오지 못했어요');
     }
-  }, [candles, interval, range, retryKey, style]);
+  }, [candles, fitContentKey, retryKey, seriesKey, style]);
 
   useEffect(() => {
     if (handledResetKeyRef.current === resetKey) return;
@@ -181,17 +250,39 @@ export function MarketInteractiveChart({
     }
   };
 
+  const selectCandleFromKeyboard = (event: KeyboardEvent<HTMLDivElement>) => {
+    const nextIndex = resolveMarketChartKeyboardIndex(
+      selectedIndexRef.current,
+      candles.length,
+      event.key,
+    );
+    if (nextIndex === null) return;
+    event.preventDefault();
+    const nextCandle = candles[nextIndex];
+    if (!nextCandle) return;
+    selectedCandleStartsAtRef.current = nextCandle.startsAt;
+    selectedIndexRef.current = nextIndex;
+    setSelectedIndex(nextIndex);
+    selectedCandleCallbackRef.current(nextCandle);
+  };
+
   return (
     <div
       className="relative overflow-hidden rounded-2xl border border-bg-border bg-bg-primary/45 focus-within:ring-2 focus-within:ring-accent"
       onDoubleClick={fitChartContent}
     >
+      <p id="market-chart-keyboard-help" className="sr-only">
+        차트에 포커스한 뒤 왼쪽·오른쪽 화살표로 봉을 이동하고 Home·End 키로 처음과 마지막 봉을 선택할 수 있어요.
+      </p>
       <div
         key={retryKey}
         ref={containerRef}
         role="region"
-        aria-label={`${stockName} 가격과 거래량 차트`}
-        className="h-[320px] w-full"
+        tabIndex={0}
+        aria-label={`${stockName} 가격과 거래량 차트, ${selectedIndex + 1}/${candles.length}번째 봉`}
+        aria-describedby="market-chart-keyboard-help"
+        onKeyDown={selectCandleFromKeyboard}
+        className="h-[320px] w-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
       />
       {chartError ? (
         <div

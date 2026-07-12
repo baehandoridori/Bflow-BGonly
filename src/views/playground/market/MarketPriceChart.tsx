@@ -36,6 +36,7 @@ interface MarketPriceChartProps {
 interface ProgressiveSeriesState {
   requestKey: string;
   candles: MarketCandle[];
+  complete: boolean;
 }
 
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -126,10 +127,12 @@ export function MarketPriceChart({
   const [leadingState, setLeadingState] = useState<ProgressiveSeriesState>({
     requestKey: '',
     candles: [],
+    complete: false,
   });
   const [historicalState, setHistoricalState] = useState<ProgressiveSeriesState>({
     requestKey: '',
     candles: [],
+    complete: false,
   });
   const profile = MARKET_INSTRUMENT_PROFILES[stock.id];
   const chartRangeStartMs = chartStartMs(range, nowMs);
@@ -177,6 +180,7 @@ export function MarketPriceChart({
           setLeadingState({
             requestKey: leadingRequestKey,
             candles: [...nextCandles],
+            complete: false,
           });
         }
       },
@@ -185,6 +189,7 @@ export function MarketPriceChart({
         setLeadingState({
           requestKey: leadingRequestKey,
           candles: nextCandles,
+          complete: true,
         });
       }
     });
@@ -213,6 +218,7 @@ export function MarketPriceChart({
           setHistoricalState({
             requestKey: historicalRequestKey,
             candles: [...nextCandles],
+            complete: false,
           });
         }
       },
@@ -221,6 +227,7 @@ export function MarketPriceChart({
         setHistoricalState({
           requestKey: historicalRequestKey,
           candles: nextCandles,
+          complete: true,
         });
       }
     });
@@ -256,6 +263,13 @@ export function MarketPriceChart({
   const historicalCandles = historicalState.requestKey === historicalRequestKey
     ? historicalState.candles
     : [];
+  const completionIdentity = [stock.id, interval, range, historicalRequestKey].join('::');
+  const completedSeriesKey = leadingState.requestKey === leadingRequestKey
+    && leadingState.complete
+    && historicalState.requestKey === historicalRequestKey
+    && historicalState.complete
+    ? completionIdentity
+    : null;
   const builtCandles = useMemo(() => [
     ...leadingCandles,
     ...historicalCandles,
@@ -394,8 +408,8 @@ export function MarketPriceChart({
             stockName={stock.name}
             candles={candles}
             style={style}
-            interval={interval}
-            range={range}
+            seriesKey={completionIdentity}
+            fitContentKey={completedSeriesKey}
             resetKey={resetKey}
             onSelectedCandle={selectCandle}
           />

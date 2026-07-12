@@ -51,6 +51,7 @@ export interface MarketChartAdapter {
     candles: readonly MarketCandle[];
     style: MarketChartStyle;
     fitContent: boolean;
+    seriesKey: string;
   }): void;
   applyTheme(theme: MarketChartTheme): void;
   resize(width: number, height: number): void;
@@ -207,24 +208,53 @@ export function createMarketChartAdapter({
   onCrosshairCandle,
 }: CreateMarketChartAdapterOptions): MarketChartAdapter {
   const chart = runtime.createChart(container, chartOptions(initialTheme));
-  const volumeSeries: VolumeSeriesApi = chart.addSeries(runtime.HistogramSeries, {
-    priceFormat: { type: 'volume' },
-    priceScaleId: 'volume',
-  }, 1);
   let theme = initialTheme;
   let priceSeries: PriceSeriesApi | null = null;
   let priceStyle: MarketChartStyle | null = null;
+  let renderedSeriesKey: string | null = null;
   let points: readonly MarketChartPoint[] = [];
   let candleByTime = new Map<number, MarketCandle>();
   let destroyed = false;
-
   const crosshairHandler: MouseEventHandler<Time> = ({ time }) => {
     const selected = typeof time === 'number'
       ? candleByTime.get(time) ?? null
       : null;
     onCrosshairCandle?.(selected);
   };
-  chart.subscribeCrosshairMove(crosshairHandler);
+  let volumeSeries!: VolumeSeriesApi;
+  let volumeSeriesCreated = false;
+  let subscriptionAttempted = false;
+
+  try {
+    volumeSeries = chart.addSeries(runtime.HistogramSeries, {
+      priceFormat: { type: 'volume' },
+      priceScaleId: 'volume',
+    }, 1);
+    volumeSeriesCreated = true;
+    subscriptionAttempted = true;
+    chart.subscribeCrosshairMove(crosshairHandler);
+  } catch (error) {
+    if (subscriptionAttempted) {
+      try {
+        chart.unsubscribeCrosshairMove(crosshairHandler);
+      } catch {
+        // 원래 초기화 오류를 보존하면서 가능한 자원만 정리한다.
+      }
+    }
+    if (volumeSeriesCreated) {
+      try {
+        chart.removeSeries(volumeSeries as ISeriesApi<SeriesType>);
+      } catch {
+        // chart.remove까지 계속 진행한다.
+      }
+    }
+    try {
+      chart.remove();
+    } catch {
+      // 호출자에게는 최초 초기화 오류를 다시 전달한다.
+    }
+    throw error;
+  }
 
   const removePriceSeries = () => {
     if (!priceSeries) return;
@@ -258,10 +288,11 @@ export function createMarketChartAdapter({
   };
 
   return {
-    render({ candles, style, fitContent }) {
+    render({ candles, style, fitContent, seriesKey }) {
       if (destroyed) return;
       const nextPoints = prepareMarketChartPoints(candles);
       const styleChanged = priceStyle !== style;
+      const seriesChanged = renderedSeriesKey !== seriesKey;
       const visibleRange = styleChanged && priceSeries
         ? chart.timeScale().getVisibleLogicalRange()
         : null;
@@ -272,7 +303,7 @@ export function createMarketChartAdapter({
         priceSeries = createPriceSeries(style);
       }
 
-      if (!styleChanged && canUpdateLastPoint(points, nextPoints)) {
+      if (!styleChanged && !seriesChanged && canUpdateLastPoint(points, nextPoints)) {
         const lastPoint = nextPoints.at(-1);
         if (lastPoint) {
           updatePrice(lastPoint);
@@ -284,6 +315,7 @@ export function createMarketChartAdapter({
       }
 
       points = nextPoints;
+      renderedSeriesKey = seriesKey;
       candleByTime = new Map(nextPoints.map(({ candle, time }) => [time, candle]));
       if (visibleRange) chart.timeScale().setVisibleLogicalRange(visibleRange);
       if (fitContent) chart.timeScale().fitContent();
@@ -319,6 +351,7 @@ export function createMarketChartAdapter({
       chart.removeSeries(volumeSeries as ISeriesApi<SeriesType>);
       chart.remove();
       points = [];
+      renderedSeriesKey = null;
       candleByTime.clear();
     },
   };
