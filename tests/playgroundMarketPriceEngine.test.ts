@@ -518,6 +518,60 @@ test('each daily close is exactly the next UTC day open', () => {
   }
 });
 
+test('daily checkpoint OHLCV exactly aggregates all completed minute bars', () => {
+  const profile = {
+    stockId: 'daily-minute-parity',
+    basePriceWon: 75_000,
+    volatilityBps: 190,
+    phase: 0.41,
+    sectorId: 'platform',
+    marketBeta: 0.8,
+    sectorBeta: 0.6,
+    idiosyncraticVolatilityBps: 120,
+    longTermDriftBps: 1,
+    baseMinuteVolume: 12_000,
+    jumpSensitivity: 1,
+  } as MarketInstrumentProfile;
+  const dayStartMs = Date.parse('2026-05-17T00:00:00.000Z');
+  const checkpoint = getMarketDailyCheckpoint(profile, dayStartMs, []);
+  const minuteBars = Array.from({ length: 24 * 60 }, (_, minute) => {
+    const minuteStartMs = dayStartMs + minute * 60_000;
+    return getMarketMinuteBar(profile, minuteStartMs, minuteStartMs + 59_999, []);
+  });
+
+  assert.deepEqual({
+    openWon: checkpoint.openWon,
+    highWon: checkpoint.highWon,
+    lowWon: checkpoint.lowWon,
+    closeWon: checkpoint.closeWon,
+    volumeShares: checkpoint.volumeShares,
+  }, {
+    openWon: minuteBars[0].openWon,
+    highWon: Math.max(...minuteBars.map((bar) => bar.highWon)),
+    lowWon: Math.min(...minuteBars.map((bar) => bar.lowWon)),
+    closeWon: minuteBars.at(-1)?.closeWon,
+    volumeShares: minuteBars.reduce((sum, bar) => sum + bar.volumeShares, 0),
+  });
+});
+
+test('a future non-overlapping event leaves a past daily checkpoint byte-identical', () => {
+  const dayStartMs = Date.parse('2026-05-18T00:00:00.000Z');
+  const withoutFuture = getMarketDailyCheckpoint(PROFILE, dayStartMs, []);
+  const futureEvent: MarketAdminEvent = {
+    id: 'after-checkpoint-day',
+    stockId: PROFILE.stockId,
+    revision: 1,
+    kind: 'shock-up',
+    title: '다음 날 이후의 충격',
+    impactBps: 900,
+    startsAt: new Date(dayStartMs + 2 * 24 * 60 * 60_000).toISOString(),
+    endsAt: null,
+  };
+  const withFuture = getMarketDailyCheckpoint(PROFILE, dayStartMs, [futureEvent]);
+
+  assert.equal(JSON.stringify(withFuture), JSON.stringify(withoutFuture));
+});
+
 test('the 180-day path compounds instead of resetting around the reference price', () => {
   const firstDayMs = Date.parse('2026-01-01T00:00:00.000Z');
   const closes = Array.from({ length: 180 }, (_, day) => (

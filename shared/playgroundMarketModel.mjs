@@ -428,6 +428,7 @@ function buildMinutePath(state, dayIndex) {
     cumulativeLogReturn,
     intraAmplitude,
     intraPhase,
+    completedBaseBars: new Array(MINUTES_PER_DAY),
   };
   setBoundedCache(minutePathCache, cacheKey, path, MINUTE_PATH_CACHE_LIMIT);
   return path;
@@ -645,7 +646,51 @@ function buildSampleTimes(minuteStartMs, observedUntilMs) {
   return times;
 }
 
+function buildBaseCompletedMinuteBar(state, minuteStartMs) {
+  const dayIndex = Math.floor((minuteStartMs - EPOCH_MS) / DAY_MS);
+  const dayStartMs = EPOCH_MS + dayIndex * DAY_MS;
+  const minute = Math.floor((minuteStartMs - dayStartMs) / MINUTE_MS);
+  const path = buildMinutePath(state, dayIndex);
+  const cached = path.completedBaseBars[minute];
+  if (cached) return { ...cached };
+
+  let openWon = 0;
+  let highWon = 0;
+  let lowWon = MAX_SAFE_INTEGER;
+  for (let second = 0; second < 60; second += 1) {
+    const priceWon = basePriceFromPath(path, minute, second / 60);
+    if (second === 0) openWon = priceWon;
+    highWon = Math.max(highWon, priceWon);
+    lowWon = Math.min(lowWon, priceWon);
+  }
+  const closeWon = basePriceFromPath(path, minute, (MINUTE_MS - 1) / MINUTE_MS);
+  highWon = Math.max(highWon, closeWon);
+  lowWon = Math.min(lowWon, closeWon);
+  const bar = {
+    openWon,
+    highWon,
+    lowWon,
+    closeWon,
+    volumeShares: calculateVolumeShares(
+      state,
+      minuteStartMs,
+      minuteStartMs + MINUTE_MS - 1,
+      [],
+      openWon,
+      closeWon,
+    ),
+  };
+  path.completedBaseBars[minute] = bar;
+  return { ...bar };
+}
+
 function buildMinuteBar(state, minuteStartMs, observedUntilMs, events) {
+  if (
+    events.length === 0
+    && observedUntilMs === minuteStartMs + MINUTE_MS - 1
+  ) {
+    return buildBaseCompletedMinuteBar(state, minuteStartMs);
+  }
   const prices = buildSampleTimes(minuteStartMs, observedUntilMs)
     .map((sampleMs) => getPriceWithNormalizedEvents(state, sampleMs, events));
   const openWon = prices[0];
@@ -666,43 +711,50 @@ function buildMinuteBar(state, minuteStartMs, observedUntilMs, events) {
   };
 }
 
-function getBaseDailySummary(state, dayIndex) {
-  const cached = state.summaries.get(dayIndex);
-  if (cached) return cached;
-  const path = buildMinutePath(state, dayIndex);
-  let highWon = Math.max(path.dailyRecord.openWon, path.dailyRecord.closeWon);
-  let lowWon = Math.min(path.dailyRecord.openWon, path.dailyRecord.closeWon);
+function aggregateCompletedDay(state, dayIndex, events) {
+  const dailyRecord = getDailyRecord(state, dayIndex);
+  let openWon = 0;
+  let highWon = 0;
+  let lowWon = MAX_SAFE_INTEGER;
+  let closeWon = 0;
   let volumeShares = 0;
-  const fractions = [0.2, 0.4, 0.6, 0.8, 1];
   for (let minute = 0; minute < MINUTES_PER_DAY; minute += 1) {
-    for (const fraction of fractions) {
-      const priceWon = basePriceFromPath(path, minute, fraction);
-      highWon = Math.max(highWon, priceWon);
-      lowWon = Math.min(lowWon, priceWon);
-    }
-    const minuteStartMs = path.dailyRecord.dayStartMs + minute * MINUTE_MS;
-    const openWon = basePriceFromPath(path, minute, 0);
-    const closeWon = basePriceFromPath(path, minute, 1);
-    volumeShares = safeShares(volumeShares + calculateVolumeShares(
+    const minuteStartMs = dailyRecord.dayStartMs + minute * MINUTE_MS;
+    const bar = buildMinuteBar(
       state,
       minuteStartMs,
       minuteStartMs + MINUTE_MS - 1,
-      [],
-      openWon,
-      closeWon,
-    ));
+      events,
+    );
+    if (minute === 0) openWon = bar.openWon;
+    highWon = Math.max(highWon, bar.highWon);
+    lowWon = Math.min(lowWon, bar.lowWon);
+    closeWon = bar.closeWon;
+    volumeShares = safeShares(volumeShares + bar.volumeShares);
   }
-  const summary = {
-    dayStartMs: path.dailyRecord.dayStartMs,
-    openWon: path.dailyRecord.openWon,
+  return {
+    dayStartMs: dailyRecord.dayStartMs,
+    openWon,
     highWon,
     lowWon,
-    closeWon: path.dailyRecord.closeWon,
+    closeWon,
     volumeShares,
-    regime: path.dailyRecord.regime,
+    regime: dailyRecord.regime,
   };
+}
+
+function getBaseDailySummary(state, dayIndex) {
+  const cached = state.summaries.get(dayIndex);
+  if (cached) return cached;
+  const summary = aggregateCompletedDay(state, dayIndex, []);
   state.summaries.set(dayIndex, summary);
   return summary;
+}
+
+function eventCanAffectCompletedDay(event, dayStartMs) {
+  const dayEndMs = dayStartMs + DAY_MS;
+  if (event.startMs >= dayEndMs) return false;
+  return event.kind !== 'halt' || event.endMs > dayStartMs;
 }
 
 function eventsFingerprint(events) {
@@ -752,45 +804,18 @@ export function getMarketDailyCheckpoint(profile, dayStartMs, events) {
   }
   const state = getProfileState(profile);
   const relevantEvents = normalizeRelevantEvents(state.profile.stockId, events);
-  if (relevantEvents.length === 0) return { ...getBaseDailySummary(state, dayIndex) };
+  const affectingEvents = relevantEvents.filter((event) => (
+    eventCanAffectCompletedDay(event, normalizedDayStartMs)
+  ));
+  if (affectingEvents.length === 0) return { ...getBaseDailySummary(state, dayIndex) };
 
-  const cacheKey = `${state.key}|${dayIndex}|${eventsFingerprint(relevantEvents)}`;
+  const cacheKey = `${state.key}|${dayIndex}|${eventsFingerprint(affectingEvents)}`;
   const cached = eventCheckpointCache.get(cacheKey);
   if (cached) {
     setBoundedCache(eventCheckpointCache, cacheKey, cached, EVENT_CHECKPOINT_CACHE_LIMIT);
     return { ...cached };
   }
-  const dailyRecord = getDailyRecord(state, dayIndex);
-  const openWon = getPriceWithNormalizedEvents(state, normalizedDayStartMs, relevantEvents);
-  const closeWon = getPriceWithNormalizedEvents(
-    state,
-    normalizedDayStartMs + DAY_MS,
-    relevantEvents,
-  );
-  let highWon = Math.max(openWon, closeWon);
-  let lowWon = Math.min(openWon, closeWon);
-  let volumeShares = 0;
-  for (let minute = 0; minute < MINUTES_PER_DAY; minute += 1) {
-    const minuteStartMs = normalizedDayStartMs + minute * MINUTE_MS;
-    const bar = buildMinuteBar(
-      state,
-      minuteStartMs,
-      minuteStartMs + MINUTE_MS - 1,
-      relevantEvents,
-    );
-    highWon = Math.max(highWon, bar.highWon);
-    lowWon = Math.min(lowWon, bar.lowWon);
-    volumeShares = safeShares(volumeShares + bar.volumeShares);
-  }
-  const checkpoint = {
-    dayStartMs: normalizedDayStartMs,
-    openWon,
-    highWon,
-    lowWon,
-    closeWon,
-    volumeShares,
-    regime: dailyRecord.regime,
-  };
+  const checkpoint = aggregateCompletedDay(state, dayIndex, affectingEvents);
   setBoundedCache(eventCheckpointCache, cacheKey, checkpoint, EVENT_CHECKPOINT_CACHE_LIMIT);
   return { ...checkpoint };
 }
