@@ -46,6 +46,18 @@ test('market router mounts one controller and keeps the mobile dock outside its 
   assert.match(actionDialog, /focusKey/);
 });
 
+test('mobile order dock blocks both entry buttons during a trading halt without coupling side validation', () => {
+  const dock = readFileSync('src/views/playground/market/MarketMobileOrderDock.tsx', 'utf8');
+
+  assert.match(
+    dock,
+    /const dockDisabled = controller\.controlsDisabled\s*\|\|\s*controller\.halted;/,
+  );
+  assert.equal((dock.match(/disabled=\{dockDisabled\}/g) ?? []).length, 2);
+  assert.match(dock, /controller\.halted\s*\?\s*'현재 거래가 잠시 멈췄어요\.'/);
+  assert.doesNotMatch(dock, /validationBySide/);
+});
+
 test('xl transition retargets dialog focus before closing an open mobile order surface', () => {
   const router = readFileSync('src/views/playground/market/MarketRouter.tsx', 'utf8');
   const detail = readFileSync('src/views/playground/market/StockDetailView.tsx', 'utf8');

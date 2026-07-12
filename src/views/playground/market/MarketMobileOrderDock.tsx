@@ -5,16 +5,19 @@ interface MarketMobileOrderDockProps {
 }
 
 export function MarketMobileOrderDock({ controller }: MarketMobileOrderDockProps) {
-  const disabledReason = controller.controlsDisabled
-    ? controller.error
-      ?? (controller.refreshRequired
-        ? '최신 시장 정보를 다시 불러온 뒤 주문할 수 있어요.'
-        : controller.pendingResolution
-          ? '이전 주문 결과를 확인한 뒤 새 주문을 열 수 있어요.'
-          : controller.submitting
-            ? '주문을 처리하고 있어요.'
-            : '주문 정보를 준비하고 있어요.')
-    : null;
+  const dockDisabled = controller.controlsDisabled || controller.halted;
+  const disabledReason = controller.halted
+    ? '현재 거래가 잠시 멈췄어요.'
+    : controller.controlsDisabled
+      ? controller.error
+        ?? (controller.refreshRequired
+          ? '최신 시장 정보를 다시 불러온 뒤 주문할 수 있어요.'
+          : controller.pendingResolution
+            ? '이전 주문 결과를 확인한 뒤 새 주문을 열 수 있어요.'
+            : controller.submitting
+              ? '주문을 처리하고 있어요.'
+              : '주문 정보를 준비하고 있어요.')
+      : null;
 
   return (
     <div
@@ -24,7 +27,7 @@ export function MarketMobileOrderDock({ controller }: MarketMobileOrderDockProps
       <div className="mx-auto grid w-full max-w-xl grid-cols-2 gap-3">
         <button
           type="button"
-          disabled={controller.controlsDisabled}
+          disabled={dockDisabled}
           aria-describedby={disabledReason ? 'market-order-dock-status' : undefined}
           onClick={(event) => controller.openSheet(event.currentTarget, 'sell')}
           className="min-h-11 cursor-pointer rounded-xl bg-market-down px-4 py-3 text-sm font-extrabold text-bg-primary transition-[background-color,opacity,transform] duration-150 ease-out motion-reduce:transition-none hover:bg-market-down/90 active:scale-[0.96] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 focus-visible:ring-offset-bg-card disabled:cursor-not-allowed disabled:opacity-50 disabled:transform-none"
@@ -33,7 +36,7 @@ export function MarketMobileOrderDock({ controller }: MarketMobileOrderDockProps
         </button>
         <button
           type="button"
-          disabled={controller.controlsDisabled}
+          disabled={dockDisabled}
           aria-describedby={disabledReason ? 'market-order-dock-status' : undefined}
           onClick={(event) => controller.openSheet(event.currentTarget, 'buy')}
           className="min-h-11 cursor-pointer rounded-xl bg-market-up px-4 py-3 text-sm font-extrabold text-bg-primary transition-[background-color,opacity,transform] duration-150 ease-out motion-reduce:transition-none hover:bg-market-up/90 active:scale-[0.96] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 focus-visible:ring-offset-bg-card disabled:cursor-not-allowed disabled:opacity-50 disabled:transform-none"
