@@ -10,9 +10,10 @@
  * 접근 권한은 사이드바에서 게이팅 (useCharacterBoardAccess).
  */
 
-import { useCallback, useEffect, useMemo, useState, type MouseEvent as ReactMouseEvent } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react';
 import { Archive, Plus, Image as ImageIcon, Search, Ruler } from 'lucide-react';
 import { useCharacterBoardStore } from '@/stores/useCharacterBoardStore';
+import { moveCostumeInOrder } from '@/stores/characterBoardStoreHelpers';
 import { useAppStore } from '@/stores/useAppStore';
 import { cn } from '@/utils/cn';
 import { EpisodeAssetBoard } from './EpisodeAssetBoard';
@@ -129,6 +130,36 @@ function CharacterGrid({ onAdd, pendingOpenId, onConsumeOpen }: { onAdd: () => v
     event.preventDefault();
     setCardMenu({ characterId, x: event.clientX, y: event.clientY, costumeId });
   }, []);
+
+  // ─── 카드 드래그 재배치(F29) ───
+  const reorderCharacters = useCharacterBoardStore((s) => s.reorderCharacters);
+  // 검색/태그 필터·키 비교·보관 목록에서는 비활성 (파생 정렬/부분 목록 위 재배치는 비직관적).
+  const cardDragEnabled = !showArchived && !heightCompareMode && !query.trim() && activeTags.length === 0;
+  const [draggingCardId, setDraggingCardId] = useState<string | null>(null);
+  const [dropTargetId, setDropTargetId] = useState<string | null>(null);
+  const draggingCardIdRef = useRef<string | null>(null); // drop 시 stale closure 회피 — 복장 드래그와 동일 ref 병행 패턴.
+  const handleCardDragStart = useCallback((id: string) => {
+    draggingCardIdRef.current = id;
+    setDraggingCardId(id);
+  }, []);
+  const handleCardDragOver = useCallback((id: string) => {
+    setDropTargetId((prev) => (prev === id ? prev : id));
+  }, []);
+  const handleCardDragEnd = useCallback(() => {
+    draggingCardIdRef.current = null;
+    setDraggingCardId(null);
+    setDropTargetId(null);
+  }, []);
+  const handleCardDrop = useCallback((targetId: string) => {
+    const dragId = draggingCardIdRef.current;
+    draggingCardIdRef.current = null;
+    setDraggingCardId(null);
+    setDropTargetId(null);
+    if (!dragId || dragId === targetId) return;
+    // 전체 characters 배열 기준으로 이동 계산 — active/archived 가 같은 sort_order 공간을 쓰므로 전 구간 재부여로 중복 방지.
+    const allIds = useCharacterBoardStore.getState().characters.map((c) => c.id);
+    void reorderCharacters(moveCostumeInOrder(allIds, dragId, targetId));
+  }, [reorderCharacters]);
 
   if (!loaded) {
     if (loadError) {
@@ -254,6 +285,12 @@ function CharacterGrid({ onAdd, pendingOpenId, onConsumeOpen }: { onAdd: () => v
                     : 170)
                 : undefined}
               referenceUnset={heightCompareMode && !c.referenceHeightPx}
+              onDragStartCard={cardDragEnabled ? handleCardDragStart : undefined}
+              onDragOverCard={cardDragEnabled ? handleCardDragOver : undefined}
+              onDropCard={cardDragEnabled ? handleCardDrop : undefined}
+              onDragEndCard={cardDragEnabled ? handleCardDragEnd : undefined}
+              dragging={draggingCardId === c.id}
+              dropTarget={dropTargetId === c.id && draggingCardId !== c.id}
             />
           ))}
         </div>

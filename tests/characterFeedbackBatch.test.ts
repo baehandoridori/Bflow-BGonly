@@ -66,8 +66,8 @@ test('B8: 카드 휠로 복장 전환 + 전환 복장을 클릭/우클릭/상세
 
 test('B9: 열기 버튼 hover 시 전체 경로', () => {
   assert.match(costumeDetail, /onClick=\{onOpen\}\s*\n\s*title=\{path\}/);
-  // 이름 텍스트의 풀 경로 title 은 유지(격하 금지).
-  assert.match(costumeDetail, /title=\{path \?\? undefined\}>\{displayCharacterPathName\(path\)\}/);
+  // 이름 텍스트 title 은 경로가 아니라 이름 풀버전(F26) — '열기' 버튼이 경로를 담당.
+  assert.match(costumeDetail, /title=\{path \? displayCharacterPathName\(path\) : undefined\}>\{displayCharacterPathName\(path\)\}/);
 });
 
 test('B10: 복장 드래그 재배치 — 순수 헬퍼 + store + DnD + pending 보호', () => {

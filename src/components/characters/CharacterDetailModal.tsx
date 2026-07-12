@@ -16,6 +16,7 @@ import { CharacterImageLightbox, type CharacterImageLightboxEntry } from '@/comp
 import { EMPTY_COSTUMES } from '@/components/characters/CharacterCard';
 import { FeaturedImageSlot, CostumeIdentity } from '@/components/characters/FeaturedImageSlot';
 import { CostumeDetail } from '@/components/characters/CostumeDetail';
+import { AddCharacterModal } from '@/components/characters/AddCharacterModal';
 import { chooseWorkFile, chooseWorkFolder } from '@/services/sceneWorkLinkService';
 import { claimReactKey } from '@/utils/claimReactKey';
 import { ConfirmDialog } from '@/components/common/ConfirmDialog';
@@ -649,6 +650,7 @@ export function CharacterDetailModal({
   }, [allVisibleCharacters, filteredIds, hasGridFilter, showAllList]);
   const [selectedId, setSelectedId] = useState(initialCharacterId);
   const [listQuery, setListQuery] = useState('');
+  const [addOpen, setAddOpen] = useState(false);
   const dialogRef = useRef<HTMLDivElement>(null);
   const modalFocus = useModalFocus(dialogRef, { autoFocus: true });
 
@@ -677,12 +679,13 @@ export function CharacterDetailModal({
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== 'Escape') return;
+      if (addOpen) return; // 추가 모달이 열려 있으면 그쪽 리스너가 닫는다 — 상세까지 같이 닫히지 않게.
       e.preventDefault();
       onClose();
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [onClose]);
+  }, [onClose, addOpen]);
 
   return (
     <div
@@ -746,6 +749,17 @@ export function CharacterDetailModal({
                 <CharacterListRow key={c.id} character={c} costumes={byCharacter.get(c.id) ?? EMPTY_COSTUMES} selected={c.id === selectedId} onSelect={setSelectedId} />
               ))}
             </div>
+            {!archivedMode && (
+              <div className="shrink-0 border-t border-bg-border/40 p-1.5">
+                <button
+                  type="button"
+                  onClick={() => setAddOpen(true)}
+                  className="flex w-full items-center gap-1.5 rounded-md px-2.5 py-2 text-sm text-text-secondary hover:bg-bg-border/30 hover:text-accent transition-colors cursor-pointer"
+                >
+                  <Plus size={15} /> 캐릭터 추가
+                </button>
+              </div>
+            )}
           </aside>
 
           {/* 우측 상세 */}
@@ -783,6 +797,14 @@ export function CharacterDetailModal({
           />
         )}
       </div>
+
+      {/* dialog div 닫는 태그 뒤, 오버레이 루트 div 닫는 태그 앞 — 포커스 트랩 충돌 방지(§F27). */}
+      {addOpen && (
+        <AddCharacterModal
+          onClose={() => setAddOpen(false)}
+          onCreated={(c) => setSelectedId(c.id)}
+        />
+      )}
     </div>
   );
 }

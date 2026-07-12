@@ -738,6 +738,7 @@ export function installDevElectronAPI(): void {
     imageDelete: async () => true,
     imageGetDir: async () => '/dev/images',
     clipboardReadImage: async () => null,
+    clipboardReadImageFile: async () => null,
 
     sheetsConnect: async () => ({ ok: false, error: 'DEV mock' }),
     sheetsIsConnected: async () => false,

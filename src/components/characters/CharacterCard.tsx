@@ -3,6 +3,7 @@ import { Image as ImageIcon } from 'lucide-react';
 import type { Character, CharacterCostume } from '@/types';
 import { CharacterImageFrame } from '@/components/characters/CharacterImageFrame';
 import { DESIGN_STAGE_META, RIGGING_STAGE_META, characterStageColor } from '@/constants/characterStages';
+import { cn } from '@/utils/cn';
 
 // 복장 없는 캐릭터에 매 렌더 새 [] 를 만들면 memo 비교가 항상 실패한다 — 안정 참조 하나를 공유 (CQ-6).
 export const EMPTY_COSTUMES: CharacterCostume[] = [];
@@ -16,6 +17,12 @@ export const CharacterCard = memo(function CharacterCard({
   onContextMenu,
   imageHeightPx,
   referenceUnset,
+  onDragStartCard,
+  onDragOverCard,
+  onDropCard,
+  onDragEndCard,
+  dragging,
+  dropTarget,
 }: {
   character: Character;
   costumes: CharacterCostume[];
@@ -25,6 +32,15 @@ export const CharacterCard = memo(function CharacterCard({
   imageHeightPx?: number;
   /** 키 비교 보기 모드인데 이 캐릭터의 기준 키가 미설정이면 true → 배지 표시. */
   referenceUnset?: boolean;
+  // 카드 드래그 재배치(F29) — 전부 optional(드래그 비활성 화면에서는 미전달). 콜백은 id 인자 안정 참조(CQ-6).
+  onDragStartCard?: (characterId: string) => void;
+  onDragOverCard?: (characterId: string) => void;
+  onDropCard?: (characterId: string) => void;
+  onDragEndCard?: () => void;
+  /** 이 카드가 드래그 중. */
+  dragging?: boolean;
+  /** 이 카드가 현재 드롭 대상(시각 강조). */
+  dropTarget?: boolean;
 }) {
   const designDone = costumes.filter((c) => c.designStage === 'done').length;
   const riggingDone = costumes.filter((c) => c.riggingStage === 'done').length;
@@ -62,10 +78,19 @@ export const CharacterCard = memo(function CharacterCard({
   return (
     <button
       type="button"
+      draggable={!!onDragStartCard}
+      onDragStart={onDragStartCard ? (e) => { e.dataTransfer.effectAllowed = 'move'; onDragStartCard(character.id); } : undefined}
+      onDragOver={onDropCard ? (e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; onDragOverCard?.(character.id); } : undefined}
+      onDrop={onDropCard ? (e) => { e.preventDefault(); onDropCard(character.id); } : undefined}
+      onDragEnd={onDragEndCard}
       onClick={() => onOpen(character.id, shown?.id)}
       onContextMenu={(event) => onContextMenu(character.id, event, shown?.id)}
       style={imageHeightPx ? { width: Math.round(imageHeightPx * 3 / 4) } : undefined}
-      className="text-left bg-bg-card border border-bg-border rounded-xl overflow-hidden hover:border-accent/50 transition-colors duration-200 flex flex-col cursor-pointer"
+      className={cn(
+        'text-left bg-bg-card border border-bg-border rounded-xl overflow-hidden hover:border-accent/50 transition-colors duration-200 flex flex-col cursor-pointer',
+        dragging && 'opacity-40',
+        dropTarget && 'border-accent ring-1 ring-accent/40',
+      )}
     >
       <div ref={imageRef} style={imageHeightPx ? { height: imageHeightPx } : undefined} className="relative aspect-[3/4] bg-bg-border/30 flex items-center justify-center overflow-hidden">
         {shown ? (
