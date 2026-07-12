@@ -11,6 +11,13 @@ export interface MarketInstrumentProfile {
   basePriceWon: number;
   volatilityBps: number;
   phase: number;
+  sectorId?: 'studio' | 'platform' | 'creative-tools' | 'collaboration';
+  marketBeta?: number;
+  sectorBeta?: number;
+  idiosyncraticVolatilityBps?: number;
+  longTermDriftBps?: number;
+  baseMinuteVolume?: number;
+  jumpSensitivity?: number;
 }
 
 export interface MarketAdminEvent {
