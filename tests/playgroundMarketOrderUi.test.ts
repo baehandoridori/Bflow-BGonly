@@ -110,6 +110,36 @@ test('one quantity builds independent buy and sell validation and the stepper ne
   assert.equal(controller.resolveMarketShareChoiceQuantity(10, 'sell', 5, 1), 10);
 });
 
+test('selected max follows selectSide and openSheet preferred-side changes in both directions', async () => {
+  const controller = await import('../src/views/playground/market/useMarketOrderController.ts');
+  assert.equal(typeof controller.transitionMarketOrderSide, 'function');
+
+  assert.deepEqual(controller.transitionMarketOrderSide({
+    nextSide: 'sell', selectedChoice: 'max', quantityInput: '5',
+    availableBuyShares: 5, availableSellShares: 1,
+  }), { side: 'sell', quantityInput: '1' });
+  assert.deepEqual(controller.transitionMarketOrderSide({
+    nextSide: 'buy', selectedChoice: 'max', quantityInput: '1',
+    availableBuyShares: 5, availableSellShares: 1,
+  }), { side: 'buy', quantityInput: '5' });
+  assert.deepEqual(controller.transitionMarketOrderSide({
+    nextSide: 'sell', selectedChoice: 5, quantityInput: '5',
+    availableBuyShares: 9, availableSellShares: 2,
+  }), { side: 'sell', quantityInput: '5' });
+
+  const source = readFileSync('src/views/playground/market/useMarketOrderController.ts', 'utf8');
+  const selectSideSource = source.slice(
+    source.indexOf('const selectSide ='),
+    source.indexOf('const selectChoice ='),
+  );
+  const openSheetSource = source.slice(
+    source.indexOf('const openSheet ='),
+    source.indexOf('const openConfirmation ='),
+  );
+  assert.match(selectSideSource, /applySideChange\(nextSide\)/);
+  assert.match(openSheetSource, /applySideChange\(nextSide\)/);
+});
+
 test('order controller freezes snapshot revision with the quote, revalidates drift, blocks halts and creates one request id', async () => {
   const helperPath = 'src/views/playground/market/useMarketOrderController.ts';
   assert.equal(existsSync(helperPath), true, 'shared order controller must exist');

@@ -243,6 +243,34 @@ export function resolveMarketShareChoiceQuantity(
   return Math.max(1, availableShares);
 }
 
+interface MarketOrderSideTransitionOptions {
+  nextSide: MarketOrderSide;
+  selectedChoice: MarketShareChoice | null;
+  quantityInput: string;
+  availableBuyShares: number;
+  availableSellShares: number;
+}
+
+export function transitionMarketOrderSide({
+  nextSide,
+  selectedChoice,
+  quantityInput,
+  availableBuyShares,
+  availableSellShares,
+}: MarketOrderSideTransitionOptions) {
+  return {
+    side: nextSide,
+    quantityInput: selectedChoice === 'max'
+      ? String(resolveMarketShareChoiceQuantity(
+          'max',
+          nextSide,
+          availableBuyShares,
+          availableSellShares,
+        ))
+      : quantityInput,
+  };
+}
+
 function limitDraftError(draft: MarketLimitDraft): string | null {
   const desiredPriceWon = Number(draft.desiredPriceInput);
   const quantityShares = Number(draft.quantityInput);
@@ -342,9 +370,21 @@ export function useMarketOrderController({
     if (opener && surface === null) openerRef.current = opener;
   };
 
+  const applySideChange = (nextSide: MarketOrderSide) => {
+    const next = transitionMarketOrderSide({
+      nextSide,
+      selectedChoice,
+      quantityInput,
+      availableBuyShares,
+      availableSellShares,
+    });
+    setSide(next.side);
+    setQuantityInputState(next.quantityInput);
+  };
+
   const selectSide = (nextSide: MarketOrderSide) => {
     if (controlsDisabled) return;
-    setSide(nextSide);
+    applySideChange(nextSide);
     clearFeedback();
   };
 
@@ -393,7 +433,7 @@ export function useMarketOrderController({
       ? preferredSideOrOpener as HTMLElement
       : openerOrSide;
     openerRef.current = opener;
-    setSide(nextSide);
+    applySideChange(nextSide);
     setSurface('mobile-order');
     clearFeedback();
   };
