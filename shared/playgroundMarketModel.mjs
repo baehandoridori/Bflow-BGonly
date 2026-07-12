@@ -45,6 +45,7 @@ export const MARKET_PROFILE_ENHANCEMENT_DEFAULTS = Object.freeze({
 
 const EPOCH_MS = Date.parse('2025-01-01T00:00:00.000Z');
 const MINUTE_MS = 60_000;
+const COMPLETED_MINUTE_FRACTION = (MINUTE_MS - 1) / MINUTE_MS;
 const DAY_MS = 24 * 60 * MINUTE_MS;
 const MINUTES_PER_DAY = DAY_MS / MINUTE_MS;
 const KST_OFFSET_MS = 9 * 60 * MINUTE_MS;
@@ -437,8 +438,13 @@ function buildMinutePath(state, dayIndex) {
 function basePriceFromPath(path, minute, fraction) {
   const boundedMinute = clamp(minute, 0, MINUTES_PER_DAY - 1);
   const boundedFraction = clamp(fraction, 0, 1);
-  const startLog = Math.log(path.dailyRecord.openWon)
-    + path.cumulativeLogReturn[boundedMinute];
+  const dailyOpenLog = Math.log(path.dailyRecord.openWon);
+  if (boundedFraction >= COMPLETED_MINUTE_FRACTION) {
+    return safeWon(Math.exp(
+      dailyOpenLog + path.cumulativeLogReturn[boundedMinute + 1],
+    ));
+  }
+  const startLog = dailyOpenLog + path.cumulativeLogReturn[boundedMinute];
   const bridgeEnvelope = Math.sqrt(Math.max(0, Math.sin(Math.PI * boundedFraction)));
   const phase = path.intraPhase[boundedMinute];
   const bridge = path.intraAmplitude[boundedMinute]
@@ -663,7 +669,7 @@ function buildBaseCompletedMinuteBar(state, minuteStartMs) {
     highWon = Math.max(highWon, priceWon);
     lowWon = Math.min(lowWon, priceWon);
   }
-  const closeWon = basePriceFromPath(path, minute, (MINUTE_MS - 1) / MINUTE_MS);
+  const closeWon = basePriceFromPath(path, minute, COMPLETED_MINUTE_FRACTION);
   highWon = Math.max(highWon, closeWon);
   lowWon = Math.min(lowWon, closeWon);
   const bar = {

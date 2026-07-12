@@ -30,6 +30,20 @@ const CONSTANT_PROFILE: MarketInstrumentProfile = {
   phase: 0.37,
 };
 
+const DAILY_MINUTE_PARITY_PROFILE = {
+  stockId: 'daily-minute-parity',
+  basePriceWon: 75_000,
+  volatilityBps: 190,
+  phase: 0.41,
+  sectorId: 'platform',
+  marketBeta: 0.8,
+  sectorBeta: 0.6,
+  idiosyncraticVolatilityBps: 120,
+  longTermDriftBps: 1,
+  baseMinuteVolume: 12_000,
+  jumpSensitivity: 1,
+} as MarketInstrumentProfile;
+
 interface MarketDailyCheckpoint {
   dayStartMs: number;
   openWon: number;
@@ -519,24 +533,16 @@ test('each daily close is exactly the next UTC day open', () => {
 });
 
 test('daily checkpoint OHLCV exactly aggregates all completed minute bars', () => {
-  const profile = {
-    stockId: 'daily-minute-parity',
-    basePriceWon: 75_000,
-    volatilityBps: 190,
-    phase: 0.41,
-    sectorId: 'platform',
-    marketBeta: 0.8,
-    sectorBeta: 0.6,
-    idiosyncraticVolatilityBps: 120,
-    longTermDriftBps: 1,
-    baseMinuteVolume: 12_000,
-    jumpSensitivity: 1,
-  } as MarketInstrumentProfile;
   const dayStartMs = Date.parse('2026-05-17T00:00:00.000Z');
-  const checkpoint = getMarketDailyCheckpoint(profile, dayStartMs, []);
+  const checkpoint = getMarketDailyCheckpoint(DAILY_MINUTE_PARITY_PROFILE, dayStartMs, []);
   const minuteBars = Array.from({ length: 24 * 60 }, (_, minute) => {
     const minuteStartMs = dayStartMs + minute * 60_000;
-    return getMarketMinuteBar(profile, minuteStartMs, minuteStartMs + 59_999, []);
+    return getMarketMinuteBar(
+      DAILY_MINUTE_PARITY_PROFILE,
+      minuteStartMs,
+      minuteStartMs + 59_999,
+      [],
+    );
   });
 
   assert.deepEqual({
@@ -552,6 +558,28 @@ test('daily checkpoint OHLCV exactly aggregates all completed minute bars', () =
     closeWon: minuteBars.at(-1)?.closeWon,
     volumeShares: minuteBars.reduce((sum, bar) => sum + bar.volumeShares, 0),
   });
+});
+
+test('event-free completed day close exactly equals the next UTC day open', () => {
+  const dayStarts = [
+    Date.parse('2026-05-17T00:00:00.000Z'),
+    Date.parse('2025-03-09T00:00:00.000Z'),
+    Date.parse('2026-07-12T00:00:00.000Z'),
+  ];
+
+  for (const dayStartMs of dayStarts) {
+    const completed = getMarketDailyCheckpoint(DAILY_MINUTE_PARITY_PROFILE, dayStartMs, []);
+    const nextDay = getMarketDailyCheckpoint(
+      DAILY_MINUTE_PARITY_PROFILE,
+      dayStartMs + 24 * 60 * 60_000,
+      [],
+    );
+    assert.equal(
+      completed.closeWon,
+      nextDay.openWon,
+      new Date(dayStartMs).toISOString(),
+    );
+  }
 });
 
 test('a future non-overlapping event leaves a past daily checkpoint byte-identical', () => {
