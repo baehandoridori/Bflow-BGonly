@@ -153,7 +153,7 @@ test('progressive daily display keeps exact synchronous candle semantics', async
   assert.ok(yieldCount > progressive.length, `${yieldCount} yields for ${progressive.length} bars`);
 });
 
-test('daily chart refreshes forming UTC-day OHLCV without restarting its history', async () => {
+test('current partial candles refresh each second without restarting history', async () => {
   const displaySeries = await import('../src/features/playground/market/marketDisplaySeries.ts');
   const profile = {
     stockId: 'forming-daily-volume-profile',
@@ -164,24 +164,28 @@ test('daily chart refreshes forming UTC-day OHLCV without restarting its history
   };
   const currentUtcDayStartMs = Date.parse('2026-07-11T00:00:00Z');
   const firstNowMs = Date.parse('2026-07-11T12:00:10Z');
-  const buildAt = (nowMs: number) => displaySeries.buildMarketDisplayCandles({
+  const buildAt = (nowMs: number, interval: '10m' | '1h' | '1d') => displaySeries.buildMarketDisplayCandles({
     profile,
     startMs: currentUtcDayStartMs,
     endMs: nowMs + 1,
     nowMs,
     events: [],
-    interval: '1d',
-  })[0];
-  const first = buildAt(firstNowMs);
-  const second = buildAt(firstNowMs + 1000);
+    interval,
+  }).at(-1);
 
-  assert.ok(second.volumeShares > first.volumeShares);
+  for (const interval of ['10m', '1h', '1d'] as const) {
+    const first = buildAt(firstNowMs, interval);
+    const second = buildAt(firstNowMs + 1000, interval);
+
+    assert.ok(first);
+    assert.ok(second);
+    assert.equal(second.startsAt, first.startsAt, interval);
+    assert.ok(second.volumeShares > first.volumeShares, interval);
+  }
   const priceChart = readFileSync(PRICE_CHART_PATH, 'utf8');
-  assert.match(priceChart, /currentUtcDayStartMs/);
-  assert.match(priceChart, /currentDailyCandles/);
-  assert.match(priceChart, /startMs:\s*currentDailyStartMs/);
-  assert.match(priceChart, /endMs:\s*currentUtcDayStartMs/);
-  assert.match(priceChart, /progressiveDailyState\.requestKey\s*===\s*progressiveRequestKey/);
+  assert.match(priceChart, /const currentCandles = useMemo/);
+  assert.match(priceChart, /\.\.\.segments\.current/);
+  assert.match(priceChart, /historicalState\.requestKey\s*===\s*historicalRequestKey/);
 });
 
 test('today daily split excludes the previous KST day before UTC rollover', async () => {
@@ -207,26 +211,197 @@ test('today daily split excludes the previous KST day before UTC rollover', asyn
     ...request,
     startMs: chartRangeStartMs,
   });
+  const segments = displaySeries.splitMarketDisplayRange(chartRangeStartMs, nowMs);
+  const leading = await displaySeries.buildMarketDisplayCandlesProgressively({
+    ...request,
+    ...segments.leading,
+    nowMs: segments.leading.endMs,
+  }, { yieldControl: async () => {} });
   const historical = await displaySeries.buildMarketDisplayCandlesProgressively({
     ...request,
-    startMs: chartRangeStartMs,
-    endMs: currentUtcDayStartMs,
-    nowMs: currentUtcDayStartMs,
+    ...segments.historical,
+    nowMs: segments.historical.endMs,
   }, { yieldControl: async () => {} });
   const current = displaySeries.buildMarketDisplayCandles({
     ...request,
-    startMs: Math.max(currentUtcDayStartMs, chartRangeStartMs),
+    ...segments.current,
   });
   const wrongUtcDay = displaySeries.buildMarketDisplayCandles({
     ...request,
     startMs: currentUtcDayStartMs,
   });
 
-  assert.deepEqual([...historical, ...current], exact);
+  assert.deepEqual([...leading, ...historical, ...current], exact);
   assert.ok(wrongUtcDay[0].volumeShares > exact[0].volumeShares);
   const priceChart = readFileSync(PRICE_CHART_PATH, 'utf8');
-  assert.match(priceChart, /currentDailyStartMs\s*=\s*Math\.max\(currentUtcDayStartMs,\s*chartRangeStartMs\)/);
-  assert.match(priceChart, /startMs:\s*currentDailyStartMs/);
+  assert.match(priceChart, /splitMarketDisplayRange\(chartRangeStartMs, nowMs\)/);
+  assert.match(priceChart, /\.\.\.segments\.current/);
+});
+
+test('long-range UI split preserves the exact leading partial daily candle', async () => {
+  const displaySeries = await import('../src/features/playground/market/marketDisplaySeries.ts');
+  assert.equal(typeof displaySeries.splitMarketDisplayRange, 'function');
+  const nowMs = Date.parse('2026-07-12T12:34:56Z');
+  const rangeStartMs = nowMs - 3 * 24 * 60 * 60_000;
+  const profile = {
+    stockId: 'leading-partial-daily-profile',
+    basePriceWon: 100_000,
+    volatilityBps: 2400,
+    phase: 0.27,
+    baseMinuteVolume: 12_000,
+  };
+  const segments = displaySeries.splitMarketDisplayRange(rangeStartMs, nowMs);
+  const baseRequest = { profile, events: [], interval: '1d' as const };
+  const leading = await displaySeries.buildMarketDisplayCandlesProgressively({
+    ...baseRequest,
+    ...segments.leading,
+    nowMs: segments.leading.endMs,
+  }, { yieldControl: async () => {} });
+  const historical = await displaySeries.buildMarketDisplayCandlesProgressively({
+    ...baseRequest,
+    ...segments.historical,
+    nowMs: segments.historical.endMs,
+  }, { yieldControl: async () => {} });
+  const current = displaySeries.buildMarketDisplayCandles({
+    ...baseRequest,
+    ...segments.current,
+    nowMs,
+  });
+  const exact = displaySeries.buildMarketDisplayCandles({
+    ...baseRequest,
+    startMs: rangeStartMs,
+    endMs: nowMs + 1,
+    nowMs,
+  });
+
+  assert.deepEqual(leading[0], exact[0]);
+  assert.deepEqual([...leading, ...historical, ...current], exact);
+  const priceChart = readFileSync(PRICE_CHART_PATH, 'utf8');
+  assert.match(priceChart, /splitMarketDisplayRange/);
+  assert.doesNotMatch(priceChart, /Math\.floor\(chartRangeStartMs\s*\/\s*DAY_MS\)\s*\*\s*DAY_MS/);
+});
+
+test('future events do not change causal display history or its request key', async () => {
+  const displaySeries = await import('../src/features/playground/market/marketDisplaySeries.ts');
+  assert.equal(typeof displaySeries.selectCausalMarketEvents, 'function');
+  assert.equal(typeof displaySeries.marketDisplayEventsFingerprint, 'function');
+  const stockId = 'causal-display-events-profile';
+  const cutoffMs = Date.parse('2026-07-12T00:00:00Z');
+  const pastEvents = [{
+    id: 'past-shock',
+    stockId,
+    kind: 'shock-up' as const,
+    title: '과거 상승',
+    impactBps: 500,
+    startsAt: '2026-07-09T01:00:00Z',
+    endsAt: '2026-07-09T02:00:00Z',
+    revision: 1,
+  }, {
+    id: 'dependency-halt',
+    stockId,
+    kind: 'halt' as const,
+    title: '정지 의존성',
+    impactBps: 0,
+    startsAt: '2026-07-10T23:00:00Z',
+    endsAt: '2026-07-11T02:00:00Z',
+    revision: 1,
+  }];
+  const futureEvent = {
+    id: 'future-shock',
+    stockId,
+    kind: 'shock-down' as const,
+    title: '미래 하락',
+    impactBps: 900,
+    startsAt: '2026-07-13T01:00:00Z',
+    endsAt: '2026-07-13T02:00:00Z',
+    revision: 1,
+  };
+  const before = displaySeries.selectCausalMarketEvents(pastEvents, stockId, cutoffMs);
+  const after = displaySeries.selectCausalMarketEvents(
+    [...pastEvents, futureEvent],
+    stockId,
+    cutoffMs,
+  );
+
+  assert.deepEqual(after, before);
+  assert.equal(
+    displaySeries.marketDisplayEventsFingerprint(after),
+    displaySeries.marketDisplayEventsFingerprint(before),
+  );
+  assert.deepEqual(after.map((event) => event.id), ['past-shock', 'dependency-halt']);
+  const historyRequest = {
+    profile: {
+      stockId,
+      basePriceWon: 1000,
+      volatilityBps: 100,
+      phase: 0.5,
+    },
+    startMs: Date.parse('2026-07-09T00:00:00Z'),
+    endMs: cutoffMs,
+    nowMs: cutoffMs,
+    interval: '1h' as const,
+  };
+  const historyBefore = await displaySeries.buildMarketDisplayCandlesProgressively({
+    ...historyRequest,
+    events: before,
+  }, { yieldControl: async () => {} });
+  const historyAfter = await displaySeries.buildMarketDisplayCandlesProgressively({
+    ...historyRequest,
+    events: after,
+  }, { yieldControl: async () => {} });
+  assert.deepEqual(historyAfter, historyBefore);
+  const priceChart = readFileSync(PRICE_CHART_PATH, 'utf8');
+  assert.match(priceChart, /selectCausalMarketEvents/);
+  assert.doesNotMatch(priceChart, /dailyEventFingerprint/);
+});
+
+test('week and month progressive builders yield between exact UTC-day chunks', async () => {
+  const displaySeries = await import('../src/features/playground/market/marketDisplaySeries.ts');
+  const nowMs = Date.parse('2026-07-12T12:34:56Z');
+  const samples = [
+    { name: 'week', days: 7, interval: '10m' as const },
+    { name: 'month', days: 30, interval: '1h' as const },
+  ];
+
+  for (const sample of samples) {
+    const request = {
+      profile: {
+        stockId: `progressive-${sample.name}-exact-profile`,
+        basePriceWon: 1000,
+        volatilityBps: 100,
+        phase: 0.25,
+        baseMinuteVolume: 8000,
+      },
+      startMs: nowMs - sample.days * 24 * 60 * 60_000,
+      endMs: nowMs + 1,
+      nowMs,
+      events: [],
+      interval: sample.interval,
+    };
+    let yieldCount = 0;
+    const progressive = await displaySeries.buildMarketDisplayCandlesProgressively(request, {
+      yieldControl: async () => {
+        yieldCount += 1;
+      },
+    });
+    const exact = displaySeries.buildMarketDisplayCandles(request);
+    assert.deepEqual(progressive, exact, sample.name);
+    assert.ok(yieldCount > sample.days, `${sample.name} only yielded ${yieldCount} times`);
+
+    const controller = new AbortController();
+    const scheduledAt = performance.now();
+    const pending = displaySeries.buildMarketDisplayCandlesProgressively({
+      ...request,
+      profile: { ...request.profile, stockId: `${request.profile.stockId}-abort` },
+    }, { signal: controller.signal });
+    const schedulingMs = performance.now() - scheduledAt;
+    controller.abort();
+    assert.ok(schedulingMs < 100, `${sample.name} scheduling blocked ${schedulingMs.toFixed(1)}ms`);
+    assert.deepEqual(await pending, []);
+  }
+
+  const priceChart = readFileSync(PRICE_CHART_PATH, 'utf8');
+  assert.doesNotMatch(priceChart, /immediateCandles/);
 });
 
 test('a future event does not invalidate completed historical display bars', async () => {

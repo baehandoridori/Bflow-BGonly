@@ -3,9 +3,13 @@ import { useEffect, useMemo, useState } from 'react';
 import { resolveIntervalForRange } from '@/features/playground/market/chartSeries';
 import { formatWon } from '@/features/playground/market/format';
 import { MARKET_INSTRUMENT_PROFILES } from '@/features/playground/market/livePriceEngine';
+import { MAX_MARKET_CHART_BARS } from '@/features/playground/market/marketChartUi';
 import {
   buildMarketDisplayCandles,
   buildMarketDisplayCandlesProgressively,
+  marketDisplayEventsFingerprint,
+  selectCausalMarketEvents,
+  splitMarketDisplayRange,
 } from '@/features/playground/market/marketDisplaySeries';
 import type {
   MarketAdminEvent,
@@ -29,7 +33,7 @@ interface MarketPriceChartProps {
   onRangeChange(range: MarketChartRange): void;
 }
 
-interface ProgressiveDailyState {
+interface ProgressiveSeriesState {
   requestKey: string;
   candles: MarketCandle[];
 }
@@ -73,22 +77,24 @@ function intervalLabel(value: MarketBarInterval): string {
   return INTERVALS.find((item) => item.value === value)?.label ?? value;
 }
 
-function dailyEventFingerprint(
-  stockId: string | undefined,
+function progressiveSeriesRequestKey(
+  segment: 'leading' | 'historical',
+  stockId: string,
+  interval: MarketBarInterval,
+  range: MarketChartRange,
+  startMs: number,
+  endMs: number,
   events: readonly MarketAdminEvent[],
 ): string {
-  return events
-    .filter((event) => event.stockId === stockId)
-    .map((event) => [
-      event.id,
-      event.revision,
-      event.kind,
-      event.impactBps,
-      event.startsAt,
-      event.endsAt ?? '',
-    ].join(':'))
-    .sort()
-    .join('|');
+  return [
+    segment,
+    stockId,
+    interval,
+    range,
+    startMs,
+    endMs,
+    marketDisplayEventsFingerprint(events),
+  ].join('::');
 }
 
 export function MarketPriceChart({
@@ -103,94 +109,144 @@ export function MarketPriceChart({
   onRangeChange,
 }: MarketPriceChartProps) {
   const [announcement, setAnnouncement] = useState('');
-  const [progressiveDailyState, setProgressiveDailyState] = useState<ProgressiveDailyState>({
+  const [leadingState, setLeadingState] = useState<ProgressiveSeriesState>({
+    requestKey: '',
+    candles: [],
+  });
+  const [historicalState, setHistoricalState] = useState<ProgressiveSeriesState>({
     requestKey: '',
     candles: [],
   });
   const profile = MARKET_INSTRUMENT_PROFILES[stock.id];
-  const currentUtcDayStartMs = Math.floor(nowMs / DAY_MS) * DAY_MS;
   const chartRangeStartMs = chartStartMs(range, nowMs);
-  const currentDailyStartMs = Math.max(currentUtcDayStartMs, chartRangeStartMs);
-  const progressiveRangeStartMs = range === 'today'
-    ? chartRangeStartMs
-    : Math.floor(chartRangeStartMs / DAY_MS) * DAY_MS;
-  const progressiveRequestKey = [
-    profile?.stockId ?? '',
+  const segments = splitMarketDisplayRange(chartRangeStartMs, nowMs);
+  const leadingEvents = selectCausalMarketEvents(events, stock.id, segments.leading.endMs);
+  const historicalEvents = selectCausalMarketEvents(
+    events,
+    stock.id,
+    segments.historical.endMs,
+  );
+  const currentEvents = selectCausalMarketEvents(events, stock.id, segments.current.endMs);
+  const currentEventsFingerprint = marketDisplayEventsFingerprint(currentEvents);
+  const leadingRequestKey = progressiveSeriesRequestKey(
+    'leading',
+    stock.id,
+    interval,
     range,
-    progressiveRangeStartMs,
-    currentUtcDayStartMs,
-    dailyEventFingerprint(profile?.stockId, events),
-  ].join('::');
+    segments.leading.startMs,
+    segments.leading.endMs,
+    leadingEvents,
+  );
+  const historicalRequestKey = progressiveSeriesRequestKey(
+    'historical',
+    stock.id,
+    interval,
+    range,
+    segments.historical.startMs,
+    segments.historical.endMs,
+    historicalEvents,
+  );
 
   useEffect(() => {
-    if (!profile || interval !== '1d') return undefined;
+    if (!profile) return undefined;
     const controller = new AbortController();
     void buildMarketDisplayCandlesProgressively({
       profile,
-      startMs: progressiveRangeStartMs,
-      endMs: currentUtcDayStartMs,
-      nowMs: currentUtcDayStartMs,
-      events,
+      ...segments.leading,
+      nowMs: segments.leading.endMs,
+      events: leadingEvents,
       interval,
     }, {
       signal: controller.signal,
       onProgress: (nextCandles) => {
         if (!controller.signal.aborted) {
-          setProgressiveDailyState({
-            requestKey: progressiveRequestKey,
+          setLeadingState({
+            requestKey: leadingRequestKey,
             candles: [...nextCandles],
           });
         }
       },
     }).then((nextCandles) => {
       if (!controller.signal.aborted) {
-        setProgressiveDailyState({
-          requestKey: progressiveRequestKey,
+        setLeadingState({
+          requestKey: leadingRequestKey,
           candles: nextCandles,
         });
       }
     });
     return () => controller.abort();
   }, [
-    currentUtcDayStartMs,
-    events,
     interval,
+    leadingRequestKey,
     profile,
-    progressiveRangeStartMs,
-    progressiveRequestKey,
+    segments.leading.endMs,
+    segments.leading.startMs,
   ]);
 
-  const currentDailyCandles = useMemo(() => {
-    if (!profile || interval !== '1d') return [];
-    return buildMarketDisplayCandles({
+  useEffect(() => {
+    if (!profile) return undefined;
+    const controller = new AbortController();
+    void buildMarketDisplayCandlesProgressively({
       profile,
-      startMs: currentDailyStartMs,
-      endMs: nowMs + 1,
-      nowMs,
-      events,
+      ...segments.historical,
+      nowMs: segments.historical.endMs,
+      events: historicalEvents,
       interval,
+    }, {
+      signal: controller.signal,
+      onProgress: (nextCandles) => {
+        if (!controller.signal.aborted) {
+          setHistoricalState({
+            requestKey: historicalRequestKey,
+            candles: [...nextCandles],
+          });
+        }
+      },
+    }).then((nextCandles) => {
+      if (!controller.signal.aborted) {
+        setHistoricalState({
+          requestKey: historicalRequestKey,
+          candles: nextCandles,
+        });
+      }
     });
-  }, [currentDailyStartMs, events, interval, nowMs, profile]);
+    return () => controller.abort();
+  }, [
+    historicalRequestKey,
+    interval,
+    profile,
+    segments.historical.endMs,
+    segments.historical.startMs,
+  ]);
 
-  const immediateCandles = useMemo(() => {
-    if (!profile || interval === '1d') return [];
+  const currentCandles = useMemo(() => {
+    if (!profile) return [];
     return buildMarketDisplayCandles({
       profile,
-      startMs: chartStartMs(range, nowMs),
-      endMs: nowMs + 1,
+      ...segments.current,
       nowMs,
-      events,
+      events: currentEvents,
       interval,
     });
-  }, [events, interval, nowMs, profile, range]);
-  const progressiveHistoricalCandles = progressiveDailyState.requestKey === progressiveRequestKey
-    ? progressiveDailyState.candles
+  }, [
+    currentEventsFingerprint,
+    interval,
+    nowMs,
+    profile,
+    segments.current.endMs,
+    segments.current.startMs,
+  ]);
+  const leadingCandles = leadingState.requestKey === leadingRequestKey
+    ? leadingState.candles
     : [];
-  const dailyCandles = useMemo(() => [
-    ...progressiveHistoricalCandles,
-    ...currentDailyCandles,
-  ], [currentDailyCandles, progressiveHistoricalCandles]);
-  const builtCandles = interval === '1d' ? dailyCandles : immediateCandles;
+  const historicalCandles = historicalState.requestKey === historicalRequestKey
+    ? historicalState.candles
+    : [];
+  const builtCandles = useMemo(() => [
+    ...leadingCandles,
+    ...historicalCandles,
+    ...currentCandles,
+  ].slice(-MAX_MARKET_CHART_BARS), [currentCandles, historicalCandles, leadingCandles]);
   const candles = useMemo(() => {
     const latestCandle = builtCandles.at(-1);
     if (!latestCandle) return builtCandles;

@@ -28,6 +28,17 @@ export interface BuildMarketDisplayCandlesProgressivelyOptions {
   yieldControl?(): Promise<void>;
 }
 
+export interface MarketDisplayTimeRange {
+  startMs: number;
+  endMs: number;
+}
+
+export interface MarketDisplayRangeSegments {
+  leading: MarketDisplayTimeRange;
+  historical: MarketDisplayTimeRange;
+  current: MarketDisplayTimeRange;
+}
+
 interface DailyBucketWindow {
   requestedFirstMinuteMs: number;
   firstBucketMs: number;
@@ -35,6 +46,60 @@ interface DailyBucketWindow {
 }
 
 const completedDisplayBarCache = new Map<string, MarketCandle>();
+
+export function selectCausalMarketEvents(
+  events: readonly MarketAdminEvent[],
+  stockId: string,
+  observedUntilExclusiveMs: number,
+): MarketAdminEvent[] {
+  return events.filter((event) => {
+    if (event.stockId !== stockId) return false;
+    const eventStartMs = Date.parse(event.startsAt);
+    return Number.isFinite(eventStartMs) && eventStartMs < observedUntilExclusiveMs;
+  });
+}
+
+export function marketDisplayEventsFingerprint(
+  events: readonly MarketAdminEvent[],
+): string {
+  return events
+    .map((event) => [
+      event.id,
+      event.revision,
+      event.kind,
+      event.impactBps,
+      event.startsAt,
+      event.endsAt ?? '',
+    ].join(':'))
+    .sort()
+    .join('|');
+}
+
+export function splitMarketDisplayRange(
+  rangeStartMs: number,
+  nowMs: number,
+): MarketDisplayRangeSegments {
+  if (![rangeStartMs, nowMs].every(Number.isFinite)) {
+    throw new RangeError('display range timestamps must be finite');
+  }
+  const visibleEndMs = nowMs + 1;
+  const firstFullUtcDayStartMs = Math.ceil(rangeStartMs / DAY_MS) * DAY_MS;
+  const currentUtcDayStartMs = Math.floor(nowMs / DAY_MS) * DAY_MS;
+  return {
+    leading: {
+      startMs: rangeStartMs,
+      endMs: Math.min(firstFullUtcDayStartMs, currentUtcDayStartMs),
+    },
+    historical: {
+      startMs: firstFullUtcDayStartMs,
+      endMs: currentUtcDayStartMs,
+    },
+    current: {
+      startMs: Math.max(currentUtcDayStartMs, rangeStartMs),
+      endMs: visibleEndMs,
+    },
+  };
+}
 
 function cloneCandle(candle: MarketCandle): MarketCandle {
   return { ...candle, newsIds: [...candle.newsIds] };
@@ -61,21 +126,11 @@ function completedDayEventFingerprint(
   bucketEndMs: number,
   events: readonly MarketAdminEvent[],
 ): string {
-  return events
-    .filter((event) => (
-      event.stockId === profile.stockId
-      && Date.parse(event.startsAt) < bucketEndMs
-    ))
-    .map((event) => [
-      event.id,
-      event.revision,
-      event.kind,
-      event.impactBps,
-      event.startsAt,
-      event.endsAt ?? '',
-    ].join(':'))
-    .sort()
-    .join('|');
+  return marketDisplayEventsFingerprint(selectCausalMarketEvents(
+    events,
+    profile.stockId,
+    bucketEndMs,
+  ));
 }
 
 function newsIdsForRange(
@@ -253,6 +308,21 @@ function yieldToMainThread(): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, 0));
 }
 
+function resolveProgressiveDayWindow(
+  request: BuildMarketDisplayCandlesRequest,
+): { firstDayMs: number; lastDayMs: number; visibleEndMs: number } | null {
+  if (![request.startMs, request.endMs, request.nowMs].every(Number.isFinite)) {
+    throw new RangeError('display candle timestamps must be finite');
+  }
+  const visibleEndMs = Math.min(request.endMs, request.nowMs + 1);
+  if (visibleEndMs <= request.startMs) return null;
+  return {
+    firstDayMs: Math.floor(request.startMs / DAY_MS) * DAY_MS,
+    lastDayMs: Math.floor((visibleEndMs - 1) / DAY_MS) * DAY_MS,
+    visibleEndMs,
+  };
+}
+
 export function buildMarketDisplayCandles(
   request: BuildMarketDisplayCandlesRequest,
 ): MarketCandle[] {
@@ -293,31 +363,29 @@ export async function buildMarketDisplayCandlesProgressively(
   const yieldControl = options.yieldControl ?? yieldToMainThread;
   await yieldControl();
   if (options.signal?.aborted) return [];
-  if (request.interval !== '1d') return buildMarketDisplayCandles(request);
-
-  const window = resolveDailyBucketWindow(request);
+  const window = resolveProgressiveDayWindow(request);
   if (!window) return [];
   const result: MarketCandle[] = [];
-  let processedBuckets = 0;
+  let processedDays = 0;
   for (
-    let bucketStartMs = window.lastBucketMs;
-    bucketStartMs >= window.firstBucketMs;
-    bucketStartMs -= DAY_MS
+    let dayStartMs = window.lastDayMs;
+    dayStartMs >= window.firstDayMs;
+    dayStartMs -= DAY_MS
   ) {
     if (options.signal?.aborted) return result;
-    const candle = buildDailyBucketCandle(
-      request,
-      window.requestedFirstMinuteMs,
-      bucketStartMs,
-    );
-    if (candle) result.unshift(candle);
-    processedBuckets += 1;
+    const dayCandles = buildMarketDisplayCandles({
+      ...request,
+      startMs: Math.max(request.startMs, dayStartMs),
+      endMs: Math.min(window.visibleEndMs, dayStartMs + DAY_MS),
+    });
+    if (dayCandles.length > 0) result.unshift(...dayCandles);
+    processedDays += 1;
     if (
-      processedBuckets === 1
-      || processedBuckets % PROGRESSIVE_PUBLISH_INTERVAL === 0
-      || bucketStartMs === window.firstBucketMs
+      processedDays === 1
+      || processedDays % PROGRESSIVE_PUBLISH_INTERVAL === 0
+      || dayStartMs === window.firstDayMs
     ) {
-      options.onProgress?.(result.map(cloneCandle));
+      options.onProgress?.(result.slice(-MAX_MARKET_CHART_BARS).map(cloneCandle));
     }
     await yieldControl();
   }
