@@ -1,4 +1,5 @@
 import {
+  getMarketEventCheckpointCacheStats,
   getMarketDailyCheckpoint,
   getMarketMinuteBar,
   getMarketPriceWon,
@@ -40,7 +41,11 @@ export const MARKET_INSTRUMENT_PROFILES = {
   },
 };
 
-export { getMarketDailyCheckpoint, getMarketMinuteBar };
+export {
+  getMarketDailyCheckpoint,
+  getMarketEventCheckpointCacheStats,
+  getMarketMinuteBar,
+};
 
 export function getLivePriceWon(profile, nowMs, events) {
   return getMarketPriceWon(profile, nowMs, events);

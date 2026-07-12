@@ -1,4 +1,10 @@
-import { useMemo, useRef, useState, type MutableRefObject } from 'react';
+import {
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type MutableRefObject,
+} from 'react';
 import { toast } from 'sonner';
 
 import {
@@ -233,6 +239,23 @@ export function resolveMarketShareChoiceQuantity(
   return Math.max(1, availableBuyShares);
 }
 
+export function reconcileMarketMaxShareChoice({
+  selectedChoice,
+  quantityInput,
+  availableBuyShares,
+}: {
+  selectedChoice: MarketShareChoice | null;
+  quantityInput: string;
+  availableBuyShares: number;
+}): {
+  selectedChoice: MarketShareChoice | null;
+  quantityInput: string;
+} {
+  if (selectedChoice !== 'max') return { selectedChoice, quantityInput };
+  if (availableBuyShares <= 0) return { selectedChoice: null, quantityInput: '1' };
+  return { selectedChoice: 'max', quantityInput: String(availableBuyShares) };
+}
+
 function limitDraftError(draft: MarketLimitDraft): string | null {
   const desiredPriceWon = Number(draft.desiredPriceInput);
   const quantityShares = Number(draft.quantityInput);
@@ -301,6 +324,17 @@ export function useMarketOrderController({
       : orderPreviewState.validationBySide;
   const availableBuyShares = orderPreviewState?.availableBuyShares ?? 0;
   const availableSellShares = orderPreviewState?.availableSellShares ?? 0;
+
+  useEffect(() => {
+    const next = reconcileMarketMaxShareChoice({
+      selectedChoice,
+      quantityInput,
+      availableBuyShares,
+    });
+    if (next.quantityInput !== quantityInput) setQuantityInputState(next.quantityInput);
+    if (next.selectedChoice !== selectedChoice) setSelectedChoice(next.selectedChoice);
+  }, [availableBuyShares, quantityInput, selectedChoice]);
+
   const pendingResolution = pendingOrderUncertain;
   const refreshRequired = valueRefreshRequired;
   const pendingCommandMismatch = pendingValueCommand !== null
@@ -341,8 +375,13 @@ export function useMarketOrderController({
       nextChoice,
       availableBuyShares,
     );
-    setQuantityInputState(String(quantityShares));
-    setSelectedChoice(nextChoice);
+    const next = reconcileMarketMaxShareChoice({
+      selectedChoice: nextChoice,
+      quantityInput: String(quantityShares),
+      availableBuyShares,
+    });
+    setQuantityInputState(next.quantityInput);
+    setSelectedChoice(next.selectedChoice);
     clearFeedback();
   };
 

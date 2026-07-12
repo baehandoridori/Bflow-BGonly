@@ -332,6 +332,70 @@ test('current partial candles refresh each second without restarting history', a
   assert.match(priceChart, /historicalState\.requestKey\s*===\s*historicalRequestKey/);
 });
 
+test('relative chart history keeps a stable request identity across consecutive seconds', async () => {
+  const chartUi = await import('../src/features/playground/market/marketChartUi.ts');
+  const firstNowMs = Date.parse('2026-07-11T12:00:10Z');
+  const secondNowMs = firstNowMs + 1000;
+  const firstStartMs = chartUi.resolveStableMarketChartRangeStartMs(
+    'week',
+    '10m',
+    firstNowMs,
+  );
+  const secondStartMs = chartUi.resolveStableMarketChartRangeStartMs(
+    'week',
+    '10m',
+    secondNowMs,
+  );
+  const request = {
+    segment: 'leading' as const,
+    stockId: 'stable-history-profile',
+    interval: '10m' as const,
+    range: 'week' as const,
+    endMs: Date.parse('2026-07-12T00:00:00Z'),
+    eventsFingerprint: '',
+  };
+
+  assert.equal(firstStartMs, secondStartMs);
+  assert.equal(
+    chartUi.marketChartProgressiveRequestKey({ ...request, startMs: firstStartMs }),
+    chartUi.marketChartProgressiveRequestKey({ ...request, startMs: secondStartMs }),
+    'a one-second quote refresh must not abort and restart historical work',
+  );
+
+  const completed = [{ startsAt: 'completed-leading' }];
+  assert.equal(
+    chartUi.resolveProgressiveMarketChartCandles({
+      state: {
+        requestKey: 'previous-request',
+        seriesIdentity: 'same-series',
+        candles: completed,
+        complete: true,
+      },
+      requestKey: 'replacement-request',
+      seriesIdentity: 'same-series',
+    }),
+    completed,
+    'completed leading data must remain visible during a same-series replacement',
+  );
+  assert.deepEqual(
+    chartUi.resolveProgressiveMarketChartCandles({
+      state: {
+        requestKey: 'previous-request',
+        seriesIdentity: 'different-series',
+        candles: completed,
+        complete: true,
+      },
+      requestKey: 'replacement-request',
+      seriesIdentity: 'same-series',
+    }),
+    [],
+  );
+
+  const priceChart = readFileSync(PRICE_CHART_PATH, 'utf8');
+  assert.match(priceChart, /resolveStableMarketChartRangeStartMs\(range, interval, nowMs\)/);
+  assert.match(priceChart, /resolveProgressiveMarketChartCandles/);
+});
+
 test('today daily split excludes the previous KST day before UTC rollover', async () => {
   const displaySeries = await import('../src/features/playground/market/marketDisplaySeries.ts');
   const profile = {

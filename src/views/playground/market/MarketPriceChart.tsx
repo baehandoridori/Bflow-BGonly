@@ -3,7 +3,12 @@ import { useEffect, useMemo, useState } from 'react';
 import { resolveIntervalForRange } from '@/features/playground/market/chartSeries';
 import { formatShares, formatWon } from '@/features/playground/market/format';
 import { MARKET_INSTRUMENT_PROFILES } from '@/features/playground/market/livePriceEngine';
-import { MAX_MARKET_CHART_BARS } from '@/features/playground/market/marketChartUi';
+import {
+  marketChartProgressiveRequestKey,
+  MAX_MARKET_CHART_BARS,
+  resolveProgressiveMarketChartCandles,
+  resolveStableMarketChartRangeStartMs,
+} from '@/features/playground/market/marketChartUi';
 import {
   buildMarketDisplayCandles,
   buildMarketDisplayCandlesProgressively,
@@ -35,12 +40,10 @@ interface MarketPriceChartProps {
 
 interface ProgressiveSeriesState {
   requestKey: string;
+  seriesIdentity: string;
   candles: MarketCandle[];
   complete: boolean;
 }
-
-const DAY_MS = 24 * 60 * 60 * 1000;
-const KOREA_OFFSET_MS = 9 * 60 * 60 * 1000;
 
 const INTERVAL_OPTIONS = [
   ['1m', '1분'], ['5m', '5분'], ['10m', '10분'],
@@ -52,16 +55,6 @@ const RANGE_OPTIONS = [
 ] as const;
 const STYLE_OPTIONS = [['line', '선'], ['candlestick', '캔들']] as const;
 const SELECT_CLASS_NAME = 'mt-2 min-h-11 w-full cursor-pointer rounded-xl border border-bg-border bg-bg-primary/55 px-3 py-2 text-sm font-semibold text-text-primary transition-colors duration-200 motion-reduce:transition-none hover:bg-bg-border/35 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent';
-
-function chartStartMs(range: MarketChartRange, nowMs: number): number {
-  if (range === 'today') {
-    return Math.floor((nowMs + KOREA_OFFSET_MS) / DAY_MS) * DAY_MS - KOREA_OFFSET_MS;
-  }
-  if (range === 'week') return nowMs - 7 * DAY_MS;
-  if (range === 'month') return nowMs - 30 * DAY_MS;
-  if (range === 'six-months') return nowMs - 180 * DAY_MS;
-  return nowMs - 600 * DAY_MS;
-}
 
 function intervalLabel(value: MarketBarInterval): string {
   return INTERVAL_OPTIONS.find(([option]) => option === value)?.[1] ?? value;
@@ -98,13 +91,29 @@ function progressiveSeriesRequestKey(
   endMs: number,
   events: readonly MarketAdminEvent[],
 ): string {
-  return [
+  return marketChartProgressiveRequestKey({
     segment,
     stockId,
     interval,
     range,
     startMs,
     endMs,
+    eventsFingerprint: marketDisplayEventsFingerprint(events),
+  });
+}
+
+function progressiveSeriesIdentity(
+  segment: 'leading' | 'historical',
+  stockId: string,
+  interval: MarketBarInterval,
+  range: MarketChartRange,
+  events: readonly MarketAdminEvent[],
+): string {
+  return [
+    segment,
+    stockId,
+    interval,
+    range,
     marketDisplayEventsFingerprint(events),
   ].join('::');
 }
@@ -126,16 +135,18 @@ export function MarketPriceChart({
   const [resetKey, setResetKey] = useState(0);
   const [leadingState, setLeadingState] = useState<ProgressiveSeriesState>({
     requestKey: '',
+    seriesIdentity: '',
     candles: [],
     complete: false,
   });
   const [historicalState, setHistoricalState] = useState<ProgressiveSeriesState>({
     requestKey: '',
+    seriesIdentity: '',
     candles: [],
     complete: false,
   });
   const profile = MARKET_INSTRUMENT_PROFILES[stock.id];
-  const chartRangeStartMs = chartStartMs(range, nowMs);
+  const chartRangeStartMs = resolveStableMarketChartRangeStartMs(range, interval, nowMs);
   const segments = splitMarketDisplayRange(chartRangeStartMs, nowMs);
   const leadingEvents = selectCausalMarketEvents(events, stock.id, segments.leading.endMs);
   const historicalEvents = selectCausalMarketEvents(
@@ -163,6 +174,12 @@ export function MarketPriceChart({
     segments.historical.endMs,
     historicalEvents,
   );
+  const leadingSeriesIdentity = progressiveSeriesIdentity(
+    'leading', stock.id, interval, range, leadingEvents,
+  );
+  const historicalSeriesIdentity = progressiveSeriesIdentity(
+    'historical', stock.id, interval, range, historicalEvents,
+  );
 
   useEffect(() => {
     if (!profile) return undefined;
@@ -179,6 +196,7 @@ export function MarketPriceChart({
         if (!controller.signal.aborted) {
           setLeadingState({
             requestKey: leadingRequestKey,
+            seriesIdentity: leadingSeriesIdentity,
             candles: [...nextCandles],
             complete: false,
           });
@@ -188,6 +206,7 @@ export function MarketPriceChart({
       if (!controller.signal.aborted) {
         setLeadingState({
           requestKey: leadingRequestKey,
+          seriesIdentity: leadingSeriesIdentity,
           candles: nextCandles,
           complete: true,
         });
@@ -197,6 +216,7 @@ export function MarketPriceChart({
   }, [
     interval,
     leadingRequestKey,
+    leadingSeriesIdentity,
     profile,
     segments.leading.endMs,
     segments.leading.startMs,
@@ -217,6 +237,7 @@ export function MarketPriceChart({
         if (!controller.signal.aborted) {
           setHistoricalState({
             requestKey: historicalRequestKey,
+            seriesIdentity: historicalSeriesIdentity,
             candles: [...nextCandles],
             complete: false,
           });
@@ -226,6 +247,7 @@ export function MarketPriceChart({
       if (!controller.signal.aborted) {
         setHistoricalState({
           requestKey: historicalRequestKey,
+          seriesIdentity: historicalSeriesIdentity,
           candles: nextCandles,
           complete: true,
         });
@@ -234,6 +256,7 @@ export function MarketPriceChart({
     return () => controller.abort();
   }, [
     historicalRequestKey,
+    historicalSeriesIdentity,
     interval,
     profile,
     segments.historical.endMs,
@@ -257,12 +280,16 @@ export function MarketPriceChart({
     segments.current.endMs,
     segments.current.startMs,
   ]);
-  const leadingCandles = leadingState.requestKey === leadingRequestKey
-    ? leadingState.candles
-    : [];
-  const historicalCandles = historicalState.requestKey === historicalRequestKey
-    ? historicalState.candles
-    : [];
+  const leadingCandles = resolveProgressiveMarketChartCandles({
+    state: leadingState,
+    requestKey: leadingRequestKey,
+    seriesIdentity: leadingSeriesIdentity,
+  });
+  const historicalCandles = resolveProgressiveMarketChartCandles({
+    state: historicalState,
+    requestKey: historicalRequestKey,
+    seriesIdentity: historicalSeriesIdentity,
+  });
   const completionIdentity = [stock.id, interval, range, historicalRequestKey].join('::');
   const completedSeriesKey = leadingState.requestKey === leadingRequestKey
     && leadingState.complete

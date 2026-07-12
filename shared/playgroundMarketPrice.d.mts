@@ -45,6 +45,13 @@ export interface SharedMarketMinuteBar {
   volumeShares: number;
 }
 
+export interface SharedMarketEventCheckpointCacheStats {
+  hits: number;
+  calculations: number;
+  series: number;
+  entries: number;
+}
+
 export function getMarketDailyCheckpoint(
   profile: SharedMarketInstrumentProfile,
   dayStartMs: number,
@@ -57,6 +64,8 @@ export function getMarketMinuteBar(
   observedUntilMs: number,
   events: readonly SharedMarketAdminEvent[],
 ): SharedMarketMinuteBar;
+
+export function getMarketEventCheckpointCacheStats(): SharedMarketEventCheckpointCacheStats;
 
 export function getLivePriceWon(
   profile: SharedMarketInstrumentProfile,

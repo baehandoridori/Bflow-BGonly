@@ -61,12 +61,16 @@ const TWO_POW_32 = 4_294_967_296;
 const TWO_POW_53 = 9_007_199_254_740_992;
 const SECTOR_IDS = new Set(['studio', 'platform', 'creative-tools', 'collaboration']);
 const MINUTE_PATH_CACHE_LIMIT = 96;
-const EVENT_CHECKPOINT_CACHE_LIMIT = 64;
+const EVENT_CHECKPOINT_SERIES_CACHE_LIMIT = 32;
+const EVENT_CHECKPOINTS_PER_SERIES_LIMIT = 640;
 
 const profileStateCache = new Map();
 const minutePathCache = new Map();
 const eventCheckpointCache = new Map();
 const regimeByDay = new Map();
+
+let eventCheckpointCacheHits = 0;
+let eventCheckpointCalculations = 0;
 
 let nextForwardRegimeDay = 0;
 let nextForwardRegimeSegment = 0;
@@ -105,6 +109,38 @@ function setBoundedCache(cache, key, value, maximum) {
     if (oldestKey === undefined) break;
     cache.delete(oldestKey);
   }
+}
+
+function getEventCheckpointSeriesCache(seriesKey) {
+  const cached = eventCheckpointCache.get(seriesKey);
+  if (cached) {
+    setBoundedCache(
+      eventCheckpointCache,
+      seriesKey,
+      cached,
+      EVENT_CHECKPOINT_SERIES_CACHE_LIMIT,
+    );
+    return cached;
+  }
+  const seriesCache = new Map();
+  setBoundedCache(
+    eventCheckpointCache,
+    seriesKey,
+    seriesCache,
+    EVENT_CHECKPOINT_SERIES_CACHE_LIMIT,
+  );
+  return seriesCache;
+}
+
+export function getMarketEventCheckpointCacheStats() {
+  let entries = 0;
+  for (const seriesCache of eventCheckpointCache.values()) entries += seriesCache.size;
+  return {
+    hits: eventCheckpointCacheHits,
+    calculations: eventCheckpointCalculations,
+    series: eventCheckpointCache.size,
+    entries,
+  };
 }
 
 function hash64(input) {
@@ -815,13 +851,26 @@ export function getMarketDailyCheckpoint(profile, dayStartMs, events) {
   ));
   if (affectingEvents.length === 0) return { ...getBaseDailySummary(state, dayIndex) };
 
-  const cacheKey = `${state.key}|${dayIndex}|${eventsFingerprint(affectingEvents)}`;
-  const cached = eventCheckpointCache.get(cacheKey);
+  const seriesKey = `${state.key}|${eventsFingerprint(affectingEvents)}`;
+  const seriesCache = getEventCheckpointSeriesCache(seriesKey);
+  const cached = seriesCache.get(dayIndex);
   if (cached) {
-    setBoundedCache(eventCheckpointCache, cacheKey, cached, EVENT_CHECKPOINT_CACHE_LIMIT);
+    eventCheckpointCacheHits += 1;
+    setBoundedCache(
+      seriesCache,
+      dayIndex,
+      cached,
+      EVENT_CHECKPOINTS_PER_SERIES_LIMIT,
+    );
     return { ...cached };
   }
+  eventCheckpointCalculations += 1;
   const checkpoint = aggregateCompletedDay(state, dayIndex, affectingEvents);
-  setBoundedCache(eventCheckpointCache, cacheKey, checkpoint, EVENT_CHECKPOINT_CACHE_LIMIT);
+  setBoundedCache(
+    seriesCache,
+    dayIndex,
+    checkpoint,
+    EVENT_CHECKPOINTS_PER_SERIES_LIMIT,
+  );
   return { ...checkpoint };
 }

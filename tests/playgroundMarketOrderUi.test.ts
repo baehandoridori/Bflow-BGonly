@@ -194,6 +194,51 @@ test('shared max always means max buyable and opening either sheet side preserve
   assert.equal((controllerInterface.match(/openConfirmation\(/g) ?? []).length, 1);
 });
 
+test('selected max follows the latest buyable amount and clears safely at zero', async () => {
+  const controller = await import('../src/views/playground/market/useMarketOrderController.ts');
+  const selectedAtFive = controller.reconcileMarketMaxShareChoice({
+    selectedChoice: 'max',
+    quantityInput: '5',
+    availableBuyShares: 5,
+  });
+  const afterPriceIncrease = controller.reconcileMarketMaxShareChoice({
+    ...selectedAtFive,
+    availableBuyShares: 3,
+  });
+  const afterOneShareBuy = controller.reconcileMarketMaxShareChoice({
+    ...afterPriceIncrease,
+    availableBuyShares: 2,
+  });
+
+  assert.deepEqual(selectedAtFive, { selectedChoice: 'max', quantityInput: '5' });
+  assert.deepEqual(afterPriceIncrease, { selectedChoice: 'max', quantityInput: '3' });
+  assert.deepEqual(
+    afterOneShareBuy,
+    { selectedChoice: 'max', quantityInput: '2' },
+    'post-buy account changes must not retain the old max quantity',
+  );
+  assert.deepEqual(controller.reconcileMarketMaxShareChoice({
+    selectedChoice: 'max',
+    quantityInput: '2',
+    availableBuyShares: 0,
+  }), {
+    selectedChoice: null,
+    quantityInput: '1',
+  });
+  assert.deepEqual(controller.reconcileMarketMaxShareChoice({
+    selectedChoice: 5,
+    quantityInput: '5',
+    availableBuyShares: 2,
+  }), {
+    selectedChoice: 5,
+    quantityInput: '5',
+  });
+
+  const source = readFileSync('src/views/playground/market/useMarketOrderController.ts', 'utf8');
+  assert.match(source, /useEffect\(\(\) => \{[\s\S]*reconcileMarketMaxShareChoice/);
+  assert.match(source, /availableBuyShares/);
+});
+
 test('order controller freezes snapshot revision with the quote, revalidates drift, blocks halts and creates one request id', async () => {
   const helperPath = 'src/views/playground/market/useMarketOrderController.ts';
   assert.equal(existsSync(helperPath), true, 'shared order controller must exist');

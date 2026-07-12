@@ -74,6 +74,12 @@ type MarketModelApi = {
     observedUntilMs: number,
     events: readonly MarketAdminEvent[],
   ) => MarketMinuteBar;
+  getMarketEventCheckpointCacheStats?: () => {
+    hits: number;
+    calculations: number;
+    series: number;
+    entries: number;
+  };
 };
 
 const marketModelApi = livePriceEngine as typeof livePriceEngine & MarketModelApi;
@@ -810,4 +816,43 @@ test('an ended trend keeps its accumulated final level', () => {
 
   assert.ok(justAfter > 0.05, String(justAfter));
   assert.ok(Math.abs(justAfter - muchLater) < 0.003, `${justAfter} vs ${muchLater}`);
+});
+
+test('event daily checkpoint cache retains the full supported 600-day series', () => {
+  assert.equal(
+    typeof marketModelApi.getMarketEventCheckpointCacheStats,
+    'function',
+    'event checkpoint cache diagnostics must be exported',
+  );
+  const profile = {
+    ...CONSTANT_PROFILE,
+    stockId: 'event-cache-600-day-profile',
+  };
+  const firstDayMs = Date.parse('2026-01-01T00:00:00.000Z');
+  const event: MarketAdminEvent = {
+    id: 'persistent-ended-trend',
+    stockId: profile.stockId,
+    revision: 1,
+    kind: 'trend',
+    title: '종료 뒤에도 누적되는 추세',
+    impactBps: 300,
+    startsAt: new Date(firstDayMs - 24 * 60 * 60_000).toISOString(),
+    endsAt: new Date(firstDayMs - 23 * 60 * 60_000).toISOString(),
+  };
+  const firstPass = Array.from({ length: 600 }, (_, day) => (
+    getMarketDailyCheckpoint(profile, firstDayMs + day * 24 * 60 * 60_000, [event])
+  ));
+  const afterFirstPass = marketModelApi.getMarketEventCheckpointCacheStats!();
+
+  const firstAgain = getMarketDailyCheckpoint(profile, firstDayMs, [event]);
+  const afterCacheHit = marketModelApi.getMarketEventCheckpointCacheStats!();
+
+  assert.deepEqual(firstAgain, firstPass[0], 'cache reuse must preserve the exact checkpoint');
+  assert.equal(
+    afterCacheHit.calculations,
+    afterFirstPass.calculations,
+    'the oldest supported checkpoint must still be cached',
+  );
+  assert.equal(afterCacheHit.hits, afterFirstPass.hits + 1);
+  assert.ok(afterCacheHit.entries >= 600);
 });

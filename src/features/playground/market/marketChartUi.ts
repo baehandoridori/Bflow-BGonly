@@ -1,7 +1,89 @@
 import { formatWon } from './format.ts';
-import type { MarketCandle } from './types';
+import type {
+  MarketBarInterval,
+  MarketCandle,
+  MarketChartRange,
+} from './types';
 
 export const MAX_MARKET_CHART_BARS = 1500;
+
+const MINUTE_MS = 60_000;
+const DAY_MS = 24 * 60 * MINUTE_MS;
+const KOREA_OFFSET_MS = 9 * 60 * MINUTE_MS;
+
+const MARKET_CHART_INTERVAL_MS: Record<MarketBarInterval, number> = {
+  '1m': MINUTE_MS,
+  '5m': 5 * MINUTE_MS,
+  '10m': 10 * MINUTE_MS,
+  '15m': 15 * MINUTE_MS,
+  '1h': 60 * MINUTE_MS,
+  '1d': DAY_MS,
+};
+
+const MARKET_CHART_RANGE_MS: Partial<Record<MarketChartRange, number>> = {
+  week: 7 * DAY_MS,
+  month: 30 * DAY_MS,
+  'six-months': 180 * DAY_MS,
+  all: 600 * DAY_MS,
+};
+
+export interface MarketChartProgressiveRequestIdentity {
+  segment: 'leading' | 'historical';
+  stockId: string;
+  interval: MarketBarInterval;
+  range: MarketChartRange;
+  startMs: number;
+  endMs: number;
+  eventsFingerprint: string;
+}
+
+export interface ProgressiveMarketChartSeriesState<T> {
+  requestKey: string;
+  seriesIdentity: string;
+  candles: readonly T[];
+  complete: boolean;
+}
+
+export function resolveStableMarketChartRangeStartMs(
+  range: MarketChartRange,
+  interval: MarketBarInterval,
+  nowMs: number,
+): number {
+  if (range === 'today') {
+    return Math.floor((nowMs + KOREA_OFFSET_MS) / DAY_MS) * DAY_MS - KOREA_OFFSET_MS;
+  }
+  const stableAnchorMs = Math.floor(nowMs / MARKET_CHART_INTERVAL_MS[interval])
+    * MARKET_CHART_INTERVAL_MS[interval];
+  return stableAnchorMs - (MARKET_CHART_RANGE_MS[range] ?? 0);
+}
+
+export function marketChartProgressiveRequestKey(
+  request: MarketChartProgressiveRequestIdentity,
+): string {
+  return [
+    request.segment,
+    request.stockId,
+    request.interval,
+    request.range,
+    request.startMs,
+    request.endMs,
+    request.eventsFingerprint,
+  ].join('::');
+}
+
+export function resolveProgressiveMarketChartCandles<T>({
+  state,
+  requestKey,
+  seriesIdentity,
+}: {
+  state: ProgressiveMarketChartSeriesState<T>;
+  requestKey: string;
+  seriesIdentity: string;
+}): readonly T[] {
+  if (state.requestKey === requestKey) return state.candles;
+  if (state.complete && state.seriesIdentity === seriesIdentity) return state.candles;
+  return [];
+}
 
 export interface MarketChartFitDecision {
   fitContent: boolean;
