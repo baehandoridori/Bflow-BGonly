@@ -48,6 +48,17 @@ export function resolveMarketChartResetSelection<T>(
   };
 }
 
+export interface MarketChartInertTarget {
+  inert: boolean;
+}
+
+export function setMarketChartContainerInert(
+  container: MarketChartInertTarget | null,
+  inert: boolean,
+): void {
+  if (container) container.inert = inert;
+}
+
 export interface MarketChartSelectionDecision {
   selectedIndex: number;
   resetSelection: boolean;

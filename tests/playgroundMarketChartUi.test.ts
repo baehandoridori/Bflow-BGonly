@@ -177,6 +177,27 @@ test('chart error overlay hides the underlying chart region from keyboard and ac
   assert.match(interactiveChart, /chartError\s*\?\s*\([\s\S]*?role="alert"[\s\S]*?<button[\s\S]*?차트 다시 불러오기/);
 });
 
+test('chart error inert lifecycle blocks descendants and restores healthy attribution', async () => {
+  const chartUi = await import('../src/features/playground/market/marketChartUi.ts');
+  assert.equal(typeof chartUi.setMarketChartContainerInert, 'function');
+  const container = { inert: false };
+
+  chartUi.setMarketChartContainerInert(container, true);
+  assert.equal(container.inert, true, 'error state must disable every chart descendant');
+  chartUi.setMarketChartContainerInert(container, false);
+  assert.equal(container.inert, false, 'recovery and cleanup must restore descendant focus');
+  chartUi.setMarketChartContainerInert(null, true);
+
+  const interactiveChart = readFileSync(INTERACTIVE_CHART_PATH, 'utf8');
+  assert.match(interactiveChart, /setMarketChartContainerInert\(container,\s*chartError\s*!==\s*null\)/);
+  assert.match(interactiveChart, /setMarketChartContainerInert\(container,\s*false\)/);
+  assert.match(interactiveChart, /\},\s*\[chartError,\s*retryKey\]\);/);
+  assert.match(interactiveChart, /ref=\{containerRef\}[\s\S]*?\/>\s*\{chartError\s*\?\s*\([\s\S]*?<button/);
+
+  const adapterSource = readFileSync('src/features/playground/market/marketChartAdapter.ts', 'utf8');
+  assert.match(adapterSource, /attributionLogo:\s*true/);
+});
+
 test('long-range display candles use exact daily engine checkpoints', async () => {
   assert.equal(existsSync(DISPLAY_SERIES_PATH), true, 'display candle fast path must exist');
   const displaySeries = await import('../src/features/playground/market/marketDisplaySeries.ts');

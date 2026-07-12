@@ -1,4 +1,10 @@
-import { type KeyboardEvent, useEffect, useRef, useState } from 'react';
+import {
+  type KeyboardEvent,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from 'react';
 import {
   CandlestickSeries,
   createChart,
@@ -17,6 +23,7 @@ import {
   resolveMarketChartKeyboardIndex,
   resolveMarketChartResetSelection,
   resolveMarketChartSelectedIndex,
+  setMarketChartContainerInert,
 } from '@/features/playground/market/marketChartUi';
 import type {
   MarketCandle,
@@ -95,6 +102,14 @@ export function MarketInteractiveChart({
   const [chartError, setChartError] = useState<string | null>(null);
   selectedCandleCallbackRef.current = onSelectedCandle;
   candlesRef.current = candles;
+
+  useLayoutEffect(() => {
+    const container = containerRef.current;
+    setMarketChartContainerInert(container, chartError !== null);
+    return () => {
+      setMarketChartContainerInert(container, false);
+    };
+  }, [chartError, retryKey]);
 
   useEffect(() => {
     const selectedStartsAt = selectedCandleStartsAtRef.current;
