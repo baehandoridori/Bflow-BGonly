@@ -1,7 +1,7 @@
 # CONTEXT.md — B flow 세션 컨텍스트 가이드
 
 > **용도**: 새 Claude 세션이 이 레포에서 작업할 때 빠르게 파악하기 위한 가이드.
-> **최종 갱신**: 2026-05-08
+> **최종 갱신**: 2026-07-13
 > **반드시 함께 읽을 문서**: `CLAUDE.md` (필수 규칙), `ROADMAP.md` (전체 개발 계획), `DEVLOG/AUTO_UPDATE_OPERATIONS.md` (자동 업데이트 운영 기준)
 
 ---
@@ -68,6 +68,22 @@
   → 실패 시: 해당 필드만 롤백 (세밀한 롤백)
   → 다른 사용자: Realtime WebSocket으로 즉시 수신 → delta 적용
 ```
+
+### 배플레이그라운드 모의시장 v3 검증 경계
+
+모의시장 가격은 외부 시세 API나 DB에 저장한 시계열이 아니라, 같은 입력이면 같은 결과를 내는 공용 결정론 모델에서 계산한다. 화면이 보여 주는 값과 실제 체결 검증이 서로 다른 공식을 쓰지 않도록 다음 단방향 흐름을 유지한다.
+
+```
+shared/playgroundMarketModel.mjs (장 전체 + 업종 + 종목 + 이벤트 결정론 모델)
+  → shared/playgroundMarketPrice.mjs (종목 프로필과 공용 가격 진입점)
+    ├─ renderer preview: 시세·OHLCV·주문 확인 화면 계산
+    └─ Electron canonical: 체결 직전 가격·거래정지·revision 재검증
+         → MarketAccountService → Supabase 계좌/보유/거래 원장 저장
+```
+
+- renderer 계산은 빠른 화면 표시와 확인용이며 신뢰 경계가 아니다. `electron/main.ts`가 같은 `getCanonicalMarketQuoteWon`을 `MarketAccountService`에 주입해 체결 직전 다시 판정한다.
+- 테스트 모드의 `previewGateway.ts`는 로컬 snapshot에 같은 명령 계약을 적용한다. 실제 앱의 계좌·보유·거래 결과는 Electron IPC를 거쳐 Supabase가 정본이다.
+- 긴 차트는 완료된 과거 봉만 bounded cache에 보관하고 최신 구간부터 점진 표시한다. 현재 진행 봉은 cache에 고정하지 않고 실제 `nowMs`로 다시 계산하며, 종목·기간·간격·원인 이벤트가 바뀌면 이전 비동기 요청을 중단한다.
 
 ### 데이터 소스 (전환 중)
 
@@ -140,6 +156,20 @@
 | `src/components/widgets/` | 대시보드 위젯 모음 |
 | `src/components/spotlight/SpotlightSearch.tsx` | Ctrl+Space 검색 |
 
+### 배플레이그라운드 모의시장 v3
+
+| 파일 | 역할 |
+|------|------|
+| `shared/playgroundMarketModel.mjs` | 장 전체·업종·종목 요인, 이벤트, 가격·분봉·일봉을 만드는 공용 결정론 모델 |
+| `shared/playgroundMarketPrice.mjs` | 종목 프로필과 renderer/Electron이 함께 쓰는 canonical 가격 진입점 |
+| `src/features/playground/market/marketQuote.ts` | 홈·행·상세가 한 번 계산한 현재가와 당일 sparkline context를 공유 |
+| `src/features/playground/market/marketDisplaySeries.ts` | 원인 이벤트 key, 완료 봉 cache, abort 가능한 점진 OHLCV 계산, 현재 진행 봉 분리 |
+| `src/features/playground/market/marketChartAdapter.ts` | Lightweight Charts 선·캔들·거래량 series, 증분 갱신, visible range와 cleanup 수명주기 |
+| `src/views/playground/market/MarketPriceChart.tsx` | 선/캔들·간격·기간 선택, 과거 점진 계산과 현재 봉 결합, stale 요청 중단 |
+| `src/views/playground/market/MarketInteractiveChart.tsx` | 휠 확대, 드래그 이동, 핀치, crosshair, 테마·오류·재시도 경계 |
+| `src/views/playground/market/useMarketOrderController.ts` | 공통 수량과 팔기/사기 독립 검증, 확인값 동결, 기존 request ID·rollback 계약 유지 |
+| `electron/marketAccountService.ts` | canonical 가격·거래정지·revision 재검증 후 Supabase 거래 실행 |
+
 ### 타입 & 유틸
 
 | 파일 | 역할 |
@@ -150,7 +180,7 @@
 
 ---
 
-## 4. 현재 진행 상태 (2026-03-14)
+## 4. 현재 진행 상태 (2026-07-13)
 
 ### 완료된 기능
 
@@ -162,6 +192,7 @@
 - Phase 7-1~7-5: 위젯 편집, 동기부여 메시지, UI 폴리시, 스포트라이트, AOT 위치저장
 - Phase 8-0~8-1, 8-3~8-5: 설정 탭, 글꼴 크기, 플렉서스 제어, 스플래시, 로그인 자동저장
 - Phase 9 M-0, M-2: Supabase 프로젝트 준비 + 클라이언트 구현 완료
+- 실험 기능: 배한솔 한정 배플레이그라운드 모의시장 v3 — 양방향 빠른주문, 조작 가능한 OHLCV 차트, 장·업종·종목 요인 시세 반영 완료
 
 ### 현재 진행 중 — Phase 9: Supabase 마이그레이션
 

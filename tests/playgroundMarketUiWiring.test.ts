@@ -4,6 +4,38 @@ import { existsSync, readFileSync } from 'node:fs';
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 
+test('playground market v3 release metadata stays aligned', () => {
+  const packageJson = JSON.parse(readFileSync('package.json', 'utf8'));
+  const packageLock = JSON.parse(readFileSync('package-lock.json', 'utf8'));
+  const updateNotes = JSON.parse(readFileSync('DEVLOG/update-notes.json', 'utf8'));
+
+  assert.equal(packageJson.version, '1.81.0');
+  assert.equal(packageLock.version, '1.81.0');
+  assert.equal(packageLock.packages[''].version, '1.81.0');
+  assert.equal(packageJson.dependencies['lightweight-charts'], '5.2.0');
+  assert.equal(packageLock.packages[''].dependencies['lightweight-charts'], '5.2.0');
+
+  const latestNote = updateNotes[0];
+  assert.equal(latestNote.version, '1.81.0');
+  assert.equal(latestNote.title, 'JBBJ 모의투자가 더 쉽고 실제 시장처럼 움직여요');
+  const releaseCopy = latestNote.items
+    .flatMap((item: { summary: string; description: string }) => [item.summary, item.description])
+    .join('\n');
+  for (const phrase of [
+    '양방향 빠른주문',
+    '휠',
+    '드래그',
+    '핀치',
+    '거래량',
+    '장 전체',
+    '업종',
+    '종목',
+    '덜 인위',
+  ]) {
+    assert.match(releaseCopy, new RegExp(phrase));
+  }
+});
+
 test('market home preserves the approved information order', () => {
   const source = readFileSync('src/views/playground/market/MarketHome.tsx', 'utf8');
   const labels = ['오늘의 JBBJ 시장', '찜한 주식', '오늘 가격에 영향을 준 소식', '모든 주식', '초보 미션'];
