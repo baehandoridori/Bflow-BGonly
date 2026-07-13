@@ -164,6 +164,24 @@ export function moveCostumeInOrder(
   return ids;
 }
 
+/**
+ * 드래그 중 targetId 카드/복장의 어느 쪽에 삽입선을 그릴지 결정한다.
+ * moveCostumeInOrder 와 같은 방향 규칙(아래로 드래그=대상 뒤 'after', 위로=대상 앞 'before')을 써서
+ * 화면에 보이는 삽입선이 실제 드롭 결과와 항상 일치하게 한다.
+ * 드래그 대상 자신 위(또는 미존재 id)에서는 표시하지 않는다(null).
+ */
+export function dropEdgeFor(
+  orderedIds: ReadonlyArray<string>,
+  dragId: string | null,
+  targetId: string,
+): 'before' | 'after' | null {
+  if (!dragId || dragId === targetId) return null;
+  const from = orderedIds.indexOf(dragId);
+  const to = orderedIds.indexOf(targetId);
+  if (from < 0 || to < 0) return null;
+  return from < to ? 'after' : 'before';
+}
+
 export type RawMapping = {
   characterId: string;
   episodeNumber: number;
