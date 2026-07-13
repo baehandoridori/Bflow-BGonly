@@ -187,6 +187,35 @@ test('activity awards points until the daily cap, then reports capped without pa
   assert.equal(capped.points, 0);
 });
 
+test('preview daily state rolls over on a new KST day and continues a consecutive streak', async () => {
+  const storage = createMemoryStorage();
+  let clock = Date.parse('2026-07-13T12:00:00+09:00');
+  const gw = createArcadeLocalStorageGateway({ userId: USER_ID, storage, now: () => clock });
+  await gw.execute({ kind: 'daily-login', requestId: 'daily-login:2026-07-13' });
+  await gw.execute({ kind: 'activity', requestId: 'comment:x1', activity: 'comment' });
+  let snap = await gw.read();
+  assert.equal(snap.attendance.streakDays, 4); // 시드 3 + 오늘
+  assert.equal(snap.attendance.todayGranted, true);
+
+  clock = Date.parse('2026-07-14T09:00:00+09:00'); // 다음 날(연속)
+  await gw.execute({ kind: 'daily-login', requestId: 'daily-login:2026-07-14' });
+  snap = await gw.read();
+  assert.equal(snap.attendance.streakDays, 5); // 연속 유지 후 +1
+  assert.equal(snap.attendance.todayGranted, true);
+  assert.equal(snap.todayActivityCounts.comment, 0); // 오늘 카운트가 새 날에 롤오버
+});
+
+test('preview streak resets after a missed KST day', async () => {
+  const storage = createMemoryStorage();
+  let clock = Date.parse('2026-07-13T12:00:00+09:00');
+  const gw = createArcadeLocalStorageGateway({ userId: USER_ID, storage, now: () => clock });
+  await gw.execute({ kind: 'daily-login', requestId: 'daily-login:2026-07-13' });
+  clock = Date.parse('2026-07-15T09:00:00+09:00'); // 하루 건너뜀(공백)
+  await gw.execute({ kind: 'daily-login', requestId: 'daily-login:2026-07-15' });
+  const snap = await gw.read();
+  assert.equal(snap.attendance.streakDays, 1); // 공백으로 리셋 후 오늘만
+});
+
 test('createArcadeGateway prefers a complete electron api over the preview context', async () => {
   const calls: string[] = [];
   const electronApi = {

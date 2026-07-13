@@ -1,6 +1,8 @@
 import {
   applyArcadePreviewCommand,
   fingerprintArcadeCommand,
+  kstDateOf,
+  rollOverPreviewDailyState,
   startedGameIdFromEntryFingerprint,
   type ArcadePreviewGateway,
 } from './previewGateway.ts';
@@ -14,6 +16,7 @@ interface PersistedArcadePreview {
   snapshot: ArcadeSnapshot;
   requestFingerprints: Record<string, string>;
   requestResponses: Record<string, ArcadeExecuteResult>;
+  dailyDate: string; // 일일 필드(출석/오늘활동/보상판수)가 대응하는 KST 날짜
   updatedAtMs: number;
 }
 
@@ -48,6 +51,17 @@ export function createArcadeLocalStorageGateway(
     options.storage.setItem(key, JSON.stringify(state));
   }
 
+  // KST 날짜가 바뀌었으면 일일 필드를 롤오버하고 저장한다(다중일 프리뷰가 서버와 일치하도록).
+  function rollOver(state: PersistedArcadePreview): PersistedArcadePreview {
+    const today = kstDateOf(options.now());
+    if (state.dailyDate !== today) {
+      rollOverPreviewDailyState(state.snapshot, state.dailyDate ?? null, today);
+      state.dailyDate = today;
+      save(state);
+    }
+    return state;
+  }
+
   function readOrCreate(): PersistedArcadePreview {
     let raw: string | null;
     try {
@@ -58,7 +72,7 @@ export function createArcadeLocalStorageGateway(
     if (raw !== null) {
       try {
         const parsed: unknown = JSON.parse(raw);
-        if (hasPersistedShape(parsed)) return parsed;
+        if (hasPersistedShape(parsed)) return rollOver(parsed);
       } catch {
         /* 손상된 프리뷰 저장본은 시드로 되돌린다. */
       }
@@ -68,6 +82,7 @@ export function createArcadeLocalStorageGateway(
       snapshot: createArcadePreviewSeed(userId),
       requestFingerprints: {},
       requestResponses: {},
+      dailyDate: kstDateOf(options.now()),
       updatedAtMs: options.now(),
     };
     save(seeded);
@@ -109,6 +124,7 @@ export function createArcadeLocalStorageGateway(
         requestResponses: applied.persistKey
           ? { ...persisted.requestResponses, [command.requestId]: applied.result }
           : { ...persisted.requestResponses },
+        dailyDate: persisted.dailyDate,
         updatedAtMs: options.now(),
       });
       return applied.result;

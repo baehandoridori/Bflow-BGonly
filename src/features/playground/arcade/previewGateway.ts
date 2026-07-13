@@ -44,6 +44,37 @@ export function fingerprintArcadeCommand(command: ArcadeExecuteCommand): string 
   return exhaustive;
 }
 
+// ms epoch → KST(Asia/Seoul) 날짜 문자열 'YYYY-MM-DD'. (게임 루프가 아니라 프리뷰 날짜 계산용)
+export function kstDateOf(nowMs: number): string {
+  return new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul' }).format(new Date(nowMs));
+}
+
+function isNextKstDay(fromDate: string, toDate: string): boolean {
+  const from = Date.parse(`${fromDate}T00:00:00Z`);
+  const to = Date.parse(`${toDate}T00:00:00Z`);
+  return Number.isFinite(from) && Number.isFinite(to) && to - from === 86_400_000;
+}
+
+// KST 날짜가 바뀌면 일일 필드를 서버처럼 롤오버한다. 서버는 KST 로 dated 원장/런에서
+// 매번 재계산하지만, 프리뷰는 dated 이력 없이 집계만 들고 있어 날짜 전환 시 직접 리셋해야 한다.
+export function rollOverPreviewDailyState(
+  snapshot: ArcadeSnapshot,
+  fromDate: string | null,
+  toDate: string,
+): void {
+  if (fromDate === null || toDate <= fromDate) return;
+  const wasGrantedPrevDay = snapshot.attendance.todayGranted;
+  const consecutive = isNextKstDay(fromDate, toDate);
+  snapshot.attendance.todayGranted = false;
+  snapshot.todayActivityCounts = { sceneProgress: 0, comment: 0, retakeDone: 0 };
+  snapshot.games.snake.todayRewardedRuns = 0;
+  snapshot.games.tetris.todayRewardedRuns = 0;
+  // 연속 출석 유지 조건: 바로 다음 날 + 직전 날 출석함. 그 외(공백)는 연속이 끊긴다.
+  if (!(consecutive && wasGrantedPrevDay)) {
+    snapshot.attendance.streakDays = 0;
+  }
+}
+
 // game-entry 지문(["game-start", runId, gameId])에서 시작 게임을 되읽는다.
 export function startedGameIdFromEntryFingerprint(fingerprint: string | undefined): string | null {
   if (fingerprint === undefined) return null;
@@ -243,6 +274,7 @@ export function createArcadePreviewGateway(
   const now = options.now ?? (() => 0);
   const latencyMs = options.latencyMs ?? 0;
   let snapshot = createArcadePreviewSeed(userId);
+  let dailyDate = kstDateOf(now());
   const fingerprintByRequestId = new Map<string, string>();
   const responseByRequestId = new Map<string, ArcadeExecuteResult>();
 
@@ -250,13 +282,23 @@ export function createArcadePreviewGateway(
     return latencyMs <= 0 ? Promise.resolve() : new Promise((resolve) => setTimeout(resolve, latencyMs));
   }
 
+  function rollOverIfNeeded(): void {
+    const today = kstDateOf(now());
+    if (today !== dailyDate) {
+      rollOverPreviewDailyState(snapshot, dailyDate, today);
+      dailyDate = today;
+    }
+  }
+
   return {
     async read() {
       await wait();
+      rollOverIfNeeded();
       return structuredClone(snapshot);
     },
     async execute(command) {
       await wait();
+      rollOverIfNeeded();
       const fingerprint = fingerprintArcadeCommand(command);
       if (fingerprintByRequestId.has(command.requestId)) {
         if (fingerprintByRequestId.get(command.requestId) !== fingerprint) {
