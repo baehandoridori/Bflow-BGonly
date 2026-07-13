@@ -1011,8 +1011,8 @@ export function installDevElectronAPI(): void {
         parentCommentId: parentCommentId ?? null,
       });
       localStore.__commentRows = comments;
-      // 캐릭터 댓글은 씬 활동이 아니므로 제외(프로덕션 main.ts 와 동일).
-      if (!characterId) maybeAwardPreviewActivity('comment', commentId);
+      // 댓글(일반·리테이크·캐릭터 보드 전부) 적립(spec §, 프로덕션 main.ts 와 동일).
+      maybeAwardPreviewActivity('comment', commentId);
     },
     supabaseEditComment: async (commentId, text, mentions, images) => {
       const comments = getMockCommentRows();

@@ -2305,10 +2305,11 @@ ipcMain.handle('supabase:add-comment', wrapIpc(async (_e: unknown, commentId: st
   revisionId: string | null = null, parentCommentId: string | null = null,
   characterId: string | null = null, costumeId: string | null = null) => {
   await sbAddComment(commentId, partUuid, sceneId, userId, userName, text, mentions, createdAt, images, revisionId, parentCommentId, characterId, costumeId);
+  // 댓글(일반·리테이크·캐릭터 보드 전부)을 남기면 업무 활동 포인트 적립(spec §: comment:<commentId>).
+  // 캐릭터 댓글도 적립 대상이므로 아래 캐릭터 early-return 보다 앞에서 호출한다.
+  void arcadeService.awardActivity({ activity: 'comment', refId: commentId });
   // 캐릭터 댓글은 씬 기반 활동 기록 경로를 타지 않는다(part/scene 이 없음).
   if (characterId) return;
-  // 씬/파트 댓글을 남기면 업무 활동 포인트 적립(canonical 배한솔 한정, 서버가 재검증·상한 처리).
-  void arcadeService.awardActivity({ activity: 'comment', refId: commentId });
   // 활동 기록 — partUuid 로 부서/에피소드 + scene UUID 자동 조회
   // (sceneId 가 TEXT 형식이라 scenes 테이블 조회로 UUID 변환 — 그룹화 정확성 + 부서 필터 통과)
   if (currentActivityUser) {

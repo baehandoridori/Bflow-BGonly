@@ -374,8 +374,14 @@ test('main wires the four activity accrual hooks with the correct conditions', (
     mainSource,
     /if \(existed && sceneState === 'done' && previousState !== 'done'\) \{\s*void arcadeService\.awardActivity\(\{ activity: 'scene-phase-done', refId: sceneUuid \}\);/,
   );
-  // 씬/파트 댓글 적립 (commentId 사용)
+  // 댓글 적립 (commentId 사용) — 캐릭터 보드 댓글도 적립 대상이므로 characterId early-return 앞에 있어야 한다.
   assert.match(mainSource, /void arcadeService\.awardActivity\(\{ activity: 'comment', refId: commentId \}\);/);
+  const commentAwardIdx = mainSource.indexOf("arcadeService.awardActivity({ activity: 'comment', refId: commentId })");
+  const characterReturnIdx = mainSource.indexOf('if (characterId) return;');
+  assert.ok(
+    commentAwardIdx > 0 && characterReturnIdx > 0 && commentAwardIdx < characterReturnIdx,
+    '댓글 적립은 캐릭터 early-return 앞에서 호출돼야 캐릭터 보드 댓글도 적립된다',
+  );
   // 리테이크 담당 완료 전이에서만 적립 (revisionId 사용)
   assert.match(
     mainSource,
