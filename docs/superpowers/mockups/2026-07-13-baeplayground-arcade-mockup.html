@@ -1,0 +1,959 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>배플레이그라운드 아케이드 · 포인트 인터랙션 목업</title>
+<style>
+  :root {
+    color-scheme: dark;
+    --bg: #0f1117;
+    --panel: #1a1d27;
+    --panel-2: #202431;
+    --stage: rgba(18, 21, 29, .87);
+    --line: #2d3041;
+    --text: #e8e8ee;
+    --muted: #8b8da3;
+    --accent: #6c5ce7;
+    --lavender: #a29bfe;
+    --mint: #45e0b5;
+    --green: #00b894;
+    --blue: #74b9ff;
+    --yellow: #fdcb6e;
+    --danger: #ff7675;
+    --mono: ui-monospace, Consolas, 'Cascadia Mono', monospace;
+  }
+  * { box-sizing: border-box; }
+  html { background: var(--bg); }
+  body {
+    margin: 0; color: var(--text); min-height: 100vh;
+    font: 14px/1.6 'Pretendard', 'Noto Sans KR', system-ui, sans-serif;
+    background:
+      radial-gradient(circle at 11% -6%, rgba(108, 92, 231, .18), transparent 31rem),
+      radial-gradient(circle at 94% 4%, rgba(0, 184, 148, .10), transparent 28rem),
+      var(--bg);
+  }
+  button { font: inherit; color: inherit; cursor: pointer; }
+  button:focus-visible { outline: 3px solid var(--lavender); outline-offset: 3px; }
+
+  /* ── 앱 헤더 목업 (우상단 포인트 배지) ─────────────────── */
+  .app-header {
+    position: sticky; top: 0; z-index: 50;
+    display: flex; align-items: center; justify-content: space-between;
+    height: 56px; padding: 0 18px;
+    border-bottom: 1px solid var(--line);
+    background: rgba(15, 17, 23, .92); backdrop-filter: blur(8px);
+  }
+  .app-header h1 { margin: 0; font-size: 14px; font-weight: 700; }
+  .app-header h1 small { color: var(--muted); font-weight: 500; margin-left: 8px; }
+  .header-right { display: flex; align-items: center; gap: 10px; }
+  .header-icon {
+    display: grid; place-items: center; width: 34px; height: 34px;
+    border: 1px solid var(--line); border-radius: 9px; background: var(--panel);
+    color: var(--muted); font-size: 15px;
+  }
+  .points-badge {
+    position: relative; display: flex; align-items: center; gap: 8px;
+    min-height: 34px; padding: 0 12px;
+    border: 1px solid rgba(162, 155, 254, .28); border-radius: 9px;
+    background: rgba(108, 92, 231, .13);
+    transition: transform .18s ease;
+  }
+  .points-badge.pulse { transform: scale(1.06); }
+  .points-badge .coin {
+    width: 16px; height: 16px; border-radius: 50%;
+    background: radial-gradient(circle at 35% 30%, #ffe29a, var(--yellow) 60%, #c9962f);
+    box-shadow: 0 0 8px rgba(253, 203, 110, .5);
+  }
+  .points-badge strong { font: 700 13px var(--mono); font-variant-numeric: tabular-nums; }
+  .points-badge span.unit { color: var(--lavender); font-size: 12px; }
+  .points-float {
+    position: absolute; right: 6px; top: -4px; pointer-events: none;
+    color: var(--mint); font: 700 12px var(--mono);
+    animation: floatUp 1.2s ease forwards;
+  }
+  @keyframes floatUp {
+    from { opacity: 0; transform: translateY(4px); }
+    18% { opacity: 1; }
+    to { opacity: 0; transform: translateY(-22px); }
+  }
+  .avatar {
+    display: flex; align-items: center; gap: 8px; padding: 0 10px; height: 34px;
+    border: 1px solid var(--line); border-radius: 9px; background: var(--panel); font-size: 13px;
+  }
+  .avatar i {
+    display: grid; place-items: center; width: 20px; height: 20px; border-radius: 50%;
+    background: var(--accent); font-style: normal; font-size: 11px; font-weight: 700;
+  }
+
+  /* ── 공통 레이아웃 ────────────────────────────────────── */
+  .wrap { max-width: 1060px; margin: 0 auto; padding: 26px 18px 80px; }
+  .note {
+    border: 1px solid rgba(162, 155, 254, .25); border-radius: 14px;
+    background: rgba(108, 92, 231, .08); padding: 14px 18px; margin-bottom: 26px;
+  }
+  .note b { color: var(--lavender); }
+  .note code { font-family: var(--mono); font-size: 12px; color: var(--mint); }
+  section.block { margin: 34px 0; }
+  section.block > header { display: flex; align-items: baseline; gap: 12px; margin-bottom: 14px; }
+  section.block > header h2 { margin: 0; font-size: 18px; letter-spacing: -.02em; }
+  section.block > header p { margin: 0; color: var(--muted); font-size: 13px; }
+  .demo-chip-row { display: flex; flex-wrap: wrap; gap: 8px; }
+  .demo-chip {
+    min-height: 44px; padding: 0 14px; border-radius: 10px;
+    border: 1px solid var(--line); background: var(--panel);
+    transition: border-color .15s ease;
+  }
+  .demo-chip:hover { border-color: rgba(162, 155, 254, .6); }
+  .demo-chip b { color: var(--mint); font-family: var(--mono); }
+  .demo-chip.capped b { color: var(--muted); }
+
+  /* ── 게임 스테이지 셸 (계획의 ArcadeStageChrome) ───────── */
+  .stage-shell {
+    display: grid; grid-template-columns: minmax(250px, .72fr) minmax(0, 1.28fr);
+    gap: 18px; padding: 20px; border: 1px solid var(--line); border-radius: 17px;
+    background: radial-gradient(circle at 78% 12%, rgba(var(--tone), .12), transparent 42%), var(--panel);
+  }
+  .stage-shell.tone-mint { --tone: 69, 224, 181; --toneSolid: #45e0b5; }
+  .stage-shell.tone-lavender { --tone: 162, 155, 254; --toneSolid: #a29bfe; }
+  .stage-info small.tag {
+    color: var(--toneSolid); font: 700 11px/1 var(--mono); letter-spacing: .15em;
+  }
+  .stage-info h3 { margin: 10px 0 6px; font-size: clamp(34px, 5vw, 52px); line-height: .9; letter-spacing: -.05em; }
+  .stage-info p.meta { margin: 0 0 14px; color: var(--muted); }
+  .hud { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin: 12px 0; }
+  .hud .cell {
+    border: 1px solid var(--line); border-radius: 10px; padding: 8px 11px; background: rgba(15,17,23,.5);
+  }
+  .hud .cell small { display: block; color: var(--muted); font-size: 11px; }
+  .hud .cell b { font: 700 16px var(--mono); font-variant-numeric: tabular-nums; }
+  .hud .cell.wide { grid-column: 1 / -1; }
+  .grade-track { height: 7px; border-radius: 99px; background: rgba(45,48,65,.9); overflow: hidden; margin-top: 6px; }
+  .grade-track i { display: block; height: 100%; width: 0%; border-radius: 99px;
+    background: linear-gradient(90deg, var(--accent), var(--toneSolid)); transition: width .3s ease; }
+  .reward-chips { display: flex; flex-wrap: wrap; gap: 6px; margin: 10px 0; }
+  .reward-chips span {
+    border: 1px solid var(--line); border-radius: 8px; padding: 3px 8px;
+    color: var(--muted); font: 600 11px var(--mono);
+  }
+  .reward-chips span.hit { color: var(--toneSolid); border-color: rgba(var(--tone), .5); }
+  .key-hints { color: var(--muted); font-size: 12px; margin-top: 8px; }
+  .key-hints kbd {
+    font-family: var(--mono); font-size: 11px; padding: 1px 6px; border-radius: 6px;
+    border: 1px solid var(--line); border-bottom-width: 2px; background: var(--panel-2); color: var(--text);
+  }
+  .stage-box {
+    position: relative; display: grid; place-items: center; min-height: 460px;
+    border: 1px solid var(--line); border-radius: 15px; background: var(--stage);
+    box-shadow: inset 0 0 50px rgba(0,0,0,.25); overflow: hidden;
+  }
+  .stage-box canvas { display: block; border-radius: 8px; }
+  .stage-overlay {
+    position: absolute; inset: 0; display: grid; place-items: center;
+    background: rgba(13, 15, 21, .78); backdrop-filter: blur(3px); text-align: center; padding: 20px;
+  }
+  .stage-overlay .card { max-width: 340px; }
+  .stage-overlay h4 { margin: 0 0 6px; font-size: 21px; }
+  .stage-overlay p { margin: 0 0 14px; color: var(--muted); font-size: 13px; }
+  .btn-primary {
+    min-height: 44px; padding: 0 18px; border: 0; border-radius: 11px; font-weight: 700;
+    background: linear-gradient(135deg, var(--accent), #8c7cf4); color: #fff;
+  }
+  .btn-primary:disabled { opacity: .45; cursor: not-allowed; }
+  .btn-ghost {
+    min-height: 44px; padding: 0 16px; border-radius: 11px;
+    border: 1px solid var(--line); background: rgba(26,29,39,.85);
+  }
+  .fee-note { display: block; margin-top: 10px; color: var(--muted); font-size: 12px; }
+  .fee-note b { color: var(--yellow); font-family: var(--mono); }
+  .countdown { font: 800 84px var(--mono); color: var(--toneSolid); animation: pop .68s ease infinite; }
+  @keyframes pop { from { transform: scale(1.25); opacity: .4; } 30% { transform: scale(1); opacity: 1; } }
+  .live-status { position: absolute; left: 12px; bottom: 10px; color: var(--muted); font-size: 11px; }
+
+  /* 결과 오버레이 */
+  .result-grade { font: 800 15px var(--mono); letter-spacing: .3em; color: var(--toneSolid); }
+  .result-score { font: 800 44px var(--mono); margin: 4px 0 2px; }
+  .result-gauge { width: 240px; height: 9px; margin: 12px auto; border-radius: 99px; background: rgba(45,48,65,.9); overflow: hidden; }
+  .result-gauge i { display: block; height: 100%; width: 0%; background: linear-gradient(90deg, var(--accent), var(--toneSolid)); transition: width .56s cubic-bezier(.2,.9,.3,1); }
+  .result-reward { font: 700 20px var(--mono); color: var(--mint); min-height: 28px; }
+  .result-reward.capped { color: var(--muted); font-size: 13px; font-weight: 600; }
+  .best-banner {
+    display: inline-block; margin: 8px 0; padding: 5px 14px; border-radius: 99px;
+    background: rgba(253, 203, 110, .14); border: 1px solid rgba(253, 203, 110, .45);
+    color: var(--yellow); font-weight: 700; font-size: 13px;
+    animation: bannerIn .4s cubic-bezier(.2,1.4,.4,1) both;
+  }
+  @keyframes bannerIn { from { transform: scale(.6); opacity: 0; } }
+  .result-achievements { display: grid; gap: 6px; margin: 10px 0 14px; }
+  .ach-card {
+    display: flex; align-items: center; gap: 10px; text-align: left;
+    border: 1px solid rgba(69, 224, 181, .35); border-radius: 10px; padding: 8px 12px;
+    background: rgba(0, 184, 148, .08); animation: achIn .35s ease both;
+  }
+  @keyframes achIn { from { transform: translateY(8px); opacity: 0; } }
+  .ach-card .medal { font-size: 20px; }
+  .ach-card b { display: block; font-size: 13px; }
+  .ach-card small { color: var(--muted); }
+  .ach-card .bonus { margin-left: auto; color: var(--mint); font: 700 13px var(--mono); }
+  .result-actions { display: flex; gap: 8px; justify-content: center; }
+
+  /* ── 도전과제 목록 ────────────────────────────────────── */
+  .ach-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 10px; }
+  .ach-tile { display: flex; gap: 11px; border: 1px solid var(--line); border-radius: 12px; padding: 12px; background: var(--panel); }
+  .ach-tile.locked { opacity: .55; }
+  .ach-tile .medal { font-size: 22px; }
+  .ach-tile b { display: block; font-size: 13px; }
+  .ach-tile small { color: var(--muted); display: block; }
+  .ach-tile .bonus { margin-left: auto; align-self: center; color: var(--mint); font: 700 12px var(--mono); white-space: nowrap; }
+  .ach-tile.locked .bonus { color: var(--muted); }
+
+  /* ── 랭킹 + 슬랙 ─────────────────────────────────────── */
+  .rank-slack { display: grid; grid-template-columns: 1.2fr .8fr; gap: 16px; }
+  .rank-panel, .slack-panel { border: 1px solid var(--line); border-radius: 15px; background: var(--panel); padding: 16px; }
+  .tabs { display: flex; gap: 6px; margin-bottom: 12px; flex-wrap: wrap; }
+  .tabs button {
+    min-height: 34px; padding: 0 13px; border-radius: 9px; font-size: 13px;
+    border: 1px solid var(--line); background: transparent; color: var(--muted);
+  }
+  .tabs button[aria-selected="true"] { background: rgba(108,92,231,.16); border-color: rgba(162,155,254,.4); color: var(--text); font-weight: 700; }
+  .tabs .spacer { flex: 1; }
+  table.rank { width: 100%; border-collapse: collapse; font-size: 13px; }
+  table.rank th { text-align: left; color: var(--muted); font-weight: 600; font-size: 11px; padding: 4px 8px; border-bottom: 1px solid var(--line); }
+  table.rank td { padding: 8px; border-bottom: 1px solid rgba(45,48,65,.5); font-variant-numeric: tabular-nums; }
+  table.rank td.num { font-family: var(--mono); }
+  table.rank tr.me td { background: rgba(108,92,231,.10); }
+  table.rank tr.me td:first-child { border-left: 2px solid var(--accent); }
+  .slack-msg { border: 1px solid var(--line); border-radius: 12px; background: #14171f; padding: 12px 14px; }
+  .slack-msg .from { display: flex; gap: 8px; align-items: center; margin-bottom: 8px; }
+  .slack-msg .from i { width: 26px; height: 26px; border-radius: 7px; background: var(--accent); display: grid; place-items: center; font-style: normal; }
+  .slack-msg .from b { font-size: 13px; }
+  .slack-msg .from small { color: var(--muted); }
+  .slack-msg .body { border-left: 3px solid var(--yellow); padding-left: 10px; font-size: 13px; }
+  .slack-msg .body b { color: var(--yellow); }
+  .slack-toggle { display: flex; align-items: center; gap: 10px; margin-top: 12px; color: var(--muted); font-size: 12px; }
+  .switch { position: relative; width: 40px; height: 22px; border-radius: 99px; border: 1px solid var(--line); background: var(--panel-2); }
+  .switch[aria-checked="true"] { background: rgba(0,184,148,.35); border-color: var(--green); }
+  .switch i { position: absolute; top: 2px; left: 2px; width: 16px; height: 16px; border-radius: 50%; background: var(--muted); transition: transform .18s ease, background .18s ease; }
+  .switch[aria-checked="true"] i { transform: translateX(18px); background: var(--mint); }
+
+  /* 토스트 */
+  .toasts { position: fixed; right: 18px; bottom: 18px; display: grid; gap: 8px; z-index: 90; }
+  .toast {
+    display: flex; align-items: center; gap: 10px; min-width: 240px; max-width: 320px;
+    border: 1px solid rgba(69,224,181,.4); border-radius: 12px; padding: 10px 14px;
+    background: rgba(20, 24, 32, .96); box-shadow: 0 12px 30px rgba(0,0,0,.4);
+    animation: achIn .3s ease both;
+  }
+  .toast.earn { border-color: rgba(162,155,254,.4); }
+  .toast b { font-size: 13px; }
+  .toast small { color: var(--muted); display: block; }
+  .toast .pts { margin-left: auto; color: var(--mint); font: 700 13px var(--mono); }
+
+  @media (max-width: 860px) {
+    .stage-shell { grid-template-columns: 1fr; }
+    .rank-slack { grid-template-columns: 1fr; }
+    .stage-box { min-height: 380px; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .points-float, .countdown, .best-banner, .ach-card, .toast { animation: none !important; }
+    .result-gauge i, .grade-track i, .points-badge { transition: none !important; }
+  }
+</style>
+</head>
+<body>
+
+<header class="app-header" aria-label="B flow 메인 헤더 목업">
+  <h1>B flow <small>메인 화면 헤더 — 우상단에 포인트 배지가 상시 노출</small></h1>
+  <div class="header-right">
+    <span class="header-icon" title="알림(기존)">🔔</span>
+    <button type="button" class="points-badge" id="pointsBadge" aria-label="보유 포인트, 배플레이그라운드 열기">
+      <span class="coin" aria-hidden="true"></span>
+      <strong id="pointsValue">12,500</strong><span class="unit">P</span>
+    </button>
+    <span class="avatar"><i>배</i> 배한솔</span>
+  </div>
+</header>
+
+<div class="wrap">
+  <div class="note">
+    <b>이 페이지는 실제로 조작되는 인터랙션 목업입니다.</b> 스네이크와 테트리스를 직접 플레이해 보면
+    입장료 차감 → 플레이 → 등급 보상 → 도전과제 → 랭킹/슬랙까지 계획된 전체 루프가 어떻게 느껴질지 확인할 수 있어요.
+    수치·규칙의 정본은 <code>docs/superpowers/plans/2026-07-13-baeplayground-arcade-points.md</code> 입니다.
+    (목업 한정: 테트리스 회전은 간이 킥 — 실제 구현은 SRS 표준 킥 테이블을 사용)
+  </div>
+
+  <!-- ① 활동 적립 -->
+  <section class="block" aria-labelledby="s1">
+    <header><h2 id="s1">① 업무 활동으로 포인트 적립</h2><p>씬 완료·댓글·리테이크·출석 시 우상단 배지가 반응해요 (버튼으로 시뮬레이션)</p></header>
+    <div class="demo-chip-row">
+      <button type="button" class="demo-chip" data-earn="5" data-label="씬 단계 완료">씬 단계 체크 <b>+5P</b></button>
+      <button type="button" class="demo-chip" data-earn="10" data-label="ACT 씬 완료">액팅 씬 완료 <b>+10P</b></button>
+      <button type="button" class="demo-chip" data-earn="5" data-label="댓글 작성">댓글 작성 <b>+5P</b></button>
+      <button type="button" class="demo-chip" data-earn="30" data-label="리테이크 수정 완료">리테이크 수정 완료 <b>+30P</b></button>
+      <button type="button" class="demo-chip" data-earn="20" data-label="오늘 첫 출석" data-once="daily">매일 첫 로그인 <b>+20P</b></button>
+    </div>
+  </section>
+
+  <!-- ② 스네이크 -->
+  <section class="block" aria-labelledby="s2">
+    <header><h2 id="s2">② 스네이크</h2><p>화살표/WASD 이동 · P 일시정지 · 5번째 사과마다 골든(+2)</p></header>
+    <div class="stage-shell tone-lavender" id="snakeShell">
+      <div class="stage-info">
+        <small class="tag">SNAKE · ONE MORE RUN</small>
+        <h3>SNAKE</h3>
+        <p class="meta">score = 최종 길이 · 시작 160ms/틱, 사과당 −4ms (하한 80ms)</p>
+        <div class="hud">
+          <div class="cell"><small>길이</small><b id="snakeLen">4</b></div>
+          <div class="cell"><small>골든 사과</small><b id="snakeGolden">0</b></div>
+          <div class="cell"><small>내 최고</small><b id="snakeBest">34</b></div>
+          <div class="cell"><small>오늘 보상</small><b id="snakeRewardCount">0/5</b></div>
+          <div class="cell wide"><small id="snakeNextGradeLabel">다음 등급(BRONZE 15)까지 11</small>
+            <div class="grade-track"><i id="snakeGradeFill"></i></div></div>
+        </div>
+        <div class="reward-chips" id="snakeChips">
+          <span data-min="15">B 15 → +8P</span><span data-min="25">S 25 → +18P</span>
+          <span data-min="40">G 40 → +30P</span><span data-min="55">P 55 → +45P</span>
+        </div>
+        <p class="key-hints"><kbd>←→↑↓</kbd>/<kbd>WASD</kbd> 이동 · <kbd>P</kbd> 일시정지 · 뒤로가기는 종료 확인</p>
+      </div>
+      <div class="stage-box" id="snakeBox">
+        <canvas id="snakeCanvas" width="378" height="378" aria-label="스네이크 게임 보드"></canvas>
+        <div class="live-status" aria-live="polite" id="snakeStatus">대기 중</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ③ 테트리스 -->
+  <section class="block" aria-labelledby="s3">
+    <header><h2 id="s3">③ 테트리스</h2><p>←→ 이동(DAS 160/ARR 40) · ↓ 소프트 · Space 하드 · Z/X 회전 · C 홀드</p></header>
+    <div class="stage-shell tone-mint" id="tetrisShell">
+      <div class="stage-info">
+        <small class="tag">TETRIS · QUICK RUN</small>
+        <h3>TETRIS</h3>
+        <p class="meta">1/2/3/4줄 = 100/300/500/800 × 레벨 · 콤보 +50×n×레벨 · 10라인마다 레벨업</p>
+        <div class="hud">
+          <div class="cell"><small>점수</small><b id="tScore">0</b></div>
+          <div class="cell"><small>레벨 · 라인</small><b><span id="tLevel">1</span> · <span id="tLines">0</span></b></div>
+          <div class="cell"><small>내 최고</small><b id="tBest">18,420</b></div>
+          <div class="cell"><small>오늘 보상</small><b id="tRewardCount">0/5</b></div>
+          <div class="cell wide"><small id="tNextGradeLabel">다음 등급(BRONZE 3,000)까지 3,000</small>
+            <div class="grade-track"><i id="tGradeFill"></i></div></div>
+        </div>
+        <div class="reward-chips" id="tChips">
+          <span data-min="3000">B 3,000 → +12P</span><span data-min="10000">S 10,000 → +30P</span>
+          <span data-min="25000">G 25,000 → +55P</span><span data-min="50000">P 50,000 → +80P</span>
+        </div>
+        <p class="key-hints"><kbd>←→</kbd> 이동 · <kbd>↓</kbd> 소프트 · <kbd>Space</kbd> 하드 · <kbd>Z</kbd>/<kbd>X</kbd> 회전 · <kbd>C</kbd> 홀드 · <kbd>P</kbd> 일시정지</p>
+      </div>
+      <div class="stage-box" id="tetrisBox">
+        <canvas id="tetrisCanvas" width="420" height="440" aria-label="테트리스 게임 보드"></canvas>
+        <div class="live-status" aria-live="polite" id="tetrisStatus">대기 중</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ④ 도전과제 -->
+  <section class="block" aria-labelledby="s4">
+    <header><h2 id="s4">④ 도전과제</h2><p>해금 시 보너스 포인트 + 토스트 · 게임 결과 화면에도 표시</p></header>
+    <div class="ach-grid" id="achGrid"></div>
+  </section>
+
+  <!-- ⑤ 랭킹 + 슬랙 -->
+  <section class="block" aria-labelledby="s5">
+    <header><h2 id="s5">⑤ 게임별 랭킹 · 신기록 슬랙 알림</h2><p>신기록을 세우면 랭킹이 갱신되고, 설정이 켜져 있으면 슬랙 미리보기가 채워져요</p></header>
+    <div class="rank-slack">
+      <div class="rank-panel">
+        <div class="tabs" role="tablist" aria-label="랭킹 게임 선택">
+          <button type="button" role="tab" aria-selected="true" data-game-tab="snake">스네이크</button>
+          <button type="button" role="tab" aria-selected="false" data-game-tab="tetris">테트리스</button>
+          <span class="spacer"></span>
+          <button type="button" role="tab" aria-selected="true" data-period-tab="all">전체</button>
+          <button type="button" role="tab" aria-selected="false" data-period-tab="week">이번 주</button>
+        </div>
+        <table class="rank" aria-label="랭킹 표">
+          <thead><tr><th style="width:44px">순위</th><th>이름</th><th style="width:110px" id="rankScoreHead">길이</th><th style="width:100px">달성일</th></tr></thead>
+          <tbody id="rankBody"></tbody>
+        </table>
+      </div>
+      <div class="slack-panel">
+        <p style="margin:0 0 10px; color:var(--muted); font-size:12px;">#studio-jbbj 채널 미리보기</p>
+        <div class="slack-msg">
+          <div class="from"><i>🎮</i><div><b>배플레이그라운드</b> <small>워크플로</small></div></div>
+          <div class="body" id="slackBody">
+            <b>아직 새 기록이 없어요</b><br />
+            <span style="color:var(--muted)">신기록이 나오면 이 자리에 실제 발송될 메시지가 표시됩니다.</span>
+          </div>
+        </div>
+        <div class="slack-toggle">
+          <button type="button" class="switch" role="switch" aria-checked="true" id="slackSwitch"><i></i></button>
+          신기록 슬랙 알림 (관리자 설정 · 기본 꺼짐, 목업에선 켜둠)
+        </div>
+      </div>
+    </div>
+  </section>
+</div>
+
+<div class="toasts" id="toasts" aria-live="polite"></div>
+
+<script>
+'use strict';
+/* ══════════ 공통: 지갑·보상·도전과제 (목업 시뮬레이션) ══════════ */
+const BALANCE = {
+  snake: { fee: 10, grades: [['bronze',15,8],['silver',25,18],['gold',40,30],['platinum',55,45]] },
+  tetris:{ fee: 15, grades: [['bronze',3000,12],['silver',10000,30],['gold',25000,55],['platinum',50000,80]] },
+  rewardCap: 5,
+};
+const ACHIEVEMENTS = [
+  { id:'arcade-first-run', medal:'🎫', name:'첫 판', desc:'아케이드 게임 첫 완주', bonus:10 },
+  { id:'arcade-runs-50', medal:'🪑', name:'단골 손님', desc:'누적 50판 플레이', bonus:30 },
+  { id:'arcade-earned-5k', medal:'🐷', name:'티끌 모아', desc:'적립 누적 5,000P', bonus:50 },
+  { id:'attend-7', medal:'📅', name:'개근상', desc:'7일 연속 출석', bonus:50 },
+  { id:'snake-30', medal:'🐍', name:'몸집 불리기', desc:'스네이크 길이 30', bonus:15 },
+  { id:'snake-55', medal:'🐉', name:'전설의 뱀', desc:'스네이크 길이 55', bonus:40 },
+  { id:'snake-golden-5', medal:'🍎', name:'황금 미식가', desc:'한 판에 골든 사과 5개', bonus:20 },
+  { id:'tetris-tetris', medal:'🧱', name:'테트리스!', desc:'한 번에 4줄 클리어', bonus:20 },
+  { id:'tetris-level-10', medal:'🚀', name:'고속 낙하', desc:'레벨 10 도달', bonus:30 },
+  { id:'tetris-30k', medal:'🏆', name:'3만 클럽', desc:'단판 30,000점', bonus:40 },
+];
+const state = {
+  points: 12500, dailyDone: new Set(), unlocked: new Set(), totalRuns: 0,
+  best: { snake: 34, tetris: 18420 }, rewards: { snake: 0, tetris: 0 },
+  slackOn: true,
+};
+const fmt = (n) => n.toLocaleString('ko-KR');
+const $ = (id) => document.getElementById(id);
+
+const badge = $('pointsBadge');
+function setPoints(next, delta, label) {
+  state.points = next;
+  $('pointsValue').textContent = fmt(next);
+  if (!delta) return;
+  badge.classList.remove('pulse'); void badge.offsetWidth; badge.classList.add('pulse');
+  setTimeout(() => badge.classList.remove('pulse'), 220);
+  const float = document.createElement('span');
+  float.className = 'points-float';
+  float.textContent = (delta > 0 ? '+' : '') + fmt(delta) + 'P';
+  if (delta < 0) float.style.color = 'var(--danger)';
+  badge.appendChild(float);
+  setTimeout(() => float.remove(), 1200);
+  if (label) toast(delta > 0 ? 'earn' : 'spend', label, (delta > 0 ? '+' : '') + fmt(delta) + 'P');
+}
+function toast(kind, title, pts, sub) {
+  const box = $('toasts');
+  const el = document.createElement('div');
+  el.className = 'toast ' + (kind === 'ach' ? '' : 'earn');
+  el.innerHTML = `<span style="font-size:18px">${kind === 'ach' ? '🏅' : kind === 'spend' ? '🎟️' : '✨'}</span>
+    <div><b>${title}</b>${sub ? `<small>${sub}</small>` : ''}</div><span class="pts">${pts ?? ''}</span>`;
+  box.appendChild(el);
+  setTimeout(() => el.remove(), 3400);
+}
+document.querySelectorAll('.demo-chip').forEach((btn) => {
+  btn.addEventListener('click', () => {
+    if (btn.dataset.once && state.dailyDone.has(btn.dataset.once)) {
+      toast('earn', '오늘은 이미 받았어요', '+0P', '내일 다시 지급돼요 (멱등 키)');
+      btn.classList.add('capped');
+      return;
+    }
+    if (btn.dataset.once) { state.dailyDone.add(btn.dataset.once); btn.classList.add('capped'); }
+    setPoints(state.points + Number(btn.dataset.earn), Number(btn.dataset.earn), btn.dataset.label);
+  });
+});
+badge.addEventListener('click', () => toast('earn', '실제 앱에서는 배플레이그라운드로 이동해요', '→'));
+
+function gradeFor(game, score) {
+  let hit = null;
+  for (const [g, min, reward] of BALANCE[game].grades) if (score >= min) hit = { grade: g, reward };
+  return hit ?? { grade: 'none', reward: 0 };
+}
+function unlockAchievements(ids) {
+  const fresh = ids.filter((id) => !state.unlocked.has(id));
+  fresh.forEach((id) => state.unlocked.add(id));
+  renderAchievements();
+  return fresh.map((id) => ACHIEVEMENTS.find((a) => a.id === id));
+}
+function renderAchievements() {
+  $('achGrid').innerHTML = ACHIEVEMENTS.map((a) => `
+    <div class="ach-tile ${state.unlocked.has(a.id) ? '' : 'locked'}">
+      <span class="medal">${state.unlocked.has(a.id) ? a.medal : '🔒'}</span>
+      <div><b>${a.name}</b><small>${a.desc}</small></div>
+      <span class="bonus">+${a.bonus}P</span>
+    </div>`).join('');
+}
+renderAchievements();
+
+/* ══════════ 랭킹 + 슬랙 ══════════ */
+const leaderboards = {
+  snake: { all: [['배한솔',34,'7/12'],['민지',29,'7/11'],['도윤',22,'7/10']], week: [['배한솔',34,'7/12'],['민지',26,'7/12']] },
+  tetris:{ all: [['배한솔',18420,'7/9'],['민지',12040,'7/8'],['유진',8130,'7/7']], week: [['민지',12040,'7/12'],['배한솔',9800,'7/11']] },
+};
+let rankGame = 'snake', rankPeriod = 'all';
+function renderRank() {
+  $('rankScoreHead').textContent = rankGame === 'snake' ? '길이' : '점수';
+  const rows = [...leaderboards[rankGame][rankPeriod]].sort((a, b) => b[1] - a[1]).slice(0, 5);
+  while (rows.length < 5) rows.push(null);
+  $('rankBody').innerHTML = rows.map((row, i) => row
+    ? `<tr class="${row[0] === '배한솔' ? 'me' : ''}"><td class="num">${String(i + 1).padStart(2, '0')}</td>
+       <td>${row[0]}${row[0] === '배한솔' ? ' · 나' : ''}</td><td class="num">${fmt(row[1])}</td><td>${row[2]}</td></tr>`
+    : `<tr><td class="num">${String(i + 1).padStart(2, '0')}</td><td style="color:var(--muted)">—</td><td class="num" style="color:var(--muted)">—</td><td style="color:var(--muted)">—</td></tr>`
+  ).join('');
+}
+document.querySelectorAll('[data-game-tab]').forEach((b) => b.addEventListener('click', () => {
+  rankGame = b.dataset.gameTab;
+  document.querySelectorAll('[data-game-tab]').forEach((x) => x.setAttribute('aria-selected', String(x === b)));
+  renderRank();
+}));
+document.querySelectorAll('[data-period-tab]').forEach((b) => b.addEventListener('click', () => {
+  rankPeriod = b.dataset.periodTab;
+  document.querySelectorAll('[data-period-tab]').forEach((x) => x.setAttribute('aria-selected', String(x === b)));
+  renderRank();
+}));
+renderRank();
+$('slackSwitch').addEventListener('click', () => {
+  state.slackOn = !state.slackOn;
+  $('slackSwitch').setAttribute('aria-checked', String(state.slackOn));
+});
+function announceRecord(gameKo, score, prev, unit) {
+  leaderboards[rankGame === 'snake' ? rankGame : rankGame] // no-op guard
+  if (!state.slackOn) return;
+  $('slackBody').innerHTML = `<b>${gameKo} 신기록! 🏆</b><br />
+    배한솔 — ${fmt(score)}${unit} ${prev ? `(이전 기록 ${fmt(prev)}${unit})` : '(첫 기록)'}<br />
+    <span style="color:var(--muted)">payload: { title, detail, player } → 슬랙 워크플로 트리거</span>`;
+}
+
+/* ══════════ 스테이지 셸 공통 (ready/countdown/running/paused/result) ══════════ */
+let activeGame = null; // 동시에 한 게임만
+function makeChrome(box, tone, opts) {
+  const overlay = document.createElement('div');
+  overlay.className = 'stage-overlay';
+  box.appendChild(overlay);
+  const chrome = {
+    phase: 'ready',
+    show(html) { overlay.innerHTML = `<div class="card">${html}</div>`; overlay.style.display = 'grid'; },
+    hide() { overlay.style.display = 'none'; },
+    ready() {
+      chrome.phase = 'ready';
+      const capped = state.rewards[opts.id] >= BALANCE.rewardCap;
+      const poor = state.points < BALANCE[opts.id].fee;
+      chrome.show(`
+        <h4>${opts.title}</h4>
+        <p>${opts.rules}</p>
+        <button type="button" class="btn-primary" id="${opts.id}Start" ${poor ? 'disabled' : ''}>
+          ${BALANCE[opts.id].fee}P 내고 시작</button>
+        <span class="fee-note">오늘 보상 가능 <b>${BALANCE.rewardCap - state.rewards[opts.id]}/${BALANCE.rewardCap}</b>
+        ${capped ? ' · 기록/랭킹만 반영돼요' : ''} ${poor ? '<br />포인트가 부족해요 — 활동으로 적립해 보세요' : ''}</span>`);
+      overlay.querySelector('#' + opts.id + 'Start')?.addEventListener('click', () => {
+        if (activeGame && activeGame !== opts.id && opts.pauseOthers) opts.pauseOthers();
+        activeGame = opts.id;
+        setPoints(state.points - BALANCE[opts.id].fee, -BALANCE[opts.id].fee, opts.title + ' 입장료');
+        chrome.countdown();
+      });
+      opts.status('대기 중');
+    },
+    countdown() {
+      chrome.phase = 'countdown';
+      let n = 3;
+      const tick = () => {
+        if (n === 0) { chrome.hide(); chrome.phase = 'running'; opts.begin(); return; }
+        chrome.show(`<div class="countdown">${n}</div>`);
+        opts.status(n + '초 뒤 시작');
+        n -= 1; chrome.timer = setTimeout(tick, 700);
+      };
+      tick();
+    },
+    paused() {
+      chrome.phase = 'paused';
+      chrome.show(`<h4>일시정지</h4><p>창을 벗어나도 자동으로 멈춰요</p>
+        <div class="result-actions">
+          <button type="button" class="btn-primary" data-resume>계속하기</button>
+          <button type="button" class="btn-ghost" data-quit>나가기</button>
+        </div>
+        <span class="fee-note">나가면 입장료는 돌려받지 못해요</span>`);
+      overlay.querySelector('[data-resume]').addEventListener('click', () => { chrome.hide(); chrome.phase = 'running'; opts.resume(); });
+      overlay.querySelector('[data-quit]').addEventListener('click', () => { opts.abort(); chrome.ready(); });
+      opts.status('일시정지');
+    },
+    result(run) {
+      chrome.phase = 'result';
+      const { grade, reward } = gradeFor(opts.id, run.score);
+      const capped = grade !== 'none' && state.rewards[opts.id] >= BALANCE.rewardCap;
+      const paid = capped ? 0 : reward;
+      if (grade !== 'none' && !capped) state.rewards[opts.id] += 1;
+      state.totalRuns += 1;
+      const isBest = run.score > state.best[opts.id];
+      const prevBest = state.best[opts.id];
+      if (isBest) {
+        state.best[opts.id] = run.score;
+        const lb = leaderboards[opts.id];
+        const stamp = '오늘';
+        const mine = lb.all.find((r) => r[0] === '배한솔');
+        if (mine) { mine[1] = run.score; mine[2] = stamp; } else lb.all.push(['배한솔', run.score, stamp]);
+        const mineW = lb.week.find((r) => r[0] === '배한솔');
+        if (mineW) { mineW[1] = Math.max(mineW[1], run.score); mineW[2] = stamp; } else lb.week.push(['배한솔', run.score, stamp]);
+        renderRank();
+        announceRecord(opts.title, run.score, prevBest, opts.unit);
+      }
+      const fresh = unlockAchievements(opts.evaluate(run));
+      if (state.totalRuns >= 1) fresh.push(...unlockAchievements(['arcade-first-run']));
+      let bonus = 0;
+      fresh.forEach((a) => { bonus += a.bonus; toast('ach', '도전과제 달성! ' + a.name, '+' + a.bonus + 'P', a.desc); });
+      const gradePct = { none: 8, bronze: 30, silver: 55, gold: 80, platinum: 100 }[grade];
+      chrome.show(`
+        <div class="result-grade">${grade === 'none' ? 'NO GRADE' : grade.toUpperCase()}</div>
+        <div class="result-score">${fmt(run.score)}<small style="font-size:15px;color:var(--muted)"> ${opts.unit}</small></div>
+        <div class="result-gauge"><i id="${opts.id}Gauge"></i></div>
+        ${isBest ? '<span class="best-banner">🏆 신기록!</span><br />' : ''}
+        <div class="result-reward ${paid === 0 ? 'capped' : ''}" id="${opts.id}Reward">${
+          grade === 'none' ? '등급 미달 — 보상 없음'
+          : capped ? '오늘 보상 한도에 도달했어요 (5/5)' : '+0P'}</div>
+        ${fresh.length ? `<div class="result-achievements">${fresh.map((a) =>
+          `<div class="ach-card"><span class="medal">${a.medal}</span><div><b>${a.name}</b><small>${a.desc}</small></div><span class="bonus">+${a.bonus}P</span></div>`).join('')}</div>` : ''}
+        <div class="result-actions">
+          <button type="button" class="btn-primary" data-replay>다시 하기 (${BALANCE[opts.id].fee}P)</button>
+          <button type="button" class="btn-ghost" data-exit>로비로</button>
+        </div>`);
+      requestAnimationFrame(() => requestAnimationFrame(() => {
+        const g = overlay.querySelector('#' + opts.id + 'Gauge');
+        if (g) g.style.width = gradePct + '%';
+      }));
+      if (paid > 0) {
+        let shown = 0;
+        const el = () => overlay.querySelector('#' + opts.id + 'Reward');
+        const step = Math.max(1, Math.round(paid / 24));
+        const iv = setInterval(() => {
+          shown = Math.min(paid, shown + step);
+          if (el()) el().textContent = '+' + shown + 'P';
+          if (shown >= paid) clearInterval(iv);
+        }, 20);
+        setPoints(state.points + paid + bonus, paid + bonus, opts.title + ' 보상' + (bonus ? ' + 도전과제' : ''));
+      } else if (bonus > 0) {
+        setPoints(state.points + bonus, bonus, '도전과제 보너스');
+      }
+      $(opts.id === 'snake' ? 'snakeRewardCount' : 'tRewardCount').textContent = state.rewards[opts.id] + '/5';
+      $(opts.id === 'snake' ? 'snakeBest' : 'tBest').textContent = fmt(state.best[opts.id]);
+      overlay.querySelector('[data-replay]').addEventListener('click', () => chrome.ready());
+      overlay.querySelector('[data-exit]').addEventListener('click', () => chrome.ready());
+      opts.status('게임 오버 — 등급 ' + grade.toUpperCase());
+    },
+  };
+  return chrome;
+}
+
+/* ══════════ 스네이크 ══════════ */
+(function snakeGame() {
+  const cv = $('snakeCanvas'), ctx = cv.getContext('2d');
+  const N = 21, CELL = cv.width / N;
+  let s = null, raf = 0, acc = 0, last = 0;
+  const chrome = makeChrome($('snakeBox'), 'lavender', {
+    id: 'snake', title: '스네이크', unit: '',
+    rules: '사과를 먹고 몸을 키우세요. 5번째 사과마다 골든(+2). 벽과 몸에 부딪히면 끝!',
+    status: (t) => { $('snakeStatus').textContent = t; },
+    begin() { s = fresh(); acc = 0; last = 0; loop(); $('snakeStatus').textContent = '진행 중'; },
+    resume() { last = 0; loop(); $('snakeStatus').textContent = '진행 중'; },
+    abort() { cancelAnimationFrame(raf); s = null; },
+    pauseOthers: () => window.__pauseTetris?.(),
+    evaluate: (run) => [
+      run.score >= 30 && 'snake-30', run.score >= 55 && 'snake-55',
+      run.golden >= 5 && 'snake-golden-5',
+    ].filter(Boolean),
+  });
+  window.__pauseSnake = () => { if (chrome.phase === 'running') { cancelAnimationFrame(raf); chrome.paused(); } };
+  function fresh() {
+    return {
+      body: [[10,10],[9,10],[8,10],[7,10]], dir: [1,0], queue: [],
+      apple: null, eaten: 0, golden: 0, tickMs: 160, grow: 0,
+    };
+  }
+  function placeApple() {
+    const taken = new Set(s.body.map((p) => p.join()));
+    const free = [];
+    for (let y = 0; y < N; y++) for (let x = 0; x < N; x++) if (!taken.has(x + ',' + y)) free.push([x, y]);
+    const pos = free[Math.floor(Math.random() * free.length)];
+    s.apple = { pos, golden: (s.eaten + 1) % 5 === 0 };
+  }
+  function step() {
+    if (!s.apple) placeApple();
+    if (s.queue.length) {
+      const d = s.queue.shift();
+      if (d[0] !== -s.dir[0] || d[1] !== -s.dir[1]) s.dir = d;
+    }
+    const head = [s.body[0][0] + s.dir[0], s.body[0][1] + s.dir[1]];
+    const tailWillMove = s.grow === 0;
+    const bodyCheck = tailWillMove ? s.body.slice(0, -1) : s.body;
+    if (head[0] < 0 || head[0] >= N || head[1] < 0 || head[1] >= N
+      || bodyCheck.some((p) => p[0] === head[0] && p[1] === head[1])) {
+      cancelAnimationFrame(raf);
+      const run = { score: s.body.length, golden: s.golden };
+      $('snakeLen').textContent = s.body.length;
+      chrome.result(run); s = null;
+      return;
+    }
+    s.body.unshift(head);
+    if (s.apple && head[0] === s.apple.pos[0] && head[1] === s.apple.pos[1]) {
+      s.eaten += 1; s.grow += s.apple.golden ? 2 : 1;
+      if (s.apple.golden) s.golden += 1;
+      s.tickMs = Math.max(80, s.tickMs - 4);
+      placeApple();
+    }
+    if (s.grow > 0) s.grow -= 1; else s.body.pop();
+    updateHud();
+  }
+  function updateHud() {
+    const len = s.body.length;
+    $('snakeLen').textContent = len; $('snakeGolden').textContent = s.golden;
+    const next = BALANCE.snake.grades.find(([, min]) => len < min);
+    $('snakeNextGradeLabel').textContent = next
+      ? `다음 등급(${next[0].toUpperCase()} ${next[1]})까지 ${next[1] - len}`
+      : '최고 등급 달성!';
+    $('snakeGradeFill').style.width = Math.min(100, (len / 55) * 100) + '%';
+    document.querySelectorAll('#snakeChips span').forEach((c) =>
+      c.classList.toggle('hit', len >= Number(c.dataset.min)));
+  }
+  function draw() {
+    ctx.fillStyle = '#12151d'; ctx.fillRect(0, 0, cv.width, cv.height);
+    ctx.strokeStyle = 'rgba(45,48,65,.35)';
+    for (let i = 1; i < N; i++) {
+      ctx.beginPath(); ctx.moveTo(i * CELL, 0); ctx.lineTo(i * CELL, cv.height); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(0, i * CELL); ctx.lineTo(cv.width, i * CELL); ctx.stroke();
+    }
+    if (!s) return;
+    if (s.apple) {
+      ctx.fillStyle = s.apple.golden ? '#fdcb6e' : '#ff7675';
+      ctx.shadowColor = s.apple.golden ? '#fdcb6e' : 'transparent';
+      ctx.shadowBlur = s.apple.golden ? 12 : 0;
+      const [ax, ay] = s.apple.pos;
+      ctx.beginPath(); ctx.arc(ax * CELL + CELL / 2, ay * CELL + CELL / 2, CELL * .34, 0, 7); ctx.fill();
+      ctx.shadowBlur = 0;
+    }
+    s.body.forEach(([x, y], i) => {
+      ctx.fillStyle = i === 0 ? '#c9c3ff' : '#a29bfe';
+      const pad = i === 0 ? 1.5 : 2.5;
+      roundRect(x * CELL + pad, y * CELL + pad, CELL - pad * 2, CELL - pad * 2, 5);
+    });
+  }
+  function roundRect(x, y, w, h, r) {
+    ctx.beginPath(); ctx.roundRect(x, y, w, h, r); ctx.fill();
+  }
+  function loop(ts) {
+    raf = requestAnimationFrame(loop);
+    if (!s) return;
+    if (!last) last = ts ?? performance.now();
+    const now = ts ?? performance.now();
+    acc += now - last; last = now;
+    while (s && acc >= s.tickMs) { acc -= s.tickMs; step(); }
+    draw();
+  }
+  draw();
+  window.addEventListener('keydown', (e) => {
+    if (chrome.phase !== 'running' && chrome.phase !== 'paused') return;
+    const map = { ArrowUp: [0,-1], ArrowDown: [0,1], ArrowLeft: [-1,0], ArrowRight: [1,0],
+      w: [0,-1], s: [0,1], a: [-1,0], d: [1,0], W: [0,-1], S: [0,1], A: [-1,0], D: [1,0] };
+    if (e.key === 'p' || e.key === 'P' || e.key === 'Escape') {
+      e.preventDefault();
+      if (chrome.phase === 'running') { cancelAnimationFrame(raf); chrome.paused(); }
+      return;
+    }
+    if (chrome.phase !== 'running' || !map[e.key] || !s) return;
+    e.preventDefault();
+    if (s.queue.length < 2) s.queue.push(map[e.key]);
+  });
+  chrome.ready();
+})();
+
+/* ══════════ 테트리스 (목업: 간이 킥 — 실구현은 SRS) ══════════ */
+(function tetrisGame() {
+  const cv = $('tetrisCanvas'), ctx = cv.getContext('2d');
+  const W = 10, H = 20, CELL = 21, OX = 8, OY = 8;
+  const SPEED = [1000, 850, 720, 600, 490, 390, 310, 240, 180, 140, 105, 80, 60, 45, 35];
+  const SHAPES = {
+    I: [[[0,1],[1,1],[2,1],[3,1]],[[2,0],[2,1],[2,2],[2,3]],[[0,2],[1,2],[2,2],[3,2]],[[1,0],[1,1],[1,2],[1,3]]],
+    O: [[[1,0],[2,0],[1,1],[2,1]],[[1,0],[2,0],[1,1],[2,1]],[[1,0],[2,0],[1,1],[2,1]],[[1,0],[2,0],[1,1],[2,1]]],
+    T: [[[1,0],[0,1],[1,1],[2,1]],[[1,0],[1,1],[2,1],[1,2]],[[0,1],[1,1],[2,1],[1,2]],[[1,0],[0,1],[1,1],[1,2]]],
+    S: [[[1,0],[2,0],[0,1],[1,1]],[[1,0],[1,1],[2,1],[2,2]],[[1,1],[2,1],[0,2],[1,2]],[[0,0],[0,1],[1,1],[1,2]]],
+    Z: [[[0,0],[1,0],[1,1],[2,1]],[[2,0],[1,1],[2,1],[1,2]],[[0,1],[1,1],[1,2],[2,2]],[[1,0],[0,1],[1,1],[0,2]]],
+    J: [[[0,0],[0,1],[1,1],[2,1]],[[1,0],[2,0],[1,1],[1,2]],[[0,1],[1,1],[2,1],[2,2]],[[1,0],[1,1],[0,2],[1,2]]],
+    L: [[[2,0],[0,1],[1,1],[2,1]],[[1,0],[1,1],[1,2],[2,2]],[[0,1],[1,1],[2,1],[0,2]],[[0,0],[1,0],[1,1],[1,2]]],
+  };
+  const COLORS = { I:'#45e0b5', O:'#fdcb6e', T:'#a29bfe', S:'#00b894', Z:'#8c7cf4', J:'#74b9ff', L:'#e8a2b8' };
+  let g = null, raf = 0, last = 0;
+  const chrome = makeChrome($('tetrisBox'), 'mint', {
+    id: 'tetris', title: '테트리스', unit: '점',
+    rules: '줄을 지워 점수를 모으세요. 한 번에 4줄이 최고 효율!',
+    status: (t) => { $('tetrisStatus').textContent = t; },
+    begin() { g = fresh(); last = 0; loop(); $('tetrisStatus').textContent = '진행 중'; },
+    resume() { last = 0; loop(); $('tetrisStatus').textContent = '진행 중'; },
+    abort() { cancelAnimationFrame(raf); g = null; },
+    pauseOthers: () => window.__pauseSnake?.(),
+    evaluate: (run) => [
+      run.maxClear >= 4 && 'tetris-tetris', run.level >= 10 && 'tetris-level-10',
+      run.score >= 30000 && 'tetris-30k',
+    ].filter(Boolean),
+  });
+  window.__pauseTetris = () => { if (chrome.phase === 'running') { cancelAnimationFrame(raf); chrome.paused(); } };
+  function bag() {
+    const b = ['I','O','T','S','Z','J','L'];
+    for (let i = b.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [b[i], b[j]] = [b[j], b[i]]; }
+    return b;
+  }
+  function fresh() {
+    const q = bag().concat(bag());
+    const st = { board: Array.from({ length: H }, () => Array(W).fill(null)),
+      queue: q, hold: null, holdUsed: false, level: 1, lines: 0, score: 0, combo: -1,
+      maxClear: 0, levelReached: 1, gravAcc: 0, soft: false, over: false };
+    spawn(st); return st;
+  }
+  function spawn(st) {
+    if (st.queue.length < 7) st.queue.push(...bag());
+    st.active = { p: st.queue.shift(), r: 0, x: 3, y: 0 };
+    st.holdUsed = false;
+    if (collides(st, st.active)) st.over = true;
+  }
+  function cells(a) { return SHAPES[a.p][a.r].map(([cx, cy]) => [a.x + cx, a.y + cy]); }
+  function collides(st, a) {
+    return cells(a).some(([x, y]) => x < 0 || x >= W || y >= H || (y >= 0 && st.board[y][x]));
+  }
+  function tryMove(dx, dy) {
+    const n = { ...g.active, x: g.active.x + dx, y: g.active.y + dy };
+    if (!collides(g, n)) { g.active = n; return true; } return false;
+  }
+  function rotate(dir) {
+    const n = { ...g.active, r: (g.active.r + dir + 4) % 4 };
+    for (const [kx, ky] of [[0,0],[-1,0],[1,0],[0,-1],[-2,0],[2,0]]) {
+      const k = { ...n, x: n.x + kx, y: n.y + ky };
+      if (!collides(g, k)) { g.active = k; return; }
+    }
+  }
+  function hardDropY() {
+    const a = { ...g.active };
+    while (!collides(g, { ...a, y: a.y + 1 })) a.y += 1;
+    return a.y;
+  }
+  function lock() {
+    cells(g.active).forEach(([x, y]) => { if (y >= 0) g.board[y][x] = COLORS[g.active.p]; });
+    let cleared = 0;
+    g.board = g.board.filter((row) => { const full = row.every(Boolean); if (full) cleared += 1; return !full; });
+    while (g.board.length < H) g.board.unshift(Array(W).fill(null));
+    if (cleared > 0) {
+      g.combo += 1;
+      g.maxClear = Math.max(g.maxClear, cleared);
+      g.lines += cleared;
+      g.score += [0, 100, 300, 500, 800][cleared] * g.level + 50 * Math.max(0, g.combo) * g.level;
+      g.level = Math.min(15, Math.floor(g.lines / 10) + 1);
+      g.levelReached = Math.max(g.levelReached, g.level);
+    } else g.combo = -1;
+    spawn(g);
+    if (g.over) {
+      cancelAnimationFrame(raf);
+      const run = { score: g.score, maxClear: g.maxClear, level: g.levelReached };
+      chrome.result(run); g = null;
+    }
+  }
+  function updateHud() {
+    $('tScore').textContent = fmt(g.score); $('tLevel').textContent = g.level; $('tLines').textContent = g.lines;
+    const next = BALANCE.tetris.grades.find(([, min]) => g.score < min);
+    $('tNextGradeLabel').textContent = next
+      ? `다음 등급(${next[0].toUpperCase()} ${fmt(next[1])})까지 ${fmt(next[1] - g.score)}`
+      : '최고 등급 달성!';
+    $('tGradeFill').style.width = Math.min(100, (g.score / 50000) * 100) + '%';
+    document.querySelectorAll('#tChips span').forEach((c) =>
+      c.classList.toggle('hit', g.score >= Number(c.dataset.min)));
+  }
+  function draw() {
+    ctx.fillStyle = '#12151d'; ctx.fillRect(0, 0, cv.width, cv.height);
+    ctx.strokeStyle = 'rgba(45,48,65,.5)';
+    ctx.strokeRect(OX - .5, OY - .5, W * CELL + 1, H * CELL + 1);
+    for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+      if (g?.board[y][x]) block(x, y, g.board[y][x], 1);
+    }
+    if (g && !g.over) {
+      const gy = hardDropY();
+      cells({ ...g.active, y: gy }).forEach(([x, y]) => { if (y >= 0) block(x, y, COLORS[g.active.p], .18); });
+      cells(g.active).forEach(([x, y]) => { if (y >= 0) block(x, y, COLORS[g.active.p], 1); });
+    }
+    // side: hold + next
+    ctx.fillStyle = 'rgba(139,141,163,.9)'; ctx.font = '700 10px ui-monospace';
+    ctx.fillText('HOLD', OX + W * CELL + 16, 20);
+    if (g?.hold) mini(g.hold, OX + W * CELL + 16, 28);
+    ctx.fillStyle = 'rgba(139,141,163,.9)'; ctx.fillText('NEXT', OX + W * CELL + 16, 92);
+    g?.queue.slice(0, 5).forEach((p, i) => mini(p, OX + W * CELL + 16, 100 + i * 52));
+    function block(x, y, color, alpha) {
+      ctx.globalAlpha = alpha; ctx.fillStyle = color;
+      ctx.beginPath(); ctx.roundRect(OX + x * CELL + 1, OY + y * CELL + 1, CELL - 2, CELL - 2, 4); ctx.fill();
+      ctx.globalAlpha = 1;
+    }
+    function mini(p, px, py) {
+      SHAPES[p][0].forEach(([cx, cy]) => {
+        ctx.fillStyle = COLORS[p];
+        ctx.beginPath(); ctx.roundRect(px + cx * 11, py + cy * 11, 9, 9, 2); ctx.fill();
+      });
+    }
+  }
+  /* DAS/ARR */
+  const held = { left: null, right: null };
+  function repeatMoves(now) {
+    for (const [key, dir] of [['left', -1], ['right', 1]]) {
+      const h = held[key];
+      if (!h) continue;
+      if (!h.dasDone && now - h.since >= 160) { h.dasDone = true; h.lastRepeat = now; tryMove(dir, 0); }
+      else if (h.dasDone && now - h.lastRepeat >= 40) { h.lastRepeat = now; tryMove(dir, 0); }
+    }
+  }
+  function loop(ts) {
+    raf = requestAnimationFrame(loop);
+    if (!g || chrome.phase !== 'running') { draw(); return; }
+    const now = ts ?? performance.now();
+    if (!last) last = now;
+    const dt = now - last; last = now;
+    repeatMoves(now);
+    const interval = g.soft ? 50 : SPEED[g.level - 1];
+    g.gravAcc += dt;
+    while (g && g.gravAcc >= interval) {
+      g.gravAcc -= interval;
+      if (!tryMove(0, 1)) { lock(); if (!g) { draw(); return; } }
+      else if (g.soft) g.score += 1;
+    }
+    updateHud(); draw();
+  }
+  draw();
+  window.addEventListener('keydown', (e) => {
+    if (chrome.phase !== 'running' && chrome.phase !== 'paused') return;
+    if (e.key === 'p' || e.key === 'P' || e.key === 'Escape') {
+      e.preventDefault();
+      if (chrome.phase === 'running') { cancelAnimationFrame(raf); chrome.paused(); }
+      return;
+    }
+    if (chrome.phase !== 'running' || !g) return;
+    if (['ArrowLeft','ArrowRight','ArrowDown',' ','z','x','Z','X','c','C','ArrowUp'].includes(e.key)) e.preventDefault();
+    if (e.repeat) return;
+    const now = performance.now();
+    if (e.key === 'ArrowLeft') { held.left = { since: now, dasDone: false, lastRepeat: 0 }; tryMove(-1, 0); }
+    if (e.key === 'ArrowRight') { held.right = { since: now, dasDone: false, lastRepeat: 0 }; tryMove(1, 0); }
+    if (e.key === 'ArrowDown') g.soft = true;
+    if (e.key === 'z' || e.key === 'Z') rotate(-1);
+    if (e.key === 'x' || e.key === 'X' || e.key === 'ArrowUp') rotate(1);
+    if (e.key === ' ') {
+      const from = g.active.y, to = hardDropY();
+      g.score += (to - from) * 2; g.active = { ...g.active, y: to }; lock();
+    }
+    if ((e.key === 'c' || e.key === 'C') && !g.holdUsed) {
+      const cur = g.active.p;
+      if (g.hold) { g.active = { p: g.hold, r: 0, x: 3, y: 0 }; g.hold = cur; }
+      else { g.hold = cur; spawn(g); }
+      g.holdUsed = true;
+    }
+    updateHud();
+  });
+  window.addEventListener('keyup', (e) => {
+    if (e.key === 'ArrowLeft') held.left = null;
+    if (e.key === 'ArrowRight') held.right = null;
+    if (e.key === 'ArrowDown' && g) g.soft = false;
+  });
+  chrome.ready();
+})();
+
+/* 창 이탈 자동 일시정지 */
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) { window.__pauseSnake?.(); window.__pauseTetris?.(); }
+});
+</script>
+</body>
+</html>

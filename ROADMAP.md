@@ -53,9 +53,9 @@ Phase 9: Supabase 마이그레이션  ██████░░░░ M-0, M-2 �
 - [x] 화면·마우스 뒤로가기와 작은 화면용 하단 주문 조작부
 - [x] 배한솔 관리자용 뉴스·가격 충격·추세·거래 정지 이벤트
 - [x] 실사용 피드백 반영: 양방향 빠른주문, 휠·드래그·핀치 차트, 장 전체·업종·종목별 시세 움직임
-- [ ] 실제 사용 피드백을 반영한 포인트·게임 점수 정책 확정
+- [ ] 실제 사용 피드백을 반영한 포인트·게임 점수 정책 확정 → **설계 완료, 한솔 리뷰 대기**: `docs/superpowers/specs/2026-07-13-baeplayground-arcade-points-design.md`
 - [ ] 정식 운영용 종목 정보 편집·시장 정책 확정
-- [ ] 게임 실행과 서버 저장
+- [ ] 게임 실행과 서버 저장 → **구현 계획 완료 (PR A~D, v1.84~1.87)**: `docs/superpowers/plans/2026-07-13-baeplayground-arcade-points.md` · 인터랙션 목업: `docs/superpowers/mockups/2026-07-13-baeplayground-arcade-mockup.html`
 
 ---
 
