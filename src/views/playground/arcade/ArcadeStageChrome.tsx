@@ -20,6 +20,7 @@ export interface ArcadeStageChromeProps {
   result?: ReactNode;
   onStart: () => void;
   onResume: () => void;
+  onPause: () => void; // 종료 확인을 띄우기 전 진행 중 루프를 멈춘다
   onQuit: () => void;
   onCountdownComplete: () => void;
   startDisabledReason?: string;
@@ -48,21 +49,28 @@ function statusText(phase: ArcadeStagePhase, game: PlaygroundGameDefinition): st
 export function ArcadeStageChrome(props: ArcadeStageChromeProps) {
   const {
     game, phase, hud, stage, result,
-    onStart, onResume, onQuit, onCountdownComplete,
+    onStart, onResume, onPause, onQuit, onCountdownComplete,
     startDisabledReason, startPending, todayRewardedRuns, entryFee, dailyRewardCap, keyHints,
   } = props;
 
   const prefersReducedMotion = useReducedMotion();
   const [countdown, setCountdown] = useState(3);
   const [confirmingQuit, setConfirmingQuit] = useState(false);
+  const [resumeAfterConfirm, setResumeAfterConfirm] = useState(false);
 
-  // 진행/일시정지/카운트다운에서만 뒤로가기를 가로채 종료 확인을 띄운다(ready/result 는 통과).
-  const interceptActive = phase === 'running' || phase === 'paused' || phase === 'countdown';
-  usePlaygroundBackInterceptor(interceptActive, () => setConfirmingQuit(true));
+  // 진행/일시정지/카운트다운, 그리고 입장료 정산 중(startPending)에도 뒤로가기를 가로챈다.
+  // 정산 중에는 이탈만 막고(모달 없이), 진행/카운트다운 중이면 먼저 멈춘 뒤 종료 확인을 띄운다.
+  const interceptActive = phase === 'running' || phase === 'paused' || phase === 'countdown' || !!startPending;
+  usePlaygroundBackInterceptor(interceptActive, () => {
+    if (startPending) return; // 정산 중 — 이탈만 차단(interceptTop 이 true 반환)
+    if (phase === 'running') { onPause(); setResumeAfterConfirm(true); }
+    else if (phase === 'countdown') { setResumeAfterConfirm(true); } // 아래 effect 가 confirm 중 멈춘다
+    setConfirmingQuit(true);
+  });
 
-  // 카운트다운 3→2→1 (각 700ms) 후 시작. reduced-motion 이면 대기 없이 즉시 시작.
+  // 카운트다운 3→2→1 (각 700ms) 후 시작. 확인 모달 중에는 멈춘다. reduced-motion 이면 즉시 시작.
   useEffect(() => {
-    if (phase !== 'countdown') return;
+    if (phase !== 'countdown' || confirmingQuit) return;
     if (prefersReducedMotion) {
       onCountdownComplete();
       return;
@@ -79,7 +87,7 @@ export function ArcadeStageChrome(props: ArcadeStageChromeProps) {
       }
     }, COUNTDOWN_STEP_MS);
     return () => clearInterval(timer);
-  }, [phase, prefersReducedMotion, onCountdownComplete]);
+  }, [phase, confirmingQuit, prefersReducedMotion, onCountdownComplete]);
 
   const rewardsLeft = Math.max(0, dailyRewardCap - todayRewardedRuns);
 
@@ -136,7 +144,19 @@ export function ArcadeStageChrome(props: ArcadeStageChromeProps) {
             <div className="pg-arcade-overlay__title">게임을 종료할까요?</div>
             <p className="pg-arcade-overlay__hint">입장료는 돌려받지 못해요.</p>
             <button type="button" className="pg-arcade-btn" onClick={() => { setConfirmingQuit(false); onQuit(); }}>종료</button>
-            <button type="button" className="pg-arcade-btn pg-arcade-btn--ghost" onClick={() => setConfirmingQuit(false)}>계속하기</button>
+            <button
+              type="button"
+              className="pg-arcade-btn pg-arcade-btn--ghost"
+              onClick={() => {
+                setConfirmingQuit(false);
+                if (resumeAfterConfirm) {
+                  setResumeAfterConfirm(false);
+                  if (phase === 'running') onResume(); // 카운트다운은 위 effect 가 재시작한다
+                }
+              }}
+            >
+              계속하기
+            </button>
           </div>
         )}
 

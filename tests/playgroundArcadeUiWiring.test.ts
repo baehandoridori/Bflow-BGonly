@@ -68,9 +68,14 @@ test('ArcadeStageChrome renders per-phase overlays and guards start/back', () =>
   // 시작 버튼은 사유가 있거나 입장 요청 진행 중이면 비활성(입장료 중복 차감 방지)
   assert.match(chromeSource, /disabled=\{!!startDisabledReason \|\| !!startPending\}/);
   assert.match(chromeSource, /entryFee\}P 내고 시작/);
-  // 진행/일시정지/카운트다운에서만 뒤로가기 인터셉트
-  assert.match(chromeSource, /phase === 'running' \|\| phase === 'paused' \|\| phase === 'countdown'/);
+  // 진행/일시정지/카운트다운 + 입장료 정산 중(startPending)에도 뒤로가기 인터셉트
+  assert.match(chromeSource, /phase === 'running' \|\| phase === 'paused' \|\| phase === 'countdown' \|\| !!startPending/);
   assert.match(chromeSource, /usePlaygroundBackInterceptor\(interceptActive/);
+  // 정산 중에는 이탈만 막고(모달 없이), 진행 중이면 확인 전에 먼저 멈춘다
+  assert.match(chromeSource, /if \(startPending\) return;/);
+  assert.match(chromeSource, /if \(phase === 'running'\) \{ onPause\(\)/);
+  // 확인 모달 중에는 카운트다운도 멈춘다
+  assert.match(chromeSource, /phase !== 'countdown' \|\| confirmingQuit/);
   // 종료 확인 문구 + 입장료 안내
   assert.match(chromeSource, /게임을 종료할까요\?/);
   assert.match(chromeSource, /입장료는 돌려받지 못해요/);
@@ -85,6 +90,8 @@ test('SnakeStage guards against duplicate entry charges and exits directly', () 
   assert.match(snakeStageSource, /if \(startingRef\.current\) return;/);
   assert.match(snakeStageSource, /startingRef\.current = true;/);
   assert.match(snakeStageSource, /startPending=\{starting\}/);
+  // 확인 전 일시정지용 onPause 전달(루프만 멈춤)
+  assert.match(snakeStageSource, /onPause=\{\(\) => loopRef\.current\?\.pause\(\)\}/);
   // 종료는 루프를 멈추고 onExit(직접 이탈)로 나간다
   assert.match(snakeStageSource, /loopRef\.current\?\.stop\(\);\s*onExit\(\);/);
 });

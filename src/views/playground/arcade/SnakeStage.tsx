@@ -209,6 +209,7 @@ export function SnakeStage({ onExit }: { onExit: () => void }) {
       ) : undefined}
       onStart={handleStart}
       onResume={() => { loopRef.current?.resume(); setPhase('running'); }}
+      onPause={() => loopRef.current?.pause()}
       onQuit={handleQuit}
       onCountdownComplete={beginLoop}
       startDisabledReason={startDisabledReason}
