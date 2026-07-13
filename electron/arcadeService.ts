@@ -127,6 +127,7 @@ export function arcadeExecutePayload(command: ArcadeExecuteCommand): Record<stri
 
 interface ArcadeMutationQueue {
   enqueue<T>(userId: string, operation: () => Promise<T>): Promise<T>;
+  drain(userId: string): Promise<void>;
 }
 
 function createArcadeMutationQueue(): ArcadeMutationQueue {
@@ -141,6 +142,11 @@ function createArcadeMutationQueue(): ArcadeMutationQueue {
         if (tails.get(userId) === tail) tails.delete(userId);
       });
       return result;
+    },
+    // 이 사용자에 대해 대기·진행 중인 뮤테이션이 모두 끝날 때까지 기다린다.
+    // 세션 전환 시 진행 중이던 지갑 쓰기를 새 세션 발행 전에 마무리·정리하기 위함.
+    async drain(userId: string): Promise<void> {
+      while (tails.has(userId)) await tails.get(userId);
     },
   };
 }
@@ -164,10 +170,27 @@ export class ArcadeService {
   private readonly logger: Pick<Console, 'error'>;
   private readonly queue = createArcadeMutationQueue();
   private readonly dailyLoginAttempts = new Set<string>();
+  private readonly transitioningSessions = new Set<string>();
 
   constructor(deps: ArcadeServiceDependencies) {
     this.deps = deps;
     this.logger = deps.logger ?? console;
+  }
+
+  // 세션 전환(로그아웃/사용자 전환) 시작을 표시한다. epoch 는 새 세션이 발행될 때에야 오르므로,
+  // 그 사이 창(window)에 들어오는 뮤테이션이 옛 세션으로 지갑을 쓰지 않도록 현재 세션을 표시해 둔다.
+  // personalTodo/market 서비스와 동일한 방식.
+  beginSessionTransition(userId: string, epoch: number): void {
+    this.transitioningSessions.add(`${userId}\u0000${epoch}`);
+  }
+
+  endSessionTransition(userId: string, epoch: number): void {
+    this.transitioningSessions.delete(`${userId}\u0000${epoch}`);
+  }
+
+  // 이 사용자에 대해 진행 중인 아케이드 뮤테이션이 끝날 때까지 기다린다 — 새 세션 발행 전에 호출된다.
+  async drainUser(userId: string): Promise<void> {
+    await this.queue.drain(userId);
   }
 
   // 네트워크 오류 1회 재시도 — 같은 request_id 를 재사용하므로 서버 멱등이 중복을 막는다.
@@ -195,12 +218,12 @@ export class ArcadeService {
   ): Promise<{ result: ArcadeExecuteResult; retried: boolean }> {
     const startedEpoch = this.deps.getSessionEpoch();
     return this.queue.enqueue(userId, async () => {
-      // 큐 대기 중 세션이 바뀌었으면(로그아웃/사용자 전환) RPC 자체를 실행하지 않는다
-      // — 스테일 입장료 차감·포인트 지급을 서버에 남기지 않기 위해 쓰기 전에 먼저 검증한다.
-      this.assertSameSession(startedEpoch);
+      // 큐 대기 중 세션이 바뀌었거나(epoch 변경) 전환이 시작됐으면(epoch 발행 전 창) RPC 자체를
+      // 실행하지 않는다 — 스테일 입장료 차감·포인트 지급을 서버에 남기지 않기 위해 쓰기 전에 검증한다.
+      this.assertSessionActive(userId, startedEpoch);
       const { value, retried } = await this.withRetryMeta(() => this.deps.execute(userId, command));
       // RPC 후에도 재확인 — 스테일 결과를 반영·broadcast·슬랙하지 않는다.
-      this.assertSameSession(startedEpoch);
+      this.assertSessionActive(userId, startedEpoch);
       const result = asResult(value);
       this.maybeNotifyRecord(command, result, retried);
       return { result, retried };
@@ -219,6 +242,14 @@ export class ArcadeService {
 
   private assertSameSession(startedEpoch: number): void {
     if (this.deps.getSessionEpoch() !== startedEpoch) {
+      throw new ArcadeSessionChangedError();
+    }
+  }
+
+  // epoch 변경(전환 완료) + 전환 표시(전환 중, epoch 발행 전) 를 모두 스테일로 본다.
+  private assertSessionActive(userId: string, startedEpoch: number): void {
+    this.assertSameSession(startedEpoch);
+    if (this.transitioningSessions.has(`${userId}\u0000${startedEpoch}`)) {
       throw new ArcadeSessionChangedError();
     }
   }

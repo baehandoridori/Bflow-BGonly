@@ -276,6 +276,85 @@ test('awardActivity swallows a mid-flight session change without broadcasting', 
   assert.equal(broadcasts.length, 0);
 });
 
+test('a mutation started during a session transition (before the epoch bumps) never reaches the RPC', async () => {
+  const executed: ArcadeExecuteCommand[] = [];
+  const service = new ArcadeService({
+    read: async () => ({}),
+    execute: async (_userId, command) => { executed.push(command); return {}; },
+    resolveActor: () => CANONICAL,
+    broadcastWalletUpdate: () => {},
+    sendSlackRecord: () => {},
+    getNowMs: () => FIXED_NOW,
+    getSessionEpoch: () => 1, // 전환 중 epoch 은 아직 발행되지 않아 그대로다
+    logger: { error: () => {} },
+  });
+  service.beginSessionTransition('u-canonical', 1);
+  await assert.rejects(
+    service.execute('u-canonical', { kind: 'activity', requestId: 'comment:c', activity: 'comment' }),
+    /세션이 바뀌/,
+  );
+  assert.equal(executed.length, 0, '전환 창에서는 epoch 이 그대로여도 RPC 를 실행하지 않는다');
+
+  // 전환이 끝나면 다시 실행된다.
+  service.endSessionTransition('u-canonical', 1);
+  await service.execute('u-canonical', { kind: 'activity', requestId: 'comment:c2', activity: 'comment' });
+  assert.equal(executed.length, 1, '전환이 끝나면 같은 epoch 에서 다시 RPC 를 실행한다');
+});
+
+test('a transition that begins mid-flight (epoch unchanged) suppresses the broadcast', async () => {
+  const broadcasts: ArcadeWalletUpdate[] = [];
+  let service!: ArcadeService;
+  service = new ArcadeService({
+    read: async () => ({}),
+    execute: async () => {
+      service.beginSessionTransition('u-canonical', 1); // RPC 진행 중 전환 시작 (epoch 은 그대로)
+      return { awarded: true, points: 5, wallet: { walletPoints: 1, lifetimeEarnedPoints: 1 } };
+    },
+    resolveActor: () => CANONICAL,
+    broadcastWalletUpdate: (update) => broadcasts.push(update),
+    sendSlackRecord: () => {},
+    getNowMs: () => FIXED_NOW,
+    getSessionEpoch: () => 1,
+    logger: { error: () => {} },
+  });
+  await assert.rejects(
+    service.execute('u-canonical', { kind: 'activity', requestId: 'comment:c', activity: 'comment' }),
+    /세션이 바뀌/,
+  );
+  assert.equal(broadcasts.length, 0, '전환이 시작되면 커밋된 결과라도 새 세션 renderer 로 broadcast 하지 않는다');
+});
+
+test('drainUser waits for an in-flight arcade mutation to settle before resolving', async () => {
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => { release = resolve; });
+  let settled = false;
+  const service = new ArcadeService({
+    read: async () => ({}),
+    execute: async () => {
+      await gate;
+      settled = true;
+      return { awarded: true, points: 5, wallet: { walletPoints: 1, lifetimeEarnedPoints: 1 } };
+    },
+    resolveActor: () => CANONICAL,
+    broadcastWalletUpdate: () => {},
+    sendSlackRecord: () => {},
+    getNowMs: () => FIXED_NOW,
+    getSessionEpoch: () => 1,
+    logger: { error: () => {} },
+  });
+  const pending = service.execute('u-canonical', { kind: 'activity', requestId: 'comment:c', activity: 'comment' });
+  let drained = false;
+  const drain = service.drainUser('u-canonical').then(() => { drained = true; });
+  await Promise.resolve();
+  assert.equal(settled, false);
+  assert.equal(drained, false, '진행 중 뮤테이션이 끝나기 전에는 drainUser 가 resolve 되지 않는다');
+  release();
+  await pending;
+  await drain;
+  assert.equal(settled, true);
+  assert.equal(drained, true, 'drainUser 는 진행 중 뮤테이션이 끝난 뒤에 resolve 된다');
+});
+
 test('arcadeExecutePayload strips the requestId and keeps only the kind fields', () => {
   assert.deepEqual(arcadeExecutePayload({ kind: 'daily-login', requestId: 'daily-login:2026-07-13' }), {});
   assert.deepEqual(arcadeExecutePayload({ kind: 'activity', requestId: 'comment:c1', activity: 'comment' }), { activity: 'comment' });

@@ -1747,15 +1747,18 @@ sessionManager = new SessionManager({
   beginPersonalDataTransition: (userId, epoch) => {
     personalTodoService.beginSessionTransition(userId, epoch);
     marketAccountService.beginSessionTransition(userId, epoch);
+    arcadeService.beginSessionTransition(userId, epoch);
   },
   endPersonalDataTransition: (userId, epoch) => {
     personalTodoService.endSessionTransition(userId, epoch);
     marketAccountService.endSessionTransition(userId, epoch);
+    arcadeService.endSessionTransition(userId, epoch);
   },
   drainPersonalDataQueue: async (userId) => {
     await Promise.all([
       personalTodoService.drainUser(userId),
       marketAccountService.drainUser(userId),
+      arcadeService.drainUser(userId),
     ]);
   },
   flushCalendarJournal: () => personalTodoCalendarSync.flushJournal(),
