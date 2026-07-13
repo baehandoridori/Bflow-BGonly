@@ -102,7 +102,8 @@ test('first read creates the approved account under the user-scoped v2 key', asy
     unrealizedPnlAtMonthStartWon: 0,
     holdings: [],
   });
-  assert.equal(storage.length, 1);
+  // v2 계좌 키 + 아케이드와 공유하는 프리뷰 지갑 키(단일 지갑 계약 반영)
+  assert.equal(storage.length, 2);
   assert.equal(storage.key(0), STORAGE_KEY);
   const persisted = JSON.parse(storage.getItem(STORAGE_KEY)!);
   assert.deepEqual(persisted.snapshot, snapshot);

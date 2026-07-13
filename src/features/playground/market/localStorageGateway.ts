@@ -6,6 +6,10 @@ import {
   type MarketPreviewGateway,
 } from './previewGateway.ts';
 import { createMarketPreviewSeed } from './seed.ts';
+import {
+  reconcileSharedPreviewWallet,
+  writeSharedPreviewWallet,
+} from '../previewSharedWallet.ts';
 import type {
   Holding,
   MarketAdminEvent,
@@ -269,15 +273,32 @@ export function createMarketLocalStorageGateway(
     }
   }
 
+  // 아케이드와 공유하는 프리뷰 지갑을 단일 진실로 반영한다(잔액 괴리 방지).
+  function readReconciled(): PersistedMarketPreview {
+    const persisted = readOrCreate();
+    const account = persisted.snapshot.account;
+    const wallet = reconcileSharedPreviewWallet(options.storage, userId, {
+      walletPoints: account.walletPoints,
+      lifetimeEarnedPoints: account.lifetimeEarnedPoints,
+    });
+    if (wallet.walletPoints === account.walletPoints && wallet.lifetimeEarnedPoints === account.lifetimeEarnedPoints) {
+      return persisted;
+    }
+    const snapshot = structuredClone(persisted.snapshot);
+    snapshot.account.walletPoints = wallet.walletPoints;
+    snapshot.account.lifetimeEarnedPoints = wallet.lifetimeEarnedPoints;
+    return save(snapshot, persisted.requestFingerprints);
+  }
+
   return {
     async read() {
       await wait(latencyMs);
-      return clonePersistedState(readOrCreate()).snapshot;
+      return clonePersistedState(readReconciled()).snapshot;
     },
 
     async execute(command: MarketCommand) {
       await wait(latencyMs);
-      const persisted = readOrCreate();
+      const persisted = readReconciled();
       const fingerprint = fingerprintMarketCommand(command);
       const hasPrevious = Object.prototype.hasOwnProperty.call(
         persisted.requestFingerprints,
@@ -295,6 +316,11 @@ export function createMarketLocalStorageGateway(
         [command.requestId]: fingerprint,
       };
       save(snapshot, requestFingerprints);
+      // 지갑 이동 등 잔액 변경을 공유 지갑에 반영해 아케이드 배지·랭킹과 일치시킨다.
+      writeSharedPreviewWallet(options.storage, userId, {
+        walletPoints: snapshot.account.walletPoints,
+        lifetimeEarnedPoints: snapshot.account.lifetimeEarnedPoints,
+      });
       return structuredClone(snapshot);
     },
     async createAdminEvent(input: MarketAdminEventInput) {

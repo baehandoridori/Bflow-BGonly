@@ -7,6 +7,10 @@ import {
   type ArcadePreviewGateway,
 } from './previewGateway.ts';
 import { createArcadePreviewSeed } from './seed.ts';
+import {
+  reconcileSharedPreviewWallet,
+  writeSharedPreviewWallet,
+} from '../previewSharedWallet.ts';
 import type { ArcadeExecuteCommand, ArcadeExecuteResult, ArcadeSnapshot } from './types';
 
 const STORAGE_KEY_PREFIX = 'bflow-arcade-preview-v1:';
@@ -62,6 +66,19 @@ export function createArcadeLocalStorageGateway(
     return state;
   }
 
+  // 공유 프리뷰 지갑을 단일 진실로 반영한다(모의투자와 잔액을 공유하도록).
+  function reconcileWallet(state: PersistedArcadePreview): PersistedArcadePreview {
+    const wallet = reconcileSharedPreviewWallet(options.storage, userId, state.snapshot.wallet);
+    if (
+      wallet.walletPoints !== state.snapshot.wallet.walletPoints
+      || wallet.lifetimeEarnedPoints !== state.snapshot.wallet.lifetimeEarnedPoints
+    ) {
+      state.snapshot.wallet = { walletPoints: wallet.walletPoints, lifetimeEarnedPoints: wallet.lifetimeEarnedPoints };
+      save(state);
+    }
+    return state;
+  }
+
   function readOrCreate(): PersistedArcadePreview {
     let raw: string | null;
     try {
@@ -72,7 +89,7 @@ export function createArcadeLocalStorageGateway(
     if (raw !== null) {
       try {
         const parsed: unknown = JSON.parse(raw);
-        if (hasPersistedShape(parsed)) return rollOver(parsed);
+        if (hasPersistedShape(parsed)) return reconcileWallet(rollOver(parsed));
       } catch {
         /* 손상된 프리뷰 저장본은 시드로 되돌린다. */
       }
@@ -86,7 +103,7 @@ export function createArcadeLocalStorageGateway(
       updatedAtMs: options.now(),
     };
     save(seeded);
-    return seeded;
+    return reconcileWallet(seeded);
   }
 
   return {
@@ -127,6 +144,8 @@ export function createArcadeLocalStorageGateway(
         dailyDate: persisted.dailyDate,
         updatedAtMs: options.now(),
       });
+      // 공유 지갑에 기록해 모의투자 프리뷰가 재로딩해도 같은 잔액을 보게 한다.
+      writeSharedPreviewWallet(options.storage, userId, applied.snapshot.wallet);
       return applied.result;
     },
   };

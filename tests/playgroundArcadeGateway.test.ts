@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url';
 
 import { createArcadeLocalStorageGateway } from '../src/features/playground/arcade/localStorageGateway.ts';
 import { createArcadeGateway } from '../src/features/playground/arcade/gateway.ts';
+import { createMarketLocalStorageGateway } from '../src/features/playground/market/localStorageGateway.ts';
 import { createArcadePreviewSeed } from '../src/features/playground/arcade/seed.ts';
 import type {
   ArcadeActivityResult,
@@ -250,6 +251,20 @@ test('the dev electron api mock exposes the arcade bridge methods', () => {
   assert.match(devApi, /arcadeExecute:/);
   assert.match(devApi, /onArcadeWalletUpdated:/);
   assert.match(devApi, /createArcadeLocalStorageGateway/);
+});
+
+test('preview shares one wallet between the arcade and market gateways', async () => {
+  const storage = createMemoryStorage();
+  const arcade = createArcadeLocalStorageGateway({ userId: USER_ID, storage, now: () => NOW });
+  await arcade.execute({ kind: 'daily-login', requestId: 'daily-login:2026-07-13' }); // 아케이드 지갑 +20
+  const arcadeWallet = (await arcade.read()).wallet.walletPoints;
+  assert.equal(arcadeWallet, 12_520);
+  // 같은 storage 를 쓰는 모의투자 게이트웨이가 재로딩해도 같은 잔액을 봐야 한다(스테일 복원 없음).
+  const market = createMarketLocalStorageGateway({ userId: USER_ID, storage, now: () => NOW });
+  const marketSnap = await market.read();
+  assert.equal(marketSnap.account.walletPoints, arcadeWallet);
+  // 모의투자가 다시 아케이드로 되돌려도(재로딩) 아케이드 잔액이 유지된다.
+  assert.equal((await arcade.read()).wallet.walletPoints, arcadeWallet);
 });
 
 test('the wallet bridge syncs market wallet changes into the arcade store', () => {
