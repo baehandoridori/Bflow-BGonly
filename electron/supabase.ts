@@ -684,16 +684,28 @@ export async function updateSceneStage(
   stage: string,
   value: boolean,
   updatedBy?: string,
-): Promise<void> {
+): Promise<{ affected: boolean; department: string | null }> {
   const update: Record<string, unknown> = {
     [stage]: value,
     updated_at: new Date().toISOString(),
   };
   if (updatedBy) update.updated_by = updatedBy;
-  const { error } = await supabase.from('scenes').update(update).eq('id', sceneUuid);
+  // 실제 바뀐 행을 결과로 돌려받아 affected/department 를 도출한다(별도 pre-read 의 TOCTOU 회피 —
+  // 읽은 뒤 삭제된 씬은 0행 update 로 잡힌다). 부서는 ACT 씬의 레거시 단계 미러를 stage 적립에서 제외하는 데 쓴다.
+  // 체크(value=true)는 실제 false→true(또는 미설정) 전이만 매칭하도록 술어를 더한다 — 이미 true 인 행은
+  // 0행이 돼 affected=false → 재체크·중복저장에 대한 오적립을 막는다(NULL 안전: is.false 또는 is.null).
+  const base = supabase.from('scenes').update(update).eq('id', sceneUuid);
+  const mutation = value === true ? base.or(`${stage}.is.false,${stage}.is.null`) : base;
+  const { data: rows, error } = await mutation.select('id, parts(department)');
   throwIfError(error);
+  const updatedRow = Array.isArray(rows) ? rows[0] : null;
+  const affected = !!updatedRow;
+  const partsField = (updatedRow as { parts?: unknown } | null)?.parts;
+  const part = Array.isArray(partsField) ? partsField[0] : partsField;
+  const department = (part as { department?: string | null } | null | undefined)?.department ?? null;
   // DB 저장 성공 → 즉시 broadcast로 다른 클라이언트에 전파
   broadcastSceneUpdate(sceneUuid, stage, value, updatedBy);
+  return { affected, department };
 }
 
 /** v1.25.0~ 액팅 씬 단계 상태 + 차수 업데이트 (한 번의 트랜잭션으로 3컬럼 동기화).
@@ -713,7 +725,14 @@ export async function updateScenePhase(
   workRound: number,
   feedbackRound: number,
   updatedBy?: string,
-): Promise<void> {
+): Promise<{ previousState: string | null; existed: boolean }> {
+  // 이전 phase 는 전이 판별용으로 미리 읽는다(best-effort). 실제 행 존재(existed)는 아래 update 결과로 판정.
+  const { data: prevRow } = await supabase
+    .from('scenes')
+    .select('scene_state')
+    .eq('id', sceneUuid)
+    .maybeSingle();
+  const previousState = (prevRow as { scene_state?: string | null } | null)?.scene_state ?? null;
   const legacyFlags = (() => {
     switch (sceneState) {
       case 'wait':     return { lo: false, done: false, review: false, png: false };
@@ -730,13 +749,16 @@ export async function updateScenePhase(
     updated_at: new Date().toISOString(),
   };
   if (updatedBy) update.updated_by = updatedBy;
-  const { error } = await supabase.from('scenes').update(update).eq('id', sceneUuid);
+  // 실제 바뀐 행을 결과로 받아 existed 를 판정(pre-read 이후 삭제된 씬은 0행 update 로 잡힌다).
+  const { data: rows, error } = await supabase.from('scenes').update(update).eq('id', sceneUuid).select('id');
   throwIfError(error);
+  const existed = Array.isArray(rows) && rows.length > 0;
   broadcastScenePhaseUpdate(sceneUuid, sceneState, workRound, feedbackRound, updatedBy);
   // legacy stage 도 broadcast — 다른 view 가 즉시 반영하도록 4개 컬럼 각각
   for (const [stage, value] of Object.entries(legacyFlags)) {
     broadcastSceneUpdate(sceneUuid, stage, value, updatedBy);
   }
+  return { previousState, existed };
 }
 
 // ═══════════════════════════════════════════════
@@ -2034,7 +2056,7 @@ export async function addRevision(
 export async function updateRevision(
   id: string,
   updates: Record<string, string>,
-): Promise<void> {
+): Promise<{ affected: boolean }> {
   const dbUpdates: Record<string, unknown> = { updated_at: new Date().toISOString() };
   const fieldMap: Record<string, string> = {
     status: 'status', priority: 'priority', description: 'description',
@@ -2062,9 +2084,11 @@ export async function updateRevision(
       dbUpdates[col] = v;
     }
   }
-  const { error } = await supabase.from('comp_revisions').update(dbUpdates).eq('id', id);
+  // 실제 바뀐 행을 결과로 받아 affected 를 판정한다 — 삭제된 리비전에 대한 오적립(retake-done)을 막기 위함.
+  const { data: rows, error } = await supabase.from('comp_revisions').update(dbUpdates).eq('id', id).select('id');
   throwIfError(error);
   broadcastDataChange('comp_revisions', 'UPDATE');
+  return { affected: Array.isArray(rows) && rows.length > 0 };
 }
 
 function mapRevision(r: Record<string, unknown>): SupabaseRevision & { sceneKey: string; notifyUserIds: string[] } {

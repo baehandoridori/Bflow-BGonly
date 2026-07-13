@@ -41,6 +41,26 @@ test('browser preview Electron API mock persists added scenes across readAll syn
   assert.match(mockApi, /supabaseAddScenes:\s*async \(sheetName, scenes\)/);
 });
 
+test('browser preview mirrors work-activity point awards so the header badge updates', async () => {
+  const mockApi = await readRepoFile('src', 'mocks', 'devElectronAPI.ts');
+
+  assert.match(mockApi, /function maybeAwardPreviewActivity/);
+  assert.match(mockApi, /function findMockSceneDepartment/);
+  assert.match(mockApi, /function findMockSceneState/);
+  assert.match(mockApi, /function findMockSceneStageValue/);
+  // 이미 done 인 씬의 첫 호출 오적립을 막도록 phase Map 을 mock 씬 현재 상태로 시드한다.
+  assert.match(mockApi, /previewScenePhaseByUuid\.get\(sceneUuid\) \?\? findMockSceneState\(sceneUuid\)/);
+  // 프로덕션 훅과 같은 조건으로 4개 활동을 미러링한다. scene-stage 는 실제 BG 씬의 false→true 전이만.
+  assert.match(mockApi, /findMockSceneDepartment\(sceneUuid\) === 'bg'/);
+  assert.match(mockApi, /findMockSceneStageValue\(sceneUuid, stage\) === false/);
+  assert.match(mockApi, /maybeAwardPreviewActivity\('scene-stage', sceneUuid, stage\)/);
+  assert.match(mockApi, /if \(sceneState === 'done' && previousState !== 'done'\) \{\s*maybeAwardPreviewActivity\('scene-phase-done', sceneUuid\);/);
+  assert.match(mockApi, /maybeAwardPreviewActivity\('comment', commentId\)/);
+  assert.match(mockApi, /maybeAwardPreviewActivity\('retake-done', id\)/);
+  // 적립되면 지갑 push 로 헤더 배지 획득 연출까지 재현한다.
+  assert.match(mockApi, /useArcadeStore\.getState\(\)\.applyWalletPush/);
+});
+
 test('browser preview starts directly at the login form after the mock is installed', async () => {
   const loginScreen = await readRepoFile('src', 'components', 'auth', 'LoginScreen.tsx');
 

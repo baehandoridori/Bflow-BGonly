@@ -36,6 +36,8 @@ interface ArcadeState {
   mutating: boolean;
   error: string | null;
   sessionKey: string | null;
+  // 마지막 지갑 적립 push — 헤더 배지의 "+N P" 획득 연출용. id 는 단조 증가(같은 delta 연속도 구분).
+  lastGain: { id: number; delta: number } | null;
   load(sessionKey?: string): Promise<void>;
   startRun(gameId: ArcadeGameId): Promise<{ runId: string } | null>;
   finishRun(input: ArcadeFinishInput): Promise<ArcadeFinishResult | null>;
@@ -169,6 +171,7 @@ export function createArcadeStore(
       mutating: false,
       error: null,
       sessionKey: null,
+      lastGain: null,
 
       async load(requestedSessionKey = DEFAULT_SESSION_KEY) {
         const gen = ++generation;
@@ -293,6 +296,10 @@ export function createArcadeStore(
       applyWalletPush(update) {
         set((state) => ({
           snapshot: state.snapshot ? { ...state.snapshot, wallet: update.wallet } : state.snapshot,
+          // 적립(양수 delta)만 획득 연출을 유발한다. 차감·0 은 배지 숫자만 조용히 갱신.
+          lastGain: update.delta > 0
+            ? { id: (state.lastGain?.id ?? 0) + 1, delta: update.delta }
+            : state.lastGain,
         }));
         syncWallet(update.wallet);
       },

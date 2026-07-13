@@ -21,6 +21,7 @@ import type { MarketPreviewGateway } from '@/features/playground/market/previewG
 import type { MarketRemoteState, MarketSnapshot } from '@/features/playground/market/types';
 import { createArcadeLocalStorageGateway } from '@/features/playground/arcade/localStorageGateway';
 import type { ArcadePreviewGateway } from '@/features/playground/arcade/previewGateway';
+import { useArcadeStore } from '@/features/playground/arcade/useArcadeStore';
 
 type PreviewUser = AppUser & { password: string };
 
@@ -118,6 +119,8 @@ function getPreviewArcadeGateway(): ArcadePreviewGateway {
 }
 
 const previewDailyLoginAttempts = new Set<string>();
+// 프리뷰 세션 내 액팅 씬 phase 를 기억해, 실제 완료 전이일 때만 적립한다(프로덕션과 동일 게이팅).
+const previewScenePhaseByUuid = new Map<string, string>();
 
 // 프리뷰에는 main 프로세스가 없어 production 의 setCanonicalActivityUser → grantDailyLogin
 // 흐름이 없다. 배한솔 프리뷰 세션이 확립되면 여기서 출석 적립을 미러링해, 자동 출석이
@@ -138,6 +141,83 @@ function maybeGrantPreviewDailyLogin(): void {
     .catch(() => {
       /* fire-and-forget — 다음 세션 트리거에서 재시도 */
     });
+}
+
+type PreviewActivityKind = 'scene-stage' | 'scene-phase-done' | 'comment' | 'retake-done';
+
+// 프로덕션 arcadeService.activityRequestId 와 동일한 규칙(프리뷰/테스트 모드 패리티).
+function previewActivityRequestId(activity: PreviewActivityKind, refId: string, stage?: string): string | null {
+  switch (activity) {
+    case 'scene-stage':
+      return stage ? `scene-stage:${refId}:${stage}` : null;
+    case 'scene-phase-done':
+      return `scene-phase-done:${refId}`;
+    case 'comment':
+      return `comment:${refId}`;
+    case 'retake-done':
+      return `retake-done:${refId}`;
+    default:
+      return null;
+  }
+}
+
+// 프리뷰에는 main 프로세스가 없어 production 의 활동 훅(awardActivity)이 없다. 씬 체크·완료·댓글·
+// 리테이크 담당 완료 시 여기서 적립을 미러링하고, 성공하면 지갑 push 로 헤더 배지 획득 연출까지
+// 재현한다(canonical 배한솔 한정, fire-and-forget, 서버 규칙과 같은 일일 상한은 게이트웨이가 처리).
+function maybeAwardPreviewActivity(activity: PreviewActivityKind, refId: string, stage?: string): void {
+  const user = previewCanonicalUserId
+    ? getMockUsers().find((candidate) => candidate.id === previewCanonicalUserId)
+    : null;
+  if (user?.name !== '배한솔' || user.slackId !== 'U05DFV9UAN5') return;
+  const requestId = previewActivityRequestId(activity, refId, stage);
+  if (!requestId) return;
+  void getPreviewArcadeGateway()
+    .execute({ kind: 'activity', activity, requestId })
+    .then((result) => {
+      // 'awarded' 키는 activity 결과에만 있어 union 을 ArcadeActivityResult 로 좁힌다.
+      // replayed(같은 requestId 재생)는 지갑 절대값이 그대로이므로 push/연출을 생략한다
+      // — production ArcadeService.shouldApplyWallet 과 동일(프리뷰는 재시도 개념이 없음).
+      if ('awarded' in result && result.awarded && result.points > 0 && !result.replayed) {
+        useArcadeStore.getState().applyWalletPush({ wallet: result.wallet, delta: result.points, reason: activity });
+      }
+    })
+    .catch(() => {
+      /* fire-and-forget — 프리뷰 적립 실패는 무시 */
+    });
+}
+
+// 프리뷰 씬 UUID → 소속 부서. 없으면 null(존재하지 않는 씬). scene-stage 는 BG 만 적립(프로덕션과 동일).
+function findMockSceneDepartment(sceneUuid: string): string | null {
+  for (const episode of getMockEpisodes()) {
+    for (const part of episode.parts) {
+      if (part.scenes.some((scene) => scene.id === sceneUuid)) return part.department;
+    }
+  }
+  return null;
+}
+
+// 프리뷰 씬 UUID → 현재 액팅 phase(scene_state). phase Map 초기 시드에 쓴다 —
+// 이미 done 인 씬의 첫 라운드 변경이 완료 적립을 오발하지 않도록(프로덕션은 DB 의 scene_state 로 판정).
+function findMockSceneState(sceneUuid: string): string | null {
+  for (const episode of getMockEpisodes()) {
+    for (const part of episode.parts) {
+      const scene = part.scenes.find((candidate) => candidate.id === sceneUuid);
+      if (scene) return scene.sceneState ?? null;
+    }
+  }
+  return null;
+}
+
+// 프리뷰 씬 UUID + 단계 → 현재 레거시 단계 값(true/false). 없는 씬은 null.
+// 실제 false→true 전이만 적립하도록(이미 true 인 단계의 재체크·중복저장 오적립 방지, 프로덕션과 동일).
+function findMockSceneStageValue(sceneUuid: string, stage: string): boolean | null {
+  for (const episode of getMockEpisodes()) {
+    for (const part of episode.parts) {
+      const scene = part.scenes.find((candidate) => candidate.id === sceneUuid);
+      if (scene) return (scene as unknown as Record<string, unknown>)[stage] === true;
+    }
+  }
+  return null;
 }
 
 function previewNoSession<T>(data: T): { ok: false; kind: 'rejected'; code: string; message: string; retryable: false } {
@@ -736,6 +816,13 @@ export function installDevElectronAPI(): void {
     // v1.25.0~ 액팅 단계 토글 + 리테이크 알림 (mock — 로그만)
     supabaseUpdateScenePhase: async (sceneUuid, sceneState, workRound, feedbackRound) => {
       console.log('[DEV] supabaseUpdateScenePhase:', { sceneUuid, sceneState, workRound, feedbackRound });
+      // 실제 완료 전이(이전 상태 ≠ done)일 때만 적립 — 이미 done 인 씬의 라운드 변경은 제외.
+      // Map 이 비었으면 mock 씬의 현재 phase 로 시드해, 이미 done 인 씬의 첫 호출이 오적립되지 않게 한다.
+      const previousState = previewScenePhaseByUuid.get(sceneUuid) ?? findMockSceneState(sceneUuid) ?? null;
+      previewScenePhaseByUuid.set(sceneUuid, sceneState);
+      if (sceneState === 'done' && previousState !== 'done') {
+        maybeAwardPreviewActivity('scene-phase-done', sceneUuid);
+      }
     },
     supabaseDispatchFeedbackNotification: async (payload) => {
       console.log('[DEV] supabaseDispatchFeedbackNotification:', payload);
@@ -839,7 +926,16 @@ export function installDevElectronAPI(): void {
       scenes.forEach((scene) => addMockScene(sheetName, scene.sceneId, scene.assignee, scene.memo));
     },
     supabaseDeleteScene: async () => {},
-    supabaseUpdateSceneStage: async () => {},
+    supabaseUpdateSceneStage: async (sceneUuid, stage, value) => {
+      // 실제 BG 씬의 false→true 전이일 때만 단계 적립 — 없는 씬/ACT 씬/이미 true 인 단계는 제외(프로덕션과 동일).
+      if (
+        value === true
+        && findMockSceneDepartment(sceneUuid) === 'bg'
+        && findMockSceneStageValue(sceneUuid, stage) === false
+      ) {
+        maybeAwardPreviewActivity('scene-stage', sceneUuid, stage);
+      }
+    },
     supabaseReadSceneWorkLinks: async (sceneUuids?: string[]) => {
       const links = getMockSceneWorkLinks();
       if (!sceneUuids?.length) return links;
@@ -944,6 +1040,8 @@ export function installDevElectronAPI(): void {
         parentCommentId: parentCommentId ?? null,
       });
       localStore.__commentRows = comments;
+      // 댓글(일반·리테이크·캐릭터 보드 전부) 적립(spec §, 프로덕션 main.ts 와 동일).
+      maybeAwardPreviewActivity('comment', commentId);
     },
     supabaseEditComment: async (commentId, text, mentions, images) => {
       const comments = getMockCommentRows();
@@ -1078,6 +1176,16 @@ export function installDevElectronAPI(): void {
       });
       localStore.__revisionRows = revisions;
       window.dispatchEvent(new CustomEvent('bflow:revisions-invalidated'));
+
+      // 리테이크 담당 완료 전이에서만 적립(프로덕션 main.ts 의 statusActionType 우선순위와 동일 조건).
+      if (
+        updates.__op !== 'revert_final'
+        && !updates.finalResolvedAt
+        && updates.__op !== 'reassign'
+        && updates.status === 'assignee_done'
+      ) {
+        maybeAwardPreviewActivity('retake-done', id);
+      }
 
       if (updates.status && updates.status !== previousStatus) {
         const actionType = updates.status === 'resolved'

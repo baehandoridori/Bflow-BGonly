@@ -1994,7 +1994,7 @@ ipcMain.handle('supabase:delete-scene', wrapIpc(async (_e: unknown, sceneUuid: s
   }
 }));
 ipcMain.handle('supabase:update-scene-stage', wrapIpc(async (_e: unknown, sceneUuid: string, stage: string, value: boolean, updatedBy?: string) => {
-  await sbUpdateSceneStage(sceneUuid, stage, value, updatedBy);
+  const { affected, department } = await sbUpdateSceneStage(sceneUuid, stage, value, updatedBy);
   if (stage === 'lo' || stage === 'done' || stage === 'review' || stage === 'png') {
     await logSceneActivity({
       sceneUuid,
@@ -2002,6 +2002,11 @@ ipcMain.handle('supabase:update-scene-stage', wrapIpc(async (_e: unknown, sceneU
       actionGroup: 'progress',
       detail: { value },
     });
+  }
+  // 실제 BG 씬 행이 바뀐 경우에만 단계 적립. 없는/삭제된 씬(affected=false)은 제외하고,
+  // ACT 씬의 레거시 단계 토글은 phase(scene-phase-done)로만 적립해 시트/단계 경로 간 점수를 일치시킨다.
+  if (value === true && affected && department === 'bg') {
+    void arcadeService.awardActivity({ activity: 'scene-stage', refId: sceneUuid, stage });
   }
 }));
 // v1.25.0~ 액팅 단계 토글 (sceneState + workRound + feedbackRound 한 번에)
@@ -2013,13 +2018,18 @@ ipcMain.handle('supabase:update-scene-phase', wrapIpc(async (
   feedbackRound: number,
   updatedBy?: string,
 ) => {
-  await sbUpdateScenePhase(sceneUuid, sceneState, workRound, feedbackRound, updatedBy);
+  const { previousState, existed } = await sbUpdateScenePhase(sceneUuid, sceneState, workRound, feedbackRound, updatedBy);
   await logSceneActivity({
     sceneUuid,
     actionType: `phase_${sceneState}` as ActionType,
     actionGroup: 'progress',
     detail: { sceneState, workRound, feedbackRound },
   });
+  // 실제 존재하는 씬이 실제 완료 전이(이전 상태 ≠ done, 이제 done)일 때만 적립. 없는/삭제된 씬,
+  // 이미 done 이던 씬의 라운드 변경은 제외한다(오적립 방지).
+  if (existed && sceneState === 'done' && previousState !== 'done') {
+    void arcadeService.awardActivity({ activity: 'scene-phase-done', refId: sceneUuid });
+  }
 }));
 ipcMain.handle('supabase:read-scene-work-links', wrapIpc(async (_e: unknown, sceneUuids?: string[]) => {
   return sbReadSceneWorkLinks(sceneUuids);
@@ -2295,6 +2305,9 @@ ipcMain.handle('supabase:add-comment', wrapIpc(async (_e: unknown, commentId: st
   revisionId: string | null = null, parentCommentId: string | null = null,
   characterId: string | null = null, costumeId: string | null = null) => {
   await sbAddComment(commentId, partUuid, sceneId, userId, userName, text, mentions, createdAt, images, revisionId, parentCommentId, characterId, costumeId);
+  // 댓글(일반·리테이크·캐릭터 보드 전부)을 남기면 업무 활동 포인트 적립(spec §: comment:<commentId>).
+  // 캐릭터 댓글도 적립 대상이므로 아래 캐릭터 early-return 보다 앞에서 호출한다.
+  void arcadeService.awardActivity({ activity: 'comment', refId: commentId });
   // 캐릭터 댓글은 씬 기반 활동 기록 경로를 타지 않는다(part/scene 이 없음).
   if (characterId) return;
   // 활동 기록 — partUuid 로 부서/에피소드 + scene UUID 자동 조회
@@ -2527,7 +2540,7 @@ ipcMain.handle('supabase:update-revision', wrapIpc(async (_e: unknown, id: strin
   // 별도 확인하는 비대칭은 삭제의 감사 귀속(Codex #8) 목적이며 실수가 아니다.
   // 리테이크 허브 2단계: __op 는 활동기록 분기 전용 신호 — DB 로는 보내지 않는다(fieldMap 미등록이라 분리).
   const { __op, ...dbUpdates } = updates;
-  await sbUpdateRevision(id, dbUpdates);
+  const { affected: revisionAffected } = await sbUpdateRevision(id, dbUpdates);
   // status 전이/담당 워크플로우 활동 기록. 한솔 결정 (2026-05-02): 진행중도 audit.
   // 우선순위: 최종완료 > 재배정(동반 status 전이보다 우선, 한솔 §7.3 '재배정 포함') > 담당완료 > 진행중 > 해결.
   // 주의: finalResolvedAt 이 빈 문자열('')이면(최종완료 되돌리기) truthy 아님 → 분기 제외(의도된 조용한 스킵).
@@ -2542,6 +2555,10 @@ ipcMain.handle('supabase:update-revision', wrapIpc(async (_e: unknown, id: strin
   else if (dbUpdates.status === 'in_progress') statusActionType = 'revision_in_progress';
   else if (dbUpdates.status === 'resolved') statusActionType = 'revision_resolve';
   else if (dbUpdates.assigneeIds) statusActionType = 'revision_reassign';
+  // 실제 리비전 행이 '담당 완료'로 전이될 때만 업무 활동 포인트 적립(삭제된/없는 리비전·재배정·해결·진행중 제외).
+  if (revisionAffected && statusActionType === 'revision_assignee_done') {
+    void arcadeService.awardActivity({ activity: 'retake-done', refId: id });
+  }
   if (currentActivityUser && statusActionType) {
     try {
       const { data: revRow } = await supabaseClient

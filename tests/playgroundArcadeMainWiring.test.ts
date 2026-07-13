@@ -1,5 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 import {
   ArcadeService,
@@ -13,6 +16,10 @@ import {
 
 const CANONICAL: ArcadeActor = { userId: 'u-canonical', name: '배한솔', slackId: 'U05DFV9UAN5' };
 const FIXED_NOW = Date.parse('2026-07-13T12:00:00+09:00');
+
+const repoRoot = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
+const mainSource = readFileSync(path.join(repoRoot, 'electron', 'main.ts'), 'utf8');
+const supabaseSource = readFileSync(path.join(repoRoot, 'electron', 'supabase.ts'), 'utf8');
 
 interface Harness {
   service: ArcadeService;
@@ -353,6 +360,50 @@ test('drainUser waits for an in-flight arcade mutation to settle before resolvin
   await drain;
   assert.equal(settled, true);
   assert.equal(drained, true, 'drainUser 는 진행 중 뮤테이션이 끝난 뒤에 resolve 된다');
+});
+
+test('main wires the four activity accrual hooks with the correct conditions', () => {
+  // 단계 체크(value===true) + 실제 BG 씬 행이 바뀐 경우만 적립(없는 씬·ACT 제외)
+  assert.match(
+    mainSource,
+    /if \(value === true && affected && department === 'bg'\) \{\s*void arcadeService\.awardActivity\(\{ activity: 'scene-stage', refId: sceneUuid, stage \}\);/,
+  );
+  // 액팅 단계는 실제 존재하는 씬의 실제 완료 전이(이전 상태 ≠ done)에서만 적립 — 없는 씬·이미 done 제외
+  assert.match(
+    mainSource,
+    /if \(existed && sceneState === 'done' && previousState !== 'done'\) \{\s*void arcadeService\.awardActivity\(\{ activity: 'scene-phase-done', refId: sceneUuid \}\);/,
+  );
+  // 댓글 적립 (commentId 사용) — 캐릭터 보드 댓글도 적립 대상이므로 characterId early-return 앞에 있어야 한다.
+  assert.match(mainSource, /void arcadeService\.awardActivity\(\{ activity: 'comment', refId: commentId \}\);/);
+  const commentAwardIdx = mainSource.indexOf("arcadeService.awardActivity({ activity: 'comment', refId: commentId })");
+  const characterReturnIdx = mainSource.indexOf('if (characterId) return;');
+  assert.ok(
+    commentAwardIdx > 0 && characterReturnIdx > 0 && commentAwardIdx < characterReturnIdx,
+    '댓글 적립은 캐릭터 early-return 앞에서 호출돼야 캐릭터 보드 댓글도 적립된다',
+  );
+  // 실제 리비전 행이 담당 완료로 전이될 때만 적립 (revisionId 사용, 삭제된 리비전 제외)
+  assert.match(
+    mainSource,
+    /if \(revisionAffected && statusActionType === 'revision_assignee_done'\) \{\s*void arcadeService\.awardActivity\(\{ activity: 'retake-done', refId: id \}\);/,
+  );
+});
+
+test('scene/revision writers derive award eligibility from the actual update result', () => {
+  // 단계 체크는 실제 false→true(또는 미설정) 전이만 매칭 — 이미 true 인 행은 0행 → 미적립. NULL 안전.
+  assert.match(supabaseSource, /\$\{stage\}\.is\.false,\$\{stage\}\.is\.null/);
+  // affected/existed 는 update(...).select(...) 결과에서 도출한다(별도 pre-read 의 TOCTOU 회피).
+  assert.match(supabaseSource, /const mutation = value === true \? base\.or/);
+  assert.match(supabaseSource, /await mutation\.select\('id, parts\(department\)'\)/);
+  assert.match(supabaseSource, /\.update\(update\)\.eq\('id', sceneUuid\)\.select\('id'\)/); // scene-phase existed
+  assert.match(supabaseSource, /\.update\(dbUpdates\)\.eq\('id', id\)\.select\('id'\)/); // revision affected
+});
+
+test('the bulk stage update handler never awards activity points', () => {
+  const bulkStart = mainSource.indexOf("ipcMain.handle('supabase:bulk-update-scene-stages'");
+  assert.ok(bulkStart > 0, 'bulk 스테이지 업데이트 핸들러가 존재해야 한다');
+  const nextHandler = mainSource.indexOf('ipcMain.handle(', bulkStart + 1);
+  const bulkBlock = mainSource.slice(bulkStart, nextHandler > 0 ? nextHandler : undefined);
+  assert.doesNotMatch(bulkBlock, /awardActivity/, '일괄 단계 변경은 활동 포인트를 적립하지 않는다');
 });
 
 test('arcadeExecutePayload strips the requestId and keeps only the kind fields', () => {
