@@ -31,8 +31,26 @@ test('the header badge gates on playground access and enters the playground on c
   assert.doesNotMatch(badgeSource, /loading \|\| error/);
   assert.match(badgeSource, /tabular-nums/);
   assert.match(badgeSource, /aria-label=/);
-  // 획득 연출(펄스/플로팅)은 PR B 이므로 아직 framer-motion 을 끌어오지 않는다.
-  assert.doesNotMatch(badgeSource, /framer-motion/);
+});
+
+test('the badge plays a pulse + floating gain via the badge float queue', () => {
+  assert.match(badgeSource, /from 'framer-motion'/);
+  // 적립 delta 는 순수 큐를 통해 순차 표시된다.
+  assert.match(badgeSource, /enqueueBadgeFloat/);
+  assert.match(badgeSource, /popBadgeFloat/);
+  assert.match(badgeSource, /state\.lastGain/);
+  // 펄스 1→1.06→1
+  assert.match(badgeSource, /scale: \[1, 1\.06, 1\]/);
+  // "+N P" 라벨
+  assert.match(badgeSource, /\+\{item\.delta\}P/);
+});
+
+test('the badge skips the animation under prefers-reduced-motion (number still updates)', () => {
+  assert.match(badgeSource, /useReducedMotion/);
+  // reduced-motion 이면 연출을 생략하고 리턴(숫자는 스냅샷으로 갱신).
+  assert.match(badgeSource, /if \(prefersReducedMotion\) return;/);
+  // 같은 gain 을 두 번 재생하지 않도록 처리한 id 를 기억한다.
+  assert.match(badgeSource, /lastProcessedGainId/);
 });
 
 const teammate = (id: string, name: string, lifetimeEarnedPoints: number | null): RankingTeammate => ({

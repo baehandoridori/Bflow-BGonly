@@ -2003,6 +2003,10 @@ ipcMain.handle('supabase:update-scene-stage', wrapIpc(async (_e: unknown, sceneU
       detail: { value },
     });
   }
+  // 단계를 체크(true)하면 업무 활동 포인트 적립(canonical 배한솔 한정, 서버가 재검증·상한 처리).
+  if (value === true) {
+    void arcadeService.awardActivity({ activity: 'scene-stage', refId: sceneUuid, stage });
+  }
 }));
 // v1.25.0~ 액팅 단계 토글 (sceneState + workRound + feedbackRound 한 번에)
 ipcMain.handle('supabase:update-scene-phase', wrapIpc(async (
@@ -2020,6 +2024,10 @@ ipcMain.handle('supabase:update-scene-phase', wrapIpc(async (
     actionGroup: 'progress',
     detail: { sceneState, workRound, feedbackRound },
   });
+  // 액팅 씬을 '완료'로 넘기면 업무 활동 포인트 적립.
+  if (sceneState === 'done') {
+    void arcadeService.awardActivity({ activity: 'scene-phase-done', refId: sceneUuid });
+  }
 }));
 ipcMain.handle('supabase:read-scene-work-links', wrapIpc(async (_e: unknown, sceneUuids?: string[]) => {
   return sbReadSceneWorkLinks(sceneUuids);
@@ -2297,6 +2305,8 @@ ipcMain.handle('supabase:add-comment', wrapIpc(async (_e: unknown, commentId: st
   await sbAddComment(commentId, partUuid, sceneId, userId, userName, text, mentions, createdAt, images, revisionId, parentCommentId, characterId, costumeId);
   // 캐릭터 댓글은 씬 기반 활동 기록 경로를 타지 않는다(part/scene 이 없음).
   if (characterId) return;
+  // 씬/파트 댓글을 남기면 업무 활동 포인트 적립(canonical 배한솔 한정, 서버가 재검증·상한 처리).
+  void arcadeService.awardActivity({ activity: 'comment', refId: commentId });
   // 활동 기록 — partUuid 로 부서/에피소드 + scene UUID 자동 조회
   // (sceneId 가 TEXT 형식이라 scenes 테이블 조회로 UUID 변환 — 그룹화 정확성 + 부서 필터 통과)
   if (currentActivityUser) {
@@ -2542,6 +2552,10 @@ ipcMain.handle('supabase:update-revision', wrapIpc(async (_e: unknown, id: strin
   else if (dbUpdates.status === 'in_progress') statusActionType = 'revision_in_progress';
   else if (dbUpdates.status === 'resolved') statusActionType = 'revision_resolve';
   else if (dbUpdates.assigneeIds) statusActionType = 'revision_reassign';
+  // 리테이크 '담당 완료'로 전이될 때만 업무 활동 포인트 적립(재배정·해결·진행중은 제외).
+  if (statusActionType === 'revision_assignee_done') {
+    void arcadeService.awardActivity({ activity: 'retake-done', refId: id });
+  }
   if (currentActivityUser && statusActionType) {
     try {
       const { data: revRow } = await supabaseClient

@@ -1,5 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 import {
   ArcadeService,
@@ -13,6 +16,11 @@ import {
 
 const CANONICAL: ArcadeActor = { userId: 'u-canonical', name: '배한솔', slackId: 'U05DFV9UAN5' };
 const FIXED_NOW = Date.parse('2026-07-13T12:00:00+09:00');
+
+const mainSource = readFileSync(
+  path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'electron', 'main.ts'),
+  'utf8',
+);
 
 interface Harness {
   service: ArcadeService;
@@ -353,6 +361,34 @@ test('drainUser waits for an in-flight arcade mutation to settle before resolvin
   await drain;
   assert.equal(settled, true);
   assert.equal(drained, true, 'drainUser 는 진행 중 뮤테이션이 끝난 뒤에 resolve 된다');
+});
+
+test('main wires the four activity accrual hooks with the correct conditions', () => {
+  // 단계 체크(value===true)만 적립, 해제는 미적립
+  assert.match(
+    mainSource,
+    /if \(value === true\) \{\s*void arcadeService\.awardActivity\(\{ activity: 'scene-stage', refId: sceneUuid, stage \}\);/,
+  );
+  // 액팅 단계는 'done' 전이에서만 적립
+  assert.match(
+    mainSource,
+    /if \(sceneState === 'done'\) \{\s*void arcadeService\.awardActivity\(\{ activity: 'scene-phase-done', refId: sceneUuid \}\);/,
+  );
+  // 씬/파트 댓글 적립 (commentId 사용)
+  assert.match(mainSource, /void arcadeService\.awardActivity\(\{ activity: 'comment', refId: commentId \}\);/);
+  // 리테이크 담당 완료 전이에서만 적립 (revisionId 사용)
+  assert.match(
+    mainSource,
+    /if \(statusActionType === 'revision_assignee_done'\) \{\s*void arcadeService\.awardActivity\(\{ activity: 'retake-done', refId: id \}\);/,
+  );
+});
+
+test('the bulk stage update handler never awards activity points', () => {
+  const bulkStart = mainSource.indexOf("ipcMain.handle('supabase:bulk-update-scene-stages'");
+  assert.ok(bulkStart > 0, 'bulk 스테이지 업데이트 핸들러가 존재해야 한다');
+  const nextHandler = mainSource.indexOf('ipcMain.handle(', bulkStart + 1);
+  const bulkBlock = mainSource.slice(bulkStart, nextHandler > 0 ? nextHandler : undefined);
+  assert.doesNotMatch(bulkBlock, /awardActivity/, '일괄 단계 변경은 활동 포인트를 적립하지 않는다');
 });
 
 test('arcadeExecutePayload strips the requestId and keeps only the kind fields', () => {
