@@ -45,8 +45,9 @@ test('browser preview mirrors work-activity point awards so the header badge upd
   const mockApi = await readRepoFile('src', 'mocks', 'devElectronAPI.ts');
 
   assert.match(mockApi, /function maybeAwardPreviewActivity/);
-  // 프로덕션 훅과 같은 조건으로 4개 활동을 미러링한다.
-  assert.match(mockApi, /if \(value === true\) maybeAwardPreviewActivity\('scene-stage', sceneUuid, stage\)/);
+  assert.match(mockApi, /function findMockSceneDepartment/);
+  // 프로덕션 훅과 같은 조건으로 4개 활동을 미러링한다. scene-stage 는 실제 BG 씬만.
+  assert.match(mockApi, /if \(value === true && findMockSceneDepartment\(sceneUuid\) === 'bg'\) \{\s*maybeAwardPreviewActivity\('scene-stage', sceneUuid, stage\);/);
   assert.match(mockApi, /if \(sceneState === 'done' && previousState !== 'done'\) \{\s*maybeAwardPreviewActivity\('scene-phase-done', sceneUuid\);/);
   assert.match(mockApi, /if \(!characterId\) maybeAwardPreviewActivity\('comment', commentId\)/);
   assert.match(mockApi, /maybeAwardPreviewActivity\('retake-done', id\)/);

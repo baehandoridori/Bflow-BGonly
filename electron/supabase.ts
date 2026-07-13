@@ -684,7 +684,18 @@ export async function updateSceneStage(
   stage: string,
   value: boolean,
   updatedBy?: string,
-): Promise<void> {
+): Promise<{ affected: boolean; department: string | null }> {
+  // 쓰기 전 실제 행 존재 + 소속 부서를 확인한다. 삭제된/없는 씬 UUID 오적립을 막고(affected=false),
+  // ACT 씬의 레거시 단계 토글은 phase 동기화의 미러이므로 stage 적립에서 제외하기 위함(department).
+  const { data: sceneRow } = await supabase
+    .from('scenes')
+    .select('id, parts(department)')
+    .eq('id', sceneUuid)
+    .maybeSingle();
+  const affected = !!sceneRow;
+  const partsField = (sceneRow as { parts?: unknown } | null)?.parts;
+  const part = Array.isArray(partsField) ? partsField[0] : partsField;
+  const department = (part as { department?: string | null } | null | undefined)?.department ?? null;
   const update: Record<string, unknown> = {
     [stage]: value,
     updated_at: new Date().toISOString(),
@@ -694,6 +705,7 @@ export async function updateSceneStage(
   throwIfError(error);
   // DB 저장 성공 → 즉시 broadcast로 다른 클라이언트에 전파
   broadcastSceneUpdate(sceneUuid, stage, value, updatedBy);
+  return { affected, department };
 }
 
 /** v1.25.0~ 액팅 씬 단계 상태 + 차수 업데이트 (한 번의 트랜잭션으로 3컬럼 동기화).
@@ -713,13 +725,14 @@ export async function updateScenePhase(
   workRound: number,
   feedbackRound: number,
   updatedBy?: string,
-): Promise<{ previousState: string | null }> {
-  // 쓰기 전 이전 phase 를 읽어둔다 — 실제 완료 전이(≠ 이미 done 인 씬의 라운드 변경) 판별에 쓴다.
+): Promise<{ previousState: string | null; existed: boolean }> {
+  // 쓰기 전 이전 phase 를 읽어둔다 — 실제 완료 전이(≠ 이미 done 인 씬의 라운드 변경) 판별 + 실제 행 존재 확인.
   const { data: prevRow } = await supabase
     .from('scenes')
     .select('scene_state')
     .eq('id', sceneUuid)
     .maybeSingle();
+  const existed = !!prevRow;
   const previousState = (prevRow as { scene_state?: string | null } | null)?.scene_state ?? null;
   const legacyFlags = (() => {
     switch (sceneState) {
@@ -744,7 +757,7 @@ export async function updateScenePhase(
   for (const [stage, value] of Object.entries(legacyFlags)) {
     broadcastSceneUpdate(sceneUuid, stage, value, updatedBy);
   }
-  return { previousState };
+  return { previousState, existed };
 }
 
 // ═══════════════════════════════════════════════

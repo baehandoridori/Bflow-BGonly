@@ -1994,7 +1994,7 @@ ipcMain.handle('supabase:delete-scene', wrapIpc(async (_e: unknown, sceneUuid: s
   }
 }));
 ipcMain.handle('supabase:update-scene-stage', wrapIpc(async (_e: unknown, sceneUuid: string, stage: string, value: boolean, updatedBy?: string) => {
-  await sbUpdateSceneStage(sceneUuid, stage, value, updatedBy);
+  const { affected, department } = await sbUpdateSceneStage(sceneUuid, stage, value, updatedBy);
   if (stage === 'lo' || stage === 'done' || stage === 'review' || stage === 'png') {
     await logSceneActivity({
       sceneUuid,
@@ -2003,8 +2003,9 @@ ipcMain.handle('supabase:update-scene-stage', wrapIpc(async (_e: unknown, sceneU
       detail: { value },
     });
   }
-  // 단계를 체크(true)하면 업무 활동 포인트 적립(canonical 배한솔 한정, 서버가 재검증·상한 처리).
-  if (value === true) {
+  // 실제 BG 씬 행이 바뀐 경우에만 단계 적립. 없는/삭제된 씬(affected=false)은 제외하고,
+  // ACT 씬의 레거시 단계 토글은 phase(scene-phase-done)로만 적립해 시트/단계 경로 간 점수를 일치시킨다.
+  if (value === true && affected && department === 'bg') {
     void arcadeService.awardActivity({ activity: 'scene-stage', refId: sceneUuid, stage });
   }
 }));
@@ -2017,16 +2018,16 @@ ipcMain.handle('supabase:update-scene-phase', wrapIpc(async (
   feedbackRound: number,
   updatedBy?: string,
 ) => {
-  const { previousState } = await sbUpdateScenePhase(sceneUuid, sceneState, workRound, feedbackRound, updatedBy);
+  const { previousState, existed } = await sbUpdateScenePhase(sceneUuid, sceneState, workRound, feedbackRound, updatedBy);
   await logSceneActivity({
     sceneUuid,
     actionType: `phase_${sceneState}` as ActionType,
     actionGroup: 'progress',
     detail: { sceneState, workRound, feedbackRound },
   });
-  // 실제 완료 전이(이전 상태가 done 이 아니었고 이제 done)일 때만 적립. 이미 done 인 씬의
-  // 라운드 변경은 완료가 아니므로 제외한다(기존에 done 이던 씬의 오적립 방지).
-  if (sceneState === 'done' && previousState !== 'done') {
+  // 실제 존재하는 씬이 실제 완료 전이(이전 상태 ≠ done, 이제 done)일 때만 적립. 없는/삭제된 씬,
+  // 이미 done 이던 씬의 라운드 변경은 제외한다(오적립 방지).
+  if (existed && sceneState === 'done' && previousState !== 'done') {
     void arcadeService.awardActivity({ activity: 'scene-phase-done', refId: sceneUuid });
   }
 }));
