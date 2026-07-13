@@ -7,7 +7,9 @@ const SEED_AT = '2026-07-13T09:00:00+09:00';
 // 팀원 리더보드 fixture 는 ranking.ts 에서 이사해 왔다.
 export function createArcadePreviewSeed(userId: string): ArcadeSnapshot {
   return {
-    wallet: { walletPoints: 12_500, lifetimeEarnedPoints: 48_200 },
+    // 지갑은 모의투자와 공유하는 한 계좌다 — 프리뷰 시드도 v2 초기지급(1,000,000)과 맞춰,
+    // 어느 쪽이 먼저 공유 지갑을 시드해도 두 기능이 같은 시작 잔액을 보게 한다.
+    wallet: { walletPoints: 1_000_000, lifetimeEarnedPoints: 1_000_000 },
     attendance: { streakDays: 3, todayGranted: false },
     todayActivityCounts: { sceneProgress: 4, comment: 2, retakeDone: 0 },
     games: {
@@ -52,7 +54,7 @@ export function createArcadePreviewSeed(userId: string): ArcadeSnapshot {
     achievements: [{ achievementId: 'arcade-first-run', unlockedAt: '2026-07-01T09:00:00+09:00' }],
     aggregates: { totalRuns: 17, arcadeEarnedPoints: 380 },
     walletLeaderboard: [
-      { userId, name: SELF_NAME, lifetimeEarnedPoints: 48_200 },
+      { userId, name: SELF_NAME, lifetimeEarnedPoints: 1_000_000 },
       { userId: 'preview-minji', name: '민지', lifetimeEarnedPoints: 4_920 },
       { userId: 'preview-doyun', name: '도윤', lifetimeEarnedPoints: 3_860 },
       { userId: 'preview-seoa', name: '서아', lifetimeEarnedPoints: 2_820 },

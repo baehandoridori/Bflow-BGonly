@@ -54,8 +54,8 @@ function gateway(storage: Storage) {
 
 test('localStorage gateway seeds a fresh snapshot on first read', async () => {
   const snapshot = await gateway(createMemoryStorage()).read();
-  assert.equal(snapshot.wallet.walletPoints, 12_500);
-  assert.equal(snapshot.wallet.lifetimeEarnedPoints, 48_200);
+  assert.equal(snapshot.wallet.walletPoints, 1_000_000);
+  assert.equal(snapshot.wallet.lifetimeEarnedPoints, 1_000_000);
   assert.equal(snapshot.attendance.streakDays, 3);
   assert.deepEqual(
     snapshot.achievements.map((a) => a.achievementId),
@@ -75,9 +75,9 @@ test('game-start deducts the entry fee and persists it', async () => {
     runId: 'run-1',
     gameId: 'snake',
   })) as ArcadeGameStartResult;
-  assert.equal(result.wallet.walletPoints, 12_490);
+  assert.equal(result.wallet.walletPoints, 999_990);
   const after = await gw.read();
-  assert.equal(after.wallet.walletPoints, 12_490);
+  assert.equal(after.wallet.walletPoints, 999_990);
 });
 
 test('re-executing the same request id replays the stored response without re-applying it', async () => {
@@ -92,10 +92,10 @@ test('re-executing the same request id replays the stored response without re-ap
   await gw.execute(command);
   const replay = (await gw.execute(command)) as ArcadeGameStartResult;
   assert.equal(replay.replayed, true);
-  assert.equal(replay.wallet.walletPoints, 12_490);
+  assert.equal(replay.wallet.walletPoints, 999_990);
   const after = await gw.read();
   // fee is only charged once
-  assert.equal(after.wallet.walletPoints, 12_490);
+  assert.equal(after.wallet.walletPoints, 999_990);
 });
 
 test('a mismatched fingerprint on the same request id is a conflict', async () => {
@@ -241,7 +241,7 @@ test('createArcadeGateway falls back to the localStorage preview when there is n
     getPreviewContext: () => ({ enabled: true, userId: USER_ID, storage: createMemoryStorage(), now: () => NOW }),
   });
   const snapshot = await gw.read();
-  assert.equal(snapshot.wallet.walletPoints, 12_500);
+  assert.equal(snapshot.wallet.walletPoints, 1_000_000);
 });
 
 test('the dev electron api mock exposes the arcade bridge methods', () => {
@@ -258,7 +258,7 @@ test('preview shares one wallet between the arcade and market gateways', async (
   const arcade = createArcadeLocalStorageGateway({ userId: USER_ID, storage, now: () => NOW });
   await arcade.execute({ kind: 'daily-login', requestId: 'daily-login:2026-07-13' }); // 아케이드 지갑 +20
   const arcadeWallet = (await arcade.read()).wallet.walletPoints;
-  assert.equal(arcadeWallet, 12_520);
+  assert.equal(arcadeWallet, 1_000_020);
   // 같은 storage 를 쓰는 모의투자 게이트웨이가 재로딩해도 같은 잔액을 봐야 한다(스테일 복원 없음).
   const market = createMarketLocalStorageGateway({ userId: USER_ID, storage, now: () => NOW });
   const marketSnap = await market.read();
