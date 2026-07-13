@@ -5,6 +5,7 @@ import {
   createMarketLocalStorageGateway,
   MarketStorageReadError,
 } from '../src/features/playground/market/localStorageGateway.ts';
+import { writeSharedPreviewWallet } from '../src/features/playground/previewSharedWallet.ts';
 import type {
   Holding,
   MarketNews,
@@ -279,4 +280,46 @@ test('persisted metadata and request fingerprints require safe integer and strin
     },
   ];
   for (const mutate of cases) await assertJsonValidCorruptionRejected(mutate);
+});
+
+test('createAdminEvent reconciles the arcade-updated shared wallet before saving', async () => {
+  const storage = new FakeStorage();
+  const gateway = createGateway(storage);
+  await gateway.read(); // 공유 지갑 시드 = 1,000,000
+  // 마지막 시장 저장 이후 아케이드가 공유 지갑을 바꿨다고 가정.
+  writeSharedPreviewWallet(storage, 'hansol-preview', { walletPoints: 999_000, lifetimeEarnedPoints: 1_000_500 });
+
+  const snapshot = await gateway.createAdminEvent({
+    stockId: 'jbbj', kind: 'news', title: '테스트 공지', impactBps: 0,
+    startsAt: '2026-07-13T00:00:00.000Z', endsAt: null,
+  });
+
+  // 스테일 1,000,000 이 아니라 아케이드가 바꾼 공유 잔액을 반영해야 한다.
+  assert.equal(snapshot.account.walletPoints, 999_000);
+  assert.equal(snapshot.account.lifetimeEarnedPoints, 1_000_500);
+  assert.equal(snapshot.adminEvents.length, 1, '이벤트도 함께 저장된다');
+  const persisted = JSON.parse(storage.getItem(STORAGE_KEY)!) as PersistedFixture;
+  assert.equal(persisted.snapshot.account.walletPoints, 999_000, '저장된 스냅샷도 맞춰진 잔액이어야 한다');
+  assert.equal(persisted.snapshot.account.lifetimeEarnedPoints, 1_000_500);
+});
+
+test('deleteAdminEvent reconciles the arcade-updated shared wallet before saving', async () => {
+  const storage = new FakeStorage();
+  const gateway = createGateway(storage);
+  await gateway.read();
+  const created = await gateway.createAdminEvent({
+    stockId: 'jbbj', kind: 'news', title: '삭제할 공지', impactBps: 0,
+    startsAt: '2026-07-13T00:00:00.000Z', endsAt: null,
+  });
+  const eventId = created.adminEvents[0]!.id;
+  // 이벤트 생성 뒤 아케이드가 공유 지갑을 또 바꿨다.
+  writeSharedPreviewWallet(storage, 'hansol-preview', { walletPoints: 990_000, lifetimeEarnedPoints: 1_001_000 });
+
+  const snapshot = await gateway.deleteAdminEvent(eventId);
+
+  assert.equal(snapshot.account.walletPoints, 990_000);
+  assert.equal(snapshot.account.lifetimeEarnedPoints, 1_001_000);
+  assert.equal(snapshot.adminEvents.length, 0, '이벤트가 삭제된다');
+  const persisted = JSON.parse(storage.getItem(STORAGE_KEY)!) as PersistedFixture;
+  assert.equal(persisted.snapshot.account.walletPoints, 990_000, '저장된 스냅샷도 맞춰진 잔액이어야 한다');
 });

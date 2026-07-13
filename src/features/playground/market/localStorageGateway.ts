@@ -325,7 +325,9 @@ export function createMarketLocalStorageGateway(
     },
     async createAdminEvent(input: MarketAdminEventInput) {
       await wait(latencyMs);
-      const persisted = readOrCreate();
+      // 아케이드가 공유 지갑을 바꿨을 수 있으므로, 거래가 아닌 이벤트 저장도 먼저 지갑을 맞춘 뒤
+      // 저장·반환한다. 그러지 않으면 스테일 잔액이 저장돼 배지·랭킹으로 되돌아 전파된다.
+      const persisted = readReconciled();
       const snapshot = addPreviewAdminEvent(
         persisted.snapshot,
         input,
@@ -336,7 +338,7 @@ export function createMarketLocalStorageGateway(
     },
     async deleteAdminEvent(eventId: string) {
       await wait(latencyMs);
-      const persisted = readOrCreate();
+      const persisted = readReconciled();
       const snapshot = removePreviewAdminEvent(persisted.snapshot, eventId);
       save(snapshot, persisted.requestFingerprints);
       return structuredClone(snapshot);
