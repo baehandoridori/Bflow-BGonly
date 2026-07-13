@@ -1705,6 +1705,7 @@ marketAccountService = new MarketAccountService({
 
 arcadeService = new ArcadeService({
   getNowMs: Date.now,
+  getSessionEpoch: () => sessionManager?.getEpoch() ?? 0,
   read: sbReadPlaygroundArcadeState,
   execute: (userId, command) =>
     sbExecutePlaygroundArcade(userId, command.requestId, command.kind, arcadeExecutePayload(command)),

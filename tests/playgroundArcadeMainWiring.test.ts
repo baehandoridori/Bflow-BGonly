@@ -26,6 +26,7 @@ function createHarness(config: {
   actor?: ArcadeActor | null;
   execute?: (command: ArcadeExecuteCommand, attempt: number) => Promise<ArcadeExecuteResult>;
   result?: ArcadeExecuteResult;
+  getSessionEpoch?: () => number;
 } = {}): Harness {
   const executed: ArcadeExecuteCommand[] = [];
   const broadcasts: ArcadeWalletUpdate[] = [];
@@ -48,6 +49,7 @@ function createHarness(config: {
       slacks.push(record);
     },
     getNowMs: () => FIXED_NOW,
+    getSessionEpoch: config.getSessionEpoch ?? (() => 1),
     logger: { error: () => {} },
   };
 
@@ -185,6 +187,52 @@ test('a best without slack notifications enabled stays silent', async () => {
     meta: {},
   });
   assert.equal(harness.slacks.length, 0);
+});
+
+test('execute discards its result and skips the broadcast when the session changes mid-flight', async () => {
+  let epoch = 1;
+  const executed: ArcadeExecuteCommand[] = [];
+  const broadcasts: ArcadeWalletUpdate[] = [];
+  const service = new ArcadeService({
+    read: async () => ({}),
+    execute: async (_userId, command) => {
+      executed.push(command);
+      epoch = 2; // RPC 진행 중 로그아웃/사용자 전환 발생
+      return { awarded: true, points: 5, wallet: { walletPoints: 1, lifetimeEarnedPoints: 1 } };
+    },
+    resolveActor: () => CANONICAL,
+    broadcastWalletUpdate: (update) => broadcasts.push(update),
+    sendSlackRecord: () => {},
+    getNowMs: () => FIXED_NOW,
+    getSessionEpoch: () => epoch,
+    logger: { error: () => {} },
+  });
+  await assert.rejects(
+    service.execute('u-canonical', { kind: 'activity', requestId: 'comment:c', activity: 'comment' }),
+    /세션이 바뀌/,
+  );
+  assert.equal(executed.length, 1);
+  assert.equal(broadcasts.length, 0);
+});
+
+test('awardActivity swallows a mid-flight session change without broadcasting', async () => {
+  let epoch = 1;
+  const broadcasts: ArcadeWalletUpdate[] = [];
+  const service = new ArcadeService({
+    read: async () => ({}),
+    execute: async () => {
+      epoch = 2;
+      return { awarded: true, points: 5, wallet: { walletPoints: 1, lifetimeEarnedPoints: 1 } };
+    },
+    resolveActor: () => CANONICAL,
+    broadcastWalletUpdate: (update) => broadcasts.push(update),
+    sendSlackRecord: () => {},
+    getNowMs: () => FIXED_NOW,
+    getSessionEpoch: () => epoch,
+    logger: { error: () => {} },
+  });
+  await service.awardActivity({ activity: 'comment', refId: 'c-1' }); // 예외를 삼켜야 한다
+  assert.equal(broadcasts.length, 0);
 });
 
 test('arcadeExecutePayload strips the requestId and keeps only the kind fields', () => {

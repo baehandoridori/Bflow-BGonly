@@ -86,7 +86,17 @@ export interface ArcadeServiceDependencies {
   broadcastWalletUpdate(update: ArcadeWalletUpdate): void;
   sendSlackRecord(record: ArcadeSlackRecord): void | Promise<void>;
   getNowMs(): number;
+  // 진행 중 세션 변경(로그아웃/사용자 전환) 감지용 canonical 세션 epoch.
+  getSessionEpoch(): number;
   logger?: Pick<Console, 'error'>;
+}
+
+// 진행 중 세션이 바뀌어 스테일 결과를 반영하지 않을 때 던진다.
+export class ArcadeSessionChangedError extends Error {
+  constructor() {
+    super('세션이 바뀌어 아케이드 결과를 반영하지 않았어요');
+    this.name = 'ArcadeSessionChangedError';
+  }
 }
 
 // ArcadeExecuteCommand → RPC p_payload (requestId·kind 를 제외한 kind별 필드).
@@ -171,15 +181,27 @@ export class ArcadeService {
   }
 
   async read(userId: string): Promise<ArcadeExecuteResult> {
-    return asResult(await this.withRetry(() => this.deps.read(userId)));
+    const startedEpoch = this.deps.getSessionEpoch();
+    const result = asResult(await this.withRetry(() => this.deps.read(userId)));
+    this.assertSameSession(startedEpoch);
+    return result;
   }
 
   async execute(userId: string, command: ArcadeExecuteCommand): Promise<ArcadeExecuteResult> {
+    const startedEpoch = this.deps.getSessionEpoch();
     return this.queue.enqueue(userId, async () => {
       const result = asResult(await this.withRetry(() => this.deps.execute(userId, command)));
+      // 진행 중 세션이 바뀌었으면(로그아웃/사용자 전환) 스테일 결과를 반영·broadcast·슬랙하지 않는다.
+      this.assertSameSession(startedEpoch);
       this.maybeNotifyRecord(command, result);
       return result;
     });
+  }
+
+  private assertSameSession(startedEpoch: number): void {
+    if (this.deps.getSessionEpoch() !== startedEpoch) {
+      throw new ArcadeSessionChangedError();
+    }
   }
 
   async awardActivity(input: AwardActivityInput): Promise<void> {
