@@ -171,31 +171,47 @@ export class ArcadeService {
   }
 
   // 네트워크 오류 1회 재시도 — 같은 request_id 를 재사용하므로 서버 멱등이 중복을 막는다.
-  private async withRetry<T>(work: () => Promise<T>): Promise<T> {
+  // retried=true 는 "첫 시도가 실패해 재시도했다"는 뜻: 이 경우 서버가 replayed 를 돌려줘도
+  // 이 프로세스는 원 성공을 관찰하지 못했으므로 지갑을 반영·broadcast 해야 한다.
+  private async withRetryMeta<T>(work: () => Promise<T>): Promise<{ value: T; retried: boolean }> {
     try {
-      return await work();
+      return { value: await work(), retried: false };
     } catch (error) {
       this.logger.error('[arcade] request failed, retrying once', error);
-      return work();
+      return { value: await work(), retried: true };
     }
   }
 
   async read(userId: string): Promise<ArcadeExecuteResult> {
     const startedEpoch = this.deps.getSessionEpoch();
-    const result = asResult(await this.withRetry(() => this.deps.read(userId)));
+    const { value } = await this.withRetryMeta(() => this.deps.read(userId));
     this.assertSameSession(startedEpoch);
-    return result;
+    return asResult(value);
+  }
+
+  private async executeWithMeta(
+    userId: string,
+    command: ArcadeExecuteCommand,
+  ): Promise<{ result: ArcadeExecuteResult; retried: boolean }> {
+    const startedEpoch = this.deps.getSessionEpoch();
+    return this.queue.enqueue(userId, async () => {
+      const { value, retried } = await this.withRetryMeta(() => this.deps.execute(userId, command));
+      // 진행 중 세션이 바뀌었으면(로그아웃/사용자 전환) 스테일 결과를 반영·broadcast·슬랙하지 않는다.
+      this.assertSameSession(startedEpoch);
+      const result = asResult(value);
+      this.maybeNotifyRecord(command, result, retried);
+      return { result, retried };
+    });
   }
 
   async execute(userId: string, command: ArcadeExecuteCommand): Promise<ArcadeExecuteResult> {
-    const startedEpoch = this.deps.getSessionEpoch();
-    return this.queue.enqueue(userId, async () => {
-      const result = asResult(await this.withRetry(() => this.deps.execute(userId, command)));
-      // 진행 중 세션이 바뀌었으면(로그아웃/사용자 전환) 스테일 결과를 반영·broadcast·슬랙하지 않는다.
-      this.assertSameSession(startedEpoch);
-      this.maybeNotifyRecord(command, result);
-      return result;
-    });
+    const { result } = await this.executeWithMeta(userId, command);
+    return result;
+  }
+
+  // 재시도 후 재생이면 이 프로세스가 원 성공을 못 봤으므로 지갑을 반영해야 한다.
+  private shouldApplyWallet(result: ArcadeExecuteResult, retried: boolean): boolean {
+    return !result.replayed || retried;
   }
 
   private assertSameSession(startedEpoch: number): void {
@@ -210,13 +226,13 @@ export class ArcadeService {
     const requestId = this.activityRequestId(input);
     if (!requestId) return;
     try {
-      const result = await this.execute(actor.userId, {
+      const { result, retried } = await this.executeWithMeta(actor.userId, {
         kind: 'activity',
         requestId,
         activity: input.activity,
       });
       if (
-        !result.replayed
+        this.shouldApplyWallet(result, retried)
         && result.awarded
         && typeof result.points === 'number'
         && result.points > 0
@@ -236,13 +252,13 @@ export class ArcadeService {
     const key = `${actor.userId}|${today}`;
     if (this.dailyLoginAttempts.has(key)) return;
     try {
-      const result = await this.execute(actor.userId, {
+      const { result, retried } = await this.executeWithMeta(actor.userId, {
         kind: 'daily-login',
         requestId: `daily-login:${today}`,
       });
       // 성공 시에만 기억한다 — 자정 경계 등으로 실패하면 다음 트리거에서 재시도한다.
       this.dailyLoginAttempts.add(key);
-      if (!result.replayed && result.wallet) {
+      if (this.shouldApplyWallet(result, retried) && result.wallet) {
         this.deps.broadcastWalletUpdate({
           wallet: result.wallet,
           delta: DAILY_LOGIN_POINTS,
@@ -254,12 +270,12 @@ export class ArcadeService {
     }
   }
 
-  private maybeNotifyRecord(command: ArcadeExecuteCommand, result: ArcadeExecuteResult): void {
+  private maybeNotifyRecord(command: ArcadeExecuteCommand, result: ArcadeExecuteResult, retried: boolean): void {
     if (
       command.kind !== 'game-finish'
       || !result.newAlltimeBest
       || !result.slackNotifyEnabled
-      || result.replayed
+      || !this.shouldApplyWallet(result, retried)
     ) {
       return;
     }

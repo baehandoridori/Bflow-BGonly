@@ -16,8 +16,8 @@ function baseSnapshot(overrides: Partial<ArcadeSnapshot> = {}): ArcadeSnapshot {
     attendance: { streakDays: 0, todayGranted: false },
     todayActivityCounts: { sceneProgress: 0, comment: 0, retakeDone: 0 },
     games: {
-      snake: { myBestScore: 0, myWeeklyBestScore: 0, todayRewardedRuns: 0, totalRuns: 0, leaderboardAll: [], leaderboardWeekly: [] },
-      tetris: { myBestScore: 0, myWeeklyBestScore: 0, todayRewardedRuns: 0, totalRuns: 0, leaderboardAll: [], leaderboardWeekly: [] },
+      snake: { myBestScore: 0, myWeeklyBestScore: 0, todayRewardedRuns: 0, totalRuns: 0, maxGoldenEaten: 0, maxLineClear: 0, maxLevel: 0, leaderboardAll: [], leaderboardWeekly: [] },
+      tetris: { myBestScore: 0, myWeeklyBestScore: 0, todayRewardedRuns: 0, totalRuns: 0, maxGoldenEaten: 0, maxLineClear: 0, maxLevel: 0, leaderboardAll: [], leaderboardWeekly: [] },
     },
     achievements: [],
     aggregates: { totalRuns: 0, arcadeEarnedPoints: 0 },

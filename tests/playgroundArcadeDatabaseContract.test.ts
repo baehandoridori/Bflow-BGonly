@@ -212,6 +212,7 @@ test('read RPC exposes the KST attendance, per-game leaderboard, and config snap
   for (const key of [
     'walletPoints', 'lifetimeEarnedPoints', 'streakDays', 'todayGranted',
     'todayActivityCounts', 'myBestScore', 'myWeeklyBestScore', 'todayRewardedRuns',
+    'maxGoldenEaten', 'maxLineClear', 'maxLevel',
     'leaderboardAll', 'leaderboardWeekly', 'achievements', 'aggregates',
     'arcadeEarnedPoints', 'walletLeaderboard', 'slackNotifyEnabled',
   ]) {

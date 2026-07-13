@@ -199,6 +199,9 @@ export function applyArcadePreviewCommand(
       const myBestScore = Math.max(prevBestScore ?? 0, command.score);
       stats.myBestScore = myBestScore;
       stats.myWeeklyBestScore = Math.max(stats.myWeeklyBestScore, command.score);
+      stats.maxGoldenEaten = Math.max(stats.maxGoldenEaten, command.meta.goldenEaten ?? 0);
+      stats.maxLineClear = Math.max(stats.maxLineClear, command.meta.maxLineClear ?? 0);
+      stats.maxLevel = Math.max(stats.maxLevel, command.meta.levelReached ?? 0);
       syncSelfWallet(next, ctx.userId);
 
       return {

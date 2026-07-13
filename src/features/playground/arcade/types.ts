@@ -32,6 +32,10 @@ export interface ArcadeGameStats {
   myWeeklyBestScore: number;
   todayRewardedRuns: number;
   totalRuns: number;
+  // per-run 최댓값 — 도전과제(골든 사과·라인 클리어·레벨)를 load 시 복구 평가하는 데 쓴다.
+  maxGoldenEaten: number;
+  maxLineClear: number;
+  maxLevel: number;
   leaderboardAll: ArcadeLeaderboardEntry[];
   leaderboardWeekly: ArcadeLeaderboardEntry[];
 }

@@ -66,6 +66,9 @@ function applyFinishToSnapshot(
         myWeeklyBestScore: Math.max(stats.myWeeklyBestScore, input.score),
         todayRewardedRuns: result.todayRewardedRuns ?? stats.todayRewardedRuns,
         totalRuns: stats.totalRuns + 1,
+        maxGoldenEaten: Math.max(stats.maxGoldenEaten, input.meta.goldenEaten ?? 0),
+        maxLineClear: Math.max(stats.maxLineClear, input.meta.maxLineClear ?? 0),
+        maxLevel: Math.max(stats.maxLevel, input.meta.levelReached ?? 0),
       },
     },
     aggregates: {
@@ -107,8 +110,18 @@ export function createArcadeStore(
         runRewardPoints: input.runRewardPoints,
         aggregates: input.aggregatesOverride ?? snapshot.aggregates,
         attendanceStreakDays: snapshot.attendance.streakDays,
-        // load 시에도 점수형 게임 과제를 누적 최고 점수로 복구 평가한다.
-        gameBests: { snake: snapshot.games.snake.myBestScore, tetris: snapshot.games.tetris.myBestScore },
+        // load 시에도 게임 과제(점수·골든·라인·레벨)를 누적 최댓값으로 복구 평가한다.
+        gamePeaks: {
+          snake: {
+            bestScore: snapshot.games.snake.myBestScore,
+            maxGoldenEaten: snapshot.games.snake.maxGoldenEaten,
+          },
+          tetris: {
+            bestScore: snapshot.games.tetris.myBestScore,
+            maxLineClear: snapshot.games.tetris.maxLineClear,
+            maxLevel: snapshot.games.tetris.maxLevel,
+          },
+        },
         unlockedIds,
       });
 

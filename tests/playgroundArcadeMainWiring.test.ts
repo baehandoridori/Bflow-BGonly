@@ -155,6 +155,25 @@ test('grantDailyLogin runs once per day on success and retries after failure', a
   assert.equal(failing.executeCallCount(), 4);
 });
 
+test('a replayed result after a retry (commit-then-lost response) still broadcasts', async () => {
+  // 첫 시도가 커밋됐지만 응답이 유실 → 재시도가 replayed 를 받는다. 이 프로세스는 원 성공을
+  // 못 봤으므로 지갑을 반영·broadcast 해야 한다.
+  const harness = createHarness({
+    execute: async (_command, attempt) => {
+      if (attempt === 1) throw new Error('response lost');
+      return {
+        granted: true, replayed: true,
+        wallet: { walletPoints: 20, lifetimeEarnedPoints: 20 },
+        attendance: { streakDays: 1, todayGranted: true },
+      };
+    },
+  });
+  await harness.service.grantDailyLogin();
+  assert.equal(harness.executeCallCount(), 2);
+  assert.equal(harness.broadcasts.length, 1);
+  assert.equal(harness.broadcasts[0]?.reason, 'daily-login');
+});
+
 test('a fresh all-time best sends a slack record when notifications are enabled', async () => {
   const harness = createHarness({
     result: { newAlltimeBest: true, slackNotifyEnabled: true, replayed: false, prevBestScore: 34, wallet: { walletPoints: 1, lifetimeEarnedPoints: 1 } },

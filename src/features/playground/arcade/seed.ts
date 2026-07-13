@@ -16,6 +16,9 @@ export function createArcadePreviewSeed(userId: string): ArcadeSnapshot {
         myWeeklyBestScore: 34,
         todayRewardedRuns: 2,
         totalRuns: 11,
+        maxGoldenEaten: 3,
+        maxLineClear: 0,
+        maxLevel: 0,
         leaderboardAll: [
           { userId, name: SELF_NAME, score: 34, at: SEED_AT },
           { userId: 'preview-minji', name: '민지', score: 28, at: SEED_AT },
@@ -32,6 +35,9 @@ export function createArcadePreviewSeed(userId: string): ArcadeSnapshot {
         myWeeklyBestScore: 12_800,
         todayRewardedRuns: 1,
         totalRuns: 6,
+        maxGoldenEaten: 0,
+        maxLineClear: 2,
+        maxLevel: 7,
         leaderboardAll: [
           { userId, name: SELF_NAME, score: 12_800, at: SEED_AT },
           { userId: 'preview-seoa', name: '서아', score: 9_700, at: SEED_AT },

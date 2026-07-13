@@ -177,24 +177,41 @@ test('evaluateAchievements reads snake and tetris run metadata', () => {
   assert.ok(!tetris.includes('snake-30'));
 });
 
-test('evaluateAchievements recovers score-based game achievements from cumulative bests on load', () => {
-  // load 시(gameId null, runMeta null)에도 누적 최고 점수로 점수형 게임 과제를 복구한다.
+test('evaluateAchievements recovers all game achievements from cumulative peaks on load', () => {
+  // load 시(gameId null, runMeta null)에도 누적 최댓값으로 게임 과제(점수·골든·라인·레벨)를 복구한다.
   const result = evaluateAchievements({
     gameId: null,
     runMeta: null,
     runRewardPoints: 0,
     aggregates: { totalRuns: 5, arcadeEarnedPoints: 0 },
     attendanceStreakDays: 0,
-    gameBests: { snake: 60, tetris: 31_000 },
+    gamePeaks: {
+      snake: { bestScore: 60, maxGoldenEaten: 6 },
+      tetris: { bestScore: 31_000, maxLineClear: 4, maxLevel: 10 },
+    },
     unlockedIds: new Set(['arcade-first-run']),
   });
   assert.ok(result.includes('snake-30'));
   assert.ok(result.includes('snake-55'));
   assert.ok(result.includes('tetris-30k'));
-  // per-run 최댓값(골든/라인/레벨) 과제는 집계 최고점만으론 복구 불가 — finish 시에만 판정
+  // per-run 최댓값 과제도 누적 최댓값으로 복구된다.
+  assert.ok(result.includes('snake-golden-5'));
+  assert.ok(result.includes('tetris-tetris'));
+  assert.ok(result.includes('tetris-level-10'));
+});
+
+test('evaluateAchievements without peaks stays finish-only for game achievements', () => {
+  const result = evaluateAchievements({
+    gameId: null,
+    runMeta: null,
+    runRewardPoints: 0,
+    aggregates: { totalRuns: 5, arcadeEarnedPoints: 0 },
+    attendanceStreakDays: 7,
+    unlockedIds: new Set(),
+  });
+  assert.ok(result.includes('attend-7'));
+  assert.ok(!result.includes('snake-30'));
   assert.ok(!result.includes('snake-golden-5'));
-  assert.ok(!result.includes('tetris-tetris'));
-  assert.ok(!result.includes('tetris-level-10'));
 });
 
 test('evaluateAchievements returns newly unlocked ids in definition order', () => {

@@ -38,19 +38,25 @@ interface EvaluateAchievementsInput {
   runRewardPoints: number; // 이번 런 지급 보상 (게임 외 평가면 0)
   aggregates: { totalRuns: number; arcadeEarnedPoints: number }; // 서버 스냅샷 = 이번 런 미포함 값
   attendanceStreakDays: number;
-  // 게임별 누적 최고 점수. load 시 이 값으로 점수형 게임 과제를 복구 평가한다
+  // 게임별 누적 최댓값(점수 + per-run 최댓값). load 시 이 값으로 게임 과제를 복구 평가한다
   // (finish 때 unlock 이 일시적으로 실패해도 다음 load 에서 다시 해금 시도).
-  gameBests?: { snake: number; tetris: number };
+  gamePeaks?: {
+    snake: { bestScore: number; maxGoldenEaten: number };
+    tetris: { bestScore: number; maxLineClear: number; maxLevel: number };
+  };
   unlockedIds: ReadonlySet<string>;
 }
 
 // 새로 해금할 도전과제 id 목록(정의 순서). 누적형은 이번 런을 반영해 판정한다.
 export function evaluateAchievements(input: EvaluateAchievementsInput): string[] {
-  const { gameId, runMeta, runRewardPoints, aggregates, attendanceStreakDays, gameBests, unlockedIds } = input;
+  const { gameId, runMeta, runRewardPoints, aggregates, attendanceStreakDays, gamePeaks, unlockedIds } = input;
   const runsAfter = aggregates.totalRuns + (runMeta ? 1 : 0);
   const earnedAfter = aggregates.arcadeEarnedPoints + runRewardPoints;
-  const snakeBest = gameBests?.snake ?? 0;
-  const tetrisBest = gameBests?.tetris ?? 0;
+  const snakeBest = gamePeaks?.snake.bestScore ?? 0;
+  const tetrisBest = gamePeaks?.tetris.bestScore ?? 0;
+  const snakeMaxGolden = gamePeaks?.snake.maxGoldenEaten ?? 0;
+  const tetrisMaxLine = gamePeaks?.tetris.maxLineClear ?? 0;
+  const tetrisMaxLevel = gamePeaks?.tetris.maxLevel ?? 0;
   // 이번 런이 해당 게임의 finish 인지 (per-run meta 로 판정하는 과제용)
   const snakeRun = gameId === 'snake' && runMeta !== null ? runMeta : null;
   const tetrisRun = gameId === 'tetris' && runMeta !== null ? runMeta : null;
@@ -75,7 +81,7 @@ export function evaluateAchievements(input: EvaluateAchievementsInput): string[]
       case 'attend-7':
         earned = attendanceStreakDays >= 7;
         break;
-      // 점수형 게임 과제: 이번 런 점수 또는 누적 최고 점수(load 복구)로 판정
+      // 게임 과제: 이번 런 값 또는 누적 최댓값(load 복구)으로 판정
       case 'snake-30':
         earned = (snakeRun !== null && snakeRun.score >= 30) || snakeBest >= 30;
         break;
@@ -85,15 +91,14 @@ export function evaluateAchievements(input: EvaluateAchievementsInput): string[]
       case 'tetris-30k':
         earned = (tetrisRun !== null && tetrisRun.score >= 30000) || tetrisBest >= 30000;
         break;
-      // per-run 최댓값(골든/라인/레벨) 과제: 집계 스냅샷엔 없으므로 finish 시에만 판정
       case 'snake-golden-5':
-        earned = snakeRun !== null && (snakeRun.goldenEaten ?? 0) >= 5;
+        earned = (snakeRun !== null && (snakeRun.goldenEaten ?? 0) >= 5) || snakeMaxGolden >= 5;
         break;
       case 'tetris-tetris':
-        earned = tetrisRun !== null && (tetrisRun.maxLineClear ?? 0) >= 4;
+        earned = (tetrisRun !== null && (tetrisRun.maxLineClear ?? 0) >= 4) || tetrisMaxLine >= 4;
         break;
       case 'tetris-level-10':
-        earned = tetrisRun !== null && (tetrisRun.levelReached ?? 0) >= 10;
+        earned = (tetrisRun !== null && (tetrisRun.levelReached ?? 0) >= 10) || tetrisMaxLevel >= 10;
         break;
       default:
         earned = false;

@@ -246,6 +246,18 @@ BEGIN
           SELECT COUNT(*) FROM public.playground_game_runs AS r
           WHERE r.user_id = p_user_id::text AND r.game_id = 'snake'
         ),
+        'maxGoldenEaten', COALESCE((
+          SELECT MAX((r.meta ->> 'goldenEaten')::bigint) FROM public.playground_game_runs AS r
+          WHERE r.user_id = p_user_id::text AND r.game_id = 'snake' AND r.meta ->> 'goldenEaten' ~ '^[0-9]+$'
+        ), 0),
+        'maxLineClear', COALESCE((
+          SELECT MAX((r.meta ->> 'maxLineClear')::bigint) FROM public.playground_game_runs AS r
+          WHERE r.user_id = p_user_id::text AND r.game_id = 'snake' AND r.meta ->> 'maxLineClear' ~ '^[0-9]+$'
+        ), 0),
+        'maxLevel', COALESCE((
+          SELECT MAX((r.meta ->> 'levelReached')::bigint) FROM public.playground_game_runs AS r
+          WHERE r.user_id = p_user_id::text AND r.game_id = 'snake' AND r.meta ->> 'levelReached' ~ '^[0-9]+$'
+        ), 0),
         'leaderboardAll', COALESCE((
           SELECT jsonb_agg(
             jsonb_build_object('userId', top.user_id, 'name', top.name, 'score', top.score, 'at', top.created_at)
@@ -303,6 +315,18 @@ BEGIN
           SELECT COUNT(*) FROM public.playground_game_runs AS r
           WHERE r.user_id = p_user_id::text AND r.game_id = 'tetris'
         ),
+        'maxGoldenEaten', COALESCE((
+          SELECT MAX((r.meta ->> 'goldenEaten')::bigint) FROM public.playground_game_runs AS r
+          WHERE r.user_id = p_user_id::text AND r.game_id = 'tetris' AND r.meta ->> 'goldenEaten' ~ '^[0-9]+$'
+        ), 0),
+        'maxLineClear', COALESCE((
+          SELECT MAX((r.meta ->> 'maxLineClear')::bigint) FROM public.playground_game_runs AS r
+          WHERE r.user_id = p_user_id::text AND r.game_id = 'tetris' AND r.meta ->> 'maxLineClear' ~ '^[0-9]+$'
+        ), 0),
+        'maxLevel', COALESCE((
+          SELECT MAX((r.meta ->> 'levelReached')::bigint) FROM public.playground_game_runs AS r
+          WHERE r.user_id = p_user_id::text AND r.game_id = 'tetris' AND r.meta ->> 'levelReached' ~ '^[0-9]+$'
+        ), 0),
         'leaderboardAll', COALESCE((
           SELECT jsonb_agg(
             jsonb_build_object('userId', top.user_id, 'name', top.name, 'score', top.score, 'at', top.created_at)
