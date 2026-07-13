@@ -117,6 +117,29 @@ function getPreviewArcadeGateway(): ArcadePreviewGateway {
   return previewArcadeGateway;
 }
 
+const previewDailyLoginAttempts = new Set<string>();
+
+// 프리뷰에는 main 프로세스가 없어 production 의 setCanonicalActivityUser → grantDailyLogin
+// 흐름이 없다. 배한솔 프리뷰 세션이 확립되면 여기서 출석 적립을 미러링해, 자동 출석이
+// 프리뷰/테스트 모드에서도 재현되게 한다(하루 1회, fire-and-forget, 서버 멱등에 의존).
+function maybeGrantPreviewDailyLogin(): void {
+  const user = previewCanonicalUserId
+    ? getMockUsers().find((candidate) => candidate.id === previewCanonicalUserId)
+    : null;
+  if (user?.name !== '배한솔' || user.slackId !== 'U05DFV9UAN5') return;
+  const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul' }).format(new Date());
+  const key = `${user.id}|${today}`;
+  if (previewDailyLoginAttempts.has(key)) return;
+  void getPreviewArcadeGateway()
+    .execute({ kind: 'daily-login', requestId: `daily-login:${today}` })
+    .then(() => {
+      previewDailyLoginAttempts.add(key);
+    })
+    .catch(() => {
+      /* fire-and-forget — 다음 세션 트리거에서 재시도 */
+    });
+}
+
 function previewNoSession<T>(data: T): { ok: false; kind: 'rejected'; code: string; message: string; retryable: false } {
   void data;
   return { ok: false, kind: 'rejected', code: 'AUTH_REQUIRED', message: '로그인이 필요합니다.', retryable: false };
@@ -1158,6 +1181,7 @@ export function installDevElectronAPI(): void {
     // ─── Personal Todos / Task Views mock ───
     ensureCanonicalSession: async () => {
       if (!previewCanonicalUserId) previewCanonicalUserId = readRememberedPreviewUser();
+      maybeGrantPreviewDailyLogin();
       return { ok: true, payload: previewCanonicalPayload() };
     },
     loginCanonicalSession: async (input) => {
@@ -1168,6 +1192,7 @@ export function installDevElectronAPI(): void {
       if (previewCanonicalUserId !== user.id) previewCanonicalEpoch++;
       previewCanonicalUserId = user.id;
       writeRememberedPreviewUser(input.rememberMe === false ? null : user.id);
+      maybeGrantPreviewDailyLogin();
       return { ok: true, payload: previewCanonicalPayload() };
     },
     restoreCanonicalSession: async () => {
@@ -1175,6 +1200,7 @@ export function installDevElectronAPI(): void {
         previewCanonicalUserId = readRememberedPreviewUser();
         previewCanonicalEpoch++;
       }
+      maybeGrantPreviewDailyLogin();
       return { ok: true, payload: previewCanonicalPayload() };
     },
     logoutCanonicalSession: async () => {

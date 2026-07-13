@@ -213,3 +213,13 @@ test('the dev electron api mock exposes the arcade bridge methods', () => {
   assert.match(devApi, /onArcadeWalletUpdated:/);
   assert.match(devApi, /createArcadeLocalStorageGateway/);
 });
+
+test('the dev electron api mirrors the daily-login grant on preview session', () => {
+  const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+  const devApi = readFileSync(path.join(root, 'src', 'mocks', 'devElectronAPI.ts'), 'utf8');
+  // 프리뷰에는 main 이 없으므로 세션 확립 시 daily-login 을 직접 미러링한다.
+  assert.match(devApi, /maybeGrantPreviewDailyLogin/);
+  assert.match(devApi, /kind: 'daily-login', requestId: `daily-login:\$\{today\}`/);
+  // login / restore / ensure 세 확립 지점에서 호출된다.
+  assert.equal((devApi.match(/maybeGrantPreviewDailyLogin\(\);/g) ?? []).length, 3);
+});
