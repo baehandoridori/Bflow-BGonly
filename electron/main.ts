@@ -23,6 +23,8 @@ import { PersonalTodoService } from './personalTodoService';
 import type { PersonalTodoCreateInput, PersonalTodoOrderMutation, PersonalTodoPatch, CalendarTodoPatch, PersonalTodoLabelColorKey } from './personalTodoService';
 import { MarketAccountService } from './marketAccountService';
 import type { MarketAdminEventInput, MarketCommand } from './marketAccountService';
+import { ArcadeService, arcadeExecutePayload } from './arcadeService';
+import type { ArcadeExecuteCommand, ArcadeSlackRecord } from './arcadeService';
 import { getCanonicalMarketQuoteWon } from '../shared/playgroundMarketPrice.mjs';
 import { PersonalTodoRecoveryJournal } from './personalTodoRecoveryJournal';
 import { PersonalTodoCalendarSync, PERSONAL_TODO_GOOGLE_LINK_KEY, PERSONAL_TODO_GOOGLE_USER_KEY } from './personalTodoCalendarSync';
@@ -1366,6 +1368,8 @@ import {
   executePlaygroundMarketCommand as sbExecutePlaygroundMarketCommand,
   createPlaygroundMarketEvent as sbCreatePlaygroundMarketEvent,
   deletePlaygroundMarketEvent as sbDeletePlaygroundMarketEvent,
+  readPlaygroundArcadeState as sbReadPlaygroundArcadeState,
+  executePlaygroundArcade as sbExecutePlaygroundArcade,
   readMemo as sbReadMemo,
   upsertMemo as sbUpsertMemo,
   readAllMemos as sbReadAllMemos,
@@ -1481,6 +1485,11 @@ function setCanonicalActivityUser(user: { id: string; name: string } | null): vo
   // 다음 폴에서 새 신원으로 재track(공유 로그인 PC에서 "재로그인했는데 편집중 표시 안 됨" 방지).
   if (identityChanged) {
     try { editingPresence?.reset(); } catch { /* ignore */ }
+  }
+  // 로그인 전환: 오늘 출석 포인트 적립을 시도한다(비-canonical·중복은 서비스가 조용히 무시).
+  // 원래 세션 확립 흐름을 막지 않도록 fire-and-forget, 비throw.
+  if (user && identityChanged) {
+    try { void arcadeService?.grantDailyLogin(); } catch { /* fire-and-forget */ }
   }
 }
 
@@ -1621,6 +1630,26 @@ const personalTodoRecoveryJournal = new PersonalTodoRecoveryJournal(
 let sessionManager: SessionManager;
 let personalTodoService: PersonalTodoService;
 let marketAccountService: MarketAccountService;
+let arcadeService: ArcadeService;
+
+// 아케이드 신기록 슬랙 웹훅 — Task 13(신기록 알림)에서 실제 URL 을 채운다.
+// 빈 문자열이면 발송을 건너뛴다(기존 웹훅 패턴과 동일).
+const ARCADE_RECORD_WEBHOOK_URL = '';
+
+async function sendArcadeRecordWebhook(record: ArcadeSlackRecord): Promise<void> {
+  if (!ARCADE_RECORD_WEBHOOK_URL) return;
+  try {
+    await fetch(ARCADE_RECORD_WEBHOOK_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        text: `🏆 ${record.player} · ${record.title}\n${record.detail}`,
+      }),
+    });
+  } catch (error) {
+    console.error('[arcade] record webhook failed', error);
+  }
+}
 const personalTodoCalendarSync = new PersonalTodoCalendarSync({
   journal: personalTodoRecoveryJournal,
   adapter: personalTodoCalendarAdapter,
@@ -1671,6 +1700,25 @@ marketAccountService = new MarketAccountService({
       name: user?.name ?? null,
       slackId: typeof user?.slackId === 'string' ? user.slackId : null,
     };
+  },
+});
+
+arcadeService = new ArcadeService({
+  getNowMs: Date.now,
+  read: sbReadPlaygroundArcadeState,
+  execute: (userId, command) =>
+    sbExecutePlaygroundArcade(userId, command.requestId, command.kind, arcadeExecutePayload(command)),
+  resolveActor: () => {
+    const user = sessionManager?.getCurrentPayload().user;
+    return {
+      userId: sessionManager?.getCanonicalUserId() ?? null,
+      name: user?.name ?? null,
+      slackId: typeof user?.slackId === 'string' ? user.slackId : null,
+    };
+  },
+  broadcastWalletUpdate: (update) => broadcastToAllWindows('arcade:wallet-updated', update),
+  sendSlackRecord: (record) => {
+    void sendArcadeRecordWebhook(record);
   },
 });
 
@@ -2746,6 +2794,37 @@ ipcMain.handle('market:create-admin-event', async (_event, input: MarketAdminEve
 ipcMain.handle('market:delete-admin-event', async (_event, eventId: string) => {
   await ensureCanonicalMarketAccess();
   return marketAccountService.deleteAdminEvent(eventId);
+});
+
+// ─── Playground arcade IPC (renderer never supplies ownership) ───
+
+async function ensureCanonicalArcadeAccess(): Promise<{ userId: string; epoch: number }> {
+  const ensured = await sessionManager.ensure();
+  const userId = sessionManager.getCanonicalUserId();
+  const epoch = sessionManager.getEpoch();
+  const user = ensured.payload.user;
+  const slackId = typeof user?.slackId === 'string' ? user.slackId : null;
+  if (
+    !ensured.ok
+    || !user
+    || !userId
+    || user.id !== userId
+    || ensured.payload.epoch !== epoch
+    || user.name !== '배한솔'
+    || slackId !== 'U05DFV9UAN5'
+  ) {
+    throw new Error('배한솔 계정에서만 배플레이그라운드를 이용할 수 있어요.');
+  }
+  return { userId, epoch };
+}
+
+ipcMain.handle('arcade:read', async () => {
+  const { userId } = await ensureCanonicalArcadeAccess();
+  return arcadeService.read(userId);
+});
+ipcMain.handle('arcade:execute', async (_event, command: ArcadeExecuteCommand) => {
+  const { userId } = await ensureCanonicalArcadeAccess();
+  return arcadeService.execute(userId, command);
 });
 
 // ─── Personal Todos IPC (main canonical session owns userId) ───

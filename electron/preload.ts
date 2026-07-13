@@ -3,6 +3,7 @@ import type { BulkStageUpdate, BulkFieldUpdate, BulkUpdateResult } from './supab
 import type { CalendarTodoPatch, PersonalTodoCreateInput, PersonalTodoLabelColorKey, PersonalTodoOrderMutation, PersonalTodoPatch } from './personalTodoService';
 import type { SessionActionResult } from './sessionManager';
 import type { MarketAdminEventInput, MarketCommand, MarketRemoteState } from './marketAccountService';
+import type { ArcadeExecuteCommand, ArcadeExecuteResult, ArcadeWalletUpdate } from './arcadeService';
 
 let canonicalSessionEpoch = 0;
 function rememberSessionEpoch(result: SessionActionResult): SessionActionResult {
@@ -305,6 +306,16 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.invoke('market:create-admin-event', input) as Promise<MarketRemoteState>,
   marketDeleteAdminEvent: (eventId: string) =>
     ipcRenderer.invoke('market:delete-admin-event', eventId) as Promise<MarketRemoteState>,
+  // ─── Playground arcade (canonical ownership stays in main) ──
+  arcadeRead: () =>
+    ipcRenderer.invoke('arcade:read') as Promise<unknown>,
+  arcadeExecute: (command: ArcadeExecuteCommand) =>
+    ipcRenderer.invoke('arcade:execute', command) as Promise<ArcadeExecuteResult>,
+  onArcadeWalletUpdated: (callback: (update: ArcadeWalletUpdate) => void) => {
+    const listener = (_event: Electron.IpcRendererEvent, payload: ArcadeWalletUpdate) => callback(payload);
+    ipcRenderer.on('arcade:wallet-updated', listener);
+    return () => ipcRenderer.removeListener('arcade:wallet-updated', listener);
+  },
   onPlaygroundNativeBack: (callback: () => void) => {
     const handler = () => callback();
     ipcRenderer.on('playground:native-back', handler);

@@ -2881,6 +2881,30 @@ export async function executePlaygroundMarketCommand(
   return data;
 }
 
+export async function readPlaygroundArcadeState(userId: string): Promise<unknown> {
+  const { data, error } = await supabase.rpc('playground_arcade_read', {
+    p_user_id: userId,
+  });
+  if (error) throw error;
+  return data;
+}
+
+export async function executePlaygroundArcade(
+  userId: string,
+  requestId: string,
+  kind: string,
+  payload: Record<string, unknown>,
+): Promise<unknown> {
+  const { data, error } = await supabase.rpc('playground_arcade_execute', {
+    p_user_id: userId,
+    p_request_id: requestId,
+    p_kind: kind,
+    p_payload: payload,
+  });
+  if (error) throw error;
+  return data;
+}
+
 export async function createPlaygroundMarketEvent(
   userId: string,
   input: MarketAdminEventInput,
