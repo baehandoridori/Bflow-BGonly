@@ -1,4 +1,10 @@
 import type { MarketAdminEventInput, MarketCommand, MarketRemoteState } from '../features/playground/market/types';
+import type {
+  ArcadeExecuteCommand,
+  ArcadeExecuteResult,
+  ArcadeSnapshot,
+  ArcadeWalletPush,
+} from '../features/playground/arcade/types';
 
 // ─── 부서 (Department) ──────────────────────
 
@@ -1380,6 +1386,10 @@ export interface ElectronAPI {
   marketExecute: (command: MarketCommand) => Promise<MarketRemoteState>;
   marketCreateAdminEvent: (input: MarketAdminEventInput) => Promise<MarketRemoteState>;
   marketDeleteAdminEvent: (eventId: string) => Promise<MarketRemoteState>;
+  // ─── Playground arcade (main-owned canonical session) ──
+  arcadeRead: () => Promise<ArcadeSnapshot>;
+  arcadeExecute: (command: ArcadeExecuteCommand) => Promise<ArcadeExecuteResult>;
+  onArcadeWalletUpdated: (callback: (update: ArcadeWalletPush) => void) => () => void;
   onPlaygroundNativeBack?: (callback: () => void) => () => void;
   // 슬랙 웹훅
   sendSlackWebhook: (payload: Record<string, string>) => Promise<{ ok: boolean }>;

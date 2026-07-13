@@ -146,7 +146,9 @@ export interface ArcadeFinishResult extends ArcadeGameFinishResult {
   unlockedAchievements: ArcadeAchievementDefinition[];
 }
 
-export interface ArcadePreviewGateway {
-  read(): Promise<ArcadeSnapshot>;
-  execute(command: ArcadeExecuteCommand): Promise<ArcadeExecuteResult>;
+// arcade:wallet-updated push 페이로드 (main → renderer)
+export interface ArcadeWalletPush {
+  wallet: ArcadeWallet;
+  delta: number;
+  reason: string;
 }

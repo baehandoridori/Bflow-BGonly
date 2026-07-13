@@ -19,6 +19,8 @@ import { createPersonalTodoPreviewStore, PERSONAL_TODO_PREVIEW_SESSION_KEY, type
 import { createMarketLocalStorageGateway } from '@/features/playground/market/localStorageGateway';
 import type { MarketPreviewGateway } from '@/features/playground/market/previewGateway';
 import type { MarketRemoteState, MarketSnapshot } from '@/features/playground/market/types';
+import { createArcadeLocalStorageGateway } from '@/features/playground/arcade/localStorageGateway';
+import type { ArcadePreviewGateway } from '@/features/playground/arcade/previewGateway';
 
 type PreviewUser = AppUser & { password: string };
 
@@ -53,6 +55,8 @@ let previewRememberedUserId: string | null = null;
 let previewTodoStore: PersonalTodoPreviewStore | null = null;
 let previewMarketGateway: MarketPreviewGateway | null = null;
 let previewMarketUserId: string | null = null;
+let previewArcadeGateway: ArcadePreviewGateway | null = null;
+let previewArcadeUserId: string | null = null;
 const previewTodoCommitListeners = new Set<(payload: unknown) => void>();
 
 function getPreviewTodoStore(): PersonalTodoPreviewStore | null {
@@ -93,6 +97,24 @@ function getPreviewMarketGateway(): MarketPreviewGateway {
     });
   }
   return previewMarketGateway;
+}
+
+function getPreviewArcadeGateway(): ArcadePreviewGateway {
+  const user = previewCanonicalUserId
+    ? getMockUsers().find((candidate) => candidate.id === previewCanonicalUserId)
+    : null;
+  if (user?.name !== '배한솔' || user.slackId !== 'U05DFV9UAN5') {
+    throw new Error('배한솔 프리뷰 계정에서만 아케이드를 이용할 수 있어요.');
+  }
+  if (!previewArcadeGateway || previewArcadeUserId !== user.id) {
+    previewArcadeUserId = user.id;
+    previewArcadeGateway = createArcadeLocalStorageGateway({
+      userId: user.id,
+      storage: window.localStorage,
+      now: () => Date.now(),
+    });
+  }
+  return previewArcadeGateway;
 }
 
 function previewNoSession<T>(data: T): { ok: false; kind: 'rejected'; code: string; message: string; retryable: false } {
@@ -1126,6 +1148,11 @@ export function installDevElectronAPI(): void {
     marketDeleteAdminEvent: async (eventId) => toMarketRemoteState(
       await getPreviewMarketGateway().deleteAdminEvent(eventId),
     ),
+
+    // ─── Playground arcade mock (same user-scoped localStorage adapter) ───
+    arcadeRead: async () => getPreviewArcadeGateway().read(),
+    arcadeExecute: async (command) => getPreviewArcadeGateway().execute(command),
+    onArcadeWalletUpdated: noop,
     onPlaygroundNativeBack: noop,
 
     // ─── Personal Todos / Task Views mock ───
