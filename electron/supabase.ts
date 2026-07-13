@@ -713,7 +713,14 @@ export async function updateScenePhase(
   workRound: number,
   feedbackRound: number,
   updatedBy?: string,
-): Promise<void> {
+): Promise<{ previousState: string | null }> {
+  // 쓰기 전 이전 phase 를 읽어둔다 — 실제 완료 전이(≠ 이미 done 인 씬의 라운드 변경) 판별에 쓴다.
+  const { data: prevRow } = await supabase
+    .from('scenes')
+    .select('scene_state')
+    .eq('id', sceneUuid)
+    .maybeSingle();
+  const previousState = (prevRow as { scene_state?: string | null } | null)?.scene_state ?? null;
   const legacyFlags = (() => {
     switch (sceneState) {
       case 'wait':     return { lo: false, done: false, review: false, png: false };
@@ -737,6 +744,7 @@ export async function updateScenePhase(
   for (const [stage, value] of Object.entries(legacyFlags)) {
     broadcastSceneUpdate(sceneUuid, stage, value, updatedBy);
   }
+  return { previousState };
 }
 
 // ═══════════════════════════════════════════════

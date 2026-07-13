@@ -119,6 +119,8 @@ function getPreviewArcadeGateway(): ArcadePreviewGateway {
 }
 
 const previewDailyLoginAttempts = new Set<string>();
+// 프리뷰 세션 내 액팅 씬 phase 를 기억해, 실제 완료 전이일 때만 적립한다(프로덕션과 동일 게이팅).
+const previewScenePhaseByUuid = new Map<string, string>();
 
 // 프리뷰에는 main 프로세스가 없어 production 의 setCanonicalActivityUser → grantDailyLogin
 // 흐름이 없다. 배한솔 프리뷰 세션이 확립되면 여기서 출석 적립을 미러링해, 자동 출석이
@@ -173,7 +175,9 @@ function maybeAwardPreviewActivity(activity: PreviewActivityKind, refId: string,
     .execute({ kind: 'activity', activity, requestId })
     .then((result) => {
       // 'awarded' 키는 activity 결과에만 있어 union 을 ArcadeActivityResult 로 좁힌다.
-      if ('awarded' in result && result.awarded && result.points > 0) {
+      // replayed(같은 requestId 재생)는 지갑 절대값이 그대로이므로 push/연출을 생략한다
+      // — production ArcadeService.shouldApplyWallet 과 동일(프리뷰는 재시도 개념이 없음).
+      if ('awarded' in result && result.awarded && result.points > 0 && !result.replayed) {
         useArcadeStore.getState().applyWalletPush({ wallet: result.wallet, delta: result.points, reason: activity });
       }
     })
@@ -778,7 +782,12 @@ export function installDevElectronAPI(): void {
     // v1.25.0~ 액팅 단계 토글 + 리테이크 알림 (mock — 로그만)
     supabaseUpdateScenePhase: async (sceneUuid, sceneState, workRound, feedbackRound) => {
       console.log('[DEV] supabaseUpdateScenePhase:', { sceneUuid, sceneState, workRound, feedbackRound });
-      if (sceneState === 'done') maybeAwardPreviewActivity('scene-phase-done', sceneUuid);
+      // 실제 완료 전이(이전 상태 ≠ done)일 때만 적립 — 이미 done 인 씬의 라운드 변경은 제외.
+      const previousState = previewScenePhaseByUuid.get(sceneUuid) ?? null;
+      previewScenePhaseByUuid.set(sceneUuid, sceneState);
+      if (sceneState === 'done' && previousState !== 'done') {
+        maybeAwardPreviewActivity('scene-phase-done', sceneUuid);
+      }
     },
     supabaseDispatchFeedbackNotification: async (payload) => {
       console.log('[DEV] supabaseDispatchFeedbackNotification:', payload);

@@ -2017,15 +2017,16 @@ ipcMain.handle('supabase:update-scene-phase', wrapIpc(async (
   feedbackRound: number,
   updatedBy?: string,
 ) => {
-  await sbUpdateScenePhase(sceneUuid, sceneState, workRound, feedbackRound, updatedBy);
+  const { previousState } = await sbUpdateScenePhase(sceneUuid, sceneState, workRound, feedbackRound, updatedBy);
   await logSceneActivity({
     sceneUuid,
     actionType: `phase_${sceneState}` as ActionType,
     actionGroup: 'progress',
     detail: { sceneState, workRound, feedbackRound },
   });
-  // 액팅 씬을 '완료'로 넘기면 업무 활동 포인트 적립.
-  if (sceneState === 'done') {
+  // 실제 완료 전이(이전 상태가 done 이 아니었고 이제 done)일 때만 적립. 이미 done 인 씬의
+  // 라운드 변경은 완료가 아니므로 제외한다(기존에 done 이던 씬의 오적립 방지).
+  if (sceneState === 'done' && previousState !== 'done') {
     void arcadeService.awardActivity({ activity: 'scene-phase-done', refId: sceneUuid });
   }
 }));

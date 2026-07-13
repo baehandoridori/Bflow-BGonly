@@ -369,10 +369,10 @@ test('main wires the four activity accrual hooks with the correct conditions', (
     mainSource,
     /if \(value === true\) \{\s*void arcadeService\.awardActivity\(\{ activity: 'scene-stage', refId: sceneUuid, stage \}\);/,
   );
-  // 액팅 단계는 'done' 전이에서만 적립
+  // 액팅 단계는 실제 완료 전이(이전 상태 ≠ done)에서만 적립 — 이미 done 인 씬의 라운드 변경 제외
   assert.match(
     mainSource,
-    /if \(sceneState === 'done'\) \{\s*void arcadeService\.awardActivity\(\{ activity: 'scene-phase-done', refId: sceneUuid \}\);/,
+    /if \(sceneState === 'done' && previousState !== 'done'\) \{\s*void arcadeService\.awardActivity\(\{ activity: 'scene-phase-done', refId: sceneUuid \}\);/,
   );
   // 씬/파트 댓글 적립 (commentId 사용)
   assert.match(mainSource, /void arcadeService\.awardActivity\(\{ activity: 'comment', refId: commentId \}\);/);
