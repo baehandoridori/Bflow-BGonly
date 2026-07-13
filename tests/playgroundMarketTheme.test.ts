@@ -92,6 +92,7 @@ test('preview feature only reaches browser persistence through the injected stor
   const nativeBackAdapter = 'src/features/playground/nativeBackBridge.ts';
   const arcadeStorageAdapter = 'src/features/playground/arcade/localStorageGateway.ts';
   const arcadeBridgeAdapter = 'src/features/playground/arcade/gateway.ts';
+  const arcadeWalletBridge = 'src/features/playground/arcade/walletBridge.ts';
   const allowlist = new Set([
     storageAdapter,
     bridgeAdapter,
@@ -99,6 +100,7 @@ test('preview feature only reaches browser persistence through the injected stor
     nativeBackAdapter,
     arcadeStorageAdapter,
     arcadeBridgeAdapter,
+    arcadeWalletBridge,
   ]);
   for (const file of files.filter((file) => !allowlist.has(file))) {
     const source = readFileSync(file, 'utf8');
