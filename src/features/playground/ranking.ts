@@ -1,4 +1,9 @@
-interface RankingFixture { id: string; name: string; points: number }
+export interface RankingTeammate {
+  id: string;
+  name: string;
+  lifetimeEarnedPoints: number | null;
+}
+
 export interface PointRankingEntry {
   id: string;
   name: string;
@@ -15,64 +20,79 @@ export interface PointRankingModel {
   statusText: string;
 }
 
-const TEAMMATES: readonly RankingFixture[] = [
-  { id: 'minji', name: '민지', points: 4920 },
-  { id: 'doyoon', name: '도윤', points: 3860 },
-  { id: 'seoa', name: '서아', points: 2820 },
-  { id: 'yujin', name: '유진', points: 2115 },
-];
 const collator = new Intl.Collator('ko-KR');
 
-export function buildPointRanking(user: {
+interface RankingSeed {
   id: string;
   name: string;
-  walletPoints: number | null;
-  lifetimeEarnedPoints: number | null;
-}): PointRankingModel {
+  points: number | null;
+  isCurrentUser: boolean;
+}
+
+// 적립 포인트가 있는 사람은 포인트 내림차순(동점은 id 순), 아직 지갑이 없는 사람은
+// 최하단에 이름순으로 이어 붙인다. null 이 comparator 에 섞이면 NaN 정렬이 되므로 분리한다.
+function rankEntries(seeds: readonly RankingSeed[]): PointRankingEntry[] {
+  const scored = seeds
+    .filter((seed) => seed.points !== null)
+    .sort((left, right) => (right.points as number) - (left.points as number) || collator.compare(left.id, right.id));
+  const unscored = seeds
+    .filter((seed) => seed.points === null)
+    .sort((left, right) => collator.compare(left.name, right.name));
+  return [
+    ...scored.map((seed, index) => ({ ...seed, rank: index + 1 })),
+    ...unscored.map((seed) => ({ ...seed, rank: null })),
+  ];
+}
+
+export function buildPointRanking(
+  user: {
+    id: string;
+    name: string;
+    walletPoints: number | null;
+    lifetimeEarnedPoints: number | null;
+  },
+  teammates: readonly RankingTeammate[],
+): PointRankingModel {
   const balanceLabel = user.walletPoints === null
     ? '— P'
     : `${user.walletPoints.toLocaleString('ko-KR')} P`;
+
+  const entries = rankEntries([
+    ...teammates.map((teammate) => ({
+      id: teammate.id,
+      name: teammate.name,
+      points: teammate.lifetimeEarnedPoints,
+      isCurrentUser: false,
+    })),
+    { id: user.id, name: user.name, points: user.lifetimeEarnedPoints, isCurrentUser: true },
+  ]);
+  const current = entries.find((entry) => entry.isCurrentUser)!;
+
   if (user.lifetimeEarnedPoints === null) {
-    const teammates = TEAMMATES.map((entry, index) => ({
-      ...entry, rank: index + 1, isCurrentUser: false,
-    }));
-    const current: PointRankingEntry = {
-      id: user.id,
-      name: user.name,
-      points: null,
-      rank: null,
-      isCurrentUser: true,
-    };
     return {
-      status: 'unavailable', entries: [...teammates, current], current,
-      balanceLabel, rankLabel: '순위 계산 중', statusText: '순위 계산 중',
+      status: 'unavailable',
+      entries,
+      current,
+      balanceLabel,
+      rankLabel: '순위 계산 중',
+      statusText: '순위 계산 중',
     };
   }
 
-  const sorted = [
-    ...TEAMMATES.map((entry) => ({ ...entry, isCurrentUser: false })),
-    {
-      id: user.id,
-      name: user.name,
-      points: user.lifetimeEarnedPoints,
-      isCurrentUser: true,
-    },
-  ].sort((left, right) => (
-    right.points - left.points || collator.compare(left.id, right.id)
-  ));
-  const entries = sorted.map((entry, index) => ({ ...entry, rank: index + 1 }));
-  const current = entries.find((entry) => entry.isCurrentUser)!;
-  const previous = current.rank === 1 ? null : entries[current.rank - 2];
+  const currentRank = current.rank!;
+  const previous = currentRank === 1 ? null : entries[currentRank - 2];
   const tied = entries.some((entry) => !entry.isCurrentUser && entry.points === current.points);
-  const statusText = current.rank === 1
+  const statusText = currentRank === 1
     ? '현재 포인트 1위예요'
     : tied
       ? '동점이에요 · 이름순으로 표시 중'
-      : `앞 순위까지 ${(previous!.points! - current.points!).toLocaleString('ko-KR')}P 남았어요`;
+      : `앞 순위까지 ${((previous!.points as number) - (current.points as number)).toLocaleString('ko-KR')}P 남았어요`;
   return {
-    status: 'ready', entries, current,
+    status: 'ready',
+    entries,
+    current,
     balanceLabel,
-    rankLabel: `#${current.rank}`,
+    rankLabel: `#${currentRank}`,
     statusText,
   };
 }

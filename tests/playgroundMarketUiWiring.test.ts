@@ -9,21 +9,22 @@ test('playground market v3 release metadata stays aligned', () => {
   const packageLock = JSON.parse(readFileSync('package-lock.json', 'utf8'));
   const updateNotes = JSON.parse(readFileSync('DEVLOG/update-notes.json', 'utf8'));
 
-  assert.equal(packageJson.version, '1.83.0');
-  assert.equal(packageLock.version, '1.83.0');
-  assert.equal(packageLock.packages[''].version, '1.83.0');
+  assert.equal(packageJson.version, '1.84.0');
+  assert.equal(packageLock.version, '1.84.0');
+  assert.equal(packageLock.packages[''].version, '1.84.0');
   assert.equal(packageJson.dependencies['lightweight-charts'], '5.2.0');
   assert.equal(packageLock.packages[''].dependencies['lightweight-charts'], '5.2.0');
   assert.deepEqual(
     updateNotes.slice(0, 4).map((note: { version: string }) => note.version),
-    ['1.83.0', '1.82.0', '1.81.0', '1.80.0'],
+    ['1.84.0', '1.83.0', '1.82.0', '1.81.0'],
   );
 
-  // 최신 릴리스(1.83.0)는 캐릭터 현황판 드래그 피드백.
-  assert.equal(updateNotes[0].version, '1.83.0');
+  // 최신 릴리스(1.84.0)는 배플레이그라운드 아케이드 기반(포인트 배지·출석 적립).
+  assert.equal(updateNotes[0].version, '1.84.0');
 
-  // 모의투자 시장 v3 릴리스(1.82.0) 메타데이터는 그대로 유지돼야 한다(이제 두 번째 항목).
-  const marketNote = updateNotes[1];
+  // 모의투자 시장 v3 릴리스(1.82.0) 메타데이터는 그대로 유지돼야 한다.
+  const marketNote = updateNotes.find((note: { version: string }) => note.version === '1.82.0');
+  assert.ok(marketNote, '1.82.0 market release note must remain');
   assert.equal(marketNote.version, '1.82.0');
   assert.equal(marketNote.title, 'JBBJ 모의투자가 더 쉽고 실제 시장처럼 움직여요');
   const releaseCopy = marketNote.items
@@ -43,7 +44,7 @@ test('playground market v3 release metadata stays aligned', () => {
     assert.match(releaseCopy, new RegExp(phrase));
   }
 
-  assert.deepEqual(updateNotes[3], {
+  assert.deepEqual(updateNotes.find((note: { version: string }) => note.version === '1.80.0'), {
     version: '1.80.0',
     title: 'JBBJ 모의투자가 실제 시장처럼 움직여요',
     items: [

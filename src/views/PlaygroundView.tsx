@@ -8,7 +8,8 @@ import {
   type PlaygroundMarketRestoreRequest,
 } from '@/features/playground/history';
 import { advanceRecommendation, createRecommendationSession } from '@/features/playground/recommendation';
-import { buildPointRanking } from '@/features/playground/ranking';
+import { buildPointRanking, type RankingTeammate } from '@/features/playground/ranking';
+import { useArcadeStore } from '@/features/playground/arcade/useArcadeStore';
 import { subscribePlaygroundNativeBack } from '@/features/playground/nativeBackBridge';
 import {
   getPlaygroundRouteIdentity,
@@ -64,18 +65,32 @@ export default function PlaygroundView({ authorizedHansol }: PlaygroundViewProps
   const currentUser = useAuthStore((state) => state.currentUser);
   const currentUserId = currentUser?.id ?? null;
   const userScopeRef = useRef(currentUserId);
+  const users = useAuthStore((state) => state.users);
   const visible = useMarketPreviewStore((state) => state.visible);
   const loadMarket = useMarketPreviewStore((state) => state.load);
+  const arcadeSnapshot = useArcadeStore((state) => state.snapshot);
+  const loadArcade = useArcadeStore((state) => state.load);
   const userName = currentUser?.name.trim() || '팀원';
-  const walletPoints = visible?.account.walletPoints ?? null;
-  const lifetimeEarnedPoints = visible?.account.lifetimeEarnedPoints ?? null;
   const marketCashWon = visible?.account.cashWon ?? null;
+  const arcadeWalletPoints = arcadeSnapshot?.wallet.walletPoints ?? null;
+  const arcadeLifetimePoints = arcadeSnapshot?.wallet.lifetimeEarnedPoints ?? null;
+  const walletLeaderboard = arcadeSnapshot?.walletLeaderboard;
+  const teammates = useMemo<RankingTeammate[]>(() => {
+    const lifetimeById = new Map((walletLeaderboard ?? []).map((entry) => [entry.userId, entry.lifetimeEarnedPoints]));
+    return users
+      .filter((teammate) => teammate.id !== currentUserId)
+      .map((teammate) => ({
+        id: teammate.id,
+        name: teammate.name,
+        lifetimeEarnedPoints: lifetimeById.get(teammate.id) ?? null,
+      }));
+  }, [users, walletLeaderboard, currentUserId]);
   const ranking = useMemo(() => buildPointRanking({
     id: currentUser?.id ?? 'preview-user',
     name: userName,
-    walletPoints,
-    lifetimeEarnedPoints,
-  }), [currentUser?.id, lifetimeEarnedPoints, userName, walletPoints]);
+    walletPoints: arcadeWalletPoints,
+    lifetimeEarnedPoints: arcadeLifetimePoints,
+  }, teammates), [currentUser?.id, arcadeLifetimePoints, userName, arcadeWalletPoints, teammates]);
 
   const captureMarketSurface = (targetRoute: PlaygroundRoute) => {
     const selector = marketScrollSelector(targetRoute);
@@ -146,6 +161,11 @@ export default function PlaygroundView({ authorizedHansol }: PlaygroundViewProps
     if (!currentUser?.id) return;
     void loadMarket(currentUser.id);
   }, [currentUser?.id, loadMarket]);
+
+  useEffect(() => {
+    if (!currentUser?.id) return;
+    void loadArcade(currentUser.id);
+  }, [currentUser?.id, loadArcade]);
 
   useEffect(() => {
     if (userScopeRef.current === currentUserId) return;

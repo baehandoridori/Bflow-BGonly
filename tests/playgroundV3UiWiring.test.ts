@@ -268,8 +268,9 @@ test('PlaygroundView wires the approved lobby through the store-aware root only'
   assert.match(source, /useState\(createRecommendationSession\)/);
   assert.match(source, /advanceRecommendation/);
   assert.match(source, /buildPointRanking/);
-  assert.match(source, /visible\?\.account\.walletPoints \?\? null/);
-  assert.match(source, /visible\?\.account\.lifetimeEarnedPoints \?\? null/);
+  assert.match(source, /useArcadeStore/);
+  assert.match(source, /arcadeSnapshot\?\.wallet\.walletPoints \?\? null/);
+  assert.match(source, /arcadeSnapshot\?\.wallet\.lifetimeEarnedPoints \?\? null/);
   assert.match(source, /visible\?\.account\.cashWon \?\? null/);
   assert.match(source, /route\.kind === 'lobby' && \(\s*<PlaygroundShell/);
   assert.match(source, /<PlaygroundLobby/);

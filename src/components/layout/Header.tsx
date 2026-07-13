@@ -4,6 +4,7 @@ import { useDataStore } from '@/stores/useDataStore';
 import { cn } from '@/utils/cn';
 import { UserMenu } from '@/components/auth/UserMenu';
 import { NotificationBell } from '@/components/NotificationPanel';
+import { HeaderPointsBadge } from './HeaderPointsBadge';
 import { resolveHeaderTitle } from './headerTitle';
 
 interface HeaderProps {
@@ -105,6 +106,9 @@ export function Header({ activeView, onRefresh }: HeaderProps) {
 
         {/* 알림 벨 */}
         <NotificationBell />
+
+        {/* 보유 포인트 배지 (배플레이그라운드 접근 권한자만) */}
+        <HeaderPointsBadge />
 
         {/* 구분선 */}
         <div className="w-px h-6 bg-bg-border" />
