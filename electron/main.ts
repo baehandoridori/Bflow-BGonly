@@ -2540,7 +2540,7 @@ ipcMain.handle('supabase:update-revision', wrapIpc(async (_e: unknown, id: strin
   // 별도 확인하는 비대칭은 삭제의 감사 귀속(Codex #8) 목적이며 실수가 아니다.
   // 리테이크 허브 2단계: __op 는 활동기록 분기 전용 신호 — DB 로는 보내지 않는다(fieldMap 미등록이라 분리).
   const { __op, ...dbUpdates } = updates;
-  await sbUpdateRevision(id, dbUpdates);
+  const { affected: revisionAffected } = await sbUpdateRevision(id, dbUpdates);
   // status 전이/담당 워크플로우 활동 기록. 한솔 결정 (2026-05-02): 진행중도 audit.
   // 우선순위: 최종완료 > 재배정(동반 status 전이보다 우선, 한솔 §7.3 '재배정 포함') > 담당완료 > 진행중 > 해결.
   // 주의: finalResolvedAt 이 빈 문자열('')이면(최종완료 되돌리기) truthy 아님 → 분기 제외(의도된 조용한 스킵).
@@ -2555,8 +2555,8 @@ ipcMain.handle('supabase:update-revision', wrapIpc(async (_e: unknown, id: strin
   else if (dbUpdates.status === 'in_progress') statusActionType = 'revision_in_progress';
   else if (dbUpdates.status === 'resolved') statusActionType = 'revision_resolve';
   else if (dbUpdates.assigneeIds) statusActionType = 'revision_reassign';
-  // 리테이크 '담당 완료'로 전이될 때만 업무 활동 포인트 적립(재배정·해결·진행중은 제외).
-  if (statusActionType === 'revision_assignee_done') {
+  // 실제 리비전 행이 '담당 완료'로 전이될 때만 업무 활동 포인트 적립(삭제된/없는 리비전·재배정·해결·진행중 제외).
+  if (revisionAffected && statusActionType === 'revision_assignee_done') {
     void arcadeService.awardActivity({ activity: 'retake-done', refId: id });
   }
   if (currentActivityUser && statusActionType) {

@@ -2056,7 +2056,7 @@ export async function addRevision(
 export async function updateRevision(
   id: string,
   updates: Record<string, string>,
-): Promise<void> {
+): Promise<{ affected: boolean }> {
   const dbUpdates: Record<string, unknown> = { updated_at: new Date().toISOString() };
   const fieldMap: Record<string, string> = {
     status: 'status', priority: 'priority', description: 'description',
@@ -2084,9 +2084,11 @@ export async function updateRevision(
       dbUpdates[col] = v;
     }
   }
-  const { error } = await supabase.from('comp_revisions').update(dbUpdates).eq('id', id);
+  // 실제 바뀐 행을 결과로 받아 affected 를 판정한다 — 삭제된 리비전에 대한 오적립(retake-done)을 막기 위함.
+  const { data: rows, error } = await supabase.from('comp_revisions').update(dbUpdates).eq('id', id).select('id');
   throwIfError(error);
   broadcastDataChange('comp_revisions', 'UPDATE');
+  return { affected: Array.isArray(rows) && rows.length > 0 };
 }
 
 function mapRevision(r: Record<string, unknown>): SupabaseRevision & { sceneKey: string; notifyUserIds: string[] } {

@@ -382,10 +382,10 @@ test('main wires the four activity accrual hooks with the correct conditions', (
     commentAwardIdx > 0 && characterReturnIdx > 0 && commentAwardIdx < characterReturnIdx,
     '댓글 적립은 캐릭터 early-return 앞에서 호출돼야 캐릭터 보드 댓글도 적립된다',
   );
-  // 리테이크 담당 완료 전이에서만 적립 (revisionId 사용)
+  // 실제 리비전 행이 담당 완료로 전이될 때만 적립 (revisionId 사용, 삭제된 리비전 제외)
   assert.match(
     mainSource,
-    /if \(statusActionType === 'revision_assignee_done'\) \{\s*void arcadeService\.awardActivity\(\{ activity: 'retake-done', refId: id \}\);/,
+    /if \(revisionAffected && statusActionType === 'revision_assignee_done'\) \{\s*void arcadeService\.awardActivity\(\{ activity: 'retake-done', refId: id \}\);/,
   );
 });
 
