@@ -47,6 +47,8 @@ export function fingerprintArcadeCommand(command: ArcadeExecuteCommand): string 
 export interface ArcadePreviewApplyContext {
   now: number;
   userId: string;
+  // 서버 RPC 와 동일하게, game-finish 는 선행 game-start(game-entry:<runId>)가 있어야 한다.
+  hasStartedRun(runId: string): boolean;
 }
 
 export interface ArcadePreviewApplyResult {
@@ -126,6 +128,9 @@ export function applyArcadePreviewCommand(
     }
 
     case 'game-finish': {
+      if (!ctx.hasStartedRun(command.runId)) {
+        throw new Error('시작되지 않은 게임은 기록할 수 없어요');
+      }
       const stats = next.games[command.gameId];
       const grade = gradeForScore(command.gameId, command.score);
       const rewardCapped = stats.todayRewardedRuns >= ARCADE_BALANCE.dailyRewardedRunsCap;
@@ -243,7 +248,11 @@ export function createArcadePreviewGateway(
         }
         return { ...(responseByRequestId.get(command.requestId) ?? {}), replayed: true } as ArcadeExecuteResult;
       }
-      const applied = applyArcadePreviewCommand(snapshot, command, { now: now(), userId });
+      const applied = applyArcadePreviewCommand(snapshot, command, {
+        now: now(),
+        userId,
+        hasStartedRun: (runId) => fingerprintByRequestId.has(`game-entry:${runId}`),
+      });
       snapshot = applied.snapshot;
       if (applied.persistKey) {
         fingerprintByRequestId.set(command.requestId, fingerprint);

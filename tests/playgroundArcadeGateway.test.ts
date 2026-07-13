@@ -116,8 +116,17 @@ test('game-start rejects when the wallet cannot cover the entry fee', async () =
   );
 });
 
+test('game-finish rejects a run that was never started', async () => {
+  const gw = gateway(seededStorage());
+  await assert.rejects(
+    gw.execute({ kind: 'game-finish', requestId: 'game-finish:ghost', runId: 'ghost', gameId: 'snake', score: 40, durationMs: 60_000, meta: {} }),
+    /시작되지 않은 게임/,
+  );
+});
+
 test('game-finish grades the score, pays the reward, and flags an all-time best', async () => {
   const gw = gateway(seededStorage());
+  await gw.execute({ kind: 'game-start', requestId: 'game-entry:run-2', runId: 'run-2', gameId: 'snake' });
   const result = (await gw.execute({
     kind: 'game-finish',
     requestId: 'game-finish:run-2',
@@ -139,7 +148,9 @@ test('game-finish caps the reward after the daily rewarded-run limit', async () 
   const storage = seededStorage((snapshot) => {
     snapshot.games.snake.todayRewardedRuns = 5;
   });
-  const result = (await gateway(storage).execute({
+  const gw = gateway(storage);
+  await gw.execute({ kind: 'game-start', requestId: 'game-entry:run-3', runId: 'run-3', gameId: 'snake' });
+  const result = (await gw.execute({
     kind: 'game-finish',
     requestId: 'game-finish:run-3',
     runId: 'run-3',
