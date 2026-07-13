@@ -9,20 +9,24 @@ test('playground market v3 release metadata stays aligned', () => {
   const packageLock = JSON.parse(readFileSync('package-lock.json', 'utf8'));
   const updateNotes = JSON.parse(readFileSync('DEVLOG/update-notes.json', 'utf8'));
 
-  assert.equal(packageJson.version, '1.82.0');
-  assert.equal(packageLock.version, '1.82.0');
-  assert.equal(packageLock.packages[''].version, '1.82.0');
+  assert.equal(packageJson.version, '1.83.0');
+  assert.equal(packageLock.version, '1.83.0');
+  assert.equal(packageLock.packages[''].version, '1.83.0');
   assert.equal(packageJson.dependencies['lightweight-charts'], '5.2.0');
   assert.equal(packageLock.packages[''].dependencies['lightweight-charts'], '5.2.0');
   assert.deepEqual(
     updateNotes.slice(0, 4).map((note: { version: string }) => note.version),
-    ['1.82.0', '1.81.0', '1.80.0', '1.79.0'],
+    ['1.83.0', '1.82.0', '1.81.0', '1.80.0'],
   );
 
-  const latestNote = updateNotes[0];
-  assert.equal(latestNote.version, '1.82.0');
-  assert.equal(latestNote.title, 'JBBJ 모의투자가 더 쉽고 실제 시장처럼 움직여요');
-  const releaseCopy = latestNote.items
+  // 최신 릴리스(1.83.0)는 캐릭터 현황판 드래그 피드백.
+  assert.equal(updateNotes[0].version, '1.83.0');
+
+  // 모의투자 시장 v3 릴리스(1.82.0) 메타데이터는 그대로 유지돼야 한다(이제 두 번째 항목).
+  const marketNote = updateNotes[1];
+  assert.equal(marketNote.version, '1.82.0');
+  assert.equal(marketNote.title, 'JBBJ 모의투자가 더 쉽고 실제 시장처럼 움직여요');
+  const releaseCopy = marketNote.items
     .flatMap((item: { summary: string; description: string }) => [item.summary, item.description])
     .join('\n');
   for (const phrase of [
@@ -39,7 +43,7 @@ test('playground market v3 release metadata stays aligned', () => {
     assert.match(releaseCopy, new RegExp(phrase));
   }
 
-  assert.deepEqual(updateNotes[2], {
+  assert.deepEqual(updateNotes[3], {
     version: '1.80.0',
     title: 'JBBJ 모의투자가 실제 시장처럼 움직여요',
     items: [

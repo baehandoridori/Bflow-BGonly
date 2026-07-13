@@ -13,7 +13,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react';
 import { Archive, Plus, Image as ImageIcon, Search, Ruler } from 'lucide-react';
 import { useCharacterBoardStore } from '@/stores/useCharacterBoardStore';
-import { moveCostumeInOrder } from '@/stores/characterBoardStoreHelpers';
+import { moveCostumeInOrder, dropEdgeFor } from '@/stores/characterBoardStoreHelpers';
 import { useAppStore } from '@/stores/useAppStore';
 import { cn } from '@/utils/cn';
 import { EpisodeAssetBoard } from './EpisodeAssetBoard';
@@ -108,6 +108,9 @@ function CharacterGrid({ onAdd, pendingOpenId, onConsumeOpen }: { onAdd: () => v
       return ha - hb;
     });
   }, [filtered, heightCompareMode]);
+
+  // 삽입선 방향 계산용 순서(id 배열). 드래그 가능 화면에선 필터가 없어 displayCharacters 가 실제 재배치 순서와 상대 순서가 같다.
+  const cardOrderIds = useMemo(() => displayCharacters.map((c) => c.id), [displayCharacters]);
 
   const cardMenuCharacter = cardMenu ? characters.find((c) => c.id === cardMenu.characterId) ?? null : null;
   const cardMenuCostumes = cardMenuCharacter ? byCharacter.get(cardMenuCharacter.id) ?? [] : [];
@@ -291,6 +294,7 @@ function CharacterGrid({ onAdd, pendingOpenId, onConsumeOpen }: { onAdd: () => v
               onDragEndCard={cardDragEnabled ? handleCardDragEnd : undefined}
               dragging={draggingCardId === c.id}
               dropTarget={dropTargetId === c.id && draggingCardId !== c.id}
+              dropEdge={cardDragEnabled && dropTargetId === c.id ? dropEdgeFor(cardOrderIds, draggingCardId, c.id) : null}
             />
           ))}
         </div>

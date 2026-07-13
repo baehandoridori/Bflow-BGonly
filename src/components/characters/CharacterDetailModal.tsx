@@ -2,7 +2,8 @@ import { memo, useCallback, useEffect, useMemo, useRef, useState, type MouseEven
 import { toast } from 'sonner';
 import { Archive, Film, Plus, X, Image as ImageIcon, Trash2, Pencil, Search, User, MessageSquare, RotateCcw, GripVertical } from 'lucide-react';
 import { useCharacterBoardStore } from '@/stores/useCharacterBoardStore';
-import { moveCostumeInOrder } from '@/stores/characterBoardStoreHelpers';
+import { moveCostumeInOrder, dropEdgeFor } from '@/stores/characterBoardStoreHelpers';
+import { applyDragGhost } from '@/utils/dragGhost';
 import { useDataStore } from '@/stores/useDataStore';
 import { useModalFocus } from '@/hooks/useModalFocus';
 import type { Character, CharacterCostume, CharacterImageFit } from '@/types';
@@ -87,20 +88,25 @@ const CostumeThumbCard = memo(function CostumeThumbCard({
   costume,
   selected,
   dragging,
+  dropEdge,
   onSelect,
   onDelete,
   onImageContextMenu,
   onDragStartCostume,
+  onDragOverCostume,
   onDropCostume,
   onDragEndCostume,
 }: {
   costume: CharacterCostume;
   selected: boolean;
   dragging: boolean;
+  /** 드래그 중 이 복장의 어느 쪽에 삽입선을 그릴지 — 대상이 아니면 null. */
+  dropEdge: 'before' | 'after' | null;
   onSelect: (costumeId: string) => void;
   onDelete: (costumeId: string) => void | Promise<void>;
   onImageContextMenu: (costumeId: string, event: ReactMouseEvent<HTMLDivElement>) => void;
   onDragStartCostume: (costumeId: string) => void;
+  onDragOverCostume: (costumeId: string) => void;
   onDropCostume: (costumeId: string) => void;
   onDragEndCostume: () => void;
 }) {
@@ -109,8 +115,12 @@ const CostumeThumbCard = memo(function CostumeThumbCard({
       role="button"
       tabIndex={0}
       draggable
-      onDragStart={(e) => { e.dataTransfer.effectAllowed = 'move'; onDragStartCostume(costume.id); }}
-      onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; }}
+      onDragStart={(e) => {
+        e.dataTransfer.effectAllowed = 'move';
+        applyDragGhost(e.dataTransfer, { label: costume.name, imageUrl: costume.featuredImageUrl });
+        onDragStartCostume(costume.id);
+      }}
+      onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; onDragOverCostume(costume.id); }}
       onDrop={(e) => { e.preventDefault(); onDropCostume(costume.id); }}
       onDragEnd={onDragEndCostume}
       onClick={() => onSelect(costume.id)}
@@ -118,18 +128,30 @@ const CostumeThumbCard = memo(function CostumeThumbCard({
       aria-pressed={selected}
       title="드래그해서 순서 바꾸기"
       className={cn(
-        'group relative w-[104px] shrink-0 flex flex-col rounded-lg overflow-hidden border transition-colors cursor-pointer',
+        'group relative w-[104px] shrink-0 flex flex-col rounded-lg border cursor-pointer',
+        'transition-[transform,opacity,border-color] duration-150 ease-out motion-reduce:transition-none',
         selected ? 'border-accent ring-1 ring-accent/40' : 'border-bg-border hover:border-text-secondary/50',
-        dragging && 'opacity-40',
+        // 드래그 중 소스는 살짝 작아지며 흐려져 "칩으로 들려 나갔다"는 느낌을 준다.
+        dragging ? 'opacity-30 scale-[0.96] motion-reduce:scale-100' : 'scale-100',
       )}
     >
+      {dropEdge && (
+        <span
+          aria-hidden="true"
+          className={cn(
+            'pointer-events-none absolute top-0.5 bottom-0.5 z-[3] w-[3px] rounded-full bg-accent',
+            'shadow-[0_0_8px_1px_rgb(var(--color-accent)/0.7)] animate-pulse motion-reduce:animate-none',
+            dropEdge === 'before' ? '-left-[7px]' : '-right-[7px]',
+          )}
+        />
+      )}
       <div
         aria-hidden="true"
         className="pointer-events-none absolute left-1 top-1 z-[1] rounded bg-black/40 p-0.5 text-white/80 opacity-0 transition-opacity group-hover:opacity-100"
       >
         <GripVertical size={12} />
       </div>
-      <div className="aspect-[3/4] w-full bg-bg-border/30 flex items-center justify-center overflow-hidden">
+      <div className="aspect-[3/4] w-full bg-bg-border/30 flex items-center justify-center overflow-hidden rounded-t-lg">
         {costume.featuredImageUrl ? (
           <CharacterImageFrame
             url={costume.featuredImageUrl}
@@ -147,7 +169,7 @@ const CostumeThumbCard = memo(function CostumeThumbCard({
           <ImageIcon size={18} className="text-text-secondary/40" />
         )}
       </div>
-      <div className="flex items-center justify-between gap-1 px-2 py-1.5 bg-bg-card">
+      <div className="flex items-center justify-between gap-1 px-2 py-1.5 bg-bg-card rounded-b-lg">
         <span className={cn('text-xs truncate', selected ? 'text-text-primary' : 'text-text-secondary')}>{costume.name}</span>
         <span className="text-[11px] text-text-secondary shrink-0">v{costume.versionNo}</span>
       </div>
@@ -336,24 +358,34 @@ function CharacterDetailPanel({
 
   // B10: 복장 드래그 재배치 — 콜백을 안정 참조로(memo 유지), 최신 순서는 store 에서 재조회.
   const [draggingCostumeId, setDraggingCostumeId] = useState<string | null>(null);
+  const [dropTargetCostumeId, setDropTargetCostumeId] = useState<string | null>(null);
   const draggingCostumeIdRef = useRef<string | null>(null);
   const handleCostumeDragStart = useCallback((costumeId: string) => {
     draggingCostumeIdRef.current = costumeId;
     setDraggingCostumeId(costumeId);
   }, []);
+  const handleCostumeDragOver = useCallback((costumeId: string) => {
+    // 드롭 대상만 기록 — 삽입선 방향은 렌더 시 현재 순서로 계산한다(dropEdgeFor).
+    setDropTargetCostumeId((prev) => (prev === costumeId ? prev : costumeId));
+  }, []);
   const handleCostumeDragEnd = useCallback(() => {
     draggingCostumeIdRef.current = null;
     setDraggingCostumeId(null);
+    setDropTargetCostumeId(null);
   }, []);
   const handleCostumeDrop = useCallback((targetId: string) => {
     const dragId = draggingCostumeIdRef.current;
     draggingCostumeIdRef.current = null;
     setDraggingCostumeId(null);
+    setDropTargetCostumeId(null);
     if (!dragId || dragId === targetId) return;
     const currentIds = (useCharacterBoardStore.getState().byCharacter.get(character.id) ?? []).map((c) => c.id);
     // 드래그 방향에 따라 대상 앞/뒤로 삽입 — 바로 다음 항목 드롭이 no-op 되지 않게.
     void reorderCostumes(character.id, moveCostumeInOrder(currentIds, dragId, targetId));
   }, [character.id, reorderCostumes]);
+
+  // 삽입선 표시용 — 현재 복장 순서(id 배열). 드롭 대상 카드에만 방향성 바를 그린다.
+  const costumeOrderIds = useMemo(() => costumes.map((c) => c.id), [costumes]);
 
   const handleArchiveCharacter = async () => {
     const ok = await ConfirmDialog.show({
@@ -532,17 +564,20 @@ function CharacterDetailPanel({
             {/* 복장 갤러리 */}
             <div className="flex flex-col gap-2">
               <div className="text-xs text-text-secondary">복장</div>
-              <div ref={galleryRef} className="flex items-stretch gap-2.5 overflow-x-auto pb-1">
+              {/* px-2: 첫 썸네일의 '앞(before)' 삽입선(-left-[7px])이 overflow-x-auto 스크롤 원점 왼쪽으로 잘리지 않도록 좌우 여백 확보. */}
+              <div ref={galleryRef} className="flex items-stretch gap-2.5 overflow-x-auto px-2 pb-1">
                 {costumes.map((c) => (
                   <CostumeThumbCard
                     key={c.id}
                     costume={c}
                     selected={activeCostumeId === c.id}
                     dragging={draggingCostumeId === c.id}
+                    dropEdge={dropTargetCostumeId === c.id ? dropEdgeFor(costumeOrderIds, draggingCostumeId, c.id) : null}
                     onSelect={setActiveCostumeId}
                     onDelete={deleteCostume}
                     onImageContextMenu={openCostumeImageMenu}
                     onDragStartCostume={handleCostumeDragStart}
+                    onDragOverCostume={handleCostumeDragOver}
                     onDropCostume={handleCostumeDrop}
                     onDragEndCostume={handleCostumeDragEnd}
                   />
