@@ -80,6 +80,9 @@ export function createArcadeStore(
     useMarketPreviewStore.getState().applyServerWallet(wallet),
 ): UseBoundStore<StoreApi<ArcadeState>> {
   let generation = 0;
+  // 이미 로컬 스냅샷에 반영한 runId. 재생 응답이 왔을 때 "진짜 중복 제출"과
+  // "main 재시도로 응답만 유실된 첫 반영"을 구분한다.
+  const appliedRuns = new Set<string>();
 
   function syncWallet(wallet: ArcadeWallet | undefined): void {
     if (wallet) syncMarketWallet(wallet);
@@ -154,6 +157,7 @@ export function createArcadeStore(
       async load(requestedSessionKey = DEFAULT_SESSION_KEY) {
         const gen = ++generation;
         const sessionChanged = get().sessionKey !== requestedSessionKey;
+        if (sessionChanged) appliedRuns.clear();
         set({
           loading: true,
           error: null,
@@ -218,16 +222,18 @@ export function createArcadeStore(
             durationMs: input.durationMs,
             meta: input.meta,
           })) as ArcadeGameFinishResult;
-          if (result.replayed) {
-            // 서버가 이미 기록한 판의 재생(재시도·중복 제출) — 로컬 집계·도전과제를
-            // 다시 적용하면 판수/보상이 부풀려지므로, 지갑 절대값만 반영하고 종료한다.
+          if (result.replayed && appliedRuns.has(input.runId)) {
+            // 이미 로컬에 반영한 판의 재생(중복 제출) — 재적용하면 판수/보상이 부풀려지므로
+            // 지갑 절대값만 동기화하고 종료한다.
             set({ mutating: false });
             syncWallet(result.wallet);
             return { ...result, unlockedAchievements: [] };
           }
+          // 신규이거나, main 재시도로 응답만 유실돼 아직 로컬 미반영인 재생 → 적용한다.
           // 도전과제 평가 입력용으로 갱신 "전" aggregates 를 캡처한다(이번 런 미포함).
           const prevAggregates = { ...before.aggregates };
           set({ snapshot: applyFinishToSnapshot(before, input, result), mutating: false });
+          appliedRuns.add(input.runId);
           syncWallet(result.wallet);
           const unlockedAchievements = await evaluateAndUnlock({
             gameId: input.gameId,

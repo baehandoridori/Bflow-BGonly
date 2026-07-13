@@ -100,29 +100,57 @@ test('finishRun unlocks each newly earned achievement exactly once', async () =>
   assert.deepEqual(result?.unlockedAchievements.map((a) => a.id), ['arcade-first-run', 'snake-30', 'snake-55']);
 });
 
-test('finishRun does not re-apply a replayed finish', async () => {
+function finishResult(overrides: Partial<ArcadeExecuteResult> = {}): ArcadeExecuteResult {
+  return {
+    grade: 'platinum', rewardPoints: 45, rewardCapped: false,
+    newAlltimeBest: true, newWeeklyBest: true, prevBestScore: null,
+    myBestScore: 55, todayRewardedRuns: 1,
+    wallet: { walletPoints: 2000, lifetimeEarnedPoints: 6000 }, slackNotifyEnabled: false,
+    ...overrides,
+  };
+}
+
+test('finishRun applies a replayed finish that is not yet reflected locally (main retry)', async () => {
+  // main 이 재시도로 커밋됐지만 응답만 유실 → 첫 finishRun 이 replayed 를 받는다. 로컬 미반영이므로 적용해야 한다.
   const gateway = createMockGateway({
     execute: async (command) => {
-      if (command.kind === 'game-finish') {
-        return {
-          grade: 'platinum', rewardPoints: 45, rewardCapped: false,
-          newAlltimeBest: true, newWeeklyBest: true, prevBestScore: null,
-          myBestScore: 55, todayRewardedRuns: 1,
-          wallet: { walletPoints: 2000, lifetimeEarnedPoints: 6000 }, slackNotifyEnabled: false,
-          replayed: true,
-        };
-      }
+      if (command.kind === 'game-finish') return finishResult({ replayed: true });
+      if (command.kind === 'achievement-unlock') return { achievementId: command.achievementId, rewardPoints: 10, wallet: { walletPoints: 2010, lifetimeEarnedPoints: 6010 } };
       return { wallet: { walletPoints: 0, lifetimeEarnedPoints: 0 } } as ArcadeExecuteResult;
     },
   });
   const store = createArcadeStore(gateway, noopSync);
   await store.getState().load('user-1');
   const runsBefore = store.getState().snapshot?.aggregates.totalRuns ?? 0;
-  const result = await store.getState().finishRun({ runId: 'r-replay', gameId: 'snake', score: 55, durationMs: 60_000, meta: {} });
-  assert.deepEqual(result?.unlockedAchievements, []);
-  // 재생은 로컬 판수·집계를 늘리지 않고, 도전과제 해금도 호출하지 않는다.
-  assert.equal(store.getState().snapshot?.aggregates.totalRuns, runsBefore);
-  assert.ok(!gateway.executed.some((command) => command.kind === 'achievement-unlock'));
+  const result = await store.getState().finishRun({ runId: 'r-lost', gameId: 'snake', score: 55, durationMs: 60_000, meta: {} });
+  assert.equal(store.getState().snapshot?.aggregates.totalRuns, runsBefore + 1);
+  assert.ok((result?.unlockedAchievements.length ?? 0) > 0, '아직 미반영 판이므로 도전과제 평가·해금을 수행');
+});
+
+test('finishRun does not double-apply a genuine duplicate finish', async () => {
+  // 같은 runId 로 두 번 finish — 첫 번째는 신규 적용, 두 번째(replayed)는 이미 반영됐으므로 재적용 안 함.
+  let firstFinish = true;
+  const gateway = createMockGateway({
+    execute: async (command) => {
+      if (command.kind === 'game-finish') {
+        const result = firstFinish ? finishResult() : finishResult({ replayed: true });
+        firstFinish = false;
+        return result;
+      }
+      if (command.kind === 'achievement-unlock') return { achievementId: command.achievementId, rewardPoints: 10, wallet: { walletPoints: 2010, lifetimeEarnedPoints: 6010 } };
+      return { wallet: { walletPoints: 0, lifetimeEarnedPoints: 0 } } as ArcadeExecuteResult;
+    },
+  });
+  const store = createArcadeStore(gateway, noopSync);
+  await store.getState().load('user-1');
+  const runsBefore = store.getState().snapshot?.aggregates.totalRuns ?? 0;
+  await store.getState().finishRun({ runId: 'r-dup', gameId: 'snake', score: 55, durationMs: 60_000, meta: {} });
+  const afterFirst = store.getState().snapshot?.aggregates.totalRuns ?? 0;
+  const replay = await store.getState().finishRun({ runId: 'r-dup', gameId: 'snake', score: 55, durationMs: 60_000, meta: {} });
+  const afterSecond = store.getState().snapshot?.aggregates.totalRuns ?? 0;
+  assert.equal(afterFirst, runsBefore + 1);
+  assert.equal(afterSecond, afterFirst, '두 번째(재생)는 재적용하지 않는다');
+  assert.deepEqual(replay?.unlockedAchievements, []);
 });
 
 test('applyWalletPush updates the arcade snapshot and syncs the market wallet', async () => {
