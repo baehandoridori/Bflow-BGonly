@@ -26,7 +26,9 @@ test('the header badge gates on playground access and enters the playground on c
   assert.match(badgeSource, /canAccessPlayground\(currentUser\)/);
   assert.match(badgeSource, /if \(!canAccess\) return null;/);
   assert.match(badgeSource, /setView\('playground'\)/);
-  assert.match(badgeSource, /'— P'/);
+  // 잔액이 null 일 때만 '— P' 로 대체(formatHeaderPoints 내부). mutation 오류로 캐시 잔액을 숨기지 않는다.
+  assert.match(badgeSource, /formatHeaderPoints\(walletPoints\)/);
+  assert.doesNotMatch(badgeSource, /loading \|\| error/);
   assert.match(badgeSource, /tabular-nums/);
   assert.match(badgeSource, /aria-label=/);
   // 획득 연출(펄스/플로팅)은 PR B 이므로 아직 framer-motion 을 끌어오지 않는다.

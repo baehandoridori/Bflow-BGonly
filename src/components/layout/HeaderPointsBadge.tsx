@@ -13,8 +13,6 @@ import { formatHeaderPoints } from './headerPointsFormat';
 export function HeaderPointsBadge() {
   const currentUser = useAuthStore((state) => state.currentUser);
   const walletPoints = useArcadeStore((state) => state.snapshot?.wallet.walletPoints ?? null);
-  const loading = useArcadeStore((state) => state.loading);
-  const error = useArcadeStore((state) => state.error);
   const load = useArcadeStore((state) => state.load);
   const canAccess = canAccessPlayground(currentUser);
   const userId = currentUser?.id ?? null;
@@ -27,7 +25,9 @@ export function HeaderPointsBadge() {
 
   if (!canAccess) return null;
 
-  const label = loading || error ? '— P' : formatHeaderPoints(walletPoints);
+  // 캐시된 잔액이 있으면 이후 mutation 오류·재로딩과 무관하게 계속 보여준다.
+  // 잔액이 아직 없을 때만(최초 로딩·로드 실패) formatHeaderPoints 가 '— P' 로 대체한다.
+  const label = formatHeaderPoints(walletPoints);
 
   return (
     <button
