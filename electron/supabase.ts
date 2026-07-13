@@ -685,24 +685,24 @@ export async function updateSceneStage(
   value: boolean,
   updatedBy?: string,
 ): Promise<{ affected: boolean; department: string | null }> {
-  // 쓰기 전 실제 행 존재 + 소속 부서를 확인한다. 삭제된/없는 씬 UUID 오적립을 막고(affected=false),
-  // ACT 씬의 레거시 단계 토글은 phase 동기화의 미러이므로 stage 적립에서 제외하기 위함(department).
-  const { data: sceneRow } = await supabase
-    .from('scenes')
-    .select('id, parts(department)')
-    .eq('id', sceneUuid)
-    .maybeSingle();
-  const affected = !!sceneRow;
-  const partsField = (sceneRow as { parts?: unknown } | null)?.parts;
-  const part = Array.isArray(partsField) ? partsField[0] : partsField;
-  const department = (part as { department?: string | null } | null | undefined)?.department ?? null;
   const update: Record<string, unknown> = {
     [stage]: value,
     updated_at: new Date().toISOString(),
   };
   if (updatedBy) update.updated_by = updatedBy;
-  const { error } = await supabase.from('scenes').update(update).eq('id', sceneUuid);
+  // 실제 바뀐 행을 결과로 돌려받아 affected/department 를 도출한다(별도 pre-read 의 TOCTOU 회피 —
+  // 읽은 뒤 삭제된 씬은 0행 update 로 잡힌다). 부서는 ACT 씬의 레거시 단계 미러를 stage 적립에서 제외하는 데 쓴다.
+  const { data: rows, error } = await supabase
+    .from('scenes')
+    .update(update)
+    .eq('id', sceneUuid)
+    .select('id, parts(department)');
   throwIfError(error);
+  const updatedRow = Array.isArray(rows) ? rows[0] : null;
+  const affected = !!updatedRow;
+  const partsField = (updatedRow as { parts?: unknown } | null)?.parts;
+  const part = Array.isArray(partsField) ? partsField[0] : partsField;
+  const department = (part as { department?: string | null } | null | undefined)?.department ?? null;
   // DB 저장 성공 → 즉시 broadcast로 다른 클라이언트에 전파
   broadcastSceneUpdate(sceneUuid, stage, value, updatedBy);
   return { affected, department };
@@ -726,13 +726,12 @@ export async function updateScenePhase(
   feedbackRound: number,
   updatedBy?: string,
 ): Promise<{ previousState: string | null; existed: boolean }> {
-  // 쓰기 전 이전 phase 를 읽어둔다 — 실제 완료 전이(≠ 이미 done 인 씬의 라운드 변경) 판별 + 실제 행 존재 확인.
+  // 이전 phase 는 전이 판별용으로 미리 읽는다(best-effort). 실제 행 존재(existed)는 아래 update 결과로 판정.
   const { data: prevRow } = await supabase
     .from('scenes')
     .select('scene_state')
     .eq('id', sceneUuid)
     .maybeSingle();
-  const existed = !!prevRow;
   const previousState = (prevRow as { scene_state?: string | null } | null)?.scene_state ?? null;
   const legacyFlags = (() => {
     switch (sceneState) {
@@ -750,8 +749,10 @@ export async function updateScenePhase(
     updated_at: new Date().toISOString(),
   };
   if (updatedBy) update.updated_by = updatedBy;
-  const { error } = await supabase.from('scenes').update(update).eq('id', sceneUuid);
+  // 실제 바뀐 행을 결과로 받아 existed 를 판정(pre-read 이후 삭제된 씬은 0행 update 로 잡힌다).
+  const { data: rows, error } = await supabase.from('scenes').update(update).eq('id', sceneUuid).select('id');
   throwIfError(error);
+  const existed = Array.isArray(rows) && rows.length > 0;
   broadcastScenePhaseUpdate(sceneUuid, sceneState, workRound, feedbackRound, updatedBy);
   // legacy stage 도 broadcast — 다른 view 가 즉시 반영하도록 4개 컬럼 각각
   for (const [stage, value] of Object.entries(legacyFlags)) {

@@ -46,6 +46,9 @@ test('browser preview mirrors work-activity point awards so the header badge upd
 
   assert.match(mockApi, /function maybeAwardPreviewActivity/);
   assert.match(mockApi, /function findMockSceneDepartment/);
+  assert.match(mockApi, /function findMockSceneState/);
+  // 이미 done 인 씬의 첫 호출 오적립을 막도록 phase Map 을 mock 씬 현재 상태로 시드한다.
+  assert.match(mockApi, /previewScenePhaseByUuid\.get\(sceneUuid\) \?\? findMockSceneState\(sceneUuid\)/);
   // 프로덕션 훅과 같은 조건으로 4개 활동을 미러링한다. scene-stage 는 실제 BG 씬만.
   assert.match(mockApi, /if \(value === true && findMockSceneDepartment\(sceneUuid\) === 'bg'\) \{\s*maybeAwardPreviewActivity\('scene-stage', sceneUuid, stage\);/);
   assert.match(mockApi, /if \(sceneState === 'done' && previousState !== 'done'\) \{\s*maybeAwardPreviewActivity\('scene-phase-done', sceneUuid\);/);

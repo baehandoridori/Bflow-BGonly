@@ -196,6 +196,18 @@ function findMockSceneDepartment(sceneUuid: string): string | null {
   return null;
 }
 
+// 프리뷰 씬 UUID → 현재 액팅 phase(scene_state). phase Map 초기 시드에 쓴다 —
+// 이미 done 인 씬의 첫 라운드 변경이 완료 적립을 오발하지 않도록(프로덕션은 DB 의 scene_state 로 판정).
+function findMockSceneState(sceneUuid: string): string | null {
+  for (const episode of getMockEpisodes()) {
+    for (const part of episode.parts) {
+      const scene = part.scenes.find((candidate) => candidate.id === sceneUuid);
+      if (scene) return scene.sceneState ?? null;
+    }
+  }
+  return null;
+}
+
 function previewNoSession<T>(data: T): { ok: false; kind: 'rejected'; code: string; message: string; retryable: false } {
   void data;
   return { ok: false, kind: 'rejected', code: 'AUTH_REQUIRED', message: '로그인이 필요합니다.', retryable: false };
@@ -793,7 +805,8 @@ export function installDevElectronAPI(): void {
     supabaseUpdateScenePhase: async (sceneUuid, sceneState, workRound, feedbackRound) => {
       console.log('[DEV] supabaseUpdateScenePhase:', { sceneUuid, sceneState, workRound, feedbackRound });
       // 실제 완료 전이(이전 상태 ≠ done)일 때만 적립 — 이미 done 인 씬의 라운드 변경은 제외.
-      const previousState = previewScenePhaseByUuid.get(sceneUuid) ?? null;
+      // Map 이 비었으면 mock 씬의 현재 phase 로 시드해, 이미 done 인 씬의 첫 호출이 오적립되지 않게 한다.
+      const previousState = previewScenePhaseByUuid.get(sceneUuid) ?? findMockSceneState(sceneUuid) ?? null;
       previewScenePhaseByUuid.set(sceneUuid, sceneState);
       if (sceneState === 'done' && previousState !== 'done') {
         maybeAwardPreviewActivity('scene-phase-done', sceneUuid);
