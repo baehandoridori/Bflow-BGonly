@@ -317,6 +317,27 @@ test('execute RPC hardcodes the arcade balance so the SQL is the paying source o
   }
 });
 
+test('game finishes are bound to the game they were started as', () => {
+  const execute = functionDefinition(readMigration(), 'playground_arcade_execute');
+  // game-start 는 시작 게임을 원장(stock_id)에 남기고, game-finish 는 그것과 대조한다.
+  assert.match(execute, /v_entry_stock_id\s*:=\s*v_game_id/i);
+  assert.match(execute, /v_entry_game_id\s+IS DISTINCT FROM\s+v_game_id/i);
+  assert.match(execute, /시작한 게임과 종료한 게임이 달라요/);
+});
+
+test('achievement bonuses are server-validated against the underlying condition', () => {
+  const execute = functionDefinition(readMigration(), 'playground_arcade_execute');
+  assert.match(execute, /v_condition_met/);
+  assert.match(execute, /아직 달성하지 못한 도전과제/);
+  // 조건은 원장/런/출석 실데이터에서 서버가 재도출한다.
+  assert.match(execute, />=\s*5000/); // arcade-earned-5k
+  assert.match(execute, /r\.score\s*>=\s*30000/i); // tetris-30k
+  assert.match(execute, /r\.score\s*>=\s*30\b/i); // snake-30
+  assert.match(execute, /goldenEaten/);
+  assert.match(execute, /maxLineClear/);
+  assert.match(execute, /v_streak\s*>=\s*7/i); // attend-7
+});
+
 test('migration re-runs safely with guard clauses on every new object', () => {
   const sql = readMigration();
   // constraint re-creation must be drop-guarded

@@ -1,6 +1,7 @@
 import {
   applyArcadePreviewCommand,
   fingerprintArcadeCommand,
+  startedGameIdFromEntryFingerprint,
   type ArcadePreviewGateway,
 } from './previewGateway.ts';
 import { createArcadePreviewSeed } from './seed.ts';
@@ -97,8 +98,7 @@ export function createArcadeLocalStorageGateway(
       const applied = applyArcadePreviewCommand(persisted.snapshot, command, {
         now: options.now(),
         userId,
-        hasStartedRun: (runId) =>
-          Object.prototype.hasOwnProperty.call(persisted.requestFingerprints, `game-entry:${runId}`),
+        startedGameId: (runId) => startedGameIdFromEntryFingerprint(persisted.requestFingerprints[`game-entry:${runId}`]),
       });
       save({
         version: 1,

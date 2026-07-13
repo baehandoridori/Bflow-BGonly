@@ -100,6 +100,31 @@ test('finishRun unlocks each newly earned achievement exactly once', async () =>
   assert.deepEqual(result?.unlockedAchievements.map((a) => a.id), ['arcade-first-run', 'snake-30', 'snake-55']);
 });
 
+test('finishRun does not re-apply a replayed finish', async () => {
+  const gateway = createMockGateway({
+    execute: async (command) => {
+      if (command.kind === 'game-finish') {
+        return {
+          grade: 'platinum', rewardPoints: 45, rewardCapped: false,
+          newAlltimeBest: true, newWeeklyBest: true, prevBestScore: null,
+          myBestScore: 55, todayRewardedRuns: 1,
+          wallet: { walletPoints: 2000, lifetimeEarnedPoints: 6000 }, slackNotifyEnabled: false,
+          replayed: true,
+        };
+      }
+      return { wallet: { walletPoints: 0, lifetimeEarnedPoints: 0 } } as ArcadeExecuteResult;
+    },
+  });
+  const store = createArcadeStore(gateway, noopSync);
+  await store.getState().load('user-1');
+  const runsBefore = store.getState().snapshot?.aggregates.totalRuns ?? 0;
+  const result = await store.getState().finishRun({ runId: 'r-replay', gameId: 'snake', score: 55, durationMs: 60_000, meta: {} });
+  assert.deepEqual(result?.unlockedAchievements, []);
+  // 재생은 로컬 판수·집계를 늘리지 않고, 도전과제 해금도 호출하지 않는다.
+  assert.equal(store.getState().snapshot?.aggregates.totalRuns, runsBefore);
+  assert.ok(!gateway.executed.some((command) => command.kind === 'achievement-unlock'));
+});
+
 test('applyWalletPush updates the arcade snapshot and syncs the market wallet', async () => {
   const synced: ArcadeWallet[] = [];
   const gateway = createMockGateway();

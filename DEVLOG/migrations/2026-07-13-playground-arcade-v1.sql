@@ -417,6 +417,8 @@ DECLARE
   v_game_id text;
   v_run_id text;
   v_entry_fee bigint;
+  v_entry_stock_id text;   -- game-entry 원장에 시작 게임을 기록해 game-finish 에서 대조
+  v_entry_game_id text;    -- game-finish 시 조회한 입장 게임
   v_score bigint;
   v_duration bigint;
   v_grade text;
@@ -432,6 +434,7 @@ DECLARE
   -- 도전과제
   v_ach_id text;
   v_bonus bigint;
+  v_condition_met boolean;  -- 서버가 도전과제 조건을 재검증(보상의 SSOT)
 BEGIN
   IF p_user_id IS NULL THEN
     RAISE EXCEPTION 'arcade user is required' USING ERRCODE = '22023';
@@ -619,6 +622,7 @@ BEGIN
         RAISE EXCEPTION '포인트가 부족해 게임을 시작할 수 없어요' USING ERRCODE = 'P0001';
       END IF;
       v_ledger_kind := 'game-entry';
+      v_entry_stock_id := v_game_id;  -- 시작 게임을 원장에 남겨 종료 시 대조한다.
       v_wallet_delta := -v_entry_fee;
       v_lifetime_delta := 0;
       UPDATE public.playground_wallet_accounts
@@ -664,14 +668,20 @@ BEGIN
       IF v_duration < 1000 OR v_duration > 14400000 THEN
         RAISE EXCEPTION 'game duration is out of range' USING ERRCODE = '22023';
       END IF;
-      -- (1) 입장 원장 존재 + 본인 소유 확인
-      IF NOT EXISTS (
-        SELECT 1 FROM public.playground_value_ledger AS l
-        WHERE l.user_id = p_user_id::text
-          AND l.request_id = 'game-entry:' || v_run_id
-          AND l.kind = 'game-entry'
-      ) THEN
+      -- (1) 입장 원장 존재 + 본인 소유 + 시작 게임 일치 확인
+      -- (game-entry 원장의 stock_id 에 시작 게임을 저장해 두었다. 다른 게임으로 종료해
+      --  낮은 입장료로 높은 보상을 받는 것을 막는다.)
+      SELECT l.stock_id
+      INTO v_entry_game_id
+      FROM public.playground_value_ledger AS l
+      WHERE l.user_id = p_user_id::text
+        AND l.request_id = 'game-entry:' || v_run_id
+        AND l.kind = 'game-entry';
+      IF NOT FOUND THEN
         RAISE EXCEPTION '시작되지 않은 게임은 기록할 수 없어요' USING ERRCODE = 'P0001';
+      END IF;
+      IF v_entry_game_id IS DISTINCT FROM v_game_id THEN
+        RAISE EXCEPTION '시작한 게임과 종료한 게임이 달라요' USING ERRCODE = 'P0001';
       END IF;
       -- (2) runs PK 중복 없음
       IF EXISTS (SELECT 1 FROM public.playground_game_runs AS r WHERE r.id = v_run_id::uuid) THEN
@@ -805,6 +815,88 @@ BEGIN
       IF v_bonus IS NULL THEN
         RAISE EXCEPTION '알 수 없는 도전과제예요' USING ERRCODE = '22023';
       END IF;
+      -- 서버측 조건 재검증 — 클라이언트 수치는 표시용 미러일 뿐 서버가 보상의 SSOT다.
+      -- 렌더러가 조건 미충족 상태로 unlock 을 요청해도 보너스를 발행하지 않는다.
+      IF v_ach_id = 'arcade-first-run' THEN
+        v_condition_met := (SELECT COUNT(*) FROM public.playground_game_runs AS r WHERE r.user_id = p_user_id::text) >= 1;
+      ELSIF v_ach_id = 'arcade-runs-50' THEN
+        v_condition_met := (SELECT COUNT(*) FROM public.playground_game_runs AS r WHERE r.user_id = p_user_id::text) >= 50;
+      ELSIF v_ach_id = 'arcade-earned-5k' THEN
+        v_condition_met := (
+          SELECT COALESCE(SUM(l.wallet_delta), 0)
+          FROM public.playground_value_ledger AS l
+          WHERE l.user_id = p_user_id::text
+            AND l.kind IN ('scene-progress', 'comment', 'retake-done', 'daily-login', 'game-reward', 'achievement')
+        ) >= 5000;
+      ELSIF v_ach_id = 'attend-7' THEN
+        v_streak := 0;
+        IF EXISTS (
+          SELECT 1 FROM public.playground_value_ledger AS l
+          WHERE l.user_id = p_user_id::text AND l.kind = 'daily-login'
+            AND (l.created_at AT TIME ZONE 'Asia/Seoul')::date = v_today
+        ) THEN
+          v_cursor := v_today;
+        ELSIF EXISTS (
+          SELECT 1 FROM public.playground_value_ledger AS l
+          WHERE l.user_id = p_user_id::text AND l.kind = 'daily-login'
+            AND (l.created_at AT TIME ZONE 'Asia/Seoul')::date = v_today - 1
+        ) THEN
+          v_cursor := v_today - 1;
+        ELSE
+          v_cursor := NULL;
+        END IF;
+        WHILE v_cursor IS NOT NULL LOOP
+          IF EXISTS (
+            SELECT 1 FROM public.playground_value_ledger AS l
+            WHERE l.user_id = p_user_id::text AND l.kind = 'daily-login'
+              AND (l.created_at AT TIME ZONE 'Asia/Seoul')::date = v_cursor
+          ) THEN
+            v_streak := v_streak + 1;
+            v_cursor := v_cursor - 1;
+          ELSE
+            v_cursor := NULL;
+          END IF;
+        END LOOP;
+        v_condition_met := v_streak >= 7;
+      ELSIF v_ach_id = 'snake-30' THEN
+        v_condition_met := EXISTS (
+          SELECT 1 FROM public.playground_game_runs AS r
+          WHERE r.user_id = p_user_id::text AND r.game_id = 'snake' AND r.score >= 30
+        );
+      ELSIF v_ach_id = 'snake-55' THEN
+        v_condition_met := EXISTS (
+          SELECT 1 FROM public.playground_game_runs AS r
+          WHERE r.user_id = p_user_id::text AND r.game_id = 'snake' AND r.score >= 55
+        );
+      ELSIF v_ach_id = 'snake-golden-5' THEN
+        v_condition_met := EXISTS (
+          SELECT 1 FROM public.playground_game_runs AS r
+          WHERE r.user_id = p_user_id::text AND r.game_id = 'snake'
+            AND COALESCE((r.meta ->> 'goldenEaten')::bigint, 0) >= 5
+        );
+      ELSIF v_ach_id = 'tetris-tetris' THEN
+        v_condition_met := EXISTS (
+          SELECT 1 FROM public.playground_game_runs AS r
+          WHERE r.user_id = p_user_id::text AND r.game_id = 'tetris'
+            AND COALESCE((r.meta ->> 'maxLineClear')::bigint, 0) >= 4
+        );
+      ELSIF v_ach_id = 'tetris-level-10' THEN
+        v_condition_met := EXISTS (
+          SELECT 1 FROM public.playground_game_runs AS r
+          WHERE r.user_id = p_user_id::text AND r.game_id = 'tetris'
+            AND COALESCE((r.meta ->> 'levelReached')::bigint, 0) >= 10
+        );
+      ELSIF v_ach_id = 'tetris-30k' THEN
+        v_condition_met := EXISTS (
+          SELECT 1 FROM public.playground_game_runs AS r
+          WHERE r.user_id = p_user_id::text AND r.game_id = 'tetris' AND r.score >= 30000
+        );
+      ELSE
+        v_condition_met := false;
+      END IF;
+      IF NOT v_condition_met THEN
+        RAISE EXCEPTION '아직 달성하지 못한 도전과제예요' USING ERRCODE = 'P0001';
+      END IF;
       INSERT INTO public.playground_achievement_unlocks (user_id, achievement_id, reward_points)
       VALUES (p_user_id::text, v_ach_id, v_bonus);
       v_ledger_kind := 'achievement';
@@ -846,9 +938,9 @@ BEGIN
 
   IF v_write_ledger THEN
     INSERT INTO public.playground_value_ledger (
-      user_id, request_id, kind, payload_fingerprint, wallet_delta, lifetime_earned_delta, response_state
+      user_id, request_id, kind, payload_fingerprint, wallet_delta, lifetime_earned_delta, stock_id, response_state
     ) VALUES (
-      p_user_id::text, p_request_id, v_ledger_kind, v_fingerprint, v_wallet_delta, v_lifetime_delta, v_response
+      p_user_id::text, p_request_id, v_ledger_kind, v_fingerprint, v_wallet_delta, v_lifetime_delta, v_entry_stock_id, v_response
     );
   END IF;
 

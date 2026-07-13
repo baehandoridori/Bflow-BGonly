@@ -124,6 +124,15 @@ test('game-finish rejects a run that was never started', async () => {
   );
 });
 
+test('game-finish rejects finishing a run as a different game than it was started', async () => {
+  const gw = gateway(seededStorage());
+  await gw.execute({ kind: 'game-start', requestId: 'game-entry:mixup', runId: 'mixup', gameId: 'snake' });
+  await assert.rejects(
+    gw.execute({ kind: 'game-finish', requestId: 'game-finish:mixup', runId: 'mixup', gameId: 'tetris', score: 40, durationMs: 60_000, meta: {} }),
+    /시작한 게임과/,
+  );
+});
+
 test('game-finish grades the score, pays the reward, and flags an all-time best', async () => {
   const gw = gateway(seededStorage());
   await gw.execute({ kind: 'game-start', requestId: 'game-entry:run-2', runId: 'run-2', gameId: 'snake' });

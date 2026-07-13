@@ -218,6 +218,13 @@ export function createArcadeStore(
             durationMs: input.durationMs,
             meta: input.meta,
           })) as ArcadeGameFinishResult;
+          if (result.replayed) {
+            // 서버가 이미 기록한 판의 재생(재시도·중복 제출) — 로컬 집계·도전과제를
+            // 다시 적용하면 판수/보상이 부풀려지므로, 지갑 절대값만 반영하고 종료한다.
+            set({ mutating: false });
+            syncWallet(result.wallet);
+            return { ...result, unlockedAchievements: [] };
+          }
           // 도전과제 평가 입력용으로 갱신 "전" aggregates 를 캡처한다(이번 런 미포함).
           const prevAggregates = { ...before.aggregates };
           set({ snapshot: applyFinishToSnapshot(before, input, result), mutating: false });

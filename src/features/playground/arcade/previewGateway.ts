@@ -44,11 +44,23 @@ export function fingerprintArcadeCommand(command: ArcadeExecuteCommand): string 
   return exhaustive;
 }
 
+// game-entry 지문(["game-start", runId, gameId])에서 시작 게임을 되읽는다.
+export function startedGameIdFromEntryFingerprint(fingerprint: string | undefined): string | null {
+  if (fingerprint === undefined) return null;
+  try {
+    const parsed: unknown = JSON.parse(fingerprint);
+    return Array.isArray(parsed) && typeof parsed[2] === 'string' ? parsed[2] : null;
+  } catch {
+    return null;
+  }
+}
+
 export interface ArcadePreviewApplyContext {
   now: number;
   userId: string;
-  // 서버 RPC 와 동일하게, game-finish 는 선행 game-start(game-entry:<runId>)가 있어야 한다.
-  hasStartedRun(runId: string): boolean;
+  // 서버 RPC 와 동일하게, game-finish 는 선행 game-start 가 있어야 하고 그 게임 종류와 일치해야 한다.
+  // 시작하지 않았으면 null, 시작했으면 시작 시의 gameId 를 돌려준다.
+  startedGameId(runId: string): string | null;
 }
 
 export interface ArcadePreviewApplyResult {
@@ -128,8 +140,12 @@ export function applyArcadePreviewCommand(
     }
 
     case 'game-finish': {
-      if (!ctx.hasStartedRun(command.runId)) {
+      const startedGame = ctx.startedGameId(command.runId);
+      if (startedGame === null) {
         throw new Error('시작되지 않은 게임은 기록할 수 없어요');
+      }
+      if (startedGame !== command.gameId) {
+        throw new Error('시작한 게임과 종료한 게임이 달라요');
       }
       const stats = next.games[command.gameId];
       const grade = gradeForScore(command.gameId, command.score);
@@ -251,7 +267,7 @@ export function createArcadePreviewGateway(
       const applied = applyArcadePreviewCommand(snapshot, command, {
         now: now(),
         userId,
-        hasStartedRun: (runId) => fingerprintByRequestId.has(`game-entry:${runId}`),
+        startedGameId: (runId) => startedGameIdFromEntryFingerprint(fingerprintByRequestId.get(`game-entry:${runId}`)),
       });
       snapshot = applied.snapshot;
       if (applied.persistKey) {
