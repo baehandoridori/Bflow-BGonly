@@ -169,6 +169,13 @@ shared/playgroundMarketModel.mjs (장 전체 + 업종 + 종목 + 이벤트 결�
 | `src/views/playground/market/MarketInteractiveChart.tsx` | 휠 확대, 드래그 이동, 핀치, crosshair, 테마·오류·재시도 경계 |
 | `src/views/playground/market/useMarketOrderController.ts` | 공통 수량과 팔기/사기 독립 검증, 확인값 동결, 기존 request ID·rollback 계약 유지 |
 | `electron/marketAccountService.ts` | canonical 가격·거래정지·revision 재검증 후 Supabase 거래 실행 |
+| `src/features/playground/arcade/constants.ts` | 아케이드 밸런스 정본 — 입장료·등급 경계·보상·상한·도전과제 정의 |
+| `src/features/playground/arcade/domain.ts` | 순수 함수 — 등급 판정·보상·다음 등급·도전과제 평가 |
+| `src/features/playground/arcade/{gateway,electronGateway,localStorageGateway,previewGateway,seed}.ts` | 모의투자와 같은 게이트웨이 5종 — electron/preview 선택, 프리뷰 로컬 재현·시드 |
+| `src/features/playground/arcade/useArcadeStore.ts` | 아케이드 스토어 — 스냅샷 로드·게임 실행·도전과제 해금·설정 |
+| `src/features/playground/arcade/walletBridge.ts` | `arcade:wallet-updated` push 구독 → 아케이드·모의투자 지갑 동기화 |
+| `src/components/layout/HeaderPointsBadge.tsx` | 앱 우상단 보유 포인트 배지(배플레이그라운드 접근 권한자 한정) |
+| `electron/arcadeService.ts` | main 아케이드 서비스 — 사용자별 큐, 출석 적립, 활동 적립, 신기록 슬랙, 지갑 push |
 
 ### 타입 & 유틸
 

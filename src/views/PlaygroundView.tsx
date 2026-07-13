@@ -8,7 +8,9 @@ import {
   type PlaygroundMarketRestoreRequest,
 } from '@/features/playground/history';
 import { advanceRecommendation, createRecommendationSession } from '@/features/playground/recommendation';
-import { buildPointRanking } from '@/features/playground/ranking';
+import { buildPointRanking, mergeRankingTeammates } from '@/features/playground/ranking';
+import { useArcadeStore } from '@/features/playground/arcade/useArcadeStore';
+import { initArcadeWalletBridge } from '@/features/playground/arcade/walletBridge';
 import { subscribePlaygroundNativeBack } from '@/features/playground/nativeBackBridge';
 import {
   getPlaygroundRouteIdentity,
@@ -64,18 +66,26 @@ export default function PlaygroundView({ authorizedHansol }: PlaygroundViewProps
   const currentUser = useAuthStore((state) => state.currentUser);
   const currentUserId = currentUser?.id ?? null;
   const userScopeRef = useRef(currentUserId);
+  const users = useAuthStore((state) => state.users);
   const visible = useMarketPreviewStore((state) => state.visible);
   const loadMarket = useMarketPreviewStore((state) => state.load);
+  const arcadeSnapshot = useArcadeStore((state) => state.snapshot);
+  const loadArcade = useArcadeStore((state) => state.load);
   const userName = currentUser?.name.trim() || '팀원';
-  const walletPoints = visible?.account.walletPoints ?? null;
-  const lifetimeEarnedPoints = visible?.account.lifetimeEarnedPoints ?? null;
   const marketCashWon = visible?.account.cashWon ?? null;
+  const arcadeWalletPoints = arcadeSnapshot?.wallet.walletPoints ?? null;
+  const arcadeLifetimePoints = arcadeSnapshot?.wallet.lifetimeEarnedPoints ?? null;
+  const walletLeaderboard = arcadeSnapshot?.walletLeaderboard;
+  const teammates = useMemo(
+    () => mergeRankingTeammates(currentUserId, walletLeaderboard ?? [], users),
+    [users, walletLeaderboard, currentUserId],
+  );
   const ranking = useMemo(() => buildPointRanking({
     id: currentUser?.id ?? 'preview-user',
     name: userName,
-    walletPoints,
-    lifetimeEarnedPoints,
-  }), [currentUser?.id, lifetimeEarnedPoints, userName, walletPoints]);
+    walletPoints: arcadeWalletPoints,
+    lifetimeEarnedPoints: arcadeLifetimePoints,
+  }, teammates), [currentUser?.id, arcadeLifetimePoints, userName, arcadeWalletPoints, teammates]);
 
   const captureMarketSurface = (targetRoute: PlaygroundRoute) => {
     const selector = marketScrollSelector(targetRoute);
@@ -146,6 +156,14 @@ export default function PlaygroundView({ authorizedHansol }: PlaygroundViewProps
     if (!currentUser?.id) return;
     void loadMarket(currentUser.id);
   }, [currentUser?.id, loadMarket]);
+
+  useEffect(() => {
+    if (!currentUser?.id) return;
+    // 몰입형 playground 로 바로 복원되면 Header(포인트 배지)가 안 뜨므로 여기서도 브릿지를
+    // 초기화한다(중복 등록 가드가 있어 배지와 함께 켜져도 안전). 이후 지갑 push·마켓 변경 수신.
+    initArcadeWalletBridge();
+    void loadArcade(currentUser.id);
+  }, [currentUser?.id, loadArcade]);
 
   useEffect(() => {
     if (userScopeRef.current === currentUserId) return;

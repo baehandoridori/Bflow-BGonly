@@ -19,6 +19,8 @@ import { createPersonalTodoPreviewStore, PERSONAL_TODO_PREVIEW_SESSION_KEY, type
 import { createMarketLocalStorageGateway } from '@/features/playground/market/localStorageGateway';
 import type { MarketPreviewGateway } from '@/features/playground/market/previewGateway';
 import type { MarketRemoteState, MarketSnapshot } from '@/features/playground/market/types';
+import { createArcadeLocalStorageGateway } from '@/features/playground/arcade/localStorageGateway';
+import type { ArcadePreviewGateway } from '@/features/playground/arcade/previewGateway';
 
 type PreviewUser = AppUser & { password: string };
 
@@ -53,6 +55,8 @@ let previewRememberedUserId: string | null = null;
 let previewTodoStore: PersonalTodoPreviewStore | null = null;
 let previewMarketGateway: MarketPreviewGateway | null = null;
 let previewMarketUserId: string | null = null;
+let previewArcadeGateway: ArcadePreviewGateway | null = null;
+let previewArcadeUserId: string | null = null;
 const previewTodoCommitListeners = new Set<(payload: unknown) => void>();
 
 function getPreviewTodoStore(): PersonalTodoPreviewStore | null {
@@ -93,6 +97,47 @@ function getPreviewMarketGateway(): MarketPreviewGateway {
     });
   }
   return previewMarketGateway;
+}
+
+function getPreviewArcadeGateway(): ArcadePreviewGateway {
+  const user = previewCanonicalUserId
+    ? getMockUsers().find((candidate) => candidate.id === previewCanonicalUserId)
+    : null;
+  if (user?.name !== '배한솔' || user.slackId !== 'U05DFV9UAN5') {
+    throw new Error('배한솔 프리뷰 계정에서만 아케이드를 이용할 수 있어요.');
+  }
+  if (!previewArcadeGateway || previewArcadeUserId !== user.id) {
+    previewArcadeUserId = user.id;
+    previewArcadeGateway = createArcadeLocalStorageGateway({
+      userId: user.id,
+      storage: window.localStorage,
+      now: () => Date.now(),
+    });
+  }
+  return previewArcadeGateway;
+}
+
+const previewDailyLoginAttempts = new Set<string>();
+
+// 프리뷰에는 main 프로세스가 없어 production 의 setCanonicalActivityUser → grantDailyLogin
+// 흐름이 없다. 배한솔 프리뷰 세션이 확립되면 여기서 출석 적립을 미러링해, 자동 출석이
+// 프리뷰/테스트 모드에서도 재현되게 한다(하루 1회, fire-and-forget, 서버 멱등에 의존).
+function maybeGrantPreviewDailyLogin(): void {
+  const user = previewCanonicalUserId
+    ? getMockUsers().find((candidate) => candidate.id === previewCanonicalUserId)
+    : null;
+  if (user?.name !== '배한솔' || user.slackId !== 'U05DFV9UAN5') return;
+  const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul' }).format(new Date());
+  const key = `${user.id}|${today}`;
+  if (previewDailyLoginAttempts.has(key)) return;
+  void getPreviewArcadeGateway()
+    .execute({ kind: 'daily-login', requestId: `daily-login:${today}` })
+    .then(() => {
+      previewDailyLoginAttempts.add(key);
+    })
+    .catch(() => {
+      /* fire-and-forget — 다음 세션 트리거에서 재시도 */
+    });
 }
 
 function previewNoSession<T>(data: T): { ok: false; kind: 'rejected'; code: string; message: string; retryable: false } {
@@ -1126,11 +1171,17 @@ export function installDevElectronAPI(): void {
     marketDeleteAdminEvent: async (eventId) => toMarketRemoteState(
       await getPreviewMarketGateway().deleteAdminEvent(eventId),
     ),
+
+    // ─── Playground arcade mock (same user-scoped localStorage adapter) ───
+    arcadeRead: async () => getPreviewArcadeGateway().read(),
+    arcadeExecute: async (command) => getPreviewArcadeGateway().execute(command),
+    onArcadeWalletUpdated: noop,
     onPlaygroundNativeBack: noop,
 
     // ─── Personal Todos / Task Views mock ───
     ensureCanonicalSession: async () => {
       if (!previewCanonicalUserId) previewCanonicalUserId = readRememberedPreviewUser();
+      maybeGrantPreviewDailyLogin();
       return { ok: true, payload: previewCanonicalPayload() };
     },
     loginCanonicalSession: async (input) => {
@@ -1141,6 +1192,7 @@ export function installDevElectronAPI(): void {
       if (previewCanonicalUserId !== user.id) previewCanonicalEpoch++;
       previewCanonicalUserId = user.id;
       writeRememberedPreviewUser(input.rememberMe === false ? null : user.id);
+      maybeGrantPreviewDailyLogin();
       return { ok: true, payload: previewCanonicalPayload() };
     },
     restoreCanonicalSession: async () => {
@@ -1148,6 +1200,7 @@ export function installDevElectronAPI(): void {
         previewCanonicalUserId = readRememberedPreviewUser();
         previewCanonicalEpoch++;
       }
+      maybeGrantPreviewDailyLogin();
       return { ok: true, payload: previewCanonicalPayload() };
     },
     logoutCanonicalSession: async () => {

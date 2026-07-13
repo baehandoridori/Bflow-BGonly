@@ -90,12 +90,19 @@ test('preview feature only reaches browser persistence through the injected stor
   const bridgeAdapter = 'src/features/playground/market/gateway.ts';
   const chartPreferenceAdapter = 'src/features/playground/market/useMarketChartPreference.ts';
   const nativeBackAdapter = 'src/features/playground/nativeBackBridge.ts';
-  for (const file of files.filter((file) => (
-    file !== storageAdapter
-    && file !== bridgeAdapter
-    && file !== chartPreferenceAdapter
-    && file !== nativeBackAdapter
-  ))) {
+  const arcadeStorageAdapter = 'src/features/playground/arcade/localStorageGateway.ts';
+  const arcadeBridgeAdapter = 'src/features/playground/arcade/gateway.ts';
+  const arcadeWalletBridge = 'src/features/playground/arcade/walletBridge.ts';
+  const allowlist = new Set([
+    storageAdapter,
+    bridgeAdapter,
+    chartPreferenceAdapter,
+    nativeBackAdapter,
+    arcadeStorageAdapter,
+    arcadeBridgeAdapter,
+    arcadeWalletBridge,
+  ]);
+  for (const file of files.filter((file) => !allowlist.has(file))) {
     const source = readFileSync(file, 'utf8');
     assert.doesNotMatch(
       source,

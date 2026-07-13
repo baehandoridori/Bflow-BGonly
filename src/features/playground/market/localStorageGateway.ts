@@ -6,6 +6,10 @@ import {
   type MarketPreviewGateway,
 } from './previewGateway.ts';
 import { createMarketPreviewSeed } from './seed.ts';
+import {
+  reconcileSharedPreviewWallet,
+  writeSharedPreviewWallet,
+} from '../previewSharedWallet.ts';
 import type {
   Holding,
   MarketAdminEvent,
@@ -269,15 +273,32 @@ export function createMarketLocalStorageGateway(
     }
   }
 
+  // 아케이드와 공유하는 프리뷰 지갑을 단일 진실로 반영한다(잔액 괴리 방지).
+  function readReconciled(): PersistedMarketPreview {
+    const persisted = readOrCreate();
+    const account = persisted.snapshot.account;
+    const wallet = reconcileSharedPreviewWallet(options.storage, userId, {
+      walletPoints: account.walletPoints,
+      lifetimeEarnedPoints: account.lifetimeEarnedPoints,
+    });
+    if (wallet.walletPoints === account.walletPoints && wallet.lifetimeEarnedPoints === account.lifetimeEarnedPoints) {
+      return persisted;
+    }
+    const snapshot = structuredClone(persisted.snapshot);
+    snapshot.account.walletPoints = wallet.walletPoints;
+    snapshot.account.lifetimeEarnedPoints = wallet.lifetimeEarnedPoints;
+    return save(snapshot, persisted.requestFingerprints);
+  }
+
   return {
     async read() {
       await wait(latencyMs);
-      return clonePersistedState(readOrCreate()).snapshot;
+      return clonePersistedState(readReconciled()).snapshot;
     },
 
     async execute(command: MarketCommand) {
       await wait(latencyMs);
-      const persisted = readOrCreate();
+      const persisted = readReconciled();
       const fingerprint = fingerprintMarketCommand(command);
       const hasPrevious = Object.prototype.hasOwnProperty.call(
         persisted.requestFingerprints,
@@ -295,11 +316,18 @@ export function createMarketLocalStorageGateway(
         [command.requestId]: fingerprint,
       };
       save(snapshot, requestFingerprints);
+      // 지갑 이동 등 잔액 변경을 공유 지갑에 반영해 아케이드 배지·랭킹과 일치시킨다.
+      writeSharedPreviewWallet(options.storage, userId, {
+        walletPoints: snapshot.account.walletPoints,
+        lifetimeEarnedPoints: snapshot.account.lifetimeEarnedPoints,
+      });
       return structuredClone(snapshot);
     },
     async createAdminEvent(input: MarketAdminEventInput) {
       await wait(latencyMs);
-      const persisted = readOrCreate();
+      // 아케이드가 공유 지갑을 바꿨을 수 있으므로, 거래가 아닌 이벤트 저장도 먼저 지갑을 맞춘 뒤
+      // 저장·반환한다. 그러지 않으면 스테일 잔액이 저장돼 배지·랭킹으로 되돌아 전파된다.
+      const persisted = readReconciled();
       const snapshot = addPreviewAdminEvent(
         persisted.snapshot,
         input,
@@ -310,7 +338,7 @@ export function createMarketLocalStorageGateway(
     },
     async deleteAdminEvent(eventId: string) {
       await wait(latencyMs);
-      const persisted = readOrCreate();
+      const persisted = readReconciled();
       const snapshot = removePreviewAdminEvent(persisted.snapshot, eventId);
       save(snapshot, persisted.requestFingerprints);
       return structuredClone(snapshot);

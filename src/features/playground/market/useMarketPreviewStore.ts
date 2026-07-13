@@ -92,6 +92,7 @@ interface MarketPreviewState {
   execute(command: MarketCommand, currentPriceWon?: number): Promise<boolean>;
   createAdminEvent(input: MarketAdminEventInput): Promise<boolean>;
   deleteAdminEvent(eventId: string): Promise<boolean>;
+  applyServerWallet(wallet: { walletPoints: number; lifetimeEarnedPoints: number }): void;
   clearError(): void;
 }
 
@@ -417,6 +418,22 @@ export function createMarketPreviewStore(
         });
         return applied;
       }
+    },
+    // 아케이드 등 다른 포인트 경로에서 지갑이 바뀌면 확정/표시 스냅샷의 잔액만 교체한다.
+    applyServerWallet(wallet) {
+      const patch = (snapshot: MarketSnapshot | null): MarketSnapshot | null =>
+        snapshot
+          ? {
+              ...snapshot,
+              account: {
+                ...snapshot.account,
+                walletPoints: wallet.walletPoints,
+                lifetimeEarnedPoints: wallet.lifetimeEarnedPoints,
+              },
+            }
+          : snapshot;
+      const state = get();
+      set({ confirmed: patch(state.confirmed), visible: patch(state.visible) });
     },
     clearError() {
       set({ error: null });

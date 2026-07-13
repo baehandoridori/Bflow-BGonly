@@ -1,0 +1,152 @@
+import {
+  applyArcadePreviewCommand,
+  fingerprintArcadeCommand,
+  kstDateOf,
+  rollOverPreviewDailyState,
+  startedGameIdFromEntryFingerprint,
+  type ArcadePreviewGateway,
+} from './previewGateway.ts';
+import { createArcadePreviewSeed } from './seed.ts';
+import {
+  reconcileSharedPreviewWallet,
+  writeSharedPreviewWallet,
+} from '../previewSharedWallet.ts';
+import type { ArcadeExecuteCommand, ArcadeExecuteResult, ArcadeSnapshot } from './types';
+
+const STORAGE_KEY_PREFIX = 'bflow-arcade-preview-v1:';
+
+interface PersistedArcadePreview {
+  version: 1;
+  snapshot: ArcadeSnapshot;
+  requestFingerprints: Record<string, string>;
+  requestResponses: Record<string, ArcadeExecuteResult>;
+  dailyDate: string; // 일일 필드(출석/오늘활동/보상판수)가 대응하는 KST 날짜
+  updatedAtMs: number;
+}
+
+export interface ArcadeLocalStorageGatewayOptions {
+  userId: string;
+  storage: Storage;
+  now: () => number;
+  latencyMs?: number;
+}
+
+function wait(ms: number): Promise<void> {
+  return ms <= 0 ? Promise.resolve() : new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function hasPersistedShape(value: unknown): value is PersistedArcadePreview {
+  return isRecord(value) && value.version === 1 && isRecord(value.snapshot);
+}
+
+export function createArcadeLocalStorageGateway(
+  options: ArcadeLocalStorageGatewayOptions,
+): ArcadePreviewGateway {
+  const userId = options.userId.trim();
+  if (!userId) throw new Error('arcade preview user id is required');
+  const key = `${STORAGE_KEY_PREFIX}${userId}`;
+  const latencyMs = options.latencyMs ?? 0;
+
+  function save(state: PersistedArcadePreview): void {
+    options.storage.setItem(key, JSON.stringify(state));
+  }
+
+  // KST 날짜가 바뀌었으면 일일 필드를 롤오버하고 저장한다(다중일 프리뷰가 서버와 일치하도록).
+  function rollOver(state: PersistedArcadePreview): PersistedArcadePreview {
+    const today = kstDateOf(options.now());
+    if (state.dailyDate !== today) {
+      rollOverPreviewDailyState(state.snapshot, state.dailyDate ?? null, today);
+      state.dailyDate = today;
+      save(state);
+    }
+    return state;
+  }
+
+  // 공유 프리뷰 지갑을 단일 진실로 반영한다(모의투자와 잔액을 공유하도록).
+  function reconcileWallet(state: PersistedArcadePreview): PersistedArcadePreview {
+    const wallet = reconcileSharedPreviewWallet(options.storage, userId, state.snapshot.wallet);
+    if (
+      wallet.walletPoints !== state.snapshot.wallet.walletPoints
+      || wallet.lifetimeEarnedPoints !== state.snapshot.wallet.lifetimeEarnedPoints
+    ) {
+      state.snapshot.wallet = { walletPoints: wallet.walletPoints, lifetimeEarnedPoints: wallet.lifetimeEarnedPoints };
+      save(state);
+    }
+    return state;
+  }
+
+  function readOrCreate(): PersistedArcadePreview {
+    let raw: string | null;
+    try {
+      raw = options.storage.getItem(key);
+    } catch {
+      raw = null;
+    }
+    if (raw !== null) {
+      try {
+        const parsed: unknown = JSON.parse(raw);
+        if (hasPersistedShape(parsed)) return reconcileWallet(rollOver(parsed));
+      } catch {
+        /* 손상된 프리뷰 저장본은 시드로 되돌린다. */
+      }
+    }
+    const seeded: PersistedArcadePreview = {
+      version: 1,
+      snapshot: createArcadePreviewSeed(userId),
+      requestFingerprints: {},
+      requestResponses: {},
+      dailyDate: kstDateOf(options.now()),
+      updatedAtMs: options.now(),
+    };
+    save(seeded);
+    return reconcileWallet(seeded);
+  }
+
+  return {
+    async read() {
+      await wait(latencyMs);
+      return structuredClone(readOrCreate().snapshot);
+    },
+    async execute(command: ArcadeExecuteCommand): Promise<ArcadeExecuteResult> {
+      await wait(latencyMs);
+      const persisted = readOrCreate();
+      const fingerprint = fingerprintArcadeCommand(command);
+      const hasPrevious = Object.prototype.hasOwnProperty.call(
+        persisted.requestFingerprints,
+        command.requestId,
+      );
+      if (hasPrevious) {
+        if (persisted.requestFingerprints[command.requestId] !== fingerprint) {
+          throw new Error('같은 요청이 다른 내용으로 이미 처리되었어요');
+        }
+        const stored = persisted.requestResponses[command.requestId];
+        return { ...(stored ?? {}), replayed: true } as ArcadeExecuteResult;
+      }
+
+      const applied = applyArcadePreviewCommand(persisted.snapshot, command, {
+        now: options.now(),
+        userId,
+        startedGameId: (runId) => startedGameIdFromEntryFingerprint(persisted.requestFingerprints[`game-entry:${runId}`]),
+      });
+      save({
+        version: 1,
+        snapshot: applied.snapshot,
+        requestFingerprints: applied.persistKey
+          ? { ...persisted.requestFingerprints, [command.requestId]: fingerprint }
+          : { ...persisted.requestFingerprints },
+        requestResponses: applied.persistKey
+          ? { ...persisted.requestResponses, [command.requestId]: applied.result }
+          : { ...persisted.requestResponses },
+        dailyDate: persisted.dailyDate,
+        updatedAtMs: options.now(),
+      });
+      // 공유 지갑에 기록해 모의투자 프리뷰가 재로딩해도 같은 잔액을 보게 한다.
+      writeSharedPreviewWallet(options.storage, userId, applied.snapshot.wallet);
+      return applied.result;
+    },
+  };
+}
