@@ -40,9 +40,12 @@ function spawnApple(
     }
   }
   const draw = nextRandom(rngState);
-  const idx = Math.min(freeCells.length - 1, Math.floor(draw.value * freeCells.length));
+  // freeCells 는 호출부(stepSnake)에서 만석을 먼저 걸러 항상 1개 이상이다. 방어적으로 0 idx 를 하한한다.
+  const idx = freeCells.length === 0
+    ? 0
+    : Math.min(freeCells.length - 1, Math.max(0, Math.floor(draw.value * freeCells.length)));
   const golden = (eaten + 1) % 5 === 0;
-  return { apple: { pos: freeCells[idx], golden }, rngState: draw.next };
+  return { apple: { pos: freeCells[idx] ?? body[0], golden }, rngState: draw.next };
 }
 
 export function createSnakeGame(seed: number): SnakeState {
@@ -126,6 +129,10 @@ export function stepSnake(state: SnakeState): SnakeState {
   const eaten = state.eaten + 1;
   const goldenEaten = state.goldenEaten + (state.apple.golden ? 1 : 0);
   const tickMs = Math.max(MIN_TICK_MS, state.tickMs - TICK_STEP_MS);
+  // 보드를 가득 채우면(만점) 스폰할 빈 칸이 없다 — 여기서 판을 끝낸다(승리).
+  if (body.length >= GRID * GRID) {
+    return { ...state, dir, queue, body, grow, length, eaten, goldenEaten, tickMs, status: 'dead' };
+  }
   const spawned = spawnApple(body, eaten, state.rngState);
   return {
     ...state,

@@ -152,6 +152,22 @@ export default function PlaygroundView({ authorizedHansol }: PlaygroundViewProps
   };
   requestBackRef.current = requestBack;
 
+  // 게임 종료(확인 후)·결과 '로비로' 전용 이탈. 뒤로가기 인터셉터를 거치지 않고 게임 라우트를
+  // 히스토리에서 pop 한다 — move(push)로 소스를 쌓으면 [lobby, game, lobby] 가 돼 다음 Back 이
+  // 끝난 게임을 다시 연다(Codex P2). 이전 항목이 없으면 소스 서페이스로 replace.
+  const exitGame = () => {
+    captureMarketSurface(historyRef.current.current());
+    const previous = historyRef.current.back();
+    if (previous) {
+      renderRoute(previous, restoreRequestFor(previous));
+      return;
+    }
+    const current = historyRef.current.current();
+    const fallback = navigatePlayground(current, { kind: 'return-to-source' });
+    historyRef.current.replace(fallback);
+    renderRoute(fallback, restoreRequestFor(fallback));
+  };
+
   useEffect(() => {
     if (!currentUser?.id) return;
     void loadMarket(currentUser.id);
@@ -282,9 +298,9 @@ export default function PlaygroundView({ authorizedHansol }: PlaygroundViewProps
             <GameHost
               game={route.game}
               returnLabel={route.returnTo === 'house' ? 'JBBJ 하우스' : '게임 로비'}
-              // 게임 종료(확인 후)·결과 '로비로' 는 뒤로가기 인터셉터를 거치지 않는 직접 이탈로 나간다.
-              // requestBack 을 쓰면 진행 중 인터셉터가 그 요청을 다시 가로채 갇힌다(Codex P1).
-              onExit={() => move({ kind: 'return-to-source' })}
+              // 게임 종료(확인 후)·결과 '로비로' 는 인터셉터를 우회하며 게임 라우트를 pop 하는 exitGame 으로 나간다.
+              // requestBack 은 진행 중 인터셉터에 다시 갇히고(P1), move(push)는 히스토리에 소스를 쌓아 재진입된다(P2).
+              onExit={exitGame}
             />
           </PlaygroundShell>
         )}

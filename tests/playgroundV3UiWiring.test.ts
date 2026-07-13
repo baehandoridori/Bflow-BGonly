@@ -224,8 +224,9 @@ test('house and game preparation use the real Shell with source-aware returns', 
   assert.match(source, /route\.kind === 'game' && \(\s*<PlaygroundShell/);
   assert.match(source, /<GameHost[\s\S]*?game=\{route\.game\}/);
   assert.match(source, /returnLabel=\{route\.returnTo === 'house' \? 'JBBJ 하우스' : '게임 로비'\}/);
-  // 게임 이탈은 뒤로가기 인터셉터를 우회하는 직접 이탈(return-to-source) — requestBack 이면 진행 중 갇힘(Codex P1).
-  assert.match(source, /<GameHost[\s\S]*?onExit=\{\(\) => move\(\{ kind: 'return-to-source' \}\)\}/);
+  // 게임 이탈은 인터셉터를 우회하며 게임 라우트를 pop 하는 exitGame — requestBack 은 갇히고(P1), move(push)는 재진입(P2).
+  assert.match(source, /<GameHost[\s\S]*?onExit=\{exitGame\}/);
+  assert.match(source, /const exitGame = \(\) => \{[\s\S]*?historyRef\.current\.back\(\)/);
   assert.match(source, /<MarketRouter[\s\S]*?onBack=\{requestBack\}/);
 });
 

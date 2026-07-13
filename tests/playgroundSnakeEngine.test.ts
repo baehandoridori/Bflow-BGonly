@@ -123,6 +123,31 @@ test('moving into the cell the tail vacates this tick survives', () => {
   assert.deepEqual(s.body[0], { x: 10, y: 11 });
 });
 
+test('eating the last free cell fills the board and ends the run without crashing', () => {
+  const base = createSnakeGame(1);
+  // (20,20) 한 칸만 비우고 나머지 440칸을 몸으로 채운다. 머리는 (19,20), 동쪽으로 이동해 마지막 칸을 먹는다.
+  const body: { x: number; y: number }[] = [{ x: 19, y: 20 }];
+  for (let y = 0; y < 21; y += 1) {
+    for (let x = 0; x < 21; x += 1) {
+      if (x === 20 && y === 20) continue; // 사과 칸(비움)
+      if (x === 19 && y === 20) continue; // 이미 머리로 넣음
+      body.push({ x, y });
+    }
+  }
+  assert.equal(body.length, 440);
+  const s = stepSnake({
+    ...base,
+    body,
+    dir: { x: 1, y: 0 },
+    grow: 0,
+    length: 440,
+    apple: { pos: { x: 20, y: 20 }, golden: false },
+  });
+  assert.equal(s.status, 'dead', '보드를 가득 채우면 판이 끝난다(승리)');
+  assert.equal(s.body.length, 441);
+  assert.ok(s.apple && typeof s.apple.pos.x === 'number', '사과가 undefined 로 깨지지 않는다');
+});
+
 test('the same seed and inputs reproduce an identical run (deterministic)', () => {
   const run = (): SnakeState => {
     let s = createSnakeGame(987654);
