@@ -17,10 +17,9 @@ import {
 const CANONICAL: ArcadeActor = { userId: 'u-canonical', name: '배한솔', slackId: 'U05DFV9UAN5' };
 const FIXED_NOW = Date.parse('2026-07-13T12:00:00+09:00');
 
-const mainSource = readFileSync(
-  path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'electron', 'main.ts'),
-  'utf8',
-);
+const repoRoot = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
+const mainSource = readFileSync(path.join(repoRoot, 'electron', 'main.ts'), 'utf8');
+const supabaseSource = readFileSync(path.join(repoRoot, 'electron', 'supabase.ts'), 'utf8');
 
 interface Harness {
   service: ArcadeService;
@@ -387,6 +386,16 @@ test('main wires the four activity accrual hooks with the correct conditions', (
     mainSource,
     /if \(revisionAffected && statusActionType === 'revision_assignee_done'\) \{\s*void arcadeService\.awardActivity\(\{ activity: 'retake-done', refId: id \}\);/,
   );
+});
+
+test('scene/revision writers derive award eligibility from the actual update result', () => {
+  // 단계 체크는 실제 false→true(또는 미설정) 전이만 매칭 — 이미 true 인 행은 0행 → 미적립. NULL 안전.
+  assert.match(supabaseSource, /\$\{stage\}\.is\.false,\$\{stage\}\.is\.null/);
+  // affected/existed 는 update(...).select(...) 결과에서 도출한다(별도 pre-read 의 TOCTOU 회피).
+  assert.match(supabaseSource, /const mutation = value === true \? base\.or/);
+  assert.match(supabaseSource, /await mutation\.select\('id, parts\(department\)'\)/);
+  assert.match(supabaseSource, /\.update\(update\)\.eq\('id', sceneUuid\)\.select\('id'\)/); // scene-phase existed
+  assert.match(supabaseSource, /\.update\(dbUpdates\)\.eq\('id', id\)\.select\('id'\)/); // revision affected
 });
 
 test('the bulk stage update handler never awards activity points', () => {

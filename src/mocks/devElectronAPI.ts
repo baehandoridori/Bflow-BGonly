@@ -208,6 +208,18 @@ function findMockSceneState(sceneUuid: string): string | null {
   return null;
 }
 
+// 프리뷰 씬 UUID + 단계 → 현재 레거시 단계 값(true/false). 없는 씬은 null.
+// 실제 false→true 전이만 적립하도록(이미 true 인 단계의 재체크·중복저장 오적립 방지, 프로덕션과 동일).
+function findMockSceneStageValue(sceneUuid: string, stage: string): boolean | null {
+  for (const episode of getMockEpisodes()) {
+    for (const part of episode.parts) {
+      const scene = part.scenes.find((candidate) => candidate.id === sceneUuid);
+      if (scene) return (scene as unknown as Record<string, unknown>)[stage] === true;
+    }
+  }
+  return null;
+}
+
 function previewNoSession<T>(data: T): { ok: false; kind: 'rejected'; code: string; message: string; retryable: false } {
   void data;
   return { ok: false, kind: 'rejected', code: 'AUTH_REQUIRED', message: '로그인이 필요합니다.', retryable: false };
@@ -915,8 +927,12 @@ export function installDevElectronAPI(): void {
     },
     supabaseDeleteScene: async () => {},
     supabaseUpdateSceneStage: async (sceneUuid, stage, value) => {
-      // 실제 BG 씬일 때만 단계 적립 — 존재하지 않는 씬/ACT 씬은 제외(프로덕션과 동일).
-      if (value === true && findMockSceneDepartment(sceneUuid) === 'bg') {
+      // 실제 BG 씬의 false→true 전이일 때만 단계 적립 — 없는 씬/ACT 씬/이미 true 인 단계는 제외(프로덕션과 동일).
+      if (
+        value === true
+        && findMockSceneDepartment(sceneUuid) === 'bg'
+        && findMockSceneStageValue(sceneUuid, stage) === false
+      ) {
         maybeAwardPreviewActivity('scene-stage', sceneUuid, stage);
       }
     },

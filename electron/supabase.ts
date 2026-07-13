@@ -692,11 +692,11 @@ export async function updateSceneStage(
   if (updatedBy) update.updated_by = updatedBy;
   // 실제 바뀐 행을 결과로 돌려받아 affected/department 를 도출한다(별도 pre-read 의 TOCTOU 회피 —
   // 읽은 뒤 삭제된 씬은 0행 update 로 잡힌다). 부서는 ACT 씬의 레거시 단계 미러를 stage 적립에서 제외하는 데 쓴다.
-  const { data: rows, error } = await supabase
-    .from('scenes')
-    .update(update)
-    .eq('id', sceneUuid)
-    .select('id, parts(department)');
+  // 체크(value=true)는 실제 false→true(또는 미설정) 전이만 매칭하도록 술어를 더한다 — 이미 true 인 행은
+  // 0행이 돼 affected=false → 재체크·중복저장에 대한 오적립을 막는다(NULL 안전: is.false 또는 is.null).
+  const base = supabase.from('scenes').update(update).eq('id', sceneUuid);
+  const mutation = value === true ? base.or(`${stage}.is.false,${stage}.is.null`) : base;
+  const { data: rows, error } = await mutation.select('id, parts(department)');
   throwIfError(error);
   const updatedRow = Array.isArray(rows) ? rows[0] : null;
   const affected = !!updatedRow;
