@@ -252,6 +252,14 @@ test('the dev electron api mock exposes the arcade bridge methods', () => {
   assert.match(devApi, /createArcadeLocalStorageGateway/);
 });
 
+test('the wallet bridge syncs market wallet changes into the arcade store', () => {
+  const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+  const bridge = readFileSync(path.join(root, 'src', 'features', 'playground', 'arcade', 'walletBridge.ts'), 'utf8');
+  // 공유 지갑: 모의투자 지갑 변경(transfer 등)도 아케이드 스냅샷에 반영한다.
+  assert.match(bridge, /useMarketPreviewStore\.subscribe/);
+  assert.match(bridge, /applyMarketWallet/);
+});
+
 test('the dev electron api mirrors the daily-login grant on preview session', () => {
   const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
   const devApi = readFileSync(path.join(root, 'src', 'mocks', 'devElectronAPI.ts'), 'utf8');

@@ -41,6 +41,7 @@ interface ArcadeState {
   finishRun(input: ArcadeFinishInput): Promise<ArcadeFinishResult | null>;
   setSlackNotify(enabled: boolean): Promise<boolean>;
   applyWalletPush(update: ArcadeWalletPush): void;
+  applyMarketWallet(wallet: ArcadeWallet): void;
   clearError(): void;
 }
 
@@ -279,6 +280,25 @@ export function createArcadeStore(
           snapshot: state.snapshot ? { ...state.snapshot, wallet: update.wallet } : state.snapshot,
         }));
         syncWallet(update.wallet);
+      },
+
+      // 모의투자 지갑 이동 등 마켓 쪽 변경을 아케이드 스냅샷에 반영한다.
+      // 마켓으로 되돌려 동기화하지 않아(무한 루프 방지) 단방향으로만 흐른다.
+      applyMarketWallet(wallet) {
+        const snapshot = get().snapshot;
+        if (!snapshot) return;
+        if (
+          snapshot.wallet.walletPoints === wallet.walletPoints
+          && snapshot.wallet.lifetimeEarnedPoints === wallet.lifetimeEarnedPoints
+        ) {
+          return;
+        }
+        set({
+          snapshot: {
+            ...snapshot,
+            wallet: { walletPoints: wallet.walletPoints, lifetimeEarnedPoints: wallet.lifetimeEarnedPoints },
+          },
+        });
       },
 
       clearError() {

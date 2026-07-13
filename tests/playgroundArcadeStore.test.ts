@@ -163,6 +163,18 @@ test('applyWalletPush updates the arcade snapshot and syncs the market wallet', 
   assert.deepEqual(synced.at(-1), { walletPoints: 7777, lifetimeEarnedPoints: 8888 });
 });
 
+test('applyMarketWallet reflects market wallet changes without syncing back to market', async () => {
+  const synced: ArcadeWallet[] = [];
+  const gateway = createMockGateway();
+  const store = createArcadeStore(gateway, (wallet) => synced.push(wallet));
+  await store.getState().load('user-1');
+  const syncedBefore = synced.length;
+  store.getState().applyMarketWallet({ walletPoints: 3333, lifetimeEarnedPoints: 5000 });
+  assert.equal(store.getState().snapshot?.wallet.walletPoints, 3333);
+  // 마켓으로 되돌려 동기화하지 않는다(무한 루프 방지).
+  assert.equal(synced.length, syncedBefore);
+});
+
 test('setSlackNotify persists the config through the gateway', async () => {
   const gateway = createMockGateway();
   const store = createArcadeStore(gateway, noopSync);
