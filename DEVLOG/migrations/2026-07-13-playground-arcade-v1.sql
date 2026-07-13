@@ -638,6 +638,11 @@ BEGIN
       IF v_game_id NOT IN ('snake', 'tetris') THEN
         RAISE EXCEPTION 'game is not available' USING ERRCODE = '22023';
       END IF;
+      -- runId 는 반드시 uuid 여야 한다. game-finish 가 uuid 로 캐스트해 runs 에 넣으므로,
+      -- 여기서 먼저 검증하지 않으면 완료할 수 없는 입장료만 차감된 원장 행이 남는다.
+      IF v_run_id !~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN
+        RAISE EXCEPTION 'game run id is invalid' USING ERRCODE = '22023';
+      END IF;
       IF p_request_id IS DISTINCT FROM 'game-entry:' || v_run_id THEN
         RAISE EXCEPTION 'game start request id is invalid' USING ERRCODE = '22023';
       END IF;
@@ -893,22 +898,27 @@ BEGIN
           WHERE r.user_id = p_user_id::text AND r.game_id = 'snake' AND r.score >= 55
         );
       ELSIF v_ach_id = 'snake-golden-5' THEN
+        -- meta 값은 반드시 숫자일 때만 캐스트한다. 비숫자 문자열이 저장돼 있으면
+        -- ::bigint 캐스트가 예외를 던져 도전과제 해금 전체가 막히므로 read RPC 와 같은 가드를 둔다.
         v_condition_met := EXISTS (
           SELECT 1 FROM public.playground_game_runs AS r
           WHERE r.user_id = p_user_id::text AND r.game_id = 'snake'
-            AND COALESCE((r.meta ->> 'goldenEaten')::bigint, 0) >= 5
+            AND r.meta ->> 'goldenEaten' ~ '^[0-9]+$'
+            AND (r.meta ->> 'goldenEaten')::bigint >= 5
         );
       ELSIF v_ach_id = 'tetris-tetris' THEN
         v_condition_met := EXISTS (
           SELECT 1 FROM public.playground_game_runs AS r
           WHERE r.user_id = p_user_id::text AND r.game_id = 'tetris'
-            AND COALESCE((r.meta ->> 'maxLineClear')::bigint, 0) >= 4
+            AND r.meta ->> 'maxLineClear' ~ '^[0-9]+$'
+            AND (r.meta ->> 'maxLineClear')::bigint >= 4
         );
       ELSIF v_ach_id = 'tetris-level-10' THEN
         v_condition_met := EXISTS (
           SELECT 1 FROM public.playground_game_runs AS r
           WHERE r.user_id = p_user_id::text AND r.game_id = 'tetris'
-            AND COALESCE((r.meta ->> 'levelReached')::bigint, 0) >= 10
+            AND r.meta ->> 'levelReached' ~ '^[0-9]+$'
+            AND (r.meta ->> 'levelReached')::bigint >= 10
         );
       ELSIF v_ach_id = 'tetris-30k' THEN
         v_condition_met := EXISTS (
