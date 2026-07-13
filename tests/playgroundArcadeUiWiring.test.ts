@@ -10,6 +10,7 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const read = (...seg: string[]) => readFileSync(path.join(root, ...seg), 'utf8');
 const chromeSource = read('src', 'views', 'playground', 'arcade', 'ArcadeStageChrome.tsx');
 const resultSource = read('src', 'views', 'playground', 'arcade', 'RunResultOverlay.tsx');
+const snakeStageSource = read('src', 'views', 'playground', 'arcade', 'SnakeStage.tsx');
 
 test('advanceFixedStep accumulates frames and steps once per crossed interval', () => {
   let steps = 0;
@@ -64,8 +65,8 @@ test('ArcadeStageChrome renders per-phase overlays and guards start/back', () =>
   assert.match(chromeSource, /phase === 'countdown'/);
   assert.match(chromeSource, /phase === 'paused'/);
   assert.match(chromeSource, /phase === 'result'/);
-  // 시작 버튼은 사유가 있으면 비활성
-  assert.match(chromeSource, /disabled=\{!!startDisabledReason\}/);
+  // 시작 버튼은 사유가 있거나 입장 요청 진행 중이면 비활성(입장료 중복 차감 방지)
+  assert.match(chromeSource, /disabled=\{!!startDisabledReason \|\| !!startPending\}/);
   assert.match(chromeSource, /entryFee\}P 내고 시작/);
   // 진행/일시정지/카운트다운에서만 뒤로가기 인터셉트
   assert.match(chromeSource, /phase === 'running' \|\| phase === 'paused' \|\| phase === 'countdown'/);
@@ -77,6 +78,15 @@ test('ArcadeStageChrome renders per-phase overlays and guards start/back', () =>
   assert.match(chromeSource, /aria-live="polite"/);
   assert.match(chromeSource, /useReducedMotion/);
   assert.match(chromeSource, /if \(prefersReducedMotion\)/);
+});
+
+test('SnakeStage guards against duplicate entry charges and exits directly', () => {
+  // 입장 요청 진행 중이면 재시작 무시(동기 ref 가드) + 버튼 비활성 전달
+  assert.match(snakeStageSource, /if \(startingRef\.current\) return;/);
+  assert.match(snakeStageSource, /startingRef\.current = true;/);
+  assert.match(snakeStageSource, /startPending=\{starting\}/);
+  // 종료는 루프를 멈추고 onExit(직접 이탈)로 나간다
+  assert.match(snakeStageSource, /loopRef\.current\?\.stop\(\);\s*onExit\(\);/);
 });
 
 test('RunResultOverlay sequences grade, reward, best banner and achievements', () => {

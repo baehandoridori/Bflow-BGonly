@@ -282,7 +282,9 @@ export default function PlaygroundView({ authorizedHansol }: PlaygroundViewProps
             <GameHost
               game={route.game}
               returnLabel={route.returnTo === 'house' ? 'JBBJ 하우스' : '게임 로비'}
-              onExit={requestBack}
+              // 게임 종료(확인 후)·결과 '로비로' 는 뒤로가기 인터셉터를 거치지 않는 직접 이탈로 나간다.
+              // requestBack 을 쓰면 진행 중 인터셉터가 그 요청을 다시 가로채 갇힌다(Codex P1).
+              onExit={() => move({ kind: 'return-to-source' })}
             />
           </PlaygroundShell>
         )}

@@ -39,6 +39,8 @@ export function SnakeStage({ onExit }: { onExit: () => void }) {
   const [phase, setPhase] = useState<ArcadeStagePhase>('ready');
   const [result, setResult] = useState<ArcadeFinishResult | null>(null);
   const [hud, setHud] = useState({ length: 4, golden: 0 });
+  const [starting, setStarting] = useState(false);
+  const startingRef = useRef(false); // 동기 가드 — 더블클릭이 첫 렌더 전에 두 번 실행되는 것 방지
 
   const engineRef = useRef<SnakeState | null>(null);
   const loopRef = useRef<FixedStepLoop | null>(null);
@@ -131,11 +133,19 @@ export function SnakeStage({ onExit }: { onExit: () => void }) {
   }, [draw, finalize]);
 
   const handleStart = useCallback(async () => {
-    const started = await startRun('snake');
-    if (!started) return; // 잔액 부족 등 — 스토어가 에러 처리
-    runIdRef.current = started.runId;
-    setResult(null);
-    setPhase('countdown');
+    if (startingRef.current) return; // 진행 중이면 무시 — 입장료 중복 차감 방지
+    startingRef.current = true;
+    setStarting(true);
+    try {
+      const started = await startRun('snake');
+      if (!started) return; // 잔액 부족 등 — 스토어가 에러 처리
+      runIdRef.current = started.runId;
+      setResult(null);
+      setPhase('countdown');
+    } finally {
+      startingRef.current = false;
+      setStarting(false);
+    }
   }, [startRun]);
 
   const handleReplay = useCallback(() => {
@@ -202,6 +212,7 @@ export function SnakeStage({ onExit }: { onExit: () => void }) {
       onQuit={handleQuit}
       onCountdownComplete={beginLoop}
       startDisabledReason={startDisabledReason}
+      startPending={starting}
       todayRewardedRuns={todayRewardedRuns}
       entryFee={entryFee}
       dailyRewardCap={ARCADE_BALANCE.dailyRewardedRunsCap}

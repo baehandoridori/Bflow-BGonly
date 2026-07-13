@@ -23,6 +23,7 @@ export interface ArcadeStageChromeProps {
   onQuit: () => void;
   onCountdownComplete: () => void;
   startDisabledReason?: string;
+  startPending?: boolean; // 입장 요청 진행 중 — 중복 시작(입장료 중복 차감) 방지용 비활성
   todayRewardedRuns: number;
   entryFee: number;
   dailyRewardCap: number;
@@ -48,7 +49,7 @@ export function ArcadeStageChrome(props: ArcadeStageChromeProps) {
   const {
     game, phase, hud, stage, result,
     onStart, onResume, onQuit, onCountdownComplete,
-    startDisabledReason, todayRewardedRuns, entryFee, dailyRewardCap, keyHints,
+    startDisabledReason, startPending, todayRewardedRuns, entryFee, dailyRewardCap, keyHints,
   } = props;
 
   const prefersReducedMotion = useReducedMotion();
@@ -108,9 +109,9 @@ export function ArcadeStageChrome(props: ArcadeStageChromeProps) {
               type="button"
               className="pg-arcade-btn"
               onClick={onStart}
-              disabled={!!startDisabledReason}
+              disabled={!!startDisabledReason || !!startPending}
             >
-              {entryFee}P 내고 시작
+              {startPending ? '시작하는 중…' : `${entryFee}P 내고 시작`}
             </button>
             {startDisabledReason && <p className="pg-arcade-overlay__hint">{startDisabledReason}</p>}
           </div>
