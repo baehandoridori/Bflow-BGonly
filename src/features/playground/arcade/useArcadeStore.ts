@@ -107,6 +107,8 @@ export function createArcadeStore(
         runRewardPoints: input.runRewardPoints,
         aggregates: input.aggregatesOverride ?? snapshot.aggregates,
         attendanceStreakDays: snapshot.attendance.streakDays,
+        // load 시에도 점수형 게임 과제를 누적 최고 점수로 복구 평가한다.
+        gameBests: { snake: snapshot.games.snake.myBestScore, tetris: snapshot.games.tetris.myBestScore },
         unlockedIds,
       });
 
