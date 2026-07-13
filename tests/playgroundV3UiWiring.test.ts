@@ -269,6 +269,7 @@ test('PlaygroundView wires the approved lobby through the store-aware root only'
   assert.match(source, /advanceRecommendation/);
   assert.match(source, /buildPointRanking/);
   assert.match(source, /useArcadeStore/);
+  assert.match(source, /initArcadeWalletBridge\(\)/);
   assert.match(source, /arcadeSnapshot\?\.wallet\.walletPoints \?\? null/);
   assert.match(source, /arcadeSnapshot\?\.wallet\.lifetimeEarnedPoints \?\? null/);
   assert.match(source, /visible\?\.account\.cashWon \?\? null/);

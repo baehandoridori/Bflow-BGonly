@@ -195,8 +195,11 @@ export class ArcadeService {
   ): Promise<{ result: ArcadeExecuteResult; retried: boolean }> {
     const startedEpoch = this.deps.getSessionEpoch();
     return this.queue.enqueue(userId, async () => {
+      // 큐 대기 중 세션이 바뀌었으면(로그아웃/사용자 전환) RPC 자체를 실행하지 않는다
+      // — 스테일 입장료 차감·포인트 지급을 서버에 남기지 않기 위해 쓰기 전에 먼저 검증한다.
+      this.assertSameSession(startedEpoch);
       const { value, retried } = await this.withRetryMeta(() => this.deps.execute(userId, command));
-      // 진행 중 세션이 바뀌었으면(로그아웃/사용자 전환) 스테일 결과를 반영·broadcast·슬랙하지 않는다.
+      // RPC 후에도 재확인 — 스테일 결과를 반영·broadcast·슬랙하지 않는다.
       this.assertSameSession(startedEpoch);
       const result = asResult(value);
       this.maybeNotifyRecord(command, result, retried);

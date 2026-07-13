@@ -208,6 +208,28 @@ test('a best without slack notifications enabled stays silent', async () => {
   assert.equal(harness.slacks.length, 0);
 });
 
+test('execute does not run the RPC when the session already changed before the queued op', async () => {
+  let epoch = 1;
+  const executed: ArcadeExecuteCommand[] = [];
+  const service = new ArcadeService({
+    read: async () => ({}),
+    execute: async (_userId, command) => {
+      executed.push(command);
+      return { awarded: true, points: 5, wallet: { walletPoints: 1, lifetimeEarnedPoints: 1 } };
+    },
+    resolveActor: () => CANONICAL,
+    broadcastWalletUpdate: () => {},
+    sendSlackRecord: () => {},
+    getNowMs: () => FIXED_NOW,
+    getSessionEpoch: () => epoch,
+    logger: { error: () => {} },
+  });
+  const pending = service.execute('u-canonical', { kind: 'activity', requestId: 'comment:c', activity: 'comment' });
+  epoch = 2; // 큐 op 이 실행되기 전에 세션 전환
+  await assert.rejects(pending, /세션이 바뀌/);
+  assert.equal(executed.length, 0, '세션이 바뀌면 RPC 를 아예 실행하지 않는다');
+});
+
 test('execute discards its result and skips the broadcast when the session changes mid-flight', async () => {
   let epoch = 1;
   const executed: ArcadeExecuteCommand[] = [];

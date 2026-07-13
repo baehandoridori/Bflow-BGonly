@@ -10,6 +10,7 @@ import {
 import { advanceRecommendation, createRecommendationSession } from '@/features/playground/recommendation';
 import { buildPointRanking, mergeRankingTeammates } from '@/features/playground/ranking';
 import { useArcadeStore } from '@/features/playground/arcade/useArcadeStore';
+import { initArcadeWalletBridge } from '@/features/playground/arcade/walletBridge';
 import { subscribePlaygroundNativeBack } from '@/features/playground/nativeBackBridge';
 import {
   getPlaygroundRouteIdentity,
@@ -158,6 +159,9 @@ export default function PlaygroundView({ authorizedHansol }: PlaygroundViewProps
 
   useEffect(() => {
     if (!currentUser?.id) return;
+    // 몰입형 playground 로 바로 복원되면 Header(포인트 배지)가 안 뜨므로 여기서도 브릿지를
+    // 초기화한다(중복 등록 가드가 있어 배지와 함께 켜져도 안전). 이후 지갑 push·마켓 변경 수신.
+    initArcadeWalletBridge();
     void loadArcade(currentUser.id);
   }, [currentUser?.id, loadArcade]);
 
