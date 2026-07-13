@@ -5,7 +5,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { formatHeaderPoints } from '../src/components/layout/headerPointsFormat.ts';
-import { buildPointRanking, type RankingTeammate } from '../src/features/playground/ranking.ts';
+import { buildPointRanking, mergeRankingTeammates, type RankingTeammate } from '../src/features/playground/ranking.ts';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const badgeSource = readFileSync(path.join(root, 'src', 'components', 'layout', 'HeaderPointsBadge.tsx'), 'utf8');
@@ -94,6 +94,27 @@ test('buildPointRanking is unavailable until the current wallet loads', () => {
   assert.equal(model.rankLabel, '순위 계산 중');
   assert.equal(model.balanceLabel, '— P');
   assert.equal(model.current.rank, null);
+});
+
+test('mergeRankingTeammates keeps scored leaderboard rows and appends wallet-less directory users', () => {
+  const merged = mergeRankingTeammates(
+    'me',
+    [
+      { userId: 'me', name: '배한솔', lifetimeEarnedPoints: 48_200 }, // 현재 사용자 → 제외
+      { userId: 'preview-minji', name: '민지', lifetimeEarnedPoints: 4_920 }, // 디렉터리에 없어도 점수 보존
+      { userId: 'u-doyun', name: '도윤', lifetimeEarnedPoints: 3_860 }, // 디렉터리에도 있음 → 한 번만
+    ],
+    [
+      { id: 'me', name: '배한솔' }, // 현재 사용자 → 제외
+      { id: 'u-doyun', name: '도윤' }, // 이미 리더보드에서 봄 → 건너뜀
+      { id: 'u-seoa', name: '서아' }, // 지갑 없음 → 점수 null 로 이어붙임
+    ],
+  );
+  assert.deepEqual(merged, [
+    { id: 'preview-minji', name: '민지', lifetimeEarnedPoints: 4_920 },
+    { id: 'u-doyun', name: '도윤', lifetimeEarnedPoints: 3_860 },
+    { id: 'u-seoa', name: '서아', lifetimeEarnedPoints: null },
+  ]);
 });
 
 test('the hardcoded teammate fixture is gone from ranking.ts', () => {

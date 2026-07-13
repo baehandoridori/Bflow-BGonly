@@ -22,6 +22,28 @@ export interface PointRankingModel {
 
 const collator = new Intl.Collator('ko-KR');
 
+// 점수가 있는 지갑 리더보드 행을 먼저 보존하고(디렉터리에 없는 팀원도 유지), 그다음
+// 지갑이 없는 디렉터리 사용자를 점수 null 로 이어붙인다. 현재 사용자는 양쪽에서 제외한다.
+export function mergeRankingTeammates(
+  currentUserId: string | null,
+  walletLeaderboard: readonly { userId: string; name: string; lifetimeEarnedPoints: number }[],
+  directoryUsers: readonly { id: string; name: string }[],
+): RankingTeammate[] {
+  const seen = new Set<string>();
+  const result: RankingTeammate[] = [];
+  for (const entry of walletLeaderboard) {
+    if (entry.userId === currentUserId || seen.has(entry.userId)) continue;
+    seen.add(entry.userId);
+    result.push({ id: entry.userId, name: entry.name, lifetimeEarnedPoints: entry.lifetimeEarnedPoints });
+  }
+  for (const user of directoryUsers) {
+    if (user.id === currentUserId || seen.has(user.id)) continue;
+    seen.add(user.id);
+    result.push({ id: user.id, name: user.name, lifetimeEarnedPoints: null });
+  }
+  return result;
+}
+
 interface RankingSeed {
   id: string;
   name: string;

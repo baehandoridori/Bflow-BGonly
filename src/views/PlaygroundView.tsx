@@ -8,7 +8,7 @@ import {
   type PlaygroundMarketRestoreRequest,
 } from '@/features/playground/history';
 import { advanceRecommendation, createRecommendationSession } from '@/features/playground/recommendation';
-import { buildPointRanking, type RankingTeammate } from '@/features/playground/ranking';
+import { buildPointRanking, mergeRankingTeammates } from '@/features/playground/ranking';
 import { useArcadeStore } from '@/features/playground/arcade/useArcadeStore';
 import { subscribePlaygroundNativeBack } from '@/features/playground/nativeBackBridge';
 import {
@@ -75,16 +75,10 @@ export default function PlaygroundView({ authorizedHansol }: PlaygroundViewProps
   const arcadeWalletPoints = arcadeSnapshot?.wallet.walletPoints ?? null;
   const arcadeLifetimePoints = arcadeSnapshot?.wallet.lifetimeEarnedPoints ?? null;
   const walletLeaderboard = arcadeSnapshot?.walletLeaderboard;
-  const teammates = useMemo<RankingTeammate[]>(() => {
-    const lifetimeById = new Map((walletLeaderboard ?? []).map((entry) => [entry.userId, entry.lifetimeEarnedPoints]));
-    return users
-      .filter((teammate) => teammate.id !== currentUserId)
-      .map((teammate) => ({
-        id: teammate.id,
-        name: teammate.name,
-        lifetimeEarnedPoints: lifetimeById.get(teammate.id) ?? null,
-      }));
-  }, [users, walletLeaderboard, currentUserId]);
+  const teammates = useMemo(
+    () => mergeRankingTeammates(currentUserId, walletLeaderboard ?? [], users),
+    [users, walletLeaderboard, currentUserId],
+  );
   const ranking = useMemo(() => buildPointRanking({
     id: currentUser?.id ?? 'preview-user',
     name: userName,
