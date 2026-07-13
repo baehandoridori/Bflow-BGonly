@@ -41,6 +41,19 @@ test('browser preview Electron API mock persists added scenes across readAll syn
   assert.match(mockApi, /supabaseAddScenes:\s*async \(sheetName, scenes\)/);
 });
 
+test('browser preview mirrors work-activity point awards so the header badge updates', async () => {
+  const mockApi = await readRepoFile('src', 'mocks', 'devElectronAPI.ts');
+
+  assert.match(mockApi, /function maybeAwardPreviewActivity/);
+  // 프로덕션 훅과 같은 조건으로 4개 활동을 미러링한다.
+  assert.match(mockApi, /if \(value === true\) maybeAwardPreviewActivity\('scene-stage', sceneUuid, stage\)/);
+  assert.match(mockApi, /if \(sceneState === 'done'\) maybeAwardPreviewActivity\('scene-phase-done', sceneUuid\)/);
+  assert.match(mockApi, /if \(!characterId\) maybeAwardPreviewActivity\('comment', commentId\)/);
+  assert.match(mockApi, /maybeAwardPreviewActivity\('retake-done', id\)/);
+  // 적립되면 지갑 push 로 헤더 배지 획득 연출까지 재현한다.
+  assert.match(mockApi, /useArcadeStore\.getState\(\)\.applyWalletPush/);
+});
+
 test('browser preview starts directly at the login form after the mock is installed', async () => {
   const loginScreen = await readRepoFile('src', 'components', 'auth', 'LoginScreen.tsx');
 

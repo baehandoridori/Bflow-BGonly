@@ -21,6 +21,7 @@ import type { MarketPreviewGateway } from '@/features/playground/market/previewG
 import type { MarketRemoteState, MarketSnapshot } from '@/features/playground/market/types';
 import { createArcadeLocalStorageGateway } from '@/features/playground/arcade/localStorageGateway';
 import type { ArcadePreviewGateway } from '@/features/playground/arcade/previewGateway';
+import { useArcadeStore } from '@/features/playground/arcade/useArcadeStore';
 
 type PreviewUser = AppUser & { password: string };
 
@@ -137,6 +138,47 @@ function maybeGrantPreviewDailyLogin(): void {
     })
     .catch(() => {
       /* fire-and-forget — 다음 세션 트리거에서 재시도 */
+    });
+}
+
+type PreviewActivityKind = 'scene-stage' | 'scene-phase-done' | 'comment' | 'retake-done';
+
+// 프로덕션 arcadeService.activityRequestId 와 동일한 규칙(프리뷰/테스트 모드 패리티).
+function previewActivityRequestId(activity: PreviewActivityKind, refId: string, stage?: string): string | null {
+  switch (activity) {
+    case 'scene-stage':
+      return stage ? `scene-stage:${refId}:${stage}` : null;
+    case 'scene-phase-done':
+      return `scene-phase-done:${refId}`;
+    case 'comment':
+      return `comment:${refId}`;
+    case 'retake-done':
+      return `retake-done:${refId}`;
+    default:
+      return null;
+  }
+}
+
+// 프리뷰에는 main 프로세스가 없어 production 의 활동 훅(awardActivity)이 없다. 씬 체크·완료·댓글·
+// 리테이크 담당 완료 시 여기서 적립을 미러링하고, 성공하면 지갑 push 로 헤더 배지 획득 연출까지
+// 재현한다(canonical 배한솔 한정, fire-and-forget, 서버 규칙과 같은 일일 상한은 게이트웨이가 처리).
+function maybeAwardPreviewActivity(activity: PreviewActivityKind, refId: string, stage?: string): void {
+  const user = previewCanonicalUserId
+    ? getMockUsers().find((candidate) => candidate.id === previewCanonicalUserId)
+    : null;
+  if (user?.name !== '배한솔' || user.slackId !== 'U05DFV9UAN5') return;
+  const requestId = previewActivityRequestId(activity, refId, stage);
+  if (!requestId) return;
+  void getPreviewArcadeGateway()
+    .execute({ kind: 'activity', activity, requestId })
+    .then((result) => {
+      // 'awarded' 키는 activity 결과에만 있어 union 을 ArcadeActivityResult 로 좁힌다.
+      if ('awarded' in result && result.awarded && result.points > 0) {
+        useArcadeStore.getState().applyWalletPush({ wallet: result.wallet, delta: result.points, reason: activity });
+      }
+    })
+    .catch(() => {
+      /* fire-and-forget — 프리뷰 적립 실패는 무시 */
     });
 }
 
@@ -736,6 +778,7 @@ export function installDevElectronAPI(): void {
     // v1.25.0~ 액팅 단계 토글 + 리테이크 알림 (mock — 로그만)
     supabaseUpdateScenePhase: async (sceneUuid, sceneState, workRound, feedbackRound) => {
       console.log('[DEV] supabaseUpdateScenePhase:', { sceneUuid, sceneState, workRound, feedbackRound });
+      if (sceneState === 'done') maybeAwardPreviewActivity('scene-phase-done', sceneUuid);
     },
     supabaseDispatchFeedbackNotification: async (payload) => {
       console.log('[DEV] supabaseDispatchFeedbackNotification:', payload);
@@ -839,7 +882,9 @@ export function installDevElectronAPI(): void {
       scenes.forEach((scene) => addMockScene(sheetName, scene.sceneId, scene.assignee, scene.memo));
     },
     supabaseDeleteScene: async () => {},
-    supabaseUpdateSceneStage: async () => {},
+    supabaseUpdateSceneStage: async (sceneUuid, stage, value) => {
+      if (value === true) maybeAwardPreviewActivity('scene-stage', sceneUuid, stage);
+    },
     supabaseReadSceneWorkLinks: async (sceneUuids?: string[]) => {
       const links = getMockSceneWorkLinks();
       if (!sceneUuids?.length) return links;
@@ -944,6 +989,8 @@ export function installDevElectronAPI(): void {
         parentCommentId: parentCommentId ?? null,
       });
       localStore.__commentRows = comments;
+      // 캐릭터 댓글은 씬 활동이 아니므로 제외(프로덕션 main.ts 와 동일).
+      if (!characterId) maybeAwardPreviewActivity('comment', commentId);
     },
     supabaseEditComment: async (commentId, text, mentions, images) => {
       const comments = getMockCommentRows();
@@ -1078,6 +1125,16 @@ export function installDevElectronAPI(): void {
       });
       localStore.__revisionRows = revisions;
       window.dispatchEvent(new CustomEvent('bflow:revisions-invalidated'));
+
+      // 리테이크 담당 완료 전이에서만 적립(프로덕션 main.ts 의 statusActionType 우선순위와 동일 조건).
+      if (
+        updates.__op !== 'revert_final'
+        && !updates.finalResolvedAt
+        && updates.__op !== 'reassign'
+        && updates.status === 'assignee_done'
+      ) {
+        maybeAwardPreviewActivity('retake-done', id);
+      }
 
       if (updates.status && updates.status !== previousStatus) {
         const actionType = updates.status === 'resolved'
