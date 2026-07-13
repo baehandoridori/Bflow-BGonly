@@ -26,7 +26,7 @@ import { getPlaygroundMovePlan } from '@/features/playground/transition/playgrou
 import type { DotWipeRequest } from '@/features/playground/transition/usePlaygroundEntryStore';
 import { useMarketPreviewStore } from '@/features/playground/market/useMarketPreviewStore';
 import { useAuthStore } from '@/stores/useAuthStore';
-import { ComingSoonGame } from './playground/ComingSoonGame';
+import { GameHost } from './playground/arcade/GameHost';
 import { JbbjHouse } from './playground/JbbjHouse';
 import { PlaygroundBackProvider } from './playground/PlaygroundBackProvider';
 import { PlaygroundLobby } from './playground/PlaygroundLobby';
@@ -143,7 +143,7 @@ export default function PlaygroundView({ authorizedHansol }: PlaygroundViewProps
     const current = historyRef.current.current();
     const fallback = current.kind === 'house'
       ? navigatePlayground(current, { kind: 'go-lobby' })
-      : current.kind === 'coming-soon' || current.kind === 'market'
+      : current.kind === 'game' || current.kind === 'market'
         ? navigatePlayground(current, { kind: 'return-to-source' })
         : null;
     if (!fallback) return;
@@ -266,23 +266,23 @@ export default function PlaygroundView({ authorizedHansol }: PlaygroundViewProps
             />
           </PlaygroundShell>
         )}
-        {route.kind === 'coming-soon' && (
+        {route.kind === 'game' && (
           <PlaygroundShell
             header={{
               titleId: 'playground-game-title',
               title: GAME_DEFINITIONS[route.game].koName,
-              description: '기록과 보상 규칙을 준비하고 있어요',
+              description: route.game === 'snake' ? '포인트를 내고 시작해 등급 보상을 받아요' : '기록과 보상 규칙을 준비하고 있어요',
               backLabel: route.returnTo === 'house' ? 'JBBJ 하우스' : '게임 로비',
               onBack: requestBack,
               showHouse: false,
               ranking,
             }}
-            surfaceKey={`coming-soon-${route.game}`}
+            surfaceKey={`game-${route.game}`}
           >
-            <ComingSoonGame
-              game={GAME_DEFINITIONS[route.game]}
+            <GameHost
+              game={route.game}
               returnLabel={route.returnTo === 'house' ? 'JBBJ 하우스' : '게임 로비'}
-              onBack={requestBack}
+              onExit={requestBack}
             />
           </PlaygroundShell>
         )}

@@ -221,10 +221,10 @@ test('house and game preparation use the real Shell with source-aware returns', 
   assert.match(source, /title:\s*'JBBJ 하우스'/);
   assert.match(source, /onBack:\s*requestBack/);
   assert.match(source, /<JbbjHouse[\s\S]*?ranking=\{ranking\}/);
-  assert.match(source, /route\.kind === 'coming-soon' && \(\s*<PlaygroundShell/);
-  assert.match(source, /game=\{GAME_DEFINITIONS\[route\.game\]\}/);
+  assert.match(source, /route\.kind === 'game' && \(\s*<PlaygroundShell/);
+  assert.match(source, /<GameHost[\s\S]*?game=\{route\.game\}/);
   assert.match(source, /returnLabel=\{route\.returnTo === 'house' \? 'JBBJ 하우스' : '게임 로비'\}/);
-  assert.match(source, /onBack=\{requestBack\}/);
+  assert.match(source, /<GameHost[\s\S]*?onExit=\{requestBack\}/);
   assert.match(source, /<MarketRouter[\s\S]*?onBack=\{requestBack\}/);
 });
 
@@ -280,7 +280,7 @@ test('PlaygroundView wires the approved lobby through the store-aware root only'
   assert.match(source, /ranking=\{ranking\}/);
   assert.match(source, /marketCashWon=\{marketCashWon\}/);
   assert.match(source, /<JbbjHouse/);
-  assert.match(source, /<ComingSoonGame/);
+  assert.match(source, /<GameHost/);
   assert.match(source, /<MarketRouter/);
   assert.doesNotMatch(recommendation, /export function pickRecommendation/);
 });

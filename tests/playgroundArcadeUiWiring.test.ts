@@ -38,9 +38,9 @@ test('advanceFixedStep caps catch-up steps to avoid the spiral of death', () => 
 });
 
 test('createFixedStepLoop does not advance simulation while paused', () => {
-  let cb: ((t: number) => void) | null = null;
-  const requestFrame = (fn: (t: number) => void) => { cb = fn; return 1; };
-  const cancelFrame = () => { cb = null; };
+  const frame: { cb: ((t: number) => void) | null } = { cb: null };
+  const requestFrame = (fn: (t: number) => void) => { frame.cb = fn; return 1; };
+  const cancelFrame = () => { frame.cb = null; };
   let steps = 0;
   const loop = createFixedStepLoop({
     getStepMs: () => 100,
@@ -50,12 +50,12 @@ test('createFixedStepLoop does not advance simulation while paused', () => {
     cancelFrame,
   });
   loop.start();
-  cb?.(1050); // delta 50 → 0 step
-  cb?.(1160); // delta 110 → 1 step
+  frame.cb?.(1050); // delta 50 → 0 step
+  frame.cb?.(1160); // delta 110 → 1 step
   assert.equal(steps, 1);
   loop.pause();
   assert.equal(loop.isRunning(), false);
-  cb?.(2000); // paused: tick 은 early-return 이어야 한다
+  frame.cb?.(2000); // paused: tick 은 early-return 이어야 한다
   assert.equal(steps, 1, '일시정지 중에는 스텝이 늘지 않는다');
 });
 

@@ -79,7 +79,7 @@ test('house entry and source return produce immediate surface routes', () => {
   );
   assert.deepEqual(
     getPlaygroundMovePlan(
-      { kind: 'coming-soon', game: 'snake', returnTo: 'house' },
+      { kind: 'game', game: 'snake', returnTo: 'house' },
       { kind: 'return-to-source' },
       { x: 0, y: 0 },
     ),
