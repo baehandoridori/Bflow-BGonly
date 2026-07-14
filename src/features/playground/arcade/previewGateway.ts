@@ -76,8 +76,9 @@ export function rollOverPreviewDailyState(
   const consecutive = isNextKstDay(fromDate, toDate);
   snapshot.attendance.todayGranted = false;
   snapshot.todayActivityCounts = { sceneProgress: 0, comment: 0, retakeDone: 0 };
-  snapshot.games.snake.todayRewardedRuns = 0;
-  snapshot.games.tetris.todayRewardedRuns = 0;
+  Object.values(snapshot.games).forEach((stats) => {
+    stats.todayRewardedRuns = 0;
+  });
   // 연속 출석 유지 조건: 바로 다음 날 + 직전 날 출석함. 그 외(공백)는 연속이 끊긴다.
   if (!(consecutive && wasGrantedPrevDay)) {
     snapshot.attendance.streakDays = 0;
@@ -85,10 +86,10 @@ export function rollOverPreviewDailyState(
   // KST 주(월요일 시작)가 바뀌면 주간 집계도 리셋한다 — 서버는 이번 주 원장에서 주간을 재계산하므로,
   // 프리뷰도 지난주 주간 최고·순위표를 비워야 '이번 주' 탭이 서버와 같이 동작한다. 전체(all-time)는 유지.
   if (kstWeekStartOfDate(fromDate) !== kstWeekStartOfDate(toDate)) {
-    snapshot.games.snake.myWeeklyBestScore = 0;
-    snapshot.games.tetris.myWeeklyBestScore = 0;
-    snapshot.games.snake.leaderboardWeekly = [];
-    snapshot.games.tetris.leaderboardWeekly = [];
+    Object.values(snapshot.games).forEach((stats) => {
+      stats.myWeeklyBestScore = 0;
+      stats.leaderboardWeekly = [];
+    });
   }
 }
 
@@ -188,6 +189,13 @@ export function applyArcadePreviewCommand(
     }
 
     case 'game-finish': {
+      const balance = ARCADE_BALANCE.games[command.gameId];
+      if (!Number.isInteger(command.score) || command.score < 0 || command.score > balance.maxScore) {
+        throw new Error(`${command.gameId} score is out of range`);
+      }
+      if (!Number.isInteger(command.durationMs) || command.durationMs < 1_000 || command.durationMs > 14_400_000) {
+        throw new Error('game duration is out of range');
+      }
       const startedGame = ctx.startedGameId(command.runId);
       if (startedGame === null) {
         throw new Error('시작되지 않은 게임은 기록할 수 없어요');

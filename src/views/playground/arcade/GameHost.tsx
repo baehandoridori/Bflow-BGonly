@@ -1,6 +1,7 @@
 import { GAME_DEFINITIONS } from '@/features/playground/catalog';
 import type { PreviewGame } from '@/features/playground/routes';
 import { ComingSoonGame } from '../ComingSoonGame';
+import { Merge2048Stage } from './Merge2048Stage';
 import { SnakeStage } from './SnakeStage';
 import { TetrisStage } from './TetrisStage';
 
@@ -19,6 +20,9 @@ export function GameHost({
   }
   if (game === 'tetris') {
     return <TetrisStage onExit={onExit} returnLabel={returnLabel} />;
+  }
+  if (game === '2048') {
+    return <Merge2048Stage onExit={onExit} returnLabel={returnLabel} />;
   }
   return <ComingSoonGame game={GAME_DEFINITIONS[game]} returnLabel={returnLabel} onBack={onExit} />;
 }

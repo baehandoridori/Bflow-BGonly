@@ -8,6 +8,7 @@ import { useAuthStore } from '@/stores/useAuthStore';
 const GAME_TABS: { id: ArcadeGameId; label: string }[] = [
   { id: 'snake', label: '스네이크' },
   { id: 'tetris', label: '테트리스' },
+  { id: '2048', label: '2048' },
 ];
 
 const PERIOD_TABS = [
@@ -18,7 +19,7 @@ const PERIOD_TABS = [
 type PeriodId = (typeof PERIOD_TABS)[number]['id'];
 
 // 게임별 점수 단위(라벨). 지금은 둘 다 '점'이지만 게임이 늘면 여기서 갈린다.
-const SCORE_UNIT: Record<ArcadeGameId, string> = { snake: '점', tetris: '점' };
+const SCORE_UNIT: Record<ArcadeGameId, string> = { snake: '점', tetris: '점', '2048': '점' };
 
 const VISIBLE_ROWS = 5;
 

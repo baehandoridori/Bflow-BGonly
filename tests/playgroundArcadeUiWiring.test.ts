@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -15,6 +15,8 @@ const snakeStageSource = read('src', 'views', 'playground', 'arcade', 'SnakeStag
 const loopSource = read('src', 'features', 'playground', 'arcade', 'games', 'loop.ts');
 const arcadeCssSource = read('src', 'views', 'playground', 'arcade', 'arcade.css');
 const tetrisStageSource = read('src', 'views', 'playground', 'arcade', 'TetrisStage.tsx');
+const merge2048StagePath = path.join(root, 'src', 'views', 'playground', 'arcade', 'Merge2048Stage.tsx');
+const merge2048StageSource = existsSync(merge2048StagePath) ? readFileSync(merge2048StagePath, 'utf8') : '';
 const gameHostSource = read('src', 'views', 'playground', 'arcade', 'GameHost.tsx');
 const neonSource = read('src', 'views', 'playground', 'arcade', 'neonBoard.ts');
 const rankingPanelSource = read('src', 'views', 'playground', 'arcade', 'ArcadeRankingPanel.tsx');
@@ -233,10 +235,122 @@ test('TetrisStage draws a blue neon board, moves hold/next into the arena sidebo
   assert.match(tetrisStageSource, /pg-arcade-sideboard/);
 });
 
-test('GameHost routes snake and tetris to their stages, others to ComingSoon', () => {
+test('GameHost routes snake, tetris, and 2048 to their stages, others to ComingSoon', () => {
   assert.match(gameHostSource, /game === 'snake'[\s\S]*?<SnakeStage/);
   assert.match(gameHostSource, /game === 'tetris'[\s\S]*?<TetrisStage/);
+  assert.match(gameHostSource, /game === '2048'[\s\S]*?<Merge2048Stage/);
   assert.match(gameHostSource, /<ComingSoonGame/);
+});
+
+test('Merge2048Stage preserves paid-run idempotency and active-only duration', () => {
+  assert.ok(merge2048StageSource, 'Merge2048Stage.tsx must exist');
+  assert.match(merge2048StageSource, /startRun\('2048'\)/);
+  assert.match(merge2048StageSource, /if \(startingRef\.current\) return;/);
+  assert.match(merge2048StageSource, /startingRef\.current = true;/);
+  assert.match(merge2048StageSource, /finishInputRef\.current = \{/);
+  assert.match(merge2048StageSource, /gameId: '2048'/);
+  assert.match(merge2048StageSource, /const input = finishInputRef\.current;/);
+  assert.match(merge2048StageSource, /Math\.min\(14_400_000, Math\.max\(1000, Math\.round\(activePlayMsRef\.current\)\)\)/);
+  assert.match(merge2048StageSource, /activeSegmentStartedAtRef/);
+  assert.match(merge2048StageSource, /mountedRef\.current = true;/);
+  assert.match(merge2048StageSource, /setFinishError\(true\)/);
+  assert.match(merge2048StageSource, /onRetryFinish=\{\(\) => void finalize\(\)\}/);
+});
+
+test('Merge2048Stage uses one crypto seed and deterministic PRNG for every tile spawn', () => {
+  assert.match(merge2048StageSource, /import \{ createSeed, nextRandom \} from '@\/features\/playground\/arcade\/games\/prng'/);
+  assert.match(merge2048StageSource, /const seedRef = useRef<number \| null>\(null\)/);
+  assert.match(merge2048StageSource, /const rngStateRef = useRef\(0\)/);
+  assert.match(
+    merge2048StageSource,
+    /const next2048Random = useCallback\(\(\): number => \{[\s\S]*?nextRandom\(rngStateRef\.current\)[\s\S]*?rngStateRef\.current = draw\.next;[\s\S]*?return draw\.value;/,
+  );
+  assert.match(
+    merge2048StageSource,
+    /const seed = createSeed\(\);[\s\S]*?seedRef\.current = seed;[\s\S]*?rngStateRef\.current = seed;[\s\S]*?create2048State\(next2048Random\)/,
+  );
+  assert.match(merge2048StageSource, /apply2048Move\(current, direction, next2048Random\)/);
+  assert.match(merge2048StageSource, /meta: seedRef\.current === null \? \{\} : \{ seed: seedRef\.current \}/);
+  assert.doesNotMatch(merge2048StageSource, /Math\.random/);
+});
+
+test('Merge2048Stage wires classic input, one latest queued move, and safe pause cleanup', () => {
+  assert.match(merge2048StageSource, /ArrowUp: 'up'[\s\S]*?ArrowDown: 'down'[\s\S]*?ArrowLeft: 'left'[\s\S]*?ArrowRight: 'right'/);
+  assert.match(merge2048StageSource, /w: 'up'[\s\S]*?s: 'down'[\s\S]*?a: 'left'[\s\S]*?d: 'right'/);
+  assert.match(merge2048StageSource, /closest\('button, input, textarea, select, \[contenteditable="true"\]'\)/);
+  assert.match(merge2048StageSource, /if \(event\.repeat\) return;/);
+  assert.match(merge2048StageSource, /SWIPE_THRESHOLD = 24/);
+  assert.match(merge2048StageSource, /queuedDirectionRef\.current = direction/);
+  assert.match(merge2048StageSource, /window\.addEventListener\('blur'/);
+  assert.match(merge2048StageSource, /document\.addEventListener\('visibilitychange'/);
+  assert.match(merge2048StageSource, /suspendPendingPresentation/);
+  assert.match(merge2048StageSource, /clearPresentationTimer/);
+  assert.match(merge2048StageSource, /pointerStartRef\.current = null;/);
+  assert.match(merge2048StageSource, /onConfirmingChange=\{handleConfirmingChange\}/);
+});
+
+test('Merge2048Stage does not auto-pause behind milestone or quit dialogs', () => {
+  assert.match(
+    merge2048StageSource,
+    /const pauseToOverlay = useCallback\(\(\): void => \{\s*if \(\s*phaseRef\.current !== 'running'\s*\|\|\s*milestoneOpenRef\.current\s*\|\|\s*confirmOpenRef\.current\s*\) return;/,
+  );
+});
+
+test('Merge2048Stage separates logical/display boards and implements the approved motion tiers', () => {
+  assert.match(merge2048StageSource, /const MOVE_MS = 150/);
+  assert.match(merge2048StageSource, /const SPAWN_MS = 190/);
+  assert.match(merge2048StageSource, /const MERGE_MS = 270/);
+  assert.match(merge2048StageSource, /engineRef\.current = move\.state/);
+  assert.match(merge2048StageSource, /setDisplayState\(/);
+  assert.match(merge2048StageSource, /impactTier2048\(move\.transition\.maxMerged\)/);
+  assert.match(merge2048StageSource, /soft: 190[\s\S]*?medium: 250[\s\S]*?heavy: 340/);
+  assert.match(merge2048StageSource, /Math\.max\([\s\S]*?SPAWN_MS[\s\S]*?MERGE_MS[\s\S]*?IMPACT_MS/);
+  assert.match(merge2048StageSource, /queuedDirectionRef/);
+  assert.match(merge2048StageSource, /useReducedMotion/);
+  assert.match(merge2048StageSource, /prefersReducedMotion/);
+  assert.match(merge2048StageSource, /role="dialog"/);
+  assert.match(merge2048StageSource, /aria-modal="true"/);
+  assert.match(merge2048StageSource, /계속 합치기/);
+  assert.match(merge2048StageSource, /handleMilestoneKeyDown/);
+  assert.match(merge2048StageSource, /event\.key === 'Tab'/);
+  assert.match(merge2048StageSource, /event\.key === 'Escape'/);
+});
+
+test('ArcadeStageChrome suspends a paid countdown while the window is blurred or hidden', () => {
+  assert.match(chromeSource, /countdownSuspended/);
+  assert.match(chromeSource, /window\.addEventListener\('blur'/);
+  assert.match(chromeSource, /window\.addEventListener\('focus'/);
+  assert.match(chromeSource, /document\.addEventListener\('visibilitychange'/);
+  assert.match(chromeSource, /document\.hidden \|\| !document\.hasFocus\(\)/);
+  assert.match(chromeSource, /phase !== 'countdown' \|\| confirmingQuit \|\| countdownSuspended/);
+  assert.match(chromeSource, /isDocumentInactive\(\)/);
+});
+
+test('Merge2048Stage exposes deterministic game hooks and accessible board state', () => {
+  assert.match(merge2048StageSource, /aria-busy=\{animating\}/);
+  assert.match(merge2048StageSource, /aria-live="polite"/);
+  assert.match(merge2048StageSource, /render_game_to_text =/);
+  assert.match(merge2048StageSource, /advanceTime =/);
+  assert.match(merge2048StageSource, /queuedDirection:/);
+  assert.match(merge2048StageSource, /delete gameWindow\.render_game_to_text/);
+  assert.match(merge2048StageSource, /delete gameWindow\.advanceTime/);
+  assert.match(merge2048StageSource, /removeEventListener\('keydown'/);
+  assert.match(merge2048StageSource, /clearPresentationTimer\(\)/);
+});
+
+test('2048 CSS keeps motion board-local, tokenized, touch-safe, and reduced-motion friendly', () => {
+  assert.match(arcadeCssSource, /\.pg-2048-board/);
+  assert.match(arcadeCssSource, /@keyframes pg-2048-slide/);
+  assert.match(arcadeCssSource, /@keyframes pg-2048-merge/);
+  assert.match(arcadeCssSource, /@keyframes pg-2048-spawn/);
+  assert.match(arcadeCssSource, /\.is-impact-soft/);
+  assert.match(arcadeCssSource, /\.is-impact-medium/);
+  assert.match(arcadeCssSource, /\.is-impact-heavy/);
+  assert.match(arcadeCssSource, /min-width: 44px/);
+  assert.match(arcadeCssSource, /min-height: 44px/);
+  assert.match(arcadeCssSource, /env\(safe-area-inset-bottom\)/);
+  assert.match(arcadeCssSource, /@media \(prefers-reduced-motion: reduce\)/);
+  assert.match(arcadeCssSource, /rgb\(var\(--pg-/);
 });
 
 test('TetrisStage reuses the arcade safeguards and DAS/ARR input', () => {

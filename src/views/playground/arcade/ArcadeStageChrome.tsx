@@ -41,6 +41,10 @@ export interface ArcadeStageChromeProps {
 
 const COUNTDOWN_STEP_MS = 700;
 
+function isDocumentInactive(): boolean {
+  return document.hidden || !document.hasFocus();
+}
+
 // aria-live 로 읽어줄 상태 문구(항상 한 개만 유지).
 function statusText(phase: ArcadeStagePhase, game: PlaygroundGameDefinition): string {
   switch (phase) {
@@ -65,6 +69,7 @@ export function ArcadeStageChrome(props: ArcadeStageChromeProps) {
 
   const prefersReducedMotion = useReducedMotion();
   const [countdown, setCountdown] = useState(3);
+  const [countdownSuspended, setCountdownSuspended] = useState(false);
   const [confirmingQuit, setConfirmingQuit] = useState(false);
   const [resumeAfterConfirm, setResumeAfterConfirm] = useState(false);
 
@@ -80,9 +85,29 @@ export function ArcadeStageChrome(props: ArcadeStageChromeProps) {
     setConfirmingQuit(true);
   });
 
-  // 카운트다운 3→2→1 (각 700ms) 후 시작. 확인 모달 중에는 멈춘다. reduced-motion 이면 즉시 시작.
+  // 유료 판의 카운트다운이 다른 창/탭에서 끝나 실제 플레이 시간이 몰래 누적되지 않게 한다.
   useEffect(() => {
-    if (phase !== 'countdown' || confirmingQuit) return;
+    if (phase !== 'countdown') {
+      setCountdownSuspended(false);
+      return;
+    }
+    const onBlur = (): void => setCountdownSuspended(true);
+    const onFocus = (): void => setCountdownSuspended(isDocumentInactive());
+    const onVisibility = (): void => setCountdownSuspended(isDocumentInactive());
+    setCountdownSuspended(isDocumentInactive());
+    window.addEventListener('blur', onBlur);
+    window.addEventListener('focus', onFocus);
+    document.addEventListener('visibilitychange', onVisibility);
+    return () => {
+      window.removeEventListener('blur', onBlur);
+      window.removeEventListener('focus', onFocus);
+      document.removeEventListener('visibilitychange', onVisibility);
+    };
+  }, [phase]);
+
+  // 카운트다운 3→2→1 (각 700ms) 후 시작. 확인 모달·백그라운드에서는 멈춘다.
+  useEffect(() => {
+    if (phase !== 'countdown' || confirmingQuit || countdownSuspended || isDocumentInactive()) return;
     if (prefersReducedMotion) {
       onCountdownComplete();
       return;
@@ -99,7 +124,7 @@ export function ArcadeStageChrome(props: ArcadeStageChromeProps) {
       }
     }, COUNTDOWN_STEP_MS);
     return () => clearInterval(timer);
-  }, [phase, confirmingQuit, prefersReducedMotion, onCountdownComplete]);
+  }, [phase, confirmingQuit, countdownSuspended, prefersReducedMotion, onCountdownComplete]);
 
   // 종료 확인 모달 표시 여부를 스테이지에 알려, 모달 뒤에서 게임 입력이 처리되지 않게 한다.
   useEffect(() => {

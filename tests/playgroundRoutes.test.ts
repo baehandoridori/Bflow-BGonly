@@ -50,3 +50,13 @@ test('game and market remember whether lobby or house opened them', () => {
   });
   assert.deepEqual(navigatePlayground(detail, { kind: 'return-to-source' }), { kind: 'lobby' });
 });
+
+test('2048 is a first-class game route that preserves its return surface', () => {
+  const lobbyGame = navigatePlayground(initialPlaygroundRoute, { kind: 'open-game', game: '2048' });
+  assert.deepEqual(lobbyGame, { kind: 'game', game: '2048', returnTo: 'lobby' });
+
+  const house = navigatePlayground(initialPlaygroundRoute, { kind: 'open-house' });
+  assert.deepEqual(navigatePlayground(house, { kind: 'open-game', game: '2048' }), {
+    kind: 'game', game: '2048', returnTo: 'house',
+  });
+});

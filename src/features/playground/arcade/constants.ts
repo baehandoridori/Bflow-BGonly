@@ -1,4 +1,4 @@
-export type ArcadeGameId = 'snake' | 'tetris';
+export type ArcadeGameId = 'snake' | 'tetris' | '2048';
 export type ArcadeGrade = 'none' | 'bronze' | 'silver' | 'gold' | 'platinum';
 
 export const ARCADE_BALANCE = {
@@ -30,6 +30,17 @@ export const ARCADE_BALANCE = {
         { grade: 'silver', min: 10_000, reward: 30 },
         { grade: 'gold', min: 25_000, reward: 55 },
         { grade: 'platinum', min: 50_000, reward: 80 },
+      ],
+    },
+    '2048': {
+      entryFee: 10,
+      scoreLabel: '점수',
+      maxScore: 10_000_000,
+      grades: [
+        { grade: 'bronze', min: 3_000, reward: 5 },
+        { grade: 'silver', min: 8_000, reward: 12 },
+        { grade: 'gold', min: 18_000, reward: 25 },
+        { grade: 'platinum', min: 35_000, reward: 40 },
       ],
     },
   },

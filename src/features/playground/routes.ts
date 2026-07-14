@@ -1,4 +1,4 @@
-export type PreviewGame = 'tetris' | 'sudoku' | 'snake';
+export type PreviewGame = 'tetris' | 'sudoku' | 'snake' | '2048';
 
 export type MarketRoute =
   | { kind: 'home'; focusRequest?: { target: 'all-stocks'; id: number } }
