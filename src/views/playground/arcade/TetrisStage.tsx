@@ -152,6 +152,9 @@ export function TetrisStage({ onExit, returnLabel }: { onExit: () => void; retur
   const finalizeDead = useCallback((dead: TetrisState) => {
     if (finishedRef.current) return;
     finishedRef.current = true;
+    // 루프를 멈추기 전에 최종 상태로 HUD 를 맞춘다 — 키입력 사망(하드드롭)은 다음 onFrame 이
+    // 오기 전에 멈추므로, 이걸 안 하면 결과 화면 점수가 저장 점수보다 낮게 보인다.
+    syncHud(dead);
     loopRef.current?.stop();
     deadStateRef.current = dead;
     if (runIdRef.current) {
@@ -164,7 +167,7 @@ export function TetrisStage({ onExit, returnLabel }: { onExit: () => void; retur
       };
     }
     void finalize();
-  }, [finalize]);
+  }, [finalize, syncHud]);
 
   const beginLoop = useCallback(() => {
     engineRef.current = createTetrisGame(createSeed());
@@ -239,7 +242,14 @@ export function TetrisStage({ onExit, returnLabel }: { onExit: () => void; retur
   // 키 입력: DAS/ARR 좌우, 소프트/하드/회전/홀드/일시정지.
   useEffect(() => {
     if (phase !== 'running' && phase !== 'paused') return;
-    if (confirmOpen) return;
+    if (confirmOpen) {
+      // 확인창이 뜨면 keyup 을 못 받으므로, 눌려 있던 좌우 DAS 와 소프트드롭을 비워
+      // '계속하기' 후 조각이 저절로 움직이거나 계속 빨리 떨어지지 않게 한다.
+      repeaterRef.current.reset();
+      const s = engineRef.current;
+      if (s) engineRef.current = applyTetrisInput(s, 'softDropOff');
+      return;
+    }
     const apply = (input: Parameters<typeof applyTetrisInput>[1]): void => {
       const s = engineRef.current;
       if (!s) return;

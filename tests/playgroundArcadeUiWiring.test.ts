@@ -204,7 +204,7 @@ test('TetrisStage reuses the arcade safeguards and DAS/ARR input', () => {
   // PR C 안전장치 이식: 중복시작 가드·payload 고정·활성시간·확인모달 입력차단·홀드반복 무시·저장실패 재시도
   assert.match(tetrisStageSource, /if \(startingRef\.current\) return;/);
   assert.match(tetrisStageSource, /finishInputRef\.current = \{/);
-  assert.match(tetrisStageSource, /if \(confirmOpen\) return;/);
+  assert.match(tetrisStageSource, /if \(confirmOpen\) \{/);
   assert.match(tetrisStageSource, /if \(e\.repeat\) return;/);
   assert.match(tetrisStageSource, /setFinishError\(true\)/);
   assert.match(tetrisStageSource, /onConfirmingChange=\{setConfirmOpen\}/);
@@ -219,6 +219,13 @@ test('TetrisStage HUD re-renders when hold/next change without a scoring change'
   assert.match(tetrisStageSource, /s\.hold !== prev\.hold \|\| next\.join\(','\) !== prev\.next\.join\(','\)/);
   assert.match(tetrisStageSource, /pieceChip\(hud\.hold, 'hold'\)/);
   assert.match(tetrisStageSource, /hud\.next\.map\(/);
+});
+
+test('TetrisStage clears held-key state on quit-confirm and syncs the HUD before a keydown death', () => {
+  // 확인창이 뜨면 눌린 좌우 DAS 와 소프트드롭을 비운다(계속하기 후 저절로 움직이지 않게)
+  assert.match(tetrisStageSource, /if \(confirmOpen\) \{[\s\S]*?repeaterRef\.current\.reset\(\);[\s\S]*?applyTetrisInput\(s, 'softDropOff'\)/);
+  // 키입력 사망을 저장하기 전에 최종 상태로 HUD 를 맞춘다(결과 화면 점수 = 저장 점수)
+  assert.match(tetrisStageSource, /syncHud\(dead\);/);
 });
 
 test('TetrisStage finalizes a run that dies from a keydown, not only from a tick', () => {
