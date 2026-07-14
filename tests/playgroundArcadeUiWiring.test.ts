@@ -11,6 +11,8 @@ const read = (...seg: string[]) => readFileSync(path.join(root, ...seg), 'utf8')
 const chromeSource = read('src', 'views', 'playground', 'arcade', 'ArcadeStageChrome.tsx');
 const resultSource = read('src', 'views', 'playground', 'arcade', 'RunResultOverlay.tsx');
 const snakeStageSource = read('src', 'views', 'playground', 'arcade', 'SnakeStage.tsx');
+const loopSource = read('src', 'features', 'playground', 'arcade', 'games', 'loop.ts');
+const arcadeCssSource = read('src', 'views', 'playground', 'arcade', 'arcade.css');
 
 test('advanceFixedStep accumulates frames and steps once per crossed interval', () => {
   let steps = 0;
@@ -83,6 +85,33 @@ test('ArcadeStageChrome renders per-phase overlays and guards start/back', () =>
   assert.match(chromeSource, /aria-live="polite"/);
   assert.match(chromeSource, /useReducedMotion/);
   assert.match(chromeSource, /if \(prefersReducedMotion\)/);
+});
+
+test('the loop auto-pauses on hidden/blur and resumes on focus', () => {
+  assert.match(loopSource, /addEventListener\('visibilitychange'/);
+  assert.match(loopSource, /addEventListener\('blur'/);
+  assert.match(loopSource, /addEventListener\('focus'/);
+  // active(사용자 의도) + visible(창 상태) 둘 다일 때만 프레임을 돌린다
+  assert.match(loopSource, /if \(!active \|\| !visible\) return;/);
+  assert.match(loopSource, /!document\.hidden && document\.hasFocus\(\)/);
+});
+
+test('arcade.css wraps --pg tokens in rgb() (they are raw triplets)', () => {
+  assert.match(arcadeCssSource, /rgb\(var\(--pg-panel\)\)/);
+  assert.match(arcadeCssSource, /rgb\(var\(--pg-bg\) \/ 0\.82\)/);
+  assert.doesNotMatch(arcadeCssSource, /background: var\(--pg-/); // 감싸지 않은 직접 사용 없음
+});
+
+test('SnakeStage keeps a retry state when finishRun fails and normalizes canvas colors', () => {
+  // finishRun 실패 시 이탈하지 않고 재시도 상태 유지
+  assert.match(snakeStageSource, /setFinishError\(true\)/);
+  assert.match(snakeStageSource, /onRetryFinish=\{\(\) => void finalize\(\)\}/);
+  assert.match(snakeStageSource, /deadStateRef/);
+  // 캔버스도 토큰을 rgb(...) 로 감싼다
+  assert.match(snakeStageSource, /`rgb\(\$\{triplet\}\)`/);
+  // 크롬은 finishError 시 재시도 오버레이를 띄운다
+  assert.match(chromeSource, /finishError \?/);
+  assert.match(chromeSource, /결과를 저장하지 못했어요/);
 });
 
 test('SnakeStage guards against duplicate entry charges and exits directly', () => {

@@ -47,53 +47,87 @@ export function createFixedStepLoop(options: FixedStepLoopOptions): FixedStepLoo
   const requestFrame = options.requestFrame ?? ((cb) => requestAnimationFrame(cb));
   const cancelFrame = options.cancelFrame ?? ((id) => cancelAnimationFrame(id));
   const maxCatchUp = options.maxCatchUp ?? 5;
+  const hasDom = typeof document !== 'undefined' && typeof window !== 'undefined';
 
   let frameId: number | null = null;
-  let running = false;
+  let active = false; // 사용자 의도(시작·재개 O / 일시정지·정지 X)
+  let visible = true; // 창이 보이고 포커스됨
   let accumulator = 0;
   let lastNow = 0;
+  let listening = false;
 
   const tick = (timestamp: number): void => {
-    if (!running) return;
-    const delta = Math.min(250, timestamp - lastNow); // 큰 간극은 250ms 로 캡(탭 복귀 등)
+    if (!active || !visible) return;
+    const delta = Math.min(250, timestamp - lastNow); // 큰 간극은 250ms 로 캡
     lastNow = timestamp;
     accumulator = advanceFixedStep(accumulator, delta, options.getStepMs, options.onStep, maxCatchUp);
     options.onFrame?.();
     frameId = requestFrame(tick);
   };
 
-  const begin = (): void => {
-    if (running) return;
-    running = true;
-    lastNow = now();
+  const startFrame = (): void => {
+    if (frameId !== null || !active || !visible) return;
+    lastNow = now(); // 재개 시 lastNow 재설정 → 멈춘/안 보인 시간은 시뮬레이션하지 않는다
     frameId = requestFrame(tick);
   };
 
-  const halt = (): void => {
-    running = false;
+  const stopFrame = (): void => {
     if (frameId !== null) {
       cancelFrame(frameId);
       frameId = null;
     }
   };
 
+  // hidden/blur 시 자동 정지, 복귀 시 자동 재개(active 인 동안만). 멈춘 시간은 누적하지 않는다.
+  const syncVisibility = (): void => {
+    const nextVisible = !document.hidden && document.hasFocus();
+    if (nextVisible === visible) return;
+    visible = nextVisible;
+    if (visible) startFrame();
+    else stopFrame();
+  };
+  const onBlur = (): void => { visible = false; stopFrame(); };
+  const onFocus = (): void => { syncVisibility(); };
+
+  const attach = (): void => {
+    if (!hasDom || listening) return;
+    listening = true;
+    visible = !document.hidden && document.hasFocus();
+    document.addEventListener('visibilitychange', syncVisibility);
+    window.addEventListener('blur', onBlur);
+    window.addEventListener('focus', onFocus);
+  };
+  const detach = (): void => {
+    if (!hasDom || !listening) return;
+    listening = false;
+    document.removeEventListener('visibilitychange', syncVisibility);
+    window.removeEventListener('blur', onBlur);
+    window.removeEventListener('focus', onFocus);
+  };
+
   return {
     start() {
       accumulator = 0;
-      begin();
+      active = true;
+      attach();
+      startFrame();
     },
     pause() {
-      halt(); // 누적기 보존 — 멈춘 시간은 다음 resume 에서 lastNow 재설정으로 버려진다
+      active = false; // 누적기 보존 — 다음 resume 에서 lastNow 재설정으로 멈춘 시간은 버려진다
+      stopFrame();
     },
     resume() {
-      begin();
+      active = true;
+      startFrame();
     },
     stop() {
-      halt();
+      active = false;
+      stopFrame();
+      detach();
       accumulator = 0;
     },
     isRunning() {
-      return running;
+      return active;
     },
   };
 }

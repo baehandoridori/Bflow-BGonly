@@ -40,9 +40,11 @@ export function SnakeStage({ onExit }: { onExit: () => void }) {
   const [result, setResult] = useState<ArcadeFinishResult | null>(null);
   const [hud, setHud] = useState({ length: 4, golden: 0 });
   const [starting, setStarting] = useState(false);
+  const [finishError, setFinishError] = useState(false);
   const startingRef = useRef(false); // 동기 가드 — 더블클릭이 첫 렌더 전에 두 번 실행되는 것 방지
 
   const engineRef = useRef<SnakeState | null>(null);
+  const deadStateRef = useRef<SnakeState | null>(null); // 종료 시점 상태 — finishRun 실패 재시도용 보존
   const loopRef = useRef<FixedStepLoop | null>(null);
   const runIdRef = useRef<string | null>(null);
   const startedAtRef = useRef(0);
@@ -65,9 +67,14 @@ export function SnakeStage({ onExit }: { onExit: () => void }) {
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
     const style = getComputedStyle(canvas);
-    const bg = style.getPropertyValue('--pg-panel') || '#1a1d27';
-    const accent = style.getPropertyValue('--pg-accent') || '#6c5ce7';
-    const yellow = style.getPropertyValue('--pg-yellow') || '#fdcb6e';
+    // --pg-* 는 RGB 트리플릿(예: '26 29 39')이라 rgb(...) 로 감싸야 유효한 색이 된다.
+    const color = (name: string, fallback: string): string => {
+      const triplet = style.getPropertyValue(name).trim();
+      return triplet ? `rgb(${triplet})` : fallback;
+    };
+    const bg = color('--pg-panel', '#1a1d27');
+    const accent = color('--pg-accent', '#6c5ce7');
+    const yellow = color('--pg-yellow', '#fdcb6e');
     ctx.clearRect(0, 0, canvas.width, canvas.height);
     ctx.fillStyle = bg;
     ctx.fillRect(0, 0, canvas.width, canvas.height);
@@ -82,10 +89,14 @@ export function SnakeStage({ onExit }: { onExit: () => void }) {
     });
   }, []);
 
-  const finalize = useCallback(async (dead: SnakeState) => {
-    setPhase('finishing');
+  // 종료 결과를 서버에 기록한다. game-finish 는 멱등이라, 실패하면 이탈하지 않고 재시도 상태를
+  // 유지해(입장료·점수 보존) 사용자가 '다시 시도'로 같은 runId 로 재기록할 수 있게 한다.
+  const finalize = useCallback(async () => {
+    const dead = deadStateRef.current;
     const runId = runIdRef.current;
-    if (!runId) { onExit(); return; }
+    if (!dead || !runId) { onExit(); return; }
+    setFinishError(false);
+    setPhase('finishing');
     const finished = await finishRun({
       runId,
       gameId: 'snake',
@@ -101,7 +112,7 @@ export function SnakeStage({ onExit }: { onExit: () => void }) {
       setResult(finished);
       setPhase('result');
     } else {
-      onExit();
+      setFinishError(true); // 실패 — 재시도 UI 유지(이탈하지 않는다)
     }
   }, [finishRun, onExit]);
 
@@ -118,7 +129,8 @@ export function SnakeStage({ onExit }: { onExit: () => void }) {
         engineRef.current = next;
         if (next.status === 'dead') {
           loopRef.current?.stop();
-          void finalize(next);
+          deadStateRef.current = next;
+          void finalize();
         }
       },
       onFrame: () => {
@@ -151,7 +163,9 @@ export function SnakeStage({ onExit }: { onExit: () => void }) {
   const handleReplay = useCallback(() => {
     runIdRef.current = null;
     engineRef.current = null;
+    deadStateRef.current = null;
     setResult(null);
+    setFinishError(false);
     setPhase('ready');
   }, []);
 
@@ -212,6 +226,8 @@ export function SnakeStage({ onExit }: { onExit: () => void }) {
       onPause={() => loopRef.current?.pause()}
       onQuit={handleQuit}
       onCountdownComplete={beginLoop}
+      finishError={finishError}
+      onRetryFinish={() => void finalize()}
       startDisabledReason={startDisabledReason}
       startPending={starting}
       todayRewardedRuns={todayRewardedRuns}

@@ -1,17 +1,18 @@
-/* 배플레이그라운드 아케이드 공용 스테이지 스타일 — --pg-* 토큰만 사용, 클래스 접두 pg-arcade-. */
+/* 배플레이그라운드 아케이드 공용 스테이지 스타일 — --pg-* 토큰만 사용, 클래스 접두 pg-arcade-.
+   토큰은 RGB 트리플릿(예: --pg-panel: 26 29 39)이라 반드시 rgb(var(--pg-*)) 로 감싸 쓴다. */
 
 .pg-arcade-stage {
   display: flex;
   flex-direction: column;
   gap: 16px;
-  color: var(--pg-text);
+  color: rgb(var(--pg-text));
 }
 
 .pg-arcade-stage__frame {
   position: relative;
   border-radius: 16px;
-  background: var(--pg-panel);
-  border: 1px solid var(--pg-line);
+  background: rgb(var(--pg-panel));
+  border: 1px solid rgb(var(--pg-line));
   overflow: hidden;
 }
 
@@ -20,8 +21,8 @@
   flex-wrap: wrap;
   gap: 12px 20px;
   padding: 12px 16px;
-  border-bottom: 1px solid var(--pg-line);
-  background: var(--pg-panel-2);
+  border-bottom: 1px solid rgb(var(--pg-line));
+  background: rgb(var(--pg-panel-2));
 }
 
 .pg-arcade-hud__item {
@@ -32,7 +33,7 @@
 
 .pg-arcade-hud__label {
   font-size: 11px;
-  color: var(--pg-muted);
+  color: rgb(var(--pg-muted));
 }
 
 .pg-arcade-hud__value {
@@ -51,7 +52,7 @@
   gap: 14px;
   padding: 24px;
   text-align: center;
-  background: color-mix(in srgb, var(--pg-bg) 82%, transparent);
+  background: rgb(var(--pg-bg) / 0.82);
   backdrop-filter: blur(2px);
 }
 
@@ -62,22 +63,22 @@
 
 .pg-arcade-overlay__hint {
   font-size: 13px;
-  color: var(--pg-muted);
+  color: rgb(var(--pg-muted));
   line-height: 1.6;
 }
 
 .pg-arcade-countdown {
   font-size: 72px;
   font-weight: 800;
-  color: var(--pg-accent);
+  color: rgb(var(--pg-accent));
   font-variant-numeric: tabular-nums;
 }
 
 .pg-arcade-btn {
   appearance: none;
-  border: 1px solid var(--pg-accent);
-  background: var(--pg-accent);
-  color: var(--pg-bg);
+  border: 1px solid rgb(var(--pg-accent));
+  background: rgb(var(--pg-accent));
+  color: rgb(var(--pg-bg));
   border-radius: 10px;
   padding: 10px 18px;
   font-size: 14px;
@@ -97,8 +98,8 @@
 
 .pg-arcade-btn--ghost {
   background: transparent;
-  color: var(--pg-text);
-  border-color: var(--pg-line);
+  color: rgb(var(--pg-text));
+  border-color: rgb(var(--pg-line));
 }
 
 .pg-arcade-keyhints {
@@ -113,15 +114,15 @@
   align-items: center;
   gap: 6px;
   font-size: 12px;
-  color: var(--pg-muted);
+  color: rgb(var(--pg-muted));
 }
 
 .pg-arcade-keyhint__key {
-  border: 1px solid var(--pg-line);
+  border: 1px solid rgb(var(--pg-line));
   border-radius: 6px;
   padding: 1px 7px;
-  background: var(--pg-panel-2);
-  color: var(--pg-text);
+  background: rgb(var(--pg-panel-2));
+  color: rgb(var(--pg-text));
   font-weight: 700;
 }
 
@@ -142,26 +143,26 @@
   width: 220px;
   height: 10px;
   border-radius: 999px;
-  background: var(--pg-panel-2);
+  background: rgb(var(--pg-panel-2));
   overflow: hidden;
 }
 
 .pg-arcade-result__gauge-fill {
   height: 100%;
-  background: var(--pg-accent);
+  background: rgb(var(--pg-accent));
 }
 
 .pg-arcade-result__reward {
   font-size: 20px;
   font-weight: 800;
-  color: var(--pg-yellow);
+  color: rgb(var(--pg-yellow));
   font-variant-numeric: tabular-nums;
 }
 
 .pg-arcade-result__best {
   font-size: 14px;
   font-weight: 700;
-  color: var(--pg-mint);
+  color: rgb(var(--pg-mint));
 }
 
 .pg-arcade-result__ach {
@@ -178,13 +179,13 @@
   gap: 10px;
   padding: 8px 12px;
   border-radius: 10px;
-  border: 1px solid var(--pg-line);
-  background: var(--pg-panel-2);
+  border: 1px solid rgb(var(--pg-line));
+  background: rgb(var(--pg-panel-2));
   font-size: 13px;
 }
 
 .pg-arcade-result__ach-bonus {
-  color: var(--pg-yellow);
+  color: rgb(var(--pg-yellow));
   font-weight: 700;
   font-variant-numeric: tabular-nums;
 }
