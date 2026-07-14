@@ -263,7 +263,7 @@ test('TetrisStage HUD re-renders when hold/next change without a scoring change'
   assert.match(tetrisStageSource, /hold: TetrisPiece \| null;/);
   assert.match(tetrisStageSource, /next: TetrisPiece\[\];/);
   assert.match(tetrisStageSource, /s\.hold !== prev\.hold \|\| next\.join\(','\) !== prev\.next\.join\(','\)/);
-  assert.match(tetrisStageSource, /pieceChip\(hud\.hold, 'hold'\)/);
+  assert.match(tetrisStageSource, /pieceGlyph\(hud\.hold, 'hold'\)/);
   assert.match(tetrisStageSource, /hud\.next\.map\(/);
 });
 

@@ -12,7 +12,7 @@ import {
   tetrisPieceCells,
   tetrisGhost,
 } from '@/features/playground/arcade/games/tetris/engine';
-import { PIECE_TONE } from '@/features/playground/arcade/games/tetris/pieces';
+import { PIECE_CELLS, PIECE_TONE } from '@/features/playground/arcade/games/tetris/pieces';
 import {
   TETRIS_COLS,
   TETRIS_HIDDEN_ROWS,
@@ -328,17 +328,34 @@ export function TetrisStage({ onExit, returnLabel }: { onExit: () => void; retur
 
   useEffect(() => () => loopRef.current?.stop(), []);
 
-  const pieceChip = (piece: TetrisPiece | null, key: string) => (
-    <span
-      key={key}
-      className={`pg-arcade-piece-chip${piece ? ' pg-arcade-piece-chip--filled' : ''}`}
-      style={piece
-        ? ({ background: `rgb(var(--pg-${PIECE_TONE[piece]}))`, '--pg-chip-glow': `rgb(var(--pg-${PIECE_TONE[piece]}))` } as CSSProperties)
-        : { background: 'transparent' }}
-    >
-      {piece ?? '·'}
-    </span>
-  );
+  // 홀드/다음 조각을 글자가 아니라 실제 테트로미노 모양(미니 네온 블록)으로 그린다.
+  const pieceGlyph = (piece: TetrisPiece | null, key: string) => {
+    if (!piece) return <span key={key} className="pg-arcade-glyph pg-arcade-glyph--empty" aria-hidden />;
+    const cells = PIECE_CELLS[piece][0]; // 회전 0 기준 [col,row] 4개
+    const cols = cells.map((c) => c[0]);
+    const rows = cells.map((c) => c[1]);
+    const minC = Math.min(...cols);
+    const maxC = Math.max(...cols);
+    const minR = Math.min(...rows);
+    const maxR = Math.max(...rows);
+    const w = maxC - minC + 1;
+    const h = maxR - minR + 1;
+    const filled = new Set(cells.map(([c, r]) => `${c - minC}:${r - minR}`));
+    return (
+      <span
+        key={key}
+        className="pg-arcade-glyph"
+        style={{ gridTemplateColumns: `repeat(${w}, var(--glyph-cell))`, '--glyph-tone': `rgb(var(--pg-${PIECE_TONE[piece]}))` } as CSSProperties}
+        aria-hidden
+      >
+        {Array.from({ length: w * h }, (_, i) => {
+          const c = i % w;
+          const r = Math.floor(i / w);
+          return <i key={i} className={filled.has(`${c}:${r}`) ? 'on' : ''} />;
+        })}
+      </span>
+    );
+  };
 
   const hud_ = (
     <>
@@ -350,13 +367,13 @@ export function TetrisStage({ onExit, returnLabel }: { onExit: () => void; retur
     </>
   );
 
-  // 보드 옆 사이드보드: 홀드 + 다음 5개
+  // 보드 옆 사이드보드: 홀드 + 다음 5개 (실제 블록 모양)
   const sideboard = (
     <div className="pg-arcade-sideboard">
-      <div className="pg-arcade-side-box"><div className="pg-arcade-side-box__label">홀드</div>{pieceChip(hud.hold, 'hold')}</div>
+      <div className="pg-arcade-side-box"><div className="pg-arcade-side-box__label">홀드</div><div className="pg-arcade-glyph-slot">{pieceGlyph(hud.hold, 'hold')}</div></div>
       <div className="pg-arcade-side-box">
         <div className="pg-arcade-side-box__label">다음</div>
-        <span className="pg-arcade-piece-next">{hud.next.map((p, i) => pieceChip(p, `next-${i}`))}</span>
+        <div className="pg-arcade-piece-next">{hud.next.map((p, i) => pieceGlyph(p, `next-${i}`))}</div>
       </div>
     </div>
   );
