@@ -249,7 +249,7 @@ export function SnakeStage({ onExit, returnLabel }: { onExit: () => void; return
       eyebrow="GROW & SURVIVE"
       accentToken="--pg-green"
       gradeProgress={gradeProgress('snake', hud.length)}
-      stage={<canvas ref={canvasRef} className="pg-arcade-board" width={GRID * CELL} height={GRID * CELL} style={{ width: 'clamp(320px, 60vh, 560px)', height: 'auto', maxWidth: '100%' }} aria-hidden />}
+      stage={<canvas ref={canvasRef} className="pg-arcade-board" width={GRID * CELL} height={GRID * CELL} aria-hidden />}
       result={result ? (
         <RunResultOverlay
           gameId="snake"

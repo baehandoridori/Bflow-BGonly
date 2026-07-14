@@ -6,23 +6,23 @@
   --pg-arena-tone: var(--pg-accent);
   display: flex;
   flex-direction: column;
-  gap: 16px;
   color: rgb(var(--pg-text));
-  /* 큰 모니터에서 아레나가 과하게 넓어져 보드가 작아 보이지 않도록 폭을 제한하고 가운데 정렬한다. */
-  width: 100%;
-  max-width: 880px;
-  margin-inline: auto;
+  /* 보이는 게임 화면(헤더 아래 surface)의 높이를 꽉 채운다. 아래의 flex:1 프레임이 남은 높이를 먹는다. */
+  height: 100%;
+  min-height: 0;
 }
 
-/* 2-pane: 좌측 정보/HUD 패널 + 우측 게임 보드 아레나 */
+/* 2-pane: 좌측 정보/HUD 패널 + 우측 게임 보드 아레나. 프레임이 스테이지 높이를 꽉 채운다. */
 .pg-arcade-stage__frame {
   position: relative;
   display: grid;
-  grid-template-columns: minmax(240px, 300px) minmax(0, 1fr);
+  grid-template-columns: minmax(220px, 280px) minmax(0, 1fr);
   border-radius: 18px;
   background: rgb(var(--pg-panel));
   border: 1px solid rgb(var(--pg-line));
   overflow: hidden;
+  flex: 1;
+  min-height: 0;
 }
 
 /* ── 좌측 정보 패널 ─────────────────────────────── */
@@ -130,22 +130,27 @@
   box-shadow: 0 0 9px rgb(var(--pg-arena-tone) / 0.55);
 }
 
-/* ── 우측 게임 보드 아레나 ─────────────────────────── */
+/* ── 우측 게임 보드 아레나 (프레임 높이를 꽉 채운다) ────────── */
 .pg-arcade-arena {
   position: relative;
   display: grid;
   place-items: center;
-  min-height: 420px;
-  padding: 22px;
+  min-height: 300px;
+  min-width: 0;
+  padding: clamp(14px, 2vw, 26px);
   background:
     radial-gradient(circle at 50% 40%, rgb(var(--pg-arena-tone) / 0.12), transparent 55%),
     rgb(var(--pg-bg) / 0.55);
 }
 
-/* 게임 캔버스 = 어두운 판 + 톤 네온 테두리 글로우 + 안쪽 비네트 */
+/* 게임 캔버스 = 어두운 판 + 톤 네온 테두리 글로우 + 안쪽 비네트.
+   아레나 높이를 꽉 채우도록 height:100%, 종횡비는 캔버스 속성이 유지, 좁으면 max-width 로 보호. */
 .pg-arcade-board {
   display: block;
-  margin: 0 auto;
+  height: 100%;
+  width: auto;
+  max-width: 100%;
+  max-height: 100%;
   border-radius: 12px;
   border: 1px solid rgb(var(--pg-arena-tone) / 0.35);
   background: rgb(var(--pg-bg));
@@ -154,12 +159,13 @@
     0 0 26px -8px rgb(var(--pg-arena-tone) / 0.5);
 }
 
-/* 테트리스 보드 + 홀드/넥스트 사이드보드 배치 */
+/* 테트리스 보드 + 홀드/넥스트 사이드보드 배치 — 아레나 높이를 채운다 */
 .pg-arcade-boardwrap {
   display: flex;
-  gap: 14px;
-  align-items: flex-start;
+  gap: clamp(8px, 1.4vw, 16px);
+  align-items: center;
   justify-content: center;
+  height: 100%;
   max-width: 100%;
 }
 
