@@ -97,6 +97,12 @@ test('the loop auto-pauses on hidden/blur and resumes on focus', () => {
   // active(사용자 의도) + visible(창 상태) 둘 다일 때만 프레임을 돌린다
   assert.match(loopSource, /if \(!active \|\| !visible\) return;/);
   assert.match(loopSource, /!document\.hidden && document\.hasFocus\(\)/);
+  // onStep 이 stop()/pause() 하면 tick 이 다음 프레임을 재요청하지 않고 frameId 를 비운다(재시작 가능)
+  assert.match(loopSource, /if \(active && visible\) \{\s*frameId = requestFrame\(tick\);\s*\} else \{\s*frameId = null;/);
+});
+
+test('SnakeStage only updates the HUD when values change (no per-frame re-render)', () => {
+  assert.match(snakeStageSource, /s\.length !== hudRef\.current\.length \|\| s\.goldenEaten !== hudRef\.current\.golden/);
 });
 
 test('arcade.css wraps --pg tokens in rgb() (they are raw triplets)', () => {

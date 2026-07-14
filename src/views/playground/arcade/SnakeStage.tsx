@@ -53,6 +53,7 @@ export function SnakeStage({ onExit, returnLabel }: { onExit: () => void; return
   // 실제 플레이 시간(ms)만 누적한다 — 일시정지·hidden/blur 동안은 스텝이 없어 자연히 제외된다.
   // wall-clock 을 쓰면 오래 멈춘 판이 duration 상한(4시간)을 넘어 game-finish 가 거부된다.
   const activePlayMsRef = useRef(0);
+  const hudRef = useRef({ length: 4, golden: 0 }); // 마지막 HUD 값 — 변할 때만 setHud(매 프레임 리렌더 방지)
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
 
   const game = GAME_DEFINITIONS.snake;
@@ -119,7 +120,8 @@ export function SnakeStage({ onExit, returnLabel }: { onExit: () => void; return
   const beginLoop = useCallback(() => {
     engineRef.current = createSnakeGame(createSeed());
     activePlayMsRef.current = 0;
-    setHud({ length: engineRef.current.length, golden: 0 });
+    hudRef.current = { length: engineRef.current.length, golden: 0 };
+    setHud(hudRef.current);
     const loop = createFixedStepLoop({
       getStepMs: () => engineRef.current?.tickMs ?? 160,
       onStep: () => {
@@ -148,8 +150,12 @@ export function SnakeStage({ onExit, returnLabel }: { onExit: () => void; return
       },
       onFrame: () => {
         draw();
+        // HUD 는 값이 바뀔 때(사과 취식)만 갱신한다 — 매 프레임 setHud 로 리렌더가 쌓이지 않게.
         const s = engineRef.current;
-        if (s) setHud({ length: s.length, golden: s.goldenEaten });
+        if (s && (s.length !== hudRef.current.length || s.goldenEaten !== hudRef.current.golden)) {
+          hudRef.current = { length: s.length, golden: s.goldenEaten };
+          setHud(hudRef.current);
+        }
       },
     });
     loopRef.current = loop;

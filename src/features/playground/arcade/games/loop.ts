@@ -62,7 +62,13 @@ export function createFixedStepLoop(options: FixedStepLoopOptions): FixedStepLoo
     lastNow = timestamp;
     accumulator = advanceFixedStep(accumulator, delta, options.getStepMs, options.onStep, maxCatchUp);
     options.onFrame?.();
-    frameId = requestFrame(tick);
+    // onStep 이 stop()/pause() 를 부르면 active/visible 이 꺼진다 — 그때는 다음 프레임을 재요청하지 않고
+    // frameId 를 비워, 죽은 뒤 프레임이 한 번 더 돌거나 같은 루프를 다시 시작하지 못하는 문제를 막는다.
+    if (active && visible) {
+      frameId = requestFrame(tick);
+    } else {
+      frameId = null;
+    }
   };
 
   const startFrame = (): void => {
