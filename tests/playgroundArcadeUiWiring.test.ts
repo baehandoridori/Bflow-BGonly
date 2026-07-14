@@ -289,6 +289,13 @@ test('Merge2048Stage wires classic input, one latest queued move, and safe pause
   assert.match(merge2048StageSource, /onConfirmingChange=\{handleConfirmingChange\}/);
 });
 
+test('Merge2048Stage does not auto-pause behind milestone or quit dialogs', () => {
+  assert.match(
+    merge2048StageSource,
+    /const pauseToOverlay = useCallback\(\(\): void => \{\s*if \(\s*phaseRef\.current !== 'running'\s*\|\|\s*milestoneOpenRef\.current\s*\|\|\s*confirmOpenRef\.current\s*\) return;/,
+  );
+});
+
 test('Merge2048Stage separates logical/display boards and implements the approved motion tiers', () => {
   assert.match(merge2048StageSource, /const MOVE_MS = 150/);
   assert.match(merge2048StageSource, /const SPAWN_MS = 190/);

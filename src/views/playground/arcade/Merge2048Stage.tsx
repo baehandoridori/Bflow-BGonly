@@ -453,7 +453,11 @@ export function Merge2048Stage({ onExit, returnLabel }: { onExit: () => void; re
   }, [resumePendingPresentation, startActiveClock, transitionPhase]);
 
   const pauseToOverlay = useCallback((): void => {
-    if (phaseRef.current !== 'running') return;
+    if (
+      phaseRef.current !== 'running'
+      || milestoneOpenRef.current
+      || confirmOpenRef.current
+    ) return;
     suspendGameplay();
     transitionPhase('paused');
   }, [suspendGameplay, transitionPhase]);
