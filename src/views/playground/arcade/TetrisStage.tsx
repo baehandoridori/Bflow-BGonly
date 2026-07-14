@@ -371,7 +371,7 @@ export function TetrisStage({ onExit, returnLabel }: { onExit: () => void; retur
       gradeProgress={gradeProgress('tetris', hud.score)}
       stage={(
         <div className="pg-arcade-boardwrap">
-          <canvas ref={canvasRef} className="pg-arcade-board" width={TETRIS_COLS * CELL} height={VISIBLE_ROWS * CELL} style={{ maxWidth: '100%', height: 'auto' }} aria-hidden />
+          <canvas ref={canvasRef} className="pg-arcade-board" width={TETRIS_COLS * CELL} height={VISIBLE_ROWS * CELL} style={{ height: 'clamp(400px, 68vh, 660px)', width: 'auto', maxWidth: '100%' }} aria-hidden />
           {sideboard}
         </div>
       )}

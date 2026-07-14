@@ -8,6 +8,10 @@
   flex-direction: column;
   gap: 16px;
   color: rgb(var(--pg-text));
+  /* 큰 모니터에서 아레나가 과하게 넓어져 보드가 작아 보이지 않도록 폭을 제한하고 가운데 정렬한다. */
+  width: 100%;
+  max-width: 880px;
+  margin-inline: auto;
 }
 
 /* 2-pane: 좌측 정보/HUD 패널 + 우측 게임 보드 아레나 */
