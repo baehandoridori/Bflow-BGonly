@@ -85,3 +85,35 @@ export async function pasteImageFromClipboard(
 
   return saveImage(dataUrl, sheetName, sceneId, imageType);
 }
+
+/**
+ * 이미지 파일의 원본 픽셀 크기 측정 (리사이즈 전 — 피드백 33).
+ * 실패 시 null — 호출측은 측정 실패로 업로드를 막지 말 것.
+ * createImageBitmap 이 가장 싸고, 미지원/디코딩 실패 시 Image 폴백.
+ */
+export async function measureImageSize(file: File | Blob): Promise<{ width: number; height: number } | null> {
+  try {
+    if (typeof createImageBitmap === 'function') {
+      const bitmap = await createImageBitmap(file);
+      const size = { width: bitmap.width, height: bitmap.height };
+      bitmap.close();
+      if (size.width > 0 && size.height > 0) return size;
+    }
+  } catch { /* Image 폴백으로 계속 */ }
+  try {
+    const dataUrl = await new Promise<string>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result as string);
+      reader.onerror = reject;
+      reader.readAsDataURL(file);
+    });
+    return await new Promise((resolve) => {
+      const img = new Image();
+      img.onload = () => resolve(img.width > 0 && img.height > 0 ? { width: img.width, height: img.height } : null);
+      img.onerror = () => resolve(null);
+      img.src = dataUrl;
+    });
+  } catch {
+    return null;
+  }
+}

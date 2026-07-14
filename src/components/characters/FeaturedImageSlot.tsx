@@ -21,7 +21,8 @@ import type {
 import { COSTUME_IMAGE_ROLES } from '@/types';
 import { uploadCharacterImage } from '@/services/supabaseService';
 import { deleteImage } from '@/services/storageService';
-import { resizeBlob } from '@/utils/imageUtils';
+import { measureImageSize, resizeBlob } from '@/utils/imageUtils';
+import { autoHeightFromNatural } from '@/utils/characterHeightGuides';
 import { dataUrlToFile } from '@/utils/dataUrlToFile';
 import { cn } from '@/utils/cn';
 import { CharacterImageFrame } from '@/components/characters/CharacterImageFrame';
@@ -354,6 +355,7 @@ export function FeaturedImageSlot({
 }) {
   const imagesByCostume = useCharacterBoardStore((s) => s.imagesByCostume);
   const addCostumeImage = useCharacterBoardStore((s) => s.addCostumeImage);
+  const setCharacterReferenceHeight = useCharacterBoardStore((s) => s.setCharacterReferenceHeight);
   const setPrimaryImage = useCharacterBoardStore((s) => s.setPrimaryImage);
   const updateCostumeImageField = useCharacterBoardStore((s) => s.updateCostumeImageField);
   const reorderCostumeImages = useCharacterBoardStore((s) => s.reorderCostumeImages);
@@ -386,19 +388,32 @@ export function FeaturedImageSlot({
     if (!targetCostume) return;
     setUploading(true);
     try {
+      // 피드백 33: 리사이즈(800px) 전에 원본 크기를 측정 — 저장본은 축소되므로 여기가 유일한 측정 지점.
+      //   측정 실패(null)해도 업로드는 계속한다.
+      const naturalSize = await measureImageSize(file);
       const isPng = file.type === 'image/png' || file.name.toLowerCase().endsWith('.png');
       const base64 = await resizeBlob(file, 800, isPng ? 0.92 : 0.8, isPng ? 'image/png' : 'image/jpeg');
       const res = await uploadCharacterImage(character.id, targetCostume.id, base64);
       if (!res.ok || !res.url) throw new Error(res.error ?? '업로드 실패');
       // 대표 이미지 자동 지정·featured_* 동기화는 store(addCostumeImage)+DB 트리거가 담당 —
       //   앱이 featured 를 직접 쓰지 않으므로 예전 이미지 파일을 지우지 않는다(P1 해소).
-      const created = await addCostumeImage(targetCostume.id, res.url, opts?.role ?? 'design');
+      const created = await addCostumeImage(targetCostume.id, res.url, opts?.role ?? 'design', naturalSize ?? undefined);
       // store 가 롤백(null)하면 방금 올린 파일이 고아가 됨 → 정리.
       if (!created) {
         deleteImage(res.url).catch((e) => console.warn('[character-board] 실패한 업로드 정리:', e));
         return;
       }
       setSelectedImageId(created.id);
+      // 피드백 33(a): 기준 키 자동 설정 — 아직 값이 없을 때만(이미 입력된 값은 덮지 않음), 원본 세로 px 로.
+      //   최신값을 store 에서 재조회 — 업로드 대기 중 다른 사용자가 값을 넣었을 수 있다(stale-closure 방지).
+      if (naturalSize) {
+        const latest = useCharacterBoardStore.getState().characters.find((c) => c.id === character.id);
+        const auto = autoHeightFromNatural(naturalSize.height);
+        if (latest && latest.referenceHeightPx == null && auto != null) {
+          const saved = await setCharacterReferenceHeight(character.id, auto);
+          if (saved) toast.success(`기준 키를 ${auto}px로 자동 설정했어요 (이미지 세로 크기)`);
+        }
+      }
       // 임시 이름 캐릭터에 파일선택/드래그로 첫 이미지를 넣으면 파일 이름으로 자동 지정 (B4).
       //   붙여넣기(opts.autoName=false)는 image.png 같은 일반명이라 제외.
       //   최신 이름을 store 에서 재조회 — 업로드 대기 중 다른 사용자가 이름을 지었을 수 있다(stale-closure 방지).
@@ -415,7 +430,7 @@ export function FeaturedImageSlot({
     } finally {
       setUploading(false);
     }
-  }, [character.id, costume, onEnsureCostume, addCostumeImage, renameCharacter]);
+  }, [character.id, costume, onEnsureCostume, addCostumeImage, renameCharacter, setCharacterReferenceHeight]);
 
   const uploadFileIfImage = useCallback((
     file: File | null | undefined,
