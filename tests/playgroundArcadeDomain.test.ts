@@ -10,7 +10,34 @@ import {
   gradeForScore,
   nextGradeInfo,
   rewardForGrade,
+  upsertLeaderboardEntry,
 } from '../src/features/playground/arcade/domain.ts';
+
+test('upsertLeaderboardEntry replaces my row, sorts by score then time, and caps to the limit', () => {
+  const at = (day: string) => `2026-01-${day}T00:00:00Z`;
+  const base = [
+    { userId: 'a', name: 'A', score: 30, at: at('01') },
+    { userId: 'me', name: '나', score: 10, at: at('01') },
+    { userId: 'b', name: 'B', score: 20, at: at('02') },
+  ];
+  const next = upsertLeaderboardEntry(base, { userId: 'me', name: '나' }, 25, at('03'));
+  assert.deepEqual(next.map((entry) => entry.userId), ['a', 'me', 'b']); // 30 > 25 > 20
+  assert.equal(next.find((entry) => entry.userId === 'me')?.score, 25);
+  assert.equal(next.filter((entry) => entry.userId === 'me').length, 1); // 중복 없음
+
+  // 동점은 먼저 달성한 쪽(at 오름차순)이 위
+  const tie = upsertLeaderboardEntry(
+    [{ userId: 'x', name: 'X', score: 25, at: at('01') }],
+    { userId: 'me', name: '나' },
+    25,
+    at('03'),
+  );
+  assert.deepEqual(tie.map((entry) => entry.userId), ['x', 'me']);
+
+  // limit 초과분은 잘린다
+  const many = Array.from({ length: 60 }, (_, i) => ({ userId: `u${i}`, name: `U${i}`, score: 1000 - i, at: at('01') }));
+  assert.equal(upsertLeaderboardEntry(many, { userId: 'me', name: '나' }, 5, at('03'), 50).length, 50);
+});
 
 test('gradeForScore uses inclusive (>=) snake boundaries', () => {
   assert.equal(gradeForScore('snake', 14), 'none');

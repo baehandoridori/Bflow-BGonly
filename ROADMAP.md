@@ -53,13 +53,13 @@ Phase 9: Supabase 마이그레이션  ██████░░░░ M-0, M-2 �
 - [x] 화면·마우스 뒤로가기와 작은 화면용 하단 주문 조작부
 - [x] 배한솔 관리자용 뉴스·가격 충격·추세·거래 정지 이벤트
 - [x] 실사용 피드백 반영: 양방향 빠른주문, 휠·드래그·핀치 차트, 장 전체·업종·종목별 시세 움직임
-- [ ] 실제 사용 피드백을 반영한 포인트·게임 점수 정책 확정 → **설계 완료, 한솔 리뷰 대기**: `docs/superpowers/specs/2026-07-13-baeplayground-arcade-points-design.md`
+- [x] 실제 사용 피드백을 반영한 포인트·게임 점수 정책 확정 → 설계(`docs/superpowers/specs/2026-07-13-baeplayground-arcade-points-design.md`)대로 PR A~D 구현 완료 (v1.84~1.87.0)
 - [ ] 정식 운영용 종목 정보 편집·시장 정책 확정
-- [ ] 게임 실행과 서버 저장 → **PR A 완료 (v1.84.0)**: 아케이드 기반(마이그레이션+RPC, 메인 서비스·IPC, 게이트웨이·스토어, 우상단 포인트 배지, 출석 적립, 포인트 랭킹 실데이터). 나머지 PR B~D(v1.85~1.87)는 진행 예정: `docs/superpowers/plans/2026-07-13-baeplayground-arcade-points.md` · 인터랙션 목업: `docs/superpowers/mockups/2026-07-13-baeplayground-arcade-mockup.html`
+- [x] 게임 실행과 서버 저장 → **PR A~D 완료 (v1.84~1.87.0)**: 아케이드 기반(마이그레이션+RPC, 메인 서비스·IPC, 게이트웨이·스토어, 우상단 포인트 배지, 출석·업무 적립), 스네이크·테트리스 실제 플레이, 등급 보상·도전과제, 게임별 순위표, 신기록 슬랙 알림 토글: `docs/superpowers/plans/2026-07-13-baeplayground-arcade-points.md` · 인터랙션 목업: `docs/superpowers/mockups/2026-07-13-baeplayground-arcade-mockup.html`
   - [x] PR A: 아케이드 포인트 기반 + 우상단 포인트 배지 + 출석 적립 + 랭킹 실데이터 (v1.84.0)
   - [x] PR B: 업무 활동(씬·댓글·리테이크) 포인트 적립 + 배지 획득 연출 (v1.85.0)
   - [x] PR C: 스네이크 엔진·스테이지·결과/보상·도전과제 (v1.86.0)
-  - [ ] PR D: 테트리스 + 게임별 랭킹 + 신기록 슬랙 알림 (v1.87.0)
+  - [x] PR D: 테트리스 + 게임별 랭킹 + 신기록 슬랙 알림 (v1.87.0)
 
 ---
 

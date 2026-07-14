@@ -100,6 +100,108 @@ test('finishRun unlocks each newly earned achievement exactly once', async () =>
   assert.deepEqual(result?.unlockedAchievements.map((a) => a.id), ['arcade-first-run', 'snake-30', 'snake-55']);
 });
 
+test('finishRun upserts my new best into the game leaderboard so the panel updates without a reload', async () => {
+  const gateway = createMockGateway({
+    execute: async (command) => {
+      if (command.kind === 'game-finish') {
+        return { grade: 'platinum', rewardPoints: 45, rewardCapped: false, newAlltimeBest: true, newWeeklyBest: true, prevBestScore: 20, myBestScore: 55, todayRewardedRuns: 1, wallet: { walletPoints: 2000, lifetimeEarnedPoints: 6000 }, slackNotifyEnabled: false };
+      }
+      return { wallet: { walletPoints: 0, lifetimeEarnedPoints: 0 } } as ArcadeExecuteResult;
+    },
+    read: async () => baseSnapshot({
+      games: {
+        snake: {
+          myBestScore: 20, myWeeklyBestScore: 20, todayRewardedRuns: 0, totalRuns: 3, maxGoldenEaten: 0, maxLineClear: 0, maxLevel: 0,
+          leaderboardAll: [
+            { userId: 'rival', name: '라이벌', score: 30, at: '2026-01-01T00:00:00Z' },
+            { userId: 'me', name: '나', score: 20, at: '2026-01-01T00:00:00Z' },
+          ],
+          leaderboardWeekly: [
+            { userId: 'rival', name: '라이벌', score: 30, at: '2026-01-01T00:00:00Z' },
+            { userId: 'me', name: '나', score: 20, at: '2026-01-01T00:00:00Z' },
+          ],
+        },
+        tetris: { myBestScore: 0, myWeeklyBestScore: 0, todayRewardedRuns: 0, totalRuns: 0, maxGoldenEaten: 0, maxLineClear: 0, maxLevel: 0, leaderboardAll: [], leaderboardWeekly: [] },
+      },
+    }),
+  });
+  const store = createArcadeStore(gateway, noopSync, () => ({ userId: 'me', name: '나' }));
+  await store.getState().load('user-1');
+  await store.getState().finishRun({ runId: 'r-lb', gameId: 'snake', score: 55, durationMs: 60_000, meta: {} });
+  const board = store.getState().snapshot!.games.snake.leaderboardAll;
+  assert.equal(board[0].userId, 'me'); // 55 > 30 → 내가 1위
+  assert.equal(board[0].score, 55);
+  assert.equal(board.filter((entry) => entry.userId === 'me').length, 1); // 내 행은 하나만(중복 없음)
+});
+
+test('finishRun refreshes the weekly board from the server after a run, fixing week-rollover staleness', async () => {
+  const emptyTetris = { myBestScore: 0, myWeeklyBestScore: 0, todayRewardedRuns: 0, totalRuns: 0, maxGoldenEaten: 0, maxLineClear: 0, maxLevel: 0, leaderboardAll: [], leaderboardWeekly: [] };
+  const serverWeekly = [{ userId: 'me', name: '나', score: 1000, at: '2026-02-02T00:00:00Z' }]; // 새 주 정본(서버가 준 이번 주)
+  let reads = 0;
+  const gateway = createMockGateway({
+    execute: async (command) => {
+      if (command.kind === 'game-finish') {
+        return { grade: 'gold', rewardPoints: 30, rewardCapped: false, newAlltimeBest: false, newWeeklyBest: true, prevBestScore: 5000, myBestScore: 5000, todayRewardedRuns: 1, wallet: { walletPoints: 1000, lifetimeEarnedPoints: 5000 }, slackNotifyEnabled: false };
+      }
+      return { wallet: { walletPoints: 0, lifetimeEarnedPoints: 0 } } as ArcadeExecuteResult;
+    },
+    read: async () => {
+      reads += 1;
+      // 첫 로드: 주 경계로 지난주 리더가 남은 stale 주간 배열. 재조회: 서버가 준 새 주 정본.
+      const weekly = reads === 1
+        ? [{ userId: 'rival', name: '라이벌', score: 8000, at: '2026-01-01T00:00:00Z' }, { userId: 'me', name: '나', score: 5000, at: '2026-01-01T00:00:00Z' }]
+        : serverWeekly;
+      return baseSnapshot({
+        games: {
+          snake: { myBestScore: 5000, myWeeklyBestScore: 5000, todayRewardedRuns: 0, totalRuns: 9, maxGoldenEaten: 0, maxLineClear: 0, maxLevel: 0, leaderboardAll: [{ userId: 'me', name: '나', score: 5000, at: '2026-01-01T00:00:00Z' }], leaderboardWeekly: weekly },
+          tetris: emptyTetris,
+        },
+      });
+    },
+  });
+  const store = createArcadeStore(gateway, noopSync, () => ({ userId: 'me', name: '나' }));
+  await store.getState().load('user-1');
+  await store.getState().finishRun({ runId: 'r-weekroll', gameId: 'snake', score: 1000, durationMs: 60_000, meta: {} });
+  await new Promise((resolve) => setTimeout(resolve, 0)); // fire-and-forget 재조회가 settle 되도록
+  assert.ok(reads >= 2, 'game-finish 후 순위표를 다시 읽어야 한다');
+  assert.deepEqual(store.getState().snapshot!.games.snake.leaderboardWeekly, serverWeekly); // 지난주 리더 없이 새 주 정본
+});
+
+test('finishRun leaves the leaderboard alone (score and achieved-at) when the run is not a new best', async () => {
+  const gateway = createMockGateway({
+    execute: async (command) => {
+      if (command.kind === 'game-finish') {
+        return { grade: 'gold', rewardPoints: 30, rewardCapped: false, newAlltimeBest: false, newWeeklyBest: false, prevBestScore: 40, myBestScore: 40, todayRewardedRuns: 1, wallet: { walletPoints: 1000, lifetimeEarnedPoints: 5000 }, slackNotifyEnabled: false };
+      }
+      return { wallet: { walletPoints: 0, lifetimeEarnedPoints: 0 } } as ArcadeExecuteResult;
+    },
+    read: async () => baseSnapshot({
+      games: {
+        snake: {
+          myBestScore: 40, myWeeklyBestScore: 40, todayRewardedRuns: 0, totalRuns: 5, maxGoldenEaten: 0, maxLineClear: 0, maxLevel: 0,
+          leaderboardAll: [{ userId: 'me', name: '나', score: 40, at: '2026-01-01T00:00:00Z' }],
+          leaderboardWeekly: [{ userId: 'me', name: '나', score: 40, at: '2026-01-01T00:00:00Z' }],
+        },
+        tetris: { myBestScore: 0, myWeeklyBestScore: 0, todayRewardedRuns: 0, totalRuns: 0, maxGoldenEaten: 0, maxLineClear: 0, maxLevel: 0, leaderboardAll: [], leaderboardWeekly: [] },
+      },
+    }),
+  });
+  const store = createArcadeStore(gateway, noopSync, () => ({ userId: 'me', name: '나' }));
+  await store.getState().load('user-1');
+  await store.getState().finishRun({ runId: 'r-nonrecord', gameId: 'snake', score: 25, durationMs: 60_000, meta: {} });
+  const row = store.getState().snapshot!.games.snake.leaderboardAll[0];
+  assert.equal(row.score, 40); // 옛 최고 그대로
+  assert.equal(row.at, '2026-01-01T00:00:00Z'); // 달성 시각을 새 시각으로 덮지 않음
+});
+
+test('finishRun leaves the leaderboard untouched when the signed-in user is unknown', async () => {
+  const gateway = createMockGateway();
+  const store = createArcadeStore(gateway, noopSync, () => null);
+  await store.getState().load('user-1');
+  await store.getState().finishRun({ runId: 'r-anon', gameId: 'snake', score: 55, durationMs: 60_000, meta: {} });
+  assert.deepEqual(store.getState().snapshot!.games.snake.leaderboardAll, []); // 신원 없음 → 그대로
+});
+
 function finishResult(overrides: Partial<ArcadeExecuteResult> = {}): ArcadeExecuteResult {
   return {
     grade: 'platinum', rewardPoints: 45, rewardCapped: false,

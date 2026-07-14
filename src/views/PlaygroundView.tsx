@@ -277,6 +277,7 @@ export default function PlaygroundView({ authorizedHansol }: PlaygroundViewProps
           >
             <JbbjHouse
               ranking={ranking}
+              authorizedHansol={authorizedHansol}
               onPlayGame={(game, origin) => move({ kind: 'open-game', game }, origin)}
               onOpenMarket={(origin) => move({ kind: 'open-market' }, origin)}
             />
@@ -287,7 +288,7 @@ export default function PlaygroundView({ authorizedHansol }: PlaygroundViewProps
             header={{
               titleId: 'playground-game-title',
               title: GAME_DEFINITIONS[route.game].koName,
-              description: route.game === 'snake' ? '포인트를 내고 시작해 등급 보상을 받아요' : '기록과 보상 규칙을 준비하고 있어요',
+              description: route.game === 'sudoku' ? '기록과 보상 규칙을 준비하고 있어요' : '포인트를 내고 시작해 등급 보상을 받아요',
               backLabel: route.returnTo === 'house' ? 'JBBJ 하우스' : '게임 로비',
               onBack: requestBack,
               showHouse: false,

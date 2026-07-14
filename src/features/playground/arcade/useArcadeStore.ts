@@ -1,10 +1,11 @@
 import { create, type StoreApi, type UseBoundStore } from 'zustand';
 
 import { ARCADE_ACHIEVEMENTS, type ArcadeAchievementDefinition } from './constants.ts';
-import { evaluateAchievements } from './domain.ts';
+import { evaluateAchievements, upsertLeaderboardEntry } from './domain.ts';
 import { createArcadeGateway } from './gateway.ts';
 import type { ArcadePreviewGateway } from './previewGateway.ts';
 import { useMarketPreviewStore } from '../market/useMarketPreviewStore.ts';
+import { useAuthStore } from '../../../stores/useAuthStore.ts';
 import type {
   ArcadeAchievementUnlockResult,
   ArcadeConfigSetResult,
@@ -28,6 +29,12 @@ export interface ArcadeFinishInput {
   score: number;
   durationMs: number;
   meta: Record<string, number>;
+}
+
+// 순위표 내 행 즉시 반영에 쓰는 나의 신원(id·이름). 없으면(미로그인) 순위표는 그대로 둔다.
+export interface ArcadeSelf {
+  userId: string;
+  name: string;
 }
 
 interface ArcadeState {
@@ -55,8 +62,19 @@ function applyFinishToSnapshot(
   snapshot: ArcadeSnapshot,
   input: ArcadeFinishInput,
   result: ArcadeGameFinishResult,
+  self: ArcadeSelf | null,
 ): ArcadeSnapshot {
   const stats = snapshot.games[input.gameId];
+  const myBestScore = result.myBestScore ?? Math.max(stats.myBestScore, input.score);
+  const myWeeklyBestScore = Math.max(stats.myWeeklyBestScore, input.score);
+  // 전체(all-time) 순위표만 낙관적으로 즉시 반영한다 — all-time 은 주 경계가 없어 캐시가 stale 되지 않고,
+  // 신기록을 새로 세운 판이면 그 판 점수(input.score)로 내 행을 즉시 올려 방금 판이 바로 보이게 한다.
+  // 주간 순위표는 손대지 않는다 — 주 경계에서 배열 자체가 지난주 데이터라 낙관적으로 섞으면 옛 리더가 남는다.
+  // 대신 finishRun 이 game-finish 직후 정본(서버/preview)으로 순위표를 재조회해 주간을 정확히 채운다.
+  const at = new Date().toISOString();
+  const leaderboardAll = self && result.newAlltimeBest && input.score > 0
+    ? upsertLeaderboardEntry(stats.leaderboardAll, self, input.score, at)
+    : stats.leaderboardAll;
   return {
     ...snapshot,
     wallet: result.wallet ?? snapshot.wallet,
@@ -64,13 +82,14 @@ function applyFinishToSnapshot(
       ...snapshot.games,
       [input.gameId]: {
         ...stats,
-        myBestScore: result.myBestScore ?? Math.max(stats.myBestScore, input.score),
-        myWeeklyBestScore: Math.max(stats.myWeeklyBestScore, input.score),
+        myBestScore,
+        myWeeklyBestScore,
         todayRewardedRuns: result.todayRewardedRuns ?? stats.todayRewardedRuns,
         totalRuns: stats.totalRuns + 1,
         maxGoldenEaten: Math.max(stats.maxGoldenEaten, input.meta.goldenEaten ?? 0),
         maxLineClear: Math.max(stats.maxLineClear, input.meta.maxLineClear ?? 0),
         maxLevel: Math.max(stats.maxLevel, input.meta.levelReached ?? 0),
+        leaderboardAll,
       },
     },
     aggregates: {
@@ -84,6 +103,10 @@ export function createArcadeStore(
   gateway: ArcadePreviewGateway,
   syncMarketWallet: (wallet: ArcadeWallet) => void = (wallet) =>
     useMarketPreviewStore.getState().applyServerWallet(wallet),
+  resolveSelf: () => ArcadeSelf | null = () => {
+    const user = useAuthStore.getState().currentUser;
+    return user ? { userId: user.id, name: user.name } : null;
+  },
 ): UseBoundStore<StoreApi<ArcadeState>> {
   let generation = 0;
   // 이미 로컬 스냅샷에 반영한 runId. 재생 응답이 왔을 때 "진짜 중복 제출"과
@@ -166,6 +189,26 @@ export function createArcadeStore(
         }
       }
       return unlockedDefs;
+    }
+
+    // game-finish 직후 주간 순위표를 정본(서버/preview)으로 다시 맞춘다 — 주 경계에서 지난주 배열이
+    // 남는 문제를 백그라운드로 보정한다(전체 순위표는 주 경계가 없어 낙관적 반영으로 충분). fire-and-forget:
+    // 결과 화면은 즉시 뜨고 주간 순위표는 곧이어 정확해진다. 실패·세션 변경 시엔 조용히 버린다.
+    async function refreshWeeklyLeaderboards(gen: number, sessionKey: string): Promise<void> {
+      try {
+        const fresh = await gateway.read();
+        if (gen !== generation || get().sessionKey !== sessionKey) return;
+        set((state) => {
+          if (!state.snapshot) return {};
+          const games = { ...state.snapshot.games };
+          (Object.keys(games) as ArcadeGameId[]).forEach((gameId) => {
+            games[gameId] = { ...games[gameId], leaderboardWeekly: fresh.games[gameId].leaderboardWeekly };
+          });
+          return { snapshot: { ...state.snapshot, games } };
+        });
+      } catch {
+        // 무시 — 다음 전체 로드/실시간에서 반영된다.
+      }
     }
 
     return {
@@ -266,7 +309,7 @@ export function createArcadeStore(
           // 신규이거나, main 재시도로 응답만 유실돼 아직 로컬 미반영인 재생 → 적용한다.
           // 도전과제 평가 입력용으로 갱신 "전" aggregates 를 캡처한다(이번 런 미포함).
           const prevAggregates = { ...before.aggregates };
-          set({ snapshot: applyFinishToSnapshot(before, input, result), mutating: false });
+          set({ snapshot: applyFinishToSnapshot(before, input, result, resolveSelf()), mutating: false });
           appliedRuns.add(input.runId);
           syncWallet(result.wallet);
           const unlockedAchievements = await evaluateAndUnlock({
@@ -280,6 +323,8 @@ export function createArcadeStore(
             runRewardPoints: result.rewardPoints ?? 0,
             aggregatesOverride: prevAggregates,
           });
+          // 주간 순위표 정본 반영은 백그라운드로 — 결과 화면 표시를 막지 않는다.
+          void refreshWeeklyLeaderboards(generation, get().sessionKey ?? DEFAULT_SESSION_KEY);
           return { ...result, unlockedAchievements };
         } catch (error) {
           set({ mutating: false, error: messageOf(error, '게임 결과를 저장하지 못했어요.') });

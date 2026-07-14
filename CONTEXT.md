@@ -173,6 +173,9 @@ shared/playgroundMarketModel.mjs (장 전체 + 업종 + 종목 + 이벤트 결�
 | `src/features/playground/arcade/domain.ts` | 순수 함수 — 등급 판정·보상·다음 등급·도전과제 평가 |
 | `src/features/playground/arcade/{gateway,electronGateway,localStorageGateway,previewGateway,seed}.ts` | 모의투자와 같은 게이트웨이 5종 — electron/preview 선택, 프리뷰 로컬 재현·시드 |
 | `src/features/playground/arcade/useArcadeStore.ts` | 아케이드 스토어 — 스냅샷 로드·게임 실행·도전과제 해금·설정 |
+| `src/features/playground/arcade/games/{prng,loop,keymap}.ts` + `games/{snake,tetris}/` | 순수 게임 엔진(결정론 PRNG·고정스텝 루프·DAS/ARR 입력, 스네이크·테트리스 SRS/7백/콤보) |
+| `src/views/playground/arcade/{ArcadeStageChrome,RunResultOverlay,SnakeStage,TetrisStage,GameHost}.tsx` | 공용 스테이지 셸·결과 오버레이·게임별 스테이지·게임 라우팅 |
+| `src/views/playground/arcade/{ArcadeRankingPanel,ArcadeAdminSettings}.tsx` | JBBJ 하우스 게임별 순위표(게임×기간 탭)·배한솔 신기록 슬랙 알림 토글 |
 | `src/features/playground/arcade/walletBridge.ts` | `arcade:wallet-updated` push 구독 → 아케이드·모의투자 지갑 동기화 |
 | `src/components/layout/HeaderPointsBadge.tsx` | 앱 우상단 보유 포인트 배지(배플레이그라운드 접근 권한자 한정) |
 | `electron/arcadeService.ts` | main 아케이드 서비스 — 사용자별 큐, 출석 적립, 활동 적립, 신기록 슬랙, 지갑 push |

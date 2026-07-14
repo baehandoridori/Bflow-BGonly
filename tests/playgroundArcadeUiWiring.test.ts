@@ -5,6 +5,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { advanceFixedStep, createFixedStepLoop } from '../src/features/playground/arcade/games/loop.ts';
+import { createHorizontalRepeater } from '../src/features/playground/arcade/games/keymap.ts';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const read = (...seg: string[]) => readFileSync(path.join(root, ...seg), 'utf8');
@@ -13,6 +14,12 @@ const resultSource = read('src', 'views', 'playground', 'arcade', 'RunResultOver
 const snakeStageSource = read('src', 'views', 'playground', 'arcade', 'SnakeStage.tsx');
 const loopSource = read('src', 'features', 'playground', 'arcade', 'games', 'loop.ts');
 const arcadeCssSource = read('src', 'views', 'playground', 'arcade', 'arcade.css');
+const tetrisStageSource = read('src', 'views', 'playground', 'arcade', 'TetrisStage.tsx');
+const gameHostSource = read('src', 'views', 'playground', 'arcade', 'GameHost.tsx');
+const rankingPanelSource = read('src', 'views', 'playground', 'arcade', 'ArcadeRankingPanel.tsx');
+const adminSettingsSource = read('src', 'views', 'playground', 'arcade', 'ArcadeAdminSettings.tsx');
+const houseSource = read('src', 'views', 'playground', 'JbbjHouse.tsx');
+const mainSource = read('electron', 'main.ts');
 
 test('advanceFixedStep accumulates frames and steps once per crossed interval', () => {
   let steps = 0;
@@ -60,6 +67,30 @@ test('createFixedStepLoop does not advance simulation while paused', () => {
   assert.equal(loop.isRunning(), false);
   frame.cb?.(2000); // paused: tick 은 early-return 이어야 한다
   assert.equal(steps, 1, '일시정지 중에는 스텝이 늘지 않는다');
+});
+
+test('the DAS/ARR repeater moves once immediately then repeats after the delay', () => {
+  const r = createHorizontalRepeater({ dasMs: 160, arrMs: 40 });
+  assert.equal(r.press(1, 0), 1, 'keydown 즉시 1회');
+  assert.equal(r.advance(159), 0, 'DAS 전에는 반복 없음');
+  assert.equal(r.advance(160), 1, 'DAS(160ms) 후 첫 반복');
+  assert.equal(r.advance(200), 1, 'ARR 40ms 간격 반복');
+  assert.equal(r.advance(239), 0);
+  assert.equal(r.advance(240), 1);
+  r.release(1, 300);
+  assert.equal(r.activeDir(), 0);
+  assert.equal(r.advance(1000), 0, 'keyup 후 반복 정지');
+});
+
+test('the repeater gives the later key priority and falls back on release', () => {
+  const r = createHorizontalRepeater({ dasMs: 160, arrMs: 40 });
+  r.press(1, 0);
+  r.press(-1, 10); // 나중 키 우선
+  assert.equal(r.activeDir(), -1);
+  r.release(-1, 20); // 오른쪽이 아직 눌려 있으면 그쪽으로 전환
+  assert.equal(r.activeDir(), 1);
+  // 같은 방향 반복 press(홀드 keydown)는 즉시 이동을 만들지 않는다
+  assert.equal(r.press(1, 30), 0);
 });
 
 test('ArcadeStageChrome renders per-phase overlays and guards start/back', () => {
@@ -154,6 +185,92 @@ test('SnakeStage guards against duplicate entry charges and exits directly', () 
   assert.match(chromeSource, /\{startErrorHint && <p className="pg-arcade-overlay__hint" role="alert">/);
   // 종료는 루프를 멈추고 onExit(직접 이탈)로 나간다
   assert.match(snakeStageSource, /loopRef\.current\?\.stop\(\);\s*onExit\(\);/);
+});
+
+test('GameHost routes snake and tetris to their stages, others to ComingSoon', () => {
+  assert.match(gameHostSource, /game === 'snake'[\s\S]*?<SnakeStage/);
+  assert.match(gameHostSource, /game === 'tetris'[\s\S]*?<TetrisStage/);
+  assert.match(gameHostSource, /<ComingSoonGame/);
+});
+
+test('TetrisStage reuses the arcade safeguards and DAS/ARR input', () => {
+  assert.match(tetrisStageSource, /startRun\('tetris'\)/);
+  assert.match(tetrisStageSource, /gameId: 'tetris'/);
+  // finish meta: 라인·레벨·최대 라인클리어 (사망 상태에서 고정)
+  assert.match(tetrisStageSource, /meta: \{ lines: dead\.lines, levelReached: dead\.stats\.levelReached, maxLineClear: dead\.stats\.maxLineClear \}/);
+  // DAS/ARR 리피터 + 활성 시간 클록
+  assert.match(tetrisStageSource, /createHorizontalRepeater\(\)/);
+  assert.match(tetrisStageSource, /repeaterRef\.current\.advance\(activePlayMsRef\.current\)/);
+  // PR C 안전장치 이식: 중복시작 가드·payload 고정·활성시간·확인모달 입력차단·홀드반복 무시·저장실패 재시도
+  assert.match(tetrisStageSource, /if \(startingRef\.current\) return;/);
+  assert.match(tetrisStageSource, /finishInputRef\.current = \{/);
+  assert.match(tetrisStageSource, /if \(confirmOpen\) \{/);
+  assert.match(tetrisStageSource, /if \(e\.repeat\) return;/);
+  assert.match(tetrisStageSource, /setFinishError\(true\)/);
+  assert.match(tetrisStageSource, /onConfirmingChange=\{setConfirmOpen\}/);
+  // duration 은 활성 시간을 4시간 상한으로 클램프
+  assert.match(tetrisStageSource, /Math\.min\(14_400_000, Math\.max\(1000, Math\.round\(activePlayMsRef\.current\)\)\)/);
+});
+
+test('TetrisStage HUD re-renders when hold/next change without a scoring change', () => {
+  // 홀드·넥스트는 점수 변화 없이 바뀌므로(홀드 스왑·조각 락) HUD 상태·비교에 포함돼야 stale 안 됨
+  assert.match(tetrisStageSource, /hold: TetrisPiece \| null;/);
+  assert.match(tetrisStageSource, /next: TetrisPiece\[\];/);
+  assert.match(tetrisStageSource, /s\.hold !== prev\.hold \|\| next\.join\(','\) !== prev\.next\.join\(','\)/);
+  assert.match(tetrisStageSource, /pieceChip\(hud\.hold, 'hold'\)/);
+  assert.match(tetrisStageSource, /hud\.next\.map\(/);
+});
+
+test('TetrisStage clears held-key state on quit-confirm/blur and syncs the HUD before a keydown death', () => {
+  // 눌린 좌우 DAS·소프트드롭을 비우는 공용 헬퍼 — keyup 을 못 받는 상황(확인창·블러·탭 전환)용
+  assert.match(tetrisStageSource, /const clearHeldKeys = \(\): void => \{[\s\S]*?repeaterRef\.current\.reset\(\);[\s\S]*?applyTetrisInput\(s, 'softDropOff'\)/);
+  assert.match(tetrisStageSource, /if \(confirmOpen\) \{\s*clearHeldKeys\(\);\s*return;/); // 확인창
+  assert.match(tetrisStageSource, /window\.addEventListener\('blur', onBlur\)/); // alt-tab
+  assert.match(tetrisStageSource, /document\.addEventListener\('visibilitychange', onVisibility\)/); // 탭 숨김
+  assert.match(tetrisStageSource, /if \(document\.hidden\) clearHeldKeys\(\)/);
+  // 키입력 사망을 저장하기 전에 최종 상태로 HUD 를 맞춘다(결과 화면 점수 = 저장 점수)
+  assert.match(tetrisStageSource, /syncHud\(dead\);/);
+});
+
+test('TetrisStage finalizes a run that dies from a keydown, not only from a tick', () => {
+  // 하드드롭·홀드로 keydown 에서 죽어도 결과 화면으로 마감돼야 한다(입장료 내고 멈추는 일 없게)
+  assert.match(tetrisStageSource, /const finalizeDead = useCallback/);
+  assert.match(tetrisStageSource, /if \(finishedRef\.current\) return;/); // 정확히 한 번만
+  assert.match(tetrisStageSource, /if \(next\.status === 'dead'\) finalizeDead\(next\)/); // 키입력 사망 경로
+  assert.match(tetrisStageSource, /if \(s\.status === 'dead'\) finalizeDead\(s\)/); // onStep(중력) 사망 경로
+});
+
+test('ArcadeRankingPanel reads snapshot leaderboards with game and period tabs', () => {
+  // 스냅샷의 leaderboard 를 그대로 — 별도 fetch 없음
+  assert.match(rankingPanelSource, /useArcadeStore\(\(state\) => state\.snapshot\)/);
+  assert.match(rankingPanelSource, /leaderboardAll/);
+  assert.match(rankingPanelSource, /leaderboardWeekly/);
+  // 게임 탭(스네이크/테트리스) × 기간 탭(전체/이번 주)
+  assert.match(rankingPanelSource, /id: 'snake'/);
+  assert.match(rankingPanelSource, /id: 'tetris'/);
+  assert.match(rankingPanelSource, /id: 'all'/);
+  assert.match(rankingPanelSource, /id: 'weekly'/);
+  // 내 행 강조 + 5행 고정(미달 시 '—' 자리 표시)
+  assert.match(rankingPanelSource, /entry\.userId === myUserId/);
+  assert.match(rankingPanelSource, /className=\{isMe \? 'is-me' : ''\}/);
+  assert.match(rankingPanelSource, /Array\.from\(\{ length: VISIBLE_ROWS \}/);
+});
+
+test('ArcadeAdminSettings toggle drives setSlackNotify and shows the URL notice', () => {
+  assert.match(adminSettingsSource, /state\.snapshot\?\.config\.slackNotifyEnabled/);
+  assert.match(adminSettingsSource, /setSlackNotify\(event\.target\.checked\)/);
+  assert.match(adminSettingsSource, /슬랙 워크플로 주소가 설정된 뒤에 실제로 발송돼요/);
+});
+
+test('JbbjHouse mounts the ranking panel and gates admin settings behind authorizedHansol', () => {
+  assert.match(houseSource, /<ArcadeRankingPanel \/>/);
+  assert.match(houseSource, /authorizedHansol && <ArcadeAdminSettings \/>/);
+  // 구현 완료 게임 집합으로 도크 상태 라벨 판단 — 테트리스도 '바로 플레이'
+  assert.match(houseSource, /PLAYABLE_GAMES[\s\S]*?'snake', 'tetris'/);
+});
+
+test('main skips the arcade record webhook when the URL is empty', () => {
+  assert.match(mainSource, /if \(!ARCADE_RECORD_WEBHOOK_URL\) return;/);
 });
 
 test('RunResultOverlay sequences grade, reward, best banner and achievements', () => {

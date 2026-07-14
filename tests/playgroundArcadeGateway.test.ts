@@ -8,6 +8,7 @@ import { createArcadeLocalStorageGateway } from '../src/features/playground/arca
 import { createArcadeGateway } from '../src/features/playground/arcade/gateway.ts';
 import { createMarketLocalStorageGateway } from '../src/features/playground/market/localStorageGateway.ts';
 import { createArcadePreviewSeed } from '../src/features/playground/arcade/seed.ts';
+import { rollOverPreviewDailyState } from '../src/features/playground/arcade/previewGateway.ts';
 import type {
   ArcadeActivityResult,
   ArcadeExecuteResult,
@@ -152,6 +153,33 @@ test('game-finish grades the score, pays the reward, and flags an all-time best'
   assert.equal(result.prevBestScore, 34);
   assert.equal(result.newAlltimeBest, true); // 40 > seed best 34
   assert.equal(result.myBestScore, 40);
+});
+
+test('a preview KST week rollover clears weekly bests and boards but keeps all-time', () => {
+  const snap = createArcadePreviewSeed(USER_ID);
+  const allTimeBefore = snap.games.snake.leaderboardAll.length;
+  // 같은 주 안의 날짜 변화(월→화, 주 시작 07-13 동일) → 주간 유지
+  rollOverPreviewDailyState(snap, '2026-07-13', '2026-07-14');
+  assert.ok(snap.games.snake.leaderboardWeekly.length > 0, '같은 주는 주간 순위표를 유지한다');
+  // 다음 주 월요일(주 시작 07-20)로 넘어가면 주간만 리셋
+  rollOverPreviewDailyState(snap, '2026-07-14', '2026-07-20');
+  assert.deepEqual(snap.games.snake.leaderboardWeekly, []);
+  assert.deepEqual(snap.games.tetris.leaderboardWeekly, []);
+  assert.equal(snap.games.snake.myWeeklyBestScore, 0);
+  assert.equal(snap.games.tetris.myWeeklyBestScore, 0);
+  assert.equal(snap.games.snake.leaderboardAll.length, allTimeBefore, '전체 순위표는 유지된다');
+});
+
+test('game-finish upserts my new best into both game leaderboards', async () => {
+  const gw = gateway(seededStorage());
+  await gw.execute({ kind: 'game-start', requestId: 'game-entry:lb', runId: 'lb', gameId: 'snake' });
+  await gw.execute({ kind: 'game-finish', requestId: 'game-finish:lb', runId: 'lb', gameId: 'snake', score: 90, durationMs: 60_000, meta: {} });
+  const snap = await gw.read();
+  const all = snap.games.snake.leaderboardAll;
+  assert.equal(all[0]?.userId, USER_ID); // 90 이 최상단
+  assert.equal(all[0]?.score, 90);
+  assert.equal(all.filter((entry) => entry.userId === USER_ID).length, 1); // 내 행 중복 없음
+  assert.equal(snap.games.snake.leaderboardWeekly[0]?.score, 90);
 });
 
 test('game-finish caps the reward after the daily rewarded-run limit', async () => {

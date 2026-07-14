@@ -35,7 +35,8 @@ Supabase(PostgreSQL + Realtime)를 단일 진실의 원천(SSOT)으로 사용. G
 - **화면과 체결**: renderer preview는 같은 공용 모델로 시세와 주문 확인값을 보여 주고, Electron의 `MarketAccountService`가 체결 직전 canonical 가격·거래정지·revision을 다시 검증한다.
 - **계좌**: 실제 앱의 예수금·보유 종목·거래 결과는 Supabase가 정본이다. 테스트 모드는 로컬 preview gateway로 같은 명령·rollback 계약을 지킨다.
 - **긴 차트**: 완료된 과거 봉만 제한된 cache에 재사용하고 점진 계산한다. 현재 진행 봉은 실제 시간으로 다시 계산하며 오래된 비동기 요청은 중단한다.
-- **아케이드 포인트**: 지갑·출석·게임 기록·도전과제는 Supabase가 정본이며, 모든 포인트 변경은 원장과 같은 트랜잭션의 RPC(`playground_arcade_read`/`playground_arcade_execute`)를 거친다. renderer는 IPC → main `ArcadeService`만 경유하고, 밸런스 수치는 `src/features/playground/arcade/constants.ts`가 정본이다(SQL·계약 테스트로 동기화). 우상단 포인트 배지·출석 적립·랭킹 실데이터가 여기에 연결된다.
+- **아케이드 포인트**: 지갑·출석·게임 기록·도전과제는 Supabase가 정본이며, 모든 포인트 변경은 원장과 같은 트랜잭션의 RPC(`playground_arcade_read`/`playground_arcade_execute`)를 거친다. renderer는 IPC → main `ArcadeService`만 경유하고, 밸런스 수치는 `src/features/playground/arcade/constants.ts`가 정본이다(SQL·계약 테스트로 동기화). 우상단 포인트 배지·출석/업무 적립·게임별 순위표가 여기에 연결된다.
+- **아케이드 게임**: 스네이크·테트리스 엔진은 부작용 없는 순수 모듈이다. 난수는 `crypto` 시드 → 결정론 PRNG로만 만들고 `Math.random()`/`Date.now()`를 엔진에 쓰지 않는다(리플레이·테스트 재현성). 게임 시작/종료는 `request_id` 멱등이라 재시도·중복 제출에도 입장료 중복 차감·이중 지급이 없다. 신기록 슬랙은 전체 최고 기록 경신 + 관리 토글 on + 주소 설정 시에만 발송된다.
 
 ---
 

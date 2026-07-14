@@ -189,3 +189,22 @@
   font-weight: 700;
   font-variant-numeric: tabular-nums;
 }
+
+/* 테트리스 홀드/넥스트 조각 칩 */
+.pg-arcade-piece-chip {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 5px;
+  border: 1px solid rgb(var(--pg-line));
+  font-size: 12px;
+  font-weight: 800;
+  color: rgb(var(--pg-bg));
+}
+
+.pg-arcade-piece-next {
+  display: inline-flex;
+  gap: 4px;
+}
