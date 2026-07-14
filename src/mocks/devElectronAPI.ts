@@ -1576,7 +1576,8 @@ export function installDevElectronAPI(): void {
       if (updates.memo !== undefined) row.memo = updates.memo;
       if (updates.costumeId !== undefined) row.costume_id = updates.costumeId;
     },
-    storageUploadCharacterImage: async () => ({ ok: true, url: 'mock://character-image' }),
+    // 프리뷰에서 업로드/붙여넣기 이미지가 실제로 렌더되도록 로드 가능한 경로를 돌려준다 (피드백 31b·33 검증용).
+    storageUploadCharacterImage: async () => ({ ok: true, url: MOCK_CHARACTER_IMAGE_URL }),
     // ─── 복장 다중 이미지 (mock) ───
     supabaseLoadCostumeImages: async () => {
       seedMockCharacterData();

@@ -1,10 +1,14 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Loader2, Plus, X } from 'lucide-react';
 import { toast } from 'sonner';
 import { useCharacterBoardStore } from '@/stores/useCharacterBoardStore';
 import { useModalFocus } from '@/hooks/useModalFocus';
 import { CHARACTER_LAYER_CLASS } from '@/constants/characterLayers';
-import { sendRiggingAnnounce, buildRiggingBigo } from '@/services/slackWebhookService';
+import { sendRiggingAnnounce } from '@/services/slackWebhookService';
+import { uploadCharacterImage } from '@/services/supabaseService';
+import { deleteImage } from '@/services/storageService';
+import { resizeBlob } from '@/utils/imageUtils';
+import { dataUrlToFile } from '@/utils/dataUrlToFile';
 import type { Character, CharacterCostume } from '@/types';
 
 interface NoteRow {
@@ -12,18 +16,26 @@ interface NoteRow {
   text: string;
 }
 
-/** 제목 템플릿 — 버튼을 누르면 제목(title)만 채운다(비고는 직접 작성). */
+/** 공지 전용으로 붙여넣은 이미지 — 복장 이미지 목록(character_costume_images)에는 등록하지 않는 one-off 업로드. */
+interface PastedImage {
+  id: string;
+  url: string;
+}
+
+/** 제목 템플릿 — 버튼을 누르면 제목(title)만 채운다(비고는 직접 작성). '[모호 리깅 현황] - …' 포맷 (피드백 31a). */
 const TITLE_TEMPLATES: { key: string; label: string; title: string }[] = [
-  { key: 'general', label: '일반 리깅 완료', title: '[모호 리깅 현황] 리깅 완료 공지' },
-  { key: 'drama', label: '드라마 톤 특수리깅 완료', title: '[모호 리깅 현황] 드라마 톤 특수리깅 완료 공지' },
-  { key: 'fix', label: '수정·보완 완료', title: '[모호 리깅 현황] 리깅 수정·보완 완료 공지' },
+  { key: 'general', label: '일반 리깅 완료', title: '[모호 리깅 현황] - 리깅 완료 공지' },
+  { key: 'drama', label: '드라마 톤 특수리깅 완료', title: '[모호 리깅 현황] - 드라마 톤 특수리깅 완료 공지' },
+  { key: 'fix', label: '수정·보완 완료', title: '[모호 리깅 현황] - 리깅 수정·보완 완료 공지' },
 ];
 
 /**
- * 리깅 완성 슬랙 공지 모달 (B11).
- * - 캐릭터 작업 폴더 경로가 자동으로 뜨고(연결돼 있으면), 이미지는 그 복장의 이미지 중 골라 붙인다(기본 대표).
- * - 비고는 여러 줄을 쓸 수 있고, 슬랙에서는 줄바꿈으로 이어진다.
- * - 워크플로 변수 CH_name=캐릭터명 / Path=캐릭터 폴더 / bigo=비고(줄바꿈) / image=고른 이미지 공개 URL.
+ * 리깅 완성 슬랙 공지 모달 (B11 + 피드백 31).
+ * - 제목은 '일반 리깅 완료' 템플릿이 미리 채워져 있고, 다른 템플릿 버튼이나 직접 입력으로 바꾼다.
+ * - 캐릭터 작업 폴더 경로가 자동으로 뜨고(연결돼 있으면), 슬랙에는 jbbj://open/ 링크로 변환돼 나간다.
+ * - 이미지는 그 복장의 이미지 중 고르거나(기본 대표), 화면 캡처를 Ctrl+V 로 바로 붙여넣는다(공지 전용 업로드).
+ * - 비고는 선택 사항 — 없어도 보낼 수 있다(피드백 31d). 여러 줄은 슬랙에서 줄바꿈으로 이어진다.
+ * - 워크플로 변수 CH_name="캐릭터" - "복장" / Path=폴더 jbbj 링크 / bigo=비고(줄바꿈) / image=고른 이미지 공개 URL.
  */
 export function RiggingAnnounceModal({
   character,
@@ -37,18 +49,41 @@ export function RiggingAnnounceModal({
   const imagesByCostume = useCharacterBoardStore((s) => s.imagesByCostume);
   const images = useMemo(() => imagesByCostume.get(costume.id) ?? [], [imagesByCostume, costume.id]);
 
-  const [title, setTitle] = useState('');
-  const [activeTpl, setActiveTpl] = useState<string | null>(null);
+  // 제목은 기본 템플릿(일반 리깅 완료)이 미리 채워진 상태로 시작 — 비고 없이도 바로 보낼 수 있게 (피드백 31a·31d).
+  const [title, setTitle] = useState(TITLE_TEMPLATES[0].title);
+  const [activeTpl, setActiveTpl] = useState<string | null>(TITLE_TEMPLATES[0].key);
   const nextRowId = useRef(1);
   const [rows, setRows] = useState<NoteRow[]>([{ id: 0, text: '' }]);
   // 기본 선택 이미지 = 대표(primary), 없으면 첫 이미지, 그것도 없으면 이미지 없이.
   const [selectedImageId, setSelectedImageId] = useState<string | null>(
     () => (images.find((i) => i.isPrimary) ?? images[0])?.id ?? null,
   );
+  const [pasted, setPasted] = useState<PastedImage[]>([]);
+  const [pasting, setPasting] = useState(false);
   const [sending, setSending] = useState(false);
 
   const dialogRef = useRef<HTMLDivElement>(null);
   const modalFocus = useModalFocus(dialogRef, { autoFocus: false });
+
+  // 정리(cleanup)용 최신값 참조 — Escape 리스너는 deps 없이 한 번만 걸리므로 ref 로 최신 상태를 본다.
+  const pastedRef = useRef<PastedImage[]>([]);
+  useEffect(() => { pastedRef.current = pasted; }, [pasted]);
+
+  /** 공지 전용 업로드 정리 — keepUrl(전송에 쓴 이미지)만 남기고 스토리지에서 삭제(고아 방지, fire-and-forget). */
+  const cleanupPastedUploads = (keepUrl: string | null) => {
+    for (const img of pastedRef.current) {
+      if (keepUrl && img.url === keepUrl) continue;
+      deleteImage(img.url).catch((e) => console.warn('[rigging-announce] 붙여넣기 이미지 정리 실패:', e));
+    }
+  };
+
+  /** 취소·백드롭·Escape 공통 닫기 — 보내지 않은 붙여넣기 이미지를 정리하고 닫는다. */
+  const handleClose = () => {
+    cleanupPastedUploads(null);
+    onClose();
+  };
+  const handleCloseRef = useRef(handleClose);
+  useEffect(() => { handleCloseRef.current = handleClose; });
 
   useEffect(() => {
     // 최상단 모달 패턴(capture + stopImmediatePropagation) — 부모 CharacterDetailModal 의 Escape 리스너까지
@@ -57,15 +92,78 @@ export function RiggingAnnounceModal({
       if (event.key !== 'Escape') return;
       event.preventDefault();
       event.stopImmediatePropagation();
-      onClose();
+      handleCloseRef.current();
     };
     window.addEventListener('keydown', onKey, { capture: true });
     return () => window.removeEventListener('keydown', onKey, { capture: true });
-  }, [onClose]);
+  }, []);
+
+  /** 피드백 31(b): 캡처 이미지 업로드 — 복장 이미지에 등록하지 않는 공지 전용(one-off) 업로드. */
+  const pasteLockRef = useRef(false);
+  const uploadPastedFile = useCallback(async (file: File) => {
+    if (pasteLockRef.current) return;
+    if (!file.type.startsWith('image/')) {
+      toast.info('이미지 파일만 붙여넣을 수 있어요');
+      return;
+    }
+    pasteLockRef.current = true;
+    setPasting(true);
+    try {
+      const isPng = file.type === 'image/png' || file.name.toLowerCase().endsWith('.png');
+      const base64 = await resizeBlob(file, 800, isPng ? 0.92 : 0.8, isPng ? 'image/png' : 'image/jpeg');
+      const res = await uploadCharacterImage(character.id, costume.id, base64);
+      if (!res.ok || !res.url) throw new Error(res.error ?? '업로드 실패');
+      const entry: PastedImage = {
+        id: `pasted-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+        url: res.url,
+      };
+      setPasted((prev) => [...prev, entry]);
+      setSelectedImageId(entry.id);
+    } catch (err) {
+      console.error('[rigging-announce] 붙여넣기 이미지 업로드 실패:', err);
+      toast.error('이미지 붙여넣기에 실패했어요');
+    } finally {
+      pasteLockRef.current = false;
+      setPasting(false);
+    }
+  }, [character.id, costume.id]);
+
+  // 피드백 31(b): 공지 이미지 Ctrl+V.
+  //   비고 입력칸에 포커스가 있어도(모달 열림 직후 autoFocus) 클립보드에 '이미지'가 있으면 첨부로 처리한다 —
+  //   텍스트 붙여넣기는 이미지 item 이 없으므로 그대로 입력칸에 들어간다.
+  useEffect(() => {
+    const onPaste = (event: ClipboardEvent) => {
+      const item = Array.from(event.clipboardData?.items ?? []).find((entry) => entry.type.startsWith('image/'));
+      const file = item?.getAsFile();
+      if (file) {
+        event.preventDefault();
+        void uploadPastedFile(file);
+        return;
+      }
+      // 탐색기 '파일 복사'는 clipboardData 에 안 실리는 환경이 있어 메인 프로세스에서 파일 경로('FileNameW')를 직접 읽는다.
+      //   텍스트 붙여넣기면 아래가 null 을 반환해 아무 일도 일어나지 않는다.
+      void (async () => {
+        const pastedFile = await window.electronAPI.clipboardReadImageFile();
+        if (!pastedFile) return;
+        const f = dataUrlToFile(pastedFile.dataUrl, pastedFile.fileName);
+        if (f) void uploadPastedFile(f);
+      })();
+    };
+    window.addEventListener('paste', onPaste);
+    return () => window.removeEventListener('paste', onPaste);
+  }, [uploadPastedFile]);
 
   const notes = rows.map((r) => r.text);
-  const hasNote = buildRiggingBigo(notes).length > 0;
-  const selectedImage = selectedImageId ? images.find((i) => i.id === selectedImageId) ?? null : null;
+
+  // 고를 수 있는 이미지 = 복장에 등록된 이미지 + 이번 공지에서 붙여넣은 이미지.
+  const selectable = useMemo(
+    () => [
+      ...images.map((img) => ({ id: img.id, url: img.url, isPrimary: img.isPrimary, isPasted: false })),
+      ...pasted.map((img) => ({ id: img.id, url: img.url, isPrimary: false, isPasted: true })),
+    ],
+    [images, pasted],
+  );
+  const selectedImage = selectedImageId ? selectable.find((i) => i.id === selectedImageId) ?? null : null;
 
   const addRow = () => setRows((prev) => [...prev, { id: nextRowId.current++, text: '' }]);
   const removeRow = (id: number) =>
@@ -74,19 +172,20 @@ export function RiggingAnnounceModal({
     setRows((prev) => prev.map((r) => (r.id === id ? { ...r, text } : r)));
 
   const onSend = async () => {
-    if (sending) return;
-    if (!hasNote) { toast.error('비고를 한 줄 이상 적어주세요'); return; }
+    if (sending || pasting) return;
     setSending(true);
     try {
       await sendRiggingAnnounce({
-        // 복장이 여러 개인 캐릭터도 어떤 복장인지 구분되도록 '캐릭터 · 복장'으로 보낸다(코덱스 P2, 한솔 결정).
-        characterName: `${character.name} · ${costume.name}`,
+        // 피드백 31(a): [내용] 줄 포맷 — '"캐릭터 이름" - "복장 이름"'. 복장이 여럿이어도 어떤 복장인지 구분된다.
+        characterName: `"${character.name}" - "${costume.name}"`,
         title: title.trim(),
         folderPath: character.workFolderPath,
         notes,
         imageUrl: selectedImage?.url ?? null,
       });
       toast.success('슬랙에 리깅 완성 공지를 보냈어요');
+      // 전송에 쓴 이미지는 남기고, 붙여넣기만 하고 안 쓴 이미지는 정리.
+      cleanupPastedUploads(selectedImage?.url ?? null);
       onClose();
     } catch (err) {
       console.error('[rigging-announce] 전송 실패:', err);
@@ -98,8 +197,9 @@ export function RiggingAnnounceModal({
 
   return (
     <div
+      data-rigging-announce="true"
       className={`fixed inset-0 ${CHARACTER_LAYER_CLASS.modal} flex items-center justify-center bg-overlay/60 backdrop-blur-sm p-6`}
-      onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}
+      onMouseDown={(event) => { if (event.target === event.currentTarget) handleClose(); }}
     >
       <div
         ref={dialogRef}
@@ -148,9 +248,9 @@ export function RiggingAnnounceModal({
           />
         </div>
 
-        {/* 경로 (자동) */}
+        {/* 경로 (자동) — 슬랙에는 jbbj://open/ 링크로 변환돼 나간다 (피드백 31c) */}
         <div className="flex flex-col gap-1.5">
-          <span className="text-xs text-text-secondary">캐릭터 경로</span>
+          <span className="text-xs text-text-secondary">캐릭터 경로 — 슬랙에서 클릭하면 폴더가 열려요</span>
           {character.workFolderPath ? (
             <div
               className="text-sm text-text-primary bg-bg-border/10 border border-bg-border/70 rounded-md px-3 py-2 break-all"
@@ -165,14 +265,14 @@ export function RiggingAnnounceModal({
           )}
         </div>
 
-        {/* 이미지 고르기 */}
+        {/* 이미지 고르기 + Ctrl+V 붙여넣기 */}
         <div className="flex flex-col gap-1.5">
           <span className="text-xs text-text-secondary">공지에 붙일 이미지</span>
-          {images.length === 0 ? (
-            <div className="text-xs text-text-secondary">이 복장에 등록된 이미지가 없어요 — 이미지 없이 보냅니다.</div>
+          {selectable.length === 0 ? (
+            <div className="text-xs text-text-secondary">이 복장에 등록된 이미지가 없어요 — 캡처를 Ctrl+V 로 붙여넣거나, 이미지 없이 보냅니다.</div>
           ) : (
             <div className="flex flex-wrap gap-2">
-              {images.map((img) => {
+              {selectable.map((img) => {
                 const on = img.id === selectedImageId;
                 return (
                   <button
@@ -188,19 +288,26 @@ export function RiggingAnnounceModal({
                     {img.isPrimary && (
                       <span className="absolute top-0.5 left-0.5 text-[9px] leading-none px-1 py-0.5 rounded bg-black/60 text-white">대표</span>
                     )}
+                    {img.isPasted && (
+                      <span className="absolute top-0.5 left-0.5 text-[9px] leading-none px-1 py-0.5 rounded bg-accent/80 text-white">붙여넣기</span>
+                    )}
                   </button>
                 );
               })}
             </div>
           )}
           <span className="text-[11px] text-text-secondary">
-            {selectedImage ? '슬랙에서 이 이미지 미리보기가 함께 표시돼요.' : '이미지 없이 텍스트만 보냅니다.'}
+            {pasting
+              ? '이미지 올리는 중…'
+              : selectedImage
+                ? '슬랙에서 이 이미지 미리보기가 함께 표시돼요. 캡처는 Ctrl+V 로 추가할 수 있어요.'
+                : '이미지 없이 텍스트만 보냅니다. 캡처는 Ctrl+V 로 추가할 수 있어요.'}
           </span>
         </div>
 
-        {/* 비고 (여러 줄) */}
+        {/* 비고 (선택, 여러 줄) */}
         <div className="flex flex-col gap-1.5">
-          <span className="text-xs text-text-secondary">비고 (여러 줄 가능 — 슬랙에서 줄바꿈으로 표시)</span>
+          <span className="text-xs text-text-secondary">비고 (선택 — 여러 줄 가능, 슬랙에서 줄바꿈으로 표시)</span>
           <div className="flex flex-col gap-1.5">
             {rows.map((row, idx) => (
               <div key={row.id} className="flex items-center gap-1.5">
@@ -211,7 +318,7 @@ export function RiggingAnnounceModal({
                   onKeyDown={(e) => {
                     if (e.key === 'Enter') { e.preventDefault(); addRow(); }
                   }}
-                  placeholder={idx === 0 ? '예) 서준 잠옷버전에 퀭한 이미지 추가!' : '비고 추가'}
+                  placeholder={idx === 0 ? '예) 서준 잠옷버전에 퀭한 이미지 추가! (생략 가능)' : '비고 추가'}
                   className="flex-1 bg-transparent border border-bg-border rounded-md px-3 py-2 text-sm text-text-primary outline-none focus:border-accent/50"
                 />
                 <button
@@ -236,11 +343,11 @@ export function RiggingAnnounceModal({
         </div>
 
         <div className="flex justify-end gap-2 pt-1">
-          <button type="button" onClick={onClose} className="px-3 py-1.5 rounded-lg text-sm text-text-secondary hover:bg-bg-border/40 cursor-pointer">취소</button>
+          <button type="button" onClick={handleClose} className="px-3 py-1.5 rounded-lg text-sm text-text-secondary hover:bg-bg-border/40 cursor-pointer">취소</button>
           <button
             type="button"
             onClick={onSend}
-            disabled={sending || !hasNote}
+            disabled={sending || pasting}
             className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm bg-accent text-white disabled:opacity-50 cursor-pointer"
           >
             {sending && <Loader2 size={13} className="animate-spin" />}

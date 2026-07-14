@@ -56,8 +56,8 @@ test('B11 UI: CostumeDetail 버튼 + 모달 배선, 모달은 대표 기본선�
   // 전송은 서비스 경유(title 포함).
   assert.match(modal, /sendRiggingAnnounce\(/);
   assert.match(modal, /title: title\.trim\(\)/);
-  // 복장이 여럿일 때 구분되도록 CH_name 은 '캐릭터 · 복장' (코덱스 P2, 한솔 결정).
-  assert.match(modal, /characterName: `\$\{character\.name\} · \$\{costume\.name\}`/);
+  // 피드백 31(a): [내용] 줄은 '"캐릭터" - "복장"' 포맷.
+  assert.match(modal, /characterName: `"\$\{character\.name\}" - "\$\{costume\.name\}"`/);
   // Escape 는 최상단 모달 패턴 — 부모 상세 모달까지 닫히지 않게 capture + stopImmediatePropagation (코덱스 P2).
   assert.match(modal, /event\.stopImmediatePropagation\(\)/);
   assert.match(modal, /addEventListener\('keydown', onKey, \{ capture: true \}\)/);
@@ -71,6 +71,31 @@ test('B11 UI: 제목 템플릿 버튼 — 누르면 제목만 채운다', () => 
   assert.match(modal, /onClick=\{\(\) => \{ setTitle\(t\.title\); setActiveTpl\(t\.key\); \}\}/);
   // 제목 직접 편집 시 활성 템플릿 해제.
   assert.match(modal, /onChange=\{\(e\) => \{ setTitle\(e\.target\.value\); setActiveTpl\(null\); \}\}/);
+});
+
+test('피드백 31(a·d): 기본 제목 미리 채움 + 비고 없이 전송 가능', () => {
+  const modal = readFileSync('src/components/characters/RiggingAnnounceModal.tsx', 'utf8');
+  assert.match(modal, /useState\(TITLE_TEMPLATES\[0\]\.title\)/);
+  assert.match(modal, /\[모호 리깅 현황\] - 리깅 완료 공지/);
+  // 비고 필수 게이트 제거 — 전송 버튼은 전송/업로드 중에만 잠긴다.
+  assert.doesNotMatch(modal, /비고를 한 줄 이상/);
+  assert.doesNotMatch(modal, /hasNote/);
+  assert.match(modal, /disabled=\{sending \|\| pasting\}/);
+});
+
+test('피드백 31(b): 공지 이미지 Ctrl+V — 공지 전용 업로드 + 미전송분 정리', () => {
+  const modal = readFileSync('src/components/characters/RiggingAnnounceModal.tsx', 'utf8');
+  assert.match(modal, /data-rigging-announce/);
+  assert.match(modal, /clipboardReadImageFile/);
+  // 복장 이미지 목록(addCostumeImage)에 등록하지 않는 one-off 업로드.
+  assert.match(modal, /uploadCharacterImage\(character\.id, costume\.id, base64\)/);
+  assert.doesNotMatch(modal, /addCostumeImage/);
+  // 취소 시 전부, 전송 시 쓴 이미지만 남기고 정리.
+  assert.match(modal, /cleanupPastedUploads\(null\)/);
+  assert.match(modal, /cleanupPastedUploads\(selectedImage\?\.url \?\? null\)/);
+  // 배경 화면(FeaturedImageSlot)의 paste 가드가 모달 열림을 감지해 이중 업로드를 막는다.
+  const slot = readFileSync('src/components/characters/FeaturedImageSlot.tsx', 'utf8');
+  assert.match(slot, /\[data-rigging-announce\]/);
 });
 
 test('buildJbbjOpenLink: 스튜디오 오토핫키 링크 포맷과 일치 (피드백 31c)', () => {
