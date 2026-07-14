@@ -49,6 +49,21 @@ export function nextGradeInfo(
   return null;
 }
 
+// 인게임 등급 진행 바용: 현재 점수의 다음 등급 라벨(대문자)과 직전 등급→다음 등급 사이 진행률(0~100).
+// 이미 최고 등급이면 label='최고 등급', pct=100.
+export function gradeProgress(gameId: ArcadeGameId, score: number): { label: string; pct: number } {
+  let prevMin = 0;
+  for (const tier of ARCADE_BALANCE.games[gameId].grades) {
+    if (score < tier.min) {
+      const span = tier.min - prevMin;
+      const pct = span <= 0 ? 0 : Math.max(0, Math.min(100, Math.round(((score - prevMin) / span) * 100)));
+      return { label: `다음 등급 ${tier.grade.toUpperCase()}`, pct };
+    }
+    prevMin = tier.min;
+  }
+  return { label: '최고 등급', pct: 100 };
+}
+
 interface EvaluateAchievementsInput {
   gameId: ArcadeGameId | null; // null = 게임 외 평가(스냅샷 load 후)
   runMeta: { score: number; goldenEaten?: number; maxLineClear?: number; levelReached?: number } | null;

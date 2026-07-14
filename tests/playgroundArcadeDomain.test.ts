@@ -8,10 +8,22 @@ import {
 import {
   evaluateAchievements,
   gradeForScore,
+  gradeProgress,
   nextGradeInfo,
   rewardForGrade,
   upsertLeaderboardEntry,
 } from '../src/features/playground/arcade/domain.ts';
+
+test('gradeProgress reports the next-grade label and progress toward it', () => {
+  // 스네이크: bronze 15 / silver 25 / gold 40 / platinum 55
+  assert.deepEqual(gradeProgress('snake', 0), { label: '다음 등급 BRONZE', pct: 0 });
+  assert.equal(gradeProgress('snake', 10).label, '다음 등급 BRONZE');
+  assert.equal(gradeProgress('snake', 10).pct, 67); // 10/15
+  assert.deepEqual(gradeProgress('snake', 20), { label: '다음 등급 SILVER', pct: 50 }); // (20-15)/(25-15)
+  assert.deepEqual(gradeProgress('snake', 55), { label: '최고 등급', pct: 100 }); // 최고 도달
+  // 테트리스: bronze 3000
+  assert.deepEqual(gradeProgress('tetris', 1500), { label: '다음 등급 BRONZE', pct: 50 });
+});
 
 test('upsertLeaderboardEntry replaces my row, sorts by score then time, and caps to the limit', () => {
   const at = (day: string) => `2026-01-${day}T00:00:00Z`;

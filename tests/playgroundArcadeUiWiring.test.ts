@@ -16,6 +16,7 @@ const loopSource = read('src', 'features', 'playground', 'arcade', 'games', 'loo
 const arcadeCssSource = read('src', 'views', 'playground', 'arcade', 'arcade.css');
 const tetrisStageSource = read('src', 'views', 'playground', 'arcade', 'TetrisStage.tsx');
 const gameHostSource = read('src', 'views', 'playground', 'arcade', 'GameHost.tsx');
+const neonSource = read('src', 'views', 'playground', 'arcade', 'neonBoard.ts');
 const rankingPanelSource = read('src', 'views', 'playground', 'arcade', 'ArcadeRankingPanel.tsx');
 const adminSettingsSource = read('src', 'views', 'playground', 'arcade', 'ArcadeAdminSettings.tsx');
 const houseSource = read('src', 'views', 'playground', 'JbbjHouse.tsx');
@@ -185,6 +186,51 @@ test('SnakeStage guards against duplicate entry charges and exits directly', () 
   assert.match(chromeSource, /\{startErrorHint && <p className="pg-arcade-overlay__hint" role="alert">/);
   // 종료는 루프를 멈추고 onExit(직접 이탈)로 나간다
   assert.match(snakeStageSource, /loopRef\.current\?\.stop\(\);\s*onExit\(\);/);
+});
+
+test('ArcadeStageChrome uses a 2-pane layout with info panel and board arena', () => {
+  // 좌측 정보 패널 + 우측 아레나
+  assert.match(chromeSource, /<aside className="pg-arcade-info">/);
+  assert.match(chromeSource, /<div className="pg-arcade-arena">/);
+  // 새 슬롯: eyebrow · 제목 · 등급 진행 · 톤 토큰
+  assert.match(chromeSource, /className="pg-arcade-eyebrow"/);
+  assert.match(chromeSource, /className="pg-arcade-title"/);
+  assert.match(chromeSource, /gradeProgress && \(/);
+  assert.match(chromeSource, /--pg-arena-tone.*var\(\$\{accentToken\}\)/);
+  // 오버레이는 아레나 안에 있어 보드만 덮는다(정보 패널은 계속 보임)
+  assert.match(chromeSource, /<div className="pg-arcade-arena">[\s\S]*?pg-arcade-overlay[\s\S]*?phase === 'result'/);
+});
+
+test('neonBoard renders emissive neon cells without an embossed inset bevel', () => {
+  // 바깥 글로우(shadowBlur) 중심, inset 베벨 아님
+  assert.match(neonSource, /export function drawNeonCell/);
+  assert.match(neonSource, /export function paintNeonBackground/);
+  assert.match(neonSource, /export function drawNeonOutline/);
+  assert.match(neonSource, /export function drawNeonDot/);
+  assert.match(neonSource, /ctx\.shadowColor = color/);
+  assert.match(neonSource, /ctx\.shadowBlur/);
+  // 위쪽만 밝히는 광택(아래 어둠 없음 → 엠보싱 방지)
+  assert.match(neonSource, /rgba\(255,255,255,0\.32\)/);
+});
+
+test('SnakeStage draws a green neon board and passes 2-pane info props', () => {
+  assert.match(snakeStageSource, /paintNeonBackground\(/);
+  assert.match(snakeStageSource, /drawNeonCell\(/);
+  assert.match(snakeStageSource, /drawNeonDot\(/);
+  assert.match(snakeStageSource, /accentToken="--pg-green"/);
+  assert.match(snakeStageSource, /eyebrow="GROW & SURVIVE"/);
+  assert.match(snakeStageSource, /gradeProgress=\{gradeProgress\('snake', hud\.length\)\}/);
+  assert.match(snakeStageSource, /className="pg-arcade-board"/);
+});
+
+test('TetrisStage draws a blue neon board, moves hold/next into the arena sideboard', () => {
+  assert.match(tetrisStageSource, /paintNeonBackground\(/);
+  assert.match(tetrisStageSource, /drawNeonCell\(/);
+  assert.match(tetrisStageSource, /drawNeonOutline\(/); // 고스트 윤곽
+  assert.match(tetrisStageSource, /accentToken="--pg-blue"/);
+  assert.match(tetrisStageSource, /gradeProgress=\{gradeProgress\('tetris', hud\.score\)\}/);
+  assert.match(tetrisStageSource, /className="pg-arcade-boardwrap"/);
+  assert.match(tetrisStageSource, /pg-arcade-sideboard/);
 });
 
 test('GameHost routes snake and tetris to their stages, others to ComingSoon', () => {

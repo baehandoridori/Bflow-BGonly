@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from 'react';
+import { useEffect, useState, type CSSProperties, type ReactNode } from 'react';
 import { useReducedMotion } from 'framer-motion';
 
 import type { PlaygroundGameDefinition } from '@/features/playground/catalog';
@@ -18,6 +18,9 @@ export interface ArcadeStageChromeProps {
   hud: ReactNode;
   stage: ReactNode;
   result?: ReactNode;
+  eyebrow?: string; // 좌측 패널 상단 소제목(예: 'FALLING BLOCKS · ENDLESS')
+  gradeProgress?: { label: string; pct: number }; // 다음 등급 진행 바
+  accentToken?: string; // 게임 톤 토큰명(예: '--pg-blue') — 아레나·보드 네온 색
   onStart: () => void;
   onResume: () => void;
   onPause: () => void; // 종료 확인을 띄우기 전 진행 중 루프를 멈춘다
@@ -54,6 +57,7 @@ function statusText(phase: ArcadeStagePhase, game: PlaygroundGameDefinition): st
 export function ArcadeStageChrome(props: ArcadeStageChromeProps) {
   const {
     game, phase, hud, stage, result,
+    eyebrow, gradeProgress, accentToken = '--pg-accent',
     onStart, onResume, onPause, onQuit, onCountdownComplete, finishError, onRetryFinish,
     onConfirmingChange, returnLabel = '로비로',
     startDisabledReason, startErrorHint, startPending, todayRewardedRuns, entryFee, dailyRewardCap, keyHints,
@@ -103,95 +107,118 @@ export function ArcadeStageChrome(props: ArcadeStageChromeProps) {
   }, [confirmingQuit, onConfirmingChange]);
 
   const rewardsLeft = Math.max(0, dailyRewardCap - todayRewardedRuns);
+  const toneStyle = { '--pg-arena-tone': `var(${accentToken})` } as CSSProperties;
 
   return (
-    <section className="pg-arcade-stage" aria-label={`${game.koName} 게임`}>
+    <section className="pg-arcade-stage" aria-label={`${game.koName} 게임`} style={toneStyle}>
       <p className="pg-arcade-visually-live" aria-live="polite" style={{ position: 'absolute', width: 1, height: 1, overflow: 'hidden', clip: 'rect(0 0 0 0)' }}>
         {statusText(phase, game)}
       </p>
       <div className="pg-arcade-stage__frame">
-        <div className="pg-arcade-hud">{hud}</div>
-        {stage}
-
-        {phase === 'ready' && (
-          <div className="pg-arcade-overlay">
-            <div className="pg-arcade-overlay__title">{game.koName}</div>
-            <p className="pg-arcade-overlay__hint">{game.stageReward}</p>
-            <div className="pg-arcade-keyhints">
-              {keyHints.map((hint) => (
-                <span key={hint.key} className="pg-arcade-keyhint">
-                  <span className="pg-arcade-keyhint__key">{hint.key}</span>
-                  {hint.label}
-                </span>
-              ))}
+        {/* 좌측: 정보·HUD 패널 */}
+        <aside className="pg-arcade-info">
+          <div className="pg-arcade-info__head">
+            {eyebrow && <span className="pg-arcade-eyebrow">{eyebrow}</span>}
+            <h2 className="pg-arcade-title">{game.koName}</h2>
+            <p className="pg-arcade-desc">{game.stageReward}</p>
+          </div>
+          <div className="pg-arcade-hud">{hud}</div>
+          {gradeProgress && (
+            <div className="pg-arcade-grade">
+              <div className="pg-arcade-grade__row">
+                <span>{gradeProgress.label}</span>
+                <span className="pg-arcade-grade__pct">{gradeProgress.pct}%</span>
+              </div>
+              <div className="pg-arcade-grade__track">
+                <i style={{ width: `${gradeProgress.pct}%` }} />
+              </div>
             </div>
-            <p className="pg-arcade-overlay__hint">오늘 보상 가능 {rewardsLeft}/{dailyRewardCap}</p>
-            <button
-              type="button"
-              className="pg-arcade-btn"
-              onClick={onStart}
-              disabled={!!startDisabledReason || !!startPending}
-            >
-              {startPending ? '시작하는 중…' : `${entryFee}P 내고 시작`}
-            </button>
-            {startDisabledReason && <p className="pg-arcade-overlay__hint">{startDisabledReason}</p>}
-            {startErrorHint && <p className="pg-arcade-overlay__hint" role="alert">{startErrorHint}</p>}
+          )}
+          <div className="pg-arcade-keyhints">
+            {keyHints.map((hint) => (
+              <span key={hint.key} className="pg-arcade-keyhint">
+                <span className="pg-arcade-keyhint__key">{hint.key}</span>
+                {hint.label}
+              </span>
+            ))}
           </div>
-        )}
+        </aside>
 
-        {phase === 'countdown' && (
-          <div className="pg-arcade-overlay">
-            <div className="pg-arcade-countdown">{countdown}</div>
-          </div>
-        )}
+        {/* 우측: 게임 보드 아레나(오버레이는 이 안에서 보드만 덮는다) */}
+        <div className="pg-arcade-arena">
+          {stage}
 
-        {phase === 'paused' && !confirmingQuit && (
-          <div className="pg-arcade-overlay">
-            <div className="pg-arcade-overlay__title">일시정지</div>
-            <button type="button" className="pg-arcade-btn" onClick={onResume}>계속하기</button>
-            <button type="button" className="pg-arcade-btn pg-arcade-btn--ghost" onClick={() => setConfirmingQuit(true)}>나가기</button>
-          </div>
-        )}
+          {phase === 'ready' && (
+            <div className="pg-arcade-overlay">
+              <div className="pg-arcade-overlay__title">{game.koName}</div>
+              <p className="pg-arcade-overlay__hint">오늘 보상 가능 {rewardsLeft}/{dailyRewardCap}</p>
+              <button
+                type="button"
+                className="pg-arcade-btn"
+                onClick={onStart}
+                disabled={!!startDisabledReason || !!startPending}
+              >
+                {startPending ? '시작하는 중…' : `${entryFee}P 내고 시작`}
+              </button>
+              {startDisabledReason && <p className="pg-arcade-overlay__hint">{startDisabledReason}</p>}
+              {startErrorHint && <p className="pg-arcade-overlay__hint" role="alert">{startErrorHint}</p>}
+            </div>
+          )}
 
-        {confirmingQuit && (
-          <div className="pg-arcade-overlay">
-            <div className="pg-arcade-overlay__title">게임을 종료할까요?</div>
-            <p className="pg-arcade-overlay__hint">입장료는 돌려받지 못해요.</p>
-            <button type="button" className="pg-arcade-btn" onClick={() => { setConfirmingQuit(false); onQuit(); }}>종료</button>
-            <button
-              type="button"
-              className="pg-arcade-btn pg-arcade-btn--ghost"
-              onClick={() => {
-                setConfirmingQuit(false);
-                if (resumeAfterConfirm) {
-                  setResumeAfterConfirm(false);
-                  if (phase === 'running') onResume(); // 카운트다운은 위 effect 가 재시작한다
-                }
-              }}
-            >
-              계속하기
-            </button>
-          </div>
-        )}
+          {phase === 'countdown' && (
+            <div className="pg-arcade-overlay">
+              <div className="pg-arcade-countdown">{countdown}</div>
+            </div>
+          )}
 
-        {phase === 'finishing' && (
-          <div className="pg-arcade-overlay">
-            {finishError ? (
-              <>
-                <div className="pg-arcade-overlay__title">결과를 저장하지 못했어요</div>
-                <p className="pg-arcade-overlay__hint">잠깐 연결이 불안했어요. 다시 시도하면 이번 점수와 보상이 기록돼요.</p>
-                <button type="button" className="pg-arcade-btn" onClick={onRetryFinish}>다시 시도</button>
-                <button type="button" className="pg-arcade-btn pg-arcade-btn--ghost" onClick={onQuit}>{returnLabel}</button>
-              </>
-            ) : (
-              <div className="pg-arcade-overlay__title">결과 저장 중…</div>
-            )}
-          </div>
-        )}
+          {phase === 'paused' && !confirmingQuit && (
+            <div className="pg-arcade-overlay">
+              <div className="pg-arcade-overlay__title">일시정지</div>
+              <button type="button" className="pg-arcade-btn" onClick={onResume}>계속하기</button>
+              <button type="button" className="pg-arcade-btn pg-arcade-btn--ghost" onClick={() => setConfirmingQuit(true)}>나가기</button>
+            </div>
+          )}
 
-        {phase === 'result' && result && (
-          <div className="pg-arcade-overlay">{result}</div>
-        )}
+          {confirmingQuit && (
+            <div className="pg-arcade-overlay">
+              <div className="pg-arcade-overlay__title">게임을 종료할까요?</div>
+              <p className="pg-arcade-overlay__hint">입장료는 돌려받지 못해요.</p>
+              <button type="button" className="pg-arcade-btn" onClick={() => { setConfirmingQuit(false); onQuit(); }}>종료</button>
+              <button
+                type="button"
+                className="pg-arcade-btn pg-arcade-btn--ghost"
+                onClick={() => {
+                  setConfirmingQuit(false);
+                  if (resumeAfterConfirm) {
+                    setResumeAfterConfirm(false);
+                    if (phase === 'running') onResume(); // 카운트다운은 위 effect 가 재시작한다
+                  }
+                }}
+              >
+                계속하기
+              </button>
+            </div>
+          )}
+
+          {phase === 'finishing' && (
+            <div className="pg-arcade-overlay">
+              {finishError ? (
+                <>
+                  <div className="pg-arcade-overlay__title">결과를 저장하지 못했어요</div>
+                  <p className="pg-arcade-overlay__hint">잠깐 연결이 불안했어요. 다시 시도하면 이번 점수와 보상이 기록돼요.</p>
+                  <button type="button" className="pg-arcade-btn" onClick={onRetryFinish}>다시 시도</button>
+                  <button type="button" className="pg-arcade-btn pg-arcade-btn--ghost" onClick={onQuit}>{returnLabel}</button>
+                </>
+              ) : (
+                <div className="pg-arcade-overlay__title">결과 저장 중…</div>
+              )}
+            </div>
+          )}
+
+          {phase === 'result' && result && (
+            <div className="pg-arcade-overlay">{result}</div>
+          )}
+        </div>
       </div>
     </section>
   );
