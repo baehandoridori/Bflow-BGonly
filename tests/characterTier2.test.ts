@@ -125,7 +125,7 @@ test('costume-images: 순수 헬퍼 (buildImagesByCostume + rebuild 구조적 �
 test('costume-images: store 상태+액션 + featured 동기화(무마이그레이션 호환)', () => {
   assert.match(store, /costumeImages: CharacterCostumeImage\[\];/);
   assert.match(store, /imagesByCostume: Map<string, CharacterCostumeImage\[\]>;/);
-  assert.match(store, /addCostumeImage: async \(costumeId, url, role = 'design'\)/);
+  assert.match(store, /addCostumeImage: async \(costumeId, url, role = 'design', naturalSize\)/);
   assert.match(store, /setPrimaryImage: async \(imageId\)/);
   assert.match(store, /reorderCostumeImages: async \(costumeId, orderedIds\)/);
   assert.match(store, /deleteCostumeImage: async \(imageId\)/);

@@ -4037,6 +4037,8 @@ export interface CharacterCostumeImageRow {
   label: string | null;
   image_background: 'transparent' | 'black' | 'white' | 'checker';
   image_fit: { scale: number; scaleX?: number; scaleY?: number; x: number; y: number; lockAspect: boolean };
+  natural_width?: number | null;
+  natural_height?: number | null;
   is_primary: boolean;
   sort_order: number;
   created_at: string;
@@ -4315,6 +4317,8 @@ export async function addCostumeImage(input: {
   role?: 'design' | 'final' | 'variant';
   imageBackground?: 'transparent' | 'black' | 'white' | 'checker';
   imageFit?: unknown;
+  naturalWidth?: number | null;
+  naturalHeight?: number | null;
   isPrimary?: boolean;
   sortOrder?: number;
   createdBy?: string | null;
@@ -4340,6 +4344,9 @@ export async function addCostumeImage(input: {
     created_by: input.createdBy ?? null,
   };
   if (input.imageBackground !== undefined) insert.image_background = input.imageBackground;
+  // 피드백 33: 원본 크기는 값이 있을 때만 컬럼에 쓴다 — 마이그레이션 전 DB 에서도 무측정 업로드는 계속 동작.
+  if (input.naturalWidth != null) insert.natural_width = input.naturalWidth;
+  if (input.naturalHeight != null) insert.natural_height = input.naturalHeight;
   const { data, error } = await supabase
     .from('character_costume_images')
     .insert(insert)

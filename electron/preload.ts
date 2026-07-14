@@ -737,6 +737,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
     role?: 'design' | 'final' | 'variant';
     imageBackground?: 'transparent' | 'black' | 'white' | 'checker';
     imageFit?: unknown;
+    naturalWidth?: number | null;
+    naturalHeight?: number | null;
     isPrimary?: boolean;
     sortOrder?: number;
     createdBy?: string | null;

@@ -186,7 +186,7 @@ export interface Character {
   memo: string | null;
   /** 캐릭터 기본 작업 폴더. 실제 폴더를 만들거나 복사하지 않고 경로만 저장한다. */
   workFolderPath: string | null;
-  /** 캐릭터 나열 시 상대 크기 비교 기준값(스튜디오 임의 단위, 실제 업로드 픽셀과 무관). null=균일 표시. (T2-3) */
+  /** 캐릭터 키(px, 1280x720 프로젝트 기준) — 이미지 업로드 시 원본 세로 px 자동 설정 + 기준선 드래그 조정(피드백 33). null=미설정. */
   referenceHeightPx: number | null;
   sortOrder: number;
   episodeIds: number[];        // 연결된 episodeNumber 목록 (매핑 테이블 조립)
@@ -274,6 +274,9 @@ export interface CharacterCostumeImage {
   imageBackground: CharacterImageBackground;
   /** 썸네일/대표 이미지 표시 변환값. 원본 이미지는 수정하지 않는다. */
   imageFit: CharacterImageFit;
+  /** 업로드 원본 크기(px, 리사이즈 전). 과거 업로드/측정 실패는 null — 기준 키 환산 폴백 처리. (피드백 33) */
+  naturalWidth: number | null;
+  naturalHeight: number | null;
   /** 이 복장의 대표 이미지 여부. costume 당 최대 1개(부분 유니크). */
   isPrimary: boolean;
   sortOrder: number;
@@ -362,6 +365,8 @@ export interface CharacterCostumeImageRow {
   image_background: unknown;
   /** JSONB — normalizeCharacterImageFit 가 정규화. */
   image_fit: unknown;
+  natural_width?: number | null;
+  natural_height?: number | null;
   is_primary: boolean | null;
   sort_order: number | null;
   created_at: string;
@@ -1559,6 +1564,8 @@ export interface ElectronAPI {
     role?: CostumeImageRole;
     imageBackground?: CharacterImageBackground;
     imageFit?: CharacterImageFit;
+    naturalWidth?: number | null;
+    naturalHeight?: number | null;
     isPrimary?: boolean;
     sortOrder?: number;
     createdBy?: string | null;

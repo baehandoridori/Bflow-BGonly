@@ -26,6 +26,8 @@ const PART_BOX_H = 96;
 const CAROUSEL_CARD_WIDTH = 112;
 const CAROUSEL_SIDE_CARD_WIDTH = 92;
 const CAROUSEL_SLOT_GAP = 78;
+/** 캐러셀 포털 레이어 z — 핀 카드(20)보다 위, 헤더(z-30)·사이드바(z-40)·모달(z-50+)보다 아래 (피드백 30). */
+const CAROUSEL_LAYER_Z = 25;
 
 interface TimelineProbe {
   partId: string;
@@ -414,6 +416,18 @@ export function TimelinePanel({ episodeNumber, partGroups, epStates, onReorder, 
     if (!pointer) return;
 
     const { clientX, clientY } = pointer;
+    // 피드백 30: 가림(occlusion) 검사 — 알림창·모달 등 다른 UI 가 이 좌표를 덮고 있으면 hover 미리보기를
+    //   발화시키지 않는다. 최상단 요소가 캐러셀 카드(pointerEvents:auto)거나 타임라인 트랙 내부일 때만 통과.
+    //   rAF 당 1회 실행이라 elementFromPoint 비용은 무시 가능.
+    const topElement = document.elementFromPoint(clientX, clientY);
+    const overTimeline = !!topElement && (
+      topElement.closest('[data-compositing-carousel-card="true"]') !== null
+      || (trackContainerRef.current?.contains(topElement) ?? false)
+    );
+    if (!overTimeline) {
+      lastHoverKeyRef.current = null;
+      return;
+    }
     const cards = document.querySelectorAll<HTMLElement>('[data-compositing-carousel-card="true"]');
     for (const card of cards) {
       const rect = card.getBoundingClientRect();
@@ -629,7 +643,7 @@ export function TimelinePanel({ episodeNumber, partGroups, epStates, onReorder, 
       {carousel && typeof document !== 'undefined' && createPortal(
         <div
           className="fixed left-0 pointer-events-none"
-          style={{ top: carousel.top, width: '100vw', height: 150, zIndex: 90 }}
+          style={{ top: carousel.top, width: '100vw', height: 150, zIndex: CAROUSEL_LAYER_Z }}
           aria-hidden={false}
         >
           {carousel.selection.visibleIndices.map((sceneIndex) => {

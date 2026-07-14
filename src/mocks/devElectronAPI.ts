@@ -1576,7 +1576,8 @@ export function installDevElectronAPI(): void {
       if (updates.memo !== undefined) row.memo = updates.memo;
       if (updates.costumeId !== undefined) row.costume_id = updates.costumeId;
     },
-    storageUploadCharacterImage: async () => ({ ok: true, url: 'mock://character-image' }),
+    // 프리뷰에서 업로드/붙여넣기 이미지가 실제로 렌더되도록 로드 가능한 경로를 돌려준다 (피드백 31b·33 검증용).
+    storageUploadCharacterImage: async () => ({ ok: true, url: MOCK_CHARACTER_IMAGE_URL }),
     // ─── 복장 다중 이미지 (mock) ───
     supabaseLoadCostumeImages: async () => {
       seedMockCharacterData();
@@ -1592,6 +1593,8 @@ export function installDevElectronAPI(): void {
         role: input.role ?? 'design', label: null,
         image_background: input.imageBackground ?? 'transparent',
         image_fit: input.imageFit ?? { scale: 1, scaleX: 1, scaleY: 1, x: 0, y: 0, lockAspect: true },
+        natural_width: input.naturalWidth ?? null,
+        natural_height: input.naturalHeight ?? null,
         is_primary: input.isPrimary ?? false,
         sort_order: input.sortOrder ?? siblings.length,
         created_at: now, updated_at: now, created_by: input.createdBy ?? null,

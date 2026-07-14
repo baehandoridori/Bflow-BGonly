@@ -155,7 +155,13 @@ interface CharacterBoardStore {
 
   // ─── 복장 다중 이미지 ───
   /** 이미지 추가 — 복장의 첫 이미지면 primary 로 지정하고 featured_* 동기화. */
-  addCostumeImage: (costumeId: string, url: string, role?: CostumeImageRole) => Promise<CharacterCostumeImage | null>;
+  addCostumeImage: (
+    costumeId: string,
+    url: string,
+    role?: CostumeImageRole,
+    /** 업로드 원본 크기(px, 리사이즈 전 측정값) — 기준 키 자동 설정·드래그 조정용 (피드백 33). */
+    naturalSize?: { width: number; height: number },
+  ) => Promise<CharacterCostumeImage | null>;
   /** 대표 이미지 지정 — 같은 복장 이미지들의 primary 갱신 + featured_* 동기화. */
   setPrimaryImage: (imageId: string) => Promise<void>;
   /** 이미지 부분 필드 수정 — primary 이미지의 배경/맞춤 변경 시 featured_* 동기화. */
@@ -572,12 +578,16 @@ export const useCharacterBoardStore = create<CharacterBoardStore>((set, get) => 
 
   // ─── 복장 다중 이미지 ───
 
-  addCostumeImage: async (costumeId, url, role = 'design') => {
+  addCostumeImage: async (costumeId, url, role = 'design', naturalSize) => {
     const createdBy = useAuthStore.getState().currentUser?.id ?? null;
     // 복장의 첫 이미지면 대표(primary)로 지정 — 기존 단일 이미지 소비처가 이 값을 계속 읽는다.
     const isPrimary = (get().imagesByCostume.get(costumeId)?.length ?? 0) === 0;
     try {
-      const created = await svcAddCostumeImage({ costumeId, url, role, isPrimary, createdBy });
+      const created = await svcAddCostumeImage({
+        costumeId, url, role, isPrimary, createdBy,
+        naturalWidth: naturalSize?.width ?? null,
+        naturalHeight: naturalSize?.height ?? null,
+      });
       set((s) => {
         if (s.costumeImages.some((i) => i.id === created.id)) return s;
         const costumeImages = sortCostumeImages([...s.costumeImages, created]);

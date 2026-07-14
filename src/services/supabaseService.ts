@@ -998,6 +998,8 @@ export function rowToCostumeImage(rawRow: CharacterCostumeImageRow | Record<stri
     label: row.label ?? null,
     imageBackground: normalizeCharacterImageBackground(row.image_background),
     imageFit: normalizeCharacterImageFit(row.image_fit),
+    naturalWidth: row.natural_width ?? null,
+    naturalHeight: row.natural_height ?? null,
     isPrimary: row.is_primary === true,
     sortOrder: row.sort_order ?? 0,
     createdAt: row.created_at,
@@ -1016,6 +1018,8 @@ export async function addCharacterCostumeImage(input: {
   role?: CostumeImageRole;
   imageBackground?: CharacterImageBackground;
   imageFit?: CharacterImageFit;
+  naturalWidth?: number | null;
+  naturalHeight?: number | null;
   isPrimary?: boolean;
   sortOrder?: number;
   createdBy?: string | null;

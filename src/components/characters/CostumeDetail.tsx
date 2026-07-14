@@ -12,6 +12,7 @@ import {
 import { AssigneeNamePicker } from '@/components/characters/AssigneeNamePicker';
 import { StageRail } from '@/components/characters/StageRail';
 import { RiggingAnnounceModal } from '@/components/characters/RiggingAnnounceModal';
+import { CharacterHeightEditor } from '@/components/characters/CharacterHeightEditor';
 import { TagChipSection } from '@/components/characters/TagChips';
 import { claimReactKey } from '@/utils/claimReactKey';
 import { DESIGN_STAGE_META, RIGGING_STAGE_META } from '@/constants/characterStages';
@@ -150,6 +151,7 @@ export function CostumeDetail({
   const setCostumeTags = useCharacterBoardStore((s) => s.setCostumeTags);
   const setVersion = useCharacterBoardStore((s) => s.setVersion);
   const setCharacterReferenceHeight = useCharacterBoardStore((s) => s.setCharacterReferenceHeight);
+  const imagesByCostume = useCharacterBoardStore((s) => s.imagesByCostume);
   const episodeLinks = useCharacterBoardStore((s) => s.episodeLinks);
   const setEpisodeCostume = useCharacterBoardStore((s) => s.setEpisodeCostume);
   const episodes = useDataStore((s) => s.episodes);
@@ -178,6 +180,7 @@ export function CostumeDetail({
   const charLinks = episodeLinks.get(character.id) ?? [];
 
   const [announceOpen, setAnnounceOpen] = useState(false);
+  const [heightEditorOpen, setHeightEditorOpen] = useState(false);
 
   return (
     <div className="flex flex-col gap-5">
@@ -218,23 +221,36 @@ export function CostumeDetail({
           />
         </div>
 
-        {/* 기준 키 (캐릭터 단위, T2-3) — 나열 시 상대 크기 비교용 */}
+        {/* 기준 키 (캐릭터 단위, T2-3 + 피드백 33) — 이미지 원본 세로 px 기준, 업로드 시 자동 설정 + 드래그 조정 */}
         <div className="flex flex-col gap-1.5">
-          <div className="text-xs text-text-secondary" title="캐릭터 나열(키 비교 보기)에서 상대 크기 기준으로 쓰는 값이에요. 실제 이미지 픽셀과 무관.">기준 키(px)</div>
-          <input
-            type="number"
-            min={1}
-            max={4999}
-            inputMode="numeric"
-            value={heightDraft}
-            onChange={(e) => { setHeightDraft(e.target.value); }}
-            onFocus={() => { heightFocused.current = true; }}
-            onBlur={commitHeight}
-            onKeyDown={(e) => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); }}
-            placeholder="예: 600"
-            aria-label="캐릭터 기준 키(px)"
-            className="h-8 w-24 rounded-md border border-bg-border bg-transparent px-2 text-sm text-text-primary outline-none focus:border-accent/50"
-          />
+          <div className="text-xs text-text-secondary" title="캐릭터 키(px, 1280x720 프로젝트 기준). 이미지를 올리면 원본 세로 크기로 자동 설정되고, '이미지로 조정'으로 머리·바닥 기준선을 맞출 수 있어요.">기준 키(px)</div>
+          <div className="flex items-center gap-1.5">
+            <input
+              type="number"
+              min={1}
+              max={4999}
+              inputMode="numeric"
+              value={heightDraft}
+              onChange={(e) => { setHeightDraft(e.target.value); }}
+              onFocus={() => { heightFocused.current = true; }}
+              onBlur={commitHeight}
+              onKeyDown={(e) => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); }}
+              placeholder="예: 600"
+              aria-label="캐릭터 기준 키(px)"
+              className="h-8 w-24 rounded-md border border-bg-border bg-transparent px-2 text-sm text-text-primary outline-none focus:border-accent/50"
+            />
+            <button
+              type="button"
+              onClick={() => setHeightEditorOpen(true)}
+              disabled={(imagesByCostume.get(costume.id)?.length ?? 0) === 0}
+              title={(imagesByCostume.get(costume.id)?.length ?? 0) > 0
+                ? '이미지 위에서 머리·바닥 기준선을 드래그해 키를 맞춰요'
+                : '이 복장에 이미지가 있어야 조정할 수 있어요'}
+              className="h-8 shrink-0 rounded-md border border-bg-border px-2 text-xs text-text-secondary hover:border-accent/50 hover:text-accent disabled:opacity-40 disabled:hover:border-bg-border disabled:hover:text-text-secondary"
+            >
+              이미지로 조정
+            </button>
+          </div>
         </div>
       </div>
 
@@ -359,6 +375,9 @@ export function CostumeDetail({
           costume={costume}
           onClose={() => setAnnounceOpen(false)}
         />
+      )}
+      {heightEditorOpen && (
+        <CharacterHeightEditor character={character} costume={costume} onClose={() => setHeightEditorOpen(false)} />
       )}
     </div>
   );
