@@ -73,11 +73,14 @@ test('ArcadeStageChrome renders per-phase overlays and guards start/back', () =>
   // 진행/일시정지/카운트다운 + 입장료 정산 중(startPending)에도 뒤로가기 인터셉트
   assert.match(chromeSource, /phase === 'running' \|\| phase === 'paused' \|\| phase === 'countdown' \|\| !!startPending/);
   assert.match(chromeSource, /usePlaygroundBackInterceptor\(interceptActive/);
-  // 정산 중에는 이탈만 막고(모달 없이), 진행 중이면 확인 전에 먼저 멈춘다
-  assert.match(chromeSource, /if \(startPending\) return;/);
+  // 정산·저장 중에는 이탈만 막고(모달 없이), 진행 중이면 확인 전에 먼저 멈춘다
+  assert.match(chromeSource, /if \(startPending \|\| phase === 'finishing'\) return;/);
   assert.match(chromeSource, /if \(phase === 'running'\) \{ onPause\(\)/);
   // 확인 모달 중에는 카운트다운도 멈춘다
   assert.match(chromeSource, /phase !== 'countdown' \|\| confirmingQuit/);
+  // 결과 저장 중(에러 전)에도 뒤로가기를 가로채 유료 판 유실을 막는다
+  assert.match(chromeSource, /const savingResult = phase === 'finishing' && !finishError;/);
+  assert.match(chromeSource, /if \(startPending \|\| phase === 'finishing'\) return;/);
   // 종료 확인 문구 + 입장료 안내
   assert.match(chromeSource, /게임을 종료할까요\?/);
   assert.match(chromeSource, /입장료는 돌려받지 못해요/);

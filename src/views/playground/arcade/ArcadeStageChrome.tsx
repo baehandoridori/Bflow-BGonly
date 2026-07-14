@@ -60,11 +60,13 @@ export function ArcadeStageChrome(props: ArcadeStageChromeProps) {
   const [confirmingQuit, setConfirmingQuit] = useState(false);
   const [resumeAfterConfirm, setResumeAfterConfirm] = useState(false);
 
-  // 진행/일시정지/카운트다운, 그리고 입장료 정산 중(startPending)에도 뒤로가기를 가로챈다.
-  // 정산 중에는 이탈만 막고(모달 없이), 진행/카운트다운 중이면 먼저 멈춘 뒤 종료 확인을 띄운다.
-  const interceptActive = phase === 'running' || phase === 'paused' || phase === 'countdown' || !!startPending;
+  // 진행/일시정지/카운트다운, 입장료 정산 중(startPending), 결과 저장 중(finishing·에러 전)에도
+  // 뒤로가기를 가로챈다. 정산·저장 중에는 이탈만 막고(모달 없이 — 유료 판이 유실되지 않게),
+  // 진행/카운트다운 중이면 먼저 멈춘 뒤 종료 확인을 띄운다. 저장 실패 UI가 뜬 뒤에는 이탈을 허용한다.
+  const savingResult = phase === 'finishing' && !finishError;
+  const interceptActive = phase === 'running' || phase === 'paused' || phase === 'countdown' || !!startPending || savingResult;
   usePlaygroundBackInterceptor(interceptActive, () => {
-    if (startPending) return; // 정산 중 — 이탈만 차단(interceptTop 이 true 반환)
+    if (startPending || phase === 'finishing') return; // 정산·결과 저장 중 — 이탈만 차단(interceptTop 이 true 반환)
     if (phase === 'running') { onPause(); setResumeAfterConfirm(true); }
     else if (phase === 'countdown') { setResumeAfterConfirm(true); } // 아래 effect 가 confirm 중 멈춘다
     setConfirmingQuit(true);
