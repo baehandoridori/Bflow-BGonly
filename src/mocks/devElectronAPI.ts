@@ -1593,6 +1593,8 @@ export function installDevElectronAPI(): void {
         role: input.role ?? 'design', label: null,
         image_background: input.imageBackground ?? 'transparent',
         image_fit: input.imageFit ?? { scale: 1, scaleX: 1, scaleY: 1, x: 0, y: 0, lockAspect: true },
+        natural_width: input.naturalWidth ?? null,
+        natural_height: input.naturalHeight ?? null,
         is_primary: input.isPrimary ?? false,
         sort_order: input.sortOrder ?? siblings.length,
         created_at: now, updated_at: now, created_by: input.createdBy ?? null,
