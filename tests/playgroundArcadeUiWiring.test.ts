@@ -16,6 +16,10 @@ const loopSource = read('src', 'features', 'playground', 'arcade', 'games', 'loo
 const arcadeCssSource = read('src', 'views', 'playground', 'arcade', 'arcade.css');
 const tetrisStageSource = read('src', 'views', 'playground', 'arcade', 'TetrisStage.tsx');
 const gameHostSource = read('src', 'views', 'playground', 'arcade', 'GameHost.tsx');
+const rankingPanelSource = read('src', 'views', 'playground', 'arcade', 'ArcadeRankingPanel.tsx');
+const adminSettingsSource = read('src', 'views', 'playground', 'arcade', 'ArcadeAdminSettings.tsx');
+const houseSource = read('src', 'views', 'playground', 'JbbjHouse.tsx');
+const mainSource = read('electron', 'main.ts');
 
 test('advanceFixedStep accumulates frames and steps once per crossed interval', () => {
   let steps = 0;
@@ -206,6 +210,39 @@ test('TetrisStage reuses the arcade safeguards and DAS/ARR input', () => {
   assert.match(tetrisStageSource, /onConfirmingChange=\{setConfirmOpen\}/);
   // duration 은 활성 시간을 4시간 상한으로 클램프
   assert.match(tetrisStageSource, /Math\.min\(14_400_000, Math\.max\(1000, Math\.round\(activePlayMsRef\.current\)\)\)/);
+});
+
+test('ArcadeRankingPanel reads snapshot leaderboards with game and period tabs', () => {
+  // 스냅샷의 leaderboard 를 그대로 — 별도 fetch 없음
+  assert.match(rankingPanelSource, /useArcadeStore\(\(state\) => state\.snapshot\)/);
+  assert.match(rankingPanelSource, /leaderboardAll/);
+  assert.match(rankingPanelSource, /leaderboardWeekly/);
+  // 게임 탭(스네이크/테트리스) × 기간 탭(전체/이번 주)
+  assert.match(rankingPanelSource, /id: 'snake'/);
+  assert.match(rankingPanelSource, /id: 'tetris'/);
+  assert.match(rankingPanelSource, /id: 'all'/);
+  assert.match(rankingPanelSource, /id: 'weekly'/);
+  // 내 행 강조 + 5행 고정(미달 시 '—' 자리 표시)
+  assert.match(rankingPanelSource, /entry\.userId === myUserId/);
+  assert.match(rankingPanelSource, /className=\{isMe \? 'is-me' : ''\}/);
+  assert.match(rankingPanelSource, /Array\.from\(\{ length: VISIBLE_ROWS \}/);
+});
+
+test('ArcadeAdminSettings toggle drives setSlackNotify and shows the URL notice', () => {
+  assert.match(adminSettingsSource, /state\.snapshot\?\.config\.slackNotifyEnabled/);
+  assert.match(adminSettingsSource, /setSlackNotify\(event\.target\.checked\)/);
+  assert.match(adminSettingsSource, /슬랙 워크플로 주소가 설정된 뒤에 실제로 발송돼요/);
+});
+
+test('JbbjHouse mounts the ranking panel and gates admin settings behind authorizedHansol', () => {
+  assert.match(houseSource, /<ArcadeRankingPanel \/>/);
+  assert.match(houseSource, /authorizedHansol && <ArcadeAdminSettings \/>/);
+  // 구현 완료 게임 집합으로 도크 상태 라벨 판단 — 테트리스도 '바로 플레이'
+  assert.match(houseSource, /PLAYABLE_GAMES[\s\S]*?'snake', 'tetris'/);
+});
+
+test('main skips the arcade record webhook when the URL is empty', () => {
+  assert.match(mainSource, /if \(!ARCADE_RECORD_WEBHOOK_URL\) return;/);
 });
 
 test('RunResultOverlay sequences grade, reward, best banner and achievements', () => {
