@@ -449,7 +449,7 @@ export function FeaturedImageSlot({
       // 패널 레벨 오버레이(액션 메뉴·썸네일 맞추기·라이트박스)는 로컬 상태 + DOM 마커로 감지.
       if (
         uploading || imageMenu || addMenu || fitEditorOpen
-        || document.querySelector('[data-character-lightbox], [data-character-fit-editor], [data-character-context-menu], [data-rigging-announce]')
+        || document.querySelector('[data-character-lightbox], [data-character-fit-editor], [data-character-context-menu], [data-rigging-announce], [data-character-height-editor]')
       ) return;
       const target = event.target;
       if (target instanceof HTMLElement && target.closest('input, textarea, [contenteditable="true"]')) return;

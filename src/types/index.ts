@@ -186,7 +186,7 @@ export interface Character {
   memo: string | null;
   /** 캐릭터 기본 작업 폴더. 실제 폴더를 만들거나 복사하지 않고 경로만 저장한다. */
   workFolderPath: string | null;
-  /** 캐릭터 나열 시 상대 크기 비교 기준값(스튜디오 임의 단위, 실제 업로드 픽셀과 무관). null=균일 표시. (T2-3) */
+  /** 캐릭터 키(px, 1280x720 프로젝트 기준) — 이미지 업로드 시 원본 세로 px 자동 설정 + 기준선 드래그 조정(피드백 33). null=미설정. */
   referenceHeightPx: number | null;
   sortOrder: number;
   episodeIds: number[];        // 연결된 episodeNumber 목록 (매핑 테이블 조립)
