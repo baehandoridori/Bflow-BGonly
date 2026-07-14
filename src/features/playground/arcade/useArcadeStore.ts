@@ -179,7 +179,12 @@ export function createArcadeStore(
       async load(requestedSessionKey = DEFAULT_SESSION_KEY) {
         const gen = ++generation;
         const sessionChanged = get().sessionKey !== requestedSessionKey;
-        if (sessionChanged) appliedRuns.clear();
+        if (sessionChanged) {
+          appliedRuns.clear();
+          // 세션(계정)이 바뀌면 보류한 runId 를 버린다 — run id 는 전역 UUID 라, 다른 사용자가
+          // 옛 runId 를 재사용하면 서로의 유료 판이 얽히거나 막힌다.
+          pendingStartRun = null;
+        }
         set({
           loading: true,
           error: null,

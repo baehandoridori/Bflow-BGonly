@@ -231,3 +231,28 @@ test('a failed paid start reuses the same runId on the next start (no double ent
   const startsAfter = gateway.executed.filter((command) => command.kind === 'game-start');
   assert.notEqual(startsAfter[2].runId, starts[0].runId, '성공 뒤 새 시작은 다른 runId');
 });
+
+test('a session change discards a pending start runId (run ids are global)', async () => {
+  let attempt = 0;
+  const gateway = createMockGateway({
+    execute: async (command) => {
+      if (command.kind === 'game-start') {
+        attempt += 1;
+        if (attempt === 1) throw new Error('response lost');
+        return { wallet: { walletPoints: 990, lifetimeEarnedPoints: 5000 } };
+      }
+      return { wallet: { walletPoints: 0, lifetimeEarnedPoints: 0 } } as ArcadeExecuteResult;
+    },
+  });
+  const store = createArcadeStore(gateway, noopSync);
+  await store.getState().load('user-1');
+  const first = await store.getState().startRun('snake');
+  assert.equal(first, null, '첫 시작 실패 → runId 보류');
+
+  // 다른 계정으로 전환하면 보류한 runId 를 버려야 한다.
+  await store.getState().load('user-2');
+  const second = await store.getState().startRun('snake');
+  assert.ok(second);
+  const starts = gateway.executed.filter((command) => command.kind === 'game-start');
+  assert.notEqual(starts[0].runId, starts[1].runId, '세션 전환 뒤 시작은 새 runId 를 발급한다');
+});
