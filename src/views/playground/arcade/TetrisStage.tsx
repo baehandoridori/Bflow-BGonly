@@ -29,6 +29,18 @@ import { RunResultOverlay } from './RunResultOverlay';
 const CELL = 24;
 const STEP_MS = 16; // 시뮬레이션 고정 스텝(≈62fps). tickTetris·DAS 클록의 단위.
 const VISIBLE_ROWS = TETRIS_ROWS - TETRIS_HIDDEN_ROWS;
+const NEXT_PREVIEW = 5;
+
+interface TetrisHud {
+  score: number;
+  level: number;
+  lines: number;
+  combo: number;
+  hold: TetrisPiece | null;
+  next: TetrisPiece[];
+}
+
+const EMPTY_HUD: TetrisHud = { score: 0, level: 1, lines: 0, combo: 0, hold: null, next: [] };
 
 const KEY_HINTS = [
   { key: '← →', label: '이동' },
@@ -46,7 +58,9 @@ export function TetrisStage({ onExit, returnLabel }: { onExit: () => void; retur
 
   const [phase, setPhase] = useState<ArcadeStagePhase>('ready');
   const [result, setResult] = useState<ArcadeFinishResult | null>(null);
-  const [hud, setHud] = useState({ score: 0, level: 1, lines: 0, combo: 0 });
+  // hold·next 도 HUD 상태에 포함한다 — 이들은 점수 변화 없이(홀드 스왑·조각 락) 바뀌므로
+  // score/level/lines/combo 만 보고 리렌더하면 홀드/넥스트 칩이 stale 로 남는다.
+  const [hud, setHud] = useState<TetrisHud>(EMPTY_HUD);
   const [starting, setStarting] = useState(false);
   const [finishError, setFinishError] = useState(false);
   const [confirmOpen, setConfirmOpen] = useState(false);
@@ -57,7 +71,7 @@ export function TetrisStage({ onExit, returnLabel }: { onExit: () => void; retur
   const finishedRef = useRef(false); // 이 판을 이미 마감(finalize)했는지 — onStep·키입력 양쪽에서 한 번만 실행되게 가드
   const finishInputRef = useRef<ArcadeFinishInput | null>(null);
   const activePlayMsRef = useRef(0); // 시뮬레이션 클록(활성 시간만 — 일시정지/hidden 제외)
-  const hudRef = useRef({ score: 0, level: 1, lines: 0, combo: 0 });
+  const hudRef = useRef<TetrisHud>(EMPTY_HUD);
   const loopRef = useRef<FixedStepLoop | null>(null);
   const runIdRef = useRef<string | null>(null);
   const repeaterRef = useRef(createHorizontalRepeater());
@@ -106,11 +120,14 @@ export function TetrisStage({ onExit, returnLabel }: { onExit: () => void; retur
 
   const syncHud = useCallback((s: TetrisState) => {
     const combo = Math.max(0, s.combo);
+    const next = s.queue.slice(0, NEXT_PREVIEW);
+    const prev = hudRef.current;
     if (
-      s.score !== hudRef.current.score || s.level !== hudRef.current.level
-      || s.lines !== hudRef.current.lines || combo !== hudRef.current.combo
+      s.score !== prev.score || s.level !== prev.level
+      || s.lines !== prev.lines || combo !== prev.combo
+      || s.hold !== prev.hold || next.join(',') !== prev.next.join(',')
     ) {
-      hudRef.current = { score: s.score, level: s.level, lines: s.lines, combo };
+      hudRef.current = { score: s.score, level: s.level, lines: s.lines, combo, hold: s.hold, next };
       setHud(hudRef.current);
     }
   }, []);
@@ -154,8 +171,8 @@ export function TetrisStage({ onExit, returnLabel }: { onExit: () => void; retur
     activePlayMsRef.current = 0;
     finishedRef.current = false;
     repeaterRef.current.reset();
-    hudRef.current = { score: 0, level: 1, lines: 0, combo: 0 };
-    setHud(hudRef.current);
+    hudRef.current = EMPTY_HUD;
+    setHud(EMPTY_HUD);
     const loop = createFixedStepLoop({
       getStepMs: () => STEP_MS,
       onStep: () => {
@@ -298,8 +315,8 @@ export function TetrisStage({ onExit, returnLabel }: { onExit: () => void; retur
       <div className="pg-arcade-hud__item"><span className="pg-arcade-hud__label">라인</span><span className="pg-arcade-hud__value">{hud.lines}</span></div>
       <div className="pg-arcade-hud__item"><span className="pg-arcade-hud__label">콤보</span><span className="pg-arcade-hud__value">{hud.combo}</span></div>
       <div className="pg-arcade-hud__item"><span className="pg-arcade-hud__label">내 최고</span><span className="pg-arcade-hud__value">{myBest.toLocaleString('ko-KR')}</span></div>
-      <div className="pg-arcade-hud__item"><span className="pg-arcade-hud__label">홀드</span>{pieceChip(engineRef.current?.hold ?? null, 'hold')}</div>
-      <div className="pg-arcade-hud__item"><span className="pg-arcade-hud__label">다음</span><span className="pg-arcade-piece-next">{(engineRef.current?.queue ?? []).slice(0, 5).map((p, i) => pieceChip(p, `next-${i}`))}</span></div>
+      <div className="pg-arcade-hud__item"><span className="pg-arcade-hud__label">홀드</span>{pieceChip(hud.hold, 'hold')}</div>
+      <div className="pg-arcade-hud__item"><span className="pg-arcade-hud__label">다음</span><span className="pg-arcade-piece-next">{hud.next.map((p, i) => pieceChip(p, `next-${i}`))}</span></div>
     </>
   );
 

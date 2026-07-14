@@ -212,6 +212,15 @@ test('TetrisStage reuses the arcade safeguards and DAS/ARR input', () => {
   assert.match(tetrisStageSource, /Math\.min\(14_400_000, Math\.max\(1000, Math\.round\(activePlayMsRef\.current\)\)\)/);
 });
 
+test('TetrisStage HUD re-renders when hold/next change without a scoring change', () => {
+  // 홀드·넥스트는 점수 변화 없이 바뀌므로(홀드 스왑·조각 락) HUD 상태·비교에 포함돼야 stale 안 됨
+  assert.match(tetrisStageSource, /hold: TetrisPiece \| null;/);
+  assert.match(tetrisStageSource, /next: TetrisPiece\[\];/);
+  assert.match(tetrisStageSource, /s\.hold !== prev\.hold \|\| next\.join\(','\) !== prev\.next\.join\(','\)/);
+  assert.match(tetrisStageSource, /pieceChip\(hud\.hold, 'hold'\)/);
+  assert.match(tetrisStageSource, /hud\.next\.map\(/);
+});
+
 test('TetrisStage finalizes a run that dies from a keydown, not only from a tick', () => {
   // 하드드롭·홀드로 keydown 에서 죽어도 결과 화면으로 마감돼야 한다(입장료 내고 멈추는 일 없게)
   assert.match(tetrisStageSource, /const finalizeDead = useCallback/);
