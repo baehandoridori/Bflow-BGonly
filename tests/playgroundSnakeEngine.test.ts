@@ -141,10 +141,11 @@ test('eating the last free cell fills the board and ends the run without crashin
     dir: { x: 1, y: 0 },
     grow: 0,
     length: 440,
-    apple: { pos: { x: 20, y: 20 }, golden: false },
+    apple: { pos: { x: 20, y: 20 }, golden: true }, // 마지막 칸이 골든(+2)이어도
   });
   assert.equal(s.status, 'dead', '보드를 가득 채우면 판이 끝난다(승리)');
   assert.equal(s.body.length, 441);
+  assert.equal(s.length, 441, '점수는 보드 칸 수(441)를 넘지 않는다(골든 +2 여도 만점 441)');
   assert.ok(s.apple && typeof s.apple.pos.x === 'number', '사과가 undefined 로 깨지지 않는다');
 });
 

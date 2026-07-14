@@ -48,7 +48,9 @@ export function SnakeStage({ onExit }: { onExit: () => void }) {
   const finishInputRef = useRef<ArcadeFinishInput | null>(null); // 종료 시 1회 고정 — 재시도도 같은 payload(멱등)
   const loopRef = useRef<FixedStepLoop | null>(null);
   const runIdRef = useRef<string | null>(null);
-  const startedAtRef = useRef(0);
+  // 실제 플레이 시간(ms)만 누적한다 — 일시정지·hidden/blur 동안은 스텝이 없어 자연히 제외된다.
+  // wall-clock 을 쓰면 오래 멈춘 판이 duration 상한(4시간)을 넘어 game-finish 가 거부된다.
+  const activePlayMsRef = useRef(0);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
 
   const game = GAME_DEFINITIONS.snake;
@@ -114,7 +116,7 @@ export function SnakeStage({ onExit }: { onExit: () => void }) {
 
   const beginLoop = useCallback(() => {
     engineRef.current = createSnakeGame(createSeed());
-    startedAtRef.current = performance.now();
+    activePlayMsRef.current = 0;
     setHud({ length: engineRef.current.length, golden: 0 });
     const loop = createFixedStepLoop({
       getStepMs: () => engineRef.current?.tickMs ?? 160,
@@ -122,18 +124,20 @@ export function SnakeStage({ onExit }: { onExit: () => void }) {
         const s = engineRef.current;
         // 이미 죽었으면 무시 — 한 프레임의 catch-up 스텝이 stop() 뒤에도 이어져 finalize 가 중복되는 것을 막는다.
         if (!s || s.status !== 'running') return;
+        activePlayMsRef.current += s.tickMs; // 이번 스텝이 소비한 활성 게임 시간
         const next = stepSnake(s);
         engineRef.current = next;
         if (next.status === 'dead') {
           loopRef.current?.stop();
           deadStateRef.current = next;
           // 종료 payload 를 이 시점에 1회 고정(재시도도 동일 request_id·내용으로 멱등 재생).
+          // duration 은 활성 플레이 시간을 유효 범위(1s~4h)로 클램프한다.
           if (runIdRef.current) {
             finishInputRef.current = {
               runId: runIdRef.current,
               gameId: 'snake',
               score: next.length,
-              durationMs: Math.max(1000, Math.round(performance.now() - startedAtRef.current)),
+              durationMs: Math.min(14_400_000, Math.max(1000, Math.round(activePlayMsRef.current))),
               meta: { goldenEaten: next.goldenEaten },
             };
           }

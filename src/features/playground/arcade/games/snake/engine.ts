@@ -114,7 +114,8 @@ export function stepSnake(state: SnakeState): SnakeState {
   if (eating) {
     const growth = state.apple.golden ? 2 : 1;
     grow += growth;
-    length += growth;
+    // 점수(길이)는 보드 칸 수(441)를 넘을 수 없다 — 마지막 칸이 골든(+2)이어도 만점은 441.
+    length = Math.min(GRID * GRID, length + growth);
   }
   if (grow > 0) {
     grow -= 1; // 꼬리 유지(성장)

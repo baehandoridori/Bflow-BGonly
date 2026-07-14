@@ -115,6 +115,10 @@ test('SnakeStage keeps a retry state when finishRun fails and normalizes canvas 
   // 종료 payload 를 1회 고정하고, finalize·재시도가 그대로 재사용(멱등 request_id·내용)
   assert.match(snakeStageSource, /finishInputRef\.current = \{/);
   assert.match(snakeStageSource, /const input = finishInputRef\.current;/);
+  // duration 은 wall-clock 이 아니라 활성 플레이 시간(스텝 tickMs 합)을 4시간 상한으로 클램프
+  assert.match(snakeStageSource, /activePlayMsRef\.current \+= s\.tickMs;/);
+  assert.match(snakeStageSource, /Math\.min\(14_400_000, Math\.max\(1000, Math\.round\(activePlayMsRef\.current\)\)\)/);
+  assert.doesNotMatch(snakeStageSource, /performance\.now\(\) - startedAtRef/); // wall-clock duration 제거
   // 캔버스도 토큰을 rgb(...) 로 감싼다
   assert.match(snakeStageSource, /`rgb\(\$\{triplet\}\)`/);
   // 크롬은 finishError 시 재시도 오버레이를 띄운다
