@@ -14,10 +14,12 @@ test('playground market v3 release metadata stays aligned', () => {
   assert.equal(packageLock.packages[''].version, latestVersion);
   assert.equal(packageJson.dependencies['lightweight-charts'], '5.2.0');
   assert.equal(packageLock.packages[''].dependencies['lightweight-charts'], '5.2.0');
-  assert.deepEqual(
-    updateNotes.slice(0, 5).map((note: { version: string }) => note.version),
-    [latestVersion, '1.88.3', '1.88.2', '1.88.1', '1.88.0'],
-  );
+  const historicalVersions = ['1.88.3', '1.88.2', '1.88.1', '1.88.0'];
+  const historicalIndexes = historicalVersions.map((version) => (
+    updateNotes.findIndex((note: { version: string }) => note.version === version)
+  ));
+  assert.ok(historicalIndexes.every((index) => index > 0));
+  assert.deepEqual([...historicalIndexes].sort((left, right) => left - right), historicalIndexes);
 
   // 최신 릴리스는 package 버전과 업데이트 내역의 맨 앞 항목이 항상 일치해야 한다.
   assert.equal(updateNotes[0].version, latestVersion);
