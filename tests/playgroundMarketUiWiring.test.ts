@@ -9,18 +9,18 @@ test('playground market v3 release metadata stays aligned', () => {
   const packageLock = JSON.parse(readFileSync('package-lock.json', 'utf8'));
   const updateNotes = JSON.parse(readFileSync('DEVLOG/update-notes.json', 'utf8'));
 
-  assert.equal(packageJson.version, '1.88.3');
-  assert.equal(packageLock.version, '1.88.3');
-  assert.equal(packageLock.packages[''].version, '1.88.3');
+  const latestVersion = packageJson.version;
+  assert.equal(packageLock.version, latestVersion);
+  assert.equal(packageLock.packages[''].version, latestVersion);
   assert.equal(packageJson.dependencies['lightweight-charts'], '5.2.0');
   assert.equal(packageLock.packages[''].dependencies['lightweight-charts'], '5.2.0');
   assert.deepEqual(
-    updateNotes.slice(0, 4).map((note: { version: string }) => note.version),
-    ['1.88.3', '1.88.2', '1.88.1', '1.88.0'],
+    updateNotes.slice(0, 5).map((note: { version: string }) => note.version),
+    [latestVersion, '1.88.3', '1.88.2', '1.88.1', '1.88.0'],
   );
 
-  // 최신 릴리스(1.88.3)는 테트리스 홀드·다음 조각을 실제 블록 모양으로 표시.
-  assert.equal(updateNotes[0].version, '1.88.3');
+  // 최신 릴리스는 package 버전과 업데이트 내역의 맨 앞 항목이 항상 일치해야 한다.
+  assert.equal(updateNotes[0].version, latestVersion);
 
   // 모의투자 시장 v3 릴리스(1.82.0) 메타데이터는 그대로 유지돼야 한다.
   const marketNote = updateNotes.find((note: { version: string }) => note.version === '1.82.0');
