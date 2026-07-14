@@ -93,6 +93,9 @@ test('피드백 31(b): 공지 이미지 Ctrl+V — 공지 전용 업로드 + 미
   // 취소 시 전부, 전송 시 쓴 이미지만 남기고 정리.
   assert.match(modal, /cleanupPastedUploads\(null\)/);
   assert.match(modal, /cleanupPastedUploads\(selectedImage\?\.url \?\? null\)/);
+  // 업로드 진행 중 닫기(in-flight) 경합 — 닫힌 뒤 완료된 업로드는 등록 없이 즉시 정리 (코덱스 P2).
+  assert.match(modal, /closedRef\.current = true;/);
+  assert.match(modal, /if \(closedRef\.current\) \{\s*\n\s*deleteImage\(res\.url\)/);
   // 배경 화면(FeaturedImageSlot)의 paste 가드가 모달 열림을 감지해 이중 업로드를 막는다.
   const slot = readFileSync('src/components/characters/FeaturedImageSlot.tsx', 'utf8');
   assert.match(slot, /\[data-rigging-announce\]/);

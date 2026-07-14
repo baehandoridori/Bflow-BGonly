@@ -77,8 +77,12 @@ export function RiggingAnnounceModal({
     }
   };
 
+  // 닫힌 뒤에 완료되는 업로드(in-flight)가 고아 파일을 남기지 않도록 닫힘 여부를 기록한다(코덱스 P2).
+  const closedRef = useRef(false);
+
   /** 취소·백드롭·Escape 공통 닫기 — 보내지 않은 붙여넣기 이미지를 정리하고 닫는다. */
   const handleClose = () => {
+    closedRef.current = true;
     cleanupPastedUploads(null);
     onClose();
   };
@@ -113,6 +117,12 @@ export function RiggingAnnounceModal({
       const base64 = await resizeBlob(file, 800, isPng ? 0.92 : 0.8, isPng ? 'image/png' : 'image/jpeg');
       const res = await uploadCharacterImage(character.id, costume.id, base64);
       if (!res.ok || !res.url) throw new Error(res.error ?? '업로드 실패');
+      // 업로드 완료 전에 모달이 닫혔으면(취소·Escape·백드롭) 목록에 등록하지 않고 방금 파일을 바로 정리 —
+      //   닫기 시점의 cleanupPastedUploads 는 아직 등록 전인 이 URL 을 모른다(코덱스 P2).
+      if (closedRef.current) {
+        deleteImage(res.url).catch((e) => console.warn('[rigging-announce] 붙여넣기 이미지 정리 실패:', e));
+        return;
+      }
       const entry: PastedImage = {
         id: `pasted-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
         url: res.url,
