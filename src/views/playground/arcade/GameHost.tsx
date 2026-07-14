@@ -15,7 +15,7 @@ export function GameHost({
   onExit: () => void;
 }) {
   if (game === 'snake') {
-    return <SnakeStage onExit={onExit} />;
+    return <SnakeStage onExit={onExit} returnLabel={returnLabel} />;
   }
   return <ComingSoonGame game={GAME_DEFINITIONS[game]} returnLabel={returnLabel} onBack={onExit} />;
 }

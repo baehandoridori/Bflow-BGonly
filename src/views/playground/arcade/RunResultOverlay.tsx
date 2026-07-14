@@ -12,6 +12,7 @@ export interface RunResultOverlayProps {
   onReplay: () => void;
   onExit: () => void;
   replayDisabledReason?: string;
+  returnLabel?: string; // 소스 서페이스 라벨('게임 로비' / 'JBBJ 하우스')
 }
 
 const GRADE_LABEL: Record<ArcadeGrade, string> = {
@@ -56,7 +57,7 @@ function useCountUp(target: number, durationMs: number, enabled: boolean): numbe
 }
 
 export function RunResultOverlay(props: RunResultOverlayProps) {
-  const { result, scoreLabel, onReplay, onExit, replayDisabledReason } = props;
+  const { result, scoreLabel, onReplay, onExit, replayDisabledReason, returnLabel = '로비로' } = props;
   const prefersReducedMotion = useReducedMotion();
   const animate = !prefersReducedMotion;
   const reward = useCountUp(result.rewardPoints, 480, animate);
@@ -107,7 +108,7 @@ export function RunResultOverlay(props: RunResultOverlayProps) {
           다시 하기
         </button>
         <button type="button" className="pg-arcade-btn pg-arcade-btn--ghost" onClick={onExit}>
-          로비로
+          {returnLabel}
         </button>
       </div>
       {replayDisabledReason && <p className="pg-arcade-overlay__hint">{replayDisabledReason}</p>}

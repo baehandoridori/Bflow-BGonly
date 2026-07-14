@@ -133,6 +133,13 @@ test('SnakeStage guards against duplicate entry charges and exits directly', () 
   assert.match(snakeStageSource, /startPending=\{starting\}/);
   // 확인 전 일시정지용 onPause 전달(루프만 멈춤)
   assert.match(snakeStageSource, /onPause=\{\(\) => loopRef\.current\?\.pause\(\)\}/);
+  // 종료 확인 모달이 뜨면 게임 키 입력을 막는다(모달 뒤 방향 큐잉 방지)
+  assert.match(snakeStageSource, /if \(confirmOpen\) return;/);
+  assert.match(snakeStageSource, /onConfirmingChange=\{setConfirmOpen\}/);
+  // 결과·종료 라벨은 소스 서페이스 라벨을 쓴다(하우스에서 진입 시 '로비로' 오표기 방지)
+  assert.match(snakeStageSource, /returnLabel=\{returnLabel\}/);
+  assert.match(resultSource, /\{returnLabel\}/);
+  assert.match(chromeSource, /onConfirmingChange\?\.\(confirmingQuit\)/);
   // 종료는 루프를 멈추고 onExit(직접 이탈)로 나간다
   assert.match(snakeStageSource, /loopRef\.current\?\.stop\(\);\s*onExit\(\);/);
 });

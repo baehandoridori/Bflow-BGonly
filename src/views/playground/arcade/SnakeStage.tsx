@@ -31,7 +31,7 @@ const KEY_HINTS = [
   { key: 'P', label: '일시정지' },
 ] as const;
 
-export function SnakeStage({ onExit }: { onExit: () => void }) {
+export function SnakeStage({ onExit, returnLabel }: { onExit: () => void; returnLabel: string }) {
   const snapshot = useArcadeStore((s) => s.snapshot);
   const startRun = useArcadeStore((s) => s.startRun);
   const finishRun = useArcadeStore((s) => s.finishRun);
@@ -41,6 +41,7 @@ export function SnakeStage({ onExit }: { onExit: () => void }) {
   const [hud, setHud] = useState({ length: 4, golden: 0 });
   const [starting, setStarting] = useState(false);
   const [finishError, setFinishError] = useState(false);
+  const [confirmOpen, setConfirmOpen] = useState(false); // 종료 확인 모달 표시 중 — 게임 입력 차단
   const startingRef = useRef(false); // 동기 가드 — 더블클릭이 첫 렌더 전에 두 번 실행되는 것 방지
 
   const engineRef = useRef<SnakeState | null>(null);
@@ -189,6 +190,7 @@ export function SnakeStage({ onExit }: { onExit: () => void }) {
   // 키 입력: 방향(화살표+WASD, preventDefault), P/Esc 일시정지·재개.
   useEffect(() => {
     if (phase !== 'running' && phase !== 'paused') return;
+    if (confirmOpen) return; // 종료 확인 모달이 떠 있으면 게임 키 입력을 처리하지 않는다
     const onKey = (e: KeyboardEvent) => {
       if (phase === 'running' && KEY_TO_DIR[e.key]) {
         e.preventDefault();
@@ -204,7 +206,7 @@ export function SnakeStage({ onExit }: { onExit: () => void }) {
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [phase]);
+  }, [phase, confirmOpen]);
 
   // 언마운트 시 루프 정리.
   useEffect(() => () => loopRef.current?.stop(), []);
@@ -231,6 +233,7 @@ export function SnakeStage({ onExit }: { onExit: () => void }) {
           onReplay={handleReplay}
           onExit={onExit}
           replayDisabledReason={startDisabledReason}
+          returnLabel={returnLabel}
         />
       ) : undefined}
       onStart={handleStart}
@@ -240,6 +243,8 @@ export function SnakeStage({ onExit }: { onExit: () => void }) {
       onCountdownComplete={beginLoop}
       finishError={finishError}
       onRetryFinish={() => void finalize()}
+      onConfirmingChange={setConfirmOpen}
+      returnLabel={returnLabel}
       startDisabledReason={startDisabledReason}
       startPending={starting}
       todayRewardedRuns={todayRewardedRuns}

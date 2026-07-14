@@ -25,6 +25,8 @@ export interface ArcadeStageChromeProps {
   onCountdownComplete: () => void;
   finishError?: boolean; // 결과 저장 실패 — 재시도 UI 표시
   onRetryFinish?: () => void;
+  onConfirmingChange?: (confirming: boolean) => void; // 종료 확인 모달 표시 여부 — 스테이지가 입력을 막게
+  returnLabel?: string; // 소스 서페이스 라벨('게임 로비' / 'JBBJ 하우스')
   startDisabledReason?: string;
   startPending?: boolean; // 입장 요청 진행 중 — 중복 시작(입장료 중복 차감) 방지용 비활성
   todayRewardedRuns: number;
@@ -52,6 +54,7 @@ export function ArcadeStageChrome(props: ArcadeStageChromeProps) {
   const {
     game, phase, hud, stage, result,
     onStart, onResume, onPause, onQuit, onCountdownComplete, finishError, onRetryFinish,
+    onConfirmingChange, returnLabel = '로비로',
     startDisabledReason, startPending, todayRewardedRuns, entryFee, dailyRewardCap, keyHints,
   } = props;
 
@@ -92,6 +95,11 @@ export function ArcadeStageChrome(props: ArcadeStageChromeProps) {
     }, COUNTDOWN_STEP_MS);
     return () => clearInterval(timer);
   }, [phase, confirmingQuit, prefersReducedMotion, onCountdownComplete]);
+
+  // 종료 확인 모달 표시 여부를 스테이지에 알려, 모달 뒤에서 게임 입력이 처리되지 않게 한다.
+  useEffect(() => {
+    onConfirmingChange?.(confirmingQuit);
+  }, [confirmingQuit, onConfirmingChange]);
 
   const rewardsLeft = Math.max(0, dailyRewardCap - todayRewardedRuns);
 
@@ -171,7 +179,7 @@ export function ArcadeStageChrome(props: ArcadeStageChromeProps) {
                 <div className="pg-arcade-overlay__title">결과를 저장하지 못했어요</div>
                 <p className="pg-arcade-overlay__hint">잠깐 연결이 불안했어요. 다시 시도하면 이번 점수와 보상이 기록돼요.</p>
                 <button type="button" className="pg-arcade-btn" onClick={onRetryFinish}>다시 시도</button>
-                <button type="button" className="pg-arcade-btn pg-arcade-btn--ghost" onClick={onQuit}>로비로</button>
+                <button type="button" className="pg-arcade-btn pg-arcade-btn--ghost" onClick={onQuit}>{returnLabel}</button>
               </>
             ) : (
               <div className="pg-arcade-overlay__title">결과 저장 중…</div>
