@@ -196,8 +196,8 @@ test('GameHost routes snake and tetris to their stages, others to ComingSoon', (
 test('TetrisStage reuses the arcade safeguards and DAS/ARR input', () => {
   assert.match(tetrisStageSource, /startRun\('tetris'\)/);
   assert.match(tetrisStageSource, /gameId: 'tetris'/);
-  // finish meta: 라인·레벨·최대 라인클리어
-  assert.match(tetrisStageSource, /meta: \{ lines: s\.lines, levelReached: s\.stats\.levelReached, maxLineClear: s\.stats\.maxLineClear \}/);
+  // finish meta: 라인·레벨·최대 라인클리어 (사망 상태에서 고정)
+  assert.match(tetrisStageSource, /meta: \{ lines: dead\.lines, levelReached: dead\.stats\.levelReached, maxLineClear: dead\.stats\.maxLineClear \}/);
   // DAS/ARR 리피터 + 활성 시간 클록
   assert.match(tetrisStageSource, /createHorizontalRepeater\(\)/);
   assert.match(tetrisStageSource, /repeaterRef\.current\.advance\(activePlayMsRef\.current\)/);
@@ -210,6 +210,14 @@ test('TetrisStage reuses the arcade safeguards and DAS/ARR input', () => {
   assert.match(tetrisStageSource, /onConfirmingChange=\{setConfirmOpen\}/);
   // duration 은 활성 시간을 4시간 상한으로 클램프
   assert.match(tetrisStageSource, /Math\.min\(14_400_000, Math\.max\(1000, Math\.round\(activePlayMsRef\.current\)\)\)/);
+});
+
+test('TetrisStage finalizes a run that dies from a keydown, not only from a tick', () => {
+  // 하드드롭·홀드로 keydown 에서 죽어도 결과 화면으로 마감돼야 한다(입장료 내고 멈추는 일 없게)
+  assert.match(tetrisStageSource, /const finalizeDead = useCallback/);
+  assert.match(tetrisStageSource, /if \(finishedRef\.current\) return;/); // 정확히 한 번만
+  assert.match(tetrisStageSource, /if \(next\.status === 'dead'\) finalizeDead\(next\)/); // 키입력 사망 경로
+  assert.match(tetrisStageSource, /if \(s\.status === 'dead'\) finalizeDead\(s\)/); // onStep(중력) 사망 경로
 });
 
 test('ArcadeRankingPanel reads snapshot leaderboards with game and period tabs', () => {

@@ -54,6 +54,7 @@ export function TetrisStage({ onExit, returnLabel }: { onExit: () => void; retur
 
   const engineRef = useRef<TetrisState | null>(null);
   const deadStateRef = useRef<TetrisState | null>(null);
+  const finishedRef = useRef(false); // 이 판을 이미 마감(finalize)했는지 — onStep·키입력 양쪽에서 한 번만 실행되게 가드
   const finishInputRef = useRef<ArcadeFinishInput | null>(null);
   const activePlayMsRef = useRef(0); // 시뮬레이션 클록(활성 시간만 — 일시정지/hidden 제외)
   const hudRef = useRef({ score: 0, level: 1, lines: 0, combo: 0 });
@@ -129,9 +130,29 @@ export function TetrisStage({ onExit, returnLabel }: { onExit: () => void; retur
     }
   }, [finishRun, onExit]);
 
+  // 판 종료 처리 — onStep(중력·자동이동 락)과 키입력(하드드롭·홀드 락)이 둘 다 죽음을 만들 수 있어
+  // 한 곳으로 모으고 finishedRef 로 정확히 한 번만 실행한다. 사망 시점의 점수·통계를 payload 로 고정한다.
+  const finalizeDead = useCallback((dead: TetrisState) => {
+    if (finishedRef.current) return;
+    finishedRef.current = true;
+    loopRef.current?.stop();
+    deadStateRef.current = dead;
+    if (runIdRef.current) {
+      finishInputRef.current = {
+        runId: runIdRef.current,
+        gameId: 'tetris',
+        score: dead.score,
+        durationMs: Math.min(14_400_000, Math.max(1000, Math.round(activePlayMsRef.current))),
+        meta: { lines: dead.lines, levelReached: dead.stats.levelReached, maxLineClear: dead.stats.maxLineClear },
+      };
+    }
+    void finalize();
+  }, [finalize]);
+
   const beginLoop = useCallback(() => {
     engineRef.current = createTetrisGame(createSeed());
     activePlayMsRef.current = 0;
+    finishedRef.current = false;
     repeaterRef.current.reset();
     hudRef.current = { score: 0, level: 1, lines: 0, combo: 0 };
     setHud(hudRef.current);
@@ -148,20 +169,7 @@ export function TetrisStage({ onExit, returnLabel }: { onExit: () => void; retur
           s = applyTetrisInput(s, dir === -1 ? 'left' : 'right');
         }
         engineRef.current = s;
-        if (s.status === 'dead') {
-          loopRef.current?.stop();
-          deadStateRef.current = s;
-          if (runIdRef.current) {
-            finishInputRef.current = {
-              runId: runIdRef.current,
-              gameId: 'tetris',
-              score: s.score,
-              durationMs: Math.min(14_400_000, Math.max(1000, Math.round(activePlayMsRef.current))),
-              meta: { lines: s.lines, levelReached: s.stats.levelReached, maxLineClear: s.stats.maxLineClear },
-            };
-          }
-          void finalize();
-        }
+        if (s.status === 'dead') finalizeDead(s);
       },
       onFrame: () => {
         draw();
@@ -172,7 +180,7 @@ export function TetrisStage({ onExit, returnLabel }: { onExit: () => void; retur
     loopRef.current = loop;
     loop.start();
     setPhase('running');
-  }, [draw, finalize, syncHud]);
+  }, [draw, finalize, finalizeDead, syncHud]);
 
   const handleStart = useCallback(async () => {
     if (startingRef.current) return;
@@ -198,6 +206,7 @@ export function TetrisStage({ onExit, returnLabel }: { onExit: () => void; retur
     runIdRef.current = null;
     engineRef.current = null;
     deadStateRef.current = null;
+    finishedRef.current = false;
     finishInputRef.current = null;
     setResult(null);
     setFinishError(false);
@@ -216,7 +225,12 @@ export function TetrisStage({ onExit, returnLabel }: { onExit: () => void; retur
     if (confirmOpen) return;
     const apply = (input: Parameters<typeof applyTetrisInput>[1]): void => {
       const s = engineRef.current;
-      if (s) engineRef.current = applyTetrisInput(s, input);
+      if (!s) return;
+      const next = applyTetrisInput(s, input);
+      engineRef.current = next;
+      // 하드드롭·홀드로 조각이 락되며 스폰이 막히면(블록아웃) 여기서 바로 죽는다.
+      // onStep 은 다음 프레임에 running 이 아니라 조기 return 하므로, 입력이 만든 죽음은 여기서 마감한다.
+      if (next.status === 'dead') finalizeDead(next);
     };
     const onKey = (e: KeyboardEvent): void => {
       const now = activePlayMsRef.current;
@@ -263,7 +277,7 @@ export function TetrisStage({ onExit, returnLabel }: { onExit: () => void; retur
       window.removeEventListener('keydown', onKey);
       window.removeEventListener('keyup', onKeyUp);
     };
-  }, [phase, confirmOpen]);
+  }, [phase, confirmOpen, finalizeDead]);
 
   useEffect(() => () => loopRef.current?.stop(), []);
 

@@ -887,10 +887,11 @@
   white-space: nowrap;
 }
 
-/* 게임별 순위표 + 관리 설정 (명예의 전당 아래) */
+/* 게임별 순위표 + 관리 설정 (명예의 전당 아래).
+   순위표만 있을 때(일반 사용자)는 전체 폭, 관리 패널이 붙는 배한솔에게만 2열. */
 .pg-house__ranks {
   display: grid;
-  grid-template-columns: minmax(0, 2fr) minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1fr);
   gap: 11px;
   margin-top: 11px;
 }

@@ -154,6 +154,18 @@ test('game-finish grades the score, pays the reward, and flags an all-time best'
   assert.equal(result.myBestScore, 40);
 });
 
+test('game-finish upserts my new best into both game leaderboards', async () => {
+  const gw = gateway(seededStorage());
+  await gw.execute({ kind: 'game-start', requestId: 'game-entry:lb', runId: 'lb', gameId: 'snake' });
+  await gw.execute({ kind: 'game-finish', requestId: 'game-finish:lb', runId: 'lb', gameId: 'snake', score: 90, durationMs: 60_000, meta: {} });
+  const snap = await gw.read();
+  const all = snap.games.snake.leaderboardAll;
+  assert.equal(all[0]?.userId, USER_ID); // 90 이 최상단
+  assert.equal(all[0]?.score, 90);
+  assert.equal(all.filter((entry) => entry.userId === USER_ID).length, 1); // 내 행 중복 없음
+  assert.equal(snap.games.snake.leaderboardWeekly[0]?.score, 90);
+});
+
 test('game-finish caps the reward after the daily rewarded-run limit', async () => {
   const storage = seededStorage((snapshot) => {
     snapshot.games.snake.todayRewardedRuns = 5;

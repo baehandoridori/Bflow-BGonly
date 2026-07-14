@@ -1,5 +1,5 @@
 import { ARCADE_ACHIEVEMENTS, ARCADE_BALANCE } from './constants.ts';
-import { gradeForScore, rewardForGrade } from './domain.ts';
+import { gradeForScore, rewardForGrade, upsertLeaderboardEntry } from './domain.ts';
 import { createArcadePreviewSeed } from './seed.ts';
 import type {
   ArcadeActivityType,
@@ -202,6 +202,15 @@ export function applyArcadePreviewCommand(
       stats.maxGoldenEaten = Math.max(stats.maxGoldenEaten, command.meta.goldenEaten ?? 0);
       stats.maxLineClear = Math.max(stats.maxLineClear, command.meta.maxLineClear ?? 0);
       stats.maxLevel = Math.max(stats.maxLevel, command.meta.levelReached ?? 0);
+      // 순위표에도 내 최고 기록을 반영해 read() 재로드 시에도 방금 판이 남도록 한다(서버 RPC 와 동일 의미).
+      const selfName = next.walletLeaderboard.find((row) => row.userId === ctx.userId)?.name ?? '나';
+      const at = new Date(ctx.now).toISOString();
+      if (myBestScore > 0) {
+        stats.leaderboardAll = upsertLeaderboardEntry(stats.leaderboardAll, { userId: ctx.userId, name: selfName }, myBestScore, at);
+      }
+      if (stats.myWeeklyBestScore > 0) {
+        stats.leaderboardWeekly = upsertLeaderboardEntry(stats.leaderboardWeekly, { userId: ctx.userId, name: selfName }, stats.myWeeklyBestScore, at);
+      }
       syncSelfWallet(next, ctx.userId);
 
       return {

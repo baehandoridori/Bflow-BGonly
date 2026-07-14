@@ -1,4 +1,21 @@
 import { ARCADE_ACHIEVEMENTS, ARCADE_BALANCE, type ArcadeGameId, type ArcadeGrade } from './constants.ts';
+import type { ArcadeLeaderboardEntry } from './types';
+
+// 순위표에 내 최고 기록 행을 upsert 한다(같은 사용자 기존 행은 교체). 점수 내림차순,
+// 동점은 먼저 달성한 쪽(at 오름차순)이 위. 상위 limit 개만 유지한다.
+// game-finish 후 서버 realtime/재로드를 기다리지 않고 내 행을 즉시 반영하는 데 쓴다(순수 함수).
+export function upsertLeaderboardEntry(
+  entries: readonly ArcadeLeaderboardEntry[],
+  self: { userId: string; name: string },
+  score: number,
+  atIso: string,
+  limit = 50,
+): ArcadeLeaderboardEntry[] {
+  const others = entries.filter((entry) => entry.userId !== self.userId);
+  others.push({ userId: self.userId, name: self.name, score, at: atIso });
+  others.sort((a, b) => b.score - a.score || a.at.localeCompare(b.at));
+  return others.slice(0, limit);
+}
 
 // 등급 판정은 경계 이상(>=) — SQL 서버 CASE 와 동일한 수치·비교연산을 쓴다.
 export function gradeForScore(gameId: ArcadeGameId, score: number): ArcadeGrade {

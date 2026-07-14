@@ -1,10 +1,11 @@
 import { create, type StoreApi, type UseBoundStore } from 'zustand';
 
 import { ARCADE_ACHIEVEMENTS, type ArcadeAchievementDefinition } from './constants.ts';
-import { evaluateAchievements } from './domain.ts';
+import { evaluateAchievements, upsertLeaderboardEntry } from './domain.ts';
 import { createArcadeGateway } from './gateway.ts';
 import type { ArcadePreviewGateway } from './previewGateway.ts';
 import { useMarketPreviewStore } from '../market/useMarketPreviewStore.ts';
+import { useAuthStore } from '../../../stores/useAuthStore.ts';
 import type {
   ArcadeAchievementUnlockResult,
   ArcadeConfigSetResult,
@@ -28,6 +29,12 @@ export interface ArcadeFinishInput {
   score: number;
   durationMs: number;
   meta: Record<string, number>;
+}
+
+// 순위표 내 행 즉시 반영에 쓰는 나의 신원(id·이름). 없으면(미로그인) 순위표는 그대로 둔다.
+export interface ArcadeSelf {
+  userId: string;
+  name: string;
 }
 
 interface ArcadeState {
@@ -55,8 +62,20 @@ function applyFinishToSnapshot(
   snapshot: ArcadeSnapshot,
   input: ArcadeFinishInput,
   result: ArcadeGameFinishResult,
+  self: ArcadeSelf | null,
 ): ArcadeSnapshot {
   const stats = snapshot.games[input.gameId];
+  const myBestScore = result.myBestScore ?? Math.max(stats.myBestScore, input.score);
+  const myWeeklyBestScore = Math.max(stats.myWeeklyBestScore, input.score);
+  // 내 최고 기록 행을 순위표에 즉시 반영한다 — 서버 realtime/재로드 없이도 방금 판이 보이도록.
+  // 미로그인이거나 최고가 0이면(등급 없음 등) 순위표는 그대로 둔다. 다음 전체 로드에서 서버 정본으로 교체.
+  const at = new Date().toISOString();
+  const leaderboardAll = self && myBestScore > 0
+    ? upsertLeaderboardEntry(stats.leaderboardAll, self, myBestScore, at)
+    : stats.leaderboardAll;
+  const leaderboardWeekly = self && myWeeklyBestScore > 0
+    ? upsertLeaderboardEntry(stats.leaderboardWeekly, self, myWeeklyBestScore, at)
+    : stats.leaderboardWeekly;
   return {
     ...snapshot,
     wallet: result.wallet ?? snapshot.wallet,
@@ -64,13 +83,15 @@ function applyFinishToSnapshot(
       ...snapshot.games,
       [input.gameId]: {
         ...stats,
-        myBestScore: result.myBestScore ?? Math.max(stats.myBestScore, input.score),
-        myWeeklyBestScore: Math.max(stats.myWeeklyBestScore, input.score),
+        myBestScore,
+        myWeeklyBestScore,
         todayRewardedRuns: result.todayRewardedRuns ?? stats.todayRewardedRuns,
         totalRuns: stats.totalRuns + 1,
         maxGoldenEaten: Math.max(stats.maxGoldenEaten, input.meta.goldenEaten ?? 0),
         maxLineClear: Math.max(stats.maxLineClear, input.meta.maxLineClear ?? 0),
         maxLevel: Math.max(stats.maxLevel, input.meta.levelReached ?? 0),
+        leaderboardAll,
+        leaderboardWeekly,
       },
     },
     aggregates: {
@@ -84,6 +105,10 @@ export function createArcadeStore(
   gateway: ArcadePreviewGateway,
   syncMarketWallet: (wallet: ArcadeWallet) => void = (wallet) =>
     useMarketPreviewStore.getState().applyServerWallet(wallet),
+  resolveSelf: () => ArcadeSelf | null = () => {
+    const user = useAuthStore.getState().currentUser;
+    return user ? { userId: user.id, name: user.name } : null;
+  },
 ): UseBoundStore<StoreApi<ArcadeState>> {
   let generation = 0;
   // 이미 로컬 스냅샷에 반영한 runId. 재생 응답이 왔을 때 "진짜 중복 제출"과
@@ -266,7 +291,7 @@ export function createArcadeStore(
           // 신규이거나, main 재시도로 응답만 유실돼 아직 로컬 미반영인 재생 → 적용한다.
           // 도전과제 평가 입력용으로 갱신 "전" aggregates 를 캡처한다(이번 런 미포함).
           const prevAggregates = { ...before.aggregates };
-          set({ snapshot: applyFinishToSnapshot(before, input, result), mutating: false });
+          set({ snapshot: applyFinishToSnapshot(before, input, result, resolveSelf()), mutating: false });
           appliedRuns.add(input.runId);
           syncWallet(result.wallet);
           const unlockedAchievements = await evaluateAndUnlock({
