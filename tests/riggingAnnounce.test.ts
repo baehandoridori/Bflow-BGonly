@@ -96,6 +96,8 @@ test('피드백 31(b): 공지 이미지 Ctrl+V — 공지 전용 업로드 + 미
   // 업로드 진행 중 닫기(in-flight) 경합 — 닫힌 뒤 완료된 업로드는 등록 없이 즉시 정리 (코덱스 P2).
   assert.match(modal, /closedRef\.current = true;/);
   assert.match(modal, /if \(closedRef\.current\) \{\s*\n\s*deleteImage\(res\.url\)/);
+  // 탐색기 파일 복사(FileNameW) 폴백 조회 동안에도 전송이 잠긴다 (코덱스 2차 P2).
+  assert.match(modal, /setPasting\(true\);[\s\S]{0,200}clipboardReadImageFile/);
   // 배경 화면(FeaturedImageSlot)의 paste 가드가 모달 열림을 감지해 이중 업로드를 막는다.
   const slot = readFileSync('src/components/characters/FeaturedImageSlot.tsx', 'utf8');
   assert.match(slot, /\[data-rigging-announce\]/);

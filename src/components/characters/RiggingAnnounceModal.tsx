@@ -153,10 +153,17 @@ export function RiggingAnnounceModal({
       // 탐색기 '파일 복사'는 clipboardData 에 안 실리는 환경이 있어 메인 프로세스에서 파일 경로('FileNameW')를 직접 읽는다.
       //   텍스트 붙여넣기면 아래가 null 을 반환해 아무 일도 일어나지 않는다.
       void (async () => {
-        const pastedFile = await window.electronAPI.clipboardReadImageFile();
-        if (!pastedFile) return;
-        const f = dataUrlToFile(pastedFile.dataUrl, pastedFile.fileName);
-        if (f) void uploadPastedFile(f);
+        // 파일 경로 조회가 끝날 때까지 pending 으로 잠가 '이미지 없이 전송' 경합을 막는다(코덱스 2차 P2) —
+        //   조회가 null(텍스트 붙여넣기)이면 잠깐 잠겼다 바로 풀린다.
+        setPasting(true);
+        try {
+          const pastedFile = await window.electronAPI.clipboardReadImageFile();
+          if (!pastedFile) return;
+          const f = dataUrlToFile(pastedFile.dataUrl, pastedFile.fileName);
+          if (f) await uploadPastedFile(f);
+        } finally {
+          setPasting(false);
+        }
       })();
     };
     window.addEventListener('paste', onPaste);
