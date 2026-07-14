@@ -134,6 +134,33 @@ test('finishRun upserts my new best into the game leaderboard so the panel updat
   assert.equal(board.filter((entry) => entry.userId === 'me').length, 1); // 내 행은 하나만(중복 없음)
 });
 
+test('finishRun leaves the leaderboard alone (score and achieved-at) when the run is not a new best', async () => {
+  const gateway = createMockGateway({
+    execute: async (command) => {
+      if (command.kind === 'game-finish') {
+        return { grade: 'gold', rewardPoints: 30, rewardCapped: false, newAlltimeBest: false, newWeeklyBest: false, prevBestScore: 40, myBestScore: 40, todayRewardedRuns: 1, wallet: { walletPoints: 1000, lifetimeEarnedPoints: 5000 }, slackNotifyEnabled: false };
+      }
+      return { wallet: { walletPoints: 0, lifetimeEarnedPoints: 0 } } as ArcadeExecuteResult;
+    },
+    read: async () => baseSnapshot({
+      games: {
+        snake: {
+          myBestScore: 40, myWeeklyBestScore: 40, todayRewardedRuns: 0, totalRuns: 5, maxGoldenEaten: 0, maxLineClear: 0, maxLevel: 0,
+          leaderboardAll: [{ userId: 'me', name: '나', score: 40, at: '2026-01-01T00:00:00Z' }],
+          leaderboardWeekly: [{ userId: 'me', name: '나', score: 40, at: '2026-01-01T00:00:00Z' }],
+        },
+        tetris: { myBestScore: 0, myWeeklyBestScore: 0, todayRewardedRuns: 0, totalRuns: 0, maxGoldenEaten: 0, maxLineClear: 0, maxLevel: 0, leaderboardAll: [], leaderboardWeekly: [] },
+      },
+    }),
+  });
+  const store = createArcadeStore(gateway, noopSync, () => ({ userId: 'me', name: '나' }));
+  await store.getState().load('user-1');
+  await store.getState().finishRun({ runId: 'r-nonrecord', gameId: 'snake', score: 25, durationMs: 60_000, meta: {} });
+  const row = store.getState().snapshot!.games.snake.leaderboardAll[0];
+  assert.equal(row.score, 40); // 옛 최고 그대로
+  assert.equal(row.at, '2026-01-01T00:00:00Z'); // 달성 시각을 새 시각으로 덮지 않음
+});
+
 test('finishRun leaves the leaderboard untouched when the signed-in user is unknown', async () => {
   const gateway = createMockGateway();
   const store = createArcadeStore(gateway, noopSync, () => null);

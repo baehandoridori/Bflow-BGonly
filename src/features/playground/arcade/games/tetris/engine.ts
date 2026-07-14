@@ -20,6 +20,8 @@ const LOCK_DELAY_MS = 500;
 const MAX_LOCK_RESETS = 15;
 const LINE_SCORES = [0, 100, 300, 500, 800] as const;
 const COMBO_UNIT = 50;
+// 서버 RPC 상한과 일치 — 초과 점수는 저장이 거부되므로(입장료 내고 결과 못 남김) 엔진에서 미리 캡한다.
+export const TETRIS_MAX_SCORE = 3_000_000;
 const SPAWN_X = 3;
 const SPAWN_Y = 0;
 const NEXT_MIN = 5;
@@ -136,7 +138,7 @@ function lockPiece(state: TetrisState): TetrisState {
     rngState: refilled.rngState,
     level,
     lines,
-    score,
+    score: Math.min(TETRIS_MAX_SCORE, score),
     combo,
     gravityElapsedMs: 0,
     lockElapsedMs: 0,
@@ -252,5 +254,5 @@ export function tickTetris(state: TetrisState, elapsedMs: number): TetrisState {
     gravityElapsedMs -= interval;
     if (state.softDrop) score += 1;
   }
-  return { ...state, active, gravityElapsedMs, score, lockElapsedMs: 0 };
+  return { ...state, active, gravityElapsedMs, score: Math.min(TETRIS_MAX_SCORE, score), lockElapsedMs: 0 };
 }

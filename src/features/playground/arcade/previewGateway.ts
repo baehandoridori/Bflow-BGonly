@@ -202,13 +202,14 @@ export function applyArcadePreviewCommand(
       stats.maxGoldenEaten = Math.max(stats.maxGoldenEaten, command.meta.goldenEaten ?? 0);
       stats.maxLineClear = Math.max(stats.maxLineClear, command.meta.maxLineClear ?? 0);
       stats.maxLevel = Math.max(stats.maxLevel, command.meta.levelReached ?? 0);
-      // 순위표에도 내 최고 기록을 반영해 read() 재로드 시에도 방금 판이 남도록 한다(서버 RPC 와 동일 의미).
+      // 최고 기록을 새로 세운 판만 순위표에 반영한다 — read() 재로드 시에도 방금 판이 남도록(서버 RPC 와 동일 의미).
+      // 기록을 못 깬 판은 순위가 그대로라 손대지 않는다(옛 점수에 새 시각이 붙어 정렬·달성일이 틀어지지 않게).
       const selfName = next.walletLeaderboard.find((row) => row.userId === ctx.userId)?.name ?? '나';
       const at = new Date(ctx.now).toISOString();
-      if (myBestScore > 0) {
+      if (newAlltimeBest && myBestScore > 0) {
         stats.leaderboardAll = upsertLeaderboardEntry(stats.leaderboardAll, { userId: ctx.userId, name: selfName }, myBestScore, at);
       }
-      if (stats.myWeeklyBestScore > 0) {
+      if (newWeeklyBest && stats.myWeeklyBestScore > 0) {
         stats.leaderboardWeekly = upsertLeaderboardEntry(stats.leaderboardWeekly, { userId: ctx.userId, name: selfName }, stats.myWeeklyBestScore, at);
       }
       syncSelfWallet(next, ctx.userId);

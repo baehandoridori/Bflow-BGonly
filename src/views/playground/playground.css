@@ -1026,7 +1026,9 @@
 }
 
 @media (max-width: 720px) {
-  .pg-house__ranks {
+  /* :has() 규칙과 같은 특이도로 맞춰야 좁은 화면에서 2열이 풀려 세로로 쌓인다. */
+  .pg-house__ranks,
+  .pg-house__ranks:has(.pg-arcade-admin) {
     grid-template-columns: minmax(0, 1fr);
   }
 }

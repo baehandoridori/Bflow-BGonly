@@ -67,13 +67,14 @@ function applyFinishToSnapshot(
   const stats = snapshot.games[input.gameId];
   const myBestScore = result.myBestScore ?? Math.max(stats.myBestScore, input.score);
   const myWeeklyBestScore = Math.max(stats.myWeeklyBestScore, input.score);
-  // 내 최고 기록 행을 순위표에 즉시 반영한다 — 서버 realtime/재로드 없이도 방금 판이 보이도록.
-  // 미로그인이거나 최고가 0이면(등급 없음 등) 순위표는 그대로 둔다. 다음 전체 로드에서 서버 정본으로 교체.
+  // 최고 기록을 새로 세운 판만 순위표에 즉시 반영한다 — 서버 realtime/재로드 없이도 방금 판이 보이도록.
+  // 기록을 못 깬 판은 내 순위가 그대로라 손대지 않는다(안 그러면 옛 점수에 새 시각이 붙어 정렬·달성일이 틀어짐).
+  // 미로그인이거나 최고가 0이면(등급 없음 등)도 그대로 둔다. 다음 전체 로드에서 서버 정본으로 교체.
   const at = new Date().toISOString();
-  const leaderboardAll = self && myBestScore > 0
+  const leaderboardAll = self && result.newAlltimeBest && myBestScore > 0
     ? upsertLeaderboardEntry(stats.leaderboardAll, self, myBestScore, at)
     : stats.leaderboardAll;
-  const leaderboardWeekly = self && myWeeklyBestScore > 0
+  const leaderboardWeekly = self && result.newWeeklyBest && myWeeklyBestScore > 0
     ? upsertLeaderboardEntry(stats.leaderboardWeekly, self, myWeeklyBestScore, at)
     : stats.leaderboardWeekly;
   return {

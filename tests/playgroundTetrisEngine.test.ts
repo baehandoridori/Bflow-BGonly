@@ -6,6 +6,7 @@ import {
   applyTetrisInput,
   tickTetris,
   tetrisPieceCells,
+  TETRIS_MAX_SCORE,
 } from '../src/features/playground/arcade/games/tetris/engine.ts';
 import { refillQueue } from '../src/features/playground/arcade/games/tetris/bag.ts';
 import type { TetrisPiece, TetrisState } from '../src/features/playground/arcade/games/tetris/types.ts';
@@ -52,6 +53,15 @@ test('an I uses an SRS kick when the in-place rotation is blocked', () => {
   const rotated = applyTetrisInput(state, 'rotateCw');
   assert.equal(rotated.active.rotation, 1);
   assert.equal(rotated.active.x, 2, 'I 킥 (-2,0)');
+});
+
+test('the score is capped at the server maximum so a huge run can still be saved', () => {
+  const board = blankBoard();
+  for (let y = 18; y <= 21; y += 1) for (let x = 0; x <= 8; x += 1) board[y][x] = 'O';
+  // 상한 바로 아래에서 4줄(800×15)을 지워도 3,000,000 을 넘지 않아야 한다(서버 RPC 가 초과분을 거부).
+  const state: TetrisState = { ...createTetrisGame(1), board, level: 15, lines: 140, score: TETRIS_MAX_SCORE - 1, active: { piece: 'I', rotation: 1, x: 7, y: 18 } };
+  const dropped = applyTetrisInput(state, 'hardDrop');
+  assert.equal(dropped.score, TETRIS_MAX_SCORE);
 });
 
 test('clearing four lines scores 800×level and reports maxLineClear 4', () => {
