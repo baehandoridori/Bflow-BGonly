@@ -13,8 +13,10 @@ import {
 import type { SnakeDirection, SnakeState } from '@/features/playground/arcade/games/snake/types';
 import { createFixedStepLoop, type FixedStepLoop } from '@/features/playground/arcade/games/loop';
 import { createSeed } from '@/features/playground/arcade/games/prng';
+import { gradeProgress } from '@/features/playground/arcade/domain';
 import { ArcadeStageChrome, type ArcadeStagePhase } from './ArcadeStageChrome';
 import { RunResultOverlay } from './RunResultOverlay';
+import { drawNeonCell, drawNeonDot, paintNeonBackground } from './neonBoard';
 
 const CELL = 20;
 const GRID = 21;
@@ -78,21 +80,26 @@ export function SnakeStage({ onExit, returnLabel }: { onExit: () => void; return
       const triplet = style.getPropertyValue(name).trim();
       return triplet ? `rgb(${triplet})` : fallback;
     };
-    const bg = color('--pg-panel', '#1a1d27');
-    const accent = color('--pg-accent', '#6c5ce7');
+    const colorA = (name: string, alpha: number, fallback: string): string => {
+      const triplet = style.getPropertyValue(name).trim();
+      return triplet ? `rgb(${triplet} / ${alpha})` : fallback;
+    };
+    const bg = color('--pg-bg', '#0f1117');
+    const grid = colorA('--pg-line', 0.32, 'rgba(45,48,65,.32)');
+    const green = color('--pg-green', '#00b894');
+    const mint = color('--pg-mint', '#45e0b5');
     const yellow = color('--pg-yellow', '#fdcb6e');
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
-    ctx.fillStyle = bg;
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
-    // 사과
+    paintNeonBackground(ctx, canvas.width, canvas.height, CELL, bg, grid);
+    // 사과 — 둥근 네온 비콘(골든=노랑, 일반=붉은 네온)
     const apple = s.apple;
-    ctx.fillStyle = apple.golden ? yellow : '#e17055';
-    ctx.fillRect(apple.pos.x * CELL + 3, apple.pos.y * CELL + 3, CELL - 6, CELL - 6);
-    // 몸
+    drawNeonDot(ctx, apple.pos.x * CELL, apple.pos.y * CELL, CELL, apple.golden ? yellow : '#ff6b81');
+    // 몸통(초록) 먼저, 머리(민트·더 밝은 글로우) 나중에 위로.
     s.body.forEach((p, i) => {
-      ctx.fillStyle = i === 0 ? '#ffffff' : accent;
-      ctx.fillRect(p.x * CELL + 1, p.y * CELL + 1, CELL - 2, CELL - 2);
+      if (i === 0) return;
+      drawNeonCell(ctx, p.x * CELL, p.y * CELL, CELL, green, { glow: CELL * 0.42 });
     });
+    const head = s.body[0];
+    if (head) drawNeonCell(ctx, head.x * CELL, head.y * CELL, CELL, mint, { glow: CELL * 0.7 });
   }, []);
 
   // 종료 결과를 서버에 기록한다. game-finish 는 멱등이라, 실패하면 이탈하지 않고 재시도 상태를
@@ -239,7 +246,10 @@ export function SnakeStage({ onExit, returnLabel }: { onExit: () => void; return
       game={game}
       phase={phase}
       hud={hud_}
-      stage={<canvas ref={canvasRef} width={GRID * CELL} height={GRID * CELL} style={{ display: 'block', width: '100%', maxWidth: GRID * CELL, margin: '0 auto', aspectRatio: '1 / 1' }} aria-hidden />}
+      eyebrow="GROW & SURVIVE"
+      accentToken="--pg-green"
+      gradeProgress={gradeProgress('snake', hud.length)}
+      stage={<canvas ref={canvasRef} className="pg-arcade-board" width={GRID * CELL} height={GRID * CELL} style={{ width: '100%', maxWidth: GRID * CELL, aspectRatio: '1 / 1' }} aria-hidden />}
       result={result ? (
         <RunResultOverlay
           gameId="snake"

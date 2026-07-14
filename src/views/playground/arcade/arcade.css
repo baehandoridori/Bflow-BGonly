@@ -2,44 +2,181 @@
    토큰은 RGB 트리플릿(예: --pg-panel: 26 29 39)이라 반드시 rgb(var(--pg-*)) 로 감싸 쓴다. */
 
 .pg-arcade-stage {
+  /* 게임 톤(파랑/초록) 기본값 — 각 게임이 --pg-arena-tone 을 override 한다. */
+  --pg-arena-tone: var(--pg-accent);
   display: flex;
   flex-direction: column;
   gap: 16px;
   color: rgb(var(--pg-text));
 }
 
+/* 2-pane: 좌측 정보/HUD 패널 + 우측 게임 보드 아레나 */
 .pg-arcade-stage__frame {
   position: relative;
-  border-radius: 16px;
+  display: grid;
+  grid-template-columns: minmax(240px, 300px) minmax(0, 1fr);
+  border-radius: 18px;
   background: rgb(var(--pg-panel));
   border: 1px solid rgb(var(--pg-line));
   overflow: hidden;
 }
 
-.pg-arcade-hud {
+/* ── 좌측 정보 패널 ─────────────────────────────── */
+.pg-arcade-info {
   display: flex;
-  flex-wrap: wrap;
-  gap: 12px 20px;
-  padding: 12px 16px;
-  border-bottom: 1px solid rgb(var(--pg-line));
-  background: rgb(var(--pg-panel-2));
+  flex-direction: column;
+  gap: 16px;
+  padding: 20px 18px;
+  border-right: 1px solid rgb(var(--pg-line));
+  background: linear-gradient(180deg, rgb(var(--pg-panel-2)), rgb(var(--pg-panel)));
+}
+
+.pg-arcade-info__head {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.pg-arcade-eyebrow {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: rgb(var(--pg-arena-tone));
+}
+
+.pg-arcade-title {
+  margin: 0;
+  font-size: 26px;
+  font-weight: 800;
+  line-height: 1;
+}
+
+.pg-arcade-desc {
+  margin: 0;
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: rgb(var(--pg-muted));
+}
+
+/* HUD: 2열 스탯 그리드 */
+.pg-arcade-hud {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1px;
+  border: 1px solid rgb(var(--pg-line));
+  border-radius: 12px;
+  overflow: hidden;
+  background: rgb(var(--pg-line));
 }
 
 .pg-arcade-hud__item {
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: 3px;
+  padding: 11px 13px;
+  background: rgb(var(--pg-panel));
 }
 
 .pg-arcade-hud__label {
-  font-size: 11px;
+  font-size: 10.5px;
+  letter-spacing: 0.06em;
   color: rgb(var(--pg-muted));
 }
 
 .pg-arcade-hud__value {
-  font-size: 18px;
-  font-weight: 700;
+  font-size: 20px;
+  font-weight: 800;
   font-variant-numeric: tabular-nums;
+}
+
+/* 다음 등급 진행 바 */
+.pg-arcade-grade {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.pg-arcade-grade__row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  font-size: 11.5px;
+  color: rgb(var(--pg-muted));
+}
+
+.pg-arcade-grade__pct {
+  font-variant-numeric: tabular-nums;
+  color: rgb(var(--pg-arena-tone));
+  font-weight: 700;
+}
+
+.pg-arcade-grade__track {
+  height: 7px;
+  border-radius: 999px;
+  background: rgb(var(--pg-bg) / 0.7);
+  overflow: hidden;
+}
+
+.pg-arcade-grade__track i {
+  display: block;
+  height: 100%;
+  border-radius: 999px;
+  background: linear-gradient(90deg, rgb(var(--pg-arena-tone)), rgb(var(--pg-arena-tone) / 0.65));
+  box-shadow: 0 0 9px rgb(var(--pg-arena-tone) / 0.55);
+}
+
+/* ── 우측 게임 보드 아레나 ─────────────────────────── */
+.pg-arcade-arena {
+  position: relative;
+  display: grid;
+  place-items: center;
+  min-height: 420px;
+  padding: 22px;
+  background:
+    radial-gradient(circle at 50% 40%, rgb(var(--pg-arena-tone) / 0.12), transparent 55%),
+    rgb(var(--pg-bg) / 0.55);
+}
+
+/* 게임 캔버스 = 어두운 판 + 톤 네온 테두리 글로우 + 안쪽 비네트 */
+.pg-arcade-board {
+  display: block;
+  margin: 0 auto;
+  border-radius: 12px;
+  border: 1px solid rgb(var(--pg-arena-tone) / 0.35);
+  background: rgb(var(--pg-bg));
+  box-shadow:
+    inset 0 0 55px rgb(0 0 0 / 0.5),
+    0 0 26px -8px rgb(var(--pg-arena-tone) / 0.5);
+}
+
+/* 테트리스 보드 + 홀드/넥스트 사이드보드 배치 */
+.pg-arcade-boardwrap {
+  display: flex;
+  gap: 14px;
+  align-items: flex-start;
+  justify-content: center;
+  max-width: 100%;
+}
+
+.pg-arcade-sideboard {
+  display: grid;
+  gap: 12px;
+}
+
+.pg-arcade-side-box {
+  padding: 9px;
+  border-radius: 10px;
+  border: 1px solid rgb(var(--pg-line));
+  background: rgb(var(--pg-panel-2));
+}
+
+.pg-arcade-side-box__label {
+  font-size: 10px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: rgb(var(--pg-muted));
+  margin-bottom: 6px;
 }
 
 .pg-arcade-overlay {
@@ -106,7 +243,8 @@
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
-  justify-content: center;
+  justify-content: flex-start;
+  margin-top: auto;
 }
 
 .pg-arcade-keyhint {
@@ -190,7 +328,7 @@
   font-variant-numeric: tabular-nums;
 }
 
-/* 테트리스 홀드/넥스트 조각 칩 */
+/* 테트리스 홀드/넥스트 조각 칩 — 네온 발광 */
 .pg-arcade-piece-chip {
   display: inline-flex;
   align-items: center;
@@ -204,7 +342,25 @@
   color: rgb(var(--pg-bg));
 }
 
+.pg-arcade-piece-chip--filled {
+  box-shadow: 0 0 8px -1px var(--pg-chip-glow, transparent);
+}
+
 .pg-arcade-piece-next {
   display: inline-flex;
   gap: 4px;
+}
+
+/* 좁은 화면: 세로로 쌓는다 */
+@media (max-width: 720px) {
+  .pg-arcade-stage__frame {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .pg-arcade-info {
+    border-right: 0;
+    border-bottom: 1px solid rgb(var(--pg-line));
+  }
+  .pg-arcade-keyhints {
+    margin-top: 0;
+  }
 }

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState, type CSSProperties } from 'react';
 import { toast } from 'sonner';
 
 import { ARCADE_BALANCE } from '@/features/playground/arcade/constants';
@@ -23,8 +23,10 @@ import {
 import { createFixedStepLoop, type FixedStepLoop } from '@/features/playground/arcade/games/loop';
 import { createHorizontalRepeater } from '@/features/playground/arcade/games/keymap';
 import { createSeed } from '@/features/playground/arcade/games/prng';
+import { gradeProgress } from '@/features/playground/arcade/domain';
 import { ArcadeStageChrome, type ArcadeStagePhase } from './ArcadeStageChrome';
 import { RunResultOverlay } from './RunResultOverlay';
+import { drawNeonCell, drawNeonOutline, paintNeonBackground } from './neonBoard';
 
 const CELL = 24;
 const STEP_MS = 16; // 시뮬레이션 고정 스텝(≈62fps). tickTetris·DAS 클록의 단위.
@@ -97,25 +99,32 @@ export function TetrisStage({ onExit, returnLabel }: { onExit: () => void; retur
       const triplet = style.getPropertyValue(name).trim();
       return triplet ? `rgb(${triplet})` : fallback;
     };
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
-    ctx.fillStyle = color('--pg-panel', '#1a1d27');
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
-    const drawCell = (x: number, boardY: number, piece: TetrisPiece, alpha: number): void => {
-      const vy = boardY - TETRIS_HIDDEN_ROWS;
-      if (vy < 0) return;
-      ctx.globalAlpha = alpha;
-      ctx.fillStyle = color(`--pg-${PIECE_TONE[piece]}`, '#6c5ce7');
-      ctx.fillRect(x * CELL + 1, vy * CELL + 1, CELL - 2, CELL - 2);
-      ctx.globalAlpha = 1;
+    const colorA = (name: string, alpha: number, fallback: string): string => {
+      const triplet = style.getPropertyValue(name).trim();
+      return triplet ? `rgb(${triplet} / ${alpha})` : fallback;
     };
+    const bg = color('--pg-bg', '#0f1117');
+    const grid = colorA('--pg-line', 0.32, 'rgba(45,48,65,.32)');
+    paintNeonBackground(ctx, canvas.width, canvas.height, CELL, bg, grid);
+    const cellColor = (piece: TetrisPiece) => color(`--pg-${PIECE_TONE[piece]}`, '#6c5ce7');
+    const visible = (boardY: number) => boardY - TETRIS_HIDDEN_ROWS >= 0;
+    const px = (x: number) => x * CELL;
+    const py = (boardY: number) => (boardY - TETRIS_HIDDEN_ROWS) * CELL;
+    // 쌓인 블록 — 네온 픽셀
     for (let y = 0; y < TETRIS_ROWS; y += 1) {
       for (let x = 0; x < TETRIS_COLS; x += 1) {
         const cell = s.board[y][x];
-        if (cell) drawCell(x, y, cell, 1);
+        if (cell && visible(y)) drawNeonCell(ctx, px(x), py(y), CELL, cellColor(cell), { glow: CELL * 0.42 });
       }
     }
-    tetrisPieceCells(tetrisGhost(s)).forEach((c) => drawCell(c.x, c.y, s.active.piece, 0.25)); // 고스트
-    tetrisPieceCells(s.active).forEach((c) => drawCell(c.x, c.y, s.active.piece, 1));
+    // 고스트(착지 자리) — 채움 없는 네온 윤곽
+    tetrisPieceCells(tetrisGhost(s)).forEach((c) => {
+      if (visible(c.y)) drawNeonOutline(ctx, px(c.x), py(c.y), CELL, cellColor(s.active.piece));
+    });
+    // 현재 조각 — 더 강한 글로우
+    tetrisPieceCells(s.active).forEach((c) => {
+      if (visible(c.y)) drawNeonCell(ctx, px(c.x), py(c.y), CELL, cellColor(s.active.piece), { glow: CELL * 0.5 });
+    });
   }, []);
 
   const syncHud = useCallback((s: TetrisState) => {
@@ -322,8 +331,10 @@ export function TetrisStage({ onExit, returnLabel }: { onExit: () => void; retur
   const pieceChip = (piece: TetrisPiece | null, key: string) => (
     <span
       key={key}
-      className="pg-arcade-piece-chip"
-      style={{ background: piece ? `rgb(var(--pg-${PIECE_TONE[piece]}))` : 'transparent' }}
+      className={`pg-arcade-piece-chip${piece ? ' pg-arcade-piece-chip--filled' : ''}`}
+      style={piece
+        ? ({ background: `rgb(var(--pg-${PIECE_TONE[piece]}))`, '--pg-chip-glow': `rgb(var(--pg-${PIECE_TONE[piece]}))` } as CSSProperties)
+        : { background: 'transparent' }}
     >
       {piece ?? '·'}
     </span>
@@ -336,9 +347,18 @@ export function TetrisStage({ onExit, returnLabel }: { onExit: () => void; retur
       <div className="pg-arcade-hud__item"><span className="pg-arcade-hud__label">라인</span><span className="pg-arcade-hud__value">{hud.lines}</span></div>
       <div className="pg-arcade-hud__item"><span className="pg-arcade-hud__label">콤보</span><span className="pg-arcade-hud__value">{hud.combo}</span></div>
       <div className="pg-arcade-hud__item"><span className="pg-arcade-hud__label">내 최고</span><span className="pg-arcade-hud__value">{myBest.toLocaleString('ko-KR')}</span></div>
-      <div className="pg-arcade-hud__item"><span className="pg-arcade-hud__label">홀드</span>{pieceChip(hud.hold, 'hold')}</div>
-      <div className="pg-arcade-hud__item"><span className="pg-arcade-hud__label">다음</span><span className="pg-arcade-piece-next">{hud.next.map((p, i) => pieceChip(p, `next-${i}`))}</span></div>
     </>
+  );
+
+  // 보드 옆 사이드보드: 홀드 + 다음 5개
+  const sideboard = (
+    <div className="pg-arcade-sideboard">
+      <div className="pg-arcade-side-box"><div className="pg-arcade-side-box__label">홀드</div>{pieceChip(hud.hold, 'hold')}</div>
+      <div className="pg-arcade-side-box">
+        <div className="pg-arcade-side-box__label">다음</div>
+        <span className="pg-arcade-piece-next">{hud.next.map((p, i) => pieceChip(p, `next-${i}`))}</span>
+      </div>
+    </div>
   );
 
   return (
@@ -346,7 +366,15 @@ export function TetrisStage({ onExit, returnLabel }: { onExit: () => void; retur
       game={game}
       phase={phase}
       hud={hud_}
-      stage={<canvas ref={canvasRef} width={TETRIS_COLS * CELL} height={VISIBLE_ROWS * CELL} style={{ display: 'block', margin: '0 auto', maxWidth: '100%', height: 'auto' }} aria-hidden />}
+      eyebrow="FALLING BLOCKS · ENDLESS"
+      accentToken="--pg-blue"
+      gradeProgress={gradeProgress('tetris', hud.score)}
+      stage={(
+        <div className="pg-arcade-boardwrap">
+          <canvas ref={canvasRef} className="pg-arcade-board" width={TETRIS_COLS * CELL} height={VISIBLE_ROWS * CELL} style={{ maxWidth: '100%', height: 'auto' }} aria-hidden />
+          {sideboard}
+        </div>
+      )}
       result={result ? (
         <RunResultOverlay
           gameId="tetris"
