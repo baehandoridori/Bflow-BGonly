@@ -157,6 +157,10 @@ function AccessibleSparkline({
   );
 }
 
+function stockReason(stock: MarketStock, quoteContext: MarketQuoteContext): string {
+  return quoteContext.reasonByStockId[stock.id] ?? '오늘 가격에 영향을 준 소식을 살펴보세요.';
+}
+
 function FavoriteButton({
   id,
   className = '',
@@ -220,7 +224,7 @@ export function FavoriteStockCard({
           <AccessibleSparkline stock={stock} quoteContext={quoteContext} />
         </span>
         <span className="mt-4 block text-sm leading-6 text-text-secondary">
-          {stock.reason}
+          {stockReason(stock, quoteContext)}
         </span>
       </button>
       <FavoriteButton
@@ -271,7 +275,7 @@ export function StockListRow({
           <AccessibleSparkline stock={stock} quoteContext={quoteContext} />
         </span>
         <span className="min-w-0 text-sm leading-6 text-text-secondary">
-          {stock.reason}
+          {stockReason(stock, quoteContext)}
         </span>
       </button>
       <FavoriteButton

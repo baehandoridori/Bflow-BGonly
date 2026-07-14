@@ -29,6 +29,9 @@ export interface MarketAdminEvent {
   startsAt: string;
   endsAt: string | null;
   revision: number;
+  automatic?: boolean;
+  summary?: string;
+  publishedAt?: string;
 }
 
 export interface MarketAdminEventInput {
@@ -60,6 +63,9 @@ export interface MarketQuoteContext {
   quoteWonByStockId: Readonly<Record<string, number>>;
   previousCloseWonByStockId: Readonly<Record<string, number>>;
   sparklineByStockId: Readonly<Record<string, PricePoint[]>>;
+  news: MarketNews[];
+  newsByStockId: Readonly<Record<string, MarketNews[]>>;
+  reasonByStockId: Readonly<Record<string, string>>;
 }
 
 export interface MarketNews {

@@ -66,6 +66,7 @@ export function MarketHome({
 
   if (!snapshot) return null;
 
+  const news = quoteContext.news;
   const wished = new Set(snapshot.favoriteStockIds);
   const favoriteStocks = snapshot.stocks.filter((stock) => wished.has(stock.id));
   const featuredStocks = favoriteStocks.length > 0
@@ -112,8 +113,8 @@ export function MarketHome({
       return;
     }
     if (snapshot.beginnerMission === 'reason') {
-      const news = snapshot.news[0];
-      if (news) void openStockAfterReadingReason(news.stockId);
+      const firstNews = news[0];
+      if (firstNews) void openStockAfterReadingReason(firstNews.stockId);
       return;
     }
     const firstStock = snapshot.stocks[0];
@@ -205,7 +206,7 @@ export function MarketHome({
             </h2>
           </div>
           <div className="mt-4 grid min-w-0 grid-cols-1 gap-3 lg:grid-cols-3">
-            {snapshot.news.slice(0, 3).map((item) => {
+            {news.slice(0, 3).map((item) => {
               const stock = snapshot.stocks.find((candidate) => candidate.id === item.stockId);
               const currentPriceWon = stock
                 ? quoteContext.quoteWonByStockId[stock.id] ?? 1

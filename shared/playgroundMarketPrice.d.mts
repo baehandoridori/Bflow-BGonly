@@ -23,6 +23,9 @@ export interface SharedMarketAdminEvent {
   startsAt: string;
   endsAt: string | null;
   revision: number;
+  automatic?: boolean;
+  summary?: string;
+  publishedAt?: string;
 }
 
 export const MARKET_INSTRUMENT_PROFILES: Readonly<Record<string, SharedMarketInstrumentProfile>>;
@@ -66,6 +69,26 @@ export function getMarketMinuteBar(
 ): SharedMarketMinuteBar;
 
 export function getMarketEventCheckpointCacheStats(): SharedMarketEventCheckpointCacheStats;
+
+export const AUTONOMOUS_NEWS_DECAY_MS: number;
+
+export function getAutonomousMarketEventsForRange(
+  startMs: number,
+  endMs: number,
+): readonly SharedMarketAdminEvent[];
+
+export function getAutonomousMarketNewsForNow(nowMs: number): readonly SharedMarketAdminEvent[];
+
+export function mergeMarketEvents(
+  manualEvents: readonly SharedMarketAdminEvent[],
+  automaticEvents: readonly SharedMarketAdminEvent[],
+): readonly SharedMarketAdminEvent[];
+
+export function getEffectiveMarketEventsForRange(
+  startMs: number,
+  endMs: number,
+  manualEvents: readonly SharedMarketAdminEvent[],
+): readonly SharedMarketAdminEvent[];
 
 export function getLivePriceWon(
   profile: SharedMarketInstrumentProfile,

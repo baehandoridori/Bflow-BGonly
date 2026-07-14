@@ -1,4 +1,9 @@
-import { aggregateCandles, buildCandles, buildMinuteCandles } from './chartSeries.ts';
+import {
+  aggregateCandles,
+  buildCandles,
+  buildMinuteCandles,
+  marketEventNewsEndMs,
+} from './chartSeries.ts';
 import { getMarketDailyCheckpoint, getMarketMinuteBar } from './livePriceEngine.ts';
 import { MAX_MARKET_CHART_BARS } from './marketChartUi.ts';
 import type {
@@ -143,9 +148,7 @@ function newsIdsForRange(
     .filter((event) => {
       if (event.stockId !== profile.stockId) return false;
       const eventStartMs = Date.parse(event.startsAt);
-      const eventEndMs = event.endsAt === null
-        ? Number.POSITIVE_INFINITY
-        : Date.parse(event.endsAt);
+      const eventEndMs = marketEventNewsEndMs(event);
       return Number.isFinite(eventStartMs)
         && !Number.isNaN(eventEndMs)
         && eventEndMs > rangeStartMs

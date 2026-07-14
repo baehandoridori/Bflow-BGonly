@@ -1,3 +1,5 @@
+import { AUTONOMOUS_NEWS_DECAY_MS } from './playgroundMarketAutoNews.mjs';
+
 export const MARKET_MODEL_REVISION = 'jbbj-cumulative-market-v1';
 
 export const MARKET_PROFILE_ENHANCEMENT_DEFAULTS = Object.freeze({
@@ -560,6 +562,14 @@ function eventOverlayLog(event, nowMs) {
     return impactLog * (1 - Math.exp(-elapsedMs / SHOCK_ENTRY_TAU_MS));
   }
   const entryAtEnd = 1 - Math.exp(-(event.endMs - event.startMs) / SHOCK_ENTRY_TAU_MS);
+  if (event.automatic === true) {
+    const automaticFade = clamp(
+      1 - (nowMs - event.endMs) / AUTONOMOUS_NEWS_DECAY_MS,
+      0,
+      1,
+    );
+    return impactLog * entryAtEnd * automaticFade;
+  }
   const decayProgress = Math.exp(-(nowMs - event.endMs) / SHOCK_DECAY_TAU_MS);
   return impactLog * entryAtEnd * (
     SHOCK_RESIDUAL_FRACTION + (1 - SHOCK_RESIDUAL_FRACTION) * decayProgress
@@ -796,6 +806,9 @@ function getBaseDailySummary(state, dayIndex) {
 function eventCanAffectCompletedDay(event, dayStartMs) {
   const dayEndMs = dayStartMs + DAY_MS;
   if (event.startMs >= dayEndMs) return false;
+  if (event.automatic === true) {
+    return event.endMs + AUTONOMOUS_NEWS_DECAY_MS > dayStartMs;
+  }
   return event.kind !== 'halt' || event.endMs > dayStartMs;
 }
 
@@ -807,6 +820,7 @@ function eventsFingerprint(events) {
     finiteOr(event.impactBps, 0),
     event.startMs,
     event.endMs,
+    event.automatic === true ? 'automatic' : 'manual',
   ].join(':')).join('|');
 }
 
