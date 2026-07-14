@@ -38,6 +38,23 @@ interface RiggingAnnounceParams {
   imageUrl: string | null;
 }
 
+/**
+ * 캐릭터 작업 폴더 경로 → 스튜디오 공용 jbbj://open/ 링크 (피드백 31c).
+ * 오토핫키 Ctrl+Shift+V 가 만드는 링크와 같은 포맷 — 백슬래시는 /, 각 폴더명은 percent 인코딩,
+ * 드라이브 문자(G:)와 대괄호([])는 원문 유지(스튜디오 예시 링크와 바이트 단위 일치 확인됨).
+ * 예) G:\공유 드라이브\사우스 코리안 파크 → jbbj://open/G:/%EA%B3%B5%EC%9C%A0%20%EB%93%9C%EB%9D%BC%EC%9D%B4%EB%B8%8C/...
+ */
+export function buildJbbjOpenLink(path: string): string {
+  const encoded = path
+    .replace(/\\/g, '/')
+    .split('/')
+    .map((seg) => (/^[A-Za-z]:$/.test(seg)
+      ? seg
+      : encodeURIComponent(seg).replace(/%5B/g, '[').replace(/%5D/g, ']')))
+    .join('/');
+  return `jbbj://open/${encoded}`;
+}
+
 /** 비고 배열 → 슬랙 bigo 문자열(빈 줄 제거 + 줄바꿈 결합). */
 export function buildRiggingBigo(notes: string[]): string {
   return notes.map((n) => n.trim()).filter((n) => n.length > 0).join('\n');
@@ -48,7 +65,9 @@ export async function sendRiggingAnnounce(params: RiggingAnnounceParams): Promis
   const payload: Record<string, string> = {
     title: params.title,
     CH_name: params.characterName,
-    Path: params.folderPath ?? '',
+    // 피드백 31(c): Path 는 원본 경로 대신 클릭하면 탐색기가 열리는 jbbj://open/ 링크로 보낸다
+    //   (슬랙 워크플로 메시지의 하이퍼링크 서식이 이 변수를 URL 로 쓴다 — 한솔 확인).
+    Path: params.folderPath ? buildJbbjOpenLink(params.folderPath) : '',
     bigo: buildRiggingBigo(params.notes),
     image: params.imageUrl ?? '',
   };

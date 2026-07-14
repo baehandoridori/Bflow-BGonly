@@ -4,7 +4,7 @@
 import { readFileSync } from 'node:fs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { buildRiggingBigo } from '../src/services/slackWebhookService.ts';
+import { buildRiggingBigo, buildJbbjOpenLink } from '../src/services/slackWebhookService.ts';
 
 test('buildRiggingBigo: 빈 줄 제거 + trim + 줄바꿈 결합', () => {
   assert.equal(buildRiggingBigo(['a', 'b']), 'a\nb');
@@ -33,7 +33,7 @@ test('B11 서비스: 워크플로 변수(title/CH_name/Path/bigo/image) 매핑',
   assert.match(svc, /export async function sendRiggingAnnounce/);
   assert.match(svc, /title: params\.title/);
   assert.match(svc, /CH_name: params\.characterName/);
-  assert.match(svc, /Path: params\.folderPath \?\? ''/);
+  assert.match(svc, /Path: params\.folderPath \? buildJbbjOpenLink\(params\.folderPath\) : ''/);
   assert.match(svc, /bigo: buildRiggingBigo\(params\.notes\)/);
   assert.match(svc, /image: params\.imageUrl \?\? ''/);
   assert.match(svc, /window\.electronAPI\.sendRiggingWebhook\(payload\)/);
@@ -71,4 +71,16 @@ test('B11 UI: 제목 템플릿 버튼 — 누르면 제목만 채운다', () => 
   assert.match(modal, /onClick=\{\(\) => \{ setTitle\(t\.title\); setActiveTpl\(t\.key\); \}\}/);
   // 제목 직접 편집 시 활성 템플릿 해제.
   assert.match(modal, /onChange=\{\(e\) => \{ setTitle\(e\.target\.value\); setActiveTpl\(null\); \}\}/);
+});
+
+test('buildJbbjOpenLink: 스튜디오 오토핫키 링크 포맷과 일치 (피드백 31c)', () => {
+  // 실제 스튜디오 예시 링크와 바이트 단위 일치 — 드라이브 문자·대괄호는 원문, 한글·공백은 percent 인코딩.
+  assert.equal(
+    buildJbbjOpenLink('G:\\공유 드라이브\\사우스 코리안 파크\\[]사코팍 캐릭터 세팅\\휠체어 할머니'),
+    'jbbj://open/G:/%EA%B3%B5%EC%9C%A0%20%EB%93%9C%EB%9D%BC%EC%9D%B4%EB%B8%8C/%EC%82%AC%EC%9A%B0%EC%8A%A4%20%EC%BD%94%EB%A6%AC%EC%95%88%20%ED%8C%8C%ED%81%AC/[]%EC%82%AC%EC%BD%94%ED%8C%8D%20%EC%BA%90%EB%A6%AD%ED%84%B0%20%EC%84%B8%ED%8C%85/%ED%9C%A0%EC%B2%B4%EC%96%B4%20%ED%95%A0%EB%A8%B8%EB%8B%88',
+  );
+  // URL 특수문자(#, %)는 안전하게 인코딩된다.
+  assert.equal(buildJbbjOpenLink('G:\\공유 드라이브\\A#B 50%'), 'jbbj://open/G:/%EA%B3%B5%EC%9C%A0%20%EB%93%9C%EB%9D%BC%EC%9D%B4%EB%B8%8C/A%23B%2050%25');
+  // 이미 슬래시인 경로도 동일 처리.
+  assert.equal(buildJbbjOpenLink('G:/이미 슬래시/경로'), 'jbbj://open/G:/%EC%9D%B4%EB%AF%B8%20%EC%8A%AC%EB%9E%98%EC%8B%9C/%EA%B2%BD%EB%A1%9C');
 });
