@@ -199,3 +199,35 @@ test('a same-key reload keeps a valid snapshot without wiping it to null', async
   assert.equal(store.getState().snapshot?.wallet.walletPoints, 200);
   assert.equal(store.getState().error, null);
 });
+
+test('a failed paid start reuses the same runId on the next start (no double entry-fee charge)', async () => {
+  let attempt = 0;
+  const gateway = createMockGateway({
+    execute: async (command) => {
+      if (command.kind === 'game-start') {
+        attempt += 1;
+        if (attempt === 1) throw new Error('response lost after charge');
+        return { wallet: { walletPoints: 990, lifetimeEarnedPoints: 5000 } };
+      }
+      return { wallet: { walletPoints: 0, lifetimeEarnedPoints: 0 } } as ArcadeExecuteResult;
+    },
+  });
+  const store = createArcadeStore(gateway, noopSync);
+  await store.getState().load();
+
+  const first = await store.getState().startRun('snake');
+  assert.equal(first, null, '첫 시작은 응답 유실로 실패');
+
+  const second = await store.getState().startRun('snake');
+  assert.ok(second, '두 번째 시작은 성공');
+
+  const starts = gateway.executed.filter((command) => command.kind === 'game-start');
+  assert.equal(starts.length, 2);
+  assert.equal(starts[0].runId, starts[1].runId, '실패 후 재시도는 같은 runId 를 재사용(멱등 재생)');
+  assert.equal(starts[0].requestId, starts[1].requestId);
+
+  // 성공 뒤에는 보류가 풀려 새 시작은 새 runId 를 발급한다.
+  await store.getState().startRun('snake');
+  const startsAfter = gateway.executed.filter((command) => command.kind === 'game-start');
+  assert.notEqual(startsAfter[2].runId, starts[0].runId, '성공 뒤 새 시작은 다른 runId');
+});
