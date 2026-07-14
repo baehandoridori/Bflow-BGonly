@@ -134,32 +134,37 @@ test('finishRun upserts my new best into the game leaderboard so the panel updat
   assert.equal(board.filter((entry) => entry.userId === 'me').length, 1); // 내 행은 하나만(중복 없음)
 });
 
-test('finishRun upserts this run score into the weekly board on a week rollover, not the stale cached best', async () => {
+test('finishRun refreshes the weekly board from the server after a run, fixing week-rollover staleness', async () => {
+  const emptyTetris = { myBestScore: 0, myWeeklyBestScore: 0, todayRewardedRuns: 0, totalRuns: 0, maxGoldenEaten: 0, maxLineClear: 0, maxLevel: 0, leaderboardAll: [], leaderboardWeekly: [] };
+  const serverWeekly = [{ userId: 'me', name: '나', score: 1000, at: '2026-02-02T00:00:00Z' }]; // 새 주 정본(서버가 준 이번 주)
+  let reads = 0;
   const gateway = createMockGateway({
     execute: async (command) => {
       if (command.kind === 'game-finish') {
-        // 새 주 첫 판(1000). 캐시된 지난주 best 는 5000 이지만 서버는 주간 신기록으로 본다.
         return { grade: 'gold', rewardPoints: 30, rewardCapped: false, newAlltimeBest: false, newWeeklyBest: true, prevBestScore: 5000, myBestScore: 5000, todayRewardedRuns: 1, wallet: { walletPoints: 1000, lifetimeEarnedPoints: 5000 }, slackNotifyEnabled: false };
       }
       return { wallet: { walletPoints: 0, lifetimeEarnedPoints: 0 } } as ArcadeExecuteResult;
     },
-    read: async () => baseSnapshot({
-      games: {
-        snake: {
-          myBestScore: 5000, myWeeklyBestScore: 5000, todayRewardedRuns: 0, totalRuns: 9, maxGoldenEaten: 0, maxLineClear: 0, maxLevel: 0,
-          leaderboardAll: [{ userId: 'me', name: '나', score: 5000, at: '2026-01-01T00:00:00Z' }],
-          leaderboardWeekly: [{ userId: 'me', name: '나', score: 5000, at: '2026-01-01T00:00:00Z' }],
+    read: async () => {
+      reads += 1;
+      // 첫 로드: 주 경계로 지난주 리더가 남은 stale 주간 배열. 재조회: 서버가 준 새 주 정본.
+      const weekly = reads === 1
+        ? [{ userId: 'rival', name: '라이벌', score: 8000, at: '2026-01-01T00:00:00Z' }, { userId: 'me', name: '나', score: 5000, at: '2026-01-01T00:00:00Z' }]
+        : serverWeekly;
+      return baseSnapshot({
+        games: {
+          snake: { myBestScore: 5000, myWeeklyBestScore: 5000, todayRewardedRuns: 0, totalRuns: 9, maxGoldenEaten: 0, maxLineClear: 0, maxLevel: 0, leaderboardAll: [{ userId: 'me', name: '나', score: 5000, at: '2026-01-01T00:00:00Z' }], leaderboardWeekly: weekly },
+          tetris: emptyTetris,
         },
-        tetris: { myBestScore: 0, myWeeklyBestScore: 0, todayRewardedRuns: 0, totalRuns: 0, maxGoldenEaten: 0, maxLineClear: 0, maxLevel: 0, leaderboardAll: [], leaderboardWeekly: [] },
-      },
-    }),
+      });
+    },
   });
   const store = createArcadeStore(gateway, noopSync, () => ({ userId: 'me', name: '나' }));
   await store.getState().load('user-1');
   await store.getState().finishRun({ runId: 'r-weekroll', gameId: 'snake', score: 1000, durationMs: 60_000, meta: {} });
-  const snapshot = store.getState().snapshot!;
-  assert.equal(snapshot.games.snake.leaderboardWeekly.find((e) => e.userId === 'me')?.score, 1000); // 이번 판 1000(캐시 5000 아님)
-  assert.equal(snapshot.games.snake.leaderboardAll.find((e) => e.userId === 'me')?.score, 5000); // all-time 미경신 → 그대로
+  await new Promise((resolve) => setTimeout(resolve, 0)); // fire-and-forget 재조회가 settle 되도록
+  assert.ok(reads >= 2, 'game-finish 후 순위표를 다시 읽어야 한다');
+  assert.deepEqual(store.getState().snapshot!.games.snake.leaderboardWeekly, serverWeekly); // 지난주 리더 없이 새 주 정본
 });
 
 test('finishRun leaves the leaderboard alone (score and achieved-at) when the run is not a new best', async () => {
