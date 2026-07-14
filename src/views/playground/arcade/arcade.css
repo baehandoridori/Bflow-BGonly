@@ -338,27 +338,48 @@
   font-variant-numeric: tabular-nums;
 }
 
-/* 테트리스 홀드/넥스트 조각 칩 — 네온 발광 */
-.pg-arcade-piece-chip {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 22px;
+/* 테트리스 홀드/넥스트 — 실제 블록 모양(미니 네온). 글자 X. */
+.pg-arcade-glyph {
+  --glyph-cell: 11px;
+  display: inline-grid;
+  gap: 2px;
+}
+
+.pg-arcade-glyph i {
+  width: var(--glyph-cell);
+  height: var(--glyph-cell);
+  border-radius: 2px;
+  background: transparent;
+}
+
+.pg-arcade-glyph i.on {
+  background: var(--glyph-tone);
+  box-shadow:
+    inset 0 1px 0 rgb(255 255 255 / 0.28),
+    0 0 6px -1px var(--glyph-tone);
+}
+
+/* 빈 홀드 자리 */
+.pg-arcade-glyph--empty {
+  display: inline-block;
+  width: 34px;
   height: 22px;
-  border-radius: 5px;
-  border: 1px solid rgb(var(--pg-line));
-  font-size: 12px;
-  font-weight: 800;
-  color: rgb(var(--pg-bg));
+  border-radius: 4px;
+  border: 1px dashed rgb(var(--pg-line));
 }
 
-.pg-arcade-piece-chip--filled {
-  box-shadow: 0 0 8px -1px var(--pg-chip-glow, transparent);
+/* 홀드 글리프를 좌측 정렬로 담는다 */
+.pg-arcade-glyph-slot {
+  display: flex;
+  min-height: 24px;
+  align-items: center;
 }
 
+/* 다음 5개 — 세로로 쌓아 크게 보이게 */
 .pg-arcade-piece-next {
-  display: inline-flex;
-  gap: 4px;
+  display: grid;
+  gap: 10px;
+  justify-items: center;
 }
 
 /* 좁은 화면: 세로로 쌓는다 */
