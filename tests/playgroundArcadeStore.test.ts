@@ -134,6 +134,34 @@ test('finishRun upserts my new best into the game leaderboard so the panel updat
   assert.equal(board.filter((entry) => entry.userId === 'me').length, 1); // 내 행은 하나만(중복 없음)
 });
 
+test('finishRun upserts this run score into the weekly board on a week rollover, not the stale cached best', async () => {
+  const gateway = createMockGateway({
+    execute: async (command) => {
+      if (command.kind === 'game-finish') {
+        // 새 주 첫 판(1000). 캐시된 지난주 best 는 5000 이지만 서버는 주간 신기록으로 본다.
+        return { grade: 'gold', rewardPoints: 30, rewardCapped: false, newAlltimeBest: false, newWeeklyBest: true, prevBestScore: 5000, myBestScore: 5000, todayRewardedRuns: 1, wallet: { walletPoints: 1000, lifetimeEarnedPoints: 5000 }, slackNotifyEnabled: false };
+      }
+      return { wallet: { walletPoints: 0, lifetimeEarnedPoints: 0 } } as ArcadeExecuteResult;
+    },
+    read: async () => baseSnapshot({
+      games: {
+        snake: {
+          myBestScore: 5000, myWeeklyBestScore: 5000, todayRewardedRuns: 0, totalRuns: 9, maxGoldenEaten: 0, maxLineClear: 0, maxLevel: 0,
+          leaderboardAll: [{ userId: 'me', name: '나', score: 5000, at: '2026-01-01T00:00:00Z' }],
+          leaderboardWeekly: [{ userId: 'me', name: '나', score: 5000, at: '2026-01-01T00:00:00Z' }],
+        },
+        tetris: { myBestScore: 0, myWeeklyBestScore: 0, todayRewardedRuns: 0, totalRuns: 0, maxGoldenEaten: 0, maxLineClear: 0, maxLevel: 0, leaderboardAll: [], leaderboardWeekly: [] },
+      },
+    }),
+  });
+  const store = createArcadeStore(gateway, noopSync, () => ({ userId: 'me', name: '나' }));
+  await store.getState().load('user-1');
+  await store.getState().finishRun({ runId: 'r-weekroll', gameId: 'snake', score: 1000, durationMs: 60_000, meta: {} });
+  const snapshot = store.getState().snapshot!;
+  assert.equal(snapshot.games.snake.leaderboardWeekly.find((e) => e.userId === 'me')?.score, 1000); // 이번 판 1000(캐시 5000 아님)
+  assert.equal(snapshot.games.snake.leaderboardAll.find((e) => e.userId === 'me')?.score, 5000); // all-time 미경신 → 그대로
+});
+
 test('finishRun leaves the leaderboard alone (score and achieved-at) when the run is not a new best', async () => {
   const gateway = createMockGateway({
     execute: async (command) => {

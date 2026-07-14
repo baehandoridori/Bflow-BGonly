@@ -221,9 +221,13 @@ test('TetrisStage HUD re-renders when hold/next change without a scoring change'
   assert.match(tetrisStageSource, /hud\.next\.map\(/);
 });
 
-test('TetrisStage clears held-key state on quit-confirm and syncs the HUD before a keydown death', () => {
-  // 확인창이 뜨면 눌린 좌우 DAS 와 소프트드롭을 비운다(계속하기 후 저절로 움직이지 않게)
-  assert.match(tetrisStageSource, /if \(confirmOpen\) \{[\s\S]*?repeaterRef\.current\.reset\(\);[\s\S]*?applyTetrisInput\(s, 'softDropOff'\)/);
+test('TetrisStage clears held-key state on quit-confirm/blur and syncs the HUD before a keydown death', () => {
+  // 눌린 좌우 DAS·소프트드롭을 비우는 공용 헬퍼 — keyup 을 못 받는 상황(확인창·블러·탭 전환)용
+  assert.match(tetrisStageSource, /const clearHeldKeys = \(\): void => \{[\s\S]*?repeaterRef\.current\.reset\(\);[\s\S]*?applyTetrisInput\(s, 'softDropOff'\)/);
+  assert.match(tetrisStageSource, /if \(confirmOpen\) \{\s*clearHeldKeys\(\);\s*return;/); // 확인창
+  assert.match(tetrisStageSource, /window\.addEventListener\('blur', onBlur\)/); // alt-tab
+  assert.match(tetrisStageSource, /document\.addEventListener\('visibilitychange', onVisibility\)/); // 탭 숨김
+  assert.match(tetrisStageSource, /if \(document\.hidden\) clearHeldKeys\(\)/);
   // 키입력 사망을 저장하기 전에 최종 상태로 HUD 를 맞춘다(결과 화면 점수 = 저장 점수)
   assert.match(tetrisStageSource, /syncHud\(dead\);/);
 });

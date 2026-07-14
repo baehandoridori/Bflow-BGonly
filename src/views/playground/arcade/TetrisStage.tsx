@@ -242,12 +242,15 @@ export function TetrisStage({ onExit, returnLabel }: { onExit: () => void; retur
   // 키 입력: DAS/ARR 좌우, 소프트/하드/회전/홀드/일시정지.
   useEffect(() => {
     if (phase !== 'running' && phase !== 'paused') return;
-    if (confirmOpen) {
-      // 확인창이 뜨면 keyup 을 못 받으므로, 눌려 있던 좌우 DAS 와 소프트드롭을 비워
-      // '계속하기' 후 조각이 저절로 움직이거나 계속 빨리 떨어지지 않게 한다.
+    // 눌려 있던 좌우 DAS·소프트드롭 상태를 비운다. 확인창/블러/탭 전환처럼 keyup 을 못 받는 상황에서
+    // 이걸 안 하면 복귀 후 조각이 저절로 움직이거나 계속 빨리 떨어진다.
+    const clearHeldKeys = (): void => {
       repeaterRef.current.reset();
       const s = engineRef.current;
       if (s) engineRef.current = applyTetrisInput(s, 'softDropOff');
+    };
+    if (confirmOpen) {
+      clearHeldKeys();
       return;
     }
     const apply = (input: Parameters<typeof applyTetrisInput>[1]): void => {
@@ -298,11 +301,19 @@ export function TetrisStage({ onExit, returnLabel }: { onExit: () => void; retur
       else if (e.key === 'ArrowRight' || e.key === 'd' || e.key === 'D') repeaterRef.current.release(1, now);
       else if (e.key === 'ArrowDown' || e.key === 's' || e.key === 'S') apply('softDropOff');
     };
+    // 창이 포커스를 잃거나(alt-tab) 탭이 숨으면 keyup 이 다른 창으로 가버려 눌린 키 상태가 남는다.
+    // 루프는 공용 loop 의 blur 처리로 멈추지만, 입력 상태는 여기서 함께 비워야 복귀 시 안 움직인다.
+    const onBlur = (): void => clearHeldKeys();
+    const onVisibility = (): void => { if (document.hidden) clearHeldKeys(); };
     window.addEventListener('keydown', onKey);
     window.addEventListener('keyup', onKeyUp);
+    window.addEventListener('blur', onBlur);
+    document.addEventListener('visibilitychange', onVisibility);
     return () => {
       window.removeEventListener('keydown', onKey);
       window.removeEventListener('keyup', onKeyUp);
+      window.removeEventListener('blur', onBlur);
+      document.removeEventListener('visibilitychange', onVisibility);
     };
   }, [phase, confirmOpen, finalizeDead]);
 

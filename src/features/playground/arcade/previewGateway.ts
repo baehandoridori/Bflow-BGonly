@@ -206,11 +206,12 @@ export function applyArcadePreviewCommand(
       // 기록을 못 깬 판은 순위가 그대로라 손대지 않는다(옛 점수에 새 시각이 붙어 정렬·달성일이 틀어지지 않게).
       const selfName = next.walletLeaderboard.find((row) => row.userId === ctx.userId)?.name ?? '나';
       const at = new Date(ctx.now).toISOString();
-      if (newAlltimeBest && myBestScore > 0) {
-        stats.leaderboardAll = upsertLeaderboardEntry(stats.leaderboardAll, { userId: ctx.userId, name: selfName }, myBestScore, at);
+      // 신기록이면 이번 판 점수(command.score)를 올린다 — 주 경계에서 캐시된 주간 최고가 아니라 실제 이번 판이 정답.
+      if (newAlltimeBest && command.score > 0) {
+        stats.leaderboardAll = upsertLeaderboardEntry(stats.leaderboardAll, { userId: ctx.userId, name: selfName }, command.score, at);
       }
-      if (newWeeklyBest && stats.myWeeklyBestScore > 0) {
-        stats.leaderboardWeekly = upsertLeaderboardEntry(stats.leaderboardWeekly, { userId: ctx.userId, name: selfName }, stats.myWeeklyBestScore, at);
+      if (newWeeklyBest && command.score > 0) {
+        stats.leaderboardWeekly = upsertLeaderboardEntry(stats.leaderboardWeekly, { userId: ctx.userId, name: selfName }, command.score, at);
       }
       syncSelfWallet(next, ctx.userId);
 

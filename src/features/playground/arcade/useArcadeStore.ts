@@ -71,11 +71,14 @@ function applyFinishToSnapshot(
   // 기록을 못 깬 판은 내 순위가 그대로라 손대지 않는다(안 그러면 옛 점수에 새 시각이 붙어 정렬·달성일이 틀어짐).
   // 미로그인이거나 최고가 0이면(등급 없음 등)도 그대로 둔다. 다음 전체 로드에서 서버 정본으로 교체.
   const at = new Date().toISOString();
-  const leaderboardAll = self && result.newAlltimeBest && myBestScore > 0
-    ? upsertLeaderboardEntry(stats.leaderboardAll, self, myBestScore, at)
+  // 신기록이면 그 판 점수(input.score)를 올린다. 주간은 특히 이렇게 해야 한다 — 앱을 켜둔 채 주가
+  // 바뀌면 캐시된 myWeeklyBestScore 는 지난주 값일 수 있는데, 서버는 새 주 첫 판을 주간 신기록으로
+  // 보므로 그 판 점수가 이번주 정답이다.
+  const leaderboardAll = self && result.newAlltimeBest && input.score > 0
+    ? upsertLeaderboardEntry(stats.leaderboardAll, self, input.score, at)
     : stats.leaderboardAll;
-  const leaderboardWeekly = self && result.newWeeklyBest && myWeeklyBestScore > 0
-    ? upsertLeaderboardEntry(stats.leaderboardWeekly, self, myWeeklyBestScore, at)
+  const leaderboardWeekly = self && result.newWeeklyBest && input.score > 0
+    ? upsertLeaderboardEntry(stats.leaderboardWeekly, self, input.score, at)
     : stats.leaderboardWeekly;
   return {
     ...snapshot,
