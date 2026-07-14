@@ -107,6 +107,11 @@ test('SnakeStage keeps a retry state when finishRun fails and normalizes canvas 
   assert.match(snakeStageSource, /setFinishError\(true\)/);
   assert.match(snakeStageSource, /onRetryFinish=\{\(\) => void finalize\(\)\}/);
   assert.match(snakeStageSource, /deadStateRef/);
+  // 죽은 뒤 catch-up 스텝이 finalize 를 중복 호출하지 않도록 가드
+  assert.match(snakeStageSource, /if \(!s \|\| s\.status !== 'running'\) return;/);
+  // 종료 payload 를 1회 고정하고, finalize·재시도가 그대로 재사용(멱등 request_id·내용)
+  assert.match(snakeStageSource, /finishInputRef\.current = \{/);
+  assert.match(snakeStageSource, /const input = finishInputRef\.current;/);
   // 캔버스도 토큰을 rgb(...) 로 감싼다
   assert.match(snakeStageSource, /`rgb\(\$\{triplet\}\)`/);
   // 크롬은 finishError 시 재시도 오버레이를 띄운다

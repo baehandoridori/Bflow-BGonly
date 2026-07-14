@@ -3,7 +3,7 @@ import { toast } from 'sonner';
 
 import { ARCADE_BALANCE } from '@/features/playground/arcade/constants';
 import { GAME_DEFINITIONS } from '@/features/playground/catalog';
-import { useArcadeStore } from '@/features/playground/arcade/useArcadeStore';
+import { useArcadeStore, type ArcadeFinishInput } from '@/features/playground/arcade/useArcadeStore';
 import type { ArcadeFinishResult } from '@/features/playground/arcade/types';
 import {
   createSnakeGame,
@@ -45,6 +45,7 @@ export function SnakeStage({ onExit }: { onExit: () => void }) {
 
   const engineRef = useRef<SnakeState | null>(null);
   const deadStateRef = useRef<SnakeState | null>(null); // 종료 시점 상태 — finishRun 실패 재시도용 보존
+  const finishInputRef = useRef<ArcadeFinishInput | null>(null); // 종료 시 1회 고정 — 재시도도 같은 payload(멱등)
   const loopRef = useRef<FixedStepLoop | null>(null);
   const runIdRef = useRef<string | null>(null);
   const startedAtRef = useRef(0);
@@ -92,18 +93,13 @@ export function SnakeStage({ onExit }: { onExit: () => void }) {
   // 종료 결과를 서버에 기록한다. game-finish 는 멱등이라, 실패하면 이탈하지 않고 재시도 상태를
   // 유지해(입장료·점수 보존) 사용자가 '다시 시도'로 같은 runId 로 재기록할 수 있게 한다.
   const finalize = useCallback(async () => {
-    const dead = deadStateRef.current;
-    const runId = runIdRef.current;
-    if (!dead || !runId) { onExit(); return; }
+    // 종료 시 고정한 payload 를 그대로 쓴다 — 재시도도 같은 request_id·같은 내용이어야 멱등 재생된다
+    // (duration 을 재계산하면 fingerprint 가 달라 다른 요청으로 거부됨).
+    const input = finishInputRef.current;
+    if (!input) { onExit(); return; }
     setFinishError(false);
     setPhase('finishing');
-    const finished = await finishRun({
-      runId,
-      gameId: 'snake',
-      score: dead.length,
-      durationMs: Math.max(1000, Math.round(performance.now() - startedAtRef.current)),
-      meta: { goldenEaten: dead.goldenEaten },
-    });
+    const finished = await finishRun(input);
     if (finished) {
       // 새로 해금된 도전과제는 토스트로도 알린다(sonner 는 앱 루트에 렌더).
       finished.unlockedAchievements.forEach((ach) => {
@@ -124,12 +120,23 @@ export function SnakeStage({ onExit }: { onExit: () => void }) {
       getStepMs: () => engineRef.current?.tickMs ?? 160,
       onStep: () => {
         const s = engineRef.current;
-        if (!s) return;
+        // 이미 죽었으면 무시 — 한 프레임의 catch-up 스텝이 stop() 뒤에도 이어져 finalize 가 중복되는 것을 막는다.
+        if (!s || s.status !== 'running') return;
         const next = stepSnake(s);
         engineRef.current = next;
         if (next.status === 'dead') {
           loopRef.current?.stop();
           deadStateRef.current = next;
+          // 종료 payload 를 이 시점에 1회 고정(재시도도 동일 request_id·내용으로 멱등 재생).
+          if (runIdRef.current) {
+            finishInputRef.current = {
+              runId: runIdRef.current,
+              gameId: 'snake',
+              score: next.length,
+              durationMs: Math.max(1000, Math.round(performance.now() - startedAtRef.current)),
+              meta: { goldenEaten: next.goldenEaten },
+            };
+          }
           void finalize();
         }
       },
@@ -164,6 +171,7 @@ export function SnakeStage({ onExit }: { onExit: () => void }) {
     runIdRef.current = null;
     engineRef.current = null;
     deadStateRef.current = null;
+    finishInputRef.current = null;
     setResult(null);
     setFinishError(false);
     setPhase('ready');
