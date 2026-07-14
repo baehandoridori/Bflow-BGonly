@@ -55,6 +55,15 @@ function isNextKstDay(fromDate: string, toDate: string): boolean {
   return Number.isFinite(from) && Number.isFinite(to) && to - from === 86_400_000;
 }
 
+// 'YYYY-MM-DD'(KST 달력 날짜) → 그 주의 월요일 날짜. 서버의 date_trunc('week') 와 같은 ISO 주(월요일 시작).
+function kstWeekStartOfDate(date: string): string {
+  const d = new Date(`${date}T00:00:00Z`);
+  if (Number.isNaN(d.getTime())) return date;
+  const mondayOffset = (d.getUTCDay() + 6) % 7; // 0=일 → 6, 1=월 → 0 ...
+  d.setUTCDate(d.getUTCDate() - mondayOffset);
+  return d.toISOString().slice(0, 10);
+}
+
 // KST 날짜가 바뀌면 일일 필드를 서버처럼 롤오버한다. 서버는 KST 로 dated 원장/런에서
 // 매번 재계산하지만, 프리뷰는 dated 이력 없이 집계만 들고 있어 날짜 전환 시 직접 리셋해야 한다.
 export function rollOverPreviewDailyState(
@@ -72,6 +81,14 @@ export function rollOverPreviewDailyState(
   // 연속 출석 유지 조건: 바로 다음 날 + 직전 날 출석함. 그 외(공백)는 연속이 끊긴다.
   if (!(consecutive && wasGrantedPrevDay)) {
     snapshot.attendance.streakDays = 0;
+  }
+  // KST 주(월요일 시작)가 바뀌면 주간 집계도 리셋한다 — 서버는 이번 주 원장에서 주간을 재계산하므로,
+  // 프리뷰도 지난주 주간 최고·순위표를 비워야 '이번 주' 탭이 서버와 같이 동작한다. 전체(all-time)는 유지.
+  if (kstWeekStartOfDate(fromDate) !== kstWeekStartOfDate(toDate)) {
+    snapshot.games.snake.myWeeklyBestScore = 0;
+    snapshot.games.tetris.myWeeklyBestScore = 0;
+    snapshot.games.snake.leaderboardWeekly = [];
+    snapshot.games.tetris.leaderboardWeekly = [];
   }
 }
 
