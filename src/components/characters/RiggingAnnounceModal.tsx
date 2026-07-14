@@ -83,7 +83,9 @@ export function RiggingAnnounceModal({
   /** 취소·백드롭·Escape 공통 닫기 — 보내지 않은 붙여넣기 이미지를 정리하고 닫는다. */
   const handleClose = () => {
     closedRef.current = true;
-    cleanupPastedUploads(null);
+    // 전송(sending) 중 닫기: 웹훅이 이미 나가 슬랙 메시지가 선택 이미지를 참조할 수 있으므로
+    //   그 이미지는 지우지 않는다(코덱스 3차 P2). 평상시 닫기는 전부 정리.
+    cleanupPastedUploads(sending ? selectedImage?.url ?? null : null);
     onClose();
   };
   const handleCloseRef = useRef(handleClose);
