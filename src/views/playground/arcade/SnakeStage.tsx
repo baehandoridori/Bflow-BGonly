@@ -201,12 +201,14 @@ export function SnakeStage({ onExit, returnLabel }: { onExit: () => void; return
     const onKey = (e: KeyboardEvent) => {
       if (phase === 'running' && KEY_TO_DIR[e.key]) {
         e.preventDefault();
+        if (e.repeat) return; // 키 홀드 반복 이벤트는 방향 큐(2칸)를 중복으로 채우지 않는다
         const s = engineRef.current;
         if (s) engineRef.current = enqueueDirection(s, KEY_TO_DIR[e.key]);
         return;
       }
       if (e.key === 'p' || e.key === 'P' || e.key === 'Escape') {
         e.preventDefault();
+        if (e.repeat) return; // 홀드 반복으로 일시정지 토글이 연타되지 않게
         if (phase === 'running') { loopRef.current?.pause(); setPhase('paused'); }
         else { loopRef.current?.resume(); setPhase('running'); }
       }

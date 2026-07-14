@@ -135,6 +135,8 @@ test('SnakeStage guards against duplicate entry charges and exits directly', () 
   assert.match(snakeStageSource, /onPause=\{\(\) => loopRef\.current\?\.pause\(\)\}/);
   // 종료 확인 모달이 뜨면 게임 키 입력을 막는다(모달 뒤 방향 큐잉 방지)
   assert.match(snakeStageSource, /if \(confirmOpen\) return;/);
+  // 키 홀드 반복(e.repeat)은 방향 큐를 중복으로 채우지 않는다
+  assert.match(snakeStageSource, /if \(e\.repeat\) return;/);
   assert.match(snakeStageSource, /onConfirmingChange=\{setConfirmOpen\}/);
   // 결과·종료 라벨은 소스 서페이스 라벨을 쓴다(하우스에서 진입 시 '로비로' 오표기 방지)
   assert.match(snakeStageSource, /returnLabel=\{returnLabel\}/);
