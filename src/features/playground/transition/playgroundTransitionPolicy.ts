@@ -39,6 +39,7 @@ const LABELS: Record<DotWipeTarget, { eyebrow: string | null; label: string }> =
   'playground-entry': { eyebrow: null, label: '지금은 쉬는 시간!' },
   tetris: { eyebrow: 'BAE PLAYGROUND', label: 'LOADING TETRIS' },
   snake: { eyebrow: 'BAE PLAYGROUND', label: 'LOADING SNAKE' },
+  '2048': { eyebrow: 'BAE PLAYGROUND', label: 'LOADING 2048' },
   sudoku: { eyebrow: 'BAE PLAYGROUND', label: 'LOADING SUDOKU' },
   market: { eyebrow: 'BAE PLAYGROUND', label: 'OPENING JBBJ MARKET' },
 };

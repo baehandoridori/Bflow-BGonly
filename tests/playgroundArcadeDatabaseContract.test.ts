@@ -11,9 +11,19 @@ const migrationPath = path.join(
   'migrations',
   '2026-07-13-playground-arcade-v1.sql',
 );
+const upgradeMigrationPath = path.join(
+  root,
+  'DEVLOG',
+  'migrations',
+  '2026-07-14-playground-2048.sql',
+);
 
 function readMigration(): string {
   return readFileSync(migrationPath, 'utf8');
+}
+
+function readUpgradeMigration(): string {
+  return readFileSync(upgradeMigrationPath, 'utf8');
 }
 
 function functionDefinition(sql: string, functionName: string): string {
@@ -347,4 +357,137 @@ test('migration re-runs safely with guard clauses on every new object', () => {
   assert.match(sql, /ON CONFLICT\s*\(id\)\s*DO NOTHING/i);
   // the read overload is dropped before recreation to keep a single public signature
   assert.match(sql, /DROP FUNCTION IF EXISTS public\.playground_arcade_read\(uuid\)/i);
+});
+
+test('2048 forward migration changes only the game allow-list and both existing RPCs', () => {
+  const sql = readUpgradeMigration();
+
+  assert.match(sql, /\nBEGIN;/i);
+  assert.match(sql, /COMMIT;\s*$/i);
+  assert.match(
+    sql,
+    /ALTER TABLE public\.playground_game_runs\s+DROP CONSTRAINT IF EXISTS playground_run_game_valid/i,
+  );
+  assert.match(
+    sql,
+    /ADD CONSTRAINT playground_run_game_valid CHECK\s*\(\s*game_id\s+IN\s*\(\s*'snake'\s*,\s*'tetris'\s*,\s*'sudoku'\s*,\s*'2048'\s*\)\s*\)/i,
+  );
+  assert.doesNotMatch(sql, /CREATE\s+TABLE/i);
+  assert.doesNotMatch(sql, /CREATE\s+(?:UNIQUE\s+)?INDEX/i);
+  assert.doesNotMatch(sql, /playground_ledger_kind_valid/i);
+
+  for (const [name] of RPC_SIGNATURES) {
+    functionDefinition(sql, name);
+  }
+});
+
+test('2048 read RPC returns personal stats plus all-time and weekly leaderboards', () => {
+  const read = functionDefinition(readUpgradeMigration(), 'playground_arcade_read');
+  const game2048 = read.match(
+    /'2048'\s*,\s*jsonb_build_object\s*\(([\s\S]*?)\n\s*\)\s*\n\s*\),\s*\n\s*'achievements'/i,
+  );
+  assert.ok(game2048, 'read snapshot must contain a dedicated games[2048] object');
+
+  for (const key of [
+    'myBestScore',
+    'myWeeklyBestScore',
+    'todayRewardedRuns',
+    'totalRuns',
+    'maxGoldenEaten',
+    'maxLineClear',
+    'maxLevel',
+    'leaderboardAll',
+    'leaderboardWeekly',
+  ]) {
+    assert.match(game2048[1], new RegExp(`'${key}'`), `2048 snapshot must expose ${key}`);
+  }
+  const gameFilters = [...game2048[1].matchAll(/r\.game_id\s*=\s*'2048'/gi)];
+  assert.ok(gameFilters.length >= 6, 'every 2048 stat and leaderboard query must filter by game id');
+  assert.match(game2048[1], /DISTINCT ON\s*\(\s*r\.user_id\s*\)/i);
+  assert.match(game2048[1], /AT TIME ZONE\s+'Asia\/Seoul'[\s\S]*?v_week_start/i);
+});
+
+test('2048 execute RPC enforces its fee, score ceiling, and inclusive grade rewards', () => {
+  const execute = functionDefinition(readUpgradeMigration(), 'playground_arcade_execute');
+
+  const allowLists = [...execute.matchAll(
+    /v_game_id\s+NOT IN\s*\(\s*'snake'\s*,\s*'tetris'\s*,\s*'2048'\s*\)/gi,
+  )];
+  assert.equal(allowLists.length, 2, 'game-start and game-finish must both accept 2048');
+  assert.match(execute, /CASE\s+v_game_id[\s\S]*?WHEN\s+'2048'\s+THEN\s+10\b/i);
+  assert.match(
+    execute,
+    /v_game_id\s*=\s*'2048'\s+AND\s*\(\s*v_score\s*<\s*0\s+OR\s+v_score\s*>\s*10000000\s*\)/i,
+  );
+
+  const grade2048 = execute.match(
+    /ELSIF\s+v_game_id\s*=\s*'2048'\s+THEN([\s\S]*?)\n\s*ELSE\s*\n\s*RAISE EXCEPTION 'game grade configuration is invalid'/i,
+  );
+  assert.ok(grade2048, '2048 must have its own grade and reward branch');
+  for (const min of [3000, 8000, 18000, 35000]) {
+    assert.match(
+      grade2048[1],
+      new RegExp(`>=\\s*${min}\\b`),
+      `2048 grade boundary ${min} must be inclusive`,
+    );
+  }
+  for (const reward of [5, 12, 25, 40]) {
+    assert.match(
+      grade2048[1],
+      new RegExp(`THEN\\s+${reward}\\b`),
+      `2048 reward ${reward} must be present`,
+    );
+  }
+});
+
+test('2048 forward migration preserves the hardened idempotent RPC security boundary', () => {
+  const sql = readUpgradeMigration();
+
+  for (const [name, signature] of RPC_SIGNATURES) {
+    const definition = functionDefinition(sql, name);
+    assert.match(definition, /SECURITY DEFINER\s+SET search_path\s*=\s*''/i);
+    assert.match(definition, /name\s*=\s*'배한솔'/i);
+    assert.match(definition, /slack_id\s*=\s*'U05DFV9UAN5'/i);
+    assert.match(definition, /COUNT\s*\(\*\)[\s\S]*?(?:<>|!=)\s*1[\s\S]*?RAISE EXCEPTION/i);
+    assert.match(definition, /users\.id\s*=\s*p_user_id::text/i);
+    assert.match(
+      definition,
+      /pg_advisory_xact_lock\s*\(\s*hashtextextended\s*\(\s*p_user_id::text\s*,\s*0\s*\)\s*\)/i,
+    );
+    assert.match(
+      sql,
+      new RegExp(`REVOKE EXECUTE ON FUNCTION public\\.${name}\\(${signature}\\) FROM PUBLIC`, 'i'),
+    );
+    assert.match(
+      sql,
+      new RegExp(`REVOKE EXECUTE ON FUNCTION public\\.${name}\\(${signature}\\) FROM anon, authenticated`, 'i'),
+    );
+    assert.match(
+      sql,
+      new RegExp(`GRANT EXECUTE ON FUNCTION public\\.${name}\\(${signature}\\) TO anon`, 'i'),
+    );
+    assert.doesNotMatch(
+      sql,
+      new RegExp(`GRANT EXECUTE ON FUNCTION public\\.${name}\\(${signature}\\) TO[^;]*\\bauthenticated\\b`, 'i'),
+    );
+  }
+
+  const read = functionDefinition(sql, 'playground_arcade_read');
+  const readLocks = [...read.matchAll(
+    /PERFORM\s+pg_advisory_xact_lock\s*\(\s*hashtextextended\s*\(\s*p_user_id::text\s*,\s*0\s*\)\s*\)/gi,
+  )];
+  assert.equal(readLocks.length, 1, '2048 read RPC must keep one per-user advisory lock');
+
+  const execute = functionDefinition(sql, 'playground_arcade_execute');
+  const advisoryLock = execute.search(
+    /pg_advisory_xact_lock\s*\(\s*hashtextextended\s*\(\s*p_user_id::text\s*,\s*0\s*\)\s*\)/i,
+  );
+  const firstTableAccess = execute.search(/\b(?:FROM|UPDATE|INSERT INTO|DELETE FROM)\s+public\./i);
+  assert.notEqual(advisoryLock, -1, '2048 execute RPC must take the per-user advisory lock');
+  assert.ok(advisoryLock < firstTableAccess, '2048 execute RPC must lock before table access');
+  assert.match(execute, /FOR UPDATE/i);
+  assert.match(execute, /IS DISTINCT FROM v_fingerprint[\s\S]*?RAISE EXCEPTION/i);
+  assert.match(execute, /response_state/i);
+  assert.match(execute, /jsonb_build_object\s*\(\s*'replayed'\s*,\s*true\s*\)/i);
+  assert.match(execute, /v_entry_game_id\s+IS DISTINCT FROM\s+v_game_id/i);
 });

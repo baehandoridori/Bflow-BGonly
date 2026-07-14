@@ -74,6 +74,17 @@ test('gradeForScore uses inclusive (>=) tetris boundaries', () => {
   assert.equal(gradeForScore('tetris', 50000), 'platinum');
 });
 
+test('gradeForScore uses inclusive (>=) 2048 boundaries', () => {
+  assert.equal(gradeForScore('2048', 2999), 'none');
+  assert.equal(gradeForScore('2048', 3000), 'bronze');
+  assert.equal(gradeForScore('2048', 7999), 'bronze');
+  assert.equal(gradeForScore('2048', 8000), 'silver');
+  assert.equal(gradeForScore('2048', 17999), 'silver');
+  assert.equal(gradeForScore('2048', 18000), 'gold');
+  assert.equal(gradeForScore('2048', 34999), 'gold');
+  assert.equal(gradeForScore('2048', 35000), 'platinum');
+});
+
 test('rewardForGrade matches the balance table', () => {
   assert.equal(rewardForGrade('snake', 'none'), 0);
   assert.equal(rewardForGrade('snake', 'bronze'), 8);
@@ -85,6 +96,11 @@ test('rewardForGrade matches the balance table', () => {
   assert.equal(rewardForGrade('tetris', 'silver'), 30);
   assert.equal(rewardForGrade('tetris', 'gold'), 55);
   assert.equal(rewardForGrade('tetris', 'platinum'), 80);
+  assert.equal(rewardForGrade('2048', 'none'), 0);
+  assert.equal(rewardForGrade('2048', 'bronze'), 5);
+  assert.equal(rewardForGrade('2048', 'silver'), 12);
+  assert.equal(rewardForGrade('2048', 'gold'), 25);
+  assert.equal(rewardForGrade('2048', 'platinum'), 40);
 });
 
 test('nextGradeInfo reports the remaining distance and returns null past platinum', () => {
@@ -268,6 +284,8 @@ test('evaluateAchievements returns newly unlocked ids in definition order', () =
 test('the balance table and achievement catalog stay internally consistent', () => {
   assert.equal(ARCADE_BALANCE.games.snake.entryFee, 10);
   assert.equal(ARCADE_BALANCE.games.tetris.entryFee, 15);
+  assert.equal(ARCADE_BALANCE.games['2048'].entryFee, 10);
+  assert.equal(ARCADE_BALANCE.games['2048'].maxScore, 10_000_000);
   assert.equal(ARCADE_BALANCE.dailyLoginPoints, 20);
   assert.equal(ARCADE_BALANCE.dailyRewardedRunsCap, 5);
   assert.equal(ARCADE_ACHIEVEMENTS.length, 10);

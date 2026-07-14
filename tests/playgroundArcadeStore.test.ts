@@ -18,6 +18,7 @@ function baseSnapshot(overrides: Partial<ArcadeSnapshot> = {}): ArcadeSnapshot {
     games: {
       snake: { myBestScore: 0, myWeeklyBestScore: 0, todayRewardedRuns: 0, totalRuns: 0, maxGoldenEaten: 0, maxLineClear: 0, maxLevel: 0, leaderboardAll: [], leaderboardWeekly: [] },
       tetris: { myBestScore: 0, myWeeklyBestScore: 0, todayRewardedRuns: 0, totalRuns: 0, maxGoldenEaten: 0, maxLineClear: 0, maxLevel: 0, leaderboardAll: [], leaderboardWeekly: [] },
+      '2048': { myBestScore: 0, myWeeklyBestScore: 0, todayRewardedRuns: 0, totalRuns: 0, maxGoldenEaten: 0, maxLineClear: 0, maxLevel: 0, leaderboardAll: [], leaderboardWeekly: [] },
     },
     achievements: [],
     aggregates: { totalRuns: 0, arcadeEarnedPoints: 0 },
@@ -122,6 +123,7 @@ test('finishRun upserts my new best into the game leaderboard so the panel updat
           ],
         },
         tetris: { myBestScore: 0, myWeeklyBestScore: 0, todayRewardedRuns: 0, totalRuns: 0, maxGoldenEaten: 0, maxLineClear: 0, maxLevel: 0, leaderboardAll: [], leaderboardWeekly: [] },
+        '2048': { myBestScore: 0, myWeeklyBestScore: 0, todayRewardedRuns: 0, totalRuns: 0, maxGoldenEaten: 0, maxLineClear: 0, maxLevel: 0, leaderboardAll: [], leaderboardWeekly: [] },
       },
     }),
   });
@@ -155,6 +157,7 @@ test('finishRun refreshes the weekly board from the server after a run, fixing w
         games: {
           snake: { myBestScore: 5000, myWeeklyBestScore: 5000, todayRewardedRuns: 0, totalRuns: 9, maxGoldenEaten: 0, maxLineClear: 0, maxLevel: 0, leaderboardAll: [{ userId: 'me', name: '나', score: 5000, at: '2026-01-01T00:00:00Z' }], leaderboardWeekly: weekly },
           tetris: emptyTetris,
+          '2048': emptyTetris,
         },
       });
     },
@@ -183,6 +186,7 @@ test('finishRun leaves the leaderboard alone (score and achieved-at) when the ru
           leaderboardWeekly: [{ userId: 'me', name: '나', score: 40, at: '2026-01-01T00:00:00Z' }],
         },
         tetris: { myBestScore: 0, myWeeklyBestScore: 0, todayRewardedRuns: 0, totalRuns: 0, maxGoldenEaten: 0, maxLineClear: 0, maxLevel: 0, leaderboardAll: [], leaderboardWeekly: [] },
+        '2048': { myBestScore: 0, myWeeklyBestScore: 0, todayRewardedRuns: 0, totalRuns: 0, maxGoldenEaten: 0, maxLineClear: 0, maxLevel: 0, leaderboardAll: [], leaderboardWeekly: [] },
       },
     }),
   });

@@ -131,6 +131,12 @@ test('dot target copy and palette are exact', () => {
     accessibleLabel: 'BAE PLAYGROUND / LOADING SUDOKU',
     palette,
   });
+  assert.deepEqual(getDotWipePresentation('2048'), {
+    eyebrow: 'BAE PLAYGROUND',
+    label: 'LOADING 2048',
+    accessibleLabel: 'BAE PLAYGROUND / LOADING 2048',
+    palette,
+  });
   assert.deepEqual(getDotWipePresentation('market'), {
     eyebrow: 'BAE PLAYGROUND',
     label: 'OPENING JBBJ MARKET',

@@ -11,7 +11,17 @@ import {
   reconcileSharedPreviewWallet,
   writeSharedPreviewWallet,
 } from '../previewSharedWallet.ts';
-import type { ArcadeExecuteCommand, ArcadeExecuteResult, ArcadeSnapshot } from './types';
+import type {
+  ArcadeAchievementUnlock,
+  ArcadeExecuteCommand,
+  ArcadeExecuteResult,
+  ArcadeGameId,
+  ArcadeGameStats,
+  ArcadeLeaderboardEntry,
+  ArcadeSnapshot,
+  ArcadeWallet,
+  ArcadeWalletLeaderboardEntry,
+} from './types';
 
 const STORAGE_KEY_PREFIX = 'bflow-arcade-preview-v1:';
 
@@ -39,8 +49,112 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
-function hasPersistedShape(value: unknown): value is PersistedArcadePreview {
-  return isRecord(value) && value.version === 1 && isRecord(value.snapshot);
+function isNonNegativeInteger(value: unknown): value is number {
+  return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0;
+}
+
+function integerOr(value: unknown, fallback: number): number {
+  return isNonNegativeInteger(value) ? value : fallback;
+}
+
+function isWallet(value: unknown): value is ArcadeWallet {
+  return isRecord(value)
+    && isNonNegativeInteger(value.walletPoints)
+    && isNonNegativeInteger(value.lifetimeEarnedPoints);
+}
+
+function normalizeLeaderboard(
+  value: unknown,
+  fallback: readonly ArcadeLeaderboardEntry[],
+): ArcadeLeaderboardEntry[] {
+  if (!Array.isArray(value)) return fallback.map((entry) => ({ ...entry }));
+  return value.flatMap((entry): ArcadeLeaderboardEntry[] => (
+    isRecord(entry)
+      && typeof entry.userId === 'string'
+      && typeof entry.name === 'string'
+      && typeof entry.at === 'string'
+      && isNonNegativeInteger(entry.score)
+      ? [{ userId: entry.userId, name: entry.name, score: entry.score, at: entry.at }]
+      : []
+  ));
+}
+
+function normalizeWalletLeaderboard(
+  value: unknown,
+  fallback: readonly ArcadeWalletLeaderboardEntry[],
+): ArcadeWalletLeaderboardEntry[] {
+  if (!Array.isArray(value)) return fallback.map((entry) => ({ ...entry }));
+  return value.flatMap((entry): ArcadeWalletLeaderboardEntry[] => (
+    isRecord(entry)
+      && typeof entry.userId === 'string'
+      && typeof entry.name === 'string'
+      && isNonNegativeInteger(entry.lifetimeEarnedPoints)
+      ? [{
+        userId: entry.userId,
+        name: entry.name,
+        lifetimeEarnedPoints: entry.lifetimeEarnedPoints,
+      }]
+      : []
+  ));
+}
+
+function normalizeAchievements(
+  value: unknown,
+  fallback: readonly ArcadeAchievementUnlock[],
+): ArcadeAchievementUnlock[] {
+  if (!Array.isArray(value)) return fallback.map((entry) => ({ ...entry }));
+  return value.flatMap((entry): ArcadeAchievementUnlock[] => (
+    isRecord(entry)
+      && typeof entry.achievementId === 'string'
+      && typeof entry.unlockedAt === 'string'
+      ? [{ achievementId: entry.achievementId, unlockedAt: entry.unlockedAt }]
+      : []
+  ));
+}
+
+function normalizeGameStats(value: unknown, fallback: ArcadeGameStats): ArcadeGameStats {
+  const source = isRecord(value) ? value : {};
+  return {
+    myBestScore: integerOr(source.myBestScore, fallback.myBestScore),
+    myWeeklyBestScore: integerOr(source.myWeeklyBestScore, fallback.myWeeklyBestScore),
+    todayRewardedRuns: integerOr(source.todayRewardedRuns, fallback.todayRewardedRuns),
+    totalRuns: integerOr(source.totalRuns, fallback.totalRuns),
+    maxGoldenEaten: integerOr(source.maxGoldenEaten, fallback.maxGoldenEaten),
+    maxLineClear: integerOr(source.maxLineClear, fallback.maxLineClear),
+    maxLevel: integerOr(source.maxLevel, fallback.maxLevel),
+    leaderboardAll: normalizeLeaderboard(source.leaderboardAll, fallback.leaderboardAll),
+    leaderboardWeekly: normalizeLeaderboard(source.leaderboardWeekly, fallback.leaderboardWeekly),
+  };
+}
+
+function isExecuteResult(value: unknown): value is ArcadeExecuteResult {
+  if (!isRecord(value)) return false;
+  if (isRecord(value.config)) return typeof value.config.slackNotifyEnabled === 'boolean';
+  if (!isWallet(value.wallet)) return false;
+  if (typeof value.grade === 'string') {
+    return ['none', 'bronze', 'silver', 'gold', 'platinum'].includes(value.grade)
+      && isNonNegativeInteger(value.rewardPoints)
+      && typeof value.rewardCapped === 'boolean'
+      && typeof value.newAlltimeBest === 'boolean'
+      && typeof value.newWeeklyBest === 'boolean'
+      && (value.prevBestScore === null || isNonNegativeInteger(value.prevBestScore))
+      && isNonNegativeInteger(value.myBestScore)
+      && isNonNegativeInteger(value.todayRewardedRuns)
+      && typeof value.slackNotifyEnabled === 'boolean';
+  }
+  if (typeof value.achievementId === 'string') {
+    return isNonNegativeInteger(value.rewardPoints);
+  }
+  if (typeof value.granted === 'boolean') {
+    return isRecord(value.attendance)
+      && isNonNegativeInteger(value.attendance.streakDays)
+      && typeof value.attendance.todayGranted === 'boolean';
+  }
+  if (typeof value.awarded === 'boolean') {
+    return isNonNegativeInteger(value.points) && typeof value.capped === 'boolean';
+  }
+  // game-start 응답은 지갑 하나만 가진다.
+  return Object.keys(value).every((field) => field === 'wallet' || field === 'replayed');
 }
 
 export function createArcadeLocalStorageGateway(
@@ -79,6 +193,76 @@ export function createArcadeLocalStorageGateway(
     return state;
   }
 
+  // v1 저장본은 출시 당시 게임 목록만 담고 있고, 브라우저 저장값은 사용자가 임의로 바꿀 수 있다.
+  // 유효한 기존 값만 보존하고 누락·오염 필드는 seed 기본값으로 되돌려 UI와 보상 상한을 보호한다.
+  function normalizePersisted(value: Record<string, unknown>): PersistedArcadePreview {
+    const defaults = createArcadePreviewSeed(userId);
+    const source = isRecord(value.snapshot) ? value.snapshot : {};
+    const persistedGames: Record<string, unknown> = isRecord(source.games)
+      ? source.games
+      : {};
+    const games = {} as ArcadeSnapshot['games'];
+    const gameIds = Object.keys(defaults.games) as ArcadeGameId[];
+
+    for (const gameId of gameIds) {
+      games[gameId] = normalizeGameStats(persistedGames[gameId], defaults.games[gameId]);
+    }
+
+    const fingerprintsSource = isRecord(value.requestFingerprints) ? value.requestFingerprints : {};
+    const responsesSource = isRecord(value.requestResponses) ? value.requestResponses : {};
+    const requestFingerprints: Record<string, string> = {};
+    const requestResponses: Record<string, ArcadeExecuteResult> = {};
+    for (const [requestId, fingerprint] of Object.entries(fingerprintsSource)) {
+      const response = responsesSource[requestId];
+      if (typeof fingerprint !== 'string' || !isExecuteResult(response)) continue;
+      requestFingerprints[requestId] = fingerprint;
+      requestResponses[requestId] = structuredClone(response);
+    }
+
+    const wallet = isWallet(source.wallet) ? structuredClone(source.wallet) : structuredClone(defaults.wallet);
+    const attendance = isRecord(source.attendance) ? source.attendance : {};
+    const activity = isRecord(source.todayActivityCounts) ? source.todayActivityCounts : {};
+    const aggregates = isRecord(source.aggregates) ? source.aggregates : {};
+    const config = isRecord(source.config) ? source.config : {};
+    return {
+      version: 1,
+      snapshot: {
+        wallet,
+        attendance: {
+          streakDays: integerOr(attendance.streakDays, defaults.attendance.streakDays),
+          todayGranted: typeof attendance.todayGranted === 'boolean'
+            ? attendance.todayGranted
+            : defaults.attendance.todayGranted,
+        },
+        todayActivityCounts: {
+          sceneProgress: integerOr(activity.sceneProgress, defaults.todayActivityCounts.sceneProgress),
+          comment: integerOr(activity.comment, defaults.todayActivityCounts.comment),
+          retakeDone: integerOr(activity.retakeDone, defaults.todayActivityCounts.retakeDone),
+        },
+        games,
+        achievements: normalizeAchievements(source.achievements, defaults.achievements),
+        aggregates: {
+          totalRuns: integerOr(aggregates.totalRuns, defaults.aggregates.totalRuns),
+          arcadeEarnedPoints: integerOr(aggregates.arcadeEarnedPoints, defaults.aggregates.arcadeEarnedPoints),
+        },
+        walletLeaderboard: normalizeWalletLeaderboard(source.walletLeaderboard, defaults.walletLeaderboard),
+        config: {
+          slackNotifyEnabled: typeof config.slackNotifyEnabled === 'boolean'
+            ? config.slackNotifyEnabled
+            : defaults.config.slackNotifyEnabled,
+        },
+      },
+      requestFingerprints,
+      requestResponses,
+      dailyDate: typeof value.dailyDate === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(value.dailyDate)
+        ? value.dailyDate
+        : kstDateOf(options.now()),
+      updatedAtMs: typeof value.updatedAtMs === 'number' && Number.isFinite(value.updatedAtMs)
+        ? value.updatedAtMs
+        : options.now(),
+    };
+  }
+
   function readOrCreate(): PersistedArcadePreview {
     let raw: string | null;
     try {
@@ -89,7 +273,11 @@ export function createArcadeLocalStorageGateway(
     if (raw !== null) {
       try {
         const parsed: unknown = JSON.parse(raw);
-        if (hasPersistedShape(parsed)) return reconcileWallet(rollOver(parsed));
+        if (isRecord(parsed) && parsed.version === 1 && isRecord(parsed.snapshot)) {
+          const normalized = normalizePersisted(parsed);
+          if (JSON.stringify(parsed) !== JSON.stringify(normalized)) save(normalized);
+          return reconcileWallet(rollOver(normalized));
+        }
       } catch {
         /* 손상된 프리뷰 저장본은 시드로 되돌린다. */
       }

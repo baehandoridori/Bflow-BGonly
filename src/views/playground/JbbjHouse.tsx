@@ -14,7 +14,7 @@ import { ArcadeRankingPanel } from './arcade/ArcadeRankingPanel';
 import { ArcadeAdminSettings } from './arcade/ArcadeAdminSettings';
 
 // 구현 완료돼 '바로 플레이'로 표시할 게임(로비/도크 상태 라벨 공용).
-const PLAYABLE_GAMES: ReadonlySet<PreviewGame> = new Set<PreviewGame>(['snake', 'tetris']);
+const PLAYABLE_GAMES: ReadonlySet<PreviewGame> = new Set<PreviewGame>(['snake', 'tetris', '2048']);
 
 export interface JbbjHouseProps {
   ranking: PointRankingModel;
@@ -132,7 +132,7 @@ export function JbbjHouse({ ranking, authorizedHansol, onPlayGame, onOpenMarket 
 
           const game = entry.kind === 'game' ? GAME_DEFINITIONS[entry.gameId] : null;
           const label = entry.kind === 'game' ? game!.koName : entry.label;
-          // 구현된 게임(스네이크·테트리스)은 '바로 플레이', 아직 준비 중인 게임은 '플레이 준비 중'.
+          // 구현된 게임(스네이크·테트리스·2048)은 '바로 플레이', 아직 준비 중인 게임은 '플레이 준비 중'.
           const status = entry.kind === 'game'
             ? (PLAYABLE_GAMES.has(entry.gameId) ? '바로 플레이' : '플레이 준비 중')
             : '시장 열기';

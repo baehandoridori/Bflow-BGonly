@@ -78,7 +78,7 @@ test('Korean header description and status copy never renders below 14 pixels', 
   }
 });
 
-test('A lobby keeps the approved hero, four quick cards, ranking rail and non-nested actions', () => {
+test('A lobby keeps the approved hero, five quick cards, ranking rail and non-nested actions', () => {
   for (const file of [
     'src/views/playground/PlaygroundGameArt.tsx',
     'src/views/playground/PlaygroundRecommendationHero.tsx',
@@ -108,7 +108,7 @@ test('A lobby keeps the approved hero, four quick cards, ranking rail and non-ne
   assert.match(rail, /JBBJ 하우스에서 진행 중/);
   assert.match(css, /grid-template-columns:\s*minmax\(0,\s*1\.72fr\)\s+minmax\(220px,\s*\.68fr\)/);
   assert.match(css, /min-height:\s*240px/);
-  assert.match(css, /grid-template-columns:\s*repeat\(4,\s*minmax\(0,\s*1fr\)\)/);
+  assert.match(css, /grid-template-columns:\s*repeat\(5,\s*minmax\(0,\s*1fr\)\)/);
   assert.match(css, /@container playground \(max-width: 970px\)[\s\S]*?\.pg-quick-grid\s*{[^}]*repeat\(2,/);
   assert.match(css, /@container playground \(max-width: 619px\)[\s\S]*?\.pg-lobby\s*{[^}]*padding:\s*10px/);
 });
@@ -182,11 +182,12 @@ test('lobby actions keep 44px targets, visible focus and Korean copy at 14px or 
   }
 });
 
-test('C house restores challenge, podium and exactly five dock entries', async () => {
+test('C house restores challenge, podium and the six-entry dock with 2048', async () => {
   const house = readFileSync('src/views/playground/JbbjHouse.tsx', 'utf8');
   const { HOUSE_DOCK_ENTRIES } = await import('../src/features/playground/catalog.ts');
 
-  assert.equal(HOUSE_DOCK_ENTRIES.length, 5);
+  assert.equal(HOUSE_DOCK_ENTRIES.length, 6);
+  assert.equal(HOUSE_DOCK_ENTRIES.some((entry) => entry.kind === 'game' && entry.gameId === '2048'), true);
   assert.match(house, /data-pg-house/);
   assert.match(house, /data-pg-challenge/);
   assert.match(house, /TEAM CHALLENGE/);
