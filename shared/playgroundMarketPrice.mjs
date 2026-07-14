@@ -1,10 +1,17 @@
 import {
   getMarketEventCheckpointCacheStats,
-  getMarketDailyCheckpoint,
-  getMarketMinuteBar,
+  getMarketDailyCheckpoint as getRawMarketDailyCheckpoint,
+  getMarketMinuteBar as getRawMarketMinuteBar,
   getMarketPriceWon,
   MARKET_PROFILE_ENHANCEMENT_DEFAULTS,
 } from './playgroundMarketModel.mjs';
+import {
+  AUTONOMOUS_NEWS_DECAY_MS,
+  getAutonomousMarketEventsForRange,
+  getAutonomousMarketNewsForNow,
+} from './playgroundMarketAutoNews.mjs';
+
+const AUTO_NEWS_LOOKBACK_MS = 24 * 60 * 60_000;
 
 export const MARKET_INSTRUMENT_PROFILES = {
   jbbj: {
@@ -41,14 +48,63 @@ export const MARKET_INSTRUMENT_PROFILES = {
   },
 };
 
+export { getMarketEventCheckpointCacheStats };
 export {
-  getMarketDailyCheckpoint,
-  getMarketEventCheckpointCacheStats,
-  getMarketMinuteBar,
+  AUTONOMOUS_NEWS_DECAY_MS,
+  getAutonomousMarketEventsForRange,
+  getAutonomousMarketNewsForNow,
 };
 
-export function getLivePriceWon(profile, nowMs, events) {
-  return getMarketPriceWon(profile, nowMs, events);
+export function mergeMarketEvents(manualEvents, automaticEvents) {
+  const merged = [];
+  const ids = new Set();
+  for (const event of Array.isArray(manualEvents) ? manualEvents : []) {
+    if (!event || typeof event.id !== 'string' || ids.has(event.id)) continue;
+    ids.add(event.id);
+    merged.push(event);
+  }
+  for (const event of Array.isArray(automaticEvents) ? automaticEvents : []) {
+    if (!event || typeof event.id !== 'string' || ids.has(event.id)) continue;
+    ids.add(event.id);
+    merged.push(event);
+  }
+  return merged;
+}
+
+export function getEffectiveMarketEventsForRange(startMs, endMs, manualEvents) {
+  if (![startMs, endMs].every(Number.isFinite)) {
+    throw new RangeError('effective market event range must use finite timestamps');
+  }
+  const automaticEvents = getAutonomousMarketEventsForRange(
+    startMs - AUTO_NEWS_LOOKBACK_MS - AUTONOMOUS_NEWS_DECAY_MS,
+    endMs,
+  );
+  return mergeMarketEvents(manualEvents, automaticEvents);
+}
+
+export function getMarketDailyCheckpoint(profile, dayStartMs, manualEvents) {
+  return getRawMarketDailyCheckpoint(
+    profile,
+    dayStartMs,
+    getEffectiveMarketEventsForRange(dayStartMs, dayStartMs + 24 * 60 * 60_000, manualEvents),
+  );
+}
+
+export function getMarketMinuteBar(profile, minuteStartMs, observedUntilMs, manualEvents) {
+  return getRawMarketMinuteBar(
+    profile,
+    minuteStartMs,
+    observedUntilMs,
+    getEffectiveMarketEventsForRange(minuteStartMs, observedUntilMs, manualEvents),
+  );
+}
+
+export function getLivePriceWon(profile, nowMs, manualEvents) {
+  return getMarketPriceWon(
+    profile,
+    nowMs,
+    getEffectiveMarketEventsForRange(nowMs, nowMs, manualEvents),
+  );
 }
 
 export function getCanonicalMarketQuoteWon(stockId, nowMs, events) {
