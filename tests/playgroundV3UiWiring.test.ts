@@ -113,6 +113,15 @@ test('A lobby keeps the approved hero, five quick cards, ranking rail and non-ne
   assert.match(css, /@container playground \(max-width: 619px\)[\s\S]*?\.pg-lobby\s*{[^}]*padding:\s*10px/);
 });
 
+test('lobby quick-launch accessible name stays derived from every rendered entry', () => {
+  const lobby = readFileSync('src/views/playground/PlaygroundLobby.tsx', 'utf8');
+
+  assert.match(lobby, /const QUICK_LAUNCH_LABEL = `\$\{QUICK_ENTRIES\.map/);
+  assert.match(lobby, /entry\.kind === 'game'[\s\S]*?GAME_DEFINITIONS\[entry\.gameId\]\.koName[\s\S]*?: entry\.label/);
+  assert.match(lobby, /aria-label=\{QUICK_LAUNCH_LABEL\}/);
+  assert.doesNotMatch(lobby, /aria-label="테트리스, 스네이크, 스도쿠, JBBJ 증권 빠른 실행"/);
+});
+
 test('only PlaygroundView may read auth and market stores', () => {
   for (const file of [
     'src/views/playground/PlaygroundLobby.tsx',

@@ -82,10 +82,16 @@ test('market home preserves the approved information order', () => {
   assert.deepEqual([...positions].sort((a, b) => a - b), positions);
 });
 
-test('lobby includes random recommendation, market, three games and JBBJ house', () => {
-  const source = readFileSync('src/views/playground/PlaygroundLobby.tsx', 'utf8');
-  for (const label of ['오늘의 추천', 'JBBJ 증권', '테트리스', '스도쿠', '스네이크', 'JBBJ 하우스']) {
-    assert.match(source, new RegExp(label));
+test('lobby renders catalog-driven recommendation, market, games and JBBJ house', () => {
+  const lobbySource = readFileSync('src/views/playground/PlaygroundLobby.tsx', 'utf8');
+  const catalogSource = readFileSync('src/features/playground/catalog.ts', 'utf8');
+
+  assert.match(lobbySource, /오늘의 추천/);
+  assert.match(lobbySource, /JBBJ 하우스/);
+  assert.match(lobbySource, /QUICK_ENTRIES\.map/);
+
+  for (const label of ['JBBJ 증권', '테트리스', '2048', '스도쿠', '스네이크']) {
+    assert.match(catalogSource, new RegExp(label));
   }
 });
 

@@ -10,6 +10,10 @@ import { PlaygroundGameCard } from './PlaygroundGameCard';
 import { PlaygroundRankingRail } from './PlaygroundRankingRail';
 import { PlaygroundRecommendationHero } from './PlaygroundRecommendationHero';
 
+const QUICK_LAUNCH_LABEL = `${QUICK_ENTRIES.map((entry) => (
+  entry.kind === 'game' ? GAME_DEFINITIONS[entry.gameId].koName : entry.label
+)).join(', ')} 빠른 실행`;
+
 export interface PlaygroundLobbyProps {
   userName: string;
   recommendation: PreviewGame;
@@ -54,7 +58,7 @@ export function PlaygroundLobby(props: PlaygroundLobbyProps) {
         <div
           className="pg-quick-grid"
           role="group"
-          aria-label="테트리스, 스네이크, 스도쿠, JBBJ 증권 빠른 실행"
+          aria-label={QUICK_LAUNCH_LABEL}
         >
           {QUICK_ENTRIES.map((entry) => (
             <PlaygroundGameCard
