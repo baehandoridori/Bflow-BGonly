@@ -26,6 +26,7 @@ import type {
   State2048,
   TileMotion2048,
 } from '@/features/playground/arcade/games/merge2048/types';
+import { createSeed, nextRandom } from '@/features/playground/arcade/games/prng';
 import type { ArcadeFinishResult } from '@/features/playground/arcade/types';
 import { useArcadeStore, type ArcadeFinishInput } from '@/features/playground/arcade/useArcadeStore';
 import { GAME_DEFINITIONS } from '@/features/playground/catalog';
@@ -160,6 +161,8 @@ export function Merge2048Stage({ onExit, returnLabel }: { onExit: () => void; re
   const startingRef = useRef(false);
   const finishedRef = useRef(false);
   const runIdRef = useRef<string | null>(null);
+  const seedRef = useRef<number | null>(null);
+  const rngStateRef = useRef(0);
   const finishInputRef = useRef<ArcadeFinishInput | null>(null);
   const activePlayMsRef = useRef(0);
   const activeSegmentStartedAtRef = useRef<number | null>(null);
@@ -180,6 +183,12 @@ export function Merge2048Stage({ onExit, returnLabel }: { onExit: () => void; re
   const startDisabledReason = walletPoints < entryFee
     ? `포인트가 부족해요 (지금 ${walletPoints}P)`
     : undefined;
+
+  const next2048Random = useCallback((): number => {
+    const draw = nextRandom(rngStateRef.current);
+    rngStateRef.current = draw.next;
+    return draw.value;
+  }, []);
 
   const transitionPhase = useCallback((next: ArcadeStagePhase): void => {
     phaseRef.current = next;
@@ -297,7 +306,7 @@ export function Merge2048Stage({ onExit, returnLabel }: { onExit: () => void; re
         gameId: '2048',
         score: finalState.score,
         durationMs: Math.min(14_400_000, Math.max(1000, Math.round(activePlayMsRef.current))),
-        meta: {},
+        meta: seedRef.current === null ? {} : { seed: seedRef.current },
       };
     }
     void finalize();
@@ -382,7 +391,7 @@ export function Merge2048Stage({ onExit, returnLabel }: { onExit: () => void; re
     }
     const current = engineRef.current;
     if (!current) return;
-    const move = apply2048Move(current, direction, Math.random);
+    const move = apply2048Move(current, direction, next2048Random);
     engineRef.current = move.state;
     if (!move.transition.changed) {
       if (move.state.status === 'over') finishGame(move.state);
@@ -404,7 +413,7 @@ export function Merge2048Stage({ onExit, returnLabel }: { onExit: () => void; re
     setLiveMessage(`${direction} 방향으로 이동 중`);
     if (prefersReducedMotion) commitMove();
     else schedulePresentation('move', MOVE_MS, commitMove);
-  }, [commitMove, finishGame, prefersReducedMotion, schedulePresentation]);
+  }, [commitMove, finishGame, next2048Random, prefersReducedMotion, schedulePresentation]);
   requestMoveRef.current = requestMove;
 
   const advancePresentation = useCallback((milliseconds: number): void => {
@@ -470,7 +479,10 @@ export function Merge2048Stage({ onExit, returnLabel }: { onExit: () => void; re
   }, [startRun, transitionPhase]);
 
   const beginGame = useCallback((): void => {
-    const initial = create2048State(Math.random);
+    const seed = createSeed();
+    seedRef.current = seed;
+    rngStateRef.current = seed;
+    const initial = create2048State(next2048Random);
     engineRef.current = initial;
     finishedRef.current = false;
     finishInputRef.current = null;
@@ -487,7 +499,7 @@ export function Merge2048Stage({ onExit, returnLabel }: { onExit: () => void; re
     startActiveClock();
     setLiveMessage('2048 게임을 시작합니다.');
     boardRef.current?.focus();
-  }, [setQueued, startActiveClock, transitionPhase, updateDisplay]);
+  }, [next2048Random, setQueued, startActiveClock, transitionPhase, updateDisplay]);
 
   const handleReplay = useCallback((): void => {
     clearPresentationTimer();
@@ -495,6 +507,8 @@ export function Merge2048Stage({ onExit, returnLabel }: { onExit: () => void; re
     pendingMoveRef.current = null;
     engineRef.current = null;
     runIdRef.current = null;
+    seedRef.current = null;
+    rngStateRef.current = 0;
     finishInputRef.current = null;
     finishedRef.current = false;
     animatingRef.current = false;

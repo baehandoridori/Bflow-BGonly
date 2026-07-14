@@ -257,6 +257,23 @@ test('Merge2048Stage preserves paid-run idempotency and active-only duration', (
   assert.match(merge2048StageSource, /onRetryFinish=\{\(\) => void finalize\(\)\}/);
 });
 
+test('Merge2048Stage uses one crypto seed and deterministic PRNG for every tile spawn', () => {
+  assert.match(merge2048StageSource, /import \{ createSeed, nextRandom \} from '@\/features\/playground\/arcade\/games\/prng'/);
+  assert.match(merge2048StageSource, /const seedRef = useRef<number \| null>\(null\)/);
+  assert.match(merge2048StageSource, /const rngStateRef = useRef\(0\)/);
+  assert.match(
+    merge2048StageSource,
+    /const next2048Random = useCallback\(\(\): number => \{[\s\S]*?nextRandom\(rngStateRef\.current\)[\s\S]*?rngStateRef\.current = draw\.next;[\s\S]*?return draw\.value;/,
+  );
+  assert.match(
+    merge2048StageSource,
+    /const seed = createSeed\(\);[\s\S]*?seedRef\.current = seed;[\s\S]*?rngStateRef\.current = seed;[\s\S]*?create2048State\(next2048Random\)/,
+  );
+  assert.match(merge2048StageSource, /apply2048Move\(current, direction, next2048Random\)/);
+  assert.match(merge2048StageSource, /meta: seedRef\.current === null \? \{\} : \{ seed: seedRef\.current \}/);
+  assert.doesNotMatch(merge2048StageSource, /Math\.random/);
+});
+
 test('Merge2048Stage wires classic input, one latest queued move, and safe pause cleanup', () => {
   assert.match(merge2048StageSource, /ArrowUp: 'up'[\s\S]*?ArrowDown: 'down'[\s\S]*?ArrowLeft: 'left'[\s\S]*?ArrowRight: 'right'/);
   assert.match(merge2048StageSource, /w: 'up'[\s\S]*?s: 'down'[\s\S]*?a: 'left'[\s\S]*?d: 'right'/);
