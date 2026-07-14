@@ -2,7 +2,10 @@ import { useEffect, useMemo, useState } from 'react';
 
 import { resolveIntervalForRange } from '@/features/playground/market/chartSeries';
 import { formatShares, formatWon } from '@/features/playground/market/format';
-import { MARKET_INSTRUMENT_PROFILES } from '@/features/playground/market/livePriceEngine';
+import {
+  getEffectiveMarketEventsForRange,
+  MARKET_INSTRUMENT_PROFILES,
+} from '@/features/playground/market/livePriceEngine';
 import {
   marketChartProgressiveRequestKey,
   MAX_MARKET_CHART_BARS,
@@ -54,6 +57,7 @@ const RANGE_OPTIONS = [
   ['six-months', '6개월'], ['all', '전체'],
 ] as const;
 const STYLE_OPTIONS = [['line', '선'], ['candlestick', '캔들']] as const;
+const INTERVAL_ORDER: MarketBarInterval[] = ['1m', '5m', '10m', '15m', '1h', '1d'];
 const SELECT_CLASS_NAME = 'mt-2 min-h-11 w-full cursor-pointer rounded-xl border border-bg-border bg-bg-primary/55 px-3 py-2 text-sm font-semibold text-text-primary transition-colors duration-200 motion-reduce:transition-none hover:bg-bg-border/35 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent';
 
 function intervalLabel(value: MarketBarInterval): string {
@@ -148,13 +152,18 @@ export function MarketPriceChart({
   const profile = MARKET_INSTRUMENT_PROFILES[stock.id];
   const chartRangeStartMs = resolveStableMarketChartRangeStartMs(range, interval, nowMs);
   const segments = splitMarketDisplayRange(chartRangeStartMs, nowMs);
-  const leadingEvents = selectCausalMarketEvents(events, stock.id, segments.leading.endMs);
-  const historicalEvents = selectCausalMarketEvents(
+  const chartEvents = useMemo(() => getEffectiveMarketEventsForRange(
+    chartRangeStartMs,
+    nowMs,
     events,
+  ), [chartRangeStartMs, events, nowMs]);
+  const leadingEvents = selectCausalMarketEvents(chartEvents, stock.id, segments.leading.endMs);
+  const historicalEvents = selectCausalMarketEvents(
+    chartEvents,
     stock.id,
     segments.historical.endMs,
   );
-  const currentEvents = selectCausalMarketEvents(events, stock.id, segments.current.endMs);
+  const currentEvents = selectCausalMarketEvents(chartEvents, stock.id, segments.current.endMs);
   const currentEventsFingerprint = marketDisplayEventsFingerprint(currentEvents);
   const leadingRequestKey = progressiveSeriesRequestKey(
     'leading',
@@ -345,6 +354,8 @@ export function MarketPriceChart({
       ? `${intervalLabel(effectiveInterval)} 간격으로 바꿨어요.`
       : `선택한 기간에는 ${intervalLabel(effectiveInterval)} 간격이 가장 촘촘해요.`);
   };
+  const minimumInterval = resolveIntervalForRange(range, '1m');
+  const minimumIntervalIndex = INTERVAL_ORDER.indexOf(minimumInterval);
 
   const selectCandle = (nextCandle: MarketCandle | null) => {
     setSelectedCandleStartsAt(nextCandle?.startsAt ?? null);
@@ -396,9 +407,18 @@ export function MarketPriceChart({
             className={SELECT_CLASS_NAME}
           >
             {INTERVAL_OPTIONS.map(([value, label]) => (
-              <option key={value} value={value}>{label}</option>
+              <option
+                key={value}
+                value={value}
+                disabled={INTERVAL_ORDER.indexOf(value) < minimumIntervalIndex}
+              >
+                {label}
+              </option>
             ))}
           </select>
+          <p className="mt-1 text-xs text-text-secondary">
+            이 기간의 최소 간격: {intervalLabel(minimumInterval)}
+          </p>
         </div>
         <div>
           <label htmlFor="market-chart-range" className="text-xs font-semibold text-text-secondary">기간</label>

@@ -113,7 +113,9 @@ export function StockDetailView({
   const currentHoldingValue = holdingSummary.marketValueWon;
   const holdingPnl = holdingSummary.unrealizedPnlWon;
   const holdingPnlRate = holdingSummary.unrealizedPnlRate ?? 0;
-  const relatedNews = snapshot.news.filter((item) => item.stockId === stock.id);
+  const relatedNews = quoteContext.newsByStockId[stock.id] ?? [];
+  const stockReason = quoteContext.reasonByStockId[stock.id]
+    ?? '오늘 가격에 영향을 준 소식을 살펴보세요.';
 
   const toggleFavorite = () => {
     if (mutating) return;
@@ -185,7 +187,7 @@ export function StockDetailView({
           <p className="mt-2 text-sm leading-6 text-text-secondary">{movement.sentence}</p>
           <div className="mt-5 rounded-xl bg-accent/10 p-4">
             <h2 id="price-reason-heading" className="text-sm font-bold text-accent">오늘 움직인 이유</h2>
-            <p className="mt-2 text-pretty text-sm leading-6 text-text-primary">{stock.reason}</p>
+            <p className="mt-2 text-pretty text-sm leading-6 text-text-primary">{stockReason}</p>
           </div>
         </section>
 

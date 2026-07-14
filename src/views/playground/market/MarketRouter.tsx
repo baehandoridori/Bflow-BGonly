@@ -37,6 +37,9 @@ const EMPTY_QUOTE_CONTEXT: MarketQuoteContext = {
   quoteWonByStockId: {},
   previousCloseWonByStockId: {},
   sparklineByStockId: {},
+  news: [],
+  newsByStockId: {},
+  reasonByStockId: {},
 };
 
 function useDesktopOrderLayout(): boolean {

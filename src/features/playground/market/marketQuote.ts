@@ -1,10 +1,12 @@
 import {
+  getAutonomousMarketNewsForNow,
   getCanonicalMarketQuoteWon,
   getMarketMinuteBar,
   MARKET_INSTRUMENT_PROFILES,
 } from './livePriceEngine.ts';
 import type {
   MarketInstrumentProfile,
+  MarketNews,
   MarketQuoteContext,
   MarketSnapshot,
   PricePoint,
@@ -21,6 +23,40 @@ const PROFILE_BY_STOCK_ID = MARKET_INSTRUMENT_PROFILES as Readonly<
   Record<string, MarketInstrumentProfile>
 >;
 const completedSparklineCache = new Map<string, PricePoint[]>();
+
+function toMarketNews(event: {
+  id: string;
+  stockId: string;
+  title: string;
+  summary?: string;
+  startsAt: string;
+  publishedAt?: string;
+}): MarketNews {
+  return {
+    id: event.id,
+    stockId: event.stockId,
+    title: event.title,
+    summary: event.summary ?? event.title,
+    publishedAt: event.publishedAt ?? event.startsAt,
+  };
+}
+
+function mergeNews(
+  manualNews: readonly MarketNews[],
+  automaticNews: readonly MarketNews[],
+): MarketNews[] {
+  const merged: MarketNews[] = [];
+  const ids = new Set<string>();
+  for (const item of [...automaticNews, ...manualNews]) {
+    if (ids.has(item.id)) continue;
+    ids.add(item.id);
+    merged.push(item);
+  }
+  return merged.sort((left, right) => (
+    Date.parse(right.publishedAt) - Date.parse(left.publishedAt)
+    || left.id.localeCompare(right.id)
+  ));
+}
 
 export function alignMarketSecond(nowMs: number): number {
   if (!Number.isFinite(nowMs)) throw new RangeError('market clock must be finite');
@@ -150,7 +186,7 @@ export function buildMarketQuoteWonByStockId(
 }
 
 export function buildMarketQuoteContext(
-  snapshot: Pick<MarketSnapshot, 'stocks' | 'adminEvents'>,
+  snapshot: Pick<MarketSnapshot, 'stocks' | 'adminEvents' | 'news'>,
   nowMs: number,
 ): MarketQuoteContext {
   const alignedNowMs = alignMarketSecond(nowMs);
@@ -159,6 +195,10 @@ export function buildMarketQuoteContext(
   const quoteWonByStockId: Record<string, number> = {};
   const previousCloseWonByStockId: Record<string, number> = {};
   const sparklineByStockId: Record<string, PricePoint[]> = {};
+  const automaticNews = getAutonomousMarketNewsForNow(alignedNowMs).map(toMarketNews);
+  const news = mergeNews(snapshot.news, automaticNews);
+  const newsByStockId: Record<string, MarketNews[]> = {};
+  const reasonByStockId: Record<string, string> = {};
 
   for (const stock of snapshot.stocks) {
     const profile = PROFILE_BY_STOCK_ID[stock.id];
@@ -181,11 +221,20 @@ export function buildMarketQuoteContext(
       quoteWon,
       snapshot.adminEvents,
     );
+    const stockNews = news.filter((item) => item.stockId === stock.id);
+    newsByStockId[stock.id] = stockNews;
+    const automaticReason = automaticNews.find((item) => item.stockId === stock.id);
+    reasonByStockId[stock.id] = automaticReason
+      ? `${automaticReason.title} ${automaticReason.summary}`
+      : stock.reason;
   }
 
   return {
     quoteWonByStockId,
     previousCloseWonByStockId,
     sparklineByStockId,
+    news,
+    newsByStockId,
+    reasonByStockId,
   };
 }

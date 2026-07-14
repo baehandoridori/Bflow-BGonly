@@ -208,6 +208,10 @@ export function createMarketChartAdapter({
   onCrosshairCandle,
 }: CreateMarketChartAdapterOptions): MarketChartAdapter {
   const chart = runtime.createChart(container, chartOptions(initialTheme));
+  // Lightweight Charts removes empty panes by default. When the price series is
+  // replaced during a style switch, that would move volume pane 1 to pane 0 and
+  // make the new price series overlap it. Keep the owned price pane stable.
+  chart.panes?.()[0]?.setPreserveEmptyPane(true);
   let theme = initialTheme;
   let priceSeries: PriceSeriesApi | null = null;
   let priceStyle: MarketChartStyle | null = null;

@@ -832,6 +832,7 @@ function createFakeLightweightChartsRuntime() {
     setVisibleLogicalRangeCalls: [] as Array<{ from: number; to: number }>,
     fitContentCalls: 0,
     removeCalls: 0,
+    panePreserveCalls: [] as boolean[],
   };
   const definitions = {
     LineSeries: { kind: 'line' },
@@ -847,6 +848,11 @@ function createFakeLightweightChartsRuntime() {
     },
     fitContent() {
       state.fitContentCalls += 1;
+    },
+  };
+  const pricePane = {
+    setPreserveEmptyPane(preserve: boolean) {
+      state.panePreserveCalls.push(preserve);
     },
   };
   const chart = {
@@ -890,6 +896,9 @@ function createFakeLightweightChartsRuntime() {
     },
     timeScale() {
       return timeScale;
+    },
+    panes() {
+      return [pricePane];
     },
     remove() {
       state.removeCalls += 1;
@@ -1080,6 +1089,7 @@ test('Lightweight Charts adapter updates the last bar and preserves range across
   );
   assert.ok(lineSeries);
   assert.ok(volumeSeries);
+  assert.deepEqual(fake.state.panePreserveCalls, [true]);
 
   const updated = [initial[0], {
     ...initial[1],
@@ -1416,4 +1426,52 @@ test('one immutable engine quote context is shared by market routes', async () =
   assert.match(account, /quoteWonByStockId/);
   assert.match(rows, /sparklineByStockId/);
   assert.doesNotMatch(rows, /todaySeriesAtQuote|stock\.series\.today/);
+});
+
+test('automatic market news flows through home, rows, detail, and candle event ids', async () => {
+  const snapshot = createMarketPreviewSeed();
+  const nowMs = Date.parse('2026-07-13T14:34:56.789Z');
+  const marketQuote = await import('../src/features/playground/market/marketQuote.ts');
+  const context = marketQuote.buildMarketQuoteContext(snapshot, nowMs);
+  const liveEngine = await import('../src/features/playground/market/livePriceEngine.ts');
+  const publishedAutomatic = liveEngine.getAutonomousMarketNewsForNow(nowMs);
+
+  for (const event of publishedAutomatic) {
+    const displayed = context.news.find((item) => item.id === event.id);
+    assert.ok(displayed, `automatic news ${event.id} must be displayed`);
+    assert.deepEqual(context.newsByStockId[event.stockId]?.find((item) => item.id === event.id), displayed);
+    assert.match(context.reasonByStockId[event.stockId] ?? '', new RegExp(event.title));
+  }
+  if (publishedAutomatic.length > 0) {
+    const event = publishedAutomatic[0];
+    const eventStartMs = Date.parse(event.startsAt);
+    const minuteStartMs = Math.floor(eventStartMs / 60_000) * 60_000;
+    const displaySeries = await import('../src/features/playground/market/marketDisplaySeries.ts');
+    const candles = displaySeries.buildMarketDisplayCandles({
+      profile: liveEngine.MARKET_INSTRUMENT_PROFILES[event.stockId],
+      startMs: minuteStartMs,
+      endMs: minuteStartMs + 60_000,
+      nowMs: minuteStartMs + 60_000,
+      events: liveEngine.getEffectiveMarketEventsForRange(
+        minuteStartMs,
+        minuteStartMs + 60_000,
+        snapshot.adminEvents,
+      ),
+      interval: '1m',
+    });
+    assert.ok(candles[0]?.newsIds.includes(event.id));
+  }
+
+  const home = readFileSync('src/views/playground/market/MarketHome.tsx', 'utf8');
+  const rows = readFileSync('src/views/playground/market/MarketRows.tsx', 'utf8');
+  const detail = readFileSync('src/views/playground/market/StockDetailView.tsx', 'utf8');
+  const chart = readFileSync('src/views/playground/market/MarketPriceChart.tsx', 'utf8');
+  assert.match(home, /quoteContext\.news/);
+  assert.doesNotMatch(home, /snapshot\.news\.slice/);
+  assert.match(rows, /reasonByStockId/);
+  assert.doesNotMatch(rows, /\{stock\.reason\}/);
+  assert.match(detail, /newsByStockId/);
+  assert.match(detail, /reasonByStockId/);
+  assert.doesNotMatch(detail, /snapshot\.news|\{stock\.reason\}/);
+  assert.match(chart, /getEffectiveMarketEventsForRange/);
 });

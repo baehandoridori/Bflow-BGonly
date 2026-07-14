@@ -1,4 +1,8 @@
 export {
+  getAutonomousMarketNewsForNow,
+  getAutonomousMarketEventsForRange,
+  getEffectiveMarketEventsForRange,
+  mergeMarketEvents,
   getCanonicalMarketQuoteWon,
   getLivePriceWon,
   getMarketDailyCheckpoint,
