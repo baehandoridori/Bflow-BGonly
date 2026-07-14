@@ -37,7 +37,7 @@ export const GAME_DEFINITIONS: Record<PreviewGame, PlaygroundGameDefinition> = {
     heroMeta: '평균 3분 · 현재 최고 길이 62',
     heroReward: '실버 등급부터 45 포인트를 획득합니다.',
     quickRecord: '최고 길이 62', quickReward: 'SILVER +45 P',
-    stageReward: '길이별 등급에 따라 최대 45 포인트를 받을 예정이에요.', tone: 'lavender',
+    stageReward: '길이별 등급에 따라 최대 45 포인트를 받아요.', tone: 'lavender',
   },
   sudoku: {
     id: 'sudoku', koName: '스도쿠', enName: 'SUDOKU',

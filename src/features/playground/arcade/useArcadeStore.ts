@@ -89,6 +89,9 @@ export function createArcadeStore(
   // 이미 로컬 스냅샷에 반영한 runId. 재생 응답이 왔을 때 "진짜 중복 제출"과
   // "main 재시도로 응답만 유실된 첫 반영"을 구분한다.
   const appliedRuns = new Set<string>();
+  // game-start 가 응답 유실로 실패했을 때 보류한 runId. 같은 게임을 다시 시작하면 이 runId 를
+  // 재사용해 이미 결제된 시작을 멱등 재생한다(입장료 중복 차감 방지). 성공 시 해제.
+  let pendingStartRun: { gameId: ArcadeGameId; runId: string } | null = null;
 
   function syncWallet(wallet: ArcadeWallet | undefined): void {
     if (wallet) syncMarketWallet(wallet);
@@ -176,7 +179,12 @@ export function createArcadeStore(
       async load(requestedSessionKey = DEFAULT_SESSION_KEY) {
         const gen = ++generation;
         const sessionChanged = get().sessionKey !== requestedSessionKey;
-        if (sessionChanged) appliedRuns.clear();
+        if (sessionChanged) {
+          appliedRuns.clear();
+          // 세션(계정)이 바뀌면 보류한 runId 를 버린다 — run id 는 전역 UUID 라, 다른 사용자가
+          // 옛 runId 를 재사용하면 서로의 유료 판이 얽히거나 막힌다.
+          pendingStartRun = null;
+        }
         set({
           loading: true,
           error: null,
@@ -201,7 +209,12 @@ export function createArcadeStore(
           set({ error: '아케이드 정보를 먼저 불러와 주세요.' });
           return null;
         }
-        const runId = crypto.randomUUID();
+        // 이전 시도가 응답 유실로 실패했다면 같은 runId 를 재사용한다 — 서버 game-start 는
+        // request_id(game-entry:runId)로 멱등이라, 이미 결제된 시작이면 재생돼 중복 차감되지 않는다.
+        const runId = pendingStartRun && pendingStartRun.gameId === gameId
+          ? pendingStartRun.runId
+          : crypto.randomUUID();
+        pendingStartRun = { gameId, runId };
         set({ mutating: true, error: null });
         try {
           const result = (await gateway.execute({
@@ -217,8 +230,10 @@ export function createArcadeStore(
               : state.snapshot,
           }));
           syncWallet(result.wallet);
+          pendingStartRun = null; // 성공 — 보류 해제
           return { runId };
         } catch (error) {
+          // 실패 시 pendingStartRun 을 유지해, 다음 시작이 같은 runId 로 재시도(멱등)하게 한다.
           set({ mutating: false, error: messageOf(error, '게임을 시작할 수 없어요.') });
           return null;
         }

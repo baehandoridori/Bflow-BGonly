@@ -121,7 +121,10 @@ export function JbbjHouse({ ranking, onPlayGame, onOpenMarket }: JbbjHouseProps)
 
           const game = entry.kind === 'game' ? GAME_DEFINITIONS[entry.gameId] : null;
           const label = entry.kind === 'game' ? game!.koName : entry.label;
-          const status = entry.kind === 'game' ? '플레이 준비 중' : '시장 열기';
+          // 구현된 게임(스네이크)은 '바로 플레이', 아직 준비 중인 게임은 '플레이 준비 중'.
+          const status = entry.kind === 'game'
+            ? (entry.gameId === 'snake' ? '바로 플레이' : '플레이 준비 중')
+            : '시장 열기';
 
           return (
             <button

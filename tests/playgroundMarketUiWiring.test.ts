@@ -9,18 +9,18 @@ test('playground market v3 release metadata stays aligned', () => {
   const packageLock = JSON.parse(readFileSync('package-lock.json', 'utf8'));
   const updateNotes = JSON.parse(readFileSync('DEVLOG/update-notes.json', 'utf8'));
 
-  assert.equal(packageJson.version, '1.85.0');
-  assert.equal(packageLock.version, '1.85.0');
-  assert.equal(packageLock.packages[''].version, '1.85.0');
+  assert.equal(packageJson.version, '1.86.0');
+  assert.equal(packageLock.version, '1.86.0');
+  assert.equal(packageLock.packages[''].version, '1.86.0');
   assert.equal(packageJson.dependencies['lightweight-charts'], '5.2.0');
   assert.equal(packageLock.packages[''].dependencies['lightweight-charts'], '5.2.0');
   assert.deepEqual(
     updateNotes.slice(0, 4).map((note: { version: string }) => note.version),
-    ['1.85.0', '1.84.0', '1.83.0', '1.82.0'],
+    ['1.86.0', '1.85.0', '1.84.0', '1.83.0'],
   );
 
-  // 최신 릴리스(1.85.0)는 업무 활동 포인트 적립 + 배지 획득 연출.
-  assert.equal(updateNotes[0].version, '1.85.0');
+  // 최신 릴리스(1.86.0)는 스네이크 실제 플레이 + 결과/보상 화면.
+  assert.equal(updateNotes[0].version, '1.86.0');
 
   // 모의투자 시장 v3 릴리스(1.82.0) 메타데이터는 그대로 유지돼야 한다.
   const marketNote = updateNotes.find((note: { version: string }) => note.version === '1.82.0');

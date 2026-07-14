@@ -1,0 +1,191 @@
+/* 배플레이그라운드 아케이드 공용 스테이지 스타일 — --pg-* 토큰만 사용, 클래스 접두 pg-arcade-.
+   토큰은 RGB 트리플릿(예: --pg-panel: 26 29 39)이라 반드시 rgb(var(--pg-*)) 로 감싸 쓴다. */
+
+.pg-arcade-stage {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  color: rgb(var(--pg-text));
+}
+
+.pg-arcade-stage__frame {
+  position: relative;
+  border-radius: 16px;
+  background: rgb(var(--pg-panel));
+  border: 1px solid rgb(var(--pg-line));
+  overflow: hidden;
+}
+
+.pg-arcade-hud {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px 20px;
+  padding: 12px 16px;
+  border-bottom: 1px solid rgb(var(--pg-line));
+  background: rgb(var(--pg-panel-2));
+}
+
+.pg-arcade-hud__item {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.pg-arcade-hud__label {
+  font-size: 11px;
+  color: rgb(var(--pg-muted));
+}
+
+.pg-arcade-hud__value {
+  font-size: 18px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.pg-arcade-overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  padding: 24px;
+  text-align: center;
+  background: rgb(var(--pg-bg) / 0.82);
+  backdrop-filter: blur(2px);
+}
+
+.pg-arcade-overlay__title {
+  font-size: 22px;
+  font-weight: 800;
+}
+
+.pg-arcade-overlay__hint {
+  font-size: 13px;
+  color: rgb(var(--pg-muted));
+  line-height: 1.6;
+}
+
+.pg-arcade-countdown {
+  font-size: 72px;
+  font-weight: 800;
+  color: rgb(var(--pg-accent));
+  font-variant-numeric: tabular-nums;
+}
+
+.pg-arcade-btn {
+  appearance: none;
+  border: 1px solid rgb(var(--pg-accent));
+  background: rgb(var(--pg-accent));
+  color: rgb(var(--pg-bg));
+  border-radius: 10px;
+  padding: 10px 18px;
+  font-size: 14px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: filter 120ms ease;
+}
+
+.pg-arcade-btn:hover {
+  filter: brightness(1.08);
+}
+
+.pg-arcade-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.pg-arcade-btn--ghost {
+  background: transparent;
+  color: rgb(var(--pg-text));
+  border-color: rgb(var(--pg-line));
+}
+
+.pg-arcade-keyhints {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: center;
+}
+
+.pg-arcade-keyhint {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: rgb(var(--pg-muted));
+}
+
+.pg-arcade-keyhint__key {
+  border: 1px solid rgb(var(--pg-line));
+  border-radius: 6px;
+  padding: 1px 7px;
+  background: rgb(var(--pg-panel-2));
+  color: rgb(var(--pg-text));
+  font-weight: 700;
+}
+
+/* 결과 오버레이 */
+.pg-arcade-result {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+}
+
+.pg-arcade-result__grade {
+  font-size: 28px;
+  font-weight: 800;
+}
+
+.pg-arcade-result__gauge {
+  width: 220px;
+  height: 10px;
+  border-radius: 999px;
+  background: rgb(var(--pg-panel-2));
+  overflow: hidden;
+}
+
+.pg-arcade-result__gauge-fill {
+  height: 100%;
+  background: rgb(var(--pg-accent));
+}
+
+.pg-arcade-result__reward {
+  font-size: 20px;
+  font-weight: 800;
+  color: rgb(var(--pg-yellow));
+  font-variant-numeric: tabular-nums;
+}
+
+.pg-arcade-result__best {
+  font-size: 14px;
+  font-weight: 700;
+  color: rgb(var(--pg-mint));
+}
+
+.pg-arcade-result__ach {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  width: 100%;
+  max-width: 320px;
+}
+
+.pg-arcade-result__ach-card {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 8px 12px;
+  border-radius: 10px;
+  border: 1px solid rgb(var(--pg-line));
+  background: rgb(var(--pg-panel-2));
+  font-size: 13px;
+}
+
+.pg-arcade-result__ach-bonus {
+  color: rgb(var(--pg-yellow));
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}

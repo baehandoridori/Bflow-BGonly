@@ -10,7 +10,7 @@ export type PlaygroundReturnSurface = 'lobby' | 'house';
 export type PlaygroundRoute =
   | { kind: 'lobby' }
   | { kind: 'house' }
-  | { kind: 'coming-soon'; game: PreviewGame; returnTo: PlaygroundReturnSurface }
+  | { kind: 'game'; game: PreviewGame; returnTo: PlaygroundReturnSurface }
   | { kind: 'market'; page: MarketRoute; returnTo: PlaygroundReturnSurface };
 
 export type PlaygroundAction =
@@ -29,7 +29,7 @@ export function getPlaygroundRouteIdentity(route: PlaygroundRoute): string {
   if (route.kind === 'lobby' || route.kind === 'house') {
     return JSON.stringify([route.kind]);
   }
-  if (route.kind === 'coming-soon') {
+  if (route.kind === 'game') {
     return JSON.stringify([route.kind, route.game, route.returnTo]);
   }
   if (route.page.kind === 'stock') {
@@ -55,7 +55,7 @@ export function shouldReplacePlaygroundNavigation(
 
 export function getPlaygroundReturnSurface(route: PlaygroundRoute): PlaygroundReturnSurface {
   if (route.kind === 'house') return 'house';
-  if (route.kind === 'coming-soon' || route.kind === 'market') return route.returnTo;
+  if (route.kind === 'game' || route.kind === 'market') return route.returnTo;
   return 'lobby';
 }
 
@@ -76,7 +76,7 @@ export function navigatePlayground(
     case 'open-house':
       return { kind: 'house' };
     case 'open-game':
-      return { kind: 'coming-soon', game: action.game, returnTo };
+      return { kind: 'game', game: action.game, returnTo };
     case 'open-market':
       return { kind: 'market', page: { kind: 'home' }, returnTo };
     case 'market-home':

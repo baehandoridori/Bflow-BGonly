@@ -31,7 +31,7 @@ test('market remains one local route with three pages', () => {
 test('game and market remember whether lobby or house opened them', () => {
   const house = navigatePlayground(initialPlaygroundRoute, { kind: 'open-house' });
   const houseGame = navigatePlayground(house, { kind: 'open-game', game: 'tetris' });
-  assert.deepEqual(houseGame, { kind: 'coming-soon', game: 'tetris', returnTo: 'house' });
+  assert.deepEqual(houseGame, { kind: 'game', game: 'tetris', returnTo: 'house' });
   assert.equal(getPlaygroundReturnSurface(houseGame), 'house');
   assert.deepEqual(navigatePlayground(houseGame, { kind: 'return-to-source' }), { kind: 'house' });
 
