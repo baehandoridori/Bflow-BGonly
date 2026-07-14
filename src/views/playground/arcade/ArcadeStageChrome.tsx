@@ -28,6 +28,7 @@ export interface ArcadeStageChromeProps {
   onConfirmingChange?: (confirming: boolean) => void; // 종료 확인 모달 표시 여부 — 스테이지가 입력을 막게
   returnLabel?: string; // 소스 서페이스 라벨('게임 로비' / 'JBBJ 하우스')
   startDisabledReason?: string;
+  startErrorHint?: string | null; // 시작 실패 안내(재시도 유도) — ready 화면에 표시
   startPending?: boolean; // 입장 요청 진행 중 — 중복 시작(입장료 중복 차감) 방지용 비활성
   todayRewardedRuns: number;
   entryFee: number;
@@ -55,7 +56,7 @@ export function ArcadeStageChrome(props: ArcadeStageChromeProps) {
     game, phase, hud, stage, result,
     onStart, onResume, onPause, onQuit, onCountdownComplete, finishError, onRetryFinish,
     onConfirmingChange, returnLabel = '로비로',
-    startDisabledReason, startPending, todayRewardedRuns, entryFee, dailyRewardCap, keyHints,
+    startDisabledReason, startErrorHint, startPending, todayRewardedRuns, entryFee, dailyRewardCap, keyHints,
   } = props;
 
   const prefersReducedMotion = useReducedMotion();
@@ -134,6 +135,7 @@ export function ArcadeStageChrome(props: ArcadeStageChromeProps) {
               {startPending ? '시작하는 중…' : `${entryFee}P 내고 시작`}
             </button>
             {startDisabledReason && <p className="pg-arcade-overlay__hint">{startDisabledReason}</p>}
+            {startErrorHint && <p className="pg-arcade-overlay__hint" role="alert">{startErrorHint}</p>}
           </div>
         )}
 

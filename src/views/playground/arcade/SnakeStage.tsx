@@ -42,6 +42,7 @@ export function SnakeStage({ onExit, returnLabel }: { onExit: () => void; return
   const [starting, setStarting] = useState(false);
   const [finishError, setFinishError] = useState(false);
   const [confirmOpen, setConfirmOpen] = useState(false); // 종료 확인 모달 표시 중 — 게임 입력 차단
+  const [startError, setStartError] = useState<string | null>(null); // 시작 실패 안내(재시도 유도)
   const startingRef = useRef(false); // 동기 가드 — 더블클릭이 첫 렌더 전에 두 번 실행되는 것 방지
 
   const engineRef = useRef<SnakeState | null>(null);
@@ -160,9 +161,14 @@ export function SnakeStage({ onExit, returnLabel }: { onExit: () => void; return
     if (startingRef.current) return; // 진행 중이면 무시 — 입장료 중복 차감 방지
     startingRef.current = true;
     setStarting(true);
+    setStartError(null);
     try {
       const started = await startRun('snake');
-      if (!started) return; // 잔액 부족 등 — 스토어가 에러 처리
+      if (!started) {
+        // 실패를 화면에 알린다 — 유료 시작이 조용히 방치되지 않게(다시 시작하면 같은 runId 로 멱등 재시도).
+        setStartError(useArcadeStore.getState().error ?? '게임을 시작하지 못했어요. 다시 시도해 주세요.');
+        return;
+      }
       runIdRef.current = started.runId;
       setResult(null);
       setPhase('countdown');
@@ -179,6 +185,7 @@ export function SnakeStage({ onExit, returnLabel }: { onExit: () => void; return
     finishInputRef.current = null;
     setResult(null);
     setFinishError(false);
+    setStartError(null);
     setPhase('ready');
   }, []);
 
@@ -246,6 +253,7 @@ export function SnakeStage({ onExit, returnLabel }: { onExit: () => void; return
       onConfirmingChange={setConfirmOpen}
       returnLabel={returnLabel}
       startDisabledReason={startDisabledReason}
+      startErrorHint={startError}
       startPending={starting}
       todayRewardedRuns={todayRewardedRuns}
       entryFee={entryFee}

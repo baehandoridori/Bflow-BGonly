@@ -140,6 +140,10 @@ test('SnakeStage guards against duplicate entry charges and exits directly', () 
   assert.match(snakeStageSource, /returnLabel=\{returnLabel\}/);
   assert.match(resultSource, /\{returnLabel\}/);
   assert.match(chromeSource, /onConfirmingChange\?\.\(confirmingQuit\)/);
+  // 시작 실패는 화면에 안내해 유료 시작이 조용히 방치되지 않게 한다
+  assert.match(snakeStageSource, /setStartError\(/);
+  assert.match(snakeStageSource, /startErrorHint=\{startError\}/);
+  assert.match(chromeSource, /\{startErrorHint && <p className="pg-arcade-overlay__hint" role="alert">/);
   // 종료는 루프를 멈추고 onExit(직접 이탈)로 나간다
   assert.match(snakeStageSource, /loopRef\.current\?\.stop\(\);\s*onExit\(\);/);
 });
