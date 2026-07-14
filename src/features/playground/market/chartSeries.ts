@@ -1,4 +1,4 @@
-import { getMarketMinuteBar } from './livePriceEngine.ts';
+import { AUTONOMOUS_NEWS_DECAY_MS, getMarketMinuteBar } from './livePriceEngine.ts';
 import type {
   MarketAdminEvent,
   MarketBarInterval,
@@ -95,6 +95,14 @@ function eventFingerprint(profile: MarketInstrumentProfile, events: readonly Mar
     .join('|');
 }
 
+export function marketEventNewsEndMs(event: MarketAdminEvent): number {
+  const eventEndMs = event.endsAt === null ? Number.POSITIVE_INFINITY : Date.parse(event.endsAt);
+  if (event.automatic === true && Number.isFinite(eventEndMs)) {
+    return eventEndMs + AUTONOMOUS_NEWS_DECAY_MS;
+  }
+  return eventEndMs;
+}
+
 function overlapsInterval(
   event: MarketAdminEvent,
   intervalStartMs: number,
@@ -102,7 +110,7 @@ function overlapsInterval(
   includeIntervalEnd: boolean,
 ): boolean {
   const eventStartMs = Date.parse(event.startsAt);
-  const eventEndMs = event.endsAt === null ? Number.POSITIVE_INFINITY : Date.parse(event.endsAt);
+  const eventEndMs = marketEventNewsEndMs(event);
   if (!Number.isFinite(eventStartMs) || Number.isNaN(eventEndMs) || eventEndMs <= eventStartMs) {
     return false;
   }

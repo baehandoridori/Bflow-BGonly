@@ -1460,6 +1460,22 @@ test('automatic market news flows through home, rows, detail, and candle event i
       interval: '1m',
     });
     assert.ok(candles[0]?.newsIds.includes(event.id));
+
+    if (event.endsAt === null) throw new Error('automatic news must end');
+    const fadeMinuteStartMs = Math.floor((Date.parse(event.endsAt) + 60 * 60_000) / 60_000) * 60_000;
+    const fadeCandles = displaySeries.buildMarketDisplayCandles({
+      profile: liveEngine.MARKET_INSTRUMENT_PROFILES[event.stockId],
+      startMs: fadeMinuteStartMs,
+      endMs: fadeMinuteStartMs + 60_000,
+      nowMs: fadeMinuteStartMs + 60_000,
+      events: liveEngine.getEffectiveMarketEventsForRange(
+        fadeMinuteStartMs,
+        fadeMinuteStartMs + 60_000,
+        snapshot.adminEvents,
+      ),
+      interval: '1m',
+    });
+    assert.ok(fadeCandles[0]?.newsIds.includes(event.id));
   }
 
   const home = readFileSync('src/views/playground/market/MarketHome.tsx', 'utf8');

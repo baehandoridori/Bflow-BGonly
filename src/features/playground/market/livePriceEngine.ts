@@ -3,6 +3,7 @@ export {
   getAutonomousMarketEventsForRange,
   getEffectiveMarketEventsForRange,
   mergeMarketEvents,
+  AUTONOMOUS_NEWS_DECAY_MS,
   getCanonicalMarketQuoteWon,
   getLivePriceWon,
   getMarketDailyCheckpoint,
