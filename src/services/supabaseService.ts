@@ -9,6 +9,7 @@ import type {
   CompositingState, CompositingStatus, CompositingErrorKind,
   Character, CharacterCostume, CostumeDesignStage, CostumeRiggingStage,
   CharacterRow, CharacterCostumeRow,
+  CharacterBoardTab, CharacterBoardTabRow,
   CharacterCostumeImage, CharacterCostumeImageRow, CostumeImageRole,
   CharacterImageBackground, CharacterImageFit,
   CostumeActivityLogContext,
@@ -17,6 +18,7 @@ import type {
 } from '../types';
 import { applyAssigneeProgressMetadata } from '../utils/assigneeProgress';
 import { normalizeCharacterImageBackground, normalizeCharacterImageFit } from '../utils/characterAssets';
+import { sanitizeTabGroups } from '@/utils/characterTabGroups';
 
 // 일괄 작업 타입 재노출 — 다른 렌더러 모듈에서 쉽게 참조 가능
 export type { BulkStageUpdate, BulkFieldUpdate, BulkUpdateResult };
@@ -1012,6 +1014,44 @@ export async function loadCharacterCostumeImages(): Promise<CharacterCostumeImag
   return (rows ?? []).map(rowToCostumeImage);
 }
 
+// ─── 캐릭터 현황판 탭·그룹 (피드백 41) ───
+
+export function rowToCharacterBoardTab(row: CharacterBoardTabRow): CharacterBoardTab {
+  return {
+    id: row.id,
+    name: row.name,
+    sortOrder: row.sort_order ?? 0,
+    groups: sanitizeTabGroups(row.groups),
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
+export async function loadCharacterBoardTabs(): Promise<CharacterBoardTab[]> {
+  const rows = (await window.electronAPI.supabaseLoadCharacterBoardTabs()) as CharacterBoardTabRow[];
+  return rows.map(rowToCharacterBoardTab);
+}
+
+export async function addCharacterBoardTab(input: { name: string; sortOrder: number; createdBy?: string | null }): Promise<CharacterBoardTab> {
+  const row = (await window.electronAPI.supabaseAddCharacterBoardTab(input)) as CharacterBoardTabRow;
+  return rowToCharacterBoardTab(row);
+}
+
+export async function updateCharacterBoardTab(
+  id: string,
+  updates: Partial<Pick<CharacterBoardTab, 'name' | 'sortOrder' | 'groups'>>,
+): Promise<void> {
+  const snake: Record<string, unknown> = {};
+  if (updates.name !== undefined) snake.name = updates.name;
+  if (updates.sortOrder !== undefined) snake.sort_order = updates.sortOrder;
+  if (updates.groups !== undefined) snake.groups = updates.groups;
+  await window.electronAPI.supabaseUpdateCharacterBoardTab(id, snake);
+}
+
+export async function deleteCharacterBoardTab(id: string): Promise<void> {
+  await window.electronAPI.supabaseDeleteCharacterBoardTab(id);
+}
+
 export async function addCharacterCostumeImage(input: {
   costumeId: string;
   url: string;
@@ -1095,7 +1135,7 @@ export async function uploadCharacterImage(
  */
 export function subscribeCharacterBoardRealtime(
   onChange: (payload: {
-    table: 'characters' | 'character_costumes' | 'character_costume_images' | 'episode_character_mapping';
+    table: 'characters' | 'character_costumes' | 'character_costume_images' | 'episode_character_mapping' | 'character_board_tabs';
     eventType: 'INSERT' | 'UPDATE' | 'DELETE';
     row: Record<string, unknown> | null;
     old: Record<string, unknown> | null;

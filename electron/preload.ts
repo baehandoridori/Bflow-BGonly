@@ -749,6 +749,14 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.invoke('supabase:delete-costume-image', id),
   supabaseSetPrimaryCostumeImage: (costumeId: string, imageId: string) =>
     ipcRenderer.invoke('supabase:set-primary-costume-image', costumeId, imageId),
+  // ─── 캐릭터 현황판 탭·그룹 (피드백 41) ───
+  supabaseLoadCharacterBoardTabs: () => ipcRenderer.invoke('supabase:load-character-board-tabs'),
+  supabaseAddCharacterBoardTab: (input: { name: string; sortOrder: number; createdBy?: string | null }) =>
+    ipcRenderer.invoke('supabase:add-character-board-tab', input),
+  supabaseUpdateCharacterBoardTab: (id: string, updates: Record<string, unknown>) =>
+    ipcRenderer.invoke('supabase:update-character-board-tab', id, updates),
+  supabaseDeleteCharacterBoardTab: (id: string) =>
+    ipcRenderer.invoke('supabase:delete-character-board-tab', id),
   onCharacterBoardRealtime: (callback: (payload: unknown) => void) => {
     const listener = (_event: Electron.IpcRendererEvent, payload: unknown) => callback(payload);
     ipcRenderer.on('character-board:realtime', listener);

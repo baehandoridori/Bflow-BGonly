@@ -194,6 +194,24 @@ export interface Character {
   updatedAt: string;
 }
 
+/** 캐릭터 현황판 사용자 정의 탭의 그룹 1개 — 탭 row 의 groups JSONB 배열 원소 (피드백 41). */
+export interface CharacterBoardTabGroup {
+  id: string;
+  name: string;
+  /** 배열 순서 = 그룹 내 카드 표시 순서. */
+  characterIds: string[];
+}
+
+/** 캐릭터 현황판 사용자 정의 탭 (피드백 41). 그룹 편집은 탭 row 단위 LWW. */
+export interface CharacterBoardTab {
+  id: string;
+  name: string;
+  sortOrder: number;
+  groups: CharacterBoardTabGroup[];
+  createdAt: string;
+  updatedAt: string;
+}
+
 /**
  * 캐릭터-에피소드 연결 1건. episode_character_mapping 1 row 의 도메인 표현.
  * 보드의 출연 에피소드 토글(episodeIds)과 별개로, 이 편 전용 메모/복장을 보관.
@@ -313,6 +331,17 @@ export interface CharacterRow {
   work_folder_path: string | null;
   reference_height_px?: number | null;
   sort_order: number | null;
+  created_at: string;
+  updated_at: string;
+  created_by?: string | null;
+}
+
+/** character_board_tabs DB row (피드백 41). */
+export interface CharacterBoardTabRow {
+  id: string;
+  name: string;
+  sort_order: number | null;
+  groups: unknown;
   created_at: string;
   updated_at: string;
   created_by?: string | null;
@@ -1573,8 +1602,13 @@ export interface ElectronAPI {
   supabaseUpdateCostumeImage: (id: string, updates: Record<string, unknown>) => Promise<any>;
   supabaseDeleteCostumeImage: (id: string) => Promise<void>;
   supabaseSetPrimaryCostumeImage: (costumeId: string, imageId: string) => Promise<void>;
+  // ─── 캐릭터 현황판 탭·그룹 (피드백 41) ───
+  supabaseLoadCharacterBoardTabs: () => Promise<any[]>;
+  supabaseAddCharacterBoardTab: (input: { name: string; sortOrder: number; createdBy?: string | null }) => Promise<any>;
+  supabaseUpdateCharacterBoardTab: (id: string, updates: Record<string, unknown>) => Promise<any>;
+  supabaseDeleteCharacterBoardTab: (id: string) => Promise<{ ok: boolean }>;
   onCharacterBoardRealtime: (cb: (payload: {
-    table: 'characters' | 'character_costumes' | 'character_costume_images' | 'episode_character_mapping';
+    table: 'characters' | 'character_costumes' | 'character_costume_images' | 'episode_character_mapping' | 'character_board_tabs';
     eventType: 'INSERT' | 'UPDATE' | 'DELETE';
     row: Record<string, unknown> | null;
     old: Record<string, unknown> | null;

@@ -1417,6 +1417,10 @@ import {
   unlinkCharacterEpisode as sbUnlinkCharacterEpisode,
   updateEpisodeCharacterMapping as sbUpdateEpisodeCharacterMapping,
   startCharacterBoardRealtime as sbStartCharacterBoardRealtime,
+  loadCharacterBoardTabs as sbLoadCharacterBoardTabs,
+  addCharacterBoardTab as sbAddCharacterBoardTab,
+  updateCharacterBoardTab as sbUpdateCharacterBoardTab,
+  deleteCharacterBoardTab as sbDeleteCharacterBoardTab,
 } from './supabase';
 import type { SupabaseUser, BulkStageUpdate, BulkFieldUpdate } from './supabase';
 import { setupRealtimeSubscription, teardownRealtime, trackPresence } from './realtime';
@@ -3551,6 +3555,34 @@ ipcMain.handle('supabase:set-primary-costume-image', wrapIpc(async (
   imageId: string,
 ) => {
   return sbSetPrimaryCostumeImage(costumeId, imageId);
+}));
+
+// ─── IPC 핸들러: 캐릭터 현황판 탭·그룹 (피드백 41) ──────────────
+
+ipcMain.handle('supabase:load-character-board-tabs', wrapIpc(async () => {
+  return sbLoadCharacterBoardTabs();
+}));
+
+ipcMain.handle('supabase:add-character-board-tab', wrapIpc(async (
+  _e: unknown,
+  input: { name: string; sortOrder: number; createdBy?: string | null },
+) => {
+  return sbAddCharacterBoardTab(input);
+}));
+
+ipcMain.handle('supabase:update-character-board-tab', wrapIpc(async (
+  _e: unknown,
+  id: string,
+  updates: Record<string, unknown>,
+) => {
+  return sbUpdateCharacterBoardTab(id, updates);
+}));
+
+ipcMain.handle('supabase:delete-character-board-tab', wrapIpc(async (
+  _e: unknown,
+  id: string,
+) => {
+  return sbDeleteCharacterBoardTab(id);
 }));
 
 ipcMain.handle('supabase:link-character-episode', wrapIpc(async (

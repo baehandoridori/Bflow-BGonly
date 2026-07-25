@@ -4406,6 +4406,48 @@ export async function setPrimaryCostumeImage(_costumeId: string, imageId: string
   if (error) throw error;
 }
 
+// ─── 캐릭터 현황판 탭·그룹 (피드백 41) ───
+
+/** 캐릭터 현황판 탭 전체 로드 — sort_order 오름차순. (탭은 소수라 페이지네이션 불필요.) */
+export async function loadCharacterBoardTabs(): Promise<Record<string, unknown>[]> {
+  const { data, error } = await supabase
+    .from('character_board_tabs')
+    .select('*')
+    .order('sort_order', { ascending: true })
+    .order('created_at', { ascending: true });
+  if (error) throw error;
+  return (data ?? []) as Record<string, unknown>[];
+}
+
+/** 탭 추가 — 생성된 row 반환. */
+export async function addCharacterBoardTab(input: { name: string; sortOrder: number; createdBy?: string | null }): Promise<Record<string, unknown>> {
+  const { data, error } = await supabase
+    .from('character_board_tabs')
+    .insert({ name: input.name, sort_order: input.sortOrder, created_by: input.createdBy ?? null })
+    .select()
+    .single();
+  if (error) throw error;
+  return data as Record<string, unknown>;
+}
+
+/** 탭 부분 수정 (name / sort_order / groups). */
+export async function updateCharacterBoardTab(id: string, updates: Record<string, unknown>): Promise<Record<string, unknown> | null> {
+  const { data, error } = await supabase
+    .from('character_board_tabs')
+    .update(updates)
+    .eq('id', id)
+    .select()
+    .maybeSingle();
+  if (error) throw error;
+  return (data ?? null) as Record<string, unknown> | null;
+}
+
+export async function deleteCharacterBoardTab(id: string): Promise<{ ok: boolean }> {
+  const { error } = await supabase.from('character_board_tabs').delete().eq('id', id);
+  if (error) throw error;
+  return { ok: true };
+}
+
 /** 캐릭터-에피소드 연결 (UPSERT, onConflict 'episode_id,character_id'). episodeNumber → episode_id 해석. */
 export async function linkCharacterEpisode(
   episodeNumber: number,
@@ -4497,7 +4539,7 @@ export async function updateEpisodeCharacterMapping(
  */
 export function startCharacterBoardRealtime(
   broadcast: (payload: {
-    table: 'characters' | 'character_costumes' | 'character_costume_images' | 'episode_character_mapping';
+    table: 'characters' | 'character_costumes' | 'character_costume_images' | 'episode_character_mapping' | 'character_board_tabs';
     eventType: 'INSERT' | 'UPDATE' | 'DELETE';
     row: Record<string, unknown> | null;
     old: Record<string, unknown> | null;
@@ -4505,7 +4547,7 @@ export function startCharacterBoardRealtime(
   /** 채널 구독 상태 통지 — 렌더러가 SUBSCRIBED(재합류) 시 catch-up 로드를 트리거하는 데 사용. */
   onStatus?: (status: string) => void,
 ): () => void {
-  const tables = ['characters', 'character_costumes', 'character_costume_images', 'episode_character_mapping'] as const;
+  const tables = ['characters', 'character_costumes', 'character_costume_images', 'episode_character_mapping', 'character_board_tabs'] as const;
   const retry = createRetryManager('CharacterBoardRealtime');
   const episodeNumberCache = new Map<string, number>();
   // 이벤트마다 독립 async 로 enrich 하면 완료 순서가 도착 순서와 어긋날 수 있어(늦은 select 가
@@ -4572,7 +4614,7 @@ export function startCharacterBoardRealtime(
 }
 
 async function enrichEpisodeCharacterMappingPayload(
-  table: 'characters' | 'character_costumes' | 'character_costume_images' | 'episode_character_mapping',
+  table: 'characters' | 'character_costumes' | 'character_costume_images' | 'episode_character_mapping' | 'character_board_tabs',
   row: Record<string, unknown> | null,
   old: Record<string, unknown> | null,
   episodeNumberCache?: Map<string, number>,
