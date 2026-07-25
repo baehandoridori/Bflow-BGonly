@@ -331,8 +331,6 @@ export function CharacterBoardView() {
   const loaded = useCharacterBoardStore((s) => s.loaded);
   const pendingCharacterBoardRequest = useAppStore((s) => s.pendingCharacterBoardRequest);
   const setPendingCharacterBoardRequest = useAppStore((s) => s.setPendingCharacterBoardRequest);
-  const pendingCharacterAddRequest = useAppStore((s) => s.pendingCharacterAddRequest);
-  const setPendingCharacterAddRequest = useAppStore((s) => s.setPendingCharacterAddRequest);
 
   const [tab, setTab] = useState<BoardTab>('board');
   const [addOpen, setAddOpen] = useState(false);
@@ -349,14 +347,6 @@ export function CharacterBoardView() {
     setPendingOpenId(pendingCharacterBoardRequest.characterId);
     setPendingCharacterBoardRequest(null);
   }, [loaded, pendingCharacterBoardRequest, setPendingCharacterBoardRequest]);
-
-  // 사이드바 '+' 등에서 캐릭터 추가 창 열기 요청 — 데이터 로드와 무관(모달은 데이터 불필요).
-  useEffect(() => {
-    if (!pendingCharacterAddRequest) return;
-    setTab('board');
-    setAddOpen(true);
-    setPendingCharacterAddRequest(false);
-  }, [pendingCharacterAddRequest, setPendingCharacterAddRequest]);
 
   // 미소비 딥링크 요청 청소는 useAppStore.setView(다른 뷰로 이동 시)와 goBackNavigation이 담당 —
   //   언마운트 cleanup 방식은 StrictMode 이중 마운트에서 정상 요청까지 지워 사용하지 않는다.
