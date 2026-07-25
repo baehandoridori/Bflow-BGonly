@@ -22,11 +22,13 @@ interface PastedImage {
   url: string;
 }
 
-/** 제목 템플릿 — 버튼을 누르면 제목(title)만 채운다(비고는 직접 작성). '[모호 리깅 현황] - …' 포맷 (피드백 31a). */
+/** 제목 템플릿 — 버튼을 누르면 제목(title)만 채운다(비고는 직접 작성).
+ *  슬랙 워크플로 서식이 제목 앞에 '[모호 리깅 현황] - ' 머리말을 자동으로 붙이므로,
+ *  앱은 머리말 없이 보낸다 — 포함해 보내면 공지에 머리말이 두 번 찍힌다 (피드백 34a). */
 const TITLE_TEMPLATES: { key: string; label: string; title: string }[] = [
-  { key: 'general', label: '일반 리깅 완료', title: '[모호 리깅 현황] - 리깅 완료 공지' },
-  { key: 'drama', label: '드라마 톤 특수리깅 완료', title: '[모호 리깅 현황] - 드라마 톤 특수리깅 완료 공지' },
-  { key: 'fix', label: '수정·보완 완료', title: '[모호 리깅 현황] - 리깅 수정·보완 완료 공지' },
+  { key: 'general', label: '일반 리깅 완료', title: '리깅 완료 공지' },
+  { key: 'drama', label: '드라마 톤 특수리깅 완료', title: '드라마 톤 특수리깅 완료 공지' },
+  { key: 'fix', label: '수정·보완 완료', title: '리깅 수정·보완 완료 공지' },
 ];
 
 /**
@@ -35,7 +37,8 @@ const TITLE_TEMPLATES: { key: string; label: string; title: string }[] = [
  * - 캐릭터 작업 폴더 경로가 자동으로 뜨고(연결돼 있으면), 슬랙에는 jbbj://open/ 링크로 변환돼 나간다.
  * - 이미지는 그 복장의 이미지 중 고르거나(기본 대표), 화면 캡처를 Ctrl+V 로 바로 붙여넣는다(공지 전용 업로드).
  * - 비고는 선택 사항 — 없어도 보낼 수 있다(피드백 31d). 여러 줄은 슬랙에서 줄바꿈으로 이어진다.
- * - 워크플로 변수 CH_name="캐릭터" - "복장" / Path=폴더 jbbj 링크 / bigo=비고(줄바꿈) / image=고른 이미지 공개 URL.
+ * - 워크플로 변수 CH_name='"캐릭터" - "복장" 리깅완료' / Path=폴더 jbbj 링크 / bigo=비고(줄바꿈) / image=고른 이미지 공개 URL.
+ *   제목 머리말 '[모호 리깅 현황] - ' 은 슬랙 워크플로 서식이 붙인다(피드백 34a — 앱은 머리말 없이 전송).
  */
 export function RiggingAnnounceModal({
   character,
@@ -195,8 +198,8 @@ export function RiggingAnnounceModal({
     setSending(true);
     try {
       await sendRiggingAnnounce({
-        // 피드백 31(a): [내용] 줄 포맷 — '"캐릭터 이름" - "복장 이름"'. 복장이 여럿이어도 어떤 복장인지 구분된다.
-        characterName: `"${character.name}" - "${costume.name}"`,
+        // 피드백 34(b): [내용] 줄 포맷 — '"캐릭터 이름" - "복장 이름" 리깅완료'. 입력 없이도 완성 공지가 나간다.
+        characterName: `"${character.name}" - "${costume.name}" 리깅완료`,
         title: title.trim(),
         folderPath: character.workFolderPath,
         notes,
@@ -265,6 +268,7 @@ export function RiggingAnnounceModal({
             placeholder="예) 드라마 톤 특수리깅 완료 공지"
             className="bg-transparent border border-bg-border rounded-md px-3 py-2 text-sm text-text-primary outline-none focus:border-accent/50"
           />
+          <span className="text-[11px] text-text-secondary/80">슬랙 공지 제목 앞에는 [모호 리깅 현황] 머리말이 자동으로 붙어요 — 제목에 또 쓰지 않아도 돼요.</span>
         </div>
 
         {/* 경로 (자동) — 슬랙에는 jbbj://open/ 링크로 변환돼 나간다 (피드백 31c) */}
