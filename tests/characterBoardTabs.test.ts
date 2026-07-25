@@ -75,3 +75,16 @@ test('배선 앵커: 마이그레이션·Realtime·IPC·store', () => {
   const mock = readFileSync('src/mocks/devElectronAPI.ts', 'utf8');
   assert.match(mock, /supabaseLoadCharacterBoardTabs/);
 });
+
+test('UI 앵커: 탭 스트립·그룹 뷰·검색 색인', () => {
+  const boardView = readFileSync('src/views/CharacterBoardView.tsx', 'utf8');
+  assert.match(boardView, /function BoardTabStrip/);
+  assert.match(boardView, /const indexedIds = useMemo/);
+  assert.match(boardView, /!indexedIds\?\.has\(c\.id\)/);
+  assert.match(boardView, /<CharacterTabGroupsView/);
+  const groupsView = readFileSync('src/components/characters/CharacterTabGroupsView.tsx', 'utf8');
+  assert.match(groupsView, /미분류/);
+  assert.match(groupsView, /moveCharacterToGroup/);
+  assert.match(groupsView, /reorderWithinGroup/);
+  assert.match(groupsView, /draggingIdRef/);
+});

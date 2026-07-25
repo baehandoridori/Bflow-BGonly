@@ -11,7 +11,7 @@
  */
 
 import { useCallback, useContext, useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react';
-import { Archive, Plus, Image as ImageIcon, Search, Ruler, LayoutGrid, Grid3x3, List, ExternalLink } from 'lucide-react';
+import { Archive, Plus, Image as ImageIcon, Search, Ruler, LayoutGrid, Grid3x3, List, ExternalLink, X } from 'lucide-react';
 import { useCharacterBoardStore } from '@/stores/useCharacterBoardStore';
 import { moveCostumeInOrder, dropEdgeFor } from '@/stores/characterBoardStoreHelpers';
 import { useAppStore } from '@/stores/useAppStore';
@@ -25,6 +25,8 @@ import { AddCharacterModal } from '@/components/characters/AddCharacterModal';
 import { loadPersistedCharacterViewMode, savePersistedCharacterViewMode, type CharacterBoardViewMode } from '@/utils/characterViewPersist';
 import { CharacterListRow } from '@/components/characters/CharacterListRow';
 import { IsPopupContext } from '@/components/widgets/Widget';
+import { CharacterTabGroupsView } from '@/components/characters/CharacterTabGroupsView';
+import type { CharacterBoardTab } from '@/types';
 
 type BoardTab = 'board' | 'episode-assets';
 
@@ -47,12 +49,136 @@ function TabButton({ active, onClick, children }: { active: boolean; onClick: ()
   );
 }
 
+/** 사용자 정의 탭 스트립 (피드백 41) — '전체' + 사용자 탭 + 추가. 이름 변경=더블클릭, 삭제=활성 탭 X → 2단계 확인. */
+function BoardTabStrip({ tabs, activeTabId, onSelect, onAdd, onRename, onDelete }: {
+  tabs: CharacterBoardTab[];
+  activeTabId: string | null;
+  onSelect: (id: string | null) => void;
+  onAdd: (name: string) => void;
+  onRename: (id: string, name: string) => void;
+  onDelete: (id: string) => void;
+}) {
+  const [adding, setAdding] = useState(false);
+  const [draft, setDraft] = useState('');
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editDraft, setEditDraft] = useState('');
+  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
+
+  const commitAdd = () => {
+    const name = draft.trim();
+    if (name) onAdd(name);
+    setDraft('');
+    setAdding(false);
+  };
+  const commitRename = () => {
+    const name = editDraft.trim();
+    if (editingId && name) onRename(editingId, name);
+    setEditingId(null);
+    setEditDraft('');
+  };
+
+  return (
+    <div className="flex flex-wrap items-center gap-1.5">
+      <button
+        type="button"
+        onClick={() => onSelect(null)}
+        className={cn('px-2.5 py-1 rounded-full text-xs border transition-colors cursor-pointer',
+          activeTabId === null ? 'border-accent bg-accent/15 text-accent' : 'border-bg-border text-text-secondary hover:text-text-primary')}
+      >
+        전체
+      </button>
+      {tabs.map((t) => (
+        editingId === t.id ? (
+          <input
+            key={t.id}
+            autoFocus
+            value={editDraft}
+            onChange={(e) => setEditDraft(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') commitRename();
+              if (e.key === 'Escape') { setEditingId(null); setEditDraft(''); }
+            }}
+            onBlur={commitRename}
+            className="w-28 bg-transparent border border-accent/50 rounded-full px-2.5 py-1 text-xs text-text-primary outline-none"
+          />
+        ) : (
+          <span key={t.id} className="inline-flex items-center">
+            <button
+              type="button"
+              onClick={() => onSelect(t.id)}
+              onDoubleClick={() => { setEditingId(t.id); setEditDraft(t.name); }}
+              title="더블클릭하면 이름을 바꿔요"
+              className={cn('px-2.5 py-1 rounded-full text-xs border transition-colors cursor-pointer',
+                activeTabId === t.id ? 'border-accent bg-accent/15 text-accent' : 'border-bg-border text-text-secondary hover:text-text-primary')}
+            >
+              {t.name}
+            </button>
+            {activeTabId === t.id && (
+              confirmDeleteId === t.id ? (
+                <span className="ml-1 flex items-center gap-1 text-xs">
+                  <button
+                    type="button"
+                    onClick={() => { onDelete(t.id); setConfirmDeleteId(null); }}
+                    className="rounded px-1.5 py-0.5 hover:bg-bg-border/30 cursor-pointer"
+                    style={{ color: 'var(--status-error)' }}
+                  >
+                    삭제
+                  </button>
+                  <button type="button" onClick={() => setConfirmDeleteId(null)} className="rounded px-1.5 py-0.5 text-text-secondary hover:bg-bg-border/30 cursor-pointer">
+                    취소
+                  </button>
+                </span>
+              ) : (
+                <button
+                  type="button"
+                  aria-label={`${t.name} 탭 삭제`}
+                  onClick={() => setConfirmDeleteId(t.id)}
+                  className="ml-0.5 rounded p-1 text-text-secondary hover:text-text-primary hover:bg-bg-border/30 cursor-pointer"
+                >
+                  <X size={11} />
+                </button>
+              )
+            )}
+          </span>
+        )
+      ))}
+      {adding ? (
+        <input
+          autoFocus
+          value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') commitAdd();
+            if (e.key === 'Escape') { setAdding(false); setDraft(''); }
+          }}
+          onBlur={commitAdd}
+          placeholder="탭 이름"
+          className="w-28 bg-transparent border border-bg-border rounded-full px-2.5 py-1 text-xs text-text-primary outline-none focus:border-accent/50"
+        />
+      ) : (
+        <button
+          type="button"
+          onClick={() => setAdding(true)}
+          className="flex items-center gap-1 rounded-full border border-dashed border-bg-border px-2.5 py-1 text-xs text-text-secondary hover:border-accent/50 hover:text-text-primary cursor-pointer"
+        >
+          <Plus size={11} /> 탭
+        </button>
+      )}
+    </div>
+  );
+}
+
 function CharacterGrid({ onAdd, pendingOpenId, onConsumeOpen }: { onAdd: () => void; pendingOpenId?: string | null; onConsumeOpen?: () => void }) {
   const characters = useCharacterBoardStore((s) => s.characters);
   const byCharacter = useCharacterBoardStore((s) => s.byCharacter);
   const loaded = useCharacterBoardStore((s) => s.loaded);
   const loadError = useCharacterBoardStore((s) => s.loadError);
   const reload = useCharacterBoardStore((s) => s.load);
+  const tabs = useCharacterBoardStore((s) => s.tabs);
+  const addTab = useCharacterBoardStore((s) => s.addTab);
+  const renameTab = useCharacterBoardStore((s) => s.renameTab);
+  const deleteTab = useCharacterBoardStore((s) => s.deleteTab);
+  const updateTabGroups = useCharacterBoardStore((s) => s.updateTabGroups);
 
   const [detailRequest, setDetailRequest] = useState<{ id: string; nonce: number; costumeId?: string } | null>(null);
   const [query, setQuery] = useState('');
@@ -66,6 +192,12 @@ function CharacterGrid({ onAdd, pendingOpenId, onConsumeOpen }: { onAdd: () => v
     setViewMode(mode);
     savePersistedCharacterViewMode(mode);
   };
+  // 사용자 정의 탭 (피드백 41). null = '전체'. 다른 사용자가 탭을 지우면 자동으로 '전체'로 복귀.
+  const [activeTabId, setActiveTabId] = useState<string | null>(null);
+  const activeTab = activeTabId ? tabs.find((t) => t.id === activeTabId) ?? null : null;
+  useEffect(() => {
+    if (activeTabId && !activeTab) setActiveTabId(null);
+  }, [activeTabId, activeTab]);
 
   const detailCharacter = useMemo(() => characters.find((c) => c.id === detailRequest?.id) ?? null, [characters, detailRequest?.id]);
   useEffect(() => { if (detailRequest && !detailCharacter) setDetailRequest(null); }, [detailRequest, detailCharacter]);
@@ -96,15 +228,29 @@ function CharacterGrid({ onAdd, pendingOpenId, onConsumeOpen }: { onAdd: () => v
     return set;
   }
 
+  // 피드백 41-4: 탭·그룹 이름을 검색 색인으로 — 이름이 일치하는 탭/그룹에 배치된 캐릭터도 검색에 걸린다.
+  const indexedIds = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    if (!q) return null;
+    const ids = new Set<string>();
+    for (const t of tabs) {
+      const tabHit = t.name.toLowerCase().includes(q);
+      for (const g of t.groups) {
+        if (tabHit || g.name.toLowerCase().includes(q)) for (const id of g.characterIds) ids.add(id);
+      }
+    }
+    return ids;
+  }, [tabs, query]);
+
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
     return visibleCharacters.filter((c) => {
-      if (q && !c.name.toLowerCase().includes(q)) return false;
+      if (q && !c.name.toLowerCase().includes(q) && !indexedIds?.has(c.id)) return false;
       if (activeTags.length > 0) { const tags = characterTags(c.id); if (!activeTags.every((t) => tags.has(t))) return false; }
       return true;
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [visibleCharacters, query, activeTags, byCharacter]);
+  }, [visibleCharacters, query, activeTags, byCharacter, indexedIds]);
   // 키 비교 보기: 가시 캐릭터 중 기준 키 최댓값을 300px 에 매핑, 나머지는 비례(clamp 90~300). 미설정은 기본 170.
   const maxReferenceHeight = useMemo(() => {
     let m = 0;
@@ -218,6 +364,15 @@ function CharacterGrid({ onAdd, pendingOpenId, onConsumeOpen }: { onAdd: () => v
     <div className="flex flex-col gap-4">
       {/* 검색·버튼·필터 칩 — 스크롤해도 상단에 붙는다 (피드백 38). 배경은 토큰 기반이라 라이트/다크 자동 대응. */}
       <div className="sticky top-0 z-20 -mx-6 bg-bg-primary/85 px-6 pt-4 pb-3 backdrop-blur-md flex flex-col gap-2.5">
+        {/* 사용자 정의 탭 (피드백 41) */}
+        <BoardTabStrip
+          tabs={tabs}
+          activeTabId={activeTabId}
+          onSelect={(id) => { setActiveTabId(id); if (id !== null) { setHeightCompareMode(false); setShowArchived(false); } }}
+          onAdd={(name) => void addTab(name).then((t) => { if (t) setActiveTabId(t.id); })}
+          onRename={(id, name) => void renameTab(id, name)}
+          onDelete={(id) => void deleteTab(id)}
+        />
         <div className="flex items-center justify-between gap-3 flex-wrap">
           <div className="relative w-full max-w-xs">
             <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-text-secondary" />
@@ -251,7 +406,7 @@ function CharacterGrid({ onAdd, pendingOpenId, onConsumeOpen }: { onAdd: () => v
             </div>
             <button
               type="button"
-              onClick={() => setHeightCompareMode((v) => !v)}
+              onClick={() => { setHeightCompareMode((v) => !v); setActiveTabId(null); }}
               title="캐릭터를 기준 키(px)에 맞춰 크기 비교로 나열해요"
               className={cn(
                 'flex items-center gap-1.5 rounded-lg border px-3 py-2 text-sm transition-colors shrink-0 cursor-pointer',
@@ -265,7 +420,7 @@ function CharacterGrid({ onAdd, pendingOpenId, onConsumeOpen }: { onAdd: () => v
             {archivedCharacters.length > 0 && (
               <button
                 type="button"
-                onClick={() => setShowArchived((value) => !value)}
+                onClick={() => { setShowArchived((value) => !value); setActiveTabId(null); }}
                 className={cn(
                   'flex items-center gap-1.5 rounded-lg border px-3 py-2 text-sm transition-colors shrink-0 cursor-pointer',
                   showArchived
@@ -291,7 +446,18 @@ function CharacterGrid({ onAdd, pendingOpenId, onConsumeOpen }: { onAdd: () => v
         )}
       </div>
 
-      {visibleCharacters.length === 0 ? (
+      {activeTab && !heightCompareMode && !showArchived ? (
+        <CharacterTabGroupsView
+          tab={activeTab}
+          characters={filtered}
+          byCharacter={byCharacter}
+          viewMode={viewMode}
+          searching={Boolean(query.trim()) || activeTags.length > 0}
+          onOpen={openCharacterDetail}
+          onContextMenu={openCardContextMenu}
+          onUpdateGroups={(groups) => void updateTabGroups(activeTab.id, groups)}
+        />
+      ) : visibleCharacters.length === 0 ? (
         <div className="flex flex-col items-center justify-center gap-3 py-16 text-center text-text-secondary">
           <ImageIcon size={28} className="opacity-35" />
           <div className="text-sm">
