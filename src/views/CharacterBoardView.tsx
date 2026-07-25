@@ -167,7 +167,7 @@ function CharacterGrid({ onAdd, pendingOpenId, onConsumeOpen }: { onAdd: () => v
   if (!loaded) {
     if (loadError) {
       return (
-        <div className="flex flex-col items-center justify-center gap-3 h-40 text-center">
+        <div className="mt-4 flex flex-col items-center justify-center gap-3 h-40 text-center">
           <span className="text-sm text-text-secondary">캐릭터 현황판을 불러오지 못했어요.</span>
           <button
             type="button"
@@ -180,7 +180,7 @@ function CharacterGrid({ onAdd, pendingOpenId, onConsumeOpen }: { onAdd: () => v
       );
     }
     return (
-      <div className="grid grid-cols-[repeat(auto-fill,minmax(180px,1fr))] gap-4">
+      <div className="mt-4 grid grid-cols-[repeat(auto-fill,minmax(180px,1fr))] gap-4">
         {Array.from({ length: 6 }).map((_, index) => (
           <div key={index} className="overflow-hidden rounded-xl border border-bg-border bg-bg-card">
             <div className="aspect-[3/4] bg-bg-border/30 animate-pulse motion-reduce:animate-none" />
@@ -200,7 +200,8 @@ function CharacterGrid({ onAdd, pendingOpenId, onConsumeOpen }: { onAdd: () => v
 
   return (
     <div className="flex flex-col gap-4">
-      <div className="flex flex-col gap-2.5">
+      {/* 검색·버튼·필터 칩 — 스크롤해도 상단에 붙는다 (피드백 38). 배경은 토큰 기반이라 라이트/다크 자동 대응. */}
+      <div className="sticky top-0 z-20 -mx-6 bg-bg-primary/85 px-6 pt-4 pb-3 backdrop-blur-md flex flex-col gap-2.5">
         <div className="flex items-center justify-between gap-3 flex-wrap">
           <div className="relative w-full max-w-xs">
             <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-text-secondary" />
@@ -352,8 +353,9 @@ export function CharacterBoardView() {
   //   언마운트 cleanup 방식은 StrictMode 이중 마운트에서 정상 요청까지 지워 사용하지 않는다.
 
   return (
-    <div className="h-full overflow-y-auto p-6">
-      <div className="mb-5 flex flex-col gap-3">
+    <div className="h-full flex flex-col">
+      {/* 제목·탭은 스크롤 밖 고정 영역 — 상단 메뉴가 항상 보인다 (피드백 38). */}
+      <div className="px-6 pt-6 flex flex-col gap-3">
         <div>
           <h1 className="text-xl font-bold text-text-primary">캐릭터 현황판</h1>
           <p className="text-sm text-text-secondary mt-0.5">
@@ -366,11 +368,15 @@ export function CharacterBoardView() {
         </div>
       </div>
 
-      {tab === 'board' ? (
-        <CharacterGrid onAdd={() => setAddOpen(true)} pendingOpenId={pendingOpenId} onConsumeOpen={() => setPendingOpenId(null)} />
-      ) : (
-        <EpisodeAssetBoard onOpenCharacter={(id) => { setTab('board'); setPendingOpenId(id); }} />
-      )}
+      <div className="flex-1 min-h-0 overflow-y-auto px-6 pb-6">
+        {tab === 'board' ? (
+          <CharacterGrid onAdd={() => setAddOpen(true)} pendingOpenId={pendingOpenId} onConsumeOpen={() => setPendingOpenId(null)} />
+        ) : (
+          <div className="pt-4">
+            <EpisodeAssetBoard onOpenCharacter={(id) => { setTab('board'); setPendingOpenId(id); }} />
+          </div>
+        )}
+      </div>
 
       {addOpen && (
         <AddCharacterModal
