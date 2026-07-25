@@ -11,7 +11,7 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react';
-import { Archive, Plus, Image as ImageIcon, Search, Ruler } from 'lucide-react';
+import { Archive, Plus, Image as ImageIcon, Search, Ruler, LayoutGrid, Grid3x3, List } from 'lucide-react';
 import { useCharacterBoardStore } from '@/stores/useCharacterBoardStore';
 import { moveCostumeInOrder, dropEdgeFor } from '@/stores/characterBoardStoreHelpers';
 import { useAppStore } from '@/stores/useAppStore';
@@ -22,8 +22,17 @@ import { TagPill } from '@/components/characters/TagChips';
 import { CharacterCard, EMPTY_COSTUMES } from '@/components/characters/CharacterCard';
 import { CharacterDetailModal } from '@/components/characters/CharacterDetailModal';
 import { AddCharacterModal } from '@/components/characters/AddCharacterModal';
+import { loadPersistedCharacterViewMode, savePersistedCharacterViewMode, type CharacterBoardViewMode } from '@/utils/characterViewPersist';
+import { CharacterListRow } from '@/components/characters/CharacterListRow';
 
 type BoardTab = 'board' | 'episode-assets';
+
+/** 보기 방식 토글 옵션 (피드백 40). */
+const VIEW_MODE_OPTIONS: { mode: CharacterBoardViewMode; label: string; Icon: typeof LayoutGrid }[] = [
+  { mode: 'card', label: '카드 보기', Icon: LayoutGrid },
+  { mode: 'compact', label: '이미지 없는 카드 보기', Icon: Grid3x3 },
+  { mode: 'list', label: '리스트 보기', Icon: List },
+];
 
 function TabButton({ active, onClick, children }: { active: boolean; onClick: () => void; children: React.ReactNode }) {
   return (
@@ -50,6 +59,12 @@ function CharacterGrid({ onAdd, pendingOpenId, onConsumeOpen }: { onAdd: () => v
   const [cardMenu, setCardMenu] = useState<{ characterId: string; x: number; y: number; costumeId?: string } | null>(null);
   const [showArchived, setShowArchived] = useState(false);
   const [heightCompareMode, setHeightCompareMode] = useState(false); // '키 비교 보기'(T2-3)
+  // 보기 방식 (피드백 40) — 마지막 선택을 localStorage 에 영속화(씬 뷰 scenesViewPersist 패턴).
+  const [viewMode, setViewMode] = useState<CharacterBoardViewMode>(() => loadPersistedCharacterViewMode() ?? 'card');
+  const changeViewMode = (mode: CharacterBoardViewMode) => {
+    setViewMode(mode);
+    savePersistedCharacterViewMode(mode);
+  };
 
   const detailCharacter = useMemo(() => characters.find((c) => c.id === detailRequest?.id) ?? null, [characters, detailRequest?.id]);
   useEffect(() => { if (detailRequest && !detailCharacter) setDetailRequest(null); }, [detailRequest, detailCharacter]);
@@ -137,7 +152,7 @@ function CharacterGrid({ onAdd, pendingOpenId, onConsumeOpen }: { onAdd: () => v
   // ─── 카드 드래그 재배치(F29) ───
   const reorderCharacters = useCharacterBoardStore((s) => s.reorderCharacters);
   // 검색/태그 필터·키 비교·보관 목록에서는 비활성 (파생 정렬/부분 목록 위 재배치는 비직관적).
-  const cardDragEnabled = !showArchived && !heightCompareMode && !query.trim() && activeTags.length === 0;
+  const cardDragEnabled = viewMode !== 'list' && !showArchived && !heightCompareMode && !query.trim() && activeTags.length === 0;
   const [draggingCardId, setDraggingCardId] = useState<string | null>(null);
   const [dropTargetId, setDropTargetId] = useState<string | null>(null);
   const draggingCardIdRef = useRef<string | null>(null); // drop 시 stale closure 회피 — 복장 드래그와 동일 ref 병행 패턴.
@@ -208,6 +223,31 @@ function CharacterGrid({ onAdd, pendingOpenId, onConsumeOpen }: { onAdd: () => v
             <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="이름으로 검색" className="w-full bg-bg-card border border-bg-border rounded-lg pl-8 pr-3 py-2 text-sm text-text-primary outline-none focus:border-accent/50" />
           </div>
           <div className="flex items-center gap-1.5">
+            {/* 보기 방식 토글 (피드백 40) — 카드 / 이미지 없는 카드 / 리스트. 키 비교 중에는 카드형 고정이라 비활성.
+                pointer-events-none 을 쓰면 hover 가 막혀 안내 title 이 영영 안 뜬다 — disabled 로 클릭만 막는다. */}
+            <div
+              role="group"
+              aria-label="보기 방식"
+              title={heightCompareMode ? '키 비교 보기 중에는 카드 보기로 고정돼요' : undefined}
+              className={cn('flex items-center rounded-lg border border-bg-border p-0.5 shrink-0', heightCompareMode && 'opacity-45')}
+            >
+              {VIEW_MODE_OPTIONS.map(({ mode, label, Icon }) => (
+                <button
+                  key={mode}
+                  type="button"
+                  aria-label={label}
+                  title={heightCompareMode ? undefined : label}
+                  disabled={heightCompareMode}
+                  onClick={() => changeViewMode(mode)}
+                  className={cn(
+                    'flex h-7 w-7 items-center justify-center rounded-md transition-colors cursor-pointer disabled:cursor-default',
+                    viewMode === mode && !heightCompareMode ? 'bg-accent/20 text-accent' : 'text-text-secondary hover:text-text-primary',
+                  )}
+                >
+                  <Icon size={14} />
+                </button>
+              ))}
+            </div>
             <button
               type="button"
               onClick={() => setHeightCompareMode((v) => !v)}
@@ -275,28 +315,45 @@ function CharacterGrid({ onAdd, pendingOpenId, onConsumeOpen }: { onAdd: () => v
           </button>
         </div>
       ) : (
-        <div className={heightCompareMode ? 'flex flex-wrap items-end gap-4' : 'grid grid-cols-[repeat(auto-fill,minmax(180px,1fr))] gap-4'}>
+        <div className={heightCompareMode
+          ? 'flex flex-wrap items-end gap-4'
+          : viewMode === 'list'
+            ? 'flex flex-col gap-1.5'
+            : viewMode === 'compact'
+              ? 'grid grid-cols-[repeat(auto-fill,minmax(150px,1fr))] gap-3'
+              : 'grid grid-cols-[repeat(auto-fill,minmax(180px,1fr))] gap-4'}>
           {displayCharacters.map((c) => (
-            <CharacterCard
-              key={c.id}
-              character={c}
-              costumes={byCharacter.get(c.id) ?? EMPTY_COSTUMES}
-              onOpen={openCharacterDetail}
-              onContextMenu={openCardContextMenu}
-              imageHeightPx={heightCompareMode
-                ? (c.referenceHeightPx && maxReferenceHeight
-                    ? Math.max(90, Math.min(300, Math.round((300 * c.referenceHeightPx) / maxReferenceHeight)))
-                    : 170)
-                : undefined}
-              referenceUnset={heightCompareMode && !c.referenceHeightPx}
-              onDragStartCard={cardDragEnabled ? handleCardDragStart : undefined}
-              onDragOverCard={cardDragEnabled ? handleCardDragOver : undefined}
-              onDropCard={cardDragEnabled ? handleCardDrop : undefined}
-              onDragEndCard={cardDragEnabled ? handleCardDragEnd : undefined}
-              dragging={draggingCardId === c.id}
-              dropTarget={dropTargetId === c.id && draggingCardId !== c.id}
-              dropEdge={cardDragEnabled && dropTargetId === c.id ? dropEdgeFor(cardOrderIds, draggingCardId, c.id) : null}
-            />
+            !heightCompareMode && viewMode === 'list' ? (
+              <CharacterListRow
+                key={c.id}
+                character={c}
+                costumes={byCharacter.get(c.id) ?? EMPTY_COSTUMES}
+                onOpen={openCharacterDetail}
+                onContextMenu={openCardContextMenu}
+              />
+            ) : (
+              <CharacterCard
+                key={c.id}
+                character={c}
+                costumes={byCharacter.get(c.id) ?? EMPTY_COSTUMES}
+                onOpen={openCharacterDetail}
+                onContextMenu={openCardContextMenu}
+                compact={!heightCompareMode && viewMode === 'compact'}
+                imageHeightPx={heightCompareMode
+                  ? (c.referenceHeightPx && maxReferenceHeight
+                      ? Math.max(90, Math.min(300, Math.round((300 * c.referenceHeightPx) / maxReferenceHeight)))
+                      : 170)
+                  : undefined}
+                referenceUnset={heightCompareMode && !c.referenceHeightPx}
+                onDragStartCard={cardDragEnabled ? handleCardDragStart : undefined}
+                onDragOverCard={cardDragEnabled ? handleCardDragOver : undefined}
+                onDropCard={cardDragEnabled ? handleCardDrop : undefined}
+                onDragEndCard={cardDragEnabled ? handleCardDragEnd : undefined}
+                dragging={draggingCardId === c.id}
+                dropTarget={dropTargetId === c.id && draggingCardId !== c.id}
+                dropEdge={cardDragEnabled && dropTargetId === c.id ? dropEdgeFor(cardOrderIds, draggingCardId, c.id) : null}
+              />
+            )
           ))}
         </div>
       )}
