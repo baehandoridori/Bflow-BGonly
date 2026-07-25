@@ -10,8 +10,8 @@
  * 접근 권한은 사이드바에서 게이팅 (useCharacterBoardAccess).
  */
 
-import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react';
-import { Archive, Plus, Image as ImageIcon, Search, Ruler, LayoutGrid, Grid3x3, List } from 'lucide-react';
+import { useCallback, useContext, useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react';
+import { Archive, Plus, Image as ImageIcon, Search, Ruler, LayoutGrid, Grid3x3, List, ExternalLink } from 'lucide-react';
 import { useCharacterBoardStore } from '@/stores/useCharacterBoardStore';
 import { moveCostumeInOrder, dropEdgeFor } from '@/stores/characterBoardStoreHelpers';
 import { useAppStore } from '@/stores/useAppStore';
@@ -24,6 +24,7 @@ import { CharacterDetailModal } from '@/components/characters/CharacterDetailMod
 import { AddCharacterModal } from '@/components/characters/AddCharacterModal';
 import { loadPersistedCharacterViewMode, savePersistedCharacterViewMode, type CharacterBoardViewMode } from '@/utils/characterViewPersist';
 import { CharacterListRow } from '@/components/characters/CharacterListRow';
+import { IsPopupContext } from '@/components/widgets/Widget';
 
 type BoardTab = 'board' | 'episode-assets';
 
@@ -393,6 +394,8 @@ export function CharacterBoardView() {
   const [tab, setTab] = useState<BoardTab>('board');
   const [addOpen, setAddOpen] = useState(false);
   const [pendingOpenId, setPendingOpenId] = useState<string | null>(null);
+  // 팝업 창 안에서는 "새 창으로" 버튼을 숨긴다 (피드백 36 — 팝업이 팝업을 또 열지 않게).
+  const isPopup = useContext(IsPopupContext);
 
   useEffect(() => {
     const release = ensureLoadedAndRealtime();
@@ -413,11 +416,23 @@ export function CharacterBoardView() {
     <div className="h-full flex flex-col">
       {/* 제목·탭은 스크롤 밖 고정 영역 — 상단 메뉴가 항상 보인다 (피드백 38). */}
       <div className="px-6 pt-6 flex flex-col gap-3">
-        <div>
-          <h1 className="text-xl font-bold text-text-primary">캐릭터 현황판</h1>
-          <p className="text-sm text-text-secondary mt-0.5">
-            {tab === 'board' ? '캐릭터별 복장 디자인·리깅 진행 상황' : '에피소드별 등장 캐릭터·이 편 주의점·복장'}
-          </p>
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <h1 className="text-xl font-bold text-text-primary">캐릭터 현황판</h1>
+            <p className="text-sm text-text-secondary mt-0.5">
+              {tab === 'board' ? '캐릭터별 복장 디자인·리깅 진행 상황' : '에피소드별 등장 캐릭터·이 편 주의점·복장'}
+            </p>
+          </div>
+          {!isPopup && typeof window.electronAPI?.widgetOpenPopup === 'function' && (
+            <button
+              type="button"
+              onClick={() => { void window.electronAPI?.widgetOpenPopup?.('character-board', '캐릭터 현황판'); }}
+              title="캐릭터 현황판을 별도 창으로 열어요 — 다른 화면을 보면서 같이 쓸 수 있어요"
+              className="flex items-center gap-1.5 rounded-lg border border-bg-border px-3 py-2 text-sm text-text-secondary hover:border-text-secondary/40 hover:text-text-primary shrink-0 cursor-pointer"
+            >
+              <ExternalLink size={15} /> 새 창으로
+            </button>
+          )}
         </div>
         <div className="flex items-center gap-1.5 border-b border-bg-border pb-2">
           <TabButton active={tab === 'board'} onClick={() => setTab('board')}>캐릭터 현황판</TabButton>

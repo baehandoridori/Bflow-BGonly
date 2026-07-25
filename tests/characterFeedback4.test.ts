@@ -61,3 +61,18 @@ test('characterViewPersist: node 환경 방어 + 스텁 왕복', () => {
   assert.equal(loadPersistedCharacterViewMode(), null);
   delete (globalThis as Record<string, unknown>).localStorage;
 });
+
+test('피드백 36: 캐릭터 현황판 팝업 창 — 프리셋 + 게이트 + 버튼', () => {
+  const main = readFileSync('electron/main.ts', 'utf8');
+  assert.match(main, /const WIDGET_POPUP_DEFAULTS/);
+  assert.match(main, /'character-board': \{ width: 1160, height: 780, alwaysOnTop: false \}/);
+  assert.match(main, /preset\?\.width \?\? 420/);
+  assert.match(main, /preset\?\.alwaysOnTop \?\? true/);
+  const popup = readFileSync('src/views/WidgetPopup.tsx', 'utf8');
+  assert.match(popup, /function CharacterBoardPopupBody/);
+  assert.match(popup, /useCharacterBoardAccessState/);
+  assert.match(popup, /'character-board': \{ label: '캐릭터 현황판', component: <CharacterBoardPopupBody \/> \}/);
+  assert.match(boardView, /widgetOpenPopup\?\.\('character-board', '캐릭터 현황판'\)/);
+  assert.match(boardView, /새 창으로/);
+  assert.match(boardView, /useContext\(IsPopupContext\)/);
+});
