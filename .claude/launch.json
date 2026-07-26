@@ -4,63 +4,106 @@
     {
       "name": "vite",
       "runtimeExecutable": "npm",
-      "runtimeArgs": ["run", "dev"],
+      "runtimeArgs": [
+        "run",
+        "dev"
+      ],
       "port": 5173,
       "autoPort": true
     },
     {
       "name": "vite-preview",
       "runtimeExecutable": "npm",
-      "runtimeArgs": ["run", "dev:renderer"],
+      "runtimeArgs": [
+        "run",
+        "dev:renderer"
+      ],
       "port": 5190,
       "autoPort": true
     },
     {
       "name": "dist-static",
       "runtimeExecutable": "npx",
-      "runtimeArgs": ["-y", "http-server", "dist", "-p", "5182", "--silent"],
+      "runtimeArgs": [
+        "-y",
+        "http-server",
+        "dist",
+        "-p",
+        "5182",
+        "--silent"
+      ],
       "port": 5182
     },
     {
       "name": "mockup",
       "runtimeExecutable": "python",
-      "runtimeArgs": ["-m", "http.server", "5555"],
-      "port": 5555
+      "runtimeArgs": [
+        "-m",
+        "http.server",
+        "5730"
+      ],
+      "port": 5730
     },
     {
       "name": "comment-mockup",
       "runtimeExecutable": "python",
-      "runtimeArgs": ["-m", "http.server", "5557"],
+      "runtimeArgs": [
+        "-m",
+        "http.server",
+        "5557"
+      ],
       "port": 5557
     },
     {
       "name": "scene-meta-mockup",
       "runtimeExecutable": "python",
-      "runtimeArgs": ["-m", "http.server", "5558"],
+      "runtimeArgs": [
+        "-m",
+        "http.server",
+        "5558"
+      ],
       "port": 5558
     },
     {
       "name": "font-mockup",
       "runtimeExecutable": "python",
-      "runtimeArgs": ["-m", "http.server", "5559"],
+      "runtimeArgs": [
+        "-m",
+        "http.server",
+        "5559"
+      ],
       "port": 5559
     },
     {
       "name": "ux-polish-mockup",
       "runtimeExecutable": "python",
-      "runtimeArgs": ["-m", "http.server", "5560"],
+      "runtimeArgs": [
+        "-m",
+        "http.server",
+        "5560"
+      ],
       "port": 5560
     },
     {
       "name": "compositing-mockup",
       "runtimeExecutable": "python",
-      "runtimeArgs": ["-m", "http.server", "5561"],
+      "runtimeArgs": [
+        "-m",
+        "http.server",
+        "5561"
+      ],
       "port": 5561
     },
     {
       "name": "my-tasks-mockup",
       "runtimeExecutable": "python",
-      "runtimeArgs": ["-m", "http.server", "5562", "--directory", ".superpowers/brainstorm/879-1782563792"],
+      "runtimeArgs": [
+        "-m",
+        "http.server",
+        "5562",
+        "--directory",
+        ".superpowers/brainstorm/879-1782563792"
+      ],
       "port": 5562,
       "autoPort": true
     }

@@ -1,0 +1,628 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>B flow · 캐릭터 탭·그룹 UI 시안 3종</title>
+<style>
+  :root {
+    --bg: #0F1117; --card: #1A1D27; --card-2: #151823; --border: #2D3041;
+    --ink: #E8E8EE; --ink-2: #8B8DA3; --accent: #6C5CE7;
+    --lo: #74B9FF; --done: #A29BFE; --review: #FDCB6E; --png: #00B894;
+    --error: #FF7675;
+    --z-sticky: 20; --z-drag: 40; --z-toast: 60;
+    --card-w: 132px; --thumb-ratio: 118%;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { height: 100%; }
+  body {
+    background: var(--bg); color: var(--ink);
+    font-family: "Pretendard", "Pretendard Variable", "Malgun Gothic", system-ui, sans-serif;
+    font-size: 14px; line-height: 1.5;
+    display: flex; flex-direction: column; overflow: hidden;
+  }
+  button { font: inherit; color: inherit; background: none; border: 0; cursor: pointer; }
+
+  /* ── 상단 바: 시안 전환 + 조정 ── */
+  .topbar {
+    display: flex; align-items: center; gap: 16px; flex-wrap: wrap;
+    padding: 12px 20px; border-bottom: 1px solid var(--border); background: var(--card-2);
+  }
+  .topbar h1 { font-size: 15px; font-weight: 700; letter-spacing: -0.01em; }
+  .topbar h1 span { color: var(--ink-2); font-weight: 500; }
+  .seg { display: flex; border: 1px solid var(--border); border-radius: 10px; padding: 3px; gap: 2px; }
+  .seg button {
+    padding: 6px 14px; border-radius: 7px; font-size: 13px; font-weight: 600; color: var(--ink-2);
+    transition: background 160ms ease-out, color 160ms ease-out;
+  }
+  .seg button:hover { color: var(--ink); }
+  .seg button[aria-pressed="true"] { background: color-mix(in oklab, var(--accent) 22%, transparent); color: #B7ADFF; }
+  .knobs { display: flex; align-items: center; gap: 10px; margin-left: auto; color: var(--ink-2); font-size: 12px; }
+  .knobs .seg button { padding: 4px 10px; font-size: 12px; }
+
+  .blurb {
+    padding: 10px 20px; border-bottom: 1px solid var(--border);
+    color: var(--ink-2); font-size: 13px; display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap;
+  }
+  .blurb b { color: var(--ink); font-weight: 700; }
+  .blurb .fix { color: #9BE8C8; }
+
+  /* ── 스테이지 공통 ── */
+  #stage { flex: 1; min-height: 0; display: flex; }
+  .pane { flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; }
+
+  .group-sec { border: 1px solid var(--border); border-radius: 12px; padding: 12px; background: transparent; }
+  .group-sec.droppable { border-color: color-mix(in oklab, var(--accent) 55%, var(--border)); }
+  .group-sec.over { background: color-mix(in oklab, var(--accent) 9%, transparent); border-color: var(--accent); }
+  .group-head { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; }
+  .group-head .name { font-weight: 700; font-size: 13.5px; }
+  .group-head .count {
+    font-size: 11px; color: var(--ink-2); background: color-mix(in oklab, var(--ink-2) 14%, transparent);
+    border-radius: 99px; padding: 1px 8px; font-variant-numeric: tabular-nums;
+  }
+  .group-head .spacer { flex: 1; }
+  .icon-btn { color: var(--ink-2); border-radius: 6px; padding: 3px 6px; font-size: 12px; }
+  .icon-btn:hover { color: var(--ink); background: color-mix(in oklab, var(--ink-2) 15%, transparent); }
+
+  .cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(var(--card-w), 1fr)); gap: 10px; }
+  .char-card {
+    background: var(--card); border: 1px solid var(--border); border-radius: 10px; overflow: hidden;
+    cursor: grab; user-select: none; text-align: left;
+    transition: border-color 160ms ease-out, transform 160ms ease-out, opacity 160ms ease-out;
+  }
+  .char-card:hover { border-color: color-mix(in oklab, var(--accent) 55%, var(--border)); }
+  .char-card:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .char-card.dragging { opacity: 0.32; transform: scale(0.97); }
+  .thumb { position: relative; width: 100%; padding-top: var(--thumb-ratio); }
+  .thumb .fig {
+    position: absolute; inset: 0; display: flex; align-items: flex-end; justify-content: center; overflow: hidden;
+  }
+  /* 단색 배경 + 실루엣 느낌의 두상(원)+몸통(둥근 사각) — 실제 썸네일 자리 표시 */
+  .fig .head { width: 34%; aspect-ratio: 1; border-radius: 50%; position: absolute; top: 16%; }
+  .fig .body { width: 56%; height: 42%; border-radius: 14px 14px 0 0; }
+  .char-meta { padding: 8px 10px 9px; }
+  .char-meta .nm { font-weight: 600; font-size: 12.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .char-meta .sub { font-size: 11px; color: var(--ink-2); margin-top: 1px; font-variant-numeric: tabular-nums; }
+
+  .empty-drop {
+    border: 1px dashed color-mix(in oklab, var(--ink-2) 45%, transparent); border-radius: 10px;
+    padding: 22px 10px; text-align: center; color: var(--ink-2); font-size: 12px;
+  }
+
+  .add-input { display: inline-flex; gap: 6px; align-items: center; }
+  .add-input input {
+    background: transparent; border: 1px solid var(--accent); border-radius: 8px; color: var(--ink);
+    padding: 5px 10px; font: inherit; font-size: 12.5px; width: 130px; outline: none;
+  }
+  .add-input input::placeholder { color: var(--ink-2); }
+
+  /* ── 시안 A: 그룹 레일 ── */
+  .v-a { display: flex; flex-direction: row !important; min-height: 0; flex: 1; }
+  .rail {
+    width: 224px; flex: none; border-right: 1px solid var(--border); background: var(--card-2);
+    display: flex; flex-direction: column; min-height: 0;
+    transition: width 240ms cubic-bezier(0.22, 1, 0.36, 1);
+  }
+  .rail.collapsed { width: 58px; }
+  .rail-head { padding: 12px 12px 8px; display: flex; align-items: center; gap: 8px; }
+  .rail-head .t { font-size: 12px; font-weight: 700; color: var(--ink-2); white-space: nowrap; }
+  .rail.collapsed .rail-head { flex-direction: column; gap: 6px; padding: 10px 6px 8px; }
+  .rail.collapsed .rail-head .t, .rail.collapsed .rail-tip { display: none; }
+  .rail-collapse { color: var(--ink-2); border-radius: 6px; padding: 4px 7px; font-size: 13px; }
+  .rail-collapse:hover { color: var(--ink); background: color-mix(in oklab, var(--ink-2) 15%, transparent); }
+  .btn-primary .short { display: none; }
+  .rail.collapsed .btn-primary .full { display: none; }
+  .rail.collapsed .btn-primary .short { display: inline; }
+  .rail.collapsed .btn-primary { padding: 6px 9px; }
+  .rail-item .ini { display: none; }
+  .rail.collapsed .rail-item { flex-direction: column; gap: 2px; padding: 7px 4px; align-items: center; }
+  .rail.collapsed .rail-item .grip, .rail.collapsed .rail-item .nm { display: none; }
+  .rail.collapsed .rail-item .ini { display: block; font-weight: 700; font-size: 13px; color: var(--ink); }
+  .rail-item .nm, .rail-item .count { transition: opacity 180ms ease-out; }
+  .btn-primary {
+    background: var(--accent); color: #fff; font-weight: 600; font-size: 12.5px;
+    border-radius: 8px; padding: 6px 12px;
+    transition: opacity 160ms ease-out;
+  }
+  .btn-primary:hover { opacity: 0.88; }
+  .rail-list { flex: 1; overflow-y: auto; padding: 4px 8px 12px; display: flex; flex-direction: column; gap: 3px; }
+  .rail-item {
+    display: flex; align-items: center; gap: 8px; width: 100%;
+    padding: 7px 9px; border-radius: 8px; border: 1px solid transparent;
+    color: var(--ink-2); font-size: 13px; text-align: left;
+    transition: background 140ms ease-out, color 140ms ease-out, border-color 140ms ease-out;
+  }
+  .rail-item .grip { cursor: grab; opacity: 0.55; font-size: 11px; letter-spacing: 1px; }
+  .rail-item .nm { flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--ink); font-weight: 600; }
+  .rail-item .count { font-size: 11px; font-variant-numeric: tabular-nums; }
+  .rail-item:hover { background: color-mix(in oklab, var(--ink-2) 10%, transparent); }
+  .rail-item.active { background: color-mix(in oklab, var(--accent) 16%, transparent); border-color: color-mix(in oklab, var(--accent) 40%, transparent); }
+  .rail-item.over { background: color-mix(in oklab, var(--accent) 22%, transparent); border-color: var(--accent); }
+  .rail-item.reorder-target { border-top: 2px solid var(--accent); border-radius: 0 0 8px 8px; }
+  .rail-tip { padding: 8px 12px 12px; color: var(--ink-2); font-size: 11px; border-top: 1px solid var(--border); }
+  .v-a .content { flex: 1; min-width: 0; overflow-y: auto; padding: 16px 20px 28px; display: flex; flex-direction: column; gap: 14px; scroll-behavior: smooth; }
+  @media (prefers-reduced-motion: reduce) { .v-a .content { scroll-behavior: auto; } }
+
+  /* 태그 필터 행 접기 (피드백 — 현황판 태그 칩 행에 그대로 적용할 인터랙션) */
+  .tagrow { border: 1px solid var(--border); border-radius: 12px; padding: 9px 12px; flex: none; }
+  .tagrow .trh { display: flex; align-items: center; gap: 8px; cursor: pointer; color: var(--ink-2); font-size: 12px; user-select: none; }
+  .tagrow .trh b { color: var(--ink); }
+  .tagrow .fold-ic { display: inline-block; transition: transform 180ms ease-out; }
+  .tagrow.closed .fold-ic { transform: rotate(-90deg); }
+  .tagrow .tags { display: flex; flex-wrap: wrap; gap: 6px; overflow: hidden; max-height: 140px; opacity: 1; margin-top: 9px; transition: max-height 220ms cubic-bezier(0.22,1,0.36,1), opacity 180ms ease-out, margin-top 220ms cubic-bezier(0.22,1,0.36,1); }
+  .tagrow.closed .tags { max-height: 0; opacity: 0; margin-top: 0; }
+  .tag { border: 1px solid var(--border); border-radius: 99px; padding: 3px 10px; font-size: 11.5px; color: var(--ink-2); }
+  .tag:hover { color: var(--ink); border-color: color-mix(in oklab, var(--accent) 45%, var(--border)); }
+
+  /* ── 시안 B: 스티키 칩 오버뷰 ── */
+  .v-b { flex: 1; min-height: 0; overflow-y: auto; }
+  .chipbar {
+    position: sticky; top: 0; z-index: var(--z-sticky);
+    display: flex; align-items: center; gap: 8px; flex-wrap: nowrap; overflow-x: auto;
+    padding: 12px 20px; background: color-mix(in oklab, var(--bg) 88%, transparent);
+    backdrop-filter: blur(10px); border-bottom: 1px solid var(--border);
+  }
+  .chip {
+    flex: none; display: inline-flex; align-items: center; gap: 7px;
+    border: 1px solid var(--border); border-radius: 99px; padding: 6px 12px;
+    font-size: 12.5px; font-weight: 600; color: var(--ink);
+    transition: border-color 140ms ease-out, background 140ms ease-out;
+  }
+  .chip .idx { color: var(--ink-2); font-weight: 700; font-size: 11px; font-variant-numeric: tabular-nums; }
+  .chip .count { color: var(--ink-2); font-size: 11px; font-variant-numeric: tabular-nums; }
+  .chip:hover { border-color: color-mix(in oklab, var(--accent) 55%, var(--border)); }
+  .chip.over { border-color: var(--accent); background: color-mix(in oklab, var(--accent) 18%, transparent); }
+  .chip.reorder-target { box-shadow: -3px 0 0 0 var(--accent); }
+  .chip.add { color: #B7ADFF; border-style: dashed; border-color: color-mix(in oklab, var(--accent) 50%, var(--border)); }
+  .v-b .secs { padding: 16px 20px 28px; display: flex; flex-direction: column; gap: 14px; }
+  .fold { transition: transform 160ms ease-out; display: inline-block; }
+  .group-sec.closed .fold { transform: rotate(-90deg); }
+  .group-sec.closed .cards, .group-sec.closed .empty-drop { display: none; }
+
+  /* ── 시안 C: 칸반 컬럼 ── */
+  .v-c { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+  .c-top { display: flex; align-items: center; gap: 10px; padding: 12px 20px; border-bottom: 1px solid var(--border); }
+  .c-top .hint { color: var(--ink-2); font-size: 12px; }
+  .board { flex: 1; min-height: 0; overflow-x: auto; display: flex; gap: 12px; padding: 16px 20px 20px; align-items: stretch; }
+  .col {
+    width: 236px; flex: none; display: flex; flex-direction: column; min-height: 0;
+    background: var(--card-2); border: 1px solid var(--border); border-radius: 12px;
+  }
+  .col.over { border-color: var(--accent); background: color-mix(in oklab, var(--accent) 8%, var(--card-2)); }
+  .col.reorder-target { box-shadow: -3px 0 0 0 var(--accent); }
+  .col-head { display: flex; align-items: center; gap: 8px; padding: 10px 12px; border-bottom: 1px solid var(--border); cursor: grab; }
+  .col-head .nm { font-weight: 700; font-size: 13px; flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .col-head .count { font-size: 11px; color: var(--ink-2); font-variant-numeric: tabular-nums; }
+  .col-body { flex: 1; min-height: 0; overflow-y: auto; padding: 10px; display: flex; flex-direction: column; gap: 8px; }
+  .col .char-card { display: flex; align-items: center; gap: 10px; padding: 7px 9px; border-radius: 9px; }
+  .col .char-card .mini { width: 34px; height: 42px; border-radius: 7px; position: relative; overflow: hidden; flex: none; }
+  .col .mini .head { width: 40%; top: 12%; }
+  .col .mini .body { width: 66%; height: 46%; }
+  .col .mini .fig { position: absolute; inset: 0; display: flex; align-items: flex-end; justify-content: center; }
+  .col .char-card .nm { font-weight: 600; font-size: 12.5px; }
+  .col .char-card .sub { font-size: 11px; color: var(--ink-2); }
+  .col-add { width: 236px; flex: none; border: 1px dashed color-mix(in oklab, var(--accent) 45%, var(--border)); border-radius: 12px; display: flex; align-items: center; justify-content: center; color: #B7ADFF; font-weight: 600; font-size: 13px; min-height: 120px; }
+  .col-add:hover { background: color-mix(in oklab, var(--accent) 8%, transparent); }
+
+  /* 자동 스크롤 안내 존 표시 (데모용 시각화) */
+  .edge-hint {
+    position: absolute; left: 0; right: 0; height: 64px; pointer-events: none; opacity: 0;
+    transition: opacity 160ms ease-out; z-index: 5;
+  }
+  .edge-hint.top { top: 0; background: linear-gradient(to bottom, color-mix(in oklab, var(--accent) 26%, transparent), transparent); }
+  .edge-hint.bottom { bottom: 0; background: linear-gradient(to top, color-mix(in oklab, var(--accent) 26%, transparent), transparent); }
+  .edge-hint.show { opacity: 1; }
+  .rel { position: relative; min-height: 0; flex: 1; display: flex; flex-direction: column; }
+
+  /* 토스트 */
+  #toast {
+    position: fixed; left: 50%; bottom: 22px; transform: translateX(-50%) translateY(8px);
+    background: var(--card); border: 1px solid var(--border); border-radius: 10px;
+    padding: 8px 16px; font-size: 12.5px; color: var(--ink); opacity: 0; pointer-events: none;
+    z-index: var(--z-toast); transition: opacity 180ms ease-out, transform 180ms ease-out;
+  }
+  #toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+  #toast b { color: #B7ADFF; }
+
+  .drag-ghost {
+    position: fixed; z-index: var(--z-drag); pointer-events: none;
+    background: var(--card); border: 1px solid var(--accent); border-radius: 8px;
+    padding: 5px 11px; font-size: 12px; font-weight: 600; opacity: 0.95;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    * { transition: none !important; animation: none !important; }
+  }
+</style>
+</head>
+<body>
+
+<header class="topbar">
+  <h1>캐릭터 탭·그룹 UI 시안 <span>· B flow 캐릭터 현황판</span></h1>
+  <div class="seg" role="tablist" aria-label="시안 선택">
+    <button id="tabA" aria-pressed="true" onclick="switchVariant('A')">A · 그룹 레일</button>
+    <button id="tabB" aria-pressed="false" onclick="switchVariant('B')">B · 스티키 칩 오버뷰</button>
+    <button id="tabC" aria-pressed="false" onclick="switchVariant('C')">C · 칸반 컬럼</button>
+  </div>
+  <div class="knobs">
+    <span>카드</span>
+    <div class="seg"><button id="szS" aria-pressed="false" onclick="setSize('S')">작게</button><button id="szM" aria-pressed="true" onclick="setSize('M')">보통</button></div>
+    <span>캐릭터 수</span>
+    <div class="seg"><button id="n14" aria-pressed="true" onclick="setCount(14)">14</button><button id="n28" aria-pressed="false" onclick="setCount(28)">28</button><button id="n48" aria-pressed="false" onclick="setCount(48)">48</button></div>
+  </div>
+</header>
+<p class="blurb" id="blurb"></p>
+<main id="stage"></main>
+<div id="toast" role="status"></div>
+
+<script>
+'use strict';
+/* ─────────────────────────── 더미 데이터 ─────────────────────────── */
+const NAMES = ['서준','미영','광철','안지상','공미영','휠체어 할머니','찜질방 사장','류성철','박덕배','최여사','꼬마 준','노점 아저씨','민지','태호','수녀님','경비 반장','한별','도윤','금자','상구','필구','영란','대머리 형사','춘식','보라','만복','세탁소 사장','은동','국수집 이모','반장 오빠','통장님','약사 선생','재봉사','신문 배달','병원장','간호사 김','목사님','헬스 관장','붕어빵 할아버지','택시 기사','환경미화 반','문방구 주인','피아노 선생','축구 코치','이장님','횟집 사장','고시생','편의점 알바'];
+const HUES = [258, 205, 168, 28, 340, 96, 214, 4, 46, 286, 148, 190];
+let CHAR_COUNT = 14;
+let SIZE = 'M';
+let VARIANT = 'A';
+
+function makeChars(n) {
+  return Array.from({ length: n }, (_, i) => ({
+    id: 'c' + i,
+    name: NAMES[i % NAMES.length] + (i >= NAMES.length ? ' ' + (Math.floor(i / NAMES.length) + 1) : ''),
+    hue: HUES[i % HUES.length],
+    costumes: 1 + (i * 7) % 4,
+  }));
+}
+function makeGroups() {
+  return [
+    { id: 'g1', name: '주요 캐릭터', ids: ['c0','c1','c2'] },
+    { id: 'g2', name: '친모 5화 신규', ids: ['c3','c4'] },
+    { id: 'g3', name: '전신 없는 캐릭터', ids: ['c5'] },
+    { id: 'g4', name: '단역·배경', ids: ['c6','c7','c8'] },
+  ];
+}
+let chars = makeChars(CHAR_COUNT);
+let groups = makeGroups();
+let railCollapsed = false;   // 시안 A: 레일 접힘 상태 (재렌더 간 유지)
+let tagsFolded = false;      // 시안 A: 태그 필터 행 접힘 상태
+const TAGS = ['가방','구조태그test','뒷모습','머리스타일','모자','뻔쓰','안경','앞모습 없음','얼굴각도 컨트롤러','짱구구조','책가방 세트','청진기','초췌','휠체어'];
+const byId = () => new Map(chars.map(c => [c.id, c]));
+const grouped = () => new Set(groups.flatMap(g => g.ids));
+const ungrouped = () => chars.filter(c => !grouped().has(c.id));
+const openState = {}; // 시안 B 접기 상태
+
+/* ─────────────────────────── 공통 유틸 ─────────────────────────── */
+const $ = (s, el = document) => el.querySelector(s);
+let dragId = null;          // 드래그 중 캐릭터 id
+let dragGroupId = null;     // 드래그 중 그룹 id (그룹 순서 변경)
+let toastTimer = null;
+function toast(html) {
+  const t = $('#toast'); t.innerHTML = html; t.classList.add('show');
+  clearTimeout(toastTimer); toastTimer = setTimeout(() => t.classList.remove('show'), 1800);
+}
+function groupName(id) { return id === null ? '미분류' : (groups.find(g => g.id === id)?.name ?? ''); }
+function moveChar(cid, targetGid) {
+  groups.forEach(g => { g.ids = g.ids.filter(x => x !== cid); });
+  if (targetGid) groups.find(g => g.id === targetGid)?.ids.push(cid);
+  toast(`<b>${byId().get(cid)?.name}</b> → ${groupName(targetGid)}`);
+  render();
+}
+function reorderGroup(srcGid, beforeGid) {
+  if (srcGid === beforeGid) return;
+  const src = groups.find(g => g.id === srcGid); if (!src) return;
+  groups = groups.filter(g => g.id !== srcGid);
+  const idx = beforeGid ? groups.findIndex(g => g.id === beforeGid) : groups.length;
+  groups.splice(idx < 0 ? groups.length : idx, 0, src);
+  toast(`그룹 순서 변경: <b>${src.name}</b>`);
+  render();
+}
+function addGroupPrompt(anchorBtn) {
+  const wrap = document.createElement('span');
+  wrap.className = 'add-input';
+  wrap.innerHTML = `<input type="text" placeholder="그룹 이름" aria-label="그룹 이름">`;
+  anchorBtn.replaceWith(wrap);
+  const inp = $('input', wrap); inp.focus();
+  const commit = () => {
+    const v = inp.value.trim();
+    if (v) { groups.push({ id: 'g' + Date.now(), name: v, ids: [] }); toast(`그룹 <b>${v}</b> 추가`); }
+    render();
+  };
+  inp.addEventListener('keydown', e => { if (e.key === 'Enter') commit(); if (e.key === 'Escape') render(); });
+  inp.addEventListener('blur', commit);
+}
+
+/* 자동 스크롤 — 드래그 중 컨테이너 가장자리 근처에서 스크롤. rAF 루프. */
+const autoScroll = { el: null, vy: 0, vx: 0, raf: 0, hintTop: null, hintBottom: null };
+function autoScrollTick() {
+  if (autoScroll.el && (autoScroll.vy || autoScroll.vx)) {
+    autoScroll.el.scrollTop += autoScroll.vy;
+    autoScroll.el.scrollLeft += autoScroll.vx;
+  }
+  autoScroll.raf = requestAnimationFrame(autoScrollTick);
+}
+function bindAutoScroll(el, { horizontal = false, hintTop = null, hintBottom = null } = {}) {
+  el.addEventListener('dragover', e => {
+    const r = el.getBoundingClientRect(); const EDGE = 72, MAX = 14;
+    autoScroll.el = el;
+    if (!horizontal) {
+      const dTop = e.clientY - r.top, dBot = r.bottom - e.clientY;
+      autoScroll.vy = dTop < EDGE ? -MAX * (1 - dTop / EDGE) : dBot < EDGE ? MAX * (1 - dBot / EDGE) : 0;
+      if (hintTop) hintTop.classList.toggle('show', autoScroll.vy < 0);
+      if (hintBottom) hintBottom.classList.toggle('show', autoScroll.vy > 0);
+    } else {
+      const dL = e.clientX - r.left, dR = r.right - e.clientX;
+      autoScroll.vx = dL < EDGE ? -MAX * (1 - dL / EDGE) : dR < EDGE ? MAX * (1 - dR / EDGE) : 0;
+    }
+  });
+  const stop = () => { autoScroll.vy = 0; autoScroll.vx = 0; autoScroll.el = null;
+    if (hintTop) hintTop.classList.remove('show'); if (hintBottom) hintBottom.classList.remove('show'); };
+  el.addEventListener('drop', stop); el.addEventListener('dragleave', e => { if (!el.contains(e.relatedTarget)) stop(); });
+  document.addEventListener('dragend', stop);
+}
+autoScrollTick();
+
+/* 카드 DOM */
+function cardEl(c, mini = false) {
+  const b = document.createElement('button');
+  b.className = 'char-card'; b.draggable = true; b.dataset.cid = c.id;
+  const skin = `oklch(0.78 0.05 ${c.hue})`, cloth = `oklch(0.55 0.11 ${c.hue})`, bgT = `oklch(0.3 0.03 ${c.hue})`;
+  if (!mini) {
+    b.innerHTML = `<div class="thumb"><div class="fig" style="background:${bgT}">
+        <div class="head" style="background:${skin}"></div><div class="body" style="background:${cloth}"></div>
+      </div></div>
+      <div class="char-meta"><div class="nm">${c.name}</div><div class="sub">복장 ${c.costumes}</div></div>`;
+  } else {
+    b.innerHTML = `<div class="mini"><div class="fig" style="background:${bgT}">
+        <div class="head" style="background:${skin}"></div><div class="body" style="background:${cloth}"></div>
+      </div></div>
+      <div><div class="nm">${c.name}</div><div class="sub">복장 ${c.costumes}</div></div>`;
+  }
+  b.addEventListener('dragstart', e => {
+    dragId = c.id; dragGroupId = null; b.classList.add('dragging');
+    e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', c.id);
+  });
+  b.addEventListener('dragend', () => { dragId = null; b.classList.remove('dragging'); document.querySelectorAll('.over').forEach(x => x.classList.remove('over')); });
+  return b;
+}
+function makeDroppable(el, gid) {
+  el.classList.add('droppable');
+  el.addEventListener('dragover', e => { if (dragId) { e.preventDefault(); el.classList.add('over'); } });
+  el.addEventListener('dragleave', e => { if (!el.contains(e.relatedTarget)) el.classList.remove('over'); });
+  el.addEventListener('drop', e => { e.preventDefault(); el.classList.remove('over'); if (dragId) moveChar(dragId, gid); });
+}
+
+/* ─────────────────────────── 시안 A: 그룹 레일 ─────────────────────────── */
+function renderA(stage) {
+  const wrap = document.createElement('div'); wrap.className = 'v-a pane';
+  wrap.innerHTML = `
+    <div class="rail${railCollapsed ? ' collapsed' : ''}" id="railA">
+      <div class="rail-head">
+        <button class="rail-collapse" id="railToggle" title="그룹 레일 접기/펼치기">${railCollapsed ? '»' : '«'}</button>
+        <span class="t">그룹 ${groups.length}개</span><span style="flex:1"></span>
+        <button class="btn-primary" id="addA"><span class="full">+ 그룹 추가</span><span class="short">＋</span></button>
+      </div>
+      <div class="rail-list" id="railList"></div>
+      <div class="rail-tip">카드를 <b style="color:var(--ink)">왼쪽 그룹 이름 위에</b> 끌어다 놓으면 스크롤 없이 바로 배치돼요. ⠿ 를 끌면 그룹 순서가 바뀌어요. « 로 레일을 접을 수 있어요.</div>
+    </div>
+    <div class="rel">
+      <div class="edge-hint top"></div><div class="edge-hint bottom"></div>
+      <div class="content" id="contentA"></div>
+    </div>`;
+  stage.appendChild(wrap);
+  $('#addA').addEventListener('click', e => addGroupPrompt(e.currentTarget));
+  /* 레일 접기 — 재렌더 없이 클래스만 토글해 width 트랜지션이 살아 있게. 본문 그리드는 리플로우로 즉시 반응. */
+  $('#railToggle').addEventListener('click', () => {
+    railCollapsed = !railCollapsed;
+    $('#railA').classList.toggle('collapsed', railCollapsed);
+    $('#railToggle').textContent = railCollapsed ? '»' : '«';
+  });
+
+  const list = $('#railList'), content = $('#contentA');
+
+  /* 태그 필터 행 — 접기/펼치기 (실제 현황판의 해시태그 칩 행에 그대로 적용할 인터랙션) */
+  const tagrow = document.createElement('div');
+  tagrow.className = 'tagrow' + (tagsFolded ? ' closed' : '');
+  tagrow.innerHTML = `<div class="trh"><span class="fold-ic">▾</span><span>태그 필터 <b>${TAGS.length}</b></span><span style="flex:1"></span><span id="tagHint">${tagsFolded ? '펼치기' : '접기'}</span></div>
+    <div class="tags">${TAGS.map(t => `<span class="tag"># ${t}</span>`).join('')}</div>`;
+  $('.trh', tagrow).addEventListener('click', () => {
+    tagsFolded = !tagsFolded;
+    tagrow.classList.toggle('closed', tagsFolded);
+    $('#tagHint', tagrow).textContent = tagsFolded ? '펼치기' : '접기';
+  });
+  content.appendChild(tagrow);
+
+  const sections = new Map();
+  const entries = [...groups.map(g => ({ gid: g.id, name: g.name, ids: g.ids })), { gid: null, name: '미분류', ids: ungrouped().map(c => c.id) }];
+
+  for (const ent of entries) {
+    /* 레일 항목 */
+    const it = document.createElement('div');
+    it.className = 'rail-item'; it.dataset.gid = ent.gid ?? '';
+    it.innerHTML = `${ent.gid ? '<span class="grip" draggable="true" title="끌어서 순서 변경">⠿</span>' : '<span class="grip" style="visibility:hidden">⠿</span>'}
+      <span class="ini" title="${ent.name}">${ent.name.charAt(0)}</span>
+      <span class="nm">${ent.name}</span><span class="count">${ent.ids.length}</span>`;
+    it.addEventListener('click', () => sections.get(ent.gid)?.scrollIntoView({ block: 'start' }));
+    /* 카드 드롭 → 배치 */
+    it.addEventListener('dragover', e => {
+      if (dragId) { e.preventDefault(); it.classList.add('over'); }
+      else if (dragGroupId && ent.gid) { e.preventDefault(); it.classList.add('reorder-target'); }
+    });
+    it.addEventListener('dragleave', () => it.classList.remove('over', 'reorder-target'));
+    it.addEventListener('drop', e => {
+      e.preventDefault(); it.classList.remove('over', 'reorder-target');
+      if (dragId) moveChar(dragId, ent.gid);
+      else if (dragGroupId && ent.gid) reorderGroup(dragGroupId, ent.gid);
+    });
+    /* 그룹 순서 드래그 */
+    const grip = $('.grip', it);
+    if (ent.gid) {
+      grip.addEventListener('dragstart', e => { dragGroupId = ent.gid; dragId = null; e.dataTransfer.effectAllowed = 'move'; e.stopPropagation(); });
+      grip.addEventListener('dragend', () => { dragGroupId = null; document.querySelectorAll('.reorder-target').forEach(x => x.classList.remove('reorder-target')); });
+    }
+    list.appendChild(it);
+
+    /* 본문 섹션 */
+    const sec = document.createElement('section');
+    sec.className = 'group-sec';
+    sec.innerHTML = `<div class="group-head"><span class="name">${ent.name}</span><span class="count">${ent.ids.length}</span></div>`;
+    const cardsBox = document.createElement('div'); cardsBox.className = 'cards';
+    const map = byId();
+    if (ent.ids.length === 0) {
+      const ed = document.createElement('div'); ed.className = 'empty-drop'; ed.textContent = '카드를 끌어다 놓아 배치해요'; sec.appendChild(ed);
+    } else { ent.ids.forEach(id => { const c = map.get(id); if (c) cardsBox.appendChild(cardEl(c)); }); sec.appendChild(cardsBox); }
+    makeDroppable(sec, ent.gid);
+    content.appendChild(sec);
+    sections.set(ent.gid, sec);
+  }
+  bindAutoScroll(content, { hintTop: $('.edge-hint.top', wrap), hintBottom: $('.edge-hint.bottom', wrap) });
+
+  /* scroll-spy: 현재 보이는 섹션 → 레일 하이라이트 */
+  const spy = () => {
+    let best = null, bestTop = -Infinity;
+    for (const [gid, sec] of sections) {
+      const top = sec.getBoundingClientRect().top - content.getBoundingClientRect().top;
+      if (top <= 40 && top > bestTop) { bestTop = top; best = gid; }
+    }
+    if (best === null && sections.size) best = [...sections.keys()][0];
+    list.querySelectorAll('.rail-item').forEach(el => el.classList.toggle('active', (el.dataset.gid || null) === (best ?? null) || (el.dataset.gid === '' && best === null)));
+  };
+  content.addEventListener('scroll', spy); spy();
+}
+
+/* ─────────────────────────── 시안 B: 스티키 칩 오버뷰 ─────────────────────────── */
+function renderB(stage) {
+  const wrap = document.createElement('div'); wrap.className = 'v-b pane rel';
+  wrap.innerHTML = `<div class="edge-hint top" style="top:58px"></div><div class="edge-hint bottom"></div>
+    <div class="v-b" id="scrollB" style="flex:1;min-height:0;overflow-y:auto">
+      <div class="chipbar" id="chipbar"></div>
+      <div class="secs" id="secsB"></div>
+    </div>`;
+  stage.appendChild(wrap);
+  const scroll = $('#scrollB'), bar = $('#chipbar'), secsBox = $('#secsB');
+
+  /* + 그룹: 칩 바 맨 앞 고정 */
+  const addChip = document.createElement('button');
+  addChip.className = 'chip add'; addChip.textContent = '+ 그룹';
+  addChip.addEventListener('click', e => addGroupPrompt(e.currentTarget));
+  bar.appendChild(addChip);
+
+  const entries = [...groups.map(g => ({ gid: g.id, name: g.name, ids: g.ids })), { gid: null, name: '미분류', ids: ungrouped().map(c => c.id) }];
+  const sections = new Map();
+
+  entries.forEach((ent, i) => {
+    const chip = document.createElement('button');
+    chip.className = 'chip'; chip.draggable = !!ent.gid;
+    chip.innerHTML = `${ent.gid ? `<span class="idx">${i + 1}</span>` : ''}<span>${ent.name}</span><span class="count">${ent.ids.length}</span>`;
+    chip.title = ent.gid ? '클릭: 이동 · 끌기: 순서 변경 · 카드를 놓으면: 배치' : '클릭: 미분류로 이동';
+    chip.addEventListener('click', () => sections.get(ent.gid)?.scrollIntoView({ block: 'start' }));
+    chip.addEventListener('dragstart', e => { dragGroupId = ent.gid; dragId = null; e.dataTransfer.effectAllowed = 'move'; });
+    chip.addEventListener('dragend', () => { dragGroupId = null; document.querySelectorAll('.reorder-target').forEach(x => x.classList.remove('reorder-target')); });
+    chip.addEventListener('dragover', e => {
+      if (dragId) { e.preventDefault(); chip.classList.add('over'); }
+      else if (dragGroupId && ent.gid && dragGroupId !== ent.gid) { e.preventDefault(); chip.classList.add('reorder-target'); }
+    });
+    chip.addEventListener('dragleave', () => chip.classList.remove('over', 'reorder-target'));
+    chip.addEventListener('drop', e => {
+      e.preventDefault(); chip.classList.remove('over', 'reorder-target');
+      if (dragId) moveChar(dragId, ent.gid);
+      else if (dragGroupId && ent.gid) reorderGroup(dragGroupId, ent.gid);
+    });
+    bar.appendChild(chip);
+
+    const sec = document.createElement('section');
+    const open = openState[ent.gid ?? '__un'] !== false;
+    sec.className = 'group-sec' + (open ? '' : ' closed');
+    sec.innerHTML = `<div class="group-head" style="cursor:pointer">
+        <span class="fold">▾</span><span class="name">${i + 1 <= groups.length && ent.gid ? (i + 1) + '. ' : ''}${ent.name}</span>
+        <span class="count">${ent.ids.length}</span><span class="spacer"></span>
+        <button class="icon-btn" title="접기/펼치기">${open ? '접기' : '펼치기'}</button>
+      </div>`;
+    $('.group-head', sec).addEventListener('click', () => { openState[ent.gid ?? '__un'] = !open; render(); });
+    const map = byId();
+    if (ent.ids.length === 0) { const ed = document.createElement('div'); ed.className = 'empty-drop'; ed.textContent = '카드를 끌어다 놓아 배치해요'; sec.appendChild(ed); }
+    else { const box = document.createElement('div'); box.className = 'cards'; ent.ids.forEach(id => { const c = map.get(id); if (c) box.appendChild(cardEl(c)); }); sec.appendChild(box); }
+    makeDroppable(sec, ent.gid);
+    secsBox.appendChild(sec); sections.set(ent.gid, sec);
+  });
+  bindAutoScroll(scroll, { hintTop: $('.edge-hint.top', wrap), hintBottom: $('.edge-hint.bottom', wrap) });
+}
+
+/* ─────────────────────────── 시안 C: 칸반 컬럼 ─────────────────────────── */
+function renderC(stage) {
+  const wrap = document.createElement('div'); wrap.className = 'v-c pane';
+  wrap.innerHTML = `
+    <div class="c-top">
+      <button class="btn-primary" id="addC">+ 그룹 추가</button>
+      <span class="hint">그룹 = 세로 컬럼. 왼쪽부터가 순서예요. 컬럼 머리를 끌면 순서가 바뀌고, 카드를 옆 컬럼으로 끌면 배치돼요.</span>
+    </div>
+    <div class="board" id="board"></div>`;
+  stage.appendChild(wrap);
+  $('#addC').addEventListener('click', e => addGroupPrompt(e.currentTarget));
+  const board = $('#board');
+
+  const entries = [{ gid: null, name: '미분류', ids: ungrouped().map(c => c.id) }, ...groups.map(g => ({ gid: g.id, name: g.name, ids: g.ids }))];
+  const map = byId();
+  for (const ent of entries) {
+    const col = document.createElement('div'); col.className = 'col';
+    col.innerHTML = `<div class="col-head" ${ent.gid ? 'draggable="true"' : ''} title="${ent.gid ? '끌어서 순서 변경' : '미분류는 맨 앞 고정'}">
+        <span class="nm">${ent.name}</span><span class="count">${ent.ids.length}</span></div>
+      <div class="col-body"></div>`;
+    const body = $('.col-body', col);
+    if (ent.ids.length === 0) { const ed = document.createElement('div'); ed.className = 'empty-drop'; ed.textContent = '카드를 여기로'; body.appendChild(ed); }
+    else ent.ids.forEach(id => { const c = map.get(id); if (c) body.appendChild(cardEl(c, true)); });
+    makeDroppable(col, ent.gid);
+    const head = $('.col-head', col);
+    if (ent.gid) {
+      head.addEventListener('dragstart', e => { dragGroupId = ent.gid; dragId = null; e.dataTransfer.effectAllowed = 'move'; });
+      head.addEventListener('dragend', () => { dragGroupId = null; document.querySelectorAll('.reorder-target').forEach(x => x.classList.remove('reorder-target')); });
+    }
+    col.addEventListener('dragover', e => { if (dragGroupId && ent.gid && dragGroupId !== ent.gid) { e.preventDefault(); col.classList.add('reorder-target'); } });
+    col.addEventListener('dragleave', e => { if (!col.contains(e.relatedTarget)) col.classList.remove('reorder-target'); });
+    col.addEventListener('drop', e => { if (dragGroupId && ent.gid) { e.preventDefault(); col.classList.remove('reorder-target'); reorderGroup(dragGroupId, ent.gid); } });
+    bindAutoScroll(body);
+    board.appendChild(col);
+  }
+  const addCol = document.createElement('button'); addCol.className = 'col-add'; addCol.textContent = '+ 그룹 추가';
+  addCol.addEventListener('click', e => addGroupPrompt(e.currentTarget));
+  board.appendChild(addCol);
+  bindAutoScroll(board, { horizontal: true });
+}
+
+/* ─────────────────────────── 전환/렌더 ─────────────────────────── */
+const BLURBS = {
+  A: `<b>시안 A · 그룹 레일 (확정안)</b> — Linear·Notion 사이드 목차 방식. <span class="fix">① 그룹 추가가 레일 최상단 고정</span> ·
+      <span class="fix">② 카드를 "레일의 그룹 이름"에 놓으면 스크롤 자체가 필요 없음</span> (본문 가장자리 자동 스크롤도 지원) ·
+      <span class="fix">③ 그룹 순서·개수가 레일에 항상 보임</span> + 현재 위치 하이라이트 + 클릭 점프 ·
+      <span class="fix">④ « 버튼으로 레일 접기/펼치기 — 카드 그리드가 부드럽게 따라 반응</span> ·
+      <span class="fix">⑤ 상단 태그 필터 행도 접기/펼치기</span> (접힌 레일에서도 드롭·클릭 동작 유지).`,
+  B: `<b>시안 B · 스티키 칩 오버뷰</b> — 현행 세로 섹션 유지 + 상단에 착 붙는 그룹 칩 바. <span class="fix">① 그룹 추가 칩이 맨 앞 고정</span> ·
+      <span class="fix">② 카드를 칩에 놓아도 배치, 가장자리 자동 스크롤 지원</span> ·
+      <span class="fix">③ 칩에 순번·개수 표시, 칩 드래그로 순서 변경, 섹션 접기로 개요 파악</span>. 기존 레이아웃과 가장 가까워 구현 변경 최소.`,
+  C: `<b>시안 C · 칸반 컬럼</b> — Trello 방식 가로 보드. <span class="fix">① 그룹 추가 버튼 상단 + 마지막 컬럼 두 곳</span> ·
+      <span class="fix">② 컬럼 간 이동은 화면 안에서 끝나 세로 스크롤 문제 자체가 사라짐</span> (컬럼 내부·보드 가장자리 자동 스크롤) ·
+      <span class="fix">③ 왼쪽→오른쪽이 곧 순서, 개수는 컬럼 머리에</span>. 단, 카드가 한 줄 리스트형이라 썸네일 크기는 작아짐.`,
+};
+function switchVariant(v) {
+  VARIANT = v;
+  ['A','B','C'].forEach(k => $('#tab' + k).setAttribute('aria-pressed', String(k === v)));
+  render();
+}
+function setSize(s) {
+  SIZE = s;
+  $('#szS').setAttribute('aria-pressed', String(s === 'S')); $('#szM').setAttribute('aria-pressed', String(s === 'M'));
+  document.documentElement.style.setProperty('--card-w', s === 'S' ? '104px' : '132px');
+  render();
+}
+function setCount(n) {
+  CHAR_COUNT = n; [14,28,48].forEach(k => $('#n' + k).setAttribute('aria-pressed', String(k === n)));
+  chars = makeChars(n);
+  groups.forEach(g => { g.ids = g.ids.filter(id => Number(id.slice(1)) < n); });
+  render();
+}
+function render() {
+  $('#blurb').innerHTML = BLURBS[VARIANT];
+  const stage = $('#stage'); stage.innerHTML = '';
+  ({ A: renderA, B: renderB, C: renderC })[VARIANT](stage);
+}
+render();
+</script>
+</body>
+</html>
