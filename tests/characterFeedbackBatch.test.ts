@@ -39,16 +39,16 @@ test('B4: 이름 없이 추가 — 임시 이름 부여 + 파일명 자동 지�
   assert.match(boardView, /onCreated=\{\(c\) => \{ setTab\('board'\); setPendingOpenId\(c\.id\); \}\}/);
 });
 
-test('B6: 사이드바에서 캐릭터 추가', () => {
-  assert.match(appStore, /pendingCharacterAddRequest: boolean/);
-  assert.match(appStore, /setPendingCharacterAddRequest: \(v: boolean\) => void/);
-  assert.match(appStore, /pendingCharacterAddRequest: view === 'character-board' \? s\.pendingCharacterAddRequest : false/);
-  assert.match(sidebar, /const isCharacterAddItem = item\.id === 'character-board' && characterAccess\.allowed && !characterAccessFailed/);
-  assert.match(sidebar, /setPendingCharacterAddRequest\(true\)/);
-  assert.match(sidebar, /aria-label="캐릭터 추가"/);
-  assert.match(boardView, /if \(!pendingCharacterAddRequest\) return;/);
-  assert.match(boardView, /setAddOpen\(true\);/);
-  assert.match(boardView, /setPendingCharacterAddRequest\(false\);/);
+test('B6→피드백 35: 사이드바 캐릭터 + 버튼 제거 — 배선 잔재 없음', () => {
+  // 사용자 요청(피드백 35)으로 사이드바 '+' 는 삭제됐다. 죽은 배선이 되살아나지 않게 고정.
+  assert.doesNotMatch(sidebar, /isCharacterAddItem/);
+  assert.doesNotMatch(sidebar, /aria-label="캐릭터 추가"/);
+  assert.doesNotMatch(sidebar, /PendingCharacterAddRequest/);
+  assert.doesNotMatch(appStore, /endingCharacterAddRequest/);
+  assert.doesNotMatch(boardView, /endingCharacterAddRequest/);
+  // 캐릭터 추가 진입점은 현황판 헤더 버튼과 상세 모달(F27)로 유지된다.
+  assert.match(boardView, /<Plus size=\{16\} \/> 캐릭터 추가/);
+  assert.match(detailModal, /<Plus size=\{15\} \/> 캐릭터 추가/);
 });
 
 test('B8: 카드 휠로 복장 전환 + 전환 복장을 클릭/우클릭/상세로 전달', () => {

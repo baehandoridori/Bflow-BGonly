@@ -56,8 +56,8 @@ test('B11 UI: CostumeDetail 버튼 + 모달 배선, 모달은 대표 기본선�
   // 전송은 서비스 경유(title 포함).
   assert.match(modal, /sendRiggingAnnounce\(/);
   assert.match(modal, /title: title\.trim\(\)/);
-  // 피드백 31(a): [내용] 줄은 '"캐릭터" - "복장"' 포맷.
-  assert.match(modal, /characterName: `"\$\{character\.name\}" - "\$\{costume\.name\}"`/);
+  // 피드백 34(b): [내용] 줄은 '"캐릭터" - "복장" 리깅완료' 포맷.
+  assert.match(modal, /characterName: `"\$\{character\.name\}" - "\$\{costume\.name\}" 리깅완료`/);
   // Escape 는 최상단 모달 패턴 — 부모 상세 모달까지 닫히지 않게 capture + stopImmediatePropagation (코덱스 P2).
   assert.match(modal, /event\.stopImmediatePropagation\(\)/);
   assert.match(modal, /addEventListener\('keydown', onKey, \{ capture: true \}\)/);
@@ -76,7 +76,11 @@ test('B11 UI: 제목 템플릿 버튼 — 누르면 제목만 채운다', () => 
 test('피드백 31(a·d): 기본 제목 미리 채움 + 비고 없이 전송 가능', () => {
   const modal = readFileSync('src/components/characters/RiggingAnnounceModal.tsx', 'utf8');
   assert.match(modal, /useState\(TITLE_TEMPLATES\[0\]\.title\)/);
-  assert.match(modal, /\[모호 리깅 현황\] - 리깅 완료 공지/);
+  // 피드백 34(a): 머리말 '[모호 리깅 현황]' 은 슬랙 워크플로가 붙인다 — 템플릿 제목에 다시 넣으면 두 번 찍힌다.
+  assert.match(modal, /title: '리깅 완료 공지'/);
+  assert.match(modal, /title: '드라마 톤 특수리깅 완료 공지'/);
+  assert.doesNotMatch(modal, /title: '\[모호 리깅 현황\]/);
+  assert.match(modal, /머리말이 자동으로 붙어요/);
   // 비고 필수 게이트 제거 — 전송 버튼은 전송/업로드 중에만 잠긴다.
   assert.doesNotMatch(modal, /비고를 한 줄 이상/);
   assert.doesNotMatch(modal, /hasNote/);

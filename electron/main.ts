@@ -4029,6 +4029,11 @@ ipcMain.handle('clipboard:read-image-file', async () => {
 
 // ─── IPC 핸들러: 위젯 팝업 윈도우 ──────────────────────────────
 
+// 위젯별 첫 오픈 기본값 — 캐릭터 현황판처럼 화면형 팝업은 위젯 기본(420×360·AOT)이 맞지 않는다 (피드백 36).
+const WIDGET_POPUP_DEFAULTS: Record<string, { width: number; height: number; alwaysOnTop?: boolean }> = {
+  'character-board': { width: 1160, height: 780, alwaysOnTop: false },
+};
+
 function openWidgetPopup(widgetId: string, widgetTitle: string, extra?: Record<string, string>): { ok: boolean } {
   // 이미 열린 팝업이면 포커스
   const existing = widgetWindows.get(widgetId);
@@ -4039,9 +4044,10 @@ function openWidgetPopup(widgetId: string, widgetTitle: string, extra?: Record<s
 
   // 저장된 위치/크기 복원 (Phase 0-6)
   const savedPos = widgetPositionCache.get(widgetId);
-  const initWidth = savedPos ? Math.max(280, savedPos.width) : 420;
-  const initHeight = savedPos ? Math.max(200, savedPos.height) : 360;
-  const initAOT = savedPos ? savedPos.alwaysOnTop : true;
+  const preset = WIDGET_POPUP_DEFAULTS[widgetId];
+  const initWidth = savedPos ? Math.max(280, savedPos.width) : preset?.width ?? 420;
+  const initHeight = savedPos ? Math.max(200, savedPos.height) : preset?.height ?? 360;
+  const initAOT = savedPos ? savedPos.alwaysOnTop : preset?.alwaysOnTop ?? true;
 
   // 호출 시점 extra가 우선. 없으면 이전에 저장된 extra 복원.
   // (EP 위젯 `?ep=1` 등의 query string 파라미터 영속화 — 이슈 ⑨)

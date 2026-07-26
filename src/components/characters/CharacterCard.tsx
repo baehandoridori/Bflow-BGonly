@@ -18,6 +18,7 @@ export const CharacterCard = memo(function CharacterCard({
   onContextMenu,
   imageHeightPx,
   referenceUnset,
+  compact,
   onDragStartCard,
   onDragOverCard,
   onDropCard,
@@ -34,6 +35,8 @@ export const CharacterCard = memo(function CharacterCard({
   imageHeightPx?: number;
   /** 키 비교 보기 모드인데 이 캐릭터의 기준 키가 미설정이면 true → 배지 표시. */
   referenceUnset?: boolean;
+  /** 이미지 없는 카드 보기 (피드백 40) — 이미지 박스를 생략하고 텍스트 정보만 그린다. */
+  compact?: boolean;
   // 카드 드래그 재배치(F29) — 전부 optional(드래그 비활성 화면에서는 미전달). 콜백은 id 인자 안정 참조(CQ-6).
   onDragStartCard?: (characterId: string) => void;
   onDragOverCard?: (characterId: string) => void;
@@ -77,7 +80,9 @@ export const CharacterCard = memo(function CharacterCard({
     };
     el.addEventListener('wheel', onWheel, { passive: false });
     return () => el.removeEventListener('wheel', onWheel);
-  }, [imaged.length]);
+    // compact ⇄ card 왕복 시 이미지 박스 DOM 이 새로 마운트되므로(카드 key 불변 → 리마운트 없음)
+    //   deps 에 compact 를 넣어 새 노드에 wheel 리스너를 다시 붙인다 (피드백 40).
+  }, [imaged.length, compact]);
 
   return (
     <button
@@ -112,33 +117,35 @@ export const CharacterCard = memo(function CharacterCard({
           )}
         />
       )}
-      <div ref={imageRef} style={imageHeightPx ? { height: imageHeightPx } : undefined} className="relative aspect-[3/4] bg-bg-border/30 flex items-center justify-center overflow-hidden rounded-t-xl">
-        {shown ? (
-          <CharacterImageFrame
-            url={shown.featuredImageUrl}
-            alt={character.name}
-            background={shown.imageBackground}
-            fit={shown.imageFit}
-            className="w-full h-full"
-          />
-        ) : (
-          <ImageIcon size={28} className="text-text-secondary/40" />
-        )}
-        {imaged.length > 1 && (
-          <div className="pointer-events-none absolute inset-x-0 bottom-1.5 flex items-center justify-center gap-1" aria-hidden="true">
-            {imaged.map((c, i) => (
-              <span
-                key={c.id}
-                className="h-1.5 w-1.5 rounded-full transition-colors duration-150"
-                style={{ backgroundColor: i === activeIdx ? 'rgb(var(--color-accent))' : 'rgba(255,255,255,0.4)' }}
-              />
-            ))}
-          </div>
-        )}
-        {referenceUnset && (
-          <span className="pointer-events-none absolute left-1 top-1 rounded bg-black/50 px-1.5 py-0.5 text-[10px] text-white/80">키 미설정</span>
-        )}
-      </div>
+      {!compact && (
+        <div ref={imageRef} style={imageHeightPx ? { height: imageHeightPx } : undefined} className="relative aspect-[3/4] bg-bg-border/30 flex items-center justify-center overflow-hidden rounded-t-xl">
+          {shown ? (
+            <CharacterImageFrame
+              url={shown.featuredImageUrl}
+              alt={character.name}
+              background={shown.imageBackground}
+              fit={shown.imageFit}
+              className="w-full h-full"
+            />
+          ) : (
+            <ImageIcon size={28} className="text-text-secondary/40" />
+          )}
+          {imaged.length > 1 && (
+            <div className="pointer-events-none absolute inset-x-0 bottom-1.5 flex items-center justify-center gap-1" aria-hidden="true">
+              {imaged.map((c, i) => (
+                <span
+                  key={c.id}
+                  className="h-1.5 w-1.5 rounded-full transition-colors duration-150"
+                  style={{ backgroundColor: i === activeIdx ? 'rgb(var(--color-accent))' : 'rgba(255,255,255,0.4)' }}
+                />
+              ))}
+            </div>
+          )}
+          {referenceUnset && (
+            <span className="pointer-events-none absolute left-1 top-1 rounded bg-black/50 px-1.5 py-0.5 text-[10px] text-white/80">키 미설정</span>
+          )}
+        </div>
+      )}
       <div className="p-3 flex flex-col gap-2">
         <div className="font-semibold text-text-primary truncate">{character.name}</div>
         <div className="flex items-center gap-2 text-xs text-text-secondary">

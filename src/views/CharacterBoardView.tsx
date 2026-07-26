@@ -10,8 +10,8 @@
  * 접근 권한은 사이드바에서 게이팅 (useCharacterBoardAccess).
  */
 
-import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react';
-import { Archive, Plus, Image as ImageIcon, Search, Ruler } from 'lucide-react';
+import { useCallback, useContext, useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react';
+import { Archive, Plus, Image as ImageIcon, Search, Ruler, LayoutGrid, Grid3x3, List, ExternalLink } from 'lucide-react';
 import { useCharacterBoardStore } from '@/stores/useCharacterBoardStore';
 import { moveCostumeInOrder, dropEdgeFor } from '@/stores/characterBoardStoreHelpers';
 import { useAppStore } from '@/stores/useAppStore';
@@ -22,8 +22,18 @@ import { TagPill } from '@/components/characters/TagChips';
 import { CharacterCard, EMPTY_COSTUMES } from '@/components/characters/CharacterCard';
 import { CharacterDetailModal } from '@/components/characters/CharacterDetailModal';
 import { AddCharacterModal } from '@/components/characters/AddCharacterModal';
+import { loadPersistedCharacterViewMode, savePersistedCharacterViewMode, type CharacterBoardViewMode } from '@/utils/characterViewPersist';
+import { CharacterListRow } from '@/components/characters/CharacterListRow';
+import { IsPopupContext } from '@/components/widgets/Widget';
 
 type BoardTab = 'board' | 'episode-assets';
+
+/** 보기 방식 토글 옵션 (피드백 40). */
+const VIEW_MODE_OPTIONS: { mode: CharacterBoardViewMode; label: string; Icon: typeof LayoutGrid }[] = [
+  { mode: 'card', label: '카드 보기', Icon: LayoutGrid },
+  { mode: 'compact', label: '이미지 없는 카드 보기', Icon: Grid3x3 },
+  { mode: 'list', label: '리스트 보기', Icon: List },
+];
 
 function TabButton({ active, onClick, children }: { active: boolean; onClick: () => void; children: React.ReactNode }) {
   return (
@@ -50,6 +60,12 @@ function CharacterGrid({ onAdd, pendingOpenId, onConsumeOpen }: { onAdd: () => v
   const [cardMenu, setCardMenu] = useState<{ characterId: string; x: number; y: number; costumeId?: string } | null>(null);
   const [showArchived, setShowArchived] = useState(false);
   const [heightCompareMode, setHeightCompareMode] = useState(false); // '키 비교 보기'(T2-3)
+  // 보기 방식 (피드백 40) — 마지막 선택을 localStorage 에 영속화(씬 뷰 scenesViewPersist 패턴).
+  const [viewMode, setViewMode] = useState<CharacterBoardViewMode>(() => loadPersistedCharacterViewMode() ?? 'card');
+  const changeViewMode = (mode: CharacterBoardViewMode) => {
+    setViewMode(mode);
+    savePersistedCharacterViewMode(mode);
+  };
 
   const detailCharacter = useMemo(() => characters.find((c) => c.id === detailRequest?.id) ?? null, [characters, detailRequest?.id]);
   useEffect(() => { if (detailRequest && !detailCharacter) setDetailRequest(null); }, [detailRequest, detailCharacter]);
@@ -137,7 +153,7 @@ function CharacterGrid({ onAdd, pendingOpenId, onConsumeOpen }: { onAdd: () => v
   // ─── 카드 드래그 재배치(F29) ───
   const reorderCharacters = useCharacterBoardStore((s) => s.reorderCharacters);
   // 검색/태그 필터·키 비교·보관 목록에서는 비활성 (파생 정렬/부분 목록 위 재배치는 비직관적).
-  const cardDragEnabled = !showArchived && !heightCompareMode && !query.trim() && activeTags.length === 0;
+  const cardDragEnabled = viewMode !== 'list' && !showArchived && !heightCompareMode && !query.trim() && activeTags.length === 0;
   const [draggingCardId, setDraggingCardId] = useState<string | null>(null);
   const [dropTargetId, setDropTargetId] = useState<string | null>(null);
   const draggingCardIdRef = useRef<string | null>(null); // drop 시 stale closure 회피 — 복장 드래그와 동일 ref 병행 패턴.
@@ -167,7 +183,7 @@ function CharacterGrid({ onAdd, pendingOpenId, onConsumeOpen }: { onAdd: () => v
   if (!loaded) {
     if (loadError) {
       return (
-        <div className="flex flex-col items-center justify-center gap-3 h-40 text-center">
+        <div className="mt-4 flex flex-col items-center justify-center gap-3 h-40 text-center">
           <span className="text-sm text-text-secondary">캐릭터 현황판을 불러오지 못했어요.</span>
           <button
             type="button"
@@ -180,7 +196,7 @@ function CharacterGrid({ onAdd, pendingOpenId, onConsumeOpen }: { onAdd: () => v
       );
     }
     return (
-      <div className="grid grid-cols-[repeat(auto-fill,minmax(180px,1fr))] gap-4">
+      <div className="mt-4 grid grid-cols-[repeat(auto-fill,minmax(180px,1fr))] gap-4">
         {Array.from({ length: 6 }).map((_, index) => (
           <div key={index} className="overflow-hidden rounded-xl border border-bg-border bg-bg-card">
             <div className="aspect-[3/4] bg-bg-border/30 animate-pulse motion-reduce:animate-none" />
@@ -200,13 +216,39 @@ function CharacterGrid({ onAdd, pendingOpenId, onConsumeOpen }: { onAdd: () => v
 
   return (
     <div className="flex flex-col gap-4">
-      <div className="flex flex-col gap-2.5">
+      {/* 검색·버튼·필터 칩 — 스크롤해도 상단에 붙는다 (피드백 38). 배경은 토큰 기반이라 라이트/다크 자동 대응. */}
+      <div className="sticky top-0 z-20 -mx-6 bg-bg-primary/85 px-6 pt-4 pb-3 backdrop-blur-md flex flex-col gap-2.5">
         <div className="flex items-center justify-between gap-3 flex-wrap">
           <div className="relative w-full max-w-xs">
             <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-text-secondary" />
             <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="이름으로 검색" className="w-full bg-bg-card border border-bg-border rounded-lg pl-8 pr-3 py-2 text-sm text-text-primary outline-none focus:border-accent/50" />
           </div>
           <div className="flex items-center gap-1.5">
+            {/* 보기 방식 토글 (피드백 40) — 카드 / 이미지 없는 카드 / 리스트. 키 비교 중에는 카드형 고정이라 비활성.
+                pointer-events-none 을 쓰면 hover 가 막혀 안내 title 이 영영 안 뜬다 — disabled 로 클릭만 막는다. */}
+            <div
+              role="group"
+              aria-label="보기 방식"
+              title={heightCompareMode ? '키 비교 보기 중에는 카드 보기로 고정돼요' : undefined}
+              className={cn('flex items-center rounded-lg border border-bg-border p-0.5 shrink-0', heightCompareMode && 'opacity-45')}
+            >
+              {VIEW_MODE_OPTIONS.map(({ mode, label, Icon }) => (
+                <button
+                  key={mode}
+                  type="button"
+                  aria-label={label}
+                  title={heightCompareMode ? undefined : label}
+                  disabled={heightCompareMode}
+                  onClick={() => changeViewMode(mode)}
+                  className={cn(
+                    'flex h-7 w-7 items-center justify-center rounded-md transition-colors cursor-pointer disabled:cursor-default',
+                    viewMode === mode && !heightCompareMode ? 'bg-accent/20 text-accent' : 'text-text-secondary hover:text-text-primary',
+                  )}
+                >
+                  <Icon size={14} />
+                </button>
+              ))}
+            </div>
             <button
               type="button"
               onClick={() => setHeightCompareMode((v) => !v)}
@@ -274,28 +316,45 @@ function CharacterGrid({ onAdd, pendingOpenId, onConsumeOpen }: { onAdd: () => v
           </button>
         </div>
       ) : (
-        <div className={heightCompareMode ? 'flex flex-wrap items-end gap-4' : 'grid grid-cols-[repeat(auto-fill,minmax(180px,1fr))] gap-4'}>
+        <div className={heightCompareMode
+          ? 'flex flex-wrap items-end gap-4'
+          : viewMode === 'list'
+            ? 'flex flex-col gap-1.5'
+            : viewMode === 'compact'
+              ? 'grid grid-cols-[repeat(auto-fill,minmax(150px,1fr))] gap-3'
+              : 'grid grid-cols-[repeat(auto-fill,minmax(180px,1fr))] gap-4'}>
           {displayCharacters.map((c) => (
-            <CharacterCard
-              key={c.id}
-              character={c}
-              costumes={byCharacter.get(c.id) ?? EMPTY_COSTUMES}
-              onOpen={openCharacterDetail}
-              onContextMenu={openCardContextMenu}
-              imageHeightPx={heightCompareMode
-                ? (c.referenceHeightPx && maxReferenceHeight
-                    ? Math.max(90, Math.min(300, Math.round((300 * c.referenceHeightPx) / maxReferenceHeight)))
-                    : 170)
-                : undefined}
-              referenceUnset={heightCompareMode && !c.referenceHeightPx}
-              onDragStartCard={cardDragEnabled ? handleCardDragStart : undefined}
-              onDragOverCard={cardDragEnabled ? handleCardDragOver : undefined}
-              onDropCard={cardDragEnabled ? handleCardDrop : undefined}
-              onDragEndCard={cardDragEnabled ? handleCardDragEnd : undefined}
-              dragging={draggingCardId === c.id}
-              dropTarget={dropTargetId === c.id && draggingCardId !== c.id}
-              dropEdge={cardDragEnabled && dropTargetId === c.id ? dropEdgeFor(cardOrderIds, draggingCardId, c.id) : null}
-            />
+            !heightCompareMode && viewMode === 'list' ? (
+              <CharacterListRow
+                key={c.id}
+                character={c}
+                costumes={byCharacter.get(c.id) ?? EMPTY_COSTUMES}
+                onOpen={openCharacterDetail}
+                onContextMenu={openCardContextMenu}
+              />
+            ) : (
+              <CharacterCard
+                key={c.id}
+                character={c}
+                costumes={byCharacter.get(c.id) ?? EMPTY_COSTUMES}
+                onOpen={openCharacterDetail}
+                onContextMenu={openCardContextMenu}
+                compact={!heightCompareMode && viewMode === 'compact'}
+                imageHeightPx={heightCompareMode
+                  ? (c.referenceHeightPx && maxReferenceHeight
+                      ? Math.max(90, Math.min(300, Math.round((300 * c.referenceHeightPx) / maxReferenceHeight)))
+                      : 170)
+                  : undefined}
+                referenceUnset={heightCompareMode && !c.referenceHeightPx}
+                onDragStartCard={cardDragEnabled ? handleCardDragStart : undefined}
+                onDragOverCard={cardDragEnabled ? handleCardDragOver : undefined}
+                onDropCard={cardDragEnabled ? handleCardDrop : undefined}
+                onDragEndCard={cardDragEnabled ? handleCardDragEnd : undefined}
+                dragging={draggingCardId === c.id}
+                dropTarget={dropTargetId === c.id && draggingCardId !== c.id}
+                dropEdge={cardDragEnabled && dropTargetId === c.id ? dropEdgeFor(cardOrderIds, draggingCardId, c.id) : null}
+              />
+            )
           ))}
         </div>
       )}
@@ -331,12 +390,12 @@ export function CharacterBoardView() {
   const loaded = useCharacterBoardStore((s) => s.loaded);
   const pendingCharacterBoardRequest = useAppStore((s) => s.pendingCharacterBoardRequest);
   const setPendingCharacterBoardRequest = useAppStore((s) => s.setPendingCharacterBoardRequest);
-  const pendingCharacterAddRequest = useAppStore((s) => s.pendingCharacterAddRequest);
-  const setPendingCharacterAddRequest = useAppStore((s) => s.setPendingCharacterAddRequest);
 
   const [tab, setTab] = useState<BoardTab>('board');
   const [addOpen, setAddOpen] = useState(false);
   const [pendingOpenId, setPendingOpenId] = useState<string | null>(null);
+  // 팝업 창 안에서는 "새 창으로" 버튼을 숨긴다 (피드백 36 — 팝업이 팝업을 또 열지 않게).
+  const isPopup = useContext(IsPopupContext);
 
   useEffect(() => {
     const release = ensureLoadedAndRealtime();
@@ -350,25 +409,30 @@ export function CharacterBoardView() {
     setPendingCharacterBoardRequest(null);
   }, [loaded, pendingCharacterBoardRequest, setPendingCharacterBoardRequest]);
 
-  // 사이드바 '+' 등에서 캐릭터 추가 창 열기 요청 — 데이터 로드와 무관(모달은 데이터 불필요).
-  useEffect(() => {
-    if (!pendingCharacterAddRequest) return;
-    setTab('board');
-    setAddOpen(true);
-    setPendingCharacterAddRequest(false);
-  }, [pendingCharacterAddRequest, setPendingCharacterAddRequest]);
-
   // 미소비 딥링크 요청 청소는 useAppStore.setView(다른 뷰로 이동 시)와 goBackNavigation이 담당 —
   //   언마운트 cleanup 방식은 StrictMode 이중 마운트에서 정상 요청까지 지워 사용하지 않는다.
 
   return (
-    <div className="h-full overflow-y-auto p-6">
-      <div className="mb-5 flex flex-col gap-3">
-        <div>
-          <h1 className="text-xl font-bold text-text-primary">캐릭터 현황판</h1>
-          <p className="text-sm text-text-secondary mt-0.5">
-            {tab === 'board' ? '캐릭터별 복장 디자인·리깅 진행 상황' : '에피소드별 등장 캐릭터·이 편 주의점·복장'}
-          </p>
+    <div className="h-full flex flex-col">
+      {/* 제목·탭은 스크롤 밖 고정 영역 — 상단 메뉴가 항상 보인다 (피드백 38). */}
+      <div className="px-6 pt-6 flex flex-col gap-3">
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <h1 className="text-xl font-bold text-text-primary">캐릭터 현황판</h1>
+            <p className="text-sm text-text-secondary mt-0.5">
+              {tab === 'board' ? '캐릭터별 복장 디자인·리깅 진행 상황' : '에피소드별 등장 캐릭터·이 편 주의점·복장'}
+            </p>
+          </div>
+          {!isPopup && typeof window.electronAPI?.widgetOpenPopup === 'function' && (
+            <button
+              type="button"
+              onClick={() => { void window.electronAPI?.widgetOpenPopup?.('character-board', '캐릭터 현황판'); }}
+              title="캐릭터 현황판을 별도 창으로 열어요 — 다른 화면을 보면서 같이 쓸 수 있어요"
+              className="flex items-center gap-1.5 rounded-lg border border-bg-border px-3 py-2 text-sm text-text-secondary hover:border-text-secondary/40 hover:text-text-primary shrink-0 cursor-pointer"
+            >
+              <ExternalLink size={15} /> 새 창으로
+            </button>
+          )}
         </div>
         <div className="flex items-center gap-1.5 border-b border-bg-border pb-2">
           <TabButton active={tab === 'board'} onClick={() => setTab('board')}>캐릭터 현황판</TabButton>
@@ -376,11 +440,15 @@ export function CharacterBoardView() {
         </div>
       </div>
 
-      {tab === 'board' ? (
-        <CharacterGrid onAdd={() => setAddOpen(true)} pendingOpenId={pendingOpenId} onConsumeOpen={() => setPendingOpenId(null)} />
-      ) : (
-        <EpisodeAssetBoard onOpenCharacter={(id) => { setTab('board'); setPendingOpenId(id); }} />
-      )}
+      <div className="flex-1 min-h-0 overflow-y-auto px-6 pb-6">
+        {tab === 'board' ? (
+          <CharacterGrid onAdd={() => setAddOpen(true)} pendingOpenId={pendingOpenId} onConsumeOpen={() => setPendingOpenId(null)} />
+        ) : (
+          <div className="pt-4">
+            <EpisodeAssetBoard onOpenCharacter={(id) => { setTab('board'); setPendingOpenId(id); }} />
+          </div>
+        )}
+      </div>
 
       {addOpen && (
         <AddCharacterModal
