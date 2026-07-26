@@ -18,6 +18,7 @@ import { create } from 'zustand';
 import type {
   Character, CharacterCostume, CharacterCostumeImage, CostumeImageRole,
   EpisodeCharacterLink, CostumeActivityLogContext,
+  CharacterBoardTab, CharacterBoardTabGroup, CharacterBoardTabRow,
 } from '@/types';
 import {
   buildEpisodeLinks,
@@ -53,9 +54,14 @@ import {
   linkCharacterEpisode as svcLinkEpisode,
   unlinkCharacterEpisode as svcUnlinkEpisode,
   updateEpisodeCharacterMapping as svcUpdateEpisodeMapping,
+  loadCharacterBoardTabs as svcLoadTabs,
+  addCharacterBoardTab as svcAddTab,
+  updateCharacterBoardTab as svcUpdateTab,
+  deleteCharacterBoardTab as svcDeleteTab,
   rowToCharacter,
   rowToCostume,
   rowToCostumeImage,
+  rowToCharacterBoardTab,
   subscribeCharacterBoardRealtime,
 } from '@/services/supabaseService';
 import { useAuthStore } from '@/stores/useAuthStore';
@@ -84,6 +90,13 @@ const pendingCharacterFields = new Map<string, Map<string, PendingLocalField>>()
 const pendingCostumeFields = new Map<string, Map<string, PendingLocalField>>();
 const pendingCostumeImageFields = new Map<string, Map<string, PendingLocalField>>();
 const pendingEpisodeLinkFields = new Map<string, Map<string, PendingLocalField>>();
+const pendingTabFields = new Map<string, Map<string, PendingLocalField>>();
+
+/** 탭 정렬: sortOrder → createdAt → id (reorderCharacters 계열과 동일한 tie-break 정신). */
+function sortTabs(tabs: CharacterBoardTab[]): CharacterBoardTab[] {
+  return tabs.slice().sort((a, b) =>
+    a.sortOrder - b.sortOrder || a.createdAt.localeCompare(b.createdAt) || a.id.localeCompare(b.id));
+}
 
 /** 에피소드 링크 pending 버킷에 얇게 묶인 편의 래퍼 — 전역 버킷 의존이라 store 에 남긴다. */
 function trackPendingEpisodeLinkField<K extends 'memo' | 'costumeId'>(
@@ -105,6 +118,8 @@ interface CharacterBoardStore {
   imagesByCostume: Map<string, CharacterCostumeImage[]>;
   /** characterId → 이 캐릭터의 에피소드 연결 상세(메모/복장). episodeIds 와 병렬 유지. */
   episodeLinks: Map<string, EpisodeCharacterLink[]>;
+  /** 사용자 정의 탭 (피드백 41) — sortOrder 오름차순. 그룹은 탭 row 안 JSONB. */
+  tabs: CharacterBoardTab[];
   loaded: boolean;
   loading: boolean;
   /** 초기 로드 실패 — UI 가 무한 스피너 대신 에러+재시도를 보이도록. */
@@ -153,6 +168,13 @@ interface CharacterBoardStore {
   reorderCostumes: (characterId: string, orderedIds: string[]) => Promise<void>;
   reorderCharacters: (orderedIds: string[]) => Promise<void>;
 
+  // ─── 사용자 정의 탭·그룹 (피드백 41) ───
+  addTab: (name: string) => Promise<CharacterBoardTab | null>;
+  renameTab: (id: string, name: string) => Promise<void>;
+  deleteTab: (id: string) => Promise<void>;
+  /** 탭의 그룹 배열 교체 — 그룹 CRUD·멤버 이동이 전부 이 액션으로 수렴(탭 단위 LWW). */
+  updateTabGroups: (id: string, groups: CharacterBoardTabGroup[]) => Promise<void>;
+
   // ─── 복장 다중 이미지 ───
   /** 이미지 추가 — 복장의 첫 이미지면 primary 로 지정하고 featured_* 동기화. */
   addCostumeImage: (
@@ -182,7 +204,7 @@ interface CharacterBoardStore {
   setEpisodeCostume: (characterId: string, episodeNumber: number, costumeId: string | null) => Promise<void>;
 
   receiveRealtime: (payload: {
-    table: 'characters' | 'character_costumes' | 'character_costume_images' | 'episode_character_mapping';
+    table: 'characters' | 'character_costumes' | 'character_costume_images' | 'episode_character_mapping' | 'character_board_tabs';
     eventType: 'INSERT' | 'UPDATE' | 'DELETE';
     row: Record<string, unknown> | null;
     old: Record<string, unknown> | null;
@@ -199,6 +221,7 @@ export const useCharacterBoardStore = create<CharacterBoardStore>((set, get) => 
   costumeImages: [],
   imagesByCostume: new Map(),
   episodeLinks: new Map(),
+  tabs: [],
   loaded: false,
   loading: false,
   loadError: false,
@@ -207,11 +230,12 @@ export const useCharacterBoardStore = create<CharacterBoardStore>((set, get) => 
     if (get().loading) return;
     set({ loading: true, loadError: false });
     try {
-      const [characters, costumes, mappings, costumeImages] = await Promise.all([
+      const [characters, costumes, mappings, costumeImages, tabs] = await Promise.all([
         svcLoadCharacters(),
         svcLoadCostumes(),
         svcLoadMap(),
         svcLoadCostumeImages(),
+        svcLoadTabs(),
       ]);
       // episodeIds 조립
       const epByChar = new Map<string, number[]>();
@@ -226,6 +250,7 @@ export const useCharacterBoardStore = create<CharacterBoardStore>((set, get) => 
       const prevCharacterById = new Map(prev.characters.map((c) => [c.id, c]));
       const prevCostumeById = new Map(prev.costumes.map((c) => [c.id, c]));
       const prevCostumeImageById = new Map(prev.costumeImages.map((i) => [i.id, i]));
+      const prevTabById = new Map(prev.tabs.map((t) => [t.id, t]));
       const assembled = sortCharacters(characters.map((c) => {
         const withEpisodes = {
           ...c,
@@ -239,6 +264,7 @@ export const useCharacterBoardStore = create<CharacterBoardStore>((set, get) => 
         mergeIncomingWithPending(pendingCostumeFields, prevCostumeById.get(c.id), c)));
       const sortedImages = sortCostumeImages(costumeImages.map((i) =>
         mergeIncomingWithPending(pendingCostumeImageFields, prevCostumeImageById.get(i.id), i)));
+      const sortedTabs = sortTabs(tabs.map((t) => mergeIncomingWithPending(pendingTabFields, prevTabById.get(t.id), t)));
       const freshLinks = buildEpisodeLinks(mappings);
       for (const [characterId, links] of freshLinks) {
         for (let i = 0; i < links.length; i++) {
@@ -257,6 +283,7 @@ export const useCharacterBoardStore = create<CharacterBoardStore>((set, get) => 
         costumeImages: sortedImages,
         imagesByCostume: rebuildImagesByCostume(prev.imagesByCostume, sortedImages),
         episodeLinks: freshLinks,
+        tabs: sortedTabs,
         loaded: true,
         loading: false,
         loadError: false,
@@ -576,6 +603,47 @@ export const useCharacterBoardStore = create<CharacterBoardStore>((set, get) => 
     }
   },
 
+  // ─── 사용자 정의 탭·그룹 (피드백 41) ───
+
+  addTab: async (name) => {
+    const trimmed = name.trim();
+    if (!trimmed) return null;
+    const createdBy = useAuthStore.getState().currentUser?.id ?? null;
+    const sortOrder = get().tabs.reduce((m, t) => Math.max(m, t.sortOrder + 1), 0);
+    try {
+      const created = await svcAddTab({ name: trimmed, sortOrder, createdBy });
+      // 서버 결과로 머지 — realtime 도착 전 즉시 반영(중복 방지 위해 같은 id 제거 후 삽입).
+      set((s) => ({ tabs: sortTabs([...s.tabs.filter((t) => t.id !== created.id), created]) }));
+      return created;
+    } catch (err) {
+      console.error('[character-board] 탭 추가 실패:', err);
+      toast.error('탭을 추가하지 못했어요');
+      return null;
+    }
+  },
+
+  renameTab: async (id, name) => {
+    const trimmed = name.trim();
+    if (!trimmed) return;
+    await applyTabUpdate(set, get, id, { name: trimmed }, '탭 이름을 저장하지 못했어요');
+  },
+
+  deleteTab: async (id) => {
+    const removed = get().tabs.find((t) => t.id === id) ?? null;
+    set((s) => ({ tabs: s.tabs.filter((t) => t.id !== id) }));
+    try {
+      await svcDeleteTab(id);
+    } catch (err) {
+      console.error('[character-board] 탭 삭제 실패:', err);
+      if (removed) set((s) => ({ tabs: sortTabs([...s.tabs, removed]) }));
+      toast.error('탭을 삭제하지 못했어요');
+    }
+  },
+
+  updateTabGroups: async (id, groups) => {
+    await applyTabUpdate(set, get, id, { groups }, '그룹 변경을 저장하지 못했어요');
+  },
+
   // ─── 복장 다중 이미지 ───
 
   addCostumeImage: async (costumeId, url, role = 'design', naturalSize) => {
@@ -814,6 +882,23 @@ export const useCharacterBoardStore = create<CharacterBoardStore>((set, get) => 
 
   receiveRealtime: (payload) => {
     const { table, eventType, row, old } = payload;
+    // character_board_tabs (피드백 41)
+    if (table === 'character_board_tabs') {
+      if (eventType === 'DELETE') {
+        const id = (old?.id ?? row?.id) as string | undefined;
+        if (id) set((s) => ({ tabs: s.tabs.filter((t) => t.id !== id) }));
+        return;
+      }
+      if (!row) return;
+      const incoming = rowToCharacterBoardTab(row as unknown as CharacterBoardTabRow);
+      set((s) => {
+        const prevTab = s.tabs.find((t) => t.id === incoming.id);
+        const merged = mergeIncomingWithPending(pendingTabFields, prevTab, incoming);
+        return { tabs: sortTabs([...s.tabs.filter((t) => t.id !== incoming.id), merged]) };
+      });
+      return;
+    }
+
     if (table === 'characters') {
       if (eventType === 'DELETE') {
         const id = old?.id;
@@ -1052,6 +1137,39 @@ async function applyCharacterUpdate(
     }
     toast.error(errorMsg);
     return false;
+  }
+}
+
+/** 탭 낙관 갱신 공통 — 즉시 반영 + pending 추적 + 실패 시 조건부 롤백 (applyCharacterUpdate 미러, 피드백 41). */
+async function applyTabUpdate(
+  set: (partial: Partial<CharacterBoardStore>) => void,
+  get: () => CharacterBoardStore,
+  id: string,
+  updates: Partial<Pick<CharacterBoardTab, 'name' | 'sortOrder' | 'groups'>>,
+  failMsg: string,
+): Promise<void> {
+  const prevTab = get().tabs.find((t) => t.id === id) ?? null;
+  trackPendingFields(pendingTabFields, id, updates as Record<string, unknown>);
+  set({ tabs: sortTabs(get().tabs.map((t) => (t.id === id ? { ...t, ...updates } : t))) });
+  try {
+    await svcUpdateTab(id, updates);
+  } catch (err) {
+    console.error('[character-board] 탭 저장 실패:', err);
+    if (prevTab) {
+      const updRec = updates as unknown as Record<string, unknown>;
+      const prevRec = prevTab as unknown as Record<string, unknown>;
+      const reverted = get().tabs.map((t) => {
+        if (t.id !== id) return t;
+        const curRec = t as unknown as Record<string, unknown>;
+        const restored: Record<string, unknown> = { ...curRec };
+        for (const k of Object.keys(updates)) {
+          if (curRec[k] === updRec[k]) restored[k] = prevRec[k];
+        }
+        return restored as unknown as CharacterBoardTab;
+      });
+      set({ tabs: sortTabs(reverted) });
+    }
+    toast.error(failMsg);
   }
 }
 

@@ -1478,6 +1478,36 @@ export function installDevElectronAPI(): void {
     },
     onCompositingStatesRealtime: noop,
 
+    // ─── 캐릭터 현황판 탭·그룹 (mock, 피드백 41) ───
+    supabaseLoadCharacterBoardTabs: async () => {
+      const store = (localStore.__characterTabs as Record<string, unknown>[] | undefined)
+        ?? (localStore.__characterTabs = [] as Record<string, unknown>[]);
+      return store as unknown[];
+    },
+    supabaseAddCharacterBoardTab: async (input: { name: string; sortOrder: number; createdBy?: string | null }) => {
+      const store = (localStore.__characterTabs as Record<string, unknown>[] | undefined)
+        ?? (localStore.__characterTabs = [] as Record<string, unknown>[]);
+      const now = new Date().toISOString();
+      const row = {
+        id: createUuid(), name: input.name, sort_order: input.sortOrder, groups: [],
+        created_by: input.createdBy ?? null, created_at: now, updated_at: now,
+      };
+      store.push(row);
+      return row;
+    },
+    supabaseUpdateCharacterBoardTab: async (id: string, updates: Record<string, unknown>) => {
+      const store = (localStore.__characterTabs as Record<string, unknown>[] | undefined) ?? [];
+      const row = store.find((r) => r.id === id) ?? null;
+      if (row) Object.assign(row, updates, { updated_at: new Date().toISOString() });
+      return row;
+    },
+    supabaseDeleteCharacterBoardTab: async (id: string) => {
+      const store = (localStore.__characterTabs as Record<string, unknown>[] | undefined) ?? [];
+      const idx = store.findIndex((r) => r.id === id);
+      if (idx >= 0) store.splice(idx, 1);
+      return { ok: true };
+    },
+
     // ─── 캐릭터 현황판 (mock) ───
     supabaseLoadCharacters: async () => {
       seedMockCharacterData();
