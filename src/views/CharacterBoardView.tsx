@@ -10,7 +10,7 @@
  */
 
 import { useCallback, useContext, useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react';
-import { Archive, Plus, Image as ImageIcon, Search, Ruler, LayoutGrid, Grid3x3, List, ExternalLink, X } from 'lucide-react';
+import { Archive, ChevronDown, Plus, Image as ImageIcon, Search, Ruler, LayoutGrid, Grid3x3, List, ExternalLink, X } from 'lucide-react';
 import { useCharacterBoardStore } from '@/stores/useCharacterBoardStore';
 import { moveCostumeInOrder, dropEdgeFor } from '@/stores/characterBoardStoreHelpers';
 import { useAppStore } from '@/stores/useAppStore';
@@ -21,7 +21,7 @@ import { TagPill } from '@/components/characters/TagChips';
 import { CharacterCard, EMPTY_COSTUMES } from '@/components/characters/CharacterCard';
 import { CharacterDetailModal } from '@/components/characters/CharacterDetailModal';
 import { AddCharacterModal } from '@/components/characters/AddCharacterModal';
-import { loadPersistedCharacterViewMode, savePersistedCharacterViewMode, type CharacterBoardViewMode } from '@/utils/characterViewPersist';
+import { loadPersistedCharacterViewMode, savePersistedCharacterViewMode, loadPersistedTagsFolded, savePersistedTagsFolded, type CharacterBoardViewMode } from '@/utils/characterViewPersist';
 import { CharacterListRow } from '@/components/characters/CharacterListRow';
 import { IsPopupContext } from '@/components/widgets/Widget';
 import { CharacterTabGroupsView } from '@/components/characters/CharacterTabGroupsView';
@@ -190,6 +190,12 @@ function CharacterGrid({ onAdd, pendingOpenId, onConsumeOpen }: { onAdd: () => v
   const changeViewMode = (mode: CharacterBoardViewMode) => {
     setViewMode(mode);
     savePersistedCharacterViewMode(mode);
+  };
+  // 태그 필터 행 접기 — 마지막 상태를 localStorage 에 영속화.
+  const [tagsFolded, setTagsFolded] = useState<boolean>(() => loadPersistedTagsFolded() ?? false);
+  const changeTagsFolded = (folded: boolean) => {
+    setTagsFolded(folded);
+    savePersistedTagsFolded(folded);
   };
   // 사용자 정의 탭 (피드백 41). null = '전체'. 다른 사용자가 탭을 지우면 자동으로 '전체'로 복귀.
   const [activeTabId, setActiveTabId] = useState<string | null>(null);
@@ -436,11 +442,28 @@ function CharacterGrid({ onAdd, pendingOpenId, onConsumeOpen }: { onAdd: () => v
           </div>
         </div>
         {allTags.length > 0 && (
-          <div className="flex flex-wrap items-center gap-1.5">
-            {allTags.map((t) => <TagPill key={t} tag={t} on={activeTags.includes(t)} onClick={() => toggleTag(t)} />)}
-            {activeTags.length > 0 && (
-              <button type="button" onClick={() => setActiveTags([])} className="text-xs text-text-secondary hover:text-text-primary px-1.5 cursor-pointer">필터 해제</button>
-            )}
+          <div>
+            <button
+              type="button"
+              onClick={() => changeTagsFolded(!tagsFolded)}
+              aria-expanded={!tagsFolded}
+              className="flex items-center gap-1.5 text-xs text-text-secondary hover:text-text-primary cursor-pointer"
+            >
+              <ChevronDown size={13} className={cn('transition-transform duration-200 motion-reduce:transition-none', tagsFolded && '-rotate-90')} />
+              태그 필터 <span className="font-semibold text-text-primary">{allTags.length}</span>
+              {activeTags.length > 0 && <span className="text-accent">· {activeTags.length}개 선택</span>}
+            </button>
+            <div
+              className={cn(
+                'flex flex-wrap items-center gap-1.5 overflow-hidden transition-[max-height,opacity,margin-top] duration-200 ease-out motion-reduce:transition-none',
+                tagsFolded ? 'mt-0 max-h-0 opacity-0' : 'mt-2 max-h-64 opacity-100',
+              )}
+            >
+              {allTags.map((t) => <TagPill key={t} tag={t} on={activeTags.includes(t)} onClick={() => toggleTag(t)} />)}
+              {activeTags.length > 0 && (
+                <button type="button" onClick={() => setActiveTags([])} className="text-xs text-text-secondary hover:text-text-primary px-1.5 cursor-pointer">필터 해제</button>
+              )}
+            </div>
           </div>
         )}
       </div>

@@ -5,7 +5,7 @@
 import { existsSync, readFileSync } from 'node:fs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { loadPersistedCharacterViewMode, savePersistedCharacterViewMode } from '../src/utils/characterViewPersist.ts';
+import { loadPersistedCharacterViewMode, savePersistedCharacterViewMode, loadPersistedTagsFolded, savePersistedTagsFolded } from '../src/utils/characterViewPersist.ts';
 
 const boardView = readFileSync('src/views/CharacterBoardView.tsx', 'utf8');
 
@@ -48,6 +48,7 @@ test('피드백 40: 보기 방식 3종 — 영속화 + 렌더 분기', () => {
 test('characterViewPersist: node 환경 방어 + 스텁 왕복', () => {
   // node 환경에는 localStorage 가 없다 — load 는 null, save 는 무예외가 계약이다.
   assert.equal(loadPersistedCharacterViewMode(), null);
+  assert.equal(loadPersistedTagsFolded(), null);
   assert.doesNotThrow(() => savePersistedCharacterViewMode('list'));
   // localStorage 스텁 주입 후 왕복 + 알 수 없는 값 방어.
   const store = new Map<string, string>();
@@ -59,6 +60,12 @@ test('characterViewPersist: node 환경 방어 + 스텁 왕복', () => {
   assert.equal(loadPersistedCharacterViewMode(), 'compact');
   store.set('bflow_character_board_view_mode', '이상한값');
   assert.equal(loadPersistedCharacterViewMode(), null);
+  savePersistedTagsFolded(true);
+  assert.equal(loadPersistedTagsFolded(), true);
+  savePersistedTagsFolded(false);
+  assert.equal(loadPersistedTagsFolded(), false);
+  store.set('bflow_character_tags_folded', '엉뚱');
+  assert.equal(loadPersistedTagsFolded(), null);
   delete (globalThis as Record<string, unknown>).localStorage;
 });
 
@@ -77,6 +84,15 @@ test('피드백 36: 캐릭터 현황판 팝업 창 — 프리셋 + 전면 공개
   assert.match(boardView, /widgetOpenPopup\?\.\('character-board', '캐릭터 현황판'\)/);
   assert.match(boardView, /새 창으로/);
   assert.match(boardView, /useContext\(IsPopupContext\)/);
+});
+
+test('태그 필터 행 접기/펼치기', () => {
+  assert.match(boardView, /loadPersistedTagsFolded\(\) \?\? false/);
+  assert.match(boardView, /savePersistedTagsFolded\(folded\)/);
+  assert.match(boardView, /aria-expanded=\{!tagsFolded\}/);
+  assert.match(boardView, /태그 필터/);
+  const persist = readFileSync('src/utils/characterViewPersist.ts', 'utf8');
+  assert.match(persist, /bflow_character_tags_folded/);
 });
 
 test('정식 공개: 캐릭터 현황판 게이팅 잔재 없음', () => {

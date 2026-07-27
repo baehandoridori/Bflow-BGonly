@@ -21,3 +21,19 @@ export function loadPersistedCharacterViewMode(): CharacterBoardViewMode | null 
 export function savePersistedCharacterViewMode(mode: CharacterBoardViewMode): void {
   try { localStorage.setItem(KEY, mode); } catch { /* ignore */ }
 }
+
+const TAGS_FOLDED_KEY = 'bflow_character_tags_folded';
+
+/** 태그 필터 칩 행 접힘 상태 (정식 공개 라운드). */
+export function loadPersistedTagsFolded(): boolean | null {
+  try {
+    const v = localStorage.getItem(TAGS_FOLDED_KEY);
+    return v === '1' ? true : v === '0' ? false : null;
+  } catch {
+    return null;
+  }
+}
+
+export function savePersistedTagsFolded(folded: boolean): void {
+  try { localStorage.setItem(TAGS_FOLDED_KEY, folded ? '1' : '0'); } catch { /* ignore */ }
+}
