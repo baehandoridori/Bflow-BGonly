@@ -2,7 +2,7 @@
  * 2026-07-26 캐릭터 현황판 피드백 배치(항목 36·38·39·40) 배선 고정 테스트.
  * 소스-문자열 검사 — 리팩터 시 앵커가 깨지면 함께 갱신할 것.
  */
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { loadPersistedCharacterViewMode, savePersistedCharacterViewMode } from '../src/utils/characterViewPersist.ts';
@@ -62,7 +62,7 @@ test('characterViewPersist: node 환경 방어 + 스텁 왕복', () => {
   delete (globalThis as Record<string, unknown>).localStorage;
 });
 
-test('피드백 36: 캐릭터 현황판 팝업 창 — 프리셋 + 게이트 + 버튼', () => {
+test('피드백 36: 캐릭터 현황판 팝업 창 — 프리셋 + 전면 공개 + 버튼', () => {
   const main = readFileSync('electron/main.ts', 'utf8');
   assert.match(main, /const WIDGET_POPUP_DEFAULTS/);
   assert.match(main, /'character-board': \{ width: 1160, height: 780, alwaysOnTop: false \}/);
@@ -70,9 +70,29 @@ test('피드백 36: 캐릭터 현황판 팝업 창 — 프리셋 + 게이트 + �
   assert.match(main, /preset\?\.alwaysOnTop \?\? true/);
   const popup = readFileSync('src/views/WidgetPopup.tsx', 'utf8');
   assert.match(popup, /function CharacterBoardPopupBody/);
-  assert.match(popup, /useCharacterBoardAccessState/);
+  // 전면 공개(정식 릴리즈) — 팝업에 게이트를 두지 않는다.
+  assert.doesNotMatch(popup, /useCharacterBoardAccessState/);
+  assert.match(popup, /lazy\(\(\) => import\('@\/views\/CharacterBoardView'\)\)/);
   assert.match(popup, /'character-board': \{ label: '캐릭터 현황판', component: <CharacterBoardPopupBody \/> \}/);
   assert.match(boardView, /widgetOpenPopup\?\.\('character-board', '캐릭터 현황판'\)/);
   assert.match(boardView, /새 창으로/);
   assert.match(boardView, /useContext\(IsPopupContext\)/);
+});
+
+test('정식 공개: 캐릭터 현황판 게이팅 잔재 없음', () => {
+  // 정식 릴리즈: 접근 게이팅 훅·공개 대상 관리 UI 는 삭제됐고 되살아나면 안 된다.
+  assert.equal(existsSync('src/hooks/useCharacterBoardAccess.ts'), false);
+  assert.equal(existsSync('src/components/settings/FeatureGatingSection.tsx'), false);
+  const sidebar = readFileSync('src/components/layout/Sidebar.tsx', 'utf8');
+  assert.doesNotMatch(sidebar, /characterAccess/);
+  assert.doesNotMatch(sidebar, /CharacterAccessRetryTip/);
+  const app = readFileSync('src/App.tsx', 'utf8');
+  assert.doesNotMatch(app, /CharacterBoardAccessFallback/);
+  assert.match(app, /case 'character-board':\s*\r?\n\s*return <CharacterBoardView \/>;/);
+  const settings = readFileSync('src/views/SettingsView.tsx', 'utf8');
+  assert.doesNotMatch(settings, /FeatureGatingSection/);
+  const spotlight = readFileSync('src/components/spotlight/SpotlightSearch.tsx', 'utf8');
+  assert.doesNotMatch(spotlight, /hasCharacterBoardAccess/);
+  const mock = readFileSync('src/mocks/devElectronAPI.ts', 'utf8');
+  assert.doesNotMatch(mock, /feature-access/);
 });

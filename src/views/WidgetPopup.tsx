@@ -22,7 +22,6 @@ import { EpDeptComparisonWidget } from '@/components/widgets/episode/EpDeptCompa
 import { EpFullDeptProgressWidget } from '@/components/widgets/episode/EpFullDeptProgressWidget';
 import { EpSinglePartWidget } from '@/components/widgets/episode/EpSinglePartWidget';
 import { WidgetIdContext, IsPopupContext } from '@/components/widgets/Widget';
-import { useCharacterBoardAccessState } from '@/hooks/useCharacterBoardAccess';
 import { GradientBackdrop } from '@/components/common/GradientBackdrop';
 import { loadPreferences, loadTheme } from '@/services/settingsService';
 import { loadSession, loadUsers } from '@/services/userService';
@@ -52,25 +51,8 @@ export function notifyDataChangeWithCooldown() {
 // 현황판은 App.tsx 와 동일하게 lazy — 팝업 엔트리 청크를 무겁게 하지 않는다 (피드백 36).
 const CharacterBoardView = lazy(() => import('@/views/CharacterBoardView'));
 
-/** 캐릭터 현황판 팝업 본문 (피드백 36) — 메인 창과 동일한 접근 게이팅(fail-closed)을 거친다. */
+/** 캐릭터 현황판 팝업 본문 (피드백 36) — lazy 로딩 래퍼. 현황판은 전면 공개(정식 릴리즈)라 접근 게이트가 없다. */
 function CharacterBoardPopupBody() {
-  const access = useCharacterBoardAccessState();
-  if (!access.allowed) {
-    return (
-      <div className="flex h-full flex-col items-center justify-center gap-2 p-6 text-center text-sm text-text-secondary">
-        {access.loading ? '권한 확인 중...' : '캐릭터 현황판에 접근 권한이 없어요.'}
-        {!access.loading && access.error && (
-          <button
-            type="button"
-            onClick={access.retry}
-            className="rounded-lg border border-bg-border px-3 py-1.5 text-xs text-text-primary hover:border-accent/50"
-          >
-            다시 확인
-          </button>
-        )}
-      </div>
-    );
-  }
   return (
     <Suspense fallback={<div className="flex h-full items-center justify-center text-sm text-text-secondary/50">불러오는 중...</div>}>
       <CharacterBoardView />

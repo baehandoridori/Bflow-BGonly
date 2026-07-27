@@ -7,7 +7,6 @@
  *          + 버전·담당자 + 디자인/리깅 단계 레일 + 구조/에셋 태그(태그별 고유색).
  *
  * 모든 변경은 낙관적 업데이트 + 실시간 동기화 (useCharacterBoardStore).
- * 접근 권한은 사이드바에서 게이팅 (useCharacterBoardAccess).
  */
 
 import { useCallback, useContext, useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react';

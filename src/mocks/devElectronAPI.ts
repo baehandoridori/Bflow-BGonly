@@ -330,13 +330,6 @@ function getMockMetadataRows(): MockMetadataRow[] {
       { type: 'part-reel-worker', key: 'EP05_C_ACT', value: '강선영', updatedAt: '2026-06-05T00:00:00.000Z' },
       { type: 'part-reel-worker', key: 'EP05_D_BG', value: '박정인', updatedAt: '2026-06-05T00:00:00.000Z' },
       { type: 'part-reel-worker', key: 'EP05_D_ACT', value: '박정인', updatedAt: '2026-06-05T00:00:00.000Z' },
-      // 캐릭터 현황판 게이팅 — preview 의 mock 배한솔(id '1') 에게 메뉴 노출.
-      {
-        type: 'feature-access',
-        key: 'character-board',
-        value: '{"userIds":["1"],"allowAdmin":true}',
-        updatedAt: '2026-06-05T00:00:00.000Z',
-      },
       {
         type: 'character-board',
         key: 'work-folder-root',

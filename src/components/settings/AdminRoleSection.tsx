@@ -68,7 +68,7 @@ export function AdminRoleSection() {
       title="관리자 권한 관리"
     >
       <p className="text-[11px] text-text-secondary/70 mb-4 leading-relaxed">
-        관리자는 이 관리자 페이지(권한 관리·기능 노출)에 들어올 수 있어요. 신중하게 지정해주세요.
+        관리자는 이 관리자 페이지(권한 관리)에 들어올 수 있어요. 신중하게 지정해주세요.
       </p>
 
       <div className="rounded-lg border border-bg-border/60 bg-bg-primary/30 p-3">
