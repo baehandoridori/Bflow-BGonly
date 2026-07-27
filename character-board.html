@@ -1,0 +1,2744 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Bflow · 캐릭터 현황판 온보딩</title>
+<style>
+/* ═══════════════════════════════════════════════════════════════
+   Bflow 캐릭터 현황판 — 시각 온보딩 릴
+   실제 앱 토큰 (Violet Dream / Dark) 그대로 사용:
+   src/index.css :root + tailwind.config.js
+   ═══════════════════════════════════════════════════════════════ */
+:root{
+  --bg:#0F1117;            /* --color-bg-primary  15 17 23  */
+  --card:#1A1D27;          /* --color-bg-card     26 29 39  */
+  --bd:#2D3041;            /* --color-bg-border   45 48 65  */
+  --tp:#E8E8EE;            /* --color-text-primary          */
+  --ts:#8B8DA3;            /* --color-text-secondary        */
+  --ac:#6C5CE7;            /* --color-accent                */
+  --ac2:#A29BFE;           /* --color-accent-sub            */
+  --on-ac:#FFFFFF;
+  /* 캐릭터 현황판 단계 색 (index.css --char-stage-*) */
+  --st-wait:#8B8DA3; --st-prog:#74B9FF; --st-rig:#6C5CE7;
+  --st-fb:#FDCB6E;  --st-done:#A29BFE; --st-comp:#00B894;
+  --err:#FF7675;
+  --font:'Pretendard Variable',Pretendard,system-ui,-apple-system,'Segoe UI','Malgun Gothic',sans-serif;
+}
+*{box-sizing:border-box;margin:0;padding:0;-webkit-font-smoothing:antialiased}
+html,body{height:100%}
+body{
+  background:#0A0B10; color:var(--tp); font-family:var(--font);
+  display:flex;flex-direction:column;align-items:center;justify-content:center;
+  gap:14px;overflow:hidden;line-height:1.5;
+}
+button{font-family:inherit;border:0;background:none;color:inherit;cursor:pointer;white-space:nowrap}
+input,textarea{font-family:inherit;color:var(--tp)}
+::-webkit-scrollbar{width:8px;height:8px}
+::-webkit-scrollbar-thumb{background:#2D3041;border-radius:8px}
+::-webkit-scrollbar-track{background:transparent}
+
+/* ─── 무대 ─────────────────────────────────────────── */
+#stageWrap{position:relative;flex:0 0 auto}
+#stage{
+  position:relative;width:1280px;height:720px;overflow:hidden;
+  background:var(--bg);border-radius:16px;border:1px solid #23263500;
+  box-shadow:0 30px 90px rgba(0,0,0,.6),0 0 0 1px rgba(255,255,255,.04);
+  transform-origin:top left;
+}
+/* 은은한 배경 그라데이션(앱 GradientBackdrop 느낌) */
+#stage::before{content:'';position:absolute;inset:0;pointer-events:none;z-index:0;
+  background:
+    radial-gradient(620px 420px at 12% -8%, rgba(108,92,231,.10), transparent 60%),
+    radial-gradient(700px 480px at 105% 112%, rgba(162,155,254,.08), transparent 60%);
+}
+/* 카메라(줌 대상): 앱 화면 + 오버레이 모두 포함 */
+#camera{position:absolute;inset:0;transform-origin:0 0;will-change:transform;z-index:1}
+#world{position:absolute;inset:0}
+#ovl{position:absolute;inset:0;pointer-events:none}
+#ovl>*{pointer-events:auto}
+
+/* ─── 앱: 캐릭터 현황판 뷰 ────────────────────────── */
+.viewCol{position:absolute;inset:0;display:flex;flex-direction:column}
+.viewHead{padding:22px 24px 0;display:flex;flex-direction:column;gap:12px;flex:0 0 auto}
+.viewHead .row1{display:flex;align-items:flex-start;justify-content:space-between;gap:12px}
+.h1{font-size:20px;font-weight:700;color:var(--tp)}
+.hsub{font-size:14px;color:var(--ts);margin-top:2px}
+.btnGhost{display:flex;align-items:center;gap:6px;border:1px solid var(--bd);border-radius:8px;
+  padding:8px 12px;font-size:14px;color:var(--ts);transition:.15s}
+.btnGhost:hover{border-color:rgba(139,141,163,.4);color:var(--tp)}
+.tabRow{display:flex;align-items:center;gap:6px;border-bottom:1px solid var(--bd);padding-bottom:8px}
+.tabBtn{padding:6px 14px;border-radius:8px;font-size:14px;font-weight:500;color:var(--ts);transition:.15s}
+.tabBtn:hover{color:var(--tp);background:rgba(45,48,65,.4)}
+.tabBtn.on{background:rgba(108,92,231,.2);color:var(--ac)}
+
+.viewBody{flex:1;min-height:0;overflow-y:auto;overflow-x:hidden;padding:0 24px 24px;position:relative}
+.toolbar{position:sticky;top:0;z-index:20;margin:0 -24px;padding:14px 24px 12px;
+  background:rgba(15,17,23,.85);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);
+  display:flex;flex-direction:column;gap:10px}
+
+/* 사용자 정의 탭 스트립 (피드백 41) */
+.bstrip{display:flex;flex-wrap:wrap;align-items:center;gap:6px}
+.bchip{padding:4px 10px;border-radius:999px;font-size:12px;border:1px solid var(--bd);
+  color:var(--ts);transition:.15s;display:inline-flex;align-items:center;gap:5px}
+.bchip:hover{color:var(--tp)}
+.bchip.on{border-color:var(--ac);background:rgba(108,92,231,.15);color:var(--ac)}
+.bchip.addTab{border-style:dashed;gap:4px}
+.bchip.addTab:hover{border-color:rgba(108,92,231,.5)}
+.bstripInput{width:112px;background:transparent;border:1px solid var(--bd);border-radius:999px;
+  padding:4px 10px;font-size:12px;outline:none}
+.bstripInput:focus,.bstripInput.hot{border-color:rgba(108,92,231,.5)}
+.tabDelWrap{display:inline-flex;align-items:center}
+.tabX{margin-left:2px;border-radius:5px;padding:3px;color:var(--ts);display:inline-flex}
+.tabX:hover{color:var(--tp);background:rgba(45,48,65,.3)}
+.confirmDel{margin-left:4px;display:inline-flex;align-items:center;gap:4px;font-size:12px}
+.confirmDel .del{color:var(--err);padding:2px 6px;border-radius:5px}
+.confirmDel .del:hover,.confirmDel .keep:hover{background:rgba(45,48,65,.3)}
+.confirmDel .keep{color:var(--ts);padding:2px 6px;border-radius:5px}
+
+/* 검색 + 버튼 줄 */
+.tools2{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap}
+.searchBox{position:relative;width:100%;max-width:320px}
+.searchBox svg{position:absolute;left:10px;top:50%;transform:translateY(-50%);color:var(--ts)}
+.searchBox input{width:100%;background:var(--card);border:1px solid var(--bd);border-radius:8px;
+  padding:8px 12px 8px 32px;font-size:14px;outline:none;transition:border-color .15s}
+.searchBox input:focus,.searchBox input.hot{border-color:rgba(108,92,231,.5)}
+.toolsR{display:flex;align-items:center;gap:6px}
+.vseg{display:flex;align-items:center;border:1px solid var(--bd);border-radius:8px;padding:2px;flex:0 0 auto;transition:opacity .2s}
+.vseg.dis{opacity:.45}
+.vbtn{width:28px;height:28px;border-radius:6px;display:flex;align-items:center;justify-content:center;
+  color:var(--ts);transition:.15s}
+.vbtn:hover{color:var(--tp)}
+.vbtn.on{background:rgba(108,92,231,.2);color:var(--ac)}
+.tbtn{display:flex;align-items:center;gap:6px;border:1px solid var(--bd);border-radius:8px;
+  padding:8px 12px;font-size:14px;color:var(--ts);transition:.15s;flex:0 0 auto}
+.tbtn:hover{border-color:rgba(139,141,163,.4);color:var(--tp)}
+.tbtn.on{border-color:rgba(108,92,231,.5);background:rgba(108,92,231,.15);color:var(--ac)}
+.btnPrimary{display:flex;align-items:center;gap:6px;padding:8px 12px;border-radius:8px;
+  background:var(--ac);color:#fff;font-size:14px;flex:0 0 auto;transition:opacity .15s}
+.btnPrimary:hover{opacity:.9}
+
+/* 태그 필터 칩 (태그별 고유색) */
+.tagRow{display:flex;flex-wrap:wrap;align-items:center;gap:6px}
+.tagpill{padding:4px 10px;border-radius:999px;font-size:12px;border:1px solid var(--bd);
+  color:var(--ts);display:inline-flex;align-items:center;gap:6px;transition:.2s;background:transparent}
+.tagpill .dot{width:8px;height:8px;border-radius:999px;flex:0 0 auto;opacity:.55}
+.tagpill.on .dot{opacity:1}
+.clearTags{font-size:12px;color:var(--ts);padding:0 6px}
+.clearTags:hover{color:var(--tp)}
+
+/* ─── 캐릭터 카드 그리드 ─────────────────────────── */
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:16px;padding-top:4px}
+.grid.compact{grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:12px}
+.listWrap{display:flex;flex-direction:column;gap:6px;padding-top:4px}
+.lineup{display:flex;flex-wrap:wrap;align-items:flex-end;gap:16px;padding-top:4px}
+
+.ccard{position:relative;text-align:left;background:var(--card);border:1px solid var(--bd);
+  border-radius:12px;display:flex;flex-direction:column;cursor:pointer;
+  transition:transform .2s ease-out,opacity .2s ease-out,border-color .2s ease-out}
+.ccard:hover{border-color:rgba(108,92,231,.5)}
+.ccard.dragSrc{opacity:.3;transform:scale(.97)}
+.ccard.dropHi{border-color:rgba(108,92,231,.6)}
+.ccard .imgBox{position:relative;aspect-ratio:3/4;background:rgba(45,48,65,.3);
+  display:flex;align-items:center;justify-content:center;overflow:hidden;
+  border-radius:12px 12px 0 0}
+.ccard .imgBox svg.art{width:100%;height:100%;display:block}
+.ccard .imgBox .noimg{color:rgba(139,141,163,.4)}
+.wheelDots{position:absolute;left:0;right:0;bottom:6px;display:flex;align-items:center;
+  justify-content:center;gap:4px;pointer-events:none}
+.wheelDots i{width:6px;height:6px;border-radius:999px;background:rgba(255,255,255,.4);transition:background .15s}
+.wheelDots i.on{background:var(--ac)}
+.hBadge{position:absolute;left:4px;top:4px;background:rgba(0,0,0,.5);border-radius:4px;
+  padding:2px 6px;font-size:10px;color:rgba(255,255,255,.8);pointer-events:none}
+.ccard .info{padding:12px;display:flex;flex-direction:column;gap:8px}
+.ccard .nm{font-weight:600;font-size:14px;color:var(--tp);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ccard .meta{display:flex;align-items:center;gap:8px;font-size:12px;color:var(--ts)}
+.badges{display:flex;align-items:center;gap:6px;font-size:11px}
+.bdgD{padding:2px 6px;border-radius:6px;background:rgba(162,155,254,.14);color:var(--st-done)}
+.bdgR{padding:2px 6px;border-radius:6px;background:rgba(0,184,148,.14);color:var(--st-comp)}
+.bdgEmpty{align-self:flex-start;padding:2px 6px;border-radius:6px;background:rgba(45,48,65,.3);
+  font-size:11px;color:var(--ts)}
+.dropLine{position:absolute;top:8px;bottom:8px;width:3px;border-radius:999px;background:var(--ac);
+  box-shadow:0 0 10px 1px rgba(108,92,231,.7);z-index:3;pointer-events:none;
+  animation:pulseA 1s ease-in-out infinite}
+.dropLine.before{left:-9px}.dropLine.after{right:-9px}
+@keyframes pulseA{0%,100%{opacity:1}50%{opacity:.45}}
+.ccard.pop{animation:popIn .45s cubic-bezier(.34,1.56,.64,1)}
+@keyframes popIn{0%{opacity:0;transform:scale(.85) translateY(8px)}100%{opacity:1;transform:none}}
+
+/* 리스트 보기 행 */
+.crow{display:flex;width:100%;align-items:center;gap:12px;border:1px solid var(--bd);
+  background:var(--card);border-radius:8px;padding:8px 12px;text-align:left;cursor:pointer;
+  transition:border-color .15s}
+.crow:hover{border-color:rgba(108,92,231,.5)}
+.crow .th{width:40px;height:40px;flex:0 0 auto;border-radius:6px;background:rgba(45,48,65,.3);
+  overflow:hidden;display:flex;align-items:center;justify-content:center}
+.crow .th svg.art{width:100%;height:100%}
+.crow .mid{min-width:0;flex:1}
+.crow .mid .nm{font-weight:500;font-size:14px;color:var(--tp)}
+.crow .mid .sub{font-size:12px;color:var(--ts)}
+
+/* 탭 그룹 섹션 */
+.gsec{border:1px solid rgba(45,48,65,.6);border-radius:12px;padding:12px;display:flex;
+  flex-direction:column;gap:12px;transition:border-color .2s}
+.gsec.dragOver{border-color:rgba(108,92,231,.4)}
+.gsec header{display:flex;align-items:center;gap:8px}
+.gsec .gnm{font-size:14px;font-weight:600;color:var(--tp)}
+.gsec .gcnt{font-size:12px;color:var(--ts)}
+.gIco{border-radius:5px;padding:4px;color:var(--ts);display:inline-flex}
+.gIco:hover{color:var(--tp);background:rgba(45,48,65,.3)}
+.gEmpty{border:1px dashed rgba(45,48,65,.7);border-radius:8px;padding:24px 12px;text-align:center;
+  font-size:12px;color:var(--ts)}
+.groupsCol{display:flex;flex-direction:column;gap:16px;padding-top:4px}
+.addGroupBtn{align-self:flex-start;display:flex;align-items:center;gap:6px;border:1px dashed var(--bd);
+  border-radius:8px;padding:8px 12px;font-size:14px;color:var(--ts)}
+.addGroupBtn:hover{border-color:rgba(108,92,231,.5);color:var(--tp)}
+.groupInputRow{display:flex;align-items:center;gap:8px}
+.groupInputRow input{background:transparent;border:1px solid var(--bd);border-radius:6px;
+  padding:8px 12px;font-size:14px;outline:none}
+.groupInputRow input.hot{border-color:rgba(108,92,231,.5)}
+.groupInputRow .ok{background:var(--ac);border-radius:8px;padding:8px 12px;color:#fff;display:flex}
+
+/* 빈 상태 */
+.emptyState{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;
+  padding:64px 0;text-align:center;color:var(--ts);font-size:14px}
+
+/* ─── 모달 공통 ──────────────────────────────────── */
+.mOverlay{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
+  background:rgba(0,0,0,.55);padding:24px;z-index:30;opacity:0;transition:opacity .2s ease-out}
+.mOverlay.show{opacity:1}
+.mOverlay.blurred{backdrop-filter:blur(4px);-webkit-backdrop-filter:blur(4px);background:rgba(0,0,0,.6)}
+
+/* 캐릭터 추가 모달 */
+.addCard{background:var(--card);border:1px solid var(--bd);border-radius:16px;width:100%;
+  max-width:448px;padding:20px;display:flex;flex-direction:column;gap:16px;
+  transform:scale(.96);transition:transform .2s ease-out}
+.mOverlay.show .addCard{transform:scale(1)}
+.addCard h2{font-size:18px;font-weight:600}
+.fld{display:flex;flex-direction:column;gap:6px}
+.fld .lb{font-size:12px;color:var(--ts)}
+.fld input,.fld textarea{background:transparent;border:1px solid var(--bd);border-radius:6px;
+  padding:8px 12px;font-size:14px;outline:none;resize:none}
+.fld input.hot,.fld input:focus,.fld textarea:focus{border-color:rgba(108,92,231,.5)}
+.fld .hint{font-size:11px;color:var(--ts)}
+.fld .warn{font-size:11px;color:var(--st-fb)}
+.mBtns{display:flex;justify-content:flex-end;gap:8px}
+.mBtns .cancel{padding:6px 12px;border-radius:8px;font-size:14px;color:var(--ts)}
+.mBtns .cancel:hover{background:rgba(45,48,65,.4)}
+.mBtns .go{padding:6px 12px;border-radius:8px;font-size:14px;background:var(--ac);color:#fff}
+
+/* ─── 캐릭터 상세 모달 (마스터-디테일) ───────────── */
+.dRow{display:flex;align-items:stretch;gap:12px;height:634px;max-width:100%}
+.dShell{position:relative;display:flex;height:100%;width:1024px;flex:0 0 auto;overflow:hidden;
+  border-radius:18px;border:1px solid var(--bd);background:var(--card);
+  box-shadow:0 40px 80px rgba(0,0,0,.5);
+  transform:scale(.97);transition:transform .22s ease-out}
+.mOverlay.show .dShell{transform:scale(1)}
+.dGlow{position:absolute;inset:0;overflow:hidden;pointer-events:none;z-index:0}
+.dGlow i{position:absolute;border-radius:999px;filter:blur(40px)}
+.dGlow .a{top:-100px;left:-100px;width:400px;height:400px;
+  background:radial-gradient(circle,rgba(108,92,231,.16) 0%,transparent 60%)}
+.dGlow .b{bottom:-150px;right:-100px;width:500px;height:500px;filter:blur(50px);
+  background:radial-gradient(circle,rgba(162,155,254,.12) 0%,transparent 60%)}
+.dAside{position:relative;z-index:1;width:200px;flex:0 0 auto;border-right:1px solid rgba(45,48,65,.6);
+  display:flex;flex-direction:column;min-height:0}
+.dAsideHead{padding:12px;border-bottom:1px solid rgba(45,48,65,.4);flex:0 0 auto}
+.dCloseTxt{display:flex;align-items:center;gap:6px;font-size:14px;color:var(--ts)}
+.dCloseTxt:hover{color:var(--tp)}
+.dSearch{position:relative;margin-top:12px}
+.dSearch svg{position:absolute;left:10px;top:50%;transform:translateY(-50%);color:var(--ts)}
+.dSearch input{width:100%;border:1px solid var(--bd);background:rgba(45,48,65,.15);border-radius:8px;
+  padding:6px 8px 6px 28px;font-size:12px;outline:none}
+.dSearch input:focus{border-color:rgba(108,92,231,.5)}
+.dList{flex:1;min-height:0;overflow-y:auto;padding:6px 0}
+.dItem{width:100%;display:flex;align-items:center;gap:10px;padding:8px 12px;text-align:left;
+  border-left:2px solid transparent;transition:.15s;cursor:pointer}
+.dItem:hover{background:rgba(45,48,65,.3)}
+.dItem.on{border-left-color:var(--ac);background:rgba(108,92,231,.1)}
+.dItem .th{width:32px;height:32px;border-radius:6px;background:rgba(45,48,65,.4);overflow:hidden;
+  display:flex;align-items:center;justify-content:center;flex:0 0 auto}
+.dItem .th svg.art{width:100%;height:100%}
+.dItem .col{display:flex;flex-direction:column;gap:4px;min-width:0;flex:1}
+.dItem .nm{font-size:13px;color:var(--ts);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.dItem.on .nm{color:var(--tp);font-weight:500}
+.dItem .pbar{height:4px;border-radius:999px;background:rgba(45,48,65,.6);overflow:hidden}
+.dItem .pbar i{display:block;height:100%;border-radius:999px;background:var(--st-comp);
+  transform-origin:left;transition:transform .2s ease-out}
+.dAddChar{flex:0 0 auto;border-top:1px solid rgba(45,48,65,.4);padding:6px}
+.dAddChar button{width:100%;display:flex;align-items:center;gap:6px;border-radius:6px;
+  padding:8px 10px;font-size:14px;color:var(--ts);transition:.15s}
+.dAddChar button:hover{background:rgba(45,48,65,.3);color:var(--ac)}
+.dMain{position:relative;z-index:1;flex:1;min-width:0;display:flex;flex-direction:column}
+.dHead{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:12px 20px;
+  border-bottom:1px solid rgba(45,48,65,.4);flex:0 0 auto;
+  background:rgba(255,255,255,.015);backdrop-filter:blur(20px);-webkit-backdrop-filter:blur(20px)}
+.dTitle{display:flex;align-items:center;gap:8px;min-width:0}
+.dTitle h2{font-size:18px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.dNameInput{background:transparent;border:1px solid rgba(108,92,231,.5);border-radius:6px;
+  padding:4px 8px;font-size:18px;font-weight:600;outline:none;width:180px}
+.icoBtn{border-radius:6px;padding:6px;color:var(--ts);display:inline-flex;transition:.15s}
+.icoBtn:hover{background:rgba(45,48,65,.3);color:var(--tp)}
+.dHeadR{display:flex;align-items:center;gap:8px;flex:0 0 auto}
+.cmtBtn{display:flex;align-items:center;gap:4px;font-size:14px;padding:4px 8px;border-radius:6px;
+  color:var(--ts);transition:.15s}
+.cmtBtn:hover{color:var(--tp)}
+.cmtBtn.on{background:rgba(108,92,231,.15);color:var(--ac)}
+.archBtn{display:flex;align-items:center;gap:4px;font-size:14px;padding:6px 8px;border-radius:6px;color:var(--ts)}
+.archBtn:hover{background:rgba(45,48,65,.3);color:#FFB86B}
+.restoreBtn{display:flex;align-items:center;gap:4px;font-size:14px;padding:6px 8px;border-radius:6px;color:var(--ts)}
+.restoreBtn:hover{background:rgba(45,48,65,.3);color:var(--tp)}
+.delBtn{display:flex;align-items:center;gap:4px;font-size:14px;padding:6px 8px;border-radius:6px;color:var(--ts)}
+.delBtn:hover{background:rgba(255,118,117,.1);color:var(--err)}
+.dBody{flex:1;min-height:0;overflow-y:auto;padding:20px}
+.dCols{display:flex;gap:24px}
+.dLeft{width:240px;flex:0 0 auto;display:flex;flex-direction:column;gap:12px}
+.featBox{position:relative;aspect-ratio:3/4;width:240px;border-radius:12px;border:1px solid var(--bd);
+  overflow:hidden;cursor:zoom-in;background:rgba(45,48,65,.18);transition:border-color .15s}
+.featBox:hover{border-color:rgba(108,92,231,.5)}
+.featBox svg.art{width:100%;height:100%;display:block}
+.featBox.dropHot{border-color:var(--ac);background:rgba(108,92,231,.1)}
+.dropVeil{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
+  border-radius:12px;background:rgba(108,92,231,.15);box-shadow:inset 0 0 0 1px rgba(108,92,231,.6);
+  font-size:12px;font-weight:500;color:var(--ac);opacity:0;transition:opacity .15s;pointer-events:none}
+.featBox.dropHot .dropVeil{opacity:1}
+.featEmpty{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;
+  width:100%;height:100%;color:var(--ts);font-size:12px}
+.featEmpty .tiny{font-size:10px;color:rgba(139,141,163,.7)}
+.featActs{display:grid;grid-template-columns:1fr 1fr auto;gap:6px}
+.fAct{display:flex;align-items:center;justify-content:center;gap:6px;border:1px solid var(--bd);
+  border-radius:6px;padding:6px 8px;font-size:12px;color:var(--ts);transition:.15s}
+.fAct:hover{color:var(--tp);border-color:rgba(139,141,163,.5)}
+.fAct .starOn{color:#FCD34D}
+.thumbStrip{display:flex;align-items:stretch;gap:6px;overflow-x:auto;padding-bottom:4px}
+.tThumb{width:56px;flex:0 0 auto;aspect-ratio:3/4;border-radius:6px;border:1px solid var(--bd);
+  overflow:hidden;background:rgba(45,48,65,.25);cursor:pointer;transition:border-color .15s;position:relative}
+.tThumb svg.art{width:100%;height:100%}
+.tThumb.on{border-color:var(--ac);box-shadow:0 0 0 1px rgba(108,92,231,.4)}
+.tAdd{width:56px;flex:0 0 auto;aspect-ratio:3/4;border:1px dashed var(--bd);border-radius:6px;
+  display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;
+  color:var(--ts);font-size:10px}
+.tAdd:hover{color:var(--ac);border-color:rgba(108,92,231,.5)}
+.costIdent{width:240px;display:flex;flex-direction:column;gap:8px}
+.costIdent .r1{display:flex;align-items:center;gap:6px}
+.costIdent .cnm{font-size:14px;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.costIdent .cv{font-size:11px;color:var(--ts);flex:0 0 auto}
+.costNameInput{flex:1;min-width:0;background:transparent;border:1px solid rgba(108,92,231,.5);
+  border-radius:6px;padding:2px 6px;font-size:14px;font-weight:500;outline:none}
+.costMemo{width:100%;min-height:64px;background:rgba(45,48,65,.12);border:1px solid var(--bd);
+  border-radius:8px;padding:8px 10px;font-size:12px;color:var(--tp);outline:none;resize:none;line-height:1.5}
+.costMemo:focus{border-color:rgba(108,92,231,.5)}
+.costMemo::placeholder{color:rgba(139,141,163,.6)}
+
+.dRight{flex:1;min-width:0;display:flex;flex-direction:column;gap:20px}
+.secLb{font-size:12px;color:var(--ts)}
+.chipsWrap{display:flex;flex-wrap:wrap;gap:6px}
+.epUnit{display:flex;align-items:center;gap:4px}
+.epChip{min-height:28px;border:1px solid var(--bd);border-radius:6px;padding:4px 8px;font-size:12px;
+  color:var(--ts);transition:.15s}
+.epChip:hover{color:var(--tp)}
+.epChip.on{background:rgba(108,92,231,.2);color:var(--ac);border-color:rgba(108,92,231,.4)}
+.epChip.taken{border-style:dashed;color:rgba(139,141,163,.6)}
+.reelBtn{min-height:28px;min-width:28px;display:flex;align-items:center;justify-content:center;
+  border:1px dashed rgba(45,48,65,.8);border-radius:6px;color:var(--ts);transition:.15s}
+.reelBtn.has{border-style:solid;border-color:var(--bd);background:rgba(45,48,65,.15)}
+.reelBtn:hover{color:var(--tp)}
+
+/* 복장 갤러리 */
+.gallery{display:flex;align-items:stretch;gap:10px;overflow-x:auto;padding:0 8px 4px}
+.gcard{position:relative;width:104px;flex:0 0 auto;display:flex;flex-direction:column;
+  border-radius:8px;border:1px solid var(--bd);cursor:pointer;
+  transition:transform .15s ease-out,opacity .15s ease-out,border-color .15s ease-out}
+.gcard:hover{border-color:rgba(139,141,163,.5)}
+.gcard.on{border-color:var(--ac);box-shadow:0 0 0 1px rgba(108,92,231,.4)}
+.gcard.dragSrc{opacity:.3;transform:scale(.96)}
+.gcard .gi{aspect-ratio:3/4;width:100%;background:rgba(45,48,65,.3);display:flex;align-items:center;
+  justify-content:center;overflow:hidden;border-radius:8px 8px 0 0}
+.gcard .gi svg.art{width:100%;height:100%}
+.gcard .gl{display:flex;align-items:center;justify-content:space-between;gap:4px;
+  padding:6px 8px;background:var(--card);border-radius:0 0 8px 8px}
+.gcard .gl .n{font-size:12px;color:var(--ts);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.gcard.on .gl .n{color:var(--tp)}
+.gcard .gl .v{font-size:11px;color:var(--ts);flex:0 0 auto}
+.gcard .grip{position:absolute;left:4px;top:4px;z-index:1;border-radius:4px;background:rgba(0,0,0,.4);
+  padding:2px;color:rgba(255,255,255,.8);opacity:0;transition:opacity .15s}
+.gcard:hover .grip{opacity:1}
+.gcard .gdel{position:absolute;top:4px;right:4px;border-radius:6px;background:rgba(0,0,0,.4);
+  padding:5px;color:rgba(255,255,255,.8);opacity:0;transition:.15s}
+.gcard:hover .gdel{opacity:1}
+.gcard .gdel:hover{color:#F87171}
+.gAdd{width:104px;flex:0 0 auto;aspect-ratio:3/4;display:flex;flex-direction:column;align-items:center;
+  justify-content:center;gap:6px;border:1px dashed var(--bd);border-radius:8px;color:var(--ts);font-size:12px}
+.gAdd:hover{color:var(--ac);border-color:rgba(108,92,231,.5)}
+.gDropLine{position:absolute;top:2px;bottom:2px;width:3px;border-radius:999px;background:var(--ac);
+  box-shadow:0 0 8px 1px rgba(108,92,231,.7);z-index:3;animation:pulseA 1s ease-in-out infinite}
+.gDropLine.before{left:-7px}.gDropLine.after{right:-7px}
+
+/* 복장 상세 (CostumeDetail) */
+.cdWrap{display:flex;flex-direction:column;gap:20px}
+.cdTopRow{display:flex;flex-wrap:wrap;align-items:flex-end;gap:24px}
+.stepper{display:flex;align-items:center;gap:8px}
+.stBtn{width:32px;height:32px;border:1px solid var(--bd);border-radius:6px;color:var(--tp);
+  font-size:16px;display:flex;align-items:center;justify-content:center}
+.stBtn:hover{background:rgba(45,48,65,.4)}
+.verInput{width:56px;height:32px;text-align:center;border:1px solid var(--bd);border-radius:6px;
+  background:transparent;font-size:14px;outline:none;font-variant-numeric:tabular-nums}
+.dateInput,.hpxInput{height:32px;border:1px solid var(--bd);border-radius:6px;background:transparent;
+  padding:0 8px;font-size:14px;outline:none;color-scheme:dark}
+.dateInput:focus,.hpxInput:focus,.dateInput.hot,.hpxInput.hot{border-color:rgba(108,92,231,.5)}
+.hpxInput{width:96px}
+.fitBtn{height:32px;border:1px solid var(--bd);border-radius:6px;padding:0 8px;font-size:12px;color:var(--ts)}
+.fitBtn:hover{border-color:rgba(108,92,231,.5);color:var(--ac)}
+.pathGrid{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.pathRow{display:flex;align-items:center;justify-content:space-between;gap:12px;
+  border:1px solid rgba(45,48,65,.7);background:rgba(45,48,65,.1);border-radius:8px;padding:8px 12px}
+.pathRow .pl{min-width:0}
+.pathRow .plb{font-size:12px;color:var(--ts)}
+.pathRow .pv{font-size:13px;color:var(--tp);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.pathRow .pv.none{color:rgba(139,141,163,.7)}
+.pathActs{display:flex;align-items:center;gap:6px;flex:0 0 auto}
+.pBtn{border:1px solid var(--bd);border-radius:6px;padding:6px 8px;font-size:12px;color:var(--ts)}
+.pBtn:hover{color:var(--tp);border-color:rgba(139,141,163,.5)}
+.pBtn.mk{border-color:rgba(108,92,231,.4);color:var(--ac)}
+.pBtn.mk:hover{background:rgba(108,92,231,.1)}
+.railsBox{display:flex;flex-direction:column;gap:20px;border:1px solid rgba(45,48,65,.6);
+  background:rgba(45,48,65,.1);border-radius:12px;padding:16px}
+.railHr{height:1px;background:rgba(45,48,65,.5)}
+.rail{display:flex;flex-direction:column;gap:10px}
+.railHead{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:8px}
+.railHead .lb{font-size:12px;color:var(--ts)}
+.railHead .cur{font-size:12px;font-weight:500}
+.railTrack{display:flex;align-items:flex-start}
+.stg{position:relative;flex:1;display:flex;flex-direction:column;align-items:center;gap:6px;cursor:pointer}
+.stg .link{position:absolute;top:9px;height:2px;left:-50%;width:100%;background:var(--bd);z-index:0;
+  transition:background .25s}
+.stg .node{position:relative;z-index:1;width:18px;height:18px;border-radius:999px;
+  display:flex;align-items:center;justify-content:center;background:var(--card);
+  border:2px solid var(--bd);transition:background-color .2s,border-color .2s,box-shadow .2s}
+.stg .node .core{width:6px;height:6px;border-radius:999px;background:#fff;display:none}
+.stg .node svg{display:none;color:#fff}
+.stg .slb{font-size:11px;line-height:1.2;text-align:center;color:var(--ts);transition:color .2s}
+.assPick{display:inline-flex;align-items:center;gap:6px;border:1px dashed var(--bd);border-radius:999px;
+  padding:3px 10px;font-size:12px;color:var(--ts);transition:.15s}
+.assPick:hover{color:var(--tp);border-color:rgba(139,141,163,.5)}
+.assChip{display:inline-flex;align-items:center;gap:5px;border-radius:999px;padding:3px 10px;
+  font-size:12px}
+.assChip .adot{width:6px;height:6px;border-radius:999px}
+.announceBtn{align-self:flex-start;display:inline-flex;align-items:center;gap:6px;
+  border:1px solid rgba(108,92,231,.4);border-radius:8px;padding:6px 12px;font-size:12px;
+  font-weight:500;color:var(--ac)}
+.announceBtn:hover{background:rgba(108,92,231,.1)}
+.tagSec{display:flex;flex-direction:column;gap:8px}
+.tagAddWrap{display:inline-flex;align-items:center;gap:4px}
+.tagAddWrap input{width:80px;background:transparent;border:1px solid var(--bd);border-radius:999px;
+  padding:4px 8px;font-size:12px;outline:none}
+.tagAddWrap input:focus{border-color:rgba(108,92,231,.5)}
+
+/* 댓글 패널 */
+.cmtPanel{width:300px;flex:0 0 auto;height:100%;border-radius:18px;border:1px solid var(--bd);
+  background:var(--card);display:flex;flex-direction:column;overflow:hidden;
+  box-shadow:0 40px 80px rgba(0,0,0,.5);animation:slideL .35s cubic-bezier(.22,1,.36,1)}
+@keyframes slideL{0%{opacity:0;transform:translateX(24px)}100%{opacity:1;transform:none}}
+.cmtHead{display:flex;align-items:center;justify-content:space-between;padding:12px 14px;
+  border-bottom:1px solid rgba(45,48,65,.4);font-size:13px;font-weight:600}
+.cmtBody{flex:1;overflow-y:auto;padding:12px 14px;display:flex;flex-direction:column;gap:12px}
+.cmtItem{display:flex;gap:8px}
+.cmtAv{width:26px;height:26px;border-radius:999px;flex:0 0 auto;display:flex;align-items:center;
+  justify-content:center;font-size:11px;font-weight:700;color:#fff}
+.cmtCol{display:flex;flex-direction:column;gap:3px;min-width:0}
+.cmtMeta{font-size:11px;color:var(--ts)}
+.cmtMeta b{color:var(--tp);font-weight:600}
+.cmtTxt{font-size:12px;color:var(--tp);background:rgba(45,48,65,.25);border-radius:0 10px 10px 10px;
+  padding:7px 10px;line-height:1.5}
+.cmtInput{border-top:1px solid rgba(45,48,65,.4);padding:10px 12px}
+.cmtInput .box{border:1px solid var(--bd);border-radius:10px;padding:8px 10px;font-size:12px;
+  color:rgba(139,141,163,.7)}
+
+/* 라이트박스 (크게 보기) */
+.lightbox{position:absolute;inset:0;z-index:40;background:rgba(4,5,9,.88);
+  display:flex;align-items:center;justify-content:center;flex-direction:column;gap:14px;
+  opacity:0;transition:opacity .25s}
+.lightbox.show{opacity:1}
+.lbImg{height:520px;aspect-ratio:3/4;border-radius:12px;overflow:hidden;background:#05060a;
+  border:1px solid rgba(255,255,255,.08);box-shadow:0 30px 70px rgba(0,0,0,.6)}
+.lbImg svg.art{width:100%;height:100%}
+.lbCap{font-size:13px;color:var(--ts)}
+.lbClose{position:absolute;top:16px;right:16px;border-radius:8px;padding:8px;color:var(--ts);
+  background:rgba(45,48,65,.3)}
+.lbClose:hover{color:var(--tp)}
+
+/* 컨텍스트 메뉴 */
+.ctxMenu{position:absolute;z-index:46;min-width:168px;background:#171A24;border:1px solid var(--bd);
+  border-radius:10px;padding:5px;box-shadow:0 18px 50px rgba(0,0,0,.55);
+  display:flex;flex-direction:column;gap:1px;opacity:0;transform:scale(.95);transform-origin:top left;
+  transition:.15s ease-out}
+.ctxMenu.show{opacity:1;transform:scale(1)}
+.ctxItem{display:flex;align-items:center;gap:8px;border-radius:6px;padding:7px 9px;font-size:12px;
+  color:var(--tp);text-align:left}
+.ctxItem:hover{background:rgba(108,92,231,.15)}
+.ctxItem.dim{color:rgba(139,141,163,.55)}
+.ctxHr{height:1px;background:rgba(45,48,65,.7);margin:3px 4px}
+.ctxLb{font-size:10px;color:var(--ts);padding:4px 9px 2px}
+
+/* 담당자 피커 미니 모달 */
+.assModal{position:absolute;inset:0;z-index:44;display:flex;align-items:center;justify-content:center;
+  background:rgba(0,0,0,.45);opacity:0;transition:opacity .2s}
+.assModal.show{opacity:1}
+.assCard{width:340px;background:var(--card);border-radius:16px;padding:16px;
+  box-shadow:0 0 0 1px rgba(255,255,255,.1),0 30px 70px rgba(0,0,0,.5)}
+.assCard .ttl{font-size:14px;font-weight:600}
+.assCard .sub{font-size:12px;color:var(--ts);margin-top:2px}
+.assCard input{width:100%;margin-top:12px;border:1px solid var(--bd);background:rgba(45,48,65,.1);
+  border-radius:10px;padding:8px 12px;font-size:14px;outline:none}
+.assList{margin-top:8px;border:1px solid rgba(45,48,65,.7);background:rgba(45,48,65,.1);
+  border-radius:10px;overflow:hidden}
+.assRow{display:flex;width:100%;align-items:center;gap:8px;padding:8px 12px;font-size:14px;
+  text-align:left;transition:.12s}
+.assRow:hover,.assRow.hi{background:rgba(108,92,231,.15)}
+.assRow .adot{width:8px;height:8px;border-radius:999px;flex:0 0 auto}
+
+/* 토스트 */
+.toast{position:absolute;left:50%;bottom:96px;transform:translateX(-50%) translateY(12px);
+  z-index:52;background:#191C28;border:1px solid var(--bd);border-radius:10px;
+  padding:9px 14px;font-size:12px;color:var(--tp);display:flex;align-items:center;gap:10px;
+  box-shadow:0 14px 40px rgba(0,0,0,.5);opacity:0;transition:.3s cubic-bezier(.22,1,.36,1);pointer-events:none}
+.toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
+.toast .tAct{color:var(--ac);font-weight:600}
+
+/* ═══ 연출 레이어 (스포트라이트 / 커서 / 자막) ═══ */
+#fx{position:absolute;inset:0;z-index:50;pointer-events:none}
+.fstrip{position:absolute;background:rgba(6,7,12,.6);backdrop-filter:blur(2.5px);
+  -webkit-backdrop-filter:blur(2.5px);opacity:0;transition:opacity .4s}
+#fx.focusOn .fstrip{opacity:1}
+.fring{position:absolute;border:2px solid var(--ac);border-radius:12px;opacity:0;
+  box-shadow:0 0 0 4px rgba(108,92,231,.22),0 0 28px rgba(108,92,231,.5),
+             inset 0 0 22px rgba(108,92,231,.12);
+  transition:opacity .35s}
+#fx.focusOn .fring{opacity:1;animation:ringPulse 1.8s ease-in-out infinite}
+@keyframes ringPulse{0%,100%{box-shadow:0 0 0 4px rgba(108,92,231,.22),0 0 28px rgba(108,92,231,.5),inset 0 0 22px rgba(108,92,231,.12)}
+  50%{box-shadow:0 0 0 7px rgba(108,92,231,.1),0 0 40px rgba(108,92,231,.65),inset 0 0 22px rgba(108,92,231,.18)}}
+.fbeamWrap{position:absolute;overflow:hidden;border-radius:12px;opacity:0}
+.fbeam{position:absolute;top:-30%;bottom:-30%;width:34%;
+  background:linear-gradient(105deg,transparent 0%,rgba(255,255,255,.14) 45%,rgba(162,155,254,.28) 50%,rgba(255,255,255,.14) 55%,transparent 100%);
+  transform:skewX(-14deg)}
+.vignette{position:absolute;inset:0;pointer-events:none;opacity:0;transition:opacity .5s;
+  background:radial-gradient(ellipse at center,transparent 52%,rgba(5,6,10,.55) 100%)}
+#fx.focusOn .vignette{opacity:1}
+
+/* 콜아웃 라벨 */
+.co{position:absolute;z-index:55;display:flex;align-items:center;gap:0;opacity:0;pointer-events:none}
+.co .line{height:1.5px;background:linear-gradient(90deg,var(--ac2),rgba(162,155,254,.15));width:34px;flex:0 0 auto;position:relative}
+.co .line::before{content:'';position:absolute;left:-3px;top:-2.5px;width:7px;height:7px;border-radius:99px;
+  background:var(--ac2);box-shadow:0 0 10px rgba(162,155,254,.9)}
+.co.left{flex-direction:row-reverse}
+.co.left .line{background:linear-gradient(270deg,var(--ac2),rgba(162,155,254,.15))}
+.co.left .line::before{left:auto;right:-3px}
+.co .tag{background:rgba(23,26,38,.96);border:1px solid rgba(108,92,231,.45);border-radius:8px;
+  padding:5px 10px;font-size:12px;color:var(--tp);white-space:nowrap;
+  box-shadow:0 10px 30px rgba(0,0,0,.5)}
+.co .tag b{color:var(--ac2);font-weight:600}
+
+/* 가짜 커서 */
+#cursor{position:absolute;left:0;top:0;z-index:60;pointer-events:none;will-change:transform}
+#cursor .halo{position:absolute;left:-13px;top:-12px;width:44px;height:44px;border-radius:999px;
+  background:radial-gradient(circle,rgba(108,92,231,.35) 0%,rgba(108,92,231,0) 65%);
+  transition:transform .18s,opacity .18s}
+#cursor.press .halo{transform:scale(.62);opacity:.9}
+#cursor .glyph{position:relative;display:block;transform-origin:4px 3px;transition:transform .13s cubic-bezier(.34,1.56,.64,1);
+  filter:drop-shadow(0 2px 5px rgba(0,0,0,.55))}
+#cursor.press .glyph{transform:scale(.8)}
+#cursor .grab{position:absolute;left:-4px;top:-2px;opacity:0;transition:opacity .12s}
+#cursor.grabbing .glyph{opacity:0}
+#cursor.grabbing .grab{opacity:1}
+.ripple{position:absolute;z-index:58;width:14px;height:14px;border-radius:999px;
+  border:2px solid rgba(162,155,254,.9);pointer-events:none}
+.dragGhost{position:absolute;z-index:59;pointer-events:none;width:92px;border-radius:10px;
+  border:1px solid rgba(108,92,231,.5);background:#1A1D27F0;overflow:hidden;
+  box-shadow:0 16px 40px rgba(0,0,0,.55);transform:rotate(3deg);opacity:0;transition:opacity .15s}
+.dragGhost .gi{aspect-ratio:3/4;background:rgba(45,48,65,.3)}
+.dragGhost .gi svg{width:100%;height:100%}
+.dragGhost .gn{padding:4px 8px;font-size:11px;color:var(--tp);white-space:nowrap;overflow:hidden;
+  text-overflow:ellipsis;background:#141722}
+.fileChip{position:absolute;z-index:59;pointer-events:none;display:flex;align-items:center;gap:7px;
+  background:#1E2230F5;border:1px solid rgba(116,185,255,.5);border-radius:10px;padding:7px 11px;
+  font-size:12px;color:var(--tp);box-shadow:0 14px 36px rgba(0,0,0,.5);opacity:0;transform:rotate(-2deg)}
+.fileChip svg{color:#74B9FF}
+
+/* 자막 (캡션) */
+#cap{position:absolute;left:50%;bottom:22px;transform:translateX(-50%);z-index:65;
+  width:min(780px,92%);pointer-events:none}
+.capCard{background:rgba(16,18,28,.9);backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);
+  border:1px solid rgba(108,92,231,.28);border-radius:14px;padding:12px 18px;
+  box-shadow:0 18px 50px rgba(0,0,0,.5),inset 0 1px 0 rgba(255,255,255,.05)}
+.capKick{font-size:10.5px;letter-spacing:.14em;color:var(--ac2);font-weight:700;
+  text-transform:uppercase;display:flex;align-items:center;gap:8px}
+.capKick .no{background:rgba(108,92,231,.2);border:1px solid rgba(108,92,231,.4);
+  border-radius:5px;padding:1px 6px;font-variant-numeric:tabular-nums}
+.capTitle{font-size:15px;font-weight:700;color:var(--tp);margin-top:3px}
+.capText{font-size:13px;color:#B9BBCC;margin-top:2px;line-height:1.55}
+.capText b{color:var(--tp);font-weight:600}
+.capText .kbd{display:inline-block;border:1px solid var(--bd);border-bottom-width:2px;border-radius:4px;
+  background:#141722;padding:0 5px;font-size:11px;color:var(--ac2);margin:0 1px}
+
+/* 인트로/아웃트로 */
+.gate{position:absolute;inset:0;z-index:70;display:flex;flex-direction:column;align-items:center;
+  justify-content:center;gap:0;background:radial-gradient(900px 600px at 50% 20%,#171A28 0%,#0D0F16 60%,#0A0B10 100%);
+  transition:opacity .5s,visibility .5s}
+.gate.hide{opacity:0;visibility:hidden}
+.gate .blob{position:absolute;border-radius:999px;filter:blur(60px);pointer-events:none}
+.gate .b1{top:-120px;left:-80px;width:460px;height:460px;background:radial-gradient(circle,rgba(108,92,231,.25),transparent 65%)}
+.gate .b2{bottom:-160px;right:-100px;width:540px;height:540px;background:radial-gradient(circle,rgba(162,155,254,.16),transparent 65%)}
+.gKick{font-size:12px;letter-spacing:.32em;color:var(--ac2);font-weight:700}
+.gTitle{font-size:44px;font-weight:800;margin-top:14px;letter-spacing:-.01em;
+  background:linear-gradient(180deg,#FFFFFF 20%,#B9B4F5 100%);-webkit-background-clip:text;
+  background-clip:text;color:transparent}
+.gSub{font-size:15px;color:var(--ts);margin-top:10px;text-align:center;line-height:1.7}
+.gChips{display:flex;flex-wrap:wrap;justify-content:center;gap:8px;margin-top:26px;max-width:640px}
+.gChip{border:1px solid rgba(108,92,231,.35);background:rgba(108,92,231,.1);border-radius:999px;
+  padding:5px 13px;font-size:12px;color:#CDC9F7}
+.gStart{margin-top:34px;display:flex;align-items:center;gap:9px;background:var(--ac);color:#fff;
+  border-radius:12px;padding:13px 26px;font-size:15px;font-weight:600;pointer-events:auto;
+  box-shadow:0 12px 34px rgba(108,92,231,.4);transition:transform .15s,box-shadow .15s}
+.gStart:hover{transform:translateY(-2px);box-shadow:0 16px 44px rgba(108,92,231,.55)}
+.gHint{margin-top:14px;font-size:12px;color:rgba(139,141,163,.75)}
+.gGrid{display:grid;grid-template-columns:repeat(3,220px);gap:10px;margin-top:26px}
+.gCell{border:1px solid rgba(45,48,65,.8);background:rgba(26,29,39,.6);border-radius:12px;
+  padding:12px 14px;font-size:12.5px;color:var(--tp);display:flex;align-items:center;gap:9px}
+.gCell svg{color:var(--st-comp);flex:0 0 auto}
+
+/* ─── 하단 컨트롤 바 ─────────────────────────────── */
+#deck{width:1280px;max-width:96vw;display:flex;flex-direction:column;gap:9px;flex:0 0 auto}
+#chips{display:flex;flex-wrap:wrap;gap:6px;justify-content:center}
+.chip{display:flex;align-items:center;gap:6px;border:1px solid #232635;background:#12141D;
+  border-radius:999px;padding:5px 11px;font-size:11.5px;color:var(--ts);transition:.15s}
+.chip .n{font-size:10px;color:#5B5E75;font-variant-numeric:tabular-nums}
+.chip:hover{color:var(--tp);border-color:#33374C}
+.chip.on{border-color:rgba(108,92,231,.55);background:rgba(108,92,231,.14);color:#CDC9F7}
+.chip.on .n{color:var(--ac2)}
+.chip.done .n{color:var(--st-comp)}
+#transport{display:flex;align-items:center;justify-content:center;gap:10px}
+.tpBtn{width:38px;height:38px;border-radius:999px;border:1px solid #232635;background:#12141D;
+  display:flex;align-items:center;justify-content:center;color:var(--tp);transition:.15s}
+.tpBtn:hover{border-color:rgba(108,92,231,.5);background:rgba(108,92,231,.12)}
+.tpBtn.big{width:46px;height:46px;background:var(--ac);border-color:var(--ac);
+  box-shadow:0 8px 26px rgba(108,92,231,.35)}
+.tpBtn.big:hover{background:#7A6BEE}
+.speedBtn{height:38px;padding:0 14px;border-radius:999px;border:1px solid #232635;background:#12141D;
+  font-size:12.5px;color:var(--ts);font-variant-numeric:tabular-nums}
+.speedBtn:hover{color:var(--tp);border-color:#33374C}
+#pbar{height:3px;border-radius:99px;background:#191C28;overflow:hidden}
+#pfill{height:100%;width:0%;background:linear-gradient(90deg,var(--ac),var(--ac2));
+  border-radius:99px;transition:width .3s}
+.deckHint{text-align:center;font-size:11px;color:#4E5166}
+.deckHint .kbd{display:inline-block;border:1px solid #232635;border-bottom-width:2px;border-radius:4px;
+  background:#12141D;padding:0 5px;font-size:10px;color:var(--ts);margin:0 1px}
+</style>
+</head>
+<body>
+
+<div id="stageWrap">
+  <div id="stage">
+    <div id="camera">
+      <div id="world"></div>
+      <div id="ovl"></div>
+    </div>
+
+    <!-- 연출 레이어 -->
+    <div id="fx">
+      <div class="vignette"></div>
+      <div class="fstrip" id="fsT"></div><div class="fstrip" id="fsB"></div>
+      <div class="fstrip" id="fsL"></div><div class="fstrip" id="fsR"></div>
+      <div class="fring" id="fring"></div>
+      <div class="fbeamWrap" id="fbeamWrap"><div class="fbeam" id="fbeam"></div></div>
+    </div>
+    <div id="coLayer"></div>
+    <div id="toast" class="toast"></div>
+
+    <div id="cursor">
+      <div class="halo"></div>
+      <svg class="glyph" width="26" height="27" viewBox="0 0 24 25" fill="none">
+        <path d="M4 2.5 L4 19 L8.6 15.2 L11.3 21.6 L14.4 20.3 L11.7 14 L17.6 13.6 Z"
+          fill="#F5F6FA" stroke="#20232F" stroke-width="1.6" stroke-linejoin="round"/>
+      </svg>
+      <svg class="grab" width="26" height="26" viewBox="0 0 24 24" fill="none">
+        <path d="M8 12V6.5a1.5 1.5 0 0 1 3 0V11 M11 11V5a1.5 1.5 0 0 1 3 0v6 M14 11V6a1.5 1.5 0 0 1 3 0v6.5 M17 12.5a1.5 1.5 0 0 1 3 .5c0 3-1 5-2.4 6.8-1 1.3-2.7 2.2-4.6 2.2h-1.9c-1.7 0-3.2-.8-4.2-2.1L4 16c-.7-1-.4-2.3.7-2.9 1-.5 2.1-.2 2.8.7l.5.7"
+          fill="#F5F6FA" stroke="#20232F" stroke-width="1.5" stroke-linejoin="round" stroke-linecap="round"/>
+      </svg>
+    </div>
+
+    <div id="cap"></div>
+
+    <!-- 인트로 -->
+    <div class="gate" id="intro">
+      <div class="blob b1"></div><div class="blob b2"></div>
+      <div class="gKick">BFLOW ONBOARDING</div>
+      <div class="gTitle">캐릭터 현황판</div>
+      <div class="gSub">캐릭터별 복장 디자인·리깅 진행 상황을 한 화면에서.<br/>실제 화면 그대로, 커서가 직접 모든 기능을 시연합니다.</div>
+      <div class="gChips" id="introChips"></div>
+      <button class="gStart" id="btnStart">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
+        시작하기
+      </button>
+      <div class="gHint">아래 칩으로 원하는 장면만 골라 볼 수도 있어요</div>
+    </div>
+
+    <!-- 아웃트로 -->
+    <div class="gate hide" id="outro">
+      <div class="blob b1"></div><div class="blob b2"></div>
+      <div class="gKick">ALL DONE</div>
+      <div class="gTitle" style="font-size:36px">이제 직접 써볼 차례예요</div>
+      <div class="gSub">캐릭터 현황판의 모든 기능을 둘러봤습니다.</div>
+      <div class="gGrid" id="outroGrid"></div>
+      <button class="gStart" id="btnReplay" style="margin-top:28px">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 2.6-6.3"/><path d="M3 4v5h5"/></svg>
+        처음부터 다시 보기
+      </button>
+    </div>
+  </div>
+</div>
+
+<div id="deck">
+  <div id="pbar"><div id="pfill"></div></div>
+  <div id="chips"></div>
+  <div id="transport">
+    <button class="tpBtn" id="btnPrev" title="이전 장면">
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor"><path d="M6 6h2v12H6zm3.5 6 8.5 6V6z"/></svg>
+    </button>
+    <button class="tpBtn big" id="btnPlay" title="재생 / 일시정지">
+      <svg id="icoPlay" width="18" height="18" viewBox="0 0 24 24" fill="currentColor" style="display:none"><path d="M8 5v14l11-7z"/></svg>
+      <svg id="icoPause" width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M6 5h4v14H6zm8 0h4v14h-4z"/></svg>
+    </button>
+    <button class="tpBtn" id="btnNext" title="다음 장면">
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor"><path d="M16 6h2v12h-2zM6 18l8.5-6L6 6z"/></svg>
+    </button>
+    <button class="speedBtn" id="btnSpeed" title="재생 속도">1.0×</button>
+  </div>
+  <div class="deckHint"><span class="kbd">Space</span> 재생/정지 · <span class="kbd">←</span><span class="kbd">→</span> 장면 이동 · 칩 클릭으로 바로 이동</div>
+</div>
+
+<script>
+/* ═══════════════ 1. 아이콘 (lucide 스타일 인라인) ═══════════════ */
+const ICO_PATHS = {
+  search:'<circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/>',
+  plus:'<path d="M5 12h14"/><path d="M12 5v14"/>',
+  x:'<path d="M18 6 6 18"/><path d="m6 6 12 12"/>',
+  ruler:'<path d="M21.3 8.7 15.3 2.7a2 2 0 0 0-2.8 0L2.7 12.5a2 2 0 0 0 0 2.8l6 6a2 2 0 0 0 2.8 0l9.8-9.8a2 2 0 0 0 0-2.8Z"/><path d="m7.5 10.5 2 2"/><path d="m10.5 7.5 2 2"/><path d="m13.5 4.5 2 2"/>',
+  archive:'<rect x="2" y="3" width="20" height="5" rx="1"/><path d="M4 8v11a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8"/><path d="M10 12h4"/>',
+  grid:'<rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/>',
+  grid3:'<rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18"/><path d="M3 15h18"/><path d="M9 3v18"/><path d="M15 3v18"/>',
+  list:'<path d="M8 6h13"/><path d="M8 12h13"/><path d="M8 18h13"/><path d="M3 6h.01"/><path d="M3 12h.01"/><path d="M3 18h.01"/>',
+  ext:'<path d="M15 3h6v6"/><path d="M10 14 21 3"/><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/>',
+  pencil:'<path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/>',
+  msg:'<path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>',
+  trash:'<path d="M3 6h18"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><path d="M10 11v6"/><path d="M14 11v6"/>',
+  grip:'<circle cx="9" cy="5" r="1"/><circle cx="9" cy="12" r="1"/><circle cx="9" cy="19" r="1"/><circle cx="15" cy="5" r="1"/><circle cx="15" cy="12" r="1"/><circle cx="15" cy="19" r="1"/>',
+  star:'<path d="M12 2l3.09 6.26L22 9.27l-5 4.87L18.18 21 12 17.77 5.82 21 7 14.14l-5-4.87 6.91-1.01Z"/>',
+  copy:'<rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>',
+  palette:'<circle cx="13.5" cy="6.5" r=".8"/><circle cx="17.5" cy="10.5" r=".8"/><circle cx="8.5" cy="7.5" r=".8"/><circle cx="6.5" cy="12" r=".8"/><path d="M12 2C6.5 2 2 6.5 2 12s4.5 10 10 10c.9 0 1.8-.7 1.8-1.8 0-.5-.2-.9-.5-1.2-.3-.3-.5-.7-.5-1.2 0-1 .8-1.8 1.8-1.8H17c2.8 0 5-2.2 5-5 0-4.9-4.5-9-10-9Z"/>',
+  film:'<rect x="2" y="2" width="20" height="20" rx="2"/><path d="M7 2v20"/><path d="M17 2v20"/><path d="M2 12h20"/><path d="M2 7h5"/><path d="M2 17h5"/><path d="M17 7h5"/><path d="M17 17h5"/>',
+  check:'<path d="M20 6 9 17l-5-5"/>',
+  user:'<path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/>',
+  img:'<rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="9" cy="9" r="2"/><path d="m21 15-3.1-3.1a2 2 0 0 0-2.8 0L6 21"/>',
+  mega:'<path d="m3 11 18-5v12L3 13v-2z"/><path d="M11.6 16.8a3 3 0 1 1-5.8-1.6"/>',
+  rotate:'<path d="M3 12a9 9 0 1 0 2.6-6.3L3 8"/><path d="M3 3v5h5"/>',
+  folder:'<path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"/>',
+  fileimg:'<path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"/><path d="M14 2v5h5"/><circle cx="10" cy="12" r="1.6"/><path d="m20 17-2.5-2.5a1.5 1.5 0 0 0-2.1 0L8 22"/>',
+};
+function I(name, size=14){
+  return `<svg width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${ICO_PATHS[name]||''}</svg>`;
+}
+
+/* ═══════════════ 2. 단계·태그 상수 (실제 앱 값) ═══════════════ */
+const STC = { wait:'#8B8DA3', prog:'#74B9FF', rig:'#6C5CE7', fb:'#FDCB6E', done:'#A29BFE', comp:'#00B894' };
+const DS_ORDER = ['waiting','in_progress','feedback','done'];
+const RS_ORDER = ['waiting','vectorized','rigging','feedback','done'];
+const DS_META = { waiting:{l:'대기',c:STC.wait}, in_progress:{l:'진행 중',c:STC.prog}, feedback:{l:'피드백',c:STC.fb}, done:{l:'완료',c:STC.done} };
+const RS_META = { waiting:{l:'대기',c:STC.wait}, vectorized:{l:'벡터화',c:STC.prog}, rigging:{l:'리깅',c:STC.rig}, feedback:{l:'피드백',c:STC.fb}, done:{l:'완성',c:STC.comp} };
+const STRUCT_PALETTE = ['얼굴각도 컨트롤러','책가방 세트','뒷모습','앞모습 없음','측면'];
+const ASSET_PALETTE  = ['담배','핸드폰','가방','안경','모자'];
+const TAG_PALETTE = ['#74B9FF','#A29BFE','#FDCB6E','#00B894','#FF7675','#FD79A8','#55EFC4','#E17055','#81ECEC','#FAB1A0','#6C5CE7','#00CEC9'];
+function tagColor(tag){
+  let h = 0;
+  for (let i = 0; i < tag.length; i++) h = ((h * 31 + tag.charCodeAt(i)) >>> 0);
+  return TAG_PALETTE[h % TAG_PALETTE.length];
+}
+const TEAM = ['배한솔','이다은','전혜림','강선영','원동우'];
+const USER_COLORS = ['#74B9FF','#FD79A8','#55EFC4','#FDCB6E','#A29BFE'];
+function userColor(name){
+  let h = 0; for (let i = 0; i < name.length; i++) h = ((h * 33 + name.charCodeAt(i)) >>> 0);
+  return USER_COLORS[h % USER_COLORS.length];
+}
+function hexA(hex, a){
+  const r = parseInt(hex.slice(1,3),16), g = parseInt(hex.slice(3,5),16), b = parseInt(hex.slice(5,7),16);
+  return `rgba(${r},${g},${b},${a})`;
+}
+
+/* ═══════════════ 3. 예시 데이터 ═══════════════ */
+const EPS = [ {n:19,l:'EP19'}, {n:20,l:'EP20'}, {n:21,l:'EP21'} ];
+function K(id, name, ver, design, rig, x={}){
+  return { id, name, ver, design, rig,
+    dAss:x.dAss||[], rAss:x.rAss||[], sTags:x.sTags||[], aTags:x.aTags||[],
+    due:x.due||null, art:x.art||null, file:x.file||null };
+}
+function C(id, name, h, eps, costumes, x={}){
+  return { id, name, h, eps:[...eps], costumes, status:x.status||'active',
+    use:x.use||{}, folder:x.folder||null, memo:x.memo||'' };
+}
+const CH0 = [
+  C('junho','준호',620,[19,20,21],[
+    K('jh1','기본',3,'done','rigging',{dAss:['이다은'],rAss:['배한솔'],sTags:['얼굴각도 컨트롤러'],aTags:['핸드폰'],due:'2026-08-07',art:['junho','base'],file:'준호_기본_v3.moho'}),
+    K('jh2','교복',1,'done','vectorized',{rAss:['강선영'],sTags:['책가방 세트'],art:['junho','uniform']}),
+    K('jh3','잠옷',1,'feedback','waiting',{dAss:['전혜림'],art:['junho','pajama']}),
+  ],{use:{19:'jh1',20:'jh2'},folder:'G:\\\\사코팍\\\\캐릭터\\\\준호'}),
+  C('sera','세라',590,[19,21],[
+    K('sr1','기본',2,'done','done',{dAss:['전혜림'],rAss:['강선영'],aTags:['안경'],art:['sera','base'],file:'세라_기본_v2.moho'}),
+    K('sr2','한복',1,'in_progress','waiting',{dAss:['이다은'],art:['sera','hanbok']}),
+  ],{use:{19:'sr1'},folder:'G:\\\\사코팍\\\\캐릭터\\\\세라'}),
+  C('deokbae','덕배',645,[20],[
+    K('db1','기본',1,'done','rigging',{rAss:['배한솔'],aTags:['담배'],art:['deokbae','base']}),
+  ]),
+  C('hwang','황 부장',660,[19,20],[
+    K('hw1','기본',2,'done','done',{dAss:['이다은'],rAss:['배한솔'],aTags:['안경'],art:['hwang','base']}),
+    K('hw2','정장',1,'feedback','waiting',{aTags:['모자'],art:['hwang','suit']}),
+  ]),
+  C('rora','로라',null,[21],[
+    K('rr1','기본',1,'in_progress','waiting',{dAss:['전혜림'],art:['rora','base']}),
+  ]),
+  C('mong','몽실이',260,[19],[
+    K('mg1','기본',1,'done','done',{sTags:['뒷모습'],art:['mong','base']}),
+  ]),
+];
+const ARCH0 = [
+  C('junho_old','준호 (구버전)',600,[],[
+    K('jo1','기본',5,'done','done',{art:['junho','old']}),
+  ],{status:'archived'}),
+];
+const deep = (o)=>JSON.parse(JSON.stringify(o));
+
+/* ═══════════════ 4. 캐릭터 아트 (SVG 벡터 일러스트) ═══════════════ */
+function human(o){
+  // o: h, skin, hairColor, hairKind(short|side|long|bob|bald), top, topKind, pants, shoe, acc[], faded
+  const scale = (Math.max(240, Math.min(700, o.h || 600)) / 700) * 0.96;
+  const acc = o.acc || [];
+  const P = [];
+  const skin = o.skin, hair = o.hairColor;
+  // ── 하의 & 다리 ──
+  if (o.topKind !== 'hanbok' && o.topKind !== 'dress' && o.topKind !== 'coat'){
+    P.push(`<rect x="-24" y="200" width="21" height="122" rx="9" fill="${o.pants}"/>`);
+    P.push(`<rect x="3" y="200" width="21" height="122" rx="9" fill="${o.pants}"/>`);
+  }
+  P.push(`<rect x="-27" y="318" width="26" height="16" rx="7" fill="${o.shoe||'#20242F'}"/>`);
+  P.push(`<rect x="1" y="318" width="26" height="16" rx="7" fill="${o.shoe||'#20242F'}"/>`);
+  // ── 상의 ──
+  const top = o.top;
+  if (o.topKind === 'hanbok'){
+    P.push(`<path d="M -46 150 L 46 150 L 62 326 Q 0 340 -62 326 Z" fill="${o.skirt||'#D9668C'}"/>`);
+    P.push(`<rect x="-42" y="92" width="84" height="66" rx="20" fill="${top}"/>`);
+    P.push(`<path d="M -8 96 L 0 128 L 8 96" fill="none" stroke="${o.skirt||'#D9668C'}" stroke-width="7" stroke-linecap="round"/>`);
+    P.push(`<rect x="-46" y="98" width="24" height="52" rx="11" fill="${top}"/>`);
+    P.push(`<rect x="22" y="98" width="24" height="52" rx="11" fill="${top}"/>`);
+  } else if (o.topKind === 'dress'){
+    P.push(`<path d="M -40 96 L 40 96 L 56 300 Q 0 312 -56 300 Z" fill="${top}"/>`);
+    P.push(`<rect x="-52" y="100" width="21" height="88" rx="10" fill="${top}"/>`);
+    P.push(`<rect x="31" y="100" width="21" height="88" rx="10" fill="${top}"/>`);
+    P.push(`<circle cx="-41" cy="192" r="10" fill="${skin}"/><circle cx="41" cy="192" r="10" fill="${skin}"/>`);
+  } else if (o.topKind === 'coat'){
+    P.push(`<rect x="-46" y="92" width="92" height="212" rx="24" fill="${top}"/>`);
+    P.push(`<path d="M 0 100 L 0 296" stroke="${o.topLine||'#6A4E38'}" stroke-width="3"/>`);
+    P.push(`<rect x="-46" y="182" width="92" height="9" fill="${o.topLine||'#6A4E38'}" opacity=".8"/>`);
+    P.push(`<rect x="-56" y="98" width="22" height="96" rx="11" fill="${top}"/>`);
+    P.push(`<rect x="34" y="98" width="22" height="96" rx="11" fill="${top}"/>`);
+    P.push(`<path d="M -18 96 L 0 120 L 18 96" fill="none" stroke="${o.topLine||'#6A4E38'}" stroke-width="4"/>`);
+  } else {
+    P.push(`<rect x="-48" y="90" width="96" height="118" rx="24" fill="${top}"/>`);
+    P.push(`<rect x="-58" y="96" width="22" height="96" rx="11" fill="${top}"/>`);
+    P.push(`<rect x="36" y="96" width="22" height="96" rx="11" fill="${top}"/>`);
+    P.push(`<circle cx="-47" cy="196" r="10" fill="${skin}"/><circle cx="47" cy="196" r="10" fill="${skin}"/>`);
+    if (o.topKind === 'hoodie'){
+      P.push(`<path d="M -34 92 Q 0 116 34 92 Q 0 76 -34 92 Z" fill="${o.hood||top}" opacity=".85"/>`);
+      P.push(`<path d="M -9 108 L -9 128 M 9 108 L 9 128" stroke="#FFFFFF66" stroke-width="4" stroke-linecap="round"/>`);
+      P.push(`<path d="M -26 176 Q 0 190 26 176 L 26 200 Q 0 210 -26 200 Z" fill="#00000022"/>`);
+    }
+    if (o.topKind === 'uniform'){
+      P.push(`<path d="M -20 92 L 0 112 L 20 92" fill="none" stroke="${o.collar||'#C6CBDD'}" stroke-width="6"/>`);
+      P.push(`<path d="M 0 112 L -6 132 L 0 158 L 6 132 Z" fill="${o.tie||'#6C5CE7'}"/>`);
+    }
+    if (o.topKind === 'suit'){
+      P.push(`<path d="M -22 90 L 0 130 L -30 200 L -46 196 L -40 92 Z" fill="${o.lapel||'#3B4150'}"/>`);
+      P.push(`<path d="M 22 90 L 0 130 L 30 200 L 46 196 L 40 92 Z" fill="${o.lapel||'#3B4150'}"/>`);
+      P.push(`<path d="M -14 90 L 0 118 L 14 90 Z" fill="${o.shirt||'#EDEFF6'}"/>`);
+      P.push(`<path d="M 0 118 L -5 134 L 0 154 L 5 134 Z" fill="${o.tie||'#8B2E3C'}"/>`);
+    }
+    if (o.topKind === 'pajama'){
+      P.push(`<path d="M -48 122 H 48 M -48 150 H 48 M -48 178 H 48" stroke="${o.stripe||'#A9B7DE'}" stroke-width="7"/>`);
+      P.push(`<rect x="-48" y="90" width="96" height="118" rx="24" fill="none"/>`);
+    }
+    if (o.topKind === 'cardigan'){
+      P.push(`<path d="M 0 96 L 0 204" stroke="#00000030" stroke-width="3"/>`);
+      P.push(`<circle cx="0" cy="128" r="3" fill="#FFFFFF88"/><circle cx="0" cy="150" r="3" fill="#FFFFFF88"/>`);
+      P.push(`<path d="M -16 90 L 0 108 L 16 90" fill="none" stroke="#00000028" stroke-width="5"/>`);
+    }
+    if (o.topKind === 'jacket'){
+      P.push(`<path d="M 0 96 L 0 204" stroke="#00000035" stroke-width="4"/>`);
+      P.push(`<path d="M -18 90 L 0 110 L 18 90" fill="none" stroke="#00000030" stroke-width="5"/>`);
+      P.push(`<rect x="-40" y="150" width="18" height="14" rx="3" fill="#00000025"/>`);
+      P.push(`<rect x="22" y="150" width="18" height="14" rx="3" fill="#00000025"/>`);
+    }
+  }
+  if (acc.includes('backpack')){
+    if (o.back){
+      P.push(`<rect x="-40" y="100" width="80" height="106" rx="20" fill="${o.strap||'#4A5060'}"/>`);
+      P.push(`<rect x="-40" y="142" width="80" height="9" fill="#00000030"/>`);
+      P.push(`<rect x="-14" y="116" width="28" height="16" rx="6" fill="#FFFFFF22"/>`);
+    } else {
+      P.push(`<path d="M -30 94 L -14 200 M 30 94 L 14 200" stroke="${o.strap||'#4A5060'}" stroke-width="9" stroke-linecap="round"/>`);
+      P.push(`<rect x="-56" y="110" width="14" height="74" rx="7" fill="${o.strap||'#4A5060'}"/>`);
+      P.push(`<rect x="42" y="110" width="14" height="74" rx="7" fill="${o.strap||'#4A5060'}"/>`);
+    }
+  }
+  // ── 머리 ──
+  P.push(`<circle cx="0" cy="44" r="45" fill="${skin}"/>`);
+  if (o.back){
+    // 뒷모습: 뒤통수를 머리카락으로 덮는다 (얼굴 요소는 아래에서 생략)
+    if (o.hairKind === 'bald'){
+      P.push(`<path d="M -45 46 Q -46 34 -40 26 L -34 50 Z" fill="${hair}"/>`);
+      P.push(`<path d="M 45 46 Q 46 34 40 26 L 34 50 Z" fill="${hair}"/>`);
+      P.push(`<path d="M -44 52 Q 0 78 44 52 L 44 42 Q 0 62 -44 42 Z" fill="${hair}"/>`);
+    } else if (o.hairKind === 'long'){
+      P.push(`<path d="M -47 40 Q -47 -4 0 -4 Q 47 -4 47 40 L 47 120 Q 0 136 -47 120 Z" fill="${hair}"/>`);
+    } else {
+      P.push(`<circle cx="0" cy="42" r="46" fill="${hair}"/>`);
+      P.push(`<path d="M -42 56 Q 0 90 42 56 L 42 38 L -42 38 Z" fill="${hair}"/>`);
+    }
+  } else if (o.hairKind === 'short'){
+    P.push(`<path d="M -45 44 A 45 45 0 0 1 45 44 L 45 34 Q 26 6 0 4 Q -26 6 -45 34 Z" fill="${hair}"/>`);
+    P.push(`<path d="M -45 44 Q -47 26 -38 16 L -34 46 Z" fill="${hair}"/>`);
+  } else if (o.hairKind === 'side'){
+    P.push(`<path d="M -45 42 A 45 45 0 0 1 45 42 L 45 30 Q 30 2 -4 2 Q -34 4 -45 34 Z" fill="${hair}"/>`);
+    P.push(`<path d="M -16 4 Q 10 8 30 26 L 12 30 Q -4 16 -16 4 Z" fill="${hair}"/>`);
+  } else if (o.hairKind === 'long'){
+    P.push(`<path d="M -47 40 Q -47 -4 0 -4 Q 47 -4 47 40 L 47 118 Q 36 128 30 118 L 30 52 Q 30 20 0 18 Q -30 20 -30 52 L -30 118 Q -36 128 -47 118 Z" fill="${hair}"/>`);
+  } else if (o.hairKind === 'bob'){
+    P.push(`<path d="M -46 42 Q -46 -4 0 -4 Q 46 -4 46 42 L 46 74 Q 34 80 32 70 L 32 46 Q 30 18 0 16 Q -30 18 -32 46 L -32 70 Q -34 80 -46 74 Z" fill="${hair}"/>`);
+  } else if (o.hairKind === 'bald'){
+    P.push(`<path d="M -45 46 Q -46 34 -40 26 L -34 50 Z" fill="${hair}"/>`);
+    P.push(`<path d="M 45 46 Q 46 34 40 26 L 34 50 Z" fill="${hair}"/>`);
+  }
+  // ── 얼굴 (뒷모습이면 생략) ──
+  const eyeY = o.hairKind === 'bald' ? 42 : 48;
+  if (!o.back){
+  P.push(`<circle cx="-15" cy="${eyeY}" r="4" fill="#23242E"/><circle cx="15" cy="${eyeY}" r="4" fill="#23242E"/>`);
+  if (acc.includes('mustache')){
+    P.push(`<path d="M -14 62 Q 0 70 14 62 Q 7 72 0 70 Q -7 72 -14 62 Z" fill="${hair}"/>`);
+  } else {
+    P.push(`<path d="M -7 ${eyeY+16} Q 0 ${eyeY+21} 7 ${eyeY+16}" fill="none" stroke="#23242E" stroke-width="3" stroke-linecap="round"/>`);
+  }
+  P.push(`<circle cx="-26" cy="${eyeY+10}" r="6" fill="#F0919155" />`);
+  P.push(`<circle cx="26" cy="${eyeY+10}" r="6" fill="#F0919155" />`);
+  if (acc.includes('glasses')){
+    P.push(`<g stroke="#2B2F3C" stroke-width="3.5" fill="#FFFFFF14">
+      <rect x="-28" y="${eyeY-11}" width="24" height="20" rx="7"/>
+      <rect x="4" y="${eyeY-11}" width="24" height="20" rx="7"/>
+      <path d="M -4 ${eyeY-2} H 4"/></g>`);
+  }
+  } // !o.back — 얼굴 생략 끝
+  if (acc.includes('hat')){
+    P.push(`<path d="M -46 18 Q 0 -24 46 18 L 46 26 L -46 26 Z" fill="${o.hatColor||'#23283A'}"/>`);
+    P.push(`<rect x="-54" y="22" width="108" height="9" rx="4" fill="${o.hatColor||'#23283A'}"/>`);
+  }
+  if (acc.includes('phone')){
+    P.push(`<rect x="38" y="176" width="20" height="34" rx="4" fill="#1B1E2A" stroke="#4B5065" stroke-width="2"/>`);
+    P.push(`<rect x="42" y="182" width="12" height="20" rx="2" fill="#74B9FF" opacity=".85"/>`);
+  }
+  const fig = P.join('');
+  const fade = o.faded ? '<rect x="0" y="0" width="300" height="400" fill="#0F1117" opacity=".38"/>' : '';
+  const grain = o.faded ? ' filter="saturate(.55)"' : '';
+  return `<svg class="art" viewBox="0 0 300 400" xmlns="http://www.w3.org/2000/svg">
+    <ellipse cx="150" cy="378" rx="${86*scale}" ry="9" fill="#000" opacity=".35"/>
+    <g transform="translate(150 ${378 - 350*scale}) scale(${scale})"${grain}>${fig}</g>${fade}</svg>`;
+}
+function dogArt(o){
+  const scale = (Math.max(240, Math.min(700, o.h || 260)) / 700) * 0.96;
+  return `<svg class="art" viewBox="0 0 300 400" xmlns="http://www.w3.org/2000/svg">
+    <ellipse cx="150" cy="378" rx="${150*scale}" ry="9" fill="#000" opacity=".35"/>
+    <g transform="translate(150 ${378 - 350*scale}) scale(${scale})">
+      <path d="M 96 250 Q 150 210 96 170" fill="none" stroke="${o.fur}" stroke-width="16" stroke-linecap="round"/>
+      <rect x="-96" y="180" width="190" height="120" rx="58" fill="${o.fur}"/>
+      <rect x="-84" y="270" width="26" height="70" rx="12" fill="${o.fur}"/>
+      <rect x="-32" y="276" width="26" height="64" rx="12" fill="${o.fur}"/>
+      <rect x="26" y="276" width="26" height="64" rx="12" fill="${o.fur}"/>
+      <rect x="62" y="270" width="26" height="70" rx="12" fill="${o.fur}"/>
+      <ellipse cx="-20" cy="236" rx="30" ry="24" fill="${o.spot}" opacity=".8"/>
+      <circle cx="-96" cy="160" r="58" fill="${o.fur}"/>
+      <path d="M -142 122 Q -156 66 -118 96 Z" fill="${o.spot}"/>
+      <path d="M -50 122 Q -36 66 -74 96 Z" fill="${o.spot}"/>
+      <circle cx="-112" cy="152" r="5.5" fill="#23242E"/><circle cx="-78" cy="152" r="5.5" fill="#23242E"/>
+      <ellipse cx="-96" cy="176" rx="9" ry="7" fill="#23242E"/>
+      <path d="M -96 182 Q -96 194 -84 194" fill="none" stroke="#23242E" stroke-width="3.5" stroke-linecap="round"/>
+      <circle cx="-124" cy="168" r="7" fill="#F0919155"/><circle cx="-66" cy="168" r="7" fill="#F0919155"/>
+    </g></svg>`;
+}
+const ART = {
+  junho: {
+    base:   (h,back)=>human({back,h,skin:'#F6C9A0',hairColor:'#2E2A33',hairKind:'short',top:'#3E4C7A',topKind:'hoodie',hood:'#33406A',pants:'#262B3A'}),
+    uniform:(h,back)=>human({back,h,skin:'#F6C9A0',hairColor:'#2E2A33',hairKind:'short',top:'#EDEFF6',topKind:'uniform',collar:'#C6CBDD',tie:'#6C5CE7',pants:'#30364A',acc:['backpack'],strap:'#4A5060'}),
+    pajama: (h,back)=>human({back,h,skin:'#F6C9A0',hairColor:'#2E2A33',hairKind:'short',top:'#C9D4F0',topKind:'pajama',stripe:'#A9B7DE',pants:'#C9D4F0',shoe:'#8E99B8'}),
+    coat:   (h,back)=>human({back,h,skin:'#F6C9A0',hairColor:'#2E2A33',hairKind:'short',top:'#8A6A4F',topKind:'coat',topLine:'#6A4E38',pants:'#262B3A'}),
+    old:    (h,back)=>human({back,h,skin:'#F6C9A0',hairColor:'#3A3644',hairKind:'short',top:'#565B70',topKind:'hoodie',hood:'#4A4F63',pants:'#33374A',faded:true}),
+  },
+  sera: {
+    base:  (h,back)=>human({back,h,skin:'#F8D2B0',hairColor:'#6B4A3A',hairKind:'long',top:'#E17055',topKind:'cardigan',pants:'#2E3140',acc:['glasses']}),
+    hanbok:(h,back)=>human({back,h,skin:'#F8D2B0',hairColor:'#6B4A3A',hairKind:'bob',top:'#F7E6EB',topKind:'hanbok',skirt:'#D9668C'}),
+  },
+  deokbae: { base:(h,back)=>human({back,h,skin:'#E8B98A',hairColor:'#1F2229',hairKind:'side',top:'#3E7A5E',topKind:'jacket',pants:'#2A2F3C'}) },
+  hwang: {
+    base:(h,back)=>human({back,h,skin:'#EFC29B',hairColor:'#5A5F6E',hairKind:'bald',top:'#4A5060',topKind:'suit',lapel:'#3B4150',shirt:'#EDEFF6',tie:'#8B2E3C',pants:'#3B4150',acc:['glasses','mustache']}),
+    suit:(h,back)=>human({back,h,skin:'#EFC29B',hairColor:'#5A5F6E',hairKind:'bald',top:'#343A4C',topKind:'suit',lapel:'#2A2F3F',shirt:'#DDE2EE',tie:'#233047',pants:'#2A2F3F',acc:['mustache','hat'],hatColor:'#23283A'}),
+  },
+  rora: { base:(h,back)=>human({back,h,skin:'#F8D2B0',hairColor:'#E0B44C',hairKind:'long',top:'#E9B44C',topKind:'dress',shoe:'#8A6A3A'}) },
+  mong: { base:(h,back)=>dogArt({h,fur:'#F1EFEA',spot:'#C9C4BA'}) },
+};
+function artOf(costume, h, back){
+  if (!costume || !costume.art) return null;
+  const [who, variant] = costume.art;
+  const fn = ART[who] && ART[who][variant];
+  return fn ? fn(h || 600, !!back) : null;
+}
+
+/* ═══════════════ 5. 월드 상태 & 렌더 ═══════════════ */
+function baseW(){
+  return {
+    tab:'board',
+    chars:deep(CH0), arch:deep(ARCH0),
+    btabs:[], activeTab:null,
+    view:'card', height:false, showArch:false,
+    query:'', filters:[],
+    cardIdx:{},
+    ui:{ tabAdding:false, groupAdding:false, tabConfirmDel:null },
+    detail:null,           // {charId, costumeId, commentOpen, archMode}
+    addOpen:false,
+    lightbox:null,         // {charId, costumeId}
+  };
+}
+let W = baseW();
+const $ = (sel, root=document)=>root.querySelector(sel);
+const $$ = (sel, root=document)=>[...root.querySelectorAll(sel)];
+const world = document.getElementById('world');
+const ovl = document.getElementById('ovl');
+
+function findChar(id){ return W.chars.find(c=>c.id===id) || W.arch.find(c=>c.id===id) || null; }
+function featuredCostume(ch){
+  const imaged = ch.costumes.filter(k=>k.art);
+  const idx = W.cardIdx[ch.id] || 0;
+  return imaged[idx] || imaged[0] || null;
+}
+function charAllTags(ch){
+  const s = new Set();
+  ch.costumes.forEach(k=>{ k.sTags.forEach(t=>s.add(t)); k.aTags.forEach(t=>s.add(t)); });
+  return s;
+}
+function allBoardTags(){
+  const s = new Set();
+  W.chars.forEach(ch=>charAllTags(ch).forEach(t=>s.add(t)));
+  return [...s].sort((a,b)=>a.localeCompare(b,'ko'));
+}
+function filteredChars(){
+  const pool = W.showArch ? W.arch : W.chars;
+  const q = W.query.trim().toLowerCase();
+  return pool.filter(ch=>{
+    if (q && !ch.name.toLowerCase().includes(q)) return false;
+    if (W.filters.length){
+      const tags = charAllTags(ch);
+      if (!W.filters.every(t=>tags.has(t))) return false;
+    }
+    return true;
+  });
+}
+
+/* ── 카드 / 리스트 행 ── */
+function cardHTML(ch, opt={}){
+  const costumes = ch.costumes;
+  const imaged = costumes.filter(k=>k.art);
+  const idx = Math.min(W.cardIdx[ch.id]||0, Math.max(0, imaged.length-1));
+  const shown = imaged[idx] || null;
+  const dDone = costumes.filter(k=>k.design==='done').length;
+  const rDone = costumes.filter(k=>k.rig==='done').length;
+  const hpx = opt.imgH;
+  const style = hpx ? ` style="width:${Math.round(hpx*3/4)}px"` : '';
+  const imgStyle = hpx ? ` style="height:${hpx}px;aspect-ratio:auto"` : '';
+  const dots = imaged.length>1 ? `<div class="wheelDots">${imaged.map((k,i)=>`<i class="${i===idx?'on':''}"></i>`).join('')}</div>` : '';
+  const hBadge = opt.refUnset ? `<span class="hBadge">키 미설정</span>` : '';
+  const badges = costumes.length
+    ? `<div class="badges"><span class="bdgD">디자인 ${dDone}/${costumes.length}</span><span class="bdgR">리깅 ${rDone}/${costumes.length}</span></div>`
+    : `<div class="bdgEmpty">복장을 추가해주세요</div>`;
+  const imgBox = opt.compact ? '' : `
+    <div class="imgBox"${imgStyle}>
+      ${shown ? artOf(shown, ch.h) : `<span class="noimg">${I('img',28)}</span>`}
+      ${dots}${hBadge}
+    </div>`;
+  return `<button class="ccard${opt.pop?' pop':''}" data-cid="${ch.id}"${style}>
+    ${imgBox}
+    <div class="info">
+      <div class="nm">${ch.name}</div>
+      <div class="meta"><span>복장 ${costumes.length}</span>${ch.eps.length?`<span>· EP ${ch.eps.length}</span>`:''}</div>
+      ${badges}
+    </div>
+  </button>`;
+}
+function listRowHTML(ch){
+  const costumes = ch.costumes;
+  const shown = costumes.find(k=>k.art) || null;
+  const dDone = costumes.filter(k=>k.design==='done').length;
+  const rDone = costumes.filter(k=>k.rig==='done').length;
+  return `<button class="crow" data-cid="${ch.id}">
+    <div class="th">${shown ? artOf(shown, ch.h) : `<span class="noimg" style="color:rgba(139,141,163,.4)">${I('img',16)}</span>`}</div>
+    <div class="mid"><div class="nm">${ch.name}</div>
+      <div class="sub">복장 ${costumes.length}${ch.eps.length?` · EP ${ch.eps.length}`:''}</div></div>
+    ${costumes.length?`<div class="badges"><span class="bdgD">디자인 ${dDone}/${costumes.length}</span><span class="bdgR">리깅 ${rDone}/${costumes.length}</span></div>`:''}
+  </button>`;
+}
+function tagPillHTML(tag, on, extra=''){
+  const c = tagColor(tag);
+  const st = on
+    ? `background:${hexA(c,.15)};border-color:${hexA(c,.6)};color:${c}`
+    : ``;
+  return `<button class="tagpill${on?' on':''}" data-tag="${tag}" ${extra} style="${st}">
+    <span class="dot" style="background:${c}"></span>${tag}</button>`;
+}
+
+/* ── 툴바 ── */
+function toolbarHTML(){
+  const tabs = W.btabs.map(t=>{
+    const on = W.activeTab === t.id;
+    const del = on ? (W.ui.tabConfirmDel === t.id
+      ? `<span class="confirmDel"><button class="del" data-act="tabDelGo" data-tid="${t.id}">삭제</button><button class="keep" data-act="tabDelNo">취소</button></span>`
+      : `<button class="tabX" data-act="tabDelAsk" data-tid="${t.id}">${I('x',11)}</button>`) : '';
+    return `<span class="tabDelWrap"><button class="bchip${on?' on':''}" data-act="selTab" data-tid="${t.id}" title="더블클릭하면 이름을 바꿔요">${t.name}</button>${del}</span>`;
+  }).join('');
+  const addTab = W.ui.tabAdding
+    ? `<input class="bstripInput hot" id="tabNameInput" placeholder="탭 이름" />`
+    : `<button class="bchip addTab" id="btnAddTab">${I('plus',11)} 탭</button>`;
+  const tagRow = (()=>{
+    const tags = allBoardTags();
+    if (!tags.length) return '';
+    return `<div class="tagRow" id="tagRow">
+      ${tags.map(t=>tagPillHTML(t, W.filters.includes(t))).join('')}
+      ${W.filters.length?`<button class="clearTags" id="btnClearTags">필터 해제</button>`:''}
+    </div>`;
+  })();
+  return `<div class="toolbar" id="toolbar">
+    <div class="bstrip" id="bstrip">
+      <button class="bchip${W.activeTab===null?' on':''}" data-act="selTab" data-tid="">전체</button>
+      ${tabs}${addTab}
+    </div>
+    <div class="tools2">
+      <div class="searchBox" id="searchBox">${I('search',14)}<input id="searchInput" placeholder="이름으로 검색" value="${W.query}"/></div>
+      <div class="toolsR">
+        <div class="vseg${W.height?' dis':''}" id="vseg" title="${W.height?'키 비교 보기 중에는 카드 보기로 고정돼요':''}">
+          <button class="vbtn${W.view==='card'&&!W.height?' on':''}" data-view="card" title="카드 보기">${I('grid',14)}</button>
+          <button class="vbtn${W.view==='compact'&&!W.height?' on':''}" data-view="compact" title="이미지 없는 카드 보기">${I('grid3',14)}</button>
+          <button class="vbtn${W.view==='list'&&!W.height?' on':''}" data-view="list" title="리스트 보기">${I('list',14)}</button>
+        </div>
+        <button class="tbtn${W.height?' on':''}" id="btnHeight" title="캐릭터를 기준 키(px)에 맞춰 크기 비교로 나열해요">${I('ruler',15)} 키 비교 보기</button>
+        ${W.arch.length?`<button class="tbtn${W.showArch?' on':''}" id="btnArch">${I('archive',15)} 보관 ${W.arch.length}</button>`:''}
+        <button class="btnPrimary" id="btnAddChar">${I('plus',16)} 캐릭터 추가</button>
+      </div>
+    </div>
+    ${tagRow}
+  </div>`;
+}
+
+/* ── 그룹(커스텀 탭) 본문 ── */
+function groupsHTML(tab, chars){
+  const byId = new Map(chars.map(c=>[c.id,c]));
+  const grouped = new Set();
+  tab.groups.forEach(g=>g.ids.forEach(id=>grouped.add(id)));
+  const ungrouped = chars.filter(c=>!grouped.has(c.id));
+  const gridCls = W.view==='list' ? 'listWrap' : W.view==='compact' ? 'grid compact' : 'grid';
+  const entry = (c)=> W.view==='list' ? listRowHTML(c) : cardHTML(c,{compact:W.view==='compact'});
+  const section = (g)=>{
+    const members = g ? g.ids.map(id=>byId.get(id)).filter(Boolean) : ungrouped;
+    const empty = g ? '카드를 끌어다 놓아 배치해요' : '모든 캐릭터가 그룹에 배치됐어요';
+    const head = g
+      ? `<span class="gnm">${g.name}</span><span class="gcnt">${members.length}</span>
+         <button class="gIco" data-act="gRename" data-gid="${g.id}">${I('pencil',12)}</button>
+         <button class="gIco" data-act="gDel" data-gid="${g.id}">${I('x',12)}</button>`
+      : `<span class="gnm">미분류</span><span class="gcnt">${members.length}</span>`;
+    return `<section class="gsec" data-gid="${g?g.id:'__un__'}">
+      <header>${head}</header>
+      ${members.length ? `<div class="${gridCls}" style="padding-top:0">${members.map(entry).join('')}</div>`
+        : `<div class="gEmpty">${empty}</div>`}
+    </section>`;
+  };
+  const adder = W.ui.groupAdding
+    ? `<div class="groupInputRow"><input id="groupNameInput" class="hot" placeholder="그룹 이름"/><button class="ok" id="groupNameOk">${I('check',14)}</button></div>`
+    : `<button class="addGroupBtn" id="btnAddGroup">${I('plus',14)} 그룹 추가</button>`;
+  return `<div class="groupsCol">${tab.groups.map(section).join('')}${section(null)}${adder}</div>`;
+}
+
+/* ── 메인 콘텐츠 ── */
+function contentHTML(){
+  const list = filteredChars();
+  if (W.height){
+    const withH = list.filter(c=>c.h);
+    const maxH = Math.max(1, ...withH.map(c=>c.h||0));
+    const sorted = [...list].sort((a,b)=>{
+      if (a.h==null && b.h==null) return 0;
+      if (a.h==null) return 1; if (b.h==null) return -1;
+      return a.h - b.h;
+    });
+    return `<div class="lineup" id="grid">${sorted.map(c=>{
+      const imgH = c.h ? Math.max(90, Math.min(300, Math.round(300*c.h/maxH))) : 170;
+      return cardHTML(c,{imgH, refUnset:!c.h});
+    }).join('')}</div>`;
+  }
+  const tab = W.activeTab ? W.btabs.find(t=>t.id===W.activeTab) : null;
+  if (tab && !W.showArch) return groupsHTML(tab, list);
+  if (!list.length){
+    return `<div class="emptyState">${I('search',24)}<div>조건에 맞는 캐릭터가 없어요.</div>
+      <button class="tbtn" id="btnResetFilter">검색·필터 초기화</button></div>`;
+  }
+  if (W.view==='list') return `<div class="listWrap" id="grid">${list.map(listRowHTML).join('')}</div>`;
+  return `<div class="grid${W.view==='compact'?' compact':''}" id="grid">${list.map(c=>cardHTML(c,{compact:W.view==='compact'})).join('')}</div>`;
+}
+
+/* ── 에피소드 에셋 탭 (개요용 목업) ── */
+function episodeAssetHTML(){
+  const jh = W.chars.find(c=>c.id==='junho') || W.chars[0];
+  const item = (ch,on)=>`<button class="dItem${on?' on':''}" style="border-radius:8px">
+    <div class="th">${artOf(featuredCostume(ch), ch.h)||''}</div>
+    <div class="col"><span class="nm">${ch.name}</span>
+    <span style="font-size:11px;color:var(--ts)">이 편 복장 · ${on?'교복':'기본'}</span></div></button>`;
+  return `<div style="padding-top:16px;display:flex;flex-direction:column;gap:14px" id="epBoard">
+    <div style="display:flex;align-items:center;gap:8px" id="epPicker">
+      <span class="secLb">에피소드</span>
+      ${EPS.map((e,i)=>`<button class="epChip${i===1?' on':''}">${e.l}</button>`).join('')}
+    </div>
+    <div style="display:flex;gap:16px;min-height:0">
+      <div style="width:230px;flex:0 0 auto;border:1px solid rgba(45,48,65,.6);border-radius:12px;padding:8px;display:flex;flex-direction:column;gap:4px" id="epCast">
+        <div class="secLb" style="padding:4px 6px">EP20 등장 캐릭터 3</div>
+        ${item(jh,true)}${item(W.chars.find(c=>c.id==='deokbae')||W.chars[1],false)}${item(W.chars.find(c=>c.id==='hwang')||W.chars[2],false)}
+      </div>
+      <div style="flex:1;border:1px solid rgba(45,48,65,.6);border-radius:12px;padding:16px;display:flex;gap:16px" id="epDetail">
+        <div style="width:150px;flex:0 0 auto;aspect-ratio:3/4;border-radius:10px;overflow:hidden;border:1px solid var(--bd);background:rgba(45,48,65,.2)">${artOf(jh.costumes[1], jh.h)||''}</div>
+        <div style="flex:1;display:flex;flex-direction:column;gap:12px;min-width:0">
+          <div><div style="font-size:16px;font-weight:600">준호</div><div style="font-size:12px;color:var(--ts)">이 편에서 쓰는 복장 · 교복 v1</div></div>
+          <div><div class="secLb" style="margin-bottom:6px">이 편 주의점</div>
+            <div class="costMemo" style="min-height:52px">우천 씬 — 머리카락 젖은 상태 유지. 20-B부터 가방 없음.</div></div>
+          <div><div class="secLb" style="margin-bottom:6px">리깅 상태 (현황판 연동)</div>
+            <span class="assChip" style="background:${hexA(STC.prog,.14)};color:${STC.prog}"><span class="adot" style="background:${STC.prog}"></span>벡터화</span>
+            <button class="epChip" style="margin-left:8px" id="epJump">캐릭터 현황판에서 보기</button></div>
+        </div>
+      </div>
+    </div>
+  </div>`;
+}
+
+/* ── 뷰 전체 ── */
+function viewHTML(){
+  const sub = W.tab==='board' ? '캐릭터별 복장 디자인·리깅 진행 상황' : '에피소드별 등장 캐릭터·이 편 주의점·복장';
+  return `<div class="viewCol">
+    <div class="viewHead">
+      <div class="row1">
+        <div><div class="h1" id="hdrTitle">캐릭터 현황판</div><div class="hsub">${sub}</div></div>
+        <button class="btnGhost" id="btnNewWin" title="캐릭터 현황판을 별도 창으로 열어요 — 다른 화면을 보면서 같이 쓸 수 있어요">${I('ext',15)} 새 창으로</button>
+      </div>
+      <div class="tabRow" id="mainTabs">
+        <button class="tabBtn${W.tab==='board'?' on':''}" id="tabBoard">캐릭터 현황판</button>
+        <button class="tabBtn${W.tab==='episode'?' on':''}" id="tabEpisode">에피소드 에셋</button>
+      </div>
+    </div>
+    <div class="viewBody" id="viewBody">
+      ${W.tab==='board' ? toolbarHTML() + `<div id="content">${contentHTML()}</div>` : episodeAssetHTML()}
+    </div>
+  </div>`;
+}
+
+
+/* ═══════════════ 6. 오버레이: 캐릭터 추가 모달 ═══════════════ */
+function addModalHTML(){
+  return `<div class="mOverlay show" id="addOverlay">
+    <div class="addCard" id="addCard">
+      <h2>캐릭터 추가</h2>
+      <div class="fld">
+        <span class="lb">이름</span>
+        <input id="addName" placeholder="캐릭터 이름 (비워도 돼요)"/>
+        <span class="hint" id="addHint">이름은 나중에 지어도 돼요. 대표 이미지를 넣으면 파일 이름으로 자동으로 채워져요.</span>
+      </div>
+      <div class="fld">
+        <span class="lb">메모 (선택)</span>
+        <textarea id="addMemo" rows="2" placeholder="메모"></textarea>
+      </div>
+      <div class="mBtns">
+        <button class="cancel" id="addCancel">취소</button>
+        <button class="go" id="addGo">추가</button>
+      </div>
+    </div>
+  </div>`;
+}
+
+/* ═══════════════ 7. 오버레이: 캐릭터 상세 모달 ═══════════════ */
+function railHTML(kind, current, costume){
+  const order = kind==='design' ? DS_ORDER : RS_ORDER;
+  const meta  = kind==='design' ? DS_META : RS_META;
+  const label = kind==='design' ? '디자인 단계' : '리깅 단계';
+  const curIdx = Math.max(0, order.indexOf(current));
+  const curColor = meta[current].c;
+  const ass = kind==='design' ? costume.dAss : costume.rAss;
+  const assHTML = ass.length
+    ? ass.map(n=>{const c=userColor(n);return `<span class="assChip" style="color:${c};box-shadow:inset 0 0 0 1px ${hexA(c,.45)}"><span class="adot" style="background:${c}"></span>${n}</span>`;}).join('')
+    : `<button class="assPick" data-kind="${kind}">${I('plus',11)} ${label==='디자인 단계'?'디자인':'리깅'} 담당자</button>`;
+  const nodes = order.map((k,i)=>{
+    const m = meta[k];
+    const passed = i < curIdx, isCur = i === curIdx, reached = i <= curIdx;
+    const prevColor = i>0 ? meta[order[i-1]].c : m.c;
+    const link = i>0 ? `<span class="link" style="${reached?`background:${prevColor}`:''}"></span>` : '';
+    const nodeStyle = `background:${reached?m.c:'var(--card)'};border-color:${reached?m.c:'var(--bd)'};${isCur?`box-shadow:0 0 0 4px ${hexA(m.c,.2)}`:''}`;
+    const inner = passed ? `<svg style="display:block" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>`
+      : isCur ? `<span class="core" style="display:block"></span>` : '';
+    return `<button class="stg" data-rail="${kind}" data-stage="${k}">
+      ${link}
+      <span class="node" style="${nodeStyle}">${inner}</span>
+      <span class="slb" style="${isCur?`color:${m.c}`:''}">${m.l}</span>
+    </button>`;
+  }).join('');
+  return `<div class="rail" id="rail${kind==='design'?'D':'R'}">
+    <div class="railHead">
+      <div style="display:flex;align-items:center;gap:8px">
+        <span class="lb">${label}</span>
+        <span class="cur" style="color:${curColor}">${meta[current].l}</span>
+      </div>
+      <div id="ass${kind==='design'?'D':'R'}">${assHTML}</div>
+    </div>
+    <div class="railTrack">${nodes}</div>
+  </div>`;
+}
+function tagSecHTML(label, palette, active, id){
+  const extra = active.filter(t=>!palette.includes(t));
+  const chips = [...palette, ...extra];
+  return `<div class="tagSec" id="${id}">
+    <div class="secLb">${label}</div>
+    <div class="chipsWrap">
+      ${chips.map(t=>tagPillHTML(t, active.includes(t))).join('')}
+      <span class="tagAddWrap">${I('plus',12)}<input placeholder="직접 추가"/></span>
+    </div>
+  </div>`;
+}
+function costumeDetailHTML(ch, k){
+  const dueVal = k.due || '';
+  const epChips = ch.eps.length
+    ? ch.eps.map(n=>{
+        const used = ch.use[n];
+        const on = used === k.id;
+        const taken = used && used !== k.id;
+        const cls = on ? ' on' : taken ? ' taken' : '';
+        const tip = on ? '이 편에서 이 복장을 쓰는 중 — 클릭하면 해제'
+          : taken ? '이 편엔 다른 복장이 지정돼 있어요 — 클릭하면 이 복장으로 바꿔요'
+          : '클릭하면 이 편에 이 복장을 지정해요';
+        return `<button class="epChip${cls}" data-cost-ep="${n}" title="${tip}">EP${n}</button>`;
+      }).join('')
+    : `<div style="font-size:11px;color:rgba(139,141,163,.8)">먼저 위 '출연 에피소드'에서 이 캐릭터를 에피소드에 연결하면, 그 편에 어떤 복장을 쓰는지 여기서 고를 수 있어요.</div>`;
+  return `<div class="cdWrap" id="costDetail">
+    <div class="cdTopRow">
+      <div class="fld"><span class="lb">버전</span>
+        <div class="stepper">
+          <button class="stBtn" id="verMinus">−</button>
+          <input class="verInput" id="verNum" value="${k.ver}"/>
+          <button class="stBtn" id="verPlus">+</button>
+        </div>
+      </div>
+      <div class="fld"><span class="lb">마감일</span>
+        <input type="date" class="dateInput" id="dueInput" value="${dueVal}"/>
+      </div>
+      <div class="fld"><span class="lb" title="캐릭터 키(px, 1280x720 프로젝트 기준). 이미지를 올리면 원본 세로 크기로 자동 설정되고, '이미지로 조정'으로 머리·바닥 기준선을 맞출 수 있어요.">기준 키(px)</span>
+        <div style="display:flex;align-items:center;gap:6px">
+          <input class="hpxInput" id="hpxInput" placeholder="예: 600" value="${ch.h??''}"/>
+          <button class="fitBtn" id="btnFitImg" title="이미지 위에서 머리·바닥 기준선을 드래그해 키를 맞춰요">이미지로 조정</button>
+        </div>
+      </div>
+    </div>
+    <div class="pathGrid" id="pathGrid">
+      <div class="pathRow" id="pathFolder">
+        <div class="pl"><div class="plb">작업 폴더</div>
+          <div class="pv${ch.folder?'':' none'}">${ch.folder ? ch.folder.split('\\\\').pop() : '연결 안 됨'}</div></div>
+        <div class="pathActs">
+          ${ch.folder?'':'<button class="pBtn mk" title="기준 경로에 캐릭터 이름으로 폴더를 만들어 연결">만들기</button>'}
+          <button class="pBtn">선택</button>
+          ${ch.folder?'<button class="pBtn">열기</button>':''}
+        </div>
+      </div>
+      <div class="pathRow" id="pathFile">
+        <div class="pl"><div class="plb">작업 파일</div>
+          <div class="pv${k.file?'':' none'}">${k.file || '연결 안 됨'}</div></div>
+        <div class="pathActs"><button class="pBtn">선택</button>${k.file?'<button class="pBtn">열기</button>':''}</div>
+      </div>
+    </div>
+    <div class="fld" id="costEpSec"><span class="lb">이 복장이 출연하는 에피소드</span>
+      <div class="chipsWrap" id="costEpRow">${epChips}</div>
+    </div>
+    <div class="railsBox" id="railsBox">
+      ${railHTML('design', k.design, k)}
+      <div class="railHr"></div>
+      ${railHTML('rig', k.rig, k)}
+      <button class="announceBtn" id="btnAnnounce">${I('mega',13)} 리깅 완성 공지</button>
+    </div>
+    ${tagSecHTML('구조 태그', STRUCT_PALETTE, k.sTags, 'tagsS')}
+    ${tagSecHTML('에셋 태그', ASSET_PALETTE, k.aTags, 'tagsA')}
+  </div>`;
+}
+function detailHTML(){
+  const D = W.detail;
+  if (!D) return '';
+  const pool = D.archMode ? W.arch : W.chars;
+  const q = (D.listQuery||'').trim().toLowerCase();
+  const listChars = q ? pool.filter(c=>c.name.toLowerCase().includes(q)) : pool;
+  const ch = findChar(D.charId);
+  if (!ch) return '';
+  const k = ch.costumes.find(x=>x.id===D.costumeId) || ch.costumes[0] || null;
+  const listRows = listChars.map(c=>{
+    const ratio = c.costumes.length ? c.costumes.filter(x=>x.rig==='done').length / c.costumes.length : 0;
+    const th = featuredCostume(c);
+    return `<button class="dItem${c.id===D.charId?' on':''}" data-did="${c.id}">
+      <div class="th">${th ? artOf(th, c.h) : I('user',15)}</div>
+      <div class="col"><span class="nm">${c.name}</span>
+        <span class="pbar" title="리깅 완료 ${Math.round(ratio*100)}%"><i style="transform:scaleX(${ratio})"></i></span></div>
+    </button>`;
+  }).join('');
+  const headBtns = D.archMode
+    ? `<button class="restoreBtn" id="dRestore">${I('rotate',14)} 복원</button>
+       <button class="delBtn" id="dDelete">${I('trash',14)} 영구 삭제</button>`
+    : `<button class="archBtn" id="dArchive">${I('archive',14)} 보관</button>`;
+  const imgSel = D.imgSel || 'front';
+  const primaryImg = D.primaryImg || 'front';
+  const featured = k && k.art ? artOf(k, ch.h, imgSel==='back')
+    : `<div class="featEmpty">${I('plus',26)}<span>이미지 추가</span><span class="tiny">클릭 · 드래그 · Ctrl+V</span></div>`;
+  const thumbs = k && k.art ? ['front','back'].map(t=>
+    `<div class="tThumb${imgSel===t?' on':''}" data-timg="${t}" title="${t==='front'?'정면':'뒷모습'}">${artOf(k, ch.h, t==='back')}</div>`).join('') : '';
+  const gallery = ch.costumes.map(x=>`
+    <div class="gcard${k&&x.id===k.id?' on':''}" data-gc="${x.id}" title="드래그해서 순서 바꾸기">
+      <span class="grip">${I('grip',12)}</span>
+      <div class="gi">${x.art ? artOf(x, ch.h) : `<span style="color:rgba(139,141,163,.4)">${I('img',18)}</span>`}</div>
+      <div class="gl"><span class="n">${x.name}</span><span class="v">v${x.ver}</span></div>
+      <button class="gdel">${I('trash',13)}</button>
+    </div>`).join('');
+  const epChips = EPS.map(e=>{
+    const on = ch.eps.includes(e.n);
+    return `<span class="epUnit">
+      <button class="epChip${on?' on':''}" data-ep="${e.n}" title="${on?'클릭: 연결 해제 · 우클릭: 릴 파일':'클릭: 이 에피소드에 연결 · 우클릭: 릴 파일'}">${e.l}</button>
+      <button class="reelBtn${e.n===19?' has':''}" title="${e.n===19?'릴 파일 보기':'릴 파일 등록'}">${I('film',13)}</button>
+    </span>`;
+  }).join('');
+  const cmt = D.commentOpen ? `
+    <div class="cmtPanel" id="cmtPanel">
+      <div class="cmtHead"><span>이 캐릭터에 대한 이야기</span>
+        <button class="icoBtn" id="cmtClose">${I('x',16)}</button></div>
+      <div class="cmtBody">
+        <div class="cmtItem"><span class="cmtAv" style="background:${userColor('이다은')}">이</span>
+          <div class="cmtCol"><span class="cmtMeta"><b>이다은</b> · 어제 17:42</span>
+          <span class="cmtTxt">기본 복장 v3 — 얼굴각도 컨트롤러 축 정리했어요. 확인 부탁!</span></div></div>
+        <div class="cmtItem"><span class="cmtAv" style="background:${userColor('배한솔')}">배</span>
+          <div class="cmtCol"><span class="cmtMeta"><b>배한솔</b> · 오늘 09:15</span>
+          <span class="cmtTxt">확인했어요. 리깅에서 목 회전 범위만 조금 넓힐게요.</span></div></div>
+        <div class="cmtItem"><span class="cmtAv" style="background:${userColor('전혜림')}">전</span>
+          <div class="cmtCol"><span class="cmtMeta"><b>전혜림</b> · 오늘 10:02</span>
+          <span class="cmtTxt">잠옷 디자인 피드백 반영본은 내일 올라갑니다.</span></div></div>
+      </div>
+      <div class="cmtInput"><div class="box">댓글 입력… (@멘션, 이미지 붙여넣기 지원)</div></div>
+    </div>` : '';
+  return `<div class="mOverlay blurred show" id="dOverlay">
+    <div class="dRow" id="dRowBox">
+      <div class="dShell" id="dShell">
+        <div class="dGlow"><i class="a"></i><i class="b"></i></div>
+        <aside class="dAside" id="dAside">
+          <div class="dAsideHead">
+            <button class="dCloseTxt" id="dCloseA">${I('x',17)} 닫기</button>
+            <div class="dSearch">${I('search',13)}<input id="dListSearch" placeholder="목록 검색" value="${D.listQuery||''}"/></div>
+          </div>
+          <div class="dList" id="dList">${listRows || `<div style="padding:32px 12px;text-align:center;font-size:12px;color:var(--ts)">검색 결과가 없어요.</div>`}</div>
+          ${D.archMode?'':`<div class="dAddChar"><button id="dAddChar">${I('plus',15)} 캐릭터 추가</button></div>`}
+        </aside>
+        <main class="dMain">
+          <div class="dHead" id="dHead">
+            <div class="dTitle" id="dTitle">
+              <h2 id="dName">${ch.name}</h2>
+              <button class="icoBtn" id="dNameEdit" title="이름 편집">${I('pencil',14)}</button>
+            </div>
+            <div class="dHeadR">
+              <button class="cmtBtn${D.commentOpen?' on':''}" id="dCmt">${I('msg',14)} 댓글 3</button>
+              ${headBtns}
+              <button class="icoBtn" id="dCloseB">${I('x',18)}</button>
+            </div>
+          </div>
+          <div class="dBody" id="dBody">
+            <div class="dCols">
+              <div class="dLeft" id="dLeft">
+                <div class="featBox" id="featBox">${featured}<div class="dropVeil">이미지 놓기</div></div>
+                ${k && k.art ? `<div class="featActs" id="featActs">
+                  <button class="fAct" id="fPrimary">${imgSel===primaryImg
+                    ? `<span class="starOn">${I('star',13)}</span> 대표`
+                    : `${I('star',13)} 대표로 지정`}</button>
+                  <button class="fAct">${I('copy',13)} 복사</button>
+                  <button class="fAct" id="fMore" title="배경·역할·썸네일 맞추기·삭제">${I('palette',13)}</button>
+                </div>
+                <div class="thumbStrip" id="thumbStrip">${thumbs}
+                  <button class="tAdd" title="이미지 추가 — 복사한 이미지를 Ctrl+V 로 붙여넣을 수도 있어요">${I('plus',15)}<span>추가</span></button>
+                </div>` : ''}
+                ${k ? `<div class="costIdent" id="costIdent">
+                  <div class="r1"><span class="cnm" id="costNm">${k.name}</span><span class="cv">v${k.ver}</span>
+                    <button class="icoBtn" id="costNmEdit" style="padding:4px">${I('pencil',12)}</button></div>
+                  <div class="costMemo" id="costMemo" contenteditable="false">${k.memoTxt||'배색 확정본. 소매 리본은 v3부터 삭제.'}</div>
+                </div>` : ''}
+              </div>
+              <div class="dRight" id="dRight">
+                <div class="fld"><span class="lb">출연 에피소드</span>
+                  <div class="chipsWrap" id="epChips">${epChips}</div></div>
+                <div class="fld"><span class="lb">복장</span>
+                  <div class="gallery" id="gallery">${gallery}
+                    <button class="gAdd" id="gAdd">${I('plus',20)}<span>복장 추가</span></button>
+                  </div></div>
+                ${k ? costumeDetailHTML(ch, k)
+                  : `<div style="text-align:center;color:var(--ts);font-size:14px;padding:40px;border:1px dashed var(--bd);border-radius:8px">복장이 없습니다. "복장 추가"로 첫 복장을 만들어보세요.</div>`}
+              </div>
+            </div>
+          </div>
+        </main>
+      </div>
+      ${cmt}
+    </div>
+  </div>`;
+}
+function lightboxHTML(){
+  const L = W.lightbox;
+  if (!L) return '';
+  const ch = findChar(L.charId);
+  const k = ch && ch.costumes.find(x=>x.id===L.costumeId);
+  if (!ch || !k) return '';
+  return `<div class="lightbox show" id="lb">
+    <button class="lbClose" id="lbClose">${I('x',18)}</button>
+    <div class="lbImg">${artOf(k, ch.h)||''}</div>
+    <div class="lbCap">${ch.name} · ${k.name} v${k.ver} — 원본 보기 (휠 확대 · ←→ 이미지 이동)</div>
+  </div>`;
+}
+
+/* ═══════════════ 8. 전체 렌더 ═══════════════ */
+function render(){
+  world.innerHTML = viewHTML();
+  ovl.innerHTML = (W.addOpen ? addModalHTML() : '') + (W.detail ? detailHTML() : '') + lightboxHTML();
+}
+
+
+/* ═══════════════ 9. 엔진: 가상 시계 + 트윈 ═══════════════ */
+const CK = { t:0, rate:1, playing:false };
+let tweens = [];
+const easeIO  = p => p<.5 ? 4*p*p*p : 1-Math.pow(-2*p+2,3)/2;
+const easeO   = p => 1-Math.pow(1-p,3);
+const easeOB  = p => { const c=1.70158, c3=c+1; return 1+c3*Math.pow(p-1,3)+c*Math.pow(p-1,2); };
+const linear  = p => p;
+function tween({dur, ease=easeIO, up, ct}){
+  return new Promise(res=>{
+    if (ct && ct.cancelled){ res(); return; }
+    tweens.push({ t0:CK.t, dur:Math.max(1, Number.isFinite(dur)?dur:1), ease, up, res, ct });
+  });
+}
+const wait = (ms, ct)=>tween({dur:ms, up:()=>{}, ct});
+function stepTweens(){
+  for (let i=tweens.length-1; i>=0; i--){
+    const tw = tweens[i];
+    if (tw.ct && tw.ct.cancelled){ tweens.splice(i,1); tw.res(); continue; }
+    const p = Math.min(1, (CK.t - tw.t0)/tw.dur);
+    try { tw.up(tw.ease(p), p); } catch(e){}
+    if (p >= 1){ tweens.splice(i,1); tw.res(); }
+  }
+}
+
+/* ═══════════════ 10. 무대 좌표 & 스케일 ═══════════════ */
+const stage = document.getElementById('stage');
+const stageWrap = document.getElementById('stageWrap');
+function fitStage(){
+  const deckH = document.getElementById('deck').offsetHeight + 40;
+  const k = Math.min((window.innerWidth-32)/1280, (window.innerHeight-deckH-24)/720, 1.08);
+  stage.style.transform = `scale(${k})`;
+  stageWrap.style.width = (1280*k)+'px';
+  stageWrap.style.height = (720*k)+'px';
+}
+window.addEventListener('resize', fitStage);
+function rectOf(el){
+  const r = el.getBoundingClientRect(), s = stage.getBoundingClientRect();
+  const k = (s.width/1280) || 1;
+  return { x:(r.left-s.left)/k, y:(r.top-s.top)/k, w:r.width/k, h:r.height/k };
+}
+const centerOf = el => { const r = rectOf(el); return { x:r.x+r.w/2, y:r.y+r.h/2 }; };
+
+/* ═══════════════ 11. 카메라 (줌·확대 표시) ═══════════════ */
+const camEl = document.getElementById('camera');
+const cam = { x:0, y:0, k:1 };
+function applyCam(){ camEl.style.transform = `translate(${cam.x}px,${cam.y}px) scale(${cam.k})`; }
+async function camTo(tx, ty, tk, ct, dur=750){
+  const f = { x:cam.x, y:cam.y, k:cam.k };
+  await tween({dur, ease:easeIO, ct, up:p=>{
+    cam.x = f.x+(tx-f.x)*p; cam.y = f.y+(ty-f.y)*p; cam.k = f.k+(tk-f.k)*p; applyCam();
+  }});
+}
+async function zoomTo(el, k, ct, opt={}){
+  // 대상 요소의 '월드 좌표' 중심을 무대 중앙(또는 지정점)으로.
+  const r = rectOf(el);
+  const wx = (r.x + r.w/2 - cam.x)/cam.k;
+  const wy = (r.y + r.h/2 - cam.y)/cam.k;
+  const cx = opt.cx ?? 640, cy = opt.cy ?? 360;
+  await camTo(cx - wx*k, cy - wy*k, k, ct, opt.dur ?? 750);
+}
+const camReset = (ct, dur=650)=>camTo(0,0,1,ct,dur);
+function camResetHard(){ cam.x=0; cam.y=0; cam.k=1; applyCam(); }
+
+/* ═══════════════ 12. 커서 ═══════════════ */
+const curEl = document.getElementById('cursor');
+const cur = { x:660, y:420 };
+function setCur(x,y){ cur.x=x; cur.y=y; curEl.style.transform = `translate(${x}px,${y}px)`; }
+setCur(cur.x, cur.y);
+async function cMove(x, y, ct, opt={}){
+  const dist = Math.hypot(x-cur.x, y-cur.y);
+  const dur = opt.dur ?? Math.max(260, Math.min(950, dist*1.5));
+  const sx=cur.x, sy=cur.y;
+  const mx=(sx+x)/2, my=(sy+y)/2;
+  const nx=-(y-sy)/(dist||1), ny=(x-sx)/(dist||1);
+  const amp = (opt.arc ?? .16) * dist * (Math.random()<.5?-1:1);
+  const cx=mx+nx*amp, cy=my+ny*amp;
+  await tween({dur, ease:easeIO, ct, up:p=>{
+    const a=1-p;
+    setCur(a*a*sx + 2*a*p*cx + p*p*x, a*a*sy + 2*a*p*cy + p*p*y);
+  }});
+}
+async function cMoveEl(el, ct, opt={}){
+  const r = rectOf(el);
+  const x = r.x + r.w*(opt.ax ?? .5) + (opt.dx||0);
+  const y = r.y + r.h*(opt.ay ?? .5) + (opt.dy||0);
+  await cMove(x, y, ct, opt);
+}
+function ripple(x, y, ct){
+  const d = document.createElement('div');
+  d.className = 'ripple';
+  document.getElementById('fx').appendChild(d);
+  tween({dur:460, ease:easeO, ct, up:p=>{
+    const s = .4 + p*2.6;
+    d.style.transform = `translate(${x-7}px,${y-7}px) scale(${s})`;
+    d.style.opacity = String(1-p);
+  }}).then(()=>d.remove());
+}
+async function cPress(ct){ curEl.classList.add('press'); ripple(cur.x, cur.y, ct); await wait(95, ct); }
+async function cRelease(ct){ curEl.classList.remove('press'); await wait(70, ct); }
+async function cClick(elOrPt, ct, opt={}){
+  if (elOrPt instanceof Element) await cMoveEl(elOrPt, ct, opt);
+  else await cMove(elOrPt.x, elOrPt.y, ct, opt);
+  await cPress(ct); await wait(50, ct); await cRelease(ct);
+  await wait(opt.settle ?? 110, ct);
+}
+async function cDblClick(el, ct, opt={}){
+  await cMoveEl(el, ct, opt);
+  await cPress(ct); await cRelease(ct); await wait(70, ct);
+  await cPress(ct); await cRelease(ct); await wait(110, ct);
+}
+function grab(on){ curEl.classList.toggle('grabbing', !!on); }
+
+/* 드래그 고스트 (실제 앱 applyDragGhost 재현: 미니 카드) */
+let ghostEl = null;
+function showGhost(name, artHTML){
+  hideGhost();
+  ghostEl = document.createElement('div');
+  ghostEl.className = 'dragGhost';
+  ghostEl.innerHTML = `<div class="gi">${artHTML||''}</div><div class="gn">${name}</div>`;
+  document.getElementById('fx').appendChild(ghostEl);
+  requestAnimationFrame(()=>{ if(ghostEl) ghostEl.style.opacity = '1'; });
+}
+function moveGhost(){ if (ghostEl) ghostEl.style.transform = `translate(${cur.x+14}px,${cur.y+10}px) rotate(3deg)`; }
+function hideGhost(){ if (ghostEl){ ghostEl.remove(); ghostEl = null; } }
+
+/* 파일 칩 (탐색기에서 끌어온 파일 연출) */
+let fileChipEl = null;
+function showFileChip(name){
+  hideFileChip();
+  fileChipEl = document.createElement('div');
+  fileChipEl.className = 'fileChip';
+  fileChipEl.innerHTML = `${I('fileimg',15)}<span>${name}</span>`;
+  document.getElementById('fx').appendChild(fileChipEl);
+  requestAnimationFrame(()=>{ if(fileChipEl) fileChipEl.style.opacity = '1'; });
+}
+function moveFileChip(){ if (fileChipEl) fileChipEl.style.transform = `translate(${cur.x+16}px,${cur.y+8}px) rotate(-2deg)`; }
+function hideFileChip(){ if (fileChipEl){ fileChipEl.remove(); fileChipEl = null; } }
+
+/* ═══════════════ 13. 스포트라이트 (4분할 베일 + 링 + 빔) ═══════════════ */
+const fx = document.getElementById('fx');
+const fsT=$('#fsT'), fsB=$('#fsB'), fsL=$('#fsL'), fsR=$('#fsR'), fring=$('#fring');
+const fbeamWrap=$('#fbeamWrap'), fbeam=$('#fbeam');
+let focusT = null, focusPad = 8, focusR = 12;
+const fState = { x:640, y:360, w:0, h:0, init:false };
+function focusOn(el, opt={}){
+  focusT = el; focusPad = opt.pad ?? 8; focusR = opt.r ?? 12;
+  fring.style.borderRadius = focusR+'px';
+  fx.classList.add('focusOn');
+  if (!fState.init){
+    const r = rectOf(el);
+    fState.x=r.x-focusPad; fState.y=r.y-focusPad; fState.w=r.w+focusPad*2; fState.h=r.h+focusPad*2;
+    fState.init = true; applyFocus(fState);
+  }
+  if (opt.beam) beamSweep();
+}
+function clearFocus(){ focusT = null; fx.classList.remove('focusOn'); fState.init = false; }
+function applyFocus(s){
+  fsT.style.cssText = `left:0;top:0;width:1280px;height:${Math.max(0,s.y)}px`;
+  fsB.style.cssText = `left:0;top:${s.y+s.h}px;width:1280px;height:${Math.max(0,720-(s.y+s.h))}px`;
+  fsL.style.cssText = `left:0;top:${s.y}px;width:${Math.max(0,s.x)}px;height:${s.h}px`;
+  fsR.style.cssText = `left:${s.x+s.w}px;top:${s.y}px;width:${Math.max(0,1280-(s.x+s.w))}px;height:${s.h}px`;
+  fring.style.cssText += `;left:${s.x}px;top:${s.y}px;width:${s.w}px;height:${s.h}px;border-radius:${focusR}px`;
+}
+function fxSync(){
+  if (!focusT) return;
+  if (!document.contains(focusT)){ return; }
+  const r = rectOf(focusT);
+  const tx=r.x-focusPad, ty=r.y-focusPad, tw=r.w+focusPad*2, th=r.h+focusPad*2;
+  const a = .22;
+  fState.x += (tx-fState.x)*a; fState.y += (ty-fState.y)*a;
+  fState.w += (tw-fState.w)*a; fState.h += (th-fState.h)*a;
+  applyFocus(fState);
+}
+async function beamSweep(ct){
+  fbeamWrap.style.cssText = `left:${fState.x}px;top:${fState.y}px;width:${fState.w}px;height:${fState.h}px;opacity:1;border-radius:${focusR}px`;
+  await tween({dur:820, ease:easeIO, ct, up:p=>{
+    fbeamWrap.style.left = fState.x+'px'; fbeamWrap.style.top = fState.y+'px';
+    fbeamWrap.style.width = fState.w+'px'; fbeamWrap.style.height = fState.h+'px';
+    fbeam.style.left = (-40 + p*150)+'%';
+  }});
+  fbeamWrap.style.opacity = '0';
+}
+async function focusPulse(el, ct, opt={}){
+  focusOn(el, opt);
+  if (opt.beam !== false){ await wait(320, ct); beamSweep(ct); }
+}
+
+/* ═══════════════ 14. 콜아웃 ═══════════════ */
+const coLayer = document.getElementById('coLayer');
+async function callout(el, html, side, ct, opt={}){
+  const r = rectOf(el);
+  const d = document.createElement('div');
+  d.className = 'co ' + (side==='left'?'left':'right');
+  d.innerHTML = `<span class="line"></span><span class="tag">${html}</span>`;
+  coLayer.appendChild(d);
+  const y = r.y + r.h*(opt.ay ?? .5);
+  if (side==='left'){ d.style.right = (1280 - r.x + 4)+'px'; d.style.top = y+'px'; }
+  else { d.style.left = (r.x + r.w + 4)+'px'; d.style.top = y+'px'; }
+  d.style.transform = 'translateY(-50%)';
+  await tween({dur:340, ease:easeO, ct, up:p=>{
+    d.style.opacity = String(p);
+    d.style.marginTop = ((1-p)*6)+'px';
+  }});
+  return d;
+}
+function clearCallouts(){ coLayer.innerHTML = ''; }
+
+/* ═══════════════ 15. 자막 · 토스트 ═══════════════ */
+const capEl = document.getElementById('cap');
+let capSeq = 0;
+async function say(no, kicker, title, text, ct){
+  const my = ++capSeq;
+  capEl.innerHTML = `<div class="capCard">
+    <div class="capKick"><span class="no">${no}</span>${kicker}</div>
+    <div class="capTitle">${title}</div>
+    ${text?`<div class="capText">${text}</div>`:''}
+  </div>`;
+  const card = capEl.firstElementChild;
+  await tween({dur:380, ease:easeO, ct, up:p=>{
+    if (capSeq!==my) return;
+    card.style.opacity = String(p);
+    card.style.transform = `translateY(${(1-p)*14}px)`;
+  }});
+}
+function capClear(){ capSeq++; capEl.innerHTML = ''; }
+const toastEl = document.getElementById('toast');
+let toastTk = 0;
+async function toast(msg, ct, opt={}){
+  const my = ++toastTk;
+  toastEl.innerHTML = msg + (opt.action?` <span class="tAct">${opt.action}</span>`:'');
+  toastEl.classList.add('show');
+  await wait(opt.hold ?? 1900, ct);
+  if (my===toastTk) toastEl.classList.remove('show');
+}
+
+/* ═══════════════ 16. 타이핑 · 스크롤 · FLIP ═══════════════ */
+async function typeIn(input, text, ct, opt={}){
+  input.classList.add('hot');
+  const isCE = input.getAttribute && input.getAttribute('contenteditable')==='true';
+  for (let i=1; i<=text.length; i++){
+    if (ct.cancelled) break;
+    if (isCE) input.textContent = text.slice(0,i);
+    else input.value = text.slice(0,i);
+    await wait(46 + Math.random()*54, ct);
+  }
+  await wait(140, ct);
+}
+async function scrollTo(container, top, ct, dur=620){
+  const from = container.scrollTop;
+  await tween({dur, ease:easeIO, ct, up:p=>{ container.scrollTop = from + (top-from)*p; }});
+}
+async function scrollToEl(container, el, ct, opt={}){
+  const cr = container.getBoundingClientRect(), er = el.getBoundingClientRect();
+  const target = container.scrollTop + (er.top - cr.top) - (opt.offset ?? 90);
+  await scrollTo(container, Math.max(0, target), ct, opt.dur ?? 620);
+}
+async function flip(container, mutate, ct, opt={}){
+  const sel = opt.sel || '[data-cid],[data-gc]';
+  const before = new Map();
+  $$(sel, container).forEach(el=>before.set(el.dataset.cid||el.dataset.gc, rectOf(el)));
+  mutate();
+  const items = $$(sel, container);
+  const moves = [];
+  items.forEach(el=>{
+    const key = el.dataset.cid||el.dataset.gc;
+    const b = before.get(key);
+    if (!b) return;
+    const a = rectOf(el);
+    const dx = (b.x-a.x)*cam.k, dy = (b.y-a.y)*cam.k;
+    if (Math.abs(dx)<1 && Math.abs(dy)<1) return;
+    el.style.transition = 'none';
+    el.style.transform = `translate(${dx/cam.k}px,${dy/cam.k}px)`;
+    moves.push(el);
+  });
+  if (!moves.length) return;
+  await tween({dur:8, up:()=>{}, ct});
+  moves.forEach(el=>{ el.style.transition = 'transform .42s cubic-bezier(.22,1,.36,1)'; el.style.transform = ''; });
+  await wait(440, ct);
+  moves.forEach(el=>{ el.style.transition = ''; });
+}
+function pressEffect(el){
+  if (!el) return;
+  el.style.transition = 'transform .12s';
+  el.style.transform = 'scale(.96)';
+  setTimeout(()=>{ el.style.transform=''; }, 130);
+}
+
+/* ═══════════════ 17. 메인 루프 ═══════════════ */
+let lastTs = performance.now();
+function loop(ts){
+  const dt = Math.min(64, ts - lastTs); lastTs = ts;
+  if (CK.playing) CK.t += dt * CK.rate;
+  stepTweens();
+  fxSync();
+  moveGhost(); moveFileChip();
+  requestAnimationFrame(loop);
+}
+requestAnimationFrame(loop);
+
+
+/* ═══════════════ 18. 장면 공통 헬퍼 ═══════════════ */
+function setupBase(mod){
+  W = baseW();
+  if (mod) mod(W);
+  render();
+  camResetHard();
+  clearFocus(); clearCallouts(); capClear();
+  hideGhost(); hideFileChip(); grab(false);
+  curEl.classList.remove('press');
+  toastEl.classList.remove('show');
+  const am = $('#assM'); if (am) am.remove();
+  const cm = $('#ctxM'); if (cm) cm.remove();
+  setCur(700, 470);
+}
+function refreshToolbar(){ const t=$('#toolbar'); if (t) t.outerHTML = toolbarHTML(); }
+function refreshContent(){ const c=$('#content'); if (c) c.innerHTML = contentHTML(); }
+async function contentFade(ct, mutate){
+  const c = $('#content'); if (!c){ mutate(); return; }
+  await tween({dur:130, ease:easeO, ct, up:p=>{ c.style.opacity = String(1-p*0.9); }});
+  mutate();
+  const c2 = $('#content');
+  await tween({dur:190, ease:easeO, ct, up:p=>{ c2.style.opacity = String(.1+p*.9); }});
+  c2.style.opacity = '';
+}
+function refreshDetail(){
+  const o = $('#dOverlay');
+  const html = detailHTML();
+  if (o) o.outerHTML = html;
+  else ovl.insertAdjacentHTML('beforeend', html);
+}
+function refreshCostDetail(){
+  const ch = findChar(W.detail.charId);
+  const k = ch.costumes.find(x=>x.id===W.detail.costumeId);
+  const el = $('#costDetail');
+  if (el && ch && k) el.outerHTML = costumeDetailHTML(ch, k);
+}
+async function openAnim(sel, ct){
+  const o = $(sel); if (!o) return;
+  o.classList.remove('show'); void o.offsetHeight; o.classList.add('show');
+  await wait(250, ct);
+}
+function cardEl(id){ return $(`.ccard[data-cid="${id}"]`) || $(`.crow[data-cid="${id}"]`); }
+async function wheelCycle(chId, ct, steps=2){
+  const ch = findChar(chId);
+  for (let s=0; s<steps; s++){
+    const el = cardEl(chId); if (!el) return;
+    const box = $('.imgBox', el); if (!box) return;
+    const imaged = ch.costumes.filter(k=>k.art);
+    W.cardIdx[chId] = ((W.cardIdx[chId]||0)+1) % imaged.length;
+    await tween({dur:120, ease:easeO, ct, up:p=>{ box.style.opacity = String(1-p*.7); }});
+    const shown = imaged[W.cardIdx[chId]];
+    const dots = imaged.map((k,i)=>`<i class="${i===W.cardIdx[chId]?'on':''}"></i>`).join('');
+    box.innerHTML = artOf(shown, ch.h) + `<div class="wheelDots">${dots}</div>`;
+    await tween({dur:170, ease:easeO, ct, up:p=>{ box.style.opacity = String(.3+p*.7); }});
+    box.style.opacity = '';
+    await wait(430, ct);
+  }
+}
+async function dragCharCard(srcId, dstId, edge, ct){
+  const src = cardEl(srcId), dst0 = cardEl(dstId);
+  if (!src || !dst0) return;
+  const ch = findChar(srcId);
+  await cMoveEl(src, ct, {ay:.42});
+  await cPress(ct); grab(true);
+  src.classList.add('dragSrc');
+  showGhost(ch.name, artOf(featuredCostume(ch), ch.h));
+  await wait(160, ct);
+  const dst = cardEl(dstId);
+  const r = rectOf(dst);
+  await cMove(edge==='before' ? r.x+18 : r.x+r.w-18, r.y+r.h*.4, ct, {dur:760, arc:.1});
+  dst.classList.add('dropHi');
+  const line = document.createElement('span');
+  line.className = 'dropLine '+edge;
+  dst.appendChild(line);
+  await wait(480, ct);
+  grab(false); await cRelease(ct);
+  hideGhost();
+  dst.classList.remove('dropHi'); line.remove();
+  src.classList.remove('dragSrc');
+  const grid = $('#grid');
+  await flip(grid, ()=>{
+    if (edge==='before') grid.insertBefore(src, dst);
+    else grid.insertBefore(src, dst.nextSibling);
+  }, ct);
+  const arr = W.chars;
+  const si = arr.findIndex(c=>c.id===srcId);
+  const [moved] = arr.splice(si,1);
+  let di = arr.findIndex(c=>c.id===dstId);
+  arr.splice(edge==='before' ? di : di+1, 0, moved);
+}
+function assModalHTML(label){
+  return `<div class="assModal" id="assM"><div class="assCard">
+    <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px">
+      <div><div class="ttl">${label} 추가</div>
+        <div class="sub">목록에서 고르거나, 쉼표로 여러 이름을 직접 입력할 수 있어요</div></div>
+      <button class="icoBtn" id="assX">${I('x',17)}</button>
+    </div>
+    <div id="assSel" style="margin-top:12px;display:none;flex-wrap:wrap;gap:6px"></div>
+    <input id="assInput" placeholder="이름 입력"/>
+    <div class="assList" id="assList">
+      ${TEAM.map(n=>`<button class="assRow" data-ass="${n}"><span class="adot" style="background:${userColor(n)}"></span>${n}</button>`).join('')}
+    </div>
+    <div style="margin-top:16px;display:flex;justify-content:flex-end;gap:8px">
+      <button class="cancel" style="padding:8px 12px;border-radius:8px;font-size:14px;color:var(--ts)">취소</button>
+      <button class="go" id="assGo" style="padding:8px 12px;border-radius:8px;font-size:14px;background:var(--ac);color:#fff">추가</button>
+    </div>
+  </div></div>`;
+}
+function ctxMenuHTML(x, y){
+  return `<div class="ctxMenu" id="ctxM" style="left:${x}px;top:${y}px">
+    <button class="ctxItem">${I('copy',13)} 이미지 복사</button>
+    <button class="ctxItem">${I('folder',13)} 작업 폴더 열기</button>
+    <button class="ctxItem">${I('img',13)} 작업 파일 열기</button>
+  </div>`;
+}
+
+/* ═══════════════ 19. 장면 대본 ═══════════════ */
+const SCENES = [
+
+/* ── S1. 화면 구조 ─────────────────────────────── */
+{ id:'s1', chip:'구조', title:'화면 한눈에',
+  setup(){ setupBase(); },
+  async run(ct){
+    await say('01','OVERVIEW','캐릭터 현황판이란?','캐릭터별 <b>복장 디자인·리깅 진행 상황</b>을 팀 전체가 한 화면에서 보는 곳이에요. 모든 변경은 실시간으로 함께 움직입니다.', ct);
+    await wait(1400, ct);
+    focusOn($('#hdrTitle').parentElement, {pad:10, beam:true});
+    await cMoveEl($('#hdrTitle'), ct, {dx:60});
+    await wait(1300, ct);
+    focusOn($('#mainTabs'), {pad:6});
+    await say('01','OVERVIEW','두 개의 탭','<b>캐릭터 현황판</b>은 캐릭터 기준, <b>에피소드 에셋</b>은 에피소드 기준으로 같은 데이터를 봐요. 이번 투어는 현황판 중심이에요.', ct);
+    await cMoveEl($('#tabEpisode'), ct);
+    await wait(1600, ct);
+    focusOn($('#toolbar'), {pad:4});
+    await say('01','OVERVIEW','상단 도구 모음','위에서부터 <b>사용자 탭</b> · <b>검색 + 보기 방식 + 키 비교 + 캐릭터 추가</b> · <b>태그 필터</b>. 스크롤해도 항상 위에 붙어 있어요.', ct);
+    await cMoveEl($('#searchBox'), ct);
+    await wait(2000, ct);
+    focusOn($('#grid'), {pad:8});
+    await say('01','OVERVIEW','캐릭터 카드 그리드','캐릭터 한 명 = 카드 한 장. 카드만 봐도 <b>복장 수·출연 에피소드·진행률</b>이 보여요. 이제 카드부터 자세히 볼게요.', ct);
+    await cMoveEl($('#grid'), ct, {ay:.35});
+    await wait(2100, ct);
+    clearFocus();
+    await wait(350, ct);
+  }
+},
+
+/* ── S2. 카드 읽는 법 ──────────────────────────── */
+{ id:'s2', chip:'카드', title:'카드 읽는 법',
+  setup(){ setupBase(); },
+  async run(ct){
+    const el = cardEl('junho');
+    await say('02','CARD','카드 한 장 뜯어보기','준호 카드를 확대해서, 각 표시가 무슨 뜻인지 볼게요.', ct);
+    await cMoveEl(el, ct);
+    await zoomTo(el, 2.05, ct, {cx:520});
+    focusOn(el, {pad:6});
+    await wait(500, ct);
+    await callout($('.imgBox', cardEl('junho')), '<b>대표 이미지</b> — 대표 복장의 대표 컷', 'right', ct, {ay:.3});
+    await wait(850, ct);
+    await callout($('.nm', cardEl('junho')), '<b>캐릭터 이름</b>', 'right', ct);
+    await wait(700, ct);
+    await callout($('.meta', cardEl('junho')), '복장 수 · 출연 <b>에피소드 수</b>', 'right', ct);
+    await wait(750, ct);
+    await callout($('.badges', cardEl('junho')), '<b>디자인 / 리깅</b> — 완료 복장 수', 'right', ct);
+    await wait(1500, ct);
+    clearCallouts();
+    await say('02','CARD','휠로 복장 미리보기','카드 위에서 <b>마우스 휠</b>을 굴리면 이미지가 있는 복장을 차례로 넘겨 봐요. 아래 점이 현재 위치예요.', ct);
+    await cMoveEl($('.imgBox', cardEl('junho')), ct);
+    await wheelCycle('junho', ct, 3);
+    await wait(500, ct);
+    await say('02','CARD','우클릭 = 빠른 메뉴','카드에서 <b>우클릭</b>하면 이미지 복사, 작업 폴더·파일 열기를 바로 할 수 있어요.', ct);
+    await cPress(ct); await cRelease(ct);
+    ovl.insertAdjacentHTML('beforeend', ctxMenuHTML(cur.x/cam.k - cam.x/cam.k, cur.y/cam.k - cam.y/cam.k));
+    const m = $('#ctxM'); void m.offsetHeight; m.classList.add('show');
+    await wait(1900, ct);
+    m.remove();
+    W.cardIdx['junho'] = 0;
+    clearFocus();
+    await camReset(ct);
+    refreshContent();
+    await wait(300, ct);
+  }
+},
+
+/* ── S3. 보기 방식 ─────────────────────────────── */
+{ id:'s3', chip:'보기', title:'보기 방식 3종',
+  setup(){ setupBase(); },
+  async run(ct){
+    await say('03','VIEW','보기 방식 토글','우상단 토글로 <b>카드 · 이미지 없는 카드 · 리스트</b> 세 가지 보기를 오갈 수 있어요. 선택은 저장돼서 다음에도 유지됩니다.', ct);
+    focusOn($('#vseg'), {pad:6, beam:true});
+    await wait(900, ct);
+    await cClick($('.vbtn[data-view="compact"]'), ct);
+    $$('.vbtn').forEach(b=>b.classList.toggle('on', b.dataset.view==='compact'));
+    await contentFade(ct, ()=>{ W.view='compact'; refreshContent(); });
+    await say('03','VIEW','이미지 없는 카드 보기','이미지를 빼고 <b>텍스트 정보만</b> 촘촘하게. 캐릭터가 많아졌을 때 진행률 훑기에 좋아요.', ct);
+    await wait(1900, ct);
+    await cClick($('.vbtn[data-view="list"]'), ct);
+    $$('.vbtn').forEach(b=>b.classList.toggle('on', b.dataset.view==='list'));
+    await contentFade(ct, ()=>{ W.view='list'; refreshContent(); });
+    await say('03','VIEW','리스트 보기','한 줄에 한 명. 썸네일·이름·복장/EP 수·진행 배지가 표 형태로 정렬돼요. 클릭·우클릭 동작은 카드와 똑같아요.', ct);
+    await wait(2100, ct);
+    await cClick($('.vbtn[data-view="card"]'), ct);
+    $$('.vbtn').forEach(b=>b.classList.toggle('on', b.dataset.view==='card'));
+    await contentFade(ct, ()=>{ W.view='card'; refreshContent(); });
+    clearFocus();
+    await wait(400, ct);
+  }
+},
+
+/* ── S4. 카드 정렬 (드래그 재배치) ─────────────── */
+{ id:'s4', chip:'정렬', title:'드래그로 순서 바꾸기',
+  setup(){ setupBase(); },
+  async run(ct){
+    await say('04','SORT','카드를 끌어서 정렬','카드를 <b>드래그</b>하면 순서를 바꿀 수 있어요. 팀 전체에 같은 순서로 저장됩니다. 넣을 자리에는 <b>보라색 삽입선</b>이 떠요.', ct);
+    await wait(700, ct);
+    await dragCharCard('deokbae', 'sera', 'before', ct);
+    await wait(700, ct);
+    await say('04','SORT','한 번 더 — 뒤쪽으로','이번엔 몽실이를 준호 뒤로. 카드 오른쪽에 가까우면 <b>뒤에</b>, 왼쪽이면 <b>앞에</b> 들어가요.', ct);
+    await dragCharCard('mong', 'junho', 'after', ct);
+    await wait(900, ct);
+    await say('04','SORT','드래그가 잠기는 순간','<b>검색·태그 필터 중 · 리스트 보기 · 키 비교 · 보관 목록</b>에서는 순서가 파생 정렬이라 드래그가 잠깐 꺼져요. 원래 화면으로 오면 다시 켜집니다.', ct);
+    await wait(2600, ct);
+  }
+},
+
+/* ── S5. 검색 · 태그 필터 ──────────────────────── */
+{ id:'s5', chip:'검색', title:'검색과 태그 필터',
+  setup(){ setupBase(); },
+  async run(ct){
+    await say('05','FILTER','이름으로 검색','검색창은 캐릭터 이름은 물론 <b>탭·그룹 이름</b>까지 함께 찾아요. "주연" 그룹에 넣어둔 캐릭터도 "주연"으로 검색되죠.', ct);
+    const inp = $('#searchInput');
+    await cClick($('#searchBox'), ct);
+    await typeIn(inp, '준', ct);
+    W.query = '준';
+    await contentFade(ct, refreshContent);
+    await wait(1500, ct);
+    await cClick($('#searchBox'), ct, {settle:40});
+    inp.value=''; inp.classList.remove('hot'); W.query='';
+    await contentFade(ct, refreshContent);
+    await say('05','FILTER','태그로 거르기','아래 칩은 복장에 달린 <b>구조·에셋 태그</b>예요. 태그마다 고유색이 있고, 여러 개를 켜면 <b>모두 가진</b> 캐릭터만 남아요(AND).', ct);
+    focusOn($('#tagRow'), {pad:6});
+    await wait(600, ct);
+    const pill = (t)=>$(`#tagRow .tagpill[data-tag="${t}"]`);
+    await cClick(pill('안경'), ct);
+    W.filters = ['안경'];
+    refreshToolbar();
+    await contentFade(ct, refreshContent);
+    await wait(1100, ct);
+    await cClick(pill('모자'), ct);
+    W.filters = ['안경','모자'];
+    refreshToolbar();
+    await contentFade(ct, refreshContent);
+    await say('05','FILTER','안경 + 모자 = 황 부장','두 태그를 모두 가진 캐릭터만 남았어요. 다 봤으면 <b>필터 해제</b> 한 번으로 초기화.', ct);
+    await wait(1700, ct);
+    await cClick($('#btnClearTags'), ct);
+    W.filters = [];
+    refreshToolbar();
+    await contentFade(ct, refreshContent);
+    clearFocus();
+    await wait(400, ct);
+  }
+},
+
+/* ── S6. 키 비교 보기 ──────────────────────────── */
+{ id:'s6', chip:'키 비교', title:'키 비교 보기',
+  setup(){ setupBase(); },
+  async run(ct){
+    await say('06','HEIGHT','키 비교 보기','각 캐릭터의 <b>기준 키(px)</b>에 맞춰 카드 크기를 비례시켜, 실제 <b>키 라인업</b>처럼 나란히 세워 봐요.', ct);
+    focusOn($('#btnHeight'), {pad:6, beam:true});
+    await wait(700, ct);
+    await cClick($('#btnHeight'), ct);
+    clearFocus();
+    W.height = true;
+    refreshToolbar();
+    await contentFade(ct, refreshContent);
+    await say('06','HEIGHT','작은 순 → 큰 순','기준 키 오름차순으로 자동 정렬돼요. 몽실이(260px)부터 황 부장(660px)까지 비율이 한눈에 보이죠.', ct);
+    focusOn($('#grid'), {pad:8});
+    await cMoveEl(cardEl('mong'), ct, {ay:.4});
+    await wait(1500, ct);
+    const rora = cardEl('rora');
+    await cMoveEl(rora, ct, {ay:.2});
+    await callout($('.hBadge', rora) || rora, '기준 키 미설정 → <b>기본 크기 + 배지</b>', 'left', ct, {ay:.15});
+    await say('06','HEIGHT','키 미설정 배지','키를 아직 안 정한 캐릭터는 맨 뒤에 기본 크기로 서고 <b>키 미설정</b> 배지가 붙어요. 상세에서 숫자 입력 또는 이미지 기준선으로 맞춥니다.', ct);
+    await wait(2300, ct);
+    clearCallouts();
+    await say('06','HEIGHT','이 모드의 규칙','키 비교 중에는 <b>카드 보기로 고정</b>이라 보기 토글이 잠겨요. 버튼을 다시 누르면 원래대로.', ct);
+    focusOn($('#vseg'), {pad:6});
+    await wait(1600, ct);
+    await cClick($('#btnHeight'), ct);
+    clearFocus();
+    W.height = false;
+    refreshToolbar();
+    await contentFade(ct, refreshContent);
+    await wait(400, ct);
+  }
+},
+
+/* ── S7. 탭 · 그룹 ─────────────────────────────── */
+{ id:'s7', chip:'탭·그룹', title:'나만의 탭과 그룹',
+  setup(){ setupBase(); },
+  async run(ct){
+    await say('07','TABS','사용자 탭 만들기','<b>전체</b> 옆의 + 탭으로 나만의 분류 화면을 만들어요. 시즌별, 주·조연별 — 기준은 자유입니다.', ct);
+    focusOn($('#bstrip'), {pad:6, beam:true});
+    await wait(600, ct);
+    await cClick($('#btnAddTab'), ct);
+    W.ui.tabAdding = true; refreshToolbar();
+    await typeIn($('#tabNameInput'), '시즌 2', ct);
+    await wait(240, ct);
+    W.ui.tabAdding = false;
+    W.btabs.push({id:'t1', name:'시즌 2', groups:[]});
+    W.activeTab = 't1';
+    refreshToolbar();
+    await contentFade(ct, refreshContent);
+    clearFocus();
+    await say('07','TABS','그룹으로 묶기','탭 안에서는 <b>그룹 섹션</b>이 생겨요. 아직 그룹이 없으니 모두 <b>미분류</b>. 그룹을 하나 만들어 볼게요.', ct);
+    await cClick($('#btnAddGroup'), ct);
+    W.ui.groupAdding = true; refreshContent();
+    await typeIn($('#groupNameInput'), '주연', ct);
+    await cClick($('#groupNameOk'), ct);
+    W.ui.groupAdding = false;
+    W.btabs[0].groups.push({id:'g1', name:'주연', ids:[]});
+    await contentFade(ct, refreshContent);
+    await say('07','TABS','카드를 끌어다 배치','빈 그룹엔 안내가 떠요 — <b>카드를 끌어다 놓아 배치해요</b>. 준호와 세라를 주연으로 옮길게요.', ct);
+    focusOn($(`.gsec[data-gid="g1"]`), {pad:6});
+    await wait(500, ct);
+    for (const id of ['junho','sera']){
+      const src = cardEl(id); if (!src) break;
+      const ch = findChar(id);
+      await cMoveEl(src, ct, {ay:.42});
+      await cPress(ct); grab(true);
+      src.classList.add('dragSrc');
+      showGhost(ch.name, artOf(featuredCostume(ch), ch.h));
+      const gsec = $(`.gsec[data-gid="g1"]`);
+      gsec.classList.add('dragOver');
+      const gr = rectOf(gsec);
+      await cMove(gr.x+gr.w*.4, gr.y+Math.min(gr.h-24, 88), ct, {dur:700});
+      await wait(320, ct);
+      grab(false); await cRelease(ct); hideGhost();
+      W.btabs[0].groups[0].ids.push(id);
+      await contentFade(ct, refreshContent);
+      focusOn($(`.gsec[data-gid="g1"]`), {pad:6});
+      await wait(450, ct);
+    }
+    clearFocus();
+    await say('07','TABS','이름 변경 · 삭제','탭은 <b>더블클릭</b>으로 이름을 바꿔요. 활성 탭의 <b>×</b>를 누르면 실수 방지를 위해 <b>삭제/취소</b> 2단계 확인을 거칩니다.', ct);
+    const tabChip = $(`.bchip[data-tid="t1"]`);
+    await cMoveEl(tabChip, ct);
+    await wait(500, ct);
+    await cClick($(`.tabX[data-tid="t1"]`), ct);
+    W.ui.tabConfirmDel = 't1'; refreshToolbar();
+    focusOn($('.confirmDel'), {pad:8});
+    await wait(1400, ct);
+    await cClick($('.confirmDel .keep'), ct);
+    W.ui.tabConfirmDel = null; refreshToolbar();
+    clearFocus();
+    await say('07','TABS','전체로 복귀','그룹 배치도 팀 공유예요. <b>전체</b> 칩을 누르면 언제든 기본 그리드로 돌아옵니다.', ct);
+    await cClick($('.bchip[data-tid=""]'), ct);
+    W.activeTab = null;
+    refreshToolbar();
+    await contentFade(ct, refreshContent);
+    await wait(600, ct);
+  }
+},
+
+
+/* ── S8. 캐릭터 추가 ───────────────────────────── */
+{ id:'s8', chip:'추가', title:'캐릭터 추가',
+  setup(){ setupBase(); },
+  async run(ct){
+    await say('08','ADD','새 캐릭터 만들기','우상단 <b>캐릭터 추가</b>를 눌러 볼게요.', ct);
+    focusOn($('#btnAddChar'), {pad:6, beam:true});
+    await wait(500, ct);
+    await cClick($('#btnAddChar'), ct);
+    clearFocus();
+    W.addOpen = true; render();
+    await openAnim('#addOverlay', ct);
+    await say('08','ADD','이름은 비워도 돼요','이름 없이 추가하면 임시 이름이 붙고, <b>첫 대표 이미지를 넣는 순간 파일 이름으로 자동 완성</b>돼요. 같은 이름이 있으면 경고만 하고 막지는 않아요.', ct);
+    await cClick($('#addName'), ct, {settle:40});
+    await typeIn($('#addName'), '레오', ct);
+    await wait(900, ct);
+    await cClick($('#addMemo'), ct, {settle:40});
+    await typeIn($('#addMemo'), '시즌 2 신규 — 준호 라이벌', ct, {cps:18});
+    await wait(400, ct);
+    await cClick($('#addGo'), ct);
+    W.addOpen = false;
+    W.chars.push(C('leo','레오',null,[],[]));
+    render();
+    const leo = cardEl('leo');
+    if (leo){
+      leo.classList.add('pop');
+      const vb = $('#viewBody');
+      await scrollToEl(vb, leo, ct, {offset:180});
+    }
+    focusOn(cardEl('leo'), {pad:6});
+    await say('08','ADD','빈 카드로 시작','새 카드가 그리드 끝에 생겼어요. 아직 복장이 없어서 <b>복장을 추가해주세요</b> 배지가 떠 있죠. 이제 카드를 열어 채워봅시다.', ct);
+    await cMoveEl(cardEl('leo'), ct);
+    await wait(2300, ct);
+    clearFocus();
+    await wait(300, ct);
+  }
+},
+
+/* ── S9. 상세 화면 구조 ────────────────────────── */
+{ id:'s9', chip:'상세', title:'상세 화면 열기',
+  setup(){ setupBase(); },
+  async run(ct){
+    await say('09','DETAIL','카드 클릭 → 상세','카드를 클릭하면 <b>전체 화면급 상세</b>가 열려요. 왼쪽은 캐릭터 목록, 오른쪽은 선택한 캐릭터의 모든 것.', ct);
+    await cClick(cardEl('junho'), ct);
+    W.detail = { charId:'junho', costumeId:'jh1', imgSel:'front', commentOpen:false, archMode:false, listQuery:'' };
+    render();
+    await openAnim('#dOverlay', ct);
+    await wait(500, ct);
+    focusOn($('#dAside'), {pad:4, r:16});
+    await say('09','DETAIL','좌측 목록','모달을 닫지 않고 <b>다른 캐릭터로 바로 이동</b>해요. 이름 아래 가는 바는 <b>리깅 완료율</b>. 목록 검색과 캐릭터 추가도 여기서 됩니다.', ct);
+    await cClick($(`.dItem[data-did="sera"]`), ct);
+    W.detail.charId = 'sera'; W.detail.costumeId = 'sr1'; W.detail.imgSel = 'front';
+    refreshDetail();
+    await wait(1500, ct);
+    await cClick($(`.dItem[data-did="junho"]`), ct);
+    W.detail.charId = 'junho'; W.detail.costumeId = 'jh1';
+    refreshDetail();
+    await wait(400, ct);
+    focusOn($('#dHead'), {pad:4});
+    await say('09','DETAIL','헤더','<b>연필</b>로 이름 변경, <b>댓글</b>로 캐릭터별 대화, <b>보관</b>으로 목록에서 숨기기. 닫기는 ×나 <span class="kbd">Esc</span>.', ct);
+    await cMoveEl($('#dNameEdit'), ct);
+    await wait(2200, ct);
+    focusOn($('#featBox'), {pad:6});
+    await say('09','DETAIL','대표 이미지','이미지는 <b>클릭·드래그·붙여넣기(Ctrl+V)</b>로 추가해요. 클릭하면 원본 크게 보기.', ct);
+    await cClick($('#featBox'), ct);
+    W.lightbox = { charId:'junho', costumeId:'jh1' };
+    render();
+    await openAnim('#lb', ct);
+    clearFocus();
+    await say('09','DETAIL','크게 보기','원본 비율로 확인하고, 휠 확대·이미지 넘기기·복사까지. 배경은 투명/검정/흰색/체커로 바꿔 볼 수 있어요.', ct);
+    await wait(2400, ct);
+    await cClick($('#lbClose'), ct);
+    W.lightbox = null; render();
+    await wait(300, ct);
+    focusOn($('#dLeft'), {pad:6});
+    await say('09','DETAIL','이미지 여러 장','복장 하나에 이미지를 <b>여러 장</b> 둘 수 있어요(정면·뒷모습 등). 아래 스트립에서 고르고, <b>대표</b>·복사·설정(배경/썸네일 맞추기) 버튼으로 관리해요.', ct);
+    const backThumb = $$('#thumbStrip .tThumb')[1];
+    if (backThumb){
+      await cClick(backThumb, ct);
+      W.detail.imgSel = 'back';
+      refreshDetail();
+      focusOn($('#dLeft'), {pad:6});
+      await wait(1200, ct);
+      await cClick($('#fPrimary'), ct);
+      W.detail.primaryImg = 'back';
+      refreshDetail();
+      focusOn($('#dLeft'), {pad:6});
+      toast('이 이미지를 대표로 지정했어요', ct, {hold:1500});
+      await wait(1600, ct);
+      await cClick($$('#thumbStrip .tThumb')[0], ct);
+      W.detail.imgSel = 'front';
+      refreshDetail();
+    }
+    clearFocus();
+    await wait(500, ct);
+  }
+},
+
+/* ── S10. 복장 추가 · 디자인 관리 ──────────────── */
+{ id:'s10', chip:'복장', title:'복장과 디자인',
+  setup(){
+    setupBase(w=>{ w.detail = { charId:'junho', costumeId:'jh1', imgSel:'front', commentOpen:false, archMode:false, listQuery:'' }; });
+  },
+  async run(ct){
+    focusOn($('#gallery'), {pad:6, beam:true});
+    await say('10','COSTUME','복장 = 관리 단위','한 캐릭터의 <b>복장(디자인)마다</b> 버전·단계·담당자·태그를 따로 관리해요. 썸네일을 클릭해 전환하고, 오른쪽 끝에서 새로 추가합니다.', ct);
+    await wait(1800, ct);
+    await cClick($('#gAdd'), ct);
+    const ch = findChar('junho');
+    ch.costumes.push(K('jh4','새 복장 1',1,'waiting','waiting',{}));
+    W.detail.costumeId = 'jh4'; W.detail.imgSel = 'front';
+    refreshDetail();
+    focusOn($('#featBox'), {pad:6});
+    await say('10','COSTUME','이미지 넣기','새 복장이 생기고 대표 이미지 자리가 비어 있어요. 탐색기에서 <b>파일을 끌어다 놓아</b> 볼게요.', ct);
+    await wait(600, ct);
+    setCur(1180, 120);
+    showFileChip('준호_겨울코트_v1.png');
+    await wait(250, ct);
+    const fb = $('#featBox');
+    await cMoveEl(fb, ct, {dur:900, arc:.1});
+    fb.classList.add('dropHot');
+    await wait(500, ct);
+    fb.classList.remove('dropHot');
+    hideFileChip();
+    const k4 = ch.costumes.find(x=>x.id==='jh4');
+    k4.art = ['junho','coat']; k4.file = null;
+    refreshDetail();
+    focusOn($('#featBox'), {pad:6});
+    await say('10','COSTUME','업로드 완료','이미지가 대표로 들어갔어요. 캐릭터 이름이 임시 상태였다면 이 순간 <b>파일 이름으로 자동 완성</b>됩니다.', ct);
+    await wait(1900, ct);
+    clearFocus();
+    focusOn($('#costIdent'), {pad:6});
+    await say('10','COSTUME','복장 이름 짓기','이미지 아래에서 <b>이 복장이 무슨 디자인인지</b> 이름과 메모를 남겨요.', ct);
+    await cClick($('#costNmEdit'), ct);
+    const r1 = $('#costIdent .r1');
+    r1.innerHTML = `<input class="costNameInput" id="costNmInput" value=""/>`;
+    await typeIn($('#costNmInput'), '겨울 코트', ct);
+    k4.name = '겨울 코트';
+    refreshDetail();
+    focusOn($('#costIdent'), {pad:6});
+    await wait(1100, ct);
+    clearFocus();
+    focusOn($('#costDetail').querySelector('.cdTopRow'), {pad:8});
+    await say('10','COSTUME','버전 관리','수정본이 나올 때마다 <b>− / +</b>로 버전을 올려요. 숫자를 직접 입력해도 됩니다.', ct);
+    await cClick($('#verPlus'), ct);
+    k4.ver = 2; $('#verNum').value = '2';
+    pressEffect($('#verPlus'));
+    await wait(420, ct);
+    await cClick($('#verPlus'), ct);
+    k4.ver = 3; $('#verNum').value = '3';
+    await wait(700, ct);
+    await cClick($('#verMinus'), ct);
+    k4.ver = 2; $('#verNum').value = '2';
+    refreshDetail();
+    focusOn($('#costDetail').querySelector('.cdTopRow'), {pad:8});
+    await say('10','COSTUME','마감일','복장 단위로 <b>마감일</b>도 걸 수 있어요. 대시보드 내 할 일과 연동됩니다.', ct);
+    await cClick($('#dueInput'), ct);
+    const due = $('#dueInput');
+    due.classList.add('hot');
+    await wait(350, ct);
+    due.value = '2026-08-21';
+    k4.due = '2026-08-21';
+    await wait(1200, ct);
+    due.classList.remove('hot');
+    clearFocus();
+    focusOn($('#gallery'), {pad:6});
+    await say('10','COSTUME','복장 순서도 드래그','갤러리의 복장 썸네일도 <b>드래그로 순서</b>를 바꿔요. 삭제는 썸네일 위 휴지통 — 원본 작업 파일은 지우지 않아요.', ct);
+    const src = $(`.gcard[data-gc="jh4"]`), dst = $(`.gcard[data-gc="jh1"]`);
+    if (src && dst){
+      await cMoveEl(src, ct, {ay:.35});
+      await cPress(ct); grab(true);
+      src.classList.add('dragSrc');
+      showGhost('겨울 코트', artOf(k4, ch.h));
+      const dr = rectOf(dst);
+      await cMove(dr.x+14, dr.y+dr.h*.35, ct, {dur:640});
+      const line = document.createElement('span');
+      line.className = 'gDropLine before';
+      dst.appendChild(line);
+      await wait(430, ct);
+      grab(false); await cRelease(ct); hideGhost();
+      line.remove();
+      src.classList.remove('dragSrc');
+      const g = $('#gallery');
+      await flip(g, ()=>{ g.insertBefore(src, dst); }, ct, {sel:'[data-gc]'});
+      const arr = ch.costumes;
+      const si = arr.findIndex(x=>x.id==='jh4');
+      const [mv] = arr.splice(si,1);
+      arr.unshift(mv);
+    }
+    await wait(1300, ct);
+    clearFocus();
+    await wait(300, ct);
+  }
+},
+
+/* ── S11. 진행 단계 · 담당자 ───────────────────── */
+{ id:'s11', chip:'단계', title:'진행 단계와 담당자',
+  setup(){
+    setupBase(w=>{
+      const ch = w.chars.find(c=>c.id==='junho');
+      const k = ch.costumes.find(x=>x.id==='jh3');
+      k.design = 'waiting'; k.rig = 'waiting'; k.dAss = []; k.rAss = [];
+      w.detail = { charId:'junho', costumeId:'jh3', imgSel:'front', commentOpen:false, archMode:false, listQuery:'' };
+    });
+  },
+  async run(ct){
+    const body = $('#dBody');
+    await scrollToEl(body, $('#railsBox'), ct, {offset:70});
+    focusOn($('#railsBox'), {pad:8, beam:true});
+    await say('11','STAGE','단계 레일','잠옷 복장으로 진행을 따라가 볼게요. <b>디자인 4단계</b>(대기→진행 중→피드백→완료), <b>리깅 5단계</b>(대기→벡터화→리깅→피드백→완성). 원하는 단계를 <b>클릭</b>하면 바로 설정돼요.', ct);
+    await wait(1400, ct);
+    const ch = findChar('junho');
+    const k = ch.costumes.find(x=>x.id==='jh3');
+    const clickStage = async (rail, stage)=>{
+      await cClick($(`#rail${rail==='design'?'D':'R'} .stg[data-stage="${stage}"]`), ct);
+      if (rail==='design') k.design = stage; else k.rig = stage;
+      refreshCostDetail();
+      focusOn($('#railsBox'), {pad:8});
+      await wait(650, ct);
+    };
+    await clickStage('design','in_progress');
+    await say('11','STAGE','현재 단계 = 글로우','현재 단계는 색 강조 + 글로우, <b>지난 단계는 체크</b>로 채워져요.', ct);
+    await clickStage('design','feedback');
+    await clickStage('design','done');
+    await wait(700, ct);
+    await say('11','STAGE','담당자 지정','단계 오른쪽에서 <b>담당자</b>를 붙여요. 팀원 목록에서 고르거나 직접 입력 — 여러 명도 가능해요.', ct);
+    await cClick($('.assPick[data-kind="design"]'), ct);
+    ovl.insertAdjacentHTML('beforeend', assModalHTML('디자인 담당자'));
+    const am = $('#assM'); void am.offsetHeight; am.classList.add('show');
+    await wait(500, ct);
+    await cClick($('.assRow[data-ass="전혜림"]'), ct);
+    const sel = $('#assSel');
+    sel.style.display = 'flex';
+    const uc = userColor('전혜림');
+    sel.innerHTML = `<span class="assChip" style="color:${uc};box-shadow:inset 0 0 0 1px ${hexA(uc,.5)}"><span class="adot" style="background:${uc}"></span>전혜림 ×</span>`;
+    await wait(700, ct);
+    await cClick($('#assGo'), ct);
+    am.remove();
+    k.dAss = ['전혜림'];
+    refreshCostDetail();
+    focusOn($('#railsBox'), {pad:8});
+    await wait(900, ct);
+    await say('11','STAGE','리깅도 같은 방식','디자인이 끝났으니 리깅 레일을 굴려 볼게요. 리깅 담당자도 똑같이 붙입니다.', ct);
+    await clickStage('rig','vectorized');
+    await clickStage('rig','rigging');
+    k.rAss = ['배한솔'];
+    refreshCostDetail();
+    focusOn($('#railsBox'), {pad:8});
+    await wait(1000, ct);
+    focusOn($('#btnAnnounce'), {pad:8});
+    await say('11','STAGE','리깅 완성 공지','리깅이 <b>완성</b>되면 이 버튼으로 슬랙에 완성 공지를 보내요. 문구를 미리 보고 전송할 수 있습니다.', ct);
+    await cClick($('#btnAnnounce'), ct);
+    toast('#캐릭터-리깅 채널에 완성 공지를 보냈어요', ct, {hold:1800});
+    await wait(2100, ct);
+    clearFocus();
+    await wait(300, ct);
+  }
+},
+
+/* ── S12. 태그 · 에피소드 · 작업 경로 ──────────── */
+{ id:'s12', chip:'태그·EP', title:'태그, 에피소드, 경로',
+  setup(){
+    setupBase(w=>{ w.detail = { charId:'junho', costumeId:'jh2', imgSel:'front', commentOpen:false, archMode:false, listQuery:'' }; });
+  },
+  async run(ct){
+    focusOn($('#epChips'), {pad:6, beam:true});
+    await say('12','LINK','출연 에피소드','칩 클릭으로 <b>캐릭터 ↔ 에피소드</b>를 연결·해제해요. 옆의 필름 버튼은 그 편 <b>릴 파일</b> 열기·등록.', ct);
+    const ch = findChar('junho');
+    await cClick($('.epChip[data-ep="21"]'), ct);
+    ch.eps = ch.eps.filter(n=>n!==21);
+    refreshDetail();
+    focusOn($('#epChips'), {pad:6});
+    toast('에피소드 연결을 해제했어요', ct, {action:'실행 취소', hold:1700});
+    await wait(1900, ct);
+    await cClick($('.epChip[data-ep="21"]'), ct);
+    ch.eps.push(21); ch.eps.sort((a,b)=>a-b);
+    refreshDetail();
+    focusOn($('#epChips'), {pad:6});
+    await wait(800, ct);
+    const body = $('#dBody');
+    await scrollToEl(body, $('#costEpSec'), ct, {offset:90});
+    focusOn($('#costEpSec'), {pad:8});
+    await say('12','LINK','이 편엔 어떤 복장?','한 단계 더 — 에피소드마다 <b>어떤 복장을 입는지</b>를 지정해요. 지금 보는 교복을 EP21에 지정해 볼게요.', ct);
+    await cClick($('[data-cost-ep="21"]'), ct);
+    ch.use[21] = 'jh2';
+    refreshCostDetail();
+    focusOn($('#costEpSec'), {pad:8});
+    await wait(700, ct);
+    const taken = $('[data-cost-ep="19"]');
+    if (taken) await callout(taken, '점선 = 이 편엔 <b>다른 복장</b>이 지정됨', 'right', ct);
+    await wait(2000, ct);
+    clearCallouts();
+    await scrollToEl(body, $('#pathGrid'), ct, {offset:110});
+    focusOn($('#pathGrid'), {pad:8});
+    await say('12','LINK','작업 폴더 · 작업 파일','실제 <b>작업 경로</b>를 연결해 두면 어디서든 바로 열어요. 폴더가 없다면 <b>만들기</b>로 캐릭터 이름 폴더를 자동 생성.', ct);
+    await cClick($('#pathFile .pBtn'), ct);
+    const k = ch.costumes.find(x=>x.id==='jh2');
+    k.file = '준호_교복_v1.moho';
+    refreshCostDetail();
+    focusOn($('#pathGrid'), {pad:8});
+    await wait(1700, ct);
+    focusOn($('#costDetail').querySelector('.cdTopRow'), {pad:8});
+    await say('12','LINK','기준 키(px)','키 비교 보기의 기준이 되는 값. 이미지를 올리면 <b>원본 세로 크기로 자동 설정</b>되고, <b>이미지로 조정</b>에서 머리·바닥 기준선을 드래그해 맞춰요.', ct);
+    await cMoveEl($('#btnFitImg'), ct);
+    pressEffect($('#btnFitImg'));
+    await wait(2300, ct);
+    await scrollToEl(body, $('#tagsS'), ct, {offset:120});
+    focusOn($('#tagsS'), {pad:8});
+    await say('12','LINK','구조 · 에셋 태그','복장 특성을 태그로 남겨요. <b>구조</b>(얼굴각도 컨트롤러, 뒷모습…)와 <b>에셋</b>(안경, 가방…). 이 태그가 그리드의 필터 칩이 됩니다.', ct);
+    await cClick($('#tagsS .tagpill[data-tag="측면"]'), ct);
+    k.sTags.push('측면');
+    refreshCostDetail();
+    await scrollToEl(body, $('#tagsA'), ct, {offset:170, dur:300});
+    focusOn($('#tagsA'), {pad:8});
+    await wait(400, ct);
+    await cClick($('#tagsA .tagpill[data-tag="가방"]'), ct);
+    k.aTags.push('가방');
+    refreshCostDetail();
+    focusOn($('#tagsA'), {pad:8});
+    await wait(600, ct);
+    await callout($('#tagsA .tagAddWrap'), '팔레트에 없으면 <b>직접 추가</b>', 'left', ct);
+    await wait(1900, ct);
+    clearCallouts(); clearFocus();
+    await wait(300, ct);
+  }
+},
+
+/* ── S13. 보관 · 복원 ──────────────────────────── */
+{ id:'s13', chip:'보관', title:'보관과 복원',
+  setup(){ setupBase(); },
+  async run(ct){
+    await say('13','ARCHIVE','끝난 캐릭터는 보관','시즌이 끝났거나 당분간 안 쓰는 캐릭터는 <b>삭제 대신 보관</b>해요. 데이터는 그대로, 목록에서만 숨겨집니다.', ct);
+    await cClick(cardEl('hwang'), ct);
+    W.detail = { charId:'hwang', costumeId:'hw1', imgSel:'front', commentOpen:false, archMode:false, listQuery:'' };
+    render();
+    await openAnim('#dOverlay', ct);
+    focusOn($('#dArchive'), {pad:6, beam:true});
+    await wait(1000, ct);
+    await cClick($('#dArchive'), ct);
+    clearFocus();
+    W.detail = null;
+    const i = W.chars.findIndex(c=>c.id==='hwang');
+    const [hw] = W.chars.splice(i,1);
+    hw.status = 'archived';
+    W.arch.push(hw);
+    render();
+    toast("'황 부장' 캐릭터를 보관했어요", ct, {hold:1700});
+    await wait(800, ct);
+    focusOn($('#btnArch'), {pad:6});
+    await say('13','ARCHIVE','보관함 열기','툴바의 <b>보관 N</b> 버튼 — 숫자가 2가 됐죠. 눌러서 보관된 캐릭터를 봅니다.', ct);
+    await wait(900, ct);
+    await cClick($('#btnArch'), ct);
+    W.showArch = true;
+    refreshToolbar();
+    await contentFade(ct, refreshContent);
+    focusOn($('#grid'), {pad:8});
+    await say('13','ARCHIVE','보관 목록','예전에 보관한 <b>준호(구버전)</b>도 여기 있어요. 카드를 열면 <b>복원</b>과 <b>영구 삭제</b>가 나타납니다.', ct);
+    await wait(1300, ct);
+    await cClick(cardEl('hwang'), ct);
+    W.detail = { charId:'hwang', costumeId:'hw1', imgSel:'front', commentOpen:false, archMode:true, listQuery:'' };
+    render();
+    await openAnim('#dOverlay', ct);
+    focusOn($('#dHead'), {pad:4});
+    await say('13','ARCHIVE','복원 · 영구 삭제','<b>복원</b>은 즉시 목록으로 되돌리고, <b>영구 삭제</b>는 2단계 확인 후에만 실행돼요. 실제 작업 폴더·원본 파일은 절대 지우지 않습니다.', ct);
+    await wait(1900, ct);
+    await cClick($('#dRestore'), ct);
+    clearFocus();
+    W.detail = null;
+    const j = W.arch.findIndex(c=>c.id==='hwang');
+    const [back] = W.arch.splice(j,1);
+    back.status = 'active';
+    W.chars.push(back);
+    W.showArch = false;
+    render();
+    toast("'황 부장' 캐릭터를 복원했어요", ct, {hold:1500});
+    focusOn(cardEl('hwang'), {pad:6});
+    await say('13','ARCHIVE','다시 현역으로','복원된 캐릭터는 그리드 끝으로 돌아와요. 순서는 드래그로 다시 정리하면 됩니다.', ct);
+    await wait(2000, ct);
+    clearFocus();
+    await wait(300, ct);
+  }
+},
+
+/* ── S14. 댓글 · 에피소드 에셋 · 새 창 ─────────── */
+{ id:'s14', chip:'마무리', title:'댓글, 에피소드 에셋, 새 창',
+  setup(){
+    setupBase(w=>{ w.detail = { charId:'junho', costumeId:'jh1', imgSel:'front', commentOpen:false, archMode:false, listQuery:'' }; });
+  },
+  async run(ct){
+    await say('14','MORE','캐릭터별 댓글','상세 헤더의 <b>댓글</b>을 켜면, 이 캐릭터만의 대화 스레드가 옆에 붙어요. @멘션과 이미지 붙여넣기도 됩니다.', ct);
+    await cClick($('#dCmt'), ct);
+    W.detail.commentOpen = true;
+    refreshDetail();
+    await camTo(24, 22, .93, ct, 550);
+    focusOn($('#cmtPanel'), {pad:4, r:18});
+    await wait(2600, ct);
+    clearFocus();
+    await cClick($('#cmtClose'), ct);
+    W.detail.commentOpen = false;
+    refreshDetail();
+    await camReset(ct, 450);
+    await cClick($('#dCloseB'), ct);
+    W.detail = null; render();
+    await wait(350, ct);
+    await say('14','MORE','에피소드 에셋 탭','같은 데이터를 <b>에피소드 기준</b>으로 보는 두 번째 탭. "이 편에 누가 나오고, 무슨 복장이고, 주의점은 뭔지"를 봐요.', ct);
+    await cClick($('#tabEpisode'), ct);
+    W.tab = 'episode'; render();
+    await wait(400, ct);
+    focusOn($('#epBoard'), {pad:8, beam:true});
+    await wait(600, ct);
+    await callout($('#epPicker'), '<b>에피소드 선택</b>', 'right', ct);
+    await callout($('#epCast'), '이 편 <b>등장 캐릭터</b>', 'right', ct, {ay:.3});
+    await callout($('#epDetail'), '이 편 복장 · <b>주의점 메모</b> · 리깅 연동', 'left', ct, {ay:.7});
+    await say('14','MORE','현황판과 연결','여기서 <b>캐릭터 현황판에서 보기</b>를 누르면 방금 본 상세로 바로 점프해요.', ct);
+    await cMoveEl($('#epJump'), ct);
+    await wait(2200, ct);
+    clearCallouts(); clearFocus();
+    await cClick($('#tabBoard'), ct);
+    W.tab = 'board'; render();
+    await wait(300, ct);
+    focusOn($('#btnNewWin'), {pad:6, beam:true});
+    await say('14','MORE','새 창으로','현황판을 <b>별도 창</b>으로 띄워 두면, 다른 화면에서 작업하면서 나란히 볼 수 있어요.', ct);
+    await cMoveEl($('#btnNewWin'), ct);
+    await wait(2200, ct);
+    clearFocus();
+    await say('14','DONE','투어 끝!','카드부터 보관까지 — 캐릭터 현황판의 모든 기능을 봤어요. 이제 실제 데이터로 직접 만져보세요.', ct);
+    await wait(2200, ct);
+    capClear();
+  }
+},
+];
+
+
+/* ═══════════════ 19. 플레이어 ═══════════════ */
+let sceneIdx = 0;
+let token = null;                    // 취소 토큰: 장면을 갈아탈 때 이전 장면을 멈추는 스위치
+const doneSet = new Set();
+const raf2 = ()=>new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)));
+
+const elIntro = $('#intro'), elOutro = $('#outro');
+const pfill = $('#pfill'), chipsEl = $('#chips');
+const icoPlay = $('#icoPlay'), icoPause = $('#icoPause');
+
+function gateVisible(){ return !elIntro.classList.contains('hide') || !elOutro.classList.contains('hide'); }
+function hideGates(){ elIntro.classList.add('hide'); elOutro.classList.add('hide'); }
+function showOutro(){
+  CK.playing = false; syncPlayBtn();
+  pfill.style.width = '100%';
+  elOutro.classList.remove('hide');
+}
+
+function syncPlayBtn(){
+  icoPlay.style.display  = CK.playing ? 'none' : '';
+  icoPause.style.display = CK.playing ? '' : 'none';
+}
+
+/* ── 덱: 칩 + 진행바 ── */
+function buildChips(){
+  chipsEl.innerHTML = SCENES.map((s,i)=>
+    `<button class="chip" data-i="${i}"><span class="n">${String(i+1).padStart(2,'0')}</span>${s.chip}</button>`).join('');
+  $$('#chips .chip').forEach(b=>b.addEventListener('click', ()=>playScene(+b.dataset.i)));
+}
+function updateDeck(finished){
+  $$('#chips .chip').forEach((b,i)=>{
+    b.classList.toggle('on', i===sceneIdx);
+    b.classList.toggle('done', doneSet.has(SCENES[i].id));
+  });
+  const p = ((sceneIdx + (finished?1:0)) / SCENES.length) * 100;
+  pfill.style.width = p + '%';
+}
+
+/* ── 게이트 콘텐츠 ── */
+function buildIntroChips(){
+  $('#introChips').innerHTML = SCENES.map(s=>`<span class="gChip">${s.chip}</span>`).join('');
+}
+function buildOutroGrid(){
+  const feats = [
+    '카드 보기 · 카드 휠', '리스트 · 키 비교 보기', '드래그 정렬 · 그룹',
+    '검색 · 태그 필터', '캐릭터 추가 · 보드 탭', '복장 · 버전 · 마감일',
+    '디자인/리깅 단계 레일', '에피소드 연결 · 작업 경로', '보관 · 복원 · 댓글',
+  ];
+  $('#outroGrid').innerHTML = feats.map(f=>`<div class="gCell">${I('check',15)}<span>${f}</span></div>`).join('');
+}
+
+/* ── 장면 재생 ──
+   흐름: 이전 토큰 취소 → 두 프레임 기다려 이전 장면 코루틴이 빠져나가게 함
+        → setup()으로 월드 초기화 → run(ct) 실행 → 끝나면 다음 장면으로. */
+async function playScene(i){
+  if (token) token.cancelled = true;
+  const ct = token = { cancelled:false };
+  sceneIdx = Math.max(0, Math.min(i, SCENES.length - 1));
+  hideGates();
+  CK.playing = true; syncPlayBtn();
+  await raf2();                       // 이전 장면 정리 대기
+  if (ct.cancelled) return;
+  const sc = SCENES[sceneIdx];
+  try { sc.setup ? sc.setup() : (W = baseW(), render()); }
+  catch(e){ console.error('[setup]', sc.id, e); }
+  updateDeck(false);
+  await raf2();                       // 레이아웃 확정 후 좌표 계산이 정확해짐
+  if (ct.cancelled) return;
+  try { await sc.run(ct); }
+  catch(e){ if (!ct.cancelled) console.error('[run]', sc.id, e); }
+  if (ct.cancelled) return;
+  doneSet.add(sc.id);
+  updateDeck(true);
+  if (sceneIdx + 1 < SCENES.length) playScene(sceneIdx + 1);
+  else showOutro();
+}
+
+/* ── 트랜스포트 ── */
+$('#btnPlay').addEventListener('click', ()=>{
+  if (!elIntro.classList.contains('hide')){ playScene(0); return; }
+  if (!elOutro.classList.contains('hide')){ playScene(0); return; }
+  CK.playing = !CK.playing; syncPlayBtn();
+});
+$('#btnPrev').addEventListener('click', ()=>playScene(sceneIdx - 1));
+$('#btnNext').addEventListener('click', ()=>{
+  if (sceneIdx + 1 >= SCENES.length) showOutro();
+  else playScene(sceneIdx + 1);
+});
+const SPEEDS = [1, 1.5, 2];
+let speedIdx = 0;
+$('#btnSpeed').addEventListener('click', ()=>{
+  speedIdx = (speedIdx + 1) % SPEEDS.length;
+  CK.rate = SPEEDS[speedIdx];
+  $('#btnSpeed').textContent = SPEEDS[speedIdx].toFixed(1) + '×';
+});
+
+/* ── 키보드 ── */
+window.addEventListener('keydown', e=>{
+  if (e.target && (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA')) return;
+  if (e.code === 'Space'){ e.preventDefault(); $('#btnPlay').click(); }
+  else if (e.code === 'ArrowLeft'){ $('#btnPrev').click(); }
+  else if (e.code === 'ArrowRight'){ $('#btnNext').click(); }
+});
+
+/* ── 게이트 버튼 ── */
+$('#btnStart').addEventListener('click', ()=>playScene(0));
+$('#btnReplay').addEventListener('click', ()=>{ doneSet.clear(); playScene(0); });
+
+/* ── 초기화 ── */
+buildChips();
+buildIntroChips();
+buildOutroGrid();
+render();               // 인트로 뒤에서도 실제 화면이 준비돼 있도록
+fitStage();
+syncPlayBtn();
+CK.playing = false;     // 시작 전에는 정지 상태
+syncPlayBtn();
+
+</script>
+</body>
+</html>
