@@ -301,6 +301,22 @@ function CharacterGrid({ onAdd, pendingOpenId, onConsumeOpen }: { onAdd: () => v
     setCardMenu({ characterId, x: event.clientX, y: event.clientY, costumeId });
   }, []);
 
+  // 레일 sticky top 계산 — sticky 헤더 실측 높이를 스크롤 컨테이너 CSS 변수로 노출.
+  //   태그 필터 접기(작업 2)로 헤더 높이가 변해도 ResizeObserver 가 추적한다.
+  //   deps 에 loaded 필수: CharacterGrid 는 미로드 시 헤더 없이 조기 return 하므로,
+  //   [] 로 두면 첫 로드(특히 팝업 창의 fresh store)에서 ref 가 null 인 채 영영 미설정된다.
+  const stickyHeaderRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const el = stickyHeaderRef.current;
+    const scroller = el?.closest('[data-board-scroll]') as HTMLElement | null;
+    if (!el || !scroller) return;
+    const apply = () => scroller.style.setProperty('--board-sticky-h', `${el.offsetHeight + 12}px`);
+    apply();
+    const ro = new ResizeObserver(apply);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [loaded]);
+
   // ─── 카드 드래그 재배치(F29) ───
   const reorderCharacters = useCharacterBoardStore((s) => s.reorderCharacters);
   // 검색/태그 필터·키 비교·보관 목록에서는 비활성 (파생 정렬/부분 목록 위 재배치는 비직관적).
@@ -368,7 +384,7 @@ function CharacterGrid({ onAdd, pendingOpenId, onConsumeOpen }: { onAdd: () => v
   return (
     <div className="flex flex-col gap-4">
       {/* 검색·버튼·필터 칩 — 스크롤해도 상단에 붙는다 (피드백 38). 배경은 토큰 기반이라 라이트/다크 자동 대응. */}
-      <div className="sticky top-0 z-20 -mx-6 bg-bg-primary/85 px-6 pt-4 pb-3 backdrop-blur-md flex flex-col gap-2.5">
+      <div ref={stickyHeaderRef} className="sticky top-0 z-20 -mx-6 bg-bg-primary/85 px-6 pt-4 pb-3 backdrop-blur-md flex flex-col gap-2.5">
         {/* 사용자 정의 탭 (피드백 41) */}
         <BoardTabStrip
           tabs={tabs}
@@ -628,7 +644,7 @@ export function CharacterBoardView() {
         </div>
       </div>
 
-      <div className="flex-1 min-h-0 overflow-y-auto px-6 pb-6">
+      <div data-board-scroll="" className="flex-1 min-h-0 overflow-y-auto px-6 pb-6">
         {tab === 'board' ? (
           <CharacterGrid onAdd={() => setAddOpen(true)} pendingOpenId={pendingOpenId} onConsumeOpen={() => setPendingOpenId(null)} />
         ) : (

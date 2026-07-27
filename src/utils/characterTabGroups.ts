@@ -70,6 +70,18 @@ export function reorderWithinGroup(groups: TabGroupLike[], groupId: string, char
   });
 }
 
+/** 그룹을 beforeGroupId 앞으로 이동 — 레일 드래그 순서 변경. beforeGroupId=null 이면 맨 뒤로. */
+export function moveGroupBefore(groups: TabGroupLike[], groupId: string, beforeGroupId: string | null): TabGroupLike[] {
+  if (groupId === beforeGroupId) return groups;
+  const src = groups.find((g) => g.id === groupId);
+  if (!src) return groups;
+  const rest = groups.filter((g) => g.id !== groupId);
+  if (beforeGroupId === null) return [...rest, src];
+  const idx = rest.findIndex((g) => g.id === beforeGroupId);
+  if (idx < 0) return groups;
+  return [...rest.slice(0, idx), src, ...rest.slice(idx)];
+}
+
 /** 그룹에 배치된 캐릭터 id 전체 집합 — 미분류 섹션 계산용. */
 export function groupedCharacterIdSet(groups: TabGroupLike[]): Set<string> {
   const set = new Set<string>();
