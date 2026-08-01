@@ -1,10 +1,12 @@
-import { useRef, useState, type MouseEvent as ReactMouseEvent } from 'react';
-import { Check, Pencil, Plus, X } from 'lucide-react';
+import { useEffect, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react';
+import { Pencil, X } from 'lucide-react';
 import type { Character, CharacterBoardTab, CharacterBoardTabGroup, CharacterCostume } from '@/types';
 import { CharacterCard, EMPTY_COSTUMES } from '@/components/characters/CharacterCard';
 import { CharacterListRow } from '@/components/characters/CharacterListRow';
+import { CharacterGroupRail, type RailEntry } from '@/components/characters/CharacterGroupRail';
+import { bindVerticalDragAutoScroll } from '@/utils/dragAutoScroll';
 import {
-  addGroup, groupedCharacterIdSet, moveCharacterToGroup, removeGroup, renameGroup, reorderWithinGroup,
+  addGroup, groupedCharacterIdSet, moveCharacterToGroup, moveGroupBefore, removeGroup, renameGroup, reorderWithinGroup,
 } from '@/utils/characterTabGroups';
 import type { CharacterBoardViewMode } from '@/utils/characterViewPersist';
 import { cn } from '@/utils/cn';
@@ -42,8 +44,40 @@ export function CharacterTabGroupsView({
     setDraggingIdState(id);
   };
 
-  const [addingGroup, setAddingGroup] = useState(false);
-  const [groupDraft, setGroupDraft] = useState('');
+  // scroll-spy + 드래그 자동 스크롤 — 보드 스크롤 컨테이너([data-board-scroll])에 바인딩.
+  const rootRef = useRef<HTMLDivElement>(null);
+  const sectionRefs = useRef(new Map<string, HTMLElement>());
+  const [activeKey, setActiveKey] = useState<string>('__ungrouped__');
+  useEffect(() => {
+    const scroller = rootRef.current?.closest('[data-board-scroll]') as HTMLElement | null;
+    if (!scroller) return;
+    const unbindAuto = bindVerticalDragAutoScroll(scroller);
+    const spy = () => {
+      // sectionRefs 는 live Map — 그룹 추가/삭제는 스크롤·재실행 시 자연 반영된다.
+      const scrollerTop = scroller.getBoundingClientRect().top;
+      let best: string | null = null;
+      let bestTop = -Infinity;
+      for (const [key, el] of sectionRefs.current) {
+        const top = el.getBoundingClientRect().top - scrollerTop;
+        if (top <= 130 && top > bestTop) { bestTop = top; best = key; }
+      }
+      if (best === null) best = sectionRefs.current.keys().next().value ?? null;
+      if (best !== null) setActiveKey(best);
+    };
+    spy();
+    scroller.addEventListener('scroll', spy, { passive: true });
+    return () => {
+      unbindAuto();
+      scroller.removeEventListener('scroll', spy);
+    };
+    // 그룹 수 변화 시 spy 즉시 재실행 — 추가/삭제 직후 activeKey stale 방지.
+  }, [tab.id, tab.groups.length]);
+
+  const scrollToSection = (gid: string | null) => {
+    const reduced = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false;
+    sectionRefs.current.get(gid ?? '__ungrouped__')?.scrollIntoView({ block: 'start', behavior: reduced ? 'auto' : 'smooth' });
+  };
+
   const [editingGroupId, setEditingGroupId] = useState<string | null>(null);
   const [editDraft, setEditDraft] = useState('');
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
@@ -75,12 +109,6 @@ export function CharacterTabGroupsView({
     onUpdateGroups(next);
   };
 
-  const commitAddGroup = () => {
-    const name = groupDraft.trim();
-    if (name) onUpdateGroups(addGroup(tab.groups, name));
-    setGroupDraft('');
-    setAddingGroup(false);
-  };
   const commitRename = () => {
     const name = editDraft.trim();
     if (editingGroupId && name) onUpdateGroups(renameGroup(tab.groups, editingGroupId, name));
@@ -125,9 +153,14 @@ export function CharacterTabGroupsView({
     return (
       <section
         key={group?.id ?? '__ungrouped__'}
+        ref={(el) => {
+          const key = group?.id ?? '__ungrouped__';
+          if (el) sectionRefs.current.set(key, el);
+          else sectionRefs.current.delete(key);
+        }}
         onDragOver={dragEnabled ? (e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; } : undefined}
         onDrop={dragEnabled ? (e) => { e.preventDefault(); dropOnGroup(group?.id ?? null); } : undefined}
-        className={cn('rounded-xl border border-bg-border/60 p-3 flex flex-col gap-3', draggingId && 'border-accent/40')}
+        className={cn('scroll-mt-[calc(var(--board-sticky-h,0px)+8px)] rounded-xl border border-bg-border/60 p-3 flex flex-col gap-3', draggingId && 'border-accent/40')}
       >
         <header className="flex items-center gap-2">
           {group && editingGroupId === group.id ? (
@@ -195,36 +228,30 @@ export function CharacterTabGroupsView({
     );
   };
 
+  const railEntries: RailEntry[] = [
+    ...tab.groups.map((g) => ({
+      gid: g.id,
+      name: g.name,
+      count: g.characterIds.filter((id) => byId.has(id)).length,
+    })),
+    { gid: null, name: '미분류', count: ungrouped.length },
+  ];
+
   return (
-    <div className="flex flex-col gap-4">
-      {tab.groups.map((g) => section(g))}
-      {section(null)}
-      {addingGroup ? (
-        <div className="flex items-center gap-2">
-          <input
-            autoFocus
-            value={groupDraft}
-            onChange={(e) => setGroupDraft(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter') commitAddGroup();
-              if (e.key === 'Escape') { setAddingGroup(false); setGroupDraft(''); }
-            }}
-            placeholder="그룹 이름"
-            className="bg-transparent border border-bg-border rounded-md px-3 py-2 text-sm text-text-primary outline-none focus:border-accent/50"
-          />
-          <button type="button" aria-label="그룹 추가 확정" onClick={commitAddGroup} className="rounded-lg bg-accent px-3 py-2 text-sm text-white hover:opacity-90 cursor-pointer">
-            <Check size={14} />
-          </button>
-        </div>
-      ) : (
-        <button
-          type="button"
-          onClick={() => setAddingGroup(true)}
-          className="self-start flex items-center gap-1.5 rounded-lg border border-dashed border-bg-border px-3 py-2 text-sm text-text-secondary hover:border-accent/50 hover:text-text-primary cursor-pointer"
-        >
-          <Plus size={14} /> 그룹 추가
-        </button>
-      )}
+    <div ref={rootRef} className="flex items-start gap-4">
+      <CharacterGroupRail
+        entries={railEntries}
+        activeKey={activeKey}
+        cardDragActive={draggingId !== null}
+        onSelect={scrollToSection}
+        onAddGroup={(name) => onUpdateGroups(addGroup(tab.groups, name))}
+        onDropCharacter={dropOnGroup}
+        onReorderGroup={(groupId, beforeId) => onUpdateGroups(moveGroupBefore(tab.groups, groupId, beforeId))}
+      />
+      <div className="min-w-0 flex-1 flex flex-col gap-4">
+        {tab.groups.map((g) => section(g))}
+        {section(null)}
+      </div>
     </div>
   );
 }

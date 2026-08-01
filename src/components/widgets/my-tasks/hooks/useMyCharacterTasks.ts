@@ -1,5 +1,4 @@
 import { useEffect, useMemo } from 'react';
-import { useCharacterBoardAccess } from '@/hooks/useCharacterBoardAccess';
 import { useAuthStore } from '@/stores/useAuthStore';
 import { useCharacterBoardStore } from '@/stores/useCharacterBoardStore';
 import { parseAssigneeNames } from '@/utils/characterStageMeta';
@@ -10,20 +9,19 @@ export function useMyCharacterTasks(): {
   pendingCharacterTasks: CharacterTaskItem[];
   doneCharacterTasks: CharacterTaskItem[];
 } {
-  const hasCharacterBoardAccess = useCharacterBoardAccess();
   const currentUser = useAuthStore((s) => s.currentUser);
   const characters = useCharacterBoardStore((s) => s.characters);
   const byCharacter = useCharacterBoardStore((s) => s.byCharacter);
   const ensureLoadedAndRealtime = useCharacterBoardStore((s) => s.ensureLoadedAndRealtime);
 
   useEffect(() => {
-    if (!hasCharacterBoardAccess || !currentUser) return;
+    if (!currentUser) return;
     const release = ensureLoadedAndRealtime({ silent: true });
     return () => { release(); };
-  }, [currentUser, ensureLoadedAndRealtime, hasCharacterBoardAccess]);
+  }, [currentUser, ensureLoadedAndRealtime]);
 
   const allTasks = useMemo(() => {
-    if (!hasCharacterBoardAccess || !currentUser?.name) return [];
+    if (!currentUser?.name) return [];
     const userName = currentUser.name;
     const tasks: CharacterTaskItem[] = [];
     const activeCharacters = characters
@@ -69,7 +67,7 @@ export function useMyCharacterTasks(): {
       }
     }
     return tasks;
-  }, [byCharacter, characters, currentUser?.name, hasCharacterBoardAccess]);
+  }, [byCharacter, characters, currentUser?.name]);
 
   // 매 렌더 새 배열 참조가 생기면 useMyTasksData 쪽 stats useMemo 가 무력화되므로 함께 메모한다.
   return useMemo(() => ({

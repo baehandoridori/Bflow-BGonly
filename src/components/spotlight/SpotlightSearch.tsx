@@ -4,7 +4,6 @@ import { Search, Film, User, FileText, Zap, Hash, Layers, CalendarDays, StickyNo
 import { useDataStore } from '@/stores/useDataStore';
 import { useAppStore } from '@/stores/useAppStore';
 import { useCharacterBoardStore } from '@/stores/useCharacterBoardStore';
-import { useCharacterBoardAccess } from '@/hooks/useCharacterBoardAccess';
 import { sceneProgress } from '@/utils/calcStats';
 import { stripEntityTokens } from '@/utils/entityTokens';
 import { DEPARTMENT_CONFIGS } from '@/types';
@@ -114,7 +113,6 @@ export function SpotlightSearch() {
   const [calEvents, setCalEvents] = useState<CalendarEvent[]>([]);
   useEffect(() => { getEvents().then(setCalEvents); }, []);
   const episodeMemos = useDataStore((s) => s.episodeMemos);
-  const hasCharacterBoardAccess = useCharacterBoardAccess();
   const characters = useCharacterBoardStore((s) => s.characters);
   const characterCostumesByCharacter = useCharacterBoardStore((s) => s.byCharacter);
   const characterBoardLoaded = useCharacterBoardStore((s) => s.loaded);
@@ -165,11 +163,11 @@ export function SpotlightSearch() {
   const characterLoadAttemptedRef = useRef(false);
   useEffect(() => {
     if (!isOpen) { characterLoadAttemptedRef.current = false; return; }
-    if (!hasCharacterBoardAccess || characterBoardLoaded || characterBoardLoading) return;
+    if (characterBoardLoaded || characterBoardLoading) return;
     if (characterLoadAttemptedRef.current) return;
     characterLoadAttemptedRef.current = true;
     void loadCharacterBoard({ silent: true });
-  }, [characterBoardLoaded, characterBoardLoading, hasCharacterBoardAccess, isOpen, loadCharacterBoard]);
+  }, [characterBoardLoaded, characterBoardLoading, isOpen, loadCharacterBoard]);
 
   /* ── 글로벌 단축키 (useGlobalShortcuts에서 커스텀 이벤트로 위임) ── */
   const isOpenRef = useRef(isOpen);
@@ -285,16 +283,14 @@ export function SpotlightSearch() {
           action: () => { setView('team'); close(); },
         },
       ];
-      if (hasCharacterBoardAccess) {
-        quickActions.push({
-          id: 'action-character-board',
-          category: 'action',
-          title: '캐릭터 현황판',
-          subtitle: '캐릭터별 복장과 리깅 진행 보기',
-          icon: <Drama size={16} />,
-          action: () => { setView('character-board'); close(); },
-        });
-      }
+      quickActions.push({
+        id: 'action-character-board',
+        category: 'action',
+        title: '캐릭터 현황판',
+        subtitle: '캐릭터별 복장과 리깅 진행 보기',
+        icon: <Drama size={16} />,
+        action: () => { setView('character-board'); close(); },
+      });
       return quickActions;
     }
 
@@ -498,42 +494,40 @@ export function SpotlightSearch() {
       }
     }
 
-    // ── 캐릭터 검색 (권한 보유자만 로드/노출) ──
-    if (hasCharacterBoardAccess) {
-      for (const character of characters) {
-        if (character.status === 'archived') continue;
-        const costumes = characterCostumesByCharacter.get(character.id) ?? [];
-        const nameScore = fuzzyScore(q, character.name);
-        let tagScore = 0;
-        let matchedTag = '';
-        for (const costume of costumes) {
-          for (const tag of [...costume.structureTags, ...costume.assetTags]) {
-            const score = fuzzyScore(q, tag) * 0.8;
-            if (score > tagScore) {
-              tagScore = score;
-              matchedTag = tag;
-            }
+    // ── 캐릭터 검색 ──
+    for (const character of characters) {
+      if (character.status === 'archived') continue;
+      const costumes = characterCostumesByCharacter.get(character.id) ?? [];
+      const nameScore = fuzzyScore(q, character.name);
+      let tagScore = 0;
+      let matchedTag = '';
+      for (const costume of costumes) {
+        for (const tag of [...costume.structureTags, ...costume.assetTags]) {
+          const score = fuzzyScore(q, tag) * 0.8;
+          if (score > tagScore) {
+            tagScore = score;
+            matchedTag = tag;
           }
         }
-        const score = Math.max(nameScore, tagScore);
-        if (score > 0) {
-          const matchedByTag = tagScore > nameScore && matchedTag;
-          items.push({
-            id: `character-${character.id}`,
-            category: 'character',
-            title: character.name,
-            subtitle: matchedByTag
-              ? `태그 "${matchedTag}" · 복장 ${costumes.length}개`
-              : `복장 ${costumes.length}개 · ${character.episodeIds.length}편 등장`,
-            icon: <Drama size={16} />,
-            score,
-            action: () => {
-              setPendingCharacterBoardRequest({ characterId: character.id });
-              setView('character-board');
-              close();
-            },
-          });
-        }
+      }
+      const score = Math.max(nameScore, tagScore);
+      if (score > 0) {
+        const matchedByTag = tagScore > nameScore && matchedTag;
+        items.push({
+          id: `character-${character.id}`,
+          category: 'character',
+          title: character.name,
+          subtitle: matchedByTag
+            ? `태그 "${matchedTag}" · 복장 ${costumes.length}개`
+            : `복장 ${costumes.length}개 · ${character.episodeIds.length}편 등장`,
+          icon: <Drama size={16} />,
+          score,
+          action: () => {
+            setPendingCharacterBoardRequest({ characterId: character.id });
+            setView('character-board');
+            close();
+          },
+        });
       }
     }
 
@@ -606,7 +600,6 @@ export function SpotlightSearch() {
     episodeMemos,
     partMemos,
     partReelWorkers,
-    hasCharacterBoardAccess,
     characters,
     characterCostumesByCharacter,
     resetAndNavigate,
@@ -702,7 +695,7 @@ export function SpotlightSearch() {
                     value={query}
                     onChange={(e) => setQuery(e.target.value)}
                     onKeyDown={handleKeyDown}
-                    placeholder={hasCharacterBoardAccess ? '씬번호, 담당자, 캐릭터, 에피소드 검색...' : '씬번호, 담당자, 에피소드 검색...'}
+                    placeholder="씬번호, 담당자, 캐릭터, 에피소드 검색..."
                     className="flex-1 bg-transparent text-text-primary text-base placeholder:text-text-secondary/60 outline-none"
                     autoComplete="off"
                     spellCheck={false}

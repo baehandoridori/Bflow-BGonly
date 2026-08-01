@@ -22,7 +22,6 @@ import { EpDeptComparisonWidget } from '@/components/widgets/episode/EpDeptCompa
 import { EpFullDeptProgressWidget } from '@/components/widgets/episode/EpFullDeptProgressWidget';
 import { EpSinglePartWidget } from '@/components/widgets/episode/EpSinglePartWidget';
 import { WidgetIdContext, IsPopupContext } from '@/components/widgets/Widget';
-import { useCharacterBoardAccessState } from '@/hooks/useCharacterBoardAccess';
 import { GradientBackdrop } from '@/components/common/GradientBackdrop';
 import { loadPreferences, loadTheme } from '@/services/settingsService';
 import { loadSession, loadUsers } from '@/services/userService';
@@ -52,22 +51,18 @@ export function notifyDataChangeWithCooldown() {
 // 현황판은 App.tsx 와 동일하게 lazy — 팝업 엔트리 청크를 무겁게 하지 않는다 (피드백 36).
 const CharacterBoardView = lazy(() => import('@/views/CharacterBoardView'));
 
-/** 캐릭터 현황판 팝업 본문 (피드백 36) — 메인 창과 동일한 접근 게이팅(fail-closed)을 거친다. */
+/**
+ * 캐릭터 현황판 팝업 본문 (피드백 36) — lazy 로딩 래퍼.
+ * 현황판은 전면 공개(정식 릴리즈)라 사용자별 접근 게이트는 없다. 다만 세션 확인은 남긴다:
+ * 폐기된 게이트가 로그인 없는 상태에서 fail-closed 로 막아 주던 역할을 대신한다 — 팝업이 열린 채
+ * 로그아웃하거나 미인증 상태로 자동 복원되면 공유 PC 에 캐릭터 데이터와 편집 컨트롤이 남는다.
+ */
 function CharacterBoardPopupBody() {
-  const access = useCharacterBoardAccessState();
-  if (!access.allowed) {
+  const currentUser = useAuthStore((s) => s.currentUser);
+  if (!currentUser) {
     return (
-      <div className="flex h-full flex-col items-center justify-center gap-2 p-6 text-center text-sm text-text-secondary">
-        {access.loading ? '권한 확인 중...' : '캐릭터 현황판에 접근 권한이 없어요.'}
-        {!access.loading && access.error && (
-          <button
-            type="button"
-            onClick={access.retry}
-            className="rounded-lg border border-bg-border px-3 py-1.5 text-xs text-text-primary hover:border-accent/50"
-          >
-            다시 확인
-          </button>
-        )}
+      <div className="flex h-full items-center justify-center p-6 text-center text-sm text-text-secondary">
+        로그인한 뒤에 캐릭터 현황판을 볼 수 있어요.
       </div>
     );
   }

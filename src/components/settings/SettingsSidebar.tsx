@@ -23,7 +23,7 @@ export type SettingsTabId =
   | 'guide'
   // v1.18.0: 어드민 전용 — 부서별 컴포지터 지정
   | 'compositor'
-  // 어드민 전용 — 권한/기능 노출 관리
+  // 어드민 전용 — 권한 관리
   | 'admin-access';
 
 interface Tab {

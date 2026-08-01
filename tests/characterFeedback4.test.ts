@@ -2,10 +2,10 @@
  * 2026-07-26 캐릭터 현황판 피드백 배치(항목 36·38·39·40) 배선 고정 테스트.
  * 소스-문자열 검사 — 리팩터 시 앵커가 깨지면 함께 갱신할 것.
  */
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { loadPersistedCharacterViewMode, savePersistedCharacterViewMode } from '../src/utils/characterViewPersist.ts';
+import { loadPersistedCharacterViewMode, savePersistedCharacterViewMode, loadPersistedTagsFolded, savePersistedTagsFolded } from '../src/utils/characterViewPersist.ts';
 
 const boardView = readFileSync('src/views/CharacterBoardView.tsx', 'utf8');
 
@@ -48,6 +48,7 @@ test('피드백 40: 보기 방식 3종 — 영속화 + 렌더 분기', () => {
 test('characterViewPersist: node 환경 방어 + 스텁 왕복', () => {
   // node 환경에는 localStorage 가 없다 — load 는 null, save 는 무예외가 계약이다.
   assert.equal(loadPersistedCharacterViewMode(), null);
+  assert.equal(loadPersistedTagsFolded(), null);
   assert.doesNotThrow(() => savePersistedCharacterViewMode('list'));
   // localStorage 스텁 주입 후 왕복 + 알 수 없는 값 방어.
   const store = new Map<string, string>();
@@ -59,10 +60,16 @@ test('characterViewPersist: node 환경 방어 + 스텁 왕복', () => {
   assert.equal(loadPersistedCharacterViewMode(), 'compact');
   store.set('bflow_character_board_view_mode', '이상한값');
   assert.equal(loadPersistedCharacterViewMode(), null);
+  savePersistedTagsFolded(true);
+  assert.equal(loadPersistedTagsFolded(), true);
+  savePersistedTagsFolded(false);
+  assert.equal(loadPersistedTagsFolded(), false);
+  store.set('bflow_character_tags_folded', '엉뚱');
+  assert.equal(loadPersistedTagsFolded(), null);
   delete (globalThis as Record<string, unknown>).localStorage;
 });
 
-test('피드백 36: 캐릭터 현황판 팝업 창 — 프리셋 + 게이트 + 버튼', () => {
+test('피드백 36: 캐릭터 현황판 팝업 창 — 프리셋 + 전면 공개 + 버튼', () => {
   const main = readFileSync('electron/main.ts', 'utf8');
   assert.match(main, /const WIDGET_POPUP_DEFAULTS/);
   assert.match(main, /'character-board': \{ width: 1160, height: 780, alwaysOnTop: false \}/);
@@ -70,9 +77,52 @@ test('피드백 36: 캐릭터 현황판 팝업 창 — 프리셋 + 게이트 + �
   assert.match(main, /preset\?\.alwaysOnTop \?\? true/);
   const popup = readFileSync('src/views/WidgetPopup.tsx', 'utf8');
   assert.match(popup, /function CharacterBoardPopupBody/);
-  assert.match(popup, /useCharacterBoardAccessState/);
+  // 전면 공개(정식 릴리즈) — 팝업에 게이트를 두지 않는다.
+  assert.doesNotMatch(popup, /useCharacterBoardAccessState/);
+  assert.match(popup, /lazy\(\(\) => import\('@\/views\/CharacterBoardView'\)\)/);
   assert.match(popup, /'character-board': \{ label: '캐릭터 현황판', component: <CharacterBoardPopupBody \/> \}/);
   assert.match(boardView, /widgetOpenPopup\?\.\('character-board', '캐릭터 현황판'\)/);
   assert.match(boardView, /새 창으로/);
   assert.match(boardView, /useContext\(IsPopupContext\)/);
+});
+
+test('태그 필터 행 접기/펼치기', () => {
+  assert.match(boardView, /loadPersistedTagsFolded\(\) \?\? false/);
+  assert.match(boardView, /savePersistedTagsFolded\(folded\)/);
+  assert.match(boardView, /aria-expanded=\{!tagsFolded\}/);
+  assert.match(boardView, /태그 필터/);
+  // 코덱스 1차 P2: 접힌 칩이 탭 순서에 남지 않게 visibility 로 감추고, 펼침은 스크롤로 잘림 방지.
+  assert.match(boardView, /aria-hidden=\{tagsFolded\}/);
+  assert.match(boardView, /max-h-0 opacity-0 invisible overflow-hidden/);
+  assert.match(boardView, /max-h-64 opacity-100 overflow-y-auto/);
+  const persist = readFileSync('src/utils/characterViewPersist.ts', 'utf8');
+  assert.match(persist, /bflow_character_tags_folded/);
+});
+
+test('정식 공개: 팝업은 로그인 세션이 있을 때만 현황판을 그린다', () => {
+  // 코덱스 1차 P1: 사용자별 게이트를 없애면서, 폐기된 훅이 fail-closed 로 막아 주던
+  //   '로그인 없음' 방어까지 사라져 공유 PC 에 데이터가 남던 문제.
+  const popup = readFileSync('src/views/WidgetPopup.tsx', 'utf8');
+  assert.match(popup, /function CharacterBoardPopupBody/);
+  assert.match(popup, /useAuthStore\(\(s\) => s\.currentUser\)/);
+  assert.match(popup, /if \(!currentUser\)/);
+  assert.match(popup, /로그인한 뒤에 캐릭터 현황판을 볼 수 있어요/);
+});
+
+test('정식 공개: 캐릭터 현황판 게이팅 잔재 없음', () => {
+  // 정식 릴리즈: 접근 게이팅 훅·공개 대상 관리 UI 는 삭제됐고 되살아나면 안 된다.
+  assert.equal(existsSync('src/hooks/useCharacterBoardAccess.ts'), false);
+  assert.equal(existsSync('src/components/settings/FeatureGatingSection.tsx'), false);
+  const sidebar = readFileSync('src/components/layout/Sidebar.tsx', 'utf8');
+  assert.doesNotMatch(sidebar, /characterAccess/);
+  assert.doesNotMatch(sidebar, /CharacterAccessRetryTip/);
+  const app = readFileSync('src/App.tsx', 'utf8');
+  assert.doesNotMatch(app, /CharacterBoardAccessFallback/);
+  assert.match(app, /case 'character-board':\s*\r?\n\s*return <CharacterBoardView \/>;/);
+  const settings = readFileSync('src/views/SettingsView.tsx', 'utf8');
+  assert.doesNotMatch(settings, /FeatureGatingSection/);
+  const spotlight = readFileSync('src/components/spotlight/SpotlightSearch.tsx', 'utf8');
+  assert.doesNotMatch(spotlight, /hasCharacterBoardAccess/);
+  const mock = readFileSync('src/mocks/devElectronAPI.ts', 'utf8');
+  assert.doesNotMatch(mock, /feature-access/);
 });

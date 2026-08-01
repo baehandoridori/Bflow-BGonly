@@ -19,9 +19,8 @@ const ShortcutsSection = lazy(() => import('@/components/settings/ShortcutsSecti
 const CompositorSection = lazy(() => import('@/components/settings/CompositorSection').then(m => ({ default: m.CompositorSection })));
 // v1.25.0~: 어드민 전용 액팅 검수자(애니메이팅 수퍼바이저) 지정 섹션
 const ActingSupervisorSection = lazy(() => import('@/components/settings/ActingSupervisorSection').then(m => ({ default: m.ActingSupervisorSection })));
-// 어드민 전용 — 권한 관리 + 기능 노출 관리
+// 어드민 전용 — 권한 관리
 const AdminRoleSection = lazy(() => import('@/components/settings/AdminRoleSection').then(m => ({ default: m.AdminRoleSection })));
-const FeatureGatingSection = lazy(() => import('@/components/settings/FeatureGatingSection').then(m => ({ default: m.FeatureGatingSection })));
 const CharacterFolderRootSection = lazy(() => import('@/components/settings/CharacterFolderRootSection').then(m => ({ default: m.CharacterFolderRootSection })));
 import { loadPreferences } from '@/services/settingsService';
 import {
@@ -100,7 +99,6 @@ export function SettingsView() {
         return (
           <div className="flex flex-col gap-6">
             <AdminRoleSection />
-            <FeatureGatingSection />
             <CharacterFolderRootSection />
           </div>
         );

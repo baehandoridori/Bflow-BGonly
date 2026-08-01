@@ -60,7 +60,6 @@ const myTaskStats = readFileSync('src/components/widgets/my-tasks/statsUtils.ts'
 const characterTaskRow = readFileSync('src/components/widgets/my-tasks/components/CharacterTaskRow.tsx', 'utf8');
 const confirmDialog = readFileSync('src/components/common/ConfirmDialog.tsx', 'utf8');
 const modalFocusHook = readFileSync('src/hooks/useModalFocus.ts', 'utf8');
-const accessHookSource = readFileSync('src/hooks/useCharacterBoardAccess.ts', 'utf8');
 const characterImageLightbox = readFileSync('src/components/characters/CharacterImageLightbox.tsx', 'utf8');
 const fitEditorSource = readFileSync('src/components/characters/CharacterImageFitEditor.tsx', 'utf8');
 const imageFrameSource = readFileSync('src/components/characters/CharacterImageFrame.tsx', 'utf8');
@@ -375,17 +374,16 @@ test('spotlight opens character board entries through a store-backed pending req
   assert.match(characterStore, /if \(!opts\?\.silent\) toast\.error\('캐릭터 현황판을 불러오지 못했어요'\)/);
 
   assert.match(spotlight, /type ResultCategory = 'scene' \| 'assignee' \| 'character'/);
-  assert.match(spotlight, /useCharacterBoardAccess\(\)/);
   // 오픈당 1회만 로드 시도 — 실패 시 열려 있는 동안 무한 재시도 금지 (C-1).
   assert.match(spotlight, /if \(!isOpen\) \{ characterLoadAttemptedRef\.current = false; return; \}/);
-  assert.match(spotlight, /if \(!hasCharacterBoardAccess \|\| characterBoardLoaded \|\| characterBoardLoading\) return;/);
+  assert.match(spotlight, /if \(characterBoardLoaded \|\| characterBoardLoading\) return;/);
   assert.match(spotlight, /if \(characterLoadAttemptedRef\.current\) return;/);
   assert.match(spotlight, /void loadCharacterBoard\(\{ silent: true \}\)/);
   assert.match(spotlight, /CATEGORY_ORDER[\s\S]*'character'/);
   assert.match(spotlight, /character\.status === 'archived'/);
   assert.match(spotlight, /fuzzyScore\(q, tag\) \* 0\.8/);
   assert.match(spotlight, /setPendingCharacterBoardRequest\(\{ characterId: character\.id \}\)/);
-  assert.match(spotlight, /placeholder=\{hasCharacterBoardAccess \? '씬번호, 담당자, 캐릭터, 에피소드 검색\.\.\.'/);
+  assert.match(spotlight, /placeholder="씬번호, 담당자, 캐릭터, 에피소드 검색\.\.\."/);
 
   assert.match(characterBoard, /pendingCharacterBoardRequest/);
   assert.match(characterBoard, /if \(!pendingCharacterBoardRequest \|\| !loaded\) return;/);
@@ -408,8 +406,7 @@ test('my tasks widget includes assigned character design and rigging work', () =
   assert.match(characterStore, /if \(!state\.loaded && !state\.loading\)[\s\S]*?void state\.load\(opts\)/);
   assert.match(characterStore, /stopCharacterBoardRealtime\?\.\(\)/);
 
-  assert.match(myCharacterTasks, /useCharacterBoardAccess\(\)/);
-  assert.match(myCharacterTasks, /if \(!hasCharacterBoardAccess \|\| !currentUser\) return;/);
+  assert.match(myCharacterTasks, /if \(!currentUser\) return;/);
   assert.match(myCharacterTasks, /ensureLoadedAndRealtime\(\{ silent: true \}\)/);
   assert.match(myCharacterTasks, /character\.status !== 'archived'/);
   assert.ok(myCharacterTasks.includes('parseAssigneeNames(costume.designAssignee).some((name) => name === userName)'));
@@ -466,21 +463,6 @@ test('character board motion sticks to transform/opacity, 200ms ease-out, and re
   assert.match(characterDetailModalSource, /animate-\[char-modal-in_200ms_ease-out\] motion-reduce:animate-none/);
   assert.match(characterImageLightbox, /animate-\[char-overlay-in_200ms_ease-out\] motion-reduce:animate-none/);
   assert.match(characterImageLightbox, /animate-\[char-modal-in_200ms_ease-out\] motion-reduce:animate-none/);
-});
-
-test('sidebar keeps the character menu reachable for retry when the access lookup fails', () => {
-  // GAP-H/I-A5: error 시 숨김 대신 흐림 + 경고 점 + floating 툴팁 + 클릭=retry. 정상 차단·로딩은 기존대로 숨김.
-  assert.match(sidebarSource, /useCharacterBoardAccessState/);
-  assert.doesNotMatch(sidebarSource, /useCharacterBoardAccess\(\)/);
-  assert.match(sidebarSource, /characterAccess\.error && !characterAccess\.allowed/);
-  assert.match(sidebarSource, /item\.id !== 'character-board' \|\| characterAccess\.allowed \|\| characterAccessFailed/);
-  assert.match(sidebarSource, /characterAccess\.retry\(\)/);
-  assert.match(sidebarSource, /CharacterAccessRetryTip/);
-  assert.match(sidebarSource, /권한 정보를 확인하지 못했어요 — 클릭해서 다시 확인/);
-  // native title 금지 — 실패 상태에서는 title 을 비우고 floating 툴팁만 쓴다.
-  assert.match(sidebarSource, /title=\{isAccessRetryItem \|\| isVisuallyExpanded \? undefined : item\.label\}/);
-  // 경고 점 색은 하드코딩 hex 대신 캐릭터 경고 토큰.
-  assert.match(sidebarSource, /rgb\(var\(--char-stage-feedback\)\)/);
 });
 
 test('character board safety and accessibility interactions use app-native guards', () => {
@@ -679,18 +661,6 @@ test('character board hardening covers image failures, drafts, realtime races, a
   assert.match(characterStoreHelpers, /function sortCharacters/);
   assert.match(characterStoreHelpers, /function sortCostumes/);
   assert.match(characterStoreHelpers, /sortOrder - b\.sortOrder[\s\S]*?compareNullableText\(a\.createdAt, b\.createdAt\)/);
-
-  assert.match(accessHookSource, /export interface CharacterBoardAccessState/);
-  assert.match(accessHookSource, /export function useCharacterBoardAccessState/);
-  assert.match(accessHookSource, /loading: boolean/);
-  assert.match(accessHookSource, /error: boolean/);
-  assert.match(accessHookSource, /retry: \(\) => void/);
-  assert.match(accessHookSource, /export function useCharacterBoardAccess\(\): boolean/);
-  assert.match(appSource, /CharacterBoardAccessFallback/);
-  assert.match(appSource, /권한 정보를 확인하지 못했어요/);
-  assert.match(appSource, /다시 확인/);
-  assert.match(appSource, /useCharacterBoardAccessState/);
-  assert.doesNotMatch(appSource, /hasCharacterBoardAccess \? <CharacterBoardView \/> : <Dashboard \/>/);
 
   assert.match(characterDetailModalSource, /실제 원본 작업 파일은 삭제하지 않아요/);
   assert.match(characterDetailModalSource, /실제 작업 폴더와 원본 작업 파일은 삭제하지 않아요/);

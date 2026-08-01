@@ -6,8 +6,9 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   sanitizeTabGroups, addGroup, renameGroup, removeGroup,
-  moveCharacterToGroup, reorderWithinGroup, groupedCharacterIdSet,
+  moveCharacterToGroup, moveGroupBefore, reorderWithinGroup, groupedCharacterIdSet,
 } from '../src/utils/characterTabGroups.ts';
+import { computeEdgeScrollSpeed } from '../src/utils/dragAutoScroll.ts';
 
 test('sanitizeTabGroups: JSONB 형식 방어', () => {
   assert.deepEqual(sanitizeTabGroups(null), []);
@@ -87,4 +88,38 @@ test('UI 앵커: 탭 스트립·그룹 뷰·검색 색인', () => {
   assert.match(groupsView, /moveCharacterToGroup/);
   assert.match(groupsView, /reorderWithinGroup/);
   assert.match(groupsView, /draggingIdRef/);
+  assert.match(boardView, /data-board-scroll/);
+  assert.match(boardView, /--board-sticky-h/);
+  // 코덱스 1차 P2: 레일 높이는 100vh 가 아니라 스크롤포트 실측 기준이어야 한다.
+  assert.match(boardView, /--board-scroll-h/);
+  const rail = readFileSync('src/components/characters/CharacterGroupRail.tsx', 'utf8');
+  assert.match(rail, /var\(--board-scroll-h, 100vh\)/);
+  assert.match(rail, /loadPersistedRailCollapsed/);
+  assert.match(rail, /transition-\[width\]/);
+  assert.match(rail, /motion-reduce:transition-none/);
+  assert.match(rail, /그룹 추가/);
+  assert.match(groupsView, /moveGroupBefore/);
+  assert.match(groupsView, /bindVerticalDragAutoScroll/);
+  assert.match(groupsView, /scroll-mt-\[calc\(var\(--board-sticky-h,0px\)\+8px\)\]/);
+  const persist = readFileSync('src/utils/characterViewPersist.ts', 'utf8');
+  assert.match(persist, /bflow_character_rail_collapsed/);
+});
+
+test('moveGroupBefore: 레일 그룹 순서 변경 + 방어', () => {
+  const g = (id: string) => ({ id, name: id.toUpperCase(), characterIds: [] });
+  const base = [g('a'), g('b'), g('c')];
+  assert.deepEqual(moveGroupBefore(base, 'c', 'a').map((x) => x.id), ['c', 'a', 'b']);
+  assert.deepEqual(moveGroupBefore(base, 'a', null).map((x) => x.id), ['b', 'c', 'a']);
+  assert.deepEqual(moveGroupBefore(base, 'a', 'a').map((x) => x.id), ['a', 'b', 'c']);
+  assert.deepEqual(moveGroupBefore(base, '없음', 'a').map((x) => x.id), ['a', 'b', 'c']);
+  assert.deepEqual(moveGroupBefore(base, 'a', '없음').map((x) => x.id), ['a', 'b', 'c']);
+});
+
+test('computeEdgeScrollSpeed: 가장자리 근접 비례 속도', () => {
+  assert.equal(computeEdgeScrollSpeed(500, 0, 1000), 0);
+  assert.ok(computeEdgeScrollSpeed(10, 0, 1000) < 0);
+  assert.ok(computeEdgeScrollSpeed(990, 0, 1000) > 0);
+  assert.equal(computeEdgeScrollSpeed(0, 0, 1000), -14);
+  assert.equal(computeEdgeScrollSpeed(1000, 0, 1000), 14);
+  assert.ok(Math.abs(computeEdgeScrollSpeed(71, 0, 1000)) < 0.5);
 });

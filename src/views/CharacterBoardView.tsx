@@ -7,11 +7,10 @@
  *          + 버전·담당자 + 디자인/리깅 단계 레일 + 구조/에셋 태그(태그별 고유색).
  *
  * 모든 변경은 낙관적 업데이트 + 실시간 동기화 (useCharacterBoardStore).
- * 접근 권한은 사이드바에서 게이팅 (useCharacterBoardAccess).
  */
 
 import { useCallback, useContext, useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react';
-import { Archive, Plus, Image as ImageIcon, Search, Ruler, LayoutGrid, Grid3x3, List, ExternalLink, X } from 'lucide-react';
+import { Archive, ChevronDown, Plus, Image as ImageIcon, Search, Ruler, LayoutGrid, Grid3x3, List, ExternalLink, X } from 'lucide-react';
 import { useCharacterBoardStore } from '@/stores/useCharacterBoardStore';
 import { moveCostumeInOrder, dropEdgeFor } from '@/stores/characterBoardStoreHelpers';
 import { useAppStore } from '@/stores/useAppStore';
@@ -22,7 +21,7 @@ import { TagPill } from '@/components/characters/TagChips';
 import { CharacterCard, EMPTY_COSTUMES } from '@/components/characters/CharacterCard';
 import { CharacterDetailModal } from '@/components/characters/CharacterDetailModal';
 import { AddCharacterModal } from '@/components/characters/AddCharacterModal';
-import { loadPersistedCharacterViewMode, savePersistedCharacterViewMode, type CharacterBoardViewMode } from '@/utils/characterViewPersist';
+import { loadPersistedCharacterViewMode, savePersistedCharacterViewMode, loadPersistedTagsFolded, savePersistedTagsFolded, type CharacterBoardViewMode } from '@/utils/characterViewPersist';
 import { CharacterListRow } from '@/components/characters/CharacterListRow';
 import { IsPopupContext } from '@/components/widgets/Widget';
 import { CharacterTabGroupsView } from '@/components/characters/CharacterTabGroupsView';
@@ -192,6 +191,12 @@ function CharacterGrid({ onAdd, pendingOpenId, onConsumeOpen }: { onAdd: () => v
     setViewMode(mode);
     savePersistedCharacterViewMode(mode);
   };
+  // 태그 필터 행 접기 — 마지막 상태를 localStorage 에 영속화.
+  const [tagsFolded, setTagsFolded] = useState<boolean>(() => loadPersistedTagsFolded() ?? false);
+  const changeTagsFolded = (folded: boolean) => {
+    setTagsFolded(folded);
+    savePersistedTagsFolded(folded);
+  };
   // 사용자 정의 탭 (피드백 41). null = '전체'. 다른 사용자가 탭을 지우면 자동으로 '전체'로 복귀.
   const [activeTabId, setActiveTabId] = useState<string | null>(null);
   const activeTab = activeTabId ? tabs.find((t) => t.id === activeTabId) ?? null : null;
@@ -296,6 +301,29 @@ function CharacterGrid({ onAdd, pendingOpenId, onConsumeOpen }: { onAdd: () => v
     setCardMenu({ characterId, x: event.clientX, y: event.clientY, costumeId });
   }, []);
 
+  // 레일 sticky top 계산 — sticky 헤더 실측 높이를 스크롤 컨테이너 CSS 변수로 노출.
+  //   태그 필터 접기(작업 2)로 헤더 높이가 변해도 ResizeObserver 가 추적한다.
+  //   deps 에 loaded 필수: CharacterGrid 는 미로드 시 헤더 없이 조기 return 하므로,
+  //   [] 로 두면 첫 로드(특히 팝업 창의 fresh store)에서 ref 가 null 인 채 영영 미설정된다.
+  const stickyHeaderRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const el = stickyHeaderRef.current;
+    const scroller = el?.closest('[data-board-scroll]') as HTMLElement | null;
+    if (!el || !scroller) return;
+    const apply = () => {
+      scroller.style.setProperty('--board-sticky-h', `${el.offsetHeight + 12}px`);
+      // 레일 높이 기준은 스크롤포트 실측 — 100vh 는 이 컨테이너 위의 고정 제목·탭 블록까지
+      //   포함해 과대 계산되고, 그만큼 레일이 스크롤포트 아래로 삐져나가 잘린다. (코덱스 1차 P2)
+      scroller.style.setProperty('--board-scroll-h', `${scroller.clientHeight}px`);
+    };
+    apply();
+    // 커스텀 속성만 쓰므로 스크롤러를 관찰해도 크기가 변하지 않는다 — RO 되먹임 없음.
+    const ro = new ResizeObserver(apply);
+    ro.observe(el);
+    ro.observe(scroller);
+    return () => ro.disconnect();
+  }, [loaded]);
+
   // ─── 카드 드래그 재배치(F29) ───
   const reorderCharacters = useCharacterBoardStore((s) => s.reorderCharacters);
   // 검색/태그 필터·키 비교·보관 목록에서는 비활성 (파생 정렬/부분 목록 위 재배치는 비직관적).
@@ -363,7 +391,7 @@ function CharacterGrid({ onAdd, pendingOpenId, onConsumeOpen }: { onAdd: () => v
   return (
     <div className="flex flex-col gap-4">
       {/* 검색·버튼·필터 칩 — 스크롤해도 상단에 붙는다 (피드백 38). 배경은 토큰 기반이라 라이트/다크 자동 대응. */}
-      <div className="sticky top-0 z-20 -mx-6 bg-bg-primary/85 px-6 pt-4 pb-3 backdrop-blur-md flex flex-col gap-2.5">
+      <div ref={stickyHeaderRef} className="sticky top-0 z-20 -mx-6 bg-bg-primary/85 px-6 pt-4 pb-3 backdrop-blur-md flex flex-col gap-2.5">
         {/* 사용자 정의 탭 (피드백 41) */}
         <BoardTabStrip
           tabs={tabs}
@@ -437,11 +465,32 @@ function CharacterGrid({ onAdd, pendingOpenId, onConsumeOpen }: { onAdd: () => v
           </div>
         </div>
         {allTags.length > 0 && (
-          <div className="flex flex-wrap items-center gap-1.5">
-            {allTags.map((t) => <TagPill key={t} tag={t} on={activeTags.includes(t)} onClick={() => toggleTag(t)} />)}
-            {activeTags.length > 0 && (
-              <button type="button" onClick={() => setActiveTags([])} className="text-xs text-text-secondary hover:text-text-primary px-1.5 cursor-pointer">필터 해제</button>
-            )}
+          <div>
+            <button
+              type="button"
+              onClick={() => changeTagsFolded(!tagsFolded)}
+              aria-expanded={!tagsFolded}
+              className="flex items-center gap-1.5 text-xs text-text-secondary hover:text-text-primary cursor-pointer"
+            >
+              <ChevronDown size={13} className={cn('transition-transform duration-200 motion-reduce:transition-none', tagsFolded && '-rotate-90')} />
+              태그 필터 <span className="font-semibold text-text-primary">{allTags.length}</span>
+              {activeTags.length > 0 && <span className="text-accent">· {activeTags.length}개 선택</span>}
+            </button>
+            {/* 접힘: visibility 로 감춰 칩들이 탭 순서에서 빠지게 한다(투명·0높이만으론 포커스가 남는다).
+                visibility 는 discrete 트랜지션이라 접히는 동안엔 보이다가 끝에서 숨는다.
+                펼침: 태그가 많아 max-h 를 넘겨도 잘리지 않도록 세로 스크롤을 준다. (코덱스 1차 P2 2건) */}
+            <div
+              aria-hidden={tagsFolded}
+              className={cn(
+                'flex flex-wrap items-center gap-1.5 transition-[max-height,opacity,margin-top,visibility] duration-200 ease-out motion-reduce:transition-none',
+                tagsFolded ? 'mt-0 max-h-0 opacity-0 invisible overflow-hidden' : 'mt-2 max-h-64 opacity-100 overflow-y-auto',
+              )}
+            >
+              {allTags.map((t) => <TagPill key={t} tag={t} on={activeTags.includes(t)} onClick={() => toggleTag(t)} />)}
+              {activeTags.length > 0 && (
+                <button type="button" onClick={() => setActiveTags([])} className="text-xs text-text-secondary hover:text-text-primary px-1.5 cursor-pointer">필터 해제</button>
+              )}
+            </div>
           </div>
         )}
       </div>
@@ -606,7 +655,7 @@ export function CharacterBoardView() {
         </div>
       </div>
 
-      <div className="flex-1 min-h-0 overflow-y-auto px-6 pb-6">
+      <div data-board-scroll="" className="flex-1 min-h-0 overflow-y-auto px-6 pb-6">
         {tab === 'board' ? (
           <CharacterGrid onAdd={() => setAddOpen(true)} pendingOpenId={pendingOpenId} onConsumeOpen={() => setPendingOpenId(null)} />
         ) : (
