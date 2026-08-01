@@ -63,6 +63,8 @@ test('팝오버: 저장 중 선택 잠금 + Esc 를 대시보드로 흘리지 �
   assert.match(popover, /e\.stopPropagation\(\);/);
   const dashboard = readFileSync('src/views/CompositingDashboardView.tsx', 'utf8');
   assert.match(dashboard, /window\.addEventListener\('keydown', onKey\)/);
+  // 코덱스 3차 P2: 닫기 버튼도 같은 규칙 — 저장 중 닫히면 실패 때 선택 의도가 사라진다.
+  assert.match(popover, /disabled=\{saving\}\r?\n\s*aria-label="닫기"/);
 });
 
 test('편집 권한은 기존 컴포지터 판정을 그대로 쓴다 (지정되면 컴포지팅 탭 수정 가능)', () => {

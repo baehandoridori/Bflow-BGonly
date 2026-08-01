@@ -123,11 +123,14 @@ export function CompositorAssignPopover({ onClose }: { onClose: () => void }) {
     >
       <div className="flex items-center justify-between px-3 py-2.5 border-b border-bg-border/60">
         <span className="text-[11px] font-bold text-text-primary">담당 컴포지터 지정</span>
+        {/* 저장 중에는 닫지 않는다 — 바깥 클릭·Esc 와 같은 규칙.
+            실패·검증 불일치 때 선택 의도가 남아 있어야 에러 토스트의 '다시 시도' 가 의미가 있다. */}
         <button
           type="button"
           onClick={onClose}
+          disabled={saving}
           aria-label="닫기"
-          className="rounded p-0.5 text-text-secondary hover:text-text-primary hover:bg-bg-border/40 cursor-pointer"
+          className="rounded p-0.5 text-text-secondary hover:text-text-primary hover:bg-bg-border/40 cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-transparent"
         >
           <X size={13} />
         </button>
