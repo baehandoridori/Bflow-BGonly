@@ -46,11 +46,23 @@ test('팝오버: 다중 선택 + 설정 탭과 같은 저장·검증 경로', ()
   assert.match(popover, /if \(dirty\) return;/);
   // 저장 중에는 바깥 클릭·Esc 로 닫히지 않는다.
   assert.match(popover, /if \(saving\) return;/);
-  assert.match(popover, /e\.key === 'Escape' && !saving/);
+  assert.match(popover, /if \(e\.key !== 'Escape' \|\| saving\) return;/);
   // 여는 칩은 '바깥' 이 아니다 — mousedown(닫기) 이 click(토글) 보다 먼저 와서
   //   제외하지 않으면 칩을 다시 눌러도 닫혔다가 즉시 다시 열린다(프리뷰 실측으로 확인한 버그).
   assert.match(popover, /target\?\.closest\('\[data-compositor-chip\]'\)/);
   assert.match(header, /data-compositor-chip=""/);
+});
+
+test('팝오버: 저장 중 선택 잠금 + Esc 를 대시보드로 흘리지 않음 (코덱스 2차 P2)', () => {
+  // 저장 중 토글하면 그 편집은 저장도 롤백도 안 된 채 창이 닫힌다 — 행 자체를 잠근다.
+  assert.match(popover, /if \(saving\) return;\r?\n\s*setSelected/);
+  assert.match(popover, /disabled=\{saving\}/);
+  assert.match(popover, /disabled:cursor-not-allowed/);
+  // Esc 는 여기서 소비 — document 버블이 window 보다 먼저라 막지 않으면
+  //   대시보드가 씬 일괄 선택·핀까지 함께 해제한다.
+  assert.match(popover, /e\.stopPropagation\(\);/);
+  const dashboard = readFileSync('src/views/CompositingDashboardView.tsx', 'utf8');
+  assert.match(dashboard, /window\.addEventListener\('keydown', onKey\)/);
 });
 
 test('편집 권한은 기존 컴포지터 판정을 그대로 쓴다 (지정되면 컴포지팅 탭 수정 가능)', () => {

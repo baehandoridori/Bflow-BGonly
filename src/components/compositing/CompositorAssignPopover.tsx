@@ -47,7 +47,11 @@ export function CompositorAssignPopover({ onClose }: { onClose: () => void }) {
       if (!rootRef.current?.contains(target)) onClose();
     };
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape' && !saving) onClose();
+      if (e.key !== 'Escape' || saving) return;
+      // 여기서 Esc 를 소비한다 — document 버블은 window 보다 먼저라, 막지 않으면
+      //   대시보드의 window keydown 핸들러까지 가서 씬 일괄 선택·핀까지 함께 풀린다.
+      e.stopPropagation();
+      onClose();
     };
     document.addEventListener('mousedown', onDown);
     document.addEventListener('keydown', onKey);
@@ -65,6 +69,9 @@ export function CompositorAssignPopover({ onClose }: { onClose: () => void }) {
   const hasChanges = changedUsers.length > 0;
 
   const toggle = (id: string) => {
+    // 저장 중 변경 금지 — expectedIds·changedUsers 는 저장 시작 시점 스냅샷이라,
+    //   여기서 더 바꾸면 그 편집은 저장되지도 롤백되지도 않은 채 창이 닫힌다.
+    if (saving) return;
     setSelected((prev) => {
       const next = new Set(prev);
       if (next.has(id)) next.delete(id);
@@ -138,7 +145,8 @@ export function CompositorAssignPopover({ onClose }: { onClose: () => void }) {
               type="button"
               onClick={() => toggle(u.id)}
               aria-pressed={on}
-              className="flex w-full items-center gap-2 px-3 py-1.5 text-left hover:bg-bg-border/30 cursor-pointer"
+              disabled={saving}
+              className="flex w-full items-center gap-2 px-3 py-1.5 text-left hover:bg-bg-border/30 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-transparent"
             >
               <span
                 className={cn(
