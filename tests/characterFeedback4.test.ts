@@ -91,8 +91,22 @@ test('태그 필터 행 접기/펼치기', () => {
   assert.match(boardView, /savePersistedTagsFolded\(folded\)/);
   assert.match(boardView, /aria-expanded=\{!tagsFolded\}/);
   assert.match(boardView, /태그 필터/);
+  // 코덱스 1차 P2: 접힌 칩이 탭 순서에 남지 않게 visibility 로 감추고, 펼침은 스크롤로 잘림 방지.
+  assert.match(boardView, /aria-hidden=\{tagsFolded\}/);
+  assert.match(boardView, /max-h-0 opacity-0 invisible overflow-hidden/);
+  assert.match(boardView, /max-h-64 opacity-100 overflow-y-auto/);
   const persist = readFileSync('src/utils/characterViewPersist.ts', 'utf8');
   assert.match(persist, /bflow_character_tags_folded/);
+});
+
+test('정식 공개: 팝업은 로그인 세션이 있을 때만 현황판을 그린다', () => {
+  // 코덱스 1차 P1: 사용자별 게이트를 없애면서, 폐기된 훅이 fail-closed 로 막아 주던
+  //   '로그인 없음' 방어까지 사라져 공유 PC 에 데이터가 남던 문제.
+  const popup = readFileSync('src/views/WidgetPopup.tsx', 'utf8');
+  assert.match(popup, /function CharacterBoardPopupBody/);
+  assert.match(popup, /useAuthStore\(\(s\) => s\.currentUser\)/);
+  assert.match(popup, /if \(!currentUser\)/);
+  assert.match(popup, /로그인한 뒤에 캐릭터 현황판을 볼 수 있어요/);
 });
 
 test('정식 공개: 캐릭터 현황판 게이팅 잔재 없음', () => {

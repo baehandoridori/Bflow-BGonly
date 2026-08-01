@@ -310,10 +310,17 @@ function CharacterGrid({ onAdd, pendingOpenId, onConsumeOpen }: { onAdd: () => v
     const el = stickyHeaderRef.current;
     const scroller = el?.closest('[data-board-scroll]') as HTMLElement | null;
     if (!el || !scroller) return;
-    const apply = () => scroller.style.setProperty('--board-sticky-h', `${el.offsetHeight + 12}px`);
+    const apply = () => {
+      scroller.style.setProperty('--board-sticky-h', `${el.offsetHeight + 12}px`);
+      // 레일 높이 기준은 스크롤포트 실측 — 100vh 는 이 컨테이너 위의 고정 제목·탭 블록까지
+      //   포함해 과대 계산되고, 그만큼 레일이 스크롤포트 아래로 삐져나가 잘린다. (코덱스 1차 P2)
+      scroller.style.setProperty('--board-scroll-h', `${scroller.clientHeight}px`);
+    };
     apply();
+    // 커스텀 속성만 쓰므로 스크롤러를 관찰해도 크기가 변하지 않는다 — RO 되먹임 없음.
     const ro = new ResizeObserver(apply);
     ro.observe(el);
+    ro.observe(scroller);
     return () => ro.disconnect();
   }, [loaded]);
 
@@ -469,10 +476,14 @@ function CharacterGrid({ onAdd, pendingOpenId, onConsumeOpen }: { onAdd: () => v
               태그 필터 <span className="font-semibold text-text-primary">{allTags.length}</span>
               {activeTags.length > 0 && <span className="text-accent">· {activeTags.length}개 선택</span>}
             </button>
+            {/* 접힘: visibility 로 감춰 칩들이 탭 순서에서 빠지게 한다(투명·0높이만으론 포커스가 남는다).
+                visibility 는 discrete 트랜지션이라 접히는 동안엔 보이다가 끝에서 숨는다.
+                펼침: 태그가 많아 max-h 를 넘겨도 잘리지 않도록 세로 스크롤을 준다. (코덱스 1차 P2 2건) */}
             <div
+              aria-hidden={tagsFolded}
               className={cn(
-                'flex flex-wrap items-center gap-1.5 overflow-hidden transition-[max-height,opacity,margin-top] duration-200 ease-out motion-reduce:transition-none',
-                tagsFolded ? 'mt-0 max-h-0 opacity-0' : 'mt-2 max-h-64 opacity-100',
+                'flex flex-wrap items-center gap-1.5 transition-[max-height,opacity,margin-top,visibility] duration-200 ease-out motion-reduce:transition-none',
+                tagsFolded ? 'mt-0 max-h-0 opacity-0 invisible overflow-hidden' : 'mt-2 max-h-64 opacity-100 overflow-y-auto',
               )}
             >
               {allTags.map((t) => <TagPill key={t} tag={t} on={activeTags.includes(t)} onClick={() => toggleTag(t)} />)}

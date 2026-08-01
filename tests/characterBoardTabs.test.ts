@@ -90,7 +90,10 @@ test('UI 앵커: 탭 스트립·그룹 뷰·검색 색인', () => {
   assert.match(groupsView, /draggingIdRef/);
   assert.match(boardView, /data-board-scroll/);
   assert.match(boardView, /--board-sticky-h/);
+  // 코덱스 1차 P2: 레일 높이는 100vh 가 아니라 스크롤포트 실측 기준이어야 한다.
+  assert.match(boardView, /--board-scroll-h/);
   const rail = readFileSync('src/components/characters/CharacterGroupRail.tsx', 'utf8');
+  assert.match(rail, /var\(--board-scroll-h, 100vh\)/);
   assert.match(rail, /loadPersistedRailCollapsed/);
   assert.match(rail, /transition-\[width\]/);
   assert.match(rail, /motion-reduce:transition-none/);

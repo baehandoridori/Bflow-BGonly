@@ -65,7 +65,8 @@ export function CharacterGroupRail({
       )}
       style={{
         top: 'var(--board-sticky-h, 0px)',
-        maxHeight: 'calc(100vh - var(--board-sticky-h, 0px) - 24px)',
+        // 보드 스크롤포트 실측 높이 기준 — 100vh 폴백은 변수 미설정 시에만 쓴다.
+        maxHeight: 'calc(var(--board-scroll-h, 100vh) - var(--board-sticky-h, 0px) - 24px)',
       }}
     >
       <div className={cn('flex items-center gap-1.5 p-2', collapsed && 'flex-col')}>
