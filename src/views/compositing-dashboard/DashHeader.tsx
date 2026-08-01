@@ -230,6 +230,7 @@ export function DashHeader({ episodeNumber, onCascadeReplay }: DashHeaderProps) 
               return canAssignCompositor ? (
                 <button
                   type="button"
+                  data-compositor-chip=""
                   onClick={() => setAssignOpen((v) => !v)}
                   aria-haspopup="dialog"
                   aria-expanded={assignOpen}

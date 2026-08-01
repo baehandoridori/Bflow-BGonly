@@ -40,7 +40,11 @@ export function CompositorAssignPopover({ onClose }: { onClose: () => void }) {
   useEffect(() => {
     const onDown = (e: MouseEvent) => {
       if (saving) return;
-      if (!rootRef.current?.contains(e.target as Node)) onClose();
+      const target = e.target as HTMLElement | null;
+      // 여는 칩 자체는 바깥으로 치지 않는다 — mousedown 이 click 보다 먼저 와서
+      //   여기서 닫고 곧바로 칩의 토글이 다시 여는 탓에 '눌러서 닫기' 가 안 먹는다.
+      if (target?.closest('[data-compositor-chip]')) return;
+      if (!rootRef.current?.contains(target)) onClose();
     };
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape' && !saving) onClose();

@@ -47,6 +47,10 @@ test('팝오버: 다중 선택 + 설정 탭과 같은 저장·검증 경로', ()
   // 저장 중에는 바깥 클릭·Esc 로 닫히지 않는다.
   assert.match(popover, /if \(saving\) return;/);
   assert.match(popover, /e\.key === 'Escape' && !saving/);
+  // 여는 칩은 '바깥' 이 아니다 — mousedown(닫기) 이 click(토글) 보다 먼저 와서
+  //   제외하지 않으면 칩을 다시 눌러도 닫혔다가 즉시 다시 열린다(프리뷰 실측으로 확인한 버그).
+  assert.match(popover, /target\?\.closest\('\[data-compositor-chip\]'\)/);
+  assert.match(header, /data-compositor-chip=""/);
 });
 
 test('편집 권한은 기존 컴포지터 판정을 그대로 쓴다 (지정되면 컴포지팅 탭 수정 가능)', () => {
