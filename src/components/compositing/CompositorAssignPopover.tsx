@@ -17,7 +17,14 @@ import { useAuthStore } from '@/stores/useAuthStore';
 import { setIsCompositor, verifyUserBoolPropAfterSave } from '@/services/userService';
 import { cn } from '@/utils/cn';
 
-export function CompositorAssignPopover({ onClose }: { onClose: () => void }) {
+export function CompositorAssignPopover({
+  onClose,
+  onSavingChange,
+}: {
+  onClose: () => void;
+  /** 저장 진행 여부를 부모에 알린다 — 부모의 여는 칩도 같이 잠가야 저장 중 unmount 를 막는다. */
+  onSavingChange?: (saving: boolean) => void;
+}) {
   const allUsers = useAuthStore((s) => s.users);
   const setUsers = useAuthStore((s) => s.setUsers);
 
@@ -35,6 +42,9 @@ export function CompositorAssignPopover({ onClose }: { onClose: () => void }) {
     if (dirty) return;
     setSelected(initial);
   }, [initial, dirty]);
+
+  // 어떤 경로로든 사라질 때 부모 잠금을 반드시 푼다(잠금이 남으면 칩이 영영 안 눌린다).
+  useEffect(() => () => onSavingChange?.(false), [onSavingChange]);
 
   // 바깥 클릭 · Esc 로 닫기. 저장 중에는 닫지 않는다(결과 토스트를 놓치지 않도록).
   useEffect(() => {
@@ -84,11 +94,37 @@ export function CompositorAssignPopover({ onClose }: { onClose: () => void }) {
   async function handleSave() {
     if (!hasChanges || saving) return;
     setSaving(true);
+    onSavingChange?.(true);
     const expectedIds = new Set(selected); // 비동기 전 스냅샷
     try {
-      await Promise.all(changedUsers.map((u) => setIsCompositor(u.id, selected.has(u.id))));
+      // 사용자별 개별 요청이라 일부만 성공할 수 있다. 하나가 실패했다고 곧장 catch 로 빠지면
+      //   이미 커밋된 쓰기는 그대로 남는데 화면은 '실패' 만 말해 실제 DB 와 어긋난다.
+      //   되돌리기(보상 롤백)도 답이 아니다 — 롤백 자체가 실패할 수 있고, 그 사이 다른 관리자가
+      //   바꾼 값을 덮을 수 있다. 그래서 성패와 무관하게 항상 실제 상태를 다시 읽어 화면을 맞추고,
+      //   남은 차이는 그대로 두어 '다시 저장' 으로 이어서 처리하게 한다.
+      const results = await Promise.allSettled(
+        changedUsers.map((u) => setIsCompositor(u.id, selected.has(u.id))),
+      );
+      const failedNames = results
+        .map((r, i) => (r.status === 'rejected' ? changedUsers[i].name : null))
+        .filter((n): n is string => n !== null);
+      if (failedNames.length > 0) {
+        console.error('[CompositorAssignPopover] 일부 저장 실패', {
+          failed: failedNames,
+          reasons: results.filter((r) => r.status === 'rejected').map((r) => (r as PromiseRejectedResult).reason),
+        });
+      }
+
       const { fresh, mismatched, diff } = await verifyUserBoolPropAfterSave(expectedIds, 'isCompositor');
-      setUsers(fresh);
+      setUsers(fresh); // 부분 저장이든 아니든 화면은 항상 실제 DB 상태를 보여준다
+
+      if (failedNames.length > 0) {
+        toast.error(
+          `${failedNames.join(', ')} 저장에 실패했어요. 나머지는 반영됐고, 다시 저장하면 남은 것만 이어서 처리돼요.`,
+          { duration: 10000 },
+        );
+        return; // dirty 유지 · 팝오버 유지 → 즉시 재시도
+      }
 
       if (mismatched) {
         const missing = diff.missing.map((u) => u.name).join(', ');
@@ -107,10 +143,12 @@ export function CompositorAssignPopover({ onClose }: { onClose: () => void }) {
       toast.success(`담당 컴포지터 ${expectedIds.size}명을 저장했어요.`);
       onClose();
     } catch (err) {
-      console.error('[CompositorAssignPopover] 저장 실패:', err);
-      toast.error('담당 컴포지터 저장에 실패했어요. 잠시 후 다시 시도해주세요.');
+      // 여기까지 오는 건 verify 단계(재조회) 실패 — 쓰기 결과는 알 수 없으므로 편집 상태를 남긴다.
+      console.error('[CompositorAssignPopover] 저장 확인 실패:', err);
+      toast.error('저장 결과를 확인하지 못했어요. 잠시 후 다시 저장해 확인해주세요.', { duration: 10000 });
     } finally {
       setSaving(false);
+      onSavingChange?.(false);
     }
   }
 

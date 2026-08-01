@@ -88,6 +88,9 @@ export function DashHeader({ episodeNumber, onCascadeReplay }: DashHeaderProps) 
   // 지정 UI 는 어드민만. 일반 사용자에게는 지금까지처럼 읽기 전용 칩이다.
   const canAssignCompositor = currentUser?.role === 'admin';
   const [assignOpen, setAssignOpen] = useState(false);
+  // 저장 중에는 칩도 잠근다 — 자식의 X·바깥클릭·Esc 를 다 막아도 여기서 닫으면
+  //   팝오버가 unmount 되어 실패 시 선택 의도를 되살릴 수 없다.
+  const [assignSaving, setAssignSaving] = useState(false);
 
   // 보는 사람 — Realtime presence 결과 (Task 3.7 에서 wire). 현재는 빈 배열.
   const viewers: { id: string; name: string }[] = [];
@@ -231,11 +234,12 @@ export function DashHeader({ episodeNumber, onCascadeReplay }: DashHeaderProps) 
                 <button
                   type="button"
                   data-compositor-chip=""
-                  onClick={() => setAssignOpen((v) => !v)}
+                  onClick={() => { if (assignSaving) return; setAssignOpen((v) => !v); }}
+                  disabled={assignSaving}
                   aria-haspopup="dialog"
                   aria-expanded={assignOpen}
-                  title={`${tooltip} — 눌러서 지정`}
-                  className={chipClass}
+                  title={assignSaving ? '저장 중이에요' : `${tooltip} — 눌러서 지정`}
+                  className={cn(chipClass, assignSaving && 'cursor-wait')}
                 >
                   {inner}
                 </button>
@@ -243,7 +247,9 @@ export function DashHeader({ episodeNumber, onCascadeReplay }: DashHeaderProps) 
                 <div className={chipClass} title={tooltip}>{inner}</div>
               );
             })()}
-            {assignOpen && canAssignCompositor && <CompositorAssignPopover onClose={() => setAssignOpen(false)} />}
+            {assignOpen && canAssignCompositor && (
+              <CompositorAssignPopover onClose={() => setAssignOpen(false)} onSavingChange={setAssignSaving} />
+            )}
           </div>
         )}
 

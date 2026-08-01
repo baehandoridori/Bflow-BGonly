@@ -28,7 +28,7 @@ test('헤더: 지정 UI 는 어드민만, 일반 사용자는 읽기 전용', ()
   assert.match(header, /const canAssignCompositor = currentUser\?\.role === 'admin'/);
   // 어드민일 때만 button + 팝오버, 아니면 기존 div 칩.
   assert.match(header, /aria-haspopup="dialog"/);
-  assert.match(header, /assignOpen && canAssignCompositor && <CompositorAssignPopover/);
+  assert.match(header, /assignOpen && canAssignCompositor && \(?\s*\r?\n?\s*<CompositorAssignPopover/);
   // 잠금 아이콘 의미는 유지 — 어드민은 연필, 그 외는 권한 유무에 따라 Unlock/Lock.
   assert.match(header, /viewerIsCompositor\s*\r?\n?\s*\?\s*<Unlock/);
 });
@@ -65,6 +65,33 @@ test('팝오버: 저장 중 선택 잠금 + Esc 를 대시보드로 흘리지 �
   assert.match(dashboard, /window\.addEventListener\('keydown', onKey\)/);
   // 코덱스 3차 P2: 닫기 버튼도 같은 규칙 — 저장 중 닫히면 실패 때 선택 의도가 사라진다.
   assert.match(popover, /disabled=\{saving\}\r?\n\s*aria-label="닫기"/);
+});
+
+test('저장 중에는 여는 칩도 잠긴다 (코덱스 4차 P2)', () => {
+  // 자식의 X·바깥클릭·Esc 를 다 막아도 부모 칩으로 닫으면 팝오버가 unmount 되어
+  //   실패 시 선택 의도를 되살릴 수 없다 — saving 을 부모로 올려 칩까지 잠근다.
+  assert.match(popover, /onSavingChange\?: \(saving: boolean\) => void/);
+  assert.match(popover, /onSavingChange\?\.\(true\)/);
+  assert.match(popover, /onSavingChange\?\.\(false\)/);
+  // 어떤 경로로 사라져도 부모 잠금은 풀린다.
+  assert.match(popover, /useEffect\(\(\) => \(\) => onSavingChange\?\.\(false\)/);
+  assert.match(header, /const \[assignSaving, setAssignSaving\] = useState\(false\)/);
+  assert.match(header, /if \(assignSaving\) return; setAssignOpen/);
+  assert.match(header, /disabled=\{assignSaving\}/);
+  assert.match(header, /onSavingChange=\{setAssignSaving\}/);
+});
+
+test('부분 저장을 숨기지 않는다 — allSettled + 항상 재조회 (코덱스 4차 P1)', () => {
+  // 사용자별 개별 요청이라 일부만 커밋될 수 있다. 하나 실패했다고 곧장 catch 로 빠지면
+  //   이미 저장된 쓰기가 남은 채 화면은 '실패' 만 말해 실제 DB 와 어긋난다.
+  assert.doesNotMatch(popover, /await Promise\.all\(/);
+  assert.match(popover, /await Promise\.allSettled\(/);
+  assert.match(popover, /r\.status === 'rejected'/);
+  // 성패와 무관하게 실제 상태를 다시 읽어 화면을 맞춘다.
+  assert.match(popover, /const \{ fresh, mismatched, diff \} = await verifyUserBoolPropAfterSave/);
+  assert.match(popover, /setUsers\(fresh\); \/\/ 부분 저장이든 아니든/);
+  // 부분 실패는 성공으로 말하지 않고, 남은 것만 이어서 저장하도록 안내 + dirty 유지.
+  assert.match(popover, /나머지는 반영됐고, 다시 저장하면 남은 것만 이어서 처리돼요/);
 });
 
 test('편집 권한은 기존 컴포지터 판정을 그대로 쓴다 (지정되면 컴포지팅 탭 수정 가능)', () => {
