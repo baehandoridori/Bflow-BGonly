@@ -186,7 +186,7 @@ export type RawMapping = {
   characterId: string;
   episodeNumber: number;
   memo: string | null;
-  costumeId: string | null;
+  costumeIds: string[];
 };
 
 /** 매핑 목록 → characterId → EpisodeCharacterLink[] (episodeNumber 오름차순). */
@@ -196,7 +196,7 @@ export function buildEpisodeLinks(mappings: RawMapping[]): Map<string, EpisodeCh
     const link: EpisodeCharacterLink = {
       episodeNumber: m.episodeNumber,
       memo: m.memo ?? null,
-      costumeId: m.costumeId ?? null,
+      costumeIds: m.costumeIds ?? [],
     };
     const arr = map.get(m.characterId);
     if (arr) arr.push(link);
@@ -213,11 +213,18 @@ export function rowToRealtimeMapping(row: Record<string, unknown> | null): RawMa
   const characterId = typeof row.character_id === 'string' ? row.character_id : null;
   const episodeNumber = typeof row.episode_number === 'number' ? row.episode_number : null;
   if (!characterId || episodeNumber == null) return null;
+  // costume_ids 배열 우선, 비어 있으면 구버전 costume_id 스칼라 폴백 (피드백 42 롤아웃 호환).
+  const rawIds = Array.isArray(row.costume_ids)
+    ? (row.costume_ids as unknown[]).filter((v): v is string => typeof v === 'string')
+    : [];
+  const costumeIds = rawIds.length > 0
+    ? rawIds
+    : typeof row.costume_id === 'string' && row.costume_id ? [row.costume_id] : [];
   return {
     characterId,
     episodeNumber,
     memo: typeof row.memo === 'string' ? row.memo : null,
-    costumeId: typeof row.costume_id === 'string' ? row.costume_id : null,
+    costumeIds,
   };
 }
 
@@ -298,8 +305,8 @@ export function mergeEpisodeLinkPatchWithPending(
   links: Map<string, EpisodeCharacterLink[]>,
   characterId: string,
   episodeNumber: number,
-  patch: Partial<Pick<EpisodeCharacterLink, 'memo' | 'costumeId'>>,
-): Partial<Pick<EpisodeCharacterLink, 'memo' | 'costumeId'>> {
+  patch: Partial<Pick<EpisodeCharacterLink, 'memo' | 'costumeIds'>>,
+): Partial<Pick<EpisodeCharacterLink, 'memo' | 'costumeIds'>> {
   const key = pendingLinkKey(characterId, episodeNumber);
   cleanupPending(bucket, key);
   const fields = bucket.get(key);
@@ -318,5 +325,5 @@ export function mergeEpisodeLinkPatchWithPending(
     }
   }
   if (fields.size === 0) bucket.delete(key);
-  return merged as Partial<Pick<EpisodeCharacterLink, 'memo' | 'costumeId'>>;
+  return merged as Partial<Pick<EpisodeCharacterLink, 'memo' | 'costumeIds'>>;
 }

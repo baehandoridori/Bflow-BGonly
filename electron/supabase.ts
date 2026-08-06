@@ -4059,6 +4059,8 @@ export interface EpisodeCharacterMapRow {
   memo: string | null;
   /** 이 편에서 사용하는 복장 (episode_character_mapping.costume_id, FK character_costumes ON DELETE SET NULL). */
   costume_id: string | null;
+  /** 이 편에서 사용하는 복장 배열 (episode_character_mapping.costume_ids JSONB). 구버전 row 는 null 일 수 있다. */
+  costume_ids: string[] | null;
   created_at: string;
 }
 
@@ -4118,11 +4120,12 @@ export async function loadEpisodeCharacterMap(): Promise<EpisodeCharacterMapRow[
     character_id: string;
     memo: string | null;
     costume_id: string | null;
+    costume_ids: string[] | null;
     created_at: string;
     episodes: { episode_number: number } | null;
   }>(
     'episode_character_mapping',
-    'id, episode_id, character_id, memo, costume_id, created_at, episodes(episode_number)',
+    'id, episode_id, character_id, memo, costume_id, costume_ids, created_at, episodes(episode_number)',
     { column: 'created_at', ascending: true },
   );
   return rows.map((r) => ({
@@ -4132,6 +4135,7 @@ export async function loadEpisodeCharacterMap(): Promise<EpisodeCharacterMapRow[
     episode_number: r.episodes?.episode_number ?? null,
     memo: r.memo ?? null,
     costume_id: r.costume_id ?? null,
+    costume_ids: r.costume_ids ?? null,
     created_at: r.created_at,
   }));
 }
@@ -4477,6 +4481,7 @@ export async function linkCharacterEpisode(
     episode_number: ep.episode_number as number,
     memo: (data.memo ?? null) as string | null,
     costume_id: (data.costume_id ?? null) as string | null,
+    costume_ids: (data.costume_ids ?? null) as string[] | null,
     created_at: data.created_at as string,
   };
 }
@@ -4502,14 +4507,14 @@ export async function unlinkCharacterEpisode(
 }
 
 /**
- * 캐릭터-에피소드 매핑의 이 편 전용 필드 수정 (memo / costume_id).
+ * 캐릭터-에피소드 매핑의 이 편 전용 필드 수정 (memo / costume_ids).
  * (episode_number → episode_id 해석 후 episode_id & character_id 조건으로 update.)
- * memo / costumeId 둘 중 전달된 것만 update. costumeId === null 이면 복장 선택 해제.
+ * costumeIds 전달 시 costume_id 스칼라도 배열 첫 값으로 dual-write — 구버전 앱 화면 호환 (피드백 42).
  */
 export async function updateEpisodeCharacterMapping(
   episodeNumber: number,
   characterId: string,
-  updates: { memo?: string | null; costumeId?: string | null },
+  updates: { memo?: string | null; costumeIds?: string[] },
 ): Promise<void> {
   const { data: ep, error: epErr } = await supabase
     .from('episodes')
@@ -4520,7 +4525,10 @@ export async function updateEpisodeCharacterMapping(
   if (!ep) throw new Error(`에피소드 ${episodeNumber} 를 찾을 수 없습니다`);
   const patch: Record<string, unknown> = {};
   if (updates.memo !== undefined) patch.memo = updates.memo;
-  if (updates.costumeId !== undefined) patch.costume_id = updates.costumeId;
+  if (updates.costumeIds !== undefined) {
+    patch.costume_ids = updates.costumeIds;
+    patch.costume_id = updates.costumeIds[0] ?? null;
+  }
   if (Object.keys(patch).length === 0) return;
   const { error } = await supabase
     .from('episode_character_mapping')

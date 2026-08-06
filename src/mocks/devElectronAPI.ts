@@ -482,11 +482,11 @@ function seedMockCharacterData(): void {
   const charEpMap = [
     {
       id: 'mock-map-1', episode_id: `mock-ep-${MOCK_CHARACTER_EP}`, character_id: 'mock-char-1',
-      episode_number: MOCK_CHARACTER_EP, memo: '이 화에서는 교복에 안경 착용', costume_id: 'mock-cos-1a', created_at: now,
+      episode_number: MOCK_CHARACTER_EP, memo: '이 화에서는 교복에 안경 착용', costume_id: 'mock-cos-1a', costume_ids: ['mock-cos-1a'], created_at: now,
     },
     {
       id: 'mock-map-2', episode_id: `mock-ep-${MOCK_CHARACTER_EP}`, character_id: 'mock-char-2',
-      episode_number: MOCK_CHARACTER_EP, memo: null, costume_id: null, created_at: now,
+      episode_number: MOCK_CHARACTER_EP, memo: null, costume_id: null, costume_ids: [], created_at: now,
     },
   ];
 
@@ -1581,7 +1581,7 @@ export function installDevElectronAPI(): void {
       if (existing) return existing;
       const row = {
         id: createUuid(), episode_id: `mock-ep-${episodeNumber}`, character_id: characterId,
-        episode_number: episodeNumber, memo: null, costume_id: null, created_at: new Date().toISOString(),
+        episode_number: episodeNumber, memo: null, costume_id: null, costume_ids: [], created_at: new Date().toISOString(),
       };
       store.push(row);
       return row;
@@ -1597,7 +1597,10 @@ export function installDevElectronAPI(): void {
       const row = store.find((r) => r.episode_number === episodeNumber && r.character_id === characterId);
       if (!row) return;
       if (updates.memo !== undefined) row.memo = updates.memo;
-      if (updates.costumeId !== undefined) row.costume_id = updates.costumeId;
+      if (updates.costumeIds !== undefined) {
+        row.costume_ids = updates.costumeIds;
+        row.costume_id = updates.costumeIds[0] ?? null;
+      }
     },
     // 프리뷰에서 업로드/붙여넣기 이미지가 실제로 렌더되도록 로드 가능한 경로를 돌려준다 (피드백 31b·33 검증용).
     storageUploadCharacterImage: async () => ({ ok: true, url: MOCK_CHARACTER_IMAGE_URL }),

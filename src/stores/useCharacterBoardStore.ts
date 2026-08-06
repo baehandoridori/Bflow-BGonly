@@ -30,6 +30,7 @@ import {
   rebuildImagesByCostume,
   reorderedCostumeSortOrders,
   rowToRealtimeMapping,
+  valuesEqual,
   sortCharacters,
   sortCostumes,
   sortCostumeImages,
@@ -99,7 +100,7 @@ function sortTabs(tabs: CharacterBoardTab[]): CharacterBoardTab[] {
 }
 
 /** 에피소드 링크 pending 버킷에 얇게 묶인 편의 래퍼 — 전역 버킷 의존이라 store 에 남긴다. */
-function trackPendingEpisodeLinkField<K extends 'memo' | 'costumeId'>(
+function trackPendingEpisodeLinkField<K extends 'memo' | 'costumeIds'>(
   characterId: string,
   episodeNumber: number,
   field: K,
@@ -201,7 +202,8 @@ interface CharacterBoardStore {
   /** 이 편 주의점 메모 — 낙관적 업데이트. */
   setEpisodeMemo: (characterId: string, episodeNumber: number, memo: string) => Promise<void>;
   /** 이 편에 쓰는 복장 선택/해제 — 낙관적 업데이트. */
-  setEpisodeCostume: (characterId: string, episodeNumber: number, costumeId: string | null) => Promise<void>;
+  /** 이 편에 쓰는 복장 배열을 통째로 저장 (피드백 42: 1:N). 호출부가 토글 결과 배열을 계산해 넘긴다. */
+  setEpisodeCostumes: (characterId: string, episodeNumber: number, costumeIds: string[]) => Promise<void>;
 
   receiveRealtime: (payload: {
     table: 'characters' | 'character_costumes' | 'character_costume_images' | 'episode_character_mapping' | 'character_board_tabs';
@@ -271,7 +273,7 @@ export const useCharacterBoardStore = create<CharacterBoardStore>((set, get) => 
           const link = links[i];
           const patched = mergeEpisodeLinkPatchWithPending(pendingEpisodeLinkFields, prev.episodeLinks, characterId, link.episodeNumber, {
             memo: link.memo,
-            costumeId: link.costumeId,
+            costumeIds: link.costumeIds,
           });
           links[i] = { ...link, ...patched };
         }
@@ -817,7 +819,7 @@ export const useCharacterBoardStore = create<CharacterBoardStore>((set, get) => 
       console.error('[character-board] linkEpisode 실패:', err);
       set((s) => {
         const currentLink = s.episodeLinks.get(characterId)?.find((l) => l.episodeNumber === episodeNumber);
-        const shouldRemove = !currentLink || (!currentLink.memo && !currentLink.costumeId);
+        const shouldRemove = !currentLink || (!currentLink.memo && currentLink.costumeIds.length === 0);
         return {
           characters: shouldRemove ? setCharacterEpisodePresence(s.characters, characterId, episodeNumber, false) : s.characters,
           episodeLinks: shouldRemove ? removeLink(s.episodeLinks, characterId, episodeNumber) : s.episodeLinks,
@@ -841,7 +843,7 @@ export const useCharacterBoardStore = create<CharacterBoardStore>((set, get) => 
         characters: setCharacterEpisodePresence(s.characters, characterId, episodeNumber, true),
         episodeLinks: upsertLink(s.episodeLinks, characterId, episodeNumber, {
           memo: previousLink?.memo ?? null,
-          costumeId: previousLink?.costumeId ?? null,
+          costumeIds: previousLink?.costumeIds ?? [],
         }),
       }));
       toast.error('에피소드 연결 해제에 실패했어요');
@@ -863,16 +865,16 @@ export const useCharacterBoardStore = create<CharacterBoardStore>((set, get) => 
     }
   },
 
-  setEpisodeCostume: async (characterId, episodeNumber, costumeId) => {
+  setEpisodeCostumes: async (characterId, episodeNumber, costumeIds) => {
     const previousLink = get().episodeLinks.get(characterId)?.find((l) => l.episodeNumber === episodeNumber) ?? null;
-    trackPendingEpisodeLinkField(characterId, episodeNumber, 'costumeId', costumeId);
-    set({ episodeLinks: upsertLink(get().episodeLinks, characterId, episodeNumber, { costumeId }) });
+    trackPendingEpisodeLinkField(characterId, episodeNumber, 'costumeIds', costumeIds);
+    set({ episodeLinks: upsertLink(get().episodeLinks, characterId, episodeNumber, { costumeIds }) });
     try {
-      await svcUpdateEpisodeMapping(episodeNumber, characterId, { costumeId });
+      await svcUpdateEpisodeMapping(episodeNumber, characterId, { costumeIds });
     } catch (err) {
-      console.error('[character-board] setEpisodeCostume 실패:', err);
+      console.error('[character-board] setEpisodeCostumes 실패:', err);
       set((s) => ({
-        episodeLinks: revertLinkFieldIfUnchanged(s.episodeLinks, characterId, episodeNumber, 'costumeId', costumeId, previousLink),
+        episodeLinks: revertLinkFieldIfUnchanged(s.episodeLinks, characterId, episodeNumber, 'costumeIds', costumeIds, previousLink),
       }));
       toast.error('이 편 복장 선택에 실패했어요');
     }
@@ -1015,7 +1017,7 @@ export const useCharacterBoardStore = create<CharacterBoardStore>((set, get) => 
           mapping.episodeNumber,
           mergeEpisodeLinkPatchWithPending(pendingEpisodeLinkFields, s.episodeLinks, mapping.characterId, mapping.episodeNumber, {
             memo: mapping.memo,
-            costumeId: mapping.costumeId,
+            costumeIds: mapping.costumeIds,
           }),
         ),
       }));
@@ -1028,7 +1030,7 @@ function upsertLink(
   links: Map<string, EpisodeCharacterLink[]>,
   characterId: string,
   episodeNumber: number,
-  patch: Partial<Pick<EpisodeCharacterLink, 'memo' | 'costumeId'>>,
+  patch: Partial<Pick<EpisodeCharacterLink, 'memo' | 'costumeIds'>>,
 ): Map<string, EpisodeCharacterLink[]> {
   const next = new Map(links);
   const arr = (next.get(characterId) ?? []).slice();
@@ -1036,7 +1038,7 @@ function upsertLink(
   if (idx >= 0) {
     arr[idx] = { ...arr[idx], ...patch };
   } else {
-    arr.push({ episodeNumber, memo: patch.memo ?? null, costumeId: patch.costumeId ?? null });
+    arr.push({ episodeNumber, memo: patch.memo ?? null, costumeIds: patch.costumeIds ?? [] });
     arr.sort((a, b) => a.episodeNumber - b.episodeNumber);
   }
   next.set(characterId, arr);
@@ -1074,7 +1076,7 @@ function setCharacterEpisodePresence(
   });
 }
 
-function revertLinkFieldIfUnchanged<K extends 'memo' | 'costumeId'>(
+function revertLinkFieldIfUnchanged<K extends 'memo' | 'costumeIds'>(
   links: Map<string, EpisodeCharacterLink[]>,
   characterId: string,
   episodeNumber: number,
@@ -1085,13 +1087,14 @@ function revertLinkFieldIfUnchanged<K extends 'memo' | 'costumeId'>(
   const arr = links.get(characterId);
   if (!arr) return links;
   const idx = arr.findIndex((l) => l.episodeNumber === episodeNumber);
-  if (idx < 0 || arr[idx][field] !== optimisticValue) return links;
+  // costumeIds 는 배열이라 !== 참조 비교로는 '낙관값 그대로'를 판정할 수 없다 — valuesEqual(JSON 딥비교) 사용.
+  if (idx < 0 || !valuesEqual(arr[idx][field], optimisticValue)) return links;
 
   const restored = {
     ...arr[idx],
-    [field]: previousLink ? previousLink[field] : null,
+    [field]: previousLink ? previousLink[field] : (field === 'costumeIds' ? [] : null),
   };
-  if (!previousLink && !restored.memo && !restored.costumeId) {
+  if (!previousLink && !restored.memo && restored.costumeIds.length === 0) {
     return removeLink(links, characterId, episodeNumber);
   }
 

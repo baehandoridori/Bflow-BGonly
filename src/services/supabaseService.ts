@@ -847,6 +847,16 @@ export function rowToCharacter(rawRow: CharacterRow | Record<string, unknown>): 
 }
 
 /** DB row(snake_case) → 도메인 CharacterCostume(camelCase). */
+/**
+ * costume_ids 배열 우선, 비어 있으면 구버전 costume_id 스칼라 폴백 (피드백 42 롤아웃 호환).
+ * 문자열 요소만 통과 — JSONB 손상/타 타입 방어.
+ */
+export function normalizeCostumeIds(costumeIds: unknown, costumeId: unknown): string[] {
+  const arr = Array.isArray(costumeIds) ? costumeIds.filter((v): v is string => typeof v === 'string') : [];
+  if (arr.length > 0) return arr;
+  return typeof costumeId === 'string' && costumeId ? [costumeId] : [];
+}
+
 export function rowToCostume(rawRow: CharacterCostumeRow | Record<string, unknown>): CharacterCostume {
   // IPC/realtime 경계 신뢰 지점 — 구조는 CharacterCostumeRow(snake_case 컬럼)로 간주하고,
   // 구버전 스키마 호환 fallback(assignee 승계 등)은 아래 로직이 담당한다.
@@ -887,12 +897,12 @@ export async function loadCharacterCostumes(): Promise<CharacterCostume[]> {
   return (rows ?? []).map(rowToCostume);
 }
 
-/** 캐릭터-에피소드 매핑 → { characterId, episodeNumber, memo, costumeId } 목록. */
+/** 캐릭터-에피소드 매핑 → { characterId, episodeNumber, memo, costumeIds } 목록. */
 export async function loadEpisodeCharacterMap(): Promise<{
   characterId: string;
   episodeNumber: number;
   memo: string | null;
-  costumeId: string | null;
+  costumeIds: string[];
 }[]> {
   const rows = await window.electronAPI.supabaseLoadEpisodeCharacterMap();
   return (rows ?? [])
@@ -901,7 +911,7 @@ export async function loadEpisodeCharacterMap(): Promise<{
       characterId: r.character_id,
       episodeNumber: r.episode_number,
       memo: r.memo ?? null,
-      costumeId: r.costume_id ?? null,
+      costumeIds: normalizeCostumeIds(r.costume_ids, r.costume_id),
     }));
 }
 
@@ -1112,11 +1122,11 @@ export async function unlinkCharacterEpisode(episodeNumber: number, characterId:
   await window.electronAPI.supabaseUnlinkCharacterEpisode(episodeNumber, characterId);
 }
 
-/** 캐릭터-에피소드 매핑의 이 편 전용 필드 수정 (memo / costumeId). */
+/** 캐릭터-에피소드 매핑의 이 편 전용 필드 수정 (memo / costumeIds). */
 export async function updateEpisodeCharacterMapping(
   episodeNumber: number,
   characterId: string,
-  updates: { memo?: string | null; costumeId?: string | null },
+  updates: { memo?: string | null; costumeIds?: string[] },
 ): Promise<void> {
   await window.electronAPI.supabaseUpdateEpisodeCharacterMap(episodeNumber, characterId, updates);
 }

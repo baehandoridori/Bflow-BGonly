@@ -3606,7 +3606,7 @@ ipcMain.handle('supabase:update-episode-character-map', wrapIpc(async (
   _e: unknown,
   episodeNumber: number,
   characterId: string,
-  updates: { memo?: string | null; costumeId?: string | null },
+  updates: { memo?: string | null; costumeIds?: string[] },
 ) => {
   return sbUpdateEpisodeCharacterMapping(episodeNumber, characterId, updates);
 }));
