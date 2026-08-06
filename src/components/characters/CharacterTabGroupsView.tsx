@@ -21,6 +21,7 @@ export function CharacterTabGroupsView({
   byCharacter,
   viewMode,
   searching,
+  dragEnabled: allowDrag = true,
   onOpen,
   onContextMenu,
   onUpdateGroups,
@@ -32,6 +33,11 @@ export function CharacterTabGroupsView({
   viewMode: CharacterBoardViewMode;
   /** 검색어·태그 필터가 걸린 상태 — 빈 섹션 문구를 "필터 때문"으로 구분해 보여준다. */
   searching: boolean;
+  /**
+   * 카드 드래그(그룹 배치·순서 변경) 허용 여부. 일부 카드만 보이는 필터 상태에서 배치를 바꾸면
+   * 숨겨진 카드까지 순서가 뒤엉키므로 보드가 필터 상태를 그대로 넘긴다 (코덱스 1차 P2). 기본 허용.
+   */
+  dragEnabled?: boolean;
   onOpen: (characterId: string, costumeId?: string) => void;
   onContextMenu: (characterId: string, event: ReactMouseEvent<HTMLButtonElement>, costumeId?: string) => void;
   onUpdateGroups: (groups: CharacterBoardTabGroup[]) => void;
@@ -87,7 +93,7 @@ export function CharacterTabGroupsView({
   // 미분류 = 표시 대상 중 어느 그룹에도 없는 캐릭터. (그룹에 남은 삭제된 캐릭터 id 는 byId 조회에서 자연 제외.)
   const ungrouped = characters.filter((c) => !grouped.has(c.id));
 
-  const dragEnabled = viewMode !== 'list';
+  const dragEnabled = viewMode !== 'list' && allowDrag;
 
   const dropOnGroup = (groupId: string | null) => {
     const dragId = draggingIdRef.current;

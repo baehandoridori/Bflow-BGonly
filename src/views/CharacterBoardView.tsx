@@ -10,7 +10,7 @@
  */
 
 import { useCallback, useContext, useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react';
-import { Archive, ChevronDown, Plus, Image as ImageIcon, Search, Ruler, LayoutGrid, Grid3x3, List, ExternalLink, X } from 'lucide-react';
+import { Archive, ChevronDown, Plus, Image as ImageIcon, Search, Ruler, LayoutGrid, Grid3x3, List, ExternalLink, UserRound, X } from 'lucide-react';
 import { useCharacterBoardStore } from '@/stores/useCharacterBoardStore';
 import { moveCostumeInOrder, dropEdgeFor } from '@/stores/characterBoardStoreHelpers';
 import { useAppStore } from '@/stores/useAppStore';
@@ -27,9 +27,19 @@ import { IsPopupContext } from '@/components/widgets/Widget';
 import { CharacterTabGroupsView } from '@/components/characters/CharacterTabGroupsView';
 import { ConfirmDialog } from '@/components/common/ConfirmDialog';
 import { effectiveHeightPx } from '@/utils/characterHeight';
+import { GlassDropdown } from '@/components/common/GlassDropdown';
+import { matchesCharacterStatusFilter, collectCharacterAssignees, type CharacterStatusFilterValue } from '@/utils/characterStatusFilter';
 import type { CharacterBoardTab } from '@/types';
 
 type BoardTab = 'board' | 'episode-assets';
+
+// 피드백 48: 씬 카드 필터와 같은 라벨 체계 — 캐릭터 보드 로컬(씬의 전역 statusFilter 와 분리).
+const CHARACTER_STATUS_FILTER_LABELS: Record<CharacterStatusFilterValue, string> = {
+  all: '전체',
+  'not-started': '미착수',
+  'in-progress': '진행중',
+  done: '완료',
+};
 
 /** 보기 방식 토글 옵션 (피드백 40). */
 const VIEW_MODE_OPTIONS: { mode: CharacterBoardViewMode; label: string; Icon: typeof LayoutGrid }[] = [
@@ -184,6 +194,9 @@ function CharacterGrid({ onAdd, pendingOpenId, onConsumeOpen }: { onAdd: () => v
   const [detailRequest, setDetailRequest] = useState<{ id: string; nonce: number; costumeId?: string } | null>(null);
   const [query, setQuery] = useState('');
   const [activeTags, setActiveTags] = useState<string[]>([]);
+  // 작업자/상태 필터 (피드백 48) — 검색·태그와 같은 비영속 로컬 상태.
+  const [assigneeFilter, setAssigneeFilter] = useState<string | null>(null);
+  const [statusFilter, setStatusFilter] = useState<CharacterStatusFilterValue>('all');
   const [cardMenu, setCardMenu] = useState<{ characterId: string; x: number; y: number; costumeId?: string } | null>(null);
   const [showArchived, setShowArchived] = useState(false);
   const [heightCompareMode, setHeightCompareMode] = useState(false); // '키 비교 보기'(T2-3)
@@ -234,6 +247,12 @@ function CharacterGrid({ onAdd, pendingOpenId, onConsumeOpen }: { onAdd: () => v
     return [...set].sort((a, b) => a.localeCompare(b, 'ko'));
   }, [byCharacter]);
 
+  // 작업자 옵션 — 전체 복장의 담당자 유니온(캐릭터에 배정된 사람만 의미 있음).
+  const assigneeOptions = useMemo(
+    () => collectCharacterAssignees([...byCharacter.values()].flat()).map((name) => ({ value: name, label: name })),
+    [byCharacter],
+  );
+
   function characterTags(characterId: string): Set<string> {
     const set = new Set<string>();
     for (const c of byCharacter.get(characterId) ?? []) { for (const t of c.structureTags) set.add(t); for (const t of c.assetTags) set.add(t); }
@@ -259,10 +278,11 @@ function CharacterGrid({ onAdd, pendingOpenId, onConsumeOpen }: { onAdd: () => v
     return visibleCharacters.filter((c) => {
       if (q && !c.name.toLowerCase().includes(q) && !indexedIds?.has(c.id)) return false;
       if (activeTags.length > 0) { const tags = characterTags(c.id); if (!activeTags.every((t) => tags.has(t))) return false; }
+      if (!matchesCharacterStatusFilter(byCharacter.get(c.id) ?? [], statusFilter, assigneeFilter)) return false;
       return true;
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [visibleCharacters, query, activeTags, byCharacter, indexedIds]);
+  }, [visibleCharacters, query, activeTags, byCharacter, indexedIds, statusFilter, assigneeFilter]);
   // 키 비교 보기 (피드백 47: 유효값 = 대표 이미지 복장의 오버라이드 ?? 대표 키): 최댓값을 300px 에 매핑, 나머지는 비례(clamp 90~300). 미설정은 기본 170.
   //   카드 휠로 다른 복장을 보는 중에도 라인업이 출렁이지 않게 캐릭터당 '대표(첫 이미지) 복장' 기준으로 고정한다.
   const displayHeightById = useMemo(() => {
@@ -344,7 +364,7 @@ function CharacterGrid({ onAdd, pendingOpenId, onConsumeOpen }: { onAdd: () => v
   // ─── 카드 드래그 재배치(F29) ───
   const reorderCharacters = useCharacterBoardStore((s) => s.reorderCharacters);
   // 검색/태그 필터·키 비교·보관 목록에서는 비활성 (파생 정렬/부분 목록 위 재배치는 비직관적).
-  const cardDragEnabled = viewMode !== 'list' && !showArchived && !heightCompareMode && !query.trim() && activeTags.length === 0;
+  const cardDragEnabled = viewMode !== 'list' && !showArchived && !heightCompareMode && !query.trim() && activeTags.length === 0 && !assigneeFilter && statusFilter === 'all';
   const [draggingCardId, setDraggingCardId] = useState<string | null>(null);
   const [dropTargetId, setDropTargetId] = useState<string | null>(null);
   const draggingCardIdRef = useRef<string | null>(null); // drop 시 stale closure 회피 — 복장 드래그와 동일 ref 병행 패턴.
@@ -481,6 +501,38 @@ function CharacterGrid({ onAdd, pendingOpenId, onConsumeOpen }: { onAdd: () => v
             </button>
           </div>
         </div>
+        {/* 작업자/상태 필터 (피드백 48) — 씬 카드 필터와 같은 구성 */}
+        <div className="flex flex-wrap items-center gap-3">
+          <GlassDropdown
+            options={assigneeOptions}
+            value={assigneeFilter ?? '__all__'}
+            onChange={(v) => setAssigneeFilter(v === '__all__' ? null : v)}
+            allOption={{ value: '__all__', label: '전체' }}
+            label="작업자 선택"
+            triggerLabel={assigneeFilter ?? '작업자: 전체'}
+            icon={<UserRound size={14} className="text-text-secondary" />}
+            minWidth={130}
+          />
+          <div className="w-px h-7 bg-bg-border" />
+          {(['all', 'not-started', 'in-progress', 'done'] as CharacterStatusFilterValue[]).map((f) => (
+            <button
+              key={f}
+              type="button"
+              onClick={() => setStatusFilter(f)}
+              className={cn(
+                'inline-flex items-center justify-center px-3 py-1.5 rounded-lg text-sm font-medium transition-colors cursor-pointer',
+                statusFilter === f
+                  ? f === 'done' ? 'bg-green-500/20 text-green-400'
+                    : f === 'not-started' ? 'bg-red-500/20 text-red-400'
+                    : f === 'in-progress' ? 'bg-yellow-500/20 text-yellow-400'
+                    : 'bg-accent/20 text-accent'
+                  : 'text-text-secondary hover:text-text-primary',
+              )}
+            >
+              {CHARACTER_STATUS_FILTER_LABELS[f]}
+            </button>
+          ))}
+        </div>
         {allTags.length > 0 && (
           <div>
             <button
@@ -518,7 +570,8 @@ function CharacterGrid({ onAdd, pendingOpenId, onConsumeOpen }: { onAdd: () => v
           characters={filtered}
           byCharacter={byCharacter}
           viewMode={viewMode}
-          searching={Boolean(query.trim()) || activeTags.length > 0}
+          searching={Boolean(query.trim()) || activeTags.length > 0 || !!assigneeFilter || statusFilter !== 'all'}
+          dragEnabled={cardDragEnabled}
           onOpen={openCharacterDetail}
           onContextMenu={openCardContextMenu}
           onUpdateGroups={(groups) => void updateTabGroups(activeTab.id, groups)}
@@ -541,7 +594,7 @@ function CharacterGrid({ onAdd, pendingOpenId, onConsumeOpen }: { onAdd: () => v
           <div className="text-sm">조건에 맞는 캐릭터가 없어요.</div>
           <button
             type="button"
-            onClick={() => { setQuery(''); setActiveTags([]); }}
+            onClick={() => { setQuery(''); setActiveTags([]); setAssigneeFilter(null); setStatusFilter('all'); }}
             className="rounded-lg border border-bg-border px-3 py-2 text-sm text-text-primary hover:border-accent/50 hover:bg-bg-border/30"
           >
             검색·필터 초기화
@@ -619,7 +672,7 @@ function CharacterGrid({ onAdd, pendingOpenId, onConsumeOpen }: { onAdd: () => v
           initialCharacterId={detailCharacter.id}
           initialCostumeId={detailRequest.costumeId}
           archivedMode={showArchived}
-          filteredIds={query.trim() || activeTags.length > 0 ? filtered.map((c) => c.id) : undefined}
+          filteredIds={query.trim() || activeTags.length > 0 || assigneeFilter || statusFilter !== 'all' ? filtered.map((c) => c.id) : undefined}
           onClose={() => setDetailRequest(null)}
         />
       )}
