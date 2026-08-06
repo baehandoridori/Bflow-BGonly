@@ -696,6 +696,9 @@ function CharacterGrid({ onAdd, pendingOpenId, pendingOpenCostumeId, pendingOpen
 export function CharacterBoardView() {
   const ensureLoadedAndRealtime = useCharacterBoardStore((s) => s.ensureLoadedAndRealtime);
   const loaded = useCharacterBoardStore((s) => s.loaded);
+  // 이미 로드된 뒤 다른 뷰를 다녀오면 ensureLoadedAndRealtime 이 조용한 재조회를 돌린다 — 이때도 loaded 는 true 라
+  //   그대로 소비하면 낡은 복장 목록으로 판정한다(원격 삭제/버전 변경 안내 누락). 재조회가 끝난 뒤 소비한다(코덱스 5차 P2).
+  const boardLoading = useCharacterBoardStore((s) => s.loading);
   const pendingCharacterBoardRequest = useAppStore((s) => s.pendingCharacterBoardRequest);
   const setPendingCharacterBoardRequest = useAppStore((s) => s.setPendingCharacterBoardRequest);
 
@@ -715,13 +718,13 @@ export function CharacterBoardView() {
   }, [ensureLoadedAndRealtime]);
 
   useEffect(() => {
-    if (!pendingCharacterBoardRequest || !loaded) return;
+    if (!pendingCharacterBoardRequest || !loaded || boardLoading) return;
     setTab('board');
     setPendingOpenId(pendingCharacterBoardRequest.characterId);
     setPendingOpenCostumeId(pendingCharacterBoardRequest.costumeId);
     setPendingOpenCostumeVersionNo(pendingCharacterBoardRequest.costumeVersionNo);
     setPendingCharacterBoardRequest(null);
-  }, [loaded, pendingCharacterBoardRequest, setPendingCharacterBoardRequest]);
+  }, [loaded, boardLoading, pendingCharacterBoardRequest, setPendingCharacterBoardRequest]);
 
   // 미소비 딥링크 요청 청소는 useAppStore.setView(다른 뷰로 이동 시)와 goBackNavigation이 담당 —
   //   언마운트 cleanup 방식은 StrictMode 이중 마운트에서 정상 요청까지 지워 사용하지 않는다.

@@ -81,6 +81,19 @@ test('피드백 49: 복장 전환 요청은 nonce 당 1회만 소비 (코덱스 
   assert.match(modal, /consumedCostumeNonceRef\.current = costumeRequest\.nonce;/);
 });
 
+test('피드백 49: 조용한 재조회가 끝난 뒤 딥링크를 소비 + 알림은 태그 원문을 노출하지 않음 (코덱스 5차 P2)', () => {
+  const board = readFileSync('src/views/CharacterBoardView.tsx', 'utf8');
+  // loaded 만 보면 재조회 중 낡은 복장 목록으로 판정해 삭제·버전 안내가 어긋난다.
+  assert.match(board, /const boardLoading = useCharacterBoardStore\(\(s\) => s\.loading\)/);
+  assert.match(board, /if \(!pendingCharacterBoardRequest \|\| !loaded \|\| boardLoading\) return;/);
+  // 멘션 슬랙 알림은 저장 원문이 아니라 '#라벨' 평문으로 나간다.
+  const panel = readFileSync('src/components/scenes/CommentPanel.tsx', 'utf8');
+  assert.doesNotMatch(panel, /commentText: comment\.text,/);
+  assert.match(panel, /commentText: stripEntityTokens\(comment\.text\)/);
+  const revisionThread = readFileSync('src/components/scenes/RevisionCommentThread.tsx', 'utf8');
+  assert.match(revisionThread, /commentText: stripEntityTokens\(newComment\.text\)/);
+});
+
 test('피드백 49: 모달 밖 이동도 떠나온 화면을 뒤로가기 스택에 기록 (코덱스 3차 P2)', () => {
   const nav = readFileSync('src/utils/hashNavigation.ts', 'utf8');
   // 씬·파트·화 분기는 navigateToSceneView 가 기록한다 — costume 분기도 setView 앞에서 같은 기록을 남겨야 한다.

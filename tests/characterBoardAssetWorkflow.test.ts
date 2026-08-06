@@ -387,7 +387,8 @@ test('spotlight opens character board entries through a store-backed pending req
   assert.match(spotlight, /placeholder="씬번호, 담당자, 캐릭터, 에피소드 검색\.\.\."/);
 
   assert.match(characterBoard, /pendingCharacterBoardRequest/);
-  assert.match(characterBoard, /if \(!pendingCharacterBoardRequest \|\| !loaded\) return;/);
+  // 피드백 49(코덱스 5차 P2): 조용한 재조회 중에는 낡은 목록으로 판정하지 않도록 boardLoading 도 함께 본다.
+  assert.match(characterBoard, /if \(!pendingCharacterBoardRequest \|\| !loaded \|\| boardLoading\) return;/);
   assert.match(characterBoard, /setPendingOpenId\(pendingCharacterBoardRequest\.characterId\)/);
   assert.match(characterBoard, /setPendingCharacterBoardRequest\(null\)/);
   assert.ok(characterBoard.includes('key={`${detailCharacter.id}:${detailRequest.nonce}`}'));

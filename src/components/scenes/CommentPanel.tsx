@@ -35,6 +35,7 @@ import { useHashtagAutocomplete } from '@/hooks/useHashtagAutocomplete';
 import { navigateToHashTarget } from '@/utils/hashNavigation';
 import type { HashTarget } from '@/utils/hashEntity';
 import type { HashCandidate } from '@/utils/hashtagCandidates';
+import { stripEntityTokens } from '@/utils/entityTokens';
 import {
   COMMENT_READ_STATE_EVENT,
   getCommentReadStateForUser,
@@ -1361,7 +1362,8 @@ export function CommentPanel({
           const target = users.find(u => u.name === mentionedName);
           if (target?.slackId && target.slackId !== currentUser.slackId) {
             sendMentionWebhook({
-              commentText: comment.text,
+              // 슬랙 알림에는 저장 원문 대신 사람이 읽는 형태로 — 태그가 '[#라벨](b…:UUID…)' 로 노출되지 않게 한다 (코덱스 5차 P2).
+              commentText: stripEntityTokens(comment.text),
               episodeLabel: epLabel,
               sceneId,
               partLabel,
@@ -1635,7 +1637,8 @@ export function CommentPanel({
           const target = users.find(u => u.name === mentionedName);
           if (target?.slackId && target.slackId !== currentUser.slackId) {
             sendMentionWebhook({
-              commentText: comment.text,
+              // 슬랙 알림에는 저장 원문 대신 사람이 읽는 형태로 — 태그가 '[#라벨](b…:UUID…)' 로 노출되지 않게 한다 (코덱스 5차 P2).
+              commentText: stripEntityTokens(comment.text),
               episodeLabel: epLabel,
               sceneId: threadSceneId,
               partLabel,

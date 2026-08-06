@@ -30,6 +30,7 @@ import { formatCommentTime } from '@/utils/formatTime';
 import * as storageService from '@/services/storageService';
 import { resizeBlob } from '@/utils/imageUtils';
 import { sendMentionWebhook } from '@/services/slackWebhookService';
+import { stripEntityTokens } from '@/utils/entityTokens';
 import { EntityText } from '@/components/common/EntityText';
 import { EntityHighlightOverlay } from '@/components/common/EntityHighlightOverlay';
 import { MentionDropdown } from '@/components/common/MentionDropdown';
@@ -376,7 +377,8 @@ export function RevisionCommentThread({ revisionId, sceneKey, onHashClick, onHas
           const target = users.find(user => user.name === mentionedName);
           if (target?.slackId && target.slackId !== currentUser.slackId) {
             sendMentionWebhook({
-              commentText: newComment.text,
+              // 슬랙 알림에는 저장 원문 대신 사람이 읽는 형태로 — 태그가 '[#라벨](b…:UUID…)' 로 노출되지 않게 한다 (코덱스 5차 P2).
+              commentText: stripEntityTokens(newComment.text),
               episodeLabel: epLabel,
               sceneId,
               partLabel,
