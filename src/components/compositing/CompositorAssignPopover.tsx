@@ -1,0 +1,226 @@
+/**
+ * 담당 컴포지터 지정 팝오버 — 컴포지팅 현황 대시보드 헤더의 '담당 컴포지터' 칩에서 연다.
+ *
+ * 어드민만 연다(호출부 DashHeader 가 게이트). 여러 명을 동시에 지정할 수 있고,
+ * 지정되면 `isCompositorForCompositing` 을 통해 컴포지팅 탭의 단계 변경 권한이 함께 열린다.
+ *
+ * 저장은 설정 탭의 컴포지터 섹션과 같은 서비스 경로를 쓴다:
+ *   setIsCompositor(변경분만) → verifyUserBoolPropAfterSave(재조회·1회 retry) → setUsers(fresh)
+ * verify 가 어긋나면 성공으로 말하지 않고 편집 상태를 유지해 재시도할 수 있게 둔다
+ * (PostgREST 반영 지연·다른 PC 동시 편집 대응).
+ */
+
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { Check, Loader2, X } from 'lucide-react';
+import { toast } from 'sonner';
+import { useAuthStore } from '@/stores/useAuthStore';
+import { setIsCompositor, verifyUserBoolPropAfterSave } from '@/services/userService';
+import { cn } from '@/utils/cn';
+
+export function CompositorAssignPopover({
+  onClose,
+  onSavingChange,
+}: {
+  onClose: () => void;
+  /** 저장 진행 여부를 부모에 알린다 — 부모의 여는 칩도 같이 잠가야 저장 중 unmount 를 막는다. */
+  onSavingChange?: (saving: boolean) => void;
+}) {
+  const allUsers = useAuthStore((s) => s.users);
+  const setUsers = useAuthStore((s) => s.setUsers);
+
+  const initial = useMemo(
+    () => new Set(allUsers.filter((u) => u.isCompositor === true).map((u) => u.id)),
+    [allUsers],
+  );
+  const [selected, setSelected] = useState<Set<string>>(initial);
+  const [saving, setSaving] = useState(false);
+  // 편집 중에는 외부 사용자 목록 갱신(다른 PC 저장·주기적 loadUsers)이 입력을 덮어쓰지 않게 한다.
+  const [dirty, setDirty] = useState(false);
+  const rootRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (dirty) return;
+    setSelected(initial);
+  }, [initial, dirty]);
+
+  // 어떤 경로로든 사라질 때 부모 잠금을 반드시 푼다(잠금이 남으면 칩이 영영 안 눌린다).
+  useEffect(() => () => onSavingChange?.(false), [onSavingChange]);
+
+  // 바깥 클릭 · Esc 로 닫기. 저장 중에는 닫지 않는다(결과 토스트를 놓치지 않도록).
+  useEffect(() => {
+    const onDown = (e: MouseEvent) => {
+      if (saving) return;
+      const target = e.target as HTMLElement | null;
+      // 여는 칩 자체는 바깥으로 치지 않는다 — mousedown 이 click 보다 먼저 와서
+      //   여기서 닫고 곧바로 칩의 토글이 다시 여는 탓에 '눌러서 닫기' 가 안 먹는다.
+      if (target?.closest('[data-compositor-chip]')) return;
+      if (!rootRef.current?.contains(target)) onClose();
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape' || saving) return;
+      // 여기서 Esc 를 소비한다 — document 버블은 window 보다 먼저라, 막지 않으면
+      //   대시보드의 window keydown 핸들러까지 가서 씬 일괄 선택·핀까지 함께 풀린다.
+      e.stopPropagation();
+      onClose();
+    };
+    document.addEventListener('mousedown', onDown);
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('mousedown', onDown);
+      document.removeEventListener('keydown', onKey);
+    };
+  }, [onClose, saving]);
+
+  const sortedUsers = useMemo(
+    () => [...allUsers].sort((a, b) => a.name.localeCompare(b.name, 'ko')),
+    [allUsers],
+  );
+  const changedUsers = allUsers.filter((u) => (u.isCompositor === true) !== selected.has(u.id));
+  const hasChanges = changedUsers.length > 0;
+
+  const toggle = (id: string) => {
+    // 저장 중 변경 금지 — expectedIds·changedUsers 는 저장 시작 시점 스냅샷이라,
+    //   여기서 더 바꾸면 그 편집은 저장되지도 롤백되지도 않은 채 창이 닫힌다.
+    if (saving) return;
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+    setDirty(true);
+  };
+
+  async function handleSave() {
+    if (!hasChanges || saving) return;
+    setSaving(true);
+    onSavingChange?.(true);
+    const expectedIds = new Set(selected); // 비동기 전 스냅샷
+    try {
+      // 사용자별 개별 요청이라 일부만 성공할 수 있다. 하나가 실패했다고 곧장 catch 로 빠지면
+      //   이미 커밋된 쓰기는 그대로 남는데 화면은 '실패' 만 말해 실제 DB 와 어긋난다.
+      //   되돌리기(보상 롤백)도 답이 아니다 — 롤백 자체가 실패할 수 있고, 그 사이 다른 관리자가
+      //   바꾼 값을 덮을 수 있다. 그래서 성패와 무관하게 항상 실제 상태를 다시 읽어 화면을 맞추고,
+      //   남은 차이는 그대로 두어 '다시 저장' 으로 이어서 처리하게 한다.
+      const results = await Promise.allSettled(
+        changedUsers.map((u) => setIsCompositor(u.id, selected.has(u.id))),
+      );
+      const failedNames = results
+        .map((r, i) => (r.status === 'rejected' ? changedUsers[i].name : null))
+        .filter((n): n is string => n !== null);
+      if (failedNames.length > 0) {
+        console.error('[CompositorAssignPopover] 일부 저장 실패', {
+          failed: failedNames,
+          reasons: results.filter((r) => r.status === 'rejected').map((r) => (r as PromiseRejectedResult).reason),
+        });
+      }
+
+      const { fresh, mismatched, diff } = await verifyUserBoolPropAfterSave(expectedIds, 'isCompositor');
+      setUsers(fresh); // 부분 저장이든 아니든 화면은 항상 실제 DB 상태를 보여준다
+
+      if (failedNames.length > 0) {
+        toast.error(
+          `${failedNames.join(', ')} 저장에 실패했어요. 나머지는 반영됐고, 다시 저장하면 남은 것만 이어서 처리돼요.`,
+          { duration: 10000 },
+        );
+        return; // dirty 유지 · 팝오버 유지 → 즉시 재시도
+      }
+
+      if (mismatched) {
+        const missing = diff.missing.map((u) => u.name).join(', ');
+        const extra = diff.extra.map((u) => u.name).join(', ');
+        console.warn('[CompositorAssignPopover] verify mismatch', { missing, extra });
+        toast.error(
+          missing
+            ? `${missing} 은(는) 저장되지 않았어요. 잠시 후 다시 시도해주세요.`
+            : `${extra} 이(가) 지정된 채로 남아있어요. 확인 후 다시 저장해주세요.`,
+          { duration: 10000 },
+        );
+        return; // dirty 유지 · 팝오버 유지 → 즉시 재시도
+      }
+
+      setDirty(false);
+      toast.success(`담당 컴포지터 ${expectedIds.size}명을 저장했어요.`);
+      onClose();
+    } catch (err) {
+      // 여기까지 오는 건 verify 단계(재조회) 실패 — 쓰기 결과는 알 수 없으므로 편집 상태를 남긴다.
+      console.error('[CompositorAssignPopover] 저장 확인 실패:', err);
+      toast.error('저장 결과를 확인하지 못했어요. 잠시 후 다시 저장해 확인해주세요.', { duration: 10000 });
+    } finally {
+      setSaving(false);
+      onSavingChange?.(false);
+    }
+  }
+
+  return (
+    <div
+      ref={rootRef}
+      role="dialog"
+      aria-label="담당 컴포지터 지정"
+      className="absolute right-0 top-[calc(100%+8px)] z-50 w-64 rounded-xl border border-bg-border bg-bg-card shadow-[0_18px_40px_rgb(var(--color-shadow)/var(--shadow-alpha))]"
+    >
+      <div className="flex items-center justify-between px-3 py-2.5 border-b border-bg-border/60">
+        <span className="text-[11px] font-bold text-text-primary">담당 컴포지터 지정</span>
+        {/* 저장 중에는 닫지 않는다 — 바깥 클릭·Esc 와 같은 규칙.
+            실패·검증 불일치 때 선택 의도가 남아 있어야 에러 토스트의 '다시 시도' 가 의미가 있다. */}
+        <button
+          type="button"
+          onClick={onClose}
+          disabled={saving}
+          aria-label="닫기"
+          className="rounded p-0.5 text-text-secondary hover:text-text-primary hover:bg-bg-border/40 cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-transparent"
+        >
+          <X size={13} />
+        </button>
+      </div>
+
+      <div className="max-h-[260px] overflow-y-auto py-1">
+        {sortedUsers.length === 0 && (
+          <div className="px-3 py-4 text-center text-[11px] text-text-secondary/60">등록된 팀원이 없어요.</div>
+        )}
+        {sortedUsers.map((u) => {
+          const on = selected.has(u.id);
+          return (
+            <button
+              key={u.id}
+              type="button"
+              onClick={() => toggle(u.id)}
+              aria-pressed={on}
+              disabled={saving}
+              className="flex w-full items-center gap-2 px-3 py-1.5 text-left hover:bg-bg-border/30 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-transparent"
+            >
+              <span
+                className={cn(
+                  'flex h-4 w-4 shrink-0 items-center justify-center rounded border',
+                  on ? 'bg-accent border-accent text-white' : 'border-bg-border',
+                )}
+              >
+                {on && <Check size={11} strokeWidth={3} />}
+              </span>
+              <span className={cn('truncate text-[12px]', on ? 'font-semibold text-text-primary' : 'text-text-secondary')}>
+                {u.name}
+              </span>
+            </button>
+          );
+        })}
+      </div>
+
+      <div className="flex items-center justify-between gap-2 px-3 py-2.5 border-t border-bg-border/60">
+        <span className="text-[10px] text-text-secondary tabular-nums">{selected.size}명 선택</span>
+        <button
+          type="button"
+          onClick={handleSave}
+          disabled={!hasChanges || saving}
+          className={cn(
+            'inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-[11px] font-bold transition-colors',
+            hasChanges && !saving
+              ? 'bg-accent text-white hover:opacity-90 cursor-pointer'
+              : 'bg-bg-border/40 text-text-secondary/60 cursor-not-allowed',
+          )}
+        >
+          {saving ? (<><Loader2 size={12} className="animate-spin" />저장 중</>) : '저장'}
+        </button>
+      </div>
+    </div>
+  );
+}

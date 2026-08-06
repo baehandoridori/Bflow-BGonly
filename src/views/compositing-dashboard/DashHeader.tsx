@@ -11,13 +11,14 @@
  * spec: docs/superpowers/specs/2026-05-21-compositing-dashboard-design.md (6.1~6.2)
  */
 
-import { useMemo } from 'react';
-import { ChevronLeft, ChevronRight, RotateCw, Eye, Lock, Unlock, FileText } from 'lucide-react';
+import { useMemo, useState } from 'react';
+import { ChevronLeft, ChevronRight, RotateCw, Eye, Lock, Unlock, FileText, Pencil } from 'lucide-react';
 import { cn } from '@/utils/cn';
 import { useDataStore, compositingKey } from '@/stores/useDataStore';
 import { useAuthStore } from '@/stores/useAuthStore';
 import { useCompositingDashboardStore } from '@/stores/useCompositingDashboardStore';
 import { isCompositorForCompositing, isCompletedStatus } from '@/utils/compositingLabels';
+import { CompositorAssignPopover } from '@/components/compositing/CompositorAssignPopover';
 
 interface DashHeaderProps {
   episodeNumber: number | null;
@@ -75,12 +76,21 @@ export function DashHeader({ episodeNumber, onCascadeReplay }: DashHeaderProps) 
     return Math.round((done / total) * 100);
   }, [compositingStates, episodeNumber, episodes]);
 
-  // 담당 컴포지터 — 본인이 컴포지터면 본인, 아니면 첫 번째 컴포지터.
-  // 추후 EP 별 명시 가능 (spec 17.2 참조).
-  const headCompositor = useMemo(() => {
-    if (viewerIsCompositor && currentUser) return currentUser;
-    return users.find((u) => u.isCompositor) ?? null;
-  }, [users, viewerIsCompositor, currentUser]);
+  // 담당 컴포지터 — 지정된 사람 전원. 본인이 지정돼 있으면 맨 앞으로 올려 '(나)' 를 먼저 보여준다.
+  //   (예전엔 첫 1명만 보여줘서 여러 명 지정해도 헤더에 한 명만 드러났다.)
+  const compositors = useMemo(() => {
+    const assigned = users.filter((u) => u.isCompositor === true);
+    const mine = currentUser ? assigned.filter((u) => u.id === currentUser.id) : [];
+    const others = currentUser ? assigned.filter((u) => u.id !== currentUser.id) : assigned;
+    return [...mine, ...others];
+  }, [users, currentUser]);
+
+  // 지정 UI 는 어드민만. 일반 사용자에게는 지금까지처럼 읽기 전용 칩이다.
+  const canAssignCompositor = currentUser?.role === 'admin';
+  const [assignOpen, setAssignOpen] = useState(false);
+  // 저장 중에는 칩도 잠근다 — 자식의 X·바깥클릭·Esc 를 다 막아도 여기서 닫으면
+  //   팝오버가 unmount 되어 실패 시 선택 의도를 되살릴 수 없다.
+  const [assignSaving, setAssignSaving] = useState(false);
 
   // 보는 사람 — Realtime presence 결과 (Task 3.7 에서 wire). 현재는 빈 배열.
   const viewers: { id: string; name: string }[] = [];
@@ -176,27 +186,70 @@ export function DashHeader({ episodeNumber, onCascadeReplay }: DashHeaderProps) 
 
       {/* 우 : 담당 컴포지터 / 보는 사람 / ↻ */}
       <div className="flex items-center gap-3 shrink-0">
-        {headCompositor && (
-          <div
-            className={cn(
-              'flex items-center gap-2 pl-2 pr-3 py-1.5 rounded-full border',
-              viewerIsCompositor
-                ? 'bg-accent/14 border-accent/45'
-                : 'bg-bg-card border-bg-border',
+        {(compositors.length > 0 || canAssignCompositor) && (
+          <div className="relative">
+            {(() => {
+              const viewerIsAssigned = Boolean(currentUser && compositors.some((u) => u.id === currentUser.id));
+              const label = compositors.length === 0
+                ? '지정 안 됨'
+                : `${compositors[0].name}${compositors.length > 1 ? ` 외 ${compositors.length - 1}` : ''}`;
+              const chipClass = cn(
+                'flex items-center gap-2 pl-2 pr-3 py-1.5 rounded-full border transition-colors',
+                viewerIsCompositor ? 'bg-accent/14 border-accent/45' : 'bg-bg-card border-bg-border',
+                canAssignCompositor && 'cursor-pointer hover:border-accent/60',
+              );
+              const inner = (
+                <>
+                  {compositors.length > 0 ? (
+                    <span className="flex shrink-0">
+                      {compositors.slice(0, 3).map((u, i) => (
+                        <span key={u.id} style={{ marginLeft: i === 0 ? 0 : -7, zIndex: 10 - i }}>
+                          <UserDot name={u.name} />
+                        </span>
+                      ))}
+                    </span>
+                  ) : (
+                    <span className="flex h-[22px] w-[22px] shrink-0 items-center justify-center rounded-full border border-dashed border-bg-border text-[10px] text-text-secondary">?</span>
+                  )}
+                  <div className="flex flex-col leading-tight min-w-0">
+                    <span className="text-[9px] text-text-secondary font-semibold tracking-wider uppercase">
+                      담당 컴포지터{compositors.length > 1 && ` ${compositors.length}명`}
+                    </span>
+                    <span className={cn('text-[11px] font-bold truncate', viewerIsCompositor ? 'text-accent' : 'text-text-primary')}>
+                      {label}
+                      {viewerIsAssigned && <span className="ml-1.5 text-[9px] font-medium opacity-80">(나)</span>}
+                    </span>
+                  </div>
+                  {canAssignCompositor
+                    ? <Pencil size={11} className="text-text-secondary ml-0.5" />
+                    : viewerIsCompositor
+                      ? <Unlock size={11} className="text-accent ml-0.5" />
+                      : <Lock size={11} className="text-text-secondary ml-0.5" />}
+                </>
+              );
+              const tooltip = compositors.length > 0
+                ? `담당 컴포지터: ${compositors.map((u) => u.name).join(', ')}`
+                : '담당 컴포지터가 아직 지정되지 않았어요';
+              return canAssignCompositor ? (
+                <button
+                  type="button"
+                  data-compositor-chip=""
+                  onClick={() => { if (assignSaving) return; setAssignOpen((v) => !v); }}
+                  disabled={assignSaving}
+                  aria-haspopup="dialog"
+                  aria-expanded={assignOpen}
+                  title={assignSaving ? '저장 중이에요' : `${tooltip} — 눌러서 지정`}
+                  className={cn(chipClass, assignSaving && 'cursor-wait')}
+                >
+                  {inner}
+                </button>
+              ) : (
+                <div className={chipClass} title={tooltip}>{inner}</div>
+              );
+            })()}
+            {assignOpen && canAssignCompositor && (
+              <CompositorAssignPopover onClose={() => setAssignOpen(false)} onSavingChange={setAssignSaving} />
             )}
-            title="현재 에피소드의 담당 컴포지터"
-          >
-            <UserDot name={headCompositor.name} />
-            <div className="flex flex-col leading-tight">
-              <span className="text-[9px] text-text-secondary font-semibold tracking-wider uppercase">담당 컴포지터</span>
-              <span className={cn('text-[11px] font-bold', viewerIsCompositor ? 'text-accent' : 'text-text-primary')}>
-                {headCompositor.name}
-                {viewerIsCompositor && <span className="ml-1.5 text-[9px] font-medium opacity-80">(나)</span>}
-              </span>
-            </div>
-            {viewerIsCompositor
-              ? <Unlock size={11} className="text-accent ml-0.5" />
-              : <Lock size={11} className="text-text-secondary ml-0.5" />}
           </div>
         )}
 
