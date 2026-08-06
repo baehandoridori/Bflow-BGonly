@@ -12,9 +12,11 @@ import { useDataStore } from '@/stores/useDataStore';
 interface Params {
   onChange: (next: string) => void;
   inputRef: RefObject<HTMLInputElement | null> | RefObject<HTMLTextAreaElement | null>;
+  /** 피드백 49: 캐릭터 스레드의 복장 후보 등 — 기본 후보(씬/파트/화) 앞에 병합된다. */
+  extraCandidates?: (filter: string) => HashCandidate[];
 }
 
-export function useHashtagAutocomplete({ onChange, inputRef }: Params) {
+export function useHashtagAutocomplete({ onChange, inputRef, extraCandidates }: Params) {
   const [open, setOpen] = useState(false);
   const [activeRange, setActiveRange] = useState<{ start: number; end: number } | null>(null);
   const [filter, setFilter] = useState('');
@@ -24,8 +26,8 @@ export function useHashtagAutocomplete({ onChange, inputRef }: Params) {
 
   // 드롭다운 active(쿼리 감지)일 때만 후보 빌드 — 비활성 시 전체 순회 비용 회피.
   const items = useMemo(
-    () => (open ? buildHashtagCandidates(episodes, episodeTitles, filter) : []),
-    [open, episodes, episodeTitles, filter],
+    () => (open ? [...(extraCandidates?.(filter) ?? []), ...buildHashtagCandidates(episodes, episodeTitles, filter)] : []),
+    [open, episodes, episodeTitles, filter, extraCandidates],
   );
 
   const refresh = useCallback(() => {

@@ -22,7 +22,7 @@ export type EntityToken =
 
 const MENTION_REGEX = /@(\S+)/g;
 // 4c: #씬·파트·화 태그(마크다운 링크식). [#라벨](bscene|bpart|bepisode:...) — 타깃은 parseHashTarget 로 검증.
-const HASH_LINK_REGEX = /\[#([^\]]+)\]\((b(?:scene|part|episode):[^)]+)\)/g;
+const HASH_LINK_REGEX = /\[#([^\]]+)\]\((b(?:scene|part|episode|costume):[^)]+)\)/g;
 
 function tokenizeTextSegment(text: string, userNames: string[]): EntityToken[] {
   const matches: { start: number; end: number; token: EntityToken }[] = [];

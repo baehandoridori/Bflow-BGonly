@@ -55,7 +55,7 @@ export function EntityHashContextMenu({
   const adjustedY = Math.min(y, window.innerHeight - menuHeight - 8);
 
   const kindLabel =
-    target.kind === 'scene' ? '씬' : target.kind === 'part' ? '파트' : '화';
+    target.kind === 'scene' ? '씬' : target.kind === 'part' ? '파트' : target.kind === 'costume' ? '복장' : '화';
 
   return (
     <div

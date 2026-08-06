@@ -19,7 +19,7 @@ interface PartLike { partId: string; scenes: readonly SceneLike[] }
 interface EpisodeLike { episodeNumber: number; title: string; parts: readonly PartLike[] }
 
 export interface HashCandidate {
-  kind: 'scene' | 'part' | 'episode';
+  kind: 'scene' | 'part' | 'episode' | 'costume';
   label: string; // 칩에 보일 짧은 라벨
   context: string; // 드롭다운 부제(중복 구분: 'EP01 A')
   tag: HashTag; // applyHashtag 삽입용
@@ -69,4 +69,28 @@ export function buildHashtagCandidates(
     if (out.length >= limit * 6) break; // 과다 순회 방지
   }
   return out.slice(0, limit);
+}
+
+/** 캐릭터 스레드의 '#' 자동완성용 복장 후보 (피드백 49). 순수 함수 — 기존 buildHashtagCandidates 와 분리해 테스트 격리. */
+export function buildCostumeCandidates(
+  costumes: { id: string; characterId: string; name: string; versionNo: number }[],
+  characterName: string,
+  filter: string,
+): HashCandidate[] {
+  const q = filter.trim().toLowerCase();
+  return costumes
+    .filter((c) => !q || c.name.toLowerCase().includes(q) || `v${c.versionNo}`.includes(q) || characterName.toLowerCase().includes(q))
+    .map((c) => ({
+      kind: 'costume',
+      label: `${c.name} v${c.versionNo}`,
+      context: characterName,
+      tag: {
+        kind: 'costume',
+        label: `${characterName} ${c.name} v${c.versionNo}`,
+        episodeNumber: 0, // costume kind 미사용 — serializeHashTag 가 참조하지 않는다.
+        characterId: c.characterId,
+        costumeId: c.id,
+        versionNo: c.versionNo,
+      },
+    }));
 }

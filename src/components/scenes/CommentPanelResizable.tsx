@@ -53,6 +53,8 @@ interface CommentPanelResizableProps {
   headerRight?: React.ReactNode;
   /** 4c PR2: #씬 칩 클릭 처리 분기(도킹 참조). 없으면 기존 점프. */
   onHashClick?: React.ComponentProps<typeof CommentPanel>['onHashClick'];
+  /** 피드백 49: 캐릭터 스레드의 '#' 자동완성에 복장 후보 병합. */
+  extraHashCandidates?: React.ComponentProps<typeof CommentPanel>['extraHashCandidates'];
   /** 4c PR3: #씬·#파트·#화 칩 우클릭 메뉴. */
   onHashContextMenu?: React.ComponentProps<typeof CommentPanel>['onHashContextMenu'];
   /** 캐릭터 현황판 — 씬 대신 캐릭터 댓글 스레드(char:{id} 키)로 동작. */
@@ -77,6 +79,7 @@ export function CommentPanelResizable(props: CommentPanelResizableProps) {
     headerTitle = '댓글 및 활동',
     headerRight,
     onHashClick,
+    extraHashCandidates,
     onHashContextMenu,
     characterThread,
   } = props;
@@ -293,6 +296,7 @@ export function CommentPanelResizable(props: CommentPanelResizableProps) {
           inlineEvents={inlineEvents}
           quickRevision={quickRevision}
           onHashClick={onHashClick}
+          extraHashCandidates={extraHashCandidates}
           onHashContextMenu={onHashContextMenu}
           characterThread={characterThread}
           onThreadPanelOpenChange={setThreadPanelOpen}

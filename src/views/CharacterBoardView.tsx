@@ -179,7 +179,7 @@ function BoardTabStrip({ tabs, activeTabId, onSelect, onAdd, onRename, onDelete 
   );
 }
 
-function CharacterGrid({ onAdd, pendingOpenId, onConsumeOpen }: { onAdd: () => void; pendingOpenId?: string | null; onConsumeOpen?: () => void }) {
+function CharacterGrid({ onAdd, pendingOpenId, pendingOpenCostumeId, onConsumeOpen }: { onAdd: () => void; pendingOpenId?: string | null; pendingOpenCostumeId?: string; onConsumeOpen?: () => void }) {
   const characters = useCharacterBoardStore((s) => s.characters);
   const byCharacter = useCharacterBoardStore((s) => s.byCharacter);
   const loaded = useCharacterBoardStore((s) => s.loaded);
@@ -227,10 +227,10 @@ function CharacterGrid({ onAdd, pendingOpenId, onConsumeOpen }: { onAdd: () => v
     if (pendingOpenId) {
       const pendingCharacter = characters.find((c) => c.id === pendingOpenId);
       if (pendingCharacter?.status === 'archived') setShowArchived(true);
-      setDetailRequest((prev) => ({ id: pendingOpenId, nonce: (prev?.nonce ?? 0) + 1 }));
+      setDetailRequest((prev) => ({ id: pendingOpenId, nonce: (prev?.nonce ?? 0) + 1, costumeId: pendingOpenCostumeId }));
       onConsumeOpen?.();
     }
-  }, [characters, pendingOpenId, onConsumeOpen]);
+  }, [characters, pendingOpenId, pendingOpenCostumeId, onConsumeOpen]);
 
   const activeCharacters = useMemo(() => characters.filter((c) => c.status !== 'archived'), [characters]);
   const archivedCharacters = useMemo(() => characters.filter((c) => c.status === 'archived'), [characters]);
@@ -689,6 +689,8 @@ export function CharacterBoardView() {
   const [tab, setTab] = useState<BoardTab>('board');
   const [addOpen, setAddOpen] = useState(false);
   const [pendingOpenId, setPendingOpenId] = useState<string | null>(null);
+  // 피드백 49: 복장 태그로 들어온 딥링크는 복장까지 지정한다(없으면 undefined = 기존 동작).
+  const [pendingOpenCostumeId, setPendingOpenCostumeId] = useState<string | undefined>(undefined);
   // 팝업 창 안에서는 "새 창으로" 버튼을 숨긴다 (피드백 36 — 팝업이 팝업을 또 열지 않게).
   const isPopup = useContext(IsPopupContext);
 
@@ -701,6 +703,7 @@ export function CharacterBoardView() {
     if (!pendingCharacterBoardRequest || !loaded) return;
     setTab('board');
     setPendingOpenId(pendingCharacterBoardRequest.characterId);
+    setPendingOpenCostumeId(pendingCharacterBoardRequest.costumeId);
     setPendingCharacterBoardRequest(null);
   }, [loaded, pendingCharacterBoardRequest, setPendingCharacterBoardRequest]);
 
@@ -737,7 +740,12 @@ export function CharacterBoardView() {
 
       <div data-board-scroll="" className="flex-1 min-h-0 overflow-y-auto px-6 pb-6">
         {tab === 'board' ? (
-          <CharacterGrid onAdd={() => setAddOpen(true)} pendingOpenId={pendingOpenId} onConsumeOpen={() => setPendingOpenId(null)} />
+          <CharacterGrid
+            onAdd={() => setAddOpen(true)}
+            pendingOpenId={pendingOpenId}
+            pendingOpenCostumeId={pendingOpenCostumeId}
+            onConsumeOpen={() => { setPendingOpenId(null); setPendingOpenCostumeId(undefined); }}
+          />
         ) : (
           <div className="pt-4">
             <EpisodeAssetBoard onOpenCharacter={(id) => { setTab('board'); setPendingOpenId(id); }} />

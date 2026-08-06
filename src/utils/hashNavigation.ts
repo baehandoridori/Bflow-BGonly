@@ -11,6 +11,12 @@ import { resolveSceneById } from '@/utils/cutScene';
 import type { HashTarget } from '@/utils/hashEntity';
 
 export function navigateToHashTarget(target: HashTarget): void {
+  if (target.kind === 'costume') {
+    // 피드백 49: 캐릭터 현황판으로 이동해 해당 캐릭터·복장을 연다 (SpotlightSearch/MyTasksWidget 의 기존 패턴과 동일).
+    useAppStore.getState().setPendingCharacterBoardRequest({ characterId: target.characterId, costumeId: target.costumeId });
+    useAppStore.getState().setView('character-board');
+    return;
+  }
   if (target.kind === 'episode') {
     // partId: null 로 선택 파트를 비운다 — 안 그러면 보던 파트(예 B)가 남아 엉뚱한 파트로 열림(코덱스 P2).
     // closeModal: 열려 있는 씬 상세 모달을 닫아 목적지 화 목록이 가려지지 않게 한다(코덱스 4차 P2).
