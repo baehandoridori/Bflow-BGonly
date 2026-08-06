@@ -571,6 +571,7 @@ function CharacterGrid({ onAdd, pendingOpenId, onConsumeOpen }: { onAdd: () => v
           byCharacter={byCharacter}
           viewMode={viewMode}
           searching={Boolean(query.trim()) || activeTags.length > 0 || !!assigneeFilter || statusFilter !== 'all'}
+          dragEnabled={cardDragEnabled}
           onOpen={openCharacterDetail}
           onContextMenu={openCardContextMenu}
           onUpdateGroups={(groups) => void updateTabGroups(activeTab.id, groups)}

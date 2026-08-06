@@ -11,16 +11,18 @@ type StageLike = {
   riggingStage: string;
   designAssignee: string | null;
   riggingAssignee: string | null;
-  assignee: string | null;
 };
 
-/** 이 사람에게 배정된 트랙의 단계만 모은다. 레거시 assignee 필드는 양 트랙 겸용으로 본다. */
+/**
+ * 이 사람에게 배정된 트랙의 단계만 모은다 (트랙별 담당자 필드 기준).
+ * 레거시 assignee 는 보지 않는다 — 구버전 스키마 row 는 rowToCostume 이 이미 두 트랙 필드로 승계하고,
+ * 컬럼이 있는 row 에서 트랙 담당자를 비운 것은 '해제'라는 뜻이라 레거시 값으로 되살리면 안 된다(코덱스 1차 P2).
+ */
 function tracksForAssignee(costumes: StageLike[], assigneeName: string): string[] {
   const stages: string[] = [];
   for (const c of costumes) {
-    const legacy = parseAssigneeNames(c.assignee).includes(assigneeName);
-    if (legacy || parseAssigneeNames(c.designAssignee).includes(assigneeName)) stages.push(c.designStage);
-    if (legacy || parseAssigneeNames(c.riggingAssignee).includes(assigneeName)) stages.push(c.riggingStage);
+    if (parseAssigneeNames(c.designAssignee).includes(assigneeName)) stages.push(c.designStage);
+    if (parseAssigneeNames(c.riggingAssignee).includes(assigneeName)) stages.push(c.riggingStage);
   }
   return stages;
 }
@@ -58,13 +60,15 @@ export function matchesCharacterStatusFilter(
   return characterWorkStatus(costumes, assigneeName) === filter;
 }
 
-/** 작업자 드롭다운 옵션 — 전체 복장의 담당자(디자인·리깅·레거시) 유니온, 한국어 정렬. */
+/**
+ * 작업자 드롭다운 옵션 — 전체 복장의 트랙 담당자(디자인·리깅) 유니온, 한국어 정렬.
+ * tracksForAssignee 와 같은 필드만 본다 — 목록에는 뜨는데 고르면 0건인 이름이 생기지 않게(코덱스 1차 P2).
+ */
 export function collectCharacterAssignees(costumes: StageLike[]): string[] {
   const set = new Set<string>();
   for (const c of costumes) {
     for (const n of parseAssigneeNames(c.designAssignee)) set.add(n);
     for (const n of parseAssigneeNames(c.riggingAssignee)) set.add(n);
-    for (const n of parseAssigneeNames(c.assignee)) set.add(n);
   }
   return [...set].sort((a, b) => a.localeCompare(b, 'ko'));
 }
