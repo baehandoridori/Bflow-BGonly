@@ -24,7 +24,7 @@ import { EpSinglePartWidget } from '@/components/widgets/episode/EpSinglePartWid
 import { WidgetIdContext, IsPopupContext } from '@/components/widgets/Widget';
 import { GradientBackdrop } from '@/components/common/GradientBackdrop';
 import { loadPreferences, loadTheme } from '@/services/settingsService';
-import { loadSession, loadUsers } from '@/services/userService';
+import { loadSession, loadUsers, setUsersSheetsMode } from '@/services/userService';
 import { applyPreferencesToDOM } from '@/utils/typography';
 import { readAll, checkConnection, readMetadata } from '@/services/supabaseService';
 import { connectGas, loadGasConfig } from '@/services/gasConfigService';
@@ -328,6 +328,7 @@ export function WidgetPopup({ widgetId, extraParams }: { widgetId: string; extra
 
         const connected = await checkConnection();
         if (connected) {
+          setUsersSheetsMode(true); // 피드백 45: 재연결 후에도 아래 loadUsers() 가 원격 목록을 읽도록.
           const episodes = await readAll();
           useDataStore.getState().setEpisodes(episodes);
           // 메타데이터 일괄 로딩 (Supabase)
@@ -350,6 +351,7 @@ export function WidgetPopup({ widgetId, extraParams }: { widgetId: string; extra
           if (urlToConnect) {
             const result = await connectGas(urlToConnect);
             if (result.ok) {
+              setUsersSheetsMode(true); // 피드백 45: GAS 폴백 재연결 성공 시에도 동일.
               const episodes = await readAll();
               useDataStore.getState().setEpisodes(episodes);
             }
@@ -495,6 +497,9 @@ export function WidgetPopup({ widgetId, extraParams }: { widgetId: string; extra
           }
         }
         useAppStore.getState().setDataConnected(connected);
+        // 피드백 45: 팝업 렌더러는 별도 프로세스라 App.tsx 의 setUsersSheetsMode(true) 가 적용되지 않는다 —
+        //   연결 성공 시 켜야 아래 loadUsers() 가 Supabase 사용자 디렉터리(전체 팀원)를 읽는다.
+        if (connected) setUsersSheetsMode(true);
 
         // 휴가 API 자동 연결
         const vacConfig = await loadVacationConfig();

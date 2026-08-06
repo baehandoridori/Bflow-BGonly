@@ -126,3 +126,13 @@ test('정식 공개: 캐릭터 현황판 게이팅 잔재 없음', () => {
   const mock = readFileSync('src/mocks/devElectronAPI.ts', 'utf8');
   assert.doesNotMatch(mock, /feature-access/);
 });
+
+test('피드백 45: 팝업 렌더러도 사용자 디렉터리 IPC 모드를 켠다', () => {
+  const popup = readFileSync('src/views/WidgetPopup.tsx', 'utf8');
+  // 팝업은 별도 프로세스 — App.tsx 의 플래그가 적용되지 않아 직접 켜야 전체 팀원 목록이 뜬다.
+  assert.match(popup, /import \{ loadSession, loadUsers, setUsersSheetsMode \} from '@\/services\/userService';/);
+  assert.match(popup, /if \(connected\) setUsersSheetsMode\(true\);/);
+  // reloadData 의 두 성공 분기(재확인·GAS 폴백)에도 각각 켠다.
+  const flagCount = popup.split('setUsersSheetsMode(true)').length - 1;
+  assert.ok(flagCount >= 3, `setUsersSheetsMode(true) 호출이 3곳 이상이어야 함 (현재 ${flagCount}곳)`);
+});
