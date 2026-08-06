@@ -4,7 +4,7 @@
 import { readFileSync } from 'node:fs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { buildRiggingBigo, buildJbbjOpenLink } from '../src/services/slackWebhookService.ts';
+import { buildRiggingBigo, buildRiggingContent, buildJbbjOpenLink } from '../src/services/slackWebhookService.ts';
 
 test('buildRiggingBigo: 빈 줄 제거 + trim + 줄바꿈 결합', () => {
   assert.equal(buildRiggingBigo(['a', 'b']), 'a\nb');
@@ -12,6 +12,13 @@ test('buildRiggingBigo: 빈 줄 제거 + trim + 줄바꿈 결합', () => {
   assert.equal(buildRiggingBigo([]), '');
   assert.equal(buildRiggingBigo(['   ']), '');
   assert.equal(buildRiggingBigo(['한 줄만']), '한 줄만');
+});
+
+test('buildRiggingContent: 비고 있으면 내용줄 + 불릿 비고, 없으면 내용줄만 (피드백 43)', () => {
+  assert.equal(buildRiggingContent('"안지상" - "기본 복장" 리깅완료', []), '"안지상" - "기본 복장" 리깅완료');
+  assert.equal(buildRiggingContent('내용줄', ['   ']), '내용줄'); // 공백뿐인 비고도 생략 취급
+  assert.equal(buildRiggingContent('내용줄', ['비고1']), '내용줄\n• 비고1');
+  assert.equal(buildRiggingContent('내용줄', ['비고1', '', ' 비고2 ']), '내용줄\n• 비고1\n• 비고2');
 });
 
 test('B11 전송 계층: main URL/핸들러 + preload + 타입 + mock', () => {
@@ -32,7 +39,7 @@ test('B11 서비스: 워크플로 변수(title/CH_name/Path/bigo/image) 매핑',
   const svc = readFileSync('src/services/slackWebhookService.ts', 'utf8');
   assert.match(svc, /export async function sendRiggingAnnounce/);
   assert.match(svc, /title: params\.title/);
-  assert.match(svc, /CH_name: params\.characterName/);
+  assert.match(svc, /CH_name: buildRiggingContent\(params\.characterName, params\.notes\)/);
   assert.match(svc, /Path: params\.folderPath \? buildJbbjOpenLink\(params\.folderPath\) : ''/);
   assert.match(svc, /bigo: buildRiggingBigo\(params\.notes\)/);
   assert.match(svc, /image: params\.imageUrl \?\? ''/);
