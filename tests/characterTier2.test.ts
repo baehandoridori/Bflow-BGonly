@@ -35,7 +35,8 @@ test('T2-4: 복장 마감일(due_date) — 필드·매퍼·store·입력·나의
   assert.match(electronSupabase, /due_date: string \| null;/);
   assert.match(rendererSupabase, /dueDate: row\.due_date \?\? null/);
   assert.match(rendererSupabase, /snake\.due_date = updates\.dueDate/);
-  assert.match(store, /\| 'dueDate'>>/);
+  // 피드백 47 로 Pick 목록 끝이 heightPx 가 됐다 — dueDate 항목 자체가 남아 있는지만 고정한다.
+  assert.match(store, /\| 'dueDate'/);
   assert.match(costumeDetail, /updateCostumeField\(costume\.id, \{ dueDate: e\.target\.value \|\| null \}\)/);
   assert.match(myCharTasks, /dueDate: costume\.dueDate/);
   assert.match(charTaskRow, /function DueBadge/);

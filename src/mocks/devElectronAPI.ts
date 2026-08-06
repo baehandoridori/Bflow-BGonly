@@ -475,6 +475,7 @@ function seedMockCharacterData(): void {
     assignee: null,
     memo: null,
     due_date: [null, '2026-07-10', null, '2026-07-06'][i] ?? null, // T2-4: 마감 배지 샘플
+    height_px: i === 1 ? 700 : null, // 피드백 47: 복장 키 오버라이드 샘플(나머지는 대표 키를 따름)
     sort_order: i, created_at: now, updated_at: now, created_by: '1',
   }));
 

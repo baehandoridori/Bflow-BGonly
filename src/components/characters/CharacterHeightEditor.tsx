@@ -3,6 +3,7 @@ import { Loader2, X } from 'lucide-react';
 import { toast } from 'sonner';
 import { useCharacterBoardStore } from '@/stores/useCharacterBoardStore';
 import { CHARACTER_LAYER_CLASS } from '@/constants/characterLayers';
+import { effectiveHeightPx } from '@/utils/characterHeight';
 import type { Character, CharacterCostume } from '@/types';
 import {
   DEFAULT_HEIGHT_GUIDES,
@@ -32,6 +33,9 @@ export function CharacterHeightEditor({
 }) {
   const imagesByCostume = useCharacterBoardStore((s) => s.imagesByCostume);
   const setCharacterReferenceHeight = useCharacterBoardStore((s) => s.setCharacterReferenceHeight);
+  const updateCostumeField = useCharacterBoardStore((s) => s.updateCostumeField);
+  // 피드백 47: 저장 대상 — 기본은 기존 동작(대표 키). '이 복장에만'을 고르면 복장 오버라이드에 저장.
+  const [saveTarget, setSaveTarget] = useState<'character' | 'costume'>('character');
 
   // 편집 대상 = 이 복장의 대표 이미지(없으면 첫 이미지). 진입 버튼이 이미지 존재를 보장하지만 방어적으로 처리.
   const image = useMemo(() => {
@@ -89,13 +93,15 @@ export function CharacterHeightEditor({
   const onSave = async () => {
     if (previewPx == null || saving) return;
     setSaving(true);
-    const ok = await setCharacterReferenceHeight(character.id, previewPx);
+    const ok = saveTarget === 'costume'
+      ? await updateCostumeField(costume.id, { heightPx: previewPx })
+      : await setCharacterReferenceHeight(character.id, previewPx);
     setSaving(false);
     if (ok) {
-      toast.success(`기준 키를 ${previewPx}px로 저장했어요`);
+      toast.success(saveTarget === 'costume' ? `이 복장 키를 ${previewPx}px로 저장했어요` : `기준 키를 ${previewPx}px로 저장했어요`);
       onClose();
     }
-    // 실패 시 토스트('키 저장에 실패했어요')와 롤백은 store 가 담당 — 에디터는 열린 채 재시도 가능.
+    // 실패 시 토스트와 롤백은 store 가 담당 — 에디터는 열린 채 재시도 가능.
   };
 
   /** 기준선 1개 — 라벨 + 드래그 손잡이(터치 영역은 선보다 두껍게). */
@@ -172,8 +178,10 @@ export function CharacterHeightEditor({
           <div className="flex flex-col gap-0.5 min-w-0">
             <span className="text-sm text-text-primary font-semibold">
               {previewPx != null ? `키 ${previewPx}px` : '계산 중…'}
-              {character.referenceHeightPx != null && (
-                <span className="ml-2 text-xs font-normal text-text-secondary">(현재 저장값 {character.referenceHeightPx}px)</span>
+              {effectiveHeightPx(character, costume) != null && (
+                <span className="ml-2 text-xs font-normal text-text-secondary">
+                  (현재 저장값 {effectiveHeightPx(character, costume)}px{costume.heightPx != null ? ' · 이 복장' : ' · 대표'})
+                </span>
               )}
             </span>
             {isFallbackBase && (
@@ -183,6 +191,17 @@ export function CharacterHeightEditor({
             )}
           </div>
           <div className="flex items-center gap-2 shrink-0">
+            {/* 저장 대상 (피드백 47) — 기본은 대표 키(기존 동작 유지) */}
+            <div className="flex items-center gap-3 text-xs text-text-secondary">
+              <label className="flex items-center gap-1.5 cursor-pointer">
+                <input type="radio" name="height-save-target" checked={saveTarget === 'character'} onChange={() => setSaveTarget('character')} />
+                대표 키에 저장
+              </label>
+              <label className="flex items-center gap-1.5 cursor-pointer">
+                <input type="radio" name="height-save-target" checked={saveTarget === 'costume'} onChange={() => setSaveTarget('costume')} />
+                이 복장에만 저장
+              </label>
+            </div>
             <button type="button" onClick={onClose} className="px-3 py-1.5 rounded-lg text-sm text-text-secondary hover:bg-bg-border/40">취소</button>
             <button
               type="button"

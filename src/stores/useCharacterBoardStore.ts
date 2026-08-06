@@ -160,7 +160,8 @@ interface CharacterBoardStore {
       | 'designAssignee'
       | 'riggingAssignee'
       | 'memo'
-      | 'dueDate'>>,
+      | 'dueDate'
+      | 'heightPx'>>,
   ) => Promise<boolean>;
   setCostumeTags: (id: string, kind: 'structure' | 'asset', tags: string[]) => Promise<void>;
   setVersion: (id: string, versionNo: number) => Promise<void>;

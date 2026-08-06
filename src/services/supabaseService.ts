@@ -881,6 +881,7 @@ export function rowToCostume(rawRow: CharacterCostumeRow | Record<string, unknow
     assignee: row.assignee ?? null,
     memo: row.memo ?? null,
     dueDate: row.due_date ?? null,
+    heightPx: row.height_px ?? null,
     sortOrder: row.sort_order ?? 0,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
@@ -964,6 +965,7 @@ export async function updateCharacterCostume(
     assignee: string | null;
     memo: string | null;
     dueDate: string | null;
+    heightPx: number | null;
     sortOrder: number;
   }>,
   /**
@@ -988,6 +990,7 @@ export async function updateCharacterCostume(
   if (updates.assignee !== undefined) snake.assignee = updates.assignee;
   if (updates.memo !== undefined) snake.memo = updates.memo;
   if (updates.dueDate !== undefined) snake.due_date = updates.dueDate;
+  if (updates.heightPx !== undefined) snake.height_px = updates.heightPx;
   if (updates.sortOrder !== undefined) snake.sort_order = updates.sortOrder;
   const row = await window.electronAPI.supabaseUpdateCostume(id, snake, logContext);
   return rowToCostume(row);

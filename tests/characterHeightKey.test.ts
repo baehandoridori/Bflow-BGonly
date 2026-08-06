@@ -4,6 +4,7 @@
 import { readFileSync } from 'node:fs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { effectiveHeightPx } from '../src/utils/characterHeight.ts';
 import {
   DEFAULT_HEIGHT_GUIDES,
   MIN_GUIDE_GAP_RATIO,
@@ -87,4 +88,34 @@ test('33-b 배선: 기준 키 드래그 에디터', () => {
   assert.match(detail, /CharacterHeightEditor/);
   const slot = readFileSync('src/components/characters/FeaturedImageSlot.tsx', 'utf8');
   assert.match(slot, /\[data-character-height-editor\]/);
+});
+
+test('피드백 47: effectiveHeightPx — 복장 오버라이드 우선, 없으면 대표 키', () => {
+  assert.equal(effectiveHeightPx({ referenceHeightPx: 600 }, { heightPx: 700 }), 700);
+  assert.equal(effectiveHeightPx({ referenceHeightPx: 600 }, { heightPx: null }), 600);
+  assert.equal(effectiveHeightPx({ referenceHeightPx: 600 }, null), 600);
+  assert.equal(effectiveHeightPx({ referenceHeightPx: null }, { heightPx: null }), null);
+});
+
+test('피드백 47 배선: 복장 키 컬럼 체인 + 에디터 저장 분기 + 키 비교 유효값', () => {
+  const types = readFileSync('src/types/index.ts', 'utf8');
+  assert.match(types, /heightPx: number \| null;/);
+  assert.match(types, /height_px\?: number \| null;/);
+  const svc = readFileSync('src/services/supabaseService.ts', 'utf8');
+  assert.match(svc, /heightPx: row\.height_px \?\? null/);
+  assert.match(svc, /snake\.height_px = updates\.heightPx/);
+  const store = readFileSync('src/stores/useCharacterBoardStore.ts', 'utf8');
+  assert.match(store, /'heightPx'/);
+  const detail = readFileSync('src/components/characters/CostumeDetail.tsx', 'utf8');
+  assert.match(detail, /이 복장 키\(px\)/);
+  assert.match(detail, /updateCostumeField\(costume\.id, \{ heightPx: next \}\)/);
+  const editor = readFileSync('src/components/characters/CharacterHeightEditor.tsx', 'utf8');
+  assert.match(editor, /updateCostumeField\(costume\.id, \{ heightPx: previewPx \}\)/);
+  assert.match(editor, /setCharacterReferenceHeight\(character\.id, previewPx\)/);
+  const board = readFileSync('src/views/CharacterBoardView.tsx', 'utf8');
+  assert.match(board, /effectiveHeightPx/);
+  const mig = readFileSync('DEVLOG/migrations/2026-08-06-costume-height-override.sql', 'utf8');
+  assert.match(mig, /ADD COLUMN IF NOT EXISTS height_px INTEGER/);
+  assert.match(mig, /chk_costume_height/);
+  assert.doesNotMatch(mig, /DROP\s+(TABLE|COLUMN)/i);
 });

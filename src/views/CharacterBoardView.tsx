@@ -26,6 +26,7 @@ import { CharacterListRow } from '@/components/characters/CharacterListRow';
 import { IsPopupContext } from '@/components/widgets/Widget';
 import { CharacterTabGroupsView } from '@/components/characters/CharacterTabGroupsView';
 import { ConfirmDialog } from '@/components/common/ConfirmDialog';
+import { effectiveHeightPx } from '@/utils/characterHeight';
 import type { CharacterBoardTab } from '@/types';
 
 type BoardTab = 'board' | 'episode-assets';
@@ -262,25 +263,35 @@ function CharacterGrid({ onAdd, pendingOpenId, onConsumeOpen }: { onAdd: () => v
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [visibleCharacters, query, activeTags, byCharacter, indexedIds]);
-  // 키 비교 보기: 가시 캐릭터 중 기준 키 최댓값을 300px 에 매핑, 나머지는 비례(clamp 90~300). 미설정은 기본 170.
+  // 키 비교 보기 (피드백 47: 유효값 = 대표 이미지 복장의 오버라이드 ?? 대표 키): 최댓값을 300px 에 매핑, 나머지는 비례(clamp 90~300). 미설정은 기본 170.
+  //   카드 휠로 다른 복장을 보는 중에도 라인업이 출렁이지 않게 캐릭터당 '대표(첫 이미지) 복장' 기준으로 고정한다.
+  const displayHeightById = useMemo(() => {
+    const m = new Map<string, number | null>();
+    for (const c of filtered) {
+      const costumes = byCharacter.get(c.id) ?? [];
+      const rep = costumes.find((k) => k.featuredImageUrl) ?? costumes[0] ?? null;
+      m.set(c.id, effectiveHeightPx(c, rep));
+    }
+    return m;
+  }, [filtered, byCharacter]);
   const maxReferenceHeight = useMemo(() => {
     let m = 0;
-    for (const c of filtered) if (c.referenceHeightPx && c.referenceHeightPx > m) m = c.referenceHeightPx;
+    for (const h of displayHeightById.values()) if (h && h > m) m = h;
     return m;
-  }, [filtered]);
+  }, [displayHeightById]);
 
   // 키 비교 모드에서는 실제 키 라인업이 되도록 기준 키 오름차순 정렬(미설정은 뒤로). 일반 모드는 기존 순서.
   const displayCharacters = useMemo(() => {
     if (!heightCompareMode) return filtered;
     return filtered.slice().sort((a, b) => {
-      const ha = a.referenceHeightPx;
-      const hb = b.referenceHeightPx;
+      const ha = displayHeightById.get(a.id) ?? null;
+      const hb = displayHeightById.get(b.id) ?? null;
       if (ha == null && hb == null) return 0;
       if (ha == null) return 1;
       if (hb == null) return -1;
       return ha - hb;
     });
-  }, [filtered, heightCompareMode]);
+  }, [filtered, heightCompareMode, displayHeightById]);
 
   // 삽입선 방향 계산용 순서(id 배열). 드래그 가능 화면에선 필터가 없어 displayCharacters 가 실제 재배치 순서와 상대 순서가 같다.
   const cardOrderIds = useMemo(() => displayCharacters.map((c) => c.id), [displayCharacters]);
@@ -562,11 +573,11 @@ function CharacterGrid({ onAdd, pendingOpenId, onConsumeOpen }: { onAdd: () => v
                 onContextMenu={openCardContextMenu}
                 compact={!heightCompareMode && viewMode === 'compact'}
                 imageHeightPx={heightCompareMode
-                  ? (c.referenceHeightPx && maxReferenceHeight
-                      ? Math.max(90, Math.min(300, Math.round((300 * c.referenceHeightPx) / maxReferenceHeight)))
+                  ? (displayHeightById.get(c.id) && maxReferenceHeight
+                      ? Math.max(90, Math.min(300, Math.round((300 * (displayHeightById.get(c.id) as number)) / maxReferenceHeight)))
                       : 170)
                   : undefined}
-                referenceUnset={heightCompareMode && !c.referenceHeightPx}
+                referenceUnset={heightCompareMode && !displayHeightById.get(c.id)}
                 onDragStartCard={cardDragEnabled ? handleCardDragStart : undefined}
                 onDragOverCard={cardDragEnabled ? handleCardDragOver : undefined}
                 onDropCard={cardDragEnabled ? handleCardDrop : undefined}

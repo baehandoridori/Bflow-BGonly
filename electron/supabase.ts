@@ -4022,6 +4022,7 @@ export interface CharacterCostumeRow {
   assignee: string | null;
   memo: string | null;
   due_date: string | null;
+  height_px: number | null;
   sort_order: number;
   created_at: string;
   updated_at: string;
