@@ -13,7 +13,12 @@ import type { HashTarget } from '@/utils/hashEntity';
 export function navigateToHashTarget(target: HashTarget): void {
   if (target.kind === 'costume') {
     // 피드백 49: 캐릭터 현황판으로 이동해 해당 캐릭터·복장을 연다 (SpotlightSearch/MyTasksWidget 의 기존 패턴과 동일).
-    useAppStore.getState().setPendingCharacterBoardRequest({ characterId: target.characterId, costumeId: target.costumeId });
+    //   태그 시점 버전도 함께 넘겨 보드가 삭제·버전 변경을 안내한다(코덱스 1차 P2 — 모달 안 클릭과 같은 안내).
+    useAppStore.getState().setPendingCharacterBoardRequest({
+      characterId: target.characterId,
+      costumeId: target.costumeId,
+      costumeVersionNo: target.versionNo,
+    });
     useAppStore.getState().setView('character-board');
     return;
   }

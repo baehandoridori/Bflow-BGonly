@@ -94,7 +94,7 @@ interface AppState {
    * Spotlight/위젯 등 외부 표면에서 캐릭터 현황판 상세 오픈을 요청할 때 사용.
    * lazy view 마운트 race를 피하기 위해 이벤트가 아니라 store 기반 요청으로 소비한다.
    */
-  pendingCharacterBoardRequest: { characterId: string; costumeId?: string } | null;
+  pendingCharacterBoardRequest: { characterId: string; costumeId?: string; costumeVersionNo?: number } | null;
   setPendingCharacterBoardRequest: (req: AppState['pendingCharacterBoardRequest']) => void;
 
   /**

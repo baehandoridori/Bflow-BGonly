@@ -60,3 +60,15 @@ test('피드백 49 배선: 정규식·칩·클릭 라우팅·자동완성 병합
   assert.match(modal, /handleCommentHashClick/);
   assert.match(modal, /costumeRequest/);
 });
+
+test('피드백 49: 모달 밖 딥링크도 태그 버전을 싣고 보드가 삭제·버전 변경을 안내 (코덱스 1차 P2)', () => {
+  const appStore = readFileSync('src/stores/useAppStore.ts', 'utf8');
+  assert.match(appStore, /pendingCharacterBoardRequest:\s*\{ characterId: string; costumeId\?: string; costumeVersionNo\?: number \} \| null/);
+  const nav = readFileSync('src/utils/hashNavigation.ts', 'utf8');
+  assert.match(nav, /costumeVersionNo: target\.versionNo/);
+  const board = readFileSync('src/views/CharacterBoardView.tsx', 'utf8');
+  // 삭제된 복장이면 안내 후 캐릭터만 열고(costumeId 를 비움), 버전이 다르면 기록 시점을 알린다.
+  assert.match(board, /태그된 복장을 찾을 수 없어요 — 삭제되었을 수 있어요/);
+  assert.match(board, /이 태그는 v\$\{pendingOpenCostumeVersionNo\} 때 남긴 기록이에요/);
+  assert.match(board, /setPendingOpenCostumeVersionNo\(pendingCharacterBoardRequest\.costumeVersionNo\)/);
+});

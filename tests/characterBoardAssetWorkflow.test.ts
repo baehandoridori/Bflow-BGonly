@@ -364,8 +364,8 @@ test('character card right click opens the compact work menu instead of opening 
 });
 
 test('spotlight opens character board entries through a store-backed pending request', () => {
-  // 피드백 49: 복장 태그 딥링크를 위해 costumeId 를 옵셔널로 얹었다(캐릭터만 여는 기존 호출부는 무변경).
-  assert.match(appStore, /pendingCharacterBoardRequest:\s*\{ characterId: string; costumeId\?: string \} \| null/);
+  // 피드백 49: 복장 태그 딥링크를 위해 costumeId·costumeVersionNo 를 옵셔널로 얹었다(캐릭터만 여는 기존 호출부는 무변경).
+  assert.match(appStore, /pendingCharacterBoardRequest:\s*\{ characterId: string; costumeId\?: string; costumeVersionNo\?: number \} \| null/);
   assert.match(appStore, /setPendingCharacterBoardRequest:\s*\(req: AppState\['pendingCharacterBoardRequest'\]\) => void/);
   assert.match(appStore, /pendingCharacterBoardRequest:\s*null/);
   assert.match(appStore, /pendingCharacterBoardRequest:\s*null,\r?\n\s*highlightSceneId:\s*null/);

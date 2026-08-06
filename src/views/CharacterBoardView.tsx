@@ -11,6 +11,7 @@
 
 import { useCallback, useContext, useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react';
 import { Archive, ChevronDown, Plus, Image as ImageIcon, Search, Ruler, LayoutGrid, Grid3x3, List, ExternalLink, UserRound, X } from 'lucide-react';
+import { toast } from 'sonner';
 import { useCharacterBoardStore } from '@/stores/useCharacterBoardStore';
 import { moveCostumeInOrder, dropEdgeFor } from '@/stores/characterBoardStoreHelpers';
 import { useAppStore } from '@/stores/useAppStore';
@@ -179,7 +180,7 @@ function BoardTabStrip({ tabs, activeTabId, onSelect, onAdd, onRename, onDelete 
   );
 }
 
-function CharacterGrid({ onAdd, pendingOpenId, pendingOpenCostumeId, onConsumeOpen }: { onAdd: () => void; pendingOpenId?: string | null; pendingOpenCostumeId?: string; onConsumeOpen?: () => void }) {
+function CharacterGrid({ onAdd, pendingOpenId, pendingOpenCostumeId, pendingOpenCostumeVersionNo, onConsumeOpen }: { onAdd: () => void; pendingOpenId?: string | null; pendingOpenCostumeId?: string; pendingOpenCostumeVersionNo?: number; onConsumeOpen?: () => void }) {
   const characters = useCharacterBoardStore((s) => s.characters);
   const byCharacter = useCharacterBoardStore((s) => s.byCharacter);
   const loaded = useCharacterBoardStore((s) => s.loaded);
@@ -227,10 +228,22 @@ function CharacterGrid({ onAdd, pendingOpenId, pendingOpenCostumeId, onConsumeOp
     if (pendingOpenId) {
       const pendingCharacter = characters.find((c) => c.id === pendingOpenId);
       if (pendingCharacter?.status === 'archived') setShowArchived(true);
-      setDetailRequest((prev) => ({ id: pendingOpenId, nonce: (prev?.nonce ?? 0) + 1, costumeId: pendingOpenCostumeId }));
+      // 피드백 49 + 코덱스 1차 P2: 복장 태그로 들어온 딥링크는 모달 안 클릭과 같은 안내를 준다 —
+      //   삭제된 복장이면 조용히 첫 복장으로 떨어지지 않게 알리고, 버전이 바뀌었으면 기록 시점을 알린다.
+      let costumeId = pendingOpenCostumeId;
+      if (costumeId) {
+        const found = (byCharacter.get(pendingOpenId) ?? []).find((c) => c.id === costumeId) ?? null;
+        if (!found) {
+          toast.info('태그된 복장을 찾을 수 없어요 — 삭제되었을 수 있어요');
+          costumeId = undefined;
+        } else if (pendingOpenCostumeVersionNo !== undefined && found.versionNo !== pendingOpenCostumeVersionNo) {
+          toast.info(`이 태그는 v${pendingOpenCostumeVersionNo} 때 남긴 기록이에요 — 지금은 v${found.versionNo}`);
+        }
+      }
+      setDetailRequest((prev) => ({ id: pendingOpenId, nonce: (prev?.nonce ?? 0) + 1, costumeId }));
       onConsumeOpen?.();
     }
-  }, [characters, pendingOpenId, pendingOpenCostumeId, onConsumeOpen]);
+  }, [characters, byCharacter, pendingOpenId, pendingOpenCostumeId, pendingOpenCostumeVersionNo, onConsumeOpen]);
 
   const activeCharacters = useMemo(() => characters.filter((c) => c.status !== 'archived'), [characters]);
   const archivedCharacters = useMemo(() => characters.filter((c) => c.status === 'archived'), [characters]);
@@ -690,7 +703,9 @@ export function CharacterBoardView() {
   const [addOpen, setAddOpen] = useState(false);
   const [pendingOpenId, setPendingOpenId] = useState<string | null>(null);
   // 피드백 49: 복장 태그로 들어온 딥링크는 복장까지 지정한다(없으면 undefined = 기존 동작).
+  //   태그를 남긴 시점의 버전도 함께 실어 보드에서 삭제·버전 변경을 안내한다(코덱스 1차 P2).
   const [pendingOpenCostumeId, setPendingOpenCostumeId] = useState<string | undefined>(undefined);
+  const [pendingOpenCostumeVersionNo, setPendingOpenCostumeVersionNo] = useState<number | undefined>(undefined);
   // 팝업 창 안에서는 "새 창으로" 버튼을 숨긴다 (피드백 36 — 팝업이 팝업을 또 열지 않게).
   const isPopup = useContext(IsPopupContext);
 
@@ -704,6 +719,7 @@ export function CharacterBoardView() {
     setTab('board');
     setPendingOpenId(pendingCharacterBoardRequest.characterId);
     setPendingOpenCostumeId(pendingCharacterBoardRequest.costumeId);
+    setPendingOpenCostumeVersionNo(pendingCharacterBoardRequest.costumeVersionNo);
     setPendingCharacterBoardRequest(null);
   }, [loaded, pendingCharacterBoardRequest, setPendingCharacterBoardRequest]);
 
@@ -744,7 +760,8 @@ export function CharacterBoardView() {
             onAdd={() => setAddOpen(true)}
             pendingOpenId={pendingOpenId}
             pendingOpenCostumeId={pendingOpenCostumeId}
-            onConsumeOpen={() => { setPendingOpenId(null); setPendingOpenCostumeId(undefined); }}
+            pendingOpenCostumeVersionNo={pendingOpenCostumeVersionNo}
+            onConsumeOpen={() => { setPendingOpenId(null); setPendingOpenCostumeId(undefined); setPendingOpenCostumeVersionNo(undefined); }}
           />
         ) : (
           <div className="pt-4">
