@@ -725,7 +725,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   supabaseUpdateEpisodeCharacterMap: (
     episodeNumber: number,
     characterId: string,
-    updates: { memo?: string | null; costumeId?: string | null },
+    updates: { memo?: string | null; costumeIds?: string[] },
   ) => ipcRenderer.invoke('supabase:update-episode-character-map', episodeNumber, characterId, updates),
   storageUploadCharacterImage: (characterId: string, costumeId: string, base64Data: string) =>
     ipcRenderer.invoke('storage:upload-character-image', characterId, costumeId, base64Data),

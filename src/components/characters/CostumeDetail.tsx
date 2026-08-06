@@ -153,7 +153,7 @@ export function CostumeDetail({
   const setCharacterReferenceHeight = useCharacterBoardStore((s) => s.setCharacterReferenceHeight);
   const imagesByCostume = useCharacterBoardStore((s) => s.imagesByCostume);
   const episodeLinks = useCharacterBoardStore((s) => s.episodeLinks);
-  const setEpisodeCostume = useCharacterBoardStore((s) => s.setEpisodeCostume);
+  const setEpisodeCostumes = useCharacterBoardStore((s) => s.setEpisodeCostumes);
   const episodes = useDataStore((s) => s.episodes);
   const getEpisodeDisplayName = useDataStore((s) => s.getEpisodeDisplayName);
 
@@ -176,7 +176,26 @@ export function CostumeDetail({
     if (next !== character.referenceHeightPx) void setCharacterReferenceHeight(character.id, next);
   };
 
-  // 이 캐릭터가 출연하는 에피소드 각각에 대해, 그 편이 '이 복장'을 쓰는지(costumeId 일치) 토글 (B2).
+  // 이 복장 키(복장 레벨, 피드백 47)도 blur 커밋 — 복장 전환 시 드래프트를 리셋해 stale 값 방지.
+  const [costumeHeightDraft, setCostumeHeightDraft] = useState(costume.heightPx?.toString() ?? '');
+  const costumeHeightFocused = useRef(false);
+  useEffect(() => { if (!costumeHeightFocused.current) setCostumeHeightDraft(costume.heightPx?.toString() ?? ''); }, [costume.id, costume.heightPx]);
+  const commitCostumeHeight = () => {
+    costumeHeightFocused.current = false;
+    const t = costumeHeightDraft.trim();
+    if (t === '') {
+      setCostumeHeightDraft('');
+      if (costume.heightPx !== null) void updateCostumeField(costume.id, { heightPx: null });
+      return;
+    }
+    const n = Number(t);
+    if (!Number.isFinite(n)) { setCostumeHeightDraft(costume.heightPx?.toString() ?? ''); return; }
+    const next = Math.max(1, Math.min(4999, Math.floor(n)));
+    setCostumeHeightDraft(String(next));
+    if (next !== costume.heightPx) void updateCostumeField(costume.id, { heightPx: next });
+  };
+
+  // 이 캐릭터가 출연하는 에피소드 각각에 대해, 그 편이 '이 복장'을 쓰는지(costumeIds 포함 여부) 토글 (B2 + 피드백 42: 1:N).
   const charLinks = episodeLinks.get(character.id) ?? [];
 
   const [announceOpen, setAnnounceOpen] = useState(false);
@@ -252,6 +271,25 @@ export function CostumeDetail({
             </button>
           </div>
         </div>
+
+        {/* 이 복장 키 오버라이드 (피드백 47) — 비우면 대표 키를 따른다. */}
+        <div className="flex flex-col gap-1.5">
+          <div className="text-xs text-text-secondary" title="이 복장만 다른 키를 쓸 때 입력해요 — 키 커지는 신발 등. 비우면 대표 키를 따라요.">이 복장 키(px)</div>
+          <input
+            type="number"
+            min={1}
+            max={4999}
+            inputMode="numeric"
+            value={costumeHeightDraft}
+            onChange={(e) => { setCostumeHeightDraft(e.target.value); }}
+            onFocus={() => { costumeHeightFocused.current = true; }}
+            onBlur={commitCostumeHeight}
+            onKeyDown={(e) => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); }}
+            placeholder={character.referenceHeightPx != null ? `대표 ${character.referenceHeightPx}` : '대표 미설정'}
+            aria-label="이 복장 키(px)"
+            className="h-8 w-24 rounded-md border border-bg-border bg-transparent px-2 text-sm text-text-primary outline-none focus:border-accent/50"
+          />
+        </div>
       </div>
 
       {/* 작업 경로 */}
@@ -272,7 +310,7 @@ export function CostumeDetail({
         />
       </div>
 
-      {/* 이 복장이 출연하는 에피소드 (B2) — 캐릭터가 출연하는 에피소드 중 이 편에 이 복장을 쓰는 것 토글 */}
+      {/* 이 복장이 출연하는 에피소드 (B2) — 캐릭터가 출연하는 에피소드 중 이 편에 이 복장을 쓰는지 토글 (피드백 42: 한 편에 여러 복장 가능) */}
       <div className="flex flex-col gap-1.5">
         <div className="text-xs text-text-secondary">이 복장이 출연하는 에피소드</div>
         {character.episodeIds.length === 0 ? (
@@ -284,26 +322,22 @@ export function CostumeDetail({
             {character.episodeIds.map((epNum) => {
               const ep = episodes.find((e) => e.episodeNumber === epNum);
               const link = charLinks.find((l) => l.episodeNumber === epNum);
-              const on = link?.costumeId === costume.id;
-              const takenByOther = !!link?.costumeId && link.costumeId !== costume.id;
+              const costumeIds = link?.costumeIds ?? [];
+              const on = costumeIds.includes(costume.id);
               return (
                 <button
                   key={epNum}
                   type="button"
-                  onClick={() => setEpisodeCostume(character.id, epNum, on ? null : costume.id)}
+                  onClick={() => setEpisodeCostumes(character.id, epNum, on ? costumeIds.filter((id) => id !== costume.id) : [...costumeIds, costume.id])}
                   aria-pressed={on}
                   title={on
                     ? '이 편에서 이 복장을 쓰는 중 — 클릭하면 해제'
-                    : takenByOther
-                      ? '이 편엔 다른 복장이 지정돼 있어요 — 클릭하면 이 복장으로 바꿔요'
-                      : '클릭하면 이 편에 이 복장을 지정해요'}
+                    : '클릭하면 이 편에 이 복장을 지정해요 — 여러 복장을 함께 지정할 수 있어요'}
                   className={cn(
                     'min-h-7 rounded-md border px-2 py-1 text-xs transition-colors cursor-pointer',
                     on
                       ? 'bg-accent/20 text-accent border-accent/40'
-                      : takenByOther
-                        ? 'border-dashed border-bg-border text-text-secondary/60 hover:text-text-primary'
-                        : 'text-text-secondary border-bg-border hover:text-text-primary',
+                      : 'text-text-secondary border-bg-border hover:text-text-primary',
                   )}
                 >
                   {ep ? getEpisodeDisplayName(ep) : `EP${epNum}`}

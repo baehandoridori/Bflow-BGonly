@@ -220,18 +220,18 @@ test('mergeEpisodeLinkPatchWithPending protects pending fields and passes the re
   const bucket: Bucket = new Map();
   trackPendingFields(bucket, pendingLinkKey('ch1', 3), { memo: 'local memo' });
   const links = new Map<string, EpisodeCharacterLink[]>([
-    ['ch1', [{ episodeNumber: 3, memo: 'local memo', costumeId: null }]],
+    ['ch1', [{ episodeNumber: 3, memo: 'local memo', costumeIds: [] }]],
   ]);
-  const patch = mergeEpisodeLinkPatchWithPending(bucket, links, 'ch1', 3, { memo: 'server memo', costumeId: 'co1' });
+  const patch = mergeEpisodeLinkPatchWithPending(bucket, links, 'ch1', 3, { memo: 'server memo', costumeIds: ['co1'] });
   assert.equal(patch.memo, 'local memo', 'pending memo should survive the remote patch');
-  assert.equal(patch.costumeId, 'co1', 'non-pending field follows the patch');
+  assert.deepEqual(patch.costumeIds, ['co1'], 'non-pending field follows the patch');
   assert.equal(bucket.has(pendingLinkKey('ch1', 3)), true);
 });
 
 test('mergeEpisodeLinkPatchWithPending clears pending on echo and is a no-op without pending', () => {
   const bucket: Bucket = new Map();
   const links = new Map<string, EpisodeCharacterLink[]>([
-    ['ch1', [{ episodeNumber: 3, memo: 'local memo', costumeId: null }]],
+    ['ch1', [{ episodeNumber: 3, memo: 'local memo', costumeIds: [] }]],
   ]);
 
   const plain = { memo: 'server memo' as string | null };
@@ -301,22 +301,22 @@ test('compareCostumes falls back sortOrder → createdAt → name → id', () =>
 
 test('buildEpisodeLinks groups mappings per character sorted by episodeNumber', () => {
   const links = buildEpisodeLinks([
-    { characterId: 'ch1', episodeNumber: 5, memo: null, costumeId: null },
-    { characterId: 'ch1', episodeNumber: 2, memo: 'm', costumeId: 'co' },
-    { characterId: 'ch2', episodeNumber: 1, memo: null, costumeId: null },
+    { characterId: 'ch1', episodeNumber: 5, memo: null, costumeIds: [] },
+    { characterId: 'ch1', episodeNumber: 2, memo: 'm', costumeIds: ['co'] },
+    { characterId: 'ch2', episodeNumber: 1, memo: null, costumeIds: [] },
   ]);
   assert.deepEqual(links.get('ch1'), [
-    { episodeNumber: 2, memo: 'm', costumeId: 'co' },
-    { episodeNumber: 5, memo: null, costumeId: null },
+    { episodeNumber: 2, memo: 'm', costumeIds: ['co'] },
+    { episodeNumber: 5, memo: null, costumeIds: [] },
   ]);
-  assert.deepEqual(links.get('ch2'), [{ episodeNumber: 1, memo: null, costumeId: null }]);
+  assert.deepEqual(links.get('ch2'), [{ episodeNumber: 1, memo: null, costumeIds: [] }]);
   assert.equal(buildEpisodeLinks([]).size, 0);
 });
 
 test('rowToRealtimeMapping parses valid rows and rejects/normalizes missing fields', () => {
   assert.deepEqual(
     rowToRealtimeMapping({ character_id: 'ch1', episode_number: 3, memo: 'm', costume_id: 'co' }),
-    { characterId: 'ch1', episodeNumber: 3, memo: 'm', costumeId: 'co' },
+    { characterId: 'ch1', episodeNumber: 3, memo: 'm', costumeIds: ['co'] },
   );
   // 필수 필드 결측/타입 불일치 → null (전체 재조립 fallback 신호)
   assert.equal(rowToRealtimeMapping(null), null);
@@ -326,6 +326,21 @@ test('rowToRealtimeMapping parses valid rows and rejects/normalizes missing fiel
   // 선택 필드는 타입이 어긋나면 null 로 정규화
   assert.deepEqual(
     rowToRealtimeMapping({ character_id: 'ch1', episode_number: 3, memo: 7, costume_id: undefined }),
-    { characterId: 'ch1', episodeNumber: 3, memo: null, costumeId: null },
+    { characterId: 'ch1', episodeNumber: 3, memo: null, costumeIds: [] },
+  );
+});
+
+test('rowToRealtimeMapping: costume_ids 배열 우선 + 구버전 costume_id 폴백 (피드백 42)', () => {
+  assert.deepEqual(
+    rowToRealtimeMapping({ character_id: 'c1', episode_number: 3, memo: null, costume_ids: ['a', 'b'], costume_id: 'a' })?.costumeIds,
+    ['a', 'b'],
+  );
+  assert.deepEqual(
+    rowToRealtimeMapping({ character_id: 'c1', episode_number: 3, memo: null, costume_id: 'a' })?.costumeIds,
+    ['a'],
+  );
+  assert.deepEqual(
+    rowToRealtimeMapping({ character_id: 'c1', episode_number: 3, memo: null })?.costumeIds,
+    [],
   );
 });

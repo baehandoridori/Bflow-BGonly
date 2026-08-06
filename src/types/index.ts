@@ -220,8 +220,8 @@ export interface EpisodeCharacterLink {
   episodeNumber: number;
   /** 이 편 주의점 메모. */
   memo: string | null;
-  /** 이 편에 쓰는 복장 id (character_costumes.id). 미선택이면 null. */
-  costumeId: string | null;
+  /** 이 편에 쓰는 복장 id 배열(character_costumes.id, 지정 순서 유지). 미선택이면 빈 배열 (피드백 42: 1:N). */
+  costumeIds: string[];
 }
 
 export type CharacterImageBackground = 'transparent' | 'black' | 'white' | 'checker';
@@ -264,6 +264,8 @@ export interface CharacterCostume {
   memo: string | null;
   /** 복장 작업 마감일(YYYY-MM-DD). null=일정 미설정. (T2-4) */
   dueDate: string | null;
+  /** 복장별 키 오버라이드(px). null = 캐릭터 대표 키를 따름 (피드백 47). */
+  heightPx: number | null;
   sortOrder: number;
   createdAt: string;
   updatedAt: string;
@@ -373,6 +375,7 @@ export interface CharacterCostumeRow {
   assignee: string | null;
   memo: string | null;
   due_date?: string | null;
+  height_px?: number | null;
   sort_order: number | null;
   created_at: string;
   updated_at: string;
@@ -1582,7 +1585,7 @@ export interface ElectronAPI {
   supabaseUpdateEpisodeCharacterMap: (
     episodeNumber: number,
     characterId: string,
-    updates: { memo?: string | null; costumeId?: string | null },
+    updates: { memo?: string | null; costumeIds?: string[] },
   ) => Promise<void>;
   storageUploadCharacterImage: (characterId: string, costumeId: string, base64Data: string) => Promise<{ ok: boolean; url?: string; error?: string }>;
   // ─── 복장 다중 이미지 (character_costume_images) ───

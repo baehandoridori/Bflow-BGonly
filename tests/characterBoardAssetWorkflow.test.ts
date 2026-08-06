@@ -650,7 +650,7 @@ test('character board hardening covers image failures, drafts, realtime races, a
   assert.match(characterStore, /trackPendingFields\(pendingCharacterFields, id, updates as Record<string, unknown>\)/);
   assert.match(characterStore, /trackPendingFields\(pendingCostumeFields, id, updates as Record<string, unknown>\)/);
   assert.match(characterStore, /trackPendingEpisodeLinkField\(characterId, episodeNumber, 'memo', memo\)/);
-  assert.match(characterStore, /trackPendingEpisodeLinkField\(characterId, episodeNumber, 'costumeId', costumeId\)/);
+  assert.match(characterStore, /trackPendingEpisodeLinkField\(characterId, episodeNumber, 'costumeIds', costumeIds\)/);
   assert.match(characterStore, /mergeEpisodeLinkPatchWithPending/);
   assert.match(characterStore, /window\.electronAPI\?\.onSupabaseStatus/);
   assert.match(characterStore, /window\.addEventListener\('online', catchUp\)/);

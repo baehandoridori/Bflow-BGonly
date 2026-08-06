@@ -46,11 +46,15 @@ function topRiggingStage(costumes: CharacterCostume[]): CostumeRiggingStage | nu
   return best >= 0 ? COSTUME_RIGGING_STAGES[best] : null;
 }
 
-/** 이 편이 특정 복장을 쓰면 그 복장의 리깅 단계, 복장 미정이면 전체 중 최고(대략 표시). */
-function episodeRiggingStage(costumes: CharacterCostume[], costumeId: string | null): CostumeRiggingStage | null {
-  if (costumeId) {
-    const picked = costumes.find((c) => c.id === costumeId);
-    if (picked) return picked.riggingStage;
+/** 이 편이 지정한 복장(들) 중 가장 덜 진행된 리깅 단계 — '이 편 준비가 끝났는지'를 보수적으로 표시. 복장 미정이면 전체 중 최고(대략 표시). */
+function episodeRiggingStage(costumes: CharacterCostume[], costumeIds: string[]): CostumeRiggingStage | null {
+  const picked = costumes.filter((c) => costumeIds.includes(c.id));
+  if (picked.length > 0) {
+    let worst: CostumeRiggingStage = picked[0].riggingStage;
+    for (const c of picked) {
+      if (COSTUME_RIGGING_STAGES.indexOf(c.riggingStage) < COSTUME_RIGGING_STAGES.indexOf(worst)) worst = c.riggingStage;
+    }
+    return worst;
   }
   return topRiggingStage(costumes);
 }
@@ -102,20 +106,22 @@ function MemoInput({ value, onCommit }: { value: string; onCommit: (next: string
 function EpisodeCharRow({
   character,
   costumes,
-  costumeId,
+  costumeIds,
   selected,
   onSelect,
 }: {
   character: Character;
   costumes: CharacterCostume[];
-  costumeId: string | null;
+  costumeIds: string[];
   selected: boolean;
   onSelect: () => void;
 }) {
   const thumb = characterThumb(costumes);
-  const selectedCostume = costumeId ? costumes.find((c) => c.id === costumeId) ?? null : null;
-  const costumeName = selectedCostume?.name ?? null;
-  const rigging = episodeRiggingStage(costumes, costumeId);
+  const picked = costumes.filter((c) => costumeIds.includes(c.id));
+  const costumeName = picked.length > 0
+    ? picked.length > 1 ? `${picked[0].name} 외 ${picked.length - 1}` : picked[0].name
+    : null;
+  const rigging = episodeRiggingStage(costumes, costumeIds);
   return (
     <button
       type="button"
@@ -162,17 +168,20 @@ function EpisodeCharDetail({
   const byCharacter = useCharacterBoardStore((s) => s.byCharacter);
   const episodeLinks = useCharacterBoardStore((s) => s.episodeLinks);
   const setEpisodeMemo = useCharacterBoardStore((s) => s.setEpisodeMemo);
-  const setEpisodeCostume = useCharacterBoardStore((s) => s.setEpisodeCostume);
+  const setEpisodeCostumes = useCharacterBoardStore((s) => s.setEpisodeCostumes);
   const unlinkEpisode = useCharacterBoardStore((s) => s.unlinkEpisode);
 
   const costumes = byCharacter.get(character.id) ?? [];
   const link = (episodeLinks.get(character.id) ?? []).find((l) => l.episodeNumber === episodeNumber);
   const memo = link?.memo ?? '';
-  const costumeId = link?.costumeId ?? null;
-  const selectedCostume = costumes.find((c) => c.id === costumeId) ?? null;
-  const hero = selectedCostume?.featuredImageUrl ?? characterThumb(costumes);
+  const costumeIds = link?.costumeIds ?? [];
+  // 지정 순서 유지 — 첫 지정 복장이 hero·헤더의 대표가 된다.
+  const selectedCostumes = costumeIds
+    .map((id) => costumes.find((c) => c.id === id))
+    .filter((c): c is CharacterCostume => Boolean(c));
+  const hero = selectedCostumes[0]?.featuredImageUrl ?? characterThumb(costumes);
   const tags = unionTags(costumes);
-  const rigging = episodeRiggingStage(costumes, costumeId);
+  const rigging = episodeRiggingStage(costumes, costumeIds);
 
   return (
     <div className="flex flex-col h-full min-h-0">
@@ -180,7 +189,7 @@ function EpisodeCharDetail({
       <div className="flex items-center justify-between gap-3 px-5 py-3 border-b border-bg-border/40 shrink-0">
         <div className="flex items-center gap-2 min-w-0">
           <h2 className="text-lg font-semibold text-text-primary truncate">{character.name}</h2>
-          <span className="text-sm text-text-secondary shrink-0">· 이 편 복장 {selectedCostume?.name ?? '미정'}</span>
+          <span className="text-sm text-text-secondary shrink-0">· 이 편 복장 {selectedCostumes.length > 0 ? selectedCostumes.map((c) => c.name).join(', ') : '미정'}</span>
         </div>
         <button
           type="button"
@@ -245,25 +254,25 @@ function EpisodeCharDetail({
             </div>
           ) : (
             <div className="flex items-stretch gap-2.5 overflow-x-auto pb-1">
-              {/* 선택 안 함 */}
+              {/* 모두 해제 */}
               <button
                 type="button"
-                onClick={() => setEpisodeCostume(character.id, episodeNumber, null)}
-                aria-pressed={costumeId === null}
+                onClick={() => setEpisodeCostumes(character.id, episodeNumber, [])}
+                aria-pressed={costumeIds.length === 0}
                 className={cn(
                   'w-[92px] shrink-0 aspect-[3/4] flex flex-col items-center justify-center gap-1 rounded-lg border text-xs transition-colors cursor-pointer',
-                  costumeId === null ? 'border-accent text-accent bg-accent/10' : 'border-dashed border-bg-border text-text-secondary hover:text-text-primary',
+                  costumeIds.length === 0 ? 'border-accent text-accent bg-accent/10' : 'border-dashed border-bg-border text-text-secondary hover:text-text-primary',
                 )}
               >
-                선택 안 함
+                모두 해제
               </button>
               {costumes.map((c) => {
-                const on = c.id === costumeId;
+                const on = costumeIds.includes(c.id);
                 return (
                   <button
                     key={c.id}
                     type="button"
-                    onClick={() => setEpisodeCostume(character.id, episodeNumber, c.id)}
+                    onClick={() => setEpisodeCostumes(character.id, episodeNumber, on ? costumeIds.filter((id) => id !== c.id) : [...costumeIds, c.id])}
                     aria-pressed={on}
                     className={cn(
                       'group relative w-[92px] shrink-0 flex flex-col rounded-lg overflow-hidden border transition-colors cursor-pointer',
@@ -409,9 +418,9 @@ export function EpisodeAssetBoard({ onOpenCharacter }: { onOpenCharacter?: (id: 
     });
   };
 
-  function costumeIdFor(characterId: string): string | null {
+  function costumeIdsFor(characterId: string): string[] {
     const link = (episodeLinks.get(characterId) ?? []).find((l) => l.episodeNumber === selectedEp);
-    return link?.costumeId ?? null;
+    return link?.costumeIds ?? [];
   }
 
   if (sortedEpisodes.length === 0) {
@@ -480,7 +489,7 @@ export function EpisodeAssetBoard({ onOpenCharacter }: { onOpenCharacter?: (id: 
                   key={c.id}
                   character={c}
                   costumes={byCharacter.get(c.id) ?? []}
-                  costumeId={costumeIdFor(c.id)}
+                  costumeIds={costumeIdsFor(c.id)}
                   selected={c.id === selectedCharId}
                   onSelect={() => setSelectedCharId(c.id)}
                 />

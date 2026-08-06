@@ -19,10 +19,12 @@ const helpers = readFileSync('src/stores/characterBoardStoreHelpers.ts', 'utf8')
 const preload = readFileSync('electron/preload.ts', 'utf8');
 const mainProc = readFileSync('electron/main.ts', 'utf8');
 
-test('T2-2: 복장별 출연 에피소드 토글 — 기존 setEpisodeCostume 재사용(마이그레이션 없음)', () => {
+test('T2-2: 복장별 출연 에피소드 토글 — 1:N 다중 지정 (피드백 42)', () => {
   assert.match(costumeDetail, /이 복장이 출연하는 에피소드/);
-  assert.match(costumeDetail, /const on = link\?\.costumeId === costume\.id/);
-  assert.match(costumeDetail, /setEpisodeCostume\(character\.id, epNum, on \? null : costume\.id\)/);
+  assert.match(costumeDetail, /const on = costumeIds\.includes\(costume\.id\)/);
+  assert.match(costumeDetail, /setEpisodeCostumes\(character\.id, epNum, on \? costumeIds\.filter\(\(id\) => id !== costume\.id\) : \[\.\.\.costumeIds, costume\.id\]\)/);
+  // '뺏어오기' 배타 UI 는 제거됐다.
+  assert.doesNotMatch(costumeDetail, /takenByOther/);
   // 캐릭터가 그 에피소드에 미연결이면 안내 문구.
   assert.match(costumeDetail, /먼저 위 '출연 에피소드'에서/);
 });
@@ -33,7 +35,8 @@ test('T2-4: 복장 마감일(due_date) — 필드·매퍼·store·입력·나의
   assert.match(electronSupabase, /due_date: string \| null;/);
   assert.match(rendererSupabase, /dueDate: row\.due_date \?\? null/);
   assert.match(rendererSupabase, /snake\.due_date = updates\.dueDate/);
-  assert.match(store, /\| 'dueDate'>>/);
+  // 피드백 47 로 Pick 목록 끝이 heightPx 가 됐다 — dueDate 항목 자체가 남아 있는지만 고정한다.
+  assert.match(store, /\| 'dueDate'/);
   assert.match(costumeDetail, /updateCostumeField\(costume\.id, \{ dueDate: e\.target\.value \|\| null \}\)/);
   assert.match(myCharTasks, /dueDate: costume\.dueDate/);
   assert.match(charTaskRow, /function DueBadge/);
@@ -64,6 +67,13 @@ test('T2 migration: due_date + reference_height_px 컬럼 추가(추가 전용)'
   assert.match(mig, /ADD COLUMN IF NOT EXISTS due_date DATE/);
   assert.match(mig, /ADD COLUMN IF NOT EXISTS reference_height_px INTEGER/);
   assert.match(mig, /chk_characters_reference_height/);
+  assert.doesNotMatch(mig, /DROP\s+(TABLE|COLUMN)/i);
+});
+
+test('피드백 42 migration: costume_ids 배열 추가 + 백필(추가 전용)', () => {
+  const mig = readFileSync('DEVLOG/migrations/2026-08-06-episode-costume-multi.sql', 'utf8');
+  assert.match(mig, /ADD COLUMN IF NOT EXISTS costume_ids JSONB NOT NULL DEFAULT '\[\]'::jsonb/);
+  assert.match(mig, /SET costume_ids = to_jsonb\(ARRAY\[costume_id\]\)/);
   assert.doesNotMatch(mig, /DROP\s+(TABLE|COLUMN)/i);
 });
 
