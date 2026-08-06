@@ -396,7 +396,9 @@ test('my tasks widget includes assigned character design and rigging work', () =
   assert.match(characterStageConstants, /export const DESIGN_STAGE_META/);
   assert.match(characterStageConstants, /export const RIGGING_STAGE_META/);
   assert.match(characterStageConstants, /export function characterStageColor/);
-  assert.match(characterStageMeta, /export function parseAssigneeNames/);
+  // 피드백 48: parseAssigneeNames 는 node-safe 순수 모듈로 분리됐고, characterStageMeta 는 re-export 로 소비처를 유지한다.
+  assert.match(characterStageMeta, /export \{ parseAssigneeNames \} from '\.\/assigneeNames\.ts'/);
+  assert.match(readFileSync('src/utils/assigneeNames.ts', 'utf8'), /export function parseAssigneeNames/);
   assert.match(assigneeNamePickerSource, /import \{ parseAssigneeNames \} from '@\/utils\/characterStageMeta'/);
   assert.match(characterCardSource, /import \{ DESIGN_STAGE_META, RIGGING_STAGE_META, characterStageColor/);
   assert.match(myCharacterTasks, /characterStageColor\(meta\)/);

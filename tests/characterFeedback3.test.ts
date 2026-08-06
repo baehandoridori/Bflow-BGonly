@@ -77,6 +77,6 @@ test('F29: 캐릭터 카드 드래그 재배치 — store 액션 + 카드 배선
   assert.match(card, /onDragStartCard\?: \(characterId: string\) => void/);
   // 뷰: 검색/태그/키비교/보관에서 비활성 게이트.
   // 피드백 40: 리스트 보기에서는 카드 드래그 재배치를 끈다(행 드래그 미지원).
-  assert.match(boardView, /const cardDragEnabled = viewMode !== 'list' && !showArchived && !heightCompareMode && !query\.trim\(\) && activeTags\.length === 0/);
+  assert.match(boardView, /const cardDragEnabled = viewMode !== 'list' && !showArchived && !heightCompareMode && !query\.trim\(\) && activeTags\.length === 0 && !assigneeFilter && statusFilter === 'all'/);
   assert.match(boardView, /void reorderCharacters\(moveCostumeInOrder\(allIds, dragId, targetId\)\)/);
 });
