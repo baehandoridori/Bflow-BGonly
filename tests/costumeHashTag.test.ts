@@ -80,3 +80,9 @@ test('피드백 49: 복장 전환 요청은 nonce 당 1회만 소비 (코덱스 
   assert.match(modal, /consumedCostumeNonceRef\.current === costumeRequest\.nonce\) return/);
   assert.match(modal, /consumedCostumeNonceRef\.current = costumeRequest\.nonce;/);
 });
+
+test('피드백 49: 모달 밖 이동도 떠나온 화면을 뒤로가기 스택에 기록 (코덱스 3차 P2)', () => {
+  const nav = readFileSync('src/utils/hashNavigation.ts', 'utf8');
+  // 씬·파트·화 분기는 navigateToSceneView 가 기록한다 — costume 분기도 setView 앞에서 같은 기록을 남겨야 한다.
+  assert.match(nav, /app\.pushNavigationBackTarget\(\);[\s\S]{0,400}app\.setView\('character-board'\)/);
+});

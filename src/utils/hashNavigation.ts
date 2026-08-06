@@ -14,12 +14,16 @@ export function navigateToHashTarget(target: HashTarget): void {
   if (target.kind === 'costume') {
     // 피드백 49: 캐릭터 현황판으로 이동해 해당 캐릭터·복장을 연다 (SpotlightSearch/MyTasksWidget 의 기존 패턴과 동일).
     //   태그 시점 버전도 함께 넘겨 보드가 삭제·버전 변경을 안내한다(코덱스 1차 P2 — 모달 안 클릭과 같은 안내).
-    useAppStore.getState().setPendingCharacterBoardRequest({
+    const app = useAppStore.getState();
+    // 씬·파트·화 분기(navigateToSceneView)와 동일하게 떠나온 화면을 먼저 기록한다 —
+    //   안 그러면 같은 태그 클릭인데 뒤로 가기가 원래 화면 대신 스택에 남은 옛 목적지로 간다(코덱스 3차 P2).
+    app.pushNavigationBackTarget();
+    app.setPendingCharacterBoardRequest({
       characterId: target.characterId,
       costumeId: target.costumeId,
       costumeVersionNo: target.versionNo,
     });
-    useAppStore.getState().setView('character-board');
+    app.setView('character-board');
     return;
   }
   if (target.kind === 'episode') {
