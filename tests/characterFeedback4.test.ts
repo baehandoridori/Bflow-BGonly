@@ -140,3 +140,14 @@ test('피드백 45: 팝업 렌더러도 사용자 디렉터리 IPC 모드를 켠
   const flagCount = popup.split('setUsersSheetsMode(true)').length - 1;
   assert.ok(flagCount >= 3, `setUsersSheetsMode(true) 호출이 3곳 이상이어야 함 (현재 ${flagCount}곳)`);
 });
+
+test('피드백 46: 카드 우클릭 보관 진입 + 빈 보관 목록 자동 복귀', () => {
+  const menu = readFileSync('src/components/characters/CharacterImageContextMenu.tsx', 'utf8');
+  assert.match(menu, /onArchive\?: \(\) => void;/);
+  assert.match(menu, /label="보관"/);
+  assert.match(menu, /보관 목록에서 영구 삭제할 수 있어요/);
+  assert.match(boardView, /onArchive=\{cardMenuCharacter\.status !== 'archived'/);
+  assert.match(boardView, /if \(showArchived && archivedCharacters\.length === 0\) setShowArchived\(false\);/);
+  const modal = readFileSync('src/components/characters/CharacterDetailModal.tsx', 'utf8');
+  assert.match(modal, /영구 삭제'를 누르면 돼요/);
+});

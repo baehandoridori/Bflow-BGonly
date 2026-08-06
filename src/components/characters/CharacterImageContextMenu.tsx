@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
-import { Copy, FolderOpen, Image as ImageIcon, Move, Palette } from 'lucide-react';
+import { Archive, Copy, FolderOpen, Image as ImageIcon, Move, Palette } from 'lucide-react';
 import type { Character, CharacterCostume, CharacterImageBackground } from '@/types';
 import { cn } from '@/utils/cn';
 import { CHARACTER_LAYER_CLASS } from '@/constants/characterLayers';
@@ -52,6 +52,7 @@ export function CharacterImageContextMenu({
   onClose,
   onBackground,
   onEditFit,
+  onArchive,
 }: {
   x: number;
   y: number;
@@ -62,6 +63,8 @@ export function CharacterImageContextMenu({
   onClose: () => void;
   onBackground?: (costumeId: string, background: CharacterImageBackground) => void;
   onEditFit?: (costumeId: string) => void;
+  /** 피드백 46: 카드 메뉴에서 보관 진입 — 활성 캐릭터일 때만 전달된다(보관 목록에선 미전달). */
+  onArchive?: () => void;
 }) {
   const ref = useRef<HTMLDivElement>(null);
   const [position, setPosition] = useState({ left: x, top: y });
@@ -166,6 +169,9 @@ export function CharacterImageContextMenu({
             <MenuButton icon={<FolderOpen size={14} />} label="작업 폴더 열기" title={folderTitle} disabled={!hasFolder} onClick={() => { void openStoredCharacterPath(character.workFolderPath, '작업 폴더'); onClose(); }} />
             <MenuButton icon={<ImageIcon size={14} />} label="작업 파일 열기" title={fileTitle} disabled={!hasFile} onClick={() => { void openStoredCharacterPath(fileCostume?.workFilePath, '작업 파일'); onClose(); }} />
             <MenuButton icon={<Copy size={14} />} label="이미지 복사" disabled={!hasImage} onClick={() => { void copyCharacterImage(imageCostume?.featuredImageUrl); onClose(); }} />
+            {onArchive && (
+              <MenuButton icon={<Archive size={14} />} label="보관" title="보관 목록으로 이동 — 보관 목록에서 영구 삭제할 수 있어요" onClick={() => { onArchive(); onClose(); }} />
+            )}
           </>
         ) : (
           <>
