@@ -19,6 +19,10 @@ test('피드백 39: 담당자 피커 — 팀원 제안 목록 + 키보드 선택
   // 자유 입력(외부 인력)과 기존 앵커는 유지된다.
   assert.match(picker, /placeholder="이름 입력"/);
   assert.match(picker, /setModalOpen/);
+  // 피드백 44: 목록 고정 상한(max-h-44) 제거 — 다이얼로그 flex 상한 안에서 목록이 남는 높이를 전부 쓴다.
+  assert.doesNotMatch(picker, /max-h-44/);
+  assert.match(picker, /max-h-\[min\(85vh,720px\)\]/);
+  assert.match(picker, /min-h-0 flex-1 overflow-y-auto/);
 });
 
 test('피드백 38: 현황판 상단 메뉴 고정 — 제목·탭 고정 영역 + sticky 헤더', () => {
@@ -125,4 +129,25 @@ test('정식 공개: 캐릭터 현황판 게이팅 잔재 없음', () => {
   assert.doesNotMatch(spotlight, /hasCharacterBoardAccess/);
   const mock = readFileSync('src/mocks/devElectronAPI.ts', 'utf8');
   assert.doesNotMatch(mock, /feature-access/);
+});
+
+test('피드백 45: 팝업 렌더러도 사용자 디렉터리 IPC 모드를 켠다', () => {
+  const popup = readFileSync('src/views/WidgetPopup.tsx', 'utf8');
+  // 팝업은 별도 프로세스 — App.tsx 의 플래그가 적용되지 않아 직접 켜야 전체 팀원 목록이 뜬다.
+  assert.match(popup, /import \{ loadSession, loadUsers, setUsersSheetsMode \} from '@\/services\/userService';/);
+  assert.match(popup, /if \(connected\) setUsersSheetsMode\(true\);/);
+  // reloadData 의 두 성공 분기(재확인·GAS 폴백)에도 각각 켠다.
+  const flagCount = popup.split('setUsersSheetsMode(true)').length - 1;
+  assert.ok(flagCount >= 3, `setUsersSheetsMode(true) 호출이 3곳 이상이어야 함 (현재 ${flagCount}곳)`);
+});
+
+test('피드백 46: 카드 우클릭 보관 진입 + 빈 보관 목록 자동 복귀', () => {
+  const menu = readFileSync('src/components/characters/CharacterImageContextMenu.tsx', 'utf8');
+  assert.match(menu, /onArchive\?: \(\) => void;/);
+  assert.match(menu, /label="보관"/);
+  assert.match(menu, /보관 목록에서 영구 삭제할 수 있어요/);
+  assert.match(boardView, /onArchive=\{cardMenuCharacter\.status !== 'archived'/);
+  assert.match(boardView, /if \(showArchived && archivedCharacters\.length === 0\) setShowArchived\(false\);/);
+  const modal = readFileSync('src/components/characters/CharacterDetailModal.tsx', 'utf8');
+  assert.match(modal, /영구 삭제'를 누르면 돼요/);
 });

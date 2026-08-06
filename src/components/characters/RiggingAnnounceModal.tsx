@@ -31,6 +31,8 @@ const TITLE_TEMPLATES: { key: string; label: string; title: string }[] = [
   { key: 'fix', label: '수정·보완 완료', title: '리깅 수정·보완 완료 공지' },
 ];
 
+const MAX_ANNOUNCE_IMAGES = 5; // 슬랙 링크 미리보기 상한(~5개)에 맞춘 첨부 상한.
+
 /**
  * 리깅 완성 슬랙 공지 모달 (B11 + 피드백 31).
  * - 제목은 '일반 리깅 완료' 템플릿이 미리 채워져 있고, 다른 템플릿 버튼이나 직접 입력으로 바꾼다.
@@ -57,10 +59,11 @@ export function RiggingAnnounceModal({
   const [activeTpl, setActiveTpl] = useState<string | null>(TITLE_TEMPLATES[0].key);
   const nextRowId = useRef(1);
   const [rows, setRows] = useState<NoteRow[]>([{ id: 0, text: '' }]);
-  // 기본 선택 이미지 = 대표(primary), 없으면 첫 이미지, 그것도 없으면 이미지 없이.
-  const [selectedImageId, setSelectedImageId] = useState<string | null>(
-    () => (images.find((i) => i.isPrimary) ?? images[0])?.id ?? null,
-  );
+  // 기본 선택 = 대표(primary), 없으면 첫 이미지 1장. 클릭 순서를 유지하는 배열 — 순번이 곧 공지에 실리는 순서(피드백 50).
+  const [selectedImageIds, setSelectedImageIds] = useState<string[]>(() => {
+    const first = (images.find((i) => i.isPrimary) ?? images[0])?.id;
+    return first ? [first] : [];
+  });
   const [pasted, setPasted] = useState<PastedImage[]>([]);
   const [pasting, setPasting] = useState(false);
   const [sending, setSending] = useState(false);
@@ -72,10 +75,10 @@ export function RiggingAnnounceModal({
   const pastedRef = useRef<PastedImage[]>([]);
   useEffect(() => { pastedRef.current = pasted; }, [pasted]);
 
-  /** 공지 전용 업로드 정리 — keepUrl(전송에 쓴 이미지)만 남기고 스토리지에서 삭제(고아 방지, fire-and-forget). */
-  const cleanupPastedUploads = (keepUrl: string | null) => {
+  /** 공지 전용 업로드 정리 — keepUrls(전송에 쓴 이미지들)만 남기고 스토리지에서 삭제(고아 방지, fire-and-forget). */
+  const cleanupPastedUploads = (keepUrls: ReadonlySet<string>) => {
     for (const img of pastedRef.current) {
-      if (keepUrl && img.url === keepUrl) continue;
+      if (keepUrls.has(img.url)) continue;
       deleteImage(img.url).catch((e) => console.warn('[rigging-announce] 붙여넣기 이미지 정리 실패:', e));
     }
   };
@@ -88,7 +91,7 @@ export function RiggingAnnounceModal({
     closedRef.current = true;
     // 전송(sending) 중 닫기: 웹훅이 이미 나가 슬랙 메시지가 선택 이미지를 참조할 수 있으므로
     //   그 이미지는 지우지 않는다(코덱스 3차 P2). 평상시 닫기는 전부 정리.
-    cleanupPastedUploads(sending ? selectedImage?.url ?? null : null);
+    cleanupPastedUploads(sending ? selectedUrlSet : new Set());
     onClose();
   };
   const handleCloseRef = useRef(handleClose);
@@ -133,7 +136,8 @@ export function RiggingAnnounceModal({
         url: res.url,
       };
       setPasted((prev) => [...prev, entry]);
-      setSelectedImageId(entry.id);
+      // 상한에 걸리면 선택은 안 하되 목록에는 남긴다(사용자가 다른 장을 빼고 고를 수 있게).
+      setSelectedImageIds((prev) => (prev.length >= MAX_ANNOUNCE_IMAGES ? prev : [...prev, entry.id]));
     } catch (err) {
       console.error('[rigging-announce] 붙여넣기 이미지 업로드 실패:', err);
       toast.error('이미지 붙여넣기에 실패했어요');
@@ -185,7 +189,10 @@ export function RiggingAnnounceModal({
     ],
     [images, pasted],
   );
-  const selectedImage = selectedImageId ? selectable.find((i) => i.id === selectedImageId) ?? null : null;
+  const selectedImages = selectedImageIds
+    .map((id) => selectable.find((i) => i.id === id))
+    .filter((i): i is NonNullable<typeof i> => Boolean(i));
+  const selectedUrlSet = new Set(selectedImages.map((i) => i.url));
 
   const addRow = () => setRows((prev) => [...prev, { id: nextRowId.current++, text: '' }]);
   const removeRow = (id: number) =>
@@ -203,11 +210,11 @@ export function RiggingAnnounceModal({
         title: title.trim(),
         folderPath: character.workFolderPath,
         notes,
-        imageUrl: selectedImage?.url ?? null,
+        imageUrls: selectedImages.map((i) => i.url),
       });
       toast.success('슬랙에 리깅 완성 공지를 보냈어요');
       // 전송에 쓴 이미지는 남기고, 붙여넣기만 하고 안 쓴 이미지는 정리.
-      cleanupPastedUploads(selectedImage?.url ?? null);
+      cleanupPastedUploads(selectedUrlSet);
       onClose();
     } catch (err) {
       console.error('[rigging-announce] 전송 실패:', err);
@@ -296,13 +303,21 @@ export function RiggingAnnounceModal({
           ) : (
             <div className="flex flex-wrap gap-2">
               {selectable.map((img) => {
-                const on = img.id === selectedImageId;
+                const on = selectedImageIds.includes(img.id);
+                const order = selectedImageIds.indexOf(img.id);
                 return (
                   <button
                     key={img.id}
                     type="button"
-                    onClick={() => setSelectedImageId(on ? null : img.id)}
-                    title={on ? '선택 해제' : '이 이미지로 공지'}
+                    onClick={() => setSelectedImageIds((prev) => {
+                      if (prev.includes(img.id)) return prev.filter((id) => id !== img.id);
+                      if (prev.length >= MAX_ANNOUNCE_IMAGES) {
+                        toast.info(`이미지는 최대 ${MAX_ANNOUNCE_IMAGES}장까지 첨부할 수 있어요`);
+                        return prev;
+                      }
+                      return [...prev, img.id];
+                    })}
+                    title={on ? '선택 해제' : '이 이미지도 공지에 첨부'}
                     className={`relative h-16 w-16 rounded-lg overflow-hidden border-2 transition-colors ${
                       on ? 'border-accent' : 'border-bg-border/70 hover:border-bg-border'
                     }`}
@@ -314,6 +329,9 @@ export function RiggingAnnounceModal({
                     {img.isPasted && (
                       <span className="absolute top-0.5 left-0.5 text-[9px] leading-none px-1 py-0.5 rounded bg-accent/80 text-white">붙여넣기</span>
                     )}
+                    {on && (
+                      <span className="absolute bottom-0.5 right-0.5 min-w-4 text-center text-[9px] leading-none px-1 py-0.5 rounded bg-accent text-white">{order + 1}</span>
+                    )}
                   </button>
                 );
               })}
@@ -322,8 +340,8 @@ export function RiggingAnnounceModal({
           <span className="text-[11px] text-text-secondary">
             {pasting
               ? '이미지 올리는 중…'
-              : selectedImage
-                ? '슬랙에서 이 이미지 미리보기가 함께 표시돼요. 캡처는 Ctrl+V 로 추가할 수 있어요.'
+              : selectedImages.length > 0
+                ? `선택한 ${selectedImages.length}장이 공지에 함께 표시돼요 (최대 ${MAX_ANNOUNCE_IMAGES}장). 캡처는 Ctrl+V 로 추가할 수 있어요.`
                 : '이미지 없이 텍스트만 보냅니다. 캡처는 Ctrl+V 로 추가할 수 있어요.'}
           </span>
         </div>

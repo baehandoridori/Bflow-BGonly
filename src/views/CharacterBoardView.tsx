@@ -25,6 +25,7 @@ import { loadPersistedCharacterViewMode, savePersistedCharacterViewMode, loadPer
 import { CharacterListRow } from '@/components/characters/CharacterListRow';
 import { IsPopupContext } from '@/components/widgets/Widget';
 import { CharacterTabGroupsView } from '@/components/characters/CharacterTabGroupsView';
+import { ConfirmDialog } from '@/components/common/ConfirmDialog';
 import type { CharacterBoardTab } from '@/types';
 
 type BoardTab = 'board' | 'episode-assets';
@@ -220,6 +221,11 @@ function CharacterGrid({ onAdd, pendingOpenId, onConsumeOpen }: { onAdd: () => v
   const activeCharacters = useMemo(() => characters.filter((c) => c.status !== 'archived'), [characters]);
   const archivedCharacters = useMemo(() => characters.filter((c) => c.status === 'archived'), [characters]);
   const visibleCharacters = showArchived ? archivedCharacters : activeCharacters;
+
+  // 피드백 46: 보관 목록에서 마지막 캐릭터를 삭제/복원하면 '보관 N' 버튼이 사라져 빈 화면에 갇힌다 — 자동 복귀.
+  useEffect(() => {
+    if (showArchived && archivedCharacters.length === 0) setShowArchived(false);
+  }, [showArchived, archivedCharacters.length]);
 
   const allTags = useMemo(() => {
     const set = new Set<string>();
@@ -583,6 +589,16 @@ function CharacterGrid({ onAdd, pendingOpenId, onConsumeOpen }: { onAdd: () => v
           imageCostume={cardMenuFeatured}
           fileCostume={cardMenuFileCostume}
           onClose={() => setCardMenu(null)}
+          onArchive={cardMenuCharacter.status !== 'archived'
+            ? () => { void (async () => {
+                const ok = await ConfirmDialog.show({
+                  message: `'${cardMenuCharacter.name}' 캐릭터를 보관할까요?\n보관된 캐릭터는 기본 목록과 검색에서 숨겨지고, 보관 목록에서 복원하거나 영구 삭제할 수 있어요.`,
+                  confirmLabel: '보관',
+                  tone: 'danger',
+                });
+                if (ok) await useCharacterBoardStore.getState().archiveCharacter(cardMenuCharacter.id);
+              })(); }
+            : undefined}
         />
       )}
 

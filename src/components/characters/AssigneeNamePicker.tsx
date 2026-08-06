@@ -123,10 +123,10 @@ export function AssigneeNamePicker({
             aria-label={`${label} 추가`}
             tabIndex={-1}
             onKeyDown={modalFocus.onKeyDown}
-            className="w-full max-w-sm rounded-2xl bg-bg-card p-4 shadow-2xl ring-1 ring-white/10"
+            className="flex max-h-[min(85vh,720px)] w-full max-w-sm flex-col rounded-2xl bg-bg-card p-4 shadow-2xl ring-1 ring-white/10"
             onMouseDown={(event) => event.stopPropagation()}
           >
-            <div className="mb-3 flex items-start justify-between gap-3">
+            <div className="shrink-0 mb-3 flex items-start justify-between gap-3">
               <div>
                 <div className="text-sm font-semibold text-text-primary">{label} 추가</div>
                 <div className="text-xs text-text-secondary">목록에서 고르거나, 쉼표로 여러 이름을 직접 입력할 수 있어요</div>
@@ -136,7 +136,7 @@ export function AssigneeNamePicker({
               </button>
             </div>
             {selected.length > 0 && (
-              <div className="mb-3 flex flex-wrap gap-1.5">
+              <div className="shrink-0 mb-3 flex flex-wrap gap-1.5">
                 {selected.map((name) => {
                   const itemColor = getUserColor(name);
                   const isListedUser = userNameSet.has(name);
@@ -187,10 +187,10 @@ export function AssigneeNamePicker({
                 }
               }}
               placeholder="이름 입력"
-              className="w-full rounded-xl border border-bg-border bg-bg-border/10 px-3 py-2 text-sm text-text-primary placeholder:text-text-secondary/50 outline-none focus:border-accent/70"
+              className="shrink-0 w-full rounded-xl border border-bg-border bg-bg-border/10 px-3 py-2 text-sm text-text-primary placeholder:text-text-secondary/50 outline-none focus:border-accent/70"
             />
             {suggestions.length > 0 && (
-              <div className="mt-2 max-h-44 overflow-y-auto rounded-xl border border-bg-border/70 bg-bg-border/10" role="listbox" aria-label="팀원 목록">
+              <div className="mt-2 min-h-0 flex-1 overflow-y-auto rounded-xl border border-bg-border/70 bg-bg-border/10" role="listbox" aria-label="팀원 목록">
                 {suggestions.map((u, i) => {
                   const itemColor = getUserColor(u.name);
                   return (
@@ -199,6 +199,7 @@ export function AssigneeNamePicker({
                       type="button"
                       role="option"
                       aria-selected={i === highlightIdx}
+                      ref={(el) => { if (el && i === highlightIdx) el.scrollIntoView({ block: 'nearest' }); }}
                       onClick={() => addName(u.name)}
                       onMouseEnter={() => setHighlightIdx(i)}
                       className={cn(
@@ -213,7 +214,7 @@ export function AssigneeNamePicker({
                 })}
               </div>
             )}
-            <div className="mt-4 flex justify-end gap-2">
+            <div className="shrink-0 mt-4 flex justify-end gap-2">
               <button type="button" onClick={closeModal} className="rounded-lg px-3 py-2 text-sm text-text-secondary hover:bg-bg-border/25 hover:text-text-primary">
                 취소
               </button>

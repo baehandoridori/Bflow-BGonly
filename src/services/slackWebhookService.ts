@@ -34,8 +34,8 @@ interface RiggingAnnounceParams {
   folderPath: string | null;
   /** 비고 여러 줄. 슬랙에선 줄바꿈으로 이어진다(bigo). */
   notes: string[];
-  /** 공지에 붙일 이미지 공개 URL(image). 없으면 빈 문자열 — 슬랙이 링크 언펄로 미리보기. */
-  imageUrl: string | null;
+  /** 공지에 붙일 이미지 공개 URL 들(image). 없으면 빈 문자열 — 슬랙이 각 링크를 언펄해 미리보기(피드백 50). */
+  imageUrls: string[];
 }
 
 /**
@@ -55,16 +55,35 @@ export function buildRiggingBigo(notes: string[]): string {
   return notes.map((n) => n.trim()).filter((n) => n.length > 0).join('\n');
 }
 
+/**
+ * 내용(CH_name) 줄 + 비고를 한 변수로 병합 (피드백 43).
+ * 비고가 없으면 내용 줄만 반환 — 슬랙 템플릿의 `• {bigo}` 줄을 없애는 대신 앱이 비고 불릿을 소유해,
+ * 비고 생략 시 빈 불릿이 남지 않는다. 불릿 문자(`• `)는 비고 줄에만 붙인다(내용 줄 불릿은 템플릿 소유).
+ */
+export function buildRiggingContent(characterLine: string, notes: string[]): string {
+  const bigo = buildRiggingBigo(notes);
+  if (!bigo) return characterLine;
+  return `${characterLine}\n${bigo.split('\n').map((n) => `• ${n}`).join('\n')}`;
+}
+
+/** 이미지 URL 배열 → image 변수 값(줄바꿈 join, 피드백 50). 슬랙이 각 줄의 링크를 언펄해 미리보기 여러 개가 뜬다. */
+export function buildRiggingImageValue(urls: string[]): string {
+  return urls.filter((u) => u.trim().length > 0).join('\n');
+}
+
 /** 리깅 완성 작업공지 전송. 워크플로 변수 title/CH_name/Path/bigo/image 를 채운다. 실패 시 throw. */
 export async function sendRiggingAnnounce(params: RiggingAnnounceParams): Promise<{ ok: boolean }> {
   const payload: Record<string, string> = {
     title: params.title,
-    CH_name: params.characterName,
+    // 피드백 43: 비고는 CH_name 에 병합해 보낸다 — 템플릿의 bigo 줄 삭제 후에도 비고가 보이고,
+    //   비고가 없으면 빈 불릿 없이 내용 줄만 나간다.
+    CH_name: buildRiggingContent(params.characterName, params.notes),
     // 피드백 31(c): Path 는 원본 경로 대신 클릭하면 탐색기가 열리는 jbbj://open/ 링크로 보낸다
     //   (슬랙 워크플로 메시지의 하이퍼링크 서식이 이 변수를 URL 로 쓴다 — 한솔 확인).
     Path: params.folderPath ? buildJbbjOpenLink(params.folderPath) : '',
+    // 트리거에 정의된 변수는 계속 전송(누락 시 요청 거부 가능) — 템플릿이 참조만 안 하면 된다.
     bigo: buildRiggingBigo(params.notes),
-    image: params.imageUrl ?? '',
+    image: buildRiggingImageValue(params.imageUrls),
   };
   return window.electronAPI.sendRiggingWebhook(payload);
 }

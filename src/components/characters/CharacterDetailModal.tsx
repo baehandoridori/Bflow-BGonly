@@ -389,7 +389,7 @@ function CharacterDetailPanel({
 
   const handleArchiveCharacter = async () => {
     const ok = await ConfirmDialog.show({
-      message: `'${character.name}' 캐릭터를 보관할까요?\n보관된 캐릭터는 기본 목록과 검색에서 숨겨지고, 보관 목록에서 다시 복원할 수 있어요.`,
+      message: `'${character.name}' 캐릭터를 보관할까요?\n보관된 캐릭터는 기본 목록과 검색에서 숨겨지고, 보관 목록에서 다시 복원할 수 있어요.\n완전히 지우려면 보관 후 '보관 N' 목록에서 열어 '영구 삭제'를 누르면 돼요.`,
       confirmLabel: '보관',
       tone: 'danger',
     });
