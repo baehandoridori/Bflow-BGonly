@@ -4,7 +4,7 @@
 import { readFileSync } from 'node:fs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { buildRiggingBigo, buildRiggingContent, buildJbbjOpenLink } from '../src/services/slackWebhookService.ts';
+import { buildRiggingBigo, buildRiggingContent, buildRiggingImageValue, buildJbbjOpenLink } from '../src/services/slackWebhookService.ts';
 
 test('buildRiggingBigo: 빈 줄 제거 + trim + 줄바꿈 결합', () => {
   assert.equal(buildRiggingBigo(['a', 'b']), 'a\nb');
@@ -19,6 +19,13 @@ test('buildRiggingContent: 비고 있으면 내용줄 + 불릿 비고, 없으면
   assert.equal(buildRiggingContent('내용줄', ['   ']), '내용줄'); // 공백뿐인 비고도 생략 취급
   assert.equal(buildRiggingContent('내용줄', ['비고1']), '내용줄\n• 비고1');
   assert.equal(buildRiggingContent('내용줄', ['비고1', '', ' 비고2 ']), '내용줄\n• 비고1\n• 비고2');
+});
+
+test('buildRiggingImageValue: 0장/1장/N장 join + 빈 URL 제거 (피드백 50)', () => {
+  assert.equal(buildRiggingImageValue([]), '');
+  assert.equal(buildRiggingImageValue(['https://a/1.png']), 'https://a/1.png');
+  assert.equal(buildRiggingImageValue(['https://a/1.png', 'https://a/2.png']), 'https://a/1.png\nhttps://a/2.png');
+  assert.equal(buildRiggingImageValue(['https://a/1.png', ' ', '']), 'https://a/1.png');
 });
 
 test('B11 전송 계층: main URL/핸들러 + preload + 타입 + mock', () => {
@@ -42,7 +49,7 @@ test('B11 서비스: 워크플로 변수(title/CH_name/Path/bigo/image) 매핑',
   assert.match(svc, /CH_name: buildRiggingContent\(params\.characterName, params\.notes\)/);
   assert.match(svc, /Path: params\.folderPath \? buildJbbjOpenLink\(params\.folderPath\) : ''/);
   assert.match(svc, /bigo: buildRiggingBigo\(params\.notes\)/);
-  assert.match(svc, /image: params\.imageUrl \?\? ''/);
+  assert.match(svc, /image: buildRiggingImageValue\(params\.imageUrls\)/);
   assert.match(svc, /window\.electronAPI\.sendRiggingWebhook\(payload\)/);
 });
 
@@ -102,8 +109,11 @@ test('피드백 31(b): 공지 이미지 Ctrl+V — 공지 전용 업로드 + 미
   assert.match(modal, /uploadCharacterImage\(character\.id, costume\.id, base64\)/);
   assert.doesNotMatch(modal, /addCostumeImage/);
   // 취소 시 전부(단, 전송 중이면 웹훅이 참조할 선택 이미지 보존 — 코덱스 3차 P2), 전송 시 쓴 이미지만 남기고 정리.
-  assert.match(modal, /cleanupPastedUploads\(sending \? selectedImage\?\.url \?\? null : null\)/);
-  assert.match(modal, /cleanupPastedUploads\(selectedImage\?\.url \?\? null\)/);
+  assert.match(modal, /cleanupPastedUploads\(sending \? selectedUrlSet : new Set\(\)\)/);
+  assert.match(modal, /cleanupPastedUploads\(selectedUrlSet\)/);
+  // 피드백 50: 다중 선택 상태 + 상한 가드.
+  assert.match(modal, /const \[selectedImageIds, setSelectedImageIds\]/);
+  assert.match(modal, /MAX_ANNOUNCE_IMAGES = 5/);
   // 업로드 진행 중 닫기(in-flight) 경합 — 닫힌 뒤 완료된 업로드는 등록 없이 즉시 정리 (코덱스 P2).
   assert.match(modal, /closedRef\.current = true;/);
   assert.match(modal, /if \(closedRef\.current\) \{\s*\n\s*deleteImage\(res\.url\)/);

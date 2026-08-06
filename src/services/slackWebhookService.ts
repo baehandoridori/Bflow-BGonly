@@ -34,8 +34,8 @@ interface RiggingAnnounceParams {
   folderPath: string | null;
   /** 비고 여러 줄. 슬랙에선 줄바꿈으로 이어진다(bigo). */
   notes: string[];
-  /** 공지에 붙일 이미지 공개 URL(image). 없으면 빈 문자열 — 슬랙이 링크 언펄로 미리보기. */
-  imageUrl: string | null;
+  /** 공지에 붙일 이미지 공개 URL 들(image). 없으면 빈 문자열 — 슬랙이 각 링크를 언펄해 미리보기(피드백 50). */
+  imageUrls: string[];
 }
 
 /**
@@ -66,6 +66,11 @@ export function buildRiggingContent(characterLine: string, notes: string[]): str
   return `${characterLine}\n${bigo.split('\n').map((n) => `• ${n}`).join('\n')}`;
 }
 
+/** 이미지 URL 배열 → image 변수 값(줄바꿈 join, 피드백 50). 슬랙이 각 줄의 링크를 언펄해 미리보기 여러 개가 뜬다. */
+export function buildRiggingImageValue(urls: string[]): string {
+  return urls.filter((u) => u.trim().length > 0).join('\n');
+}
+
 /** 리깅 완성 작업공지 전송. 워크플로 변수 title/CH_name/Path/bigo/image 를 채운다. 실패 시 throw. */
 export async function sendRiggingAnnounce(params: RiggingAnnounceParams): Promise<{ ok: boolean }> {
   const payload: Record<string, string> = {
@@ -78,7 +83,7 @@ export async function sendRiggingAnnounce(params: RiggingAnnounceParams): Promis
     Path: params.folderPath ? buildJbbjOpenLink(params.folderPath) : '',
     // 트리거에 정의된 변수는 계속 전송(누락 시 요청 거부 가능) — 템플릿이 참조만 안 하면 된다.
     bigo: buildRiggingBigo(params.notes),
-    image: params.imageUrl ?? '',
+    image: buildRiggingImageValue(params.imageUrls),
   };
   return window.electronAPI.sendRiggingWebhook(payload);
 }
