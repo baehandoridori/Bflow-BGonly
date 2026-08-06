@@ -688,6 +688,9 @@ export function CharacterDetailModal({
   const characters = useCharacterBoardStore((s) => s.characters);
   const byCharacter = useCharacterBoardStore((s) => s.byCharacter);
 
+  // 재진입 시 도는 조용한 재조회 — 이 동안의 복장 태그 클릭은 낡은 목록으로 판정하지 않는다(코덱스 6차 P2).
+  const boardLoading = useCharacterBoardStore((s) => s.loading);
+
   const allVisibleCharacters = useMemo(
     () => characters.filter((c) => (archivedMode ? c.status === 'archived' : c.status !== 'archived')),
     [archivedMode, characters],
@@ -734,8 +737,7 @@ export function CharacterDetailModal({
     [byCharacter, selected],
   );
 
-  const handleCommentHashClick = (target: HashTarget) => {
-    if (target.kind !== 'costume') { navigateToHashTarget(target); return; }
+  const resolveCostumeHashTarget = useCallback((target: Extract<HashTarget, { kind: 'costume' }>) => {
     if (!selected) return;
     const costumes = byCharacter.get(target.characterId) ?? [];
     const found = costumes.find((c) => c.id === target.costumeId) ?? null;
@@ -756,6 +758,21 @@ export function CharacterDetailModal({
     if (target.versionNo !== undefined && found.versionNo !== target.versionNo) {
       toast.info(`이 태그는 v${target.versionNo} 때 남긴 기록이에요 — 지금은 v${found.versionNo}`);
     }
+  }, [byCharacter, selected, allVisibleCharacters]);
+
+  // 조용한 재조회 중에는 복장 목록이 아직 낡았을 수 있다 — 클릭을 보류했다가 재조회가 끝나면 그때 판정한다
+  //   (안 그러면 원격에서 지운 복장이 잠깐 열리거나, 올라간 버전의 안내가 누락된다. 코덱스 6차 P2).
+  const [pendingHashTarget, setPendingHashTarget] = useState<Extract<HashTarget, { kind: 'costume' }> | null>(null);
+  useEffect(() => {
+    if (!pendingHashTarget || boardLoading) return;
+    resolveCostumeHashTarget(pendingHashTarget);
+    setPendingHashTarget(null);
+  }, [pendingHashTarget, boardLoading, resolveCostumeHashTarget]);
+
+  const handleCommentHashClick = (target: HashTarget) => {
+    if (target.kind !== 'costume') { navigateToHashTarget(target); return; }
+    if (boardLoading) { setPendingHashTarget(target); return; }
+    resolveCostumeHashTarget(target);
   };
   useEffect(() => {
     if (selected) return;

@@ -92,6 +92,11 @@ test('피드백 49: 조용한 재조회가 끝난 뒤 딥링크를 소비 + 알�
   assert.match(panel, /commentText: stripEntityTokens\(comment\.text\)/);
   const revisionThread = readFileSync('src/components/scenes/RevisionCommentThread.tsx', 'utf8');
   assert.match(revisionThread, /commentText: stripEntityTokens\(newComment\.text\)/);
+  // 모달 안 클릭도 같은 게이트를 쓴다 — 재조회 중 클릭은 보류했다가 끝난 뒤 판정 (코덱스 6차 P2).
+  const modal = readFileSync('src/components/characters/CharacterDetailModal.tsx', 'utf8');
+  assert.match(modal, /const boardLoading = useCharacterBoardStore\(\(s\) => s\.loading\)/);
+  assert.match(modal, /if \(boardLoading\) \{ setPendingHashTarget\(target\); return; \}/);
+  assert.match(modal, /if \(!pendingHashTarget \|\| boardLoading\) return;/);
 });
 
 test('피드백 49: 모달 밖 이동도 떠나온 화면을 뒤로가기 스택에 기록 (코덱스 3차 P2)', () => {
