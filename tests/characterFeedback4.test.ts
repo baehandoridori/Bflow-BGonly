@@ -19,6 +19,10 @@ test('피드백 39: 담당자 피커 — 팀원 제안 목록 + 키보드 선택
   // 자유 입력(외부 인력)과 기존 앵커는 유지된다.
   assert.match(picker, /placeholder="이름 입력"/);
   assert.match(picker, /setModalOpen/);
+  // 피드백 44: 목록 고정 상한(max-h-44) 제거 — 다이얼로그 flex 상한 안에서 목록이 남는 높이를 전부 쓴다.
+  assert.doesNotMatch(picker, /max-h-44/);
+  assert.match(picker, /max-h-\[min\(85vh,720px\)\]/);
+  assert.match(picker, /min-h-0 flex-1 overflow-y-auto/);
 });
 
 test('피드백 38: 현황판 상단 메뉴 고정 — 제목·탭 고정 영역 + sticky 헤더', () => {
