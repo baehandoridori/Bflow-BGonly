@@ -72,3 +72,11 @@ test('피드백 49: 모달 밖 딥링크도 태그 버전을 싣고 보드가 �
   assert.match(board, /이 태그는 v\$\{pendingOpenCostumeVersionNo\} 때 남긴 기록이에요/);
   assert.match(board, /setPendingOpenCostumeVersionNo\(pendingCharacterBoardRequest\.costumeVersionNo\)/);
 });
+
+test('피드백 49: 복장 전환 요청은 nonce 당 1회만 소비 (코덱스 2차 P2)', () => {
+  const modal = readFileSync('src/components/characters/CharacterDetailModal.tsx', 'utf8');
+  // 소비 표시가 없으면 이후 복장 편집·Realtime 수신마다 이펙트가 재실행돼 수동 선택을 되돌린다.
+  assert.match(modal, /const consumedCostumeNonceRef = useRef<number \| null>\(null\)/);
+  assert.match(modal, /consumedCostumeNonceRef\.current === costumeRequest\.nonce\) return/);
+  assert.match(modal, /consumedCostumeNonceRef\.current = costumeRequest\.nonce;/);
+});

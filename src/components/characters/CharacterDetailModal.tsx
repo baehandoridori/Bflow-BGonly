@@ -271,9 +271,15 @@ function CharacterDetailPanel({
   }, [costumes, activeCostumeId]);
 
   // 피드백 49: 복장 전환 요청 소비 — 캐릭터 전환 직후 costumes 가 아직 이전 것일 수 있어 존재 확인 후 반영.
+  //   nonce 를 1회만 소비한다: 소비하지 않으면 이후 복장 편집·Realtime 수신으로 costumes 배열이 새로 만들어질 때마다
+  //   이 이펙트가 다시 돌아, 사용자가 수동으로 고른 복장을 옛 요청으로 되돌린다(코덱스 2차 P2).
+  const consumedCostumeNonceRef = useRef<number | null>(null);
   useEffect(() => {
-    if (!costumeRequest) return;
-    if (costumes.some((c) => c.id === costumeRequest.costumeId)) setActiveCostumeId(costumeRequest.costumeId);
+    if (!costumeRequest || consumedCostumeNonceRef.current === costumeRequest.nonce) return;
+    if (costumes.some((c) => c.id === costumeRequest.costumeId)) {
+      consumedCostumeNonceRef.current = costumeRequest.nonce;
+      setActiveCostumeId(costumeRequest.costumeId);
+    }
   }, [costumeRequest, costumes]);
 
   useEffect(() => { setEditingName(false); setNameDraft(character.name); }, [character.id, character.name]);
