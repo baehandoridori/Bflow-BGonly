@@ -11,6 +11,7 @@
 
 import { useCallback, useContext, useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react';
 import { Archive, ChevronDown, Plus, Image as ImageIcon, Search, Ruler, LayoutGrid, Grid3x3, List, ExternalLink, UserRound, X } from 'lucide-react';
+import { toast } from 'sonner';
 import { useCharacterBoardStore } from '@/stores/useCharacterBoardStore';
 import { moveCostumeInOrder, dropEdgeFor } from '@/stores/characterBoardStoreHelpers';
 import { useAppStore } from '@/stores/useAppStore';
@@ -179,7 +180,7 @@ function BoardTabStrip({ tabs, activeTabId, onSelect, onAdd, onRename, onDelete 
   );
 }
 
-function CharacterGrid({ onAdd, pendingOpenId, onConsumeOpen }: { onAdd: () => void; pendingOpenId?: string | null; onConsumeOpen?: () => void }) {
+function CharacterGrid({ onAdd, pendingOpenId, pendingOpenCostumeId, pendingOpenCostumeVersionNo, onConsumeOpen }: { onAdd: () => void; pendingOpenId?: string | null; pendingOpenCostumeId?: string; pendingOpenCostumeVersionNo?: number; onConsumeOpen?: () => void }) {
   const characters = useCharacterBoardStore((s) => s.characters);
   const byCharacter = useCharacterBoardStore((s) => s.byCharacter);
   const loaded = useCharacterBoardStore((s) => s.loaded);
@@ -227,10 +228,22 @@ function CharacterGrid({ onAdd, pendingOpenId, onConsumeOpen }: { onAdd: () => v
     if (pendingOpenId) {
       const pendingCharacter = characters.find((c) => c.id === pendingOpenId);
       if (pendingCharacter?.status === 'archived') setShowArchived(true);
-      setDetailRequest((prev) => ({ id: pendingOpenId, nonce: (prev?.nonce ?? 0) + 1 }));
+      // 피드백 49 + 코덱스 1차 P2: 복장 태그로 들어온 딥링크는 모달 안 클릭과 같은 안내를 준다 —
+      //   삭제된 복장이면 조용히 첫 복장으로 떨어지지 않게 알리고, 버전이 바뀌었으면 기록 시점을 알린다.
+      let costumeId = pendingOpenCostumeId;
+      if (costumeId) {
+        const found = (byCharacter.get(pendingOpenId) ?? []).find((c) => c.id === costumeId) ?? null;
+        if (!found) {
+          toast.info('태그된 복장을 찾을 수 없어요 — 삭제되었을 수 있어요');
+          costumeId = undefined;
+        } else if (pendingOpenCostumeVersionNo !== undefined && found.versionNo !== pendingOpenCostumeVersionNo) {
+          toast.info(`이 태그는 v${pendingOpenCostumeVersionNo} 때 남긴 기록이에요 — 지금은 v${found.versionNo}`);
+        }
+      }
+      setDetailRequest((prev) => ({ id: pendingOpenId, nonce: (prev?.nonce ?? 0) + 1, costumeId }));
       onConsumeOpen?.();
     }
-  }, [characters, pendingOpenId, onConsumeOpen]);
+  }, [characters, byCharacter, pendingOpenId, pendingOpenCostumeId, pendingOpenCostumeVersionNo, onConsumeOpen]);
 
   const activeCharacters = useMemo(() => characters.filter((c) => c.status !== 'archived'), [characters]);
   const archivedCharacters = useMemo(() => characters.filter((c) => c.status === 'archived'), [characters]);
@@ -683,12 +696,19 @@ function CharacterGrid({ onAdd, pendingOpenId, onConsumeOpen }: { onAdd: () => v
 export function CharacterBoardView() {
   const ensureLoadedAndRealtime = useCharacterBoardStore((s) => s.ensureLoadedAndRealtime);
   const loaded = useCharacterBoardStore((s) => s.loaded);
+  // 이미 로드된 뒤 다른 뷰를 다녀오면 ensureLoadedAndRealtime 이 조용한 재조회를 돌린다 — 이때도 loaded 는 true 라
+  //   그대로 소비하면 낡은 복장 목록으로 판정한다(원격 삭제/버전 변경 안내 누락). 재조회가 끝난 뒤 소비한다(코덱스 5차 P2).
+  const boardLoading = useCharacterBoardStore((s) => s.loading);
   const pendingCharacterBoardRequest = useAppStore((s) => s.pendingCharacterBoardRequest);
   const setPendingCharacterBoardRequest = useAppStore((s) => s.setPendingCharacterBoardRequest);
 
   const [tab, setTab] = useState<BoardTab>('board');
   const [addOpen, setAddOpen] = useState(false);
   const [pendingOpenId, setPendingOpenId] = useState<string | null>(null);
+  // 피드백 49: 복장 태그로 들어온 딥링크는 복장까지 지정한다(없으면 undefined = 기존 동작).
+  //   태그를 남긴 시점의 버전도 함께 실어 보드에서 삭제·버전 변경을 안내한다(코덱스 1차 P2).
+  const [pendingOpenCostumeId, setPendingOpenCostumeId] = useState<string | undefined>(undefined);
+  const [pendingOpenCostumeVersionNo, setPendingOpenCostumeVersionNo] = useState<number | undefined>(undefined);
   // 팝업 창 안에서는 "새 창으로" 버튼을 숨긴다 (피드백 36 — 팝업이 팝업을 또 열지 않게).
   const isPopup = useContext(IsPopupContext);
 
@@ -698,11 +718,13 @@ export function CharacterBoardView() {
   }, [ensureLoadedAndRealtime]);
 
   useEffect(() => {
-    if (!pendingCharacterBoardRequest || !loaded) return;
+    if (!pendingCharacterBoardRequest || !loaded || boardLoading) return;
     setTab('board');
     setPendingOpenId(pendingCharacterBoardRequest.characterId);
+    setPendingOpenCostumeId(pendingCharacterBoardRequest.costumeId);
+    setPendingOpenCostumeVersionNo(pendingCharacterBoardRequest.costumeVersionNo);
     setPendingCharacterBoardRequest(null);
-  }, [loaded, pendingCharacterBoardRequest, setPendingCharacterBoardRequest]);
+  }, [loaded, boardLoading, pendingCharacterBoardRequest, setPendingCharacterBoardRequest]);
 
   // 미소비 딥링크 요청 청소는 useAppStore.setView(다른 뷰로 이동 시)와 goBackNavigation이 담당 —
   //   언마운트 cleanup 방식은 StrictMode 이중 마운트에서 정상 요청까지 지워 사용하지 않는다.
@@ -737,7 +759,13 @@ export function CharacterBoardView() {
 
       <div data-board-scroll="" className="flex-1 min-h-0 overflow-y-auto px-6 pb-6">
         {tab === 'board' ? (
-          <CharacterGrid onAdd={() => setAddOpen(true)} pendingOpenId={pendingOpenId} onConsumeOpen={() => setPendingOpenId(null)} />
+          <CharacterGrid
+            onAdd={() => setAddOpen(true)}
+            pendingOpenId={pendingOpenId}
+            pendingOpenCostumeId={pendingOpenCostumeId}
+            pendingOpenCostumeVersionNo={pendingOpenCostumeVersionNo}
+            onConsumeOpen={() => { setPendingOpenId(null); setPendingOpenCostumeId(undefined); setPendingOpenCostumeVersionNo(undefined); }}
+          />
         ) : (
           <div className="pt-4">
             <EpisodeAssetBoard onOpenCharacter={(id) => { setTab('board'); setPendingOpenId(id); }} />

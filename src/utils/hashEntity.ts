@@ -11,7 +11,8 @@
 export type HashTarget =
   | { kind: 'scene'; episodeNumber: number; partId: string; sceneId: string; sceneUuid?: string }
   | { kind: 'part'; episodeNumber: number; partId: string }
-  | { kind: 'episode'; episodeNumber: number };
+  | { kind: 'episode'; episodeNumber: number }
+  | { kind: 'costume'; characterId: string; costumeId: string; versionNo: number };
 
 export interface HashTag {
   kind: HashTarget['kind'];
@@ -22,11 +23,17 @@ export interface HashTag {
   sceneId?: string;
   /** Supabase scene UUID(있으면). 같은 파트 내 sceneId 중복 row 를 정확히 구분. */
   sceneUuid?: string;
+  /** costume kind 전용 (피드백 49). episodeNumber 는 costume 에선 미사용(직렬화에 안 들어감 — 빌더는 0 을 넣는다). */
+  characterId?: string;
+  costumeId?: string;
+  versionNo?: number;
 }
 
 export function serializeHashTag(t: HashTag): string {
   const payload =
-    t.kind === 'scene'
+    t.kind === 'costume'
+      ? `bcostume:${t.characterId}:${t.costumeId}:${t.versionNo ?? 1}`
+      : t.kind === 'scene'
       ? t.sceneUuid
         ? `bscene:${t.episodeNumber}:${t.partId}:${t.sceneId}:${t.sceneUuid}`
         : `bscene:${t.episodeNumber}:${t.partId}:${t.sceneId}`
@@ -41,6 +48,14 @@ export function serializeHashTag(t: HashTag): string {
 
 export function parseHashTarget(target: string): HashTarget | null {
   const seg = target.split(':');
+  // bcostume:<characterId>:<costumeId>:<versionNo> — id 세그먼트는 UUID 라 아래 ep 숫자 가드 대상이 아니다 (피드백 49).
+  if (seg[0] === 'bcostume') {
+    if (seg.length !== 4 || !seg[1] || !seg[2]) return null;
+    if (!/^\d+$/.test(seg[3] ?? '')) return null;
+    const v = parseInt(seg[3], 10);
+    if (!Number.isInteger(v) || v <= 0) return null;
+    return { kind: 'costume', characterId: seg[1], costumeId: seg[2], versionNo: v };
+  }
   // ep 는 순수 숫자만 허용 — parseInt 는 '1abc'→1 처럼 접두사를 받아들여, 손편집/복사된
   // 잘못된 payload(bepisode:1abc 등)가 클릭 칩으로 렌더돼 엉뚱하게 점프하는 걸 막는다(코덱스 8차).
   if (!/^\d+$/.test(seg[1] ?? '')) return null;

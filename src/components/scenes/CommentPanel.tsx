@@ -34,6 +34,8 @@ import { useMentionAutocomplete } from '@/hooks/useMentionAutocomplete';
 import { useHashtagAutocomplete } from '@/hooks/useHashtagAutocomplete';
 import { navigateToHashTarget } from '@/utils/hashNavigation';
 import type { HashTarget } from '@/utils/hashEntity';
+import type { HashCandidate } from '@/utils/hashtagCandidates';
+import { stripEntityTokens } from '@/utils/entityTokens';
 import {
   COMMENT_READ_STATE_EVENT,
   getCommentReadStateForUser,
@@ -97,6 +99,8 @@ interface CommentPanelProps {
   quickRevision?: CommentPanelQuickRevisionContext;
   /** 4c PR2: #씬 칩 클릭 처리 분기(도킹 참조). 없으면 기존 점프(navigateToHashTarget). */
   onHashClick?: (t: HashTarget) => void;
+  /** 피드백 49: 캐릭터 스레드의 '#' 자동완성에 복장 후보 병합. */
+  extraHashCandidates?: (filter: string) => HashCandidate[];
   /** 4c PR3: #씬·#파트·#화 칩 우클릭 메뉴. */
   onHashContextMenu?: (t: HashTarget, e: React.MouseEvent) => void;
   /** Slack-style 스레드 사이드 패널 열림 상태를 부모 패널 폭 계산에 알려준다. */
@@ -302,6 +306,7 @@ export function CommentPanel({
   sceneLabel,
   quickRevision,
   onHashClick,
+  extraHashCandidates,
   onHashContextMenu,
   onThreadPanelOpenChange,
   threadWidth = 340,
@@ -937,6 +942,7 @@ export function CommentPanel({
   const hash = useHashtagAutocomplete({
     onChange: (next) => { setInput(next); inputValueRef.current = next; },
     inputRef,
+    extraCandidates: extraHashCandidates,
   });
   // 답글 진입(replyTarget 설정) 시 멘션·태그 드롭다운 닫기 — 답글 프리셋 setInput+focus 가 stale 드롭다운을 남기지 않게.
   useEffect(() => {
@@ -1356,7 +1362,8 @@ export function CommentPanel({
           const target = users.find(u => u.name === mentionedName);
           if (target?.slackId && target.slackId !== currentUser.slackId) {
             sendMentionWebhook({
-              commentText: comment.text,
+              // 슬랙 알림에는 저장 원문 대신 사람이 읽는 형태로 — 태그가 '[#라벨](b…:UUID…)' 로 노출되지 않게 한다 (코덱스 5차 P2).
+              commentText: stripEntityTokens(comment.text),
               episodeLabel: epLabel,
               sceneId,
               partLabel,
@@ -1630,7 +1637,8 @@ export function CommentPanel({
           const target = users.find(u => u.name === mentionedName);
           if (target?.slackId && target.slackId !== currentUser.slackId) {
             sendMentionWebhook({
-              commentText: comment.text,
+              // 슬랙 알림에는 저장 원문 대신 사람이 읽는 형태로 — 태그가 '[#라벨](b…:UUID…)' 로 노출되지 않게 한다 (코덱스 5차 P2).
+              commentText: stripEntityTokens(comment.text),
               episodeLabel: epLabel,
               sceneId: threadSceneId,
               partLabel,

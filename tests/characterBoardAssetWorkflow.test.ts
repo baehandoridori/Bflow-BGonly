@@ -364,7 +364,8 @@ test('character card right click opens the compact work menu instead of opening 
 });
 
 test('spotlight opens character board entries through a store-backed pending request', () => {
-  assert.match(appStore, /pendingCharacterBoardRequest:\s*\{ characterId: string \} \| null/);
+  // 피드백 49: 복장 태그 딥링크를 위해 costumeId·costumeVersionNo 를 옵셔널로 얹었다(캐릭터만 여는 기존 호출부는 무변경).
+  assert.match(appStore, /pendingCharacterBoardRequest:\s*\{ characterId: string; costumeId\?: string; costumeVersionNo\?: number \} \| null/);
   assert.match(appStore, /setPendingCharacterBoardRequest:\s*\(req: AppState\['pendingCharacterBoardRequest'\]\) => void/);
   assert.match(appStore, /pendingCharacterBoardRequest:\s*null/);
   assert.match(appStore, /pendingCharacterBoardRequest:\s*null,\r?\n\s*highlightSceneId:\s*null/);
@@ -386,7 +387,8 @@ test('spotlight opens character board entries through a store-backed pending req
   assert.match(spotlight, /placeholder="씬번호, 담당자, 캐릭터, 에피소드 검색\.\.\."/);
 
   assert.match(characterBoard, /pendingCharacterBoardRequest/);
-  assert.match(characterBoard, /if \(!pendingCharacterBoardRequest \|\| !loaded\) return;/);
+  // 피드백 49(코덱스 5차 P2): 조용한 재조회 중에는 낡은 목록으로 판정하지 않도록 boardLoading 도 함께 본다.
+  assert.match(characterBoard, /if \(!pendingCharacterBoardRequest \|\| !loaded \|\| boardLoading\) return;/);
   assert.match(characterBoard, /setPendingOpenId\(pendingCharacterBoardRequest\.characterId\)/);
   assert.match(characterBoard, /setPendingCharacterBoardRequest\(null\)/);
   assert.ok(characterBoard.includes('key={`${detailCharacter.id}:${detailRequest.nonce}`}'));

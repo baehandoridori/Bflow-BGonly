@@ -1,5 +1,5 @@
 import { Fragment, type ReactNode, type MouseEvent } from 'react';
-import { Image, Layers, Clapperboard } from 'lucide-react';
+import { Image, Layers, Clapperboard, Shirt } from 'lucide-react';
 import { tokenizeEntities } from '@/utils/entityTokens';
 import type { HashTarget } from '@/utils/hashEntity';
 import { PathBadge } from './PathBadge';
@@ -48,21 +48,26 @@ export function EntityText({ text, userNames, onMentionClick, renderTextSegment,
         }
         if (tok.type === 'hash') {
           const target = tok.target;
-          const Icon = target.kind === 'scene' ? Image : target.kind === 'part' ? Layers : Clapperboard;
+          const Icon = target.kind === 'costume' ? Shirt : target.kind === 'scene' ? Image : target.kind === 'part' ? Layers : Clapperboard;
           const color =
-            target.kind === 'scene'
-              ? 'text-[#5fe3cd] bg-[#5fe3cd]/12'
-              : target.kind === 'part'
-                ? 'text-[#f5c97a] bg-[#f5c97a]/12'
-                : 'text-[#9cc9ff] bg-[#9cc9ff]/12';
+            target.kind === 'costume'
+              ? 'text-[#f2a0c0] bg-[#f2a0c0]/12'
+              : target.kind === 'scene'
+                ? 'text-[#5fe3cd] bg-[#5fe3cd]/12'
+                : target.kind === 'part'
+                  ? 'text-[#f5c97a] bg-[#f5c97a]/12'
+                  : 'text-[#9cc9ff] bg-[#9cc9ff]/12';
           // 칩 표기·툴팁에 에피소드 이름 포함(a001 → '친모2 a001', 툴팁 '친모2 - A - a001').
-          const epLabel = epName(target.episodeNumber);
-          const chipLabel = target.kind === 'episode' ? tok.label : `${epLabel} ${tok.label}`;
-          const tip = target.kind === 'scene'
-            ? `${epLabel} - ${target.partId} - ${target.sceneId}`
-            : target.kind === 'part'
-              ? `${epLabel} - ${target.partId}`
-              : epLabel;
+          //   costume 태그(피드백 49)는 episodeNumber 가 없다 — 라벨에 이미 '캐릭터 복장 v버전'이 들어 있어 그대로 쓴다.
+          const epLabel = target.kind === 'costume' ? '' : epName(target.episodeNumber);
+          const chipLabel = target.kind === 'episode' || target.kind === 'costume' ? tok.label : `${epLabel} ${tok.label}`;
+          const tip = target.kind === 'costume'
+            ? '캐릭터 카드에서 이 복장 열기'
+            : target.kind === 'scene'
+              ? `${epLabel} - ${target.partId} - ${target.sceneId}`
+              : target.kind === 'part'
+                ? `${epLabel} - ${target.partId}`
+                : epLabel;
           return (
             <span
               key={`h${i}`}

@@ -29,6 +29,9 @@ import {
 } from '@/services/characterPathActions';
 import { openOrRegisterEpisodeReel } from '@/services/episodeReelActions';
 import { costumeNameForNew } from '@/utils/characterCostumeName';
+import { buildCostumeCandidates } from '@/utils/hashtagCandidates';
+import { navigateToHashTarget } from '@/utils/hashNavigation';
+import type { HashTarget } from '@/utils/hashEntity';
 
 function riggingRatio(costumes: CharacterCostume[]): number {
   if (costumes.length === 0) return 0;
@@ -197,6 +200,7 @@ const CostumeThumbCard = memo(function CostumeThumbCard({
 function CharacterDetailPanel({
   character,
   initialCostumeId,
+  costumeRequest,
   onClose,
   commentOpen,
   onToggleComment,
@@ -204,6 +208,8 @@ function CharacterDetailPanel({
 }: {
   character: Character;
   initialCostumeId?: string;
+  /** 외부(댓글 복장 태그)에서 특정 복장을 열라는 요청 — nonce 변경마다 소비 (피드백 49). */
+  costumeRequest?: { costumeId: string; nonce: number } | null;
   onClose: () => void;
   commentOpen: boolean;
   onToggleComment: () => void;
@@ -263,6 +269,18 @@ function CharacterDetailPanel({
     if (costumes.length === 0) { setActiveCostumeId(null); return; }
     if (!costumes.some((c) => c.id === activeCostumeId)) setActiveCostumeId(costumes[0].id);
   }, [costumes, activeCostumeId]);
+
+  // 피드백 49: 복장 전환 요청 소비 — 캐릭터 전환 직후 costumes 가 아직 이전 것일 수 있어 존재 확인 후 반영.
+  //   nonce 를 1회만 소비한다: 소비하지 않으면 이후 복장 편집·Realtime 수신으로 costumes 배열이 새로 만들어질 때마다
+  //   이 이펙트가 다시 돌아, 사용자가 수동으로 고른 복장을 옛 요청으로 되돌린다(코덱스 2차 P2).
+  const consumedCostumeNonceRef = useRef<number | null>(null);
+  useEffect(() => {
+    if (!costumeRequest || consumedCostumeNonceRef.current === costumeRequest.nonce) return;
+    if (costumes.some((c) => c.id === costumeRequest.costumeId)) {
+      consumedCostumeNonceRef.current = costumeRequest.nonce;
+      setActiveCostumeId(costumeRequest.costumeId);
+    }
+  }, [costumeRequest, costumes]);
 
   useEffect(() => { setEditingName(false); setNameDraft(character.name); }, [character.id, character.name]);
 
@@ -670,6 +688,9 @@ export function CharacterDetailModal({
   const characters = useCharacterBoardStore((s) => s.characters);
   const byCharacter = useCharacterBoardStore((s) => s.byCharacter);
 
+  // 재진입 시 도는 조용한 재조회 — 이 동안의 복장 태그 클릭은 낡은 목록으로 판정하지 않는다(코덱스 6차 P2).
+  const boardLoading = useCharacterBoardStore((s) => s.loading);
+
   const allVisibleCharacters = useMemo(
     () => characters.filter((c) => (archivedMode ? c.status === 'archived' : c.status !== 'archived')),
     [archivedMode, characters],
@@ -700,6 +721,59 @@ export function CharacterDetailModal({
     return visibleCharacters.filter((character) => character.name.toLowerCase().includes(q));
   }, [listQuery, visibleCharacters]);
   const selected = visibleCharacters.find((c) => c.id === selectedId) ?? null;
+
+  // 피드백 49: 댓글 복장 태그 클릭 → 좌측 패널의 활성 복장 전환 요청 (nonce 로 같은 복장 재클릭도 소비).
+  const [costumeRequest, setCostumeRequest] = useState<{ costumeId: string; nonce: number } | null>(null);
+
+  const costumeHashCandidates = useCallback(
+    (filter: string) => {
+      if (!selected) return [];
+      return buildCostumeCandidates(
+        (byCharacter.get(selected.id) ?? []).map((c) => ({ id: c.id, characterId: c.characterId, name: c.name, versionNo: c.versionNo })),
+        selected.name,
+        filter,
+      );
+    },
+    [byCharacter, selected],
+  );
+
+  const resolveCostumeHashTarget = useCallback((target: Extract<HashTarget, { kind: 'costume' }>) => {
+    if (!selected) return;
+    const costumes = byCharacter.get(target.characterId) ?? [];
+    const found = costumes.find((c) => c.id === target.costumeId) ?? null;
+    if (target.characterId !== selected.id) {
+      // 다른 캐릭터의 태그(붙여넣기 등) — 이 모달이 다룰 수 있는 목록(보관/활성 구분)에 있을 때만 전환한다.
+      //   목록 필터 밖이면 기존 자동 보정 이펙트가 '전체 보기'로 전환해 유지하므로 스냅되지 않는다.
+      if (!allVisibleCharacters.some((c) => c.id === target.characterId)) {
+        toast.info('이 태그의 캐릭터는 지금 목록에 없어요 — 검색·필터를 해제하고 다시 열어 주세요');
+        return;
+      }
+      setSelectedId(target.characterId);
+    }
+    if (!found) {
+      toast.info('태그된 복장을 찾을 수 없어요 — 삭제되었을 수 있어요');
+      return;
+    }
+    setCostumeRequest((prev) => ({ costumeId: target.costumeId, nonce: (prev?.nonce ?? 0) + 1 }));
+    if (target.versionNo !== undefined && found.versionNo !== target.versionNo) {
+      toast.info(`이 태그는 v${target.versionNo} 때 남긴 기록이에요 — 지금은 v${found.versionNo}`);
+    }
+  }, [byCharacter, selected, allVisibleCharacters]);
+
+  // 조용한 재조회 중에는 복장 목록이 아직 낡았을 수 있다 — 클릭을 보류했다가 재조회가 끝나면 그때 판정한다
+  //   (안 그러면 원격에서 지운 복장이 잠깐 열리거나, 올라간 버전의 안내가 누락된다. 코덱스 6차 P2).
+  const [pendingHashTarget, setPendingHashTarget] = useState<Extract<HashTarget, { kind: 'costume' }> | null>(null);
+  useEffect(() => {
+    if (!pendingHashTarget || boardLoading) return;
+    resolveCostumeHashTarget(pendingHashTarget);
+    setPendingHashTarget(null);
+  }, [pendingHashTarget, boardLoading, resolveCostumeHashTarget]);
+
+  const handleCommentHashClick = (target: HashTarget) => {
+    if (target.kind !== 'costume') { navigateToHashTarget(target); return; }
+    if (boardLoading) { setPendingHashTarget(target); return; }
+    resolveCostumeHashTarget(target);
+  };
   useEffect(() => {
     if (selected) return;
     // 선택 캐릭터가 그리드 필터 밖에 있으면(딥링크 진입 등) 목록을 전체 보기로 전환해 유지한다.
@@ -803,6 +877,7 @@ export function CharacterDetailModal({
               <CharacterDetailPanel
                 character={selected}
                 initialCostumeId={selected.id === initialCharacterId ? initialCostumeId : undefined}
+                costumeRequest={costumeRequest}
                 onClose={onClose}
                 commentOpen={commentOpen}
                 onToggleComment={() => setCommentOpen((v) => !v)}
@@ -818,6 +893,8 @@ export function CharacterDetailModal({
             key={selected.id}
             sceneKey={`char:${selected.id}`}
             characterThread={{ characterId: selected.id, characterName: selected.name }}
+            onHashClick={handleCommentHashClick}
+            extraHashCandidates={costumeHashCandidates}
             headerTitle="이 캐릭터에 대한 이야기"
             sceneLabel={selected.name}
             commentCount={commentCount}

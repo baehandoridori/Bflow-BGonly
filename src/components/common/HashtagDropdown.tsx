@@ -1,5 +1,5 @@
 import { useEffect, useRef } from 'react';
-import { Image, Layers, Clapperboard } from 'lucide-react';
+import { Image, Layers, Clapperboard, Shirt } from 'lucide-react';
 import type { HashCandidate } from '@/utils/hashtagCandidates';
 
 interface Props {
@@ -28,7 +28,7 @@ export function HashtagDropdown({ items, index, onPick, positionClassName }: Pro
       }`}
     >
       {items.map((cand, i) => {
-        const Icon = cand.kind === 'scene' ? Image : cand.kind === 'part' ? Layers : Clapperboard;
+        const Icon = cand.kind === 'costume' ? Shirt : cand.kind === 'scene' ? Image : cand.kind === 'part' ? Layers : Clapperboard;
         return (
           <button
             key={`${cand.kind}-${cand.tag.episodeNumber}-${cand.label}-${i}`}
