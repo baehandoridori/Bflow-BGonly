@@ -51,8 +51,13 @@ test('B6→피드백 35: 사이드바 캐릭터 + 버튼 제거 — 배선 잔�
   assert.match(detailModal, /<Plus size=\{15\} \/> 캐릭터 추가/);
 });
 
-test('B8: 카드 휠로 복장 전환 + 전환 복장을 클릭/우클릭/상세로 전달', () => {
-  assert.match(card, /el\.addEventListener\('wheel', onWheel, \{ passive: false \}\)/);
+test('B8→피드백 53: 카드 좌/우 버튼으로 복장 전환 + 전환 복장을 클릭/우클릭/상세로 전달', () => {
+  // 피드백 53: 휠 하이재킹 제거 — wheel 리스너가 되살아나면 스크롤 충돌 회귀.
+  assert.doesNotMatch(card, /addEventListener\('wheel'/);
+  assert.match(card, /aria-label="이전 복장"/);
+  assert.match(card, /aria-label="다음 복장"/);
+  assert.match(card, /e\.stopPropagation\(\); stepCostume\(-1\);/);
+  assert.match(card, /e\.stopPropagation\(\); stepCostume\(1\);/);
   assert.match(card, /onOpen\(character\.id, shown\?\.id\)/);
   assert.match(card, /onContextMenu\(character\.id, event, shown\?\.id\)/);
   assert.match(card, /imaged\.length > 1/);

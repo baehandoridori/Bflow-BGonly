@@ -123,3 +123,22 @@ test('computeEdgeScrollSpeed: 가장자리 근접 비례 속도', () => {
   assert.equal(computeEdgeScrollSpeed(1000, 0, 1000), 14);
   assert.ok(Math.abs(computeEdgeScrollSpeed(71, 0, 1000)) < 0.5);
 });
+
+test('피드백 52: 그룹 섹션 접기 — persist 키 + UI 배선', () => {
+  const persist = readFileSync('src/utils/characterViewPersist.ts', 'utf8');
+  assert.match(persist, /bflow_character_group_folded/);
+  assert.match(persist, /export function loadPersistedGroupFolded\(\): string\[\]/);
+  assert.match(persist, /export function savePersistedGroupFolded\(keys: string\[\]\): void/);
+  const groupsView = readFileSync('src/components/characters/CharacterTabGroupsView.tsx', 'utf8');
+  assert.match(groupsView, /loadPersistedGroupFolded/);
+  assert.match(groupsView, /sectionFoldKey/);
+  assert.match(groupsView, /aria-expanded=\{!folded\}/);
+  // 레일 점프 시 접힌 섹션 자동 펼침 후 rAF 스크롤(레이아웃 반영 전 스크롤 방지).
+  assert.match(groupsView, /requestAnimationFrame\(scroll\)/);
+  // 접힘 본문은 조건부 렌더 — 트랜지션 근사값 금지 결정의 앵커.
+  assert.match(groupsView, /\{folded \? null : members\.length === 0 \? \(/);
+  // 전체 일괄 접기/펼치기 토글 (한솔 추가).
+  assert.match(groupsView, /toggleFoldAll/);
+  assert.match(groupsView, /모두 접기/);
+  assert.match(groupsView, /모두 펼치기/);
+});
