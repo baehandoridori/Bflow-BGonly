@@ -4239,6 +4239,25 @@ export async function deleteCharacter(id: string): Promise<void> {
   await removeCharacterStorageByUrl(urls);
 }
 
+/** 복장 작업 파일 경로 전체 로드 (프레즌스 캐시용, 피드백 54) — id + work_file_path 만.
+ *  PostgREST 는 기본 1000행 캡이 있으므로 .range() 페이지네이션으로 전량을 읽는다. */
+export async function readCostumeWorkFiles(): Promise<Array<{ id: string; path: string | null }>> {
+  const PAGE = 1000;
+  const rows: Array<{ id: string; path: string | null }> = [];
+  for (let offset = 0; ; offset += PAGE) {
+    const { data, error } = await supabase
+      .from('character_costumes')
+      .select('id, work_file_path')
+      .order('id', { ascending: true })
+      .range(offset, offset + PAGE - 1);
+    if (error) throw new Error(`character_costumes work_file_path 조회 실패: ${error.message}`);
+    const page = (data ?? []) as Array<{ id: string; work_file_path: string | null }>;
+    rows.push(...page.map((r) => ({ id: r.id, path: r.work_file_path })));
+    if (page.length < PAGE) break;
+  }
+  return rows;
+}
+
 /** 복장 추가 (INSERT). sort_order 는 해당 캐릭터 내 최대값 +1. */
 export async function addCharacterCostume(input: {
   characterId: string;

@@ -3,6 +3,7 @@ import { X, Droplets, Eye, Pin, PinOff, Minus, BarChart3 } from 'lucide-react';
 import { useAppStore } from '@/stores/useAppStore';
 import { useDataStore } from '@/stores/useDataStore';
 import { useAuthStore } from '@/stores/useAuthStore';
+import { useEditingPresenceStore } from '@/stores/useEditingPresenceStore';
 import { OverallProgressWidget } from '@/components/widgets/OverallProgressWidget';
 import { StageBarsWidget } from '@/components/widgets/StageBarsWidget';
 import { AssigneeCardsWidget } from '@/components/widgets/AssigneeCardsWidget';
@@ -33,7 +34,7 @@ import { extractSceneDelta } from '@/utils/realtimeDelta';
 import { loadVacationConfig, connectVacation } from '@/services/vacationService';
 import { useVacationPendingStore } from '@/stores/useVacationPendingStore';
 import { Toaster, toast as sonnerToast } from 'sonner';
-import type { Episode, AppUser } from '@/types';
+import type { Episode, AppUser, PresenceSnapshotBundle } from '@/types';
 import { getPreset, getLightColors, applyTheme, type ThemeColors } from '@/themes';
 import { DEFAULT_GAS_IMAGE_URL } from '@/config';
 
@@ -262,6 +263,22 @@ export function WidgetPopup({ widgetId, extraParams }: { widgetId: string; extra
     // 구독 등록 직후 메인에 현재 세션 재전송 요청 — ready-to-show 타이밍 miss 방어 (이중 안전망)
     window.electronAPI?.sessionRequestCurrent?.();
     return () => { cleanup?.(); };
+  }, []);
+
+  // 실시간 편집 프레즌스 구독 — 팝업 렌더러는 별도 프로세스라 App.tsx 배선이 적용되지 않는다 (피드백 54).
+  // 캐릭터 현황판 팝업의 카드/행/모달이 프레즌스를 소비하므로, 스냅샷 push + 마운트 시 replay 를 배선한다.
+  useEffect(() => {
+    let liveEventSeen = false;
+    const off = window.electronAPI?.onSupabasePresence?.((snap) => {
+      liveEventSeen = true;
+      useEditingPresenceStore.getState().applyPresenceSnapshot(snap as PresenceSnapshotBundle);
+    });
+    window.electronAPI?.getPresenceSnapshot?.().then((snap) => {
+      if (!liveEventSeen) {
+        useEditingPresenceStore.getState().applyPresenceSnapshot(snap as PresenceSnapshotBundle | null | undefined);
+      }
+    }).catch(() => { /* ignore */ });
+    return () => { off?.(); };
   }, []);
 
   // 테마 변경 브로드캐스트 구독 — 메인 창에서 테마 바뀌면 즉시 재적용

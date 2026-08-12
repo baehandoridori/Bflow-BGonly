@@ -30,6 +30,9 @@ import {
 import { openOrRegisterEpisodeReel } from '@/services/episodeReelActions';
 import { costumeNameForNew } from '@/utils/characterCostumeName';
 import { buildCostumeCandidates } from '@/utils/hashtagCandidates';
+import { useCostumeEditingPresence, useCostumeCollisionWarn } from '@/stores/useEditingPresenceStore';
+import { editingModalBeamClass } from '@/utils/editingPresence';
+import { EditingPresenceBanner } from '@/components/scenes/EditingPresenceBanner';
 import { navigateToHashTarget } from '@/utils/hashNavigation';
 import type { HashTarget } from '@/utils/hashEntity';
 
@@ -234,6 +237,9 @@ function CharacterDetailPanel({
   const getEpisodeDisplayName = useDataStore((s) => s.getEpisodeDisplayName);
 
   const costumes = byCharacter.get(character.id) ?? [];
+  // 피드백 54: 이 캐릭터의 복장 파일 열림 배너(씬 상세 모달의 배너와 동일 위상 — 헤더 아래·본문 위).
+  const panelPresenceEditors = useCostumeEditingPresence(costumes.map((c) => c.id));
+  const panelPresenceWarn = useCostumeCollisionWarn(costumes.map((c) => c.id));
   // B8: 카드에서 휠로 넘겨 보던 복장이 있으면 그 복장으로 열린다(초기 캐릭터 한정 — 이후 다른 캐릭터로 바꾸면 아래 효과가 첫 복장으로 리셋).
   const [activeCostumeId, setActiveCostumeId] = useState<string | null>(() => (
     initialCostumeId && costumes.some((c) => c.id === initialCostumeId) ? initialCostumeId : costumes[0]?.id ?? null
@@ -509,6 +515,9 @@ function CharacterDetailPanel({
         </div>
       </div>
 
+      {/* 실시간 편집 프레즌스 — 배너(헤더 아래·본문 밖: .editing-banner 자체 마진이 이 자리 기준으로 저작됨). */}
+      <EditingPresenceBanner editors={panelPresenceEditors} warn={panelPresenceWarn} />
+
       {/* 본문 (스크롤) */}
       <div className="flex-1 min-h-0 overflow-y-auto p-5">
         <div className="flex gap-6 flex-col lg:flex-row">
@@ -721,6 +730,10 @@ export function CharacterDetailModal({
     return visibleCharacters.filter((character) => character.name.toLowerCase().includes(q));
   }, [listQuery, visibleCharacters]);
   const selected = visibleCharacters.find((c) => c.id === selectedId) ?? null;
+  // 피드백 54: 선택된 캐릭터의 복장 파일 열림 — 모달 본체 링 + 우측 상세 배너용.
+  const selectedCostumeUuids = selected ? (byCharacter.get(selected.id) ?? []).map((c) => c.id) : [];
+  const modalPresenceEditors = useCostumeEditingPresence(selectedCostumeUuids);
+  const modalPresenceWarn = useCostumeCollisionWarn(selectedCostumeUuids);
 
   // 피드백 49: 댓글 복장 태그 클릭 → 좌측 패널의 활성 복장 전환 요청 (nonce 로 같은 복장 재클릭도 소비).
   const [costumeRequest, setCostumeRequest] = useState<{ costumeId: string; nonce: number } | null>(null);
@@ -812,7 +825,11 @@ export function CharacterDetailModal({
         className="flex h-[88vh] max-h-full max-w-full items-stretch gap-3 overflow-x-auto overflow-y-hidden outline-none animate-[char-modal-in_200ms_ease-out] motion-reduce:animate-none"
       >
         <div
-          className="relative flex h-full w-[min(1024px,calc(100vw-2rem))] shrink-0 overflow-hidden rounded-modal border border-bg-border bg-bg-card"
+          className={cn(
+            'relative flex h-full w-[min(1024px,calc(100vw-2rem))] shrink-0 overflow-hidden rounded-modal border border-bg-border bg-bg-card',
+            // 실시간 편집 프레즌스 — 모달 본체 안쪽 무지개 링(본체는 비스크롤 — 스크롤은 내부 aside/main 소유).
+            editingModalBeamClass(modalPresenceEditors.length > 0, modalPresenceWarn),
+          )}
           style={{ boxShadow: '0 40px 80px rgba(0,0,0,0.5)' }}
         >
           {/* 배경 글로우 */}

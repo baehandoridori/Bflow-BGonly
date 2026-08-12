@@ -1,21 +1,21 @@
 // electron/presence/sceneLinkIndex.ts
-import path from 'path';
+// 씬 전용 래퍼 — 실제 인덱스/해석 알고리즘은 엔티티 무관 workFileIndex 가 소유한다 (피드백 54).
 import type { SupabaseSceneWorkLink } from '../supabase';
+// @ts-expect-error TS5097 — Node 내장 TS 테스트는 runtime import의 .ts 확장자가 필요하고, Electron 빌드는 Vite가 번들한다.
+import { buildWorkFileBasenameIndex, resolveIdsForBasenames, type WorkFileEntry } from './workFileIndex.ts';
+
+/** scene 감지 소스 어댑터 — primary_file 링크를 WorkFileEntry 목록으로 (main 의 PresenceSource 등록용). */
+export function sceneWorkFileEntries(links: SupabaseSceneWorkLink[]): WorkFileEntry[] {
+  return (links ?? [])
+    .filter((link) => link.linkKind === 'primary_file')
+    .map((link) => ({ id: link.sceneUuid, path: link.path }));
+}
 
 /** primary_file 링크의 basename(소문자) → sceneUuid 집합 */
 export function buildPrimaryFileBasenameIndex(
   links: SupabaseSceneWorkLink[],
 ): Map<string, Set<string>> {
-  const index = new Map<string, Set<string>>();
-  for (const link of links ?? []) {
-    if (link.linkKind !== 'primary_file' || !link.path) continue;
-    const base = path.win32.basename(link.path).toLowerCase();
-    if (!base) continue;
-    let set = index.get(base);
-    if (!set) index.set(base, (set = new Set()));
-    set.add(link.sceneUuid);
-  }
-  return index;
+  return buildWorkFileBasenameIndex(sceneWorkFileEntries(links));
 }
 
 export interface ResolveResult { sceneUuids: string[]; collisions: string[]; }
@@ -25,13 +25,6 @@ export function resolveScenesForBasenames(
   index: Map<string, Set<string>>,
   basenames: string[],
 ): ResolveResult {
-  const sceneSet = new Set<string>();
-  const collisions: string[] = [];
-  for (const base of basenames ?? []) {
-    const set = index.get(base);
-    if (!set || set.size === 0) continue;
-    if (set.size > 1) collisions.push(base);
-    for (const uuid of set) sceneSet.add(uuid);
-  }
-  return { sceneUuids: [...sceneSet], collisions };
+  const { ids, collisions } = resolveIdsForBasenames(index, basenames);
+  return { sceneUuids: ids, collisions };
 }
