@@ -944,13 +944,21 @@ export function CommentPanel({
     inputRef,
     extraCandidates: extraHashCandidates,
   });
+  // 피드백 51~54 라운드(작업 5): 답글 작성기에도 # 자동완성 — threadMention 의 해시 짝.
+  // extraCandidates 로 복장 후보까지 병합(캐릭터 스레드에서 답글에도 #복장 이 뜬다).
+  const threadHash = useHashtagAutocomplete({
+    onChange: (next) => { setThreadInput(next); threadInputValueRef.current = next; },
+    inputRef: threadInputRef,
+    extraCandidates: extraHashCandidates,
+  });
   // 답글 진입(replyTarget 설정) 시 멘션·태그 드롭다운 닫기 — 답글 프리셋 setInput+focus 가 stale 드롭다운을 남기지 않게.
   useEffect(() => {
     if (replyTarget) { mention.close(); hash.close(); }
   }, [replyTarget, mention.close, hash.close]);
   useEffect(() => {
     threadMention.close();
-  }, [activeThreadRootId, activeRevisionThreadId, threadMention.close]);
+    threadHash.close();
+  }, [activeThreadRootId, activeRevisionThreadId, threadMention.close, threadHash.close]);
   // Codex P2 8차(2026-04-29): unmount 후 upload 완료 race 처리 — React 가 unmounted component 의 setState 를
   // drop 하므로 setAttachedImages updater 안의 side-effect (deleteImage) 도 실행 안 됨 → orphan.
   // mountedRef 로 unmount 여부를 직접 확인해 그 케이스에서 storage 즉시 정리.
@@ -1617,6 +1625,7 @@ export function CommentPanel({
       setThreadInput('');
       threadInputValueRef.current = '';
       threadMention.close();
+      threadHash.close();
       setThreadAttachedImages([]);
       threadAttachedImagesRef.current = [];
 
@@ -2704,6 +2713,7 @@ export function CommentPanel({
                   if (activeThreadRoot) setLastThreadRootId(activeThreadRoot.id);
                   setThreadMentionTarget(null);
                   threadMention.close();
+                  threadHash.close();
                   setActiveThreadRootId(null);
                   setActiveRevisionThreadId(null);
                 }}
@@ -2863,14 +2873,21 @@ export function CommentPanel({
                 }}
                 onDrop={handleThreadDrop}
               >
-                {threadMention.active && (
+                {threadMention.active ? (
                   <MentionDropdown
                     items={threadMention.items}
                     index={threadMention.index}
                     onPick={threadMention.select}
                     positionClassName="left-2 right-2"
                   />
-                )}
+                ) : threadHash.active ? (
+                  <HashtagDropdown
+                    items={threadHash.items}
+                    index={threadHash.index}
+                    onPick={threadHash.select}
+                    positionClassName="left-2 right-2"
+                  />
+                ) : null}
                 {threadMentionTarget && (!activeThreadRoot || threadMentionTarget.id !== activeThreadRoot.id) && (
                   <div className="mb-1.5 flex items-center gap-1.5 px-1 text-[10.5px] font-medium text-accent">
                     <CornerDownRight size={11} />
@@ -2925,12 +2942,14 @@ export function CommentPanel({
                       setThreadInput(event.target.value);
                       threadInputValueRef.current = event.target.value;
                       threadMention.refresh();
+                      threadHash.refresh();
                     }}
-                    onClick={() => threadMention.refresh()}
-                    onSelect={() => threadMention.refresh()}
+                    onClick={() => { threadMention.refresh(); threadHash.refresh(); }}
+                    onSelect={() => { threadMention.refresh(); threadHash.refresh(); }}
                     onScroll={(event) => setThreadInputScrollTop(event.currentTarget.scrollTop)}
                     onKeyDown={(event) => {
                       if (threadMention.onKeyDown(event)) return;
+                      if (threadHash.onKeyDown(event)) return;
                       if (event.key === 'Enter' && !event.shiftKey) {
                         event.preventDefault();
                         handleThreadSubmit();

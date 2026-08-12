@@ -140,6 +140,17 @@ test('retake side thread composer supports explicit user mentions', () => {
   assert.match(commentPanel, /if \(threadMention\.onKeyDown\(event\)\) return/);
 });
 
+test('피드백 51~54 작업 5: 답글 작성기 # 자동완성 — threadMention 의 해시 짝 배선', () => {
+  assert.match(commentPanel, /const threadHash = useHashtagAutocomplete\(\{/);
+  // threadHash 에만 매치하는 형태로 고정 — 메인 hash 는 `inputRef,` 축약형이라 이 연속이 없다.
+  assert.match(commentPanel, /inputRef: threadInputRef,\s*extraCandidates: extraHashCandidates,/);
+  assert.match(commentPanel, /threadHash\.active/);
+  assert.match(commentPanel, /onPick=\{threadHash\.select\}/);
+  assert.match(commentPanel, /threadHash\.refresh\(\)/);
+  assert.match(commentPanel, /if \(threadHash\.onKeyDown\(event\)\) return/);
+  assert.match(commentPanel, /threadHash\.close\(\)/);
+});
+
 test('CommentPanel mounted ref is restored after development remount checks', () => {
   assert.match(commentPanel, /const mountedRef = useRef\(true\)/);
   assert.match(commentPanel, /useEffect\(\(\) => \{\s*mountedRef\.current = true;\s*return \(\) => \{ mountedRef\.current = false; \};\s*\}, \[\]\)/);
