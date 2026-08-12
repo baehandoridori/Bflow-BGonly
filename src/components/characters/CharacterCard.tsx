@@ -1,5 +1,5 @@
-import { memo, useEffect, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react';
-import { Image as ImageIcon } from 'lucide-react';
+import { memo, useEffect, useState, type MouseEvent as ReactMouseEvent } from 'react';
+import { ChevronLeft, ChevronRight, Image as ImageIcon } from 'lucide-react';
 import type { Character, CharacterCostume } from '@/types';
 import { CharacterImageFrame } from '@/components/characters/CharacterImageFrame';
 import { DESIGN_STAGE_META, RIGGING_STAGE_META, characterStageColor } from '@/constants/characterStages';
@@ -52,37 +52,20 @@ export const CharacterCard = memo(function CharacterCard({
   const designDone = costumes.filter((c) => c.designStage === 'done').length;
   const riggingDone = costumes.filter((c) => c.riggingStage === 'done').length;
 
-  // B8: 이미지 있는 복장을 카드 위 휠로 순환 미리보기. 전환한 복장은 클릭/우클릭에도 그대로 이어진다.
+  // B8→피드백 53: 이미지 있는 복장을 좌/우 버튼으로 순환 미리보기. 전환한 복장은 클릭/우클릭에도 그대로 이어진다.
+  // (원래 휠로 넘겼으나 preventDefault 가 페이지 스크롤을 하이재킹해 카드가 많은 화면에서 충돌 — 버튼으로 교체.)
   const imaged = costumes.filter((c) => c.featuredImageUrl);
   const [activeIdx, setActiveIdx] = useState(0);
   useEffect(() => { if (activeIdx >= imaged.length) setActiveIdx(0); }, [imaged.length, activeIdx]);
   const shown = imaged[activeIdx] ?? imaged[0] ?? null;
 
-  const imageRef = useRef<HTMLDivElement>(null);
-  const wheelAccum = useRef(0);
-  const lastStepAt = useRef(0);
-  useEffect(() => {
-    const el = imageRef.current;
-    if (!el) return;
-    const count = imaged.length;
-    // React onWheel 은 passive 라 preventDefault 불가 → native non-passive 로 등록.
-    const onWheel = (e: WheelEvent) => {
-      if (count <= 1) return; // 1장 이하면 하이재킹 없이 페이지 스크롤 그대로.
-      e.preventDefault();
-      wheelAccum.current += e.deltaY;
-      if (Math.abs(wheelAccum.current) < 40) return; // 작은 델타 누적 — 트랙패드 과도 전환 방지.
-      // 관성 스크롤 연타 억제 쿨다운.
-      if (e.timeStamp - lastStepAt.current < 120) { wheelAccum.current = 0; return; }
-      const dir = wheelAccum.current > 0 ? 1 : -1;
-      wheelAccum.current = 0;
-      lastStepAt.current = e.timeStamp;
-      setActiveIdx((i) => ((i + dir) % count + count) % count);
-    };
-    el.addEventListener('wheel', onWheel, { passive: false });
-    return () => el.removeEventListener('wheel', onWheel);
-    // compact ⇄ card 왕복 시 이미지 박스 DOM 이 새로 마운트되므로(카드 key 불변 → 리마운트 없음)
-    //   deps 에 compact 를 넣어 새 노드에 wheel 리스너를 다시 붙인다 (피드백 40).
-  }, [imaged.length, compact]);
+  const stepCostume = (dir: 1 | -1) => {
+    setActiveIdx((i) => {
+      const count = imaged.length;
+      if (count <= 1) return i;
+      return ((i + dir) % count + count) % count;
+    });
+  };
 
   return (
     <button
@@ -100,7 +83,7 @@ export const CharacterCard = memo(function CharacterCard({
       onContextMenu={(event) => onContextMenu(character.id, event, shown?.id)}
       style={imageHeightPx ? { width: Math.round(imageHeightPx * 3 / 4) } : undefined}
       className={cn(
-        'relative text-left bg-bg-card border border-bg-border rounded-xl hover:border-accent/50 flex flex-col cursor-pointer',
+        'group relative text-left bg-bg-card border border-bg-border rounded-xl hover:border-accent/50 flex flex-col cursor-pointer',
         'transition-[transform,opacity,border-color] duration-200 ease-out motion-reduce:transition-none',
         // 드래그 중 소스는 살짝 작아지며 흐려져 "고스트로 들려 나갔다"는 느낌을 준다.
         dragging ? 'opacity-30 scale-[0.97] motion-reduce:scale-100' : 'scale-100',
@@ -118,7 +101,7 @@ export const CharacterCard = memo(function CharacterCard({
         />
       )}
       {!compact && (
-        <div ref={imageRef} style={imageHeightPx ? { height: imageHeightPx } : undefined} className="relative aspect-[3/4] bg-bg-border/30 flex items-center justify-center overflow-hidden rounded-t-xl">
+        <div style={imageHeightPx ? { height: imageHeightPx } : undefined} className="relative aspect-[3/4] bg-bg-border/30 flex items-center justify-center overflow-hidden rounded-t-xl">
           {shown ? (
             <CharacterImageFrame
               url={shown.featuredImageUrl}
@@ -129,6 +112,29 @@ export const CharacterCard = memo(function CharacterCard({
             />
           ) : (
             <ImageIcon size={28} className="text-text-secondary/40" />
+          )}
+          {/* 피드백 53: 복장 넘김 좌/우 버튼 — 카드 루트가 <button> 이라 중첩 불가 → span[role=button]. hover 시에만 표시. */}
+          {imaged.length > 1 && (
+            <>
+              <span
+                role="button"
+                aria-label="이전 복장"
+                draggable={false}
+                onClick={(e) => { e.stopPropagation(); stepCostume(-1); }}
+                className="absolute left-1 top-1/2 z-[2] flex h-6 w-6 -translate-y-1/2 items-center justify-center rounded-full bg-black/45 text-white/90 opacity-0 transition-opacity duration-150 hover:bg-black/65 group-hover:opacity-100 motion-reduce:transition-none cursor-pointer"
+              >
+                <ChevronLeft size={14} />
+              </span>
+              <span
+                role="button"
+                aria-label="다음 복장"
+                draggable={false}
+                onClick={(e) => { e.stopPropagation(); stepCostume(1); }}
+                className="absolute right-1 top-1/2 z-[2] flex h-6 w-6 -translate-y-1/2 items-center justify-center rounded-full bg-black/45 text-white/90 opacity-0 transition-opacity duration-150 hover:bg-black/65 group-hover:opacity-100 motion-reduce:transition-none cursor-pointer"
+              >
+                <ChevronRight size={14} />
+              </span>
+            </>
           )}
           {imaged.length > 1 && (
             <div className="pointer-events-none absolute inset-x-0 bottom-1.5 flex items-center justify-center gap-1" aria-hidden="true">
