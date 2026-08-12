@@ -5,6 +5,9 @@ import { CharacterImageFrame } from '@/components/characters/CharacterImageFrame
 import { DESIGN_STAGE_META, RIGGING_STAGE_META, characterStageColor } from '@/constants/characterStages';
 import { applyDragGhost } from '@/utils/dragGhost';
 import { cn } from '@/utils/cn';
+import { useCostumeEditingPresence, useCostumeCollisionWarn } from '@/stores/useEditingPresenceStore';
+import { editingBeamClass } from '@/utils/editingPresence';
+import { EditingNameLabels } from '@/components/scenes/EditingNameLabels';
 
 // 복장 없는 캐릭터에 매 렌더 새 [] 를 만들면 memo 비교가 항상 실패한다 — 안정 참조 하나를 공유 (CQ-6).
 export const EMPTY_COSTUMES: CharacterCostume[] = [];
@@ -51,6 +54,9 @@ export const CharacterCard = memo(function CharacterCard({
 }) {
   const designDone = costumes.filter((c) => c.designStage === 'done').length;
   const riggingDone = costumes.filter((c) => c.riggingStage === 'done').length;
+  // 피드백 54: 이 캐릭터의 복장 파일을 누가 열어놨나 — 복장 uuid 유니온(씬 통합 카드의 BG/ACT 유니온과 동일 패턴).
+  const presenceEditors = useCostumeEditingPresence(costumes.map((c) => c.id));
+  const presenceWarn = useCostumeCollisionWarn(costumes.map((c) => c.id));
 
   // B8→피드백 53: 이미지 있는 복장을 좌/우 버튼으로 순환 미리보기. 전환한 복장은 클릭/우클릭에도 그대로 이어진다.
   // (원래 휠로 넘겼으나 preventDefault 가 페이지 스크롤을 하이재킹해 카드가 많은 화면에서 충돌 — 버튼으로 교체.)
@@ -81,15 +87,19 @@ export const CharacterCard = memo(function CharacterCard({
       onDragEnd={onDragEndCard}
       onClick={() => onOpen(character.id, shown?.id)}
       onContextMenu={(event) => onContextMenu(character.id, event, shown?.id)}
-      style={imageHeightPx ? { width: Math.round(imageHeightPx * 3 / 4) } : undefined}
+      style={{ ...(imageHeightPx ? { width: Math.round(imageHeightPx * 3 / 4) } : null), overflow: 'visible' }}
       className={cn(
         'group relative text-left bg-bg-card border border-bg-border rounded-xl hover:border-accent/50 flex flex-col cursor-pointer',
+        // 실시간 편집 프레즌스 — 회전 무지개 테두리(래퍼 없이 클래스만, 복장 유니온). 씬 카드와 동일 패턴.
+        editingBeamClass(presenceEditors.length > 0, presenceWarn),
         'transition-[transform,opacity,border-color] duration-200 ease-out motion-reduce:transition-none',
         // 드래그 중 소스는 살짝 작아지며 흐려져 "고스트로 들려 나갔다"는 느낌을 준다.
         dragging ? 'opacity-30 scale-[0.97] motion-reduce:scale-100' : 'scale-100',
         dropTarget && !dragging && 'border-accent/60',
       )}
     >
+      {/* 실시간 편집 프레즌스 — 무지개 이름표(좌상단, 씬 카드와 동일 위치). */}
+      <EditingNameLabels editors={presenceEditors} className="absolute -top-3 left-3 z-20" />
       {dropEdge && !dragging && (
         <span
           aria-hidden="true"
