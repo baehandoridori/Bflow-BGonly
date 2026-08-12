@@ -428,8 +428,12 @@ export interface SceneWorkLink {
 // ─── 실시간 편집 프레즌스 (main ↔ renderer 경계 공유 타입) ───
 // electron/presence/types.ts 와 구조적으로 동일하게 유지 (IPC는 평문 JSON).
 export interface EditingUser { userId: string; username: string; }
-/** sceneUuid -> 그 씬을 편집 중인 사용자들 */
+/** uuid(씬 sceneUuid·복장 costumeUuid 등) -> 그 파일을 편집 중인 사용자들 */
 export type EditingPresenceSnapshot = Record<string, EditingUser[]>;
+/** 파일 열림 감지 대상 종류 — renderer 소비 지점(훅 kind 인자)용 (피드백 54). */
+export type PresenceKind = 'scene' | 'costume';
+/** main → renderer 프레즌스 IPC payload — kind별 스냅샷 묶음 (피드백 54). */
+export type PresenceSnapshotBundle = Record<string, EditingPresenceSnapshot>;
 
 export interface Scene {
   id?: string;   // Supabase UUID (Sheets 모드에서는 undefined)

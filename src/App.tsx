@@ -55,7 +55,7 @@ import {
 } from '@/utils/starNestSettings';
 import { WelcomeToast } from '@/components/WelcomeToast';
 import { useEditingPresenceStore } from '@/stores/useEditingPresenceStore';
-import type { EditingPresenceSnapshot } from '@/types';
+import type { PresenceSnapshotBundle } from '@/types';
 import { UpdateCenterModal } from '@/components/update/UpdateCenterModal';
 import { getGreeting, isFirstLogin, markFirstLoginShown } from '@/utils/greetings';
 import { useGlobalShortcuts } from '@/hooks/useGlobalShortcuts';
@@ -1369,13 +1369,13 @@ export default function App() {
     let liveEventSeen = false;
     const off = window.electronAPI?.onSupabasePresence?.((snap) => {
       liveEventSeen = true;
-      useEditingPresenceStore.getState().applyPresenceSnapshot(snap as EditingPresenceSnapshot);
+      useEditingPresenceStore.getState().applyPresenceSnapshot(snap as PresenceSnapshotBundle);
     });
     // 마운트 시 현재 스냅샷 replay — 리로드/새 창이 마지막 sync 이후 구독해도 현재 편집자를 즉시 반영.
     // 단, 그 사이 실시간 이벤트를 한 번이라도 받았다면(=더 최신) replay 는 적용하지 않는다.
     window.electronAPI?.getPresenceSnapshot?.().then((snap) => {
       if (!liveEventSeen) {
-        useEditingPresenceStore.getState().applyPresenceSnapshot((snap ?? {}) as EditingPresenceSnapshot);
+        useEditingPresenceStore.getState().applyPresenceSnapshot(snap as PresenceSnapshotBundle | null | undefined);
       }
     }).catch(() => { /* ignore */ });
     return () => off?.();

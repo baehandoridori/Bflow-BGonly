@@ -1347,6 +1347,7 @@ import {
   type AddRevisionSetInput,
   type UpdateRevisionSetInput,
   readSceneWorkLinks as sbReadSceneWorkLinks,
+  readCostumeWorkFiles as sbReadCostumeWorkFiles,
   upsertSceneWorkLink as sbUpsertSceneWorkLink,
   deleteSceneWorkLink as sbDeleteSceneWorkLink,
   type SceneWorkLinkInput,
@@ -1426,8 +1427,9 @@ import type { SupabaseUser, BulkStageUpdate, BulkFieldUpdate } from './supabase'
 import { setupRealtimeSubscription, teardownRealtime, trackPresence } from './realtime';
 import { recordActivity, getActivity, channelToTable, channelToAction } from './activityLogger';
 import { startEditingPresenceService, receivePresence } from './presence/editingPresenceService';
+import { sceneWorkFileEntries } from './presence/sceneLinkIndex';
 import type { EditingPresenceHandle } from './presence/editingPresenceService';
-import type { EditingPresenceSnapshot, EditingPresencePayload } from './presence/types';
+import type { PresenceSnapshotBundle, EditingPresencePayload } from './presence/types';
 
 // Realtime 구독 cleanup 핸들 — 앱 종료(teardownRealtime) 시 해제해 채널 누수 방지.
 let characterBoardRealtimeCleanup: (() => void) | null = null;
@@ -1436,7 +1438,7 @@ let compositingStatesRealtimeCleanup: (() => void) | null = null;
 let editingPresence: EditingPresenceHandle | null = null;
 let sceneWorkLinkCache: SupabaseSceneWorkLink[] = [];
 // 마지막 병합 프레즌스 스냅샷 — 새 렌더러/창이 마운트 시 replay로 현재 편집자를 즉시 반영.
-let lastPresenceSnapshot: EditingPresenceSnapshot = {};
+let lastPresenceSnapshot: PresenceSnapshotBundle = {};
 
 // ─── Supabase IPC 에러 래퍼 ───
 function wrapIpc<T extends unknown[], R>(
@@ -1482,7 +1484,7 @@ function setCanonicalActivityUser(user: { id: string; name: string } | null): vo
   // 로그아웃(사용자 → null): 내가 편집 중이라는 표시를 즉시 비운다(빈 씬 목록 track).
   if (prev && !user) {
     try {
-      trackPresence({ userId: prev.id, username: prev.name, editingSceneUuids: [], updatedAt: new Date().toISOString() });
+      trackPresence({ userId: prev.id, username: prev.name, editingSceneUuids: [], editing: {}, updatedAt: new Date().toISOString() });
     } catch { /* ignore */ }
   }
   // 신원 변경(로그아웃/로그인/계정 전환): dedup 기억 리셋 → 같은 Moho 파일이 열린 채여도
@@ -3123,6 +3125,15 @@ function startSupabaseRealtime() {
 
   // 4) 캐릭터 현황판 Realtime 구독 (characters / character_costumes / character_costume_images / episode_character_mapping)
   characterBoardRealtimeCleanup = sbStartCharacterBoardRealtime((payload) => {
+    // 피드백 54: 복장 작업 파일 경로가 "실제로 바뀐" 변경에만 프레즌스 캐시를 최신화하고
+    // dedup 을 비워 재평가한다 — 이미 열린 Moho 창 집합이 그대로면 폴러 onChange 가 안 뜨기 때문.
+    // (scene_work_links 의 onSceneWorkLinkChange 와 동일 패턴 — refresh 완료 후 reset.
+    //  단 이 테이블은 스테이지 토글 등 고빈도 UPDATE 가 흔해 costumeFileCacheAffected 로 실변경만 골라낸다.)
+    if (payload.table === 'character_costumes' && costumeFileCacheAffected(payload)) {
+      void refreshCostumeFileCache().then(() => {
+        try { editingPresence?.reset(); } catch { /* ignore */ }
+      });
+    }
     if (mainWindow && !mainWindow.isDestroyed()) {
       mainWindow.webContents.send('character-board:realtime', payload);
     }
@@ -3152,15 +3163,53 @@ async function refreshSceneWorkLinkCache(): Promise<void> {
   }
 }
 
+// 복장 작업 파일 경로 캐시 — 프레즌스 basename→복장 매칭용 (피드백 54).
+let costumeFileCache: Array<{ id: string; path: string | null }> = [];
+
+// 전체 복장 파일 경로를 다시 읽어 프레즌스 캐시를 최신화. 실패 시 기존 캐시 유지.
+async function refreshCostumeFileCache(): Promise<void> {
+  try {
+    costumeFileCache = await sbReadCostumeWorkFiles();
+  } catch (err) {
+    console.warn('[presence] character_costumes 파일 경로 캐시 갱신 실패:', err);
+  }
+}
+
+// 이 realtime payload 가 복장 "작업 파일 경로" 캐시에 영향을 주는 변경인지 판정 (피드백 54).
+// character_costumes 는 스테이지 토글 등 변경 빈도가 높은 테이블 — 모든 변경에 캐시 재로드+reset 을 걸면
+// 토글 1회마다 전 클라이언트가 전량 재조회 + 재track 하는 증폭이 생긴다. path 실변경만 골라낸다.
+// 판정이 불가능한 형태(row/old 필드 부재)면 안전 측으로 true(fail-open — 놓치는 것보다 한 번 더 읽는 쪽).
+function costumeFileCacheAffected(payload: {
+  eventType: 'INSERT' | 'UPDATE' | 'DELETE';
+  row: Record<string, unknown> | null;
+  old: Record<string, unknown> | null;
+}): boolean {
+  if (payload.eventType === 'DELETE') {
+    // REPLICA IDENTITY 기본값이면 old 에는 id 만 온다 — 캐시에 path 가 있던 행의 삭제만 영향.
+    const oldId = payload.old?.id;
+    if (typeof oldId !== 'string') return true;
+    return costumeFileCache.some((c) => c.id === oldId && !!c.path);
+  }
+  const row = payload.row;
+  if (!row || typeof row.id !== 'string' || !('work_file_path' in row)) return true;
+  const nextPath = (row.work_file_path as string | null) ?? null;
+  const cached = costumeFileCache.find((c) => c.id === row.id)?.path ?? null;
+  return nextPath !== cached;
+}
+
 // 프레즌스 서비스 기동: 캐시 최초 로드 후 폴러 시작. 중복 기동 방지.
 async function startEditingPresence(): Promise<void> {
   if (editingPresence) return;
-  await refreshSceneWorkLinkCache();
+  await Promise.all([refreshSceneWorkLinkCache(), refreshCostumeFileCache()]);
   editingPresence = startEditingPresenceService({
     getCurrentUser: () => currentActivityUser
       ? { userId: currentActivityUser.id, username: currentActivityUser.name }
       : null,
-    getWorkLinks: () => sceneWorkLinkCache,
+    // kind별 감지 소스 — 새 파일 종류는 여기에 소스 1줄 + PresenceKind 유니온 + UI 부착으로 확장 (피드백 54).
+    sources: [
+      { kind: 'scene', getEntries: () => sceneWorkFileEntries(sceneWorkLinkCache) },
+      { kind: 'costume', getEntries: () => costumeFileCache },
+    ],
     track: (p) => trackPresence(p),
     broadcast: broadcastSupabasePresence,
     now: () => new Date().toISOString(),
@@ -3185,7 +3234,7 @@ function broadcastSupabaseEvent(table: string, payload: unknown) {
 }
 
 // 실시간 편집 프레즌스 스냅샷을 모든 윈도우에 전달.
-function broadcastSupabasePresence(snapshot: EditingPresenceSnapshot) {
+function broadcastSupabasePresence(snapshot: PresenceSnapshotBundle) {
   // 마지막 스냅샷 캐시 — 나중에 마운트하는 렌더러/창이 replay로 즉시 현재 편집자를 본다.
   lastPresenceSnapshot = snapshot;
   if (mainWindow && !mainWindow.isDestroyed()) {
