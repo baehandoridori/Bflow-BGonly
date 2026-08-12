@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react';
-import { Pencil, X } from 'lucide-react';
+import { ChevronDown, ChevronsDownUp, ChevronsUpDown, Pencil, X } from 'lucide-react';
 import type { Character, CharacterBoardTab, CharacterBoardTabGroup, CharacterCostume } from '@/types';
 import { CharacterCard, EMPTY_COSTUMES } from '@/components/characters/CharacterCard';
 import { CharacterListRow } from '@/components/characters/CharacterListRow';
@@ -8,7 +8,7 @@ import { bindVerticalDragAutoScroll } from '@/utils/dragAutoScroll';
 import {
   addGroup, groupedCharacterIdSet, moveCharacterToGroup, moveGroupBefore, removeGroup, renameGroup, reorderWithinGroup,
 } from '@/utils/characterTabGroups';
-import type { CharacterBoardViewMode } from '@/utils/characterViewPersist';
+import { loadPersistedGroupFolded, savePersistedGroupFolded, type CharacterBoardViewMode } from '@/utils/characterViewPersist';
 import { cn } from '@/utils/cn';
 
 /**
@@ -79,9 +79,44 @@ export function CharacterTabGroupsView({
     // 그룹 수 변화 시 spy 즉시 재실행 — 추가/삭제 직후 activeKey stale 방지.
   }, [tab.id, tab.groups.length]);
 
+  // 피드백 52: 그룹 섹션 접기 — 개인 로컬 상태(localStorage). 키는 탭 id 접두(다른 탭 동명 그룹 구분).
+  const [foldedKeys, setFoldedKeys] = useState<Set<string>>(() => new Set(loadPersistedGroupFolded()));
+  const sectionFoldKey = (gid: string | null) => `${tab.id}:${gid ?? '__ungrouped__'}`;
+  const toggleFold = (gid: string | null) => {
+    const key = sectionFoldKey(gid);
+    const next = new Set(foldedKeys);
+    if (next.has(key)) next.delete(key);
+    else next.add(key);
+    setFoldedKeys(next);
+    savePersistedGroupFolded([...next]);
+  };
+  // 피드백 52(한솔 추가): 현재 탭의 모든 섹션(그룹+미분류) 일괄 접기/펼치기 토글.
+  const allSectionKeys = [...tab.groups.map((g) => sectionFoldKey(g.id)), sectionFoldKey(null)];
+  const allFolded = allSectionKeys.every((k) => foldedKeys.has(k));
+  const toggleFoldAll = () => {
+    const next = new Set(foldedKeys);
+    if (allFolded) allSectionKeys.forEach((k) => next.delete(k));
+    else allSectionKeys.forEach((k) => next.add(k));
+    setFoldedKeys(next);
+    savePersistedGroupFolded([...next]);
+  };
+
   const scrollToSection = (gid: string | null) => {
     const reduced = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false;
-    sectionRefs.current.get(gid ?? '__ungrouped__')?.scrollIntoView({ block: 'start', behavior: reduced ? 'auto' : 'smooth' });
+    const scroll = () => {
+      sectionRefs.current.get(gid ?? '__ungrouped__')?.scrollIntoView({ block: 'start', behavior: reduced ? 'auto' : 'smooth' });
+    };
+    // 접힌 섹션으로 점프하면 "보러 가기" 의도 — 펼친 뒤 DOM 반영 후 스크롤.
+    const key = sectionFoldKey(gid);
+    if (foldedKeys.has(key)) {
+      const next = new Set(foldedKeys);
+      next.delete(key);
+      setFoldedKeys(next);
+      savePersistedGroupFolded([...next]);
+      requestAnimationFrame(scroll);
+      return;
+    }
+    scroll();
   };
 
   const [editingGroupId, setEditingGroupId] = useState<string | null>(null);
@@ -156,6 +191,7 @@ export function CharacterTabGroupsView({
     const members = group
       ? group.characterIds.map((id) => byId.get(id)).filter((c): c is Character => Boolean(c))
       : ungrouped;
+    const folded = foldedKeys.has(sectionFoldKey(group?.id ?? null));
     return (
       <section
         key={group?.id ?? '__ungrouped__'}
@@ -169,6 +205,15 @@ export function CharacterTabGroupsView({
         className={cn('scroll-mt-[calc(var(--board-sticky-h,0px)+8px)] rounded-xl border border-bg-border/60 p-3 flex flex-col gap-3', draggingId && 'border-accent/40')}
       >
         <header className="flex items-center gap-2">
+          <button
+            type="button"
+            aria-expanded={!folded}
+            aria-label={`${group ? group.name : '미분류'} ${folded ? '펼치기' : '접기'}`}
+            onClick={() => toggleFold(group?.id ?? null)}
+            className="rounded p-1 text-text-secondary hover:text-text-primary hover:bg-bg-border/30 cursor-pointer"
+          >
+            <ChevronDown size={13} className={cn('transition-transform duration-200 motion-reduce:transition-none', folded && '-rotate-90')} />
+          </button>
           {group && editingGroupId === group.id ? (
             <input
               autoFocus
@@ -223,7 +268,7 @@ export function CharacterTabGroupsView({
             </>
           )}
         </header>
-        {members.length === 0 ? (
+        {folded ? null : members.length === 0 ? (
           <div className="rounded-lg border border-dashed border-bg-border/70 px-3 py-6 text-center text-xs text-text-secondary">
             {searching ? '검색·필터 조건에 맞는 캐릭터가 여기 없어요' : group ? '카드를 끌어다 놓아 배치해요' : '모든 캐릭터가 그룹에 배치됐어요'}
           </div>
@@ -255,6 +300,18 @@ export function CharacterTabGroupsView({
         onReorderGroup={(groupId, beforeId) => onUpdateGroups(moveGroupBefore(tab.groups, groupId, beforeId))}
       />
       <div className="min-w-0 flex-1 flex flex-col gap-4">
+        {/* 피드백 52(한솔 추가): 전체 일괄 접기/펼치기 — 레일은 무수정(기존 앵커 테스트 보존), 본문 상단 우측에 토글 1개. */}
+        <div className="-mb-2 flex justify-end">
+          <button
+            type="button"
+            onClick={toggleFoldAll}
+            aria-label={allFolded ? '그룹 모두 펼치기' : '그룹 모두 접기'}
+            className="flex items-center gap-1 rounded-md px-2 py-1 text-xs text-text-secondary hover:text-text-primary hover:bg-bg-border/30 cursor-pointer"
+          >
+            {allFolded ? <ChevronsUpDown size={13} /> : <ChevronsDownUp size={13} />}
+            {allFolded ? '모두 펼치기' : '모두 접기'}
+          </button>
+        </div>
         {tab.groups.map((g) => section(g))}
         {section(null)}
       </div>

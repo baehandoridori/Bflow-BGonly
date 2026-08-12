@@ -53,3 +53,21 @@ export function loadPersistedRailCollapsed(): boolean | null {
 export function savePersistedRailCollapsed(collapsed: boolean): void {
   try { localStorage.setItem(RAIL_COLLAPSED_KEY, collapsed ? '1' : '0'); } catch { /* ignore */ }
 }
+
+const GROUP_FOLDED_KEY = 'bflow_character_group_folded';
+
+/** 커스텀 탭 그룹 섹션 접힘 키 목록 (피드백 52). 키 형식: `${tabId}:${groupId | '__ungrouped__'}`. */
+export function loadPersistedGroupFolded(): string[] {
+  try {
+    const raw = localStorage.getItem(GROUP_FOLDED_KEY);
+    if (!raw) return [];
+    const parsed: unknown = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed.filter((v): v is string => typeof v === 'string') : [];
+  } catch {
+    return [];
+  }
+}
+
+export function savePersistedGroupFolded(keys: string[]): void {
+  try { localStorage.setItem(GROUP_FOLDED_KEY, JSON.stringify(keys)); } catch { /* ignore */ }
+}
