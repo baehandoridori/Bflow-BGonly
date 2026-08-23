@@ -54,7 +54,7 @@
 - 칩 텍스트: 종일 → `태그명 · 제목`, 시간 일정 → `HH:MM 제목`.
 - 주/오늘 보기(카드 목록 방식 유지): 종일 카드 먼저, 그 아래 시간 일정 시각순. 부제 `14:00 – 15:00 · 태그명`. 시간표 축은 만들지 않는다(M2).
 - 보기 전용(내 편집 권한 없는 캘린더·휴가·구글 아닌 소유 불가 항목): 드래그 불가(`isReadOnly` 기존 로직 재사용), 상세 패널에 편집/삭제 버튼 미노출 + `보기 전용` 표시.
-- 필터 적용 순서: (켜진 캘린더) ∩ (켜진 태그). `전체` 태그 칩 = 태그 필터 해제. 태그 없는 일정은 태그 필터가 걸려 있어도 항상 표시(태그는 선택 사항이므로 숨기면 실종처럼 보임 — `전체`가 아닐 때는 숨김이 자연스럽다는 반론이 있으나, **태그 없는 일정은 항상 표시**로 확정. 숨고 싶으면 태그를 달면 된다).
+- 필터 적용 순서: (켜진 캘린더) ∩ (켜진 태그). 태그 칩(휴가 포함)은 **각각 독립 토글**이며 기본값은 모두 켬 — 따라서 다른 태그를 둔 채 휴가만 끄는 기존 습관이 그대로 성립한다. `전체` 칩은 상태가 아니라 **"모두 켜기" 리셋 버튼**이고, 모든 칩이 켜져 있을 때만 강조 표시된다. 태그 없는 일정은 태그 필터가 걸려 있어도 항상 표시(태그는 선택 사항이므로 숨기면 실종처럼 보임 — `전체`가 아닐 때는 숨김이 자연스럽다는 반론이 있으나, **태그 없는 일정은 항상 표시**로 확정. 숨고 싶으면 태그를 달면 된다).
 
 ### 3.3 새 일정 모달 (M3, 기존 `EventCreateModal` 개편)
 
@@ -76,7 +76,7 @@
 
 ### 3.7 알림 (M6 좌측)
 
-기존 알림 센터(`useNotificationStore`)에 `calendar` 유형 추가. 문구: "{사람} 님이 [{캘린더}] 에 일정을 추가했어요 / '{제목}' 을 변경했어요(날짜 A → B) / 일정을 삭제했어요". 클릭 → `setView('schedule')` + 해당 날짜 이동(`bflow:navigate-to-date` 재사용).
+기존 알림 센터(`useNotificationStore`)에 `calendar` 유형 추가. 문구: "{사람} 님이 [{캘린더}] 에 일정을 추가했어요 / '{제목}' 을 변경했어요(날짜 A → B) / 일정을 삭제했어요". 날짜가 바뀐 update 는 detail 에 `9/25 → 9/26` 식 표기, 제목·메모·태그 등 그 외 변경은 detail 없이 "'{제목}' 을 변경했어요" 로 통일. 클릭 → `setView('schedule')` + 해당 날짜 이동(`bflow:navigate-to-date` 재사용).
 
 ---
 
@@ -162,7 +162,7 @@ CREATE INDEX IF NOT EXISTS idx_calendar_notif_recipient
 ### 4.1 기존 데이터 이관 (같은 마이그레이션에서)
 
 1. `private_calendar_events` 의 `user_id` 별로 개인 캘린더 upsert: `calendars(name='개인', color='#6C5CE7', visibility='private', owner_id=user_id, is_personal=true)`.
-2. `private_calendar_events` → `calendar_events` 복사(id·created_at 유지, `calendar_id` = 그 사용자의 개인 캘린더, `all_day=true`).
+2. `private_calendar_events` → `calendar_events` 복사(id·created_at 유지, `calendar_id` = 그 사용자의 개인 캘린더, `all_day=true`)). 기존 일정별 `color` 는 **의도적으로 버린다**(§3.6 "색=캘린더 소속" 결정에 따라 개인 캘린더 단일색으로 통일 — 데이터 유실이지만 승인된 트레이드오프).
 3. `private_calendar_events` 테이블은 **이번엔 남겨둠**(롤백 대비). 다음 라운드에서 DROP.
 4. 앱 레벨: 로그인 시 개인 캘린더가 없으면 메인 프로세스가 생성(`ensurePersonalCalendar`) — 신규 사용자 대응.
 
@@ -184,7 +184,7 @@ canCreateCalendar(user, visibility): boolean
 ```
 
 - **강제 지점 = 메인 프로세스 IPC 핸들러**(`getSessionUserIdOrThrow` + 위 함수). `private_calendar_events` 의 `assertPrivateEventOwnerOrThrow`(`electron/main.ts:2430-2435`) 패턴 확장. 읽기(`calendar:list`, `calendar:events:list`)도 멤버십으로 필터해 반환.
-- 개인 캘린더(`is_personal`) 는 공개 범위 변경·삭제·멤버 추가 불가(항상 `private`).
+- 개인 캘린더(`is_personal`) 는 공개 범위 변경·삭제·멤버 추가 불가(항상 `private`)이며, **관리(이름·색 포함)도 소유자 본인만** 가능 — `canManageCalendar` 의 admin 특례에서 `is_personal` 을 제외한다.
 - 팀 전체 캘린더의 편집자 = 소유자 + `calendar_members.can_edit`(팀 캘린더에서 members 행은 "추가 편집자" 목록으로 사용).
 - **한계(명시)**: DB 는 anon key + `allow_all` RLS 그대로이므로 보안 수준은 기존 "나만 보기" 와 동일한 앱 레벨 강제다. Supabase Auth+RLS 는 별도 프로젝트.
 
@@ -201,7 +201,7 @@ canCreateCalendar(user, visibility): boolean
 | `calendar:set-members` | 멤버 전체 교체(추가/제거/권한 변경 일괄) |
 | `calendar:events:list` | 내가 볼 수 있는 캘린더들의 일정(기간 파라미터, `.range()` 페이지네이션 — PostgREST 1000행 제한 대응) |
 | `calendar:events:create/update/delete` | 일정 CRUD (canEditCalendarEvents 검증) + 알림 행 생성 + `broadcastCalendarChanged` |
-| `calendar:tags:list/save` | 태그 목록 / admin 저장(추가·수정·삭제·정렬 일괄) |
+| `calendar:tags:list/save` | 태그 목록 / admin 저장(추가·수정·삭제·정렬 일괄). `getSessionUserIdOrThrow` 는 id 만 주므로 save 는 메인에서 `users.role` 재조회로 admin 검증 |
 | `calendar:notifications:catchup` / `:mark-read` | 시작 시 미읽음 로드 / 읽음 처리 |
 
 구현 위치: `electron/supabase.ts` 에 CRUD 함수(기존 `sbAddPrivateEvent` 형식), `electron/calendarService.ts`(메인측 권한 검증+알림 생성 헬퍼) 신설. CLAUDE.md 규칙 5(렌더러 직접 Supabase 금지) 준수.
@@ -219,7 +219,7 @@ canCreateCalendar(user, visibility): boolean
 ## 7. 실시간·전파
 
 - `electron/realtime.ts` 구독 추가: `calendars`, `calendar_members`, `calendar_events`, `calendar_notifications`(INSERT, recipient 필터는 수신 후 클라이언트에서) → 렌더러 `bflow:calendar-changed` (+알림은 `bflow:calendar-notification`).
-- `App.tsx` 의 broadcast `data-change` 전체 리로드 분기에서 `calendar%` 테이블 **제외** (`App.tsx:2458-2480` — 안 그러면 일정 하나에 앱 전체 reload).
+- `App.tsx` 의 broadcast `data-change` 전체 리로드 분기에서 `calendar%` 테이블과 `private_calendar_events` 를 **제외** (`App.tsx:2458-2480` — 안 그러면 일정 하나에 앱 전체 reload. `private_calendar_events` 제외는 신구 버전 공존 창 동안 구버전의 "나만 보기" 쓰기가 신버전 전체 리로드를 유발하지 않게 하기 위함).
 - 기존 `broadcastCalendarChanged` 수신부(`App.tsx:2584-2595`)를 "B flow 이벤트 재조회(항상) + 구글 syncIncremental(인증 시)" 로 수정 — 현재는 구글 인증자만 재조회해 비공개/공유 변경이 미반영되는 버그 겸 해결(`electron/broadcast.ts:241-242` 주석 불일치 해소).
 - 같은 PC 다중 창: 기존 `calendar:broadcast-change` IPC 유지. `WidgetPopup` 캘린더 팝업은 같은 캐시를 읽으므로 자동 반영.
 
@@ -277,7 +277,7 @@ canCreateCalendar(user, visibility): boolean
 
 - 버전 번호는 각 PR 시점의 `origin/main` 기준 재확인(package.json + lock 3자 일치).
 - 마이그레이션 SQL 은 `DEVLOG/migrations/` 기록 + 라이브 적용은 PR2 머지 시점(G드라이브 배포 전, manifest 마지막 원칙과 동일하게 "DB 먼저, 앱 나중").
-- PR2 배포 전 구버전 앱 호환: 신규 테이블 추가만이므로 구버전 앱은 영향 없음. `private_calendar_events` 는 이관 후에도 남겨 구버전 "나만 보기" 가 깨지지 않게 함(신·구 버전이 다른 테이블을 보는 창은 짧고, 개인 일정 특성상 충돌 위험 낮음 — 완전 전환은 전 팀원 업데이트 후 다음 라운드에서 구 테이블 DROP).
+- PR2 배포 전 구버전 앱 호환: 신규 테이블 추가만이므로 구버전 앱은 영향 없음. `private_calendar_events` 는 이관 후에도 남겨 구버전 "나만 보기" 가 깨지지 않게 함(신·구 버전이 다른 테이블을 보는 창은 짧고, 개인 일정 특성상 충돌 위험 낮음 — 완전 전환은 전 팀원 업데이트 후 다음 라운드에서 구 테이블 DROP. **DROP 직전에 공존 창 동안 구버전이 `private_calendar_events` 에 새로 쓴 델타 행을 `calendar_events` 로 재이관**한 뒤 DROP 한다 — 유실 방지).
 
 ---
 
