@@ -1,0 +1,156 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <style>
+    body { margin: 0; font-family: 'Pretendard Variable', Pretendard, system-ui, -apple-system, 'Segoe UI', 'Malgun Gothic', sans-serif; background: #0F1117; color: #E8E8EE; }
+    a { color: #A29BFE; } a:hover { color: #C4BCFA; }
+    .chip { display: inline-flex; align-items: center; gap: 6px; padding: 3px 8px; border-radius: 6px; font-size: 11px; line-height: 16px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .dot { width: 6px; height: 6px; border-radius: 999px; flex: 0 0 auto; }
+    .cell { background: #1A1D27; padding: 4px; font-size: 10px; color: #E8E8EE; display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+    .cell-dim { background: #1A1D27; padding: 4px; font-size: 10px; color: #8B8DA3; }
+    .dow { padding: 6px; font-size: 10px; color: #8B8DA3; text-align: center; }
+    .tab { display: inline-flex; align-items: center; gap: 7px; padding: 7px 12px; font-size: 12px; color: #8B8DA3; font-weight: 600; border-bottom: 2px solid transparent; }
+    .tag { padding: 4px 10px; font-size: 11px; border-radius: 999px; font-weight: 600; }
+    .seg { padding: 5px 10px; font-size: 11px; color: #8B8DA3; font-weight: 600; }
+    .av { width: 20px; height: 20px; border-radius: 999px; border: 2px solid #1A1D27; box-sizing: border-box; }
+  </style>
+</helmet>
+<div style="width: 1120px; height: 720px; display: flex; flex-direction: row; background: #0F1117; overflow: hidden; box-sizing: border-box;">
+
+  <div style="width: 48px; background: #0F1117; border-right: 1px solid #2D3041; display: flex; flex-direction: column; align-items: center; gap: 14px; padding-top: 16px; box-sizing: border-box;">
+    <div style="width: 22px; height: 22px; border-radius: 6px; background: #2D3041;"></div>
+    <div style="width: 22px; height: 22px; border-radius: 6px; background: #2D3041;"></div>
+    <div style="width: 22px; height: 22px; border-radius: 6px; background: #2D3041;"></div>
+    <div style="width: 22px; height: 22px; border-radius: 6px; background: rgba(108,92,231,0.35); outline: 2px solid #6C5CE7;"></div>
+    <div style="width: 22px; height: 22px; border-radius: 6px; background: #2D3041;"></div>
+  </div>
+
+  <div style="flex: 1 1 0%; min-width: 0; display: flex; flex-direction: column; gap: 8px; padding: 10px 12px; box-sizing: border-box;">
+
+    <div style="display: flex; flex-direction: row; align-items: center; justify-content: space-between; gap: 12px;">
+      <div style="display: flex; flex-direction: row; align-items: center; gap: 12px;">
+        <div style="display: flex; flex-direction: row; align-items: center; gap: 8px; font-size: 18px; font-weight: 700;">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#6C5CE7" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2"></rect><path d="M16 2v4M8 2v4M3 10h18"></path></svg>
+          <span>캘린더</span>
+        </div>
+        <div style="display: flex; flex-direction: row; align-items: center; gap: 6px;">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#8B8DA3" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 18l-6-6 6-6"></path></svg>
+          <span style="font-size: 18px; font-weight: 700; min-width: 140px; text-align: center;">2026년 9월</span>
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#8B8DA3" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18l6-6-6-6"></path></svg>
+          <span style="margin-left: 8px; padding: 5px 10px; font-size: 11px; border-radius: 8px; background: rgba(108,92,231,0.12); color: #A29BFE; font-weight: 600;">오늘</span>
+        </div>
+      </div>
+      <div style="display: flex; flex-direction: row; align-items: center; gap: 8px;">
+        <div style="display: flex; flex-direction: row; background: #1A1D27; border: 1px solid rgba(45,48,65,0.6); border-radius: 8px; padding: 2px;">
+          <span class="seg" style="border-radius: 6px; background: rgba(108,92,231,0.2); color: #A29BFE;">월</span>
+          <span class="seg">2주</span>
+          <span class="seg">주</span>
+          <span class="seg">오늘</span>
+        </div>
+        <span style="display: inline-flex; align-items: center; gap: 6px; padding: 7px 14px; font-size: 13px; border-radius: 8px; background: #6C5CE7; color: #FFFFFF; font-weight: 600;">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#FFFFFF" stroke-width="2.5" stroke-linecap="round"><path d="M12 5v14M5 12h14"></path></svg>
+          일정
+        </span>
+      </div>
+    </div>
+
+    <!-- 캘린더 탭 줄 -->
+    <div style="display: flex; flex-direction: row; align-items: center; gap: 2px; border-bottom: 1px solid rgba(45,48,65,0.8);">
+      <span class="tab">전체</span>
+      <span class="tab" style="color: #E8E8EE; border-bottom-color: #E17055;"><span class="dot" style="width: 8px; height: 8px; background: #E17055;"></span>EP 마일스톤</span>
+      <span class="tab"><span class="dot" style="width: 8px; height: 8px; background: #74B9FF;"></span>스튜디오 공지</span>
+      <span class="tab"><span class="dot" style="width: 8px; height: 8px; background: #FDCB6E;"></span>리드 회의</span>
+      <span class="tab"><span class="dot" style="width: 8px; height: 8px; background: #55EFC4;"></span>컴포 TF</span>
+      <span class="tab"><span class="dot" style="width: 8px; height: 8px; background: #6C5CE7;"></span>개인</span>
+      <span class="tab"><span class="dot" style="width: 8px; height: 8px; background: #8B8DA3;"></span>내 구글</span>
+      <span class="tab" style="color: #A29BFE;">+</span>
+    </div>
+
+    <!-- 선택된 캘린더 정보 + 태그 바 -->
+    <div style="display: flex; flex-direction: row; align-items: center; justify-content: space-between; gap: 10px; padding: 0 2px;">
+      <div style="display: flex; flex-direction: row; align-items: center; gap: 10px; font-size: 11px; color: #8B8DA3;">
+        <span style="font-size: 13px; font-weight: 700; color: #E8E8EE;">EP 마일스톤</span>
+        <span>팀 전체 공개</span>
+        <span style="color: #2D3041;">·</span>
+        <span>만든이 배한솔</span>
+        <span style="color: #2D3041;">·</span>
+        <div style="display: flex; flex-direction: row;">
+          <span class="av" style="background: #6C5CE7;"></span>
+          <span class="av" style="background: #E17055; margin-left: -6px;"></span>
+          <span class="av" style="background: #74B9FF; margin-left: -6px;"></span>
+          <span style="font-size: 10px; margin-left: 4px; align-self: center;">편집자 3명</span>
+        </div>
+        <span style="padding: 3px 8px; border-radius: 6px; border: 1px solid rgba(45,48,65,0.9); color: #A29BFE; font-size: 10px; font-weight: 600;">설정</span>
+      </div>
+      <div style="display: flex; flex-direction: row; align-items: center; gap: 6px;">
+        <span style="font-size: 11px; color: #8B8DA3; margin-right: 4px;">태그</span>
+        <span class="tag" style="border: 1px solid rgba(108,92,231,0.5); background: rgba(108,92,231,0.15); color: #C4BCFA;">전체</span>
+        <span class="tag" style="border: 1px solid rgba(225,112,85,0.5); background: rgba(225,112,85,0.15); color: #F3A08B;">업로드</span>
+        <span class="tag" style="border: 1px solid rgba(116,185,255,0.5); background: rgba(116,185,255,0.15); color: #9FCDFF;">가편</span>
+        <span class="tag" style="border: 1px solid rgba(253,203,110,0.5); background: rgba(253,203,110,0.15); color: #FFE09A;">대본</span>
+        <span class="tag" style="border: 1px solid rgba(45,48,65,0.9); background: #1A1D27; color: rgba(139,141,163,0.55);">회의</span>
+      </div>
+    </div>
+
+    <div style="flex: 1 1 0%; min-height: 0; display: flex; flex-direction: column; background: #1A1D27; border: 1px solid rgba(45,48,65,0.7); border-radius: 10px; overflow: hidden;">
+      <div style="display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); border-bottom: 1px solid rgba(45,48,65,0.7);">
+        <div class="dow">일</div><div class="dow">월</div><div class="dow">화</div><div class="dow">수</div><div class="dow">목</div><div class="dow">금</div><div class="dow">토</div>
+      </div>
+      <div style="flex: 1 1 0%; display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); grid-template-rows: repeat(5, minmax(0, 1fr)); gap: 1px; background: rgba(45,48,65,0.5);">
+        <div class="cell-dim">30</div>
+        <div class="cell"><span>1</span><span class="chip" style="background: rgba(225,112,85,0.22); color: #F3A08B;"><span class="dot" style="background: #E17055;"></span>업로드 · EP05 업로드</span></div>
+        <div class="cell"><span>2</span></div>
+        <div class="cell"><span>3</span></div>
+        <div class="cell"><span>4</span></div>
+        <div class="cell"><span>5</span><span class="chip" style="background: rgba(225,112,85,0.22); color: #F3A08B;"><span class="dot" style="background: #E17055;"></span>대본 · EP07 대본 확정</span></div>
+        <div class="cell"><span>6</span></div>
+
+        <div class="cell"><span>7</span></div>
+        <div class="cell"><span>8</span></div>
+        <div class="cell" style="background: rgba(108,92,231,0.08); color: #A29BFE; font-weight: 700;"><span>9 · 오늘</span></div>
+        <div class="cell"><span>10</span></div>
+        <div class="cell"><span>11</span></div>
+        <div class="cell"><span>12</span><span class="chip" style="background: rgba(225,112,85,0.22); color: #F3A08B;"><span class="dot" style="background: #E17055;"></span>가편 · EP06 가편 납품</span></div>
+        <div class="cell"><span>13</span></div>
+
+        <div class="cell"><span>14</span></div>
+        <div class="cell"><span>15</span></div>
+        <div class="cell"><span>16</span></div>
+        <div class="cell"><span>17</span></div>
+        <div class="cell"><span>18</span><span class="chip" style="background: rgba(225,112,85,0.22); color: #F3A08B;"><span class="dot" style="background: #E17055;"></span>가편 · EP07 가편 시사</span></div>
+        <div class="cell"><span>19</span></div>
+        <div class="cell"><span>20</span></div>
+
+        <div class="cell"><span>21</span></div>
+        <div class="cell"><span>22</span></div>
+        <div class="cell"><span>23</span></div>
+        <div class="cell"><span>24</span></div>
+        <div class="cell"><span>25</span><span class="chip" style="background: rgba(225,112,85,0.22); color: #F3A08B;"><span class="dot" style="background: #E17055;"></span>업로드 · EP06 업로드</span></div>
+        <div class="cell"><span>26</span></div>
+        <div class="cell"><span>27</span></div>
+
+        <div class="cell"><span>28</span></div>
+        <div class="cell"><span>29</span></div>
+        <div class="cell"><span>30</span></div>
+        <div class="cell-dim">1</div>
+        <div class="cell-dim">2</div>
+        <div class="cell-dim">3</div>
+        <div class="cell-dim">4</div>
+      </div>
+    </div>
+  </div>
+</div>
+</x-dc>
+<script data-dc-script data-props='{}'>
+class Component extends DCLogic {
+  renderVals() { return {}; }
+}
+</script>
+</body>
+</html>
