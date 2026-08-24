@@ -297,6 +297,123 @@ function deferred<T>() {
   return { promise, resolve, reject };
 }
 
+test('deleted session users cannot reach any actor-bound calendar IPC operation', async (t) => {
+  const eventInput = {
+    calendar_id: 'calendar-1', title: '삭제 사용자 일정', memo: null, tag_id: null,
+    all_day: true, start_date: '2026-08-26', end_date: '2026-08-26',
+    start_time: null, end_time: null, linked_episode: null, linked_part: null,
+    linked_sheet_name: null, linked_scene_id: null, linked_department: null,
+    linked_todo_id: null,
+  };
+  const legacyInput = {
+    title: '삭제 사용자 비공개 일정', memo: '', color: '#6C5CE7', type: 'custom',
+    start_date: '2026-08-26', end_date: '2026-08-26', linked_episode: null,
+    linked_part: null, linked_sheet_name: null, linked_scene_id: null,
+    linked_department: null, linked_todo_id: null, created_by: '표시 이름',
+  };
+  const googleInput = {
+    summary: '삭제 사용자 구글 일정', description: '', startDate: '2026-08-26',
+    endDate: '2026-08-27', extendedProperties: { bflow_type: 'custom' },
+    visibility: 'default',
+  };
+  const scenarios = [
+    { name: 'calendar list', channel: 'calendar:list', args: [] },
+    {
+      name: 'calendar create',
+      channel: 'calendar:create',
+      args: [{ name: '공유', color: '#6C5CE7', visibility: 'members' }],
+    },
+    { name: 'calendar update', channel: 'calendar:update', args: ['calendar-1', { name: '수정' }] },
+    { name: 'calendar delete', channel: 'calendar:delete', args: ['calendar-1'] },
+    { name: 'calendar members write', channel: 'calendar:set-members', args: ['calendar-1', []] },
+    { name: 'event list', channel: 'calendar:events:list', args: [{}] },
+    { name: 'event create', channel: 'calendar:events:create', args: [eventInput] },
+    { name: 'event update', channel: 'calendar:events:update', args: ['event-1', { title: '수정' }] },
+    { name: 'event delete', channel: 'calendar:events:delete', args: ['event-1'] },
+    {
+      name: 'privacy source delete',
+      channel: 'calendar:privacy-migration:delete-source',
+      args: ['event-1'],
+    },
+    { name: 'tag list', channel: 'calendar:tags:list', args: [] },
+    { name: 'tag write', channel: 'calendar:tags:save', args: [[]] },
+    { name: 'notification catchup', channel: 'calendar:notifications:catchup', args: [] },
+    { name: 'notification mark read', channel: 'calendar:notifications:mark-read', args: [[]] },
+    {
+      name: 'B flow privacy replacement create',
+      channel: 'calendar:privacy-migration:create-replacement',
+      args: [{ storage: 'bflow', event: eventInput }],
+    },
+    {
+      name: 'legacy privacy replacement create',
+      channel: 'calendar:privacy-migration:create-replacement',
+      args: [{ storage: 'legacy-private', event: legacyInput }],
+    },
+    {
+      name: 'Google privacy replacement create',
+      channel: 'calendar:privacy-migration:create-replacement',
+      args: [{ storage: 'google', calendar_id: 'primary', event: googleInput }],
+    },
+  ] as const;
+  const originalError = console.error;
+  try {
+    console.error = () => {};
+    for (const scenario of scenarios) {
+      await t.test(scenario.name, async () => {
+        let downstreamCalls = 0;
+        let replacementCreateCalls = 0;
+        const downstream = async () => {
+          downstreamCalls += 1;
+          throw new Error('actor-bound downstream was reached');
+        };
+        const harness = await createIpcHarness({
+          getUserRole: async () => {
+            throw new Error('캘린더 사용자 세션이 더 이상 유효하지 않습니다');
+          },
+          ensurePersonalCalendar: downstream,
+          listCalendarsWithMembers: downstream,
+          getCalendarWithMembers: downstream,
+          createCalendar: downstream,
+          updateCalendar: downstream,
+          deleteCalendar: downstream,
+          replaceMembers: downstream,
+          listEventsInRange: downstream,
+          getEventByIdForWrite: downstream,
+          createEvent: downstream,
+          updateEvent: downstream,
+          deleteEvent: downstream,
+          listTags: downstream,
+          saveTags: downstream,
+          listUnreadNotifications: downstream,
+          markNotificationsRead: downstream,
+        }, 'deleted-user', {
+          createLegacyPrivateEvent: async () => {
+            replacementCreateCalls += 1;
+            return { id: 'orphan-legacy-event' };
+          },
+          createGoogleEvent: async () => {
+            replacementCreateCalls += 1;
+            return 'orphan-google-event';
+          },
+        });
+        try {
+          await assert.rejects(
+            harness.invoke(scenario.channel, ...scenario.args),
+            /캘린더 사용자 세션이 더 이상 유효하지 않습니다/,
+          );
+          assert.equal(downstreamCalls, 0);
+          assert.equal(replacementCreateCalls, 0);
+          assert.deepEqual(harness.broadcasts, []);
+        } finally {
+          harness.restore();
+        }
+      });
+    }
+  } finally {
+    console.error = originalError;
+  }
+});
+
 test('calendar:list waits for personal calendar ensure before listing calendars', async () => {
   let releaseEnsure!: () => void;
   const ensureGate = new Promise<void>((resolve) => { releaseEnsure = resolve; });
@@ -347,6 +464,40 @@ test('calendar:list propagates personal calendar provisioning failures before li
     assert.equal(listCalls, 0);
   } finally {
     console.error = originalError;
+    harness.restore();
+  }
+});
+
+test('a real user still sees team calendars and their events through the strict session boundary', async () => {
+  const listEventCalls: unknown[][] = [];
+  const calendars = [
+    calendarRow({ id: 'team-calendar', visibility: 'team', owner_id: 'admin-1' }),
+    calendarRow({ id: 'private-other', visibility: 'private', owner_id: 'other-user' }),
+  ];
+  const harness = await createIpcHarness({
+    getUserRole: async () => 'user',
+    ensurePersonalCalendar: async () => {},
+    listCalendarsWithMembers: async () => ({ calendars, members: [] }),
+    listEventsInRange: async (...args) => {
+      listEventCalls.push(args);
+      return [calendarEventRow({ calendar_id: 'team-calendar' })];
+    },
+  }, 'real-user');
+  try {
+    const visibleCalendars = await harness.invoke('calendar:list') as Array<{ id: string }>;
+    assert.deepEqual(visibleCalendars.map(({ id }) => id), ['team-calendar']);
+
+    const events = await harness.invoke('calendar:events:list', {
+      from: '2026-08-01',
+      to: '2026-08-31',
+    }) as Array<{ calendar_id: string }>;
+    assert.deepEqual(events.map(({ calendar_id }) => calendar_id), ['team-calendar']);
+    assert.deepEqual(listEventCalls, [[{
+      calendarIds: ['team-calendar'],
+      from: '2026-08-01',
+      to: '2026-08-31',
+    }]]);
+  } finally {
     harness.restore();
   }
 });
@@ -966,6 +1117,7 @@ test('calendar event create passes the session actor and strips renderer-control
 
 test('privacy replacement receipt deletes its exact B flow create after ordinary permission is revoked', async () => {
   let currentUserId = 'user-a';
+  let actorExists = true;
   const createCalls: unknown[][] = [];
   const receiptDeleteCalls: unknown[][] = [];
   const created = calendarEventRow({
@@ -975,7 +1127,10 @@ test('privacy replacement receipt deletes its exact B flow create after ordinary
     created_at: '2026-08-25T01:02:03.456Z',
   });
   const harness = await createIpcHarness({
-    getUserRole: async () => 'user',
+    getUserRole: async () => {
+      if (!actorExists) throw new Error('캘린더 사용자 세션이 더 이상 유효하지 않습니다');
+      return 'user';
+    },
     getCalendarWithMembers: async () => ({
       calendar: calendarRow({ id: 'personal-user-a', owner_id: 'user-a', is_personal: true }),
       members: [],
@@ -1012,6 +1167,7 @@ test('privacy replacement receipt deletes its exact B flow create after ordinary
     assert.deepEqual(createCalls, [[request.event, 'user-a']]);
 
     currentUserId = 'user-b';
+    actorExists = false;
     const originalError = console.error;
     try {
       console.error = () => {};
@@ -1293,7 +1449,9 @@ test('privacy replacement receipt binds Google deletion to the exact calendar, e
   let currentUserId = 'google-user-a';
   const googleCreates: unknown[][] = [];
   const googleDeletes: unknown[][] = [];
-  const harness = await createIpcHarness({}, () => currentUserId, {
+  const harness = await createIpcHarness({
+    getUserRole: async () => 'user',
+  }, () => currentUserId, {
     createGoogleEvent: async (...args) => {
       googleCreates.push(args);
       return 'google-replacement-a';
@@ -1504,6 +1662,70 @@ async function bundledCalendarStoreSource(): Promise<string> {
   }).then((result) => result.outputFiles[0].text);
   return storeBundle;
 }
+
+test('calendar store rejects a deleted session user instead of downgrading it to a user role', async () => {
+  const globalScope = globalThis as Record<string, unknown>;
+  const hadPrior = Object.prototype.hasOwnProperty.call(globalScope, STORE_HARNESS_KEY);
+  const prior = globalScope[STORE_HARNESS_KEY];
+  const query = {
+    select: () => query,
+    eq: () => query,
+    maybeSingle: async () => ({ data: null, error: null }),
+  };
+  globalScope[STORE_HARNESS_KEY] = { from: () => query };
+  try {
+    const encoded = Buffer.from(await bundledCalendarStoreSource()).toString('base64');
+    const store = await import(`data:text/javascript;base64,${encoded}#calendar-store-${storeNonce++}`) as {
+      getUserRole(userId: string): Promise<'admin' | 'user'>;
+    };
+
+    await assert.rejects(
+      store.getUserRole('deleted-user'),
+      /캘린더 사용자 세션이 더 이상 유효하지 않습니다/,
+    );
+  } finally {
+    if (hadPrior) globalScope[STORE_HARNESS_KEY] = prior;
+    else delete globalScope[STORE_HARNESS_KEY];
+  }
+});
+
+test('calendar store preserves real user roles and propagates user lookup failures', async () => {
+  const globalScope = globalThis as Record<string, unknown>;
+  const hadPrior = Object.prototype.hasOwnProperty.call(globalScope, STORE_HARNESS_KEY);
+  const prior = globalScope[STORE_HARNESS_KEY];
+  let response: { data: unknown; error: { code?: string; message: string } | null } = {
+    data: { role: 'user' },
+    error: null,
+  };
+  const query = {
+    select: () => query,
+    eq: () => query,
+    maybeSingle: async () => response,
+  };
+  globalScope[STORE_HARNESS_KEY] = { from: () => query };
+  try {
+    const encoded = Buffer.from(await bundledCalendarStoreSource()).toString('base64');
+    const store = await import(`data:text/javascript;base64,${encoded}#calendar-store-${storeNonce++}`) as {
+      getUserRole(userId: string): Promise<'admin' | 'user'>;
+    };
+
+    assert.equal(await store.getUserRole('real-user'), 'user');
+    response = { data: { role: 'admin' }, error: null };
+    assert.equal(await store.getUserRole('real-admin'), 'admin');
+
+    response = {
+      data: null,
+      error: { code: '08006', message: 'temporary users lookup failure' },
+    };
+    await assert.rejects(
+      store.getUserRole('real-user'),
+      /temporary users lookup failure/,
+    );
+  } finally {
+    if (hadPrior) globalScope[STORE_HARNESS_KEY] = prior;
+    else delete globalScope[STORE_HARNESS_KEY];
+  }
+});
 
 test('calendar store keeps soft reads empty while strict write pre-reads surface a missing table', async () => {
   const globalScope = globalThis as Record<string, unknown>;

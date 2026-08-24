@@ -426,8 +426,8 @@ export function registerCalendarIpc(deps: CalendarIpcDeps): void {
   }));
 
   ipcMain.handle('calendar:events:create', wrap(async (input: CalendarEventCreateInput) => {
-    const actorId = deps.getSessionUserIdOrThrow();
-    const created = await createBflowEventForActor(input, actorId);
+    const user = await sessionUser();
+    const created = await createBflowEventForActor(input, user.id);
     broadcastDataChange('calendar_events', 'INSERT');
     broadcastCalendarChanged('INSERT');
     return created;
@@ -438,7 +438,8 @@ export function registerCalendarIpc(deps: CalendarIpcDeps): void {
     rawRequest: unknown,
   ) => {
     const senderId = requireSenderId(event);
-    const actorId = deps.getSessionUserIdOrThrow();
+    const user = await sessionUser();
+    const actorId = user.id;
     const request = requirePrivacyReplacementRequest(rawRequest);
     let target: PrivacyReplacementTarget;
 
@@ -614,7 +615,7 @@ export function registerCalendarIpc(deps: CalendarIpcDeps): void {
   )));
 
   ipcMain.handle('calendar:tags:list', wrap(async () => {
-    deps.getSessionUserIdOrThrow();
+    await sessionUser();
     return store.listTags();
   }));
 
@@ -631,13 +632,13 @@ export function registerCalendarIpc(deps: CalendarIpcDeps): void {
   }));
 
   ipcMain.handle('calendar:notifications:catchup', wrap(async () => {
-    const userId = deps.getSessionUserIdOrThrow();
+    const user = await sessionUser();
     const since = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
-    return store.listUnreadNotifications(userId, since);
+    return store.listUnreadNotifications(user.id, since);
   }));
 
   ipcMain.handle('calendar:notifications:mark-read', wrap(async (ids: string[]) => {
-    const userId = deps.getSessionUserIdOrThrow();
-    await store.markNotificationsRead(userId, ids);
+    const user = await sessionUser();
+    await store.markNotificationsRead(user.id, ids);
   }));
 }

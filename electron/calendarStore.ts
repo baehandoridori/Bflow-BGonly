@@ -442,7 +442,11 @@ export async function getUserRole(userId: string): Promise<'admin' | 'user'> {
     .eq('id', userId)
     .maybeSingle();
   throwIfError(error);
-  return (data as { role?: string } | null)?.role === 'admin' ? 'admin' : 'user';
+  const user = data as { role?: string } | null;
+  if (!user) {
+    throw new Error('캘린더 사용자 세션이 더 이상 유효하지 않습니다');
+  }
+  return user.role === 'admin' ? 'admin' : 'user';
 }
 
 // ── 개인 캘린더 보장 (로그인 훅 — Task 2.5 에서 연결) ──
