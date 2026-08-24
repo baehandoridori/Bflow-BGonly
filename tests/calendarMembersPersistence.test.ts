@@ -56,6 +56,67 @@ test('replace_calendar_members rejects a missing calendar before an empty replac
   assert.ok(foreignKeyErrorIndex < deleteIndex, 'missing parent must fail before child rows change');
 });
 
+function calendarCreateRpc(sql: string): string {
+  return between(
+    sql,
+    'CREATE OR REPLACE FUNCTION public.create_calendar_with_members_authorized',
+    'COMMENT ON FUNCTION public.create_calendar_with_members_authorized',
+  );
+}
+
+test('calendar create RPC is an invoker transaction with parent-to-child writer lock order', () => {
+  const fn = calendarCreateRpc(readFileSync(migrationPath, 'utf8'));
+  assert.match(fn, /RETURNS SETOF calendars/);
+  assert.match(fn, /LANGUAGE\s+plpgsql\s+SECURITY INVOKER\s+SET search_path\s*=\s*public,\s*pg_temp/s);
+
+  const calendarTableLock = fn.indexOf('LOCK TABLE calendars IN ROW EXCLUSIVE MODE;');
+  const memberTableLock = fn.indexOf('LOCK TABLE calendar_members IN ROW EXCLUSIVE MODE;');
+  const actorRowLock = fn.indexOf('FOR NO KEY UPDATE;');
+  const calendarInsert = fn.indexOf('INSERT INTO calendars');
+  const memberInsert = fn.indexOf('INSERT INTO calendar_members');
+  const returnRow = fn.indexOf('RETURN NEXT v_created;');
+
+  assert.ok(calendarTableLock >= 0 && calendarTableLock < memberTableLock);
+  assert.ok(memberTableLock < actorRowLock, 'writer table locks must precede the actor permission row lock');
+  assert.ok(actorRowLock < calendarInsert, 'session actor must be locked and authorized before creation');
+  assert.doesNotMatch(fn, /WHERE actor\.id\s*=\s*p_actor_id\s+FOR UPDATE;/s);
+  assert.ok(calendarInsert < memberInsert, 'calendar parent must be inserted before initial member children');
+  assert.ok(memberInsert < returnRow, 'success must be returned only after initial members are written');
+});
+
+test('calendar create RPC derives ownership and team permission from the locked session actor', () => {
+  const fn = calendarCreateRpc(readFileSync(migrationPath, 'utf8'));
+  assert.match(fn, /FROM users AS actor[\s\S]*actor\.id\s*=\s*p_actor_id[\s\S]*FOR NO KEY UPDATE;/);
+  assert.match(fn, /v_visibility\s*=\s*'team'[\s\S]*v_actor_role\s+IS DISTINCT FROM\s+'admin'[\s\S]*ERRCODE\s*=\s*'42501'/);
+  assert.match(fn, /INSERT INTO calendars\s*\(name, color, visibility, owner_id, is_personal\)/s);
+  assert.match(fn, /p_actor_id,\s*false/s);
+  assert.doesNotMatch(fn, /p_owner_id|p_is_personal/);
+});
+
+test('calendar create RPC accepts only canonical calendar and member input fields', () => {
+  const fn = calendarCreateRpc(readFileSync(migrationPath, 'utf8'));
+  const calendarAllowed = fn.match(/v_allowed_keys CONSTANT TEXT\[\] := ARRAY\[([\s\S]*?)\];/);
+  const memberAllowed = fn.match(/v_member_allowed_keys CONSTANT TEXT\[\] := ARRAY\[([\s\S]*?)\];/);
+  assert.ok(calendarAllowed);
+  assert.ok(memberAllowed);
+  assert.deepEqual(
+    [...calendarAllowed[1].matchAll(/'([^']+)'/g)].map((match) => match[1]),
+    ['name', 'color', 'visibility'],
+  );
+  assert.deepEqual(
+    [...memberAllowed[1].matchAll(/'([^']+)'/g)].map((match) => match[1]),
+    ['user_id', 'can_edit'],
+  );
+  assert.match(fn, /jsonb_typeof\(p_calendar\)\s*<>\s*'object'/);
+  assert.match(fn, /jsonb_typeof\(p_members\)\s*<>\s*'array'/);
+  assert.match(fn, /jsonb_object_keys\(p_calendar\)/);
+  assert.match(fn, /jsonb_array_elements\(p_members\)[\s\S]*jsonb_object_keys/);
+  assert.match(fn, /ERRCODE\s*=\s*'22023'/);
+  for (const immutable of ['id', 'owner_id', 'is_personal', 'created_at', 'updated_at']) {
+    assert.doesNotMatch(calendarAllowed[1], new RegExp(`'${immutable}'`));
+  }
+});
+
 test('delete_user_cascade serializes calendar and event writers before row cleanup', () => {
   const sql = readFileSync(migrationPath, 'utf8');
   const fn = between(

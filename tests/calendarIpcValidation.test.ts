@@ -195,6 +195,30 @@ test('calendar:list waits for personal calendar ensure before listing calendars'
   }
 });
 
+test('calendar:list propagates personal calendar provisioning failures before listing', async () => {
+  let listCalls = 0;
+  const originalError = console.error;
+  const harness = await createIpcHarness({
+    getUserRole: async () => 'user',
+    ensurePersonalCalendar: async () => { throw new Error('temporary personal calendar insert failure'); },
+    listCalendarsWithMembers: async () => {
+      listCalls += 1;
+      return { calendars: [], members: [] };
+    },
+  });
+  try {
+    console.error = () => {};
+    await assert.rejects(
+      harness.invoke('calendar:list'),
+      /temporary personal calendar insert failure/,
+    );
+    assert.equal(listCalls, 0);
+  } finally {
+    console.error = originalError;
+    harness.restore();
+  }
+});
+
 test('calendar:create rejects invalid or boxed visibility before persistence', async () => {
   let createCalls = 0;
   const originalError = console.error;
@@ -307,11 +331,13 @@ test('calendar:set-members filters the owner and strips extra fields before repl
 });
 
 test('calendar:create keeps omitted members equivalent to an empty member list', async () => {
-  let replaceCalls = 0;
+  const createCalls: unknown[][] = [];
   const harness = await createIpcHarness({
     getUserRole: async () => 'user',
-    createCalendar: async () => calendarRow({ visibility: 'members' }),
-    replaceMembers: async () => { replaceCalls += 1; },
+    createCalendar: async (...args) => {
+      createCalls.push(args);
+      return calendarRow({ visibility: 'members' });
+    },
   });
   try {
     await harness.invoke('calendar:create', {
@@ -319,12 +345,78 @@ test('calendar:create keeps omitted members equivalent to an empty member list',
       color: '#6C5CE7',
       visibility: 'members',
     });
-    assert.equal(replaceCalls, 0);
+    assert.deepEqual(createCalls, [[
+      { name: '공유 캘린더', color: '#6C5CE7', visibility: 'members' },
+      [],
+      'user-1',
+    ]]);
     assert.deepEqual(harness.broadcasts, [
       { kind: 'data', args: ['calendars', 'INSERT'] },
       { kind: 'calendar', args: ['INSERT'] },
     ]);
   } finally {
+    harness.restore();
+  }
+});
+
+test('calendar:create atomically passes only safe calendar fields, members, and the session actor', async () => {
+  const createCalls: unknown[][] = [];
+  const harness = await createIpcHarness({
+    getUserRole: async () => 'user',
+    createCalendar: async (...args) => {
+      createCalls.push(args);
+      return calendarRow({ visibility: 'members' });
+    },
+  });
+  try {
+    await harness.invoke('calendar:create', {
+      id: 'spoofed-calendar',
+      name: '원자 생성',
+      color: '#74B9FF',
+      visibility: 'members',
+      owner_id: 'spoofed-owner',
+      actor_id: 'spoofed-actor',
+      is_personal: true,
+      members: [
+        { user_id: 'user-1', can_edit: true, role: 'owner-spoof' },
+        { user_id: 'user-2', can_edit: false, role: 'admin-spoof' },
+      ],
+    });
+
+    assert.deepEqual(createCalls, [[
+      { name: '원자 생성', color: '#74B9FF', visibility: 'members' },
+      [{ user_id: 'user-2', can_edit: false }],
+      'user-1',
+    ]]);
+    assert.deepEqual(harness.broadcasts, [
+      { kind: 'data', args: ['calendars', 'INSERT'] },
+      { kind: 'calendar', args: ['INSERT'] },
+    ]);
+  } finally {
+    harness.restore();
+  }
+});
+
+test('calendar:create does not broadcast when the atomic create RPC rejects', async () => {
+  const originalError = console.error;
+  const harness = await createIpcHarness({
+    getUserRole: async () => 'user',
+    createCalendar: async () => { throw new Error('23503 initial member does not exist'); },
+  });
+  try {
+    console.error = () => {};
+    await assert.rejects(
+      harness.invoke('calendar:create', {
+        name: '실패 캘린더',
+        color: '#6C5CE7',
+        visibility: 'members',
+        members: [{ user_id: 'missing-user', can_edit: true }],
+      }),
+      /23503 initial member does not exist/,
+    );
+    assert.deepEqual(harness.broadcasts, []);
+  } finally {
+    console.error = originalError;
     harness.restore();
   }
 });
@@ -672,6 +764,96 @@ test('calendar store keeps soft reads empty while strict write pre-reads surface
   }
 });
 
+test('personal calendar provisioning ignores only missing-table errors and propagates transient failures', async () => {
+  const globalScope = globalThis as Record<string, unknown>;
+  const hadPrior = Object.prototype.hasOwnProperty.call(globalScope, STORE_HARNESS_KEY);
+  const prior = globalScope[STORE_HARNESS_KEY];
+  const originalWarn = console.warn;
+  try {
+    console.warn = () => {};
+    const encoded = Buffer.from(await bundledCalendarStoreSource()).toString('base64');
+    const scenarios = [
+      {
+        userId: 'lookup-migration-user',
+        lookupError: { code: '42P01', message: 'relation calendars does not exist' },
+        insertError: null,
+        rejects: false,
+        expectedInsertCalls: 0,
+      },
+      {
+        userId: 'insert-migration-user',
+        lookupError: null,
+        insertError: { code: 'PGRST205', message: 'calendars missing from schema cache' },
+        rejects: false,
+        expectedInsertCalls: 1,
+      },
+      {
+        userId: 'transient-user',
+        lookupError: null,
+        insertError: { code: '08006', message: 'temporary calendar insert failure' },
+        rejects: true,
+        expectedError: /temporary calendar insert failure/,
+        expectedInsertCalls: 1,
+      },
+      {
+        userId: 'lookup-transient-user',
+        lookupError: { code: '08006', message: 'temporary calendar lookup failure' },
+        insertError: null,
+        rejects: true,
+        expectedError: /temporary calendar lookup failure/,
+        expectedInsertCalls: 0,
+      },
+      {
+        userId: 'missing-column-user',
+        lookupError: { code: '42703', message: 'column calendars.is_personal does not exist' },
+        insertError: null,
+        rejects: true,
+        expectedError: /column calendars\.is_personal does not exist/,
+        expectedInsertCalls: 0,
+      },
+      {
+        userId: 'stale-column-cache-user',
+        lookupError: null,
+        insertError: { code: 'PGRST204', message: "Could not find the 'owner_id' column of 'calendars' in the schema cache" },
+        rejects: true,
+        expectedError: /owner_id.*column.*schema cache/i,
+        expectedInsertCalls: 1,
+      },
+    ] as const;
+
+    for (const scenario of scenarios) {
+      let insertCalls = 0;
+      const query = {
+        select: () => query,
+        eq: () => query,
+        maybeSingle: async () => ({ data: null, error: scenario.lookupError }),
+        insert: async () => {
+          insertCalls += 1;
+          return { error: scenario.insertError };
+        },
+      };
+      globalScope[STORE_HARNESS_KEY] = { from: () => query };
+      const store = await import(`data:text/javascript;base64,${encoded}#calendar-store-${storeNonce++}`) as {
+        ensurePersonalCalendar(userId: string): Promise<void>;
+      };
+
+      if (scenario.rejects) {
+        await assert.rejects(
+          store.ensurePersonalCalendar(scenario.userId),
+          scenario.expectedError,
+        );
+      } else {
+        await assert.doesNotReject(store.ensurePersonalCalendar(scenario.userId));
+      }
+      assert.equal(insertCalls, scenario.expectedInsertCalls);
+    }
+  } finally {
+    console.warn = originalWarn;
+    if (hadPrior) globalScope[STORE_HARNESS_KEY] = prior;
+    else delete globalScope[STORE_HARNESS_KEY];
+  }
+});
+
 function calendarStoreRpcHarness(
   responseFor: (name: string, args: Record<string, unknown>) => {
     data: unknown;
@@ -689,6 +871,55 @@ function calendarStoreRpcHarness(
     },
   };
 }
+
+test('calendar store creates a calendar and initial members through one exact authorized RPC', async () => {
+  const globalScope = globalThis as Record<string, unknown>;
+  const hadPrior = Object.prototype.hasOwnProperty.call(globalScope, STORE_HARNESS_KEY);
+  const prior = globalScope[STORE_HARNESS_KEY];
+  const created = calendarRow({ name: '원자 생성', visibility: 'members' });
+  let response: { data: unknown; error: { code?: string; message: string } | null } = {
+    data: [created],
+    error: null,
+  };
+  const harness = calendarStoreRpcHarness(() => response);
+  globalScope[STORE_HARNESS_KEY] = harness.supabase;
+  try {
+    const encoded = Buffer.from(await bundledCalendarStoreSource()).toString('base64');
+    const store = await import(`data:text/javascript;base64,${encoded}#calendar-store-${storeNonce++}`) as {
+      createCalendar(
+        input: { name: string; color: string; visibility: string },
+        members: Array<{ user_id: string; can_edit: boolean }>,
+        actorId: string,
+      ): Promise<unknown>;
+    };
+    const input = { name: '원자 생성', color: '#74B9FF', visibility: 'members' };
+    const members = [{ user_id: 'user-2', can_edit: false }];
+
+    assert.deepEqual(await store.createCalendar(input, members, 'session-user'), created);
+    assert.deepEqual(harness.calls, [{
+      name: 'create_calendar_with_members_authorized',
+      args: { p_actor_id: 'session-user', p_calendar: input, p_members: members },
+    }]);
+
+    response = {
+      data: [],
+      error: { code: '23503', message: 'initial calendar member does not exist' },
+    };
+    await assert.rejects(
+      store.createCalendar(input, members, 'session-user'),
+      /initial calendar member does not exist/,
+    );
+
+    response = { data: [], error: null };
+    await assert.rejects(
+      store.createCalendar(input, members, 'session-user'),
+      /결과 행|returned.*row/i,
+    );
+  } finally {
+    if (hadPrior) globalScope[STORE_HARNESS_KEY] = prior;
+    else delete globalScope[STORE_HARNESS_KEY];
+  }
+});
 
 test('calendar store sends exact authorized RPC arguments and returns typed event rows', async () => {
   const globalScope = globalThis as Record<string, unknown>;

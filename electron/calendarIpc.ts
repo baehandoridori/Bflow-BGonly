@@ -130,27 +130,13 @@ export function registerCalendarIpc(deps: CalendarIpcDeps): void {
     if (!canCreateCalendar(user, visibility)) {
       throw new Error('팀 전체 캘린더는 관리자만 만들 수 있습니다');
     }
-    const safeMembers = normalizeCalendarMembers(input.members, user.id);
+    const normalizedMembers = normalizeCalendarMembers(input.members, user.id);
+    const safeMembers = visibility === 'private' ? [] : normalizedMembers;
     const created = await store.createCalendar({
       name: input.name,
       color: input.color,
       visibility,
-      owner_id: user.id,
-      is_personal: false,
-    });
-    if (safeMembers.length && visibility !== 'private') {
-      try {
-        await store.replaceMembers(created.id, safeMembers);
-      } catch (memberError) {
-        try {
-          await store.deleteCalendar(created.id);
-        } catch (cleanupError) {
-          const cleanupMessage = cleanupError instanceof Error ? cleanupError.message : String(cleanupError);
-          console.error(`[Calendar IPC] 멤버 설정 실패 후 캘린더 ${created.id} 보상 삭제 실패:`, cleanupMessage);
-        }
-        throw memberError;
-      }
-    }
+    }, safeMembers, user.id);
     broadcastDataChange('calendars', 'INSERT');
     broadcastCalendarChanged('INSERT');
     return created;

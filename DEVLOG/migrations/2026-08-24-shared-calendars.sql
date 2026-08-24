@@ -124,7 +124,160 @@ $$;
 COMMENT ON FUNCTION public.replace_calendar_members(UUID, JSONB) IS
   '캘린더별 부모 행 잠금으로 직렬화하는 멤버 전체 교체 atomic RPC. 빈 배열은 전체 삭제, 잘못된 입력·없는 캘린더는 변경 전 거부.';
 
--- ── 2-1) 일정 쓰기 권한 원자적 검증 RPC ───────────────────────
+-- ── 2-1) 캘린더 + 초기 멤버 원자적 생성 RPC ────────────────────
+-- 캘린더와 초기 멤버를 한 RPC 트랜잭션에서 기록한다. 멤버 FK 실패를 포함해
+-- 어느 단계든 실패하면 부모 캘린더 INSERT도 함께 롤백된다.
+CREATE OR REPLACE FUNCTION public.create_calendar_with_members_authorized(
+  p_actor_id TEXT,
+  p_calendar JSONB,
+  p_members JSONB
+)
+RETURNS SETOF calendars
+LANGUAGE plpgsql
+SECURITY INVOKER
+SET search_path = public, pg_temp
+AS $$
+DECLARE
+  v_allowed_keys CONSTANT TEXT[] := ARRAY['name', 'color', 'visibility'];
+  v_required_keys CONSTANT TEXT[] := ARRAY['name', 'color', 'visibility'];
+  v_member_allowed_keys CONSTANT TEXT[] := ARRAY['user_id', 'can_edit'];
+  v_visibility TEXT;
+  v_actor_role TEXT;
+  v_created calendars%ROWTYPE;
+BEGIN
+  IF p_actor_id IS NULL OR btrim(p_actor_id) = '' THEN
+    RAISE EXCEPTION 'A session actor is required' USING ERRCODE = '42501';
+  END IF;
+
+  IF p_calendar IS NULL OR jsonb_typeof(p_calendar) <> 'object' THEN
+    RAISE EXCEPTION 'p_calendar must be a JSON object' USING ERRCODE = '22023';
+  END IF;
+
+  IF EXISTS (
+    SELECT 1
+    FROM jsonb_object_keys(p_calendar) AS submitted(key)
+    WHERE NOT (submitted.key = ANY (v_allowed_keys))
+  ) THEN
+    RAISE EXCEPTION 'p_calendar contains an unknown or immutable field' USING ERRCODE = '22023';
+  END IF;
+
+  IF EXISTS (
+    SELECT 1
+    FROM unnest(v_required_keys) AS required(key)
+    WHERE NOT (p_calendar ? required.key)
+  ) THEN
+    RAISE EXCEPTION 'p_calendar is missing a canonical field' USING ERRCODE = '22023';
+  END IF;
+
+  IF jsonb_typeof(p_calendar->'name') IS DISTINCT FROM 'string'
+     OR btrim(p_calendar->>'name') = ''
+     OR jsonb_typeof(p_calendar->'color') IS DISTINCT FROM 'string'
+     OR btrim(p_calendar->>'color') = ''
+     OR jsonb_typeof(p_calendar->'visibility') IS DISTINCT FROM 'string' THEN
+    RAISE EXCEPTION 'Calendar name, color, and visibility must be non-empty strings' USING ERRCODE = '22023';
+  END IF;
+
+  v_visibility := p_calendar->>'visibility';
+  IF v_visibility NOT IN ('private', 'members', 'team') THEN
+    RAISE EXCEPTION 'Invalid calendar visibility' USING ERRCODE = '22023';
+  END IF;
+
+  IF p_members IS NULL OR jsonb_typeof(p_members) <> 'array' THEN
+    RAISE EXCEPTION 'p_members must be a JSON array' USING ERRCODE = '22023';
+  END IF;
+
+  IF EXISTS (
+    SELECT 1
+    FROM jsonb_array_elements(p_members) AS item(value)
+    WHERE jsonb_typeof(item.value) <> 'object'
+  ) THEN
+    RAISE EXCEPTION 'Each calendar member must be a JSON object' USING ERRCODE = '22023';
+  END IF;
+
+  IF EXISTS (
+    SELECT 1
+    FROM jsonb_array_elements(p_members) AS item(value)
+    CROSS JOIN LATERAL jsonb_object_keys(item.value) AS submitted(key)
+    WHERE NOT (submitted.key = ANY (v_member_allowed_keys))
+  ) THEN
+    RAISE EXCEPTION 'A calendar member contains an unknown field' USING ERRCODE = '22023';
+  END IF;
+
+  IF EXISTS (
+    SELECT 1
+    FROM jsonb_array_elements(p_members) AS item(value)
+    WHERE NOT (item.value ? 'user_id')
+       OR NOT (item.value ? 'can_edit')
+       OR jsonb_typeof(item.value->'user_id') IS DISTINCT FROM 'string'
+       OR btrim(item.value->>'user_id') = ''
+       OR jsonb_typeof(item.value->'can_edit') IS DISTINCT FROM 'boolean'
+  ) THEN
+    RAISE EXCEPTION 'Each calendar member requires user_id and can_edit' USING ERRCODE = '22023';
+  END IF;
+
+  IF EXISTS (
+    SELECT item.value->>'user_id'
+    FROM jsonb_array_elements(p_members) AS item(value)
+    GROUP BY item.value->>'user_id'
+    HAVING count(*) > 1
+  ) THEN
+    RAISE EXCEPTION 'Duplicate calendar member user_id' USING ERRCODE = '23505';
+  END IF;
+
+  IF EXISTS (
+    SELECT 1
+    FROM jsonb_array_elements(p_members) AS item(value)
+    WHERE item.value->>'user_id' = p_actor_id
+  ) THEN
+    RAISE EXCEPTION 'The calendar owner cannot also be an initial member' USING ERRCODE = '22023';
+  END IF;
+
+  IF v_visibility = 'private' AND jsonb_array_length(p_members) > 0 THEN
+    RAISE EXCEPTION 'A private calendar cannot have initial members' USING ERRCODE = '22023';
+  END IF;
+
+  -- delete_user_cascade와 같은 부모→자식 순서. 일반 writer끼리는 호환된다.
+  LOCK TABLE calendars IN ROW EXCLUSIVE MODE;
+  LOCK TABLE calendar_members IN ROW EXCLUSIVE MODE;
+
+  -- 세션 actor의 존재와 team 생성 권한을 같은 트랜잭션에서 고정한다.
+  SELECT actor.role INTO v_actor_role
+  FROM users AS actor
+  WHERE actor.id = p_actor_id
+  FOR NO KEY UPDATE;
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'Session actor % not found', p_actor_id USING ERRCODE = '42501';
+  END IF;
+
+  IF v_visibility = 'team' AND v_actor_role IS DISTINCT FROM 'admin' THEN
+    RAISE EXCEPTION 'Only an admin can create a team calendar' USING ERRCODE = '42501';
+  END IF;
+
+  INSERT INTO calendars (name, color, visibility, owner_id, is_personal)
+  VALUES (
+    p_calendar->>'name',
+    p_calendar->>'color',
+    v_visibility,
+    p_actor_id,
+    false
+  )
+  RETURNING * INTO v_created;
+
+  INSERT INTO calendar_members (calendar_id, user_id, can_edit)
+  SELECT
+    v_created.id,
+    item.value->>'user_id',
+    (item.value->>'can_edit')::BOOLEAN
+  FROM jsonb_array_elements(p_members) AS item(value);
+
+  RETURN NEXT v_created;
+END;
+$$;
+
+COMMENT ON FUNCTION public.create_calendar_with_members_authorized(TEXT, JSONB, JSONB) IS
+  '세션 actor 권한과 안전한 입력을 재검증하고 캘린더 + 초기 멤버를 단일 트랜잭션에서 생성하는 SECURITY INVOKER RPC.';
+
+-- ── 2-2) 일정 쓰기 권한 원자적 검증 RPC ───────────────────────
 -- IPC 사전 검사는 친절한 오류용이다. 실제 권한은 부모 캘린더 행을 잠근 뒤
 -- 같은 트랜잭션에서 재확인하여 멤버 권한 회수와 일정 쓰기의 TOCTOU를 막는다.
 CREATE OR REPLACE FUNCTION public.create_calendar_event_authorized(

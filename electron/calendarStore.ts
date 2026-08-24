@@ -75,7 +75,10 @@ function throwIfError(error: SbError): void {
 function isMissingTable(error: SbError): boolean {
   if (!error) return false;
   if (error.code === '42P01' || error.code === 'PGRST205') return true;
-  return /does not exist|schema cache/i.test(error.message ?? '');
+  if (error.code) return false;
+  const message = error.message ?? '';
+  return /\brelation\s+(?:"[^"]+"|'[^']+'|[\w.]+)\s+does not exist\b/i.test(message)
+    || /could not find the table\s+['"][^'"]+['"]\s+in the schema cache/i.test(message);
 }
 
 function warnMissingTable(table: string, emptyResult: string): void {
@@ -87,6 +90,13 @@ function requireEventRpcRow(data: unknown, operation: string): CalendarEventRow 
     throw new Error(`${operation} RPC가 결과 행을 반환하지 않았습니다`);
   }
   return data[0] as CalendarEventRow;
+}
+
+function requireCalendarRpcRow(data: unknown, operation: string): CalendarRow {
+  if (!Array.isArray(data) || data.length !== 1 || !data[0]) {
+    throw new Error(`${operation} RPC가 결과 행을 반환하지 않았습니다`);
+  }
+  return data[0] as CalendarRow;
 }
 
 // ── 캘린더 ──────────────────────────────────────
@@ -159,16 +169,14 @@ export async function createCalendar(input: {
   name: string;
   color: string;
   visibility: 'private' | 'members' | 'team';
-  owner_id: string;
-  is_personal?: boolean;
-}): Promise<CalendarRow> {
-  const { data, error } = await supabase
-    .from('calendars')
-    .insert(input)
-    .select('*')
-    .single();
+}, members: Array<{ user_id: string; can_edit: boolean }>, actorId: string): Promise<CalendarRow> {
+  const { data, error } = await supabase.rpc('create_calendar_with_members_authorized', {
+    p_actor_id: actorId,
+    p_calendar: input,
+    p_members: members,
+  });
   throwIfError(error);
-  return data as CalendarRow;
+  return requireCalendarRpcRow(data, '캘린더 생성');
 }
 
 export async function updateCalendar(
@@ -425,8 +433,11 @@ export async function ensurePersonalCalendar(userId: string): Promise<void> {
     .eq('is_personal', true)
     .maybeSingle();
   if (error) {
-    if (!isMissingTable(error)) console.warn('[calendar] 개인 캘린더 조회 실패:', error.message);
-    return;
+    if (isMissingTable(error)) {
+      warnMissingTable('calendars', '개인 캘린더 보장 생략');
+      return;
+    }
+    throwIfError(error);
   }
   if (data) {
     ensuredPersonalFor.add(userId);
@@ -440,9 +451,16 @@ export async function ensurePersonalCalendar(userId: string): Promise<void> {
     owner_id: userId,
     is_personal: true,
   });
-  if (insertError && insertError.code !== '23505') {
-    console.warn('[calendar] 개인 캘린더 생성 실패:', insertError.message);
-    return;
+  if (insertError) {
+    if (insertError.code === '23505') {
+      ensuredPersonalFor.add(userId);
+      return;
+    }
+    if (isMissingTable(insertError)) {
+      warnMissingTable('calendars', '개인 캘린더 보장 생략');
+      return;
+    }
+    throwIfError(insertError);
   }
   ensuredPersonalFor.add(userId);
 }
