@@ -8,7 +8,7 @@ import { cn } from '@/utils/cn';
 import { useDataStore } from '@/stores/useDataStore';
 import { useAppStore } from '@/stores/useAppStore';
 import {
-  getEvents, addEvent, updateEvent, deleteEvent,
+  getEvents, loadBflowEvents, addEvent, updateEvent, deleteEvent,
 } from '@/services/calendarService';
 import { fetchAllVacationEvents } from '@/services/vacationService';
 import { useCalendarDnD } from '@/hooks/useCalendarDnD';
@@ -118,7 +118,9 @@ export function ScheduleView() {
     // cold cache 방어: 캐시가 비어있으면 syncAll 시도
     (async () => {
       const cached = await getEvents();
-      if (cached.length === 0) {
+      const wasColdCache = cached.length === 0;
+      await loadBflowEvents();
+      if (wasColdCache) {
         try {
           const { isAuthenticated } = await import('@/services/googleCalendarService');
           if (await isAuthenticated()) {

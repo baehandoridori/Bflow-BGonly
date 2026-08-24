@@ -12,7 +12,7 @@ import type {
 import * as gcalService from './googleCalendarService';
 import { readMetadata, writeMetadata } from './supabaseService';
 import { useAuthStore } from '@/stores/useAuthStore';
-import { useCalendarStore } from '@/stores/useCalendarStore';
+import { getPersonalCalendar, useCalendarStore } from '@/stores/useCalendarStore';
 import { createUuid } from '@/utils/createUuid';
 
 // 비공개 이벤트는 Google Calendar 가 아닌 Supabase 에만 저장된다.
@@ -602,6 +602,14 @@ export async function addEvent(event: CalendarEvent): Promise<void> {
   if (event.isPrivate) {
     const userId = useAuthStore.getState().currentUser?.id;
     if (!userId) throw new Error('로그인 정보가 필요합니다 (비공개 일정)');
+
+    const calendarState = useCalendarStore.getState();
+    if (!calendarState.loaded) await calendarState.loadAll();
+    const personal = getPersonalCalendar(useCalendarStore.getState(), userId);
+    if (personal) {
+      await addBflowEvent({ ...event, calendarId: personal.id }, personal.id);
+      return;
+    }
 
     const localId = event.id;
     // 낙관적 업데이트
