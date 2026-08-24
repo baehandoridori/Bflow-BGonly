@@ -52,6 +52,9 @@ export function EventQuickEdit({
   const isVacation = event.type === 'vacation';
   const hasCalendarDerivedFields = event.sourceCalendarId?.startsWith('bflow:') === true
     || (event.source === 'bflow' && Boolean(event.calendarId));
+  const derivedFieldsDescriptionId = hasCalendarDerivedFields
+    ? `calendar-derived-fields-${event.id}`
+    : undefined;
   const fieldStyle = {
     background: 'rgb(var(--color-bg-primary) / 0.82)',
     border: '1px solid rgb(var(--color-bg-border) / 0.56)',
@@ -123,6 +126,11 @@ export function EventQuickEdit({
           boxShadow: '0 16px 36px rgb(var(--color-shadow) / calc(var(--shadow-alpha) * 1.28))',
         }}
       >
+        {derivedFieldsDescriptionId && (
+          <p id={derivedFieldsDescriptionId} className="sr-only">
+            색상과 유형은 소속 캘린더와 연결 정보로 결정되어 여기서 변경할 수 없습니다.
+          </p>
+        )}
         {/* 헤더: 탭 */}
         <div className="flex border-b" style={{ borderColor: 'rgb(var(--color-bg-border) / 0.45)' }}>
           <button
@@ -166,10 +174,12 @@ export function EventQuickEdit({
               {/* 색상 그리드 5x2 */}
               <div className="grid grid-cols-5 gap-2 mb-4">
                 {EVENT_COLORS.map((color) => (
-                  <button
-                    key={color}
-                    disabled={hasCalendarDerivedFields}
-                    onClick={hasCalendarDerivedFields ? undefined : () => onUpdateColor(event.id, color)}
+                   <button
+                     key={color}
+                     disabled={hasCalendarDerivedFields}
+                     aria-label={hasCalendarDerivedFields ? `${color} 캘린더 색상, 변경 불가` : `${color} 색상 선택`}
+                     aria-describedby={derivedFieldsDescriptionId}
+                     onClick={hasCalendarDerivedFields ? undefined : () => onUpdateColor(event.id, color)}
                     className="relative w-8 h-8 rounded-lg transition-transform hover:scale-110 cursor-pointer disabled:cursor-not-allowed disabled:opacity-55 disabled:hover:scale-100"
                     style={{
                       background: color,
@@ -248,10 +258,11 @@ export function EventQuickEdit({
                   {/* 타입 세그먼트 */}
                   <div className="flex gap-1">
                     {TYPE_OPTIONS.map((opt) => (
-                      <button
-                        key={opt.value}
-                        disabled={hasCalendarDerivedFields}
-                        onClick={hasCalendarDerivedFields ? undefined : () => setType(opt.value)}
+                       <button
+                         key={opt.value}
+                         disabled={hasCalendarDerivedFields}
+                         aria-describedby={derivedFieldsDescriptionId}
+                         onClick={hasCalendarDerivedFields ? undefined : () => setType(opt.value)}
                         className="flex-1 py-1.5 rounded-lg text-[11px] font-medium transition-colors cursor-pointer disabled:cursor-not-allowed disabled:opacity-70"
                         style={{
                           background: type === opt.value ? 'rgb(var(--color-accent))' : 'rgb(var(--color-bg-primary) / 0.82)',

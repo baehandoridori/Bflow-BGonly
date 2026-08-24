@@ -38,6 +38,8 @@ type QuickEditProps = {
 type QuickEditComponent = (props: QuickEditProps) => ReactNode;
 
 type ButtonElement = ReactElement<{
+  'aria-describedby'?: string;
+  'aria-label'?: string;
   className?: string;
   children?: ReactNode;
   disabled?: boolean;
@@ -227,8 +229,15 @@ test('new B flow color swatches are disabled and cannot call the color updater',
     assert.equal(swatches.length, 10, `${name}: all current swatches remain visible`);
     for (const swatch of swatches) {
       assert.equal(swatch.props.disabled, true, `${name}: swatch is display-only`);
+      assert.equal(
+        swatch.props['aria-describedby'],
+        `calendar-derived-fields-${target.id}`,
+        `${name}: disabled swatch explains why it is read-only`,
+      );
+      assert.match(swatch.props['aria-label'] ?? '', /변경 불가/, `${name}: swatch has an accessible label`);
       swatch.props.onClick?.();
     }
+    assert.match(textContent(tree), /소속 캘린더와 연결 정보로 결정/);
     assert.deepEqual(colorUpdates, [], `${name}: display-only swatches never update color`);
   }
 });
@@ -237,7 +246,13 @@ test('new B flow type segments show the derived type but stay disabled', async (
   for (const { name, target } of newBflowCases) {
     const tree = await renderQuickEdit(target, 'edit');
     for (const label of ['커스텀', '에피소드', '파트', '씬']) {
-      assert.equal(findButtonByText(tree, label).props.disabled, true, `${name}: ${label} is display-only`);
+      const button = findButtonByText(tree, label);
+      assert.equal(button.props.disabled, true, `${name}: ${label} is display-only`);
+      assert.equal(
+        button.props['aria-describedby'],
+        `calendar-derived-fields-${target.id}`,
+        `${name}: ${label} explains why it is read-only`,
+      );
     }
     const selectedLabel = target.type === 'scene' ? '씬' : '파트';
     assert.equal(
