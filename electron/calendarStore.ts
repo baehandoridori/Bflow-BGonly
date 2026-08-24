@@ -365,8 +365,12 @@ export async function listTags(): Promise<CalendarTagRow[]> {
 /** 태그 일괄 저장 — 전달 목록이 최종 상태이며 삭제된 태그의 일정 연결은 DB가 NULL 처리한다. */
 export async function saveTags(
   tags: Array<{ id?: string; name: string; color: string; sort_order: number }>,
+  actorId: string,
 ): Promise<CalendarTagRow[]> {
-  const { data, error } = await supabase.rpc('replace_calendar_tags', { p_tags: tags });
+  const { data, error } = await supabase.rpc('replace_calendar_tags_authorized', {
+    p_actor_id: actorId,
+    p_tags: tags,
+  });
   throwIfError(error);
   return (data ?? []) as CalendarTagRow[];
 }

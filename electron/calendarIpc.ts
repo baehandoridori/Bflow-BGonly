@@ -340,7 +340,7 @@ export function registerCalendarIpc(deps: CalendarIpcDeps): void {
     const user = await sessionUser();
     if (user.role !== 'admin') throw new Error('태그는 관리자만 수정할 수 있습니다');
     const safeTags = tags.map(({ id, name, color, sort_order }) => ({ id, name, color, sort_order }));
-    const saved = await store.saveTags(safeTags);
+    const saved = await store.saveTags(safeTags, user.id);
     broadcastDataChange('calendar_tags', 'UPDATE');
     broadcastCalendarChanged('UPDATE');
     return saved;

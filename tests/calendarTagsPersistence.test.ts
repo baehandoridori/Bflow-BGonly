@@ -13,25 +13,41 @@ function between(source: string, start: string, end: string): string {
   return source.slice(from, to);
 }
 
-test('saveTags delegates the final tag list to exactly one replace_calendar_tags RPC', () => {
+test('saveTags delegates the final tag list and session actor to exactly one authorized RPC', () => {
   const store = readFileSync(storePath, 'utf8');
   const saveTags = between(store, 'export async function saveTags', '// ── 알림');
 
-  assert.match(saveTags, /supabase\.rpc\('replace_calendar_tags', \{ p_tags: tags \}\)/);
+  assert.match(
+    saveTags,
+    /supabase\.rpc\('replace_calendar_tags_authorized', \{\s*p_actor_id: actorId,\s*p_tags: tags,?\s*\}\)/,
+  );
   assert.match(saveTags, /throwIfError\(error\)/);
   assert.match(saveTags, /return \(data \?\? \[\]\) as CalendarTagRow\[\]/);
-  assert.equal((saveTags.match(/\.rpc\('replace_calendar_tags'/g) ?? []).length, 1);
+  assert.equal((saveTags.match(/\.rpc\('replace_calendar_tags_authorized'/g) ?? []).length, 1);
+  assert.doesNotMatch(saveTags, /\.rpc\('replace_calendar_tags'/);
   assert.doesNotMatch(saveTags, /readTags\(|\.from\('calendar_tags'\)|\.delete\(|\.update\(|\.insert\(/);
 });
 
-test('replace_calendar_tags validates final input then atomically deletes, temporary-renames, updates, and inserts', () => {
+test('authorized tag replacement locks and revalidates the actor role before atomic final-list writes', () => {
   const sql = readFileSync(migrationPath, 'utf8');
-  const fn = between(sql, 'CREATE OR REPLACE FUNCTION public.replace_calendar_tags', 'COMMENT ON FUNCTION public.replace_calendar_tags');
+  const fn = between(
+    sql,
+    'CREATE OR REPLACE FUNCTION public.replace_calendar_tags_authorized',
+    'COMMENT ON FUNCTION public.replace_calendar_tags_authorized',
+  );
 
+  assert.match(sql, /DROP FUNCTION IF EXISTS public\.replace_calendar_tags\(JSONB\)/);
+  assert.match(fn, /\(\s*p_actor_id TEXT,\s*p_tags JSONB\s*\)/);
   assert.match(fn, /RETURNS TABLE \(id UUID, name TEXT, color TEXT, sort_order INTEGER\)/);
+  assert.match(fn, /SECURITY INVOKER/);
+  assert.match(fn, /SET search_path = public, pg_temp/);
+  assert.match(fn, /p_actor_id IS NULL OR btrim\(p_actor_id\) = ''/);
   assert.match(fn, /p_tags IS NULL OR jsonb_typeof\(p_tags\) <> 'array'/);
   assert.match(fn, /jsonb_typeof\(tag\.value\) <> 'object'/);
   assert.match(fn, /requires name, color, and sort_order/);
+  assert.match(fn, /SELECT actor\.role INTO v_actor_role[\s\S]*FROM users AS actor[\s\S]*WHERE actor\.id = p_actor_id[\s\S]*FOR SHARE/);
+  assert.match(fn, /Session actor % not found[\s\S]*ERRCODE = '42501'/);
+  assert.match(fn, /v_actor_role IS DISTINCT FROM 'admin'[\s\S]*Calendar tag management permission denied[\s\S]*ERRCODE = '42501'/);
   assert.match(fn, /Duplicate calendar tag id/);
   assert.match(fn, /Duplicate calendar tag name/);
   assert.match(fn, /Unknown calendar tag id/);
@@ -41,13 +57,17 @@ test('replace_calendar_tags validates final input then atomically deletes, tempo
 
   const fieldValidationEnd = fn.indexOf('Each calendar tag requires name, color, and sort_order');
   const lockIndex = fn.indexOf('LOCK TABLE calendar_tags IN SHARE ROW EXCLUSIVE MODE;');
+  const actorLockIndex = fn.indexOf('SELECT actor.role INTO v_actor_role');
+  const adminCheckIndex = fn.indexOf("v_actor_role IS DISTINCT FROM 'admin'");
   const dataValidationIndex = fn.indexOf('Duplicate calendar tag id');
   const deleteIndex = fn.indexOf('DELETE FROM calendar_tags');
   const temporaryRenameIndex = fn.indexOf("format('__calendar_tags_tmp_");
   const updateIndex = fn.indexOf('SET name = submitted.name');
   const insertIndex = fn.indexOf('INSERT INTO calendar_tags (name, color, sort_order)');
   assert.ok(fieldValidationEnd < lockIndex, 'lock follows structural and field validation');
-  assert.ok(lockIndex < dataValidationIndex, 'lock precedes ID/name/existence validation and writes');
+  assert.ok(lockIndex < actorLockIndex, 'tag table lock precedes the actor row lock consistently');
+  assert.ok(actorLockIndex < adminCheckIndex, 'the locked actor role is checked before proceeding');
+  assert.ok(adminCheckIndex < dataValidationIndex, 'authorization precedes data validation and every write');
   assert.ok(deleteIndex >= 0 && deleteIndex < temporaryRenameIndex, 'delete must follow validation and precede name staging');
   assert.ok(temporaryRenameIndex < updateIndex, 'existing names must be staged before final updates for swaps');
   assert.ok(updateIndex < insertIndex, 'existing rows update before new rows insert');

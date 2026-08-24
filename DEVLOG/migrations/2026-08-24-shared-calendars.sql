@@ -777,12 +777,25 @@ COMMENT ON FUNCTION public.delete_calendar_event_authorized(TEXT, UUID, UUID) IS
 
 -- ── 2-2) 태그 원자적 전체 교체 RPC ────────────────────────────
 -- 함수 안의 예외는 호출 전체를 rollback한다. 따라서 태그 삭제의 FK SET NULL도 후속 실패 시 복구된다.
-CREATE OR REPLACE FUNCTION public.replace_calendar_tags(p_tags JSONB)
+-- 예전 actor 없는 함수가 적용된 개발 DB에서도 권한 우회 경로를 남기지 않는다.
+DROP FUNCTION IF EXISTS public.replace_calendar_tags(JSONB);
+
+CREATE OR REPLACE FUNCTION public.replace_calendar_tags_authorized(
+  p_actor_id TEXT,
+  p_tags JSONB
+)
 RETURNS TABLE (id UUID, name TEXT, color TEXT, sort_order INTEGER)
 LANGUAGE plpgsql
-SET search_path = public
+SECURITY INVOKER
+SET search_path = public, pg_temp
 AS $$
+DECLARE
+  v_actor_role TEXT;
 BEGIN
+  IF p_actor_id IS NULL OR btrim(p_actor_id) = '' THEN
+    RAISE EXCEPTION 'A session actor is required' USING ERRCODE = '42501';
+  END IF;
+
   IF p_tags IS NULL OR jsonb_typeof(p_tags) <> 'array' THEN
     RAISE EXCEPTION 'p_tags must be a JSON array' USING ERRCODE = '22023';
   END IF;
@@ -814,6 +827,19 @@ BEGIN
 
   -- 구조·필드 검증 뒤, 데이터 검증과 교체 전체를 동시 saveTags 호출과 상호 배제한다.
   LOCK TABLE calendar_tags IN SHARE ROW EXCLUSIVE MODE;
+
+  -- table→actor 순서는 다른 캘린더 관리 RPC의 table→row 규약과 같다.
+  -- FOR SHARE는 role 강등/사용자 삭제와 충돌하되 FK의 KEY SHARE와는 호환된다.
+  SELECT actor.role INTO v_actor_role
+  FROM users AS actor
+  WHERE actor.id = p_actor_id
+  FOR SHARE;
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'Session actor % not found', p_actor_id USING ERRCODE = '42501';
+  END IF;
+  IF v_actor_role IS DISTINCT FROM 'admin' THEN
+    RAISE EXCEPTION 'Calendar tag management permission denied' USING ERRCODE = '42501';
+  END IF;
 
   IF EXISTS (
     SELECT submitted.id
@@ -876,8 +902,8 @@ BEGIN
 END;
 $$;
 
-COMMENT ON FUNCTION public.replace_calendar_tags(JSONB) IS
-  '태그 최종 목록을 단일 트랜잭션으로 교체. 검증 실패나 후속 실패 시 삭제·수정·FK SET NULL을 함께 rollback한다.';
+COMMENT ON FUNCTION public.replace_calendar_tags_authorized(TEXT, JSONB) IS
+  '세션 actor의 admin 역할을 잠가 재검증한 뒤 태그 최종 목록을 단일 트랜잭션으로 교체. 검증 실패나 후속 실패 시 삭제·수정·FK SET NULL을 함께 rollback한다.';
 
 -- ── 3) RLS allow_all (기존 관례: supabase-init.sql:255-259 의 pg_policies 존재 검사 패턴) ──
 DO $$

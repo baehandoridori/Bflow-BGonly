@@ -497,6 +497,44 @@ test('calendar:create does not broadcast when the atomic create RPC rejects', as
   }
 });
 
+test('calendar:tags:save binds the final list to the session actor and broadcasts only after success', async () => {
+  const saveCalls: unknown[][] = [];
+  const tags = [{ id: 'tag-1', name: '회의', color: '#A29BFE', sort_order: 0 }];
+  const harness = await createIpcHarness({
+    getUserRole: async () => 'admin',
+    saveTags: async (...args) => {
+      saveCalls.push(args);
+      return tags;
+    },
+  }, 'session-admin');
+  try {
+    assert.deepEqual(await harness.invoke('calendar:tags:save', [
+      { ...tags[0], actor_id: 'spoofed-admin', ignored: true },
+    ]), tags);
+    assert.deepEqual(saveCalls, [[tags, 'session-admin']]);
+    assert.deepEqual(harness.broadcasts, [
+      { kind: 'data', args: ['calendar_tags', 'UPDATE'] },
+      { kind: 'calendar', args: ['UPDATE'] },
+    ]);
+
+    harness.broadcasts.length = 0;
+    harness.store.saveTags = async () => { throw new Error('tag actor was demoted'); };
+    const originalError = console.error;
+    try {
+      console.error = () => {};
+      await assert.rejects(
+        harness.invoke('calendar:tags:save', tags),
+        /tag actor was demoted/,
+      );
+    } finally {
+      console.error = originalError;
+    }
+    assert.deepEqual(harness.broadcasts, []);
+  } finally {
+    harness.restore();
+  }
+});
+
 test('ElectronAPI calendar event write inputs expose only fields accepted by IPC', () => {
   const fixturePath = join(process.cwd(), 'tests', `.calendar-ipc-type-contract-${process.pid}.ts`);
   const tscPath = join(process.cwd(), 'node_modules', 'typescript', 'bin', 'tsc');
@@ -1096,6 +1134,30 @@ test('calendar store sends exact authorized RPC arguments and returns typed even
         },
       },
     ]);
+  } finally {
+    if (hadPrior) globalScope[STORE_HARNESS_KEY] = prior;
+    else delete globalScope[STORE_HARNESS_KEY];
+  }
+});
+
+test('calendar store sends the final tag list and actor only to the authorized replacement RPC', async () => {
+  const globalScope = globalThis as Record<string, unknown>;
+  const hadPrior = Object.prototype.hasOwnProperty.call(globalScope, STORE_HARNESS_KEY);
+  const prior = globalScope[STORE_HARNESS_KEY];
+  const tags = [{ id: 'tag-1', name: '회의', color: '#A29BFE', sort_order: 0 }];
+  const harness = calendarStoreRpcHarness(() => ({ data: tags, error: null }));
+  globalScope[STORE_HARNESS_KEY] = harness.supabase;
+  try {
+    const encoded = Buffer.from(await bundledCalendarStoreSource()).toString('base64');
+    const store = await import(`data:text/javascript;base64,${encoded}#calendar-store-${storeNonce++}`) as {
+      saveTags(input: typeof tags, actorId: string): Promise<unknown>;
+    };
+
+    assert.deepEqual(await store.saveTags(tags, 'session-admin'), tags);
+    assert.deepEqual(harness.calls, [{
+      name: 'replace_calendar_tags_authorized',
+      args: { p_actor_id: 'session-admin', p_tags: tags },
+    }]);
   } finally {
     if (hadPrior) globalScope[STORE_HARNESS_KEY] = prior;
     else delete globalScope[STORE_HARNESS_KEY];
