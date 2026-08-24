@@ -87,6 +87,7 @@ function toCalendarEventFromBflowRow(
     endTime: row.end_time ?? undefined,
     canEdit,
     isReadOnly: !canEdit,
+    isPrivate: calendar?.isPersonal === true,
     source: 'bflow',
   };
 }
@@ -471,6 +472,7 @@ function withBflowCalendarPresentation(event: CalendarEvent, calendarId: string)
     calendarId,
     canEdit,
     isReadOnly: !canEdit,
+    isPrivate: calendar?.isPersonal === true,
     source: 'bflow',
   };
 }
@@ -523,6 +525,19 @@ function toBflowEventUpdatePatch(updates: Partial<CalendarEvent>): BflowEventUpd
   if (hasOwnEventUpdate(updates, 'linkedDepartment')) patch.linked_department = updates.linkedDepartment ?? null;
   if (hasOwnEventUpdate(updates, 'linkedTodoId')) patch.linked_todo_id = updates.linkedTodoId ?? null;
   return patch;
+}
+
+function isBflowPersonalEvent(event: CalendarEvent): boolean {
+  if (!event.sourceCalendarId?.startsWith(BFLOW_CAL_PREFIX)) return false;
+  const calendarId = event.calendarId ?? event.sourceCalendarId?.slice(BFLOW_CAL_PREFIX.length);
+  return calendarId !== undefined
+    && useCalendarStore.getState().calendars.some((calendar) => (
+      calendar.id === calendarId && calendar.isPersonal
+    ));
+}
+
+function isPrivateStorageEvent(event: CalendarEvent): boolean {
+  return event.sourceCalendarId === PRIVATE_CAL_ID || isBflowPersonalEvent(event);
 }
 
 /** 로컬 ID(cal_xxx) 또는 GCal ID로 캐시에서 이벤트 찾기 (cold cache 시 sync 시도) */
@@ -706,36 +721,25 @@ export async function updateEvent(eventId: string, updates: Partial<CalendarEven
   if (!existing) return;
   const actualId = existing.id; // GCal ID (캐시에 저장된 실제 ID)
 
-  // ── B flow 공유 캘린더 이벤트 분기 — calendar:* IPC 경유 ──
-  if (existing.sourceCalendarId?.startsWith(BFLOW_CAL_PREFIX)) {
-    const patch = toBflowEventUpdatePatch(updates);
-    if (Object.keys(patch).length === 0) return;
-    const previous = { ...existing };
-    const optimistic = applyBflowEventUpdates(existing, updates);
-    mutateSourceEvents('bflow', (events) => events.map((item) => (
-      item.id === actualId ? optimistic : item
-    )));
-    broadcastCalendarChange({ eventId: actualId, action: 'update' });
-
-    try {
-      await window.electronAPI.calendarEventUpdate(actualId, patch);
-    } catch (err) {
-      mutateSourceEvents('bflow', (events) => events.map((item) => (
-        item.id === actualId ? previous : item
-      )));
-      broadcastCalendarChange({ eventId: actualId, action: 'update' });
-      throw err;
-    }
-    return;
-  }
-
-  // ── 저장소 이전(migration) 감지 —
-  //    공개(GCal) ↔ 비공개(Supabase) 플래그가 바뀌면 단순 필드 패치로는 안 된다.
-  //    "앱에만 저장" 약속을 지키려면 실제로 기존 저장소에서 삭제하고 새 저장소에 생성해야 한다.
-  const currentlyPrivate = existing.sourceCalendarId === PRIVATE_CAL_ID;
+  // ── 저장소 이전(migration) 감지 ─────────────────────
+  // 개인 B flow 캘린더와 구 private_calendar_events 는 모두 "나만 보기"의 실제 저장소다.
+  // 플래그가 바뀌면 단순 필드 패치가 아니라 새 저장소에 먼저 생성한 뒤 원본을 지운다.
+  const currentlyPrivate = isPrivateStorageEvent(existing);
   const nextPrivate = updates.isPrivate !== undefined ? updates.isPrivate : currentlyPrivate;
   if (updates.isPrivate !== undefined && currentlyPrivate !== nextPrivate) {
     const merged: CalendarEvent = { ...existing, ...updates, isPrivate: nextPrivate };
+    const requestedCalendarId = updates.calendarId;
+    const requestedCalendarIsPersonal = requestedCalendarId !== undefined
+      && useCalendarStore.getState().calendars.some((calendar) => (
+        calendar.id === requestedCalendarId && calendar.isPersonal
+      ));
+    // isPrivate=true 은 항상 현재 사용자의 개인 캘린더(없으면 legacy 폴백)로 보낸다.
+    // 반대로 false 는 명시된 일반 B flow 대상만 유지하고, 기존 개인 calendarId 는 제거해
+    // 기존 Google 공개 경로로 향하게 한다.
+    const targetCalendarId = nextPrivate || requestedCalendarIsPersonal
+      ? undefined
+      : requestedCalendarId;
+
     // create-first: 새 저장소에 먼저 생성해 성공을 확정한 뒤 기존 저장소에서 제거한다.
     // delete-first 방식이면 create 가 네트워크/인증 오류로 실패했을 때 원본이 이미
     // 사라져 데이터 손실이 발생하므로, 사용자 관점에서 atomic 하게 느껴지도록 순서를 뒤집음.
@@ -743,7 +747,11 @@ export async function updateEvent(eventId: string, updates: Partial<CalendarEven
     const fresh: CalendarEvent = {
       ...merged,
       id: freshLocalId,
-      sourceCalendarId: undefined, // addEvent 내부에서 경로 결정
+      calendarId: targetCalendarId,
+      sourceCalendarId: undefined, // addEvent 내부에서 새 저장소 경로 결정
+      source: undefined,
+      canEdit: undefined,
+      isReadOnly: undefined,
       createdAt: merged.createdAt || new Date().toISOString(),
     };
     // 1) 새 저장소에 생성 — 실패하면 원본이 그대로 남아있어 데이터 손실 없음.
@@ -763,6 +771,29 @@ export async function updateEvent(eventId: string, updates: Partial<CalendarEven
     }
     if (eventId !== actualId && eventId !== freshLocalId) {
       localToGcalId.set(eventId, freshLocalId);
+    }
+    return;
+  }
+
+  // ── B flow 공유 캘린더 이벤트 분기 — calendar:* IPC 경유 ──
+  if (existing.sourceCalendarId?.startsWith(BFLOW_CAL_PREFIX)) {
+    const patch = toBflowEventUpdatePatch(updates);
+    if (Object.keys(patch).length === 0) return;
+    const previous = { ...existing };
+    const optimistic = applyBflowEventUpdates(existing, updates);
+    mutateSourceEvents('bflow', (events) => events.map((item) => (
+      item.id === actualId ? optimistic : item
+    )));
+    broadcastCalendarChange({ eventId: actualId, action: 'update' });
+
+    try {
+      await window.electronAPI.calendarEventUpdate(actualId, patch);
+    } catch (err) {
+      mutateSourceEvents('bflow', (events) => events.map((item) => (
+        item.id === actualId ? previous : item
+      )));
+      broadcastCalendarChange({ eventId: actualId, action: 'update' });
+      throw err;
     }
     return;
   }
