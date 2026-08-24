@@ -7,7 +7,7 @@ import { getEvents, getEventsForDate, syncAll } from '@/services/calendarService
 import * as gcalService from '@/services/googleCalendarService';
 import { fetchAllVacationEvents } from '@/services/vacationService';
 import type { CalendarEvent, CalendarFilter } from '@/types/calendar';
-import { VACATION_COLOR } from '@/types/vacation';
+import { mapVacationEvents } from '@/utils/vacationEvents';
 import { useVacationPendingStore } from '@/stores/useVacationPendingStore';
 import { Widget } from './Widget';
 import { WEEKDAY_SHORT, fmtDate, parseDate, addDays, getISOWeekNumber } from '@/utils/calendarDate';
@@ -101,20 +101,7 @@ export function CalendarWidget() {
     if (!vacationConnected) { setVacationEvts([]); return; }
     fetchAllVacationEvents()
       .then((raw) => {
-        setVacationEvts(raw.map((v, i) => ({
-          id: `wvac-${v.name}-${v.startDate}-${i}`,
-          title: `${v.name} ${v.type}`,
-          memo: '',
-          color: VACATION_COLOR,
-          type: 'vacation' as const,
-          startDate: v.startDate,
-          endDate: v.endDate,
-          createdBy: v.name,
-          createdAt: new Date().toISOString(),
-          vacationType: v.type,
-          vacationUserName: v.name,
-          isReadOnly: true,
-        })));
+        setVacationEvts(mapVacationEvents(raw, 'wvac'));
       })
       .catch(() => setVacationEvts([]));
   }, [vacationConnected]);

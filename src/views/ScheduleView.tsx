@@ -20,7 +20,7 @@ import type {
 } from '@/types/calendar';
 import { EVENT_COLORS } from '@/types/calendar';
 import { DEPARTMENT_CONFIGS } from '@/types';
-import { VACATION_COLOR } from '@/types/vacation';
+import { mapVacationEvents } from '@/utils/vacationEvents';
 import { MiniCalendar } from '@/components/calendar/MiniCalendar';
 import { EventSidePanel } from '@/components/calendar/EventSidePanel';
 import { EventQuickEdit } from '@/components/calendar/EventQuickEdit';
@@ -1011,21 +1011,7 @@ export function ScheduleView() {
     if (!vacationConnected) { setVacationEvents([]); return; }
     try {
       const raw = await fetchAllVacationEvents();
-      const mapped: CalendarEvent[] = raw.map((v, i) => ({
-        id: `vac-${v.name}-${v.startDate}-${i}`,
-        title: `${v.name} ${v.type}`,
-        memo: '',
-        color: VACATION_COLOR,
-        type: 'vacation' as const,
-        startDate: v.startDate,
-        endDate: v.endDate,
-        createdBy: v.name,
-        createdAt: new Date().toISOString(),
-        vacationType: v.type,
-        vacationUserName: v.name,
-        isReadOnly: true,
-      }));
-      setVacationEvents(mapped);
+      setVacationEvents(mapVacationEvents(raw, 'vac'));
     } catch {
       // 비차단 — 실패해도 캘린더는 정상 동작
       setVacationEvents([]);

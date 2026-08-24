@@ -1,5 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { mapVacationEvents } from '../src/utils/vacationEvents.ts';
+import { VACATION_COLOR } from '../src/types/vacation.ts';
 import {
   WEEKDAYS, WEEKDAY_SHORT, fmtDate, parseDate, addDays, daysBetween,
   hexToRgba, getISOWeekNumber,
@@ -58,4 +60,28 @@ test('getISOWeekNumber — 구 WeekScrollView 알고리즘과 2025~2026 전 구�
   for (let d = new Date(2025, 0, 1, 12); d.getFullYear() <= 2026; d.setDate(d.getDate() + 1)) {
     assert.equal(getISOWeekNumber(d), oldWsvImpl(d), `주차 불일치: ${fmtDate(d)}`);
   }
+});
+
+test('mapVacationEvents — 접두별 ID·읽기전용·필드 매핑', () => {
+  const raw = [
+    { name: '배한솔', type: '연차', startDate: '2026-09-01', endDate: '2026-09-02' },
+    { name: '허혜원', type: '오전반차', startDate: '2026-09-03', endDate: '2026-09-03' },
+  ];
+  for (const prefix of ['vac', 'wvac', 'gvac'] as const) {
+    const mapped = mapVacationEvents(raw, prefix);
+    assert.equal(mapped.length, 2);
+    assert.equal(mapped[0].id, `${prefix}-배한솔-2026-09-01-0`);
+    assert.equal(mapped[1].id, `${prefix}-허혜원-2026-09-03-1`);
+  }
+  const [a] = mapVacationEvents(raw, 'vac');
+  assert.equal(a.title, '배한솔 연차');
+  assert.equal(a.memo, '');
+  assert.equal(a.color, VACATION_COLOR);
+  assert.equal(a.type, 'vacation');
+  assert.equal(a.startDate, '2026-09-01');
+  assert.equal(a.endDate, '2026-09-02');
+  assert.equal(a.createdBy, '배한솔');
+  assert.equal(a.vacationType, '연차');
+  assert.equal(a.vacationUserName, '배한솔');
+  assert.equal(a.isReadOnly, true);
 });

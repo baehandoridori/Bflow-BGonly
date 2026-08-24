@@ -11,6 +11,7 @@ import { fetchAllVacationEvents } from '@/services/vacationService';
 import type { CalendarEvent } from '@/types/calendar';
 import { EVENT_COLORS } from '@/types/calendar';
 import { VACATION_COLOR } from '@/types/vacation';
+import { mapVacationEvents } from '@/utils/vacationEvents';
 import { cn } from '@/utils/cn';
 import { navigateToSceneView } from '@/utils/sceneNavigationAction';
 
@@ -310,20 +311,7 @@ function EventGanttChart() {
     }
     fetchAllVacationEvents()
       .then((raw) => {
-        const mapped: CalendarEvent[] = raw.map((v, i) => ({
-          id: `gvac-${v.name}-${v.startDate}-${i}`,
-          title: `${v.name} ${v.type}`,
-          memo: '',
-          color: VACATION_COLOR,
-          type: 'vacation' as const,
-          startDate: v.startDate,
-          endDate: v.endDate,
-          createdBy: v.name,
-          createdAt: new Date().toISOString(),
-          vacationType: v.type,
-          vacationUserName: v.name,
-          isReadOnly: true,
-        }));
+        const mapped = mapVacationEvents(raw, 'gvac');
         setEvents((prev) => {
           // 기존 vacation 이벤트 제거 후 새로 추가
           const nonVac = prev.filter((e) => e.type !== 'vacation');
