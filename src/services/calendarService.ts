@@ -892,23 +892,26 @@ function confirmGoogleEventUpdate(
     confirmed.endDate = updates.endDate;
   }
 
-  // extendedProperties.private는 필드별 PATCH가 아니라 요청 snapshot 전체가 마지막 값이 된다.
-  // 빠진 키를 undefined로 되돌려 앞선 성공 요청의 메타데이터가 합쳐지거나 부활하지 않게 한다.
+  // Google PATCH는 전송한 extended property 키만 덮어쓰고 빠진 키는 서버에 유지한다.
+  // confirmed 상태도 실제 전송 키만 합쳐 다음 요청의 기준이 서버 상태와 같게 한다.
   if (patch.extendedProperties !== undefined) {
     const meta = patch.extendedProperties;
-    confirmed = {
-      ...confirmed,
-      type: (meta.bflow_type as CalendarEventType | undefined) ?? 'custom',
-      linkedEpisode: meta.bflow_linked_episode !== undefined
+    if (Object.prototype.hasOwnProperty.call(meta, 'bflow_type')) {
+      confirmed.type = (meta.bflow_type as CalendarEventType | undefined) ?? 'custom';
+    }
+    if (Object.prototype.hasOwnProperty.call(meta, 'bflow_linked_episode')) {
+      confirmed.linkedEpisode = meta.bflow_linked_episode !== undefined
         ? Number(meta.bflow_linked_episode)
-        : undefined,
-      linkedPart: meta.bflow_linked_part,
-      linkedSceneId: meta.bflow_linked_scene_id,
-      linkedDepartment: meta.bflow_department as 'bg' | 'acting' | undefined,
-      linkedTodoId: meta.bflow_linked_todo_id,
-      vacationType: meta.bflow_vacation_type,
-      vacationUserName: meta.bflow_vacation_user,
-    };
+        : undefined;
+    }
+    if (Object.prototype.hasOwnProperty.call(meta, 'bflow_linked_part')) confirmed.linkedPart = meta.bflow_linked_part;
+    if (Object.prototype.hasOwnProperty.call(meta, 'bflow_linked_scene_id')) confirmed.linkedSceneId = meta.bflow_linked_scene_id;
+    if (Object.prototype.hasOwnProperty.call(meta, 'bflow_department')) {
+      confirmed.linkedDepartment = meta.bflow_department as 'bg' | 'acting' | undefined;
+    }
+    if (Object.prototype.hasOwnProperty.call(meta, 'bflow_linked_todo_id')) confirmed.linkedTodoId = meta.bflow_linked_todo_id;
+    if (Object.prototype.hasOwnProperty.call(meta, 'bflow_vacation_type')) confirmed.vacationType = meta.bflow_vacation_type;
+    if (Object.prototype.hasOwnProperty.call(meta, 'bflow_vacation_user')) confirmed.vacationUserName = meta.bflow_vacation_user;
   }
 
   confirmedGoogleEvents.set(key, {

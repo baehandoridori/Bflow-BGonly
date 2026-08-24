@@ -1216,6 +1216,8 @@ test('failed full sync and empty incremental never confirm a pending optimistic 
           if (index === 0) throw new Error('optimistic A failed');
         },
       });
+      const originalWarn = console.warn;
+      console.warn = () => {};
 
       try {
         await harness.service.syncAll({ skipBflowLoad: true });
@@ -1241,16 +1243,35 @@ test('failed full sync and empty incremental never confirm a pending optimistic 
         gates[0].resolve();
         await editA;
       } finally {
+        console.warn = originalWarn;
         harness.restore();
       }
     });
   }
 });
 
-test('successful metadata writes confirm the last whole snapshot instead of a field union', async (t) => {
+test('successful metadata writes confirm Google PATCH merges in completion order', async (t) => {
   const scenarios = [
-    { name: 'A then B', order: [0, 1] as const },
-    { name: 'B then A', order: [1, 0] as const },
+    {
+      name: 'A then B',
+      order: [0, 1] as const,
+      afterWrites: { bflow_type: 'custom', bflow_linked_part: '파트 B' },
+      afterC: {
+        bflow_type: 'custom',
+        bflow_linked_part: '파트 B',
+        bflow_linked_todo_id: 'todo-c',
+      },
+    },
+    {
+      name: 'B then A',
+      order: [1, 0] as const,
+      afterWrites: { bflow_type: 'scene', bflow_linked_part: '파트 B' },
+      afterC: {
+        bflow_type: 'scene',
+        bflow_linked_part: '파트 B',
+        bflow_linked_todo_id: 'todo-c',
+      },
+    },
   ];
 
   for (const scenario of scenarios) {
@@ -1261,6 +1282,7 @@ test('successful metadata writes confirm the last whole snapshot instead of a fi
       const started = [deferred<void>(), deferred<void>()];
       const gates = [deferred<void>(), deferred<void>()];
       const patches: Array<Record<string, unknown>> = [];
+      let serverMetadata: Record<string, string> = { bflow_type: 'custom' };
       const harness = await createHarness({
         personalCalendarId: 'primary',
         fullSync: async () => {
@@ -1275,8 +1297,16 @@ test('successful metadata writes confirm the last whole snapshot instead of a fi
             started[index].resolve();
             await gates[index].promise;
           }
+          if (patch.extendedProperties) {
+            serverMetadata = {
+              ...serverMetadata,
+              ...(patch.extendedProperties as Record<string, string>),
+            };
+          }
         },
       });
+      const originalWarn = console.warn;
+      console.warn = () => {};
 
       try {
         await harness.service.syncAll({ skipBflowLoad: true });
@@ -1294,24 +1324,21 @@ test('successful metadata writes confirm the last whole snapshot instead of a fi
           await edits[index];
         }
         await Promise.all(edits);
+        assert.deepEqual(
+          serverMetadata,
+          scenario.afterWrites,
+          'the fake server must model Google PATCH by retaining omitted property keys',
+        );
 
         await harness.service.updateEvent(eventId, { linkedTodoId: 'todo-c' });
-        const expectedLastSnapshot = scenario.order[1] === 1
-          ? {
-              bflow_type: 'custom',
-              bflow_linked_part: '파트 B',
-              bflow_linked_todo_id: 'todo-c',
-            }
-          : {
-              bflow_type: 'scene',
-              bflow_linked_todo_id: 'todo-c',
-            };
         assert.deepEqual(
           patches[2].extendedProperties,
-          expectedLastSnapshot,
-          'C must extend only the metadata snapshot from the last completed server PATCH',
+          scenario.afterC,
+          'C must extend the same metadata merge that Google retained on the server',
         );
+        assert.deepEqual(serverMetadata, scenario.afterC);
       } finally {
+        console.warn = originalWarn;
         harness.restore();
       }
     });
