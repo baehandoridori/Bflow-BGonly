@@ -273,11 +273,15 @@ function rebuildEventCache(): void {
   );
 }
 
-/** 낙관적 CRUD 공용 헬퍼 — 두 소스 배열에 같은 변환을 적용 후 캐시 재조립.
- * id 기준 map/filter 는 해당 id 가 한쪽 배열에만 존재하므로 양쪽 적용이 안전하다. */
-function mutateSourceEvents(fn: (events: CalendarEvent[]) => CalendarEvent[]): void {
-  bflowEvents = fn(bflowEvents);
-  googleEvents = fn(googleEvents);
+type CalendarCacheSource = 'bflow' | 'google';
+
+/** 낙관적 CRUD 공용 헬퍼 — 확인된 단일 source만 변경한 뒤 병합 캐시를 재조립한다. */
+function mutateSourceEvents(
+  source: CalendarCacheSource,
+  fn: (events: CalendarEvent[]) => CalendarEvent[],
+): void {
+  if (source === 'bflow') bflowEvents = fn(bflowEvents);
+  else googleEvents = fn(googleEvents);
   rebuildEventCache();
 }
 
@@ -410,6 +414,40 @@ export async function syncIncremental(): Promise<void> {
 
 const localToGcalId = new Map<string, string>();
 
+function hasOwnEventUpdate<K extends keyof CalendarEvent>(
+  updates: Partial<CalendarEvent>,
+  key: K,
+): boolean {
+  return Object.prototype.hasOwnProperty.call(updates, key);
+}
+
+function inferExistingEventSource(event: CalendarEvent): CalendarCacheSource {
+  if (
+    event.source === 'bflow'
+    || event.sourceCalendarId === PRIVATE_CAL_ID
+    || event.sourceCalendarId?.startsWith(BFLOW_CAL_PREFIX)
+  ) {
+    return 'bflow';
+  }
+  if (event.source === 'google') return 'google';
+
+  // rebuildEventCache는 원본 객체 참조를 유지하므로 legacy source 표식이 없어도
+  // 현재 정본 배열의 실제 소속으로 안전하게 판정할 수 있다.
+  if (bflowEvents.includes(event)) return 'bflow';
+  if (googleEvents.includes(event)) return 'google';
+
+  // 기존 Google 이벤트는 sourceCalendarId에 실제 Google 캘린더 ID를 보존한다.
+  if (event.sourceCalendarId) return 'google';
+  throw new Error('[Calendar] 이벤트 캐시 출처를 확인할 수 없습니다');
+}
+
+function cleanupDeletedEventAliases(requestId: string, actualId: string): void {
+  localToGcalId.delete(requestId);
+  for (const [localId, serverId] of localToGcalId) {
+    if (serverId === actualId) localToGcalId.delete(localId);
+  }
+}
+
 function bflowEventType(event: CalendarEvent): CalendarEventType {
   if (event.linkedSceneId) return 'scene';
   if (event.linkedPart) return 'part';
@@ -438,18 +476,18 @@ function applyBflowEventUpdates(
   let next = { ...existing };
   if (updates.title !== undefined) next.title = updates.title;
   if (updates.memo !== undefined) next.memo = updates.memo;
-  if (updates.tagId !== undefined) next.tagId = updates.tagId ?? undefined;
+  if (hasOwnEventUpdate(updates, 'tagId')) next.tagId = updates.tagId ?? undefined;
   if (updates.allDay !== undefined) next.allDay = updates.allDay;
   if (updates.startDate !== undefined) next.startDate = updates.startDate;
   if (updates.endDate !== undefined) next.endDate = updates.endDate;
-  if (updates.startTime !== undefined) next.startTime = updates.startTime ?? undefined;
-  if (updates.endTime !== undefined) next.endTime = updates.endTime ?? undefined;
-  if (updates.linkedEpisode !== undefined) next.linkedEpisode = updates.linkedEpisode ?? undefined;
-  if (updates.linkedPart !== undefined) next.linkedPart = updates.linkedPart ?? undefined;
-  if (updates.linkedSheetName !== undefined) next.linkedSheetName = updates.linkedSheetName ?? undefined;
-  if (updates.linkedSceneId !== undefined) next.linkedSceneId = updates.linkedSceneId ?? undefined;
-  if (updates.linkedDepartment !== undefined) next.linkedDepartment = updates.linkedDepartment ?? undefined;
-  if (updates.linkedTodoId !== undefined) next.linkedTodoId = updates.linkedTodoId ?? undefined;
+  if (hasOwnEventUpdate(updates, 'startTime')) next.startTime = updates.startTime ?? undefined;
+  if (hasOwnEventUpdate(updates, 'endTime')) next.endTime = updates.endTime ?? undefined;
+  if (hasOwnEventUpdate(updates, 'linkedEpisode')) next.linkedEpisode = updates.linkedEpisode ?? undefined;
+  if (hasOwnEventUpdate(updates, 'linkedPart')) next.linkedPart = updates.linkedPart ?? undefined;
+  if (hasOwnEventUpdate(updates, 'linkedSheetName')) next.linkedSheetName = updates.linkedSheetName ?? undefined;
+  if (hasOwnEventUpdate(updates, 'linkedSceneId')) next.linkedSceneId = updates.linkedSceneId ?? undefined;
+  if (hasOwnEventUpdate(updates, 'linkedDepartment')) next.linkedDepartment = updates.linkedDepartment ?? undefined;
+  if (hasOwnEventUpdate(updates, 'linkedTodoId')) next.linkedTodoId = updates.linkedTodoId ?? undefined;
   if (updates.calendarId !== undefined) {
     next = withBflowCalendarPresentation(next, updates.calendarId);
   }
@@ -466,18 +504,18 @@ function toBflowEventUpdatePatch(updates: Partial<CalendarEvent>): BflowEventUpd
   if (updates.calendarId !== undefined) patch.calendar_id = updates.calendarId;
   if (updates.title !== undefined) patch.title = updates.title;
   if (updates.memo !== undefined) patch.memo = updates.memo;
-  if (updates.tagId !== undefined) patch.tag_id = updates.tagId ?? null;
+  if (hasOwnEventUpdate(updates, 'tagId')) patch.tag_id = updates.tagId ?? null;
   if (updates.allDay !== undefined) patch.all_day = updates.allDay;
   if (updates.startDate !== undefined) patch.start_date = updates.startDate;
   if (updates.endDate !== undefined) patch.end_date = updates.endDate;
-  if (updates.startTime !== undefined) patch.start_time = updates.startTime ?? null;
-  if (updates.endTime !== undefined) patch.end_time = updates.endTime ?? null;
-  if (updates.linkedEpisode !== undefined) patch.linked_episode = updates.linkedEpisode ?? null;
-  if (updates.linkedPart !== undefined) patch.linked_part = updates.linkedPart ?? null;
-  if (updates.linkedSheetName !== undefined) patch.linked_sheet_name = updates.linkedSheetName ?? null;
-  if (updates.linkedSceneId !== undefined) patch.linked_scene_id = updates.linkedSceneId ?? null;
-  if (updates.linkedDepartment !== undefined) patch.linked_department = updates.linkedDepartment ?? null;
-  if (updates.linkedTodoId !== undefined) patch.linked_todo_id = updates.linkedTodoId ?? null;
+  if (hasOwnEventUpdate(updates, 'startTime')) patch.start_time = updates.startTime ?? null;
+  if (hasOwnEventUpdate(updates, 'endTime')) patch.end_time = updates.endTime ?? null;
+  if (hasOwnEventUpdate(updates, 'linkedEpisode')) patch.linked_episode = updates.linkedEpisode ?? null;
+  if (hasOwnEventUpdate(updates, 'linkedPart')) patch.linked_part = updates.linkedPart ?? null;
+  if (hasOwnEventUpdate(updates, 'linkedSheetName')) patch.linked_sheet_name = updates.linkedSheetName ?? null;
+  if (hasOwnEventUpdate(updates, 'linkedSceneId')) patch.linked_scene_id = updates.linkedSceneId ?? null;
+  if (hasOwnEventUpdate(updates, 'linkedDepartment')) patch.linked_department = updates.linkedDepartment ?? null;
+  if (hasOwnEventUpdate(updates, 'linkedTodoId')) patch.linked_todo_id = updates.linkedTodoId ?? null;
   return patch;
 }
 
@@ -543,12 +581,12 @@ async function addBflowEvent(event: CalendarEvent, calendarId: string): Promise<
     if (localId !== inserted.id) {
       localToGcalId.set(localId, inserted.id);
     }
-    mutateSourceEvents((events) => events.map((item) => (
+    mutateSourceEvents('bflow', (events) => events.map((item) => (
       item.id === localId ? { ...item, id: inserted.id } : item
     )));
     broadcastCalendarChange({ eventId: inserted.id, action: 'update' });
   } catch (err) {
-    mutateSourceEvents((events) => events.filter((item) => item.id !== localId));
+    mutateSourceEvents('bflow', (events) => events.filter((item) => item.id !== localId));
     broadcastCalendarChange();
     throw err;
   }
@@ -597,12 +635,12 @@ export async function addEvent(event: CalendarEvent): Promise<void> {
       if (localId !== inserted.id) {
         localToGcalId.set(localId, inserted.id);
       }
-      mutateSourceEvents((events) => events.map((item) => (
+      mutateSourceEvents('bflow', (events) => events.map((item) => (
         item.id === localId ? { ...item, id: inserted.id } : item
       )));
       broadcastCalendarChange({ eventId: inserted.id, action: 'update' });
     } catch (err) {
-      mutateSourceEvents((events) => events.filter((item) => item.id !== localId));
+      mutateSourceEvents('bflow', (events) => events.filter((item) => item.id !== localId));
       broadcastCalendarChange();
       throw err;
     }
@@ -637,13 +675,13 @@ export async function addEvent(event: CalendarEvent): Promise<void> {
     if (localId !== gcalId) {
       localToGcalId.set(localId, gcalId);
     }
-    mutateSourceEvents((events) => events.map((item) => (
+    mutateSourceEvents('google', (events) => events.map((item) => (
       item.id === localId ? { ...item, id: gcalId } : item
     )));
     broadcastCalendarChange({ eventId: gcalId, action: 'update' });
   } catch (err) {
     // 실패: 롤백
-    mutateSourceEvents((events) => events.filter((item) => item.id !== localId));
+    mutateSourceEvents('google', (events) => events.filter((item) => item.id !== localId));
     broadcastCalendarChange();
     throw err;
   }
@@ -660,7 +698,7 @@ export async function updateEvent(eventId: string, updates: Partial<CalendarEven
     if (Object.keys(patch).length === 0) return;
     const previous = { ...existing };
     const optimistic = applyBflowEventUpdates(existing, updates);
-    mutateSourceEvents((events) => events.map((item) => (
+    mutateSourceEvents('bflow', (events) => events.map((item) => (
       item.id === actualId ? optimistic : item
     )));
     broadcastCalendarChange({ eventId: actualId, action: 'update' });
@@ -668,7 +706,7 @@ export async function updateEvent(eventId: string, updates: Partial<CalendarEven
     try {
       await window.electronAPI.calendarEventUpdate(actualId, patch);
     } catch (err) {
-      mutateSourceEvents((events) => events.map((item) => (
+      mutateSourceEvents('bflow', (events) => events.map((item) => (
         item.id === actualId ? previous : item
       )));
       broadcastCalendarChange({ eventId: actualId, action: 'update' });
@@ -718,7 +756,7 @@ export async function updateEvent(eventId: string, updates: Partial<CalendarEven
   // ── 비공개 이벤트 분기 — Supabase update ──
   if (existing.sourceCalendarId === PRIVATE_CAL_ID) {
     const previous = { ...existing };
-    mutateSourceEvents((events) => events.map((item) => (
+    mutateSourceEvents('bflow', (events) => events.map((item) => (
       item.id === actualId ? { ...item, ...updates } : item
     )));
     broadcastCalendarChange({ eventId: actualId, action: 'update' });
@@ -731,15 +769,15 @@ export async function updateEvent(eventId: string, updates: Partial<CalendarEven
       if (updates.type !== undefined) patch.type = updates.type;
       if (updates.startDate !== undefined) patch.start_date = updates.startDate;
       if (updates.endDate !== undefined) patch.end_date = updates.endDate;
-      if (updates.linkedEpisode !== undefined) patch.linked_episode = updates.linkedEpisode ?? null;
-      if (updates.linkedPart !== undefined) patch.linked_part = updates.linkedPart ?? null;
-      if (updates.linkedSheetName !== undefined) patch.linked_sheet_name = updates.linkedSheetName ?? null;
-      if (updates.linkedSceneId !== undefined) patch.linked_scene_id = updates.linkedSceneId ?? null;
-      if (updates.linkedDepartment !== undefined) patch.linked_department = updates.linkedDepartment ?? null;
-      if (updates.linkedTodoId !== undefined) patch.linked_todo_id = updates.linkedTodoId ?? null;
+      if (hasOwnEventUpdate(updates, 'linkedEpisode')) patch.linked_episode = updates.linkedEpisode ?? null;
+      if (hasOwnEventUpdate(updates, 'linkedPart')) patch.linked_part = updates.linkedPart ?? null;
+      if (hasOwnEventUpdate(updates, 'linkedSheetName')) patch.linked_sheet_name = updates.linkedSheetName ?? null;
+      if (hasOwnEventUpdate(updates, 'linkedSceneId')) patch.linked_scene_id = updates.linkedSceneId ?? null;
+      if (hasOwnEventUpdate(updates, 'linkedDepartment')) patch.linked_department = updates.linkedDepartment ?? null;
+      if (hasOwnEventUpdate(updates, 'linkedTodoId')) patch.linked_todo_id = updates.linkedTodoId ?? null;
       await window.electronAPI.supabaseUpdatePrivateEvent(actualId, patch);
     } catch (err) {
-      mutateSourceEvents((events) => events.map((item) => (
+      mutateSourceEvents('bflow', (events) => events.map((item) => (
         item.id === actualId ? previous : item
       )));
       broadcastCalendarChange({ eventId: actualId, action: 'update' });
@@ -751,10 +789,11 @@ export async function updateEvent(eventId: string, updates: Partial<CalendarEven
   // 원본 캘린더 ID 우선 사용 (캘린더 설정 변경 후에도 올바른 캘린더에서 수정)
   const calId = existing.sourceCalendarId || await getTargetCalendar(existing.type);
   if (!calId) return;
+  const existingSource = inferExistingEventSource(existing);
 
   // 낙관적 업데이트: 캐시 먼저 업데이트
   const previous = { ...existing };
-  mutateSourceEvents((events) => events.map((item) => (
+  mutateSourceEvents(existingSource, (events) => events.map((item) => (
     item.id === actualId ? { ...item, ...updates } : item
   )));
   broadcastCalendarChange({ eventId: actualId, action: 'update' });
@@ -775,7 +814,7 @@ export async function updateEvent(eventId: string, updates: Partial<CalendarEven
     });
   } catch (err) {
     // 실패: 롤백
-    mutateSourceEvents((events) => events.map((item) => (
+    mutateSourceEvents(existingSource, (events) => events.map((item) => (
       item.id === actualId ? previous : item
     )));
     broadcastCalendarChange({ eventId: actualId, action: 'update' });
@@ -790,16 +829,15 @@ export async function deleteEvent(eventId: string): Promise<void> {
 
   // ── B flow 공유 캘린더 이벤트 분기 — calendar:* IPC 경유 ──
   if (existing.sourceCalendarId?.startsWith(BFLOW_CAL_PREFIX)) {
-    const previousMapping = localToGcalId.get(eventId);
-    mutateSourceEvents((events) => events.filter((item) => item.id !== actualId));
-    localToGcalId.delete(eventId);
+    mutateSourceEvents('bflow', (events) => events.filter((item) => item.id !== actualId));
     broadcastCalendarChange({ eventId: actualId, action: 'delete' });
     try {
       await window.electronAPI.calendarEventDelete(actualId);
+      cleanupDeletedEventAliases(eventId, actualId);
     } catch (err) {
-      if (!bflowEvents.some((item) => item.id === actualId)) bflowEvents.push(existing);
-      rebuildEventCache();
-      if (previousMapping !== undefined) localToGcalId.set(eventId, previousMapping);
+      mutateSourceEvents('bflow', (events) => (
+        events.some((item) => item.id === actualId) ? events : [...events, existing]
+      ));
       broadcastCalendarChange({ eventId: actualId, action: 'add' });
       throw err;
     }
@@ -809,16 +847,15 @@ export async function deleteEvent(eventId: string): Promise<void> {
   // ── 비공개 이벤트 분기 — Supabase delete ──
   if (existing.sourceCalendarId === PRIVATE_CAL_ID) {
     const previous = existing;
-    const previousMapping = localToGcalId.get(eventId);
-    mutateSourceEvents((events) => events.filter((item) => item.id !== actualId));
-    localToGcalId.delete(eventId);
+    mutateSourceEvents('bflow', (events) => events.filter((item) => item.id !== actualId));
     broadcastCalendarChange({ eventId: actualId, action: 'delete' });
     try {
       await window.electronAPI.supabaseDeletePrivateEvent(actualId);
+      cleanupDeletedEventAliases(eventId, actualId);
     } catch (err) {
-      if (!bflowEvents.some((item) => item.id === actualId)) bflowEvents.push(previous);
-      rebuildEventCache();
-      if (previousMapping !== undefined) localToGcalId.set(eventId, previousMapping);
+      mutateSourceEvents('bflow', (events) => (
+        events.some((item) => item.id === actualId) ? events : [...events, previous]
+      ));
       broadcastCalendarChange({ eventId: actualId, action: 'add' });
       throw err;
     }
@@ -832,8 +869,9 @@ export async function deleteEvent(eventId: string): Promise<void> {
   // 404 등 실패 시 catch에서 롤백 처리.
   const isLocalOnly = !existing.sourceCalendarId;
   if (isLocalOnly) {
-    mutateSourceEvents((events) => events.filter((item) => item.id !== actualId));
-    localToGcalId.delete(eventId);
+    const existingSource = inferExistingEventSource(existing);
+    mutateSourceEvents(existingSource, (events) => events.filter((item) => item.id !== actualId));
+    cleanupDeletedEventAliases(eventId, actualId);
     broadcastCalendarChange({ eventId: actualId, action: 'delete' });
     return;
   }
@@ -841,21 +879,20 @@ export async function deleteEvent(eventId: string): Promise<void> {
   // 원본 캘린더 ID 우선 사용
   const calId = existing.sourceCalendarId || await getTargetCalendar(existing.type);
   if (!calId) return;
+  const existingSource = inferExistingEventSource(existing);
 
   // 낙관적 업데이트: 캐시 먼저 업데이트
-  const previousMapping = localToGcalId.get(eventId);
-  mutateSourceEvents((events) => events.filter((item) => item.id !== actualId));
-  // 매핑도 정리
-  localToGcalId.delete(eventId);
+  mutateSourceEvents(existingSource, (events) => events.filter((item) => item.id !== actualId));
   broadcastCalendarChange({ eventId: actualId, action: 'delete' });
 
   try {
     await gcalService.deleteEvent(calId, actualId);
+    cleanupDeletedEventAliases(eventId, actualId);
   } catch (err) {
     // 실패: 롤백
-    if (!googleEvents.some((item) => item.id === actualId)) googleEvents.push(existing);
-    rebuildEventCache();
-    if (previousMapping !== undefined) localToGcalId.set(eventId, previousMapping);
+    mutateSourceEvents(existingSource, (events) => (
+      events.some((item) => item.id === actualId) ? events : [...events, existing]
+    ));
     broadcastCalendarChange({ eventId: actualId, action: 'add' });
     throw err;
   }
