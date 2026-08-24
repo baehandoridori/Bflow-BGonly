@@ -56,7 +56,7 @@ test('replace_calendar_members rejects a missing calendar before an empty replac
   assert.ok(foreignKeyErrorIndex < deleteIndex, 'missing parent must fail before child rows change');
 });
 
-test('delete_user_cascade clears event authors before locking owned calendars and cleaning members', () => {
+test('delete_user_cascade serializes calendar and event writers before row cleanup', () => {
   const sql = readFileSync(migrationPath, 'utf8');
   const fn = between(
     sql,
@@ -68,15 +68,25 @@ test('delete_user_cascade clears event authors before locking owned calendars an
     fn,
     /PERFORM\s+c\.id\s+FROM\s+calendars\s+c\s+WHERE\s+c\.owner_id\s*=\s*p_user_id\s+ORDER BY\s+c\.id\s+FOR UPDATE;/s,
   );
-  assert.doesNotMatch(fn, /LOCK\s+TABLE/i);
 
+  const calendarTableLockIndex = fn.indexOf('LOCK TABLE calendars IN SHARE ROW EXCLUSIVE MODE;');
+  const eventTableLockIndex = fn.indexOf('LOCK TABLE calendar_events IN SHARE ROW EXCLUSIVE MODE;');
   const parentLockIndex = fn.indexOf('PERFORM c.id');
   const eventCleanupIndex = fn.indexOf('UPDATE calendar_events SET created_by = NULL');
   const personalDeleteIndex = fn.indexOf('DELETE FROM calendars WHERE owner_id = p_user_id AND is_personal');
   const memberDeleteIndex = fn.indexOf('DELETE FROM calendar_members m USING calendars c');
   const ownerUpdateIndex = fn.indexOf('UPDATE calendars SET owner_id = v_admin_id');
 
-  assert.ok(eventCleanupIndex >= 0 && eventCleanupIndex < parentLockIndex);
+  assert.ok(calendarTableLockIndex >= 0, 'calendar writers must be serialized first');
+  assert.ok(
+    calendarTableLockIndex < eventTableLockIndex,
+    'calendar table lock must precede the event table lock',
+  );
+  assert.ok(
+    eventTableLockIndex < eventCleanupIndex,
+    'both table locks must be held before event rows are changed',
+  );
+  assert.ok(eventCleanupIndex < parentLockIndex);
   assert.ok(parentLockIndex < personalDeleteIndex);
   assert.ok(parentLockIndex < memberDeleteIndex);
   assert.ok(parentLockIndex < ownerUpdateIndex);

@@ -358,6 +358,12 @@ BEGIN
   DELETE FROM private_calendar_events WHERE user_id = p_user_id;
 
   -- ── 공유 캘린더 정리 (2026-08-24 추가, 설계서 §4) ──
+  -- 사용자 삭제는 드문 관리자 작업이다. direct calendar DELETE(parent→child)와
+  -- event move/update(child→parent)가 서로 역순으로 행 잠금을 잡지 못하도록,
+  -- 두 쓰기 테이블을 부모→자식 순서로 먼저 직렬화한다.
+  LOCK TABLE calendars IN SHARE ROW EXCLUSIVE MODE;
+  LOCK TABLE calendar_events IN SHARE ROW EXCLUSIVE MODE;
+
   -- 작성자 표시는 nullable — FK(NO ACTION) 위반 방지. 이벤트 행을 부모 캘린더보다 먼저 잠근다.
   UPDATE calendar_events SET created_by = NULL WHERE created_by = p_user_id;
 
