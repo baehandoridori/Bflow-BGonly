@@ -420,7 +420,20 @@ export function hasUsableElectronAPI(api: Partial<ElectronAPI> | undefined): boo
     && typeof api?.readSettings === 'function'
     && typeof api?.writeSettings === 'function'
     && typeof api?.supabaseTestConnection === 'function'
-    && typeof api?.supabaseReadAll === 'function';
+    && typeof api?.supabaseReadAll === 'function'
+    && typeof api?.calendarList === 'function'
+    && typeof api?.calendarCreate === 'function'
+    && typeof api?.calendarUpdate === 'function'
+    && typeof api?.calendarDelete === 'function'
+    && typeof api?.calendarSetMembers === 'function'
+    && typeof api?.calendarEventsList === 'function'
+    && typeof api?.calendarEventCreate === 'function'
+    && typeof api?.calendarEventUpdate === 'function'
+    && typeof api?.calendarEventDelete === 'function'
+    && typeof api?.calendarTagsList === 'function'
+    && typeof api?.calendarTagsSave === 'function'
+    && typeof api?.calendarNotificationsCatchup === 'function'
+    && typeof api?.calendarNotificationsMarkRead === 'function';
 }
 
 function getMockActivityRows(): MockActivityRow[] {
@@ -1129,7 +1142,7 @@ export function installDevElectronAPI(): void {
     }),
     supabaseDeleteImageVersion: async () => {},
     supabaseReadPrivateEvents: async () => [],
-    supabaseAddPrivateEvent: async () => ({ id: 'mock-private' }),
+    supabaseAddPrivateEvent: async () => ({ id: createUuid() }),
     supabaseUpdatePrivateEvent: async () => {},
     supabaseDeletePrivateEvent: async () => {},
     // ─── B flow 공유 캘린더 (프리뷰 in-memory) ───

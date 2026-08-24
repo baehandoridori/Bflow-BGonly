@@ -69,7 +69,52 @@ CREATE TABLE IF NOT EXISTS calendar_notifications (
 CREATE INDEX IF NOT EXISTS idx_calendar_notif_recipient
   ON calendar_notifications(recipient_id, created_at DESC);
 
--- ── 2) RLS allow_all (기존 관례: supabase-init.sql:255-259 의 pg_policies 존재 검사 패턴) ──
+-- ── 2) 캘린더 멤버 원자적 전체 교체 RPC ─────────────────────────
+-- DELETE + INSERT 가 함수 호출 한 트랜잭션에서 실행되어, INSERT 실패 시 기존 멤버도 복원된다.
+CREATE OR REPLACE FUNCTION public.replace_calendar_members(
+  p_calendar_id UUID,
+  p_members JSONB
+)
+RETURNS VOID
+LANGUAGE plpgsql
+SET search_path = public
+AS $$
+BEGIN
+  IF p_members IS NULL OR jsonb_typeof(p_members) <> 'array' THEN
+    RAISE EXCEPTION 'p_members must be a JSON array' USING ERRCODE = '22023';
+  END IF;
+
+  IF EXISTS (
+    SELECT 1
+    FROM jsonb_to_recordset(p_members) AS member(user_id TEXT, can_edit BOOLEAN)
+    WHERE member.user_id IS NULL
+       OR btrim(member.user_id) = ''
+       OR member.can_edit IS NULL
+  ) THEN
+    RAISE EXCEPTION 'Each calendar member requires user_id and can_edit' USING ERRCODE = '22023';
+  END IF;
+
+  IF EXISTS (
+    SELECT member.user_id
+    FROM jsonb_to_recordset(p_members) AS member(user_id TEXT, can_edit BOOLEAN)
+    GROUP BY member.user_id
+    HAVING count(*) > 1
+  ) THEN
+    RAISE EXCEPTION 'Duplicate calendar member user_id' USING ERRCODE = '23505';
+  END IF;
+
+  DELETE FROM calendar_members WHERE calendar_id = p_calendar_id;
+
+  INSERT INTO calendar_members (calendar_id, user_id, can_edit)
+  SELECT p_calendar_id, member.user_id, member.can_edit
+  FROM jsonb_to_recordset(p_members) AS member(user_id TEXT, can_edit BOOLEAN);
+END;
+$$;
+
+COMMENT ON FUNCTION public.replace_calendar_members(UUID, JSONB) IS
+  '캘린더 멤버 전체 교체 atomic RPC. 빈 배열은 전체 삭제, NULL/비배열/필드 누락/중복 user_id 는 변경 전 거부.';
+
+-- ── 3) RLS allow_all (기존 관례: supabase-init.sql:255-259 의 pg_policies 존재 검사 패턴) ──
 DO $$
 DECLARE t TEXT;
 BEGIN
@@ -81,7 +126,7 @@ BEGIN
   END LOOP;
 END $$;
 
--- ── 3) 태그 시드 4행 (설계서 §4, 한솔이 태그 관리에서 수정 가능) ──
+-- ── 4) 태그 시드 4행 (설계서 §4, 한솔이 태그 관리에서 수정 가능) ──
 INSERT INTO calendar_tags (name, color, sort_order) VALUES
   ('업로드', '#E17055', 0),
   ('가편',   '#74B9FF', 1),
@@ -89,8 +134,8 @@ INSERT INTO calendar_tags (name, color, sort_order) VALUES
   ('회의',   '#A29BFE', 3)
 ON CONFLICT (name) DO NOTHING;
 
--- ── 4) 기존 "나만 보기" 데이터 이관 (설계서 §4.1, 재실행 안전) ──
--- 4-1) private_calendar_events 사용자별 개인 캘린더 upsert
+-- ── 5) 기존 "나만 보기" 데이터 이관 (설계서 §4.1, 재실행 안전) ──
+-- 5-1) private_calendar_events 사용자별 개인 캘린더 upsert
 --      (users 에 없는 고아 user_id 는 FK 위반 방지를 위해 제외)
 INSERT INTO calendars (name, color, visibility, owner_id, is_personal)
 SELECT DISTINCT '개인', '#6C5CE7', 'private', p.user_id, true
@@ -98,7 +143,7 @@ FROM private_calendar_events p
 JOIN users u ON u.id = p.user_id
 ON CONFLICT (owner_id) WHERE is_personal DO NOTHING;
 
--- 4-2) 이벤트 복사 (id·created_at 유지, all_day=true, color 는 의도적으로 버림 — 설계서 §4.1)
+-- 5-2) 이벤트 복사 (id·created_at 유지, all_day=true, color 는 의도적으로 버림 — 설계서 §4.1)
 --      구 created_by 는 이름 문자열이라 FK(users.id) 불만족 → 소유자 user_id 로 대체.
 --      구 start_date 는 'YYYY-MM-DD 또는 ISO datetime' — 앞 10자만 잘라 DATE 캐스팅.
 INSERT INTO calendar_events (id, calendar_id, title, memo, all_day, start_date, end_date,
@@ -114,10 +159,10 @@ WHERE substring(p.start_date, 1, 10) ~ '^\d{4}-\d{2}-\d{2}$'
   AND substring(p.end_date, 1, 10) ~ '^\d{4}-\d{2}-\d{2}$'
 ON CONFLICT (id) DO NOTHING;
 
--- 4-3) private_calendar_events 테이블은 이번엔 남겨둠(롤백 + 구버전 앱 호환 — 설계서 §12).
+-- 5-3) private_calendar_events 테이블은 이번엔 남겨둠(롤백 + 구버전 앱 호환 — 설계서 §12).
 --      다음 라운드에서 공존 창 델타 재이관 후 DROP.
 
--- ── 5) Realtime publication 4개 (재실행 시 duplicate_object 흡수) ──
+-- ── 6) Realtime publication 4개 (재실행 시 duplicate_object 흡수) ──
 DO $$
 DECLARE t TEXT;
 BEGIN
@@ -129,7 +174,7 @@ BEGIN
   END LOOP;
 END $$;
 
--- ── 6) delete_user_cascade 갱신 (2026-06-29 판 전문 복사 + 캘린더 정리 추가) ──
+-- ── 7) delete_user_cascade 갱신 (2026-06-29 판 전문 복사 + 캘린더 정리 추가) ──
 -- 베이스: DEVLOG/migrations/2026-06-29-character-board-asset-workflow.sql:33-84
 -- (더 최신 재정의가 있으면 그 판을 베이스로 할 것 — Step 1 에서 확인)
 CREATE OR REPLACE FUNCTION public.delete_user_cascade(p_user_id TEXT)

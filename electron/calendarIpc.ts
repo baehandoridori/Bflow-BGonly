@@ -55,10 +55,16 @@ export function registerCalendarIpc(deps: CalendarIpcDeps): void {
     return { id, role: await store.getUserRole(id) };
   };
 
-  /** 캘린더 + 멤버 로드, 요청자가 볼 수 없으면 throw. */
-  const loadCalendarForUserOrThrow = async (calendarId: string, userId: string) => {
+  /** 관리 권한 검사용 원본 로드 — admin 은 비공개 캘린더도 관리할 수 있다. */
+  const loadCalendarOrThrow = async (calendarId: string) => {
     const { calendar, members } = await store.getCalendarWithMembers(calendarId);
     if (!calendar) throw new Error('캘린더를 찾을 수 없습니다');
+    return { calendar, members };
+  };
+
+  /** 캘린더 + 멤버 로드, 요청자가 볼 수 없으면 throw. */
+  const loadCalendarForUserOrThrow = async (calendarId: string, userId: string) => {
+    const { calendar, members } = await loadCalendarOrThrow(calendarId);
     if (!canViewCalendar(calendar, members.map((member) => member.user_id), userId)) {
       throw new Error('이 캘린더에 대한 권한이 없습니다');
     }
@@ -106,7 +112,17 @@ export function registerCalendarIpc(deps: CalendarIpcDeps): void {
       const safeMembers = input.members
         .filter((member) => member.user_id !== user.id)
         .map(({ user_id, can_edit }) => ({ user_id, can_edit }));
-      await store.replaceMembers(created.id, safeMembers);
+      try {
+        await store.replaceMembers(created.id, safeMembers);
+      } catch (memberError) {
+        try {
+          await store.deleteCalendar(created.id);
+        } catch (cleanupError) {
+          const cleanupMessage = cleanupError instanceof Error ? cleanupError.message : String(cleanupError);
+          console.error(`[Calendar IPC] 멤버 설정 실패 후 캘린더 ${created.id} 보상 삭제 실패:`, cleanupMessage);
+        }
+        throw memberError;
+      }
     }
     broadcastDataChange('calendars', 'INSERT');
     broadcastCalendarChanged('INSERT');
@@ -118,7 +134,7 @@ export function registerCalendarIpc(deps: CalendarIpcDeps): void {
     updates: Parameters<typeof store.updateCalendar>[1],
   ) => {
     const user = await sessionUser();
-    const { calendar } = await loadCalendarForUserOrThrow(id, user.id);
+    const { calendar } = await loadCalendarOrThrow(id);
     if (!canManageCalendar(calendar, user)) {
       throw new Error('이 캘린더를 수정할 권한이 없습니다');
     }
@@ -140,7 +156,7 @@ export function registerCalendarIpc(deps: CalendarIpcDeps): void {
 
   ipcMain.handle('calendar:delete', wrap(async (id: string) => {
     const user = await sessionUser();
-    const { calendar } = await loadCalendarForUserOrThrow(id, user.id);
+    const { calendar } = await loadCalendarOrThrow(id);
     if (calendar.is_personal) throw new Error('개인 캘린더는 삭제할 수 없습니다');
     if (!canManageCalendar(calendar, user)) {
       throw new Error('이 캘린더를 삭제할 권한이 없습니다');
@@ -156,7 +172,7 @@ export function registerCalendarIpc(deps: CalendarIpcDeps): void {
     members: Array<{ user_id: string; can_edit: boolean }>,
   ) => {
     const user = await sessionUser();
-    const { calendar } = await loadCalendarForUserOrThrow(calendarId, user.id);
+    const { calendar } = await loadCalendarOrThrow(calendarId);
     if (calendar.is_personal) throw new Error('개인 캘린더에는 멤버를 추가할 수 없습니다');
     if (!canManageCalendar(calendar, user)) {
       throw new Error('이 캘린더의 멤버를 수정할 권한이 없습니다');
@@ -194,7 +210,24 @@ export function registerCalendarIpc(deps: CalendarIpcDeps): void {
       throw new Error('이 캘린더에 일정을 만들 권한이 없습니다');
     }
 
-    const created = await store.createEvent({ ...input, created_by: user.id });
+    const created = await store.createEvent({
+      calendar_id: input.calendar_id,
+      title: input.title,
+      memo: input.memo,
+      tag_id: input.tag_id,
+      all_day: input.all_day,
+      start_date: input.start_date,
+      end_date: input.end_date,
+      start_time: input.start_time,
+      end_time: input.end_time,
+      linked_episode: input.linked_episode,
+      linked_part: input.linked_part,
+      linked_sheet_name: input.linked_sheet_name,
+      linked_scene_id: input.linked_scene_id,
+      linked_department: input.linked_department,
+      linked_todo_id: input.linked_todo_id,
+      created_by: user.id,
+    });
     await emitCalendarEventNotifications({
       actorId: user.id,
       action: 'create',
@@ -220,20 +253,39 @@ export function registerCalendarIpc(deps: CalendarIpcDeps): void {
       throw new Error('이 일정을 수정할 권한이 없습니다');
     }
 
+    let notificationCalendar = calendar;
+    let notificationMembers = members;
     if (updates.calendar_id && updates.calendar_id !== previous.calendar_id) {
       const target = await loadCalendarForUserOrThrow(updates.calendar_id, user.id);
       if (!canEditCalendarEvents(target.calendar, target.members, user.id)) {
         throw new Error('옮기려는 캘린더에 일정을 만들 권한이 없습니다');
       }
+      notificationCalendar = target.calendar;
+      notificationMembers = target.members;
     }
 
-    const { created_by: _ignoredCreatedBy, ...safeUpdates } = updates;
+    const safeUpdates: Parameters<typeof store.updateEvent>[1] = {};
+    if (updates.calendar_id !== undefined) safeUpdates.calendar_id = updates.calendar_id;
+    if (updates.title !== undefined) safeUpdates.title = updates.title;
+    if (updates.memo !== undefined) safeUpdates.memo = updates.memo;
+    if (updates.tag_id !== undefined) safeUpdates.tag_id = updates.tag_id;
+    if (updates.all_day !== undefined) safeUpdates.all_day = updates.all_day;
+    if (updates.start_date !== undefined) safeUpdates.start_date = updates.start_date;
+    if (updates.end_date !== undefined) safeUpdates.end_date = updates.end_date;
+    if (updates.start_time !== undefined) safeUpdates.start_time = updates.start_time;
+    if (updates.end_time !== undefined) safeUpdates.end_time = updates.end_time;
+    if (updates.linked_episode !== undefined) safeUpdates.linked_episode = updates.linked_episode;
+    if (updates.linked_part !== undefined) safeUpdates.linked_part = updates.linked_part;
+    if (updates.linked_sheet_name !== undefined) safeUpdates.linked_sheet_name = updates.linked_sheet_name;
+    if (updates.linked_scene_id !== undefined) safeUpdates.linked_scene_id = updates.linked_scene_id;
+    if (updates.linked_department !== undefined) safeUpdates.linked_department = updates.linked_department;
+    if (updates.linked_todo_id !== undefined) safeUpdates.linked_todo_id = updates.linked_todo_id;
     const updated = await store.updateEvent(id, safeUpdates);
     await emitCalendarEventNotifications({
       actorId: user.id,
       action: 'update',
-      calendar,
-      members,
+      calendar: notificationCalendar,
+      members: notificationMembers,
       event: updated,
       previous,
     });

@@ -185,18 +185,11 @@ export async function replaceMembers(
   calendarId: string,
   members: Array<{ user_id: string; can_edit: boolean }>,
 ): Promise<void> {
-  const { error: deleteError } = await supabase
-    .from('calendar_members')
-    .delete()
-    .eq('calendar_id', calendarId);
-  throwIfError(deleteError);
-
-  if (members.length === 0) return;
-
-  const { error: insertError } = await supabase
-    .from('calendar_members')
-    .insert(members.map((member) => ({ calendar_id: calendarId, ...member })));
-  throwIfError(insertError);
+  const { error } = await supabase.rpc('replace_calendar_members', {
+    p_calendar_id: calendarId,
+    p_members: members,
+  });
+  throwIfError(error);
 }
 
 // ── 일정 ────────────────────────────────────────
