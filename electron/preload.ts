@@ -1,4 +1,5 @@
 import { contextBridge, ipcRenderer, webUtils } from 'electron';
+import type { CalendarApiInputContract } from '../src/shared/calendarApiContract';
 import type { BulkStageUpdate, BulkFieldUpdate, BulkUpdateResult } from './supabase';
 import type { CalendarTodoPatch, PersonalTodoCreateInput, PersonalTodoLabelColorKey, PersonalTodoOrderMutation, PersonalTodoPatch } from './personalTodoService';
 import type { SessionActionResult } from './sessionManager';
@@ -265,19 +266,31 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.invoke('supabase:delete-private-event', id),
   // ─── B flow 공유 캘린더 ───
   calendarList: () => ipcRenderer.invoke('calendar:list'),
-  calendarCreate: (input: unknown) => ipcRenderer.invoke('calendar:create', input),
-  calendarUpdate: (id: string, updates: unknown) => ipcRenderer.invoke('calendar:update', id, updates),
+  calendarCreate: (input: Parameters<CalendarApiInputContract['calendarCreate']>[0]) =>
+    ipcRenderer.invoke('calendar:create', input),
+  calendarUpdate: (
+    id: Parameters<CalendarApiInputContract['calendarUpdate']>[0],
+    updates: Parameters<CalendarApiInputContract['calendarUpdate']>[1],
+  ) => ipcRenderer.invoke('calendar:update', id, updates),
   calendarDelete: (id: string) => ipcRenderer.invoke('calendar:delete', id),
-  calendarSetMembers: (calendarId: string, members: unknown) =>
+  calendarSetMembers: (
+    calendarId: Parameters<CalendarApiInputContract['calendarSetMembers']>[0],
+    members: Parameters<CalendarApiInputContract['calendarSetMembers']>[1],
+  ) =>
     ipcRenderer.invoke('calendar:set-members', calendarId, members),
-  calendarEventsList: (params?: { from?: string; to?: string }) =>
+  calendarEventsList: (params?: Parameters<CalendarApiInputContract['calendarEventsList']>[0]) =>
     ipcRenderer.invoke('calendar:events:list', params),
-  calendarEventCreate: (input: unknown) => ipcRenderer.invoke('calendar:events:create', input),
-  calendarEventUpdate: (id: string, updates: unknown) =>
+  calendarEventCreate: (input: Parameters<CalendarApiInputContract['calendarEventCreate']>[0]) =>
+    ipcRenderer.invoke('calendar:events:create', input),
+  calendarEventUpdate: (
+    id: Parameters<CalendarApiInputContract['calendarEventUpdate']>[0],
+    updates: Parameters<CalendarApiInputContract['calendarEventUpdate']>[1],
+  ) =>
     ipcRenderer.invoke('calendar:events:update', id, updates),
   calendarEventDelete: (id: string) => ipcRenderer.invoke('calendar:events:delete', id),
   calendarTagsList: () => ipcRenderer.invoke('calendar:tags:list'),
-  calendarTagsSave: (tags: unknown) => ipcRenderer.invoke('calendar:tags:save', tags),
+  calendarTagsSave: (tags: Parameters<CalendarApiInputContract['calendarTagsSave']>[0]) =>
+    ipcRenderer.invoke('calendar:tags:save', tags),
   calendarNotificationsCatchup: () => ipcRenderer.invoke('calendar:notifications:catchup'),
   calendarNotificationsMarkRead: (ids: string[]) =>
     ipcRenderer.invoke('calendar:notifications:mark-read', ids),

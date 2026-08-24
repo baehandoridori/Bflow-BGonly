@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { unlinkSync, writeFileSync } from 'node:fs';
+import { readFileSync, unlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import test from 'node:test';
 import { build, type Plugin } from 'esbuild';
@@ -339,6 +339,45 @@ updateInput.updated_at = '2099-01-01T00:00:00.000Z';
     assert.equal(result.status, 0, `${result.stdout}${result.stderr}`);
   } finally {
     unlinkSync(fixturePath);
+  }
+});
+
+test('preload calendar bridge parameters stay linked to the public ElectronAPI contract', () => {
+  const source = readFileSync('electron/preload.ts', 'utf8');
+  const publicTypes = readFileSync('src/types/index.ts', 'utf8');
+  assert.match(
+    source,
+    /import type \{ CalendarApiInputContract \} from '\.\.\/src\/shared\/calendarApiContract';/,
+  );
+  assert.match(
+    publicTypes,
+    /export interface ElectronAPI extends CalendarApiInputContract/,
+  );
+  const methodParameterIndexes: Record<string, number[]> = {
+    calendarCreate: [0],
+    calendarUpdate: [0, 1],
+    calendarSetMembers: [0, 1],
+    calendarEventsList: [0],
+    calendarEventCreate: [0],
+    calendarEventUpdate: [0, 1],
+    calendarTagsSave: [0],
+  };
+  for (const [method, parameterIndexes] of Object.entries(methodParameterIndexes)) {
+    for (const parameterIndex of parameterIndexes) {
+      const contractParameter = new RegExp(
+        `${method}:[\\s\\S]{0,320}Parameters<CalendarApiInputContract\\['${method}'\\]>\\[${parameterIndex}\\]`,
+      );
+      assert.match(
+        source,
+        contractParameter,
+        `${method} preload parameter ${parameterIndex} must derive from the shared calendar contract`,
+      );
+      assert.match(
+        publicTypes,
+        contractParameter,
+        `${method} ElectronAPI parameter ${parameterIndex} must derive from the shared calendar contract`,
+      );
+    }
   }
 });
 

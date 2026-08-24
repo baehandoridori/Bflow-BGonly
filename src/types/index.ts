@@ -5,6 +5,7 @@ import type {
   ArcadeSnapshot,
   ArcadeWalletPush,
 } from '../features/playground/arcade/types';
+import type { CalendarApiInputContract } from '../shared/calendarApiContract';
 
 // ─── 부서 (Department) ──────────────────────
 
@@ -1033,7 +1034,7 @@ export interface UpdateInfo {
 
 // ─── Electron API (preload에서 노출) ─────────
 
-export interface ElectronAPI {
+export interface ElectronAPI extends CalendarApiInputContract {
   getDataPath: () => Promise<string>;
   shellShowItem?: (filePath: string) => Promise<{ ok: boolean; error?: string }>;
   shellOpenPath?: (targetPath: string) => Promise<{ ok: boolean; error?: string }>;
@@ -1416,12 +1417,9 @@ export interface ElectronAPI {
     can_edit: boolean;
     can_manage: boolean;
   }>>;
-  calendarCreate: (input: {
-    name: string;
-    color: string;
-    visibility: 'private' | 'members' | 'team';
-    members?: Array<{ user_id: string; can_edit: boolean }>;
-  }) => Promise<{
+  calendarCreate: (
+    input: Parameters<CalendarApiInputContract['calendarCreate']>[0],
+  ) => Promise<{
     id: string;
     name: string;
     color: string;
@@ -1432,15 +1430,17 @@ export interface ElectronAPI {
     updated_at: string;
   }>;
   calendarUpdate: (
-    id: string,
-    updates: Partial<{ name: string; color: string; visibility: 'private' | 'members' | 'team' }>,
+    id: Parameters<CalendarApiInputContract['calendarUpdate']>[0],
+    updates: Parameters<CalendarApiInputContract['calendarUpdate']>[1],
   ) => Promise<void>;
   calendarDelete: (id: string) => Promise<void>;
   calendarSetMembers: (
-    calendarId: string,
-    members: Array<{ user_id: string; can_edit: boolean }>,
+    calendarId: Parameters<CalendarApiInputContract['calendarSetMembers']>[0],
+    members: Parameters<CalendarApiInputContract['calendarSetMembers']>[1],
   ) => Promise<void>;
-  calendarEventsList: (params?: { from?: string; to?: string }) => Promise<Array<{
+  calendarEventsList: (
+    params?: Parameters<CalendarApiInputContract['calendarEventsList']>[0]
+  ) => Promise<Array<{
     id: string;
     calendar_id: string;
     title: string;
@@ -1461,23 +1461,9 @@ export interface ElectronAPI {
     created_at: string;
     updated_at: string;
   }>>;
-  calendarEventCreate: (input: {
-    calendar_id: string;
-    title: string;
-    memo: string | null;
-    tag_id: string | null;
-    all_day: boolean;
-    start_date: string;
-    end_date: string;
-    start_time: string | null;
-    end_time: string | null;
-    linked_episode: number | null;
-    linked_part: string | null;
-    linked_sheet_name: string | null;
-    linked_scene_id: string | null;
-    linked_department: string | null;
-    linked_todo_id: string | null;
-  }) => Promise<{
+  calendarEventCreate: (
+    input: Parameters<CalendarApiInputContract['calendarEventCreate']>[0],
+  ) => Promise<{
     id: string;
     calendar_id: string;
     title: string;
@@ -1499,24 +1485,8 @@ export interface ElectronAPI {
     updated_at: string;
   }>;
   calendarEventUpdate: (
-    id: string,
-    updates: Partial<{
-      calendar_id: string;
-      title: string;
-      memo: string | null;
-      tag_id: string | null;
-      all_day: boolean;
-      start_date: string;
-      end_date: string;
-      start_time: string | null;
-      end_time: string | null;
-      linked_episode: number | null;
-      linked_part: string | null;
-      linked_sheet_name: string | null;
-      linked_scene_id: string | null;
-      linked_department: string | null;
-      linked_todo_id: string | null;
-    }>,
+    id: Parameters<CalendarApiInputContract['calendarEventUpdate']>[0],
+    updates: Parameters<CalendarApiInputContract['calendarEventUpdate']>[1],
   ) => Promise<{
     id: string;
     calendar_id: string;
@@ -1546,7 +1516,7 @@ export interface ElectronAPI {
     sort_order: number;
   }>>;
   calendarTagsSave: (
-    tags: Array<{ id?: string; name: string; color: string; sort_order: number }>,
+    tags: Parameters<CalendarApiInputContract['calendarTagsSave']>[0],
   ) => Promise<Array<{ id: string; name: string; color: string; sort_order: number }>>;
   calendarNotificationsCatchup: () => Promise<Array<{
     id: string;
