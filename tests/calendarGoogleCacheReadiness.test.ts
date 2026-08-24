@@ -20,12 +20,16 @@ type ServiceModule = {
   getEvents(): Promise<Array<{
     id: string;
     title: string;
+    color: string;
     createdBy: string;
     type: string;
     startDate: string;
     endDate: string;
     linkedPart?: string;
     sourceCalendarId?: string;
+    isPrivate?: boolean;
+    canEdit?: boolean;
+    isReadOnly?: boolean;
   }>>;
   deleteEvent(eventId: string): Promise<void>;
   saveTeamCalendarId(calendarId: string | null): Promise<void>;
@@ -1387,6 +1391,97 @@ test('switching users clears B flow cache and metadata before the new user load 
   }
 });
 
+test('a clean-session metadata failure defers event mapping until a later metadata retry succeeds', async () => {
+  let calendarListCalls = 0;
+  let eventListCalls = 0;
+  const harness = await createHarness({
+    currentUserId: 'user-a',
+    calendarList: async () => {
+      calendarListCalls += 1;
+      if (calendarListCalls === 1) throw new Error('calendar metadata unavailable');
+      return [personalCalendar('user-a')];
+    },
+    fullSync: async () => [],
+    bflowEventsList: async () => {
+      eventListCalls += 1;
+      return [bflowEvent('personal-user-a', 'A 개인 일정')];
+    },
+  });
+  const originalWarn = console.warn;
+  console.warn = () => {};
+  try {
+    await harness.service.loadBflowEvents();
+
+    assert.equal(eventListCalls, 0, 'rows must not be fetched or mapped without calendar metadata');
+    assert.deepEqual(await harness.service.getEvents(), []);
+    assert.deepEqual(harness.broadcasts, []);
+
+    await harness.service.loadBflowEvents();
+
+    assert.equal(eventListCalls, 1);
+    const [event] = await harness.service.getEvents();
+    assert.deepEqual({
+      id: event?.id,
+      color: event?.color,
+      sourceCalendarId: event?.sourceCalendarId,
+      isPrivate: event?.isPrivate,
+      canEdit: event?.canEdit,
+      isReadOnly: event?.isReadOnly,
+    }, {
+      id: 'personal-user-a',
+      color: '#6C5CE7',
+      sourceCalendarId: 'bflow:calendar-1',
+      isPrivate: true,
+      canEdit: true,
+      isReadOnly: false,
+    });
+    assert.equal(harness.broadcasts.length, 1);
+  } finally {
+    console.warn = originalWarn;
+    harness.restore();
+  }
+});
+
+test('an older failed metadata request does not duplicate the newer successful event load', async () => {
+  const olderMetadata = deferred<BflowCalendarFixture[]>();
+  const olderMetadataStarted = deferred<void>();
+  let calendarListCalls = 0;
+  let eventListCalls = 0;
+  const harness = await createHarness({
+    currentUserId: 'user-a',
+    calendarList: async () => {
+      calendarListCalls += 1;
+      if (calendarListCalls === 1) {
+        olderMetadataStarted.resolve();
+        return olderMetadata.promise;
+      }
+      return [personalCalendar('user-a')];
+    },
+    fullSync: async () => [],
+    bflowEventsList: async () => {
+      eventListCalls += 1;
+      return [bflowEvent('latest-personal', '최신 개인 일정')];
+    },
+  });
+  const originalWarn = console.warn;
+  console.warn = () => {};
+  try {
+    const olderLoad = harness.service.loadBflowEvents();
+    await olderMetadataStarted.promise;
+    await harness.service.loadBflowEvents();
+
+    olderMetadata.reject(new Error('older metadata failed'));
+    await olderLoad;
+
+    assert.equal(eventListCalls, 1, 'only the latest metadata-ready request may fetch event rows');
+    assert.deepEqual((await harness.service.getEvents()).map(({ id }) => id), ['latest-personal']);
+    assert.equal(harness.broadcasts.length, 1);
+  } finally {
+    console.warn = originalWarn;
+    harness.restore();
+  }
+});
+
 test('a stale user A load cannot commit or broadcast after auth switches to user B', async () => {
   const staleRows = deferred<BflowEventFixture[]>();
   const staleEventsStarted = deferred<void>();
@@ -1598,7 +1693,7 @@ test('stale B flow and legacy add successes cannot leave cache, broadcast, or ID
   }
 });
 
-test('privacy migration stops after replacement creation if the authenticated B flow session changed', async () => {
+test('privacy migration compensates only the committed replacement when the authenticated session changes', async () => {
   const createStarted = deferred<void>();
   const createGate = deferred<void>();
   const harness = await createHarness({
@@ -1629,7 +1724,75 @@ test('privacy migration stops after replacement creation if the authenticated B 
     await migration;
 
     assert.deepEqual(harness.deletedGoogleEventIds, [], 'old Google source must not be deleted for user B');
-    assert.deepEqual(harness.deletedBflowEventIds, [], 'stale replacement must not be compensated in user B');
+    assert.deepEqual(
+      harness.deletedBflowEventIds,
+      ['replacement-user-a'],
+      'only the exact server ID committed by the old create may be compensated',
+    );
+    assert.equal(harness.broadcasts.length, broadcastsAfterSwitch);
+
+    assert.equal(
+      (await harness.service.getEvents()).some(({ id }) => id === 'replacement-user-a'),
+      false,
+      'the old-session replacement must not enter user B cache',
+    );
+    await harness.service.deleteEvent('replacement-user-a');
+    assert.deepEqual(
+      harness.deletedBflowEventIds,
+      ['replacement-user-a'],
+      'the stale request ID must not leave an alias that triggers another delete in user B',
+    );
+  } finally {
+    harness.restore();
+  }
+});
+
+test('stale-session replacement compensation failure retains the session and delete causes', async () => {
+  const createStarted = deferred<void>();
+  const createGate = deferred<void>();
+  const replacementDeleteError = new Error('replacement delete failed in the new session');
+  const harness = await createHarness({
+    currentUserId: 'user-a',
+    personalCalendarId: 'primary',
+    calendarList: async () => [personalCalendar('user-a')],
+    bflowEventsList: async () => [],
+    fullSync: async () => [googleEvent('google-user-a', 'A 공개 일정')],
+    createBflowEvent: async () => {
+      createStarted.resolve();
+      await createGate.promise;
+      return bflowEvent('replacement-user-a', 'A 비공개 일정');
+    },
+    deleteBflowEvent: async (eventId) => {
+      assert.equal(eventId, 'replacement-user-a');
+      throw replacementDeleteError;
+    },
+  });
+
+  try {
+    await harness.service.loadBflowEvents();
+    await harness.service.syncAll({ skipBflowLoad: true });
+    const migration = harness.service.updateEvent('google-user-a', { isPrivate: true }).then(
+      () => null,
+      (error: unknown) => error,
+    );
+    await createStarted.promise;
+
+    harness.service.__testUseAuthStore.setState({ currentUser: authUser('user-b') });
+    const broadcastsAfterSwitch = harness.broadcasts.length;
+    createGate.resolve();
+    const thrown = await migration;
+
+    assert.ok(thrown instanceof Error);
+    assert.equal(thrown.name, 'PrivacyMigrationCompensationError');
+    assert.match(thrown.message, /google-user-a/);
+    assert.match(thrown.message, /replacement-user-a/);
+    assert.match(
+      String((thrown as Error & { errors: readonly unknown[] }).errors[0]),
+      /session changed/,
+    );
+    assert.equal((thrown as Error & { errors: readonly unknown[] }).errors[1], replacementDeleteError);
+    assert.deepEqual(harness.deletedGoogleEventIds, [], 'the old Google source remains untouched');
+    assert.deepEqual(harness.deletedBflowEventIds, ['replacement-user-a']);
     assert.equal(harness.broadcasts.length, broadcastsAfterSwitch);
   } finally {
     harness.restore();
