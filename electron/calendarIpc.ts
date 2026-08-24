@@ -38,7 +38,13 @@ type CalendarEventCreateInput = Parameters<typeof store.createEvent>[0];
 type InvokeEvent = { sender?: { id?: number } };
 
 type PrivacyReplacementTarget =
-  | { storage: 'bflow'; actualId: string; calendarId: string; actorId: string }
+  | {
+      storage: 'bflow';
+      actualId: string;
+      calendarId: string;
+      actorId: string;
+      createdAt: string;
+    }
   | { storage: 'legacy-private'; actualId: string; actorId: string }
   | { storage: 'google'; actualId: string; calendarId: string; actorId: string };
 
@@ -442,6 +448,7 @@ export function registerCalendarIpc(deps: CalendarIpcDeps): void {
         actualId: created.id,
         calendarId: created.calendar_id,
         actorId,
+        createdAt: created.created_at,
       };
       broadcastDataChange('calendar_events', 'INSERT');
       broadcastCalendarChanged('INSERT');
@@ -485,7 +492,11 @@ export function registerCalendarIpc(deps: CalendarIpcDeps): void {
     if (disposition === 'keep') return;
 
     if (target.storage === 'bflow') {
-      await store.deleteEvent(target.actualId, target.calendarId, target.actorId);
+      await store.deletePrivacyReplacementEvent(
+        target.actualId,
+        target.calendarId,
+        target.createdAt,
+      );
       broadcastDataChange('calendar_events', 'DELETE');
       broadcastCalendarChanged('DELETE');
     } else if (target.storage === 'legacy-private') {

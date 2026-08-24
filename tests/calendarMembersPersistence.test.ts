@@ -105,6 +105,50 @@ test('replace_calendar_members_authorized rejects a missing calendar before an e
   assert.ok(foreignKeyErrorIndex < deleteIndex, 'missing parent must fail before child rows change');
 });
 
+test('calendar visibility update to private clears member access in the same transaction', () => {
+  const sql = readFileSync(migrationPath, 'utf8');
+  const fn = between(
+    sql,
+    'CREATE OR REPLACE FUNCTION public.update_calendar_authorized',
+    'COMMENT ON FUNCTION public.update_calendar_authorized',
+  );
+
+  const calendarTableLock = fn.indexOf('LOCK TABLE calendars IN ROW EXCLUSIVE MODE;');
+  const memberTableLock = fn.indexOf('LOCK TABLE calendar_members IN ROW EXCLUSIVE MODE;');
+  const calendarRowLock = fn.indexOf('FOR UPDATE;');
+  const calendarUpdate = fn.indexOf('UPDATE calendars AS target');
+  const privateCleanup = fn.indexOf("v_requested_visibility = 'private'", calendarUpdate);
+  const memberDelete = fn.indexOf('DELETE FROM calendar_members', privateCleanup);
+
+  assert.ok(calendarTableLock >= 0 && calendarTableLock < memberTableLock);
+  assert.ok(memberTableLock < calendarRowLock, 'parent-to-child table locks precede the calendar row lock');
+  assert.ok(calendarRowLock < calendarUpdate);
+  assert.ok(calendarUpdate < privateCleanup, 'visibility changes before the conditional member cleanup');
+  assert.ok(privateCleanup < memberDelete, 'private visibility removes every former member row');
+  assert.match(fn, /IF NOT v_calendar\.is_personal[\s\S]*v_requested_visibility\s*=\s*'private'[\s\S]*DELETE FROM calendar_members[\s\S]*calendar_id\s*=\s*p_calendar_id/s);
+});
+
+test('private nonpersonal calendars reject nonempty member replacement but allow empty cleanup', () => {
+  const sql = readFileSync(migrationPath, 'utf8');
+  const fn = between(
+    sql,
+    'CREATE OR REPLACE FUNCTION public.replace_calendar_members_authorized',
+    'COMMENT ON FUNCTION public.replace_calendar_members_authorized',
+  );
+
+  const permission = fn.indexOf('Calendar member management permission denied');
+  const privateGuard = fn.indexOf("v_calendar.visibility = 'private'", permission);
+  const nonemptyGuard = fn.indexOf('jsonb_array_length(p_members) > 0', privateGuard);
+  const privateError = fn.indexOf('Private calendars cannot have members', nonemptyGuard);
+  const invalidCode = fn.indexOf("ERRCODE = '22023'", privateError);
+  const memberDelete = fn.indexOf('DELETE FROM calendar_members', invalidCode);
+
+  assert.ok(permission >= 0 && permission < privateGuard, 'management permission is checked first');
+  assert.ok(privateGuard < nonemptyGuard);
+  assert.ok(nonemptyGuard < privateError && privateError < invalidCode);
+  assert.ok(invalidCode < memberDelete, 'a rejected nonempty list cannot alter existing membership rows');
+});
+
 function calendarCreateRpc(sql: string): string {
   return between(
     sql,
@@ -202,6 +246,35 @@ test('delete_user_cascade serializes calendar and event writers before row clean
   assert.ok(parentLockIndex < ownerUpdateIndex);
 });
 
+test('delete_user_cascade locks the deterministic successor admin through ownership transfer', () => {
+  const sql = readFileSync(migrationPath, 'utf8');
+  const fn = between(
+    sql,
+    'CREATE OR REPLACE FUNCTION public.delete_user_cascade',
+    'COMMENT ON FUNCTION public.delete_user_cascade',
+  );
+
+  const successorSelection = fn.indexOf('SELECT id INTO v_admin_id FROM users');
+  const successorOrder = fn.indexOf(
+    "ORDER BY (name = '배한솔') DESC, created_at ASC, id ASC",
+    successorSelection,
+  );
+  const successorLimit = fn.indexOf('LIMIT 1', successorOrder);
+  const successorLock = fn.indexOf('FOR NO KEY UPDATE;', successorLimit);
+  const memberCleanup = fn.indexOf('DELETE FROM calendar_members m USING calendars c', successorLock);
+  const ownershipTransfer = fn.indexOf('UPDATE calendars SET owner_id = v_admin_id', memberCleanup);
+
+  assert.ok(successorSelection >= 0, 'successor selection must exist');
+  assert.ok(successorSelection < successorOrder, 'successor preference remains deterministic');
+  assert.ok(successorOrder < successorLimit);
+  assert.ok(
+    successorLimit < successorLock,
+    'the chosen admin row must be locked against demotion or deletion before LIMIT 1 returns',
+  );
+  assert.ok(successorLock < memberCleanup);
+  assert.ok(memberCleanup < ownershipTransfer, 'the successor stays locked through ownership transfer');
+});
+
 const eventRpcNames = [
   'create_calendar_event_authorized',
   'update_calendar_event_authorized',
@@ -280,6 +353,29 @@ test('calendar event create and delete lock parent rows before writing event row
   const deleteWrite = deleteFn.indexOf('DELETE FROM calendar_events');
   assert.ok(deleteParentLock >= 0 && deleteParentLock < deleteEventLock);
   assert.ok(deleteEventLock < deleteWrite, 'delete must lock its event after its parent and before deletion');
+});
+
+test('privacy replacement delete RPC atomically matches the exact created row incarnation', () => {
+  const sql = readFileSync(migrationPath, 'utf8');
+  const fn = between(
+    sql,
+    'CREATE OR REPLACE FUNCTION public.delete_calendar_privacy_replacement',
+    'COMMENT ON FUNCTION public.delete_calendar_privacy_replacement',
+  );
+
+  assert.match(fn, /RETURNS SETOF public\.calendar_events/);
+  assert.match(fn, /LANGUAGE\s+sql\s+SECURITY INVOKER\s+SET search_path\s*=\s*public,\s*pg_temp/s);
+  assert.match(fn, /DELETE FROM public\.calendar_events AS target_event/);
+  assert.match(fn, /target_event\.id\s*=\s*p_event_id/);
+  assert.match(fn, /target_event\.calendar_id\s*=\s*p_calendar_id/);
+  assert.match(fn, /target_event\.created_at\s*=\s*p_created_at/);
+  assert.match(fn, /RETURNING target_event\.\*/);
+  assert.equal((fn.match(/\bDELETE\s+FROM\b/g) ?? []).length, 1, 'receipt cleanup stays one statement');
+  assert.doesNotMatch(fn, /created_by|p_created_by|calendar_members|\busers\b|can_edit|\brole\b/i);
+  assert.match(
+    sql,
+    /DROP FUNCTION IF EXISTS public\.delete_calendar_privacy_replacement\(UUID, UUID, TEXT, TIMESTAMPTZ\)/,
+  );
 });
 
 test('calendar event update locks ordered source and target parents before the event row and checks stale source', () => {

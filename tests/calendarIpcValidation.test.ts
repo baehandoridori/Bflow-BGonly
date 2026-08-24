@@ -45,6 +45,7 @@ const storeFunctionNames = [
   'createEvent',
   'updateEvent',
   'deleteEvent',
+  'deletePrivacyReplacementEvent',
   'listTags',
   'saveTags',
   'listUnreadNotifications',
@@ -871,14 +872,15 @@ test('calendar event create passes the session actor and strips renderer-control
   }
 });
 
-test('privacy replacement receipt deletes only its exact B flow create across a session switch', async () => {
+test('privacy replacement receipt deletes its exact B flow create after ordinary permission is revoked', async () => {
   let currentUserId = 'user-a';
   const createCalls: unknown[][] = [];
-  const deleteCalls: unknown[][] = [];
+  const receiptDeleteCalls: unknown[][] = [];
   const created = calendarEventRow({
     id: 'replacement-user-a',
     calendar_id: 'personal-user-a',
     created_by: 'user-a',
+    created_at: '2026-08-25T01:02:03.456Z',
   });
   const harness = await createIpcHarness({
     getUserRole: async () => 'user',
@@ -890,7 +892,10 @@ test('privacy replacement receipt deletes only its exact B flow create across a 
       createCalls.push(args);
       return created;
     },
-    deleteEvent: async (...args) => { deleteCalls.push(args); },
+    deleteEvent: async () => {
+      throw new Error('42501 permission revoked after replacement create');
+    },
+    deletePrivacyReplacementEvent: async (...args) => { receiptDeleteCalls.push(args); },
   }, () => currentUserId);
   const request = {
     storage: 'bflow',
@@ -923,7 +928,7 @@ test('privacy replacement receipt deletes only its exact B flow create across a 
         /receipt|보상|발급/i,
         'another renderer cannot spend the receipt',
       );
-      assert.deepEqual(deleteCalls, []);
+      assert.deepEqual(receiptDeleteCalls, []);
 
       await harness.invokeAs(
         501,
@@ -931,10 +936,10 @@ test('privacy replacement receipt deletes only its exact B flow create across a 
         result.receipt,
         'delete',
       );
-      assert.deepEqual(deleteCalls, [[
+      assert.deepEqual(receiptDeleteCalls, [[
         'replacement-user-a',
         'personal-user-a',
-        'user-a',
+        '2026-08-25T01:02:03.456Z',
       ]]);
 
       await assert.rejects(
@@ -947,7 +952,7 @@ test('privacy replacement receipt deletes only its exact B flow create across a 
         /receipt|보상/i,
         'a renderer cannot forge an event id into a receipt',
       );
-      assert.equal(deleteCalls.length, 1);
+      assert.equal(receiptDeleteCalls.length, 1);
     } finally {
       console.error = originalError;
     }
@@ -1247,9 +1252,9 @@ test('privacy replacement receipt is consumed on keep and on a failed compensati
     getUserRole: async () => 'user',
     getCalendarWithMembers: async () => ({ calendar: calendarRow(), members: [] }),
     createEvent: async () => calendarEventRow({ id: `replacement-${deleteCalls}` }),
-    deleteEvent: async () => {
+    deletePrivacyReplacementEvent: async () => {
       deleteCalls += 1;
-      throw new Error('42501 permission revoked after create');
+      throw new Error('privacy replacement row identity no longer matches');
     },
   });
   const event = {
@@ -1279,7 +1284,7 @@ test('privacy replacement receipt is consumed on keep and on a failed compensati
     ) as { receipt: string };
     await assert.rejects(
       harness.invoke('calendar:privacy-migration:settle-replacement', failing.receipt, 'delete'),
-      /42501 permission revoked/,
+      /identity no longer matches/,
     );
     await assert.rejects(
       harness.invoke('calendar:privacy-migration:settle-replacement', failing.receipt, 'delete'),
@@ -1655,6 +1660,7 @@ test('calendar store sends exact authorized RPC arguments and returns typed even
       createEvent(input: Record<string, unknown>, actorId: string): Promise<unknown>;
       updateEvent(id: string, updates: Record<string, unknown>, expectedCalendarId: string, actorId: string): Promise<unknown>;
       deleteEvent(id: string, expectedCalendarId: string, actorId: string): Promise<void>;
+      deletePrivacyReplacementEvent(id: string, calendarId: string, createdAt: string): Promise<void>;
     };
 
     const createInput = {
@@ -1675,6 +1681,14 @@ test('calendar store sends exact authorized RPC arguments and returns typed even
       updated,
     );
     assert.equal(await store.deleteEvent('event-1', 'calendar-1', 'session-user'), undefined);
+    assert.equal(
+      await store.deletePrivacyReplacementEvent(
+        'replacement-1',
+        'calendar-1',
+        '2026-08-25T01:02:03.456Z',
+      ),
+      undefined,
+    );
 
     assert.deepEqual(harness.calls, [
       {
@@ -1696,6 +1710,14 @@ test('calendar store sends exact authorized RPC arguments and returns typed even
           p_actor_id: 'session-user',
           p_event_id: 'event-1',
           p_expected_calendar_id: 'calendar-1',
+        },
+      },
+      {
+        name: 'delete_calendar_privacy_replacement',
+        args: {
+          p_event_id: 'replacement-1',
+          p_calendar_id: 'calendar-1',
+          p_created_at: '2026-08-25T01:02:03.456Z',
         },
       },
     ]);
@@ -1765,11 +1787,17 @@ test('calendar store rejects zero-row create, update, and delete RPC results', a
       createEvent(input: Record<string, unknown>, actorId: string): Promise<unknown>;
       updateEvent(id: string, updates: Record<string, unknown>, expectedCalendarId: string, actorId: string): Promise<unknown>;
       deleteEvent(id: string, expectedCalendarId: string, actorId: string): Promise<void>;
+      deletePrivacyReplacementEvent(id: string, calendarId: string, createdAt: string): Promise<void>;
     };
     for (const write of [
       () => store.createEvent({ calendar_id: 'calendar-1' }, 'session-user'),
       () => store.updateEvent('event-1', { title: '수정됨' }, 'calendar-1', 'session-user'),
       () => store.deleteEvent('event-1', 'calendar-1', 'session-user'),
+      () => store.deletePrivacyReplacementEvent(
+        'replacement-1',
+        'calendar-1',
+        '2026-08-25T01:02:03.456Z',
+      ),
     ]) {
       await assert.rejects(write(), /결과 행|returned.*row/i);
     }

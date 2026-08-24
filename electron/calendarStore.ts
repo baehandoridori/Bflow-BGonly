@@ -341,6 +341,21 @@ export async function deleteEvent(
   requireEventRpcRow(data, '일정 삭제');
 }
 
+/** 비공개 전환 중 생성한 B flow 대체 일정만 정확한 생성 시점 식별자로 보상 삭제한다. */
+export async function deletePrivacyReplacementEvent(
+  id: string,
+  calendarId: string,
+  createdAt: string,
+): Promise<void> {
+  const { data, error } = await supabase.rpc('delete_calendar_privacy_replacement', {
+    p_event_id: id,
+    p_calendar_id: calendarId,
+    p_created_at: createdAt,
+  });
+  throwIfError(error);
+  requireEventRpcRow(data, '비공개 전환 대체 일정 삭제');
+}
+
 // ── 태그 ────────────────────────────────────────
 
 async function readTags(allowMissingTable: boolean): Promise<CalendarTagRow[]> {

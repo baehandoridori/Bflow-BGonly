@@ -122,6 +122,7 @@ BEGIN
   END IF;
 
   LOCK TABLE calendars IN ROW EXCLUSIVE MODE;
+  LOCK TABLE calendar_members IN ROW EXCLUSIVE MODE;
 
   SELECT candidate.* INTO v_calendar
   FROM calendars AS candidate
@@ -131,7 +132,7 @@ BEGIN
     RAISE EXCEPTION 'Calendar % not found', p_calendar_id USING ERRCODE = '23503';
   END IF;
 
-  -- delete_user_cascade도 calendar→user 순으로 잠그므로 같은 순서를 유지한다.
+  -- delete_user_cascade와 관리 writer도 calendar→children→user 순서를 유지한다.
   SELECT actor.role INTO v_actor_role
   FROM users AS actor
   WHERE actor.id = p_actor_id
@@ -165,11 +166,18 @@ BEGIN
       END,
       updated_at = now()
   WHERE target.id = p_calendar_id;
+
+  IF NOT v_calendar.is_personal
+     AND p_updates ? 'visibility'
+     AND v_requested_visibility = 'private' THEN
+    DELETE FROM calendar_members
+    WHERE calendar_id = p_calendar_id;
+  END IF;
 END;
 $$;
 
 COMMENT ON FUNCTION public.update_calendar_authorized(TEXT, UUID, JSONB) IS
-  '캘린더→actor 순으로 잠근 뒤 owner/admin 관리 권한과 team 공개 권한을 재확인하는 캘린더 수정 RPC.';
+  '캘린더→멤버→actor 순으로 잠근 뒤 owner/admin 관리 권한과 team 공개 권한을 재확인하고 private 전환 시 멤버를 함께 제거하는 캘린더 수정 RPC.';
 
 CREATE OR REPLACE FUNCTION public.delete_calendar_authorized(
   p_actor_id TEXT,
@@ -291,6 +299,10 @@ BEGIN
      AND v_actor_role IS DISTINCT FROM 'admin' THEN
     RAISE EXCEPTION 'Calendar member management permission denied' USING ERRCODE = '42501';
   END IF;
+  IF v_calendar.visibility = 'private'
+     AND jsonb_array_length(p_members) > 0 THEN
+    RAISE EXCEPTION 'Private calendars cannot have members' USING ERRCODE = '22023';
+  END IF;
 
   DELETE FROM calendar_members WHERE calendar_id = p_calendar_id;
 
@@ -302,7 +314,7 @@ END;
 $$;
 
 COMMENT ON FUNCTION public.replace_calendar_members_authorized(TEXT, UUID, JSONB) IS
-  '캘린더→actor 순으로 잠근 뒤 개인 캘린더 불변식과 owner/admin 권한을 재확인하는 멤버 전체 교체 atomic RPC.';
+  '캘린더→멤버→actor 순으로 잠근 뒤 개인/private 캘린더 불변식과 owner/admin 권한을 재확인하는 멤버 전체 교체 atomic RPC.';
 
 -- ── 2-1) 캘린더 + 초기 멤버 원자적 생성 RPC ────────────────────
 -- 캘린더와 초기 멤버를 한 RPC 트랜잭션에서 기록한다. 멤버 FK 실패를 포함해
@@ -775,6 +787,33 @@ $$;
 COMMENT ON FUNCTION public.delete_calendar_event_authorized(TEXT, UUID, UUID) IS
   'source 부모와 일정 행을 잠근 뒤 owner/can_edit 권한과 expected source를 재확인하는 일정 삭제 RPC.';
 
+-- 비공개 전환은 대체 일정 생성과 원본 삭제 사이에 세션·권한이 바뀔 수 있다.
+-- main 프로세스의 일회성 receipt가 기억한 생성 결과만 단일 DELETE로 정리한다.
+-- created_by 는 사용자 삭제 cascade가 NULL로 바꿀 수 있으므로 행 세대 식별자에 쓰지 않는다.
+-- id + calendar + 불변 생성시각이 모두 같은 한 행에만 작동하므로 동일 id가 재사용되거나
+-- 행이 교체되면 0행을 반환한다. 이전 개발 DB의 4인자 판은 재실행 때 제거한다.
+DROP FUNCTION IF EXISTS public.delete_calendar_privacy_replacement(UUID, UUID, TEXT, TIMESTAMPTZ);
+
+CREATE OR REPLACE FUNCTION public.delete_calendar_privacy_replacement(
+  p_event_id UUID,
+  p_calendar_id UUID,
+  p_created_at TIMESTAMPTZ
+)
+RETURNS SETOF public.calendar_events
+LANGUAGE sql
+SECURITY INVOKER
+SET search_path = public, pg_temp
+AS $$
+  DELETE FROM public.calendar_events AS target_event
+  WHERE target_event.id = p_event_id
+    AND target_event.calendar_id = p_calendar_id
+    AND target_event.created_at = p_created_at
+  RETURNING target_event.*;
+$$;
+
+COMMENT ON FUNCTION public.delete_calendar_privacy_replacement(UUID, UUID, TIMESTAMPTZ) IS
+  'main 일회성 receipt에 고정된 정확한 대체 일정 행만 권한 재검사 없이 원자적으로 보상 삭제하는 SECURITY INVOKER RPC.';
+
 -- ── 2-2) 태그 원자적 전체 교체 RPC ────────────────────────────
 -- 함수 안의 예외는 호출 전체를 rollback한다. 따라서 태그 삭제의 FK SET NULL도 후속 실패 시 복구된다.
 -- 예전 actor 없는 함수가 적용된 개발 DB에서도 권한 우회 경로를 남기지 않는다.
@@ -1099,10 +1138,12 @@ BEGIN
   -- 개인 캘린더는 삭제 (이벤트는 ON DELETE CASCADE)
   DELETE FROM calendars WHERE owner_id = p_user_id AND is_personal;
   -- 공유 캘린더는 팀 자산 보존 — admin(배한솔 우선) 에게 소유 이전
+  -- calendar→event→user 순서로 잠그며, 동률은 id로 고정하고 역할 변경·삭제를 이전 완료까지 막는다.
   SELECT id INTO v_admin_id FROM users
   WHERE id <> p_user_id AND role = 'admin'
-  ORDER BY (name = '배한솔') DESC, created_at ASC
-  LIMIT 1;
+  ORDER BY (name = '배한솔') DESC, created_at ASC, id ASC
+  LIMIT 1
+  FOR NO KEY UPDATE;
   IF v_admin_id IS NOT NULL THEN
     -- 새 소유자가 이미 멤버 행으로 있으면 제거(소유자는 멤버 목록에 두지 않는 규약)
     DELETE FROM calendar_members m USING calendars c
