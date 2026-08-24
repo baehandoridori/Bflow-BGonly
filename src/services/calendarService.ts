@@ -377,39 +377,55 @@ export async function loadBflowEvents(): Promise<void> {
 export async function syncAll(options: { broadcast?: boolean; skipBflowLoad?: boolean } = {}): Promise<CalendarEvent[]> {
   if (!options.skipBflowLoad) await loadBflowEvents();
   const seen = new Set<string>();
-  const events: CalendarEvent[] = [];
+  const successfulEvents: CalendarEvent[] = [];
 
   // 팀/개인 캘린더 목록 — 설정 조회 실패 시에도 비공개 이벤트는 이미 위에서 로드됨
   const calIds = new Set<string>();
+  let settingsLoaded = false;
   try {
     const settings = await getGCalSettings();
     if (settings.teamCalendarId) calIds.add(settings.teamCalendarId);
     calIds.add(settings.personalCalendarId || 'primary');
+    settingsLoaded = true;
   } catch (err) {
     console.warn('[Calendar] GCal 설정 조회 실패 — 공개 일정 동기화 건너뜀:', err);
   }
 
   // Google Calendar fullSync — 각 calId 를 개별 try/catch 로 감싸 한 캘린더 실패가
   // 다른 캘린더 로드를 막지 않게 한다.
-  let fullSyncSucceeded = calIds.size > 0;
+  const successfulCalendarIds = new Set<string>();
+  const failedCalendarIds = new Set<string>();
   for (const calId of calIds) {
     try {
       const gcalEvents = await gcalService.fullSync(calId);
+      successfulCalendarIds.add(calId);
       for (const e of gcalEvents) {
         if (e.id && !seen.has(e.id)) {
           seen.add(e.id);
-          events.push(toCalendarEvent(e, calId));
+          successfulEvents.push(toCalendarEvent(e, calId));
         }
       }
     } catch (err) {
-      fullSyncSucceeded = false;
+      failedCalendarIds.add(calId);
       console.warn(`[Calendar] Google fullSync 실패 (${calId}):`, err);
     }
   }
 
-  // GCal에 없는 이벤트는 캐시에서도 제거 (legacy 로컬 이벤트 미지원)
-  googleEvents = events;
-  googleCacheReady = fullSyncSucceeded;
+  if (settingsLoaded && successfulCalendarIds.size > 0) {
+    // 성공한 캘린더는 빈 결과까지 완전히 교체하되, 실패한 캘린더의 마지막 성공
+    // 데이터는 유지한다. 새 성공 행과 ID가 겹치면 새 행이 우선한다.
+    const retainedFailedEvents = googleEvents.filter(
+      (event) => event.sourceCalendarId && failedCalendarIds.has(event.sourceCalendarId),
+    );
+    googleEvents = [
+      ...successfulEvents,
+      ...retainedFailedEvents.filter((event) => !seen.has(event.id)),
+    ];
+  }
+  // 설정 조회 실패나 전체 fullSync 실패는 마지막 성공 캐시를 보존하고 재시도 대상으로 둔다.
+  googleCacheReady = settingsLoaded
+    && successfulCalendarIds.size === calIds.size
+    && failedCalendarIds.size === 0;
   rebuildEventCache();
   if (options.broadcast !== false) broadcastCalendarChange();
 
@@ -421,7 +437,7 @@ export async function syncAll(options: { broadcast?: boolean; skipBflowLoad?: bo
     );
   }
 
-  return events;
+  return [...googleEvents];
 }
 
 /** Incremental 동기화 (webhook 알림 시 호출) */
