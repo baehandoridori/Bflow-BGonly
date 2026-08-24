@@ -1,7 +1,15 @@
 import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
 import test from 'node:test';
-import { createElement, forwardRef, Fragment, type ComponentType, type ReactNode } from 'react';
+import {
+  createElement,
+  forwardRef,
+  Fragment,
+  isValidElement,
+  type ComponentType,
+  type ReactElement,
+  type ReactNode,
+} from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { build } from 'esbuild';
 
@@ -31,6 +39,41 @@ type QuickEditProps = {
 };
 
 let bundledQuickEdit: Promise<ComponentType<QuickEditProps>> | undefined;
+let capturedPortalChild: ReactNode | undefined;
+
+type QuickEditCallbacks = Pick<
+  QuickEditProps,
+  'onClose' | 'onUpdateColor' | 'onUpdate' | 'onDelete' | 'onDuplicate'
+>;
+
+type ButtonElement = ReactElement<{
+  children?: ReactNode;
+  onClick?: () => void;
+}, 'button'>;
+
+function textContent(node: ReactNode): string {
+  if (typeof node === 'string' || typeof node === 'number') return String(node);
+  if (Array.isArray(node)) return node.map(textContent).join('');
+  if (!isValidElement(node)) return '';
+  return textContent((node.props as { children?: ReactNode }).children);
+}
+
+function findButtonByText(node: ReactNode, label: string): ButtonElement | undefined {
+  if (Array.isArray(node)) {
+    for (const child of node) {
+      const found = findButtonByText(child, label);
+      if (found) return found;
+    }
+    return undefined;
+  }
+  if (!isValidElement(node)) return undefined;
+
+  const props = node.props as { children?: ReactNode };
+  if (node.type === 'button' && textContent(props.children).includes(label)) {
+    return node as ButtonElement;
+  }
+  return findButtonByText(props.children, label);
+}
 
 async function loadQuickEdit(): Promise<ComponentType<QuickEditProps>> {
   bundledQuickEdit ??= build({
@@ -69,7 +112,14 @@ async function loadQuickEdit(): Promise<ComponentType<QuickEditProps>> {
     const runtimeRequire = (id: string): unknown => {
       if (id === 'react') return nodeRequire('react');
       if (id === 'react/jsx-runtime') return nodeRequire('react/jsx-runtime');
-      if (id === 'react-dom') return { createPortal: (child: ReactNode) => child };
+      if (id === 'react-dom') {
+        return {
+          createPortal: (child: ReactNode) => {
+            capturedPortalChild = child;
+            return child;
+          },
+        };
+      }
       if (id === 'framer-motion') {
         return {
           motion: { div: MotionDiv },
@@ -114,20 +164,24 @@ function event(overrides: Partial<QuickEditEvent>): QuickEditEvent {
   };
 }
 
-async function renderQuickEdit(target: QuickEditEvent): Promise<string> {
+async function renderQuickEdit(
+  target: QuickEditEvent,
+  callbacks: Partial<QuickEditCallbacks> = {},
+): Promise<string> {
   const EventQuickEdit = await loadQuickEdit();
   const globalScope = globalThis as typeof globalThis & { document?: { body: object } };
   const previousDocument = globalScope.document;
+  capturedPortalChild = undefined;
   globalScope.document = { body: {} };
   try {
     return renderToStaticMarkup(createElement(EventQuickEdit, {
       event: target,
       position: { x: 0, y: 0 },
-      onClose: () => {},
-      onUpdateColor: () => {},
-      onUpdate: () => {},
-      onDelete: () => {},
-      onDuplicate: () => {},
+      onClose: callbacks.onClose ?? (() => {}),
+      onUpdateColor: callbacks.onUpdateColor ?? (() => {}),
+      onUpdate: callbacks.onUpdate ?? (() => {}),
+      onDelete: callbacks.onDelete ?? (() => {}),
+      onDuplicate: callbacks.onDuplicate ?? (() => {}),
     }));
   } finally {
     if (previousDocument === undefined) delete globalScope.document;
@@ -190,5 +244,52 @@ test('quick editor keeps duplicate and delete actions when color changes are uns
     const markup = await renderQuickEdit(target);
     assert.equal(markup.includes('복사'), true, `${name}: duplicate remains available`);
     assert.equal(markup.includes('삭제'), true, `${name}: delete remains available`);
+  }
+});
+
+test('quick editor duplicate and delete buttons invoke the matching action and close once', async () => {
+  const cases: Array<{ name: string; target: QuickEditEvent }> = [
+    {
+      name: 'new B flow event',
+      target: event({ source: 'bflow', sourceCalendarId: 'bflow:personal-cal', calendarId: 'personal-cal' }),
+    },
+    {
+      name: 'Google event',
+      target: event({ source: 'google', sourceCalendarId: 'primary' }),
+    },
+    {
+      name: 'legacy private event',
+      target: event({ source: 'bflow', sourceCalendarId: 'supabase-private' }),
+    },
+  ];
+
+  for (const { name, target } of cases) {
+    for (const action of ['복사', '삭제'] as const) {
+      const duplicated: QuickEditEvent[] = [];
+      const deleted: string[] = [];
+      let closeCount = 0;
+
+      await renderQuickEdit(target, {
+        onClose: () => { closeCount += 1; },
+        onDuplicate: (value) => { duplicated.push(value); },
+        onDelete: (id) => { deleted.push(id); },
+      });
+
+      assert.ok(capturedPortalChild, `${name}: createPortal child must be captured`);
+      const button = findButtonByText(capturedPortalChild, action);
+      assert.ok(button, `${name}: ${action} button must exist`);
+      assert.equal(typeof button.props.onClick, 'function', `${name}: ${action} button must be clickable`);
+      button.props.onClick?.();
+
+      if (action === '복사') {
+        assert.equal(duplicated.length, 1, `${name}: duplicate runs exactly once`);
+        assert.strictEqual(duplicated[0], target, `${name}: duplicate receives the original event`);
+        assert.deepEqual(deleted, [], `${name}: duplicate must not call delete`);
+      } else {
+        assert.deepEqual(duplicated, [], `${name}: delete must not call duplicate`);
+        assert.deepEqual(deleted, [target.id], `${name}: delete receives the event id`);
+      }
+      assert.equal(closeCount, 1, `${name}: ${action} closes exactly once`);
+    }
   }
 });
