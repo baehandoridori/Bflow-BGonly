@@ -22,6 +22,10 @@ export interface CalendarState {
 function loadExplicitFalseRecords(key: string): Record<string, boolean> {
   try {
     const raw = localStorage.getItem(key);
+    if (raw === null) {
+      localStorage.setItem(key, '{}');
+      return {};
+    }
     if (!raw) return {};
     const parsed = JSON.parse(raw) as unknown;
     if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return {};
@@ -45,6 +49,10 @@ function saveExplicitFalseRecords(key: string, records: Record<string, boolean>)
 function loadMutedCalendarIds(): string[] {
   try {
     const raw = localStorage.getItem(MUTED_CALENDARS_KEY);
+    if (raw === null) {
+      localStorage.setItem(MUTED_CALENDARS_KEY, '[]');
+      return [];
+    }
     if (!raw) return [];
     const parsed = JSON.parse(raw) as unknown;
     if (!Array.isArray(parsed)) return [];
