@@ -102,6 +102,26 @@ export function EventQuickEdit({
     onClose();
   }, [event, onDuplicate, onClose]);
 
+  const quickActions = (
+    <div className="flex gap-2">
+      <button
+        onClick={handleDuplicate}
+        className="flex-1 flex items-center justify-center gap-1.5 py-1.5 rounded-lg text-xs transition-colors cursor-pointer bg-bg-primary/80 text-text-primary hover:bg-bg-border/40"
+      >
+        <Copy size={12} />
+        복사
+      </button>
+      <button
+        onClick={handleDelete}
+        className="flex-1 flex items-center justify-center gap-1.5 py-1.5 rounded-lg text-xs transition-colors cursor-pointer"
+        style={{ background: 'rgba(255,107,107,0.15)', color: '#FF6B6B' }}
+      >
+        <Trash2 size={12} />
+        삭제
+      </button>
+    </div>
+  );
+
   return createPortal(
     <AnimatePresence>
       <motion.div
@@ -183,23 +203,7 @@ export function EventQuickEdit({
               </div>
 
               {/* 빠른 액션 */}
-              <div className="flex gap-2">
-                <button
-                  onClick={handleDuplicate}
-                  className="flex-1 flex items-center justify-center gap-1.5 py-1.5 rounded-lg text-xs transition-colors cursor-pointer bg-bg-primary/80 text-text-primary hover:bg-bg-border/40"
-                >
-                  <Copy size={12} />
-                  복사
-                </button>
-                <button
-                  onClick={handleDelete}
-                  className="flex-1 flex items-center justify-center gap-1.5 py-1.5 rounded-lg text-xs transition-colors cursor-pointer"
-                  style={{ background: 'rgba(255,107,107,0.15)', color: '#FF6B6B' }}
-                >
-                  <Trash2 size={12} />
-                  삭제
-                </button>
-              </div>
+              {quickActions}
             </div>
           ) : (
             /* ── 일정 편집 탭 ── */
@@ -285,6 +289,7 @@ export function EventQuickEdit({
                   </button>
                 </div>
               )}
+              {!canUpdateColor && <div className="mt-3">{quickActions}</div>}
             </div>
           )}
         </div>

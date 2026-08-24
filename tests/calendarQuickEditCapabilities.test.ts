@@ -163,5 +163,32 @@ test('quick editor hides unsupported color controls while preserving legacy priv
     const markup = await renderQuickEdit(target);
     assert.equal(markup.includes('색상'), showsColor, name);
     assert.equal(markup.includes('일정 편집'), true, `${name}: edit tab remains available`);
+    if (showsColor) {
+      assert.equal(markup.includes('복사'), true, `${name}: legacy duplicate remains in the color tab`);
+      assert.equal(markup.includes('삭제'), true, `${name}: legacy delete remains in the color tab`);
+    }
+  }
+});
+
+test('quick editor keeps duplicate and delete actions when color changes are unsupported', async () => {
+  const cases: Array<{ name: string; target: QuickEditEvent }> = [
+    {
+      name: 'new personal B flow event',
+      target: event({ source: 'bflow', sourceCalendarId: 'bflow:personal-cal', calendarId: 'personal-cal' }),
+    },
+    {
+      name: 'new shared B flow event',
+      target: event({ source: 'bflow', sourceCalendarId: 'bflow:shared-cal', calendarId: 'shared-cal' }),
+    },
+    {
+      name: 'Google event',
+      target: event({ source: 'google', sourceCalendarId: 'primary' }),
+    },
+  ];
+
+  for (const { name, target } of cases) {
+    const markup = await renderQuickEdit(target);
+    assert.equal(markup.includes('복사'), true, `${name}: duplicate remains available`);
+    assert.equal(markup.includes('삭제'), true, `${name}: delete remains available`);
   }
 });
