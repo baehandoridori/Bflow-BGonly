@@ -39,9 +39,7 @@ export function EventQuickEdit({
   const colorMode = useAppStore((s) => s.colorMode);
   const ref = useRef<HTMLDivElement>(null);
   const [adjusted, setAdjusted] = useState(position);
-  const canUpdateColor = event.source !== 'google'
-    && !(event.source === 'bflow' && event.calendarId !== undefined);
-  const [tab, setTab] = useState<TabKey>(canUpdateColor ? 'color' : 'edit');
+  const [tab, setTab] = useState<TabKey>('color');
 
   // 편집 폼 상태
   const [title, setTitle] = useState(event.title);
@@ -102,26 +100,6 @@ export function EventQuickEdit({
     onClose();
   }, [event, onDuplicate, onClose]);
 
-  const quickActions = (
-    <div className="flex gap-2">
-      <button
-        onClick={handleDuplicate}
-        className="flex-1 flex items-center justify-center gap-1.5 py-1.5 rounded-lg text-xs transition-colors cursor-pointer bg-bg-primary/80 text-text-primary hover:bg-bg-border/40"
-      >
-        <Copy size={12} />
-        복사
-      </button>
-      <button
-        onClick={handleDelete}
-        className="flex-1 flex items-center justify-center gap-1.5 py-1.5 rounded-lg text-xs transition-colors cursor-pointer"
-        style={{ background: 'rgba(255,107,107,0.15)', color: '#FF6B6B' }}
-      >
-        <Trash2 size={12} />
-        삭제
-      </button>
-    </div>
-  );
-
   return createPortal(
     <AnimatePresence>
       <motion.div
@@ -143,18 +121,16 @@ export function EventQuickEdit({
       >
         {/* 헤더: 탭 */}
         <div className="flex border-b" style={{ borderColor: 'rgb(var(--color-bg-border) / 0.45)' }}>
-          {canUpdateColor && (
-            <button
-              onClick={() => setTab('color')}
-              className="flex-1 py-2.5 text-xs font-medium transition-colors cursor-pointer"
-              style={{
-                color: tab === 'color' ? 'rgb(var(--color-accent))' : 'rgb(var(--color-text-secondary))',
-                borderBottom: tab === 'color' ? '2px solid rgb(var(--color-accent))' : '2px solid transparent',
-              }}
-            >
-              <Palette size={12} className="inline mr-1" /> 색상
-            </button>
-          )}
+          <button
+            onClick={() => setTab('color')}
+            className="flex-1 py-2.5 text-xs font-medium transition-colors cursor-pointer"
+            style={{
+              color: tab === 'color' ? 'rgb(var(--color-accent))' : 'rgb(var(--color-text-secondary))',
+              borderBottom: tab === 'color' ? '2px solid rgb(var(--color-accent))' : '2px solid transparent',
+            }}
+          >
+            <Palette size={12} className="inline mr-1" /> 색상
+          </button>
           <button
             onClick={() => !isVacation && setTab('edit')}
             className={`flex-1 py-2.5 text-xs font-medium transition-colors ${isVacation ? 'cursor-not-allowed opacity-50' : 'cursor-pointer'}`}
@@ -169,7 +145,7 @@ export function EventQuickEdit({
 
         {/* 탭 콘텐츠 */}
         <div className="p-3">
-          {canUpdateColor && tab === 'color' ? (
+          {tab === 'color' ? (
             /* ── 색상 탭 ── */
             <div>
               {/* 이벤트 제목 + 현재 색상 */}
@@ -203,7 +179,23 @@ export function EventQuickEdit({
               </div>
 
               {/* 빠른 액션 */}
-              {quickActions}
+              <div className="flex gap-2">
+                <button
+                  onClick={handleDuplicate}
+                  className="flex-1 flex items-center justify-center gap-1.5 py-1.5 rounded-lg text-xs transition-colors cursor-pointer bg-bg-primary/80 text-text-primary hover:bg-bg-border/40"
+                >
+                  <Copy size={12} />
+                  복사
+                </button>
+                <button
+                  onClick={handleDelete}
+                  className="flex-1 flex items-center justify-center gap-1.5 py-1.5 rounded-lg text-xs transition-colors cursor-pointer"
+                  style={{ background: 'rgba(255,107,107,0.15)', color: '#FF6B6B' }}
+                >
+                  <Trash2 size={12} />
+                  삭제
+                </button>
+              </div>
             </div>
           ) : (
             /* ── 일정 편집 탭 ── */
@@ -289,7 +281,6 @@ export function EventQuickEdit({
                   </button>
                 </div>
               )}
-              {!canUpdateColor && <div className="mt-3">{quickActions}</div>}
             </div>
           )}
         </div>
