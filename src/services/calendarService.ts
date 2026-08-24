@@ -23,8 +23,33 @@ const BFLOW_CAL_PREFIX = 'bflow:';
 type RawPrivateEvent = Awaited<ReturnType<NonNullable<Window['electronAPI']>['supabaseReadPrivateEvents']>>[number];
 type RawBflowEvent = Awaited<ReturnType<NonNullable<Window['electronAPI']>['calendarEventsList']>>[number];
 
-// 마이그레이션이 ID를 유지한 구 비공개 행. 복제된 B flow 행을 삭제할 때 함께 정리한다.
-let legacyPrivateEventIds = new Set<string>();
+// 마이그레이션이 ID를 유지한 구 비공개 행. 사용자 전환이나 읽기 실패 때 다른 사용자의
+// ID를 재사용하지 않도록, 조회 신뢰도까지 함께 보관한다.
+type LegacyPrivateEventState = {
+  userId: string | null;
+  ids: Set<string>;
+  status: 'known' | 'unknown';
+};
+
+let legacyPrivateEvents: LegacyPrivateEventState = {
+  userId: null,
+  ids: new Set<string>(),
+  status: 'unknown',
+};
+
+async function readLegacyPrivateEventsForUser(userId: string): Promise<RawPrivateEvent[]> {
+  const rows = await window.electronAPI.supabaseReadPrivateEvents(userId);
+  legacyPrivateEvents = {
+    userId,
+    ids: new Set(rows.map((row) => row.id)),
+    status: 'known',
+  };
+  return rows;
+}
+
+function forgetLegacyPrivateEvent(id: string): void {
+  legacyPrivateEvents.ids.delete(id);
+}
 
 function toCalendarEventFromPrivate(row: RawPrivateEvent): CalendarEvent {
   return {
@@ -304,18 +329,18 @@ export async function loadBflowEvents(): Promise<void> {
 
     // 마이그레이션 전 폴백: 구 private_calendar_events 병행 읽기 — 중복 id 는 calendar_events 우선.
     const newIds = new Set(next.map((event) => event.id));
-    const loadedLegacyPrivateEventIds = new Set<string>();
+    const userId = useAuthStore.getState().currentUser?.id;
     try {
-      const userId = useAuthStore.getState().currentUser?.id;
       if (userId) {
-        const legacyRows = await window.electronAPI.supabaseReadPrivateEvents(userId);
+        const legacyRows = await readLegacyPrivateEventsForUser(userId);
         for (const row of legacyRows) {
-          loadedLegacyPrivateEventIds.add(row.id);
           if (!newIds.has(row.id)) next.push(toCalendarEventFromPrivate(row));
         }
+      } else {
+        legacyPrivateEvents = { userId: null, ids: new Set<string>(), status: 'known' };
       }
-      legacyPrivateEventIds = loadedLegacyPrivateEventIds;
     } catch (err) {
+      legacyPrivateEvents = { userId: userId ?? null, ids: new Set<string>(), status: 'unknown' };
       console.warn('[Calendar] 구 비공개 일정 폴백 로드 실패:', err);
     }
 
@@ -534,6 +559,12 @@ function isBflowPersonalEvent(event: CalendarEvent): boolean {
     && useCalendarStore.getState().calendars.some((calendar) => (
       calendar.id === calendarId && calendar.isPersonal
     ));
+}
+
+function isCurrentUsersPersonalBflowEvent(event: CalendarEvent, userId: string): boolean {
+  if (!event.sourceCalendarId?.startsWith(BFLOW_CAL_PREFIX)) return false;
+  const calendarId = event.calendarId ?? event.sourceCalendarId.slice(BFLOW_CAL_PREFIX.length);
+  return getPersonalCalendar(useCalendarStore.getState(), userId)?.id === calendarId;
 }
 
 function isPrivateStorageEvent(event: CalendarEvent): boolean {
@@ -874,13 +905,25 @@ export async function deleteEvent(eventId: string): Promise<void> {
 
   // ── B flow 공유 캘린더 이벤트 분기 — calendar:* IPC 경유 ──
   if (existing.sourceCalendarId?.startsWith(BFLOW_CAL_PREFIX)) {
-    const hasLegacyCopy = legacyPrivateEventIds.has(actualId);
+    const currentUserId = useAuthStore.getState().currentUser?.id;
+    const isCurrentUsersPersonal = currentUserId !== undefined
+      && isCurrentUsersPersonalBflowEvent(existing, currentUserId);
+    let hasLegacyCopy = false;
+
+    if (isCurrentUsersPersonal && currentUserId) {
+      const stateIsCurrentAndKnown = legacyPrivateEvents.userId === currentUserId
+        && legacyPrivateEvents.status === 'known';
+      if (!stateIsCurrentAndKnown) await readLegacyPrivateEventsForUser(currentUserId);
+      const legacyIds = legacyPrivateEvents.ids;
+      hasLegacyCopy = legacyIds.has(actualId);
+    }
+
     mutateSourceEvents('bflow', (events) => events.filter((item) => item.id !== actualId));
     broadcastCalendarChange({ eventId: actualId, action: 'delete' });
     try {
       if (hasLegacyCopy) {
         await window.electronAPI.supabaseDeletePrivateEvent(actualId);
-        legacyPrivateEventIds.delete(actualId);
+        forgetLegacyPrivateEvent(actualId);
       }
       await window.electronAPI.calendarEventDelete(actualId);
       cleanupDeletedEventAliases(eventId, actualId);
@@ -901,6 +944,7 @@ export async function deleteEvent(eventId: string): Promise<void> {
     broadcastCalendarChange({ eventId: actualId, action: 'delete' });
     try {
       await window.electronAPI.supabaseDeletePrivateEvent(actualId);
+      forgetLegacyPrivateEvent(actualId);
       cleanupDeletedEventAliases(eventId, actualId);
     } catch (err) {
       mutateSourceEvents('bflow', (events) => (
