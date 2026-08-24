@@ -2,17 +2,26 @@
  * 캘린더 서비스 (어댑터)
  * Google Calendar API를 기존 CalendarEvent 인터페이스로 래핑
  */
-import type { CalendarEvent, CalendarEventType, BflowEventMeta, GCalSettings } from '@/types/calendar';
+import type {
+  BflowCalendar,
+  CalendarEvent,
+  CalendarEventType,
+  BflowEventMeta,
+  GCalSettings,
+} from '@/types/calendar';
 import * as gcalService from './googleCalendarService';
 import { readMetadata, writeMetadata } from './supabaseService';
 import { useAuthStore } from '@/stores/useAuthStore';
+import { useCalendarStore } from '@/stores/useCalendarStore';
 import { createUuid } from '@/utils/createUuid';
 
 // 비공개 이벤트는 Google Calendar 가 아닌 Supabase 에만 저장된다.
 // sourceCalendarId 에 이 특수 식별자를 써서 update/delete 시 올바른 저장소로 라우팅.
 const PRIVATE_CAL_ID = 'supabase-private';
+const BFLOW_CAL_PREFIX = 'bflow:';
 
 type RawPrivateEvent = Awaited<ReturnType<NonNullable<Window['electronAPI']>['supabaseReadPrivateEvents']>>[number];
+type RawBflowEvent = Awaited<ReturnType<NonNullable<Window['electronAPI']>['calendarEventsList']>>[number];
 
 function toCalendarEventFromPrivate(row: RawPrivateEvent): CalendarEvent {
   return {
@@ -33,6 +42,49 @@ function toCalendarEventFromPrivate(row: RawPrivateEvent): CalendarEvent {
     linkedTodoId: row.linked_todo_id ?? undefined,
     sourceCalendarId: PRIVATE_CAL_ID,
     isPrivate: true,
+    source: 'bflow',
+  };
+}
+
+function toCalendarEventFromBflowRow(
+  row: RawBflowEvent,
+  calendarsById: Map<string, BflowCalendar>,
+): CalendarEvent {
+  const calendar = calendarsById.get(row.calendar_id);
+  const canEdit = calendar?.canEdit ?? false;
+  const type: CalendarEventType = row.linked_scene_id
+    ? 'scene'
+    : row.linked_part
+      ? 'part'
+      : row.linked_episode !== null
+        ? 'episode'
+        : 'custom';
+
+  return {
+    id: row.id,
+    title: row.title,
+    memo: row.memo ?? '',
+    color: calendar?.color ?? '#6C5CE7',
+    type,
+    startDate: row.start_date,
+    endDate: row.end_date,
+    createdBy: row.created_by ?? '',
+    createdAt: row.created_at,
+    linkedEpisode: row.linked_episode ?? undefined,
+    linkedPart: row.linked_part ?? undefined,
+    linkedSheetName: row.linked_sheet_name ?? undefined,
+    linkedSceneId: row.linked_scene_id ?? undefined,
+    linkedDepartment: (row.linked_department as 'bg' | 'acting' | undefined) ?? undefined,
+    linkedTodoId: row.linked_todo_id ?? undefined,
+    sourceCalendarId: `${BFLOW_CAL_PREFIX}${row.calendar_id}`,
+    calendarId: row.calendar_id,
+    tagId: row.tag_id ?? undefined,
+    allDay: row.all_day,
+    startTime: row.start_time ?? undefined,
+    endTime: row.end_time ?? undefined,
+    canEdit,
+    isReadOnly: !canEdit,
+    source: 'bflow',
   };
 }
 
@@ -166,6 +218,7 @@ function toCalendarEvent(gcalEvent: any, calendarId: string): CalendarEvent {
     sourceCalendarId: calendarId,
     // Google Calendar 의 visibility='private' 를 읽어 isPrivate 에 반영
     isPrivate: gcalEvent.visibility === 'private',
+    source: 'google',
   };
 }
 
@@ -209,34 +262,65 @@ async function getTargetCalendar(_type: CalendarEventType): Promise<string | nul
 
 // ─── 공개 API (기존 인터페이스 유지) ──────────────────────────
 
+let bflowEvents: CalendarEvent[] = [];
+let googleEvents: CalendarEvent[] = [];
 let eventCache: CalendarEvent[] = [];
+
+function rebuildEventCache(): void {
+  const seen = new Set<string>();
+  eventCache = [...bflowEvents, ...googleEvents].filter(
+    (event) => !seen.has(event.id) && (seen.add(event.id), true),
+  );
+}
+
+/** 낙관적 CRUD 공용 헬퍼 — 두 소스 배열에 같은 변환을 적용 후 캐시 재조립.
+ * id 기준 map/filter 는 해당 id 가 한쪽 배열에만 존재하므로 양쪽 적용이 안전하다. */
+function mutateSourceEvents(fn: (events: CalendarEvent[]) => CalendarEvent[]): void {
+  bflowEvents = fn(bflowEvents);
+  googleEvents = fn(googleEvents);
+  rebuildEventCache();
+}
 
 export async function getEvents(): Promise<CalendarEvent[]> {
   return [...eventCache];
 }
 
-/** 전체 동기화 (앱 시작 시 호출) */
-export async function syncAll(options: { broadcast?: boolean } = {}): Promise<CalendarEvent[]> {
-
-  const seen = new Set<string>();
-  const events: CalendarEvent[] = [];
-
-  // 비공개 이벤트 (Supabase, Google Calendar 비연동) — Google 동기화보다 먼저 로드해
-  // Google 인증/네트워크/설정 실패로 syncAll 이 조기 종료되어도 개인 일정은 반드시 표시되게 한다.
+/** B flow 일정 로드 — 구글 인증 가드 밖에서 항상 호출된다 (설계서 §6.2 핵심). */
+export async function loadBflowEvents(): Promise<void> {
   try {
-    const userId = useAuthStore.getState().currentUser?.id;
-    if (userId) {
-      const rows = await window.electronAPI.supabaseReadPrivateEvents(userId);
-      for (const row of rows) {
-        if (!seen.has(row.id)) {
-          seen.add(row.id);
-          events.push(toCalendarEventFromPrivate(row));
+    await useCalendarStore.getState().loadAll();
+    const calendars = useCalendarStore.getState().calendars;
+    const calendarsById = new Map(calendars.map((calendar) => [calendar.id, calendar]));
+    const rows = await window.electronAPI.calendarEventsList();
+    const next = rows.map((row) => toCalendarEventFromBflowRow(row, calendarsById));
+
+    // 마이그레이션 전 폴백: 구 private_calendar_events 병행 읽기 — 중복 id 는 calendar_events 우선.
+    const newIds = new Set(next.map((event) => event.id));
+    try {
+      const userId = useAuthStore.getState().currentUser?.id;
+      if (userId) {
+        const legacyRows = await window.electronAPI.supabaseReadPrivateEvents(userId);
+        for (const row of legacyRows) {
+          if (!newIds.has(row.id)) next.push(toCalendarEventFromPrivate(row));
         }
       }
+    } catch (err) {
+      console.warn('[Calendar] 구 비공개 일정 폴백 로드 실패:', err);
     }
+
+    bflowEvents = next;
+    rebuildEventCache();
+    broadcastCalendarChange();
   } catch (err) {
-    console.warn('[Calendar] 비공개 이벤트 로드 실패:', err);
+    console.warn('[Calendar] B flow 일정 로드 실패:', err);
   }
+}
+
+/** 전체 동기화 (앱 시작 시 호출) */
+export async function syncAll(options: { broadcast?: boolean } = {}): Promise<CalendarEvent[]> {
+  await loadBflowEvents();
+  const seen = new Set<string>();
+  const events: CalendarEvent[] = [];
 
   // 팀/개인 캘린더 목록 — 설정 조회 실패 시에도 비공개 이벤트는 이미 위에서 로드됨
   const calIds = new Set<string>();
@@ -265,7 +349,8 @@ export async function syncAll(options: { broadcast?: boolean } = {}): Promise<Ca
   }
 
   // GCal에 없는 이벤트는 캐시에서도 제거 (legacy 로컬 이벤트 미지원)
-  eventCache = [...events];
+  googleEvents = events;
+  rebuildEventCache();
   if (options.broadcast !== false) broadcastCalendarChange();
 
   // Watch 채널 등록 (실시간 동기화용)
@@ -293,25 +378,29 @@ export async function syncIncremental(): Promise<void> {
 
     if (isFullSync) {
       // fullSync 폴백: 해당 캘린더의 캐시를 완전히 교체 (삭제된 이벤트 제거)
-      eventCache = eventCache.filter((e) => e.sourceCalendarId !== calId);
+      const next = googleEvents.filter((event) => event.sourceCalendarId !== calId);
       // ID 기반 중복 제거 (팀/개인 캘린더에 같은 이벤트가 있을 수 있음)
-      const seenIds = new Set(eventCache.map((e) => e.id));
+      const seenIds = new Set(next.map((event) => event.id));
       for (const gcalEvent of updated) {
         if (gcalEvent.id && !seenIds.has(gcalEvent.id)) {
           seenIds.add(gcalEvent.id);
-          eventCache.push(toCalendarEvent(gcalEvent, calId));
+          next.push(toCalendarEvent(gcalEvent, calId));
         }
       }
+      googleEvents = next;
     } else {
       // 일반 incremental: 삭제 + 머지
-      eventCache = eventCache.filter((e) => !deleted.includes(e.id));
+      let next = googleEvents.filter((event) => !deleted.includes(event.id));
       for (const gcalEvent of updated) {
         const converted = toCalendarEvent(gcalEvent, calId);
-        const idx = eventCache.findIndex((e) => e.id === converted.id);
-        if (idx >= 0) eventCache[idx] = converted;
-        else eventCache.push(converted);
+        const exists = next.some((event) => event.id === converted.id);
+        next = exists
+          ? next.map((event) => (event.id === converted.id ? converted : event))
+          : [...next, converted];
       }
+      googleEvents = next;
     }
+    rebuildEventCache();
   }
 
   broadcastCalendarChange();
@@ -320,6 +409,77 @@ export async function syncIncremental(): Promise<void> {
 // ─── 로컬 ID ↔ GCal ID 매핑 (할일 등 cal_* ID 호환용) ──────────────────
 
 const localToGcalId = new Map<string, string>();
+
+function bflowEventType(event: CalendarEvent): CalendarEventType {
+  if (event.linkedSceneId) return 'scene';
+  if (event.linkedPart) return 'part';
+  if (event.linkedEpisode !== undefined) return 'episode';
+  return 'custom';
+}
+
+function withBflowCalendarPresentation(event: CalendarEvent, calendarId: string): CalendarEvent {
+  const calendar = useCalendarStore.getState().calendars.find((item) => item.id === calendarId);
+  const canEdit = calendar?.canEdit ?? false;
+  return {
+    ...event,
+    color: calendar?.color ?? '#6C5CE7',
+    sourceCalendarId: `${BFLOW_CAL_PREFIX}${calendarId}`,
+    calendarId,
+    canEdit,
+    isReadOnly: !canEdit,
+    source: 'bflow',
+  };
+}
+
+function applyBflowEventUpdates(
+  existing: CalendarEvent,
+  updates: Partial<CalendarEvent>,
+): CalendarEvent {
+  let next = { ...existing };
+  if (updates.title !== undefined) next.title = updates.title;
+  if (updates.memo !== undefined) next.memo = updates.memo;
+  if (updates.tagId !== undefined) next.tagId = updates.tagId ?? undefined;
+  if (updates.allDay !== undefined) next.allDay = updates.allDay;
+  if (updates.startDate !== undefined) next.startDate = updates.startDate;
+  if (updates.endDate !== undefined) next.endDate = updates.endDate;
+  if (updates.startTime !== undefined) next.startTime = updates.startTime ?? undefined;
+  if (updates.endTime !== undefined) next.endTime = updates.endTime ?? undefined;
+  if (updates.linkedEpisode !== undefined) next.linkedEpisode = updates.linkedEpisode ?? undefined;
+  if (updates.linkedPart !== undefined) next.linkedPart = updates.linkedPart ?? undefined;
+  if (updates.linkedSheetName !== undefined) next.linkedSheetName = updates.linkedSheetName ?? undefined;
+  if (updates.linkedSceneId !== undefined) next.linkedSceneId = updates.linkedSceneId ?? undefined;
+  if (updates.linkedDepartment !== undefined) next.linkedDepartment = updates.linkedDepartment ?? undefined;
+  if (updates.linkedTodoId !== undefined) next.linkedTodoId = updates.linkedTodoId ?? undefined;
+  if (updates.calendarId !== undefined) {
+    next = withBflowCalendarPresentation(next, updates.calendarId);
+  }
+  next.type = bflowEventType(next);
+  return next;
+}
+
+type BflowEventUpdatePatch = Parameters<
+  NonNullable<Window['electronAPI']>['calendarEventUpdate']
+>[1];
+
+function toBflowEventUpdatePatch(updates: Partial<CalendarEvent>): BflowEventUpdatePatch {
+  const patch: BflowEventUpdatePatch = {};
+  if (updates.calendarId !== undefined) patch.calendar_id = updates.calendarId;
+  if (updates.title !== undefined) patch.title = updates.title;
+  if (updates.memo !== undefined) patch.memo = updates.memo;
+  if (updates.tagId !== undefined) patch.tag_id = updates.tagId ?? null;
+  if (updates.allDay !== undefined) patch.all_day = updates.allDay;
+  if (updates.startDate !== undefined) patch.start_date = updates.startDate;
+  if (updates.endDate !== undefined) patch.end_date = updates.endDate;
+  if (updates.startTime !== undefined) patch.start_time = updates.startTime ?? null;
+  if (updates.endTime !== undefined) patch.end_time = updates.endTime ?? null;
+  if (updates.linkedEpisode !== undefined) patch.linked_episode = updates.linkedEpisode ?? null;
+  if (updates.linkedPart !== undefined) patch.linked_part = updates.linkedPart ?? null;
+  if (updates.linkedSheetName !== undefined) patch.linked_sheet_name = updates.linkedSheetName ?? null;
+  if (updates.linkedSceneId !== undefined) patch.linked_scene_id = updates.linkedSceneId ?? null;
+  if (updates.linkedDepartment !== undefined) patch.linked_department = updates.linkedDepartment ?? null;
+  if (updates.linkedTodoId !== undefined) patch.linked_todo_id = updates.linkedTodoId ?? null;
+  return patch;
+}
 
 /** 로컬 ID(cal_xxx) 또는 GCal ID로 캐시에서 이벤트 찾기 (cold cache 시 sync 시도) */
 async function resolveEvent(eventId: string): Promise<CalendarEvent | undefined> {
@@ -351,7 +511,55 @@ async function resolveEvent(eventId: string): Promise<CalendarEvent | undefined>
   return undefined;
 }
 
+async function addBflowEvent(event: CalendarEvent, calendarId: string): Promise<void> {
+  const localId = event.id;
+  const optimistic = withBflowCalendarPresentation({
+    ...event,
+    type: bflowEventType(event),
+    allDay: event.allDay ?? true,
+  }, calendarId);
+  bflowEvents.push(optimistic);
+  rebuildEventCache();
+  broadcastCalendarChange({ eventId: localId, action: 'add' });
+
+  try {
+    const inserted = await window.electronAPI.calendarEventCreate({
+      calendar_id: calendarId,
+      title: event.title,
+      memo: event.memo,
+      tag_id: event.tagId ?? null,
+      all_day: event.allDay ?? true,
+      start_date: event.startDate,
+      end_date: event.endDate,
+      start_time: event.startTime ?? null,
+      end_time: event.endTime ?? null,
+      linked_episode: event.linkedEpisode ?? null,
+      linked_part: event.linkedPart ?? null,
+      linked_sheet_name: event.linkedSheetName ?? null,
+      linked_scene_id: event.linkedSceneId ?? null,
+      linked_department: event.linkedDepartment ?? null,
+      linked_todo_id: event.linkedTodoId ?? null,
+    });
+    if (localId !== inserted.id) {
+      localToGcalId.set(localId, inserted.id);
+    }
+    mutateSourceEvents((events) => events.map((item) => (
+      item.id === localId ? { ...item, id: inserted.id } : item
+    )));
+    broadcastCalendarChange({ eventId: inserted.id, action: 'update' });
+  } catch (err) {
+    mutateSourceEvents((events) => events.filter((item) => item.id !== localId));
+    broadcastCalendarChange();
+    throw err;
+  }
+}
+
 export async function addEvent(event: CalendarEvent): Promise<void> {
+  if (event.calendarId) {
+    await addBflowEvent(event, event.calendarId);
+    return;
+  }
+
   // ── 비공개 이벤트 분기 — Supabase 에만 저장, Google Calendar 비연동 ──
   if (event.isPrivate) {
     const userId = useAuthStore.getState().currentUser?.id;
@@ -359,7 +567,13 @@ export async function addEvent(event: CalendarEvent): Promise<void> {
 
     const localId = event.id;
     // 낙관적 업데이트
-    eventCache.push({ ...event, sourceCalendarId: PRIVATE_CAL_ID, isPrivate: true });
+    bflowEvents.push({
+      ...event,
+      sourceCalendarId: PRIVATE_CAL_ID,
+      isPrivate: true,
+      source: 'bflow',
+    });
+    rebuildEventCache();
     broadcastCalendarChange({ eventId: localId, action: 'add' });
 
     try {
@@ -383,11 +597,12 @@ export async function addEvent(event: CalendarEvent): Promise<void> {
       if (localId !== inserted.id) {
         localToGcalId.set(localId, inserted.id);
       }
-      const idx = eventCache.findIndex((e) => e.id === localId);
-      if (idx >= 0) eventCache[idx] = { ...eventCache[idx], id: inserted.id };
+      mutateSourceEvents((events) => events.map((item) => (
+        item.id === localId ? { ...item, id: inserted.id } : item
+      )));
       broadcastCalendarChange({ eventId: inserted.id, action: 'update' });
     } catch (err) {
-      eventCache = eventCache.filter((e) => e.id !== localId);
+      mutateSourceEvents((events) => events.filter((item) => item.id !== localId));
       broadcastCalendarChange();
       throw err;
     }
@@ -401,7 +616,8 @@ export async function addEvent(event: CalendarEvent): Promise<void> {
   const localId = event.id;
 
   // 낙관적 업데이트: 로컬 ID로 캐시에 먼저 추가 + 원본 캘린더 ID 기록
-  eventCache.push({ ...event, sourceCalendarId: calId });
+  googleEvents.push({ ...event, sourceCalendarId: calId, source: 'google' });
+  rebuildEventCache();
   broadcastCalendarChange({ eventId: localId, action: 'add' });
 
   try {
@@ -421,12 +637,13 @@ export async function addEvent(event: CalendarEvent): Promise<void> {
     if (localId !== gcalId) {
       localToGcalId.set(localId, gcalId);
     }
-    const idx = eventCache.findIndex((e) => e.id === localId);
-    if (idx >= 0) eventCache[idx] = { ...eventCache[idx], id: gcalId };
+    mutateSourceEvents((events) => events.map((item) => (
+      item.id === localId ? { ...item, id: gcalId } : item
+    )));
     broadcastCalendarChange({ eventId: gcalId, action: 'update' });
   } catch (err) {
     // 실패: 롤백
-    eventCache = eventCache.filter((e) => e.id !== localId);
+    mutateSourceEvents((events) => events.filter((item) => item.id !== localId));
     broadcastCalendarChange();
     throw err;
   }
@@ -436,6 +653,29 @@ export async function updateEvent(eventId: string, updates: Partial<CalendarEven
   const existing = await resolveEvent(eventId);
   if (!existing) return;
   const actualId = existing.id; // GCal ID (캐시에 저장된 실제 ID)
+
+  // ── B flow 공유 캘린더 이벤트 분기 — calendar:* IPC 경유 ──
+  if (existing.sourceCalendarId?.startsWith(BFLOW_CAL_PREFIX)) {
+    const patch = toBflowEventUpdatePatch(updates);
+    if (Object.keys(patch).length === 0) return;
+    const previous = { ...existing };
+    const optimistic = applyBflowEventUpdates(existing, updates);
+    mutateSourceEvents((events) => events.map((item) => (
+      item.id === actualId ? optimistic : item
+    )));
+    broadcastCalendarChange({ eventId: actualId, action: 'update' });
+
+    try {
+      await window.electronAPI.calendarEventUpdate(actualId, patch);
+    } catch (err) {
+      mutateSourceEvents((events) => events.map((item) => (
+        item.id === actualId ? previous : item
+      )));
+      broadcastCalendarChange({ eventId: actualId, action: 'update' });
+      throw err;
+    }
+    return;
+  }
 
   // ── 저장소 이전(migration) 감지 —
   //    공개(GCal) ↔ 비공개(Supabase) 플래그가 바뀌면 단순 필드 패치로는 안 된다.
@@ -478,7 +718,9 @@ export async function updateEvent(eventId: string, updates: Partial<CalendarEven
   // ── 비공개 이벤트 분기 — Supabase update ──
   if (existing.sourceCalendarId === PRIVATE_CAL_ID) {
     const previous = { ...existing };
-    eventCache = eventCache.map((e) => (e.id === actualId ? { ...e, ...updates } : e));
+    mutateSourceEvents((events) => events.map((item) => (
+      item.id === actualId ? { ...item, ...updates } : item
+    )));
     broadcastCalendarChange({ eventId: actualId, action: 'update' });
 
     try {
@@ -497,7 +739,9 @@ export async function updateEvent(eventId: string, updates: Partial<CalendarEven
       if (updates.linkedTodoId !== undefined) patch.linked_todo_id = updates.linkedTodoId ?? null;
       await window.electronAPI.supabaseUpdatePrivateEvent(actualId, patch);
     } catch (err) {
-      eventCache = eventCache.map((e) => (e.id === actualId ? previous : e));
+      mutateSourceEvents((events) => events.map((item) => (
+        item.id === actualId ? previous : item
+      )));
       broadcastCalendarChange({ eventId: actualId, action: 'update' });
       throw err;
     }
@@ -510,7 +754,9 @@ export async function updateEvent(eventId: string, updates: Partial<CalendarEven
 
   // 낙관적 업데이트: 캐시 먼저 업데이트
   const previous = { ...existing };
-  eventCache = eventCache.map((e) => (e.id === actualId ? { ...e, ...updates } : e));
+  mutateSourceEvents((events) => events.map((item) => (
+    item.id === actualId ? { ...item, ...updates } : item
+  )));
   broadcastCalendarChange({ eventId: actualId, action: 'update' });
 
   try {
@@ -529,7 +775,9 @@ export async function updateEvent(eventId: string, updates: Partial<CalendarEven
     });
   } catch (err) {
     // 실패: 롤백
-    eventCache = eventCache.map((e) => (e.id === actualId ? previous : e));
+    mutateSourceEvents((events) => events.map((item) => (
+      item.id === actualId ? previous : item
+    )));
     broadcastCalendarChange({ eventId: actualId, action: 'update' });
     throw err;
   }
@@ -540,16 +788,37 @@ export async function deleteEvent(eventId: string): Promise<void> {
   if (!existing) return;
   const actualId = existing.id; // GCal ID
 
+  // ── B flow 공유 캘린더 이벤트 분기 — calendar:* IPC 경유 ──
+  if (existing.sourceCalendarId?.startsWith(BFLOW_CAL_PREFIX)) {
+    const previousMapping = localToGcalId.get(eventId);
+    mutateSourceEvents((events) => events.filter((item) => item.id !== actualId));
+    localToGcalId.delete(eventId);
+    broadcastCalendarChange({ eventId: actualId, action: 'delete' });
+    try {
+      await window.electronAPI.calendarEventDelete(actualId);
+    } catch (err) {
+      if (!bflowEvents.some((item) => item.id === actualId)) bflowEvents.push(existing);
+      rebuildEventCache();
+      if (previousMapping !== undefined) localToGcalId.set(eventId, previousMapping);
+      broadcastCalendarChange({ eventId: actualId, action: 'add' });
+      throw err;
+    }
+    return;
+  }
+
   // ── 비공개 이벤트 분기 — Supabase delete ──
   if (existing.sourceCalendarId === PRIVATE_CAL_ID) {
     const previous = existing;
-    eventCache = eventCache.filter((e) => e.id !== actualId);
+    const previousMapping = localToGcalId.get(eventId);
+    mutateSourceEvents((events) => events.filter((item) => item.id !== actualId));
     localToGcalId.delete(eventId);
     broadcastCalendarChange({ eventId: actualId, action: 'delete' });
     try {
       await window.electronAPI.supabaseDeletePrivateEvent(actualId);
     } catch (err) {
-      eventCache = [...eventCache, previous];
+      if (!bflowEvents.some((item) => item.id === actualId)) bflowEvents.push(previous);
+      rebuildEventCache();
+      if (previousMapping !== undefined) localToGcalId.set(eventId, previousMapping);
       broadcastCalendarChange({ eventId: actualId, action: 'add' });
       throw err;
     }
@@ -563,7 +832,7 @@ export async function deleteEvent(eventId: string): Promise<void> {
   // 404 등 실패 시 catch에서 롤백 처리.
   const isLocalOnly = !existing.sourceCalendarId;
   if (isLocalOnly) {
-    eventCache = eventCache.filter((e) => e.id !== actualId);
+    mutateSourceEvents((events) => events.filter((item) => item.id !== actualId));
     localToGcalId.delete(eventId);
     broadcastCalendarChange({ eventId: actualId, action: 'delete' });
     return;
@@ -574,7 +843,8 @@ export async function deleteEvent(eventId: string): Promise<void> {
   if (!calId) return;
 
   // 낙관적 업데이트: 캐시 먼저 업데이트
-  eventCache = eventCache.filter((e) => e.id !== actualId);
+  const previousMapping = localToGcalId.get(eventId);
+  mutateSourceEvents((events) => events.filter((item) => item.id !== actualId));
   // 매핑도 정리
   localToGcalId.delete(eventId);
   broadcastCalendarChange({ eventId: actualId, action: 'delete' });
@@ -583,7 +853,9 @@ export async function deleteEvent(eventId: string): Promise<void> {
     await gcalService.deleteEvent(calId, actualId);
   } catch (err) {
     // 실패: 롤백
-    eventCache = [...eventCache, existing];
+    if (!googleEvents.some((item) => item.id === actualId)) googleEvents.push(existing);
+    rebuildEventCache();
+    if (previousMapping !== undefined) localToGcalId.set(eventId, previousMapping);
     broadcastCalendarChange({ eventId: actualId, action: 'add' });
     throw err;
   }
