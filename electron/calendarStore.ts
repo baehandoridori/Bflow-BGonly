@@ -304,34 +304,9 @@ export async function listTags(): Promise<CalendarTagRow[]> {
 export async function saveTags(
   tags: Array<{ id?: string; name: string; color: string; sort_order: number }>,
 ): Promise<CalendarTagRow[]> {
-  const existing = await readTags(false);
-  const submittedIds = new Set(tags.flatMap((tag) => (tag.id ? [tag.id] : [])));
-  const deletedIds = existing
-    .map((tag) => tag.id)
-    .filter((id) => !submittedIds.has(id));
-
-  if (deletedIds.length > 0) {
-    const { error } = await supabase.from('calendar_tags').delete().in('id', deletedIds);
-    throwIfError(error);
-  }
-
-  for (const tag of tags) {
-    if (tag.id) {
-      const { error } = await supabase
-        .from('calendar_tags')
-        .update({ name: tag.name, color: tag.color, sort_order: tag.sort_order })
-        .eq('id', tag.id);
-      throwIfError(error);
-      continue;
-    }
-
-    const { error } = await supabase
-      .from('calendar_tags')
-      .insert({ name: tag.name, color: tag.color, sort_order: tag.sort_order });
-    throwIfError(error);
-  }
-
-  return readTags(false);
+  const { data, error } = await supabase.rpc('replace_calendar_tags', { p_tags: tags });
+  throwIfError(error);
+  return (data ?? []) as CalendarTagRow[];
 }
 
 // ── 알림 (PR2 는 저장소 함수만 — insert 호출은 PR4) ──

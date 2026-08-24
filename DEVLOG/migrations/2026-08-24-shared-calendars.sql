@@ -114,6 +114,107 @@ $$;
 COMMENT ON FUNCTION public.replace_calendar_members(UUID, JSONB) IS
   '캘린더 멤버 전체 교체 atomic RPC. 빈 배열은 전체 삭제, NULL/비배열/필드 누락/중복 user_id 는 변경 전 거부.';
 
+-- ── 2-1) 태그 원자적 전체 교체 RPC ────────────────────────────
+-- 함수 안의 예외는 호출 전체를 rollback한다. 따라서 태그 삭제의 FK SET NULL도 후속 실패 시 복구된다.
+CREATE OR REPLACE FUNCTION public.replace_calendar_tags(p_tags JSONB)
+RETURNS TABLE (id UUID, name TEXT, color TEXT, sort_order INTEGER)
+LANGUAGE plpgsql
+SET search_path = public
+AS $$
+BEGIN
+  IF p_tags IS NULL OR jsonb_typeof(p_tags) <> 'array' THEN
+    RAISE EXCEPTION 'p_tags must be a JSON array' USING ERRCODE = '22023';
+  END IF;
+
+  IF EXISTS (
+    SELECT 1
+    FROM jsonb_array_elements(p_tags) AS tag(value)
+    WHERE jsonb_typeof(tag.value) <> 'object'
+       OR NOT (tag.value ? 'name')
+       OR jsonb_typeof(tag.value->'name') <> 'string'
+       OR btrim(tag.value->>'name') = ''
+       OR NOT (tag.value ? 'color')
+       OR jsonb_typeof(tag.value->'color') <> 'string'
+       OR btrim(tag.value->>'color') = ''
+       OR NOT (tag.value ? 'sort_order')
+       OR jsonb_typeof(tag.value->'sort_order') <> 'number'
+       OR tag.value->>'sort_order' !~ '^-?[0-9]+$'
+       OR (
+         tag.value ? 'id'
+         AND (
+           jsonb_typeof(tag.value->'id') <> 'string'
+           OR tag.value->>'id' !~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
+         )
+       )
+  ) THEN
+    RAISE EXCEPTION 'Each calendar tag requires name, color, and sort_order; id must be a UUID when provided'
+      USING ERRCODE = '22023';
+  END IF;
+
+  IF EXISTS (
+    SELECT submitted.id
+    FROM jsonb_to_recordset(p_tags) AS submitted(id UUID, name TEXT, color TEXT, sort_order INTEGER)
+    WHERE submitted.id IS NOT NULL
+    GROUP BY submitted.id
+    HAVING count(*) > 1
+  ) THEN
+    RAISE EXCEPTION 'Duplicate calendar tag id' USING ERRCODE = '23505';
+  END IF;
+
+  IF EXISTS (
+    SELECT submitted.name
+    FROM jsonb_to_recordset(p_tags) AS submitted(id UUID, name TEXT, color TEXT, sort_order INTEGER)
+    GROUP BY submitted.name
+    HAVING count(*) > 1
+  ) THEN
+    RAISE EXCEPTION 'Duplicate calendar tag name' USING ERRCODE = '23505';
+  END IF;
+
+  IF EXISTS (
+    SELECT 1
+    FROM jsonb_to_recordset(p_tags) AS submitted(id UUID, name TEXT, color TEXT, sort_order INTEGER)
+    LEFT JOIN calendar_tags AS current ON current.id = submitted.id
+    WHERE submitted.id IS NOT NULL AND current.id IS NULL
+  ) THEN
+    RAISE EXCEPTION 'Unknown calendar tag id' USING ERRCODE = 'P0002';
+  END IF;
+
+  -- 제출 목록에 없는 태그만 삭제한다. calendar_events.tag_id 는 FK의 ON DELETE SET NULL을 따른다.
+  DELETE FROM calendar_tags
+  WHERE id NOT IN (
+    SELECT submitted.id
+    FROM jsonb_to_recordset(p_tags) AS submitted(id UUID, name TEXT, color TEXT, sort_order INTEGER)
+    WHERE submitted.id IS NOT NULL
+  );
+
+  -- 기존 이름을 transaction-local 임시 이름으로 옮겨 이름 swap도 UNIQUE 충돌 없이 처리한다.
+  UPDATE calendar_tags AS target
+  SET name = format('__calendar_tags_tmp_%s_%s', txid_current(), target.id)
+  FROM jsonb_to_recordset(p_tags) AS submitted(id UUID, name TEXT, color TEXT, sort_order INTEGER)
+  WHERE submitted.id IS NOT NULL AND target.id = submitted.id;
+
+  UPDATE calendar_tags AS target
+  SET name = submitted.name,
+      color = submitted.color,
+      sort_order = submitted.sort_order
+  FROM jsonb_to_recordset(p_tags) AS submitted(id UUID, name TEXT, color TEXT, sort_order INTEGER)
+  WHERE submitted.id IS NOT NULL AND target.id = submitted.id;
+
+  INSERT INTO calendar_tags (name, color, sort_order)
+  SELECT submitted.name, submitted.color, submitted.sort_order
+  FROM jsonb_to_recordset(p_tags) AS submitted(id UUID, name TEXT, color TEXT, sort_order INTEGER)
+  WHERE submitted.id IS NULL;
+
+  RETURN QUERY
+  SELECT tag.id, tag.name, tag.color, tag.sort_order
+  FROM calendar_tags AS tag
+  ORDER BY tag.sort_order, tag.id;
+END;
+$$;
+
+COMMENT ON FUNCTION public.replace_calendar_tags(JSONB) IS
+  '태그 최종 목록을 단일 트랜잭션으로 교체. 검증 실패나 후속 실패 시 삭제·수정·FK SET NULL을 함께 rollback한다.';
+
 -- ── 3) RLS allow_all (기존 관례: supabase-init.sql:255-259 의 pg_policies 존재 검사 패턴) ──
 DO $$
 DECLARE t TEXT;
@@ -127,12 +228,26 @@ BEGIN
 END $$;
 
 -- ── 4) 태그 시드 4행 (설계서 §4, 한솔이 태그 관리에서 수정 가능) ──
-INSERT INTO calendar_tags (name, color, sort_order) VALUES
-  ('업로드', '#E17055', 0),
-  ('가편',   '#74B9FF', 1),
-  ('대본',   '#FDCB6E', 2),
-  ('회의',   '#A29BFE', 3)
-ON CONFLICT (name) DO NOTHING;
+-- marker가 남으므로 관리자가 이름을 바꾸거나 지운 뒤 재실행해도 기본 태그를 되살리지 않는다.
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1
+    FROM metadata
+    WHERE type = 'migration-seed'
+      AND key = 'calendar-tags-v1'
+  ) THEN
+    INSERT INTO calendar_tags (name, color, sort_order) VALUES
+      ('업로드', '#E17055', 0),
+      ('가편',   '#74B9FF', 1),
+      ('대본',   '#FDCB6E', 2),
+      ('회의',   '#A29BFE', 3)
+    ON CONFLICT (name) DO NOTHING;
+
+    INSERT INTO metadata (type, key, value)
+    VALUES ('migration-seed', 'calendar-tags-v1', 'seeded');
+  END IF;
+END $$;
 
 -- ── 5) 기존 "나만 보기" 데이터 이관 (설계서 §4.1, 재실행 안전) ──
 -- 5-1) private_calendar_events 사용자별 개인 캘린더 upsert
