@@ -49,6 +49,7 @@ type Calls = {
   bflowCreates: Array<Record<string, unknown>>;
   bflowDeletes: string[];
   googleCreates: Array<{ calendarId: string; input: unknown }>;
+  googleDeletes: Array<{ calendarId: string; eventId: string }>;
 };
 
 let bundleSource: Promise<string> | undefined;
@@ -116,6 +117,8 @@ async function bundledServiceSource(): Promise<string> {
 async function createHarness(options: {
   rows: CalendarEventRow[];
   failGoogleCreate?: boolean;
+  bflowDeleteError?: Error;
+  googleDeleteError?: Error;
 }): Promise<{ service: ServiceModule; calls: Calls; restore(): void }> {
   const globalScope = globalThis as Record<string, unknown>;
   const prior = new Map<string, { exists: boolean; value: unknown }>();
@@ -144,6 +147,7 @@ async function createHarness(options: {
     bflowCreates: [],
     bflowDeletes: [],
     googleCreates: [],
+    googleDeletes: [],
   };
   const calendars = [calendarRow('personal-cal', true), calendarRow('shared-cal', false)];
   const electronAPI = {
@@ -155,7 +159,10 @@ async function createHarness(options: {
       return { ...input, id: 'created-private-event' };
     },
     calendarEventUpdate: async () => {},
-    calendarEventDelete: async (id: string) => { calls.bflowDeletes.push(id); },
+    calendarEventDelete: async (id: string) => {
+      calls.bflowDeletes.push(id);
+      if (options.bflowDeleteError) throw options.bflowDeleteError;
+    },
     calendarBroadcastChange: async () => ({ ok: true }),
     supabaseReadPrivateEvents: async () => [],
     supabaseAddPrivateEvent: async () => ({ id: 'legacy-private-event' }),
@@ -168,7 +175,10 @@ async function createHarness(options: {
       return 'created-google-event';
     },
     gcalUpdateEvent: async () => {},
-    gcalDeleteEvent: async () => {},
+    gcalDeleteEvent: async (calendarId: string, eventId: string) => {
+      calls.googleDeletes.push({ calendarId, eventId });
+      if (options.googleDeleteError) throw options.googleDeleteError;
+    },
   };
   globalScope.window = Object.assign(new EventTarget(), { electronAPI });
 
@@ -265,6 +275,62 @@ test('failed public replacement leaves the personal B flow source intact', async
     assert.deepEqual(harness.calls.bflowDeletes, []);
     const events = await harness.service.getEvents();
     assert.equal(events.find((event) => event.id === 'personal-event')?.isPrivate, true);
+  } finally {
+    harness.restore();
+  }
+});
+
+test('failed original delete compensates the Google replacement and rejects the privacy migration', async () => {
+  const originalDeleteError = new Error('original B flow delete failed');
+  const harness = await createHarness({
+    rows: [eventRow('personal-event', 'personal-cal')],
+    bflowDeleteError: originalDeleteError,
+  });
+  try {
+    await harness.service.loadBflowEvents();
+
+    await assert.rejects(
+      harness.service.updateEvent('personal-event', { isPrivate: false }),
+      originalDeleteError,
+    );
+    assert.deepEqual(harness.calls.bflowDeletes, ['personal-event']);
+    assert.deepEqual(harness.calls.googleDeletes, [{
+      calendarId: 'primary',
+      eventId: 'created-google-event',
+    }]);
+    const events = await harness.service.getEvents();
+    assert.deepEqual(events.map((event) => event.id), ['personal-event']);
+  } finally {
+    harness.restore();
+  }
+});
+
+test('compensation failure retains both deletion errors with source and replacement IDs', async () => {
+  const originalDeleteError = new Error('original B flow delete failed');
+  const replacementDeleteError = new Error('replacement Google delete failed');
+  const harness = await createHarness({
+    rows: [eventRow('personal-event', 'personal-cal')],
+    bflowDeleteError: originalDeleteError,
+    googleDeleteError: replacementDeleteError,
+  });
+  try {
+    await harness.service.loadBflowEvents();
+
+    let thrown: unknown;
+    try {
+      await harness.service.updateEvent('personal-event', { isPrivate: false });
+    } catch (error) {
+      thrown = error;
+    }
+
+    assert.ok(thrown instanceof Error);
+    assert.equal(thrown.name, 'PrivacyMigrationCompensationError');
+    assert.match(thrown.message, /personal-event/);
+    assert.match(thrown.message, /created-google-event/);
+    assert.deepEqual(
+      (thrown as Error & { errors: readonly unknown[] }).errors,
+      [originalDeleteError, replacementDeleteError],
+    );
   } finally {
     harness.restore();
   }

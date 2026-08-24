@@ -37,6 +37,21 @@ let legacyPrivateEvents: LegacyPrivateEventState = {
   status: 'unknown',
 };
 
+class PrivacyMigrationCompensationError extends Error {
+  readonly errors: readonly [unknown, unknown];
+
+  constructor(
+    originalEventId: string,
+    replacementEventId: string,
+    originalDeleteError: unknown,
+    compensationDeleteError: unknown,
+  ) {
+    super(`[calendar] privacy migration failed: original ${originalEventId} delete and replacement ${replacementEventId} compensation delete both failed`);
+    this.name = 'PrivacyMigrationCompensationError';
+    this.errors = [originalDeleteError, compensationDeleteError];
+  }
+}
+
 async function readLegacyPrivateEventsForUser(userId: string): Promise<RawPrivateEvent[]> {
   const rows = await window.electronAPI.supabaseReadPrivateEvents(userId);
   legacyPrivateEvents = {
@@ -788,11 +803,23 @@ export async function updateEvent(eventId: string, updates: Partial<CalendarEven
     // 1) 새 저장소에 생성 — 실패하면 원본이 그대로 남아있어 데이터 손실 없음.
     await addEvent(fresh);
     // 2) 새 이벤트가 안전하게 자리잡은 뒤 기존 저장소에서 제거.
-    //    여기서 실패하더라도 사용자에게는 '이전 성공' — 중복이 잠깐 남을 뿐 데이터 손실 아님.
     try {
       await deleteEvent(eventId);
-    } catch (err) {
-      console.error('[calendar] privacy migration: 새 저장소 생성은 성공했으나 기존 저장소 삭제 실패. 중복 이벤트가 남을 수 있음:', err);
+    } catch (originalDeleteError) {
+      // 원본 삭제가 실패하면 create-first 단계의 replacement도 되돌려야 reload 후
+      // 영구 중복이 남지 않는다. deleteEvent 는 실패 시 원본 cache 를 복원한다.
+      const replacementId = (await resolveEvent(freshLocalId))?.id ?? freshLocalId;
+      try {
+        await deleteEvent(freshLocalId);
+      } catch (compensationDeleteError) {
+        throw new PrivacyMigrationCompensationError(
+          actualId,
+          replacementId,
+          originalDeleteError,
+          compensationDeleteError,
+        );
+      }
+      throw originalDeleteError;
     }
     // 3) 원본 eventId 를 들고 있는 caller 가 stale id 로 이어지는 update/delete 를 호출해도
     //    resolveEvent 가 매핑 체인을 타고 찾을 수 있도록 oldId → freshLocalId 매핑 등록.
