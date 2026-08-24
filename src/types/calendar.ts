@@ -52,7 +52,6 @@ export interface CalendarEvent {
   // 휴가 전용 필드 (type === 'vacation')
   vacationType?: string;     // 연차, 오전반차, 오후반차, 대체휴가, 특별휴가
   vacationUserName?: string; // 휴가 사용자 이름
-  vacationRowIndex?: number; // Vacation Log 행 번호 (취소용)
   isReadOnly?: boolean;      // 드래그/편집 불가 (휴가 이벤트)
 
   // GCal 연동: 이벤트가 저장된 원본 캘린더 ID (수정/삭제 시 사용)
@@ -66,9 +65,6 @@ export interface CalendarEvent {
    */
   isPrivate?: boolean;
 }
-
-/** 이벤트 저장소 */
-export type CalendarStore = CalendarEvent[];
 
 /** Google Calendar 연동 설정 */
 export interface GCalSettings {
