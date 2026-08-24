@@ -275,18 +275,63 @@ ON CONFLICT (owner_id) WHERE is_personal DO NOTHING;
 
 -- 5-2) 이벤트 복사 (id·created_at 유지, all_day=true, color 는 의도적으로 버림 — 설계서 §4.1)
 --      구 created_by 는 이름 문자열이라 FK(users.id) 불만족 → 소유자 user_id 로 대체.
---      구 start_date 는 'YYYY-MM-DD 또는 ISO datetime' — 앞 10자만 잘라 DATE 캐스팅.
+--      구 날짜는 'YYYY-MM-DD 또는 ISO datetime'. 실제 존재하는 날짜만 복사하고,
+--      잘못된 날짜 행은 호환·정정용 private_calendar_events 에 그대로 남긴다.
+WITH legacy_raw AS MATERIALIZED (
+  SELECT p.*, c.id AS target_calendar_id,
+    substring(p.start_date, 1, 10) AS start_raw,
+    substring(p.end_date, 1, 10) AS end_raw
+  FROM private_calendar_events p
+  JOIN calendars c ON c.owner_id = p.user_id AND c.is_personal
+),
+legacy_parts AS MATERIALIZED (
+  SELECT legacy_raw.*,
+    CASE WHEN start_raw ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}$'
+      THEN split_part(start_raw, '-', 1)::integer END AS start_year,
+    CASE WHEN start_raw ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}$'
+      THEN split_part(start_raw, '-', 2)::integer END AS start_month,
+    CASE WHEN start_raw ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}$'
+      THEN split_part(start_raw, '-', 3)::integer END AS start_day,
+    CASE WHEN end_raw ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}$'
+      THEN split_part(end_raw, '-', 1)::integer END AS end_year,
+    CASE WHEN end_raw ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}$'
+      THEN split_part(end_raw, '-', 2)::integer END AS end_month,
+    CASE WHEN end_raw ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}$'
+      THEN split_part(end_raw, '-', 3)::integer END AS end_day
+  FROM legacy_raw
+),
+legacy_parsed AS MATERIALIZED (
+  SELECT legacy_parts.*,
+    CASE
+      WHEN start_year BETWEEN 1 AND 9999
+       AND start_month BETWEEN 1 AND 12
+       AND start_day BETWEEN 1 AND 31
+      THEN CASE
+        WHEN extract(month FROM (make_date(start_year, start_month, 1) + start_day - 1)) = start_month
+        THEN make_date(start_year, start_month, 1) + start_day - 1
+      END
+    END AS migrated_start_date,
+    CASE
+      WHEN end_year BETWEEN 1 AND 9999
+       AND end_month BETWEEN 1 AND 12
+       AND end_day BETWEEN 1 AND 31
+      THEN CASE
+        WHEN extract(month FROM (make_date(end_year, end_month, 1) + end_day - 1)) = end_month
+        THEN make_date(end_year, end_month, 1) + end_day - 1
+      END
+    END AS migrated_end_date
+  FROM legacy_parts
+)
 INSERT INTO calendar_events (id, calendar_id, title, memo, all_day, start_date, end_date,
   linked_episode, linked_part, linked_sheet_name, linked_scene_id, linked_department,
   linked_todo_id, created_by, created_at, updated_at)
-SELECT p.id, c.id, p.title, p.memo, true,
-  substring(p.start_date, 1, 10)::date, substring(p.end_date, 1, 10)::date,
+SELECT p.id, p.target_calendar_id, p.title, p.memo, true,
+  p.migrated_start_date, p.migrated_end_date,
   p.linked_episode, p.linked_part, p.linked_sheet_name, p.linked_scene_id, p.linked_department,
   p.linked_todo_id, p.user_id, p.created_at, p.updated_at
-FROM private_calendar_events p
-JOIN calendars c ON c.owner_id = p.user_id AND c.is_personal
-WHERE substring(p.start_date, 1, 10) ~ '^\d{4}-\d{2}-\d{2}$'
-  AND substring(p.end_date, 1, 10) ~ '^\d{4}-\d{2}-\d{2}$'
+FROM legacy_parsed p
+WHERE p.migrated_start_date IS NOT NULL
+  AND p.migrated_end_date IS NOT NULL
 ON CONFLICT (id) DO NOTHING;
 
 -- 5-3) private_calendar_events 테이블은 이번엔 남겨둠(롤백 + 구버전 앱 호환 — 설계서 §12).

@@ -68,3 +68,27 @@ test('calendar tag seed runs once behind a metadata marker without moving seed r
   assert.match(seedGate, /LOCK TABLE metadata IN SHARE ROW EXCLUSIVE MODE;/);
   assert.match(seedGate, /key = 'calendar-tags-v1'/);
 });
+
+test('legacy private-event migration quarantines impossible dates without exception-prone DATE casts', () => {
+  const sql = readFileSync(migrationPath, 'utf8');
+  const copy = between(
+    sql,
+    '-- 5-2) 이벤트 복사',
+    '-- 5-3) private_calendar_events 테이블은 이번엔 남겨둠',
+  );
+
+  assert.doesNotMatch(copy, /::date\b/i);
+  assert.match(copy, /WITH legacy_raw AS MATERIALIZED/);
+  assert.match(copy, /legacy_parts AS MATERIALIZED/);
+  assert.match(copy, /legacy_parsed AS MATERIALIZED/);
+  assert.match(copy, /start_year BETWEEN 1 AND 9999/);
+  assert.match(copy, /start_month BETWEEN 1 AND 12/);
+  assert.match(copy, /start_day BETWEEN 1 AND 31/);
+  assert.match(copy, /extract\(month FROM \(make_date\(start_year, start_month, 1\) \+ start_day - 1\)\) = start_month/);
+  assert.match(copy, /end_year BETWEEN 1 AND 9999/);
+  assert.match(copy, /end_month BETWEEN 1 AND 12/);
+  assert.match(copy, /end_day BETWEEN 1 AND 31/);
+  assert.match(copy, /extract\(month FROM \(make_date\(end_year, end_month, 1\) \+ end_day - 1\)\) = end_month/);
+  assert.match(copy, /migrated_start_date IS NOT NULL/);
+  assert.match(copy, /migrated_end_date IS NOT NULL/);
+});
