@@ -317,6 +317,7 @@ let eventCache: CalendarEvent[] = [];
 let googleCacheReady = false;
 let syncAllGeneration = 0;
 let bflowLoadGeneration = 0;
+let bflowMutationInFlight = 0;
 
 export function isGoogleCacheReady(): boolean {
   return googleCacheReady;
@@ -331,13 +332,41 @@ function rebuildEventCache(): void {
 
 type CalendarCacheSource = 'bflow' | 'google';
 
+function invalidateBflowLoads(): void {
+  bflowLoadGeneration += 1;
+}
+
+function beginBflowMutation(): void {
+  bflowMutationInFlight += 1;
+  invalidateBflowLoads();
+}
+
+function finishBflowMutation(): void {
+  bflowMutationInFlight -= 1;
+  invalidateBflowLoads();
+}
+
+async function withBflowMutation<T>(mutation: () => Promise<T>): Promise<T> {
+  beginBflowMutation();
+  try {
+    return await mutation();
+  } finally {
+    finishBflowMutation();
+  }
+}
+
 /** 낙관적 CRUD 공용 헬퍼 — 확인된 단일 source만 변경한 뒤 병합 캐시를 재조립한다. */
 function mutateSourceEvents(
   source: CalendarCacheSource,
   fn: (events: CalendarEvent[]) => CalendarEvent[],
 ): void {
-  if (source === 'bflow') bflowEvents = fn(bflowEvents);
-  else googleEvents = fn(googleEvents);
+  if (source === 'bflow') {
+    // CRUD가 시작된 뒤 도착한 이전 load 결과가 낙관적 변경을 되돌리지 못하게 한다.
+    invalidateBflowLoads();
+    bflowEvents = fn(bflowEvents);
+  } else {
+    googleEvents = fn(googleEvents);
+  }
   rebuildEventCache();
 }
 
@@ -382,7 +411,7 @@ async function loadBflowEventsInternal(options: LoadBflowEventsOptions = {}): Pr
     }
 
     // 단독 로드와 syncAll을 포함해 가장 늦게 시작한 요청만 B flow/legacy 상태를 함께 반영한다.
-    if (requestGeneration !== bflowLoadGeneration) return;
+    if (requestGeneration !== bflowLoadGeneration || bflowMutationInFlight > 0) return;
     legacyPrivateEvents = nextLegacyPrivateEvents;
     bflowEvents = next;
     rebuildEventCache();
@@ -676,46 +705,47 @@ async function resolveEvent(eventId: string): Promise<CalendarEvent | undefined>
 }
 
 async function addBflowEvent(event: CalendarEvent, calendarId: string): Promise<void> {
-  const localId = event.id;
-  const optimistic = withBflowCalendarPresentation({
-    ...event,
-    type: bflowEventType(event),
-    allDay: event.allDay ?? true,
-  }, calendarId);
-  bflowEvents.push(optimistic);
-  rebuildEventCache();
-  broadcastCalendarChange({ eventId: localId, action: 'add' });
+  await withBflowMutation(async () => {
+    const localId = event.id;
+    const optimistic = withBflowCalendarPresentation({
+      ...event,
+      type: bflowEventType(event),
+      allDay: event.allDay ?? true,
+    }, calendarId);
+    mutateSourceEvents('bflow', (events) => [...events, optimistic]);
+    broadcastCalendarChange({ eventId: localId, action: 'add' });
 
-  try {
-    const inserted = await window.electronAPI.calendarEventCreate({
-      calendar_id: calendarId,
-      title: event.title,
-      memo: event.memo,
-      tag_id: event.tagId ?? null,
-      all_day: event.allDay ?? true,
-      start_date: event.startDate,
-      end_date: event.endDate,
-      start_time: event.startTime ?? null,
-      end_time: event.endTime ?? null,
-      linked_episode: event.linkedEpisode ?? null,
-      linked_part: event.linkedPart ?? null,
-      linked_sheet_name: event.linkedSheetName ?? null,
-      linked_scene_id: event.linkedSceneId ?? null,
-      linked_department: event.linkedDepartment ?? null,
-      linked_todo_id: event.linkedTodoId ?? null,
-    });
-    if (localId !== inserted.id) {
-      localToGcalId.set(localId, inserted.id);
+    try {
+      const inserted = await window.electronAPI.calendarEventCreate({
+        calendar_id: calendarId,
+        title: event.title,
+        memo: event.memo,
+        tag_id: event.tagId ?? null,
+        all_day: event.allDay ?? true,
+        start_date: event.startDate,
+        end_date: event.endDate,
+        start_time: event.startTime ?? null,
+        end_time: event.endTime ?? null,
+        linked_episode: event.linkedEpisode ?? null,
+        linked_part: event.linkedPart ?? null,
+        linked_sheet_name: event.linkedSheetName ?? null,
+        linked_scene_id: event.linkedSceneId ?? null,
+        linked_department: event.linkedDepartment ?? null,
+        linked_todo_id: event.linkedTodoId ?? null,
+      });
+      if (localId !== inserted.id) {
+        localToGcalId.set(localId, inserted.id);
+      }
+      mutateSourceEvents('bflow', (events) => events.map((item) => (
+        item.id === localId ? { ...item, id: inserted.id } : item
+      )));
+      broadcastCalendarChange({ eventId: inserted.id, action: 'update' });
+    } catch (err) {
+      mutateSourceEvents('bflow', (events) => events.filter((item) => item.id !== localId));
+      broadcastCalendarChange();
+      throw err;
     }
-    mutateSourceEvents('bflow', (events) => events.map((item) => (
-      item.id === localId ? { ...item, id: inserted.id } : item
-    )));
-    broadcastCalendarChange({ eventId: inserted.id, action: 'update' });
-  } catch (err) {
-    mutateSourceEvents('bflow', (events) => events.filter((item) => item.id !== localId));
-    broadcastCalendarChange();
-    throw err;
-  }
+  });
 }
 
 export async function addEvent(event: CalendarEvent): Promise<void> {
@@ -737,47 +767,48 @@ export async function addEvent(event: CalendarEvent): Promise<void> {
       return;
     }
 
-    const localId = event.id;
-    // 낙관적 업데이트
-    bflowEvents.push({
-      ...event,
-      sourceCalendarId: PRIVATE_CAL_ID,
-      isPrivate: true,
-      source: 'bflow',
-    });
-    rebuildEventCache();
-    broadcastCalendarChange({ eventId: localId, action: 'add' });
+    await withBflowMutation(async () => {
+      const localId = event.id;
+      // 낙관적 업데이트
+      mutateSourceEvents('bflow', (events) => [...events, {
+        ...event,
+        sourceCalendarId: PRIVATE_CAL_ID,
+        isPrivate: true,
+        source: 'bflow',
+      }]);
+      broadcastCalendarChange({ eventId: localId, action: 'add' });
 
-    try {
-      const inserted = await window.electronAPI.supabaseAddPrivateEvent({
-        user_id: userId,
-        title: event.title,
-        memo: event.memo,
-        color: event.color,
-        type: event.type,
-        start_date: event.startDate,
-        end_date: event.endDate,
-        linked_episode: event.linkedEpisode ?? null,
-        linked_part: event.linkedPart ?? null,
-        linked_sheet_name: event.linkedSheetName ?? null,
-        linked_scene_id: event.linkedSceneId ?? null,
-        linked_department: event.linkedDepartment ?? null,
-        linked_todo_id: event.linkedTodoId ?? null,
-        created_by: event.createdBy,
-      });
-      // 로컬 ID → Supabase UUID 교체
-      if (localId !== inserted.id) {
-        localToGcalId.set(localId, inserted.id);
+      try {
+        const inserted = await window.electronAPI.supabaseAddPrivateEvent({
+          user_id: userId,
+          title: event.title,
+          memo: event.memo,
+          color: event.color,
+          type: event.type,
+          start_date: event.startDate,
+          end_date: event.endDate,
+          linked_episode: event.linkedEpisode ?? null,
+          linked_part: event.linkedPart ?? null,
+          linked_sheet_name: event.linkedSheetName ?? null,
+          linked_scene_id: event.linkedSceneId ?? null,
+          linked_department: event.linkedDepartment ?? null,
+          linked_todo_id: event.linkedTodoId ?? null,
+          created_by: event.createdBy,
+        });
+        // 로컬 ID → Supabase UUID 교체
+        if (localId !== inserted.id) {
+          localToGcalId.set(localId, inserted.id);
+        }
+        mutateSourceEvents('bflow', (events) => events.map((item) => (
+          item.id === localId ? { ...item, id: inserted.id } : item
+        )));
+        broadcastCalendarChange({ eventId: inserted.id, action: 'update' });
+      } catch (err) {
+        mutateSourceEvents('bflow', (events) => events.filter((item) => item.id !== localId));
+        broadcastCalendarChange();
+        throw err;
       }
-      mutateSourceEvents('bflow', (events) => events.map((item) => (
-        item.id === localId ? { ...item, id: inserted.id } : item
-      )));
-      broadcastCalendarChange({ eventId: inserted.id, action: 'update' });
-    } catch (err) {
-      mutateSourceEvents('bflow', (events) => events.filter((item) => item.id !== localId));
-      broadcastCalendarChange();
-      throw err;
-    }
+    });
     return;
   }
 
@@ -859,36 +890,38 @@ export async function updateEvent(eventId: string, updates: Partial<CalendarEven
       isReadOnly: undefined,
       createdAt: merged.createdAt || new Date().toISOString(),
     };
-    // 1) 새 저장소에 생성 — 실패하면 원본이 그대로 남아있어 데이터 손실 없음.
-    await addEvent(fresh);
-    // 2) 새 이벤트가 안전하게 자리잡은 뒤 기존 저장소에서 제거.
-    try {
-      await deleteEvent(eventId);
-    } catch (originalDeleteError) {
-      // 원본 삭제가 실패하면 create-first 단계의 replacement도 되돌려야 reload 후
-      // 영구 중복이 남지 않는다. deleteEvent 는 실패 시 원본 cache 를 복원한다.
-      const replacementId = (await resolveEvent(freshLocalId))?.id ?? freshLocalId;
+    await withBflowMutation(async () => {
+      // 1) 새 저장소에 생성 — 실패하면 원본이 그대로 남아있어 데이터 손실 없음.
+      await addEvent(fresh);
+      // 2) 새 이벤트가 안전하게 자리잡은 뒤 기존 저장소에서 제거.
       try {
-        await deleteEvent(freshLocalId);
-      } catch (compensationDeleteError) {
-        throw new PrivacyMigrationCompensationError(
-          actualId,
-          replacementId,
-          originalDeleteError,
-          compensationDeleteError,
-        );
+        await deleteEvent(eventId);
+      } catch (originalDeleteError) {
+        // 원본 삭제가 실패하면 create-first 단계의 replacement도 되돌려야 reload 후
+        // 영구 중복이 남지 않는다. deleteEvent 는 실패 시 원본 cache 를 복원한다.
+        const replacementId = (await resolveEvent(freshLocalId))?.id ?? freshLocalId;
+        try {
+          await deleteEvent(freshLocalId);
+        } catch (compensationDeleteError) {
+          throw new PrivacyMigrationCompensationError(
+            actualId,
+            replacementId,
+            originalDeleteError,
+            compensationDeleteError,
+          );
+        }
+        throw originalDeleteError;
       }
-      throw originalDeleteError;
-    }
-    // 3) 원본 eventId 를 들고 있는 caller 가 stale id 로 이어지는 update/delete 를 호출해도
-    //    resolveEvent 가 매핑 체인을 타고 찾을 수 있도록 oldId → freshLocalId 매핑 등록.
-    //    addEvent 는 freshLocalId → 최종 저장소 real id 를 추가로 매핑하므로 2단계 체인으로 해결.
-    if (actualId !== freshLocalId) {
-      localToGcalId.set(actualId, freshLocalId);
-    }
-    if (eventId !== actualId && eventId !== freshLocalId) {
-      localToGcalId.set(eventId, freshLocalId);
-    }
+      // 3) 원본 eventId 를 들고 있는 caller 가 stale id 로 이어지는 update/delete 를 호출해도
+      //    resolveEvent 가 매핑 체인을 타고 찾을 수 있도록 oldId → freshLocalId 매핑 등록.
+      //    addEvent 는 freshLocalId → 최종 저장소 real id 를 추가로 매핑하므로 2단계 체인으로 해결.
+      if (actualId !== freshLocalId) {
+        localToGcalId.set(actualId, freshLocalId);
+      }
+      if (eventId !== actualId && eventId !== freshLocalId) {
+        localToGcalId.set(eventId, freshLocalId);
+      }
+    });
     return;
   }
 
@@ -896,55 +929,59 @@ export async function updateEvent(eventId: string, updates: Partial<CalendarEven
   if (existing.sourceCalendarId?.startsWith(BFLOW_CAL_PREFIX)) {
     const patch = toBflowEventUpdatePatch(updates);
     if (Object.keys(patch).length === 0) return;
-    const previous = { ...existing };
-    const optimistic = applyBflowEventUpdates(existing, updates);
-    mutateSourceEvents('bflow', (events) => events.map((item) => (
-      item.id === actualId ? optimistic : item
-    )));
-    broadcastCalendarChange({ eventId: actualId, action: 'update' });
-
-    try {
-      await window.electronAPI.calendarEventUpdate(actualId, patch);
-    } catch (err) {
+    await withBflowMutation(async () => {
+      const previous = { ...existing };
+      const optimistic = applyBflowEventUpdates(existing, updates);
       mutateSourceEvents('bflow', (events) => events.map((item) => (
-        item.id === actualId ? previous : item
+        item.id === actualId ? optimistic : item
       )));
       broadcastCalendarChange({ eventId: actualId, action: 'update' });
-      throw err;
-    }
+
+      try {
+        await window.electronAPI.calendarEventUpdate(actualId, patch);
+      } catch (err) {
+        mutateSourceEvents('bflow', (events) => events.map((item) => (
+          item.id === actualId ? previous : item
+        )));
+        broadcastCalendarChange({ eventId: actualId, action: 'update' });
+        throw err;
+      }
+    });
     return;
   }
 
   // ── 비공개 이벤트 분기 — Supabase update ──
   if (existing.sourceCalendarId === PRIVATE_CAL_ID) {
-    const previous = { ...existing };
-    mutateSourceEvents('bflow', (events) => events.map((item) => (
-      item.id === actualId ? { ...item, ...updates } : item
-    )));
-    broadcastCalendarChange({ eventId: actualId, action: 'update' });
-
-    try {
-      const patch: Record<string, unknown> = {};
-      if (updates.title !== undefined) patch.title = updates.title;
-      if (updates.memo !== undefined) patch.memo = updates.memo;
-      if (updates.color !== undefined) patch.color = updates.color;
-      if (updates.type !== undefined) patch.type = updates.type;
-      if (updates.startDate !== undefined) patch.start_date = updates.startDate;
-      if (updates.endDate !== undefined) patch.end_date = updates.endDate;
-      if (hasOwnEventUpdate(updates, 'linkedEpisode')) patch.linked_episode = updates.linkedEpisode ?? null;
-      if (hasOwnEventUpdate(updates, 'linkedPart')) patch.linked_part = updates.linkedPart ?? null;
-      if (hasOwnEventUpdate(updates, 'linkedSheetName')) patch.linked_sheet_name = updates.linkedSheetName ?? null;
-      if (hasOwnEventUpdate(updates, 'linkedSceneId')) patch.linked_scene_id = updates.linkedSceneId ?? null;
-      if (hasOwnEventUpdate(updates, 'linkedDepartment')) patch.linked_department = updates.linkedDepartment ?? null;
-      if (hasOwnEventUpdate(updates, 'linkedTodoId')) patch.linked_todo_id = updates.linkedTodoId ?? null;
-      await window.electronAPI.supabaseUpdatePrivateEvent(actualId, patch);
-    } catch (err) {
+    await withBflowMutation(async () => {
+      const previous = { ...existing };
       mutateSourceEvents('bflow', (events) => events.map((item) => (
-        item.id === actualId ? previous : item
+        item.id === actualId ? { ...item, ...updates } : item
       )));
       broadcastCalendarChange({ eventId: actualId, action: 'update' });
-      throw err;
-    }
+
+      try {
+        const patch: Record<string, unknown> = {};
+        if (updates.title !== undefined) patch.title = updates.title;
+        if (updates.memo !== undefined) patch.memo = updates.memo;
+        if (updates.color !== undefined) patch.color = updates.color;
+        if (updates.type !== undefined) patch.type = updates.type;
+        if (updates.startDate !== undefined) patch.start_date = updates.startDate;
+        if (updates.endDate !== undefined) patch.end_date = updates.endDate;
+        if (hasOwnEventUpdate(updates, 'linkedEpisode')) patch.linked_episode = updates.linkedEpisode ?? null;
+        if (hasOwnEventUpdate(updates, 'linkedPart')) patch.linked_part = updates.linkedPart ?? null;
+        if (hasOwnEventUpdate(updates, 'linkedSheetName')) patch.linked_sheet_name = updates.linkedSheetName ?? null;
+        if (hasOwnEventUpdate(updates, 'linkedSceneId')) patch.linked_scene_id = updates.linkedSceneId ?? null;
+        if (hasOwnEventUpdate(updates, 'linkedDepartment')) patch.linked_department = updates.linkedDepartment ?? null;
+        if (hasOwnEventUpdate(updates, 'linkedTodoId')) patch.linked_todo_id = updates.linkedTodoId ?? null;
+        await window.electronAPI.supabaseUpdatePrivateEvent(actualId, patch);
+      } catch (err) {
+        mutateSourceEvents('bflow', (events) => events.map((item) => (
+          item.id === actualId ? previous : item
+        )));
+        broadcastCalendarChange({ eventId: actualId, action: 'update' });
+        throw err;
+      }
+    });
     return;
   }
 
@@ -991,54 +1028,60 @@ export async function deleteEvent(eventId: string): Promise<void> {
 
   // ── B flow 공유 캘린더 이벤트 분기 — calendar:* IPC 경유 ──
   if (existing.sourceCalendarId?.startsWith(BFLOW_CAL_PREFIX)) {
-    const currentUserId = useAuthStore.getState().currentUser?.id;
-    const isCurrentUsersPersonal = currentUserId !== undefined
-      && isCurrentUsersPersonalBflowEvent(existing, currentUserId);
-    let hasLegacyCopy = false;
+    await withBflowMutation(async () => {
+      const currentUserId = useAuthStore.getState().currentUser?.id;
+      const isCurrentUsersPersonal = currentUserId !== undefined
+        && isCurrentUsersPersonalBflowEvent(existing, currentUserId);
+      let hasLegacyCopy = false;
 
-    if (isCurrentUsersPersonal && currentUserId) {
-      const stateIsCurrentAndKnown = legacyPrivateEvents.userId === currentUserId
-        && legacyPrivateEvents.status === 'known';
-      if (!stateIsCurrentAndKnown) await readLegacyPrivateEventsForUser(currentUserId);
-      const legacyIds = legacyPrivateEvents.ids;
-      hasLegacyCopy = legacyIds.has(actualId);
-    }
-
-    mutateSourceEvents('bflow', (events) => events.filter((item) => item.id !== actualId));
-    broadcastCalendarChange({ eventId: actualId, action: 'delete' });
-    try {
-      if (hasLegacyCopy) {
-        await window.electronAPI.supabaseDeletePrivateEvent(actualId);
-        forgetLegacyPrivateEvent(actualId);
+      if (isCurrentUsersPersonal && currentUserId) {
+        const stateIsCurrentAndKnown = legacyPrivateEvents.userId === currentUserId
+          && legacyPrivateEvents.status === 'known';
+        if (!stateIsCurrentAndKnown) await readLegacyPrivateEventsForUser(currentUserId);
+        const legacyIds = legacyPrivateEvents.ids;
+        hasLegacyCopy = legacyIds.has(actualId);
       }
-      await window.electronAPI.calendarEventDelete(actualId);
-      cleanupDeletedEventAliases(eventId, actualId);
-    } catch (err) {
-      mutateSourceEvents('bflow', (events) => (
-        events.some((item) => item.id === actualId) ? events : [...events, existing]
-      ));
-      broadcastCalendarChange({ eventId: actualId, action: 'add' });
-      throw err;
-    }
+
+      mutateSourceEvents('bflow', (events) => events.filter((item) => item.id !== actualId));
+      broadcastCalendarChange({ eventId: actualId, action: 'delete' });
+      try {
+        if (hasLegacyCopy) {
+          await window.electronAPI.supabaseDeletePrivateEvent(actualId);
+          forgetLegacyPrivateEvent(actualId);
+        }
+        await window.electronAPI.calendarEventDelete(actualId);
+        cleanupDeletedEventAliases(eventId, actualId);
+      } catch (err) {
+        mutateSourceEvents('bflow', (events) => (
+          events.some((item) => item.id === actualId) ? events : [...events, existing]
+        ));
+        broadcastCalendarChange({ eventId: actualId, action: 'add' });
+        throw err;
+      }
+    });
     return;
   }
 
   // ── 비공개 이벤트 분기 — Supabase delete ──
   if (existing.sourceCalendarId === PRIVATE_CAL_ID) {
-    const previous = existing;
-    mutateSourceEvents('bflow', (events) => events.filter((item) => item.id !== actualId));
-    broadcastCalendarChange({ eventId: actualId, action: 'delete' });
-    try {
-      await window.electronAPI.supabaseDeletePrivateEvent(actualId);
-      forgetLegacyPrivateEvent(actualId);
-      cleanupDeletedEventAliases(eventId, actualId);
-    } catch (err) {
+    await withBflowMutation(async () => {
+      const previous = existing;
       mutateSourceEvents('bflow', (events) => (
-        events.some((item) => item.id === actualId) ? events : [...events, previous]
+        events.filter((item) => item.id !== actualId)
       ));
-      broadcastCalendarChange({ eventId: actualId, action: 'add' });
-      throw err;
-    }
+      broadcastCalendarChange({ eventId: actualId, action: 'delete' });
+      try {
+        await window.electronAPI.supabaseDeletePrivateEvent(actualId);
+        forgetLegacyPrivateEvent(actualId);
+        cleanupDeletedEventAliases(eventId, actualId);
+      } catch (err) {
+        mutateSourceEvents('bflow', (events) => (
+          events.some((item) => item.id === actualId) ? events : [...events, previous]
+        ));
+        broadcastCalendarChange({ eventId: actualId, action: 'add' });
+        throw err;
+      }
+    });
     return;
   }
 

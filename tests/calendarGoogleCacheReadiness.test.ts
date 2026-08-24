@@ -94,6 +94,7 @@ type HarnessOptions = {
   fullSync(calendarId: string): Promise<GoogleEventFixture[]>;
   calendarList?: () => Promise<BflowCalendarFixture[]>;
   bflowEventsList?: () => Promise<BflowEventFixture[]>;
+  deleteBflowEvent?: (eventId: string) => Promise<void>;
   readPrivateEvents?: (userId: string) => Promise<LegacyPrivateEventFixture[]>;
   currentUserId?: string;
   teamCalendarId?: string | null;
@@ -262,6 +263,7 @@ async function createHarness(
       calendarEventsList: options.bflowEventsList ?? (async () => []),
       calendarEventDelete: async (eventId: string) => {
         deletedBflowEventIds.push(eventId);
+        await options.deleteBflowEvent?.(eventId);
       },
       calendarBroadcastChange: async (detail: unknown) => {
         broadcasts.push(detail);
@@ -604,6 +606,99 @@ test('a newer syncAll B flow load wins against an older standalone load without 
   } finally {
     harness.restore();
   }
+});
+
+test('a completed B flow delete invalidates an older pending standalone load', async () => {
+  const staleRows = deferred<BflowEventFixture[]>();
+  const staleLoadStarted = deferred<void>();
+  let listCalls = 0;
+  const seeded = bflowEvent('delete-me', '삭제할 일정');
+  const harness = await createHarness({
+    fullSync: async () => [],
+    bflowEventsList: async () => {
+      listCalls += 1;
+      if (listCalls === 1) return [seeded];
+      staleLoadStarted.resolve();
+      return staleRows.promise;
+    },
+  });
+  try {
+    await harness.service.loadBflowEvents();
+    const staleLoad = harness.service.loadBflowEvents();
+    await staleLoadStarted.promise;
+
+    await harness.service.deleteEvent(seeded.id);
+    const broadcastsAfterDelete = harness.broadcasts.length;
+
+    staleRows.resolve([seeded]);
+    await staleLoad;
+
+    assert.equal(listCalls, 2);
+    assert.deepEqual(await harness.service.getEvents(), []);
+    assert.deepEqual(harness.deletedBflowEventIds, [seeded.id]);
+    assert.equal(harness.broadcasts.length, broadcastsAfterDelete, 'the stale load must not rebroadcast after delete');
+  } finally {
+    harness.restore();
+  }
+});
+
+test('a pending B flow delete rejects a later stale load on both completion orders', async (t) => {
+  for (const completionOrder of ['load-first', 'delete-first'] as const) {
+    await t.test(completionOrder, async () => {
+      const seeded = bflowEvent('pending-delete', '삭제 진행 중인 일정');
+      const staleRows = deferred<BflowEventFixture[]>();
+      const staleLoadStarted = deferred<void>();
+      const deleteStarted = deferred<void>();
+      const deleteIpc = deferred<void>();
+      let listCalls = 0;
+      const harness = await createHarness({
+        fullSync: async () => [],
+        bflowEventsList: async () => {
+          listCalls += 1;
+          if (listCalls === 1) return [seeded];
+          staleLoadStarted.resolve();
+          return staleRows.promise;
+        },
+        deleteBflowEvent: async () => {
+          deleteStarted.resolve();
+          await deleteIpc.promise;
+        },
+      });
+      try {
+        await harness.service.loadBflowEvents();
+        const pendingDelete = harness.service.deleteEvent(seeded.id);
+        await deleteStarted.promise;
+        assert.deepEqual(await harness.service.getEvents(), [], 'delete is optimistic while IPC is pending');
+
+        const pendingLoad = harness.service.loadBflowEvents();
+        await staleLoadStarted.promise;
+        const broadcastsAfterOptimisticDelete = harness.broadcasts.length;
+
+        if (completionOrder === 'load-first') {
+          staleRows.resolve([seeded]);
+          await pendingLoad;
+          deleteIpc.resolve();
+          await pendingDelete;
+        } else {
+          deleteIpc.resolve();
+          await pendingDelete;
+          staleRows.resolve([seeded]);
+          await pendingLoad;
+        }
+
+        assert.deepEqual(await harness.service.getEvents(), []);
+        assert.deepEqual(harness.deletedBflowEventIds, [seeded.id]);
+        assert.equal(harness.broadcasts.length, broadcastsAfterOptimisticDelete);
+      } finally {
+        harness.restore();
+      }
+    });
+  }
+});
+
+test('B flow optimistic inserts do not bypass the cache-writer invalidation helper', () => {
+  const source = readFileSync('src/services/calendarService.ts', 'utf8');
+  assert.doesNotMatch(source, /\bbflowEvents\.push\(/);
 });
 
 test('a stale default sync cannot replace the latest legacy-copy tracking used by delete', async (t) => {
