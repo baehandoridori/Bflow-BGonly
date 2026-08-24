@@ -36,11 +36,18 @@ test('replace_calendar_tags validates final input then atomically deletes, tempo
   assert.match(fn, /Duplicate calendar tag name/);
   assert.match(fn, /Unknown calendar tag id/);
   assert.match(fn, /RAISE EXCEPTION/);
+  assert.match(fn, /DELETE FROM calendar_tags AS target\s+WHERE target\.id NOT IN/);
+  assert.doesNotMatch(fn, /DELETE FROM calendar_tags\s+WHERE id\b/);
 
+  const fieldValidationEnd = fn.indexOf('Each calendar tag requires name, color, and sort_order');
+  const lockIndex = fn.indexOf('LOCK TABLE calendar_tags IN SHARE ROW EXCLUSIVE MODE;');
+  const dataValidationIndex = fn.indexOf('Duplicate calendar tag id');
   const deleteIndex = fn.indexOf('DELETE FROM calendar_tags');
   const temporaryRenameIndex = fn.indexOf("format('__calendar_tags_tmp_");
   const updateIndex = fn.indexOf('SET name = submitted.name');
   const insertIndex = fn.indexOf('INSERT INTO calendar_tags (name, color, sort_order)');
+  assert.ok(fieldValidationEnd < lockIndex, 'lock follows structural and field validation');
+  assert.ok(lockIndex < dataValidationIndex, 'lock precedes ID/name/existence validation and writes');
   assert.ok(deleteIndex >= 0 && deleteIndex < temporaryRenameIndex, 'delete must follow validation and precede name staging');
   assert.ok(temporaryRenameIndex < updateIndex, 'existing names must be staged before final updates for swaps');
   assert.ok(updateIndex < insertIndex, 'existing rows update before new rows insert');
@@ -50,7 +57,7 @@ test('replace_calendar_tags validates final input then atomically deletes, tempo
 
 test('calendar tag seed runs once behind a metadata marker without moving seed rows outside its gate', () => {
   const sql = readFileSync(migrationPath, 'utf8');
-  const seedGate = between(sql, "DO $$\nBEGIN\n  IF NOT EXISTS (\n    SELECT 1\n    FROM metadata\n    WHERE type = 'migration-seed'", '-- ── 5) 기존 "나만 보기" 데이터 이관');
+  const seedGate = between(sql, "DO $$\nBEGIN\n  LOCK TABLE metadata IN SHARE ROW EXCLUSIVE MODE;\n\n  IF NOT EXISTS (\n    SELECT 1\n    FROM metadata\n    WHERE type = 'migration-seed'", '-- ── 5) 기존 "나만 보기" 데이터 이관');
 
   const seedIndex = seedGate.indexOf('INSERT INTO calendar_tags (name, color, sort_order) VALUES');
   const markerIndex = seedGate.indexOf("INSERT INTO metadata (type, key, value)\n    VALUES ('migration-seed', 'calendar-tags-v1'");
@@ -58,5 +65,6 @@ test('calendar tag seed runs once behind a metadata marker without moving seed r
   assert.ok(markerIndex > seedIndex, 'marker is written only after seed succeeds');
   assert.match(seedGate, /ON CONFLICT \(name\) DO NOTHING/);
   assert.equal((sql.match(/ON CONFLICT \(name\) DO NOTHING/g) ?? []).length, 1);
+  assert.match(seedGate, /LOCK TABLE metadata IN SHARE ROW EXCLUSIVE MODE;/);
   assert.match(seedGate, /key = 'calendar-tags-v1'/);
 });

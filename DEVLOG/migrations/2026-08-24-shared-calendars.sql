@@ -151,6 +151,9 @@ BEGIN
       USING ERRCODE = '22023';
   END IF;
 
+  -- 구조·필드 검증 뒤, 데이터 검증과 교체 전체를 동시 saveTags 호출과 상호 배제한다.
+  LOCK TABLE calendar_tags IN SHARE ROW EXCLUSIVE MODE;
+
   IF EXISTS (
     SELECT submitted.id
     FROM jsonb_to_recordset(p_tags) AS submitted(id UUID, name TEXT, color TEXT, sort_order INTEGER)
@@ -180,8 +183,8 @@ BEGIN
   END IF;
 
   -- 제출 목록에 없는 태그만 삭제한다. calendar_events.tag_id 는 FK의 ON DELETE SET NULL을 따른다.
-  DELETE FROM calendar_tags
-  WHERE id NOT IN (
+  DELETE FROM calendar_tags AS target
+  WHERE target.id NOT IN (
     SELECT submitted.id
     FROM jsonb_to_recordset(p_tags) AS submitted(id UUID, name TEXT, color TEXT, sort_order INTEGER)
     WHERE submitted.id IS NOT NULL
@@ -231,6 +234,8 @@ END $$;
 -- marker가 남으므로 관리자가 이름을 바꾸거나 지운 뒤 재실행해도 기본 태그를 되살리지 않는다.
 DO $$
 BEGIN
+  LOCK TABLE metadata IN SHARE ROW EXCLUSIVE MODE;
+
   IF NOT EXISTS (
     SELECT 1
     FROM metadata
