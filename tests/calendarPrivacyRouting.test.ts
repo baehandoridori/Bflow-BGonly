@@ -51,6 +51,7 @@ type ServiceModule = {
 type Calls = {
   broadcasts: unknown[];
   bflowCreates: Array<Record<string, unknown>>;
+  legacyCreates: Array<Record<string, unknown>>;
   bflowUpdates: Array<{ id: string; patch: Record<string, unknown> }>;
   bflowDeletes: string[];
   legacyUpdates: Array<{ id: string; patch: Record<string, unknown> }>;
@@ -164,6 +165,7 @@ async function createHarness(options: {
   teamGoogleCalendarId?: string;
   personalGoogleCalendarId?: string;
   includePersonalCalendar?: boolean;
+  calendarList?: () => Promise<CalendarRow[]>;
 }): Promise<{ service: ServiceModule; calls: Calls; restore(): void }> {
   const globalScope = globalThis as Record<string, unknown>;
   const prior = new Map<string, { exists: boolean; value: unknown }>();
@@ -197,6 +199,7 @@ async function createHarness(options: {
   const calls: Calls = {
     broadcasts: [],
     bflowCreates: [],
+    legacyCreates: [],
     bflowUpdates: [],
     bflowDeletes: [],
     legacyUpdates: [],
@@ -210,7 +213,9 @@ async function createHarness(options: {
     ? [calendarRow('shared-cal', false)]
     : [calendarRow('personal-cal', true), calendarRow('shared-cal', false)];
   const electronAPI = {
-    calendarList: async () => calendars,
+    calendarList: async () => (
+      options.calendarList ? options.calendarList() : calendars
+    ),
     calendarTagsList: async () => [],
     calendarEventsList: async () => options.rows,
     calendarEventCreate: async (input: Record<string, unknown>) => {
@@ -233,7 +238,10 @@ async function createHarness(options: {
       return { ok: true };
     },
     supabaseReadPrivateEvents: async () => [],
-    supabaseAddPrivateEvent: async () => ({ id: 'legacy-private-event' }),
+    supabaseAddPrivateEvent: async (input: Record<string, unknown>) => {
+      calls.legacyCreates.push(input);
+      return { id: 'legacy-private-event' };
+    },
     supabaseUpdatePrivateEvent: async (id: string, patch: Record<string, unknown>) => {
       calls.legacyUpdates.push({ id, patch });
     },
@@ -313,6 +321,81 @@ async function createHarness(options: {
     throw error;
   }
 }
+
+test('private add retries a clean-profile calendar-list failure before choosing storage', async () => {
+  let calendarListCalls = 0;
+  const originalWarn = console.warn;
+  const harness = await createHarness({
+    rows: [],
+    calendarList: async () => {
+      calendarListCalls += 1;
+      if (calendarListCalls === 1) throw new Error('temporary calendar-list outage');
+      return [calendarRow('personal-cal', true), calendarRow('shared-cal', false)];
+    },
+  });
+  console.warn = () => {};
+  try {
+    await harness.service.loadBflowEvents();
+    await harness.service.addEvent({
+      id: 'retry-private-event',
+      title: '재시도 후 저장',
+      memo: '',
+      color: '#6C5CE7',
+      type: 'custom',
+      startDate: '2026-08-24',
+      endDate: '2026-08-24',
+      createdBy: 'user-1',
+      createdAt: '2026-08-24T00:00:00.000Z',
+      isPrivate: true,
+    });
+
+    assert.equal(calendarListCalls, 2);
+    assert.equal(harness.calls.bflowCreates.length, 1);
+    assert.equal(harness.calls.bflowCreates[0].calendar_id, 'personal-cal');
+    assert.deepEqual(harness.calls.legacyCreates, []);
+  } finally {
+    console.warn = originalWarn;
+    harness.restore();
+  }
+});
+
+test('private add never falls back to legacy storage while calendar-list readiness is unresolved', async () => {
+  let calendarListCalls = 0;
+  const originalWarn = console.warn;
+  const harness = await createHarness({
+    rows: [],
+    calendarList: async () => {
+      calendarListCalls += 1;
+      throw new Error('persistent calendar-list outage');
+    },
+  });
+  console.warn = () => {};
+  try {
+    await harness.service.loadBflowEvents();
+    await assert.rejects(
+      harness.service.addEvent({
+        id: 'blocked-private-event',
+        title: '잘못된 폴백 방지',
+        memo: '',
+        color: '#6C5CE7',
+        type: 'custom',
+        startDate: '2026-08-24',
+        endDate: '2026-08-24',
+        createdBy: 'user-1',
+        createdAt: '2026-08-24T00:00:00.000Z',
+        isPrivate: true,
+      }),
+      /캘린더 목록/,
+    );
+
+    assert.equal(calendarListCalls, 2);
+    assert.deepEqual(harness.calls.bflowCreates, []);
+    assert.deepEqual(harness.calls.legacyCreates, []);
+  } finally {
+    console.warn = originalWarn;
+    harness.restore();
+  }
+});
 
 test('personal B flow calendar rows retain isPrivate on load', async () => {
   const harness = await createHarness({ rows: [eventRow('personal-event', 'personal-cal')] });

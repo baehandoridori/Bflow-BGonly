@@ -136,7 +136,12 @@ export const useCalendarStore = create<CalendarState>((set) => ({
       || requestUserId !== calendarStoreSessionUserId
       || requestUserId !== (useAuthStore.getState().currentUser?.id ?? null)
     ) return;
-    set({ ...next, loaded: true });
+    set((state) => ({
+      ...next,
+      // loaded는 개인 캘린더 저장 경로를 결정하는 준비 상태다. 태그만 성공한
+      // 최초 요청에서는 true로 올리지 않아 다음 쓰기가 캘린더 목록을 재시도한다.
+      loaded: state.loaded || calendarResult.status === 'fulfilled',
+    }));
   },
 
   toggleCalendarVisible(id) {

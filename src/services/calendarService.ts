@@ -1141,7 +1141,11 @@ async function addEventInternal(
         await calendarState.loadAll();
         if (!isBflowMutationCurrent(token)) return null;
       }
-      const personal = getPersonalCalendar(useCalendarStore.getState(), userId);
+      const refreshedCalendarState = useCalendarStore.getState();
+      if (!refreshedCalendarState.loaded) {
+        throw new Error('캘린더 목록을 불러오지 못해 나만 보기 일정을 저장하지 않았습니다');
+      }
+      const personal = getPersonalCalendar(refreshedCalendarState, userId);
       if (personal) {
         return addBflowEvent({ ...event, calendarId: personal.id }, personal.id, token);
       }
