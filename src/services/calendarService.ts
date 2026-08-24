@@ -311,6 +311,7 @@ let googleEvents: CalendarEvent[] = [];
 let eventCache: CalendarEvent[] = [];
 // Google 캐시는 빈 목록도 정상적인 동기화 결과이므로 이벤트 개수와 별도로 준비 상태를 보관한다.
 let googleCacheReady = false;
+let syncAllGeneration = 0;
 
 export function isGoogleCacheReady(): boolean {
   return googleCacheReady;
@@ -375,6 +376,7 @@ export async function loadBflowEvents(): Promise<void> {
 
 /** 전체 동기화 (앱 시작 시 호출) */
 export async function syncAll(options: { broadcast?: boolean; skipBflowLoad?: boolean } = {}): Promise<CalendarEvent[]> {
+  const requestGeneration = ++syncAllGeneration;
   if (!options.skipBflowLoad) await loadBflowEvents();
   const seen = new Set<string>();
   const successfulEvents: CalendarEvent[] = [];
@@ -410,6 +412,10 @@ export async function syncAll(options: { broadcast?: boolean; skipBflowLoad?: bo
       console.warn(`[Calendar] Google fullSync 실패 (${calId}):`, err);
     }
   }
+
+  // 더 늦게 시작한 전체 동기화가 이미 최신 결과를 맡았다면, 오래된 요청은
+  // 캐시·준비 상태·변경 알림·watch 등록을 건드리지 않는다.
+  if (requestGeneration !== syncAllGeneration) return [...googleEvents];
 
   if (settingsLoaded) {
     // 성공한 캘린더는 빈 결과까지 완전히 교체하되, 실패한 캘린더의 마지막 성공

@@ -61,9 +61,25 @@ function googleEvent(id: string, summary: string): GoogleEventFixture {
   };
 }
 
+function deferred<T>(): {
+  promise: Promise<T>;
+  resolve(value: T): void;
+} {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((next) => {
+    resolve = next;
+  });
+  return { promise, resolve };
+}
+
 async function createHarness(
   input: HarnessOptions | HarnessOptions['fullSync'],
-): Promise<{ service: ServiceModule; restore(): void }> {
+): Promise<{
+  service: ServiceModule;
+  broadcasts: unknown[];
+  watchedCalendarIds: string[];
+  restore(): void;
+}> {
   const options: HarnessOptions = typeof input === 'function' ? { fullSync: input } : input;
   const globalScope = globalThis as Record<string, unknown>;
   const prior = new Map<string, { exists: boolean; value: unknown }>();
@@ -72,6 +88,8 @@ async function createHarness(
   }
 
   const values = new Map<string, string>();
+  const broadcasts: unknown[] = [];
+  const watchedCalendarIds: string[] = [];
   if (options.personalCalendarId !== undefined) {
     values.set('bflow_gcal_local_settings', JSON.stringify({
       personalCalendarId: options.personalCalendarId,
@@ -100,7 +118,10 @@ async function createHarness(
       calendarList: async () => [],
       calendarTagsList: async () => [],
       calendarEventsList: async () => [],
-      calendarBroadcastChange: async () => ({ ok: true }),
+      calendarBroadcastChange: async (detail: unknown) => {
+        broadcasts.push(detail);
+        return { ok: true };
+      },
       supabaseReadPrivateEvents: async () => [],
       supabaseWriteMetadata: async () => {},
       supabaseReadMetadata: async () => options.teamCalendarId
@@ -112,7 +133,9 @@ async function createHarness(
           }
         : null,
       gcalFullSync: options.fullSync,
-      gcalEnsureWatch: async () => {},
+      gcalEnsureWatch: async (calendarId: string) => {
+        watchedCalendarIds.push(calendarId);
+      },
     },
   });
 
@@ -121,6 +144,8 @@ async function createHarness(
     const service = await import(`data:text/javascript;base64,${encoded}#calendar-google-ready-${bundleNonce++}`) as unknown as ServiceModule;
     return {
       service,
+      broadcasts,
+      watchedCalendarIds,
       restore() {
         for (const [key, value] of prior) {
           if (value.exists) globalScope[key] = value.value;
@@ -293,6 +318,45 @@ test('a configured-calendar failure retains only that calendar after another cal
     );
   } finally {
     console.warn = originalWarn;
+    harness.restore();
+  }
+});
+
+test('an older concurrent sync cannot overwrite or rebroadcast a newer completed sync', async () => {
+  const firstResult = deferred<GoogleEventFixture[]>();
+  const secondResult = deferred<GoogleEventFixture[]>();
+  const firstStarted = deferred<void>();
+  const secondStarted = deferred<void>();
+  let callCount = 0;
+  const harness = await createHarness(async () => {
+    callCount += 1;
+    if (callCount === 1) {
+      firstStarted.resolve();
+      return firstResult.promise;
+    }
+    secondStarted.resolve();
+    return secondResult.promise;
+  });
+  try {
+    const firstSync = harness.service.syncAll({ skipBflowLoad: true });
+    await firstStarted.promise;
+    const secondSync = harness.service.syncAll({ skipBflowLoad: true });
+    await secondStarted.promise;
+
+    secondResult.resolve([googleEvent('new', '나중 요청의 최신 일정')]);
+    await secondSync;
+    firstResult.resolve([googleEvent('old', '먼저 요청한 오래된 일정')]);
+    await firstSync;
+
+    const events = await harness.service.getEvents();
+    assert.deepEqual(
+      events.map(({ id, title, sourceCalendarId }) => ({ id, title, sourceCalendarId })),
+      [{ id: 'new', title: '나중 요청의 최신 일정', sourceCalendarId: 'primary' }],
+    );
+    assert.equal(harness.service.isGoogleCacheReady(), true);
+    assert.equal(harness.broadcasts.length, 1);
+    assert.deepEqual(harness.watchedCalendarIds, ['primary']);
+  } finally {
     harness.restore();
   }
 });
