@@ -309,6 +309,12 @@ async function getTargetCalendar(_type: CalendarEventType): Promise<string | nul
 let bflowEvents: CalendarEvent[] = [];
 let googleEvents: CalendarEvent[] = [];
 let eventCache: CalendarEvent[] = [];
+// Google 캐시는 빈 목록도 정상적인 동기화 결과이므로 이벤트 개수와 별도로 준비 상태를 보관한다.
+let googleCacheReady = false;
+
+export function isGoogleCacheReady(): boolean {
+  return googleCacheReady;
+}
 
 function rebuildEventCache(): void {
   const seen = new Set<string>();
@@ -385,6 +391,7 @@ export async function syncAll(options: { broadcast?: boolean; skipBflowLoad?: bo
 
   // Google Calendar fullSync — 각 calId 를 개별 try/catch 로 감싸 한 캘린더 실패가
   // 다른 캘린더 로드를 막지 않게 한다.
+  let fullSyncSucceeded = calIds.size > 0;
   for (const calId of calIds) {
     try {
       const gcalEvents = await gcalService.fullSync(calId);
@@ -395,12 +402,14 @@ export async function syncAll(options: { broadcast?: boolean; skipBflowLoad?: bo
         }
       }
     } catch (err) {
+      fullSyncSucceeded = false;
       console.warn(`[Calendar] Google fullSync 실패 (${calId}):`, err);
     }
   }
 
   // GCal에 없는 이벤트는 캐시에서도 제거 (legacy 로컬 이벤트 미지원)
   googleEvents = events;
+  googleCacheReady = fullSyncSucceeded;
   rebuildEventCache();
   if (options.broadcast !== false) broadcastCalendarChange();
 

@@ -87,13 +87,14 @@ export const useCalendarStore = create<CalendarState>((set) => ({
   mutedCalendarIds: loadMutedCalendarIds(),
 
   async loadAll() {
-    try {
-      const [calendarRows, tagRows] = await Promise.all([
-        window.electronAPI.calendarList(),
-        window.electronAPI.calendarTagsList(),
-      ]);
-      set({
-        calendars: calendarRows.map((row) => ({
+    const [calendarResult, tagResult] = await Promise.allSettled([
+      window.electronAPI.calendarList(),
+      window.electronAPI.calendarTagsList(),
+    ]);
+    const next: Partial<Pick<CalendarState, 'calendars' | 'tags'>> = {};
+
+    if (calendarResult.status === 'fulfilled') {
+      next.calendars = calendarResult.value.map((row) => ({
           id: row.id,
           name: row.name,
           color: row.color,
@@ -107,19 +108,24 @@ export const useCalendarStore = create<CalendarState>((set) => ({
           canEdit: row.can_edit,
           canManage: row.can_manage,
           createdAt: row.created_at,
-        })),
-        tags: tagRows.map((row) => ({
+        }));
+    } else {
+      console.warn('[Calendar] 캘린더 목록 로드 실패:', calendarResult.reason);
+    }
+
+    if (tagResult.status === 'fulfilled') {
+      next.tags = tagResult.value.map((row) => ({
           id: row.id,
           name: row.name,
           color: row.color,
           sortOrder: row.sort_order,
-        })),
-        loaded: true,
-      });
-    } catch (err) {
-      console.warn('[Calendar] 캘린더 목록·태그 로드 실패:', err);
-      set({ calendars: [], tags: [], loaded: true });
+        }));
+    } else {
+      console.warn('[Calendar] 캘린더 태그 로드 실패:', tagResult.reason);
     }
+
+    // 독립 요청의 실패는 마지막으로 성공한 다른 메타데이터를 지우지 않는다.
+    set({ ...next, loaded: true });
   },
 
   toggleCalendarVisible(id) {
