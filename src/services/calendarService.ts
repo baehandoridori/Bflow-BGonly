@@ -340,8 +340,12 @@ export async function getEvents(): Promise<CalendarEvent[]> {
   return [...eventCache];
 }
 
-/** B flow 일정 로드 — 구글 인증 가드 밖에서 항상 호출된다 (설계서 §6.2 핵심). */
-export async function loadBflowEvents(): Promise<void> {
+type LoadBflowEventsOptions = {
+  broadcast?: boolean;
+  shouldCommit?: () => boolean;
+};
+
+async function loadBflowEventsInternal(options: LoadBflowEventsOptions = {}): Promise<void> {
   try {
     await useCalendarStore.getState().loadAll();
     const calendars = useCalendarStore.getState().calendars;
@@ -366,18 +370,31 @@ export async function loadBflowEvents(): Promise<void> {
       console.warn('[Calendar] 구 비공개 일정 폴백 로드 실패:', err);
     }
 
+    // syncAll 안에서 호출된 느린 선행 요청은 더 최신 요청의 B flow 캐시를 덮지 않는다.
+    if (options.shouldCommit && !options.shouldCommit()) return;
     bflowEvents = next;
     rebuildEventCache();
-    broadcastCalendarChange();
+    if (options.broadcast !== false) broadcastCalendarChange();
   } catch (err) {
     console.warn('[Calendar] B flow 일정 로드 실패:', err);
   }
 }
 
+/** B flow 일정 로드 — 구글 인증 가드 밖에서 항상 호출된다 (설계서 §6.2 핵심). */
+export async function loadBflowEvents(): Promise<void> {
+  await loadBflowEventsInternal();
+}
+
 /** 전체 동기화 (앱 시작 시 호출) */
 export async function syncAll(options: { broadcast?: boolean; skipBflowLoad?: boolean } = {}): Promise<CalendarEvent[]> {
   const requestGeneration = ++syncAllGeneration;
-  if (!options.skipBflowLoad) await loadBflowEvents();
+  if (!options.skipBflowLoad) {
+    await loadBflowEventsInternal({
+      broadcast: options.broadcast !== false,
+      shouldCommit: () => requestGeneration === syncAllGeneration,
+    });
+    if (requestGeneration !== syncAllGeneration) return [...googleEvents];
+  }
   const seen = new Set<string>();
   const successfulEvents: CalendarEvent[] = [];
 

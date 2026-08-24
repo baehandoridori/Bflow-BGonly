@@ -5,7 +5,7 @@ import { build } from 'esbuild';
 
 type ServiceModule = {
   loadBflowEvents(): Promise<void>;
-  syncAll(options?: { skipBflowLoad?: boolean }): Promise<unknown>;
+  syncAll(options?: { broadcast?: boolean; skipBflowLoad?: boolean }): Promise<unknown>;
   getEvents(): Promise<Array<{
     id: string;
     title: string;
@@ -24,8 +24,31 @@ type GoogleEventFixture = {
   extendedProperties: { private: { bflow_type: 'custom' } };
 };
 
+type BflowEventFixture = {
+  id: string;
+  calendar_id: string;
+  title: string;
+  memo: string | null;
+  tag_id: string | null;
+  all_day: boolean;
+  start_date: string;
+  end_date: string;
+  start_time: string | null;
+  end_time: string | null;
+  linked_episode: number | null;
+  linked_part: string | null;
+  linked_sheet_name: string | null;
+  linked_scene_id: string | null;
+  linked_department: string | null;
+  linked_todo_id: string | null;
+  created_by: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
 type HarnessOptions = {
   fullSync(calendarId: string): Promise<GoogleEventFixture[]>;
+  bflowEventsList?: () => Promise<BflowEventFixture[]>;
   teamCalendarId?: string | null;
   personalCalendarId?: string | null;
   failSettingsWrite?: () => boolean;
@@ -58,6 +81,30 @@ function googleEvent(id: string, summary: string): GoogleEventFixture {
     end: { date: '2026-08-25' },
     created: '2026-08-24T00:00:00.000Z',
     extendedProperties: { private: { bflow_type: 'custom' } },
+  };
+}
+
+function bflowEvent(id: string, title: string): BflowEventFixture {
+  return {
+    id,
+    calendar_id: 'calendar-1',
+    title,
+    memo: null,
+    tag_id: null,
+    all_day: true,
+    start_date: '2026-08-24',
+    end_date: '2026-08-24',
+    start_time: null,
+    end_time: null,
+    linked_episode: null,
+    linked_part: null,
+    linked_sheet_name: null,
+    linked_scene_id: null,
+    linked_department: null,
+    linked_todo_id: null,
+    created_by: null,
+    created_at: '2026-08-24T00:00:00.000Z',
+    updated_at: '2026-08-24T00:00:00.000Z',
   };
 }
 
@@ -117,7 +164,7 @@ async function createHarness(
     electronAPI: {
       calendarList: async () => [],
       calendarTagsList: async () => [],
-      calendarEventsList: async () => [],
+      calendarEventsList: options.bflowEventsList ?? (async () => []),
       calendarBroadcastChange: async (detail: unknown) => {
         broadcasts.push(detail);
         return { ok: true };
@@ -356,6 +403,72 @@ test('an older concurrent sync cannot overwrite or rebroadcast a newer completed
     assert.equal(harness.service.isGoogleCacheReady(), true);
     assert.equal(harness.broadcasts.length, 1);
     assert.deepEqual(harness.watchedCalendarIds, ['primary']);
+  } finally {
+    harness.restore();
+  }
+});
+
+test('an older default sync cannot overwrite or rebroadcast a newer B flow load', async () => {
+  const firstRows = deferred<BflowEventFixture[]>();
+  const secondRows = deferred<BflowEventFixture[]>();
+  const firstStarted = deferred<void>();
+  const secondStarted = deferred<void>();
+  let listCallCount = 0;
+  const harness = await createHarness({
+    fullSync: async () => [],
+    bflowEventsList: async () => {
+      listCallCount += 1;
+      if (listCallCount === 1) {
+        firstStarted.resolve();
+        return firstRows.promise;
+      }
+      secondStarted.resolve();
+      return secondRows.promise;
+    },
+  });
+  try {
+    const firstSync = harness.service.syncAll();
+    await firstStarted.promise;
+    const secondSync = harness.service.syncAll();
+    await secondStarted.promise;
+
+    secondRows.resolve([bflowEvent('new-bflow', '나중 요청의 최신 B flow 일정')]);
+    await secondSync;
+    const broadcastsAfterNewerSync = harness.broadcasts.length;
+
+    firstRows.resolve([bflowEvent('old-bflow', '먼저 요청한 오래된 B flow 일정')]);
+    await firstSync;
+
+    const events = await harness.service.getEvents();
+    assert.deepEqual(
+      events.map(({ id, title, sourceCalendarId }) => ({ id, title, sourceCalendarId })),
+      [{
+        id: 'new-bflow',
+        title: '나중 요청의 최신 B flow 일정',
+        sourceCalendarId: 'bflow:calendar-1',
+      }],
+    );
+    assert.equal(harness.service.isGoogleCacheReady(), true);
+    assert.ok(broadcastsAfterNewerSync > 0, 'the current sync still broadcasts its committed changes');
+    assert.equal(harness.broadcasts.length, broadcastsAfterNewerSync, 'the stale sync must not rebroadcast');
+  } finally {
+    harness.restore();
+  }
+});
+
+test('syncAll broadcast false suppresses both B flow and Google change broadcasts', async () => {
+  const harness = await createHarness({
+    fullSync: async () => [],
+    bflowEventsList: async () => [bflowEvent('quiet-bflow', '알림 없이 반영할 일정')],
+  });
+  try {
+    await harness.service.syncAll({ broadcast: false });
+
+    assert.deepEqual(
+      (await harness.service.getEvents()).map(({ id, title }) => ({ id, title })),
+      [{ id: 'quiet-bflow', title: '알림 없이 반영할 일정' }],
+    );
+    assert.deepEqual(harness.broadcasts, []);
   } finally {
     harness.restore();
   }
