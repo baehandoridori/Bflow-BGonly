@@ -92,10 +92,10 @@ export function EventQuickEdit({
 
   const handleSave = useCallback(() => {
     const updates: Partial<CalendarEvent> = { title, startDate, endDate, memo };
-    if (!hasCalendarDerivedFields) updates.type = type;
+    if (!hasCalendarDerivedFields && type !== event.type) updates.type = type;
     onUpdate(event.id, updates);
     onClose();
-  }, [event.id, title, startDate, endDate, type, memo, hasCalendarDerivedFields, onUpdate, onClose]);
+  }, [event.id, event.type, title, startDate, endDate, type, memo, hasCalendarDerivedFields, onUpdate, onClose]);
 
   const handleDelete = useCallback(() => {
     onDelete(event.id);

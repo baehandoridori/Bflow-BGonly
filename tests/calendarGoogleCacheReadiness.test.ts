@@ -20,6 +20,10 @@ type ServiceModule = {
     id: string;
     title: string;
     createdBy: string;
+    type: string;
+    startDate: string;
+    endDate: string;
+    linkedPart?: string;
     sourceCalendarId?: string;
   }>>;
   deleteEvent(eventId: string): Promise<void>;
@@ -43,10 +47,11 @@ type ServiceModule = {
 type GoogleEventFixture = {
   id: string;
   summary: string;
+  description?: string;
   start: { date: string };
   end: { date: string };
   created: string;
-  extendedProperties: { private: { bflow_type: 'custom' } };
+  extendedProperties: { private: Record<string, string> };
 };
 
 type BflowEventFixture = {
@@ -110,10 +115,13 @@ type HarnessOptions = {
   calendarList?: () => Promise<BflowCalendarFixture[]>;
   bflowEventsList?: () => Promise<BflowEventFixture[]>;
   createBflowEvent?: (input: Record<string, unknown>) => Promise<BflowEventFixture>;
+  createLegacyEvent?: (input: Record<string, unknown>) => Promise<LegacyPrivateEventFixture>;
   updateBflowEvent?: (eventId: string, patch: Record<string, unknown>) => Promise<BflowEventFixture>;
   updateLegacyEvent?: (eventId: string, patch: Record<string, unknown>) => Promise<void>;
   updateGoogleEvent?: (calendarId: string, eventId: string, patch: Record<string, unknown>) => Promise<void>;
   deleteBflowEvent?: (eventId: string) => Promise<void>;
+  deleteLegacyEvent?: (eventId: string) => Promise<void>;
+  deleteGoogleEvent?: (calendarId: string, eventId: string) => Promise<void>;
   readPrivateEvents?: (userId: string) => Promise<LegacyPrivateEventFixture[]>;
   currentUserId?: string;
   teamCalendarId?: string | null;
@@ -239,6 +247,7 @@ async function createHarness(
   watchedCalendarIds: string[];
   deletedBflowEventIds: string[];
   deletedLegacyEventIds: string[];
+  deletedGoogleEventIds: string[];
   restore(): void;
 }> {
   const options: HarnessOptions = typeof input === 'function' ? { fullSync: input } : input;
@@ -253,6 +262,7 @@ async function createHarness(
   const watchedCalendarIds: string[] = [];
   const deletedBflowEventIds: string[] = [];
   const deletedLegacyEventIds: string[] = [];
+  const deletedGoogleEventIds: string[] = [];
   if (options.personalCalendarId !== undefined) {
     values.set('bflow_gcal_local_settings', JSON.stringify({
       personalCalendarId: options.personalCalendarId,
@@ -298,12 +308,17 @@ async function createHarness(
         return { ok: true };
       },
       supabaseReadPrivateEvents: options.readPrivateEvents ?? (async () => []),
+      supabaseAddPrivateEvent: async (input: Record<string, unknown>) => {
+        if (!options.createLegacyEvent) throw new Error('unexpected supabaseAddPrivateEvent');
+        return options.createLegacyEvent(input);
+      },
       supabaseUpdatePrivateEvent: async (eventId: string, patch: Record<string, unknown>) => {
         if (!options.updateLegacyEvent) throw new Error('unexpected supabaseUpdatePrivateEvent');
         await options.updateLegacyEvent(eventId, patch);
       },
       supabaseDeletePrivateEvent: async (eventId: string) => {
         deletedLegacyEventIds.push(eventId);
+        await options.deleteLegacyEvent?.(eventId);
       },
       supabaseWriteMetadata: async () => {},
       supabaseReadMetadata: async () => options.teamCalendarId
@@ -315,6 +330,11 @@ async function createHarness(
           }
         : null,
       gcalFullSync: options.fullSync,
+      gcalIsAuthenticated: async () => false,
+      gcalDeleteEvent: async (calendarId: string, eventId: string) => {
+        deletedGoogleEventIds.push(eventId);
+        await options.deleteGoogleEvent?.(calendarId, eventId);
+      },
       gcalUpdateEvent: async (calendarId: string, eventId: string, patch: Record<string, unknown>) => {
         if (!options.updateGoogleEvent) throw new Error('unexpected gcalUpdateEvent');
         await options.updateGoogleEvent(calendarId, eventId, patch);
@@ -345,6 +365,7 @@ async function createHarness(
       watchedCalendarIds,
       deletedBflowEventIds,
       deletedLegacyEventIds,
+      deletedGoogleEventIds,
       restore() {
         for (const [key, value] of prior) {
           if (value.exists) globalScope[key] = value.value;
@@ -1056,6 +1077,107 @@ test('overlapping updates reconcile every calendar source to the authoritative c
   }
 });
 
+test('overlapping Google edits never copy an unconfirmed different field into a title-only write', async (t) => {
+  const scenarios = [
+    { name: 'A fails before B succeeds', order: [0, 1] as const, outcomes: ['failure', 'success'] as const },
+    { name: 'B succeeds before A fails', order: [1, 0] as const, outcomes: ['failure', 'success'] as const },
+    { name: 'both succeed A then B', order: [0, 1] as const, outcomes: ['success', 'success'] as const },
+    { name: 'both succeed B then A', order: [1, 0] as const, outcomes: ['success', 'success'] as const },
+  ];
+
+  for (const scenario of scenarios) {
+    await t.test(scenario.name, async () => {
+      const eventId = 'google-different-fields';
+      let authoritative = googleEvent(eventId, '수정 전 제목');
+      let updateCalls = 0;
+      let canonicalReads = 0;
+      const started = [deferred<void>(), deferred<void>()];
+      const gates = [deferred<void>(), deferred<void>()];
+      const patches: Array<Record<string, unknown>> = [];
+
+      const harness = await createHarness({
+        personalCalendarId: 'primary',
+        fullSync: async () => {
+          canonicalReads += 1;
+          return [authoritative];
+        },
+        updateGoogleEvent: async (_calendarId, _id, patch) => {
+          const index = updateCalls;
+          updateCalls += 1;
+          patches[index] = patch;
+          started[index].resolve();
+          await gates[index].promise;
+          if (scenario.outcomes[index] === 'failure') throw new Error(`update ${index} failed`);
+
+          if (Object.hasOwn(patch, 'summary')) authoritative = { ...authoritative, summary: String(patch.summary) };
+          if (Object.hasOwn(patch, 'description')) authoritative = { ...authoritative, description: String(patch.description ?? '') };
+          if (Object.hasOwn(patch, 'startDate')) {
+            authoritative = { ...authoritative, start: { date: String(patch.startDate) } };
+          }
+          if (Object.hasOwn(patch, 'endDate')) {
+            authoritative = { ...authoritative, end: { date: String(patch.endDate) } };
+          }
+          if (Object.hasOwn(patch, 'extendedProperties')) {
+            authoritative = {
+              ...authoritative,
+              extendedProperties: { private: { ...(patch.extendedProperties as Record<string, string>) } },
+            };
+          }
+        },
+      });
+
+      try {
+        await harness.service.syncAll({ skipBflowLoad: true });
+        const updates = [
+          harness.service.updateEvent(eventId, {
+            type: 'scene',
+            linkedPart: '파트 A',
+            startDate: '2026-08-26',
+            endDate: '2026-08-27',
+          }),
+          undefined as Promise<void> | undefined,
+        ];
+        await started[0].promise;
+        updates[1] = harness.service.updateEvent(eventId, { title: '제목 B' });
+        await started[1].promise;
+
+        const settled = updates.map((promise) => promise!.then(
+          () => null,
+          (error: unknown) => error,
+        ));
+        for (const index of scenario.order) {
+          gates[index].resolve();
+          await settled[index];
+        }
+        await Promise.all(settled);
+
+        assert.deepEqual(
+          Object.keys(patches[1]).sort(),
+          ['summary'],
+          'the title-only write must not carry dates or extended metadata from A optimistic state',
+        );
+        const current = (await harness.service.getEvents()).find(({ id }) => id === eventId);
+        assert.ok(current);
+        assert.equal(current.title, '제목 B');
+        if (scenario.outcomes[0] === 'failure') {
+          assert.equal(current.type, 'custom');
+          assert.equal(current.linkedPart, undefined);
+          assert.equal(current.startDate, '2026-08-24');
+          assert.equal(current.endDate, '2026-08-24');
+        } else {
+          assert.equal(current.type, 'scene');
+          assert.equal(current.linkedPart, '파트 A');
+          assert.equal(current.startDate, '2026-08-26');
+          assert.equal(current.endDate, '2026-08-27');
+        }
+        assert.equal(canonicalReads, 2, 'initial sync plus one coalesced reconciliation');
+      } finally {
+        harness.restore();
+      }
+    });
+  }
+});
+
 test('switching users clears B flow cache and metadata before the new user load can fail', async () => {
   let activeUserId = 'user-a';
   let failLoads = false;
@@ -1124,6 +1246,223 @@ test('a stale user A load cannot commit or broadcast after auth switches to user
 
     assert.deepEqual(await harness.service.getEvents(), []);
     assert.deepEqual(harness.service.__testUseCalendarStore.getState().calendars, []);
+    assert.equal(harness.broadcasts.length, broadcastsAfterSwitch);
+  } finally {
+    harness.restore();
+  }
+});
+
+test('stale B flow and legacy delete failures cannot restore user A rows into user B cache', async (t) => {
+  for (const source of ['bflow', 'legacy'] as const) {
+    await t.test(source, async () => {
+      let activeUserId = 'user-a';
+      const deleteStarted = deferred<void>();
+      const deleteGate = deferred<void>();
+      const harness = await createHarness({
+        currentUserId: activeUserId,
+        calendarList: async () => [personalCalendar(activeUserId)],
+        fullSync: async () => [],
+        bflowEventsList: async () => source === 'bflow'
+          ? [bflowEvent(`event-${activeUserId}`, `일정 ${activeUserId}`)]
+          : [],
+        readPrivateEvents: async () => source === 'legacy'
+          ? [{ ...legacyPrivateEvent(`event-${activeUserId}`, activeUserId), title: `일정 ${activeUserId}` }]
+          : [],
+        deleteBflowEvent: async () => {
+          if (source !== 'bflow') return;
+          deleteStarted.resolve();
+          await deleteGate.promise;
+          throw new Error('A delete failed');
+        },
+        deleteLegacyEvent: async () => {
+          if (source !== 'legacy') return;
+          deleteStarted.resolve();
+          await deleteGate.promise;
+          throw new Error('A delete failed');
+        },
+      });
+
+      try {
+        await harness.service.loadBflowEvents();
+        const deletion = harness.service.deleteEvent('event-user-a').then(
+          () => null,
+          (error: unknown) => error,
+        );
+        await deleteStarted.promise;
+
+        activeUserId = 'user-b';
+        harness.service.__testUseAuthStore.setState({ currentUser: authUser(activeUserId) });
+        await harness.service.loadBflowEvents();
+        const broadcastsAfterBLoad = harness.broadcasts.length;
+
+        deleteGate.resolve();
+        await deletion;
+
+        assert.deepEqual(
+          (await harness.service.getEvents()).map(({ id, title }) => ({ id, title })),
+          [{ id: 'event-user-b', title: '일정 user-b' }],
+        );
+        assert.equal(harness.broadcasts.length, broadcastsAfterBLoad);
+      } finally {
+        harness.restore();
+      }
+    });
+  }
+});
+
+test('stale B flow and legacy update failures cannot roll user A data over user B same-id rows', async (t) => {
+  for (const source of ['bflow', 'legacy'] as const) {
+    await t.test(source, async () => {
+      let activeUserId = 'user-a';
+      const updateStarted = deferred<void>();
+      const updateGate = deferred<void>();
+      const harness = await createHarness({
+        currentUserId: activeUserId,
+        calendarList: async () => [personalCalendar(activeUserId)],
+        fullSync: async () => [],
+        bflowEventsList: async () => source === 'bflow'
+          ? [{ ...bflowEvent('shared-id', `일정 ${activeUserId}`) }]
+          : [],
+        readPrivateEvents: async () => source === 'legacy'
+          ? [{ ...legacyPrivateEvent('shared-id', activeUserId), title: `일정 ${activeUserId}` }]
+          : [],
+        updateBflowEvent: async () => {
+          updateStarted.resolve();
+          await updateGate.promise;
+          throw new Error('A update failed');
+        },
+        updateLegacyEvent: async () => {
+          updateStarted.resolve();
+          await updateGate.promise;
+          throw new Error('A update failed');
+        },
+      });
+
+      try {
+        await harness.service.loadBflowEvents();
+        const update = harness.service.updateEvent('shared-id', { title: 'A 낙관적 수정' }).then(
+          () => null,
+          (error: unknown) => error,
+        );
+        await updateStarted.promise;
+
+        activeUserId = 'user-b';
+        harness.service.__testUseAuthStore.setState({ currentUser: authUser(activeUserId) });
+        await harness.service.loadBflowEvents();
+        const broadcastsAfterBLoad = harness.broadcasts.length;
+
+        updateGate.resolve();
+        await update;
+
+        assert.equal(
+          (await harness.service.getEvents()).find(({ id }) => id === 'shared-id')?.title,
+          '일정 user-b',
+        );
+        assert.equal(harness.broadcasts.length, broadcastsAfterBLoad);
+      } finally {
+        harness.restore();
+      }
+    });
+  }
+});
+
+test('stale B flow and legacy add successes cannot leave cache, broadcast, or ID aliases in user B session', async (t) => {
+  for (const source of ['bflow', 'legacy'] as const) {
+    await t.test(source, async () => {
+      let activeUserId = 'user-a';
+      const createStarted = deferred<void>();
+      const createGate = deferred<void>();
+      const serverId = 'server-shared-id';
+      const harness = await createHarness({
+        currentUserId: activeUserId,
+        calendarList: async () => source === 'bflow' ? [personalCalendar(activeUserId)] : [],
+        fullSync: async () => [],
+        bflowEventsList: async () => source === 'bflow' && activeUserId === 'user-b'
+          ? [bflowEvent(serverId, 'B 기존 일정')]
+          : [],
+        readPrivateEvents: async () => source === 'legacy' && activeUserId === 'user-b'
+          ? [{ ...legacyPrivateEvent(serverId, activeUserId), title: 'B 기존 일정' }]
+          : [],
+        createBflowEvent: async () => {
+          createStarted.resolve();
+          await createGate.promise;
+          return bflowEvent(serverId, 'A 새 일정');
+        },
+        createLegacyEvent: async () => {
+          createStarted.resolve();
+          await createGate.promise;
+          return { ...legacyPrivateEvent(serverId, 'user-a'), title: 'A 새 일정' };
+        },
+      });
+
+      try {
+        const input = calendarEventInput('local-user-a', 'A 새 일정');
+        if (source === 'legacy') {
+          delete input.calendarId;
+          input.isPrivate = true;
+        }
+        const add = harness.service.addEvent(input).then(
+          () => null,
+          (error: unknown) => error,
+        );
+        await createStarted.promise;
+
+        activeUserId = 'user-b';
+        harness.service.__testUseAuthStore.setState({ currentUser: authUser(activeUserId) });
+        await harness.service.loadBflowEvents();
+        const broadcastsAfterBLoad = harness.broadcasts.length;
+
+        createGate.resolve();
+        await add;
+
+        assert.deepEqual(
+          (await harness.service.getEvents()).map(({ id, title }) => ({ id, title })),
+          [{ id: serverId, title: 'B 기존 일정' }],
+        );
+        assert.equal(harness.broadcasts.length, broadcastsAfterBLoad);
+
+        await harness.service.deleteEvent('local-user-a');
+        assert.deepEqual(harness.deletedBflowEventIds, []);
+        assert.deepEqual(harness.deletedLegacyEventIds, []);
+      } finally {
+        harness.restore();
+      }
+    });
+  }
+});
+
+test('privacy migration stops after replacement creation if the authenticated B flow session changed', async () => {
+  const createStarted = deferred<void>();
+  const createGate = deferred<void>();
+  const harness = await createHarness({
+    currentUserId: 'user-a',
+    personalCalendarId: 'primary',
+    calendarList: async () => [personalCalendar('user-a')],
+    bflowEventsList: async () => [],
+    fullSync: async () => [googleEvent('google-user-a', 'A 공개 일정')],
+    createBflowEvent: async () => {
+      createStarted.resolve();
+      await createGate.promise;
+      return bflowEvent('replacement-user-a', 'A 비공개 일정');
+    },
+  });
+
+  try {
+    await harness.service.loadBflowEvents();
+    await harness.service.syncAll({ skipBflowLoad: true });
+    const migration = harness.service.updateEvent('google-user-a', { isPrivate: true }).then(
+      () => null,
+      (error: unknown) => error,
+    );
+    await createStarted.promise;
+
+    harness.service.__testUseAuthStore.setState({ currentUser: authUser('user-b') });
+    const broadcastsAfterSwitch = harness.broadcasts.length;
+    createGate.resolve();
+    await migration;
+
+    assert.deepEqual(harness.deletedGoogleEventIds, [], 'old Google source must not be deleted for user B');
+    assert.deepEqual(harness.deletedBflowEventIds, [], 'stale replacement must not be compensated in user B');
     assert.equal(harness.broadcasts.length, broadcastsAfterSwitch);
   } finally {
     harness.restore();

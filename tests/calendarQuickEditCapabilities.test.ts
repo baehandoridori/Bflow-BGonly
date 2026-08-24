@@ -54,6 +54,7 @@ type QuickEditCallbacks = Pick<
 
 let bundledQuickEdit: Promise<QuickEditComponent> | undefined;
 let forcedTab: 'color' | 'edit' = 'color';
+let forcedEventType: QuickEditEventType | undefined;
 let capturedPortalChild: ReactNode;
 
 function textContent(node: ReactNode): string {
@@ -118,7 +119,11 @@ async function loadQuickEdit(): Promise<QuickEditComponent> {
             const value = typeof initial === 'function'
               ? (initial as () => unknown)()
               : initial;
-            return [value === 'color' ? forcedTab : value, () => {}];
+            if (value === 'color') return [forcedTab, () => {}];
+            if (typeof value === 'string' && ['custom', 'episode', 'part', 'scene', 'vacation'].includes(value)) {
+              return [forcedEventType ?? value, () => {}];
+            }
+            return [value, () => {}];
           },
           useEffect: () => {},
           useRef: (initial: unknown) => ({ current: initial }),
@@ -183,12 +188,14 @@ async function renderQuickEdit(
   target: QuickEditEvent,
   tab: 'color' | 'edit',
   callbacks: Partial<QuickEditCallbacks> = {},
+  draftType?: QuickEditEventType,
 ): Promise<ReactNode> {
   const EventQuickEdit = await loadQuickEdit();
   const globalScope = globalThis as typeof globalThis & { document?: { body: object } };
   const previousDocument = globalScope.document;
   globalScope.document = { body: {} };
   forcedTab = tab;
+  forcedEventType = draftType;
   capturedPortalChild = undefined;
   try {
     EventQuickEdit({
@@ -284,7 +291,7 @@ test('new B flow save omits derived type while retaining editable fields', async
   assert.equal(Object.hasOwn(updates[0].patch, 'type'), false);
 });
 
-test('legacy private and Google events keep enabled color and type editing with type in save', async () => {
+test('legacy private and Google events keep enabled editing but omit an unchanged type from save', async () => {
   const cases: Array<{ name: string; target: QuickEditEvent }> = [
     {
       name: 'legacy private',
@@ -315,7 +322,31 @@ test('legacy private and Google events keep enabled color and type editing with 
       assert.notEqual(findButtonByText(editTree, label).props.disabled, true, `${name}: ${label} remains editable`);
     }
     findButtonByText(editTree, '저장').props.onClick?.();
-    assert.equal(updates[0].patch.type, target.type, `${name}: save keeps its editable type`);
+    assert.equal(Object.hasOwn(updates[0].patch, 'type'), false, `${name}: unchanged type is not sent`);
+  }
+});
+
+test('legacy private and Google events include type when the user actually changes it', async () => {
+  const cases: Array<{ name: string; target: QuickEditEvent }> = [
+    {
+      name: 'legacy private',
+      target: event({ source: 'bflow', sourceCalendarId: 'supabase-private', type: 'episode' }),
+    },
+    {
+      name: 'Google',
+      target: event({ source: 'google', sourceCalendarId: 'primary', type: 'scene' }),
+    },
+  ];
+
+  for (const { name, target } of cases) {
+    const updates: Array<{ id: string; patch: Partial<QuickEditEvent> }> = [];
+    const tree = await renderQuickEdit(target, 'edit', {
+      onUpdate: (id, patch) => updates.push({ id, patch }),
+    }, 'part');
+
+    findButtonByText(tree, '저장').props.onClick?.();
+
+    assert.equal(updates[0].patch.type, 'part', `${name}: changed type is sent`);
   }
 });
 
