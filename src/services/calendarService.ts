@@ -52,8 +52,12 @@ class PrivacyMigrationCompensationError extends Error {
   }
 }
 
+async function fetchLegacyPrivateEventsForUser(userId: string): Promise<RawPrivateEvent[]> {
+  return window.electronAPI.supabaseReadPrivateEvents(userId);
+}
+
 async function readLegacyPrivateEventsForUser(userId: string): Promise<RawPrivateEvent[]> {
-  const rows = await window.electronAPI.supabaseReadPrivateEvents(userId);
+  const rows = await fetchLegacyPrivateEventsForUser(userId);
   legacyPrivateEvents = {
     userId,
     ids: new Set(rows.map((row) => row.id)),
@@ -312,6 +316,7 @@ let eventCache: CalendarEvent[] = [];
 // Google 캐시는 빈 목록도 정상적인 동기화 결과이므로 이벤트 개수와 별도로 준비 상태를 보관한다.
 let googleCacheReady = false;
 let syncAllGeneration = 0;
+let bflowLoadGeneration = 0;
 
 export function isGoogleCacheReady(): boolean {
   return googleCacheReady;
@@ -342,10 +347,10 @@ export async function getEvents(): Promise<CalendarEvent[]> {
 
 type LoadBflowEventsOptions = {
   broadcast?: boolean;
-  shouldCommit?: () => boolean;
 };
 
 async function loadBflowEventsInternal(options: LoadBflowEventsOptions = {}): Promise<void> {
+  const requestGeneration = ++bflowLoadGeneration;
   try {
     await useCalendarStore.getState().loadAll();
     const calendars = useCalendarStore.getState().calendars;
@@ -356,22 +361,29 @@ async function loadBflowEventsInternal(options: LoadBflowEventsOptions = {}): Pr
     // 마이그레이션 전 폴백: 구 private_calendar_events 병행 읽기 — 중복 id 는 calendar_events 우선.
     const newIds = new Set(next.map((event) => event.id));
     const userId = useAuthStore.getState().currentUser?.id;
+    let nextLegacyPrivateEvents: LegacyPrivateEventState;
     try {
       if (userId) {
-        const legacyRows = await readLegacyPrivateEventsForUser(userId);
+        const legacyRows = await fetchLegacyPrivateEventsForUser(userId);
+        nextLegacyPrivateEvents = {
+          userId,
+          ids: new Set(legacyRows.map((row) => row.id)),
+          status: 'known',
+        };
         for (const row of legacyRows) {
           if (!newIds.has(row.id)) next.push(toCalendarEventFromPrivate(row));
         }
       } else {
-        legacyPrivateEvents = { userId: null, ids: new Set<string>(), status: 'known' };
+        nextLegacyPrivateEvents = { userId: null, ids: new Set<string>(), status: 'known' };
       }
     } catch (err) {
-      legacyPrivateEvents = { userId: userId ?? null, ids: new Set<string>(), status: 'unknown' };
+      nextLegacyPrivateEvents = { userId: userId ?? null, ids: new Set<string>(), status: 'unknown' };
       console.warn('[Calendar] 구 비공개 일정 폴백 로드 실패:', err);
     }
 
-    // syncAll 안에서 호출된 느린 선행 요청은 더 최신 요청의 B flow 캐시를 덮지 않는다.
-    if (options.shouldCommit && !options.shouldCommit()) return;
+    // 단독 로드와 syncAll을 포함해 가장 늦게 시작한 요청만 B flow/legacy 상태를 함께 반영한다.
+    if (requestGeneration !== bflowLoadGeneration) return;
+    legacyPrivateEvents = nextLegacyPrivateEvents;
     bflowEvents = next;
     rebuildEventCache();
     if (options.broadcast !== false) broadcastCalendarChange();
@@ -391,7 +403,6 @@ export async function syncAll(options: { broadcast?: boolean; skipBflowLoad?: bo
   if (!options.skipBflowLoad) {
     await loadBflowEventsInternal({
       broadcast: options.broadcast !== false,
-      shouldCommit: () => requestGeneration === syncAllGeneration,
     });
     if (requestGeneration !== syncAllGeneration) return [...googleEvents];
   }

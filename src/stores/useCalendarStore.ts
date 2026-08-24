@@ -4,6 +4,7 @@ import type { BflowCalendar, CalendarTag } from '@/types/calendar';
 const VISIBLE_CALENDARS_KEY = 'bflow_calendar_visible_v1';
 const ENABLED_TAGS_KEY = 'bflow_calendar_tags_enabled_v1';
 const MUTED_CALENDARS_KEY = 'bflow_calendar_muted_v1';
+let loadAllGeneration = 0;
 
 export interface CalendarState {
   calendars: BflowCalendar[];
@@ -87,6 +88,7 @@ export const useCalendarStore = create<CalendarState>((set) => ({
   mutedCalendarIds: loadMutedCalendarIds(),
 
   async loadAll() {
+    const requestGeneration = ++loadAllGeneration;
     const [calendarResult, tagResult] = await Promise.allSettled([
       window.electronAPI.calendarList(),
       window.electronAPI.calendarTagsList(),
@@ -125,6 +127,7 @@ export const useCalendarStore = create<CalendarState>((set) => ({
     }
 
     // 독립 요청의 실패는 마지막으로 성공한 다른 메타데이터를 지우지 않는다.
+    if (requestGeneration !== loadAllGeneration) return;
     set({ ...next, loaded: true });
   },
 

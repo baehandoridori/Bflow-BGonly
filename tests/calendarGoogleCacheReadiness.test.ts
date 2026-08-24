@@ -11,8 +11,18 @@ type ServiceModule = {
     title: string;
     sourceCalendarId?: string;
   }>>;
+  deleteEvent(eventId: string): Promise<void>;
   saveTeamCalendarId(calendarId: string | null): Promise<void>;
   isGoogleCacheReady(): boolean;
+  __testUseAuthStore: {
+    setState(state: { currentUser: {
+      id: string;
+      name: string;
+      slackId: string;
+      isInitialPassword: boolean;
+      createdAt: string;
+    } }): void;
+  };
 };
 
 type GoogleEventFixture = {
@@ -46,9 +56,46 @@ type BflowEventFixture = {
   updated_at: string;
 };
 
+type BflowCalendarFixture = {
+  id: string;
+  name: string;
+  color: string;
+  visibility: 'private' | 'members' | 'team';
+  owner_id: string;
+  is_personal: boolean;
+  created_at: string;
+  updated_at: string;
+  members: Array<{ user_id: string; can_edit: boolean }>;
+  can_edit: boolean;
+  can_manage: boolean;
+};
+
+type LegacyPrivateEventFixture = {
+  id: string;
+  user_id: string;
+  title: string;
+  memo: string | null;
+  color: string | null;
+  type: string | null;
+  start_date: string;
+  end_date: string;
+  linked_episode: number | null;
+  linked_part: string | null;
+  linked_sheet_name: string | null;
+  linked_scene_id: string | null;
+  linked_department: string | null;
+  linked_todo_id: string | null;
+  created_by: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
 type HarnessOptions = {
   fullSync(calendarId: string): Promise<GoogleEventFixture[]>;
+  calendarList?: () => Promise<BflowCalendarFixture[]>;
   bflowEventsList?: () => Promise<BflowEventFixture[]>;
+  readPrivateEvents?: (userId: string) => Promise<LegacyPrivateEventFixture[]>;
+  currentUserId?: string;
   teamCalendarId?: string | null;
   personalCalendarId?: string | null;
   failSettingsWrite?: () => boolean;
@@ -60,7 +107,10 @@ let bundleNonce = 0;
 async function bundledServiceSource(): Promise<string> {
   bundleSource ??= build({
     stdin: {
-      contents: "export * from './src/services/calendarService.ts';",
+      contents: [
+        "export * from './src/services/calendarService.ts';",
+        "export { useAuthStore as __testUseAuthStore } from './src/stores/useAuthStore.ts';",
+      ].join('\n'),
       resolveDir: process.cwd(),
       sourcefile: 'calendar-google-cache-readiness-entry.ts',
     },
@@ -108,15 +158,56 @@ function bflowEvent(id: string, title: string): BflowEventFixture {
   };
 }
 
+function personalCalendar(userId: string): BflowCalendarFixture {
+  return {
+    id: 'calendar-1',
+    name: '내 캘린더',
+    color: '#6C5CE7',
+    visibility: 'private',
+    owner_id: userId,
+    is_personal: true,
+    created_at: '2026-08-24T00:00:00.000Z',
+    updated_at: '2026-08-24T00:00:00.000Z',
+    members: [],
+    can_edit: true,
+    can_manage: true,
+  };
+}
+
+function legacyPrivateEvent(id: string, userId: string): LegacyPrivateEventFixture {
+  return {
+    id,
+    user_id: userId,
+    title: '이관 전 개인 일정',
+    memo: null,
+    color: '#6C5CE7',
+    type: 'custom',
+    start_date: '2026-08-24',
+    end_date: '2026-08-24',
+    linked_episode: null,
+    linked_part: null,
+    linked_sheet_name: null,
+    linked_scene_id: null,
+    linked_department: null,
+    linked_todo_id: null,
+    created_by: userId,
+    created_at: '2026-08-24T00:00:00.000Z',
+    updated_at: '2026-08-24T00:00:00.000Z',
+  };
+}
+
 function deferred<T>(): {
   promise: Promise<T>;
   resolve(value: T): void;
+  reject(reason?: unknown): void;
 } {
   let resolve!: (value: T) => void;
-  const promise = new Promise<T>((next) => {
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((next, fail) => {
     resolve = next;
+    reject = fail;
   });
-  return { promise, resolve };
+  return { promise, resolve, reject };
 }
 
 async function createHarness(
@@ -125,6 +216,8 @@ async function createHarness(
   service: ServiceModule;
   broadcasts: unknown[];
   watchedCalendarIds: string[];
+  deletedBflowEventIds: string[];
+  deletedLegacyEventIds: string[];
   restore(): void;
 }> {
   const options: HarnessOptions = typeof input === 'function' ? { fullSync: input } : input;
@@ -137,6 +230,8 @@ async function createHarness(
   const values = new Map<string, string>();
   const broadcasts: unknown[] = [];
   const watchedCalendarIds: string[] = [];
+  const deletedBflowEventIds: string[] = [];
+  const deletedLegacyEventIds: string[] = [];
   if (options.personalCalendarId !== undefined) {
     values.set('bflow_gcal_local_settings', JSON.stringify({
       personalCalendarId: options.personalCalendarId,
@@ -162,14 +257,20 @@ async function createHarness(
   };
   globalScope.window = Object.assign(new EventTarget(), {
     electronAPI: {
-      calendarList: async () => [],
+      calendarList: options.calendarList ?? (async () => []),
       calendarTagsList: async () => [],
       calendarEventsList: options.bflowEventsList ?? (async () => []),
+      calendarEventDelete: async (eventId: string) => {
+        deletedBflowEventIds.push(eventId);
+      },
       calendarBroadcastChange: async (detail: unknown) => {
         broadcasts.push(detail);
         return { ok: true };
       },
-      supabaseReadPrivateEvents: async () => [],
+      supabaseReadPrivateEvents: options.readPrivateEvents ?? (async () => []),
+      supabaseDeletePrivateEvent: async (eventId: string) => {
+        deletedLegacyEventIds.push(eventId);
+      },
       supabaseWriteMetadata: async () => {},
       supabaseReadMetadata: async () => options.teamCalendarId
         ? {
@@ -189,10 +290,23 @@ async function createHarness(
   try {
     const encoded = Buffer.from(await bundledServiceSource()).toString('base64');
     const service = await import(`data:text/javascript;base64,${encoded}#calendar-google-ready-${bundleNonce++}`) as unknown as ServiceModule;
+    if (options.currentUserId) {
+      service.__testUseAuthStore.setState({
+        currentUser: {
+          id: options.currentUserId,
+          name: '테스트 사용자',
+          slackId: '',
+          isInitialPassword: false,
+          createdAt: '2026-08-24T00:00:00.000Z',
+        },
+      });
+    }
     return {
       service,
       broadcasts,
       watchedCalendarIds,
+      deletedBflowEventIds,
+      deletedLegacyEventIds,
       restore() {
         for (const [key, value] of prior) {
           if (value.exists) globalScope[key] = value.value;
@@ -440,19 +554,105 @@ test('an older default sync cannot overwrite or rebroadcast a newer B flow load'
     await firstSync;
 
     const events = await harness.service.getEvents();
+    const expected = [{
+      id: 'new-bflow',
+      title: '나중 요청의 최신 B flow 일정',
+      sourceCalendarId: 'bflow:calendar-1',
+    }];
     assert.deepEqual(
       events.map(({ id, title, sourceCalendarId }) => ({ id, title, sourceCalendarId })),
-      [{
-        id: 'new-bflow',
-        title: '나중 요청의 최신 B flow 일정',
-        sourceCalendarId: 'bflow:calendar-1',
-      }],
+      expected,
     );
     assert.equal(harness.service.isGoogleCacheReady(), true);
     assert.ok(broadcastsAfterNewerSync > 0, 'the current sync still broadcasts its committed changes');
     assert.equal(harness.broadcasts.length, broadcastsAfterNewerSync, 'the stale sync must not rebroadcast');
   } finally {
     harness.restore();
+  }
+});
+
+test('a newer syncAll B flow load wins against an older standalone load without a stale broadcast', async () => {
+  const olderRows = deferred<BflowEventFixture[]>();
+  const olderStarted = deferred<void>();
+  let listCalls = 0;
+  const harness = await createHarness({
+    fullSync: async () => [],
+    bflowEventsList: async () => {
+      listCalls += 1;
+      if (listCalls === 1) {
+        olderStarted.resolve();
+        return olderRows.promise;
+      }
+      return [bflowEvent('sync-new', '나중 전체 동기화 일정')];
+    },
+  });
+  try {
+    const olderStandalone = harness.service.loadBflowEvents();
+    await olderStarted.promise;
+    await harness.service.syncAll();
+    const broadcastsAfterNewerSync = harness.broadcasts.length;
+
+    olderRows.resolve([bflowEvent('standalone-old', '먼저 시작한 단독 로드 일정')]);
+    await olderStandalone;
+
+    assert.deepEqual(
+      (await harness.service.getEvents()).map(({ id, title }) => ({ id, title })),
+      [{ id: 'sync-new', title: '나중 전체 동기화 일정' }],
+    );
+    assert.ok(broadcastsAfterNewerSync > 0);
+    assert.equal(harness.broadcasts.length, broadcastsAfterNewerSync);
+  } finally {
+    harness.restore();
+  }
+});
+
+test('a stale default sync cannot replace the latest legacy-copy tracking used by delete', async (t) => {
+  for (const staleOutcome of ['success', 'failure'] as const) {
+    await t.test(`stale legacy ${staleOutcome}`, async () => {
+      const userId = 'user-1';
+      const staleLegacyRows = deferred<LegacyPrivateEventFixture[]>();
+      const staleLegacyStarted = deferred<void>();
+      let bflowListCalls = 0;
+      let legacyReadCalls = 0;
+      const harness = await createHarness({
+        currentUserId: userId,
+        calendarList: async () => [personalCalendar(userId)],
+        fullSync: async () => [],
+        bflowEventsList: async () => {
+          bflowListCalls += 1;
+          if (bflowListCalls === 1) return [bflowEvent('old-bflow', '먼저 시작한 예전 개인 일정')];
+          return [bflowEvent('new-bflow', '최신 개인 일정')];
+        },
+        readPrivateEvents: async () => {
+          legacyReadCalls += 1;
+          if (legacyReadCalls === 1) {
+            staleLegacyStarted.resolve();
+            return staleLegacyRows.promise;
+          }
+          if (legacyReadCalls === 2) return [legacyPrivateEvent('new-bflow', userId)];
+          throw new Error(`unexpected legacy read: ${legacyReadCalls}`);
+        },
+      });
+      const originalWarn = console.warn;
+      try {
+        console.warn = () => {};
+        const staleSync = harness.service.syncAll();
+        await staleLegacyStarted.promise;
+        await harness.service.loadBflowEvents();
+
+        if (staleOutcome === 'success') staleLegacyRows.resolve([]);
+        else staleLegacyRows.reject(new Error('stale legacy read failed'));
+        await staleSync;
+        await harness.service.deleteEvent('new-bflow');
+
+        assert.equal(legacyReadCalls, 2, 'delete trusts the latest known legacy snapshot without a stale refresh');
+        assert.deepEqual(harness.deletedLegacyEventIds, ['new-bflow']);
+        assert.deepEqual(harness.deletedBflowEventIds, ['new-bflow']);
+      } finally {
+        console.warn = originalWarn;
+        harness.restore();
+      }
+    });
   }
 });
 
