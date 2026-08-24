@@ -40,20 +40,40 @@ type CalendarEventRow = {
 
 type ServiceModule = {
   loadBflowEvents(): Promise<void>;
+  syncAll(options?: { broadcast?: boolean; skipBflowLoad?: boolean }): Promise<Array<Record<string, unknown>>>;
   getEvents(): Promise<Array<Record<string, unknown>>>;
+  addEvent(event: Record<string, unknown>): Promise<void>;
   updateEvent(eventId: string, updates: Record<string, unknown>): Promise<void>;
   useAuthStore: { getState(): { setCurrentUser(user: unknown): void } };
 };
 
 type Calls = {
   bflowCreates: Array<Record<string, unknown>>;
+  bflowUpdates: Array<{ id: string; patch: Record<string, unknown> }>;
   bflowDeletes: string[];
+  legacyUpdates: Array<{ id: string; patch: Record<string, unknown> }>;
+  legacyDeletes: string[];
   googleCreates: Array<{ calendarId: string; input: unknown }>;
+  googleUpdates: Array<{ calendarId: string; eventId: string; input: unknown }>;
   googleDeletes: Array<{ calendarId: string; eventId: string }>;
 };
 
 let bundleSource: Promise<string> | undefined;
 let bundleNonce = 0;
+
+function createDeferred<T>(): {
+  promise: Promise<T>;
+  resolve(value: T): void;
+  reject(reason: unknown): void;
+} {
+  let resolve!: (value: T) => void;
+  let reject!: (reason: unknown) => void;
+  const promise = new Promise<T>((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise;
+    reject = rejectPromise;
+  });
+  return { promise, resolve, reject };
+}
 
 function calendarRow(id: string, isPersonal: boolean): CalendarRow {
   return {
@@ -119,6 +139,9 @@ async function createHarness(options: {
   failGoogleCreate?: boolean;
   bflowDeleteError?: Error;
   googleDeleteError?: Error;
+  bflowDelete?: (id: string) => Promise<void>;
+  googleFullSync?: (calendarId: string) => Promise<unknown[]>;
+  includePersonalCalendar?: boolean;
 }): Promise<{ service: ServiceModule; calls: Calls; restore(): void }> {
   const globalScope = globalThis as Record<string, unknown>;
   const prior = new Map<string, { exists: boolean; value: unknown }>();
@@ -145,11 +168,17 @@ async function createHarness(options: {
 
   const calls: Calls = {
     bflowCreates: [],
+    bflowUpdates: [],
     bflowDeletes: [],
+    legacyUpdates: [],
+    legacyDeletes: [],
     googleCreates: [],
+    googleUpdates: [],
     googleDeletes: [],
   };
-  const calendars = [calendarRow('personal-cal', true), calendarRow('shared-cal', false)];
+  const calendars = options.includePersonalCalendar === false
+    ? [calendarRow('shared-cal', false)]
+    : [calendarRow('personal-cal', true), calendarRow('shared-cal', false)];
   const electronAPI = {
     calendarList: async () => calendars,
     calendarTagsList: async () => [],
@@ -158,23 +187,38 @@ async function createHarness(options: {
       calls.bflowCreates.push(input);
       return { ...input, id: 'created-private-event' };
     },
-    calendarEventUpdate: async () => {},
+    calendarEventUpdate: async (id: string, patch: Record<string, unknown>) => {
+      calls.bflowUpdates.push({ id, patch });
+    },
     calendarEventDelete: async (id: string) => {
       calls.bflowDeletes.push(id);
+      if (options.bflowDelete) {
+        await options.bflowDelete(id);
+        return;
+      }
       if (options.bflowDeleteError) throw options.bflowDeleteError;
     },
     calendarBroadcastChange: async () => ({ ok: true }),
     supabaseReadPrivateEvents: async () => [],
     supabaseAddPrivateEvent: async () => ({ id: 'legacy-private-event' }),
-    supabaseUpdatePrivateEvent: async () => {},
-    supabaseDeletePrivateEvent: async () => {},
+    supabaseUpdatePrivateEvent: async (id: string, patch: Record<string, unknown>) => {
+      calls.legacyUpdates.push({ id, patch });
+    },
+    supabaseDeletePrivateEvent: async (id: string) => { calls.legacyDeletes.push(id); },
     gcalIsAuthenticated: async () => false,
+    gcalSaveLocalSettings: async () => {},
+    gcalFullSync: async (calendarId: string) => (
+      options.googleFullSync ? options.googleFullSync(calendarId) : []
+    ),
+    gcalEnsureWatch: async () => {},
     gcalInsertEvent: async (calendarId: string, input: unknown) => {
       calls.googleCreates.push({ calendarId, input });
       if (options.failGoogleCreate) throw new Error('Google calendar unavailable');
       return 'created-google-event';
     },
-    gcalUpdateEvent: async () => {},
+    gcalUpdateEvent: async (calendarId: string, eventId: string, input: unknown) => {
+      calls.googleUpdates.push({ calendarId, eventId, input });
+    },
     gcalDeleteEvent: async (calendarId: string, eventId: string) => {
       calls.googleDeletes.push({ calendarId, eventId });
       if (options.googleDeleteError) throw options.googleDeleteError;
@@ -235,6 +279,7 @@ test('making a personal B flow event public creates Google replacement before de
 
     assert.equal(harness.calls.googleCreates.length, 1);
     assert.deepEqual(harness.calls.bflowDeletes, ['personal-event']);
+    assert.deepEqual(harness.calls.bflowUpdates, []);
     const events = await harness.service.getEvents();
     const migrated = events.find((event) => event.id === 'created-google-event');
     assert.equal(migrated?.source, 'google');
@@ -253,8 +298,54 @@ test('making a shared B flow event private creates personal-calendar replacement
     assert.equal(harness.calls.bflowCreates.length, 1);
     assert.equal(harness.calls.bflowCreates[0].calendar_id, 'personal-cal');
     assert.deepEqual(harness.calls.bflowDeletes, ['shared-event']);
+    assert.deepEqual(harness.calls.bflowUpdates, []);
     const events = await harness.service.getEvents();
     assert.equal(events.find((event) => event.id === 'created-private-event')?.isPrivate, true);
+  } finally {
+    harness.restore();
+  }
+});
+
+test('ordinary B flow update stays on calendar IPC and never falls through to Google', async () => {
+  const harness = await createHarness({ rows: [eventRow('shared-event', 'shared-cal')] });
+  try {
+    await harness.service.loadBflowEvents();
+    await harness.service.updateEvent('shared-event', { title: '수정된 일정' });
+
+    assert.deepEqual(harness.calls.bflowUpdates, [{
+      id: 'shared-event',
+      patch: { title: '수정된 일정' },
+    }]);
+    assert.deepEqual(harness.calls.legacyUpdates, []);
+    assert.deepEqual(harness.calls.googleUpdates, []);
+  } finally {
+    harness.restore();
+  }
+});
+
+test('ordinary legacy-private update stays on Supabase and never falls through to Google', async () => {
+  const harness = await createHarness({ rows: [], includePersonalCalendar: false });
+  try {
+    await harness.service.addEvent({
+      id: 'local-private-event',
+      title: '비공개 일정',
+      memo: '',
+      color: '#6C5CE7',
+      type: 'custom',
+      startDate: '2026-08-24',
+      endDate: '2026-08-24',
+      createdBy: 'user-1',
+      createdAt: '2026-08-24T00:00:00.000Z',
+      isPrivate: true,
+    });
+    await harness.service.updateEvent('legacy-private-event', { title: '수정된 비공개 일정' });
+
+    assert.deepEqual(harness.calls.bflowUpdates, []);
+    assert.deepEqual(harness.calls.legacyUpdates, [{
+      id: 'legacy-private-event',
+      patch: { title: '수정된 비공개 일정' },
+    }]);
+    assert.deepEqual(harness.calls.googleUpdates, []);
   } finally {
     harness.restore();
   }
@@ -300,6 +391,124 @@ test('failed original delete compensates the Google replacement and rejects the 
     }]);
     const events = await harness.service.getEvents();
     assert.deepEqual(events.map((event) => event.id), ['personal-event']);
+  } finally {
+    harness.restore();
+  }
+});
+
+test('stale empty Google sync cannot hide a confirmed replacement from privacy migration compensation', async () => {
+  const originalDeleteError = new Error('original B flow delete failed');
+  const staleSnapshot = createDeferred<unknown[]>();
+  const syncStarted = createDeferred<void>();
+  const originalDelete = createDeferred<void>();
+  const originalDeleteStarted = createDeferred<void>();
+  const harness = await createHarness({
+    rows: [eventRow('personal-event', 'personal-cal')],
+    googleFullSync: async () => {
+      syncStarted.resolve(undefined);
+      return staleSnapshot.promise;
+    },
+    bflowDelete: async (id) => {
+      if (id === 'personal-event') {
+        originalDeleteStarted.resolve(undefined);
+        return originalDelete.promise;
+      }
+    },
+  });
+  try {
+    await harness.service.loadBflowEvents();
+    const staleSync = harness.service.syncAll({ skipBflowLoad: true });
+    await syncStarted.promise;
+
+    const update = harness.service.updateEvent('personal-event', { isPrivate: false });
+    const rejectedUpdate = assert.rejects(update, originalDeleteError);
+    await originalDeleteStarted.promise;
+
+    staleSnapshot.resolve([]);
+    await staleSync;
+    originalDelete.reject(originalDeleteError);
+    await rejectedUpdate;
+
+    assert.deepEqual(harness.calls.googleDeletes, [{
+      calendarId: 'primary',
+      eventId: 'created-google-event',
+    }]);
+    const events = await harness.service.getEvents();
+    assert.deepEqual(events.map((event) => event.id), ['personal-event']);
+    assert.equal(events.some((event) => event.id === 'created-google-event'), false);
+  } finally {
+    harness.restore();
+  }
+});
+
+test('failed shared-source delete compensates the confirmed personal B flow replacement', async () => {
+  const originalDeleteError = new Error('original shared B flow delete failed');
+  const harness = await createHarness({
+    rows: [eventRow('shared-event', 'shared-cal')],
+    bflowDelete: async (id) => {
+      if (id === 'shared-event') throw originalDeleteError;
+    },
+  });
+  try {
+    await harness.service.loadBflowEvents();
+
+    await assert.rejects(
+      harness.service.updateEvent('shared-event', { isPrivate: true }),
+      originalDeleteError,
+    );
+
+    assert.deepEqual(harness.calls.bflowDeletes, ['shared-event', 'created-private-event']);
+    const events = await harness.service.getEvents();
+    assert.deepEqual(events.map((event) => event.id), ['shared-event']);
+  } finally {
+    harness.restore();
+  }
+});
+
+test('failed shared-source delete compensates the confirmed legacy-private replacement by real ID', async () => {
+  const originalDeleteError = new Error('original shared B flow delete failed');
+  const harness = await createHarness({
+    rows: [eventRow('shared-event', 'shared-cal')],
+    includePersonalCalendar: false,
+    bflowDelete: async (id) => {
+      if (id === 'shared-event') throw originalDeleteError;
+    },
+  });
+  try {
+    await harness.service.loadBflowEvents();
+
+    await assert.rejects(
+      harness.service.updateEvent('shared-event', { isPrivate: true }),
+      originalDeleteError,
+    );
+
+    assert.deepEqual(harness.calls.bflowDeletes, ['shared-event']);
+    assert.deepEqual(harness.calls.legacyDeletes, ['legacy-private-event']);
+    const events = await harness.service.getEvents();
+    assert.deepEqual(events.map((event) => event.id), ['shared-event']);
+  } finally {
+    harness.restore();
+  }
+});
+
+test('exported addEvent keeps its Promise<void> result while internal creation tracks the real ID', async () => {
+  const harness = await createHarness({ rows: [] });
+  try {
+    const result = await harness.service.addEvent({
+      id: 'local-public-event',
+      title: '공개 일정',
+      memo: '',
+      color: '#6C5CE7',
+      type: 'custom',
+      startDate: '2026-08-24',
+      endDate: '2026-08-24',
+      createdBy: 'user-1',
+      createdAt: '2026-08-24T00:00:00.000Z',
+      isPrivate: false,
+    });
+
+    assert.equal(result, undefined);
+    assert.equal(harness.calls.googleCreates.length, 1);
   } finally {
     harness.restore();
   }

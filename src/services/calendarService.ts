@@ -332,6 +332,11 @@ function rebuildEventCache(): void {
 
 type CalendarCacheSource = 'bflow' | 'google';
 
+type CreatedEventRef =
+  | { actualId: string; storage: 'bflow'; calendarId: string }
+  | { actualId: string; storage: 'legacy-private' }
+  | { actualId: string; storage: 'google'; calendarId: string };
+
 function invalidateBflowLoads(): void {
   bflowLoadGeneration += 1;
 }
@@ -704,8 +709,8 @@ async function resolveEvent(eventId: string): Promise<CalendarEvent | undefined>
   return undefined;
 }
 
-async function addBflowEvent(event: CalendarEvent, calendarId: string): Promise<void> {
-  await withBflowMutation(async () => {
+async function addBflowEvent(event: CalendarEvent, calendarId: string): Promise<CreatedEventRef> {
+  return withBflowMutation(async () => {
     const localId = event.id;
     const optimistic = withBflowCalendarPresentation({
       ...event,
@@ -740,6 +745,7 @@ async function addBflowEvent(event: CalendarEvent, calendarId: string): Promise<
         item.id === localId ? { ...item, id: inserted.id } : item
       )));
       broadcastCalendarChange({ eventId: inserted.id, action: 'update' });
+      return { actualId: inserted.id, storage: 'bflow', calendarId };
     } catch (err) {
       mutateSourceEvents('bflow', (events) => events.filter((item) => item.id !== localId));
       broadcastCalendarChange();
@@ -748,10 +754,9 @@ async function addBflowEvent(event: CalendarEvent, calendarId: string): Promise<
   });
 }
 
-export async function addEvent(event: CalendarEvent): Promise<void> {
+async function addEventInternal(event: CalendarEvent): Promise<CreatedEventRef> {
   if (event.calendarId) {
-    await addBflowEvent(event, event.calendarId);
-    return;
+    return addBflowEvent(event, event.calendarId);
   }
 
   // ── 비공개 이벤트 분기 — Supabase 에만 저장, Google Calendar 비연동 ──
@@ -763,11 +768,10 @@ export async function addEvent(event: CalendarEvent): Promise<void> {
     if (!calendarState.loaded) await calendarState.loadAll();
     const personal = getPersonalCalendar(useCalendarStore.getState(), userId);
     if (personal) {
-      await addBflowEvent({ ...event, calendarId: personal.id }, personal.id);
-      return;
+      return addBflowEvent({ ...event, calendarId: personal.id }, personal.id);
     }
 
-    await withBflowMutation(async () => {
+    return withBflowMutation(async () => {
       const localId = event.id;
       // 낙관적 업데이트
       mutateSourceEvents('bflow', (events) => [...events, {
@@ -803,13 +807,13 @@ export async function addEvent(event: CalendarEvent): Promise<void> {
           item.id === localId ? { ...item, id: inserted.id } : item
         )));
         broadcastCalendarChange({ eventId: inserted.id, action: 'update' });
+        return { actualId: inserted.id, storage: 'legacy-private' };
       } catch (err) {
         mutateSourceEvents('bflow', (events) => events.filter((item) => item.id !== localId));
         broadcastCalendarChange();
         throw err;
       }
     });
-    return;
   }
 
   const calId = await getTargetCalendar(event.type);
@@ -844,12 +848,35 @@ export async function addEvent(event: CalendarEvent): Promise<void> {
       item.id === localId ? { ...item, id: gcalId } : item
     )));
     broadcastCalendarChange({ eventId: gcalId, action: 'update' });
+    return { actualId: gcalId, storage: 'google', calendarId: calId };
   } catch (err) {
     // 실패: 롤백
     mutateSourceEvents('google', (events) => events.filter((item) => item.id !== localId));
     broadcastCalendarChange();
     throw err;
   }
+}
+
+export async function addEvent(event: CalendarEvent): Promise<void> {
+  await addEventInternal(event);
+}
+
+async function compensateCreatedEvent(requestId: string, created: CreatedEventRef): Promise<void> {
+  if (created.storage === 'google') {
+    await gcalService.deleteEvent(created.calendarId, created.actualId);
+  } else if (created.storage === 'bflow') {
+    await window.electronAPI.calendarEventDelete(created.actualId);
+  } else {
+    await window.electronAPI.supabaseDeletePrivateEvent(created.actualId);
+    forgetLegacyPrivateEvent(created.actualId);
+  }
+
+  const cacheSource: CalendarCacheSource = created.storage === 'google' ? 'google' : 'bflow';
+  mutateSourceEvents(cacheSource, (events) => events.filter((item) => (
+    item.id !== created.actualId && item.id !== requestId
+  )));
+  cleanupDeletedEventAliases(requestId, created.actualId);
+  broadcastCalendarChange({ eventId: created.actualId, action: 'delete' });
 }
 
 export async function updateEvent(eventId: string, updates: Partial<CalendarEvent>): Promise<void> {
@@ -892,20 +919,19 @@ export async function updateEvent(eventId: string, updates: Partial<CalendarEven
     };
     await withBflowMutation(async () => {
       // 1) 새 저장소에 생성 — 실패하면 원본이 그대로 남아있어 데이터 손실 없음.
-      await addEvent(fresh);
+      const replacement = await addEventInternal(fresh);
       // 2) 새 이벤트가 안전하게 자리잡은 뒤 기존 저장소에서 제거.
       try {
         await deleteEvent(eventId);
       } catch (originalDeleteError) {
         // 원본 삭제가 실패하면 create-first 단계의 replacement도 되돌려야 reload 후
         // 영구 중복이 남지 않는다. deleteEvent 는 실패 시 원본 cache 를 복원한다.
-        const replacementId = (await resolveEvent(freshLocalId))?.id ?? freshLocalId;
         try {
-          await deleteEvent(freshLocalId);
+          await compensateCreatedEvent(freshLocalId, replacement);
         } catch (compensationDeleteError) {
           throw new PrivacyMigrationCompensationError(
             actualId,
-            replacementId,
+            replacement.actualId,
             originalDeleteError,
             compensationDeleteError,
           );
