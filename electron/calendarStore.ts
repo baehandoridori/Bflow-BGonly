@@ -232,20 +232,30 @@ export async function listEventsInRange(params: {
   }
 }
 
-export async function getEventById(id: string): Promise<CalendarEventRow | null> {
+async function readEventById(id: string, missingTableIsEmpty: boolean): Promise<CalendarEventRow | null> {
   const { data, error } = await supabase
     .from('calendar_events')
     .select('*')
     .eq('id', id)
     .maybeSingle();
   if (error) {
-    if (isMissingTable(error)) {
+    if (missingTableIsEmpty && isMissingTable(error)) {
       warnMissingTable('calendar_events', '빈 결과');
       return null;
     }
     throwIfError(error);
   }
   return (data as CalendarEventRow | null) ?? null;
+}
+
+/** 일반 조회는 마이그레이션 전 테이블 부재를 빈 결과로 취급한다. */
+export async function getEventById(id: string): Promise<CalendarEventRow | null> {
+  return readEventById(id, true);
+}
+
+/** 쓰기 전 권한/원본 확인은 테이블 부재를 성공으로 오인하면 안 되므로 오류를 그대로 올린다. */
+export async function getEventByIdForWrite(id: string): Promise<CalendarEventRow | null> {
+  return readEventById(id, false);
 }
 
 export async function createEvent(

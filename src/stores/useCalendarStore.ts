@@ -1,10 +1,12 @@
 import { create } from 'zustand';
 import type { BflowCalendar, CalendarTag } from '@/types/calendar';
+import { useAuthStore } from './useAuthStore.ts';
 
 const VISIBLE_CALENDARS_KEY = 'bflow_calendar_visible_v1';
 const ENABLED_TAGS_KEY = 'bflow_calendar_tags_enabled_v1';
 const MUTED_CALENDARS_KEY = 'bflow_calendar_muted_v1';
 let loadAllGeneration = 0;
+let calendarStoreSessionUserId = useAuthStore.getState().currentUser?.id ?? null;
 
 export interface CalendarState {
   calendars: BflowCalendar[];
@@ -88,6 +90,8 @@ export const useCalendarStore = create<CalendarState>((set) => ({
   mutedCalendarIds: loadMutedCalendarIds(),
 
   async loadAll() {
+    const requestUserId = useAuthStore.getState().currentUser?.id ?? null;
+    resetCalendarStoreSession(requestUserId);
     const requestGeneration = ++loadAllGeneration;
     const [calendarResult, tagResult] = await Promise.allSettled([
       window.electronAPI.calendarList(),
@@ -127,7 +131,11 @@ export const useCalendarStore = create<CalendarState>((set) => ({
     }
 
     // 독립 요청의 실패는 마지막으로 성공한 다른 메타데이터를 지우지 않는다.
-    if (requestGeneration !== loadAllGeneration) return;
+    if (
+      requestGeneration !== loadAllGeneration
+      || requestUserId !== calendarStoreSessionUserId
+      || requestUserId !== (useAuthStore.getState().currentUser?.id ?? null)
+    ) return;
     set({ ...next, loaded: true });
   },
 
@@ -166,3 +174,16 @@ export const useCalendarStore = create<CalendarState>((set) => ({
     });
   },
 }));
+
+function resetCalendarStoreSession(userId: string | null): void {
+  if (userId === calendarStoreSessionUserId) return;
+  calendarStoreSessionUserId = userId;
+  loadAllGeneration += 1;
+  useCalendarStore.setState({ calendars: [], tags: [], loaded: false });
+}
+
+// Zustand 구독은 setCurrentUser/setState와 같은 call stack에서 실행된다. 따라서 새 사용자의
+// 첫 IPC가 실패하더라도 이전 사용자의 캘린더 메타데이터가 한 프레임도 남지 않는다.
+useAuthStore.subscribe((state) => {
+  resetCalendarStoreSession(state.currentUser?.id ?? null);
+});

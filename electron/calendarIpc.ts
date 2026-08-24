@@ -49,6 +49,16 @@ async function emitCalendarEventNotifications(_ctx: {
 const membersOf = (all: CalendarMemberRow[], calendarId: string) =>
   all.filter((member) => member.calendar_id === calendarId);
 
+function normalizeCalendarVisibility(value: unknown): CalendarRow['visibility'] {
+  if (
+    typeof value !== 'string'
+    || (value !== 'private' && value !== 'members' && value !== 'team')
+  ) {
+    throw new Error('캘린더 공개 범위가 올바르지 않습니다');
+  }
+  return value;
+}
+
 function normalizeCalendarMembers(members: unknown, ownerId: string): Array<{ user_id: string; can_edit: boolean }> {
   if (members === undefined) return [];
   if (!Array.isArray(members)) throw new Error('캘린더 멤버 입력이 올바르지 않습니다');
@@ -92,6 +102,7 @@ export function registerCalendarIpc(deps: CalendarIpcDeps): void {
 
   ipcMain.handle('calendar:list', wrap(async () => {
     const user = await sessionUser();
+    await store.ensurePersonalCalendar(user.id);
     const { calendars, members } = await store.listCalendarsWithMembers();
     return calendars
       .filter((calendar) => canViewCalendar(
@@ -116,19 +127,20 @@ export function registerCalendarIpc(deps: CalendarIpcDeps): void {
     visibility: 'private' | 'members' | 'team';
     members?: unknown;
   }) => {
+    const visibility = normalizeCalendarVisibility(input.visibility);
     const user = await sessionUser();
-    if (!canCreateCalendar(user, input.visibility)) {
+    if (!canCreateCalendar(user, visibility)) {
       throw new Error('팀 전체 캘린더는 관리자만 만들 수 있습니다');
     }
     const safeMembers = normalizeCalendarMembers(input.members, user.id);
     const created = await store.createCalendar({
       name: input.name,
       color: input.color,
-      visibility: input.visibility,
+      visibility,
       owner_id: user.id,
       is_personal: false,
     });
-    if (safeMembers.length && input.visibility !== 'private') {
+    if (safeMembers.length && visibility !== 'private') {
       try {
         await store.replaceMembers(created.id, safeMembers);
       } catch (memberError) {
@@ -150,6 +162,9 @@ export function registerCalendarIpc(deps: CalendarIpcDeps): void {
     id: string,
     updates: Parameters<typeof store.updateCalendar>[1],
   ) => {
+    const requestedVisibility = updates.visibility === undefined
+      ? undefined
+      : normalizeCalendarVisibility(updates.visibility);
     const user = await sessionUser();
     const { calendar } = await loadCalendarOrThrow(id);
     if (!canManageCalendar(calendar, user)) {
@@ -159,11 +174,11 @@ export function registerCalendarIpc(deps: CalendarIpcDeps): void {
     const safeUpdates: Parameters<typeof store.updateCalendar>[1] = {};
     if (updates.name !== undefined) safeUpdates.name = updates.name;
     if (updates.color !== undefined) safeUpdates.color = updates.color;
-    if (!calendar.is_personal && updates.visibility !== undefined) {
-      if (updates.visibility === 'team' && !canCreateCalendar(user, 'team')) {
+    if (!calendar.is_personal && requestedVisibility !== undefined) {
+      if (requestedVisibility === 'team' && !canCreateCalendar(user, 'team')) {
         throw new Error('팀 전체 캘린더는 관리자만 만들 수 있습니다');
       }
-      safeUpdates.visibility = updates.visibility;
+      safeUpdates.visibility = requestedVisibility;
     }
 
     await store.updateCalendar(id, safeUpdates);
@@ -313,7 +328,7 @@ export function registerCalendarIpc(deps: CalendarIpcDeps): void {
 
   ipcMain.handle('calendar:events:delete', wrap(async (id: string) => {
     const user = await sessionUser();
-    const previous = await store.getEventById(id);
+    const previous = await store.getEventByIdForWrite(id);
     if (!previous) return;
     const { calendar, members } = await loadCalendarForUserOrThrow(previous.calendar_id, user.id);
     if (!canEditCalendarEvents(calendar, members, user.id)) {

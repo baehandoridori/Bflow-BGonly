@@ -36,6 +36,8 @@ let legacyPrivateEvents: LegacyPrivateEventState = {
   ids: new Set<string>(),
   status: 'unknown',
 };
+let bflowSessionUserId = useAuthStore.getState().currentUser?.id ?? null;
+let bflowSessionGeneration = 0;
 
 class PrivacyMigrationCompensationError extends Error {
   readonly errors: readonly [unknown, unknown];
@@ -57,7 +59,13 @@ async function fetchLegacyPrivateEventsForUser(userId: string): Promise<RawPriva
 }
 
 async function readLegacyPrivateEventsForUser(userId: string): Promise<RawPrivateEvent[]> {
+  const requestSessionGeneration = bflowSessionGeneration;
   const rows = await fetchLegacyPrivateEventsForUser(userId);
+  if (
+    requestSessionGeneration !== bflowSessionGeneration
+    || userId !== bflowSessionUserId
+    || userId !== useAuthStore.getState().currentUser?.id
+  ) return rows;
   legacyPrivateEvents = {
     userId,
     ids: new Set(rows.map((row) => row.id)),
@@ -99,6 +107,9 @@ function toCalendarEventFromBflowRow(
 ): CalendarEvent {
   const calendar = calendarsById.get(row.calendar_id);
   const canEdit = calendar?.canEdit ?? false;
+  const creator = row.created_by
+    ? useAuthStore.getState().users.find((user) => user.id === row.created_by)
+    : undefined;
   const type: CalendarEventType = row.linked_scene_id
     ? 'scene'
     : row.linked_part
@@ -115,7 +126,7 @@ function toCalendarEventFromBflowRow(
     type,
     startDate: row.start_date,
     endDate: row.end_date,
-    createdBy: row.created_by ?? '',
+    createdBy: creator?.name ?? row.created_by ?? '',
     createdAt: row.created_at,
     linkedEpisode: row.linked_episode ?? undefined,
     linkedPart: row.linked_part ?? undefined,
@@ -318,6 +329,9 @@ let googleCacheReady = false;
 let syncAllGeneration = 0;
 let bflowLoadGeneration = 0;
 let bflowMutationInFlight = 0;
+let bflowLoadsInFlight = 0;
+let bflowReloadRequested = false;
+let bflowReloadTask: { sessionGeneration: number; promise: Promise<void> } | null = null;
 // 이 renderer 세션에서 보상 삭제된 캘린더+이벤트 ID를 기억해, 삭제 전에 만들어진
 // 동기화 snapshot이 해당 이벤트만 되살리지 못하게 한다.
 const compensatedGoogleEventKeys = new Set<string>();
@@ -350,6 +364,100 @@ function rebuildEventCache(): void {
 
 type CalendarCacheSource = 'bflow' | 'google';
 
+type ConcurrentEventUpdateFlight = {
+  source: CalendarCacheSource;
+  sessionGeneration: number | null;
+  inFlight: number;
+  concurrent: boolean;
+  reconcileRequested: boolean;
+  reconcileTask: Promise<void> | null;
+};
+
+const concurrentEventUpdateFlights = new Map<string, ConcurrentEventUpdateFlight>();
+
+async function reconcileConcurrentEventUpdates(flight: ConcurrentEventUpdateFlight): Promise<void> {
+  try {
+    if (flight.source === 'bflow') {
+      if (flight.sessionGeneration !== bflowSessionGeneration) return;
+      await loadBflowEventsInternal();
+      return;
+    }
+    await syncAll({ skipBflowLoad: true });
+  } catch (err) {
+    // 쓰기 성공/실패 결과를 정본 재조회 오류로 바꾸지는 않는다. 기존 캐시는 유지하고
+    // 다음 화면 동기화에서 다시 수렴할 수 있도록 진단만 남긴다.
+    console.warn('[Calendar] 겹친 일정 수정 후 정본 재조회 실패:', err);
+  }
+}
+
+async function drainConcurrentEventUpdateReconciliation(
+  key: string,
+  flight: ConcurrentEventUpdateFlight,
+): Promise<void> {
+  if (flight.reconcileTask) {
+    await flight.reconcileTask;
+    return;
+  }
+
+  const task = (async () => {
+    // 정본 재조회 중 새 수정이 끝나면 한 번 더 조회한다. 진행 중인 쓰기보다 먼저 받은
+    // snapshot이 마지막 낙관적 값을 덮는 것을 막으면서, 평상시 단일 수정은 추가 조회하지 않는다.
+    while (flight.inFlight === 0 && flight.reconcileRequested) {
+      flight.reconcileRequested = false;
+      await reconcileConcurrentEventUpdates(flight);
+    }
+  })();
+  flight.reconcileTask = task;
+  try {
+    await task;
+  } finally {
+    if (flight.reconcileTask === task) flight.reconcileTask = null;
+    if (
+      flight.inFlight === 0
+      && !flight.reconcileRequested
+      && concurrentEventUpdateFlights.get(key) === flight
+    ) {
+      concurrentEventUpdateFlights.delete(key);
+    }
+  }
+}
+
+async function withConcurrentEventUpdateReconciliation<T>(
+  source: CalendarCacheSource,
+  key: string,
+  mutation: () => Promise<T>,
+): Promise<T> {
+  let flight = concurrentEventUpdateFlights.get(key);
+  if (flight) {
+    flight.concurrent = true;
+  } else {
+    flight = {
+      source,
+      sessionGeneration: source === 'bflow' ? bflowSessionGeneration : null,
+      inFlight: 0,
+      concurrent: false,
+      reconcileRequested: false,
+      reconcileTask: null,
+    };
+    concurrentEventUpdateFlights.set(key, flight);
+  }
+  flight.inFlight += 1;
+
+  try {
+    return await mutation();
+  } finally {
+    flight.inFlight = Math.max(0, flight.inFlight - 1);
+    if (flight.concurrent) flight.reconcileRequested = true;
+    if (flight.inFlight === 0) {
+      if (flight.reconcileRequested) {
+        await drainConcurrentEventUpdateReconciliation(key, flight);
+      } else if (concurrentEventUpdateFlights.get(key) === flight) {
+        concurrentEventUpdateFlights.delete(key);
+      }
+    }
+  }
+}
+
 type CreatedEventRef =
   | { actualId: string; storage: 'bflow'; calendarId: string }
   | { actualId: string; storage: 'legacy-private' }
@@ -359,22 +467,32 @@ function invalidateBflowLoads(): void {
   bflowLoadGeneration += 1;
 }
 
-function beginBflowMutation(): void {
+type BflowMutationToken = { sessionGeneration: number };
+
+function beginBflowMutation(): BflowMutationToken {
+  resetBflowSession(useAuthStore.getState().currentUser?.id ?? null);
+  const token = { sessionGeneration: bflowSessionGeneration };
   bflowMutationInFlight += 1;
+  if (bflowLoadsInFlight > 0) bflowReloadRequested = true;
   invalidateBflowLoads();
+  return token;
 }
 
-function finishBflowMutation(): void {
-  bflowMutationInFlight -= 1;
+async function finishBflowMutation(token: BflowMutationToken): Promise<void> {
+  if (token.sessionGeneration !== bflowSessionGeneration) return;
+  bflowMutationInFlight = Math.max(0, bflowMutationInFlight - 1);
   invalidateBflowLoads();
+  if (bflowMutationInFlight === 0 && bflowReloadRequested) {
+    await reloadBflowAfterDiscardedLoad(token.sessionGeneration);
+  }
 }
 
 async function withBflowMutation<T>(mutation: () => Promise<T>): Promise<T> {
-  beginBflowMutation();
+  const token = beginBflowMutation();
   try {
     return await mutation();
   } finally {
-    finishBflowMutation();
+    await finishBflowMutation(token);
   }
 }
 
@@ -401,8 +519,13 @@ type LoadBflowEventsOptions = {
   broadcast?: boolean;
 };
 
-async function loadBflowEventsInternal(options: LoadBflowEventsOptions = {}): Promise<void> {
+async function loadBflowEventsInternal(options: LoadBflowEventsOptions = {}): Promise<boolean> {
+  resetBflowSession(useAuthStore.getState().currentUser?.id ?? null);
+  const requestSessionGeneration = bflowSessionGeneration;
+  const requestUserId = bflowSessionUserId;
   const requestGeneration = ++bflowLoadGeneration;
+  bflowLoadsInFlight += 1;
+  if (bflowMutationInFlight > 0) bflowReloadRequested = true;
   try {
     await useCalendarStore.getState().loadAll();
     const calendars = useCalendarStore.getState().calendars;
@@ -412,7 +535,7 @@ async function loadBflowEventsInternal(options: LoadBflowEventsOptions = {}): Pr
 
     // 마이그레이션 전 폴백: 구 private_calendar_events 병행 읽기 — 중복 id 는 calendar_events 우선.
     const newIds = new Set(next.map((event) => event.id));
-    const userId = useAuthStore.getState().currentUser?.id;
+    const userId = requestUserId;
     let nextLegacyPrivateEvents: LegacyPrivateEventState;
     try {
       if (userId) {
@@ -434,13 +557,53 @@ async function loadBflowEventsInternal(options: LoadBflowEventsOptions = {}): Pr
     }
 
     // 단독 로드와 syncAll을 포함해 가장 늦게 시작한 요청만 B flow/legacy 상태를 함께 반영한다.
-    if (requestGeneration !== bflowLoadGeneration || bflowMutationInFlight > 0) return;
+    if (
+      requestSessionGeneration !== bflowSessionGeneration
+      || requestUserId !== bflowSessionUserId
+      || requestUserId !== (useAuthStore.getState().currentUser?.id ?? null)
+    ) return false;
+    if (requestGeneration !== bflowLoadGeneration || bflowMutationInFlight > 0) {
+      if (bflowMutationInFlight > 0) bflowReloadRequested = true;
+      return false;
+    }
     legacyPrivateEvents = nextLegacyPrivateEvents;
     bflowEvents = next;
     rebuildEventCache();
     if (options.broadcast !== false) broadcastCalendarChange();
+    return true;
   } catch (err) {
-    console.warn('[Calendar] B flow 일정 로드 실패:', err);
+    if (requestSessionGeneration === bflowSessionGeneration) {
+      console.warn('[Calendar] B flow 일정 로드 실패:', err);
+    }
+    return false;
+  } finally {
+    if (requestSessionGeneration === bflowSessionGeneration) {
+      bflowLoadsInFlight = Math.max(0, bflowLoadsInFlight - 1);
+    }
+  }
+}
+
+async function reloadBflowAfterDiscardedLoad(sessionGeneration: number): Promise<void> {
+  while (
+    sessionGeneration === bflowSessionGeneration
+    && bflowMutationInFlight === 0
+    && bflowReloadRequested
+  ) {
+    const existing = bflowReloadTask;
+    if (existing?.sessionGeneration === sessionGeneration) {
+      await existing.promise;
+      continue;
+    }
+
+    bflowReloadRequested = false;
+    const promise = loadBflowEventsInternal().then(() => undefined);
+    const task = { sessionGeneration, promise };
+    bflowReloadTask = task;
+    try {
+      await promise;
+    } finally {
+      if (bflowReloadTask === task) bflowReloadTask = null;
+    }
   }
 }
 
@@ -586,6 +749,31 @@ export async function syncIncremental(): Promise<void> {
 // ─── 로컬 ID ↔ GCal ID 매핑 (할일 등 cal_* ID 호환용) ──────────────────
 
 const localToGcalId = new Map<string, string>();
+
+function resetBflowSession(userId: string | null): void {
+  if (userId === bflowSessionUserId) return;
+  bflowSessionUserId = userId;
+  bflowSessionGeneration += 1;
+  bflowLoadGeneration += 1;
+  bflowMutationInFlight = 0;
+  bflowLoadsInFlight = 0;
+  bflowReloadRequested = false;
+  bflowReloadTask = null;
+  bflowEvents = [];
+  legacyPrivateEvents = {
+    userId,
+    ids: new Set<string>(),
+    status: 'unknown',
+  };
+  localToGcalId.clear();
+  rebuildEventCache();
+}
+
+// 인증 store 구독은 상태 변경과 같은 call stack에서 실행된다. Google cache는 기존 인증
+// lifecycle에 맡기고, 사용자 소유인 B flow/private cache와 alias만 즉시 격리한다.
+useAuthStore.subscribe((state) => {
+  resetBflowSession(state.currentUser?.id ?? null);
+});
 
 function hasOwnEventUpdate<K extends keyof CalendarEvent>(
   updates: Partial<CalendarEvent>,
@@ -989,59 +1177,67 @@ export async function updateEvent(eventId: string, updates: Partial<CalendarEven
   if (existing.sourceCalendarId?.startsWith(BFLOW_CAL_PREFIX)) {
     const patch = toBflowEventUpdatePatch(updates);
     if (Object.keys(patch).length === 0) return;
-    await withBflowMutation(async () => {
-      const previous = { ...existing };
-      const optimistic = applyBflowEventUpdates(existing, updates);
-      mutateSourceEvents('bflow', (events) => events.map((item) => (
-        item.id === actualId ? optimistic : item
-      )));
-      broadcastCalendarChange({ eventId: actualId, action: 'update' });
-
-      try {
-        await window.electronAPI.calendarEventUpdate(actualId, patch);
-      } catch (err) {
+    await withConcurrentEventUpdateReconciliation(
+      'bflow',
+      `bflow:${bflowSessionGeneration}:${actualId}`,
+      () => withBflowMutation(async () => {
+        const previous = { ...existing };
+        const optimistic = applyBflowEventUpdates(existing, updates);
         mutateSourceEvents('bflow', (events) => events.map((item) => (
-          item.id === actualId ? previous : item
+          item.id === actualId ? optimistic : item
         )));
         broadcastCalendarChange({ eventId: actualId, action: 'update' });
-        throw err;
-      }
-    });
+
+        try {
+          await window.electronAPI.calendarEventUpdate(actualId, patch);
+        } catch (err) {
+          mutateSourceEvents('bflow', (events) => events.map((item) => (
+            item.id === actualId ? previous : item
+          )));
+          broadcastCalendarChange({ eventId: actualId, action: 'update' });
+          throw err;
+        }
+      }),
+    );
     return;
   }
 
   // ── 비공개 이벤트 분기 — Supabase update ──
   if (existing.sourceCalendarId === PRIVATE_CAL_ID) {
-    await withBflowMutation(async () => {
-      const previous = { ...existing };
-      mutateSourceEvents('bflow', (events) => events.map((item) => (
-        item.id === actualId ? { ...item, ...updates } : item
-      )));
-      broadcastCalendarChange({ eventId: actualId, action: 'update' });
-
-      try {
-        const patch: Record<string, unknown> = {};
-        if (updates.title !== undefined) patch.title = updates.title;
-        if (updates.memo !== undefined) patch.memo = updates.memo;
-        if (updates.color !== undefined) patch.color = updates.color;
-        if (updates.type !== undefined) patch.type = updates.type;
-        if (updates.startDate !== undefined) patch.start_date = updates.startDate;
-        if (updates.endDate !== undefined) patch.end_date = updates.endDate;
-        if (hasOwnEventUpdate(updates, 'linkedEpisode')) patch.linked_episode = updates.linkedEpisode ?? null;
-        if (hasOwnEventUpdate(updates, 'linkedPart')) patch.linked_part = updates.linkedPart ?? null;
-        if (hasOwnEventUpdate(updates, 'linkedSheetName')) patch.linked_sheet_name = updates.linkedSheetName ?? null;
-        if (hasOwnEventUpdate(updates, 'linkedSceneId')) patch.linked_scene_id = updates.linkedSceneId ?? null;
-        if (hasOwnEventUpdate(updates, 'linkedDepartment')) patch.linked_department = updates.linkedDepartment ?? null;
-        if (hasOwnEventUpdate(updates, 'linkedTodoId')) patch.linked_todo_id = updates.linkedTodoId ?? null;
-        await window.electronAPI.supabaseUpdatePrivateEvent(actualId, patch);
-      } catch (err) {
+    await withConcurrentEventUpdateReconciliation(
+      'bflow',
+      `bflow:${bflowSessionGeneration}:${actualId}`,
+      () => withBflowMutation(async () => {
+        const previous = { ...existing };
         mutateSourceEvents('bflow', (events) => events.map((item) => (
-          item.id === actualId ? previous : item
+          item.id === actualId ? { ...item, ...updates } : item
         )));
         broadcastCalendarChange({ eventId: actualId, action: 'update' });
-        throw err;
-      }
-    });
+
+        try {
+          const patch: Record<string, unknown> = {};
+          if (updates.title !== undefined) patch.title = updates.title;
+          if (updates.memo !== undefined) patch.memo = updates.memo;
+          if (updates.color !== undefined) patch.color = updates.color;
+          if (updates.type !== undefined) patch.type = updates.type;
+          if (updates.startDate !== undefined) patch.start_date = updates.startDate;
+          if (updates.endDate !== undefined) patch.end_date = updates.endDate;
+          if (hasOwnEventUpdate(updates, 'linkedEpisode')) patch.linked_episode = updates.linkedEpisode ?? null;
+          if (hasOwnEventUpdate(updates, 'linkedPart')) patch.linked_part = updates.linkedPart ?? null;
+          if (hasOwnEventUpdate(updates, 'linkedSheetName')) patch.linked_sheet_name = updates.linkedSheetName ?? null;
+          if (hasOwnEventUpdate(updates, 'linkedSceneId')) patch.linked_scene_id = updates.linkedSceneId ?? null;
+          if (hasOwnEventUpdate(updates, 'linkedDepartment')) patch.linked_department = updates.linkedDepartment ?? null;
+          if (hasOwnEventUpdate(updates, 'linkedTodoId')) patch.linked_todo_id = updates.linkedTodoId ?? null;
+          await window.electronAPI.supabaseUpdatePrivateEvent(actualId, patch);
+        } catch (err) {
+          mutateSourceEvents('bflow', (events) => events.map((item) => (
+            item.id === actualId ? previous : item
+          )));
+          broadcastCalendarChange({ eventId: actualId, action: 'update' });
+          throw err;
+        }
+      }),
+    );
     return;
   }
 
@@ -1050,35 +1246,41 @@ export async function updateEvent(eventId: string, updates: Partial<CalendarEven
   if (!calId) return;
   const existingSource = inferExistingEventSource(existing);
 
-  // 낙관적 업데이트: 캐시 먼저 업데이트
-  const previous = { ...existing };
-  mutateSourceEvents(existingSource, (events) => events.map((item) => (
-    item.id === actualId ? { ...item, ...updates } : item
-  )));
-  broadcastCalendarChange({ eventId: actualId, action: 'update' });
+  await withConcurrentEventUpdateReconciliation(
+    'google',
+    `google:${calId}:${actualId}`,
+    async () => {
+      // 낙관적 업데이트: 캐시 먼저 업데이트
+      const previous = { ...existing };
+      mutateSourceEvents(existingSource, (events) => events.map((item) => (
+        item.id === actualId ? { ...item, ...updates } : item
+      )));
+      broadcastCalendarChange({ eventId: actualId, action: 'update' });
 
-  try {
-    const effectiveStart = updates.startDate ?? existing.startDate;
-    const effectiveEnd = updates.endDate ?? existing.endDate;
-    const isAllDay = effectiveStart.length === 10;
-    const gcalEndDate = isAllDay && effectiveEnd ? addOneDay(effectiveEnd) : effectiveEnd;
-    await gcalService.updateEvent(calId, actualId, {
-      summary: updates.title,
-      description: updates.memo,
-      startDate: updates.startDate,
-      endDate: gcalEndDate,
-      extendedProperties: toBflowMeta({ ...existing, ...updates }),
-      // isPrivate 토글은 이미 위의 저장소 이전 경로에서 처리됨 — 여기는 저장소 변경 없이
-      // 단순 필드 수정만 오므로 visibility 는 건드리지 않는다.
-    });
-  } catch (err) {
-    // 실패: 롤백
-    mutateSourceEvents(existingSource, (events) => events.map((item) => (
-      item.id === actualId ? previous : item
-    )));
-    broadcastCalendarChange({ eventId: actualId, action: 'update' });
-    throw err;
-  }
+      try {
+        const effectiveStart = updates.startDate ?? existing.startDate;
+        const effectiveEnd = updates.endDate ?? existing.endDate;
+        const isAllDay = effectiveStart.length === 10;
+        const gcalEndDate = isAllDay && effectiveEnd ? addOneDay(effectiveEnd) : effectiveEnd;
+        await gcalService.updateEvent(calId, actualId, {
+          summary: updates.title,
+          description: updates.memo,
+          startDate: updates.startDate,
+          endDate: gcalEndDate,
+          extendedProperties: toBflowMeta({ ...existing, ...updates }),
+          // isPrivate 토글은 이미 위의 저장소 이전 경로에서 처리됨 — 여기는 저장소 변경 없이
+          // 단순 필드 수정만 오므로 visibility 는 건드리지 않는다.
+        });
+      } catch (err) {
+        // 실패: 롤백
+        mutateSourceEvents(existingSource, (events) => events.map((item) => (
+          item.id === actualId ? previous : item
+        )));
+        broadcastCalendarChange({ eventId: actualId, action: 'update' });
+        throw err;
+      }
+    },
+  );
 }
 
 export async function deleteEvent(eventId: string): Promise<void> {
