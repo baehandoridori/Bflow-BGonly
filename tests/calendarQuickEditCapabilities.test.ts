@@ -23,6 +23,8 @@ type QuickEditEvent = {
   source?: 'bflow' | 'google' | 'vacation';
   sourceCalendarId?: string;
   calendarId?: string;
+  canEdit?: boolean;
+  isReadOnly?: boolean;
 };
 
 type QuickEditProps = {
@@ -381,5 +383,68 @@ test('new B flow duplicate and delete actions still invoke their callback and cl
       assert.deepEqual(deleted, [target.id]);
     }
     assert.equal(closeCount, 1, `${action} closes once`);
+  }
+});
+
+test('read-only calendar events expose no quick-edit write action', async () => {
+  const cases: Array<{ name: string; target: QuickEditEvent }> = [
+    {
+      name: 'explicit read-only B flow event',
+      target: event({
+        source: 'bflow',
+        calendarId: 'calendar-shared',
+        isReadOnly: true,
+      }),
+    },
+    {
+      name: 'calendar event without edit permission',
+      target: event({
+        source: 'bflow',
+        calendarId: 'calendar-shared',
+        canEdit: false,
+      }),
+    },
+  ];
+
+  for (const { name, target } of cases) {
+    const colorUpdates: Array<[string, string]> = [];
+    const updates: Array<{ id: string; patch: Partial<QuickEditEvent> }> = [];
+    const deleted: string[] = [];
+    const duplicated: QuickEditEvent[] = [];
+    let closeCount = 0;
+    const colorTree = await renderQuickEdit(target, 'color', {
+      onClose: () => { closeCount += 1; },
+      onUpdateColor: (id, color) => colorUpdates.push([id, color]),
+      onUpdate: (id, patch) => updates.push({ id, patch }),
+      onDelete: (id) => deleted.push(id),
+      onDuplicate: (value) => duplicated.push(value),
+    });
+
+    assert.match(textContent(colorTree), /보기 전용/);
+    assert.equal(findButtonByText(colorTree, '일정 편집').props.disabled, true, `${name}: edit tab is disabled`);
+    for (const swatch of colorButtons(colorTree)) {
+      assert.equal(swatch.props.disabled, true, `${name}: color is disabled`);
+      swatch.props.onClick?.();
+    }
+    for (const action of ['복사', '삭제'] as const) {
+      const button = findButtonByText(colorTree, action);
+      assert.equal(button.props.disabled, true, `${name}: ${action} is disabled`);
+      assert.equal(button.props.onClick, undefined, `${name}: ${action} has no write handler`);
+    }
+
+    const editTree = await renderQuickEdit(target, 'edit', {
+      onClose: () => { closeCount += 1; },
+      onUpdate: (id, patch) => updates.push({ id, patch }),
+      onDelete: (id) => deleted.push(id),
+      onDuplicate: (value) => duplicated.push(value),
+    });
+    assert.match(textContent(editTree), /보기 전용 일정/);
+    assert.equal(findButtons(editTree).some((button) => textContent(button).includes('저장')), false, `${name}: save is absent`);
+
+    assert.deepEqual(colorUpdates, []);
+    assert.deepEqual(updates, []);
+    assert.deepEqual(deleted, []);
+    assert.deepEqual(duplicated, []);
+    assert.equal(closeCount, 0, `${name}: blocked actions do not close the popup`);
   }
 });

@@ -50,11 +50,17 @@ export function EventQuickEdit({
   const users = useAuthStore((s) => s.users);
 
   const isVacation = event.type === 'vacation';
+  const isWriteProtected = !isVacation && (event.isReadOnly === true || event.canEdit === false);
   const hasCalendarDerivedFields = event.sourceCalendarId?.startsWith('bflow:') === true
     || (event.source === 'bflow' && Boolean(event.calendarId));
   const derivedFieldsDescriptionId = hasCalendarDerivedFields
     ? `calendar-derived-fields-${event.id}`
     : undefined;
+  const readOnlyDescriptionId = isWriteProtected
+    ? `calendar-read-only-${event.id}`
+    : undefined;
+  const colorChangeBlocked = hasCalendarDerivedFields || isWriteProtected;
+  const colorDescriptionId = readOnlyDescriptionId ?? derivedFieldsDescriptionId;
   const fieldStyle = {
     background: 'rgb(var(--color-bg-primary) / 0.82)',
     border: '1px solid rgb(var(--color-bg-border) / 0.56)',
@@ -91,21 +97,24 @@ export function EventQuickEdit({
   }, [onClose]);
 
   const handleSave = useCallback(() => {
+    if (isWriteProtected) return;
     const updates: Partial<CalendarEvent> = { title, startDate, endDate, memo };
     if (!hasCalendarDerivedFields && type !== event.type) updates.type = type;
     onUpdate(event.id, updates);
     onClose();
-  }, [event.id, event.type, title, startDate, endDate, type, memo, hasCalendarDerivedFields, onUpdate, onClose]);
+  }, [event.id, event.type, title, startDate, endDate, type, memo, hasCalendarDerivedFields, isWriteProtected, onUpdate, onClose]);
 
   const handleDelete = useCallback(() => {
+    if (isWriteProtected) return;
     onDelete(event.id);
     onClose();
-  }, [event.id, onDelete, onClose]);
+  }, [event.id, isWriteProtected, onDelete, onClose]);
 
   const handleDuplicate = useCallback(() => {
+    if (isWriteProtected) return;
     onDuplicate(event);
     onClose();
-  }, [event, onDuplicate, onClose]);
+  }, [event, isWriteProtected, onDuplicate, onClose]);
 
   return createPortal(
     <AnimatePresence>
@@ -126,9 +135,11 @@ export function EventQuickEdit({
           boxShadow: '0 16px 36px rgb(var(--color-shadow) / calc(var(--shadow-alpha) * 1.28))',
         }}
       >
-        {derivedFieldsDescriptionId && (
-          <p id={derivedFieldsDescriptionId} className="sr-only">
-            색상과 유형은 소속 캘린더와 연결 정보로 결정되어 여기서 변경할 수 없습니다.
+        {colorDescriptionId && (
+          <p id={colorDescriptionId} className="sr-only">
+            {isWriteProtected
+              ? '보기 전용 일정이라 변경, 복사 또는 삭제할 수 없습니다.'
+              : '색상과 유형은 소속 캘린더와 연결 정보로 결정되어 여기서 변경할 수 없습니다.'}
           </p>
         )}
         {/* 헤더: 탭 */}
@@ -144,8 +155,10 @@ export function EventQuickEdit({
             <Palette size={12} className="inline mr-1" /> 색상
           </button>
           <button
-            onClick={() => !isVacation && setTab('edit')}
-            className={`flex-1 py-2.5 text-xs font-medium transition-colors ${isVacation ? 'cursor-not-allowed opacity-50' : 'cursor-pointer'}`}
+            disabled={isVacation || isWriteProtected}
+            aria-describedby={readOnlyDescriptionId}
+            onClick={() => !isVacation && !isWriteProtected && setTab('edit')}
+            className={`flex-1 py-2.5 text-xs font-medium transition-colors ${isVacation || isWriteProtected ? 'cursor-not-allowed opacity-50' : 'cursor-pointer'}`}
             style={{
               color: tab === 'edit' ? 'rgb(var(--color-accent))' : 'rgb(var(--color-text-secondary))',
               borderBottom: tab === 'edit' ? '2px solid rgb(var(--color-accent))' : '2px solid transparent',
@@ -176,10 +189,14 @@ export function EventQuickEdit({
                 {EVENT_COLORS.map((color) => (
                    <button
                      key={color}
-                     disabled={hasCalendarDerivedFields}
-                     aria-label={hasCalendarDerivedFields ? `${color} 캘린더 색상, 변경 불가` : `${color} 색상 선택`}
-                     aria-describedby={derivedFieldsDescriptionId}
-                     onClick={hasCalendarDerivedFields ? undefined : () => onUpdateColor(event.id, color)}
+                     disabled={colorChangeBlocked}
+                     aria-label={isWriteProtected
+                       ? `${color} 보기 전용, 변경 불가`
+                       : hasCalendarDerivedFields
+                         ? `${color} 캘린더 색상, 변경 불가`
+                         : `${color} 색상 선택`}
+                     aria-describedby={colorDescriptionId}
+                     onClick={colorChangeBlocked ? undefined : () => onUpdateColor(event.id, color)}
                     className="relative w-8 h-8 rounded-lg transition-transform hover:scale-110 cursor-pointer disabled:cursor-not-allowed disabled:opacity-55 disabled:hover:scale-100"
                     style={{
                       background: color,
@@ -196,15 +213,19 @@ export function EventQuickEdit({
               {/* 빠른 액션 */}
               <div className="flex gap-2">
                 <button
-                  onClick={handleDuplicate}
-                  className="flex-1 flex items-center justify-center gap-1.5 py-1.5 rounded-lg text-xs transition-colors cursor-pointer bg-bg-primary/80 text-text-primary hover:bg-bg-border/40"
+                  disabled={isWriteProtected}
+                  aria-describedby={readOnlyDescriptionId}
+                  onClick={isWriteProtected ? undefined : handleDuplicate}
+                  className="flex-1 flex items-center justify-center gap-1.5 py-1.5 rounded-lg text-xs transition-colors cursor-pointer bg-bg-primary/80 text-text-primary hover:bg-bg-border/40 disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:bg-bg-primary/80"
                 >
                   <Copy size={12} />
                   복사
                 </button>
                 <button
-                  onClick={handleDelete}
-                  className="flex-1 flex items-center justify-center gap-1.5 py-1.5 rounded-lg text-xs transition-colors cursor-pointer"
+                  disabled={isWriteProtected}
+                  aria-describedby={readOnlyDescriptionId}
+                  onClick={isWriteProtected ? undefined : handleDelete}
+                  className="flex-1 flex items-center justify-center gap-1.5 py-1.5 rounded-lg text-xs transition-colors cursor-pointer disabled:cursor-not-allowed disabled:opacity-50"
                   style={{ background: 'rgba(255,107,107,0.15)', color: '#FF6B6B' }}
                 >
                   <Trash2 size={12} />
@@ -218,6 +239,10 @@ export function EventQuickEdit({
               {isVacation ? (
                 <p className="text-xs text-center py-6 text-text-secondary">
                   휴가 관리는 휴가 탭에서 관리합니다
+                </p>
+              ) : isWriteProtected ? (
+                <p className="text-xs text-center py-6 text-text-secondary">
+                  보기 전용 일정은 여기서 편집할 수 없습니다
                 </p>
               ) : (
                 <div className="flex flex-col gap-2.5">
