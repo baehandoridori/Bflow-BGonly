@@ -7,20 +7,6 @@
 
 import { useState, useCallback, useRef, useEffect } from 'react';
 
-// ── 유틸 ──
-
-function parseDate(s: string): Date {
-  const [y, m, d] = s.split('-').map(Number);
-  return new Date(y, m - 1, d, 12, 0, 0, 0);
-}
-
-function fmtDate(d: Date): string {
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, '0');
-  const dd = String(d.getDate()).padStart(2, '0');
-  return `${y}-${m}-${dd}`;
-}
-
 /** data-date 속성을 가진 가장 가까운 부모 엘리먼트에서 날짜 추출 */
 function getDateFromElement(el: HTMLElement | null): string | null {
   while (el) {

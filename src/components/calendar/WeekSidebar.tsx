@@ -2,16 +2,9 @@
 import React, { useMemo, useRef, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import type { CalendarEvent } from '@/types/calendar';
-import { getISOWeekNumber } from './WeekScrollView';
+import { fmtDate, getISOWeekNumber } from '@/utils/calendarDate';
 
 /* ── 로컬 유틸 ──────────────────────────────────────── */
-function fmtDate(d: Date): string {
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, '0');
-  const dd = String(d.getDate()).padStart(2, '0');
-  return `${y}-${m}-${dd}`;
-}
-
 /* ── 타입 ────────────────────────────────────────────── */
 export interface WeekSidebarProps {
   weeks: Date[][]; // 전체 연도 주 배열

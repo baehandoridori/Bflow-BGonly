@@ -2,16 +2,10 @@
 import React, { useMemo, useRef, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import type { CalendarEvent } from '@/types/calendar';
+import { fmtDate } from '@/utils/calendarDate';
 
 /* ── 로컬 유틸 ──────────────────────────────────────── */
 const WEEKDAY_KR = ['일', '월', '화', '수', '목', '금', '토'];
-
-function fmtDate(d: Date): string {
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, '0');
-  const dd = String(d.getDate()).padStart(2, '0');
-  return `${y}-${m}-${dd}`;
-}
 
 /** 연도의 dayIndex(0-based) → Date */
 function dayIndexToDate(year: number, dayIndex: number): Date {

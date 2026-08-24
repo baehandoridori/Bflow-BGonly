@@ -32,34 +32,11 @@ import { useCalendarDragCreate } from '@/hooks/useCalendarDragCreate';
 import { floatingGlassStyle, tooltipGlassStyle } from '@/utils/glassStyles';
 import { navigateToSceneView } from '@/utils/sceneNavigationAction';
 import { createUuid } from '@/utils/createUuid';
+import { WEEKDAYS, fmtDate, parseDate, addDays, daysBetween } from '@/utils/calendarDate';
 
 /* ═══════════════════════════════════════════════════
    유틸리티
    ═══════════════════════════════════════════════════ */
-
-const WEEKDAYS = ['일', '월', '화', '수', '목', '금', '토'];
-
-function fmtDate(d: Date): string {
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, '0');
-  const dd = String(d.getDate()).padStart(2, '0');
-  return `${y}-${m}-${dd}`;
-}
-
-function parseDate(s: string): Date {
-  const [y, m, d] = s.split('-').map(Number);
-  return new Date(y, m - 1, d, 12, 0, 0, 0);
-}
-
-function addDays(d: Date, n: number): Date {
-  const r = new Date(d);
-  r.setDate(r.getDate() + n);
-  return r;
-}
-
-function daysBetween(a: string, b: string): number {
-  return Math.round((parseDate(b).getTime() - parseDate(a).getTime()) / 86400000);
-}
 
 /** 이벤트의 연속 바 레이아웃 계산 */
 interface EventBar {
