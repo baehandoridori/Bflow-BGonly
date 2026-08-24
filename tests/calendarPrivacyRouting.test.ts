@@ -41,6 +41,7 @@ type CalendarEventRow = {
 type ServiceModule = {
   loadBflowEvents(): Promise<void>;
   syncAll(options?: { broadcast?: boolean; skipBflowLoad?: boolean }): Promise<Array<Record<string, unknown>>>;
+  syncIncremental(): Promise<void>;
   getEvents(): Promise<Array<Record<string, unknown>>>;
   addEvent(event: Record<string, unknown>): Promise<void>;
   updateEvent(eventId: string, updates: Record<string, unknown>): Promise<void>;
@@ -48,6 +49,7 @@ type ServiceModule = {
 };
 
 type Calls = {
+  broadcasts: unknown[];
   bflowCreates: Array<Record<string, unknown>>;
   bflowUpdates: Array<{ id: string; patch: Record<string, unknown> }>;
   bflowDeletes: string[];
@@ -56,6 +58,7 @@ type Calls = {
   googleCreates: Array<{ calendarId: string; input: unknown }>;
   googleUpdates: Array<{ calendarId: string; eventId: string; input: unknown }>;
   googleDeletes: Array<{ calendarId: string; eventId: string }>;
+  watches: Array<{ calendarId: string; userId: string }>;
 };
 
 let bundleSource: Promise<string> | undefined;
@@ -115,6 +118,17 @@ function eventRow(id: string, calendarId: string): CalendarEventRow {
   };
 }
 
+function googleEvent(id: string): Record<string, unknown> {
+  return {
+    id,
+    summary: '전환 대상',
+    description: '',
+    start: { date: '2026-08-24' },
+    end: { date: '2026-08-25' },
+    extendedProperties: { private: { bflow_type: 'custom' } },
+  };
+}
+
 async function bundledServiceSource(): Promise<string> {
   bundleSource ??= build({
     stdin: {
@@ -140,7 +154,15 @@ async function createHarness(options: {
   bflowDeleteError?: Error;
   googleDeleteError?: Error;
   bflowDelete?: (id: string) => Promise<void>;
+  googleDelete?: (calendarId: string, eventId: string) => Promise<void>;
   googleFullSync?: (calendarId: string) => Promise<unknown[]>;
+  googleIncrementalSync?: (calendarId: string) => Promise<{
+    updated: unknown[];
+    deleted: string[];
+    isFullSync: boolean;
+  }>;
+  teamGoogleCalendarId?: string;
+  personalGoogleCalendarId?: string;
   includePersonalCalendar?: boolean;
 }): Promise<{ service: ServiceModule; calls: Calls; restore(): void }> {
   const globalScope = globalThis as Record<string, unknown>;
@@ -153,6 +175,12 @@ async function createHarness(options: {
   }
 
   const localStorageValues = new Map<string, string>();
+  if (options.personalGoogleCalendarId) {
+    localStorageValues.set('bflow_gcal_local_settings', JSON.stringify({
+      personalCalendarId: options.personalGoogleCalendarId,
+      lastSyncAt: null,
+    }));
+  }
   globalScope.localStorage = {
     getItem: (key: string) => localStorageValues.get(key) ?? null,
     setItem: (key: string, value: string) => { localStorageValues.set(key, value); },
@@ -167,6 +195,7 @@ async function createHarness(options: {
   };
 
   const calls: Calls = {
+    broadcasts: [],
     bflowCreates: [],
     bflowUpdates: [],
     bflowDeletes: [],
@@ -175,6 +204,7 @@ async function createHarness(options: {
     googleCreates: [],
     googleUpdates: [],
     googleDeletes: [],
+    watches: [],
   };
   const calendars = options.includePersonalCalendar === false
     ? [calendarRow('shared-cal', false)]
@@ -198,19 +228,40 @@ async function createHarness(options: {
       }
       if (options.bflowDeleteError) throw options.bflowDeleteError;
     },
-    calendarBroadcastChange: async () => ({ ok: true }),
+    calendarBroadcastChange: async (detail: unknown) => {
+      calls.broadcasts.push(detail);
+      return { ok: true };
+    },
     supabaseReadPrivateEvents: async () => [],
     supabaseAddPrivateEvent: async () => ({ id: 'legacy-private-event' }),
     supabaseUpdatePrivateEvent: async (id: string, patch: Record<string, unknown>) => {
       calls.legacyUpdates.push({ id, patch });
     },
     supabaseDeletePrivateEvent: async (id: string) => { calls.legacyDeletes.push(id); },
+    supabaseReadMetadata: async (type: string, key: string) => (
+      type === 'gcal' && key === 'teamCalendarId' && options.teamGoogleCalendarId
+        ? {
+          type,
+          key,
+          value: options.teamGoogleCalendarId,
+          updatedAt: '2026-08-24T00:00:00.000Z',
+        }
+        : null
+    ),
+    supabaseWriteMetadata: async () => {},
     gcalIsAuthenticated: async () => false,
     gcalSaveLocalSettings: async () => {},
     gcalFullSync: async (calendarId: string) => (
       options.googleFullSync ? options.googleFullSync(calendarId) : []
     ),
-    gcalEnsureWatch: async () => {},
+    gcalIncrementalSync: async (calendarId: string) => (
+      options.googleIncrementalSync
+        ? options.googleIncrementalSync(calendarId)
+        : { updated: [], deleted: [], isFullSync: false }
+    ),
+    gcalEnsureWatch: async (calendarId: string, userId: string) => {
+      calls.watches.push({ calendarId, userId });
+    },
     gcalInsertEvent: async (calendarId: string, input: unknown) => {
       calls.googleCreates.push({ calendarId, input });
       if (options.failGoogleCreate) throw new Error('Google calendar unavailable');
@@ -221,6 +272,10 @@ async function createHarness(options: {
     },
     gcalDeleteEvent: async (calendarId: string, eventId: string) => {
       calls.googleDeletes.push({ calendarId, eventId });
+      if (options.googleDelete) {
+        await options.googleDelete(calendarId, eventId);
+        return;
+      }
       if (options.googleDeleteError) throw options.googleDeleteError;
     },
   };
@@ -441,6 +496,139 @@ test('stale empty Google sync cannot hide a confirmed replacement from privacy m
   }
 });
 
+test('successful Google compensation filters only the replacement from a pending full sync', async () => {
+  const originalDeleteError = new Error('original B flow delete failed');
+  const compensationDelete = createDeferred<void>();
+  const compensationDeleteStarted = createDeferred<void>();
+  const staleSnapshot = createDeferred<unknown[]>();
+  const syncStarted = createDeferred<void>();
+  const harness = await createHarness({
+    rows: [eventRow('personal-event', 'personal-cal')],
+    bflowDeleteError: originalDeleteError,
+    googleDelete: async () => {
+      compensationDeleteStarted.resolve(undefined);
+      return compensationDelete.promise;
+    },
+    googleFullSync: async () => {
+      syncStarted.resolve(undefined);
+      return staleSnapshot.promise;
+    },
+  });
+  try {
+    await harness.service.loadBflowEvents();
+    const update = harness.service.updateEvent('personal-event', { isPrivate: false });
+    const rejectedUpdate = assert.rejects(update, originalDeleteError);
+    await compensationDeleteStarted.promise;
+
+    const staleSync = harness.service.syncAll({ skipBflowLoad: true });
+    await syncStarted.promise;
+
+    compensationDelete.resolve(undefined);
+    await rejectedUpdate;
+    const broadcastsAfterCompensation = harness.calls.broadcasts.length;
+    const watchesAfterCompensation = harness.calls.watches.length;
+
+    staleSnapshot.resolve([
+      googleEvent('created-google-event'),
+      googleEvent('unrelated-google-event'),
+    ]);
+    await staleSync;
+
+    const events = await harness.service.getEvents();
+    assert.deepEqual(events.map((event) => event.id), [
+      'personal-event',
+      'unrelated-google-event',
+    ]);
+    assert.equal(events.some((event) => event.id === 'created-google-event'), false);
+    assert.equal(harness.calls.broadcasts.length, broadcastsAfterCompensation + 1);
+    assert.equal(harness.calls.watches.length, watchesAfterCompensation + 1);
+  } finally {
+    harness.restore();
+  }
+});
+
+test('successful Google compensation filters the replacement from incremental and full-fallback updates', async () => {
+  const originalDeleteError = new Error('original B flow delete failed');
+  let incrementalCalls = 0;
+  const harness = await createHarness({
+    rows: [eventRow('personal-event', 'personal-cal')],
+    bflowDeleteError: originalDeleteError,
+    googleIncrementalSync: async () => {
+      incrementalCalls += 1;
+      return {
+        updated: [
+          googleEvent('created-google-event'),
+          googleEvent(incrementalCalls === 1
+            ? 'unrelated-incremental-event'
+            : 'unrelated-full-fallback-event'),
+        ],
+        deleted: [],
+        isFullSync: incrementalCalls === 2,
+      };
+    },
+  });
+  try {
+    await harness.service.loadBflowEvents();
+    await assert.rejects(
+      harness.service.updateEvent('personal-event', { isPrivate: false }),
+      originalDeleteError,
+    );
+    const broadcastsAfterCompensation = harness.calls.broadcasts.length;
+
+    await harness.service.syncIncremental();
+    let events = await harness.service.getEvents();
+    assert.deepEqual(events.map((event) => event.id), [
+      'personal-event',
+      'unrelated-incremental-event',
+    ]);
+    assert.equal(harness.calls.broadcasts.length, broadcastsAfterCompensation + 1);
+
+    await harness.service.syncIncremental();
+    events = await harness.service.getEvents();
+    assert.deepEqual(events.map((event) => event.id), [
+      'personal-event',
+      'unrelated-full-fallback-event',
+    ]);
+    assert.equal(harness.calls.broadcasts.length, broadcastsAfterCompensation + 2);
+    assert.equal(incrementalCalls, 2);
+    assert.equal(events.some((event) => event.id === 'created-google-event'), false);
+  } finally {
+    harness.restore();
+  }
+});
+
+test('Google compensation tombstone keeps the same event ID from another calendar', async () => {
+  const originalDeleteError = new Error('original B flow delete failed');
+  const harness = await createHarness({
+    rows: [eventRow('personal-event', 'personal-cal')],
+    bflowDeleteError: originalDeleteError,
+    teamGoogleCalendarId: 'primary',
+    personalGoogleCalendarId: 'other-google-calendar',
+    googleFullSync: async () => [googleEvent('created-google-event')],
+  });
+  try {
+    await harness.service.loadBflowEvents();
+    await assert.rejects(
+      harness.service.updateEvent('personal-event', { isPrivate: false }),
+      originalDeleteError,
+    );
+    const broadcastsAfterCompensation = harness.calls.broadcasts.length;
+    const watchesAfterCompensation = harness.calls.watches.length;
+
+    await harness.service.syncAll({ skipBflowLoad: true });
+
+    const matchingEvents = (await harness.service.getEvents()).filter(
+      (event) => event.id === 'created-google-event',
+    );
+    assert.equal(matchingEvents.length, 1);
+    assert.equal(matchingEvents[0].sourceCalendarId, 'other-google-calendar');
+    assert.equal(harness.calls.broadcasts.length, broadcastsAfterCompensation + 1);
+    assert.equal(harness.calls.watches.length, watchesAfterCompensation + 2);
+  } finally {
+    harness.restore();
+  }
+});
+
 test('failed shared-source delete compensates the confirmed personal B flow replacement', async () => {
   const originalDeleteError = new Error('original shared B flow delete failed');
   const harness = await createHarness({
@@ -521,6 +709,7 @@ test('compensation failure retains both deletion errors with source and replacem
     rows: [eventRow('personal-event', 'personal-cal')],
     bflowDeleteError: originalDeleteError,
     googleDeleteError: replacementDeleteError,
+    googleFullSync: async () => [googleEvent('created-google-event')],
   });
   try {
     await harness.service.loadBflowEvents();
@@ -540,6 +729,9 @@ test('compensation failure retains both deletion errors with source and replacem
       (thrown as Error & { errors: readonly unknown[] }).errors,
       [originalDeleteError, replacementDeleteError],
     );
+    await harness.service.syncAll({ skipBflowLoad: true });
+    const events = await harness.service.getEvents();
+    assert.equal(events.some((event) => event.id === 'created-google-event'), true);
   } finally {
     harness.restore();
   }

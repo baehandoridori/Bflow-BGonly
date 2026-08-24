@@ -318,6 +318,24 @@ let googleCacheReady = false;
 let syncAllGeneration = 0;
 let bflowLoadGeneration = 0;
 let bflowMutationInFlight = 0;
+// 이 renderer 세션에서 보상 삭제된 캘린더+이벤트 ID를 기억해, 삭제 전에 만들어진
+// 동기화 snapshot이 해당 이벤트만 되살리지 못하게 한다.
+const compensatedGoogleEventKeys = new Set<string>();
+
+function compensatedGoogleEventKey(calendarId: string, eventId: string): string {
+  return `${calendarId}\u0000${eventId}`;
+}
+
+function isCompensatedGoogleEvent(
+  calendarId: string | undefined,
+  eventId: string | undefined,
+): boolean {
+  return Boolean(
+    calendarId
+    && eventId
+    && compensatedGoogleEventKeys.has(compensatedGoogleEventKey(calendarId, eventId)),
+  );
+}
 
 export function isGoogleCacheReady(): boolean {
   return googleCacheReady;
@@ -464,7 +482,7 @@ export async function syncAll(options: { broadcast?: boolean; skipBflowLoad?: bo
       const gcalEvents = await gcalService.fullSync(calId);
       successfulCalendarIds.add(calId);
       for (const e of gcalEvents) {
-        if (e.id && !seen.has(e.id)) {
+        if (e.id && !isCompensatedGoogleEvent(calId, e.id) && !seen.has(e.id)) {
           seen.add(e.id);
           successfulEvents.push(toCalendarEvent(e, calId));
         }
@@ -486,8 +504,12 @@ export async function syncAll(options: { broadcast?: boolean; skipBflowLoad?: bo
       (event) => event.sourceCalendarId && failedCalendarIds.has(event.sourceCalendarId),
     );
     googleEvents = [
-      ...successfulEvents,
-      ...retainedFailedEvents.filter((event) => !seen.has(event.id)),
+      ...successfulEvents.filter((event) => (
+        !isCompensatedGoogleEvent(event.sourceCalendarId, event.id)
+      )),
+      ...retainedFailedEvents.filter((event) => (
+        !isCompensatedGoogleEvent(event.sourceCalendarId, event.id) && !seen.has(event.id)
+      )),
     ];
   }
   // 설정 조회 실패나 전체 fullSync 실패는 마지막 성공 캐시를 보존하고 재시도 대상으로 둔다.
@@ -522,11 +544,18 @@ export async function syncIncremental(): Promise<void> {
 
     if (isFullSync) {
       // fullSync 폴백: 해당 캘린더의 캐시를 완전히 교체 (삭제된 이벤트 제거)
-      const next = googleEvents.filter((event) => event.sourceCalendarId !== calId);
+      const next = googleEvents.filter((event) => (
+        event.sourceCalendarId !== calId
+        && !isCompensatedGoogleEvent(event.sourceCalendarId, event.id)
+      ));
       // ID 기반 중복 제거 (팀/개인 캘린더에 같은 이벤트가 있을 수 있음)
       const seenIds = new Set(next.map((event) => event.id));
       for (const gcalEvent of updated) {
-        if (gcalEvent.id && !seenIds.has(gcalEvent.id)) {
+        if (
+          gcalEvent.id
+          && !isCompensatedGoogleEvent(calId, gcalEvent.id)
+          && !seenIds.has(gcalEvent.id)
+        ) {
           seenIds.add(gcalEvent.id);
           next.push(toCalendarEvent(gcalEvent, calId));
         }
@@ -534,8 +563,12 @@ export async function syncIncremental(): Promise<void> {
       googleEvents = next;
     } else {
       // 일반 incremental: 삭제 + 머지
-      let next = googleEvents.filter((event) => !deleted.includes(event.id));
+      let next = googleEvents.filter((event) => (
+        !deleted.includes(event.id)
+        && !isCompensatedGoogleEvent(event.sourceCalendarId, event.id)
+      ));
       for (const gcalEvent of updated) {
+        if (isCompensatedGoogleEvent(calId, gcalEvent.id)) continue;
         const converted = toCalendarEvent(gcalEvent, calId);
         const exists = next.some((event) => event.id === converted.id);
         next = exists
@@ -864,6 +897,7 @@ export async function addEvent(event: CalendarEvent): Promise<void> {
 async function compensateCreatedEvent(requestId: string, created: CreatedEventRef): Promise<void> {
   if (created.storage === 'google') {
     await gcalService.deleteEvent(created.calendarId, created.actualId);
+    compensatedGoogleEventKeys.add(compensatedGoogleEventKey(created.calendarId, created.actualId));
   } else if (created.storage === 'bflow') {
     await window.electronAPI.calendarEventDelete(created.actualId);
   } else {
