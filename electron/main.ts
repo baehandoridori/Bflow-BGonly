@@ -20,6 +20,7 @@ import { uploadImage as storageUploadImage, deleteImage as storageDeleteImage, u
 // v1.20.0: 사용자 폰트 IPC + bflow-font:// custom protocol
 import { registerFontProtocol, registerFontIpcHandlers } from './fontIpc';
 import { registerCalendarIpc } from './calendarIpc';
+import * as calendarStore from './calendarStore';
 import { PersonalTodoService } from './personalTodoService';
 import type { PersonalTodoCreateInput, PersonalTodoOrderMutation, PersonalTodoPatch, CalendarTodoPatch, PersonalTodoLabelColorKey } from './personalTodoService';
 import { MarketAccountService } from './marketAccountService';
@@ -1776,6 +1777,9 @@ sessionManager = new SessionManager({
     if (payload.user) {
       void personalTodoCalendarSync.recover(payload.user.id).catch((error) => {
         console.warn('[personal-todo] calendar recovery deferred:', error);
+      });
+      void calendarStore.ensurePersonalCalendar(payload.user.id).catch((error) => {
+        console.warn('[calendar] 개인 캘린더 보장 실패 (다음 로그인에 재시도):', error);
       });
     }
   },
