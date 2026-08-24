@@ -435,6 +435,7 @@ export function hasUsableElectronAPI(api: Partial<ElectronAPI> | undefined): boo
     && typeof api?.calendarEventCreate === 'function'
     && typeof api?.calendarPrivacyReplacementCreate === 'function'
     && typeof api?.calendarPrivacyReplacementSettle === 'function'
+    && typeof api?.calendarPrivacyMigrationSourceDelete === 'function'
     && typeof api?.calendarEventUpdate === 'function'
     && typeof api?.calendarEventDelete === 'function'
     && typeof api?.calendarTagsList === 'function'
@@ -1221,6 +1222,12 @@ export function installDevElectronAPI(): void {
       };
       mockCalendarEvents.push(created);
       return { ...created };
+    },
+    calendarPrivacyMigrationSourceDelete: async (id) => {
+      const index = mockCalendarEvents.findIndex((event) => event.id === id);
+      if (index < 0) return 'missing';
+      mockCalendarEvents.splice(index, 1);
+      return 'deleted';
     },
     calendarPrivacyReplacementCreate: async (request) => {
       let target: MockPrivacyReplacementTarget;

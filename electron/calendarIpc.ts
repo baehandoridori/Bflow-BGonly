@@ -15,6 +15,7 @@ import { broadcastCalendarChanged, broadcastDataChange } from './broadcast';
 import type {
   CalendarPrivacyReplacementCreateInput,
   CalendarPrivacyReplacementDisposition,
+  CalendarPrivacyMigrationSourceDeleteResult,
   GoogleReplacementCreateInput,
   LegacyPrivateReplacementCreateInput,
 } from '../src/shared/calendarApiContract';
@@ -559,16 +560,38 @@ export function registerCalendarIpc(deps: CalendarIpcDeps): void {
     return updated;
   }));
 
-  ipcMain.handle('calendar:events:delete', wrap(async (id: string) => {
+  const deleteCalendarEventIfPresent = async (
+    id: string,
+    classifyStrictMigrationOutcome = false,
+  ): Promise<CalendarPrivacyMigrationSourceDeleteResult> => {
     const user = await sessionUser();
     const previous = await store.getEventByIdForWrite(id);
-    if (!previous) return;
+    if (!previous) return 'missing';
     const { calendar, members } = await loadCalendarForUserOrThrow(previous.calendar_id, user.id);
     if (!canEditCalendarEvents(calendar, members, user.id)) {
       throw new Error('이 일정을 삭제할 권한이 없습니다');
     }
 
-    await store.deleteEvent(id, previous.calendar_id, user.id);
+    try {
+      await store.deleteEvent(id, previous.calendar_id, user.id);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      if (!classifyStrictMigrationOutcome) throw error;
+
+      // strict migration은 RPC response-loss 뒤 replacement까지 지워 0-row가 되는 일을
+      // 막아야 한다. 원본이 여전히 있으면 definitive failure, 재조회도 실패하거나
+      // non-conflict error 뒤 사라졌다면 commit 여부가 불확실하므로 replacement를 유지한다.
+      let latest: CalendarEventRow | null;
+      try {
+        latest = await store.getEventByIdForWrite(id);
+      } catch {
+        return 'ambiguous';
+      }
+      if (latest) throw error;
+      return /calendar event source changed; refresh and retry/i.test(message)
+        ? 'missing'
+        : 'ambiguous';
+    }
     await emitCalendarEventNotifications({
       actorId: user.id,
       action: 'delete',
@@ -579,7 +602,16 @@ export function registerCalendarIpc(deps: CalendarIpcDeps): void {
     });
     broadcastDataChange('calendar_events', 'DELETE');
     broadcastCalendarChanged('DELETE');
+    return 'deleted';
+  };
+
+  ipcMain.handle('calendar:events:delete', wrap(async (id: string) => {
+    await deleteCalendarEventIfPresent(id);
   }));
+
+  ipcMain.handle('calendar:privacy-migration:delete-source', wrap(async (id: string) => (
+    deleteCalendarEventIfPresent(id, true)
+  )));
 
   ipcMain.handle('calendar:tags:list', wrap(async () => {
     deps.getSessionUserIdOrThrow();

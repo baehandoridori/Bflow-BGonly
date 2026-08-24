@@ -70,6 +70,7 @@ export type CalendarPrivacyReplacementCreateInput =
   | { storage: 'google'; calendar_id: string; event: GoogleReplacementCreateInput };
 
 export type CalendarPrivacyReplacementDisposition = 'keep' | 'delete';
+export type CalendarPrivacyMigrationSourceDeleteResult = 'deleted' | 'missing' | 'ambiguous';
 
 export interface CalendarApiInputContract {
   calendarCreate: (input: CalendarCreateInput) => unknown;
@@ -78,6 +79,7 @@ export interface CalendarApiInputContract {
   calendarEventsList: (params?: { from?: string; to?: string }) => unknown;
   calendarEventCreate: (input: CalendarEventCreateInput) => unknown;
   calendarEventUpdate: (id: string, updates: CalendarEventUpdateInput) => unknown;
+  calendarPrivacyMigrationSourceDelete: (id: string) => unknown;
   calendarPrivacyReplacementCreate: (input: CalendarPrivacyReplacementCreateInput) => unknown;
   calendarPrivacyReplacementSettle: (
     receipt: string,

@@ -5,7 +5,10 @@ import type {
   ArcadeSnapshot,
   ArcadeWalletPush,
 } from '../features/playground/arcade/types';
-import type { CalendarApiInputContract } from '../shared/calendarApiContract';
+import type {
+  CalendarApiInputContract,
+  CalendarPrivacyMigrationSourceDeleteResult,
+} from '../shared/calendarApiContract';
 
 // ─── 부서 (Department) ──────────────────────
 
@@ -1484,6 +1487,9 @@ export interface ElectronAPI extends CalendarApiInputContract {
     created_at: string;
     updated_at: string;
   }>;
+  calendarPrivacyMigrationSourceDelete: (
+    id: Parameters<CalendarApiInputContract['calendarPrivacyMigrationSourceDelete']>[0],
+  ) => Promise<CalendarPrivacyMigrationSourceDeleteResult>;
   calendarPrivacyReplacementCreate: (
     input: Parameters<CalendarApiInputContract['calendarPrivacyReplacementCreate']>[0],
   ) => Promise<{

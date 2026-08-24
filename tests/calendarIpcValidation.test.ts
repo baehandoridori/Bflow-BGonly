@@ -733,6 +733,7 @@ test('preload calendar bridge parameters stay linked to the public ElectronAPI c
     calendarSetMembers: [0, 1],
     calendarEventsList: [0],
     calendarEventCreate: [0],
+    calendarPrivacyMigrationSourceDelete: [0],
     calendarPrivacyReplacementCreate: [0],
     calendarPrivacyReplacementSettle: [0, 1],
     calendarEventUpdate: [0, 1],
@@ -775,11 +776,102 @@ test('calendar:events:delete rejects a missing-table pre-read but keeps a genuin
     assert.equal(deleteCalls, 0);
 
     harness.store.getEventByIdForWrite = async () => null;
-    await harness.invoke('calendar:events:delete', 'already-gone');
+    assert.equal(await harness.invoke('calendar:events:delete', 'already-gone'), undefined);
+    assert.equal(
+      await harness.invoke('calendar:privacy-migration:delete-source', 'already-gone'),
+      'missing',
+      'privacy migration must distinguish an externally deleted source from an ordinary idempotent delete',
+    );
     assert.equal(deleteCalls, 0);
+    assert.deepEqual(harness.broadcasts, []);
   } finally {
     console.error = originalError;
     harness.restore();
+  }
+});
+
+test('strict migration delete classifies only a confirmed source-conflict disappearance as missing', async () => {
+  const previous = calendarEventRow();
+  let current: ReturnType<typeof calendarEventRow> | null = previous;
+  let deleteOutcome: 'missing-race' | 'permission-error' = 'missing-race';
+  const harness = await createIpcHarness({
+    getUserRole: async () => 'user',
+    getEventByIdForWrite: async () => current,
+    getCalendarWithMembers: async () => ({ calendar: calendarRow(), members: [] }),
+    deleteEvent: async () => {
+      if (deleteOutcome === 'missing-race') {
+        current = null;
+        throw new Error('40001 Calendar event source changed; refresh and retry');
+      }
+      throw new Error('42501 Calendar event delete permission denied');
+    },
+  });
+  const originalError = console.error;
+  try {
+    console.error = () => {};
+    assert.equal(
+      await harness.invoke('calendar:privacy-migration:delete-source', previous.id),
+      'missing',
+      'the strict path confirms the row disappeared after its pre-read',
+    );
+    assert.deepEqual(harness.broadcasts, []);
+
+    current = previous;
+    deleteOutcome = 'permission-error';
+    await assert.rejects(
+      harness.invoke('calendar:privacy-migration:delete-source', previous.id),
+      /42501.*permission denied/,
+    );
+    assert.deepEqual(harness.broadcasts, []);
+  } finally {
+    console.error = originalError;
+    harness.restore();
+  }
+});
+
+test('strict migration delete preserves a replacement for response-loss and readback ambiguity', async (t) => {
+  for (const outcome of ['commit-then-error', 'readback-fails', 'row-retained'] as const) {
+    await t.test(outcome, async () => {
+      const previous = calendarEventRow();
+      let current: ReturnType<typeof calendarEventRow> | null = previous;
+      let reads = 0;
+      const responseError = new Error(`ECONNRESET ${outcome}`);
+      const harness = await createIpcHarness({
+        getUserRole: async () => 'user',
+        getEventByIdForWrite: async () => {
+          reads += 1;
+          if (outcome === 'readback-fails' && reads > 1) {
+            throw new Error('authoritative readback unavailable');
+          }
+          return current;
+        },
+        getCalendarWithMembers: async () => ({ calendar: calendarRow(), members: [] }),
+        deleteEvent: async () => {
+          if (outcome === 'commit-then-error') current = null;
+          throw responseError;
+        },
+      });
+      const originalError = console.error;
+      try {
+        console.error = () => {};
+        if (outcome === 'row-retained') {
+          await assert.rejects(
+            harness.invoke('calendar:privacy-migration:delete-source', previous.id),
+            /ECONNRESET row-retained/,
+          );
+        } else {
+          assert.equal(
+            await harness.invoke('calendar:privacy-migration:delete-source', previous.id),
+            'ambiguous',
+            'a possibly committed delete must keep the replacement instead of compensating it',
+          );
+        }
+        assert.deepEqual(harness.broadcasts, []);
+      } finally {
+        console.error = originalError;
+        harness.restore();
+      }
+    });
   }
 });
 

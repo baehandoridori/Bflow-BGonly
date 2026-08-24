@@ -25,7 +25,10 @@ import { EpSinglePartWidget } from '@/components/widgets/episode/EpSinglePartWid
 import { WidgetIdContext, IsPopupContext } from '@/components/widgets/Widget';
 import { GradientBackdrop } from '@/components/common/GradientBackdrop';
 import { loadPreferences, loadTheme } from '@/services/settingsService';
-import { applyCommittedGoogleDelete } from '@/services/calendarService';
+import {
+  applyCommittedGoogleDelete,
+  applyCommittedPrivacyReplacementDelete,
+} from '@/services/calendarService';
 import { loadSession, loadUsers, setUsersSheetsMode } from '@/services/userService';
 import { applyPreferencesToDOM } from '@/utils/typography';
 import { readAll, checkConnection, readMetadata } from '@/services/supabaseService';
@@ -51,11 +54,11 @@ export function notifyDataChangeWithCooldown() {
 }
 
 /** 메인/다른 위젯에서 온 calendar-changed를 이 팝업의 독립 cache에 먼저 반영한다.
- *  PR2에서는 Google 영속 삭제 완료 marker만 exact tombstone 처리하며, 일반 add/update
- *  재조회와 realtime 확장은 PR4 범위로 남긴다. */
+ *  PR2에서는 privacy migration 보상으로 영속 삭제가 확정된 Google/B flow/legacy 행만
+ *  exact tombstone 처리하며, 일반 add/update 재조회와 realtime 확장은 PR4 범위로 남긴다. */
 export async function applyIncomingCalendarChangeInPopup(payload: unknown): Promise<void> {
   try {
-    applyCommittedGoogleDelete(payload);
+    applyCommittedGoogleDelete(payload) || applyCommittedPrivacyReplacementDelete(payload);
   } catch (error) {
     console.warn('[Calendar] 팝업 확정 삭제 반영 실패:', error);
   }

@@ -291,6 +291,12 @@ async function createHarness(options: {
       }
       if (options.bflowDeleteError) throw options.bflowDeleteError;
     },
+    calendarPrivacyMigrationSourceDelete: async (id: string) => {
+      calls.bflowDeletes.push(id);
+      if (options.bflowDelete) await options.bflowDelete(id);
+      else if (options.bflowDeleteError) throw options.bflowDeleteError;
+      return 'deleted' as const;
+    },
     calendarBroadcastChange: async (detail: unknown) => {
       calls.broadcasts.push(detail);
       return { ok: true };
