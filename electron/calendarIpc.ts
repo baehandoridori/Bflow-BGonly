@@ -16,9 +16,7 @@ interface CalendarIpcDeps {
   getSessionUserIdOrThrow: () => string;
 }
 
-type CalendarEventCreateInput = Omit<Parameters<typeof store.createEvent>[0], 'created_by'> & {
-  created_by?: string | null;
-};
+type CalendarEventCreateInput = Omit<Parameters<typeof store.createEvent>[0], 'id' | 'created_by'>;
 
 function wrap<T extends unknown[], R>(fn: (...args: T) => Promise<R>) {
   return async (_e: unknown, ...args: T): Promise<R> => {
@@ -201,7 +199,7 @@ export function registerCalendarIpc(deps: CalendarIpcDeps): void {
 
   ipcMain.handle('calendar:set-members', wrap(async (
     calendarId: string,
-    members: Array<{ user_id: string; can_edit: boolean }>,
+    members: unknown,
   ) => {
     const user = await sessionUser();
     const { calendar } = await loadCalendarOrThrow(calendarId);
@@ -210,9 +208,7 @@ export function registerCalendarIpc(deps: CalendarIpcDeps): void {
       throw new Error('이 캘린더의 멤버를 수정할 권한이 없습니다');
     }
 
-    const safeMembers = members
-      .filter((member) => member.user_id !== calendar.owner_id)
-      .map(({ user_id, can_edit }) => ({ user_id, can_edit }));
+    const safeMembers = normalizeCalendarMembers(members, calendar.owner_id);
     await store.replaceMembers(calendarId, safeMembers);
     broadcastDataChange('calendar_members', 'UPDATE');
     broadcastCalendarChanged('UPDATE');

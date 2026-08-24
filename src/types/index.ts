@@ -1462,7 +1462,6 @@ export interface ElectronAPI {
     updated_at: string;
   }>>;
   calendarEventCreate: (input: {
-    id?: string;
     calendar_id: string;
     title: string;
     memo: string | null;
@@ -1478,7 +1477,6 @@ export interface ElectronAPI {
     linked_scene_id: string | null;
     linked_department: string | null;
     linked_todo_id: string | null;
-    created_by?: string | null;
   }) => Promise<{
     id: string;
     calendar_id: string;
@@ -1518,8 +1516,6 @@ export interface ElectronAPI {
       linked_scene_id: string | null;
       linked_department: string | null;
       linked_todo_id: string | null;
-      created_by: string | null;
-      updated_at: string;
     }>,
   ) => Promise<{
     id: string;

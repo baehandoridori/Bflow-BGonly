@@ -1218,10 +1218,12 @@ export function installDevElectronAPI(): void {
     calendarEventUpdate: async (id, updates) => {
       const event = mockCalendarEvents.find((candidate) => candidate.id === id);
       if (!event) throw new Error('일정을 찾을 수 없습니다');
-      const safeUpdates = { ...updates };
-      delete safeUpdates.created_by;
-      delete safeUpdates.updated_at;
-      Object.assign(event, safeUpdates, { updated_at: new Date().toISOString() });
+      const immutableFields = {
+        id: event.id,
+        created_by: event.created_by,
+        created_at: event.created_at,
+      };
+      Object.assign(event, updates, immutableFields, { updated_at: new Date().toISOString() });
       return { ...event };
     },
     calendarEventDelete: async (id) => {

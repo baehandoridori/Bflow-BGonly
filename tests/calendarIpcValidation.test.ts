@@ -1,4 +1,7 @@
 import assert from 'node:assert/strict';
+import { spawnSync } from 'node:child_process';
+import { unlinkSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
 import test from 'node:test';
 import { build, type Plugin } from 'esbuild';
 
@@ -212,6 +215,130 @@ test('calendar:update rejects invalid or boxed visibility before persistence', a
   } finally {
     console.error = originalError;
     harness.restore();
+  }
+});
+
+test('calendar:set-members rejects non-arrays and non-primitive member fields without side effects', async () => {
+  let replaceCalls = 0;
+  const originalError = console.error;
+  const harness = await createIpcHarness({
+    getUserRole: async () => 'user',
+    getCalendarWithMembers: async () => ({
+      calendar: calendarRow({ visibility: 'members' }),
+      members: [],
+    }),
+    replaceMembers: async () => { replaceCalls += 1; },
+  });
+  try {
+    console.error = () => {};
+    const invalidMembers = [
+      null,
+      {},
+      [null],
+      [{ user_id: '', can_edit: true }],
+      [{ user_id: new String('user-2'), can_edit: true }],
+      [{ user_id: 'user-2', can_edit: new Boolean(true) }],
+    ];
+    for (const members of invalidMembers) {
+      await assert.rejects(
+        harness.invoke('calendar:set-members', 'calendar-1', members),
+        /캘린더 멤버 입력이 올바르지 않습니다/,
+      );
+    }
+    assert.equal(replaceCalls, 0);
+    assert.deepEqual(harness.broadcasts, []);
+  } finally {
+    console.error = originalError;
+    harness.restore();
+  }
+});
+
+test('calendar:set-members filters the owner and strips extra fields before replacement', async () => {
+  const replacements: unknown[][] = [];
+  const harness = await createIpcHarness({
+    getUserRole: async () => 'user',
+    getCalendarWithMembers: async () => ({
+      calendar: calendarRow({ visibility: 'members' }),
+      members: [],
+    }),
+    replaceMembers: async (...args) => { replacements.push(args); },
+  });
+  try {
+    await harness.invoke('calendar:set-members', 'calendar-1', [
+      { user_id: 'user-1', can_edit: true, role: 'owner-spoof' },
+      { user_id: 'user-2', can_edit: false, role: 'admin-spoof' },
+    ]);
+    assert.deepEqual(replacements, [[
+      'calendar-1',
+      [{ user_id: 'user-2', can_edit: false }],
+    ]]);
+    assert.deepEqual(harness.broadcasts, [
+      { kind: 'data', args: ['calendar_members', 'UPDATE'] },
+      { kind: 'calendar', args: ['UPDATE'] },
+    ]);
+  } finally {
+    harness.restore();
+  }
+});
+
+test('calendar:create keeps omitted members equivalent to an empty member list', async () => {
+  let replaceCalls = 0;
+  const harness = await createIpcHarness({
+    getUserRole: async () => 'user',
+    createCalendar: async () => calendarRow({ visibility: 'members' }),
+    replaceMembers: async () => { replaceCalls += 1; },
+  });
+  try {
+    await harness.invoke('calendar:create', {
+      name: '공유 캘린더',
+      color: '#6C5CE7',
+      visibility: 'members',
+    });
+    assert.equal(replaceCalls, 0);
+    assert.deepEqual(harness.broadcasts, [
+      { kind: 'data', args: ['calendars', 'INSERT'] },
+      { kind: 'calendar', args: ['INSERT'] },
+    ]);
+  } finally {
+    harness.restore();
+  }
+});
+
+test('ElectronAPI calendar event write inputs expose only fields accepted by IPC', () => {
+  const fixturePath = join(process.cwd(), 'tests', `.calendar-ipc-type-contract-${process.pid}.ts`);
+  const tscPath = join(process.cwd(), 'node_modules', 'typescript', 'bin', 'tsc');
+  writeFileSync(fixturePath, `
+import type { ElectronAPI } from '../src/types/index.ts';
+
+type CreateInput = Parameters<ElectronAPI['calendarEventCreate']>[0];
+declare const createInput: CreateInput;
+// @ts-expect-error IPC generates event ids instead of accepting renderer-supplied ids.
+createInput.id = 'spoofed-id';
+// @ts-expect-error IPC derives the creator from the authenticated session.
+createInput.created_by = 'spoofed-user';
+
+type UpdateInput = Parameters<ElectronAPI['calendarEventUpdate']>[1];
+declare const updateInput: UpdateInput;
+// @ts-expect-error IPC never accepts a renderer-supplied creator.
+updateInput.created_by = 'spoofed-user';
+// @ts-expect-error IPC owns the update timestamp.
+updateInput.updated_at = '2099-01-01T00:00:00.000Z';
+`);
+  try {
+    const result = spawnSync(process.execPath, [
+      tscPath,
+      '--noEmit',
+      '--strict',
+      '--skipLibCheck',
+      '--target', 'ES2020',
+      '--module', 'ESNext',
+      '--moduleResolution', 'bundler',
+      '--allowImportingTsExtensions',
+      fixturePath,
+    ], { cwd: process.cwd(), encoding: 'utf8' });
+    assert.equal(result.status, 0, `${result.stdout}${result.stderr}`);
+  } finally {
+    unlinkSync(fixturePath);
   }
 });
 
