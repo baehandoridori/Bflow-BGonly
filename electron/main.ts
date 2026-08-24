@@ -19,6 +19,7 @@ import { uploadImage as driveUploadImage, setImageUploadUrl } from './drive-imag
 import { uploadImage as storageUploadImage, deleteImage as storageDeleteImage, uploadCharacterImage as storageUploadCharacterImage } from './storage';
 // v1.20.0: 사용자 폰트 IPC + bflow-font:// custom protocol
 import { registerFontProtocol, registerFontIpcHandlers } from './fontIpc';
+import { registerCalendarIpc } from './calendarIpc';
 import { PersonalTodoService } from './personalTodoService';
 import type { PersonalTodoCreateInput, PersonalTodoOrderMutation, PersonalTodoPatch, CalendarTodoPatch, PersonalTodoLabelColorKey } from './personalTodoService';
 import { MarketAccountService } from './marketAccountService';
@@ -2455,6 +2456,8 @@ ipcMain.handle('supabase:delete-private-event', wrapIpc(async (_e: unknown, id: 
   await assertPrivateEventOwnerOrThrow(id);
   await sbDeletePrivateEvent(id);
 }));
+
+registerCalendarIpc({ getSessionUserIdOrThrow });
 
 // ─── Revisions ───
 ipcMain.handle('supabase:read-revisions', wrapIpc(async () => {

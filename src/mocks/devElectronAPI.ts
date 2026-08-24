@@ -60,6 +60,54 @@ let previewArcadeGateway: ArcadePreviewGateway | null = null;
 let previewArcadeUserId: string | null = null;
 const previewTodoCommitListeners = new Set<(payload: unknown) => void>();
 
+type MockCalendarRow = Awaited<ReturnType<ElectronAPI['calendarCreate']>>;
+type MockCalendarEventRow = Awaited<ReturnType<ElectronAPI['calendarEventCreate']>>;
+type MockCalendarTagRow = Awaited<ReturnType<ElectronAPI['calendarTagsList']>>[number];
+
+const mockCalendars: MockCalendarRow[] = [];
+const mockCalendarEvents: MockCalendarEventRow[] = [];
+const mockCalendarTags: MockCalendarTagRow[] = [
+  { id: 'tag-upload', name: '업로드', color: '#E17055', sort_order: 0 },
+  { id: 'tag-cut', name: '가편', color: '#74B9FF', sort_order: 1 },
+  { id: 'tag-script', name: '대본', color: '#FDCB6E', sort_order: 2 },
+  { id: 'tag-meeting', name: '회의', color: '#A29BFE', sort_order: 3 },
+];
+
+function ensureMockPersonalCalendar(): MockCalendarRow | null {
+  const userId = previewCanonicalUserId;
+  if (!userId) return null;
+
+  const existing = mockCalendars.find(
+    (calendar) => calendar.owner_id === userId && calendar.is_personal,
+  );
+  if (existing) return existing;
+
+  const now = new Date().toISOString();
+  const created: MockCalendarRow = {
+    id: `mock-personal-${userId}`,
+    name: '개인',
+    color: '#6C5CE7',
+    visibility: 'private',
+    owner_id: userId,
+    is_personal: true,
+    created_at: now,
+    updated_at: now,
+  };
+  mockCalendars.push(created);
+  return created;
+}
+
+function visibleMockCalendarIds(): Set<string> {
+  ensureMockPersonalCalendar();
+  const userId = previewCanonicalUserId;
+  if (!userId) return new Set();
+  return new Set(
+    mockCalendars
+      .filter((calendar) => calendar.owner_id === userId || calendar.visibility === 'team')
+      .map((calendar) => calendar.id),
+  );
+}
+
 function getPreviewTodoStore(): PersonalTodoPreviewStore | null {
   if (!previewCanonicalUserId) return null;
   if (!previewTodoStore || previewTodoStore.userId !== previewCanonicalUserId) {
@@ -1084,6 +1132,102 @@ export function installDevElectronAPI(): void {
     supabaseAddPrivateEvent: async () => ({ id: 'mock-private' }),
     supabaseUpdatePrivateEvent: async () => {},
     supabaseDeletePrivateEvent: async () => {},
+    // ─── B flow 공유 캘린더 (프리뷰 in-memory) ───
+    calendarList: async () => {
+      const visibleIds = visibleMockCalendarIds();
+      const userId = previewCanonicalUserId;
+      return mockCalendars
+        .filter((calendar) => visibleIds.has(calendar.id))
+        .map((calendar) => ({
+          ...calendar,
+          members: [],
+          can_edit: calendar.owner_id === userId,
+          can_manage: calendar.owner_id === userId,
+        }));
+    },
+    calendarCreate: async (input) => {
+      const userId = previewCanonicalUserId;
+      if (!userId) throw new Error('로그인이 필요합니다');
+      const now = new Date().toISOString();
+      const created: MockCalendarRow = {
+        id: createUuid(),
+        name: input.name,
+        color: input.color,
+        visibility: input.visibility,
+        owner_id: userId,
+        is_personal: false,
+        created_at: now,
+        updated_at: now,
+      };
+      mockCalendars.push(created);
+      return { ...created };
+    },
+    calendarUpdate: async (id, updates) => {
+      const calendar = mockCalendars.find((candidate) => candidate.id === id);
+      if (!calendar) return;
+      if (updates.name !== undefined) calendar.name = updates.name;
+      if (updates.color !== undefined) calendar.color = updates.color;
+      if (!calendar.is_personal && updates.visibility !== undefined) {
+        calendar.visibility = updates.visibility;
+      }
+      calendar.updated_at = new Date().toISOString();
+    },
+    calendarDelete: async (id) => {
+      const index = mockCalendars.findIndex((calendar) => calendar.id === id);
+      if (index >= 0) mockCalendars.splice(index, 1);
+      for (let eventIndex = mockCalendarEvents.length - 1; eventIndex >= 0; eventIndex--) {
+        if (mockCalendarEvents[eventIndex].calendar_id === id) {
+          mockCalendarEvents.splice(eventIndex, 1);
+        }
+      }
+    },
+    calendarSetMembers: async () => {},
+    calendarEventsList: async (params) => {
+      const visibleIds = visibleMockCalendarIds();
+      return mockCalendarEvents
+        .filter((event) => visibleIds.has(event.calendar_id))
+        .filter((event) => !params?.from || event.end_date >= params.from)
+        .filter((event) => !params?.to || event.start_date <= params.to)
+        .map((event) => ({ ...event }));
+    },
+    calendarEventCreate: async (input) => {
+      const now = new Date().toISOString();
+      const created: MockCalendarEventRow = {
+        ...input,
+        id: createUuid(),
+        created_by: previewCanonicalUserId,
+        created_at: now,
+        updated_at: now,
+      };
+      mockCalendarEvents.push(created);
+      return { ...created };
+    },
+    calendarEventUpdate: async (id, updates) => {
+      const event = mockCalendarEvents.find((candidate) => candidate.id === id);
+      if (!event) throw new Error('일정을 찾을 수 없습니다');
+      const safeUpdates = { ...updates };
+      delete safeUpdates.created_by;
+      delete safeUpdates.updated_at;
+      Object.assign(event, safeUpdates, { updated_at: new Date().toISOString() });
+      return { ...event };
+    },
+    calendarEventDelete: async (id) => {
+      const index = mockCalendarEvents.findIndex((event) => event.id === id);
+      if (index >= 0) mockCalendarEvents.splice(index, 1);
+    },
+    calendarTagsList: async () => mockCalendarTags.map((tag) => ({ ...tag })),
+    calendarTagsSave: async (tags) => {
+      const saved = tags.map((tag) => ({
+        id: tag.id ?? createUuid(),
+        name: tag.name,
+        color: tag.color,
+        sort_order: tag.sort_order,
+      }));
+      mockCalendarTags.splice(0, mockCalendarTags.length, ...saved);
+      return saved.map((tag) => ({ ...tag }));
+    },
+    calendarNotificationsCatchup: async () => [],
+    calendarNotificationsMarkRead: async () => {},
     supabaseReadRevisions: async () => getMockRevisionRows(),
     supabaseAddRevision: async (
       id: string,

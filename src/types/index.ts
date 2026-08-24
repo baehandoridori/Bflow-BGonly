@@ -1403,6 +1403,171 @@ export interface ElectronAPI {
   }) => Promise<{ id: string }>;
   supabaseUpdatePrivateEvent: (id: string, updates: Record<string, unknown>) => Promise<void>;
   supabaseDeletePrivateEvent: (id: string) => Promise<void>;
+  calendarList: () => Promise<Array<{
+    id: string;
+    name: string;
+    color: string;
+    visibility: 'private' | 'members' | 'team';
+    owner_id: string;
+    is_personal: boolean;
+    created_at: string;
+    updated_at: string;
+    members: Array<{ user_id: string; can_edit: boolean }>;
+    can_edit: boolean;
+    can_manage: boolean;
+  }>>;
+  calendarCreate: (input: {
+    name: string;
+    color: string;
+    visibility: 'private' | 'members' | 'team';
+    members?: Array<{ user_id: string; can_edit: boolean }>;
+  }) => Promise<{
+    id: string;
+    name: string;
+    color: string;
+    visibility: 'private' | 'members' | 'team';
+    owner_id: string;
+    is_personal: boolean;
+    created_at: string;
+    updated_at: string;
+  }>;
+  calendarUpdate: (
+    id: string,
+    updates: Partial<{ name: string; color: string; visibility: 'private' | 'members' | 'team' }>,
+  ) => Promise<void>;
+  calendarDelete: (id: string) => Promise<void>;
+  calendarSetMembers: (
+    calendarId: string,
+    members: Array<{ user_id: string; can_edit: boolean }>,
+  ) => Promise<void>;
+  calendarEventsList: (params?: { from?: string; to?: string }) => Promise<Array<{
+    id: string;
+    calendar_id: string;
+    title: string;
+    memo: string | null;
+    tag_id: string | null;
+    all_day: boolean;
+    start_date: string;
+    end_date: string;
+    start_time: string | null;
+    end_time: string | null;
+    linked_episode: number | null;
+    linked_part: string | null;
+    linked_sheet_name: string | null;
+    linked_scene_id: string | null;
+    linked_department: string | null;
+    linked_todo_id: string | null;
+    created_by: string | null;
+    created_at: string;
+    updated_at: string;
+  }>>;
+  calendarEventCreate: (input: {
+    id?: string;
+    calendar_id: string;
+    title: string;
+    memo: string | null;
+    tag_id: string | null;
+    all_day: boolean;
+    start_date: string;
+    end_date: string;
+    start_time: string | null;
+    end_time: string | null;
+    linked_episode: number | null;
+    linked_part: string | null;
+    linked_sheet_name: string | null;
+    linked_scene_id: string | null;
+    linked_department: string | null;
+    linked_todo_id: string | null;
+    created_by?: string | null;
+  }) => Promise<{
+    id: string;
+    calendar_id: string;
+    title: string;
+    memo: string | null;
+    tag_id: string | null;
+    all_day: boolean;
+    start_date: string;
+    end_date: string;
+    start_time: string | null;
+    end_time: string | null;
+    linked_episode: number | null;
+    linked_part: string | null;
+    linked_sheet_name: string | null;
+    linked_scene_id: string | null;
+    linked_department: string | null;
+    linked_todo_id: string | null;
+    created_by: string | null;
+    created_at: string;
+    updated_at: string;
+  }>;
+  calendarEventUpdate: (
+    id: string,
+    updates: Partial<{
+      calendar_id: string;
+      title: string;
+      memo: string | null;
+      tag_id: string | null;
+      all_day: boolean;
+      start_date: string;
+      end_date: string;
+      start_time: string | null;
+      end_time: string | null;
+      linked_episode: number | null;
+      linked_part: string | null;
+      linked_sheet_name: string | null;
+      linked_scene_id: string | null;
+      linked_department: string | null;
+      linked_todo_id: string | null;
+      created_by: string | null;
+      updated_at: string;
+    }>,
+  ) => Promise<{
+    id: string;
+    calendar_id: string;
+    title: string;
+    memo: string | null;
+    tag_id: string | null;
+    all_day: boolean;
+    start_date: string;
+    end_date: string;
+    start_time: string | null;
+    end_time: string | null;
+    linked_episode: number | null;
+    linked_part: string | null;
+    linked_sheet_name: string | null;
+    linked_scene_id: string | null;
+    linked_department: string | null;
+    linked_todo_id: string | null;
+    created_by: string | null;
+    created_at: string;
+    updated_at: string;
+  }>;
+  calendarEventDelete: (id: string) => Promise<void>;
+  calendarTagsList: () => Promise<Array<{
+    id: string;
+    name: string;
+    color: string;
+    sort_order: number;
+  }>>;
+  calendarTagsSave: (
+    tags: Array<{ id?: string; name: string; color: string; sort_order: number }>,
+  ) => Promise<Array<{ id: string; name: string; color: string; sort_order: number }>>;
+  calendarNotificationsCatchup: () => Promise<Array<{
+    id: string;
+    recipient_id: string;
+    actor_id: string | null;
+    actor_name: string | null;
+    calendar_id: string | null;
+    calendar_name: string | null;
+    event_id: string | null;
+    event_title: string | null;
+    event_date: string | null;
+    action: 'create' | 'update' | 'delete';
+    detail: string | null;
+    created_at: string;
+    read_at: string | null;
+  }>>;
+  calendarNotificationsMarkRead: (ids: string[]) => Promise<void>;
   supabaseReadRevisions: () => Promise<unknown[]>;
   supabaseAddRevision: (id: string, partUuid: string, sceneId: string, revisionNo: number, status: string, priority: string, description: string, frameNo: string, imageUrl: string, department: string, lookupDepartment: string, requesterId: string, requesterName: string, assignee: string, createdAt: string, notifyUserIdsJson: string, assigneeIdsJson?: string, setId?: string) => Promise<void>;
   supabaseUpdateRevision: (id: string, updates: Record<string, string>) => Promise<void>;

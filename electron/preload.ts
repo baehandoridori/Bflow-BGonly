@@ -263,6 +263,24 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.invoke('supabase:update-private-event', id, updates),
   supabaseDeletePrivateEvent: (id: string) =>
     ipcRenderer.invoke('supabase:delete-private-event', id),
+  // ─── B flow 공유 캘린더 ───
+  calendarList: () => ipcRenderer.invoke('calendar:list'),
+  calendarCreate: (input: unknown) => ipcRenderer.invoke('calendar:create', input),
+  calendarUpdate: (id: string, updates: unknown) => ipcRenderer.invoke('calendar:update', id, updates),
+  calendarDelete: (id: string) => ipcRenderer.invoke('calendar:delete', id),
+  calendarSetMembers: (calendarId: string, members: unknown) =>
+    ipcRenderer.invoke('calendar:set-members', calendarId, members),
+  calendarEventsList: (params?: { from?: string; to?: string }) =>
+    ipcRenderer.invoke('calendar:events:list', params),
+  calendarEventCreate: (input: unknown) => ipcRenderer.invoke('calendar:events:create', input),
+  calendarEventUpdate: (id: string, updates: unknown) =>
+    ipcRenderer.invoke('calendar:events:update', id, updates),
+  calendarEventDelete: (id: string) => ipcRenderer.invoke('calendar:events:delete', id),
+  calendarTagsList: () => ipcRenderer.invoke('calendar:tags:list'),
+  calendarTagsSave: (tags: unknown) => ipcRenderer.invoke('calendar:tags:save', tags),
+  calendarNotificationsCatchup: () => ipcRenderer.invoke('calendar:notifications:catchup'),
+  calendarNotificationsMarkRead: (ids: string[]) =>
+    ipcRenderer.invoke('calendar:notifications:mark-read', ids),
   supabaseReadRevisions: () =>
     ipcRenderer.invoke('supabase:read-revisions'),
     supabaseAddRevision: (
