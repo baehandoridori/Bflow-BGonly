@@ -141,7 +141,9 @@ export function EventSidePanel({
     return () => window.removeEventListener('keydown', onKey);
   }, [editing, onClose, event]);
 
-  const isVacation = event.type === 'vacation' || event.isReadOnly;
+  const isVacation = event.type === 'vacation';
+  const isViewOnly = !isVacation && (event.isReadOnly === true || event.canEdit === false);
+  const isEditing = editing && !isVacation && !isViewOnly;
   const hasLinkedScene = event.type !== 'custom' && event.type !== 'vacation';
   const hasLinkedTodo = !!(event.linkedTodoId || event.id.startsWith('cal_'));
   const dday = calcDDay(event.endDate);
@@ -164,6 +166,10 @@ export function EventSidePanel({
 
   // 편집 저장
   const handleSave = () => {
+    if (isVacation || isViewOnly) {
+      setEditing(false);
+      return;
+    }
     onUpdate(event.id, {
       title: draftTitle,
       startDate: fromInputDate(draftStart),
@@ -213,7 +219,7 @@ export function EventSidePanel({
           style={{ backgroundColor: event.color }}
         />
         <div className="flex-1 min-w-0">
-          {editing ? (
+          {isEditing ? (
             <input
               value={draftTitle}
               onChange={(e) => setDraftTitle(e.target.value)}
@@ -221,9 +227,16 @@ export function EventSidePanel({
               autoFocus
             />
           ) : (
-            <h3 className="text-sm font-semibold text-text-primary truncate leading-snug">
-              {event.title}
-            </h3>
+            <div className="flex min-w-0 items-center gap-1.5">
+              <h3 className="min-w-0 flex-1 truncate text-sm font-semibold leading-snug text-text-primary">
+                {event.title}
+              </h3>
+              {isViewOnly && (
+                <span className="shrink-0 rounded-full border border-bg-border/70 bg-bg-primary/60 px-1.5 py-0.5 text-[9px] font-medium text-text-secondary">
+                  보기 전용
+                </span>
+              )}
+            </div>
           )}
         </div>
         <button
@@ -239,7 +252,7 @@ export function EventSidePanel({
         {/* 정보 카드 */}
         <div className="bg-bg-primary/55 rounded-lg border border-bg-border/55 p-3 flex flex-col gap-2.5">
           {/* 날짜 */}
-          {editing ? (
+          {isEditing ? (
             <div className="flex flex-col gap-1.5">
               <label className={labelClassName}>
                 시작일
@@ -326,9 +339,9 @@ export function EventSidePanel({
           )}
         </div>
 
-        {(editing || event.isPrivate) && (
+        {(isEditing || event.isPrivate) && (
           <div className="rounded-lg border border-bg-border/55 bg-bg-primary/45 px-3 py-2.5">
-            {editing ? (
+            {isEditing ? (
               <label className="flex items-start gap-2.5 cursor-pointer select-none">
                 <input
                   type="checkbox"
@@ -360,7 +373,7 @@ export function EventSidePanel({
             <FileText size={11} />
             <span className="text-[10px] font-medium uppercase tracking-wide">메모</span>
           </div>
-          {editing ? (
+          {isEditing ? (
             <EntityAwareInput
               multiline
               value={draftMemo ?? ''}
@@ -410,7 +423,13 @@ export function EventSidePanel({
               휴가 탭으로 이동
             </button>
           </div>
-        ) : editing ? (
+        ) : isViewOnly ? (
+          <div className="rounded-lg border border-bg-border/55 bg-bg-primary/45 px-3 py-2.5 text-center">
+            <p className="text-[10px] leading-relaxed text-text-secondary/70">
+              보기 전용 일정이라 편집하거나 삭제할 수 없습니다
+            </p>
+          </div>
+        ) : isEditing ? (
           /* 편집 모드: 저장/취소 */
           <div className="flex gap-2 pt-1">
             <button

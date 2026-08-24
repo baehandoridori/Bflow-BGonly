@@ -39,6 +39,19 @@ type QuickEditProps = {
 
 type QuickEditComponent = (props: QuickEditProps) => ReactNode;
 
+type SidePanelProps = {
+  event: QuickEditEvent & {
+    vacationType?: string;
+    vacationUserName?: string;
+  };
+  onClose(): void;
+  onDelete(id: string): void;
+  onUpdate(id: string, updates: Partial<QuickEditEvent>): void;
+  onNavigate(event: QuickEditEvent): void;
+};
+
+type SidePanelComponent = (props: SidePanelProps) => ReactNode;
+
 type ButtonElement = ReactElement<{
   'aria-describedby'?: string;
   'aria-label'?: string;
@@ -55,6 +68,7 @@ type QuickEditCallbacks = Pick<
 >;
 
 let bundledQuickEdit: Promise<QuickEditComponent> | undefined;
+let bundledSidePanel: Promise<SidePanelComponent> | undefined;
 let forcedTab: 'color' | 'edit' = 'color';
 let forcedEventType: QuickEditEventType | undefined;
 let capturedPortalChild: ReactNode;
@@ -171,6 +185,101 @@ async function loadQuickEdit(): Promise<QuickEditComponent> {
   return bundledQuickEdit;
 }
 
+async function loadSidePanel(): Promise<SidePanelComponent> {
+  bundledSidePanel ??= build({
+    entryPoints: ['src/components/calendar/EventSidePanel.tsx'],
+    bundle: true,
+    format: 'cjs',
+    platform: 'node',
+    target: 'node22',
+    write: false,
+    external: [
+      'react',
+      'react/jsx-runtime',
+      'framer-motion',
+      'lucide-react',
+      '@/stores/useDataStore',
+      '@/stores/useAppStore',
+      '@/stores/useAuthStore',
+      '@/components/common/EntityAwareInput',
+      '@/components/common/EntityText',
+      '@/types',
+      '@/utils/glassStyles',
+      '@/utils/calendarDate',
+    ],
+  }).then((result) => {
+    const source = result.outputFiles[0].text;
+    const module = { exports: {} as Record<string, unknown> };
+    const nodeRequire = createRequire(import.meta.url);
+    const react = nodeRequire('react') as Record<string, unknown>;
+    const runtimeRequire = (id: string): unknown => {
+      if (id === 'react') {
+        return {
+          ...react,
+          useState(initial: unknown) {
+            const value = typeof initial === 'function'
+              ? (initial as () => unknown)()
+              : initial;
+            return [value, () => {}];
+          },
+          useEffect: () => {},
+          useMemo: (factory: () => unknown) => factory(),
+        };
+      }
+      if (id === 'react/jsx-runtime') return nodeRequire('react/jsx-runtime');
+      if (id === 'framer-motion') {
+        return {
+          motion: { div: 'div' },
+          AnimatePresence: ({ children }: { children: ReactNode }) => children,
+        };
+      }
+      if (id === 'lucide-react') {
+        const Icon = () => null;
+        return {
+          X: Icon,
+          Pencil: Icon,
+          Trash2: Icon,
+          ExternalLink: Icon,
+          Clock: Icon,
+          FileText: Icon,
+          MapPin: Icon,
+          Palmtree: Icon,
+          Save: Icon,
+          XCircle: Icon,
+          CheckSquare: Icon,
+        };
+      }
+      if (id === '@/stores/useDataStore') {
+        return { useDataStore: (selector: (state: { episodeTitles: Record<number, string> }) => unknown) => selector({ episodeTitles: {} }) };
+      }
+      if (id === '@/stores/useAppStore') {
+        return {
+          useAppStore: (selector: (state: { colorMode: string; setView: () => void }) => unknown) => selector({
+            colorMode: 'dark',
+            setView: () => {},
+          }),
+        };
+      }
+      if (id === '@/stores/useAuthStore') {
+        return { useAuthStore: (selector: (state: { users: unknown[] }) => unknown) => selector({ users: [] }) };
+      }
+      if (id === '@/components/common/EntityAwareInput') return { EntityAwareInput: () => null };
+      if (id === '@/components/common/EntityText') return { EntityText: () => null };
+      if (id === '@/types') return { DEPARTMENT_CONFIGS: {} };
+      if (id === '@/utils/glassStyles') return { floatingGlassStyle: {} };
+      if (id === '@/utils/calendarDate') {
+        return { parseDate: (value: string) => new Date(`${value}T12:00:00`) };
+      }
+      return nodeRequire(id);
+    };
+
+    const evaluate = new Function('require', 'module', 'exports', source);
+    evaluate(runtimeRequire, module, module.exports);
+    return module.exports.EventSidePanel as SidePanelComponent;
+  });
+  return bundledSidePanel;
+}
+
 function event(overrides: Partial<QuickEditEvent> = {}): QuickEditEvent {
   return {
     id: 'event-1',
@@ -215,6 +324,20 @@ async function renderQuickEdit(
     if (previousDocument === undefined) delete globalScope.document;
     else globalScope.document = previousDocument;
   }
+}
+
+async function renderSidePanel(
+  target: SidePanelProps['event'],
+  callbacks: Partial<Omit<SidePanelProps, 'event'>> = {},
+): Promise<ReactNode> {
+  const EventSidePanel = await loadSidePanel();
+  return EventSidePanel({
+    event: target,
+    onClose: callbacks.onClose ?? (() => {}),
+    onDelete: callbacks.onDelete ?? (() => {}),
+    onUpdate: callbacks.onUpdate ?? (() => {}),
+    onNavigate: callbacks.onNavigate ?? (() => {}),
+  });
 }
 
 const newBflowCases: Array<{ name: string; target: QuickEditEvent }> = [
@@ -447,4 +570,71 @@ test('read-only calendar events expose no quick-edit write action', async () => 
     assert.deepEqual(duplicated, []);
     assert.equal(closeCount, 0, `${name}: blocked actions do not close the popup`);
   }
+});
+
+test('read-only shared event keeps its real details without vacation or write actions in the side panel', async () => {
+  const target = event({
+    source: 'bflow',
+    calendarId: 'calendar-shared',
+    type: 'scene',
+    isReadOnly: true,
+    canEdit: false,
+  });
+  const deleted: string[] = [];
+  const updated: Array<{ id: string; patch: Partial<QuickEditEvent> }> = [];
+  const navigated: QuickEditEvent[] = [];
+  let closeCount = 0;
+  const tree = await renderSidePanel(target, {
+    onClose: () => { closeCount += 1; },
+    onDelete: (id) => deleted.push(id),
+    onUpdate: (id, patch) => updated.push({ id, patch }),
+    onNavigate: (value) => navigated.push(value),
+  });
+  const text = textContent(tree);
+
+  assert.match(text, /테스트 일정/);
+  assert.match(text, /씬/);
+  assert.match(text, /보기 전용/);
+  assert.doesNotMatch(text, /휴가 관리는|휴가 탭으로 이동/);
+  assert.equal(
+    findButtons(tree).some((button) => ['편집', '저장', '삭제'].includes(textContent(button).trim())),
+    false,
+    'read-only shared events expose no write button',
+  );
+  assert.deepEqual(deleted, []);
+  assert.deepEqual(updated, []);
+  assert.deepEqual(navigated, []);
+  assert.equal(closeCount, 0);
+});
+
+test('vacation and writable events keep their existing side-panel actions', async () => {
+  const vacation = event({
+    source: 'vacation',
+    type: 'vacation',
+    isReadOnly: true,
+  }) as SidePanelProps['event'];
+  vacation.vacationType = '연차';
+  vacation.vacationUserName = '배한솔';
+  const navigated: QuickEditEvent[] = [];
+  let vacationCloseCount = 0;
+  const vacationTree = await renderSidePanel(vacation, {
+    onClose: () => { vacationCloseCount += 1; },
+    onNavigate: (value) => navigated.push(value),
+  });
+  assert.match(textContent(vacationTree), /휴가 관리는 휴가 탭에서 관리합니다/);
+  findButtonByText(vacationTree, '휴가 탭으로 이동').props.onClick?.();
+  assert.deepEqual(navigated, [vacation]);
+  assert.equal(vacationCloseCount, 1);
+
+  const writable = event({ source: 'bflow', calendarId: 'calendar-owned', canEdit: true });
+  const deleted: string[] = [];
+  let writableCloseCount = 0;
+  const writableTree = await renderSidePanel(writable, {
+    onClose: () => { writableCloseCount += 1; },
+    onDelete: (id) => deleted.push(id),
+  });
+  assert.ok(findButtonByText(writableTree, '편집'));
+  findButtonByText(writableTree, '삭제').props.onClick?.();
+  assert.deepEqual(deleted, [writable.id]);
+  assert.equal(writableCloseCount, 1);
 });
