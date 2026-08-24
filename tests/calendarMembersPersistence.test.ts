@@ -56,7 +56,7 @@ test('replace_calendar_members rejects a missing calendar before an empty replac
   assert.ok(foreignKeyErrorIndex < deleteIndex, 'missing parent must fail before child rows change');
 });
 
-test('delete_user_cascade locks owned calendar parents in UUID order before calendar child cleanup', () => {
+test('delete_user_cascade clears event authors before locking owned calendars and cleaning members', () => {
   const sql = readFileSync(migrationPath, 'utf8');
   const fn = between(
     sql,
@@ -76,7 +76,7 @@ test('delete_user_cascade locks owned calendar parents in UUID order before cale
   const memberDeleteIndex = fn.indexOf('DELETE FROM calendar_members m USING calendars c');
   const ownerUpdateIndex = fn.indexOf('UPDATE calendars SET owner_id = v_admin_id');
 
-  assert.ok(parentLockIndex >= 0 && parentLockIndex < eventCleanupIndex);
+  assert.ok(eventCleanupIndex >= 0 && eventCleanupIndex < parentLockIndex);
   assert.ok(parentLockIndex < personalDeleteIndex);
   assert.ok(parentLockIndex < memberDeleteIndex);
   assert.ok(parentLockIndex < ownerUpdateIndex);

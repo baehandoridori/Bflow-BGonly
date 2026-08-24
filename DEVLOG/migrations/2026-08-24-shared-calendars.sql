@@ -358,6 +358,9 @@ BEGIN
   DELETE FROM private_calendar_events WHERE user_id = p_user_id;
 
   -- ── 공유 캘린더 정리 (2026-08-24 추가, 설계서 §4) ──
+  -- 작성자 표시는 nullable — FK(NO ACTION) 위반 방지. 이벤트 행을 부모 캘린더보다 먼저 잠근다.
+  UPDATE calendar_events SET created_by = NULL WHERE created_by = p_user_id;
+
   -- 멤버 교체 RPC와 동일하게 부모→자식 순서로 잠가 교착을 피한다.
   PERFORM c.id
   FROM calendars c
@@ -365,8 +368,6 @@ BEGIN
   ORDER BY c.id
   FOR UPDATE;
 
-  -- 작성자 표시는 nullable — FK(NO ACTION) 위반 방지
-  UPDATE calendar_events SET created_by = NULL WHERE created_by = p_user_id;
   -- 개인 캘린더는 삭제 (이벤트는 ON DELETE CASCADE)
   DELETE FROM calendars WHERE owner_id = p_user_id AND is_personal;
   -- 공유 캘린더는 팀 자산 보존 — admin(배한솔 우선) 에게 소유 이전
