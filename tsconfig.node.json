@@ -9,5 +9,5 @@
     "allowSyntheticDefaultImports": true,
     "resolveJsonModule": true
   },
-  "include": ["vite.config.ts", "electron"]
+  "include": ["vite.config.ts", "electron", "src/shared"]
 }
