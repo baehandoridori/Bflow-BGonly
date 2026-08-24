@@ -49,6 +49,25 @@ async function emitCalendarEventNotifications(_ctx: {
 const membersOf = (all: CalendarMemberRow[], calendarId: string) =>
   all.filter((member) => member.calendar_id === calendarId);
 
+function normalizeCalendarMembers(members: unknown, ownerId: string): Array<{ user_id: string; can_edit: boolean }> {
+  if (members === undefined) return [];
+  if (!Array.isArray(members)) throw new Error('캘린더 멤버 입력이 올바르지 않습니다');
+  return members.map((member) => {
+    if (!member || typeof member !== 'object') {
+      throw new Error('캘린더 멤버 입력이 올바르지 않습니다');
+    }
+    const candidate = member as Record<string, unknown>;
+    if (
+      typeof candidate.user_id !== 'string'
+      || candidate.user_id.trim().length === 0
+      || typeof candidate.can_edit !== 'boolean'
+    ) {
+      throw new Error('캘린더 멤버 입력이 올바르지 않습니다');
+    }
+    return { user_id: candidate.user_id, can_edit: candidate.can_edit };
+  }).filter((member) => member.user_id !== ownerId);
+}
+
 export function registerCalendarIpc(deps: CalendarIpcDeps): void {
   const sessionUser = async () => {
     const id = deps.getSessionUserIdOrThrow();
@@ -95,12 +114,13 @@ export function registerCalendarIpc(deps: CalendarIpcDeps): void {
     name: string;
     color: string;
     visibility: 'private' | 'members' | 'team';
-    members?: Array<{ user_id: string; can_edit: boolean }>;
+    members?: unknown;
   }) => {
     const user = await sessionUser();
     if (!canCreateCalendar(user, input.visibility)) {
       throw new Error('팀 전체 캘린더는 관리자만 만들 수 있습니다');
     }
+    const safeMembers = normalizeCalendarMembers(input.members, user.id);
     const created = await store.createCalendar({
       name: input.name,
       color: input.color,
@@ -108,10 +128,7 @@ export function registerCalendarIpc(deps: CalendarIpcDeps): void {
       owner_id: user.id,
       is_personal: false,
     });
-    if (input.members?.length && input.visibility !== 'private') {
-      const safeMembers = input.members
-        .filter((member) => member.user_id !== user.id)
-        .map(({ user_id, can_edit }) => ({ user_id, can_edit }));
+    if (safeMembers.length && input.visibility !== 'private') {
       try {
         await store.replaceMembers(created.id, safeMembers);
       } catch (memberError) {
