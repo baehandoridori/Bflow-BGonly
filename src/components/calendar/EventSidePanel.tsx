@@ -22,13 +22,9 @@ import { EntityAwareInput } from '@/components/common/EntityAwareInput';
 import { EntityText } from '@/components/common/EntityText';
 import { DEPARTMENT_CONFIGS } from '@/types';
 import { floatingGlassStyle } from '@/utils/glassStyles';
+import { parseDate } from '@/utils/calendarDate';
 
 // ─── 유틸 ──────────────────────────────────────────
-
-function parseDate(s: string): Date {
-  const [y, m, d] = s.split('-').map(Number);
-  return new Date(y, m - 1, d, 12, 0, 0, 0);
-}
 
 function formatDate(d: Date): string {
   return `${d.getFullYear()}년 ${d.getMonth() + 1}월 ${d.getDate()}일`;

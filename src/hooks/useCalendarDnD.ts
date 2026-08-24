@@ -6,6 +6,7 @@
  */
 
 import { useState, useCallback, useRef, useEffect } from 'react';
+import { addDays, daysBetween, fmtDate, parseDate } from '@/utils/calendarDate';
 
 export type DragMode = 'move' | 'resize-start' | 'resize-end';
 
@@ -26,26 +27,8 @@ export interface DragPreview {
   newEndDate: string;
 }
 
-function parseDate(s: string): Date {
-  const [y, m, d] = s.split('-').map(Number);
-  return new Date(y, m - 1, d, 12, 0, 0, 0);
-}
-
-function fmtDate(d: Date): string {
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, '0');
-  const dd = String(d.getDate()).padStart(2, '0');
-  return `${y}-${m}-${dd}`;
-}
-
 function addDaysToStr(dateStr: string, days: number): string {
-  const d = parseDate(dateStr);
-  d.setDate(d.getDate() + days);
-  return fmtDate(d);
-}
-
-function daysBetweenDates(a: string, b: string): number {
-  return Math.round((parseDate(b).getTime() - parseDate(a).getTime()) / 86400000);
+  return fmtDate(addDays(parseDate(dateStr), days));
 }
 
 /** data-date 속성을 가진 가장 가까운 부모 엘리먼트에서 날짜 추출 */
@@ -102,7 +85,7 @@ export function useCalendarDnD(
       const hoverDate = target ? getDateFromElement(target) : null;
       if (!hoverDate) return;
 
-      const deltaDays = daysBetweenDates(state.anchorDate, hoverDate);
+      const deltaDays = daysBetween(state.anchorDate, hoverDate);
 
       let newStart: string;
       let newEnd: string;

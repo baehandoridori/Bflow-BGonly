@@ -3,45 +3,9 @@ import React, { useMemo, useRef, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { CalendarDays } from 'lucide-react';
 import type { CalendarEvent } from '@/types/calendar';
+import { WEEKDAYS, WEEKDAY_SHORT, fmtDate, parseDate, addDays, daysBetween, getISOWeekNumber, hexToRgba } from '@/utils/calendarDate';
 
 /* ── 로컬 유틸 ──────────────────────────────────────── */
-const WEEKDAYS = ['일', '월', '화', '수', '목', '금', '토'];
-const WEEKDAY_SHORT = ['일', '월', '화', '수', '목', '금', '토'];
-
-function fmtDate(d: Date): string {
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, '0');
-  const dd = String(d.getDate()).padStart(2, '0');
-  return `${y}-${m}-${dd}`;
-}
-
-function parseDate(s: string): Date {
-  const [y, m, d] = s.split('-').map(Number);
-  return new Date(y, m - 1, d, 12, 0, 0, 0);
-}
-
-function addDays(d: Date, n: number): Date {
-  const r = new Date(d);
-  r.setDate(r.getDate() + n);
-  return r;
-}
-
-function daysBetween(a: string, b: string): number {
-  return Math.round(
-    (parseDate(b).getTime() - parseDate(a).getTime()) / 86400000,
-  );
-}
-
-/** ISO 8601 주차 번호 (1~53) */
-function getISOWeekNumber(d: Date): number {
-  const date = new Date(d.getTime());
-  date.setHours(12, 0, 0, 0);
-  // ISO: 주의 시작은 월요일, 첫째 주는 1/4를 포함하는 주
-  date.setDate(date.getDate() + 3 - ((date.getDay() + 6) % 7));
-  const yearStart = new Date(date.getFullYear(), 0, 1);
-  return Math.ceil(((date.getTime() - yearStart.getTime()) / 86400000 + 1) / 7);
-}
-
 /** 해당 연도의 일요일 시작 주 배열 생성 (약 53주) */
 function generateYearWeeks(year: number): Date[][] {
   // 1월 1일이 속한 주의 일요일부터 시작
@@ -74,15 +38,6 @@ function findWeekIndexForDate(weeks: Date[][], dateStr: string): number {
     if (dateStr >= wStart && dateStr <= wEnd) return i;
   }
   return 0;
-}
-
-// hex → rgba
-function hexToRgba(hex: string, alpha: number): string {
-  const h = hex.replace('#', '');
-  const r = parseInt(h.substring(0, 2), 16);
-  const g = parseInt(h.substring(2, 4), 16);
-  const b = parseInt(h.substring(4, 6), 16);
-  return `rgba(${r},${g},${b},${alpha})`;
 }
 
 /* ── 타입 ────────────────────────────────────────────── */
@@ -246,7 +201,7 @@ export default function WeekScrollView({
 }
 
 /* export for ScheduleView to find initial week index */
-export { generateYearWeeks, findWeekIndexForDate, getISOWeekNumber };
+export { generateYearWeeks, findWeekIndexForDate };
 
 /* ── ActiveWeek: 포커스된 주 ──────────────────────────── */
 function ActiveWeek({

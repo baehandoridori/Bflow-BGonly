@@ -210,29 +210,13 @@ async function getTargetCalendar(_type: CalendarEventType): Promise<string | nul
 // ─── 공개 API (기존 인터페이스 유지) ──────────────────────────
 
 let eventCache: CalendarEvent[] = [];
-let legacyLoaded = false;
-
-/** 기존 calendar-events.json에서 로컬 이벤트 로드 (GCal 전환 전 데이터 보존) */
-async function loadLegacyEvents(): Promise<void> {
-  // 기존 calendar-events.json legacy 이벤트는 더 이상 로드하지 않음
-  // (GCal 전환 완료 — 로컬 전용 이벤트는 이제 지원 안 함)
-  legacyLoaded = true;
-}
-
-export async function loadAllEvents(): Promise<CalendarEvent[]> {
-  if (eventCache.length === 0) await loadLegacyEvents();
-  return [...eventCache];
-}
 
 export async function getEvents(): Promise<CalendarEvent[]> {
-  if (eventCache.length === 0) await loadLegacyEvents();
   return [...eventCache];
 }
 
 /** 전체 동기화 (앱 시작 시 호출) */
 export async function syncAll(options: { broadcast?: boolean } = {}): Promise<CalendarEvent[]> {
-  // legacy 로컬 이벤트를 먼저 로드 (syncAll이 getEvents보다 먼저 호출될 수 있으므로)
-  await loadLegacyEvents();
 
   const seen = new Set<string>();
   const events: CalendarEvent[] = [];
@@ -624,15 +608,4 @@ export function filterEventsByRange(events: CalendarEvent[], rangeStart: string,
 
 export function getEventsForDate(events: CalendarEvent[], date: string): CalendarEvent[] {
   return events.filter((e) => e.startDate <= date && e.endDate >= date);
-}
-
-export async function findEventByTodoId(todoId: string): Promise<CalendarEvent | undefined> {
-  // cold cache 방어: 캐시가 비어있으면 sync 시도
-  if (eventCache.length === 0) {
-    try {
-      const authed = await gcalService.isAuthenticated();
-      if (authed) await syncAll();
-    } catch { /* 무시 */ }
-  }
-  return eventCache.find((e) => e.linkedTodoId === todoId);
 }

@@ -7,22 +7,13 @@ import { getEvents, getEventsForDate, syncAll } from '@/services/calendarService
 import * as gcalService from '@/services/googleCalendarService';
 import { fetchAllVacationEvents } from '@/services/vacationService';
 import type { CalendarEvent, CalendarFilter } from '@/types/calendar';
-import { VACATION_COLOR } from '@/types/vacation';
+import { mapVacationEvents } from '@/utils/vacationEvents';
 import { useVacationPendingStore } from '@/stores/useVacationPendingStore';
 import { Widget } from './Widget';
+import { WEEKDAY_SHORT, fmtDate, parseDate, addDays, getISOWeekNumber } from '@/utils/calendarDate';
 
 // pending 휴가용 노란색 (amber-400)
 const PENDING_VACATION_COLOR = '#FBBF24';
-
-const WEEKDAYS_SHORT = ['일', '월', '화', '수', '목', '금', '토'];
-
-/** ISO week number for a date */
-function getWeekNumber(d: Date): number {
-  const tmp = new Date(d.getFullYear(), d.getMonth(), d.getDate());
-  tmp.setDate(tmp.getDate() + 4 - (tmp.getDay() || 7));
-  const yearStart = new Date(tmp.getFullYear(), 0, 1);
-  return Math.ceil(((tmp.getTime() - yearStart.getTime()) / 86400000 + 1) / 7);
-}
 
 /** Get Sunday-start week beginning for a date */
 function getWeekStart(d: Date): Date {
@@ -54,24 +45,6 @@ function packEventRows(events: CalendarEvent[]): CalendarEvent[][] {
     if (!placed) rows.push([ev]);
   }
   return rows;
-}
-
-function fmtDate(d: Date): string {
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, '0');
-  const dd = String(d.getDate()).padStart(2, '0');
-  return `${y}-${m}-${dd}`;
-}
-
-function parseDate(s: string): Date {
-  const [y, m, d] = s.split('-').map(Number);
-  return new Date(y, m - 1, d, 12, 0, 0, 0);
-}
-
-function addDays(d: Date, n: number): Date {
-  const r = new Date(d);
-  r.setDate(r.getDate() + n);
-  return r;
 }
 
 export function CalendarWidget() {
@@ -128,20 +101,7 @@ export function CalendarWidget() {
     if (!vacationConnected) { setVacationEvts([]); return; }
     fetchAllVacationEvents()
       .then((raw) => {
-        setVacationEvts(raw.map((v, i) => ({
-          id: `wvac-${v.name}-${v.startDate}-${i}`,
-          title: `${v.name} ${v.type}`,
-          memo: '',
-          color: VACATION_COLOR,
-          type: 'vacation' as const,
-          startDate: v.startDate,
-          endDate: v.endDate,
-          createdBy: v.name,
-          createdAt: new Date().toISOString(),
-          vacationType: v.type,
-          vacationUserName: v.name,
-          isReadOnly: true,
-        })));
+        setVacationEvts(mapVacationEvents(raw, 'wvac'));
       })
       .catch(() => setVacationEvts([]));
   }, [vacationConnected]);
@@ -335,9 +295,9 @@ export function CalendarWidget() {
                 <span className="text-[11px] font-semibold text-text-primary min-w-[72px] text-center">
                   {(() => {
                     const ws = addDays(getWeekStart(new Date()), weekOffset * 14);
-                    const wn = getWeekNumber(ws);
+                    const wn = getISOWeekNumber(ws);
                     const ws2 = addDays(ws, 7);
-                    const wn2 = getWeekNumber(ws2);
+                    const wn2 = getISOWeekNumber(ws2);
                     return `${wn}-${wn2}주차 ${ws.getMonth() + 1}/${ws.getDate()}~`;
                   })()}
                 </span>
@@ -360,7 +320,7 @@ export function CalendarWidget() {
                 <span className="text-[11px] font-semibold text-text-primary min-w-[72px] text-center">
                   {(() => {
                     const ws = addDays(getWeekStart(new Date()), weekOffset * 7);
-                    const wn = getWeekNumber(ws);
+                    const wn = getISOWeekNumber(ws);
                     return `${wn}주차 ${ws.getMonth() + 1}/${ws.getDate()}~`;
                   })()}
                 </span>
@@ -436,7 +396,7 @@ export function CalendarWidget() {
         {viewMode === 'month' && (
           <>
             <div className="grid grid-cols-7 gap-px">
-              {WEEKDAYS_SHORT.map((d, i) => (
+              {WEEKDAY_SHORT.map((d, i) => (
                 <div key={d} className={cn(
                   'text-center text-[9px] font-medium py-0.5',
                   i === 0 ? 'text-red-400/50' : i === 6 ? 'text-blue-400/50' : 'text-text-secondary/40',
@@ -558,7 +518,7 @@ export function CalendarWidget() {
 
           const weeks = Array.from({ length: 5 }, (_, i) => {
             const ws = addDays(activeStart, (i - 1) * 7);
-            const wn = getWeekNumber(ws);
+            const wn = getISOWeekNumber(ws);
             const days = Array.from({ length: 7 }, (__, j) => {
               const d = addDays(ws, j);
               return { date: d, str: fmtDate(d), dow: j };
@@ -655,7 +615,7 @@ export function CalendarWidget() {
 
           const weeks = Array.from({ length: 5 }, (_, i) => {
             const ws = addDays(baseDate, (weekOffset + i - 2) * 7);
-            const wn = getWeekNumber(ws);
+            const wn = getISOWeekNumber(ws);
             const days = Array.from({ length: 7 }, (__, j) => {
               const d = addDays(ws, j);
               return { date: d, str: fmtDate(d), dow: j };
@@ -709,7 +669,7 @@ export function CalendarWidget() {
                         {isActive && (
                           <span className={cn('text-[7px]',
                             d.dow === 0 ? 'text-[#E17055]/60' : d.dow === 6 ? 'text-[#74B9FF]/60' : 'text-text-secondary/40',
-                          )}>{WEEKDAYS_SHORT[d.dow]}</span>
+                          )}>{WEEKDAY_SHORT[d.dow]}</span>
                         )}
                         <span className={cn(
                           isActive ? 'text-[10px] font-medium' : 'text-[8px]',
@@ -803,7 +763,7 @@ export function CalendarWidget() {
                 'text-[9px]',
                 d.getDay() === 0 ? 'text-[#E17055]/60' : d.getDay() === 6 ? 'text-[#74B9FF]/60' : 'text-text-secondary/50',
               )}>
-                {WEEKDAYS_SHORT[d.getDay()]}
+                {WEEKDAY_SHORT[d.getDay()]}
               </span>
             </motion.div>
           );
@@ -836,7 +796,7 @@ export function CalendarWidget() {
                     'text-[10px] mb-2',
                     centerDate.getDay() === 0 ? 'text-[#E17055]' : centerDate.getDay() === 6 ? 'text-[#74B9FF]' : 'text-text-secondary/60',
                   )}>
-                    {WEEKDAYS_SHORT[centerDate.getDay()]}요일 &middot; {centerDate.getMonth() + 1}월
+                    {WEEKDAY_SHORT[centerDate.getDay()]}요일 &middot; {centerDate.getMonth() + 1}월
                   </span>
 
                   {centerEvents.length === 0 ? (

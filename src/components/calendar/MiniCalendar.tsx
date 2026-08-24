@@ -3,6 +3,7 @@ import { ChevronLeft, ChevronRight } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { cn } from '@/utils/cn';
 import type { CalendarEvent } from '@/types/calendar';
+import { WEEKDAYS, fmtDate, addDays } from '@/utils/calendarDate';
 
 // ─── Props ───────────────────────────────────────
 export interface MiniCalendarProps {
@@ -15,21 +16,6 @@ export interface MiniCalendarProps {
 }
 
 // ─── Utility functions ───────────────────────────
-function fmtDate(d: Date): string {
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, '0');
-  const dd = String(d.getDate()).padStart(2, '0');
-  return `${y}-${m}-${dd}`;
-}
-
-function addDays(d: Date, n: number): Date {
-  const r = new Date(d);
-  r.setDate(r.getDate() + n);
-  return r;
-}
-
-const WEEKDAYS = ['일', '월', '화', '수', '목', '금', '토'];
-
 // ─── Component ───────────────────────────────────
 export function MiniCalendar({
   currentMonth,

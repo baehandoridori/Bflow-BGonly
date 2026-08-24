@@ -3,27 +3,10 @@ import React, { useMemo, useRef, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { CalendarDays } from 'lucide-react';
 import type { CalendarEvent } from '@/types/calendar';
+import { fmtDate, parseDate, daysBetween, hexToRgba } from '@/utils/calendarDate';
 
 /* ── 로컬 유틸 ──────────────────────────────────────── */
 const WEEKDAY_KR = ['일', '월', '화', '수', '목', '금', '토'];
-
-function fmtDate(d: Date): string {
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, '0');
-  const dd = String(d.getDate()).padStart(2, '0');
-  return `${y}-${m}-${dd}`;
-}
-
-function parseDate(s: string): Date {
-  const [y, m, d] = s.split('-').map(Number);
-  return new Date(y, m - 1, d, 12, 0, 0, 0);
-}
-
-function daysBetween(a: string, b: string): number {
-  return Math.round(
-    (parseDate(b).getTime() - parseDate(a).getTime()) / 86400000,
-  );
-}
 
 /** 연도의 dayIndex(0-based) → Date */
 function dayIndexToDate(year: number, dayIndex: number): Date {
@@ -31,15 +14,6 @@ function dayIndexToDate(year: number, dayIndex: number): Date {
   const d = new Date(jan1);
   d.setDate(d.getDate() + dayIndex);
   return d;
-}
-
-// hex → rgba
-function hexToRgba(hex: string, alpha: number): string {
-  const h = hex.replace('#', '');
-  const r = parseInt(h.substring(0, 2), 16);
-  const g = parseInt(h.substring(2, 4), 16);
-  const b = parseInt(h.substring(4, 6), 16);
-  return `rgba(${r},${g},${b},${alpha})`;
 }
 
 /** 해당 연도의 총 일수 */
