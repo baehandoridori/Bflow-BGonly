@@ -320,6 +320,7 @@ test('calendar:set-members filters the owner and strips extra fields before repl
     assert.deepEqual(replacements, [[
       'calendar-1',
       [{ user_id: 'user-2', can_edit: false }],
+      'user-1',
     ]]);
     assert.deepEqual(harness.broadcasts, [
       { kind: 'data', args: ['calendar_members', 'UPDATE'] },
@@ -327,6 +328,81 @@ test('calendar:set-members filters the owner and strips extra fields before repl
     ]);
   } finally {
     harness.restore();
+  }
+});
+
+test('calendar management writes bind update and delete to the main session actor', async () => {
+  const updates: unknown[][] = [];
+  const deletions: unknown[][] = [];
+  const harness = await createIpcHarness({
+    getUserRole: async () => 'user',
+    getCalendarWithMembers: async () => ({
+      calendar: calendarRow({ visibility: 'members', owner_id: 'session-user' }),
+      members: [],
+    }),
+    updateCalendar: async (...args) => { updates.push(args); },
+    deleteCalendar: async (...args) => { deletions.push(args); },
+  }, 'session-user');
+  try {
+    await harness.invoke('calendar:update', 'calendar-1', { name: '새 이름' });
+    await harness.invoke('calendar:delete', 'calendar-1');
+
+    assert.deepEqual(updates, [[
+      'calendar-1',
+      { name: '새 이름' },
+      'session-user',
+    ]]);
+    assert.deepEqual(deletions, [['calendar-1', 'session-user']]);
+  } finally {
+    harness.restore();
+  }
+});
+
+test('calendar management RPC permission and missing-row errors never broadcast success', async () => {
+  const originalError = console.error;
+  const scenarios = [
+    {
+      channel: 'calendar:update',
+      args: ['calendar-1', { name: '거부됨' }],
+      override: { updateCalendar: async () => { throw new Error('42501 update denied'); } },
+      expected: /42501 update denied/,
+    },
+    {
+      channel: 'calendar:delete',
+      args: ['calendar-1'],
+      override: { deleteCalendar: async () => { throw new Error('23503 calendar missing'); } },
+      expected: /23503 calendar missing/,
+    },
+    {
+      channel: 'calendar:set-members',
+      args: ['calendar-1', [{ user_id: 'user-2', can_edit: false }]],
+      override: { replaceMembers: async () => { throw new Error('42501 members denied'); } },
+      expected: /42501 members denied/,
+    },
+  ] as const;
+  try {
+    console.error = () => {};
+    for (const scenario of scenarios) {
+      const harness = await createIpcHarness({
+        getUserRole: async () => 'user',
+        getCalendarWithMembers: async () => ({
+          calendar: calendarRow({ visibility: 'members' }),
+          members: [],
+        }),
+        ...scenario.override,
+      });
+      try {
+        await assert.rejects(
+          harness.invoke(scenario.channel, ...scenario.args),
+          scenario.expected,
+        );
+        assert.deepEqual(harness.broadcasts, []);
+      } finally {
+        harness.restore();
+      }
+    }
+  } finally {
+    console.error = originalError;
   }
 });
 
@@ -872,7 +948,7 @@ function calendarStoreRpcHarness(
   };
 }
 
-test('calendar store creates a calendar and initial members through one exact authorized RPC', async () => {
+test('calendar store uses exact actor-authorized RPCs for calendar creation and management', async () => {
   const globalScope = globalThis as Record<string, unknown>;
   const hadPrior = Object.prototype.hasOwnProperty.call(globalScope, STORE_HARNESS_KEY);
   const prior = globalScope[STORE_HARNESS_KEY];
@@ -891,6 +967,13 @@ test('calendar store creates a calendar and initial members through one exact au
         members: Array<{ user_id: string; can_edit: boolean }>,
         actorId: string,
       ): Promise<unknown>;
+      updateCalendar(id: string, updates: Record<string, unknown>, actorId: string): Promise<void>;
+      deleteCalendar(id: string, actorId: string): Promise<void>;
+      replaceMembers(
+        calendarId: string,
+        members: Array<{ user_id: string; can_edit: boolean }>,
+        actorId: string,
+      ): Promise<void>;
     };
     const input = { name: '원자 생성', color: '#74B9FF', visibility: 'members' };
     const members = [{ user_id: 'user-2', can_edit: false }];
@@ -900,6 +983,32 @@ test('calendar store creates a calendar and initial members through one exact au
       name: 'create_calendar_with_members_authorized',
       args: { p_actor_id: 'session-user', p_calendar: input, p_members: members },
     }]);
+
+    await store.updateCalendar('calendar-1', { name: '수정됨' }, 'session-user');
+    await store.replaceMembers('calendar-1', members, 'session-user');
+    await store.deleteCalendar('calendar-1', 'session-user');
+    assert.deepEqual(harness.calls.slice(1), [
+      {
+        name: 'update_calendar_authorized',
+        args: {
+          p_actor_id: 'session-user',
+          p_calendar_id: 'calendar-1',
+          p_updates: { name: '수정됨' },
+        },
+      },
+      {
+        name: 'replace_calendar_members_authorized',
+        args: {
+          p_actor_id: 'session-user',
+          p_calendar_id: 'calendar-1',
+          p_members: members,
+        },
+      },
+      {
+        name: 'delete_calendar_authorized',
+        args: { p_actor_id: 'session-user', p_calendar_id: 'calendar-1' },
+      },
+    ]);
 
     response = {
       data: [],

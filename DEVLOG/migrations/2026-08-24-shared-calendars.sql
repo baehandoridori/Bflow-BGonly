@@ -69,21 +69,184 @@ CREATE TABLE IF NOT EXISTS calendar_notifications (
 CREATE INDEX IF NOT EXISTS idx_calendar_notif_recipient
   ON calendar_notifications(recipient_id, created_at DESC);
 
--- ── 2) 캘린더 멤버 원자적 전체 교체 RPC ─────────────────────────
--- DELETE + INSERT 가 함수 호출 한 트랜잭션에서 실행되어, INSERT 실패 시 기존 멤버도 복원된다.
-CREATE OR REPLACE FUNCTION public.replace_calendar_members(
+-- ── 2) 캘린더 관리 쓰기 권한 원자적 검증 RPC ────────────────────
+-- IPC 사전 검사는 친절한 오류용이다. 실제 관리 권한은 캘린더와 actor 행을
+-- 같은 트랜잭션에서 잠근 뒤 재확인하여 소유권 이전·admin 강등 TOCTOU를 막는다.
+CREATE OR REPLACE FUNCTION public.update_calendar_authorized(
+  p_actor_id TEXT,
+  p_calendar_id UUID,
+  p_updates JSONB
+)
+RETURNS VOID
+LANGUAGE plpgsql
+SECURITY INVOKER
+SET search_path = public, pg_temp
+AS $$
+DECLARE
+  v_allowed_keys CONSTANT TEXT[] := ARRAY['name', 'color', 'visibility'];
+  v_calendar calendars%ROWTYPE;
+  v_actor_role TEXT;
+  v_requested_visibility TEXT;
+BEGIN
+  IF p_actor_id IS NULL OR btrim(p_actor_id) = '' THEN
+    RAISE EXCEPTION 'A session actor is required' USING ERRCODE = '42501';
+  END IF;
+  IF p_updates IS NULL OR jsonb_typeof(p_updates) <> 'object' THEN
+    RAISE EXCEPTION 'p_updates must be a JSON object' USING ERRCODE = '22023';
+  END IF;
+  IF EXISTS (
+    SELECT 1
+    FROM jsonb_object_keys(p_updates) AS submitted(key)
+    WHERE NOT (submitted.key = ANY (v_allowed_keys))
+  ) THEN
+    RAISE EXCEPTION 'p_updates contains an unknown or immutable field' USING ERRCODE = '22023';
+  END IF;
+  IF p_updates ? 'name'
+     AND (jsonb_typeof(p_updates->'name') IS DISTINCT FROM 'string'
+          OR btrim(p_updates->>'name') = '') THEN
+    RAISE EXCEPTION 'Calendar name must be a non-empty string' USING ERRCODE = '22023';
+  END IF;
+  IF p_updates ? 'color'
+     AND (jsonb_typeof(p_updates->'color') IS DISTINCT FROM 'string'
+          OR btrim(p_updates->>'color') = '') THEN
+    RAISE EXCEPTION 'Calendar color must be a non-empty string' USING ERRCODE = '22023';
+  END IF;
+  IF p_updates ? 'visibility' THEN
+    IF jsonb_typeof(p_updates->'visibility') IS DISTINCT FROM 'string' THEN
+      RAISE EXCEPTION 'Calendar visibility must be a string' USING ERRCODE = '22023';
+    END IF;
+    v_requested_visibility := p_updates->>'visibility';
+    IF v_requested_visibility NOT IN ('private', 'members', 'team') THEN
+      RAISE EXCEPTION 'Invalid calendar visibility' USING ERRCODE = '22023';
+    END IF;
+  END IF;
+
+  LOCK TABLE calendars IN ROW EXCLUSIVE MODE;
+
+  SELECT candidate.* INTO v_calendar
+  FROM calendars AS candidate
+  WHERE candidate.id = p_calendar_id
+  FOR UPDATE;
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'Calendar % not found', p_calendar_id USING ERRCODE = '23503';
+  END IF;
+
+  -- delete_user_cascade도 calendar→user 순으로 잠그므로 같은 순서를 유지한다.
+  SELECT actor.role INTO v_actor_role
+  FROM users AS actor
+  WHERE actor.id = p_actor_id
+  FOR SHARE;
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'Session actor % not found', p_actor_id USING ERRCODE = '42501';
+  END IF;
+
+  IF v_calendar.is_personal THEN
+    IF v_calendar.owner_id <> p_actor_id THEN
+      RAISE EXCEPTION 'Personal calendar update permission denied' USING ERRCODE = '42501';
+    END IF;
+  ELSIF v_calendar.owner_id <> p_actor_id
+        AND v_actor_role IS DISTINCT FROM 'admin' THEN
+    RAISE EXCEPTION 'Calendar update permission denied' USING ERRCODE = '42501';
+  END IF;
+
+  IF NOT v_calendar.is_personal
+     AND v_requested_visibility = 'team'
+     AND v_actor_role IS DISTINCT FROM 'admin' THEN
+    RAISE EXCEPTION 'Only an admin can make a team calendar' USING ERRCODE = '42501';
+  END IF;
+
+  UPDATE calendars AS target
+  SET name = CASE WHEN p_updates ? 'name' THEN p_updates->>'name' ELSE v_calendar.name END,
+      color = CASE WHEN p_updates ? 'color' THEN p_updates->>'color' ELSE v_calendar.color END,
+      visibility = CASE
+        WHEN NOT v_calendar.is_personal AND p_updates ? 'visibility'
+          THEN v_requested_visibility
+        ELSE v_calendar.visibility
+      END,
+      updated_at = now()
+  WHERE target.id = p_calendar_id;
+END;
+$$;
+
+COMMENT ON FUNCTION public.update_calendar_authorized(TEXT, UUID, JSONB) IS
+  '캘린더→actor 순으로 잠근 뒤 owner/admin 관리 권한과 team 공개 권한을 재확인하는 캘린더 수정 RPC.';
+
+CREATE OR REPLACE FUNCTION public.delete_calendar_authorized(
+  p_actor_id TEXT,
+  p_calendar_id UUID
+)
+RETURNS VOID
+LANGUAGE plpgsql
+SECURITY INVOKER
+SET search_path = public, pg_temp
+AS $$
+DECLARE
+  v_calendar calendars%ROWTYPE;
+  v_actor_role TEXT;
+BEGIN
+  IF p_actor_id IS NULL OR btrim(p_actor_id) = '' THEN
+    RAISE EXCEPTION 'A session actor is required' USING ERRCODE = '42501';
+  END IF;
+
+  -- event writer·delete_user_cascade와 동일한 부모→자식 테이블 잠금 순서다.
+  LOCK TABLE calendars IN ROW EXCLUSIVE MODE;
+  LOCK TABLE calendar_events IN ROW EXCLUSIVE MODE;
+  LOCK TABLE calendar_members IN ROW EXCLUSIVE MODE;
+
+  SELECT candidate.* INTO v_calendar
+  FROM calendars AS candidate
+  WHERE candidate.id = p_calendar_id
+  FOR UPDATE;
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'Calendar % not found', p_calendar_id USING ERRCODE = '23503';
+  END IF;
+
+  SELECT actor.role INTO v_actor_role
+  FROM users AS actor
+  WHERE actor.id = p_actor_id
+  FOR SHARE;
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'Session actor % not found', p_actor_id USING ERRCODE = '42501';
+  END IF;
+
+  IF v_calendar.is_personal THEN
+    RAISE EXCEPTION 'Personal calendars cannot be deleted' USING ERRCODE = '42501';
+  END IF;
+  IF v_calendar.owner_id <> p_actor_id
+     AND v_actor_role IS DISTINCT FROM 'admin' THEN
+    RAISE EXCEPTION 'Calendar delete permission denied' USING ERRCODE = '42501';
+  END IF;
+
+  DELETE FROM calendars AS target WHERE target.id = p_calendar_id;
+END;
+$$;
+
+COMMENT ON FUNCTION public.delete_calendar_authorized(TEXT, UUID) IS
+  '캘린더→actor 순으로 잠근 뒤 개인 캘린더 불변식과 owner/admin 관리 권한을 재확인하는 캘린더 삭제 RPC.';
+
+-- 예전 2인자 함수가 적용된 개발 DB에서도 actor 없는 우회 경로를 남기지 않는다.
+DROP FUNCTION IF EXISTS public.replace_calendar_members(UUID, JSONB);
+
+CREATE OR REPLACE FUNCTION public.replace_calendar_members_authorized(
+  p_actor_id TEXT,
   p_calendar_id UUID,
   p_members JSONB
 )
 RETURNS VOID
 LANGUAGE plpgsql
-SET search_path = public
+SECURITY INVOKER
+SET search_path = public, pg_temp
 AS $$
+DECLARE
+  v_calendar calendars%ROWTYPE;
+  v_actor_role TEXT;
 BEGIN
+  IF p_actor_id IS NULL OR btrim(p_actor_id) = '' THEN
+    RAISE EXCEPTION 'A session actor is required' USING ERRCODE = '42501';
+  END IF;
   IF p_members IS NULL OR jsonb_typeof(p_members) <> 'array' THEN
     RAISE EXCEPTION 'p_members must be a JSON array' USING ERRCODE = '22023';
   END IF;
-
   IF EXISTS (
     SELECT 1
     FROM jsonb_to_recordset(p_members) AS member(user_id TEXT, can_edit BOOLEAN)
@@ -93,7 +256,6 @@ BEGIN
   ) THEN
     RAISE EXCEPTION 'Each calendar member requires user_id and can_edit' USING ERRCODE = '22023';
   END IF;
-
   IF EXISTS (
     SELECT member.user_id
     FROM jsonb_to_recordset(p_members) AS member(user_id TEXT, can_edit BOOLEAN)
@@ -103,26 +265,44 @@ BEGIN
     RAISE EXCEPTION 'Duplicate calendar member user_id' USING ERRCODE = '23505';
   END IF;
 
-  -- 같은 캘린더의 전체 교체 호출을 직렬화한다. 잠금은 RPC 트랜잭션 종료까지 유지된다.
-  PERFORM 1
-  FROM calendars
-  WHERE id = p_calendar_id
-  FOR UPDATE;
+  LOCK TABLE calendars IN ROW EXCLUSIVE MODE;
+  LOCK TABLE calendar_members IN ROW EXCLUSIVE MODE;
 
+  SELECT candidate.* INTO v_calendar
+  FROM calendars AS candidate
+  WHERE candidate.id = p_calendar_id
+  FOR UPDATE;
   IF NOT FOUND THEN
     RAISE EXCEPTION 'Calendar % not found', p_calendar_id USING ERRCODE = '23503';
+  END IF;
+
+  SELECT actor.role INTO v_actor_role
+  FROM users AS actor
+  WHERE actor.id = p_actor_id
+  FOR SHARE;
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'Session actor % not found', p_actor_id USING ERRCODE = '42501';
+  END IF;
+
+  IF v_calendar.is_personal THEN
+    RAISE EXCEPTION 'Personal calendars cannot have members' USING ERRCODE = '42501';
+  END IF;
+  IF v_calendar.owner_id <> p_actor_id
+     AND v_actor_role IS DISTINCT FROM 'admin' THEN
+    RAISE EXCEPTION 'Calendar member management permission denied' USING ERRCODE = '42501';
   END IF;
 
   DELETE FROM calendar_members WHERE calendar_id = p_calendar_id;
 
   INSERT INTO calendar_members (calendar_id, user_id, can_edit)
   SELECT p_calendar_id, member.user_id, member.can_edit
-  FROM jsonb_to_recordset(p_members) AS member(user_id TEXT, can_edit BOOLEAN);
+  FROM jsonb_to_recordset(p_members) AS member(user_id TEXT, can_edit BOOLEAN)
+  WHERE member.user_id <> v_calendar.owner_id;
 END;
 $$;
 
-COMMENT ON FUNCTION public.replace_calendar_members(UUID, JSONB) IS
-  '캘린더별 부모 행 잠금으로 직렬화하는 멤버 전체 교체 atomic RPC. 빈 배열은 전체 삭제, 잘못된 입력·없는 캘린더는 변경 전 거부.';
+COMMENT ON FUNCTION public.replace_calendar_members_authorized(TEXT, UUID, JSONB) IS
+  '캘린더→actor 순으로 잠근 뒤 개인 캘린더 불변식과 owner/admin 권한을 재확인하는 멤버 전체 교체 atomic RPC.';
 
 -- ── 2-1) 캘린더 + 초기 멤버 원자적 생성 RPC ────────────────────
 -- 캘린더와 초기 멤버를 한 RPC 트랜잭션에서 기록한다. 멤버 FK 실패를 포함해

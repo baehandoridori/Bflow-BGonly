@@ -165,7 +165,7 @@ export function registerCalendarIpc(deps: CalendarIpcDeps): void {
       safeUpdates.visibility = requestedVisibility;
     }
 
-    await store.updateCalendar(id, safeUpdates);
+    await store.updateCalendar(id, safeUpdates, user.id);
     broadcastDataChange('calendars', 'UPDATE');
     broadcastCalendarChanged('UPDATE');
   }));
@@ -178,7 +178,7 @@ export function registerCalendarIpc(deps: CalendarIpcDeps): void {
       throw new Error('이 캘린더를 삭제할 권한이 없습니다');
     }
 
-    await store.deleteCalendar(id);
+    await store.deleteCalendar(id, user.id);
     broadcastDataChange('calendars', 'DELETE');
     broadcastCalendarChanged('DELETE');
   }));
@@ -195,7 +195,7 @@ export function registerCalendarIpc(deps: CalendarIpcDeps): void {
     }
 
     const safeMembers = normalizeCalendarMembers(members, calendar.owner_id);
-    await store.replaceMembers(calendarId, safeMembers);
+    await store.replaceMembers(calendarId, safeMembers, user.id);
     broadcastDataChange('calendar_members', 'UPDATE');
     broadcastCalendarChanged('UPDATE');
   }));

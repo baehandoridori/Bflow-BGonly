@@ -182,16 +182,21 @@ export async function createCalendar(input: {
 export async function updateCalendar(
   id: string,
   updates: Partial<Pick<CalendarRow, 'name' | 'color' | 'visibility'>>,
+  actorId: string,
 ): Promise<void> {
-  const { error } = await supabase
-    .from('calendars')
-    .update({ ...updates, updated_at: new Date().toISOString() })
-    .eq('id', id);
+  const { error } = await supabase.rpc('update_calendar_authorized', {
+    p_actor_id: actorId,
+    p_calendar_id: id,
+    p_updates: updates,
+  });
   throwIfError(error);
 }
 
-export async function deleteCalendar(id: string): Promise<void> {
-  const { error } = await supabase.from('calendars').delete().eq('id', id);
+export async function deleteCalendar(id: string, actorId: string): Promise<void> {
+  const { error } = await supabase.rpc('delete_calendar_authorized', {
+    p_actor_id: actorId,
+    p_calendar_id: id,
+  });
   throwIfError(error);
 }
 
@@ -199,8 +204,10 @@ export async function deleteCalendar(id: string): Promise<void> {
 export async function replaceMembers(
   calendarId: string,
   members: Array<{ user_id: string; can_edit: boolean }>,
+  actorId: string,
 ): Promise<void> {
-  const { error } = await supabase.rpc('replace_calendar_members', {
+  const { error } = await supabase.rpc('replace_calendar_members_authorized', {
+    p_actor_id: actorId,
     p_calendar_id: calendarId,
     p_members: members,
   });

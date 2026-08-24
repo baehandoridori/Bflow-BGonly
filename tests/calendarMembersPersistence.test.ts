@@ -12,38 +12,87 @@ function between(source: string, start: string, end: string): string {
   return source.slice(from, to);
 }
 
-test('replace_calendar_members locks its calendar parent before replacing child rows', () => {
+test('calendar management RPCs lock and recheck actor rights in the write transaction', () => {
   const sql = readFileSync(migrationPath, 'utf8');
-  const fn = between(
+  const scenarios = [
+    {
+      name: 'update_calendar_authorized',
+      permissionDenied: 'Calendar update permission denied',
+      write: 'UPDATE calendars AS target',
+    },
+    {
+      name: 'delete_calendar_authorized',
+      permissionDenied: 'Calendar delete permission denied',
+      write: 'DELETE FROM calendars AS target',
+    },
+    {
+      name: 'replace_calendar_members_authorized',
+      permissionDenied: 'Calendar member management permission denied',
+      write: 'DELETE FROM calendar_members',
+    },
+  ];
+  for (const scenario of scenarios) {
+    const fn = between(
+      sql,
+      `CREATE OR REPLACE FUNCTION public.${scenario.name}`,
+      `COMMENT ON FUNCTION public.${scenario.name}`,
+    );
+    assert.match(fn, /LANGUAGE\s+plpgsql\s+SECURITY INVOKER\s+SET search_path\s*=\s*public,\s*pg_temp/s);
+    const parentLock = fn.indexOf('FOR UPDATE;');
+    const actorLock = fn.indexOf('FOR SHARE;');
+    const permission = fn.indexOf(scenario.permissionDenied, actorLock);
+    const write = fn.indexOf(scenario.write, permission);
+    assert.ok(parentLock >= 0, `${scenario.name} must lock the calendar row`);
+    assert.ok(parentLock < actorLock, `${scenario.name} must lock the calendar before the actor row`);
+    assert.ok(actorLock < permission, `${scenario.name} must recheck owner/admin rights after both locks`);
+    assert.ok(permission < write, `${scenario.name} must deny stale management rights before writing`);
+    assert.match(fn, /v_calendar\.is_personal[\s\S]*v_calendar\.owner_id\s*<>\s*p_actor_id/s);
+    assert.match(fn, /v_actor_role\s+IS DISTINCT FROM\s+'admin'/s);
+  }
+
+  const updateFn = between(
     sql,
-    'CREATE OR REPLACE FUNCTION public.replace_calendar_members',
-    'COMMENT ON FUNCTION public.replace_calendar_members',
+    'CREATE OR REPLACE FUNCTION public.update_calendar_authorized',
+    'COMMENT ON FUNCTION public.update_calendar_authorized',
   );
+  assert.match(updateFn, /v_requested_visibility\s*=\s*'team'[\s\S]*v_actor_role\s+IS DISTINCT FROM\s+'admin'/s);
+  assert.match(updateFn, /UPDATE calendars/);
 
-  assert.match(
-    fn,
-    /PERFORM\s+1\s+FROM\s+calendars\s+WHERE\s+id\s*=\s*p_calendar_id\s+FOR UPDATE;/s,
+  const deleteFn = between(
+    sql,
+    'CREATE OR REPLACE FUNCTION public.delete_calendar_authorized',
+    'COMMENT ON FUNCTION public.delete_calendar_authorized',
   );
-  assert.doesNotMatch(fn, /LOCK\s+TABLE/i);
+  const deleteCalendarTableLock = deleteFn.indexOf('LOCK TABLE calendars IN ROW EXCLUSIVE MODE;');
+  const deleteEventTableLock = deleteFn.indexOf('LOCK TABLE calendar_events IN ROW EXCLUSIVE MODE;');
+  const deleteMemberTableLock = deleteFn.indexOf('LOCK TABLE calendar_members IN ROW EXCLUSIVE MODE;');
+  const deleteParentRowLock = deleteFn.indexOf('FOR UPDATE;');
+  assert.ok(deleteCalendarTableLock >= 0 && deleteCalendarTableLock < deleteEventTableLock);
+  assert.ok(deleteEventTableLock < deleteMemberTableLock);
+  assert.ok(deleteMemberTableLock < deleteParentRowLock);
+  assert.match(deleteFn, /v_calendar\.is_personal[\s\S]*ERRCODE\s*=\s*'42501'/s);
+  assert.match(deleteFn, /DELETE FROM calendars/);
 
-  const fieldValidationIndex = fn.indexOf('Each calendar member requires user_id and can_edit');
-  const duplicateValidationIndex = fn.indexOf('Duplicate calendar member user_id');
-  const parentLockIndex = fn.indexOf('FOR UPDATE;');
-  const deleteIndex = fn.indexOf('DELETE FROM calendar_members');
-  const insertIndex = fn.indexOf('INSERT INTO calendar_members');
-
-  assert.ok(fieldValidationIndex >= 0 && fieldValidationIndex < parentLockIndex);
-  assert.ok(duplicateValidationIndex >= 0 && duplicateValidationIndex < parentLockIndex);
-  assert.ok(parentLockIndex < deleteIndex, 'parent lock must precede the child delete');
-  assert.ok(deleteIndex < insertIndex, 'the final-list delete must precede the insert');
+  const membersFn = between(
+    sql,
+    'CREATE OR REPLACE FUNCTION public.replace_calendar_members_authorized',
+    'COMMENT ON FUNCTION public.replace_calendar_members_authorized',
+  );
+  const fieldValidation = membersFn.indexOf('Each calendar member requires user_id and can_edit');
+  const parentLock = membersFn.indexOf('FOR UPDATE;');
+  const memberDelete = membersFn.indexOf('DELETE FROM calendar_members');
+  const memberInsert = membersFn.indexOf('INSERT INTO calendar_members');
+  assert.ok(fieldValidation >= 0 && fieldValidation < parentLock);
+  assert.ok(parentLock < memberDelete);
+  assert.ok(memberDelete < memberInsert);
 });
 
-test('replace_calendar_members rejects a missing calendar before an empty replacement can succeed', () => {
+test('replace_calendar_members_authorized rejects a missing calendar before an empty replacement can succeed', () => {
   const sql = readFileSync(migrationPath, 'utf8');
   const fn = between(
     sql,
-    'CREATE OR REPLACE FUNCTION public.replace_calendar_members',
-    'COMMENT ON FUNCTION public.replace_calendar_members',
+    'CREATE OR REPLACE FUNCTION public.replace_calendar_members_authorized',
+    'COMMENT ON FUNCTION public.replace_calendar_members_authorized',
   );
 
   const parentLockIndex = fn.indexOf('FOR UPDATE;');
