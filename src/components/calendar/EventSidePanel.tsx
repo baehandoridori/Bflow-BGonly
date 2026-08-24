@@ -190,6 +190,37 @@ export function EventSidePanel({
     setEditing(false);
   };
 
+  const linkedNavigationButtons = (
+    <>
+      {hasLinkedScene && (
+        <button
+          onClick={() => onNavigate(event)}
+          className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg text-xs font-medium bg-[#6C5CE7]/15 text-[#6C5CE7] hover:bg-[#6C5CE7]/25 transition-colors cursor-pointer"
+        >
+          <ExternalLink size={12} />
+          이동
+        </button>
+      )}
+      {hasLinkedTodo && (
+        <button
+          onClick={() => {
+            const todoId = event.linkedTodoId || event.id.replace(/^cal_/, '');
+            setView('dashboard');
+            // 대시보드 마운트 대기 후 네비게이션 이벤트 디스패치
+            setTimeout(() => {
+              window.dispatchEvent(new CustomEvent('bflow:navigate-to-todo', { detail: { todoId } }));
+            }, 300);
+            onClose();
+          }}
+          className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg text-xs font-medium bg-[#A29BFE]/15 text-[#A29BFE] hover:bg-[#A29BFE]/25 transition-colors cursor-pointer"
+        >
+          <CheckSquare size={12} />
+          할일로 이동
+        </button>
+      )}
+    </>
+  );
+
   return (
     <motion.div
       key={event.id}
@@ -424,10 +455,17 @@ export function EventSidePanel({
             </button>
           </div>
         ) : isViewOnly ? (
-          <div className="rounded-lg border border-bg-border/55 bg-bg-primary/45 px-3 py-2.5 text-center">
-            <p className="text-[10px] leading-relaxed text-text-secondary/70">
-              보기 전용 일정이라 편집하거나 삭제할 수 없습니다
-            </p>
+          <div className="flex flex-col gap-2 pt-1">
+            <div className="rounded-lg border border-bg-border/55 bg-bg-primary/45 px-3 py-2.5 text-center">
+              <p className="text-[10px] leading-relaxed text-text-secondary/70">
+                보기 전용 일정이라 편집하거나 삭제할 수 없습니다
+              </p>
+            </div>
+            {(hasLinkedScene || hasLinkedTodo) && (
+              <div className="flex gap-2">
+                {linkedNavigationButtons}
+              </div>
+            )}
           </div>
         ) : isEditing ? (
           /* 편집 모드: 저장/취소 */
@@ -458,32 +496,7 @@ export function EventSidePanel({
                 <Pencil size={12} />
                 편집
               </button>
-              {hasLinkedScene && (
-                <button
-                  onClick={() => onNavigate(event)}
-                  className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg text-xs font-medium bg-[#6C5CE7]/15 text-[#6C5CE7] hover:bg-[#6C5CE7]/25 transition-colors cursor-pointer"
-                >
-                  <ExternalLink size={12} />
-                  이동
-                </button>
-              )}
-              {hasLinkedTodo && (
-                <button
-                  onClick={() => {
-                    const todoId = event.linkedTodoId || event.id.replace(/^cal_/, '');
-                    setView('dashboard');
-                    // 대시보드 마운트 대기 후 네비게이션 이벤트 디스패치
-                    setTimeout(() => {
-                      window.dispatchEvent(new CustomEvent('bflow:navigate-to-todo', { detail: { todoId } }));
-                    }, 300);
-                    onClose();
-                  }}
-                  className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg text-xs font-medium bg-[#A29BFE]/15 text-[#A29BFE] hover:bg-[#A29BFE]/25 transition-colors cursor-pointer"
-                >
-                  <CheckSquare size={12} />
-                  할일로 이동
-                </button>
-              )}
+              {linkedNavigationButtons}
             </div>
             <button
               onClick={() => {

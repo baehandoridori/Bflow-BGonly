@@ -23,6 +23,8 @@ type QuickEditEvent = {
   source?: 'bflow' | 'google' | 'vacation';
   sourceCalendarId?: string;
   calendarId?: string;
+  linkedSceneId?: string;
+  linkedTodoId?: string;
   canEdit?: boolean;
   isReadOnly?: boolean;
 };
@@ -577,6 +579,7 @@ test('read-only shared event keeps its real details without vacation or write ac
     source: 'bflow',
     calendarId: 'calendar-shared',
     type: 'scene',
+    linkedSceneId: 'S001',
     isReadOnly: true,
     canEdit: false,
   });
@@ -601,10 +604,26 @@ test('read-only shared event keeps its real details without vacation or write ac
     false,
     'read-only shared events expose no write button',
   );
+  findButtonByText(tree, '이동').props.onClick?.();
   assert.deepEqual(deleted, []);
   assert.deepEqual(updated, []);
-  assert.deepEqual(navigated, []);
+  assert.deepEqual(navigated, [target]);
   assert.equal(closeCount, 0);
+
+  const linkedTodo = event({
+    source: 'bflow',
+    calendarId: 'calendar-shared',
+    linkedTodoId: 'todo-1',
+    isReadOnly: true,
+    canEdit: false,
+  });
+  const todoTree = await renderSidePanel(linkedTodo);
+  assert.ok(findButtonByText(todoTree, '할일로 이동'));
+  assert.equal(
+    findButtons(todoTree).some((button) => ['편집', '저장', '삭제'].includes(textContent(button).trim())),
+    false,
+    'read-only linked todos keep navigation without write actions',
+  );
 });
 
 test('vacation and writable events keep their existing side-panel actions', async () => {
