@@ -103,6 +103,16 @@ BEGIN
     RAISE EXCEPTION 'Duplicate calendar member user_id' USING ERRCODE = '23505';
   END IF;
 
+  -- 같은 캘린더의 전체 교체 호출을 직렬화한다. 잠금은 RPC 트랜잭션 종료까지 유지된다.
+  PERFORM 1
+  FROM calendars
+  WHERE id = p_calendar_id
+  FOR UPDATE;
+
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'Calendar % not found', p_calendar_id USING ERRCODE = '23503';
+  END IF;
+
   DELETE FROM calendar_members WHERE calendar_id = p_calendar_id;
 
   INSERT INTO calendar_members (calendar_id, user_id, can_edit)
@@ -112,7 +122,7 @@ END;
 $$;
 
 COMMENT ON FUNCTION public.replace_calendar_members(UUID, JSONB) IS
-  '캘린더 멤버 전체 교체 atomic RPC. 빈 배열은 전체 삭제, NULL/비배열/필드 누락/중복 user_id 는 변경 전 거부.';
+  '캘린더별 부모 행 잠금으로 직렬화하는 멤버 전체 교체 atomic RPC. 빈 배열은 전체 삭제, 잘못된 입력·없는 캘린더는 변경 전 거부.';
 
 -- ── 2-1) 태그 원자적 전체 교체 RPC ────────────────────────────
 -- 함수 안의 예외는 호출 전체를 rollback한다. 따라서 태그 삭제의 FK SET NULL도 후속 실패 시 복구된다.
@@ -348,6 +358,13 @@ BEGIN
   DELETE FROM private_calendar_events WHERE user_id = p_user_id;
 
   -- ── 공유 캘린더 정리 (2026-08-24 추가, 설계서 §4) ──
+  -- 멤버 교체 RPC와 동일하게 부모→자식 순서로 잠가 교착을 피한다.
+  PERFORM c.id
+  FROM calendars c
+  WHERE c.owner_id = p_user_id
+  ORDER BY c.id
+  FOR UPDATE;
+
   -- 작성자 표시는 nullable — FK(NO ACTION) 위반 방지
   UPDATE calendar_events SET created_by = NULL WHERE created_by = p_user_id;
   -- 개인 캘린더는 삭제 (이벤트는 ON DELETE CASCADE)
