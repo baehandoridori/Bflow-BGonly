@@ -2,16 +2,15 @@ import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
-  CalendarDays, ChevronLeft, ChevronRight, Plus, X, Filter,
-  Trash2, ExternalLink, GripVertical, Clock, MapPin, FileText, Pencil,
-  Palmtree, Settings, CheckSquare,
+  CalendarDays, ChevronLeft, ChevronRight, Plus, X,
+  Palmtree, CheckSquare,
 } from 'lucide-react';
 import { cn } from '@/utils/cn';
 import { useDataStore } from '@/stores/useDataStore';
 import { useAppStore } from '@/stores/useAppStore';
 import { useAuthStore } from '@/stores/useAuthStore';
 import {
-  getEvents, addEvent, updateEvent, deleteEvent, filterEventsByRange,
+  getEvents, addEvent, updateEvent, deleteEvent,
 } from '@/services/calendarService';
 import { fetchAllVacationEvents } from '@/services/vacationService';
 import { useCalendarDnD } from '@/hooks/useCalendarDnD';
@@ -23,7 +22,6 @@ import { EVENT_COLORS } from '@/types/calendar';
 import { DEPARTMENT_CONFIGS } from '@/types';
 import { VACATION_COLOR } from '@/types/vacation';
 import { MiniCalendar } from '@/components/calendar/MiniCalendar';
-// EventCreateTooltip removed — drag/click now opens full EventCreateModal
 import { EventSidePanel } from '@/components/calendar/EventSidePanel';
 import { EventQuickEdit } from '@/components/calendar/EventQuickEdit';
 import WeekScrollView, { generateYearWeeks, findWeekIndexForDate } from '@/components/calendar/WeekScrollView';
@@ -57,10 +55,6 @@ function addDays(d: Date, n: number): Date {
   const r = new Date(d);
   r.setDate(r.getDate() + n);
   return r;
-}
-
-function isSameDay(a: Date, b: Date): boolean {
-  return a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate();
 }
 
 function daysBetween(a: string, b: string): number {
@@ -142,11 +136,10 @@ function layoutEventBars(
    ═══════════════════════════════════════════════════ */
 
 function EventBarChip({
-  bar, compact, onClick, onDragStart, isDragging, isGhost,
+  bar, onClick, onDragStart, isDragging, isGhost,
   hoveredEventId, onHover, onContextMenu,
 }: {
   bar: EventBar;
-  compact?: boolean;
   onClick: (e: CalendarEvent) => void;
   onDragStart?: (eventId: string, mode: DragMode, anchorDate: string) => void;
   isDragging?: boolean;
@@ -270,8 +263,8 @@ function EventBarChip({
       style={{
         left: `calc(${(bar.startCol / 7) * 100}% + 2px)`,
         width: `calc(${(bar.span / 7) * 100}% - 4px)`,
-        top: `${bar.row * (compact ? 23 : 28) + (compact ? 28 : 36)}px`,
-        height: compact ? '22px' : '26px',
+        top: `${bar.row * 28 + 36}px`,
+        height: '26px',
         cursor: ev.isReadOnly ? 'pointer' : isDragging ? 'grabbing' : 'grab',
         transition: isGhost ? 'left 0.12s ease-out, width 0.12s ease-out, top 0.12s ease-out' : undefined,
       }}
@@ -406,161 +399,18 @@ function OverflowPopup({
 }
 
 /* ═══════════════════════════════════════════════════
-   이벤트 상세 모달
-   ═══════════════════════════════════════════════════ */
-
-function EventDetailModal({
-  event, onClose, onDelete, onNavigate, onEdit,
-}: {
-  event: CalendarEvent;
-  onClose: () => void;
-  onDelete: (id: string) => void;
-  onNavigate: (ev: CalendarEvent) => void;
-  onEdit: (ev: CalendarEvent) => void;
-}) {
-  const episodeTitles = useDataStore((s) => s.episodeTitles);
-  const start = parseDate(event.startDate);
-  const end = parseDate(event.endDate);
-  const isSingle = event.startDate === event.endDate;
-  const dateLabel = isSingle
-    ? `${start.getFullYear()}년 ${start.getMonth() + 1}월 ${start.getDate()}일`
-    : `${start.getMonth() + 1}/${start.getDate()} → ${end.getMonth() + 1}/${end.getDate()}`;
-
-  const typeLabels: Record<CalendarEventType, string> = {
-    custom: '일반 이벤트',
-    episode: '에피소드',
-    part: '파트',
-    scene: '씬',
-    vacation: '휴가',
-  };
-
-  return (
-    <motion.div
-      initial={{ opacity: 0 }}
-      animate={{ opacity: 1 }}
-      exit={{ opacity: 0 }}
-      className="fixed inset-0 z-50 flex items-center justify-center bg-overlay/50 backdrop-blur-sm"
-      onClick={onClose}
-    >
-      <motion.div
-        initial={{ opacity: 0, scale: 0.93, y: 12 }}
-        animate={{ opacity: 1, scale: 1, y: 0 }}
-        exit={{ opacity: 0, scale: 0.93, y: 12 }}
-        transition={{ duration: 0.2 }}
-        className="bg-bg-card rounded-2xl shadow-2xl border border-bg-border w-96 overflow-hidden"
-        onClick={(e) => e.stopPropagation()}
-      >
-        {/* 컬러 헤더 */}
-        <div
-          className="h-2 w-full"
-          style={{ background: `linear-gradient(90deg, ${event.color}, ${event.color}80)` }}
-        />
-        <div className="p-5 flex flex-col gap-4">
-          <div className="flex items-start justify-between">
-            <div className="flex-1 min-w-0">
-              <h3 className="text-base font-bold text-text-primary truncate">{event.title}</h3>
-              <div className="flex items-center gap-2 mt-1">
-                <span
-                  className="text-[11px] px-1.5 py-0.5 rounded-full font-medium"
-                  style={{ backgroundColor: `${event.color}20`, color: event.color }}
-                >
-                  {typeLabels[event.type]}
-                </span>
-                {event.linkedEpisode != null && (
-                  <span className="text-[11px] text-text-secondary">
-                    {episodeTitles[event.linkedEpisode] || `EP.${String(event.linkedEpisode).padStart(2, '0')}`}
-                    {event.linkedPart && ` ${event.linkedPart}파트`}
-                    {event.linkedSceneId && ` #${event.linkedSceneId}`}
-                  </span>
-                )}
-              </div>
-            </div>
-            <button onClick={onClose} className="p-1 text-text-secondary hover:text-text-primary cursor-pointer">
-              <X size={16} />
-            </button>
-          </div>
-
-          {/* 정보 */}
-          <div className="flex flex-col gap-2.5 text-xs">
-            <div className="flex items-center gap-2 text-text-secondary">
-              <Clock size={13} />
-              <span>{dateLabel}</span>
-            </div>
-            {event.memo && (
-              <div className="flex items-start gap-2 text-text-secondary">
-                <FileText size={13} className="shrink-0 mt-0.5" />
-                <span className="leading-relaxed">{event.memo}</span>
-              </div>
-            )}
-            <div className="flex items-center gap-2 text-text-secondary/60">
-              <MapPin size={13} />
-              <span>작성: {event.createdBy}</span>
-            </div>
-          </div>
-
-          {/* 액션 */}
-          {event.isReadOnly ? (
-            /* 휴가 이벤트 — 프로필에서 관리 안내 */
-            <div className="flex flex-col gap-2 pt-1">
-              <p className="text-[11px] text-text-secondary/50 text-center">
-                휴가 이벤트는 프로필 설정에서 관리됩니다
-              </p>
-              <button
-                onClick={() => { onNavigate(event); onClose(); }}
-                className="w-full flex items-center justify-center gap-1.5 py-2 rounded-xl text-xs font-medium bg-emerald-500/15 text-emerald-400 hover:bg-emerald-500/25 transition-colors cursor-pointer"
-              >
-                <Settings size={13} />
-                프로필 설정으로 이동
-              </button>
-            </div>
-          ) : (
-            <div className="flex gap-2 pt-1">
-              <button
-                onClick={() => { onEdit(event); onClose(); }}
-                className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-xl text-xs font-medium bg-bg-border/20 text-text-primary hover:bg-bg-border/30 transition-colors cursor-pointer"
-              >
-                <Pencil size={13} />
-                편집
-              </button>
-              {event.type !== 'custom' && (
-                <button
-                  onClick={() => onNavigate(event)}
-                  className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-xl text-xs font-medium bg-accent/15 text-accent hover:bg-accent/25 transition-colors cursor-pointer"
-                >
-                  <ExternalLink size={13} />
-                  이동
-                </button>
-              )}
-              <button
-                onClick={() => { onDelete(event.id); onClose(); }}
-                className="flex items-center justify-center gap-1.5 py-2 px-4 rounded-xl text-xs font-medium bg-red-500/10 text-red-400 hover:bg-red-500/20 transition-colors cursor-pointer"
-              >
-                <Trash2 size={13} />
-                삭제
-              </button>
-            </div>
-          )}
-        </div>
-      </motion.div>
-    </motion.div>
-  );
-}
-
-/* ═══════════════════════════════════════════════════
    이벤트 생성/편집 모달
    ═══════════════════════════════════════════════════ */
 
 function EventCreateModal({
   initialDate,
   initialEndDate,
-  editEvent,
   episodes,
   onClose,
   onSave,
 }: {
   initialDate?: string;
   initialEndDate?: string;
-  editEvent?: CalendarEvent;
   episodes: { episodeNumber: number; title: string; parts: { partId: string; sheetName: string; department: string; scenes: { sceneId: string; no: number }[] }[] }[];
   onClose: () => void;
   onSave: (ev: Omit<CalendarEvent, 'id' | 'createdAt'>) => void;
@@ -569,20 +419,18 @@ function EventCreateModal({
   const episodeTitles = useDataStore((s) => s.episodeTitles);
   const colorMode = useAppStore((s) => s.colorMode);
   const today = fmtDate(new Date());
-  const isEditMode = !!editEvent;
-
-  const [title, setTitle] = useState(editEvent?.title ?? '');
-  const [memo, setMemo] = useState(editEvent?.memo ?? '');
-  const [startDate, setStartDate] = useState(editEvent?.startDate ?? initialDate ?? today);
-  const [endDate, setEndDate] = useState(editEvent?.endDate ?? initialEndDate ?? initialDate ?? today);
-  const [color, setColor] = useState<string>(editEvent?.color ?? EVENT_COLORS[0]);
-  const [evType, setEvType] = useState<CalendarEventType>(editEvent?.type ?? 'custom');
-  const [isPrivate, setIsPrivate] = useState<boolean>(!!editEvent?.isPrivate);
+  const [title, setTitle] = useState('');
+  const [memo, setMemo] = useState('');
+  const [startDate, setStartDate] = useState(initialDate ?? today);
+  const [endDate, setEndDate] = useState(initialEndDate ?? initialDate ?? today);
+  const [color, setColor] = useState<string>(EVENT_COLORS[0]);
+  const [evType, setEvType] = useState<CalendarEventType>('custom');
+  const [isPrivate, setIsPrivate] = useState(false);
 
   // 연결 항목
-  const [linkedEp, setLinkedEp] = useState<number | ''>(editEvent?.linkedEpisode ?? '');
-  const [linkedPart, setLinkedPart] = useState(editEvent?.linkedSheetName ?? '');
-  const [linkedScene, setLinkedScene] = useState(editEvent?.linkedSceneId ?? '');
+  const [linkedEp, setLinkedEp] = useState<number | ''>('');
+  const [linkedPart, setLinkedPart] = useState('');
+  const [linkedScene, setLinkedScene] = useState('');
 
   const selectedEpParts = useMemo(() => {
     if (linkedEp === '') return [];
@@ -596,7 +444,6 @@ function EventCreateModal({
 
   // 에피소드/파트/씬 선택 시 제목 자동 입력
   useEffect(() => {
-    if (isEditMode) return; // 편집 모드에서는 자동입력 안 함
     if (evType === 'custom') return;
     const ep = episodes.find((e) => e.episodeNumber === linkedEp);
     if (!ep) {
@@ -626,7 +473,7 @@ function EventCreateModal({
         }
       }
     }
-  }, [evType, linkedEp, linkedPart, linkedScene, episodes, selectedEpParts, isEditMode]);
+  }, [evType, linkedEp, linkedPart, linkedScene, episodes, selectedEpParts]);
 
   const handleSubmit = () => {
     if (!title.trim()) return;
@@ -674,7 +521,7 @@ function EventCreateModal({
       >
         {/* 헤더 */}
         <div className="flex items-center justify-between px-5 py-4 border-b border-bg-border">
-          <h3 className="text-sm font-bold text-text-primary">{isEditMode ? '이벤트 편집' : '새 이벤트'}</h3>
+          <h3 className="text-sm font-bold text-text-primary">새 이벤트</h3>
           <button onClick={onClose} className="p-1 text-text-secondary hover:text-text-primary cursor-pointer">
             <X size={16} />
           </button>
@@ -847,7 +694,7 @@ function EventCreateModal({
             disabled={!title.trim()}
             className="w-full py-2.5 rounded-xl text-sm font-medium bg-accent hover:bg-accent/80 text-white disabled:opacity-30 transition-colors cursor-pointer disabled:cursor-not-allowed"
           >
-            {isEditMode ? '이벤트 저장' : '이벤트 추가'}
+            이벤트 추가
           </button>
         </div>
       </motion.div>
@@ -865,7 +712,6 @@ function CalendarGrid({
   today,
   currentMonth,
   maxVisibleBars,
-  onDateClick,
   onEventClick,
   onDragStart,
   dragPreview,
@@ -873,7 +719,6 @@ function CalendarGrid({
   onCellMouseDown,
   isDateInDragRange,
   onEventContextMenu,
-  focusWeekIndex,
   onWheel,
   monthKey,
   monthDirection = 0,
@@ -885,14 +730,12 @@ function CalendarGrid({
   today: string;
   currentMonth: number;
   maxVisibleBars: number;
-  onDateClick: (date: string) => void;
   onEventClick: (ev: CalendarEvent) => void;
   onDragStart?: (eventId: string, mode: DragMode, anchorDate: string) => void;
   dragPreview?: DragPreview | null;
   isDragging?: boolean;
   onCellMouseDown?: (e: React.MouseEvent, date: string) => void;
   isDateInDragRange?: (date: string) => boolean;
-  focusWeekIndex?: number;
   onWheel?: (e: React.WheelEvent) => void;
   onEventContextMenu?: (ev: CalendarEvent, e: React.MouseEvent) => void;
   monthKey?: string;
@@ -981,7 +824,6 @@ function CalendarGrid({
                       isInDragRange && 'bg-accent/15 border-accent/30',
                       isFocused && 'ring-2 ring-inset ring-accent/60 bg-accent/8 z-10',
                     )}
-                    onClick={() => { if (!isDragging) onDateClick(dateStr); }}
                     onMouseDown={onCellMouseDown ? (e) => onCellMouseDown(e, dateStr) : undefined}
                   >
                     {/* 드래그 중 가상 이벤트 바 — 셀 내부 하단에 고정해서 칸을 넘지 않게 */}
@@ -1085,77 +927,6 @@ function CalendarGrid({
 }
 
 /* ═══════════════════════════════════════════════════
-   오늘 뷰 (타임라인 스타일)
-   ═══════════════════════════════════════════════════ */
-
-function TodayView({
-  events, today, onEventClick,
-}: {
-  events: CalendarEvent[];
-  today: string;
-  onEventClick: (ev: CalendarEvent) => void;
-}) {
-  const todayEvents = events
-    .filter((e) => e.startDate <= today && e.endDate >= today)
-    .sort((a, b) => a.startDate.localeCompare(b.startDate));
-
-  const d = parseDate(today);
-  const label = `${d.getFullYear()}년 ${d.getMonth() + 1}월 ${d.getDate()}일 ${WEEKDAYS[d.getDay()]}요일`;
-
-  return (
-    <div className="flex flex-col gap-4">
-      <div className="text-center py-4">
-        <div className="text-2xl font-bold text-text-primary">{d.getDate()}</div>
-        <div className="text-sm text-text-secondary mt-1">{label}</div>
-      </div>
-
-      {todayEvents.length === 0 ? (
-        <div className="flex flex-col items-center justify-center py-16 text-text-secondary/50">
-          <CalendarDays size={40} className="mb-3 opacity-30" />
-          <p className="text-sm">오늘 일정이 없습니다</p>
-        </div>
-      ) : (
-        <div className="flex flex-col gap-2">
-          {todayEvents.map((ev) => {
-            const isSingle = ev.startDate === ev.endDate;
-            const s = parseDate(ev.startDate);
-            const e = parseDate(ev.endDate);
-            const dateRange = isSingle
-              ? '오늘'
-              : `${s.getMonth() + 1}/${s.getDate()} → ${e.getMonth() + 1}/${e.getDate()}`;
-
-            return (
-              <button
-                key={ev.id}
-                onClick={() => onEventClick(ev)}
-                className="flex items-center gap-3 p-3 rounded-xl transition-all hover:scale-[1.01] cursor-pointer"
-                style={{
-                  background: `linear-gradient(135deg, ${ev.color}12 0%, ${ev.color}08 100%)`,
-                  border: `1px solid ${ev.color}25`,
-                  backdropFilter: 'blur(8px)',
-                }}
-              >
-                <div className="w-1 h-10 rounded-full shrink-0" style={{ backgroundColor: ev.color }} />
-                <div className="flex-1 min-w-0 text-left">
-                  <p className="text-sm font-medium text-text-primary truncate">{ev.title}</p>
-                  <p className="text-[11px] text-text-secondary/60 mt-0.5">{dateRange} · {ev.createdBy}</p>
-                </div>
-                <span
-                  className="text-[11px] px-1.5 py-0.5 rounded-full font-medium shrink-0"
-                  style={{ backgroundColor: `${ev.color}20`, color: ev.color }}
-                >
-                  {ev.type === 'custom' ? '일반' : ev.type === 'vacation' ? '휴가' : ev.type.toUpperCase()}
-                </span>
-              </button>
-            );
-          })}
-        </div>
-      )}
-    </div>
-  );
-}
-
-/* ═══════════════════════════════════════════════════
    캘린더 → 할일 역동기화 헬퍼
    ═══════════════════════════════════════════════════ */
 
@@ -1169,7 +940,6 @@ async function syncCalendarToTodo(todoId: string, calEvent: CalendarEvent) {
       endDate: calEvent.endDate || null,
       addToCalendar: true,
     });
-    window.dispatchEvent(new Event('bflow:todos-changed'));
   } catch (err) {
     console.warn('[ScheduleView] 할일 역동기화 실패:', err);
   }
@@ -1179,7 +949,6 @@ async function unlinkTodoFromCalendar(todoId: string) {
   const supabaseService = await import('@/services/supabaseService');
   try {
     await supabaseService.applyCalendarToTodoPatch(todoId, { addToCalendar: false });
-    window.dispatchEvent(new Event('bflow:todos-changed'));
   } catch (err) {
     console.warn('[ScheduleView] 할일 링크 해제 실패:', err);
   }
@@ -1204,11 +973,8 @@ export function ScheduleView() {
   const [deptFilter, setDeptFilter] = useState<'all' | 'bg' | 'acting'>('all');
   const [showCreate, setShowCreate] = useState(false);
   const [createDate, setCreateDate] = useState<string | undefined>();
-  const [editEvent, setEditEvent] = useState<CalendarEvent | null>(null);
-  const [detailEvent, setDetailEvent] = useState<CalendarEvent | null>(null);
 
   // ─── 새 컴포넌트 상태 ───
-  // Side panel state (replaces detailEvent modal)
   const [panelEvent, setPanelEvent] = useState<CalendarEvent | null>(null);
 
   // 월간 뷰 휠 — 디바운스 타이머
@@ -1237,7 +1003,6 @@ export function ScheduleView() {
   const [year, setYear] = useState(() => new Date().getFullYear());
   const [month, setMonth] = useState(() => new Date().getMonth());
   const [monthDir, setMonthDir] = useState(0); // 월 슬라이드 방향
-  const [weekOffset, setWeekOffset] = useState(0); // 주/2주 뷰 오프셋
 
   const today = fmtDate(new Date());
   const vacationConnected = useAppStore((s) => s.vacationConnected);
@@ -1347,7 +1112,7 @@ export function ScheduleView() {
     }
 
     return [];
-  }, [viewMode, year, month, weekOffset]);
+  }, [viewMode, year, month]);
 
   // 네비게이션
   const goToPrev = () => {
@@ -1381,7 +1146,6 @@ export function ScheduleView() {
     const todayStr = fmtDate(now);
     setYear(now.getFullYear());
     setMonth(now.getMonth());
-    setWeekOffset(0);
     // 주간 뷰: 오늘이 속한 주로 이동
     const yearWeeks = generateYearWeeks(now.getFullYear());
     setActiveWeekIndex(findWeekIndexForDate(yearWeeks, todayStr));
@@ -1418,21 +1182,6 @@ export function ScheduleView() {
     }
   }, []);
 
-  const handleUpdateEvent = useCallback(async (data: Omit<CalendarEvent, 'id' | 'createdAt'>) => {
-    if (!editEvent) return;
-    const updates = { ...data };
-    await updateEvent(editEvent.id, updates);
-    const updatedEvent = { ...editEvent, ...updates };
-    setEvents((prev) => prev.map((e) => (e.id === editEvent.id ? { ...e, ...updates } : e)));
-    // 캘린더 → 할일 역동기화
-    if (updatedEvent.linkedTodoId || updatedEvent.id.startsWith('cal_')) {
-      const todoId = updatedEvent.linkedTodoId || updatedEvent.id.replace(/^cal_/, '');
-      syncCalendarToTodo(todoId, updatedEvent);
-    }
-    setEditEvent(null);
-    setShowCreate(false);
-  }, [editEvent]);
-
   const handleDeleteEvent = useCallback(async (id: string) => {
     // 삭제 전에 이벤트 정보 저장 (할일 연결 해제용)
     const deletingEvent = events.find(e => e.id === id);
@@ -1447,12 +1196,6 @@ export function ScheduleView() {
     }
   }, [events]);
 
-  // 날짜 클릭 → 툴팁으로 이벤트 생성 (드래그 훅이 처리하므로 기존 모달은 열지 않음)
-  const handleDateClick = useCallback((_date: string) => {
-    // 드래그 훅의 onDragComplete가 상세 편집 모달을 직접 열므로
-    // 여기서는 아무것도 하지 않음 (이중 모달 방지)
-  }, []);
-
   // 이벤트 클릭 → 사이드패널 토글 (같은 이벤트 재클릭 시 닫기)
   const handleEventClick = useCallback((ev: CalendarEvent) => {
     setPanelEvent(prev => prev?.id === ev.id ? null : ev);
@@ -1463,7 +1206,6 @@ export function ScheduleView() {
     // 휴가 이벤트 → 휴가 탭으로 이동
     if (ev.type === 'vacation') {
       setView('vacation');
-      setDetailEvent(null);
       setPanelEvent(null);
       return;
     }
@@ -1480,7 +1222,6 @@ export function ScheduleView() {
       highlightSceneId: ev.linkedSceneId,
       toastMessage: `${ev.title} → 씬 뷰로 이동합니다`,
     });
-    setDetailEvent(null);
   }, [setView]);
 
   // 드래그&드롭
@@ -1521,12 +1262,11 @@ export function ScheduleView() {
   // 오늘 버튼 하이라이트 (persistedDateRange와 분리)
   // todayHighlight 제거됨 — pulseDate로 통합
 
-  const { dragState, handleCellMouseDown, isDateInRange } = useCalendarDragCreate({
+  const { handleCellMouseDown, isDateInRange } = useCalendarDragCreate({
     onDragComplete: (startDate, endDate, _anchorEl) => {
       // 드래그/클릭 완료 → 상세 편집 모달 열기 (시작일+종료일 프리필)
       setCreateDate(startDate);
       setCreateEndDate(endDate);
-      setEditEvent(null);
       setShowCreate(true);
       // 모달이 열려 있는 동안 하이라이트 유지
       setPersistedDateRange({ startDate, endDate });
@@ -1620,7 +1360,6 @@ export function ScheduleView() {
         e.stopPropagation();
         setCreateDate(focusedDate);
         setCreateEndDate(focusedDate);
-        setEditEvent(null);
         setShowCreate(true);
         setPersistedDateRange({ startDate: focusedDate, endDate: focusedDate });
       }
@@ -1998,7 +1737,6 @@ export function ScheduleView() {
                 onDateClick={(dateStr) => {
                   setCreateDate(dateStr);
                   setCreateEndDate(dateStr);
-                  setEditEvent(null);
                   setShowCreate(true);
                 }}
                 year={year}
@@ -2013,7 +1751,6 @@ export function ScheduleView() {
                 onDateClick={(dateStr) => {
                   setCreateDate(dateStr);
                   setCreateEndDate(dateStr);
-                  setEditEvent(null);
                   setShowCreate(true);
                 }}
                 activeWeekIndex={activeWeekIndex}
@@ -2027,7 +1764,6 @@ export function ScheduleView() {
                 today={today}
                 currentMonth={month}
                 maxVisibleBars={maxBars}
-                onDateClick={handleDateClick}
                 onEventClick={handleEventClick}
                 onDragStart={handleBarDragStart}
                 dragPreview={dragPreview}
@@ -2060,18 +1796,17 @@ export function ScheduleView() {
       <AnimatePresence>
         {showCreate && (
           <EventCreateModal
-            key={editEvent ? `edit-${editEvent.id}` : 'create'}
+            key="create"
             initialDate={createDate}
             initialEndDate={createEndDate}
-            editEvent={editEvent ?? undefined}
             episodes={episodes}
-            onClose={() => { setShowCreate(false); setCreateDate(undefined); setCreateEndDate(undefined); setEditEvent(null); }}
-            onSave={editEvent ? handleUpdateEvent : handleAddEvent}
+            onClose={() => { setShowCreate(false); setCreateDate(undefined); setCreateEndDate(undefined); }}
+            onSave={handleAddEvent}
           />
         )}
       </AnimatePresence>
 
-      {/* ═══ EventSidePanel (replaces EventDetailModal) ═══ */}
+      {/* ═══ 이벤트 사이드패널 ═══ */}
       <AnimatePresence>
         {panelEvent && (
           <EventSidePanel
