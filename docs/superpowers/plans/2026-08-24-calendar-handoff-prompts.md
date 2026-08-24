@@ -1,7 +1,50 @@
 # 공유 캘린더 구현 — 실행 세션 핸드오프 프롬프트 (PR1~PR4)
 
-> 사용법: 각 PR 을 **새 Claude Code 세션**(작업 디렉터리 `C:\Bflow-BGonly`)에 아래 프롬프트를 그대로 붙여넣어 시작한다. 반드시 순서대로(PR1 머지 → PR2 → PR3 → PR4). 이전 PR 이 머지된 뒤 다음 세션을 시작할 것.
+> 사용법: **권장은 "통합 순차 진행 프롬프트" 하나를 새 Claude Code 세션(작업 디렉터리 `C:\Bflow-BGonly`)에 붙여넣는 것** — 한 세션이 PR1→PR4 를 순차 진행하며 각 머지 시점에만 한솔 확인을 받는다. 개별 프롬프트(아래)는 PR 을 세션별로 나누고 싶을 때 사용.
 > 공통 전제: 머지·G드라이브 배포·슬랙 공지·라이브 DB 적용은 **한솔이 직접 지시할 때만**. 각 세션은 PR 생성 + 코덱스 리뷰 루프까지가 자동 범위다.
+
+---
+
+## 통합 순차 진행 프롬프트 (권장 — 한 세션으로 PR1→PR4)
+
+```
+B flow 공유 캘린더 라운드(설계·플랜 완료, 문서는 main 에 머지됨)를 PR1부터 PR4까지 순차 구현해줘.
+
+## 전체 진행 방식
+이 세션은 PR1 → PR2 → PR3 → PR4 를 순서대로 진행한다. 각 PR 마다:
+1. origin/main 최신화 → 새 워크트리·브랜치 생성 (superpowers:using-git-worktrees). 브랜치명: claude/calendar-pr1-cleanup / pr2-data / pr3-ui / pr4-notify.
+2. 필독: docs/superpowers/plans/2026-08-24-calendar-shared-calendars.md 의 Chunk 0(공통 규칙·파일 지도) + 해당 PR 의 Chunk. 추가로 —
+   · PR1: 설계서 §10 + docs/superpowers/research/2026-08-24-calendar-current-structure.md §3
+   · PR2: 설계서 §4·§5·§6·§12
+   · PR3: 설계서 §3 + 시안 원본 docs/superpowers/specs/mockups/2026-08-24-calendar/M1~M6 (브라우저로 열어 시각 기준)
+   · PR4: 설계서 §7·§8·§9
+   (설계서 = docs/superpowers/specs/2026-08-24-calendar-pm-shared-calendars-design.md, 플랜과 충돌 시 설계서 우선. 단 플랜에 "의도된 편차"로 명시된 항목은 플랜을 따른다)
+3. superpowers:executing-plans(서브에이전트 가능하면 superpowers:subagent-driven-development)로 해당 Chunk 의 Task 를 체크박스 순서대로 실행. 연구 문서의 줄 번호는 드리프트 가능 — 모든 삭제·수정은 grep 재확인 후 진행.
+4. 검증 게이트(순서 고정): npm run typecheck → 관련 npm run test:* → npm run build:vite → 프리뷰 실기(npm run dev:renderer 후 http://localhost:5190/?preview=1, mock 로그인 배한솔/1234). 작동 증명 없이 완료 표시 금지. PR별 실기 시나리오는 각 Chunk 마무리 Task 에 있다.
+5. 버전: PR 생성 직전 origin/main 기준 마이너 +1, package.json + package-lock.json(최상단 version + packages[""].version) 3자 일치.
+6. pr-creator 스킬로 PR 생성 → codex-review-loop 스킬로 코덱스가 명시적 클린 신호를 줄 때까지 반영.
+7. 코덱스 클린 후 완료 보고(각 PR 프롬프트의 "완료 보고" 항목 형식)와 함께 한솔에게 머지 확인을 요청하고 대기한다. "머지해" 지시를 받으면 gh pr merge <번호> --squash 로 머지하고, gh pr view 로 머지 확인 후 다음 PR 로 넘어간다. 지시 전 임의 머지 금지.
+
+## PR 사이 특별 게이트
+- PR2 머지 직후: PR3 시작 전에 한솔에게 마이그레이션 라이브 적용 게이트를 상기시켜라(이 문서 하단 "배포 게이트 체크리스트" 1번). 적용 지시가 오면 DEVLOG/migrations/2026-08-24-shared-calendars.sql 을 Supabase MCP 로 적용하고 이관 전후 행 수 비교(SELECT count(*))로 검증해 보고한다. 적용 지시가 없어도 PR3 는 프리뷰 mock 으로 진행 가능하니 확인 후 계속.
+- PR4 머지 후: 빌드·G드라이브 배포는 별도 지시 대기(bflow-release-deploy 스킬, manifest.json 마지막 원칙).
+
+## PR별 요점 (상세는 각 Chunk)
+- PR1 정리(동작 불변): 죽은 코드 삭제(EventCreateTooltip, ScheduleView 내 EventDetailModal/TodayView/편집모드 잔재 등) + 날짜 유틸·휴가 매핑 공용화 + ScheduleView 분해 + test:calendar 스크립트. isPrivate/구글 경로는 건드리지 않는다.
+- PR2 데이터: 마이그레이션 SQL 작성(파일만, 라이브 적용은 게이트) + calendarPermissions(TDD) + electron/calendarStore·calendarIpc + ensurePersonalCalendar + 렌더러 타입/서비스/useCalendarStore + "나만 보기" 저장 경로 스위치 + mock. 불변식: 머지 후에도 화면 동작 동일, 테이블 없어도 조용히 동작(에러 토스트 금지).
+- PR3 UI: 프리뷰 seed 선행 → CalendarRail → TagBar(+필터 TDD) → 헤더 개편(유형·부서 필터 제거) → EventCreateModal 개편(캘린더 선택·종일/시각·태그, "나만 보기" 체크박스 제거) → CalendarSettingsModal → TagManagerPopover → EventSidePanel/EventQuickEdit → 주/오늘 시간 표시 → 칩 규칙. 마무리에 시안 M1~M6 대조 체크리스트 수행. 알림/realtime·타임라인 탭·휴가 모듈은 금지.
+- PR4 알림·마감: 알림 생성(수신자·문구 순수 함수 TDD) → 캐치업+알림센터 calendar 유형 → realtime 4테이블 구독 + App.tsx data-change 제외/calendar-changed 수신부 수정 → teamCalendarId 완전 제거(grep 소탕 증거) → 프리뷰 알림 seed → ROADMAP/CLAUDE.md/lessons 문서 마감. 실기: 두 창 실시간 반영·알림 클릭 이동·구글 미연동 표시.
+
+## 전 구간 금지
+G드라이브 배포·슬랙 게시(한솔 명시 시에만), /home/user/Bflow(원본 레포) 수정, 지시 없는 머지, PR 범위 밖 변경(각 Chunk 의 "금지" 참조).
+
+## 컨텍스트 유지
+세션이 길어져 컨텍스트가 요약되더라도, 각 PR 시작 시점마다 Chunk 0 + 해당 Chunk 를 다시 읽어 상태를 복원한 뒤 진행하라. 각 PR 완료 보고에는 "지금까지 머지된 PR / 남은 PR" 현황 한 줄을 포함하라.
+
+시작: 지금 바로 PR1 부터 진행해.
+```
+
+> 아래 개별 프롬프트는 PR 을 세션별로 나눠 돌리고 싶을 때의 대안이다. 통합 프롬프트와 내용은 동일하다.
 
 ---
 
