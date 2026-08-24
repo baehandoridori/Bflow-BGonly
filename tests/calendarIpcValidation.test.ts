@@ -13,6 +13,13 @@ type IpcHarnessState = {
   broadcasts: Array<{ kind: 'data' | 'calendar'; args: unknown[] }>;
 };
 
+type CalendarIpcExternalDeps = {
+  createLegacyPrivateEvent?: (input: Record<string, unknown>, actorId: string) => Promise<{ id: string }>;
+  deleteLegacyPrivateEvent?: (eventId: string, actorId: string) => Promise<void>;
+  createGoogleEvent?: (calendarId: string, input: unknown, actorId: string) => Promise<string>;
+  deleteGoogleEvent?: (calendarId: string, eventId: string, actorId: string) => Promise<void>;
+};
+
 const IPC_HARNESS_KEY = '__calendarIpcBehaviorHarness';
 const STORE_HARNESS_KEY = '__calendarStoreStrictReadHarness';
 let ipcBundle: Promise<string> | undefined;
@@ -90,8 +97,13 @@ function defaultStore(): IpcHarnessState['store'] {
 
 async function createIpcHarness(
   overrides: Partial<IpcHarnessState['store']> = {},
-  userId = 'user-1',
-): Promise<IpcHarnessState & { invoke(channel: string, ...args: unknown[]): Promise<unknown>; restore(): void }> {
+  userId: string | (() => string) = 'user-1',
+  externalDeps: CalendarIpcExternalDeps = {},
+): Promise<IpcHarnessState & {
+  invoke(channel: string, ...args: unknown[]): Promise<unknown>;
+  invokeAs(senderId: number, channel: string, ...args: unknown[]): Promise<unknown>;
+  restore(): void;
+}> {
   const globalScope = globalThis as Record<string, unknown>;
   const hadPrior = Object.prototype.hasOwnProperty.call(globalScope, IPC_HARNESS_KEY);
   const prior = globalScope[IPC_HARNESS_KEY];
@@ -106,14 +118,32 @@ async function createIpcHarness(
     const module = await import(`data:text/javascript;base64,${encoded}#calendar-ipc-${ipcNonce++}`) as {
       registerCalendarIpc(deps: { getSessionUserIdOrThrow(): string }): void;
     };
-    module.registerCalendarIpc({ getSessionUserIdOrThrow: () => userId });
+    module.registerCalendarIpc({
+      getSessionUserIdOrThrow: () => typeof userId === 'function' ? userId() : userId,
+      createLegacyPrivateEvent: externalDeps.createLegacyPrivateEvent ?? (async () => {
+        throw new Error('unexpected legacy private replacement create');
+      }),
+      deleteLegacyPrivateEvent: externalDeps.deleteLegacyPrivateEvent ?? (async () => {
+        throw new Error('unexpected legacy private replacement delete');
+      }),
+      createGoogleEvent: externalDeps.createGoogleEvent ?? (async () => {
+        throw new Error('unexpected Google replacement create');
+      }),
+      deleteGoogleEvent: externalDeps.deleteGoogleEvent ?? (async () => {
+        throw new Error('unexpected Google replacement delete');
+      }),
+    });
+    const invokeAs = async (senderId: number, channel: string, ...args: unknown[]) => {
+      const handler = state.handlers.get(channel);
+      assert.ok(handler, `missing IPC handler: ${channel}`);
+      return handler({ sender: { id: senderId } }, ...args);
+    };
     return {
       ...state,
       async invoke(channel, ...args) {
-        const handler = state.handlers.get(channel);
-        assert.ok(handler, `missing IPC handler: ${channel}`);
-        return handler(null, ...args);
+        return invokeAs(101, channel, ...args);
       },
+      invokeAs,
       restore() {
         if (hadPrior) globalScope[IPC_HARNESS_KEY] = prior;
         else delete globalScope[IPC_HARNESS_KEY];
@@ -554,6 +584,17 @@ declare const updateInput: UpdateInput;
 updateInput.created_by = 'spoofed-user';
 // @ts-expect-error IPC owns the update timestamp.
 updateInput.updated_at = '2099-01-01T00:00:00.000Z';
+
+type ReplacementInput = Parameters<ElectronAPI['calendarPrivacyReplacementCreate']>[0];
+declare const replacementInput: ReplacementInput;
+// @ts-expect-error Main derives the replacement actor from its authenticated session.
+replacementInput.actor_id = 'spoofed-user';
+// @ts-expect-error Main, not the renderer, binds the receipt to the returned event id.
+replacementInput.event.id = 'other-event';
+
+type ReplacementDisposition = Parameters<ElectronAPI['calendarPrivacyReplacementSettle']>[1];
+// @ts-expect-error A receipt can only be kept or used for exact compensation deletion.
+const invalidDisposition: ReplacementDisposition = 'replace';
 `);
   try {
     const result = spawnSync(process.execPath, [
@@ -590,6 +631,8 @@ test('preload calendar bridge parameters stay linked to the public ElectronAPI c
     calendarSetMembers: [0, 1],
     calendarEventsList: [0],
     calendarEventCreate: [0],
+    calendarPrivacyReplacementCreate: [0],
+    calendarPrivacyReplacementSettle: [0, 1],
     calendarEventUpdate: [0, 1],
     calendarTagsSave: [0],
   };
@@ -723,6 +766,232 @@ test('calendar event create passes the session actor and strips renderer-control
       linked_todo_id: null,
     }, 'session-user']]);
   } finally {
+    harness.restore();
+  }
+});
+
+test('privacy replacement receipt deletes only its exact B flow create across a session switch', async () => {
+  let currentUserId = 'user-a';
+  const createCalls: unknown[][] = [];
+  const deleteCalls: unknown[][] = [];
+  const created = calendarEventRow({
+    id: 'replacement-user-a',
+    calendar_id: 'personal-user-a',
+    created_by: 'user-a',
+  });
+  const harness = await createIpcHarness({
+    getUserRole: async () => 'user',
+    getCalendarWithMembers: async () => ({
+      calendar: calendarRow({ id: 'personal-user-a', owner_id: 'user-a', is_personal: true }),
+      members: [],
+    }),
+    createEvent: async (...args) => {
+      createCalls.push(args);
+      return created;
+    },
+    deleteEvent: async (...args) => { deleteCalls.push(args); },
+  }, () => currentUserId);
+  const request = {
+    storage: 'bflow',
+    event: {
+      calendar_id: 'personal-user-a', title: 'A 비공개 일정', memo: null, tag_id: null,
+      all_day: true, start_date: '2026-08-26', end_date: '2026-08-26',
+      start_time: null, end_time: null, linked_episode: null, linked_part: null,
+      linked_sheet_name: null, linked_scene_id: null, linked_department: null,
+      linked_todo_id: null,
+    },
+  };
+  try {
+    const result = await harness.invokeAs(
+      501,
+      'calendar:privacy-migration:create-replacement',
+      request,
+    ) as { actual_id: string; receipt: string; storage: string };
+    assert.equal(result.actual_id, 'replacement-user-a');
+    assert.equal(result.storage, 'bflow');
+    assert.equal(typeof result.receipt, 'string');
+    assert.equal(result.receipt.includes('replacement-user-a'), false, 'receipt stays opaque');
+    assert.deepEqual(createCalls, [[request.event, 'user-a']]);
+
+    currentUserId = 'user-b';
+    const originalError = console.error;
+    try {
+      console.error = () => {};
+      await assert.rejects(
+        harness.invokeAs(777, 'calendar:privacy-migration:settle-replacement', result.receipt, 'delete'),
+        /receipt|보상|발급/i,
+        'another renderer cannot spend the receipt',
+      );
+      assert.deepEqual(deleteCalls, []);
+
+      await harness.invokeAs(
+        501,
+        'calendar:privacy-migration:settle-replacement',
+        result.receipt,
+        'delete',
+      );
+      assert.deepEqual(deleteCalls, [[
+        'replacement-user-a',
+        'personal-user-a',
+        'user-a',
+      ]]);
+
+      await assert.rejects(
+        harness.invokeAs(501, 'calendar:privacy-migration:settle-replacement', result.receipt, 'delete'),
+        /receipt|보상|사용/i,
+        'a consumed receipt cannot be reused',
+      );
+      await assert.rejects(
+        harness.invokeAs(501, 'calendar:privacy-migration:settle-replacement', 'forged-receipt', 'delete'),
+        /receipt|보상/i,
+        'a renderer cannot forge an event id into a receipt',
+      );
+      assert.equal(deleteCalls.length, 1);
+    } finally {
+      console.error = originalError;
+    }
+  } finally {
+    harness.restore();
+  }
+});
+
+test('privacy replacement receipt binds legacy deletion to the create actor and exact returned id', async () => {
+  let currentUserId = 'legacy-user-a';
+  const legacyCreates: unknown[][] = [];
+  const legacyDeletes: unknown[][] = [];
+  const harness = await createIpcHarness({
+    getUserRole: async () => 'user',
+  }, () => currentUserId, {
+    createLegacyPrivateEvent: async (...args) => {
+      legacyCreates.push(args);
+      return { id: 'legacy-replacement-a' };
+    },
+    deleteLegacyPrivateEvent: async (...args) => { legacyDeletes.push(args); },
+  });
+  const event = {
+    title: '레거시 비공개 일정', memo: '', color: '#6C5CE7', type: 'custom',
+    start_date: '2026-08-26', end_date: '2026-08-26', linked_episode: null,
+    linked_part: null, linked_sheet_name: null, linked_scene_id: null,
+    linked_department: null, linked_todo_id: null, created_by: '표시 이름',
+  };
+  try {
+    const result = await harness.invokeAs(
+      601,
+      'calendar:privacy-migration:create-replacement',
+      { storage: 'legacy-private', event },
+    ) as { actual_id: string; receipt: string };
+    assert.equal(result.actual_id, 'legacy-replacement-a');
+    assert.deepEqual(legacyCreates, [[event, 'legacy-user-a']]);
+
+    currentUserId = 'legacy-user-b';
+    await harness.invokeAs(
+      601,
+      'calendar:privacy-migration:settle-replacement',
+      result.receipt,
+      'delete',
+    );
+    assert.deepEqual(legacyDeletes, [['legacy-replacement-a', 'legacy-user-a']]);
+  } finally {
+    harness.restore();
+  }
+});
+
+test('privacy replacement receipt binds Google deletion to the exact calendar, event, and create actor', async () => {
+  let currentUserId = 'google-user-a';
+  const googleCreates: unknown[][] = [];
+  const googleDeletes: unknown[][] = [];
+  const harness = await createIpcHarness({}, () => currentUserId, {
+    createGoogleEvent: async (...args) => {
+      googleCreates.push(args);
+      return 'google-replacement-a';
+    },
+    deleteGoogleEvent: async (...args) => { googleDeletes.push(args); },
+  });
+  const event = {
+    summary: '공개 전환 일정',
+    description: '메모',
+    startDate: '2026-08-26',
+    endDate: '2026-08-27',
+    extendedProperties: { bflow_type: 'custom' },
+    visibility: 'default',
+  };
+  try {
+    const result = await harness.invokeAs(
+      701,
+      'calendar:privacy-migration:create-replacement',
+      { storage: 'google', calendar_id: 'primary', event, actor_id: 'spoofed-user' },
+    ) as { actual_id: string; receipt: string };
+    assert.equal(result.actual_id, 'google-replacement-a');
+    assert.deepEqual(googleCreates, [[
+      'primary',
+      { ...event, colorId: undefined },
+      'google-user-a',
+    ]]);
+
+    currentUserId = 'google-user-b';
+    await harness.invokeAs(
+      701,
+      'calendar:privacy-migration:settle-replacement',
+      result.receipt,
+      'delete',
+    );
+    assert.deepEqual(googleDeletes, [[
+      'primary',
+      'google-replacement-a',
+      'google-user-a',
+    ]]);
+  } finally {
+    harness.restore();
+  }
+});
+
+test('privacy replacement receipt is consumed on keep and on a failed compensation attempt', async () => {
+  let deleteCalls = 0;
+  const harness = await createIpcHarness({
+    getUserRole: async () => 'user',
+    getCalendarWithMembers: async () => ({ calendar: calendarRow(), members: [] }),
+    createEvent: async () => calendarEventRow({ id: `replacement-${deleteCalls}` }),
+    deleteEvent: async () => {
+      deleteCalls += 1;
+      throw new Error('42501 permission revoked after create');
+    },
+  });
+  const event = {
+    calendar_id: 'calendar-1', title: '일정', memo: null, tag_id: null,
+    all_day: true, start_date: '2026-08-26', end_date: '2026-08-26',
+    start_time: null, end_time: null, linked_episode: null, linked_part: null,
+    linked_sheet_name: null, linked_scene_id: null, linked_department: null,
+    linked_todo_id: null,
+  };
+  const originalError = console.error;
+  try {
+    console.error = () => {};
+    const kept = await harness.invoke(
+      'calendar:privacy-migration:create-replacement',
+      { storage: 'bflow', event },
+    ) as { receipt: string };
+    await harness.invoke('calendar:privacy-migration:settle-replacement', kept.receipt, 'keep');
+    await assert.rejects(
+      harness.invoke('calendar:privacy-migration:settle-replacement', kept.receipt, 'delete'),
+      /receipt|보상|사용/i,
+    );
+    assert.equal(deleteCalls, 0);
+
+    const failing = await harness.invoke(
+      'calendar:privacy-migration:create-replacement',
+      { storage: 'bflow', event },
+    ) as { receipt: string };
+    await assert.rejects(
+      harness.invoke('calendar:privacy-migration:settle-replacement', failing.receipt, 'delete'),
+      /42501 permission revoked/,
+    );
+    await assert.rejects(
+      harness.invoke('calendar:privacy-migration:settle-replacement', failing.receipt, 'delete'),
+      /receipt|보상|사용/i,
+    );
+    assert.equal(deleteCalls, 1);
+  } finally {
+    console.error = originalError;
     harness.restore();
   }
 });

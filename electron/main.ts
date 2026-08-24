@@ -2461,7 +2461,25 @@ ipcMain.handle('supabase:delete-private-event', wrapIpc(async (_e: unknown, id: 
   await sbDeletePrivateEvent(id);
 }));
 
-registerCalendarIpc({ getSessionUserIdOrThrow });
+registerCalendarIpc({
+  getSessionUserIdOrThrow,
+  createLegacyPrivateEvent: (input, actorId) => sbAddPrivateEvent({
+    ...input,
+    user_id: actorId,
+  }),
+  deleteLegacyPrivateEvent: async (eventId, actorId) => {
+    const ownerId = await sbGetPrivateEventOwner(eventId);
+    if (!ownerId) return;
+    if (ownerId !== actorId) {
+      throw new Error('보상 대상 비공개 일정의 소유자가 변경되었습니다');
+    }
+    await sbDeletePrivateEvent(eventId);
+  },
+  createGoogleEvent: (calendarId, input) => (
+    gcal.insertEvent(calendarId, input as gcal.GCalEventInput)
+  ),
+  deleteGoogleEvent: (calendarId, eventId) => gcal.deleteEvent(calendarId, eventId),
+});
 
 // ─── Revisions ───
 ipcMain.handle('supabase:read-revisions', wrapIpc(async () => {

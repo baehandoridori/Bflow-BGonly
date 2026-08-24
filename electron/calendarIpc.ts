@@ -1,6 +1,7 @@
 /** electron/calendarIpc.ts — calendar:* IPC 등록.
  *  세션 검증(getSessionUserIdOrThrow 주입) + 권한 강제(calendarPermissions) + broadcast.
  *  main.ts 비대화 방지를 위해 분리. 렌더러 → 여기 → calendarStore → Supabase 단일 경로. */
+import { randomBytes } from 'node:crypto';
 import { ipcMain } from 'electron';
 import {
   canViewCalendar,
@@ -11,12 +12,43 @@ import {
 import * as store from './calendarStore';
 import type { CalendarRow, CalendarEventRow, CalendarMemberRow } from './calendarStore';
 import { broadcastCalendarChanged, broadcastDataChange } from './broadcast';
+import type {
+  CalendarPrivacyReplacementCreateInput,
+  CalendarPrivacyReplacementDisposition,
+  GoogleReplacementCreateInput,
+  LegacyPrivateReplacementCreateInput,
+} from '../src/shared/calendarApiContract';
 
 interface CalendarIpcDeps {
   getSessionUserIdOrThrow: () => string;
+  createLegacyPrivateEvent: (
+    input: LegacyPrivateReplacementCreateInput,
+    actorId: string,
+  ) => Promise<{ id: string }>;
+  deleteLegacyPrivateEvent: (eventId: string, actorId: string) => Promise<void>;
+  createGoogleEvent: (
+    calendarId: string,
+    input: GoogleReplacementCreateInput,
+    actorId: string,
+  ) => Promise<string>;
+  deleteGoogleEvent: (calendarId: string, eventId: string, actorId: string) => Promise<void>;
 }
 
 type CalendarEventCreateInput = Parameters<typeof store.createEvent>[0];
+type InvokeEvent = { sender?: { id?: number } };
+
+type PrivacyReplacementTarget =
+  | { storage: 'bflow'; actualId: string; calendarId: string; actorId: string }
+  | { storage: 'legacy-private'; actualId: string; actorId: string }
+  | { storage: 'google'; actualId: string; calendarId: string; actorId: string };
+
+type PrivacyReplacementReceipt = {
+  senderId: number;
+  target: PrivacyReplacementTarget;
+  expiresAt: number;
+};
+
+const PRIVACY_REPLACEMENT_RECEIPT_TTL_MS = 5 * 60 * 1000;
 
 function wrap<T extends unknown[], R>(fn: (...args: T) => Promise<R>) {
   return async (_e: unknown, ...args: T): Promise<R> => {
@@ -28,6 +60,52 @@ function wrap<T extends unknown[], R>(fn: (...args: T) => Promise<R>) {
       throw new Error(msg);
     }
   };
+}
+
+function wrapWithEvent<T extends unknown[], R>(
+  fn: (event: InvokeEvent, ...args: T) => Promise<R>,
+) {
+  return async (event: InvokeEvent, ...args: T): Promise<R> => {
+    try {
+      return await fn(event, ...args);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.error('[Calendar IPC]', msg);
+      throw new Error(msg);
+    }
+  };
+}
+
+function requireSenderId(event: InvokeEvent): number {
+  const senderId = event?.sender?.id;
+  if (!Number.isSafeInteger(senderId) || (senderId ?? 0) <= 0) {
+    throw new Error('보상 receipt 발급 창을 확인할 수 없습니다');
+  }
+  return senderId as number;
+}
+
+function requirePrivacyReplacementRequest(value: unknown): CalendarPrivacyReplacementCreateInput {
+  if (!value || typeof value !== 'object') {
+    throw new Error('보상 가능한 일정 생성 요청이 올바르지 않습니다');
+  }
+  const request = value as Record<string, unknown>;
+  if (
+    request.storage !== 'bflow'
+    && request.storage !== 'legacy-private'
+    && request.storage !== 'google'
+  ) {
+    throw new Error('보상 가능한 일정 저장소가 올바르지 않습니다');
+  }
+  if (!request.event || typeof request.event !== 'object') {
+    throw new Error('보상 가능한 일정 입력이 올바르지 않습니다');
+  }
+  if (request.storage === 'google' && (
+    typeof request.calendar_id !== 'string'
+    || request.calendar_id.trim().length === 0
+  )) {
+    throw new Error('구글 캘린더 ID가 올바르지 않습니다');
+  }
+  return request as unknown as CalendarPrivacyReplacementCreateInput;
 }
 
 /** 일정 쓰기 성공 후 알림 파이프라인 진입점 (설계서 §8).
@@ -76,7 +154,110 @@ function normalizeCalendarMembers(members: unknown, ownerId: string): Array<{ us
   }).filter((member) => member.user_id !== ownerId);
 }
 
+function safeCalendarEventCreateInput(input: CalendarEventCreateInput): CalendarEventCreateInput {
+  return {
+    calendar_id: input.calendar_id,
+    title: input.title,
+    memo: input.memo,
+    tag_id: input.tag_id,
+    all_day: input.all_day,
+    start_date: input.start_date,
+    end_date: input.end_date,
+    start_time: input.start_time,
+    end_time: input.end_time,
+    linked_episode: input.linked_episode,
+    linked_part: input.linked_part,
+    linked_sheet_name: input.linked_sheet_name,
+    linked_scene_id: input.linked_scene_id,
+    linked_department: input.linked_department,
+    linked_todo_id: input.linked_todo_id,
+  };
+}
+
+function safeLegacyPrivateCreateInput(
+  input: LegacyPrivateReplacementCreateInput,
+): LegacyPrivateReplacementCreateInput {
+  return {
+    title: input.title,
+    memo: input.memo,
+    color: input.color,
+    type: input.type,
+    start_date: input.start_date,
+    end_date: input.end_date,
+    linked_episode: input.linked_episode,
+    linked_part: input.linked_part,
+    linked_sheet_name: input.linked_sheet_name,
+    linked_scene_id: input.linked_scene_id,
+    linked_department: input.linked_department,
+    linked_todo_id: input.linked_todo_id,
+    created_by: input.created_by,
+  };
+}
+
+function safeGoogleCreateInput(input: GoogleReplacementCreateInput): GoogleReplacementCreateInput {
+  const extendedProperties = input.extendedProperties && typeof input.extendedProperties === 'object'
+    ? Object.fromEntries(Object.entries(input.extendedProperties).filter((entry) => (
+      typeof entry[1] === 'string'
+    )))
+    : undefined;
+  return {
+    summary: input.summary,
+    description: input.description,
+    startDate: input.startDate,
+    endDate: input.endDate,
+    colorId: input.colorId,
+    extendedProperties,
+    visibility: input.visibility,
+  };
+}
+
 export function registerCalendarIpc(deps: CalendarIpcDeps): void {
+  const privacyReplacementReceipts = new Map<string, PrivacyReplacementReceipt>();
+
+  const purgeExpiredReceipts = (now: number) => {
+    for (const [receipt, entry] of privacyReplacementReceipts) {
+      if (entry.expiresAt <= now) privacyReplacementReceipts.delete(receipt);
+    }
+  };
+
+  const issuePrivacyReplacementReceipt = (
+    senderId: number,
+    target: PrivacyReplacementTarget,
+  ): string => {
+    const now = Date.now();
+    purgeExpiredReceipts(now);
+    let receipt: string;
+    do {
+      receipt = randomBytes(32).toString('base64url');
+    } while (privacyReplacementReceipts.has(receipt));
+    privacyReplacementReceipts.set(receipt, {
+      senderId,
+      target,
+      expiresAt: now + PRIVACY_REPLACEMENT_RECEIPT_TTL_MS,
+    });
+    return receipt;
+  };
+
+  const consumePrivacyReplacementReceipt = (
+    receipt: unknown,
+    senderId: number,
+  ): PrivacyReplacementTarget => {
+    if (typeof receipt !== 'string' || receipt.length === 0) {
+      throw new Error('보상 receipt가 올바르지 않습니다');
+    }
+    const entry = privacyReplacementReceipts.get(receipt);
+    if (!entry) throw new Error('보상 receipt가 없거나 이미 사용되었습니다');
+    if (entry.expiresAt <= Date.now()) {
+      privacyReplacementReceipts.delete(receipt);
+      throw new Error('보상 receipt가 만료되었습니다');
+    }
+    if (entry.senderId !== senderId) {
+      throw new Error('보상 receipt를 발급받은 창이 아닙니다');
+    }
+    privacyReplacementReceipts.delete(receipt);
+    return entry.target;
+  };
+
   const sessionUser = async () => {
     const id = deps.getSessionUserIdOrThrow();
     return { id, role: await store.getUserRole(id) };
@@ -96,6 +277,26 @@ export function registerCalendarIpc(deps: CalendarIpcDeps): void {
       throw new Error('이 캘린더에 대한 권한이 없습니다');
     }
     return { calendar, members };
+  };
+
+  const createBflowEventForActor = async (
+    input: CalendarEventCreateInput,
+    actorId: string,
+  ) => {
+    const { calendar, members } = await loadCalendarForUserOrThrow(input.calendar_id, actorId);
+    if (!canEditCalendarEvents(calendar, members, actorId)) {
+      throw new Error('이 캘린더에 일정을 만들 권한이 없습니다');
+    }
+    const created = await store.createEvent(safeCalendarEventCreateInput(input), actorId);
+    await emitCalendarEventNotifications({
+      actorId,
+      action: 'create',
+      calendar,
+      members,
+      event: created,
+      previous: null,
+    });
+    return created;
   };
 
   ipcMain.handle('calendar:list', wrap(async () => {
@@ -218,40 +419,80 @@ export function registerCalendarIpc(deps: CalendarIpcDeps): void {
   }));
 
   ipcMain.handle('calendar:events:create', wrap(async (input: CalendarEventCreateInput) => {
-    const user = await sessionUser();
-    const { calendar, members } = await loadCalendarForUserOrThrow(input.calendar_id, user.id);
-    if (!canEditCalendarEvents(calendar, members, user.id)) {
-      throw new Error('이 캘린더에 일정을 만들 권한이 없습니다');
-    }
-
-    const created = await store.createEvent({
-      calendar_id: input.calendar_id,
-      title: input.title,
-      memo: input.memo,
-      tag_id: input.tag_id,
-      all_day: input.all_day,
-      start_date: input.start_date,
-      end_date: input.end_date,
-      start_time: input.start_time,
-      end_time: input.end_time,
-      linked_episode: input.linked_episode,
-      linked_part: input.linked_part,
-      linked_sheet_name: input.linked_sheet_name,
-      linked_scene_id: input.linked_scene_id,
-      linked_department: input.linked_department,
-      linked_todo_id: input.linked_todo_id,
-    }, user.id);
-    await emitCalendarEventNotifications({
-      actorId: user.id,
-      action: 'create',
-      calendar,
-      members,
-      event: created,
-      previous: null,
-    });
+    const actorId = deps.getSessionUserIdOrThrow();
+    const created = await createBflowEventForActor(input, actorId);
     broadcastDataChange('calendar_events', 'INSERT');
     broadcastCalendarChanged('INSERT');
     return created;
+  }));
+
+  ipcMain.handle('calendar:privacy-migration:create-replacement', wrapWithEvent(async (
+    event,
+    rawRequest: unknown,
+  ) => {
+    const senderId = requireSenderId(event);
+    const actorId = deps.getSessionUserIdOrThrow();
+    const request = requirePrivacyReplacementRequest(rawRequest);
+    let target: PrivacyReplacementTarget;
+
+    if (request.storage === 'bflow') {
+      const created = await createBflowEventForActor(request.event, actorId);
+      target = {
+        storage: 'bflow',
+        actualId: created.id,
+        calendarId: created.calendar_id,
+        actorId,
+      };
+      broadcastDataChange('calendar_events', 'INSERT');
+      broadcastCalendarChanged('INSERT');
+    } else if (request.storage === 'legacy-private') {
+      const created = await deps.createLegacyPrivateEvent(
+        safeLegacyPrivateCreateInput(request.event),
+        actorId,
+      );
+      target = { storage: 'legacy-private', actualId: created.id, actorId };
+    } else {
+      const actualId = await deps.createGoogleEvent(
+        request.calendar_id,
+        safeGoogleCreateInput(request.event),
+        actorId,
+      );
+      target = {
+        storage: 'google',
+        actualId,
+        calendarId: request.calendar_id,
+        actorId,
+      };
+    }
+
+    return {
+      storage: target.storage,
+      actual_id: target.actualId,
+      calendar_id: 'calendarId' in target ? target.calendarId : undefined,
+      receipt: issuePrivacyReplacementReceipt(senderId, target),
+    };
+  }));
+
+  ipcMain.handle('calendar:privacy-migration:settle-replacement', wrapWithEvent(async (
+    event,
+    receipt: unknown,
+    disposition: CalendarPrivacyReplacementDisposition,
+  ) => {
+    if (disposition !== 'keep' && disposition !== 'delete') {
+      throw new Error('보상 receipt 처리 방식이 올바르지 않습니다');
+    }
+    const target = consumePrivacyReplacementReceipt(receipt, requireSenderId(event));
+    if (disposition === 'keep') return;
+
+    if (target.storage === 'bflow') {
+      await store.deleteEvent(target.actualId, target.calendarId, target.actorId);
+      broadcastDataChange('calendar_events', 'DELETE');
+      broadcastCalendarChanged('DELETE');
+    } else if (target.storage === 'legacy-private') {
+      await deps.deleteLegacyPrivateEvent(target.actualId, target.actorId);
+    } else {
+      await deps.deleteGoogleEvent(target.calendarId, target.actualId, target.actorId);
+    }
   }));
 
   ipcMain.handle('calendar:events:update', wrap(async (

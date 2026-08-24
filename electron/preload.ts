@@ -282,6 +282,17 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.invoke('calendar:events:list', params),
   calendarEventCreate: (input: Parameters<CalendarApiInputContract['calendarEventCreate']>[0]) =>
     ipcRenderer.invoke('calendar:events:create', input),
+  calendarPrivacyReplacementCreate: (
+    input: Parameters<CalendarApiInputContract['calendarPrivacyReplacementCreate']>[0],
+  ) => ipcRenderer.invoke('calendar:privacy-migration:create-replacement', input),
+  calendarPrivacyReplacementSettle: (
+    receipt: Parameters<CalendarApiInputContract['calendarPrivacyReplacementSettle']>[0],
+    disposition: Parameters<CalendarApiInputContract['calendarPrivacyReplacementSettle']>[1],
+  ) => ipcRenderer.invoke(
+    'calendar:privacy-migration:settle-replacement',
+    receipt,
+    disposition,
+  ),
   calendarEventUpdate: (
     id: Parameters<CalendarApiInputContract['calendarEventUpdate']>[0],
     updates: Parameters<CalendarApiInputContract['calendarEventUpdate']>[1],

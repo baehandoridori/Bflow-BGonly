@@ -66,6 +66,11 @@ type MockCalendarTagRow = Awaited<ReturnType<ElectronAPI['calendarTagsList']>>[n
 
 const mockCalendars: MockCalendarRow[] = [];
 const mockCalendarEvents: MockCalendarEventRow[] = [];
+type MockPrivacyReplacementTarget =
+  | { storage: 'bflow'; actualId: string; calendarId: string }
+  | { storage: 'legacy-private'; actualId: string }
+  | { storage: 'google'; actualId: string; calendarId: string };
+const mockPrivacyReplacementReceipts = new Map<string, MockPrivacyReplacementTarget>();
 const mockCalendarTags: MockCalendarTagRow[] = [
   { id: 'tag-upload', name: '업로드', color: '#E17055', sort_order: 0 },
   { id: 'tag-cut', name: '가편', color: '#74B9FF', sort_order: 1 },
@@ -428,6 +433,8 @@ export function hasUsableElectronAPI(api: Partial<ElectronAPI> | undefined): boo
     && typeof api?.calendarSetMembers === 'function'
     && typeof api?.calendarEventsList === 'function'
     && typeof api?.calendarEventCreate === 'function'
+    && typeof api?.calendarPrivacyReplacementCreate === 'function'
+    && typeof api?.calendarPrivacyReplacementSettle === 'function'
     && typeof api?.calendarEventUpdate === 'function'
     && typeof api?.calendarEventDelete === 'function'
     && typeof api?.calendarTagsList === 'function'
@@ -1214,6 +1221,51 @@ export function installDevElectronAPI(): void {
       };
       mockCalendarEvents.push(created);
       return { ...created };
+    },
+    calendarPrivacyReplacementCreate: async (request) => {
+      let target: MockPrivacyReplacementTarget;
+      if (request.storage === 'bflow') {
+        const now = new Date().toISOString();
+        const created: MockCalendarEventRow = {
+          ...request.event,
+          id: createUuid(),
+          created_by: previewCanonicalUserId,
+          created_at: now,
+          updated_at: now,
+        };
+        mockCalendarEvents.push(created);
+        target = {
+          storage: 'bflow',
+          actualId: created.id,
+          calendarId: created.calendar_id,
+        };
+      } else if (request.storage === 'legacy-private') {
+        target = { storage: 'legacy-private', actualId: createUuid() };
+      } else {
+        target = {
+          storage: 'google',
+          actualId: `mock_${createUuid()}`,
+          calendarId: request.calendar_id,
+        };
+      }
+      const receipt = createUuid();
+      mockPrivacyReplacementReceipts.set(receipt, target);
+      return {
+        storage: target.storage,
+        actual_id: target.actualId,
+        calendar_id: 'calendarId' in target ? target.calendarId : undefined,
+        receipt,
+      };
+    },
+    calendarPrivacyReplacementSettle: async (receipt, disposition) => {
+      const target = mockPrivacyReplacementReceipts.get(receipt);
+      if (!target) throw new Error('보상 receipt가 없거나 이미 사용되었습니다');
+      mockPrivacyReplacementReceipts.delete(receipt);
+      if (disposition !== 'delete' || target.storage !== 'bflow') return;
+      const index = mockCalendarEvents.findIndex((event) => (
+        event.id === target.actualId && event.calendar_id === target.calendarId
+      ));
+      if (index >= 0) mockCalendarEvents.splice(index, 1);
     },
     calendarEventUpdate: async (id, updates) => {
       const event = mockCalendarEvents.find((candidate) => candidate.id === id);

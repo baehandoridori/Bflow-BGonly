@@ -495,9 +495,9 @@ async function withConcurrentEventUpdateReconciliation<T>(
 }
 
 type CreatedEventRef =
-  | { actualId: string; storage: 'bflow'; calendarId: string }
-  | { actualId: string; storage: 'legacy-private' }
-  | { actualId: string; storage: 'google'; calendarId: string };
+  | { actualId: string; storage: 'bflow'; calendarId: string; receipt?: string }
+  | { actualId: string; storage: 'legacy-private'; receipt?: string }
+  | { actualId: string; storage: 'google'; calendarId: string; receipt?: string };
 
 function invalidateBflowLoads(): void {
   bflowLoadGeneration += 1;
@@ -1084,6 +1084,7 @@ async function addBflowEvent(
   event: CalendarEvent,
   calendarId: string,
   inheritedToken?: BflowMutationToken,
+  isPrivacyMigrationReplacement = false,
 ): Promise<CreatedEventRef | null> {
   const mutate = async (token: BflowMutationToken): Promise<CreatedEventRef | null> => {
     if (!isBflowMutationCurrent(token)) return null;
@@ -1097,7 +1098,7 @@ async function addBflowEvent(
     broadcastCalendarChange({ eventId: localId, action: 'add' });
 
     try {
-      const inserted = await window.electronAPI.calendarEventCreate({
+      const createInput = {
         calendar_id: calendarId,
         title: event.title,
         memo: event.memo,
@@ -1113,18 +1114,32 @@ async function addBflowEvent(
         linked_scene_id: event.linkedSceneId ?? null,
         linked_department: event.linkedDepartment ?? null,
         linked_todo_id: event.linkedTodoId ?? null,
-      });
-      const created: CreatedEventRef = { actualId: inserted.id, storage: 'bflow', calendarId };
+      };
+      const replacement = isPrivacyMigrationReplacement
+        ? await window.electronAPI.calendarPrivacyReplacementCreate({
+            storage: 'bflow',
+            event: createInput,
+          })
+        : null;
+      const actualId = replacement
+        ? replacement.actual_id
+        : (await window.electronAPI.calendarEventCreate(createInput)).id;
+      const created: CreatedEventRef = {
+        actualId,
+        storage: 'bflow',
+        calendarId: replacement?.calendar_id ?? calendarId,
+        receipt: replacement?.receipt,
+      };
       // 메인은 이미 이전 세션 actor로 insert를 커밋했을 수 있다. 실ID를 버리면
       // privacy migration caller가 정확한 replacement를 보상 삭제할 수 없다.
       if (!isBflowMutationCurrent(token)) return created;
-      if (localId !== inserted.id) {
-        localToGcalId.set(localId, inserted.id);
+      if (localId !== actualId) {
+        localToGcalId.set(localId, actualId);
       }
       mutateSourceEvents('bflow', (events) => events.map((item) => (
-        item.id === localId ? { ...item, id: inserted.id } : item
+        item.id === localId ? { ...item, id: actualId } : item
       )));
-      broadcastCalendarChange({ eventId: inserted.id, action: 'update' });
+      broadcastCalendarChange({ eventId: actualId, action: 'update' });
       return created;
     } catch (err) {
       if (!isBflowMutationCurrent(token)) return null;
@@ -1139,9 +1154,15 @@ async function addBflowEvent(
 async function addEventInternal(
   event: CalendarEvent,
   inheritedToken?: BflowMutationToken,
+  isPrivacyMigrationReplacement = false,
 ): Promise<CreatedEventRef | null> {
   if (event.calendarId) {
-    return addBflowEvent(event, event.calendarId, inheritedToken);
+    return addBflowEvent(
+      event,
+      event.calendarId,
+      inheritedToken,
+      isPrivacyMigrationReplacement,
+    );
   }
 
   // ── 비공개 이벤트 분기 — Supabase 에만 저장, Google Calendar 비연동 ──
@@ -1161,7 +1182,12 @@ async function addEventInternal(
       }
       const personal = getPersonalCalendar(refreshedCalendarState, userId);
       if (personal) {
-        return addBflowEvent({ ...event, calendarId: personal.id }, personal.id, token);
+        return addBflowEvent(
+          { ...event, calendarId: personal.id },
+          personal.id,
+          token,
+          isPrivacyMigrationReplacement,
+        );
       }
 
       const localId = event.id;
@@ -1175,8 +1201,7 @@ async function addEventInternal(
       broadcastCalendarChange({ eventId: localId, action: 'add' });
 
       try {
-        const inserted = await window.electronAPI.supabaseAddPrivateEvent({
-          user_id: userId,
+        const createInput = {
           title: event.title,
           memo: event.memo,
           color: event.color,
@@ -1190,17 +1215,33 @@ async function addEventInternal(
           linked_department: event.linkedDepartment ?? null,
           linked_todo_id: event.linkedTodoId ?? null,
           created_by: event.createdBy,
-        });
-        const created: CreatedEventRef = { actualId: inserted.id, storage: 'legacy-private' };
+        };
+        const replacement = isPrivacyMigrationReplacement
+          ? await window.electronAPI.calendarPrivacyReplacementCreate({
+              storage: 'legacy-private',
+              event: createInput,
+            })
+          : null;
+        const actualId = replacement
+          ? replacement.actual_id
+          : (await window.electronAPI.supabaseAddPrivateEvent({
+              ...createInput,
+              user_id: userId,
+            })).id;
+        const created: CreatedEventRef = {
+          actualId,
+          storage: 'legacy-private',
+          receipt: replacement?.receipt,
+        };
         if (!isBflowMutationCurrent(token)) return created;
         // 로컬 ID → Supabase UUID 교체
-        if (localId !== inserted.id) {
-          localToGcalId.set(localId, inserted.id);
+        if (localId !== actualId) {
+          localToGcalId.set(localId, actualId);
         }
         mutateSourceEvents('bflow', (events) => events.map((item) => (
-          item.id === localId ? { ...item, id: inserted.id } : item
+          item.id === localId ? { ...item, id: actualId } : item
         )));
-        broadcastCalendarChange({ eventId: inserted.id, action: 'update' });
+        broadcastCalendarChange({ eventId: actualId, action: 'update' });
         return created;
       } catch (err) {
         if (!isBflowMutationCurrent(token)) return null;
@@ -1231,16 +1272,29 @@ async function addEventInternal(
     // GCal 종일 이벤트 종료일 보정 (B flow inclusive → GCal exclusive)
     const isAllDay = event.startDate.length === 10;
     const gcalEndDate = isAllDay && event.endDate ? addOneDay(event.endDate) : event.endDate;
-    const gcalId = await gcalService.insertEvent(calId, {
+    const createInput = {
       summary: event.title,
       description: event.memo,
       startDate: event.startDate,
       endDate: gcalEndDate,
       extendedProperties: toBflowMeta(event),
       // 비공개 일정이면 Google Calendar 에 'private' 로 저장 — 도메인 내 다른 사용자에게 숨김
-      visibility: event.isPrivate ? 'private' : undefined,
-    });
-    const created: CreatedEventRef = { actualId: gcalId, storage: 'google', calendarId: calId };
+      visibility: event.isPrivate ? 'private' as const : undefined,
+    };
+    const replacement = isPrivacyMigrationReplacement
+      ? await window.electronAPI.calendarPrivacyReplacementCreate({
+          storage: 'google',
+          calendar_id: calId,
+          event: createInput,
+        })
+      : null;
+    const gcalId = replacement?.actual_id ?? await gcalService.insertEvent(calId, createInput);
+    const created: CreatedEventRef = {
+      actualId: gcalId,
+      storage: 'google',
+      calendarId: replacement?.calendar_id ?? calId,
+      receipt: replacement?.receipt,
+    };
     if (inheritedToken && !isBflowMutationCurrent(inheritedToken)) return created;
     sessionOptimisticGoogleEventIds.delete(localId);
     // 성공: 로컬 ID → GCal ID 매핑 등록 + 캐시 ID 교체
@@ -1271,6 +1325,10 @@ export async function addEvent(event: CalendarEvent): Promise<void> {
 }
 
 async function deletePersistedCreatedEvent(created: CreatedEventRef): Promise<void> {
+  if (created.receipt) {
+    await window.electronAPI.calendarPrivacyReplacementSettle(created.receipt, 'delete');
+    return;
+  }
   if (created.storage === 'google') {
     await gcalService.deleteEvent(created.calendarId, created.actualId);
   } else if (created.storage === 'bflow') {
@@ -1280,6 +1338,30 @@ async function deletePersistedCreatedEvent(created: CreatedEventRef): Promise<vo
   }
 }
 
+async function keepPersistedCreatedEvent(created: CreatedEventRef): Promise<void> {
+  if (!created.receipt) return;
+  await window.electronAPI.calendarPrivacyReplacementSettle(created.receipt, 'keep');
+}
+
+function tombstoneGoogleEvent(calendarId: string, eventId: string): boolean {
+  compensatedGoogleEventKeys.add(compensatedGoogleEventKey(calendarId, eventId));
+  confirmedGoogleEvents.delete(googleEventKey(calendarId, eventId));
+  const removedFromCurrentCache = googleEvents.some((event) => (
+    event.id === eventId && event.sourceCalendarId === calendarId
+  ));
+  googleEvents = googleEvents.filter((event) => !(
+    event.id === eventId && event.sourceCalendarId === calendarId
+  ));
+  if (removedFromCurrentCache) rebuildEventCache();
+  return removedFromCurrentCache;
+}
+
+function tombstoneCompensatedGoogleReplacement(created: CreatedEventRef): boolean {
+  return created.storage === 'google'
+    ? tombstoneGoogleEvent(created.calendarId, created.actualId)
+    : false;
+}
+
 async function compensateStalePrivacyMigrationReplacement(
   originalEventId: string,
   created: CreatedEventRef,
@@ -1287,8 +1369,14 @@ async function compensateStalePrivacyMigrationReplacement(
 ): Promise<void> {
   try {
     // 세션 전환 뒤에는 old source ID를 resolve/delete하지 않는다. 이전 create 응답의
-    // 실ID만 직접 지우고 새 세션 cache·alias·broadcast에는 손대지 않는다.
+    // 실ID만 직접 지우며 새 세션 alias나 무관한 cache 행에는 손대지 않는다.
     await deletePersistedCreatedEvent(created);
+    // Google replacement는 삭제 이전에 시작한 fullSync snapshot에도 들어갈 수 있다.
+    // 정확한 캘린더+이벤트 tombstone으로 그 한 행만 차단한다. 이미 UI cache에 노출된
+    // 경우에만 exact delete를 알려 구독자의 ghost도 함께 걷어낸다.
+    if (tombstoneCompensatedGoogleReplacement(created)) {
+      broadcastCalendarChange({ eventId: created.actualId, action: 'delete' });
+    }
   } catch (compensationDeleteError) {
     throw new PrivacyMigrationCompensationError(
       originalEventId,
@@ -1306,11 +1394,16 @@ async function compensateCreatedEvent(
 ): Promise<boolean> {
   if (!isBflowMutationCurrent(token)) return false;
   await deletePersistedCreatedEvent(created);
-  if (!isBflowMutationCurrent(token)) return false;
-  if (created.storage === 'google') {
-    compensatedGoogleEventKeys.add(compensatedGoogleEventKey(created.calendarId, created.actualId));
-    confirmedGoogleEvents.delete(googleEventKey(created.calendarId, created.actualId));
-  } else if (created.storage === 'legacy-private') {
+  // persistence 보상은 끝났으므로 세션 전환 여부와 무관하게 Google의 정확한 행을
+  // tombstone 처리한다. 그래야 보상 전에 시작한 snapshot도 삭제 행을 복원하지 못한다.
+  const removedGoogleRow = tombstoneCompensatedGoogleReplacement(created);
+  if (!isBflowMutationCurrent(token)) {
+    if (removedGoogleRow) {
+      broadcastCalendarChange({ eventId: created.actualId, action: 'delete' });
+    }
+    return false;
+  }
+  if (created.storage === 'legacy-private') {
     forgetLegacyPrivateEvent(created.actualId);
   }
 
@@ -1365,7 +1458,7 @@ export async function updateEvent(eventId: string, updates: Partial<CalendarEven
     };
     await withBflowMutation(async (token) => {
       // 1) 새 저장소에 생성 — 실패하면 원본이 그대로 남아있어 데이터 손실 없음.
-      const replacement = await addEventInternal(fresh, token);
+      const replacement = await addEventInternal(fresh, token, true);
       if (!replacement) return;
       if (!isBflowMutationCurrent(token)) {
         await compensateStalePrivacyMigrationReplacement(
@@ -1378,7 +1471,6 @@ export async function updateEvent(eventId: string, updates: Partial<CalendarEven
       // 2) 새 이벤트가 안전하게 자리잡은 뒤 기존 저장소에서 제거.
       try {
         await deleteEvent(eventId, token);
-        if (!isBflowMutationCurrent(token)) return;
       } catch (originalDeleteError) {
         if (!isBflowMutationCurrent(token)) {
           await compensateStalePrivacyMigrationReplacement(
@@ -1403,6 +1495,10 @@ export async function updateEvent(eventId: string, updates: Partial<CalendarEven
         }
         throw originalDeleteError;
       }
+      // 원본 persistence 삭제가 끝났다면 세션이 바뀌었더라도 replacement가 유일한
+      // 정본이다. 보상 capability를 폐기하고 새 세션 cache에는 손대지 않는다.
+      await keepPersistedCreatedEvent(replacement);
+      if (!isBflowMutationCurrent(token)) return;
       // 3) 원본 eventId 를 들고 있는 caller 가 stale id 로 이어지는 update/delete 를 호출해도
       //    resolveEvent 가 매핑 체인을 타고 찾을 수 있도록 oldId → freshLocalId 매핑 등록.
       //    addEvent 는 freshLocalId → 최종 저장소 real id 를 추가로 매핑하므로 2단계 체인으로 해결.
@@ -1525,16 +1621,23 @@ export async function deleteEvent(
   eventId: string,
   inheritedToken?: BflowMutationToken,
 ): Promise<void> {
+  const continueBeforeSourceDelete = (token: BflowMutationToken): boolean => {
+    if (isBflowMutationCurrent(token)) return true;
+    if (inheritedToken) {
+      throw new Error('[calendar] privacy migration session changed before source deletion');
+    }
+    return false;
+  };
   const requestToken = inheritedToken ?? captureBflowMutationToken();
   const existing = await resolveEvent(eventId);
-  if (!isBflowMutationCurrent(requestToken)) return;
+  if (!continueBeforeSourceDelete(requestToken)) return;
   if (!existing) return;
   const actualId = existing.id; // GCal ID
 
   // ── B flow 공유 캘린더 이벤트 분기 — calendar:* IPC 경유 ──
   if (existing.sourceCalendarId?.startsWith(BFLOW_CAL_PREFIX)) {
     const mutate = async (token: BflowMutationToken): Promise<void> => {
-      if (!isBflowMutationCurrent(token)) return;
+      if (!continueBeforeSourceDelete(token)) return;
       const currentUserId = token.userId ?? undefined;
       const isCurrentUsersPersonal = currentUserId !== undefined
         && isCurrentUsersPersonalBflowEvent(existing, currentUserId);
@@ -1545,7 +1648,7 @@ export async function deleteEvent(
           && legacyPrivateEvents.status === 'known';
         if (!stateIsCurrentAndKnown) {
           await readLegacyPrivateEventsForUser(currentUserId);
-          if (!isBflowMutationCurrent(token)) return;
+          if (!continueBeforeSourceDelete(token)) return;
         }
         hasLegacyCopy = legacyPrivateEvents.ids.has(actualId);
       }
@@ -1555,14 +1658,17 @@ export async function deleteEvent(
       try {
         if (hasLegacyCopy) {
           await window.electronAPI.supabaseDeletePrivateEvent(actualId);
-          if (!isBflowMutationCurrent(token)) return;
+          if (!continueBeforeSourceDelete(token)) return;
           forgetLegacyPrivateEvent(actualId);
         }
         await window.electronAPI.calendarEventDelete(actualId);
         if (!isBflowMutationCurrent(token)) return;
         cleanupDeletedEventAliases(eventId, actualId);
       } catch (err) {
-        if (!isBflowMutationCurrent(token)) return;
+        if (!isBflowMutationCurrent(token)) {
+          if (inheritedToken) throw err;
+          return;
+        }
         mutateSourceEvents('bflow', (events) => (
           events.some((item) => item.id === actualId) ? events : [...events, existing]
         ));
@@ -1578,7 +1684,7 @@ export async function deleteEvent(
   // ── 비공개 이벤트 분기 — Supabase delete ──
   if (existing.sourceCalendarId === PRIVATE_CAL_ID) {
     const mutate = async (token: BflowMutationToken): Promise<void> => {
-      if (!isBflowMutationCurrent(token)) return;
+      if (!continueBeforeSourceDelete(token)) return;
       const previous = existing;
       mutateSourceEvents('bflow', (events) => events.filter((item) => item.id !== actualId));
       broadcastCalendarChange({ eventId: actualId, action: 'delete' });
@@ -1588,7 +1694,10 @@ export async function deleteEvent(
         forgetLegacyPrivateEvent(actualId);
         cleanupDeletedEventAliases(eventId, actualId);
       } catch (err) {
-        if (!isBflowMutationCurrent(token)) return;
+        if (!isBflowMutationCurrent(token)) {
+          if (inheritedToken) throw err;
+          return;
+        }
         mutateSourceEvents('bflow', (events) => (
           events.some((item) => item.id === actualId) ? events : [...events, previous]
         ));
@@ -1604,7 +1713,7 @@ export async function deleteEvent(
   // 로컬 전용 이벤트(GCal에 저장되지 않은 legacy 이벤트)는 캐시에서만 제거
   const isLocalOnly = !existing.sourceCalendarId;
   if (isLocalOnly) {
-    if (inheritedToken && !isBflowMutationCurrent(inheritedToken)) return;
+    if (!continueBeforeSourceDelete(requestToken)) return;
     const existingSource = inferExistingEventSource(existing);
     mutateSourceEvents(existingSource, (events) => events.filter((item) => item.id !== actualId));
     cleanupDeletedEventAliases(eventId, actualId);
@@ -1614,7 +1723,7 @@ export async function deleteEvent(
 
   // 원본 캘린더 ID 우선 사용
   const calId = existing.sourceCalendarId || await getTargetCalendar(existing.type);
-  if (inheritedToken && !isBflowMutationCurrent(inheritedToken)) return;
+  if (!continueBeforeSourceDelete(requestToken)) return;
   if (!calId) return;
   const existingSource = inferExistingEventSource(existing);
 
@@ -1624,11 +1733,15 @@ export async function deleteEvent(
 
   try {
     await gcalService.deleteEvent(calId, actualId);
+    // 삭제 전에 시작한 Google snapshot이 완료되더라도 이 정확한 원본 행을 되살리지 않는다.
+    const removedReappearedSource = tombstoneGoogleEvent(calId, actualId);
+    if (removedReappearedSource) {
+      broadcastCalendarChange({ eventId: actualId, action: 'delete' });
+    }
     if (inheritedToken && !isBflowMutationCurrent(inheritedToken)) return;
-    confirmedGoogleEvents.delete(googleEventKey(calId, actualId));
     cleanupDeletedEventAliases(eventId, actualId);
   } catch (err) {
-    if (inheritedToken && !isBflowMutationCurrent(inheritedToken)) return;
+    if (inheritedToken && !isBflowMutationCurrent(inheritedToken)) throw err;
     // 실패: 롤백
     mutateSourceEvents(existingSource, (events) => (
       events.some((item) => item.id === actualId) ? events : [...events, existing]

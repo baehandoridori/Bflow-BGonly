@@ -209,6 +209,12 @@ async function createHarness(options: {
     googleDeletes: [],
     watches: [],
   };
+  const privacyReplacementReceipts = new Map<string, {
+    storage: 'bflow' | 'legacy-private' | 'google';
+    actualId: string;
+    calendarId?: string;
+  }>();
+  let privacyReceiptNonce = 0;
   const calendars = options.includePersonalCalendar === false
     ? [calendarRow('shared-cal', false)]
     : [calendarRow('personal-cal', true), calendarRow('shared-cal', false)];
@@ -221,6 +227,58 @@ async function createHarness(options: {
     calendarEventCreate: async (input: Record<string, unknown>) => {
       calls.bflowCreates.push(input);
       return { ...input, id: 'created-private-event' };
+    },
+    calendarPrivacyReplacementCreate: async (request: {
+      storage: 'bflow' | 'legacy-private' | 'google';
+      event: Record<string, unknown>;
+      calendar_id?: string;
+    }) => {
+      let actualId: string;
+      if (request.storage === 'bflow') {
+        calls.bflowCreates.push(request.event);
+        actualId = 'created-private-event';
+      } else if (request.storage === 'legacy-private') {
+        calls.legacyCreates.push(request.event);
+        actualId = 'legacy-private-event';
+      } else {
+        const calendarId = request.calendar_id ?? 'primary';
+        calls.googleCreates.push({ calendarId, input: request.event });
+        if (options.failGoogleCreate) throw new Error('Google calendar unavailable');
+        actualId = 'created-google-event';
+      }
+      const receipt = `privacy-receipt-${privacyReceiptNonce++}`;
+      privacyReplacementReceipts.set(receipt, {
+        storage: request.storage,
+        actualId,
+        calendarId: request.calendar_id,
+      });
+      return {
+        storage: request.storage,
+        actual_id: actualId,
+        calendar_id: request.calendar_id,
+        receipt,
+      };
+    },
+    calendarPrivacyReplacementSettle: async (
+      receipt: string,
+      disposition: 'keep' | 'delete',
+    ) => {
+      const target = privacyReplacementReceipts.get(receipt);
+      if (!target) throw new Error('receipt missing or consumed');
+      privacyReplacementReceipts.delete(receipt);
+      if (disposition === 'keep') return;
+      if (target.storage === 'bflow') {
+        calls.bflowDeletes.push(target.actualId);
+        if (options.bflowDelete) await options.bflowDelete(target.actualId);
+        else if (options.bflowDeleteError) throw options.bflowDeleteError;
+      } else if (target.storage === 'legacy-private') {
+        calls.legacyDeletes.push(target.actualId);
+      } else {
+        const calendarId = target.calendarId ?? 'primary';
+        calls.googleDeletes.push({ calendarId, eventId: target.actualId });
+        if (options.googleDelete) await options.googleDelete(calendarId, target.actualId);
+        else if (options.googleDeleteError) throw options.googleDeleteError;
+      }
     },
     calendarEventUpdate: async (id: string, patch: Record<string, unknown>) => {
       calls.bflowUpdates.push({ id, patch });
