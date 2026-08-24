@@ -11,6 +11,7 @@ type ServiceModule = {
     title: string;
     sourceCalendarId?: string;
   }>>;
+  saveTeamCalendarId(calendarId: string | null): Promise<void>;
   isGoogleCacheReady(): boolean;
 };
 
@@ -101,6 +102,7 @@ async function createHarness(
       calendarEventsList: async () => [],
       calendarBroadcastChange: async () => ({ ok: true }),
       supabaseReadPrivateEvents: async () => [],
+      supabaseWriteMetadata: async () => {},
       supabaseReadMetadata: async () => options.teamCalendarId
         ? {
             type: 'gcal',
@@ -253,6 +255,41 @@ test('a partial sync replaces successful calendars, retains failed calendars, an
         { id: 'primary-new', title: '새 개인 일정', sourceCalendarId: 'primary' },
         { id: 'team-only', title: '유지할 팀 일정', sourceCalendarId: 'team' },
       ],
+    );
+  } finally {
+    console.warn = originalWarn;
+    harness.restore();
+  }
+});
+
+test('a configured-calendar failure retains only that calendar after another calendar is removed from settings', async () => {
+  let firstSync = true;
+  const harness = await createHarness({
+    teamCalendarId: 'team',
+    personalCalendarId: 'primary',
+    fullSync: async (calendarId) => {
+      if (firstSync) {
+        return calendarId === 'team'
+          ? [googleEvent('team-old', '설정에서 제거할 팀 일정')]
+          : [googleEvent('primary-old', '유지할 개인 일정')];
+      }
+      throw new Error('primary unavailable');
+    },
+  });
+  const originalWarn = console.warn;
+  try {
+    console.warn = () => {};
+    await harness.service.syncAll({ skipBflowLoad: true });
+    await harness.service.saveTeamCalendarId(null);
+    firstSync = false;
+
+    await harness.service.syncAll({ skipBflowLoad: true });
+
+    assert.equal(harness.service.isGoogleCacheReady(), false);
+    const events = await harness.service.getEvents();
+    assert.deepEqual(
+      events.map(({ id, title, sourceCalendarId }) => ({ id, title, sourceCalendarId })),
+      [{ id: 'primary-old', title: '유지할 개인 일정', sourceCalendarId: 'primary' }],
     );
   } finally {
     console.warn = originalWarn;

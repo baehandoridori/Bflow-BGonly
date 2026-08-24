@@ -411,7 +411,7 @@ export async function syncAll(options: { broadcast?: boolean; skipBflowLoad?: bo
     }
   }
 
-  if (settingsLoaded && successfulCalendarIds.size > 0) {
+  if (settingsLoaded) {
     // 성공한 캘린더는 빈 결과까지 완전히 교체하되, 실패한 캘린더의 마지막 성공
     // 데이터는 유지한다. 새 성공 행과 ID가 겹치면 새 행이 우선한다.
     const retainedFailedEvents = googleEvents.filter(
