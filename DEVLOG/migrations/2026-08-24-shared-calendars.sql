@@ -69,6 +69,68 @@ CREATE TABLE IF NOT EXISTS calendar_notifications (
 CREATE INDEX IF NOT EXISTS idx_calendar_notif_recipient
   ON calendar_notifications(recipient_id, created_at DESC);
 
+-- ── 1-1) 레거시 개인 일정 사용자 FK ──────────────────────────
+-- 기존 고아 행은 다음 정리 라운드까지 보존하되, 새 쓰기와 사용자 삭제가 경합해
+-- 고아 행을 더 만들 수 없도록 NOT VALID FK를 건다. NOT VALID도 새 INSERT/UPDATE와
+-- 부모 DELETE에는 즉시 적용된다. 구버전 DB에 테이블이 없으면 안전하게 건너뛴다.
+DO $$
+DECLARE
+  v_legacy_user_type OID;
+  v_user_id_type OID;
+  v_legacy_user_attnum SMALLINT;
+  v_user_id_attnum SMALLINT;
+  v_existing_constraint RECORD;
+BEGIN
+  IF pg_catalog.to_regclass('public.private_calendar_events') IS NULL THEN
+    RETURN;
+  END IF;
+
+  SELECT atttypid, attnum
+  INTO v_legacy_user_type, v_legacy_user_attnum
+  FROM pg_catalog.pg_attribute
+  WHERE attrelid = 'public.private_calendar_events'::regclass
+    AND attname = 'user_id'
+    AND NOT attisdropped;
+
+  SELECT atttypid, attnum
+  INTO v_user_id_type, v_user_id_attnum
+  FROM pg_catalog.pg_attribute
+  WHERE attrelid = 'public.users'::regclass
+    AND attname = 'id'
+    AND NOT attisdropped;
+
+  IF v_legacy_user_type IS DISTINCT FROM v_user_id_type
+     OR v_legacy_user_attnum IS NULL
+     OR v_user_id_attnum IS NULL THEN
+    RAISE EXCEPTION 'private_calendar_events.user_id and users.id must have the same type'
+      USING ERRCODE = '42804';
+  END IF;
+
+  SELECT constraint_row.*
+  INTO v_existing_constraint
+  FROM pg_catalog.pg_constraint AS constraint_row
+  WHERE constraint_row.conrelid = 'public.private_calendar_events'::regclass
+    AND constraint_row.conname = 'private_calendar_events_user_id_fkey';
+
+  IF FOUND THEN
+    IF v_existing_constraint.contype <> 'f'
+       OR v_existing_constraint.confrelid <> 'public.users'::regclass
+       OR v_existing_constraint.conkey <> ARRAY[v_legacy_user_attnum]::SMALLINT[]
+       OR v_existing_constraint.confkey <> ARRAY[v_user_id_attnum]::SMALLINT[]
+       OR v_existing_constraint.confdeltype <> 'c' THEN
+      RAISE EXCEPTION 'Constraint private_calendar_events_user_id_fkey has an incompatible definition'
+        USING ERRCODE = '42710';
+    END IF;
+  ELSE
+    ALTER TABLE public.private_calendar_events
+      ADD CONSTRAINT private_calendar_events_user_id_fkey
+      FOREIGN KEY (user_id)
+      REFERENCES public.users(id)
+      ON DELETE CASCADE
+      NOT VALID;
+  END IF;
+END $$;
+
 -- ── 2) 캘린더 관리 쓰기 권한 원자적 검증 RPC ────────────────────
 -- IPC 사전 검사는 친절한 오류용이다. 실제 관리 권한은 캘린더와 actor 행을
 -- 같은 트랜잭션에서 잠근 뒤 재확인하여 소유권 이전·admin 강등 TOCTOU를 막는다.
@@ -1076,10 +1138,47 @@ AS $$
 DECLARE
   v_user_name TEXT;
   v_admin_id TEXT;
+  v_has_shared_calendars BOOLEAN := false;
 BEGIN
   SELECT name INTO v_user_name FROM users WHERE id = p_user_id;
   IF v_user_name IS NULL THEN
     RAISE EXCEPTION 'User % not found', p_user_id USING ERRCODE = 'P0002';
+  END IF;
+
+  -- ── 공유 캘린더 불변식 선검사 (어떤 사용자 데이터도 바꾸기 전) ──
+  -- 사용자 삭제는 드문 관리자 작업이다. direct calendar DELETE(parent→child)와
+  -- event move/update(child→parent)가 서로 역순으로 행 잠금을 잡지 못하도록,
+  -- 두 쓰기 테이블을 부모→자식 순서로 먼저 직렬화한다.
+  LOCK TABLE calendars IN SHARE ROW EXCLUSIVE MODE;
+  LOCK TABLE calendar_events IN SHARE ROW EXCLUSIVE MODE;
+
+  -- 멤버 교체 RPC와 동일하게 부모→자식 순서로 잠가 교착을 피한다.
+  PERFORM c.id
+  FROM calendars c
+  WHERE c.owner_id = p_user_id
+  ORDER BY c.id
+  FOR UPDATE;
+
+  SELECT EXISTS (
+    SELECT 1
+    FROM calendars c
+    WHERE c.owner_id = p_user_id
+      AND NOT c.is_personal
+  ) INTO v_has_shared_calendars;
+
+  IF v_has_shared_calendars THEN
+    -- 공유 캘린더는 팀 자산 보존 — admin(배한솔 우선) 에게 소유 이전한다.
+    -- calendar→event→user 순서로 잠그며, 동률은 id로 고정하고 역할 변경·삭제를 이전 완료까지 막는다.
+    SELECT id INTO v_admin_id FROM users
+    WHERE id <> p_user_id AND role = 'admin'
+    ORDER BY (name = '배한솔') DESC, created_at ASC, id ASC
+    LIMIT 1
+    FOR NO KEY UPDATE;
+
+    IF v_admin_id IS NULL THEN
+      RAISE EXCEPTION 'Shared calendars require another admin owner before deleting user %', p_user_id
+        USING ERRCODE = '55000';
+    END IF;
   END IF;
 
   UPDATE scenes         SET assignee = NULL WHERE assignee = v_user_name;
@@ -1119,39 +1218,18 @@ BEGIN
   DELETE FROM private_calendar_events WHERE user_id = p_user_id;
 
   -- ── 공유 캘린더 정리 (2026-08-24 추가, 설계서 §4) ──
-  -- 사용자 삭제는 드문 관리자 작업이다. direct calendar DELETE(parent→child)와
-  -- event move/update(child→parent)가 서로 역순으로 행 잠금을 잡지 못하도록,
-  -- 두 쓰기 테이블을 부모→자식 순서로 먼저 직렬화한다.
-  LOCK TABLE calendars IN SHARE ROW EXCLUSIVE MODE;
-  LOCK TABLE calendar_events IN SHARE ROW EXCLUSIVE MODE;
-
   -- 작성자 표시는 nullable — FK(NO ACTION) 위반 방지. 이벤트 행을 부모 캘린더보다 먼저 잠근다.
   UPDATE calendar_events SET created_by = NULL WHERE created_by = p_user_id;
 
-  -- 멤버 교체 RPC와 동일하게 부모→자식 순서로 잠가 교착을 피한다.
-  PERFORM c.id
-  FROM calendars c
-  WHERE c.owner_id = p_user_id
-  ORDER BY c.id
-  FOR UPDATE;
-
   -- 개인 캘린더는 삭제 (이벤트는 ON DELETE CASCADE)
   DELETE FROM calendars WHERE owner_id = p_user_id AND is_personal;
-  -- 공유 캘린더는 팀 자산 보존 — admin(배한솔 우선) 에게 소유 이전
-  -- calendar→event→user 순서로 잠그며, 동률은 id로 고정하고 역할 변경·삭제를 이전 완료까지 막는다.
-  SELECT id INTO v_admin_id FROM users
-  WHERE id <> p_user_id AND role = 'admin'
-  ORDER BY (name = '배한솔') DESC, created_at ASC, id ASC
-  LIMIT 1
-  FOR NO KEY UPDATE;
+
   IF v_admin_id IS NOT NULL THEN
     -- 새 소유자가 이미 멤버 행으로 있으면 제거(소유자는 멤버 목록에 두지 않는 규약)
     DELETE FROM calendar_members m USING calendars c
       WHERE m.calendar_id = c.id AND c.owner_id = p_user_id AND m.user_id = v_admin_id;
     UPDATE calendars SET owner_id = v_admin_id, updated_at = now()
       WHERE owner_id = p_user_id;
-  ELSE
-    DELETE FROM calendars WHERE owner_id = p_user_id;  -- admin 부재(비정상) 폴백
   END IF;
   DELETE FROM calendar_members       WHERE user_id = p_user_id;
   DELETE FROM calendar_notifications WHERE recipient_id = p_user_id;
@@ -1161,4 +1239,4 @@ END;
 $$;
 
 COMMENT ON FUNCTION public.delete_user_cascade(TEXT) IS
-  '사용자 삭제 + 종속 정리 atomic RPC. 씬/리테이크/복장 담당자 비우기 / 개인 데이터 삭제 / 개인 캘린더 삭제·공유 캘린더 admin 이전 / users 삭제를 한 트랜잭션으로. comments·activity_log 는 역사 기록으로 보존.';
+  '사용자 삭제 + 종속 정리 atomic RPC. 공유 캘린더 소유자는 후계 admin을 잠근 뒤에만 진행하며, 부재 시 어떤 변경도 없이 거부한다. 개인 데이터 삭제 / 개인 캘린더 삭제·공유 캘린더 admin 이전 / users 삭제를 한 트랜잭션으로. comments·activity_log 는 역사 기록으로 보존.';

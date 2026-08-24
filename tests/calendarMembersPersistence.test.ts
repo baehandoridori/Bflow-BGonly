@@ -12,6 +12,44 @@ function between(source: string, start: string, end: string): string {
   return source.slice(from, to);
 }
 
+test('legacy private events add an idempotent type-safe NOT VALID user foreign key', () => {
+  const sql = readFileSync(migrationPath, 'utf8');
+  const block = between(
+    sql,
+    '-- ── 1-1) 레거시 개인 일정 사용자 FK',
+    '-- ── 2) 캘린더 관리 쓰기 권한 원자적 검증 RPC',
+  );
+
+  const tableGuard = block.indexOf("to_regclass('public.private_calendar_events') IS NULL");
+  const legacyTypeLookup = block.indexOf("attrelid = 'public.private_calendar_events'::regclass");
+  const userTypeLookup = block.indexOf("attrelid = 'public.users'::regclass", legacyTypeLookup);
+  const typeMismatch = block.indexOf('v_legacy_user_type IS DISTINCT FROM v_user_id_type');
+  const typeError = block.indexOf("ERRCODE = '42804'", typeMismatch);
+  const constraintLookup = block.indexOf("conname = 'private_calendar_events_user_id_fkey'", typeError);
+  const existingConstraintBranch = block.indexOf('IF FOUND THEN', constraintLookup);
+  const existingDefinitionCheck = block.indexOf("v_existing_constraint.contype <> 'f'", existingConstraintBranch);
+  const existingDeleteActionCheck = block.indexOf("v_existing_constraint.confdeltype <> 'c'", existingDefinitionCheck);
+  const incompatibleConstraintError = block.indexOf("ERRCODE = '42710'", existingDeleteActionCheck);
+  const addConstraint = block.indexOf(
+    'ADD CONSTRAINT private_calendar_events_user_id_fkey',
+    incompatibleConstraintError,
+  );
+
+  assert.ok(tableGuard >= 0, 'older or clean databases may not have the legacy table');
+  assert.ok(tableGuard < legacyTypeLookup && legacyTypeLookup < userTypeLookup);
+  assert.ok(userTypeLookup < typeMismatch && typeMismatch < typeError);
+  assert.ok(typeError < constraintLookup && constraintLookup < existingConstraintBranch);
+  assert.ok(existingConstraintBranch < existingDefinitionCheck);
+  assert.ok(existingDefinitionCheck < existingDeleteActionCheck);
+  assert.ok(existingDeleteActionCheck < incompatibleConstraintError);
+  assert.ok(incompatibleConstraintError < addConstraint);
+  assert.match(
+    block,
+    /FOREIGN KEY \(user_id\)\s+REFERENCES public\.users\(id\)\s+ON DELETE CASCADE\s+NOT VALID/s,
+  );
+  assert.doesNotMatch(block, /VALIDATE CONSTRAINT/);
+});
+
 test('calendar management RPCs lock and recheck actor rights in the write transaction', () => {
   const sql = readFileSync(migrationPath, 'utf8');
   const scenarios = [
@@ -240,10 +278,49 @@ test('delete_user_cascade serializes calendar and event writers before row clean
     eventTableLockIndex < eventCleanupIndex,
     'both table locks must be held before event rows are changed',
   );
-  assert.ok(eventCleanupIndex < parentLockIndex);
+  assert.ok(parentLockIndex < eventCleanupIndex, 'owned calendars must be locked before any cleanup');
   assert.ok(parentLockIndex < personalDeleteIndex);
   assert.ok(parentLockIndex < memberDeleteIndex);
   assert.ok(parentLockIndex < ownerUpdateIndex);
+});
+
+test('delete_user_cascade rejects a shared owner without a successor before any mutation', () => {
+  const sql = readFileSync(migrationPath, 'utf8');
+  const fn = between(
+    sql,
+    'CREATE OR REPLACE FUNCTION public.delete_user_cascade',
+    'COMMENT ON FUNCTION public.delete_user_cascade',
+  );
+
+  const parentLock = fn.indexOf('PERFORM c.id');
+  const sharedOwnershipCheck = fn.indexOf('SELECT EXISTS (', parentLock);
+  const sharedBranch = fn.indexOf('IF v_has_shared_calendars THEN', sharedOwnershipCheck);
+  const successorSelection = fn.indexOf('SELECT id INTO v_admin_id FROM users', sharedBranch);
+  const successorLock = fn.indexOf('FOR NO KEY UPDATE;', successorSelection);
+  const missingSuccessorGuard = fn.indexOf('IF v_admin_id IS NULL THEN', successorLock);
+  const invariantError = fn.indexOf('Shared calendars require another admin owner', missingSuccessorGuard);
+  const invariantSqlState = fn.indexOf("ERRCODE = '55000'", invariantError);
+  const firstMutation = fn.indexOf('UPDATE scenes');
+
+  assert.match(
+    fn,
+    /SELECT EXISTS \([\s\S]*c\.owner_id\s*=\s*p_user_id[\s\S]*AND NOT c\.is_personal[\s\S]*\) INTO v_has_shared_calendars;/s,
+  );
+  assert.ok(parentLock >= 0 && parentLock < sharedOwnershipCheck);
+  assert.ok(sharedOwnershipCheck < sharedBranch);
+  assert.ok(sharedBranch < successorSelection);
+  assert.ok(successorSelection < successorLock);
+  assert.ok(successorLock < missingSuccessorGuard);
+  assert.ok(missingSuccessorGuard < invariantError && invariantError < invariantSqlState);
+  assert.ok(
+    invariantSqlState < firstMutation,
+    'the missing-successor invariant must abort before dependent user data is changed',
+  );
+  assert.equal(
+    fn.includes('DELETE FROM calendars WHERE owner_id = p_user_id;'),
+    false,
+    'shared calendars must never fall through to a destructive delete',
+  );
 });
 
 test('delete_user_cascade locks the deterministic successor admin through ownership transfer', () => {
