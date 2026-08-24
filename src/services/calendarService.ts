@@ -321,8 +321,8 @@ export async function loadBflowEvents(): Promise<void> {
 }
 
 /** 전체 동기화 (앱 시작 시 호출) */
-export async function syncAll(options: { broadcast?: boolean } = {}): Promise<CalendarEvent[]> {
-  await loadBflowEvents();
+export async function syncAll(options: { broadcast?: boolean; skipBflowLoad?: boolean } = {}): Promise<CalendarEvent[]> {
+  if (!options.skipBflowLoad) await loadBflowEvents();
   const seen = new Set<string>();
   const events: CalendarEvent[] = [];
 

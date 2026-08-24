@@ -125,7 +125,7 @@ export function ScheduleView() {
           const { isAuthenticated } = await import('@/services/googleCalendarService');
           if (await isAuthenticated()) {
             const { syncAll } = await import('@/services/calendarService');
-            await syncAll();
+            await syncAll({ skipBflowLoad: true });
           }
         } catch { /* GCal 미연결 시 무시 */ }
       }

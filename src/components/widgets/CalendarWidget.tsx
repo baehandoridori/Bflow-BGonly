@@ -83,7 +83,7 @@ export function CalendarWidget() {
         await loadBflowEvents();
         const authed = await gcalService.isAuthenticated();
         if (authed && !cancelled) {
-          await syncAll();
+          await syncAll({ skipBflowLoad: true });
         }
       } catch { /* GCal 미연결 시 무시 */ }
       if (!cancelled) getEvents().then(setEvents);
