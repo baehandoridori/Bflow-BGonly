@@ -1792,7 +1792,7 @@ export async function readPrivateEvents(userId: string): Promise<SupabasePrivate
   return (data as SupabasePrivateEvent[]) || [];
 }
 
-export async function addPrivateEvent(input: {
+type PrivateEventCreateInput = {
   user_id: string;
   title: string;
   memo?: string;
@@ -1807,10 +1807,31 @@ export async function addPrivateEvent(input: {
   linked_department?: string | null;
   linked_todo_id?: string | null;
   created_by?: string;
-}): Promise<SupabasePrivateEvent> {
+};
+
+function safePrivateEventCreateInput(input: PrivateEventCreateInput): PrivateEventCreateInput {
+  return {
+    user_id: input.user_id,
+    title: input.title,
+    memo: input.memo,
+    color: input.color,
+    type: input.type,
+    start_date: input.start_date,
+    end_date: input.end_date,
+    linked_episode: input.linked_episode,
+    linked_part: input.linked_part,
+    linked_sheet_name: input.linked_sheet_name,
+    linked_scene_id: input.linked_scene_id,
+    linked_department: input.linked_department,
+    linked_todo_id: input.linked_todo_id,
+    created_by: input.created_by,
+  };
+}
+
+export async function addPrivateEvent(input: PrivateEventCreateInput): Promise<SupabasePrivateEvent> {
   const { data, error } = await supabase
     .from('private_calendar_events')
-    .insert(input)
+    .insert(safePrivateEventCreateInput(input))
     .select('*')
     .single();
   throwIfError(error);
@@ -1819,24 +1840,46 @@ export async function addPrivateEvent(input: {
   return data as SupabasePrivateEvent;
 }
 
+type PrivateEventUpdateInput = Partial<{
+  title: string;
+  memo: string;
+  color: string;
+  type: string;
+  start_date: string;
+  end_date: string;
+  linked_episode: number | null;
+  linked_part: string | null;
+  linked_sheet_name: string | null;
+  linked_scene_id: string | null;
+  linked_department: string | null;
+  linked_todo_id: string | null;
+}>;
+
+function safePrivateEventUpdateInput(input: PrivateEventUpdateInput): PrivateEventUpdateInput {
+  const safe: PrivateEventUpdateInput = {};
+  if (input.title !== undefined) safe.title = input.title;
+  if (input.memo !== undefined) safe.memo = input.memo;
+  if (input.color !== undefined) safe.color = input.color;
+  if (input.type !== undefined) safe.type = input.type;
+  if (input.start_date !== undefined) safe.start_date = input.start_date;
+  if (input.end_date !== undefined) safe.end_date = input.end_date;
+  if (input.linked_episode !== undefined) safe.linked_episode = input.linked_episode;
+  if (input.linked_part !== undefined) safe.linked_part = input.linked_part;
+  if (input.linked_sheet_name !== undefined) safe.linked_sheet_name = input.linked_sheet_name;
+  if (input.linked_scene_id !== undefined) safe.linked_scene_id = input.linked_scene_id;
+  if (input.linked_department !== undefined) safe.linked_department = input.linked_department;
+  if (input.linked_todo_id !== undefined) safe.linked_todo_id = input.linked_todo_id;
+  return safe;
+}
+
 export async function updatePrivateEvent(
   id: string,
-  updates: Partial<{
-    title: string;
-    memo: string;
-    color: string;
-    type: string;
-    start_date: string;
-    end_date: string;
-    linked_episode: number | null;
-    linked_part: string | null;
-    linked_sheet_name: string | null;
-    linked_scene_id: string | null;
-    linked_department: string | null;
-    linked_todo_id: string | null;
-  }>,
+  updates: PrivateEventUpdateInput,
 ): Promise<void> {
-  const patch = { ...updates, updated_at: new Date().toISOString() };
+  const patch = {
+    ...safePrivateEventUpdateInput(updates),
+    updated_at: new Date().toISOString(),
+  };
   const { error } = await supabase.from('private_calendar_events').update(patch).eq('id', id);
   throwIfError(error);
   broadcastDataChange('private_calendar_events', 'UPDATE');
@@ -1846,6 +1889,24 @@ export async function updatePrivateEvent(
 export async function deletePrivateEvent(id: string): Promise<void> {
   const { error } = await supabase.from('private_calendar_events').delete().eq('id', id);
   throwIfError(error);
+  broadcastDataChange('private_calendar_events', 'DELETE');
+  broadcastCalendarChanged('DELETE');
+}
+
+/** privacy replacement receipt 전용 원자적 삭제.
+ *  create 때 캡처한 owner와 id를 같은 DELETE 문에 묶어, 검증과 삭제 사이에 같은 UUID가
+ *  다른 소유자의 행으로 교체되어도 새 행을 지우지 않는다. */
+export async function deletePrivateEventForOwner(id: string, ownerId: string): Promise<void> {
+  const { data, error } = await supabase
+    .from('private_calendar_events')
+    .delete()
+    .eq('id', id)
+    .eq('user_id', ownerId)
+    .select('id');
+  throwIfError(error);
+  if (!Array.isArray(data) || !data.some((row) => row?.id === id)) {
+    throw new Error('보상 대상 비공개 일정이 없거나 소유자가 변경되었습니다');
+  }
   broadcastDataChange('private_calendar_events', 'DELETE');
   broadcastCalendarChanged('DELETE');
 }

@@ -2625,13 +2625,16 @@ export default function App() {
     const cleanup = window.electronAPI?.onCalendarChanged?.((payload) => {
       const detail = payload && typeof payload === 'object' ? payload as { action?: string } : {};
       const refresh = async () => {
-        if (detail.action === 'upsert' || detail.action === 'delete') {
-          try {
-            const { syncAll } = await import('@/services/calendarService');
+        try {
+          const { applyCommittedGoogleDelete, syncAll } = await import('@/services/calendarService');
+          // Google 영속 삭제 완료 marker는 재조회보다 먼저 exact tombstone 처리한다.
+          // 삭제 전 시작한 snapshot이나 다른 창의 독립 cache가 ghost를 되살려도 이 행만 차단된다.
+          const appliedCommittedDelete = applyCommittedGoogleDelete(payload);
+          if (!appliedCommittedDelete && (detail.action === 'upsert' || detail.action === 'delete')) {
             await syncAll({ broadcast: false });
-          } catch (error) {
-            console.warn('[Broadcast] 개인 할일 캘린더 캐시 갱신 실패:', error);
           }
+        } catch (error) {
+          console.warn('[Broadcast] 개인 할일 캘린더 캐시 갱신 실패:', error);
         }
         window.dispatchEvent(new CustomEvent('bflow:calendar-changed', { detail: payload }));
       };

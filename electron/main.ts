@@ -1380,6 +1380,7 @@ import {
   addPrivateEvent as sbAddPrivateEvent,
   updatePrivateEvent as sbUpdatePrivateEvent,
   deletePrivateEvent as sbDeletePrivateEvent,
+  deletePrivateEventForOwner as sbDeletePrivateEventForOwner,
   getPrivateEventOwner as sbGetPrivateEventOwner,
   listActivities as sbListActivities,
   getActivityStats as sbGetActivityStats,
@@ -2467,14 +2468,9 @@ registerCalendarIpc({
     ...input,
     user_id: actorId,
   }),
-  deleteLegacyPrivateEvent: async (eventId, actorId) => {
-    const ownerId = await sbGetPrivateEventOwner(eventId);
-    if (!ownerId) return;
-    if (ownerId !== actorId) {
-      throw new Error('보상 대상 비공개 일정의 소유자가 변경되었습니다');
-    }
-    await sbDeletePrivateEvent(eventId);
-  },
+  deleteLegacyPrivateEvent: (eventId, actorId) => (
+    sbDeletePrivateEventForOwner(eventId, actorId)
+  ),
   createGoogleEvent: (calendarId, input) => (
     gcal.insertEvent(calendarId, input as gcal.GCalEventInput)
   ),

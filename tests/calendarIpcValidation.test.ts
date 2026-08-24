@@ -22,10 +22,13 @@ type CalendarIpcExternalDeps = {
 
 const IPC_HARNESS_KEY = '__calendarIpcBehaviorHarness';
 const STORE_HARNESS_KEY = '__calendarStoreStrictReadHarness';
+const SUPABASE_PRIVATE_HARNESS_KEY = '__calendarSupabasePrivateHarness';
 let ipcBundle: Promise<string> | undefined;
 let ipcNonce = 0;
 let storeBundle: Promise<string> | undefined;
 let storeNonce = 0;
+let supabasePrivateBundle: Promise<string> | undefined;
+let supabasePrivateNonce = 0;
 
 const storeFunctionNames = [
   'getUserRole',
@@ -88,6 +91,94 @@ async function bundledCalendarIpcSource(): Promise<string> {
     write: false,
   }).then((result) => result.outputFiles[0].text);
   return ipcBundle;
+}
+
+function calendarSupabasePrivateTestPlugin(): Plugin {
+  return {
+    name: 'calendar-supabase-private-test-dependencies',
+    setup(builder) {
+      builder.onResolve({ filter: /^@supabase\/supabase-js$/ }, () => ({
+        path: 'supabase-client',
+        namespace: 'calendar-supabase-private-test',
+      }));
+      builder.onResolve({ filter: /^ws$/ }, () => ({
+        path: 'ws',
+        namespace: 'calendar-supabase-private-test',
+      }));
+      builder.onResolve({ filter: /^\.\/broadcast$/ }, () => ({
+        path: 'broadcast',
+        namespace: 'calendar-supabase-private-test',
+      }));
+      builder.onResolve({ filter: /^\.\/storage$/ }, () => ({
+        path: 'storage',
+        namespace: 'calendar-supabase-private-test',
+      }));
+      builder.onResolve({ filter: /^\.\/retry-utils$/ }, () => ({
+        path: 'retry-utils',
+        namespace: 'calendar-supabase-private-test',
+      }));
+      builder.onLoad({ filter: /^supabase-client$/, namespace: 'calendar-supabase-private-test' }, () => ({
+        contents: `export const createClient = () => globalThis.${SUPABASE_PRIVATE_HARNESS_KEY}.client;`,
+      }));
+      builder.onLoad({ filter: /^ws$/, namespace: 'calendar-supabase-private-test' }, () => ({
+        contents: 'export default class WebSocket {}',
+      }));
+      builder.onLoad({ filter: /^broadcast$/, namespace: 'calendar-supabase-private-test' }, () => ({
+        contents: [
+          'broadcastSceneUpdate',
+          'broadcastSceneFieldUpdate',
+          'broadcastScenePhaseUpdate',
+          'broadcastDataChange',
+          'broadcastCommentAdded',
+          'broadcastCalendarChanged',
+          'broadcastCommentReactionChanged',
+          'broadcastCommentReactionNotification',
+          'broadcastCommentReactionNotificationRemoved',
+          'broadcastActivityRemoved',
+        ].map((name) => `export const ${name} = () => {};`).join('\n'),
+      }));
+      builder.onLoad({ filter: /^storage$/, namespace: 'calendar-supabase-private-test' }, () => ({
+        contents: 'export const deleteImage = async () => {};',
+      }));
+      builder.onLoad({ filter: /^retry-utils$/, namespace: 'calendar-supabase-private-test' }, () => ({
+        contents: 'export const createRetryManager = () => ({ run: async (fn) => fn(), reset: () => {} });',
+      }));
+    },
+  };
+}
+
+async function bundledCalendarSupabasePrivateSource(): Promise<string> {
+  supabasePrivateBundle ??= build({
+    stdin: {
+      contents: "export * from './electron/supabase.ts';",
+      resolveDir: process.cwd(),
+      sourcefile: 'calendar-supabase-private-entry.ts',
+    },
+    bundle: true,
+    format: 'esm',
+    platform: 'node',
+    target: 'node22',
+    plugins: [calendarSupabasePrivateTestPlugin()],
+    write: false,
+  }).then((result) => result.outputFiles[0].text);
+  return supabasePrivateBundle;
+}
+
+async function loadCalendarSupabasePrivateModule(client: unknown): Promise<{
+  addPrivateEvent(input: Record<string, unknown>): Promise<unknown>;
+  updatePrivateEvent(eventId: string, updates: Record<string, unknown>): Promise<void>;
+  deletePrivateEventForOwner?: (eventId: string, ownerId: string) => Promise<void>;
+}> {
+  const globalScope = globalThis as Record<string, unknown>;
+  globalScope[SUPABASE_PRIVATE_HARNESS_KEY] = { client };
+  const encoded = Buffer.from(await bundledCalendarSupabasePrivateSource()).toString('base64');
+  return import(
+    `data:text/javascript;base64,${encoded}#calendar-supabase-private-${supabasePrivateNonce++}`
+  ) as Promise<{
+    addPrivateEvent(input: Record<string, unknown>): Promise<unknown>;
+    updatePrivateEvent(eventId: string, updates: Record<string, unknown>): Promise<void>;
+    deletePrivateEventForOwner?: (eventId: string, ownerId: string) => Promise<void>;
+  }>;
 }
 
 function defaultStore(): IpcHarnessState['store'] {
@@ -193,6 +284,16 @@ function calendarEventRow(overrides: Record<string, unknown> = {}) {
     updated_at: '2026-08-24T00:00:00.000Z',
     ...overrides,
   };
+}
+
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((next, fail) => {
+    resolve = next;
+    reject = fail;
+  });
+  return { promise, resolve, reject };
 }
 
 test('calendar:list waits for personal calendar ensure before listing calendars', async () => {
@@ -852,6 +953,201 @@ test('privacy replacement receipt deletes only its exact B flow create across a 
     }
   } finally {
     harness.restore();
+  }
+});
+
+test('ordinary legacy private create strips renderer-controlled identifiers at the final DB boundary', async () => {
+  const globalScope = globalThis as Record<string, unknown>;
+  const priorHarness = globalScope[SUPABASE_PRIVATE_HARNESS_KEY];
+  const hadHarness = Object.prototype.hasOwnProperty.call(globalScope, SUPABASE_PRIVATE_HARNESS_KEY);
+  const priorWebSocket = globalScope.WebSocket;
+  const hadWebSocket = Object.prototype.hasOwnProperty.call(globalScope, 'WebSocket');
+  let inserted: Record<string, unknown> | undefined;
+  const client = {
+    from(table: string) {
+      assert.equal(table, 'private_calendar_events');
+      return {
+        insert(input: Record<string, unknown>) {
+          inserted = input;
+          return {
+            select() {
+              return {
+                async single() {
+                  return { data: { id: 'server-generated-id', ...input }, error: null };
+                },
+              };
+            },
+          };
+        },
+      };
+    },
+  };
+
+  try {
+    const module = await loadCalendarSupabasePrivateModule(client);
+    await module.addPrivateEvent({
+      id: 'renderer-injected-id',
+      user_id: 'session-user',
+      title: '안전한 일정',
+      memo: '',
+      color: '#6C5CE7',
+      type: 'custom',
+      start_date: '2026-08-26',
+      end_date: '2026-08-26',
+      linked_episode: null,
+      linked_part: null,
+      linked_sheet_name: null,
+      linked_scene_id: null,
+      linked_department: null,
+      linked_todo_id: null,
+      created_by: 'session-user',
+      created_at: 'renderer-controlled',
+      updated_at: 'renderer-controlled',
+    });
+    assert.deepEqual(inserted, {
+      user_id: 'session-user',
+      title: '안전한 일정',
+      memo: '',
+      color: '#6C5CE7',
+      type: 'custom',
+      start_date: '2026-08-26',
+      end_date: '2026-08-26',
+      linked_episode: null,
+      linked_part: null,
+      linked_sheet_name: null,
+      linked_scene_id: null,
+      linked_department: null,
+      linked_todo_id: null,
+      created_by: 'session-user',
+    });
+  } finally {
+    if (hadHarness) globalScope[SUPABASE_PRIVATE_HARNESS_KEY] = priorHarness;
+    else delete globalScope[SUPABASE_PRIVATE_HARNESS_KEY];
+    if (hadWebSocket) globalScope.WebSocket = priorWebSocket;
+    else delete globalScope.WebSocket;
+  }
+});
+
+test('ordinary legacy private update strips owner and immutable fields at the final DB boundary', async () => {
+  const globalScope = globalThis as Record<string, unknown>;
+  const priorHarness = globalScope[SUPABASE_PRIVATE_HARNESS_KEY];
+  const hadHarness = Object.prototype.hasOwnProperty.call(globalScope, SUPABASE_PRIVATE_HARNESS_KEY);
+  const priorWebSocket = globalScope.WebSocket;
+  const hadWebSocket = Object.prototype.hasOwnProperty.call(globalScope, 'WebSocket');
+  let updated: Record<string, unknown> | undefined;
+  const client = {
+    from(table: string) {
+      assert.equal(table, 'private_calendar_events');
+      return {
+        update(patch: Record<string, unknown>) {
+          updated = patch;
+          return {
+            async eq(field: string, value: unknown) {
+              assert.equal(field, 'id');
+              assert.equal(value, 'legacy-event');
+              return { error: null };
+            },
+          };
+        },
+      };
+    },
+  };
+
+  try {
+    const module = await loadCalendarSupabasePrivateModule(client);
+    await module.updatePrivateEvent('legacy-event', {
+      id: 'replacement-id',
+      user_id: 'attacker',
+      title: '허용된 제목',
+      memo: '허용된 메모',
+      linked_todo_id: null,
+      created_by: 'attacker',
+      created_at: 'renderer-created-at',
+      updated_at: 'renderer-updated-at',
+    });
+    assert.ok(updated);
+    assert.equal(updated.title, '허용된 제목');
+    assert.equal(updated.memo, '허용된 메모');
+    assert.equal(updated.linked_todo_id, null);
+    assert.equal(typeof updated.updated_at, 'string');
+    assert.notEqual(updated.updated_at, 'renderer-updated-at');
+    assert.deepEqual(Object.keys(updated).sort(), [
+      'linked_todo_id',
+      'memo',
+      'title',
+      'updated_at',
+    ]);
+  } finally {
+    if (hadHarness) globalScope[SUPABASE_PRIVATE_HARNESS_KEY] = priorHarness;
+    else delete globalScope[SUPABASE_PRIVATE_HARNESS_KEY];
+    if (hadWebSocket) globalScope.WebSocket = priorWebSocket;
+    else delete globalScope.WebSocket;
+  }
+});
+
+test('legacy receipt compensation atomically preserves a same-id row replaced by another owner', async () => {
+  const globalScope = globalThis as Record<string, unknown>;
+  const priorHarness = globalScope[SUPABASE_PRIVATE_HARNESS_KEY];
+  const hadHarness = Object.prototype.hasOwnProperty.call(globalScope, SUPABASE_PRIVATE_HARNESS_KEY);
+  const priorWebSocket = globalScope.WebSocket;
+  const hadWebSocket = Object.prototype.hasOwnProperty.call(globalScope, 'WebSocket');
+  const deleteStarted = deferred<void>();
+  const deleteGate = deferred<void>();
+  let row: { id: string; user_id: string } | null = {
+    id: 'legacy-replacement-a',
+    user_id: 'legacy-user-a',
+  };
+  const client = {
+    from(table: string) {
+      assert.equal(table, 'private_calendar_events');
+      const predicates = new Map<string, unknown>();
+      const builder = {
+        eq(field: string, value: unknown) {
+          predicates.set(field, value);
+          return builder;
+        },
+        async select() {
+          deleteStarted.resolve();
+          await deleteGate.promise;
+          if (
+            row
+            && [...predicates].every(([field, value]) => row?.[field as 'id' | 'user_id'] === value)
+          ) {
+            const deleted = row;
+            row = null;
+            return { data: [{ id: deleted.id }], error: null };
+          }
+          return { data: [], error: null };
+        },
+      };
+      return { delete: () => builder };
+    },
+  };
+
+  try {
+    const module = await loadCalendarSupabasePrivateModule(client);
+    assert.ok(
+      module.deletePrivateEventForOwner,
+      'legacy compensation must use one id+captured-owner delete statement',
+    );
+    const deletion = module.deletePrivateEventForOwner(
+      'legacy-replacement-a',
+      'legacy-user-a',
+    );
+    await deleteStarted.promise;
+    row = { id: 'legacy-replacement-a', user_id: 'legacy-user-b' };
+    deleteGate.resolve();
+
+    await assert.rejects(deletion, /owner|소유|보상|일치|찾을 수/i);
+    assert.deepEqual(row, {
+      id: 'legacy-replacement-a',
+      user_id: 'legacy-user-b',
+    });
+  } finally {
+    if (hadHarness) globalScope[SUPABASE_PRIVATE_HARNESS_KEY] = priorHarness;
+    else delete globalScope[SUPABASE_PRIVATE_HARNESS_KEY];
+    if (hadWebSocket) globalScope.WebSocket = priorWebSocket;
+    else delete globalScope.WebSocket;
   }
 });
 

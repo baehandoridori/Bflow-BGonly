@@ -25,6 +25,7 @@ import { EpSinglePartWidget } from '@/components/widgets/episode/EpSinglePartWid
 import { WidgetIdContext, IsPopupContext } from '@/components/widgets/Widget';
 import { GradientBackdrop } from '@/components/common/GradientBackdrop';
 import { loadPreferences, loadTheme } from '@/services/settingsService';
+import { applyCommittedGoogleDelete } from '@/services/calendarService';
 import { loadSession, loadUsers, setUsersSheetsMode } from '@/services/userService';
 import { applyPreferencesToDOM } from '@/utils/typography';
 import { readAll, checkConnection, readMetadata } from '@/services/supabaseService';
@@ -47,6 +48,18 @@ export function notifyDataChangeWithCooldown() {
   _reloadCooldown = true;
   setTimeout(() => { _reloadCooldown = false; }, _COOLDOWN_MS);
   return window.electronAPI?.dataNotifyChange?.();
+}
+
+/** 메인/다른 위젯에서 온 calendar-changed를 이 팝업의 독립 cache에 먼저 반영한다.
+ *  PR2에서는 Google 영속 삭제 완료 marker만 exact tombstone 처리하며, 일반 add/update
+ *  재조회와 realtime 확장은 PR4 범위로 남긴다. */
+export async function applyIncomingCalendarChangeInPopup(payload: unknown): Promise<void> {
+  try {
+    applyCommittedGoogleDelete(payload);
+  } catch (error) {
+    console.warn('[Calendar] 팝업 확정 삭제 반영 실패:', error);
+  }
+  window.dispatchEvent(new CustomEvent('bflow:calendar-changed', { detail: payload }));
 }
 
 // 현황판은 App.tsx 와 동일하게 lazy — 팝업 엔트리 청크를 무겁게 하지 않는다 (피드백 36).
@@ -315,7 +328,7 @@ export function WidgetPopup({ widgetId, extraParams }: { widgetId: string; extra
   // 무한 루프 방지: 송신자 제외는 메인 프로세스에서 처리됨
   useEffect(() => {
     const cleanup = window.electronAPI?.onCalendarChanged?.((payload) => {
-      window.dispatchEvent(new CustomEvent('bflow:calendar-changed', { detail: payload }));
+      void applyIncomingCalendarChangeInPopup(payload);
     });
     return () => { cleanup?.(); };
   }, []);
