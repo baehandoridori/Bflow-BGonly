@@ -16,7 +16,7 @@ interface CalendarIpcDeps {
   getSessionUserIdOrThrow: () => string;
 }
 
-type CalendarEventCreateInput = Omit<Parameters<typeof store.createEvent>[0], 'id' | 'created_by'>;
+type CalendarEventCreateInput = Parameters<typeof store.createEvent>[0];
 
 function wrap<T extends unknown[], R>(fn: (...args: T) => Promise<R>) {
   return async (_e: unknown, ...args: T): Promise<R> => {
@@ -254,8 +254,7 @@ export function registerCalendarIpc(deps: CalendarIpcDeps): void {
       linked_scene_id: input.linked_scene_id,
       linked_department: input.linked_department,
       linked_todo_id: input.linked_todo_id,
-      created_by: user.id,
-    });
+    }, user.id);
     await emitCalendarEventNotifications({
       actorId: user.id,
       action: 'create',
@@ -308,7 +307,7 @@ export function registerCalendarIpc(deps: CalendarIpcDeps): void {
     if (updates.linked_scene_id !== undefined) safeUpdates.linked_scene_id = updates.linked_scene_id;
     if (updates.linked_department !== undefined) safeUpdates.linked_department = updates.linked_department;
     if (updates.linked_todo_id !== undefined) safeUpdates.linked_todo_id = updates.linked_todo_id;
-    const updated = await store.updateEvent(id, safeUpdates, previous.calendar_id);
+    const updated = await store.updateEvent(id, safeUpdates, previous.calendar_id, user.id);
     await emitCalendarEventNotifications({
       actorId: user.id,
       action: 'update',
@@ -331,7 +330,7 @@ export function registerCalendarIpc(deps: CalendarIpcDeps): void {
       throw new Error('이 일정을 삭제할 권한이 없습니다');
     }
 
-    await store.deleteEvent(id, previous.calendar_id);
+    await store.deleteEvent(id, previous.calendar_id, user.id);
     await emitCalendarEventNotifications({
       actorId: user.id,
       action: 'delete',

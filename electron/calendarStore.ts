@@ -82,6 +82,13 @@ function warnMissingTable(table: string, emptyResult: string): void {
   console.warn(`[calendar] ${table} 테이블 없음 — 마이그레이션 전, ${emptyResult} 반환`);
 }
 
+function requireEventRpcRow(data: unknown, operation: string): CalendarEventRow {
+  if (!Array.isArray(data) || data.length !== 1 || !data[0]) {
+    throw new Error(`${operation} RPC가 결과 행을 반환하지 않았습니다`);
+  }
+  return data[0] as CalendarEventRow;
+}
+
 // ── 캘린더 ──────────────────────────────────────
 
 export async function listCalendarsWithMembers(): Promise<{ calendars: CalendarRow[]; members: CalendarMemberRow[] }> {
@@ -258,49 +265,65 @@ export async function getEventByIdForWrite(id: string): Promise<CalendarEventRow
   return readEventById(id, false);
 }
 
+export type CalendarEventWriteFields = Pick<
+  CalendarEventRow,
+  | 'calendar_id'
+  | 'title'
+  | 'memo'
+  | 'tag_id'
+  | 'all_day'
+  | 'start_date'
+  | 'end_date'
+  | 'start_time'
+  | 'end_time'
+  | 'linked_episode'
+  | 'linked_part'
+  | 'linked_sheet_name'
+  | 'linked_scene_id'
+  | 'linked_department'
+  | 'linked_todo_id'
+>;
+
 export async function createEvent(
-  input: Omit<CalendarEventRow, 'id' | 'created_at' | 'updated_at'> & { id?: string },
+  input: CalendarEventWriteFields,
+  actorId: string,
 ): Promise<CalendarEventRow> {
-  const { data, error } = await supabase
-    .from('calendar_events')
-    .insert(input)
-    .select('*')
-    .single();
+  const { data, error } = await supabase.rpc('create_calendar_event_authorized', {
+    p_actor_id: actorId,
+    p_event: input,
+  });
   throwIfError(error);
-  return data as CalendarEventRow;
+  return requireEventRpcRow(data, '일정 생성');
 }
 
 export async function updateEvent(
   id: string,
-  updates: Partial<Omit<CalendarEventRow, 'id' | 'created_at'>>,
+  updates: Partial<CalendarEventWriteFields>,
   expectedCalendarId: string,
+  actorId: string,
 ): Promise<CalendarEventRow> {
-  const { data, error } = await supabase
-    .from('calendar_events')
-    .update({ ...updates, updated_at: new Date().toISOString() })
-    .eq('id', id)
-    .eq('calendar_id', expectedCalendarId)
-    .select('*')
-    .maybeSingle();
+  const { data, error } = await supabase.rpc('update_calendar_event_authorized', {
+    p_actor_id: actorId,
+    p_event_id: id,
+    p_expected_calendar_id: expectedCalendarId,
+    p_updates: updates,
+  });
   throwIfError(error);
-  if (!data) {
-    throw new Error('일정이 다른 캘린더로 변경되었습니다. 새로고침 후 다시 시도해 주세요');
-  }
-  return data as CalendarEventRow;
+  return requireEventRpcRow(data, '일정 수정');
 }
 
-export async function deleteEvent(id: string, expectedCalendarId: string): Promise<void> {
-  const { data, error } = await supabase
-    .from('calendar_events')
-    .delete()
-    .eq('id', id)
-    .eq('calendar_id', expectedCalendarId)
-    .select('id')
-    .maybeSingle();
+export async function deleteEvent(
+  id: string,
+  expectedCalendarId: string,
+  actorId: string,
+): Promise<void> {
+  const { data, error } = await supabase.rpc('delete_calendar_event_authorized', {
+    p_actor_id: actorId,
+    p_event_id: id,
+    p_expected_calendar_id: expectedCalendarId,
+  });
   throwIfError(error);
-  if (!data) {
-    throw new Error('일정이 다른 캘린더로 변경되었습니다. 새로고침 후 다시 시도해 주세요');
-  }
+  requireEventRpcRow(data, '일정 삭제');
 }
 
 // ── 태그 ────────────────────────────────────────

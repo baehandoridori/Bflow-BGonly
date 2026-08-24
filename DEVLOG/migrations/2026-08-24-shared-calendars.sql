@@ -124,7 +124,325 @@ $$;
 COMMENT ON FUNCTION public.replace_calendar_members(UUID, JSONB) IS
   '캘린더별 부모 행 잠금으로 직렬화하는 멤버 전체 교체 atomic RPC. 빈 배열은 전체 삭제, 잘못된 입력·없는 캘린더는 변경 전 거부.';
 
--- ── 2-1) 태그 원자적 전체 교체 RPC ────────────────────────────
+-- ── 2-1) 일정 쓰기 권한 원자적 검증 RPC ───────────────────────
+-- IPC 사전 검사는 친절한 오류용이다. 실제 권한은 부모 캘린더 행을 잠근 뒤
+-- 같은 트랜잭션에서 재확인하여 멤버 권한 회수와 일정 쓰기의 TOCTOU를 막는다.
+CREATE OR REPLACE FUNCTION public.create_calendar_event_authorized(
+  p_actor_id TEXT,
+  p_event JSONB
+)
+RETURNS SETOF calendar_events
+LANGUAGE plpgsql
+SECURITY INVOKER
+SET search_path = public, pg_temp
+AS $$
+DECLARE
+  v_allowed_keys CONSTANT TEXT[] := ARRAY[
+    'calendar_id', 'title', 'memo', 'tag_id', 'all_day', 'start_date', 'end_date',
+    'start_time', 'end_time', 'linked_episode', 'linked_part', 'linked_sheet_name',
+    'linked_scene_id', 'linked_department', 'linked_todo_id'
+  ];
+  v_required_keys CONSTANT TEXT[] := ARRAY[
+    'calendar_id', 'title', 'memo', 'tag_id', 'all_day', 'start_date', 'end_date',
+    'start_time', 'end_time', 'linked_episode', 'linked_part', 'linked_sheet_name',
+    'linked_scene_id', 'linked_department', 'linked_todo_id'
+  ];
+  v_calendar_id UUID;
+  v_calendar calendars%ROWTYPE;
+  v_created calendar_events%ROWTYPE;
+BEGIN
+  IF p_actor_id IS NULL OR btrim(p_actor_id) = '' THEN
+    RAISE EXCEPTION 'A session actor is required' USING ERRCODE = '42501';
+  END IF;
+
+  IF p_event IS NULL OR jsonb_typeof(p_event) <> 'object' THEN
+    RAISE EXCEPTION 'p_event must be a JSON object' USING ERRCODE = '22023';
+  END IF;
+
+  IF EXISTS (
+    SELECT 1
+    FROM jsonb_object_keys(p_event) AS submitted(key)
+    WHERE NOT (submitted.key = ANY (v_allowed_keys))
+  ) THEN
+    RAISE EXCEPTION 'p_event contains an unknown or immutable field' USING ERRCODE = '22023';
+  END IF;
+
+  IF EXISTS (
+    SELECT 1
+    FROM unnest(v_required_keys) AS required(key)
+    WHERE NOT (p_event ? required.key)
+  ) THEN
+    RAISE EXCEPTION 'p_event is missing a canonical field' USING ERRCODE = '22023';
+  END IF;
+
+  BEGIN
+    v_calendar_id := (p_event->>'calendar_id')::UUID;
+  EXCEPTION WHEN invalid_text_representation THEN
+    RAISE EXCEPTION 'calendar_id must be a UUID' USING ERRCODE = '22023';
+  END;
+  IF v_calendar_id IS NULL THEN
+    RAISE EXCEPTION 'Target calendar is missing' USING ERRCODE = '23503';
+  END IF;
+
+  -- delete_user_cascade와 같은 부모→자식 테이블 순서. 일반 writer끼리는 호환된다.
+  LOCK TABLE calendars IN ROW EXCLUSIVE MODE;
+  LOCK TABLE calendar_events IN ROW EXCLUSIVE MODE;
+
+  SELECT candidate.* INTO v_calendar
+  FROM calendars AS candidate
+  WHERE candidate.id = v_calendar_id
+  FOR UPDATE;
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'Target calendar % not found', v_calendar_id USING ERRCODE = '23503';
+  END IF;
+
+  IF v_calendar.owner_id <> p_actor_id
+     AND NOT EXISTS (
+       SELECT 1
+       FROM calendar_members AS permission
+       WHERE permission.calendar_id = v_calendar.id
+         AND permission.user_id = p_actor_id
+         AND permission.can_edit IS TRUE
+     ) THEN
+    RAISE EXCEPTION 'Calendar event create permission denied' USING ERRCODE = '42501';
+  END IF;
+
+  INSERT INTO calendar_events (
+    calendar_id, title, memo, tag_id, all_day, start_date, end_date,
+    start_time, end_time, linked_episode, linked_part, linked_sheet_name,
+    linked_scene_id, linked_department, linked_todo_id, created_by
+  ) VALUES (
+    v_calendar_id,
+    p_event->>'title',
+    p_event->>'memo',
+    (p_event->>'tag_id')::UUID,
+    (p_event->>'all_day')::BOOLEAN,
+    (p_event->>'start_date')::DATE,
+    (p_event->>'end_date')::DATE,
+    p_event->>'start_time',
+    p_event->>'end_time',
+    (p_event->>'linked_episode')::INTEGER,
+    p_event->>'linked_part',
+    p_event->>'linked_sheet_name',
+    p_event->>'linked_scene_id',
+    p_event->>'linked_department',
+    p_event->>'linked_todo_id',
+    p_actor_id
+  )
+  RETURNING * INTO v_created;
+
+  RETURN NEXT v_created;
+END;
+$$;
+
+COMMENT ON FUNCTION public.create_calendar_event_authorized(TEXT, JSONB) IS
+  '부모 캘린더 잠금 후 owner/can_edit 권한을 재확인하고 세션 actor를 created_by로 강제하는 일정 생성 RPC.';
+
+CREATE OR REPLACE FUNCTION public.update_calendar_event_authorized(
+  p_actor_id TEXT,
+  p_event_id UUID,
+  p_expected_calendar_id UUID,
+  p_updates JSONB
+)
+RETURNS SETOF calendar_events
+LANGUAGE plpgsql
+SECURITY INVOKER
+SET search_path = public, pg_temp
+AS $$
+DECLARE
+  v_allowed_keys CONSTANT TEXT[] := ARRAY[
+    'calendar_id', 'title', 'memo', 'tag_id', 'all_day', 'start_date', 'end_date',
+    'start_time', 'end_time', 'linked_episode', 'linked_part', 'linked_sheet_name',
+    'linked_scene_id', 'linked_department', 'linked_todo_id'
+  ];
+  v_target_calendar_id UUID;
+  v_source calendars%ROWTYPE;
+  v_target calendars%ROWTYPE;
+  v_existing calendar_events%ROWTYPE;
+  v_updated calendar_events%ROWTYPE;
+BEGIN
+  IF p_actor_id IS NULL OR btrim(p_actor_id) = '' THEN
+    RAISE EXCEPTION 'A session actor is required' USING ERRCODE = '42501';
+  END IF;
+
+  IF p_updates IS NULL OR jsonb_typeof(p_updates) <> 'object' THEN
+    RAISE EXCEPTION 'p_updates must be a JSON object' USING ERRCODE = '22023';
+  END IF;
+
+  IF EXISTS (
+    SELECT 1
+    FROM jsonb_object_keys(p_updates) AS submitted(key)
+    WHERE NOT (submitted.key = ANY (v_allowed_keys))
+  ) THEN
+    RAISE EXCEPTION 'p_updates contains an unknown or immutable field' USING ERRCODE = '22023';
+  END IF;
+
+  IF p_expected_calendar_id IS NULL THEN
+    RAISE EXCEPTION 'Expected source calendar is missing' USING ERRCODE = '23503';
+  END IF;
+
+  v_target_calendar_id := p_expected_calendar_id;
+  IF p_updates ? 'calendar_id' THEN
+    BEGIN
+      v_target_calendar_id := (p_updates->>'calendar_id')::UUID;
+    EXCEPTION WHEN invalid_text_representation THEN
+      RAISE EXCEPTION 'calendar_id must be a UUID' USING ERRCODE = '22023';
+    END;
+    IF v_target_calendar_id IS NULL THEN
+      RAISE EXCEPTION 'Target calendar is missing' USING ERRCODE = '23503';
+    END IF;
+  END IF;
+
+  LOCK TABLE calendars IN ROW EXCLUSIVE MODE;
+  LOCK TABLE calendar_events IN ROW EXCLUSIVE MODE;
+
+  -- source와 payload에서 파생한 target을 UUID 순서로 잠가 이동끼리의 역순 교착을 피한다.
+  PERFORM candidate.id
+  FROM calendars AS candidate
+  WHERE candidate.id = ANY (ARRAY[p_expected_calendar_id, v_target_calendar_id])
+  ORDER BY candidate.id
+  FOR UPDATE;
+
+  SELECT candidate.* INTO v_source
+  FROM calendars AS candidate
+  WHERE candidate.id = p_expected_calendar_id;
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'Source calendar % not found', p_expected_calendar_id USING ERRCODE = '23503';
+  END IF;
+
+  SELECT candidate.* INTO v_target
+  FROM calendars AS candidate
+  WHERE candidate.id = v_target_calendar_id;
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'Target calendar % not found', v_target_calendar_id USING ERRCODE = '23503';
+  END IF;
+
+  SELECT current_event.* INTO v_existing
+  FROM calendar_events AS current_event
+  WHERE current_event.id = p_event_id
+  FOR UPDATE;
+  IF NOT FOUND OR v_existing.calendar_id <> p_expected_calendar_id THEN
+    RAISE EXCEPTION 'Calendar event source changed; refresh and retry' USING ERRCODE = '40001';
+  END IF;
+
+  IF v_source.owner_id <> p_actor_id
+     AND NOT EXISTS (
+       SELECT 1
+       FROM calendar_members AS permission
+       WHERE permission.calendar_id = v_source.id
+         AND permission.user_id = p_actor_id
+         AND permission.can_edit IS TRUE
+     ) THEN
+    RAISE EXCEPTION 'Calendar event source permission denied' USING ERRCODE = '42501';
+  END IF;
+
+  IF v_target.owner_id <> p_actor_id
+     AND NOT EXISTS (
+       SELECT 1
+       FROM calendar_members AS permission
+       WHERE permission.calendar_id = v_target.id
+         AND permission.user_id = p_actor_id
+         AND permission.can_edit IS TRUE
+     ) THEN
+    RAISE EXCEPTION 'Calendar event target permission denied' USING ERRCODE = '42501';
+  END IF;
+
+  UPDATE calendar_events AS target_event
+  SET calendar_id = CASE WHEN p_updates ? 'calendar_id' THEN v_target_calendar_id ELSE v_existing.calendar_id END,
+      title = CASE WHEN p_updates ? 'title' THEN p_updates->>'title' ELSE v_existing.title END,
+      memo = CASE WHEN p_updates ? 'memo' THEN p_updates->>'memo' ELSE v_existing.memo END,
+      tag_id = CASE WHEN p_updates ? 'tag_id' THEN (p_updates->>'tag_id')::UUID ELSE v_existing.tag_id END,
+      all_day = CASE WHEN p_updates ? 'all_day' THEN (p_updates->>'all_day')::BOOLEAN ELSE v_existing.all_day END,
+      start_date = CASE WHEN p_updates ? 'start_date' THEN (p_updates->>'start_date')::DATE ELSE v_existing.start_date END,
+      end_date = CASE WHEN p_updates ? 'end_date' THEN (p_updates->>'end_date')::DATE ELSE v_existing.end_date END,
+      start_time = CASE WHEN p_updates ? 'start_time' THEN p_updates->>'start_time' ELSE v_existing.start_time END,
+      end_time = CASE WHEN p_updates ? 'end_time' THEN p_updates->>'end_time' ELSE v_existing.end_time END,
+      linked_episode = CASE WHEN p_updates ? 'linked_episode' THEN (p_updates->>'linked_episode')::INTEGER ELSE v_existing.linked_episode END,
+      linked_part = CASE WHEN p_updates ? 'linked_part' THEN p_updates->>'linked_part' ELSE v_existing.linked_part END,
+      linked_sheet_name = CASE WHEN p_updates ? 'linked_sheet_name' THEN p_updates->>'linked_sheet_name' ELSE v_existing.linked_sheet_name END,
+      linked_scene_id = CASE WHEN p_updates ? 'linked_scene_id' THEN p_updates->>'linked_scene_id' ELSE v_existing.linked_scene_id END,
+      linked_department = CASE WHEN p_updates ? 'linked_department' THEN p_updates->>'linked_department' ELSE v_existing.linked_department END,
+      linked_todo_id = CASE WHEN p_updates ? 'linked_todo_id' THEN p_updates->>'linked_todo_id' ELSE v_existing.linked_todo_id END,
+      updated_at = now()
+  WHERE target_event.id = p_event_id
+  RETURNING * INTO v_updated;
+
+  RETURN NEXT v_updated;
+END;
+$$;
+
+COMMENT ON FUNCTION public.update_calendar_event_authorized(TEXT, UUID, UUID, JSONB) IS
+  'source/target 부모와 일정 행을 순서대로 잠근 뒤 양쪽 owner/can_edit 권한과 expected source를 재확인하는 일정 수정 RPC.';
+
+CREATE OR REPLACE FUNCTION public.delete_calendar_event_authorized(
+  p_actor_id TEXT,
+  p_event_id UUID,
+  p_expected_calendar_id UUID
+)
+RETURNS SETOF calendar_events
+LANGUAGE plpgsql
+SECURITY INVOKER
+SET search_path = public, pg_temp
+AS $$
+DECLARE
+  v_source calendars%ROWTYPE;
+  v_existing calendar_events%ROWTYPE;
+  v_deleted calendar_events%ROWTYPE;
+BEGIN
+  IF p_actor_id IS NULL OR btrim(p_actor_id) = '' THEN
+    RAISE EXCEPTION 'A session actor is required' USING ERRCODE = '42501';
+  END IF;
+  IF p_expected_calendar_id IS NULL THEN
+    RAISE EXCEPTION 'Expected source calendar is missing' USING ERRCODE = '23503';
+  END IF;
+
+  LOCK TABLE calendars IN ROW EXCLUSIVE MODE;
+  LOCK TABLE calendar_events IN ROW EXCLUSIVE MODE;
+
+  PERFORM candidate.id
+  FROM calendars AS candidate
+  WHERE candidate.id = p_expected_calendar_id
+  ORDER BY candidate.id
+  FOR UPDATE;
+
+  SELECT candidate.* INTO v_source
+  FROM calendars AS candidate
+  WHERE candidate.id = p_expected_calendar_id;
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'Source calendar % not found', p_expected_calendar_id USING ERRCODE = '23503';
+  END IF;
+
+  SELECT current_event.* INTO v_existing
+  FROM calendar_events AS current_event
+  WHERE current_event.id = p_event_id
+  FOR UPDATE;
+  IF NOT FOUND OR v_existing.calendar_id <> p_expected_calendar_id THEN
+    RAISE EXCEPTION 'Calendar event source changed; refresh and retry' USING ERRCODE = '40001';
+  END IF;
+
+  IF v_source.owner_id <> p_actor_id
+     AND NOT EXISTS (
+       SELECT 1
+       FROM calendar_members AS permission
+       WHERE permission.calendar_id = v_source.id
+         AND permission.user_id = p_actor_id
+         AND permission.can_edit IS TRUE
+     ) THEN
+    RAISE EXCEPTION 'Calendar event delete permission denied' USING ERRCODE = '42501';
+  END IF;
+
+  DELETE FROM calendar_events AS target_event
+  WHERE target_event.id = p_event_id
+  RETURNING * INTO v_deleted;
+
+  RETURN NEXT v_deleted;
+END;
+$$;
+
+COMMENT ON FUNCTION public.delete_calendar_event_authorized(TEXT, UUID, UUID) IS
+  'source 부모와 일정 행을 잠근 뒤 owner/can_edit 권한과 expected source를 재확인하는 일정 삭제 RPC.';
+
+-- ── 2-2) 태그 원자적 전체 교체 RPC ────────────────────────────
 -- 함수 안의 예외는 호출 전체를 rollback한다. 따라서 태그 삭제의 FK SET NULL도 후속 실패 시 복구된다.
 CREATE OR REPLACE FUNCTION public.replace_calendar_tags(p_tags JSONB)
 RETURNS TABLE (id UUID, name TEXT, color TEXT, sort_order INTEGER)

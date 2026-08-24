@@ -454,10 +454,157 @@ test('calendar event update and delete bind the write to the calendar authorized
       'event-1',
       { title: '수정됨' },
       'calendar-1',
+      'user-1',
     ]]);
-    assert.deepEqual(deleteCalls, [['event-1', 'calendar-1']]);
+    assert.deepEqual(deleteCalls, [['event-1', 'calendar-1', 'user-1']]);
   } finally {
     harness.restore();
+  }
+});
+
+test('calendar event create passes the session actor and strips renderer-controlled fields', async () => {
+  const createCalls: unknown[][] = [];
+  const input = {
+    calendar_id: 'calendar-1',
+    title: '새 일정',
+    memo: null,
+    tag_id: null,
+    all_day: true,
+    start_date: '2026-08-26',
+    end_date: '2026-08-26',
+    start_time: null,
+    end_time: null,
+    linked_episode: null,
+    linked_part: null,
+    linked_sheet_name: null,
+    linked_scene_id: null,
+    linked_department: null,
+    linked_todo_id: null,
+    id: 'spoofed-id',
+    created_by: 'spoofed-actor',
+    created_at: '2099-01-01T00:00:00.000Z',
+    updated_at: '2099-01-01T00:00:00.000Z',
+    owner_id: 'spoofed-owner',
+  };
+  const harness = await createIpcHarness({
+    getUserRole: async () => 'user',
+    getCalendarWithMembers: async () => ({
+      calendar: calendarRow({ owner_id: 'session-user' }),
+      members: [],
+    }),
+    createEvent: async (...args) => {
+      createCalls.push(args);
+      return calendarEventRow({ title: '새 일정', created_by: 'session-user' });
+    },
+  }, 'session-user');
+  try {
+    await harness.invoke('calendar:events:create', input);
+    assert.deepEqual(createCalls, [[{
+      calendar_id: 'calendar-1',
+      title: '새 일정',
+      memo: null,
+      tag_id: null,
+      all_day: true,
+      start_date: '2026-08-26',
+      end_date: '2026-08-26',
+      start_time: null,
+      end_time: null,
+      linked_episode: null,
+      linked_part: null,
+      linked_sheet_name: null,
+      linked_scene_id: null,
+      linked_department: null,
+      linked_todo_id: null,
+    }, 'session-user']]);
+  } finally {
+    harness.restore();
+  }
+});
+
+test('calendar event move passes the expected source, whitelisted target patch, and session actor', async () => {
+  const updateCalls: unknown[][] = [];
+  const previous = calendarEventRow({ calendar_id: 'source-calendar' });
+  const harness = await createIpcHarness({
+    getUserRole: async () => 'user',
+    getEventByIdForWrite: async () => previous,
+    getCalendarWithMembers: async (calendarId) => ({
+      calendar: calendarRow({ id: calendarId, owner_id: 'session-user' }),
+      members: [],
+    }),
+    updateEvent: async (...args) => {
+      updateCalls.push(args);
+      return { ...previous, calendar_id: 'target-calendar', title: '이동됨', memo: null };
+    },
+  }, 'session-user');
+  try {
+    await harness.invoke('calendar:events:update', 'event-1', {
+      calendar_id: 'target-calendar',
+      title: '이동됨',
+      memo: null,
+      created_by: 'spoofed-actor',
+      created_at: '2099-01-01T00:00:00.000Z',
+      updated_at: '2099-01-01T00:00:00.000Z',
+      id: 'spoofed-id',
+      arbitrary: 'spoofed-value',
+    });
+    assert.deepEqual(updateCalls, [[
+      'event-1',
+      { calendar_id: 'target-calendar', title: '이동됨', memo: null },
+      'source-calendar',
+      'session-user',
+    ]]);
+  } finally {
+    harness.restore();
+  }
+});
+
+test('calendar event RPC permission and conflict errors do not broadcast success', async () => {
+  const originalError = console.error;
+  const previous = calendarEventRow();
+  const scenarios = [
+    {
+      channel: 'calendar:events:create',
+      args: [{
+        calendar_id: 'calendar-1', title: '새 일정', memo: null, tag_id: null,
+        all_day: true, start_date: '2026-08-26', end_date: '2026-08-26',
+        start_time: null, end_time: null, linked_episode: null, linked_part: null,
+        linked_sheet_name: null, linked_scene_id: null, linked_department: null,
+        linked_todo_id: null,
+      }],
+      overrides: { createEvent: async () => { throw new Error('42501 permission denied'); } },
+      expected: /42501|permission denied/,
+    },
+    {
+      channel: 'calendar:events:update',
+      args: ['event-1', { title: '수정됨' }],
+      overrides: { updateEvent: async () => { throw new Error('40001 stale source conflict'); } },
+      expected: /40001|conflict/,
+    },
+    {
+      channel: 'calendar:events:delete',
+      args: ['event-1'],
+      overrides: { deleteEvent: async () => { throw new Error('42501 permission revoked'); } },
+      expected: /42501|permission revoked/,
+    },
+  ] as const;
+  try {
+    console.error = () => {};
+    for (const scenario of scenarios) {
+      const harness = await createIpcHarness({
+        getUserRole: async () => 'user',
+        getEventByIdForWrite: async () => previous,
+        getCalendarWithMembers: async () => ({ calendar: calendarRow(), members: [] }),
+        ...scenario.overrides,
+      });
+      try {
+        await assert.rejects(harness.invoke(scenario.channel, ...scenario.args), scenario.expected);
+        assert.deepEqual(harness.broadcasts, []);
+      } finally {
+        harness.restore();
+      }
+    }
+  } finally {
+    console.error = originalError;
   }
 });
 
@@ -525,67 +672,89 @@ test('calendar store keeps soft reads empty while strict write pre-reads surface
   }
 });
 
-function calendarStoreWriteHarness(dataFor: (operation: 'update' | 'delete') => unknown) {
-  const operations: Array<{
-    operation: 'update' | 'delete';
-    filters: Array<[string, unknown]>;
-  }> = [];
+function calendarStoreRpcHarness(
+  responseFor: (name: string, args: Record<string, unknown>) => {
+    data: unknown;
+    error: { code?: string; message: string } | null;
+  },
+) {
+  const calls: Array<{ name: string; args: Record<string, unknown> }> = [];
   return {
-    operations,
+    calls,
     supabase: {
-      from() {
-        let operation: 'update' | 'delete' = 'update';
-        const filters: Array<[string, unknown]> = [];
-        const response = () => ({ data: dataFor(operation), error: null });
-        const query = {
-          update() {
-            operation = 'update';
-            operations.push({ operation, filters });
-            return query;
-          },
-          delete() {
-            operation = 'delete';
-            operations.push({ operation, filters });
-            return query;
-          },
-          eq(column: string, value: unknown) {
-            filters.push([column, value]);
-            return query;
-          },
-          select() { return query; },
-          single: async () => response(),
-          maybeSingle: async () => response(),
-          then(resolve: (value: unknown) => unknown, reject: (reason: unknown) => unknown) {
-            return Promise.resolve(response()).then(resolve, reject);
-          },
-        };
-        return query;
+      async rpc(name: string, args: Record<string, unknown>) {
+        calls.push({ name, args });
+        return responseFor(name, args);
       },
     },
   };
 }
 
-test('calendar store constrains event update and delete to the authorized source calendar', async () => {
+test('calendar store sends exact authorized RPC arguments and returns typed event rows', async () => {
   const globalScope = globalThis as Record<string, unknown>;
   const hadPrior = Object.prototype.hasOwnProperty.call(globalScope, STORE_HARNESS_KEY);
   const prior = globalScope[STORE_HARNESS_KEY];
-  const harness = calendarStoreWriteHarness((operation) => (
-    operation === 'update' ? calendarEventRow({ title: '수정됨' }) : { id: 'event-1' }
-  ));
+  const created = calendarEventRow({ title: '생성됨' });
+  const updated = calendarEventRow({ calendar_id: 'calendar-2', title: '이동됨' });
+  const deleted = calendarEventRow();
+  const harness = calendarStoreRpcHarness((name) => ({
+    data: name === 'create_calendar_event_authorized'
+      ? [created]
+      : name === 'update_calendar_event_authorized'
+        ? [updated]
+        : [deleted],
+    error: null,
+  }));
   globalScope[STORE_HARNESS_KEY] = harness.supabase;
   try {
     const encoded = Buffer.from(await bundledCalendarStoreSource()).toString('base64');
     const store = await import(`data:text/javascript;base64,${encoded}#calendar-store-${storeNonce++}`) as {
-      updateEvent(id: string, updates: Record<string, unknown>, expectedCalendarId: string): Promise<unknown>;
-      deleteEvent(id: string, expectedCalendarId: string): Promise<void>;
+      createEvent(input: Record<string, unknown>, actorId: string): Promise<unknown>;
+      updateEvent(id: string, updates: Record<string, unknown>, expectedCalendarId: string, actorId: string): Promise<unknown>;
+      deleteEvent(id: string, expectedCalendarId: string, actorId: string): Promise<void>;
     };
 
-    await store.updateEvent('event-1', { title: '수정됨' }, 'calendar-1');
-    await store.deleteEvent('event-1', 'calendar-1');
+    const createInput = {
+      calendar_id: 'calendar-1', title: '생성됨', memo: null, tag_id: null,
+      all_day: true, start_date: '2026-08-26', end_date: '2026-08-26',
+      start_time: null, end_time: null, linked_episode: null, linked_part: null,
+      linked_sheet_name: null, linked_scene_id: null, linked_department: null,
+      linked_todo_id: null,
+    };
+    assert.deepEqual(await store.createEvent(createInput, 'session-user'), created);
+    assert.deepEqual(
+      await store.updateEvent(
+        'event-1',
+        { calendar_id: 'calendar-2', title: '이동됨', memo: null },
+        'calendar-1',
+        'session-user',
+      ),
+      updated,
+    );
+    assert.equal(await store.deleteEvent('event-1', 'calendar-1', 'session-user'), undefined);
 
-    assert.deepEqual(harness.operations.map(({ operation, filters }) => ({ operation, filters })), [
-      { operation: 'update', filters: [['id', 'event-1'], ['calendar_id', 'calendar-1']] },
-      { operation: 'delete', filters: [['id', 'event-1'], ['calendar_id', 'calendar-1']] },
+    assert.deepEqual(harness.calls, [
+      {
+        name: 'create_calendar_event_authorized',
+        args: { p_actor_id: 'session-user', p_event: createInput },
+      },
+      {
+        name: 'update_calendar_event_authorized',
+        args: {
+          p_actor_id: 'session-user',
+          p_event_id: 'event-1',
+          p_expected_calendar_id: 'calendar-1',
+          p_updates: { calendar_id: 'calendar-2', title: '이동됨', memo: null },
+        },
+      },
+      {
+        name: 'delete_calendar_event_authorized',
+        args: {
+          p_actor_id: 'session-user',
+          p_event_id: 'event-1',
+          p_expected_calendar_id: 'calendar-1',
+        },
+      },
     ]);
   } finally {
     if (hadPrior) globalScope[STORE_HARNESS_KEY] = prior;
@@ -593,32 +762,50 @@ test('calendar store constrains event update and delete to the authorized source
   }
 });
 
-test('calendar store rejects a write when the event left the authorized source calendar', async () => {
+test('calendar store propagates RPC errors before checking returned row counts', async () => {
   const globalScope = globalThis as Record<string, unknown>;
   const hadPrior = Object.prototype.hasOwnProperty.call(globalScope, STORE_HARNESS_KEY);
   const prior = globalScope[STORE_HARNESS_KEY];
-  const harness = calendarStoreWriteHarness(() => null);
+  const harness = calendarStoreRpcHarness(() => ({
+    data: [],
+    error: { code: 'PGRST202', message: 'authorized calendar RPC is missing from schema cache' },
+  }));
   globalScope[STORE_HARNESS_KEY] = harness.supabase;
   try {
     const encoded = Buffer.from(await bundledCalendarStoreSource()).toString('base64');
     const store = await import(`data:text/javascript;base64,${encoded}#calendar-store-${storeNonce++}`) as {
-      updateEvent(id: string, updates: Record<string, unknown>, expectedCalendarId: string): Promise<unknown>;
-      deleteEvent(id: string, expectedCalendarId: string): Promise<void>;
+      createEvent(input: Record<string, unknown>, actorId: string): Promise<unknown>;
     };
-    const statuses: string[] = [];
+    await assert.rejects(
+      store.createEvent({ calendar_id: 'calendar-1' }, 'session-user'),
+      /authorized calendar RPC is missing from schema cache/,
+    );
+  } finally {
+    if (hadPrior) globalScope[STORE_HARNESS_KEY] = prior;
+    else delete globalScope[STORE_HARNESS_KEY];
+  }
+});
+
+test('calendar store rejects zero-row create, update, and delete RPC results', async () => {
+  const globalScope = globalThis as Record<string, unknown>;
+  const hadPrior = Object.prototype.hasOwnProperty.call(globalScope, STORE_HARNESS_KEY);
+  const prior = globalScope[STORE_HARNESS_KEY];
+  const harness = calendarStoreRpcHarness(() => ({ data: [], error: null }));
+  globalScope[STORE_HARNESS_KEY] = harness.supabase;
+  try {
+    const encoded = Buffer.from(await bundledCalendarStoreSource()).toString('base64');
+    const store = await import(`data:text/javascript;base64,${encoded}#calendar-store-${storeNonce++}`) as {
+      createEvent(input: Record<string, unknown>, actorId: string): Promise<unknown>;
+      updateEvent(id: string, updates: Record<string, unknown>, expectedCalendarId: string, actorId: string): Promise<unknown>;
+      deleteEvent(id: string, expectedCalendarId: string, actorId: string): Promise<void>;
+    };
     for (const write of [
-      () => store.updateEvent('event-1', { title: '수정됨' }, 'calendar-1'),
-      () => store.deleteEvent('event-1', 'calendar-1'),
+      () => store.createEvent({ calendar_id: 'calendar-1' }, 'session-user'),
+      () => store.updateEvent('event-1', { title: '수정됨' }, 'calendar-1', 'session-user'),
+      () => store.deleteEvent('event-1', 'calendar-1', 'session-user'),
     ]) {
-      try {
-        await write();
-        statuses.push('fulfilled');
-      } catch (error) {
-        assert.match(String(error), /다른 캘린더|새로고침|conflict/i);
-        statuses.push('rejected');
-      }
+      await assert.rejects(write(), /결과 행|returned.*row/i);
     }
-    assert.deepEqual(statuses, ['rejected', 'rejected']);
   } finally {
     if (hadPrior) globalScope[STORE_HARNESS_KEY] = prior;
     else delete globalScope[STORE_HARNESS_KEY];

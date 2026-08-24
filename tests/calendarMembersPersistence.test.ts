@@ -91,3 +91,112 @@ test('delete_user_cascade serializes calendar and event writers before row clean
   assert.ok(parentLockIndex < memberDeleteIndex);
   assert.ok(parentLockIndex < ownerUpdateIndex);
 });
+
+const eventRpcNames = [
+  'create_calendar_event_authorized',
+  'update_calendar_event_authorized',
+  'delete_calendar_event_authorized',
+] as const;
+
+function eventRpc(sql: string, name: typeof eventRpcNames[number]): string {
+  return between(
+    sql,
+    `CREATE OR REPLACE FUNCTION public.${name}`,
+    `COMMENT ON FUNCTION public.${name}`,
+  );
+}
+
+test('calendar event RPCs run as invokers and lock writer tables in parent-to-child order', () => {
+  const sql = readFileSync(migrationPath, 'utf8');
+  for (const name of eventRpcNames) {
+    const fn = eventRpc(sql, name);
+    assert.match(fn, /LANGUAGE\s+plpgsql\s+SECURITY INVOKER\s+SET search_path\s*=\s*public,\s*pg_temp/s);
+    const calendarTableLock = fn.indexOf('LOCK TABLE calendars IN ROW EXCLUSIVE MODE;');
+    const eventTableLock = fn.indexOf('LOCK TABLE calendar_events IN ROW EXCLUSIVE MODE;');
+    assert.ok(calendarTableLock >= 0, `${name} must lock calendars`);
+    assert.ok(calendarTableLock < eventTableLock, `${name} must lock calendars before calendar_events`);
+  }
+});
+
+test('calendar event RPCs authorize only the owner or an explicit can_edit member', () => {
+  const sql = readFileSync(migrationPath, 'utf8');
+  for (const name of eventRpcNames) {
+    const fn = eventRpc(sql, name);
+    assert.match(fn, /owner_id\s*<>\s*p_actor_id/s);
+    assert.match(
+      fn,
+      /calendar_members[\s\S]*user_id\s*=\s*p_actor_id[\s\S]*can_edit\s+IS TRUE/s,
+    );
+    assert.doesNotMatch(fn, /visibility\s*=\s*'team'|role\s*=\s*'admin'/i);
+    assert.match(fn, /ERRCODE\s*=\s*'42501'/);
+  }
+});
+
+test('calendar event create and update reject non-object or non-whitelisted payload fields', () => {
+  const sql = readFileSync(migrationPath, 'utf8');
+  const allowedFields = [
+    'calendar_id', 'title', 'memo', 'tag_id', 'all_day', 'start_date', 'end_date',
+    'start_time', 'end_time', 'linked_episode', 'linked_part', 'linked_sheet_name',
+    'linked_scene_id', 'linked_department', 'linked_todo_id',
+  ];
+  for (const name of ['create_calendar_event_authorized', 'update_calendar_event_authorized'] as const) {
+    const fn = eventRpc(sql, name);
+    assert.match(fn, /jsonb_typeof\([^)]*\)\s*<>\s*'object'/);
+    assert.match(fn, /jsonb_object_keys/);
+    assert.match(fn, /ERRCODE\s*=\s*'22023'/);
+    for (const field of allowedFields) assert.match(fn, new RegExp(`'${field}'`));
+    for (const immutable of ['id', 'created_by', 'created_at', 'updated_at']) {
+      assert.doesNotMatch(fn, new RegExp(`allowed[^;]*'${immutable}'`, 'is'));
+    }
+  }
+
+  const createFn = eventRpc(sql, 'create_calendar_event_authorized');
+  assert.match(createFn, /v_required_keys\s+CONSTANT\s+TEXT\[\]/);
+  assert.match(createFn, /unnest\(v_required_keys\)[\s\S]*NOT \(p_event \? required\.key\)/);
+});
+
+test('calendar event create and delete lock parent rows before writing event rows', () => {
+  const sql = readFileSync(migrationPath, 'utf8');
+  const createFn = eventRpc(sql, 'create_calendar_event_authorized');
+  const createParentLock = createFn.indexOf('FROM calendars AS candidate');
+  const createParentForUpdate = createFn.indexOf('FOR UPDATE;', createParentLock);
+  const createWrite = createFn.indexOf('INSERT INTO calendar_events');
+  assert.ok(createParentLock >= 0 && createParentLock < createParentForUpdate);
+  assert.ok(createParentForUpdate < createWrite, 'create permission parent must stay locked through insert');
+
+  const deleteFn = eventRpc(sql, 'delete_calendar_event_authorized');
+  const deleteParentLock = deleteFn.indexOf('ORDER BY candidate.id\n  FOR UPDATE;');
+  const deleteEventLock = deleteFn.indexOf('FROM calendar_events AS current_event');
+  const deleteWrite = deleteFn.indexOf('DELETE FROM calendar_events');
+  assert.ok(deleteParentLock >= 0 && deleteParentLock < deleteEventLock);
+  assert.ok(deleteEventLock < deleteWrite, 'delete must lock its event after its parent and before deletion');
+});
+
+test('calendar event update locks ordered source and target parents before the event row and checks stale source', () => {
+  const sql = readFileSync(migrationPath, 'utf8');
+  const fn = eventRpc(sql, 'update_calendar_event_authorized');
+  const parentLock = fn.indexOf('ORDER BY candidate.id\n  FOR UPDATE;');
+  const eventLock = fn.indexOf('FROM calendar_events AS current_event');
+  const staleGuard = fn.indexOf('v_existing.calendar_id <> p_expected_calendar_id');
+  const write = fn.indexOf('UPDATE calendar_events');
+
+  assert.ok(parentLock >= 0, 'source and derived target parents must be UUID-ordered and locked');
+  assert.ok(parentLock < eventLock, 'parent rows must be locked before the event row');
+  assert.ok(eventLock < staleGuard, 'the locked event source must be checked for staleness');
+  assert.ok(staleGuard < write, 'stale source must fail before the update');
+  assert.match(fn, /ERRCODE\s*=\s*'40001'/);
+  assert.match(fn, /p_updates\s*\?\s*'calendar_id'/);
+});
+
+test('calendar event update preserves omitted fields, explicit null clears, and owns updated_at', () => {
+  const sql = readFileSync(migrationPath, 'utf8');
+  const fn = eventRpc(sql, 'update_calendar_event_authorized');
+  for (const field of ['memo', 'tag_id', 'start_time', 'end_time', 'linked_part', 'linked_todo_id']) {
+    assert.match(
+      fn,
+      new RegExp(`${field}\\s*=\\s*CASE\\s+WHEN\\s+p_updates\\s*\\?\\s*'${field}'`, 's'),
+    );
+  }
+  assert.match(fn, /updated_at\s*=\s*now\(\)/);
+  assert.doesNotMatch(fn, /created_by\s*=/);
+});
