@@ -50,6 +50,8 @@ export function EventQuickEdit({
   const users = useAuthStore((s) => s.users);
 
   const isVacation = event.type === 'vacation';
+  const hasCalendarDerivedFields = event.sourceCalendarId?.startsWith('bflow:') === true
+    || (event.source === 'bflow' && Boolean(event.calendarId));
   const fieldStyle = {
     background: 'rgb(var(--color-bg-primary) / 0.82)',
     border: '1px solid rgb(var(--color-bg-border) / 0.56)',
@@ -86,9 +88,11 @@ export function EventQuickEdit({
   }, [onClose]);
 
   const handleSave = useCallback(() => {
-    onUpdate(event.id, { title, startDate, endDate, type, memo });
+    const updates: Partial<CalendarEvent> = { title, startDate, endDate, memo };
+    if (!hasCalendarDerivedFields) updates.type = type;
+    onUpdate(event.id, updates);
     onClose();
-  }, [event.id, title, startDate, endDate, type, memo, onUpdate, onClose]);
+  }, [event.id, title, startDate, endDate, type, memo, hasCalendarDerivedFields, onUpdate, onClose]);
 
   const handleDelete = useCallback(() => {
     onDelete(event.id);
@@ -164,8 +168,9 @@ export function EventQuickEdit({
                 {EVENT_COLORS.map((color) => (
                   <button
                     key={color}
-                    onClick={() => onUpdateColor(event.id, color)}
-                    className="relative w-8 h-8 rounded-lg transition-transform hover:scale-110 cursor-pointer"
+                    disabled={hasCalendarDerivedFields}
+                    onClick={hasCalendarDerivedFields ? undefined : () => onUpdateColor(event.id, color)}
+                    className="relative w-8 h-8 rounded-lg transition-transform hover:scale-110 cursor-pointer disabled:cursor-not-allowed disabled:opacity-55 disabled:hover:scale-100"
                     style={{
                       background: color,
                       border: event.color === color ? '2px solid white' : '2px solid transparent',
@@ -245,8 +250,9 @@ export function EventQuickEdit({
                     {TYPE_OPTIONS.map((opt) => (
                       <button
                         key={opt.value}
-                        onClick={() => setType(opt.value)}
-                        className="flex-1 py-1.5 rounded-lg text-[11px] font-medium transition-colors cursor-pointer"
+                        disabled={hasCalendarDerivedFields}
+                        onClick={hasCalendarDerivedFields ? undefined : () => setType(opt.value)}
+                        className="flex-1 py-1.5 rounded-lg text-[11px] font-medium transition-colors cursor-pointer disabled:cursor-not-allowed disabled:opacity-70"
                         style={{
                           background: type === opt.value ? 'rgb(var(--color-accent))' : 'rgb(var(--color-bg-primary) / 0.82)',
                           color: type === opt.value ? 'rgb(var(--color-on-accent))' : 'rgb(var(--color-text-secondary))',
