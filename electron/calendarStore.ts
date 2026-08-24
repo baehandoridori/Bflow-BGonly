@@ -273,20 +273,34 @@ export async function createEvent(
 export async function updateEvent(
   id: string,
   updates: Partial<Omit<CalendarEventRow, 'id' | 'created_at'>>,
+  expectedCalendarId: string,
 ): Promise<CalendarEventRow> {
   const { data, error } = await supabase
     .from('calendar_events')
     .update({ ...updates, updated_at: new Date().toISOString() })
     .eq('id', id)
+    .eq('calendar_id', expectedCalendarId)
     .select('*')
-    .single();
+    .maybeSingle();
   throwIfError(error);
+  if (!data) {
+    throw new Error('일정이 다른 캘린더로 변경되었습니다. 새로고침 후 다시 시도해 주세요');
+  }
   return data as CalendarEventRow;
 }
 
-export async function deleteEvent(id: string): Promise<void> {
-  const { error } = await supabase.from('calendar_events').delete().eq('id', id);
+export async function deleteEvent(id: string, expectedCalendarId: string): Promise<void> {
+  const { data, error } = await supabase
+    .from('calendar_events')
+    .delete()
+    .eq('id', id)
+    .eq('calendar_id', expectedCalendarId)
+    .select('id')
+    .maybeSingle();
   throwIfError(error);
+  if (!data) {
+    throw new Error('일정이 다른 캘린더로 변경되었습니다. 새로고침 후 다시 시도해 주세요');
+  }
 }
 
 // ── 태그 ────────────────────────────────────────

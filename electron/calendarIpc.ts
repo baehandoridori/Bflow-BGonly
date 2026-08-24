@@ -274,7 +274,7 @@ export function registerCalendarIpc(deps: CalendarIpcDeps): void {
     updates: Parameters<typeof store.updateEvent>[1],
   ) => {
     const user = await sessionUser();
-    const previous = await store.getEventById(id);
+    const previous = await store.getEventByIdForWrite(id);
     if (!previous) throw new Error('일정을 찾을 수 없습니다');
     const { calendar, members } = await loadCalendarForUserOrThrow(previous.calendar_id, user.id);
     if (!canEditCalendarEvents(calendar, members, user.id)) {
@@ -308,7 +308,7 @@ export function registerCalendarIpc(deps: CalendarIpcDeps): void {
     if (updates.linked_scene_id !== undefined) safeUpdates.linked_scene_id = updates.linked_scene_id;
     if (updates.linked_department !== undefined) safeUpdates.linked_department = updates.linked_department;
     if (updates.linked_todo_id !== undefined) safeUpdates.linked_todo_id = updates.linked_todo_id;
-    const updated = await store.updateEvent(id, safeUpdates);
+    const updated = await store.updateEvent(id, safeUpdates, previous.calendar_id);
     await emitCalendarEventNotifications({
       actorId: user.id,
       action: 'update',
@@ -331,7 +331,7 @@ export function registerCalendarIpc(deps: CalendarIpcDeps): void {
       throw new Error('이 일정을 삭제할 권한이 없습니다');
     }
 
-    await store.deleteEvent(id);
+    await store.deleteEvent(id, previous.calendar_id);
     await emitCalendarEventNotifications({
       actorId: user.id,
       action: 'delete',

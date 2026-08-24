@@ -140,6 +140,31 @@ function calendarRow(overrides: Record<string, unknown> = {}) {
   };
 }
 
+function calendarEventRow(overrides: Record<string, unknown> = {}) {
+  return {
+    id: 'event-1',
+    calendar_id: 'calendar-1',
+    title: '테스트 일정',
+    memo: null,
+    tag_id: null,
+    all_day: true,
+    start_date: '2026-08-25',
+    end_date: '2026-08-25',
+    start_time: null,
+    end_time: null,
+    linked_episode: null,
+    linked_part: null,
+    linked_sheet_name: null,
+    linked_scene_id: null,
+    linked_department: null,
+    linked_todo_id: null,
+    created_by: 'user-1',
+    created_at: '2026-08-24T00:00:00.000Z',
+    updated_at: '2026-08-24T00:00:00.000Z',
+    ...overrides,
+  };
+}
+
 test('calendar:list waits for personal calendar ensure before listing calendars', async () => {
   let releaseEnsure!: () => void;
   const ensureGate = new Promise<void>((resolve) => { releaseEnsure = resolve; });
@@ -407,6 +432,35 @@ test('calendar:events:delete rejects a missing-table pre-read but keeps a genuin
   }
 });
 
+test('calendar event update and delete bind the write to the calendar authorized by the pre-read', async () => {
+  const updateCalls: unknown[][] = [];
+  const deleteCalls: unknown[][] = [];
+  const previous = calendarEventRow();
+  const harness = await createIpcHarness({
+    getUserRole: async () => 'user',
+    getEventById: async () => previous,
+    getEventByIdForWrite: async () => previous,
+    getCalendarWithMembers: async () => ({ calendar: calendarRow(), members: [] }),
+    updateEvent: async (...args) => {
+      updateCalls.push(args);
+      return { ...previous, title: '수정됨' };
+    },
+    deleteEvent: async (...args) => { deleteCalls.push(args); },
+  });
+  try {
+    await harness.invoke('calendar:events:update', 'event-1', { title: '수정됨' });
+    await harness.invoke('calendar:events:delete', 'event-1');
+    assert.deepEqual(updateCalls, [[
+      'event-1',
+      { title: '수정됨' },
+      'calendar-1',
+    ]]);
+    assert.deepEqual(deleteCalls, [['event-1', 'calendar-1']]);
+  } finally {
+    harness.restore();
+  }
+});
+
 function calendarStoreTestPlugin(): Plugin {
   return {
     name: 'calendar-store-test-supabase',
@@ -466,6 +520,106 @@ test('calendar store keeps soft reads empty while strict write pre-reads surface
     assert.equal(await store.getEventByIdForWrite('already-gone'), null);
   } finally {
     console.warn = originalWarn;
+    if (hadPrior) globalScope[STORE_HARNESS_KEY] = prior;
+    else delete globalScope[STORE_HARNESS_KEY];
+  }
+});
+
+function calendarStoreWriteHarness(dataFor: (operation: 'update' | 'delete') => unknown) {
+  const operations: Array<{
+    operation: 'update' | 'delete';
+    filters: Array<[string, unknown]>;
+  }> = [];
+  return {
+    operations,
+    supabase: {
+      from() {
+        let operation: 'update' | 'delete' = 'update';
+        const filters: Array<[string, unknown]> = [];
+        const response = () => ({ data: dataFor(operation), error: null });
+        const query = {
+          update() {
+            operation = 'update';
+            operations.push({ operation, filters });
+            return query;
+          },
+          delete() {
+            operation = 'delete';
+            operations.push({ operation, filters });
+            return query;
+          },
+          eq(column: string, value: unknown) {
+            filters.push([column, value]);
+            return query;
+          },
+          select() { return query; },
+          single: async () => response(),
+          maybeSingle: async () => response(),
+          then(resolve: (value: unknown) => unknown, reject: (reason: unknown) => unknown) {
+            return Promise.resolve(response()).then(resolve, reject);
+          },
+        };
+        return query;
+      },
+    },
+  };
+}
+
+test('calendar store constrains event update and delete to the authorized source calendar', async () => {
+  const globalScope = globalThis as Record<string, unknown>;
+  const hadPrior = Object.prototype.hasOwnProperty.call(globalScope, STORE_HARNESS_KEY);
+  const prior = globalScope[STORE_HARNESS_KEY];
+  const harness = calendarStoreWriteHarness((operation) => (
+    operation === 'update' ? calendarEventRow({ title: '수정됨' }) : { id: 'event-1' }
+  ));
+  globalScope[STORE_HARNESS_KEY] = harness.supabase;
+  try {
+    const encoded = Buffer.from(await bundledCalendarStoreSource()).toString('base64');
+    const store = await import(`data:text/javascript;base64,${encoded}#calendar-store-${storeNonce++}`) as {
+      updateEvent(id: string, updates: Record<string, unknown>, expectedCalendarId: string): Promise<unknown>;
+      deleteEvent(id: string, expectedCalendarId: string): Promise<void>;
+    };
+
+    await store.updateEvent('event-1', { title: '수정됨' }, 'calendar-1');
+    await store.deleteEvent('event-1', 'calendar-1');
+
+    assert.deepEqual(harness.operations.map(({ operation, filters }) => ({ operation, filters })), [
+      { operation: 'update', filters: [['id', 'event-1'], ['calendar_id', 'calendar-1']] },
+      { operation: 'delete', filters: [['id', 'event-1'], ['calendar_id', 'calendar-1']] },
+    ]);
+  } finally {
+    if (hadPrior) globalScope[STORE_HARNESS_KEY] = prior;
+    else delete globalScope[STORE_HARNESS_KEY];
+  }
+});
+
+test('calendar store rejects a write when the event left the authorized source calendar', async () => {
+  const globalScope = globalThis as Record<string, unknown>;
+  const hadPrior = Object.prototype.hasOwnProperty.call(globalScope, STORE_HARNESS_KEY);
+  const prior = globalScope[STORE_HARNESS_KEY];
+  const harness = calendarStoreWriteHarness(() => null);
+  globalScope[STORE_HARNESS_KEY] = harness.supabase;
+  try {
+    const encoded = Buffer.from(await bundledCalendarStoreSource()).toString('base64');
+    const store = await import(`data:text/javascript;base64,${encoded}#calendar-store-${storeNonce++}`) as {
+      updateEvent(id: string, updates: Record<string, unknown>, expectedCalendarId: string): Promise<unknown>;
+      deleteEvent(id: string, expectedCalendarId: string): Promise<void>;
+    };
+    const statuses: string[] = [];
+    for (const write of [
+      () => store.updateEvent('event-1', { title: '수정됨' }, 'calendar-1'),
+      () => store.deleteEvent('event-1', 'calendar-1'),
+    ]) {
+      try {
+        await write();
+        statuses.push('fulfilled');
+      } catch (error) {
+        assert.match(String(error), /다른 캘린더|새로고침|conflict/i);
+        statuses.push('rejected');
+      }
+    }
+    assert.deepEqual(statuses, ['rejected', 'rejected']);
+  } finally {
     if (hadPrior) globalScope[STORE_HARNESS_KEY] = prior;
     else delete globalScope[STORE_HARNESS_KEY];
   }
