@@ -14,6 +14,7 @@ type AuthUserFixture = {
 type ServiceModule = {
   loadBflowEvents(): Promise<void>;
   syncAll(options?: { broadcast?: boolean; skipBflowLoad?: boolean }): Promise<unknown>;
+  syncIncremental(): Promise<void>;
   addEvent(event: Record<string, unknown>): Promise<void>;
   updateEvent(eventId: string, updates: Record<string, unknown>): Promise<void>;
   getEvents(): Promise<Array<{
@@ -112,6 +113,11 @@ type LegacyPrivateEventFixture = {
 
 type HarnessOptions = {
   fullSync(calendarId: string): Promise<GoogleEventFixture[]>;
+  incrementalSync?: (calendarId: string) => Promise<{
+    updated: GoogleEventFixture[];
+    deleted: string[];
+    isFullSync: boolean;
+  }>;
   calendarList?: () => Promise<BflowCalendarFixture[]>;
   bflowEventsList?: () => Promise<BflowEventFixture[]>;
   createBflowEvent?: (input: Record<string, unknown>) => Promise<BflowEventFixture>;
@@ -330,6 +336,11 @@ async function createHarness(
           }
         : null,
       gcalFullSync: options.fullSync,
+      gcalIncrementalSync: options.incrementalSync ?? (async () => ({
+        updated: [],
+        deleted: [],
+        isFullSync: false,
+      })),
       gcalIsAuthenticated: async () => false,
       gcalDeleteEvent: async (calendarId: string, eventId: string) => {
         deletedGoogleEventIds.push(eventId);
@@ -1171,6 +1182,135 @@ test('overlapping Google edits never copy an unconfirmed different field into a 
           assert.equal(current.endDate, '2026-08-27');
         }
         assert.equal(canonicalReads, 2, 'initial sync plus one coalesced reconciliation');
+      } finally {
+        harness.restore();
+      }
+    });
+  }
+});
+
+test('failed full sync and empty incremental never confirm a pending optimistic metadata edit', async (t) => {
+  for (const syncKind of ['partial-full-failure', 'empty-incremental'] as const) {
+    await t.test(syncKind, async () => {
+      const eventId = `pending-${syncKind}`;
+      let failPrimaryFullSync = false;
+      let updateCalls = 0;
+      const started = [deferred<void>(), deferred<void>()];
+      const gates = [deferred<void>(), deferred<void>()];
+      const patches: Array<Record<string, unknown>> = [];
+      const harness = await createHarness({
+        teamCalendarId: 'team-calendar',
+        personalCalendarId: 'primary',
+        fullSync: async (calendarId) => {
+          if (calendarId === 'team-calendar') return [];
+          if (failPrimaryFullSync) throw new Error('primary sync failed');
+          return [googleEvent(eventId, '서버 제목')];
+        },
+        incrementalSync: async () => ({ updated: [], deleted: [], isFullSync: false }),
+        updateGoogleEvent: async (_calendarId, _id, patch) => {
+          const index = updateCalls;
+          updateCalls += 1;
+          patches[index] = patch;
+          started[index].resolve();
+          await gates[index].promise;
+          if (index === 0) throw new Error('optimistic A failed');
+        },
+      });
+
+      try {
+        await harness.service.syncAll({ skipBflowLoad: true });
+        failPrimaryFullSync = true;
+        const editA = harness.service.updateEvent(eventId, { type: 'scene' }).catch(() => {});
+        await started[0].promise;
+
+        if (syncKind === 'partial-full-failure') {
+          await harness.service.syncAll({ skipBflowLoad: true });
+        } else {
+          await harness.service.syncIncremental();
+        }
+
+        const editB = harness.service.updateEvent(eventId, { linkedTodoId: 'todo-b' });
+        await started[1].promise;
+        assert.deepEqual(patches[1].extendedProperties, {
+          bflow_type: 'custom',
+          bflow_linked_todo_id: 'todo-b',
+        });
+
+        gates[1].resolve();
+        await editB;
+        gates[0].resolve();
+        await editA;
+      } finally {
+        harness.restore();
+      }
+    });
+  }
+});
+
+test('successful metadata writes confirm the last whole snapshot instead of a field union', async (t) => {
+  const scenarios = [
+    { name: 'A then B', order: [0, 1] as const },
+    { name: 'B then A', order: [1, 0] as const },
+  ];
+
+  for (const scenario of scenarios) {
+    await t.test(scenario.name, async () => {
+      const eventId = `metadata-last-${scenario.name}`;
+      let failReconciliation = false;
+      let updateCalls = 0;
+      const started = [deferred<void>(), deferred<void>()];
+      const gates = [deferred<void>(), deferred<void>()];
+      const patches: Array<Record<string, unknown>> = [];
+      const harness = await createHarness({
+        personalCalendarId: 'primary',
+        fullSync: async () => {
+          if (failReconciliation) throw new Error('reconciliation unavailable');
+          return [googleEvent(eventId, '서버 제목')];
+        },
+        updateGoogleEvent: async (_calendarId, _id, patch) => {
+          const index = updateCalls;
+          updateCalls += 1;
+          patches[index] = patch;
+          if (index < 2) {
+            started[index].resolve();
+            await gates[index].promise;
+          }
+        },
+      });
+
+      try {
+        await harness.service.syncAll({ skipBflowLoad: true });
+        failReconciliation = true;
+        const edits = [
+          harness.service.updateEvent(eventId, { type: 'scene' }),
+          undefined as Promise<void> | undefined,
+        ];
+        await started[0].promise;
+        edits[1] = harness.service.updateEvent(eventId, { linkedPart: '파트 B' });
+        await started[1].promise;
+
+        for (const index of scenario.order) {
+          gates[index].resolve();
+          await edits[index];
+        }
+        await Promise.all(edits);
+
+        await harness.service.updateEvent(eventId, { linkedTodoId: 'todo-c' });
+        const expectedLastSnapshot = scenario.order[1] === 1
+          ? {
+              bflow_type: 'custom',
+              bflow_linked_part: '파트 B',
+              bflow_linked_todo_id: 'todo-c',
+            }
+          : {
+              bflow_type: 'scene',
+              bflow_linked_todo_id: 'todo-c',
+            };
+        assert.deepEqual(
+          patches[2].extendedProperties,
+          expectedLastSnapshot,
+          'C must extend only the metadata snapshot from the last completed server PATCH',
+        );
       } finally {
         harness.restore();
       }

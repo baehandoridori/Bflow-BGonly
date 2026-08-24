@@ -370,24 +370,32 @@ function googleEventKey(calendarId: string, eventId: string): string {
   return `${calendarId}\u0000${eventId}`;
 }
 
-function replaceConfirmedGoogleEvents(events: CalendarEvent[]): void {
-  confirmedGoogleEvents.clear();
+function replaceConfirmedGoogleCalendar(calendarId: string, events: CalendarEvent[]): void {
+  for (const [key, event] of confirmedGoogleEvents) {
+    if (event.sourceCalendarId === calendarId) confirmedGoogleEvents.delete(key);
+  }
   for (const event of events) {
-    if (event.sourceCalendarId) {
-      confirmedGoogleEvents.set(googleEventKey(event.sourceCalendarId, event.id), { ...event });
-    }
+    confirmedGoogleEvents.set(googleEventKey(calendarId, event.id), {
+      ...event,
+      sourceCalendarId: calendarId,
+    });
   }
 }
 
-function confirmGoogleEventUpdate(
+function applyConfirmedGoogleIncremental(
   calendarId: string,
-  eventId: string,
-  fallback: CalendarEvent,
-  updates: Partial<CalendarEvent>,
+  updated: CalendarEvent[],
+  deleted: string[],
 ): void {
-  const key = googleEventKey(calendarId, eventId);
-  const confirmed = confirmedGoogleEvents.get(key) ?? fallback;
-  confirmedGoogleEvents.set(key, { ...confirmed, ...updates, id: eventId, sourceCalendarId: calendarId });
+  for (const eventId of deleted) {
+    confirmedGoogleEvents.delete(googleEventKey(calendarId, eventId));
+  }
+  for (const event of updated) {
+    confirmedGoogleEvents.set(googleEventKey(calendarId, event.id), {
+      ...event,
+      sourceCalendarId: calendarId,
+    });
+  }
 }
 
 type CalendarCacheSource = 'bflow' | 'google';
@@ -662,6 +670,7 @@ export async function syncAll(options: { broadcast?: boolean; skipBflowLoad?: bo
   }
   const seen = new Set<string>();
   const successfulEvents: CalendarEvent[] = [];
+  const successfulEventsByCalendar = new Map<string, CalendarEvent[]>();
 
   // 팀/개인 캘린더 목록 — 설정 조회 실패 시에도 비공개 이벤트는 이미 위에서 로드됨
   const calIds = new Set<string>();
@@ -683,12 +692,16 @@ export async function syncAll(options: { broadcast?: boolean; skipBflowLoad?: bo
     try {
       const gcalEvents = await gcalService.fullSync(calId);
       successfulCalendarIds.add(calId);
+      const calendarEvents: CalendarEvent[] = [];
       for (const e of gcalEvents) {
-        if (e.id && !isCompensatedGoogleEvent(calId, e.id) && !seen.has(e.id)) {
-          seen.add(e.id);
-          successfulEvents.push(toCalendarEvent(e, calId));
-        }
+        if (!e.id || isCompensatedGoogleEvent(calId, e.id)) continue;
+        const converted = toCalendarEvent(e, calId);
+        calendarEvents.push(converted);
+        if (seen.has(e.id)) continue;
+        seen.add(e.id);
+        successfulEvents.push(converted);
       }
+      successfulEventsByCalendar.set(calId, calendarEvents);
     } catch (err) {
       failedCalendarIds.add(calId);
       console.warn(`[Calendar] Google fullSync 실패 (${calId}):`, err);
@@ -713,7 +726,9 @@ export async function syncAll(options: { broadcast?: boolean; skipBflowLoad?: bo
         !isCompensatedGoogleEvent(event.sourceCalendarId, event.id) && !seen.has(event.id)
       )),
     ];
-    replaceConfirmedGoogleEvents(googleEvents);
+    for (const calId of successfulCalendarIds) {
+      replaceConfirmedGoogleCalendar(calId, successfulEventsByCalendar.get(calId) ?? []);
+    }
   }
   // 설정 조회 실패나 전체 fullSync 실패는 마지막 성공 캐시를 보존하고 재시도 대상으로 둔다.
   googleCacheReady = settingsLoaded
@@ -744,6 +759,9 @@ export async function syncIncremental(): Promise<void> {
 
   for (const calId of calIds) {
     const { updated, deleted, isFullSync } = await gcalService.incrementalSync(calId);
+    const confirmedUpdates = updated
+      .filter((event) => event.id && !isCompensatedGoogleEvent(calId, event.id))
+      .map((event) => toCalendarEvent(event, calId));
 
     if (isFullSync) {
       // fullSync 폴백: 해당 캘린더의 캐시를 완전히 교체 (삭제된 이벤트 제거)
@@ -753,34 +771,28 @@ export async function syncIncremental(): Promise<void> {
       ));
       // ID 기반 중복 제거 (팀/개인 캘린더에 같은 이벤트가 있을 수 있음)
       const seenIds = new Set(next.map((event) => event.id));
-      for (const gcalEvent of updated) {
-        if (
-          gcalEvent.id
-          && !isCompensatedGoogleEvent(calId, gcalEvent.id)
-          && !seenIds.has(gcalEvent.id)
-        ) {
-          seenIds.add(gcalEvent.id);
-          next.push(toCalendarEvent(gcalEvent, calId));
-        }
+      for (const converted of confirmedUpdates) {
+        if (seenIds.has(converted.id)) continue;
+        seenIds.add(converted.id);
+        next.push(converted);
       }
       googleEvents = next;
+      replaceConfirmedGoogleCalendar(calId, confirmedUpdates);
     } else {
       // 일반 incremental: 삭제 + 머지
       let next = googleEvents.filter((event) => (
         !deleted.includes(event.id)
         && !isCompensatedGoogleEvent(event.sourceCalendarId, event.id)
       ));
-      for (const gcalEvent of updated) {
-        if (isCompensatedGoogleEvent(calId, gcalEvent.id)) continue;
-        const converted = toCalendarEvent(gcalEvent, calId);
+      for (const converted of confirmedUpdates) {
         const exists = next.some((event) => event.id === converted.id);
         next = exists
           ? next.map((event) => (event.id === converted.id ? converted : event))
           : [...next, converted];
       }
       googleEvents = next;
+      applyConfirmedGoogleIncremental(calId, confirmedUpdates, deleted);
     }
-    replaceConfirmedGoogleEvents(googleEvents);
     rebuildEventCache();
   }
 
@@ -858,6 +870,52 @@ function buildGoogleEventUpdatePayload(
     patch.extendedProperties = toBflowMeta({ ...confirmed, ...updates });
   }
   return patch;
+}
+
+function confirmGoogleEventUpdate(
+  calendarId: string,
+  eventId: string,
+  fallback: CalendarEvent,
+  updates: Partial<CalendarEvent>,
+  patch: GoogleEventUpdatePayload,
+): void {
+  const key = googleEventKey(calendarId, eventId);
+  let confirmed = { ...(confirmedGoogleEvents.get(key) ?? fallback) };
+
+  // Google PATCH의 일반 필드는 부분 갱신이므로 실제 요청에 포함된 값만 확정한다.
+  if (patch.summary !== undefined) confirmed.title = patch.summary;
+  if (patch.description !== undefined) confirmed.memo = patch.description;
+  if (patch.startDate !== undefined && updates.startDate !== undefined) {
+    confirmed.startDate = updates.startDate;
+  }
+  if (patch.endDate !== undefined && updates.endDate !== undefined) {
+    confirmed.endDate = updates.endDate;
+  }
+
+  // extendedProperties.private는 필드별 PATCH가 아니라 요청 snapshot 전체가 마지막 값이 된다.
+  // 빠진 키를 undefined로 되돌려 앞선 성공 요청의 메타데이터가 합쳐지거나 부활하지 않게 한다.
+  if (patch.extendedProperties !== undefined) {
+    const meta = patch.extendedProperties;
+    confirmed = {
+      ...confirmed,
+      type: (meta.bflow_type as CalendarEventType | undefined) ?? 'custom',
+      linkedEpisode: meta.bflow_linked_episode !== undefined
+        ? Number(meta.bflow_linked_episode)
+        : undefined,
+      linkedPart: meta.bflow_linked_part,
+      linkedSceneId: meta.bflow_linked_scene_id,
+      linkedDepartment: meta.bflow_department as 'bg' | 'acting' | undefined,
+      linkedTodoId: meta.bflow_linked_todo_id,
+      vacationType: meta.bflow_vacation_type,
+      vacationUserName: meta.bflow_vacation_user,
+    };
+  }
+
+  confirmedGoogleEvents.set(key, {
+    ...confirmed,
+    id: eventId,
+    sourceCalendarId: calendarId,
+  });
 }
 
 function inferExistingEventSource(event: CalendarEvent): CalendarCacheSource {
@@ -1389,7 +1447,7 @@ export async function updateEvent(eventId: string, updates: Partial<CalendarEven
 
       try {
         await gcalService.updateEvent(calId, actualId, googlePatch);
-        confirmGoogleEventUpdate(calId, actualId, confirmed, updates);
+        confirmGoogleEventUpdate(calId, actualId, confirmed, updates, googlePatch);
       } catch (err) {
         // 실패: 롤백
         mutateSourceEvents(existingSource, (events) => events.map((item) => (
