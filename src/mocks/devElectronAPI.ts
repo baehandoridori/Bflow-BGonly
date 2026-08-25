@@ -22,6 +22,12 @@ import type { MarketRemoteState, MarketSnapshot } from '@/features/playground/ma
 import { createArcadeLocalStorageGateway } from '@/features/playground/arcade/localStorageGateway';
 import type { ArcadePreviewGateway } from '@/features/playground/arcade/previewGateway';
 import { useArcadeStore } from '@/features/playground/arcade/useArcadeStore';
+import {
+  canCreateCalendar,
+  canEditCalendarEvents,
+  canManageCalendar,
+  canViewCalendar,
+} from '@/shared/calendarPermissions';
 
 type PreviewUser = AppUser & { password: string };
 
@@ -59,6 +65,147 @@ let previewMarketUserId: string | null = null;
 let previewArcadeGateway: ArcadePreviewGateway | null = null;
 let previewArcadeUserId: string | null = null;
 const previewTodoCommitListeners = new Set<(payload: unknown) => void>();
+
+type MockCalendarRow = Awaited<ReturnType<ElectronAPI['calendarCreate']>>;
+type MockCalendarEventRow = Awaited<ReturnType<ElectronAPI['calendarEventCreate']>>;
+type MockCalendarTagRow = Awaited<ReturnType<ElectronAPI['calendarTagsList']>>[number];
+type MockCalendarMemberRow = { calendar_id: string; user_id: string; can_edit: boolean };
+type MockCalendarEventCreateInput = Parameters<ElectronAPI['calendarEventCreate']>[0];
+
+const mockCalendars: MockCalendarRow[] = [];
+const mockCalendarEvents: MockCalendarEventRow[] = [];
+const mockCalendarMembers: MockCalendarMemberRow[] = [];
+type MockPrivacyReplacementTarget =
+  | { storage: 'bflow'; actualId: string; calendarId: string }
+  | { storage: 'legacy-private'; actualId: string }
+  | { storage: 'google'; actualId: string; calendarId: string };
+const mockPrivacyReplacementReceipts = new Map<string, MockPrivacyReplacementTarget>();
+const mockCalendarTags: MockCalendarTagRow[] = [
+  { id: 'tag-upload', name: '업로드', color: '#E17055', sort_order: 0 },
+  { id: 'tag-cut', name: '가편', color: '#74B9FF', sort_order: 1 },
+  { id: 'tag-script', name: '대본', color: '#FDCB6E', sort_order: 2 },
+  { id: 'tag-meeting', name: '회의', color: '#A29BFE', sort_order: 3 },
+];
+
+function requireMockCalendarUser(): PreviewUser {
+  const user = previewCanonicalUserId
+    ? getMockUsers().find((candidate) => candidate.id === previewCanonicalUserId)
+    : null;
+  if (!user) throw new Error('로그인이 필요합니다');
+  return user;
+}
+
+function mockPermissionUser(user: PreviewUser): { id: string; role: 'admin' | 'user' } {
+  return { id: user.id, role: user.role === 'admin' ? 'admin' : 'user' };
+}
+
+function requireMockCalendar(calendarId: string): MockCalendarRow {
+  const calendar = mockCalendars.find((candidate) => candidate.id === calendarId);
+  if (!calendar) throw new Error('캘린더를 찾을 수 없습니다');
+  return calendar;
+}
+
+function mockMembersOf(calendarId: string): MockCalendarMemberRow[] {
+  return mockCalendarMembers.filter((member) => member.calendar_id === calendarId);
+}
+
+function normalizeMockCalendarMembers(
+  calendar: MockCalendarRow,
+  members: Array<{ user_id: string; can_edit: boolean }>,
+): MockCalendarMemberRow[] {
+  const knownUserIds = new Set(getMockUsers().map(({ id }) => id));
+  const seen = new Set<string>();
+  const normalized: MockCalendarMemberRow[] = [];
+  for (const member of members) {
+    if (member.user_id === calendar.owner_id) continue;
+    if (!knownUserIds.has(member.user_id)) throw new Error('존재하지 않는 캘린더 멤버입니다');
+    if (seen.has(member.user_id)) throw new Error('중복된 캘린더 멤버입니다');
+    seen.add(member.user_id);
+    normalized.push({
+      calendar_id: calendar.id,
+      user_id: member.user_id,
+      can_edit: member.can_edit,
+    });
+  }
+  return normalized;
+}
+
+function replaceMockCalendarMembers(
+  calendar: MockCalendarRow,
+  members: Array<{ user_id: string; can_edit: boolean }>,
+): void {
+  const normalized = normalizeMockCalendarMembers(calendar, members);
+  for (let index = mockCalendarMembers.length - 1; index >= 0; index--) {
+    if (mockCalendarMembers[index].calendar_id === calendar.id) mockCalendarMembers.splice(index, 1);
+  }
+  mockCalendarMembers.push(...normalized);
+}
+
+function canViewMockCalendar(calendar: MockCalendarRow, userId: string): boolean {
+  return canViewCalendar(
+    calendar,
+    mockMembersOf(calendar.id).map(({ user_id }) => user_id),
+    userId,
+  );
+}
+
+function requireMockCalendarEventWrite(calendarId: string, userId: string): MockCalendarRow {
+  const calendar = requireMockCalendar(calendarId);
+  const members = mockMembersOf(calendarId);
+  if (!canViewMockCalendar(calendar, userId) || !canEditCalendarEvents(calendar, members, userId)) {
+    throw new Error('이 캘린더의 일정을 변경할 권한이 없습니다');
+  }
+  return calendar;
+}
+
+function createMockCalendarEvent(input: MockCalendarEventCreateInput, userId: string): MockCalendarEventRow {
+  requireMockCalendarEventWrite(input.calendar_id, userId);
+  const now = new Date().toISOString();
+  const created: MockCalendarEventRow = {
+    ...input,
+    id: createUuid(),
+    created_by: userId,
+    created_at: now,
+    updated_at: now,
+  };
+  mockCalendarEvents.push(created);
+  return created;
+}
+
+function ensureMockPersonalCalendar(): MockCalendarRow | null {
+  const userId = previewCanonicalUserId;
+  if (!userId) return null;
+
+  const existing = mockCalendars.find(
+    (calendar) => calendar.owner_id === userId && calendar.is_personal,
+  );
+  if (existing) return existing;
+
+  const now = new Date().toISOString();
+  const created: MockCalendarRow = {
+    id: `mock-personal-${userId}`,
+    name: '개인',
+    color: '#6C5CE7',
+    visibility: 'private',
+    owner_id: userId,
+    is_personal: true,
+    created_at: now,
+    updated_at: now,
+  };
+  mockCalendars.push(created);
+  return created;
+}
+
+function visibleMockCalendarIds(): Set<string> {
+  ensureMockPersonalCalendar();
+  const userId = previewCanonicalUserId;
+  if (!userId) return new Set();
+  return new Set(
+    mockCalendars
+      .filter((calendar) => canViewMockCalendar(calendar, userId))
+      .map((calendar) => calendar.id),
+  );
+}
 
 function getPreviewTodoStore(): PersonalTodoPreviewStore | null {
   if (!previewCanonicalUserId) return null;
@@ -372,7 +519,23 @@ export function hasUsableElectronAPI(api: Partial<ElectronAPI> | undefined): boo
     && typeof api?.readSettings === 'function'
     && typeof api?.writeSettings === 'function'
     && typeof api?.supabaseTestConnection === 'function'
-    && typeof api?.supabaseReadAll === 'function';
+    && typeof api?.supabaseReadAll === 'function'
+    && typeof api?.calendarList === 'function'
+    && typeof api?.calendarCreate === 'function'
+    && typeof api?.calendarUpdate === 'function'
+    && typeof api?.calendarDelete === 'function'
+    && typeof api?.calendarSetMembers === 'function'
+    && typeof api?.calendarEventsList === 'function'
+    && typeof api?.calendarEventCreate === 'function'
+    && typeof api?.calendarPrivacyReplacementCreate === 'function'
+    && typeof api?.calendarPrivacyReplacementSettle === 'function'
+    && typeof api?.calendarPrivacyMigrationSourceDelete === 'function'
+    && typeof api?.calendarEventUpdate === 'function'
+    && typeof api?.calendarEventDelete === 'function'
+    && typeof api?.calendarTagsList === 'function'
+    && typeof api?.calendarTagsSave === 'function'
+    && typeof api?.calendarNotificationsCatchup === 'function'
+    && typeof api?.calendarNotificationsMarkRead === 'function';
 }
 
 function getMockActivityRows(): MockActivityRow[] {
@@ -1081,9 +1244,190 @@ export function installDevElectronAPI(): void {
     }),
     supabaseDeleteImageVersion: async () => {},
     supabaseReadPrivateEvents: async () => [],
-    supabaseAddPrivateEvent: async () => ({ id: 'mock-private' }),
+    supabaseAddPrivateEvent: async () => ({ id: createUuid() }),
     supabaseUpdatePrivateEvent: async () => {},
     supabaseDeletePrivateEvent: async () => {},
+    // ─── B flow 공유 캘린더 (프리뷰 in-memory) ───
+    calendarList: async () => {
+      const visibleIds = visibleMockCalendarIds();
+      const user = requireMockCalendarUser();
+      return mockCalendars
+        .filter((calendar) => visibleIds.has(calendar.id))
+        .map((calendar) => {
+          const members = mockMembersOf(calendar.id);
+          return {
+            ...calendar,
+            members: members.map(({ user_id, can_edit }) => ({ user_id, can_edit })),
+            can_edit: canEditCalendarEvents(calendar, members, user.id),
+            can_manage: canManageCalendar(calendar, mockPermissionUser(user)),
+          };
+        });
+    },
+    calendarCreate: async (input) => {
+      const user = requireMockCalendarUser();
+      if (!canCreateCalendar(mockPermissionUser(user), input.visibility)) {
+        throw new Error('팀 전체 캘린더는 관리자만 만들 수 있습니다');
+      }
+      const now = new Date().toISOString();
+      const created: MockCalendarRow = {
+        id: createUuid(),
+        name: input.name,
+        color: input.color,
+        visibility: input.visibility,
+        owner_id: user.id,
+        is_personal: false,
+        created_at: now,
+        updated_at: now,
+      };
+      const members = input.visibility === 'private'
+        ? []
+        : normalizeMockCalendarMembers(created, input.members ?? []);
+      mockCalendars.push(created);
+      mockCalendarMembers.push(...members);
+      return { ...created };
+    },
+    calendarUpdate: async (id, updates) => {
+      const user = requireMockCalendarUser();
+      const calendar = requireMockCalendar(id);
+      if (!canManageCalendar(calendar, mockPermissionUser(user))) {
+        throw new Error('이 캘린더를 수정할 권한이 없습니다');
+      }
+      if (updates.visibility === 'team' && !canCreateCalendar(mockPermissionUser(user), 'team')) {
+        throw new Error('팀 전체 캘린더는 관리자만 만들 수 있습니다');
+      }
+      if (updates.name !== undefined) calendar.name = updates.name;
+      if (updates.color !== undefined) calendar.color = updates.color;
+      if (!calendar.is_personal && updates.visibility !== undefined) {
+        calendar.visibility = updates.visibility;
+        if (updates.visibility === 'private') replaceMockCalendarMembers(calendar, []);
+      }
+      calendar.updated_at = new Date().toISOString();
+    },
+    calendarDelete: async (id) => {
+      const user = requireMockCalendarUser();
+      const calendar = requireMockCalendar(id);
+      if (calendar.is_personal) throw new Error('개인 캘린더는 삭제할 수 없습니다');
+      if (!canManageCalendar(calendar, mockPermissionUser(user))) {
+        throw new Error('이 캘린더를 삭제할 권한이 없습니다');
+      }
+      const index = mockCalendars.findIndex((calendar) => calendar.id === id);
+      if (index >= 0) mockCalendars.splice(index, 1);
+      for (let memberIndex = mockCalendarMembers.length - 1; memberIndex >= 0; memberIndex--) {
+        if (mockCalendarMembers[memberIndex].calendar_id === id) mockCalendarMembers.splice(memberIndex, 1);
+      }
+      for (let eventIndex = mockCalendarEvents.length - 1; eventIndex >= 0; eventIndex--) {
+        if (mockCalendarEvents[eventIndex].calendar_id === id) {
+          mockCalendarEvents.splice(eventIndex, 1);
+        }
+      }
+    },
+    calendarSetMembers: async (calendarId, members) => {
+      const user = requireMockCalendarUser();
+      const calendar = requireMockCalendar(calendarId);
+      if (calendar.is_personal) throw new Error('개인 캘린더에는 멤버를 추가할 수 없습니다');
+      if (!canManageCalendar(calendar, mockPermissionUser(user))) {
+        throw new Error('이 캘린더의 멤버를 수정할 권한이 없습니다');
+      }
+      if (calendar.visibility === 'private' && members.length > 0) {
+        throw new Error('비공개 캘린더에는 멤버를 추가할 수 없습니다');
+      }
+      replaceMockCalendarMembers(calendar, members);
+    },
+    calendarEventsList: async (params) => {
+      const visibleIds = visibleMockCalendarIds();
+      return mockCalendarEvents
+        .filter((event) => visibleIds.has(event.calendar_id))
+        .filter((event) => !params?.from || event.end_date >= params.from)
+        .filter((event) => !params?.to || event.start_date <= params.to)
+        .map((event) => ({ ...event }));
+    },
+    calendarEventCreate: async (input) => {
+      const created = createMockCalendarEvent(input, requireMockCalendarUser().id);
+      return { ...created };
+    },
+    calendarPrivacyMigrationSourceDelete: async (request) => {
+      if (request.storage === 'legacy-private') return 'missing';
+      if (request.storage === 'google') return 'deleted';
+      const index = mockCalendarEvents.findIndex((event) => event.id === request.event_id);
+      if (index < 0) return 'missing';
+      requireMockCalendarEventWrite(
+        mockCalendarEvents[index].calendar_id,
+        requireMockCalendarUser().id,
+      );
+      mockCalendarEvents.splice(index, 1);
+      return 'deleted';
+    },
+    calendarPrivacyReplacementCreate: async (request) => {
+      let target: MockPrivacyReplacementTarget;
+      if (request.storage === 'bflow') {
+        const created = createMockCalendarEvent(request.event, requireMockCalendarUser().id);
+        target = {
+          storage: 'bflow',
+          actualId: created.id,
+          calendarId: created.calendar_id,
+        };
+      } else if (request.storage === 'legacy-private') {
+        target = { storage: 'legacy-private', actualId: createUuid() };
+      } else {
+        throw new Error('Google Calendar 연결 후 공개 일정으로 전환할 수 있습니다.');
+      }
+      const receipt = createUuid();
+      mockPrivacyReplacementReceipts.set(receipt, target);
+      return {
+        storage: target.storage,
+        actual_id: target.actualId,
+        calendar_id: 'calendarId' in target ? target.calendarId : undefined,
+        receipt,
+      };
+    },
+    calendarPrivacyReplacementSettle: async (receipt, disposition) => {
+      const target = mockPrivacyReplacementReceipts.get(receipt);
+      if (!target) throw new Error('보상 receipt가 없거나 이미 사용되었습니다');
+      mockPrivacyReplacementReceipts.delete(receipt);
+      if (disposition !== 'delete' || target.storage !== 'bflow') return;
+      const index = mockCalendarEvents.findIndex((event) => (
+        event.id === target.actualId && event.calendar_id === target.calendarId
+      ));
+      if (index >= 0) mockCalendarEvents.splice(index, 1);
+    },
+    calendarEventUpdate: async (id, updates) => {
+      const user = requireMockCalendarUser();
+      const event = mockCalendarEvents.find((candidate) => candidate.id === id);
+      if (!event) throw new Error('일정을 찾을 수 없습니다');
+      requireMockCalendarEventWrite(event.calendar_id, user.id);
+      if (updates.calendar_id !== undefined && updates.calendar_id !== event.calendar_id) {
+        requireMockCalendarEventWrite(updates.calendar_id, user.id);
+      }
+      const immutableFields = {
+        id: event.id,
+        created_by: event.created_by,
+        created_at: event.created_at,
+      };
+      Object.assign(event, updates, immutableFields, { updated_at: new Date().toISOString() });
+      return { ...event };
+    },
+    calendarEventDelete: async (id) => {
+      const index = mockCalendarEvents.findIndex((event) => event.id === id);
+      if (index < 0) return;
+      requireMockCalendarEventWrite(
+        mockCalendarEvents[index].calendar_id,
+        requireMockCalendarUser().id,
+      );
+      mockCalendarEvents.splice(index, 1);
+    },
+    calendarTagsList: async () => mockCalendarTags.map((tag) => ({ ...tag })),
+    calendarTagsSave: async (tags) => {
+      const saved = tags.map((tag) => ({
+        id: tag.id ?? createUuid(),
+        name: tag.name,
+        color: tag.color,
+        sort_order: tag.sort_order,
+      }));
+      mockCalendarTags.splice(0, mockCalendarTags.length, ...saved);
+      return saved.map((tag) => ({ ...tag }));
+    },
+    calendarNotificationsCatchup: async () => [],
+    calendarNotificationsMarkRead: async () => {},
     supabaseReadRevisions: async () => getMockRevisionRows(),
     supabaseAddRevision: async (
       id: string,

@@ -23,6 +23,32 @@ export const EVENT_COLORS = [
   '#48DBFB', // cyan
 ] as const;
 
+/** B flow 자체 캘린더 (Supabase calendars 행의 렌더러 표현) */
+export interface BflowCalendar {
+  id: string;
+  name: string;
+  color: string;
+  visibility: 'private' | 'members' | 'team';
+  ownerId: string;
+  isPersonal: boolean;
+  members: CalendarMember[];
+  canEdit: boolean;
+  canManage: boolean;
+  createdAt: string;
+}
+
+export interface CalendarMember {
+  userId: string;
+  canEdit: boolean;
+}
+
+export interface CalendarTag {
+  id: string;
+  name: string;
+  color: string;
+  sortOrder: number;
+}
+
 /** 캘린더 이벤트 */
 export interface CalendarEvent {
   id: string;
@@ -58,12 +84,19 @@ export interface CalendarEvent {
   sourceCalendarId?: string;
 
   /**
-   * 비공개 일정 — true 면 Google Calendar 에 `visibility: 'private'` 로 저장된다.
-   * 같은 Google Workspace 도메인(studiojbbj.com) 의 다른 사용자가 같은 캘린더를
-   * 구독/공유하더라도 이 이벤트의 제목·메모는 보이지 않고 "비공개 일정" 으로만 표시된다.
-   * 개인 일정용 — 기본값 false (공개).
+   * 레거시 호환 — true 면 B flow 개인 캘린더 경로로 저장된다.
+   * 신규 코드는 calendarId 를 사용한다.
    */
   isPrivate?: boolean;
+
+  // ── B flow 공유 캘린더 확장 (PR2) ──
+  calendarId?: string;
+  tagId?: string;
+  allDay?: boolean;
+  startTime?: string;
+  endTime?: string;
+  canEdit?: boolean;
+  source?: 'bflow' | 'google' | 'vacation';
 }
 
 /** Google Calendar 연동 설정 */

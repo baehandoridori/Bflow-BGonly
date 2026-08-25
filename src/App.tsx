@@ -40,7 +40,14 @@ import { extractSceneDelta } from '@/utils/realtimeDelta';
 import { loadVacationConfig, connectVacation } from '@/services/vacationService';
 import { loadLayout, loadPreferences, savePreferences, loadTheme, saveTheme } from '@/services/settingsService';
 import { semverGt } from '@/utils/semver';
-import { loadSession, loadUsers, setUsersSheetsMode, migrateUsersToSheets } from '@/services/userService';
+import {
+  fetchFreshUsersFromSupabase,
+  loadSession,
+  loadUsers,
+  setUsersSheetsMode,
+  migrateUsersToSheets,
+} from '@/services/userService';
+import { reconcileAuthoritativeUserDirectory } from '@/services/authoritativeUserSession';
 import { setFeedbackLastSeenAt, setAssignmentLastSeenAt, getCommentReactionLastSeenAt, setCommentReactionLastSeenAt } from '@/utils/lastSeenTracker';
 import { buildReactionNotificationTitle } from '@/utils/commentReactionEmojiFormat';
 import { applyTheme, getPreset, getLightColors, deriveThemeFromAccent, sanitizeCustomHex, hexToRgb, DEFAULT_THEME_ID } from '@/themes';
@@ -2458,17 +2465,19 @@ export default function App() {
       if (data.event === 'data-change') {
         const changedTable = (data.payload as { table?: string } | undefined)?.table;
         if (changedTable === 'users') {
-          // 권한/사용자 변경 → 사용자 목록 재로드 + 현재 세션 role 갱신(관리자 승격·강등을 재시작 없이 즉시 반영).
-          loadUsers().then((freshUsers) => {
-            setUsers(freshUsers);
-            const me = useAuthStore.getState().currentUser;
-            if (me) {
-              const updated = freshUsers.find((u) => u.id === me.id);
-              if (updated && updated.role !== me.role) {
-                useAuthStore.getState().setCurrentUser({ ...me, role: updated.role });
-              }
-            }
-          }).catch((e) => console.warn('[Broadcast] users 변경 재로드 실패:', e));
+          // direct Supabase 조회가 성공한 authoritative 목록만 session 삭제 판단에 쓴다.
+          // transient outage의 local fallback으로 사용자를 로그아웃시키지 않는다.
+          void fetchFreshUsersFromSupabase().then((freshUsers) => (
+            reconcileAuthoritativeUserDirectory(freshUsers, {
+              getCurrentUser: () => useAuthStore.getState().currentUser,
+              setUsers: (users) => useAuthStore.getState().setUsers(users),
+              setCurrentUser: (user) => useAuthStore.getState().setCurrentUser(user),
+              logoutCanonicalSession: () => window.electronAPI.logoutCanonicalSession(),
+              onLogoutFailure: (error) => {
+                console.warn('[Broadcast] 삭제 사용자 canonical session 종료 실패:', error);
+              },
+            })
+          )).catch((e) => console.warn('[Broadcast] users 변경 재로드 실패:', e));
           return;
         }
         // 구조적 변경 (씬/파트/에피소드 추가/삭제) → 디바운스 full reload
@@ -2582,17 +2591,26 @@ export default function App() {
       }
 
       if (data.event === 'calendar-changed') {
-        // GCal webhook → incremental sync (인증된 경우에만)
-        import('@/services/googleCalendarService').then(({ isAuthenticated }) => {
-          isAuthenticated().then((authed) => {
-            if (!authed) return;
-            import('@/services/calendarService').then(({ syncIncremental }) => {
-              syncIncremental().catch((err) =>
-                console.warn('[Broadcast] 캘린더 incremental sync 실패:', err),
-              );
-            });
-          });
-        });
+        // exact committed-delete marker는 원격 앱에서도 먼저 tombstone한다. 일반 GCal
+        // webhook 신호만 기존 incremental sync로 이어 PR4 realtime 범위는 건드리지 않는다.
+        void (async () => {
+          try {
+            const calendar = await import('@/services/calendarService');
+            const appliedCommittedDelete = calendar.applyCommittedGoogleDelete(data.payload)
+              || calendar.applyCommittedPrivacyReplacementDelete(data.payload);
+            if (appliedCommittedDelete) {
+              window.dispatchEvent(new CustomEvent('bflow:calendar-changed', {
+                detail: data.payload,
+              }));
+              return;
+            }
+            const { isAuthenticated } = await import('@/services/googleCalendarService');
+            if (!await isAuthenticated()) return;
+            await calendar.syncIncremental();
+          } catch (err) {
+            console.warn('[Broadcast] 캘린더 incremental sync 실패:', err);
+          }
+        })();
       }
     });
     return () => {
@@ -2625,13 +2643,21 @@ export default function App() {
     const cleanup = window.electronAPI?.onCalendarChanged?.((payload) => {
       const detail = payload && typeof payload === 'object' ? payload as { action?: string } : {};
       const refresh = async () => {
-        if (detail.action === 'upsert' || detail.action === 'delete') {
-          try {
-            const { syncAll } = await import('@/services/calendarService');
+        try {
+          const {
+            applyCommittedGoogleDelete,
+            applyCommittedPrivacyReplacementDelete,
+            syncAll,
+          } = await import('@/services/calendarService');
+          // 영속 삭제 완료 marker는 재조회보다 먼저 exact tombstone 처리한다.
+          // 삭제 전 시작한 snapshot이나 다른 창의 독립 cache가 ghost를 되살려도 이 행만 차단된다.
+          const appliedCommittedDelete = applyCommittedGoogleDelete(payload)
+            || applyCommittedPrivacyReplacementDelete(payload);
+          if (!appliedCommittedDelete && (detail.action === 'upsert' || detail.action === 'delete')) {
             await syncAll({ broadcast: false });
-          } catch (error) {
-            console.warn('[Broadcast] 개인 할일 캘린더 캐시 갱신 실패:', error);
           }
+        } catch (error) {
+          console.warn('[Broadcast] 개인 할일 캘린더 캐시 갱신 실패:', error);
         }
         window.dispatchEvent(new CustomEvent('bflow:calendar-changed', { detail: payload }));
       };

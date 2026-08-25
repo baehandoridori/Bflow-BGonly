@@ -1,4 +1,5 @@
 import { contextBridge, ipcRenderer, webUtils } from 'electron';
+import type { CalendarApiInputContract } from '../src/shared/calendarApiContract';
 import type { BulkStageUpdate, BulkFieldUpdate, BulkUpdateResult } from './supabase';
 import type { CalendarTodoPatch, PersonalTodoCreateInput, PersonalTodoLabelColorKey, PersonalTodoOrderMutation, PersonalTodoPatch } from './personalTodoService';
 import type { SessionActionResult } from './sessionManager';
@@ -263,6 +264,50 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.invoke('supabase:update-private-event', id, updates),
   supabaseDeletePrivateEvent: (id: string) =>
     ipcRenderer.invoke('supabase:delete-private-event', id),
+  // ─── B flow 공유 캘린더 ───
+  calendarList: () => ipcRenderer.invoke('calendar:list'),
+  calendarCreate: (input: Parameters<CalendarApiInputContract['calendarCreate']>[0]) =>
+    ipcRenderer.invoke('calendar:create', input),
+  calendarUpdate: (
+    id: Parameters<CalendarApiInputContract['calendarUpdate']>[0],
+    updates: Parameters<CalendarApiInputContract['calendarUpdate']>[1],
+  ) => ipcRenderer.invoke('calendar:update', id, updates),
+  calendarDelete: (id: string) => ipcRenderer.invoke('calendar:delete', id),
+  calendarSetMembers: (
+    calendarId: Parameters<CalendarApiInputContract['calendarSetMembers']>[0],
+    members: Parameters<CalendarApiInputContract['calendarSetMembers']>[1],
+  ) =>
+    ipcRenderer.invoke('calendar:set-members', calendarId, members),
+  calendarEventsList: (params?: Parameters<CalendarApiInputContract['calendarEventsList']>[0]) =>
+    ipcRenderer.invoke('calendar:events:list', params),
+  calendarEventCreate: (input: Parameters<CalendarApiInputContract['calendarEventCreate']>[0]) =>
+    ipcRenderer.invoke('calendar:events:create', input),
+  calendarPrivacyMigrationSourceDelete: (
+    input: Parameters<CalendarApiInputContract['calendarPrivacyMigrationSourceDelete']>[0],
+  ) => ipcRenderer.invoke('calendar:privacy-migration:delete-source', input),
+  calendarPrivacyReplacementCreate: (
+    input: Parameters<CalendarApiInputContract['calendarPrivacyReplacementCreate']>[0],
+  ) => ipcRenderer.invoke('calendar:privacy-migration:create-replacement', input),
+  calendarPrivacyReplacementSettle: (
+    receipt: Parameters<CalendarApiInputContract['calendarPrivacyReplacementSettle']>[0],
+    disposition: Parameters<CalendarApiInputContract['calendarPrivacyReplacementSettle']>[1],
+  ) => ipcRenderer.invoke(
+    'calendar:privacy-migration:settle-replacement',
+    receipt,
+    disposition,
+  ),
+  calendarEventUpdate: (
+    id: Parameters<CalendarApiInputContract['calendarEventUpdate']>[0],
+    updates: Parameters<CalendarApiInputContract['calendarEventUpdate']>[1],
+  ) =>
+    ipcRenderer.invoke('calendar:events:update', id, updates),
+  calendarEventDelete: (id: string) => ipcRenderer.invoke('calendar:events:delete', id),
+  calendarTagsList: () => ipcRenderer.invoke('calendar:tags:list'),
+  calendarTagsSave: (tags: Parameters<CalendarApiInputContract['calendarTagsSave']>[0]) =>
+    ipcRenderer.invoke('calendar:tags:save', tags),
+  calendarNotificationsCatchup: () => ipcRenderer.invoke('calendar:notifications:catchup'),
+  calendarNotificationsMarkRead: (ids: string[]) =>
+    ipcRenderer.invoke('calendar:notifications:mark-read', ids),
   supabaseReadRevisions: () =>
     ipcRenderer.invoke('supabase:read-revisions'),
     supabaseAddRevision: (

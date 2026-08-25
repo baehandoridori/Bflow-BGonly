@@ -320,8 +320,10 @@ test('calendar recovery searches both previous and current candidate calendars',
 
 test('user profile mutations refresh and broadcast the canonical main-owned profile', () => {
   const main = readFileSync('electron/main.ts', 'utf8');
+  const userAdminIpc = readFileSync('electron/userAdminIpc.ts', 'utf8');
   const userService = readFileSync('src/services/userService.ts', 'utf8');
-  assert.match(main, /supabase:update-user[\s\S]{0,500}refreshCurrentUser/);
+  assert.match(main, /registerUserAdminIpc\(ipcMain,[\s\S]{0,500}refreshCurrentUser/);
+  assert.match(userAdminIpc, /supabase:update-user[\s\S]{0,800}refreshCurrentUser/);
   assert.match(main, /auth:change-own-password[\s\S]{0,2500}refreshCurrentUser/);
   assert.match(userService, /changeOwnPassword/);
 });

@@ -25,7 +25,17 @@ import { EpSinglePartWidget } from '@/components/widgets/episode/EpSinglePartWid
 import { WidgetIdContext, IsPopupContext } from '@/components/widgets/Widget';
 import { GradientBackdrop } from '@/components/common/GradientBackdrop';
 import { loadPreferences, loadTheme } from '@/services/settingsService';
-import { loadSession, loadUsers, setUsersSheetsMode } from '@/services/userService';
+import {
+  applyCommittedGoogleDelete,
+  applyCommittedPrivacyReplacementDelete,
+} from '@/services/calendarService';
+import {
+  fetchFreshUsersFromSupabase,
+  loadSession,
+  loadUsers,
+  setUsersSheetsMode,
+} from '@/services/userService';
+import { reconcileAuthoritativeUserDirectory } from '@/services/authoritativeUserSession';
 import { applyPreferencesToDOM } from '@/utils/typography';
 import { readAll, checkConnection, readMetadata } from '@/services/supabaseService';
 import { connectGas, loadGasConfig } from '@/services/gasConfigService';
@@ -47,6 +57,53 @@ export function notifyDataChangeWithCooldown() {
   _reloadCooldown = true;
   setTimeout(() => { _reloadCooldown = false; }, _COOLDOWN_MS);
   return window.electronAPI?.dataNotifyChange?.();
+}
+
+/** 메인/다른 위젯에서 온 calendar-changed를 이 팝업의 독립 cache에 먼저 반영한다.
+ *  PR2에서는 privacy migration 보상으로 영속 삭제가 확정된 Google/B flow/legacy 행만
+ *  exact tombstone 처리하며, 일반 add/update 재조회와 realtime 확장은 PR4 범위로 남긴다. */
+export async function applyIncomingCalendarChangeInPopup(payload: unknown): Promise<void> {
+  try {
+    applyCommittedGoogleDelete(payload) || applyCommittedPrivacyReplacementDelete(payload);
+  } catch (error) {
+    console.warn('[Calendar] 팝업 확정 삭제 반영 실패:', error);
+  }
+  window.dispatchEvent(new CustomEvent('bflow:calendar-changed', { detail: payload }));
+}
+
+/** main이 전달한 Supabase broadcast 중 calendar exact marker만 popup cache 경로로 연결한다. */
+export async function applyIncomingSupabaseCalendarChangeInPopup(raw: unknown): Promise<boolean> {
+  if (!raw || typeof raw !== 'object') return false;
+  const data = raw as { event?: unknown; payload?: unknown };
+  if (data.event !== 'calendar-changed') return false;
+  await applyIncomingCalendarChangeInPopup(data.payload);
+  return true;
+}
+
+export async function reconcilePopupUserDirectory(): Promise<'unchanged' | 'updated' | 'deleted'> {
+  const freshUsers = await fetchFreshUsersFromSupabase();
+  return reconcileAuthoritativeUserDirectory(freshUsers, {
+    getCurrentUser: () => useAuthStore.getState().currentUser,
+    setUsers: (users) => useAuthStore.getState().setUsers(users),
+    setCurrentUser: (user) => {
+      useAuthStore.getState().setCurrentUser(user);
+      if (!user) {
+        // calendarService의 사용자 소유 cache는 auth store 구독에서 같은 call stack에
+        // 비워진다. 그 직후 팝업 위젯의 별도 events state도 재조회해 private 일정이
+        // canonical logout 완료를 기다리는 동안 화면에 남지 않게 한다.
+        window.dispatchEvent(new CustomEvent('bflow:calendar-changed', {
+          detail: {
+            action: 'session-cleared',
+            reason: 'authoritative-user-deleted',
+          },
+        }));
+      }
+    },
+    logoutCanonicalSession: () => window.electronAPI.logoutCanonicalSession(),
+    onLogoutFailure: (error) => {
+      console.warn('[WidgetPopup] 삭제 사용자 canonical session 종료 실패:', error);
+    },
+  });
 }
 
 // 현황판은 App.tsx 와 동일하게 lazy — 팝업 엔트리 청크를 무겁게 하지 않는다 (피드백 36).
@@ -315,7 +372,7 @@ export function WidgetPopup({ widgetId, extraParams }: { widgetId: string; extra
   // 무한 루프 방지: 송신자 제외는 메인 프로세스에서 처리됨
   useEffect(() => {
     const cleanup = window.electronAPI?.onCalendarChanged?.((payload) => {
-      window.dispatchEvent(new CustomEvent('bflow:calendar-changed', { detail: payload }));
+      void applyIncomingCalendarChangeInPopup(payload);
     });
     return () => { cleanup?.(); };
   }, []);
@@ -401,6 +458,13 @@ export function WidgetPopup({ widgetId, extraParams }: { widgetId: string; extra
     const cleanupRealtime = window.electronAPI?.onSupabaseRealtime?.((event: unknown) => {
       const { table, payload } = event as import('@/services/supabaseService').SupabaseRealtimeEvent;
 
+      if (table === 'users') {
+        void reconcilePopupUserDirectory()
+          .then((result) => { if (result !== 'deleted') reloadData(); })
+          .catch((error) => console.warn('[WidgetPopup] users 변경 재로드 실패:', error));
+        return;
+      }
+
       if (table === 'comments') {
         invalidatePartCache();
         return;
@@ -454,8 +518,22 @@ export function WidgetPopup({ widgetId, extraParams }: { widgetId: string; extra
           return;
         }
       }
+      if (data.event === 'calendar-changed') {
+        // 다른 앱 인스턴스에서 persistence가 끝난 exact delete marker도 이 popup의
+        // 독립 calendar cache에 즉시 적용한다. 일반 calendar action은 여기서 full
+        // reload하지 않고 기존 PR2 동작을 유지한다.
+        void applyIncomingSupabaseCalendarChangeInPopup(raw);
+        return;
+      }
       if (data.event === 'data-change') {
-        reloadData();
+        const table = data.payload?.table;
+        if (table === 'users') {
+          void reconcilePopupUserDirectory()
+            .then((result) => { if (result !== 'deleted') reloadData(); })
+            .catch((error) => console.warn('[WidgetPopup] users 변경 재로드 실패:', error));
+        } else {
+          reloadData();
+        }
       }
     });
 

@@ -1291,6 +1291,27 @@ export async function addUser(user: SupabaseUser): Promise<void> {
   broadcastDataChange('users', 'INSERT');
 }
 
+/** main canonical actor를 DB transaction에 전달하는 관리자 사용자 추가 경로.
+ * users가 완전히 비어 있을 때만 actor 자신인 admin 1명을 bootstrap할 수 있다. */
+export async function addUserAuthorized(
+  actorId: string,
+  user: import('./userAdminIpc').UserAdminCreateInput,
+): Promise<void> {
+  const { error } = await supabase.rpc('create_user_authorized', {
+    p_actor_id: actorId,
+    p_user: {
+      id: user.id,
+      name: user.name,
+      role: user.role,
+      slack_id: user.slackId,
+      hire_date: user.hireDate,
+      birthday: user.birthday,
+    },
+  });
+  throwIfError(error);
+  broadcastDataChange('users', 'INSERT');
+}
+
 /** 사용자 업데이트.
  *  v1.18.1: isCompositor(boolean) 처리를 위해 value 타입을 string | boolean | null 로 확장.
  *  Postgres update 는 null 을 명시적으로 SET … = NULL 로 적용하므로 그대로 전달.
@@ -1316,6 +1337,30 @@ export async function updateUser(
   broadcastDataChange('users', 'UPDATE');
 }
 
+export async function updateUserAuthorized(
+  actorId: string,
+  userId: string,
+  updates: import('./userAdminIpc').UserAdminUpdateInput,
+): Promise<void> {
+  const dbUpdates: Record<string, unknown> = {};
+  if (updates.name !== undefined) dbUpdates.name = updates.name;
+  if (updates.role !== undefined) dbUpdates.role = updates.role;
+  if (updates.slackId !== undefined) dbUpdates.slack_id = updates.slackId;
+  if (updates.hireDate !== undefined) dbUpdates.hire_date = updates.hireDate;
+  if (updates.birthday !== undefined) dbUpdates.birthday = updates.birthday;
+  if (updates.isCompositor !== undefined) dbUpdates.is_compositor = updates.isCompositor;
+  if (updates.isActingSupervisor !== undefined) {
+    dbUpdates.is_acting_supervisor = updates.isActingSupervisor;
+  }
+  const { error } = await supabase.rpc('update_user_authorized', {
+    p_actor_id: actorId,
+    p_user_id: userId,
+    p_updates: dbUpdates,
+  });
+  throwIfError(error);
+  broadcastDataChange('users', 'UPDATE');
+}
+
 /** 사용자 삭제.
  *  퇴사자 처리와 개인 데이터 정리를 DB RPC 한 트랜잭션으로 수행한다.
  *  - scenes.assignee, comp_revisions.assignee 는 NULL 로 비움
@@ -1325,6 +1370,15 @@ export async function updateUser(
  */
 export async function deleteUser(userId: string): Promise<void> {
   const { error } = await supabase.rpc('delete_user_cascade', { p_user_id: userId });
+  throwIfError(error);
+  broadcastDataChange('users', 'DELETE');
+}
+
+export async function deleteUserAuthorized(actorId: string, userId: string): Promise<void> {
+  const { error } = await supabase.rpc('delete_user_authorized', {
+    p_actor_id: actorId,
+    p_user_id: userId,
+  });
   throwIfError(error);
   broadcastDataChange('users', 'DELETE');
 }
@@ -1792,7 +1846,7 @@ export async function readPrivateEvents(userId: string): Promise<SupabasePrivate
   return (data as SupabasePrivateEvent[]) || [];
 }
 
-export async function addPrivateEvent(input: {
+type PrivateEventCreateInput = {
   user_id: string;
   title: string;
   memo?: string;
@@ -1807,10 +1861,31 @@ export async function addPrivateEvent(input: {
   linked_department?: string | null;
   linked_todo_id?: string | null;
   created_by?: string;
-}): Promise<SupabasePrivateEvent> {
+};
+
+function safePrivateEventCreateInput(input: PrivateEventCreateInput): PrivateEventCreateInput {
+  return {
+    user_id: input.user_id,
+    title: input.title,
+    memo: input.memo,
+    color: input.color,
+    type: input.type,
+    start_date: input.start_date,
+    end_date: input.end_date,
+    linked_episode: input.linked_episode,
+    linked_part: input.linked_part,
+    linked_sheet_name: input.linked_sheet_name,
+    linked_scene_id: input.linked_scene_id,
+    linked_department: input.linked_department,
+    linked_todo_id: input.linked_todo_id,
+    created_by: input.created_by,
+  };
+}
+
+export async function addPrivateEvent(input: PrivateEventCreateInput): Promise<SupabasePrivateEvent> {
   const { data, error } = await supabase
     .from('private_calendar_events')
-    .insert(input)
+    .insert(safePrivateEventCreateInput(input))
     .select('*')
     .single();
   throwIfError(error);
@@ -1819,26 +1894,57 @@ export async function addPrivateEvent(input: {
   return data as SupabasePrivateEvent;
 }
 
+type PrivateEventUpdateInput = Partial<{
+  title: string;
+  memo: string;
+  color: string;
+  type: string;
+  start_date: string;
+  end_date: string;
+  linked_episode: number | null;
+  linked_part: string | null;
+  linked_sheet_name: string | null;
+  linked_scene_id: string | null;
+  linked_department: string | null;
+  linked_todo_id: string | null;
+}>;
+
+function safePrivateEventUpdateInput(input: PrivateEventUpdateInput): PrivateEventUpdateInput {
+  const safe: PrivateEventUpdateInput = {};
+  if (input.title !== undefined) safe.title = input.title;
+  if (input.memo !== undefined) safe.memo = input.memo;
+  if (input.color !== undefined) safe.color = input.color;
+  if (input.type !== undefined) safe.type = input.type;
+  if (input.start_date !== undefined) safe.start_date = input.start_date;
+  if (input.end_date !== undefined) safe.end_date = input.end_date;
+  if (input.linked_episode !== undefined) safe.linked_episode = input.linked_episode;
+  if (input.linked_part !== undefined) safe.linked_part = input.linked_part;
+  if (input.linked_sheet_name !== undefined) safe.linked_sheet_name = input.linked_sheet_name;
+  if (input.linked_scene_id !== undefined) safe.linked_scene_id = input.linked_scene_id;
+  if (input.linked_department !== undefined) safe.linked_department = input.linked_department;
+  if (input.linked_todo_id !== undefined) safe.linked_todo_id = input.linked_todo_id;
+  return safe;
+}
+
 export async function updatePrivateEvent(
   id: string,
-  updates: Partial<{
-    title: string;
-    memo: string;
-    color: string;
-    type: string;
-    start_date: string;
-    end_date: string;
-    linked_episode: number | null;
-    linked_part: string | null;
-    linked_sheet_name: string | null;
-    linked_scene_id: string | null;
-    linked_department: string | null;
-    linked_todo_id: string | null;
-  }>,
+  ownerId: string,
+  updates: PrivateEventUpdateInput,
 ): Promise<void> {
-  const patch = { ...updates, updated_at: new Date().toISOString() };
-  const { error } = await supabase.from('private_calendar_events').update(patch).eq('id', id);
+  const patch = {
+    ...safePrivateEventUpdateInput(updates),
+    updated_at: new Date().toISOString(),
+  };
+  const { data, error } = await supabase
+    .from('private_calendar_events')
+    .update(patch)
+    .eq('id', id)
+    .eq('user_id', ownerId)
+    .select('id');
   throwIfError(error);
+  if (!Array.isArray(data) || !data.some((row) => row?.id === id)) {
+    throw new Error('해당 비공개 일정을 찾을 수 없거나 소유자가 변경되었습니다');
+  }
   broadcastDataChange('private_calendar_events', 'UPDATE');
   broadcastCalendarChanged('UPDATE');
 }
@@ -1848,6 +1954,50 @@ export async function deletePrivateEvent(id: string): Promise<void> {
   throwIfError(error);
   broadcastDataChange('private_calendar_events', 'DELETE');
   broadcastCalendarChanged('DELETE');
+}
+
+/** privacy replacement receipt 전용 원자적 삭제.
+ *  create 때 캡처한 owner와 id를 같은 DELETE 문에 묶어, 검증과 삭제 사이에 같은 UUID가
+ *  다른 소유자의 행으로 교체되어도 새 행을 지우지 않는다. */
+export async function deletePrivateEventForOwner(id: string, ownerId: string): Promise<void> {
+  const { data, error } = await supabase
+    .from('private_calendar_events')
+    .delete()
+    .eq('id', id)
+    .eq('user_id', ownerId)
+    .select('id');
+  throwIfError(error);
+  if (!Array.isArray(data) || !data.some((row) => row?.id === id)) {
+    throw new Error('보상 대상 비공개 일정이 없거나 소유자가 변경되었습니다');
+  }
+  broadcastDataChange('private_calendar_events', 'DELETE');
+  broadcastCalendarChanged('DELETE');
+}
+
+/** privacy migration source 전용 conditional delete.
+ * pre-read 뒤 다른 intent가 먼저 삭제한 zero-row는 확정 missing으로 구분하고,
+ * Supabase/network error는 caller가 authoritative readback으로 판정할 수 있게 throw한다. */
+export async function deletePrivateEventForOwnerIfPresent(
+  id: string,
+  ownerId: string,
+): Promise<'deleted' | 'missing'> {
+  const { data, error } = await supabase
+    .from('private_calendar_events')
+    .delete()
+    .eq('id', id)
+    .eq('user_id', ownerId)
+    .select('id');
+  throwIfError(error);
+  // Supabase가 정상 응답한 []만 conditional zero-row를 증명한다. null/비배열은
+  // DELETE commit 뒤 representation 응답이 유실된 것일 수 있으므로 caller의
+  // authoritative readback 분류로 넘긴다.
+  if (!Array.isArray(data)) {
+    throw new Error('비공개 일정 삭제 결과를 확인할 수 없습니다');
+  }
+  if (!data.some((row) => row?.id === id)) return 'missing';
+  broadcastDataChange('private_calendar_events', 'DELETE');
+  broadcastCalendarChanged('DELETE');
+  return 'deleted';
 }
 
 /** 특정 비공개 이벤트의 소유자(user_id) 조회 — IPC 핸들러에서 권한 검증용. */

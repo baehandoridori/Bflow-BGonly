@@ -5,6 +5,10 @@ import type {
   ArcadeSnapshot,
   ArcadeWalletPush,
 } from '../features/playground/arcade/types';
+import type {
+  CalendarApiInputContract,
+  CalendarPrivacyMigrationSourceDeleteResult,
+} from '../shared/calendarApiContract';
 
 // ─── 부서 (Department) ──────────────────────
 
@@ -1033,7 +1037,7 @@ export interface UpdateInfo {
 
 // ─── Electron API (preload에서 노출) ─────────
 
-export interface ElectronAPI {
+export interface ElectronAPI extends CalendarApiInputContract {
   getDataPath: () => Promise<string>;
   shellShowItem?: (filePath: string) => Promise<{ ok: boolean; error?: string }>;
   shellOpenPath?: (targetPath: string) => Promise<{ ok: boolean; error?: string }>;
@@ -1403,6 +1407,151 @@ export interface ElectronAPI {
   }) => Promise<{ id: string }>;
   supabaseUpdatePrivateEvent: (id: string, updates: Record<string, unknown>) => Promise<void>;
   supabaseDeletePrivateEvent: (id: string) => Promise<void>;
+  calendarList: () => Promise<Array<{
+    id: string;
+    name: string;
+    color: string;
+    visibility: 'private' | 'members' | 'team';
+    owner_id: string;
+    is_personal: boolean;
+    created_at: string;
+    updated_at: string;
+    members: Array<{ user_id: string; can_edit: boolean }>;
+    can_edit: boolean;
+    can_manage: boolean;
+  }>>;
+  calendarCreate: (
+    input: Parameters<CalendarApiInputContract['calendarCreate']>[0],
+  ) => Promise<{
+    id: string;
+    name: string;
+    color: string;
+    visibility: 'private' | 'members' | 'team';
+    owner_id: string;
+    is_personal: boolean;
+    created_at: string;
+    updated_at: string;
+  }>;
+  calendarUpdate: (
+    id: Parameters<CalendarApiInputContract['calendarUpdate']>[0],
+    updates: Parameters<CalendarApiInputContract['calendarUpdate']>[1],
+  ) => Promise<void>;
+  calendarDelete: (id: string) => Promise<void>;
+  calendarSetMembers: (
+    calendarId: Parameters<CalendarApiInputContract['calendarSetMembers']>[0],
+    members: Parameters<CalendarApiInputContract['calendarSetMembers']>[1],
+  ) => Promise<void>;
+  calendarEventsList: (
+    params?: Parameters<CalendarApiInputContract['calendarEventsList']>[0]
+  ) => Promise<Array<{
+    id: string;
+    calendar_id: string;
+    title: string;
+    memo: string | null;
+    tag_id: string | null;
+    all_day: boolean;
+    start_date: string;
+    end_date: string;
+    start_time: string | null;
+    end_time: string | null;
+    linked_episode: number | null;
+    linked_part: string | null;
+    linked_sheet_name: string | null;
+    linked_scene_id: string | null;
+    linked_department: string | null;
+    linked_todo_id: string | null;
+    created_by: string | null;
+    created_at: string;
+    updated_at: string;
+  }>>;
+  calendarEventCreate: (
+    input: Parameters<CalendarApiInputContract['calendarEventCreate']>[0],
+  ) => Promise<{
+    id: string;
+    calendar_id: string;
+    title: string;
+    memo: string | null;
+    tag_id: string | null;
+    all_day: boolean;
+    start_date: string;
+    end_date: string;
+    start_time: string | null;
+    end_time: string | null;
+    linked_episode: number | null;
+    linked_part: string | null;
+    linked_sheet_name: string | null;
+    linked_scene_id: string | null;
+    linked_department: string | null;
+    linked_todo_id: string | null;
+    created_by: string | null;
+    created_at: string;
+    updated_at: string;
+  }>;
+  calendarPrivacyMigrationSourceDelete: (
+    input: Parameters<CalendarApiInputContract['calendarPrivacyMigrationSourceDelete']>[0],
+  ) => Promise<CalendarPrivacyMigrationSourceDeleteResult>;
+  calendarPrivacyReplacementCreate: (
+    input: Parameters<CalendarApiInputContract['calendarPrivacyReplacementCreate']>[0],
+  ) => Promise<{
+    storage: 'bflow' | 'legacy-private' | 'google';
+    actual_id: string;
+    calendar_id?: string;
+    receipt: string;
+  }>;
+  calendarPrivacyReplacementSettle: (
+    receipt: Parameters<CalendarApiInputContract['calendarPrivacyReplacementSettle']>[0],
+    disposition: Parameters<CalendarApiInputContract['calendarPrivacyReplacementSettle']>[1],
+  ) => Promise<void>;
+  calendarEventUpdate: (
+    id: Parameters<CalendarApiInputContract['calendarEventUpdate']>[0],
+    updates: Parameters<CalendarApiInputContract['calendarEventUpdate']>[1],
+  ) => Promise<{
+    id: string;
+    calendar_id: string;
+    title: string;
+    memo: string | null;
+    tag_id: string | null;
+    all_day: boolean;
+    start_date: string;
+    end_date: string;
+    start_time: string | null;
+    end_time: string | null;
+    linked_episode: number | null;
+    linked_part: string | null;
+    linked_sheet_name: string | null;
+    linked_scene_id: string | null;
+    linked_department: string | null;
+    linked_todo_id: string | null;
+    created_by: string | null;
+    created_at: string;
+    updated_at: string;
+  }>;
+  calendarEventDelete: (id: string) => Promise<void>;
+  calendarTagsList: () => Promise<Array<{
+    id: string;
+    name: string;
+    color: string;
+    sort_order: number;
+  }>>;
+  calendarTagsSave: (
+    tags: Parameters<CalendarApiInputContract['calendarTagsSave']>[0],
+  ) => Promise<Array<{ id: string; name: string; color: string; sort_order: number }>>;
+  calendarNotificationsCatchup: () => Promise<Array<{
+    id: string;
+    recipient_id: string;
+    actor_id: string | null;
+    actor_name: string | null;
+    calendar_id: string | null;
+    calendar_name: string | null;
+    event_id: string | null;
+    event_title: string | null;
+    event_date: string | null;
+    action: 'create' | 'update' | 'delete';
+    detail: string | null;
+    created_at: string;
+    read_at: string | null;
+  }>>;
+  calendarNotificationsMarkRead: (ids: string[]) => Promise<void>;
   supabaseReadRevisions: () => Promise<unknown[]>;
   supabaseAddRevision: (id: string, partUuid: string, sceneId: string, revisionNo: number, status: string, priority: string, description: string, frameNo: string, imageUrl: string, department: string, lookupDepartment: string, requesterId: string, requesterName: string, assignee: string, createdAt: string, notifyUserIdsJson: string, assigneeIdsJson?: string, setId?: string) => Promise<void>;
   supabaseUpdateRevision: (id: string, updates: Record<string, string>) => Promise<void>;

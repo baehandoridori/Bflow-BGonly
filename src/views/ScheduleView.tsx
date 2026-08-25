@@ -8,7 +8,7 @@ import { cn } from '@/utils/cn';
 import { useDataStore } from '@/stores/useDataStore';
 import { useAppStore } from '@/stores/useAppStore';
 import {
-  getEvents, addEvent, updateEvent, deleteEvent,
+  getEvents, isGoogleCacheReady, loadBflowEvents, addEvent, updateEvent, deleteEvent,
 } from '@/services/calendarService';
 import { fetchAllVacationEvents } from '@/services/vacationService';
 import { useCalendarDnD } from '@/hooks/useCalendarDnD';
@@ -115,15 +115,15 @@ export function ScheduleView() {
   // 이벤트 로드 + 외부 변경 구독 (할일 위젯 등에서 수정 시 즉시 반영)
   useEffect(() => {
     let cancelled = false;
-    // cold cache 방어: 캐시가 비어있으면 syncAll 시도
+    // B flow와 Google 캐시는 별도로 준비된다. B flow 행이 있어도 Google full sync는 필요할 수 있다.
     (async () => {
-      const cached = await getEvents();
-      if (cached.length === 0) {
+      await loadBflowEvents();
+      if (!isGoogleCacheReady()) {
         try {
           const { isAuthenticated } = await import('@/services/googleCalendarService');
           if (await isAuthenticated()) {
             const { syncAll } = await import('@/services/calendarService');
-            await syncAll();
+            await syncAll({ skipBflowLoad: true });
           }
         } catch { /* GCal 미연결 시 무시 */ }
       }

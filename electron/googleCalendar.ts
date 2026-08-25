@@ -342,6 +342,34 @@ export async function deleteEvent(calendarId: string, eventId: string): Promise<
   await getCalendarApi().events.delete({ calendarId, eventId });
 }
 
+function isGoogleNotFoundError(error: unknown): boolean {
+  if (!error || typeof error !== 'object') return false;
+  const candidate = error as {
+    code?: unknown;
+    status?: unknown;
+    response?: { status?: unknown };
+  };
+  return candidate.code === 404
+    || candidate.code === '404'
+    || candidate.status === 404
+    || candidate.response?.status === 404;
+}
+
+/** privacy migration source 판정용 authoritative existence read.
+ * Google API의 명시적 404만 missing으로 바꾸고 network/5xx는 그대로 전파한다. */
+export async function getEvent(
+  calendarId: string,
+  eventId: string,
+): Promise<{ id: string } | null> {
+  try {
+    const response = await getCalendarApi().events.get({ calendarId, eventId });
+    return { id: response.data.id || eventId };
+  } catch (error) {
+    if (isGoogleNotFoundError(error)) return null;
+    throw error;
+  }
+}
+
 // ─── Incremental Sync ──────────────────────────────
 
 interface SyncState {

@@ -3,7 +3,7 @@ import { CalendarDays, ChevronLeft, ChevronRight, ChevronDown, Filter, Settings2
 import { motion, AnimatePresence } from 'framer-motion';
 import { cn } from '@/utils/cn';
 import { useAppStore } from '@/stores/useAppStore';
-import { getEvents, getEventsForDate, syncAll } from '@/services/calendarService';
+import { getEvents, getEventsForDate, loadBflowEvents, syncAll } from '@/services/calendarService';
 import * as gcalService from '@/services/googleCalendarService';
 import { fetchAllVacationEvents } from '@/services/vacationService';
 import type { CalendarEvent, CalendarFilter } from '@/types/calendar';
@@ -80,9 +80,10 @@ export function CalendarWidget() {
     // 초기 로드: 인증된 경우 전체 동기화 후 캐시 반영
     (async () => {
       try {
+        await loadBflowEvents();
         const authed = await gcalService.isAuthenticated();
         if (authed && !cancelled) {
-          await syncAll();
+          await syncAll({ skipBflowLoad: true });
         }
       } catch { /* GCal 미연결 시 무시 */ }
       if (!cancelled) getEvents().then(setEvents);
