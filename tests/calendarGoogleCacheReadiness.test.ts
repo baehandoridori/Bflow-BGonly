@@ -694,6 +694,8 @@ test('Google sync maps RFC3339 dateTime into timed B flow fields while all-day e
     });
     assert.equal(allDayEvent?.allDay, true);
     assert.equal(allDayEvent?.endDate, '2026-08-24', 'Google exclusive end remains B flow inclusive');
+    assert.equal(timedEvent?.color, '#8B8DA3', 'Google events use the neutral source color');
+    assert.equal(allDayEvent?.color, '#8B8DA3', 'the Google source color is independent of event timing');
   } finally {
     harness.restore();
   }

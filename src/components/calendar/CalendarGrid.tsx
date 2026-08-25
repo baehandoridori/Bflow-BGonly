@@ -7,6 +7,7 @@ import type { CalendarEvent } from '@/types/calendar';
 import { EVENT_COLORS } from '@/types/calendar';
 import type { DragMode, DragPreview } from '@/hooks/useCalendarDnD';
 import { WEEKDAYS, fmtDate, parseDate, addDays, daysBetween } from '@/utils/calendarDate';
+import { formatEventChipText } from '@/utils/calendarEventFilter';
 import { floatingGlassStyle, tooltipGlassStyle } from '@/utils/glassStyles';
 
 /** 이벤트의 연속 바 레이아웃 계산 */
@@ -85,7 +86,7 @@ function layoutEventBars(
 
 function EventBarChip({
   bar, onClick, onDragStart, isDragging, isGhost,
-  hoveredEventId, onHover, onContextMenu,
+  hoveredEventId, onHover, onContextMenu, tagNameById, calendarNameById,
 }: {
   bar: EventBar;
   onClick: (e: CalendarEvent) => void;
@@ -95,6 +96,8 @@ function EventBarChip({
   hoveredEventId?: string | null;
   onHover?: (id: string | null) => void;
   onContextMenu?: (ev: CalendarEvent, e: React.MouseEvent) => void;
+  tagNameById: Record<string, string>;
+  calendarNameById: Record<string, string>;
 }) {
   const ev = bar.event;
   const hex = ev.color || EVENT_COLORS[0];
@@ -247,7 +250,7 @@ function EventBarChip({
         {!bar.isStart && <span className="text-[9px] mr-0.5 opacity-60">◂</span>}
         {ev.type === 'vacation' && <Palmtree size={10} className="shrink-0 mr-1 opacity-80" />}
         {(ev.linkedTodoId || ev.id.startsWith('cal_')) && <CheckSquare size={9} className="shrink-0 mr-1 opacity-70" />}
-        <span className="truncate">{ev.title}</span>
+        <span className="truncate">{formatEventChipText(ev, tagNameById, calendarNameById)}</span>
         {!bar.isEnd && <span className="text-[9px] ml-auto pl-0.5 opacity-60 shrink-0">▸</span>}
         {/* 리사이즈 핸들 (오른쪽) */}
         {bar.isEnd && !isGhost && !ev.isReadOnly && (
@@ -368,6 +371,8 @@ export function CalendarGrid({
   monthDirection = 0,
   focusedDate,
   pulseDate,
+  tagNameById,
+  calendarNameById,
 }: {
   weeks: Date[][];
   events: CalendarEvent[];
@@ -386,6 +391,8 @@ export function CalendarGrid({
   monthDirection?: number;
   focusedDate?: string | null;
   pulseDate?: string | null;
+  tagNameById: Record<string, string>;
+  calendarNameById: Record<string, string>;
 }) {
   const [overflow, setOverflow] = useState<{ date: string; rect: DOMRect } | null>(null);
   const [hoveredEventId, setHoveredEventId] = useState<string | null>(null);
@@ -540,6 +547,8 @@ export function CalendarGrid({
                     hoveredEventId={hoveredEventId}
                     onHover={setHoveredEventId}
                     onContextMenu={onEventContextMenu}
+                    tagNameById={tagNameById}
+                    calendarNameById={calendarNameById}
                   />
                 );
               })}

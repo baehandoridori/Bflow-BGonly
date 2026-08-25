@@ -280,7 +280,7 @@ function toCalendarEvent(gcalEvent: any, calendarId: string): CalendarEvent {
     id: gcalEvent.id,
     title: gcalEvent.summary || '',
     memo: gcalEvent.description || '',
-    color: '#6C5CE7', // TODO: GCal colorId → 색상 매핑
+    color: '#8B8DA3',
     type: (meta.bflow_type as CalendarEventType) || 'custom',
     startDate: startDate || '',
     endDate: endDate || '',

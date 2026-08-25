@@ -41,6 +41,17 @@ type TagManagerPopoverProps = {
 };
 type TagManagerPopoverComponent = (props: TagManagerPopoverProps) => ReactNode;
 type ScheduleViewComponent = () => ReactNode;
+type CalendarGridProps = {
+  weeks: Date[][];
+  events: ScheduleCalendarEvent[];
+  today: string;
+  currentMonth: number;
+  maxVisibleBars: number;
+  tagNameById: Record<string, string>;
+  calendarNameById: Record<string, string>;
+  onEventClick(event: ScheduleCalendarEvent): void;
+};
+type CalendarGridComponent = (props: CalendarGridProps) => ReactNode;
 type ScheduleCalendarEvent = {
   id: string;
   title: string;
@@ -63,6 +74,8 @@ type ScheduleCalendarEvent = {
 };
 type ScheduleGridProps = {
   events: ScheduleCalendarEvent[];
+  tagNameById: Record<string, string>;
+  calendarNameById: Record<string, string>;
   onEventClick(event: ScheduleCalendarEvent): void;
   onEventContextMenu(event: ScheduleCalendarEvent, mouse: { preventDefault(): void; stopPropagation(): void; clientX: number; clientY: number }): void;
 };
@@ -173,6 +186,7 @@ let bundledRail: Promise<CalendarRailComponent> | undefined;
 let bundledTagBar: Promise<TagBarComponent> | undefined;
 let bundledTagManagerPopover: Promise<TagManagerPopoverComponent> | undefined;
 let bundledScheduleView: Promise<ScheduleViewComponent> | undefined;
+let bundledCalendarGrid: Promise<CalendarGridComponent> | undefined;
 let bundledEventCreateModal: Promise<EventCreateModalComponent> | undefined;
 let bundledCalendarSettingsModal: Promise<CalendarSettingsModalComponent> | undefined;
 let bundledWeekScrollView: Promise<WeekScrollViewModule> | undefined;
@@ -737,6 +751,59 @@ async function loadScheduleView(): Promise<ScheduleViewComponent> {
   return bundledScheduleView;
 }
 
+async function loadCalendarGrid(): Promise<CalendarGridComponent> {
+  bundledCalendarGrid ??= build({
+    entryPoints: ['src/components/calendar/CalendarGrid.tsx'],
+    bundle: true,
+    format: 'cjs',
+    platform: 'node',
+    target: 'node22',
+    write: false,
+    external: [
+      'react', 'react/jsx-runtime', 'react-dom', 'framer-motion', 'lucide-react',
+      '@/utils/cn',
+    ],
+  }).then((result) => {
+    const module = { exports: {} as Record<string, unknown> };
+    const nodeRequire = createRequire(import.meta.url);
+    const react = nodeRequire('react') as Record<string, unknown>;
+    const jsxRuntime = nodeRequire('react/jsx-runtime') as { jsx(type: unknown, props: unknown, key?: string): ReactNode };
+    const emptyComponent = () => null;
+    const evaluate = new Function('require', 'module', 'exports', result.outputFiles[0].text);
+    evaluate((id: string) => {
+      if (id === 'react') {
+        return {
+          ...react,
+          useState(initial: unknown) {
+            const slot = stateCursor++;
+            if (stateSlots[slot] === undefined) {
+              stateSlots[slot] = typeof initial === 'function' ? (initial as () => unknown)() : initial;
+            }
+            return [stateSlots[slot], (next: unknown) => {
+              stateSlots[slot] = typeof next === 'function'
+                ? (next as (value: unknown) => unknown)(stateSlots[slot])
+                : next;
+            }];
+          },
+          useMemo: (factory: () => unknown) => factory(),
+          useRef: (initial: unknown) => ({ current: initial }),
+        };
+      }
+      if (id === 'react/jsx-runtime') return jsxRuntime;
+      if (id === 'react-dom') return { createPortal: (children: ReactNode) => children };
+      if (id === 'framer-motion') return {
+        AnimatePresence: ({ children }: { children: ReactNode }) => children,
+        motion: { div: 'div' },
+      };
+      if (id === 'lucide-react') return { CheckSquare: emptyComponent, Palmtree: emptyComponent, X: emptyComponent };
+      if (id === '@/utils/cn') return { cn: (...values: unknown[]) => values.filter(Boolean).join(' ') };
+      return nodeRequire(id);
+    }, module, module.exports);
+    return module.exports.CalendarGrid as CalendarGridComponent;
+  });
+  return bundledCalendarGrid;
+}
+
 async function loadEventCreateModal(): Promise<EventCreateModalComponent> {
   bundledEventCreateModal ??= build({
     entryPoints: ['src/components/calendar/EventCreateModal.tsx'],
@@ -1062,6 +1129,23 @@ async function renderScheduleView(): Promise<ReactNode> {
   const ScheduleView = await loadScheduleView();
   stateCursor = 0;
   return resolveComponents(ScheduleView());
+}
+
+async function renderCalendarGrid(events: ScheduleCalendarEvent[]): Promise<ReactNode> {
+  const CalendarGrid = await loadCalendarGrid();
+  stateSlots = [];
+  stateCursor = 0;
+  const week = Array.from({ length: 7 }, (_, index) => new Date(2026, 7, 23 + index, 12));
+  return resolveComponents(CalendarGrid({
+    weeks: [week],
+    events,
+    today: '2026-08-25',
+    currentMonth: 7,
+    maxVisibleBars: 6,
+    tagNameById: { 'tag-meeting': '회의' },
+    calendarNameById: { mine: 'EP 마일스톤', team: '스튜디오 공지' },
+    onEventClick() {},
+  }));
 }
 
 async function renderEventCreateModal(
@@ -1413,6 +1497,68 @@ test('ScheduleView replaces legacy controls with the tag bar and reports visible
   assert.equal(typeof scheduleTagBarProps[0].onOpenTagManager, 'function', 'ScheduleView keeps the tag manager anchoring callback wired');
   assert.ok(labels.includes('일정'), 'the creation action uses the shared calendar wording');
   assert.match(textContent(tree), /이번 달 0개.*오늘 0개.*켜진 캘린더 4\/4/, 'statistics describe the filtered view and rail visibility instead of total and vacation counts');
+});
+
+test('CalendarGrid renders tag-aware chip text while keeping each event color as the tint and border source', async () => {
+  resetHarness();
+  const events = [
+    calendarListEvent({
+      id: 'tagged-all-day',
+      title: 'EP05 업로드',
+      color: '#74B9FF',
+      tagId: 'tag-meeting',
+      calendarId: 'mine',
+    }),
+    calendarListEvent({
+      id: 'calendar-all-day',
+      title: '전체 회식',
+      color: '#FDCB6E',
+      tagId: undefined,
+      calendarId: 'team',
+    }),
+    calendarListEvent({
+      id: 'timed-event',
+      title: '리드 회의',
+      color: '#00B894',
+      allDay: false,
+      startTime: '14:00',
+      endTime: '15:00',
+      calendarId: 'mine',
+    }),
+  ];
+
+  const tree = await renderCalendarGrid(events);
+  const chip = (id: string) => {
+    const element = findElements(tree, (candidate) => candidate.props['data-event-id'] === id)[0];
+    assert.ok(element, `event chip '${id}' must be rendered by the real CalendarGrid`);
+    return element;
+  };
+
+  assert.equal(textContent(chip('tagged-all-day')), '회의 · EP05 업로드');
+  assert.equal(textContent(chip('calendar-all-day')), '스튜디오 공지 · 전체 회식');
+  assert.equal(textContent(chip('timed-event')), '14:00 리드 회의');
+
+  const tintedChipBody = directElementChildren(chip('tagged-all-day'))[0];
+  const tintStyle = tintedChipBody.props.style as { background?: string; borderLeft?: string };
+  assert.match(tintStyle.background ?? '', /#74B9FF/, 'the chip tint still comes from event.color');
+  assert.equal(tintStyle.borderLeft, '3px solid #74B9FF', 'the chip border still comes from event.color');
+});
+
+test('ScheduleView passes tag and calendar lookup maps to its only month grid', async () => {
+  resetHarness();
+  await renderScheduleView();
+
+  assert.equal(scheduleGridProps.length, 1, 'the month view has one CalendarGrid wiring point');
+  assert.deepEqual(scheduleGridProps[0].tagNameById, {
+    'tag-meeting': '회의',
+    'tag-review': '검수',
+  });
+  assert.deepEqual(scheduleGridProps[0].calendarNameById, {
+    mine: 'EP 마일스톤',
+    team: '스튜디오 공지',
+    'editable-share': '리드 회의',
+    'view-share': '외부 보기',
+  });
 });
 
 test('ScheduleView opens TagManagerPopover with the exact TagBar anchor', async () => {

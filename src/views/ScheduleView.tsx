@@ -117,6 +117,7 @@ export function ScheduleView() {
   const today = fmtDate(new Date());
   const vacationConnected = useAppStore((s) => s.vacationConnected);
   const calendars = useCalendarStore((state) => state.calendars);
+  const tags = useCalendarStore((state) => state.tags);
   const visibleCalendarIds = useCalendarStore((state) => state.visibleCalendarIds);
   const enabledTagIds = useCalendarStore((state) => state.enabledTagIds);
   const googleVisible = visibleCalendarIds[GOOGLE_CALENDAR_ID] !== false;
@@ -198,6 +199,14 @@ export function ScheduleView() {
     [calendars, visibleCalendarIds, googleAuthenticated, googleVisible],
   );
   const totalRailCalendarCount = calendars.length + (googleAuthenticated ? 1 : 0);
+  const tagNameById = useMemo<Record<string, string>>(
+    () => Object.fromEntries(tags.map((tag) => [tag.id, tag.name])),
+    [tags],
+  );
+  const calendarNameById = useMemo<Record<string, string>>(
+    () => Object.fromEntries(calendars.map((calendar) => [calendar.id, calendar.name])),
+    [calendars],
+  );
 
   // 주 데이터 계산 (모든 날짜를 정오로 생성 — parseDate와 일관성 유지)
   const weeks = useMemo(() => {
@@ -880,6 +889,8 @@ export function ScheduleView() {
                 monthDirection={monthDir}
                 focusedDate={focusedDate}
                 pulseDate={pulseDate}
+                tagNameById={tagNameById}
+                calendarNameById={calendarNameById}
                 onWheel={(e) => {
                   if (viewMode !== 'month') return;
                   // 디바운스된 월 이동 (휠 아래=다음달, 위=이전달)
