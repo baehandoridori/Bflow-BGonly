@@ -5,7 +5,7 @@ import { CalendarDays, Copy, Pencil, Tags, Trash2 } from 'lucide-react';
 import type { CalendarEvent, CalendarEventType } from '@/types/calendar';
 import { useAppStore } from '@/stores/useAppStore';
 import { useAuthStore } from '@/stores/useAuthStore';
-import { useCalendarStore } from '@/stores/useCalendarStore';
+import { isOptimisticCalendarTagId, useCalendarStore } from '@/stores/useCalendarStore';
 import { EntityAwareInput } from '@/components/common/EntityAwareInput';
 import { floatingGlassStyle } from '@/utils/glassStyles';
 
@@ -46,7 +46,9 @@ export function EventQuickEdit({
   const calendars = useCalendarStore((state) => state.calendars);
   const tags = useCalendarStore((state) => state.tags);
   const editableCalendars = useMemo(() => calendars.filter((calendar) => calendar.canEdit), [calendars]);
-  const sortedTags = useMemo(() => [...tags].sort((left, right) => left.sortOrder - right.sortOrder), [tags]);
+  const sortedTags = useMemo(() => tags
+    .filter((tag) => !isOptimisticCalendarTagId(tag.id))
+    .sort((left, right) => left.sortOrder - right.sortOrder), [tags]);
   const ref = useRef<HTMLDivElement>(null);
   const [adjusted, setAdjusted] = useState(position);
   const [tab, setTab] = useState<TabKey>('calendar');

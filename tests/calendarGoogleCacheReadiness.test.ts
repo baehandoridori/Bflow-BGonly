@@ -50,11 +50,14 @@ type ServiceModule = {
   __testUseCalendarStore: {
     getState(): {
       calendars: StoreCalendarFixture[];
-      tags: Array<{ id: string }>;
+      tags: StoreTagFixture[];
       loaded: boolean;
       optimisticDeletedCalendarIds: string[];
+      optimisticDeletedTagIds: string[];
       visibleCalendarIds: Record<string, boolean>;
+      enabledTagIds: Record<string, boolean>;
       mutedCalendarIds: string[];
+      loadAll(): Promise<{ calendarsFresh: boolean; tagsFresh: boolean }>;
       toggleCalendarVisible(calendarId: string): void;
       toggleMuted(calendarId: string): void;
       upsertCalendarOptimistically(actorId: string, calendar: StoreCalendarFixture): void;
@@ -78,11 +81,18 @@ type ServiceModule = {
         },
       ): void;
       clearCalendarOptimisticOverlay(actorId: string, token: number): void;
+      setTagOptimisticOverlay(actorId: string, token: number, tags: StoreTagFixture[]): void;
+      clearTagOptimisticOverlay(actorId: string, token: number): void;
+      toggleTag(tagId: string): void;
     };
   };
   __testGetCalendarCanonicalSnapshot(actorId: string | undefined): {
     revision: number;
     calendars: StoreCalendarFixture[];
+  } | null;
+  __testGetTagCanonicalSnapshot(actorId: string | undefined): {
+    revision: number;
+    tags: StoreTagFixture[];
   } | null;
 };
 
@@ -145,6 +155,13 @@ type StoreCalendarFixture = {
   createdAt: string;
 };
 
+type StoreTagFixture = {
+  id: string;
+  name: string;
+  color: string;
+  sortOrder: number;
+};
+
 type LegacyPrivateEventFixture = {
   id: string;
   user_id: string;
@@ -173,6 +190,12 @@ type HarnessOptions = {
     isFullSync: boolean;
   }>;
   calendarList?: () => Promise<BflowCalendarFixture[]>;
+  calendarTagsList?: () => Promise<Array<{
+    id: string;
+    name: string;
+    color: string;
+    sort_order: number;
+  }>>;
   bflowEventsList?: () => Promise<BflowEventFixture[]>;
   createBflowEvent?: (input: Record<string, unknown>) => Promise<BflowEventFixture>;
   createLegacyEvent?: (input: Record<string, unknown>) => Promise<LegacyPrivateEventFixture>;
@@ -215,7 +238,7 @@ async function bundledServiceSource(): Promise<string> {
       contents: [
         "export * from './src/services/calendarService.ts';",
         "export { useAuthStore as __testUseAuthStore } from './src/stores/useAuthStore.ts';",
-        "export { getCalendarCanonicalSnapshot as __testGetCalendarCanonicalSnapshot, useCalendarStore as __testUseCalendarStore } from './src/stores/useCalendarStore.ts';",
+        "export { getCalendarCanonicalSnapshot as __testGetCalendarCanonicalSnapshot, getTagCanonicalSnapshot as __testGetTagCanonicalSnapshot, useCalendarStore as __testUseCalendarStore } from './src/stores/useCalendarStore.ts';",
       ].join('\n'),
       resolveDir: process.cwd(),
       sourcefile: 'calendar-google-cache-readiness-entry.ts',
@@ -498,7 +521,7 @@ async function createHarness(
   globalScope.window = Object.assign(new EventTarget(), {
     electronAPI: {
       calendarList: options.calendarList ?? (async () => []),
-      calendarTagsList: async () => [],
+      calendarTagsList: options.calendarTagsList ?? (async () => []),
       calendarEventsList: options.bflowEventsList ?? (async () => []),
       calendarEventCreate: async (input: Record<string, unknown>) => {
         if (!options.createBflowEvent) throw new Error('unexpected calendarEventCreate');
@@ -2830,6 +2853,87 @@ test('actor-scoped calendar metadata overlays survive canonical refresh and an A
       harness.service.__testUseCalendarStore.getState().calendars.map(({ name, color }) => ({ name, color })),
       [{ name: '내 캘린더', color: '#6C5CE7' }],
       'settlement restores the latest canonical snapshot',
+    );
+  } finally {
+    harness.restore();
+  }
+});
+
+test('actor-scoped tag overlays preserve raw canonical metadata through concurrent loads and A-B-A sessions', async () => {
+  let activeUserId = 'user-a';
+  let tagListCalls = 0;
+  const concurrentTags = deferred<Array<{
+    id: string; name: string; color: string; sort_order: number;
+  }>>();
+  const canonicalA = [
+    { id: 'tag-review', name: '검수', color: '#00B894', sort_order: 0 },
+    { id: 'tag-meeting', name: '회의', color: '#FDCB6E', sort_order: 1 },
+  ];
+  const harness = await createHarness({
+    currentUserId: activeUserId,
+    calendarList: async () => [personalCalendar(activeUserId)],
+    calendarTagsList: async () => {
+      tagListCalls += 1;
+      if (tagListCalls === 1) return canonicalA;
+      if (tagListCalls === 2) return concurrentTags.promise;
+      if (activeUserId === 'user-b') {
+        return [{ id: 'tag-b', name: 'B 전용', color: '#74B9FF', sort_order: 0 }];
+      }
+      return canonicalA;
+    },
+    fullSync: async () => [],
+    bflowEventsList: async () => [],
+  });
+  try {
+    await harness.service.loadBflowEvents();
+    let store = harness.service.__testUseCalendarStore.getState();
+    store.toggleTag('tag-meeting');
+    const optimistic = [
+      { id: 'tag-review', name: '검수 수정', color: '#74B9FF', sortOrder: 0 },
+    ];
+    store.setTagOptimisticOverlay('user-a', 71, optimistic);
+    store = harness.service.__testUseCalendarStore.getState();
+    assert.deepEqual(store.tags, optimistic, 'the initiating actor sees the shared optimistic projection');
+    assert.deepEqual(store.optimisticDeletedTagIds, ['tag-meeting']);
+
+    const concurrentLoad = store.loadAll();
+    concurrentTags.resolve(canonicalA);
+    assert.deepEqual(await concurrentLoad, { calendarsFresh: true, tagsFresh: true });
+    store = harness.service.__testUseCalendarStore.getState();
+    assert.deepEqual(store.tags, optimistic, 'a fresh canonical load cannot erase an active tag overlay');
+    assert.deepEqual(
+      harness.service.__testGetTagCanonicalSnapshot('user-a')?.tags.map(({ id, name }) => ({ id, name })),
+      canonicalA.map(({ id, name }) => ({ id, name })),
+      'the raw canonical snapshot remains separately readable for verification',
+    );
+
+    activeUserId = 'user-b';
+    harness.service.__testUseAuthStore.setState({ currentUser: authUser(activeUserId) });
+    assert.deepEqual(harness.service.__testUseCalendarStore.getState().tags, [], 'A tags never leak into B');
+    assert.equal(harness.service.__testGetTagCanonicalSnapshot('user-a'), null);
+    await harness.service.__testUseCalendarStore.getState().loadAll();
+    assert.deepEqual(
+      harness.service.__testUseCalendarStore.getState().tags.map(({ id }) => id),
+      ['tag-b'],
+    );
+
+    activeUserId = 'user-a';
+    harness.service.__testUseAuthStore.setState({ currentUser: authUser(activeUserId) });
+    store = harness.service.__testUseCalendarStore.getState();
+    assert.deepEqual(store.tags, optimistic, 'returning to A restores only A\'s active overlay');
+    store.clearTagOptimisticOverlay('user-a', 71);
+    assert.deepEqual(
+      harness.service.__testUseCalendarStore.getState().tags.map(({ id, name }) => ({ id, name })),
+      canonicalA.map(({ id, name }) => ({ id, name })),
+      'clearing the overlay exposes the latest raw canonical rows',
+    );
+
+    const preferenceBefore = { ...store.enabledTagIds };
+    store.toggleTag('optimistic-tag:user-a:1');
+    assert.deepEqual(
+      harness.service.__testUseCalendarStore.getState().enabledTagIds,
+      preferenceBefore,
+      'a temporary optimistic tag id cannot enter persisted tag preferences',
     );
   } finally {
     harness.restore();

@@ -131,6 +131,7 @@ export function ScheduleView() {
   const calendars = useCalendarStore((state) => state.calendars);
   const calendarsLoaded = useCalendarStore((state) => state.loaded);
   const optimisticDeletedCalendarIds = useCalendarStore((state) => state.optimisticDeletedCalendarIds);
+  const optimisticDeletedTagIds = useCalendarStore((state) => state.optimisticDeletedTagIds);
   const tags = useCalendarStore((state) => state.tags);
   const visibleCalendarIds = useCalendarStore((state) => state.visibleCalendarIds);
   const enabledTagIds = useCalendarStore((state) => state.enabledTagIds);
@@ -139,6 +140,10 @@ export function ScheduleView() {
   const knownCalendarIds = useMemo(
     () => (calendarsLoaded ? new Set(calendars.map((calendar) => calendar.id)) : undefined),
     [calendars, calendarsLoaded],
+  );
+  const deletedTagIds = useMemo(
+    () => new Set(optimisticDeletedTagIds),
+    [optimisticDeletedTagIds],
   );
 
   useEffect(() => {
@@ -224,9 +229,10 @@ export function ScheduleView() {
   const allEvents = useMemo(() => [...events, ...vacationEvents], [events, vacationEvents]);
   const filteredEvents = useMemo(
     () => filterCalendarEvents(allEvents, {
-      visibleCalendarIds, enabledTagIds, googleVisible, knownCalendarIds, personalCalendarId,
+      visibleCalendarIds, enabledTagIds, optimisticDeletedTagIds: deletedTagIds,
+      googleVisible, knownCalendarIds, personalCalendarId,
     }),
-    [allEvents, visibleCalendarIds, enabledTagIds, googleVisible, knownCalendarIds, personalCalendarId],
+    [allEvents, visibleCalendarIds, enabledTagIds, deletedTagIds, googleVisible, knownCalendarIds, personalCalendarId],
   );
 
   const visibleCalendarCount = useMemo(

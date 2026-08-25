@@ -17,7 +17,11 @@ import type { CalendarEvent, CalendarEventType } from '@/types/calendar';
 import { useDataStore } from '@/stores/useDataStore';
 import { useAppStore } from '@/stores/useAppStore';
 import { useAuthStore } from '@/stores/useAuthStore';
-import { useCalendarStore } from '@/stores/useCalendarStore';
+import {
+  getTagCanonicalSnapshot,
+  isOptimisticCalendarTagId,
+  useCalendarStore,
+} from '@/stores/useCalendarStore';
 import { EntityAwareInput } from '@/components/common/EntityAwareInput';
 import { EntityText } from '@/components/common/EntityText';
 import { DEPARTMENT_CONFIGS } from '@/types';
@@ -115,10 +119,20 @@ export function EventSidePanel({
   const [draftEndTime, setDraftEndTime] = useState(event.endTime ?? '');
   const users = useAuthStore((s) => s.users);
   const userNames = useMemo(() => users.map((u) => u.name), [users]);
+  const currentUser = useAuthStore((state) => state.currentUser);
   const calendars = useCalendarStore((state) => state.calendars);
   const tags = useCalendarStore((state) => state.tags);
+  const optimisticDeletedTagIds = useCalendarStore((state) => state.optimisticDeletedTagIds);
   const editableCalendars = useMemo(() => calendars.filter((calendar) => calendar.canEdit), [calendars]);
-  const sortedTags = useMemo(() => [...tags].sort((left, right) => left.sortOrder - right.sortOrder), [tags]);
+  const sortedTags = useMemo(() => tags
+    .filter((tag) => !isOptimisticCalendarTagId(tag.id))
+    .sort((left, right) => left.sortOrder - right.sortOrder), [tags]);
+  const selectableTagIds = useMemo(() => new Set(sortedTags.map((tag) => tag.id)), [sortedTags]);
+  const deletedTagIds = new Set(optimisticDeletedTagIds);
+  const canonicalTagSnapshot = getTagCanonicalSnapshot(currentUser?.id);
+  const canonicalTagIds = canonicalTagSnapshot
+    ? new Set(canonicalTagSnapshot.tags.map((tag) => tag.id))
+    : null;
 
   // 이벤트 변경 시 드래프트 리셋
   useEffect(() => {
@@ -133,6 +147,16 @@ export function EventSidePanel({
     setDraftEndTime(event.endTime ?? '');
     setEditing(false);
   }, [event]);
+
+  const selectedTagUnavailable = Boolean(draftTagId && (
+    isOptimisticCalendarTagId(draftTagId)
+    || deletedTagIds.has(draftTagId)
+    || (!selectableTagIds.has(draftTagId) && canonicalTagIds !== null && !canonicalTagIds.has(draftTagId))
+  ));
+
+  useEffect(() => {
+    if (selectedTagUnavailable) setDraftTagId(undefined);
+  }, [draftTagId, selectedTagUnavailable]);
 
   // ESC 닫기
   useEffect(() => {
@@ -222,8 +246,11 @@ export function EventSidePanel({
       }
     }
     if (isCanonicalBflow) {
+      const persistedTagId = draftTagId && !selectedTagUnavailable
+        ? draftTagId
+        : undefined;
       if (draftCalendarId !== event.calendarId) updates.calendarId = draftCalendarId;
-      if (draftTagId !== event.tagId) updates.tagId = draftTagId;
+      if (persistedTagId !== event.tagId) updates.tagId = persistedTagId;
     }
     if (Object.keys(updates).length > 0) onUpdate(event.id, updates);
     setEditing(false);

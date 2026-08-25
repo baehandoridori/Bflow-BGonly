@@ -99,6 +99,19 @@ let forcedSidePanelDraft: Partial<Pick<
   'title' | 'startDate' | 'endDate' | 'memo' | 'calendarId' | 'tagId' | 'allDay' | 'startTime' | 'endTime'
 >> = {};
 let sidePanelStateCursor = 0;
+let calendarTagOptionsOverride: Array<{
+  id: string; name: string; color: string; sortOrder: number;
+}> | null = null;
+let calendarOptimisticDeletedTagIdsOverride: string[] = [];
+let calendarTagCanonicalSnapshotOverride: {
+  revision: number;
+  tags: Array<{ id: string; name: string; color: string; sortOrder: number }>;
+} | null | undefined;
+
+const defaultCanonicalTags = [
+  { id: 'tag-meeting', name: '회의', color: '#FDCB6E', sortOrder: 10 },
+  { id: 'tag-review', name: '검수', color: '#00B894', sortOrder: 20 },
+];
 
 function textContent(node: ReactNode): string {
   if (typeof node === 'string' || typeof node === 'number') return String(node);
@@ -244,21 +257,35 @@ async function loadQuickEdit(): Promise<QuickEditComponent> {
         return { useAppStore: (selector: (state: { colorMode: string }) => unknown) => selector({ colorMode: 'dark' }) };
       }
       if (id === '@/stores/useAuthStore') {
-        return { useAuthStore: (selector: (state: { users: unknown[] }) => unknown) => selector({ users: [] }) };
+        return {
+          useAuthStore: (selector: (state: { users: unknown[]; currentUser: { id: string } }) => unknown) => selector({
+            users: [],
+            currentUser: { id: 'user-me' },
+          }),
+        };
       }
       if (id === '@/stores/useCalendarStore') {
-        const state = {
-          calendars: [
-            { id: 'calendar-1', name: '내 일정', color: '#6C5CE7', canEdit: true },
-            { id: 'calendar-2', name: 'EP 마일스톤', color: '#74B9FF', canEdit: true },
-            { id: 'calendar-view', name: '보기 캘린더', color: '#8B8DA3', canEdit: false },
-          ],
-          tags: [
-            { id: 'tag-meeting', name: '회의', color: '#FDCB6E', sortOrder: 10 },
-            { id: 'tag-review', name: '검수', color: '#00B894', sortOrder: 20 },
-          ],
+        return {
+          useCalendarStore: (selector: (value: {
+            calendars: Array<{ id: string; name: string; color: string; canEdit: boolean }>;
+            tags: typeof defaultCanonicalTags;
+            optimisticDeletedTagIds: string[];
+          }) => unknown) => selector({
+            calendars: [
+              { id: 'calendar-1', name: '내 일정', color: '#6C5CE7', canEdit: true },
+              { id: 'calendar-2', name: 'EP 마일스톤', color: '#74B9FF', canEdit: true },
+              { id: 'calendar-view', name: '보기 캘린더', color: '#8B8DA3', canEdit: false },
+            ],
+            tags: calendarTagOptionsOverride ?? defaultCanonicalTags,
+            optimisticDeletedTagIds: calendarOptimisticDeletedTagIdsOverride,
+          }),
+          isOptimisticCalendarTagId: (idValue: string) => idValue.startsWith('optimistic-tag:'),
+          getTagCanonicalSnapshot: (actorId: string | undefined) => actorId === 'user-me'
+            ? calendarTagCanonicalSnapshotOverride === undefined
+              ? { revision: 1, tags: defaultCanonicalTags }
+              : calendarTagCanonicalSnapshotOverride
+            : null,
         };
-        return { useCalendarStore: (selector: (value: typeof state) => unknown) => selector(state) };
       }
       if (id === '@/components/common/EntityAwareInput') {
         return { EntityAwareInput: () => null };
@@ -368,17 +395,35 @@ async function loadSidePanel(): Promise<SidePanelComponent> {
         };
       }
       if (id === '@/stores/useAuthStore') {
-        return { useAuthStore: (selector: (state: { users: unknown[] }) => unknown) => selector({ users: [] }) };
+        return {
+          useAuthStore: (selector: (state: { users: unknown[]; currentUser: { id: string } }) => unknown) => selector({
+            users: [],
+            currentUser: { id: 'user-me' },
+          }),
+        };
       }
       if (id === '@/stores/useCalendarStore') {
-        const state = {
-          calendars: [
-            { id: 'calendar-1', name: '내 일정', color: '#6C5CE7', canEdit: true },
-            { id: 'calendar-2', name: 'EP 마일스톤', color: '#74B9FF', canEdit: true },
-          ],
-          tags: [{ id: 'tag-meeting', name: '회의', color: '#FDCB6E', sortOrder: 10 }],
+        return {
+          useCalendarStore: (selector: (value: {
+            calendars: Array<{ id: string; name: string; color: string; canEdit: boolean }>;
+            tags: typeof defaultCanonicalTags;
+            optimisticDeletedTagIds: string[];
+          }) => unknown) => selector({
+            calendars: [
+              { id: 'calendar-1', name: '내 일정', color: '#6C5CE7', canEdit: true },
+              { id: 'calendar-2', name: 'EP 마일스톤', color: '#74B9FF', canEdit: true },
+            ],
+            tags: calendarTagOptionsOverride
+              ?? [{ id: 'tag-meeting', name: '회의', color: '#FDCB6E', sortOrder: 10 }],
+            optimisticDeletedTagIds: calendarOptimisticDeletedTagIdsOverride,
+          }),
+          isOptimisticCalendarTagId: (idValue: string) => idValue.startsWith('optimistic-tag:'),
+          getTagCanonicalSnapshot: (actorId: string | undefined) => actorId === 'user-me'
+            ? calendarTagCanonicalSnapshotOverride === undefined
+              ? { revision: 1, tags: defaultCanonicalTags }
+              : calendarTagCanonicalSnapshotOverride
+            : null,
         };
-        return { useCalendarStore: (selector: (value: typeof state) => unknown) => selector(state) };
       }
       if (id === '@/components/common/EntityAwareInput') return { EntityAwareInput: () => null };
       if (id === '@/components/common/EntityText') return { EntityText: () => null };
@@ -714,6 +759,59 @@ test('side panel shows calendar, tag and timed range and saves only changed temp
   assert.equal(Object.hasOwn(allDayUpdates[0].patch, 'endTime'), true);
   assert.equal(allDayUpdates[0].patch.startTime, undefined);
   assert.equal(allDayUpdates[0].patch.endTime, undefined);
+});
+
+test('side panel cannot submit a tag selection that disappeared while the editor was open', async () => {
+  const target = event({
+    source: 'bflow',
+    sourceCalendarId: 'bflow:calendar-1',
+    calendarId: 'calendar-1',
+    tagId: undefined,
+    canEdit: true,
+  });
+  const updates: Array<{ id: string; patch: Partial<QuickEditEvent> }> = [];
+  calendarTagOptionsOverride = [];
+  calendarOptimisticDeletedTagIdsOverride = ['tag-meeting'];
+  try {
+    const tree = await renderSidePanel(target, {
+      onUpdate: (id, patch) => updates.push({ id, patch }),
+    }, true, { title: '제목 수정', tagId: 'tag-meeting' });
+    findButtonByText(tree, '저장').props.onClick?.();
+    assert.deepEqual(updates, [{
+      id: target.id,
+      patch: { title: '제목 수정' },
+    }], 'a deleted or temporary tag id is removed again at submit time');
+  } finally {
+    calendarTagOptionsOverride = null;
+    calendarOptimisticDeletedTagIdsOverride = [];
+  }
+});
+
+test('side panel preserves an existing tag while canonical tag metadata is unavailable', async () => {
+  const target = event({
+    source: 'bflow',
+    sourceCalendarId: 'bflow:calendar-1',
+    calendarId: 'calendar-1',
+    tagId: 'tag-meeting',
+    canEdit: true,
+  });
+  const updates: Array<{ id: string; patch: Partial<QuickEditEvent> }> = [];
+  calendarTagOptionsOverride = [];
+  calendarTagCanonicalSnapshotOverride = null;
+  try {
+    const tree = await renderSidePanel(target, {
+      onUpdate: (id, patch) => updates.push({ id, patch }),
+    }, true, { title: '메타데이터 장애 중 제목 수정' });
+    findButtonByText(tree, '저장').props.onClick?.();
+    assert.deepEqual(updates, [{
+      id: target.id,
+      patch: { title: '메타데이터 장애 중 제목 수정' },
+    }], 'an unknown tag list cannot be treated as authoritative deletion');
+    assert.equal(Object.hasOwn(updates[0].patch, 'tagId'), false);
+  } finally {
+    calendarTagOptionsOverride = null;
+    calendarTagCanonicalSnapshotOverride = undefined;
+  }
 });
 
 test('side panel blocks non-increasing timed ranges while allowing an overnight range', async () => {

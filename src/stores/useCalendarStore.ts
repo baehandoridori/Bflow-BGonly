@@ -6,6 +6,7 @@ const VISIBLE_CALENDARS_KEY = 'bflow_calendar_visible_v1';
 const ENABLED_TAGS_KEY = 'bflow_calendar_tags_enabled_v1';
 const MUTED_CALENDARS_KEY = 'bflow_calendar_muted_v1';
 const OPTIMISTIC_CALENDAR_ID_PREFIX = 'optimistic-calendar:';
+const OPTIMISTIC_TAG_ID_PREFIX = 'optimistic-tag:';
 let loadAllGeneration = 0;
 let calendarStoreSessionUserId = useAuthStore.getState().currentUser?.id ?? null;
 
@@ -44,15 +45,30 @@ interface CalendarCanonicalSnapshot {
   calendars: BflowCalendar[];
 }
 
+interface RegisteredTagOptimisticOverlay {
+  token: number;
+  tags: CalendarTag[];
+  deletedTagIds: string[];
+}
+
+export interface TagCanonicalSnapshot {
+  revision: number;
+  tags: CalendarTag[];
+}
+
 let nextCalendarCanonicalRevision = 0;
 const calendarCanonicalByActor = new Map<string, CalendarCanonicalSnapshot>();
 const calendarOptimisticByActor = new Map<string, RegisteredCalendarOptimisticOverlay>();
+let nextTagCanonicalRevision = 0;
+const tagCanonicalByActor = new Map<string, TagCanonicalSnapshot>();
+const tagOptimisticByActor = new Map<string, RegisteredTagOptimisticOverlay>();
 
 export interface CalendarState {
   calendars: BflowCalendar[];
   tags: CalendarTag[];
   loaded: boolean;
   optimisticDeletedCalendarIds: string[];
+  optimisticDeletedTagIds: string[];
   visibleCalendarIds: Record<string, boolean>;
   enabledTagIds: Record<string, boolean>;
   mutedCalendarIds: string[];
@@ -69,6 +85,8 @@ export interface CalendarState {
     overlay: CalendarOptimisticOverlay,
   ): void;
   clearCalendarOptimisticOverlay(actorId: string, token: number): void;
+  setTagOptimisticOverlay(actorId: string, token: number, tags: CalendarTag[]): void;
+  clearTagOptimisticOverlay(actorId: string, token: number): void;
 }
 
 function cloneCalendar(calendar: BflowCalendar): BflowCalendar {
@@ -80,6 +98,10 @@ function cloneCalendar(calendar: BflowCalendar): BflowCalendar {
 
 function cloneCalendars(calendars: BflowCalendar[]): BflowCalendar[] {
   return calendars.map(cloneCalendar);
+}
+
+function cloneTags(tags: CalendarTag[]): CalendarTag[] {
+  return tags.map((tag) => ({ ...tag }));
 }
 
 function calendarMembersMatch(left: BflowCalendar['members'], right: BflowCalendar['members']): boolean {
@@ -167,6 +189,14 @@ export function getCalendarCanonicalSnapshot(
   return snapshot ? { revision: snapshot.revision, calendars: cloneCalendars(snapshot.calendars) } : null;
 }
 
+export function getTagCanonicalSnapshot(
+  actorId: string | undefined,
+): TagCanonicalSnapshot | null {
+  if (!actorId || useAuthStore.getState().currentUser?.id !== actorId) return null;
+  const snapshot = tagCanonicalByActor.get(actorId);
+  return snapshot ? { revision: snapshot.revision, tags: cloneTags(snapshot.tags) } : null;
+}
+
 function loadExplicitFalseRecords(key: string): Record<string, boolean> {
   try {
     const raw = localStorage.getItem(key);
@@ -218,6 +248,14 @@ function isPersistableCalendarPreferenceId(id: string): boolean {
   return !id.startsWith(OPTIMISTIC_CALENDAR_ID_PREFIX);
 }
 
+export function isOptimisticCalendarTagId(id: string): boolean {
+  return id.startsWith(OPTIMISTIC_TAG_ID_PREFIX);
+}
+
+function isPersistableTagPreferenceId(id: string): boolean {
+  return !isOptimisticCalendarTagId(id);
+}
+
 export function isCalendarVisible(state: CalendarState, id: string): boolean {
   return state.visibleCalendarIds[id] !== false;
 }
@@ -230,11 +268,12 @@ export function getPersonalCalendar(state: CalendarState, myUserId: string): Bfl
   return state.calendars.find((calendar) => calendar.isPersonal && calendar.ownerId === myUserId);
 }
 
-export const useCalendarStore = create<CalendarState>((set) => ({
+export const useCalendarStore = create<CalendarState>((set, get) => ({
   calendars: [],
   tags: [],
   loaded: false,
   optimisticDeletedCalendarIds: [],
+  optimisticDeletedTagIds: [],
   visibleCalendarIds: loadExplicitFalseRecords(VISIBLE_CALENDARS_KEY),
   enabledTagIds: loadExplicitFalseRecords(ENABLED_TAGS_KEY),
   mutedCalendarIds: loadMutedCalendarIds(),
@@ -247,8 +286,12 @@ export const useCalendarStore = create<CalendarState>((set) => ({
       window.electronAPI.calendarList(),
       window.electronAPI.calendarTagsList(),
     ]);
-    const next: Partial<Pick<CalendarState, 'calendars' | 'tags' | 'optimisticDeletedCalendarIds'>> = {};
+    const next: Partial<Pick<
+      CalendarState,
+      'calendars' | 'tags' | 'optimisticDeletedCalendarIds' | 'optimisticDeletedTagIds'
+    >> = {};
     let canonicalCalendars: BflowCalendar[] | undefined;
+    let canonicalTags: CalendarTag[] | undefined;
 
     if (calendarResult.status === 'fulfilled') {
       canonicalCalendars = calendarResult.value.map((row) => ({
@@ -271,7 +314,7 @@ export const useCalendarStore = create<CalendarState>((set) => ({
     }
 
     if (tagResult.status === 'fulfilled') {
-      next.tags = tagResult.value.map((row) => ({
+      canonicalTags = tagResult.value.map((row) => ({
           id: row.id,
           name: row.name,
           color: row.color,
@@ -300,6 +343,18 @@ export const useCalendarStore = create<CalendarState>((set) => ({
         ? applyCalendarOptimisticOverlay(requestUserId, canonical, registered.overlay, true)
         : canonical;
       next.optimisticDeletedCalendarIds = optimisticDeletedCalendarIds(registered);
+    }
+    if (canonicalTags) {
+      const canonical = cloneTags(canonicalTags);
+      if (requestUserId) {
+        tagCanonicalByActor.set(requestUserId, {
+          revision: ++nextTagCanonicalRevision,
+          tags: cloneTags(canonical),
+        });
+      }
+      const registered = requestUserId ? tagOptimisticByActor.get(requestUserId) : undefined;
+      next.tags = registered ? cloneTags(registered.tags) : canonical;
+      next.optimisticDeletedTagIds = registered ? [...registered.deletedTagIds] : [];
     }
     set((state) => ({
       ...next,
@@ -371,6 +426,46 @@ export const useCalendarStore = create<CalendarState>((set) => ({
     }));
   },
 
+  setTagOptimisticOverlay(actorId, token, tags) {
+    const currentActorId = useAuthStore.getState().currentUser?.id;
+    const previous = tagOptimisticByActor.get(actorId);
+    // A confirmed save response may replace the already-registered projection with real UUIDs
+    // after the user switched away. A new inactive-actor overlay is never accepted.
+    if (currentActorId !== actorId && previous?.token !== token) return;
+    const optimistic = cloneTags(tags);
+    const optimisticIds = new Set(optimistic.map((tag) => tag.id));
+    const baseline = tagCanonicalByActor.get(actorId)?.tags
+      ?? (currentActorId === actorId ? get().tags : []);
+    const deletedTagIds = new Set(
+      previous?.token === token ? previous.deletedTagIds : [],
+    );
+    for (const tag of baseline) {
+      if (!optimisticIds.has(tag.id)) deletedTagIds.add(tag.id);
+    }
+    const registered: RegisteredTagOptimisticOverlay = {
+      token,
+      tags: optimistic,
+      deletedTagIds: [...deletedTagIds],
+    };
+    tagOptimisticByActor.set(actorId, registered);
+    if (currentActorId !== actorId) return;
+    set({
+      tags: cloneTags(optimistic),
+      optimisticDeletedTagIds: [...registered.deletedTagIds],
+    });
+  },
+
+  clearTagOptimisticOverlay(actorId, token) {
+    const registered = tagOptimisticByActor.get(actorId);
+    if (!registered || registered.token !== token) return;
+    tagOptimisticByActor.delete(actorId);
+    if (useAuthStore.getState().currentUser?.id !== actorId) return;
+    set({
+      tags: cloneTags(tagCanonicalByActor.get(actorId)?.tags ?? []),
+      optimisticDeletedTagIds: [],
+    });
+  },
+
   toggleCalendarVisible(id) {
     if (!isPersistableCalendarPreferenceId(id)) return;
     set((state) => {
@@ -383,6 +478,7 @@ export const useCalendarStore = create<CalendarState>((set) => ({
   },
 
   toggleTag(id) {
+    if (!isPersistableTagPreferenceId(id)) return;
     set((state) => {
       const next = { ...state.enabledTagIds };
       if (isTagEnabled(state, id)) next[id] = false;
@@ -415,13 +511,16 @@ function resetCalendarStoreSession(userId: string | null): void {
   loadAllGeneration += 1;
   const registered = userId ? calendarOptimisticByActor.get(userId) : undefined;
   const canonical = userId ? calendarCanonicalByActor.get(userId) : undefined;
+  const registeredTags = userId ? tagOptimisticByActor.get(userId) : undefined;
+  const canonicalTags = userId ? tagCanonicalByActor.get(userId) : undefined;
   useCalendarStore.setState({
     calendars: registered && userId
       ? applyCalendarOptimisticOverlay(userId, canonical?.calendars ?? [], registered.overlay, Boolean(canonical))
       : [],
-    tags: [],
+    tags: cloneTags(registeredTags?.tags ?? canonicalTags?.tags ?? []),
     loaded: false,
     optimisticDeletedCalendarIds: optimisticDeletedCalendarIds(registered),
+    optimisticDeletedTagIds: registeredTags ? [...registeredTags.deletedTagIds] : [],
   });
 }
 

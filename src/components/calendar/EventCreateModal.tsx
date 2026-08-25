@@ -5,7 +5,11 @@ import { cn } from '@/utils/cn';
 import { useAuthStore } from '@/stores/useAuthStore';
 import { useDataStore } from '@/stores/useDataStore';
 import { useAppStore } from '@/stores/useAppStore';
-import { useCalendarStore } from '@/stores/useCalendarStore';
+import {
+  getTagCanonicalSnapshot,
+  isOptimisticCalendarTagId,
+  useCalendarStore,
+} from '@/stores/useCalendarStore';
 import type { CalendarEvent, CalendarEventType } from '@/types/calendar';
 import { DEPARTMENT_CONFIGS } from '@/types';
 import { fmtDate } from '@/utils/calendarDate';
@@ -44,8 +48,17 @@ export function EventCreateModal({ initialDate, initialEndDate, episodes, google
   const colorMode = useAppStore((state) => state.colorMode);
   const calendars = useCalendarStore((state) => state.calendars);
   const tags = useCalendarStore((state) => state.tags);
+  const optimisticDeletedTagIds = useCalendarStore((state) => state.optimisticDeletedTagIds);
   const editableCalendars = useMemo(() => calendars.filter((calendar) => calendar.canEdit), [calendars]);
-  const sortedTags = useMemo(() => [...tags].sort((left, right) => left.sortOrder - right.sortOrder), [tags]);
+  const sortedTags = useMemo(() => tags
+    .filter((tag) => !isOptimisticCalendarTagId(tag.id))
+    .sort((left, right) => left.sortOrder - right.sortOrder), [tags]);
+  const selectableTagIds = useMemo(() => new Set(sortedTags.map((tag) => tag.id)), [sortedTags]);
+  const deletedTagIds = new Set(optimisticDeletedTagIds);
+  const canonicalTagSnapshot = getTagCanonicalSnapshot(currentUser?.id);
+  const canonicalTagIds = canonicalTagSnapshot
+    ? new Set(canonicalTagSnapshot.tags.map((tag) => tag.id))
+    : null;
   const defaultCalendarId = editableCalendars.find((calendar) => calendar.isPersonal)?.id
     ?? editableCalendars[0]?.id
     ?? (googleAuthenticated ? GOOGLE_CALENDAR_OPTION : '');
@@ -110,6 +123,16 @@ export function EventCreateModal({ initialDate, initialEndDate, episodes, google
         : `${episodeLabel} ${part.partId}파트 (${departmentLabel}) — 씬 선택...`);
   }, [episodeTitles, episodes, evType, linkedEp, linkedPart, linkedScene, selectedEpParts]);
 
+  const selectedTagUnavailable = Boolean(tagId && (
+    isOptimisticCalendarTagId(tagId)
+    || deletedTagIds.has(tagId)
+    || (!selectableTagIds.has(tagId) && canonicalTagIds !== null && !canonicalTagIds.has(tagId))
+  ));
+
+  useEffect(() => {
+    if (selectedTagUnavailable) setTagId(undefined);
+  }, [selectedTagUnavailable, tagId]);
+
   const changeCalendar = (calendarId: string) => {
     userSelectedCalendarRef.current = true;
     setSelectedCalendarId(calendarId);
@@ -133,6 +156,7 @@ export function EventCreateModal({ initialDate, initialEndDate, episodes, google
     if (!title.trim() || !selectedCalendarId || !selectedDestinationAvailable || (!allDay && (!startTime || !endTime))) return;
     if (hasInvalidTimedInterval) return;
     const partData = selectedEpParts.find((part) => part.sheetName === linkedPart);
+    const persistedTagId = tagId && !selectedTagUnavailable ? tagId : undefined;
     onSave({
       title: title.trim(),
       memo: memo.trim(),
@@ -142,7 +166,7 @@ export function EventCreateModal({ initialDate, initialEndDate, episodes, google
       endDate: endDate < startDate ? startDate : endDate,
       createdBy: currentUser?.name ?? '알 수 없음',
       ...(isGoogle ? {} : { calendarId: selectedCalendarId }),
-      tagId: isGoogle ? undefined : tagId,
+      tagId: isGoogle ? undefined : persistedTagId,
       allDay,
       startTime: allDay ? undefined : startTime,
       endTime: allDay ? undefined : endTime,

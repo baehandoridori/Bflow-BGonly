@@ -1702,6 +1702,7 @@ async function loadEventCreateModal(): Promise<EventCreateModalComponent> {
         createdAt: '2026-08-24T00:00:00.000Z',
       }],
       tags: [],
+      optimisticDeletedTagIds: [],
     };
     const evaluate = new Function('require', 'module', 'exports', result.outputFiles[0].text);
     evaluate((id: string) => {
@@ -1728,10 +1729,14 @@ async function loadEventCreateModal(): Promise<EventCreateModalComponent> {
       if (id === 'framer-motion') return { motion: { div: 'div' } };
       if (id === 'lucide-react') return { CalendarDays: emptyComponent, X: emptyComponent };
       if (id === '@/utils/cn') return { cn: (...values: unknown[]) => values.filter(Boolean).join(' ') };
-      if (id === '@/stores/useAuthStore') return { useAuthStore: (selector: (state: { currentUser: { name: string } }) => unknown) => selector({ currentUser: { name: '배한솔' } }) };
+      if (id === '@/stores/useAuthStore') return { useAuthStore: (selector: (state: { currentUser: { id: string; name: string } }) => unknown) => selector({ currentUser: { id: 'user-me', name: '배한솔' } }) };
       if (id === '@/stores/useDataStore') return { useDataStore: (selector: (state: { episodeTitles: {} }) => unknown) => selector({ episodeTitles: {} }) };
       if (id === '@/stores/useAppStore') return { useAppStore: (selector: (state: { colorMode: string }) => unknown) => selector({ colorMode: 'dark' }) };
-      if (id === '@/stores/useCalendarStore') return { useCalendarStore: (selector: (state: typeof calendarState) => unknown) => selector(calendarState) };
+      if (id === '@/stores/useCalendarStore') return {
+        useCalendarStore: (selector: (state: typeof calendarState) => unknown) => selector(calendarState),
+        getTagCanonicalSnapshot: () => null,
+        isOptimisticCalendarTagId: (idValue: string) => idValue.startsWith('optimistic-tag:'),
+      };
       if (id === '@/types') return { DEPARTMENT_CONFIGS: {} };
       if (id === '@/utils/calendarDate') return { fmtDate: () => '2026-08-25' };
       if (id === '@/utils/glassStyles') return { floatingGlassStyle: {} };

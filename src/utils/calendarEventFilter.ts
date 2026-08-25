@@ -6,6 +6,8 @@ export const VACATION_CHIP_ID = 'builtin-vacation';
 export interface CalendarFilterState {
   visibleCalendarIds: Readonly<Record<string, boolean>>;
   enabledTagIds: Readonly<Record<string, boolean>>;
+  /** 태그 full-list 저장 뒤 일정 정본이 따라오기 전까지 삭제 태그를 '태그 없음'으로 취급한다. */
+  optimisticDeletedTagIds?: ReadonlySet<string>;
   googleVisible: boolean;
   /** 캘린더 메타데이터가 한 번 성공한 후 현재 사용자가 열람할 수 있는 B flow 캘린더 id. */
   knownCalendarIds?: ReadonlySet<string>;
@@ -42,7 +44,11 @@ export function filterCalendarEvents(
       ?? (isLegacyPrivateBflowEvent(ev) ? state.personalCalendarId : undefined);
     if (ev.calendarId && state.knownCalendarIds && !state.knownCalendarIds.has(ev.calendarId)) return false;
     if (calendarId && state.visibleCalendarIds[calendarId] === false) return false;
-    if (ev.tagId && state.enabledTagIds[ev.tagId] === false) return false;
+    if (
+      ev.tagId
+      && !state.optimisticDeletedTagIds?.has(ev.tagId)
+      && state.enabledTagIds[ev.tagId] === false
+    ) return false;
     return true;
   });
 }

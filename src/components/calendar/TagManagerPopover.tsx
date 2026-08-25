@@ -9,7 +9,7 @@ import { toast } from 'sonner';
 import { ConfirmDialog } from '@/components/common/ConfirmDialog';
 import { loadBflowEvents } from '@/services/calendarService';
 import { useAuthStore } from '@/stores/useAuthStore';
-import { useCalendarStore } from '@/stores/useCalendarStore';
+import { getTagCanonicalSnapshot, useCalendarStore } from '@/stores/useCalendarStore';
 import { EVENT_COLORS, type CalendarTag } from '@/types/calendar';
 import { floatingGlassStyle } from '@/utils/glassStyles';
 
@@ -41,14 +41,21 @@ interface PopoverPosition {
 type ReconciliationMode = 'metadata' | 'events';
 
 interface PendingTagReconciliation {
+  actorId: string;
   drafts: DraftTag[];
+  beforeRevision: number;
+  beforeTags: CalendarTag[];
   mode: ReconciliationMode;
   lockMutations: boolean;
+  persistenceSucceeded: boolean;
 }
 
 interface InFlightTagOperation {
+  actorId: string;
   token: number;
   drafts: DraftTag[];
+  beforeRevision: number;
+  beforeTags: CalendarTag[];
   mode: ReconciliationMode;
 }
 
@@ -60,26 +67,36 @@ interface TagMutationSnapshot {
 }
 
 let nextTagOperationToken = 0;
-let tagMutationSnapshot: TagMutationSnapshot = {
+let tagMutationRevision = { revision: 0 };
+const emptyTagMutationSnapshot: TagMutationSnapshot = {
   revision: 0,
   inFlight: null,
   reconciliation: null,
   settledDrafts: null,
 };
+const tagMutationByActor = new Map<string, TagMutationSnapshot>();
+let activeTagOperation: { actorId: string; token: number } | null = null;
 const tagMutationListeners = new Set<() => void>();
 
 function cloneDrafts(drafts: DraftTag[]): DraftTag[] {
   return drafts.map((tag) => ({ ...tag }));
 }
 
+function cloneTags(tags: CalendarTag[]): CalendarTag[] {
+  return tags.map((tag) => ({ ...tag }));
+}
+
 function publishTagMutationSnapshot(
+  actorId: string,
   updates: Omit<Partial<TagMutationSnapshot>, 'revision'>,
 ): void {
-  tagMutationSnapshot = {
-    ...tagMutationSnapshot,
+  const previous = tagMutationByActor.get(actorId) ?? emptyTagMutationSnapshot;
+  tagMutationByActor.set(actorId, {
+    ...previous,
     ...updates,
-    revision: tagMutationSnapshot.revision + 1,
-  };
+    revision: previous.revision + 1,
+  });
+  tagMutationRevision = { revision: tagMutationRevision.revision + 1 };
   for (const listener of tagMutationListeners) listener();
 }
 
@@ -88,8 +105,22 @@ function subscribeTagMutationSnapshot(listener: () => void): () => void {
   return () => tagMutationListeners.delete(listener);
 }
 
-function getTagMutationSnapshot(): TagMutationSnapshot {
-  return tagMutationSnapshot;
+function getTagMutationRevision(): { revision: number } {
+  return tagMutationRevision;
+}
+
+function getActorTagMutation(actorId: string | undefined): TagMutationSnapshot {
+  return actorId
+    ? tagMutationByActor.get(actorId) ?? emptyTagMutationSnapshot
+    : emptyTagMutationSnapshot;
+}
+
+function hasUnresolvedTagReconciliation(): boolean {
+  return [...tagMutationByActor.values()].some((snapshot) => snapshot.reconciliation !== null);
+}
+
+function isCurrentTagActor(actorId: string): boolean {
+  return useAuthStore.getState().currentUser?.id === actorId;
 }
 
 const POPOVER_WIDTH = 320;
@@ -101,6 +132,60 @@ function orderedDrafts(tags: CalendarTag[]): DraftTag[] {
   return [...tags]
     .sort((a, b) => a.sortOrder - b.sortOrder)
     .map((tag) => ({ id: tag.id, key: tag.id, name: tag.name, color: tag.color }));
+}
+
+function projectedTags(drafts: DraftTag[], actorId: string, token: number): CalendarTag[] {
+  return drafts.map((tag, index) => ({
+    id: tag.id ?? `optimistic-tag:${actorId}:${token}:${index}`,
+    name: tag.name,
+    color: tag.color,
+    sortOrder: index,
+  }));
+}
+
+function tagsExactlyMatch(left: CalendarTag[], right: CalendarTag[]): boolean {
+  const orderedLeft = [...left].sort((a, b) => a.sortOrder - b.sortOrder);
+  const orderedRight = [...right].sort((a, b) => a.sortOrder - b.sortOrder);
+  return orderedLeft.length === orderedRight.length
+    && orderedLeft.every((tag, index) => {
+      const expected = orderedRight[index];
+      return expected !== undefined
+        && tag.id === expected.id
+        && tag.name === expected.name
+        && tag.color === expected.color;
+    });
+}
+
+function visibleTagsMatchDrafts(tags: CalendarTag[], drafts: DraftTag[]): boolean {
+  const orderedTags = [...tags].sort((a, b) => a.sortOrder - b.sortOrder);
+  return orderedTags.length === drafts.length
+    && drafts.every((draft, index) => {
+      const tag = orderedTags[index];
+      return tag !== undefined
+        && draft.id === tag.id
+        && draft.name === tag.name
+        && draft.color === tag.color;
+    });
+}
+
+type TagVerification = 'committed' | 'not-committed' | 'ambiguous';
+
+function verifyTagDrafts(
+  beforeTags: CalendarTag[],
+  drafts: DraftTag[],
+  canonicalTags: CalendarTag[],
+): TagVerification {
+  const orderedCanonical = [...canonicalTags].sort((a, b) => a.sortOrder - b.sortOrder);
+  const beforeIds = new Set(beforeTags.map((tag) => tag.id));
+  const committed = orderedCanonical.length === drafts.length
+    && drafts.every((draft, index) => {
+      const canonical = orderedCanonical[index];
+      if (!canonical || canonical.name !== draft.name || canonical.color !== draft.color) return false;
+      return draft.id ? canonical.id === draft.id : !beforeIds.has(canonical.id);
+    });
+  if (committed) return 'committed';
+  if (tagsExactlyMatch(beforeTags, orderedCanonical)) return 'not-committed';
+  return 'ambiguous';
 }
 
 function calculatePosition(anchorRect: DOMRect, width: number, height: number): PopoverPosition {
@@ -134,12 +219,14 @@ function isPointInsideAnchor(event: MouseEvent, anchorRect: DOMRect): boolean {
 
 export function TagManagerPopover({ anchorRect, onClose }: TagManagerPopoverProps) {
   const currentUser = useAuthStore((state) => state.currentUser);
+  const actorId = currentUser?.id;
   const tags = useCalendarStore((state) => state.tags);
-  const sharedMutation = useSyncExternalStore(
+  useSyncExternalStore(
     subscribeTagMutationSnapshot,
-    getTagMutationSnapshot,
-    getTagMutationSnapshot,
+    getTagMutationRevision,
+    getTagMutationRevision,
   );
+  const sharedMutation = getActorTagMutation(actorId);
   const isAdmin = currentUser?.role === 'admin';
   const popoverRef = useRef<HTMLDivElement>(null);
   const [position, setPosition] = useState(() => (
@@ -147,15 +234,20 @@ export function TagManagerPopover({ anchorRect, onClose }: TagManagerPopoverProp
   ));
   const [localDrafts, setDrafts] = useState<DraftTag[]>(() => (
     cloneDrafts(
-      tagMutationSnapshot.inFlight?.drafts
-      ?? tagMutationSnapshot.reconciliation?.drafts
+      sharedMutation.inFlight?.drafts
+      ?? sharedMutation.reconciliation?.drafts
       ?? orderedDrafts(tags),
     )
   ));
   const [editing, setEditing] = useState<EditingTag | null>(null);
-  const editingActive = editing !== null;
   const [localSaving, setSaving] = useState(false);
+  const renderedActorId = useRef(actorId);
+  const actorChanged = renderedActorId.current !== actorId;
+  if (actorChanged) renderedActorId.current = actorId;
+  const editingForActor = actorChanged || !isAdmin ? null : editing;
+  const editingActive = editingForActor !== null;
   const appliedSharedRevision = useRef(sharedMutation.revision);
+  if (actorChanged) appliedSharedRevision.current = sharedMutation.revision;
   const sharedDrafts = sharedMutation.inFlight?.drafts
     ?? sharedMutation.reconciliation?.drafts
     ?? (
@@ -163,11 +255,11 @@ export function TagManagerPopover({ anchorRect, onClose }: TagManagerPopoverProp
         ? sharedMutation.settledDrafts
         : null
     );
-  const drafts = sharedDrafts ?? localDrafts;
+  const drafts = actorChanged ? orderedDrafts(tags) : sharedDrafts ?? localDrafts;
   const reconciliationMode = sharedMutation.reconciliation?.mode ?? null;
-  const mutationsLocked = sharedMutation.inFlight !== null
-    || Boolean(sharedMutation.reconciliation?.lockMutations);
-  const saving = localSaving || sharedMutation.inFlight !== null;
+  const mutationsLocked = activeTagOperation !== null
+    || hasUnresolvedTagReconciliation();
+  const saving = localSaving || activeTagOperation !== null;
   const reconciliationRequired = reconciliationMode !== null;
 
   useEffect(() => {
@@ -184,6 +276,10 @@ export function TagManagerPopover({ anchorRect, onClose }: TagManagerPopoverProp
       ?? sharedMutation.settledDrafts;
     if (nextDrafts) setDrafts(cloneDrafts(nextDrafts));
   }, [sharedMutation]);
+
+  useEffect(() => {
+    setEditing(null);
+  }, [actorId, isAdmin]);
 
   const updatePosition = useCallback(() => {
     const rect = popoverRef.current?.getBoundingClientRect();
@@ -225,90 +321,163 @@ export function TagManagerPopover({ anchorRect, onClose }: TagManagerPopoverProp
     };
   }, [anchorRect, editingActive, onClose]);
 
-  const refreshCanonicalTags = async (mode: ReconciliationMode): Promise<boolean> => {
-    if (mode === 'events') {
-      return loadBflowEvents({ requireTagsFresh: true });
-    }
-    const metadataFreshness = await useCalendarStore.getState().loadAll();
-    return metadataFreshness.tagsFresh;
+  const refreshCanonicalTags = async (
+    mode: ReconciliationMode,
+    operationActorId: string,
+  ): Promise<{ tagsFresh: boolean; tags: CalendarTag[] }> => {
+    const revisionBeforeRefresh = getTagCanonicalSnapshot(operationActorId)?.revision ?? 0;
+    const eventsFresh = mode === 'events'
+      ? await loadBflowEvents({ requireTagsFresh: true })
+      : true;
+    if (mode === 'metadata') await useCalendarStore.getState().loadAll();
+    const canonical = getTagCanonicalSnapshot(operationActorId);
+    return {
+      tagsFresh: eventsFresh && canonical !== null && canonical.revision > revisionBeforeRefresh,
+      tags: canonical?.tags ?? [],
+    };
   };
 
   const settleTagOperation = (
     token: number,
+    operationActorId: string,
     finalDrafts: DraftTag[],
     reconciliation: PendingTagReconciliation | null,
-  ) => {
-    if (tagMutationSnapshot.inFlight?.token !== token) return;
-    publishTagMutationSnapshot({
+  ): boolean => {
+    const actorMutation = getActorTagMutation(operationActorId);
+    if (
+      activeTagOperation?.token !== token
+      || activeTagOperation.actorId !== operationActorId
+      || actorMutation.inFlight?.token !== token
+      || actorMutation.inFlight.actorId !== operationActorId
+    ) return false;
+    activeTagOperation = null;
+    publishTagMutationSnapshot(operationActorId, {
       inFlight: null,
       reconciliation,
       settledDrafts: cloneDrafts(finalDrafts),
     });
+    return true;
+  };
+
+  const clearTagOverlay = (operationActorId: string, token: number): void => {
+    useCalendarStore.getState().clearTagOptimisticOverlay(operationActorId, token);
   };
 
   const reconcileFromCanonical = async () => {
-    const pending = tagMutationSnapshot.reconciliation;
-    if (!pending || tagMutationSnapshot.inFlight) return;
+    const operationActorId = actorId;
+    if (!operationActorId || !isCurrentTagActor(operationActorId) || activeTagOperation) return;
+    const actorMutation = getActorTagMutation(operationActorId);
+    const pending = actorMutation.reconciliation;
+    if (!pending || actorMutation.inFlight || pending.actorId !== operationActorId) return;
     const token = ++nextTagOperationToken;
-    publishTagMutationSnapshot({
+    activeTagOperation = { actorId: operationActorId, token };
+    publishTagMutationSnapshot(operationActorId, {
       inFlight: {
+        actorId: operationActorId,
         token,
         drafts: cloneDrafts(pending.drafts),
+        beforeRevision: pending.beforeRevision,
+        beforeTags: cloneTags(pending.beforeTags),
         mode: pending.mode,
       },
       settledDrafts: null,
     });
+    useCalendarStore.getState().setTagOptimisticOverlay(
+      operationActorId,
+      token,
+      projectedTags(pending.drafts, operationActorId, token),
+    );
     setSaving(true);
-    let refreshed = false;
+    let refresh = { tagsFresh: false, tags: [] as CalendarTag[] };
     try {
-      refreshed = await refreshCanonicalTags(pending.mode);
+      refresh = await refreshCanonicalTags(pending.mode, operationActorId);
     } catch {
-      refreshed = false;
+      refresh = { tagsFresh: false, tags: [] };
     }
-    if (refreshed) {
-      const canonicalDrafts = orderedDrafts(useCalendarStore.getState().tags);
+    if (
+      activeTagOperation?.token !== token
+      || activeTagOperation.actorId !== operationActorId
+    ) return;
+    if (!isCurrentTagActor(operationActorId)) {
+      settleTagOperation(token, operationActorId, pending.drafts, pending);
+      setSaving(false);
+      return;
+    }
+    if (!refresh.tagsFresh) {
+      settleTagOperation(token, operationActorId, pending.drafts, pending);
+      setSaving(false);
+      toast.error('최신 태그 목록을 불러오지 못했어요. 잠시 후 다시 시도해 주세요.');
+      return;
+    }
+
+    if (pending.persistenceSucceeded) {
+      const canonicalDrafts = orderedDrafts(refresh.tags);
+      if (settleTagOperation(token, operationActorId, canonicalDrafts, null)) {
+        clearTagOverlay(operationActorId, token);
+      }
       setDrafts(canonicalDrafts);
       setEditing(null);
-      settleTagOperation(token, canonicalDrafts, null);
-    } else {
-      settleTagOperation(token, pending.drafts, pending);
-      toast.error('최신 태그 목록을 불러오지 못했어요. 잠시 후 다시 시도해 주세요.');
+      setSaving(false);
+      return;
     }
+
+    const verification = verifyTagDrafts(pending.beforeTags, pending.drafts, refresh.tags);
+    if (verification !== 'ambiguous') {
+      const canonicalDrafts = orderedDrafts(refresh.tags);
+      if (settleTagOperation(token, operationActorId, canonicalDrafts, null)) {
+        clearTagOverlay(operationActorId, token);
+      }
+      setDrafts(canonicalDrafts);
+      setEditing(null);
+      setSaving(false);
+      toast.error(verification === 'committed'
+        ? '응답은 받지 못했지만 최신 목록에서 태그 변경을 확인했어요.'
+        : '태그 변경이 저장되지 않은 것을 확인했어요. 내용을 확인하고 다시 시도해 주세요.');
+      return;
+    }
+    settleTagOperation(token, operationActorId, pending.drafts, pending);
     setSaving(false);
+    toast.error('최신 목록에서도 태그 저장 결과를 확정하지 못했어요. 잠시 후 다시 확인해 주세요.');
   };
 
   const persistDrafts = async (
     nextDrafts: DraftTag[],
     refreshEvents = false,
   ): Promise<boolean> => {
-    const activeSnapshot = tagMutationSnapshot;
+    const operationActorId = currentUser?.id;
+    if (!operationActorId || !isAdmin || !isCurrentTagActor(operationActorId)) return false;
+    const actorMutation = getActorTagMutation(operationActorId);
     if (
-      !isAdmin
-      || activeSnapshot.inFlight
-      || activeSnapshot.reconciliation?.lockMutations
+      activeTagOperation
+      || actorMutation.inFlight
+      || hasUnresolvedTagReconciliation()
     ) return false;
     const requestedMode: ReconciliationMode = refreshEvents ? 'events' : 'metadata';
-    const currentReconciliation = activeSnapshot.reconciliation;
-    const inheritedMode: ReconciliationMode = (
-      currentReconciliation?.mode === 'events' || requestedMode === 'events'
-    ) ? 'events' : 'metadata';
-    const requestedRefreshResolvesPending = (
-      currentReconciliation?.mode !== 'events' || requestedMode === 'events'
-    );
+    const beforeSnapshot = getTagCanonicalSnapshot(operationActorId);
+    const beforeTags = beforeSnapshot?.tags ?? cloneTags(tags);
+    const beforeRevision = beforeSnapshot?.revision ?? 0;
     const token = ++nextTagOperationToken;
-    publishTagMutationSnapshot({
+    activeTagOperation = { actorId: operationActorId, token };
+    publishTagMutationSnapshot(operationActorId, {
       inFlight: {
+        actorId: operationActorId,
         token,
         drafts: cloneDrafts(nextDrafts),
+        beforeRevision,
+        beforeTags: cloneTags(beforeTags),
         mode: requestedMode,
       },
+      reconciliation: null,
       settledDrafts: null,
     });
+    useCalendarStore.getState().setTagOptimisticOverlay(
+      operationActorId,
+      token,
+      projectedTags(nextDrafts, operationActorId, token),
+    );
     setSaving(true);
     setDrafts(nextDrafts);
-    let persistenceFailure: unknown;
-    let refreshFailure: unknown;
-    let refreshed = false;
+    let persistenceSucceeded = false;
     let committedDrafts: DraftTag[] | null = null;
     try {
       const savedRows = await window.electronAPI.calendarTagsSave(nextDrafts.map((tag, index) => ({
@@ -325,68 +494,92 @@ export function TagManagerPopover({ anchorRect, onClose }: TagManagerPopoverProp
           name: tag.name,
           color: tag.color,
         }));
-      setDrafts(committedDrafts);
-    } catch (error) {
-      persistenceFailure = error;
+      persistenceSucceeded = true;
+      useCalendarStore.getState().setTagOptimisticOverlay(
+        operationActorId,
+        token,
+        projectedTags(committedDrafts, operationActorId, token),
+      );
+    } catch {
+      persistenceSucceeded = false;
     }
-    try {
-      refreshed = await refreshCanonicalTags(requestedMode);
-      if (!refreshed) refreshFailure = new Error('Calendar tag reconciliation failed');
-    } catch (error) {
-      refreshFailure = error;
-    }
-    if (persistenceFailure) {
-      if (refreshed) {
-        const canonicalDrafts = orderedDrafts(useCalendarStore.getState().tags);
-        const nextReconciliation = requestedRefreshResolvesPending
-          ? null
-          : {
-            drafts: cloneDrafts(canonicalDrafts),
-            mode: inheritedMode,
-            lockMutations: false,
-          };
-        setDrafts(canonicalDrafts);
-        setEditing(null);
-        settleTagOperation(token, canonicalDrafts, nextReconciliation);
-        setSaving(false);
-        toast.error('태그 저장 결과를 확인할 수 없어 최신 목록으로 다시 맞췄어요.');
-        return true;
-      }
-      const nextReconciliation = {
-        drafts: cloneDrafts(nextDrafts),
-        mode: inheritedMode,
-        lockMutations: true,
-      };
-      setDrafts(nextDrafts);
-      setEditing(null);
-      settleTagOperation(token, nextDrafts, nextReconciliation);
+    if (
+      activeTagOperation?.token !== token
+      || activeTagOperation.actorId !== operationActorId
+    ) return false;
+    const outcomeDrafts = committedDrafts ?? nextDrafts;
+    const pending: PendingTagReconciliation = {
+      actorId: operationActorId,
+      drafts: cloneDrafts(outcomeDrafts),
+      beforeRevision,
+      beforeTags: cloneTags(beforeTags),
+      mode: requestedMode,
+      lockMutations: true,
+      persistenceSucceeded,
+    };
+    if (!isCurrentTagActor(operationActorId)) {
+      settleTagOperation(token, operationActorId, outcomeDrafts, pending);
       setSaving(false);
-      toast.error('태그 저장 결과와 최신 목록을 확인할 수 없어요. 최신 목록을 다시 불러와 주세요.');
       return false;
     }
-    if (refreshFailure) {
-      const nextReconciliation = {
-        drafts: cloneDrafts(committedDrafts!),
-        mode: inheritedMode,
-        lockMutations: false,
-      };
-      settleTagOperation(token, committedDrafts!, nextReconciliation);
+
+    let refresh = { tagsFresh: false, tags: [] as CalendarTag[] };
+    try {
+      refresh = await refreshCanonicalTags(requestedMode, operationActorId);
+    } catch {
+      refresh = { tagsFresh: false, tags: [] };
+    }
+    if (
+      activeTagOperation?.token !== token
+      || activeTagOperation.actorId !== operationActorId
+    ) return false;
+    if (!isCurrentTagActor(operationActorId)) {
+      settleTagOperation(token, operationActorId, outcomeDrafts, pending);
       setSaving(false);
-      toast.error('태그는 저장됐지만 최신 목록을 불러오지 못했어요. 잠시 후 다시 시도해 주세요.');
+      return false;
+    }
+
+    if (persistenceSucceeded && refresh.tagsFresh) {
+      const canonicalDrafts = orderedDrafts(refresh.tags);
+      if (settleTagOperation(token, operationActorId, canonicalDrafts, null)) {
+        clearTagOverlay(operationActorId, token);
+      }
+      setDrafts(canonicalDrafts);
+      setEditing(null);
+      setSaving(false);
       return true;
     }
-    const canonicalDrafts = orderedDrafts(useCalendarStore.getState().tags);
-    const nextReconciliation = requestedRefreshResolvesPending
-      ? null
-      : {
-        drafts: cloneDrafts(canonicalDrafts),
-        mode: inheritedMode,
-        lockMutations: false,
-      };
-    setDrafts(canonicalDrafts);
-    settleTagOperation(token, canonicalDrafts, nextReconciliation);
+    if (!persistenceSucceeded && refresh.tagsFresh) {
+      const verification = verifyTagDrafts(beforeTags, nextDrafts, refresh.tags);
+      if (verification !== 'ambiguous') {
+        const canonicalDrafts = orderedDrafts(refresh.tags);
+        if (settleTagOperation(token, operationActorId, canonicalDrafts, null)) {
+          clearTagOverlay(operationActorId, token);
+        }
+        setDrafts(canonicalDrafts);
+        if (verification === 'committed') setEditing(null);
+        setSaving(false);
+        toast.error(verification === 'committed'
+          ? '응답은 받지 못했지만 최신 목록에서 태그 변경을 확인했어요.'
+          : '태그 변경이 저장되지 않은 것을 확인했어요. 내용을 확인하고 다시 시도해 주세요.');
+        return verification === 'committed';
+      }
+    }
+
+    settleTagOperation(token, operationActorId, outcomeDrafts, pending);
+    setDrafts(outcomeDrafts);
+    setEditing(null);
     setSaving(false);
-    return true;
+    if (persistenceSucceeded) {
+      toast.error('태그는 저장됐지만 최신 목록을 불러오지 못했어요. 최신 목록 확인 후 다시 편집해 주세요.');
+      return true;
+    }
+    if (refresh.tagsFresh) {
+      toast.error('최신 목록에서도 태그 저장 결과를 확정하지 못했어요. 목록을 다시 확인해 주세요.');
+      return false;
+    }
+    toast.error('태그 저장 결과와 최신 목록을 확인할 수 없어요. 최신 목록을 다시 불러와 주세요.');
+    return false;
   };
 
   const beginEdit = (tag: DraftTag) => {
@@ -401,7 +594,7 @@ export function TagManagerPopover({ anchorRect, onClose }: TagManagerPopoverProp
   };
 
   const beginAdd = () => {
-    if (!isAdmin || saving || editing || mutationsLocked) return;
+    if (!isAdmin || saving || editingForActor || mutationsLocked) return;
     setEditing({
       key: 'new-tag',
       label: '새',
@@ -412,16 +605,16 @@ export function TagManagerPopover({ anchorRect, onClose }: TagManagerPopoverProp
   };
 
   const confirmEdit = async () => {
-    if (!editing || !editing.name.trim()) return;
-    const nextDrafts = editing.isNew
+    if (!editingForActor || !editingForActor.name.trim()) return;
+    const nextDrafts = editingForActor.isNew
       ? [...drafts, {
-        key: editing.key,
-        name: editing.name.trim(),
-        color: editing.color,
+        key: editingForActor.key,
+        name: editingForActor.name.trim(),
+        color: editingForActor.color,
       }]
       : drafts.map((tag) => (
-        tag.key === editing.key
-          ? { ...tag, name: editing.name.trim(), color: editing.color }
+        tag.key === editingForActor.key
+          ? { ...tag, name: editingForActor.name.trim(), color: editingForActor.color }
           : tag
       ));
     if (await persistDrafts(nextDrafts)) setEditing(null);
@@ -430,7 +623,7 @@ export function TagManagerPopover({ anchorRect, onClose }: TagManagerPopoverProp
   const moveTag = async (index: number, direction: -1 | 1) => {
     const nextIndex = index + direction;
     if (
-      !isAdmin || saving || editing || mutationsLocked
+      !isAdmin || saving || editingForActor || mutationsLocked
       || nextIndex < 0 || nextIndex >= drafts.length
     ) return;
     const nextDrafts = [...drafts];
@@ -439,14 +632,38 @@ export function TagManagerPopover({ anchorRect, onClose }: TagManagerPopoverProp
   };
 
   const deleteTag = async (tag: DraftTag) => {
-    if (!isAdmin || saving || editing || mutationsLocked) return;
+    const operationActorId = currentUser?.id;
+    if (!operationActorId || !isAdmin || saving || editingForActor || mutationsLocked) return;
+    const mutationRevisionAtConfirm = getActorTagMutation(operationActorId).revision;
+    const canonicalRevisionAtConfirm = getTagCanonicalSnapshot(operationActorId)?.revision ?? 0;
+    const confirmedDrafts = cloneDrafts(drafts);
+    const confirmedIdentity = { id: tag.id, key: tag.key, name: tag.name, color: tag.color };
     const confirmed = await ConfirmDialog.show({
       message: "이 태그를 쓰는 일정은 '태그 없음'으로 바뀌어요",
       confirmLabel: '삭제',
       tone: 'danger',
     });
     if (!confirmed) return;
-    await persistDrafts(drafts.filter((draft) => draft.key !== tag.key), true);
+    const currentActor = useAuthStore.getState().currentUser;
+    const currentCanonicalRevision = getTagCanonicalSnapshot(operationActorId)?.revision ?? 0;
+    const currentTag = useCalendarStore.getState().tags.find((candidate) => (
+      candidate.id === confirmedIdentity.id
+      && candidate.name === confirmedIdentity.name
+      && candidate.color === confirmedIdentity.color
+    ));
+    if (
+      currentActor?.id !== operationActorId
+      || currentActor.role !== 'admin'
+      || activeTagOperation !== null
+      || getActorTagMutation(operationActorId).revision !== mutationRevisionAtConfirm
+      || currentCanonicalRevision !== canonicalRevisionAtConfirm
+      || !currentTag
+      || !visibleTagsMatchDrafts(useCalendarStore.getState().tags, confirmedDrafts)
+    ) return;
+    await persistDrafts(
+      confirmedDrafts.filter((draft) => draft.key !== confirmedIdentity.key),
+      true,
+    );
   };
 
   return createPortal(
@@ -485,28 +702,28 @@ export function TagManagerPopover({ anchorRect, onClose }: TagManagerPopoverProp
       </div>
 
       <div className="space-y-1.5">
-        {drafts.length === 0 && !editing && (
+        {drafts.length === 0 && !editingForActor && (
           <p className="py-5 text-center text-xs text-text-secondary">등록된 태그가 없어요</p>
         )}
         {drafts.map((tag, index) => (
-          editing?.key === tag.key ? (
-            <TagEditor key={tag.key} editing={editing} saving={saving} onChange={setEditing} onConfirm={confirmEdit} onCancel={() => setEditing(null)} />
+          editingForActor?.key === tag.key ? (
+            <TagEditor key={tag.key} editing={editingForActor} saving={saving} onChange={setEditing} onConfirm={confirmEdit} onCancel={() => setEditing(null)} />
           ) : (
             <div key={tag.key} className="flex min-h-9 items-center gap-2 rounded-lg px-2 py-1.5 hover:bg-bg-border/25">
               <span className="h-2.5 w-2.5 shrink-0 rounded-full" style={{ backgroundColor: tag.color }} />
               <span className="min-w-0 flex-1 truncate text-xs font-medium">{tag.name}</span>
               {isAdmin && (
                 <div className="flex items-center gap-0.5">
-                  <IconButton label={`${tag.name} 태그 위로`} disabled={saving || mutationsLocked || Boolean(editing) || index === 0} onClick={() => moveTag(index, -1)}>
+                  <IconButton label={`${tag.name} 태그 위로`} disabled={saving || mutationsLocked || Boolean(editingForActor) || index === 0} onClick={() => moveTag(index, -1)}>
                     <ChevronUp size={13} />
                   </IconButton>
-                  <IconButton label={`${tag.name} 태그 아래로`} disabled={saving || mutationsLocked || Boolean(editing) || index === drafts.length - 1} onClick={() => moveTag(index, 1)}>
+                  <IconButton label={`${tag.name} 태그 아래로`} disabled={saving || mutationsLocked || Boolean(editingForActor) || index === drafts.length - 1} onClick={() => moveTag(index, 1)}>
                     <ChevronDown size={13} />
                   </IconButton>
-                  <IconButton label={`${tag.name} 태그 편집`} disabled={saving || mutationsLocked || Boolean(editing)} onClick={() => beginEdit(tag)}>
+                  <IconButton label={`${tag.name} 태그 편집`} disabled={saving || mutationsLocked || Boolean(editingForActor)} onClick={() => beginEdit(tag)}>
                     <Pencil size={13} />
                   </IconButton>
-                  <IconButton label={`${tag.name} 태그 삭제`} disabled={saving || mutationsLocked || Boolean(editing)} danger onClick={() => deleteTag(tag)}>
+                  <IconButton label={`${tag.name} 태그 삭제`} disabled={saving || mutationsLocked || Boolean(editingForActor)} danger onClick={() => deleteTag(tag)}>
                     <Trash2 size={13} />
                   </IconButton>
                 </div>
@@ -515,8 +732,8 @@ export function TagManagerPopover({ anchorRect, onClose }: TagManagerPopoverProp
           )
         ))}
 
-        {editing?.isNew && (
-          <TagEditor editing={editing} saving={saving} onChange={setEditing} onConfirm={confirmEdit} onCancel={() => setEditing(null)} />
+        {editingForActor?.isNew && (
+          <TagEditor editing={editingForActor} saving={saving} onChange={setEditing} onConfirm={confirmEdit} onCancel={() => setEditing(null)} />
         )}
       </div>
 
@@ -539,7 +756,7 @@ export function TagManagerPopover({ anchorRect, onClose }: TagManagerPopoverProp
         </div>
       )}
 
-      {isAdmin && !editing && (
+      {isAdmin && !editingForActor && (
         <button
           type="button"
           onClick={beginAdd}

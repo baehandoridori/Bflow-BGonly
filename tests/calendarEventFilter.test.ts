@@ -37,6 +37,15 @@ test('태그 없는 일정은 태그 필터가 걸려 있어도 항상 표시', 
   assert.equal(out.length, 1);
 });
 
+test('낙관적으로 삭제된 태그의 stale 일정은 꺼진 태그 필터에 숨지 않고 태그 없음처럼 표시', () => {
+  const stale = ev({ id: 'stale-deleted-tag', tagId: 't1' });
+  const out = filterCalendarEvents([stale], state({
+    enabledTagIds: { t1: false },
+    optimisticDeletedTagIds: new Set(['t1']),
+  }));
+  assert.deepEqual(out.map((event: { id: string }) => event.id), ['stale-deleted-tag']);
+});
+
 test('태그 없는 일정도 캘린더가 꺼지면 숨김', () => {
   const out = filterCalendarEvents([ev({ id: '1' })], state({ visibleCalendarIds: { 'cal-a': false } }));
   assert.equal(out.length, 0);

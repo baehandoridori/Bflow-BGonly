@@ -199,6 +199,7 @@ let calendarState: {
   loaded: boolean;
   tags: Array<{ id: string; name: string; color: string; sortOrder: number }>;
   optimisticDeletedCalendarIds: string[];
+  optimisticDeletedTagIds: string[];
   visibleCalendarIds: Record<string, boolean>;
   enabledTagIds: Record<string, boolean>;
   mutedCalendarIds: string[];
@@ -214,6 +215,12 @@ let calendarState: {
     overlay: SettingsCalendarOptimisticOverlay,
   ): void;
   clearCalendarOptimisticOverlay(actorId: string, token: number): void;
+  setTagOptimisticOverlay(
+    actorId: string,
+    token: number,
+    tags: Array<{ id: string; name: string; color: string; sortOrder: number }>,
+  ): void;
+  clearTagOptimisticOverlay(actorId: string, token: number): void;
 };
 let openedSettings: BflowCalendar[] = [];
 let createdCount = 0;
@@ -273,6 +280,7 @@ let settingsCloseCount = 0;
 let tagManagerApiCalls: Array<{ name: string; args: unknown[] }> = [];
 let tagManagerApiFailures = new Set<string>();
 let tagManagerMetadataFreshness = { calendarsFresh: true, tagsFresh: true };
+let tagManagerBflowReloadResult = true;
 let tagManagerCanonicalTagsAfterReload: Array<{
   id: string;
   name: string;
@@ -287,6 +295,8 @@ let tagManagerLastCommittedTags: Array<{
 }> | null = null;
 let tagManagerConfirmResponses: boolean[] = [];
 let tagManagerConfirmMessages: string[] = [];
+let tagManagerConfirmGate: Promise<void> | null = null;
+let resolveTagManagerConfirmGate: (() => void) | null = null;
 let tagManagerToastErrors: string[] = [];
 let tagManagerCloseCount = 0;
 let tagManagerGeneratedId = 0;
@@ -294,6 +304,17 @@ let tagManagerSaveGate: Promise<void> | null = null;
 let resolveTagManagerSaveGate: (() => void) | null = null;
 let tagManagerRefreshGate: Promise<void> | null = null;
 let resolveTagManagerRefreshGate: (() => void) | null = null;
+let tagManagerCanonicalRevision = 0;
+let tagManagerCanonicalByActor = new Map<string, {
+  revision: number;
+  tags: Array<{ id: string; name: string; color: string; sortOrder: number }>;
+}>();
+let tagManagerStoreOverlay: {
+  actorId: string;
+  token: number;
+  tags: Array<{ id: string; name: string; color: string; sortOrder: number }>;
+  deletedTagIds: string[];
+} | null = null;
 type TagManagerDocumentListener = {
   capture: boolean;
   listener: (event: Record<string, unknown>) => void;
@@ -325,6 +346,7 @@ const tagManagerDocumentMock = {
   },
 };
 let tagManagerEffectCursor = 0;
+let tagManagerEffectDeps: unknown[][] = [];
 let tagManagerEffectCleanup: (() => void) | undefined;
 
 function resolveComponents(node: ReactNode): ReactNode {
@@ -493,6 +515,7 @@ function resetHarness(): void {
   tagManagerEffectCleanup?.();
   tagManagerEffectCleanup = undefined;
   tagManagerEffectCursor = 0;
+  tagManagerEffectDeps = [];
   tagManagerDocumentListeners.clear();
   stateSlots = [];
   stateCursor = 0;
@@ -577,10 +600,13 @@ function resetHarness(): void {
   tagManagerApiCalls = [];
   tagManagerApiFailures = new Set();
   tagManagerMetadataFreshness = { calendarsFresh: true, tagsFresh: true };
+  tagManagerBflowReloadResult = true;
   tagManagerCanonicalTagsAfterReload = null;
   tagManagerLastCommittedTags = null;
   tagManagerConfirmResponses = [];
   tagManagerConfirmMessages = [];
+  tagManagerConfirmGate = null;
+  resolveTagManagerConfirmGate = null;
   tagManagerToastErrors = [];
   tagManagerCloseCount = 0;
   tagManagerGeneratedId = 0;
@@ -588,6 +614,9 @@ function resetHarness(): void {
   resolveTagManagerSaveGate = null;
   tagManagerRefreshGate = null;
   resolveTagManagerRefreshGate = null;
+  tagManagerCanonicalRevision = 0;
+  tagManagerCanonicalByActor = new Map();
+  tagManagerStoreOverlay = null;
   calendarState = {
     loaded: true,
     calendars: [
@@ -601,6 +630,7 @@ function resetHarness(): void {
       { id: 'tag-review', name: '검수', color: '#00B894', sortOrder: 10 },
     ],
     optimisticDeletedCalendarIds: [],
+    optimisticDeletedTagIds: [],
     visibleCalendarIds: {},
     enabledTagIds: {},
     mutedCalendarIds: [],
@@ -609,6 +639,7 @@ function resetHarness(): void {
       else calendarState.visibleCalendarIds[id] = false;
     },
     toggleTag(id) {
+      if (id.startsWith('optimistic-tag:')) return;
       if (calendarState.enabledTagIds[id] === false) delete calendarState.enabledTagIds[id];
       else calendarState.enabledTagIds[id] = false;
     },
@@ -649,6 +680,38 @@ function resetHarness(): void {
       );
       calendarState.optimisticDeletedCalendarIds = [];
     },
+    setTagOptimisticOverlay(actorId, token, tags) {
+      if (settingsCurrentUser.id !== actorId && (
+        tagManagerStoreOverlay?.actorId !== actorId || tagManagerStoreOverlay.token !== token
+      )) return;
+      const priorDeleted = tagManagerStoreOverlay?.actorId === actorId
+        && tagManagerStoreOverlay.token === token
+        ? tagManagerStoreOverlay.deletedTagIds
+        : [];
+      const baseline = tagManagerCanonicalByActor.get(actorId)?.tags
+        ?? (settingsCurrentUser.id === actorId ? calendarState.tags : []);
+      const tagIds = new Set(tags.map(({ id }) => id));
+      const deletedTagIds = [...new Set([
+        ...priorDeleted,
+        ...baseline.filter(({ id }) => !tagIds.has(id)).map(({ id }) => id),
+      ])];
+      tagManagerStoreOverlay = {
+        actorId,
+        token,
+        tags: tags.map((tag) => ({ ...tag })),
+        deletedTagIds,
+      };
+      if (settingsCurrentUser.id !== actorId) return;
+      calendarState.tags = tags.map((tag) => ({ ...tag }));
+      calendarState.optimisticDeletedTagIds = deletedTagIds;
+    },
+    clearTagOptimisticOverlay(actorId, token) {
+      if (tagManagerStoreOverlay?.actorId !== actorId || tagManagerStoreOverlay.token !== token) return;
+      tagManagerStoreOverlay = null;
+      if (settingsCurrentUser.id !== actorId) return;
+      calendarState.tags = (tagManagerCanonicalByActor.get(actorId)?.tags ?? []).map((tag) => ({ ...tag }));
+      calendarState.optimisticDeletedTagIds = [];
+    },
   };
   settingsCanonicalCalendars = calendarState.calendars.map((item) => ({
     ...item,
@@ -657,6 +720,10 @@ function resetHarness(): void {
   settingsCanonicalByActor.set(settingsCurrentUser.id, {
     revision: settingsCanonicalRevision,
     calendars: cloneSettingsCalendars(settingsCanonicalCalendars),
+  });
+  tagManagerCanonicalByActor.set(settingsCurrentUser.id, {
+    revision: tagManagerCanonicalRevision,
+    tags: calendarState.tags.map((tag) => ({ ...tag })),
   });
 }
 
@@ -706,7 +773,10 @@ async function loadRail(): Promise<CalendarRailComponent> {
         const Icon = () => null;
         return { BellOff: Icon, Check: Icon, ChevronDown: Icon, MoreHorizontal: Icon, Plus: Icon, Settings: Icon };
       }
-      if (id === '@/stores/useCalendarStore') return { useCalendarStore: (selector: (state: typeof calendarState) => unknown) => selector(calendarState) };
+      if (id === '@/stores/useCalendarStore') return {
+        useCalendarStore: (selector: (state: typeof calendarState) => unknown) => selector(calendarState),
+        isOptimisticCalendarTagId: (idValue: string) => idValue.startsWith('optimistic-tag:'),
+      };
       if (id === '@/stores/useAuthStore') return { useAuthStore: (selector: (state: { currentUser: { id: string } }) => unknown) => selector({ currentUser: { id: myUserId } }) };
       if (id === '@/stores/useAppStore') return { useAppStore: (selector: (state: { setView(view: string): void }) => unknown) => selector({ setView: (view) => appViews.push(view) }) };
       return nodeRequire(id);
@@ -769,12 +839,23 @@ async function loadTagManagerPopover(): Promise<TagManagerPopoverComponent> {
       {
         getState: () => ({
           tags: calendarState.tags,
+          setTagOptimisticOverlay: calendarState.setTagOptimisticOverlay,
+          clearTagOptimisticOverlay: calendarState.clearTagOptimisticOverlay,
           async loadAll() {
             tagManagerApiCalls.push({ name: 'loadAll', args: [] });
             if (tagManagerRefreshGate) await tagManagerRefreshGate;
-            const canonicalTags = tagManagerCanonicalTagsAfterReload ?? tagManagerLastCommittedTags;
-            if (tagManagerMetadataFreshness.tagsFresh && canonicalTags) {
-              calendarState.tags = canonicalTags.map((tag) => ({ ...tag }));
+            const canonicalTags = tagManagerCanonicalTagsAfterReload
+              ?? tagManagerLastCommittedTags
+              ?? tagManagerCanonicalByActor.get(settingsCurrentUser.id)?.tags
+              ?? [];
+            if (tagManagerMetadataFreshness.tagsFresh) {
+              tagManagerCanonicalByActor.set(settingsCurrentUser.id, {
+                revision: ++tagManagerCanonicalRevision,
+                tags: canonicalTags.map((tag) => ({ ...tag })),
+              });
+              calendarState.tags = tagManagerStoreOverlay?.actorId === settingsCurrentUser.id
+                ? tagManagerStoreOverlay.tags.map((tag) => ({ ...tag }))
+                : canonicalTags.map((tag) => ({ ...tag }));
             }
             return tagManagerMetadataFreshness;
           },
@@ -797,9 +878,20 @@ async function loadTagManagerPopover(): Promise<TagManagerPopoverComponent> {
                 : next;
             }];
           },
-          useEffect(effect: () => void | (() => void)) {
+          useEffect(effect: () => void | (() => void), deps?: unknown[]) {
             const slot = tagManagerEffectCursor++;
-            if (slot !== 2) return;
+            if (slot === 2) {
+              const previous = tagManagerEffectDeps[slot];
+              tagManagerEffectDeps[slot] = deps ? [...deps] : [];
+              if (
+                previous === undefined
+                || deps === undefined
+                || previous.length !== deps.length
+                || deps.some((dependency, index) => !Object.is(dependency, previous[index]))
+              ) effect();
+              return;
+            }
+            if (slot !== 3) return;
             tagManagerEffectCleanup?.();
             tagManagerEffectCleanup = effect() ?? undefined;
           },
@@ -831,17 +923,34 @@ async function loadTagManagerPopover(): Promise<TagManagerPopoverComponent> {
           ConfirmDialog: {
             async show(options: { message: string }) {
               tagManagerConfirmMessages.push(options.message);
+              if (tagManagerConfirmGate) await tagManagerConfirmGate;
               return tagManagerConfirmResponses.shift() ?? false;
             },
           },
         };
       }
       if (id === '@/stores/useAuthStore') {
+        const useAuthStore = Object.assign(
+          (selector: (state: { currentUser: TestUser }) => unknown) => selector({ currentUser: settingsCurrentUser }),
+          { getState: () => ({ currentUser: settingsCurrentUser }) },
+        );
         return {
-          useAuthStore: (selector: (state: { currentUser: TestUser }) => unknown) => selector({ currentUser: settingsCurrentUser }),
+          useAuthStore,
         };
       }
-      if (id === '@/stores/useCalendarStore') return { useCalendarStore: useCalendarStoreMock };
+      if (id === '@/stores/useCalendarStore') {
+        return {
+          useCalendarStore: useCalendarStoreMock,
+          getTagCanonicalSnapshot(actorId: string | undefined) {
+            if (!actorId || settingsCurrentUser.id !== actorId) return null;
+            const snapshot = tagManagerCanonicalByActor.get(actorId);
+            return snapshot ? {
+              revision: snapshot.revision,
+              tags: snapshot.tags.map((tag) => ({ ...tag })),
+            } : null;
+          },
+        };
+      }
       if (id === '@/services/calendarService') {
         return {
           async loadBflowEvents(...args: unknown[]) {
@@ -849,11 +958,20 @@ async function loadTagManagerPopover(): Promise<TagManagerPopoverComponent> {
             if (tagManagerRefreshGate) await tagManagerRefreshGate;
             const options = args[0] as { requireTagsFresh?: boolean } | undefined;
             const refreshed = options?.requireTagsFresh !== true || tagManagerMetadataFreshness.tagsFresh;
-            const canonicalTags = tagManagerCanonicalTagsAfterReload ?? tagManagerLastCommittedTags;
-            if (refreshed && canonicalTags) {
-              calendarState.tags = canonicalTags.map((tag) => ({ ...tag }));
+            const canonicalTags = tagManagerCanonicalTagsAfterReload
+              ?? tagManagerLastCommittedTags
+              ?? tagManagerCanonicalByActor.get(settingsCurrentUser.id)?.tags
+              ?? [];
+            if (refreshed) {
+              tagManagerCanonicalByActor.set(settingsCurrentUser.id, {
+                revision: ++tagManagerCanonicalRevision,
+                tags: canonicalTags.map((tag) => ({ ...tag })),
+              });
+              calendarState.tags = tagManagerStoreOverlay?.actorId === settingsCurrentUser.id
+                ? tagManagerStoreOverlay.tags.map((tag) => ({ ...tag }))
+                : canonicalTags.map((tag) => ({ ...tag }));
             }
-            return refreshed;
+            return refreshed && tagManagerBflowReloadResult;
           },
         };
       }
@@ -1202,10 +1320,21 @@ async function loadEventCreateModal(): Promise<EventCreateModalComponent> {
       if (id === 'framer-motion') return { motion: { div: 'div' } };
       if (id === 'lucide-react') return { CalendarDays: emptyComponent, X: emptyComponent };
       if (id === '@/utils/cn') return { cn: (...values: string[]) => values.filter(Boolean).join(' ') };
-      if (id === '@/stores/useAuthStore') return { useAuthStore: (selector: (state: { currentUser: { name: string } }) => unknown) => selector({ currentUser: { name: '배한솔' } }) };
+      if (id === '@/stores/useAuthStore') return { useAuthStore: (selector: (state: { currentUser: { id: string; name: string } }) => unknown) => selector({ currentUser: { id: settingsCurrentUser.id, name: '배한솔' } }) };
       if (id === '@/stores/useDataStore') return { useDataStore: (selector: (state: { episodeTitles: {} }) => unknown) => selector({ episodeTitles: {} }) };
       if (id === '@/stores/useAppStore') return { useAppStore: (selector: (state: { colorMode: string }) => unknown) => selector({ colorMode: 'dark' }) };
-      if (id === '@/stores/useCalendarStore') return { useCalendarStore: (selector: (state: typeof calendarState) => unknown) => selector(calendarState) };
+      if (id === '@/stores/useCalendarStore') return {
+        useCalendarStore: (selector: (state: typeof calendarState) => unknown) => selector(calendarState),
+        isOptimisticCalendarTagId: (idValue: string) => idValue.startsWith('optimistic-tag:'),
+        getTagCanonicalSnapshot(actorId: string | undefined) {
+          if (!actorId || actorId !== settingsCurrentUser.id) return null;
+          const snapshot = tagManagerCanonicalByActor.get(actorId);
+          return snapshot ? {
+            revision: snapshot.revision,
+            tags: snapshot.tags.map((tag) => ({ ...tag })),
+          } : null;
+        },
+      };
       if (id === '@/types') return { DEPARTMENT_CONFIGS: {} };
       if (id === '@/types/calendar') return { EVENT_COLORS: ['#6C5CE7'] };
       if (id === '@/utils/calendarDate') return { fmtDate: () => '2026-08-25' };
@@ -2034,8 +2163,16 @@ test('TagManagerPopover lets admins edit, reorder, and add tags with canonical f
     assert.equal(tagManagerToastErrors.length, 1);
     assert.match(tagManagerToastErrors[0], /저장됐지만/, 'the message distinguishes commit from reload failure');
     assert.ok(buttonByLabel(tree, '리뷰 태그 편집'), 'the committed row remains rendered after reload failure');
+    assert.equal(
+      buttonByLabel(tree, '리뷰 태그 편집').props.disabled,
+      true,
+      'a returned UUID remains visible but full-list writes stay locked until a fresh rebase',
+    );
 
     tagManagerMetadataFreshness = { calendarsFresh: true, tagsFresh: true };
+    tagManagerCanonicalTagsAfterReload = tagManagerLastCommittedTags;
+    await buttonByLabel(tree, '최신 태그 목록 다시 불러오기').props.onClick?.();
+    tree = await renderTagManagerPopover();
     await buttonByLabel(tree, '리뷰 태그 위로').props.onClick?.();
     assert.deepEqual(tagManagerApiCalls.at(-2)?.args, [[
       { id: 'tag-review', name: '검수', color: '#00B894', sort_order: 0 },
@@ -2044,7 +2181,73 @@ test('TagManagerPopover lets admins edit, reorder, and add tags with canonical f
     ]], 'the next save reuses the authoritative UUID instead of resubmitting a fake new row');
   });
 
-  await t.test('a lost save response adopts a fresh canonical UUID and exits the editor', async () => {
+  await t.test('a lost save response settles as committed when fresh canonical rows exactly match the submitted rename', async () => {
+    resetHarness();
+    tagManagerApiFailures.add('calendarTagsSave');
+    tagManagerCanonicalTagsAfterReload = [
+      { id: 'tag-review', name: '검수', color: '#00B894', sortOrder: 0 },
+      { id: 'tag-meeting', name: '회의 응답유실', color: '#FDCB6E', sortOrder: 1 },
+    ];
+    let tree = await renderTagManagerPopover();
+    buttonByLabel(tree, '회의 태그 편집').props.onClick?.();
+    tree = await renderTagManagerPopover();
+    formElementByLabel(tree, '회의 태그 이름').props.onChange?.({
+      target: { value: '회의 응답유실', checked: false },
+    });
+    tree = await renderTagManagerPopover();
+    await buttonByLabel(tree, '회의 태그 저장').props.onClick?.();
+    tree = await renderTagManagerPopover();
+
+    assert.deepEqual(tagManagerApiCalls.map((call) => call.name), ['calendarTagsSave', 'loadAll']);
+    assert.match(tagManagerToastErrors[0], /최신 목록에서 태그 변경을 확인했/);
+    assert.ok(buttonByLabel(tree, '회의 응답유실 태그 편집'));
+    assert.equal(
+      findFormElements(tree).some((element) => element.props['aria-label'] === '회의 태그 이름'),
+      false,
+      'an exactly verified commit closes the editor and leaves no retry draft',
+    );
+    assert.equal(
+      findButtons(tree).some((button) => button.props['aria-label'] === '최신 태그 목록 다시 불러오기'),
+      false,
+      'an exactly verified commit clears the reconciliation latch',
+    );
+  });
+
+  await t.test('a lost save response keeps the inline draft retryable when fresh canonical rows exactly match the before snapshot', async () => {
+    resetHarness();
+    tagManagerApiFailures.add('calendarTagsSave');
+    tagManagerCanonicalTagsAfterReload = [
+      { id: 'tag-review', name: '검수', color: '#00B894', sortOrder: 0 },
+      { id: 'tag-meeting', name: '회의', color: '#FDCB6E', sortOrder: 1 },
+    ];
+    let tree = await renderTagManagerPopover();
+    buttonByLabel(tree, '회의 태그 편집').props.onClick?.();
+    tree = await renderTagManagerPopover();
+    formElementByLabel(tree, '회의 태그 이름').props.onChange?.({
+      target: { value: '회의 재시도', checked: false },
+    });
+    tree = await renderTagManagerPopover();
+    await buttonByLabel(tree, '회의 태그 저장').props.onClick?.();
+    tree = await renderTagManagerPopover();
+
+    assert.deepEqual(tagManagerApiCalls.map((call) => call.name), ['calendarTagsSave', 'loadAll']);
+    assert.match(tagManagerToastErrors[0], /저장되지 않은 것을 확인했/);
+    assert.deepEqual(calendarState.tags, tagManagerCanonicalTagsAfterReload);
+    assert.equal(
+      formElementByLabel(tree, '회의 태그 이름').props.value,
+      '회의 재시도',
+      'the attempted value stays in the editor for an intentional retry',
+    );
+    assert.equal(buttonByLabel(tree, '회의 태그 저장').props.disabled, false);
+    assert.equal(
+      findButtons(tree).some((button) => button.props['aria-label'] === '최신 태그 목록 다시 불러오기'),
+      false,
+      'an exact before-state proves no commit and does not leave a global write lock',
+    );
+    buttonByLabel(tree, '회의 태그 편집 취소').props.onClick?.();
+  });
+
+  await t.test('a lost save response keeps an intent overlay locked when fresh canonical rows are unrelated', async () => {
     resetHarness();
     tagManagerApiFailures.add('calendarTagsSave');
     tagManagerCanonicalTagsAfterReload = [
@@ -2061,20 +2264,28 @@ test('TagManagerPopover lets admins edit, reorder, and add tags with canonical f
     tree = await renderTagManagerPopover();
 
     assert.deepEqual(tagManagerApiCalls.map((call) => call.name), ['calendarTagsSave', 'loadAll']);
-    assert.match(tagManagerToastErrors[0], /저장 결과.*최신 목록/);
-    assert.ok(buttonByLabel(tree, '서버 정본 태그 편집'), 'fresh canonical rows replace the ambiguous intent');
+    assert.match(tagManagerToastErrors[0], /확정하지 못했/);
+    assert.ok(buttonByLabel(tree, '응답 유실 태그 편집'), 'an unrelated canonical list cannot erase the submitted intent');
+    assert.equal(buttonByLabel(tree, '응답 유실 태그 편집').props.disabled, true);
+    assert.ok(buttonByLabel(tree, '최신 태그 목록 다시 불러오기'));
     assert.equal(
       findFormElements(tree).some((element) => element.props['aria-label'] === '새 태그 이름'),
       false,
-      'fresh reconciliation closes the idless editor',
+      'the ambiguous full-list intent is retained as a locked projection instead of an active editor',
     );
 
+    tagManagerCanonicalTagsAfterReload = [
+      { id: 'tag-review', name: '검수', color: '#00B894', sortOrder: 0 },
+      { id: 'tag-meeting', name: '회의', color: '#FDCB6E', sortOrder: 1 },
+      { id: 'tag-server-new', name: '응답 유실', color: '#6C5CE7', sortOrder: 2 },
+    ];
+    await buttonByLabel(tree, '최신 태그 목록 다시 불러오기').props.onClick?.();
+    tree = await renderTagManagerPopover();
     tagManagerApiFailures.delete('calendarTagsSave');
-    tagManagerCanonicalTagsAfterReload = null;
-    await buttonByLabel(tree, '서버 정본 태그 위로').props.onClick?.();
+    await buttonByLabel(tree, '응답 유실 태그 위로').props.onClick?.();
     assert.deepEqual(tagManagerApiCalls.at(-2)?.args, [[
       { id: 'tag-review', name: '검수', color: '#00B894', sort_order: 0 },
-      { id: 'tag-server-new', name: '서버 정본', color: '#6C5CE7', sort_order: 1 },
+      { id: 'tag-server-new', name: '응답 유실', color: '#6C5CE7', sort_order: 1 },
       { id: 'tag-meeting', name: '회의', color: '#FDCB6E', sort_order: 2 },
     ]], 'the next mutation reuses only the canonical server UUID');
   });
@@ -2152,6 +2363,303 @@ test('TagManagerPopover lets admins edit, reorder, and add tags with canonical f
   });
 });
 
+test('TagManagerPopover publishes tag mutations to the shared store across persistence outcomes', async (t) => {
+  const clearTagReconciliation = async (
+    canonicalTags: Array<{ id: string; name: string; color: string; sortOrder: number }>,
+  ) => {
+    tagManagerSaveGate = null;
+    tagManagerRefreshGate = null;
+    tagManagerMetadataFreshness = { calendarsFresh: true, tagsFresh: true };
+    tagManagerCanonicalTagsAfterReload = canonicalTags;
+    stateSlots = [];
+    tagManagerRefSlots = [];
+    const retryTree = await renderTagManagerPopover();
+    const retryButton = findButtons(retryTree).find((button) => (
+      button.props['aria-label'] === '최신 태그 목록 다시 불러오기'
+    ));
+    await retryButton?.props.onClick?.();
+    tagManagerCanonicalTagsAfterReload = null;
+  };
+
+  await t.test('rename and recolor stay shared during slow persistence and after a committed refresh failure', async () => {
+    resetHarness();
+    tagManagerMetadataFreshness = { calendarsFresh: true, tagsFresh: false };
+    tagManagerSaveGate = new Promise<void>((resolve) => {
+      resolveTagManagerSaveGate = resolve;
+    });
+    tagManagerRefreshGate = new Promise<void>((resolve) => {
+      resolveTagManagerRefreshGate = resolve;
+    });
+    let tree = await renderTagManagerPopover();
+    buttonByLabel(tree, '회의 태그 편집').props.onClick?.();
+    tree = await renderTagManagerPopover();
+    formElementByLabel(tree, '회의 태그 이름').props.onChange?.({ target: { value: '회의록', checked: false } });
+    tree = await renderTagManagerPopover();
+    buttonByLabel(tree, '#74B9FF 태그 색상').props.onClick?.();
+    tree = await renderTagManagerPopover();
+    const pendingSave = buttonByLabel(tree, '회의 태그 저장').props.onClick?.();
+    const committed = [
+      { id: 'tag-review', name: '검수', color: '#00B894', sortOrder: 0 },
+      { id: 'tag-meeting', name: '회의록', color: '#74B9FF', sortOrder: 1 },
+    ];
+    try {
+      assert.deepEqual(calendarState.tags, committed, 'the shared store changes before the IPC promise settles');
+      const tagBar = await renderTagBar(false, () => {});
+      assert.match(textContent(tagBar), /회의록/, 'TagBar reads the optimistic shared tag name');
+
+      resolveTagManagerSaveGate?.();
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      assert.deepEqual(
+        calendarState.tags,
+        committed,
+        'the authoritative save response replaces the optimistic draft before refresh settles',
+      );
+
+      resolveTagManagerRefreshGate?.();
+      await pendingSave;
+      assert.deepEqual(
+        calendarState.tags,
+        committed,
+        'a refresh failure cannot roll back rows already confirmed by persistence',
+      );
+    } finally {
+      resolveTagManagerSaveGate?.();
+      resolveTagManagerRefreshGate?.();
+      await pendingSave;
+      await clearTagReconciliation(committed);
+    }
+  });
+
+  await t.test('a failed save publishes the reorder immediately and fresh canonical metadata rolls it back', async () => {
+    resetHarness();
+    tagManagerApiFailures.add('calendarTagsSave');
+    tagManagerCanonicalTagsAfterReload = [
+      { id: 'tag-review', name: '검수', color: '#00B894', sortOrder: 0 },
+      { id: 'tag-meeting', name: '회의', color: '#FDCB6E', sortOrder: 1 },
+    ];
+    tagManagerSaveGate = new Promise<void>((resolve) => {
+      resolveTagManagerSaveGate = resolve;
+    });
+    const tree = await renderTagManagerPopover();
+    const pendingSave = buttonByLabel(tree, '회의 태그 위로').props.onClick?.();
+    try {
+      assert.deepEqual(calendarState.tags.map(({ id, sortOrder }) => ({ id, sortOrder })), [
+        { id: 'tag-meeting', sortOrder: 0 },
+        { id: 'tag-review', sortOrder: 1 },
+      ], 'reordering is shared while persistence is unresolved');
+
+      resolveTagManagerSaveGate?.();
+      await pendingSave;
+      assert.deepEqual(calendarState.tags, [
+        { id: 'tag-review', name: '검수', color: '#00B894', sortOrder: 0 },
+        { id: 'tag-meeting', name: '회의', color: '#FDCB6E', sortOrder: 1 },
+      ], 'fresh canonical metadata replaces an unconfirmed optimistic reorder');
+    } finally {
+      resolveTagManagerSaveGate?.();
+      await pendingSave;
+      tagManagerSaveGate = null;
+    }
+  });
+
+  await t.test('an ambiguous delete remains shared when persistence and canonical refresh both fail', async () => {
+    resetHarness();
+    tagManagerApiFailures.add('calendarTagsSave');
+    tagManagerMetadataFreshness = { calendarsFresh: true, tagsFresh: false };
+    tagManagerConfirmResponses = [true];
+    const tree = await renderTagManagerPopover();
+    await buttonByLabel(tree, '회의 태그 삭제').props.onClick?.();
+    const ambiguous = [
+      { id: 'tag-review', name: '검수', color: '#00B894', sortOrder: 0 },
+    ];
+    try {
+      assert.deepEqual(
+        calendarState.tags,
+        ambiguous,
+        'the shared views keep the exact ambiguous delete intent until reconciliation',
+      );
+    } finally {
+      await clearTagReconciliation(ambiguous);
+    }
+  });
+
+  await t.test('a new tag uses a non-persistable shared temp id until save returns its server UUID', async () => {
+    resetHarness();
+    tagManagerMetadataFreshness = { calendarsFresh: true, tagsFresh: false };
+    tagManagerSaveGate = new Promise<void>((resolve) => {
+      resolveTagManagerSaveGate = resolve;
+    });
+    tagManagerRefreshGate = new Promise<void>((resolve) => {
+      resolveTagManagerRefreshGate = resolve;
+    });
+    let tree = await renderTagManagerPopover();
+    buttonByText(tree, '새 태그').props.onClick?.();
+    tree = await renderTagManagerPopover();
+    formElementByLabel(tree, '새 태그 이름').props.onChange?.({ target: { value: '신규 공유', checked: false } });
+    tree = await renderTagManagerPopover();
+    const pendingSave = buttonByLabel(tree, '새 태그 저장').props.onClick?.();
+
+    const optimisticTag = calendarState.tags.find(({ name }) => name === '신규 공유');
+    assert.match(optimisticTag?.id ?? '', /^optimistic-tag:/);
+    const tagBar = await renderTagBar(false, () => {});
+    buttonByLabel(tagBar, '신규 공유 태그').props.onClick?.();
+    assert.equal(calendarState.enabledTagIds[optimisticTag!.id], undefined, 'temp ids never enter tag preferences');
+
+    resolveTagManagerSaveGate?.();
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    assert.equal(
+      calendarState.tags.find(({ name }) => name === '신규 공유')?.id,
+      'tag-generated-1',
+      'the authoritative response replaces the temp id before refresh settles',
+    );
+    resolveTagManagerRefreshGate?.();
+    await pendingSave;
+
+    tagManagerMetadataFreshness = { calendarsFresh: true, tagsFresh: true };
+    tagManagerCanonicalTagsAfterReload = tagManagerLastCommittedTags;
+    stateSlots = [];
+    tagManagerRefSlots = [];
+    tree = await renderTagManagerPopover();
+    await buttonByLabel(tree, '최신 태그 목록 다시 불러오기').props.onClick?.();
+    tagManagerSaveGate = null;
+    tagManagerRefreshGate = null;
+  });
+});
+
+test('TagManagerPopover keeps module flights and confirmations inside the captured actor session', async (t) => {
+  await t.test('an A save flight never renders A drafts in actor B', async () => {
+    resetHarness();
+    tagManagerSaveGate = new Promise<void>((resolve) => {
+      resolveTagManagerSaveGate = resolve;
+    });
+    let tree = await renderTagManagerPopover();
+    buttonByLabel(tree, '회의 태그 편집').props.onClick?.();
+    tree = await renderTagManagerPopover();
+    formElementByLabel(tree, '회의 태그 이름').props.onChange?.({ target: { value: 'A 비공개 초안', checked: false } });
+    tree = await renderTagManagerPopover();
+    const pendingSave = buttonByLabel(tree, '회의 태그 저장').props.onClick?.();
+    try {
+      settingsCurrentUser = { ...settingsCurrentUser, id: 'user-b', name: 'B 사용자' };
+      calendarState.tags = [{ id: 'tag-b', name: 'B 정본', color: '#74B9FF', sortOrder: 0 }];
+      stateSlots = [];
+      tagManagerRefSlots = [];
+      tree = await renderTagManagerPopover();
+      assert.match(textContent(tree), /B 정본/);
+      assert.doesNotMatch(textContent(tree), /A 비공개 초안/, 'actor B never renders actor A module drafts');
+      assert.equal(buttonByText(tree, '새 태그').props.disabled, true, 'the global full-list write mutex still locks B');
+    } finally {
+      settingsCurrentUser = { ...settingsCurrentUser, id: myUserId, name: '배한솔' };
+      resolveTagManagerSaveGate?.();
+      await pendingSave;
+      tagManagerSaveGate = null;
+    }
+  });
+
+  await t.test('an auth change immediately cancels an actor-local inline editor', async () => {
+    resetHarness();
+    let tree = await renderTagManagerPopover();
+    buttonByText(tree, '새 태그').props.onClick?.();
+    tree = await renderTagManagerPopover();
+    assert.ok(formElementByLabel(tree, '새 태그 이름'));
+
+    settingsCurrentUser = { ...settingsCurrentUser, id: 'user-b', name: 'B 사용자', role: 'user' };
+    tree = await renderTagManagerPopover();
+    assert.equal(
+      findFormElements(tree).some((element) => element.props['aria-label'] === '새 태그 이름'),
+      false,
+      'the previous actor cannot leave an editable draft mounted in the next session',
+    );
+  });
+
+  await t.test('a save completion while B is active keeps the global full-list write lock without exposing A drafts', async () => {
+    resetHarness();
+    tagManagerMetadataFreshness = { calendarsFresh: true, tagsFresh: false };
+    tagManagerSaveGate = new Promise<void>((resolve) => {
+      resolveTagManagerSaveGate = resolve;
+    });
+    let tree = await renderTagManagerPopover();
+    buttonByLabel(tree, '회의 태그 편집').props.onClick?.();
+    tree = await renderTagManagerPopover();
+    formElementByLabel(tree, '회의 태그 이름').props.onChange?.({ target: { value: 'A 커밋', checked: false } });
+    tree = await renderTagManagerPopover();
+    const pendingSave = buttonByLabel(tree, '회의 태그 저장').props.onClick?.();
+
+    settingsCurrentUser = { ...settingsCurrentUser, id: 'user-b', name: 'B 사용자' };
+    calendarState.tags = [{ id: 'tag-b', name: 'B 정본', color: '#74B9FF', sortOrder: 0 }];
+    stateSlots = [];
+    tagManagerRefSlots = [];
+    await renderTagManagerPopover();
+    resolveTagManagerSaveGate?.();
+    await pendingSave;
+    assert.deepEqual(
+      tagManagerApiCalls.map(({ name }) => name),
+      ['calendarTagsSave'],
+      'the stale A continuation must not start a canonical load in actor B',
+    );
+
+    stateSlots = [];
+    tagManagerRefSlots = [];
+    tree = await renderTagManagerPopover();
+    assert.match(textContent(tree), /B 정본/);
+    assert.equal(
+      buttonByText(tree, '새 태그').props.disabled,
+      true,
+      'an unresolved A full-list write keeps B from overwriting it with stale rows',
+    );
+    buttonByText(tree, '새 태그').props.onClick?.();
+    tree = await renderTagManagerPopover();
+    assert.equal(
+      findFormElements(tree).some((element) => element.props['aria-label'] === '새 태그 이름'),
+      false,
+      'a direct handler invocation cannot bypass the cross-actor full-list lock',
+    );
+    assert.equal(
+      tagManagerApiCalls.filter(({ name }) => name === 'calendarTagsSave').length,
+      1,
+      'B cannot start an additional full-list save while A remains unresolved',
+    );
+
+    settingsCurrentUser = { ...settingsCurrentUser, id: myUserId, name: '배한솔' };
+    assert.equal(tagManagerStoreOverlay?.actorId, myUserId);
+    calendarState.tags = tagManagerStoreOverlay?.tags.map((tag) => ({ ...tag })) ?? [];
+    calendarState.optimisticDeletedTagIds = [...(tagManagerStoreOverlay?.deletedTagIds ?? [])];
+    stateSlots = [];
+    tagManagerRefSlots = [];
+    tree = await renderTagManagerPopover();
+    assert.match(textContent(tree), /A 커밋/);
+    assert.ok(buttonByLabel(tree, '최신 태그 목록 다시 불러오기'));
+    assert.equal(buttonByText(tree, '새 태그').props.disabled, true, 'A remains locked until its own fresh retry');
+
+    tagManagerMetadataFreshness = { calendarsFresh: true, tagsFresh: true };
+    tagManagerCanonicalTagsAfterReload = tagManagerStoreOverlay?.tags.map((tag) => ({ ...tag })) ?? [];
+    await buttonByLabel(tree, '최신 태그 목록 다시 불러오기').props.onClick?.();
+
+    settingsCurrentUser = { ...settingsCurrentUser, id: 'user-b', name: 'B 사용자' };
+    calendarState.tags = [{ id: 'tag-b', name: 'B 정본', color: '#74B9FF', sortOrder: 0 }];
+    stateSlots = [];
+    tagManagerRefSlots = [];
+    tree = await renderTagManagerPopover();
+    assert.equal(buttonByText(tree, '새 태그').props.disabled, false, 'A fresh settlement releases the global mutex');
+    tagManagerSaveGate = null;
+  });
+
+  await t.test('a delete confirmation captured by A becomes inert after switching to B', async () => {
+    resetHarness();
+    tagManagerConfirmResponses = [true];
+    tagManagerConfirmGate = new Promise<void>((resolve) => {
+      resolveTagManagerConfirmGate = resolve;
+    });
+    const tree = await renderTagManagerPopover();
+    const pendingDelete = buttonByLabel(tree, '회의 태그 삭제').props.onClick?.();
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    settingsCurrentUser = { ...settingsCurrentUser, id: 'user-b', name: 'B 사용자' };
+    calendarState.tags = [{ id: 'tag-b', name: 'B 정본', color: '#74B9FF', sortOrder: 0 }];
+    resolveTagManagerConfirmGate?.();
+    await pendingDelete;
+
+    assert.deepEqual(tagManagerApiCalls, [], 'the stale A confirmation cannot persist B-session data');
+  });
+});
+
 test('TagManagerPopover confirms deletion and reloads after both successful and failed saves', async (t) => {
   await t.test('cancel is inert, while confirmation deletes from the canonical list', async () => {
     resetHarness();
@@ -2201,8 +2709,8 @@ test('TagManagerPopover confirms deletion and reloads after both successful and 
     assert.ok(buttonByLabel(tree, '최신 태그 목록 다시 불러오기'));
     assert.equal(
       buttonByLabel(tree, '검수 태그 편집').props.disabled,
-      false,
-      'authoritative saved rows remain editable while only reconciliation needs a retry',
+      true,
+      'authoritative saved rows stay visible but full-list writes wait for a fresh rebase',
     );
 
     stateSlots = [];
@@ -2235,11 +2743,11 @@ test('TagManagerPopover confirms deletion and reloads after both successful and 
     assert.equal(
       findButtons(tree).some((button) => button.props['aria-label'] === '최신 태그 목록 다시 불러오기'),
       false,
-      'a fresh retry clears the non-locking reconciliation state',
+      'a fresh retry clears the committed-write reconciliation state',
     );
   });
 
-  await t.test('a later metadata save cannot clear an unresolved event reconciliation', async () => {
+  await t.test('a stronger event reconciliation cannot be bypassed by a later full-list metadata save', async () => {
     resetHarness();
     tagManagerMetadataFreshness = { calendarsFresh: true, tagsFresh: false };
     tagManagerConfirmResponses = [true];
@@ -2251,31 +2759,20 @@ test('TagManagerPopover confirms deletion and reloads after both successful and 
     tagManagerMetadataFreshness = { calendarsFresh: true, tagsFresh: true };
     buttonByLabel(tree, '검수 태그 편집').props.onClick?.();
     tree = await renderTagManagerPopover();
-    formElementByLabel(tree, '검수 태그 이름').props.onChange?.({ target: { value: '검수 수정', checked: false } });
-    tree = await renderTagManagerPopover();
-    await buttonByLabel(tree, '검수 태그 저장').props.onClick?.();
-    tree = await renderTagManagerPopover();
-
+    assert.equal(
+      findFormElements(tree).some((element) => element.props['aria-label'] === '검수 태그 이름'),
+      false,
+      'a stale full-list editor cannot open before event reconciliation',
+    );
     assert.deepEqual(
       tagManagerApiCalls.map((call) => call.name),
-      ['calendarTagsSave', 'loadBflowEvents', 'calendarTagsSave', 'loadAll'],
-      'the safe follow-up mutation may refresh metadata but does not pretend events were refreshed',
+      ['calendarTagsSave', 'loadBflowEvents'],
+      'no second full-list save can bypass the stronger event reconciliation',
     );
-    assert.ok(
-      buttonByLabel(tree, '최신 태그 목록 다시 불러오기'),
-      'the stronger unresolved event reconciliation survives the metadata save',
-    );
-    assert.match(textContent(tree), /검수 수정/);
     assert.doesNotMatch(textContent(tree), /회의/);
 
-    stateSlots = [];
-    tagManagerRefSlots = [];
-    tree = await renderTagManagerPopover();
-    assert.ok(buttonByLabel(tree, '최신 태그 목록 다시 불러오기'));
-    assert.match(textContent(tree), /검수 수정/, 'the latest committed drafts survive remount with the event latch');
-
     tagManagerCanonicalTagsAfterReload = [
-      { id: 'tag-review', name: '검수 수정', color: '#00B894', sortOrder: 0 },
+      { id: 'tag-review', name: '검수', color: '#00B894', sortOrder: 0 },
     ];
     await buttonByLabel(tree, '최신 태그 목록 다시 불러오기').props.onClick?.();
     tree = await renderTagManagerPopover();
@@ -2285,6 +2782,30 @@ test('TagManagerPopover confirms deletion and reloads after both successful and 
       false,
       'only a fresh event reconciliation clears the inherited strongest mode',
     );
+  });
+
+  await t.test('a tag revision without fresh event rows keeps delete reconciliation and its tombstone locked', async () => {
+    resetHarness();
+    tagManagerConfirmResponses = [true];
+    tagManagerBflowReloadResult = false;
+    tagManagerCanonicalTagsAfterReload = [
+      { id: 'tag-review', name: '검수', color: '#00B894', sortOrder: 0 },
+    ];
+    let tree = await renderTagManagerPopover();
+    await buttonByLabel(tree, '회의 태그 삭제').props.onClick?.();
+    tree = await renderTagManagerPopover();
+
+    assert.deepEqual(tagManagerApiCalls.map((call) => call.name), ['calendarTagsSave', 'loadBflowEvents']);
+    assert.ok(buttonByLabel(tree, '최신 태그 목록 다시 불러오기'));
+    assert.equal(buttonByLabel(tree, '검수 태그 편집').props.disabled, true);
+    assert.deepEqual(
+      calendarState.optimisticDeletedTagIds,
+      ['tag-meeting'],
+      'stale event rows keep treating the deleted tag as tagless until event reconciliation succeeds',
+    );
+
+    tagManagerBflowReloadResult = true;
+    await buttonByLabel(tree, '최신 태그 목록 다시 불러오기').props.onClick?.();
   });
 
   await t.test('an ambiguous delete locks mutations until an explicit fresh event reconciliation', async () => {
@@ -3963,6 +4484,59 @@ test('EventCreateModal shows editable calendars in field order, defaults persona
   assert.equal(formElementByLabel(tree, '종일 일정').props.checked, true, 'all-day is enabled by default');
   assert.equal(findFormElements(tree).some((element) => element.props.type === 'time'), false, 'time fields stay hidden for all-day events');
   assert.doesNotMatch(renderedText, /팀 캘린더에 공유돼요|이 캘린더 멤버와 공유돼요|알림/, 'personal calendars do not show shared-calendar copy');
+});
+
+test('EventCreateModal never offers an optimistic tag placeholder as a persisted event tag', async () => {
+  resetHarness();
+  calendarState.tags.push({
+    id: 'optimistic-tag:user-me:91:2',
+    name: '저장 중 태그',
+    color: '#74B9FF',
+    sortOrder: 2,
+  });
+  const tree = await renderEventCreateModal(false, () => {});
+  assert.equal(
+    findButtons(tree).some((button) => button.props['aria-label'] === '저장 중 태그 태그'),
+    false,
+    'a temporary renderer-only id cannot become an event foreign key',
+  );
+});
+
+test('EventCreateModal clears a selected tag that disappears before submit', async () => {
+  resetHarness();
+  const saved: Record<string, unknown>[] = [];
+  let tree = await renderEventCreateModal(false, (event) => saved.push(event));
+  formElementByLabel(tree, '제목').props.onChange?.({ target: { value: '삭제 중 태그 일정', checked: false } });
+  buttonByLabel(tree, '회의 태그').props.onClick?.();
+  tree = await renderEventCreateModal(false, (event) => saved.push(event));
+  calendarState.tags = calendarState.tags.filter(({ id }) => id !== 'tag-meeting');
+  calendarState.optimisticDeletedTagIds = ['tag-meeting'];
+  tree = await renderEventCreateModal(false, (event) => saved.push(event));
+  flushEventCreateEffects();
+  tree = await renderEventCreateModal(false, (event) => saved.push(event));
+  buttonByText(tree, '만들기').props.onClick?.();
+
+  assert.equal(saved.length, 1);
+  assert.equal(saved[0].tagId, undefined, 'a stale deleted UUID cannot become an event foreign key');
+});
+
+test('EventCreateModal preserves a selected real tag while canonical tag metadata is unavailable', async () => {
+  resetHarness();
+  const saved: Record<string, unknown>[] = [];
+  let tree = await renderEventCreateModal(false, (event) => saved.push(event));
+  formElementByLabel(tree, '제목').props.onChange?.({ target: { value: '메타데이터 장애 일정', checked: false } });
+  buttonByLabel(tree, '회의 태그').props.onClick?.();
+  tree = await renderEventCreateModal(false, (event) => saved.push(event));
+
+  calendarState.tags = [];
+  tagManagerCanonicalByActor.delete(settingsCurrentUser.id);
+  tree = await renderEventCreateModal(false, (event) => saved.push(event));
+  flushEventCreateEffects();
+  tree = await renderEventCreateModal(false, (event) => saved.push(event));
+  buttonByText(tree, '만들기').props.onClick?.();
+
+  assert.equal(saved.length, 1);
+  assert.equal(saved[0].tagId, 'tag-meeting', 'an unknown tag list is not authoritative deletion');
 });
 
 test('EventCreateModal describes shared visibility without promising deferred notifications', async () => {

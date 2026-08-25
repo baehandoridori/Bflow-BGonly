@@ -542,3 +542,21 @@ PR #116 에서 12 라운드 (P1×3, P2×6, P3×2) 끝에 silent-done. Monitor �
 - canonical B flow 일정의 불변 identity는 저장소 namespace와 일정 UUID다. 캘린더 ID처럼 이동 가능한 속성은 identity에 넣지 않는다.
 - 같은 raw UUID가 다른 저장소에 존재할 수 있으므로 Google·legacy·vacation은 source namespace를 유지한다.
 - 정본화 helper는 실시간 알림, 드래그, 상세 편집, 빠른 편집, 연결된 할일 역동기화까지 모든 소비 경로에 동일하게 적용하고, 비동기 요청 시작 전 identity snapshot을 보존한다.
+
+---
+
+## 2026-08-25: 전체 목록 낙관 반영은 정본·projection·응답 유실 상태를 분리한다
+
+### 증상
+
+- 태그 팝오버의 로컬 draft만 먼저 바꾸면 상단 TagBar와 일정 필터·표시는 저장과 재조회가 끝날 때까지 이전 값을 유지했다.
+- full-list 저장은 응답만 유실돼도 실제 반영 여부가 불명확하며, 정본 재조회 전 다음 전체 목록 쓰기를 허용하면 다른 관리자의 변경을 덮을 수 있었다.
+- 새 태그의 임시 ID나 삭제된 태그의 stale UUID가 일정 작성·편집과 로컬 필터 설정으로 흘러갈 수 있었다.
+
+### 교훈
+
+- 공유 소비자가 읽는 store에 actor+token overlay를 먼저 반영하되, raw canonical snapshot과 projected 목록은 별도로 보존한다. 동시 재조회는 raw 정본을 갱신한 뒤 overlay를 다시 적용한다.
+- full-list 저장 결과는 `반영 확인 / 정확한 미반영 / 판정 불가`로 나누고, 판정 불가 또는 저장 성공 뒤 재조회 실패에서는 fresh canonical 확인 전 다음 쓰기를 잠근다.
+- 사용자별 draft·overlay는 격리하지만 전역 태그 테이블의 in-flight/reconciliation 쓰기 잠금은 모든 사용자에게 적용한다. 모든 await 뒤에는 시작 actor와 token을 다시 확인한다.
+- 생성용 임시 ID는 명시적 prefix로 구분하고 IPC, 일정 FK, localStorage에 보내지 않는다. 서버 응답이 준 실제 UUID로 같은 overlay를 교체한다.
+- 삭제 overlay는 tombstone으로 stale event tag를 즉시 `태그 없음`처럼 표시하되, 빈 태그 배열이 단순 로드 실패일 수도 있으므로 raw canonical freshness나 정확한 tombstone 없이 기존 tagId를 지우지 않는다.
