@@ -56,6 +56,10 @@ type ScheduleCalendarEvent = {
   calendarId?: string;
   canEdit?: boolean;
   isReadOnly?: boolean;
+  allDay?: boolean;
+  startTime?: string;
+  endTime?: string;
+  tagId?: string;
 };
 type ScheduleGridProps = {
   events: ScheduleCalendarEvent[];
@@ -86,6 +90,31 @@ type CalendarSettingsModalProps = {
   onClose(): void;
 };
 type CalendarSettingsModalComponent = (props: CalendarSettingsModalProps) => ReactNode;
+type WeekScrollViewProps = {
+  currentMonth: number;
+  currentYear: number;
+  events: ScheduleCalendarEvent[];
+  today: string;
+  onEventClick(event: ScheduleCalendarEvent): void;
+  onDateClick?(date: string): void;
+  activeWeekIndex: number;
+  onWeekChange(index: number): void;
+  mode?: 'week' | '2week';
+};
+type WeekScrollViewModule = {
+  default(props: WeekScrollViewProps): ReactNode;
+  generateYearWeeks(year: number): Date[][];
+  findWeekIndexForDate(weeks: Date[][], date: string): number;
+};
+type DayScrollViewProps = {
+  events: ScheduleCalendarEvent[];
+  activeDayIndex: number;
+  onActiveDayChange(index: number): void;
+  onEventClick?(event: ScheduleCalendarEvent): void;
+  onDateClick?(date: string): void;
+  year: number;
+};
+type DayScrollViewComponent = (props: DayScrollViewProps) => ReactNode;
 
 type TestUser = {
   id: string;
@@ -146,6 +175,8 @@ let bundledTagManagerPopover: Promise<TagManagerPopoverComponent> | undefined;
 let bundledScheduleView: Promise<ScheduleViewComponent> | undefined;
 let bundledEventCreateModal: Promise<EventCreateModalComponent> | undefined;
 let bundledCalendarSettingsModal: Promise<CalendarSettingsModalComponent> | undefined;
+let bundledWeekScrollView: Promise<WeekScrollViewModule> | undefined;
+let bundledDayScrollView: Promise<DayScrollViewComponent> | undefined;
 let scheduleTagBarProps: TagBarProps[] = [];
 let scheduleTagManagerProps: TagManagerPopoverProps[] = [];
 let scheduleGridProps: ScheduleGridProps[] = [];
@@ -211,6 +242,27 @@ function findFormElements(node: ReactNode): FormElement[] {
     ...(['input', 'select', 'textarea'].includes(String(node.type)) ? [node as FormElement] : []),
     ...findFormElements(props.children),
   ];
+}
+
+function findElements(
+  node: ReactNode,
+  predicate: (element: ReactElement<Record<string, unknown>>) => boolean,
+): ReactElement<Record<string, unknown>>[] {
+  if (Array.isArray(node)) return node.flatMap((child) => findElements(child, predicate));
+  if (!isValidElement(node)) return [];
+  const element = node as ReactElement<Record<string, unknown>>;
+  return [
+    ...(predicate(element) ? [element] : []),
+    ...findElements(element.props.children as ReactNode, predicate),
+  ];
+}
+
+function directElementChildren(node: ReactElement<Record<string, unknown>>): ReactElement<Record<string, unknown>>[] {
+  const flatten = (value: ReactNode): ReactElement<Record<string, unknown>>[] => {
+    if (Array.isArray(value)) return value.flatMap(flatten);
+    return isValidElement(value) ? [value as ReactElement<Record<string, unknown>>] : [];
+  };
+  return flatten(node.props.children as ReactNode);
 }
 
 function formElementByLabel(node: ReactNode, label: string): FormElement {
@@ -890,6 +942,96 @@ async function loadCalendarSettingsModal(): Promise<CalendarSettingsModalCompone
   return bundledCalendarSettingsModal;
 }
 
+async function loadWeekScrollView(): Promise<WeekScrollViewModule> {
+  bundledWeekScrollView ??= build({
+    entryPoints: ['src/components/calendar/WeekScrollView.tsx'],
+    bundle: true,
+    format: 'cjs',
+    platform: 'node',
+    target: 'node22',
+    write: false,
+    external: [
+      'react', 'react/jsx-runtime', 'framer-motion', 'lucide-react',
+      '@/stores/useCalendarStore',
+    ],
+  }).then((result) => {
+    const module = { exports: {} as Record<string, unknown> };
+    const nodeRequire = createRequire(import.meta.url);
+    const react = nodeRequire('react') as Record<string, unknown>;
+    const jsxRuntime = nodeRequire('react/jsx-runtime');
+    const evaluate = new Function('require', 'module', 'exports', result.outputFiles[0].text);
+    evaluate((id: string) => {
+      if (id === 'react') {
+        return {
+          ...react,
+          useMemo: (factory: () => unknown) => factory(),
+          useRef: (initial: unknown) => ({ current: initial }),
+          useCallback: (fn: unknown) => fn,
+        };
+      }
+      if (id === 'react/jsx-runtime') return jsxRuntime;
+      if (id === 'framer-motion') {
+        return {
+          AnimatePresence: ({ children }: { children: ReactNode }) => children,
+          motion: { div: 'div' },
+        };
+      }
+      if (id === 'lucide-react') return { CalendarDays: () => null };
+      if (id === '@/stores/useCalendarStore') {
+        return { useCalendarStore: (selector: (state: typeof calendarState) => unknown) => selector(calendarState) };
+      }
+      return nodeRequire(id);
+    }, module, module.exports);
+    return module.exports as unknown as WeekScrollViewModule;
+  });
+  return bundledWeekScrollView;
+}
+
+async function loadDayScrollView(): Promise<DayScrollViewComponent> {
+  bundledDayScrollView ??= build({
+    entryPoints: ['src/components/calendar/DayScrollView.tsx'],
+    bundle: true,
+    format: 'cjs',
+    platform: 'node',
+    target: 'node22',
+    write: false,
+    external: [
+      'react', 'react/jsx-runtime', 'framer-motion', 'lucide-react',
+      '@/stores/useCalendarStore',
+    ],
+  }).then((result) => {
+    const module = { exports: {} as Record<string, unknown> };
+    const nodeRequire = createRequire(import.meta.url);
+    const react = nodeRequire('react') as Record<string, unknown>;
+    const jsxRuntime = nodeRequire('react/jsx-runtime');
+    const evaluate = new Function('require', 'module', 'exports', result.outputFiles[0].text);
+    evaluate((id: string) => {
+      if (id === 'react') {
+        return {
+          ...react,
+          useMemo: (factory: () => unknown) => factory(),
+          useRef: (initial: unknown) => ({ current: initial }),
+          useCallback: (fn: unknown) => fn,
+        };
+      }
+      if (id === 'react/jsx-runtime') return jsxRuntime;
+      if (id === 'framer-motion') {
+        return {
+          AnimatePresence: ({ children }: { children: ReactNode }) => children,
+          motion: { div: 'div' },
+        };
+      }
+      if (id === 'lucide-react') return { CalendarDays: () => null };
+      if (id === '@/stores/useCalendarStore') {
+        return { useCalendarStore: (selector: (state: typeof calendarState) => unknown) => selector(calendarState) };
+      }
+      return nodeRequire(id);
+    }, module, module.exports);
+    return module.exports.default as DayScrollViewComponent;
+  });
+  return bundledDayScrollView;
+}
+
 async function renderRail(isAuthenticated: boolean): Promise<ReactNode> {
   const CalendarRail = await loadRail();
   stateCursor = 0;
@@ -959,6 +1101,123 @@ async function renderCalendarSettingsModal(
     onClose: () => { settingsCloseCount += 1; },
   }));
 }
+
+function calendarListEvent(overrides: Partial<ScheduleCalendarEvent>): ScheduleCalendarEvent {
+  return {
+    id: 'list-event',
+    title: '목록 일정',
+    memo: '',
+    color: '#6C5CE7',
+    type: 'scene',
+    startDate: '2026-08-25',
+    endDate: '2026-08-25',
+    createdBy: myUserId,
+    createdAt: '2026-08-24T00:00:00.000Z',
+    source: 'bflow',
+    calendarId: 'mine',
+    allDay: true,
+    ...overrides,
+  };
+}
+
+function activeDayIndex(year: number, month: number, day: number): number {
+  const jan1 = new Date(year, 0, 1, 12, 0, 0, 0);
+  const target = new Date(year, month, day, 12, 0, 0, 0);
+  return Math.round((target.getTime() - jan1.getTime()) / 86_400_000);
+}
+
+function assertCalendarListCards(
+  tree: ReactNode,
+  events: ScheduleCalendarEvent[],
+  subtitleFontSize: number,
+): ReactElement<Record<string, unknown>>[] {
+  const scrollLists = findElements(tree, (element) => element.props['data-scroll-events'] === true);
+  assert.equal(scrollLists.length, 1, 'only the active card list owns the scroll marker');
+  const cards = directElementChildren(scrollLists[0]).slice(0, events.length);
+  const titles = events.map((event) => event.title);
+
+  assert.deepEqual(
+    cards.map((card) => titles.find((title) => textContent(card).includes(title))),
+    ['A 종일 태그', 'B 종일 없음', 'C 오전 회의', 'D 오후 회의'],
+    'all-day cards precede timed cards and timed cards sort by start time',
+  );
+
+  const subtitles = cards.map((card) => {
+    const candidates = findElements(card, (element) => {
+      const style = element.props.style as { fontSize?: number } | undefined;
+      return style?.fontSize === subtitleFontSize;
+    });
+    assert.ok(candidates.length <= 1, 'each card has at most one subtitle');
+    return candidates[0] ? textContent(candidates[0]) : null;
+  });
+  assert.deepEqual(subtitles, [
+    '회의',
+    null,
+    '09:00 – 10:00 · 회의',
+    '14:00 – 15:00 · 회의',
+  ]);
+  assert.doesNotMatch(textContent(scrollLists[0]), /scene|종일 ·|8\/25|→/);
+  return cards;
+}
+
+test('WeekScrollView and DayScrollView sort active cards and render tag-aware time subtitles', async (t) => {
+  const late = calendarListEvent({
+    id: 'late', title: 'D 오후 회의', allDay: false,
+    startTime: '14:00', endTime: '15:00', tagId: 'tag-meeting',
+  });
+  const allDayWithoutTag = calendarListEvent({ id: 'all-none', title: 'B 종일 없음' });
+  const early = calendarListEvent({
+    id: 'early', title: 'C 오전 회의', allDay: false,
+    startTime: '09:00', endTime: '10:00', tagId: 'tag-meeting',
+  });
+  const allDayWithTag = calendarListEvent({ id: 'all-tag', title: 'A 종일 태그', tagId: 'tag-meeting' });
+  const events = [late, allDayWithoutTag, early, allDayWithTag];
+
+  await t.test('week active list', async () => {
+    resetHarness();
+    const weekModule = await loadWeekScrollView();
+    const weeks = weekModule.generateYearWeeks(2026);
+    const clicked: ScheduleCalendarEvent[] = [];
+    let stopped = false;
+    const tree = resolveComponents(weekModule.default({
+      currentMonth: 7,
+      currentYear: 2026,
+      events,
+      today: '2026-08-25',
+      onEventClick: (event) => clicked.push(event),
+      activeWeekIndex: weekModule.findWeekIndexForDate(weeks, '2026-08-25'),
+      onWeekChange() {},
+    }));
+
+    const cards = assertCalendarListCards(tree, events, 9);
+    (cards[2].props.onClick as (event: { stopPropagation(): void }) => void)({
+      stopPropagation: () => { stopped = true; },
+    });
+    assert.equal(stopped, true);
+    assert.equal(clicked[0], early, 'the sorted card still forwards the original event object');
+  });
+
+  await t.test('day active list', async () => {
+    resetHarness();
+    const DayScrollView = await loadDayScrollView();
+    const clicked: ScheduleCalendarEvent[] = [];
+    let stopped = false;
+    const tree = resolveComponents(DayScrollView({
+      events,
+      activeDayIndex: activeDayIndex(2026, 7, 25),
+      onActiveDayChange() {},
+      onEventClick: (event) => clicked.push(event),
+      year: 2026,
+    }));
+
+    const cards = assertCalendarListCards(tree, events, 10);
+    (cards[2].props.onClick as (event: { stopPropagation(): void }) => void)({
+      stopPropagation: () => { stopped = true; },
+    });
+    assert.equal(stopped, true);
+    assert.equal(clicked[0], early, 'the sorted card still forwards the original event object');
+  });
+});
 
 test('CalendarRail renders four grouped sections and drives visibility, menu permissions, callbacks, and Google settings navigation', async () => {
   resetHarness();
