@@ -525,3 +525,20 @@ PR #116 에서 12 라운드 (P1×3, P2×6, P3×2) 끝에 silent-done. Monitor �
 - 낙관적 메타데이터는 actor와 mutation token에 묶인 overlay/tombstone으로 보존하고, 정본 snapshot과 분리한다. 동시 refresh 뒤에는 overlay를 재적용하고, 계정 전환 중 오래된 완료는 다른 actor 상태를 검증하거나 닫지 못하게 한다.
 - metadata freshness와 event-row freshness를 별도로 판정한다. 정본 메타데이터가 새로 왔다면 event 재조회 실패와 무관하게 commit 여부를 판정할 수 있어야 한다.
 - preview/mock도 실제 쓰기와 같은 UUID·FK 검증을 mutation 전에 수행하고, 실패 전후 전체 상태가 동일한지 테스트한다.
+
+---
+
+## 2026-08-25: 일정 정체성과 현재 저장 가능 여부를 저장 직전에 다시 확인한다
+
+### 증상
+
+- Google 인증이 풀린 뒤 대체할 편집 가능 캘린더가 없는데도 이전 Google 선택값이 남아 저장 버튼과 submit 경로가 열릴 수 있었다.
+- B flow 일정이 다른 캘린더로 이동하면 `sourceCalendarId`가 바뀌므로, 이를 일정 정체성에 포함하면 같은 UUID의 정본 행을 놓쳤다. 반대로 ID만 비교하면 Google·legacy 등 다른 저장소의 같은 ID 행을 잘못 채택할 수 있었다.
+- 실시간 갱신 경로만 정체성 helper를 쓰고 드래그·상세·빠른 편집 후 정본화가 ID만 비교하면 같은 결함이 다른 경로에서 다시 나타났다.
+
+### 교훈
+
+- 저장 대상의 가용성은 선택 effect뿐 아니라 버튼 활성화와 실제 submit 경계에서 모두 다시 확인한다. 인증·권한 변경 뒤 fallback이 없으면 stale 선택을 즉시 비운다.
+- canonical B flow 일정의 불변 identity는 저장소 namespace와 일정 UUID다. 캘린더 ID처럼 이동 가능한 속성은 identity에 넣지 않는다.
+- 같은 raw UUID가 다른 저장소에 존재할 수 있으므로 Google·legacy·vacation은 source namespace를 유지한다.
+- 정본화 helper는 실시간 알림, 드래그, 상세 편집, 빠른 편집, 연결된 할일 역동기화까지 모든 소비 경로에 동일하게 적용하고, 비동기 요청 시작 전 identity snapshot을 보존한다.

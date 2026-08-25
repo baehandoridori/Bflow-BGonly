@@ -68,6 +68,7 @@ export function EventCreateModal({ initialDate, initialEndDate, episodes, google
 
   const isGoogle = selectedCalendarId === GOOGLE_CALENDAR_OPTION;
   const selectedCalendar = editableCalendars.find((calendar) => calendar.id === selectedCalendarId);
+  const selectedDestinationAvailable = isGoogle ? googleAuthenticated : Boolean(selectedCalendar);
   const selectedEpParts = useMemo(() => linkedEp === ''
     ? []
     : episodes.find((episode) => episode.episodeNumber === linkedEp)?.parts ?? [], [linkedEp, episodes]);
@@ -76,16 +77,13 @@ export function EventCreateModal({ initialDate, initialEndDate, episodes, google
     : selectedEpParts.find((part) => part.sheetName === linkedPart)?.scenes ?? [], [linkedPart, selectedEpParts]);
 
   useEffect(() => {
-    const available = isGoogle
-      ? googleAuthenticated
-      : editableCalendars.some((calendar) => calendar.id === selectedCalendarId);
     const untouchedGoogleFallback = !userSelectedCalendarRef.current
       && isGoogle
       && defaultCalendarId !== GOOGLE_CALENDAR_OPTION;
-    if ((!available || untouchedGoogleFallback) && defaultCalendarId) {
+    if ((!selectedDestinationAvailable || untouchedGoogleFallback) && selectedCalendarId !== defaultCalendarId) {
       setSelectedCalendarId(defaultCalendarId);
     }
-  }, [defaultCalendarId, editableCalendars, googleAuthenticated, isGoogle, selectedCalendarId]);
+  }, [defaultCalendarId, isGoogle, selectedCalendarId, selectedDestinationAvailable]);
 
   useEffect(() => {
     if (evType === 'custom') return;
@@ -132,7 +130,7 @@ export function EventCreateModal({ initialDate, initialEndDate, episodes, google
     && `${endDate}T${endTime}` <= `${startDate}T${startTime}`;
 
   const handleSubmit = () => {
-    if (!title.trim() || !selectedCalendarId || (!allDay && (!startTime || !endTime))) return;
+    if (!title.trim() || !selectedCalendarId || !selectedDestinationAvailable || (!allDay && (!startTime || !endTime))) return;
     if (hasInvalidTimedInterval) return;
     const partData = selectedEpParts.find((part) => part.sheetName === linkedPart);
     onSave({
@@ -161,7 +159,7 @@ export function EventCreateModal({ initialDate, initialEndDate, episodes, google
     : selectedCalendar?.visibility === 'members'
       ? '이 캘린더 멤버와 공유돼요'
       : '';
-  const canSubmit = Boolean(title.trim() && selectedCalendarId && (allDay || (startTime && endTime)))
+  const canSubmit = Boolean(title.trim() && selectedCalendarId && selectedDestinationAvailable && (allDay || (startTime && endTime)))
     && !hasInvalidTimedInterval;
   const inputClass = 'w-full bg-bg-card border border-accent/40 rounded-lg px-3 py-2 text-sm font-medium text-text-primary outline-none focus:border-accent focus:ring-1 focus:ring-accent/20';
 

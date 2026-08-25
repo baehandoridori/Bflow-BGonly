@@ -37,6 +37,16 @@ import { navigateToSceneView } from '@/utils/sceneNavigationAction';
 import { createUuid } from '@/utils/createUuid';
 import { fmtDate, parseDate, addDays } from '@/utils/calendarDate';
 
+type CalendarEventIdentity = Pick<CalendarEvent, 'id' | 'source' | 'sourceCalendarId'>;
+
+function snapshotCalendarEventIdentity(event: CalendarEvent): CalendarEventIdentity {
+  return {
+    id: event.id,
+    source: event.source,
+    sourceCalendarId: event.sourceCalendarId,
+  };
+}
+
 /* ═══════════════════════════════════════════════════
    캘린더 → 할일 역동기화 헬퍼
    ═══════════════════════════════════════════════════ */
@@ -95,6 +105,7 @@ export function ScheduleView() {
   const [quickEdit, setQuickEdit] = useState<{
     event: CalendarEvent; position: { x: number; y: number };
   } | null>(null);
+  const draggedEventIdentityRef = useRef<CalendarEventIdentity | null>(null);
 
   // Week scroll view state — 연도 기준 절대 인덱스
   const [activeWeekIndex, setActiveWeekIndex] = useState(() => {
@@ -400,12 +411,20 @@ export function ScheduleView() {
 
   // 드래그&드롭
   const handleEventDragDone = useCallback(async (eventId: string, newStart: string, newEnd: string) => {
+    const mutationIdentity = draggedEventIdentityRef.current;
+    draggedEventIdentityRef.current = null;
     await updateEvent(eventId, { startDate: newStart, endDate: newEnd });
     const canonicalEvents = await getEvents();
-    const canonical = canonicalEvents.find((event) => event.id === eventId);
+    const canonical = mutationIdentity
+      ? canonicalEvents.find((event) => hasSameCalendarEventIdentity(event, mutationIdentity))
+      : undefined;
     setEvents(canonicalEvents);
-    setPanelEvent((previous) => previous?.id === eventId ? canonical ?? null : previous);
-    setQuickEdit((previous) => previous?.event.id === eventId
+    setPanelEvent((previous) => previous && mutationIdentity
+      && hasSameCalendarEventIdentity(previous, mutationIdentity)
+      ? canonical ?? null
+      : previous);
+    setQuickEdit((previous) => previous && mutationIdentity
+      && hasSameCalendarEventIdentity(previous.event, mutationIdentity)
       ? canonical ? { ...previous, event: canonical } : null
       : previous);
     if (canonical && (canonical.linkedTodoId || canonical.id.startsWith('cal_'))) {
@@ -419,6 +438,7 @@ export function ScheduleView() {
   const handleBarDragStart = useCallback((eventId: string, mode: DragMode, anchorDate: string) => {
     const ev = allEvents.find((ev) => ev.id === eventId);
     if (!ev || ev.isReadOnly) return;
+    draggedEventIdentityRef.current = snapshotCalendarEventIdentity(ev);
     startDrag(eventId, mode, ev.startDate, ev.endDate, 0, anchorDate);
   }, [allEvents, startDrag]);
 
@@ -606,7 +626,12 @@ export function ScheduleView() {
   }, [isDateInRange, persistedDateRange, pulseDate]);
 
   // ─── 사이드 패널 / 퀵 에디트 핸들러 ───
-  const handleUpdateEventDirect = useCallback(async (id: string, updates: Partial<CalendarEvent>) => {
+  const handleUpdateEventDirect = useCallback(async (
+    eventBeforeUpdate: CalendarEvent,
+    id: string,
+    updates: Partial<CalendarEvent>,
+  ) => {
+    const mutationIdentity = snapshotCalendarEventIdentity(eventBeforeUpdate);
     const sanitized = { ...updates };
     // 빈 문자열 날짜 방지: 기존 값 유지
     if ('startDate' in sanitized && !sanitized.startDate) delete sanitized.startDate;
@@ -626,14 +651,20 @@ export function ScheduleView() {
 
     try {
       const canonicalEvents = await getEvents();
-      const canonical = canonicalEvents.find((event) => event.id === id);
+      const canonical = canonicalEvents.find((event) => (
+        hasSameCalendarEventIdentity(event, mutationIdentity)
+      ));
       setEvents(canonicalEvents);
       if (!persistenceFailed && canonical && (canonical.linkedTodoId || canonical.id.startsWith('cal_'))) {
         const todoId = canonical.linkedTodoId || canonical.id.replace(/^cal_/, '');
         void syncCalendarToTodo(todoId, canonical);
       }
-      setPanelEvent((previous) => previous?.id === id ? canonical ?? null : previous);
-      setQuickEdit((previous) => previous?.event.id === id
+      setPanelEvent((previous) => previous
+        && hasSameCalendarEventIdentity(previous, mutationIdentity)
+        ? canonical ?? null
+        : previous);
+      setQuickEdit((previous) => previous
+        && hasSameCalendarEventIdentity(previous.event, mutationIdentity)
         ? canonical ? { ...previous, event: canonical } : null
         : previous);
     } catch (refreshError) {
@@ -993,7 +1024,7 @@ export function ScheduleView() {
             event={panelEvent}
             onClose={() => setPanelEvent(null)}
             onDelete={(id) => { handleDeleteEvent(id); setPanelEvent(null); }}
-            onUpdate={handleUpdateEventDirect}
+            onUpdate={(id, updates) => handleUpdateEventDirect(panelEvent, id, updates)}
             onNavigate={handleNavigate}
           />
         )}
@@ -1006,7 +1037,7 @@ export function ScheduleView() {
           event={quickEdit.event}
           position={quickEdit.position}
           onClose={() => setQuickEdit(null)}
-          onUpdate={handleUpdateEventDirect}
+          onUpdate={(id, updates) => handleUpdateEventDirect(quickEdit.event, id, updates)}
           onDelete={(id) => { handleDeleteEvent(id); setPanelEvent(prev => prev?.id === id ? null : prev); }}
           onDuplicate={handleDuplicateEvent}
         />

@@ -152,14 +152,28 @@ function calendarEvent(overrides: Partial<CalendarEvent> = {}): CalendarEvent {
   };
 }
 
-test('calendar event identity includes source and source calendar when present', () => {
+test('canonical B flow event identity survives a move between calendars', () => {
+  const beforeMove = calendarEvent();
+  const afterMove = calendarEvent({
+    title: '이동 후 정본 일정',
+    sourceCalendarId: 'bflow:other-calendar',
+    calendarId: 'other-calendar',
+  });
+
+  assert.equal(
+    hasSameCalendarEventIdentity(beforeMove, afterMove),
+    true,
+    'the globally unique canonical row remains open after its mutable calendar changes',
+  );
+});
+
+test('calendar event identity keeps same-id storage namespaces isolated', () => {
   const selected = calendarEvent();
   assert.equal(hasSameCalendarEventIdentity(selected, { ...selected, title: 'same identity' } as CalendarEvent), true);
   for (const unrelated of [
     calendarEvent({ source: 'google', sourceCalendarId: 'primary', calendarId: undefined }),
     calendarEvent({ source: 'bflow', sourceCalendarId: 'supabase-private', calendarId: undefined }),
     calendarEvent({ source: 'vacation', sourceCalendarId: 'vacation', calendarId: undefined }),
-    calendarEvent({ source: 'bflow', sourceCalendarId: 'bflow:other-calendar', calendarId: 'other-calendar' }),
   ]) {
     assert.equal(
       hasSameCalendarEventIdentity(selected, unrelated),
@@ -167,6 +181,22 @@ test('calendar event identity includes source and source calendar when present',
       `same id from ${unrelated.source}/${unrelated.sourceCalendarId} is a different row`,
     );
   }
+
+  const googlePrimary = calendarEvent({
+    source: 'google',
+    sourceCalendarId: 'primary',
+    calendarId: undefined,
+  });
+  const googleTeam = calendarEvent({
+    source: 'google',
+    sourceCalendarId: 'team-calendar',
+    calendarId: undefined,
+  });
+  assert.equal(
+    hasSameCalendarEventIdentity(googlePrimary, googleTeam),
+    false,
+    'Google event IDs remain scoped to their source calendar',
+  );
 });
 
 async function bundleCalendarConsumer(
