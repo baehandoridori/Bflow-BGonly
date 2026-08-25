@@ -547,6 +547,21 @@ test('quick edit title-only save emits no unchanged Google temporal or memo fiel
   assert.deepEqual(updates, [{ id: target.id, patch: { title: '제목만 변경' } }]);
 });
 
+test('quick edit sends a complete date pair when only the start crosses the current end', async () => {
+  const target = event({ source: 'google', sourceCalendarId: 'primary' });
+  const updates: Array<{ id: string; patch: Partial<QuickEditEvent> }> = [];
+  const tree = await renderQuickEdit(target, 'edit', {
+    onUpdate: (id, patch) => updates.push({ id, patch }),
+  }, undefined, { startDate: '2026-08-26' });
+
+  findButtonByText(tree, '저장').props.onClick?.();
+
+  assert.deepEqual(updates, [{
+    id: target.id,
+    patch: { startDate: '2026-08-26', endDate: '2026-08-25' },
+  }]);
+});
+
 test('side panel title-only save emits no unchanged Google temporal or memo fields', async () => {
   const target = event({
     source: 'google',
@@ -574,6 +589,25 @@ test('side panel title-only save emits no unchanged Google temporal or memo fiel
   assert.deepEqual(staleAllDayUpdates, [{ id: target.id, patch: { title: '종일 제목만 변경' } }]);
 });
 
+test('side panel sends a complete date pair when only the start crosses the current end', async () => {
+  const target = event({
+    source: 'bflow',
+    sourceCalendarId: 'bflow:calendar-1',
+    calendarId: 'calendar-1',
+  });
+  const updates: Array<{ id: string; patch: Partial<QuickEditEvent> }> = [];
+  const tree = await renderSidePanel(target, {
+    onUpdate: (id, patch) => updates.push({ id, patch }),
+  }, true, { startDate: '2026-08-26' });
+
+  findButtonByText(tree, '저장').props.onClick?.();
+
+  assert.deepEqual(updates, [{
+    id: target.id,
+    patch: { startDate: '2026-08-26', endDate: '2026-08-25' },
+  }]);
+});
+
 test('legacy private side panel keeps date-only editing and emits no unsupported all-day or time keys', async () => {
   const target = event({
     source: 'bflow',
@@ -594,7 +628,10 @@ test('legacy private side panel keeps date-only editing and emits no unsupported
 
   assert.deepEqual({ temporalControlLabels, updates }, {
     temporalControlLabels: [],
-    updates: [{ id: target.id, patch: { startDate: '2026-08-26' } }],
+    updates: [{
+      id: target.id,
+      patch: { startDate: '2026-08-26', endDate: '2026-08-25' },
+    }],
   });
 });
 

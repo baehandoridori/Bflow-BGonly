@@ -1230,6 +1230,14 @@ test('ScheduleView refreshes panel state from the authoritative event cache afte
   assert.deepEqual(scheduleUpdateCalls, [{ id: before.id, updates: { calendarId: 'editable-share' } }]);
   assert.equal(scheduleGetEventsCalls, 1, 'a successful write is followed by a canonical cache read');
   assert.deepEqual(schedulePanelProps.at(-1)?.event, scheduleCanonicalEvents[0], 'panel uses re-derived color, source and permissions');
+
+  await panel.onUpdate(before.id, { startDate: '2026-08-26', endDate: '2026-08-25' });
+
+  assert.deepEqual(scheduleUpdateCalls.at(-1), {
+    id: before.id,
+    updates: { startDate: '2026-08-25', endDate: '2026-08-26' },
+  }, 'a complete crossing date pair reaches the existing ScheduleView swap');
+  assert.equal(scheduleGetEventsCalls, 2);
 });
 
 test('ScheduleView quick edit removes the color callback and duplicates a read-only B flow event into the editable personal calendar', async () => {

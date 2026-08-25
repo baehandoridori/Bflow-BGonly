@@ -196,8 +196,10 @@ export function EventSidePanel({
     const nextStartDate = fromInputDate(draftStart);
     const nextEndDate = fromInputDate(draftEnd);
     if (draftTitle !== event.title) updates.title = draftTitle;
-    if (nextStartDate !== event.startDate) updates.startDate = nextStartDate;
-    if (nextEndDate !== event.endDate) updates.endDate = nextEndDate;
+    if (nextStartDate !== event.startDate || nextEndDate !== event.endDate) {
+      updates.startDate = nextStartDate;
+      updates.endDate = nextEndDate;
+    }
     if (draftMemo !== event.memo) updates.memo = draftMemo;
     if (supportsTimeEditing) {
       const allDayChanged = draftAllDay !== (event.allDay ?? true);

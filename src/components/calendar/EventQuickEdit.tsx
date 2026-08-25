@@ -95,8 +95,10 @@ export function EventQuickEdit({
     if (!canWrite) return;
     const updates: Partial<CalendarEvent> = {};
     if (title !== event.title) updates.title = title;
-    if (startDate !== event.startDate) updates.startDate = startDate;
-    if (endDate !== event.endDate) updates.endDate = endDate;
+    if (startDate !== event.startDate || endDate !== event.endDate) {
+      updates.startDate = startDate;
+      updates.endDate = endDate;
+    }
     if (memo !== event.memo) updates.memo = memo;
     if (!isCanonicalBflow && type !== event.type) updates.type = type;
     if (Object.keys(updates).length > 0) onUpdate(event.id, updates);
