@@ -5,6 +5,7 @@ import type { CalendarTodoPatch, PersonalTodoCreateInput, PersonalTodoLabelColor
 import type { SessionActionResult } from './sessionManager';
 import type { MarketAdminEventInput, MarketCommand, MarketRemoteState } from './marketAccountService';
 import type { ArcadeExecuteCommand, ArcadeExecuteResult, ArcadeWalletUpdate } from './arcadeService';
+import type { RealtimeStatusMetadata } from './realtime';
 
 let canonicalSessionEpoch = 0;
 function rememberSessionEpoch(result: SessionActionResult): SessionActionResult {
@@ -472,8 +473,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   },
   // 마운트 시 현재 프레즌스 스냅샷 replay 조회 (리로드/새 창 대응)
   getPresenceSnapshot: () => ipcRenderer.invoke('presence:get-snapshot'),
-  onSupabaseStatus: (callback: (status: string) => void) => {
-    const handler = (_event: unknown, status: string) => callback(status);
+  onSupabaseStatus: (callback: (status: string, metadata: RealtimeStatusMetadata) => void) => {
+    const handler = (_event: unknown, status: string, metadata: RealtimeStatusMetadata) => callback(status, metadata);
     ipcRenderer.on('supabase:status', handler);
     return () => ipcRenderer.removeListener('supabase:status', handler);
   },

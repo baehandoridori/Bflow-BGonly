@@ -12,6 +12,7 @@ import { cn } from '@/utils/cn';
 import { getEvents } from '@/services/calendarService';
 import { readMetadata } from '@/services/supabaseService';
 import type { CalendarEvent } from '@/types/calendar';
+import { calendarEventIdentityKey } from '@/utils/calendarEventIdentity';
 
 /* ────────────────────────────────────────────────
    타입
@@ -111,7 +112,19 @@ export function SpotlightSearch() {
   const episodeTitles = useDataStore((s) => s.episodeTitles);
   const epName = (ep: Episode) => episodeTitles[ep.episodeNumber] || ep.title;
   const [calEvents, setCalEvents] = useState<CalendarEvent[]>([]);
-  useEffect(() => { getEvents().then(setCalEvents); }, []);
+  useEffect(() => {
+    let cancelled = false;
+    const refresh = async () => {
+      const canonicalEvents = await getEvents();
+      if (!cancelled) setCalEvents(canonicalEvents);
+    };
+    void refresh();
+    window.addEventListener('bflow:calendar-changed', refresh);
+    return () => {
+      cancelled = true;
+      window.removeEventListener('bflow:calendar-changed', refresh);
+    };
+  }, []);
   const episodeMemos = useDataStore((s) => s.episodeMemos);
   const characters = useCharacterBoardStore((s) => s.characters);
   const characterCostumesByCharacter = useCharacterBoardStore((s) => s.byCharacter);
@@ -575,7 +588,7 @@ export function SpotlightSearch() {
       if (evScore > 0) {
         const typeLabel = ev.type && typeLabels[ev.type] ? `[${typeLabels[ev.type]}] ` : '';
         items.push({
-          id: `event-${ev.id}`,
+          id: `event-${calendarEventIdentityKey(ev)}`,
           category: 'event',
           title: ev.title || '(제목 없음)',
           subtitle: `${typeLabel}${ev.startDate} → ${ev.endDate}${ev.memo ? ` · ${ev.memo.slice(0, 30)}` : ''}`,

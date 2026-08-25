@@ -1,10 +1,11 @@
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import { motion, AnimatePresence } from 'framer-motion';
-import { X, Copy, Trash2, Check, Palette, Pencil } from 'lucide-react';
-import { CalendarEvent, CalendarEventType, EVENT_COLORS } from '@/types/calendar';
+import { CalendarDays, Copy, Pencil, Tags, Trash2 } from 'lucide-react';
+import type { CalendarEvent, CalendarEventType } from '@/types/calendar';
 import { useAppStore } from '@/stores/useAppStore';
 import { useAuthStore } from '@/stores/useAuthStore';
+import { isOptimisticCalendarTagId, useCalendarStore } from '@/stores/useCalendarStore';
 import { EntityAwareInput } from '@/components/common/EntityAwareInput';
 import { floatingGlassStyle } from '@/utils/glassStyles';
 
@@ -12,13 +13,18 @@ interface EventQuickEditProps {
   event: CalendarEvent;
   position: { x: number; y: number };
   onClose: () => void;
-  onUpdateColor: (id: string, color: string) => void;
-  onUpdate: (id: string, updates: Partial<CalendarEvent>) => void;
+  onUpdate: (id: string, updates: Partial<CalendarEvent>) => void | Promise<void>;
   onDelete: (id: string) => void;
   onDuplicate: (event: CalendarEvent) => void;
 }
 
-type TabKey = 'color' | 'edit';
+type TabKey = 'calendar' | 'edit';
+
+interface PendingSelection<T> {
+  eventId: string;
+  value: T;
+  requestId: number;
+}
 
 const TYPE_OPTIONS: { value: CalendarEventType; label: string }[] = [
   { value: 'custom', label: '커스텀' },
@@ -31,47 +37,57 @@ export function EventQuickEdit({
   event,
   position,
   onClose,
-  onUpdateColor,
   onUpdate,
   onDelete,
   onDuplicate,
 }: EventQuickEditProps) {
-  const colorMode = useAppStore((s) => s.colorMode);
+  const colorMode = useAppStore((state) => state.colorMode);
+  const users = useAuthStore((state) => state.users);
+  const calendars = useCalendarStore((state) => state.calendars);
+  const tags = useCalendarStore((state) => state.tags);
+  const editableCalendars = useMemo(() => calendars.filter((calendar) => calendar.canEdit), [calendars]);
+  const sortedTags = useMemo(() => tags
+    .filter((tag) => !isOptimisticCalendarTagId(tag.id))
+    .sort((left, right) => left.sortOrder - right.sortOrder), [tags]);
   const ref = useRef<HTMLDivElement>(null);
   const [adjusted, setAdjusted] = useState(position);
-  const [tab, setTab] = useState<TabKey>('color');
-
-  // 편집 폼 상태
+  const [tab, setTab] = useState<TabKey>('calendar');
   const [title, setTitle] = useState(event.title);
   const [startDate, setStartDate] = useState(event.startDate);
   const [endDate, setEndDate] = useState(event.endDate);
   const [type, setType] = useState<CalendarEventType>(event.type);
   const [memo, setMemo] = useState(event.memo);
-  const users = useAuthStore((s) => s.users);
+  const [pendingCalendar, setPendingCalendar] = useState<PendingSelection<string | undefined> | null>(null);
+  const [pendingTag, setPendingTag] = useState<PendingSelection<string | undefined> | null>(null);
+  const calendarUpdateRequestRef = useRef(0);
+  const tagUpdateRequestRef = useRef(0);
 
   const isVacation = event.type === 'vacation';
-  const isWriteProtected = !isVacation && (event.isReadOnly === true || event.canEdit === false);
-  const hasCalendarDerivedFields = event.sourceCalendarId?.startsWith('bflow:') === true
-    || (event.source === 'bflow' && Boolean(event.calendarId));
-  const derivedFieldsDescriptionId = hasCalendarDerivedFields
-    ? `calendar-derived-fields-${event.id}`
-    : undefined;
-  const readOnlyDescriptionId = isWriteProtected
-    ? `calendar-read-only-${event.id}`
-    : undefined;
-  const colorChangeBlocked = hasCalendarDerivedFields || isWriteProtected;
-  const colorDescriptionId = readOnlyDescriptionId ?? derivedFieldsDescriptionId;
+  const isWriteProtected = event.isReadOnly === true || event.canEdit === false;
+  const canWrite = !isVacation && !isWriteProtected;
+  const isCanonicalBflow = event.sourceCalendarId?.startsWith('bflow:') === true && Boolean(event.calendarId);
+  const displayedCalendarId = pendingCalendar?.eventId === event.id
+    ? pendingCalendar.value
+    : event.calendarId;
+  const displayedTagId = pendingTag?.eventId === event.id
+    ? pendingTag.value
+    : event.tagId;
+  const calendarSelectionPending = pendingCalendar?.eventId === event.id;
+  const tagSelectionPending = pendingTag?.eventId === event.id;
+  const derivedFieldsDescriptionId = isCanonicalBflow ? `calendar-derived-fields-${event.id}` : undefined;
+  const readOnlyDescriptionId = isWriteProtected || isVacation ? `calendar-read-only-${event.id}` : undefined;
+  const currentCalendar = calendars.find((calendar) => calendar.id === event.calendarId);
+  const currentTag = tags.find((tag) => tag.id === event.tagId);
   const fieldStyle = {
     background: 'rgb(var(--color-bg-primary) / 0.82)',
     border: '1px solid rgb(var(--color-bg-border) / 0.56)',
     color: 'rgb(var(--color-text-primary))',
   } as const;
 
-  // 화면 밖으로 나가지 않도록 위치 조정
   useEffect(() => {
-    const el = ref.current;
-    if (!el) return;
-    const rect = el.getBoundingClientRect();
+    const element = ref.current;
+    if (!element) return;
+    const rect = element.getBoundingClientRect();
     let { x, y } = position;
     if (x + rect.width > window.innerWidth - 8) x = window.innerWidth - rect.width - 8;
     if (y + rect.height > window.innerHeight - 8) y = window.innerHeight - rect.height - 8;
@@ -80,13 +96,12 @@ export function EventQuickEdit({
     setAdjusted({ x, y });
   }, [position]);
 
-  // 외부 클릭 / ESC 닫기
   useEffect(() => {
-    const handleClick = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) onClose();
+    const handleClick = (mouseEvent: MouseEvent) => {
+      if (ref.current && !ref.current.contains(mouseEvent.target as Node)) onClose();
     };
-    const handleKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose();
+    const handleKey = (keyboardEvent: KeyboardEvent) => {
+      if (keyboardEvent.key === 'Escape') onClose();
     };
     document.addEventListener('mousedown', handleClick);
     document.addEventListener('keydown', handleKey);
@@ -97,24 +112,61 @@ export function EventQuickEdit({
   }, [onClose]);
 
   const handleSave = useCallback(() => {
-    if (isWriteProtected) return;
-    const updates: Partial<CalendarEvent> = { title, startDate, endDate, memo };
-    if (!hasCalendarDerivedFields && type !== event.type) updates.type = type;
-    onUpdate(event.id, updates);
+    if (!canWrite) return;
+    const updates: Partial<CalendarEvent> = {};
+    if (title !== event.title) updates.title = title;
+    if (startDate !== event.startDate || endDate !== event.endDate) {
+      updates.startDate = startDate;
+      updates.endDate = endDate;
+    }
+    if (memo !== event.memo) updates.memo = memo;
+    if (!isCanonicalBflow && type !== event.type) updates.type = type;
+    if (Object.keys(updates).length > 0) onUpdate(event.id, updates);
     onClose();
-  }, [event.id, event.type, title, startDate, endDate, type, memo, hasCalendarDerivedFields, isWriteProtected, onUpdate, onClose]);
+  }, [canWrite, endDate, event, isCanonicalBflow, memo, onClose, onUpdate, startDate, title, type]);
 
   const handleDelete = useCallback(() => {
-    if (isWriteProtected) return;
+    if (!canWrite) return;
     onDelete(event.id);
     onClose();
-  }, [event.id, isWriteProtected, onDelete, onClose]);
+  }, [canWrite, event.id, onClose, onDelete]);
 
   const handleDuplicate = useCallback(() => {
-    if (isWriteProtected) return;
     onDuplicate(event);
     onClose();
-  }, [event, isWriteProtected, onDuplicate, onClose]);
+  }, [event, onClose, onDuplicate]);
+
+  const handleCalendarChange = useCallback(async (calendarId: string) => {
+    if (!canWrite || !isCanonicalBflow || calendarSelectionPending || calendarId === displayedCalendarId) return;
+    const requestId = ++calendarUpdateRequestRef.current;
+    setPendingCalendar({
+      eventId: event.id,
+      value: calendarId,
+      requestId,
+    });
+    try {
+      await onUpdate(event.id, { calendarId });
+    } catch {
+      // The canonical event remains the rollback source below.
+    }
+    setPendingCalendar((current) => current?.requestId === requestId ? null : current);
+  }, [calendarSelectionPending, canWrite, displayedCalendarId, event.id, isCanonicalBflow, onUpdate]);
+
+  const handleTagChange = useCallback(async (tagId: string | undefined) => {
+    if (!canWrite || !isCanonicalBflow || tagSelectionPending || tagId === displayedTagId) return;
+    const requestId = ++tagUpdateRequestRef.current;
+    setPendingTag({
+      eventId: event.id,
+      value: tagId,
+      requestId,
+    });
+    try {
+      await onUpdate(event.id, { tagId });
+    } catch {
+      // The canonical event remains the rollback source below.
+    }
+    setPendingTag((current) => current?.requestId === requestId ? null : current);
+  }, [canWrite, displayedTagId, event.id, isCanonicalBflow, onUpdate, tagSelectionPending]);
 
   return createPortal(
     <AnimatePresence>
@@ -135,30 +187,29 @@ export function EventQuickEdit({
           boxShadow: '0 16px 36px rgb(var(--color-shadow) / calc(var(--shadow-alpha) * 1.28))',
         }}
       >
-        {colorDescriptionId && (
-          <p id={colorDescriptionId} className="sr-only">
-            {isWriteProtected
-              ? '보기 전용 일정이라 변경, 복사 또는 삭제할 수 없습니다.'
-              : '색상과 유형은 소속 캘린더와 연결 정보로 결정되어 여기서 변경할 수 없습니다.'}
-          </p>
+        {readOnlyDescriptionId && (
+          <p id={readOnlyDescriptionId} className="sr-only">보기 전용 일정이라 변경하거나 삭제할 수 없지만 복사는 가능합니다.</p>
         )}
-        {/* 헤더: 탭 */}
+        {derivedFieldsDescriptionId && (
+          <p id={derivedFieldsDescriptionId} className="sr-only">유형은 연결 정보에서 자동으로 결정됩니다.</p>
+        )}
+
         <div className="flex border-b" style={{ borderColor: 'rgb(var(--color-bg-border) / 0.45)' }}>
           <button
-            onClick={() => setTab('color')}
+            onClick={() => setTab('calendar')}
             className="flex-1 py-2.5 text-xs font-medium transition-colors cursor-pointer"
             style={{
-              color: tab === 'color' ? 'rgb(var(--color-accent))' : 'rgb(var(--color-text-secondary))',
-              borderBottom: tab === 'color' ? '2px solid rgb(var(--color-accent))' : '2px solid transparent',
+              color: tab === 'calendar' ? 'rgb(var(--color-accent))' : 'rgb(var(--color-text-secondary))',
+              borderBottom: tab === 'calendar' ? '2px solid rgb(var(--color-accent))' : '2px solid transparent',
             }}
           >
-            <Palette size={12} className="inline mr-1" /> 색상
+            <Tags size={12} className="inline mr-1" /> 태그·캘린더
           </button>
           <button
-            disabled={isVacation || isWriteProtected}
+            disabled={!canWrite}
             aria-describedby={readOnlyDescriptionId}
-            onClick={() => !isVacation && !isWriteProtected && setTab('edit')}
-            className={`flex-1 py-2.5 text-xs font-medium transition-colors ${isVacation || isWriteProtected ? 'cursor-not-allowed opacity-50' : 'cursor-pointer'}`}
+            onClick={() => canWrite && setTab('edit')}
+            className={`flex-1 py-2.5 text-xs font-medium transition-colors ${canWrite ? 'cursor-pointer' : 'cursor-not-allowed opacity-50'}`}
             style={{
               color: tab === 'edit' ? 'rgb(var(--color-accent))' : 'rgb(var(--color-text-secondary))',
               borderBottom: tab === 'edit' ? '2px solid rgb(var(--color-accent))' : '2px solid transparent',
@@ -168,159 +219,149 @@ export function EventQuickEdit({
           </button>
         </div>
 
-        {/* 탭 콘텐츠 */}
         <div className="p-3">
-          {tab === 'color' ? (
-            /* ── 색상 탭 ── */
-            <div>
-              {/* 이벤트 제목 + 현재 색상 */}
-              <div className="flex items-center gap-2 mb-3">
-                <span
-                  className="w-3 h-3 rounded-full shrink-0"
-                  style={{ background: event.color }}
-                />
-                <span className="text-xs font-medium truncate text-text-primary">
-                  {event.title}
-                </span>
+          {tab === 'calendar' ? (
+            <div className="flex flex-col gap-3">
+              <div className="flex items-center gap-2">
+                <span className="h-3 w-3 shrink-0 rounded-full" style={{ background: event.color }} />
+                <span className="truncate text-xs font-medium text-text-primary">{event.title}</span>
+                {(isWriteProtected || isVacation) && (
+                  <span className="ml-auto rounded-full border border-bg-border/70 px-1.5 py-0.5 text-[9px] text-text-secondary">보기 전용</span>
+                )}
               </div>
 
-              {/* 색상 그리드 5x2 */}
-              <div className="grid grid-cols-5 gap-2 mb-4">
-                {EVENT_COLORS.map((color) => (
-                   <button
-                     key={color}
-                     disabled={colorChangeBlocked}
-                     aria-label={isWriteProtected
-                       ? `${color} 보기 전용, 변경 불가`
-                       : hasCalendarDerivedFields
-                         ? `${color} 캘린더 색상, 변경 불가`
-                         : `${color} 색상 선택`}
-                     aria-describedby={colorDescriptionId}
-                     onClick={colorChangeBlocked ? undefined : () => onUpdateColor(event.id, color)}
-                    className="relative w-8 h-8 rounded-lg transition-transform hover:scale-110 cursor-pointer disabled:cursor-not-allowed disabled:opacity-55 disabled:hover:scale-100"
-                    style={{
-                      background: color,
-                      border: event.color === color ? '2px solid white' : '2px solid transparent',
-                    }}
-                  >
-                    {event.color === color && (
-                      <Check className="absolute inset-0 m-auto text-white" size={14} strokeWidth={3} />
-                    )}
-                  </button>
-                ))}
-              </div>
+              {isCanonicalBflow ? (
+                canWrite ? (
+                  <>
+                    <div>
+                      <label className="text-[10px] font-medium uppercase tracking-wide text-text-secondary">캘린더</label>
+                      <div className="relative mt-1">
+                        <CalendarDays size={13} className="pointer-events-none absolute left-2 top-1/2 -translate-y-1/2 text-text-secondary" />
+                        <select
+                          aria-label="캘린더"
+                          value={displayedCalendarId}
+                          disabled={calendarSelectionPending}
+                          onChange={(changeEvent) => {
+                            const calendarId = changeEvent.target.value;
+                            return handleCalendarChange(calendarId);
+                          }}
+                          className="w-full rounded-lg border border-bg-border/60 bg-bg-primary/80 py-1.5 pl-7 pr-2 text-xs text-text-primary outline-none focus:border-accent/60"
+                        >
+                          {editableCalendars.map((calendar) => <option key={calendar.id} value={calendar.id}>{calendar.name}</option>)}
+                        </select>
+                      </div>
+                    </div>
+                    <div>
+                      <label className="text-[10px] font-medium uppercase tracking-wide text-text-secondary">태그</label>
+                      <div className="mt-1.5 flex flex-wrap gap-1.5">
+                        <button
+                          type="button"
+                          aria-pressed={displayedTagId === undefined}
+                          disabled={tagSelectionPending}
+                          onClick={() => handleTagChange(undefined)}
+                          className={`rounded-full px-2 py-1 text-[10px] ${displayedTagId === undefined ? 'bg-accent/20 text-accent' : 'bg-bg-primary/80 text-text-secondary'}`}
+                        >
+                          없음
+                        </button>
+                        {sortedTags.map((tag) => {
+                          const selected = displayedTagId === tag.id;
+                          return (
+                            <button
+                              type="button"
+                              key={tag.id}
+                              aria-pressed={selected}
+                              disabled={tagSelectionPending}
+                              onClick={() => handleTagChange(tag.id)}
+                              className="rounded-full border px-2 py-1 text-[10px]"
+                              style={{
+                                color: selected ? tag.color : 'rgb(var(--color-text-secondary))',
+                                borderColor: selected ? tag.color : 'rgb(var(--color-bg-border) / 0.65)',
+                                background: selected ? `color-mix(in srgb, ${tag.color} 18%, transparent)` : 'transparent',
+                              }}
+                            >
+                              {tag.name}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  </>
+                ) : (
+                  <div className="rounded-lg border border-bg-border/55 bg-bg-primary/45 px-3 py-2 text-[11px] text-text-secondary">
+                    {currentCalendar?.name ?? 'B flow 캘린더'}{currentTag ? ` · ${currentTag.name}` : ' · 태그 없음'}
+                  </div>
+                )
+              ) : (
+                <div className="rounded-lg border border-bg-border/55 bg-bg-primary/45 px-3 py-2 text-[11px] leading-relaxed text-text-secondary">
+                  Google 또는 이전 형식 일정은 현재 저장소를 유지합니다.
+                </div>
+              )}
 
-              {/* 빠른 액션 */}
               <div className="flex gap-2">
                 <button
-                  disabled={isWriteProtected}
                   aria-describedby={readOnlyDescriptionId}
-                  onClick={isWriteProtected ? undefined : handleDuplicate}
-                  className="flex-1 flex items-center justify-center gap-1.5 py-1.5 rounded-lg text-xs transition-colors cursor-pointer bg-bg-primary/80 text-text-primary hover:bg-bg-border/40 disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:bg-bg-primary/80"
+                  onClick={handleDuplicate}
+                  className="flex-1 cursor-pointer rounded-lg bg-bg-primary/80 py-1.5 text-xs text-text-primary transition-colors hover:bg-bg-border/40"
                 >
-                  <Copy size={12} />
-                  복사
+                  <Copy size={12} className="mr-1.5 inline" /> 복사
                 </button>
                 <button
-                  disabled={isWriteProtected}
+                  disabled={!canWrite}
                   aria-describedby={readOnlyDescriptionId}
-                  onClick={isWriteProtected ? undefined : handleDelete}
-                  className="flex-1 flex items-center justify-center gap-1.5 py-1.5 rounded-lg text-xs transition-colors cursor-pointer disabled:cursor-not-allowed disabled:opacity-50"
+                  onClick={canWrite ? handleDelete : undefined}
+                  className="flex-1 cursor-pointer rounded-lg py-1.5 text-xs disabled:cursor-not-allowed disabled:opacity-45"
                   style={{ background: 'rgba(255,107,107,0.15)', color: '#FF6B6B' }}
                 >
-                  <Trash2 size={12} />
-                  삭제
+                  <Trash2 size={12} className="mr-1.5 inline" /> 삭제
                 </button>
               </div>
             </div>
           ) : (
-            /* ── 일정 편집 탭 ── */
             <div>
-              {isVacation ? (
-                <p className="text-xs text-center py-6 text-text-secondary">
-                  휴가 관리는 휴가 탭에서 관리합니다
-                </p>
-              ) : isWriteProtected ? (
-                <p className="text-xs text-center py-6 text-text-secondary">
-                  보기 전용 일정은 여기서 편집할 수 없습니다
-                </p>
+              {!canWrite ? (
+                <p className="py-6 text-center text-xs text-text-secondary">보기 전용 일정은 여기서 편집할 수 없습니다</p>
               ) : (
                 <div className="flex flex-col gap-2.5">
-                  {/* 제목 */}
                   <input
                     type="text"
                     value={title}
-                    onChange={(e) => setTitle(e.target.value)}
+                    onChange={(changeEvent) => setTitle(changeEvent.target.value)}
                     placeholder="일정 제목"
-                    className="w-full px-2.5 py-1.5 rounded-lg text-xs outline-none placeholder:text-text-secondary/45"
+                    className="w-full rounded-lg px-2.5 py-1.5 text-xs outline-none placeholder:text-text-secondary/45"
                     style={fieldStyle}
                   />
-
-                  {/* 날짜 */}
                   <div className="flex gap-2">
-                    <input
-                      type="date"
-                      value={startDate}
-                      onChange={(e) => setStartDate(e.target.value)}
-                      className="flex-1 px-2.5 py-1.5 rounded-lg text-xs outline-none"
-                      style={{
-                        ...fieldStyle,
-                        colorScheme: colorMode,
-                      }}
-                    />
-                    <input
-                      type="date"
-                      value={endDate}
-                      onChange={(e) => setEndDate(e.target.value)}
-                      className="flex-1 px-2.5 py-1.5 rounded-lg text-xs outline-none"
-                      style={{
-                        ...fieldStyle,
-                        colorScheme: colorMode,
-                      }}
-                    />
+                    <input type="date" value={startDate} onChange={(changeEvent) => setStartDate(changeEvent.target.value)} className="flex-1 rounded-lg px-2.5 py-1.5 text-xs outline-none" style={{ ...fieldStyle, colorScheme: colorMode }} />
+                    <input type="date" value={endDate} onChange={(changeEvent) => setEndDate(changeEvent.target.value)} className="flex-1 rounded-lg px-2.5 py-1.5 text-xs outline-none" style={{ ...fieldStyle, colorScheme: colorMode }} />
                   </div>
-
-                  {/* 타입 세그먼트 */}
                   <div className="flex gap-1">
-                    {TYPE_OPTIONS.map((opt) => (
-                       <button
-                         key={opt.value}
-                         disabled={hasCalendarDerivedFields}
-                         aria-describedby={derivedFieldsDescriptionId}
-                         onClick={hasCalendarDerivedFields ? undefined : () => setType(opt.value)}
-                        className="flex-1 py-1.5 rounded-lg text-[11px] font-medium transition-colors cursor-pointer disabled:cursor-not-allowed disabled:opacity-70"
+                    {TYPE_OPTIONS.map((option) => (
+                      <button
+                        key={option.value}
+                        disabled={isCanonicalBflow}
+                        aria-describedby={derivedFieldsDescriptionId}
+                        onClick={isCanonicalBflow ? undefined : () => setType(option.value)}
+                        className="flex-1 cursor-pointer rounded-lg py-1.5 text-[11px] font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-70"
                         style={{
-                          background: type === opt.value ? 'rgb(var(--color-accent))' : 'rgb(var(--color-bg-primary) / 0.82)',
-                          color: type === opt.value ? 'rgb(var(--color-on-accent))' : 'rgb(var(--color-text-secondary))',
+                          background: type === option.value ? 'rgb(var(--color-accent))' : 'rgb(var(--color-bg-primary) / 0.82)',
+                          color: type === option.value ? 'rgb(var(--color-on-accent))' : 'rgb(var(--color-text-secondary))',
                         }}
                       >
-                        {opt.label}
+                        {option.label}
                       </button>
                     ))}
                   </div>
-
-                  {/* 메모 */}
                   <EntityAwareInput
                     multiline
                     value={memo ?? ''}
                     onChange={setMemo}
                     users={users}
-                    /* #태그 끔: 캘린더 메모는 ScheduleView·CalendarView 등에서 평문으로 표시돼
-                       직렬화 토큰('[#a001](...)')이 노출된다(EntityAwareInput enableHashtag 주석 참조). */
                     rows={3}
                     placeholder="메모"
                     dropdownPositionClassName="left-2 right-2"
-                    className="w-full px-2.5 py-1.5 rounded-lg text-xs outline-none resize-none placeholder:text-text-secondary/45 bg-bg-primary/[0.82] border border-bg-border/[0.56] text-text-primary"
+                    className="w-full resize-none rounded-lg border border-bg-border/[0.56] bg-bg-primary/[0.82] px-2.5 py-1.5 text-xs text-text-primary outline-none placeholder:text-text-secondary/45"
                   />
-
-                  {/* 저장 */}
-                  <button
-                    onClick={handleSave}
-                    className="w-full py-2 rounded-lg text-xs font-medium transition-colors cursor-pointer"
-                    style={{ background: 'rgb(var(--color-accent))', color: 'rgb(var(--color-on-accent))' }}
-                  >
-                    저장
-                  </button>
+                  <button onClick={handleSave} className="w-full cursor-pointer rounded-lg py-2 text-xs font-medium transition-colors" style={{ background: 'rgb(var(--color-accent))', color: 'rgb(var(--color-on-accent))' }}>저장</button>
                 </div>
               )}
             </div>

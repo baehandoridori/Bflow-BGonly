@@ -16,6 +16,7 @@ export type CalendarUpdateInput = Partial<{
   name: string;
   color: string;
   visibility: CalendarVisibility;
+  members: CalendarMemberInput[];
 }>;
 
 export interface CalendarEventCreateInput {

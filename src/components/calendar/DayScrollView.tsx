@@ -3,7 +3,10 @@ import React, { useMemo, useRef, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { CalendarDays } from 'lucide-react';
 import type { CalendarEvent } from '@/types/calendar';
-import { fmtDate, parseDate, daysBetween, hexToRgba } from '@/utils/calendarDate';
+import { useCalendarStore } from '@/stores/useCalendarStore';
+import { fmtDate, daysBetween, hexToRgba } from '@/utils/calendarDate';
+import { formatEventTimeRange, sortEventsForList } from '@/utils/calendarEventFilter';
+import { calendarEventIdentityKey } from '@/utils/calendarEventIdentity';
 
 /* ── 로컬 유틸 ──────────────────────────────────────── */
 const WEEKDAY_KR = ['일', '월', '화', '수', '목', '금', '토'];
@@ -56,6 +59,11 @@ export default function DayScrollView({
   year,
 }: DayScrollViewProps) {
   const maxDay = daysInYear(year) - 1;
+  const tags = useCalendarStore((state) => state.tags);
+  const tagNameById = useMemo(
+    () => Object.fromEntries(tags.map((tag) => [tag.id, tag.name])) as Record<string, string>,
+    [tags],
+  );
 
   /* 표시할 날짜 범위: active ± 2 */
   const visibleDays = useMemo(() => {
@@ -146,6 +154,7 @@ export default function DayScrollView({
                   today={today}
                   onEventClick={onEventClick}
                   onDateClick={onDateClick}
+                  tagNameById={tagNameById}
                 />
               ) : isNear ? (
                 <NearDay
@@ -177,6 +186,7 @@ function ActiveDay({
   today,
   onEventClick,
   onDateClick,
+  tagNameById,
 }: {
   date: Date;
   dateStr: string;
@@ -184,11 +194,13 @@ function ActiveDay({
   today: string;
   onEventClick?: (ev: CalendarEvent) => void;
   onDateClick?: (date: string) => void;
+  tagNameById: Record<string, string>;
 }) {
   const dow = date.getDay();
   const isToday = dateStr === today;
   const dayColor = dow === 0 ? '#E17055' : dow === 6 ? '#74B9FF' : PRIMARY_TEXT;
   const label = `${date.getMonth() + 1}/${date.getDate()} ${WEEKDAY_KR[dow]}`;
+  const sortedEvents = useMemo(() => sortEventsForList(events), [events]);
 
   return (
     <div
@@ -241,11 +253,12 @@ function ActiveDay({
         </div>
       ) : (
         <div data-scroll-events className="flex flex-col gap-2 flex-1 overflow-y-auto">
-          {events.map((ev) => (
+          {sortedEvents.map((ev) => (
             <DayEventCard
-              key={ev.id}
+              key={calendarEventIdentityKey(ev)}
               event={ev}
               today={today}
+              tagNameById={tagNameById}
               onClick={(e) => { e.stopPropagation(); onEventClick?.(ev); }}
             />
           ))}
@@ -264,25 +277,20 @@ function ActiveDay({
 function DayEventCard({
   event,
   today,
+  tagNameById,
   onClick,
 }: {
   event: CalendarEvent;
   today: string;
+  tagNameById: Record<string, string>;
   onClick: (e: React.MouseEvent) => void;
 }) {
-  const s = parseDate(event.startDate);
-  const e = parseDate(event.endDate);
-  const isSingle = event.startDate === event.endDate;
-  const dayLabel = (d: Date) =>
-    `${d.getMonth() + 1}/${d.getDate()}(${WEEKDAY_KR[d.getDay()]})`;
-
-  const dateRange = isSingle
-    ? dayLabel(s)
-    : `${dayLabel(s)} → ${dayLabel(e)}`;
-
   const dDay = daysBetween(today, event.endDate);
   const dDayLabel =
     dDay === 0 ? 'D-Day' : dDay > 0 ? `D-${dDay}` : `D+${Math.abs(dDay)}`;
+  const subtitle = event.allDay === false
+    ? formatEventTimeRange(event, tagNameById)
+    : event.tagId ? tagNameById[event.tagId] : null;
 
   return (
     <motion.div
@@ -303,9 +311,11 @@ function DayEventCard({
         >
           {event.title}
         </span>
-        <span style={{ fontSize: 10, color: SECONDARY_TEXT }}>
-          {dateRange} · {event.type}
-        </span>
+        {subtitle && (
+          <span style={{ fontSize: 10, color: SECONDARY_TEXT }}>
+            {subtitle}
+          </span>
+        )}
       </div>
       <span
         className="shrink-0 text-[9px] font-bold px-1.5 py-0.5 rounded"
@@ -360,7 +370,7 @@ function NearDay({
       <div className="flex flex-col gap-1 items-center">
         {events.slice(0, 5).map((ev) => (
           <div
-            key={ev.id}
+            key={calendarEventIdentityKey(ev)}
             className="rounded-full"
             style={{ width: 6, height: 6, background: ev.color }}
           />

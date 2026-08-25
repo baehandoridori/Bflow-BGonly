@@ -145,10 +145,12 @@ SECURITY INVOKER
 SET search_path = public, pg_temp
 AS $$
 DECLARE
-  v_allowed_keys CONSTANT TEXT[] := ARRAY['name', 'color', 'visibility'];
+  v_allowed_keys CONSTANT TEXT[] := ARRAY['name', 'color', 'visibility', 'members'];
+  v_member_allowed_keys CONSTANT TEXT[] := ARRAY['user_id', 'can_edit'];
   v_calendar calendars%ROWTYPE;
   v_actor_role TEXT;
   v_requested_visibility TEXT;
+  v_effective_visibility TEXT;
 BEGIN
   IF p_actor_id IS NULL OR btrim(p_actor_id) = '' THEN
     RAISE EXCEPTION 'A session actor is required' USING ERRCODE = '42501';
@@ -182,6 +184,45 @@ BEGIN
       RAISE EXCEPTION 'Invalid calendar visibility' USING ERRCODE = '22023';
     END IF;
   END IF;
+  IF p_updates ? 'members' THEN
+    IF jsonb_typeof(p_updates->'members') IS DISTINCT FROM 'array' THEN
+      RAISE EXCEPTION 'Calendar members must be a JSON array' USING ERRCODE = '22023';
+    END IF;
+    IF EXISTS (
+      SELECT 1
+      FROM jsonb_array_elements(p_updates->'members') AS item(value)
+      WHERE jsonb_typeof(item.value) <> 'object'
+    ) THEN
+      RAISE EXCEPTION 'Each calendar member must be a JSON object' USING ERRCODE = '22023';
+    END IF;
+    IF EXISTS (
+      SELECT 1
+      FROM jsonb_array_elements(p_updates->'members') AS item(value)
+      CROSS JOIN LATERAL jsonb_object_keys(item.value) AS submitted(key)
+      WHERE NOT (submitted.key = ANY (v_member_allowed_keys))
+    ) THEN
+      RAISE EXCEPTION 'A calendar member contains an unknown field' USING ERRCODE = '22023';
+    END IF;
+    IF EXISTS (
+      SELECT 1
+      FROM jsonb_array_elements(p_updates->'members') AS item(value)
+      WHERE NOT (item.value ? 'user_id')
+         OR NOT (item.value ? 'can_edit')
+         OR jsonb_typeof(item.value->'user_id') IS DISTINCT FROM 'string'
+         OR btrim(item.value->>'user_id') = ''
+         OR jsonb_typeof(item.value->'can_edit') IS DISTINCT FROM 'boolean'
+    ) THEN
+      RAISE EXCEPTION 'Each calendar member requires user_id and can_edit' USING ERRCODE = '22023';
+    END IF;
+    IF EXISTS (
+      SELECT item.value->>'user_id'
+      FROM jsonb_array_elements(p_updates->'members') AS item(value)
+      GROUP BY item.value->>'user_id'
+      HAVING count(*) > 1
+    ) THEN
+      RAISE EXCEPTION 'Duplicate calendar member user_id' USING ERRCODE = '23505';
+    END IF;
+  END IF;
 
   LOCK TABLE calendars IN ROW EXCLUSIVE MODE;
   LOCK TABLE calendar_members IN ROW EXCLUSIVE MODE;
@@ -193,6 +234,12 @@ BEGIN
   IF NOT FOUND THEN
     RAISE EXCEPTION 'Calendar % not found', p_calendar_id USING ERRCODE = '23503';
   END IF;
+
+  v_effective_visibility := CASE
+    WHEN NOT v_calendar.is_personal AND p_updates ? 'visibility'
+      THEN v_requested_visibility
+    ELSE v_calendar.visibility
+  END;
 
   -- delete_user_cascade와 관리 writer도 calendar→children→user 순서를 유지한다.
   SELECT actor.role INTO v_actor_role
@@ -207,6 +254,9 @@ BEGIN
     IF v_calendar.owner_id <> p_actor_id THEN
       RAISE EXCEPTION 'Personal calendar update permission denied' USING ERRCODE = '42501';
     END IF;
+    IF p_updates ? 'members' THEN
+      RAISE EXCEPTION 'Personal calendars cannot have members' USING ERRCODE = '42501';
+    END IF;
   ELSIF v_calendar.owner_id <> p_actor_id
         AND v_actor_role IS DISTINCT FROM 'admin' THEN
     RAISE EXCEPTION 'Calendar update permission denied' USING ERRCODE = '42501';
@@ -218,20 +268,39 @@ BEGIN
     RAISE EXCEPTION 'Only an admin can make a team calendar' USING ERRCODE = '42501';
   END IF;
 
+  IF p_updates ? 'members'
+     AND v_effective_visibility = 'private'
+     AND jsonb_array_length(p_updates->'members') > 0 THEN
+    RAISE EXCEPTION 'Private calendars cannot have members' USING ERRCODE = '22023';
+  END IF;
+
   UPDATE calendars AS target
   SET name = CASE WHEN p_updates ? 'name' THEN p_updates->>'name' ELSE v_calendar.name END,
       color = CASE WHEN p_updates ? 'color' THEN p_updates->>'color' ELSE v_calendar.color END,
       visibility = CASE
         WHEN NOT v_calendar.is_personal AND p_updates ? 'visibility'
-          THEN v_requested_visibility
+          THEN v_effective_visibility
         ELSE v_calendar.visibility
       END,
       updated_at = now()
   WHERE target.id = p_calendar_id;
 
-  IF NOT v_calendar.is_personal
-     AND p_updates ? 'visibility'
-     AND v_requested_visibility = 'private' THEN
+  IF NOT v_calendar.is_personal AND p_updates ? 'members' THEN
+    DELETE FROM calendar_members
+    WHERE calendar_id = p_calendar_id;
+
+    IF v_effective_visibility <> 'private' THEN
+      INSERT INTO calendar_members (calendar_id, user_id, can_edit)
+      SELECT
+        p_calendar_id,
+        item.value->>'user_id',
+        (item.value->>'can_edit')::BOOLEAN
+      FROM jsonb_array_elements(p_updates->'members') AS item(value)
+      WHERE item.value->>'user_id' <> v_calendar.owner_id;
+    END IF;
+  ELSIF NOT v_calendar.is_personal
+        AND p_updates ? 'visibility'
+        AND v_requested_visibility = 'private' THEN
     DELETE FROM calendar_members
     WHERE calendar_id = p_calendar_id;
   END IF;
@@ -239,7 +308,7 @@ END;
 $$;
 
 COMMENT ON FUNCTION public.update_calendar_authorized(TEXT, UUID, JSONB) IS
-  '캘린더→멤버→actor 순으로 잠근 뒤 owner/admin 관리 권한과 team 공개 권한을 재확인하고 private 전환 시 멤버를 함께 제거하는 캘린더 수정 RPC.';
+  '캘린더→멤버→actor 순으로 잠근 뒤 owner/admin 관리 권한, 공개 범위와 멤버 입력을 재확인하고 설정과 멤버를 함께 교체하는 캘린더 수정 RPC.';
 
 CREATE OR REPLACE FUNCTION public.delete_calendar_authorized(
   p_actor_id TEXT,
@@ -1298,11 +1367,11 @@ $$;
 COMMENT ON FUNCTION public.update_user_authorized(TEXT, TEXT, JSONB) IS
   'actor와 target users 행을 정렬 잠금하고 현재 admin만 비밀번호 제외 allow-list 필드를 수정.';
 
--- ── 6) Realtime publication 4개 (재실행 시 duplicate_object 흡수) ──
+-- ── 6) Realtime publication 5개 (재실행 시 duplicate_object 흡수) ──
 DO $$
 DECLARE t TEXT;
 BEGIN
-  FOREACH t IN ARRAY ARRAY['calendars','calendar_members','calendar_events','calendar_notifications'] LOOP
+  FOREACH t IN ARRAY ARRAY['calendars','calendar_members','calendar_events','calendar_tags','calendar_notifications'] LOOP
     BEGIN
       EXECUTE format('ALTER PUBLICATION supabase_realtime ADD TABLE %I', t);
     EXCEPTION WHEN duplicate_object THEN NULL;

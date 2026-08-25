@@ -22,6 +22,7 @@ import type { MarketRemoteState, MarketSnapshot } from '@/features/playground/ma
 import { createArcadeLocalStorageGateway } from '@/features/playground/arcade/localStorageGateway';
 import type { ArcadePreviewGateway } from '@/features/playground/arcade/previewGateway';
 import { useArcadeStore } from '@/features/playground/arcade/useArcadeStore';
+import { createDevCalendarSeed } from './devCalendarSeed';
 import {
   canCreateCalendar,
   canEditCalendarEvents,
@@ -71,21 +72,29 @@ type MockCalendarEventRow = Awaited<ReturnType<ElectronAPI['calendarEventCreate'
 type MockCalendarTagRow = Awaited<ReturnType<ElectronAPI['calendarTagsList']>>[number];
 type MockCalendarMemberRow = { calendar_id: string; user_id: string; can_edit: boolean };
 type MockCalendarEventCreateInput = Parameters<ElectronAPI['calendarEventCreate']>[0];
+const CALENDAR_TAG_UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
-const mockCalendars: MockCalendarRow[] = [];
-const mockCalendarEvents: MockCalendarEventRow[] = [];
-const mockCalendarMembers: MockCalendarMemberRow[] = [];
+const devCalendarSeed = createDevCalendarSeed();
+const mockCalendars: MockCalendarRow[] = devCalendarSeed.calendars;
+const mockCalendarEvents: MockCalendarEventRow[] = devCalendarSeed.events;
+const mockCalendarMembers: MockCalendarMemberRow[] = devCalendarSeed.members;
 type MockPrivacyReplacementTarget =
   | { storage: 'bflow'; actualId: string; calendarId: string }
   | { storage: 'legacy-private'; actualId: string }
   | { storage: 'google'; actualId: string; calendarId: string };
 const mockPrivacyReplacementReceipts = new Map<string, MockPrivacyReplacementTarget>();
-const mockCalendarTags: MockCalendarTagRow[] = [
-  { id: 'tag-upload', name: '업로드', color: '#E17055', sort_order: 0 },
-  { id: 'tag-cut', name: '가편', color: '#74B9FF', sort_order: 1 },
-  { id: 'tag-script', name: '대본', color: '#FDCB6E', sort_order: 2 },
-  { id: 'tag-meeting', name: '회의', color: '#A29BFE', sort_order: 3 },
-];
+const mockCalendarTags: MockCalendarTagRow[] = devCalendarSeed.tags;
+
+function normalizeMockCalendarEventTagId(tagId: unknown): string | null {
+  if (tagId === undefined || tagId === null) return null;
+  if (typeof tagId !== 'string' || !CALENDAR_TAG_UUID_PATTERN.test(tagId)) {
+    throw new Error('태그 ID는 UUID여야 합니다');
+  }
+  if (!mockCalendarTags.some(({ id }) => id === tagId)) {
+    throw new Error('존재하지 않는 태그입니다');
+  }
+  return tagId;
+}
 
 function requireMockCalendarUser(): PreviewUser {
   const user = previewCanonicalUserId
@@ -111,23 +120,46 @@ function mockMembersOf(calendarId: string): MockCalendarMemberRow[] {
 
 function normalizeMockCalendarMembers(
   calendar: MockCalendarRow,
-  members: Array<{ user_id: string; can_edit: boolean }>,
+  members: unknown,
 ): MockCalendarMemberRow[] {
+  if (!Array.isArray(members)) throw new Error('캘린더 멤버 입력이 올바르지 않습니다');
   const knownUserIds = new Set(getMockUsers().map(({ id }) => id));
   const seen = new Set<string>();
   const normalized: MockCalendarMemberRow[] = [];
   for (const member of members) {
-    if (member.user_id === calendar.owner_id) continue;
-    if (!knownUserIds.has(member.user_id)) throw new Error('존재하지 않는 캘린더 멤버입니다');
-    if (seen.has(member.user_id)) throw new Error('중복된 캘린더 멤버입니다');
-    seen.add(member.user_id);
+    if (!member || typeof member !== 'object') {
+      throw new Error('캘린더 멤버 입력이 올바르지 않습니다');
+    }
+    const candidate = member as Record<string, unknown>;
+    if (
+      typeof candidate.user_id !== 'string'
+      || candidate.user_id.trim().length === 0
+      || typeof candidate.can_edit !== 'boolean'
+    ) {
+      throw new Error('캘린더 멤버 입력이 올바르지 않습니다');
+    }
+    const safeMember = { user_id: candidate.user_id, can_edit: candidate.can_edit };
+    if (safeMember.user_id === calendar.owner_id) continue;
+    if (!knownUserIds.has(safeMember.user_id)) throw new Error('존재하지 않는 캘린더 멤버입니다');
+    if (seen.has(safeMember.user_id)) throw new Error('중복된 캘린더 멤버입니다');
+    seen.add(safeMember.user_id);
     normalized.push({
       calendar_id: calendar.id,
-      user_id: member.user_id,
-      can_edit: member.can_edit,
+      user_id: safeMember.user_id,
+      can_edit: safeMember.can_edit,
     });
   }
   return normalized;
+}
+
+function applyNormalizedMockCalendarMembers(
+  calendarId: string,
+  members: MockCalendarMemberRow[],
+): void {
+  for (let index = mockCalendarMembers.length - 1; index >= 0; index--) {
+    if (mockCalendarMembers[index].calendar_id === calendarId) mockCalendarMembers.splice(index, 1);
+  }
+  mockCalendarMembers.push(...members);
 }
 
 function replaceMockCalendarMembers(
@@ -135,10 +167,7 @@ function replaceMockCalendarMembers(
   members: Array<{ user_id: string; can_edit: boolean }>,
 ): void {
   const normalized = normalizeMockCalendarMembers(calendar, members);
-  for (let index = mockCalendarMembers.length - 1; index >= 0; index--) {
-    if (mockCalendarMembers[index].calendar_id === calendar.id) mockCalendarMembers.splice(index, 1);
-  }
-  mockCalendarMembers.push(...normalized);
+  applyNormalizedMockCalendarMembers(calendar.id, normalized);
 }
 
 function canViewMockCalendar(calendar: MockCalendarRow, userId: string): boolean {
@@ -160,9 +189,11 @@ function requireMockCalendarEventWrite(calendarId: string, userId: string): Mock
 
 function createMockCalendarEvent(input: MockCalendarEventCreateInput, userId: string): MockCalendarEventRow {
   requireMockCalendarEventWrite(input.calendar_id, userId);
+  const tagId = normalizeMockCalendarEventTagId(input.tag_id);
   const now = new Date().toISOString();
   const created: MockCalendarEventRow = {
     ...input,
+    tag_id: tagId,
     id: createUuid(),
     created_by: userId,
     created_at: now,
@@ -183,7 +214,7 @@ function ensureMockPersonalCalendar(): MockCalendarRow | null {
 
   const now = new Date().toISOString();
   const created: MockCalendarRow = {
-    id: `mock-personal-${userId}`,
+    id: createUuid(),
     name: '개인',
     color: '#6C5CE7',
     visibility: 'private',
@@ -1292,16 +1323,40 @@ export function installDevElectronAPI(): void {
       if (!canManageCalendar(calendar, mockPermissionUser(user))) {
         throw new Error('이 캘린더를 수정할 권한이 없습니다');
       }
-      if (updates.visibility === 'team' && !canCreateCalendar(mockPermissionUser(user), 'team')) {
+      if (
+        !calendar.is_personal
+        && updates.visibility === 'team'
+        && !canCreateCalendar(mockPermissionUser(user), 'team')
+      ) {
         throw new Error('팀 전체 캘린더는 관리자만 만들 수 있습니다');
       }
+      if (updates.name !== undefined && (typeof updates.name !== 'string' || updates.name.trim() === '')) {
+        throw new Error('캘린더 이름이 올바르지 않습니다');
+      }
+      if (updates.color !== undefined && (typeof updates.color !== 'string' || updates.color.trim() === '')) {
+        throw new Error('캘린더 색상이 올바르지 않습니다');
+      }
+
+      const nextVisibility = calendar.is_personal
+        ? calendar.visibility
+        : updates.visibility ?? calendar.visibility;
+      let nextMembers: MockCalendarMemberRow[] | undefined;
+      if (updates.members !== undefined) {
+        if (calendar.is_personal) throw new Error('개인 캘린더에는 멤버를 추가할 수 없습니다');
+        const normalizedMembers = normalizeMockCalendarMembers(calendar, updates.members);
+        if (nextVisibility === 'private' && normalizedMembers.length > 0) {
+          throw new Error('비공개 캘린더에는 멤버를 추가할 수 없습니다');
+        }
+        nextMembers = normalizedMembers;
+      } else if (!calendar.is_personal && updates.visibility === 'private') {
+        nextMembers = [];
+      }
+
       if (updates.name !== undefined) calendar.name = updates.name;
       if (updates.color !== undefined) calendar.color = updates.color;
-      if (!calendar.is_personal && updates.visibility !== undefined) {
-        calendar.visibility = updates.visibility;
-        if (updates.visibility === 'private') replaceMockCalendarMembers(calendar, []);
-      }
+      calendar.visibility = nextVisibility;
       calendar.updated_at = new Date().toISOString();
+      if (nextMembers !== undefined) applyNormalizedMockCalendarMembers(calendar.id, nextMembers);
     },
     calendarDelete: async (id) => {
       const user = requireMockCalendarUser();
@@ -1398,12 +1453,15 @@ export function installDevElectronAPI(): void {
       if (updates.calendar_id !== undefined && updates.calendar_id !== event.calendar_id) {
         requireMockCalendarEventWrite(updates.calendar_id, user.id);
       }
+      const normalizedUpdates = updates.tag_id === undefined
+        ? updates
+        : { ...updates, tag_id: normalizeMockCalendarEventTagId(updates.tag_id) };
       const immutableFields = {
         id: event.id,
         created_by: event.created_by,
         created_at: event.created_at,
       };
-      Object.assign(event, updates, immutableFields, { updated_at: new Date().toISOString() });
+      Object.assign(event, normalizedUpdates, immutableFields, { updated_at: new Date().toISOString() });
       return { ...event };
     },
     calendarEventDelete: async (id) => {
@@ -1415,14 +1473,57 @@ export function installDevElectronAPI(): void {
       );
       mockCalendarEvents.splice(index, 1);
     },
-    calendarTagsList: async () => mockCalendarTags.map((tag) => ({ ...tag })),
+    calendarTagsList: async () => {
+      requireMockCalendarUser();
+      return mockCalendarTags.map((tag) => ({ ...tag }));
+    },
     calendarTagsSave: async (tags) => {
+      const user = requireMockCalendarUser();
+      if (user.role !== 'admin') throw new Error('태그는 관리자만 수정할 수 있습니다');
+      if (tags.some((tag) => (
+        typeof tag.name !== 'string'
+        || tag.name.trim() === ''
+        || typeof tag.color !== 'string'
+        || tag.color.trim() === ''
+        || !Number.isInteger(tag.sort_order)
+        || (
+          tag.id !== undefined
+          && (typeof tag.id !== 'string' || !CALENDAR_TAG_UUID_PATTERN.test(tag.id))
+        )
+      ))) {
+        throw new Error(
+          'Each calendar tag requires name, color, and sort_order; id must be a UUID when provided',
+        );
+      }
+
+      const submittedIds = new Set<string>();
+      for (const tag of tags) {
+        if (tag.id === undefined) continue;
+        if (submittedIds.has(tag.id)) throw new Error('Duplicate calendar tag id');
+        submittedIds.add(tag.id);
+      }
+
+      const submittedNames = new Set<string>();
+      for (const tag of tags) {
+        if (submittedNames.has(tag.name)) throw new Error('Duplicate calendar tag name');
+        submittedNames.add(tag.name);
+      }
+
+      const currentIds = new Set(mockCalendarTags.map((tag) => tag.id));
+      if (tags.some((tag) => tag.id !== undefined && !currentIds.has(tag.id))) {
+        throw new Error('Unknown calendar tag id');
+      }
+
       const saved = tags.map((tag) => ({
         id: tag.id ?? createUuid(),
         name: tag.name,
         color: tag.color,
         sort_order: tag.sort_order,
       }));
+      const savedIds = new Set(saved.map((tag) => tag.id));
+      for (const event of mockCalendarEvents) {
+        if (event.tag_id && !savedIds.has(event.tag_id)) event.tag_id = null;
+      }
       mockCalendarTags.splice(0, mockCalendarTags.length, ...saved);
       return saved.map((tag) => ({ ...tag }));
     },

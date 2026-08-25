@@ -78,6 +78,7 @@ test('mapVacationEvents — 접두별 ID·읽기전용·필드 매핑', () => {
   assert.equal(a.memo, '');
   assert.equal(a.color, VACATION_COLOR);
   assert.equal(a.type, 'vacation');
+  assert.equal(a.source, 'vacation');
   assert.equal(a.startDate, '2026-09-01');
   assert.equal(a.endDate, '2026-09-02');
   assert.equal(a.createdBy, '배한솔');

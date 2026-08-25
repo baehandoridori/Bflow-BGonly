@@ -490,3 +490,123 @@ PR #116 에서 12 라운드 (P1×3, P2×6, P3×2) 끝에 silent-done. Monitor �
 - rolling 기간의 시작을 편의상 UTC 자정으로 내리면 첫 partial 일봉의 시가·저가·거래량에 요청 전 데이터가 섞인다. `첫 partial / 완료된 전체 일자 / 현재 partial`로 분할하고 세 구간의 합이 단일 exact builder와 `deepEqual`인지 고정한다.
 - 과거 비동기 요청 key와 effect 입력에는 그 구간 종료 전 시작한 동일 종목 이벤트만 넣는다. 미래 이벤트 때문에 유효한 과거 결과를 숨기거나 다시 계산하지 않되, 과거 shock과 그 가격을 참조하는 halt 의존성은 보존한다.
 - 일봉만 비동기화해도 주간 10분봉·월간 1시간봉은 render에서 수백 ms를 막을 수 있다. 모든 간격을 UTC 일자 단위로 yield·abort 가능하게 계산하고, 현재 partial 구간만 매초 동기로 갱신한다.
+
+---
+
+## 2026-08-25: 결합된 설정 저장과 응답 유실 정본화를 한 계약으로 설계한다
+
+### 증상
+
+- 캘린더 공개 범위와 멤버 교체를 별도 RPC로 저장해 첫 저장만 반영되는 부분 성공이 가능했다.
+- 태그·캘린더 쓰기가 서버에 반영된 뒤 응답이나 후속 재조회만 실패하면 UI가 이전 draft를 복원하거나 다시 저장을 허용해, 삭제 부활·UUID 중복·캘린더 중복 생성 위험이 생겼다.
+- 저장 중 팝오버를 닫고 다시 열면 컴포넌트 로컬 `saving` 상태가 사라져 같은 전체 목록 쓰기가 겹칠 수 있었다.
+
+### 교훈
+
+- 함께 성립해야 하는 설정과 멤버 변경은 DB의 한 트랜잭션·한 RPC에서 검증하고 적용한다. renderer 보상 호출로 원자성을 흉내 내지 않는다.
+- persistence 성공 여부와 canonical refresh 성공 여부를 별도 상태로 다룬다. 저장 성공+재조회 실패는 재저장을 허용하지 않고, 저장 응답 유실+재조회 성공은 정본이 사용자의 의도와 일치하는지 확인한 뒤에만 성공으로 채택한다.
+- 결과를 확정할 수 없으면 제출 draft와 필요한 재조회 강도를 보존하고 mutation을 잠근다. 더 약한 후속 metadata 재조회가 미해결 event 재조회 의무를 지우면 안 된다.
+- 비동기 쓰기 잠금과 reconciliation 상태는 닫기·재마운트로 사라지는 컴포넌트 로컬 state에만 두지 않는다. 모듈 범위 불변 snapshot과 구독 또는 동등한 생명주기 경계를 사용한다.
+- 테스트는 `commit 후 응답 유실`, `저장 성공 후 reload 실패`, `둘 다 실패`, `저장 중 닫기→재열기`, `후속 더 약한 저장`을 각각 분리해 실제 재시도 가능 여부와 canonical 수렴을 검증한다.
+
+---
+
+## 2026-08-25: 실시간 invalidation과 낙관적 메타데이터의 신뢰 경계를 분리한다
+
+### 증상
+
+- Supabase Realtime 행 payload를 renderer까지 그대로 전달하면 정본 재조회 전에 권한 없는 일정 제목·메모가 프로세스 경계를 넘을 수 있었다.
+- 캘린더 설정을 한 번만 낙관 반영하면 동시 `loadAll()`이나 A→B→A 계정 전환이 임시 상태를 덮고, 삭제 중에는 설정 모달이 정본 확인 전에 닫힐 수 있었다.
+- preview 일정 쓰기가 존재하지 않거나 삭제된 태그 ID를 허용해 실제 DB의 UUID·FK 계약과 달랐다.
+
+### 교훈
+
+- Realtime은 신뢰할 수 없는 행 전달 통로가 아니라 `{ table, eventType }` 수준의 row-free invalidation 신호로만 쓴다. renderer는 현재 actor를 다시 검증하는 canonical IPC로 데이터를 재조회한다.
+- 낙관적 메타데이터는 actor와 mutation token에 묶인 overlay/tombstone으로 보존하고, 정본 snapshot과 분리한다. 동시 refresh 뒤에는 overlay를 재적용하고, 계정 전환 중 오래된 완료는 다른 actor 상태를 검증하거나 닫지 못하게 한다.
+- metadata freshness와 event-row freshness를 별도로 판정한다. 정본 메타데이터가 새로 왔다면 event 재조회 실패와 무관하게 commit 여부를 판정할 수 있어야 한다.
+- preview/mock도 실제 쓰기와 같은 UUID·FK 검증을 mutation 전에 수행하고, 실패 전후 전체 상태가 동일한지 테스트한다.
+
+---
+
+## 2026-08-25: 일정 정체성과 현재 저장 가능 여부를 저장 직전에 다시 확인한다
+
+### 증상
+
+- Google 인증이 풀린 뒤 대체할 편집 가능 캘린더가 없는데도 이전 Google 선택값이 남아 저장 버튼과 submit 경로가 열릴 수 있었다.
+- B flow 일정이 다른 캘린더로 이동하면 `sourceCalendarId`가 바뀌므로, 이를 일정 정체성에 포함하면 같은 UUID의 정본 행을 놓쳤다. 반대로 ID만 비교하면 Google·legacy 등 다른 저장소의 같은 ID 행을 잘못 채택할 수 있었다.
+- 실시간 갱신 경로만 정체성 helper를 쓰고 드래그·상세·빠른 편집 후 정본화가 ID만 비교하면 같은 결함이 다른 경로에서 다시 나타났다.
+
+### 교훈
+
+- 저장 대상의 가용성은 선택 effect뿐 아니라 버튼 활성화와 실제 submit 경계에서 모두 다시 확인한다. 인증·권한 변경 뒤 fallback이 없으면 stale 선택을 즉시 비운다.
+- canonical B flow 일정의 불변 identity는 저장소 namespace와 일정 UUID다. 캘린더 ID처럼 이동 가능한 속성은 identity에 넣지 않는다.
+- 같은 raw UUID가 다른 저장소에 존재할 수 있으므로 Google·legacy·vacation은 source namespace를 유지한다.
+- 정본화 helper는 실시간 알림, 드래그, 상세 편집, 빠른 편집, 연결된 할일 역동기화까지 모든 소비 경로에 동일하게 적용하고, 비동기 요청 시작 전 identity snapshot을 보존한다.
+
+---
+
+## 2026-08-25: 전체 목록 낙관 반영은 정본·projection·응답 유실 상태를 분리한다
+
+### 증상
+
+- 태그 팝오버의 로컬 draft만 먼저 바꾸면 상단 TagBar와 일정 필터·표시는 저장과 재조회가 끝날 때까지 이전 값을 유지했다.
+- full-list 저장은 응답만 유실돼도 실제 반영 여부가 불명확하며, 정본 재조회 전 다음 전체 목록 쓰기를 허용하면 다른 관리자의 변경을 덮을 수 있었다.
+- 새 태그의 임시 ID나 삭제된 태그의 stale UUID가 일정 작성·편집과 로컬 필터 설정으로 흘러갈 수 있었다.
+
+### 교훈
+
+- 공유 소비자가 읽는 store에 actor+token overlay를 먼저 반영하되, raw canonical snapshot과 projected 목록은 별도로 보존한다. 동시 재조회는 raw 정본을 갱신한 뒤 overlay를 다시 적용한다.
+- full-list 저장 결과는 `반영 확인 / 정확한 미반영 / 판정 불가`로 나누고, 판정 불가 또는 저장 성공 뒤 재조회 실패에서는 fresh canonical 확인 전 다음 쓰기를 잠근다.
+- 사용자별 draft·overlay는 격리하지만 전역 태그 테이블의 in-flight/reconciliation 쓰기 잠금은 모든 사용자에게 적용한다. 모든 await 뒤에는 시작 actor와 token을 다시 확인한다.
+- 생성용 임시 ID는 명시적 prefix로 구분하고 IPC, 일정 FK, localStorage에 보내지 않는다. 서버 응답이 준 실제 UUID로 같은 overlay를 교체한다.
+- 삭제 overlay는 tombstone으로 stale event tag를 즉시 `태그 없음`처럼 표시하되, 빈 태그 배열이 단순 로드 실패일 수도 있으므로 raw canonical freshness나 정확한 tombstone 없이 기존 tagId를 지우지 않는다.
+
+---
+
+## 2026-08-25: 공급자 로컬 ID는 모든 일정 경로에서 source namespace와 함께 보존한다
+
+### 증상
+
+- 서로 다른 Google 캘린더나 B flow 일정이 같은 raw ID를 쓰면 캐시 병합이 한 행을 지우고, 편집·삭제가 먼저 찾은 다른 저장소 행으로 향할 수 있었다.
+- 화면의 React key만 source-aware로 바꿔도 동기화, 드래그, 상세 패널, 검색, 위젯, 재시도·롤백이 ID만 비교하면 같은 오배선이 다른 경로에서 재발했다.
+- 같은 raw ID의 privacy migration 둘이 겹칠 때 단일 active lease와 raw alias 하나만 유지하면, 먼저 끝난 작업이 아직 진행 중인 다른 작업의 대기·별칭을 지울 수 있었다.
+
+### 교훈
+
+- 공급자 로컬 ID는 단독 정체성이 아니다. Google은 calendar ID, legacy는 저장소 표식, canonical B flow는 이동 가능한 calendar ID를 제외한 B flow namespace와 UUID를 함께 사용한다.
+- 하나의 composite identity helper를 캐시 dedupe, full·incremental sync, React key·선택, 드래그 ghost, mutation resolve, optimistic update, retry, rollback에 동일하게 적용한다.
+- target identity가 없는 legacy 호출은 후보가 정확히 하나일 때만 진행하고, 여러 namespace가 같은 raw ID를 공유하면 fail closed한다.
+- migration alias와 intent mutex도 source-aware로 유지한다. raw follower는 관련된 모든 active lease가 끝날 때까지 기다리고, 하나라도 결과가 불명확하면 다른 replacement를 추측하지 않고 실패해야 한다.
+- 회귀 테스트는 같은 ID의 Google A·Google B·B flow를 동시에 두고 full/partial/incremental sync, exact edit/delete, 실패 rollback, 겹친 migration의 staggered completion, 모든 UI consumer key·선택을 함께 검증한다.
+
+---
+
+## 2026-08-26: 파생된 표시 문구와 저장 필수값을 분리한다
+
+### 증상
+
+- 에피소드·파트·씬 연결 대상을 고르지 않아도 `에피소드 선택...` 같은 자동 제목이 비어 있지 않아 만들기 버튼과 submit 경로가 열렸다.
+- 불완전한 연결 일정은 재조회 때 `custom` 또는 더 낮은 연결 유형으로 바뀌면서 placeholder 제목만 남을 수 있었다.
+
+### 교훈
+
+- 자동 제목·placeholder는 표시 상태일 뿐 저장 완결성의 증거로 사용하지 않는다.
+- 연결형 일정은 현재 episode → part → scene 목록의 실제 membership을 단계별로 검증하고, 버튼 활성화와 submit handler가 동일한 gate를 재사용한다.
+- truthy ID만 확인하지 말고 옵션 목록이 갱신되어 stale 선택이 사라진 경우도 저장 직전에 차단한다.
+
+---
+
+## 2026-08-26: Realtime 재연결은 이벤트 재생이 아니라 정본 재조회 경계다
+
+### 증상
+
+- Realtime이 끊긴 동안 멤버 권한이 회수되거나 비공개 일정이 바뀌면, 재가입 뒤에도 누락된 `postgres_changes`는 자동 재생되지 않았다.
+- 메인 화면의 일반 `loadData()`는 공유 캘린더 event cache를 갱신하지 않았고, 팝업 위젯은 재연결 상태 자체를 구독하지 않아 접근 불가 일정이 화면에 남을 수 있었다.
+- 최초 join과 reconnect가 같은 `SUBSCRIBED` 문자열이라 renderer가 구독 횟수만으로 구분하면 초기 연결 실패나 SDK의 같은 채널 auto-rejoin을 놓칠 수 있었다.
+
+### 교훈
+
+- Realtime 상태의 정본인 구독 계층이 최초 join과 단절 뒤 join을 구분해 row-free metadata로 전달한다. 오류·타임아웃·종료 뒤 다음 `SUBSCRIBED` 한 번만 reconnect catch-up으로 소비한다.
+- 재연결은 놓친 행을 추측하거나 replay로 간주하지 않고, 현재 actor 권한을 다시 검증하는 canonical `loadBflowEvents({ broadcast: false })`로 수렴시킨다.
+- 메인 창과 팝업 창은 같은 coalescing queue를 사용해 burst는 한 번으로 합치고, 조회 중 새 신호만 직렬 재조회한다. 최초 연결의 기존 일반 로드는 유지하되 캘린더 추가 조회는 하지 않는다.
+- 상태 IPC를 확장할 때 기존 문자열 첫 인자는 유지하고, 메인 창·모든 팝업·preload가 boolean reconnect metadata를 빠뜨리지 않는지 전송 경계 테스트로 고정한다.

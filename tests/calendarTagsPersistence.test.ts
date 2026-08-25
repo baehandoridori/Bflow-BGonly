@@ -6,6 +6,7 @@ const storePath = 'electron/calendarStore.ts';
 const migrationPath = 'DEVLOG/migrations/2026-08-24-shared-calendars.sql';
 
 function between(source: string, start: string, end: string): string {
+  source = source.replace(/\r\n?/g, '\n');
   const from = source.indexOf(start);
   const to = source.indexOf(end, from);
   assert.notEqual(from, -1, `missing start: ${start}`);

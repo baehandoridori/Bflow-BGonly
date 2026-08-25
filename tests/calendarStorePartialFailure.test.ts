@@ -74,7 +74,10 @@ test('partial failures apply successful metadata and preserve the last successfu
 
   try {
     const { useCalendarStore } = await import(`../src/stores/useCalendarStore.ts?partial-failure=${Date.now()}`);
-    await useCalendarStore.getState().loadAll();
+    assert.deepEqual(await useCalendarStore.getState().loadAll(), {
+      calendarsFresh: true,
+      tagsFresh: true,
+    });
     assert.equal(calendarListCalls, 1);
     assert.equal(calendarTagsListCalls, 1);
     assert.deepEqual(useCalendarStore.getState().calendars.map(({ id, name }) => ({ id, name })), [
@@ -85,7 +88,10 @@ test('partial failures apply successful metadata and preserve the last successfu
     ]);
 
     console.warn = () => {};
-    await useCalendarStore.getState().loadAll();
+    assert.deepEqual(await useCalendarStore.getState().loadAll(), {
+      calendarsFresh: true,
+      tagsFresh: false,
+    });
 
     assert.equal(calendarListCalls, 2);
     assert.equal(calendarTagsListCalls, 2);
@@ -98,7 +104,10 @@ test('partial failures apply successful metadata and preserve the last successfu
       { id: 'tag-1', name: '기존 태그' },
     ]);
 
-    await useCalendarStore.getState().loadAll();
+    assert.deepEqual(await useCalendarStore.getState().loadAll(), {
+      calendarsFresh: false,
+      tagsFresh: true,
+    });
 
     assert.equal(calendarListCalls, 3);
     assert.equal(calendarTagsListCalls, 3);
@@ -113,7 +122,10 @@ test('partial failures apply successful metadata and preserve the last successfu
 
     const olderLoad = useCalendarStore.getState().loadAll();
     const latestLoad = useCalendarStore.getState().loadAll();
-    await latestLoad;
+    assert.deepEqual(await latestLoad, {
+      calendarsFresh: true,
+      tagsFresh: false,
+    });
 
     assert.equal(calendarListCalls, 5);
     assert.equal(calendarTagsListCalls, 5);
@@ -130,7 +142,10 @@ test('partial failures apply successful metadata and preserve the last successfu
       created_at: '2026-08-24T00:30:00.000Z',
     }]);
     olderTags.resolve([{ id: 'stale-tag', name: '늦게 끝난 예전 태그', color: '#D63031', sort_order: 9 }]);
-    await olderLoad;
+    assert.deepEqual(await olderLoad, {
+      calendarsFresh: false,
+      tagsFresh: false,
+    }, 'a superseded call cannot report metadata that it did not apply as fresh');
 
     assert.deepEqual(useCalendarStore.getState().calendars.map(({ id, name }) => ({ id, name })), [
       { id: 'latest-calendar', name: '가장 최신 캘린더' },

@@ -6,6 +6,27 @@ import { createRetryManager } from './retry-utils';
 // 모든 테이블 변경을 하나의 채널로 구독 (무료 플랜 연결 수 절약)
 
 type ChangePayload = RealtimePostgresChangesPayload<Record<string, unknown>>;
+export type SharedCalendarRealtimeTable =
+  | 'calendars'
+  | 'calendar_members'
+  | 'calendar_events'
+  | 'calendar_tags';
+
+export type SharedCalendarRealtimeInvalidation = {
+  eventType: ChangePayload['eventType'];
+};
+
+/** Renderer가 최초 join과 retry 뒤 join을 구분하되 DB 행은 받지 않는 상태 메타데이터. */
+export type RealtimeStatusMetadata = {
+  reconnected: boolean;
+};
+
+const SHARED_CALENDAR_REALTIME_TABLES: readonly SharedCalendarRealtimeTable[] = [
+  'calendars',
+  'calendar_members',
+  'calendar_events',
+  'calendar_tags',
+];
 
 export interface RealtimeCallbacks {
   onSceneChange: (payload: ChangePayload) => void;
@@ -15,8 +36,12 @@ export interface RealtimeCallbacks {
   onEpisodeChange: (payload: ChangePayload) => void;
   onPartChange: (payload: ChangePayload) => void;
   onSceneWorkLinkChange?: (payload: ChangePayload) => void;
+  onCalendarChange: (
+    table: SharedCalendarRealtimeTable,
+    payload: SharedCalendarRealtimeInvalidation,
+  ) => void;
   onActivityInsert: (payload: ChangePayload) => void;
-  onStatusChange: (status: string) => void;
+  onStatusChange: (status: string, metadata: RealtimeStatusMetadata) => void;
   /** Supabase presence sync/join/leave — 전체 presence 상태 스냅샷 전달 */
   onPresenceSync?: (state: Record<string, unknown[]>) => void;
 }
@@ -127,6 +152,18 @@ function createChannel(callbacks: RealtimeCallbacks): RealtimeChannel {
         callbacks.onActivityInsert(payload);
       },
     );
+  for (const table of SHARED_CALENDAR_REALTIME_TABLES) {
+    built.on(
+      'postgres_changes',
+      { event: '*', schema: 'public', table },
+      (payload) => {
+        console.log(`[Realtime] ${table} 이벤트 수신:`, payload.eventType);
+        // 공유 캘린더 행은 renderer 권한 경계 밖으로 전달하지 않는다. 변경 종류만 알리고,
+        // 각 renderer가 현재 actor 기준의 canonical IPC를 다시 읽어 권한을 재검증한다.
+        callbacks.onCalendarChange(table, { eventType: payload.eventType });
+      },
+    );
+  }
   // presence 는 와일드카드('*') 미지원 → sync/join/leave 3개 이벤트를 개별 구독.
   // 각 이벤트마다 전체 상태를 다시 병합하도록 스냅샷을 넘긴다.
   const emitPresence = () => callbacks.onPresenceSync?.(built.presenceState() as Record<string, unknown[]>);
@@ -140,15 +177,15 @@ function createChannel(callbacks: RealtimeCallbacks): RealtimeChannel {
 function scheduleRetry(): void {
   if (!savedCallbacks) return;
   const scheduled = retry.schedule(() => {
-    if (savedCallbacks) reconnect(savedCallbacks);
+    if (savedCallbacks) reconnect(savedCallbacks, true);
   });
   // 최대 재시도 초과 → 영구 실패 알림
   if (!scheduled) {
-    savedCallbacks.onStatusChange('CLOSED');
+    savedCallbacks.onStatusChange('CLOSED', { reconnected: false });
   }
 }
 
-function reconnect(callbacks: RealtimeCallbacks): void {
+function reconnect(callbacks: RealtimeCallbacks, isRetry: boolean): void {
   // 기존 채널 정리
   if (channel) {
     supabase.removeChannel(channel);
@@ -159,13 +196,24 @@ function reconnect(callbacks: RealtimeCallbacks): void {
   channel = newChannel;
   // 새 채널은 아직 join 전 → track 금지 상태로 초기화.
   isSubscribed = false;
+  // retry로 만든 채널의 첫 성공 join만 renderer catch-up 경계다. 같은 채널이
+  // SUBSCRIBED를 중복 통지해도 정본 재조회를 반복하지 않도록 한 번만 소비한다.
+  let reconnectCatchUpPending = isRetry;
 
   newChannel.subscribe((status) => {
     // 이미 교체된 채널의 콜백은 무시 (stale 방지)
     if (channel !== newChannel) return;
 
     console.log(`[Realtime] 구독 상태: ${status}`);
-    callbacks.onStatusChange(status);
+    // Supabase SDK는 CHANNEL_ERROR/join timeout 뒤 같은 RealtimeChannel 안에서도
+    // 자동 rejoin한다. 외부 retry가 새 채널을 만들기 전에 성공할 수 있으므로,
+    // 연결 단절을 본 현재 채널도 다음 성공 join에서 catch-up을 한 번 요구한다.
+    if (status === 'TIMED_OUT' || status === 'CLOSED' || status === 'CHANNEL_ERROR') {
+      reconnectCatchUpPending = true;
+    }
+    const reconnected = status === 'SUBSCRIBED' && reconnectCatchUpPending;
+    if (status === 'SUBSCRIBED') reconnectCatchUpPending = false;
+    callbacks.onStatusChange(status, { reconnected });
 
     if (status === 'SUBSCRIBED') {
       // 연결 성공 — 재시도 카운터 초기화
@@ -191,7 +239,7 @@ export function setupRealtimeSubscription(callbacks: RealtimeCallbacks): () => v
   savedCallbacks = callbacks;
   retry.reset();
 
-  reconnect(callbacks);
+  reconnect(callbacks, false);
 
   // cleanup 함수 반환
   return () => {

@@ -7,6 +7,14 @@ import type { CalendarEvent } from '@/types/calendar';
 import { EVENT_COLORS } from '@/types/calendar';
 import type { DragMode, DragPreview } from '@/hooks/useCalendarDnD';
 import { WEEKDAYS, fmtDate, parseDate, addDays, daysBetween } from '@/utils/calendarDate';
+import { formatEventChipText } from '@/utils/calendarEventFilter';
+import {
+  calendarEventLinkedTodoId,
+  calendarEventIdentityKey,
+  hasSameCalendarEventIdentity,
+  snapshotCalendarEventIdentity,
+  type CalendarEventIdentity,
+} from '@/utils/calendarEventIdentity';
 import { floatingGlassStyle, tooltipGlassStyle } from '@/utils/glassStyles';
 
 /** 이벤트의 연속 바 레이아웃 계산 */
@@ -63,7 +71,7 @@ function layoutEventBars(
       rows.push(new Array(cols).fill(''));
     }
     for (let c = startCol; c <= endCol; c++) {
-      rows[placed][c] = ev.id;
+      rows[placed][c] = calendarEventIdentityKey(ev);
     }
 
     bars.push({
@@ -85,20 +93,24 @@ function layoutEventBars(
 
 function EventBarChip({
   bar, onClick, onDragStart, isDragging, isGhost,
-  hoveredEventId, onHover, onContextMenu,
+  hoveredEventIdentity, onHover, onContextMenu, tagNameById, calendarNameById,
 }: {
   bar: EventBar;
   onClick: (e: CalendarEvent) => void;
-  onDragStart?: (eventId: string, mode: DragMode, anchorDate: string) => void;
+  onDragStart?: (event: CalendarEvent, mode: DragMode, anchorDate: string) => void;
   isDragging?: boolean;
   isGhost?: boolean;
-  hoveredEventId?: string | null;
-  onHover?: (id: string | null) => void;
+  hoveredEventIdentity?: CalendarEventIdentity | null;
+  onHover?: (identity: CalendarEventIdentity | null) => void;
   onContextMenu?: (ev: CalendarEvent, e: React.MouseEvent) => void;
+  tagNameById: Record<string, string>;
+  calendarNameById: Record<string, string>;
 }) {
   const ev = bar.event;
   const hex = ev.color || EVENT_COLORS[0];
-  const isHovered = hoveredEventId === ev.id;
+  const isHovered = hoveredEventIdentity
+    ? hasSameCalendarEventIdentity(hoveredEventIdentity, ev)
+    : false;
   const [showTooltip, setShowTooltip] = useState(false);
   const [tooltipPos, setTooltipPos] = useState({ x: 0, y: 0 });
   const tooltipTimer = useRef<ReturnType<typeof setTimeout>>();
@@ -159,7 +171,7 @@ function EventBarChip({
         dragStarted = true;
         document.removeEventListener('mousemove', onMove);
         document.removeEventListener('mouseup', onUp);
-        onDragStart(ev.id, mode, anchorDate!);
+        onDragStart(ev, mode, anchorDate!);
       }
     };
 
@@ -176,7 +188,7 @@ function EventBarChip({
   };
 
   const handleEnter = (e: React.MouseEvent) => {
-    onHover?.(ev.id);
+    onHover?.(snapshotCalendarEventIdentity(ev));
     setTooltipPos({ x: e.clientX, y: e.clientY });
     tooltipTimer.current = setTimeout(() => setShowTooltip(true), 400);
   };
@@ -201,6 +213,7 @@ function EventBarChip({
       onMouseLeave={handleLeave}
       onContextMenu={onContextMenu ? (e) => onContextMenu(ev, e) : undefined}
       data-event-id={ev.id}
+      data-event-identity={calendarEventIdentityKey(ev)}
       className={cn(
         'absolute text-left z-10 calendar-event-bar',
         isGhost ? 'pointer-events-none opacity-50' : 'transition-all duration-150',
@@ -246,8 +259,8 @@ function EventBarChip({
         )}
         {!bar.isStart && <span className="text-[9px] mr-0.5 opacity-60">◂</span>}
         {ev.type === 'vacation' && <Palmtree size={10} className="shrink-0 mr-1 opacity-80" />}
-        {(ev.linkedTodoId || ev.id.startsWith('cal_')) && <CheckSquare size={9} className="shrink-0 mr-1 opacity-70" />}
-        <span className="truncate">{ev.title}</span>
+        {calendarEventLinkedTodoId(ev) && <CheckSquare size={9} className="shrink-0 mr-1 opacity-70" />}
+        <span className="truncate">{formatEventChipText(ev, tagNameById, calendarNameById)}</span>
         {!bar.isEnd && <span className="text-[9px] ml-auto pl-0.5 opacity-60 shrink-0">▸</span>}
         {/* 리사이즈 핸들 (오른쪽) */}
         {bar.isEnd && !isGhost && !ev.isReadOnly && (
@@ -325,7 +338,7 @@ function OverflowPopup({
             : `${evS.getMonth() + 1}/${evS.getDate()} → ${evE.getMonth() + 1}/${evE.getDate()}`;
           return (
             <button
-              key={ev.id}
+              key={calendarEventIdentityKey(ev)}
               onClick={() => { onEventClick(ev); onClose(); }}
               className="flex items-center gap-2 px-2 py-1.5 rounded-lg hover:bg-bg-primary/50 transition-colors text-left cursor-pointer"
             >
@@ -359,6 +372,7 @@ export function CalendarGrid({
   onEventClick,
   onDragStart,
   dragPreview,
+  draggedEventIdentity,
   isDragging,
   onCellMouseDown,
   isDateInDragRange,
@@ -368,6 +382,8 @@ export function CalendarGrid({
   monthDirection = 0,
   focusedDate,
   pulseDate,
+  tagNameById,
+  calendarNameById,
 }: {
   weeks: Date[][];
   events: CalendarEvent[];
@@ -375,8 +391,9 @@ export function CalendarGrid({
   currentMonth: number;
   maxVisibleBars: number;
   onEventClick: (ev: CalendarEvent) => void;
-  onDragStart?: (eventId: string, mode: DragMode, anchorDate: string) => void;
+  onDragStart?: (event: CalendarEvent, mode: DragMode, anchorDate: string) => void;
   dragPreview?: DragPreview | null;
+  draggedEventIdentity?: CalendarEventIdentity | null;
   isDragging?: boolean;
   onCellMouseDown?: (e: React.MouseEvent, date: string) => void;
   isDateInDragRange?: (date: string) => boolean;
@@ -386,19 +403,23 @@ export function CalendarGrid({
   monthDirection?: number;
   focusedDate?: string | null;
   pulseDate?: string | null;
+  tagNameById: Record<string, string>;
+  calendarNameById: Record<string, string>;
 }) {
   const [overflow, setOverflow] = useState<{ date: string; rect: DOMRect } | null>(null);
-  const [hoveredEventId, setHoveredEventId] = useState<string | null>(null);
+  const [hoveredEventIdentity, setHoveredEventIdentity] = useState<CalendarEventIdentity | null>(null);
 
   // 드래그 중이면 프리뷰 날짜로 이벤트를 대체해서 고스트 바 표시
   const displayEvents = useMemo(() => {
     if (!dragPreview) return events;
     return events.map((e) =>
-      e.id === dragPreview.eventId
+      (draggedEventIdentity
+        ? hasSameCalendarEventIdentity(e, draggedEventIdentity)
+        : e.id === dragPreview.eventId)
         ? { ...e, startDate: dragPreview.newStartDate, endDate: dragPreview.newEndDate }
         : e,
     );
-  }, [events, dragPreview]);
+  }, [events, dragPreview, draggedEventIdentity]);
 
   return (
     <div className="flex flex-col flex-1 h-full min-h-0" onWheel={onWheel}>
@@ -528,18 +549,26 @@ export function CalendarGrid({
 
               {/* 이벤트 바 (오버레이) */}
               {bars.filter((b) => b.row < maxVisibleBars).map((bar) => {
-                const barIsDragging = isDragging && dragPreview?.eventId === bar.event.id;
+                const barIsDragging = Boolean(
+                  isDragging
+                  && dragPreview?.eventId === bar.event.id
+                  && (draggedEventIdentity
+                    ? hasSameCalendarEventIdentity(bar.event, draggedEventIdentity)
+                    : true),
+                );
                 return (
                   <EventBarChip
-                    key={`${bar.event.id}-w${wi}-c${bar.startCol}`}
+                    key={`${calendarEventIdentityKey(bar.event)}-w${wi}-c${bar.startCol}`}
                     bar={bar}
                     onClick={onEventClick}
                     onDragStart={onDragStart}
                     isDragging={barIsDragging}
                     isGhost={barIsDragging}
-                    hoveredEventId={hoveredEventId}
-                    onHover={setHoveredEventId}
+                    hoveredEventIdentity={hoveredEventIdentity}
+                    onHover={setHoveredEventIdentity}
                     onContextMenu={onEventContextMenu}
+                    tagNameById={tagNameById}
+                    calendarNameById={calendarNameById}
                   />
                 );
               })}

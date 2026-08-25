@@ -13,6 +13,7 @@ export function mapVacationEvents(raw: VacationEvent[], idPrefix: VacationIdPref
     memo: '',
     color: VACATION_COLOR,
     type: 'vacation' as const,
+    source: 'vacation' as const,
     startDate: v.startDate,
     endDate: v.endDate,
     createdBy: v.name,

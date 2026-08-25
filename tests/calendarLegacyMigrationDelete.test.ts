@@ -43,8 +43,10 @@ type LegacyPrivateRow = Omit<CalendarEventRow, 'calendar_id' | 'tag_id' | 'all_d
   type: string | null;
 };
 
+type CalendarTagRow = { id: string; name: string; color: string; sort_order: number };
+
 type ServiceModule = {
-  loadBflowEvents(): Promise<void>;
+  loadBflowEvents(options?: { requireTagsFresh?: boolean }): Promise<boolean>;
   getEvents(): Promise<Array<Record<string, unknown>>>;
   addEvent(event: Record<string, unknown>): Promise<void>;
   deleteEvent(eventId: string): Promise<void>;
@@ -55,6 +57,7 @@ type Calls = {
   bflowDeletes: string[];
   legacyDeletes: string[];
   legacyReadUsers: string[];
+  eventReads: number;
 };
 
 let bundleSource: Promise<string> | undefined;
@@ -127,6 +130,9 @@ async function bundledServiceSource(): Promise<string> {
 async function createHarness(options: {
   calendars: CalendarRow[];
   rows: CalendarEventRow[];
+  listCalendars?(): Promise<CalendarRow[]>;
+  listTags?(): Promise<CalendarTagRow[]>;
+  listEvents?(): Promise<CalendarEventRow[]>;
   readLegacy(userId: string, attempt: number): Promise<LegacyPrivateRow[]>;
 }): Promise<{ service: ServiceModule; calls: Calls; restore(): void }> {
   const globalScope = globalThis as Record<string, unknown>;
@@ -148,11 +154,16 @@ async function createHarness(options: {
     }
   };
 
-  const calls: Calls = { bflowDeletes: [], legacyDeletes: [], legacyReadUsers: [] };
+  const calls: Calls = {
+    bflowDeletes: [], legacyDeletes: [], legacyReadUsers: [], eventReads: 0,
+  };
   const electronAPI = {
-    calendarList: async () => options.calendars,
-    calendarTagsList: async () => [],
-    calendarEventsList: async () => options.rows,
+    calendarList: async () => options.listCalendars?.() ?? options.calendars,
+    calendarTagsList: async () => options.listTags?.() ?? [],
+    calendarEventsList: async () => {
+      calls.eventReads += 1;
+      return options.listEvents?.() ?? options.rows;
+    },
     calendarEventCreate: async (input: Record<string, unknown>) => ({ ...input, id: 'legacy-only' }),
     calendarEventUpdate: async () => {},
     calendarEventDelete: async (id: string) => { calls.bflowDeletes.push(id); },
@@ -221,6 +232,108 @@ test('a cold legacy-read failure blocks deletion of the current personal B flow 
     assert.deepEqual(harness.calls.legacyReadUsers, ['user-1', 'user-1']);
     assert.equal((await harness.service.getEvents()).some((event) => event.id === 'migrated-event'), true);
   } finally {
+    harness.restore();
+  }
+});
+
+test('loadBflowEvents returns false and preserves the last cache when its canonical event read fails', async () => {
+  let eventReadFails = false;
+  const originalWarn = console.warn;
+  const existing = eventRow('existing-event', 'personal-1');
+  const harness = await createHarness({
+    calendars: [calendarRow('personal-1', 'user-1')],
+    rows: [existing],
+    listEvents: async () => {
+      if (eventReadFails) throw new Error('canonical event outage');
+      return [existing];
+    },
+    readLegacy: async () => [],
+  });
+  try {
+    setUser(harness.service, 'user-1');
+    assert.equal(await harness.service.loadBflowEvents(), true);
+    assert.deepEqual((await harness.service.getEvents()).map((event) => event.id), ['existing-event']);
+
+    console.warn = () => {};
+    eventReadFails = true;
+    assert.equal(await harness.service.loadBflowEvents(), false);
+    assert.deepEqual(
+      (await harness.service.getEvents()).map((event) => event.id),
+      ['existing-event'],
+      'a failed reload cannot partially replace the last confirmed event cache',
+    );
+  } finally {
+    console.warn = originalWarn;
+    harness.restore();
+  }
+});
+
+test('a warmed calendar metadata failure returns false before stale metadata can remap events', async () => {
+  let calendarReadFails = false;
+  let rows = [eventRow('existing-event', 'personal-1')];
+  const originalWarn = console.warn;
+  const harness = await createHarness({
+    calendars: [calendarRow('personal-1', 'user-1')],
+    rows,
+    listCalendars: async () => {
+      if (calendarReadFails) throw new Error('calendar metadata outage');
+      return [calendarRow('personal-1', 'user-1')];
+    },
+    listEvents: async () => rows,
+    readLegacy: async () => [],
+  });
+  try {
+    setUser(harness.service, 'user-1');
+    assert.equal(await harness.service.loadBflowEvents(), true);
+    assert.equal(harness.calls.eventReads, 1);
+
+    console.warn = () => {};
+    calendarReadFails = true;
+    rows = [eventRow('must-not-replace-cache', 'personal-1')];
+    assert.equal(await harness.service.loadBflowEvents(), false);
+    assert.equal(harness.calls.eventReads, 1, 'stale calendar metadata must stop before the event read');
+    assert.deepEqual((await harness.service.getEvents()).map((event) => event.id), ['existing-event']);
+  } finally {
+    console.warn = originalWarn;
+    harness.restore();
+  }
+});
+
+test('a tag-sensitive B flow reload requires a fresh tag list and preserves its event cache on failure', async () => {
+  let tagReadFails = false;
+  let rows = [eventRow('existing-event', 'personal-1')];
+  const originalWarn = console.warn;
+  const harness = await createHarness({
+    calendars: [calendarRow('personal-1', 'user-1')],
+    rows,
+    listTags: async () => {
+      if (tagReadFails) throw new Error('tag metadata outage');
+      return [{ id: 'tag-1', name: '회의', color: '#FDCB6E', sort_order: 0 }];
+    },
+    listEvents: async () => rows,
+    readLegacy: async () => [],
+  });
+  try {
+    setUser(harness.service, 'user-1');
+    assert.equal(await harness.service.loadBflowEvents({ requireTagsFresh: true }), true);
+    assert.equal(harness.calls.eventReads, 1);
+
+    console.warn = () => {};
+    tagReadFails = true;
+    rows = [eventRow('must-not-replace-cache', 'personal-1')];
+    assert.equal(await harness.service.loadBflowEvents({ requireTagsFresh: true }), false);
+    assert.equal(harness.calls.eventReads, 1, 'tag-sensitive refresh stops before events when tags are stale');
+    assert.deepEqual((await harness.service.getEvents()).map((event) => event.id), ['existing-event']);
+
+    assert.equal(
+      await harness.service.loadBflowEvents(),
+      true,
+      'ordinary event refreshes only require fresh calendar metadata',
+    );
+    assert.equal(harness.calls.eventReads, 2);
+    assert.deepEqual((await harness.service.getEvents()).map((event) => event.id), ['must-not-replace-cache']);
+  } finally {
+    console.warn = originalWarn;
     harness.restore();
   }
 });

@@ -12,8 +12,32 @@ let gcalChannel: RealtimeChannel | null = null;
 let broadcastConnected = false;
 type BroadcastListener = (event: string, payload: Record<string, unknown>) => void;
 let listener: BroadcastListener | null = null;
+export type CalendarChangedAction = 'INSERT' | 'UPDATE' | 'DELETE';
+export type TrustedSharedCalendarChange = {
+  action: CalendarChangedAction;
+  senderId?: string;
+  ts: number;
+  trustedSharedCalendarChange: true;
+};
+type CalendarChangedLocalListener = (payload: TrustedSharedCalendarChange) => void;
+let calendarChangedLocalListener: CalendarChangedLocalListener | null = null;
 
 const retry = createRetryManager('Broadcast');
+
+/**
+ * persistence 직후 같은 Electron 프로세스의 창에도 정본 재조회 신호를 보낸다.
+ * 재등록은 이전 listener를 교체하며, 오래된 cleanup이 새 listener를 지우지 않는다.
+ */
+export function setCalendarChangedLocalListener(
+  nextListener: CalendarChangedLocalListener,
+): () => void {
+  calendarChangedLocalListener = nextListener;
+  return () => {
+    if (calendarChangedLocalListener === nextListener) {
+      calendarChangedLocalListener = null;
+    }
+  };
+}
 
 function createChannel(onReceive: BroadcastListener): RealtimeChannel {
   return supabase
@@ -157,7 +181,13 @@ export function broadcastSceneFieldUpdate(
 
 /** 구조적 변경 (에피소드/파트/씬 추가·삭제 등) broadcast 전송 */
 export function broadcastDataChange(table: string, action: string, senderId?: string): void {
-  safeSend('data-change', { table, action, senderId, ts: Date.now() });
+  try {
+    safeSend('data-change', { table, action, senderId, ts: Date.now() });
+  } catch (error) {
+    // calendar IPC를 포함한 DB commit 이후 invalidation이다. 전송 경합이 commit 결과나
+    // 뒤따르는 local calendar fanout을 되돌리면 안 된다.
+    console.warn('[Broadcast] cross-client data-change fanout failed:', error);
+  }
 }
 
 /** v1.25.0~ 액팅 씬 단계 변경 broadcast (sceneState + workRound + feedbackRound 한 번에). */
@@ -242,7 +272,27 @@ export function broadcastSceneAssignmentNotification(payload: Omit<AssignmentBro
 /** 캘린더(공개 GCal 이벤트 + 개인 비공개 이벤트) 변경 broadcast.
  *  수신 측(calendarService) 에서 sync/재렌더 트리거. 다른 기기 비공개 CRUD 도 실시간 반영된다. */
 export function broadcastCalendarChanged(action: string, senderId?: string): void {
-  safeSend('calendar-changed', { action, senderId, ts: Date.now() });
+  const ts = Date.now();
+  if (action === 'INSERT' || action === 'UPDATE' || action === 'DELETE') {
+    try {
+      calendarChangedLocalListener?.({
+        action,
+        senderId,
+        ts,
+        trustedSharedCalendarChange: true,
+      });
+    } catch (error) {
+      // persistence는 이미 성공했다. 한 로컬 창의 전송 실패가 다른 PC 알림을 막지 않는다.
+      console.warn('[Broadcast] local calendar commit fanout failed:', error);
+    }
+  }
+  try {
+    // 기존 cross-client payload 계약에는 local trust 표식을 섞지 않는다.
+    safeSend('calendar-changed', { action, senderId, ts });
+  } catch (error) {
+    // persistence 성공 뒤 전송 채널 경합이 IPC 결과를 실패로 되돌리면 안 된다.
+    console.warn('[Broadcast] cross-client calendar commit fanout failed:', error);
+  }
 }
 
 /** privacy replacement 보상 삭제의 영속 commit을 다른 앱 인스턴스에도 exact row로 전달한다.

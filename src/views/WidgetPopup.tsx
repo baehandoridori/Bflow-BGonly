@@ -28,6 +28,7 @@ import { loadPreferences, loadTheme } from '@/services/settingsService';
 import {
   applyCommittedGoogleDelete,
   applyCommittedPrivacyReplacementDelete,
+  loadBflowEvents,
 } from '@/services/calendarService';
 import {
   fetchFreshUsersFromSupabase,
@@ -44,7 +45,13 @@ import { extractSceneDelta } from '@/utils/realtimeDelta';
 import { loadVacationConfig, connectVacation } from '@/services/vacationService';
 import { useVacationPendingStore } from '@/stores/useVacationPendingStore';
 import { Toaster, toast as sonnerToast } from 'sonner';
-import type { Episode, AppUser, PresenceSnapshotBundle } from '@/types';
+import type {
+  AppUser,
+  ElectronAPI,
+  Episode,
+  PresenceSnapshotBundle,
+  SupabaseRealtimeStatusMetadata,
+} from '@/types';
 import { getPreset, getLightColors, applyTheme, type ThemeColors } from '@/themes';
 import { DEFAULT_GAS_IMAGE_URL } from '@/config';
 
@@ -59,10 +66,122 @@ export function notifyDataChangeWithCooldown() {
   return window.electronAPI?.dataNotifyChange?.();
 }
 
+const POPUP_SHARED_BFLOW_CALENDAR_TABLES = new Set([
+  'calendars',
+  'calendar_members',
+  'calendar_events',
+  'calendar_tags',
+]);
+const POPUP_SHARED_BFLOW_CALENDAR_ACTIONS = new Set(['INSERT', 'UPDATE', 'DELETE']);
+
+function popupSharedBflowCalendarChangeDetail(raw: unknown): unknown | null {
+  if (!raw || typeof raw !== 'object') return null;
+  const value = raw as { event?: unknown; payload?: unknown; table?: unknown; action?: unknown };
+  if (value.event === 'local-calendar-changed') {
+    return value.payload ?? { action: 'local-refresh' };
+  }
+  if (
+    typeof value.table === 'string'
+    && POPUP_SHARED_BFLOW_CALENDAR_TABLES.has(value.table)
+  ) return raw;
+  if (value.event === 'data-change' && value.payload && typeof value.payload === 'object') {
+    const payload = value.payload as { table?: unknown };
+    if (
+      typeof payload.table === 'string'
+      && POPUP_SHARED_BFLOW_CALENDAR_TABLES.has(payload.table)
+    ) return value.payload;
+  }
+  const detail = value.event === 'calendar-changed' ? value.payload : raw;
+  if (!detail || typeof detail !== 'object') return null;
+  const action = (detail as { action?: unknown }).action;
+  return typeof action === 'string' && POPUP_SHARED_BFLOW_CALENDAR_ACTIONS.has(action)
+    ? detail
+    : null;
+}
+
+let popupSharedCalendarRefreshFlight: Promise<void> | null = null;
+let popupSharedCalendarRefreshPhase: 'idle' | 'scheduled' | 'loading' = 'idle';
+let popupSharedCalendarRefreshAgain = false;
+let popupSharedCalendarRefreshDetail: unknown = null;
+
+async function enqueuePopupSharedCalendarRefresh(detail: unknown): Promise<void> {
+  popupSharedCalendarRefreshDetail = detail;
+  if (popupSharedCalendarRefreshFlight) {
+    if (popupSharedCalendarRefreshPhase === 'loading') popupSharedCalendarRefreshAgain = true;
+    return popupSharedCalendarRefreshFlight;
+  }
+
+  const run = async () => {
+    popupSharedCalendarRefreshPhase = 'scheduled';
+    await new Promise<void>((resolve) => setTimeout(resolve, 0));
+    while (true) {
+      popupSharedCalendarRefreshPhase = 'loading';
+      popupSharedCalendarRefreshAgain = false;
+      const refreshDetail = popupSharedCalendarRefreshDetail;
+      try {
+        await loadBflowEvents({ broadcast: false });
+      } catch (error) {
+        console.warn('[Calendar] 팝업 공유 캘린더 정본 재조회 실패:', error);
+      }
+      if (popupSharedCalendarRefreshAgain) {
+        popupSharedCalendarRefreshPhase = 'scheduled';
+        await new Promise<void>((resolve) => setTimeout(resolve, 0));
+        continue;
+      }
+      window.dispatchEvent(new CustomEvent('bflow:calendar-changed', { detail: refreshDetail }));
+      return;
+    }
+  };
+
+  const ownedFlight = run().finally(() => {
+    if (popupSharedCalendarRefreshFlight === ownedFlight) {
+      popupSharedCalendarRefreshFlight = null;
+      popupSharedCalendarRefreshPhase = 'idle';
+      popupSharedCalendarRefreshAgain = false;
+    }
+  });
+  popupSharedCalendarRefreshFlight = ownedFlight;
+  return ownedFlight;
+}
+
+/** 팝업의 독립 cache도 일반 공유 캘린더 신호 뒤 정본을 먼저 읽고 UI를 갱신한다. */
+export async function applyIncomingSharedBflowCalendarChangeInPopup(raw: unknown): Promise<boolean> {
+  const detail = popupSharedBflowCalendarChangeDetail(raw);
+  if (!detail) return false;
+  await enqueuePopupSharedCalendarRefresh(detail);
+  return true;
+}
+
+/** 팝업은 최초 join을 건드리지 않고, 실제 재연결 때만 독립 캘린더 cache를 보충한다. */
+export async function applyPopupRealtimeCalendarReconnectCatchUp(
+  status: string,
+  metadata: SupabaseRealtimeStatusMetadata | undefined,
+): Promise<boolean> {
+  if (status !== 'SUBSCRIBED' || metadata?.reconnected !== true) return false;
+  await enqueuePopupSharedCalendarRefresh({
+    action: 'realtime-reconnect',
+    source: 'supabase-status',
+  });
+  return true;
+}
+
+/** WidgetPopup effect가 실제 사용하는 Realtime status receiver. */
+export function installPopupRealtimeCalendarReconnectCatchUp(
+  subscribe: ElectronAPI['onSupabaseStatus'] | undefined = window.electronAPI?.onSupabaseStatus,
+): (() => void) | undefined {
+  return subscribe?.((status, metadata) => (
+    applyPopupRealtimeCalendarReconnectCatchUp(status, metadata)
+  ));
+}
+
 /** 메인/다른 위젯에서 온 calendar-changed를 이 팝업의 독립 cache에 먼저 반영한다.
- *  PR2에서는 privacy migration 보상으로 영속 삭제가 확정된 Google/B flow/legacy 행만
- *  exact tombstone 처리하며, 일반 add/update 재조회와 realtime 확장은 PR4 범위로 남긴다. */
+ *  일반 공유 캘린더 신호는 정본을 재조회하고, privacy migration 영속 삭제 marker는
+ *  재조회보다 먼저 exact tombstone 처리해 오래된 snapshot의 ghost 복원을 막는다. */
 export async function applyIncomingCalendarChangeInPopup(payload: unknown): Promise<void> {
+  const sharedPayload = payload == null
+    ? { event: 'local-calendar-changed', payload }
+    : payload;
+  if (await applyIncomingSharedBflowCalendarChangeInPopup(sharedPayload)) return;
   try {
     applyCommittedGoogleDelete(payload) || applyCommittedPrivacyReplacementDelete(payload);
   } catch (error) {
@@ -71,8 +190,9 @@ export async function applyIncomingCalendarChangeInPopup(payload: unknown): Prom
   window.dispatchEvent(new CustomEvent('bflow:calendar-changed', { detail: payload }));
 }
 
-/** main이 전달한 Supabase broadcast 중 calendar exact marker만 popup cache 경로로 연결한다. */
+/** main이 전달한 Supabase 공유 변경과 exact marker를 popup cache 경로로 연결한다. */
 export async function applyIncomingSupabaseCalendarChangeInPopup(raw: unknown): Promise<boolean> {
+  if (await applyIncomingSharedBflowCalendarChangeInPopup(raw)) return true;
   if (!raw || typeof raw !== 'object') return false;
   const data = raw as { event?: unknown; payload?: unknown };
   if (data.event !== 'calendar-changed') return false;
@@ -458,6 +578,11 @@ export function WidgetPopup({ widgetId, extraParams }: { widgetId: string; extra
     const cleanupRealtime = window.electronAPI?.onSupabaseRealtime?.((event: unknown) => {
       const { table, payload } = event as import('@/services/supabaseService').SupabaseRealtimeEvent;
 
+      if (popupSharedBflowCalendarChangeDetail(event)) {
+        void applyIncomingSharedBflowCalendarChangeInPopup(event);
+        return;
+      }
+
       if (table === 'users') {
         void reconcilePopupUserDirectory()
           .then((result) => { if (result !== 'deleted') reloadData(); })
@@ -496,11 +621,17 @@ export function WidgetPopup({ widgetId, extraParams }: { widgetId: string; extra
       }
       reloadData();
     });
+    const cleanupRealtimeStatus = installPopupRealtimeCalendarReconnectCatchUp();
 
     // Supabase Broadcast: 즉시 동기화 (Publication 설정 불필요)
     const cleanupBroadcast = window.electronAPI?.onSupabaseBroadcast?.((raw: unknown) => {
       const data = raw as { event: string; payload: Record<string, unknown> };
       if (!data?.event) return;
+
+      if (popupSharedBflowCalendarChangeDetail(raw)) {
+        void applyIncomingSharedBflowCalendarChangeInPopup(raw);
+        return;
+      }
 
       if (data.event === 'scene-update') {
         const { sceneUuid, stage, value } = data.payload as { sceneUuid: string; stage: string; value: boolean };
@@ -519,9 +650,8 @@ export function WidgetPopup({ widgetId, extraParams }: { widgetId: string; extra
         }
       }
       if (data.event === 'calendar-changed') {
-        // 다른 앱 인스턴스에서 persistence가 끝난 exact delete marker도 이 popup의
-        // 독립 calendar cache에 즉시 적용한다. 일반 calendar action은 여기서 full
-        // reload하지 않고 기존 PR2 동작을 유지한다.
+        // 일반 공유 변경은 위 정본 재조회 분기에서 처리된다. 이 잔여 경로는 다른 앱
+        // 인스턴스에서 persistence가 끝난 exact delete marker를 즉시 tombstone한다.
         void applyIncomingSupabaseCalendarChangeInPopup(raw);
         return;
       }
@@ -540,6 +670,7 @@ export function WidgetPopup({ widgetId, extraParams }: { widgetId: string; extra
     return () => {
       cleanupSnapshot?.();
       cleanupRealtime?.();
+      cleanupRealtimeStatus?.();
       cleanupBroadcast?.();
       clearInterval(emergencyPoll);
       if (reloadTimer) clearTimeout(reloadTimer);

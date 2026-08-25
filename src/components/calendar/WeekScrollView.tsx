@@ -3,7 +3,10 @@ import React, { useMemo, useRef, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { CalendarDays } from 'lucide-react';
 import type { CalendarEvent } from '@/types/calendar';
-import { WEEKDAYS, WEEKDAY_SHORT, fmtDate, parseDate, addDays, daysBetween, getISOWeekNumber, hexToRgba } from '@/utils/calendarDate';
+import { useCalendarStore } from '@/stores/useCalendarStore';
+import { WEEKDAYS, fmtDate, addDays, daysBetween, getISOWeekNumber, hexToRgba } from '@/utils/calendarDate';
+import { formatEventTimeRange, sortEventsForList } from '@/utils/calendarEventFilter';
+import { calendarEventIdentityKey } from '@/utils/calendarEventIdentity';
 
 /* ── 로컬 유틸 ──────────────────────────────────────── */
 /** 해당 연도의 일요일 시작 주 배열 생성 (약 53주) */
@@ -79,6 +82,11 @@ export default function WeekScrollView({
   mode = 'week',
 }: WeekScrollViewProps) {
   const is2Week = mode === '2week';
+  const tags = useCalendarStore((state) => state.tags);
+  const tagNameById = useMemo(
+    () => Object.fromEntries(tags.map((tag) => [tag.id, tag.name])) as Record<string, string>,
+    [tags],
+  );
   /* 전체 연도 주 데이터 */
   const allWeeks = useMemo(() => generateYearWeeks(currentYear), [currentYear]);
 
@@ -174,6 +182,7 @@ export default function WeekScrollView({
                   onEventClick={onEventClick}
                   onDateClick={onDateClick}
                   compact={is2Week}
+                  tagNameById={tagNameById}
                 />
               ) : isNear ? (
                 <CompactWeek
@@ -212,6 +221,7 @@ function ActiveWeek({
   onEventClick,
   onDateClick,
   compact,
+  tagNameById,
 }: {
   week: Date[];
   events: CalendarEvent[];
@@ -220,7 +230,10 @@ function ActiveWeek({
   onEventClick: (ev: CalendarEvent) => void;
   onDateClick?: (date: string) => void;
   compact?: boolean;
+  tagNameById: Record<string, string>;
 }) {
+  const sortedEvents = useMemo(() => sortEventsForList(events), [events]);
+
   return (
     <div
       className="rounded-xl p-5 mb-2 flex flex-col"
@@ -280,7 +293,7 @@ function ActiveWeek({
               <div className="flex gap-px" style={{ minHeight: 6 }}>
                 {dayEvents.slice(0, 3).map((ev) => (
                   <div
-                    key={ev.id}
+                    key={calendarEventIdentityKey(ev)}
                     className="rounded-full"
                     style={{
                       width: 5,
@@ -315,7 +328,7 @@ function ActiveWeek({
 
             return (
               <div
-                key={ev.id}
+                key={calendarEventIdentityKey(ev)}
                 className="grid grid-cols-7 gap-1"
               >
                 <div
@@ -351,11 +364,12 @@ function ActiveWeek({
         </div>
       ) : (
         <div data-scroll-events className="flex flex-col gap-2 flex-1 overflow-y-auto mt-2">
-          {events.map((ev) => (
+          {sortedEvents.map((ev) => (
             <EventCard
-              key={ev.id}
+              key={calendarEventIdentityKey(ev)}
               event={ev}
               today={today}
+              tagNameById={tagNameById}
               onClick={(e) => { e.stopPropagation(); onEventClick(ev); }}
             />
           ))}
@@ -369,29 +383,20 @@ function ActiveWeek({
 function EventCard({
   event,
   today,
+  tagNameById,
   onClick,
 }: {
   event: CalendarEvent;
   today: string;
+  tagNameById: Record<string, string>;
   onClick: (e: React.MouseEvent) => void;
 }) {
-  const s = parseDate(event.startDate);
-  const e = parseDate(event.endDate);
-  const isSingle = event.startDate === event.endDate;
-
-  // 요일 포함 날짜 표시: "3/18(수) → 3/20(금)"
-  const dayLabel = (d: Date) =>
-    `${d.getMonth() + 1}/${d.getDate()}(${WEEKDAY_SHORT[d.getDay()]})`;
-
-  const dateRange = isSingle
-    ? dayLabel(s)
-    : `${dayLabel(s)} → ${dayLabel(e)}`;
-
   const dDay = daysBetween(today, event.endDate);
   const dDayLabel =
     dDay === 0 ? 'D-Day' : dDay > 0 ? `D-${dDay}` : `D+${Math.abs(dDay)}`;
-
-  const spanDays = isSingle ? '' : ` (${daysBetween(event.startDate, event.endDate) + 1}일)`;
+  const subtitle = event.allDay === false
+    ? formatEventTimeRange(event, tagNameById)
+    : event.tagId ? tagNameById[event.tagId] : null;
 
   return (
     <motion.div
@@ -412,9 +417,11 @@ function EventCard({
         >
           {event.title}
         </span>
-        <span style={{ fontSize: 9, color: SECONDARY_TEXT }}>
-          {dateRange}{spanDays} · {event.type}
-        </span>
+        {subtitle && (
+          <span style={{ fontSize: 9, color: SECONDARY_TEXT }}>
+            {subtitle}
+          </span>
+        )}
       </div>
       <span
         className="shrink-0 text-[9px] font-bold px-1.5 py-0.5 rounded"
@@ -489,7 +496,7 @@ function CompactWeek({
                     .slice(0, 2)
                     .map((ev) => (
                       <div
-                        key={ev.id}
+                        key={calendarEventIdentityKey(ev)}
                         className="rounded-full"
                         style={{
                           width: 4,

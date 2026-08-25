@@ -2,7 +2,6 @@ import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   CalendarDays, ChevronLeft, ChevronRight, Plus,
-  Palmtree,
 } from 'lucide-react';
 import { cn } from '@/utils/cn';
 import { useDataStore } from '@/stores/useDataStore';
@@ -14,7 +13,7 @@ import { fetchAllVacationEvents } from '@/services/vacationService';
 import { useCalendarDnD } from '@/hooks/useCalendarDnD';
 import type { DragMode } from '@/hooks/useCalendarDnD';
 import type {
-  CalendarEvent, CalendarViewMode, CalendarFilter,
+  BflowCalendar, CalendarEvent, CalendarViewMode,
 } from '@/types/calendar';
 import { mapVacationEvents } from '@/utils/vacationEvents';
 import { MiniCalendar } from '@/components/calendar/MiniCalendar';
@@ -26,7 +25,20 @@ import WeekScrollView, { generateYearWeeks, findWeekIndexForDate } from '@/compo
 import WeekSidebar from '@/components/calendar/WeekSidebar';
 import DayScrollView from '@/components/calendar/DayScrollView';
 import DaySidebar from '@/components/calendar/DaySidebar';
+import { CalendarRail, GOOGLE_CALENDAR_ID } from '@/components/calendar/CalendarRail';
+import { TagBar } from '@/components/calendar/TagBar';
+import { TagManagerPopover } from '@/components/calendar/TagManagerPopover';
+import { CalendarSettingsModal } from '@/components/calendar/CalendarSettingsModal';
 import { useCalendarDragCreate } from '@/hooks/useCalendarDragCreate';
+import { useCalendarStore } from '@/stores/useCalendarStore';
+import { filterCalendarEvents } from '@/utils/calendarEventFilter';
+import {
+  calendarEventLinkedTodoId,
+  calendarEventIdentityKey,
+  hasSameCalendarEventIdentity,
+  snapshotCalendarEventIdentity,
+  type CalendarEventIdentity,
+} from '@/utils/calendarEventIdentity';
 import { navigateToSceneView } from '@/utils/sceneNavigationAction';
 import { createUuid } from '@/utils/createUuid';
 import { fmtDate, parseDate, addDays } from '@/utils/calendarDate';
@@ -72,12 +84,12 @@ export function ScheduleView() {
 
   const [events, setEvents] = useState<CalendarEvent[]>([]);
   const [vacationEvents, setVacationEvents] = useState<CalendarEvent[]>([]);
-  const [showVacation, setShowVacation] = useState(true);
   const [viewMode, setViewMode] = useState<CalendarViewMode>('month');
-  const [filter, setFilter] = useState<CalendarFilter>('all');
-  const [deptFilter, setDeptFilter] = useState<'all' | 'bg' | 'acting'>('all');
   const [showCreate, setShowCreate] = useState(false);
   const [createDate, setCreateDate] = useState<string | undefined>();
+  const [googleAuthenticated, setGoogleAuthenticated] = useState(false);
+  const [calendarSettings, setCalendarSettings] = useState<BflowCalendar | null | undefined>(undefined);
+  const [tagManagerAnchor, setTagManagerAnchor] = useState<DOMRect | null>(null);
 
   // ─── 새 컴포넌트 상태 ───
   const [panelEvent, setPanelEvent] = useState<CalendarEvent | null>(null);
@@ -89,6 +101,7 @@ export function ScheduleView() {
   const [quickEdit, setQuickEdit] = useState<{
     event: CalendarEvent; position: { x: number; y: number };
   } | null>(null);
+  const draggedEventIdentityRef = useRef<CalendarEventIdentity | null>(null);
 
   // Week scroll view state — 연도 기준 절대 인덱스
   const [activeWeekIndex, setActiveWeekIndex] = useState(() => {
@@ -111,10 +124,70 @@ export function ScheduleView() {
 
   const today = fmtDate(new Date());
   const vacationConnected = useAppStore((s) => s.vacationConnected);
+  const calendars = useCalendarStore((state) => state.calendars);
+  const calendarsLoaded = useCalendarStore((state) => state.loaded);
+  const optimisticDeletedCalendarIds = useCalendarStore((state) => state.optimisticDeletedCalendarIds);
+  const optimisticDeletedTagIds = useCalendarStore((state) => state.optimisticDeletedTagIds);
+  const tags = useCalendarStore((state) => state.tags);
+  const visibleCalendarIds = useCalendarStore((state) => state.visibleCalendarIds);
+  const enabledTagIds = useCalendarStore((state) => state.enabledTagIds);
+  const googleVisible = visibleCalendarIds[GOOGLE_CALENDAR_ID] !== false;
+  const personalCalendarId = calendars.find((calendar) => calendar.isPersonal)?.id;
+  const knownCalendarIds = useMemo(
+    () => (calendarsLoaded ? new Set(calendars.map((calendar) => calendar.id)) : undefined),
+    [calendars, calendarsLoaded],
+  );
+  const deletedTagIds = useMemo(
+    () => new Set(optimisticDeletedTagIds),
+    [optimisticDeletedTagIds],
+  );
+
+  useEffect(() => {
+    let cancelled = false;
+    const refreshGoogleAuthentication = async () => {
+      try {
+        const { isAuthenticated } = await import('@/services/googleCalendarService');
+        const authenticated = await isAuthenticated();
+        if (!cancelled) setGoogleAuthenticated(authenticated);
+      } catch {
+        if (!cancelled) setGoogleAuthenticated(false);
+      }
+    };
+    const handleAuthenticationChanged = (event: Event) => {
+      const authenticated = (event as CustomEvent<{ authed?: boolean }>).detail?.authed;
+      if (typeof authenticated === 'boolean') setGoogleAuthenticated(authenticated);
+      else void refreshGoogleAuthentication();
+    };
+    void refreshGoogleAuthentication();
+    window.addEventListener('bflow:gcal-auth-changed', handleAuthenticationChanged);
+    return () => {
+      cancelled = true;
+      window.removeEventListener('bflow:gcal-auth-changed', handleAuthenticationChanged);
+    };
+  }, []);
 
   // 이벤트 로드 + 외부 변경 구독 (할일 위젯 등에서 수정 시 즉시 반영)
   useEffect(() => {
     let cancelled = false;
+    const applyCanonicalEvents = (canonicalEvents: CalendarEvent[]) => {
+      setEvents(canonicalEvents);
+      setPanelEvent((previous) => {
+        if (!previous || previous.source === 'vacation') return previous;
+        return canonicalEvents.find((event) => hasSameCalendarEventIdentity(event, previous)) ?? null;
+      });
+      setQuickEdit((previous) => {
+        if (!previous) return previous;
+        if (previous.event.source === 'vacation') return previous;
+        const canonical = canonicalEvents.find((event) => (
+          hasSameCalendarEventIdentity(event, previous.event)
+        ));
+        return canonical ? { ...previous, event: canonical } : null;
+      });
+    };
+    const refresh = async () => {
+      const canonicalEvents = await getEvents();
+      if (!cancelled) applyCanonicalEvents(canonicalEvents);
+    };
     // B flow와 Google 캐시는 별도로 준비된다. B flow 행이 있어도 Google full sync는 필요할 수 있다.
     (async () => {
       await loadBflowEvents();
@@ -127,11 +200,11 @@ export function ScheduleView() {
           }
         } catch { /* GCal 미연결 시 무시 */ }
       }
-      if (!cancelled) getEvents().then(setEvents);
+      await refresh();
     })();
-    const refresh = () => getEvents().then(setEvents);
-    window.addEventListener('bflow:calendar-changed', refresh);
-    return () => { cancelled = true; window.removeEventListener('bflow:calendar-changed', refresh); };
+    const handleCalendarChanged = () => { void refresh(); };
+    window.addEventListener('bflow:calendar-changed', handleCalendarChanged);
+    return () => { cancelled = true; window.removeEventListener('bflow:calendar-changed', handleCalendarChanged); };
   }, []);
 
   // 휴가 이벤트 로드
@@ -148,19 +221,42 @@ export function ScheduleView() {
 
   useEffect(() => { loadVacationEvents(); }, [loadVacationEvents]);
 
-  // 통합 이벤트 (로컬 + 휴가)
-  const allEvents = useMemo(() => {
-    if (!showVacation) return events;
-    return [...events, ...vacationEvents];
-  }, [events, vacationEvents, showVacation]);
+  // 통합 이벤트 (B flow + 연결된 휴가)와 캘린더∩태그 필터를 한 경로로 유지한다.
+  const allEvents = useMemo(() => [...events, ...vacationEvents], [events, vacationEvents]);
+  const filteredEvents = useMemo(
+    () => filterCalendarEvents(allEvents, {
+      visibleCalendarIds, enabledTagIds, optimisticDeletedTagIds: deletedTagIds,
+      googleVisible, knownCalendarIds, personalCalendarId,
+    }),
+    [allEvents, visibleCalendarIds, enabledTagIds, deletedTagIds, googleVisible, knownCalendarIds, personalCalendarId],
+  );
 
-  // 필터링
-  const filteredEvents = useMemo(() => {
-    let result = allEvents;
-    if (filter !== 'all') result = result.filter((e) => e.type === filter);
-    if (deptFilter !== 'all') result = result.filter((e) => e.linkedDepartment === deptFilter || e.type === 'custom' || e.type === 'vacation');
-    return result;
-  }, [allEvents, filter, deptFilter]);
+  const visibleCalendarCount = useMemo(
+    () => calendars.filter((calendar) => visibleCalendarIds[calendar.id] !== false).length
+      + (googleAuthenticated && googleVisible ? 1 : 0),
+    [calendars, visibleCalendarIds, googleAuthenticated, googleVisible],
+  );
+  const totalRailCalendarCount = calendars.length + (googleAuthenticated ? 1 : 0);
+  const tagNameById = useMemo<Record<string, string>>(
+    () => Object.fromEntries(tags.map((tag) => [tag.id, tag.name])),
+    [tags],
+  );
+  const calendarNameById = useMemo<Record<string, string>>(
+    () => Object.fromEntries(calendars.map((calendar) => [calendar.id, calendar.name])),
+    [calendars],
+  );
+
+  // 권한이 회수되거나 관리 권한이 사라진 캘린더의 설정 모달을 stale 객체로 유지하지 않는다.
+  // create mode의 null sentinel은 캘린더 목록과 무관하므로 그대로 보존한다.
+  useEffect(() => {
+    if (!calendarsLoaded) return;
+    setCalendarSettings((previous) => {
+      if (previous === undefined || previous === null) return previous;
+      const canonical = calendars.find((calendar) => calendar.id === previous.id);
+      if (!canonical && optimisticDeletedCalendarIds.includes(previous.id)) return previous;
+      return canonical?.canManage ? canonical : undefined;
+    });
+  }, [calendars, calendarsLoaded, optimisticDeletedCalendarIds]);
 
   // 주 데이터 계산 (모든 날짜를 정오로 생성 — parseDate와 일관성 유지)
   const weeks = useMemo(() => {
@@ -273,23 +369,20 @@ export function ScheduleView() {
     }
   }, []);
 
-  const handleDeleteEvent = useCallback(async (id: string) => {
-    // 삭제 전에 이벤트 정보 저장 (할일 연결 해제용)
-    const deletingEvent = events.find(e => e.id === id);
-    await deleteEvent(id);
-    setEvents((prev) => prev.filter((e) => e.id !== id));
+  const handleDeleteEvent = useCallback(async (deletingEvent: CalendarEvent) => {
+    const mutationIdentity = snapshotCalendarEventIdentity(deletingEvent);
+    await deleteEvent(deletingEvent.id, mutationIdentity);
+    setEvents((prev) => prev.filter((event) => (
+      !hasSameCalendarEventIdentity(event, mutationIdentity)
+    )));
     // 할일 연결된 이벤트인 경우 addToCalendar = false 처리 (할일 자체는 유지)
-    if (deletingEvent) {
-      if (deletingEvent.linkedTodoId || deletingEvent.id.startsWith('cal_')) {
-        const todoId = deletingEvent.linkedTodoId || deletingEvent.id.replace(/^cal_/, '');
-        unlinkTodoFromCalendar(todoId);
-      }
-    }
-  }, [events]);
+    const todoId = calendarEventLinkedTodoId(deletingEvent);
+    if (todoId) unlinkTodoFromCalendar(todoId);
+  }, []);
 
   // 이벤트 클릭 → 사이드패널 토글 (같은 이벤트 재클릭 시 닫기)
   const handleEventClick = useCallback((ev: CalendarEvent) => {
-    setPanelEvent(prev => prev?.id === ev.id ? null : ev);
+    setPanelEvent((previous) => previous && hasSameCalendarEventIdentity(previous, ev) ? null : ev);
   }, []);
 
   // 이벤트에서 해당 뷰로 이동
@@ -317,26 +410,37 @@ export function ScheduleView() {
 
   // 드래그&드롭
   const handleEventDragDone = useCallback(async (eventId: string, newStart: string, newEnd: string) => {
-    await updateEvent(eventId, { startDate: newStart, endDate: newEnd });
-    setEvents((prev) => {
-      const updated = prev.map((e) => (e.id === eventId ? { ...e, startDate: newStart, endDate: newEnd } : e));
-      // sync to todo if linked
-      const ev = updated.find((e) => e.id === eventId);
-      if (ev && (ev.linkedTodoId || ev.id.startsWith('cal_'))) {
-        const todoId = ev.linkedTodoId || ev.id.replace(/^cal_/, '');
-        syncCalendarToTodo(todoId, ev);
-      }
-      return updated;
-    });
+    const mutationIdentity = draggedEventIdentityRef.current;
+    draggedEventIdentityRef.current = null;
+    await updateEvent(
+      eventId,
+      { startDate: newStart, endDate: newEnd },
+      mutationIdentity ?? undefined,
+    );
+    const canonicalEvents = await getEvents();
+    const canonical = mutationIdentity
+      ? canonicalEvents.find((event) => hasSameCalendarEventIdentity(event, mutationIdentity))
+      : undefined;
+    setEvents(canonicalEvents);
+    setPanelEvent((previous) => previous && mutationIdentity
+      && hasSameCalendarEventIdentity(previous, mutationIdentity)
+      ? canonical ?? null
+      : previous);
+    setQuickEdit((previous) => previous && mutationIdentity
+      && hasSameCalendarEventIdentity(previous.event, mutationIdentity)
+      ? canonical ? { ...previous, event: canonical } : null
+      : previous);
+    const todoId = canonical ? calendarEventLinkedTodoId(canonical) : undefined;
+    if (canonical && todoId) void syncCalendarToTodo(todoId, canonical);
   }, []);
 
   const { isDragging, preview: dragPreview, startDrag } = useCalendarDnD(handleEventDragDone, handleEventDragDone);
 
-  const handleBarDragStart = useCallback((eventId: string, mode: DragMode, anchorDate: string) => {
-    const ev = allEvents.find((ev) => ev.id === eventId);
+  const handleBarDragStart = useCallback((ev: CalendarEvent, mode: DragMode, anchorDate: string) => {
     if (!ev || ev.isReadOnly) return;
-    startDrag(eventId, mode, ev.startDate, ev.endDate, 0, anchorDate);
-  }, [allEvents, startDrag]);
+    draggedEventIdentityRef.current = snapshotCalendarEventIdentity(ev);
+    startDrag(ev.id, mode, ev.startDate, ev.endDate, 0, anchorDate);
+  }, [startDrag]);
 
   // ─── 드래그-투-크리에이트: 시작/종료 날짜 상태 ───
   const [createEndDate, setCreateEndDate] = useState<string | undefined>();
@@ -378,9 +482,8 @@ export function ScheduleView() {
       const tag = (e.target as HTMLElement)?.tagName;
       if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
 
-      // 패널이 열려 있을 때 Escape만 처리
+      // 패널의 첫 ESC는 편집 취소, 다음 ESC는 닫기다. 패널 자체 리스너에 맡긴다.
       if (panelEvent && e.key === 'Escape') {
-        setPanelEvent(null);
         return;
       }
 
@@ -497,9 +600,22 @@ export function ScheduleView() {
         if (detail.todoId) {
           navigateTimersRef.current.push(
             setTimeout(() => {
-              const linkedEvent = events.find(ev =>
-                ev.linkedTodoId === detail.todoId || ev.id === `cal_${detail.todoId}`
+              const linkedCandidates = events.filter((ev) => ev.linkedTodoId === detail.todoId);
+              const fallbackCandidates = linkedCandidates.length === 0
+                ? events.filter((ev) => (
+                    ev.linkedTodoId === undefined
+                    && calendarEventLinkedTodoId(ev) === detail.todoId
+                  ))
+                : [];
+              const candidatesByIdentity = new Map(
+                [...linkedCandidates, ...fallbackCandidates]
+                  .map((event) => [calendarEventIdentityKey(event), event]),
               );
+              // todo detail에는 source namespace가 없으므로 후보가 둘 이상이면 다른
+              // storage 행을 임의로 채택하지 않고 패널을 그대로 둔다.
+              const linkedEvent = candidatesByIdentity.size === 1
+                ? candidatesByIdentity.values().next().value
+                : undefined;
               if (linkedEvent) setPanelEvent(linkedEvent);
             }, 100)
           );
@@ -523,38 +639,77 @@ export function ScheduleView() {
   }, [isDateInRange, persistedDateRange, pulseDate]);
 
   // ─── 사이드 패널 / 퀵 에디트 핸들러 ───
-  const handleUpdateEventDirect = useCallback(async (id: string, updates: Partial<CalendarEvent>) => {
+  const handleUpdateEventDirect = useCallback(async (
+    eventBeforeUpdate: CalendarEvent,
+    id: string,
+    updates: Partial<CalendarEvent>,
+  ) => {
+    const mutationIdentity = snapshotCalendarEventIdentity(eventBeforeUpdate);
+    const sanitized = { ...updates };
     // 빈 문자열 날짜 방지: 기존 값 유지
-    if ('startDate' in updates && !updates.startDate) delete updates.startDate;
-    if ('endDate' in updates && !updates.endDate) delete updates.endDate;
+    if ('startDate' in sanitized && !sanitized.startDate) delete sanitized.startDate;
+    if ('endDate' in sanitized && !sanitized.endDate) delete sanitized.endDate;
     // endDate < startDate 방지: 자동 swap
-    if (updates.startDate && updates.endDate && updates.endDate < updates.startDate) {
-      [updates.startDate, updates.endDate] = [updates.endDate, updates.startDate];
+    if (sanitized.startDate && sanitized.endDate && sanitized.endDate < sanitized.startDate) {
+      [sanitized.startDate, sanitized.endDate] = [sanitized.endDate, sanitized.startDate];
     }
-    await updateEvent(id, updates);
-    setEvents(prev => {
-      const updated = prev.map(e => e.id === id ? { ...e, ...updates } : e);
-      // 캘린더 → 할일 역동기화 (최신 상태에서 참조)
-      const ev = prev.find(e => e.id === id);
-      if (ev) {
-        const updatedEvent = { ...ev, ...updates };
-        if (updatedEvent.linkedTodoId || updatedEvent.id.startsWith('cal_')) {
-          const todoId = updatedEvent.linkedTodoId || updatedEvent.id.replace(/^cal_/, '');
-          syncCalendarToTodo(todoId, updatedEvent);
-        }
-      }
-      return updated;
-    });
-    // 사이드패널에 표시 중인 이벤트도 갱신
-    setPanelEvent(prev => prev && prev.id === id ? { ...prev, ...updates } : prev);
+    let persistenceFailed = false;
+    let persistenceError: unknown;
+    try {
+      await updateEvent(id, sanitized, mutationIdentity);
+    } catch (error) {
+      persistenceFailed = true;
+      persistenceError = error;
+    }
+
+    try {
+      const canonicalEvents = await getEvents();
+      const canonical = canonicalEvents.find((event) => (
+        hasSameCalendarEventIdentity(event, mutationIdentity)
+      ));
+      setEvents(canonicalEvents);
+      const todoId = canonical ? calendarEventLinkedTodoId(canonical) : undefined;
+      if (!persistenceFailed && canonical && todoId) void syncCalendarToTodo(todoId, canonical);
+      setPanelEvent((previous) => previous
+        && hasSameCalendarEventIdentity(previous, mutationIdentity)
+        ? canonical ?? null
+        : previous);
+      setQuickEdit((previous) => previous
+        && hasSameCalendarEventIdentity(previous.event, mutationIdentity)
+        ? canonical ? { ...previous, event: canonical } : null
+        : previous);
+    } catch (refreshError) {
+      if (!persistenceFailed) throw refreshError;
+      console.warn('[ScheduleView] 일정 저장 실패 후 정본 새로고침 실패:', refreshError);
+    }
+
+    if (persistenceFailed) throw persistenceError;
   }, []);
 
   const handleDuplicateEvent = useCallback(async (event: CalendarEvent) => {
+    const isCanonicalBflow = event.sourceCalendarId?.startsWith('bflow:') === true
+      && Boolean(event.calendarId);
+    const isWriteProtected = event.isReadOnly === true || event.canEdit === false;
+    let duplicateCalendarId = event.calendarId;
+    if (isCanonicalBflow && isWriteProtected) {
+      const personal = useCalendarStore.getState().calendars.find((calendar) => (
+        calendar.isPersonal && calendar.canEdit
+      ));
+      if (!personal) {
+        console.warn('[ScheduleView] 복제할 수 있는 개인 캘린더가 없습니다');
+        return;
+      }
+      duplicateCalendarId = personal.id;
+    }
     const newEv: CalendarEvent = {
       ...event,
       id: createUuid(),
       title: `${event.title} (복사)`,
       createdAt: new Date().toISOString(),
+      calendarId: duplicateCalendarId,
+      sourceCalendarId: undefined,
+      source: undefined,
+      canEdit: undefined,
       // 연결 정보 모두 제거: 완전 독립 이벤트로 복제
       linkedTodoId: undefined,
       isReadOnly: false,
@@ -606,6 +761,9 @@ export function ScheduleView() {
 
   // 사이드바 상태
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const handleOpenTagManager = useCallback((anchorRect: DOMRect) => {
+    setTagManagerAnchor(anchorRect);
+  }, []);
 
   return (
     <div className="flex h-full">
@@ -626,35 +784,42 @@ export function ScheduleView() {
               <ChevronLeft size={12} />
               접기
             </button>
-            {viewMode === 'today' ? (
-              <DaySidebar
-                activeDayIndex={activeDayIndex}
-                onDaySelect={setActiveDayIndex}
-                events={filteredEvents}
-                year={year}
+            <div className="min-h-0 flex-1 overflow-y-auto pr-1">
+              {viewMode === 'today' ? (
+                <DaySidebar
+                  activeDayIndex={activeDayIndex}
+                  onDaySelect={setActiveDayIndex}
+                  events={filteredEvents}
+                  year={year}
+                />
+              ) : (viewMode === 'week' || viewMode === '2week') ? (
+                <WeekSidebar
+                  weeks={weeks}
+                  events={filteredEvents}
+                  today={today}
+                  activeWeekIndex={activeWeekIndex}
+                  onWeekSelect={setActiveWeekIndex}
+                  currentMonth={month}
+                  currentYear={year}
+                />
+              ) : (
+                <MiniCalendar
+                  currentMonth={new Date(year, month, 1)}
+                  onMonthChange={(d) => { setYear(d.getFullYear()); setMonth(d.getMonth()); }}
+                  onDateSelect={(dateStr) => {
+                    setCreateDate(dateStr);
+                    setShowCreate(true);
+                  }}
+                  events={filteredEvents}
+                  selectedDate={createDate}
+                />
+              )}
+              <CalendarRail
+                isAuthenticated={googleAuthenticated}
+                onOpenSettings={(calendar) => setCalendarSettings(calendar)}
+                onCreateCalendar={() => setCalendarSettings(null)}
               />
-            ) : (viewMode === 'week' || viewMode === '2week') ? (
-              <WeekSidebar
-                weeks={weeks}
-                events={filteredEvents}
-                today={today}
-                activeWeekIndex={activeWeekIndex}
-                onWeekSelect={setActiveWeekIndex}
-                currentMonth={month}
-                currentYear={year}
-              />
-            ) : (
-              <MiniCalendar
-                currentMonth={new Date(year, month, 1)}
-                onMonthChange={(d) => { setYear(d.getFullYear()); setMonth(d.getMonth()); }}
-                onDateSelect={(dateStr) => {
-                  setCreateDate(dateStr);
-                  setShowCreate(true);
-                }}
-                events={filteredEvents}
-                selectedDate={createDate}
-              />
-            )}
+            </div>
           </div>
         ) : (
           <div className="w-[40px] h-full flex flex-col items-center pt-3">
@@ -708,59 +873,6 @@ export function ScheduleView() {
         </div>
 
         <div className="flex items-center gap-2">
-          {/* 필터 */}
-          <div className="flex items-center bg-bg-card rounded-lg p-0.5 border border-bg-border/50">
-            {([['all', '전체'], ['custom', '일반'], ['episode', 'EP'], ['part', '파트'], ['scene', '씬'], ['vacation', '휴가']] as const).map(([f, l]) => (
-              <button
-                key={f}
-                onClick={() => setFilter(f)}
-                className={cn(
-                  'px-3 py-1.5 text-xs rounded-md font-medium cursor-pointer transition-colors',
-                  filter === f
-                    ? f === 'vacation' ? 'bg-emerald-500/20 text-emerald-400' : 'bg-accent/20 text-accent'
-                    : 'text-text-secondary hover:text-text-primary',
-                )}
-              >
-                {l}
-              </button>
-            ))}
-          </div>
-
-          {/* 휴가 표시 토글 */}
-          {vacationConnected && (
-            <button
-              onClick={() => setShowVacation((v) => !v)}
-              className={cn(
-                'flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors cursor-pointer border',
-                showVacation
-                  ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30'
-                  : 'bg-bg-card text-text-secondary/50 border-bg-border/50',
-              )}
-              title={showVacation ? '휴가 이벤트 숨기기' : '휴가 이벤트 표시'}
-            >
-              <Palmtree size={13} />
-              휴가
-            </button>
-          )}
-
-          {/* 부서 필터 */}
-          <div className="flex items-center bg-bg-card rounded-lg p-0.5 border border-bg-border/50">
-            {([['all', '전체'], ['bg', 'BG'], ['acting', 'ACT']] as const).map(([f, l]) => (
-              <button
-                key={f}
-                onClick={() => setDeptFilter(f)}
-                className={cn(
-                  'px-3 py-1.5 text-xs rounded-md font-medium cursor-pointer transition-colors',
-                  deptFilter === f
-                    ? 'bg-accent/20 text-accent'
-                    : 'text-text-secondary hover:text-text-primary',
-                )}
-              >
-                {l}
-              </button>
-            ))}
-          </div>
-
           {/* 뷰 모드 */}
           <div className="flex bg-bg-card rounded-lg p-0.5 border border-bg-border/50">
             {([['month', '월'], ['2week', '2주'], ['week', '주'], ['today', '오늘']] as const).map(([m, l]) => (
@@ -785,27 +897,32 @@ export function ScheduleView() {
             className="flex items-center gap-1.5 px-4 py-2 rounded-lg bg-accent hover:bg-accent/80 text-white text-sm font-medium shadow-sm shadow-accent/20 transition-colors cursor-pointer"
           >
             <Plus size={16} />
-            이벤트
+            일정
           </button>
         </div>
       </div>
 
+      <TagBar
+        vacationConnected={vacationConnected}
+        onOpenTagManager={handleOpenTagManager}
+      />
+      {tagManagerAnchor && (
+        <TagManagerPopover
+          anchorRect={tagManagerAnchor}
+          onClose={() => setTagManagerAnchor(null)}
+        />
+      )}
+
       {/* ═══ 이벤트 수 통계 ═══ */}
       <div className="flex items-center gap-4 text-sm text-text-secondary/50 px-4">
-        <span>전체 {allEvents.length}개</span>
-        <span className="text-bg-border/50">·</span>
-        <span>이번 달 {allEvents.filter((e) => {
+        <span>이번 달 {filteredEvents.filter((e) => {
           const s = parseDate(e.startDate);
           return s.getFullYear() === year && s.getMonth() === month;
         }).length}개</span>
         <span className="text-bg-border/50">·</span>
-        <span>오늘 {allEvents.filter((e) => e.startDate <= today && e.endDate >= today).length}개</span>
-        {vacationEvents.length > 0 && (
-          <>
-            <span className="text-bg-border/50">·</span>
-            <span className="text-emerald-400/70">휴가 {vacationEvents.length}건</span>
-          </>
-        )}
+        <span>오늘 {filteredEvents.filter((e) => e.startDate <= today && e.endDate >= today).length}개</span>
+        <span className="text-bg-border/50">·</span>
+        <span>켜진 캘린더 {visibleCalendarCount}/{totalRailCalendarCount}</span>
       </div>
 
       {/* ═══ 캘린더 본체 ═══ */}
@@ -858,6 +975,7 @@ export function ScheduleView() {
                 onEventClick={handleEventClick}
                 onDragStart={handleBarDragStart}
                 dragPreview={dragPreview}
+                draggedEventIdentity={draggedEventIdentityRef.current}
                 isDragging={isDragging}
                 onCellMouseDown={handleCellMouseDown}
                 isDateInDragRange={isDateInHighlightRange}
@@ -866,6 +984,8 @@ export function ScheduleView() {
                 monthDirection={monthDir}
                 focusedDate={focusedDate}
                 pulseDate={pulseDate}
+                tagNameById={tagNameById}
+                calendarNameById={calendarNameById}
                 onWheel={(e) => {
                   if (viewMode !== 'month') return;
                   // 디바운스된 월 이동 (휠 아래=다음달, 위=이전달)
@@ -891,8 +1011,19 @@ export function ScheduleView() {
             initialDate={createDate}
             initialEndDate={createEndDate}
             episodes={episodes}
+            googleAuthenticated={googleAuthenticated}
             onClose={() => { setShowCreate(false); setCreateDate(undefined); setCreateEndDate(undefined); }}
             onSave={handleAddEvent}
+          />
+        )}
+        {calendarSettings !== undefined && (
+          <CalendarSettingsModal
+            key="calendar-settings"
+            calendar={calendarSettings ?? undefined}
+            eventCount={calendarSettings
+              ? events.filter((event) => event.calendarId === calendarSettings.id).length
+              : 0}
+            onClose={() => setCalendarSettings(undefined)}
           />
         )}
       </AnimatePresence>
@@ -901,11 +1032,11 @@ export function ScheduleView() {
       <AnimatePresence>
         {panelEvent && (
           <EventSidePanel
-            key={`panel-${panelEvent.id}`}
+            key={`panel-${calendarEventIdentityKey(panelEvent)}`}
             event={panelEvent}
             onClose={() => setPanelEvent(null)}
-            onDelete={(id) => { handleDeleteEvent(id); setPanelEvent(null); }}
-            onUpdate={handleUpdateEventDirect}
+            onDelete={() => { void handleDeleteEvent(panelEvent); setPanelEvent(null); }}
+            onUpdate={(id, updates) => handleUpdateEventDirect(panelEvent, id, updates)}
             onNavigate={handleNavigate}
           />
         )}
@@ -914,20 +1045,19 @@ export function ScheduleView() {
       {/* ═══ EventQuickEdit (right-click popup) ═══ */}
       {quickEdit && (
         <EventQuickEdit
-          key={quickEdit.event.id}
+          key={calendarEventIdentityKey(quickEdit.event)}
           event={quickEdit.event}
           position={quickEdit.position}
           onClose={() => setQuickEdit(null)}
-          onUpdateColor={(id, color) => {
-            handleUpdateEventDirect(id, { color });
-            // 패널 이벤트도 업데이트
-            setPanelEvent(prev => prev && prev.id === id ? { ...prev, color } : prev);
+          onUpdate={(id, updates) => handleUpdateEventDirect(quickEdit.event, id, updates)}
+          onDelete={() => {
+            const deletingEvent = quickEdit.event;
+            void handleDeleteEvent(deletingEvent);
+            setPanelEvent((previous) => previous
+              && hasSameCalendarEventIdentity(previous, deletingEvent)
+              ? null
+              : previous);
           }}
-          onUpdate={(id, updates) => {
-            handleUpdateEventDirect(id, updates);
-            setPanelEvent(prev => prev && prev.id === id ? { ...prev, ...updates } : prev);
-          }}
-          onDelete={(id) => { handleDeleteEvent(id); setPanelEvent(prev => prev?.id === id ? null : prev); }}
           onDuplicate={handleDuplicateEvent}
         />
       )}

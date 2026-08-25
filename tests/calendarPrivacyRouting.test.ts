@@ -1,6 +1,10 @@
 import assert from 'node:assert/strict';
+import { createRequire } from 'node:module';
 import test from 'node:test';
 import { build } from 'esbuild';
+import { isValidElement, type ReactElement, type ReactNode } from 'react';
+import { filterCalendarEvents } from '../src/utils/calendarEventFilter.ts';
+import type { CalendarEvent } from '../src/types/calendar.ts';
 
 type CalendarRow = {
   id: string;
@@ -38,6 +42,16 @@ type CalendarEventRow = {
   updated_at: string;
 };
 
+type CalendarTagRow = {
+  id: string;
+  name: string;
+  color: string;
+  sort_order: number;
+};
+
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const UNKNOWN_TAG_UUID = '00000000-0000-4000-8000-000000000099';
+
 type ServiceModule = {
   loadBflowEvents(): Promise<void>;
   syncAll(options?: { broadcast?: boolean; skipBflowLoad?: boolean }): Promise<Array<Record<string, unknown>>>;
@@ -63,6 +77,13 @@ type PreviewCalendarApi = {
   calendarSetMembers(calendarId: string, members: Array<{ user_id: string; can_edit: boolean }>): Promise<void>;
   calendarEventCreate(input: Omit<CalendarEventRow, 'id' | 'created_by' | 'created_at' | 'updated_at'>): Promise<CalendarEventRow>;
   calendarEventsList(params?: { from?: string; to?: string }): Promise<CalendarEventRow[]>;
+  calendarTagsList(): Promise<CalendarTagRow[]>;
+  calendarTagsSave(tags: Array<{
+    id?: string;
+    name: string;
+    color: string;
+    sort_order: number;
+  }>): Promise<CalendarTagRow[]>;
   calendarEventUpdate(
     id: string,
     updates: Partial<Omit<CalendarEventRow, 'id' | 'created_by' | 'created_at' | 'updated_at'>>,
@@ -720,9 +741,375 @@ test('unauthenticated preview rejects a Google replacement and keeps the persona
       rememberMe: false,
     })).ok, true);
     assert.deepEqual(
-      (await harness.api.calendarEventsList()).map(({ id, title }) => ({ id, title })),
-      [{ id: source.id, title: '보존할 나만 보기 일정' }],
+      (await harness.api.calendarEventsList()).find(({ id }) => id === source.id),
+      source,
     );
+  } finally {
+    harness.restore();
+  }
+});
+
+test('fresh preview seeds four visible calendars, four tags, and fifteen current-month events for 배한솔', async () => {
+  const harness = await createPreviewCalendarHarness();
+  try {
+    await previewLogin(harness.api, '배한솔');
+    const now = new Date();
+    const yearMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+
+    const calendars = await harness.api.calendarList();
+    assert.equal(calendars.length, 4);
+    const tags = await harness.api.calendarTagsList();
+    const events = await harness.api.calendarEventsList({
+      from: `${yearMonth}-01`,
+      to: `${yearMonth}-31`,
+    });
+    assert.equal(tags.length, 4);
+    assert.equal(events.length, 15);
+    assert.ok(
+      calendars.every(({ id }) => UUID_PATTERN.test(id)),
+      'preview calendar ids match the production UUID columns',
+    );
+    const calendarIds = new Set(calendars.map(({ id }) => id));
+    assert.ok(
+      events.every(({ id }) => UUID_PATTERN.test(id)),
+      'preview event ids match the production UUID columns',
+    );
+    assert.ok(
+      events.every(({ calendar_id }) => (
+        UUID_PATTERN.test(calendar_id) && calendarIds.has(calendar_id)
+      )),
+      'every seeded event calendar reference points at a UUID-shaped seeded calendar',
+    );
+    assert.ok(tags.every(({ id }) => UUID_PATTERN.test(id)), 'preview seed tag ids match production UUID columns');
+    const tagIds = new Set(tags.map(({ id }) => id));
+    assert.ok(
+      events.every(({ tag_id }) => tag_id === null || tagIds.has(tag_id)),
+      'every seeded event tag reference points at a UUID-shaped seeded tag',
+    );
+    assert.equal(calendars.find(({ name }) => name === '스튜디오 공지')?.can_edit, false);
+    assert.equal(calendars.find(({ name }) => name === 'EP 마일스톤')?.can_edit, true);
+    assert.equal(calendars.find(({ name }) => name === '리드 회의')?.can_edit, true);
+  } finally {
+    harness.restore();
+  }
+});
+
+test('preview event creation enforces UUID-backed tag references atomically', async () => {
+  const harness = await createPreviewCalendarHarness();
+  try {
+    await previewLogin(harness.api, '배한솔');
+    const calendar = (await harness.api.calendarList()).find(({ can_edit }) => can_edit);
+    assert.ok(calendar);
+    const [knownTag] = await harness.api.calendarTagsList();
+    assert.ok(knownTag);
+    const unchanged = await harness.api.calendarEventsList();
+
+    await assert.rejects(
+      harness.api.calendarEventCreate({
+        ...previewEventInput(calendar.id, '잘못된 UUID 생성'),
+        tag_id: 'not-a-uuid',
+      }),
+      /UUID/,
+    );
+    assert.deepEqual(await harness.api.calendarEventsList(), unchanged);
+
+    await assert.rejects(
+      harness.api.calendarEventCreate({
+        ...previewEventInput(calendar.id, '없는 태그 생성'),
+        tag_id: UNKNOWN_TAG_UUID,
+      }),
+      /존재하지 않는 태그/,
+    );
+    assert.deepEqual(await harness.api.calendarEventsList(), unchanged);
+
+    const nullTagged = await harness.api.calendarEventCreate(
+      previewEventInput(calendar.id, 'null 태그 생성'),
+    );
+    assert.equal(nullTagged.tag_id, null);
+
+    const omittedTagInput = previewEventInput(calendar.id, '생략 태그 생성');
+    delete (omittedTagInput as Partial<typeof omittedTagInput>).tag_id;
+    const omittedTagged = await harness.api.calendarEventCreate(omittedTagInput);
+    assert.equal(omittedTagged.tag_id, null, '생략된 tag_id는 DB처럼 null로 저장한다');
+
+    const knownTagged = await harness.api.calendarEventCreate({
+      ...previewEventInput(calendar.id, '유효한 태그 생성'),
+      tag_id: knownTag.id,
+    });
+    assert.equal(knownTagged.tag_id, knownTag.id);
+    assert.equal(
+      (await harness.api.calendarEventsList()).find(({ id }) => id === knownTagged.id)?.tag_id,
+      knownTag.id,
+    );
+  } finally {
+    harness.restore();
+  }
+});
+
+test('preview event update enforces current UUID-backed tag references atomically', async () => {
+  const harness = await createPreviewCalendarHarness();
+  try {
+    await previewLogin(harness.api, '배한솔');
+    const calendar = (await harness.api.calendarList()).find(({ can_edit }) => can_edit);
+    assert.ok(calendar);
+    const tags = await harness.api.calendarTagsList();
+    const [deletedTag, knownTag] = tags;
+    assert.ok(deletedTag);
+    assert.ok(knownTag);
+    const event = await harness.api.calendarEventCreate(
+      previewEventInput(calendar.id, '태그 수정 대상'),
+    );
+    const unchanged = await harness.api.calendarEventsList();
+
+    await assert.rejects(
+      harness.api.calendarEventUpdate(event.id, {
+        title: '적용되면 안 됨',
+        tag_id: 'not-a-uuid',
+      }),
+      /UUID/,
+    );
+    assert.deepEqual(await harness.api.calendarEventsList(), unchanged);
+
+    await assert.rejects(
+      harness.api.calendarEventUpdate(event.id, {
+        title: '없는 태그로 변경',
+        tag_id: UNKNOWN_TAG_UUID,
+      }),
+      /존재하지 않는 태그/,
+    );
+    assert.deepEqual(await harness.api.calendarEventsList(), unchanged);
+
+    await harness.api.calendarTagsSave(
+      tags
+        .filter(({ id }) => id !== deletedTag.id)
+        .map(({ id, name, color, sort_order }) => ({ id, name, color, sort_order })),
+    );
+    const afterDeletion = await harness.api.calendarEventsList();
+    await assert.rejects(
+      harness.api.calendarEventUpdate(event.id, {
+        title: '삭제된 태그로 변경',
+        tag_id: deletedTag.id,
+      }),
+      /존재하지 않는 태그/,
+    );
+    assert.deepEqual(await harness.api.calendarEventsList(), afterDeletion);
+
+    const knownTagged = await harness.api.calendarEventUpdate(event.id, { tag_id: knownTag.id });
+    assert.equal(knownTagged.tag_id, knownTag.id);
+    const omittedTagged = await harness.api.calendarEventUpdate(event.id, { title: '태그 유지' });
+    assert.equal(omittedTagged.tag_id, knownTag.id);
+    const cleared = await harness.api.calendarEventUpdate(event.id, { tag_id: null });
+    assert.equal(cleared.tag_id, null);
+  } finally {
+    harness.restore();
+  }
+});
+
+test('preview generates a UUID-backed personal calendar for a user without a seeded one', async () => {
+  const harness = await createPreviewCalendarHarness();
+  try {
+    await previewLogin(harness.api, '장삐쭈');
+
+    const calendars = await harness.api.calendarList();
+    const personalCalendar = calendars.find(({ is_personal }) => is_personal);
+
+    assert.ok(personalCalendar, 'preview creates the same required personal calendar as production');
+    assert.ok(UUID_PATTERN.test(personalCalendar.id));
+    assert.ok(calendars.every(({ id }) => UUID_PATTERN.test(id)));
+  } finally {
+    harness.restore();
+  }
+});
+
+test('preview tag replacement requires an admin session', async () => {
+  const harness = await createPreviewCalendarHarness();
+  try {
+    await assert.rejects(
+      harness.api.calendarTagsList(),
+      /로그인이 필요합니다/,
+      'an unauthenticated preview must not read team tags',
+    );
+
+    await assert.rejects(
+      harness.api.calendarTagsSave([]),
+      /로그인이 필요합니다/,
+      'an unauthenticated preview must not mutate team tags',
+    );
+
+    await previewLogin(harness.api, '장삐쭈');
+    const unchanged = await harness.api.calendarTagsList();
+    const payload = unchanged.map(({ id, name, color, sort_order }) => ({
+      id, name, color, sort_order,
+    }));
+    await assert.rejects(
+      harness.api.calendarTagsSave(payload),
+      /관리자/,
+      'a regular preview user must have the same tag-write boundary as production',
+    );
+    assert.deepEqual(await harness.api.calendarTagsList(), unchanged);
+
+    await harness.api.logoutCanonicalSession();
+    await previewLogin(harness.api, '배한솔');
+    assert.deepEqual(await harness.api.calendarTagsSave(payload), unchanged);
+  } finally {
+    harness.restore();
+  }
+});
+
+test('preview tag replacement validates the whole final list before changing tags or event links', async (t) => {
+  const invalidCases: Array<{
+    name: string;
+    expected: RegExp;
+    change(tags: CalendarTagRow[]): Array<{
+      id?: string;
+      name: string;
+      color: string;
+      sort_order: number;
+    }>;
+  }> = [
+    {
+      name: 'empty id',
+      expected: /id must be a UUID/,
+      change: (tags) => tags.map((tag, index) => ({
+        ...tag,
+        id: index === 0 ? '   ' : tag.id,
+      })),
+    },
+    {
+      name: 'non-UUID id',
+      expected: /id must be a UUID/,
+      change: (tags) => tags.map((tag, index) => ({
+        ...tag,
+        id: index === 0 ? 'tag-not-a-uuid' : tag.id,
+      })),
+    },
+    {
+      name: 'empty name',
+      expected: /requires name, color, and sort_order/,
+      change: (tags) => tags.map((tag, index) => ({
+        ...tag,
+        name: index === 0 ? '   ' : tag.name,
+      })),
+    },
+    {
+      name: 'empty color',
+      expected: /requires name, color, and sort_order/,
+      change: (tags) => tags.map((tag, index) => ({
+        ...tag,
+        color: index === 0 ? '   ' : tag.color,
+      })),
+    },
+    {
+      name: 'duplicate id',
+      expected: /Duplicate calendar tag id/,
+      change: (tags) => tags.map((tag, index) => ({
+        ...tag,
+        id: index === 1 ? tags[0].id : tag.id,
+      })),
+    },
+    {
+      name: 'duplicate name',
+      expected: /Duplicate calendar tag name/,
+      change: (tags) => tags.map((tag, index) => ({
+        ...tag,
+        name: index === 1 ? tags[0].name : tag.name,
+      })),
+    },
+    {
+      name: 'unknown existing id',
+      expected: /Unknown calendar tag id/,
+      change: (tags) => tags.map((tag, index) => ({
+        ...tag,
+        id: index === 0 ? UNKNOWN_TAG_UUID : tag.id,
+      })),
+    },
+  ];
+
+  for (const invalidCase of invalidCases) {
+    await t.test(invalidCase.name, async () => {
+      const harness = await createPreviewCalendarHarness();
+      try {
+        await previewLogin(harness.api, '배한솔');
+        const unchangedTags = await harness.api.calendarTagsList();
+        const unchangedEvents = await harness.api.calendarEventsList();
+
+        await assert.rejects(
+          harness.api.calendarTagsSave(invalidCase.change(unchangedTags)),
+          invalidCase.expected,
+        );
+        assert.deepEqual(await harness.api.calendarTagsList(), unchangedTags);
+        assert.deepEqual(await harness.api.calendarEventsList(), unchangedEvents);
+      } finally {
+        harness.restore();
+      }
+    });
+  }
+});
+
+test('preview tag replacement accepts UUID-backed edits and generates a UUID only for an omitted new id', async () => {
+  const harness = await createPreviewCalendarHarness();
+  try {
+    await previewLogin(harness.api, '배한솔');
+    const tags = await harness.api.calendarTagsList();
+    const [first, second, ...rest] = tags;
+    const saved = await harness.api.calendarTagsSave([
+      { id: second.id, name: `${second.name} 수정`, color: second.color, sort_order: 0 },
+      { id: first.id, name: first.name, color: first.color, sort_order: 1 },
+      ...rest.map((tag, index) => ({ ...tag, sort_order: index + 2 })),
+      { name: '신규', color: '#6C5CE7', sort_order: tags.length },
+    ]);
+
+    assert.equal(saved[0].id, second.id, '일반 편집·재정렬은 기존 UUID를 보존한다');
+    assert.equal(saved[0].name, `${second.name} 수정`);
+    assert.ok(saved.every(({ id }) => UUID_PATTERN.test(id)));
+    assert.ok(
+      !tags.some(({ id }) => id === saved.at(-1)?.id),
+      'id를 생략한 신규 태그만 새 UUID를 받는다',
+    );
+  } finally {
+    harness.restore();
+  }
+});
+
+test('preview tag deletion clears event tag ids so a disabled deleted tag cannot hide the event', async () => {
+  const harness = await createPreviewCalendarHarness();
+  try {
+    await previewLogin(harness.api, '배한솔');
+    const tags = await harness.api.calendarTagsList();
+    const events = await harness.api.calendarEventsList();
+    const taggedEvent = events.find((event) => event.tag_id !== null);
+    assert.ok(taggedEvent?.tag_id, 'the preview seed must include a tagged event');
+    const deletedTagId = taggedEvent.tag_id;
+
+    await harness.api.calendarTagsSave(
+      tags
+        .filter((tag) => tag.id !== deletedTagId)
+        .map(({ id, name, color, sort_order }) => ({ id, name, color, sort_order })),
+    );
+
+    const canonical = (await harness.api.calendarEventsList())
+      .find((event) => event.id === taggedEvent.id);
+    assert.equal(canonical?.tag_id, null, 'preview mirrors the live FK ON DELETE SET NULL result');
+
+    const visible = filterCalendarEvents([{
+      id: canonical.id,
+      title: canonical.title,
+      memo: canonical.memo ?? '',
+      color: '#6C5CE7',
+      type: 'custom',
+      startDate: canonical.start_date,
+      endDate: canonical.end_date,
+      createdBy: canonical.created_by ?? '',
+      createdAt: canonical.created_at,
+      source: 'bflow',
+      calendarId: canonical.calendar_id,
+      tagId: canonical.tag_id ?? undefined,
+    } satisfies CalendarEvent], {
+      visibleCalendarIds: {},
+      enabledTagIds: { [deletedTagId]: false },
+      googleVisible: true,
+    });
+    assert.deepEqual(visible.map((event) => event.id), [taggedEvent.id]);
   } finally {
     harness.restore();
   }
@@ -781,8 +1168,8 @@ test('preview member replacement keeps viewer reads while revoking writes, then 
     assert.equal(viewerCalendar?.can_edit, false);
     assert.equal(viewerCalendar?.can_manage, false);
     assert.deepEqual(
-      (await harness.api.calendarEventsList()).map(({ id, title }) => ({ id, title })),
-      [{ id: event.id, title: '읽기 전용 일정' }],
+      (await harness.api.calendarEventsList()).find(({ id }) => id === event.id),
+      event,
     );
     await assert.rejects(
       harness.api.calendarEventCreate(previewEventInput(calendar.id, '금지된 생성')),
@@ -1200,4 +1587,237 @@ test('compensation failure retains both deletion errors with source and replacem
   } finally {
     harness.restore();
   }
+});
+
+type EventCreateModalProps = {
+  initialDate: string;
+  initialEndDate: string;
+  episodes: [];
+  googleAuthenticated: boolean;
+  onClose(): void;
+  onSave(event: Record<string, unknown>): void;
+};
+
+type EventCreateModalComponent = (props: EventCreateModalProps) => ReactNode;
+
+type EventCreateFormElement = ReactElement<{
+  'aria-label'?: string;
+  checked?: boolean;
+  value?: string;
+  onChange?: (event: { target: { checked: boolean; value: string } }) => void;
+}, 'input' | 'select' | 'textarea'>;
+
+type EventCreateButtonElement = ReactElement<{
+  children?: ReactNode;
+  disabled?: boolean;
+  onClick?: () => void;
+}, 'button'>;
+
+let eventCreateModalBundle: Promise<EventCreateModalComponent> | undefined;
+let eventCreateStateSlots: unknown[] = [];
+let eventCreateStateCursor = 0;
+
+function resolveEventCreateComponents(node: ReactNode): ReactNode {
+  if (Array.isArray(node)) return node.map(resolveEventCreateComponents);
+  if (!isValidElement(node)) return node;
+  if (typeof node.type === 'function') {
+    return resolveEventCreateComponents((node.type as (props: unknown) => ReactNode)(node.props));
+  }
+  const props = node.props as { children?: ReactNode };
+  return {
+    ...node,
+    props: { ...props, children: resolveEventCreateComponents(props.children) },
+  } as ReactNode;
+}
+
+function eventCreateText(node: ReactNode): string {
+  if (typeof node === 'string' || typeof node === 'number') return String(node);
+  if (Array.isArray(node)) return node.map(eventCreateText).join('');
+  if (!isValidElement(node)) return '';
+  return eventCreateText((node.props as { children?: ReactNode }).children);
+}
+
+function eventCreateFormElements(node: ReactNode): EventCreateFormElement[] {
+  if (Array.isArray(node)) return node.flatMap(eventCreateFormElements);
+  if (!isValidElement(node)) return [];
+  const props = node.props as { children?: ReactNode };
+  return [
+    ...(['input', 'select', 'textarea'].includes(String(node.type)) ? [node as EventCreateFormElement] : []),
+    ...eventCreateFormElements(props.children),
+  ];
+}
+
+function eventCreateFormElement(node: ReactNode, label: string): EventCreateFormElement {
+  const element = eventCreateFormElements(node).find((candidate) => candidate.props['aria-label'] === label);
+  assert.ok(element, `form element '${label}' must be rendered`);
+  return element;
+}
+
+function eventCreateButtons(node: ReactNode): EventCreateButtonElement[] {
+  if (Array.isArray(node)) return node.flatMap(eventCreateButtons);
+  if (!isValidElement(node)) return [];
+  const props = node.props as { children?: ReactNode };
+  return [
+    ...(node.type === 'button' ? [node as EventCreateButtonElement] : []),
+    ...eventCreateButtons(props.children),
+  ];
+}
+
+function eventCreateButton(node: ReactNode, text: string): EventCreateButtonElement {
+  const button = eventCreateButtons(node).find((candidate) => eventCreateText(candidate).includes(text));
+  assert.ok(button, `button '${text}' must be rendered`);
+  return button;
+}
+
+async function loadEventCreateModal(): Promise<EventCreateModalComponent> {
+  eventCreateModalBundle ??= build({
+    entryPoints: ['src/components/calendar/EventCreateModal.tsx'],
+    bundle: true,
+    format: 'cjs',
+    platform: 'node',
+    target: 'node22',
+    write: false,
+    external: [
+      'react', 'react/jsx-runtime', 'framer-motion', 'lucide-react',
+      '@/utils/cn', '@/stores/useAuthStore', '@/stores/useDataStore', '@/stores/useAppStore',
+      '@/stores/useCalendarStore', '@/types', '@/types/calendar', '@/utils/calendarDate', '@/utils/glassStyles',
+    ],
+  }).then((result) => {
+    const module = { exports: {} as Record<string, unknown> };
+    const nodeRequire = createRequire(import.meta.url);
+    const react = nodeRequire('react') as Record<string, unknown>;
+    const jsxRuntime = nodeRequire('react/jsx-runtime');
+    const emptyComponent = () => null;
+    const calendarState = {
+      calendars: [{
+        id: 'mine',
+        name: '내 캘린더',
+        color: '#6C5CE7',
+        visibility: 'private',
+        ownerId: 'user-me',
+        isPersonal: true,
+        members: [],
+        canEdit: true,
+        canManage: true,
+        createdAt: '2026-08-24T00:00:00.000Z',
+      }],
+      tags: [],
+      optimisticDeletedTagIds: [],
+    };
+    const evaluate = new Function('require', 'module', 'exports', result.outputFiles[0].text);
+    evaluate((id: string) => {
+      if (id === 'react') {
+        return {
+          ...react,
+          useState(initial: unknown) {
+            const slot = eventCreateStateCursor++;
+            if (eventCreateStateSlots[slot] === undefined) {
+              eventCreateStateSlots[slot] = typeof initial === 'function' ? (initial as () => unknown)() : initial;
+            }
+            return [eventCreateStateSlots[slot], (next: unknown) => {
+              eventCreateStateSlots[slot] = typeof next === 'function'
+                ? (next as (value: unknown) => unknown)(eventCreateStateSlots[slot])
+                : next;
+            }];
+          },
+          useRef: (initial: unknown) => ({ current: initial }),
+          useEffect: () => undefined,
+          useMemo: (factory: () => unknown) => factory(),
+        };
+      }
+      if (id === 'react/jsx-runtime') return jsxRuntime;
+      if (id === 'framer-motion') return { motion: { div: 'div' } };
+      if (id === 'lucide-react') return { CalendarDays: emptyComponent, X: emptyComponent };
+      if (id === '@/utils/cn') return { cn: (...values: unknown[]) => values.filter(Boolean).join(' ') };
+      if (id === '@/stores/useAuthStore') return { useAuthStore: (selector: (state: { currentUser: { id: string; name: string } }) => unknown) => selector({ currentUser: { id: 'user-me', name: '배한솔' } }) };
+      if (id === '@/stores/useDataStore') return { useDataStore: (selector: (state: { episodeTitles: {} }) => unknown) => selector({ episodeTitles: {} }) };
+      if (id === '@/stores/useAppStore') return { useAppStore: (selector: (state: { colorMode: string }) => unknown) => selector({ colorMode: 'dark' }) };
+      if (id === '@/stores/useCalendarStore') return {
+        useCalendarStore: (selector: (state: typeof calendarState) => unknown) => selector(calendarState),
+        getTagCanonicalSnapshot: () => null,
+        isOptimisticCalendarTagId: (idValue: string) => idValue.startsWith('optimistic-tag:'),
+      };
+      if (id === '@/types') return { DEPARTMENT_CONFIGS: {} };
+      if (id === '@/utils/calendarDate') return { fmtDate: () => '2026-08-25' };
+      if (id === '@/utils/glassStyles') return { floatingGlassStyle: {} };
+      return nodeRequire(id);
+    }, module, module.exports);
+    return module.exports.EventCreateModal as EventCreateModalComponent;
+  });
+  return eventCreateModalBundle;
+}
+
+async function submitTimedEvent(input: {
+  startDate: string;
+  startTime: string;
+  endDate: string;
+  endTime: string;
+}): Promise<{ saved: Record<string, unknown>[]; renderedText: string; submitDisabled: boolean }> {
+  eventCreateStateSlots = [];
+  const saved: Record<string, unknown>[] = [];
+  const EventCreateModal = await loadEventCreateModal();
+  const props: EventCreateModalProps = {
+    initialDate: input.startDate,
+    initialEndDate: input.endDate,
+    episodes: [],
+    googleAuthenticated: false,
+    onClose() {},
+    onSave(event) { saved.push(event); },
+  };
+  const render = () => {
+    eventCreateStateCursor = 0;
+    return resolveEventCreateComponents(EventCreateModal(props));
+  };
+
+  let tree = render();
+  eventCreateFormElement(tree, '제목').props.onChange?.({ target: { value: '시간 일정', checked: false } });
+  eventCreateFormElement(tree, '종일 일정').props.onChange?.({ target: { value: '', checked: false } });
+  tree = render();
+  eventCreateFormElement(tree, '시작 시각').props.onChange?.({ target: { value: input.startTime, checked: false } });
+  tree = render();
+  eventCreateFormElement(tree, '시작일').props.onChange?.({ target: { value: input.startDate, checked: false } });
+  eventCreateFormElement(tree, '종료일').props.onChange?.({ target: { value: input.endDate, checked: false } });
+  eventCreateFormElement(tree, '종료 시각').props.onChange?.({ target: { value: input.endTime, checked: false } });
+  tree = render();
+  const submitButton = eventCreateButton(tree, '만들기');
+  submitButton.props.onClick?.();
+  tree = render();
+
+  return {
+    saved,
+    renderedText: eventCreateText(tree),
+    submitDisabled: submitButton.props.disabled === true,
+  };
+}
+
+test('EventCreateModal rejects reversed timed intervals before calling onSave', async (t) => {
+  for (const invalid of [
+    { name: 'same-day reversed clock', startDate: '2026-08-25', startTime: '15:00', endDate: '2026-08-25', endTime: '14:00' },
+    { name: 'same timestamp', startDate: '2026-08-25', startTime: '15:00', endDate: '2026-08-25', endTime: '15:00' },
+    { name: 'earlier end date', startDate: '2026-08-25', startTime: '09:00', endDate: '2026-08-24', endTime: '10:00' },
+  ]) {
+    await t.test(invalid.name, async () => {
+      const result = await submitTimedEvent(invalid);
+      assert.deepEqual(result.saved, []);
+      assert.match(result.renderedText, /종료 시각은 시작 시각보다 뒤여야 해요\./);
+      assert.equal(result.submitDisabled, true);
+    });
+  }
+});
+
+test('EventCreateModal keeps a later-date timed interval even when its clock time is earlier', async () => {
+  const result = await submitTimedEvent({
+    startDate: '2026-08-25',
+    startTime: '23:30',
+    endDate: '2026-08-26',
+    endTime: '00:30',
+  });
+
+  assert.doesNotMatch(result.renderedText, /종료 시각은 시작 시각보다 뒤여야 해요\./);
+  assert.equal(result.submitDisabled, false);
+  assert.equal(result.saved.length, 1);
+  assert.equal(result.saved[0].startDate, '2026-08-25');
+  assert.equal(result.saved[0].startTime, '23:30');
+  assert.equal(result.saved[0].endDate, '2026-08-26');
+  assert.equal(result.saved[0].endTime, '00:30');
 });
