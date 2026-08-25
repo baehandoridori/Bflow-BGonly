@@ -45,6 +45,21 @@ type EventCreateModalProps = {
   onSave(event: Record<string, unknown>): void;
 };
 type EventCreateModalComponent = (props: EventCreateModalProps) => ReactNode;
+type CalendarSettingsModalProps = {
+  calendar?: BflowCalendar;
+  eventCount: number;
+  onClose(): void;
+};
+type CalendarSettingsModalComponent = (props: CalendarSettingsModalProps) => ReactNode;
+
+type TestUser = {
+  id: string;
+  name: string;
+  slackId: string;
+  isInitialPassword: boolean;
+  createdAt: string;
+  role?: string;
+};
 
 type ButtonElement = ReactElement<{
   'aria-label'?: string;
@@ -52,7 +67,8 @@ type ButtonElement = ReactElement<{
   children?: ReactNode;
   disabled?: boolean;
   style?: { background?: string };
-  onClick?: (event?: { stopPropagation(): void }) => void;
+  title?: string;
+  onClick?: (event?: { stopPropagation(): void }) => void | Promise<void>;
 }, 'button'>;
 
 type FormElement = ReactElement<{
@@ -64,6 +80,7 @@ type FormElement = ReactElement<{
   value?: string;
   children?: ReactNode;
   onChange?: (event: { target: { checked: boolean; value: string } }) => void;
+  onFocus?: () => void;
 }, 'input' | 'select' | 'textarea'>;
 
 const myUserId = 'user-me';
@@ -92,7 +109,18 @@ let bundledRail: Promise<CalendarRailComponent> | undefined;
 let bundledTagBar: Promise<TagBarComponent> | undefined;
 let bundledScheduleView: Promise<ScheduleViewComponent> | undefined;
 let bundledEventCreateModal: Promise<EventCreateModalComponent> | undefined;
+let bundledCalendarSettingsModal: Promise<CalendarSettingsModalComponent> | undefined;
 let scheduleTagBarProps: TagBarProps[] = [];
+let settingsCurrentUser: TestUser;
+let settingsUsers: TestUser[] = [];
+let settingsApiCalls: Array<{ name: string; args: unknown[] }> = [];
+let settingsApiFailures = new Set<string>();
+let settingsLoadAllFailure = false;
+let settingsConfirmResponses: boolean[] = [];
+let settingsConfirmMessages: string[] = [];
+let settingsToastErrors: string[] = [];
+let settingsToastSuccesses: string[] = [];
+let settingsCloseCount = 0;
 
 function resolveComponents(node: ReactNode): ReactNode {
   if (Array.isArray(node)) return node.map(resolveComponents);
@@ -164,6 +192,12 @@ function buttonByText(node: ReactNode, label: string): ButtonElement {
   return button;
 }
 
+function buttonByTitle(node: ReactNode, title: string): ButtonElement {
+  const button = findButtons(node).find((candidate) => candidate.props.title === title);
+  assert.ok(button, `button titled '${title}' must be rendered`);
+  return button;
+}
+
 function calendar(overrides: Partial<BflowCalendar>): BflowCalendar {
   return {
     id: 'calendar-1',
@@ -192,6 +226,41 @@ function resetHarness(): void {
   createdCount = 0;
   appViews = [];
   scheduleTagBarProps = [];
+  settingsCurrentUser = {
+    id: myUserId,
+    name: '배한솔',
+    slackId: 'U-ME',
+    isInitialPassword: false,
+    createdAt: '2026-01-01T00:00:00.000Z',
+    role: 'admin',
+  };
+  settingsUsers = [
+    settingsCurrentUser,
+    {
+      id: 'owner-lead',
+      name: '허혜원',
+      slackId: 'U-LEAD',
+      isInitialPassword: false,
+      createdAt: '2026-01-02T00:00:00.000Z',
+      role: 'user',
+    },
+    {
+      id: 'user-jang',
+      name: '장삐쭈',
+      slackId: 'U-JANG',
+      isInitialPassword: false,
+      createdAt: '2026-01-03T00:00:00.000Z',
+      role: 'user',
+    },
+  ];
+  settingsApiCalls = [];
+  settingsApiFailures = new Set();
+  settingsLoadAllFailure = false;
+  settingsConfirmResponses = [];
+  settingsConfirmMessages = [];
+  settingsToastErrors = [];
+  settingsToastSuccesses = [];
+  settingsCloseCount = 0;
   calendarState = {
     calendars: [
       calendar({ id: 'mine', name: 'EP 마일스톤', isPersonal: true }),
@@ -326,7 +395,8 @@ async function loadScheduleView(): Promise<ScheduleViewComponent> {
       '@/components/calendar/EventCreateModal', '@/components/calendar/WeekScrollView',
       '@/components/calendar/WeekSidebar', '@/components/calendar/DayScrollView',
       '@/components/calendar/DaySidebar', '@/components/calendar/CalendarRail',
-      '@/components/calendar/TagBar', '@/hooks/useCalendarDragCreate', '@/stores/useCalendarStore',
+      '@/components/calendar/TagBar', '@/components/calendar/CalendarSettingsModal',
+      '@/hooks/useCalendarDragCreate', '@/stores/useCalendarStore',
       '@/utils/sceneNavigationAction', '@/utils/createUuid', '@/utils/calendarDate',
       '@/utils/calendarEventFilter',
     ],
@@ -334,14 +404,24 @@ async function loadScheduleView(): Promise<ScheduleViewComponent> {
     const module = { exports: {} as Record<string, unknown> };
     const nodeRequire = createRequire(import.meta.url);
     const react = nodeRequire('react') as Record<string, unknown>;
-    const jsxRuntime = nodeRequire('react/jsx-runtime') as { jsx(type: unknown, props: unknown): ReactNode };
+    const jsxRuntime = nodeRequire('react/jsx-runtime') as { jsx(type: unknown, props: unknown, key?: string): ReactNode };
     const emptyComponent = () => null;
     const evaluate = new Function('require', 'module', 'exports', result.outputFiles[0].text);
     evaluate((id: string) => {
       if (id === 'react') {
         return {
           ...react,
-          useState: (initial: unknown) => [typeof initial === 'function' ? (initial as () => unknown)() : initial, () => {}],
+          useState(initial: unknown) {
+            const slot = stateCursor++;
+            if (stateSlots[slot] === undefined) {
+              stateSlots[slot] = typeof initial === 'function' ? (initial as () => unknown)() : initial;
+            }
+            return [stateSlots[slot], (next: unknown) => {
+              stateSlots[slot] = typeof next === 'function'
+                ? (next as (value: unknown) => unknown)(stateSlots[slot])
+                : next;
+            }];
+          },
           useEffect: () => {}, useMemo: (factory: () => unknown) => factory(), useCallback: (fn: unknown) => fn,
           useRef: (initial: unknown) => ({ current: initial }),
         };
@@ -360,8 +440,30 @@ async function loadScheduleView(): Promise<ScheduleViewComponent> {
       if (id === '@/hooks/useCalendarDnD') return { useCalendarDnD: () => ({ isDragging: false, preview: null, startDrag() {} }) };
       if (id === '@/utils/vacationEvents') return { mapVacationEvents: () => [] };
       if (id === '@/components/calendar/WeekScrollView') return { default: emptyComponent, generateYearWeeks: () => [], findWeekIndexForDate: () => 0 };
-      if (id === '@/components/calendar/CalendarRail') return { CalendarRail: emptyComponent, GOOGLE_CALENDAR_ID: 'google' };
+      if (id === '@/components/calendar/CalendarRail') {
+        return {
+          GOOGLE_CALENDAR_ID: 'google',
+          CalendarRail: (props: CalendarRailProps) => jsxRuntime.jsx('div', {
+            children: [
+              jsxRuntime.jsx('button', { 'aria-label': '레일 새 캘린더', onClick: props.onCreateCalendar, children: '새 캘린더' }, 'create'),
+              jsxRuntime.jsx('button', {
+                'aria-label': '레일 캘린더 설정',
+                onClick: () => props.onOpenSettings(calendarState.calendars[0]),
+                children: '설정 열기',
+              }, 'settings'),
+            ],
+          }),
+        };
+      }
       if (id === '@/components/calendar/TagBar') return { TagBar: (props: TagBarProps) => { scheduleTagBarProps.push(props); return jsxRuntime.jsx('div', { children: '태그' }); } };
+      if (id === '@/components/calendar/CalendarSettingsModal') {
+        return {
+          CalendarSettingsModal: (props: CalendarSettingsModalProps) => jsxRuntime.jsx('div', {
+            'aria-label': '캘린더 설정 모달',
+            children: props.calendar ? `설정 ${props.calendar.name} 일정 ${props.eventCount}개` : '새 캘린더 연결됨',
+          }),
+        };
+      }
       if (id === '@/hooks/useCalendarDragCreate') return { useCalendarDragCreate: () => ({ handleCellMouseDown() {}, isDateInRange: () => false }) };
       if (id === '@/stores/useCalendarStore') return { useCalendarStore: (selector: (state: typeof calendarState) => unknown) => selector(calendarState), getState: () => ({ loadAll: async () => {} }) };
       if (id === '@/utils/sceneNavigationAction') return { navigateToSceneView() {} };
@@ -448,6 +550,139 @@ async function loadEventCreateModal(): Promise<EventCreateModalComponent> {
   return bundledEventCreateModal;
 }
 
+async function loadCalendarSettingsModal(): Promise<CalendarSettingsModalComponent> {
+  bundledCalendarSettingsModal ??= build({
+    entryPoints: ['src/components/calendar/CalendarSettingsModal.tsx'],
+    bundle: true,
+    format: 'cjs',
+    platform: 'node',
+    target: 'node22',
+    write: false,
+    external: [
+      'react', 'react/jsx-runtime', 'framer-motion', 'lucide-react', 'sonner',
+      '@/components/common/ConfirmDialog', '@/stores/useAuthStore', '@/stores/useCalendarStore',
+      '@/types/calendar', '@/utils/avatarColor', '@/utils/cn', '@/utils/glassStyles',
+    ],
+  }).then((result) => {
+    const module = { exports: {} as Record<string, unknown> };
+    const nodeRequire = createRequire(import.meta.url);
+    const react = nodeRequire('react') as Record<string, unknown>;
+    const jsxRuntime = nodeRequire('react/jsx-runtime');
+    const emptyComponent = () => null;
+    const useCalendarStoreMock = Object.assign(
+      (selector: (state: typeof calendarState) => unknown) => selector(calendarState),
+      {
+        getState: () => ({
+          async loadAll() {
+            settingsApiCalls.push({ name: 'loadAll', args: [] });
+            if (settingsLoadAllFailure) throw new Error('load all failed');
+          },
+        }),
+      },
+    );
+    const callApi = async (name: string, args: unknown[]) => {
+      settingsApiCalls.push({ name, args });
+      if (settingsApiFailures.has(name)) throw new Error(`${name} failed`);
+      return {
+        id: 'created-calendar',
+        name: String((args[0] as { name?: string } | undefined)?.name ?? ''),
+        color: '#6C5CE7',
+        visibility: 'members',
+        owner_id: settingsCurrentUser.id,
+        is_personal: false,
+        created_at: '2026-08-25T00:00:00.000Z',
+        updated_at: '2026-08-25T00:00:00.000Z',
+      };
+    };
+    const evaluate = new Function('require', 'module', 'exports', result.outputFiles[0].text);
+    evaluate((id: string) => {
+      if (id === 'react') {
+        return {
+          ...react,
+          useState(initial: unknown) {
+            const slot = stateCursor++;
+            if (stateSlots[slot] === undefined) {
+              stateSlots[slot] = typeof initial === 'function' ? (initial as () => unknown)() : initial;
+            }
+            return [stateSlots[slot], (next: unknown) => {
+              stateSlots[slot] = typeof next === 'function'
+                ? (next as (value: unknown) => unknown)(stateSlots[slot])
+                : next;
+            }];
+          },
+          useRef(initial: unknown) {
+            const slot = modalRefCursor++;
+            modalRefSlots[slot] ??= { current: initial };
+            return modalRefSlots[slot];
+          },
+          useEffect: () => {},
+          useMemo: (factory: () => unknown) => factory(),
+          useCallback: (fn: unknown) => fn,
+        };
+      }
+      if (id === 'react/jsx-runtime') return jsxRuntime;
+      if (id === 'framer-motion') return { motion: { div: 'div' } };
+      if (id === 'lucide-react') {
+        return {
+          Check: emptyComponent, Crown: emptyComponent, Search: emptyComponent,
+          Settings: emptyComponent, Trash2: emptyComponent, X: emptyComponent,
+        };
+      }
+      if (id === 'sonner') {
+        return {
+          toast: {
+            error(message: string) { settingsToastErrors.push(message); },
+            success(message: string) { settingsToastSuccesses.push(message); },
+          },
+        };
+      }
+      if (id === '@/components/common/ConfirmDialog') {
+        return {
+          ConfirmDialog: {
+            async show(options: { message: string }) {
+              settingsConfirmMessages.push(options.message);
+              return settingsConfirmResponses.shift() ?? false;
+            },
+          },
+        };
+      }
+      if (id === '@/stores/useAuthStore') {
+        return {
+          useAuthStore: (selector: (state: { currentUser: TestUser; users: TestUser[] }) => unknown) => selector({
+            currentUser: settingsCurrentUser,
+            users: settingsUsers,
+          }),
+        };
+      }
+      if (id === '@/stores/useCalendarStore') return { useCalendarStore: useCalendarStoreMock };
+      if (id === '@/types/calendar') {
+        return {
+          EVENT_COLORS: [
+            '#6C5CE7', '#74B9FF', '#00B894', '#FDCB6E', '#E17055',
+            '#FF6B6B', '#A29BFE', '#55EFC4', '#FF9FF3', '#48DBFB',
+          ],
+        };
+      }
+      if (id === '@/utils/avatarColor') return { avatarColor: () => '#6C5CE7' };
+      if (id === '@/utils/cn') return { cn: (...values: string[]) => values.filter(Boolean).join(' ') };
+      if (id === '@/utils/glassStyles') return { floatingGlassStyle: {} };
+      return nodeRequire(id);
+    }, module, module.exports);
+    Object.assign(globalThis, {
+      window: {
+        electronAPI: {
+          calendarCreate: (...args: unknown[]) => callApi('calendarCreate', args),
+          calendarUpdate: (...args: unknown[]) => callApi('calendarUpdate', args),
+          calendarDelete: (...args: unknown[]) => callApi('calendarDelete', args),
+          calendarSetMembers: (...args: unknown[]) => callApi('calendarSetMembers', args),
+        },
+      },
+    });
+    return module.exports.CalendarSettingsModal as CalendarSettingsModalComponent;
+  });
+  return bundledCalendarSettingsModal;
+}
+
 async function renderRail(isAuthenticated: boolean): Promise<ReactNode> {
   const CalendarRail = await loadRail();
   stateCursor = 0;
@@ -465,6 +700,7 @@ async function renderTagBar(vacationConnected: boolean, onOpenTagManager: (ancho
 
 async function renderScheduleView(): Promise<ReactNode> {
   const ScheduleView = await loadScheduleView();
+  stateCursor = 0;
   return resolveComponents(ScheduleView());
 }
 
@@ -490,6 +726,20 @@ async function renderEventCreateModal(
 function flushEventCreateEffects(): void {
   const effects = pendingModalEffects.splice(0);
   for (const effect of effects) effect();
+}
+
+async function renderCalendarSettingsModal(
+  calendarValue?: BflowCalendar,
+  eventCount = 4,
+): Promise<ReactNode> {
+  const CalendarSettingsModal = await loadCalendarSettingsModal();
+  stateCursor = 0;
+  modalRefCursor = 0;
+  return resolveComponents(CalendarSettingsModal({
+    calendar: calendarValue,
+    eventCount,
+    onClose: () => { settingsCloseCount += 1; },
+  }));
 }
 
 test('CalendarRail renders four grouped sections and drives visibility, menu permissions, callbacks, and Google settings navigation', async () => {
@@ -574,6 +824,198 @@ test('ScheduleView replaces legacy controls with the tag bar and reports visible
   assert.equal(typeof scheduleTagBarProps[0].onOpenTagManager, 'function', 'ScheduleView keeps the tag manager anchoring callback wired');
   assert.ok(labels.includes('일정'), 'the creation action uses the shared calendar wording');
   assert.match(textContent(tree), /이번 달 0개.*오늘 0개.*켜진 캘린더 4\/4/, 'statistics describe the filtered view and rail visibility instead of total and vacation counts');
+});
+
+test('ScheduleView opens calendar settings from both rail entry points', async () => {
+  resetHarness();
+
+  let tree = await renderScheduleView();
+  buttonByTitle(tree, '사이드바 펼치기').props.onClick?.();
+  tree = await renderScheduleView();
+  buttonByLabel(tree, '레일 새 캘린더').props.onClick?.();
+  tree = await renderScheduleView();
+  assert.match(textContent(nodeByAriaLabel(tree, '캘린더 설정 모달')), /새 캘린더 연결됨/);
+
+  resetHarness();
+  tree = await renderScheduleView();
+  buttonByTitle(tree, '사이드바 펼치기').props.onClick?.();
+  tree = await renderScheduleView();
+  buttonByLabel(tree, '레일 캘린더 설정').props.onClick?.();
+  tree = await renderScheduleView();
+  assert.match(
+    textContent(nodeByAriaLabel(tree, '캘린더 설정 모달')),
+    /설정 EP 마일스톤 일정 0개/,
+    'ScheduleView passes the selected calendar and counts its current events',
+  );
+});
+
+test('CalendarSettingsModal creates a members calendar atomically and reloads before closing', async () => {
+  resetHarness();
+  let tree = await renderCalendarSettingsModal();
+
+  assert.match(textContent(tree), /새 캘린더/);
+  assert.doesNotMatch(textContent(tree), /만든 날|일정 4개/, 'create mode has no metadata badge row');
+  assert.equal(
+    findButtons(tree).filter((button) => button.props['aria-label']?.startsWith('색상 ')).length,
+    10,
+    'the shared ten-color preset is available',
+  );
+
+  formElementByLabel(tree, '캘린더 이름').props.onChange?.({ target: { value: '컴포 TF', checked: false } });
+  formElementByLabel(tree, '멤버 검색').props.onFocus?.();
+  tree = await renderCalendarSettingsModal();
+  buttonByLabel(tree, '장삐쭈 추가').props.onClick?.();
+  tree = await renderCalendarSettingsModal();
+  assert.match(textContent(tree), /2명 · 편집 0 · 보기 1/);
+  assert.match(textContent(tree), /배한솔.*소유자.*변경 불가/);
+  assert.ok(buttonByLabel(tree, '장삐쭈 제거'));
+
+  await buttonByText(tree, '저장').props.onClick?.();
+
+  assert.deepEqual(settingsApiCalls.map((call) => call.name), ['calendarCreate', 'loadAll']);
+  assert.deepEqual(settingsApiCalls[0].args, [{
+    name: '컴포 TF',
+    color: '#6C5CE7',
+    visibility: 'members',
+    members: [{ user_id: 'user-jang', can_edit: false }],
+  }]);
+  assert.equal(settingsCloseCount, 1, 'the modal closes only after the canonical list reload succeeds');
+});
+
+test('CalendarSettingsModal edits visibility and members in permission-safe order', async (t) => {
+  const shared = calendar({
+    id: 'shared-settings',
+    name: '리드 회의',
+    ownerId: 'owner-lead',
+    visibility: 'members',
+    members: [
+      { userId: myUserId, canEdit: true },
+      { userId: 'user-jang', canEdit: false },
+    ],
+    canManage: true,
+  });
+
+  await t.test('a failed calendar update never starts the member replacement', async () => {
+    resetHarness();
+    settingsApiFailures.add('calendarUpdate');
+    const tree = await renderCalendarSettingsModal(shared, 14);
+
+    assert.match(textContent(tree), /소유자 허혜원.*만든 날 2026-08-24.*일정 14개/);
+    assert.match(textContent(tree), /3명 · 편집 1 · 보기 1/);
+    await buttonByText(tree, '저장').props.onClick?.();
+
+    assert.deepEqual(settingsApiCalls.map((call) => call.name), ['calendarUpdate', 'loadAll']);
+    assert.equal(settingsCloseCount, 0);
+    assert.equal(settingsToastErrors.length, 1);
+  });
+
+  await t.test('a successful shared edit updates first, then replaces members, then reloads', async () => {
+    resetHarness();
+    let tree = await renderCalendarSettingsModal(shared, 14);
+    buttonByLabel(tree, '장삐쭈 편집 권한').props.onClick?.();
+    tree = await renderCalendarSettingsModal(shared, 14);
+    await buttonByText(tree, '저장').props.onClick?.();
+
+    assert.deepEqual(settingsApiCalls.map((call) => call.name), [
+      'calendarUpdate', 'calendarSetMembers', 'loadAll',
+    ]);
+    assert.deepEqual(settingsApiCalls[1].args, [
+      'shared-settings',
+      [
+        { user_id: myUserId, can_edit: true },
+        { user_id: 'user-jang', can_edit: true },
+      ],
+    ]);
+    assert.equal(settingsCloseCount, 1);
+  });
+
+  await t.test('switching to private relies on the atomic update and skips member replacement', async () => {
+    resetHarness();
+    let tree = await renderCalendarSettingsModal(shared, 14);
+    formElementByLabel(tree, '나만').props.onChange?.({ target: { value: 'private', checked: true } });
+    tree = await renderCalendarSettingsModal(shared, 14);
+    await buttonByText(tree, '저장').props.onClick?.();
+
+    assert.deepEqual(settingsApiCalls.map((call) => call.name), ['calendarUpdate', 'loadAll']);
+    assert.deepEqual(settingsApiCalls[0].args, [
+      'shared-settings',
+      { name: '리드 회의', color: '#6C5CE7', visibility: 'private' },
+    ]);
+  });
+});
+
+test('CalendarSettingsModal hides personal sharing controls and gates team visibility to admins', async () => {
+  resetHarness();
+  const personal = calendar({ id: 'personal-settings', isPersonal: true, canManage: true });
+  let tree = await renderCalendarSettingsModal(personal, 3);
+
+  assert.ok(formElementByLabel(tree, '캘린더 이름'));
+  assert.doesNotMatch(textContent(tree), /공개 범위|멤버|캘린더 삭제/);
+  assert.equal(findFormElements(tree).some((element) => element.props.type === 'radio'), false);
+  formElementByLabel(tree, '캘린더 이름').props.onChange?.({ target: { value: '내 일정', checked: false } });
+  tree = await renderCalendarSettingsModal(personal, 3);
+  await buttonByText(tree, '저장').props.onClick?.();
+  assert.deepEqual(settingsApiCalls.map((call) => call.name), ['calendarUpdate', 'loadAll']);
+  assert.deepEqual(
+    settingsApiCalls[0].args,
+    ['personal-settings', { name: '내 일정', color: '#6C5CE7' }],
+    'personal saves expose only the editable name and color fields',
+  );
+
+  resetHarness();
+  settingsCurrentUser = { ...settingsCurrentUser, role: 'user' };
+  settingsUsers = [settingsCurrentUser, ...settingsUsers.filter((user) => user.id !== myUserId)];
+  tree = await renderCalendarSettingsModal();
+  assert.equal(formElementByLabel(tree, '팀 전체').props.disabled, true);
+  assert.match(textContent(tree), /관리자만/);
+
+  resetHarness();
+  tree = await renderCalendarSettingsModal();
+  assert.equal(formElementByLabel(tree, '팀 전체').props.disabled, false);
+});
+
+test('CalendarSettingsModal confirms destructive deletion and reloads on success or failure', async (t) => {
+  const editable = calendar({ id: 'delete-me', name: '컴포 TF', canManage: true });
+
+  await t.test('cancel leaves the calendar untouched; confirm deletes and reloads', async () => {
+    resetHarness();
+    settingsConfirmResponses = [false, true];
+    const tree = await renderCalendarSettingsModal(editable, 7);
+
+    await buttonByText(tree, '캘린더 삭제').props.onClick?.();
+    assert.deepEqual(settingsApiCalls, []);
+    await buttonByText(tree, '캘린더 삭제').props.onClick?.();
+
+    assert.match(settingsConfirmMessages[0], /일정 7개가 함께 삭제돼요/);
+    assert.deepEqual(settingsApiCalls.map((call) => call.name), ['calendarDelete', 'loadAll']);
+    assert.deepEqual(settingsApiCalls[0].args, ['delete-me']);
+    assert.equal(settingsCloseCount, 1);
+  });
+
+  await t.test('delete failure still reloads and keeps the modal open', async () => {
+    resetHarness();
+    settingsConfirmResponses = [true];
+    settingsApiFailures.add('calendarDelete');
+    const tree = await renderCalendarSettingsModal(editable, 7);
+    await buttonByText(tree, '캘린더 삭제').props.onClick?.();
+
+    assert.deepEqual(settingsApiCalls.map((call) => call.name), ['calendarDelete', 'loadAll']);
+    assert.equal(settingsCloseCount, 0);
+    assert.equal(settingsToastErrors.length, 1);
+  });
+});
+
+test('CalendarSettingsModal treats reload failure as a save failure and keeps edits open', async () => {
+  resetHarness();
+  settingsLoadAllFailure = true;
+  let tree = await renderCalendarSettingsModal();
+  formElementByLabel(tree, '캘린더 이름').props.onChange?.({ target: { value: '재시도 캘린더', checked: false } });
+  tree = await renderCalendarSettingsModal();
+  await buttonByText(tree, '저장').props.onClick?.();
+
+  assert.deepEqual(settingsApiCalls.map((call) => call.name), ['calendarCreate', 'loadAll']);
+  assert.equal(settingsCloseCount, 0);
+  assert.equal(settingsToastErrors.length, 1);
 });
 
 test('EventCreateModal shows editable calendars in field order, defaults personal, and removes legacy privacy and color controls', async () => {

@@ -13,7 +13,7 @@ import { fetchAllVacationEvents } from '@/services/vacationService';
 import { useCalendarDnD } from '@/hooks/useCalendarDnD';
 import type { DragMode } from '@/hooks/useCalendarDnD';
 import type {
-  CalendarEvent, CalendarViewMode,
+  BflowCalendar, CalendarEvent, CalendarViewMode,
 } from '@/types/calendar';
 import { mapVacationEvents } from '@/utils/vacationEvents';
 import { MiniCalendar } from '@/components/calendar/MiniCalendar';
@@ -27,6 +27,7 @@ import DayScrollView from '@/components/calendar/DayScrollView';
 import DaySidebar from '@/components/calendar/DaySidebar';
 import { CalendarRail, GOOGLE_CALENDAR_ID } from '@/components/calendar/CalendarRail';
 import { TagBar } from '@/components/calendar/TagBar';
+import { CalendarSettingsModal } from '@/components/calendar/CalendarSettingsModal';
 import { useCalendarDragCreate } from '@/hooks/useCalendarDragCreate';
 import { useCalendarStore } from '@/stores/useCalendarStore';
 import { filterCalendarEvents } from '@/utils/calendarEventFilter';
@@ -79,6 +80,7 @@ export function ScheduleView() {
   const [showCreate, setShowCreate] = useState(false);
   const [createDate, setCreateDate] = useState<string | undefined>();
   const [googleAuthenticated, setGoogleAuthenticated] = useState(false);
+  const [calendarSettings, setCalendarSettings] = useState<BflowCalendar | null | undefined>(undefined);
 
   // ─── 새 컴포넌트 상태 ───
   const [panelEvent, setPanelEvent] = useState<CalendarEvent | null>(null);
@@ -693,8 +695,8 @@ export function ScheduleView() {
               )}
               <CalendarRail
                 isAuthenticated={googleAuthenticated}
-                onOpenSettings={() => undefined}
-                onCreateCalendar={() => undefined}
+                onOpenSettings={(calendar) => setCalendarSettings(calendar)}
+                onCreateCalendar={() => setCalendarSettings(null)}
               />
             </div>
           </div>
@@ -882,6 +884,16 @@ export function ScheduleView() {
             googleAuthenticated={googleAuthenticated}
             onClose={() => { setShowCreate(false); setCreateDate(undefined); setCreateEndDate(undefined); }}
             onSave={handleAddEvent}
+          />
+        )}
+        {calendarSettings !== undefined && (
+          <CalendarSettingsModal
+            key="calendar-settings"
+            calendar={calendarSettings ?? undefined}
+            eventCount={calendarSettings
+              ? events.filter((event) => event.calendarId === calendarSettings.id).length
+              : 0}
+            onClose={() => setCalendarSettings(undefined)}
           />
         )}
       </AnimatePresence>
