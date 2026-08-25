@@ -1291,6 +1291,27 @@ export async function addUser(user: SupabaseUser): Promise<void> {
   broadcastDataChange('users', 'INSERT');
 }
 
+/** main canonical actor를 DB transaction에 전달하는 관리자 사용자 추가 경로.
+ * users가 완전히 비어 있을 때만 actor 자신인 admin 1명을 bootstrap할 수 있다. */
+export async function addUserAuthorized(
+  actorId: string,
+  user: import('./userAdminIpc').UserAdminCreateInput,
+): Promise<void> {
+  const { error } = await supabase.rpc('create_user_authorized', {
+    p_actor_id: actorId,
+    p_user: {
+      id: user.id,
+      name: user.name,
+      role: user.role,
+      slack_id: user.slackId,
+      hire_date: user.hireDate,
+      birthday: user.birthday,
+    },
+  });
+  throwIfError(error);
+  broadcastDataChange('users', 'INSERT');
+}
+
 /** 사용자 업데이트.
  *  v1.18.1: isCompositor(boolean) 처리를 위해 value 타입을 string | boolean | null 로 확장.
  *  Postgres update 는 null 을 명시적으로 SET … = NULL 로 적용하므로 그대로 전달.
@@ -1316,6 +1337,30 @@ export async function updateUser(
   broadcastDataChange('users', 'UPDATE');
 }
 
+export async function updateUserAuthorized(
+  actorId: string,
+  userId: string,
+  updates: import('./userAdminIpc').UserAdminUpdateInput,
+): Promise<void> {
+  const dbUpdates: Record<string, unknown> = {};
+  if (updates.name !== undefined) dbUpdates.name = updates.name;
+  if (updates.role !== undefined) dbUpdates.role = updates.role;
+  if (updates.slackId !== undefined) dbUpdates.slack_id = updates.slackId;
+  if (updates.hireDate !== undefined) dbUpdates.hire_date = updates.hireDate;
+  if (updates.birthday !== undefined) dbUpdates.birthday = updates.birthday;
+  if (updates.isCompositor !== undefined) dbUpdates.is_compositor = updates.isCompositor;
+  if (updates.isActingSupervisor !== undefined) {
+    dbUpdates.is_acting_supervisor = updates.isActingSupervisor;
+  }
+  const { error } = await supabase.rpc('update_user_authorized', {
+    p_actor_id: actorId,
+    p_user_id: userId,
+    p_updates: dbUpdates,
+  });
+  throwIfError(error);
+  broadcastDataChange('users', 'UPDATE');
+}
+
 /** 사용자 삭제.
  *  퇴사자 처리와 개인 데이터 정리를 DB RPC 한 트랜잭션으로 수행한다.
  *  - scenes.assignee, comp_revisions.assignee 는 NULL 로 비움
@@ -1325,6 +1370,15 @@ export async function updateUser(
  */
 export async function deleteUser(userId: string): Promise<void> {
   const { error } = await supabase.rpc('delete_user_cascade', { p_user_id: userId });
+  throwIfError(error);
+  broadcastDataChange('users', 'DELETE');
+}
+
+export async function deleteUserAuthorized(actorId: string, userId: string): Promise<void> {
+  const { error } = await supabase.rpc('delete_user_authorized', {
+    p_actor_id: actorId,
+    p_user_id: userId,
+  });
   throwIfError(error);
   broadcastDataChange('users', 'DELETE');
 }

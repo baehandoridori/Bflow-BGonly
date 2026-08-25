@@ -1115,6 +1115,148 @@ ON CONFLICT (id) DO NOTHING;
 -- 5-3) private_calendar_events 테이블은 이번엔 남겨둠(롤백 + 구버전 앱 호환 — 설계서 §12).
 --      다음 라운드에서 공존 창 델타 재이관 후 DROP.
 
+-- ── 5-4) 사용자 관리 IPC가 신뢰하는 admin role을 DB transaction 안에서 재검증 ──
+CREATE OR REPLACE FUNCTION public.create_user_authorized(
+  p_actor_id TEXT,
+  p_user JSONB
+)
+RETURNS VOID
+LANGUAGE plpgsql
+SECURITY INVOKER
+SET search_path = public, pg_temp
+AS $$
+DECLARE
+  v_allowed_keys CONSTANT TEXT[] := ARRAY[
+    'id', 'name', 'role', 'slack_id', 'hire_date', 'birthday'
+  ];
+  v_new users%ROWTYPE;
+  v_actor_role TEXT;
+  v_users_empty BOOLEAN;
+BEGIN
+  IF p_actor_id IS NULL OR btrim(p_actor_id) = '' THEN
+    RAISE EXCEPTION 'User-management actor is required' USING ERRCODE = '42501';
+  END IF;
+  IF p_user IS NULL OR jsonb_typeof(p_user) <> 'object' THEN
+    RAISE EXCEPTION 'User input must be an object' USING ERRCODE = '22023';
+  END IF;
+  IF EXISTS (
+    SELECT 1 FROM jsonb_object_keys(p_user) AS key
+    WHERE NOT (key = ANY(v_allowed_keys))
+  ) THEN
+    RAISE EXCEPTION 'User input contains unsupported fields' USING ERRCODE = '22023';
+  END IF;
+
+  -- 사용자 관리 작업은 드물다. table writer lock으로 bootstrap/add/update/delete와
+  -- role 강등을 직렬화한 뒤 actor role을 같은 transaction에서 판단한다.
+  LOCK TABLE users IN SHARE ROW EXCLUSIVE MODE;
+  SELECT NOT EXISTS (SELECT 1 FROM users) INTO v_users_empty;
+  v_new := jsonb_populate_record(NULL::users, p_user);
+
+  IF v_new.id IS NULL OR btrim(v_new.id) = ''
+     OR v_new.name IS NULL OR btrim(v_new.name) = ''
+     OR v_new.role IS NULL OR v_new.role NOT IN ('admin', 'user') THEN
+    RAISE EXCEPTION 'User id, name, or role is invalid' USING ERRCODE = '22023';
+  END IF;
+
+  IF v_users_empty THEN
+    -- 최초 DB 이관은 이미 canonical session으로 로그인한 local admin 자신만 1회 허용.
+    IF v_new.id IS DISTINCT FROM p_actor_id OR v_new.role IS DISTINCT FROM 'admin' THEN
+      RAISE EXCEPTION 'Only the canonical bootstrap admin can create the first user'
+        USING ERRCODE = '42501';
+    END IF;
+  ELSE
+    SELECT role INTO v_actor_role
+    FROM users
+    WHERE id = p_actor_id
+    FOR NO KEY UPDATE;
+    IF v_actor_role IS DISTINCT FROM 'admin' THEN
+      RAISE EXCEPTION 'Only an admin can create users' USING ERRCODE = '42501';
+    END IF;
+  END IF;
+
+  INSERT INTO users (
+    id, name, role, password, slack_id, hire_date, birthday,
+    is_initial_password, is_compositor, is_acting_supervisor
+  ) VALUES (
+    v_new.id, v_new.name, v_new.role, '1234', v_new.slack_id, v_new.hire_date, v_new.birthday,
+    true, false, false
+  );
+END;
+$$;
+
+COMMENT ON FUNCTION public.create_user_authorized(TEXT, JSONB) IS
+  'main canonical actor를 users writer lock 뒤 admin으로 재검증해 사용자 추가. users가 비었을 때는 actor 자신인 admin 1명만 bootstrap 허용.';
+
+CREATE OR REPLACE FUNCTION public.update_user_authorized(
+  p_actor_id TEXT,
+  p_user_id TEXT,
+  p_updates JSONB
+)
+RETURNS VOID
+LANGUAGE plpgsql
+SECURITY INVOKER
+SET search_path = public, pg_temp
+AS $$
+DECLARE
+  v_allowed_keys CONSTANT TEXT[] := ARRAY[
+    'name', 'role', 'slack_id', 'hire_date', 'birthday',
+    'is_compositor', 'is_acting_supervisor'
+  ];
+  v_actor_role TEXT;
+  v_target users%ROWTYPE;
+  v_patch users%ROWTYPE;
+BEGIN
+  IF p_actor_id IS NULL OR btrim(p_actor_id) = ''
+     OR p_user_id IS NULL OR btrim(p_user_id) = '' THEN
+    RAISE EXCEPTION 'User-management actor and target are required' USING ERRCODE = '42501';
+  END IF;
+  IF p_updates IS NULL OR jsonb_typeof(p_updates) <> 'object' THEN
+    RAISE EXCEPTION 'User update must be an object' USING ERRCODE = '22023';
+  END IF;
+  IF EXISTS (
+    SELECT 1 FROM jsonb_object_keys(p_updates) AS key
+    WHERE NOT (key = ANY(v_allowed_keys))
+  ) THEN
+    RAISE EXCEPTION 'User update contains unsupported fields' USING ERRCODE = '22023';
+  END IF;
+
+  LOCK TABLE users IN SHARE ROW EXCLUSIVE MODE;
+  PERFORM id
+  FROM users
+  WHERE id IN (p_actor_id, p_user_id)
+  ORDER BY id
+  FOR UPDATE;
+
+  SELECT role INTO v_actor_role FROM users WHERE id = p_actor_id;
+  IF v_actor_role IS DISTINCT FROM 'admin' THEN
+    RAISE EXCEPTION 'Only an admin can update users' USING ERRCODE = '42501';
+  END IF;
+  SELECT * INTO v_target FROM users WHERE id = p_user_id;
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'User % not found', p_user_id USING ERRCODE = 'P0002';
+  END IF;
+
+  v_patch := jsonb_populate_record(v_target, p_updates);
+  IF v_patch.name IS NULL OR btrim(v_patch.name) = ''
+     OR v_patch.role IS NULL OR v_patch.role NOT IN ('admin', 'user') THEN
+    RAISE EXCEPTION 'Updated user name or role is invalid' USING ERRCODE = '22023';
+  END IF;
+
+  UPDATE users SET
+    name = v_patch.name,
+    role = v_patch.role,
+    slack_id = v_patch.slack_id,
+    hire_date = v_patch.hire_date,
+    birthday = v_patch.birthday,
+    is_compositor = v_patch.is_compositor,
+    is_acting_supervisor = v_patch.is_acting_supervisor
+  WHERE id = p_user_id;
+END;
+$$;
+
+COMMENT ON FUNCTION public.update_user_authorized(TEXT, TEXT, JSONB) IS
+  'actor와 target users 행을 정렬 잠금하고 현재 admin만 비밀번호 제외 allow-list 필드를 수정.';
+
 -- ── 6) Realtime publication 4개 (재실행 시 duplicate_object 흡수) ──
 DO $$
 DECLARE t TEXT;
@@ -1240,3 +1382,48 @@ $$;
 
 COMMENT ON FUNCTION public.delete_user_cascade(TEXT) IS
   '사용자 삭제 + 종속 정리 atomic RPC. 공유 캘린더 소유자는 후계 admin을 잠근 뒤에만 진행하며, 부재 시 어떤 변경도 없이 거부한다. 개인 데이터 삭제 / 개인 캘린더 삭제·공유 캘린더 admin 이전 / users 삭제를 한 트랜잭션으로. comments·activity_log 는 역사 기록으로 보존.';
+
+CREATE OR REPLACE FUNCTION public.delete_user_authorized(
+  p_actor_id TEXT,
+  p_user_id TEXT
+)
+RETURNS VOID
+LANGUAGE plpgsql
+SECURITY INVOKER
+SET search_path = public, pg_temp
+AS $$
+DECLARE
+  v_actor_role TEXT;
+  v_target_exists BOOLEAN;
+BEGIN
+  IF p_actor_id IS NULL OR btrim(p_actor_id) = ''
+     OR p_user_id IS NULL OR btrim(p_user_id) = '' THEN
+    RAISE EXCEPTION 'User-management actor and target are required' USING ERRCODE = '42501';
+  END IF;
+
+  -- delete_user_cascade와 calendar management RPC의 전역 parent→child 순서를 유지한다.
+  -- users writer는 그 뒤에 직렬화하므로 role 강등과 stale admin 삭제 요청도 한쪽만 이긴다.
+  LOCK TABLE calendars IN SHARE ROW EXCLUSIVE MODE;
+  LOCK TABLE calendar_events IN SHARE ROW EXCLUSIVE MODE;
+  LOCK TABLE users IN SHARE ROW EXCLUSIVE MODE;
+  PERFORM id
+  FROM users
+  WHERE id IN (p_actor_id, p_user_id)
+  ORDER BY id
+  FOR UPDATE;
+
+  SELECT role INTO v_actor_role FROM users WHERE id = p_actor_id;
+  SELECT EXISTS (SELECT 1 FROM users WHERE id = p_user_id) INTO v_target_exists;
+  IF v_actor_role IS DISTINCT FROM 'admin' THEN
+    RAISE EXCEPTION 'Only an admin can delete users' USING ERRCODE = '42501';
+  END IF;
+  IF NOT v_target_exists THEN
+    RAISE EXCEPTION 'User % not found', p_user_id USING ERRCODE = 'P0002';
+  END IF;
+
+  PERFORM public.delete_user_cascade(p_user_id);
+END;
+$$;
+
+COMMENT ON FUNCTION public.delete_user_authorized(TEXT, TEXT) IS
+  'calendar writer 순서를 유지한 뒤 canonical actor와 target users 행을 잠가 현재 admin만 atomic user cascade를 실행.';

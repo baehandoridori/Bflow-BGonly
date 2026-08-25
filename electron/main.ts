@@ -26,6 +26,8 @@ import {
   relayIncomingCommittedCalendarDeleteToWindows,
 } from './calendarWindowFanout';
 import { deleteGoogleEventWithCommittedMarker } from './googleCalendarDeleteBoundary';
+import { registerUserAdminIpc } from './userAdminIpc';
+import { registerLegacyPrivateEventIpc } from './legacyPrivateEventIpc';
 import * as calendarStore from './calendarStore';
 import { PersonalTodoService } from './personalTodoService';
 import type { PersonalTodoCreateInput, PersonalTodoOrderMutation, PersonalTodoPatch, CalendarTodoPatch, PersonalTodoLabelColorKey } from './personalTodoService';
@@ -1333,9 +1335,10 @@ import {
   bulkUpdateSceneFields as sbBulkUpdateSceneFields,
   updateSceneField as sbUpdateSceneField,
   readUsers as sbReadUsers,
-  addUser as sbAddUser,
   updateUser as sbUpdateUser,
-  deleteUser as sbDeleteUser,
+  addUserAuthorized as sbAddUserAuthorized,
+  updateUserAuthorized as sbUpdateUserAuthorized,
+  deleteUserAuthorized as sbDeleteUserAuthorized,
   readCommentsForPart as sbReadComments,
   readCommentsForCharacter as sbReadCommentsForCharacter,
   readCommentReadStates as sbReadCommentReadStates,
@@ -1433,7 +1436,7 @@ import {
   updateCharacterBoardTab as sbUpdateCharacterBoardTab,
   deleteCharacterBoardTab as sbDeleteCharacterBoardTab,
 } from './supabase';
-import type { SupabaseUser, BulkStageUpdate, BulkFieldUpdate } from './supabase';
+import type { BulkStageUpdate, BulkFieldUpdate } from './supabase';
 import { setupRealtimeSubscription, teardownRealtime, trackPresence } from './realtime';
 import { recordActivity, getActivity, channelToTable, channelToAction } from './activityLogger';
 import { startEditingPresenceService, receivePresence } from './presence/editingPresenceService';
@@ -2273,18 +2276,20 @@ ipcMain.handle('supabase:read-users', wrapIpc(async () => {
     users: (await sbReadUsers()).map(sanitizePublicUser),
   };
 }));
-ipcMain.handle('supabase:add-user', wrapIpc(async (_e: unknown, user: SupabaseUser) => {
-  await sbAddUser({ ...user, password: '1234', isInitialPassword: true });
-}));
-ipcMain.handle('supabase:update-user', wrapIpc(async (_e: unknown, userId: string, updates: Record<string, string | boolean | null>) => {
-  const { password: _password, isInitialPassword: _initialPassword, ...safeUpdates } = updates;
-  await sbUpdateUser(userId, safeUpdates);
-  if (sessionManager?.getCanonicalUserId() === userId) await sessionManager.refreshCurrentUser();
-}));
-ipcMain.handle('supabase:delete-user', wrapIpc(async (_e: unknown, userId: string) => {
-  await sbDeleteUser(userId);
-  if (sessionManager?.getCanonicalUserId() === userId) await sessionManager.refreshCurrentUser();
-}));
+
+function getCanonicalUserIdOrThrow(): string {
+  const userId = sessionManager?.getCanonicalUserId();
+  if (!userId) throw new Error('로그인된 사용자 세션이 필요합니다 (사용자 관리)');
+  return userId;
+}
+
+registerUserAdminIpc(ipcMain, {
+  getCanonicalUserIdOrThrow,
+  addUser: sbAddUserAuthorized,
+  updateUser: sbUpdateUserAuthorized,
+  deleteUser: sbDeleteUserAuthorized,
+  refreshCurrentUser: () => sessionManager.refreshCurrentUser(),
+});
 
 // ─── Comments ───
 ipcMain.handle('supabase:read-comments', wrapIpc(async (_e: unknown, partUuid: string) => {
@@ -2440,34 +2445,22 @@ function getSessionUserIdOrThrow(): string {
   return id;
 }
 
-async function assertPrivateEventOwnerOrThrow(id: string): Promise<void> {
-  const ownerId = await sbGetPrivateEventOwner(id);
-  if (!ownerId) throw new Error('해당 비공개 일정을 찾을 수 없습니다');
-  const sessionUserId = getSessionUserIdOrThrow();
-  if (ownerId !== sessionUserId) throw new Error('이 비공개 일정에 대한 권한이 없습니다');
-}
-
-ipcMain.handle('supabase:read-private-events', wrapIpc(async () => {
-  // 렌더러가 넘긴 userId 는 무시 — 세션 사용자 본인 것만 조회.
-  const userId = getSessionUserIdOrThrow();
-  return sbReadPrivateEvents(userId);
-}));
-
-ipcMain.handle('supabase:add-private-event', wrapIpc(async (_e: unknown, input: Parameters<typeof sbAddPrivateEvent>[0]) => {
-  // 렌더러가 넘긴 user_id 는 무시하고 세션 본인 id 로 강제.
-  const userId = getSessionUserIdOrThrow();
-  return sbAddPrivateEvent({ ...input, user_id: userId });
-}));
-
-ipcMain.handle('supabase:update-private-event', wrapIpc(async (_e: unknown, id: string, updates: Parameters<typeof sbUpdatePrivateEvent>[1]) => {
-  await assertPrivateEventOwnerOrThrow(id);
-  await sbUpdatePrivateEvent(id, updates);
-}));
-
-ipcMain.handle('supabase:delete-private-event', wrapIpc(async (_e: unknown, id: string) => {
-  await assertPrivateEventOwnerOrThrow(id);
-  await sbDeletePrivateEvent(id);
-}));
+registerLegacyPrivateEventIpc(ipcMain, {
+  getSessionUserIdOrThrow,
+  assertLiveUser: async (userId) => {
+    await calendarStore.getUserRole(userId);
+  },
+  readEvents: (userId) => sbReadPrivateEvents(userId),
+  addEvent: (input) => sbAddPrivateEvent(
+    input as Parameters<typeof sbAddPrivateEvent>[0],
+  ),
+  getEventOwner: (eventId) => sbGetPrivateEventOwner(eventId),
+  updateEvent: (eventId, updates) => sbUpdatePrivateEvent(
+    eventId,
+    updates as Parameters<typeof sbUpdatePrivateEvent>[1],
+  ),
+  deleteEvent: (eventId) => sbDeletePrivateEvent(eventId),
+});
 
 registerCalendarIpc({
   getSessionUserIdOrThrow,

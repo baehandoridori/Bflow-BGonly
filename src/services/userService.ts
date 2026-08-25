@@ -9,6 +9,7 @@
 
 import type { AppUser, AuthSession, PublicUserDirectory } from '@/types';
 import { createUuid } from '@/utils/createUuid';
+import { useAuthStore } from '@/stores/useAuthStore';
 import { selectVisibleUsers } from './userDirectoryPolicy';
 
 // ─── 모드 관리 ──────────────────────────────────
@@ -262,8 +263,14 @@ export async function migrateUsersToSheets(): Promise<void> {
     const data = await window.electronAPI.usersRead();
     if (!data || !Array.isArray(data.users) || data.users.length === 0) return;
 
-    // Supabase에 하나씩 추가
-    for (const user of data.users) {
+    // 비어 있는 DB의 첫 행은 main canonical session과 같은 local admin이어야 한다.
+    // 로컬 파일 순서가 달라도 현재 로그인 admin을 먼저 보내고, 첫 insert 뒤에는 DB가
+    // 그 actor의 admin role을 잠금 재검증해 나머지 사용자를 순차 추가한다.
+    const actorId = useAuthStore.getState().currentUser?.id;
+    const orderedUsers = actorId
+      ? [...data.users].sort((a, b) => Number(b.id === actorId) - Number(a.id === actorId))
+      : data.users;
+    for (const user of orderedUsers) {
       try {
         await window.electronAPI.supabaseAddUser(user);
       } catch (err) {
