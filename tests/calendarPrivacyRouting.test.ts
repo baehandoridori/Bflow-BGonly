@@ -52,14 +52,54 @@ type PreviewCalendarApi = {
   loginCanonicalSession(input: { name: string; password: string; rememberMe: boolean }): Promise<{ ok: boolean }>;
   logoutCanonicalSession(): Promise<unknown>;
   calendarList(): Promise<CalendarRow[]>;
+  calendarCreate(input: {
+    name: string;
+    color: string;
+    visibility: CalendarRow['visibility'];
+    members?: Array<{ user_id: string; can_edit: boolean }>;
+  }): Promise<Omit<CalendarRow, 'members' | 'can_edit' | 'can_manage'>>;
+  calendarUpdate(id: string, updates: Partial<Pick<CalendarRow, 'name' | 'color' | 'visibility'>>): Promise<void>;
+  calendarDelete(id: string): Promise<void>;
+  calendarSetMembers(calendarId: string, members: Array<{ user_id: string; can_edit: boolean }>): Promise<void>;
   calendarEventCreate(input: Omit<CalendarEventRow, 'id' | 'created_by' | 'created_at' | 'updated_at'>): Promise<CalendarEventRow>;
   calendarEventsList(params?: { from?: string; to?: string }): Promise<CalendarEventRow[]>;
+  calendarEventUpdate(
+    id: string,
+    updates: Partial<Omit<CalendarEventRow, 'id' | 'created_by' | 'created_at' | 'updated_at'>>,
+  ): Promise<CalendarEventRow>;
+  calendarEventDelete(id: string): Promise<void>;
   calendarPrivacyReplacementCreate(request: {
     storage: 'google';
     calendar_id: string;
     event: Record<string, unknown>;
   }): Promise<unknown>;
 };
+
+const previewLogin = async (api: PreviewCalendarApi, name: string) => {
+  const result = await api.loginCanonicalSession({ name, password: '1234', rememberMe: false });
+  assert.equal(result.ok, true);
+};
+
+const previewEventInput = (
+  calendarId: string,
+  title: string,
+): Omit<CalendarEventRow, 'id' | 'created_by' | 'created_at' | 'updated_at'> => ({
+  calendar_id: calendarId,
+  title,
+  memo: '',
+  tag_id: null,
+  all_day: true,
+  start_date: '2026-08-24',
+  end_date: '2026-08-24',
+  start_time: null,
+  end_time: null,
+  linked_episode: null,
+  linked_part: null,
+  linked_sheet_name: null,
+  linked_scene_id: null,
+  linked_department: null,
+  linked_todo_id: null,
+});
 
 type Calls = {
   broadcasts: unknown[];
@@ -683,6 +723,149 @@ test('unauthenticated preview rejects a Google replacement and keeps the persona
       (await harness.api.calendarEventsList()).map(({ id, title }) => ({ id, title })),
       [{ id: source.id, title: '보존할 나만 보기 일정' }],
     );
+  } finally {
+    harness.restore();
+  }
+});
+
+test('preview calendar creation persists an editor member with list rights and event CRUD access', async () => {
+  const harness = await createPreviewCalendarHarness();
+  try {
+    await previewLogin(harness.api, '배한솔');
+    const calendar = await harness.api.calendarCreate({
+      name: '편집 멤버 캘린더',
+      color: '#74B9FF',
+      visibility: 'members',
+      members: [{ user_id: '2', can_edit: true }],
+    });
+
+    const ownerView = (await harness.api.calendarList()).find(({ id }) => id === calendar.id);
+    assert.deepEqual(ownerView?.members, [{ user_id: '2', can_edit: true }]);
+    assert.equal(ownerView?.can_edit, true);
+    assert.equal(ownerView?.can_manage, true);
+
+    await harness.api.logoutCanonicalSession();
+    await previewLogin(harness.api, '장삐쭈');
+    const memberView = (await harness.api.calendarList()).find(({ id }) => id === calendar.id);
+    assert.deepEqual(memberView?.members, [{ user_id: '2', can_edit: true }]);
+    assert.equal(memberView?.can_edit, true);
+    assert.equal(memberView?.can_manage, false);
+
+    const event = await harness.api.calendarEventCreate(previewEventInput(calendar.id, '멤버 생성 일정'));
+    const updated = await harness.api.calendarEventUpdate(event.id, { title: '멤버 수정 일정' });
+    assert.equal(updated.title, '멤버 수정 일정');
+    await harness.api.calendarEventDelete(event.id);
+    assert.equal((await harness.api.calendarEventsList()).some(({ id }) => id === event.id), false);
+  } finally {
+    harness.restore();
+  }
+});
+
+test('preview member replacement keeps viewer reads while revoking writes, then removes visibility', async () => {
+  const harness = await createPreviewCalendarHarness();
+  try {
+    await previewLogin(harness.api, '배한솔');
+    const calendar = await harness.api.calendarCreate({
+      name: '멤버 교체 캘린더',
+      color: '#A29BFE',
+      visibility: 'members',
+      members: [{ user_id: '2', can_edit: true }],
+    });
+    const event = await harness.api.calendarEventCreate(previewEventInput(calendar.id, '읽기 전용 일정'));
+    await harness.api.calendarSetMembers(calendar.id, [{ user_id: '2', can_edit: false }]);
+
+    await harness.api.logoutCanonicalSession();
+    await previewLogin(harness.api, '장삐쭈');
+    const viewerCalendar = (await harness.api.calendarList()).find(({ id }) => id === calendar.id);
+    assert.deepEqual(viewerCalendar?.members, [{ user_id: '2', can_edit: false }]);
+    assert.equal(viewerCalendar?.can_edit, false);
+    assert.equal(viewerCalendar?.can_manage, false);
+    assert.deepEqual(
+      (await harness.api.calendarEventsList()).map(({ id, title }) => ({ id, title })),
+      [{ id: event.id, title: '읽기 전용 일정' }],
+    );
+    await assert.rejects(
+      harness.api.calendarEventCreate(previewEventInput(calendar.id, '금지된 생성')),
+      /권한/,
+    );
+    await assert.rejects(harness.api.calendarEventUpdate(event.id, { title: '금지된 수정' }), /권한/);
+    await assert.rejects(harness.api.calendarEventDelete(event.id), /권한/);
+
+    await harness.api.logoutCanonicalSession();
+    await previewLogin(harness.api, '배한솔');
+    assert.equal((await harness.api.calendarEventsList()).find(({ id }) => id === event.id)?.title, '읽기 전용 일정');
+    await harness.api.calendarSetMembers(calendar.id, []);
+
+    await harness.api.logoutCanonicalSession();
+    await previewLogin(harness.api, '장삐쭈');
+    assert.equal((await harness.api.calendarList()).some(({ id }) => id === calendar.id), false);
+    assert.equal((await harness.api.calendarEventsList()).some(({ id }) => id === event.id), false);
+  } finally {
+    harness.restore();
+  }
+});
+
+test('preview private transition clears members and calendar deletion cascades events', async () => {
+  const harness = await createPreviewCalendarHarness();
+  try {
+    await previewLogin(harness.api, '배한솔');
+    const calendar = await harness.api.calendarCreate({
+      name: '정리 대상 캘린더',
+      color: '#00B894',
+      visibility: 'members',
+      members: [{ user_id: '2', can_edit: true }],
+    });
+    const event = await harness.api.calendarEventCreate(previewEventInput(calendar.id, '함께 정리할 일정'));
+
+    await harness.api.calendarUpdate(calendar.id, { visibility: 'private' });
+    const privateView = (await harness.api.calendarList()).find(({ id }) => id === calendar.id);
+    assert.deepEqual(privateView?.members, []);
+
+    await harness.api.logoutCanonicalSession();
+    await previewLogin(harness.api, '장삐쭈');
+    assert.equal((await harness.api.calendarList()).some(({ id }) => id === calendar.id), false);
+    assert.equal((await harness.api.calendarEventsList()).some(({ id }) => id === event.id), false);
+
+    await harness.api.logoutCanonicalSession();
+    await previewLogin(harness.api, '배한솔');
+    await harness.api.calendarUpdate(calendar.id, { visibility: 'members' });
+    await harness.api.calendarSetMembers(calendar.id, [{ user_id: '2', can_edit: true }]);
+    await harness.api.calendarDelete(calendar.id);
+    assert.equal((await harness.api.calendarList()).some(({ id }) => id === calendar.id), false);
+    assert.equal((await harness.api.calendarEventsList()).some(({ id }) => id === event.id), false);
+    await assert.rejects(
+      harness.api.calendarSetMembers(calendar.id, [{ user_id: '2', can_edit: true }]),
+      /찾을 수 없습니다/,
+    );
+  } finally {
+    harness.restore();
+  }
+});
+
+test('preview team calendars are visible but read-only to nonmembers', async () => {
+  const harness = await createPreviewCalendarHarness();
+  try {
+    await previewLogin(harness.api, '배한솔');
+    const calendar = await harness.api.calendarCreate({
+      name: '팀 전체 캘린더',
+      color: '#FDCB6E',
+      visibility: 'team',
+    });
+    const event = await harness.api.calendarEventCreate(previewEventInput(calendar.id, '팀 공지 일정'));
+
+    await harness.api.logoutCanonicalSession();
+    await previewLogin(harness.api, '허혜원');
+    const teamView = (await harness.api.calendarList()).find(({ id }) => id === calendar.id);
+    assert.deepEqual(teamView?.members, []);
+    assert.equal(teamView?.can_edit, false);
+    assert.equal(teamView?.can_manage, false);
+    assert.equal((await harness.api.calendarEventsList()).some(({ id }) => id === event.id), true);
+    await assert.rejects(
+      harness.api.calendarEventCreate(previewEventInput(calendar.id, '금지된 팀 일정')),
+      /권한/,
+    );
+    await assert.rejects(harness.api.calendarEventUpdate(event.id, { title: '금지된 팀 수정' }), /권한/);
+    await assert.rejects(harness.api.calendarEventDelete(event.id), /권한/);
   } finally {
     harness.restore();
   }
