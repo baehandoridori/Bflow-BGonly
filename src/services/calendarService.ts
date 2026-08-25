@@ -990,8 +990,8 @@ function requestBflowReloadAfterExternalInvalidation(): void {
 }
 
 /** B flow 일정 로드 — 구글 인증 가드 밖에서 항상 호출된다 (설계서 §6.2 핵심). */
-export async function loadBflowEvents(): Promise<void> {
-  await loadBflowEventsInternal();
+export async function loadBflowEvents(): Promise<boolean> {
+  return loadBflowEventsInternal();
 }
 
 /** 전체 동기화 (앱 시작 시 호출) */

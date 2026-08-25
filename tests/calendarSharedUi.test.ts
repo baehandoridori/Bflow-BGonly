@@ -205,6 +205,7 @@ let settingsUsers: TestUser[] = [];
 let settingsApiCalls: Array<{ name: string; args: unknown[] }> = [];
 let settingsApiFailures = new Set<string>();
 let settingsLoadAllFailure = false;
+let settingsBflowReloadResult = true;
 let settingsConfirmResponses: boolean[] = [];
 let settingsConfirmMessages: string[] = [];
 let settingsToastErrors: string[] = [];
@@ -213,6 +214,7 @@ let settingsCloseCount = 0;
 let tagManagerApiCalls: Array<{ name: string; args: unknown[] }> = [];
 let tagManagerApiFailures = new Set<string>();
 let tagManagerLoadAllFailure = false;
+let tagManagerBflowReloadResult = true;
 let tagManagerConfirmResponses: boolean[] = [];
 let tagManagerConfirmMessages: string[] = [];
 let tagManagerToastErrors: string[] = [];
@@ -381,6 +383,7 @@ function resetHarness(): void {
   settingsApiCalls = [];
   settingsApiFailures = new Set();
   settingsLoadAllFailure = false;
+  settingsBflowReloadResult = true;
   settingsConfirmResponses = [];
   settingsConfirmMessages = [];
   settingsToastErrors = [];
@@ -389,6 +392,7 @@ function resetHarness(): void {
   tagManagerApiCalls = [];
   tagManagerApiFailures = new Set();
   tagManagerLoadAllFailure = false;
+  tagManagerBflowReloadResult = true;
   tagManagerConfirmResponses = [];
   tagManagerConfirmMessages = [];
   tagManagerToastErrors = [];
@@ -593,7 +597,7 @@ async function loadTagManagerPopover(): Promise<TagManagerPopoverComponent> {
         return {
           async loadBflowEvents() {
             tagManagerApiCalls.push({ name: 'loadBflowEvents', args: [] });
-            if (tagManagerLoadAllFailure) throw new Error('canonical reload failed');
+            return tagManagerBflowReloadResult;
           },
         };
       }
@@ -995,7 +999,7 @@ async function loadCalendarSettingsModal(): Promise<CalendarSettingsModalCompone
         return {
           async loadBflowEvents() {
             settingsApiCalls.push({ name: 'loadBflowEvents', args: [] });
-            if (settingsLoadAllFailure) throw new Error('canonical reload failed');
+            return settingsBflowReloadResult;
           },
         };
       }
@@ -1476,16 +1480,18 @@ test('TagManagerPopover confirms deletion and reloads after both successful and 
     assert.equal(tagManagerCloseCount, 0);
   });
 
-  await t.test('canonical reload failure also reports failure without closing', async () => {
+  await t.test('a false canonical reload result reports failure and restores the previous drafts', async () => {
     resetHarness();
-    tagManagerLoadAllFailure = true;
+    tagManagerBflowReloadResult = false;
     tagManagerConfirmResponses = [true];
-    const tree = await renderTagManagerPopover();
+    let tree = await renderTagManagerPopover();
     await buttonByLabel(tree, '회의 태그 삭제').props.onClick?.();
+    tree = await renderTagManagerPopover();
 
     assert.deepEqual(tagManagerApiCalls.map((call) => call.name), ['calendarTagsSave', 'loadBflowEvents']);
     assert.equal(tagManagerToastErrors.length, 1);
     assert.equal(tagManagerCloseCount, 0);
+    assert.match(textContent(tree), /검수.*회의/, 'the failed optimistic delete restores the exact previous draft list');
   });
 });
 
@@ -1793,7 +1799,7 @@ test('CalendarSettingsModal edits visibility and members in permission-safe orde
     assert.equal(settingsToastErrors.length, 1);
   });
 
-  await t.test('a successful shared edit updates first, then replaces members, then reloads', async () => {
+  await t.test('a successful shared edit updates first, then replaces members, then reloads events', async () => {
     resetHarness();
     let tree = await renderCalendarSettingsModal(shared, 14);
     buttonByLabel(tree, '장삐쭈 편집 권한').props.onClick?.();
@@ -1801,7 +1807,7 @@ test('CalendarSettingsModal edits visibility and members in permission-safe orde
     await buttonByText(tree, '저장').props.onClick?.();
 
     assert.deepEqual(settingsApiCalls.map((call) => call.name), [
-      'calendarUpdate', 'calendarSetMembers', 'loadAll',
+      'calendarUpdate', 'calendarSetMembers', 'loadBflowEvents',
     ]);
     assert.deepEqual(settingsApiCalls[1].args, [
       'shared-settings',
@@ -1813,18 +1819,43 @@ test('CalendarSettingsModal edits visibility and members in permission-safe orde
     assert.equal(settingsCloseCount, 1);
   });
 
-  await t.test('switching to private relies on the atomic update and skips member replacement', async () => {
+  await t.test('switching a team calendar to private reloads event permissions and skips member replacement', async () => {
     resetHarness();
-    let tree = await renderCalendarSettingsModal(shared, 14);
+    const team = calendar({
+      ...shared,
+      id: 'team-settings',
+      visibility: 'team',
+    });
+    let tree = await renderCalendarSettingsModal(team, 14);
     formElementByLabel(tree, '나만').props.onChange?.({ target: { value: 'private', checked: true } });
+    tree = await renderCalendarSettingsModal(team, 14);
+    await buttonByText(tree, '저장').props.onClick?.();
+
+    assert.deepEqual(settingsApiCalls.map((call) => call.name), ['calendarUpdate', 'loadBflowEvents']);
+    assert.deepEqual(settingsApiCalls[0].args, [
+      'team-settings',
+      { visibility: 'private' },
+    ]);
+  });
+
+  await t.test('an admin removing their own edit membership treats a false event reload as failure', async () => {
+    resetHarness();
+    settingsBflowReloadResult = false;
+    let tree = await renderCalendarSettingsModal(shared, 14);
+    buttonByLabel(tree, '배한솔 제거').props.onClick?.();
     tree = await renderCalendarSettingsModal(shared, 14);
     await buttonByText(tree, '저장').props.onClick?.();
 
-    assert.deepEqual(settingsApiCalls.map((call) => call.name), ['calendarUpdate', 'loadAll']);
-    assert.deepEqual(settingsApiCalls[0].args, [
-      'shared-settings',
-      { visibility: 'private' },
+    assert.deepEqual(settingsApiCalls.map((call) => call.name), [
+      'calendarUpdate', 'calendarSetMembers', 'loadBflowEvents',
     ]);
+    assert.deepEqual(settingsApiCalls[1].args, [
+      'shared-settings',
+      [{ user_id: 'user-jang', can_edit: false }],
+    ]);
+    assert.equal(settingsCloseCount, 0);
+    assert.equal(settingsToastSuccesses.length, 0);
+    assert.equal(settingsToastErrors.length, 1);
   });
 });
 
@@ -1899,6 +1930,21 @@ test('CalendarSettingsModal treats reload failure as a save failure and keeps ed
 
   assert.deepEqual(settingsApiCalls.map((call) => call.name), ['calendarCreate', 'loadAll']);
   assert.equal(settingsCloseCount, 0);
+  assert.equal(settingsToastErrors.length, 1);
+});
+
+test('CalendarSettingsModal treats a false event reload result as a color save failure', async () => {
+  resetHarness();
+  settingsBflowReloadResult = false;
+  const editable = calendar({ id: 'color-refresh', canManage: true });
+  let tree = await renderCalendarSettingsModal(editable, 2);
+  buttonByLabel(tree, '색상 #74B9FF').props.onClick?.();
+  tree = await renderCalendarSettingsModal(editable, 2);
+  await buttonByText(tree, '저장').props.onClick?.();
+
+  assert.deepEqual(settingsApiCalls.map((call) => call.name), ['calendarUpdate', 'loadBflowEvents']);
+  assert.equal(settingsCloseCount, 0);
+  assert.equal(settingsToastSuccesses.length, 0);
   assert.equal(settingsToastErrors.length, 1);
 });
 

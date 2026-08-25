@@ -116,8 +116,12 @@ export function CalendarSettingsModal({ calendar, eventCount, onClose }: Calenda
       failure = error;
     } finally {
       try {
-        if (refreshEvents) await loadBflowEvents();
-        else await useCalendarStore.getState().loadAll();
+        if (refreshEvents) {
+          const refreshed = await loadBflowEvents();
+          if (!refreshed) failure ??= new Error('B flow event refresh failed');
+        } else {
+          await useCalendarStore.getState().loadAll();
+        }
       } catch (error) {
         failure ??= error;
       }
@@ -176,7 +180,7 @@ export function CalendarSettingsModal({ calendar, eventCount, onClose }: Calenda
       },
       '캘린더 설정을 저장했어요',
       '캘린더 설정을 저장하지 못했어요. 다시 시도해 주세요.',
-      updates.color !== undefined,
+      updates.color !== undefined || visibilityChanged || membersChanged,
     );
   };
 

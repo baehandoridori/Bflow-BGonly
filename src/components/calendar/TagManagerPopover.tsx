@@ -136,6 +136,7 @@ export function TagManagerPopover({ anchorRect, onClose }: TagManagerPopoverProp
   ): Promise<boolean> => {
     if (!isAdmin || saving) return false;
     setSaving(true);
+    const previousDrafts = drafts;
     setDrafts(nextDrafts);
     let failure: unknown;
     try {
@@ -149,14 +150,19 @@ export function TagManagerPopover({ anchorRect, onClose }: TagManagerPopoverProp
       failure = error;
     } finally {
       try {
-        if (refreshEvents) await loadBflowEvents();
-        else await useCalendarStore.getState().loadAll();
+        if (refreshEvents) {
+          const refreshed = await loadBflowEvents();
+          if (!refreshed) failure ??= new Error('B flow event refresh failed');
+        } else {
+          await useCalendarStore.getState().loadAll();
+        }
       } catch (error) {
         failure ??= error;
       }
     }
     setSaving(false);
     if (failure) {
+      setDrafts(previousDrafts);
       toast.error('태그를 저장하지 못했어요. 다시 시도해 주세요.');
       return false;
     }

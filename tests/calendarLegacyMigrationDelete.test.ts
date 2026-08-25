@@ -44,7 +44,7 @@ type LegacyPrivateRow = Omit<CalendarEventRow, 'calendar_id' | 'tag_id' | 'all_d
 };
 
 type ServiceModule = {
-  loadBflowEvents(): Promise<void>;
+  loadBflowEvents(): Promise<boolean>;
   getEvents(): Promise<Array<Record<string, unknown>>>;
   addEvent(event: Record<string, unknown>): Promise<void>;
   deleteEvent(eventId: string): Promise<void>;
@@ -127,6 +127,7 @@ async function bundledServiceSource(): Promise<string> {
 async function createHarness(options: {
   calendars: CalendarRow[];
   rows: CalendarEventRow[];
+  listEvents?(): Promise<CalendarEventRow[]>;
   readLegacy(userId: string, attempt: number): Promise<LegacyPrivateRow[]>;
 }): Promise<{ service: ServiceModule; calls: Calls; restore(): void }> {
   const globalScope = globalThis as Record<string, unknown>;
@@ -152,7 +153,7 @@ async function createHarness(options: {
   const electronAPI = {
     calendarList: async () => options.calendars,
     calendarTagsList: async () => [],
-    calendarEventsList: async () => options.rows,
+    calendarEventsList: async () => options.listEvents?.() ?? options.rows,
     calendarEventCreate: async (input: Record<string, unknown>) => ({ ...input, id: 'legacy-only' }),
     calendarEventUpdate: async () => {},
     calendarEventDelete: async (id: string) => { calls.bflowDeletes.push(id); },
@@ -221,6 +222,38 @@ test('a cold legacy-read failure blocks deletion of the current personal B flow 
     assert.deepEqual(harness.calls.legacyReadUsers, ['user-1', 'user-1']);
     assert.equal((await harness.service.getEvents()).some((event) => event.id === 'migrated-event'), true);
   } finally {
+    harness.restore();
+  }
+});
+
+test('loadBflowEvents returns false and preserves the last cache when its canonical event read fails', async () => {
+  let eventReadFails = false;
+  const originalWarn = console.warn;
+  const existing = eventRow('existing-event', 'personal-1');
+  const harness = await createHarness({
+    calendars: [calendarRow('personal-1', 'user-1')],
+    rows: [existing],
+    listEvents: async () => {
+      if (eventReadFails) throw new Error('canonical event outage');
+      return [existing];
+    },
+    readLegacy: async () => [],
+  });
+  try {
+    setUser(harness.service, 'user-1');
+    assert.equal(await harness.service.loadBflowEvents(), true);
+    assert.deepEqual((await harness.service.getEvents()).map((event) => event.id), ['existing-event']);
+
+    console.warn = () => {};
+    eventReadFails = true;
+    assert.equal(await harness.service.loadBflowEvents(), false);
+    assert.deepEqual(
+      (await harness.service.getEvents()).map((event) => event.id),
+      ['existing-event'],
+      'a failed reload cannot partially replace the last confirmed event cache',
+    );
+  } finally {
+    console.warn = originalWarn;
     harness.restore();
   }
 });
