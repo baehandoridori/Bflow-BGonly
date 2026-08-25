@@ -151,10 +151,13 @@ export function TagManagerPopover({ anchorRect, onClose }: TagManagerPopoverProp
     } finally {
       try {
         if (refreshEvents) {
-          const refreshed = await loadBflowEvents();
+          const refreshed = await loadBflowEvents({ requireTagsFresh: true });
           if (!refreshed) failure ??= new Error('B flow event refresh failed');
         } else {
-          await useCalendarStore.getState().loadAll();
+          const metadataFreshness = await useCalendarStore.getState().loadAll();
+          if (!metadataFreshness.tagsFresh) {
+            failure ??= new Error('Calendar tag metadata refresh failed');
+          }
         }
       } catch (error) {
         failure ??= error;

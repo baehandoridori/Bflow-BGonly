@@ -8,6 +8,11 @@ const MUTED_CALENDARS_KEY = 'bflow_calendar_muted_v1';
 let loadAllGeneration = 0;
 let calendarStoreSessionUserId = useAuthStore.getState().currentUser?.id ?? null;
 
+export interface CalendarMetadataFreshness {
+  calendarsFresh: boolean;
+  tagsFresh: boolean;
+}
+
 export interface CalendarState {
   calendars: BflowCalendar[];
   tags: CalendarTag[];
@@ -15,7 +20,7 @@ export interface CalendarState {
   visibleCalendarIds: Record<string, boolean>;
   enabledTagIds: Record<string, boolean>;
   mutedCalendarIds: string[];
-  loadAll(): Promise<void>;
+  loadAll(): Promise<CalendarMetadataFreshness>;
   toggleCalendarVisible(id: string): void;
   toggleTag(id: string): void;
   resetTagsAllOn(): void;
@@ -135,13 +140,17 @@ export const useCalendarStore = create<CalendarState>((set) => ({
       requestGeneration !== loadAllGeneration
       || requestUserId !== calendarStoreSessionUserId
       || requestUserId !== (useAuthStore.getState().currentUser?.id ?? null)
-    ) return;
+    ) return { calendarsFresh: false, tagsFresh: false };
     set((state) => ({
       ...next,
       // loaded는 개인 캘린더 저장 경로를 결정하는 준비 상태다. 태그만 성공한
       // 최초 요청에서는 true로 올리지 않아 다음 쓰기가 캘린더 목록을 재시도한다.
       loaded: state.loaded || calendarResult.status === 'fulfilled',
     }));
+    return {
+      calendarsFresh: calendarResult.status === 'fulfilled',
+      tagsFresh: tagResult.status === 'fulfilled',
+    };
   },
 
   toggleCalendarVisible(id) {

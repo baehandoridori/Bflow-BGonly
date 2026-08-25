@@ -204,7 +204,7 @@ let settingsCurrentUser: TestUser;
 let settingsUsers: TestUser[] = [];
 let settingsApiCalls: Array<{ name: string; args: unknown[] }> = [];
 let settingsApiFailures = new Set<string>();
-let settingsLoadAllFailure = false;
+let settingsMetadataFreshness = { calendarsFresh: true, tagsFresh: true };
 let settingsBflowReloadResult = true;
 let settingsConfirmResponses: boolean[] = [];
 let settingsConfirmMessages: string[] = [];
@@ -213,8 +213,7 @@ let settingsToastSuccesses: string[] = [];
 let settingsCloseCount = 0;
 let tagManagerApiCalls: Array<{ name: string; args: unknown[] }> = [];
 let tagManagerApiFailures = new Set<string>();
-let tagManagerLoadAllFailure = false;
-let tagManagerBflowReloadResult = true;
+let tagManagerMetadataFreshness = { calendarsFresh: true, tagsFresh: true };
 let tagManagerConfirmResponses: boolean[] = [];
 let tagManagerConfirmMessages: string[] = [];
 let tagManagerToastErrors: string[] = [];
@@ -382,7 +381,7 @@ function resetHarness(): void {
   ];
   settingsApiCalls = [];
   settingsApiFailures = new Set();
-  settingsLoadAllFailure = false;
+  settingsMetadataFreshness = { calendarsFresh: true, tagsFresh: true };
   settingsBflowReloadResult = true;
   settingsConfirmResponses = [];
   settingsConfirmMessages = [];
@@ -391,8 +390,7 @@ function resetHarness(): void {
   settingsCloseCount = 0;
   tagManagerApiCalls = [];
   tagManagerApiFailures = new Set();
-  tagManagerLoadAllFailure = false;
-  tagManagerBflowReloadResult = true;
+  tagManagerMetadataFreshness = { calendarsFresh: true, tagsFresh: true };
   tagManagerConfirmResponses = [];
   tagManagerConfirmMessages = [];
   tagManagerToastErrors = [];
@@ -540,7 +538,7 @@ async function loadTagManagerPopover(): Promise<TagManagerPopoverComponent> {
         getState: () => ({
           async loadAll() {
             tagManagerApiCalls.push({ name: 'loadAll', args: [] });
-            if (tagManagerLoadAllFailure) throw new Error('load all failed');
+            return tagManagerMetadataFreshness;
           },
         }),
       },
@@ -595,9 +593,10 @@ async function loadTagManagerPopover(): Promise<TagManagerPopoverComponent> {
       if (id === '@/stores/useCalendarStore') return { useCalendarStore: useCalendarStoreMock };
       if (id === '@/services/calendarService') {
         return {
-          async loadBflowEvents() {
-            tagManagerApiCalls.push({ name: 'loadBflowEvents', args: [] });
-            return tagManagerBflowReloadResult;
+          async loadBflowEvents(...args: unknown[]) {
+            tagManagerApiCalls.push({ name: 'loadBflowEvents', args });
+            const options = args[0] as { requireTagsFresh?: boolean } | undefined;
+            return options?.requireTagsFresh !== true || tagManagerMetadataFreshness.tagsFresh;
           },
         };
       }
@@ -915,7 +914,7 @@ async function loadCalendarSettingsModal(): Promise<CalendarSettingsModalCompone
         getState: () => ({
           async loadAll() {
             settingsApiCalls.push({ name: 'loadAll', args: [] });
-            if (settingsLoadAllFailure) throw new Error('load all failed');
+            return settingsMetadataFreshness;
           },
         }),
       },
@@ -1449,6 +1448,22 @@ test('TagManagerPopover lets admins edit, reorder, and add tags with canonical f
       { name: '리뷰', color: '#E17055', sort_order: 2 },
     ]]);
   });
+
+  await t.test('a warmed tag-list failure reports an error and rolls an optimistic reorder back', async () => {
+    resetHarness();
+    tagManagerMetadataFreshness = { calendarsFresh: true, tagsFresh: false };
+    let tree = await renderTagManagerPopover();
+    await buttonByLabel(tree, '회의 태그 위로').props.onClick?.();
+    tree = await renderTagManagerPopover();
+
+    assert.deepEqual(tagManagerApiCalls.map((call) => call.name), ['calendarTagsSave', 'loadAll']);
+    assert.equal(tagManagerToastErrors.length, 1);
+    const restoredText = textContent(tree);
+    assert.ok(
+      restoredText.indexOf('검수') < restoredText.indexOf('회의'),
+      'the last confirmed draft order survives a partial metadata reload failure',
+    );
+  });
 });
 
 test('TagManagerPopover confirms deletion and reloads after both successful and failed saves', async (t) => {
@@ -1480,9 +1495,9 @@ test('TagManagerPopover confirms deletion and reloads after both successful and 
     assert.equal(tagManagerCloseCount, 0);
   });
 
-  await t.test('a false canonical reload result reports failure and restores the previous drafts', async () => {
+  await t.test('a tag-sensitive reload rejects stale tag metadata and restores the previous drafts', async () => {
     resetHarness();
-    tagManagerBflowReloadResult = false;
+    tagManagerMetadataFreshness = { calendarsFresh: true, tagsFresh: false };
     tagManagerConfirmResponses = [true];
     let tree = await renderTagManagerPopover();
     await buttonByLabel(tree, '회의 태그 삭제').props.onClick?.();
@@ -1920,9 +1935,9 @@ test('CalendarSettingsModal confirms destructive deletion and reloads on success
   });
 });
 
-test('CalendarSettingsModal treats reload failure as a save failure and keeps edits open', async () => {
+test('CalendarSettingsModal treats a warmed calendar-list failure as a save failure and keeps edits open', async () => {
   resetHarness();
-  settingsLoadAllFailure = true;
+  settingsMetadataFreshness = { calendarsFresh: false, tagsFresh: true };
   let tree = await renderCalendarSettingsModal();
   formElementByLabel(tree, '캘린더 이름').props.onChange?.({ target: { value: '재시도 캘린더', checked: false } });
   tree = await renderCalendarSettingsModal();

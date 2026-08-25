@@ -864,6 +864,7 @@ export async function getEvents(): Promise<CalendarEvent[]> {
 
 type LoadBflowEventsOptions = {
   broadcast?: boolean;
+  requireTagsFresh?: boolean;
 };
 
 async function loadBflowEventsInternal(options: LoadBflowEventsOptions = {}): Promise<boolean> {
@@ -874,13 +875,15 @@ async function loadBflowEventsInternal(options: LoadBflowEventsOptions = {}): Pr
   bflowLoadsInFlight += 1;
   if (bflowMutationInFlight > 0) bflowReloadRequested = true;
   try {
-    await useCalendarStore.getState().loadAll();
+    const metadataFreshness = await useCalendarStore.getState().loadAll();
     if (
       requestGeneration !== bflowLoadGeneration
       || requestSessionGeneration !== bflowSessionGeneration
       || requestUserId !== bflowSessionUserId
       || requestUserId !== (useAuthStore.getState().currentUser?.id ?? null)
     ) return false;
+    if (!metadataFreshness.calendarsFresh) return false;
+    if (options.requireTagsFresh && !metadataFreshness.tagsFresh) return false;
     const calendarState = useCalendarStore.getState();
     // 일정 행은 캘린더 색·개인 여부·편집 권한을 메타데이터에서 파생한다. 깨끗한
     // 세션에서 목록 조회가 실패했다면 fallback 값으로 오해석하지 말고 다음 호출이
@@ -990,8 +993,8 @@ function requestBflowReloadAfterExternalInvalidation(): void {
 }
 
 /** B flow 일정 로드 — 구글 인증 가드 밖에서 항상 호출된다 (설계서 §6.2 핵심). */
-export async function loadBflowEvents(): Promise<boolean> {
-  return loadBflowEventsInternal();
+export async function loadBflowEvents(options: { requireTagsFresh?: boolean } = {}): Promise<boolean> {
+  return loadBflowEventsInternal(options);
 }
 
 /** 전체 동기화 (앱 시작 시 호출) */

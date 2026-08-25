@@ -120,7 +120,10 @@ export function CalendarSettingsModal({ calendar, eventCount, onClose }: Calenda
           const refreshed = await loadBflowEvents();
           if (!refreshed) failure ??= new Error('B flow event refresh failed');
         } else {
-          await useCalendarStore.getState().loadAll();
+          const metadataFreshness = await useCalendarStore.getState().loadAll();
+          if (!metadataFreshness.calendarsFresh) {
+            failure ??= new Error('Calendar metadata refresh failed');
+          }
         }
       } catch (error) {
         failure ??= error;
