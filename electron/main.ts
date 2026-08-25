@@ -2455,9 +2455,10 @@ registerLegacyPrivateEventIpc(ipcMain, {
     input as Parameters<typeof sbAddPrivateEvent>[0],
   ),
   getEventOwner: (eventId) => sbGetPrivateEventOwner(eventId),
-  updateEvent: (eventId, updates) => sbUpdatePrivateEvent(
+  updateEvent: (eventId, ownerId, updates) => sbUpdatePrivateEvent(
     eventId,
-    updates as Parameters<typeof sbUpdatePrivateEvent>[1],
+    ownerId,
+    updates as Parameters<typeof sbUpdatePrivateEvent>[2],
   ),
   deleteEvent: (eventId) => sbDeletePrivateEvent(eventId),
 });

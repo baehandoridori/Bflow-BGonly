@@ -133,7 +133,9 @@ test('live legacy private handlers bind reads and creates to the canonical sessi
     readEvents: async (userId) => { calls.push({ kind: 'read', args: [userId] }); return []; },
     addEvent: async (input) => { calls.push({ kind: 'add', args: [input] }); return { id: 'created' }; },
     getEventOwner: async (id) => { calls.push({ kind: 'owner', args: [id] }); return 'user-a'; },
-    updateEvent: async (id, updates) => { calls.push({ kind: 'update', args: [id, updates] }); },
+    updateEvent: async (id, ownerId, updates) => {
+      calls.push({ kind: 'update', args: [id, ownerId, updates] });
+    },
     deleteEvent: async (id) => { calls.push({ kind: 'delete', args: [id] }); },
   });
 
@@ -147,7 +149,11 @@ test('live legacy private handlers bind reads and creates to the canonical sessi
     user_id: 'user-a', title: 'private',
   }]);
   assert.equal(calls.filter((call) => call.kind === 'live').length, 4);
-  assert.equal(calls.filter((call) => call.kind === 'update').length, 1);
+  assert.deepEqual(calls.filter((call) => call.kind === 'update')[0].args, [
+    'event-1',
+    'user-a',
+    { title: 'changed' },
+  ]);
   assert.equal(calls.filter((call) => call.kind === 'delete').length, 1);
 });
 

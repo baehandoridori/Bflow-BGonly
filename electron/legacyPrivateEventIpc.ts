@@ -8,7 +8,11 @@ export type LegacyPrivateEventIpcDeps = {
   readEvents(userId: string): Promise<unknown[]>;
   addEvent(input: Record<string, unknown>): Promise<unknown>;
   getEventOwner(eventId: string): Promise<string | null>;
-  updateEvent(eventId: string, updates: Record<string, unknown>): Promise<void>;
+  updateEvent(
+    eventId: string,
+    ownerId: string,
+    updates: Record<string, unknown>,
+  ): Promise<void>;
   deleteEvent(eventId: string): Promise<void>;
 };
 
@@ -58,8 +62,8 @@ export function registerLegacyPrivateEventIpc(
   });
 
   ipc.handle('supabase:update-private-event', async (_event, rawId: unknown, rawUpdates: unknown) => {
-    const { eventId } = await ownedEvent(rawId);
-    await deps.updateEvent(eventId, objectInput(rawUpdates, '비공개 일정 수정'));
+    const { eventId, userId } = await ownedEvent(rawId);
+    await deps.updateEvent(eventId, userId, objectInput(rawUpdates, '비공개 일정 수정'));
   });
 
   ipc.handle('supabase:delete-private-event', async (_event, rawId: unknown) => {

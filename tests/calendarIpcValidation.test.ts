@@ -10,6 +10,7 @@ import {
   relayIncomingCommittedCalendarDeleteToWindows,
 } from '../electron/calendarWindowFanout.ts';
 import { deleteGoogleEventWithCommittedMarker } from '../electron/googleCalendarDeleteBoundary.ts';
+import { registerLegacyPrivateEventIpc } from '../electron/legacyPrivateEventIpc.ts';
 
 type Handler = (_event: unknown, ...args: unknown[]) => Promise<unknown>;
 
@@ -152,7 +153,9 @@ function calendarSupabasePrivateTestPlugin(): Plugin {
           'broadcastCommentReactionNotification',
           'broadcastCommentReactionNotificationRemoved',
           'broadcastActivityRemoved',
-        ].map((name) => `export const ${name} = () => {};`).join('\n'),
+        ].map((name) => (
+          `export const ${name} = (...args) => globalThis.${SUPABASE_PRIVATE_HARNESS_KEY}.broadcasts.push({ name: '${name}', args });`
+        )).join('\n'),
       }));
       builder.onLoad({ filter: /^storage$/, namespace: 'calendar-supabase-private-test' }, () => ({
         contents: 'export const deleteImage = async () => {};',
@@ -181,9 +184,17 @@ async function bundledCalendarSupabasePrivateSource(): Promise<string> {
   return supabasePrivateBundle;
 }
 
-async function loadCalendarSupabasePrivateModule(client: unknown): Promise<{
+async function loadCalendarSupabasePrivateModule(
+  client: unknown,
+  broadcasts: Array<{ name: string; args: unknown[] }> = [],
+): Promise<{
   addPrivateEvent(input: Record<string, unknown>): Promise<unknown>;
-  updatePrivateEvent(eventId: string, updates: Record<string, unknown>): Promise<void>;
+  getPrivateEventOwner(eventId: string): Promise<string | null>;
+  updatePrivateEvent(
+    eventId: string,
+    ownerId: string,
+    updates: Record<string, unknown>,
+  ): Promise<void>;
   deletePrivateEventForOwner?: (eventId: string, ownerId: string) => Promise<void>;
   deletePrivateEventForOwnerIfPresent?: (
     eventId: string,
@@ -191,13 +202,18 @@ async function loadCalendarSupabasePrivateModule(client: unknown): Promise<{
   ) => Promise<'deleted' | 'missing'>;
 }> {
   const globalScope = globalThis as Record<string, unknown>;
-  globalScope[SUPABASE_PRIVATE_HARNESS_KEY] = { client };
+  globalScope[SUPABASE_PRIVATE_HARNESS_KEY] = { client, broadcasts };
   const encoded = Buffer.from(await bundledCalendarSupabasePrivateSource()).toString('base64');
   return import(
     `data:text/javascript;base64,${encoded}#calendar-supabase-private-${supabasePrivateNonce++}`
   ) as Promise<{
     addPrivateEvent(input: Record<string, unknown>): Promise<unknown>;
-    updatePrivateEvent(eventId: string, updates: Record<string, unknown>): Promise<void>;
+    getPrivateEventOwner(eventId: string): Promise<string | null>;
+    updatePrivateEvent(
+      eventId: string,
+      ownerId: string,
+      updates: Record<string, unknown>,
+    ): Promise<void>;
     deletePrivateEventForOwner?: (eventId: string, ownerId: string) => Promise<void>;
     deletePrivateEventForOwnerIfPresent?: (
       eventId: string,
@@ -1712,13 +1728,22 @@ test('ordinary legacy private update strips owner and immutable fields at the fi
       return {
         update(patch: Record<string, unknown>) {
           updated = patch;
-          return {
-            async eq(field: string, value: unknown) {
-              assert.equal(field, 'id');
-              assert.equal(value, 'legacy-event');
-              return { error: null };
+          const predicates = new Map<string, unknown>();
+          const builder = {
+            eq(field: string, value: unknown) {
+              predicates.set(field, value);
+              return builder;
+            },
+            async select(selection: string) {
+              assert.equal(selection, 'id');
+              assert.deepEqual([...predicates], [
+                ['id', 'legacy-event'],
+                ['user_id', 'legacy-user'],
+              ]);
+              return { data: [{ id: 'legacy-event' }], error: null };
             },
           };
+          return builder;
         },
       };
     },
@@ -1726,7 +1751,7 @@ test('ordinary legacy private update strips owner and immutable fields at the fi
 
   try {
     const module = await loadCalendarSupabasePrivateModule(client);
-    await module.updatePrivateEvent('legacy-event', {
+    await module.updatePrivateEvent('legacy-event', 'legacy-user', {
       id: 'replacement-id',
       user_id: 'attacker',
       title: '허용된 제목',
@@ -1748,6 +1773,94 @@ test('ordinary legacy private update strips owner and immutable fields at the fi
       'title',
       'updated_at',
     ]);
+  } finally {
+    if (hadHarness) globalScope[SUPABASE_PRIVATE_HARNESS_KEY] = priorHarness;
+    else delete globalScope[SUPABASE_PRIVATE_HARNESS_KEY];
+    if (hadWebSocket) globalScope.WebSocket = priorWebSocket;
+    else delete globalScope.WebSocket;
+  }
+});
+
+test('legacy update rejects a row deleted after owner pre-read and never broadcasts success', async () => {
+  const globalScope = globalThis as Record<string, unknown>;
+  const priorHarness = globalScope[SUPABASE_PRIVATE_HARNESS_KEY];
+  const hadHarness = Object.prototype.hasOwnProperty.call(globalScope, SUPABASE_PRIVATE_HARNESS_KEY);
+  const priorWebSocket = globalScope.WebSocket;
+  const hadWebSocket = Object.prototype.hasOwnProperty.call(globalScope, 'WebSocket');
+  const broadcasts: Array<{ name: string; args: unknown[] }> = [];
+  let row: { id: string; user_id: string } | null = {
+    id: 'concurrently-deleted-event',
+    user_id: 'legacy-user',
+  };
+  const client = {
+    from(table: string) {
+      assert.equal(table, 'private_calendar_events');
+      return {
+        select(selection: string) {
+          assert.equal(selection, 'user_id');
+          const predicates = new Map<string, unknown>();
+          return {
+            eq(field: string, value: unknown) {
+              predicates.set(field, value);
+              return {
+                async maybeSingle() {
+                  const matched = row && [...predicates].every(
+                    ([key, expected]) => row?.[key as 'id' | 'user_id'] === expected,
+                  ) ? { user_id: row.user_id } : null;
+                  row = null;
+                  return { data: matched, error: null };
+                },
+              };
+            },
+          };
+        },
+        update() {
+          const predicates = new Map<string, unknown>();
+          const builder = {
+            eq(field: string, value: unknown) {
+              predicates.set(field, value);
+              return builder;
+            },
+            async select(selection: string) {
+              assert.equal(selection, 'id');
+              const matched = row && [...predicates].every(
+                ([key, expected]) => row?.[key as 'id' | 'user_id'] === expected,
+              ) ? [{ id: row.id }] : [];
+              return { data: matched, error: null };
+            },
+          };
+          return builder;
+        },
+      };
+    },
+  };
+
+  try {
+    const module = await loadCalendarSupabasePrivateModule(client, broadcasts);
+    const registered = new Map<string, Handler>();
+    registerLegacyPrivateEventIpc({
+      handle(channel, handler) {
+        registered.set(channel, handler as Handler);
+      },
+    }, {
+      getSessionUserIdOrThrow: () => 'legacy-user',
+      assertLiveUser: async () => {},
+      readEvents: async () => [],
+      addEvent: async () => ({ id: 'unused' }),
+      getEventOwner: (eventId) => module.getPrivateEventOwner(eventId),
+      updateEvent: (eventId, ownerId, updates) => (
+        module.updatePrivateEvent(eventId, ownerId, updates)
+      ),
+      deleteEvent: async () => {},
+    });
+    const update = registered.get('supabase:update-private-event');
+    assert.ok(update);
+
+    await assert.rejects(
+      update({}, 'concurrently-deleted-event', { title: '유령 수정' }),
+      /찾을 수 없습니다|변경되었습니다/,
+    );
+    assert.deepEqual(broadcasts, []);
   } finally {
     if (hadHarness) globalScope[SUPABASE_PRIVATE_HARNESS_KEY] = priorHarness;
     else delete globalScope[SUPABASE_PRIVATE_HARNESS_KEY];

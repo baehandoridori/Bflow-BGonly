@@ -1928,14 +1928,23 @@ function safePrivateEventUpdateInput(input: PrivateEventUpdateInput): PrivateEve
 
 export async function updatePrivateEvent(
   id: string,
+  ownerId: string,
   updates: PrivateEventUpdateInput,
 ): Promise<void> {
   const patch = {
     ...safePrivateEventUpdateInput(updates),
     updated_at: new Date().toISOString(),
   };
-  const { error } = await supabase.from('private_calendar_events').update(patch).eq('id', id);
+  const { data, error } = await supabase
+    .from('private_calendar_events')
+    .update(patch)
+    .eq('id', id)
+    .eq('user_id', ownerId)
+    .select('id');
   throwIfError(error);
+  if (!Array.isArray(data) || !data.some((row) => row?.id === id)) {
+    throw new Error('해당 비공개 일정을 찾을 수 없거나 소유자가 변경되었습니다');
+  }
   broadcastDataChange('private_calendar_events', 'UPDATE');
   broadcastCalendarChanged('UPDATE');
 }
