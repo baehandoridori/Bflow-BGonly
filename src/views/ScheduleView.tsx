@@ -355,16 +355,17 @@ export function ScheduleView() {
   // 드래그&드롭
   const handleEventDragDone = useCallback(async (eventId: string, newStart: string, newEnd: string) => {
     await updateEvent(eventId, { startDate: newStart, endDate: newEnd });
-    setEvents((prev) => {
-      const updated = prev.map((e) => (e.id === eventId ? { ...e, startDate: newStart, endDate: newEnd } : e));
-      // sync to todo if linked
-      const ev = updated.find((e) => e.id === eventId);
-      if (ev && (ev.linkedTodoId || ev.id.startsWith('cal_'))) {
-        const todoId = ev.linkedTodoId || ev.id.replace(/^cal_/, '');
-        syncCalendarToTodo(todoId, ev);
-      }
-      return updated;
-    });
+    const canonicalEvents = await getEvents();
+    const canonical = canonicalEvents.find((event) => event.id === eventId);
+    setEvents(canonicalEvents);
+    setPanelEvent((previous) => previous?.id === eventId ? canonical ?? null : previous);
+    setQuickEdit((previous) => previous?.event.id === eventId
+      ? canonical ? { ...previous, event: canonical } : null
+      : previous);
+    if (canonical && (canonical.linkedTodoId || canonical.id.startsWith('cal_'))) {
+      const todoId = canonical.linkedTodoId || canonical.id.replace(/^cal_/, '');
+      void syncCalendarToTodo(todoId, canonical);
+    }
   }, []);
 
   const { isDragging, preview: dragPreview, startDrag } = useCalendarDnD(handleEventDragDone, handleEventDragDone);
@@ -415,9 +416,8 @@ export function ScheduleView() {
       const tag = (e.target as HTMLElement)?.tagName;
       if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
 
-      // 패널이 열려 있을 때 Escape만 처리
+      // 패널의 첫 ESC는 편집 취소, 다음 ESC는 닫기다. 패널 자체 리스너에 맡긴다.
       if (panelEvent && e.key === 'Escape') {
-        setPanelEvent(null);
         return;
       }
 
@@ -561,37 +561,52 @@ export function ScheduleView() {
 
   // ─── 사이드 패널 / 퀵 에디트 핸들러 ───
   const handleUpdateEventDirect = useCallback(async (id: string, updates: Partial<CalendarEvent>) => {
+    const sanitized = { ...updates };
     // 빈 문자열 날짜 방지: 기존 값 유지
-    if ('startDate' in updates && !updates.startDate) delete updates.startDate;
-    if ('endDate' in updates && !updates.endDate) delete updates.endDate;
+    if ('startDate' in sanitized && !sanitized.startDate) delete sanitized.startDate;
+    if ('endDate' in sanitized && !sanitized.endDate) delete sanitized.endDate;
     // endDate < startDate 방지: 자동 swap
-    if (updates.startDate && updates.endDate && updates.endDate < updates.startDate) {
-      [updates.startDate, updates.endDate] = [updates.endDate, updates.startDate];
+    if (sanitized.startDate && sanitized.endDate && sanitized.endDate < sanitized.startDate) {
+      [sanitized.startDate, sanitized.endDate] = [sanitized.endDate, sanitized.startDate];
     }
-    await updateEvent(id, updates);
-    setEvents(prev => {
-      const updated = prev.map(e => e.id === id ? { ...e, ...updates } : e);
-      // 캘린더 → 할일 역동기화 (최신 상태에서 참조)
-      const ev = prev.find(e => e.id === id);
-      if (ev) {
-        const updatedEvent = { ...ev, ...updates };
-        if (updatedEvent.linkedTodoId || updatedEvent.id.startsWith('cal_')) {
-          const todoId = updatedEvent.linkedTodoId || updatedEvent.id.replace(/^cal_/, '');
-          syncCalendarToTodo(todoId, updatedEvent);
-        }
-      }
-      return updated;
-    });
-    // 사이드패널에 표시 중인 이벤트도 갱신
-    setPanelEvent(prev => prev && prev.id === id ? { ...prev, ...updates } : prev);
+    await updateEvent(id, sanitized);
+    const canonicalEvents = await getEvents();
+    const canonical = canonicalEvents.find((event) => event.id === id);
+    setEvents(canonicalEvents);
+    if (canonical && (canonical.linkedTodoId || canonical.id.startsWith('cal_'))) {
+      const todoId = canonical.linkedTodoId || canonical.id.replace(/^cal_/, '');
+      void syncCalendarToTodo(todoId, canonical);
+    }
+    setPanelEvent((previous) => previous?.id === id ? canonical ?? null : previous);
+    setQuickEdit((previous) => previous?.event.id === id
+      ? canonical ? { ...previous, event: canonical } : null
+      : previous);
   }, []);
 
   const handleDuplicateEvent = useCallback(async (event: CalendarEvent) => {
+    const isCanonicalBflow = event.sourceCalendarId?.startsWith('bflow:') === true
+      && Boolean(event.calendarId);
+    const isWriteProtected = event.isReadOnly === true || event.canEdit === false;
+    let duplicateCalendarId = event.calendarId;
+    if (isCanonicalBflow && isWriteProtected) {
+      const personal = useCalendarStore.getState().calendars.find((calendar) => (
+        calendar.isPersonal && calendar.canEdit
+      ));
+      if (!personal) {
+        console.warn('[ScheduleView] 복제할 수 있는 개인 캘린더가 없습니다');
+        return;
+      }
+      duplicateCalendarId = personal.id;
+    }
     const newEv: CalendarEvent = {
       ...event,
       id: createUuid(),
       title: `${event.title} (복사)`,
       createdAt: new Date().toISOString(),
+      calendarId: duplicateCalendarId,
+      sourceCalendarId: undefined,
+      source: undefined,
+      canEdit: undefined,
       // 연결 정보 모두 제거: 완전 독립 이벤트로 복제
       linkedTodoId: undefined,
       isReadOnly: false,
@@ -928,15 +943,7 @@ export function ScheduleView() {
           event={quickEdit.event}
           position={quickEdit.position}
           onClose={() => setQuickEdit(null)}
-          onUpdateColor={(id, color) => {
-            handleUpdateEventDirect(id, { color });
-            // 패널 이벤트도 업데이트
-            setPanelEvent(prev => prev && prev.id === id ? { ...prev, color } : prev);
-          }}
-          onUpdate={(id, updates) => {
-            handleUpdateEventDirect(id, updates);
-            setPanelEvent(prev => prev && prev.id === id ? { ...prev, ...updates } : prev);
-          }}
+          onUpdate={handleUpdateEventDirect}
           onDelete={(id) => { handleDeleteEvent(id); setPanelEvent(prev => prev?.id === id ? null : prev); }}
           onDuplicate={handleDuplicateEvent}
         />

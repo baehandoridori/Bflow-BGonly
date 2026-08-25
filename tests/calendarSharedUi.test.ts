@@ -41,6 +41,36 @@ type TagManagerPopoverProps = {
 };
 type TagManagerPopoverComponent = (props: TagManagerPopoverProps) => ReactNode;
 type ScheduleViewComponent = () => ReactNode;
+type ScheduleCalendarEvent = {
+  id: string;
+  title: string;
+  memo: string;
+  color: string;
+  type: 'custom' | 'episode' | 'part' | 'scene' | 'vacation';
+  startDate: string;
+  endDate: string;
+  createdBy: string;
+  createdAt: string;
+  source?: 'bflow' | 'google' | 'vacation';
+  sourceCalendarId?: string;
+  calendarId?: string;
+  canEdit?: boolean;
+  isReadOnly?: boolean;
+};
+type ScheduleGridProps = {
+  events: ScheduleCalendarEvent[];
+  onEventClick(event: ScheduleCalendarEvent): void;
+  onEventContextMenu(event: ScheduleCalendarEvent, mouse: { preventDefault(): void; stopPropagation(): void; clientX: number; clientY: number }): void;
+};
+type SchedulePanelProps = {
+  event: ScheduleCalendarEvent;
+  onUpdate(id: string, updates: Partial<ScheduleCalendarEvent>): void | Promise<void>;
+};
+type ScheduleQuickEditProps = {
+  event: ScheduleCalendarEvent;
+  onDuplicate(event: ScheduleCalendarEvent): void | Promise<void>;
+  [key: string]: unknown;
+};
 type EventCreateModalProps = {
   initialDate?: string;
   initialEndDate?: string;
@@ -118,6 +148,13 @@ let bundledEventCreateModal: Promise<EventCreateModalComponent> | undefined;
 let bundledCalendarSettingsModal: Promise<CalendarSettingsModalComponent> | undefined;
 let scheduleTagBarProps: TagBarProps[] = [];
 let scheduleTagManagerProps: TagManagerPopoverProps[] = [];
+let scheduleGridProps: ScheduleGridProps[] = [];
+let schedulePanelProps: SchedulePanelProps[] = [];
+let scheduleQuickEditProps: ScheduleQuickEditProps[] = [];
+let scheduleCanonicalEvents: ScheduleCalendarEvent[] = [];
+let scheduleUpdateCalls: Array<{ id: string; updates: Partial<ScheduleCalendarEvent> }> = [];
+let scheduleAddedEvents: ScheduleCalendarEvent[] = [];
+let scheduleGetEventsCalls = 0;
 let settingsCurrentUser: TestUser;
 let settingsUsers: TestUser[] = [];
 let settingsApiCalls: Array<{ name: string; args: unknown[] }> = [];
@@ -241,6 +278,13 @@ function resetHarness(): void {
   appViews = [];
   scheduleTagBarProps = [];
   scheduleTagManagerProps = [];
+  scheduleGridProps = [];
+  schedulePanelProps = [];
+  scheduleQuickEditProps = [];
+  scheduleCanonicalEvents = [];
+  scheduleUpdateCalls = [];
+  scheduleAddedEvents = [];
+  scheduleGetEventsCalls = 0;
   settingsCurrentUser = {
     id: myUserId,
     name: '배한솔',
@@ -565,7 +609,17 @@ async function loadScheduleView(): Promise<ScheduleViewComponent> {
         const appState = { setView() {}, vacationConnected: false };
         return { useAppStore: (selector?: (state: typeof appState) => unknown) => selector ? selector(appState) : appState };
       }
-      if (id === '@/services/calendarService') return { getEvents: async () => [], isGoogleCacheReady: () => true, loadBflowEvents: async () => {}, addEvent: async () => {}, updateEvent: async () => {}, deleteEvent: async () => {} };
+      if (id === '@/services/calendarService') return {
+        getEvents: async () => {
+          scheduleGetEventsCalls += 1;
+          return scheduleCanonicalEvents;
+        },
+        isGoogleCacheReady: () => true,
+        loadBflowEvents: async () => {},
+        addEvent: async (event: ScheduleCalendarEvent) => { scheduleAddedEvents.push(event); },
+        updateEvent: async (id: string, updates: Partial<ScheduleCalendarEvent>) => { scheduleUpdateCalls.push({ id, updates }); },
+        deleteEvent: async () => {},
+      };
       if (id === '@/services/vacationService') return { fetchAllVacationEvents: async () => [] };
       if (id === '@/hooks/useCalendarDnD') return { useCalendarDnD: () => ({ isDragging: false, preview: null, startDrag() {} }) };
       if (id === '@/utils/vacationEvents') return { mapVacationEvents: () => [] };
@@ -603,11 +657,26 @@ async function loadScheduleView(): Promise<ScheduleViewComponent> {
         };
       }
       if (id === '@/hooks/useCalendarDragCreate') return { useCalendarDragCreate: () => ({ handleCellMouseDown() {}, isDateInRange: () => false }) };
-      if (id === '@/stores/useCalendarStore') return { useCalendarStore: (selector: (state: typeof calendarState) => unknown) => selector(calendarState), getState: () => ({ loadAll: async () => {} }) };
+      if (id === '@/stores/useCalendarStore') {
+        const useCalendarStore = Object.assign(
+          (selector: (state: typeof calendarState) => unknown) => selector(calendarState),
+          { getState: () => ({ ...calendarState, loadAll: async () => {} }) },
+        );
+        return { useCalendarStore };
+      }
       if (id === '@/utils/sceneNavigationAction') return { navigateToSceneView() {} };
       if (id === '@/utils/createUuid') return { createUuid: () => 'new-id' };
       if (id === '@/utils/calendarDate') return { fmtDate: () => '2026-08-25', parseDate: (date: string) => new Date(`${date}T12:00:00`), addDays: (date: Date, days: number) => new Date(date.getFullYear(), date.getMonth(), date.getDate() + days, 12) };
       if (id === '@/utils/calendarEventFilter') return { filterCalendarEvents: (events: unknown[]) => events };
+      if (id === '@/components/calendar/CalendarGrid') {
+        return { CalendarGrid: (props: ScheduleGridProps) => { scheduleGridProps.push(props); return jsxRuntime.jsx('div', { children: '캘린더 그리드' }); } };
+      }
+      if (id === '@/components/calendar/EventSidePanel') {
+        return { EventSidePanel: (props: SchedulePanelProps) => { schedulePanelProps.push(props); return jsxRuntime.jsx('div', { 'aria-label': '일정 상세 패널 연결됨', children: props.event.title }); } };
+      }
+      if (id === '@/components/calendar/EventQuickEdit') {
+        return { EventQuickEdit: (props: ScheduleQuickEditProps) => { scheduleQuickEditProps.push(props); return jsxRuntime.jsx('div', { 'aria-label': '일정 퀵에디트 연결됨', children: props.event.title }); } };
+      }
       if (id.startsWith('@/components/calendar/')) return Object.fromEntries([[id.split('/').at(-1)?.replace(/\.tsx$/, ''), emptyComponent]]);
       return nodeRequire(id);
     }, module, module.exports);
@@ -1119,6 +1188,87 @@ test('ScheduleView opens calendar settings from both rail entry points', async (
     /설정 EP 마일스톤 일정 0개/,
     'ScheduleView passes the selected calendar and counts its current events',
   );
+});
+
+test('ScheduleView refreshes panel state from the authoritative event cache after an update', async () => {
+  resetHarness();
+  const before: ScheduleCalendarEvent = {
+    id: 'event-move',
+    title: '리드 회의',
+    memo: '',
+    color: '#6C5CE7',
+    type: 'custom',
+    startDate: '2026-08-25',
+    endDate: '2026-08-25',
+    createdBy: '배한솔',
+    createdAt: '2026-08-24T00:00:00.000Z',
+    source: 'bflow',
+    sourceCalendarId: 'bflow:mine',
+    calendarId: 'mine',
+    canEdit: true,
+    isReadOnly: false,
+  };
+  scheduleCanonicalEvents = [{
+    ...before,
+    color: '#74B9FF',
+    sourceCalendarId: 'bflow:editable-share',
+    calendarId: 'editable-share',
+    canEdit: false,
+    isReadOnly: true,
+  }];
+
+  await renderScheduleView();
+  stateSlots[0] = [before];
+  await renderScheduleView();
+  scheduleGridProps.at(-1)?.onEventClick(before);
+  await renderScheduleView();
+  const panel = schedulePanelProps.at(-1);
+  assert.ok(panel);
+  await panel.onUpdate(before.id, { calendarId: 'editable-share' });
+  await renderScheduleView();
+
+  assert.deepEqual(scheduleUpdateCalls, [{ id: before.id, updates: { calendarId: 'editable-share' } }]);
+  assert.equal(scheduleGetEventsCalls, 1, 'a successful write is followed by a canonical cache read');
+  assert.deepEqual(schedulePanelProps.at(-1)?.event, scheduleCanonicalEvents[0], 'panel uses re-derived color, source and permissions');
+});
+
+test('ScheduleView quick edit removes the color callback and duplicates a read-only B flow event into the editable personal calendar', async () => {
+  resetHarness();
+  const readOnly: ScheduleCalendarEvent = {
+    id: 'event-read-only',
+    title: '전체 회식',
+    memo: '',
+    color: '#8B8DA3',
+    type: 'custom',
+    startDate: '2026-08-25',
+    endDate: '2026-08-25',
+    createdBy: '허혜원',
+    createdAt: '2026-08-24T00:00:00.000Z',
+    source: 'bflow',
+    sourceCalendarId: 'bflow:view-share',
+    calendarId: 'view-share',
+    canEdit: false,
+    isReadOnly: true,
+  };
+
+  await renderScheduleView();
+  stateSlots[0] = [readOnly];
+  await renderScheduleView();
+  scheduleGridProps.at(-1)?.onEventContextMenu(readOnly, {
+    preventDefault() {},
+    stopPropagation() {},
+    clientX: 100,
+    clientY: 120,
+  });
+  await renderScheduleView();
+  const quickEdit = scheduleQuickEditProps.at(-1);
+  assert.ok(quickEdit);
+  assert.equal(Object.hasOwn(quickEdit, 'onUpdateColor'), false, 'individual event color updates are no longer wired');
+  await quickEdit.onDuplicate(readOnly);
+
+  assert.equal(scheduleAddedEvents.length, 1);
+  assert.equal(scheduleAddedEvents[0].calendarId, 'mine', 'read-only duplicates target the editable personal calendar');
+  assert.notEqual(scheduleAddedEvents[0].calendarId, readOnly.calendarId);
 });
 
 test('CalendarSettingsModal creates a members calendar atomically and reloads before closing', async () => {

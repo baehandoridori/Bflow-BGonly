@@ -1179,6 +1179,72 @@ function hasOwnEventUpdate<K extends keyof CalendarEvent>(
 
 type GoogleEventUpdatePayload = Parameters<typeof gcalService.updateEvent>[2];
 
+const GOOGLE_TEMPORAL_UPDATE_KEYS: ReadonlyArray<keyof CalendarEvent> = [
+  'allDay',
+  'startDate',
+  'endDate',
+  'startTime',
+  'endTime',
+];
+
+type GoogleTemporalFields = Pick<
+  CalendarEvent,
+  'allDay' | 'startDate' | 'endDate' | 'startTime' | 'endTime'
+>;
+
+type GoogleEventUpdatePlan = {
+  patch: GoogleEventUpdatePayload;
+  temporal?: GoogleTemporalFields;
+};
+
+function hasGoogleTemporalUpdate(updates: Partial<CalendarEvent>): boolean {
+  return GOOGLE_TEMPORAL_UPDATE_KEYS.some((key) => hasOwnEventUpdate(updates, key));
+}
+
+function resolveGoogleTemporalFields(
+  confirmed: CalendarEvent,
+  updates: Partial<CalendarEvent>,
+): GoogleTemporalFields {
+  const merged = { ...confirmed, ...updates };
+  const allDay = merged.allDay ?? true;
+  const startDate = merged.startDate;
+  const endDate = merged.endDate;
+  const validDate = (value: unknown): value is string => {
+    if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+    const [year, month, day] = value.split('-').map(Number);
+    const parsed = new Date(Date.UTC(year, month - 1, day));
+    return parsed.getUTCFullYear() === year
+      && parsed.getUTCMonth() === month - 1
+      && parsed.getUTCDate() === day;
+  };
+
+  if (!validDate(startDate) || !validDate(endDate) || endDate < startDate) {
+    throw new Error('종료 날짜는 시작 날짜보다 빠를 수 없습니다');
+  }
+  if (allDay) {
+    return {
+      allDay: true,
+      startDate,
+      endDate,
+      startTime: undefined,
+      endTime: undefined,
+    };
+  }
+
+  const validTime = (value: unknown): value is string => (
+    typeof value === 'string' && /^(?:[01]\d|2[0-3]):[0-5]\d(?::[0-5]\d)?$/.test(value)
+  );
+  const startTime = merged.startTime;
+  const endTime = merged.endTime;
+  if (!validTime(startTime) || !validTime(endTime)) {
+    throw new Error('시간 일정에는 올바른 시작·종료 시각이 모두 필요합니다');
+  }
+  if (`${endDate}T${endTime}` <= `${startDate}T${startTime}`) {
+    throw new Error('종료 시각은 시작 시각보다 뒤여야 합니다');
+  }
+  return { allDay: false, startDate, endDate, startTime, endTime };
+}
+
 const GOOGLE_METADATA_UPDATE_KEYS: ReadonlyArray<keyof CalendarEvent> = [
   'type',
   'linkedEpisode',
@@ -1190,24 +1256,28 @@ const GOOGLE_METADATA_UPDATE_KEYS: ReadonlyArray<keyof CalendarEvent> = [
   'vacationUserName',
 ];
 
-function buildGoogleEventUpdatePayload(
+function buildGoogleEventUpdatePlan(
   confirmed: CalendarEvent,
   updates: Partial<CalendarEvent>,
-): GoogleEventUpdatePayload {
+): GoogleEventUpdatePlan {
   const patch: GoogleEventUpdatePayload = {};
+  const temporal = hasGoogleTemporalUpdate(updates)
+    ? resolveGoogleTemporalFields(confirmed, updates)
+    : undefined;
   if (hasOwnEventUpdate(updates, 'title')) patch.summary = updates.title;
   if (hasOwnEventUpdate(updates, 'memo')) patch.description = updates.memo;
-  if (hasOwnEventUpdate(updates, 'startDate') && updates.startDate !== undefined) {
-    patch.startDate = updates.startDate;
-  }
-  if (hasOwnEventUpdate(updates, 'endDate') && updates.endDate !== undefined) {
-    const effectiveStart = updates.startDate ?? confirmed.startDate;
-    patch.endDate = effectiveStart.length === 10 ? addOneDay(updates.endDate) : updates.endDate;
+  if (temporal) {
+    patch.startDate = temporal.allDay
+      ? temporal.startDate
+      : toKstRfc3339(temporal.startDate, temporal.startTime ?? '');
+    patch.endDate = temporal.allDay
+      ? addOneDay(temporal.endDate)
+      : toKstRfc3339(temporal.endDate, temporal.endTime ?? '');
   }
   if (GOOGLE_METADATA_UPDATE_KEYS.some((key) => hasOwnEventUpdate(updates, key))) {
     patch.extendedProperties = toBflowMeta({ ...confirmed, ...updates });
   }
-  return patch;
+  return { patch, temporal };
 }
 
 function confirmGoogleEventUpdate(
@@ -1216,6 +1286,7 @@ function confirmGoogleEventUpdate(
   fallback: CalendarEvent,
   updates: Partial<CalendarEvent>,
   patch: GoogleEventUpdatePayload,
+  temporal: GoogleTemporalFields | undefined,
 ): void {
   const key = googleEventKey(calendarId, eventId);
   let confirmed = { ...(confirmedGoogleEvents.get(key) ?? fallback) };
@@ -1223,11 +1294,12 @@ function confirmGoogleEventUpdate(
   // Google PATCH의 일반 필드는 부분 갱신이므로 실제 요청에 포함된 값만 확정한다.
   if (patch.summary !== undefined) confirmed.title = patch.summary;
   if (patch.description !== undefined) confirmed.memo = patch.description;
-  if (patch.startDate !== undefined && updates.startDate !== undefined) {
-    confirmed.startDate = updates.startDate;
-  }
-  if (patch.endDate !== undefined && updates.endDate !== undefined) {
-    confirmed.endDate = updates.endDate;
+  if (temporal) {
+    confirmed.allDay = temporal.allDay;
+    confirmed.startDate = temporal.startDate;
+    confirmed.endDate = temporal.endDate;
+    confirmed.startTime = temporal.startTime;
+    confirmed.endTime = temporal.endTime;
   }
 
   // Google PATCH는 전송한 extended property 키만 덮어쓰고 빠진 키는 서버에 유지한다.
@@ -2126,18 +2198,25 @@ async function updateEventForToken(
     'google',
     `google:${calId}:${actualId}`,
     async () => {
-      // 낙관적 업데이트: 캐시 먼저 업데이트
+      // temporal payload 검증을 먼저 끝낸 뒤 캐시를 낙관적으로 갱신한다.
       const previous = { ...existing };
       const confirmed = confirmedGoogleEvents.get(googleEventKey(calId, actualId)) ?? previous;
-      const googlePatch = buildGoogleEventUpdatePayload(confirmed, updates);
+      const googleUpdate = buildGoogleEventUpdatePlan(confirmed, updates);
       mutateSourceEvents(existingSource, (events) => events.map((item) => (
         item.id === actualId ? { ...item, ...updates } : item
       )));
       broadcastCalendarChange({ eventId: actualId, action: 'update' });
 
       try {
-        await gcalService.updateEvent(calId, actualId, googlePatch);
-        confirmGoogleEventUpdate(calId, actualId, confirmed, updates, googlePatch);
+        await gcalService.updateEvent(calId, actualId, googleUpdate.patch);
+        confirmGoogleEventUpdate(
+          calId,
+          actualId,
+          confirmed,
+          updates,
+          googleUpdate.patch,
+          googleUpdate.temporal,
+        );
       } catch (err) {
         // 실패: 롤백
         mutateSourceEvents(existingSource, (events) => events.map((item) => (

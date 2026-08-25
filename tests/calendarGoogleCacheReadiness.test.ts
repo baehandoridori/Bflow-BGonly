@@ -699,6 +699,166 @@ test('Google sync maps RFC3339 dateTime into timed B flow fields while all-day e
   }
 });
 
+test('Google temporal updates send a complete canonical pair, confirm all UI fields, and reject invalid pairs before mutation', async () => {
+  const patches: Array<Record<string, unknown>> = [];
+  const timed: GoogleEventFixture = {
+    id: 'google-temporal-update',
+    summary: '시간 수정 대상',
+    start: { dateTime: '2026-08-31T23:30:00+09:00' },
+    end: { dateTime: '2026-09-01T00:30:00+09:00' },
+    created: '2026-08-24T00:00:00.000Z',
+    extendedProperties: { private: { bflow_type: 'custom' } },
+  };
+  const harness = await createHarness({
+    personalCalendarId: 'primary',
+    fullSync: async () => [timed],
+    updateGoogleEvent: async (_calendarId, _eventId, patch) => {
+      patches.push(patch);
+    },
+  });
+
+  try {
+    await harness.service.syncAll({ skipBflowLoad: true });
+
+    await harness.service.updateEvent(timed.id, { startTime: '22:10' });
+    assert.deepEqual(patches[0], {
+      startDate: '2026-08-31T22:10:00+09:00',
+      endDate: '2026-09-01T00:30:00+09:00',
+    });
+    let current = (await harness.service.getEvents()).find(({ id }) => id === timed.id);
+    assert.deepEqual(current && {
+      allDay: current.allDay,
+      startDate: current.startDate,
+      endDate: current.endDate,
+      startTime: current.startTime,
+      endTime: current.endTime,
+    }, {
+      allDay: false,
+      startDate: '2026-08-31',
+      endDate: '2026-09-01',
+      startTime: '22:10',
+      endTime: '00:30',
+    });
+
+    await harness.service.updateEvent(timed.id, {
+      allDay: true,
+      startDate: '2026-09-10',
+      endDate: '2026-09-12',
+      startTime: undefined,
+      endTime: undefined,
+    });
+    assert.deepEqual(patches[1], {
+      startDate: '2026-09-10',
+      endDate: '2026-09-13',
+    }, 'the inclusive UI end is sent to Google as an exclusive end');
+    current = (await harness.service.getEvents()).find(({ id }) => id === timed.id);
+    assert.deepEqual(current && {
+      allDay: current.allDay,
+      startDate: current.startDate,
+      endDate: current.endDate,
+      startTime: current.startTime,
+      endTime: current.endTime,
+    }, {
+      allDay: true,
+      startDate: '2026-09-10',
+      endDate: '2026-09-12',
+      startTime: undefined,
+      endTime: undefined,
+    });
+
+    await harness.service.updateEvent(timed.id, { title: '제목만 수정' });
+    assert.deepEqual(patches[2], { summary: '제목만 수정' }, 'title-only patches contain no temporal fields');
+
+    const broadcastsBeforeInvalid = harness.broadcasts.length;
+    const invalid = await harness.service.updateEvent(timed.id, {
+      allDay: false,
+      startDate: '2026-09-12',
+      endDate: '2026-09-12',
+      startTime: '15:00',
+      endTime: '14:00',
+    }).then(
+      () => null,
+      (error: unknown) => error,
+    );
+    assert.ok(invalid instanceof Error);
+    assert.match(invalid.message, /시간|시각|종료|invalid/i);
+    assert.equal(patches.length, 3, 'invalid pairs never reach Google');
+    assert.equal(harness.broadcasts.length, broadcastsBeforeInvalid, 'invalid pairs never enter optimistic cache mutation');
+  } finally {
+    harness.restore();
+  }
+});
+
+test('overlapping Google temporal updates confirm the exact complete pair that each request sent', async () => {
+  const started = [deferred<void>(), deferred<void>()];
+  const gates = [deferred<void>(), deferred<void>()];
+  const patches: Array<Record<string, unknown>> = [];
+  let authoritative: GoogleEventFixture = {
+    id: 'google-temporal-overlap',
+    summary: '겹침 수정 대상',
+    start: { dateTime: '2026-09-10T10:00:00+09:00' },
+    end: { dateTime: '2026-09-10T11:00:00+09:00' },
+    created: '2026-08-24T00:00:00.000Z',
+    extendedProperties: { private: { bflow_type: 'custom' } },
+  };
+  const harness = await createHarness({
+    personalCalendarId: 'primary',
+    fullSync: async () => [authoritative],
+    updateGoogleEvent: async (_calendarId, _eventId, patch) => {
+      const index = patches.length;
+      patches.push(patch);
+      started[index].resolve();
+      await gates[index].promise;
+      authoritative = {
+        ...authoritative,
+        start: { dateTime: String(patch.startDate) },
+        end: { dateTime: String(patch.endDate) },
+      };
+    },
+  });
+
+  try {
+    await harness.service.syncAll({ skipBflowLoad: true });
+    const first = harness.service.updateEvent(authoritative.id, { startTime: '10:30' });
+    await started[0].promise;
+    const second = harness.service.updateEvent(authoritative.id, { endTime: '10:15' });
+    await started[1].promise;
+
+    assert.deepEqual(patches, [
+      {
+        startDate: '2026-09-10T10:30:00+09:00',
+        endDate: '2026-09-10T11:00:00+09:00',
+      },
+      {
+        startDate: '2026-09-10T10:00:00+09:00',
+        endDate: '2026-09-10T10:15:00+09:00',
+      },
+    ]);
+
+    gates[0].resolve();
+    await first;
+    gates[1].resolve();
+    const secondError = await second.then(
+      () => null,
+      (error: unknown) => error,
+    );
+
+    assert.equal(secondError, null, 'a successful Google write must not fail while confirming another request snapshot');
+    const current = (await harness.service.getEvents()).find(({ id }) => id === authoritative.id);
+    assert.deepEqual(current && {
+      startTime: current.startTime,
+      endTime: current.endTime,
+    }, {
+      startTime: '10:00',
+      endTime: '10:15',
+    }, 'the coalesced authoritative reload keeps the completion-order winner');
+  } finally {
+    gates[0].resolve();
+    gates[1].resolve();
+    harness.restore();
+  }
+});
+
 test('an empty successful Google full sync is tracked independently from B flow event count', async () => {
   const harness = await createHarness(async () => []);
   try {

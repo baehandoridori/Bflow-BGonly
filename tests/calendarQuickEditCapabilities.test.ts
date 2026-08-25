@@ -27,13 +27,16 @@ type QuickEditEvent = {
   linkedTodoId?: string;
   canEdit?: boolean;
   isReadOnly?: boolean;
+  tagId?: string;
+  allDay?: boolean;
+  startTime?: string;
+  endTime?: string;
 };
 
 type QuickEditProps = {
   event: QuickEditEvent;
   position: { x: number; y: number };
   onClose(): void;
-  onUpdateColor(id: string, color: string): void;
   onUpdate(id: string, updates: Partial<QuickEditEvent>): void;
   onDelete(id: string): void;
   onDuplicate(event: QuickEditEvent): void;
@@ -64,16 +67,28 @@ type ButtonElement = ReactElement<{
   style?: Record<string, unknown>;
 }, 'button'>;
 
+type FormElement = ReactElement<{
+  'aria-label'?: string;
+  checked?: boolean;
+  children?: ReactNode;
+  disabled?: boolean;
+  type?: string;
+  value?: string;
+  onChange?: (event: { target: { checked: boolean; value: string } }) => void;
+}, 'input' | 'select' | 'textarea'>;
+
 type QuickEditCallbacks = Pick<
   QuickEditProps,
-  'onClose' | 'onUpdateColor' | 'onUpdate' | 'onDelete' | 'onDuplicate'
+  'onClose' | 'onUpdate' | 'onDelete' | 'onDuplicate'
 >;
 
 let bundledQuickEdit: Promise<QuickEditComponent> | undefined;
 let bundledSidePanel: Promise<SidePanelComponent> | undefined;
-let forcedTab: 'color' | 'edit' = 'color';
+let forcedTab: 'calendar' | 'edit' = 'calendar';
 let forcedEventType: QuickEditEventType | undefined;
 let capturedPortalChild: ReactNode;
+let forcedSidePanelEditing = false;
+let sidePanelStateCursor = 0;
 
 function textContent(node: ReactNode): string {
   if (typeof node === 'string' || typeof node === 'number') return String(node);
@@ -96,6 +111,24 @@ function findButtonByText(node: ReactNode, label: string): ButtonElement {
   const button = findButtons(node).find((candidate) => textContent(candidate).includes(label));
   assert.ok(button, `button '${label}' must exist`);
   return button;
+}
+
+function findFormElements(node: ReactNode): FormElement[] {
+  if (Array.isArray(node)) return node.flatMap(findFormElements);
+  if (!isValidElement(node)) return [];
+  const props = node.props as { children?: ReactNode };
+  return [
+    ...(node.type === 'input' || node.type === 'select' || node.type === 'textarea'
+      ? [node as FormElement]
+      : []),
+    ...findFormElements(props.children),
+  ];
+}
+
+function findFormElementByLabel(node: ReactNode, label: string): FormElement {
+  const element = findFormElements(node).find((candidate) => candidate.props['aria-label'] === label);
+  assert.ok(element, `form element '${label}' must exist`);
+  return element;
 }
 
 function colorButtons(node: ReactNode): ButtonElement[] {
@@ -121,6 +154,7 @@ async function loadQuickEdit(): Promise<QuickEditComponent> {
       'lucide-react',
       '@/stores/useAppStore',
       '@/stores/useAuthStore',
+      '@/stores/useCalendarStore',
       '@/components/common/EntityAwareInput',
       '@/utils/glassStyles',
     ],
@@ -137,7 +171,7 @@ async function loadQuickEdit(): Promise<QuickEditComponent> {
             const value = typeof initial === 'function'
               ? (initial as () => unknown)()
               : initial;
-            if (value === 'color') return [forcedTab, () => {}];
+            if (value === 'calendar') return [forcedTab, () => {}];
             if (typeof value === 'string' && ['custom', 'episode', 'part', 'scene', 'vacation'].includes(value)) {
               return [forcedEventType ?? value, () => {}];
             }
@@ -146,6 +180,7 @@ async function loadQuickEdit(): Promise<QuickEditComponent> {
           useEffect: () => {},
           useRef: (initial: unknown) => ({ current: initial }),
           useCallback: (callback: unknown) => callback,
+          useMemo: (factory: () => unknown) => factory(),
         };
       }
       if (id === 'react/jsx-runtime') return nodeRequire('react/jsx-runtime');
@@ -165,13 +200,27 @@ async function loadQuickEdit(): Promise<QuickEditComponent> {
       }
       if (id === 'lucide-react') {
         const Icon = () => null;
-        return { X: Icon, Copy: Icon, Trash2: Icon, Check: Icon, Palette: Icon, Pencil: Icon };
+        return { CalendarDays: Icon, Copy: Icon, Pencil: Icon, Tags: Icon, Trash2: Icon };
       }
       if (id === '@/stores/useAppStore') {
         return { useAppStore: (selector: (state: { colorMode: string }) => unknown) => selector({ colorMode: 'dark' }) };
       }
       if (id === '@/stores/useAuthStore') {
         return { useAuthStore: (selector: (state: { users: unknown[] }) => unknown) => selector({ users: [] }) };
+      }
+      if (id === '@/stores/useCalendarStore') {
+        const state = {
+          calendars: [
+            { id: 'calendar-1', name: '내 일정', color: '#6C5CE7', canEdit: true },
+            { id: 'calendar-2', name: 'EP 마일스톤', color: '#74B9FF', canEdit: true },
+            { id: 'calendar-view', name: '보기 캘린더', color: '#8B8DA3', canEdit: false },
+          ],
+          tags: [
+            { id: 'tag-meeting', name: '회의', color: '#FDCB6E', sortOrder: 10 },
+            { id: 'tag-review', name: '검수', color: '#00B894', sortOrder: 20 },
+          ],
+        };
+        return { useCalendarStore: (selector: (value: typeof state) => unknown) => selector(state) };
       }
       if (id === '@/components/common/EntityAwareInput') {
         return { EntityAwareInput: () => null };
@@ -203,6 +252,7 @@ async function loadSidePanel(): Promise<SidePanelComponent> {
       '@/stores/useDataStore',
       '@/stores/useAppStore',
       '@/stores/useAuthStore',
+      '@/stores/useCalendarStore',
       '@/components/common/EntityAwareInput',
       '@/components/common/EntityText',
       '@/types',
@@ -219,9 +269,11 @@ async function loadSidePanel(): Promise<SidePanelComponent> {
         return {
           ...react,
           useState(initial: unknown) {
+            const slot = sidePanelStateCursor++;
             const value = typeof initial === 'function'
               ? (initial as () => unknown)()
               : initial;
+            if (slot === 0) return [forcedSidePanelEditing, () => {}];
             return [value, () => {}];
           },
           useEffect: () => {},
@@ -265,6 +317,16 @@ async function loadSidePanel(): Promise<SidePanelComponent> {
       if (id === '@/stores/useAuthStore') {
         return { useAuthStore: (selector: (state: { users: unknown[] }) => unknown) => selector({ users: [] }) };
       }
+      if (id === '@/stores/useCalendarStore') {
+        const state = {
+          calendars: [
+            { id: 'calendar-1', name: '내 일정', color: '#6C5CE7', canEdit: true },
+            { id: 'calendar-2', name: 'EP 마일스톤', color: '#74B9FF', canEdit: true },
+          ],
+          tags: [{ id: 'tag-meeting', name: '회의', color: '#FDCB6E', sortOrder: 10 }],
+        };
+        return { useCalendarStore: (selector: (value: typeof state) => unknown) => selector(state) };
+      }
       if (id === '@/components/common/EntityAwareInput') return { EntityAwareInput: () => null };
       if (id === '@/components/common/EntityText') return { EntityText: () => null };
       if (id === '@/types') return { DEPARTMENT_CONFIGS: {} };
@@ -299,7 +361,7 @@ function event(overrides: Partial<QuickEditEvent> = {}): QuickEditEvent {
 
 async function renderQuickEdit(
   target: QuickEditEvent,
-  tab: 'color' | 'edit',
+  tab: 'calendar' | 'edit',
   callbacks: Partial<QuickEditCallbacks> = {},
   draftType?: QuickEditEventType,
 ): Promise<ReactNode> {
@@ -315,7 +377,6 @@ async function renderQuickEdit(
       event: target,
       position: { x: 0, y: 0 },
       onClose: callbacks.onClose ?? (() => {}),
-      onUpdateColor: callbacks.onUpdateColor ?? (() => {}),
       onUpdate: callbacks.onUpdate ?? (() => {}),
       onDelete: callbacks.onDelete ?? (() => {}),
       onDuplicate: callbacks.onDuplicate ?? (() => {}),
@@ -331,8 +392,11 @@ async function renderQuickEdit(
 async function renderSidePanel(
   target: SidePanelProps['event'],
   callbacks: Partial<Omit<SidePanelProps, 'event'>> = {},
+  editing = false,
 ): Promise<ReactNode> {
   const EventSidePanel = await loadSidePanel();
+  forcedSidePanelEditing = editing;
+  sidePanelStateCursor = 0;
   return EventSidePanel({
     event: target,
     onClose: callbacks.onClose ?? (() => {}),
@@ -348,31 +412,92 @@ const newBflowCases: Array<{ name: string; target: QuickEditEvent }> = [
     target: event({ sourceCalendarId: 'bflow:calendar-1', calendarId: 'calendar-1', type: 'scene' }),
   },
   {
-    name: 'bflow source with calendar id',
-    target: event({ source: 'bflow', calendarId: 'calendar-1', type: 'part' }),
+    name: 'second canonical B flow calendar',
+    target: event({ source: 'bflow', sourceCalendarId: 'bflow:calendar-2', calendarId: 'calendar-2', type: 'part' }),
   },
 ];
 
-test('new B flow color swatches are disabled and cannot call the color updater', async () => {
+test('canonical B flow quick edit replaces event colors with immediate tag and calendar controls', async () => {
+  const target = event({
+    source: 'bflow',
+    sourceCalendarId: 'bflow:calendar-1',
+    calendarId: 'calendar-1',
+    tagId: 'tag-meeting',
+    canEdit: true,
+  });
+  const updates: Array<{ id: string; patch: Partial<QuickEditEvent> }> = [];
+  const tree = await renderQuickEdit(target, 'calendar', {
+    onUpdate: (id, patch) => updates.push({ id, patch }),
+  });
+
+  assert.match(textContent(tree), /태그·캘린더/);
+  assert.equal(colorButtons(tree).length, 0, 'individual event color swatches are removed');
+  assert.match(textContent(tree), /회의/);
+  assert.match(textContent(tree), /검수/);
+  assert.doesNotMatch(textContent(findFormElementByLabel(tree, '캘린더')), /보기 캘린더/);
+
+  findButtonByText(tree, '없음').props.onClick?.();
+  findFormElementByLabel(tree, '캘린더').props.onChange?.({ target: { value: 'calendar-2', checked: false } });
+
+  assert.deepEqual(updates, [
+    { id: target.id, patch: { tagId: undefined } },
+    { id: target.id, patch: { calendarId: 'calendar-2' } },
+  ]);
+  assert.equal(Object.hasOwn(updates[0].patch, 'tagId'), true, 'tag clearing remains an own key');
+});
+
+test('side panel shows calendar, tag and timed range and saves temporal fields without legacy privacy', async () => {
+  const target = event({
+    source: 'bflow',
+    sourceCalendarId: 'bflow:calendar-1',
+    calendarId: 'calendar-1',
+    tagId: 'tag-meeting',
+    allDay: false,
+    startTime: '14:00',
+    endTime: '15:00',
+    canEdit: true,
+  });
+  const displayTree = await renderSidePanel(target);
+  const displayText = textContent(displayTree);
+  assert.match(displayText, /내 일정/);
+  assert.match(displayText, /회의/);
+  assert.match(displayText, /14:00\s*[–-]\s*15:00/);
+  assert.doesNotMatch(displayText, /나만 보기/);
+
+  const updates: Array<{ id: string; patch: Partial<QuickEditEvent> }> = [];
+  const editTree = await renderSidePanel(target, {
+    onUpdate: (id, patch) => updates.push({ id, patch }),
+  }, true);
+  assert.ok(findFormElementByLabel(editTree, '종일 일정'));
+  assert.ok(findFormElementByLabel(editTree, '시작 시각'));
+  assert.ok(findFormElementByLabel(editTree, '종료 시각'));
+  findButtonByText(editTree, '저장').props.onClick?.();
+
+  assert.equal(updates.length, 1);
+  assert.equal(updates[0].patch.calendarId, 'calendar-1');
+  assert.equal(updates[0].patch.tagId, 'tag-meeting');
+  assert.equal(updates[0].patch.allDay, false);
+  assert.equal(updates[0].patch.startTime, '14:00');
+  assert.equal(updates[0].patch.endTime, '15:00');
+  assert.equal(Object.hasOwn(updates[0].patch, 'isPrivate'), false);
+
+  const allDayUpdates: Array<{ id: string; patch: Partial<QuickEditEvent> }> = [];
+  const allDayTree = await renderSidePanel({ ...target, allDay: true }, {
+    onUpdate: (id, patch) => allDayUpdates.push({ id, patch }),
+  }, true);
+  findButtonByText(allDayTree, '저장').props.onClick?.();
+
+  assert.equal(Object.hasOwn(allDayUpdates[0].patch, 'startTime'), true);
+  assert.equal(Object.hasOwn(allDayUpdates[0].patch, 'endTime'), true);
+  assert.equal(allDayUpdates[0].patch.startTime, undefined);
+  assert.equal(allDayUpdates[0].patch.endTime, undefined);
+});
+
+test('quick edit removes individual color swatches for every storage', async () => {
   for (const { name, target } of newBflowCases) {
-    const colorUpdates: Array<[string, string]> = [];
-    const tree = await renderQuickEdit(target, 'color', {
-      onUpdateColor: (id, color) => colorUpdates.push([id, color]),
-    });
-    const swatches = colorButtons(tree);
-    assert.equal(swatches.length, 10, `${name}: all current swatches remain visible`);
-    for (const swatch of swatches) {
-      assert.equal(swatch.props.disabled, true, `${name}: swatch is display-only`);
-      assert.equal(
-        swatch.props['aria-describedby'],
-        `calendar-derived-fields-${target.id}`,
-        `${name}: disabled swatch explains why it is read-only`,
-      );
-      assert.match(swatch.props['aria-label'] ?? '', /변경 불가/, `${name}: swatch has an accessible label`);
-      swatch.props.onClick?.();
-    }
-    assert.match(textContent(tree), /소속 캘린더와 연결 정보로 결정/);
-    assert.deepEqual(colorUpdates, [], `${name}: display-only swatches never update color`);
+    const tree = await renderQuickEdit(target, 'calendar');
+    assert.equal(colorButtons(tree).length, 0, `${name}: color choices are absent`);
+    assert.match(textContent(tree), /태그·캘린더/);
   }
 });
 
@@ -431,16 +556,10 @@ test('legacy private and Google events keep enabled editing but omit an unchange
   ];
 
   for (const { name, target } of cases) {
-    const colorUpdates: Array<[string, string]> = [];
     const updates: Array<{ id: string; patch: Partial<QuickEditEvent> }> = [];
-    const colorTree = await renderQuickEdit(target, 'color', {
-      onUpdateColor: (id, color) => colorUpdates.push([id, color]),
-    });
-    const swatch = colorButtons(colorTree).find((button) => button.props.style?.background === '#74B9FF');
-    assert.ok(swatch, `${name}: expected color swatch exists`);
-    assert.notEqual(swatch.props.disabled, true, `${name}: color remains editable`);
-    swatch.props.onClick?.();
-    assert.deepEqual(colorUpdates, [[target.id, '#74B9FF']], `${name}: color updater receives the choice`);
+    const calendarTree = await renderQuickEdit(target, 'calendar');
+    assert.equal(colorButtons(calendarTree).length, 0, `${name}: legacy color editing is removed too`);
+    assert.match(textContent(calendarTree), /현재 저장소를 유지/);
 
     const editTree = await renderQuickEdit(target, 'edit', {
       onUpdate: (id, patch) => updates.push({ id, patch }),
@@ -477,13 +596,14 @@ test('legacy private and Google events include type when the user actually chang
   }
 });
 
-test('vacation keeps its existing color and edit-tab behavior', async () => {
+test('vacation blocks edit and delete while retaining duplicate navigation', async () => {
   const target = event({ source: 'vacation', type: 'vacation' });
-  const colorTree = await renderQuickEdit(target, 'color');
-  assert.equal(colorButtons(colorTree).length, 10);
-  assert.notEqual(colorButtons(colorTree)[0].props.disabled, true);
-  const editTab = findButtonByText(colorTree, '일정 편집');
+  const calendarTree = await renderQuickEdit(target, 'calendar');
+  assert.equal(colorButtons(calendarTree).length, 0);
+  const editTab = findButtonByText(calendarTree, '일정 편집');
   assert.match(String(editTab.props.className), /cursor-not-allowed/);
+  assert.notEqual(findButtonByText(calendarTree, '복사').props.disabled, true);
+  assert.equal(findButtonByText(calendarTree, '삭제').props.disabled, true);
 });
 
 test('new B flow duplicate and delete actions still invoke their callback and close once', async () => {
@@ -492,7 +612,7 @@ test('new B flow duplicate and delete actions still invoke their callback and cl
     const duplicated: QuickEditEvent[] = [];
     const deleted: string[] = [];
     let closeCount = 0;
-    const tree = await renderQuickEdit(target, 'color', {
+    const tree = await renderQuickEdit(target, 'calendar', {
       onClose: () => { closeCount += 1; },
       onDuplicate: (value) => duplicated.push(value),
       onDelete: (id) => deleted.push(id),
@@ -511,12 +631,13 @@ test('new B flow duplicate and delete actions still invoke their callback and cl
   }
 });
 
-test('read-only calendar events expose no quick-edit write action', async () => {
+test('read-only calendar events block update and delete but still allow duplicate', async () => {
   const cases: Array<{ name: string; target: QuickEditEvent }> = [
     {
       name: 'explicit read-only B flow event',
       target: event({
         source: 'bflow',
+        sourceCalendarId: 'bflow:calendar-shared',
         calendarId: 'calendar-shared',
         isReadOnly: true,
       }),
@@ -525,6 +646,7 @@ test('read-only calendar events expose no quick-edit write action', async () => 
       name: 'calendar event without edit permission',
       target: event({
         source: 'bflow',
+        sourceCalendarId: 'bflow:calendar-shared',
         calendarId: 'calendar-shared',
         canEdit: false,
       }),
@@ -532,30 +654,25 @@ test('read-only calendar events expose no quick-edit write action', async () => 
   ];
 
   for (const { name, target } of cases) {
-    const colorUpdates: Array<[string, string]> = [];
     const updates: Array<{ id: string; patch: Partial<QuickEditEvent> }> = [];
     const deleted: string[] = [];
     const duplicated: QuickEditEvent[] = [];
     let closeCount = 0;
-    const colorTree = await renderQuickEdit(target, 'color', {
+    const calendarTree = await renderQuickEdit(target, 'calendar', {
       onClose: () => { closeCount += 1; },
-      onUpdateColor: (id, color) => colorUpdates.push([id, color]),
       onUpdate: (id, patch) => updates.push({ id, patch }),
       onDelete: (id) => deleted.push(id),
       onDuplicate: (value) => duplicated.push(value),
     });
 
-    assert.match(textContent(colorTree), /보기 전용/);
-    assert.equal(findButtonByText(colorTree, '일정 편집').props.disabled, true, `${name}: edit tab is disabled`);
-    for (const swatch of colorButtons(colorTree)) {
-      assert.equal(swatch.props.disabled, true, `${name}: color is disabled`);
-      swatch.props.onClick?.();
-    }
-    for (const action of ['복사', '삭제'] as const) {
-      const button = findButtonByText(colorTree, action);
-      assert.equal(button.props.disabled, true, `${name}: ${action} is disabled`);
-      assert.equal(button.props.onClick, undefined, `${name}: ${action} has no write handler`);
-    }
+    assert.match(textContent(calendarTree), /보기 전용/);
+    assert.equal(findButtonByText(calendarTree, '일정 편집').props.disabled, true, `${name}: edit tab is disabled`);
+    const duplicateButton = findButtonByText(calendarTree, '복사');
+    assert.notEqual(duplicateButton.props.disabled, true, `${name}: duplicate remains available`);
+    duplicateButton.props.onClick?.();
+    const deleteButton = findButtonByText(calendarTree, '삭제');
+    assert.equal(deleteButton.props.disabled, true, `${name}: delete is disabled`);
+    assert.equal(deleteButton.props.onClick, undefined, `${name}: delete has no write handler`);
 
     const editTree = await renderQuickEdit(target, 'edit', {
       onClose: () => { closeCount += 1; },
@@ -566,11 +683,10 @@ test('read-only calendar events expose no quick-edit write action', async () => 
     assert.match(textContent(editTree), /보기 전용 일정/);
     assert.equal(findButtons(editTree).some((button) => textContent(button).includes('저장')), false, `${name}: save is absent`);
 
-    assert.deepEqual(colorUpdates, []);
     assert.deepEqual(updates, []);
     assert.deepEqual(deleted, []);
-    assert.deepEqual(duplicated, []);
-    assert.equal(closeCount, 0, `${name}: blocked actions do not close the popup`);
+    assert.deepEqual(duplicated, [target]);
+    assert.equal(closeCount, 1, `${name}: successful duplicate closes the popup once`);
   }
 });
 
