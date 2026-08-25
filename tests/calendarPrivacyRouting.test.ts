@@ -48,6 +48,19 @@ type ServiceModule = {
   useAuthStore: { getState(): { setCurrentUser(user: unknown): void } };
 };
 
+type PreviewCalendarApi = {
+  loginCanonicalSession(input: { name: string; password: string; rememberMe: boolean }): Promise<{ ok: boolean }>;
+  logoutCanonicalSession(): Promise<unknown>;
+  calendarList(): Promise<CalendarRow[]>;
+  calendarEventCreate(input: Omit<CalendarEventRow, 'id' | 'created_by' | 'created_at' | 'updated_at'>): Promise<CalendarEventRow>;
+  calendarEventsList(params?: { from?: string; to?: string }): Promise<CalendarEventRow[]>;
+  calendarPrivacyReplacementCreate(request: {
+    storage: 'google';
+    calendar_id: string;
+    event: Record<string, unknown>;
+  }): Promise<unknown>;
+};
+
 type Calls = {
   broadcasts: unknown[];
   bflowCreates: Array<Record<string, unknown>>;
@@ -63,6 +76,7 @@ type Calls = {
 };
 
 let bundleSource: Promise<string> | undefined;
+let previewBundleSource: Promise<string> | undefined;
 let bundleNonce = 0;
 
 function createDeferred<T>(): {
@@ -147,6 +161,71 @@ async function bundledServiceSource(): Promise<string> {
     write: false,
   }).then((result) => result.outputFiles[0].text);
   return bundleSource;
+}
+
+async function bundledPreviewSource(): Promise<string> {
+  previewBundleSource ??= build({
+    stdin: {
+      contents: "export { installDevElectronAPI } from './src/mocks/devElectronAPI.ts';",
+      resolveDir: process.cwd(),
+      sourcefile: 'calendar-preview-mock-entry.ts',
+    },
+    bundle: true,
+    format: 'esm',
+    platform: 'browser',
+    target: 'es2022',
+    write: false,
+  }).then((result) => result.outputFiles[0].text);
+  return previewBundleSource;
+}
+
+async function createPreviewCalendarHarness(): Promise<{
+  api: PreviewCalendarApi;
+  restore(): void;
+}> {
+  const globalScope = globalThis as Record<string, unknown>;
+  const prior = new Map<string, { exists: boolean; value: unknown }>();
+  for (const key of ['window', 'document']) {
+    prior.set(key, {
+      exists: Object.prototype.hasOwnProperty.call(globalScope, key),
+      value: globalScope[key],
+    });
+  }
+
+  const localStorageValues = new Map<string, string>();
+  const localStorage = {
+    getItem: (key: string) => localStorageValues.get(key) ?? null,
+    setItem: (key: string, value: string) => { localStorageValues.set(key, value); },
+    removeItem: (key: string) => { localStorageValues.delete(key); },
+  };
+  const previewWindow = { electronAPI: undefined as PreviewCalendarApi | undefined, localStorage };
+  globalScope.window = previewWindow;
+  globalScope.document = { documentElement: { dataset: {} } };
+
+  try {
+    const source = await bundledPreviewSource();
+    const encoded = Buffer.from(source).toString('base64');
+    const preview = await import(
+      `data:text/javascript;base64,${encoded}#calendar-preview-${bundleNonce++}`
+    ) as { installDevElectronAPI(): void };
+    preview.installDevElectronAPI();
+    assert.ok(previewWindow.electronAPI);
+    return {
+      api: previewWindow.electronAPI,
+      restore() {
+        for (const [key, value] of prior) {
+          if (value.exists) globalScope[key] = value.value;
+          else delete globalScope[key];
+        }
+      },
+    };
+  } catch (error) {
+    for (const [key, value] of prior) {
+      if (value.exists) globalScope[key] = value.value;
+      else delete globalScope[key];
+    }
+    throw error;
+  }
 }
 
 async function createHarness(options: {
@@ -552,6 +631,58 @@ test('ordinary legacy-private update stays on Supabase and never falls through t
       patch: { title: '수정된 비공개 일정' },
     }]);
     assert.deepEqual(harness.calls.googleUpdates, []);
+  } finally {
+    harness.restore();
+  }
+});
+
+test('unauthenticated preview rejects a Google replacement and keeps the personal source after relogin', async () => {
+  const harness = await createPreviewCalendarHarness();
+  try {
+    assert.equal((await harness.api.loginCanonicalSession({
+      name: '배한솔',
+      password: '1234',
+      rememberMe: false,
+    })).ok, true);
+    const personalCalendar = (await harness.api.calendarList()).find((calendar) => calendar.is_personal);
+    assert.ok(personalCalendar);
+    const source = await harness.api.calendarEventCreate({
+      calendar_id: personalCalendar.id,
+      title: '보존할 나만 보기 일정',
+      memo: '',
+      tag_id: null,
+      all_day: true,
+      start_date: '2026-08-24',
+      end_date: '2026-08-24',
+      start_time: null,
+      end_time: null,
+      linked_episode: null,
+      linked_part: null,
+      linked_sheet_name: null,
+      linked_scene_id: null,
+      linked_department: null,
+      linked_todo_id: null,
+    });
+
+    await assert.rejects(
+      harness.api.calendarPrivacyReplacementCreate({
+        storage: 'google',
+        calendar_id: 'primary',
+        event: { summary: '공개 전환 시도' },
+      }),
+      /Google Calendar.*연결/,
+    );
+
+    await harness.api.logoutCanonicalSession();
+    assert.equal((await harness.api.loginCanonicalSession({
+      name: '배한솔',
+      password: '1234',
+      rememberMe: false,
+    })).ok, true);
+    assert.deepEqual(
+      (await harness.api.calendarEventsList()).map(({ id, title }) => ({ id, title })),
+      [{ id: source.id, title: '보존할 나만 보기 일정' }],
+    );
   } finally {
     harness.restore();
   }

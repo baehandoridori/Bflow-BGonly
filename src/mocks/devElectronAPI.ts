@@ -1251,11 +1251,7 @@ export function installDevElectronAPI(): void {
       } else if (request.storage === 'legacy-private') {
         target = { storage: 'legacy-private', actualId: createUuid() };
       } else {
-        target = {
-          storage: 'google',
-          actualId: `mock_${createUuid()}`,
-          calendarId: request.calendar_id,
-        };
+        throw new Error('Google Calendar 연결 후 공개 일정으로 전환할 수 있습니다.');
       }
       const receipt = createUuid();
       mockPrivacyReplacementReceipts.set(receipt, target);
