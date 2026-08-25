@@ -518,6 +518,12 @@ export function CalendarSettingsModal({ calendar, eventCount, onClose }: Calenda
         );
         return;
       }
+      if (verification === 'not-committed') {
+        settleCalendarMutation(token, actorId, null);
+        setSaving(false);
+        toast.error('변경 내용이 저장되지 않은 것을 확인했어요. 내용을 확인하고 다시 시도해 주세요.');
+        return;
+      }
     }
 
     settleCalendarMutation(token, actorId, reconciliation);

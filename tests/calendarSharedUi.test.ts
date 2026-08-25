@@ -3036,7 +3036,7 @@ test('CalendarSettingsModal reconciles confirmed commits and ambiguous response 
   });
 });
 
-test('CalendarSettingsModal keeps an ordinary failed update open and mutation-locked until reconciliation', async () => {
+test('CalendarSettingsModal unlocks an update after a fresh before-state proves it was not committed', async () => {
   resetHarness();
   settingsApiFailures.add('calendarUpdate');
   const editable = calendar({ id: 'ordinary-update-failure', canManage: true });
@@ -3050,8 +3050,77 @@ test('CalendarSettingsModal keeps an ordinary failed update open and mutation-lo
   assert.equal(settingsToastSuccesses.length, 0);
   assert.equal(settingsToastErrors.length, 1);
   tree = await renderCalendarSettingsModal(editable, 2);
-  assert.ok(buttonByLabel(tree, '최신 캘린더 목록 다시 불러오기'));
-  assert.equal(buttonByText(tree, '저장').props.disabled, true);
+  assert.equal(
+    findButtons(tree).some((button) => button.props['aria-label'] === '최신 캘린더 목록 다시 불러오기'),
+    false,
+    'a fresh no-commit proof leaves no reconciliation banner',
+  );
+  assert.equal(buttonByText(tree, '저장').props.disabled, false, 'the attempted draft is immediately retryable');
+  assert.equal(buttonByLabel(tree, '색상 #74B9FF').props['aria-pressed'], true, 'the user draft survives the failed write');
+
+  settingsApiFailures.delete('calendarUpdate');
+  await buttonByText(tree, '저장').props.onClick?.();
+
+  assert.deepEqual(settingsApiCalls.map((call) => call.name), [
+    'calendarUpdate', 'loadBflowEvents', 'calendarUpdate', 'loadBflowEvents',
+  ]);
+  assert.equal(settingsCloseCount, 1, 'a deliberate retry can complete without an extra reconciliation click');
+  assert.equal(settingsToastSuccesses.length, 1);
+});
+
+test('CalendarSettingsModal unlocks a create after a fresh list proves no new calendar was committed', async () => {
+  resetHarness();
+  settingsApiFailures.add('calendarCreate');
+  let tree = await renderCalendarSettingsModal();
+  formElementByLabel(tree, '캘린더 이름').props.onChange?.({ target: { value: '재시도 생성', checked: false } });
+  tree = await renderCalendarSettingsModal();
+  await buttonByText(tree, '저장').props.onClick?.();
+
+  assert.deepEqual(settingsApiCalls.map((call) => call.name), ['calendarCreate', 'loadAll']);
+  assert.equal(settingsCloseCount, 0);
+  tree = await renderCalendarSettingsModal();
+  assert.equal(
+    findButtons(tree).some((button) => button.props['aria-label'] === '최신 캘린더 목록 다시 불러오기'),
+    false,
+    'no new canonical ID proves the create did not commit without another reload',
+  );
+  assert.equal(buttonByText(tree, '저장').props.disabled, false);
+  assert.equal(formElementByLabel(tree, '캘린더 이름').props.value, '재시도 생성', 'the create draft remains available');
+
+  settingsApiFailures.delete('calendarCreate');
+  await buttonByText(tree, '저장').props.onClick?.();
+
+  assert.deepEqual(settingsApiCalls.map((call) => call.name), [
+    'calendarCreate', 'loadAll', 'calendarCreate', 'loadAll',
+  ]);
+  assert.equal(settingsCloseCount, 1);
+});
+
+test('CalendarSettingsModal unlocks a delete after a fresh list proves the target remains', async () => {
+  resetHarness();
+  settingsApiFailures.add('calendarDelete');
+  settingsConfirmResponses = [true, true];
+  const editable = calendar({ id: 'retry-delete', name: '재시도 삭제', canManage: true });
+  let tree = await renderCalendarSettingsModal(editable, 3);
+  await buttonByText(tree, '캘린더 삭제').props.onClick?.();
+
+  assert.deepEqual(settingsApiCalls.map((call) => call.name), ['calendarDelete', 'loadBflowEvents']);
+  assert.equal(settingsCloseCount, 0);
+  tree = await renderCalendarSettingsModal(editable, 3);
+  assert.equal(
+    findButtons(tree).some((button) => button.props['aria-label'] === '최신 캘린더 목록 다시 불러오기'),
+    false,
+    'the canonical target proves deletion did not commit without another reload',
+  );
+  assert.equal(buttonByText(tree, '캘린더 삭제').props.disabled, false);
+
+  settingsApiFailures.delete('calendarDelete');
+  await buttonByText(tree, '캘린더 삭제').props.onClick?.();
+
+  assert.deepEqual(settingsApiCalls.map((call) => call.name), [
+    'calendarDelete', 'loadBflowEvents', 'calendarDelete', 'loadBflowEvents',
+  ]);
+  assert.equal(settingsCloseCount, 1);
 });
 
 test('EventCreateModal shows editable calendars in field order, defaults personal, and removes legacy privacy and color controls', async () => {
