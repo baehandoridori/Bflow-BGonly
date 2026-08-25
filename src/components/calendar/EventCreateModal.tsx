@@ -82,6 +82,9 @@ export function EventCreateModal({ initialDate, initialEndDate, episodes, google
   const isGoogle = selectedCalendarId === GOOGLE_CALENDAR_OPTION;
   const selectedCalendar = editableCalendars.find((calendar) => calendar.id === selectedCalendarId);
   const selectedDestinationAvailable = isGoogle ? googleAuthenticated : Boolean(selectedCalendar);
+  const selectedEpisode = linkedEp === ''
+    ? undefined
+    : episodes.find((episode) => episode.episodeNumber === linkedEp);
   const selectedEpParts = useMemo(() => linkedEp === ''
     ? []
     : episodes.find((episode) => episode.episodeNumber === linkedEp)?.parts ?? [], [linkedEp, episodes]);
@@ -151,11 +154,24 @@ export function EventCreateModal({ initialDate, initialEndDate, episodes, google
   const hasInvalidTimedInterval = !allDay
     && Boolean(startTime && endTime)
     && `${endDate}T${endTime}` <= `${startDate}T${startTime}`;
+  const selectedPartData = selectedEpParts.find((part) => part.sheetName === linkedPart);
+  const selectedSceneData = selectedPartScenes.find((scene) => (
+    (scene.sceneId || String(scene.no)) === linkedScene
+  ));
+  const hasRequiredLinkTarget = evType === 'custom'
+    || (evType === 'episode' && Boolean(selectedEpisode))
+    || (evType === 'part' && Boolean(selectedEpisode && selectedPartData))
+    || (evType === 'scene' && Boolean(selectedEpisode && selectedPartData && selectedSceneData));
+  const canSubmit = Boolean(
+    title.trim()
+    && selectedCalendarId
+    && selectedDestinationAvailable
+    && (allDay || (startTime && endTime))
+    && hasRequiredLinkTarget
+  ) && !hasInvalidTimedInterval;
 
   const handleSubmit = () => {
-    if (!title.trim() || !selectedCalendarId || !selectedDestinationAvailable || (!allDay && (!startTime || !endTime))) return;
-    if (hasInvalidTimedInterval) return;
-    const partData = selectedEpParts.find((part) => part.sheetName === linkedPart);
+    if (!canSubmit) return;
     const persistedTagId = tagId && !selectedTagUnavailable ? tagId : undefined;
     onSave({
       title: title.trim(),
@@ -171,10 +187,10 @@ export function EventCreateModal({ initialDate, initialEndDate, episodes, google
       startTime: allDay ? undefined : startTime,
       endTime: allDay ? undefined : endTime,
       linkedEpisode: linkedEp !== '' ? linkedEp : undefined,
-      linkedPart: partData?.partId,
+      linkedPart: selectedPartData?.partId,
       linkedSheetName: linkedPart || undefined,
       linkedSceneId: linkedScene || undefined,
-      linkedDepartment: partData?.department as 'bg' | 'acting' | undefined,
+      linkedDepartment: selectedPartData?.department as 'bg' | 'acting' | undefined,
     });
   };
 
@@ -183,8 +199,6 @@ export function EventCreateModal({ initialDate, initialEndDate, episodes, google
     : selectedCalendar?.visibility === 'members'
       ? '이 캘린더 멤버와 공유돼요'
       : '';
-  const canSubmit = Boolean(title.trim() && selectedCalendarId && selectedDestinationAvailable && (allDay || (startTime && endTime)))
-    && !hasInvalidTimedInterval;
   const inputClass = 'w-full bg-bg-card border border-accent/40 rounded-lg px-3 py-2 text-sm font-medium text-text-primary outline-none focus:border-accent focus:ring-1 focus:ring-accent/20';
 
   return (

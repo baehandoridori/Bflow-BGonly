@@ -578,3 +578,18 @@ PR #116 에서 12 라운드 (P1×3, P2×6, P3×2) 끝에 silent-done. Monitor �
 - target identity가 없는 legacy 호출은 후보가 정확히 하나일 때만 진행하고, 여러 namespace가 같은 raw ID를 공유하면 fail closed한다.
 - migration alias와 intent mutex도 source-aware로 유지한다. raw follower는 관련된 모든 active lease가 끝날 때까지 기다리고, 하나라도 결과가 불명확하면 다른 replacement를 추측하지 않고 실패해야 한다.
 - 회귀 테스트는 같은 ID의 Google A·Google B·B flow를 동시에 두고 full/partial/incremental sync, exact edit/delete, 실패 rollback, 겹친 migration의 staggered completion, 모든 UI consumer key·선택을 함께 검증한다.
+
+---
+
+## 2026-08-26: 파생된 표시 문구와 저장 필수값을 분리한다
+
+### 증상
+
+- 에피소드·파트·씬 연결 대상을 고르지 않아도 `에피소드 선택...` 같은 자동 제목이 비어 있지 않아 만들기 버튼과 submit 경로가 열렸다.
+- 불완전한 연결 일정은 재조회 때 `custom` 또는 더 낮은 연결 유형으로 바뀌면서 placeholder 제목만 남을 수 있었다.
+
+### 교훈
+
+- 자동 제목·placeholder는 표시 상태일 뿐 저장 완결성의 증거로 사용하지 않는다.
+- 연결형 일정은 현재 episode → part → scene 목록의 실제 membership을 단계별로 검증하고, 버튼 활성화와 submit handler가 동일한 gate를 재사용한다.
+- truthy ID만 확인하지 말고 옵션 목록이 갱신되어 stale 선택이 사라진 경우도 저장 직전에 차단한다.

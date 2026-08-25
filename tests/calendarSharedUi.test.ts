@@ -121,7 +121,16 @@ type ScheduleQuickEditProps = {
 type EventCreateModalProps = {
   initialDate?: string;
   initialEndDate?: string;
-  episodes: [];
+  episodes: Array<{
+    episodeNumber: number;
+    title: string;
+    parts: Array<{
+      partId: string;
+      sheetName: string;
+      department: string;
+      scenes: Array<{ sceneId: string; no: number }>;
+    }>;
+  }>;
   googleAuthenticated: boolean;
   onClose(): void;
   onSave(event: Record<string, unknown>): void;
@@ -437,6 +446,12 @@ function directElementChildren(node: ReactElement<Record<string, unknown>>): Rea
 function formElementByLabel(node: ReactNode, label: string): FormElement {
   const element = findFormElements(node).find((candidate) => candidate.props['aria-label'] === label);
   assert.ok(element, `form element '${label}' must be rendered`);
+  return element;
+}
+
+function formElementByOptionText(node: ReactNode, label: string): FormElement {
+  const element = findFormElements(node).find((candidate) => textContent(candidate).includes(label));
+  assert.ok(element, `form element containing option '${label}' must be rendered`);
   return element;
 }
 
@@ -1916,6 +1931,7 @@ async function renderEventCreateModal(
   googleAuthenticated: boolean,
   onSave: (event: Record<string, unknown>) => void,
   initialDate = '2026-08-25',
+  episodes: EventCreateModalProps['episodes'] = [],
 ): Promise<ReactNode> {
   const EventCreateModal = await loadEventCreateModal();
   stateCursor = 0;
@@ -1924,7 +1940,7 @@ async function renderEventCreateModal(
   return resolveComponents(EventCreateModal({
     initialDate,
     initialEndDate: initialDate,
-    episodes: [],
+    episodes,
     googleAuthenticated,
     onClose() {},
     onSave,
@@ -5082,6 +5098,79 @@ test('EventCreateModal shows editable calendars in field order, defaults persona
   assert.equal(formElementByLabel(tree, '종일 일정').props.checked, true, 'all-day is enabled by default');
   assert.equal(findFormElements(tree).some((element) => element.props.type === 'time'), false, 'time fields stay hidden for all-day events');
   assert.doesNotMatch(renderedText, /팀 캘린더에 공유돼요|이 캘린더 멤버와 공유돼요|알림/, 'personal calendars do not show shared-calendar copy');
+});
+
+test('EventCreateModal blocks incomplete linked types and saves them after every required target is selected', async (t) => {
+  const episodes: EventCreateModalProps['episodes'] = [{
+    episodeNumber: 101,
+    title: '101화',
+    parts: [{
+      partId: 'A',
+      sheetName: 'EP101_BG',
+      department: 'bg',
+      scenes: [{ sceneId: 'scene-101-1', no: 1 }],
+    }],
+  }];
+  const cases = [
+    {
+      type: 'episode',
+      typeButton: '에피소드',
+      selections: [['에피소드 선택', '101']],
+      expectedLink: { linkedEpisode: 101 },
+    },
+    {
+      type: 'part',
+      typeButton: '파트',
+      selections: [['에피소드 선택', '101'], ['파트 선택', 'EP101_BG']],
+      expectedLink: { linkedEpisode: 101, linkedPart: 'A' },
+    },
+    {
+      type: 'scene',
+      typeButton: '씬',
+      selections: [['에피소드 선택', '101'], ['파트 선택', 'EP101_BG'], ['씬 선택', 'scene-101-1']],
+      expectedLink: { linkedEpisode: 101, linkedPart: 'A', linkedSceneId: 'scene-101-1' },
+    },
+  ] as const;
+
+  for (const entry of cases) {
+    await t.test(entry.type, async () => {
+      resetHarness();
+      const saved: Record<string, unknown>[] = [];
+      const render = () => renderEventCreateModal(false, (event) => saved.push(event), '2026-08-25', episodes);
+      let tree = await render();
+
+      buttonByText(tree, entry.typeButton).props.onClick?.();
+      tree = await render();
+      flushEventCreateEffects();
+      tree = await render();
+
+      const incompleteCreateButton = buttonByText(tree, '만들기');
+      incompleteCreateButton.props.onClick?.();
+      assert.deepEqual(
+        { disabled: incompleteCreateButton.props.disabled, saveCount: saved.length },
+        { disabled: true, saveCount: 0 },
+        `${entry.type} cannot submit its generated placeholder without a linked target`,
+      );
+
+      for (const [placeholder, value] of entry.selections) {
+        formElementByOptionText(tree, placeholder).props.onChange?.({ target: { value, checked: false } });
+        tree = await render();
+        flushEventCreateEffects();
+        tree = await render();
+      }
+
+      const completeCreateButton = buttonByText(tree, '만들기');
+      assert.equal(completeCreateButton.props.disabled, false, `${entry.type} becomes submittable after selecting its target`);
+      completeCreateButton.props.onClick?.();
+
+      assert.equal(saved.length, 1);
+      assert.equal(saved[0].type, entry.type);
+      assert.deepEqual(
+        Object.fromEntries(Object.keys(entry.expectedLink).map((key) => [key, saved[0][key]])),
+        entry.expectedLink,
+      );
+    });
+  }
 });
 
 test('EventCreateModal never offers an optimistic tag placeholder as a persisted event tag', async () => {
