@@ -628,18 +628,22 @@ function calendarEventInput(id: string, title: string): Record<string, unknown> 
   };
 }
 
-test('timed Google create serializes local KST date and time as RFC3339 without changing the all-day route', async () => {
+test('timed Google create serializes KST fields and keeps its optimistic and persisted cache rows neutral', async () => {
   const inserts: Array<{ calendarId: string; input: Record<string, unknown> }> = [];
+  const insertStarted = deferred<void>();
+  const insertGate = deferred<string>();
   const harness = await createHarness({
     fullSync: async () => [],
     personalCalendarId: 'primary',
     createGoogleEvent: async (calendarId, input) => {
       inserts.push({ calendarId, input });
-      return 'google-timed-1';
+      insertStarted.resolve();
+      return insertGate.promise;
     },
   });
+  let creation: Promise<void> | undefined;
   try {
-    await harness.service.addEvent({
+    creation = harness.service.addEvent({
       id: 'local-timed-1',
       title: '야간 회의',
       memo: '',
@@ -653,12 +657,23 @@ test('timed Google create serializes local KST date and time as RFC3339 without 
       createdBy: '배한솔',
       createdAt: '2026-08-24T00:00:00.000Z',
     });
+    await insertStarted.promise;
+
+    const optimistic = (await harness.service.getEvents()).find((event) => event.id === 'local-timed-1');
+    assert.equal(optimistic?.color, '#8B8DA3', 'the optimistic Google row uses the neutral source color');
+
+    insertGate.resolve('google-timed-1');
+    await creation;
 
     assert.equal(inserts.length, 1);
     assert.equal(inserts[0].calendarId, 'primary');
     assert.equal(inserts[0].input.startDate, '2026-08-31T23:30:00+09:00');
     assert.equal(inserts[0].input.endDate, '2026-09-01T00:30:00+09:00');
+    const persisted = (await harness.service.getEvents()).find((event) => event.id === 'google-timed-1');
+    assert.equal(persisted?.color, '#8B8DA3', 'the persisted Google row keeps the same neutral source color');
   } finally {
+    insertGate.resolve('google-timed-1');
+    await creation?.catch(() => {});
     harness.restore();
   }
 });

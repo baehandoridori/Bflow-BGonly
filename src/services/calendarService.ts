@@ -1673,7 +1673,7 @@ async function addEventInternal(
   const localId = event.id;
 
   // 낙관적 업데이트: 로컬 ID로 캐시에 먼저 추가 + 원본 캘린더 ID 기록
-  googleEvents.push({ ...event, sourceCalendarId: calId, source: 'google' });
+  googleEvents.push({ ...event, color: '#8B8DA3', sourceCalendarId: calId, source: 'google' });
   if (inheritedToken) sessionOptimisticGoogleEventIds.add(localId);
   rebuildEventCache();
   broadcastCalendarChange({ eventId: localId, action: 'add' });
