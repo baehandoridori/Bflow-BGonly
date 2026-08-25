@@ -1414,12 +1414,18 @@ export function installDevElectronAPI(): void {
     },
     calendarTagsList: async () => mockCalendarTags.map((tag) => ({ ...tag })),
     calendarTagsSave: async (tags) => {
+      const user = requireMockCalendarUser();
+      if (user.role !== 'admin') throw new Error('태그는 관리자만 수정할 수 있습니다');
       const saved = tags.map((tag) => ({
         id: tag.id ?? createUuid(),
         name: tag.name,
         color: tag.color,
         sort_order: tag.sort_order,
       }));
+      const savedIds = new Set(saved.map((tag) => tag.id));
+      for (const event of mockCalendarEvents) {
+        if (event.tag_id && !savedIds.has(event.tag_id)) event.tag_id = null;
+      }
       mockCalendarTags.splice(0, mockCalendarTags.length, ...saved);
       return saved.map((tag) => ({ ...tag }));
     },

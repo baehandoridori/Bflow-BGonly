@@ -521,6 +521,7 @@ async function loadTagManagerPopover(): Promise<TagManagerPopoverComponent> {
     external: [
       'react', 'react/jsx-runtime', 'react-dom', 'lucide-react', 'sonner',
       '@/components/common/ConfirmDialog', '@/stores/useAuthStore', '@/stores/useCalendarStore',
+      '@/services/calendarService',
       '@/types/calendar', '@/utils/glassStyles',
     ],
   }).then((result) => {
@@ -588,6 +589,14 @@ async function loadTagManagerPopover(): Promise<TagManagerPopoverComponent> {
         };
       }
       if (id === '@/stores/useCalendarStore') return { useCalendarStore: useCalendarStoreMock };
+      if (id === '@/services/calendarService') {
+        return {
+          async loadBflowEvents() {
+            tagManagerApiCalls.push({ name: 'loadBflowEvents', args: [] });
+            if (tagManagerLoadAllFailure) throw new Error('canonical reload failed');
+          },
+        };
+      }
       if (id === '@/types/calendar') {
         return {
           EVENT_COLORS: [
@@ -887,6 +896,7 @@ async function loadCalendarSettingsModal(): Promise<CalendarSettingsModalCompone
     external: [
       'react', 'react/jsx-runtime', 'framer-motion', 'lucide-react', 'sonner',
       '@/components/common/ConfirmDialog', '@/stores/useAuthStore', '@/stores/useCalendarStore',
+      '@/services/calendarService',
       '@/types/calendar', '@/utils/avatarColor', '@/utils/cn', '@/utils/glassStyles',
     ],
   }).then((result) => {
@@ -981,6 +991,14 @@ async function loadCalendarSettingsModal(): Promise<CalendarSettingsModalCompone
         };
       }
       if (id === '@/stores/useCalendarStore') return { useCalendarStore: useCalendarStoreMock };
+      if (id === '@/services/calendarService') {
+        return {
+          async loadBflowEvents() {
+            settingsApiCalls.push({ name: 'loadBflowEvents', args: [] });
+            if (settingsLoadAllFailure) throw new Error('canonical reload failed');
+          },
+        };
+      }
       if (id === '@/types/calendar') {
         return {
           EVENT_COLORS: [
@@ -1440,7 +1458,7 @@ test('TagManagerPopover confirms deletion and reloads after both successful and 
     await buttonByLabel(tree, '회의 태그 삭제').props.onClick?.();
 
     assert.equal(tagManagerConfirmMessages[0], "이 태그를 쓰는 일정은 '태그 없음'으로 바뀌어요");
-    assert.deepEqual(tagManagerApiCalls.map((call) => call.name), ['calendarTagsSave', 'loadAll']);
+    assert.deepEqual(tagManagerApiCalls.map((call) => call.name), ['calendarTagsSave', 'loadBflowEvents']);
     assert.deepEqual(tagManagerApiCalls[0].args, [[
       { id: 'tag-review', name: '검수', color: '#00B894', sort_order: 0 },
     ]]);
@@ -1449,10 +1467,11 @@ test('TagManagerPopover confirms deletion and reloads after both successful and 
   await t.test('save failure still reloads, reports the error, and keeps the popover open', async () => {
     resetHarness();
     tagManagerApiFailures.add('calendarTagsSave');
+    tagManagerConfirmResponses = [true];
     const tree = await renderTagManagerPopover();
-    await buttonByLabel(tree, '회의 태그 위로').props.onClick?.();
+    await buttonByLabel(tree, '회의 태그 삭제').props.onClick?.();
 
-    assert.deepEqual(tagManagerApiCalls.map((call) => call.name), ['calendarTagsSave', 'loadAll']);
+    assert.deepEqual(tagManagerApiCalls.map((call) => call.name), ['calendarTagsSave', 'loadBflowEvents']);
     assert.equal(tagManagerToastErrors.length, 1);
     assert.equal(tagManagerCloseCount, 0);
   });
@@ -1460,10 +1479,11 @@ test('TagManagerPopover confirms deletion and reloads after both successful and 
   await t.test('canonical reload failure also reports failure without closing', async () => {
     resetHarness();
     tagManagerLoadAllFailure = true;
+    tagManagerConfirmResponses = [true];
     const tree = await renderTagManagerPopover();
-    await buttonByLabel(tree, '회의 태그 위로').props.onClick?.();
+    await buttonByLabel(tree, '회의 태그 삭제').props.onClick?.();
 
-    assert.deepEqual(tagManagerApiCalls.map((call) => call.name), ['calendarTagsSave', 'loadAll']);
+    assert.deepEqual(tagManagerApiCalls.map((call) => call.name), ['calendarTagsSave', 'loadBflowEvents']);
     assert.equal(tagManagerToastErrors.length, 1);
     assert.equal(tagManagerCloseCount, 0);
   });
@@ -1749,7 +1769,7 @@ test('CalendarSettingsModal edits visibility and members in permission-safe orde
     tree = await renderCalendarSettingsModal(ownedTeam, 9);
     await buttonByText(tree, '저장').props.onClick?.();
 
-    assert.deepEqual(settingsApiCalls.map((call) => call.name), ['calendarUpdate', 'loadAll']);
+    assert.deepEqual(settingsApiCalls.map((call) => call.name), ['calendarUpdate', 'loadBflowEvents']);
     assert.deepEqual(settingsApiCalls[0].args, [
       'owned-team',
       { name: '스튜디오 공지 수정', color: '#74B9FF' },
@@ -1760,13 +1780,15 @@ test('CalendarSettingsModal edits visibility and members in permission-safe orde
   await t.test('a failed calendar update never starts the member replacement', async () => {
     resetHarness();
     settingsApiFailures.add('calendarUpdate');
-    const tree = await renderCalendarSettingsModal(shared, 14);
+    let tree = await renderCalendarSettingsModal(shared, 14);
 
     assert.match(textContent(tree), /소유자 허혜원.*만든 날 2026-08-24.*일정 14개/);
     assert.match(textContent(tree), /3명 · 편집 1 · 보기 1/);
+    buttonByLabel(tree, '색상 #74B9FF').props.onClick?.();
+    tree = await renderCalendarSettingsModal(shared, 14);
     await buttonByText(tree, '저장').props.onClick?.();
 
-    assert.deepEqual(settingsApiCalls.map((call) => call.name), ['calendarUpdate', 'loadAll']);
+    assert.deepEqual(settingsApiCalls.map((call) => call.name), ['calendarUpdate', 'loadBflowEvents']);
     assert.equal(settingsCloseCount, 0);
     assert.equal(settingsToastErrors.length, 1);
   });
@@ -1849,7 +1871,7 @@ test('CalendarSettingsModal confirms destructive deletion and reloads on success
     await buttonByText(tree, '캘린더 삭제').props.onClick?.();
 
     assert.match(settingsConfirmMessages[0], /일정 7개가 함께 삭제돼요/);
-    assert.deepEqual(settingsApiCalls.map((call) => call.name), ['calendarDelete', 'loadAll']);
+    assert.deepEqual(settingsApiCalls.map((call) => call.name), ['calendarDelete', 'loadBflowEvents']);
     assert.deepEqual(settingsApiCalls[0].args, ['delete-me']);
     assert.equal(settingsCloseCount, 1);
   });
@@ -1861,7 +1883,7 @@ test('CalendarSettingsModal confirms destructive deletion and reloads on success
     const tree = await renderCalendarSettingsModal(editable, 7);
     await buttonByText(tree, '캘린더 삭제').props.onClick?.();
 
-    assert.deepEqual(settingsApiCalls.map((call) => call.name), ['calendarDelete', 'loadAll']);
+    assert.deepEqual(settingsApiCalls.map((call) => call.name), ['calendarDelete', 'loadBflowEvents']);
     assert.equal(settingsCloseCount, 0);
     assert.equal(settingsToastErrors.length, 1);
   });

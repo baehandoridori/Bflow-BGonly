@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { build } from 'esbuild';
+import { filterCalendarEvents } from '../src/utils/calendarEventFilter.ts';
+import type { CalendarEvent } from '../src/types/calendar.ts';
 
 type CalendarRow = {
   id: string;
@@ -71,6 +73,12 @@ type PreviewCalendarApi = {
   calendarEventCreate(input: Omit<CalendarEventRow, 'id' | 'created_by' | 'created_at' | 'updated_at'>): Promise<CalendarEventRow>;
   calendarEventsList(params?: { from?: string; to?: string }): Promise<CalendarEventRow[]>;
   calendarTagsList(): Promise<CalendarTagRow[]>;
+  calendarTagsSave(tags: Array<{
+    id?: string;
+    name: string;
+    color: string;
+    sort_order: number;
+  }>): Promise<CalendarTagRow[]>;
   calendarEventUpdate(
     id: string,
     updates: Partial<Omit<CalendarEventRow, 'id' | 'created_by' | 'created_at' | 'updated_at'>>,
@@ -753,6 +761,80 @@ test('fresh preview seeds four visible calendars, four tags, and fifteen current
     assert.equal(calendars.find(({ id }) => id === 'cal-notice')?.can_edit, false);
     assert.equal(calendars.find(({ id }) => id === 'cal-milestone')?.can_edit, true);
     assert.equal(calendars.find(({ id }) => id === 'cal-leads')?.can_edit, true);
+  } finally {
+    harness.restore();
+  }
+});
+
+test('preview tag replacement requires an admin session', async () => {
+  const harness = await createPreviewCalendarHarness();
+  try {
+    const unchanged = await harness.api.calendarTagsList();
+    const payload = unchanged.map(({ id, name, color, sort_order }) => ({
+      id, name, color, sort_order,
+    }));
+
+    await assert.rejects(
+      harness.api.calendarTagsSave(payload),
+      /로그인이 필요합니다/,
+      'an unauthenticated preview must not mutate team tags',
+    );
+
+    await previewLogin(harness.api, '장삐쭈');
+    await assert.rejects(
+      harness.api.calendarTagsSave(payload),
+      /관리자/,
+      'a regular preview user must have the same tag-write boundary as production',
+    );
+    assert.deepEqual(await harness.api.calendarTagsList(), unchanged);
+
+    await harness.api.logoutCanonicalSession();
+    await previewLogin(harness.api, '배한솔');
+    assert.deepEqual(await harness.api.calendarTagsSave(payload), unchanged);
+  } finally {
+    harness.restore();
+  }
+});
+
+test('preview tag deletion clears event tag ids so a disabled deleted tag cannot hide the event', async () => {
+  const harness = await createPreviewCalendarHarness();
+  try {
+    await previewLogin(harness.api, '배한솔');
+    const tags = await harness.api.calendarTagsList();
+    const events = await harness.api.calendarEventsList();
+    const taggedEvent = events.find((event) => event.tag_id !== null);
+    assert.ok(taggedEvent?.tag_id, 'the preview seed must include a tagged event');
+    const deletedTagId = taggedEvent.tag_id;
+
+    await harness.api.calendarTagsSave(
+      tags
+        .filter((tag) => tag.id !== deletedTagId)
+        .map(({ id, name, color, sort_order }) => ({ id, name, color, sort_order })),
+    );
+
+    const canonical = (await harness.api.calendarEventsList())
+      .find((event) => event.id === taggedEvent.id);
+    assert.equal(canonical?.tag_id, null, 'preview mirrors the live FK ON DELETE SET NULL result');
+
+    const visible = filterCalendarEvents([{
+      id: canonical.id,
+      title: canonical.title,
+      memo: canonical.memo ?? '',
+      color: '#6C5CE7',
+      type: 'custom',
+      startDate: canonical.start_date,
+      endDate: canonical.end_date,
+      createdBy: canonical.created_by ?? '',
+      createdAt: canonical.created_at,
+      source: 'bflow',
+      calendarId: canonical.calendar_id,
+      tagId: canonical.tag_id ?? undefined,
+    } satisfies CalendarEvent], {
+      visibleCalendarIds: {},
+      enabledTagIds: { [deletedTagId]: false },
+      googleVisible: true,
+    });
+    assert.deepEqual(visible.map((event) => event.id), [taggedEvent.id]);
   } finally {
     harness.restore();
   }

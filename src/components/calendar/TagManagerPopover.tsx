@@ -7,6 +7,7 @@ import {
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { ConfirmDialog } from '@/components/common/ConfirmDialog';
+import { loadBflowEvents } from '@/services/calendarService';
 import { useAuthStore } from '@/stores/useAuthStore';
 import { useCalendarStore } from '@/stores/useCalendarStore';
 import { EVENT_COLORS, type CalendarTag } from '@/types/calendar';
@@ -129,7 +130,10 @@ export function TagManagerPopover({ anchorRect, onClose }: TagManagerPopoverProp
     };
   }, [anchorRect, onClose]);
 
-  const persistDrafts = async (nextDrafts: DraftTag[]): Promise<boolean> => {
+  const persistDrafts = async (
+    nextDrafts: DraftTag[],
+    refreshEvents = false,
+  ): Promise<boolean> => {
     if (!isAdmin || saving) return false;
     setSaving(true);
     setDrafts(nextDrafts);
@@ -145,7 +149,8 @@ export function TagManagerPopover({ anchorRect, onClose }: TagManagerPopoverProp
       failure = error;
     } finally {
       try {
-        await useCalendarStore.getState().loadAll();
+        if (refreshEvents) await loadBflowEvents();
+        else await useCalendarStore.getState().loadAll();
       } catch (error) {
         failure ??= error;
       }
@@ -212,7 +217,7 @@ export function TagManagerPopover({ anchorRect, onClose }: TagManagerPopoverProp
       tone: 'danger',
     });
     if (!confirmed) return;
-    await persistDrafts(drafts.filter((draft) => draft.key !== tag.key));
+    await persistDrafts(drafts.filter((draft) => draft.key !== tag.key), true);
   };
 
   return createPortal(

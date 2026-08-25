@@ -3,6 +3,7 @@ import { motion } from 'framer-motion';
 import { Check, Crown, Search, Settings, Trash2, X } from 'lucide-react';
 import { toast } from 'sonner';
 import { ConfirmDialog } from '@/components/common/ConfirmDialog';
+import { loadBflowEvents } from '@/services/calendarService';
 import { useAuthStore } from '@/stores/useAuthStore';
 import { useCalendarStore } from '@/stores/useCalendarStore';
 import { EVENT_COLORS, type BflowCalendar, type CalendarMember } from '@/types/calendar';
@@ -105,6 +106,7 @@ export function CalendarSettingsModal({ calendar, eventCount, onClose }: Calenda
     mutation: () => Promise<unknown>,
     successMessage: string,
     failureMessage: string,
+    refreshEvents = false,
   ) => {
     setSaving(true);
     let failure: unknown;
@@ -114,7 +116,8 @@ export function CalendarSettingsModal({ calendar, eventCount, onClose }: Calenda
       failure = error;
     } finally {
       try {
-        await useCalendarStore.getState().loadAll();
+        if (refreshEvents) await loadBflowEvents();
+        else await useCalendarStore.getState().loadAll();
       } catch (error) {
         failure ??= error;
       }
@@ -173,6 +176,7 @@ export function CalendarSettingsModal({ calendar, eventCount, onClose }: Calenda
       },
       '캘린더 설정을 저장했어요',
       '캘린더 설정을 저장하지 못했어요. 다시 시도해 주세요.',
+      updates.color !== undefined,
     );
   };
 
@@ -188,6 +192,7 @@ export function CalendarSettingsModal({ calendar, eventCount, onClose }: Calenda
       () => window.electronAPI.calendarDelete(calendar.id),
       '캘린더를 삭제했어요',
       '캘린더를 삭제하지 못했어요. 다시 시도해 주세요.',
+      true,
     );
   };
 
