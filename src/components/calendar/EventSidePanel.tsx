@@ -162,6 +162,7 @@ export function EventSidePanel({
   const isViewOnly = event.isReadOnly === true || event.canEdit === false;
   const isEditing = editing && !isVacation && !isViewOnly;
   const isCanonicalBflow = event.sourceCalendarId?.startsWith('bflow:') === true && Boolean(event.calendarId);
+  const supportsTimeEditing = isCanonicalBflow || event.source === 'google';
   const currentCalendar = calendars.find((calendar) => calendar.id === event.calendarId);
   const currentTag = tags.find((tag) => tag.id === event.tagId);
   const hasLinkedScene = event.type !== 'custom' && event.type !== 'vacation';
@@ -190,21 +191,32 @@ export function EventSidePanel({
       setEditing(false);
       return;
     }
-    if (!draftAllDay && (!draftStartTime || !draftEndTime)) return;
-    const updates: Partial<CalendarEvent> = {
-      title: draftTitle,
-      startDate: fromInputDate(draftStart),
-      endDate: fromInputDate(draftEnd),
-      memo: draftMemo,
-      allDay: draftAllDay,
-      startTime: draftAllDay ? undefined : draftStartTime,
-      endTime: draftAllDay ? undefined : draftEndTime,
-    };
-    if (isCanonicalBflow) {
-      updates.calendarId = draftCalendarId;
-      updates.tagId = draftTagId;
+    if (supportsTimeEditing && !draftAllDay && (!draftStartTime || !draftEndTime)) return;
+    const updates: Partial<CalendarEvent> = {};
+    const nextStartDate = fromInputDate(draftStart);
+    const nextEndDate = fromInputDate(draftEnd);
+    if (draftTitle !== event.title) updates.title = draftTitle;
+    if (nextStartDate !== event.startDate) updates.startDate = nextStartDate;
+    if (nextEndDate !== event.endDate) updates.endDate = nextEndDate;
+    if (draftMemo !== event.memo) updates.memo = draftMemo;
+    if (supportsTimeEditing) {
+      const allDayChanged = draftAllDay !== (event.allDay ?? true);
+      if (allDayChanged) updates.allDay = draftAllDay;
+      if (draftAllDay) {
+        if (allDayChanged) {
+          updates.startTime = undefined;
+          updates.endTime = undefined;
+        }
+      } else {
+        if (draftStartTime !== event.startTime) updates.startTime = draftStartTime;
+        if (draftEndTime !== event.endTime) updates.endTime = draftEndTime;
+      }
     }
-    onUpdate(event.id, updates);
+    if (isCanonicalBflow) {
+      if (draftCalendarId !== event.calendarId) updates.calendarId = draftCalendarId;
+      if (draftTagId !== event.tagId) updates.tagId = draftTagId;
+    }
+    if (Object.keys(updates).length > 0) onUpdate(event.id, updates);
     setEditing(false);
   };
 
@@ -317,23 +329,25 @@ export function EventSidePanel({
           {/* 날짜 */}
           {isEditing ? (
             <div className="flex flex-col gap-1.5">
-              <label className="flex items-center justify-between gap-3 text-[11px] font-medium text-text-secondary">
-                <span>종일</span>
-                <input
-                  aria-label="종일 일정"
-                  type="checkbox"
-                  checked={draftAllDay}
-                  onChange={(changeEvent) => {
-                    const checked = changeEvent.target.checked;
-                    setDraftAllDay(checked);
-                    if (!checked) {
-                      if (!draftStartTime) setDraftStartTime('09:00');
-                      if (!draftEndTime) setDraftEndTime('10:00');
-                    }
-                  }}
-                  className="h-3.5 w-3.5 rounded accent-accent cursor-pointer"
-                />
-              </label>
+              {supportsTimeEditing && (
+                <label className="flex items-center justify-between gap-3 text-[11px] font-medium text-text-secondary">
+                  <span>종일</span>
+                  <input
+                    aria-label="종일 일정"
+                    type="checkbox"
+                    checked={draftAllDay}
+                    onChange={(changeEvent) => {
+                      const checked = changeEvent.target.checked;
+                      setDraftAllDay(checked);
+                      if (!checked) {
+                        if (!draftStartTime) setDraftStartTime('09:00');
+                        if (!draftEndTime) setDraftEndTime('10:00');
+                      }
+                    }}
+                    className="h-3.5 w-3.5 rounded accent-accent cursor-pointer"
+                  />
+                </label>
+              )}
               <label className={labelClassName}>
                 시작일
               </label>
@@ -344,7 +358,7 @@ export function EventSidePanel({
                 className={dateFieldClassName}
                 style={{ colorScheme: colorMode }}
               />
-              {!draftAllDay && (
+              {supportsTimeEditing && !draftAllDay && (
                 <input
                   aria-label="시작 시각"
                   type="time"
@@ -365,7 +379,7 @@ export function EventSidePanel({
                 className={dateFieldClassName}
                 style={{ colorScheme: colorMode }}
               />
-              {!draftAllDay && (
+              {supportsTimeEditing && !draftAllDay && (
                 <input
                   aria-label="종료 시각"
                   type="time"
@@ -382,7 +396,7 @@ export function EventSidePanel({
               <Clock size={12} className="shrink-0" />
               <span className="text-xs">
                 {formatDateRange(event.startDate, event.endDate)}
-                {event.allDay === false && event.startTime && event.endTime
+                {supportsTimeEditing && event.allDay === false && event.startTime && event.endTime
                   ? ` ${event.startTime} – ${event.endTime}`
                   : ''}
               </span>

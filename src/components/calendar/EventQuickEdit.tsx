@@ -93,11 +93,15 @@ export function EventQuickEdit({
 
   const handleSave = useCallback(() => {
     if (!canWrite) return;
-    const updates: Partial<CalendarEvent> = { title, startDate, endDate, memo };
+    const updates: Partial<CalendarEvent> = {};
+    if (title !== event.title) updates.title = title;
+    if (startDate !== event.startDate) updates.startDate = startDate;
+    if (endDate !== event.endDate) updates.endDate = endDate;
+    if (memo !== event.memo) updates.memo = memo;
     if (!isCanonicalBflow && type !== event.type) updates.type = type;
-    onUpdate(event.id, updates);
+    if (Object.keys(updates).length > 0) onUpdate(event.id, updates);
     onClose();
-  }, [canWrite, endDate, event.id, event.type, isCanonicalBflow, memo, onClose, onUpdate, startDate, title, type]);
+  }, [canWrite, endDate, event, isCanonicalBflow, memo, onClose, onUpdate, startDate, title, type]);
 
   const handleDelete = useCallback(() => {
     if (!canWrite) return;
@@ -182,7 +186,10 @@ export function EventQuickEdit({
                         <select
                           aria-label="캘린더"
                           value={event.calendarId}
-                          onChange={(changeEvent) => onUpdate(event.id, { calendarId: changeEvent.target.value })}
+                          onChange={(changeEvent) => {
+                            const calendarId = changeEvent.target.value;
+                            if (calendarId !== event.calendarId) onUpdate(event.id, { calendarId });
+                          }}
                           className="w-full rounded-lg border border-bg-border/60 bg-bg-primary/80 py-1.5 pl-7 pr-2 text-xs text-text-primary outline-none focus:border-accent/60"
                         >
                           {editableCalendars.map((calendar) => <option key={calendar.id} value={calendar.id}>{calendar.name}</option>)}
@@ -195,7 +202,9 @@ export function EventQuickEdit({
                         <button
                           type="button"
                           aria-pressed={event.tagId === undefined}
-                          onClick={() => onUpdate(event.id, { tagId: undefined })}
+                          onClick={() => {
+                            if (event.tagId !== undefined) onUpdate(event.id, { tagId: undefined });
+                          }}
                           className={`rounded-full px-2 py-1 text-[10px] ${event.tagId === undefined ? 'bg-accent/20 text-accent' : 'bg-bg-primary/80 text-text-secondary'}`}
                         >
                           없음
@@ -207,7 +216,9 @@ export function EventQuickEdit({
                               type="button"
                               key={tag.id}
                               aria-pressed={selected}
-                              onClick={() => onUpdate(event.id, { tagId: tag.id })}
+                              onClick={() => {
+                                if (!selected) onUpdate(event.id, { tagId: tag.id });
+                              }}
                               className="rounded-full border px-2 py-1 text-[10px]"
                               style={{
                                 color: selected ? tag.color : 'rgb(var(--color-text-secondary))',

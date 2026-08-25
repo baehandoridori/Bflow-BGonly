@@ -86,8 +86,14 @@ let bundledQuickEdit: Promise<QuickEditComponent> | undefined;
 let bundledSidePanel: Promise<SidePanelComponent> | undefined;
 let forcedTab: 'calendar' | 'edit' = 'calendar';
 let forcedEventType: QuickEditEventType | undefined;
+let forcedQuickEditDraft: Partial<Pick<QuickEditEvent, 'title' | 'startDate' | 'endDate' | 'memo'>> = {};
+let quickEditStateCursor = 0;
 let capturedPortalChild: ReactNode;
 let forcedSidePanelEditing = false;
+let forcedSidePanelDraft: Partial<Pick<
+  QuickEditEvent,
+  'title' | 'startDate' | 'endDate' | 'memo' | 'calendarId' | 'tagId' | 'allDay' | 'startTime' | 'endTime'
+>> = {};
 let sidePanelStateCursor = 0;
 
 function textContent(node: ReactNode): string {
@@ -168,13 +174,16 @@ async function loadQuickEdit(): Promise<QuickEditComponent> {
         return {
           ...react,
           useState(initial: unknown) {
+            const slot = quickEditStateCursor++;
             const value = typeof initial === 'function'
               ? (initial as () => unknown)()
               : initial;
-            if (value === 'calendar') return [forcedTab, () => {}];
-            if (typeof value === 'string' && ['custom', 'episode', 'part', 'scene', 'vacation'].includes(value)) {
-              return [forcedEventType ?? value, () => {}];
-            }
+            if (slot === 1) return [forcedTab, () => {}];
+            if (slot === 2 && forcedQuickEditDraft.title !== undefined) return [forcedQuickEditDraft.title, () => {}];
+            if (slot === 3 && forcedQuickEditDraft.startDate !== undefined) return [forcedQuickEditDraft.startDate, () => {}];
+            if (slot === 4 && forcedQuickEditDraft.endDate !== undefined) return [forcedQuickEditDraft.endDate, () => {}];
+            if (slot === 5) return [forcedEventType ?? value, () => {}];
+            if (slot === 6 && forcedQuickEditDraft.memo !== undefined) return [forcedQuickEditDraft.memo, () => {}];
             return [value, () => {}];
           },
           useEffect: () => {},
@@ -274,6 +283,21 @@ async function loadSidePanel(): Promise<SidePanelComponent> {
               ? (initial as () => unknown)()
               : initial;
             if (slot === 0) return [forcedSidePanelEditing, () => {}];
+            const draftKeys = [
+              'title',
+              'startDate',
+              'endDate',
+              'memo',
+              'calendarId',
+              'tagId',
+              'allDay',
+              'startTime',
+              'endTime',
+            ] as const;
+            const draftKey = draftKeys[slot - 1];
+            if (draftKey && Object.hasOwn(forcedSidePanelDraft, draftKey)) {
+              return [forcedSidePanelDraft[draftKey], () => {}];
+            }
             return [value, () => {}];
           },
           useEffect: () => {},
@@ -364,6 +388,7 @@ async function renderQuickEdit(
   tab: 'calendar' | 'edit',
   callbacks: Partial<QuickEditCallbacks> = {},
   draftType?: QuickEditEventType,
+  draft: Partial<Pick<QuickEditEvent, 'title' | 'startDate' | 'endDate' | 'memo'>> = {},
 ): Promise<ReactNode> {
   const EventQuickEdit = await loadQuickEdit();
   const globalScope = globalThis as typeof globalThis & { document?: { body: object } };
@@ -371,6 +396,8 @@ async function renderQuickEdit(
   globalScope.document = { body: {} };
   forcedTab = tab;
   forcedEventType = draftType;
+  forcedQuickEditDraft = draft;
+  quickEditStateCursor = 0;
   capturedPortalChild = undefined;
   try {
     EventQuickEdit({
@@ -393,9 +420,11 @@ async function renderSidePanel(
   target: SidePanelProps['event'],
   callbacks: Partial<Omit<SidePanelProps, 'event'>> = {},
   editing = false,
+  draft: typeof forcedSidePanelDraft = {},
 ): Promise<ReactNode> {
   const EventSidePanel = await loadSidePanel();
   forcedSidePanelEditing = editing;
+  forcedSidePanelDraft = draft;
   sidePanelStateCursor = 0;
   return EventSidePanel({
     event: target,
@@ -436,6 +465,10 @@ test('canonical B flow quick edit replaces event colors with immediate tag and c
   assert.match(textContent(tree), /검수/);
   assert.doesNotMatch(textContent(findFormElementByLabel(tree, '캘린더')), /보기 캘린더/);
 
+  findButtonByText(tree, '회의').props.onClick?.();
+  findFormElementByLabel(tree, '캘린더').props.onChange?.({ target: { value: 'calendar-1', checked: false } });
+  assert.deepEqual(updates, [], 're-selecting the current tag or calendar is a no-op');
+
   findButtonByText(tree, '없음').props.onClick?.();
   findFormElementByLabel(tree, '캘린더').props.onChange?.({ target: { value: 'calendar-2', checked: false } });
 
@@ -444,9 +477,16 @@ test('canonical B flow quick edit replaces event colors with immediate tag and c
     { id: target.id, patch: { calendarId: 'calendar-2' } },
   ]);
   assert.equal(Object.hasOwn(updates[0].patch, 'tagId'), true, 'tag clearing remains an own key');
+
+  const alreadyUntaggedUpdates: typeof updates = [];
+  const alreadyUntaggedTree = await renderQuickEdit({ ...target, tagId: undefined }, 'calendar', {
+    onUpdate: (id, patch) => alreadyUntaggedUpdates.push({ id, patch }),
+  });
+  findButtonByText(alreadyUntaggedTree, '없음').props.onClick?.();
+  assert.deepEqual(alreadyUntaggedUpdates, [], 'clearing an already empty tag is a no-op');
 });
 
-test('side panel shows calendar, tag and timed range and saves temporal fields without legacy privacy', async () => {
+test('side panel shows calendar, tag and timed range and saves only changed temporal fields without legacy privacy', async () => {
   const target = event({
     source: 'bflow',
     sourceCalendarId: 'bflow:calendar-1',
@@ -467,30 +507,95 @@ test('side panel shows calendar, tag and timed range and saves temporal fields w
   const updates: Array<{ id: string; patch: Partial<QuickEditEvent> }> = [];
   const editTree = await renderSidePanel(target, {
     onUpdate: (id, patch) => updates.push({ id, patch }),
-  }, true);
+  }, true, { startTime: '14:10' });
   assert.ok(findFormElementByLabel(editTree, '종일 일정'));
   assert.ok(findFormElementByLabel(editTree, '시작 시각'));
   assert.ok(findFormElementByLabel(editTree, '종료 시각'));
   findButtonByText(editTree, '저장').props.onClick?.();
 
-  assert.equal(updates.length, 1);
-  assert.equal(updates[0].patch.calendarId, 'calendar-1');
-  assert.equal(updates[0].patch.tagId, 'tag-meeting');
-  assert.equal(updates[0].patch.allDay, false);
-  assert.equal(updates[0].patch.startTime, '14:00');
-  assert.equal(updates[0].patch.endTime, '15:00');
+  assert.deepEqual(updates, [{ id: target.id, patch: { startTime: '14:10' } }]);
   assert.equal(Object.hasOwn(updates[0].patch, 'isPrivate'), false);
 
   const allDayUpdates: Array<{ id: string; patch: Partial<QuickEditEvent> }> = [];
-  const allDayTree = await renderSidePanel({ ...target, allDay: true }, {
+  const allDayTree = await renderSidePanel(target, {
     onUpdate: (id, patch) => allDayUpdates.push({ id, patch }),
-  }, true);
+  }, true, { allDay: true });
   findButtonByText(allDayTree, '저장').props.onClick?.();
 
+  assert.equal(allDayUpdates[0].patch.allDay, true);
   assert.equal(Object.hasOwn(allDayUpdates[0].patch, 'startTime'), true);
   assert.equal(Object.hasOwn(allDayUpdates[0].patch, 'endTime'), true);
   assert.equal(allDayUpdates[0].patch.startTime, undefined);
   assert.equal(allDayUpdates[0].patch.endTime, undefined);
+});
+
+test('quick edit title-only save emits no unchanged Google temporal or memo fields', async () => {
+  const target = event({
+    source: 'google',
+    sourceCalendarId: 'primary',
+    allDay: false,
+    startTime: '14:00',
+    endTime: '15:00',
+  });
+  const updates: Array<{ id: string; patch: Partial<QuickEditEvent> }> = [];
+  const tree = await renderQuickEdit(target, 'edit', {
+    onUpdate: (id, patch) => updates.push({ id, patch }),
+  }, undefined, { title: '제목만 변경' });
+
+  findButtonByText(tree, '저장').props.onClick?.();
+
+  assert.deepEqual(updates, [{ id: target.id, patch: { title: '제목만 변경' } }]);
+});
+
+test('side panel title-only save emits no unchanged Google temporal or memo fields', async () => {
+  const target = event({
+    source: 'google',
+    sourceCalendarId: 'primary',
+    allDay: false,
+    startTime: '14:00',
+    endTime: '15:00',
+  });
+  const updates: Array<{ id: string; patch: Partial<QuickEditEvent> }> = [];
+  const tree = await renderSidePanel(target, {
+    onUpdate: (id, patch) => updates.push({ id, patch }),
+  }, true, { title: '제목만 변경' });
+
+  findButtonByText(tree, '저장').props.onClick?.();
+
+  assert.deepEqual(updates, [{ id: target.id, patch: { title: '제목만 변경' } }]);
+
+  const staleAllDayUpdates: typeof updates = [];
+  const staleAllDayTree = await renderSidePanel({ ...target, allDay: true }, {
+    onUpdate: (id, patch) => staleAllDayUpdates.push({ id, patch }),
+  }, true, { title: '종일 제목만 변경' });
+
+  findButtonByText(staleAllDayTree, '저장').props.onClick?.();
+
+  assert.deepEqual(staleAllDayUpdates, [{ id: target.id, patch: { title: '종일 제목만 변경' } }]);
+});
+
+test('legacy private side panel keeps date-only editing and emits no unsupported all-day or time keys', async () => {
+  const target = event({
+    source: 'bflow',
+    sourceCalendarId: 'supabase-private',
+    allDay: false,
+    startTime: '14:00',
+    endTime: '15:00',
+  });
+  const updates: Array<{ id: string; patch: Partial<QuickEditEvent> }> = [];
+  const tree = await renderSidePanel(target, {
+    onUpdate: (id, patch) => updates.push({ id, patch }),
+  }, true, { startDate: '2026-08-26' });
+
+  findButtonByText(tree, '저장').props.onClick?.();
+  const temporalControlLabels = findFormElements(tree)
+    .map((element) => element.props['aria-label'])
+    .filter((label) => ['종일 일정', '시작 시각', '종료 시각'].includes(label ?? ''));
+
+  assert.deepEqual({ temporalControlLabels, updates }, {
+    temporalControlLabels: [],
+    updates: [{ id: target.id, patch: { startDate: '2026-08-26' } }],
+  });
 });
 
 test('quick edit removes individual color swatches for every storage', async () => {
@@ -522,28 +627,26 @@ test('new B flow type segments show the derived type but stay disabled', async (
   }
 });
 
-test('new B flow save omits derived type while retaining editable fields', async () => {
+test('new B flow save omits derived type while retaining changed editable fields', async () => {
   const updates: Array<{ id: string; patch: Partial<QuickEditEvent> }> = [];
   const target = newBflowCases[0].target;
   const tree = await renderQuickEdit(target, 'edit', {
     onUpdate: (id, patch) => updates.push({ id, patch }),
-  });
+  }, undefined, { title: '변경된 제목', memo: '변경된 메모' });
 
   findButtonByText(tree, '저장').props.onClick?.();
 
   assert.deepEqual(updates, [{
     id: target.id,
     patch: {
-      title: target.title,
-      startDate: target.startDate,
-      endDate: target.endDate,
-      memo: target.memo,
+      title: '변경된 제목',
+      memo: '변경된 메모',
     },
   }]);
   assert.equal(Object.hasOwn(updates[0].patch, 'type'), false);
 });
 
-test('legacy private and Google events keep enabled editing but omit an unchanged type from save', async () => {
+test('legacy private and Google events keep enabled editing and unchanged saves emit no write', async () => {
   const cases: Array<{ name: string; target: QuickEditEvent }> = [
     {
       name: 'legacy private',
@@ -568,7 +671,7 @@ test('legacy private and Google events keep enabled editing but omit an unchange
       assert.notEqual(findButtonByText(editTree, label).props.disabled, true, `${name}: ${label} remains editable`);
     }
     findButtonByText(editTree, '저장').props.onClick?.();
-    assert.equal(Object.hasOwn(updates[0].patch, 'type'), false, `${name}: unchanged type is not sent`);
+    assert.deepEqual(updates, [], `${name}: unchanged fields do not trigger a write`);
   }
 });
 
