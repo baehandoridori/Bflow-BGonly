@@ -26,7 +26,9 @@ import WeekScrollView, { generateYearWeeks, findWeekIndexForDate } from '@/compo
 import WeekSidebar from '@/components/calendar/WeekSidebar';
 import DayScrollView from '@/components/calendar/DayScrollView';
 import DaySidebar from '@/components/calendar/DaySidebar';
+import { CalendarRail } from '@/components/calendar/CalendarRail';
 import { useCalendarDragCreate } from '@/hooks/useCalendarDragCreate';
+import { useCalendarStore } from '@/stores/useCalendarStore';
 import { navigateToSceneView } from '@/utils/sceneNavigationAction';
 import { createUuid } from '@/utils/createUuid';
 import { fmtDate, parseDate, addDays } from '@/utils/calendarDate';
@@ -78,6 +80,7 @@ export function ScheduleView() {
   const [deptFilter, setDeptFilter] = useState<'all' | 'bg' | 'acting'>('all');
   const [showCreate, setShowCreate] = useState(false);
   const [createDate, setCreateDate] = useState<string | undefined>();
+  const [googleAuthenticated, setGoogleAuthenticated] = useState(false);
 
   // ─── 새 컴포넌트 상태 ───
   const [panelEvent, setPanelEvent] = useState<CalendarEvent | null>(null);
@@ -111,6 +114,34 @@ export function ScheduleView() {
 
   const today = fmtDate(new Date());
   const vacationConnected = useAppStore((s) => s.vacationConnected);
+
+  useEffect(() => {
+    void useCalendarStore.getState().loadAll();
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    const refreshGoogleAuthentication = async () => {
+      try {
+        const { isAuthenticated } = await import('@/services/googleCalendarService');
+        const authenticated = await isAuthenticated();
+        if (!cancelled) setGoogleAuthenticated(authenticated);
+      } catch {
+        if (!cancelled) setGoogleAuthenticated(false);
+      }
+    };
+    const handleAuthenticationChanged = (event: Event) => {
+      const authenticated = (event as CustomEvent<{ authed?: boolean }>).detail?.authed;
+      if (typeof authenticated === 'boolean') setGoogleAuthenticated(authenticated);
+      else void refreshGoogleAuthentication();
+    };
+    void refreshGoogleAuthentication();
+    window.addEventListener('bflow:gcal-auth-changed', handleAuthenticationChanged);
+    return () => {
+      cancelled = true;
+      window.removeEventListener('bflow:gcal-auth-changed', handleAuthenticationChanged);
+    };
+  }, []);
 
   // 이벤트 로드 + 외부 변경 구독 (할일 위젯 등에서 수정 시 즉시 반영)
   useEffect(() => {
@@ -626,35 +657,42 @@ export function ScheduleView() {
               <ChevronLeft size={12} />
               접기
             </button>
-            {viewMode === 'today' ? (
-              <DaySidebar
-                activeDayIndex={activeDayIndex}
-                onDaySelect={setActiveDayIndex}
-                events={filteredEvents}
-                year={year}
+            <div className="min-h-0 flex-1 overflow-y-auto pr-1">
+              {viewMode === 'today' ? (
+                <DaySidebar
+                  activeDayIndex={activeDayIndex}
+                  onDaySelect={setActiveDayIndex}
+                  events={filteredEvents}
+                  year={year}
+                />
+              ) : (viewMode === 'week' || viewMode === '2week') ? (
+                <WeekSidebar
+                  weeks={weeks}
+                  events={filteredEvents}
+                  today={today}
+                  activeWeekIndex={activeWeekIndex}
+                  onWeekSelect={setActiveWeekIndex}
+                  currentMonth={month}
+                  currentYear={year}
+                />
+              ) : (
+                <MiniCalendar
+                  currentMonth={new Date(year, month, 1)}
+                  onMonthChange={(d) => { setYear(d.getFullYear()); setMonth(d.getMonth()); }}
+                  onDateSelect={(dateStr) => {
+                    setCreateDate(dateStr);
+                    setShowCreate(true);
+                  }}
+                  events={filteredEvents}
+                  selectedDate={createDate}
+                />
+              )}
+              <CalendarRail
+                isAuthenticated={googleAuthenticated}
+                onOpenSettings={() => undefined}
+                onCreateCalendar={() => undefined}
               />
-            ) : (viewMode === 'week' || viewMode === '2week') ? (
-              <WeekSidebar
-                weeks={weeks}
-                events={filteredEvents}
-                today={today}
-                activeWeekIndex={activeWeekIndex}
-                onWeekSelect={setActiveWeekIndex}
-                currentMonth={month}
-                currentYear={year}
-              />
-            ) : (
-              <MiniCalendar
-                currentMonth={new Date(year, month, 1)}
-                onMonthChange={(d) => { setYear(d.getFullYear()); setMonth(d.getMonth()); }}
-                onDateSelect={(dateStr) => {
-                  setCreateDate(dateStr);
-                  setShowCreate(true);
-                }}
-                events={filteredEvents}
-                selectedDate={createDate}
-              />
-            )}
+            </div>
           </div>
         ) : (
           <div className="w-[40px] h-full flex flex-col items-center pt-3">
