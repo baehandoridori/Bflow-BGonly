@@ -508,3 +508,20 @@ PR #116 에서 12 라운드 (P1×3, P2×6, P3×2) 끝에 silent-done. Monitor �
 - 결과를 확정할 수 없으면 제출 draft와 필요한 재조회 강도를 보존하고 mutation을 잠근다. 더 약한 후속 metadata 재조회가 미해결 event 재조회 의무를 지우면 안 된다.
 - 비동기 쓰기 잠금과 reconciliation 상태는 닫기·재마운트로 사라지는 컴포넌트 로컬 state에만 두지 않는다. 모듈 범위 불변 snapshot과 구독 또는 동등한 생명주기 경계를 사용한다.
 - 테스트는 `commit 후 응답 유실`, `저장 성공 후 reload 실패`, `둘 다 실패`, `저장 중 닫기→재열기`, `후속 더 약한 저장`을 각각 분리해 실제 재시도 가능 여부와 canonical 수렴을 검증한다.
+
+---
+
+## 2026-08-25: 실시간 invalidation과 낙관적 메타데이터의 신뢰 경계를 분리한다
+
+### 증상
+
+- Supabase Realtime 행 payload를 renderer까지 그대로 전달하면 정본 재조회 전에 권한 없는 일정 제목·메모가 프로세스 경계를 넘을 수 있었다.
+- 캘린더 설정을 한 번만 낙관 반영하면 동시 `loadAll()`이나 A→B→A 계정 전환이 임시 상태를 덮고, 삭제 중에는 설정 모달이 정본 확인 전에 닫힐 수 있었다.
+- preview 일정 쓰기가 존재하지 않거나 삭제된 태그 ID를 허용해 실제 DB의 UUID·FK 계약과 달랐다.
+
+### 교훈
+
+- Realtime은 신뢰할 수 없는 행 전달 통로가 아니라 `{ table, eventType }` 수준의 row-free invalidation 신호로만 쓴다. renderer는 현재 actor를 다시 검증하는 canonical IPC로 데이터를 재조회한다.
+- 낙관적 메타데이터는 actor와 mutation token에 묶인 overlay/tombstone으로 보존하고, 정본 snapshot과 분리한다. 동시 refresh 뒤에는 overlay를 재적용하고, 계정 전환 중 오래된 완료는 다른 actor 상태를 검증하거나 닫지 못하게 한다.
+- metadata freshness와 event-row freshness를 별도로 판정한다. 정본 메타데이터가 새로 왔다면 event 재조회 실패와 무관하게 commit 여부를 판정할 수 있어야 한다.
+- preview/mock도 실제 쓰기와 같은 UUID·FK 검증을 mutation 전에 수행하고, 실패 전후 전체 상태가 동일한지 테스트한다.

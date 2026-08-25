@@ -119,6 +119,7 @@ export function ScheduleView() {
   const vacationConnected = useAppStore((s) => s.vacationConnected);
   const calendars = useCalendarStore((state) => state.calendars);
   const calendarsLoaded = useCalendarStore((state) => state.loaded);
+  const optimisticDeletedCalendarIds = useCalendarStore((state) => state.optimisticDeletedCalendarIds);
   const tags = useCalendarStore((state) => state.tags);
   const visibleCalendarIds = useCalendarStore((state) => state.visibleCalendarIds);
   const enabledTagIds = useCalendarStore((state) => state.enabledTagIds);
@@ -239,9 +240,10 @@ export function ScheduleView() {
     setCalendarSettings((previous) => {
       if (previous === undefined || previous === null) return previous;
       const canonical = calendars.find((calendar) => calendar.id === previous.id);
+      if (!canonical && optimisticDeletedCalendarIds.includes(previous.id)) return previous;
       return canonical?.canManage ? canonical : undefined;
     });
-  }, [calendars, calendarsLoaded]);
+  }, [calendars, calendarsLoaded, optimisticDeletedCalendarIds]);
 
   // 주 데이터 계산 (모든 날짜를 정오로 생성 — parseDate와 일관성 유지)
   const weeks = useMemo(() => {

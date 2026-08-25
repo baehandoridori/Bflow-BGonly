@@ -78,7 +78,7 @@ function broadcastPlugin(): Plugin {
   };
 }
 
-test('the live Supabase realtime channel subscribes all shared-calendar tables and forwards their payloads', async () => {
+test('the live Supabase realtime channel forwards shared-calendar changes as row-free invalidations', async () => {
   const registrations: RegisteredHandler[] = [];
   const channel = {
     on(type: string, filter: Record<string, unknown>, handler: RegisteredHandler['handler']) {
@@ -132,12 +132,29 @@ test('the live Supabase realtime channel subscribes all shared-calendar tables a
       'every canonical shared-calendar table must be on the actual bflow-realtime channel',
     );
     for (const registration of calendarRegistrations) {
-      registration.handler({ eventType: 'UPDATE', new: { id: registration.filter.table } });
+      registration.handler({
+        eventType: 'UPDATE',
+        schema: 'public',
+        table: registration.filter.table,
+        commit_timestamp: '2026-08-25T00:00:00.000Z',
+        new: {
+          id: registration.filter.table,
+          title: '권한 없는 사용자가 보면 안 되는 일정 제목',
+          memo: '권한 없는 사용자가 보면 안 되는 메모',
+        },
+        old: {
+          id: registration.filter.table,
+          title: '수정 전 비공개 제목',
+        },
+        row: {
+          title: 'SDK 모양이 바뀌어도 전달하면 안 되는 행',
+        },
+      });
     }
     assert.deepEqual(
-      received.map(({ table }) => table),
-      expectedTables,
-      'the table identity must reach the callback used by main.ts',
+      received,
+      expectedTables.map((table) => ({ table, payload: { eventType: 'UPDATE' } })),
+      'renderer invalidations may identify the fixed table and event type, but must never include database rows',
     );
     cleanup();
   } finally {

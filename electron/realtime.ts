@@ -12,6 +12,10 @@ export type SharedCalendarRealtimeTable =
   | 'calendar_events'
   | 'calendar_tags';
 
+export type SharedCalendarRealtimeInvalidation = {
+  eventType: ChangePayload['eventType'];
+};
+
 const SHARED_CALENDAR_REALTIME_TABLES: readonly SharedCalendarRealtimeTable[] = [
   'calendars',
   'calendar_members',
@@ -27,7 +31,10 @@ export interface RealtimeCallbacks {
   onEpisodeChange: (payload: ChangePayload) => void;
   onPartChange: (payload: ChangePayload) => void;
   onSceneWorkLinkChange?: (payload: ChangePayload) => void;
-  onCalendarChange: (table: SharedCalendarRealtimeTable, payload: ChangePayload) => void;
+  onCalendarChange: (
+    table: SharedCalendarRealtimeTable,
+    payload: SharedCalendarRealtimeInvalidation,
+  ) => void;
   onActivityInsert: (payload: ChangePayload) => void;
   onStatusChange: (status: string) => void;
   /** Supabase presence sync/join/leave — 전체 presence 상태 스냅샷 전달 */
@@ -146,7 +153,9 @@ function createChannel(callbacks: RealtimeCallbacks): RealtimeChannel {
       { event: '*', schema: 'public', table },
       (payload) => {
         console.log(`[Realtime] ${table} 이벤트 수신:`, payload.eventType);
-        callbacks.onCalendarChange(table, payload);
+        // 공유 캘린더 행은 renderer 권한 경계 밖으로 전달하지 않는다. 변경 종류만 알리고,
+        // 각 renderer가 현재 actor 기준의 canonical IPC를 다시 읽어 권한을 재검증한다.
+        callbacks.onCalendarChange(table, { eventType: payload.eventType });
       },
     );
   }

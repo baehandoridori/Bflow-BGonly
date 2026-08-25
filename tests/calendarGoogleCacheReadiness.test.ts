@@ -39,6 +39,7 @@ type ServiceModule = {
   saveTeamCalendarId(calendarId: string | null): Promise<void>;
   applyCommittedGoogleDelete(payload: unknown): boolean;
   applyCommittedPrivacyReplacementDelete(payload: unknown): boolean;
+  refreshCalendarPresentationFromMetadata(): void;
   isGoogleCacheReady(): boolean;
   __testUseAuthStore: {
     setState(state: {
@@ -48,11 +49,41 @@ type ServiceModule = {
   };
   __testUseCalendarStore: {
     getState(): {
-      calendars: Array<{ id: string; ownerId: string }>;
+      calendars: StoreCalendarFixture[];
       tags: Array<{ id: string }>;
       loaded: boolean;
+      optimisticDeletedCalendarIds: string[];
+      visibleCalendarIds: Record<string, boolean>;
+      mutedCalendarIds: string[];
+      toggleCalendarVisible(calendarId: string): void;
+      toggleMuted(calendarId: string): void;
+      upsertCalendarOptimistically(actorId: string, calendar: StoreCalendarFixture): void;
+      removeCalendarOptimistically(actorId: string, calendarId: string): void;
+      setCalendarOptimisticOverlay(
+        actorId: string,
+        token: number,
+        overlay: {
+          kind: 'create';
+          beforeCalendarIds: string[];
+          calendar: StoreCalendarFixture;
+        } | {
+          kind: 'update';
+          calendarId: string;
+          beforeCalendar: StoreCalendarFixture;
+          patch: Partial<StoreCalendarFixture>;
+        } | {
+          kind: 'delete';
+          calendarId: string;
+          beforeCalendar: StoreCalendarFixture;
+        },
+      ): void;
+      clearCalendarOptimisticOverlay(actorId: string, token: number): void;
     };
   };
+  __testGetCalendarCanonicalSnapshot(actorId: string | undefined): {
+    revision: number;
+    calendars: StoreCalendarFixture[];
+  } | null;
 };
 
 type GoogleEventFixture = {
@@ -99,6 +130,19 @@ type BflowCalendarFixture = {
   members: Array<{ user_id: string; can_edit: boolean }>;
   can_edit: boolean;
   can_manage: boolean;
+};
+
+type StoreCalendarFixture = {
+  id: string;
+  name: string;
+  color: string;
+  visibility: 'private' | 'members' | 'team';
+  ownerId: string;
+  isPersonal: boolean;
+  members: Array<{ userId: string; canEdit: boolean }>;
+  canEdit: boolean;
+  canManage: boolean;
+  createdAt: string;
 };
 
 type LegacyPrivateEventFixture = {
@@ -171,7 +215,7 @@ async function bundledServiceSource(): Promise<string> {
       contents: [
         "export * from './src/services/calendarService.ts';",
         "export { useAuthStore as __testUseAuthStore } from './src/stores/useAuthStore.ts';",
-        "export { useCalendarStore as __testUseCalendarStore } from './src/stores/useCalendarStore.ts';",
+        "export { getCalendarCanonicalSnapshot as __testGetCalendarCanonicalSnapshot, useCalendarStore as __testUseCalendarStore } from './src/stores/useCalendarStore.ts';",
       ].join('\n'),
       resolveDir: process.cwd(),
       sourcefile: 'calendar-google-cache-readiness-entry.ts',
@@ -2604,6 +2648,232 @@ test('switching users clears B flow cache and metadata before the new user load 
     assert.deepEqual(harness.service.__testUseCalendarStore.getState().calendars, []);
   } finally {
     console.warn = originalWarn;
+    harness.restore();
+  }
+});
+
+test('optimistic calendar metadata derives event presentation locally and cannot cross actor sessions', async () => {
+  const harness = await createHarness({
+    currentUserId: 'user-a',
+    calendarList: async () => [personalCalendar('user-a')],
+    fullSync: async () => [],
+    bflowEventsList: async () => [bflowEvent('optimistic-metadata-event', '색상 즉시 반영')],
+  });
+  let localPresentationSignals = 0;
+  const onCalendarChanged = () => { localPresentationSignals += 1; };
+  try {
+    await harness.service.loadBflowEvents();
+    window.addEventListener('bflow:calendar-changed', onCalendarChanged);
+    const store = harness.service.__testUseCalendarStore.getState();
+    const original = store.calendars[0];
+    assert.ok(original);
+    const crossWindowBroadcastsBeforeOptimism = harness.broadcasts.length;
+
+    store.upsertCalendarOptimistically('user-a', {
+      ...original,
+      name: '이름 즉시 반영',
+      color: '#74B9FF',
+      visibility: 'team',
+    });
+    harness.service.refreshCalendarPresentationFromMetadata();
+
+    const [presented] = await harness.service.getEvents();
+    assert.deepEqual({
+      name: harness.service.__testUseCalendarStore.getState().calendars[0]?.name,
+      visibility: harness.service.__testUseCalendarStore.getState().calendars[0]?.visibility,
+      eventColor: presented?.color,
+    }, {
+      name: '이름 즉시 반영',
+      visibility: 'team',
+      eventColor: '#74B9FF',
+    });
+    assert.equal(localPresentationSignals, 1);
+    assert.equal(
+      harness.broadcasts.length,
+      crossWindowBroadcastsBeforeOptimism,
+      'uncommitted metadata stays in the initiating renderer until main confirms persistence',
+    );
+
+    store.removeCalendarOptimistically('user-a', original.id);
+    harness.service.refreshCalendarPresentationFromMetadata();
+    assert.deepEqual(await harness.service.getEvents(), [], 'calendar removal hides its cached events without reloading rows');
+
+    harness.service.__testUseAuthStore.setState({ currentUser: authUser('user-b') });
+    assert.deepEqual(harness.service.__testUseCalendarStore.getState().calendars, []);
+    harness.service.__testUseCalendarStore.getState().upsertCalendarOptimistically('user-a', original);
+    assert.deepEqual(
+      harness.service.__testUseCalendarStore.getState().calendars,
+      [],
+      'a late actor-A optimistic continuation cannot populate actor-B metadata',
+    );
+  } finally {
+    window.removeEventListener('bflow:calendar-changed', onCalendarChanged);
+    harness.restore();
+  }
+});
+
+test('local calendar placeholders cannot persist visibility or mute preferences', async () => {
+  const harness = await createHarness({
+    currentUserId: 'user-a',
+    calendarList: async () => [personalCalendar('user-a')],
+    fullSync: async () => [],
+    bflowEventsList: async () => [],
+  });
+  try {
+    await harness.service.loadBflowEvents();
+    const store = harness.service.__testUseCalendarStore.getState();
+    const original = store.calendars[0];
+    assert.ok(original);
+    const placeholderId = 'optimistic-calendar:user-a:1';
+    store.setCalendarOptimisticOverlay('user-a', 51, {
+      kind: 'create',
+      beforeCalendarIds: store.calendars.map(({ id }) => id),
+      calendar: {
+        ...original,
+        id: placeholderId,
+        name: '재시작 전 임시 캘린더',
+        isPersonal: false,
+        canEdit: false,
+        canManage: false,
+      },
+    });
+    const visibilityStorageBefore = localStorage.getItem('bflow_calendar_visible_v1');
+    const mutedStorageBefore = localStorage.getItem('bflow_calendar_muted_v1');
+
+    store.toggleCalendarVisible(placeholderId);
+    store.toggleMuted(placeholderId);
+
+    let state = harness.service.__testUseCalendarStore.getState();
+    assert.equal(state.visibleCalendarIds[placeholderId], undefined);
+    assert.equal(state.mutedCalendarIds.includes(placeholderId), false);
+    assert.equal(localStorage.getItem('bflow_calendar_visible_v1'), visibilityStorageBefore);
+    assert.equal(localStorage.getItem('bflow_calendar_muted_v1'), mutedStorageBefore);
+
+    state.clearCalendarOptimisticOverlay('user-a', 51);
+    state.setCalendarOptimisticOverlay('user-a', 52, {
+      kind: 'create',
+      beforeCalendarIds: state.calendars.map(({ id }) => id),
+      calendar: {
+        ...original,
+        id: placeholderId,
+        name: 'counter 재사용 임시 캘린더',
+        isPersonal: false,
+        canEdit: false,
+        canManage: false,
+      },
+    });
+    state = harness.service.__testUseCalendarStore.getState();
+    assert.equal(state.visibleCalendarIds[placeholderId], undefined, 'counter reuse inherits no stale visibility');
+    assert.equal(state.mutedCalendarIds.includes(placeholderId), false, 'counter reuse inherits no stale mute');
+
+    state.toggleCalendarVisible(original.id);
+    state.toggleMuted(original.id);
+    state = harness.service.__testUseCalendarStore.getState();
+    assert.equal(state.visibleCalendarIds[original.id], false);
+    assert.equal(state.mutedCalendarIds.includes(original.id), true);
+    assert.deepEqual(JSON.parse(localStorage.getItem('bflow_calendar_visible_v1') ?? '{}'), {
+      [original.id]: false,
+    });
+    assert.deepEqual(JSON.parse(localStorage.getItem('bflow_calendar_muted_v1') ?? '[]'), [original.id]);
+  } finally {
+    harness.restore();
+  }
+});
+
+test('actor-scoped calendar metadata overlays survive canonical refresh and an A-B-A session reset', async () => {
+  let activeUserId = 'user-a';
+  const harness = await createHarness({
+    currentUserId: activeUserId,
+    calendarList: async () => [personalCalendar(activeUserId)],
+    fullSync: async () => [],
+    bflowEventsList: async () => [bflowEvent(`overlay-event-${activeUserId}`, '낙관 표시 유지')],
+  });
+  try {
+    await harness.service.loadBflowEvents();
+    let store = harness.service.__testUseCalendarStore.getState();
+    const original = store.calendars[0];
+    assert.ok(original);
+    store.setCalendarOptimisticOverlay('user-a', 41, {
+      kind: 'update',
+      calendarId: original.id,
+      beforeCalendar: original,
+      patch: {
+        name: 'A 낙관 이름',
+        color: '#74B9FF',
+        visibility: 'team',
+      },
+    });
+
+    await harness.service.loadBflowEvents();
+    store = harness.service.__testUseCalendarStore.getState();
+    assert.deepEqual(
+      store.calendars.map(({ name, color, visibility }) => ({ name, color, visibility })),
+      [{ name: 'A 낙관 이름', color: '#74B9FF', visibility: 'team' }],
+      'a concurrent canonical load cannot erase a pending optimistic overlay',
+    );
+    assert.equal((await harness.service.getEvents())[0]?.color, '#74B9FF');
+
+    activeUserId = 'user-b';
+    harness.service.__testUseAuthStore.setState({ currentUser: authUser(activeUserId) });
+    assert.deepEqual(harness.service.__testUseCalendarStore.getState().calendars, [], 'A metadata never leaks to B');
+
+    activeUserId = 'user-a';
+    harness.service.__testUseAuthStore.setState({ currentUser: authUser(activeUserId) });
+    store = harness.service.__testUseCalendarStore.getState();
+    assert.equal(store.calendars[0]?.name, 'A 낙관 이름', 'returning to A restores the still-pending overlay');
+    assert.equal(store.loaded, false, 'the retained presentation does not masquerade as a fresh canonical load');
+
+    await harness.service.loadBflowEvents();
+    assert.equal((await harness.service.getEvents())[0]?.color, '#74B9FF');
+    harness.service.__testUseCalendarStore.getState().clearCalendarOptimisticOverlay('user-a', 41);
+    assert.deepEqual(
+      harness.service.__testUseCalendarStore.getState().calendars.map(({ name, color }) => ({ name, color })),
+      [{ name: '내 캘린더', color: '#6C5CE7' }],
+      'settlement restores the latest canonical snapshot',
+    );
+  } finally {
+    harness.restore();
+  }
+});
+
+test('canonical calendar snapshots are readable only for the current actor', async () => {
+  let activeUserId = 'user-a';
+  const harness = await createHarness({
+    currentUserId: activeUserId,
+    calendarList: async () => [personalCalendar(activeUserId)],
+    fullSync: async () => [],
+    bflowEventsList: async () => [],
+  });
+  try {
+    await harness.service.loadBflowEvents();
+    assert.deepEqual(
+      harness.service.__testGetCalendarCanonicalSnapshot('user-a')?.calendars.map(({ ownerId }) => ownerId),
+      ['user-a'],
+    );
+
+    activeUserId = 'user-b';
+    harness.service.__testUseAuthStore.setState({ currentUser: authUser(activeUserId) });
+    await harness.service.loadBflowEvents();
+    assert.equal(
+      harness.service.__testGetCalendarCanonicalSnapshot('user-a'),
+      null,
+      'B cannot read the retained private metadata snapshot for actor A',
+    );
+    assert.deepEqual(
+      harness.service.__testGetCalendarCanonicalSnapshot('user-b')?.calendars.map(({ ownerId }) => ownerId),
+      ['user-b'],
+      'B can read only the snapshot loaded for the current B session',
+    );
+
+    activeUserId = 'user-a';
+    harness.service.__testUseAuthStore.setState({ currentUser: authUser(activeUserId) });
+    assert.equal(harness.service.__testGetCalendarCanonicalSnapshot('user-b'), null);
+    assert.deepEqual(
+      harness.service.__testGetCalendarCanonicalSnapshot('user-a')?.calendars.map(({ ownerId }) => ownerId),
+      ['user-a'],
+      'the retained A snapshot becomes readable again only after A returns',
+    );
+  } finally {
     harness.restore();
   }
 });

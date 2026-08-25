@@ -861,12 +861,23 @@ function mutateSourceEvents(
 export async function getEvents(): Promise<CalendarEvent[]> {
   const calendarState = useCalendarStore.getState();
   if (!calendarState.loaded) return [...eventCache];
-  const knownCalendarIds = new Set(calendarState.calendars.map((calendar) => calendar.id));
-  return eventCache.filter((event) => (
-    event.source !== 'bflow'
-    || !event.calendarId
-    || knownCalendarIds.has(event.calendarId)
-  ));
+  const calendarsById = new Map(calendarState.calendars.map((calendar) => [calendar.id, calendar]));
+  return eventCache.flatMap((event) => {
+    if (event.source !== 'bflow' || !event.calendarId) return [event];
+    if (!calendarsById.has(event.calendarId)) return [];
+    // 색·편집 권한·개인 캘린더 표시는 event row가 아니라 현재 캘린더 메타데이터가
+    // 정본이다. 메타데이터의 낙관적 변경도 별도 event 재조회 없이 즉시 파생한다.
+    return [withBflowCalendarPresentation(event, event.calendarId)];
+  });
+}
+
+/** 현재 renderer의 메타데이터 낙관적 변경을 event state 구독자에게만 알린다.
+ * persistence 전 상태를 다른 BrowserWindow로 보내지 않으며, main의 커밋 fanout은
+ * 기존 calendar IPC 경계가 담당한다. */
+export function refreshCalendarPresentationFromMetadata(): void {
+  window.dispatchEvent(new CustomEvent('bflow:calendar-changed', {
+    detail: { action: 'optimistic-metadata' },
+  }));
 }
 
 type LoadBflowEventsOptions = {

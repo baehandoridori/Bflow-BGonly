@@ -5,10 +5,18 @@ import { motion } from 'framer-motion';
 import { Check, Crown, Search, Settings, Trash2, X } from 'lucide-react';
 import { toast } from 'sonner';
 import { ConfirmDialog } from '@/components/common/ConfirmDialog';
-import { loadBflowEvents } from '@/services/calendarService';
+import {
+  loadBflowEvents,
+  refreshCalendarPresentationFromMetadata,
+} from '@/services/calendarService';
 import type { CalendarCreateInput, CalendarUpdateInput } from '@/shared/calendarApiContract';
+import { canViewCalendar } from '@/shared/calendarPermissions';
 import { useAuthStore } from '@/stores/useAuthStore';
-import { useCalendarStore } from '@/stores/useCalendarStore';
+import {
+  getCalendarCanonicalSnapshot,
+  useCalendarStore,
+  type CalendarOptimisticOverlay,
+} from '@/stores/useCalendarStore';
 import { EVENT_COLORS, type BflowCalendar, type CalendarMember } from '@/types/calendar';
 import { avatarColor } from '@/utils/avatarColor';
 import { cn } from '@/utils/cn';
@@ -25,6 +33,11 @@ type CalendarVisibility = BflowCalendar['visibility'];
 type CalendarRefreshMode = 'metadata' | 'events';
 type CalendarVerification = 'committed' | 'not-committed' | 'ambiguous';
 
+interface CalendarCanonicalRefresh {
+  calendarsFresh: boolean;
+  calendars: BflowCalendar[];
+}
+
 interface CalendarIntentBase {
   actorId: string;
 }
@@ -33,6 +46,7 @@ interface CalendarCreateIntent extends CalendarIntentBase {
   kind: 'create';
   input: CalendarCreateInput;
   beforeCalendarIds: string[];
+  optimisticCalendarId: string;
 }
 
 interface CalendarUpdateIntent extends CalendarIntentBase {
@@ -69,6 +83,7 @@ interface ActorCalendarMutationState {
 }
 
 let nextCalendarMutationToken = 0;
+let nextOptimisticCalendarId = 0;
 let calendarMutationRevision = { revision: 0 };
 const calendarMutationByActor = new Map<string, ActorCalendarMutationState>();
 const emptyActorCalendarMutation: ActorCalendarMutationState = {
@@ -158,6 +173,22 @@ function calendarMatchesUpdates(calendar: BflowCalendar, updates: CalendarUpdate
   return true;
 }
 
+function canActorViewCalendarAfterUpdate(intent: CalendarUpdateIntent): boolean {
+  const visibility = intent.updates.visibility ?? intent.beforeCalendar.visibility;
+  const memberUserIds = intent.updates.members === undefined
+    ? intent.beforeCalendar.members.map((member) => member.userId)
+    : intent.updates.members.map((member) => member.user_id);
+  return canViewCalendar(
+    {
+      owner_id: intent.beforeCalendar.ownerId,
+      visibility,
+      is_personal: intent.beforeCalendar.isPersonal,
+    },
+    memberUserIds,
+    intent.actorId,
+  );
+}
+
 function verifyCalendarIntent(
   intent: CalendarMutationIntent,
   calendars: BflowCalendar[],
@@ -225,6 +256,79 @@ function uniqueMembers(members: CalendarMember[], ownerId: string): CalendarMemb
     seen.add(member.userId);
     return true;
   });
+}
+
+function calendarMembersFromInput(
+  members: NonNullable<CalendarCreateInput['members']>,
+): CalendarMember[] {
+  return members.map((member) => ({
+    userId: member.user_id,
+    canEdit: member.can_edit,
+  }));
+}
+
+function calendarOptimisticOverlayFromIntent(intent: CalendarMutationIntent): CalendarOptimisticOverlay {
+  if (intent.kind === 'create') {
+    return {
+      kind: 'create',
+      beforeCalendarIds: intent.beforeCalendarIds,
+      calendar: {
+        id: intent.optimisticCalendarId,
+        name: intent.input.name,
+        color: intent.input.color,
+        visibility: intent.input.visibility,
+        ownerId: intent.actorId,
+        isPersonal: false,
+        members: calendarMembersFromInput(
+          intent.input.visibility === 'private' ? [] : intent.input.members ?? [],
+        ),
+        // 로컬 placeholder ID로 일정/설정 persistence를 시작하지 못하게 막는다.
+        canEdit: false,
+        canManage: false,
+        createdAt: '',
+      },
+    };
+  }
+  if (intent.kind === 'delete' || !canActorViewCalendarAfterUpdate(intent)) {
+    return {
+      kind: 'delete',
+      calendarId: intent.calendarId,
+      beforeCalendar: intent.beforeCalendar,
+    };
+  }
+  const members = intent.updates.members === undefined
+    ? undefined
+    : calendarMembersFromInput(intent.updates.members);
+  return {
+    kind: 'update',
+    calendarId: intent.calendarId,
+    beforeCalendar: intent.beforeCalendar,
+    patch: {
+      ...(intent.updates.name === undefined ? {} : { name: intent.updates.name }),
+      ...(intent.updates.color === undefined ? {} : { color: intent.updates.color }),
+      ...(intent.updates.visibility === undefined ? {} : { visibility: intent.updates.visibility }),
+      ...(members === undefined ? {} : {
+        members,
+        canEdit: intent.beforeCalendar.ownerId === intent.actorId
+          || members.some((member) => member.userId === intent.actorId && member.canEdit),
+      }),
+    },
+  };
+}
+
+function applyOptimisticCalendarIntent(intent: CalendarMutationIntent, token: number): void {
+  if (!isCurrentCalendarActor(intent.actorId)) return;
+  useCalendarStore.getState().setCalendarOptimisticOverlay(
+    intent.actorId,
+    token,
+    calendarOptimisticOverlayFromIntent(intent),
+  );
+  refreshCalendarPresentationFromMetadata();
+}
+
+function clearOptimisticCalendarIntent(intent: CalendarMutationIntent, token: number): void {
+  useCalendarStore.getState().clearCalendarOptimisticOverlay(intent.actorId, token);
+  if (isCurrentCalendarActor(intent.actorId)) refreshCalendarPresentationFromMetadata();
 }
 
 export function CalendarSettingsModal({ calendar, eventCount, onClose }: CalendarSettingsModalProps) {
@@ -359,10 +463,22 @@ export function CalendarSettingsModal({ calendar, eventCount, onClose }: Calenda
     setMembers((current) => current.filter((member) => member.userId !== userId));
   };
 
-  const refreshCanonicalCalendars = async (mode: CalendarRefreshMode): Promise<boolean> => {
-    if (mode === 'events') return loadBflowEvents();
-    const metadataFreshness = await useCalendarStore.getState().loadAll();
-    return metadataFreshness.calendarsFresh;
+  const refreshCanonicalCalendars = async (
+    mode: CalendarRefreshMode,
+    actorId: string,
+  ): Promise<CalendarCanonicalRefresh> => {
+    const beforeRevision = getCalendarCanonicalSnapshot(actorId)?.revision ?? 0;
+    let eventsFresh = false;
+    let metadataFreshness: Awaited<ReturnType<ReturnType<typeof useCalendarStore.getState>['loadAll']>> | null = null;
+    if (mode === 'events') eventsFresh = await loadBflowEvents();
+    else metadataFreshness = await useCalendarStore.getState().loadAll();
+    const canonical = getCalendarCanonicalSnapshot(actorId);
+    const calendarsFresh = canonical !== null && canonical.revision > beforeRevision;
+    return {
+      calendarsFresh: calendarsFresh
+        || (mode === 'events' ? eventsFresh : Boolean(metadataFreshness?.calendarsFresh)),
+      calendars: canonical?.calendars ?? useCalendarStore.getState().calendars,
+    };
   };
 
   const settleCalendarMutation = (
@@ -384,6 +500,7 @@ export function CalendarSettingsModal({ calendar, eventCount, onClose }: Calenda
     successMessage: string,
   ): void => {
     if (!settleCalendarMutation(token, intent.actorId, null)) return;
+    clearOptimisticCalendarIntent(intent, token);
     toast.success(successMessage);
     closeActiveModalForIntent(intent);
   };
@@ -402,19 +519,21 @@ export function CalendarSettingsModal({ calendar, eventCount, onClose }: Calenda
         refreshMode: pending.refreshMode,
       },
     });
+    applyOptimisticCalendarIntent(pending.intent, token);
     setSaving(true);
-    let refreshed = false;
+    let refresh: CalendarCanonicalRefresh = { calendarsFresh: false, calendars: [] };
     try {
-      refreshed = await refreshCanonicalCalendars(pending.refreshMode);
+      refresh = await refreshCanonicalCalendars(pending.refreshMode, actorId);
     } catch {
-      refreshed = false;
+      refresh = { calendarsFresh: false, calendars: [] };
     }
     if (!isCurrentCalendarActor(actorId)) {
       settleCalendarMutation(token, actorId, pending);
       if (mountedRef.current) setSaving(false);
       return;
     }
-    if (!refreshed) {
+    if (!refresh.calendarsFresh) {
+      applyOptimisticCalendarIntent(pending.intent, token);
       settleCalendarMutation(token, actorId, pending);
       setSaving(false);
       toast.error('최신 캘린더 목록을 불러오지 못했어요. 잠시 후 다시 시도해 주세요.');
@@ -429,7 +548,7 @@ export function CalendarSettingsModal({ calendar, eventCount, onClose }: Calenda
 
     const verification = verifyCalendarIntent(
       pending.intent,
-      useCalendarStore.getState().calendars,
+      refresh.calendars,
     );
     if (verification === 'committed') {
       setSaving(false);
@@ -441,11 +560,14 @@ export function CalendarSettingsModal({ calendar, eventCount, onClose }: Calenda
       return;
     }
     if (verification === 'not-committed') {
-      settleCalendarMutation(token, actorId, null);
+      if (settleCalendarMutation(token, actorId, null)) {
+        clearOptimisticCalendarIntent(pending.intent, token);
+      }
       setSaving(false);
       toast.error('변경 내용이 저장되지 않은 것을 확인했어요. 내용을 확인하고 다시 시도해 주세요.');
       return;
     }
+    applyOptimisticCalendarIntent(pending.intent, token);
     settleCalendarMutation(token, actorId, pending);
     setSaving(false);
     toast.error('최신 목록에서도 저장 결과를 확정하지 못했어요. 잠시 후 다시 확인해 주세요.');
@@ -459,6 +581,7 @@ export function CalendarSettingsModal({ calendar, eventCount, onClose }: Calenda
     refreshEvents = false,
   ) => {
     const actorId = intent.actorId;
+    if (!isCurrentCalendarActor(actorId)) return;
     const actorMutation = getActorCalendarMutation(actorId);
     if (actorMutation.inFlight || actorMutation.reconciliation) return;
     const refreshMode: CalendarRefreshMode = refreshEvents ? 'events' : 'metadata';
@@ -467,6 +590,7 @@ export function CalendarSettingsModal({ calendar, eventCount, onClose }: Calenda
       inFlight: { token, intent, refreshMode },
       reconciliation: null,
     });
+    applyOptimisticCalendarIntent(intent, token);
     setSaving(true);
     let persistenceSucceeded = false;
     try {
@@ -486,11 +610,11 @@ export function CalendarSettingsModal({ calendar, eventCount, onClose }: Calenda
       if (mountedRef.current) setSaving(false);
       return;
     }
-    let refreshed = false;
+    let refresh: CalendarCanonicalRefresh = { calendarsFresh: false, calendars: [] };
     try {
-      refreshed = await refreshCanonicalCalendars(refreshMode);
+      refresh = await refreshCanonicalCalendars(refreshMode, actorId);
     } catch {
-      refreshed = false;
+      refresh = { calendarsFresh: false, calendars: [] };
     }
     if (!isCurrentCalendarActor(actorId)) {
       settleCalendarMutation(token, actorId, reconciliation);
@@ -498,16 +622,16 @@ export function CalendarSettingsModal({ calendar, eventCount, onClose }: Calenda
       return;
     }
 
-    if (persistenceSucceeded && refreshed) {
+    if (persistenceSucceeded && refresh.calendarsFresh) {
       setSaving(false);
       finishVerifiedMutation(token, intent, successMessage);
       return;
     }
 
-    if (!persistenceSucceeded && refreshed) {
+    if (!persistenceSucceeded && refresh.calendarsFresh) {
       const verification = verifyCalendarIntent(
         intent,
-        useCalendarStore.getState().calendars,
+        refresh.calendars,
       );
       if (verification === 'committed') {
         setSaving(false);
@@ -519,18 +643,21 @@ export function CalendarSettingsModal({ calendar, eventCount, onClose }: Calenda
         return;
       }
       if (verification === 'not-committed') {
-        settleCalendarMutation(token, actorId, null);
+        if (settleCalendarMutation(token, actorId, null)) {
+          clearOptimisticCalendarIntent(intent, token);
+        }
         setSaving(false);
         toast.error('변경 내용이 저장되지 않은 것을 확인했어요. 내용을 확인하고 다시 시도해 주세요.');
         return;
       }
     }
 
+    applyOptimisticCalendarIntent(intent, token);
     settleCalendarMutation(token, actorId, reconciliation);
     setSaving(false);
     if (persistenceSucceeded) {
       toast.error('캘린더 변경은 저장됐지만 최신 목록을 불러오지 못했어요. 목록 확인만 다시 시도해 주세요.');
-    } else if (refreshed) {
+    } else if (refresh.calendarsFresh) {
       toast.error('저장 응답을 받지 못해 최신 목록만으로 결과를 확정하지 못했어요. 목록을 다시 확인해 주세요.');
     } else {
       toast.error(`${failureMessage} 저장 결과도 확인할 수 없어 최신 목록을 다시 불러와 주세요.`);
@@ -566,6 +693,7 @@ export function CalendarSettingsModal({ calendar, eventCount, onClose }: Calenda
           actorId: currentUser.id,
           input,
           beforeCalendarIds: useCalendarStore.getState().calendars.map((item) => item.id),
+          optimisticCalendarId: `optimistic-calendar:${currentUser.id}:${++nextOptimisticCalendarId}`,
         },
         () => window.electronAPI.calendarCreate(input),
         '캘린더를 만들었어요',
@@ -616,20 +744,31 @@ export function CalendarSettingsModal({ calendar, eventCount, onClose }: Calenda
       || getActorCalendarMutation(currentUser?.id).inFlight
       || getActorCalendarMutation(currentUser?.id).reconciliation
     ) return;
+    const actorId = currentUser.id;
+    const calendarId = calendar.id;
+    const modalToken = modalInstanceTokenRef.current;
     const confirmed = await ConfirmDialog.show({
       message: `${calendar.name} 캘린더를 삭제할까요?\n일정 ${eventCount}개가 함께 삭제돼요.`,
       confirmLabel: '삭제',
       tone: 'danger',
     });
-    if (!confirmed) return;
+    const active = activeCalendarModal;
+    if (
+      !confirmed
+      || !mountedRef.current
+      || !isCurrentCalendarActor(actorId)
+      || active?.token !== modalToken
+      || active.actorId !== actorId
+      || active.calendarId !== calendarId
+    ) return;
     await runMutation(
       {
         kind: 'delete',
-        actorId: currentUser.id,
-        calendarId: calendar.id,
+        actorId,
+        calendarId,
         beforeCalendar: cloneCalendar(calendar),
       },
-      () => window.electronAPI.calendarDelete(calendar.id),
+      () => window.electronAPI.calendarDelete(calendarId),
       '캘린더를 삭제했어요',
       '캘린더를 삭제하지 못했어요. 다시 시도해 주세요.',
       true,

@@ -21,6 +21,21 @@ type BflowCalendar = {
   createdAt: string;
 };
 
+type SettingsCalendarOptimisticOverlay = {
+  kind: 'create';
+  beforeCalendarIds: string[];
+  calendar: BflowCalendar;
+} | {
+  kind: 'update';
+  calendarId: string;
+  beforeCalendar: BflowCalendar;
+  patch: Partial<BflowCalendar>;
+} | {
+  kind: 'delete';
+  calendarId: string;
+  beforeCalendar: BflowCalendar;
+};
+
 type CalendarRailProps = {
   isAuthenticated: boolean;
   onOpenSettings(calendar: BflowCalendar): void;
@@ -145,7 +160,7 @@ type ButtonElement = ReactElement<{
   'aria-pressed'?: boolean;
   children?: ReactNode;
   disabled?: boolean;
-  style?: { background?: string };
+  style?: { background?: string; backgroundColor?: string };
   title?: string;
   onClick?: (event?: { stopPropagation(): void }) => void | Promise<void>;
 }, 'button'>;
@@ -181,6 +196,7 @@ let calendarState: {
   calendars: BflowCalendar[];
   loaded: boolean;
   tags: Array<{ id: string; name: string; color: string; sortOrder: number }>;
+  optimisticDeletedCalendarIds: string[];
   visibleCalendarIds: Record<string, boolean>;
   enabledTagIds: Record<string, boolean>;
   mutedCalendarIds: string[];
@@ -188,6 +204,14 @@ let calendarState: {
   toggleTag(id: string): void;
   resetTagsAllOn(): void;
   toggleMuted(id: string): void;
+  upsertCalendarOptimistically(actorId: string, calendar: BflowCalendar): void;
+  removeCalendarOptimistically(actorId: string, calendarId: string): void;
+  setCalendarOptimisticOverlay(
+    actorId: string,
+    token: number,
+    overlay: SettingsCalendarOptimisticOverlay,
+  ): void;
+  clearCalendarOptimisticOverlay(actorId: string, token: number): void;
 };
 let openedSettings: BflowCalendar[] = [];
 let createdCount = 0;
@@ -222,12 +246,21 @@ let settingsApiCalls: Array<{ name: string; args: unknown[] }> = [];
 let settingsApiFailures = new Set<string>();
 let settingsMetadataFreshness = { calendarsFresh: true, tagsFresh: true };
 let settingsBflowReloadResult = true;
+let settingsBflowMetadataFresh = true;
 let settingsCanonicalCalendarsAfterReload: BflowCalendar[] | null = null;
+let settingsCanonicalCalendars: BflowCalendar[] = [];
+let settingsCanonicalRevision = 0;
+let settingsCanonicalByActor = new Map<string, { revision: number; calendars: BflowCalendar[] }>();
+let settingsOptimisticByActor = new Map<string, { token: number; overlay: SettingsCalendarOptimisticOverlay }>();
+let settingsCachedEvents: ScheduleCalendarEvent[] = [];
+let settingsPresentationRefreshCount = 0;
 let settingsRefreshCount = 0;
 let settingsApiGate: Promise<void> | null = null;
 let resolveSettingsApiGate: (() => void) | null = null;
 let settingsRefreshGate: Promise<void> | null = null;
 let resolveSettingsRefreshGate: (() => void) | null = null;
+let settingsConfirmGate: Promise<void> | null = null;
+let resolveSettingsConfirmGate: (() => void) | null = null;
 let settingsConfirmResponses: boolean[] = [];
 let settingsConfirmMessages: string[] = [];
 let settingsToastErrors: string[] = [];
@@ -403,6 +436,53 @@ function calendar(overrides: Partial<BflowCalendar>): BflowCalendar {
   };
 }
 
+function cloneSettingsCalendars(calendars: BflowCalendar[]): BflowCalendar[] {
+  return calendars.map((item) => ({
+    ...item,
+    members: item.members.map((member) => ({ ...member })),
+  }));
+}
+
+function applySettingsCalendarOverlay(
+  actorId: string,
+  calendars: BflowCalendar[],
+  overlay: SettingsCalendarOptimisticOverlay,
+): BflowCalendar[] {
+  const base = cloneSettingsCalendars(calendars);
+  if (overlay.kind === 'create') {
+    const beforeIds = new Set(overlay.beforeCalendarIds);
+    const exact = base.some((item) => (
+      !beforeIds.has(item.id)
+      && item.id !== overlay.calendar.id
+      && item.ownerId === actorId
+      && item.name === overlay.calendar.name
+      && item.color === overlay.calendar.color
+      && item.visibility === overlay.calendar.visibility
+    ));
+    if (exact) return base;
+    return base.some((item) => item.id === overlay.calendar.id)
+      ? base.map((item) => item.id === overlay.calendar.id ? { ...overlay.calendar } : item)
+      : [...base, { ...overlay.calendar }];
+  }
+  if (overlay.kind === 'delete') return base.filter((item) => item.id !== overlay.calendarId);
+  const current = base.find((item) => item.id === overlay.calendarId) ?? overlay.beforeCalendar;
+  const patched = {
+    ...current,
+    ...overlay.patch,
+    members: overlay.patch.members?.map((member) => ({ ...member })) ?? current.members,
+  };
+  return base.some((item) => item.id === overlay.calendarId)
+    ? base.map((item) => item.id === overlay.calendarId ? patched : item)
+    : [...base, patched];
+}
+
+function publishSettingsCanonicalSnapshot(actorId: string, calendars: BflowCalendar[]): void {
+  settingsCanonicalByActor.set(actorId, {
+    revision: ++settingsCanonicalRevision,
+    calendars: cloneSettingsCalendars(calendars),
+  });
+}
+
 function resetHarness(): void {
   for (const cleanup of scheduleMountedEffectCleanups.splice(0).reverse()) cleanup();
   scheduleWindowListeners.clear();
@@ -466,12 +546,21 @@ function resetHarness(): void {
   settingsApiFailures = new Set();
   settingsMetadataFreshness = { calendarsFresh: true, tagsFresh: true };
   settingsBflowReloadResult = true;
+  settingsBflowMetadataFresh = true;
   settingsCanonicalCalendarsAfterReload = null;
+  settingsCanonicalCalendars = [];
+  settingsCanonicalRevision = 0;
+  settingsCanonicalByActor = new Map();
+  settingsOptimisticByActor = new Map();
+  settingsCachedEvents = [];
+  settingsPresentationRefreshCount = 0;
   settingsRefreshCount = 0;
   settingsApiGate = null;
   resolveSettingsApiGate = null;
   settingsRefreshGate = null;
   resolveSettingsRefreshGate = null;
+  settingsConfirmGate = null;
+  resolveSettingsConfirmGate = null;
   settingsConfirmResponses = [];
   settingsConfirmMessages = [];
   settingsToastErrors = [];
@@ -504,6 +593,7 @@ function resetHarness(): void {
       { id: 'tag-meeting', name: '회의', color: '#FDCB6E', sortOrder: 20 },
       { id: 'tag-review', name: '검수', color: '#00B894', sortOrder: 10 },
     ],
+    optimisticDeletedCalendarIds: [],
     visibleCalendarIds: {},
     enabledTagIds: {},
     mutedCalendarIds: [],
@@ -523,7 +613,44 @@ function resetHarness(): void {
         ? calendarState.mutedCalendarIds.filter((calendarId) => calendarId !== id)
         : [...calendarState.mutedCalendarIds, id];
     },
+    upsertCalendarOptimistically(actorId, value) {
+      if (settingsCurrentUser.id !== actorId) return;
+      const existingIndex = calendarState.calendars.findIndex((item) => item.id === value.id);
+      const cloned = { ...value, members: value.members.map((member) => ({ ...member })) };
+      calendarState.calendars = existingIndex >= 0
+        ? calendarState.calendars.map((item, index) => index === existingIndex ? cloned : item)
+        : [...calendarState.calendars, cloned];
+    },
+    removeCalendarOptimistically(actorId, calendarId) {
+      if (settingsCurrentUser.id !== actorId) return;
+      calendarState.calendars = calendarState.calendars.filter((item) => item.id !== calendarId);
+    },
+    setCalendarOptimisticOverlay(actorId, token, overlay) {
+      if (settingsCurrentUser.id !== actorId) return;
+      settingsOptimisticByActor.set(actorId, { token, overlay });
+      const canonical = settingsCanonicalByActor.get(actorId)?.calendars ?? calendarState.calendars;
+      calendarState.calendars = applySettingsCalendarOverlay(actorId, canonical, overlay);
+      calendarState.optimisticDeletedCalendarIds = overlay.kind === 'delete' ? [overlay.calendarId] : [];
+    },
+    clearCalendarOptimisticOverlay(actorId, token) {
+      const registered = settingsOptimisticByActor.get(actorId);
+      if (!registered || registered.token !== token) return;
+      settingsOptimisticByActor.delete(actorId);
+      if (settingsCurrentUser.id !== actorId) return;
+      calendarState.calendars = cloneSettingsCalendars(
+        settingsCanonicalByActor.get(actorId)?.calendars ?? settingsCanonicalCalendars,
+      );
+      calendarState.optimisticDeletedCalendarIds = [];
+    },
   };
+  settingsCanonicalCalendars = calendarState.calendars.map((item) => ({
+    ...item,
+    members: item.members.map((member) => ({ ...member })),
+  }));
+  settingsCanonicalByActor.set(settingsCurrentUser.id, {
+    revision: settingsCanonicalRevision,
+    calendars: cloneSettingsCalendars(settingsCanonicalCalendars),
+  });
 }
 
 async function loadRail(): Promise<CalendarRailComponent> {
@@ -1084,15 +1211,21 @@ async function loadCalendarSettingsModal(): Promise<CalendarSettingsModalCompone
       {
         getState: () => ({
           calendars: calendarState.calendars,
+          upsertCalendarOptimistically: calendarState.upsertCalendarOptimistically,
+          removeCalendarOptimistically: calendarState.removeCalendarOptimistically,
+          setCalendarOptimisticOverlay: calendarState.setCalendarOptimisticOverlay,
+          clearCalendarOptimisticOverlay: calendarState.clearCalendarOptimisticOverlay,
           async loadAll() {
             settingsApiCalls.push({ name: 'loadAll', args: [] });
             if (settingsRefreshGate) await settingsRefreshGate;
             settingsRefreshCount += 1;
-            if (settingsMetadataFreshness.calendarsFresh && settingsCanonicalCalendarsAfterReload) {
-              calendarState.calendars = settingsCanonicalCalendarsAfterReload.map((item) => ({
-                ...item,
-                members: item.members.map((member) => ({ ...member })),
-              }));
+            if (settingsMetadataFreshness.calendarsFresh) {
+              const canonical = settingsCanonicalCalendarsAfterReload ?? settingsCanonicalCalendars;
+              publishSettingsCanonicalSnapshot(settingsCurrentUser.id, canonical);
+              const overlay = settingsOptimisticByActor.get(settingsCurrentUser.id)?.overlay;
+              calendarState.calendars = overlay
+                ? applySettingsCalendarOverlay(settingsCurrentUser.id, canonical, overlay)
+                : cloneSettingsCalendars(canonical);
             }
             return settingsMetadataFreshness;
           },
@@ -1104,7 +1237,7 @@ async function loadCalendarSettingsModal(): Promise<CalendarSettingsModalCompone
       if (settingsApiGate) await settingsApiGate;
       if (settingsApiFailures.has(name)) throw new Error(`${name} failed`);
       const input = args[0] as { name?: string; color?: string; visibility?: BflowCalendar['visibility'] } | undefined;
-      return {
+      const created = {
         id: 'created-calendar',
         name: String(input?.name ?? ''),
         color: input?.color ?? '#6C5CE7',
@@ -1114,6 +1247,55 @@ async function loadCalendarSettingsModal(): Promise<CalendarSettingsModalCompone
         created_at: '2026-08-25T00:00:00.000Z',
         updated_at: '2026-08-25T00:00:00.000Z',
       };
+      if (name === 'calendarCreate') {
+        const createInput = args[0] as {
+          name: string;
+          color: string;
+          visibility: BflowCalendar['visibility'];
+          members?: Array<{ user_id: string; can_edit: boolean }>;
+        };
+        settingsCanonicalCalendars = [...settingsCanonicalCalendars, {
+          id: created.id,
+          name: createInput.name,
+          color: createInput.color,
+          visibility: createInput.visibility,
+          ownerId: settingsCurrentUser.id,
+          isPersonal: false,
+          members: (createInput.members ?? []).map((member) => ({
+            userId: member.user_id,
+            canEdit: member.can_edit,
+          })),
+          canEdit: true,
+          canManage: true,
+          createdAt: created.created_at,
+        }];
+      } else if (name === 'calendarUpdate') {
+        const calendarId = args[0] as string;
+        const updates = args[1] as {
+          name?: string;
+          color?: string;
+          visibility?: BflowCalendar['visibility'];
+          members?: Array<{ user_id: string; can_edit: boolean }>;
+        };
+        settingsCanonicalCalendars = settingsCanonicalCalendars.map((item) => (
+          item.id === calendarId
+            ? {
+                ...item,
+                ...updates,
+                ...(updates.members === undefined ? {} : {
+                  members: updates.members.map((member) => ({
+                    userId: member.user_id,
+                    canEdit: member.can_edit,
+                  })),
+                }),
+              }
+            : item
+        ));
+      } else if (name === 'calendarDelete') {
+        const calendarId = args[0] as string;
+        settingsCanonicalCalendars = settingsCanonicalCalendars.filter((item) => item.id !== calendarId);
+      }
+      return created;
     };
     const evaluate = new Function('require', 'module', 'exports', result.outputFiles[0].text);
     evaluate((id: string) => {
@@ -1166,6 +1348,7 @@ async function loadCalendarSettingsModal(): Promise<CalendarSettingsModalCompone
           ConfirmDialog: {
             async show(options: { message: string }) {
               settingsConfirmMessages.push(options.message);
+              if (settingsConfirmGate) await settingsConfirmGate;
               return settingsConfirmResponses.shift() ?? false;
             },
           },
@@ -1186,18 +1369,40 @@ async function loadCalendarSettingsModal(): Promise<CalendarSettingsModalCompone
         );
         return { useAuthStore: useAuthStoreMock };
       }
-      if (id === '@/stores/useCalendarStore') return { useCalendarStore: useCalendarStoreMock };
+      if (id === '@/stores/useCalendarStore') {
+        return {
+          useCalendarStore: useCalendarStoreMock,
+          getCalendarCanonicalSnapshot(actorId: string) {
+            const snapshot = settingsCanonicalByActor.get(actorId);
+            return snapshot ? {
+              revision: snapshot.revision,
+              calendars: cloneSettingsCalendars(snapshot.calendars),
+            } : null;
+          },
+        };
+      }
       if (id === '@/services/calendarService') {
         return {
+          refreshCalendarPresentationFromMetadata() {
+            settingsPresentationRefreshCount += 1;
+            const calendarsById = new Map(calendarState.calendars.map((item) => [item.id, item]));
+            settingsCachedEvents = settingsCachedEvents.flatMap((event) => {
+              if (event.source !== 'bflow' || !event.calendarId) return [event];
+              const eventCalendar = calendarsById.get(event.calendarId);
+              return eventCalendar ? [{ ...event, color: eventCalendar.color }] : [];
+            });
+          },
           async loadBflowEvents() {
             settingsApiCalls.push({ name: 'loadBflowEvents', args: [] });
             if (settingsRefreshGate) await settingsRefreshGate;
             settingsRefreshCount += 1;
-            if (settingsBflowReloadResult && settingsCanonicalCalendarsAfterReload) {
-              calendarState.calendars = settingsCanonicalCalendarsAfterReload.map((item) => ({
-                ...item,
-                members: item.members.map((member) => ({ ...member })),
-              }));
+            if (settingsBflowMetadataFresh) {
+              const canonical = settingsCanonicalCalendarsAfterReload ?? settingsCanonicalCalendars;
+              publishSettingsCanonicalSnapshot(settingsCurrentUser.id, canonical);
+              const overlay = settingsOptimisticByActor.get(settingsCurrentUser.id)?.overlay;
+              calendarState.calendars = overlay
+                ? applySettingsCalendarOverlay(settingsCurrentUser.id, canonical, overlay)
+                : cloneSettingsCalendars(canonical);
             }
             return settingsBflowReloadResult;
           },
@@ -1452,10 +1657,22 @@ async function renderCalendarSettingsModal(
     && settingsRefreshCount === 0
     && !calendarState.calendars.some((item) => item.id === calendarValue.id)
   ) {
-    calendarState.calendars = [...calendarState.calendars, {
+    const added = {
       ...calendarValue,
       members: calendarValue.members.map((member) => ({ ...member })),
-    }];
+    };
+    calendarState.calendars = [...calendarState.calendars, added];
+    if (!settingsCanonicalCalendars.some((item) => item.id === calendarValue.id)) {
+      settingsCanonicalCalendars = [...settingsCanonicalCalendars, {
+        ...added,
+        members: added.members.map((member) => ({ ...member })),
+      }];
+      const existingSnapshot = settingsCanonicalByActor.get(settingsCurrentUser.id);
+      settingsCanonicalByActor.set(settingsCurrentUser.id, {
+        revision: existingSnapshot?.revision ?? settingsCanonicalRevision,
+        calendars: cloneSettingsCalendars(settingsCanonicalCalendars),
+      });
+    }
   }
   stateCursor = 0;
   modalRefCursor = 0;
@@ -2291,6 +2508,37 @@ test('ScheduleView reconciles an open calendar settings modal without closing cr
     tree = await renderScheduleView();
     assert.match(textContent(tree), /새 캘린더 연결됨/, 'create mode is not mistaken for a revoked existing calendar');
   });
+
+  await t.test('a pending optimistic delete keeps its matching retry modal until canonical settlement', async () => {
+    resetHarness();
+    let tree = await renderScheduleView();
+    buttonByTitle(tree, '사이드바 펼치기').props.onClick?.();
+    tree = await renderScheduleView();
+    buttonByLabel(tree, '레일 캘린더 설정').props.onClick?.();
+    tree = await renderScheduleView();
+    assert.match(textContent(tree), /설정 EP 마일스톤/);
+
+    calendarState.optimisticDeletedCalendarIds = ['mine'];
+    calendarState.calendars = calendarState.calendars.filter((calendar) => calendar.id !== 'mine');
+    await renderScheduleView();
+    await flushScheduleMountEffects();
+    tree = await renderScheduleView();
+    assert.match(
+      textContent(tree),
+      /설정 EP 마일스톤/,
+      'local removal hides the rail row without hiding the ambiguous-response retry surface',
+    );
+
+    calendarState.optimisticDeletedCalendarIds = [];
+    await renderScheduleView();
+    await flushScheduleMountEffects();
+    tree = await renderScheduleView();
+    assert.equal(
+      findElements(tree, (element) => element.props['aria-label'] === '캘린더 설정 모달').length,
+      0,
+      'authoritative absence closes the modal once the tombstone is settled',
+    );
+  });
 });
 
 test('ScheduleView replaces legacy controls with the tag bar and reports visible rail calendars', async () => {
@@ -2604,6 +2852,106 @@ test('CalendarSettingsModal creates a members calendar atomically and reloads be
   assert.equal(settingsCloseCount, 1, 'the modal closes only after the canonical list reload succeeds');
 });
 
+test('CalendarSettingsModal updates calendar metadata and event presentation before deferred IPC settles', async (t) => {
+  await t.test('create adds a non-persistable local placeholder to the rail immediately', async () => {
+    resetHarness();
+    settingsApiGate = new Promise<void>((resolve) => { resolveSettingsApiGate = resolve; });
+    let tree = await renderCalendarSettingsModal();
+    formElementByLabel(tree, '캘린더 이름').props.onChange?.({
+      target: { value: '즉시 보이는 캘린더', checked: false },
+    });
+    tree = await renderCalendarSettingsModal();
+
+    const pendingSave = buttonByText(tree, '저장').props.onClick?.();
+
+    const optimistic = calendarState.calendars.find((item) => item.name === '즉시 보이는 캘린더');
+    assert.ok(optimistic, 'the rail store changes in the same turn instead of waiting for IPC');
+    assert.match(optimistic.id, /^optimistic-calendar:/, 'the placeholder is visibly local, not a fake server UUID');
+    assert.equal(optimistic.canEdit, false, 'events cannot be persisted against the local-only placeholder');
+    assert.match(textContent(await renderRail(false)), /즉시 보이는 캘린더/);
+    assert.deepEqual(settingsApiCalls[0].args, [{
+      name: '즉시 보이는 캘린더',
+      color: '#6C5CE7',
+      visibility: 'members',
+      members: [],
+    }], 'the local placeholder id never crosses the persistence boundary');
+
+    resolveSettingsApiGate?.();
+    await pendingSave;
+    assert.ok(calendarState.calendars.some((item) => item.id === 'created-calendar'));
+    assert.equal(calendarState.calendars.some((item) => item.id === optimistic.id), false);
+  });
+
+  await t.test('name, color, and visibility update the rail and cached event tint immediately', async () => {
+    resetHarness();
+    const editable = calendar({
+      id: 'deferred-update',
+      name: '수정 전',
+      ownerId: myUserId,
+      visibility: 'members',
+      color: '#6C5CE7',
+      canManage: true,
+    });
+    let tree = await renderCalendarSettingsModal(editable, 1);
+    settingsCachedEvents = [calendarListEvent({
+      id: 'deferred-event',
+      calendarId: editable.id,
+      sourceCalendarId: `bflow:${editable.id}`,
+      color: '#6C5CE7',
+    })];
+    settingsApiGate = new Promise<void>((resolve) => { resolveSettingsApiGate = resolve; });
+    formElementByLabel(tree, '캘린더 이름').props.onChange?.({
+      target: { value: '수정 즉시', checked: false },
+    });
+    buttonByLabel(tree, '색상 #74B9FF').props.onClick?.();
+    formElementByLabel(tree, '팀 전체').props.onChange?.({
+      target: { value: 'team', checked: true },
+    });
+    tree = await renderCalendarSettingsModal(editable, 1);
+
+    const pendingSave = buttonByText(tree, '저장').props.onClick?.();
+
+    const optimistic = calendarState.calendars.find((item) => item.id === editable.id);
+    assert.deepEqual(
+      optimistic && { name: optimistic.name, color: optimistic.color, visibility: optimistic.visibility },
+      { name: '수정 즉시', color: '#74B9FF', visibility: 'team' },
+    );
+    const rail = await renderRail(false);
+    assert.match(textContent(rail), /팀 전체.*수정 즉시/);
+    assert.equal(buttonByLabel(rail, '수정 즉시 표시').props.style?.backgroundColor, '#74B9FF');
+    assert.equal(settingsCachedEvents[0]?.color, '#74B9FF', 'existing event chips derive the new calendar tint without an event reload');
+    assert.equal(settingsPresentationRefreshCount, 1);
+    assert.deepEqual(settingsApiCalls.map((call) => call.name), ['calendarUpdate']);
+
+    resolveSettingsApiGate?.();
+    await pendingSave;
+  });
+
+  await t.test('delete removes the rail row and its cached events while IPC is pending', async () => {
+    resetHarness();
+    const editable = calendar({ id: 'deferred-delete', name: '즉시 삭제', canManage: true });
+    const tree = await renderCalendarSettingsModal(editable, 1);
+    settingsCachedEvents = [calendarListEvent({
+      id: 'deleted-calendar-event',
+      calendarId: editable.id,
+      sourceCalendarId: `bflow:${editable.id}`,
+    })];
+    settingsConfirmResponses = [true];
+    settingsApiGate = new Promise<void>((resolve) => { resolveSettingsApiGate = resolve; });
+
+    const pendingDelete = buttonByText(tree, '캘린더 삭제').props.onClick?.();
+    await new Promise<void>((resolve) => setImmediate(resolve));
+
+    assert.equal(calendarState.calendars.some((item) => item.id === editable.id), false);
+    assert.doesNotMatch(textContent(await renderRail(false)), /즉시 삭제/);
+    assert.deepEqual(settingsCachedEvents, [], 'known-calendar filtering hides deleted calendar events immediately');
+    assert.deepEqual(settingsApiCalls.map((call) => call.name), ['calendarDelete']);
+
+    resolveSettingsApiGate?.();
+    await pendingDelete;
+  });
+});
+
 test('CalendarSettingsModal edits visibility and members in permission-safe order', async (t) => {
   const shared = calendar({
     id: 'shared-settings',
@@ -2704,6 +3052,7 @@ test('CalendarSettingsModal edits visibility and members in permission-safe orde
   await t.test('an admin removing their own edit membership treats a false event reload as failure', async () => {
     resetHarness();
     settingsBflowReloadResult = false;
+    settingsBflowMetadataFresh = false;
     let tree = await renderCalendarSettingsModal(shared, 14);
     buttonByLabel(tree, '배한솔 제거').props.onClick?.();
     tree = await renderCalendarSettingsModal(shared, 14);
@@ -2719,6 +3068,22 @@ test('CalendarSettingsModal edits visibility and members in permission-safe orde
     assert.equal(settingsCloseCount, 0);
     assert.equal(settingsToastSuccesses.length, 0);
     assert.equal(settingsToastErrors.length, 1);
+  });
+
+  await t.test('fresh canonical metadata settles the mutation even when event-row refresh fails', async () => {
+    resetHarness();
+    settingsBflowReloadResult = false;
+    settingsBflowMetadataFresh = true;
+    let tree = await renderCalendarSettingsModal(shared, 14);
+    buttonByLabel(tree, '색상 #74B9FF').props.onClick?.();
+    tree = await renderCalendarSettingsModal(shared, 14);
+    await buttonByText(tree, '저장').props.onClick?.();
+
+    assert.deepEqual(settingsApiCalls.map((call) => call.name), [
+      'calendarUpdate', 'loadBflowEvents',
+    ]);
+    assert.equal(settingsCloseCount, 1, 'fresh calendar metadata is sufficient to adopt the committed update');
+    assert.equal(settingsToastErrors.length, 0);
   });
 });
 
@@ -2783,6 +3148,261 @@ test('CalendarSettingsModal confirms destructive deletion and reloads on success
   });
 });
 
+test('CalendarSettingsModal rejects handlers captured by a previous calendar actor', async (t) => {
+  await t.test('a deferred delete confirmation cannot cross an A to B session switch', async () => {
+    resetHarness();
+    const actorA = settingsCurrentUser;
+    const actorB = settingsUsers.find((user) => user.id === 'user-jang');
+    assert.ok(actorB);
+    const calendarA = calendar({
+      id: 'confirm-actor-a',
+      name: 'A 비공개 일정',
+      ownerId: actorA.id,
+      canManage: true,
+    });
+    const calendarB = calendar({
+      id: 'confirm-actor-b',
+      name: 'B 캘린더',
+      ownerId: actorB.id,
+      canManage: true,
+    });
+    settingsConfirmResponses = [true];
+    settingsConfirmGate = new Promise<void>((resolve) => {
+      resolveSettingsConfirmGate = resolve;
+    });
+    const treeA = await renderCalendarSettingsModal(calendarA, 3);
+
+    const pendingDelete = buttonByText(treeA, '캘린더 삭제').props.onClick?.();
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    assert.equal(settingsConfirmMessages.length, 1, 'the destructive prompt is actually pending');
+
+    settingsCurrentUser = actorB;
+    calendarState.calendars = [calendarB];
+    settingsCanonicalCalendars = [calendarB];
+    settingsCanonicalByActor.set(actorB.id, {
+      revision: ++settingsCanonicalRevision,
+      calendars: cloneSettingsCalendars([calendarB]),
+    });
+    stateSlots = [];
+    modalRefSlots = [];
+    await renderCalendarSettingsModal(calendarB, 0);
+
+    resolveSettingsConfirmGate?.();
+    await pendingDelete;
+
+    assert.deepEqual(settingsApiCalls, [], 'the stale A handler never invokes B-session persistence');
+    assert.equal(settingsOptimisticByActor.size, 0, 'neither actor receives a stale optimistic mutation');
+    assert.deepEqual(calendarState.calendars.map((item) => item.id), [calendarB.id]);
+    assert.deepEqual(calendarState.optimisticDeletedCalendarIds, []);
+    assert.equal(settingsPresentationRefreshCount, 0);
+    assert.equal(settingsCloseCount, 0);
+    assert.deepEqual(settingsToastErrors, []);
+    assert.deepEqual(settingsToastSuccesses, []);
+  });
+
+  await t.test('a directly invoked stale save handler is stopped at the mutation boundary', async () => {
+    resetHarness();
+    const actorB = settingsUsers.find((user) => user.id === 'user-jang');
+    assert.ok(actorB);
+    const calendarA = calendar({ id: 'stale-save-a', ownerId: settingsCurrentUser.id, canManage: true });
+    let tree = await renderCalendarSettingsModal(calendarA, 1);
+    formElementByLabel(tree, '캘린더 이름').props.onChange?.({
+      target: { value: 'A에서 준비한 수정', checked: false },
+    });
+    tree = await renderCalendarSettingsModal(calendarA, 1);
+    const staleSave = buttonByText(tree, '저장').props.onClick;
+
+    settingsCurrentUser = actorB;
+    await staleSave?.();
+
+    assert.deepEqual(settingsApiCalls, [], 'runMutation rejects the captured A actor before IPC');
+    assert.equal(settingsOptimisticByActor.size, 0);
+    assert.equal(settingsPresentationRefreshCount, 0);
+    assert.equal(settingsCloseCount, 0);
+    assert.deepEqual(settingsToastErrors, []);
+    assert.deepEqual(settingsToastSuccesses, []);
+  });
+});
+
+test('CalendarSettingsModal hides metadata immediately when an update removes the actor view permission', async (t) => {
+  await t.test('a non-owner admin switching a team calendar to private keeps only the retry modal after refresh failure', async () => {
+    resetHarness();
+    const teamCalendar = calendar({
+      id: 'admin-team-to-private',
+      name: '관리 중인 팀 캘린더',
+      ownerId: 'owner-lead',
+      visibility: 'team',
+      members: [],
+      canManage: true,
+    });
+    let tree = await renderCalendarSettingsModal(teamCalendar, 2);
+    settingsCachedEvents = [calendarListEvent({
+      id: 'private-after-update-event',
+      title: '비공개 전환 일정 제목',
+      memo: '비공개 전환 일정 메모',
+      calendarId: teamCalendar.id,
+      sourceCalendarId: `bflow:${teamCalendar.id}`,
+    })];
+    settingsApiGate = new Promise<void>((resolve) => { resolveSettingsApiGate = resolve; });
+    settingsBflowReloadResult = false;
+    settingsBflowMetadataFresh = false;
+    formElementByLabel(tree, '나만').props.onChange?.({ target: { value: 'private', checked: true } });
+    tree = await renderCalendarSettingsModal(teamCalendar, 2);
+
+    const pendingSave = buttonByText(tree, '저장').props.onClick?.();
+
+    assert.equal(calendarState.calendars.some((item) => item.id === teamCalendar.id), false);
+    assert.deepEqual(settingsCachedEvents, [], 'cached title and memo disappear before persistence settles');
+    assert.deepEqual(calendarState.optimisticDeletedCalendarIds, [teamCalendar.id]);
+    assert.equal(settingsCloseCount, 0, 'the matching settings modal remains as the retry surface');
+
+    resolveSettingsApiGate?.();
+    await pendingSave;
+
+    assert.deepEqual(settingsApiCalls.map((call) => call.name), ['calendarUpdate', 'loadBflowEvents']);
+    assert.equal(calendarState.calendars.some((item) => item.id === teamCalendar.id), false);
+    assert.deepEqual(calendarState.optimisticDeletedCalendarIds, [teamCalendar.id]);
+    assert.equal(settingsCloseCount, 0);
+    assert.equal(settingsToastErrors.length, 1);
+  });
+
+  await t.test('a non-owner admin removing their own member row stays hidden through ambiguous response loss', async () => {
+    resetHarness();
+    const membersCalendar = calendar({
+      id: 'admin-member-self-removal',
+      name: '멤버 전용 캘린더',
+      ownerId: 'owner-lead',
+      visibility: 'members',
+      members: [
+        { userId: myUserId, canEdit: true },
+        { userId: 'user-jang', canEdit: false },
+      ],
+      canManage: true,
+    });
+    let tree = await renderCalendarSettingsModal(membersCalendar, 2);
+    settingsCachedEvents = [calendarListEvent({
+      id: 'member-removal-event',
+      title: '제거 뒤 숨길 제목',
+      memo: '제거 뒤 숨길 메모',
+      calendarId: membersCalendar.id,
+      sourceCalendarId: `bflow:${membersCalendar.id}`,
+    })];
+    settingsApiFailures.add('calendarUpdate');
+    settingsCanonicalCalendarsAfterReload = calendarState.calendars.map((item) => (
+      item.id === membersCalendar.id
+        ? {
+            ...item,
+            members: [
+              { userId: myUserId, canEdit: false },
+              { userId: 'user-jang', canEdit: false },
+            ],
+          }
+        : { ...item, members: item.members.map((member) => ({ ...member })) }
+    ));
+    buttonByLabel(tree, '배한솔 제거').props.onClick?.();
+    tree = await renderCalendarSettingsModal(membersCalendar, 2);
+
+    await buttonByText(tree, '저장').props.onClick?.();
+
+    assert.deepEqual(settingsApiCalls.map((call) => call.name), ['calendarUpdate', 'loadBflowEvents']);
+    assert.equal(calendarState.calendars.some((item) => item.id === membersCalendar.id), false);
+    assert.deepEqual(settingsCachedEvents, []);
+    assert.deepEqual(calendarState.optimisticDeletedCalendarIds, [membersCalendar.id]);
+    assert.equal(settingsCloseCount, 0, 'ambiguous canonical metadata keeps the safe hidden retry surface');
+    assert.equal(settingsToastErrors.length, 1);
+  });
+
+  await t.test('independent canonical revocation cannot confirm a response-lost metadata update', async () => {
+    resetHarness();
+    const membersCalendar = calendar({
+      id: 'admin-member-confirmed-removal',
+      name: '제3자 회수 전 이름',
+      ownerId: 'owner-lead',
+      visibility: 'members',
+      members: [{ userId: myUserId, canEdit: true }],
+      canManage: true,
+    });
+    let tree = await renderCalendarSettingsModal(membersCalendar, 1);
+    settingsApiFailures.add('calendarUpdate');
+    settingsCanonicalCalendarsAfterReload = calendarState.calendars
+      .filter((item) => item.id !== membersCalendar.id)
+      .map((item) => ({ ...item, members: item.members.map((member) => ({ ...member })) }));
+    formElementByLabel(tree, '캘린더 이름').props.onChange?.({
+      target: { value: '응답 유실 중 보낸 이름', checked: false },
+    });
+    buttonByLabel(tree, '배한솔 제거').props.onClick?.();
+    tree = await renderCalendarSettingsModal(membersCalendar, 1);
+
+    await buttonByText(tree, '저장').props.onClick?.();
+
+    assert.deepEqual(settingsApiCalls[0], {
+      name: 'calendarUpdate',
+      args: [membersCalendar.id, { name: '응답 유실 중 보낸 이름', members: [] }],
+    });
+    assert.equal(
+      settingsCloseCount,
+      0,
+      'target absence proves revocation, not that the independently failed name and member write committed',
+    );
+    assert.deepEqual(calendarState.optimisticDeletedCalendarIds, [membersCalendar.id]);
+    assert.equal(settingsToastErrors.length, 1);
+    assert.deepEqual(settingsToastSuccesses, []);
+  });
+
+  await t.test('team visibility and calendar ownership keep presentation visible', async () => {
+    resetHarness();
+    const nonOwnerTeam = calendar({
+      id: 'admin-stays-team',
+      name: '팀 유지 전',
+      ownerId: 'owner-lead',
+      visibility: 'team',
+      members: [],
+      canManage: true,
+    });
+    let tree = await renderCalendarSettingsModal(nonOwnerTeam, 1);
+    settingsCachedEvents = [calendarListEvent({
+      id: 'team-stays-visible-event',
+      calendarId: nonOwnerTeam.id,
+      sourceCalendarId: `bflow:${nonOwnerTeam.id}`,
+    })];
+    settingsApiGate = new Promise<void>((resolve) => { resolveSettingsApiGate = resolve; });
+    formElementByLabel(tree, '캘린더 이름').props.onChange?.({ target: { value: '팀 유지 후', checked: false } });
+    tree = await renderCalendarSettingsModal(nonOwnerTeam, 1);
+    const pendingTeamSave = buttonByText(tree, '저장').props.onClick?.();
+
+    assert.ok(calendarState.calendars.some((item) => item.id === nonOwnerTeam.id));
+    assert.equal(settingsCachedEvents.length, 1);
+    assert.deepEqual(calendarState.optimisticDeletedCalendarIds, []);
+    resolveSettingsApiGate?.();
+    await pendingTeamSave;
+
+    resetHarness();
+    const ownerCalendar = calendar({
+      id: 'owner-stays-visible',
+      ownerId: myUserId,
+      visibility: 'team',
+      members: [],
+      canManage: true,
+    });
+    tree = await renderCalendarSettingsModal(ownerCalendar, 1);
+    settingsCachedEvents = [calendarListEvent({
+      id: 'owner-private-visible-event',
+      calendarId: ownerCalendar.id,
+      sourceCalendarId: `bflow:${ownerCalendar.id}`,
+    })];
+    settingsApiGate = new Promise<void>((resolve) => { resolveSettingsApiGate = resolve; });
+    formElementByLabel(tree, '나만').props.onChange?.({ target: { value: 'private', checked: true } });
+    tree = await renderCalendarSettingsModal(ownerCalendar, 1);
+    const pendingOwnerSave = buttonByText(tree, '저장').props.onClick?.();
+
+    assert.ok(calendarState.calendars.some((item) => item.id === ownerCalendar.id));
+    assert.equal(settingsCachedEvents.length, 1);
+    assert.deepEqual(calendarState.optimisticDeletedCalendarIds, []);
+    resolveSettingsApiGate?.();
+    await pendingOwnerSave;
+  });
+});
+
 test('CalendarSettingsModal reconciles confirmed commits and ambiguous response loss without duplicate mutations', async (t) => {
   await t.test('a committed create with a failed reload survives remount and cannot be submitted twice', async () => {
     resetHarness();
@@ -2791,6 +3411,10 @@ test('CalendarSettingsModal reconciles confirmed commits and ambiguous response 
     formElementByLabel(tree, '캘린더 이름').props.onChange?.({ target: { value: '재시도 캘린더', checked: false } });
     tree = await renderCalendarSettingsModal();
     await buttonByText(tree, '저장').props.onClick?.();
+    assert.ok(
+      calendarState.calendars.some((item) => item.name === '재시도 캘린더'),
+      'an unavailable refresh keeps the safe optimistic placeholder while the duplicate-write latch is active',
+    );
 
     assert.deepEqual(settingsApiCalls.map((call) => call.name), ['calendarCreate', 'loadAll']);
     assert.equal(settingsCloseCount, 0);
@@ -2853,6 +3477,7 @@ test('CalendarSettingsModal reconciles confirmed commits and ambiguous response 
     const calendarA = calendar({ id: 'actor-a-calendar', ownerId: actorA.id, canManage: true });
     const calendarB = calendar({ id: 'actor-b-calendar', ownerId: actorB.id, canManage: true });
     settingsBflowReloadResult = false;
+    settingsBflowMetadataFresh = false;
     let tree = await renderCalendarSettingsModal(calendarA, 1, () => { closeCalls.push('A'); });
     buttonByLabel(tree, '색상 #74B9FF').props.onClick?.();
     tree = await renderCalendarSettingsModal(calendarA, 1, () => { closeCalls.push('A'); });
@@ -2861,6 +3486,7 @@ test('CalendarSettingsModal reconciles confirmed commits and ambiguous response 
 
     settingsCurrentUser = actorB;
     settingsBflowReloadResult = true;
+    settingsBflowMetadataFresh = true;
     stateSlots = [];
     modalRefSlots = [];
     tree = await renderCalendarSettingsModal(calendarB, 1, () => { closeCalls.push('B'); });
@@ -2969,6 +3595,10 @@ test('CalendarSettingsModal reconciles confirmed commits and ambiguous response 
     formElementByLabel(tree, '캘린더 이름').props.onChange?.({ target: { value: '모호한 캘린더', checked: false } });
     tree = await renderCalendarSettingsModal();
     await buttonByText(tree, '저장').props.onClick?.();
+    assert.ok(
+      calendarState.calendars.some((item) => item.name === '모호한 캘린더'),
+      'an unavailable refresh keeps the safe optimistic placeholder while the duplicate-write latch is active',
+    );
 
     stateSlots = [];
     modalRefSlots = [];
@@ -2979,7 +3609,7 @@ test('CalendarSettingsModal reconciles confirmed commits and ambiguous response 
     assert.equal(settingsApiCalls.filter((call) => call.name === 'calendarCreate').length, 1);
 
     settingsMetadataFreshness = { calendarsFresh: true, tagsFresh: true };
-    settingsCanonicalCalendarsAfterReload = calendarState.calendars.map((item) => ({
+    settingsCanonicalCalendarsAfterReload = settingsCanonicalCalendars.map((item) => ({
       ...item,
       members: item.members.map((member) => ({ ...member })),
     }));
@@ -2991,6 +3621,11 @@ test('CalendarSettingsModal reconciles confirmed commits and ambiguous response 
       false,
     );
     assert.equal(buttonByText(tree, '저장').props.disabled, false, 'only the explicit canonical retry unlocks creation');
+    assert.equal(
+      calendarState.calendars.some((item) => item.name === '모호한 캘린더'),
+      false,
+      'a fresh no-commit proof restores canonical metadata and removes the placeholder',
+    );
   });
 
   await t.test('an update response loss closes when fresh target fields and normalized members exactly match', async () => {

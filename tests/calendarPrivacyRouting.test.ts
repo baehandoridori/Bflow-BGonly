@@ -794,6 +794,117 @@ test('fresh preview seeds four visible calendars, four tags, and fifteen current
   }
 });
 
+test('preview event creation enforces UUID-backed tag references atomically', async () => {
+  const harness = await createPreviewCalendarHarness();
+  try {
+    await previewLogin(harness.api, '배한솔');
+    const calendar = (await harness.api.calendarList()).find(({ can_edit }) => can_edit);
+    assert.ok(calendar);
+    const [knownTag] = await harness.api.calendarTagsList();
+    assert.ok(knownTag);
+    const unchanged = await harness.api.calendarEventsList();
+
+    await assert.rejects(
+      harness.api.calendarEventCreate({
+        ...previewEventInput(calendar.id, '잘못된 UUID 생성'),
+        tag_id: 'not-a-uuid',
+      }),
+      /UUID/,
+    );
+    assert.deepEqual(await harness.api.calendarEventsList(), unchanged);
+
+    await assert.rejects(
+      harness.api.calendarEventCreate({
+        ...previewEventInput(calendar.id, '없는 태그 생성'),
+        tag_id: UNKNOWN_TAG_UUID,
+      }),
+      /존재하지 않는 태그/,
+    );
+    assert.deepEqual(await harness.api.calendarEventsList(), unchanged);
+
+    const nullTagged = await harness.api.calendarEventCreate(
+      previewEventInput(calendar.id, 'null 태그 생성'),
+    );
+    assert.equal(nullTagged.tag_id, null);
+
+    const omittedTagInput = previewEventInput(calendar.id, '생략 태그 생성');
+    delete (omittedTagInput as Partial<typeof omittedTagInput>).tag_id;
+    const omittedTagged = await harness.api.calendarEventCreate(omittedTagInput);
+    assert.equal(omittedTagged.tag_id, null, '생략된 tag_id는 DB처럼 null로 저장한다');
+
+    const knownTagged = await harness.api.calendarEventCreate({
+      ...previewEventInput(calendar.id, '유효한 태그 생성'),
+      tag_id: knownTag.id,
+    });
+    assert.equal(knownTagged.tag_id, knownTag.id);
+    assert.equal(
+      (await harness.api.calendarEventsList()).find(({ id }) => id === knownTagged.id)?.tag_id,
+      knownTag.id,
+    );
+  } finally {
+    harness.restore();
+  }
+});
+
+test('preview event update enforces current UUID-backed tag references atomically', async () => {
+  const harness = await createPreviewCalendarHarness();
+  try {
+    await previewLogin(harness.api, '배한솔');
+    const calendar = (await harness.api.calendarList()).find(({ can_edit }) => can_edit);
+    assert.ok(calendar);
+    const tags = await harness.api.calendarTagsList();
+    const [deletedTag, knownTag] = tags;
+    assert.ok(deletedTag);
+    assert.ok(knownTag);
+    const event = await harness.api.calendarEventCreate(
+      previewEventInput(calendar.id, '태그 수정 대상'),
+    );
+    const unchanged = await harness.api.calendarEventsList();
+
+    await assert.rejects(
+      harness.api.calendarEventUpdate(event.id, {
+        title: '적용되면 안 됨',
+        tag_id: 'not-a-uuid',
+      }),
+      /UUID/,
+    );
+    assert.deepEqual(await harness.api.calendarEventsList(), unchanged);
+
+    await assert.rejects(
+      harness.api.calendarEventUpdate(event.id, {
+        title: '없는 태그로 변경',
+        tag_id: UNKNOWN_TAG_UUID,
+      }),
+      /존재하지 않는 태그/,
+    );
+    assert.deepEqual(await harness.api.calendarEventsList(), unchanged);
+
+    await harness.api.calendarTagsSave(
+      tags
+        .filter(({ id }) => id !== deletedTag.id)
+        .map(({ id, name, color, sort_order }) => ({ id, name, color, sort_order })),
+    );
+    const afterDeletion = await harness.api.calendarEventsList();
+    await assert.rejects(
+      harness.api.calendarEventUpdate(event.id, {
+        title: '삭제된 태그로 변경',
+        tag_id: deletedTag.id,
+      }),
+      /존재하지 않는 태그/,
+    );
+    assert.deepEqual(await harness.api.calendarEventsList(), afterDeletion);
+
+    const knownTagged = await harness.api.calendarEventUpdate(event.id, { tag_id: knownTag.id });
+    assert.equal(knownTagged.tag_id, knownTag.id);
+    const omittedTagged = await harness.api.calendarEventUpdate(event.id, { title: '태그 유지' });
+    assert.equal(omittedTagged.tag_id, knownTag.id);
+    const cleared = await harness.api.calendarEventUpdate(event.id, { tag_id: null });
+    assert.equal(cleared.tag_id, null);
+  } finally {
+    harness.restore();
+  }
+});
+
 test('preview generates a UUID-backed personal calendar for a user without a seeded one', async () => {
   const harness = await createPreviewCalendarHarness();
   try {

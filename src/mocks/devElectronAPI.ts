@@ -85,6 +85,17 @@ type MockPrivacyReplacementTarget =
 const mockPrivacyReplacementReceipts = new Map<string, MockPrivacyReplacementTarget>();
 const mockCalendarTags: MockCalendarTagRow[] = devCalendarSeed.tags;
 
+function normalizeMockCalendarEventTagId(tagId: unknown): string | null {
+  if (tagId === undefined || tagId === null) return null;
+  if (typeof tagId !== 'string' || !CALENDAR_TAG_UUID_PATTERN.test(tagId)) {
+    throw new Error('태그 ID는 UUID여야 합니다');
+  }
+  if (!mockCalendarTags.some(({ id }) => id === tagId)) {
+    throw new Error('존재하지 않는 태그입니다');
+  }
+  return tagId;
+}
+
 function requireMockCalendarUser(): PreviewUser {
   const user = previewCanonicalUserId
     ? getMockUsers().find((candidate) => candidate.id === previewCanonicalUserId)
@@ -178,9 +189,11 @@ function requireMockCalendarEventWrite(calendarId: string, userId: string): Mock
 
 function createMockCalendarEvent(input: MockCalendarEventCreateInput, userId: string): MockCalendarEventRow {
   requireMockCalendarEventWrite(input.calendar_id, userId);
+  const tagId = normalizeMockCalendarEventTagId(input.tag_id);
   const now = new Date().toISOString();
   const created: MockCalendarEventRow = {
     ...input,
+    tag_id: tagId,
     id: createUuid(),
     created_by: userId,
     created_at: now,
@@ -1440,12 +1453,15 @@ export function installDevElectronAPI(): void {
       if (updates.calendar_id !== undefined && updates.calendar_id !== event.calendar_id) {
         requireMockCalendarEventWrite(updates.calendar_id, user.id);
       }
+      const normalizedUpdates = updates.tag_id === undefined
+        ? updates
+        : { ...updates, tag_id: normalizeMockCalendarEventTagId(updates.tag_id) };
       const immutableFields = {
         id: event.id,
         created_by: event.created_by,
         created_at: event.created_at,
       };
-      Object.assign(event, updates, immutableFields, { updated_at: new Date().toISOString() });
+      Object.assign(event, normalizedUpdates, immutableFields, { updated_at: new Date().toISOString() });
       return { ...event };
     },
     calendarEventDelete: async (id) => {
