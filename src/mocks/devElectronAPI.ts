@@ -22,6 +22,7 @@ import type { MarketRemoteState, MarketSnapshot } from '@/features/playground/ma
 import { createArcadeLocalStorageGateway } from '@/features/playground/arcade/localStorageGateway';
 import type { ArcadePreviewGateway } from '@/features/playground/arcade/previewGateway';
 import { useArcadeStore } from '@/features/playground/arcade/useArcadeStore';
+import { createDevCalendarSeed } from './devCalendarSeed';
 import {
   canCreateCalendar,
   canEditCalendarEvents,
@@ -72,20 +73,16 @@ type MockCalendarTagRow = Awaited<ReturnType<ElectronAPI['calendarTagsList']>>[n
 type MockCalendarMemberRow = { calendar_id: string; user_id: string; can_edit: boolean };
 type MockCalendarEventCreateInput = Parameters<ElectronAPI['calendarEventCreate']>[0];
 
-const mockCalendars: MockCalendarRow[] = [];
-const mockCalendarEvents: MockCalendarEventRow[] = [];
-const mockCalendarMembers: MockCalendarMemberRow[] = [];
+const devCalendarSeed = createDevCalendarSeed();
+const mockCalendars: MockCalendarRow[] = devCalendarSeed.calendars;
+const mockCalendarEvents: MockCalendarEventRow[] = devCalendarSeed.events;
+const mockCalendarMembers: MockCalendarMemberRow[] = devCalendarSeed.members;
 type MockPrivacyReplacementTarget =
   | { storage: 'bflow'; actualId: string; calendarId: string }
   | { storage: 'legacy-private'; actualId: string }
   | { storage: 'google'; actualId: string; calendarId: string };
 const mockPrivacyReplacementReceipts = new Map<string, MockPrivacyReplacementTarget>();
-const mockCalendarTags: MockCalendarTagRow[] = [
-  { id: 'tag-upload', name: '업로드', color: '#E17055', sort_order: 0 },
-  { id: 'tag-cut', name: '가편', color: '#74B9FF', sort_order: 1 },
-  { id: 'tag-script', name: '대본', color: '#FDCB6E', sort_order: 2 },
-  { id: 'tag-meeting', name: '회의', color: '#A29BFE', sort_order: 3 },
-];
+const mockCalendarTags: MockCalendarTagRow[] = devCalendarSeed.tags;
 
 function requireMockCalendarUser(): PreviewUser {
   const user = previewCanonicalUserId

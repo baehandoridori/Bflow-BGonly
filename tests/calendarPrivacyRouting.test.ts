@@ -38,6 +38,13 @@ type CalendarEventRow = {
   updated_at: string;
 };
 
+type CalendarTagRow = {
+  id: string;
+  name: string;
+  color: string;
+  sort_order: number;
+};
+
 type ServiceModule = {
   loadBflowEvents(): Promise<void>;
   syncAll(options?: { broadcast?: boolean; skipBflowLoad?: boolean }): Promise<Array<Record<string, unknown>>>;
@@ -63,6 +70,7 @@ type PreviewCalendarApi = {
   calendarSetMembers(calendarId: string, members: Array<{ user_id: string; can_edit: boolean }>): Promise<void>;
   calendarEventCreate(input: Omit<CalendarEventRow, 'id' | 'created_by' | 'created_at' | 'updated_at'>): Promise<CalendarEventRow>;
   calendarEventsList(params?: { from?: string; to?: string }): Promise<CalendarEventRow[]>;
+  calendarTagsList(): Promise<CalendarTagRow[]>;
   calendarEventUpdate(
     id: string,
     updates: Partial<Omit<CalendarEventRow, 'id' | 'created_by' | 'created_at' | 'updated_at'>>,
@@ -720,9 +728,31 @@ test('unauthenticated preview rejects a Google replacement and keeps the persona
       rememberMe: false,
     })).ok, true);
     assert.deepEqual(
-      (await harness.api.calendarEventsList()).map(({ id, title }) => ({ id, title })),
-      [{ id: source.id, title: '보존할 나만 보기 일정' }],
+      (await harness.api.calendarEventsList()).find(({ id }) => id === source.id),
+      source,
     );
+  } finally {
+    harness.restore();
+  }
+});
+
+test('fresh preview seeds four visible calendars, four tags, and fifteen current-month events for 배한솔', async () => {
+  const harness = await createPreviewCalendarHarness();
+  try {
+    await previewLogin(harness.api, '배한솔');
+    const now = new Date();
+    const yearMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+
+    const calendars = await harness.api.calendarList();
+    assert.equal(calendars.length, 4);
+    assert.equal((await harness.api.calendarTagsList()).length, 4);
+    assert.equal((await harness.api.calendarEventsList({
+      from: `${yearMonth}-01`,
+      to: `${yearMonth}-31`,
+    })).length, 15);
+    assert.equal(calendars.find(({ id }) => id === 'cal-notice')?.can_edit, false);
+    assert.equal(calendars.find(({ id }) => id === 'cal-milestone')?.can_edit, true);
+    assert.equal(calendars.find(({ id }) => id === 'cal-leads')?.can_edit, true);
   } finally {
     harness.restore();
   }
@@ -781,8 +811,8 @@ test('preview member replacement keeps viewer reads while revoking writes, then 
     assert.equal(viewerCalendar?.can_edit, false);
     assert.equal(viewerCalendar?.can_manage, false);
     assert.deepEqual(
-      (await harness.api.calendarEventsList()).map(({ id, title }) => ({ id, title })),
-      [{ id: event.id, title: '읽기 전용 일정' }],
+      (await harness.api.calendarEventsList()).find(({ id }) => id === event.id),
+      event,
     );
     await assert.rejects(
       harness.api.calendarEventCreate(previewEventInput(calendar.id, '금지된 생성')),
