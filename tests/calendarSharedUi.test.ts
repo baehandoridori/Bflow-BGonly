@@ -200,6 +200,9 @@ let scheduleCanonicalEvents: ScheduleCalendarEvent[] = [];
 let scheduleUpdateCalls: Array<{ id: string; updates: Partial<ScheduleCalendarEvent> }> = [];
 let scheduleAddedEvents: ScheduleCalendarEvent[] = [];
 let scheduleGetEventsCalls = 0;
+let schedulePendingEffects: Array<() => void | (() => void)> = [];
+let scheduleLoadAllCalls = 0;
+let scheduleLoadBflowEventsCalls = 0;
 let settingsCurrentUser: TestUser;
 let settingsUsers: TestUser[] = [];
 let settingsApiCalls: Array<{ name: string; args: unknown[] }> = [];
@@ -352,6 +355,9 @@ function resetHarness(): void {
   scheduleUpdateCalls = [];
   scheduleAddedEvents = [];
   scheduleGetEventsCalls = 0;
+  schedulePendingEffects = [];
+  scheduleLoadAllCalls = 0;
+  scheduleLoadBflowEventsCalls = 0;
   settingsCurrentUser = {
     id: myUserId,
     name: '배한솔',
@@ -674,7 +680,10 @@ async function loadScheduleView(): Promise<ScheduleViewComponent> {
                 : next;
             }];
           },
-          useEffect: () => {}, useMemo: (factory: () => unknown) => factory(), useCallback: (fn: unknown) => fn,
+          useEffect(effect: () => void | (() => void)) {
+            schedulePendingEffects.push(effect);
+          },
+          useMemo: (factory: () => unknown) => factory(), useCallback: (fn: unknown) => fn,
           useRef: (initial: unknown) => ({ current: initial }),
         };
       }
@@ -693,7 +702,10 @@ async function loadScheduleView(): Promise<ScheduleViewComponent> {
           return scheduleCanonicalEvents;
         },
         isGoogleCacheReady: () => true,
-        loadBflowEvents: async () => {},
+        loadBflowEvents: async () => {
+          scheduleLoadBflowEventsCalls += 1;
+          return true;
+        },
         addEvent: async (event: ScheduleCalendarEvent) => { scheduleAddedEvents.push(event); },
         updateEvent: async (id: string, updates: Partial<ScheduleCalendarEvent>) => { scheduleUpdateCalls.push({ id, updates }); },
         deleteEvent: async () => {},
@@ -738,7 +750,15 @@ async function loadScheduleView(): Promise<ScheduleViewComponent> {
       if (id === '@/stores/useCalendarStore') {
         const useCalendarStore = Object.assign(
           (selector: (state: typeof calendarState) => unknown) => selector(calendarState),
-          { getState: () => ({ ...calendarState, loadAll: async () => {} }) },
+          {
+            getState: () => ({
+              ...calendarState,
+              async loadAll() {
+                scheduleLoadAllCalls += 1;
+                return { calendarsFresh: true, tagsFresh: true };
+              },
+            }),
+          },
         );
         return { useCalendarStore };
       }
@@ -758,6 +778,14 @@ async function loadScheduleView(): Promise<ScheduleViewComponent> {
       if (id.startsWith('@/components/calendar/')) return Object.fromEntries([[id.split('/').at(-1)?.replace(/\.tsx$/, ''), emptyComponent]]);
       return nodeRequire(id);
     }, module, module.exports);
+    Object.assign(globalThis, {
+      document: { addEventListener() {}, removeEventListener() {} },
+      window: {
+        addEventListener() {},
+        removeEventListener() {},
+        electronAPI: { async gcalIsAuthenticated() { return false; } },
+      },
+    });
     return module.exports.ScheduleView as ScheduleViewComponent;
   });
   return bundledScheduleView;
@@ -1152,6 +1180,17 @@ async function renderScheduleView(): Promise<ReactNode> {
   return resolveComponents(ScheduleView());
 }
 
+async function flushScheduleMountEffects(): Promise<void> {
+  const effects = schedulePendingEffects.splice(0);
+  const cleanups: Array<() => void> = [];
+  for (const effect of effects) {
+    const cleanup = effect();
+    if (typeof cleanup === 'function') cleanups.push(cleanup);
+  }
+  await new Promise<void>((resolve) => setImmediate(resolve));
+  for (const cleanup of cleanups.reverse()) cleanup();
+}
+
 async function renderCalendarGrid(events: ScheduleCalendarEvent[]): Promise<ReactNode> {
   const CalendarGrid = await loadCalendarGrid();
   stateSlots = [];
@@ -1524,6 +1563,15 @@ test('TagManagerPopover gives non-admins the same tag list as a read-only view',
   for (const forbidden of ['검수 태그 편집', '검수 태그 삭제', '검수 태그 아래로']) {
     assert.equal(findButtons(tree).some((button) => button.props['aria-label'] === forbidden), false);
   }
+});
+
+test('ScheduleView mount delegates B flow metadata and events through one canonical loader', async () => {
+  resetHarness();
+  await renderScheduleView();
+  await flushScheduleMountEffects();
+
+  assert.equal(scheduleLoadBflowEventsCalls, 1, 'the canonical B flow loader runs exactly once on mount');
+  assert.equal(scheduleLoadAllCalls, 0, 'ScheduleView must not start a competing direct metadata generation');
 });
 
 test('ScheduleView replaces legacy controls with the tag bar and reports visible rail calendars', async () => {

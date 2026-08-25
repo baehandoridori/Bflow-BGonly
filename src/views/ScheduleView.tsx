@@ -123,10 +123,6 @@ export function ScheduleView() {
   const googleVisible = visibleCalendarIds[GOOGLE_CALENDAR_ID] !== false;
 
   useEffect(() => {
-    void useCalendarStore.getState().loadAll();
-  }, []);
-
-  useEffect(() => {
     let cancelled = false;
     const refreshGoogleAuthentication = async () => {
       try {
