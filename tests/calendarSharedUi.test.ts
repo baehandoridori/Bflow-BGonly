@@ -69,6 +69,11 @@ type FormElement = ReactElement<{
 const myUserId = 'user-me';
 let stateSlots: unknown[] = [];
 let stateCursor = 0;
+let modalRefSlots: Array<{ current: unknown }> = [];
+let modalRefCursor = 0;
+let modalEffectDeps: Array<readonly unknown[] | undefined> = [];
+let modalEffectCursor = 0;
+let pendingModalEffects: Array<() => void> = [];
 let calendarState: {
   calendars: BflowCalendar[];
   tags: Array<{ id: string; name: string; color: string; sortOrder: number }>;
@@ -178,6 +183,11 @@ function calendar(overrides: Partial<BflowCalendar>): BflowCalendar {
 function resetHarness(): void {
   stateSlots = [];
   stateCursor = 0;
+  modalRefSlots = [];
+  modalRefCursor = 0;
+  modalEffectDeps = [];
+  modalEffectCursor = 0;
+  pendingModalEffects = [];
   openedSettings = [];
   createdCount = 0;
   appViews = [];
@@ -399,9 +409,23 @@ async function loadEventCreateModal(): Promise<EventCreateModalComponent> {
               stateSlots[slot] = typeof next === 'function'
                 ? (next as (value: unknown) => unknown)(stateSlots[slot])
                 : next;
-            }];
+              }];
           },
-          useEffect: () => {},
+          useRef(initial: unknown) {
+            const slot = modalRefCursor++;
+            modalRefSlots[slot] ??= { current: initial };
+            return modalRefSlots[slot];
+          },
+          useEffect(effect: () => void, deps?: readonly unknown[]) {
+            const slot = modalEffectCursor++;
+            const previous = modalEffectDeps[slot];
+            const changed = deps === undefined
+              || previous === undefined
+              || deps.length !== previous.length
+              || deps.some((value, index) => !Object.is(value, previous[index]));
+            modalEffectDeps[slot] = deps;
+            if (changed) pendingModalEffects.push(effect);
+          },
           useMemo: (factory: () => unknown) => factory(),
         };
       }
@@ -451,6 +475,8 @@ async function renderEventCreateModal(
 ): Promise<ReactNode> {
   const EventCreateModal = await loadEventCreateModal();
   stateCursor = 0;
+  modalRefCursor = 0;
+  modalEffectCursor = 0;
   return resolveComponents(EventCreateModal({
     initialDate,
     initialEndDate: initialDate,
@@ -459,6 +485,11 @@ async function renderEventCreateModal(
     onClose() {},
     onSave,
   }));
+}
+
+function flushEventCreateEffects(): void {
+  const effects = pendingModalEffects.splice(0);
+  for (const effect of effects) effect();
 }
 
 test('CalendarRail renders four grouped sections and drives visibility, menu permissions, callbacks, and Google settings navigation', async () => {
@@ -642,4 +673,57 @@ test('EventCreateModal routes Google without a calendar ID and clears the disabl
   assert.equal(saved[0].allDay, true);
   assert.equal(saved[0].startTime, undefined);
   assert.equal(saved[0].endTime, undefined);
+});
+
+test('EventCreateModal replaces only an untouched Google fallback when the personal calendar loads later', async () => {
+  resetHarness();
+  const loadedCalendars = calendarState.calendars;
+  calendarState.calendars = [];
+
+  let tree = await renderEventCreateModal(true, () => {});
+  assert.equal(formElementByLabel(tree, '캘린더').props.value, 'google', 'Google is the temporary empty-store fallback');
+  flushEventCreateEffects();
+
+  calendarState.calendars = loadedCalendars;
+  tree = await renderEventCreateModal(true, () => {});
+  assert.equal(formElementByLabel(tree, '캘린더').props.value, 'google', 'the loading render still exposes the prior selection');
+  flushEventCreateEffects();
+  tree = await renderEventCreateModal(true, () => {});
+  assert.equal(formElementByLabel(tree, '캘린더').props.value, 'mine', 'the first loaded personal calendar replaces the untouched fallback');
+
+  flushEventCreateEffects();
+  tree = await renderEventCreateModal(true, () => {});
+  assert.equal(formElementByLabel(tree, '캘린더').props.value, 'mine', 'the correction stabilizes after one state transition');
+});
+
+test('EventCreateModal never overwrites an explicit Google or shared-calendar choice during later calendar loads', async (t) => {
+  await t.test('explicit Google choice', async () => {
+    resetHarness();
+    const loadedCalendars = calendarState.calendars;
+    calendarState.calendars = [];
+    let tree = await renderEventCreateModal(true, () => {});
+    formElementByLabel(tree, '캘린더').props.onChange?.({ target: { value: 'google', checked: false } });
+    flushEventCreateEffects();
+
+    calendarState.calendars = loadedCalendars;
+    await renderEventCreateModal(true, () => {});
+    flushEventCreateEffects();
+    tree = await renderEventCreateModal(true, () => {});
+    assert.equal(formElementByLabel(tree, '캘린더').props.value, 'google');
+  });
+
+  await t.test('explicit shared-calendar choice', async () => {
+    resetHarness();
+    const personal = calendarState.calendars.find((item) => item.id === 'mine');
+    assert.ok(personal);
+    calendarState.calendars = calendarState.calendars.filter((item) => item.id !== 'mine');
+    let tree = await renderEventCreateModal(true, () => {});
+    formElementByLabel(tree, '캘린더').props.onChange?.({ target: { value: 'editable-share', checked: false } });
+
+    calendarState.calendars = [personal, ...calendarState.calendars];
+    await renderEventCreateModal(true, () => {});
+    flushEventCreateEffects();
+    tree = await renderEventCreateModal(true, () => {});
+    assert.equal(formElementByLabel(tree, '캘린더').props.value, 'editable-share');
+  });
 });

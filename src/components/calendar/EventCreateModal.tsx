@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { motion } from 'framer-motion';
 import { CalendarDays, X } from 'lucide-react';
 import { cn } from '@/utils/cn';
@@ -64,6 +64,7 @@ export function EventCreateModal({ initialDate, initialEndDate, episodes, google
   const [linkedEp, setLinkedEp] = useState<number | ''>('');
   const [linkedPart, setLinkedPart] = useState('');
   const [linkedScene, setLinkedScene] = useState('');
+  const userSelectedCalendarRef = useRef(false);
 
   const isGoogle = selectedCalendarId === GOOGLE_CALENDAR_OPTION;
   const selectedCalendar = editableCalendars.find((calendar) => calendar.id === selectedCalendarId);
@@ -78,7 +79,12 @@ export function EventCreateModal({ initialDate, initialEndDate, episodes, google
     const available = isGoogle
       ? googleAuthenticated
       : editableCalendars.some((calendar) => calendar.id === selectedCalendarId);
-    if (!available && defaultCalendarId) setSelectedCalendarId(defaultCalendarId);
+    const untouchedGoogleFallback = !userSelectedCalendarRef.current
+      && isGoogle
+      && defaultCalendarId !== GOOGLE_CALENDAR_OPTION;
+    if ((!available || untouchedGoogleFallback) && defaultCalendarId) {
+      setSelectedCalendarId(defaultCalendarId);
+    }
   }, [defaultCalendarId, editableCalendars, googleAuthenticated, isGoogle, selectedCalendarId]);
 
   useEffect(() => {
@@ -107,6 +113,7 @@ export function EventCreateModal({ initialDate, initialEndDate, episodes, google
   }, [episodeTitles, episodes, evType, linkedEp, linkedPart, linkedScene, selectedEpParts]);
 
   const changeCalendar = (calendarId: string) => {
+    userSelectedCalendarRef.current = true;
     setSelectedCalendarId(calendarId);
     if (calendarId === GOOGLE_CALENDAR_OPTION) setTagId(undefined);
   };
