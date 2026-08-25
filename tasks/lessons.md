@@ -593,3 +593,20 @@ PR #116 에서 12 라운드 (P1×3, P2×6, P3×2) 끝에 silent-done. Monitor �
 - 자동 제목·placeholder는 표시 상태일 뿐 저장 완결성의 증거로 사용하지 않는다.
 - 연결형 일정은 현재 episode → part → scene 목록의 실제 membership을 단계별로 검증하고, 버튼 활성화와 submit handler가 동일한 gate를 재사용한다.
 - truthy ID만 확인하지 말고 옵션 목록이 갱신되어 stale 선택이 사라진 경우도 저장 직전에 차단한다.
+
+---
+
+## 2026-08-26: Realtime 재연결은 이벤트 재생이 아니라 정본 재조회 경계다
+
+### 증상
+
+- Realtime이 끊긴 동안 멤버 권한이 회수되거나 비공개 일정이 바뀌면, 재가입 뒤에도 누락된 `postgres_changes`는 자동 재생되지 않았다.
+- 메인 화면의 일반 `loadData()`는 공유 캘린더 event cache를 갱신하지 않았고, 팝업 위젯은 재연결 상태 자체를 구독하지 않아 접근 불가 일정이 화면에 남을 수 있었다.
+- 최초 join과 reconnect가 같은 `SUBSCRIBED` 문자열이라 renderer가 구독 횟수만으로 구분하면 초기 연결 실패나 SDK의 같은 채널 auto-rejoin을 놓칠 수 있었다.
+
+### 교훈
+
+- Realtime 상태의 정본인 구독 계층이 최초 join과 단절 뒤 join을 구분해 row-free metadata로 전달한다. 오류·타임아웃·종료 뒤 다음 `SUBSCRIBED` 한 번만 reconnect catch-up으로 소비한다.
+- 재연결은 놓친 행을 추측하거나 replay로 간주하지 않고, 현재 actor 권한을 다시 검증하는 canonical `loadBflowEvents({ broadcast: false })`로 수렴시킨다.
+- 메인 창과 팝업 창은 같은 coalescing queue를 사용해 burst는 한 번으로 합치고, 조회 중 새 신호만 직렬 재조회한다. 최초 연결의 기존 일반 로드는 유지하되 캘린더 추가 조회는 하지 않는다.
+- 상태 IPC를 확장할 때 기존 문자열 첫 인자는 유지하고, 메인 창·모든 팝업·preload가 boolean reconnect metadata를 빠뜨리지 않는지 전송 경계 테스트로 고정한다.

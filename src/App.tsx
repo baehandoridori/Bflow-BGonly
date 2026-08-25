@@ -99,7 +99,7 @@ import {
 } from '@/utils/notificationEpisodeLabels';
 import { isGeneralRevisionSceneKey } from '@/utils/revisionGeneral';
 import { isRecentSelfRevisionAction } from '@/stores/useRevisionStore';
-import type { RevisionAssigneeState, UpdateInfo } from '@/types';
+import type { RevisionAssigneeState, SupabaseRealtimeStatusMetadata, UpdateInfo } from '@/types';
 
 // Lazy chunk 로드 실패(네트워크 끊김, 빌드 artifact 누락) 시 블랭크 스크린 방지용 ErrorBoundary.
 // 이 컴포넌트 자체는 파일 외부로 분리하지 않고 로컬에 유지 — 인증 모달/메인 뷰 한정으로만 사용.
@@ -201,6 +201,32 @@ export async function applyIncomingSharedBflowCalendarChangeInApp(raw: unknown):
   if (!detail) return false;
   await enqueueAppSharedCalendarRefresh(detail);
   return true;
+}
+
+/** 기존 일반 reload는 모든 SUBSCRIBED에서 유지하고, 공유 캘린더 정본은 재연결에만 보충한다. */
+export async function applyAppRealtimeCalendarReconnectCatchUp(
+  status: string,
+  metadata: SupabaseRealtimeStatusMetadata | undefined,
+  reloadGeneralData: () => void,
+): Promise<boolean> {
+  if (status !== 'SUBSCRIBED') return false;
+  reloadGeneralData();
+  if (metadata?.reconnected !== true) return false;
+  await enqueueAppSharedCalendarRefresh({
+    action: 'realtime-reconnect',
+    source: 'supabase-status',
+  });
+  return true;
+}
+
+/** App effect가 실제 사용하는 Realtime status receiver. */
+export function installAppRealtimeCalendarReconnectCatchUp(
+  reloadGeneralData: () => void,
+  subscribe: typeof onSupabaseStatusChange = onSupabaseStatusChange,
+): () => void {
+  return subscribe((status, metadata) => (
+    applyAppRealtimeCalendarReconnectCatchUp(status, metadata, reloadGeneralData)
+  ));
 }
 
 function isSceneAssignedToUser<T extends { assignee?: string | null }>(
@@ -2831,12 +2857,7 @@ export default function App() {
   // Supabase Realtime 연결 상태 모니터링: 재연결 시 즉시 동기화
   useEffect(() => {
     if (!window.electronAPI?.onSupabaseStatus) return;
-    const cleanup = onSupabaseStatusChange((status: string) => {
-      if (status === 'SUBSCRIBED') {
-        // Realtime 재연결 완료 → 놓친 변경사항 즉시 동기화
-        loadData();
-      }
-    });
+    const cleanup = installAppRealtimeCalendarReconnectCatchUp(loadData);
     return () => { cleanup?.(); };
   }, [loadData]);
 

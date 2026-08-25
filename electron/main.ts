@@ -3137,14 +3137,14 @@ function startSupabaseRealtime() {
         if (!win.isDestroyed()) win.webContents.send('activity:realtime-insert', row);
       }
     },
-    onStatusChange: (status) => {
+    onStatusChange: (status, metadata) => {
       currentRealtimeStatus = status;
       lastSupabaseStatus = humanizeStatus(status);
       if (mainWindow && !mainWindow.isDestroyed()) {
-        mainWindow.webContents.send('supabase:status', status);
+        mainWindow.webContents.send('supabase:status', status, metadata);
       }
       for (const win of widgetWindows.values()) {
-        if (!win.isDestroyed()) win.webContents.send('supabase:status', status);
+        if (!win.isDestroyed()) win.webContents.send('supabase:status', status, metadata);
       }
       rebuildTrayMenu();
     },

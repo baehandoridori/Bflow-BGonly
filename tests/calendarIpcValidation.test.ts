@@ -3720,3 +3720,112 @@ for (const receiver of [
     });
   });
 }
+
+type RealtimeStatusMetadata = { reconnected?: boolean };
+type RealtimeStatusListener = (
+  status: string,
+  metadata?: RealtimeStatusMetadata,
+) => boolean | Promise<boolean> | void;
+type RealtimeStatusSubscriber = (listener: RealtimeStatusListener) => () => void;
+
+test('main calendar reconnect subscription skips the first join and catches up canonical rows after a real reconnect', async () => {
+  await withCalendarReceiverWindow(async (order, received) => {
+    const loadGate = deferred<void>();
+    const loadStarted = deferred<void>();
+    const loadOptions: Array<Record<string, unknown> | undefined> = [];
+    const exported = await loadSharedCalendarReceiver(
+      'src/App.tsx',
+      'installAppRealtimeCalendarReconnectCatchUp',
+      async (options) => {
+        loadOptions.push(options);
+        order.push('canonical-load');
+        loadStarted.resolve(undefined);
+        await loadGate.promise;
+        return true;
+      },
+    );
+    const install = exported as unknown as undefined | ((
+      reloadGeneralData: () => void,
+      subscribe: RealtimeStatusSubscriber,
+    ) => () => void);
+    assert.ok(install, 'App must expose the production status subscription used by its effect');
+
+    let listener: RealtimeStatusListener | undefined;
+    let cleanups = 0;
+    const cleanup = install!(
+      () => { order.push('general-load'); },
+      (next) => {
+        listener = next;
+        return () => { cleanups += 1; };
+      },
+    );
+    assert.ok(listener);
+
+    assert.equal(await listener!('SUBSCRIBED', { reconnected: false }), false);
+    assert.deepEqual(
+      order,
+      ['general-load'],
+      'the initial subscription keeps the existing general reload without adding a calendar read',
+    );
+
+    const catchUp = listener!('SUBSCRIBED', { reconnected: true }) as Promise<boolean>;
+    await loadStarted.promise;
+    assert.deepEqual(order, ['general-load', 'general-load', 'canonical-load']);
+    assert.deepEqual(loadOptions, [{ broadcast: false }]);
+    assert.deepEqual(received, [], 'UI consumers must wait for the authorized canonical read');
+
+    loadGate.resolve(undefined);
+    assert.equal(await catchUp, true);
+    assert.deepEqual(order, ['general-load', 'general-load', 'canonical-load', 'ui-refresh']);
+    assert.equal(received.length, 1);
+    cleanup();
+    assert.equal(cleanups, 1);
+  });
+});
+
+test('popup calendar reconnect subscription skips the first join and catches up its independent cache after reconnect', async () => {
+  await withCalendarReceiverWindow(async (order, received) => {
+    const loadGate = deferred<void>();
+    const loadStarted = deferred<void>();
+    const loadOptions: Array<Record<string, unknown> | undefined> = [];
+    const exported = await loadSharedCalendarReceiver(
+      'src/views/WidgetPopup.tsx',
+      'installPopupRealtimeCalendarReconnectCatchUp',
+      async (options) => {
+        loadOptions.push(options);
+        order.push('canonical-load');
+        loadStarted.resolve(undefined);
+        await loadGate.promise;
+        return true;
+      },
+    );
+    const install = exported as unknown as undefined | ((
+      subscribe: RealtimeStatusSubscriber,
+    ) => () => void);
+    assert.ok(install, 'WidgetPopup must expose the production status subscription used by its effect');
+
+    let listener: RealtimeStatusListener | undefined;
+    let cleanups = 0;
+    const cleanup = install!((next) => {
+      listener = next;
+      return () => { cleanups += 1; };
+    });
+    assert.ok(listener);
+
+    assert.equal(await listener!('SUBSCRIBED', { reconnected: false }), false);
+    assert.deepEqual(order, [], 'the first popup join must not duplicate its initial calendar load');
+
+    const catchUp = listener!('SUBSCRIBED', { reconnected: true }) as Promise<boolean>;
+    await loadStarted.promise;
+    assert.deepEqual(order, ['canonical-load']);
+    assert.deepEqual(loadOptions, [{ broadcast: false }]);
+    assert.deepEqual(received, []);
+
+    loadGate.resolve(undefined);
+    assert.equal(await catchUp, true);
+    assert.deepEqual(order, ['canonical-load', 'ui-refresh']);
+    assert.equal(received.length, 1);
+    cleanup();
+    assert.equal(cleanups, 1);
+  });
+});

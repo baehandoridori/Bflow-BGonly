@@ -32,20 +32,26 @@ async function bundleModule(entry: string, plugin: Plugin): Promise<Record<strin
   return import(`data:text/javascript;base64,${encoded}#calendar-realtime-${bundleNonce++}`) as Promise<Record<string, unknown>>;
 }
 
-function retryStub(namespace: string): Plugin {
+function retryStub(namespace: string, schedule: string = '() => true'): Plugin {
   return {
     name: `${namespace}-retry-stub`,
     setup(builder) {
       builder.onResolve({ filter: /^\.\/retry-utils$/ }, () => ({ path: 'retry-utils', namespace }));
       builder.onLoad({ filter: /^retry-utils$/, namespace }, () => ({
-        contents: `export const createRetryManager = () => ({ schedule: () => true, reset() {}, clear() {} });`,
+        contents: `export const createRetryManager = () => ({ schedule: ${schedule}, reset() {}, clear() {} });`,
       }));
     },
   };
 }
 
 function realtimePlugin(): Plugin {
-  const retry = retryStub('calendar-realtime-test');
+  const retry = retryStub(
+    'calendar-realtime-test',
+    `(callback) => {
+      globalThis.${REALTIME_HARNESS_KEY}.retryCallbacks?.push(callback);
+      return true;
+    }`,
+  );
   return {
     name: 'calendar-realtime-test-dependencies',
     setup(builder) {
@@ -157,6 +163,98 @@ test('the live Supabase realtime channel forwards shared-calendar changes as row
       'renderer invalidations may identify the fixed table and event type, but must never include database rows',
     );
     cleanup();
+  } finally {
+    delete (globalThis as Record<string, unknown>)[REALTIME_HARNESS_KEY];
+  }
+});
+
+test('the live Realtime status contract distinguishes an actual reconnect from the first subscription', async () => {
+  const statusCallbacks: Array<(status: string) => void> = [];
+  const retryCallbacks: Array<() => void> = [];
+  const channels: Array<Record<string, unknown>> = [];
+  (globalThis as Record<string, unknown>)[REALTIME_HARNESS_KEY] = {
+    retryCallbacks,
+    supabase: {
+      channel: () => {
+        const channel = {
+          on() { return this; },
+          subscribe(callback?: (status: string) => void) {
+            if (callback) statusCallbacks.push(callback);
+            return this;
+          },
+          presenceState: () => ({}),
+          track: async () => 'ok',
+        };
+        channels.push(channel);
+        return channel;
+      },
+      removeChannel: () => {},
+    },
+  };
+
+  try {
+    const module = await bundleModule(
+      "export * from './electron/realtime.ts';",
+      realtimePlugin(),
+    );
+    const setup = module.setupRealtimeSubscription as ((callbacks: Record<string, unknown>) => () => void);
+    const subscribed: Array<{ status: string; reconnected: unknown }> = [];
+    const noOp = () => {};
+    const callbacks = {
+      onSceneChange: noOp,
+      onCommentChange: noOp,
+      onRevisionChange: noOp,
+      onRevisionSetChange: noOp,
+      onEpisodeChange: noOp,
+      onPartChange: noOp,
+      onSceneWorkLinkChange: noOp,
+      onActivityInsert: noOp,
+      onCalendarChange: noOp,
+      onStatusChange: (status: string, metadata?: { reconnected?: boolean }) => {
+        if (status === 'SUBSCRIBED') {
+          subscribed.push({ status, reconnected: metadata?.reconnected });
+        }
+      },
+    };
+    const cleanup = setup(callbacks);
+
+    assert.equal(channels.length, 1);
+    statusCallbacks[0]('SUBSCRIBED');
+    assert.deepEqual(subscribed, [{ status: 'SUBSCRIBED', reconnected: false }]);
+
+    statusCallbacks[0]('CHANNEL_ERROR');
+    assert.equal(retryCallbacks.length, 1, 'a channel failure must schedule the production reconnect path');
+    statusCallbacks[0]('SUBSCRIBED');
+    assert.deepEqual(subscribed, [
+      { status: 'SUBSCRIBED', reconnected: false },
+      { status: 'SUBSCRIBED', reconnected: true },
+    ], 'the SDK same-channel auto-rejoin is also a catch-up boundary');
+    statusCallbacks[0]('SUBSCRIBED');
+    assert.deepEqual(subscribed, [
+      { status: 'SUBSCRIBED', reconnected: false },
+      { status: 'SUBSCRIBED', reconnected: true },
+      { status: 'SUBSCRIBED', reconnected: false },
+    ], 'the same channel consumes its catch-up marker on its first successful rejoin');
+    cleanup();
+
+    statusCallbacks.length = 0;
+    retryCallbacks.length = 0;
+    channels.length = 0;
+    subscribed.length = 0;
+    const cleanupFailedInitialJoin = setup(callbacks);
+    statusCallbacks[0]('CHANNEL_ERROR');
+    retryCallbacks.shift()!();
+    assert.equal(channels.length, 2);
+    statusCallbacks[1]('SUBSCRIBED');
+    assert.deepEqual(subscribed, [
+      { status: 'SUBSCRIBED', reconnected: true },
+    ], 'a retry join is a catch-up boundary even when the initial channel never subscribed');
+    statusCallbacks[1]('SUBSCRIBED');
+    assert.deepEqual(subscribed, [
+      { status: 'SUBSCRIBED', reconnected: true },
+      { status: 'SUBSCRIBED', reconnected: false },
+    ], 'a replacement retry channel also consumes the marker only once');
+    cleanupFailedInitialJoin();
   } finally {
     delete (globalThis as Record<string, unknown>)[REALTIME_HARNESS_KEY];
   }
@@ -445,4 +543,26 @@ test('main wires realtime calendar rows to renderers and persistence commits to 
   assert.match(calendarIpc, /await store\.createCalendar\([\s\S]{0,500}broadcastCalendarChanged\('INSERT'\)/);
   assert.match(calendarIpc, /await store\.updateCalendar\([\s\S]{0,500}broadcastCalendarChanged\('UPDATE'\)/);
   assert.match(calendarIpc, /await store\.replaceMembers\([\s\S]{0,300}broadcastCalendarChanged\('UPDATE'\)/);
+});
+
+test('Realtime reconnect metadata stays row-free across main and preload status transport', () => {
+  const realtime = readFileSync('electron/realtime.ts', 'utf8');
+  const main = readFileSync('electron/main.ts', 'utf8');
+  const preload = readFileSync('electron/preload.ts', 'utf8');
+
+  assert.match(
+    realtime,
+    /export type RealtimeStatusMetadata = \{\s*reconnected: boolean;\s*\};/,
+    'status metadata may identify reconnects but must never carry calendar rows',
+  );
+  assert.match(
+    main,
+    /onStatusChange:\s*\(status, metadata\)\s*=>[\s\S]{0,400}mainWindow\.webContents\.send\('supabase:status', status, metadata\)[\s\S]{0,300}win\.webContents\.send\('supabase:status', status, metadata\)/,
+    'main must forward the same row-free metadata to the main window and every popup',
+  );
+  assert.match(
+    preload,
+    /onSupabaseStatus:\s*\(callback:\s*\(status: string, metadata: RealtimeStatusMetadata\) => void\)[\s\S]{0,250}callback\(status, metadata\)/,
+    'preload must preserve the metadata argument instead of dropping it at the renderer boundary',
+  );
 });

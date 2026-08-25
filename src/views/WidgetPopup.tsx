@@ -45,7 +45,13 @@ import { extractSceneDelta } from '@/utils/realtimeDelta';
 import { loadVacationConfig, connectVacation } from '@/services/vacationService';
 import { useVacationPendingStore } from '@/stores/useVacationPendingStore';
 import { Toaster, toast as sonnerToast } from 'sonner';
-import type { Episode, AppUser, PresenceSnapshotBundle } from '@/types';
+import type {
+  AppUser,
+  ElectronAPI,
+  Episode,
+  PresenceSnapshotBundle,
+  SupabaseRealtimeStatusMetadata,
+} from '@/types';
 import { getPreset, getLightColors, applyTheme, type ThemeColors } from '@/themes';
 import { DEFAULT_GAS_IMAGE_URL } from '@/config';
 
@@ -144,6 +150,28 @@ export async function applyIncomingSharedBflowCalendarChangeInPopup(raw: unknown
   if (!detail) return false;
   await enqueuePopupSharedCalendarRefresh(detail);
   return true;
+}
+
+/** 팝업은 최초 join을 건드리지 않고, 실제 재연결 때만 독립 캘린더 cache를 보충한다. */
+export async function applyPopupRealtimeCalendarReconnectCatchUp(
+  status: string,
+  metadata: SupabaseRealtimeStatusMetadata | undefined,
+): Promise<boolean> {
+  if (status !== 'SUBSCRIBED' || metadata?.reconnected !== true) return false;
+  await enqueuePopupSharedCalendarRefresh({
+    action: 'realtime-reconnect',
+    source: 'supabase-status',
+  });
+  return true;
+}
+
+/** WidgetPopup effect가 실제 사용하는 Realtime status receiver. */
+export function installPopupRealtimeCalendarReconnectCatchUp(
+  subscribe: ElectronAPI['onSupabaseStatus'] | undefined = window.electronAPI?.onSupabaseStatus,
+): (() => void) | undefined {
+  return subscribe?.((status, metadata) => (
+    applyPopupRealtimeCalendarReconnectCatchUp(status, metadata)
+  ));
 }
 
 /** 메인/다른 위젯에서 온 calendar-changed를 이 팝업의 독립 cache에 먼저 반영한다.
@@ -593,6 +621,7 @@ export function WidgetPopup({ widgetId, extraParams }: { widgetId: string; extra
       }
       reloadData();
     });
+    const cleanupRealtimeStatus = installPopupRealtimeCalendarReconnectCatchUp();
 
     // Supabase Broadcast: 즉시 동기화 (Publication 설정 불필요)
     const cleanupBroadcast = window.electronAPI?.onSupabaseBroadcast?.((raw: unknown) => {
@@ -641,6 +670,7 @@ export function WidgetPopup({ widgetId, extraParams }: { widgetId: string; extra
     return () => {
       cleanupSnapshot?.();
       cleanupRealtime?.();
+      cleanupRealtimeStatus?.();
       cleanupBroadcast?.();
       clearInterval(emergencyPoll);
       if (reloadTimer) clearTimeout(reloadTimer);

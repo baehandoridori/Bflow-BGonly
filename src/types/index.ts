@@ -1037,6 +1037,11 @@ export interface UpdateInfo {
 
 // ─── Electron API (preload에서 노출) ─────────
 
+export interface SupabaseRealtimeStatusMetadata {
+  /** 최초 join이 아니라 연결 단절 뒤 성공한 join인지 여부. */
+  reconnected: boolean;
+}
+
 export interface ElectronAPI extends CalendarApiInputContract {
   getDataPath: () => Promise<string>;
   shellShowItem?: (filePath: string) => Promise<{ ok: boolean; error?: string }>;
@@ -1569,7 +1574,9 @@ export interface ElectronAPI extends CalendarApiInputContract {
   onSupabaseRealtime: (callback: (event: unknown) => void) => () => void;
   onSupabasePresence: (callback: (snapshot: unknown) => void) => () => void;
   getPresenceSnapshot: () => Promise<unknown>;
-  onSupabaseStatus: (callback: (status: string) => void) => () => void;
+  onSupabaseStatus: (
+    callback: (status: string, metadata: SupabaseRealtimeStatusMetadata) => void,
+  ) => () => void;
   onSupabaseBroadcast: (callback: (event: unknown) => void) => () => void;
   // ─── Playground market (main-owned canonical session) ──
   marketRead: () => Promise<MarketRemoteState>;

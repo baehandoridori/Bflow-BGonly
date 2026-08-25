@@ -595,7 +595,9 @@ export async function getSupabaseRealtimeStatus(): Promise<string> {
   catch { return 'CONNECTING'; }
 }
 
-export function onSupabaseStatusChange(callback: (status: string) => void): () => void {
+export function onSupabaseStatusChange(
+  callback: (status: string, metadata: import('@/types').SupabaseRealtimeStatusMetadata) => void,
+): () => void {
   return window.electronAPI.onSupabaseStatus(callback);
 }
 
