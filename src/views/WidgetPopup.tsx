@@ -29,7 +29,13 @@ import {
   applyCommittedGoogleDelete,
   applyCommittedPrivacyReplacementDelete,
 } from '@/services/calendarService';
-import { loadSession, loadUsers, setUsersSheetsMode } from '@/services/userService';
+import {
+  fetchFreshUsersFromSupabase,
+  loadSession,
+  loadUsers,
+  setUsersSheetsMode,
+} from '@/services/userService';
+import { reconcileAuthoritativeUserDirectory } from '@/services/authoritativeUserSession';
 import { applyPreferencesToDOM } from '@/utils/typography';
 import { readAll, checkConnection, readMetadata } from '@/services/supabaseService';
 import { connectGas, loadGasConfig } from '@/services/gasConfigService';
@@ -72,6 +78,19 @@ export async function applyIncomingSupabaseCalendarChangeInPopup(raw: unknown): 
   if (data.event !== 'calendar-changed') return false;
   await applyIncomingCalendarChangeInPopup(data.payload);
   return true;
+}
+
+async function reconcilePopupUserDirectory(): Promise<'unchanged' | 'updated' | 'deleted'> {
+  const freshUsers = await fetchFreshUsersFromSupabase();
+  return reconcileAuthoritativeUserDirectory(freshUsers, {
+    getCurrentUser: () => useAuthStore.getState().currentUser,
+    setUsers: (users) => useAuthStore.getState().setUsers(users),
+    setCurrentUser: (user) => useAuthStore.getState().setCurrentUser(user),
+    logoutCanonicalSession: () => window.electronAPI.logoutCanonicalSession(),
+    onLogoutFailure: (error) => {
+      console.warn('[WidgetPopup] 삭제 사용자 canonical session 종료 실패:', error);
+    },
+  });
 }
 
 // 현황판은 App.tsx 와 동일하게 lazy — 팝업 엔트리 청크를 무겁게 하지 않는다 (피드백 36).
@@ -426,6 +445,13 @@ export function WidgetPopup({ widgetId, extraParams }: { widgetId: string; extra
     const cleanupRealtime = window.electronAPI?.onSupabaseRealtime?.((event: unknown) => {
       const { table, payload } = event as import('@/services/supabaseService').SupabaseRealtimeEvent;
 
+      if (table === 'users') {
+        void reconcilePopupUserDirectory()
+          .then((result) => { if (result !== 'deleted') reloadData(); })
+          .catch((error) => console.warn('[WidgetPopup] users 변경 재로드 실패:', error));
+        return;
+      }
+
       if (table === 'comments') {
         invalidatePartCache();
         return;
@@ -487,7 +513,14 @@ export function WidgetPopup({ widgetId, extraParams }: { widgetId: string; extra
         return;
       }
       if (data.event === 'data-change') {
-        reloadData();
+        const table = data.payload?.table;
+        if (table === 'users') {
+          void reconcilePopupUserDirectory()
+            .then((result) => { if (result !== 'deleted') reloadData(); })
+            .catch((error) => console.warn('[WidgetPopup] users 변경 재로드 실패:', error));
+        } else {
+          reloadData();
+        }
       }
     });
 

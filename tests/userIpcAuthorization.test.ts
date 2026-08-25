@@ -4,6 +4,7 @@ import path from 'node:path';
 import test from 'node:test';
 import { registerUserAdminIpc } from '../electron/userAdminIpc.ts';
 import { registerLegacyPrivateEventIpc } from '../electron/legacyPrivateEventIpc.ts';
+import { reconcileAuthoritativeUserDirectory } from '../src/services/authoritativeUserSession.ts';
 
 type Handler = (_event: unknown, ...args: unknown[]) => Promise<unknown>;
 
@@ -212,4 +213,67 @@ test('empty-directory migration sends the canonical local admin first for one-sh
   assert.match(service, /useAuthStore\.getState\(\)\.currentUser\?\.id/);
   assert.match(service, /orderedUsers[\s\S]*b\.id === actorId[\s\S]*a\.id === actorId/s);
   assert.match(service, /for \(const user of orderedUsers\)[\s\S]*supabaseAddUser\(user\)/s);
+});
+
+test('authoritative deletion clears renderer identity and caches before canonical logout finishes', async () => {
+  let finishLogout!: (value: { ok: boolean; error?: string }) => void;
+  const logout = new Promise<{ ok: boolean; error?: string }>((resolve) => { finishLogout = resolve; });
+  const currentUser = { id: 'deleted-user', name: 'Deleted', role: 'user' };
+  const currentValues: Array<typeof currentUser | null> = [];
+  const userLists: unknown[][] = [];
+
+  const reconciliation = reconcileAuthoritativeUserDirectory([], {
+    getCurrentUser: () => currentUser,
+    setUsers: (users) => { userLists.push(users); },
+    setCurrentUser: (user) => { currentValues.push(user); },
+    logoutCanonicalSession: () => logout,
+  });
+
+  assert.deepEqual(userLists, [[]]);
+  assert.deepEqual(currentValues, [null], 'calendar auth subscription must clear caches synchronously');
+  finishLogout({ ok: true });
+  assert.equal(await reconciliation, 'deleted');
+});
+
+test('authoritative user refresh updates the live profile without logging out', async () => {
+  let logoutCalls = 0;
+  const currentUser = { id: 'user-1', name: 'Before', role: 'user' };
+  const updatedUser = { id: 'user-1', name: 'After', role: 'admin' };
+  let applied: typeof currentUser | null = null;
+  const result = await reconcileAuthoritativeUserDirectory([updatedUser], {
+    getCurrentUser: () => currentUser,
+    setUsers: () => {},
+    setCurrentUser: (user) => { applied = user; },
+    logoutCanonicalSession: async () => { logoutCalls += 1; return { ok: true }; },
+  });
+  assert.equal(result, 'updated');
+  assert.deepEqual(applied, updatedUser);
+  assert.equal(logoutCalls, 0);
+});
+
+test('a transient directory fetch failure never reaches deletion reconciliation', async () => {
+  let reconciliationCalls = 0;
+  const fetchAndReconcile = async () => {
+    const users = await Promise.reject(new Error('temporary network outage'));
+    reconciliationCalls += 1;
+    return reconcileAuthoritativeUserDirectory(users, {
+      getCurrentUser: () => ({ id: 'user-1' }),
+      setUsers: () => {},
+      setCurrentUser: () => {},
+      logoutCanonicalSession: async () => ({ ok: true }),
+    });
+  };
+
+  await assert.rejects(fetchAndReconcile(), /temporary network outage/);
+  assert.equal(reconciliationCalls, 0);
+});
+
+test('App applies deletion policy only after a direct authoritative user-directory fetch', () => {
+  const root = path.resolve(import.meta.dirname, '..');
+  const app = readFileSync(path.join(root, 'src', 'App.tsx'), 'utf8');
+  const popup = readFileSync(path.join(root, 'src', 'views', 'WidgetPopup.tsx'), 'utf8');
+  assert.match(app, /changedTable === 'users'[\s\S]*fetchFreshUsersFromSupabase\(\)[\s\S]*reconcileAuthoritativeUserDirectory/s);
+  assert.doesNotMatch(app, /changedTable === 'users'[\s\S]{0,300}loadUsers\(\)/s);
+  assert.match(popup, /reconcilePopupUserDirectory[\s\S]*fetchFreshUsersFromSupabase\(\)[\s\S]*reconcileAuthoritativeUserDirectory/s);
+  assert.match(popup, /table === 'users'[\s\S]{0,300}reconcilePopupUserDirectory\(\)/s);
 });

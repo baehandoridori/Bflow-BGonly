@@ -40,7 +40,14 @@ import { extractSceneDelta } from '@/utils/realtimeDelta';
 import { loadVacationConfig, connectVacation } from '@/services/vacationService';
 import { loadLayout, loadPreferences, savePreferences, loadTheme, saveTheme } from '@/services/settingsService';
 import { semverGt } from '@/utils/semver';
-import { loadSession, loadUsers, setUsersSheetsMode, migrateUsersToSheets } from '@/services/userService';
+import {
+  fetchFreshUsersFromSupabase,
+  loadSession,
+  loadUsers,
+  setUsersSheetsMode,
+  migrateUsersToSheets,
+} from '@/services/userService';
+import { reconcileAuthoritativeUserDirectory } from '@/services/authoritativeUserSession';
 import { setFeedbackLastSeenAt, setAssignmentLastSeenAt, getCommentReactionLastSeenAt, setCommentReactionLastSeenAt } from '@/utils/lastSeenTracker';
 import { buildReactionNotificationTitle } from '@/utils/commentReactionEmojiFormat';
 import { applyTheme, getPreset, getLightColors, deriveThemeFromAccent, sanitizeCustomHex, hexToRgb, DEFAULT_THEME_ID } from '@/themes';
@@ -2458,17 +2465,19 @@ export default function App() {
       if (data.event === 'data-change') {
         const changedTable = (data.payload as { table?: string } | undefined)?.table;
         if (changedTable === 'users') {
-          // 권한/사용자 변경 → 사용자 목록 재로드 + 현재 세션 role 갱신(관리자 승격·강등을 재시작 없이 즉시 반영).
-          loadUsers().then((freshUsers) => {
-            setUsers(freshUsers);
-            const me = useAuthStore.getState().currentUser;
-            if (me) {
-              const updated = freshUsers.find((u) => u.id === me.id);
-              if (updated && updated.role !== me.role) {
-                useAuthStore.getState().setCurrentUser({ ...me, role: updated.role });
-              }
-            }
-          }).catch((e) => console.warn('[Broadcast] users 변경 재로드 실패:', e));
+          // direct Supabase 조회가 성공한 authoritative 목록만 session 삭제 판단에 쓴다.
+          // transient outage의 local fallback으로 사용자를 로그아웃시키지 않는다.
+          void fetchFreshUsersFromSupabase().then((freshUsers) => (
+            reconcileAuthoritativeUserDirectory(freshUsers, {
+              getCurrentUser: () => useAuthStore.getState().currentUser,
+              setUsers: (users) => useAuthStore.getState().setUsers(users),
+              setCurrentUser: (user) => useAuthStore.getState().setCurrentUser(user),
+              logoutCanonicalSession: () => window.electronAPI.logoutCanonicalSession(),
+              onLogoutFailure: (error) => {
+                console.warn('[Broadcast] 삭제 사용자 canonical session 종료 실패:', error);
+              },
+            })
+          )).catch((e) => console.warn('[Broadcast] users 변경 재로드 실패:', e));
           return;
         }
         // 구조적 변경 (씬/파트/에피소드 추가/삭제) → 디바운스 full reload
