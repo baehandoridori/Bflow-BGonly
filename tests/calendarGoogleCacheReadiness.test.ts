@@ -183,6 +183,24 @@ async function bundledServiceSource(): Promise<string> {
 
 type PopupCalendarChangeHandler = (payload: unknown) => Promise<void>;
 type PopupSupabaseCalendarChangeHandler = (raw: unknown) => Promise<boolean>;
+type PopupUserDirectoryReconciler = () => Promise<'unchanged' | 'updated' | 'deleted'>;
+
+type PopupUserDirectoryRuntime = {
+  fetchFreshUsers(): Promise<Array<{ id: string }>>;
+  reconcileDirectory(
+    users: Array<{ id: string }>,
+    deps: {
+      setCurrentUser(user: { id: string } | null): void;
+    },
+  ): Promise<'unchanged' | 'updated' | 'deleted'>;
+  authStore: {
+    getState(): {
+      currentUser: { id: string } | null;
+      setUsers(users: Array<{ id: string }>): void;
+      setCurrentUser(user: { id: string } | null): void;
+    };
+  };
+};
 
 async function bundledWidgetPopupSource(): Promise<string> {
   widgetPopupBundleSource ??= build({
@@ -206,9 +224,11 @@ async function bundledWidgetPopupSource(): Promise<string> {
 async function loadWidgetPopupCalendarChangeHandler(
   applyCommittedGoogleDelete: (payload: unknown) => boolean,
   applyCommittedPrivacyReplacementDelete: (payload: unknown) => boolean = () => false,
+  userDirectoryRuntime?: PopupUserDirectoryRuntime,
 ): Promise<{
   calendarChange: PopupCalendarChangeHandler | undefined;
   supabaseCalendarChange: PopupSupabaseCalendarChangeHandler | undefined;
+  reconcileUserDirectory: PopupUserDirectoryReconciler | undefined;
 }> {
   const source = await bundledWidgetPopupSource();
   const module = { exports: {} as Record<string, unknown> };
@@ -225,6 +245,16 @@ async function loadWidgetPopupCalendarChangeHandler(
     if (id === '@/services/calendarService') {
       return { applyCommittedGoogleDelete, applyCommittedPrivacyReplacementDelete };
     }
+    if (id === '@/services/userService' && userDirectoryRuntime) {
+      return { fetchFreshUsersFromSupabase: userDirectoryRuntime.fetchFreshUsers };
+    }
+    if (id === '@/services/authoritativeUserSession' && userDirectoryRuntime) {
+      return { reconcileAuthoritativeUserDirectory: userDirectoryRuntime.reconcileDirectory };
+    }
+    if (id === '@/stores/useAuthStore' && userDirectoryRuntime) {
+      const useAuthStore = Object.assign(noop, userDirectoryRuntime.authStore);
+      return { useAuthStore };
+    }
     return mockModule;
   };
 
@@ -235,6 +265,9 @@ async function loadWidgetPopupCalendarChangeHandler(
     supabaseCalendarChange: (
       module.exports.applyIncomingSupabaseCalendarChangeInPopup
     ) as PopupSupabaseCalendarChangeHandler | undefined,
+    reconcileUserDirectory: (
+      module.exports.reconcilePopupUserDirectory
+    ) as PopupUserDirectoryReconciler | undefined,
   };
 }
 
@@ -670,6 +703,86 @@ test('popup applies exact committed delete markers before forwarding them to wid
       'dispatch',
     ]);
     assert.deepEqual(received, [googlePayload, bflowPayload]);
+  } finally {
+    if (priorWindow.exists) globalScope.window = priorWindow.value;
+    else delete globalScope.window;
+    if (priorCustomEvent.exists) globalScope.CustomEvent = priorCustomEvent.value;
+    else delete globalScope.CustomEvent;
+  }
+});
+
+test('popup refreshes its mounted calendar widget after authoritative deletion clears the actor cache', async () => {
+  const globalScope = globalThis as Record<string, unknown>;
+  const priorWindow = {
+    exists: Object.prototype.hasOwnProperty.call(globalScope, 'window'),
+    value: globalScope.window,
+  };
+  const priorCustomEvent = {
+    exists: Object.prototype.hasOwnProperty.call(globalScope, 'CustomEvent'),
+    value: globalScope.CustomEvent,
+  };
+  let currentUser: { id: string } | null = { id: 'deleted-user' };
+  let finishReconciliation!: (result: 'deleted') => void;
+  let reportActorCleared!: () => void;
+  const actorCleared = new Promise<void>((resolve) => { reportActorCleared = resolve; });
+  const order: string[] = [];
+  const received: unknown[] = [];
+  const popupWindow = Object.assign(new EventTarget(), {
+    electronAPI: {
+      logoutCanonicalSession: async () => ({ ok: true }),
+    },
+  });
+  popupWindow.addEventListener('bflow:calendar-changed', (event) => {
+    order.push('calendar-refresh');
+    assert.equal(currentUser, null, 'the user-owned service cache clears before the widget refreshes');
+    received.push((event as Event & { detail?: unknown }).detail);
+  });
+  globalScope.window = popupWindow;
+  globalScope.CustomEvent = class extends Event {
+    detail: unknown;
+    constructor(type: string, init?: { detail?: unknown }) {
+      super(type);
+      this.detail = init?.detail;
+    }
+  };
+
+  try {
+    const { reconcileUserDirectory } = await loadWidgetPopupCalendarChangeHandler(
+      () => false,
+      () => false,
+      {
+        fetchFreshUsers: async () => [],
+        reconcileDirectory: (_users, deps) => {
+          order.push('clear-actor');
+          deps.setCurrentUser(null);
+          reportActorCleared();
+          return new Promise((resolve) => { finishReconciliation = resolve; });
+        },
+        authStore: {
+          getState: () => ({
+            currentUser,
+            setUsers: () => {},
+            setCurrentUser: (user) => { currentUser = user; },
+          }),
+        },
+      },
+    );
+    assert.ok(reconcileUserDirectory, 'WidgetPopup must expose its authoritative user reconciliation path');
+
+    const reconciliation = reconcileUserDirectory();
+    await actorCleared;
+    assert.deepEqual(
+      order,
+      ['clear-actor', 'calendar-refresh'],
+      'the popup widget refresh cannot wait for canonical logout to finish',
+    );
+    finishReconciliation('deleted');
+    assert.equal(await reconciliation, 'deleted');
+    assert.deepEqual(order, ['clear-actor', 'calendar-refresh']);
+    assert.deepEqual(received, [{
+      action: 'session-cleared',
+      reason: 'authoritative-user-deleted',
+    }]);
   } finally {
     if (priorWindow.exists) globalScope.window = priorWindow.value;
     else delete globalScope.window;

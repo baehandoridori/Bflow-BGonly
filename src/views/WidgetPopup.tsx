@@ -80,12 +80,25 @@ export async function applyIncomingSupabaseCalendarChangeInPopup(raw: unknown): 
   return true;
 }
 
-async function reconcilePopupUserDirectory(): Promise<'unchanged' | 'updated' | 'deleted'> {
+export async function reconcilePopupUserDirectory(): Promise<'unchanged' | 'updated' | 'deleted'> {
   const freshUsers = await fetchFreshUsersFromSupabase();
   return reconcileAuthoritativeUserDirectory(freshUsers, {
     getCurrentUser: () => useAuthStore.getState().currentUser,
     setUsers: (users) => useAuthStore.getState().setUsers(users),
-    setCurrentUser: (user) => useAuthStore.getState().setCurrentUser(user),
+    setCurrentUser: (user) => {
+      useAuthStore.getState().setCurrentUser(user);
+      if (!user) {
+        // calendarService의 사용자 소유 cache는 auth store 구독에서 같은 call stack에
+        // 비워진다. 그 직후 팝업 위젯의 별도 events state도 재조회해 private 일정이
+        // canonical logout 완료를 기다리는 동안 화면에 남지 않게 한다.
+        window.dispatchEvent(new CustomEvent('bflow:calendar-changed', {
+          detail: {
+            action: 'session-cleared',
+            reason: 'authoritative-user-deleted',
+          },
+        }));
+      }
+    },
     logoutCanonicalSession: () => window.electronAPI.logoutCanonicalSession(),
     onLogoutFailure: (error) => {
       console.warn('[WidgetPopup] 삭제 사용자 canonical session 종료 실패:', error);
