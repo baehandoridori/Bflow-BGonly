@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict';
+import { createRequire } from 'node:module';
 import test from 'node:test';
 import { build } from 'esbuild';
+import { isValidElement, type ReactElement, type ReactNode } from 'react';
 import { filterCalendarEvents } from '../src/utils/calendarEventFilter.ts';
 import type { CalendarEvent } from '../src/types/calendar.ts';
 
@@ -1399,4 +1401,232 @@ test('compensation failure retains both deletion errors with source and replacem
   } finally {
     harness.restore();
   }
+});
+
+type EventCreateModalProps = {
+  initialDate: string;
+  initialEndDate: string;
+  episodes: [];
+  googleAuthenticated: boolean;
+  onClose(): void;
+  onSave(event: Record<string, unknown>): void;
+};
+
+type EventCreateModalComponent = (props: EventCreateModalProps) => ReactNode;
+
+type EventCreateFormElement = ReactElement<{
+  'aria-label'?: string;
+  checked?: boolean;
+  value?: string;
+  onChange?: (event: { target: { checked: boolean; value: string } }) => void;
+}, 'input' | 'select' | 'textarea'>;
+
+type EventCreateButtonElement = ReactElement<{
+  children?: ReactNode;
+  disabled?: boolean;
+  onClick?: () => void;
+}, 'button'>;
+
+let eventCreateModalBundle: Promise<EventCreateModalComponent> | undefined;
+let eventCreateStateSlots: unknown[] = [];
+let eventCreateStateCursor = 0;
+
+function resolveEventCreateComponents(node: ReactNode): ReactNode {
+  if (Array.isArray(node)) return node.map(resolveEventCreateComponents);
+  if (!isValidElement(node)) return node;
+  if (typeof node.type === 'function') {
+    return resolveEventCreateComponents((node.type as (props: unknown) => ReactNode)(node.props));
+  }
+  const props = node.props as { children?: ReactNode };
+  return {
+    ...node,
+    props: { ...props, children: resolveEventCreateComponents(props.children) },
+  } as ReactNode;
+}
+
+function eventCreateText(node: ReactNode): string {
+  if (typeof node === 'string' || typeof node === 'number') return String(node);
+  if (Array.isArray(node)) return node.map(eventCreateText).join('');
+  if (!isValidElement(node)) return '';
+  return eventCreateText((node.props as { children?: ReactNode }).children);
+}
+
+function eventCreateFormElements(node: ReactNode): EventCreateFormElement[] {
+  if (Array.isArray(node)) return node.flatMap(eventCreateFormElements);
+  if (!isValidElement(node)) return [];
+  const props = node.props as { children?: ReactNode };
+  return [
+    ...(['input', 'select', 'textarea'].includes(String(node.type)) ? [node as EventCreateFormElement] : []),
+    ...eventCreateFormElements(props.children),
+  ];
+}
+
+function eventCreateFormElement(node: ReactNode, label: string): EventCreateFormElement {
+  const element = eventCreateFormElements(node).find((candidate) => candidate.props['aria-label'] === label);
+  assert.ok(element, `form element '${label}' must be rendered`);
+  return element;
+}
+
+function eventCreateButtons(node: ReactNode): EventCreateButtonElement[] {
+  if (Array.isArray(node)) return node.flatMap(eventCreateButtons);
+  if (!isValidElement(node)) return [];
+  const props = node.props as { children?: ReactNode };
+  return [
+    ...(node.type === 'button' ? [node as EventCreateButtonElement] : []),
+    ...eventCreateButtons(props.children),
+  ];
+}
+
+function eventCreateButton(node: ReactNode, text: string): EventCreateButtonElement {
+  const button = eventCreateButtons(node).find((candidate) => eventCreateText(candidate).includes(text));
+  assert.ok(button, `button '${text}' must be rendered`);
+  return button;
+}
+
+async function loadEventCreateModal(): Promise<EventCreateModalComponent> {
+  eventCreateModalBundle ??= build({
+    entryPoints: ['src/components/calendar/EventCreateModal.tsx'],
+    bundle: true,
+    format: 'cjs',
+    platform: 'node',
+    target: 'node22',
+    write: false,
+    external: [
+      'react', 'react/jsx-runtime', 'framer-motion', 'lucide-react',
+      '@/utils/cn', '@/stores/useAuthStore', '@/stores/useDataStore', '@/stores/useAppStore',
+      '@/stores/useCalendarStore', '@/types', '@/types/calendar', '@/utils/calendarDate', '@/utils/glassStyles',
+    ],
+  }).then((result) => {
+    const module = { exports: {} as Record<string, unknown> };
+    const nodeRequire = createRequire(import.meta.url);
+    const react = nodeRequire('react') as Record<string, unknown>;
+    const jsxRuntime = nodeRequire('react/jsx-runtime');
+    const emptyComponent = () => null;
+    const calendarState = {
+      calendars: [{
+        id: 'mine',
+        name: '내 캘린더',
+        color: '#6C5CE7',
+        visibility: 'private',
+        ownerId: 'user-me',
+        isPersonal: true,
+        members: [],
+        canEdit: true,
+        canManage: true,
+        createdAt: '2026-08-24T00:00:00.000Z',
+      }],
+      tags: [],
+    };
+    const evaluate = new Function('require', 'module', 'exports', result.outputFiles[0].text);
+    evaluate((id: string) => {
+      if (id === 'react') {
+        return {
+          ...react,
+          useState(initial: unknown) {
+            const slot = eventCreateStateCursor++;
+            if (eventCreateStateSlots[slot] === undefined) {
+              eventCreateStateSlots[slot] = typeof initial === 'function' ? (initial as () => unknown)() : initial;
+            }
+            return [eventCreateStateSlots[slot], (next: unknown) => {
+              eventCreateStateSlots[slot] = typeof next === 'function'
+                ? (next as (value: unknown) => unknown)(eventCreateStateSlots[slot])
+                : next;
+            }];
+          },
+          useRef: (initial: unknown) => ({ current: initial }),
+          useEffect: () => undefined,
+          useMemo: (factory: () => unknown) => factory(),
+        };
+      }
+      if (id === 'react/jsx-runtime') return jsxRuntime;
+      if (id === 'framer-motion') return { motion: { div: 'div' } };
+      if (id === 'lucide-react') return { CalendarDays: emptyComponent, X: emptyComponent };
+      if (id === '@/utils/cn') return { cn: (...values: unknown[]) => values.filter(Boolean).join(' ') };
+      if (id === '@/stores/useAuthStore') return { useAuthStore: (selector: (state: { currentUser: { name: string } }) => unknown) => selector({ currentUser: { name: '배한솔' } }) };
+      if (id === '@/stores/useDataStore') return { useDataStore: (selector: (state: { episodeTitles: {} }) => unknown) => selector({ episodeTitles: {} }) };
+      if (id === '@/stores/useAppStore') return { useAppStore: (selector: (state: { colorMode: string }) => unknown) => selector({ colorMode: 'dark' }) };
+      if (id === '@/stores/useCalendarStore') return { useCalendarStore: (selector: (state: typeof calendarState) => unknown) => selector(calendarState) };
+      if (id === '@/types') return { DEPARTMENT_CONFIGS: {} };
+      if (id === '@/utils/calendarDate') return { fmtDate: () => '2026-08-25' };
+      if (id === '@/utils/glassStyles') return { floatingGlassStyle: {} };
+      return nodeRequire(id);
+    }, module, module.exports);
+    return module.exports.EventCreateModal as EventCreateModalComponent;
+  });
+  return eventCreateModalBundle;
+}
+
+async function submitTimedEvent(input: {
+  startDate: string;
+  startTime: string;
+  endDate: string;
+  endTime: string;
+}): Promise<{ saved: Record<string, unknown>[]; renderedText: string; submitDisabled: boolean }> {
+  eventCreateStateSlots = [];
+  const saved: Record<string, unknown>[] = [];
+  const EventCreateModal = await loadEventCreateModal();
+  const props: EventCreateModalProps = {
+    initialDate: input.startDate,
+    initialEndDate: input.endDate,
+    episodes: [],
+    googleAuthenticated: false,
+    onClose() {},
+    onSave(event) { saved.push(event); },
+  };
+  const render = () => {
+    eventCreateStateCursor = 0;
+    return resolveEventCreateComponents(EventCreateModal(props));
+  };
+
+  let tree = render();
+  eventCreateFormElement(tree, '제목').props.onChange?.({ target: { value: '시간 일정', checked: false } });
+  eventCreateFormElement(tree, '종일 일정').props.onChange?.({ target: { value: '', checked: false } });
+  tree = render();
+  eventCreateFormElement(tree, '시작 시각').props.onChange?.({ target: { value: input.startTime, checked: false } });
+  tree = render();
+  eventCreateFormElement(tree, '시작일').props.onChange?.({ target: { value: input.startDate, checked: false } });
+  eventCreateFormElement(tree, '종료일').props.onChange?.({ target: { value: input.endDate, checked: false } });
+  eventCreateFormElement(tree, '종료 시각').props.onChange?.({ target: { value: input.endTime, checked: false } });
+  tree = render();
+  const submitButton = eventCreateButton(tree, '만들기');
+  submitButton.props.onClick?.();
+  tree = render();
+
+  return {
+    saved,
+    renderedText: eventCreateText(tree),
+    submitDisabled: submitButton.props.disabled === true,
+  };
+}
+
+test('EventCreateModal rejects reversed timed intervals before calling onSave', async (t) => {
+  for (const invalid of [
+    { name: 'same-day reversed clock', startDate: '2026-08-25', startTime: '15:00', endDate: '2026-08-25', endTime: '14:00' },
+    { name: 'same timestamp', startDate: '2026-08-25', startTime: '15:00', endDate: '2026-08-25', endTime: '15:00' },
+    { name: 'earlier end date', startDate: '2026-08-25', startTime: '09:00', endDate: '2026-08-24', endTime: '10:00' },
+  ]) {
+    await t.test(invalid.name, async () => {
+      const result = await submitTimedEvent(invalid);
+      assert.deepEqual(result.saved, []);
+      assert.match(result.renderedText, /종료 시각은 시작 시각보다 뒤여야 해요\./);
+      assert.equal(result.submitDisabled, true);
+    });
+  }
+});
+
+test('EventCreateModal keeps a later-date timed interval even when its clock time is earlier', async () => {
+  const result = await submitTimedEvent({
+    startDate: '2026-08-25',
+    startTime: '23:30',
+    endDate: '2026-08-26',
+    endTime: '00:30',
+  });
+
+  assert.doesNotMatch(result.renderedText, /종료 시각은 시작 시각보다 뒤여야 해요\./);
+  assert.equal(result.submitDisabled, false);
+  assert.equal(result.saved.length, 1);
+  assert.equal(result.saved[0].startDate, '2026-08-25');
+  assert.equal(result.saved[0].startTime, '23:30');
+  assert.equal(result.saved[0].endDate, '2026-08-26');
+  assert.equal(result.saved[0].endTime, '00:30');
 });

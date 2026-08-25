@@ -127,8 +127,13 @@ export function EventCreateModal({ initialDate, initialEndDate, episodes, google
     }
   };
 
+  const hasInvalidTimedInterval = !allDay
+    && Boolean(startTime && endTime)
+    && `${endDate}T${endTime}` <= `${startDate}T${startTime}`;
+
   const handleSubmit = () => {
     if (!title.trim() || !selectedCalendarId || (!allDay && (!startTime || !endTime))) return;
+    if (hasInvalidTimedInterval) return;
     const partData = selectedEpParts.find((part) => part.sheetName === linkedPart);
     onSave({
       title: title.trim(),
@@ -156,7 +161,8 @@ export function EventCreateModal({ initialDate, initialEndDate, episodes, google
     : selectedCalendar?.visibility === 'members'
       ? `이 캘린더 멤버 ${selectedCalendar.members.length}명에게 알림이 가요`
       : '';
-  const canSubmit = Boolean(title.trim() && selectedCalendarId && (allDay || (startTime && endTime)));
+  const canSubmit = Boolean(title.trim() && selectedCalendarId && (allDay || (startTime && endTime)))
+    && !hasInvalidTimedInterval;
   const inputClass = 'w-full bg-bg-card border border-accent/40 rounded-lg px-3 py-2 text-sm font-medium text-text-primary outline-none focus:border-accent focus:ring-1 focus:ring-accent/20';
 
   return (
@@ -214,6 +220,11 @@ export function EventCreateModal({ initialDate, initialEndDate, episodes, google
               </div>
               {!allDay && <TimeField label="종료 시각" value={endTime} onChange={setEndTime} colorMode={colorMode} inputClass={inputClass} />}
             </div>
+            {hasInvalidTimedInterval && (
+              <p role="alert" className="mt-2 text-[11px] font-medium text-red-400">
+                종료 시각은 시작 시각보다 뒤여야 해요.
+              </p>
+            )}
           </div>
 
           <div>

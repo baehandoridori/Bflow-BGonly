@@ -167,6 +167,31 @@ test('calendar visibility update to private clears member access in the same tra
   assert.match(fn, /IF NOT v_calendar\.is_personal[\s\S]*v_requested_visibility\s*=\s*'private'[\s\S]*DELETE FROM calendar_members[\s\S]*calendar_id\s*=\s*p_calendar_id/s);
 });
 
+test('calendar settings update replaces fields and members in one authorized transaction', () => {
+  const sql = readFileSync(migrationPath, 'utf8');
+  const fn = between(
+    sql,
+    'CREATE OR REPLACE FUNCTION public.update_calendar_authorized',
+    'COMMENT ON FUNCTION public.update_calendar_authorized',
+  );
+
+  const memberValidation = fn.indexOf('Each calendar member requires user_id and can_edit');
+  const calendarRowLock = fn.indexOf('FOR UPDATE;');
+  const calendarUpdate = fn.indexOf('UPDATE calendars AS target');
+  const memberDelete = fn.indexOf('DELETE FROM calendar_members', calendarUpdate);
+  const memberInsert = fn.indexOf('INSERT INTO calendar_members', memberDelete);
+
+  assert.match(fn, /v_allowed_keys[^;]*'members'/s);
+  assert.ok(memberValidation >= 0 && memberValidation < calendarRowLock);
+  assert.ok(calendarRowLock < calendarUpdate);
+  assert.ok(calendarUpdate < memberDelete);
+  assert.ok(memberDelete < memberInsert);
+  assert.match(
+    fn,
+    /p_updates\s*\?\s*'members'[\s\S]*jsonb_array_length\(p_updates->'members'\)\s*>\s*0[\s\S]*Private calendars cannot have members/s,
+  );
+});
+
 test('private nonpersonal calendars reject nonempty member replacement but allow empty cleanup', () => {
   const sql = readFileSync(migrationPath, 'utf8');
   const fn = between(

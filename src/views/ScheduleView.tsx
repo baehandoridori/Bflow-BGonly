@@ -574,18 +574,33 @@ export function ScheduleView() {
     if (sanitized.startDate && sanitized.endDate && sanitized.endDate < sanitized.startDate) {
       [sanitized.startDate, sanitized.endDate] = [sanitized.endDate, sanitized.startDate];
     }
-    await updateEvent(id, sanitized);
-    const canonicalEvents = await getEvents();
-    const canonical = canonicalEvents.find((event) => event.id === id);
-    setEvents(canonicalEvents);
-    if (canonical && (canonical.linkedTodoId || canonical.id.startsWith('cal_'))) {
-      const todoId = canonical.linkedTodoId || canonical.id.replace(/^cal_/, '');
-      void syncCalendarToTodo(todoId, canonical);
+    let persistenceFailed = false;
+    let persistenceError: unknown;
+    try {
+      await updateEvent(id, sanitized);
+    } catch (error) {
+      persistenceFailed = true;
+      persistenceError = error;
     }
-    setPanelEvent((previous) => previous?.id === id ? canonical ?? null : previous);
-    setQuickEdit((previous) => previous?.event.id === id
-      ? canonical ? { ...previous, event: canonical } : null
-      : previous);
+
+    try {
+      const canonicalEvents = await getEvents();
+      const canonical = canonicalEvents.find((event) => event.id === id);
+      setEvents(canonicalEvents);
+      if (!persistenceFailed && canonical && (canonical.linkedTodoId || canonical.id.startsWith('cal_'))) {
+        const todoId = canonical.linkedTodoId || canonical.id.replace(/^cal_/, '');
+        void syncCalendarToTodo(todoId, canonical);
+      }
+      setPanelEvent((previous) => previous?.id === id ? canonical ?? null : previous);
+      setQuickEdit((previous) => previous?.event.id === id
+        ? canonical ? { ...previous, event: canonical } : null
+        : previous);
+    } catch (refreshError) {
+      if (!persistenceFailed) throw refreshError;
+      console.warn('[ScheduleView] 일정 저장 실패 후 정본 새로고침 실패:', refreshError);
+    }
+
+    if (persistenceFailed) throw persistenceError;
   }, []);
 
   const handleDuplicateEvent = useCallback(async (event: CalendarEvent) => {

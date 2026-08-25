@@ -2,6 +2,7 @@
  * 권한 검증·broadcast 는 calendarIpc.ts 담당 — 여기는 순수 데이터 접근만.
  * 마이그레이션 전(테이블 부재) 안전: 읽기는 빈 결과 + console.warn, 쓰기는 throw. */
 import { supabase } from './supabase';
+import type { CalendarUpdateInput } from '../src/shared/calendarApiContract';
 
 export interface CalendarRow {
   id: string;
@@ -203,7 +204,7 @@ export async function createCalendar(input: {
 
 export async function updateCalendar(
   id: string,
-  updates: Partial<Pick<CalendarRow, 'name' | 'color' | 'visibility'>>,
+  updates: CalendarUpdateInput,
   actorId: string,
 ): Promise<void> {
   const { error } = await supabase.rpc('update_calendar_authorized', {

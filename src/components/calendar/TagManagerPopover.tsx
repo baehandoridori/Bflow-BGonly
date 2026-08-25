@@ -1,5 +1,5 @@
 import {
-  useCallback, useEffect, useLayoutEffect, useRef, useState,
+  useCallback, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore,
 } from 'react';
 import { createPortal } from 'react-dom';
 import {
@@ -36,6 +36,60 @@ interface EditingTag {
 interface PopoverPosition {
   left: number;
   top: number;
+}
+
+type ReconciliationMode = 'metadata' | 'events';
+
+interface PendingTagReconciliation {
+  drafts: DraftTag[];
+  mode: ReconciliationMode;
+  lockMutations: boolean;
+}
+
+interface InFlightTagOperation {
+  token: number;
+  drafts: DraftTag[];
+  mode: ReconciliationMode;
+}
+
+interface TagMutationSnapshot {
+  revision: number;
+  inFlight: InFlightTagOperation | null;
+  reconciliation: PendingTagReconciliation | null;
+  settledDrafts: DraftTag[] | null;
+}
+
+let nextTagOperationToken = 0;
+let tagMutationSnapshot: TagMutationSnapshot = {
+  revision: 0,
+  inFlight: null,
+  reconciliation: null,
+  settledDrafts: null,
+};
+const tagMutationListeners = new Set<() => void>();
+
+function cloneDrafts(drafts: DraftTag[]): DraftTag[] {
+  return drafts.map((tag) => ({ ...tag }));
+}
+
+function publishTagMutationSnapshot(
+  updates: Omit<Partial<TagMutationSnapshot>, 'revision'>,
+): void {
+  tagMutationSnapshot = {
+    ...tagMutationSnapshot,
+    ...updates,
+    revision: tagMutationSnapshot.revision + 1,
+  };
+  for (const listener of tagMutationListeners) listener();
+}
+
+function subscribeTagMutationSnapshot(listener: () => void): () => void {
+  tagMutationListeners.add(listener);
+  return () => tagMutationListeners.delete(listener);
+}
+
+function getTagMutationSnapshot(): TagMutationSnapshot {
+  return tagMutationSnapshot;
 }
 
 const POPOVER_WIDTH = 320;
@@ -81,18 +135,54 @@ function isPointInsideAnchor(event: MouseEvent, anchorRect: DOMRect): boolean {
 export function TagManagerPopover({ anchorRect, onClose }: TagManagerPopoverProps) {
   const currentUser = useAuthStore((state) => state.currentUser);
   const tags = useCalendarStore((state) => state.tags);
+  const sharedMutation = useSyncExternalStore(
+    subscribeTagMutationSnapshot,
+    getTagMutationSnapshot,
+    getTagMutationSnapshot,
+  );
   const isAdmin = currentUser?.role === 'admin';
   const popoverRef = useRef<HTMLDivElement>(null);
   const [position, setPosition] = useState(() => (
     calculatePosition(anchorRect, POPOVER_WIDTH, ESTIMATED_HEIGHT)
   ));
-  const [drafts, setDrafts] = useState<DraftTag[]>(() => orderedDrafts(tags));
+  const [localDrafts, setDrafts] = useState<DraftTag[]>(() => (
+    cloneDrafts(
+      tagMutationSnapshot.inFlight?.drafts
+      ?? tagMutationSnapshot.reconciliation?.drafts
+      ?? orderedDrafts(tags),
+    )
+  ));
   const [editing, setEditing] = useState<EditingTag | null>(null);
-  const [saving, setSaving] = useState(false);
+  const [localSaving, setSaving] = useState(false);
+  const appliedSharedRevision = useRef(sharedMutation.revision);
+  const sharedDrafts = sharedMutation.inFlight?.drafts
+    ?? sharedMutation.reconciliation?.drafts
+    ?? (
+      sharedMutation.revision > appliedSharedRevision.current
+        ? sharedMutation.settledDrafts
+        : null
+    );
+  const drafts = sharedDrafts ?? localDrafts;
+  const reconciliationMode = sharedMutation.reconciliation?.mode ?? null;
+  const mutationsLocked = sharedMutation.inFlight !== null
+    || Boolean(sharedMutation.reconciliation?.lockMutations);
+  const saving = localSaving || sharedMutation.inFlight !== null;
+  const reconciliationRequired = reconciliationMode !== null;
 
   useEffect(() => {
-    setDrafts(orderedDrafts(tags));
-  }, [tags]);
+    if (!sharedMutation.inFlight && !sharedMutation.reconciliation) {
+      setDrafts(orderedDrafts(tags));
+    }
+  }, [sharedMutation.inFlight, sharedMutation.reconciliation, tags]);
+
+  useEffect(() => {
+    if (sharedMutation.revision === appliedSharedRevision.current) return;
+    appliedSharedRevision.current = sharedMutation.revision;
+    const nextDrafts = sharedMutation.inFlight?.drafts
+      ?? sharedMutation.reconciliation?.drafts
+      ?? sharedMutation.settledDrafts;
+    if (nextDrafts) setDrafts(cloneDrafts(nextDrafts));
+  }, [sharedMutation]);
 
   const updatePosition = useCallback(() => {
     const rect = popoverRef.current?.getBoundingClientRect();
@@ -130,50 +220,172 @@ export function TagManagerPopover({ anchorRect, onClose }: TagManagerPopoverProp
     };
   }, [anchorRect, onClose]);
 
+  const refreshCanonicalTags = async (mode: ReconciliationMode): Promise<boolean> => {
+    if (mode === 'events') {
+      return loadBflowEvents({ requireTagsFresh: true });
+    }
+    const metadataFreshness = await useCalendarStore.getState().loadAll();
+    return metadataFreshness.tagsFresh;
+  };
+
+  const settleTagOperation = (
+    token: number,
+    finalDrafts: DraftTag[],
+    reconciliation: PendingTagReconciliation | null,
+  ) => {
+    if (tagMutationSnapshot.inFlight?.token !== token) return;
+    publishTagMutationSnapshot({
+      inFlight: null,
+      reconciliation,
+      settledDrafts: cloneDrafts(finalDrafts),
+    });
+  };
+
+  const reconcileFromCanonical = async () => {
+    const pending = tagMutationSnapshot.reconciliation;
+    if (!pending || tagMutationSnapshot.inFlight) return;
+    const token = ++nextTagOperationToken;
+    publishTagMutationSnapshot({
+      inFlight: {
+        token,
+        drafts: cloneDrafts(pending.drafts),
+        mode: pending.mode,
+      },
+      settledDrafts: null,
+    });
+    setSaving(true);
+    let refreshed = false;
+    try {
+      refreshed = await refreshCanonicalTags(pending.mode);
+    } catch {
+      refreshed = false;
+    }
+    if (refreshed) {
+      const canonicalDrafts = orderedDrafts(useCalendarStore.getState().tags);
+      setDrafts(canonicalDrafts);
+      setEditing(null);
+      settleTagOperation(token, canonicalDrafts, null);
+    } else {
+      settleTagOperation(token, pending.drafts, pending);
+      toast.error('최신 태그 목록을 불러오지 못했어요. 잠시 후 다시 시도해 주세요.');
+    }
+    setSaving(false);
+  };
+
   const persistDrafts = async (
     nextDrafts: DraftTag[],
     refreshEvents = false,
   ): Promise<boolean> => {
-    if (!isAdmin || saving) return false;
+    const activeSnapshot = tagMutationSnapshot;
+    if (
+      !isAdmin
+      || activeSnapshot.inFlight
+      || activeSnapshot.reconciliation?.lockMutations
+    ) return false;
+    const requestedMode: ReconciliationMode = refreshEvents ? 'events' : 'metadata';
+    const currentReconciliation = activeSnapshot.reconciliation;
+    const inheritedMode: ReconciliationMode = (
+      currentReconciliation?.mode === 'events' || requestedMode === 'events'
+    ) ? 'events' : 'metadata';
+    const requestedRefreshResolvesPending = (
+      currentReconciliation?.mode !== 'events' || requestedMode === 'events'
+    );
+    const token = ++nextTagOperationToken;
+    publishTagMutationSnapshot({
+      inFlight: {
+        token,
+        drafts: cloneDrafts(nextDrafts),
+        mode: requestedMode,
+      },
+      settledDrafts: null,
+    });
     setSaving(true);
-    const previousDrafts = drafts;
     setDrafts(nextDrafts);
-    let failure: unknown;
+    let persistenceFailure: unknown;
+    let refreshFailure: unknown;
+    let refreshed = false;
+    let committedDrafts: DraftTag[] | null = null;
     try {
-      await window.electronAPI.calendarTagsSave(nextDrafts.map((tag, index) => ({
+      const savedRows = await window.electronAPI.calendarTagsSave(nextDrafts.map((tag, index) => ({
         ...(tag.id ? { id: tag.id } : {}),
         name: tag.name.trim(),
         color: tag.color,
         sort_order: index,
       })));
+      committedDrafts = [...savedRows]
+        .sort((a, b) => a.sort_order - b.sort_order)
+        .map((tag) => ({
+          id: tag.id,
+          key: tag.id,
+          name: tag.name,
+          color: tag.color,
+        }));
+      setDrafts(committedDrafts);
     } catch (error) {
-      failure = error;
-    } finally {
-      try {
-        if (refreshEvents) {
-          const refreshed = await loadBflowEvents({ requireTagsFresh: true });
-          if (!refreshed) failure ??= new Error('B flow event refresh failed');
-        } else {
-          const metadataFreshness = await useCalendarStore.getState().loadAll();
-          if (!metadataFreshness.tagsFresh) {
-            failure ??= new Error('Calendar tag metadata refresh failed');
-          }
-        }
-      } catch (error) {
-        failure ??= error;
-      }
+      persistenceFailure = error;
     }
-    setSaving(false);
-    if (failure) {
-      setDrafts(previousDrafts);
-      toast.error('태그를 저장하지 못했어요. 다시 시도해 주세요.');
+    try {
+      refreshed = await refreshCanonicalTags(requestedMode);
+      if (!refreshed) refreshFailure = new Error('Calendar tag reconciliation failed');
+    } catch (error) {
+      refreshFailure = error;
+    }
+    if (persistenceFailure) {
+      if (refreshed) {
+        const canonicalDrafts = orderedDrafts(useCalendarStore.getState().tags);
+        const nextReconciliation = requestedRefreshResolvesPending
+          ? null
+          : {
+            drafts: cloneDrafts(canonicalDrafts),
+            mode: inheritedMode,
+            lockMutations: false,
+          };
+        setDrafts(canonicalDrafts);
+        setEditing(null);
+        settleTagOperation(token, canonicalDrafts, nextReconciliation);
+        setSaving(false);
+        toast.error('태그 저장 결과를 확인할 수 없어 최신 목록으로 다시 맞췄어요.');
+        return true;
+      }
+      const nextReconciliation = {
+        drafts: cloneDrafts(nextDrafts),
+        mode: inheritedMode,
+        lockMutations: true,
+      };
+      setDrafts(nextDrafts);
+      setEditing(null);
+      settleTagOperation(token, nextDrafts, nextReconciliation);
+      setSaving(false);
+      toast.error('태그 저장 결과와 최신 목록을 확인할 수 없어요. 최신 목록을 다시 불러와 주세요.');
       return false;
     }
+    if (refreshFailure) {
+      const nextReconciliation = {
+        drafts: cloneDrafts(committedDrafts!),
+        mode: inheritedMode,
+        lockMutations: false,
+      };
+      settleTagOperation(token, committedDrafts!, nextReconciliation);
+      setSaving(false);
+      toast.error('태그는 저장됐지만 최신 목록을 불러오지 못했어요. 잠시 후 다시 시도해 주세요.');
+      return true;
+    }
+    const canonicalDrafts = orderedDrafts(useCalendarStore.getState().tags);
+    const nextReconciliation = requestedRefreshResolvesPending
+      ? null
+      : {
+        drafts: cloneDrafts(canonicalDrafts),
+        mode: inheritedMode,
+        lockMutations: false,
+      };
+    setDrafts(canonicalDrafts);
+    settleTagOperation(token, canonicalDrafts, nextReconciliation);
+    setSaving(false);
     return true;
   };
 
   const beginEdit = (tag: DraftTag) => {
-    if (!isAdmin || saving) return;
+    if (!isAdmin || saving || mutationsLocked) return;
     setEditing({
       key: tag.key,
       label: tag.name,
@@ -184,7 +396,7 @@ export function TagManagerPopover({ anchorRect, onClose }: TagManagerPopoverProp
   };
 
   const beginAdd = () => {
-    if (!isAdmin || saving || editing) return;
+    if (!isAdmin || saving || editing || mutationsLocked) return;
     setEditing({
       key: 'new-tag',
       label: '새',
@@ -212,14 +424,17 @@ export function TagManagerPopover({ anchorRect, onClose }: TagManagerPopoverProp
 
   const moveTag = async (index: number, direction: -1 | 1) => {
     const nextIndex = index + direction;
-    if (!isAdmin || saving || editing || nextIndex < 0 || nextIndex >= drafts.length) return;
+    if (
+      !isAdmin || saving || editing || mutationsLocked
+      || nextIndex < 0 || nextIndex >= drafts.length
+    ) return;
     const nextDrafts = [...drafts];
     [nextDrafts[index], nextDrafts[nextIndex]] = [nextDrafts[nextIndex], nextDrafts[index]];
     await persistDrafts(nextDrafts);
   };
 
   const deleteTag = async (tag: DraftTag) => {
-    if (!isAdmin || saving || editing) return;
+    if (!isAdmin || saving || editing || mutationsLocked) return;
     const confirmed = await ConfirmDialog.show({
       message: "이 태그를 쓰는 일정은 '태그 없음'으로 바뀌어요",
       confirmLabel: '삭제',
@@ -277,16 +492,16 @@ export function TagManagerPopover({ anchorRect, onClose }: TagManagerPopoverProp
               <span className="min-w-0 flex-1 truncate text-xs font-medium">{tag.name}</span>
               {isAdmin && (
                 <div className="flex items-center gap-0.5">
-                  <IconButton label={`${tag.name} 태그 위로`} disabled={saving || Boolean(editing) || index === 0} onClick={() => moveTag(index, -1)}>
+                  <IconButton label={`${tag.name} 태그 위로`} disabled={saving || mutationsLocked || Boolean(editing) || index === 0} onClick={() => moveTag(index, -1)}>
                     <ChevronUp size={13} />
                   </IconButton>
-                  <IconButton label={`${tag.name} 태그 아래로`} disabled={saving || Boolean(editing) || index === drafts.length - 1} onClick={() => moveTag(index, 1)}>
+                  <IconButton label={`${tag.name} 태그 아래로`} disabled={saving || mutationsLocked || Boolean(editing) || index === drafts.length - 1} onClick={() => moveTag(index, 1)}>
                     <ChevronDown size={13} />
                   </IconButton>
-                  <IconButton label={`${tag.name} 태그 편집`} disabled={saving || Boolean(editing)} onClick={() => beginEdit(tag)}>
+                  <IconButton label={`${tag.name} 태그 편집`} disabled={saving || mutationsLocked || Boolean(editing)} onClick={() => beginEdit(tag)}>
                     <Pencil size={13} />
                   </IconButton>
-                  <IconButton label={`${tag.name} 태그 삭제`} disabled={saving || Boolean(editing)} danger onClick={() => deleteTag(tag)}>
+                  <IconButton label={`${tag.name} 태그 삭제`} disabled={saving || mutationsLocked || Boolean(editing)} danger onClick={() => deleteTag(tag)}>
                     <Trash2 size={13} />
                   </IconButton>
                 </div>
@@ -300,11 +515,30 @@ export function TagManagerPopover({ anchorRect, onClose }: TagManagerPopoverProp
         )}
       </div>
 
+      {reconciliationRequired && (
+        <div className="mt-2 rounded-lg border border-amber-400/35 bg-amber-400/10 p-2.5">
+          <p className="text-[11px] leading-4 text-text-secondary">
+            {mutationsLocked
+              ? '저장 결과를 확인하는 동안 태그 변경을 잠시 멈췄어요.'
+              : '태그는 저장됐어요. 최신 목록 반영만 다시 확인해 주세요.'}
+          </p>
+          <button
+            type="button"
+            aria-label="최신 태그 목록 다시 불러오기"
+            onClick={reconcileFromCanonical}
+            disabled={saving}
+            className="mt-2 w-full rounded-md border border-bg-border px-2 py-1.5 text-xs font-medium text-text-primary transition-colors hover:bg-bg-border/50 disabled:cursor-not-allowed disabled:opacity-50 cursor-pointer"
+          >
+            최신 목록 다시 불러오기
+          </button>
+        </div>
+      )}
+
       {isAdmin && !editing && (
         <button
           type="button"
           onClick={beginAdd}
-          disabled={saving}
+          disabled={saving || mutationsLocked}
           className="mt-2 flex w-full items-center justify-center gap-1.5 rounded-lg border border-dashed border-bg-border px-3 py-2 text-xs text-text-secondary transition-colors hover:border-accent/50 hover:bg-accent/10 hover:text-accent disabled:cursor-not-allowed disabled:opacity-50 cursor-pointer"
         >
           <Plus size={13} /> 새 태그

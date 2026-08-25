@@ -546,6 +546,13 @@ export function registerCalendarIpc(deps: CalendarIpcDeps): void {
       throw new Error('이 캘린더를 수정할 권한이 없습니다');
     }
 
+    const requestedMembers = updates.members === undefined
+      ? undefined
+      : normalizeCalendarMembers(updates.members, calendar.owner_id);
+    if (calendar.is_personal && requestedMembers !== undefined) {
+      throw new Error('개인 캘린더에는 멤버를 추가할 수 없습니다');
+    }
+
     const safeUpdates: Parameters<typeof store.updateCalendar>[1] = {};
     if (updates.name !== undefined) safeUpdates.name = updates.name;
     if (updates.color !== undefined) safeUpdates.color = updates.color;
@@ -555,9 +562,15 @@ export function registerCalendarIpc(deps: CalendarIpcDeps): void {
       }
       safeUpdates.visibility = requestedVisibility;
     }
+    if (!calendar.is_personal && requestedMembers !== undefined) {
+      safeUpdates.members = requestedMembers;
+    }
 
     await store.updateCalendar(id, safeUpdates, user.id);
     broadcastDataChange('calendars', 'UPDATE');
+    if (safeUpdates.members !== undefined || safeUpdates.visibility === 'private') {
+      broadcastDataChange('calendar_members', 'UPDATE');
+    }
     broadcastCalendarChanged('UPDATE');
   }));
 

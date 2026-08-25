@@ -108,23 +108,46 @@ function mockMembersOf(calendarId: string): MockCalendarMemberRow[] {
 
 function normalizeMockCalendarMembers(
   calendar: MockCalendarRow,
-  members: Array<{ user_id: string; can_edit: boolean }>,
+  members: unknown,
 ): MockCalendarMemberRow[] {
+  if (!Array.isArray(members)) throw new Error('캘린더 멤버 입력이 올바르지 않습니다');
   const knownUserIds = new Set(getMockUsers().map(({ id }) => id));
   const seen = new Set<string>();
   const normalized: MockCalendarMemberRow[] = [];
   for (const member of members) {
-    if (member.user_id === calendar.owner_id) continue;
-    if (!knownUserIds.has(member.user_id)) throw new Error('존재하지 않는 캘린더 멤버입니다');
-    if (seen.has(member.user_id)) throw new Error('중복된 캘린더 멤버입니다');
-    seen.add(member.user_id);
+    if (!member || typeof member !== 'object') {
+      throw new Error('캘린더 멤버 입력이 올바르지 않습니다');
+    }
+    const candidate = member as Record<string, unknown>;
+    if (
+      typeof candidate.user_id !== 'string'
+      || candidate.user_id.trim().length === 0
+      || typeof candidate.can_edit !== 'boolean'
+    ) {
+      throw new Error('캘린더 멤버 입력이 올바르지 않습니다');
+    }
+    const safeMember = { user_id: candidate.user_id, can_edit: candidate.can_edit };
+    if (safeMember.user_id === calendar.owner_id) continue;
+    if (!knownUserIds.has(safeMember.user_id)) throw new Error('존재하지 않는 캘린더 멤버입니다');
+    if (seen.has(safeMember.user_id)) throw new Error('중복된 캘린더 멤버입니다');
+    seen.add(safeMember.user_id);
     normalized.push({
       calendar_id: calendar.id,
-      user_id: member.user_id,
-      can_edit: member.can_edit,
+      user_id: safeMember.user_id,
+      can_edit: safeMember.can_edit,
     });
   }
   return normalized;
+}
+
+function applyNormalizedMockCalendarMembers(
+  calendarId: string,
+  members: MockCalendarMemberRow[],
+): void {
+  for (let index = mockCalendarMembers.length - 1; index >= 0; index--) {
+    if (mockCalendarMembers[index].calendar_id === calendarId) mockCalendarMembers.splice(index, 1);
+  }
+  mockCalendarMembers.push(...members);
 }
 
 function replaceMockCalendarMembers(
@@ -132,10 +155,7 @@ function replaceMockCalendarMembers(
   members: Array<{ user_id: string; can_edit: boolean }>,
 ): void {
   const normalized = normalizeMockCalendarMembers(calendar, members);
-  for (let index = mockCalendarMembers.length - 1; index >= 0; index--) {
-    if (mockCalendarMembers[index].calendar_id === calendar.id) mockCalendarMembers.splice(index, 1);
-  }
-  mockCalendarMembers.push(...normalized);
+  applyNormalizedMockCalendarMembers(calendar.id, normalized);
 }
 
 function canViewMockCalendar(calendar: MockCalendarRow, userId: string): boolean {
@@ -1289,16 +1309,40 @@ export function installDevElectronAPI(): void {
       if (!canManageCalendar(calendar, mockPermissionUser(user))) {
         throw new Error('이 캘린더를 수정할 권한이 없습니다');
       }
-      if (updates.visibility === 'team' && !canCreateCalendar(mockPermissionUser(user), 'team')) {
+      if (
+        !calendar.is_personal
+        && updates.visibility === 'team'
+        && !canCreateCalendar(mockPermissionUser(user), 'team')
+      ) {
         throw new Error('팀 전체 캘린더는 관리자만 만들 수 있습니다');
       }
+      if (updates.name !== undefined && (typeof updates.name !== 'string' || updates.name.trim() === '')) {
+        throw new Error('캘린더 이름이 올바르지 않습니다');
+      }
+      if (updates.color !== undefined && (typeof updates.color !== 'string' || updates.color.trim() === '')) {
+        throw new Error('캘린더 색상이 올바르지 않습니다');
+      }
+
+      const nextVisibility = calendar.is_personal
+        ? calendar.visibility
+        : updates.visibility ?? calendar.visibility;
+      let nextMembers: MockCalendarMemberRow[] | undefined;
+      if (updates.members !== undefined) {
+        if (calendar.is_personal) throw new Error('개인 캘린더에는 멤버를 추가할 수 없습니다');
+        const normalizedMembers = normalizeMockCalendarMembers(calendar, updates.members);
+        if (nextVisibility === 'private' && normalizedMembers.length > 0) {
+          throw new Error('비공개 캘린더에는 멤버를 추가할 수 없습니다');
+        }
+        nextMembers = normalizedMembers;
+      } else if (!calendar.is_personal && updates.visibility === 'private') {
+        nextMembers = [];
+      }
+
       if (updates.name !== undefined) calendar.name = updates.name;
       if (updates.color !== undefined) calendar.color = updates.color;
-      if (!calendar.is_personal && updates.visibility !== undefined) {
-        calendar.visibility = updates.visibility;
-        if (updates.visibility === 'private') replaceMockCalendarMembers(calendar, []);
-      }
+      calendar.visibility = nextVisibility;
       calendar.updated_at = new Date().toISOString();
+      if (nextMembers !== undefined) applyNormalizedMockCalendarMembers(calendar.id, nextMembers);
     },
     calendarDelete: async (id) => {
       const user = requireMockCalendarUser();

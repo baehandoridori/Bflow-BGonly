@@ -13,12 +13,18 @@ interface EventQuickEditProps {
   event: CalendarEvent;
   position: { x: number; y: number };
   onClose: () => void;
-  onUpdate: (id: string, updates: Partial<CalendarEvent>) => void;
+  onUpdate: (id: string, updates: Partial<CalendarEvent>) => void | Promise<void>;
   onDelete: (id: string) => void;
   onDuplicate: (event: CalendarEvent) => void;
 }
 
 type TabKey = 'calendar' | 'edit';
+
+interface PendingSelection<T> {
+  eventId: string;
+  value: T;
+  requestId: number;
+}
 
 const TYPE_OPTIONS: { value: CalendarEventType; label: string }[] = [
   { value: 'custom', label: '커스텀' },
@@ -49,11 +55,23 @@ export function EventQuickEdit({
   const [endDate, setEndDate] = useState(event.endDate);
   const [type, setType] = useState<CalendarEventType>(event.type);
   const [memo, setMemo] = useState(event.memo);
+  const [pendingCalendar, setPendingCalendar] = useState<PendingSelection<string | undefined> | null>(null);
+  const [pendingTag, setPendingTag] = useState<PendingSelection<string | undefined> | null>(null);
+  const calendarUpdateRequestRef = useRef(0);
+  const tagUpdateRequestRef = useRef(0);
 
   const isVacation = event.type === 'vacation';
   const isWriteProtected = event.isReadOnly === true || event.canEdit === false;
   const canWrite = !isVacation && !isWriteProtected;
   const isCanonicalBflow = event.sourceCalendarId?.startsWith('bflow:') === true && Boolean(event.calendarId);
+  const displayedCalendarId = pendingCalendar?.eventId === event.id
+    ? pendingCalendar.value
+    : event.calendarId;
+  const displayedTagId = pendingTag?.eventId === event.id
+    ? pendingTag.value
+    : event.tagId;
+  const calendarSelectionPending = pendingCalendar?.eventId === event.id;
+  const tagSelectionPending = pendingTag?.eventId === event.id;
   const derivedFieldsDescriptionId = isCanonicalBflow ? `calendar-derived-fields-${event.id}` : undefined;
   const readOnlyDescriptionId = isWriteProtected || isVacation ? `calendar-read-only-${event.id}` : undefined;
   const currentCalendar = calendars.find((calendar) => calendar.id === event.calendarId);
@@ -115,6 +133,38 @@ export function EventQuickEdit({
     onDuplicate(event);
     onClose();
   }, [event, onClose, onDuplicate]);
+
+  const handleCalendarChange = useCallback(async (calendarId: string) => {
+    if (!canWrite || !isCanonicalBflow || calendarSelectionPending || calendarId === displayedCalendarId) return;
+    const requestId = ++calendarUpdateRequestRef.current;
+    setPendingCalendar({
+      eventId: event.id,
+      value: calendarId,
+      requestId,
+    });
+    try {
+      await onUpdate(event.id, { calendarId });
+    } catch {
+      // The canonical event remains the rollback source below.
+    }
+    setPendingCalendar((current) => current?.requestId === requestId ? null : current);
+  }, [calendarSelectionPending, canWrite, displayedCalendarId, event.id, isCanonicalBflow, onUpdate]);
+
+  const handleTagChange = useCallback(async (tagId: string | undefined) => {
+    if (!canWrite || !isCanonicalBflow || tagSelectionPending || tagId === displayedTagId) return;
+    const requestId = ++tagUpdateRequestRef.current;
+    setPendingTag({
+      eventId: event.id,
+      value: tagId,
+      requestId,
+    });
+    try {
+      await onUpdate(event.id, { tagId });
+    } catch {
+      // The canonical event remains the rollback source below.
+    }
+    setPendingTag((current) => current?.requestId === requestId ? null : current);
+  }, [canWrite, displayedTagId, event.id, isCanonicalBflow, onUpdate, tagSelectionPending]);
 
   return createPortal(
     <AnimatePresence>
@@ -187,10 +237,11 @@ export function EventQuickEdit({
                         <CalendarDays size={13} className="pointer-events-none absolute left-2 top-1/2 -translate-y-1/2 text-text-secondary" />
                         <select
                           aria-label="캘린더"
-                          value={event.calendarId}
+                          value={displayedCalendarId}
+                          disabled={calendarSelectionPending}
                           onChange={(changeEvent) => {
                             const calendarId = changeEvent.target.value;
-                            if (calendarId !== event.calendarId) onUpdate(event.id, { calendarId });
+                            return handleCalendarChange(calendarId);
                           }}
                           className="w-full rounded-lg border border-bg-border/60 bg-bg-primary/80 py-1.5 pl-7 pr-2 text-xs text-text-primary outline-none focus:border-accent/60"
                         >
@@ -203,24 +254,22 @@ export function EventQuickEdit({
                       <div className="mt-1.5 flex flex-wrap gap-1.5">
                         <button
                           type="button"
-                          aria-pressed={event.tagId === undefined}
-                          onClick={() => {
-                            if (event.tagId !== undefined) onUpdate(event.id, { tagId: undefined });
-                          }}
-                          className={`rounded-full px-2 py-1 text-[10px] ${event.tagId === undefined ? 'bg-accent/20 text-accent' : 'bg-bg-primary/80 text-text-secondary'}`}
+                          aria-pressed={displayedTagId === undefined}
+                          disabled={tagSelectionPending}
+                          onClick={() => handleTagChange(undefined)}
+                          className={`rounded-full px-2 py-1 text-[10px] ${displayedTagId === undefined ? 'bg-accent/20 text-accent' : 'bg-bg-primary/80 text-text-secondary'}`}
                         >
                           없음
                         </button>
                         {sortedTags.map((tag) => {
-                          const selected = event.tagId === tag.id;
+                          const selected = displayedTagId === tag.id;
                           return (
                             <button
                               type="button"
                               key={tag.id}
                               aria-pressed={selected}
-                              onClick={() => {
-                                if (!selected) onUpdate(event.id, { tagId: tag.id });
-                              }}
+                              disabled={tagSelectionPending}
+                              onClick={() => handleTagChange(tag.id)}
                               className="rounded-full border px-2 py-1 text-[10px]"
                               style={{
                                 color: selected ? tag.color : 'rgb(var(--color-text-secondary))',

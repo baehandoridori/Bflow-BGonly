@@ -85,6 +85,8 @@ type SchedulePanelProps = {
 };
 type ScheduleQuickEditProps = {
   event: ScheduleCalendarEvent;
+  onClose(): void;
+  onUpdate(id: string, updates: Partial<ScheduleCalendarEvent>): void | Promise<void>;
   onDuplicate(event: ScheduleCalendarEvent): void | Promise<void>;
   [key: string]: unknown;
 };
@@ -168,6 +170,8 @@ let modalRefCursor = 0;
 let modalEffectDeps: Array<readonly unknown[] | undefined> = [];
 let modalEffectCursor = 0;
 let pendingModalEffects: Array<() => void> = [];
+let tagManagerRefSlots: Array<{ current: unknown }> = [];
+let tagManagerRefCursor = 0;
 let calendarState: {
   calendars: BflowCalendar[];
   tags: Array<{ id: string; name: string; color: string; sortOrder: number }>;
@@ -198,6 +202,7 @@ let schedulePanelProps: SchedulePanelProps[] = [];
 let scheduleQuickEditProps: ScheduleQuickEditProps[] = [];
 let scheduleCanonicalEvents: ScheduleCalendarEvent[] = [];
 let scheduleUpdateCalls: Array<{ id: string; updates: Partial<ScheduleCalendarEvent> }> = [];
+let scheduleUpdateHandler: ((id: string, updates: Partial<ScheduleCalendarEvent>) => Promise<void>) | undefined;
 let scheduleAddedEvents: ScheduleCalendarEvent[] = [];
 let scheduleGetEventsCalls = 0;
 let schedulePendingEffects: Array<() => void | (() => void)> = [];
@@ -209,6 +214,12 @@ let settingsApiCalls: Array<{ name: string; args: unknown[] }> = [];
 let settingsApiFailures = new Set<string>();
 let settingsMetadataFreshness = { calendarsFresh: true, tagsFresh: true };
 let settingsBflowReloadResult = true;
+let settingsCanonicalCalendarsAfterReload: BflowCalendar[] | null = null;
+let settingsRefreshCount = 0;
+let settingsApiGate: Promise<void> | null = null;
+let resolveSettingsApiGate: (() => void) | null = null;
+let settingsRefreshGate: Promise<void> | null = null;
+let resolveSettingsRefreshGate: (() => void) | null = null;
 let settingsConfirmResponses: boolean[] = [];
 let settingsConfirmMessages: string[] = [];
 let settingsToastErrors: string[] = [];
@@ -217,10 +228,27 @@ let settingsCloseCount = 0;
 let tagManagerApiCalls: Array<{ name: string; args: unknown[] }> = [];
 let tagManagerApiFailures = new Set<string>();
 let tagManagerMetadataFreshness = { calendarsFresh: true, tagsFresh: true };
+let tagManagerCanonicalTagsAfterReload: Array<{
+  id: string;
+  name: string;
+  color: string;
+  sortOrder: number;
+}> | null = null;
+let tagManagerLastCommittedTags: Array<{
+  id: string;
+  name: string;
+  color: string;
+  sortOrder: number;
+}> | null = null;
 let tagManagerConfirmResponses: boolean[] = [];
 let tagManagerConfirmMessages: string[] = [];
 let tagManagerToastErrors: string[] = [];
 let tagManagerCloseCount = 0;
+let tagManagerGeneratedId = 0;
+let tagManagerSaveGate: Promise<void> | null = null;
+let resolveTagManagerSaveGate: (() => void) | null = null;
+let tagManagerRefreshGate: Promise<void> | null = null;
+let resolveTagManagerRefreshGate: (() => void) | null = null;
 
 function resolveComponents(node: ReactNode): ReactNode {
   if (Array.isArray(node)) return node.map(resolveComponents);
@@ -343,6 +371,8 @@ function resetHarness(): void {
   modalEffectDeps = [];
   modalEffectCursor = 0;
   pendingModalEffects = [];
+  tagManagerRefSlots = [];
+  tagManagerRefCursor = 0;
   openedSettings = [];
   createdCount = 0;
   appViews = [];
@@ -353,6 +383,7 @@ function resetHarness(): void {
   scheduleQuickEditProps = [];
   scheduleCanonicalEvents = [];
   scheduleUpdateCalls = [];
+  scheduleUpdateHandler = undefined;
   scheduleAddedEvents = [];
   scheduleGetEventsCalls = 0;
   schedulePendingEffects = [];
@@ -389,18 +420,32 @@ function resetHarness(): void {
   settingsApiFailures = new Set();
   settingsMetadataFreshness = { calendarsFresh: true, tagsFresh: true };
   settingsBflowReloadResult = true;
+  settingsCanonicalCalendarsAfterReload = null;
+  settingsRefreshCount = 0;
+  settingsApiGate = null;
+  resolveSettingsApiGate = null;
+  settingsRefreshGate = null;
+  resolveSettingsRefreshGate = null;
   settingsConfirmResponses = [];
   settingsConfirmMessages = [];
   settingsToastErrors = [];
   settingsToastSuccesses = [];
   settingsCloseCount = 0;
+  bundledCalendarSettingsModal = undefined;
   tagManagerApiCalls = [];
   tagManagerApiFailures = new Set();
   tagManagerMetadataFreshness = { calendarsFresh: true, tagsFresh: true };
+  tagManagerCanonicalTagsAfterReload = null;
+  tagManagerLastCommittedTags = null;
   tagManagerConfirmResponses = [];
   tagManagerConfirmMessages = [];
   tagManagerToastErrors = [];
   tagManagerCloseCount = 0;
+  tagManagerGeneratedId = 0;
+  tagManagerSaveGate = null;
+  resolveTagManagerSaveGate = null;
+  tagManagerRefreshGate = null;
+  resolveTagManagerRefreshGate = null;
   calendarState = {
     calendars: [
       calendar({ id: 'mine', name: 'EP 마일스톤', isPersonal: true }),
@@ -542,8 +587,14 @@ async function loadTagManagerPopover(): Promise<TagManagerPopoverComponent> {
       (selector: (state: typeof calendarState) => unknown) => selector(calendarState),
       {
         getState: () => ({
+          tags: calendarState.tags,
           async loadAll() {
             tagManagerApiCalls.push({ name: 'loadAll', args: [] });
+            if (tagManagerRefreshGate) await tagManagerRefreshGate;
+            const canonicalTags = tagManagerCanonicalTagsAfterReload ?? tagManagerLastCommittedTags;
+            if (tagManagerMetadataFreshness.tagsFresh && canonicalTags) {
+              calendarState.tags = canonicalTags.map((tag) => ({ ...tag }));
+            }
             return tagManagerMetadataFreshness;
           },
         }),
@@ -567,9 +618,17 @@ async function loadTagManagerPopover(): Promise<TagManagerPopoverComponent> {
           },
           useEffect: () => {},
           useLayoutEffect: () => {},
-          useRef: (initial: unknown) => ({ current: initial }),
+          useRef(initial: unknown) {
+            const slot = tagManagerRefCursor++;
+            tagManagerRefSlots[slot] ??= { current: initial };
+            return tagManagerRefSlots[slot];
+          },
           useCallback: (fn: unknown) => fn,
           useMemo: (factory: () => unknown) => factory(),
+          useSyncExternalStore: (
+            _subscribe: (listener: () => void) => () => void,
+            getSnapshot: () => unknown,
+          ) => getSnapshot(),
         };
       }
       if (id === 'react/jsx-runtime') return jsxRuntime;
@@ -601,8 +660,14 @@ async function loadTagManagerPopover(): Promise<TagManagerPopoverComponent> {
         return {
           async loadBflowEvents(...args: unknown[]) {
             tagManagerApiCalls.push({ name: 'loadBflowEvents', args });
+            if (tagManagerRefreshGate) await tagManagerRefreshGate;
             const options = args[0] as { requireTagsFresh?: boolean } | undefined;
-            return options?.requireTagsFresh !== true || tagManagerMetadataFreshness.tagsFresh;
+            const refreshed = options?.requireTagsFresh !== true || tagManagerMetadataFreshness.tagsFresh;
+            const canonicalTags = tagManagerCanonicalTagsAfterReload ?? tagManagerLastCommittedTags;
+            if (refreshed && canonicalTags) {
+              calendarState.tags = canonicalTags.map((tag) => ({ ...tag }));
+            }
+            return refreshed;
           },
         };
       }
@@ -625,8 +690,25 @@ async function loadTagManagerPopover(): Promise<TagManagerPopoverComponent> {
         electronAPI: {
           async calendarTagsSave(...args: unknown[]) {
             tagManagerApiCalls.push({ name: 'calendarTagsSave', args });
+            if (tagManagerSaveGate) await tagManagerSaveGate;
             if (tagManagerApiFailures.has('calendarTagsSave')) throw new Error('save failed');
-            return [];
+            const submitted = args[0] as Array<{
+              id?: string;
+              name: string;
+              color: string;
+              sort_order: number;
+            }>;
+            const saved = submitted.map((tag) => ({
+              ...tag,
+              id: tag.id ?? `tag-generated-${++tagManagerGeneratedId}`,
+            }));
+            tagManagerLastCommittedTags = saved.map((tag) => ({
+              id: tag.id,
+              name: tag.name,
+              color: tag.color,
+              sortOrder: tag.sort_order,
+            }));
+            return saved;
           },
         },
       },
@@ -707,7 +789,10 @@ async function loadScheduleView(): Promise<ScheduleViewComponent> {
           return true;
         },
         addEvent: async (event: ScheduleCalendarEvent) => { scheduleAddedEvents.push(event); },
-        updateEvent: async (id: string, updates: Partial<ScheduleCalendarEvent>) => { scheduleUpdateCalls.push({ id, updates }); },
+        updateEvent: async (id: string, updates: Partial<ScheduleCalendarEvent>) => {
+          scheduleUpdateCalls.push({ id, updates });
+          await scheduleUpdateHandler?.(id, updates);
+        },
         deleteEvent: async () => {},
       };
       if (id === '@/services/vacationService') return { fetchAllVacationEvents: async () => [] };
@@ -940,8 +1025,17 @@ async function loadCalendarSettingsModal(): Promise<CalendarSettingsModalCompone
       (selector: (state: typeof calendarState) => unknown) => selector(calendarState),
       {
         getState: () => ({
+          calendars: calendarState.calendars,
           async loadAll() {
             settingsApiCalls.push({ name: 'loadAll', args: [] });
+            if (settingsRefreshGate) await settingsRefreshGate;
+            settingsRefreshCount += 1;
+            if (settingsMetadataFreshness.calendarsFresh && settingsCanonicalCalendarsAfterReload) {
+              calendarState.calendars = settingsCanonicalCalendarsAfterReload.map((item) => ({
+                ...item,
+                members: item.members.map((member) => ({ ...member })),
+              }));
+            }
             return settingsMetadataFreshness;
           },
         }),
@@ -949,12 +1043,14 @@ async function loadCalendarSettingsModal(): Promise<CalendarSettingsModalCompone
     );
     const callApi = async (name: string, args: unknown[]) => {
       settingsApiCalls.push({ name, args });
+      if (settingsApiGate) await settingsApiGate;
       if (settingsApiFailures.has(name)) throw new Error(`${name} failed`);
+      const input = args[0] as { name?: string; color?: string; visibility?: BflowCalendar['visibility'] } | undefined;
       return {
         id: 'created-calendar',
-        name: String((args[0] as { name?: string } | undefined)?.name ?? ''),
-        color: '#6C5CE7',
-        visibility: 'members',
+        name: String(input?.name ?? ''),
+        color: input?.color ?? '#6C5CE7',
+        visibility: input?.visibility ?? 'members',
         owner_id: settingsCurrentUser.id,
         is_personal: false,
         created_at: '2026-08-25T00:00:00.000Z',
@@ -985,6 +1081,10 @@ async function loadCalendarSettingsModal(): Promise<CalendarSettingsModalCompone
           useEffect: () => {},
           useMemo: (factory: () => unknown) => factory(),
           useCallback: (fn: unknown) => fn,
+          useSyncExternalStore: (
+            _subscribe: (listener: () => void) => () => void,
+            getSnapshot: () => unknown,
+          ) => getSnapshot(),
         };
       }
       if (id === 'react/jsx-runtime') return jsxRuntime;
@@ -1014,18 +1114,33 @@ async function loadCalendarSettingsModal(): Promise<CalendarSettingsModalCompone
         };
       }
       if (id === '@/stores/useAuthStore') {
-        return {
-          useAuthStore: (selector: (state: { currentUser: TestUser; users: TestUser[] }) => unknown) => selector({
+        const useAuthStoreMock = Object.assign(
+          (selector: (state: { currentUser: TestUser; users: TestUser[] }) => unknown) => selector({
             currentUser: settingsCurrentUser,
             users: settingsUsers,
           }),
-        };
+          {
+            getState: () => ({
+              currentUser: settingsCurrentUser,
+              users: settingsUsers,
+            }),
+          },
+        );
+        return { useAuthStore: useAuthStoreMock };
       }
       if (id === '@/stores/useCalendarStore') return { useCalendarStore: useCalendarStoreMock };
       if (id === '@/services/calendarService') {
         return {
           async loadBflowEvents() {
             settingsApiCalls.push({ name: 'loadBflowEvents', args: [] });
+            if (settingsRefreshGate) await settingsRefreshGate;
+            settingsRefreshCount += 1;
+            if (settingsBflowReloadResult && settingsCanonicalCalendarsAfterReload) {
+              calendarState.calendars = settingsCanonicalCalendarsAfterReload.map((item) => ({
+                ...item,
+                members: item.members.map((member) => ({ ...member })),
+              }));
+            }
             return settingsBflowReloadResult;
           },
         };
@@ -1168,6 +1283,7 @@ async function renderTagManagerPopover(
 ): Promise<ReactNode> {
   const TagManagerPopover = await loadTagManagerPopover();
   stateCursor = 0;
+  tagManagerRefCursor = 0;
   return resolveComponents(TagManagerPopover({
     anchorRect,
     onClose: () => { tagManagerCloseCount += 1; },
@@ -1235,14 +1351,25 @@ function flushEventCreateEffects(): void {
 async function renderCalendarSettingsModal(
   calendarValue?: BflowCalendar,
   eventCount = 4,
+  onClose: () => void = () => { settingsCloseCount += 1; },
 ): Promise<ReactNode> {
   const CalendarSettingsModal = await loadCalendarSettingsModal();
+  if (
+    calendarValue
+    && settingsRefreshCount === 0
+    && !calendarState.calendars.some((item) => item.id === calendarValue.id)
+  ) {
+    calendarState.calendars = [...calendarState.calendars, {
+      ...calendarValue,
+      members: calendarValue.members.map((member) => ({ ...member })),
+    }];
+  }
   stateCursor = 0;
   modalRefCursor = 0;
   return resolveComponents(CalendarSettingsModal({
     calendar: calendarValue,
     eventCount,
-    onClose: () => { settingsCloseCount += 1; },
+    onClose,
   }));
 }
 
@@ -1488,7 +1615,7 @@ test('TagManagerPopover lets admins edit, reorder, and add tags with canonical f
     ]]);
   });
 
-  await t.test('a warmed tag-list failure reports an error and rolls an optimistic reorder back', async () => {
+  await t.test('a warmed tag-list failure reports an error but keeps the committed reorder', async () => {
     resetHarness();
     tagManagerMetadataFreshness = { calendarsFresh: true, tagsFresh: false };
     let tree = await renderTagManagerPopover();
@@ -1497,11 +1624,150 @@ test('TagManagerPopover lets admins edit, reorder, and add tags with canonical f
 
     assert.deepEqual(tagManagerApiCalls.map((call) => call.name), ['calendarTagsSave', 'loadAll']);
     assert.equal(tagManagerToastErrors.length, 1);
-    const restoredText = textContent(tree);
+    const committedText = textContent(tree);
     assert.ok(
-      restoredText.indexOf('검수') < restoredText.indexOf('회의'),
-      'the last confirmed draft order survives a partial metadata reload failure',
+      committedText.indexOf('회의') < committedText.indexOf('검수'),
+      'a committed reorder is not rolled back only because reconciliation failed',
     );
+    assert.ok(buttonByLabel(tree, '최신 태그 목록 다시 불러오기'));
+
+    tagManagerMetadataFreshness = { calendarsFresh: true, tagsFresh: true };
+    tagManagerCanonicalTagsAfterReload = [
+      { id: 'tag-meeting', name: '회의', color: '#FDCB6E', sortOrder: 0 },
+      { id: 'tag-review', name: '검수', color: '#00B894', sortOrder: 1 },
+    ];
+    await buttonByLabel(tree, '최신 태그 목록 다시 불러오기').props.onClick?.();
+  });
+
+  await t.test('a committed new tag adopts its returned UUID before a failed reconciliation', async () => {
+    resetHarness();
+    tagManagerMetadataFreshness = { calendarsFresh: true, tagsFresh: false };
+    let tree = await renderTagManagerPopover();
+    buttonByText(tree, '새 태그').props.onClick?.();
+    tree = await renderTagManagerPopover();
+    formElementByLabel(tree, '새 태그 이름').props.onChange?.({ target: { value: '리뷰', checked: false } });
+    tree = await renderTagManagerPopover();
+    await buttonByLabel(tree, '새 태그 저장').props.onClick?.();
+    tree = await renderTagManagerPopover();
+
+    assert.equal(tagManagerToastErrors.length, 1);
+    assert.match(tagManagerToastErrors[0], /저장됐지만/, 'the message distinguishes commit from reload failure');
+    assert.ok(buttonByLabel(tree, '리뷰 태그 편집'), 'the committed row remains rendered after reload failure');
+
+    tagManagerMetadataFreshness = { calendarsFresh: true, tagsFresh: true };
+    await buttonByLabel(tree, '리뷰 태그 위로').props.onClick?.();
+    assert.deepEqual(tagManagerApiCalls.at(-2)?.args, [[
+      { id: 'tag-review', name: '검수', color: '#00B894', sort_order: 0 },
+      { id: 'tag-generated-1', name: '리뷰', color: '#6C5CE7', sort_order: 1 },
+      { id: 'tag-meeting', name: '회의', color: '#FDCB6E', sort_order: 2 },
+    ]], 'the next save reuses the authoritative UUID instead of resubmitting a fake new row');
+  });
+
+  await t.test('a lost save response adopts a fresh canonical UUID and exits the editor', async () => {
+    resetHarness();
+    tagManagerApiFailures.add('calendarTagsSave');
+    tagManagerCanonicalTagsAfterReload = [
+      { id: 'tag-review', name: '검수', color: '#00B894', sortOrder: 0 },
+      { id: 'tag-meeting', name: '회의', color: '#FDCB6E', sortOrder: 1 },
+      { id: 'tag-server-new', name: '서버 정본', color: '#6C5CE7', sortOrder: 2 },
+    ];
+    let tree = await renderTagManagerPopover();
+    buttonByText(tree, '새 태그').props.onClick?.();
+    tree = await renderTagManagerPopover();
+    formElementByLabel(tree, '새 태그 이름').props.onChange?.({ target: { value: '응답 유실', checked: false } });
+    tree = await renderTagManagerPopover();
+    await buttonByLabel(tree, '새 태그 저장').props.onClick?.();
+    tree = await renderTagManagerPopover();
+
+    assert.deepEqual(tagManagerApiCalls.map((call) => call.name), ['calendarTagsSave', 'loadAll']);
+    assert.match(tagManagerToastErrors[0], /저장 결과.*최신 목록/);
+    assert.ok(buttonByLabel(tree, '서버 정본 태그 편집'), 'fresh canonical rows replace the ambiguous intent');
+    assert.equal(
+      findFormElements(tree).some((element) => element.props['aria-label'] === '새 태그 이름'),
+      false,
+      'fresh reconciliation closes the idless editor',
+    );
+
+    tagManagerApiFailures.delete('calendarTagsSave');
+    tagManagerCanonicalTagsAfterReload = null;
+    await buttonByLabel(tree, '서버 정본 태그 위로').props.onClick?.();
+    assert.deepEqual(tagManagerApiCalls.at(-2)?.args, [[
+      { id: 'tag-review', name: '검수', color: '#00B894', sort_order: 0 },
+      { id: 'tag-server-new', name: '서버 정본', color: '#6C5CE7', sort_order: 1 },
+      { id: 'tag-meeting', name: '회의', color: '#FDCB6E', sort_order: 2 },
+    ]], 'the next mutation reuses only the canonical server UUID');
+  });
+
+  await t.test('an in-flight save locks a forced remount until its authoritative UUID settles', async () => {
+    resetHarness();
+    tagManagerCanonicalTagsAfterReload = [
+      { id: 'tag-review', name: '검수', color: '#00B894', sortOrder: 0 },
+      { id: 'tag-meeting', name: '회의', color: '#FDCB6E', sortOrder: 1 },
+      { id: 'tag-generated-1', name: '동시 추가', color: '#6C5CE7', sortOrder: 2 },
+    ];
+    tagManagerSaveGate = new Promise<void>((resolve) => {
+      resolveTagManagerSaveGate = resolve;
+    });
+    tagManagerRefreshGate = new Promise<void>((resolve) => {
+      resolveTagManagerRefreshGate = resolve;
+    });
+    let tree = await renderTagManagerPopover();
+    buttonByText(tree, '새 태그').props.onClick?.();
+    tree = await renderTagManagerPopover();
+    formElementByLabel(tree, '새 태그 이름').props.onChange?.({ target: { value: '동시 추가', checked: false } });
+    tree = await renderTagManagerPopover();
+    const firstSave = buttonByLabel(tree, '새 태그 저장').props.onClick?.();
+
+    assert.equal(tagManagerApiCalls.filter((call) => call.name === 'calendarTagsSave').length, 1);
+    stateSlots = [];
+    tagManagerRefSlots = [];
+    tree = await renderTagManagerPopover();
+    assert.match(textContent(tree), /동시 추가/, 'the remount renders the exact in-flight full list');
+    assert.equal(buttonByLabel(tree, '동시 추가 태그 편집').props.disabled, true);
+    assert.equal(buttonByLabel(tree, '회의 태그 위로').props.disabled, true);
+    assert.equal(buttonByText(tree, '새 태그').props.disabled, true);
+
+    buttonByLabel(tree, '동시 추가 태그 편집').props.onClick?.();
+    buttonByLabel(tree, '회의 태그 위로').props.onClick?.();
+    tree = await renderTagManagerPopover();
+    assert.equal(
+      findFormElements(tree).some((element) => element.props['aria-label'] === '동시 추가 태그 이름'),
+      false,
+      'programmatic handlers cannot bypass the module flight from a remounted instance',
+    );
+    assert.equal(
+      tagManagerApiCalls.filter((call) => call.name === 'calendarTagsSave').length,
+      1,
+      'no second full-list save starts before the first save and refresh settle',
+    );
+
+    resolveTagManagerSaveGate?.();
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    assert.deepEqual(
+      tagManagerApiCalls.map((call) => call.name),
+      ['calendarTagsSave', 'loadAll'],
+      'the module flight remains active after persistence while canonical refresh is pending',
+    );
+    tree = await renderTagManagerPopover();
+    assert.equal(buttonByLabel(tree, '동시 추가 태그 편집').props.disabled, true);
+    buttonByLabel(tree, '회의 태그 위로').props.onClick?.();
+    assert.equal(tagManagerApiCalls.filter((call) => call.name === 'calendarTagsSave').length, 1);
+
+    resolveTagManagerRefreshGate?.();
+    await firstSave;
+    tree = await renderTagManagerPopover();
+    assert.equal(buttonByLabel(tree, '동시 추가 태그 편집').props.disabled, false);
+    assert.equal(buttonByText(tree, '새 태그').props.disabled, false);
+
+    tagManagerSaveGate = null;
+    tagManagerRefreshGate = null;
+    tagManagerCanonicalTagsAfterReload = null;
+    await buttonByLabel(tree, '동시 추가 태그 위로').props.onClick?.();
+    assert.deepEqual(tagManagerApiCalls.at(-2)?.args, [[
+      { id: 'tag-review', name: '검수', color: '#00B894', sort_order: 0 },
+      { id: 'tag-generated-1', name: '동시 추가', color: '#6C5CE7', sort_order: 1 },
+      { id: 'tag-meeting', name: '회의', color: '#FDCB6E', sort_order: 2 },
+    ]], 'the remounted instance converges to the settled server UUID before its next save');
   });
 });
 
@@ -1534,7 +1800,7 @@ test('TagManagerPopover confirms deletion and reloads after both successful and 
     assert.equal(tagManagerCloseCount, 0);
   });
 
-  await t.test('a tag-sensitive reload rejects stale tag metadata and restores the previous drafts', async () => {
+  await t.test('a tag-sensitive reload failure keeps the already committed deletion', async () => {
     resetHarness();
     tagManagerMetadataFreshness = { calendarsFresh: true, tagsFresh: false };
     tagManagerConfirmResponses = [true];
@@ -1545,7 +1811,159 @@ test('TagManagerPopover confirms deletion and reloads after both successful and 
     assert.deepEqual(tagManagerApiCalls.map((call) => call.name), ['calendarTagsSave', 'loadBflowEvents']);
     assert.equal(tagManagerToastErrors.length, 1);
     assert.equal(tagManagerCloseCount, 0);
-    assert.match(textContent(tree), /검수.*회의/, 'the failed optimistic delete restores the exact previous draft list');
+    assert.match(textContent(tree), /검수/);
+    assert.doesNotMatch(
+      textContent(tree),
+      /회의/,
+      'a deleted UUID must not be resurrected after only the reconciliation step fails',
+    );
+    assert.ok(buttonByLabel(tree, '최신 태그 목록 다시 불러오기'));
+    assert.equal(
+      buttonByLabel(tree, '검수 태그 편집').props.disabled,
+      false,
+      'authoritative saved rows remain editable while only reconciliation needs a retry',
+    );
+
+    stateSlots = [];
+    tagManagerRefSlots = [];
+    tree = await renderTagManagerPopover();
+    assert.doesNotMatch(textContent(tree), /회의/, 'reopening keeps the authoritative committed delete');
+    assert.ok(buttonByLabel(tree, '최신 태그 목록 다시 불러오기'));
+
+    tagManagerMetadataFreshness = { calendarsFresh: true, tagsFresh: true };
+    tagManagerCanonicalTagsAfterReload = [
+      { id: 'tag-review', name: '검수', color: '#00B894', sortOrder: 0 },
+    ];
+    tagManagerRefreshGate = new Promise<void>((resolve) => {
+      resolveTagManagerRefreshGate = resolve;
+    });
+    const retry = buttonByLabel(tree, '최신 태그 목록 다시 불러오기').props.onClick?.();
+    tree = await renderTagManagerPopover();
+    assert.equal(buttonByLabel(tree, '최신 태그 목록 다시 불러오기').props.disabled, true);
+    assert.equal(buttonByLabel(tree, '검수 태그 편집').props.disabled, true);
+    buttonByLabel(tree, '최신 태그 목록 다시 불러오기').props.onClick?.();
+    assert.equal(
+      tagManagerApiCalls.filter((call) => call.name === 'loadBflowEvents').length,
+      2,
+      'a remounted retry handler cannot start a second canonical refresh during module flight',
+    );
+    resolveTagManagerRefreshGate?.();
+    await retry;
+    tagManagerRefreshGate = null;
+    tree = await renderTagManagerPopover();
+    assert.equal(
+      findButtons(tree).some((button) => button.props['aria-label'] === '최신 태그 목록 다시 불러오기'),
+      false,
+      'a fresh retry clears the non-locking reconciliation state',
+    );
+  });
+
+  await t.test('a later metadata save cannot clear an unresolved event reconciliation', async () => {
+    resetHarness();
+    tagManagerMetadataFreshness = { calendarsFresh: true, tagsFresh: false };
+    tagManagerConfirmResponses = [true];
+    let tree = await renderTagManagerPopover();
+    await buttonByLabel(tree, '회의 태그 삭제').props.onClick?.();
+    tree = await renderTagManagerPopover();
+    assert.ok(buttonByLabel(tree, '최신 태그 목록 다시 불러오기'));
+
+    tagManagerMetadataFreshness = { calendarsFresh: true, tagsFresh: true };
+    buttonByLabel(tree, '검수 태그 편집').props.onClick?.();
+    tree = await renderTagManagerPopover();
+    formElementByLabel(tree, '검수 태그 이름').props.onChange?.({ target: { value: '검수 수정', checked: false } });
+    tree = await renderTagManagerPopover();
+    await buttonByLabel(tree, '검수 태그 저장').props.onClick?.();
+    tree = await renderTagManagerPopover();
+
+    assert.deepEqual(
+      tagManagerApiCalls.map((call) => call.name),
+      ['calendarTagsSave', 'loadBflowEvents', 'calendarTagsSave', 'loadAll'],
+      'the safe follow-up mutation may refresh metadata but does not pretend events were refreshed',
+    );
+    assert.ok(
+      buttonByLabel(tree, '최신 태그 목록 다시 불러오기'),
+      'the stronger unresolved event reconciliation survives the metadata save',
+    );
+    assert.match(textContent(tree), /검수 수정/);
+    assert.doesNotMatch(textContent(tree), /회의/);
+
+    stateSlots = [];
+    tagManagerRefSlots = [];
+    tree = await renderTagManagerPopover();
+    assert.ok(buttonByLabel(tree, '최신 태그 목록 다시 불러오기'));
+    assert.match(textContent(tree), /검수 수정/, 'the latest committed drafts survive remount with the event latch');
+
+    tagManagerCanonicalTagsAfterReload = [
+      { id: 'tag-review', name: '검수 수정', color: '#00B894', sortOrder: 0 },
+    ];
+    await buttonByLabel(tree, '최신 태그 목록 다시 불러오기').props.onClick?.();
+    tree = await renderTagManagerPopover();
+    assert.deepEqual(tagManagerApiCalls.map((call) => call.name).slice(-1), ['loadBflowEvents']);
+    assert.equal(
+      findButtons(tree).some((button) => button.props['aria-label'] === '최신 태그 목록 다시 불러오기'),
+      false,
+      'only a fresh event reconciliation clears the inherited strongest mode',
+    );
+  });
+
+  await t.test('an ambiguous delete locks mutations until an explicit fresh event reconciliation', async () => {
+    resetHarness();
+    calendarState.tags.push({ id: 'tag-third', name: '세번째', color: '#74B9FF', sortOrder: 30 });
+    tagManagerApiFailures.add('calendarTagsSave');
+    tagManagerMetadataFreshness = { calendarsFresh: true, tagsFresh: false };
+    tagManagerConfirmResponses = [true];
+    let tree = await renderTagManagerPopover();
+    await buttonByLabel(tree, '회의 태그 삭제').props.onClick?.();
+    tree = await renderTagManagerPopover();
+
+    assert.doesNotMatch(textContent(tree), /회의/, 'the exact submitted delete remains visible while commit is unknown');
+    assert.ok(buttonByLabel(tree, '최신 태그 목록 다시 불러오기'));
+    assert.equal(buttonByLabel(tree, '세번째 태그 위로').props.disabled, true, 'reordering is locked');
+    assert.equal(buttonByLabel(tree, '검수 태그 편집').props.disabled, true, 'editing is locked');
+    assert.equal(buttonByLabel(tree, '검수 태그 삭제').props.disabled, true, 'deletion is locked');
+    assert.equal(buttonByText(tree, '새 태그').props.disabled, true, 'creation is locked');
+
+    stateSlots = [];
+    tagManagerRefSlots = [];
+    tree = await renderTagManagerPopover();
+    assert.ok(
+      buttonByLabel(tree, '최신 태그 목록 다시 불러오기'),
+      'closing and reopening cannot discard the ambiguous-write lock',
+    );
+    assert.doesNotMatch(textContent(tree), /회의/, 'reopening cannot resurrect the submitted delete UUID');
+
+    buttonByLabel(tree, '검수 태그 편집').props.onClick?.();
+    tree = await renderTagManagerPopover();
+    assert.equal(
+      findFormElements(tree).some((element) => element.props['aria-label'] === '검수 태그 이름'),
+      false,
+      'a programmatic click cannot bypass the mutation lock',
+    );
+
+    await buttonByLabel(tree, '최신 태그 목록 다시 불러오기').props.onClick?.();
+    tree = await renderTagManagerPopover();
+    assert.ok(buttonByLabel(tree, '최신 태그 목록 다시 불러오기'), 'a stale retry stays locked');
+    assert.deepEqual(
+      tagManagerApiCalls.map((call) => call.name),
+      ['calendarTagsSave', 'loadBflowEvents', 'loadBflowEvents'],
+      'delete reconciliation keeps requiring fresh events as well as tags',
+    );
+
+    tagManagerMetadataFreshness = { calendarsFresh: true, tagsFresh: true };
+    tagManagerCanonicalTagsAfterReload = [
+      { id: 'tag-review', name: '검수', color: '#00B894', sortOrder: 0 },
+      { id: 'tag-third', name: '세번째', color: '#74B9FF', sortOrder: 1 },
+    ];
+    await buttonByLabel(tree, '최신 태그 목록 다시 불러오기').props.onClick?.();
+    tree = await renderTagManagerPopover();
+
+    assert.equal(
+      findButtons(tree).some((button) => button.props['aria-label'] === '최신 태그 목록 다시 불러오기'),
+      false,
+      'fresh canonical reconciliation unlocks the manager',
+    );
+    assert.equal(buttonByLabel(tree, '세번째 태그 위로').props.disabled, false);
+    assert.doesNotMatch(textContent(tree), /회의/, 'a UUID absent from the canonical rows is never resurrected');
   });
 });
 
@@ -1734,6 +2152,85 @@ test('ScheduleView refreshes panel state from the authoritative event cache afte
   assert.equal(scheduleGetEventsCalls, 2);
 });
 
+test('ScheduleView reconciles a remounted quick edit after optimistic persistence rolls back', async () => {
+  resetHarness();
+  const before: ScheduleCalendarEvent = {
+    id: 'event-rollback',
+    title: '팀 회의',
+    memo: '',
+    color: '#6C5CE7',
+    type: 'custom',
+    startDate: '2026-08-25',
+    endDate: '2026-08-25',
+    createdBy: '배한솔',
+    createdAt: '2026-08-24T00:00:00.000Z',
+    source: 'bflow',
+    sourceCalendarId: 'bflow:mine',
+    calendarId: 'mine',
+    tagId: 'tag-meeting',
+    canEdit: true,
+    isReadOnly: false,
+  };
+  const optimistic = {
+    ...before,
+    color: '#74B9FF',
+    sourceCalendarId: 'bflow:editable-share',
+    calendarId: 'editable-share',
+    tagId: 'tag-review',
+  };
+  const persistenceError = new Error('calendar persistence failed');
+  let rejectUpdate!: (reason: Error) => void;
+  const pendingUpdate = new Promise<void>((_resolve, reject) => {
+    rejectUpdate = reject;
+  });
+  scheduleUpdateHandler = async () => pendingUpdate;
+  scheduleCanonicalEvents = [before];
+
+  await renderScheduleView();
+  stateSlots[0] = [before];
+  await renderScheduleView();
+  scheduleGridProps.at(-1)?.onEventContextMenu(before, {
+    preventDefault() {},
+    stopPropagation() {},
+    clientX: 120,
+    clientY: 180,
+  });
+  await renderScheduleView();
+  const originalQuickEdit = scheduleQuickEditProps.at(-1);
+  assert.ok(originalQuickEdit);
+  const updateResult = originalQuickEdit.onUpdate(before.id, {
+    calendarId: optimistic.calendarId,
+    tagId: optimistic.tagId,
+  });
+  assert.ok(updateResult instanceof Promise);
+
+  originalQuickEdit.onClose();
+  stateSlots[0] = [optimistic];
+  await renderScheduleView();
+  scheduleGridProps.at(-1)?.onEventClick(optimistic);
+  scheduleGridProps.at(-1)?.onEventContextMenu(optimistic, {
+    preventDefault() {},
+    stopPropagation() {},
+    clientX: 160,
+    clientY: 220,
+  });
+  await renderScheduleView();
+  assert.deepEqual(schedulePanelProps.at(-1)?.event, optimistic);
+  assert.deepEqual(scheduleQuickEditProps.at(-1)?.event, optimistic, 'the reopened popup starts from the optimistic broadcast');
+
+  rejectUpdate(persistenceError);
+  await assert.rejects(updateResult, (error) => {
+    assert.equal(error, persistenceError, 'the original persistence error reaches EventQuickEdit');
+    return true;
+  });
+  await renderScheduleView();
+
+  assert.equal(scheduleGetEventsCalls, 1, 'a rejected write still reads the rolled-back canonical cache');
+  assert.deepEqual(scheduleGridProps.at(-1)?.events, [before], 'the calendar list returns to the canonical event');
+  assert.deepEqual(schedulePanelProps.at(-1)?.event, before, 'an open panel returns to the canonical event');
+  assert.deepEqual(scheduleQuickEditProps.at(-1)?.event, before, 'the remounted popup returns to the canonical event');
+});
+
 test('ScheduleView quick edit removes the color callback and duplicates a read-only B flow event into the editable personal calendar', async () => {
   resetHarness();
   const readOnly: ScheduleCalendarEvent = {
@@ -1862,7 +2359,7 @@ test('CalendarSettingsModal edits visibility and members in permission-safe orde
     assert.equal(settingsToastErrors.length, 1);
   });
 
-  await t.test('a successful shared edit updates first, then replaces members, then reloads events', async () => {
+  await t.test('a successful shared edit sends fields and members in one atomic update before reloading events', async () => {
     resetHarness();
     let tree = await renderCalendarSettingsModal(shared, 14);
     buttonByLabel(tree, '장삐쭈 편집 권한').props.onClick?.();
@@ -1870,19 +2367,21 @@ test('CalendarSettingsModal edits visibility and members in permission-safe orde
     await buttonByText(tree, '저장').props.onClick?.();
 
     assert.deepEqual(settingsApiCalls.map((call) => call.name), [
-      'calendarUpdate', 'calendarSetMembers', 'loadBflowEvents',
+      'calendarUpdate', 'loadBflowEvents',
     ]);
-    assert.deepEqual(settingsApiCalls[1].args, [
+    assert.deepEqual(settingsApiCalls[0].args, [
       'shared-settings',
-      [
-        { user_id: myUserId, can_edit: true },
-        { user_id: 'user-jang', can_edit: true },
-      ],
+      {
+        members: [
+          { user_id: myUserId, can_edit: true },
+          { user_id: 'user-jang', can_edit: true },
+        ],
+      },
     ]);
     assert.equal(settingsCloseCount, 1);
   });
 
-  await t.test('switching a team calendar to private reloads event permissions and skips member replacement', async () => {
+  await t.test('switching a team calendar to private atomically clears members before reloading permissions', async () => {
     resetHarness();
     const team = calendar({
       ...shared,
@@ -1897,7 +2396,7 @@ test('CalendarSettingsModal edits visibility and members in permission-safe orde
     assert.deepEqual(settingsApiCalls.map((call) => call.name), ['calendarUpdate', 'loadBflowEvents']);
     assert.deepEqual(settingsApiCalls[0].args, [
       'team-settings',
-      { visibility: 'private' },
+      { visibility: 'private', members: [] },
     ]);
   });
 
@@ -1910,11 +2409,11 @@ test('CalendarSettingsModal edits visibility and members in permission-safe orde
     await buttonByText(tree, '저장').props.onClick?.();
 
     assert.deepEqual(settingsApiCalls.map((call) => call.name), [
-      'calendarUpdate', 'calendarSetMembers', 'loadBflowEvents',
+      'calendarUpdate', 'loadBflowEvents',
     ]);
-    assert.deepEqual(settingsApiCalls[1].args, [
+    assert.deepEqual(settingsApiCalls[0].args, [
       'shared-settings',
-      [{ user_id: 'user-jang', can_edit: false }],
+      { members: [{ user_id: 'user-jang', can_edit: false }] },
     ]);
     assert.equal(settingsCloseCount, 0);
     assert.equal(settingsToastSuccesses.length, 0);
@@ -1983,23 +2482,263 @@ test('CalendarSettingsModal confirms destructive deletion and reloads on success
   });
 });
 
-test('CalendarSettingsModal treats a warmed calendar-list failure as a save failure and keeps edits open', async () => {
-  resetHarness();
-  settingsMetadataFreshness = { calendarsFresh: false, tagsFresh: true };
-  let tree = await renderCalendarSettingsModal();
-  formElementByLabel(tree, '캘린더 이름').props.onChange?.({ target: { value: '재시도 캘린더', checked: false } });
-  tree = await renderCalendarSettingsModal();
-  await buttonByText(tree, '저장').props.onClick?.();
+test('CalendarSettingsModal reconciles confirmed commits and ambiguous response loss without duplicate mutations', async (t) => {
+  await t.test('a committed create with a failed reload survives remount and cannot be submitted twice', async () => {
+    resetHarness();
+    settingsMetadataFreshness = { calendarsFresh: false, tagsFresh: true };
+    let tree = await renderCalendarSettingsModal();
+    formElementByLabel(tree, '캘린더 이름').props.onChange?.({ target: { value: '재시도 캘린더', checked: false } });
+    tree = await renderCalendarSettingsModal();
+    await buttonByText(tree, '저장').props.onClick?.();
 
-  assert.deepEqual(settingsApiCalls.map((call) => call.name), ['calendarCreate', 'loadAll']);
-  assert.equal(settingsCloseCount, 0);
-  assert.equal(settingsToastErrors.length, 1);
+    assert.deepEqual(settingsApiCalls.map((call) => call.name), ['calendarCreate', 'loadAll']);
+    assert.equal(settingsCloseCount, 0);
+    assert.match(settingsToastErrors[0], /저장됐지만|만들어졌지만/);
+
+    stateSlots = [];
+    modalRefSlots = [];
+    tree = await renderCalendarSettingsModal();
+    assert.ok(buttonByLabel(tree, '최신 캘린더 목록 다시 불러오기'));
+    assert.equal(buttonByText(tree, '저장').props.disabled, true, 'the confirmed create stays mutation-locked after remount');
+    await buttonByText(tree, '저장').props.onClick?.();
+    assert.equal(
+      settingsApiCalls.filter((call) => call.name === 'calendarCreate').length,
+      1,
+      'a programmatic second click cannot create a duplicate',
+    );
+
+    settingsMetadataFreshness = { calendarsFresh: true, tagsFresh: true };
+    await buttonByLabel(tree, '최신 캘린더 목록 다시 불러오기').props.onClick?.();
+    assert.equal(settingsCloseCount, 1, 'a fresh canonical retry finishes the already confirmed create');
+  });
+
+  await t.test('a settled old create cannot close an unrelated settings modal opened while persistence was pending', async () => {
+    resetHarness();
+    const closeCalls: string[] = [];
+    settingsApiGate = new Promise<void>((resolve) => {
+      resolveSettingsApiGate = resolve;
+    });
+    let tree = await renderCalendarSettingsModal(undefined, 4, () => { closeCalls.push('create'); });
+    formElementByLabel(tree, '캘린더 이름').props.onChange?.({ target: { value: '느린 생성', checked: false } });
+    tree = await renderCalendarSettingsModal(undefined, 4, () => { closeCalls.push('create'); });
+    const pendingSave = buttonByText(tree, '저장').props.onClick?.();
+    assert.equal(settingsApiCalls.filter((call) => call.name === 'calendarCreate').length, 1);
+
+    buttonByLabel(tree, '닫기').props.onClick?.();
+    assert.deepEqual(closeCalls, ['create']);
+    stateSlots = [];
+    modalRefSlots = [];
+    const unrelated = calendar({ id: 'unrelated-settings', name: '다른 캘린더', canManage: true });
+    tree = await renderCalendarSettingsModal(unrelated, 1, () => { closeCalls.push('unrelated'); });
+    assert.equal(buttonByText(tree, '저장').props.disabled, true, 'the unrelated modal stays globally locked during the old write');
+
+    resolveSettingsApiGate?.();
+    await pendingSave;
+    assert.deepEqual(
+      closeCalls,
+      ['create'],
+      'the unmounted create continuation must not invoke either its stale close or the unrelated modal close',
+    );
+    tree = await renderCalendarSettingsModal(unrelated, 1, () => { closeCalls.push('unrelated'); });
+    assert.equal(buttonByText(tree, '저장').props.disabled, false, 'the unrelated modal unlocks after the old write settles');
+  });
+
+  await t.test('an A reconciliation does not lock B and returns only when actor A signs back in', async () => {
+    resetHarness();
+    const closeCalls: string[] = [];
+    const actorA = settingsCurrentUser;
+    const actorB = settingsUsers.find((user) => user.id === 'user-jang');
+    assert.ok(actorB);
+    const calendarA = calendar({ id: 'actor-a-calendar', ownerId: actorA.id, canManage: true });
+    const calendarB = calendar({ id: 'actor-b-calendar', ownerId: actorB.id, canManage: true });
+    settingsBflowReloadResult = false;
+    let tree = await renderCalendarSettingsModal(calendarA, 1, () => { closeCalls.push('A'); });
+    buttonByLabel(tree, '색상 #74B9FF').props.onClick?.();
+    tree = await renderCalendarSettingsModal(calendarA, 1, () => { closeCalls.push('A'); });
+    await buttonByText(tree, '저장').props.onClick?.();
+    assert.ok(buttonByLabel(await renderCalendarSettingsModal(calendarA), '최신 캘린더 목록 다시 불러오기'));
+
+    settingsCurrentUser = actorB;
+    settingsBflowReloadResult = true;
+    stateSlots = [];
+    modalRefSlots = [];
+    tree = await renderCalendarSettingsModal(calendarB, 1, () => { closeCalls.push('B'); });
+    assert.equal(
+      findButtons(tree).some((button) => button.props['aria-label'] === '최신 캘린더 목록 다시 불러오기'),
+      false,
+      'actor B never sees actor A reconciliation',
+    );
+    assert.equal(buttonByText(tree, '저장').props.disabled, false, 'actor B mutations remain usable');
+    formElementByLabel(tree, '캘린더 이름').props.onChange?.({ target: { value: 'B 수정', checked: false } });
+    tree = await renderCalendarSettingsModal(calendarB, 1, () => { closeCalls.push('B'); });
+    await buttonByText(tree, '저장').props.onClick?.();
+    assert.deepEqual(closeCalls, ['B']);
+    assert.equal(settingsApiCalls.filter((call) => call.name === 'calendarUpdate').length, 2);
+
+    settingsCurrentUser = actorA;
+    stateSlots = [];
+    modalRefSlots = [];
+    tree = await renderCalendarSettingsModal(calendarA, 1, () => { closeCalls.push('A'); });
+    assert.ok(buttonByLabel(tree, '최신 캘린더 목록 다시 불러오기'));
+    assert.equal(buttonByLabel(tree, '색상 #74B9FF').props['aria-pressed'], true, 'actor A intent draft is restored');
+    await buttonByLabel(tree, '최신 캘린더 목록 다시 불러오기').props.onClick?.();
+    assert.deepEqual(closeCalls, ['B', 'A']);
+  });
+
+  await t.test('an actor switch during deferred refresh preserves A latch without verifying against B data', async () => {
+    resetHarness();
+    const closeCalls: string[] = [];
+    const actorA = settingsCurrentUser;
+    const actorB = settingsUsers.find((user) => user.id === 'user-jang');
+    assert.ok(actorB);
+    const calendarA = calendar({ id: 'deferred-actor-a', ownerId: actorA.id, canManage: true });
+    const calendarB = calendar({ id: 'deferred-actor-b', ownerId: actorB.id, canManage: true });
+    settingsRefreshGate = new Promise<void>((resolve) => {
+      resolveSettingsRefreshGate = resolve;
+    });
+    let tree = await renderCalendarSettingsModal(calendarA, 1, () => { closeCalls.push('A'); });
+    buttonByLabel(tree, '색상 #74B9FF').props.onClick?.();
+    tree = await renderCalendarSettingsModal(calendarA, 1, () => { closeCalls.push('A'); });
+    const pendingSave = buttonByText(tree, '저장').props.onClick?.();
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    assert.deepEqual(settingsApiCalls.map((call) => call.name), ['calendarUpdate', 'loadBflowEvents']);
+
+    settingsCurrentUser = actorB;
+    stateSlots = [];
+    modalRefSlots = [];
+    tree = await renderCalendarSettingsModal(calendarB, 1, () => { closeCalls.push('B'); });
+    assert.equal(buttonByText(tree, '저장').props.disabled, false);
+    assert.equal(
+      findButtons(tree).some((button) => button.props['aria-label'] === '최신 캘린더 목록 다시 불러오기'),
+      false,
+    );
+
+    resolveSettingsRefreshGate?.();
+    await pendingSave;
+    assert.deepEqual(closeCalls, [], 'A async continuation cannot close actor B');
+    tree = await renderCalendarSettingsModal(calendarB, 1, () => { closeCalls.push('B'); });
+    assert.equal(buttonByText(tree, '저장').props.disabled, false);
+
+    settingsCurrentUser = actorA;
+    settingsRefreshGate = null;
+    stateSlots = [];
+    modalRefSlots = [];
+    tree = await renderCalendarSettingsModal(calendarA, 1, () => { closeCalls.push('A'); });
+    assert.ok(
+      buttonByLabel(tree, '최신 캘린더 목록 다시 불러오기'),
+      'actor A returns to a safe confirmed-write reconciliation instead of a B-filtered verification',
+    );
+    await buttonByLabel(tree, '최신 캘린더 목록 다시 불러오기').props.onClick?.();
+    assert.deepEqual(closeCalls, ['A']);
+  });
+
+  await t.test('a create response loss closes only when one new exact canonical calendar verifies the intent', async () => {
+    resetHarness();
+    const before = calendarState.calendars.map((item) => ({ ...item, members: item.members.map((member) => ({ ...member })) }));
+    settingsApiFailures.add('calendarCreate');
+    settingsCanonicalCalendarsAfterReload = [...before, calendar({
+      id: 'server-created',
+      name: '응답 유실 캘린더',
+      color: '#6C5CE7',
+      visibility: 'members',
+      ownerId: myUserId,
+      members: [],
+      isPersonal: false,
+    })];
+    let tree = await renderCalendarSettingsModal();
+    formElementByLabel(tree, '캘린더 이름').props.onChange?.({ target: { value: '응답 유실 캘린더', checked: false } });
+    tree = await renderCalendarSettingsModal();
+    await buttonByText(tree, '저장').props.onClick?.();
+
+    assert.deepEqual(settingsApiCalls.map((call) => call.name), ['calendarCreate', 'loadAll']);
+    assert.equal(settingsCloseCount, 1, 'the exact post-call ID candidate proves the response-lost create committed');
+    tree = await renderCalendarSettingsModal();
+    assert.equal(
+      findButtons(tree).some((button) => button.props['aria-label'] === '최신 캘린더 목록 다시 불러오기'),
+      false,
+      'verified response loss leaves no retry latch',
+    );
+  });
+
+  await t.test('dual create failure survives remount and unlocks only after an explicit fresh no-commit proof', async () => {
+    resetHarness();
+    settingsApiFailures.add('calendarCreate');
+    settingsMetadataFreshness = { calendarsFresh: false, tagsFresh: true };
+    let tree = await renderCalendarSettingsModal();
+    formElementByLabel(tree, '캘린더 이름').props.onChange?.({ target: { value: '모호한 캘린더', checked: false } });
+    tree = await renderCalendarSettingsModal();
+    await buttonByText(tree, '저장').props.onClick?.();
+
+    stateSlots = [];
+    modalRefSlots = [];
+    tree = await renderCalendarSettingsModal();
+    assert.ok(buttonByLabel(tree, '최신 캘린더 목록 다시 불러오기'));
+    assert.equal(buttonByText(tree, '저장').props.disabled, true);
+    await buttonByText(tree, '저장').props.onClick?.();
+    assert.equal(settingsApiCalls.filter((call) => call.name === 'calendarCreate').length, 1);
+
+    settingsMetadataFreshness = { calendarsFresh: true, tagsFresh: true };
+    settingsCanonicalCalendarsAfterReload = calendarState.calendars.map((item) => ({
+      ...item,
+      members: item.members.map((member) => ({ ...member })),
+    }));
+    await buttonByLabel(tree, '최신 캘린더 목록 다시 불러오기').props.onClick?.();
+    tree = await renderCalendarSettingsModal();
+    assert.equal(settingsCloseCount, 0, 'a no-commit proof keeps the draft open for a deliberate retry');
+    assert.equal(
+      findButtons(tree).some((button) => button.props['aria-label'] === '최신 캘린더 목록 다시 불러오기'),
+      false,
+    );
+    assert.equal(buttonByText(tree, '저장').props.disabled, false, 'only the explicit canonical retry unlocks creation');
+  });
+
+  await t.test('an update response loss closes when fresh target fields and normalized members exactly match', async () => {
+    resetHarness();
+    const editable = calendar({
+      id: 'update-response-loss',
+      name: '리드 회의',
+      visibility: 'members',
+      ownerId: 'owner-lead',
+      members: [{ userId: 'user-jang', canEdit: false }],
+      canManage: true,
+    });
+    settingsApiFailures.add('calendarUpdate');
+    settingsCanonicalCalendarsAfterReload = [...calendarState.calendars, {
+      ...editable,
+      name: '리드 회의 수정',
+      members: [{ userId: 'user-jang', canEdit: true }],
+    }];
+    let tree = await renderCalendarSettingsModal(editable, 2);
+    formElementByLabel(tree, '캘린더 이름').props.onChange?.({ target: { value: '리드 회의 수정', checked: false } });
+    buttonByLabel(tree, '장삐쭈 편집 권한').props.onClick?.();
+    tree = await renderCalendarSettingsModal(editable, 2);
+    await buttonByText(tree, '저장').props.onClick?.();
+
+    assert.deepEqual(settingsApiCalls.map((call) => call.name), ['calendarUpdate', 'loadBflowEvents']);
+    assert.equal(settingsCloseCount, 1);
+  });
+
+  await t.test('a delete response loss closes when the fresh canonical list proves the target absent', async () => {
+    resetHarness();
+    const editable = calendar({ id: 'delete-response-loss', name: '삭제 응답 유실', canManage: true });
+    settingsApiFailures.add('calendarDelete');
+    settingsConfirmResponses = [true];
+    settingsCanonicalCalendarsAfterReload = calendarState.calendars.map((item) => ({
+      ...item,
+      members: item.members.map((member) => ({ ...member })),
+    }));
+    const tree = await renderCalendarSettingsModal(editable, 7);
+    await buttonByText(tree, '캘린더 삭제').props.onClick?.();
+
+    assert.deepEqual(settingsApiCalls.map((call) => call.name), ['calendarDelete', 'loadBflowEvents']);
+    assert.equal(settingsCloseCount, 1);
+  });
 });
 
-test('CalendarSettingsModal treats a false event reload result as a color save failure', async () => {
+test('CalendarSettingsModal keeps an ordinary failed update open and mutation-locked until reconciliation', async () => {
   resetHarness();
-  settingsBflowReloadResult = false;
-  const editable = calendar({ id: 'color-refresh', canManage: true });
+  settingsApiFailures.add('calendarUpdate');
+  const editable = calendar({ id: 'ordinary-update-failure', canManage: true });
   let tree = await renderCalendarSettingsModal(editable, 2);
   buttonByLabel(tree, '색상 #74B9FF').props.onClick?.();
   tree = await renderCalendarSettingsModal(editable, 2);
@@ -2009,6 +2748,9 @@ test('CalendarSettingsModal treats a false event reload result as a color save f
   assert.equal(settingsCloseCount, 0);
   assert.equal(settingsToastSuccesses.length, 0);
   assert.equal(settingsToastErrors.length, 1);
+  tree = await renderCalendarSettingsModal(editable, 2);
+  assert.ok(buttonByLabel(tree, '최신 캘린더 목록 다시 불러오기'));
+  assert.equal(buttonByText(tree, '저장').props.disabled, true);
 });
 
 test('EventCreateModal shows editable calendars in field order, defaults personal, and removes legacy privacy and color controls', async () => {

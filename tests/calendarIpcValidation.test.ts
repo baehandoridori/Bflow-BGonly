@@ -674,6 +674,48 @@ test('calendar:set-members filters the owner and strips extra fields before repl
   }
 });
 
+test('calendar:update persists calendar fields and sanitized members in one storage call', async () => {
+  const updates: unknown[][] = [];
+  let replaceCalls = 0;
+  const harness = await createIpcHarness({
+    getUserRole: async () => 'user',
+    getCalendarWithMembers: async () => ({
+      calendar: calendarRow({ visibility: 'members', owner_id: 'user-1' }),
+      members: [],
+    }),
+    updateCalendar: async (...args) => { updates.push(args); },
+    replaceMembers: async () => { replaceCalls += 1; },
+  });
+  try {
+    await harness.invoke('calendar:update', 'calendar-1', {
+      name: '원자 수정',
+      visibility: 'members',
+      members: [
+        { user_id: 'user-1', can_edit: true, role: 'owner-spoof' },
+        { user_id: 'user-2', can_edit: false, role: 'admin-spoof' },
+      ],
+    });
+
+    assert.deepEqual(updates, [[
+      'calendar-1',
+      {
+        name: '원자 수정',
+        visibility: 'members',
+        members: [{ user_id: 'user-2', can_edit: false }],
+      },
+      'user-1',
+    ]]);
+    assert.equal(replaceCalls, 0);
+    assert.deepEqual(harness.broadcasts, [
+      { kind: 'data', args: ['calendars', 'UPDATE'] },
+      { kind: 'data', args: ['calendar_members', 'UPDATE'] },
+      { kind: 'calendar', args: ['UPDATE'] },
+    ]);
+  } finally {
+    harness.restore();
+  }
+});
+
 test('calendar management writes bind update and delete to the main session actor', async () => {
   const updates: unknown[][] = [];
   const deletions: unknown[][] = [];

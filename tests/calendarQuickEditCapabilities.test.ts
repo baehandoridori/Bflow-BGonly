@@ -37,7 +37,7 @@ type QuickEditProps = {
   event: QuickEditEvent;
   position: { x: number; y: number };
   onClose(): void;
-  onUpdate(id: string, updates: Partial<QuickEditEvent>): void;
+  onUpdate(id: string, updates: Partial<QuickEditEvent>): void | Promise<void>;
   onDelete(id: string): void;
   onDuplicate(event: QuickEditEvent): void;
 };
@@ -60,10 +60,11 @@ type SidePanelComponent = (props: SidePanelProps) => ReactNode;
 type ButtonElement = ReactElement<{
   'aria-describedby'?: string;
   'aria-label'?: string;
+  'aria-pressed'?: boolean;
   className?: string;
   children?: ReactNode;
   disabled?: boolean;
-  onClick?: () => void;
+  onClick?: () => unknown;
   style?: Record<string, unknown>;
 }, 'button'>;
 
@@ -74,7 +75,7 @@ type FormElement = ReactElement<{
   disabled?: boolean;
   type?: string;
   value?: string;
-  onChange?: (event: { target: { checked: boolean; value: string } }) => void;
+  onChange?: (event: { target: { checked: boolean; value: string } }) => unknown;
 }, 'input' | 'select' | 'textarea'>;
 
 type QuickEditCallbacks = Pick<
@@ -88,6 +89,9 @@ let forcedTab: 'calendar' | 'edit' = 'calendar';
 let forcedEventType: QuickEditEventType | undefined;
 let forcedQuickEditDraft: Partial<Pick<QuickEditEvent, 'title' | 'startDate' | 'endDate' | 'memo'>> = {};
 let quickEditStateCursor = 0;
+let quickEditRefCursor = 0;
+let statefulQuickEditState: unknown[] | undefined;
+let statefulQuickEditRefs: Array<{ current: unknown }> | undefined;
 let capturedPortalChild: ReactNode;
 let forcedSidePanelEditing = false;
 let forcedSidePanelDraft: Partial<Pick<
@@ -178,6 +182,15 @@ async function loadQuickEdit(): Promise<QuickEditComponent> {
             const value = typeof initial === 'function'
               ? (initial as () => unknown)()
               : initial;
+            const persistentState = statefulQuickEditState;
+            if (persistentState) {
+              if (!(slot in persistentState)) persistentState[slot] = value;
+              return [persistentState[slot], (next: unknown) => {
+                persistentState[slot] = typeof next === 'function'
+                  ? (next as (current: unknown) => unknown)(persistentState[slot])
+                  : next;
+              }];
+            }
             if (slot === 1) return [forcedTab, () => {}];
             if (slot === 2 && forcedQuickEditDraft.title !== undefined) return [forcedQuickEditDraft.title, () => {}];
             if (slot === 3 && forcedQuickEditDraft.startDate !== undefined) return [forcedQuickEditDraft.startDate, () => {}];
@@ -187,7 +200,13 @@ async function loadQuickEdit(): Promise<QuickEditComponent> {
             return [value, () => {}];
           },
           useEffect: () => {},
-          useRef: (initial: unknown) => ({ current: initial }),
+          useRef: (initial: unknown) => {
+            const slot = quickEditRefCursor++;
+            const persistentRefs = statefulQuickEditRefs;
+            if (!persistentRefs) return { current: initial };
+            if (!(slot in persistentRefs)) persistentRefs[slot] = { current: initial };
+            return persistentRefs[slot];
+          },
           useCallback: (callback: unknown) => callback,
           useMemo: (factory: () => unknown) => factory(),
         };
@@ -398,6 +417,7 @@ async function renderQuickEdit(
   forcedEventType = draftType;
   forcedQuickEditDraft = draft;
   quickEditStateCursor = 0;
+  quickEditRefCursor = 0;
   capturedPortalChild = undefined;
   try {
     EventQuickEdit({
@@ -414,6 +434,64 @@ async function renderQuickEdit(
     if (previousDocument === undefined) delete globalScope.document;
     else globalScope.document = previousDocument;
   }
+}
+
+async function createStatefulQuickEditHarness(
+  initialEvent: QuickEditEvent,
+  callbacks: Partial<QuickEditCallbacks>,
+): Promise<{ render(nextEvent?: QuickEditEvent): ReactNode }> {
+  const EventQuickEdit = await loadQuickEdit();
+  const hookState: unknown[] = [];
+  const hookRefs: Array<{ current: unknown }> = [];
+  let currentEvent = initialEvent;
+
+  return {
+    render(nextEvent = currentEvent) {
+      currentEvent = nextEvent;
+      const globalScope = globalThis as typeof globalThis & { document?: { body: object } };
+      const previousDocument = globalScope.document;
+      globalScope.document = { body: {} };
+      forcedTab = 'calendar';
+      forcedEventType = undefined;
+      forcedQuickEditDraft = {};
+      quickEditStateCursor = 0;
+      quickEditRefCursor = 0;
+      capturedPortalChild = undefined;
+      statefulQuickEditState = hookState;
+      statefulQuickEditRefs = hookRefs;
+      try {
+        EventQuickEdit({
+          event: currentEvent,
+          position: { x: 0, y: 0 },
+          onClose: callbacks.onClose ?? (() => {}),
+          onUpdate: callbacks.onUpdate ?? (() => {}),
+          onDelete: callbacks.onDelete ?? (() => {}),
+          onDuplicate: callbacks.onDuplicate ?? (() => {}),
+        });
+        assert.ok(capturedPortalChild, 'createPortal child must be captured');
+        return capturedPortalChild;
+      } finally {
+        statefulQuickEditState = undefined;
+        statefulQuickEditRefs = undefined;
+        if (previousDocument === undefined) delete globalScope.document;
+        else globalScope.document = previousDocument;
+      }
+    },
+  };
+}
+
+function createDeferred(): {
+  promise: Promise<void>;
+  resolve(): void;
+  reject(reason: Error): void;
+} {
+  let resolve!: () => void;
+  let reject!: (reason: Error) => void;
+  const promise = new Promise<void>((promiseResolve, promiseReject) => {
+    resolve = promiseResolve;
+    reject = promiseReject;
+  });
+  return { promise, resolve, reject };
 }
 
 async function renderSidePanel(
@@ -484,6 +562,105 @@ test('canonical B flow quick edit replaces event colors with immediate tag and c
   });
   findButtonByText(alreadyUntaggedTree, '없음').props.onClick?.();
   assert.deepEqual(alreadyUntaggedUpdates, [], 'clearing an already empty tag is a no-op');
+});
+
+test('canonical B flow quick edit keeps pending calendar and tag selections visible until persistence settles', async () => {
+  const target = event({
+    source: 'bflow',
+    sourceCalendarId: 'bflow:calendar-1',
+    calendarId: 'calendar-1',
+    tagId: 'tag-meeting',
+    canEdit: true,
+  });
+  const writes: Array<{
+    patch: Partial<QuickEditEvent>;
+    deferred: ReturnType<typeof createDeferred>;
+  }> = [];
+  const harness = await createStatefulQuickEditHarness(target, {
+    onUpdate: (_id, patch) => {
+      const deferred = createDeferred();
+      writes.push({ patch, deferred });
+      return deferred.promise;
+    },
+  });
+
+  let tree = harness.render();
+  const calendarWrite = findFormElementByLabel(tree, '캘린더').props.onChange?.({
+    target: { value: 'calendar-2', checked: false },
+  });
+  tree = harness.render();
+  assert.equal(findFormElementByLabel(tree, '캘린더').props.value, 'calendar-2');
+  assert.equal(findFormElementByLabel(tree, '캘린더').props.disabled, true);
+  findFormElementByLabel(tree, '캘린더').props.onChange?.({
+    target: { value: 'calendar-1', checked: false },
+  });
+  assert.deepEqual(
+    writes.map(({ patch }) => patch),
+    [{ calendarId: 'calendar-2' }],
+    'a second calendar intent cannot overtake the in-flight persistence request',
+  );
+
+  const tagWrite = findButtonByText(tree, '검수').props.onClick?.();
+  tree = harness.render();
+  assert.equal(findButtonByText(tree, '검수').props['aria-pressed'], true);
+  assert.equal(findButtonByText(tree, '검수').props.disabled, true);
+  findButtonByText(tree, '회의').props.onClick?.();
+  assert.equal(findFormElementByLabel(tree, '캘린더').props.value, 'calendar-2');
+
+  findFormElementByLabel(tree, '캘린더').props.onChange?.({
+    target: { value: 'calendar-2', checked: false },
+  });
+  findButtonByText(tree, '검수').props.onClick?.();
+  assert.deepEqual(
+    writes.map(({ patch }) => patch),
+    [{ calendarId: 'calendar-2' }, { tagId: 'tag-review' }],
+    're-selecting or replacing either pending value is a no-op',
+  );
+
+  writes.forEach(({ deferred }) => deferred.resolve());
+  await Promise.all([calendarWrite, tagWrite]);
+  tree = harness.render({ ...target, calendarId: 'calendar-1', tagId: undefined });
+  assert.equal(findFormElementByLabel(tree, '캘린더').props.value, 'calendar-1');
+  assert.equal(findButtonByText(tree, '없음').props['aria-pressed'], true);
+  assert.equal(findButtonByText(tree, '검수').props['aria-pressed'], false);
+});
+
+test('canonical B flow quick edit rolls pending calendar and tag selections back when persistence rejects', async () => {
+  const target = event({
+    source: 'bflow',
+    sourceCalendarId: 'bflow:calendar-1',
+    calendarId: 'calendar-1',
+    tagId: 'tag-meeting',
+    canEdit: true,
+  });
+  const writes: Array<ReturnType<typeof createDeferred>> = [];
+  const harness = await createStatefulQuickEditHarness(target, {
+    onUpdate: () => {
+      const deferred = createDeferred();
+      writes.push(deferred);
+      return deferred.promise;
+    },
+  });
+
+  let tree = harness.render();
+  const calendarWrite = findFormElementByLabel(tree, '캘린더').props.onChange?.({
+    target: { value: 'calendar-2', checked: false },
+  });
+  tree = harness.render();
+  assert.equal(findFormElementByLabel(tree, '캘린더').props.value, 'calendar-2');
+  writes[0].reject(new Error('calendar persistence failed'));
+  await calendarWrite;
+  tree = harness.render();
+  assert.equal(findFormElementByLabel(tree, '캘린더').props.value, 'calendar-1');
+
+  const tagWrite = findButtonByText(tree, '검수').props.onClick?.();
+  tree = harness.render();
+  assert.equal(findButtonByText(tree, '검수').props['aria-pressed'], true);
+  writes[1].reject(new Error('tag persistence failed'));
+  await tagWrite;
+  tree = harness.render();
+  assert.equal(findButtonByText(tree, '회의').props['aria-pressed'], true);
+  assert.equal(findButtonByText(tree, '검수').props['aria-pressed'], false);
 });
 
 test('side panel shows calendar, tag and timed range and saves only changed temporal fields without legacy privacy', async () => {
