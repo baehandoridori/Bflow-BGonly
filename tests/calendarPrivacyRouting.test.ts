@@ -769,18 +769,23 @@ test('fresh preview seeds four visible calendars, four tags, and fifteen current
 test('preview tag replacement requires an admin session', async () => {
   const harness = await createPreviewCalendarHarness();
   try {
-    const unchanged = await harness.api.calendarTagsList();
-    const payload = unchanged.map(({ id, name, color, sort_order }) => ({
-      id, name, color, sort_order,
-    }));
+    await assert.rejects(
+      harness.api.calendarTagsList(),
+      /로그인이 필요합니다/,
+      'an unauthenticated preview must not read team tags',
+    );
 
     await assert.rejects(
-      harness.api.calendarTagsSave(payload),
+      harness.api.calendarTagsSave([]),
       /로그인이 필요합니다/,
       'an unauthenticated preview must not mutate team tags',
     );
 
     await previewLogin(harness.api, '장삐쭈');
+    const unchanged = await harness.api.calendarTagsList();
+    const payload = unchanged.map(({ id, name, color, sort_order }) => ({
+      id, name, color, sort_order,
+    }));
     await assert.rejects(
       harness.api.calendarTagsSave(payload),
       /관리자/,
@@ -793,6 +798,88 @@ test('preview tag replacement requires an admin session', async () => {
     assert.deepEqual(await harness.api.calendarTagsSave(payload), unchanged);
   } finally {
     harness.restore();
+  }
+});
+
+test('preview tag replacement validates the whole final list before changing tags or event links', async (t) => {
+  const invalidCases: Array<{
+    name: string;
+    expected: RegExp;
+    change(tags: CalendarTagRow[]): Array<{
+      id?: string;
+      name: string;
+      color: string;
+      sort_order: number;
+    }>;
+  }> = [
+    {
+      name: 'empty id',
+      expected: /requires name, color, and sort_order/,
+      change: (tags) => tags.map((tag, index) => ({
+        ...tag,
+        id: index === 0 ? '   ' : tag.id,
+      })),
+    },
+    {
+      name: 'empty name',
+      expected: /requires name, color, and sort_order/,
+      change: (tags) => tags.map((tag, index) => ({
+        ...tag,
+        name: index === 0 ? '   ' : tag.name,
+      })),
+    },
+    {
+      name: 'empty color',
+      expected: /requires name, color, and sort_order/,
+      change: (tags) => tags.map((tag, index) => ({
+        ...tag,
+        color: index === 0 ? '   ' : tag.color,
+      })),
+    },
+    {
+      name: 'duplicate id',
+      expected: /Duplicate calendar tag id/,
+      change: (tags) => tags.map((tag, index) => ({
+        ...tag,
+        id: index === 1 ? tags[0].id : tag.id,
+      })),
+    },
+    {
+      name: 'duplicate name',
+      expected: /Duplicate calendar tag name/,
+      change: (tags) => tags.map((tag, index) => ({
+        ...tag,
+        name: index === 1 ? tags[0].name : tag.name,
+      })),
+    },
+    {
+      name: 'unknown existing id',
+      expected: /Unknown calendar tag id/,
+      change: (tags) => tags.map((tag, index) => ({
+        ...tag,
+        id: index === 0 ? 'tag-not-in-current-list' : tag.id,
+      })),
+    },
+  ];
+
+  for (const invalidCase of invalidCases) {
+    await t.test(invalidCase.name, async () => {
+      const harness = await createPreviewCalendarHarness();
+      try {
+        await previewLogin(harness.api, '배한솔');
+        const unchangedTags = await harness.api.calendarTagsList();
+        const unchangedEvents = await harness.api.calendarEventsList();
+
+        await assert.rejects(
+          harness.api.calendarTagsSave(invalidCase.change(unchangedTags)),
+          invalidCase.expected,
+        );
+        assert.deepEqual(await harness.api.calendarTagsList(), unchangedTags);
+        assert.deepEqual(await harness.api.calendarEventsList(), unchangedEvents);
+      } finally {
+        harness.restore();
+      }
+    });
   }
 });
 

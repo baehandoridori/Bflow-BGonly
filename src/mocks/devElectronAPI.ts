@@ -1412,10 +1412,47 @@ export function installDevElectronAPI(): void {
       );
       mockCalendarEvents.splice(index, 1);
     },
-    calendarTagsList: async () => mockCalendarTags.map((tag) => ({ ...tag })),
+    calendarTagsList: async () => {
+      requireMockCalendarUser();
+      return mockCalendarTags.map((tag) => ({ ...tag }));
+    },
     calendarTagsSave: async (tags) => {
       const user = requireMockCalendarUser();
       if (user.role !== 'admin') throw new Error('태그는 관리자만 수정할 수 있습니다');
+      if (tags.some((tag) => (
+        typeof tag.name !== 'string'
+        || tag.name.trim() === ''
+        || typeof tag.color !== 'string'
+        || tag.color.trim() === ''
+        || !Number.isInteger(tag.sort_order)
+        || (
+          tag.id !== undefined
+          && (typeof tag.id !== 'string' || tag.id.trim() === '')
+        )
+      ))) {
+        throw new Error(
+          'Each calendar tag requires name, color, and sort_order; id must be non-empty when provided',
+        );
+      }
+
+      const submittedIds = new Set<string>();
+      for (const tag of tags) {
+        if (tag.id === undefined) continue;
+        if (submittedIds.has(tag.id)) throw new Error('Duplicate calendar tag id');
+        submittedIds.add(tag.id);
+      }
+
+      const submittedNames = new Set<string>();
+      for (const tag of tags) {
+        if (submittedNames.has(tag.name)) throw new Error('Duplicate calendar tag name');
+        submittedNames.add(tag.name);
+      }
+
+      const currentIds = new Set(mockCalendarTags.map((tag) => tag.id));
+      if (tags.some((tag) => tag.id !== undefined && !currentIds.has(tag.id))) {
+        throw new Error('Unknown calendar tag id');
+      }
+
       const saved = tags.map((tag) => ({
         id: tag.id ?? createUuid(),
         name: tag.name,
