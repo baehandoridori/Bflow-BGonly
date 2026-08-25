@@ -160,6 +160,11 @@ type FormElement = ReactElement<{
   children?: ReactNode;
   onChange?: (event: { target: { checked: boolean; value: string } }) => void;
   onFocus?: () => void;
+  onKeyDown?: (event: {
+    key: string;
+    preventDefault(): void;
+    stopPropagation(): void;
+  }) => void;
 }, 'input' | 'select' | 'textarea'>;
 
 const myUserId = 'user-me';
@@ -249,6 +254,38 @@ let tagManagerSaveGate: Promise<void> | null = null;
 let resolveTagManagerSaveGate: (() => void) | null = null;
 let tagManagerRefreshGate: Promise<void> | null = null;
 let resolveTagManagerRefreshGate: (() => void) | null = null;
+type TagManagerDocumentListener = {
+  capture: boolean;
+  listener: (event: Record<string, unknown>) => void;
+};
+const tagManagerDocumentListeners = new Map<string, TagManagerDocumentListener[]>();
+const tagManagerDocumentMock = {
+  body: {},
+  addEventListener(
+    type: string,
+    listener: (event: Record<string, unknown>) => void,
+    options?: boolean | { capture?: boolean },
+  ) {
+    const capture = typeof options === 'boolean' ? options : Boolean(options?.capture);
+    const listeners = tagManagerDocumentListeners.get(type) ?? [];
+    listeners.push({ capture, listener });
+    tagManagerDocumentListeners.set(type, listeners);
+  },
+  removeEventListener(
+    type: string,
+    listener: (event: Record<string, unknown>) => void,
+    options?: boolean | { capture?: boolean },
+  ) {
+    const capture = typeof options === 'boolean' ? options : Boolean(options?.capture);
+    tagManagerDocumentListeners.set(
+      type,
+      (tagManagerDocumentListeners.get(type) ?? [])
+        .filter((entry) => entry.listener !== listener || entry.capture !== capture),
+    );
+  },
+};
+let tagManagerEffectCursor = 0;
+let tagManagerEffectCleanup: (() => void) | undefined;
 
 function resolveComponents(node: ReactNode): ReactNode {
   if (Array.isArray(node)) return node.map(resolveComponents);
@@ -364,6 +401,10 @@ function calendar(overrides: Partial<BflowCalendar>): BflowCalendar {
 }
 
 function resetHarness(): void {
+  tagManagerEffectCleanup?.();
+  tagManagerEffectCleanup = undefined;
+  tagManagerEffectCursor = 0;
+  tagManagerDocumentListeners.clear();
   stateSlots = [];
   stateCursor = 0;
   modalRefSlots = [];
@@ -616,7 +657,12 @@ async function loadTagManagerPopover(): Promise<TagManagerPopoverComponent> {
                 : next;
             }];
           },
-          useEffect: () => {},
+          useEffect(effect: () => void | (() => void)) {
+            const slot = tagManagerEffectCursor++;
+            if (slot !== 2) return;
+            tagManagerEffectCleanup?.();
+            tagManagerEffectCleanup = effect() ?? undefined;
+          },
           useLayoutEffect: () => {},
           useRef(initial: unknown) {
             const slot = tagManagerRefCursor++;
@@ -683,7 +729,7 @@ async function loadTagManagerPopover(): Promise<TagManagerPopoverComponent> {
       return nodeRequire(id);
     }, module, module.exports);
     Object.assign(globalThis, {
-      document: { body: {}, addEventListener() {}, removeEventListener() {} },
+      document: tagManagerDocumentMock,
       window: {
         innerWidth: 1120,
         innerHeight: 720,
@@ -1284,10 +1330,40 @@ async function renderTagManagerPopover(
   const TagManagerPopover = await loadTagManagerPopover();
   stateCursor = 0;
   tagManagerRefCursor = 0;
+  tagManagerEffectCursor = 0;
+  globalThis.document = tagManagerDocumentMock as unknown as Document;
   return resolveComponents(TagManagerPopover({
     anchorRect,
     onClose: () => { tagManagerCloseCount += 1; },
   }));
+}
+
+function dispatchTagManagerEscape(target?: FormElement): void {
+  let propagationStopped = false;
+  let immediatePropagationStopped = false;
+  const event = {
+    key: 'Escape',
+    clientX: 0,
+    clientY: 0,
+    target: {},
+    preventDefault() {},
+    stopPropagation() { propagationStopped = true; },
+    stopImmediatePropagation() {
+      propagationStopped = true;
+      immediatePropagationStopped = true;
+    },
+  };
+  const listeners = [...(tagManagerDocumentListeners.get('keydown') ?? [])];
+  for (const entry of listeners.filter(({ capture }) => capture)) {
+    entry.listener(event);
+    if (immediatePropagationStopped) return;
+  }
+  if (!propagationStopped) target?.props.onKeyDown?.(event);
+  if (propagationStopped) return;
+  for (const entry of listeners.filter(({ capture }) => !capture)) {
+    entry.listener(event);
+    if (immediatePropagationStopped) return;
+  }
 }
 
 async function renderScheduleView(): Promise<ReactNode> {
@@ -1613,6 +1689,46 @@ test('TagManagerPopover lets admins edit, reorder, and add tags with canonical f
       { id: 'tag-meeting', name: '회의', color: '#FDCB6E', sort_order: 1 },
       { name: '리뷰', color: '#E17055', sort_order: 2 },
     ]]);
+  });
+
+  await t.test('Escape cancels an active inline edit before a later Escape closes the popover', async () => {
+    resetHarness();
+    let tree = await renderTagManagerPopover();
+    buttonByLabel(tree, '회의 태그 편집').props.onClick?.();
+    tree = await renderTagManagerPopover();
+    const input = formElementByLabel(tree, '회의 태그 이름');
+
+    dispatchTagManagerEscape(input);
+    assert.equal(tagManagerCloseCount, 0, '입력창의 첫 Escape는 팝오버를 닫지 않는다');
+    tree = await renderTagManagerPopover();
+    assert.equal(
+      findFormElements(tree).some((element) => element.props['aria-label'] === '회의 태그 이름'),
+      false,
+      '첫 Escape는 인라인 편집만 취소한다',
+    );
+
+    dispatchTagManagerEscape();
+    assert.equal(tagManagerCloseCount, 1, '편집이 없을 때의 다음 Escape는 팝오버를 닫는다');
+  });
+
+  await t.test('Escape from a color preset cancels the active edit before closing the popover', async () => {
+    resetHarness();
+    let tree = await renderTagManagerPopover();
+    buttonByLabel(tree, '회의 태그 편집').props.onClick?.();
+    tree = await renderTagManagerPopover();
+    assert.ok(buttonByLabel(tree, '#6C5CE7 태그 색상'), '편집 중 색상 프리셋이 렌더링된다');
+
+    dispatchTagManagerEscape();
+    assert.equal(tagManagerCloseCount, 0, '색상 버튼에서의 첫 Escape는 팝오버를 닫지 않는다');
+    tree = await renderTagManagerPopover();
+    assert.equal(
+      findFormElements(tree).some((element) => element.props['aria-label'] === '회의 태그 이름'),
+      false,
+      '입력창 밖에서의 첫 Escape도 인라인 편집만 취소한다',
+    );
+
+    dispatchTagManagerEscape();
+    assert.equal(tagManagerCloseCount, 1, '편집 취소 후 다음 Escape는 팝오버를 닫는다');
   });
 
   await t.test('a warmed tag-list failure reports an error but keeps the committed reorder', async () => {

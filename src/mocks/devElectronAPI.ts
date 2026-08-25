@@ -72,6 +72,7 @@ type MockCalendarEventRow = Awaited<ReturnType<ElectronAPI['calendarEventCreate'
 type MockCalendarTagRow = Awaited<ReturnType<ElectronAPI['calendarTagsList']>>[number];
 type MockCalendarMemberRow = { calendar_id: string; user_id: string; can_edit: boolean };
 type MockCalendarEventCreateInput = Parameters<ElectronAPI['calendarEventCreate']>[0];
+const CALENDAR_TAG_UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 const devCalendarSeed = createDevCalendarSeed();
 const mockCalendars: MockCalendarRow[] = devCalendarSeed.calendars;
@@ -1471,11 +1472,11 @@ export function installDevElectronAPI(): void {
         || !Number.isInteger(tag.sort_order)
         || (
           tag.id !== undefined
-          && (typeof tag.id !== 'string' || tag.id.trim() === '')
+          && (typeof tag.id !== 'string' || !CALENDAR_TAG_UUID_PATTERN.test(tag.id))
         )
       ))) {
         throw new Error(
-          'Each calendar tag requires name, color, and sort_order; id must be non-empty when provided',
+          'Each calendar tag requires name, color, and sort_order; id must be a UUID when provided',
         );
       }
 

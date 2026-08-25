@@ -49,6 +49,9 @@ type CalendarTagRow = {
   sort_order: number;
 };
 
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const UNKNOWN_TAG_UUID = '00000000-0000-4000-8000-000000000099';
+
 type ServiceModule = {
   loadBflowEvents(): Promise<void>;
   syncAll(options?: { broadcast?: boolean; skipBflowLoad?: boolean }): Promise<Array<Record<string, unknown>>>;
@@ -755,11 +758,19 @@ test('fresh preview seeds four visible calendars, four tags, and fifteen current
 
     const calendars = await harness.api.calendarList();
     assert.equal(calendars.length, 4);
-    assert.equal((await harness.api.calendarTagsList()).length, 4);
-    assert.equal((await harness.api.calendarEventsList({
+    const tags = await harness.api.calendarTagsList();
+    const events = await harness.api.calendarEventsList({
       from: `${yearMonth}-01`,
       to: `${yearMonth}-31`,
-    })).length, 15);
+    });
+    assert.equal(tags.length, 4);
+    assert.equal(events.length, 15);
+    assert.ok(tags.every(({ id }) => UUID_PATTERN.test(id)), 'preview seed tag ids match production UUID columns');
+    const tagIds = new Set(tags.map(({ id }) => id));
+    assert.ok(
+      events.every(({ tag_id }) => tag_id === null || tagIds.has(tag_id)),
+      'every seeded event tag reference points at a UUID-shaped seeded tag',
+    );
     assert.equal(calendars.find(({ id }) => id === 'cal-notice')?.can_edit, false);
     assert.equal(calendars.find(({ id }) => id === 'cal-milestone')?.can_edit, true);
     assert.equal(calendars.find(({ id }) => id === 'cal-leads')?.can_edit, true);
@@ -816,10 +827,18 @@ test('preview tag replacement validates the whole final list before changing tag
   }> = [
     {
       name: 'empty id',
-      expected: /requires name, color, and sort_order/,
+      expected: /id must be a UUID/,
       change: (tags) => tags.map((tag, index) => ({
         ...tag,
         id: index === 0 ? '   ' : tag.id,
+      })),
+    },
+    {
+      name: 'non-UUID id',
+      expected: /id must be a UUID/,
+      change: (tags) => tags.map((tag, index) => ({
+        ...tag,
+        id: index === 0 ? 'tag-not-a-uuid' : tag.id,
       })),
     },
     {
@@ -859,7 +878,7 @@ test('preview tag replacement validates the whole final list before changing tag
       expected: /Unknown calendar tag id/,
       change: (tags) => tags.map((tag, index) => ({
         ...tag,
-        id: index === 0 ? 'tag-not-in-current-list' : tag.id,
+        id: index === 0 ? UNKNOWN_TAG_UUID : tag.id,
       })),
     },
   ];
@@ -882,6 +901,31 @@ test('preview tag replacement validates the whole final list before changing tag
         harness.restore();
       }
     });
+  }
+});
+
+test('preview tag replacement accepts UUID-backed edits and generates a UUID only for an omitted new id', async () => {
+  const harness = await createPreviewCalendarHarness();
+  try {
+    await previewLogin(harness.api, '배한솔');
+    const tags = await harness.api.calendarTagsList();
+    const [first, second, ...rest] = tags;
+    const saved = await harness.api.calendarTagsSave([
+      { id: second.id, name: `${second.name} 수정`, color: second.color, sort_order: 0 },
+      { id: first.id, name: first.name, color: first.color, sort_order: 1 },
+      ...rest.map((tag, index) => ({ ...tag, sort_order: index + 2 })),
+      { name: '신규', color: '#6C5CE7', sort_order: tags.length },
+    ]);
+
+    assert.equal(saved[0].id, second.id, '일반 편집·재정렬은 기존 UUID를 보존한다');
+    assert.equal(saved[0].name, `${second.name} 수정`);
+    assert.ok(saved.every(({ id }) => UUID_PATTERN.test(id)));
+    assert.ok(
+      !tags.some(({ id }) => id === saved.at(-1)?.id),
+      'id를 생략한 신규 태그만 새 UUID를 받는다',
+    );
+  } finally {
+    harness.restore();
   }
 });
 

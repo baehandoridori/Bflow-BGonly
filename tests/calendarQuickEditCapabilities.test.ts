@@ -141,6 +141,16 @@ function findFormElementByLabel(node: ReactNode, label: string): FormElement {
   return element;
 }
 
+function findElementsByRole(node: ReactNode, role: string): ReactElement[] {
+  if (Array.isArray(node)) return node.flatMap((child) => findElementsByRole(child, role));
+  if (!isValidElement(node)) return [];
+  const props = node.props as { children?: ReactNode; role?: string };
+  return [
+    ...(props.role === role ? [node] : []),
+    ...findElementsByRole(props.children, role),
+  ];
+}
+
 function colorButtons(node: ReactNode): ButtonElement[] {
   return findButtons(node).filter((button) => {
     const background = button.props.style?.background;
@@ -704,6 +714,71 @@ test('side panel shows calendar, tag and timed range and saves only changed temp
   assert.equal(Object.hasOwn(allDayUpdates[0].patch, 'endTime'), true);
   assert.equal(allDayUpdates[0].patch.startTime, undefined);
   assert.equal(allDayUpdates[0].patch.endTime, undefined);
+});
+
+test('side panel blocks non-increasing timed ranges while allowing an overnight range', async () => {
+  const target = event({
+    source: 'bflow',
+    sourceCalendarId: 'bflow:calendar-1',
+    calendarId: 'calendar-1',
+    allDay: false,
+    startDate: '2026-08-24',
+    endDate: '2026-08-24',
+    startTime: '15:00',
+    endTime: '16:00',
+    canEdit: true,
+  });
+  const invalidDrafts = [
+    { name: 'same-day reversed', draft: { startTime: '15:00', endTime: '14:00' } },
+    { name: 'equal timestamp', draft: { startTime: '15:00', endTime: '15:00' } },
+    {
+      name: 'earlier end date',
+      draft: {
+        startDate: '2026-08-25',
+        endDate: '2026-08-24',
+        startTime: '09:00',
+        endTime: '10:00',
+      },
+    },
+  ] as const;
+
+  for (const { name, draft } of invalidDrafts) {
+    const updates: Array<{ id: string; patch: Partial<QuickEditEvent> }> = [];
+    const tree = await renderSidePanel(target, {
+      onUpdate: (id, patch) => updates.push({ id, patch }),
+    }, true, draft);
+    const saveButton = findButtonByText(tree, '저장');
+
+    assert.equal(saveButton.props.disabled, true, `${name}: save is disabled`);
+    assert.match(textContent(tree), /종료 시각은 시작 시각보다 뒤여야 해요\./, `${name}: warning is visible`);
+    assert.equal(findElementsByRole(tree, 'alert').length, 1, `${name}: warning is announced`);
+    saveButton.props.onClick?.();
+    assert.deepEqual(updates, [], `${name}: direct handler invocation cannot persist`);
+  }
+
+  const updates: Array<{ id: string; patch: Partial<QuickEditEvent> }> = [];
+  const overnightTree = await renderSidePanel(target, {
+    onUpdate: (id, patch) => updates.push({ id, patch }),
+  }, true, {
+    startDate: '2026-08-24',
+    endDate: '2026-08-25',
+    startTime: '23:30',
+    endTime: '00:30',
+  });
+  const overnightSave = findButtonByText(overnightTree, '저장');
+
+  assert.notEqual(overnightSave.props.disabled, true);
+  assert.doesNotMatch(textContent(overnightTree), /종료 시각은 시작 시각보다 뒤여야 해요\./);
+  overnightSave.props.onClick?.();
+  assert.deepEqual(updates, [{
+    id: target.id,
+    patch: {
+      startDate: '2026-08-24',
+      endDate: '2026-08-25',
+      startTime: '23:30',
+      endTime: '00:30',
+    },
+  }]);
 });
 
 test('quick edit title-only save emits no unchanged Google temporal or memo fields', async () => {

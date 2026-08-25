@@ -121,6 +121,7 @@ export function ScheduleView() {
   const visibleCalendarIds = useCalendarStore((state) => state.visibleCalendarIds);
   const enabledTagIds = useCalendarStore((state) => state.enabledTagIds);
   const googleVisible = visibleCalendarIds[GOOGLE_CALENDAR_ID] !== false;
+  const personalCalendarId = calendars.find((calendar) => calendar.isPersonal)?.id;
 
   useEffect(() => {
     let cancelled = false;
@@ -185,8 +186,10 @@ export function ScheduleView() {
   // 통합 이벤트 (B flow + 연결된 휴가)와 캘린더∩태그 필터를 한 경로로 유지한다.
   const allEvents = useMemo(() => [...events, ...vacationEvents], [events, vacationEvents]);
   const filteredEvents = useMemo(
-    () => filterCalendarEvents(allEvents, { visibleCalendarIds, enabledTagIds, googleVisible }),
-    [allEvents, visibleCalendarIds, enabledTagIds, googleVisible],
+    () => filterCalendarEvents(allEvents, {
+      visibleCalendarIds, enabledTagIds, googleVisible, personalCalendarId,
+    }),
+    [allEvents, visibleCalendarIds, enabledTagIds, googleVisible, personalCalendarId],
   );
 
   const visibleCalendarCount = useMemo(

@@ -7,11 +7,24 @@ export interface CalendarFilterState {
   visibleCalendarIds: Readonly<Record<string, boolean>>;
   enabledTagIds: Readonly<Record<string, boolean>>;
   googleVisible: boolean;
+  /** calendarId 가 없던 private_calendar_events 행을 현재 개인 캘린더 토글에 연결한다. */
+  personalCalendarId?: string;
+}
+
+const LEGACY_PRIVATE_SOURCE_CALENDAR_ID = 'supabase-private';
+
+function isLegacyPrivateBflowEvent(ev: CalendarEvent): boolean {
+  return ev.sourceCalendarId === LEGACY_PRIVATE_SOURCE_CALENDAR_ID
+    && !ev.calendarId
+    && ev.source !== 'google'
+    && ev.source !== 'vacation'
+    && ev.type !== 'vacation';
 }
 
 function sourceOf(ev: CalendarEvent): 'bflow' | 'google' | 'vacation' {
   if (ev.source) return ev.source;
   if (ev.type === 'vacation') return 'vacation';
+  if (isLegacyPrivateBflowEvent(ev)) return 'bflow';
   return ev.calendarId ? 'bflow' : 'google';
 }
 
@@ -23,7 +36,9 @@ export function filterCalendarEvents(
     const source = sourceOf(ev);
     if (source === 'vacation') return state.enabledTagIds[VACATION_CHIP_ID] !== false;
     if (source === 'google') return state.googleVisible;
-    if (ev.calendarId && state.visibleCalendarIds[ev.calendarId] === false) return false;
+    const calendarId = ev.calendarId
+      ?? (isLegacyPrivateBflowEvent(ev) ? state.personalCalendarId : undefined);
+    if (calendarId && state.visibleCalendarIds[calendarId] === false) return false;
     if (ev.tagId && state.enabledTagIds[ev.tagId] === false) return false;
     return true;
   });

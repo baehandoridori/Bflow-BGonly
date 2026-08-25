@@ -171,6 +171,13 @@ export function EventSidePanel({
   const fieldClassName = 'w-full bg-bg-primary/85 border border-bg-border/70 focus:border-accent/50 rounded-md px-2 py-1 text-sm font-semibold text-text-primary outline-none transition-colors';
   const dateFieldClassName = 'w-full bg-bg-primary/85 border border-bg-border/70 focus:border-accent/50 rounded-md px-2 py-1 text-xs text-text-primary outline-none transition-colors';
   const labelClassName = 'text-[10px] text-text-secondary/70 font-medium uppercase tracking-wide';
+  const hasInvalidTimedInterval = supportsTimeEditing
+    && !draftAllDay
+    && Boolean(draftStartTime && draftEndTime)
+    && `${draftEnd}T${draftEndTime}` <= `${draftStart}T${draftStartTime}`;
+  const isTimedSaveBlocked = supportsTimeEditing
+    && !draftAllDay
+    && (!draftStartTime || !draftEndTime || hasInvalidTimedInterval);
 
   // 연결 정보 텍스트
   const linkedLabel = (() => {
@@ -191,7 +198,7 @@ export function EventSidePanel({
       setEditing(false);
       return;
     }
-    if (supportsTimeEditing && !draftAllDay && (!draftStartTime || !draftEndTime)) return;
+    if (isTimedSaveBlocked) return;
     const updates: Partial<CalendarEvent> = {};
     const nextStartDate = fromInputDate(draftStart);
     const nextEndDate = fromInputDate(draftEnd);
@@ -391,6 +398,11 @@ export function EventSidePanel({
                   className={dateFieldClassName}
                   style={{ colorScheme: colorMode }}
                 />
+              )}
+              {hasInvalidTimedInterval && (
+                <p role="alert" className="text-[11px] font-medium text-red-400">
+                  종료 시각은 시작 시각보다 뒤여야 해요.
+                </p>
               )}
             </div>
           ) : (
@@ -609,7 +621,8 @@ export function EventSidePanel({
             </button>
             <button
               onClick={handleSave}
-              className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg text-xs font-medium bg-[#6C5CE7]/20 text-[#6C5CE7] hover:bg-[#6C5CE7]/30 transition-colors cursor-pointer"
+              disabled={isTimedSaveBlocked}
+              className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg text-xs font-medium bg-[#6C5CE7]/20 text-[#6C5CE7] hover:bg-[#6C5CE7]/30 transition-colors cursor-pointer disabled:cursor-not-allowed disabled:opacity-45"
             >
               <Save size={13} />
               저장

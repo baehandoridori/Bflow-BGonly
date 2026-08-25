@@ -153,6 +153,7 @@ export function TagManagerPopover({ anchorRect, onClose }: TagManagerPopoverProp
     )
   ));
   const [editing, setEditing] = useState<EditingTag | null>(null);
+  const editingActive = editing !== null;
   const [localSaving, setSaving] = useState(false);
   const appliedSharedRevision = useRef(sharedMutation.revision);
   const sharedDrafts = sharedMutation.inFlight?.drafts
@@ -210,15 +211,19 @@ export function TagManagerPopover({ anchorRect, onClose }: TagManagerPopoverProp
       event.preventDefault();
       event.stopPropagation();
       event.stopImmediatePropagation();
+      if (editingActive) {
+        setEditing(null);
+        return;
+      }
       onClose();
     };
     document.addEventListener('mousedown', handleMouseDown);
-    document.addEventListener('keydown', handleKeyDown, true);
+    document.addEventListener('keydown', handleKeyDown);
     return () => {
       document.removeEventListener('mousedown', handleMouseDown);
-      document.removeEventListener('keydown', handleKeyDown, true);
+      document.removeEventListener('keydown', handleKeyDown);
     };
-  }, [anchorRect, onClose]);
+  }, [anchorRect, editingActive, onClose]);
 
   const refreshCanonicalTags = async (mode: ReconciliationMode): Promise<boolean> => {
     if (mode === 'events') {
