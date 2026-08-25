@@ -765,15 +765,46 @@ test('fresh preview seeds four visible calendars, four tags, and fifteen current
     });
     assert.equal(tags.length, 4);
     assert.equal(events.length, 15);
+    assert.ok(
+      calendars.every(({ id }) => UUID_PATTERN.test(id)),
+      'preview calendar ids match the production UUID columns',
+    );
+    const calendarIds = new Set(calendars.map(({ id }) => id));
+    assert.ok(
+      events.every(({ id }) => UUID_PATTERN.test(id)),
+      'preview event ids match the production UUID columns',
+    );
+    assert.ok(
+      events.every(({ calendar_id }) => (
+        UUID_PATTERN.test(calendar_id) && calendarIds.has(calendar_id)
+      )),
+      'every seeded event calendar reference points at a UUID-shaped seeded calendar',
+    );
     assert.ok(tags.every(({ id }) => UUID_PATTERN.test(id)), 'preview seed tag ids match production UUID columns');
     const tagIds = new Set(tags.map(({ id }) => id));
     assert.ok(
       events.every(({ tag_id }) => tag_id === null || tagIds.has(tag_id)),
       'every seeded event tag reference points at a UUID-shaped seeded tag',
     );
-    assert.equal(calendars.find(({ id }) => id === 'cal-notice')?.can_edit, false);
-    assert.equal(calendars.find(({ id }) => id === 'cal-milestone')?.can_edit, true);
-    assert.equal(calendars.find(({ id }) => id === 'cal-leads')?.can_edit, true);
+    assert.equal(calendars.find(({ name }) => name === '스튜디오 공지')?.can_edit, false);
+    assert.equal(calendars.find(({ name }) => name === 'EP 마일스톤')?.can_edit, true);
+    assert.equal(calendars.find(({ name }) => name === '리드 회의')?.can_edit, true);
+  } finally {
+    harness.restore();
+  }
+});
+
+test('preview generates a UUID-backed personal calendar for a user without a seeded one', async () => {
+  const harness = await createPreviewCalendarHarness();
+  try {
+    await previewLogin(harness.api, '장삐쭈');
+
+    const calendars = await harness.api.calendarList();
+    const personalCalendar = calendars.find(({ is_personal }) => is_personal);
+
+    assert.ok(personalCalendar, 'preview creates the same required personal calendar as production');
+    assert.ok(UUID_PATTERN.test(personalCalendar.id));
+    assert.ok(calendars.every(({ id }) => UUID_PATTERN.test(id)));
   } finally {
     harness.restore();
   }

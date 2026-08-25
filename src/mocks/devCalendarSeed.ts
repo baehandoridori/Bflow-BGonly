@@ -19,6 +19,31 @@ const DEV_CALENDAR_TAG_IDS = {
   meeting: '00000000-0000-4000-8000-000000000004',
 } as const;
 
+const DEV_CALENDAR_IDS = {
+  personal: '10000000-0000-4000-8000-000000000001',
+  milestone: '10000000-0000-4000-8000-000000000002',
+  notice: '10000000-0000-4000-8000-000000000003',
+  leads: '10000000-0000-4000-8000-000000000004',
+} as const;
+
+const DEV_CALENDAR_EVENT_IDS = {
+  event01: '20000000-0000-4000-8000-000000000001',
+  event02: '20000000-0000-4000-8000-000000000002',
+  event03: '20000000-0000-4000-8000-000000000003',
+  event04: '20000000-0000-4000-8000-000000000004',
+  event05: '20000000-0000-4000-8000-000000000005',
+  event06: '20000000-0000-4000-8000-000000000006',
+  event07: '20000000-0000-4000-8000-000000000007',
+  event08: '20000000-0000-4000-8000-000000000008',
+  event09: '20000000-0000-4000-8000-000000000009',
+  event10: '20000000-0000-4000-8000-000000000010',
+  event11: '20000000-0000-4000-8000-000000000011',
+  event12: '20000000-0000-4000-8000-000000000012',
+  event13: '20000000-0000-4000-8000-000000000013',
+  event14: '20000000-0000-4000-8000-000000000014',
+  event15: '20000000-0000-4000-8000-000000000015',
+} as const;
+
 export const DEV_CALENDAR_SEED_TAGS: DevCalendarTagRow[] = [
   { id: DEV_CALENDAR_TAG_IDS.upload, name: '업로드', color: '#E17055', sort_order: 0 },
   { id: DEV_CALENDAR_TAG_IDS.cut, name: '가편', color: '#74B9FF', sort_order: 1 },
@@ -27,15 +52,15 @@ export const DEV_CALENDAR_SEED_TAGS: DevCalendarTagRow[] = [
 ];
 
 export const DEV_CALENDAR_SEED_CALENDARS: DevCalendarRow[] = [
-  { id: 'cal-personal-1', name: '개인', color: '#6C5CE7', visibility: 'private', owner_id: '1', is_personal: true, created_at: createdAt, updated_at: createdAt },
-  { id: 'cal-milestone', name: 'EP 마일스톤', color: '#74B9FF', visibility: 'team', owner_id: '1', is_personal: false, created_at: createdAt, updated_at: createdAt },
-  { id: 'cal-notice', name: '스튜디오 공지', color: '#FDCB6E', visibility: 'team', owner_id: '3', is_personal: false, created_at: createdAt, updated_at: createdAt },
-  { id: 'cal-leads', name: '리드 회의', color: '#A29BFE', visibility: 'members', owner_id: '3', is_personal: false, created_at: createdAt, updated_at: createdAt },
+  { id: DEV_CALENDAR_IDS.personal, name: '개인', color: '#6C5CE7', visibility: 'private', owner_id: '1', is_personal: true, created_at: createdAt, updated_at: createdAt },
+  { id: DEV_CALENDAR_IDS.milestone, name: 'EP 마일스톤', color: '#74B9FF', visibility: 'team', owner_id: '1', is_personal: false, created_at: createdAt, updated_at: createdAt },
+  { id: DEV_CALENDAR_IDS.notice, name: '스튜디오 공지', color: '#FDCB6E', visibility: 'team', owner_id: '3', is_personal: false, created_at: createdAt, updated_at: createdAt },
+  { id: DEV_CALENDAR_IDS.leads, name: '리드 회의', color: '#A29BFE', visibility: 'members', owner_id: '3', is_personal: false, created_at: createdAt, updated_at: createdAt },
 ];
 
 export const DEV_CALENDAR_SEED_MEMBERS: DevCalendarMemberRow[] = [
-  { calendar_id: 'cal-leads', user_id: '1', can_edit: true },
-  { calendar_id: 'cal-leads', user_id: '2', can_edit: false },
+  { calendar_id: DEV_CALENDAR_IDS.leads, user_id: '1', can_edit: true },
+  { calendar_id: DEV_CALENDAR_IDS.leads, user_id: '2', can_edit: false },
 ];
 
 const event = (
@@ -62,28 +87,28 @@ const event = (
   linked_scene_id: null,
   linked_department: null,
   linked_todo_id: null,
-  created_by: calendar_id === 'cal-notice' || calendar_id === 'cal-leads' ? '3' : '1',
+  created_by: calendar_id === DEV_CALENDAR_IDS.notice || calendar_id === DEV_CALENDAR_IDS.leads ? '3' : '1',
   created_at: createdAt,
   updated_at: createdAt,
   ...overrides,
 });
 
 export const DEV_CALENDAR_SEED_EVENTS: DevCalendarEventRow[] = [
-  event('sev-01', 'cal-milestone', 'EP05 업로드', date(1), undefined, { tag_id: DEV_CALENDAR_TAG_IDS.upload }),
-  event('sev-02', 'cal-milestone', 'EP06 가편 납품', date(12), undefined, { tag_id: DEV_CALENDAR_TAG_IDS.cut, linked_episode: 6 }),
-  event('sev-03', 'cal-milestone', 'EP07 대본 리딩', date(8), undefined, { tag_id: DEV_CALENDAR_TAG_IDS.script }),
-  event('sev-04', 'cal-milestone', 'EP06 업로드', date(25), undefined, { tag_id: DEV_CALENDAR_TAG_IDS.upload }),
-  event('sev-05', 'cal-milestone', 'EP07 가편 작업', date(13), date(16), { tag_id: DEV_CALENDAR_TAG_IDS.cut }),
-  event('sev-06', 'cal-notice', '전체 회식', date(15), undefined, { memo: '장소 추후 공지' }),
-  event('sev-07', 'cal-notice', '사무실 정비', date(21), date(22)),
-  event('sev-08', 'cal-notice', '채널 점검', date(28), undefined, { tag_id: DEV_CALENDAR_TAG_IDS.upload }),
-  event('sev-09', 'cal-leads', '리드 회의', date(3), undefined, { tag_id: DEV_CALENDAR_TAG_IDS.meeting, all_day: false, start_time: '14:00', end_time: '15:00' }),
-  event('sev-10', 'cal-leads', '리드 회의', date(10), undefined, { tag_id: DEV_CALENDAR_TAG_IDS.meeting, all_day: false, start_time: '14:00', end_time: '15:00' }),
-  event('sev-11', 'cal-leads', '리드 회의', date(17), undefined, { tag_id: DEV_CALENDAR_TAG_IDS.meeting, all_day: false, start_time: '14:00', end_time: '15:00' }),
-  event('sev-12', 'cal-leads', '컴포 TF 싱크', date(18), undefined, { tag_id: DEV_CALENDAR_TAG_IDS.meeting, all_day: false, start_time: '15:30', end_time: '16:00' }),
-  event('sev-13', 'cal-personal-1', '치과', date(9), undefined, { all_day: false, start_time: '09:30', end_time: '10:30' }),
-  event('sev-14', 'cal-personal-1', '장비 반납', date(19)),
-  event('sev-15', 'cal-personal-1', '이사 준비', date(26), date(27)),
+  event(DEV_CALENDAR_EVENT_IDS.event01, DEV_CALENDAR_IDS.milestone, 'EP05 업로드', date(1), undefined, { tag_id: DEV_CALENDAR_TAG_IDS.upload }),
+  event(DEV_CALENDAR_EVENT_IDS.event02, DEV_CALENDAR_IDS.milestone, 'EP06 가편 납품', date(12), undefined, { tag_id: DEV_CALENDAR_TAG_IDS.cut, linked_episode: 6 }),
+  event(DEV_CALENDAR_EVENT_IDS.event03, DEV_CALENDAR_IDS.milestone, 'EP07 대본 리딩', date(8), undefined, { tag_id: DEV_CALENDAR_TAG_IDS.script }),
+  event(DEV_CALENDAR_EVENT_IDS.event04, DEV_CALENDAR_IDS.milestone, 'EP06 업로드', date(25), undefined, { tag_id: DEV_CALENDAR_TAG_IDS.upload }),
+  event(DEV_CALENDAR_EVENT_IDS.event05, DEV_CALENDAR_IDS.milestone, 'EP07 가편 작업', date(13), date(16), { tag_id: DEV_CALENDAR_TAG_IDS.cut }),
+  event(DEV_CALENDAR_EVENT_IDS.event06, DEV_CALENDAR_IDS.notice, '전체 회식', date(15), undefined, { memo: '장소 추후 공지' }),
+  event(DEV_CALENDAR_EVENT_IDS.event07, DEV_CALENDAR_IDS.notice, '사무실 정비', date(21), date(22)),
+  event(DEV_CALENDAR_EVENT_IDS.event08, DEV_CALENDAR_IDS.notice, '채널 점검', date(28), undefined, { tag_id: DEV_CALENDAR_TAG_IDS.upload }),
+  event(DEV_CALENDAR_EVENT_IDS.event09, DEV_CALENDAR_IDS.leads, '리드 회의', date(3), undefined, { tag_id: DEV_CALENDAR_TAG_IDS.meeting, all_day: false, start_time: '14:00', end_time: '15:00' }),
+  event(DEV_CALENDAR_EVENT_IDS.event10, DEV_CALENDAR_IDS.leads, '리드 회의', date(10), undefined, { tag_id: DEV_CALENDAR_TAG_IDS.meeting, all_day: false, start_time: '14:00', end_time: '15:00' }),
+  event(DEV_CALENDAR_EVENT_IDS.event11, DEV_CALENDAR_IDS.leads, '리드 회의', date(17), undefined, { tag_id: DEV_CALENDAR_TAG_IDS.meeting, all_day: false, start_time: '14:00', end_time: '15:00' }),
+  event(DEV_CALENDAR_EVENT_IDS.event12, DEV_CALENDAR_IDS.leads, '컴포 TF 싱크', date(18), undefined, { tag_id: DEV_CALENDAR_TAG_IDS.meeting, all_day: false, start_time: '15:30', end_time: '16:00' }),
+  event(DEV_CALENDAR_EVENT_IDS.event13, DEV_CALENDAR_IDS.personal, '치과', date(9), undefined, { all_day: false, start_time: '09:30', end_time: '10:30' }),
+  event(DEV_CALENDAR_EVENT_IDS.event14, DEV_CALENDAR_IDS.personal, '장비 반납', date(19)),
+  event(DEV_CALENDAR_EVENT_IDS.event15, DEV_CALENDAR_IDS.personal, '이사 준비', date(26), date(27)),
 ];
 
 export function createDevCalendarSeed(): {

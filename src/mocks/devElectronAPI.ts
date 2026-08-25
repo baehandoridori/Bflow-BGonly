@@ -201,7 +201,7 @@ function ensureMockPersonalCalendar(): MockCalendarRow | null {
 
   const now = new Date().toISOString();
   const created: MockCalendarRow = {
-    id: `mock-personal-${userId}`,
+    id: createUuid(),
     name: '개인',
     color: '#6C5CE7',
     visibility: 'private',

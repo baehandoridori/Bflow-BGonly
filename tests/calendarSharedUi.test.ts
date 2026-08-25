@@ -2892,7 +2892,22 @@ test('EventCreateModal shows editable calendars in field order, defaults persona
   assert.doesNotMatch(renderedText, /색상/);
   assert.equal(formElementByLabel(tree, '종일 일정').props.checked, true, 'all-day is enabled by default');
   assert.equal(findFormElements(tree).some((element) => element.props.type === 'time'), false, 'time fields stay hidden for all-day events');
-  assert.doesNotMatch(renderedText, /팀 전원에게 알림이 가요|이 캘린더 멤버/, 'personal calendars do not show team notification copy');
+  assert.doesNotMatch(renderedText, /팀 캘린더에 공유돼요|이 캘린더 멤버와 공유돼요|알림/, 'personal calendars do not show shared-calendar copy');
+});
+
+test('EventCreateModal describes shared visibility without promising deferred notifications', async () => {
+  resetHarness();
+  let tree = await renderEventCreateModal(false, () => {});
+
+  formElementByLabel(tree, '캘린더').props.onChange?.({ target: { value: 'team', checked: false } });
+  tree = await renderEventCreateModal(false, () => {});
+  assert.match(textContent(tree), /팀 캘린더에 공유돼요/);
+  assert.doesNotMatch(textContent(tree), /알림/, 'team creation must not promise a notification that is not implemented');
+
+  formElementByLabel(tree, '캘린더').props.onChange?.({ target: { value: 'editable-share', checked: false } });
+  tree = await renderEventCreateModal(false, () => {});
+  assert.match(textContent(tree), /이 캘린더 멤버와 공유돼요/);
+  assert.doesNotMatch(textContent(tree), /알림/, 'member creation must not promise a notification that is not implemented');
 });
 
 test('EventCreateModal creates a tagged timed B flow event and rolls an empty end time into the next day', async () => {
@@ -2901,13 +2916,8 @@ test('EventCreateModal creates a tagged timed B flow event and rolls an empty en
   let tree = await renderEventCreateModal(false, (event) => saved.push(event), '2026-08-31');
   assert.doesNotMatch(textContent(formElementByLabel(tree, '캘린더')), /내 구글 캘린더/, 'Google is hidden while Task 3.3 reports unauthenticated');
 
-  formElementByLabel(tree, '캘린더').props.onChange?.({ target: { value: 'team', checked: false } });
-  tree = await renderEventCreateModal(false, (event) => saved.push(event), '2026-08-31');
-  assert.match(textContent(tree), /팀 전원에게 알림이 가요/);
-
   formElementByLabel(tree, '캘린더').props.onChange?.({ target: { value: 'editable-share', checked: false } });
   tree = await renderEventCreateModal(false, (event) => saved.push(event), '2026-08-31');
-  assert.match(textContent(tree), /이 캘린더 멤버 0명에게 알림이 가요/);
 
   formElementByLabel(tree, '종일 일정').props.onChange?.({ target: { checked: false, value: '' } });
   tree = await renderEventCreateModal(false, (event) => saved.push(event), '2026-08-31');

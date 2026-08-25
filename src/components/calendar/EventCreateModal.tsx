@@ -156,10 +156,10 @@ export function EventCreateModal({ initialDate, initialEndDate, episodes, google
     });
   };
 
-  const notificationCopy = selectedCalendar?.visibility === 'team'
-    ? '팀 전원에게 알림이 가요'
+  const sharingCopy = selectedCalendar?.visibility === 'team'
+    ? '팀 캘린더에 공유돼요'
     : selectedCalendar?.visibility === 'members'
-      ? `이 캘린더 멤버 ${selectedCalendar.members.length}명에게 알림이 가요`
+      ? '이 캘린더 멤버와 공유돼요'
       : '';
   const canSubmit = Boolean(title.trim() && selectedCalendarId && (allDay || (startTime && endTime)))
     && !hasInvalidTimedInterval;
@@ -302,7 +302,7 @@ export function EventCreateModal({ initialDate, initialEndDate, episodes, google
         </div>
 
         <div className="sticky bottom-0 flex items-center justify-between gap-3 border-t border-bg-border bg-bg-card/95 px-5 py-4">
-          <p className="min-h-4 text-[11px] text-text-secondary/75">{notificationCopy}</p>
+          <p className="min-h-4 text-[11px] text-text-secondary/75">{sharingCopy}</p>
           <div className="flex shrink-0 gap-2">
             <button type="button" onClick={onClose} className="px-3 py-2 rounded-lg text-xs text-text-secondary hover:text-text-primary cursor-pointer">취소</button>
             <button type="button" onClick={handleSubmit} disabled={!canSubmit} className="px-4 py-2 rounded-lg text-xs font-medium bg-accent hover:bg-accent/80 text-white disabled:opacity-30 transition-colors cursor-pointer disabled:cursor-not-allowed">만들기</button>
