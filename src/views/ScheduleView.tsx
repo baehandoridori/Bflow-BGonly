@@ -2,7 +2,6 @@ import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   CalendarDays, ChevronLeft, ChevronRight, Plus,
-  Palmtree,
 } from 'lucide-react';
 import { cn } from '@/utils/cn';
 import { useDataStore } from '@/stores/useDataStore';
@@ -14,7 +13,7 @@ import { fetchAllVacationEvents } from '@/services/vacationService';
 import { useCalendarDnD } from '@/hooks/useCalendarDnD';
 import type { DragMode } from '@/hooks/useCalendarDnD';
 import type {
-  CalendarEvent, CalendarViewMode, CalendarFilter,
+  CalendarEvent, CalendarViewMode,
 } from '@/types/calendar';
 import { mapVacationEvents } from '@/utils/vacationEvents';
 import { MiniCalendar } from '@/components/calendar/MiniCalendar';
@@ -26,9 +25,11 @@ import WeekScrollView, { generateYearWeeks, findWeekIndexForDate } from '@/compo
 import WeekSidebar from '@/components/calendar/WeekSidebar';
 import DayScrollView from '@/components/calendar/DayScrollView';
 import DaySidebar from '@/components/calendar/DaySidebar';
-import { CalendarRail } from '@/components/calendar/CalendarRail';
+import { CalendarRail, GOOGLE_CALENDAR_ID } from '@/components/calendar/CalendarRail';
+import { TagBar } from '@/components/calendar/TagBar';
 import { useCalendarDragCreate } from '@/hooks/useCalendarDragCreate';
 import { useCalendarStore } from '@/stores/useCalendarStore';
+import { filterCalendarEvents } from '@/utils/calendarEventFilter';
 import { navigateToSceneView } from '@/utils/sceneNavigationAction';
 import { createUuid } from '@/utils/createUuid';
 import { fmtDate, parseDate, addDays } from '@/utils/calendarDate';
@@ -74,10 +75,7 @@ export function ScheduleView() {
 
   const [events, setEvents] = useState<CalendarEvent[]>([]);
   const [vacationEvents, setVacationEvents] = useState<CalendarEvent[]>([]);
-  const [showVacation, setShowVacation] = useState(true);
   const [viewMode, setViewMode] = useState<CalendarViewMode>('month');
-  const [filter, setFilter] = useState<CalendarFilter>('all');
-  const [deptFilter, setDeptFilter] = useState<'all' | 'bg' | 'acting'>('all');
   const [showCreate, setShowCreate] = useState(false);
   const [createDate, setCreateDate] = useState<string | undefined>();
   const [googleAuthenticated, setGoogleAuthenticated] = useState(false);
@@ -114,6 +112,10 @@ export function ScheduleView() {
 
   const today = fmtDate(new Date());
   const vacationConnected = useAppStore((s) => s.vacationConnected);
+  const calendars = useCalendarStore((state) => state.calendars);
+  const visibleCalendarIds = useCalendarStore((state) => state.visibleCalendarIds);
+  const enabledTagIds = useCalendarStore((state) => state.enabledTagIds);
+  const googleVisible = visibleCalendarIds[GOOGLE_CALENDAR_ID] !== false;
 
   useEffect(() => {
     void useCalendarStore.getState().loadAll();
@@ -179,19 +181,19 @@ export function ScheduleView() {
 
   useEffect(() => { loadVacationEvents(); }, [loadVacationEvents]);
 
-  // 통합 이벤트 (로컬 + 휴가)
-  const allEvents = useMemo(() => {
-    if (!showVacation) return events;
-    return [...events, ...vacationEvents];
-  }, [events, vacationEvents, showVacation]);
+  // 통합 이벤트 (B flow + 연결된 휴가)와 캘린더∩태그 필터를 한 경로로 유지한다.
+  const allEvents = useMemo(() => [...events, ...vacationEvents], [events, vacationEvents]);
+  const filteredEvents = useMemo(
+    () => filterCalendarEvents(allEvents, { visibleCalendarIds, enabledTagIds, googleVisible }),
+    [allEvents, visibleCalendarIds, enabledTagIds, googleVisible],
+  );
 
-  // 필터링
-  const filteredEvents = useMemo(() => {
-    let result = allEvents;
-    if (filter !== 'all') result = result.filter((e) => e.type === filter);
-    if (deptFilter !== 'all') result = result.filter((e) => e.linkedDepartment === deptFilter || e.type === 'custom' || e.type === 'vacation');
-    return result;
-  }, [allEvents, filter, deptFilter]);
+  const visibleCalendarCount = useMemo(
+    () => calendars.filter((calendar) => visibleCalendarIds[calendar.id] !== false).length
+      + (googleAuthenticated && googleVisible ? 1 : 0),
+    [calendars, visibleCalendarIds, googleAuthenticated, googleVisible],
+  );
+  const totalRailCalendarCount = calendars.length + (googleAuthenticated ? 1 : 0);
 
   // 주 데이터 계산 (모든 날짜를 정오로 생성 — parseDate와 일관성 유지)
   const weeks = useMemo(() => {
@@ -637,6 +639,8 @@ export function ScheduleView() {
 
   // 사이드바 상태
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  // Task 3.7의 anchored tag manager가 이 실제 클릭 위치를 사용한다.
+  const handleOpenTagManager = useCallback((_anchorRect: DOMRect) => {}, []);
 
   return (
     <div className="flex h-full">
@@ -746,59 +750,6 @@ export function ScheduleView() {
         </div>
 
         <div className="flex items-center gap-2">
-          {/* 필터 */}
-          <div className="flex items-center bg-bg-card rounded-lg p-0.5 border border-bg-border/50">
-            {([['all', '전체'], ['custom', '일반'], ['episode', 'EP'], ['part', '파트'], ['scene', '씬'], ['vacation', '휴가']] as const).map(([f, l]) => (
-              <button
-                key={f}
-                onClick={() => setFilter(f)}
-                className={cn(
-                  'px-3 py-1.5 text-xs rounded-md font-medium cursor-pointer transition-colors',
-                  filter === f
-                    ? f === 'vacation' ? 'bg-emerald-500/20 text-emerald-400' : 'bg-accent/20 text-accent'
-                    : 'text-text-secondary hover:text-text-primary',
-                )}
-              >
-                {l}
-              </button>
-            ))}
-          </div>
-
-          {/* 휴가 표시 토글 */}
-          {vacationConnected && (
-            <button
-              onClick={() => setShowVacation((v) => !v)}
-              className={cn(
-                'flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors cursor-pointer border',
-                showVacation
-                  ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30'
-                  : 'bg-bg-card text-text-secondary/50 border-bg-border/50',
-              )}
-              title={showVacation ? '휴가 이벤트 숨기기' : '휴가 이벤트 표시'}
-            >
-              <Palmtree size={13} />
-              휴가
-            </button>
-          )}
-
-          {/* 부서 필터 */}
-          <div className="flex items-center bg-bg-card rounded-lg p-0.5 border border-bg-border/50">
-            {([['all', '전체'], ['bg', 'BG'], ['acting', 'ACT']] as const).map(([f, l]) => (
-              <button
-                key={f}
-                onClick={() => setDeptFilter(f)}
-                className={cn(
-                  'px-3 py-1.5 text-xs rounded-md font-medium cursor-pointer transition-colors',
-                  deptFilter === f
-                    ? 'bg-accent/20 text-accent'
-                    : 'text-text-secondary hover:text-text-primary',
-                )}
-              >
-                {l}
-              </button>
-            ))}
-          </div>
-
           {/* 뷰 모드 */}
           <div className="flex bg-bg-card rounded-lg p-0.5 border border-bg-border/50">
             {([['month', '월'], ['2week', '2주'], ['week', '주'], ['today', '오늘']] as const).map(([m, l]) => (
@@ -823,27 +774,26 @@ export function ScheduleView() {
             className="flex items-center gap-1.5 px-4 py-2 rounded-lg bg-accent hover:bg-accent/80 text-white text-sm font-medium shadow-sm shadow-accent/20 transition-colors cursor-pointer"
           >
             <Plus size={16} />
-            이벤트
+            일정
           </button>
         </div>
       </div>
 
+      <TagBar
+        vacationConnected={vacationConnected}
+        onOpenTagManager={handleOpenTagManager}
+      />
+
       {/* ═══ 이벤트 수 통계 ═══ */}
       <div className="flex items-center gap-4 text-sm text-text-secondary/50 px-4">
-        <span>전체 {allEvents.length}개</span>
-        <span className="text-bg-border/50">·</span>
-        <span>이번 달 {allEvents.filter((e) => {
+        <span>이번 달 {filteredEvents.filter((e) => {
           const s = parseDate(e.startDate);
           return s.getFullYear() === year && s.getMonth() === month;
         }).length}개</span>
         <span className="text-bg-border/50">·</span>
-        <span>오늘 {allEvents.filter((e) => e.startDate <= today && e.endDate >= today).length}개</span>
-        {vacationEvents.length > 0 && (
-          <>
-            <span className="text-bg-border/50">·</span>
-            <span className="text-emerald-400/70">휴가 {vacationEvents.length}건</span>
-          </>
-        )}
+        <span>오늘 {filteredEvents.filter((e) => e.startDate <= today && e.endDate >= today).length}개</span>
+        <span className="text-bg-border/50">·</span>
+        <span>켜진 캘린더 {visibleCalendarCount}/{totalRailCalendarCount}</span>
       </div>
 
       {/* ═══ 캘린더 본체 ═══ */}

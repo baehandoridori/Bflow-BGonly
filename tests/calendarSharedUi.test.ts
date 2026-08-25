@@ -29,6 +29,14 @@ type CalendarRailProps = {
 
 type CalendarRailComponent = (props: CalendarRailProps) => ReactNode;
 
+type TagBarProps = {
+  vacationConnected: boolean;
+  onOpenTagManager(anchorRect: DOMRect): void;
+};
+
+type TagBarComponent = (props: TagBarProps) => ReactNode;
+type ScheduleViewComponent = () => ReactNode;
+
 type ButtonElement = ReactElement<{
   'aria-label'?: string;
   'aria-pressed'?: boolean;
@@ -41,15 +49,22 @@ let stateSlots: unknown[] = [];
 let stateCursor = 0;
 let calendarState: {
   calendars: BflowCalendar[];
+  tags: Array<{ id: string; name: string; color: string; sortOrder: number }>;
   visibleCalendarIds: Record<string, boolean>;
+  enabledTagIds: Record<string, boolean>;
   mutedCalendarIds: string[];
   toggleCalendarVisible(id: string): void;
+  toggleTag(id: string): void;
+  resetTagsAllOn(): void;
   toggleMuted(id: string): void;
 };
 let openedSettings: BflowCalendar[] = [];
 let createdCount = 0;
 let appViews: string[] = [];
 let bundledRail: Promise<CalendarRailComponent> | undefined;
+let bundledTagBar: Promise<TagBarComponent> | undefined;
+let bundledScheduleView: Promise<ScheduleViewComponent> | undefined;
+let scheduleTagBarProps: TagBarProps[] = [];
 
 function resolveComponents(node: ReactNode): ReactNode {
   if (Array.isArray(node)) return node.map(resolveComponents);
@@ -127,6 +142,7 @@ function resetHarness(): void {
   openedSettings = [];
   createdCount = 0;
   appViews = [];
+  scheduleTagBarProps = [];
   calendarState = {
     calendars: [
       calendar({ id: 'mine', name: 'EP 마일스톤', isPersonal: true }),
@@ -134,11 +150,23 @@ function resetHarness(): void {
       calendar({ id: 'editable-share', name: '리드 회의', visibility: 'members', ownerId: 'lead', canEdit: true, canManage: false }),
       calendar({ id: 'view-share', name: '외부 보기', visibility: 'members', ownerId: 'lead', canEdit: false, canManage: false }),
     ],
+    tags: [
+      { id: 'tag-meeting', name: '회의', color: '#FDCB6E', sortOrder: 20 },
+      { id: 'tag-review', name: '검수', color: '#00B894', sortOrder: 10 },
+    ],
     visibleCalendarIds: {},
+    enabledTagIds: {},
     mutedCalendarIds: [],
     toggleCalendarVisible(id) {
       if (calendarState.visibleCalendarIds[id] === false) delete calendarState.visibleCalendarIds[id];
       else calendarState.visibleCalendarIds[id] = false;
+    },
+    toggleTag(id) {
+      if (calendarState.enabledTagIds[id] === false) delete calendarState.enabledTagIds[id];
+      else calendarState.enabledTagIds[id] = false;
+    },
+    resetTagsAllOn() {
+      calendarState.enabledTagIds = {};
     },
     toggleMuted(id) {
       calendarState.mutedCalendarIds = calendarState.mutedCalendarIds.includes(id)
@@ -204,6 +232,101 @@ async function loadRail(): Promise<CalendarRailComponent> {
   return bundledRail;
 }
 
+async function loadTagBar(): Promise<TagBarComponent> {
+  bundledTagBar ??= build({
+    entryPoints: ['src/components/calendar/TagBar.tsx'],
+    bundle: true,
+    format: 'cjs',
+    platform: 'node',
+    target: 'node22',
+    write: false,
+    external: ['react', 'react/jsx-runtime', 'lucide-react', '@/stores/useCalendarStore'],
+  }).then((result) => {
+    const module = { exports: {} as Record<string, unknown> };
+    const nodeRequire = createRequire(import.meta.url);
+    const react = nodeRequire('react') as Record<string, unknown>;
+    const evaluate = new Function('require', 'module', 'exports', result.outputFiles[0].text);
+    evaluate((id: string) => {
+      if (id === 'react') return { ...react, useMemo: (factory: () => unknown) => factory() };
+      if (id === 'react/jsx-runtime') return nodeRequire('react/jsx-runtime');
+      if (id === 'lucide-react') return { Settings: () => null };
+      if (id === '@/stores/useCalendarStore') {
+        return { useCalendarStore: (selector: (state: typeof calendarState) => unknown) => selector(calendarState) };
+      }
+      return nodeRequire(id);
+    }, module, module.exports);
+    return module.exports.TagBar as TagBarComponent;
+  });
+  return bundledTagBar;
+}
+
+async function loadScheduleView(): Promise<ScheduleViewComponent> {
+  bundledScheduleView ??= build({
+    entryPoints: ['src/views/ScheduleView.tsx'],
+    bundle: true,
+    format: 'cjs',
+    platform: 'node',
+    target: 'node22',
+    write: false,
+    external: [
+      'react', 'react/jsx-runtime', 'framer-motion', 'lucide-react',
+      '@/utils/cn', '@/stores/useDataStore', '@/stores/useAppStore', '@/services/calendarService',
+      '@/services/vacationService', '@/hooks/useCalendarDnD', '@/utils/vacationEvents',
+      '@/components/calendar/MiniCalendar', '@/components/calendar/EventSidePanel',
+      '@/components/calendar/EventQuickEdit', '@/components/calendar/CalendarGrid',
+      '@/components/calendar/EventCreateModal', '@/components/calendar/WeekScrollView',
+      '@/components/calendar/WeekSidebar', '@/components/calendar/DayScrollView',
+      '@/components/calendar/DaySidebar', '@/components/calendar/CalendarRail',
+      '@/components/calendar/TagBar', '@/hooks/useCalendarDragCreate', '@/stores/useCalendarStore',
+      '@/utils/sceneNavigationAction', '@/utils/createUuid', '@/utils/calendarDate',
+      '@/utils/calendarEventFilter',
+    ],
+  }).then((result) => {
+    const module = { exports: {} as Record<string, unknown> };
+    const nodeRequire = createRequire(import.meta.url);
+    const react = nodeRequire('react') as Record<string, unknown>;
+    const jsxRuntime = nodeRequire('react/jsx-runtime') as { jsx(type: unknown, props: unknown): ReactNode };
+    const emptyComponent = () => null;
+    const evaluate = new Function('require', 'module', 'exports', result.outputFiles[0].text);
+    evaluate((id: string) => {
+      if (id === 'react') {
+        return {
+          ...react,
+          useState: (initial: unknown) => [typeof initial === 'function' ? (initial as () => unknown)() : initial, () => {}],
+          useEffect: () => {}, useMemo: (factory: () => unknown) => factory(), useCallback: (fn: unknown) => fn,
+          useRef: (initial: unknown) => ({ current: initial }),
+        };
+      }
+      if (id === 'react/jsx-runtime') return jsxRuntime;
+      if (id === 'framer-motion') return { AnimatePresence: ({ children }: { children: ReactNode }) => children, motion: { div: 'div' } };
+      if (id === 'lucide-react') return { CalendarDays: emptyComponent, ChevronLeft: emptyComponent, ChevronRight: emptyComponent, Plus: emptyComponent };
+      if (id === '@/utils/cn') return { cn: (...values: string[]) => values.filter(Boolean).join(' ') };
+      if (id === '@/stores/useDataStore') return { useDataStore: (selector: (state: { episodes: []; episodeTitles: {} }) => unknown) => selector({ episodes: [], episodeTitles: {} }) };
+      if (id === '@/stores/useAppStore') {
+        const appState = { setView() {}, vacationConnected: false };
+        return { useAppStore: (selector?: (state: typeof appState) => unknown) => selector ? selector(appState) : appState };
+      }
+      if (id === '@/services/calendarService') return { getEvents: async () => [], isGoogleCacheReady: () => true, loadBflowEvents: async () => {}, addEvent: async () => {}, updateEvent: async () => {}, deleteEvent: async () => {} };
+      if (id === '@/services/vacationService') return { fetchAllVacationEvents: async () => [] };
+      if (id === '@/hooks/useCalendarDnD') return { useCalendarDnD: () => ({ isDragging: false, preview: null, startDrag() {} }) };
+      if (id === '@/utils/vacationEvents') return { mapVacationEvents: () => [] };
+      if (id === '@/components/calendar/WeekScrollView') return { default: emptyComponent, generateYearWeeks: () => [], findWeekIndexForDate: () => 0 };
+      if (id === '@/components/calendar/CalendarRail') return { CalendarRail: emptyComponent, GOOGLE_CALENDAR_ID: 'google' };
+      if (id === '@/components/calendar/TagBar') return { TagBar: (props: TagBarProps) => { scheduleTagBarProps.push(props); return jsxRuntime.jsx('div', { children: '태그' }); } };
+      if (id === '@/hooks/useCalendarDragCreate') return { useCalendarDragCreate: () => ({ handleCellMouseDown() {}, isDateInRange: () => false }) };
+      if (id === '@/stores/useCalendarStore') return { useCalendarStore: (selector: (state: typeof calendarState) => unknown) => selector(calendarState), getState: () => ({ loadAll: async () => {} }) };
+      if (id === '@/utils/sceneNavigationAction') return { navigateToSceneView() {} };
+      if (id === '@/utils/createUuid') return { createUuid: () => 'new-id' };
+      if (id === '@/utils/calendarDate') return { fmtDate: () => '2026-08-25', parseDate: (date: string) => new Date(`${date}T12:00:00`), addDays: (date: Date, days: number) => new Date(date.getFullYear(), date.getMonth(), date.getDate() + days, 12) };
+      if (id === '@/utils/calendarEventFilter') return { filterCalendarEvents: (events: unknown[]) => events };
+      if (id.startsWith('@/components/calendar/')) return Object.fromEntries([[id.split('/').at(-1)?.replace(/\.tsx$/, ''), emptyComponent]]);
+      return nodeRequire(id);
+    }, module, module.exports);
+    return module.exports.ScheduleView as ScheduleViewComponent;
+  });
+  return bundledScheduleView;
+}
+
 async function renderRail(isAuthenticated: boolean): Promise<ReactNode> {
   const CalendarRail = await loadRail();
   stateCursor = 0;
@@ -212,6 +335,16 @@ async function renderRail(isAuthenticated: boolean): Promise<ReactNode> {
     onOpenSettings: (value) => openedSettings.push(value),
     onCreateCalendar: () => { createdCount += 1; },
   }));
+}
+
+async function renderTagBar(vacationConnected: boolean, onOpenTagManager: (anchorRect: DOMRect) => void): Promise<ReactNode> {
+  const TagBar = await loadTagBar();
+  return resolveComponents(TagBar({ vacationConnected, onOpenTagManager }));
+}
+
+async function renderScheduleView(): Promise<ReactNode> {
+  const ScheduleView = await loadScheduleView();
+  return resolveComponents(ScheduleView());
 }
 
 test('CalendarRail renders four grouped sections and drives visibility, menu permissions, callbacks, and Google settings navigation', async () => {
@@ -252,4 +385,48 @@ test('CalendarRail renders four grouped sections and drives visibility, menu per
   assert.match(textContent(tree), /연동됨/, 'linked Google row is rendered');
   buttonByLabel(tree, '내 구글 표시').props.onClick?.();
   assert.equal(calendarState.visibleCalendarIds.google, false, 'Google visibility uses the shared explicit-false record');
+});
+
+test('TagBar independently toggles tags, resets every chip, and forwards the clicked manager anchor', async () => {
+  resetHarness();
+  const openedAnchors: DOMRect[] = [];
+
+  let tree = await renderTagBar(true, (anchorRect) => openedAnchors.push(anchorRect));
+  assert.deepEqual(
+    findButtons(tree).map((button) => textContent(button)).filter((label) => label === '검수' || label === '회의'),
+    ['검수', '회의'],
+    'tags render in their sortOrder so the bar matches the saved team order',
+  );
+  assert.equal(buttonByLabel(tree, '회의 태그').props['aria-pressed'], true);
+  assert.equal(buttonByLabel(tree, '휴가 태그').props['aria-pressed'], true);
+
+  buttonByLabel(tree, '회의 태그').props.onClick?.();
+  assert.equal(calendarState.enabledTagIds['tag-meeting'], false, 'a chip writes only its own explicit-false state');
+  assert.equal(calendarState.enabledTagIds['tag-review'], undefined, 'turning one chip off leaves another chip enabled');
+
+  tree = await renderTagBar(true, (anchorRect) => openedAnchors.push(anchorRect));
+  assert.equal(buttonByLabel(tree, '전체 태그 켜기').props['aria-pressed'], false, '전체 is not highlighted while one chip is off');
+  buttonByLabel(tree, '전체 태그 켜기').props.onClick?.();
+  assert.deepEqual(calendarState.enabledTagIds, {}, '전체 restores every tag using the store reset action');
+
+  tree = await renderTagBar(true, (anchorRect) => openedAnchors.push(anchorRect));
+  const anchor = { left: 17, top: 29, width: 84, height: 28 } as DOMRect;
+  buttonByLabel(tree, '태그 관리').props.onClick?.({
+    currentTarget: { getBoundingClientRect: () => anchor },
+  });
+  assert.deepEqual(openedAnchors, [anchor], 'tag manager receives the clicked button rectangle instead of querying the document');
+});
+
+test('ScheduleView replaces legacy controls with the tag bar and reports visible rail calendars', async () => {
+  resetHarness();
+  const tree = await renderScheduleView();
+  const labels = findButtons(tree).map(textContent);
+
+  for (const removedControl of ['일반', 'EP', '파트', '씬', 'BG', 'ACT']) {
+    assert.equal(labels.includes(removedControl), false, `${removedControl} is no longer a separate legacy filter`);
+  }
+  assert.ok(scheduleTagBarProps[0], 'ScheduleView renders TagBar instead of the legacy type, department, and vacation controls');
+  assert.equal(typeof scheduleTagBarProps[0].onOpenTagManager, 'function', 'ScheduleView keeps the tag manager anchoring callback wired');
+  assert.ok(labels.includes('일정'), 'the creation action uses the shared calendar wording');
+  assert.match(textContent(tree), /이번 달 0개.*오늘 0개.*켜진 캘린더 4\/4/, 'statistics describe the filtered view and rail visibility instead of total and vacation counts');
 });

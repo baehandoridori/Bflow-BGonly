@@ -1,0 +1,86 @@
+import { Settings } from 'lucide-react';
+import { useMemo } from 'react';
+import { useCalendarStore } from '@/stores/useCalendarStore';
+import { hexToRgba } from '@/utils/calendarDate';
+import { VACATION_CHIP_ID } from '@/utils/calendarEventFilter';
+
+interface TagBarProps {
+  vacationConnected: boolean;
+  onOpenTagManager: (anchorRect: DOMRect) => void;
+}
+
+interface TagChipProps {
+  name: string;
+  color: string;
+  enabled: boolean;
+  onClick: () => void;
+}
+
+function TagChip({ name, color, enabled, onClick }: TagChipProps) {
+  return (
+    <button
+      type="button"
+      aria-label={`${name} 태그`}
+      aria-pressed={enabled}
+      onClick={onClick}
+      className="rounded-full border px-2.5 py-1 text-xs font-medium transition-colors cursor-pointer"
+      style={enabled
+        ? { backgroundColor: hexToRgba(color, 0.22), borderColor: hexToRgba(color, 0.45), color }
+        : { backgroundColor: 'transparent', borderColor: 'rgba(139, 141, 163, 0.35)', color: '#8B8DA3' }}
+    >
+      {name}
+    </button>
+  );
+}
+
+export function TagBar({ vacationConnected, onOpenTagManager }: TagBarProps) {
+  const tags = useCalendarStore((state) => state.tags);
+  const enabledTagIds = useCalendarStore((state) => state.enabledTagIds);
+  const toggleTag = useCalendarStore((state) => state.toggleTag);
+  const resetTagsAllOn = useCalendarStore((state) => state.resetTagsAllOn);
+  const orderedTags = useMemo(() => [...tags].sort((a, b) => a.sortOrder - b.sortOrder), [tags]);
+  const allEnabled = orderedTags.every((tag) => enabledTagIds[tag.id] !== false)
+    && (!vacationConnected || enabledTagIds[VACATION_CHIP_ID] !== false);
+
+  return (
+    <div className="flex flex-wrap items-center gap-1.5 px-3" aria-label="태그 필터">
+      <span className="mr-1 text-xs font-medium text-text-secondary">태그</span>
+      <button
+        type="button"
+        aria-label="전체 태그 켜기"
+        aria-pressed={allEnabled}
+        onClick={resetTagsAllOn}
+        className={allEnabled
+          ? 'rounded-full border border-accent/40 bg-accent/15 px-2.5 py-1 text-xs font-medium text-accent transition-colors cursor-pointer'
+          : 'rounded-full border border-text-secondary/30 px-2.5 py-1 text-xs font-medium text-text-secondary transition-colors hover:text-text-primary cursor-pointer'}
+      >
+        전체
+      </button>
+      {orderedTags.map((tag) => (
+        <TagChip
+          key={tag.id}
+          name={tag.name}
+          color={tag.color}
+          enabled={enabledTagIds[tag.id] !== false}
+          onClick={() => toggleTag(tag.id)}
+        />
+      ))}
+      {vacationConnected && (
+        <TagChip
+          name="휴가"
+          color="#00B894"
+          enabled={enabledTagIds[VACATION_CHIP_ID] !== false}
+          onClick={() => toggleTag(VACATION_CHIP_ID)}
+        />
+      )}
+      <button
+        type="button"
+        aria-label="태그 관리"
+        onClick={(event) => onOpenTagManager(event.currentTarget.getBoundingClientRect())}
+        className="ml-1 flex items-center gap-1 rounded-full px-2 py-1 text-xs text-text-secondary transition-colors hover:bg-bg-border/50 hover:text-text-primary cursor-pointer"
+      >
+        <Settings size={12} /> 태그 관리
+      </button>
+    </div>
+  );
+}
