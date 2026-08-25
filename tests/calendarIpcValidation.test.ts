@@ -507,8 +507,9 @@ test('calendar:list propagates personal calendar provisioning failures before li
   }
 });
 
-test('a real user still sees team calendars and their events through the strict session boundary', async () => {
+test('event listing delegates actor visibility and the date range to one atomic store read', async () => {
   const listEventCalls: unknown[][] = [];
+  let calendarListCalls = 0;
   const calendars = [
     calendarRow({ id: 'team-calendar', visibility: 'team', owner_id: 'admin-1' }),
     calendarRow({ id: 'private-other', visibility: 'private', owner_id: 'other-user' }),
@@ -516,7 +517,10 @@ test('a real user still sees team calendars and their events through the strict 
   const harness = await createIpcHarness({
     getUserRole: async () => 'user',
     ensurePersonalCalendar: async () => {},
-    listCalendarsWithMembers: async () => ({ calendars, members: [] }),
+    listCalendarsWithMembers: async () => {
+      calendarListCalls += 1;
+      return { calendars, members: [] };
+    },
     listEventsInRange: async (...args) => {
       listEventCalls.push(args);
       return [calendarEventRow({ calendar_id: 'team-calendar' })];
@@ -531,8 +535,9 @@ test('a real user still sees team calendars and their events through the strict 
       to: '2026-08-31',
     }) as Array<{ calendar_id: string }>;
     assert.deepEqual(events.map(({ calendar_id }) => calendar_id), ['team-calendar']);
+    assert.equal(calendarListCalls, 1, 'event reads must not precompute visibility in a separate request');
     assert.deepEqual(listEventCalls, [[{
-      calendarIds: ['team-calendar'],
+      actorId: 'real-user',
       from: '2026-08-01',
       to: '2026-08-31',
     }]]);
@@ -2680,6 +2685,204 @@ async function bundledCalendarStoreSource(): Promise<string> {
   }).then((result) => result.outputFiles[0].text);
   return storeBundle;
 }
+
+test('calendar store deterministically drains every calendar member page past a server row cap', async () => {
+  const globalScope = globalThis as Record<string, unknown>;
+  const hadPrior = Object.prototype.hasOwnProperty.call(globalScope, STORE_HARNESS_KEY);
+  const prior = globalScope[STORE_HARNESS_KEY];
+  const calendar = calendarRow({ id: 'calendar-shared', visibility: 'members' });
+  const memberPages = [
+    Array.from({ length: 1000 }, (_, index) => ({
+      calendar_id: 'calendar-shared',
+      user_id: `user-${String(index).padStart(4, '0')}`,
+      can_edit: index % 2 === 0,
+    })),
+    [{ calendar_id: 'calendar-shared', user_id: 'user-1000', can_edit: false }],
+  ];
+  const ranges: Array<[number, number]> = [];
+  const memberOrders: string[][] = [];
+  let memberPage = 0;
+
+  const from = (table: string) => {
+    const orders: string[] = [];
+    const query = {
+      select: () => query,
+      order: (column: string) => {
+        orders.push(column);
+        return query;
+      },
+      range: async (start: number, end: number) => {
+        assert.equal(table, 'calendar_members');
+        ranges.push([start, end]);
+        memberOrders.push([...orders]);
+        return { data: memberPages[memberPage++] ?? [], error: null };
+      },
+      then: (
+        resolve: (value: { data: unknown; error: null }) => unknown,
+        reject: (reason?: unknown) => unknown,
+      ) => Promise.resolve(
+        table === 'calendars'
+          ? { data: [calendar], error: null }
+          : { data: memberPages[0], error: null },
+      ).then(resolve, reject),
+    };
+    return query;
+  };
+  globalScope[STORE_HARNESS_KEY] = { from };
+  try {
+    const encoded = Buffer.from(await bundledCalendarStoreSource()).toString('base64');
+    const store = await import(`data:text/javascript;base64,${encoded}#calendar-store-${storeNonce++}`) as {
+      listCalendarsWithMembers(): Promise<{ calendars: unknown[]; members: Array<{ user_id: string }> }>;
+    };
+
+    const result = await store.listCalendarsWithMembers();
+    assert.equal(result.members.length, 1001);
+    assert.equal(result.members[0]?.user_id, 'user-0000');
+    assert.equal(result.members.at(-1)?.user_id, 'user-1000');
+    assert.deepEqual(ranges, [[0, 999], [1000, 1999]]);
+    assert.deepEqual(memberOrders, [
+      ['calendar_id', 'user_id'],
+      ['calendar_id', 'user_id'],
+    ]);
+  } finally {
+    if (hadPrior) globalScope[STORE_HARNESS_KEY] = prior;
+    else delete globalScope[STORE_HARNESS_KEY];
+  }
+});
+
+test('calendar store pages one actor-authorized event RPC without accepting caller-computed calendar ids', async () => {
+  const globalScope = globalThis as Record<string, unknown>;
+  const hadPrior = Object.prototype.hasOwnProperty.call(globalScope, STORE_HARNESS_KEY);
+  const prior = globalScope[STORE_HARNESS_KEY];
+  const eventPages = [
+    Array.from({ length: 1000 }, (_, index) => calendarEventRow({
+      id: `event-${String(index).padStart(4, '0')}`,
+    })),
+    [calendarEventRow({ id: 'event-1000' })],
+  ];
+  const calls: Array<{
+    name: string;
+    args: Record<string, unknown>;
+    orders: string[];
+    range: [number, number];
+  }> = [];
+  let eventPage = 0;
+  globalScope[STORE_HARNESS_KEY] = {
+    rpc(name: string, args: Record<string, unknown>) {
+      const orders: string[] = [];
+      const query = {
+        order(column: string) {
+          orders.push(column);
+          return query;
+        },
+        async range(start: number, end: number) {
+          calls.push({ name, args, orders: [...orders], range: [start, end] });
+          return { data: eventPages[eventPage++] ?? [], error: null };
+        },
+      };
+      return query;
+    },
+  };
+  try {
+    const encoded = Buffer.from(await bundledCalendarStoreSource()).toString('base64');
+    const store = await import(`data:text/javascript;base64,${encoded}#calendar-store-${storeNonce++}`) as {
+      listEventsInRange(params: { actorId: string; from?: string; to?: string }): Promise<Array<{ id: string }>>;
+    };
+
+    const events = await store.listEventsInRange({
+      actorId: 'member-user',
+      from: '2026-08-01',
+      to: '2026-08-31',
+    });
+    assert.equal(events.length, 1001);
+    assert.equal(events[0]?.id, 'event-0000');
+    assert.equal(events.at(-1)?.id, 'event-1000');
+    assert.deepEqual(calls, [
+      {
+        name: 'list_calendar_events_authorized',
+        args: { p_actor_id: 'member-user', p_from: '2026-08-01', p_to: '2026-08-31' },
+        orders: ['start_date', 'id'],
+        range: [0, 999],
+      },
+      {
+        name: 'list_calendar_events_authorized',
+        args: { p_actor_id: 'member-user', p_from: '2026-08-01', p_to: '2026-08-31' },
+        orders: ['start_date', 'id'],
+        range: [1000, 1999],
+      },
+    ]);
+  } finally {
+    if (hadPrior) globalScope[STORE_HARNESS_KEY] = prior;
+    else delete globalScope[STORE_HARNESS_KEY];
+  }
+});
+
+test('calendar store soft-reads only an exactly missing authorized event RPC before migration', async () => {
+  const globalScope = globalThis as Record<string, unknown>;
+  const hadPrior = Object.prototype.hasOwnProperty.call(globalScope, STORE_HARNESS_KEY);
+  const prior = globalScope[STORE_HARNESS_KEY];
+  const originalWarn = console.warn;
+  const scenarios = [
+    {
+      error: {
+        code: 'PGRST202',
+        message: 'Could not find the function public.list_calendar_events_authorized in the schema cache',
+      },
+      empty: true,
+    },
+    {
+      error: {
+        code: '42883',
+        message: 'function public.list_calendar_events_authorized(text,date,date) does not exist',
+      },
+      empty: true,
+    },
+    {
+      error: {
+        code: 'PGRST202',
+        message: 'Could not find the function public.some_other_function in the schema cache',
+      },
+      empty: false,
+    },
+    {
+      error: {
+        code: '08006',
+        message: 'temporary connection failure while calling list_calendar_events_authorized',
+      },
+      empty: false,
+    },
+  ] as const;
+  try {
+    console.warn = () => {};
+    const encoded = Buffer.from(await bundledCalendarStoreSource()).toString('base64');
+    for (const scenario of scenarios) {
+      globalScope[STORE_HARNESS_KEY] = {
+        rpc() {
+          const query = {
+            order: () => query,
+            range: async () => ({ data: null, error: scenario.error }),
+          };
+          return query;
+        },
+      };
+      const store = await import(`data:text/javascript;base64,${encoded}#calendar-store-${storeNonce++}`) as {
+        listEventsInRange(params: { actorId: string }): Promise<unknown[]>;
+      };
+      if (scenario.empty) {
+        assert.deepEqual(await store.listEventsInRange({ actorId: 'member-user' }), []);
+      } else {
+        await assert.rejects(
+          store.listEventsInRange({ actorId: 'member-user' }),
+          new RegExp(scenario.error.message.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')),
+        );
+      }
+    }
+  } finally {
+    console.warn = originalWarn;
+    if (hadPrior) globalScope[STORE_HARNESS_KEY] = prior;
+    else delete globalScope[STORE_HARNESS_KEY];
+  }
+});
 
 test('calendar store rejects a deleted session user instead of downgrading it to a user role', async () => {
   const globalScope = globalThis as Record<string, unknown>;

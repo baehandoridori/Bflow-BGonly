@@ -593,16 +593,8 @@ export function registerCalendarIpc(deps: CalendarIpcDeps): void {
 
   ipcMain.handle('calendar:events:list', wrap(async (params?: { from?: string; to?: string }) => {
     const user = await sessionUser();
-    const { calendars, members } = await store.listCalendarsWithMembers();
-    const visibleIds = calendars
-      .filter((calendar) => canViewCalendar(
-        calendar,
-        membersOf(members, calendar.id).map((member) => member.user_id),
-        user.id,
-      ))
-      .map((calendar) => calendar.id);
     return store.listEventsInRange({
-      calendarIds: visibleIds,
+      actorId: user.id,
       from: params?.from,
       to: params?.to,
     });

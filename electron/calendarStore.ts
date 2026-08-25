@@ -81,6 +81,15 @@ function isMissingTable(error: SbError): boolean {
     || /could not find the table\s+['"][^'"]+['"]\s+in the schema cache/i.test(message);
 }
 
+function isMissingFunction(error: SbError, functionName: string): boolean {
+  if (!error || (error.code !== 'PGRST202' && error.code !== '42883')) return false;
+  const message = error.message ?? '';
+  if (!message.toLowerCase().includes(functionName.toLowerCase())) return false;
+  return error.code === 'PGRST202'
+    ? /function[\s\S]*schema cache/i.test(message)
+    : /function[\s\S]*does not exist/i.test(message);
+}
+
 function warnMissingTable(table: string, emptyResult: string): void {
   console.warn(`[calendar] ${table} 테이블 없음 — 마이그레이션 전, ${emptyResult} 반환`);
 }
@@ -114,20 +123,33 @@ export async function listCalendarsWithMembers(): Promise<{ calendars: CalendarR
     throwIfError(error);
   }
 
-  const { data: memberData, error: memberError } = await supabase
-    .from('calendar_members')
-    .select('calendar_id, user_id, can_edit');
-  if (memberError) {
-    if (isMissingTable(memberError)) {
-      warnMissingTable('calendar_members', '빈 목록');
-      return { calendars: [], members: [] };
+  const pageSize = 1000;
+  const members: CalendarMemberRow[] = [];
+  let offset = 0;
+  for (;;) {
+    const { data: memberData, error: memberError } = await supabase
+      .from('calendar_members')
+      .select('calendar_id, user_id, can_edit')
+      .order('calendar_id', { ascending: true })
+      .order('user_id', { ascending: true })
+      .range(offset, offset + pageSize - 1);
+    if (memberError) {
+      if (isMissingTable(memberError)) {
+        warnMissingTable('calendar_members', '빈 목록');
+        return { calendars: [], members: [] };
+      }
+      throwIfError(memberError);
     }
-    throwIfError(memberError);
+
+    const rows = (memberData ?? []) as CalendarMemberRow[];
+    members.push(...rows);
+    if (rows.length < pageSize) break;
+    offset += pageSize;
   }
 
   return {
     calendars: (data ?? []) as CalendarRow[],
-    members: (memberData ?? []) as CalendarMemberRow[],
+    members,
   };
 }
 
@@ -218,29 +240,27 @@ export async function replaceMembers(
 
 /** 기간 조회 + .range() 페이지네이션 (PostgREST 1000행 제한). */
 export async function listEventsInRange(params: {
-  calendarIds: string[];
+  actorId: string;
   from?: string;
   to?: string;
 }): Promise<CalendarEventRow[]> {
-  if (params.calendarIds.length === 0) return [];
-
   const pageSize = 1000;
   const all: CalendarEventRow[] = [];
   let offset = 0;
   for (;;) {
-    let query = supabase
-      .from('calendar_events')
-      .select('*')
-      .in('calendar_id', params.calendarIds)
+    const query = supabase
+      .rpc('list_calendar_events_authorized', {
+        p_actor_id: params.actorId,
+        p_from: params.from ?? null,
+        p_to: params.to ?? null,
+      })
       .order('start_date', { ascending: true })
       .order('id', { ascending: true })
       .range(offset, offset + pageSize - 1);
-    if (params.from) query = query.gte('end_date', params.from);
-    if (params.to) query = query.lte('start_date', params.to);
 
     const { data, error } = await query;
     if (error) {
-      if (isMissingTable(error)) {
+      if (isMissingTable(error) || isMissingFunction(error, 'list_calendar_events_authorized')) {
         warnMissingTable('calendar_events', '빈 목록');
         return [];
       }

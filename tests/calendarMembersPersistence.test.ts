@@ -195,6 +195,32 @@ function calendarCreateRpc(sql: string): string {
   );
 }
 
+test('calendar event range reads authorize the actor and filter visibility in one SQL statement', () => {
+  const sql = readFileSync(migrationPath, 'utf8');
+  const fn = between(
+    sql,
+    'CREATE OR REPLACE FUNCTION public.list_calendar_events_authorized',
+    'COMMENT ON FUNCTION public.list_calendar_events_authorized',
+  );
+
+  assert.match(fn, /p_actor_id\s+TEXT[\s\S]*p_from\s+DATE[\s\S]*p_to\s+DATE/s);
+  assert.match(fn, /RETURNS SETOF public\.calendar_events/);
+  assert.match(fn, /LANGUAGE\s+sql\s+SECURITY INVOKER\s+SET search_path\s*=\s*public,\s*pg_temp\s+STABLE/s);
+  assert.match(fn, /FROM public\.calendar_events AS event\s+JOIN public\.calendars AS calendar/s);
+  assert.match(fn, /EXISTS \([\s\S]*FROM public\.users AS actor[\s\S]*actor\.id\s*=\s*p_actor_id[\s\S]*\)/s);
+  assert.match(fn, /calendar\.owner_id\s*=\s*p_actor_id/);
+  assert.match(fn, /calendar\.visibility\s*=\s*'team'/);
+  assert.match(
+    fn,
+    /FROM public\.calendar_members AS permission[\s\S]*permission\.calendar_id\s*=\s*calendar\.id[\s\S]*permission\.user_id\s*=\s*p_actor_id/s,
+  );
+  assert.doesNotMatch(fn, /calendar\.visibility\s*=\s*'members'/);
+  assert.match(fn, /p_from\s+IS NULL\s+OR\s+event\.end_date\s*>=\s*p_from/);
+  assert.match(fn, /p_to\s+IS NULL\s+OR\s+event\.start_date\s*<=\s*p_to/);
+  assert.equal((fn.match(/\bSELECT\b/gi) ?? []).length, 3, 'one event query plus actor and membership EXISTS');
+  assert.doesNotMatch(fn, /\bLOCK\s+TABLE\b|\bFOR\s+(?:UPDATE|SHARE)\b/i);
+});
+
 test('calendar create RPC is an invoker transaction with parent-to-child writer lock order', () => {
   const fn = calendarCreateRpc(readFileSync(migrationPath, 'utf8'));
   assert.match(fn, /RETURNS SETOF calendars/);

@@ -531,7 +531,48 @@ $$;
 COMMENT ON FUNCTION public.create_calendar_with_members_authorized(TEXT, JSONB, JSONB) IS
   '세션 actor 권한과 안전한 입력을 재검증하고 캘린더 + 초기 멤버를 단일 트랜잭션에서 생성하는 SECURITY INVOKER RPC.';
 
--- ── 2-2) 일정 쓰기 권한 원자적 검증 RPC ───────────────────────
+-- ── 2-2) 일정 가시성 + 기간 원자적 조회 RPC ───────────────────
+-- 캘린더 목록을 먼저 읽고 일정 목록을 나중에 읽으면 두 요청 사이의 멤버 회수나
+-- private 전환을 놓칠 수 있다. 한 SQL statement snapshot에서 actor 존재, 가시성,
+-- 기간 겹침을 함께 평가한다. 읽기 전용이므로 writer table/row lock은 잡지 않는다.
+CREATE OR REPLACE FUNCTION public.list_calendar_events_authorized(
+  p_actor_id TEXT,
+  p_from DATE DEFAULT NULL,
+  p_to DATE DEFAULT NULL
+)
+RETURNS SETOF public.calendar_events
+LANGUAGE sql
+SECURITY INVOKER
+SET search_path = public, pg_temp
+STABLE
+AS $$
+  SELECT event.*
+  FROM public.calendar_events AS event
+  JOIN public.calendars AS calendar ON calendar.id = event.calendar_id
+  WHERE EXISTS (
+      SELECT 1
+      FROM public.users AS actor
+      WHERE actor.id = p_actor_id
+    )
+    AND (
+      calendar.owner_id = p_actor_id
+      OR calendar.visibility = 'team'
+      OR EXISTS (
+        SELECT 1
+        FROM public.calendar_members AS permission
+        WHERE permission.calendar_id = calendar.id
+          AND permission.user_id = p_actor_id
+      )
+    )
+    AND (p_from IS NULL OR event.end_date >= p_from)
+    AND (p_to IS NULL OR event.start_date <= p_to)
+  ORDER BY event.start_date ASC, event.id ASC;
+$$;
+
+COMMENT ON FUNCTION public.list_calendar_events_authorized(TEXT, DATE, DATE) IS
+  'actor 존재와 owner/team/member 가시성, 기간 겹침을 한 statement snapshot에서 평가하는 잠금 없는 SECURITY INVOKER 일정 조회 RPC.';
+
+-- ── 2-3) 일정 쓰기 권한 원자적 검증 RPC ───────────────────────
 -- IPC 사전 검사는 친절한 오류용이다. 실제 권한은 부모 캘린더 행을 잠근 뒤
 -- 같은 트랜잭션에서 재확인하여 멤버 권한 회수와 일정 쓰기의 TOCTOU를 막는다.
 CREATE OR REPLACE FUNCTION public.create_calendar_event_authorized(
