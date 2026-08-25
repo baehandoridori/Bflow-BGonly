@@ -560,3 +560,21 @@ PR #116 에서 12 라운드 (P1×3, P2×6, P3×2) 끝에 silent-done. Monitor �
 - 사용자별 draft·overlay는 격리하지만 전역 태그 테이블의 in-flight/reconciliation 쓰기 잠금은 모든 사용자에게 적용한다. 모든 await 뒤에는 시작 actor와 token을 다시 확인한다.
 - 생성용 임시 ID는 명시적 prefix로 구분하고 IPC, 일정 FK, localStorage에 보내지 않는다. 서버 응답이 준 실제 UUID로 같은 overlay를 교체한다.
 - 삭제 overlay는 tombstone으로 stale event tag를 즉시 `태그 없음`처럼 표시하되, 빈 태그 배열이 단순 로드 실패일 수도 있으므로 raw canonical freshness나 정확한 tombstone 없이 기존 tagId를 지우지 않는다.
+
+---
+
+## 2026-08-25: 공급자 로컬 ID는 모든 일정 경로에서 source namespace와 함께 보존한다
+
+### 증상
+
+- 서로 다른 Google 캘린더나 B flow 일정이 같은 raw ID를 쓰면 캐시 병합이 한 행을 지우고, 편집·삭제가 먼저 찾은 다른 저장소 행으로 향할 수 있었다.
+- 화면의 React key만 source-aware로 바꿔도 동기화, 드래그, 상세 패널, 검색, 위젯, 재시도·롤백이 ID만 비교하면 같은 오배선이 다른 경로에서 재발했다.
+- 같은 raw ID의 privacy migration 둘이 겹칠 때 단일 active lease와 raw alias 하나만 유지하면, 먼저 끝난 작업이 아직 진행 중인 다른 작업의 대기·별칭을 지울 수 있었다.
+
+### 교훈
+
+- 공급자 로컬 ID는 단독 정체성이 아니다. Google은 calendar ID, legacy는 저장소 표식, canonical B flow는 이동 가능한 calendar ID를 제외한 B flow namespace와 UUID를 함께 사용한다.
+- 하나의 composite identity helper를 캐시 dedupe, full·incremental sync, React key·선택, 드래그 ghost, mutation resolve, optimistic update, retry, rollback에 동일하게 적용한다.
+- target identity가 없는 legacy 호출은 후보가 정확히 하나일 때만 진행하고, 여러 namespace가 같은 raw ID를 공유하면 fail closed한다.
+- migration alias와 intent mutex도 source-aware로 유지한다. raw follower는 관련된 모든 active lease가 끝날 때까지 기다리고, 하나라도 결과가 불명확하면 다른 replacement를 추측하지 않고 실패해야 한다.
+- 회귀 테스트는 같은 ID의 Google A·Google B·B flow를 동시에 두고 full/partial/incremental sync, exact edit/delete, 실패 rollback, 겹친 migration의 staggered completion, 모든 UI consumer key·선택을 함께 검증한다.

@@ -12,6 +12,7 @@ import { cn } from '@/utils/cn';
 import { getEvents } from '@/services/calendarService';
 import { readMetadata } from '@/services/supabaseService';
 import type { CalendarEvent } from '@/types/calendar';
+import { calendarEventIdentityKey } from '@/utils/calendarEventIdentity';
 
 /* ────────────────────────────────────────────────
    타입
@@ -587,7 +588,7 @@ export function SpotlightSearch() {
       if (evScore > 0) {
         const typeLabel = ev.type && typeLabels[ev.type] ? `[${typeLabels[ev.type]}] ` : '';
         items.push({
-          id: `event-${ev.id}`,
+          id: `event-${calendarEventIdentityKey(ev)}`,
           category: 'event',
           title: ev.title || '(제목 없음)',
           subtitle: `${typeLabel}${ev.startDate} → ${ev.endDate}${ev.memo ? ` · ${ev.memo.slice(0, 30)}` : ''}`,

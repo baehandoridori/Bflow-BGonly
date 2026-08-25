@@ -11,6 +11,7 @@ import { mapVacationEvents } from '@/utils/vacationEvents';
 import { useVacationPendingStore } from '@/stores/useVacationPendingStore';
 import { Widget } from './Widget';
 import { WEEKDAY_SHORT, fmtDate, parseDate, addDays, getISOWeekNumber } from '@/utils/calendarDate';
+import { calendarEventIdentityKey } from '@/utils/calendarEventIdentity';
 
 // pending 휴가용 노란색 (amber-400)
 const PENDING_VACATION_COLOR = '#FBBF24';
@@ -115,6 +116,7 @@ export function CalendarWidget() {
       memo: '',
       color: PENDING_VACATION_COLOR,
       type: 'vacation' as const,
+      source: 'vacation' as const,
       startDate: p.startDate,
       endDate: p.endDate,
       createdBy: p.name,
@@ -445,7 +447,7 @@ export function CalendarWidget() {
                     {hasEvents && !day.isToday && dotEvents.length > 0 && (
                       <div className="flex items-center gap-px mt-0.5">
                         {dotEvents.map((ev) => (
-                          <div key={ev.id} className="w-1 h-1 rounded-full" style={{ backgroundColor: `${ev.color}90` }} />
+                          <div key={calendarEventIdentityKey(ev)} className="w-1 h-1 rounded-full" style={{ backgroundColor: `${ev.color}90` }} />
                         ))}
                       </div>
                     )}
@@ -466,7 +468,7 @@ export function CalendarWidget() {
                         const widthCols = Math.min(spanDays, 7 - day.dow);
                         return (
                           <div
-                            key={`bar-${ev.id}-${day.dateStr}`}
+                            key={`bar-${calendarEventIdentityKey(ev)}-${day.dateStr}`}
                             className="absolute pointer-events-none"
                             style={{
                               bottom: 1 + evIdx * 5,
@@ -499,7 +501,7 @@ export function CalendarWidget() {
             </div>
             <div className="flex flex-col gap-0.5">
               {dateEvents.slice(0, 4).map((ev) => (
-                <div key={ev.id} className="flex items-center gap-1.5">
+                <div key={calendarEventIdentityKey(ev)} className="flex items-center gap-1.5">
                   <div className="w-1.5 h-1.5 rounded-full shrink-0" style={{ backgroundColor: ev.color }} />
                   <span className="text-[11px] text-text-primary truncate">{ev.title}</span>
                 </div>
@@ -584,7 +586,7 @@ export function CalendarWidget() {
                         const span = evEnd - evStart + 1;
                         return (
                           <div
-                            key={`${ev.id}-${fmtDate(week.ws)}`}
+                            key={`${calendarEventIdentityKey(ev)}-${fmtDate(week.ws)}`}
                             className="absolute overflow-hidden whitespace-nowrap text-ellipsis"
                             style={{
                               top: rowIdx * 11, left: `${(evStart / 7) * 100}%`, width: `${(span / 7) * 100}%`,
@@ -694,7 +696,7 @@ export function CalendarWidget() {
                         const span = evEnd - evStart + 1;
                         return (
                           <div
-                            key={`w-${ev.id}`}
+                            key={`w-${calendarEventIdentityKey(ev)}`}
                             className="absolute overflow-hidden whitespace-nowrap text-ellipsis"
                             style={{
                               top: rowIdx * 13, left: `${(evStart / 7) * 100}%`, width: `${(span / 7) * 100}%`,
@@ -717,7 +719,7 @@ export function CalendarWidget() {
                     <div className="text-[9px] font-semibold text-text-secondary/50 mb-0.5">오늘의 일정</div>
                     <div className="flex flex-col gap-0.5">
                       {todayEvents.slice(0, 4).map((ev) => (
-                        <div key={ev.id} className="flex items-center gap-1.5">
+                        <div key={calendarEventIdentityKey(ev)} className="flex items-center gap-1.5">
                           <div className="w-1.5 h-1.5 rounded-full shrink-0" style={{ backgroundColor: ev.color }} />
                           <span className="text-[9px] text-text-primary truncate">{ev.title}</span>
                         </div>
@@ -807,7 +809,7 @@ export function CalendarWidget() {
                       {centerEvents.map((ev) => {
                         const dday = getDdayLabel(ev.endDate, centerStr);
                         return (
-                          <div key={ev.id} className="flex items-center gap-1.5">
+                          <div key={calendarEventIdentityKey(ev)} className="flex items-center gap-1.5">
                             <div className="w-1.5 h-1.5 rounded-full shrink-0" style={{ backgroundColor: ev.color }} />
                             <span className="text-[10px] text-text-primary truncate flex-1">{ev.title}</span>
                             {dday && (

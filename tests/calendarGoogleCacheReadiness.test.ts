@@ -17,7 +17,11 @@ type ServiceModule = {
   syncAll(options?: { broadcast?: boolean; skipBflowLoad?: boolean }): Promise<unknown>;
   syncIncremental(): Promise<void>;
   addEvent(event: Record<string, unknown>): Promise<void>;
-  updateEvent(eventId: string, updates: Record<string, unknown>): Promise<void>;
+  updateEvent(
+    eventId: string,
+    updates: Record<string, unknown>,
+    targetIdentity?: EventIdentityFixture,
+  ): Promise<void>;
   getEvents(): Promise<Array<{
     id: string;
     title: string;
@@ -30,12 +34,13 @@ type ServiceModule = {
     startTime?: string;
     endTime?: string;
     linkedPart?: string;
+    source?: 'bflow' | 'google' | 'vacation';
     sourceCalendarId?: string;
     isPrivate?: boolean;
     canEdit?: boolean;
     isReadOnly?: boolean;
   }>>;
-  deleteEvent(eventId: string): Promise<void>;
+  deleteEvent(eventId: string, targetIdentity?: EventIdentityFixture): Promise<void>;
   saveTeamCalendarId(calendarId: string | null): Promise<void>;
   applyCommittedGoogleDelete(payload: unknown): boolean;
   applyCommittedPrivacyReplacementDelete(payload: unknown): boolean;
@@ -94,6 +99,12 @@ type ServiceModule = {
     revision: number;
     tags: StoreTagFixture[];
   } | null;
+};
+
+type EventIdentityFixture = {
+  id: string;
+  source?: 'bflow' | 'google' | 'vacation';
+  sourceCalendarId?: string;
 };
 
 type GoogleEventFixture = {
@@ -1768,7 +1779,874 @@ test('a settings lookup failure preserves the last successful Google cache and m
   }
 });
 
-test('a partial sync replaces successful calendars, retains failed calendars, and lets fresh duplicate IDs win', async () => {
+test('full sync keeps same-id Google rows from different source calendars', async () => {
+  const harness = await createHarness({
+    teamCalendarId: 'team',
+    personalCalendarId: 'primary',
+    fullSync: async (calendarId) => [
+      googleEvent('shared-google-id', calendarId === 'team' ? '팀 일정' : '개인 일정'),
+    ],
+  });
+  try {
+    await harness.service.syncAll({ skipBflowLoad: true });
+
+    assert.deepEqual(
+      (await harness.service.getEvents()).map(({ id, title, sourceCalendarId }) => ({
+        id,
+        title,
+        sourceCalendarId,
+      })),
+      [
+        { id: 'shared-google-id', title: '팀 일정', sourceCalendarId: 'team' },
+        { id: 'shared-google-id', title: '개인 일정', sourceCalendarId: 'primary' },
+      ],
+      'a provider-local ID is not a renderer-global event identity',
+    );
+  } finally {
+    harness.restore();
+  }
+});
+
+test('an exact Google identity updates only the selected same-id calendar row', async () => {
+  const updateCalls: Array<{ calendarId: string; eventId: string }> = [];
+  const harness = await createHarness({
+    teamCalendarId: 'team',
+    personalCalendarId: 'primary',
+    fullSync: async (calendarId) => [
+      googleEvent('shared-google-id', calendarId === 'team' ? '팀 일정' : '개인 일정'),
+    ],
+    updateGoogleEvent: async (calendarId, eventId) => {
+      updateCalls.push({ calendarId, eventId });
+    },
+  });
+  try {
+    await harness.service.syncAll({ skipBflowLoad: true });
+    await harness.service.updateEvent(
+      'shared-google-id',
+      { title: '개인 일정 수정' },
+      { id: 'shared-google-id', source: 'google', sourceCalendarId: 'primary' },
+    );
+
+    assert.deepEqual(updateCalls, [{ calendarId: 'primary', eventId: 'shared-google-id' }]);
+    assert.deepEqual(
+      (await harness.service.getEvents()).map(({ title, sourceCalendarId }) => ({ title, sourceCalendarId })),
+      [
+        { title: '팀 일정', sourceCalendarId: 'team' },
+        { title: '개인 일정 수정', sourceCalendarId: 'primary' },
+      ],
+      'the optimistic cache patch must not spill into the other Google calendar',
+    );
+  } finally {
+    harness.restore();
+  }
+});
+
+test('a Google create returning another calendar same ID replaces only its optimistic source row', async () => {
+  const harness = await createHarness({
+    teamCalendarId: 'team',
+    personalCalendarId: 'primary',
+    fullSync: async (calendarId) => calendarId === 'team'
+      ? [googleEvent('server-shared-id', '기존 팀 일정')]
+      : [],
+    createGoogleEvent: async () => 'server-shared-id',
+  });
+  try {
+    await harness.service.syncAll({ skipBflowLoad: true });
+    await harness.service.addEvent({
+      id: 'local-create-id',
+      title: '새 개인 일정',
+      memo: '',
+      color: '#6C5CE7',
+      type: 'custom',
+      startDate: '2026-08-25',
+      endDate: '2026-08-25',
+      allDay: true,
+      createdBy: 'user-a',
+      createdAt: '2026-08-24T00:00:00.000Z',
+    });
+
+    assert.deepEqual(
+      (await harness.service.getEvents()).map(({ id, title, sourceCalendarId }) => ({
+        id,
+        title,
+        sourceCalendarId,
+      })),
+      [
+        { id: 'server-shared-id', title: '기존 팀 일정', sourceCalendarId: 'team' },
+        { id: 'server-shared-id', title: '새 개인 일정', sourceCalendarId: 'primary' },
+      ],
+    );
+  } finally {
+    harness.restore();
+  }
+});
+
+test('an exact Google identity deletes only its row when B flow has the same raw ID', async () => {
+  const googleDeletes: Array<{ calendarId: string; eventId: string }> = [];
+  const harness = await createHarness({
+    currentUserId: 'user-a',
+    calendarList: async () => [personalCalendar('user-a')],
+    bflowEventsList: async () => [bflowEvent('cross-storage-id', 'B flow 일정')],
+    personalCalendarId: 'primary',
+    fullSync: async () => [googleEvent('cross-storage-id', 'Google 일정')],
+    deleteGoogleEvent: async (calendarId, eventId) => {
+      googleDeletes.push({ calendarId, eventId });
+    },
+  });
+  try {
+    await harness.service.loadBflowEvents();
+    await harness.service.syncAll({ skipBflowLoad: true });
+    assert.equal((await harness.service.getEvents()).length, 2, 'both storage rows coexist before deletion');
+
+    await harness.service.deleteEvent(
+      'cross-storage-id',
+      { id: 'cross-storage-id', source: 'google', sourceCalendarId: 'primary' },
+    );
+
+    assert.deepEqual(googleDeletes, [{ calendarId: 'primary', eventId: 'cross-storage-id' }]);
+    assert.deepEqual(harness.deletedBflowEventIds, [], 'the B flow row is never routed to deletion');
+    assert.deepEqual(
+      (await harness.service.getEvents()).map(({ title, sourceCalendarId }) => ({ title, sourceCalendarId })),
+      [{ title: 'B flow 일정', sourceCalendarId: 'bflow:calendar-1' }],
+    );
+  } finally {
+    harness.restore();
+  }
+});
+
+test('an exact Google privacy migration does not redirect a same-id B flow linked-todo alias', async () => {
+  const source = {
+    ...bflowEvent('privacy-collision-id', '남아야 할 B flow 일정'),
+    linked_todo_id: 'bflow-todo',
+  };
+  const google = googleEvent('privacy-collision-id', '이관할 Google 일정');
+  google.extendedProperties.private.bflow_linked_todo_id = 'google-todo';
+  const bflowUpdates: string[] = [];
+  const harness = await createHarness({
+    currentUserId: 'user-a',
+    calendarList: async () => [personalCalendar('user-a')],
+    bflowEventsList: async () => [source],
+    personalCalendarId: 'primary',
+    fullSync: async () => [google],
+    createPrivacyReplacement: async () => ({
+      actual_id: 'private-replacement-id',
+      storage: 'bflow',
+      calendar_id: 'calendar-1',
+      receipt: 'private-replacement-receipt',
+    }),
+    settlePrivacyReplacement: async () => {},
+    updateBflowEvent: async (eventId, patch) => {
+      bflowUpdates.push(eventId);
+      return { ...source, title: String(patch.title ?? source.title) };
+    },
+  });
+  try {
+    await harness.service.loadBflowEvents();
+    await harness.service.syncAll({ skipBflowLoad: true });
+
+    await harness.service.updateEvent(
+      google.id,
+      { isPrivate: true },
+      { id: google.id, source: 'google', sourceCalendarId: 'primary' },
+    );
+    await harness.service.updateEvent(
+      google.id,
+      { title: '이관 뒤 exact 수정' },
+      { id: google.id, source: 'google', sourceCalendarId: 'primary' },
+    );
+    assert.deepEqual(
+      bflowUpdates,
+      ['private-replacement-id'],
+      'the captured Google identity advances only to its source-aware replacement',
+    );
+    await assert.rejects(
+      harness.service.updateEvent(google.id, { title: 'raw ID로 잘못 수정' }),
+      /ambiguous/i,
+      'the unrelated direct row and aliased replacement form an ambiguous raw-ID candidate set',
+    );
+    assert.deepEqual(
+      bflowUpdates,
+      ['private-replacement-id'],
+      'an ambiguous raw ID never reaches the unrelated direct row',
+    );
+    await harness.service.updateEvent('cal_bflow-todo', { title: 'B flow 별칭 수정' });
+
+    assert.deepEqual(harness.privacyMigrationSourceDeletes, [{
+      storage: 'google',
+      event_id: google.id,
+      calendar_id: 'primary',
+    }]);
+    assert.deepEqual(
+      bflowUpdates,
+      ['private-replacement-id', source.id],
+      'the untouched B flow linked-todo alias must not be inherited by the Google replacement',
+    );
+    await harness.service.deleteEvent(
+      source.id,
+      { id: source.id, source: 'bflow', sourceCalendarId: 'bflow:calendar-1' },
+    );
+    await harness.service.updateEvent(google.id, { title: 'stale raw alias로 replacement 수정' });
+    assert.deepEqual(
+      bflowUpdates,
+      ['private-replacement-id', source.id, 'private-replacement-id'],
+      'deleting the unrelated direct row preserves the old raw ID alias to the sole replacement',
+    );
+  } finally {
+    harness.restore();
+  }
+});
+
+test('a failed exact Google privacy migration cannot poison a same-id B flow intent', async () => {
+  const replacementCreateStarted = deferred<void>();
+  const replacementCreateGate = deferred<void>();
+  const sourceDeleteError = new Error('Google source delete failed');
+  const compensationError = new Error('replacement compensation failed');
+  const sibling = bflowEvent('intent-collision-id', '독립 B flow 일정');
+  const google = googleEvent('intent-collision-id', '실패할 Google 이관');
+  const bflowUpdates: string[] = [];
+  const harness = await createHarness({
+    currentUserId: 'user-a',
+    calendarList: async () => [personalCalendar('user-a')],
+    bflowEventsList: async () => [sibling],
+    personalCalendarId: 'primary',
+    fullSync: async () => [google],
+    createPrivacyReplacement: async () => {
+      replacementCreateStarted.resolve();
+      await replacementCreateGate.promise;
+      return {
+        actual_id: 'ambiguous-replacement-id',
+        storage: 'bflow',
+        calendar_id: 'calendar-1',
+        receipt: 'ambiguous-replacement-receipt',
+      };
+    },
+    deletePrivacyMigrationSource: async () => {
+      throw sourceDeleteError;
+    },
+    settlePrivacyReplacement: async (_receipt, disposition) => {
+      if (disposition === 'delete') throw compensationError;
+    },
+    updateBflowEvent: async (eventId, patch) => {
+      bflowUpdates.push(eventId);
+      return { ...sibling, title: String(patch.title ?? sibling.title) };
+    },
+  });
+  try {
+    await harness.service.loadBflowEvents();
+    await harness.service.syncAll({ skipBflowLoad: true });
+
+    const migration = harness.service.updateEvent(
+      google.id,
+      { isPrivate: true },
+      { id: google.id, source: 'google', sourceCalendarId: 'primary' },
+    ).then(() => null, (error: unknown) => error);
+    await replacementCreateStarted.promise;
+    const siblingUpdate = harness.service.updateEvent(
+      sibling.id,
+      { title: '독립 수정 성공' },
+      { id: sibling.id, source: 'bflow', sourceCalendarId: 'bflow:calendar-1' },
+    ).then(() => null, (error: unknown) => error);
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    const writesBeforeMigrationSettles = bflowUpdates.length;
+
+    replacementCreateGate.resolve();
+    const [migrationResult, siblingResult] = await Promise.all([migration, siblingUpdate]);
+
+    assert.equal(writesBeforeMigrationSettles, 1, 'the exact sibling does not wait on another source identity');
+    assert.ok(migrationResult instanceof Error);
+    assert.equal(migrationResult.name, 'PrivacyMigrationCompensationError');
+    assert.equal(siblingResult, null, 'the unrelated exact intent never inherits migration ambiguity');
+    assert.deepEqual(bflowUpdates, [sibling.id]);
+  } finally {
+    replacementCreateGate.resolve();
+    harness.restore();
+  }
+});
+
+test('a failed exact Google privacy migration cannot capture a same-id exact B flow migration', async () => {
+  const firstCreateStarted = deferred<void>();
+  const firstCreateGate = deferred<void>();
+  const firstDeleteError = new Error('first Google source delete failed');
+  const firstCompensationError = new Error('first replacement compensation failed');
+  const sibling = bflowEvent('privacy-intent-collision-id', '독립 B flow 개인 일정');
+  const google = googleEvent('privacy-intent-collision-id', '실패할 Google 공개 일정');
+  const harness = await createHarness({
+    currentUserId: 'user-a',
+    calendarList: async () => [personalCalendar('user-a')],
+    bflowEventsList: async () => [sibling],
+    personalCalendarId: 'primary',
+    fullSync: async () => [google],
+    createPrivacyReplacement: async (request) => {
+      if (request.storage === 'bflow') {
+        firstCreateStarted.resolve();
+        await firstCreateGate.promise;
+        return {
+          actual_id: 'failed-private-replacement',
+          storage: 'bflow',
+          calendar_id: 'calendar-1',
+          receipt: 'failed-private-receipt',
+        };
+      }
+      return {
+        actual_id: 'successful-google-replacement',
+        storage: 'google',
+        calendar_id: 'primary',
+        receipt: 'successful-google-receipt',
+      };
+    },
+    deletePrivacyMigrationSource: async (request) => {
+      if (request.storage === 'google') throw firstDeleteError;
+      return 'deleted';
+    },
+    settlePrivacyReplacement: async (receipt, disposition) => {
+      if (receipt === 'failed-private-receipt' && disposition === 'delete') {
+        throw firstCompensationError;
+      }
+    },
+  });
+  try {
+    await harness.service.loadBflowEvents();
+    await harness.service.syncAll({ skipBflowLoad: true });
+
+    const firstMigration = harness.service.updateEvent(
+      google.id,
+      { isPrivate: true },
+      { id: google.id, source: 'google', sourceCalendarId: 'primary' },
+    ).then(() => null, (error: unknown) => error);
+    await firstCreateStarted.promise;
+    let siblingSettled = false;
+    const siblingMigration = harness.service.updateEvent(
+      sibling.id,
+      { isPrivate: false },
+      { id: sibling.id, source: 'bflow', sourceCalendarId: 'bflow:calendar-1' },
+    ).then(
+      () => null,
+      (error: unknown) => error,
+    ).finally(() => { siblingSettled = true; });
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    const siblingSettledBeforeFirst = siblingSettled;
+
+    firstCreateGate.resolve();
+    const [firstResult, siblingResult] = await Promise.all([firstMigration, siblingMigration]);
+
+    assert.equal(siblingSettledBeforeFirst, true, 'an exact sibling migration uses its own source lease');
+    assert.ok(firstResult instanceof Error);
+    assert.equal(firstResult.name, 'PrivacyMigrationCompensationError');
+    assert.equal(siblingResult, null, 'the sibling migration does not inherit the first ambiguity');
+    assert.equal(
+      harness.privacyReplacementCreates.filter((request) => request.storage === 'google').length,
+      1,
+      'the independent B flow migration reaches its own persistence create',
+    );
+  } finally {
+    firstCreateGate.resolve();
+    harness.restore();
+  }
+});
+
+test('a raw same-id follower waits for every exact migration and then fails closed', async () => {
+  const firstSourceDeleteStarted = deferred<void>();
+  const firstSourceDeleteGate = deferred<void>();
+  const sibling = bflowEvent('staggered-privacy-id', 'B flow 개인 일정');
+  const google = googleEvent('staggered-privacy-id', 'Google 공개 일정');
+  const bflowUpdates: string[] = [];
+  const googleUpdates: string[] = [];
+  const harness = await createHarness({
+    currentUserId: 'user-a',
+    calendarList: async () => [personalCalendar('user-a')],
+    bflowEventsList: async () => [sibling],
+    personalCalendarId: 'primary',
+    fullSync: async () => [google],
+    createPrivacyReplacement: async (request) => request.storage === 'bflow'
+      ? {
+          actual_id: 'staggered-bflow-replacement',
+          storage: 'bflow',
+          calendar_id: 'calendar-1',
+          receipt: 'staggered-bflow-receipt',
+        }
+      : {
+          actual_id: 'staggered-google-replacement',
+          storage: 'google',
+          calendar_id: 'primary',
+          receipt: 'staggered-google-receipt',
+        },
+    deletePrivacyMigrationSource: async (request) => {
+      if (request.storage === 'google') {
+        firstSourceDeleteStarted.resolve();
+        await firstSourceDeleteGate.promise;
+      }
+      return 'deleted';
+    },
+    settlePrivacyReplacement: async () => {},
+    updateBflowEvent: async (eventId) => {
+      bflowUpdates.push(eventId);
+      return { ...sibling, id: eventId };
+    },
+    updateGoogleEvent: async (_calendarId, eventId) => {
+      googleUpdates.push(eventId);
+    },
+  });
+  try {
+    await harness.service.loadBflowEvents();
+    await harness.service.syncAll({ skipBflowLoad: true });
+
+    const firstMigration = harness.service.updateEvent(
+      google.id,
+      { isPrivate: true },
+      { id: google.id, source: 'google', sourceCalendarId: 'primary' },
+    );
+    await firstSourceDeleteStarted.promise;
+    await harness.service.updateEvent(
+      sibling.id,
+      { isPrivate: false },
+      { id: sibling.id, source: 'bflow', sourceCalendarId: 'bflow:calendar-1' },
+    );
+
+    let rawSettled = false;
+    const rawFollower = harness.service.updateEvent(
+      google.id,
+      { title: 'raw follower must not choose a replacement' },
+    ).then(
+      () => null,
+      (error: unknown) => error,
+    ).finally(() => { rawSettled = true; });
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    const settledBeforeEveryMigration = rawSettled;
+    const writesBeforeEveryMigration = bflowUpdates.length + googleUpdates.length;
+
+    firstSourceDeleteGate.resolve();
+    await firstMigration;
+    const rawResult = await rawFollower;
+
+    assert.equal(settledBeforeEveryMigration, false, 'the remaining exact lease still fences raw X');
+    assert.equal(writesBeforeEveryMigration, 0, 'raw X reaches no sibling persistence while a lease remains');
+    assert.ok(rawResult instanceof Error);
+    assert.match(rawResult.message, /ambiguous/i);
+    assert.deepEqual(bflowUpdates, []);
+    assert.deepEqual(googleUpdates, []);
+  } finally {
+    firstSourceDeleteGate.resolve();
+    harness.restore();
+  }
+});
+
+test('a raw follower inherits ambiguity when one of several same-id migrations loses its source', async (t) => {
+  for (const followerKind of ['ordinary', 'privacy'] as const) {
+    await t.test(followerKind, async () => {
+      const firstSourceDeleteStarted = deferred<void>();
+      const firstSourceDeleteGate = deferred<void>();
+      const secondSourceDeleteStarted = deferred<void>();
+      const secondSourceDeleteGate = deferred<void>();
+      const compensationError = new Error('orphan replacement compensation failed');
+      const sibling = bflowEvent('multi-ambiguous-id', 'B flow 개인 일정');
+      const google = googleEvent('multi-ambiguous-id', 'Google 공개 일정');
+      const bflowUpdates: string[] = [];
+      const googleUpdates: string[] = [];
+      let bflowReplacementCreates = 0;
+      const harness = await createHarness({
+        currentUserId: 'user-a',
+        calendarList: async () => [personalCalendar('user-a')],
+        bflowEventsList: async () => [sibling],
+        personalCalendarId: 'primary',
+        fullSync: async () => [google],
+        createPrivacyReplacement: async (request) => {
+          if (request.storage === 'bflow') {
+            bflowReplacementCreates += 1;
+            return {
+              actual_id: bflowReplacementCreates === 1
+                ? 'orphan-bflow-replacement'
+                : 'misrouted-bflow-replacement',
+              storage: 'bflow',
+              calendar_id: 'calendar-1',
+              receipt: bflowReplacementCreates === 1
+                ? 'orphan-bflow-receipt'
+                : 'misrouted-bflow-receipt',
+            };
+          }
+          return {
+            actual_id: 'successful-google-replacement',
+            storage: 'google',
+            calendar_id: 'primary',
+            receipt: 'successful-google-receipt',
+          };
+        },
+        deletePrivacyMigrationSource: async (request) => {
+          if (request.storage === 'google' && request.event_id === google.id) {
+            firstSourceDeleteStarted.resolve();
+            await firstSourceDeleteGate.promise;
+            return 'missing';
+          }
+          if (request.storage === 'bflow' && request.event_id === sibling.id) {
+            secondSourceDeleteStarted.resolve();
+            await secondSourceDeleteGate.promise;
+          }
+          return 'deleted';
+        },
+        settlePrivacyReplacement: async (receipt, disposition) => {
+          if (receipt === 'orphan-bflow-receipt' && disposition === 'delete') {
+            throw compensationError;
+          }
+        },
+        updateBflowEvent: async (eventId) => {
+          bflowUpdates.push(eventId);
+          return { ...sibling, id: eventId };
+        },
+        updateGoogleEvent: async (_calendarId, eventId) => {
+          googleUpdates.push(eventId);
+        },
+      });
+
+      try {
+        await harness.service.loadBflowEvents();
+        await harness.service.syncAll({ skipBflowLoad: true });
+
+        const firstMigration = harness.service.updateEvent(
+          google.id,
+          { isPrivate: true },
+          { id: google.id, source: 'google', sourceCalendarId: 'primary' },
+        ).then(() => null, (error: unknown) => error);
+        await firstSourceDeleteStarted.promise;
+        const secondMigration = harness.service.updateEvent(
+          sibling.id,
+          { isPrivate: false },
+          { id: sibling.id, source: 'bflow', sourceCalendarId: 'bflow:calendar-1' },
+        ).then(() => null, (error: unknown) => error);
+        await secondSourceDeleteStarted.promise;
+
+        let rawSettled = false;
+        const rawFollower = harness.service.updateEvent(
+          google.id,
+          followerKind === 'ordinary'
+            ? { title: 'must not route to the successful sibling' }
+            : { isPrivate: true },
+        ).then(
+          () => null,
+          (error: unknown) => error,
+        ).finally(() => { rawSettled = true; });
+        await new Promise<void>((resolve) => setImmediate(resolve));
+        assert.equal(rawSettled, false, 'the raw follower waits while both exact leases are active');
+
+        secondSourceDeleteGate.resolve();
+        assert.equal(await secondMigration, null);
+        await new Promise<void>((resolve) => setImmediate(resolve));
+        assert.equal(rawSettled, false, 'settling the successful sibling does not release the first lease');
+
+        firstSourceDeleteGate.resolve();
+        const [firstResult, rawResult] = await Promise.all([firstMigration, rawFollower]);
+
+        assert.ok(firstResult instanceof Error);
+        assert.equal(firstResult.name, 'PrivacyMigrationCompensationError');
+        assert.equal(rawResult, firstResult, 'one ambiguous outcome poisons the raw multi-lease follower');
+        assert.deepEqual(bflowUpdates, []);
+        assert.deepEqual(googleUpdates, []);
+        assert.equal(
+          bflowReplacementCreates,
+          1,
+          'a raw privacy follower cannot create another replacement from the successful sibling',
+        );
+      } finally {
+        firstSourceDeleteGate.resolve();
+        secondSourceDeleteGate.resolve();
+        harness.restore();
+      }
+    });
+  }
+});
+
+test('raw-id-only mutations fail closed when multiple storage identities share the ID', async () => {
+  const updateCalls: Array<{ calendarId: string; eventId: string }> = [];
+  const deleteCalls: Array<{ calendarId: string; eventId: string }> = [];
+  const harness = await createHarness({
+    teamCalendarId: 'team',
+    personalCalendarId: 'primary',
+    fullSync: async (calendarId) => [googleEvent('ambiguous-id', `${calendarId} 일정`)],
+    updateGoogleEvent: async (calendarId, eventId) => {
+      updateCalls.push({ calendarId, eventId });
+    },
+    deleteGoogleEvent: async (calendarId, eventId) => {
+      deleteCalls.push({ calendarId, eventId });
+    },
+  });
+  try {
+    await harness.service.syncAll({ skipBflowLoad: true });
+
+    await assert.rejects(
+      harness.service.updateEvent('ambiguous-id', { title: '잘못된 수정' }),
+      /ambiguous/i,
+    );
+    assert.deepEqual(updateCalls, [], 'an ambiguous ID never reaches persistence');
+    await assert.rejects(
+      harness.service.deleteEvent('ambiguous-id'),
+      /ambiguous/i,
+    );
+    assert.deepEqual(deleteCalls, [], 'an ambiguous delete never reaches persistence');
+    await assert.rejects(
+      harness.service.updateEvent(
+        'ambiguous-id',
+        { title: '불일치 target' },
+        { id: 'different-id', source: 'google', sourceCalendarId: 'primary' },
+      ),
+      /does not match/i,
+    );
+    assert.deepEqual(updateCalls, [], 'a mismatched target identity also fails before persistence');
+  } finally {
+    harness.restore();
+  }
+});
+
+test('raw cal_* mutations union direct provider and linked-todo identity candidates', async () => {
+  const todoId = 'provider-collision';
+  const rawGoogleId = `cal_${todoId}`;
+  const linkedBflow = {
+    ...bflowEvent('bflow-linked-todo-row', 'B flow 연결 일정'),
+    linked_todo_id: todoId,
+  };
+  const googleUpdates: string[] = [];
+  const bflowUpdates: string[] = [];
+  const googleDeletes: string[] = [];
+  const harness = await createHarness({
+    currentUserId: 'user-a',
+    calendarList: async () => [personalCalendar('user-a')],
+    bflowEventsList: async () => [linkedBflow],
+    personalCalendarId: 'primary',
+    fullSync: async () => [googleEvent(rawGoogleId, 'Google provider 일정')],
+    updateGoogleEvent: async (_calendarId, eventId) => {
+      googleUpdates.push(eventId);
+    },
+    updateBflowEvent: async (eventId, patch) => {
+      bflowUpdates.push(eventId);
+      return { ...linkedBflow, title: String(patch.title ?? linkedBflow.title) };
+    },
+    deleteGoogleEvent: async (_calendarId, eventId) => {
+      googleDeletes.push(eventId);
+    },
+  });
+  try {
+    await harness.service.loadBflowEvents();
+    await harness.service.syncAll({ skipBflowLoad: true });
+
+    await assert.rejects(
+      harness.service.updateEvent(rawGoogleId, { title: 'raw 오라우팅 수정' }),
+      /ambiguous/i,
+    );
+    await assert.rejects(
+      harness.service.deleteEvent(rawGoogleId),
+      /ambiguous/i,
+    );
+    assert.deepEqual(googleUpdates, []);
+    assert.deepEqual(bflowUpdates, []);
+    assert.deepEqual(googleDeletes, []);
+    assert.deepEqual(harness.deletedBflowEventIds, []);
+
+    await harness.service.updateEvent(
+      rawGoogleId,
+      { title: 'Google exact 수정' },
+      { id: rawGoogleId, source: 'google', sourceCalendarId: 'primary' },
+    );
+    await harness.service.updateEvent(
+      linkedBflow.id,
+      { title: 'B flow exact 수정' },
+      { id: linkedBflow.id, source: 'bflow', sourceCalendarId: 'bflow:calendar-1' },
+    );
+    assert.deepEqual(googleUpdates, [rawGoogleId]);
+    assert.deepEqual(bflowUpdates, [linkedBflow.id]);
+
+    await harness.service.deleteEvent(
+      rawGoogleId,
+      { id: rawGoogleId, source: 'google', sourceCalendarId: 'primary' },
+    );
+    await harness.service.deleteEvent(
+      linkedBflow.id,
+      { id: linkedBflow.id, source: 'bflow', sourceCalendarId: 'bflow:calendar-1' },
+    );
+    assert.deepEqual(googleDeletes, [rawGoogleId]);
+    assert.deepEqual(harness.deletedBflowEventIds, [linkedBflow.id]);
+  } finally {
+    harness.restore();
+  }
+});
+
+test('incremental delete scopes a same-id tombstone to the reporting Google calendar', async () => {
+  let incremental = false;
+  const harness = await createHarness({
+    teamCalendarId: 'team',
+    personalCalendarId: 'primary',
+    fullSync: async (calendarId) => [googleEvent('incremental-shared', `${calendarId} 원본`)],
+    incrementalSync: async (calendarId) => incremental && calendarId === 'team'
+      ? { updated: [], deleted: ['incremental-shared'], isFullSync: false }
+      : { updated: [], deleted: [], isFullSync: false },
+  });
+  try {
+    await harness.service.syncAll({ skipBflowLoad: true });
+    incremental = true;
+    await harness.service.syncIncremental();
+
+    assert.deepEqual(
+      (await harness.service.getEvents()).map(({ title, sourceCalendarId }) => ({ title, sourceCalendarId })),
+      [{ title: 'primary 원본', sourceCalendarId: 'primary' }],
+    );
+  } finally {
+    harness.restore();
+  }
+});
+
+test('incremental update replaces only the reporting same-id Google calendar row', async () => {
+  let incremental = false;
+  const harness = await createHarness({
+    teamCalendarId: 'team',
+    personalCalendarId: 'primary',
+    fullSync: async (calendarId) => [googleEvent('incremental-shared', `${calendarId} 원본`)],
+    incrementalSync: async (calendarId) => incremental && calendarId === 'team'
+      ? { updated: [googleEvent('incremental-shared', 'team 수정')], deleted: [], isFullSync: false }
+      : { updated: [], deleted: [], isFullSync: false },
+  });
+  try {
+    await harness.service.syncAll({ skipBflowLoad: true });
+    incremental = true;
+    await harness.service.syncIncremental();
+
+    assert.deepEqual(
+      (await harness.service.getEvents()).map(({ title, sourceCalendarId }) => ({ title, sourceCalendarId })),
+      [
+        { title: 'team 수정', sourceCalendarId: 'team' },
+        { title: 'primary 원본', sourceCalendarId: 'primary' },
+      ],
+    );
+  } finally {
+    harness.restore();
+  }
+});
+
+test('incremental full-sync fallback does not skip a same-id row owned by another Google calendar', async () => {
+  let incremental = false;
+  const harness = await createHarness({
+    teamCalendarId: 'team',
+    personalCalendarId: 'primary',
+    fullSync: async (calendarId) => [googleEvent('incremental-shared', `${calendarId} 원본`)],
+    incrementalSync: async (calendarId) => incremental && calendarId === 'team'
+      ? { updated: [googleEvent('incremental-shared', 'team 전체 교체')], deleted: [], isFullSync: true }
+      : { updated: [], deleted: [], isFullSync: false },
+  });
+  try {
+    await harness.service.syncAll({ skipBflowLoad: true });
+    incremental = true;
+    await harness.service.syncIncremental();
+
+    assert.deepEqual(
+      (await harness.service.getEvents()).map(({ title, sourceCalendarId }) => ({ title, sourceCalendarId })),
+      [
+        { title: 'primary 원본', sourceCalendarId: 'primary' },
+        { title: 'team 전체 교체', sourceCalendarId: 'team' },
+      ],
+    );
+  } finally {
+    harness.restore();
+  }
+});
+
+test('failed exact Google update rolls back only its same-id target row', async () => {
+  const harness = await createHarness({
+    teamCalendarId: 'team',
+    personalCalendarId: 'primary',
+    fullSync: async (calendarId) => [googleEvent('rollback-shared', `${calendarId} 원본`)],
+    updateGoogleEvent: async () => {
+      throw new Error('update failed');
+    },
+  });
+  try {
+    await harness.service.syncAll({ skipBflowLoad: true });
+    await assert.rejects(
+      harness.service.updateEvent(
+        'rollback-shared',
+        { title: '실패할 개인 수정' },
+        { id: 'rollback-shared', source: 'google', sourceCalendarId: 'primary' },
+      ),
+      /update failed/,
+    );
+
+    assert.deepEqual(
+      (await harness.service.getEvents()).map(({ title, sourceCalendarId }) => ({ title, sourceCalendarId })),
+      [
+        { title: 'team 원본', sourceCalendarId: 'team' },
+        { title: 'primary 원본', sourceCalendarId: 'primary' },
+      ],
+    );
+  } finally {
+    harness.restore();
+  }
+});
+
+test('failed exact Google delete restores its target despite a same-id sibling', async () => {
+  const harness = await createHarness({
+    teamCalendarId: 'team',
+    personalCalendarId: 'primary',
+    fullSync: async (calendarId) => [googleEvent('rollback-shared', `${calendarId} 원본`)],
+    deleteGoogleEvent: async () => {
+      throw new Error('delete failed');
+    },
+  });
+  try {
+    await harness.service.syncAll({ skipBflowLoad: true });
+    await assert.rejects(
+      harness.service.deleteEvent(
+        'rollback-shared',
+        { id: 'rollback-shared', source: 'google', sourceCalendarId: 'primary' },
+      ),
+      /delete failed/,
+    );
+
+    assert.deepEqual(
+      (await harness.service.getEvents()).map(({ title, sourceCalendarId }) => ({ title, sourceCalendarId })),
+      [
+        { title: 'team 원본', sourceCalendarId: 'team' },
+        { title: 'primary 원본', sourceCalendarId: 'primary' },
+      ],
+      'the sibling cannot satisfy the rollback existence check for the deleted target',
+    );
+  } finally {
+    harness.restore();
+  }
+});
+
+test('a captured canonical B flow identity still routes after the row moves calendars', async () => {
+  let rows = [bflowEvent('moved-bflow-id', '이동 전 일정')];
+  const updateCalls: Array<{ eventId: string; patch: Record<string, unknown> }> = [];
+  const secondCalendar: BflowCalendarFixture = {
+    ...personalCalendar('user-a'),
+    id: 'calendar-2',
+    name: '이동 대상',
+    visibility: 'members',
+    is_personal: false,
+  };
+  const harness = await createHarness({
+    currentUserId: 'user-a',
+    calendarList: async () => [personalCalendar('user-a'), secondCalendar],
+    bflowEventsList: async () => rows,
+    fullSync: async () => [],
+    updateBflowEvent: async (eventId, patch) => {
+      updateCalls.push({ eventId, patch });
+      return { ...rows[0], title: String(patch.title ?? rows[0].title) };
+    },
+  });
+  try {
+    await harness.service.loadBflowEvents();
+    const captured: EventIdentityFixture = {
+      id: 'moved-bflow-id',
+      source: 'bflow',
+      sourceCalendarId: 'bflow:calendar-1',
+    };
+    rows = [{ ...rows[0], calendar_id: 'calendar-2', title: '이동 뒤 일정' }];
+    await harness.service.loadBflowEvents();
+
+    await harness.service.updateEvent('moved-bflow-id', { title: '이동 뒤 수정' }, captured);
+
+    assert.deepEqual(updateCalls, [{ eventId: 'moved-bflow-id', patch: { title: '이동 뒤 수정' } }]);
+  } finally {
+    harness.restore();
+  }
+});
+
+test('a partial sync replaces successful calendars, retains failed calendars, and preserves same-id rows by source calendar', async () => {
   let attempt = 1;
   const harness = await createHarness({
     teamCalendarId: 'team',
@@ -1804,6 +2682,7 @@ test('a partial sync replaces successful calendars, retains failed calendars, an
       [
         { id: 'shared', title: '개인의 새 중복 일정', sourceCalendarId: 'primary' },
         { id: 'primary-new', title: '새 개인 일정', sourceCalendarId: 'primary' },
+        { id: 'shared', title: '팀의 이전 중복 일정', sourceCalendarId: 'team' },
         { id: 'team-only', title: '유지할 팀 일정', sourceCalendarId: 'team' },
       ],
     );
@@ -4029,7 +4908,11 @@ test('an ordinary update started after privacy migration applies to the committe
     await replacementCreateStarted.promise;
 
     let followerSettled = false;
-    const follower = harness.service.updateEvent(source.id, { title: 'T2 최신 제목' })
+    const follower = harness.service.updateEvent(
+      source.id,
+      { title: 'T2 최신 제목' },
+      { id: source.id, source: 'bflow', sourceCalendarId: 'bflow:calendar-1' },
+    )
       .finally(() => { followerSettled = true; });
     await Promise.resolve();
     await Promise.resolve();
@@ -4089,7 +4972,10 @@ test('an ordinary delete started after privacy migration deletes the committed r
       (error: unknown) => error,
     );
     await replacementCreateStarted.promise;
-    const follower = harness.service.deleteEvent(source.id);
+    const follower = harness.service.deleteEvent(
+      source.id,
+      { id: source.id, source: 'bflow', sourceCalendarId: 'bflow:calendar-1' },
+    );
 
     replacementCreateGate.resolve();
     assert.equal(await migration, null);
@@ -4212,10 +5098,23 @@ test('fresh replacement ID followers continue on the source after create rejecti
             && ((payload as { eventId: string }).eventId).startsWith('cal_')
           )) as { eventId: string } | undefined;
           assert.ok(optimisticAdd, 'the optimistic fresh replacement ID must be exposed');
+          const optimisticEvent = (await harness.service.getEvents()).find(
+            (event) => event.id === optimisticAdd.eventId,
+          );
+          assert.ok(optimisticEvent, 'the UI can capture the optimistic replacement identity');
+          const optimisticIdentity: EventIdentityFixture = {
+            id: optimisticEvent.id,
+            source: optimisticEvent.source as EventIdentityFixture['source'],
+            sourceCalendarId: optimisticEvent.sourceCalendarId,
+          };
 
           const follower = (followerKind === 'update'
-            ? harness.service.updateEvent(optimisticAdd.eventId, { title: 'T2 최신 제목' })
-            : harness.service.deleteEvent(optimisticAdd.eventId)).then(
+            ? harness.service.updateEvent(
+                optimisticAdd.eventId,
+                { title: 'T2 최신 제목' },
+                optimisticIdentity,
+              )
+            : harness.service.deleteEvent(optimisticAdd.eventId, optimisticIdentity)).then(
               () => null,
               (error: unknown) => error,
             );

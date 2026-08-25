@@ -6,6 +6,7 @@ import type { CalendarEvent } from '@/types/calendar';
 import { useCalendarStore } from '@/stores/useCalendarStore';
 import { fmtDate, daysBetween, hexToRgba } from '@/utils/calendarDate';
 import { formatEventTimeRange, sortEventsForList } from '@/utils/calendarEventFilter';
+import { calendarEventIdentityKey } from '@/utils/calendarEventIdentity';
 
 /* ── 로컬 유틸 ──────────────────────────────────────── */
 const WEEKDAY_KR = ['일', '월', '화', '수', '목', '금', '토'];
@@ -254,7 +255,7 @@ function ActiveDay({
         <div data-scroll-events className="flex flex-col gap-2 flex-1 overflow-y-auto">
           {sortedEvents.map((ev) => (
             <DayEventCard
-              key={ev.id}
+              key={calendarEventIdentityKey(ev)}
               event={ev}
               today={today}
               tagNameById={tagNameById}
@@ -369,7 +370,7 @@ function NearDay({
       <div className="flex flex-col gap-1 items-center">
         {events.slice(0, 5).map((ev) => (
           <div
-            key={ev.id}
+            key={calendarEventIdentityKey(ev)}
             className="rounded-full"
             style={{ width: 6, height: 6, background: ev.color }}
           />

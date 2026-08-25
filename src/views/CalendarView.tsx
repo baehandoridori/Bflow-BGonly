@@ -14,7 +14,7 @@ import { VACATION_COLOR } from '@/types/vacation';
 import { mapVacationEvents } from '@/utils/vacationEvents';
 import { cn } from '@/utils/cn';
 import { navigateToSceneView } from '@/utils/sceneNavigationAction';
-import { hasSameCalendarEventIdentity } from '@/utils/calendarEventIdentity';
+import { calendarEventIdentityKey, hasSameCalendarEventIdentity } from '@/utils/calendarEventIdentity';
 
 /* ────────────────────────────────────────────────
    프로그레스 색상
@@ -302,11 +302,11 @@ function EventGanttChart() {
       const result = await getEvents();
       if (cancelled) return;
       setEvents((prev) => {
-        const vacOnly = prev.filter((e) => e.type === 'vacation');
-        return [...result, ...vacOnly];
+        const externalVacationEvents = prev.filter((e) => e.source === 'vacation');
+        return [...result, ...externalVacationEvents];
       });
       setSelectedEvent((previous) => {
-        if (!previous || previous.type === 'vacation') return previous;
+        if (!previous || previous.source === 'vacation') return previous;
         return result.find((event) => hasSameCalendarEventIdentity(event, previous)) ?? null;
       });
     };
@@ -321,7 +321,7 @@ function EventGanttChart() {
   // 휴가 이벤트 로드 & 머지
   useEffect(() => {
     if (!vacationConnected) {
-      setEvents((prev) => prev.filter((e) => e.type !== 'vacation'));
+      setEvents((prev) => prev.filter((e) => e.source !== 'vacation'));
       return;
     }
     fetchAllVacationEvents()
@@ -329,8 +329,8 @@ function EventGanttChart() {
         const mapped = mapVacationEvents(raw, 'gvac');
         setEvents((prev) => {
           // 기존 vacation 이벤트 제거 후 새로 추가
-          const nonVac = prev.filter((e) => e.type !== 'vacation');
-          return [...nonVac, ...mapped];
+          const nonExternalVacationEvents = prev.filter((e) => e.source !== 'vacation');
+          return [...nonExternalVacationEvents, ...mapped];
         });
       })
       .catch(() => { /* 비차단 */ });
@@ -527,11 +527,11 @@ function EventGanttChart() {
             const offsetDays = Math.round((evStart.getTime() - rangeStartDate.getTime()) / 86400000);
             const spanDays = Math.round((evEnd.getTime() - evStart.getTime()) / 86400000) + 1;
             const hex = ev.color || EVENT_COLORS[0];
-            const isSelected = selectedEvent?.id === ev.id;
+            const isSelected = selectedEvent != null && hasSameCalendarEventIdentity(selectedEvent, ev);
 
             return (
               <motion.div
-                key={ev.id}
+                key={calendarEventIdentityKey(ev)}
                 initial={{ opacity: 0, y: 4 }}
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ duration: 0.15, delay: i * 0.02 }}
@@ -649,7 +649,7 @@ function EventGanttChart() {
                         const vacLabel = v.vacationType || v.type || '휴가';
                         return (
                           <div
-                            key={v.id}
+                            key={calendarEventIdentityKey(v)}
                             className="absolute top-1 h-5 rounded-md flex items-center px-1.5 text-[9px] font-medium truncate cursor-pointer hover:brightness-110"
                             style={{
                               left: off * DAY_WIDTH,

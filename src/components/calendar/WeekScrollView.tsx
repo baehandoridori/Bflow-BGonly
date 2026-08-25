@@ -6,6 +6,7 @@ import type { CalendarEvent } from '@/types/calendar';
 import { useCalendarStore } from '@/stores/useCalendarStore';
 import { WEEKDAYS, fmtDate, addDays, daysBetween, getISOWeekNumber, hexToRgba } from '@/utils/calendarDate';
 import { formatEventTimeRange, sortEventsForList } from '@/utils/calendarEventFilter';
+import { calendarEventIdentityKey } from '@/utils/calendarEventIdentity';
 
 /* ── 로컬 유틸 ──────────────────────────────────────── */
 /** 해당 연도의 일요일 시작 주 배열 생성 (약 53주) */
@@ -292,7 +293,7 @@ function ActiveWeek({
               <div className="flex gap-px" style={{ minHeight: 6 }}>
                 {dayEvents.slice(0, 3).map((ev) => (
                   <div
-                    key={ev.id}
+                    key={calendarEventIdentityKey(ev)}
                     className="rounded-full"
                     style={{
                       width: 5,
@@ -327,7 +328,7 @@ function ActiveWeek({
 
             return (
               <div
-                key={ev.id}
+                key={calendarEventIdentityKey(ev)}
                 className="grid grid-cols-7 gap-1"
               >
                 <div
@@ -365,7 +366,7 @@ function ActiveWeek({
         <div data-scroll-events className="flex flex-col gap-2 flex-1 overflow-y-auto mt-2">
           {sortedEvents.map((ev) => (
             <EventCard
-              key={ev.id}
+              key={calendarEventIdentityKey(ev)}
               event={ev}
               today={today}
               tagNameById={tagNameById}
@@ -495,7 +496,7 @@ function CompactWeek({
                     .slice(0, 2)
                     .map((ev) => (
                       <div
-                        key={ev.id}
+                        key={calendarEventIdentityKey(ev)}
                         className="rounded-full"
                         style={{
                           width: 4,

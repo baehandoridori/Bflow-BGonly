@@ -65,6 +65,14 @@ type CalendarGridProps = {
   tagNameById: Record<string, string>;
   calendarNameById: Record<string, string>;
   onEventClick(event: ScheduleCalendarEvent): void;
+  onDragStart?(event: ScheduleCalendarEvent, mode: 'move' | 'resize-start' | 'resize-end', anchorDate: string): void;
+  dragPreview?: {
+    eventId: string;
+    newStartDate: string;
+    newEndDate: string;
+  } | null;
+  draggedEventIdentity?: ScheduleEventIdentity | null;
+  isDragging?: boolean;
 };
 type CalendarGridComponent = (props: CalendarGridProps) => ReactNode;
 type ScheduleCalendarEvent = {
@@ -88,22 +96,25 @@ type ScheduleCalendarEvent = {
   tagId?: string;
   linkedTodoId?: string;
 };
+type ScheduleEventIdentity = Pick<ScheduleCalendarEvent, 'id' | 'source' | 'sourceCalendarId'>;
 type ScheduleGridProps = {
   events: ScheduleCalendarEvent[];
   tagNameById: Record<string, string>;
   calendarNameById: Record<string, string>;
   onEventClick(event: ScheduleCalendarEvent): void;
-  onDragStart(eventId: string, mode: 'move' | 'resize-start' | 'resize-end', anchorDate: string): void;
+  onDragStart(event: ScheduleCalendarEvent, mode: 'move' | 'resize-start' | 'resize-end', anchorDate: string): void;
   onEventContextMenu(event: ScheduleCalendarEvent, mouse: { preventDefault(): void; stopPropagation(): void; clientX: number; clientY: number }): void;
 };
 type SchedulePanelProps = {
   event: ScheduleCalendarEvent;
   onUpdate(id: string, updates: Partial<ScheduleCalendarEvent>): void | Promise<void>;
+  onDelete(id: string): void | Promise<void>;
 };
 type ScheduleQuickEditProps = {
   event: ScheduleCalendarEvent;
   onClose(): void;
   onUpdate(id: string, updates: Partial<ScheduleCalendarEvent>): void | Promise<void>;
+  onDelete(id: string): void | Promise<void>;
   onDuplicate(event: ScheduleCalendarEvent): void | Promise<void>;
   [key: string]: unknown;
 };
@@ -116,6 +127,13 @@ type EventCreateModalProps = {
   onSave(event: Record<string, unknown>): void;
 };
 type EventCreateModalComponent = (props: EventCreateModalProps) => ReactNode;
+type EventSidePanelComponent = (props: {
+  event: ScheduleCalendarEvent;
+  onClose(): void;
+  onDelete(id: string): void;
+  onUpdate(id: string, updates: Partial<ScheduleCalendarEvent>): void;
+  onNavigate(event: ScheduleCalendarEvent): void;
+}) => ReactNode;
 type CalendarSettingsModalProps = {
   calendar?: BflowCalendar;
   eventCount: number;
@@ -231,6 +249,7 @@ let bundledTagManagerPopover: Promise<TagManagerPopoverComponent> | undefined;
 let bundledScheduleView: Promise<ScheduleViewComponent> | undefined;
 let bundledCalendarGrid: Promise<CalendarGridComponent> | undefined;
 let bundledEventCreateModal: Promise<EventCreateModalComponent> | undefined;
+let bundledEventSidePanel: Promise<EventSidePanelComponent> | undefined;
 let bundledCalendarSettingsModal: Promise<CalendarSettingsModalComponent> | undefined;
 let bundledWeekScrollView: Promise<WeekScrollViewModule> | undefined;
 let bundledDayScrollView: Promise<DayScrollViewComponent> | undefined;
@@ -240,8 +259,13 @@ let scheduleGridProps: ScheduleGridProps[] = [];
 let schedulePanelProps: SchedulePanelProps[] = [];
 let scheduleQuickEditProps: ScheduleQuickEditProps[] = [];
 let scheduleCanonicalEvents: ScheduleCalendarEvent[] = [];
-let scheduleUpdateCalls: Array<{ id: string; updates: Partial<ScheduleCalendarEvent> }> = [];
+let scheduleUpdateCalls: Array<{
+  id: string;
+  updates: Partial<ScheduleCalendarEvent>;
+  targetIdentity?: ScheduleEventIdentity;
+}> = [];
 let scheduleUpdateHandler: ((id: string, updates: Partial<ScheduleCalendarEvent>) => Promise<void>) | undefined;
+let scheduleDeleteCalls: Array<{ id: string; targetIdentity?: ScheduleEventIdentity }> = [];
 let scheduleDragDoneHandler: ((eventId: string, newStart: string, newEnd: string) => void | Promise<void>) | undefined;
 let scheduleTodoSyncCalls: Array<{ todoId: string; patch: Record<string, unknown> }> = [];
 let scheduleAddedEvents: ScheduleCalendarEvent[] = [];
@@ -537,6 +561,7 @@ function resetHarness(): void {
   scheduleCanonicalEvents = [];
   scheduleUpdateCalls = [];
   scheduleUpdateHandler = undefined;
+  scheduleDeleteCalls = [];
   scheduleDragDoneHandler = undefined;
   scheduleTodoSyncCalls = [];
   (globalThis as typeof globalThis & { __scheduleTodoSyncCalls?: typeof scheduleTodoSyncCalls }).__scheduleTodoSyncCalls = scheduleTodoSyncCalls;
@@ -1110,11 +1135,17 @@ async function loadScheduleView(): Promise<ScheduleViewComponent> {
           return true;
         },
         addEvent: async (event: ScheduleCalendarEvent) => { scheduleAddedEvents.push(event); },
-        updateEvent: async (id: string, updates: Partial<ScheduleCalendarEvent>) => {
-          scheduleUpdateCalls.push({ id, updates });
+        updateEvent: async (
+          id: string,
+          updates: Partial<ScheduleCalendarEvent>,
+          targetIdentity?: ScheduleEventIdentity,
+        ) => {
+          scheduleUpdateCalls.push({ id, updates, targetIdentity });
           await scheduleUpdateHandler?.(id, updates);
         },
-        deleteEvent: async () => {},
+        deleteEvent: async (id: string, targetIdentity?: ScheduleEventIdentity) => {
+          scheduleDeleteCalls.push({ id, targetIdentity });
+        },
       };
       if (id === '@/services/vacationService') return { fetchAllVacationEvents: async () => [] };
       if (id === '@/hooks/useCalendarDnD') {
@@ -1254,13 +1285,95 @@ async function loadCalendarGrid(): Promise<CalendarGridComponent> {
         AnimatePresence: ({ children }: { children: ReactNode }) => children,
         motion: { div: 'div' },
       };
-      if (id === 'lucide-react') return { CheckSquare: emptyComponent, Palmtree: emptyComponent, X: emptyComponent };
+      if (id === 'lucide-react') return {
+        CheckSquare: () => jsxRuntime.jsx('span', { 'data-linked-todo-icon': true }),
+        Palmtree: emptyComponent,
+        X: emptyComponent,
+      };
       if (id === '@/utils/cn') return { cn: (...values: unknown[]) => values.filter(Boolean).join(' ') };
       return nodeRequire(id);
     }, module, module.exports);
     return module.exports.CalendarGrid as CalendarGridComponent;
   });
   return bundledCalendarGrid;
+}
+
+async function loadEventSidePanel(): Promise<EventSidePanelComponent> {
+  bundledEventSidePanel ??= build({
+    entryPoints: ['src/components/calendar/EventSidePanel.tsx'],
+    bundle: true,
+    format: 'cjs',
+    platform: 'node',
+    target: 'node22',
+    write: false,
+    external: [
+      'react', 'react/jsx-runtime', 'framer-motion', 'lucide-react',
+      '@/stores/useDataStore', '@/stores/useAppStore', '@/stores/useAuthStore',
+      '@/stores/useCalendarStore', '@/components/common/EntityAwareInput',
+      '@/components/common/EntityText', '@/types', '@/types/calendar',
+      '@/utils/glassStyles', '@/utils/calendarDate',
+    ],
+  }).then((result) => {
+    const module = { exports: {} as Record<string, unknown> };
+    const nodeRequire = createRequire(import.meta.url);
+    const react = nodeRequire('react') as Record<string, unknown>;
+    const jsxRuntime = nodeRequire('react/jsx-runtime') as { jsx(type: unknown, props: unknown, key?: string): ReactNode };
+    const emptyComponent = () => null;
+    const evaluate = new Function('require', 'module', 'exports', result.outputFiles[0].text);
+    evaluate((id: string) => {
+      if (id === 'react') {
+        return {
+          ...react,
+          useState(initial: unknown) {
+            const slot = stateCursor++;
+            if (stateSlots[slot] === undefined) {
+              stateSlots[slot] = typeof initial === 'function' ? (initial as () => unknown)() : initial;
+            }
+            return [stateSlots[slot], (next: unknown) => {
+              stateSlots[slot] = typeof next === 'function'
+                ? (next as (value: unknown) => unknown)(stateSlots[slot])
+                : next;
+            }];
+          },
+          useEffect() {},
+          useMemo: (factory: () => unknown) => factory(),
+        };
+      }
+      if (id === 'react/jsx-runtime') return jsxRuntime;
+      if (id === 'framer-motion') return {
+        AnimatePresence: ({ children }: { children: ReactNode }) => children,
+        motion: { div: 'div' },
+      };
+      if (id === 'lucide-react') return new Proxy({}, { get: () => emptyComponent });
+      if (id === '@/stores/useDataStore') {
+        return { useDataStore: (selector: (state: { episodeTitles: {} }) => unknown) => selector({ episodeTitles: {} }) };
+      }
+      if (id === '@/stores/useAppStore') {
+        const appState = { colorMode: 'dark', setView: (view: string) => appViews.push(view) };
+        return { useAppStore: (selector: (state: typeof appState) => unknown) => selector(appState) };
+      }
+      if (id === '@/stores/useAuthStore') {
+        const authState = { users: [], currentUser: settingsCurrentUser };
+        return { useAuthStore: (selector: (state: typeof authState) => unknown) => selector(authState) };
+      }
+      if (id === '@/stores/useCalendarStore') return {
+        useCalendarStore: (selector: (state: typeof calendarState) => unknown) => selector(calendarState),
+        isOptimisticCalendarTagId: (idValue: string) => idValue.startsWith('optimistic-tag:'),
+        getTagCanonicalSnapshot: () => null,
+      };
+      if (id === '@/components/common/EntityAwareInput') return { EntityAwareInput: () => null };
+      if (id === '@/components/common/EntityText') {
+        return { EntityText: ({ text }: { text?: string }) => text ?? null };
+      }
+      if (id === '@/types') return { DEPARTMENT_CONFIGS: {} };
+      if (id === '@/types/calendar') return { EVENT_COLORS: ['#6C5CE7'] };
+      if (id === '@/utils/glassStyles') return { floatingGlassStyle: {} };
+      if (id === '@/utils/calendarDate') return { parseDate: (date: string) => new Date(`${date}T12:00:00`) };
+      return nodeRequire(id);
+    }, module, module.exports);
+    return module.exports.EventSidePanel as EventSidePanelComponent;
+  });
+  return bundledEventSidePanel;
 }
 
 async function loadEventCreateModal(): Promise<EventCreateModalComponent> {
@@ -1758,14 +1871,17 @@ async function flushScheduleMountEffects(): Promise<void> {
   await new Promise<void>((resolve) => setImmediate(resolve));
 }
 
-async function dispatchScheduleWindowEvent(type: string): Promise<void> {
+async function dispatchScheduleWindowEvent(type: string, detail?: Record<string, unknown>): Promise<void> {
   for (const listener of scheduleWindowListeners.get(type) ?? []) {
-    listener({ type } as Event);
+    listener({ type, detail } as unknown as Event);
   }
   await new Promise<void>((resolve) => setImmediate(resolve));
 }
 
-async function renderCalendarGrid(events: ScheduleCalendarEvent[]): Promise<ReactNode> {
+async function renderCalendarGrid(
+  events: ScheduleCalendarEvent[],
+  overrides: Partial<CalendarGridProps> = {},
+): Promise<ReactNode> {
   const CalendarGrid = await loadCalendarGrid();
   stateSlots = [];
   stateCursor = 0;
@@ -1779,6 +1895,20 @@ async function renderCalendarGrid(events: ScheduleCalendarEvent[]): Promise<Reac
     tagNameById: { 'tag-meeting': '회의' },
     calendarNameById: { mine: 'EP 마일스톤', team: '스튜디오 공지' },
     onEventClick() {},
+    ...overrides,
+  }));
+}
+
+async function renderEventSidePanel(event: ScheduleCalendarEvent): Promise<ReactNode> {
+  const EventSidePanel = await loadEventSidePanel();
+  stateSlots = [];
+  stateCursor = 0;
+  return resolveComponents(EventSidePanel({
+    event,
+    onClose() {},
+    onDelete() {},
+    onUpdate() {},
+    onNavigate() {},
   }));
 }
 
@@ -2950,6 +3080,74 @@ test('ScheduleView calendar-changed listener replaces or closes long-lived event
   assert.equal(scheduleQuickEditProps.length, 0, 'the revoked row closes quick edit');
 });
 
+test('ScheduleView only preserves external vacation selections outside the canonical event cache', async (t) => {
+  const vacation = calendarListEvent({
+    id: 'vacation-selection',
+    title: '정본 휴가 일정',
+    type: 'vacation',
+    source: 'google',
+    sourceCalendarId: 'primary',
+    calendarId: undefined,
+    isReadOnly: true,
+  });
+
+  await t.test('revoked Google vacation closes panel and quick edit', async () => {
+    resetHarness();
+    scheduleCanonicalEvents = [vacation];
+    await renderScheduleView();
+    await flushScheduleMountEffects();
+    await renderScheduleView();
+    scheduleGridProps.at(-1)?.onEventClick(vacation);
+    scheduleGridProps.at(-1)?.onEventContextMenu(vacation, {
+      preventDefault() {},
+      stopPropagation() {},
+      clientX: 80,
+      clientY: 120,
+    });
+    await renderScheduleView();
+    assert.equal(schedulePanelProps.at(-1)?.event, vacation);
+    assert.equal(scheduleQuickEditProps.at(-1)?.event, vacation);
+
+    scheduleCanonicalEvents = [];
+    await dispatchScheduleWindowEvent('bflow:calendar-changed');
+    schedulePanelProps = [];
+    scheduleQuickEditProps = [];
+    await renderScheduleView();
+    assert.equal(schedulePanelProps.length, 0, 'canonical vacation revocation closes the panel');
+    assert.equal(scheduleQuickEditProps.length, 0, 'canonical vacation revocation closes quick edit');
+  });
+
+  await t.test('external vacation selection survives a canonical calendar refresh', async () => {
+    resetHarness();
+    const externalVacation = {
+      ...vacation,
+      id: 'vac-external-selection',
+      title: '외부 휴가 일정',
+      source: 'vacation' as const,
+      sourceCalendarId: undefined,
+    };
+    await renderScheduleView();
+    stateSlots[0] = [externalVacation];
+    await renderScheduleView();
+    scheduleGridProps.at(-1)?.onEventClick(externalVacation);
+    scheduleGridProps.at(-1)?.onEventContextMenu(externalVacation, {
+      preventDefault() {},
+      stopPropagation() {},
+      clientX: 80,
+      clientY: 120,
+    });
+    await renderScheduleView();
+
+    scheduleCanonicalEvents = [];
+    await dispatchScheduleWindowEvent('bflow:calendar-changed');
+    schedulePanelProps = [];
+    scheduleQuickEditProps = [];
+    await renderScheduleView();
+    assert.equal(schedulePanelProps.at(-1)?.event, externalVacation);
+    assert.equal(scheduleQuickEditProps.at(-1)?.event, externalVacation);
+  });
+});
+
 test('ScheduleView follows canonical B flow moves but rejects same-id rows from another storage source', async () => {
   resetHarness();
   const selected: ScheduleCalendarEvent = {
@@ -3015,6 +3213,92 @@ test('ScheduleView follows canonical B flow moves but rejects same-id rows from 
   assert.deepEqual(scheduleGridProps.at(-1)?.events, [crossStorage], 'the other storage row remains independently visible');
   assert.equal(schedulePanelProps.length, 0, 'same id from Google cannot replace the old B flow panel');
   assert.equal(scheduleQuickEditProps.length, 0, 'same id from Google cannot replace B flow quick edit');
+});
+
+test('ScheduleView todo navigation does not adopt an unrelated same-id storage row', async () => {
+  resetHarness();
+  const unrelatedGoogle: ScheduleCalendarEvent = {
+    id: 'cal_todo-identity',
+    title: '무관한 Google 일정',
+    memo: '할일 패널에 열리면 안 됨',
+    color: '#74B9FF',
+    type: 'custom',
+    startDate: '2026-08-25',
+    endDate: '2026-08-25',
+    createdBy: 'owner',
+    createdAt: '2026-08-24T00:00:00.000Z',
+    source: 'google',
+    sourceCalendarId: 'primary',
+    canEdit: true,
+    isReadOnly: false,
+  };
+  scheduleCanonicalEvents = [unrelatedGoogle];
+
+  await renderScheduleView();
+  await flushScheduleMountEffects();
+  await renderScheduleView();
+  await flushScheduleMountEffects();
+  await dispatchScheduleWindowEvent('bflow:navigate-to-date', {
+    date: '2026-08-25',
+    todoId: 'todo-identity',
+  });
+  await new Promise<void>((resolve) => setTimeout(resolve, 120));
+  schedulePanelProps = [];
+  await renderScheduleView();
+  assert.equal(
+    schedulePanelProps.length,
+    0,
+    'a raw cal_* collision cannot substitute for the missing linked B flow event',
+  );
+  resetHarness();
+});
+
+test('ScheduleView todo navigation prefers the unique linked identity over a raw-ID sibling', async () => {
+  resetHarness();
+  const unrelatedGoogle: ScheduleCalendarEvent = {
+    id: 'cal_todo-identity',
+    title: '무관한 Google 일정',
+    memo: '',
+    color: '#74B9FF',
+    type: 'custom',
+    startDate: '2026-08-25',
+    endDate: '2026-08-25',
+    createdBy: 'owner',
+    createdAt: '2026-08-24T00:00:00.000Z',
+    source: 'google',
+    sourceCalendarId: 'primary',
+    linkedTodoId: 'another-google-todo',
+    canEdit: true,
+    isReadOnly: false,
+  };
+  const linkedBflow: ScheduleCalendarEvent = {
+    ...unrelatedGoogle,
+    title: '열어야 할 B flow 할일 일정',
+    source: 'bflow',
+    sourceCalendarId: 'bflow:mine',
+    calendarId: 'mine',
+    linkedTodoId: 'todo-identity',
+  };
+  scheduleCanonicalEvents = [unrelatedGoogle, linkedBflow];
+
+  await renderScheduleView();
+  await flushScheduleMountEffects();
+  await renderScheduleView();
+  await flushScheduleMountEffects();
+  await dispatchScheduleWindowEvent('bflow:navigate-to-date', {
+    date: '2026-08-25',
+    todoId: 'todo-identity',
+  });
+  await new Promise<void>((resolve) => setTimeout(resolve, 120));
+  schedulePanelProps = [];
+  await renderScheduleView();
+
+  assert.deepEqual(
+    schedulePanelProps.at(-1)?.event,
+    linkedBflow,
+    'the explicit linkedTodo row wins even when an earlier sibling shares its raw ID',
+  );
+  resetHarness();
 });
 
 test('ScheduleView reconciles an open calendar settings modal without closing create mode', async (t) => {
@@ -3170,6 +3454,170 @@ test('CalendarGrid renders tag-aware chip text while keeping each event color as
   assert.equal(tintStyle.borderLeft, '3px solid #74B9FF', 'the chip border still comes from event.color');
 });
 
+test('CalendarGrid keeps same-id rows keyed and ghosted by source identity and forwards the dragged event object', async () => {
+  const bflow = calendarListEvent({
+    id: 'grid-shared-id',
+    title: 'B flow 일정',
+    source: 'bflow',
+    sourceCalendarId: 'bflow:mine',
+    calendarId: 'mine',
+    isReadOnly: false,
+  });
+  const google = calendarListEvent({
+    id: 'grid-shared-id',
+    title: 'Google 일정',
+    source: 'google',
+    sourceCalendarId: 'primary',
+    calendarId: undefined,
+    isReadOnly: false,
+  });
+  const targetIdentity: ScheduleEventIdentity = {
+    id: bflow.id,
+    source: bflow.source,
+    sourceCalendarId: bflow.sourceCalendarId,
+  };
+  const dragged: Array<{ event: ScheduleCalendarEvent; mode: string; anchorDate: string }> = [];
+  const listeners = new Map<string, (event: { clientX: number; clientY: number }) => void>();
+  const globalScope = globalThis as typeof globalThis & { document?: unknown };
+  const hadDocument = Object.prototype.hasOwnProperty.call(globalScope, 'document');
+  const priorDocument = globalScope.document;
+  globalScope.document = {
+    addEventListener(type: string, listener: (event: { clientX: number; clientY: number }) => void) {
+      listeners.set(type, listener);
+    },
+    removeEventListener(type: string) {
+      listeners.delete(type);
+    },
+    elementFromPoint() {
+      return null;
+    },
+  };
+  try {
+    const ghostTree = await renderCalendarGrid([bflow, google], {
+      dragPreview: {
+        eventId: bflow.id,
+        newStartDate: '2026-08-26',
+        newEndDate: '2026-08-26',
+      },
+      draggedEventIdentity: targetIdentity,
+      isDragging: true,
+      onDragStart(event, mode, anchorDate) {
+        dragged.push({ event, mode, anchorDate });
+      },
+    });
+    const bars = findElements(ghostTree, (candidate) => candidate.props['data-event-id'] === 'grid-shared-id');
+    assert.equal(bars.length, 2, 'both provider rows render');
+    assert.equal(
+      new Set(bars.map((bar) => bar.props['data-event-identity'])).size,
+      2,
+      'the same source-aware identity used by React keys stays unique per provider row',
+    );
+    assert.equal(
+      bars.filter((bar) => String(bar.props.className).includes('pointer-events-none')).length,
+      1,
+      'only the selected identity becomes the drag ghost',
+    );
+
+    const interactiveTree = await renderCalendarGrid([bflow, google], {
+      onDragStart(event, mode, anchorDate) {
+        dragged.push({ event, mode, anchorDate });
+      },
+    });
+    const bflowBar = findElements(
+      interactiveTree,
+      (candidate) => candidate.props['data-event-id'] === bflow.id
+        && textContent(candidate).includes('B flow 일정'),
+    ).find((bar) => textContent(bar).includes('B flow 일정'));
+    assert.ok(bflowBar);
+    const target = {
+      style: {} as Record<string, string>,
+      getBoundingClientRect: () => ({ left: 0, width: 100 }),
+    };
+    const onMouseDown = bflowBar.props.onMouseDown as (event: Record<string, unknown>) => void;
+    onMouseDown({
+      button: 0,
+      clientX: 50,
+      clientY: 20,
+      preventDefault() {},
+      stopPropagation() {},
+      currentTarget: target,
+    });
+    listeners.get('mousemove')?.({ clientX: 60, clientY: 20 });
+
+    assert.deepEqual(dragged, [{ event: bflow, mode: 'move', anchorDate: bflow.startDate }]);
+  } finally {
+    if (hadDocument) globalScope.document = priorDocument;
+    else delete globalScope.document;
+  }
+});
+
+test('todo affordances only infer cal_* links for local B flow rows', async () => {
+  resetHarness();
+  const googleCollision = calendarListEvent({
+    id: 'cal_todo-source-fence',
+    title: 'Google cal ID 충돌',
+    type: 'custom',
+    source: 'google',
+    sourceCalendarId: 'primary',
+    calendarId: undefined,
+    linkedTodoId: undefined,
+  });
+  const localLegacy = calendarListEvent({
+    ...googleCollision,
+    title: '로컬 B flow 할일 일정',
+    source: undefined,
+    sourceCalendarId: undefined,
+  });
+  const explicitGoogle = calendarListEvent({
+    ...googleCollision,
+    id: 'google-explicit-link',
+    title: '명시적으로 연결된 Google 일정',
+    linkedTodoId: 'todo-explicit',
+  });
+
+  const grid = await renderCalendarGrid([googleCollision, localLegacy, explicitGoogle]);
+  const barFor = (title: string) => findElements(grid, (element) => (
+    element.props['data-event-id'] !== undefined && textContent(element).includes(title)
+  ))[0];
+  const linkedIconCount = (title: string) => findElements(
+    barFor(title),
+    (element) => element.props['data-linked-todo-icon'] === true,
+  ).length;
+  assert.equal(linkedIconCount(googleCollision.title), 0, 'a Google cal_* ID alone does not render the todo icon');
+  assert.equal(linkedIconCount(localLegacy.title), 1, 'legacy local cal_* rows keep the inferred todo icon');
+  assert.equal(linkedIconCount(explicitGoogle.title), 1, 'an explicit linkedTodoId works for every provider');
+
+  const googlePanel = await renderEventSidePanel(googleCollision);
+  assert.equal(
+    findButtons(googlePanel).some((button) => textContent(button) === '할일로 이동'),
+    false,
+    'a metadata-less Google cal_* row cannot expose todo navigation',
+  );
+
+  const priorWindow = globalThis.window;
+  const navigations: Array<{ todoId?: string }> = [];
+  Object.assign(globalThis, {
+    window: {
+      addEventListener() {},
+      removeEventListener() {},
+      dispatchEvent(event: CustomEvent<{ todoId?: string }>) {
+        navigations.push(event.detail);
+        return true;
+      },
+    },
+  });
+  try {
+    const explicitPanel = await renderEventSidePanel(explicitGoogle);
+    const todoButton = findButtons(explicitPanel).find((button) => textContent(button) === '할일로 이동');
+    assert.ok(todoButton, 'explicit Google todo links keep the navigation button');
+    todoButton.props.onClick?.({ stopPropagation() {} });
+    await new Promise<void>((resolve) => setTimeout(resolve, 320));
+    assert.deepEqual(navigations, [{ todoId: 'todo-explicit' }], 'panel navigation dispatches the explicit todo identity');
+  } finally {
+    globalThis.window = priorWindow;
+  }
+});
+
 test('ScheduleView passes tag and calendar lookup maps to its only month grid', async () => {
   resetHarness();
   await renderScheduleView();
@@ -3258,7 +3706,15 @@ test('ScheduleView refreshes panel state from the authoritative event cache afte
   await panel.onUpdate(before.id, { calendarId: 'editable-share' });
   await renderScheduleView();
 
-  assert.deepEqual(scheduleUpdateCalls, [{ id: before.id, updates: { calendarId: 'editable-share' } }]);
+  assert.deepEqual(scheduleUpdateCalls, [{
+    id: before.id,
+    updates: { calendarId: 'editable-share' },
+    targetIdentity: {
+      id: before.id,
+      source: before.source,
+      sourceCalendarId: before.sourceCalendarId,
+    },
+  }]);
   assert.equal(scheduleGetEventsCalls, 1, 'a successful write is followed by a canonical cache read');
   assert.deepEqual(schedulePanelProps.at(-1)?.event, scheduleCanonicalEvents[0], 'panel uses re-derived color, source and permissions');
 
@@ -3267,6 +3723,11 @@ test('ScheduleView refreshes panel state from the authoritative event cache afte
   assert.deepEqual(scheduleUpdateCalls.at(-1), {
     id: before.id,
     updates: { startDate: '2026-08-25', endDate: '2026-08-26' },
+    targetIdentity: {
+      id: before.id,
+      source: before.source,
+      sourceCalendarId: before.sourceCalendarId,
+    },
   }, 'a complete crossing date pair reaches the existing ScheduleView swap');
   assert.equal(scheduleGetEventsCalls, 2);
 });
@@ -3312,12 +3773,17 @@ test('ScheduleView drag reconciliation follows a moved B flow row but rejects a 
     startDate: '2026-08-26',
     endDate: '2026-08-26',
   };
-  scheduleGridProps.at(-1)?.onDragStart(before.id, 'move', before.startDate);
+  scheduleGridProps.at(-1)?.onDragStart(before, 'move', before.startDate);
   assert.ok(scheduleDragDoneHandler, 'the real ScheduleView drag completion handler is wired into the DnD hook');
   scheduleCanonicalEvents = [moved];
   await scheduleDragDoneHandler(before.id, moved.startDate, moved.endDate);
   await renderScheduleView();
 
+  assert.deepEqual(scheduleUpdateCalls.at(-1)?.targetIdentity, {
+    id: before.id,
+    source: before.source,
+    sourceCalendarId: before.sourceCalendarId,
+  }, 'drag persistence receives the exact row selected at drag start');
   assert.deepEqual(schedulePanelProps.at(-1)?.event, moved, 'a globally unique B flow UUID follows a calendar move');
   assert.deepEqual(scheduleQuickEditProps.at(-1)?.event, moved, 'quick edit follows the same moved B flow row');
 
@@ -3330,7 +3796,7 @@ test('ScheduleView drag reconciliation follows a moved B flow row but rejects a 
     calendarId: undefined,
     linkedTodoId: 'google-todo',
   };
-  scheduleGridProps.at(-1)?.onDragStart(moved.id, 'move', moved.startDate);
+  scheduleGridProps.at(-1)?.onDragStart(moved, 'move', moved.startDate);
   scheduleCanonicalEvents = [crossStorage];
   schedulePanelProps = [];
   scheduleQuickEditProps = [];
@@ -3397,10 +3863,142 @@ test('ScheduleView direct update reconciliation rejects a same-id row from anoth
   await new Promise<void>((resolve) => setImmediate(resolve));
   await renderScheduleView();
 
+  assert.deepEqual(scheduleUpdateCalls.at(-1)?.targetIdentity, {
+    id: before.id,
+    source: before.source,
+    sourceCalendarId: before.sourceCalendarId,
+  }, 'direct edits keep the panel row identity through the service boundary');
   assert.deepEqual(scheduleGridProps.at(-1)?.events, [crossStorage], 'the canonical list can still contain the independent Google row');
   assert.equal(schedulePanelProps.length, 0, 'the B flow panel closes instead of adopting same-id Google data');
   assert.equal(scheduleQuickEditProps.length, 0, 'the B flow quick edit closes instead of adopting same-id Google data');
   assert.deepEqual(scheduleTodoSyncCalls, [], 'the unrelated Google row never drives B flow todo reverse-sync');
+});
+
+test('ScheduleView never infers todo side effects from a metadata-less Google cal_* ID', async (t) => {
+  const googleEvent = calendarListEvent({
+    id: 'cal_google-provider-id',
+    title: 'Google 제공자 ID 일정',
+    type: 'custom',
+    source: 'google',
+    sourceCalendarId: 'primary',
+    calendarId: undefined,
+    linkedTodoId: undefined,
+    canEdit: true,
+    isReadOnly: false,
+  });
+
+  await t.test('direct edit does not reverse-sync a guessed todo', async () => {
+    resetHarness();
+    scheduleCanonicalEvents = [{ ...googleEvent, title: '수정된 Google 일정' }];
+    await renderScheduleView();
+    stateSlots[0] = [googleEvent];
+    await renderScheduleView();
+    scheduleGridProps.at(-1)?.onEventClick(googleEvent);
+    await renderScheduleView();
+    const panel = schedulePanelProps.at(-1);
+    assert.ok(panel);
+    await panel.onUpdate(googleEvent.id, { title: '수정된 Google 일정' });
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    assert.deepEqual(scheduleTodoSyncCalls, []);
+  });
+
+  await t.test('drag does not reverse-sync a guessed todo', async () => {
+    resetHarness();
+    scheduleCanonicalEvents = [{
+      ...googleEvent,
+      startDate: '2026-08-26',
+      endDate: '2026-08-26',
+    }];
+    await renderScheduleView();
+    stateSlots[0] = [googleEvent];
+    await renderScheduleView();
+    scheduleGridProps.at(-1)?.onDragStart(googleEvent, 'move', googleEvent.startDate);
+    assert.ok(scheduleDragDoneHandler);
+    await scheduleDragDoneHandler(googleEvent.id, '2026-08-26', '2026-08-26');
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    assert.deepEqual(scheduleTodoSyncCalls, []);
+  });
+
+  await t.test('delete does not unlink a guessed todo', async () => {
+    resetHarness();
+    await renderScheduleView();
+    stateSlots[0] = [googleEvent];
+    await renderScheduleView();
+    scheduleGridProps.at(-1)?.onEventClick(googleEvent);
+    await renderScheduleView();
+    const panel = schedulePanelProps.at(-1);
+    assert.ok(panel);
+    await panel.onDelete(googleEvent.id);
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    assert.deepEqual(scheduleTodoSyncCalls, []);
+  });
+
+  await t.test('explicit Google todo metadata still reverse-syncs', async () => {
+    resetHarness();
+    const explicitlyLinked = { ...googleEvent, id: 'google-explicit', linkedTodoId: 'todo-explicit' };
+    scheduleCanonicalEvents = [{ ...explicitlyLinked, title: '명시 연결 수정' }];
+    await renderScheduleView();
+    stateSlots[0] = [explicitlyLinked];
+    await renderScheduleView();
+    scheduleGridProps.at(-1)?.onEventClick(explicitlyLinked);
+    await renderScheduleView();
+    const panel = schedulePanelProps.at(-1);
+    assert.ok(panel);
+    await panel.onUpdate(explicitlyLinked.id, { title: '명시 연결 수정' });
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    assert.equal(scheduleTodoSyncCalls.at(-1)?.todoId, 'todo-explicit');
+  });
+});
+
+test('ScheduleView delete keeps the selected row identity and preserves same-id siblings', async () => {
+  resetHarness();
+  const bflow: ScheduleCalendarEvent = {
+    id: 'delete-shared-id',
+    title: '삭제할 B flow 일정',
+    memo: '',
+    color: '#6C5CE7',
+    type: 'custom',
+    startDate: '2026-08-25',
+    endDate: '2026-08-25',
+    createdBy: '배한솔',
+    createdAt: '2026-08-24T00:00:00.000Z',
+    source: 'bflow',
+    sourceCalendarId: 'bflow:mine',
+    calendarId: 'mine',
+    canEdit: true,
+    isReadOnly: false,
+  };
+  const google: ScheduleCalendarEvent = {
+    ...bflow,
+    title: '보존할 Google 일정',
+    source: 'google',
+    sourceCalendarId: 'primary',
+    calendarId: undefined,
+    linkedTodoId: 'unrelated-google-todo',
+  };
+
+  await renderScheduleView();
+  stateSlots[0] = [google, bflow];
+  await renderScheduleView();
+  scheduleGridProps.at(-1)?.onEventClick(bflow);
+  await renderScheduleView();
+  const panel = schedulePanelProps.at(-1);
+  assert.ok(panel);
+
+  await panel.onDelete(bflow.id);
+  await new Promise<void>((resolve) => setImmediate(resolve));
+  await renderScheduleView();
+
+  assert.deepEqual(scheduleDeleteCalls, [{
+    id: bflow.id,
+    targetIdentity: {
+      id: bflow.id,
+      source: bflow.source,
+      sourceCalendarId: bflow.sourceCalendarId,
+    },
+  }]);
+  assert.deepEqual(scheduleGridProps.at(-1)?.events, [google], 'only the selected storage row leaves local state');
+  assert.deepEqual(scheduleTodoSyncCalls, [], 'a same-id sibling cannot drive todo unlinking');
 });
 
 test('ScheduleView reconciles a remounted quick edit after optimistic persistence rolls back', async () => {

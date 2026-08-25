@@ -27,6 +27,7 @@ import { EntityText } from '@/components/common/EntityText';
 import { DEPARTMENT_CONFIGS } from '@/types';
 import { floatingGlassStyle } from '@/utils/glassStyles';
 import { parseDate } from '@/utils/calendarDate';
+import { calendarEventLinkedTodoId } from '@/utils/calendarEventIdentity';
 
 // ─── 유틸 ──────────────────────────────────────────
 
@@ -190,7 +191,8 @@ export function EventSidePanel({
   const currentCalendar = calendars.find((calendar) => calendar.id === event.calendarId);
   const currentTag = tags.find((tag) => tag.id === event.tagId);
   const hasLinkedScene = event.type !== 'custom' && event.type !== 'vacation';
-  const hasLinkedTodo = !!(event.linkedTodoId || event.id.startsWith('cal_'));
+  const linkedTodoId = calendarEventLinkedTodoId(event);
+  const hasLinkedTodo = Boolean(linkedTodoId);
   const dday = calcDDay(event.endDate);
   const fieldClassName = 'w-full bg-bg-primary/85 border border-bg-border/70 focus:border-accent/50 rounded-md px-2 py-1 text-sm font-semibold text-text-primary outline-none transition-colors';
   const dateFieldClassName = 'w-full bg-bg-primary/85 border border-bg-border/70 focus:border-accent/50 rounded-md px-2 py-1 text-xs text-text-primary outline-none transition-colors';
@@ -284,11 +286,10 @@ export function EventSidePanel({
       {hasLinkedTodo && (
         <button
           onClick={() => {
-            const todoId = event.linkedTodoId || event.id.replace(/^cal_/, '');
             setView('dashboard');
             // 대시보드 마운트 대기 후 네비게이션 이벤트 디스패치
             setTimeout(() => {
-              window.dispatchEvent(new CustomEvent('bflow:navigate-to-todo', { detail: { todoId } }));
+              window.dispatchEvent(new CustomEvent('bflow:navigate-to-todo', { detail: { todoId: linkedTodoId } }));
             }, 300);
             onClose();
           }}
