@@ -895,6 +895,33 @@ test('CalendarSettingsModal edits visibility and members in permission-safe orde
     canManage: true,
   });
 
+  await t.test('a non-admin team owner saves name and color without resending guarded visibility or unchanged members', async () => {
+    resetHarness();
+    settingsCurrentUser = { ...settingsCurrentUser, role: 'user' };
+    settingsUsers = [settingsCurrentUser, ...settingsUsers.filter((user) => user.id !== myUserId)];
+    const ownedTeam = calendar({
+      id: 'owned-team',
+      name: '스튜디오 공지',
+      ownerId: myUserId,
+      visibility: 'team',
+      members: [{ userId: 'user-jang', canEdit: true }],
+      canManage: true,
+    });
+    let tree = await renderCalendarSettingsModal(ownedTeam, 9);
+
+    formElementByLabel(tree, '캘린더 이름').props.onChange?.({ target: { value: '스튜디오 공지 수정', checked: false } });
+    buttonByLabel(tree, '색상 #74B9FF').props.onClick?.();
+    tree = await renderCalendarSettingsModal(ownedTeam, 9);
+    await buttonByText(tree, '저장').props.onClick?.();
+
+    assert.deepEqual(settingsApiCalls.map((call) => call.name), ['calendarUpdate', 'loadAll']);
+    assert.deepEqual(settingsApiCalls[0].args, [
+      'owned-team',
+      { name: '스튜디오 공지 수정', color: '#74B9FF' },
+    ]);
+    assert.equal(settingsCloseCount, 1);
+  });
+
   await t.test('a failed calendar update never starts the member replacement', async () => {
     resetHarness();
     settingsApiFailures.add('calendarUpdate');
@@ -939,7 +966,7 @@ test('CalendarSettingsModal edits visibility and members in permission-safe orde
     assert.deepEqual(settingsApiCalls.map((call) => call.name), ['calendarUpdate', 'loadAll']);
     assert.deepEqual(settingsApiCalls[0].args, [
       'shared-settings',
-      { name: '리드 회의', color: '#6C5CE7', visibility: 'private' },
+      { visibility: 'private' },
     ]);
   });
 });
@@ -958,8 +985,8 @@ test('CalendarSettingsModal hides personal sharing controls and gates team visib
   assert.deepEqual(settingsApiCalls.map((call) => call.name), ['calendarUpdate', 'loadAll']);
   assert.deepEqual(
     settingsApiCalls[0].args,
-    ['personal-settings', { name: '내 일정', color: '#6C5CE7' }],
-    'personal saves expose only the editable name and color fields',
+    ['personal-settings', { name: '내 일정' }],
+    'personal saves expose only fields that actually changed',
   );
 
   resetHarness();

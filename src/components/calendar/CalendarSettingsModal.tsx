@@ -131,7 +131,8 @@ export function CalendarSettingsModal({ calendar, eventCount, onClose }: Calenda
   const handleSave = async () => {
     const trimmedName = name.trim();
     if (!trimmedName || !currentUser || saving) return;
-    const memberInput = uniqueMembers(members, ownerId).map((member) => ({
+    const normalizedMembers = uniqueMembers(members, ownerId);
+    const memberInput = normalizedMembers.map((member) => ({
       user_id: member.userId,
       can_edit: member.canEdit,
     }));
@@ -151,14 +152,22 @@ export function CalendarSettingsModal({ calendar, eventCount, onClose }: Calenda
     }
 
     const nextVisibility: CalendarVisibility = isPersonal ? 'private' : visibility;
+    const visibilityChanged = !isPersonal && nextVisibility !== calendar.visibility;
+    const originalMembers = uniqueMembers(calendar.members, ownerId);
+    const membersChanged = !isPersonal && (
+      normalizedMembers.length !== originalMembers.length
+      || normalizedMembers.some((member) => !originalMembers.some((original) => (
+        original.userId === member.userId && original.canEdit === member.canEdit
+      )))
+    );
+    const updates: Partial<Pick<BflowCalendar, 'name' | 'color' | 'visibility'>> = {};
+    if (trimmedName !== calendar.name) updates.name = trimmedName;
+    if (color !== calendar.color) updates.color = color;
+    if (visibilityChanged) updates.visibility = nextVisibility;
     await runMutation(
       async () => {
-        await window.electronAPI.calendarUpdate(calendar.id, {
-          name: trimmedName,
-          color,
-          ...(!isPersonal ? { visibility: nextVisibility } : {}),
-        });
-        if (!isPersonal && nextVisibility !== 'private') {
+        await window.electronAPI.calendarUpdate(calendar.id, updates);
+        if (!isPersonal && nextVisibility !== 'private' && (visibilityChanged || membersChanged)) {
           await window.electronAPI.calendarSetMembers(calendar.id, memberInput);
         }
       },
