@@ -27,6 +27,7 @@ import DayScrollView from '@/components/calendar/DayScrollView';
 import DaySidebar from '@/components/calendar/DaySidebar';
 import { CalendarRail, GOOGLE_CALENDAR_ID } from '@/components/calendar/CalendarRail';
 import { TagBar } from '@/components/calendar/TagBar';
+import { TagManagerPopover } from '@/components/calendar/TagManagerPopover';
 import { CalendarSettingsModal } from '@/components/calendar/CalendarSettingsModal';
 import { useCalendarDragCreate } from '@/hooks/useCalendarDragCreate';
 import { useCalendarStore } from '@/stores/useCalendarStore';
@@ -81,6 +82,7 @@ export function ScheduleView() {
   const [createDate, setCreateDate] = useState<string | undefined>();
   const [googleAuthenticated, setGoogleAuthenticated] = useState(false);
   const [calendarSettings, setCalendarSettings] = useState<BflowCalendar | null | undefined>(undefined);
+  const [tagManagerAnchor, setTagManagerAnchor] = useState<DOMRect | null>(null);
 
   // ─── 새 컴포넌트 상태 ───
   const [panelEvent, setPanelEvent] = useState<CalendarEvent | null>(null);
@@ -641,8 +643,9 @@ export function ScheduleView() {
 
   // 사이드바 상태
   const [sidebarOpen, setSidebarOpen] = useState(false);
-  // Task 3.7의 anchored tag manager가 이 실제 클릭 위치를 사용한다.
-  const handleOpenTagManager = useCallback((_anchorRect: DOMRect) => {}, []);
+  const handleOpenTagManager = useCallback((anchorRect: DOMRect) => {
+    setTagManagerAnchor(anchorRect);
+  }, []);
 
   return (
     <div className="flex h-full">
@@ -785,6 +788,12 @@ export function ScheduleView() {
         vacationConnected={vacationConnected}
         onOpenTagManager={handleOpenTagManager}
       />
+      {tagManagerAnchor && (
+        <TagManagerPopover
+          anchorRect={tagManagerAnchor}
+          onClose={() => setTagManagerAnchor(null)}
+        />
+      )}
 
       {/* ═══ 이벤트 수 통계 ═══ */}
       <div className="flex items-center gap-4 text-sm text-text-secondary/50 px-4">

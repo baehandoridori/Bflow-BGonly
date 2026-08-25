@@ -35,6 +35,11 @@ type TagBarProps = {
 };
 
 type TagBarComponent = (props: TagBarProps) => ReactNode;
+type TagManagerPopoverProps = {
+  anchorRect: DOMRect;
+  onClose(): void;
+};
+type TagManagerPopoverComponent = (props: TagManagerPopoverProps) => ReactNode;
 type ScheduleViewComponent = () => ReactNode;
 type EventCreateModalProps = {
   initialDate?: string;
@@ -107,10 +112,12 @@ let createdCount = 0;
 let appViews: string[] = [];
 let bundledRail: Promise<CalendarRailComponent> | undefined;
 let bundledTagBar: Promise<TagBarComponent> | undefined;
+let bundledTagManagerPopover: Promise<TagManagerPopoverComponent> | undefined;
 let bundledScheduleView: Promise<ScheduleViewComponent> | undefined;
 let bundledEventCreateModal: Promise<EventCreateModalComponent> | undefined;
 let bundledCalendarSettingsModal: Promise<CalendarSettingsModalComponent> | undefined;
 let scheduleTagBarProps: TagBarProps[] = [];
+let scheduleTagManagerProps: TagManagerPopoverProps[] = [];
 let settingsCurrentUser: TestUser;
 let settingsUsers: TestUser[] = [];
 let settingsApiCalls: Array<{ name: string; args: unknown[] }> = [];
@@ -121,6 +128,13 @@ let settingsConfirmMessages: string[] = [];
 let settingsToastErrors: string[] = [];
 let settingsToastSuccesses: string[] = [];
 let settingsCloseCount = 0;
+let tagManagerApiCalls: Array<{ name: string; args: unknown[] }> = [];
+let tagManagerApiFailures = new Set<string>();
+let tagManagerLoadAllFailure = false;
+let tagManagerConfirmResponses: boolean[] = [];
+let tagManagerConfirmMessages: string[] = [];
+let tagManagerToastErrors: string[] = [];
+let tagManagerCloseCount = 0;
 
 function resolveComponents(node: ReactNode): ReactNode {
   if (Array.isArray(node)) return node.map(resolveComponents);
@@ -226,6 +240,7 @@ function resetHarness(): void {
   createdCount = 0;
   appViews = [];
   scheduleTagBarProps = [];
+  scheduleTagManagerProps = [];
   settingsCurrentUser = {
     id: myUserId,
     name: '배한솔',
@@ -261,6 +276,13 @@ function resetHarness(): void {
   settingsToastErrors = [];
   settingsToastSuccesses = [];
   settingsCloseCount = 0;
+  tagManagerApiCalls = [];
+  tagManagerApiFailures = new Set();
+  tagManagerLoadAllFailure = false;
+  tagManagerConfirmResponses = [];
+  tagManagerConfirmMessages = [];
+  tagManagerToastErrors = [];
+  tagManagerCloseCount = 0;
   calendarState = {
     calendars: [
       calendar({ id: 'mine', name: 'EP 마일스톤', isPersonal: true }),
@@ -378,6 +400,114 @@ async function loadTagBar(): Promise<TagBarComponent> {
   return bundledTagBar;
 }
 
+async function loadTagManagerPopover(): Promise<TagManagerPopoverComponent> {
+  bundledTagManagerPopover ??= build({
+    entryPoints: ['src/components/calendar/TagManagerPopover.tsx'],
+    bundle: true,
+    format: 'cjs',
+    platform: 'node',
+    target: 'node22',
+    write: false,
+    external: [
+      'react', 'react/jsx-runtime', 'react-dom', 'lucide-react', 'sonner',
+      '@/components/common/ConfirmDialog', '@/stores/useAuthStore', '@/stores/useCalendarStore',
+      '@/types/calendar', '@/utils/glassStyles',
+    ],
+  }).then((result) => {
+    const module = { exports: {} as Record<string, unknown> };
+    const nodeRequire = createRequire(import.meta.url);
+    const react = nodeRequire('react') as Record<string, unknown>;
+    const jsxRuntime = nodeRequire('react/jsx-runtime');
+    const emptyComponent = () => null;
+    const useCalendarStoreMock = Object.assign(
+      (selector: (state: typeof calendarState) => unknown) => selector(calendarState),
+      {
+        getState: () => ({
+          async loadAll() {
+            tagManagerApiCalls.push({ name: 'loadAll', args: [] });
+            if (tagManagerLoadAllFailure) throw new Error('load all failed');
+          },
+        }),
+      },
+    );
+    const evaluate = new Function('require', 'module', 'exports', result.outputFiles[0].text);
+    evaluate((id: string) => {
+      if (id === 'react') {
+        return {
+          ...react,
+          useState(initial: unknown) {
+            const slot = stateCursor++;
+            if (stateSlots[slot] === undefined) {
+              stateSlots[slot] = typeof initial === 'function' ? (initial as () => unknown)() : initial;
+            }
+            return [stateSlots[slot], (next: unknown) => {
+              stateSlots[slot] = typeof next === 'function'
+                ? (next as (value: unknown) => unknown)(stateSlots[slot])
+                : next;
+            }];
+          },
+          useEffect: () => {},
+          useLayoutEffect: () => {},
+          useRef: (initial: unknown) => ({ current: initial }),
+          useCallback: (fn: unknown) => fn,
+          useMemo: (factory: () => unknown) => factory(),
+        };
+      }
+      if (id === 'react/jsx-runtime') return jsxRuntime;
+      if (id === 'react-dom') return { createPortal: (children: ReactNode) => children };
+      if (id === 'lucide-react') {
+        return {
+          Check: emptyComponent, ChevronDown: emptyComponent, ChevronUp: emptyComponent,
+          Pencil: emptyComponent, Plus: emptyComponent, Trash2: emptyComponent, X: emptyComponent,
+        };
+      }
+      if (id === 'sonner') return { toast: { error: (message: string) => tagManagerToastErrors.push(message) } };
+      if (id === '@/components/common/ConfirmDialog') {
+        return {
+          ConfirmDialog: {
+            async show(options: { message: string }) {
+              tagManagerConfirmMessages.push(options.message);
+              return tagManagerConfirmResponses.shift() ?? false;
+            },
+          },
+        };
+      }
+      if (id === '@/stores/useAuthStore') {
+        return {
+          useAuthStore: (selector: (state: { currentUser: TestUser }) => unknown) => selector({ currentUser: settingsCurrentUser }),
+        };
+      }
+      if (id === '@/stores/useCalendarStore') return { useCalendarStore: useCalendarStoreMock };
+      if (id === '@/types/calendar') {
+        return {
+          EVENT_COLORS: [
+            '#6C5CE7', '#74B9FF', '#00B894', '#FDCB6E', '#E17055',
+            '#FF6B6B', '#A29BFE', '#55EFC4', '#FF9FF3', '#48DBFB',
+          ],
+        };
+      }
+      if (id === '@/utils/glassStyles') return { floatingGlassStyle: {} };
+      return nodeRequire(id);
+    }, module, module.exports);
+    Object.assign(globalThis, {
+      document: { body: {}, addEventListener() {}, removeEventListener() {} },
+      window: {
+        innerWidth: 1120,
+        innerHeight: 720,
+        electronAPI: {
+          async calendarTagsSave(...args: unknown[]) {
+            tagManagerApiCalls.push({ name: 'calendarTagsSave', args });
+            if (tagManagerApiFailures.has('calendarTagsSave')) throw new Error('save failed');
+            return [];
+          },
+        },
+      },
+    });
+    return module.exports.TagManagerPopover as TagManagerPopoverComponent;
+  });
+  return bundledTagManagerPopover;
+}
+
 async function loadScheduleView(): Promise<ScheduleViewComponent> {
   bundledScheduleView ??= build({
     entryPoints: ['src/views/ScheduleView.tsx'],
@@ -395,7 +525,7 @@ async function loadScheduleView(): Promise<ScheduleViewComponent> {
       '@/components/calendar/EventCreateModal', '@/components/calendar/WeekScrollView',
       '@/components/calendar/WeekSidebar', '@/components/calendar/DayScrollView',
       '@/components/calendar/DaySidebar', '@/components/calendar/CalendarRail',
-      '@/components/calendar/TagBar', '@/components/calendar/CalendarSettingsModal',
+      '@/components/calendar/TagBar', '@/components/calendar/TagManagerPopover', '@/components/calendar/CalendarSettingsModal',
       '@/hooks/useCalendarDragCreate', '@/stores/useCalendarStore',
       '@/utils/sceneNavigationAction', '@/utils/createUuid', '@/utils/calendarDate',
       '@/utils/calendarEventFilter',
@@ -456,6 +586,14 @@ async function loadScheduleView(): Promise<ScheduleViewComponent> {
         };
       }
       if (id === '@/components/calendar/TagBar') return { TagBar: (props: TagBarProps) => { scheduleTagBarProps.push(props); return jsxRuntime.jsx('div', { children: '태그' }); } };
+      if (id === '@/components/calendar/TagManagerPopover') {
+        return {
+          TagManagerPopover: (props: TagManagerPopoverProps) => {
+            scheduleTagManagerProps.push(props);
+            return jsxRuntime.jsx('div', { 'aria-label': '태그 관리 팝오버 연결됨', children: '태그 관리 팝오버' });
+          },
+        };
+      }
       if (id === '@/components/calendar/CalendarSettingsModal') {
         return {
           CalendarSettingsModal: (props: CalendarSettingsModalProps) => jsxRuntime.jsx('div', {
@@ -698,6 +836,17 @@ async function renderTagBar(vacationConnected: boolean, onOpenTagManager: (ancho
   return resolveComponents(TagBar({ vacationConnected, onOpenTagManager }));
 }
 
+async function renderTagManagerPopover(
+  anchorRect = { left: 940, right: 1028, top: 640, bottom: 668, width: 88, height: 28 } as DOMRect,
+): Promise<ReactNode> {
+  const TagManagerPopover = await loadTagManagerPopover();
+  stateCursor = 0;
+  return resolveComponents(TagManagerPopover({
+    anchorRect,
+    onClose: () => { tagManagerCloseCount += 1; },
+  }));
+}
+
 async function renderScheduleView(): Promise<ReactNode> {
   const ScheduleView = await loadScheduleView();
   stateCursor = 0;
@@ -812,6 +961,118 @@ test('TagBar independently toggles tags, resets every chip, and forwards the cli
   assert.deepEqual(openedAnchors, [anchor], 'tag manager receives the clicked button rectangle instead of querying the document');
 });
 
+test('TagManagerPopover lets admins edit, reorder, and add tags with canonical full-list saves', async (t) => {
+  await t.test('editing one row sends every tag in the visible order and reloads', async () => {
+    resetHarness();
+    let tree = await renderTagManagerPopover();
+    const initialText = textContent(tree);
+    assert.ok(initialText.indexOf('검수') < initialText.indexOf('회의'), 'saved sort order controls the row order');
+    assert.match(initialText, /휴가는 자동 태그라 여기서 바꿀 수 없어요/);
+    assert.equal(initialText.match(/휴가/g)?.length, 1, 'vacation is guidance, not a managed tag row');
+
+    buttonByLabel(tree, '회의 태그 편집').props.onClick?.();
+    tree = await renderTagManagerPopover();
+    formElementByLabel(tree, '회의 태그 이름').props.onChange?.({ target: { value: '회의록', checked: false } });
+    tree = await renderTagManagerPopover();
+    await buttonByLabel(tree, '회의 태그 저장').props.onClick?.();
+
+    assert.deepEqual(tagManagerApiCalls.map((call) => call.name), ['calendarTagsSave', 'loadAll']);
+    assert.deepEqual(tagManagerApiCalls[0].args, [[
+      { id: 'tag-review', name: '검수', color: '#00B894', sort_order: 0 },
+      { id: 'tag-meeting', name: '회의록', color: '#FDCB6E', sort_order: 1 },
+    ]]);
+    assert.equal(tagManagerCloseCount, 0, 'row saves keep the manager open');
+  });
+
+  await t.test('reordering renumbers the canonical payload', async () => {
+    resetHarness();
+    const tree = await renderTagManagerPopover();
+    assert.equal(buttonByLabel(tree, '검수 태그 위로').props.disabled, true);
+    await buttonByLabel(tree, '회의 태그 위로').props.onClick?.();
+
+    assert.deepEqual(tagManagerApiCalls.map((call) => call.name), ['calendarTagsSave', 'loadAll']);
+    assert.deepEqual(tagManagerApiCalls[0].args, [[
+      { id: 'tag-meeting', name: '회의', color: '#FDCB6E', sort_order: 0 },
+      { id: 'tag-review', name: '검수', color: '#00B894', sort_order: 1 },
+    ]]);
+  });
+
+  await t.test('adding a row omits a fake id and preserves the selected preset color', async () => {
+    resetHarness();
+    let tree = await renderTagManagerPopover();
+    buttonByText(tree, '새 태그').props.onClick?.();
+    tree = await renderTagManagerPopover();
+    formElementByLabel(tree, '새 태그 이름').props.onChange?.({ target: { value: '리뷰', checked: false } });
+    tree = await renderTagManagerPopover();
+    buttonByLabel(tree, '#E17055 태그 색상').props.onClick?.();
+    tree = await renderTagManagerPopover();
+    await buttonByLabel(tree, '새 태그 저장').props.onClick?.();
+
+    assert.deepEqual(tagManagerApiCalls.map((call) => call.name), ['calendarTagsSave', 'loadAll']);
+    assert.deepEqual(tagManagerApiCalls[0].args, [[
+      { id: 'tag-review', name: '검수', color: '#00B894', sort_order: 0 },
+      { id: 'tag-meeting', name: '회의', color: '#FDCB6E', sort_order: 1 },
+      { name: '리뷰', color: '#E17055', sort_order: 2 },
+    ]]);
+  });
+});
+
+test('TagManagerPopover confirms deletion and reloads after both successful and failed saves', async (t) => {
+  await t.test('cancel is inert, while confirmation deletes from the canonical list', async () => {
+    resetHarness();
+    tagManagerConfirmResponses = [false, true];
+    const tree = await renderTagManagerPopover();
+
+    await buttonByLabel(tree, '회의 태그 삭제').props.onClick?.();
+    assert.deepEqual(tagManagerApiCalls, []);
+    await buttonByLabel(tree, '회의 태그 삭제').props.onClick?.();
+
+    assert.equal(tagManagerConfirmMessages[0], "이 태그를 쓰는 일정은 '태그 없음'으로 바뀌어요");
+    assert.deepEqual(tagManagerApiCalls.map((call) => call.name), ['calendarTagsSave', 'loadAll']);
+    assert.deepEqual(tagManagerApiCalls[0].args, [[
+      { id: 'tag-review', name: '검수', color: '#00B894', sort_order: 0 },
+    ]]);
+  });
+
+  await t.test('save failure still reloads, reports the error, and keeps the popover open', async () => {
+    resetHarness();
+    tagManagerApiFailures.add('calendarTagsSave');
+    const tree = await renderTagManagerPopover();
+    await buttonByLabel(tree, '회의 태그 위로').props.onClick?.();
+
+    assert.deepEqual(tagManagerApiCalls.map((call) => call.name), ['calendarTagsSave', 'loadAll']);
+    assert.equal(tagManagerToastErrors.length, 1);
+    assert.equal(tagManagerCloseCount, 0);
+  });
+
+  await t.test('canonical reload failure also reports failure without closing', async () => {
+    resetHarness();
+    tagManagerLoadAllFailure = true;
+    const tree = await renderTagManagerPopover();
+    await buttonByLabel(tree, '회의 태그 위로').props.onClick?.();
+
+    assert.deepEqual(tagManagerApiCalls.map((call) => call.name), ['calendarTagsSave', 'loadAll']);
+    assert.equal(tagManagerToastErrors.length, 1);
+    assert.equal(tagManagerCloseCount, 0);
+  });
+});
+
+test('TagManagerPopover gives non-admins the same tag list as a read-only view', async () => {
+  resetHarness();
+  settingsCurrentUser = { ...settingsCurrentUser, role: 'user' };
+  const tree = await renderTagManagerPopover();
+  const renderedText = textContent(tree);
+
+  assert.match(renderedText, /태그 관리/);
+  assert.match(renderedText, /관리자만 편집/);
+  assert.match(renderedText, /검수/);
+  assert.match(renderedText, /회의/);
+  assert.doesNotMatch(renderedText, /새 태그/);
+  for (const forbidden of ['검수 태그 편집', '검수 태그 삭제', '검수 태그 아래로']) {
+    assert.equal(findButtons(tree).some((button) => button.props['aria-label'] === forbidden), false);
+  }
+});
+
 test('ScheduleView replaces legacy controls with the tag bar and reports visible rail calendars', async () => {
   resetHarness();
   const tree = await renderScheduleView();
@@ -824,6 +1085,17 @@ test('ScheduleView replaces legacy controls with the tag bar and reports visible
   assert.equal(typeof scheduleTagBarProps[0].onOpenTagManager, 'function', 'ScheduleView keeps the tag manager anchoring callback wired');
   assert.ok(labels.includes('일정'), 'the creation action uses the shared calendar wording');
   assert.match(textContent(tree), /이번 달 0개.*오늘 0개.*켜진 캘린더 4\/4/, 'statistics describe the filtered view and rail visibility instead of total and vacation counts');
+});
+
+test('ScheduleView opens TagManagerPopover with the exact TagBar anchor', async () => {
+  resetHarness();
+  let tree = await renderScheduleView();
+  const anchor = { left: 111, right: 207, top: 52, bottom: 80, width: 96, height: 28 } as DOMRect;
+  scheduleTagBarProps[0].onOpenTagManager(anchor);
+  tree = await renderScheduleView();
+
+  assert.ok(nodeByAriaLabel(tree, '태그 관리 팝오버 연결됨'));
+  assert.deepEqual(scheduleTagManagerProps.at(-1)?.anchorRect, anchor);
 });
 
 test('ScheduleView opens calendar settings from both rail entry points', async () => {
