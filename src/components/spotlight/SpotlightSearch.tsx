@@ -111,7 +111,19 @@ export function SpotlightSearch() {
   const episodeTitles = useDataStore((s) => s.episodeTitles);
   const epName = (ep: Episode) => episodeTitles[ep.episodeNumber] || ep.title;
   const [calEvents, setCalEvents] = useState<CalendarEvent[]>([]);
-  useEffect(() => { getEvents().then(setCalEvents); }, []);
+  useEffect(() => {
+    let cancelled = false;
+    const refresh = async () => {
+      const canonicalEvents = await getEvents();
+      if (!cancelled) setCalEvents(canonicalEvents);
+    };
+    void refresh();
+    window.addEventListener('bflow:calendar-changed', refresh);
+    return () => {
+      cancelled = true;
+      window.removeEventListener('bflow:calendar-changed', refresh);
+    };
+  }, []);
   const episodeMemos = useDataStore((s) => s.episodeMemos);
   const characters = useCharacterBoardStore((s) => s.characters);
   const characterCostumesByCharacter = useCharacterBoardStore((s) => s.byCharacter);

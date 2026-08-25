@@ -1827,6 +1827,8 @@ test('an older default sync cannot overwrite or rebroadcast a newer B flow load'
   const secondStarted = deferred<void>();
   let listCallCount = 0;
   const harness = await createHarness({
+    currentUserId: 'user-1',
+    calendarList: async () => [personalCalendar('user-1')],
     fullSync: async () => [],
     bflowEventsList: async () => {
       listCallCount += 1;
@@ -1874,6 +1876,8 @@ test('a newer syncAll B flow load wins against an older standalone load without 
   const olderStarted = deferred<void>();
   let listCalls = 0;
   const harness = await createHarness({
+    currentUserId: 'user-1',
+    calendarList: async () => [personalCalendar('user-1')],
     fullSync: async () => [],
     bflowEventsList: async () => {
       listCalls += 1;
@@ -2649,6 +2653,67 @@ test('a clean-session metadata failure defers event mapping until a later metada
       isReadOnly: false,
     });
     assert.equal(harness.broadcasts.length, 1);
+  } finally {
+    console.warn = originalWarn;
+    harness.restore();
+  }
+});
+
+test('fresh calendar membership revocation removes only inaccessible canonical B flow cache when event refresh fails', async () => {
+  let calendarListCalls = 0;
+  let eventListCalls = 0;
+  const sharedCalendar: BflowCalendarFixture = {
+    ...personalCalendar('owner-user'),
+    id: 'shared-calendar',
+    name: '공유 캘린더',
+    visibility: 'members',
+    is_personal: false,
+    can_manage: false,
+  };
+  const harness = await createHarness({
+    currentUserId: 'user-a',
+    calendarList: async () => {
+      calendarListCalls += 1;
+      return calendarListCalls === 1
+        ? [personalCalendar('user-a'), sharedCalendar]
+        : [personalCalendar('user-a')];
+    },
+    bflowEventsList: async () => {
+      eventListCalls += 1;
+      if (eventListCalls === 1) {
+        return [
+          bflowEvent('personal-event', '내 일정'),
+          { ...bflowEvent('revoked-event', '회수된 민감 일정'), calendar_id: 'shared-calendar' },
+        ];
+      }
+      throw new Error('event list temporary outage after membership revocation');
+    },
+    readPrivateEvents: async () => [legacyPrivateEvent('legacy-private-event', 'user-a')],
+    personalCalendarId: 'primary',
+    fullSync: async () => [googleEvent('google-event', '구글 일정')],
+  });
+  const originalWarn = console.warn;
+  try {
+    await harness.service.loadBflowEvents();
+    await harness.service.syncAll({ skipBflowLoad: true });
+    assert.deepEqual(
+      (await harness.service.getEvents()).map(({ id }) => id),
+      ['personal-event', 'revoked-event', 'legacy-private-event', 'google-event'],
+    );
+
+    console.warn = () => {};
+    await harness.service.loadBflowEvents();
+
+    assert.deepEqual(
+      harness.service.__testUseCalendarStore.getState().calendars.map(({ id }) => id),
+      ['calendar-1'],
+      'the successful metadata response is authoritative even when the following event request fails',
+    );
+    assert.deepEqual(
+      (await harness.service.getEvents()).map(({ id }) => id),
+      ['personal-event', 'legacy-private-event', 'google-event'],
+      'revoked canonical rows are removed while legacy-private and Google caches remain visible',
+    );
   } finally {
     console.warn = originalWarn;
     harness.restore();
@@ -5308,6 +5373,8 @@ test('a stale default sync cannot replace the latest legacy-copy tracking used b
 
 test('syncAll broadcast false suppresses both B flow and Google change broadcasts', async () => {
   const harness = await createHarness({
+    currentUserId: 'user-1',
+    calendarList: async () => [personalCalendar('user-1')],
     fullSync: async () => [],
     bflowEventsList: async () => [bflowEvent('quiet-bflow', '알림 없이 반영할 일정')],
   });

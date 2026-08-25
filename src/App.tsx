@@ -115,6 +115,94 @@ class LazyErrorBoundary extends Component<{ children: ReactNode; name: string },
   }
 }
 
+const SHARED_BFLOW_CALENDAR_TABLES = new Set([
+  'calendars',
+  'calendar_members',
+  'calendar_events',
+  'calendar_tags',
+]);
+const SHARED_BFLOW_CALENDAR_ACTIONS = new Set(['INSERT', 'UPDATE', 'DELETE']);
+
+function sharedBflowCalendarChangeDetail(raw: unknown): unknown | null {
+  if (!raw || typeof raw !== 'object') return null;
+  const value = raw as { event?: unknown; payload?: unknown; table?: unknown; action?: unknown };
+  if (value.event === 'local-calendar-changed') {
+    return value.payload ?? { action: 'local-refresh' };
+  }
+  if (
+    typeof value.table === 'string'
+    && SHARED_BFLOW_CALENDAR_TABLES.has(value.table)
+  ) return raw;
+  if (value.event === 'data-change' && value.payload && typeof value.payload === 'object') {
+    const payload = value.payload as { table?: unknown };
+    if (typeof payload.table === 'string' && SHARED_BFLOW_CALENDAR_TABLES.has(payload.table)) {
+      return value.payload;
+    }
+  }
+  const detail = value.event === 'calendar-changed' ? value.payload : raw;
+  if (!detail || typeof detail !== 'object') return null;
+  const action = (detail as { action?: unknown }).action;
+  return typeof action === 'string' && SHARED_BFLOW_CALENDAR_ACTIONS.has(action)
+    ? detail
+    : null;
+}
+
+let appSharedCalendarRefreshFlight: Promise<void> | null = null;
+let appSharedCalendarRefreshPhase: 'idle' | 'scheduled' | 'loading' = 'idle';
+let appSharedCalendarRefreshAgain = false;
+let appSharedCalendarRefreshDetail: unknown = null;
+
+async function enqueueAppSharedCalendarRefresh(detail: unknown): Promise<void> {
+  appSharedCalendarRefreshDetail = detail;
+  if (appSharedCalendarRefreshFlight) {
+    // 최초 signal과 짝을 이루는 calendar-changed는 시작 전에는 한 번으로 합치고,
+    // 실제 조회 중 도착한 별도 변경은 snapshot 유실을 막기 위해 한 번 더 읽는다.
+    if (appSharedCalendarRefreshPhase === 'loading') appSharedCalendarRefreshAgain = true;
+    return appSharedCalendarRefreshFlight;
+  }
+
+  const run = async () => {
+    appSharedCalendarRefreshPhase = 'scheduled';
+    await new Promise<void>((resolve) => setTimeout(resolve, 0));
+    while (true) {
+      appSharedCalendarRefreshPhase = 'loading';
+      appSharedCalendarRefreshAgain = false;
+      const refreshDetail = appSharedCalendarRefreshDetail;
+      try {
+        const calendar = await import('@/services/calendarService');
+        await calendar.loadBflowEvents({ broadcast: false });
+      } catch (error) {
+        console.warn('[Calendar] 공유 캘린더 정본 재조회 실패:', error);
+      }
+      if (appSharedCalendarRefreshAgain) {
+        appSharedCalendarRefreshPhase = 'scheduled';
+        await new Promise<void>((resolve) => setTimeout(resolve, 0));
+        continue;
+      }
+      window.dispatchEvent(new CustomEvent('bflow:calendar-changed', { detail: refreshDetail }));
+      return;
+    }
+  };
+
+  const ownedFlight = run().finally(() => {
+    if (appSharedCalendarRefreshFlight === ownedFlight) {
+      appSharedCalendarRefreshFlight = null;
+      appSharedCalendarRefreshPhase = 'idle';
+      appSharedCalendarRefreshAgain = false;
+    }
+  });
+  appSharedCalendarRefreshFlight = ownedFlight;
+  return ownedFlight;
+}
+
+/** calendar IPC/Supabase의 일반 공유 캘린더 신호를 정본 cache 재조회로 수렴시킨다. */
+export async function applyIncomingSharedBflowCalendarChangeInApp(raw: unknown): Promise<boolean> {
+  const detail = sharedBflowCalendarChangeDetail(raw);
+  if (!detail) return false;
+  await enqueueAppSharedCalendarRefresh(detail);
+  return true;
+}
+
 function isSceneAssignedToUser<T extends { assignee?: string | null }>(
   scene: T | null | undefined,
   userName: string,
@@ -1396,6 +1484,11 @@ export default function App() {
       const { table, payload } = event;
       console.log(`[App Realtime] 이벤트 수신: table=${table}, type=${payload?.eventType}`);
 
+      if (sharedBflowCalendarChangeDetail(event)) {
+        void applyIncomingSharedBflowCalendarChangeInApp(event);
+        return;
+      }
+
       if (table === 'scene_work_links') {
         useSceneWorkLinkStore.getState().applyRealtime(payload);
         return;
@@ -2232,6 +2325,11 @@ export default function App() {
       if (!data?.event) return;
       console.log(`[App Broadcast] 이벤트 수신: ${data.event}`, data.payload);
 
+      if (sharedBflowCalendarChangeDetail(raw)) {
+        void applyIncomingSharedBflowCalendarChangeInApp(raw);
+        return;
+      }
+
       if (data.event === 'scene-update') {
         // 체크박스 토글 → UUID로 즉시 반영
         const { sceneUuid, stage, value, senderId } = data.payload as { sceneUuid: string; stage: string; value: boolean; senderId?: string };
@@ -2641,6 +2739,13 @@ export default function App() {
   // 무한 루프 방지: 송신자 제외는 메인 프로세스에서 처리됨
   useEffect(() => {
     const cleanup = window.electronAPI?.onCalendarChanged?.((payload) => {
+      const sharedPayload = payload == null
+        ? { event: 'local-calendar-changed', payload }
+        : payload;
+      if (sharedBflowCalendarChangeDetail(sharedPayload)) {
+        void applyIncomingSharedBflowCalendarChangeInApp(sharedPayload);
+        return;
+      }
       const detail = payload && typeof payload === 'object' ? payload as { action?: string } : {};
       const refresh = async () => {
         try {

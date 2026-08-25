@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { readFileSync, unlinkSync, writeFileSync } from 'node:fs';
+import { createRequire } from 'node:module';
 import { join } from 'node:path';
 import test from 'node:test';
 import { build, type Plugin } from 'esbuild';
@@ -3496,3 +3497,226 @@ test('calendar store rejects zero-row create, update, and delete RPC results', a
     else delete globalScope[STORE_HARNESS_KEY];
   }
 });
+
+type SharedCalendarReceiver = (raw: unknown) => Promise<boolean>;
+
+const CALENDAR_RECEIVER_HARNESS_KEY = '__calendarReceiverBehaviorHarness';
+let appCalendarReceiverBundle: Promise<string> | undefined;
+let popupCalendarReceiverBundle: Promise<string> | undefined;
+
+function calendarReceiverTestPlugin(): Plugin {
+  return {
+    name: 'calendar-receiver-test-dependencies',
+    setup(builder) {
+      builder.onResolve({ filter: /^@\/services\/calendarService$/ }, () => ({
+        path: 'calendar-service',
+        namespace: 'calendar-receiver-test',
+      }));
+      builder.onLoad({ filter: /^calendar-service$/, namespace: 'calendar-receiver-test' }, () => ({
+        contents: [
+          `const state = () => globalThis.${CALENDAR_RECEIVER_HARNESS_KEY};`,
+          'export const loadBflowEvents = (...args) => state().loadBflowEvents(...args);',
+          'export const applyCommittedGoogleDelete = () => false;',
+          'export const applyCommittedPrivacyReplacementDelete = () => false;',
+          'export const syncAll = async () => [];',
+          'export const syncIncremental = async () => {};',
+        ].join('\n'),
+      }));
+      builder.onResolve({ filter: /^@\/services\/googleCalendarService$/ }, () => ({
+        path: 'google-calendar-service',
+        namespace: 'calendar-receiver-test',
+      }));
+      builder.onLoad({ filter: /^google-calendar-service$/, namespace: 'calendar-receiver-test' }, () => ({
+        contents: 'export const isAuthenticated = async () => false;',
+      }));
+    },
+  };
+}
+
+async function bundledCalendarReceiverSource(entryPoint: 'src/App.tsx' | 'src/views/WidgetPopup.tsx') {
+  const cache = entryPoint === 'src/App.tsx' ? appCalendarReceiverBundle : popupCalendarReceiverBundle;
+  if (cache) return cache;
+  const pending = build({
+    entryPoints: [entryPoint],
+    bundle: true,
+    format: 'cjs',
+    platform: 'node',
+    target: 'node22',
+    write: false,
+    packages: 'external',
+    external: ['@/*', '*.css'],
+    plugins: [calendarReceiverTestPlugin()],
+  }).then((result) => result.outputFiles[0].text);
+  if (entryPoint === 'src/App.tsx') appCalendarReceiverBundle = pending;
+  else popupCalendarReceiverBundle = pending;
+  return pending;
+}
+
+async function loadSharedCalendarReceiver(
+  entryPoint: 'src/App.tsx' | 'src/views/WidgetPopup.tsx',
+  exportName: string,
+  loadBflowEvents: (options?: Record<string, unknown>) => Promise<boolean>,
+): Promise<SharedCalendarReceiver | undefined> {
+  const source = await bundledCalendarReceiverSource(entryPoint);
+  (globalThis as Record<string, unknown>)[CALENDAR_RECEIVER_HARNESS_KEY] = { loadBflowEvents };
+  const module = { exports: {} as Record<string, unknown> };
+  const nodeRequire = createRequire(import.meta.url);
+  const noop = () => undefined;
+  const mockExport = new Proxy(noop, {
+    get: (_target, key) => (key === '__esModule' ? true : mockExport),
+  });
+  const mockModule = new Proxy({ __esModule: true } as Record<string, unknown>, {
+    get: (_target, key) => (key === '__esModule' ? true : mockExport),
+  });
+  const runtimeRequire = (id: string): unknown => {
+    if (id === 'react' || id === 'react/jsx-runtime' || id === 'react-dom') {
+      return nodeRequire(id);
+    }
+    return mockModule;
+  };
+  const evaluate = new Function('require', 'module', 'exports', source);
+  evaluate(runtimeRequire, module, module.exports);
+  return module.exports[exportName] as SharedCalendarReceiver | undefined;
+}
+
+async function withCalendarReceiverWindow(
+  run: (order: string[], received: unknown[]) => Promise<void>,
+): Promise<void> {
+  const globalScope = globalThis as Record<string, unknown>;
+  const previousHarness = {
+    exists: Object.prototype.hasOwnProperty.call(globalScope, CALENDAR_RECEIVER_HARNESS_KEY),
+    value: globalScope[CALENDAR_RECEIVER_HARNESS_KEY],
+  };
+  const previousWindow = {
+    exists: Object.prototype.hasOwnProperty.call(globalScope, 'window'),
+    value: globalScope.window,
+  };
+  const previousCustomEvent = {
+    exists: Object.prototype.hasOwnProperty.call(globalScope, 'CustomEvent'),
+    value: globalScope.CustomEvent,
+  };
+  const order: string[] = [];
+  const received: unknown[] = [];
+  const receiverWindow = new EventTarget();
+  receiverWindow.addEventListener('bflow:calendar-changed', (event) => {
+    order.push('ui-refresh');
+    received.push((event as Event & { detail?: unknown }).detail);
+  });
+  globalScope.window = receiverWindow;
+  globalScope.CustomEvent = class extends Event {
+    detail: unknown;
+    constructor(type: string, init?: { detail?: unknown }) {
+      super(type);
+      this.detail = init?.detail;
+    }
+  };
+  try {
+    await run(order, received);
+  } finally {
+    if (previousWindow.exists) globalScope.window = previousWindow.value;
+    else delete globalScope.window;
+    if (previousCustomEvent.exists) globalScope.CustomEvent = previousCustomEvent.value;
+    else delete globalScope.CustomEvent;
+    if (previousHarness.exists) globalScope[CALENDAR_RECEIVER_HARNESS_KEY] = previousHarness.value;
+    else delete globalScope[CALENDAR_RECEIVER_HARNESS_KEY];
+  }
+}
+
+for (const receiver of [
+  {
+    label: 'main',
+    entryPoint: 'src/App.tsx' as const,
+    exportName: 'applyIncomingSharedBflowCalendarChangeInApp',
+  },
+  {
+    label: 'popup',
+    entryPoint: 'src/views/WidgetPopup.tsx' as const,
+    exportName: 'applyIncomingSharedBflowCalendarChangeInPopup',
+  },
+]) {
+  test(`${receiver.label} receiver reloads canonical B flow rows before refreshing shared-calendar UI`, async () => {
+    await withCalendarReceiverWindow(async (order, received) => {
+      const loadGate = deferred<void>();
+      const loadStarted = deferred<void>();
+      const loadOptions: Array<Record<string, unknown> | undefined> = [];
+      const handler = await loadSharedCalendarReceiver(
+        receiver.entryPoint,
+        receiver.exportName,
+        async (options) => {
+          loadOptions.push(options);
+          order.push('canonical-load');
+          loadStarted.resolve(undefined);
+          await loadGate.promise;
+          return true;
+        },
+      );
+      assert.ok(handler, `${receiver.label} must expose the receiver used by its subscriptions`);
+
+      const memberChange = {
+        event: 'data-change',
+        payload: { table: 'calendar_members', action: 'UPDATE', ts: 1 },
+      };
+      const genericCalendarChange = {
+        event: 'calendar-changed',
+        payload: { action: 'UPDATE', ts: 2 },
+      };
+      const first = handler(memberChange);
+      const duplicate = handler(genericCalendarChange);
+      const localWindowSignal = handler({ event: 'local-calendar-changed', payload: undefined });
+      await loadStarted.promise;
+
+      assert.deepEqual(order, ['canonical-load'], 'UI subscribers must wait for canonical rows');
+      assert.deepEqual(loadOptions, [{ broadcast: false }], 'receiver reload must not rebroadcast');
+
+      loadGate.resolve(undefined);
+      assert.deepEqual(await Promise.all([first, duplicate, localWindowSignal]), [true, true, true]);
+      assert.deepEqual(order, ['canonical-load', 'ui-refresh']);
+      assert.equal(received.length, 1, 'paired data/calendar signals are coalesced into one UI refresh');
+    });
+  });
+
+  test(`${receiver.label} receiver reruns when a newer shared-calendar signal arrives during the canonical read`, async () => {
+    await withCalendarReceiverWindow(async (order, received) => {
+      const firstGate = deferred<void>();
+      const secondGate = deferred<void>();
+      const firstStarted = deferred<void>();
+      const secondStarted = deferred<void>();
+      let loads = 0;
+      const handler = await loadSharedCalendarReceiver(
+        receiver.entryPoint,
+        receiver.exportName,
+        async () => {
+          loads += 1;
+          order.push(`canonical-load-${loads}`);
+          if (loads === 1) {
+            firstStarted.resolve(undefined);
+            await firstGate.promise;
+          } else {
+            secondStarted.resolve(undefined);
+            await secondGate.promise;
+          }
+          return true;
+        },
+      );
+      assert.ok(handler);
+
+      const first = handler({ table: 'calendars', payload: { eventType: 'UPDATE' } });
+      await firstStarted.promise;
+      const newer = handler({ table: 'calendar_members', payload: { eventType: 'UPDATE' } });
+      firstGate.resolve(undefined);
+      await secondStarted.promise;
+
+      assert.deepEqual(
+        order,
+        ['canonical-load-1', 'canonical-load-2'],
+        'the stale read must not refresh UI before the queued canonical reread',
+      );
+      assert.deepEqual(received, []);
+
+      secondGate.resolve(undefined);
+      assert.deepEqual(await Promise.all([first, newer]), [true, true]);
+      assert.deepEqual(order, ['canonical-load-1', 'canonical-load-2', 'ui-refresh']);
+      assert.equal(received.length, 1);
+    });
+  });
+}

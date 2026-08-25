@@ -1367,11 +1367,11 @@ $$;
 COMMENT ON FUNCTION public.update_user_authorized(TEXT, TEXT, JSONB) IS
   'actor와 target users 행을 정렬 잠금하고 현재 admin만 비밀번호 제외 allow-list 필드를 수정.';
 
--- ── 6) Realtime publication 4개 (재실행 시 duplicate_object 흡수) ──
+-- ── 6) Realtime publication 5개 (재실행 시 duplicate_object 흡수) ──
 DO $$
 DECLARE t TEXT;
 BEGIN
-  FOREACH t IN ARRAY ARRAY['calendars','calendar_members','calendar_events','calendar_notifications'] LOOP
+  FOREACH t IN ARRAY ARRAY['calendars','calendar_members','calendar_events','calendar_tags','calendar_notifications'] LOOP
     BEGIN
       EXECUTE format('ALTER PUBLICATION supabase_realtime ADD TABLE %I', t);
     EXCEPTION WHEN duplicate_object THEN NULL;

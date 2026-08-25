@@ -7,6 +7,8 @@ export interface CalendarFilterState {
   visibleCalendarIds: Readonly<Record<string, boolean>>;
   enabledTagIds: Readonly<Record<string, boolean>>;
   googleVisible: boolean;
+  /** 캘린더 메타데이터가 한 번 성공한 후 현재 사용자가 열람할 수 있는 B flow 캘린더 id. */
+  knownCalendarIds?: ReadonlySet<string>;
   /** calendarId 가 없던 private_calendar_events 행을 현재 개인 캘린더 토글에 연결한다. */
   personalCalendarId?: string;
 }
@@ -38,6 +40,7 @@ export function filterCalendarEvents(
     if (source === 'google') return state.googleVisible;
     const calendarId = ev.calendarId
       ?? (isLegacyPrivateBflowEvent(ev) ? state.personalCalendarId : undefined);
+    if (ev.calendarId && state.knownCalendarIds && !state.knownCalendarIds.has(ev.calendarId)) return false;
     if (calendarId && state.visibleCalendarIds[calendarId] === false) return false;
     if (ev.tagId && state.enabledTagIds[ev.tagId] === false) return false;
     return true;

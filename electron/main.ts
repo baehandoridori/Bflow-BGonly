@@ -22,7 +22,10 @@ import { registerFontProtocol, registerFontIpcHandlers } from './fontIpc';
 import { registerCalendarIpc } from './calendarIpc';
 import {
   broadcastCommittedCalendarDeleteToWindows,
+  broadcastSharedCalendarSignalToWindows,
+  broadcastTrustedSharedCalendarChangeToWindows,
   isCommittedCalendarDeleteMarker,
+  isSharedCalendarBroadcastSignal,
   relayIncomingCommittedCalendarDeleteToWindows,
 } from './calendarWindowFanout';
 import { deleteGoogleEventWithCommittedMarker } from './googleCalendarDeleteBoundary';
@@ -1306,7 +1309,7 @@ ipcMain.handle('whiteboard:write-shared', async (_event, data: unknown) => {
 
 // ─── IPC 핸들러: Supabase ────────────────────────────────────
 
-import { setupBroadcast, broadcastSceneUpdate, broadcastSceneFieldUpdate, broadcastDataChange, broadcastActingFeedbackRequest, broadcastSceneAssignmentNotification, broadcastRetakeAssigneeCompletion, broadcastCalendarCommittedDelete } from './broadcast';
+import { setupBroadcast, broadcastSceneUpdate, broadcastSceneFieldUpdate, broadcastDataChange, broadcastActingFeedbackRequest, broadcastSceneAssignmentNotification, broadcastRetakeAssigneeCompletion, broadcastCalendarCommittedDelete, setCalendarChangedLocalListener } from './broadcast';
 import type { FeedbackBroadcastPayload, RetakeAssigneeCompletionBroadcastPayload } from './broadcast';
 import {
   testConnection as supabaseTestConnection,
@@ -2463,6 +2466,14 @@ registerLegacyPrivateEventIpc(ipcMain, {
   deleteEvent: (eventId) => sbDeletePrivateEvent(eventId),
 });
 
+setCalendarChangedLocalListener((payload) => {
+  broadcastTrustedSharedCalendarChangeToWindows(
+    mainWindow,
+    widgetWindows.values(),
+    payload,
+  );
+});
+
 registerCalendarIpc({
   getSessionUserIdOrThrow,
   createLegacyPrivateEvent: (input, actorId) => sbAddPrivateEvent({
@@ -3099,6 +3110,7 @@ function startSupabaseRealtime() {
     onRevisionSetChange: (payload) => broadcastSupabaseEvent('comp_revision_sets', payload),
     onEpisodeChange: (payload) => broadcastSupabaseEvent('episodes', payload),
     onPartChange: (payload) => broadcastSupabaseEvent('parts', payload),
+    onCalendarChange: (table, payload) => broadcastSupabaseCalendarEvent(table, payload),
     onSceneWorkLinkChange: (payload) => {
       broadcastSupabaseEvent('scene_work_links', payload);
       // 프레즌스 basename→씬 매칭에 쓰는 캐시를 최신화(전체 재로드) 후 재평가.
@@ -3147,6 +3159,15 @@ function startSupabaseRealtime() {
       widgetWindows.values(),
     )) return;
     const broadcastEvent = { event, payload };
+    if (isSharedCalendarBroadcastSignal(event, payload)) {
+      broadcastSharedCalendarSignalToWindows(
+        'supabase:broadcast-event',
+        mainWindow,
+        widgetWindows.values(),
+        broadcastEvent,
+      );
+      return;
+    }
     if (mainWindow && !mainWindow.isDestroyed()) {
       mainWindow.webContents.send('supabase:broadcast-event', broadcastEvent);
     }
@@ -3274,6 +3295,16 @@ function broadcastSupabaseEvent(table: string, payload: unknown) {
   for (const win of widgetWindows.values()) {
     if (!win.isDestroyed()) win.webContents.send('supabase:realtime-event', event);
   }
+}
+
+function broadcastSupabaseCalendarEvent(table: string, payload: unknown) {
+  const event = { table, payload };
+  broadcastSharedCalendarSignalToWindows(
+    'supabase:realtime-event',
+    mainWindow,
+    widgetWindows.values(),
+    event,
+  );
 }
 
 // 실시간 편집 프레즌스 스냅샷을 모든 윈도우에 전달.

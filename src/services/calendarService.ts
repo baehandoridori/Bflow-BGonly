@@ -859,7 +859,14 @@ function mutateSourceEvents(
 }
 
 export async function getEvents(): Promise<CalendarEvent[]> {
-  return [...eventCache];
+  const calendarState = useCalendarStore.getState();
+  if (!calendarState.loaded) return [...eventCache];
+  const knownCalendarIds = new Set(calendarState.calendars.map((calendar) => calendar.id));
+  return eventCache.filter((event) => (
+    event.source !== 'bflow'
+    || !event.calendarId
+    || knownCalendarIds.has(event.calendarId)
+  ));
 }
 
 type LoadBflowEventsOptions = {
@@ -993,7 +1000,7 @@ function requestBflowReloadAfterExternalInvalidation(): void {
 }
 
 /** B flow 일정 로드 — 구글 인증 가드 밖에서 항상 호출된다 (설계서 §6.2 핵심). */
-export async function loadBflowEvents(options: { requireTagsFresh?: boolean } = {}): Promise<boolean> {
+export async function loadBflowEvents(options: LoadBflowEventsOptions = {}): Promise<boolean> {
   return loadBflowEventsInternal(options);
 }
 

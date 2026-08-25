@@ -14,6 +14,7 @@ import { VACATION_COLOR } from '@/types/vacation';
 import { mapVacationEvents } from '@/utils/vacationEvents';
 import { cn } from '@/utils/cn';
 import { navigateToSceneView } from '@/utils/sceneNavigationAction';
+import { hasSameCalendarEventIdentity } from '@/utils/calendarEventIdentity';
 
 /* ────────────────────────────────────────────────
    프로그레스 색상
@@ -292,15 +293,29 @@ function fmtDate(d: Date): string {
 
 function EventGanttChart() {
   const [events, setEvents] = useState<CalendarEvent[]>([]);
+  const [selectedEvent, setSelectedEvent] = useState<CalendarEvent | null>(null);
   const vacationConnected = useAppStore((s) => s.vacationConnected);
 
   useEffect(() => {
-    getEvents().then((result) => {
+    let cancelled = false;
+    const refresh = async () => {
+      const result = await getEvents();
+      if (cancelled) return;
       setEvents((prev) => {
         const vacOnly = prev.filter((e) => e.type === 'vacation');
         return [...result, ...vacOnly];
       });
-    });
+      setSelectedEvent((previous) => {
+        if (!previous || previous.type === 'vacation') return previous;
+        return result.find((event) => hasSameCalendarEventIdentity(event, previous)) ?? null;
+      });
+    };
+    void refresh();
+    window.addEventListener('bflow:calendar-changed', refresh);
+    return () => {
+      cancelled = true;
+      window.removeEventListener('bflow:calendar-changed', refresh);
+    };
   }, []);
 
   // 휴가 이벤트 로드 & 머지
@@ -379,7 +394,6 @@ function EventGanttChart() {
   const totalWidth = totalDays * DAY_WIDTH;
   const LABEL_WIDTH = 160; // 왼쪽 라벨 영역
 
-  const [selectedEvent, setSelectedEvent] = useState<CalendarEvent | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
 
   // 월별 그룹 계산

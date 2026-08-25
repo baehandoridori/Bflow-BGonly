@@ -32,6 +32,7 @@ import { CalendarSettingsModal } from '@/components/calendar/CalendarSettingsMod
 import { useCalendarDragCreate } from '@/hooks/useCalendarDragCreate';
 import { useCalendarStore } from '@/stores/useCalendarStore';
 import { filterCalendarEvents } from '@/utils/calendarEventFilter';
+import { hasSameCalendarEventIdentity } from '@/utils/calendarEventIdentity';
 import { navigateToSceneView } from '@/utils/sceneNavigationAction';
 import { createUuid } from '@/utils/createUuid';
 import { fmtDate, parseDate, addDays } from '@/utils/calendarDate';
@@ -117,11 +118,16 @@ export function ScheduleView() {
   const today = fmtDate(new Date());
   const vacationConnected = useAppStore((s) => s.vacationConnected);
   const calendars = useCalendarStore((state) => state.calendars);
+  const calendarsLoaded = useCalendarStore((state) => state.loaded);
   const tags = useCalendarStore((state) => state.tags);
   const visibleCalendarIds = useCalendarStore((state) => state.visibleCalendarIds);
   const enabledTagIds = useCalendarStore((state) => state.enabledTagIds);
   const googleVisible = visibleCalendarIds[GOOGLE_CALENDAR_ID] !== false;
   const personalCalendarId = calendars.find((calendar) => calendar.isPersonal)?.id;
+  const knownCalendarIds = useMemo(
+    () => (calendarsLoaded ? new Set(calendars.map((calendar) => calendar.id)) : undefined),
+    [calendars, calendarsLoaded],
+  );
 
   useEffect(() => {
     let cancelled = false;
@@ -150,6 +156,25 @@ export function ScheduleView() {
   // 이벤트 로드 + 외부 변경 구독 (할일 위젯 등에서 수정 시 즉시 반영)
   useEffect(() => {
     let cancelled = false;
+    const applyCanonicalEvents = (canonicalEvents: CalendarEvent[]) => {
+      setEvents(canonicalEvents);
+      setPanelEvent((previous) => {
+        if (!previous || previous.source === 'vacation' || previous.type === 'vacation') return previous;
+        return canonicalEvents.find((event) => hasSameCalendarEventIdentity(event, previous)) ?? null;
+      });
+      setQuickEdit((previous) => {
+        if (!previous) return previous;
+        if (previous.event.source === 'vacation' || previous.event.type === 'vacation') return previous;
+        const canonical = canonicalEvents.find((event) => (
+          hasSameCalendarEventIdentity(event, previous.event)
+        ));
+        return canonical ? { ...previous, event: canonical } : null;
+      });
+    };
+    const refresh = async () => {
+      const canonicalEvents = await getEvents();
+      if (!cancelled) applyCanonicalEvents(canonicalEvents);
+    };
     // B flow와 Google 캐시는 별도로 준비된다. B flow 행이 있어도 Google full sync는 필요할 수 있다.
     (async () => {
       await loadBflowEvents();
@@ -162,11 +187,11 @@ export function ScheduleView() {
           }
         } catch { /* GCal 미연결 시 무시 */ }
       }
-      if (!cancelled) getEvents().then(setEvents);
+      await refresh();
     })();
-    const refresh = () => getEvents().then(setEvents);
-    window.addEventListener('bflow:calendar-changed', refresh);
-    return () => { cancelled = true; window.removeEventListener('bflow:calendar-changed', refresh); };
+    const handleCalendarChanged = () => { void refresh(); };
+    window.addEventListener('bflow:calendar-changed', handleCalendarChanged);
+    return () => { cancelled = true; window.removeEventListener('bflow:calendar-changed', handleCalendarChanged); };
   }, []);
 
   // 휴가 이벤트 로드
@@ -187,9 +212,9 @@ export function ScheduleView() {
   const allEvents = useMemo(() => [...events, ...vacationEvents], [events, vacationEvents]);
   const filteredEvents = useMemo(
     () => filterCalendarEvents(allEvents, {
-      visibleCalendarIds, enabledTagIds, googleVisible, personalCalendarId,
+      visibleCalendarIds, enabledTagIds, googleVisible, knownCalendarIds, personalCalendarId,
     }),
-    [allEvents, visibleCalendarIds, enabledTagIds, googleVisible, personalCalendarId],
+    [allEvents, visibleCalendarIds, enabledTagIds, googleVisible, knownCalendarIds, personalCalendarId],
   );
 
   const visibleCalendarCount = useMemo(
@@ -206,6 +231,17 @@ export function ScheduleView() {
     () => Object.fromEntries(calendars.map((calendar) => [calendar.id, calendar.name])),
     [calendars],
   );
+
+  // 권한이 회수되거나 관리 권한이 사라진 캘린더의 설정 모달을 stale 객체로 유지하지 않는다.
+  // create mode의 null sentinel은 캘린더 목록과 무관하므로 그대로 보존한다.
+  useEffect(() => {
+    if (!calendarsLoaded) return;
+    setCalendarSettings((previous) => {
+      if (previous === undefined || previous === null) return previous;
+      const canonical = calendars.find((calendar) => calendar.id === previous.id);
+      return canonical?.canManage ? canonical : undefined;
+    });
+  }, [calendars, calendarsLoaded]);
 
   // 주 데이터 계산 (모든 날짜를 정오로 생성 — parseDate와 일관성 유지)
   const weeks = useMemo(() => {

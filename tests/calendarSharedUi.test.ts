@@ -179,6 +179,7 @@ let tagManagerRefSlots: Array<{ current: unknown }> = [];
 let tagManagerRefCursor = 0;
 let calendarState: {
   calendars: BflowCalendar[];
+  loaded: boolean;
   tags: Array<{ id: string; name: string; color: string; sortOrder: number }>;
   visibleCalendarIds: Record<string, boolean>;
   enabledTagIds: Record<string, boolean>;
@@ -211,6 +212,8 @@ let scheduleUpdateHandler: ((id: string, updates: Partial<ScheduleCalendarEvent>
 let scheduleAddedEvents: ScheduleCalendarEvent[] = [];
 let scheduleGetEventsCalls = 0;
 let schedulePendingEffects: Array<() => void | (() => void)> = [];
+let scheduleMountedEffectCleanups: Array<() => void> = [];
+const scheduleWindowListeners = new Map<string, Set<(event: Event) => void>>();
 let scheduleLoadAllCalls = 0;
 let scheduleLoadBflowEventsCalls = 0;
 let settingsCurrentUser: TestUser;
@@ -401,6 +404,8 @@ function calendar(overrides: Partial<BflowCalendar>): BflowCalendar {
 }
 
 function resetHarness(): void {
+  for (const cleanup of scheduleMountedEffectCleanups.splice(0).reverse()) cleanup();
+  scheduleWindowListeners.clear();
   tagManagerEffectCleanup?.();
   tagManagerEffectCleanup = undefined;
   tagManagerEffectCursor = 0;
@@ -488,6 +493,7 @@ function resetHarness(): void {
   tagManagerRefreshGate = null;
   resolveTagManagerRefreshGate = null;
   calendarState = {
+    loaded: true,
     calendars: [
       calendar({ id: 'mine', name: 'EP 마일스톤', isPersonal: true }),
       calendar({ id: 'team', name: '스튜디오 공지', visibility: 'team', ownerId: 'owner-team' }),
@@ -912,8 +918,14 @@ async function loadScheduleView(): Promise<ScheduleViewComponent> {
     Object.assign(globalThis, {
       document: { addEventListener() {}, removeEventListener() {} },
       window: {
-        addEventListener() {},
-        removeEventListener() {},
+        addEventListener(type: string, listener: (event: Event) => void) {
+          const listeners = scheduleWindowListeners.get(type) ?? new Set();
+          listeners.add(listener);
+          scheduleWindowListeners.set(type, listeners);
+        },
+        removeEventListener(type: string, listener: (event: Event) => void) {
+          scheduleWindowListeners.get(type)?.delete(listener);
+        },
         electronAPI: { async gcalIsAuthenticated() { return false; } },
       },
     });
@@ -1374,13 +1386,18 @@ async function renderScheduleView(): Promise<ReactNode> {
 
 async function flushScheduleMountEffects(): Promise<void> {
   const effects = schedulePendingEffects.splice(0);
-  const cleanups: Array<() => void> = [];
   for (const effect of effects) {
     const cleanup = effect();
-    if (typeof cleanup === 'function') cleanups.push(cleanup);
+    if (typeof cleanup === 'function') scheduleMountedEffectCleanups.push(cleanup);
   }
   await new Promise<void>((resolve) => setImmediate(resolve));
-  for (const cleanup of cleanups.reverse()) cleanup();
+}
+
+async function dispatchScheduleWindowEvent(type: string): Promise<void> {
+  for (const listener of scheduleWindowListeners.get(type) ?? []) {
+    listener({ type } as Event);
+  }
+  await new Promise<void>((resolve) => setImmediate(resolve));
 }
 
 async function renderCalendarGrid(events: ScheduleCalendarEvent[]): Promise<ReactNode> {
@@ -2106,6 +2123,174 @@ test('ScheduleView mount delegates B flow metadata and events through one canoni
 
   assert.equal(scheduleLoadBflowEventsCalls, 1, 'the canonical B flow loader runs exactly once on mount');
   assert.equal(scheduleLoadAllCalls, 0, 'ScheduleView must not start a competing direct metadata generation');
+});
+
+test('ScheduleView calendar-changed listener replaces or closes long-lived event state from the canonical cache', async () => {
+  resetHarness();
+  const stale: ScheduleCalendarEvent = {
+    id: 'revoked-event',
+    title: '회수 전 기밀 일정',
+    memo: '회수 전 기밀 메모',
+    color: '#6C5CE7',
+    type: 'custom',
+    startDate: '2026-08-25',
+    endDate: '2026-08-25',
+    createdBy: 'owner',
+    createdAt: '2026-08-24T00:00:00.000Z',
+    source: 'bflow',
+    sourceCalendarId: 'bflow:revoked-calendar',
+    calendarId: 'revoked-calendar',
+    canEdit: true,
+    isReadOnly: false,
+  };
+  scheduleCanonicalEvents = [stale];
+
+  await renderScheduleView();
+  await flushScheduleMountEffects();
+  await renderScheduleView();
+  scheduleGridProps.at(-1)?.onEventClick(stale);
+  scheduleGridProps.at(-1)?.onEventContextMenu(stale, {
+    preventDefault() {},
+    stopPropagation() {},
+    clientX: 120,
+    clientY: 180,
+  });
+  await renderScheduleView();
+  assert.equal(schedulePanelProps.at(-1)?.event.memo, stale.memo);
+  assert.equal(scheduleQuickEditProps.at(-1)?.event.memo, stale.memo);
+
+  const replacement = { ...stale, title: '정본 교체 일정', memo: '정본 교체 메모', canEdit: false, isReadOnly: true };
+  scheduleCanonicalEvents = [replacement];
+  await dispatchScheduleWindowEvent('bflow:calendar-changed');
+  schedulePanelProps = [];
+  scheduleQuickEditProps = [];
+  await renderScheduleView();
+
+  assert.deepEqual(scheduleGridProps.at(-1)?.events, [replacement]);
+  assert.deepEqual(schedulePanelProps.at(-1)?.event, replacement, 'the open panel follows title, memo and permission changes');
+  assert.deepEqual(scheduleQuickEditProps.at(-1)?.event, replacement, 'the open quick edit follows the same canonical row');
+
+  scheduleCanonicalEvents = [];
+  await dispatchScheduleWindowEvent('bflow:calendar-changed');
+  schedulePanelProps = [];
+  scheduleQuickEditProps = [];
+  await renderScheduleView();
+
+  assert.deepEqual(scheduleGridProps.at(-1)?.events, [], 'the revoked row leaves the visible event list');
+  assert.equal(schedulePanelProps.length, 0, 'the revoked row closes the detail panel');
+  assert.equal(scheduleQuickEditProps.length, 0, 'the revoked row closes quick edit');
+});
+
+test('ScheduleView never replaces open B flow state with a same-id row from another calendar source', async () => {
+  resetHarness();
+  const selected: ScheduleCalendarEvent = {
+    id: 'shared-id',
+    title: '회수 대상 일정',
+    memo: '회수 대상 메모',
+    color: '#6C5CE7',
+    type: 'custom',
+    startDate: '2026-08-25',
+    endDate: '2026-08-25',
+    createdBy: 'owner',
+    createdAt: '2026-08-24T00:00:00.000Z',
+    source: 'bflow',
+    sourceCalendarId: 'bflow:revoked-calendar',
+    calendarId: 'revoked-calendar',
+    canEdit: true,
+    isReadOnly: false,
+  };
+  scheduleCanonicalEvents = [selected];
+  await renderScheduleView();
+  await flushScheduleMountEffects();
+  await renderScheduleView();
+  scheduleGridProps.at(-1)?.onEventClick(selected);
+  scheduleGridProps.at(-1)?.onEventContextMenu(selected, {
+    preventDefault() {},
+    stopPropagation() {},
+    clientX: 100,
+    clientY: 140,
+  });
+  await renderScheduleView();
+
+  const unrelated = {
+    ...selected,
+    title: '다른 캘린더 동일 ID 일정',
+    memo: '노출되면 안 되는 다른 출처 메모',
+    sourceCalendarId: 'bflow:other-calendar',
+    calendarId: 'other-calendar',
+  };
+  scheduleCanonicalEvents = [unrelated];
+  await dispatchScheduleWindowEvent('bflow:calendar-changed');
+  schedulePanelProps = [];
+  scheduleQuickEditProps = [];
+  await renderScheduleView();
+
+  assert.deepEqual(scheduleGridProps.at(-1)?.events, [unrelated], 'the unrelated row remains independently visible');
+  assert.equal(schedulePanelProps.length, 0, 'same id from another B flow calendar closes the old panel');
+  assert.equal(scheduleQuickEditProps.length, 0, 'same id from another B flow calendar closes quick edit');
+});
+
+test('ScheduleView reconciles an open calendar settings modal without closing create mode', async (t) => {
+  await t.test('same-id metadata replaces the stale object and missing or unmanaged rows close the modal', async () => {
+    resetHarness();
+    let tree = await renderScheduleView();
+    buttonByTitle(tree, '사이드바 펼치기').props.onClick?.();
+    tree = await renderScheduleView();
+    buttonByLabel(tree, '레일 캘린더 설정').props.onClick?.();
+    tree = await renderScheduleView();
+    assert.match(textContent(tree), /설정 EP 마일스톤/);
+
+    calendarState.calendars = calendarState.calendars.map((calendar) => (
+      calendar.id === 'mine' ? { ...calendar, name: '정본 개인 캘린더' } : calendar
+    ));
+    await renderScheduleView();
+    await flushScheduleMountEffects();
+    tree = await renderScheduleView();
+    assert.match(textContent(tree), /설정 정본 개인 캘린더/, 'same-id canonical metadata replaces the stale modal object');
+
+    calendarState.calendars = calendarState.calendars.map((calendar) => (
+      calendar.id === 'mine' ? { ...calendar, canManage: false } : calendar
+    ));
+    await renderScheduleView();
+    await flushScheduleMountEffects();
+    tree = await renderScheduleView();
+    assert.equal(
+      findElements(tree, (element) => element.props['aria-label'] === '캘린더 설정 모달').length,
+      0,
+      'loss of manage permission closes the modal',
+    );
+
+    calendarState.calendars = calendarState.calendars.map((calendar) => (
+      calendar.id === 'mine' ? { ...calendar, canManage: true } : calendar
+    ));
+    buttonByLabel(tree, '레일 캘린더 설정').props.onClick?.();
+    await renderScheduleView();
+    calendarState.calendars = calendarState.calendars.filter((calendar) => calendar.id !== 'mine');
+    await renderScheduleView();
+    await flushScheduleMountEffects();
+    tree = await renderScheduleView();
+    assert.equal(
+      findElements(tree, (element) => element.props['aria-label'] === '캘린더 설정 모달').length,
+      0,
+      'a missing canonical row also closes the modal',
+    );
+  });
+
+  await t.test('the null create-mode sentinel survives unrelated calendar list refreshes', async () => {
+    resetHarness();
+    let tree = await renderScheduleView();
+    buttonByTitle(tree, '사이드바 펼치기').props.onClick?.();
+    tree = await renderScheduleView();
+    buttonByLabel(tree, '레일 새 캘린더').props.onClick?.();
+    tree = await renderScheduleView();
+    assert.match(textContent(tree), /새 캘린더 연결됨/);
+
+    calendarState.calendars = [];
+    await renderScheduleView();
+    await flushScheduleMountEffects();
+    tree = await renderScheduleView();
+    assert.match(textContent(tree), /새 캘린더 연결됨/, 'create mode is not mistaken for a revoked existing calendar');
+  });
 });
 
 test('ScheduleView replaces legacy controls with the tag bar and reports visible rail calendars', async () => {

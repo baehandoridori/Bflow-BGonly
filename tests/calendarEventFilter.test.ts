@@ -54,6 +54,58 @@ test('구글 일정은 googleVisible 로만 제어(태그 필터 무관)', () =>
   assert.equal(filterCalendarEvents([g], state({ enabledTagIds: { t1: false } })).length, 1);
 });
 
+test('권한 목록이 한 번 확정되면 알 수 없는 B flow 캘린더 캐시만 숨김', () => {
+  const events = [
+    ev({ id: 'known', calendarId: 'team-cal' }),
+    ev({ id: 'revoked', calendarId: 'revoked-cal' }),
+    ev({
+      id: 'personal-legacy',
+      calendarId: undefined,
+      sourceCalendarId: 'supabase-private',
+      isPrivate: true,
+    }),
+    ev({ id: 'google', source: 'google', calendarId: undefined, sourceCalendarId: 'primary' }),
+    ev({ id: 'vacation', source: 'vacation', type: 'vacation', calendarId: undefined }),
+  ];
+
+  const out = filterCalendarEvents(events, state({
+    personalCalendarId: 'personal-cal',
+    knownCalendarIds: new Set(['personal-cal', 'team-cal']),
+  }));
+
+  assert.deepEqual(
+    out.map((event: { id: string }) => event.id),
+    ['known', 'personal-legacy', 'google', 'vacation'],
+  );
+});
+
+test('캘린더 메타데이터가 아직 확정되지 않은 초기 상태는 캐시를 임의로 숨기지 않음', () => {
+  const cached = ev({ id: 'cached-before-metadata', calendarId: 'not-yet-known' });
+
+  assert.deepEqual(
+    filterCalendarEvents([cached], state()).map((event: { id: string }) => event.id),
+    ['cached-before-metadata'],
+  );
+});
+
+test('프리마이그레이션의 빈 캘린더 목록에서도 레거시 개인 일정은 보존', () => {
+  const events = [
+    ev({ id: 'unknown-canonical', calendarId: 'unknown-calendar' }),
+    ev({
+      id: 'legacy-private',
+      calendarId: undefined,
+      sourceCalendarId: 'supabase-private',
+      isPrivate: true,
+    }),
+  ];
+
+  assert.deepEqual(
+    filterCalendarEvents(events, state({ knownCalendarIds: new Set() }))
+      .map((event: { id: string }) => event.id),
+    ['legacy-private'],
+  );
+});
+
 test('개인 캘린더 off 는 정식 개인 일정과 혼재한 레거시 비공개 일정을 함께 숨김', () => {
   const events = [
     ev({

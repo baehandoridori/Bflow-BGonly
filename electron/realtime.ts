@@ -6,6 +6,18 @@ import { createRetryManager } from './retry-utils';
 // 모든 테이블 변경을 하나의 채널로 구독 (무료 플랜 연결 수 절약)
 
 type ChangePayload = RealtimePostgresChangesPayload<Record<string, unknown>>;
+export type SharedCalendarRealtimeTable =
+  | 'calendars'
+  | 'calendar_members'
+  | 'calendar_events'
+  | 'calendar_tags';
+
+const SHARED_CALENDAR_REALTIME_TABLES: readonly SharedCalendarRealtimeTable[] = [
+  'calendars',
+  'calendar_members',
+  'calendar_events',
+  'calendar_tags',
+];
 
 export interface RealtimeCallbacks {
   onSceneChange: (payload: ChangePayload) => void;
@@ -15,6 +27,7 @@ export interface RealtimeCallbacks {
   onEpisodeChange: (payload: ChangePayload) => void;
   onPartChange: (payload: ChangePayload) => void;
   onSceneWorkLinkChange?: (payload: ChangePayload) => void;
+  onCalendarChange: (table: SharedCalendarRealtimeTable, payload: ChangePayload) => void;
   onActivityInsert: (payload: ChangePayload) => void;
   onStatusChange: (status: string) => void;
   /** Supabase presence sync/join/leave — 전체 presence 상태 스냅샷 전달 */
@@ -127,6 +140,16 @@ function createChannel(callbacks: RealtimeCallbacks): RealtimeChannel {
         callbacks.onActivityInsert(payload);
       },
     );
+  for (const table of SHARED_CALENDAR_REALTIME_TABLES) {
+    built.on(
+      'postgres_changes',
+      { event: '*', schema: 'public', table },
+      (payload) => {
+        console.log(`[Realtime] ${table} 이벤트 수신:`, payload.eventType);
+        callbacks.onCalendarChange(table, payload);
+      },
+    );
+  }
   // presence 는 와일드카드('*') 미지원 → sync/join/leave 3개 이벤트를 개별 구독.
   // 각 이벤트마다 전체 상태를 다시 병합하도록 스냅샷을 넘긴다.
   const emitPresence = () => callbacks.onPresenceSync?.(built.presenceState() as Record<string, unknown[]>);
