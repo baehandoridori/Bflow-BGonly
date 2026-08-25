@@ -879,6 +879,7 @@ export function ScheduleView() {
             initialDate={createDate}
             initialEndDate={createEndDate}
             episodes={episodes}
+            googleAuthenticated={googleAuthenticated}
             onClose={() => { setShowCreate(false); setCreateDate(undefined); setCreateEndDate(undefined); }}
             onSave={handleAddEvent}
           />

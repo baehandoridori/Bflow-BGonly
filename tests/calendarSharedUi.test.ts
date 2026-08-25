@@ -36,13 +36,35 @@ type TagBarProps = {
 
 type TagBarComponent = (props: TagBarProps) => ReactNode;
 type ScheduleViewComponent = () => ReactNode;
+type EventCreateModalProps = {
+  initialDate?: string;
+  initialEndDate?: string;
+  episodes: [];
+  googleAuthenticated: boolean;
+  onClose(): void;
+  onSave(event: Record<string, unknown>): void;
+};
+type EventCreateModalComponent = (props: EventCreateModalProps) => ReactNode;
 
 type ButtonElement = ReactElement<{
   'aria-label'?: string;
   'aria-pressed'?: boolean;
   children?: ReactNode;
+  disabled?: boolean;
+  style?: { background?: string };
   onClick?: (event?: { stopPropagation(): void }) => void;
 }, 'button'>;
+
+type FormElement = ReactElement<{
+  'aria-label'?: string;
+  checked?: boolean;
+  disabled?: boolean;
+  step?: number;
+  type?: string;
+  value?: string;
+  children?: ReactNode;
+  onChange?: (event: { target: { checked: boolean; value: string } }) => void;
+}, 'input' | 'select' | 'textarea'>;
 
 const myUserId = 'user-me';
 let stateSlots: unknown[] = [];
@@ -64,6 +86,7 @@ let appViews: string[] = [];
 let bundledRail: Promise<CalendarRailComponent> | undefined;
 let bundledTagBar: Promise<TagBarComponent> | undefined;
 let bundledScheduleView: Promise<ScheduleViewComponent> | undefined;
+let bundledEventCreateModal: Promise<EventCreateModalComponent> | undefined;
 let scheduleTagBarProps: TagBarProps[] = [];
 
 function resolveComponents(node: ReactNode): ReactNode {
@@ -94,6 +117,22 @@ function findButtons(node: ReactNode): ButtonElement[] {
     ...(node.type === 'button' ? [node as ButtonElement] : []),
     ...findButtons(props.children),
   ];
+}
+
+function findFormElements(node: ReactNode): FormElement[] {
+  if (Array.isArray(node)) return node.flatMap(findFormElements);
+  if (!isValidElement(node)) return [];
+  const props = node.props as { children?: ReactNode };
+  return [
+    ...(['input', 'select', 'textarea'].includes(String(node.type)) ? [node as FormElement] : []),
+    ...findFormElements(props.children),
+  ];
+}
+
+function formElementByLabel(node: ReactNode, label: string): FormElement {
+  const element = findFormElements(node).find((candidate) => candidate.props['aria-label'] === label);
+  assert.ok(element, `form element '${label}' must be rendered`);
+  return element;
 }
 
 function nodeByAriaLabel(node: ReactNode, label: string): ReactElement<{ 'aria-label'?: string }> {
@@ -327,6 +366,64 @@ async function loadScheduleView(): Promise<ScheduleViewComponent> {
   return bundledScheduleView;
 }
 
+async function loadEventCreateModal(): Promise<EventCreateModalComponent> {
+  bundledEventCreateModal ??= build({
+    entryPoints: ['src/components/calendar/EventCreateModal.tsx'],
+    bundle: true,
+    format: 'cjs',
+    platform: 'node',
+    target: 'node22',
+    write: false,
+    external: [
+      'react', 'react/jsx-runtime', 'framer-motion', 'lucide-react',
+      '@/utils/cn', '@/stores/useAuthStore', '@/stores/useDataStore', '@/stores/useAppStore',
+      '@/stores/useCalendarStore', '@/types', '@/types/calendar', '@/utils/calendarDate', '@/utils/glassStyles',
+    ],
+  }).then((result) => {
+    const module = { exports: {} as Record<string, unknown> };
+    const nodeRequire = createRequire(import.meta.url);
+    const react = nodeRequire('react') as Record<string, unknown>;
+    const jsxRuntime = nodeRequire('react/jsx-runtime');
+    const emptyComponent = () => null;
+    const evaluate = new Function('require', 'module', 'exports', result.outputFiles[0].text);
+    evaluate((id: string) => {
+      if (id === 'react') {
+        return {
+          ...react,
+          useState(initial: unknown) {
+            const slot = stateCursor++;
+            if (stateSlots[slot] === undefined) {
+              stateSlots[slot] = typeof initial === 'function' ? (initial as () => unknown)() : initial;
+            }
+            return [stateSlots[slot], (next: unknown) => {
+              stateSlots[slot] = typeof next === 'function'
+                ? (next as (value: unknown) => unknown)(stateSlots[slot])
+                : next;
+            }];
+          },
+          useEffect: () => {},
+          useMemo: (factory: () => unknown) => factory(),
+        };
+      }
+      if (id === 'react/jsx-runtime') return jsxRuntime;
+      if (id === 'framer-motion') return { motion: { div: 'div' } };
+      if (id === 'lucide-react') return { CalendarDays: emptyComponent, X: emptyComponent };
+      if (id === '@/utils/cn') return { cn: (...values: string[]) => values.filter(Boolean).join(' ') };
+      if (id === '@/stores/useAuthStore') return { useAuthStore: (selector: (state: { currentUser: { name: string } }) => unknown) => selector({ currentUser: { name: '배한솔' } }) };
+      if (id === '@/stores/useDataStore') return { useDataStore: (selector: (state: { episodeTitles: {} }) => unknown) => selector({ episodeTitles: {} }) };
+      if (id === '@/stores/useAppStore') return { useAppStore: (selector: (state: { colorMode: string }) => unknown) => selector({ colorMode: 'dark' }) };
+      if (id === '@/stores/useCalendarStore') return { useCalendarStore: (selector: (state: typeof calendarState) => unknown) => selector(calendarState) };
+      if (id === '@/types') return { DEPARTMENT_CONFIGS: {} };
+      if (id === '@/types/calendar') return { EVENT_COLORS: ['#6C5CE7'] };
+      if (id === '@/utils/calendarDate') return { fmtDate: () => '2026-08-25' };
+      if (id === '@/utils/glassStyles') return { floatingGlassStyle: {} };
+      return nodeRequire(id);
+    }, module, module.exports);
+    return module.exports.EventCreateModal as EventCreateModalComponent;
+  });
+  return bundledEventCreateModal;
+}
+
 async function renderRail(isAuthenticated: boolean): Promise<ReactNode> {
   const CalendarRail = await loadRail();
   stateCursor = 0;
@@ -345,6 +442,23 @@ async function renderTagBar(vacationConnected: boolean, onOpenTagManager: (ancho
 async function renderScheduleView(): Promise<ReactNode> {
   const ScheduleView = await loadScheduleView();
   return resolveComponents(ScheduleView());
+}
+
+async function renderEventCreateModal(
+  googleAuthenticated: boolean,
+  onSave: (event: Record<string, unknown>) => void,
+  initialDate = '2026-08-25',
+): Promise<ReactNode> {
+  const EventCreateModal = await loadEventCreateModal();
+  stateCursor = 0;
+  return resolveComponents(EventCreateModal({
+    initialDate,
+    initialEndDate: initialDate,
+    episodes: [],
+    googleAuthenticated,
+    onClose() {},
+    onSave,
+  }));
 }
 
 test('CalendarRail renders four grouped sections and drives visibility, menu permissions, callbacks, and Google settings navigation', async () => {
@@ -429,4 +543,103 @@ test('ScheduleView replaces legacy controls with the tag bar and reports visible
   assert.equal(typeof scheduleTagBarProps[0].onOpenTagManager, 'function', 'ScheduleView keeps the tag manager anchoring callback wired');
   assert.ok(labels.includes('일정'), 'the creation action uses the shared calendar wording');
   assert.match(textContent(tree), /이번 달 0개.*오늘 0개.*켜진 캘린더 4\/4/, 'statistics describe the filtered view and rail visibility instead of total and vacation counts');
+});
+
+test('EventCreateModal shows editable calendars in field order, defaults personal, and removes legacy privacy and color controls', async () => {
+  resetHarness();
+  const tree = await renderEventCreateModal(true, () => {});
+  const calendarSelect = formElementByLabel(tree, '캘린더');
+  const optionText = textContent(calendarSelect);
+
+  assert.equal(calendarSelect.props.value, 'mine', 'the personal calendar is the initial destination');
+  assert.match(optionText, /EP 마일스톤/);
+  assert.match(optionText, /리드 회의/);
+  assert.match(optionText, /내 구글 캘린더/);
+  assert.ok(optionText.endsWith('내 구글 캘린더'), 'Google stays after every editable B flow calendar');
+  assert.doesNotMatch(optionText, /외부 보기/, 'view-only calendars cannot be selected for creation');
+
+  const renderedText = textContent(tree);
+  const fieldLabels = ['캘린더', '제목', '종일', '태그', '연결', '메모'];
+  const fieldPositions = fieldLabels.map((label) => renderedText.indexOf(label));
+  assert.ok(fieldPositions.every((position) => position >= 0), 'every required field is visible');
+  assert.deepEqual(fieldPositions, [...fieldPositions].sort((a, b) => a - b), 'required fields stay in the specified order');
+  assert.match(renderedText, /편집 권한이 있는 캘린더만 보여요/);
+  assert.doesNotMatch(renderedText, /나만 보기/);
+  assert.doesNotMatch(renderedText, /색상/);
+  assert.equal(formElementByLabel(tree, '종일 일정').props.checked, true, 'all-day is enabled by default');
+  assert.equal(findFormElements(tree).some((element) => element.props.type === 'time'), false, 'time fields stay hidden for all-day events');
+  assert.doesNotMatch(renderedText, /팀 전원에게 알림이 가요|이 캘린더 멤버/, 'personal calendars do not show team notification copy');
+});
+
+test('EventCreateModal creates a tagged timed B flow event and rolls an empty end time into the next day', async () => {
+  resetHarness();
+  const saved: Record<string, unknown>[] = [];
+  let tree = await renderEventCreateModal(false, (event) => saved.push(event), '2026-08-31');
+  assert.doesNotMatch(textContent(formElementByLabel(tree, '캘린더')), /내 구글 캘린더/, 'Google is hidden while Task 3.3 reports unauthenticated');
+
+  formElementByLabel(tree, '캘린더').props.onChange?.({ target: { value: 'team', checked: false } });
+  tree = await renderEventCreateModal(false, (event) => saved.push(event), '2026-08-31');
+  assert.match(textContent(tree), /팀 전원에게 알림이 가요/);
+
+  formElementByLabel(tree, '캘린더').props.onChange?.({ target: { value: 'editable-share', checked: false } });
+  tree = await renderEventCreateModal(false, (event) => saved.push(event), '2026-08-31');
+  assert.match(textContent(tree), /이 캘린더 멤버 0명에게 알림이 가요/);
+
+  formElementByLabel(tree, '종일 일정').props.onChange?.({ target: { checked: false, value: '' } });
+  tree = await renderEventCreateModal(false, (event) => saved.push(event), '2026-08-31');
+  assert.deepEqual(
+    findFormElements(tree).filter((element) => element.props.type === 'time').map((element) => element.props.step),
+    [600, 600],
+    'both time controls use ten-minute steps',
+  );
+
+  formElementByLabel(tree, '시작 시각').props.onChange?.({ target: { value: '14:00', checked: false } });
+  tree = await renderEventCreateModal(false, (event) => saved.push(event), '2026-08-31');
+  assert.equal(formElementByLabel(tree, '종료 시각').props.value, '15:00', 'an empty end time defaults to one hour later');
+
+  formElementByLabel(tree, '종료 시각').props.onChange?.({ target: { value: '', checked: false } });
+  tree = await renderEventCreateModal(false, (event) => saved.push(event), '2026-08-31');
+  formElementByLabel(tree, '시작 시각').props.onChange?.({ target: { value: '23:30', checked: false } });
+  tree = await renderEventCreateModal(false, (event) => saved.push(event), '2026-08-31');
+  assert.equal(formElementByLabel(tree, '종료 시각').props.value, '00:30');
+  assert.equal(formElementByLabel(tree, '종료일').props.value, '2026-09-01', 'midnight rollover advances the end date');
+
+  formElementByLabel(tree, '제목').props.onChange?.({ target: { value: '리드 회의', checked: false } });
+  buttonByLabel(tree, '회의 태그').props.onClick?.();
+  tree = await renderEventCreateModal(false, (event) => saved.push(event), '2026-08-31');
+  assert.match(buttonByLabel(tree, '회의 태그').props.style?.background ?? '', /#FDCB6E/, 'the selected tag uses its saved color tint');
+  buttonByText(tree, '만들기').props.onClick?.();
+
+  assert.equal(saved.length, 1);
+  assert.equal(saved[0].calendarId, 'editable-share');
+  assert.equal(saved[0].tagId, 'tag-meeting');
+  assert.equal(saved[0].allDay, false);
+  assert.equal(saved[0].startTime, '23:30');
+  assert.equal(saved[0].endTime, '00:30');
+  assert.equal(saved[0].endDate, '2026-09-01');
+});
+
+test('EventCreateModal routes Google without a calendar ID and clears the disabled team tag choice', async () => {
+  resetHarness();
+  const saved: Record<string, unknown>[] = [];
+  let tree = await renderEventCreateModal(true, (event) => saved.push(event));
+
+  buttonByLabel(tree, '회의 태그').props.onClick?.();
+  tree = await renderEventCreateModal(true, (event) => saved.push(event));
+  formElementByLabel(tree, '캘린더').props.onChange?.({ target: { value: 'google', checked: false } });
+  tree = await renderEventCreateModal(true, (event) => saved.push(event));
+
+  assert.match(textContent(tree), /Google 일정에는 팀 태그를 붙일 수 없어요/);
+  assert.equal(buttonByLabel(tree, '회의 태그').props.disabled, true);
+  assert.equal(buttonByLabel(tree, '검수 태그').props.disabled, true);
+  formElementByLabel(tree, '제목').props.onChange?.({ target: { value: '구글 일정', checked: false } });
+  tree = await renderEventCreateModal(true, (event) => saved.push(event));
+  buttonByText(tree, '만들기').props.onClick?.();
+
+  assert.equal(saved.length, 1);
+  assert.equal(Object.hasOwn(saved[0], 'calendarId'), false, 'Google uses the public route instead of the sentinel as a B flow ID');
+  assert.equal(saved[0].tagId, undefined, 'Google submissions cannot keep an ignored team tag');
+  assert.equal(saved[0].allDay, true);
+  assert.equal(saved[0].startTime, undefined);
+  assert.equal(saved[0].endTime, undefined);
 });

@@ -260,8 +260,14 @@ export function saveGCalSettings(settings: GCalSettings): void {
 function toCalendarEvent(gcalEvent: any, calendarId: string): CalendarEvent {
   const meta = (gcalEvent.extendedProperties?.private || {}) as Partial<BflowEventMeta>;
   const isAllDay = !!gcalEvent.start?.date;
-  const startDate = isAllDay ? gcalEvent.start.date : gcalEvent.start?.dateTime?.slice(0, 10);
-  let endDate = isAllDay ? gcalEvent.end?.date : gcalEvent.end?.dateTime?.slice(0, 10);
+  const timedStart = !isAllDay && gcalEvent.start?.dateTime
+    ? fromRfc3339ToKstFields(gcalEvent.start.dateTime)
+    : undefined;
+  const timedEnd = !isAllDay && gcalEvent.end?.dateTime
+    ? fromRfc3339ToKstFields(gcalEvent.end.dateTime)
+    : undefined;
+  const startDate = isAllDay ? gcalEvent.start.date : timedStart?.date;
+  let endDate = isAllDay ? gcalEvent.end?.date : timedEnd?.date;
 
   // GCal 종일 이벤트는 종료일이 exclusive (3/25~3/26 = 3/25 하루)
   // B flow는 inclusive 종료일을 사용하므로 하루 빼기
@@ -278,6 +284,9 @@ function toCalendarEvent(gcalEvent: any, calendarId: string): CalendarEvent {
     type: (meta.bflow_type as CalendarEventType) || 'custom',
     startDate: startDate || '',
     endDate: endDate || '',
+    allDay: isAllDay,
+    startTime: timedStart?.time,
+    endTime: timedEnd?.time,
     createdBy: gcalEvent.creator?.email || '',
     createdAt: gcalEvent.created || new Date().toISOString(),
     linkedEpisode: meta.bflow_linked_episode ? Number(meta.bflow_linked_episode) : undefined,
@@ -309,6 +318,23 @@ function addOneDay(dateStr: string): string {
   const utc = Date.UTC(y, m - 1, d + 1);
   const r = new Date(utc);
   return `${r.getUTCFullYear()}-${String(r.getUTCMonth() + 1).padStart(2, '0')}-${String(r.getUTCDate()).padStart(2, '0')}`;
+}
+
+function toKstRfc3339(date: string, time: string): string {
+  const normalizedTime = time.length === 5 ? `${time}:00` : time;
+  return `${date}T${normalizedTime}+09:00`;
+}
+
+function fromRfc3339ToKstFields(value: string): { date: string; time: string } {
+  const instant = new Date(value);
+  if (Number.isNaN(instant.getTime())) {
+    return { date: value.slice(0, 10), time: value.slice(11, 16) };
+  }
+  const kst = new Date(instant.getTime() + 9 * 60 * 60 * 1000);
+  return {
+    date: `${kst.getUTCFullYear()}-${String(kst.getUTCMonth() + 1).padStart(2, '0')}-${String(kst.getUTCDate()).padStart(2, '0')}`,
+    time: `${String(kst.getUTCHours()).padStart(2, '0')}:${String(kst.getUTCMinutes()).padStart(2, '0')}`,
+  };
 }
 
 /** B flow CalendarEvent → GCal extendedProperties */
@@ -1582,13 +1608,17 @@ async function addEventInternal(
 
   try {
     // GCal 종일 이벤트 종료일 보정 (B flow inclusive → GCal exclusive)
-    const isAllDay = event.startDate.length === 10;
+    const isAllDay = event.allDay ?? true;
     const gcalEndDate = isAllDay && event.endDate ? addOneDay(event.endDate) : event.endDate;
     const createInput = {
       summary: event.title,
       description: event.memo,
-      startDate: event.startDate,
-      endDate: gcalEndDate,
+      startDate: isAllDay
+        ? event.startDate
+        : toKstRfc3339(event.startDate, event.startTime ?? ''),
+      endDate: isAllDay
+        ? gcalEndDate
+        : toKstRfc3339(event.endDate, event.endTime ?? ''),
       extendedProperties: toBflowMeta(event),
       // 비공개 일정이면 Google Calendar 에 'private' 로 저장 — 도메인 내 다른 사용자에게 숨김
       visibility: event.isPrivate ? 'private' as const : undefined,

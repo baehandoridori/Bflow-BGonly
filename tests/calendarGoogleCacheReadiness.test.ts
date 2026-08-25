@@ -26,6 +26,9 @@ type ServiceModule = {
     type: string;
     startDate: string;
     endDate: string;
+    allDay?: boolean;
+    startTime?: string;
+    endTime?: string;
     linkedPart?: string;
     sourceCalendarId?: string;
     isPrivate?: boolean;
@@ -56,8 +59,8 @@ type GoogleEventFixture = {
   id: string;
   summary: string;
   description?: string;
-  start: { date: string };
-  end: { date: string };
+  start: { date: string } | { dateTime: string };
+  end: { date: string } | { dateTime: string };
   created: string;
   extendedProperties: { private: Record<string, string> };
 };
@@ -139,6 +142,7 @@ type HarnessOptions = {
   updateBflowEvent?: (eventId: string, patch: Record<string, unknown>) => Promise<BflowEventFixture>;
   updateLegacyEvent?: (eventId: string, patch: Record<string, unknown>) => Promise<void>;
   updateGoogleEvent?: (calendarId: string, eventId: string, patch: Record<string, unknown>) => Promise<void>;
+  createGoogleEvent?: (calendarId: string, input: Record<string, unknown>) => Promise<string>;
   deleteBflowEvent?: (eventId: string) => Promise<void>;
   deleteBflowMigrationSource?: (
     eventId: string,
@@ -549,6 +553,10 @@ async function createHarness(
         if (!options.updateGoogleEvent) throw new Error('unexpected gcalUpdateEvent');
         await options.updateGoogleEvent(calendarId, eventId, patch);
       },
+      gcalInsertEvent: async (calendarId: string, input: Record<string, unknown>) => {
+        if (!options.createGoogleEvent) throw new Error('unexpected gcalInsertEvent');
+        return options.createGoogleEvent(calendarId, input);
+      },
       gcalEnsureWatch: async (calendarId: string) => {
         watchedCalendarIds.push(calendarId);
       },
@@ -619,6 +627,77 @@ function calendarEventInput(id: string, title: string): Record<string, unknown> 
     calendarId: 'calendar-1',
   };
 }
+
+test('timed Google create serializes local KST date and time as RFC3339 without changing the all-day route', async () => {
+  const inserts: Array<{ calendarId: string; input: Record<string, unknown> }> = [];
+  const harness = await createHarness({
+    fullSync: async () => [],
+    personalCalendarId: 'primary',
+    createGoogleEvent: async (calendarId, input) => {
+      inserts.push({ calendarId, input });
+      return 'google-timed-1';
+    },
+  });
+  try {
+    await harness.service.addEvent({
+      id: 'local-timed-1',
+      title: '야간 회의',
+      memo: '',
+      color: '#6C5CE7',
+      type: 'custom',
+      startDate: '2026-08-31',
+      endDate: '2026-09-01',
+      allDay: false,
+      startTime: '23:30',
+      endTime: '00:30',
+      createdBy: '배한솔',
+      createdAt: '2026-08-24T00:00:00.000Z',
+    });
+
+    assert.equal(inserts.length, 1);
+    assert.equal(inserts[0].calendarId, 'primary');
+    assert.equal(inserts[0].input.startDate, '2026-08-31T23:30:00+09:00');
+    assert.equal(inserts[0].input.endDate, '2026-09-01T00:30:00+09:00');
+  } finally {
+    harness.restore();
+  }
+});
+
+test('Google sync maps RFC3339 dateTime into timed B flow fields while all-day end dates stay exclusive', async () => {
+  const timed: GoogleEventFixture = {
+    id: 'google-timed-1',
+    summary: '야간 회의',
+    start: { dateTime: '2026-08-31T23:30:00+09:00' },
+    end: { dateTime: '2026-09-01T00:30:00+09:00' },
+    created: '2026-08-24T00:00:00.000Z',
+    extendedProperties: { private: { bflow_type: 'custom' } },
+  };
+  const harness = await createHarness(async () => [timed, googleEvent('google-all-day-1', '종일 일정')]);
+  try {
+    await harness.service.syncAll({ skipBflowLoad: true });
+    const events = await harness.service.getEvents();
+    const timedEvent = events.find((event) => event.id === 'google-timed-1');
+    const allDayEvent = events.find((event) => event.id === 'google-all-day-1');
+
+    assert.deepEqual(timedEvent && {
+      allDay: timedEvent.allDay,
+      startDate: timedEvent.startDate,
+      endDate: timedEvent.endDate,
+      startTime: timedEvent.startTime,
+      endTime: timedEvent.endTime,
+    }, {
+      allDay: false,
+      startDate: '2026-08-31',
+      endDate: '2026-09-01',
+      startTime: '23:30',
+      endTime: '00:30',
+    });
+    assert.equal(allDayEvent?.allDay, true);
+    assert.equal(allDayEvent?.endDate, '2026-08-24', 'Google exclusive end remains B flow inclusive');
+  } finally {
+    harness.restore();
+  }
+});
 
 test('an empty successful Google full sync is tracked independently from B flow event count', async () => {
   const harness = await createHarness(async () => []);
