@@ -4,6 +4,12 @@ import { readFileSync, unlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import test from 'node:test';
 import { build, type Plugin } from 'esbuild';
+import {
+  broadcastCommittedCalendarDeleteToWindows,
+  isCommittedCalendarDeleteMarker,
+  relayIncomingCommittedCalendarDeleteToWindows,
+} from '../electron/calendarWindowFanout.ts';
+import { deleteGoogleEventWithCommittedMarker } from '../electron/googleCalendarDeleteBoundary.ts';
 
 type Handler = (_event: unknown, ...args: unknown[]) => Promise<unknown>;
 
@@ -11,13 +17,22 @@ type IpcHarnessState = {
   handlers: Map<string, Handler>;
   store: Record<string, (...args: unknown[]) => unknown>;
   broadcasts: Array<{ kind: 'data' | 'calendar'; args: unknown[] }>;
+  committedDeleteMarkers: unknown[];
+  broadcastFailure: { data: boolean; calendar: boolean };
 };
 
 type CalendarIpcExternalDeps = {
   createLegacyPrivateEvent?: (input: Record<string, unknown>, actorId: string) => Promise<{ id: string }>;
   deleteLegacyPrivateEvent?: (eventId: string, actorId: string) => Promise<void>;
+  deleteLegacyPrivateSourceEvent?: (
+    eventId: string,
+    actorId: string,
+  ) => Promise<'deleted' | 'missing'>;
+  getLegacyPrivateEventOwner?: (eventId: string) => Promise<string | null>;
   createGoogleEvent?: (calendarId: string, input: unknown, actorId: string) => Promise<string>;
   deleteGoogleEvent?: (calendarId: string, eventId: string, actorId: string) => Promise<void>;
+  getGoogleEvent?: (calendarId: string, eventId: string, actorId: string) => Promise<{ id: string } | null>;
+  onCommittedReplacementDelete?: (payload: unknown) => void;
 };
 
 const IPC_HARNESS_KEY = '__calendarIpcBehaviorHarness';
@@ -69,8 +84,9 @@ function calendarIpcTestPlugin(): Plugin {
       }));
       builder.onLoad({ filter: /^broadcast$/, namespace: 'calendar-ipc-test' }, () => ({
         contents: [
-          `export const broadcastDataChange = (...args) => globalThis.${IPC_HARNESS_KEY}.broadcasts.push({ kind: 'data', args });`,
-          `export const broadcastCalendarChanged = (...args) => globalThis.${IPC_HARNESS_KEY}.broadcasts.push({ kind: 'calendar', args });`,
+          `export const broadcastDataChange = (...args) => { const state = globalThis.${IPC_HARNESS_KEY}; if (state.broadcastFailure.data) throw new Error('data broadcast channel closed'); state.broadcasts.push({ kind: 'data', args }); };`,
+          `export const broadcastCalendarChanged = (...args) => { const state = globalThis.${IPC_HARNESS_KEY}; if (state.broadcastFailure.calendar) throw new Error('calendar broadcast channel closed'); state.broadcasts.push({ kind: 'calendar', args }); };`,
+          `export const broadcastCalendarCommittedDelete = (...args) => globalThis.${IPC_HARNESS_KEY}.broadcasts.push({ kind: 'calendar', args });`,
         ].join('\n'),
       }));
     },
@@ -169,6 +185,10 @@ async function loadCalendarSupabasePrivateModule(client: unknown): Promise<{
   addPrivateEvent(input: Record<string, unknown>): Promise<unknown>;
   updatePrivateEvent(eventId: string, updates: Record<string, unknown>): Promise<void>;
   deletePrivateEventForOwner?: (eventId: string, ownerId: string) => Promise<void>;
+  deletePrivateEventForOwnerIfPresent?: (
+    eventId: string,
+    ownerId: string,
+  ) => Promise<'deleted' | 'missing'>;
 }> {
   const globalScope = globalThis as Record<string, unknown>;
   globalScope[SUPABASE_PRIVATE_HARNESS_KEY] = { client };
@@ -179,6 +199,10 @@ async function loadCalendarSupabasePrivateModule(client: unknown): Promise<{
     addPrivateEvent(input: Record<string, unknown>): Promise<unknown>;
     updatePrivateEvent(eventId: string, updates: Record<string, unknown>): Promise<void>;
     deletePrivateEventForOwner?: (eventId: string, ownerId: string) => Promise<void>;
+    deletePrivateEventForOwnerIfPresent?: (
+      eventId: string,
+      ownerId: string,
+    ) => Promise<'deleted' | 'missing'>;
   }>;
 }
 
@@ -203,6 +227,8 @@ async function createIpcHarness(
     handlers: new Map(),
     store: { ...defaultStore(), ...overrides },
     broadcasts: [],
+    committedDeleteMarkers: [],
+    broadcastFailure: { data: false, calendar: false },
   };
   globalScope[IPC_HARNESS_KEY] = state;
   try {
@@ -218,12 +244,25 @@ async function createIpcHarness(
       deleteLegacyPrivateEvent: externalDeps.deleteLegacyPrivateEvent ?? (async () => {
         throw new Error('unexpected legacy private replacement delete');
       }),
+      deleteLegacyPrivateSourceEvent: externalDeps.deleteLegacyPrivateSourceEvent ?? (async () => {
+        throw new Error('unexpected legacy private source delete');
+      }),
+      getLegacyPrivateEventOwner: externalDeps.getLegacyPrivateEventOwner ?? (async () => {
+        throw new Error('unexpected legacy private source read');
+      }),
       createGoogleEvent: externalDeps.createGoogleEvent ?? (async () => {
         throw new Error('unexpected Google replacement create');
       }),
       deleteGoogleEvent: externalDeps.deleteGoogleEvent ?? (async () => {
         throw new Error('unexpected Google replacement delete');
       }),
+      getGoogleEvent: externalDeps.getGoogleEvent ?? (async () => {
+        throw new Error('unexpected Google source read');
+      }),
+      onCommittedReplacementDelete: (payload: unknown) => {
+        state.committedDeleteMarkers.push(payload);
+        externalDeps.onCommittedReplacementDelete?.(payload);
+      },
     });
     const invokeAs = async (senderId: number, channel: string, ...args: unknown[]) => {
       const handler = state.handlers.get(channel);
@@ -965,15 +1004,24 @@ test('strict migration delete classifies only a confirmed source-conflict disapp
       'missing',
       'the strict path confirms the row disappeared after its pre-read',
     );
-    assert.deepEqual(harness.broadcasts, []);
+    assert.deepEqual(harness.committedDeleteMarkers, [{
+      eventId: previous.id,
+      action: 'delete',
+      storage: 'bflow',
+      calendarId: previous.calendar_id,
+      committedPrivacyReplacementDelete: true,
+    }], 'a post-pre-read authoritative absence is propagated independently of replacement compensation');
 
     current = previous;
     deleteOutcome = 'permission-error';
+    harness.broadcasts.length = 0;
+    harness.committedDeleteMarkers.length = 0;
     await assert.rejects(
       harness.invoke('calendar:privacy-migration:delete-source', previous.id),
       /42501.*permission denied/,
     );
     assert.deepEqual(harness.broadcasts, []);
+    assert.deepEqual(harness.committedDeleteMarkers, []);
   } finally {
     console.error = originalError;
     harness.restore();
@@ -1017,7 +1065,298 @@ test('strict migration delete preserves a replacement for response-loss and read
             'a possibly committed delete must keep the replacement instead of compensating it',
           );
         }
-        assert.deepEqual(harness.broadcasts, []);
+        assert.deepEqual(
+          harness.committedDeleteMarkers,
+          outcome === 'commit-then-error'
+            ? [{
+                eventId: previous.id,
+                action: 'delete',
+                storage: 'bflow',
+                calendarId: previous.calendar_id,
+                committedPrivacyReplacementDelete: true,
+              }]
+            : [],
+          'only authoritative source absence emits an exact marker',
+        );
+      } finally {
+        console.error = originalError;
+        harness.restore();
+      }
+    });
+  }
+});
+
+test('a committed strict B flow source delete publishes its exact main-process marker', async () => {
+  const previous = calendarEventRow({ id: 'bflow-source', calendar_id: 'calendar-1' });
+  const harness = await createIpcHarness({
+    getUserRole: async () => 'user',
+    getEventByIdForWrite: async () => previous,
+    getCalendarWithMembers: async () => ({ calendar: calendarRow(), members: [] }),
+    deleteEvent: async () => {},
+  });
+  try {
+    assert.equal(
+      await harness.invoke('calendar:privacy-migration:delete-source', {
+        storage: 'bflow',
+        event_id: previous.id,
+      }),
+      'deleted',
+    );
+    const marker = {
+      eventId: previous.id,
+      action: 'delete',
+      storage: 'bflow',
+      calendarId: previous.calendar_id,
+      committedPrivacyReplacementDelete: true,
+    };
+    assert.deepEqual(harness.committedDeleteMarkers, [marker]);
+    assert.equal(
+      harness.broadcasts.some(({ kind, args }) => (
+        kind === 'calendar' && args.length === 1 && args[0] === harness.committedDeleteMarkers[0]
+      )),
+      true,
+    );
+  } finally {
+    harness.restore();
+  }
+});
+
+test('strict B flow source deletion keeps its committed outcome when post-commit broadcasts throw', async (t) => {
+  for (const failingSideEffect of ['data', 'calendar'] as const) {
+    await t.test(failingSideEffect, async () => {
+      const previous = calendarEventRow({ id: `strict-postcommit-${failingSideEffect}` });
+      const harness = await createIpcHarness({
+        getUserRole: async () => 'user',
+        getEventByIdForWrite: async () => previous,
+        getCalendarWithMembers: async () => ({ calendar: calendarRow(), members: [] }),
+        deleteEvent: async () => {},
+      });
+      const originalWarn = console.warn;
+      try {
+        console.warn = () => {};
+        harness.broadcastFailure[failingSideEffect] = true;
+        assert.equal(
+          await harness.invoke('calendar:privacy-migration:delete-source', {
+            storage: 'bflow',
+            event_id: previous.id,
+          }),
+          'deleted',
+          'post-commit delivery failure cannot ask the renderer to compensate its replacement',
+        );
+        assert.deepEqual(harness.committedDeleteMarkers, [{
+          eventId: previous.id,
+          action: 'delete',
+          storage: 'bflow',
+          calendarId: previous.calendar_id,
+          committedPrivacyReplacementDelete: true,
+        }]);
+        assert.deepEqual(
+          harness.broadcasts[0]?.args[0],
+          harness.committedDeleteMarkers[0],
+          'the exact committed marker is emitted before fallible generic post-commit side effects',
+        );
+        assert.equal(
+          harness.broadcasts.some(({ kind, args }) => (
+            failingSideEffect === 'data'
+              ? kind === 'calendar' && args[0] === 'DELETE'
+              : kind === 'data' && args[0] === 'calendar_events' && args[1] === 'DELETE'
+          )),
+          true,
+          'each generic side effect is isolated so the other one still runs',
+        );
+      } finally {
+        console.warn = originalWarn;
+        harness.restore();
+      }
+    });
+  }
+});
+
+test('strict legacy source deletion classifies missing, committed-response-loss, definitive failure, and readback failure', async (t) => {
+  for (const outcome of [
+    'pre-missing',
+    'deleted',
+    'concurrent-zero-row',
+    'zero-row-other-owner',
+    'zero-row-same-owner',
+    'zero-row-readback-fails',
+    'commit-then-error',
+    'response-loss-other-owner',
+    'row-retained',
+    'readback-fails',
+  ] as const) {
+    await t.test(outcome, async () => {
+      let owner: string | null = outcome === 'pre-missing' ? null : 'legacy-user';
+      let ownerReads = 0;
+      const deleteCalls: unknown[][] = [];
+      const deleteError = new Error(`legacy delete ${outcome}`);
+      const harness = await createIpcHarness({
+        getUserRole: async () => 'user',
+      }, 'legacy-user', {
+        getLegacyPrivateEventOwner: async () => {
+          ownerReads += 1;
+          if (
+            (outcome === 'readback-fails' || outcome === 'zero-row-readback-fails')
+            && ownerReads > 1
+          ) {
+            throw new Error('legacy authoritative readback unavailable');
+          }
+          return owner;
+        },
+        deleteLegacyPrivateSourceEvent: async (...args) => {
+          deleteCalls.push(args);
+          if (outcome === 'deleted') {
+            owner = null;
+            return 'deleted';
+          }
+          if (outcome === 'concurrent-zero-row') {
+            owner = null;
+            return 'missing';
+          }
+          if (outcome === 'zero-row-other-owner') {
+            owner = 'legacy-user-b';
+            return 'missing';
+          }
+          if (outcome === 'zero-row-same-owner' || outcome === 'zero-row-readback-fails') {
+            return 'missing';
+          }
+          if (outcome === 'commit-then-error') owner = null;
+          if (outcome === 'response-loss-other-owner') owner = 'legacy-user-b';
+          throw deleteError;
+        },
+      });
+      const originalError = console.error;
+      try {
+        console.error = () => {};
+        const request = { storage: 'legacy-private', event_id: 'legacy-source' };
+        if (outcome === 'row-retained' || outcome === 'zero-row-same-owner') {
+          await assert.rejects(
+            harness.invoke('calendar:privacy-migration:delete-source', request),
+            outcome === 'row-retained'
+              ? /legacy delete row-retained/
+              : /삭제가 완료되지 않았습니다/,
+          );
+        } else {
+          assert.equal(
+            await harness.invoke('calendar:privacy-migration:delete-source', request),
+            outcome === 'pre-missing'
+              || outcome === 'concurrent-zero-row'
+              || outcome === 'zero-row-other-owner'
+              || outcome === 'zero-row-same-owner'
+              || outcome === 'zero-row-readback-fails'
+              ? 'missing'
+              : outcome === 'deleted'
+                ? 'deleted'
+                : 'ambiguous',
+          );
+        }
+        assert.deepEqual(
+          deleteCalls,
+          outcome === 'pre-missing' ? [] : [['legacy-source', 'legacy-user']],
+          'the delete is bound to the authoritative owner captured by main',
+        );
+        assert.deepEqual(
+          harness.committedDeleteMarkers,
+          outcome === 'deleted'
+            || outcome === 'concurrent-zero-row'
+            || outcome === 'zero-row-other-owner'
+            || outcome === 'commit-then-error'
+            || outcome === 'response-loss-other-owner'
+            ? [{
+                eventId: 'legacy-source',
+                action: 'delete',
+                storage: 'legacy-private',
+                ownerId: 'legacy-user',
+                committedPrivacyReplacementDelete: true,
+              }]
+            : [],
+        );
+      } finally {
+        console.error = originalError;
+        harness.restore();
+      }
+    });
+  }
+});
+
+test('strict Google source deletion classifies 404 and uncertain API outcomes without risking zero rows', async (t) => {
+  const notFound = Object.assign(new Error('Google event not found'), { code: 404 });
+  for (const outcome of [
+    'pre-missing',
+    'deleted',
+    'commit-retry-404',
+    'commit-then-network-error',
+    'row-retained',
+    'readback-fails',
+  ] as const) {
+    await t.test(outcome, async () => {
+      let exists = outcome !== 'pre-missing';
+      let reads = 0;
+      const deleteCalls: unknown[][] = [];
+      const responseError = new Error(`Google delete ${outcome}`);
+      const harness = await createIpcHarness({
+        getUserRole: async () => 'user',
+      }, 'google-user', {
+        getGoogleEvent: async () => {
+          reads += 1;
+          if (outcome === 'readback-fails' && reads > 1) {
+            throw new Error('Google authoritative readback unavailable');
+          }
+          return exists ? { id: 'google-source' } : null;
+        },
+        deleteGoogleEvent: async (...args) => {
+          deleteCalls.push(args);
+          if (outcome === 'deleted') {
+            exists = false;
+            return;
+          }
+          if (outcome === 'commit-retry-404') {
+            exists = false;
+            throw notFound;
+          }
+          if (outcome === 'commit-then-network-error') exists = false;
+          throw responseError;
+        },
+      });
+      const originalError = console.error;
+      try {
+        console.error = () => {};
+        const request = {
+          storage: 'google',
+          calendar_id: 'primary',
+          event_id: 'google-source',
+        };
+        if (outcome === 'row-retained') {
+          await assert.rejects(
+            harness.invoke('calendar:privacy-migration:delete-source', request),
+            /Google delete row-retained/,
+          );
+        } else {
+          const expected = outcome === 'pre-missing'
+            ? 'missing'
+            : outcome === 'deleted'
+              ? 'deleted'
+              : 'ambiguous';
+          assert.equal(
+            await harness.invoke('calendar:privacy-migration:delete-source', request),
+            expected,
+          );
+        }
+        assert.deepEqual(
+          deleteCalls,
+          outcome === 'pre-missing' ? [] : [['primary', 'google-source', 'google-user']],
+        );
+        assert.deepEqual(
+          harness.committedDeleteMarkers,
+          outcome === 'deleted' || outcome === 'commit-retry-404' || outcome === 'commit-then-network-error'
+            ? [{
+                eventId: 'google-source',
+                action: 'delete',
+                calendarId: 'primary',
+                committedGoogleDelete: true,
+              }]
+            : [],
+        );
       } finally {
         console.error = originalError;
         harness.restore();
@@ -1205,6 +1544,80 @@ test('privacy replacement receipt deletes its exact B flow create after ordinary
       console.error = originalError;
     }
   } finally {
+    harness.restore();
+  }
+});
+
+test('privacy replacement receipt is a single-success capability that blocks an in-flight duplicate', async () => {
+  const deleteStarted = deferred<void>();
+  const deleteGate = deferred<void>();
+  let deleteCalls = 0;
+  const harness = await createIpcHarness({
+    getUserRole: async () => 'user',
+    getCalendarWithMembers: async () => ({ calendar: calendarRow(), members: [] }),
+    createEvent: async () => calendarEventRow({
+      id: 'single-success-replacement',
+      created_at: '2026-08-25T01:02:03.456Z',
+    }),
+    deletePrivacyReplacementEvent: async () => {
+      deleteCalls += 1;
+      deleteStarted.resolve();
+      await deleteGate.promise;
+    },
+  });
+  const originalError = console.error;
+  try {
+    console.error = () => {};
+    const created = await harness.invokeAs(
+      501,
+      'calendar:privacy-migration:create-replacement',
+      {
+        storage: 'bflow',
+        event: {
+          calendar_id: 'calendar-1', title: '단일 성공 receipt', memo: null, tag_id: null,
+          all_day: true, start_date: '2026-08-26', end_date: '2026-08-26',
+          start_time: null, end_time: null, linked_episode: null, linked_part: null,
+          linked_sheet_name: null, linked_scene_id: null, linked_department: null,
+          linked_todo_id: null,
+        },
+      },
+    ) as { receipt: string };
+    const firstSettle = harness.invokeAs(
+      501,
+      'calendar:privacy-migration:settle-replacement',
+      created.receipt,
+      'delete',
+    );
+    await deleteStarted.promise;
+
+    await assert.rejects(
+      harness.invokeAs(
+        501,
+        'calendar:privacy-migration:settle-replacement',
+        created.receipt,
+        'delete',
+      ),
+      /처리 중/,
+      'the same sender cannot spend a receipt twice while its exact delete is pending',
+    );
+    assert.equal(deleteCalls, 1, 'the duplicate never reaches persistence');
+
+    deleteGate.resolve();
+    assert.equal(await firstSettle, undefined);
+    assert.equal(harness.committedDeleteMarkers.length, 1);
+    await assert.rejects(
+      harness.invokeAs(
+        501,
+        'calendar:privacy-migration:settle-replacement',
+        created.receipt,
+        'delete',
+      ),
+      /receipt|보상|사용/i,
+      'the first confirmed success consumes the capability permanently',
+    );
+    assert.equal(deleteCalls, 1);
+  } finally {
+    console.error = originalError;
     harness.restore();
   }
 });
@@ -1404,6 +1817,77 @@ test('legacy receipt compensation atomically preserves a same-id row replaced by
   }
 });
 
+test('legacy source conditional delete returns missing for a normal zero-row race', async () => {
+  const globalScope = globalThis as Record<string, unknown>;
+  const priorHarness = globalScope[SUPABASE_PRIVATE_HARNESS_KEY];
+  const hadHarness = Object.prototype.hasOwnProperty.call(globalScope, SUPABASE_PRIVATE_HARNESS_KEY);
+  const priorWebSocket = globalScope.WebSocket;
+  const hadWebSocket = Object.prototype.hasOwnProperty.call(globalScope, 'WebSocket');
+  let row: { id: string; user_id: string } | null = {
+    id: 'legacy-source-a',
+    user_id: 'legacy-user-b',
+  };
+  let returnMalformedResult = false;
+  const client = {
+    from(table: string) {
+      assert.equal(table, 'private_calendar_events');
+      const predicates = new Map<string, unknown>();
+      const builder = {
+        eq(field: string, value: unknown) {
+          predicates.set(field, value);
+          return builder;
+        },
+        async select() {
+          if (
+            row
+            && [...predicates].every(([field, value]) => row?.[field as 'id' | 'user_id'] === value)
+          ) {
+            const deleted = row;
+            row = null;
+            if (returnMalformedResult) return { data: null, error: null };
+            return { data: [{ id: deleted.id }], error: null };
+          }
+          return { data: [], error: null };
+        },
+      };
+      return { delete: () => builder };
+    },
+  };
+
+  try {
+    const module = await loadCalendarSupabasePrivateModule(client);
+    assert.ok(module.deletePrivateEventForOwnerIfPresent);
+    assert.equal(
+      await module.deletePrivateEventForOwnerIfPresent('legacy-source-a', 'legacy-user-a'),
+      'missing',
+      'a concurrent ordinary delete/owner replacement zero-row is a definitive missing outcome',
+    );
+    assert.deepEqual(row, { id: 'legacy-source-a', user_id: 'legacy-user-b' });
+    assert.equal(
+      await module.deletePrivateEventForOwnerIfPresent('legacy-source-a', 'legacy-user-b'),
+      'deleted',
+    );
+    assert.equal(row, null);
+
+    row = { id: 'legacy-source-response-loss', user_id: 'legacy-user-a' };
+    returnMalformedResult = true;
+    await assert.rejects(
+      module.deletePrivateEventForOwnerIfPresent(
+        'legacy-source-response-loss',
+        'legacy-user-a',
+      ),
+      /결과|result|확인/i,
+      'a null DELETE representation is not a definitive zero-row missing outcome',
+    );
+    assert.equal(row, null, 'the fixture models commit followed by a malformed/lost response');
+  } finally {
+    if (hadHarness) globalScope[SUPABASE_PRIVATE_HARNESS_KEY] = priorHarness;
+    else delete globalScope[SUPABASE_PRIVATE_HARNESS_KEY];
+    if (hadWebSocket) globalScope.WebSocket = priorWebSocket;
+    else delete globalScope.WebSocket;
+  }
+});
+
 test('privacy replacement receipt binds legacy deletion to the create actor and exact returned id', async () => {
   let currentUserId = 'legacy-user-a';
   const legacyCreates: unknown[][] = [];
@@ -1496,15 +1980,540 @@ test('privacy replacement receipt binds Google deletion to the exact calendar, e
   }
 });
 
-test('privacy replacement receipt is consumed on keep and on a failed compensation attempt', async () => {
+test('settled replacement deletes publish an exact main-process marker before a simulated IPC response loss', async (t) => {
+  const bflowEventInput = {
+    calendar_id: 'personal-user', title: 'B flow 보상 일정', memo: null, tag_id: null,
+    all_day: true, start_date: '2026-08-26', end_date: '2026-08-26',
+    start_time: null, end_time: null, linked_episode: null, linked_part: null,
+    linked_sheet_name: null, linked_scene_id: null, linked_department: null,
+    linked_todo_id: null,
+  };
+  const legacyEventInput = {
+    title: '레거시 보상 일정', memo: '', color: '#6C5CE7', type: 'custom',
+    start_date: '2026-08-26', end_date: '2026-08-26', linked_episode: null,
+    linked_part: null, linked_sheet_name: null, linked_scene_id: null,
+    linked_department: null, linked_todo_id: null, created_by: '사용자',
+  };
+  const googleEventInput = {
+    summary: 'Google 보상 일정', description: '', startDate: '2026-08-26',
+    endDate: '2026-08-27', extendedProperties: { bflow_type: 'custom' },
+    visibility: 'default',
+  };
+
+  const scenarios = [
+    {
+      name: 'B flow',
+      request: { storage: 'bflow', event: bflowEventInput },
+      expected: {
+        eventId: 'replacement-bflow',
+        action: 'delete',
+        storage: 'bflow',
+        calendarId: 'personal-user',
+        committedPrivacyReplacementDelete: true,
+      },
+      overrides: {
+        getUserRole: async () => 'user',
+        getCalendarWithMembers: async () => ({
+          calendar: calendarRow({ id: 'personal-user', owner_id: 'user-1', is_personal: true }),
+          members: [],
+        }),
+        createEvent: async () => calendarEventRow({
+          id: 'replacement-bflow',
+          calendar_id: 'personal-user',
+          created_at: '2026-08-25T01:00:00.000Z',
+        }),
+        deletePrivacyReplacementEvent: async () => {},
+      },
+      external: {},
+    },
+    {
+      name: 'legacy private',
+      request: { storage: 'legacy-private', event: legacyEventInput },
+      expected: {
+        eventId: 'replacement-legacy',
+        action: 'delete',
+        storage: 'legacy-private',
+        ownerId: 'user-1',
+        committedPrivacyReplacementDelete: true,
+      },
+      overrides: { getUserRole: async () => 'user' },
+      external: {
+        createLegacyPrivateEvent: async () => ({ id: 'replacement-legacy' }),
+        deleteLegacyPrivateEvent: async () => {},
+      },
+    },
+    {
+      name: 'Google',
+      request: { storage: 'google', calendar_id: 'primary', event: googleEventInput },
+      expected: {
+        eventId: 'replacement-google',
+        action: 'delete',
+        calendarId: 'primary',
+        committedGoogleDelete: true,
+      },
+      overrides: { getUserRole: async () => 'user' },
+      external: {
+        createGoogleEvent: async () => 'replacement-google',
+        deleteGoogleEvent: async () => {},
+      },
+    },
+  ] as const;
+
+  for (const scenario of scenarios) {
+    await t.test(scenario.name, async () => {
+      const harness = await createIpcHarness(
+        scenario.overrides,
+        'user-1',
+        scenario.external,
+      );
+      try {
+        const created = await harness.invokeAs(
+          801,
+          'calendar:privacy-migration:create-replacement',
+          scenario.request,
+        ) as { receipt: string };
+        harness.broadcasts.length = 0;
+        harness.committedDeleteMarkers.length = 0;
+
+        await assert.rejects(
+          harness.invokeAs(
+            801,
+            'calendar:privacy-migration:settle-replacement',
+            created.receipt,
+            'delete',
+          ).then(() => { throw new Error('simulated renderer response loss'); }),
+          /simulated renderer response loss/,
+        );
+
+        assert.deepEqual(
+          harness.committedDeleteMarkers,
+          [scenario.expected],
+          'the main boundary informs every local BrowserWindow independently of invoke delivery',
+        );
+        assert.equal(
+          harness.broadcasts.some(({ kind, args }) => (
+            kind === 'calendar'
+            && args.length === 1
+            && (() => {
+              try {
+                assert.deepEqual(args[0], scenario.expected);
+                return true;
+              } catch {
+                return false;
+              }
+            })()
+          )),
+          true,
+          'the exact committed marker is also sent through the cross-client calendar broadcast',
+        );
+      } finally {
+        harness.restore();
+      }
+    });
+  }
+});
+
+test('a throwing local-window marker fanout cannot turn a committed replacement delete into failure', async () => {
+  const survivingWindowDeliveries: Array<{ channel: string; payload: unknown }> = [];
+  const fanoutErrors: unknown[] = [];
+  const harness = await createIpcHarness({
+    getUserRole: async () => 'user',
+    getCalendarWithMembers: async () => ({
+      calendar: calendarRow({ id: 'personal-user', owner_id: 'user-1', is_personal: true }),
+      members: [],
+    }),
+    createEvent: async () => calendarEventRow({
+      id: 'replacement-after-window-close',
+      calendar_id: 'personal-user',
+      created_at: '2026-08-25T01:00:00.000Z',
+    }),
+    deletePrivacyReplacementEvent: async () => {},
+  }, 'user-1', {
+    onCommittedReplacementDelete: (payload) => {
+      broadcastCommittedCalendarDeleteToWindows(
+        {
+          isDestroyed: () => false,
+          webContents: {
+            send: () => { throw new Error('main window closed during webContents.send'); },
+          },
+        },
+        [{
+          isDestroyed: () => false,
+          webContents: {
+            send: (channel, deliveredPayload) => {
+              survivingWindowDeliveries.push({ channel, payload: deliveredPayload });
+            },
+          },
+        }],
+        payload,
+        (error) => { fanoutErrors.push(error); },
+      );
+    },
+  });
+  const originalWarn = console.warn;
+  const originalError = console.error;
+  try {
+    console.warn = () => {};
+    console.error = () => {};
+    const created = await harness.invokeAs(
+      901,
+      'calendar:privacy-migration:create-replacement',
+      {
+        storage: 'bflow',
+        event: {
+          calendar_id: 'personal-user', title: '창 종료 경합', memo: null, tag_id: null,
+          all_day: true, start_date: '2026-08-26', end_date: '2026-08-26',
+          start_time: null, end_time: null, linked_episode: null, linked_part: null,
+          linked_sheet_name: null, linked_scene_id: null, linked_department: null,
+          linked_todo_id: null,
+        },
+      },
+    ) as { receipt: string };
+    harness.broadcasts.length = 0;
+
+    assert.equal(
+      await harness.invokeAs(
+        901,
+        'calendar:privacy-migration:settle-replacement',
+        created.receipt,
+        'delete',
+      ),
+      undefined,
+      'post-commit local fanout is best-effort and cannot reject the persistence result',
+    );
+    assert.equal(
+      harness.broadcasts.some(({ kind, args }) => (
+        kind === 'calendar'
+        && args.length === 1
+        && (args[0] as { eventId?: string }).eventId === 'replacement-after-window-close'
+      )),
+      true,
+      'cross-client fanout still runs after local-window delivery throws',
+    );
+    assert.deepEqual(survivingWindowDeliveries, [{
+      channel: 'calendar:changed',
+      payload: harness.committedDeleteMarkers[0],
+    }], 'a first-window send failure does not skip the next local BrowserWindow');
+    assert.equal(fanoutErrors.length, 1);
+    await assert.rejects(
+      harness.invokeAs(
+        901,
+        'calendar:privacy-migration:settle-replacement',
+        created.receipt,
+        'delete',
+      ),
+      /receipt|보상|사용/i,
+      'the successful persistence attempt consumed the receipt exactly once',
+    );
+  } finally {
+    console.warn = originalWarn;
+    console.error = originalError;
+    harness.restore();
+  }
+});
+
+test('a remote Supabase exact marker still reaches later windows when the first send throws', () => {
+  const delivered: Array<{ channel: string; payload: unknown }> = [];
+  const errors: unknown[] = [];
+  const marker = {
+    eventId: 'remote-legacy-owner-a',
+    action: 'delete',
+    storage: 'legacy-private',
+    ownerId: 'user-a',
+    committedPrivacyReplacementDelete: true,
+  };
+  const handled = relayIncomingCommittedCalendarDeleteToWindows(
+    'calendar-changed',
+    marker,
+    {
+      isDestroyed: () => false,
+      webContents: { send: () => { throw new Error('main closed during remote relay'); } },
+    },
+    [{
+      isDestroyed: () => false,
+      webContents: {
+        send: (channel, payload) => { delivered.push({ channel, payload }); },
+      },
+    }],
+    (error) => { errors.push(error); },
+  );
+
+  assert.equal(handled, true);
+  assert.deepEqual(delivered, [{ channel: 'calendar:changed', payload: marker }]);
+  assert.equal(errors.length, 1);
+  assert.equal(
+    relayIncomingCommittedCalendarDeleteToWindows(
+      'scene-update',
+      marker,
+      null,
+      [],
+    ),
+    false,
+    'non-calendar broadcasts keep the existing generic delivery path',
+  );
+  const mainSource = readFileSync(join(process.cwd(), 'electron/main.ts'), 'utf8');
+  assert.match(
+    mainSource,
+    /setupBroadcast\(\(event, payload\) => \{\s*if \(relayIncomingCommittedCalendarDeleteToWindows\(/,
+    'the production Supabase receiver routes exact calendar markers through this hardened fanout',
+  );
+});
+
+test('generic renderer calendar relay rejects forged committed markers for every storage', () => {
+  for (const marker of [
+    {
+      eventId: 'forged-bflow', action: 'delete', storage: 'bflow', calendarId: 'calendar-1',
+      committedPrivacyReplacementDelete: true,
+    },
+    {
+      eventId: 'forged-legacy', action: 'delete', storage: 'legacy-private', ownerId: 'user-a',
+      committedPrivacyReplacementDelete: true,
+    },
+    {
+      eventId: 'forged-google', action: 'delete', calendarId: 'primary',
+      committedGoogleDelete: true,
+    },
+  ]) {
+    assert.equal(isCommittedCalendarDeleteMarker(marker), true);
+  }
+  assert.equal(
+    isCommittedCalendarDeleteMarker({ eventId: 'ordinary', action: 'delete' }),
+    false,
+  );
+  const mainSource = readFileSync(join(process.cwd(), 'electron/main.ts'), 'utf8');
+  assert.match(
+    mainSource,
+    /ipcMain\.handle\('calendar:broadcast-change',[\s\S]*?isCommittedCalendarDeleteMarker\(payload\)[\s\S]*?return \{ ok: false \}/,
+    'the generic renderer IPC must stop forged commit markers before any window relay',
+  );
+});
+
+test('ordinary Google delete boundary classifies commit loss and emits only after confirmed absence', async (t) => {
+  for (const outcome of ['success', 'commit-response-loss', 'retained', 'readback-fails'] as const) {
+    await t.test(outcome, async () => {
+      let exists = true;
+      let readCalls = 0;
+      const deleteError = new Error(`Google ordinary delete ${outcome}`);
+      const localMarkers: unknown[] = [];
+      const crossClientMarkers: unknown[] = [];
+      const boundary = deleteGoogleEventWithCommittedMarker(
+        'primary',
+        'ordinary-google-event',
+        {
+          deleteEvent: async () => {
+            if (outcome === 'success') {
+              exists = false;
+              return;
+            }
+            if (outcome === 'commit-response-loss') exists = false;
+            throw deleteError;
+          },
+          getEvent: async () => {
+            readCalls += 1;
+            if (outcome === 'readback-fails') throw new Error('Google ordinary readback unavailable');
+            return exists ? { id: 'ordinary-google-event' } : null;
+          },
+          emitLocal: (marker) => {
+            localMarkers.push(marker);
+            if (outcome === 'success') throw new Error('first local window closed');
+          },
+          emitCrossClient: (marker) => { crossClientMarkers.push(marker); },
+          onFanoutError: () => {},
+        },
+      );
+
+      if (outcome === 'retained') {
+        await assert.rejects(boundary, (error: unknown) => error === deleteError);
+      } else if (outcome === 'readback-fails') {
+        await assert.rejects(boundary, /readback|확인|unavailable/i);
+      } else {
+        assert.equal(await boundary, undefined);
+      }
+      assert.equal(readCalls, outcome === 'success' ? 0 : 1);
+      const shouldEmit = outcome === 'success' || outcome === 'commit-response-loss';
+      assert.equal(localMarkers.length, shouldEmit ? 1 : 0);
+      assert.equal(crossClientMarkers.length, shouldEmit ? 1 : 0);
+      if (shouldEmit) {
+        assert.deepEqual(crossClientMarkers[0], {
+          eventId: 'ordinary-google-event',
+          action: 'delete',
+          calendarId: 'primary',
+          committedGoogleDelete: true,
+        });
+      }
+    });
+  }
+});
+
+test('replacement settlement distinguishes commit-response-loss from a row-preserving failure for every storage', async (t) => {
+  for (const storage of ['bflow', 'legacy-private', 'google'] as const) {
+    for (const firstOutcome of ['commit-then-throw', 'throw-before-commit', 'readback-fails'] as const) {
+      await t.test(`${storage} ${firstOutcome}`, async () => {
+        let exists = true;
+        let deleteCalls = 0;
+        let readCalls = 0;
+        let retrySucceeds = false;
+        const deleteError = new Error(`${storage} replacement delete response lost`);
+        const readbackError = new Error(`${storage} replacement readback unavailable`);
+        const eventId = `settle-${storage}-${firstOutcome}`;
+        const calendarId = storage === 'bflow' ? 'personal-user' : 'primary';
+        const createdAt = '2026-08-25T01:00:00.000Z';
+
+        const deleteAttempt = async () => {
+          deleteCalls += 1;
+          if (retrySucceeds) {
+            exists = false;
+            return;
+          }
+          if (firstOutcome === 'commit-then-throw') exists = false;
+          throw deleteError;
+        };
+        const harness = await createIpcHarness({
+          getUserRole: async () => 'user',
+          getCalendarWithMembers: async () => ({
+            calendar: calendarRow({ id: calendarId, owner_id: 'user-1', is_personal: true }),
+            members: [],
+          }),
+          createEvent: async () => calendarEventRow({
+            id: eventId,
+            calendar_id: calendarId,
+            created_at: createdAt,
+          }),
+          deletePrivacyReplacementEvent: storage === 'bflow'
+            ? deleteAttempt
+            : async () => { throw new Error('unexpected B flow delete'); },
+          getEventByIdForWrite: async () => {
+            readCalls += 1;
+            if (firstOutcome === 'readback-fails' && !retrySucceeds) throw readbackError;
+            return exists
+              ? calendarEventRow({ id: eventId, calendar_id: calendarId, created_at: createdAt })
+              : null;
+          },
+        }, 'user-1', {
+          createLegacyPrivateEvent: async () => ({ id: eventId }),
+          deleteLegacyPrivateEvent: storage === 'legacy-private'
+            ? deleteAttempt
+            : async () => { throw new Error('unexpected legacy delete'); },
+          getLegacyPrivateEventOwner: async () => {
+            readCalls += 1;
+            if (firstOutcome === 'readback-fails' && !retrySucceeds) throw readbackError;
+            return exists ? 'user-1' : null;
+          },
+          createGoogleEvent: async () => eventId,
+          deleteGoogleEvent: storage === 'google'
+            ? deleteAttempt
+            : async () => { throw new Error('unexpected Google delete'); },
+          getGoogleEvent: async () => {
+            readCalls += 1;
+            if (firstOutcome === 'readback-fails' && !retrySucceeds) throw readbackError;
+            return exists ? { id: eventId } : null;
+          },
+        });
+
+        const request = storage === 'bflow'
+          ? {
+              storage,
+              event: {
+                calendar_id: calendarId, title: 'B flow', memo: null, tag_id: null,
+                all_day: true, start_date: '2026-08-26', end_date: '2026-08-26',
+                start_time: null, end_time: null, linked_episode: null, linked_part: null,
+                linked_sheet_name: null, linked_scene_id: null, linked_department: null,
+                linked_todo_id: null,
+              },
+            }
+          : storage === 'legacy-private'
+            ? {
+                storage,
+                event: {
+                  title: 'legacy', start_date: '2026-08-26', end_date: '2026-08-26',
+                },
+              }
+            : {
+                storage,
+                calendar_id: calendarId,
+                event: {
+                  summary: 'Google', startDate: '2026-08-26', endDate: '2026-08-27',
+                },
+              };
+        const originalError = console.error;
+        try {
+          console.error = () => {};
+          const created = await harness.invokeAs(
+            902,
+            'calendar:privacy-migration:create-replacement',
+            request,
+          ) as { receipt: string };
+          harness.broadcasts.length = 0;
+          harness.committedDeleteMarkers.length = 0;
+
+          const first = harness.invokeAs(
+            902,
+            'calendar:privacy-migration:settle-replacement',
+            created.receipt,
+            'delete',
+          );
+          if (firstOutcome === 'commit-then-throw') {
+            assert.equal(await first, undefined);
+            assert.equal(readCalls, 1);
+            assert.equal(harness.committedDeleteMarkers.length, 1);
+            await assert.rejects(
+              harness.invokeAs(
+                902,
+                'calendar:privacy-migration:settle-replacement',
+                created.receipt,
+                'delete',
+              ),
+              /receipt|보상|사용/i,
+              'a confirmed absent replacement consumes its receipt',
+            );
+          } else {
+            await assert.rejects(
+              first,
+              firstOutcome === 'readback-fails'
+                ? /readback|재조회|확인|unavailable/i
+                : /response lost/,
+            );
+            assert.deepEqual(harness.committedDeleteMarkers, []);
+            assert.equal(exists, true);
+
+            retrySucceeds = true;
+            assert.equal(
+              await harness.invokeAs(
+                902,
+                'calendar:privacy-migration:settle-replacement',
+                created.receipt,
+                'delete',
+              ),
+              undefined,
+              'a non-committed or unclassified failure releases the receipt for an exact retry',
+            );
+            assert.equal(harness.committedDeleteMarkers.length, 1);
+          }
+          assert.equal(deleteCalls, firstOutcome === 'commit-then-throw' ? 1 : 2);
+        } finally {
+          console.error = originalError;
+          harness.restore();
+        }
+      });
+    }
+  }
+});
+
+test('privacy replacement receipt is consumed on keep but released after a confirmed failed delete', async () => {
   let deleteCalls = 0;
+  let replacementExists = true;
+  let deleteFails = true;
   const harness = await createIpcHarness({
     getUserRole: async () => 'user',
     getCalendarWithMembers: async () => ({ calendar: calendarRow(), members: [] }),
     createEvent: async () => calendarEventRow({ id: `replacement-${deleteCalls}` }),
+    getEventByIdForWrite: async () => (
+      replacementExists ? calendarEventRow({ id: 'replacement-0' }) : null
+    ),
     deletePrivacyReplacementEvent: async () => {
       deleteCalls += 1;
-      throw new Error('privacy replacement row identity no longer matches');
+      if (deleteFails) throw new Error('privacy replacement row identity no longer matches');
+      replacementExists = false;
     },
   });
   const event = {
@@ -1522,6 +2531,7 @@ test('privacy replacement receipt is consumed on keep and on a failed compensati
       { storage: 'bflow', event },
     ) as { receipt: string };
     await harness.invoke('calendar:privacy-migration:settle-replacement', kept.receipt, 'keep');
+    assert.deepEqual(harness.committedDeleteMarkers, [], 'keep is not a committed delete');
     await assert.rejects(
       harness.invoke('calendar:privacy-migration:settle-replacement', kept.receipt, 'delete'),
       /receipt|보상|사용/i,
@@ -1536,11 +2546,19 @@ test('privacy replacement receipt is consumed on keep and on a failed compensati
       harness.invoke('calendar:privacy-migration:settle-replacement', failing.receipt, 'delete'),
       /identity no longer matches/,
     );
+    assert.deepEqual(harness.committedDeleteMarkers, [], 'failed persistence emits no committed marker');
+    deleteFails = false;
+    assert.equal(
+      await harness.invoke('calendar:privacy-migration:settle-replacement', failing.receipt, 'delete'),
+      undefined,
+      'a confirmed non-commit leaves the exact receipt reusable',
+    );
+    assert.equal(harness.committedDeleteMarkers.length, 1);
     await assert.rejects(
       harness.invoke('calendar:privacy-migration:settle-replacement', failing.receipt, 'delete'),
       /receipt|보상|사용/i,
     );
-    assert.equal(deleteCalls, 1);
+    assert.equal(deleteCalls, 2);
   } finally {
     console.error = originalError;
     harness.restore();

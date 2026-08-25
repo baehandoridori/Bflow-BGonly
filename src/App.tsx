@@ -2582,17 +2582,26 @@ export default function App() {
       }
 
       if (data.event === 'calendar-changed') {
-        // GCal webhook → incremental sync (인증된 경우에만)
-        import('@/services/googleCalendarService').then(({ isAuthenticated }) => {
-          isAuthenticated().then((authed) => {
-            if (!authed) return;
-            import('@/services/calendarService').then(({ syncIncremental }) => {
-              syncIncremental().catch((err) =>
-                console.warn('[Broadcast] 캘린더 incremental sync 실패:', err),
-              );
-            });
-          });
-        });
+        // exact committed-delete marker는 원격 앱에서도 먼저 tombstone한다. 일반 GCal
+        // webhook 신호만 기존 incremental sync로 이어 PR4 realtime 범위는 건드리지 않는다.
+        void (async () => {
+          try {
+            const calendar = await import('@/services/calendarService');
+            const appliedCommittedDelete = calendar.applyCommittedGoogleDelete(data.payload)
+              || calendar.applyCommittedPrivacyReplacementDelete(data.payload);
+            if (appliedCommittedDelete) {
+              window.dispatchEvent(new CustomEvent('bflow:calendar-changed', {
+                detail: data.payload,
+              }));
+              return;
+            }
+            const { isAuthenticated } = await import('@/services/googleCalendarService');
+            if (!await isAuthenticated()) return;
+            await calendar.syncIncremental();
+          } catch (err) {
+            console.warn('[Broadcast] 캘린더 incremental sync 실패:', err);
+          }
+        })();
       }
     });
     return () => {

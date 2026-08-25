@@ -1488,7 +1488,7 @@ export interface ElectronAPI extends CalendarApiInputContract {
     updated_at: string;
   }>;
   calendarPrivacyMigrationSourceDelete: (
-    id: Parameters<CalendarApiInputContract['calendarPrivacyMigrationSourceDelete']>[0],
+    input: Parameters<CalendarApiInputContract['calendarPrivacyMigrationSourceDelete']>[0],
   ) => Promise<CalendarPrivacyMigrationSourceDeleteResult>;
   calendarPrivacyReplacementCreate: (
     input: Parameters<CalendarApiInputContract['calendarPrivacyReplacementCreate']>[0],

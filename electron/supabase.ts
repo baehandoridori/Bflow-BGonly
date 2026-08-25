@@ -1911,6 +1911,32 @@ export async function deletePrivateEventForOwner(id: string, ownerId: string): P
   broadcastCalendarChanged('DELETE');
 }
 
+/** privacy migration source 전용 conditional delete.
+ * pre-read 뒤 다른 intent가 먼저 삭제한 zero-row는 확정 missing으로 구분하고,
+ * Supabase/network error는 caller가 authoritative readback으로 판정할 수 있게 throw한다. */
+export async function deletePrivateEventForOwnerIfPresent(
+  id: string,
+  ownerId: string,
+): Promise<'deleted' | 'missing'> {
+  const { data, error } = await supabase
+    .from('private_calendar_events')
+    .delete()
+    .eq('id', id)
+    .eq('user_id', ownerId)
+    .select('id');
+  throwIfError(error);
+  // Supabase가 정상 응답한 []만 conditional zero-row를 증명한다. null/비배열은
+  // DELETE commit 뒤 representation 응답이 유실된 것일 수 있으므로 caller의
+  // authoritative readback 분류로 넘긴다.
+  if (!Array.isArray(data)) {
+    throw new Error('비공개 일정 삭제 결과를 확인할 수 없습니다');
+  }
+  if (!data.some((row) => row?.id === id)) return 'missing';
+  broadcastDataChange('private_calendar_events', 'DELETE');
+  broadcastCalendarChanged('DELETE');
+  return 'deleted';
+}
+
 /** 특정 비공개 이벤트의 소유자(user_id) 조회 — IPC 핸들러에서 권한 검증용. */
 export async function getPrivateEventOwner(id: string): Promise<string | null> {
   const { data, error } = await supabase

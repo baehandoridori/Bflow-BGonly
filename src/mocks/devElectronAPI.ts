@@ -1223,8 +1223,10 @@ export function installDevElectronAPI(): void {
       mockCalendarEvents.push(created);
       return { ...created };
     },
-    calendarPrivacyMigrationSourceDelete: async (id) => {
-      const index = mockCalendarEvents.findIndex((event) => event.id === id);
+    calendarPrivacyMigrationSourceDelete: async (request) => {
+      if (request.storage === 'legacy-private') return 'missing';
+      if (request.storage === 'google') return 'deleted';
+      const index = mockCalendarEvents.findIndex((event) => event.id === request.event_id);
       if (index < 0) return 'missing';
       mockCalendarEvents.splice(index, 1);
       return 'deleted';

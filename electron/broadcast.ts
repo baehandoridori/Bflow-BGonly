@@ -1,6 +1,7 @@
 import type { RealtimeChannel } from '@supabase/supabase-js';
 import { supabase } from './supabase';
 import { createRetryManager } from './retry-utils';
+import type { CalendarCommittedReplacementDeleteMarker } from '../src/shared/calendarApiContract';
 
 // ─── Supabase Broadcast 채널 ────────────────────
 // postgres_changes와 달리 Publication 설정이 필요 없음.
@@ -242,6 +243,14 @@ export function broadcastSceneAssignmentNotification(payload: Omit<AssignmentBro
  *  수신 측(calendarService) 에서 sync/재렌더 트리거. 다른 기기 비공개 CRUD 도 실시간 반영된다. */
 export function broadcastCalendarChanged(action: string, senderId?: string): void {
   safeSend('calendar-changed', { action, senderId, ts: Date.now() });
+}
+
+/** privacy replacement 보상 삭제의 영속 commit을 다른 앱 인스턴스에도 exact row로 전달한다.
+ * generic action envelope에 중첩하지 않아 renderer가 marker를 top-level에서 판독할 수 있다. */
+export function broadcastCalendarCommittedDelete(
+  marker: CalendarCommittedReplacementDeleteMarker,
+): void {
+  safeSend('calendar-changed', { ...marker, ts: Date.now() });
 }
 
 /** v1.28.0 (코덱스 2차 P1): 댓글 이모지 리액션 변경 broadcast.

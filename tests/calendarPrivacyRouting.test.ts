@@ -291,7 +291,11 @@ async function createHarness(options: {
       }
       if (options.bflowDeleteError) throw options.bflowDeleteError;
     },
-    calendarPrivacyMigrationSourceDelete: async (id: string) => {
+    calendarPrivacyMigrationSourceDelete: async (request: string | {
+      storage: 'bflow' | 'legacy-private' | 'google';
+      event_id: string;
+    }) => {
+      const id = typeof request === 'string' ? request : request.event_id;
       calls.bflowDeletes.push(id);
       if (options.bflowDelete) await options.bflowDelete(id);
       else if (options.bflowDeleteError) throw options.bflowDeleteError;

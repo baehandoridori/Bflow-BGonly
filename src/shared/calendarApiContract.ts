@@ -71,6 +71,32 @@ export type CalendarPrivacyReplacementCreateInput =
 
 export type CalendarPrivacyReplacementDisposition = 'keep' | 'delete';
 export type CalendarPrivacyMigrationSourceDeleteResult = 'deleted' | 'missing' | 'ambiguous';
+export type CalendarPrivacyMigrationSourceDeleteInput =
+  | { storage: 'bflow'; event_id: string }
+  | { storage: 'legacy-private'; event_id: string }
+  | { storage: 'google'; calendar_id: string; event_id: string };
+
+export type CalendarCommittedReplacementDeleteMarker =
+  | {
+      eventId: string;
+      action: 'delete';
+      storage: 'bflow';
+      calendarId: string;
+      committedPrivacyReplacementDelete: true;
+    }
+  | {
+      eventId: string;
+      action: 'delete';
+      storage: 'legacy-private';
+      ownerId: string;
+      committedPrivacyReplacementDelete: true;
+    }
+  | {
+      eventId: string;
+      action: 'delete';
+      calendarId: string;
+      committedGoogleDelete: true;
+    };
 
 export interface CalendarApiInputContract {
   calendarCreate: (input: CalendarCreateInput) => unknown;
@@ -79,7 +105,7 @@ export interface CalendarApiInputContract {
   calendarEventsList: (params?: { from?: string; to?: string }) => unknown;
   calendarEventCreate: (input: CalendarEventCreateInput) => unknown;
   calendarEventUpdate: (id: string, updates: CalendarEventUpdateInput) => unknown;
-  calendarPrivacyMigrationSourceDelete: (id: string) => unknown;
+  calendarPrivacyMigrationSourceDelete: (input: CalendarPrivacyMigrationSourceDeleteInput) => unknown;
   calendarPrivacyReplacementCreate: (input: CalendarPrivacyReplacementCreateInput) => unknown;
   calendarPrivacyReplacementSettle: (
     receipt: string,

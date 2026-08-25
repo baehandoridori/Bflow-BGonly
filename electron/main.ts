@@ -20,6 +20,12 @@ import { uploadImage as storageUploadImage, deleteImage as storageDeleteImage, u
 // v1.20.0: 사용자 폰트 IPC + bflow-font:// custom protocol
 import { registerFontProtocol, registerFontIpcHandlers } from './fontIpc';
 import { registerCalendarIpc } from './calendarIpc';
+import {
+  broadcastCommittedCalendarDeleteToWindows,
+  isCommittedCalendarDeleteMarker,
+  relayIncomingCommittedCalendarDeleteToWindows,
+} from './calendarWindowFanout';
+import { deleteGoogleEventWithCommittedMarker } from './googleCalendarDeleteBoundary';
 import * as calendarStore from './calendarStore';
 import { PersonalTodoService } from './personalTodoService';
 import type { PersonalTodoCreateInput, PersonalTodoOrderMutation, PersonalTodoPatch, CalendarTodoPatch, PersonalTodoLabelColorKey } from './personalTodoService';
@@ -1298,7 +1304,7 @@ ipcMain.handle('whiteboard:write-shared', async (_event, data: unknown) => {
 
 // ─── IPC 핸들러: Supabase ────────────────────────────────────
 
-import { setupBroadcast, broadcastSceneUpdate, broadcastSceneFieldUpdate, broadcastDataChange, broadcastActingFeedbackRequest, broadcastSceneAssignmentNotification, broadcastRetakeAssigneeCompletion } from './broadcast';
+import { setupBroadcast, broadcastSceneUpdate, broadcastSceneFieldUpdate, broadcastDataChange, broadcastActingFeedbackRequest, broadcastSceneAssignmentNotification, broadcastRetakeAssigneeCompletion, broadcastCalendarCommittedDelete } from './broadcast';
 import type { FeedbackBroadcastPayload, RetakeAssigneeCompletionBroadcastPayload } from './broadcast';
 import {
   testConnection as supabaseTestConnection,
@@ -1381,6 +1387,7 @@ import {
   updatePrivateEvent as sbUpdatePrivateEvent,
   deletePrivateEvent as sbDeletePrivateEvent,
   deletePrivateEventForOwner as sbDeletePrivateEventForOwner,
+  deletePrivateEventForOwnerIfPresent as sbDeletePrivateEventForOwnerIfPresent,
   getPrivateEventOwner as sbGetPrivateEventOwner,
   listActivities as sbListActivities,
   getActivityStats as sbGetActivityStats,
@@ -2471,10 +2478,18 @@ registerCalendarIpc({
   deleteLegacyPrivateEvent: (eventId, actorId) => (
     sbDeletePrivateEventForOwner(eventId, actorId)
   ),
+  deleteLegacyPrivateSourceEvent: (eventId, actorId) => (
+    sbDeletePrivateEventForOwnerIfPresent(eventId, actorId)
+  ),
+  getLegacyPrivateEventOwner: (eventId) => sbGetPrivateEventOwner(eventId),
   createGoogleEvent: (calendarId, input) => (
     gcal.insertEvent(calendarId, input as gcal.GCalEventInput)
   ),
   deleteGoogleEvent: (calendarId, eventId) => gcal.deleteEvent(calendarId, eventId),
+  getGoogleEvent: (calendarId, eventId) => gcal.getEvent(calendarId, eventId),
+  onCommittedReplacementDelete: (payload) => {
+    broadcastCommittedCalendarDeleteToWindows(mainWindow, widgetWindows.values(), payload);
+  },
 });
 
 // ─── Revisions ───
@@ -3039,7 +3054,14 @@ ipcMain.handle('gcal:update-event', wrapIpc(async (_e: unknown, calendarId: stri
 }));
 
 ipcMain.handle('gcal:delete-event', wrapIpc(async (_e: unknown, calendarId: string, eventId: string) => {
-  return gcal.deleteEvent(calendarId, eventId);
+  return deleteGoogleEventWithCommittedMarker(calendarId, eventId, {
+    deleteEvent: gcal.deleteEvent,
+    getEvent: gcal.getEvent,
+    emitLocal: (marker) => {
+      broadcastCommittedCalendarDeleteToWindows(mainWindow, widgetWindows.values(), marker);
+    },
+    emitCrossClient: broadcastCalendarCommittedDelete,
+  });
 }));
 
 ipcMain.handle('gcal:ensure-watch', wrapIpc(async (_e: unknown, calendarId: string, userId: string) => {
@@ -3124,6 +3146,12 @@ function startSupabaseRealtime() {
 
   // 2) Broadcast 기반 즉시 동기화 (Publication 설정 불필요)
   setupBroadcast((event, payload) => {
+    if (relayIncomingCommittedCalendarDeleteToWindows(
+      event,
+      payload,
+      mainWindow,
+      widgetWindows.values(),
+    )) return;
     const broadcastEvent = { event, payload };
     if (mainWindow && !mainWindow.isDestroyed()) {
       mainWindow.webContents.send('supabase:broadcast-event', broadcastEvent);
@@ -3802,6 +3830,7 @@ ipcMain.handle('theme:broadcast-change', (_event, payload: unknown) => {
 
 // 캘린더 변경 브로드캐스트 — 송신자 제외(자기 프로세스 window event 중복 방지)
 ipcMain.handle('calendar:broadcast-change', (event, payload: unknown) => {
+  if (isCommittedCalendarDeleteMarker(payload)) return { ok: false };
   broadcastToAllWindows('calendar:changed', payload, event.sender.id);
   return { ok: true };
 });

@@ -65,6 +65,15 @@ export async function applyIncomingCalendarChangeInPopup(payload: unknown): Prom
   window.dispatchEvent(new CustomEvent('bflow:calendar-changed', { detail: payload }));
 }
 
+/** main이 전달한 Supabase broadcast 중 calendar exact marker만 popup cache 경로로 연결한다. */
+export async function applyIncomingSupabaseCalendarChangeInPopup(raw: unknown): Promise<boolean> {
+  if (!raw || typeof raw !== 'object') return false;
+  const data = raw as { event?: unknown; payload?: unknown };
+  if (data.event !== 'calendar-changed') return false;
+  await applyIncomingCalendarChangeInPopup(data.payload);
+  return true;
+}
+
 // 현황판은 App.tsx 와 동일하게 lazy — 팝업 엔트리 청크를 무겁게 하지 않는다 (피드백 36).
 const CharacterBoardView = lazy(() => import('@/views/CharacterBoardView'));
 
@@ -469,6 +478,13 @@ export function WidgetPopup({ widgetId, extraParams }: { widgetId: string; extra
           useDataStore.getState().updateSceneByUuid(sceneUuid, { [field]: normalized });
           return;
         }
+      }
+      if (data.event === 'calendar-changed') {
+        // 다른 앱 인스턴스에서 persistence가 끝난 exact delete marker도 이 popup의
+        // 독립 calendar cache에 즉시 적용한다. 일반 calendar action은 여기서 full
+        // reload하지 않고 기존 PR2 동작을 유지한다.
+        void applyIncomingSupabaseCalendarChangeInPopup(raw);
+        return;
       }
       if (data.event === 'data-change') {
         reloadData();
