@@ -38,6 +38,7 @@ import {
 import type {
   CalendarPrivacyMigrationSourceDeleteInput,
   CalendarPrivacyMigrationSourceDeleteResult,
+  CalendarPrivacyReplacementDisposition,
 } from '@/shared/calendarApiContract';
 
 type PreviewUser = AppUser & { password: string };
@@ -97,6 +98,17 @@ type MockPrivacyReplacementTarget =
   | { storage: 'bflow'; actualId: string; calendarId: string }
   | { storage: 'legacy-private'; actualId: string }
   | { storage: 'google'; actualId: string; calendarId: string };
+type MockPrivacyReplacementOrigin = { userId: string; epoch: number };
+type MockPrivacyReplacementState = 'created' | 'needsKeep' | 'needsDelete' | 'kept' | 'deleted';
+type MockPrivacyReplacementEntry = {
+  origin: MockPrivacyReplacementOrigin;
+  source: CalendarPrivacyMigrationSourceDeleteInput;
+  target: MockPrivacyReplacementTarget;
+  state: MockPrivacyReplacementState;
+  terminalDisposition: CalendarPrivacyReplacementDisposition | null;
+  retiring: boolean;
+};
+const mockPrivacyReplacementEntries = new Set<MockPrivacyReplacementEntry>();
 const mockCalendarTags: MockCalendarTagRow[] = devCalendarSeed.tags;
 const supabaseBroadcastListeners = new Set<(event: unknown) => void>();
 const previewCalendarNotificationRealtime = createDevCalendarNotificationRealtimeListeners();
@@ -391,6 +403,102 @@ function deleteMockPrivacyReplacementTarget(target: MockPrivacyReplacementTarget
     event.id === target.actualId && event.calendar_id === target.calendarId
   ));
   if (index >= 0) mockCalendarEvents.splice(index, 1);
+}
+
+function isMockPrivacyReplacementTerminal(entry: MockPrivacyReplacementEntry): boolean {
+  return entry.state === 'kept' || entry.state === 'deleted';
+}
+
+function sameMockPrivacyReplacementOrigin(
+  left: MockPrivacyReplacementOrigin,
+  right: MockPrivacyReplacementOrigin,
+): boolean {
+  return left.userId === right.userId && left.epoch === right.epoch;
+}
+
+function markMockPrivacyReplacementTerminal(
+  entry: MockPrivacyReplacementEntry,
+  disposition: CalendarPrivacyReplacementDisposition,
+): void {
+  entry.state = disposition === 'keep' ? 'kept' : 'deleted';
+  entry.terminalDisposition = disposition;
+}
+
+function settleMockPrivacyReplacement(
+  entry: MockPrivacyReplacementEntry,
+  disposition: CalendarPrivacyReplacementDisposition,
+  options: { transitionOwned?: boolean } = {},
+): void {
+  if (disposition !== 'keep' && disposition !== 'delete') {
+    throw new Error('보상 continuation 처리 방식이 올바르지 않습니다');
+  }
+  if (isMockPrivacyReplacementTerminal(entry)) {
+    if (entry.retiring && entry.terminalDisposition === disposition) return;
+    throw new Error('보상 continuation은 이미 반대 방식으로 확정되었습니다');
+  }
+  if (entry.retiring && !options.transitionOwned) {
+    throw new Error('보상 continuation은 세션 전환 정리 중입니다');
+  }
+  if (entry.state === 'needsKeep' && disposition !== 'keep') {
+    throw new Error('원본 삭제 결과가 불확실하여 replacement를 유지해야 합니다');
+  }
+  if (entry.state === 'needsDelete' && disposition !== 'delete') {
+    throw new Error('원본 일정이 남아 있어 replacement를 삭제해야 합니다');
+  }
+
+  if (disposition === 'delete') deleteMockPrivacyReplacementTarget(entry.target);
+  markMockPrivacyReplacementTerminal(entry, disposition);
+}
+
+function deleteMockPrivacyReplacementSource(
+  entry: MockPrivacyReplacementEntry,
+): CalendarPrivacyMigrationSourceDeleteResult {
+  const currentOrigin: MockPrivacyReplacementOrigin | null = previewCanonicalUserId
+    ? { userId: previewCanonicalUserId, epoch: previewCanonicalEpoch }
+    : null;
+  if (entry.retiring || !currentOrigin || !sameMockPrivacyReplacementOrigin(entry.origin, currentOrigin)) {
+    throw new Error('세션 전환 뒤 이전 사용자의 이관 원본은 더 이상 삭제할 수 없습니다');
+  }
+  if (entry.state !== 'created') {
+    throw new Error('이관 원본을 삭제할 수 있는 replacement 상태가 아닙니다');
+  }
+
+  try {
+    const result = deleteMockBoundPrivacyMigrationSource(entry.source, entry.origin.userId);
+    entry.state = result === 'deleted' || result === 'ambiguous' ? 'needsKeep' : 'needsDelete';
+    return result;
+  } catch (error) {
+    entry.state = 'needsDelete';
+    throw error;
+  }
+}
+
+function resolveMockRetiringPrivacyReplacement(entry: MockPrivacyReplacementEntry): void {
+  entry.retiring = true;
+  while (!isMockPrivacyReplacementTerminal(entry)) {
+    if (entry.state === 'created') entry.state = 'needsDelete';
+    if (entry.state === 'needsKeep') {
+      settleMockPrivacyReplacement(entry, 'keep', { transitionOwned: true });
+      continue;
+    }
+    if (entry.state === 'needsDelete') {
+      settleMockPrivacyReplacement(entry, 'delete', { transitionOwned: true });
+      continue;
+    }
+    throw new Error('replacement continuation 정리 상태가 올바르지 않습니다');
+  }
+}
+
+/**
+ * mock의 create/source-delete는 동기 메모리 작업이므로, 실제 main의 begin + drain을
+ * 새 세션을 publish하기 전에 한 번에 수행한다. 전환 뒤 남은 closure는 확정된 같은
+ * outcome만 idempotent하게 읽을 수 있고 다른 target/source를 바꾸지 못한다.
+ */
+function transitionMockPrivacyReplacementOrigin(origin: MockPrivacyReplacementOrigin): void {
+  for (const entry of mockPrivacyReplacementEntries) {
+    if (!sameMockPrivacyReplacementOrigin(entry.origin, origin)) continue;
+    resolveMockRetiringPrivacyReplacement(entry);
+  }
 }
 
 function ensureMockPersonalCalendar(): MockCalendarRow | null {
@@ -1590,7 +1698,6 @@ export function installDevElectronAPI(): void {
     },
     calendarPrivacyReplacementCreate: async (request) => {
       const actor = requireMockCalendarUser();
-      const originEpoch = previewCanonicalEpoch;
       let target: MockPrivacyReplacementTarget;
       if (request.storage === 'bflow') {
         const created = createMockCalendarEvent(request.event, actor.id);
@@ -1604,24 +1711,23 @@ export function installDevElectronAPI(): void {
       } else {
         throw new Error('Google Calendar 연결 후 공개 일정으로 전환할 수 있습니다.');
       }
-      let settled = false;
+      const entry: MockPrivacyReplacementEntry = {
+        origin: { userId: actor.id, epoch: previewCanonicalEpoch },
+        source: { ...request.source } as CalendarPrivacyMigrationSourceDeleteInput,
+        target,
+        state: 'created',
+        terminalDisposition: null,
+        retiring: false,
+      };
+      mockPrivacyReplacementEntries.add(entry);
       return {
         storage: target.storage,
         actual_id: target.actualId,
         calendar_id: 'calendarId' in target ? target.calendarId : undefined,
         settle: async (disposition) => {
-          if (settled) throw new Error('보상 continuation이 이미 처리되었습니다');
-          settled = true;
-          if (disposition === 'delete') deleteMockPrivacyReplacementTarget(target);
+          settleMockPrivacyReplacement(entry, disposition);
         },
-        deleteSource: async () => {
-          // stale renderer의 보상 settle은 계속 허용하되, 새 로그인 세션이 old source를
-          // 삭제하는 일은 preview에서도 막는다. 실제 main transition fence와 같은 방향이다.
-          if (previewCanonicalUserId !== actor.id || previewCanonicalEpoch !== originEpoch) {
-            throw new Error('이전 사용자 세션의 이관 원본은 더 이상 삭제할 수 없습니다');
-          }
-          return deleteMockBoundPrivacyMigrationSource(request.source, actor.id);
-        },
+        deleteSource: async () => deleteMockPrivacyReplacementSource(entry),
       };
     },
     calendarEventUpdate: async (id, updates) => {
@@ -1930,7 +2036,15 @@ export function installDevElectronAPI(): void {
       if (!user || user.password !== input.password) {
         return { ok: false, payload: previewCanonicalPayload(), error: '이름 또는 비밀번호가 일치하지 않습니다.' };
       }
-      if (previewCanonicalUserId !== user.id) previewCanonicalEpoch++;
+      if (previewCanonicalUserId !== user.id) {
+        if (previewCanonicalUserId) {
+          transitionMockPrivacyReplacementOrigin({
+            userId: previewCanonicalUserId,
+            epoch: previewCanonicalEpoch,
+          });
+        }
+        previewCanonicalEpoch++;
+      }
       previewCanonicalUserId = user.id;
       writeRememberedPreviewUser(input.rememberMe === false ? null : user.id);
       maybeGrantPreviewDailyLogin();
@@ -1945,7 +2059,13 @@ export function installDevElectronAPI(): void {
       return { ok: true, payload: previewCanonicalPayload() };
     },
     logoutCanonicalSession: async () => {
-      if (previewCanonicalUserId) previewCanonicalEpoch++;
+      if (previewCanonicalUserId) {
+        transitionMockPrivacyReplacementOrigin({
+          userId: previewCanonicalUserId,
+          epoch: previewCanonicalEpoch,
+        });
+        previewCanonicalEpoch++;
+      }
       previewCanonicalUserId = null;
       writeRememberedPreviewUser(null);
       return { ok: true, payload: previewCanonicalPayload() };

@@ -814,7 +814,7 @@ test('unauthenticated preview rejects a Google replacement and keeps the persona
   }
 });
 
-test('preview replacement exposes only a retained continuation across a session switch', async () => {
+test('preview session transition resolves a created replacement and only repeats its terminal delete', async () => {
   const harness = await createPreviewCalendarHarness();
   try {
     await previewLogin(harness.api, '배한솔');
@@ -842,14 +842,50 @@ test('preview replacement exposes only a retained continuation across a session 
 
     await harness.api.logoutCanonicalSession();
     await previewLogin(harness.api, '허혜원');
-    await assert.rejects(replacement.deleteSource(), /이전 사용자 세션/);
+    await assert.rejects(replacement.deleteSource(), /세션/);
+    await assert.rejects(replacement.settle('keep'), /반대 방식/);
+    await replacement.settle('delete');
     await replacement.settle('delete');
 
     await harness.api.logoutCanonicalSession();
     await previewLogin(harness.api, '배한솔');
     const ids = (await harness.api.calendarEventsList()).map((event) => event.id);
     assert.ok(ids.includes(source.id), 'new-session actor never deletes the bound A source');
-    assert.equal(ids.includes(replacement.actual_id), false, 'A continuation can still compensate its target');
+    assert.equal(ids.includes(replacement.actual_id), false, 'session transition owns the created target cleanup');
+  } finally {
+    harness.restore();
+  }
+});
+
+test('preview session transition preserves a source-deleted replacement and only repeats its terminal keep', async () => {
+  const harness = await createPreviewCalendarHarness();
+  try {
+    await previewLogin(harness.api, '배한솔');
+    const personalCalendar = (await harness.api.calendarList()).find((calendar) => calendar.is_personal);
+    assert.ok(personalCalendar);
+    const source = await harness.api.calendarEventCreate(
+      previewEventInput(personalCalendar.id, '삭제 완료 원본'),
+    );
+    const replacement = await harness.api.calendarPrivacyReplacementCreate({
+      storage: 'bflow',
+      source: { storage: 'bflow', event_id: source.id },
+      event: previewEventInput(personalCalendar.id, '보존할 이관 대상'),
+    });
+    assert.equal('transition_resolved' in replacement, false);
+    if ('transition_resolved' in replacement) throw new Error('unexpected transition resolution');
+    assert.equal(await replacement.deleteSource(), 'deleted');
+
+    await harness.api.logoutCanonicalSession();
+    await previewLogin(harness.api, '허혜원');
+    await assert.rejects(replacement.settle('delete'), /반대 방식/);
+    await replacement.settle('keep');
+    await replacement.settle('keep');
+
+    await harness.api.logoutCanonicalSession();
+    await previewLogin(harness.api, '배한솔');
+    const ids = (await harness.api.calendarEventsList()).map((event) => event.id);
+    assert.equal(ids.includes(source.id), false, 'source deletion remains committed before the session transition');
+    assert.ok(ids.includes(replacement.actual_id), 'session transition keeps the already-migrated target');
   } finally {
     harness.restore();
   }
