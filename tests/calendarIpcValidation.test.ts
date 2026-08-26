@@ -3799,18 +3799,22 @@ test('calendar notification catch-up applies valid muted calendar exclusions bef
   }
 });
 
-test('calendar notification catch-up filters 200 muted rows before limiting, keeps deletes, and orders timestamp ties by id', async () => {
+test('calendar notification catch-up applies all 101 muted calendars before limiting, keeps deletes, and orders timestamp ties by id', async () => {
   const globalScope = globalThis as Record<string, unknown>;
   const hadPrior = Object.prototype.hasOwnProperty.call(globalScope, STORE_HARNESS_KEY);
   const prior = globalScope[STORE_HARNESS_KEY];
-  const mutedCalendarId = '10000000-0000-4000-8000-000000000002';
-  const visibleCalendarId = '10000000-0000-4000-8000-000000000003';
+  const mutedCalendarIds = Array.from(
+    { length: 101 },
+    (_, index) => `10000000-0000-4000-8000-${String(index + 1).padStart(12, '0')}`,
+  );
+  const newestMutedCalendarId = mutedCalendarIds.at(-1)!;
+  const visibleCalendarId = '30000000-0000-4000-8000-000000000003';
   const rows = [
     ...Array.from({ length: 200 }, (_, index) => ({
       id: `muted-${String(index).padStart(3, '0')}`,
       recipient_id: 'recipient-1',
       read_at: null,
-      calendar_id: mutedCalendarId,
+      calendar_id: newestMutedCalendarId,
       created_at: '2026-08-26T12:00:00.000Z',
     })),
     {
@@ -3906,10 +3910,11 @@ test('calendar notification catch-up filters 200 muted rows before limiting, kee
 
     assert.deepEqual(
       (await store.listUnreadNotifications('recipient-1', '2026-07-27T00:00:00.000Z', {
-        excludedCalendarIds: [mutedCalendarId],
+        excludedCalendarIds: mutedCalendarIds,
       })).map((row) => row.id),
       ['visible-z', 'visible-a', 'deleted-event'],
     );
+    assert.ok(rows.every((row) => row.read_at === null), 'muting only filters catch-up rows and never marks them read');
     assert.deepEqual(orders, [
       { column: 'created_at', ascending: false },
       { column: 'id', ascending: false },

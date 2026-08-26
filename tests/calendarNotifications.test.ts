@@ -146,7 +146,7 @@ test('realtime 알림 행은 renderer에 필요한 표시 필드만 camelCase로
   );
 });
 
-test('catch-up exclusion input keeps only unique UUID calendar ids and has a bounded payload', () => {
+test('catch-up exclusion input keeps every unique UUID calendar id without silently dropping a muted calendar', () => {
   const validIds = Array.from(
     { length: 101 },
     (_, index) => `10000000-0000-4000-8000-${String(index + 1).padStart(12, '0')}`,
@@ -161,8 +161,9 @@ test('catch-up exclusion input keeps only unique UUID calendar ids and has a bou
   });
 
   assert.equal(CALENDAR_NOTIFICATION_CATCHUP_LIMIT, 200);
-  assert.equal(normalized.excludedCalendarIds.length, 100);
+  assert.equal(normalized.excludedCalendarIds.length, 101);
   assert.deepEqual(normalized.excludedCalendarIds.slice(0, 2), validIds.slice(0, 2));
+  assert.equal(normalized.excludedCalendarIds.at(-1), validIds.at(-1));
   assert.equal(normalized.excludedCalendarIds.includes('calendar_id.eq.renderer-controlled-recipient'), false);
 });
 
@@ -329,10 +330,16 @@ test('preview calendar catch-up returns copies, excludes the real muted seed cal
       );
     }
 
+    const unrelatedMutedCalendarIds = Array.from(
+      { length: 100 },
+      (_, index) => `20000000-0000-4000-8000-${String(index + 1).padStart(12, '0')}`,
+    );
     assert.deepEqual(
-      await harness.api.calendarNotificationsCatchup({ excludedCalendarIds: [mutedSeedCalendarId!] }),
+      await harness.api.calendarNotificationsCatchup({
+        excludedCalendarIds: [...unrelatedMutedCalendarIds, mutedSeedCalendarId!],
+      }),
       [],
-      'the actual UUID-shaped seed calendar is removed before the cap without marking its rows read',
+      'the 101st valid muted calendar is still excluded before the cap without marking its rows read',
     );
     assert.deepEqual(
       await harness.api.calendarNotificationsCatchup(),

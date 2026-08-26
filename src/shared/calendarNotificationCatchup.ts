@@ -6,7 +6,6 @@ export const CALENDAR_NOTIFICATION_CATCHUP_LIMIT = 200;
  * DB/프리뷰 모두 UUID를 사용하므로 허용 목록으로 조립 전 입력을 좁힌다.
  */
 const CALENDAR_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-const MAX_EXCLUDED_CALENDAR_IDS = 100;
 
 export interface CalendarNotificationCatchupInput {
   excludedCalendarIds?: string[];
@@ -30,7 +29,6 @@ export function normalizeCalendarNotificationCatchupInput(
     if (!CALENDAR_ID_PATTERN.test(id) || seen.has(id)) continue;
     seen.add(id);
     excludedCalendarIds.push(id);
-    if (excludedCalendarIds.length === MAX_EXCLUDED_CALENDAR_IDS) break;
   }
 
   return { excludedCalendarIds };
