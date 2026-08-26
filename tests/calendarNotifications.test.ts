@@ -10,6 +10,7 @@ import {
   buildCalendarNotificationText,
   mapCalendarNotificationRow,
 } from '../src/shared/calendarNotifications.ts';
+import { createDevCalendarNotificationRealtimeListeners } from '../src/mocks/devCalendarNotificationRealtime.ts';
 
 test('수신자: members 캘린더 = 소유자 + 멤버 - 행위자', () => {
   const recipients = computeCalendarNotificationRecipients(
@@ -158,17 +159,38 @@ test('preview calendar catch-up seeds use the signed-in mock user and visible cu
   assert.match(source, /detail:\s*`\$\{.*?\}\/12 → \$\{.*?\}\/13`/s);
   assert.match(source, /calendarNotificationsCatchup:\s*async \(\) => mockCalendarNotifications/);
   assert.match(source, /calendarNotificationsMarkRead:\s*async \(\) => \{\}/);
+  assert.match(source, /onSupabaseRealtime:\s*\(callback\) => previewCalendarNotificationRealtime\.subscribe\(callback\)/);
+  assert.match(source, /previewCalendarNotificationRealtime\.emitCalendarNotification\(row\)/);
 });
 
-test('preview broadcast mock fans out calendar notifications through unsubscribable isolated listeners', () => {
-  const source = readPreviewApiSource();
+test('preview realtime helper emits the canonical calendar envelope, isolates listener failures, and unsubscribes', () => {
+  const realtime = createDevCalendarNotificationRealtimeListeners(() => {});
+  const received: unknown[] = [];
+  realtime.subscribe(() => {
+    throw new Error('first listener failure');
+  });
+  const unsubscribe = realtime.subscribe((event) => received.push(event));
+  const notification = {
+    id: 'mock-calendar-notification-1',
+    recipientId: '1',
+    actorId: '2',
+    actorName: '장삐쭈',
+    calendarId: 'calendar-1',
+    calendarName: 'EP 마일스톤',
+    eventTitle: 'EP06 업로드',
+    eventDate: '2026-08-25',
+    action: 'create' as const,
+    detail: null,
+    createdAt: '2026-08-26T00:00:00.000Z',
+  };
 
-  assert.match(source, /const supabaseBroadcastListeners = new Set<\(event: unknown\) => void>\(\)/);
-  assert.match(source, /supabaseBroadcastListeners\.add\(callback\)/);
-  assert.match(source, /return \(\) => supabaseBroadcastListeners\.delete\(callback\)/);
-  assert.match(source, /catch \(err\)\s*\{\s*console\.warn\('\[dev preview broadcast\] listener failed:', err\)/s);
-  assert.match(source, /__bflowMockCalendarNotify/);
-  assert.match(source, /event: 'calendar-notification'/);
-  assert.match(source, /payload: \{ notification: row \}/);
-  assert.doesNotMatch(source, /payload:\s*\{\s*notification:\s*mockCalendarNotifications\[0\]/s);
+  realtime.emitCalendarNotification(notification);
+  assert.deepEqual(received, [{
+    table: 'calendar_notifications',
+    payload: { notification },
+  }]);
+
+  unsubscribe();
+  realtime.emitCalendarNotification({ ...notification, id: 'mock-calendar-notification-2' });
+  assert.equal(received.length, 1);
 });

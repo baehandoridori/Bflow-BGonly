@@ -23,6 +23,7 @@ import { createArcadeLocalStorageGateway } from '@/features/playground/arcade/lo
 import type { ArcadePreviewGateway } from '@/features/playground/arcade/previewGateway';
 import { useArcadeStore } from '@/features/playground/arcade/useArcadeStore';
 import { createDevCalendarSeed } from './devCalendarSeed';
+import { createDevCalendarNotificationRealtimeListeners } from './devCalendarNotificationRealtime';
 import type { CalendarNotificationPushRow } from '@/shared/calendarNotifications';
 import {
   canCreateCalendar,
@@ -91,6 +92,7 @@ type MockPrivacyReplacementTarget =
 const mockPrivacyReplacementReceipts = new Map<string, MockPrivacyReplacementTarget>();
 const mockCalendarTags: MockCalendarTagRow[] = devCalendarSeed.tags;
 const supabaseBroadcastListeners = new Set<(event: unknown) => void>();
+const previewCalendarNotificationRealtime = createDevCalendarNotificationRealtimeListeners();
 
 function buildMockCalendarNotifications(): MockCalendarNotificationRow[] {
   const milestoneCalendar = mockCalendars.find((calendar) => calendar.name === 'EP 마일스톤');
@@ -1813,7 +1815,7 @@ export function installDevElectronAPI(): void {
     supabaseWriteMetadata: async (type, key, value) => upsertMockMetadata(type, key, value),
     supabaseGetActivity: async () => [],
     supabaseGetRealtimeStatus: async () => 'CONNECTING',
-    onSupabaseRealtime: noop,
+    onSupabaseRealtime: (callback) => previewCalendarNotificationRealtime.subscribe(callback),
     onSupabasePresence: noop,
     getPresenceSnapshot: async () => ({}),
     onSupabaseStatus: noop,
@@ -2226,7 +2228,7 @@ export function installDevElectronAPI(): void {
       id: `mock-calendar-notification-${Date.now()}`,
       createdAt: new Date().toISOString(),
     };
-    emitMockSupabaseBroadcast({ event: 'calendar-notification', payload: { notification: row } });
+    previewCalendarNotificationRealtime.emitCalendarNotification(row);
   };
   document.documentElement.dataset.devElectronApi = 'installed';
 }
