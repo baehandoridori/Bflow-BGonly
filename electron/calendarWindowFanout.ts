@@ -55,6 +55,33 @@ export function broadcastSharedCalendarSignalToWindows(
   broadcastCalendarPayloadToWindows(channel, mainWindow, widgetWindows, payload, onError);
 }
 
+/** calendar_notifications 는 main의 정본 세션 수신자에게만 최소 형태로 전달한다.
+ * 모든 renderer가 main 세션을 공유하므로 renderer별 필터보다 앞선 IPC 경계에서 막는다. */
+export function broadcastCalendarNotificationToSessionWindows(
+  notification: { recipientId: string },
+  getSessionUserIdOrThrow: () => string,
+  mainWindow: CalendarMarkerWindow | null,
+  widgetWindows: Iterable<CalendarMarkerWindow>,
+  onError?: (error: unknown) => void,
+): boolean {
+  let sessionUserId: string;
+  try {
+    sessionUserId = getSessionUserIdOrThrow();
+  } catch {
+    return false;
+  }
+  if (!sessionUserId || notification.recipientId !== sessionUserId) return false;
+
+  broadcastSharedCalendarSignalToWindows(
+    'supabase:realtime-event',
+    mainWindow,
+    widgetWindows,
+    { table: 'calendar_notifications', payload: { notification } },
+    onError,
+  );
+  return true;
+}
+
 /** main persistence가 만든 uppercase 일반 신호만 이 경로로 모든 로컬 창에 전달한다. */
 export function broadcastTrustedSharedCalendarChangeToWindows(
   mainWindow: CalendarMarkerWindow | null,

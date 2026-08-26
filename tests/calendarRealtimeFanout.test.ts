@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs';
 import test from 'node:test';
 import { build, type Plugin } from 'esbuild';
 import * as calendarWindowFanout from '../electron/calendarWindowFanout.ts';
+import { mapCalendarNotificationRow } from '../src/shared/calendarNotifications.ts';
 
 type RegisteredHandler = {
   type: string;
@@ -563,6 +564,76 @@ test('remote shared-calendar relay channels continue from a failed main window t
   }
 });
 
+test('calendar notification realtime fanout sends only the canonical main-session recipient', () => {
+  const fanout = (calendarWindowFanout as Record<string, unknown>)
+    .broadcastCalendarNotificationToSessionWindows as undefined | ((
+      payload: unknown,
+      getSessionUserIdOrThrow: () => string,
+      mainWindow: unknown,
+      widgetWindows: Iterable<unknown>,
+      onError?: (error: unknown) => void,
+    ) => boolean);
+  assert.equal(
+    typeof fanout,
+    'function',
+    'notification fanout must verify the canonical main session before any BrowserWindow send',
+  );
+
+  const mainSends: Array<{ channel: string; payload: unknown }> = [];
+  const widgetSends: Array<{ channel: string; payload: unknown }> = [];
+  const mainWindow = {
+    isDestroyed: () => false,
+    webContents: { send: (channel: string, payload: unknown) => mainSends.push({ channel, payload }) },
+  };
+  const widgetWindows = [{
+    isDestroyed: () => false,
+    webContents: { send: (channel: string, payload: unknown) => widgetSends.push({ channel, payload }) },
+  }];
+  const notification = mapCalendarNotificationRow({
+    id: 'notice-1',
+    recipient_id: 'recipient-1',
+    actor_id: 'actor-1',
+    actor_name: '작업자',
+    calendar_id: 'calendar-1',
+    calendar_name: '팀 일정',
+    event_title: '비공개 세부 제목',
+    event_date: '2026-08-26',
+    action: 'create',
+    detail: null,
+    created_at: '2026-08-26T00:00:00.000Z',
+    private_only_column: 'renderer에 노출되면 안 됨',
+  });
+  assert.ok(notification, 'the main boundary must have a valid minimal notification before fanout');
+  assert.equal('private_only_column' in notification, false);
+  const expectedEvent = {
+    table: 'calendar_notifications',
+    payload: {
+      notification: {
+        id: 'notice-1',
+        recipientId: 'recipient-1',
+        actorId: 'actor-1',
+        actorName: '작업자',
+        calendarId: 'calendar-1',
+        calendarName: '팀 일정',
+        eventTitle: '비공개 세부 제목',
+        eventDate: '2026-08-26',
+        action: 'create',
+        detail: null,
+        createdAt: '2026-08-26T00:00:00.000Z',
+      },
+    },
+  };
+
+  assert.equal(fanout!(notification, () => 'recipient-1', mainWindow, widgetWindows), true);
+  assert.deepEqual(mainSends, [{ channel: 'supabase:realtime-event', payload: expectedEvent }]);
+  assert.deepEqual(widgetSends, [{ channel: 'supabase:realtime-event', payload: expectedEvent }]);
+
+  assert.equal(fanout!(notification, () => 'another-user', mainWindow, widgetWindows), false);
+  assert.equal(fanout!(notification, () => { throw new Error('no main session'); }, mainWindow, widgetWindows), false);
+  assert.deepEqual(mainSends, [{ channel: 'supabase:realtime-event', payload: expectedEvent }]);
+  assert.deepEqual(widgetSends, [{ channel: 'supabase:realtime-event', payload: expectedEvent }]);
+});
+
 test('only ordinary calendar broadcasts enter the generic hardened relay', () => {
   const predicate = (calendarWindowFanout as Record<string, unknown>)
     .isSharedCalendarBroadcastSignal as undefined | ((event: string, payload: unknown) => boolean);
@@ -612,8 +683,8 @@ test('main wires realtime calendar rows to renderers and persistence commits to 
   );
   assert.match(
     main,
-    /function broadcastSupabaseCalendarNotification\([\s\S]{0,400}mapCalendarNotificationRow\([\s\S]{0,400}broadcastSharedCalendarSignalToWindows\(\s*'supabase:realtime-event'/,
-    'main must map a notification row before delivering it through the established realtime channel',
+    /function broadcastSupabaseCalendarNotification\([\s\S]{0,300}mapCalendarNotificationRow\([\s\S]{0,300}broadcastCalendarNotificationToSessionWindows\(\s*notification,\s*getSessionUserIdOrThrow,\s*mainWindow,\s*widgetWindows\.values\(\)/,
+    'main must route notification delivery through the canonical-session fanout boundary',
   );
 
   const calendarIpc = readFileSync('electron/calendarIpc.ts', 'utf8');

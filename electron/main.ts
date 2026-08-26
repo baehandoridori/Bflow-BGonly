@@ -21,6 +21,7 @@ import { uploadImage as storageUploadImage, deleteImage as storageDeleteImage, u
 import { registerFontProtocol, registerFontIpcHandlers } from './fontIpc';
 import { registerCalendarIpc } from './calendarIpc';
 import {
+  broadcastCalendarNotificationToSessionWindows,
   broadcastCommittedCalendarDeleteToWindows,
   broadcastSharedCalendarSignalToWindows,
   broadcastTrustedSharedCalendarChangeToWindows,
@@ -3309,7 +3310,7 @@ function broadcastSupabaseCalendarEvent(table: string, payload: unknown) {
   );
 }
 
-/** calendar_notifications 원시 행은 표시·수신자 필터에 필요한 최소 필드만 renderer로 전달한다. */
+/** calendar_notifications 는 canonical main 세션 수신자에게만 최소 형태로 전달한다. */
 function broadcastSupabaseCalendarNotification(payload: unknown) {
   const row = payload && typeof payload === 'object'
     ? (payload as { new?: unknown }).new
@@ -3317,11 +3318,11 @@ function broadcastSupabaseCalendarNotification(payload: unknown) {
   if (!row || typeof row !== 'object') return;
   const notification = mapCalendarNotificationRow(row as Record<string, unknown>);
   if (!notification) return;
-  broadcastSharedCalendarSignalToWindows(
-    'supabase:realtime-event',
+  broadcastCalendarNotificationToSessionWindows(
+    notification,
+    getSessionUserIdOrThrow,
     mainWindow,
     widgetWindows.values(),
-    { table: 'calendar_notifications', payload: { notification } },
   );
 }
 
