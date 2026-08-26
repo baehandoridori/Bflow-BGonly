@@ -4160,6 +4160,26 @@ test('ScheduleView carries weekly and daily navigation across a calendar-year bo
 });
 
 test('ScheduleView keeps valid weekly indices owned by the displayed year', async (t) => {
+  const renderCardAtIndexOne = async (): Promise<ReactNode> => {
+    resetHarness();
+    scheduleLocalStorage.set('bflow_calendar_view_v1', JSON.stringify({
+      viewMode: 'week',
+      weekSubMode: 'card',
+    }));
+
+    await renderScheduleView();
+    const card = scheduleWeekScrollProps.at(-1);
+    assert.ok(card);
+    card.onWeekChange(1);
+    const tree = await renderScheduleView();
+    const indexOne = scheduleWeekScrollProps.at(-1);
+    assert.ok(indexOne);
+    assert.equal(indexOne.currentYear, 2026);
+    assert.equal(indexOne.currentMonth, 0);
+    assert.equal(indexOne.activeWeekIndex, 1);
+    return tree;
+  };
+
   await t.test('a valid timegrid index for the first 2026 week keeps January 2026 selected', async () => {
     resetHarness();
     scheduleLocalStorage.set('bflow_calendar_view_v1', JSON.stringify({
@@ -4210,6 +4230,33 @@ test('ScheduleView keeps valid weekly indices owned by the displayed year', asyn
     const priorYear = scheduleWeekScrollProps.at(-1);
     assert.ok(priorYear);
     assert.equal(priorYear.currentYear, 2025, 'only the boundary sentinel changes the displayed year');
+  });
+
+  await t.test('the header previous control keeps index one and index zero inside January 2026', async () => {
+    const tree = await renderCardAtIndexOne();
+    buttonByLabel(tree, '이전 기간').props.onClick?.({ stopPropagation() {} });
+    await renderScheduleView();
+
+    const firstWeek = scheduleWeekScrollProps.at(-1);
+    assert.ok(firstWeek);
+    assert.equal(firstWeek.currentYear, 2026);
+    assert.equal(firstWeek.currentMonth, 0);
+    assert.equal(firstWeek.activeWeekIndex, 0);
+  });
+
+  await t.test('ArrowLeft keeps index one and index zero inside January 2026', async () => {
+    await renderCardAtIndexOne();
+    schedulePendingEffects.splice(0);
+    await renderScheduleView();
+    await flushScheduleMountEffects();
+
+    dispatchScheduleKeydown('ArrowLeft');
+    await renderScheduleView();
+    const firstWeek = scheduleWeekScrollProps.at(-1);
+    assert.ok(firstWeek);
+    assert.equal(firstWeek.currentYear, 2026);
+    assert.equal(firstWeek.currentMonth, 0);
+    assert.equal(firstWeek.activeWeekIndex, 0);
   });
 });
 

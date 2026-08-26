@@ -390,25 +390,16 @@ export function ScheduleView() {
     setActiveWeekIndex(findWeekIndexForDate(targetWeeks, fmtDate(target)));
   }, []);
 
-  const moveWeekBy = useCallback((delta: number) => {
-    const yearWeeks = generateYearWeeks(year);
-    if (yearWeeks.length === 0) return;
-    const safeIndex = Math.max(0, Math.min(yearWeeks.length - 1, activeWeekIndex));
-    const anchor = yearWeeks[safeIndex]?.[3];
-    if (!anchor) return;
-    moveToWeekContaining(addDays(anchor, delta * 7));
-  }, [activeWeekIndex, moveToWeekContaining, year]);
-
   const handleWeekChange = useCallback((requestedIndex: number) => {
     const yearWeeks = generateYearWeeks(year);
     if (yearWeeks.length === 0) return;
     const lastIndex = yearWeeks.length - 1;
     if (requestedIndex < 0) {
-      moveToWeekContaining(addDays(yearWeeks[0][3], -7));
+      moveToWeekContaining(addDays(yearWeeks[0][3], requestedIndex * 7));
       return;
     }
     if (requestedIndex > lastIndex) {
-      moveToWeekContaining(addDays(yearWeeks[lastIndex][3], 7));
+      moveToWeekContaining(addDays(yearWeeks[lastIndex][3], (requestedIndex - lastIndex) * 7));
       return;
     }
     const requestedWeek = yearWeeks[requestedIndex];
@@ -417,6 +408,13 @@ export function ScheduleView() {
     setMonth(dateInDisplayedYear.getMonth());
     setActiveWeekIndex(requestedIndex);
   }, [moveToWeekContaining, year]);
+
+  const moveWeekBy = useCallback((delta: number) => {
+    const yearWeeks = generateYearWeeks(year);
+    if (yearWeeks.length === 0) return;
+    const safeIndex = Math.max(0, Math.min(yearWeeks.length - 1, activeWeekIndex));
+    handleWeekChange(safeIndex + delta);
+  }, [activeWeekIndex, handleWeekChange, year]);
 
   const moveToDay = useCallback((date: Date) => {
     const target = normalizeCalendarDate(date);
