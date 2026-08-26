@@ -515,7 +515,7 @@ export function registerCalendarIpc(deps: CalendarIpcDeps): void {
       throw new Error('이 캘린더에 일정을 만들 권한이 없습니다');
     }
     const created = await store.createEvent(safeCalendarEventCreateInput(input), actorId);
-    await emitCalendarEventNotifications({
+    void emitCalendarEventNotifications({
       actorId,
       action: 'create',
       calendar,
@@ -775,7 +775,7 @@ export function registerCalendarIpc(deps: CalendarIpcDeps): void {
     if (updates.linked_department !== undefined) safeUpdates.linked_department = updates.linked_department;
     if (updates.linked_todo_id !== undefined) safeUpdates.linked_todo_id = updates.linked_todo_id;
     const updated = await store.updateEvent(id, safeUpdates, previous.calendar_id, user.id);
-    await emitCalendarEventNotifications({
+    void emitCalendarEventNotifications({
       actorId: user.id,
       action: 'update',
       calendar: notificationCalendar,
@@ -838,14 +838,16 @@ export function registerCalendarIpc(deps: CalendarIpcDeps): void {
         calendarId: previous.calendar_id,
         committedPrivacyReplacementDelete: true,
       });
-      await runStrictPostCommitSideEffect('notification', () => emitCalendarEventNotifications({
-        actorId: user.id,
-        action: 'delete',
-        calendar,
-        members,
-        event: null,
-        previous,
-      }));
+      await runStrictPostCommitSideEffect('notification', () => {
+        void emitCalendarEventNotifications({
+          actorId: user.id,
+          action: 'delete',
+          calendar,
+          members,
+          event: null,
+          previous,
+        });
+      });
       await runStrictPostCommitSideEffect('data broadcast', () => {
         broadcastDataChange('calendar_events', 'DELETE');
       });
@@ -854,7 +856,7 @@ export function registerCalendarIpc(deps: CalendarIpcDeps): void {
       });
       return 'deleted';
     }
-    await emitCalendarEventNotifications({
+    void emitCalendarEventNotifications({
       actorId: user.id,
       action: 'delete',
       calendar,

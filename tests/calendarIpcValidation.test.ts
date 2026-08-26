@@ -18,12 +18,14 @@ type Handler = (_event: unknown, ...args: unknown[]) => Promise<unknown>;
 type IpcHarnessState = {
   handlers: Map<string, Handler>;
   store: Record<string, (...args: unknown[]) => unknown>;
+  readUsers: () => Promise<Array<{ id: string; name: string }>>;
   broadcasts: Array<{ kind: 'data' | 'calendar'; args: unknown[] }>;
   committedDeleteMarkers: unknown[];
   broadcastFailure: { data: boolean; calendar: boolean };
 };
 
 type CalendarIpcExternalDeps = {
+  readUsers?: () => Promise<Array<{ id: string; name: string }>>;
   createLegacyPrivateEvent?: (input: Record<string, unknown>, actorId: string) => Promise<{ id: string }>;
   deleteLegacyPrivateEvent?: (eventId: string, actorId: string) => Promise<void>;
   deleteLegacyPrivateSourceEvent?: (
@@ -67,6 +69,7 @@ const storeFunctionNames = [
   'saveTags',
   'listUnreadNotifications',
   'markNotificationsRead',
+  'insertNotifications',
 ] as const;
 
 function calendarIpcTestPlugin(): Plugin {
@@ -86,7 +89,7 @@ function calendarIpcTestPlugin(): Plugin {
         )).join('\n'),
       }));
       builder.onLoad({ filter: /^supabase$/, namespace: 'calendar-ipc-test' }, () => ({
-        contents: 'export const readUsers = async () => [];',
+        contents: `export const readUsers = () => globalThis.${IPC_HARNESS_KEY}.readUsers();`,
       }));
       builder.onLoad({ filter: /^broadcast$/, namespace: 'calendar-ipc-test' }, () => ({
         contents: [
@@ -247,6 +250,7 @@ async function createIpcHarness(
   const state: IpcHarnessState = {
     handlers: new Map(),
     store: { ...defaultStore(), ...overrides },
+    readUsers: externalDeps.readUsers ?? (async () => []),
     broadcasts: [],
     committedDeleteMarkers: [],
     broadcastFailure: { data: false, calendar: false },
@@ -356,6 +360,219 @@ function deferred<T>() {
   });
   return { promise, resolve, reject };
 }
+
+test('calendar event notifications persist recipient-specific create, update, and delete rows', async (t) => {
+  const users = [
+    { id: 'actor', name: '한솔' },
+    { id: 'owner', name: '리더' },
+    { id: 'member', name: '멤버' },
+  ];
+  const calendar = calendarRow({
+    name: 'EP 마일스톤',
+    visibility: 'members',
+    owner_id: 'owner',
+  });
+  const members = [
+    { calendar_id: 'calendar-1', user_id: 'actor', can_edit: true },
+    { calendar_id: 'calendar-1', user_id: 'member', can_edit: true },
+  ];
+  const eventInput = {
+    calendar_id: 'calendar-1', title: 'EP12 업로드', memo: null, tag_id: null,
+    all_day: true, start_date: '2026-09-25', end_date: '2026-09-25',
+    start_time: null, end_time: null, linked_episode: null, linked_part: null,
+    linked_sheet_name: null, linked_scene_id: null, linked_department: null, linked_todo_id: null,
+  };
+
+  await t.test('create', async () => {
+    let rows: unknown;
+    const inserted = deferred<void>();
+    const created = calendarEventRow({ ...eventInput, created_by: 'actor' });
+    const harness = await createIpcHarness({
+      getUserRole: async () => 'user',
+      getCalendarWithMembers: async () => ({ calendar, members }),
+      createEvent: async () => created,
+      insertNotifications: async (nextRows) => { rows = nextRows; inserted.resolve(); },
+    }, 'actor', { readUsers: async () => users });
+    try {
+      assert.deepEqual(await harness.invoke('calendar:events:create', eventInput), created);
+      await inserted.promise;
+      assert.deepEqual(rows, [
+        { recipient_id: 'owner', actor_id: 'actor', actor_name: '한솔', calendar_id: 'calendar-1', calendar_name: 'EP 마일스톤', event_id: 'event-1', event_title: 'EP12 업로드', event_date: '2026-09-25', action: 'create', detail: null },
+        { recipient_id: 'member', actor_id: 'actor', actor_name: '한솔', calendar_id: 'calendar-1', calendar_name: 'EP 마일스톤', event_id: 'event-1', event_title: 'EP12 업로드', event_date: '2026-09-25', action: 'create', detail: null },
+      ]);
+    } finally {
+      harness.restore();
+    }
+  });
+
+  await t.test('update', async () => {
+    let rows: unknown;
+    const inserted = deferred<void>();
+    const previous = calendarEventRow({ ...eventInput, created_by: 'actor' });
+    const updated = calendarEventRow({ ...eventInput, title: 'EP12 일정 변경', start_date: '2026-09-26', end_date: '2026-09-26', created_by: 'actor' });
+    const harness = await createIpcHarness({
+      getUserRole: async () => 'user',
+      getEventByIdForWrite: async () => previous,
+      getCalendarWithMembers: async () => ({ calendar, members }),
+      updateEvent: async () => updated,
+      insertNotifications: async (nextRows) => { rows = nextRows; inserted.resolve(); },
+    }, 'actor', { readUsers: async () => users });
+    try {
+      assert.deepEqual(await harness.invoke('calendar:events:update', 'event-1', {
+        title: 'EP12 일정 변경', start_date: '2026-09-26', end_date: '2026-09-26',
+      }), updated);
+      await inserted.promise;
+      assert.deepEqual(rows, [
+        { recipient_id: 'owner', actor_id: 'actor', actor_name: '한솔', calendar_id: 'calendar-1', calendar_name: 'EP 마일스톤', event_id: 'event-1', event_title: 'EP12 일정 변경', event_date: '2026-09-26', action: 'update', detail: '9/25 → 9/26' },
+        { recipient_id: 'member', actor_id: 'actor', actor_name: '한솔', calendar_id: 'calendar-1', calendar_name: 'EP 마일스톤', event_id: 'event-1', event_title: 'EP12 일정 변경', event_date: '2026-09-26', action: 'update', detail: '9/25 → 9/26' },
+      ]);
+    } finally {
+      harness.restore();
+    }
+  });
+
+  await t.test('delete', async () => {
+    let rows: unknown;
+    const inserted = deferred<void>();
+    const previous = calendarEventRow({ ...eventInput, created_by: 'actor' });
+    const harness = await createIpcHarness({
+      getUserRole: async () => 'user',
+      getEventByIdForWrite: async () => previous,
+      getCalendarWithMembers: async () => ({ calendar, members }),
+      deleteEvent: async () => {},
+      insertNotifications: async (nextRows) => { rows = nextRows; inserted.resolve(); },
+    }, 'actor', { readUsers: async () => users });
+    try {
+      assert.equal(await harness.invoke('calendar:events:delete', 'event-1'), undefined);
+      await inserted.promise;
+      assert.deepEqual(rows, [
+        { recipient_id: 'owner', actor_id: 'actor', actor_name: '한솔', calendar_id: 'calendar-1', calendar_name: 'EP 마일스톤', event_id: 'event-1', event_title: 'EP12 업로드', event_date: '2026-09-25', action: 'delete', detail: null },
+        { recipient_id: 'member', actor_id: 'actor', actor_name: '한솔', calendar_id: 'calendar-1', calendar_name: 'EP 마일스톤', event_id: 'event-1', event_title: 'EP12 업로드', event_date: '2026-09-25', action: 'delete', detail: null },
+      ]);
+    } finally {
+      harness.restore();
+    }
+  });
+});
+
+test('calendar CRUD and strict migration do not wait for best-effort notification reads', async (t) => {
+  const eventInput = {
+    calendar_id: 'calendar-1', title: '비차단 알림', memo: null, tag_id: null,
+    all_day: true, start_date: '2026-09-25', end_date: '2026-09-25',
+    start_time: null, end_time: null, linked_episode: null, linked_part: null,
+    linked_sheet_name: null, linked_scene_id: null, linked_department: null, linked_todo_id: null,
+  };
+  const scenarios = [
+    {
+      name: 'create',
+      channel: 'calendar:events:create',
+      args: [eventInput],
+      store: { createEvent: async () => calendarEventRow(eventInput) },
+    },
+    {
+      name: 'update',
+      channel: 'calendar:events:update',
+      args: ['event-1', { title: '수정됨' }],
+      store: {
+        getEventByIdForWrite: async () => calendarEventRow(eventInput),
+        updateEvent: async () => calendarEventRow({ ...eventInput, title: '수정됨' }),
+      },
+    },
+    {
+      name: 'delete',
+      channel: 'calendar:events:delete',
+      args: ['event-1'],
+      store: { getEventByIdForWrite: async () => calendarEventRow(eventInput), deleteEvent: async () => {} },
+    },
+    {
+      name: 'strict migration delete',
+      channel: 'calendar:privacy-migration:delete-source',
+      args: [{ storage: 'bflow', event_id: 'event-1' }],
+      store: { getEventByIdForWrite: async () => calendarEventRow(eventInput), deleteEvent: async () => {} },
+    },
+  ] as const;
+
+  for (const scenario of scenarios) {
+    await t.test(scenario.name, async () => {
+      const readStarted = deferred<void>();
+      const releaseRead = deferred<Array<{ id: string; name: string }>>();
+      const harness = await createIpcHarness({
+        getUserRole: async () => 'user',
+        getCalendarWithMembers: async () => ({ calendar: calendarRow(), members: [] }),
+        insertNotifications: async () => {},
+        ...scenario.store,
+      }, 'user-1', {
+        readUsers: async () => {
+          readStarted.resolve();
+          return releaseRead.promise;
+        },
+      });
+      try {
+        const invocation = harness.invoke(scenario.channel, ...scenario.args);
+        await readStarted.promise;
+        let returned = false;
+        void invocation.then(() => { returned = true; }, () => {});
+        await new Promise<void>((resolve) => setImmediate(resolve));
+        assert.equal(returned, true);
+        releaseRead.resolve([]);
+        await invocation;
+      } finally {
+        releaseRead.resolve([]);
+        await new Promise<void>((resolve) => setImmediate(resolve));
+        harness.restore();
+      }
+    });
+  }
+});
+
+test('failed calendar notification reads and inserts leave CRUD successful', async (t) => {
+  const eventInput = {
+    calendar_id: 'calendar-1', title: '실패 격리', memo: null, tag_id: null,
+    all_day: true, start_date: '2026-09-25', end_date: '2026-09-25',
+    start_time: null, end_time: null, linked_episode: null, linked_part: null,
+    linked_sheet_name: null, linked_scene_id: null, linked_department: null, linked_todo_id: null,
+  };
+  const originalWarn = console.warn;
+  console.warn = () => {};
+  try {
+    await t.test('read failure', async () => {
+      const attempted = deferred<void>();
+      const created = calendarEventRow(eventInput);
+      const harness = await createIpcHarness({
+        getUserRole: async () => 'user',
+        getCalendarWithMembers: async () => ({ calendar: calendarRow({ visibility: 'team' }), members: [] }),
+        createEvent: async () => created,
+      }, 'user-1', {
+        readUsers: async () => { attempted.resolve(); throw new Error('directory unavailable'); },
+      });
+      try {
+        assert.deepEqual(await harness.invoke('calendar:events:create', eventInput), created);
+        await attempted.promise;
+      } finally {
+        harness.restore();
+      }
+    });
+
+    await t.test('insert failure', async () => {
+      const attempted = deferred<void>();
+      const created = calendarEventRow(eventInput);
+      const harness = await createIpcHarness({
+        getUserRole: async () => 'user',
+        getCalendarWithMembers: async () => ({ calendar: calendarRow({ visibility: 'team' }), members: [] }),
+        createEvent: async () => created,
+        insertNotifications: async () => { attempted.resolve(); throw new Error('insert unavailable'); },
+      }, 'user-1', { readUsers: async () => [{ id: 'other', name: '다른 사용자' }] });
+      try {
+        assert.deepEqual(await harness.invoke('calendar:events:create', eventInput), created);
+        await attempted.promise;
+      } finally {
+        harness.restore();
+      }
+    });
+  } finally {
+    console.warn = originalWarn;
+  }
+});
 
 test('deleted session users cannot reach any actor-bound calendar IPC operation', async (t) => {
   const eventInput = {
