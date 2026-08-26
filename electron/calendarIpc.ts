@@ -58,6 +58,8 @@ interface CalendarIpcDeps {
     actorId: string,
   ) => Promise<{ id: string } | null>;
   onCommittedReplacementDelete: (payload: CalendarCommittedReplacementDeleteMarker) => void;
+  /** 테스트에서만 짧은 만료를 검증할 수 있는 replacement receipt TTL override. */
+  privacyReplacementReceiptTtlMs?: number;
 }
 
 /** 종료 직전에 best-effort 캘린더 알림 작업을 유한 시간만 기다리기 위한 메인 프로세스 경계. */
@@ -68,6 +70,10 @@ export interface CalendarNotificationDrain {
   beginPrivacyReplacementTransition(origin: CalendarPrivacyReplacementOrigin): void;
   /** 기존 actor의 creating/sourceDeleting receipt를 정리해 terminal 상태가 될 때까지 기다린다. */
   drainPrivacyReplacementTransition(origin: CalendarPrivacyReplacementOrigin): Promise<void>;
+  /** 다음 canonical session을 publish한 뒤 더 이상 쓰일 수 없는 origin lock을 해제한다. */
+  completePrivacyReplacementTransition(origin: CalendarPrivacyReplacementOrigin): void;
+  /** publish 전에 후속 단계가 실패하면 현재 actor가 다시 작업할 수 있게 origin lock을 되돌린다. */
+  abortPrivacyReplacementTransition(origin: CalendarPrivacyReplacementOrigin): void;
   getPendingNotificationCount(): number;
   waitForNotificationIdle(timeoutMs: number): Promise<boolean>;
 }
@@ -123,6 +129,7 @@ type PrivacyReplacementState =
   | 'deleted';
 
 type PrivacyReplacementReceipt = {
+  receipt: string;
   senderId: number;
   secret: string;
   origin: CalendarSessionOrigin;
@@ -136,6 +143,8 @@ type PrivacyReplacementReceipt = {
   resolveOperation: (() => void) | null;
   /** session/TTL cleanup은 하나의 tracked resolution만 공유한다. */
   transitionResolution: Promise<void> | null;
+  /** renderer가 사라져도 만료 정리를 시작하는 main-owned timer. */
+  expiryTimer: ReturnType<typeof setTimeout> | null;
 };
 
 type PrivacyReplacementTransitionReservation = {
@@ -459,6 +468,11 @@ function safeGoogleCreateInput(input: GoogleReplacementCreateInput): GoogleRepla
 
 export function registerCalendarIpc(deps: CalendarIpcDeps): CalendarNotificationDrain {
   const privacyReplacementReceipts = new Map<string, PrivacyReplacementReceipt>();
+  const configuredReceiptTtl = deps.privacyReplacementReceiptTtlMs;
+  const privacyReplacementReceiptTtlMs = Number.isFinite(configuredReceiptTtl)
+    && (configuredReceiptTtl as number) > 0
+    ? Math.floor(configuredReceiptTtl as number)
+    : PRIVACY_REPLACEMENT_RECEIPT_TTL_MS;
   // 알림 Promise뿐 아니라 DB await 전에 등록한 mutation fence도 같은 집합으로 관리한다.
   // 종료 직전 0개를 읽은 뒤, 이미 시작된 mutation이 알림을 enqueue하는 race를 막는다.
   const pendingNotificationWork = new Set<Promise<void>>();
@@ -608,6 +622,52 @@ export function registerCalendarIpc(deps: CalendarIpcDeps): CalendarNotification
     while (entry.operation) await entry.operation;
   };
 
+  const clearReceiptExpiryTimer = (entry: PrivacyReplacementReceipt): void => {
+    if (!entry.expiryTimer) return;
+    clearTimeout(entry.expiryTimer);
+    entry.expiryTimer = null;
+  };
+
+  const scheduleReceiptExpiry = (entry: PrivacyReplacementReceipt): void => {
+    clearReceiptExpiryTimer(entry);
+    const delayMs = Math.max(0, entry.expiresAt - Date.now());
+    const timer = setTimeout(() => {
+      entry.expiryTimer = null;
+      const current = privacyReplacementReceipts.get(entry.receipt);
+      if (current !== entry) return;
+      expirePrivacyReplacementReceipt(entry.receipt, entry, Date.now());
+    }, delayMs);
+    // receipt는 최대 5분 동안만 보조 정리 대상으로 남는다. 이 timer가 정상 앱 종료를
+    // 붙들면 안 되므로 Node/Electron timer일 때만 unref 한다.
+    timer.unref?.();
+    entry.expiryTimer = timer;
+  };
+
+  const expirePrivacyReplacementReceipt = (
+    receipt: string,
+    entry: PrivacyReplacementReceipt,
+    now: number,
+  ): void => {
+    if (privacyReplacementReceipts.get(receipt) !== entry) return;
+    if (entry.expiresAt > now) {
+      scheduleReceiptExpiry(entry);
+      return;
+    }
+    if (isTerminalReceipt(entry)) {
+      clearReceiptExpiryTimer(entry);
+      privacyReplacementReceipts.delete(receipt);
+      return;
+    }
+    // renderer가 reload/crash하여 후속 privacy IPC가 한 번도 오지 않아도, 원본과
+    // replacement를 영구히 함께 남기지 않는다. 정리 실패는 다음 TTL에 다시 시도한다.
+    entry.retiring = true;
+    entry.expiresAt = now + privacyReplacementReceiptTtlMs;
+    scheduleReceiptExpiry(entry);
+    void resolveTrackedRetiringReceipt(entry).catch((error) => {
+      console.warn('[Calendar IPC] 만료 replacement receipt 정리 실패:', error);
+    });
+  };
+
   const markReceiptTerminal = (
     entry: PrivacyReplacementReceipt,
     disposition: CalendarPrivacyReplacementDisposition,
@@ -616,23 +676,13 @@ export function registerCalendarIpc(deps: CalendarIpcDeps): CalendarNotification
     entry.terminalDisposition = disposition;
     // terminal outcome은 TTL 동안 보존한다. 세션 전환이 끝난 뒤 돌아온 A의 같은
     // continuation은 idempotent하지만, 반대 outcome은 더 이상 mutation할 수 없다.
-    entry.expiresAt = Date.now() + PRIVACY_REPLACEMENT_RECEIPT_TTL_MS;
+    entry.expiresAt = Date.now() + privacyReplacementReceiptTtlMs;
+    scheduleReceiptExpiry(entry);
   };
 
   const purgeExpiredReceipts = (now: number): void => {
     for (const [receipt, entry] of privacyReplacementReceipts) {
-      if (entry.expiresAt > now) continue;
-      if (isTerminalReceipt(entry)) {
-        privacyReplacementReceipts.delete(receipt);
-        continue;
-      }
-      // active receipt를 TTL만으로 버리면 target/source의 정확한 관계를 잃는다.
-      // 보수적으로 retire하고 main-owned cleanup으로 넘긴다.
-      entry.retiring = true;
-      entry.expiresAt = now + PRIVACY_REPLACEMENT_RECEIPT_TTL_MS;
-      void resolveTrackedRetiringReceipt(entry).catch((error) => {
-        console.warn('[Calendar IPC] 만료 replacement receipt 정리 실패:', error);
-      });
+      if (entry.expiresAt <= now) expirePrivacyReplacementReceipt(receipt, entry, now);
     }
   };
 
@@ -665,16 +715,19 @@ export function registerCalendarIpc(deps: CalendarIpcDeps): CalendarNotification
       // IPC object를 그대로 잡지 않아 원본 identity가 renderer 객체 변경에 영향을 받지 않는다.
       source: { ...source } as CalendarPrivacyMigrationSourceDeleteInput,
       target: null,
-      expiresAt: now + PRIVACY_REPLACEMENT_RECEIPT_TTL_MS,
+      expiresAt: now + privacyReplacementReceiptTtlMs,
       state: 'creating',
       terminalDisposition: null,
       retiring: false,
       operation: null,
       resolveOperation: null,
       transitionResolution: null,
+      receipt,
+      expiryTimer: null,
     };
     privacyReplacementReceipts.set(receipt, entry);
     beginReceiptOperation(entry, 'creating');
+    scheduleReceiptExpiry(entry);
     return { receipt, secret: entry.secret, entry };
   };
 
@@ -771,11 +824,11 @@ export function registerCalendarIpc(deps: CalendarIpcDeps): CalendarNotification
     if (entry.operation) {
       throw new Error('보상 receipt가 이미 처리 중입니다');
     }
-    if (entry.state === 'created') {
-      // 이전 빌드가 source-delete와 settlement를 별도 IPC로 나누던 짧은 공존 기간에는
-      // renderer가 이미 확보한 continuation으로 정확한 target만 정리할 수 있었다.
-      // 신규 CalendarService는 항상 deleteSource() 뒤에만 여기로 오며, 전환 drain은
-      // created를 무조건 delete로 해석한다. secret을 모르는 renderer는 이 경로를 쓸 수 없다.
+    if (entry.state === 'created' && disposition !== 'delete') {
+      // replacement는 원본 삭제 결과가 confirmed/ambiguous가 되기 전까지 provisional이다.
+      // keep을 허용하면 원본과 공개 replacement가 함께 남을 수 있으므로, 이 상태에서는
+      // 정확한 target 보상 삭제만 가능하다.
+      throw new Error('원본 일정 삭제 결과를 확인하기 전에는 replacement를 유지할 수 없습니다');
     }
     if (entry.state === 'needsKeep' && disposition !== 'keep') {
       throw new Error('원본 삭제 결과가 불확실하여 replacement를 유지해야 합니다');
@@ -850,6 +903,20 @@ export function registerCalendarIpc(deps: CalendarIpcDeps): CalendarNotification
       },
     );
     return resolution;
+  };
+
+  const retirePrivacyReplacementReceiptsForQuit = (): void => {
+    for (const entry of privacyReplacementReceipts.values()) {
+      if (isTerminalReceipt(entry)) continue;
+      // create가 이미 persistence를 기다리는 중이어도 entry는 발급돼 있다. 이 플래그를
+      // 먼저 세우면 handler가 돌아왔을 때 ordinary continuation을 돌려주지 않고 exact
+      // target 정리로 연결한다. resolution은 tracked work로 등록돼 before-quit snapshot에
+      // 포함되며, 실패는 기존 best-effort 종료 정책대로 로그만 남긴다.
+      entry.retiring = true;
+      void resolveTrackedRetiringReceipt(entry).catch((error) => {
+        console.warn('[Calendar IPC] 종료 중 replacement receipt 정리 실패:', error);
+      });
+    }
   };
 
   const sessionUser = async () => {
@@ -1486,6 +1553,7 @@ export function registerCalendarIpc(deps: CalendarIpcDeps): CalendarNotification
   return {
     beginQuitting: () => {
       notificationMutationIntakeOpen = false;
+      retirePrivacyReplacementReceiptsForQuit();
     },
     beginPrivacyReplacementTransition: (origin) => {
       const key = originKey(origin);
@@ -1536,6 +1604,12 @@ export function registerCalendarIpc(deps: CalendarIpcDeps): CalendarNotification
       })();
       reservation.drain = drain;
       return drain;
+    },
+    completePrivacyReplacementTransition: (origin) => {
+      privacyReplacementRetiringOrigins.delete(originKey(origin));
+    },
+    abortPrivacyReplacementTransition: (origin) => {
+      privacyReplacementRetiringOrigins.delete(originKey(origin));
     },
     getPendingNotificationCount: () => pendingNotificationWork.size,
     waitForNotificationIdle,

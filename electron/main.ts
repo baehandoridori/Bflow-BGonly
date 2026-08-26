@@ -1785,6 +1785,12 @@ sessionManager = new SessionManager({
   drainPrivacyReplacementTransition: (userId, epoch) => (
     calendarNotificationDrain.drainPrivacyReplacementTransition({ userId, epoch })
   ),
+  completePrivacyReplacementTransition: (userId, epoch) => {
+    calendarNotificationDrain.completePrivacyReplacementTransition({ userId, epoch });
+  },
+  abortPrivacyReplacementTransition: (userId, epoch) => {
+    calendarNotificationDrain.abortPrivacyReplacementTransition({ userId, epoch });
+  },
   drainPersonalDataQueue: async (userId) => {
     await Promise.all([
       personalTodoService.drainUser(userId),

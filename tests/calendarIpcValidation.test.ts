@@ -26,6 +26,7 @@ type IpcHarnessState = {
 
 type CalendarIpcExternalDeps = {
   getSessionOrigin?: () => { userId: string; epoch: number; role: 'admin' | 'user' };
+  privacyReplacementReceiptTtlMs?: number;
   readUsers?: () => Promise<Array<{ id: string; name: string }>>;
   createLegacyPrivateEvent?: (input: Record<string, unknown>, actorId: string) => Promise<{ id: string }>;
   deleteLegacyPrivateEvent?: (eventId: string, actorId: string) => Promise<void>;
@@ -44,6 +45,8 @@ type CalendarNotificationRuntime = {
   beginQuitting(): void;
   beginPrivacyReplacementTransition(origin: { userId: string; epoch: number }): void;
   drainPrivacyReplacementTransition(origin: { userId: string; epoch: number }): Promise<void>;
+  completePrivacyReplacementTransition(origin: { userId: string; epoch: number }): void;
+  abortPrivacyReplacementTransition(origin: { userId: string; epoch: number }): void;
   getPendingNotificationCount(): number;
   waitForNotificationIdle(timeoutMs: number): Promise<boolean>;
 };
@@ -275,6 +278,7 @@ async function createIpcHarness(
       registerCalendarIpc(deps: {
         getSessionUserIdOrThrow(): string;
         getSessionOriginOrThrow(): { userId: string; epoch: number; role: 'admin' | 'user' };
+        privacyReplacementReceiptTtlMs?: number;
       }): CalendarNotificationRuntime | undefined;
     };
     const notificationRuntime = module.registerCalendarIpc({
@@ -284,6 +288,7 @@ async function createIpcHarness(
         epoch: 0,
         role: 'user',
       },
+      privacyReplacementReceiptTtlMs: externalDeps.privacyReplacementReceiptTtlMs,
       createLegacyPrivateEvent: externalDeps.createLegacyPrivateEvent ?? (async () => {
         throw new Error('unexpected legacy private replacement create');
       }),
@@ -2129,8 +2134,12 @@ test('preload exposes only an opaque privacy replacement continuation', async ()
 
 test('a B flow privacy replacement emits its create notification only after its receipt is kept', async () => {
   const notificationRows: Array<Array<Record<string, unknown>>> = [];
-  const inserted = deferred<void>();
   let replacementNumber = 0;
+  const source = calendarEventRow({
+    id: 'notification-source',
+    calendar_id: 'replacement-calendar',
+    created_by: 'actor',
+  });
   const replacementCalendar = calendarRow({
     id: 'replacement-calendar',
     name: '이관 대상',
@@ -2139,6 +2148,7 @@ test('a B flow privacy replacement emits its create notification only after its 
   });
   const request = {
     storage: 'bflow' as const,
+    source: { storage: 'bflow' as const, event_id: source.id },
     event: {
       calendar_id: 'replacement-calendar', title: '보상 전용 일정', memo: null, tag_id: null,
       all_day: true, start_date: '2026-08-26', end_date: '2026-08-26',
@@ -2161,10 +2171,11 @@ test('a B flow privacy replacement emits its create notification only after its 
       created_by: 'actor',
       created_at: `2026-08-26T00:00:0${replacementNumber}.000Z`,
     }),
+    getEventByIdForWrite: async (eventId) => eventId === source.id ? source : null,
+    deleteEvent: async () => {},
     deletePrivacyReplacementEvent: async () => {},
     insertNotifications: async (rows) => {
       notificationRows.push(rows as Array<Record<string, unknown>>);
-      inserted.resolve();
     },
   }, 'actor', {
     readUsers: async () => [
@@ -2177,7 +2188,7 @@ test('a B flow privacy replacement emits its create notification only after its 
       501,
       'calendar:privacy-migration:create-replacement',
       request,
-    ) as { receipt: string };
+    ) as { receipt: string; continuation_secret: string };
 
     assert.deepEqual(
       notificationRows,
@@ -2185,14 +2196,27 @@ test('a B flow privacy replacement emits its create notification only after its 
       'the provisional replacement is not visible to recipients before source deletion is settled',
     );
 
+    assert.equal(
+      await harness.invokeAs(
+        501,
+        'calendar:privacy-migration:delete-bound-source',
+        kept.receipt,
+        kept.continuation_secret,
+      ),
+      'deleted',
+      'the bound original must be deleted before its replacement can be kept',
+    );
     await harness.invokeAs(
       501,
       'calendar:privacy-migration:settle-replacement',
       kept.receipt,
+      kept.continuation_secret,
       'keep',
     );
-    await inserted.promise;
-    assert.deepEqual(notificationRows, [[{
+    assert.ok(harness.notificationRuntime);
+    assert.equal(await harness.notificationRuntime.waitForNotificationIdle(1_000), true);
+    const replacementCreateNotifications = notificationRows.filter((rows) => rows[0]?.action === 'create');
+    assert.deepEqual(replacementCreateNotifications, [[{
       recipient_id: 'recipient', actor_id: 'actor', actor_name: '행위자',
       calendar_id: 'replacement-calendar', calendar_name: '이관 대상',
       event_id: 'replacement-1', event_title: '보상 전용 일정', event_date: '2026-08-26',
@@ -2203,14 +2227,18 @@ test('a B flow privacy replacement emits its create notification only after its 
         501,
         'calendar:privacy-migration:settle-replacement',
         kept.receipt,
+        kept.continuation_secret,
         'keep',
       ),
       /receipt|보상|사용/i,
       'a settled receipt cannot queue the same replacement notification again',
     );
-    assert.ok(harness.notificationRuntime);
     assert.equal(await harness.notificationRuntime.waitForNotificationIdle(1_000), true);
-    assert.equal(notificationRows.length, 1, 'a duplicate keep attempt adds no notification');
+    assert.equal(
+      notificationRows.filter((rows) => rows[0]?.action === 'create').length,
+      1,
+      'a duplicate keep attempt adds no replacement notification',
+    );
 
     const compensated = await harness.invokeAs(
       501,
@@ -2225,7 +2253,7 @@ test('a B flow privacy replacement emits its create notification only after its 
     );
     await new Promise<void>((resolve) => setImmediate(resolve));
     assert.equal(
-      notificationRows.length,
+      notificationRows.filter((rows) => rows[0]?.action === 'create').length,
       1,
       'compensating the provisional replacement never exposes a create notification',
     );
@@ -2551,6 +2579,203 @@ test('privacy replacement transition waits for a bound source delete and keeps o
   }
 });
 
+test('privacy replacement cannot keep a created target before its bound source outcome is known', async () => {
+  const notificationRows: Array<Array<Record<string, unknown>>> = [];
+  const targetDeleteCalls: unknown[][] = [];
+  const harness = await createIpcHarness({
+    getUserRole: async () => 'user',
+    getCalendarWithMembers: async () => ({
+      calendar: calendarRow({ owner_id: 'user-a', visibility: 'members' }),
+      members: [{ calendar_id: 'calendar-1', user_id: 'user-a', can_edit: true }],
+    }),
+    createEvent: async () => calendarEventRow({
+      id: 'unsettled-created-target',
+      calendar_id: 'calendar-1',
+      created_by: 'user-a',
+      created_at: '2026-08-27T07:08:09.012Z',
+    }),
+    deletePrivacyReplacementEvent: async (...args) => { targetDeleteCalls.push(args); },
+    insertNotifications: async (rows) => { notificationRows.push(rows as Array<Record<string, unknown>>); },
+  }, 'user-a', {
+    getSessionOrigin: () => ({ userId: 'user-a', epoch: 7, role: 'user' }),
+    readUsers: async () => [{ id: 'user-a', name: 'A' }],
+  });
+  const originalError = console.error;
+  try {
+    console.error = () => {};
+    const created = await harness.invokeAs(501, 'calendar:privacy-migration:create-replacement', {
+      storage: 'bflow',
+      source: { storage: 'bflow', event_id: 'source-must-remain' },
+      event: {
+        calendar_id: 'calendar-1', title: '원본 확인 전 replacement', memo: null, tag_id: null,
+        all_day: true, start_date: '2026-08-27', end_date: '2026-08-27',
+        start_time: null, end_time: null, linked_episode: null, linked_part: null,
+        linked_sheet_name: null, linked_scene_id: null, linked_department: null, linked_todo_id: null,
+      },
+    }) as { receipt: string; continuation_secret: string };
+
+    await assert.rejects(
+      harness.invokeAs(
+        501,
+        'calendar:privacy-migration:settle-replacement',
+        created.receipt,
+        created.continuation_secret,
+        'keep',
+      ),
+      /원본.*삭제|결과|replacement/i,
+      'a replacement stays provisional until main has recorded a successful or ambiguous source outcome',
+    );
+    assert.deepEqual(notificationRows, [], 'an undeleted source cannot expose a replacement create notification');
+    assert.deepEqual(targetDeleteCalls, [], 'rejecting early keep does not mutate the exact target either');
+  } finally {
+    console.error = originalError;
+    harness.restore();
+  }
+});
+
+test('shutdown retires a created privacy replacement before its source can be deleted', async () => {
+  const targetDeleteStarted = deferred<void>();
+  const releaseTargetDelete = deferred<void>();
+  const targetDeleteCalls: unknown[][] = [];
+  let sourceDeleteCalls = 0;
+  const replacement = calendarEventRow({
+    id: 'shutdown-created-replacement',
+    calendar_id: 'calendar-1',
+    created_by: 'user-a',
+    created_at: '2026-08-27T08:09:10.123Z',
+  });
+  const harness = await createIpcHarness({
+    getUserRole: async () => 'user',
+    getCalendarWithMembers: async () => ({
+      calendar: calendarRow({ owner_id: 'user-a' }),
+      members: [],
+    }),
+    createEvent: async () => replacement,
+    deleteEvent: async () => { sourceDeleteCalls += 1; },
+    deletePrivacyReplacementEvent: async (...args) => {
+      targetDeleteCalls.push(args);
+      targetDeleteStarted.resolve();
+      await releaseTargetDelete.promise;
+    },
+  }, 'user-a', {
+    getSessionOrigin: () => ({ userId: 'user-a', epoch: 7, role: 'user' }),
+  });
+  try {
+    const created = await harness.invokeAs(501, 'calendar:privacy-migration:create-replacement', {
+      storage: 'bflow',
+      source: { storage: 'bflow', event_id: 'shutdown-source-must-remain' },
+      event: {
+        calendar_id: 'calendar-1', title: '종료 전 replacement', memo: null, tag_id: null,
+        all_day: true, start_date: '2026-08-27', end_date: '2026-08-27',
+        start_time: null, end_time: null, linked_episode: null, linked_part: null,
+        linked_sheet_name: null, linked_scene_id: null, linked_department: null, linked_todo_id: null,
+      },
+    }) as { receipt: string; continuation_secret: string };
+    assert.ok(harness.notificationRuntime);
+    assert.equal(harness.notificationRuntime.getPendingNotificationCount(), 0);
+
+    harness.notificationRuntime.beginQuitting();
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    assert.equal(targetDeleteCalls.length, 1, 'quit immediately starts exact cleanup for an unresolved created target');
+    assert.equal(
+      await harness.notificationRuntime.waitForNotificationIdle(0),
+      false,
+      'the shutdown drain remains open while exact replacement cleanup is pending',
+    );
+    await assert.rejects(
+      harness.invokeAs(
+        501,
+        'calendar:privacy-migration:delete-bound-source',
+        created.receipt,
+        created.continuation_secret,
+      ),
+      /종료|retir|전환/i,
+      'quit never lets the renderer delete the original after main owns compensation',
+    );
+    assert.equal(sourceDeleteCalls, 0, 'the original source remains untouched during shutdown compensation');
+
+    releaseTargetDelete.resolve();
+    await targetDeleteStarted.promise;
+    assert.equal(await harness.notificationRuntime.waitForNotificationIdle(1_000), true);
+    assert.deepEqual(targetDeleteCalls, [[
+      'shutdown-created-replacement',
+      'calendar-1',
+      '2026-08-27T08:09:10.123Z',
+    ]]);
+  } finally {
+    releaseTargetDelete.resolve();
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    harness.restore();
+  }
+});
+
+test('an abandoned privacy replacement is retired by its scheduled expiry without another privacy IPC', async () => {
+  const targetDeleteStarted = deferred<void>();
+  const releaseTargetDelete = deferred<void>();
+  const targetDeleteCalls: unknown[][] = [];
+  const replacement = calendarEventRow({
+    id: 'expired-created-replacement',
+    calendar_id: 'calendar-1',
+    created_by: 'user-a',
+    created_at: '2026-08-27T09:10:11.234Z',
+  });
+  const harness = await createIpcHarness({
+    getUserRole: async () => 'user',
+    getCalendarWithMembers: async () => ({
+      calendar: calendarRow({ owner_id: 'user-a' }),
+      members: [],
+    }),
+    createEvent: async () => replacement,
+    deletePrivacyReplacementEvent: async (...args) => {
+      targetDeleteCalls.push(args);
+      targetDeleteStarted.resolve();
+      await releaseTargetDelete.promise;
+    },
+  }, 'user-a', {
+    getSessionOrigin: () => ({ userId: 'user-a', epoch: 7, role: 'user' }),
+    privacyReplacementReceiptTtlMs: 20,
+  });
+  try {
+    await harness.invokeAs(501, 'calendar:privacy-migration:create-replacement', {
+      storage: 'bflow',
+      source: { storage: 'bflow', event_id: 'expired-source-must-remain' },
+      event: {
+        calendar_id: 'calendar-1', title: '만료 정리 대상', memo: null, tag_id: null,
+        all_day: true, start_date: '2026-08-27', end_date: '2026-08-27',
+        start_time: null, end_time: null, linked_episode: null, linked_part: null,
+        linked_sheet_name: null, linked_scene_id: null, linked_department: null, linked_todo_id: null,
+      },
+    });
+    assert.ok(harness.notificationRuntime);
+    assert.equal(harness.notificationRuntime.getPendingNotificationCount(), 0);
+
+    await new Promise<void>((resolve, reject) => {
+      const timeout = setTimeout(() => reject(new Error('receipt expiry did not start cleanup')), 500);
+      void targetDeleteStarted.promise.then(
+        () => { clearTimeout(timeout); resolve(); },
+        reject,
+      );
+    });
+    assert.equal(
+      await harness.notificationRuntime.waitForNotificationIdle(0),
+      false,
+      'the scheduled exact cleanup stays in the shutdown drain until persistence settles',
+    );
+    assert.deepEqual(targetDeleteCalls, [[
+      'expired-created-replacement',
+      'calendar-1',
+      '2026-08-27T09:10:11.234Z',
+    ]]);
+
+    releaseTargetDelete.resolve();
+    assert.equal(await harness.notificationRuntime.waitForNotificationIdle(1_000), true);
+  } finally {
+    releaseTargetDelete.resolve();
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    harness.restore();
+  }
+});
+
 test('a retiring created replacement ignores renderer keep and transition deletes it exactly once', async () => {
   const targetDeleteStarted = deferred<void>();
   const releaseTargetDelete = deferred<void>();
@@ -2734,7 +2959,7 @@ test('shutdown drain keeps a transition-owned replacement delete after its sourc
   }
 });
 
-test('shutdown rejects an unreserved privacy transition before it can delete an existing replacement', async () => {
+test('shutdown retires an existing replacement and rejects a new unreserved privacy transition', async () => {
   let targetDeleteCalls = 0;
   const harness = await createIpcHarness({
     getUserRole: async () => 'user',
@@ -2765,6 +2990,12 @@ test('shutdown rejects an unreserved privacy transition before it can delete an 
     assert.ok(harness.notificationRuntime);
     assert.equal(harness.notificationRuntime.getPendingNotificationCount(), 0);
     harness.notificationRuntime.beginQuitting();
+    assert.equal(
+      await harness.notificationRuntime.waitForNotificationIdle(1_000),
+      true,
+      'quit owns the already-issued provisional replacement until its exact cleanup completes',
+    );
+    assert.equal(targetDeleteCalls, 1, 'quit cleanup deletes the provisional target while leaving its source alone');
 
     assert.throws(
       () => harness.notificationRuntime?.beginPrivacyReplacementTransition({ userId: 'user-a', epoch: 7 }),
@@ -2775,7 +3006,7 @@ test('shutdown rejects an unreserved privacy transition before it can delete an 
       harness.notificationRuntime.drainPrivacyReplacementTransition({ userId: 'user-a', epoch: 7 }),
       /종료|quitting|예약/i,
     );
-    assert.equal(targetDeleteCalls, 0, 'post-quit transition work never reaches exact target deletion');
+    assert.equal(targetDeleteCalls, 1, 'the rejected post-quit transition cannot start a second cleanup');
   } finally {
     harness.restore();
   }
@@ -2914,6 +3145,71 @@ test('session transition closes personal work and leaves B unpublished when quit
   assert.deepEqual(ended, [{ userId: 'user-a', epoch: 1 }]);
   assert.equal(manager.getCanonicalUserId(), 'user-a');
   assert.deepEqual(published, ['user-a'], 'B never publishes when shutdown rejects transition reservation');
+});
+
+test('a finished or aborted session transition releases only its retired privacy origin lock', async () => {
+  const origin = { userId: 'user-a', epoch: 7, role: 'user' as const };
+  const harness = await createIpcHarness({
+    getUserRole: async () => 'user',
+    getCalendarWithMembers: async () => ({ calendar: calendarRow({ owner_id: 'user-a' }), members: [] }),
+    createEvent: async () => calendarEventRow({ id: 'origin-lock-replacement', created_by: 'user-a' }),
+    deletePrivacyReplacementEvent: async () => {},
+  }, 'user-a', {
+    getSessionOrigin: () => origin,
+  });
+  const createInput = {
+    storage: 'bflow',
+    source: { storage: 'bflow', event_id: 'origin-lock-source' },
+    event: {
+      calendar_id: 'calendar-1', title: 'origin lock', memo: null, tag_id: null,
+      all_day: true, start_date: '2026-08-27', end_date: '2026-08-27',
+      start_time: null, end_time: null, linked_episode: null, linked_part: null,
+      linked_sheet_name: null, linked_scene_id: null, linked_department: null, linked_todo_id: null,
+    },
+  };
+  try {
+    assert.ok(harness.notificationRuntime);
+    const transition = { userId: 'user-a', epoch: 7 };
+    harness.notificationRuntime.beginPrivacyReplacementTransition(transition);
+    await harness.notificationRuntime.drainPrivacyReplacementTransition(transition);
+    await assert.rejects(
+      harness.invokeAs(501, 'calendar:privacy-migration:create-replacement', createInput),
+      /정리 중|이전 사용자/i,
+      'drain alone must retain the old origin lock until SessionManager decides publish or abort',
+    );
+
+    harness.notificationRuntime.completePrivacyReplacementTransition(transition);
+    const afterPublish = await harness.invokeAs(
+      501,
+      'calendar:privacy-migration:create-replacement',
+      createInput,
+    ) as { receipt: string; continuation_secret: string };
+    await harness.invokeAs(
+      501,
+      'calendar:privacy-migration:settle-replacement',
+      afterPublish.receipt,
+      afterPublish.continuation_secret,
+      'delete',
+    );
+
+    harness.notificationRuntime.beginPrivacyReplacementTransition(transition);
+    await harness.notificationRuntime.drainPrivacyReplacementTransition(transition);
+    harness.notificationRuntime.abortPrivacyReplacementTransition(transition);
+    const afterAbort = await harness.invokeAs(
+      501,
+      'calendar:privacy-migration:create-replacement',
+      createInput,
+    ) as { receipt: string; continuation_secret: string };
+    await harness.invokeAs(
+      501,
+      'calendar:privacy-migration:settle-replacement',
+      afterAbort.receipt,
+      afterAbort.continuation_secret,
+      'delete',
+    );
+  } finally {
+    harness.restore();
+  }
 });
 
 test('privacy replacement receipt is a single-success capability that blocks an in-flight duplicate', async () => {
@@ -3968,13 +4264,16 @@ test('privacy replacement receipt is consumed on keep but released after a confi
   let deleteCalls = 0;
   let replacementExists = true;
   let deleteFails = true;
+  const source = calendarEventRow({ id: 'legacy-test-source' });
   const harness = await createIpcHarness({
     getUserRole: async () => 'user',
     getCalendarWithMembers: async () => ({ calendar: calendarRow(), members: [] }),
     createEvent: async () => calendarEventRow({ id: `replacement-${deleteCalls}` }),
-    getEventByIdForWrite: async () => (
-      replacementExists ? calendarEventRow({ id: 'replacement-0' }) : null
-    ),
+    getEventByIdForWrite: async (eventId) => {
+      if (eventId === source.id) return source;
+      return replacementExists ? calendarEventRow({ id: 'replacement-0' }) : null;
+    },
+    deleteEvent: async () => {},
     deletePrivacyReplacementEvent: async () => {
       deleteCalls += 1;
       if (deleteFails) throw new Error('privacy replacement row identity no longer matches');
@@ -3994,9 +4293,23 @@ test('privacy replacement receipt is consumed on keep but released after a confi
     const kept = await harness.invoke(
       'calendar:privacy-migration:create-replacement',
       { storage: 'bflow', event },
-    ) as { receipt: string };
+    ) as { receipt: string; continuation_secret: string };
+    assert.equal(
+      await harness.invoke(
+        'calendar:privacy-migration:delete-bound-source',
+        kept.receipt,
+        kept.continuation_secret,
+      ),
+      'deleted',
+      'only a confirmed source delete may move a provisional replacement to keep',
+    );
+    const markerCountAfterSourceDelete = harness.committedDeleteMarkers.length;
     await harness.invoke('calendar:privacy-migration:settle-replacement', kept.receipt, 'keep');
-    assert.deepEqual(harness.committedDeleteMarkers, [], 'keep is not a committed delete');
+    assert.equal(
+      harness.committedDeleteMarkers.length,
+      markerCountAfterSourceDelete,
+      'keep does not add a committed replacement delete marker after the source marker',
+    );
     await assert.rejects(
       harness.invoke('calendar:privacy-migration:settle-replacement', kept.receipt, 'delete'),
       /receipt|보상|사용/i,
@@ -4011,14 +4324,18 @@ test('privacy replacement receipt is consumed on keep but released after a confi
       harness.invoke('calendar:privacy-migration:settle-replacement', failing.receipt, 'delete'),
       /identity no longer matches/,
     );
-    assert.deepEqual(harness.committedDeleteMarkers, [], 'failed persistence emits no committed marker');
+    assert.equal(
+      harness.committedDeleteMarkers.length,
+      markerCountAfterSourceDelete,
+      'failed replacement persistence emits no additional committed marker',
+    );
     deleteFails = false;
     assert.equal(
       await harness.invoke('calendar:privacy-migration:settle-replacement', failing.receipt, 'delete'),
       undefined,
       'a confirmed non-commit leaves the exact receipt reusable',
     );
-    assert.equal(harness.committedDeleteMarkers.length, 1);
+    assert.equal(harness.committedDeleteMarkers.length, markerCountAfterSourceDelete + 1);
     await assert.rejects(
       harness.invoke('calendar:privacy-migration:settle-replacement', failing.receipt, 'delete'),
       /receipt|보상|사용/i,

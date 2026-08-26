@@ -44,6 +44,10 @@ export interface SessionManagerDependencies {
   beginPrivacyReplacementTransition(userId: string, epoch: number): void;
   /** retire 뒤 남은 create/source-delete를 terminal 상태까지 정리한다. */
   drainPrivacyReplacementTransition(userId: string, epoch: number): Promise<void>;
+  /** 새 canonical session을 publish한 뒤에만 이전 origin lock을 해제한다. */
+  completePrivacyReplacementTransition?(userId: string, epoch: number): void;
+  /** publish 전에 이후 단계가 실패하면, 정리 완료 origin을 현재 사용자에게 되돌린다. */
+  abortPrivacyReplacementTransition?(userId: string, epoch: number): void;
   flushCalendarJournal(): Promise<void>;
   setActivityUser(user: { id: string; name: string } | null): void;
   broadcast(payload: CanonicalSessionPayload): void;
@@ -97,6 +101,7 @@ export class SessionManager {
     if (currentUserId && currentUserId !== nextUserId) {
       const transition = { userId: currentUserId, epoch: this.getEpoch() };
       let personalTransitionStarted = false;
+      let privacyTransitionDrained = false;
       try {
         this.dependencies.beginPersonalDataTransition(transition.userId, transition.epoch);
         personalTransitionStarted = true;
@@ -108,8 +113,15 @@ export class SessionManager {
           this.dependencies.drainPersonalDataQueue(currentUserId),
           this.dependencies.drainPrivacyReplacementTransition(transition.userId, transition.epoch),
         ]);
+        privacyTransitionDrained = true;
         await this.dependencies.flushCalendarJournal();
       } catch (error) {
+        // drain 뒤 journal/remembered-session 준비가 실패하면 A는 계속 canonical이다.
+        // 이때만 origin lock을 되돌려 A가 다음 이관을 정상적으로 시작할 수 있다.
+        // drain 자체 실패는 fail-closed로 lock을 남겨 B publish를 계속 막는다.
+        if (privacyTransitionDrained) {
+          this.dependencies.abortPrivacyReplacementTransition?.(transition.userId, transition.epoch);
+        }
         if (personalTransitionStarted) {
           this.dependencies.endPersonalDataTransition(transition.userId, transition.epoch);
         }
@@ -120,8 +132,19 @@ export class SessionManager {
     return null;
   }
 
-  private finishTransition(transition: { userId: string; epoch: number } | null): void {
-    if (transition) this.dependencies.endPersonalDataTransition(transition.userId, transition.epoch);
+  private finishTransition(
+    transition: { userId: string; epoch: number } | null,
+    published: boolean,
+  ): void {
+    if (!transition) return;
+    if (published) {
+      // publish 직후에만 이전 epoch lock을 해제한다. 그 전에는 old renderer가 A로
+      // 보일 수 있으므로, drain 종료만으로 해제하면 race가 다시 열린다.
+      this.dependencies.completePrivacyReplacementTransition?.(transition.userId, transition.epoch);
+    } else {
+      this.dependencies.abortPrivacyReplacementTransition?.(transition.userId, transition.epoch);
+    }
+    this.dependencies.endPersonalDataTransition(transition.userId, transition.epoch);
   }
 
   private publish(user: SessionUserRecord | null, session: RememberedAuthSession | null): CanonicalSessionPayload {
@@ -150,11 +173,14 @@ export class SessionManager {
           userName: user.name,
           loggedInAt: new Date().toISOString(),
         };
+        let published = false;
         try {
           await this.dependencies.writeRememberedSession(input.rememberMe === false ? null : session);
-          return { ok: true, payload: this.publish(user, session) };
+          const payload = this.publish(user, session);
+          published = true;
+          return { ok: true, payload };
         } finally {
-          this.finishTransition(transition);
+          this.finishTransition(transition, published);
         }
       } catch (error) {
         return { ok: false, payload: this.getCurrentPayload(), error: errorMessage(error) };
@@ -194,11 +220,14 @@ export class SessionManager {
     return this.serialize(async () => {
       try {
         const transition = await this.prepareTransition(null);
+        let published = false;
         try {
           await this.dependencies.writeRememberedSession(null);
-          return { ok: true, payload: this.publish(null, null) };
+          const payload = this.publish(null, null);
+          published = true;
+          return { ok: true, payload };
         } finally {
-          this.finishTransition(transition);
+          this.finishTransition(transition, published);
         }
       } catch (error) {
         return { ok: false, payload: this.getCurrentPayload(), error: errorMessage(error) };
@@ -219,11 +248,14 @@ export class SessionManager {
             return { ok: true, payload: this.getCurrentPayload() };
           }
           const transition = await this.prepareTransition(null);
+          let published = false;
           try {
             await this.dependencies.writeRememberedSession(null);
-            return { ok: true, payload: this.publish(null, null) };
+            const payload = this.publish(null, null);
+            published = true;
+            return { ok: true, payload };
           } finally {
-            this.finishTransition(transition);
+            this.finishTransition(transition, published);
           }
         }
         return { ok: true, payload: this.publish(user, this.payload.session) };

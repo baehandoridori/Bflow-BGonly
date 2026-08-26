@@ -189,9 +189,72 @@ type PreviewCalendarNotificationRow = {
   read_at: string | null;
 };
 
+type PreviewCalendarNotificationCalendar = {
+  id: string;
+  name: string;
+  visibility: 'private' | 'members' | 'team';
+};
+
+type PreviewCalendarNotificationEventInput = {
+  calendar_id: string;
+  title: string;
+  memo: string | null;
+  tag_id: string | null;
+  all_day: boolean;
+  start_date: string;
+  end_date: string;
+  start_time: string | null;
+  end_time: string | null;
+  linked_episode: number | null;
+  linked_part: string | null;
+  linked_sheet_name: string | null;
+  linked_scene_id: string | null;
+  linked_department: string | null;
+  linked_todo_id: string | null;
+};
+
+type PreviewCalendarNotificationEvent = PreviewCalendarNotificationEventInput & {
+  id: string;
+  created_by: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+type PreviewCalendarPrivacyReplacement = {
+  storage: 'bflow' | 'legacy-private' | 'google';
+  actual_id: string;
+  calendar_id?: string;
+  settle(disposition: 'keep' | 'delete'): Promise<void>;
+  deleteSource(): Promise<'deleted' | 'missing' | 'ambiguous'>;
+};
+
 type PreviewCalendarNotificationApi = {
   loginCanonicalSession(input: { name: string; password: string; rememberMe: boolean }): Promise<{ ok: boolean }>;
   logoutCanonicalSession(): Promise<unknown>;
+  calendarList(): Promise<PreviewCalendarNotificationCalendar[]>;
+  calendarCreate(input: {
+    name: string;
+    color: string;
+    visibility: 'private' | 'members' | 'team';
+    members?: Array<{ user_id: string; can_edit: boolean }>;
+  }): Promise<PreviewCalendarNotificationCalendar>;
+  calendarEventCreate(input: PreviewCalendarNotificationEventInput): Promise<PreviewCalendarNotificationEvent>;
+  calendarEventUpdate(
+    id: string,
+    updates: Partial<PreviewCalendarNotificationEventInput>,
+  ): Promise<PreviewCalendarNotificationEvent>;
+  calendarEventDelete(id: string): Promise<void>;
+  calendarEventsList(params?: { from?: string; to?: string }): Promise<PreviewCalendarNotificationEvent[]>;
+  calendarPrivacyReplacementCreate(request: {
+    storage: 'bflow' | 'legacy-private' | 'google';
+    calendar_id?: string;
+    source: {
+      storage: 'bflow' | 'legacy-private' | 'google';
+      event_id: string;
+      calendar_id?: string;
+    };
+    event: Record<string, unknown>;
+  }): Promise<PreviewCalendarPrivacyReplacement | { transition_resolved: 'deleted' }>;
   calendarNotificationsCatchup(input?: { excludedCalendarIds?: string[] }): Promise<PreviewCalendarNotificationRow[]>;
   calendarNotificationsMarkRead(ids: string[]): Promise<void>;
   onSupabaseRealtime(callback: (event: unknown) => void): () => void;
@@ -285,6 +348,30 @@ async function createPreviewCalendarNotificationHarness(): Promise<{
 async function previewLogin(api: PreviewCalendarNotificationApi, name: string): Promise<void> {
   const result = await api.loginCanonicalSession({ name, password: '1234', rememberMe: false });
   assert.equal(result.ok, true);
+}
+
+function previewNotificationEventInput(
+  calendarId: string,
+  title: string,
+  startDate = '2026-09-25',
+): PreviewCalendarNotificationEventInput {
+  return {
+    calendar_id: calendarId,
+    title,
+    memo: null,
+    tag_id: null,
+    all_day: true,
+    start_date: startDate,
+    end_date: startDate,
+    start_time: null,
+    end_time: null,
+    linked_episode: null,
+    linked_part: null,
+    linked_sheet_name: null,
+    linked_scene_id: null,
+    linked_department: null,
+    linked_todo_id: null,
+  };
 }
 
 test('preview calendar catch-up seeds use the signed-in mock user and real current-month calendar rows', () => {
@@ -400,6 +487,210 @@ test('preview calendar notification reads persist per current session and inject
       restoredOwnRows.some((row) => row.id === ownUntouchedId),
       true,
       'another session cannot mark this user’s unread row read by guessing its id',
+    );
+  } finally {
+    harness.restore();
+  }
+});
+
+test('preview calendar CRUD persists recipient-specific notification rows for another user and keeps canonical realtime delivery', async () => {
+  const harness = await createPreviewCalendarNotificationHarness();
+  try {
+    await previewLogin(harness.api, '배한솔');
+    const sharedCalendar = await harness.api.calendarCreate({
+      name: '프리뷰 알림 공유 일정',
+      color: '#74B9FF',
+      visibility: 'members',
+      members: [{ user_id: '2', can_edit: true }],
+    });
+    const received: unknown[] = [];
+    const unsubscribe = harness.api.onSupabaseRealtime((event) => received.push(event));
+    const created = await harness.api.calendarEventCreate(
+      previewNotificationEventInput(sharedCalendar.id, '알림 생성 일정'),
+    );
+    const updated = await harness.api.calendarEventUpdate(created.id, {
+      title: '알림 변경 일정',
+      start_date: '2026-09-26',
+      end_date: '2026-09-26',
+    });
+    await harness.api.calendarEventDelete(created.id);
+
+    assert.equal(received.length, 0, '행위자 자신에게는 preview realtime 알림을 보내지 않는다');
+    assert.equal(
+      (await harness.api.calendarNotificationsCatchup()).some((row) => row.event_id === created.id),
+      false,
+      '행위자의 catch-up에는 자기 변경 알림을 저장하지 않는다',
+    );
+
+    await harness.api.logoutCanonicalSession();
+    await previewLogin(harness.api, '장삐쭈');
+    const recipientRows = (await harness.api.calendarNotificationsCatchup())
+      .filter((row) => row.event_id === created.id);
+    assert.equal(recipientRows.length, 3);
+    assert.deepEqual(
+      recipientRows.map((row) => row.action).sort(),
+      ['create', 'delete', 'update'],
+    );
+    assert.ok(recipientRows.every((row) => (
+      row.recipient_id === '2'
+      && row.actor_id === '1'
+      && row.actor_name === '배한솔'
+      && row.calendar_id === sharedCalendar.id
+      && row.calendar_name === sharedCalendar.name
+    )));
+    const createRow = recipientRows.find((row) => row.action === 'create');
+    assert.ok(createRow);
+    assert.equal(createRow.event_title, '알림 생성 일정');
+    assert.equal(createRow.event_date, '2026-09-25');
+    assert.equal(createRow.detail, null);
+    const updateRow = recipientRows.find((row) => row.action === 'update');
+    assert.ok(updateRow);
+    assert.equal(updateRow.event_title, updated.title);
+    assert.equal(updateRow.event_date, updated.start_date);
+    assert.equal(updateRow.detail, '9/25 → 9/26');
+    const deleteRow = recipientRows.find((row) => row.action === 'delete');
+    assert.ok(deleteRow);
+    assert.equal(deleteRow.event_title, updated.title);
+    assert.equal(deleteRow.event_date, updated.start_date);
+    assert.equal(deleteRow.detail, null);
+
+    await harness.api.logoutCanonicalSession();
+    await previewLogin(harness.api, '허혜원');
+    assert.equal(
+      (await harness.api.calendarNotificationsCatchup()).some((row) => row.event_id === created.id),
+      false,
+      'members 캘린더의 다른 사용자는 이 변경 알림을 받지 않는다',
+    );
+
+    await harness.api.logoutCanonicalSession();
+    await previewLogin(harness.api, '장삐쭈');
+
+    harness.previewWindow.__bflowMockCalendarNotify?.({
+      recipientId: '2',
+      eventTitle: '현재 수신자 realtime',
+    });
+    assert.equal(received.length, 1);
+    const realtime = received[0] as {
+      table?: string;
+      payload?: { notification?: { recipientId?: string; eventTitle?: string } };
+    };
+    assert.equal(realtime.table, 'calendar_notifications');
+    assert.equal(realtime.payload?.notification?.recipientId, '2');
+    assert.equal(realtime.payload?.notification?.eventTitle, '현재 수신자 realtime');
+    unsubscribe();
+  } finally {
+    harness.restore();
+  }
+});
+
+test('preview calendar move emits a source delete and target create to their separate recipients', async () => {
+  const harness = await createPreviewCalendarNotificationHarness();
+  try {
+    await previewLogin(harness.api, '배한솔');
+    const sourceCalendar = await harness.api.calendarCreate({
+      name: '이동 전 공유 일정',
+      color: '#74B9FF',
+      visibility: 'members',
+      members: [{ user_id: '2', can_edit: true }],
+    });
+    const targetCalendar = await harness.api.calendarCreate({
+      name: '이동 후 공유 일정',
+      color: '#A29BFE',
+      visibility: 'members',
+      members: [{ user_id: '3', can_edit: true }],
+    });
+    const created = await harness.api.calendarEventCreate(
+      previewNotificationEventInput(sourceCalendar.id, '다른 캘린더로 이동할 일정'),
+    );
+    await harness.api.calendarEventUpdate(created.id, { calendar_id: targetCalendar.id });
+
+    await harness.api.logoutCanonicalSession();
+    await previewLogin(harness.api, '장삐쭈');
+    const sourceRows = (await harness.api.calendarNotificationsCatchup())
+      .filter((row) => row.event_id === created.id);
+    assert.deepEqual(sourceRows.map((row) => row.action).sort(), ['create', 'delete']);
+    assert.equal(sourceRows.find((row) => row.action === 'delete')?.calendar_id, sourceCalendar.id);
+
+    await harness.api.logoutCanonicalSession();
+    await previewLogin(harness.api, '허혜원');
+    const targetRows = (await harness.api.calendarNotificationsCatchup())
+      .filter((row) => row.event_id === created.id);
+    assert.deepEqual(targetRows.map((row) => row.action), ['create']);
+    assert.equal(targetRows[0]?.calendar_id, targetCalendar.id);
+  } finally {
+    harness.restore();
+  }
+});
+
+test('preview privacy migration notifies source deletion and kept replacement creation exactly once', async () => {
+  const harness = await createPreviewCalendarNotificationHarness();
+  try {
+    await previewLogin(harness.api, '배한솔');
+    const sourceCalendar = (await harness.api.calendarList())
+      .find((calendar) => calendar.name === 'EP 마일스톤');
+    assert.ok(sourceCalendar);
+    const source = (await harness.api.calendarEventsList())
+      .find((event) => event.calendar_id === sourceCalendar.id && event.title === 'EP05 업로드');
+    assert.ok(source);
+    const targetCalendar = await harness.api.calendarCreate({
+      name: '이관 후 수신 일정',
+      color: '#A29BFE',
+      visibility: 'members',
+      members: [{ user_id: '2', can_edit: true }],
+    });
+    const replacement = await harness.api.calendarPrivacyReplacementCreate({
+      storage: 'bflow',
+      source: { storage: 'bflow', event_id: source.id },
+      event: previewNotificationEventInput(targetCalendar.id, '이관 완료 일정'),
+    });
+    assert.equal('transition_resolved' in replacement, false);
+    if ('transition_resolved' in replacement) throw new Error('unexpected transition resolution');
+
+    assert.equal(await replacement.deleteSource(), 'deleted');
+    await replacement.settle('keep');
+    await assert.rejects(replacement.settle('keep'), /반대 방식/);
+
+    await harness.api.logoutCanonicalSession();
+    await previewLogin(harness.api, '장삐쭈');
+    const rows = await harness.api.calendarNotificationsCatchup();
+    const sourceRows = rows.filter((row) => row.event_id === source.id);
+    assert.deepEqual(sourceRows.map((row) => row.action), ['delete']);
+    assert.equal(sourceRows[0]?.calendar_id, sourceCalendar.id);
+    const targetRows = rows.filter((row) => row.event_id === replacement.actual_id);
+    assert.deepEqual(targetRows.map((row) => row.action), ['create']);
+    assert.equal(targetRows[0]?.calendar_id, targetCalendar.id);
+  } finally {
+    harness.restore();
+  }
+});
+
+test('preview privacy migration compensation never notifies a replacement that is deleted', async () => {
+  const harness = await createPreviewCalendarNotificationHarness();
+  try {
+    await previewLogin(harness.api, '배한솔');
+    const targetCalendar = await harness.api.calendarCreate({
+      name: '보상 삭제 수신 일정',
+      color: '#A29BFE',
+      visibility: 'members',
+      members: [{ user_id: '2', can_edit: true }],
+    });
+    const replacement = await harness.api.calendarPrivacyReplacementCreate({
+      storage: 'bflow',
+      source: { storage: 'legacy-private', event_id: 'missing-legacy-source' },
+      event: previewNotificationEventInput(targetCalendar.id, '보상으로 삭제될 일정'),
+    });
+    assert.equal('transition_resolved' in replacement, false);
+    if ('transition_resolved' in replacement) throw new Error('unexpected transition resolution');
+
+    assert.equal(await replacement.deleteSource(), 'missing');
+    await replacement.settle('delete');
+
+    await harness.api.logoutCanonicalSession();
+    await previewLogin(harness.api, '장삐쭈');
+    assert.equal(
+      (await harness.api.calendarNotificationsCatchup())
+        .some((row) => row.event_id === replacement.actual_id),
+      false,
     );
   } finally {
     harness.restore();

@@ -891,6 +891,37 @@ test('preview session transition preserves a source-deleted replacement and only
   }
 });
 
+test('preview privacy replacement cannot keep a created target before its bound source is resolved', async () => {
+  const harness = await createPreviewCalendarHarness();
+  try {
+    await previewLogin(harness.api, '배한솔');
+    const personalCalendar = (await harness.api.calendarList()).find((calendar) => calendar.is_personal);
+    assert.ok(personalCalendar);
+    const source = await harness.api.calendarEventCreate(
+      previewEventInput(personalCalendar.id, '원본 삭제 전 일정'),
+    );
+    const replacement = await harness.api.calendarPrivacyReplacementCreate({
+      storage: 'bflow',
+      source: { storage: 'bflow', event_id: source.id },
+      event: previewEventInput(personalCalendar.id, '공개 전환 대상'),
+    });
+    assert.equal('transition_resolved' in replacement, false);
+    if ('transition_resolved' in replacement) throw new Error('unexpected transition resolution');
+
+    await assert.rejects(replacement.settle('keep'), /원본 일정 삭제 결과/);
+    const beforeCompensation = await harness.api.calendarEventsList();
+    assert.ok(beforeCompensation.some(({ id }) => id === source.id));
+    assert.ok(beforeCompensation.some(({ id }) => id === replacement.actual_id));
+
+    await replacement.settle('delete');
+    const afterCompensation = await harness.api.calendarEventsList();
+    assert.ok(afterCompensation.some(({ id }) => id === source.id));
+    assert.equal(afterCompensation.some(({ id }) => id === replacement.actual_id), false);
+  } finally {
+    harness.restore();
+  }
+});
+
 test('fresh preview seeds four visible calendars, four tags, and fifteen current-month events for 배한솔', async () => {
   const harness = await createPreviewCalendarHarness();
   try {

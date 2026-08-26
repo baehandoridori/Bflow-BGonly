@@ -24,7 +24,11 @@ import type { ArcadePreviewGateway } from '@/features/playground/arcade/previewG
 import { useArcadeStore } from '@/features/playground/arcade/useArcadeStore';
 import { createDevCalendarSeed } from './devCalendarSeed';
 import { createDevCalendarNotificationRealtimeListeners } from './devCalendarNotificationRealtime';
-import type { CalendarNotificationPushRow } from '@/shared/calendarNotifications';
+import {
+  buildCalendarChangeDetail,
+  computeCalendarNotificationRecipients,
+  type CalendarNotificationPushRow,
+} from '@/shared/calendarNotifications';
 import {
   CALENDAR_NOTIFICATION_CATCHUP_LIMIT,
   normalizeCalendarNotificationCatchupInput,
@@ -94,8 +98,18 @@ const devCalendarSeed = createDevCalendarSeed();
 const mockCalendars: MockCalendarRow[] = devCalendarSeed.calendars;
 const mockCalendarEvents: MockCalendarEventRow[] = devCalendarSeed.events;
 const mockCalendarMembers: MockCalendarMemberRow[] = devCalendarSeed.members;
+type MockCalendarEventNotification = {
+  actor: PreviewUser;
+  calendar: MockCalendarRow;
+  event: MockCalendarEventRow;
+};
 type MockPrivacyReplacementTarget =
-  | { storage: 'bflow'; actualId: string; calendarId: string }
+  | {
+      storage: 'bflow';
+      actualId: string;
+      calendarId: string;
+      notification: MockCalendarEventNotification;
+    }
   | { storage: 'legacy-private'; actualId: string }
   | { storage: 'google'; actualId: string; calendarId: string };
 type MockPrivacyReplacementOrigin = { userId: string; epoch: number };
@@ -218,6 +232,66 @@ function toMockCalendarNotificationPushRow(row: MockCalendarNotificationRow): Ca
     detail: row.detail,
     createdAt: row.created_at,
   };
+}
+
+function nextMockCalendarNotificationId(): string {
+  return `mock-calendar-notification-${Date.now()}-${String(++nextMockCalendarNotificationSequence).padStart(6, '0')}`;
+}
+
+/**
+ * mock에서도 메인 IPC와 같은 수신자 계산으로 DB 행을 먼저 저장한 뒤, 현재 canonical
+ * preview 세션이 그 수신자일 때만 최소 realtime envelope을 전달한다.
+ */
+function persistMockCalendarEventNotifications(input: {
+  actor: PreviewUser;
+  action: CalendarNotificationPushRow['action'];
+  calendar: MockCalendarRow;
+  event: MockCalendarEventRow | null;
+  previous: MockCalendarEventRow | null;
+}): void {
+  try {
+    const event = input.event ?? input.previous;
+    if (!event) return;
+    const recipientIds = computeCalendarNotificationRecipients(
+      input.calendar,
+      mockMembersOf(input.calendar.id).map((member) => member.user_id),
+      getMockUsers().map((user) => user.id),
+      input.actor.id,
+    );
+    if (recipientIds.length === 0) return;
+
+    const detail = input.action === 'update' && input.previous && input.event
+      ? buildCalendarChangeDetail(
+        { startDate: input.previous.start_date, endDate: input.previous.end_date },
+        { startDate: input.event.start_date, endDate: input.event.end_date },
+      )
+      : null;
+    const createdAt = new Date().toISOString();
+    const rows = recipientIds.map((recipientId): MockCalendarNotificationRow => ({
+      id: nextMockCalendarNotificationId(),
+      recipient_id: recipientId,
+      actor_id: input.actor.id,
+      actor_name: input.actor.name,
+      calendar_id: input.calendar.id,
+      calendar_name: input.calendar.name,
+      event_id: event.id,
+      event_title: event.title,
+      event_date: event.start_date,
+      action: input.action,
+      detail,
+      created_at: createdAt,
+      read_at: null,
+    }));
+    mockCalendarNotifications.push(...rows);
+    for (const row of rows) {
+      if (row.recipient_id !== previewCanonicalUserId) continue;
+      previewCalendarNotificationRealtime.emitCalendarNotification(
+        toMockCalendarNotificationPushRow(row),
+      );
+    }
+  } catch (error) {
+    console.warn('[dev preview calendar] 알림 저장 실패 (best-effort):', error);
+  }
 }
 
 function safeMockCalendarNotificationPushRow(
@@ -439,6 +513,9 @@ function settleMockPrivacyReplacement(
   if (entry.retiring && !options.transitionOwned) {
     throw new Error('보상 continuation은 세션 전환 정리 중입니다');
   }
+  if (entry.state === 'created' && disposition !== 'delete') {
+    throw new Error('원본 일정 삭제 결과를 확인하기 전에는 replacement를 유지할 수 없습니다');
+  }
   if (entry.state === 'needsKeep' && disposition !== 'keep') {
     throw new Error('원본 삭제 결과가 불확실하여 replacement를 유지해야 합니다');
   }
@@ -447,6 +524,14 @@ function settleMockPrivacyReplacement(
   }
 
   if (disposition === 'delete') deleteMockPrivacyReplacementTarget(entry.target);
+  if (disposition === 'keep' && entry.target.storage === 'bflow') {
+    const { notification } = entry.target;
+    persistMockCalendarEventNotifications({
+      ...notification,
+      action: 'create',
+      previous: null,
+    });
+  }
   markMockPrivacyReplacementTerminal(entry, disposition);
 }
 
@@ -464,7 +549,26 @@ function deleteMockPrivacyReplacementSource(
   }
 
   try {
+    const sourceNotification = entry.source.storage === 'bflow'
+      ? (() => {
+        const sourceEvent = mockCalendarEvents.find((event) => event.id === entry.source.event_id);
+        if (!sourceEvent) return null;
+        return {
+          actor: requireMockCalendarUser(),
+          calendar: { ...requireMockCalendar(sourceEvent.calendar_id) },
+          event: { ...sourceEvent },
+        } satisfies MockCalendarEventNotification;
+      })()
+      : null;
     const result = deleteMockBoundPrivacyMigrationSource(entry.source, entry.origin.userId);
+    if ((result === 'deleted' || result === 'ambiguous') && sourceNotification) {
+      persistMockCalendarEventNotifications({
+        ...sourceNotification,
+        action: 'delete',
+        previous: sourceNotification.event,
+        event: null,
+      });
+    }
     entry.state = result === 'deleted' || result === 'ambiguous' ? 'needsKeep' : 'needsDelete';
     return result;
   } catch (error) {
@@ -1693,7 +1797,15 @@ export function installDevElectronAPI(): void {
         .map((event) => ({ ...event }));
     },
     calendarEventCreate: async (input) => {
-      const created = createMockCalendarEvent(input, requireMockCalendarUser().id);
+      const actor = requireMockCalendarUser();
+      const created = createMockCalendarEvent(input, actor.id);
+      persistMockCalendarEventNotifications({
+        actor,
+        action: 'create',
+        calendar: requireMockCalendar(created.calendar_id),
+        event: created,
+        previous: null,
+      });
       return { ...created };
     },
     calendarPrivacyReplacementCreate: async (request) => {
@@ -1701,10 +1813,16 @@ export function installDevElectronAPI(): void {
       let target: MockPrivacyReplacementTarget;
       if (request.storage === 'bflow') {
         const created = createMockCalendarEvent(request.event, actor.id);
+        const calendar = requireMockCalendar(created.calendar_id);
         target = {
           storage: 'bflow',
           actualId: created.id,
           calendarId: created.calendar_id,
+          notification: {
+            actor: { ...actor },
+            calendar: { ...calendar },
+            event: { ...created },
+          },
         };
       } else if (request.storage === 'legacy-private') {
         target = { storage: 'legacy-private', actualId: createUuid() };
@@ -1731,12 +1849,14 @@ export function installDevElectronAPI(): void {
       };
     },
     calendarEventUpdate: async (id, updates) => {
-      const user = requireMockCalendarUser();
+      const actor = requireMockCalendarUser();
       const event = mockCalendarEvents.find((candidate) => candidate.id === id);
       if (!event) throw new Error('일정을 찾을 수 없습니다');
-      requireMockCalendarEventWrite(event.calendar_id, user.id);
+      const previous = { ...event };
+      const sourceCalendar = requireMockCalendarEventWrite(event.calendar_id, actor.id);
+      let targetCalendar = sourceCalendar;
       if (updates.calendar_id !== undefined && updates.calendar_id !== event.calendar_id) {
-        requireMockCalendarEventWrite(updates.calendar_id, user.id);
+        targetCalendar = requireMockCalendarEventWrite(updates.calendar_id, actor.id);
       }
       const normalizedUpdates = updates.tag_id === undefined
         ? updates
@@ -1747,16 +1867,46 @@ export function installDevElectronAPI(): void {
         created_at: event.created_at,
       };
       Object.assign(event, normalizedUpdates, immutableFields, { updated_at: new Date().toISOString() });
+      if (previous.calendar_id !== event.calendar_id) {
+        persistMockCalendarEventNotifications({
+          actor,
+          action: 'delete',
+          calendar: sourceCalendar,
+          event: null,
+          previous,
+        });
+        persistMockCalendarEventNotifications({
+          actor,
+          action: 'create',
+          calendar: targetCalendar,
+          event,
+          previous: null,
+        });
+      } else {
+        persistMockCalendarEventNotifications({
+          actor,
+          action: 'update',
+          calendar: sourceCalendar,
+          event,
+          previous,
+        });
+      }
       return { ...event };
     },
     calendarEventDelete: async (id) => {
       const index = mockCalendarEvents.findIndex((event) => event.id === id);
       if (index < 0) return;
-      requireMockCalendarEventWrite(
-        mockCalendarEvents[index].calendar_id,
-        requireMockCalendarUser().id,
-      );
+      const actor = requireMockCalendarUser();
+      const previous = { ...mockCalendarEvents[index] };
+      const calendar = requireMockCalendarEventWrite(previous.calendar_id, actor.id);
       mockCalendarEvents.splice(index, 1);
+      persistMockCalendarEventNotifications({
+        actor,
+        action: 'delete',
+        calendar,
+        event: null,
+        previous,
+      });
     },
     calendarTagsList: async () => {
       requireMockCalendarUser();
@@ -2422,7 +2572,7 @@ export function installDevElectronAPI(): void {
 
     const row = {
       ...safeMockCalendarNotificationPushRow(toMockCalendarNotificationPushRow(template), overrides),
-      id: `mock-calendar-notification-${Date.now()}-${String(++nextMockCalendarNotificationSequence).padStart(6, '0')}`,
+      id: nextMockCalendarNotificationId(),
       createdAt: new Date().toISOString(),
     };
     mockCalendarNotifications.push(mockCalendarNotificationRowFromPush(row, template));
