@@ -3,6 +3,7 @@ import { motion } from 'framer-motion';
 import type { CalendarEvent } from '@/types/calendar';
 import { layoutEventBars, type EventBar } from '@/components/calendar/CalendarGrid';
 import { fmtDate, hexToRgba } from '@/utils/calendarDate';
+import { formatEventChipText, formatEventTimeRange } from '@/utils/calendarEventFilter';
 import { calendarEventIdentityKey } from '@/utils/calendarEventIdentity';
 import { layoutDayBlocks, minutesToTime, timeToMinutes } from '@/utils/timeGridLayout';
 import { useMotionPref } from '@/hooks/useMotionPref';
@@ -18,15 +19,19 @@ const DAY_END_MIN = 24 * 60;
 const ALL_DAY_ROW_PX = 28;
 const WEEKDAY_KR = ['일', '월', '화', '수', '목', '금', '토'];
 const CARD_BASE_RGB = [26, 29, 39] as const; // #1A1D27
+const EMPTY_NAME_MAP: Record<string, string> = {};
 
 export interface WeekTimeGridViewProps {
   /** 일요일부터 토요일까지의 활성 주간 날짜 7개 */
   weekDays: Date[];
   events: CalendarEvent[];
+  /** 상위 보기의 날짜 힌트. 현재 시각 강조는 minute-updated clock을 기준으로 계산한다. */
   today: string;
   onEventClick: (event: CalendarEvent) => void;
   /** PR-C에서 시간 prefill을 연결한다. PR-B는 선택한 날짜만 연다. */
   onSlotClick: (date: string, startTime: string, endTime: string) => void;
+  tagNameById: Record<string, string>;
+  calendarNameById: Record<string, string>;
   /** ScheduleView가 주 범위를 소유하고, 그리드는 계산한 다음 인덱스만 요청한다. */
   activeWeekIndex: number;
   weekCount: number;
@@ -85,6 +90,12 @@ export function getTimeSlots(startMin: number, endMin: number): Array<{ startMin
   return slots;
 }
 
+/** minute-updated clock에서 실제 오늘과 주 안의 열 위치를 함께 계산한다. */
+export function getTimeGridToday(now: Date, dateStrings: readonly string[]): { today: string; todayIndex: number } {
+  const today = fmtDate(now);
+  return { today, todayIndex: dateStrings.indexOf(today) };
+}
+
 /** 범위 밖 -1 / weekCount도 상위가 연도 이동으로 해석하도록 그대로 전달한다. */
 export function getNextWeekIndex(activeWeekIndex: number, _weekCount: number, delta: -1 | 1): number {
   return activeWeekIndex + delta;
@@ -106,11 +117,14 @@ export function requestWeekChangeFromWheel(
 }
 
 /** 종일 레인으로 강등된 시간 일정도 시작 시각과 주간 경계 계속 표시를 잃지 않는다. */
-export function getAllDayBarLabel(bar: Pick<EventBar, 'event' | 'isStart' | 'isEnd'>): string {
+export function getAllDayBarLabel(
+  bar: Pick<EventBar, 'event' | 'isStart' | 'isEnd'>,
+  tagNameById: Record<string, string> = EMPTY_NAME_MAP,
+  calendarNameById: Record<string, string> = EMPTY_NAME_MAP,
+): string {
   const before = bar.isStart ? '' : '◂ ';
-  const time = bar.event.allDay === false && bar.event.startTime ? `${bar.event.startTime} ` : '';
   const after = bar.isEnd ? '' : ' ▸';
-  return `${before}${time}${bar.event.title}${after}`;
+  return `${before}${formatEventChipText(bar.event, tagNameById, calendarNameById)}${after}`;
 }
 
 /** 현재 시각선은 활성 밴드 내부의 half-open 구간에서만 위치를 만든다. */
@@ -226,9 +240,10 @@ function eventBlockStyle(layout: { col: number; span: number; cols: number }, to
 export function WeekTimeGridView({
   weekDays,
   events,
-  today,
   onEventClick,
   onSlotClick,
+  tagNameById,
+  calendarNameById,
   activeWeekIndex,
   weekCount,
   onWeekChange,
@@ -268,7 +283,7 @@ export function WeekTimeGridView({
     () => [...timedByDate.values()].some((blocks) => bandContains(blocks, EVENING_START_MIN, DAY_END_MIN)),
     [timedByDate],
   );
-  const todayIndex = dateStrings.indexOf(today);
+  const { today: actualToday, todayIndex } = getTimeGridToday(now, dateStrings);
   const nowMin = now.getHours() * 60 + now.getMinutes();
   const includesToday = todayIndex >= 0;
   const dawnVisible = resolveBandExpanded(hasDawnBlocks, dawnChoice, nowMin, 0, DAWN_END_MIN, includesToday);
@@ -285,10 +300,10 @@ export function WeekTimeGridView({
     const scrollIntoView = () => {
       if (cancelled || done) return;
       done = true;
-      const todayIndex = dateStrings.indexOf(today);
+      const currentTodayIndex = dateStrings.indexOf(actualToday);
       const nowMin = now.getHours() * 60 + now.getMinutes();
       const beforeMain = dawnVisible ? (DAWN_END_MIN / 60) * HOUR_PX : 0;
-      const target = todayIndex >= 0
+      const target = currentTodayIndex >= 0
         ? Math.max(0, beforeMain + ((nowMin - MAIN_START_MIN - 90) / 60) * HOUR_PX)
         : beforeMain;
       scrollRef.current?.scrollTo({ top: target, behavior: 'auto' });
@@ -300,7 +315,7 @@ export function WeekTimeGridView({
       window.cancelAnimationFrame(frame);
       window.clearTimeout(fallback);
     };
-  }, [dawnVisible, today, weekKey]);
+  }, [actualToday, dawnVisible, weekKey]);
 
   const handleWheel = useCallback((event: React.WheelEvent<HTMLDivElement>) => {
     requestWeekChangeFromWheel(event, activeWeekIndex, weekCount, onWeekChange);
@@ -313,7 +328,7 @@ export function WeekTimeGridView({
           <div aria-hidden="true" />
           {dates.map((date, index) => {
             const dateStr = dateStrings[index];
-            const isToday = dateStr === today;
+            const isToday = dateStr === actualToday;
             const isWeekend = index === 0 || index === 6;
             return (
               <div
@@ -336,39 +351,41 @@ export function WeekTimeGridView({
           <div className="absolute inset-y-0 left-0 flex items-start justify-center pt-2 text-[9px] text-text-secondary" style={{ width: TIME_GUTTER_PX }}>종일</div>
           <div className="absolute inset-y-0 right-0 grid grid-cols-7" style={{ left: TIME_GUTTER_PX }}>
             {dateStrings.map((dateStr, index) => (
-              <button
+              <div
                 key={dateStr}
-                type="button"
-                aria-label={`${dateStr} 종일 일정 만들기`}
-                className={`border-l border-bg-border/20 transition-colors hover:bg-bg-border/15 ${dateStr === today ? 'bg-accent/[0.03]' : ''}`}
+                aria-hidden="true"
+                data-time-grid-all-day-empty="true"
+                className={`border-l border-bg-border/20 transition-colors hover:bg-bg-border/15 ${dateStr === actualToday ? 'bg-accent/[0.03]' : ''}`}
                 style={getWeekendCellStyle(index === 0 || index === 6)}
-                onClick={() => onSlotClick(dateStr, '00:00', '23:59')}
               />
             ))}
           </div>
           <div className="absolute inset-y-0 right-0" style={{ left: TIME_GUTTER_PX }}>
-            {allDayBars.filter((bar) => bar.row < visibleAllDayRows).map((bar) => (
-              <button
-                key={`${calendarEventIdentityKey(bar.event)}-${bar.startCol}`}
-                type="button"
-                title={getAllDayBarLabel(bar)}
-                aria-label={`${getAllDayBarLabel(bar)}, 종일 일정`}
-                className="absolute z-10 truncate rounded px-1.5 text-left text-[10px] font-semibold text-white shadow-sm outline-none focus-visible:ring-2 focus-visible:ring-white focus-visible:ring-offset-1 focus-visible:ring-offset-bg-primary"
-                style={{
-                  top: 3 + bar.row * ALL_DAY_ROW_PX,
-                  left: `calc(${bar.startCol * (100 / 7)}% + 2px)`,
-                  width: `calc(${bar.span * (100 / 7)}% - 4px)`,
-                  height: 22,
-                  ...getAllDayBarStyle(bar.event.color),
-                }}
-                onClick={(event) => {
-                  event.stopPropagation();
-                  onEventClick(bar.event);
-                }}
-              >
-                {getAllDayBarLabel(bar)}
-              </button>
-            ))}
+            {allDayBars.filter((bar) => bar.row < visibleAllDayRows).map((bar) => {
+              const label = getAllDayBarLabel(bar, tagNameById, calendarNameById);
+              return (
+                <button
+                  key={`${calendarEventIdentityKey(bar.event)}-${bar.startCol}`}
+                  type="button"
+                  title={label}
+                  aria-label={`${label}, 종일 일정`}
+                  className="absolute z-10 truncate rounded px-1.5 text-left text-[10px] font-semibold text-white shadow-sm outline-none focus-visible:ring-2 focus-visible:ring-white focus-visible:ring-offset-1 focus-visible:ring-offset-bg-primary"
+                  style={{
+                    top: 3 + bar.row * ALL_DAY_ROW_PX,
+                    left: `calc(${bar.startCol * (100 / 7)}% + 2px)`,
+                    width: `calc(${bar.span * (100 / 7)}% - 4px)`,
+                    height: 22,
+                    ...getAllDayBarStyle(bar.event.color),
+                  }}
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    onEventClick(bar.event);
+                  }}
+                >
+                  {label}
+                </button>
+              );
+            })}
           </div>
           {hiddenAllDayCount > 0 && (
             <button
@@ -393,12 +410,13 @@ export function WeekTimeGridView({
           dates={dates}
           dateStrings={dateStrings}
           blocksByDate={timedByDate}
-          today={today}
+          today={actualToday}
           todayIndex={todayIndex}
           nowMin={nowMin}
           reduce={reduce}
           onEventClick={onEventClick}
           onSlotClick={onSlotClick}
+          tagNameById={tagNameById}
         />
         <TimeBand
           label="시간대"
@@ -408,12 +426,13 @@ export function WeekTimeGridView({
           dates={dates}
           dateStrings={dateStrings}
           blocksByDate={timedByDate}
-          today={today}
+          today={actualToday}
           todayIndex={todayIndex}
           nowMin={nowMin}
           reduce={reduce}
           onEventClick={onEventClick}
           onSlotClick={onSlotClick}
+          tagNameById={tagNameById}
         />
         <TimeBand
           label="저녁 시간대"
@@ -424,12 +443,13 @@ export function WeekTimeGridView({
           dates={dates}
           dateStrings={dateStrings}
           blocksByDate={timedByDate}
-          today={today}
+          today={actualToday}
           todayIndex={todayIndex}
           nowMin={nowMin}
           reduce={reduce}
           onEventClick={onEventClick}
           onSlotClick={onSlotClick}
+          tagNameById={tagNameById}
         />
       </div>
     </div>
@@ -451,6 +471,7 @@ function TimeBand({
   reduce,
   onEventClick,
   onSlotClick,
+  tagNameById,
 }: {
   label: string;
   startMin: number;
@@ -466,6 +487,7 @@ function TimeBand({
   reduce: boolean;
   onEventClick: (event: CalendarEvent) => void;
   onSlotClick: (date: string, startTime: string, endTime: string) => void;
+  tagNameById: Record<string, string>;
 }) {
   if (!visible) {
     return (
@@ -548,6 +570,8 @@ function TimeBand({
                 const visualStyle = getTimedBlockVisualStyle(block.event.color);
                 const stateStyle = getTimedBlockStateStyle(block.event.color, isCurrent);
                 const opacity = getTimedBlockOpacity(isPast);
+                const timeLabel = formatEventTimeRange(block.event, tagNameById)
+                  ?? `${minutesToTime(block.startMin)}–${minutesToTime(block.endMin)}`;
                 return (
                   <motion.button
                     key={layout.id}
@@ -574,7 +598,7 @@ function TimeBand({
                       onEventClick(block.event);
                     }}
                   >
-                    {duration >= 30 && <span data-time-grid-time="true" className="block truncate" style={{ color: visualStyle.timeColor, fontSize: 9 }}>{minutesToTime(block.startMin)}–{minutesToTime(block.endMin)}</span>}
+                    {duration >= 30 && <span data-time-grid-time="true" className="block truncate" style={{ color: visualStyle.timeColor, fontSize: 9 }}>{timeLabel}</span>}
                     <span data-time-grid-title="true" className="block truncate" style={{ color: visualStyle.titleColor, fontSize: visualStyle.titleFontSize }}>{block.event.title}</span>
                   </motion.button>
                 );

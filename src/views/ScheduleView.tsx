@@ -1108,6 +1108,8 @@ export function ScheduleView() {
                 today={today}
                 onEventClick={handleEventClick}
                 onSlotClick={handleTimeGridSlotClick}
+                tagNameById={tagNameById}
+                calendarNameById={calendarNameById}
                 activeWeekIndex={activeWeekIndex}
                 weekCount={weeks.length}
                 onWeekChange={handleWeekChange}

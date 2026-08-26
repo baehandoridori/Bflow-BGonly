@@ -18,6 +18,9 @@ type CalendarEvent = {
   allDay?: boolean;
   startTime?: string;
   endTime?: string;
+  tagId?: string;
+  calendarId?: string;
+  source?: 'bflow' | 'google' | 'vacation';
 };
 
 type WeekTimeGridModule = {
@@ -31,6 +34,8 @@ type WeekTimeGridModule = {
     today: string;
     onEventClick(event: CalendarEvent): void;
     onSlotClick(date: string, startTime: string, endTime: string): void;
+    tagNameById: Record<string, string>;
+    calendarNameById: Record<string, string>;
     activeWeekIndex: number;
     weekCount: number;
     onWeekChange(nextIndex: number): void;
@@ -49,7 +54,8 @@ type WeekTimeGridModule = {
     event: CalendarEvent;
     isStart: boolean;
     isEnd: boolean;
-  }): string;
+  }, tagNameById?: Record<string, string>, calendarNameById?: Record<string, string>): string;
+  getTimeGridToday(now: Date, dateStrings: string[]): { today: string; todayIndex: number };
   getCurrentTimeMarker(nowMin: number, bandStartMin: number, bandEndMin: number, todayIndex: number): {
     top: number;
     label: string;
@@ -185,6 +191,62 @@ test('WeekTimeGridView: 종일 레인에 이어진 일정 표시와 강등된 �
   assert.equal(label, '◂ 08:30 이틀 회의 ▸');
 });
 
+test('WeekTimeGridView: 분 단위 현재 시각이 자정을 넘으면 실제 오늘 열도 함께 바뀐다', async () => {
+  const { getTimeGridToday } = await loadWeekTimeGridView();
+  const dateStrings = ['2026-08-23', '2026-08-24'];
+
+  assert.deepEqual(getTimeGridToday(new Date(2026, 7, 23, 23, 59), dateStrings), {
+    today: '2026-08-23',
+    todayIndex: 0,
+  });
+  assert.deepEqual(getTimeGridToday(new Date(2026, 7, 24, 0, 0), dateStrings), {
+    today: '2026-08-24',
+    todayIndex: 1,
+  });
+});
+
+test('WeekTimeGridView: 빈 종일 레인은 timed 슬롯 callback을 만들지 않는다', async () => {
+  const module = await loadWeekTimeGridView();
+  const markup = renderToStaticMarkup(createElement(module.default, {
+    weekDays: Array.from({ length: 7 }, (_, index) => new Date(2026, 7, 23 + index, 12)),
+    events: [],
+    today: '2026-08-23',
+    onEventClick() {},
+    onSlotClick() {},
+    tagNameById: {},
+    calendarNameById: {},
+    activeWeekIndex: 0,
+    weekCount: 4,
+    onWeekChange() {},
+  }));
+
+  assert.match(markup, /data-time-grid-all-day-empty="true"/);
+  assert.doesNotMatch(markup, /종일 일정 만들기/);
+});
+
+test('WeekTimeGridView: D10 라벨은 공용 태그·캘린더·시간 범위 포맷을 사용한다', async () => {
+  const module = await loadWeekTimeGridView();
+  const tagNameById = { 'tag-meeting': '회의' };
+  const calendarNameById = { team: '스튜디오 공지' };
+  const allDay = event({ id: 'all-day-label', title: '종일 일정', allDay: true, tagId: 'tag-meeting', calendarId: 'team' });
+  const markup = renderToStaticMarkup(createElement(module.default, {
+    weekDays: Array.from({ length: 7 }, (_, index) => new Date(2026, 7, 23 + index, 12)),
+    events: [allDay, event({ id: 'timed-label-shared', title: '시간 일정', startDate: '2026-08-25', endDate: '2026-08-25', startTime: '09:00', endTime: '09:30', tagId: 'tag-meeting' })],
+    today: '2026-08-23',
+    onEventClick() {},
+    onSlotClick() {},
+    tagNameById,
+    calendarNameById,
+    activeWeekIndex: 0,
+    weekCount: 4,
+    onWeekChange() {},
+  }));
+
+  assert.equal(module.getAllDayBarLabel({ event: allDay, isStart: true, isEnd: true }, tagNameById, calendarNameById), '회의 · 종일 일정');
+  assert.match(markup, /회의 · 종일 일정/);
+  assert.match(markup, /09:00 – 09:30 · 회의/);
+});
+
 test('WeekTimeGridView: 현재 시각선은 56px 시간 눈금 기준 위치와 레이블을 계산한다', async () => {
   const { getCurrentTimeMarker } = await loadWeekTimeGridView();
 
@@ -274,7 +336,13 @@ test('WeekTimeGridView: 오늘 외 열의 현재 시각선은 28% 빨강 1px을 
 
 test('WeekTimeGridView: weekend-today accent를 보존하는 주말 tint와 종일 칩 표기를 실제 마크업에 남긴다', async () => {
   const module = await loadWeekTimeGridView();
-  const week = Array.from({ length: 7 }, (_, index) => new Date(2026, 7, 23 + index, 12));
+  const liveNow = new Date();
+  // 부모가 전달한 today가 오래되어도 minute-updated clock의 실제 오늘을 써야 한다.
+  const week = Array.from(
+    { length: 7 },
+    (_, index) => new Date(liveNow.getFullYear(), liveNow.getMonth(), liveNow.getDate() + index, 12),
+  );
+  const weekOutsideToday = Array.from({ length: 7 }, (_, index) => new Date(2000, 0, 2 + index, 12));
   const allDayEvents = [
     event({ id: 'all-1', allDay: true }),
     event({ id: 'all-2', allDay: true }),
@@ -283,20 +351,24 @@ test('WeekTimeGridView: weekend-today accent를 보존하는 주말 tint와 종�
   const markup = renderToStaticMarkup(createElement(module.default, {
     weekDays: week,
     events: allDayEvents,
-    today: '2026-08-23',
+    today: '1900-01-01',
     onEventClick() {},
     onSlotClick() {},
+    tagNameById: {},
+    calendarNameById: {},
     activeWeekIndex: 0,
     weekCount: 4,
     onWeekChange() {},
     onEventContextMenu() {},
   }));
   const collapsedMarkup = renderToStaticMarkup(createElement(module.default, {
-    weekDays: week,
+    weekDays: weekOutsideToday,
     events: allDayEvents,
-    today: '2026-01-01',
+    today: '1900-01-01',
     onEventClick() {},
     onSlotClick() {},
+    tagNameById: {},
+    calendarNameById: {},
     activeWeekIndex: 0,
     weekCount: 4,
     onWeekChange() {},
@@ -314,7 +386,7 @@ test('WeekTimeGridView: weekend-today accent를 보존하는 주말 tint와 종�
   assert.match(markup, /\+1개/);
   assert.doesNotMatch(markup, /opacity-60/);
   assert.match(markup, /class="min-w-0[^"]*bg-accent\/10" style="background-image:linear-gradient\(rgba\(116, 185, 255, 0.06\), rgba\(116, 185, 255, 0.06\)\)"/);
-  assert.match(markup, /aria-label="2026-08-23 종일 일정 만들기" class="[^"]*hover:bg-bg-border\/15[^"]*bg-accent\/\[0\.03\]" style="background-image:linear-gradient\(rgba\(116, 185, 255, 0.06\), rgba\(116, 185, 255, 0.06\)\)"/);
+  assert.match(markup, /data-time-grid-all-day-empty="true" class="[^"]*hover:bg-bg-border\/15[^"]*bg-accent\/\[0\.03\]" style="background-image:linear-gradient\(rgba\(116, 185, 255, 0.06\), rgba\(116, 185, 255, 0.06\)\)"/);
   assert.match(markup, /class="relative border-r border-bg-border\/20 bg-accent\/\[0\.035\]" style="background-image:linear-gradient\(rgba\(116, 185, 255, 0.06\), rgba\(116, 185, 255, 0.06\)\)"/);
   assert.match(markup, /hover:bg-bg-border\/15/);
   assert.doesNotMatch(markup, /hover:bg-accent\/\[0.08\]/);
@@ -331,10 +403,12 @@ test('WeekTimeGridView: 30분 이상 시간 블록은 원본색 시각을 제목
     today: '2026-01-01',
     onEventClick() {},
     onSlotClick() {},
+    tagNameById: {},
+    calendarNameById: {},
     activeWeekIndex: 1,
     weekCount: 4,
     onWeekChange() {},
   }));
 
-  assert.match(markup, /data-time-grid-time="true"[^>]*>09:00–09:30<\/span><span data-time-grid-title="true"[^>]*>오전 회의<\/span>/);
+  assert.match(markup, /data-time-grid-time="true"[^>]*>09:00 – 09:30<\/span><span data-time-grid-title="true"[^>]*>오전 회의<\/span>/);
 });
