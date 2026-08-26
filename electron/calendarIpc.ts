@@ -9,8 +9,13 @@ import {
   canManageCalendar,
   canCreateCalendar,
 } from '../src/shared/calendarPermissions';
+import {
+  buildCalendarChangeDetail,
+  computeCalendarNotificationRecipients,
+} from '../src/shared/calendarNotifications';
 import * as store from './calendarStore';
 import type { CalendarRow, CalendarEventRow, CalendarMemberRow } from './calendarStore';
+import { readUsers } from './supabase';
 import {
   broadcastCalendarChanged,
   broadcastCalendarCommittedDelete,
@@ -205,10 +210,8 @@ function committedReplacementDeleteMarker(
   };
 }
 
-/** 일정 쓰기 성공 후 알림 파이프라인 진입점 (설계서 §8).
- *  PR4 에서 수신자 계산 + calendar_notifications insert 를 구현한다.
- *  PR2 에서는 호출 지점만 확정하고 의도적으로 아무것도 하지 않는다. */
-async function emitCalendarEventNotifications(_ctx: {
+/** 일정 쓰기 성공 후 알림 파이프라인 진입점 — 실패해도 일정 저장은 유지한다. */
+async function emitCalendarEventNotifications(ctx: {
   actorId: string;
   action: 'create' | 'update' | 'delete';
   calendar: CalendarRow;
@@ -216,7 +219,41 @@ async function emitCalendarEventNotifications(_ctx: {
   event: CalendarEventRow | null;
   previous: CalendarEventRow | null;
 }): Promise<void> {
-  return;
+  try {
+    const event = ctx.event ?? ctx.previous;
+    if (!event) return;
+
+    const users = await readUsers();
+    const recipients = computeCalendarNotificationRecipients(
+      ctx.calendar,
+      ctx.members.map((member) => member.user_id),
+      users.map((user) => user.id),
+      ctx.actorId,
+    );
+    if (recipients.length === 0) return;
+
+    const detail = ctx.action === 'update' && ctx.previous && ctx.event
+      ? buildCalendarChangeDetail(
+        { startDate: ctx.previous.start_date, endDate: ctx.previous.end_date },
+        { startDate: ctx.event.start_date, endDate: ctx.event.end_date },
+      )
+      : null;
+    const actor = users.find((user) => user.id === ctx.actorId);
+    await store.insertNotifications(recipients.map((recipientId) => ({
+      recipient_id: recipientId,
+      actor_id: ctx.actorId,
+      actor_name: actor?.name ?? '알 수 없음',
+      calendar_id: ctx.calendar.id,
+      calendar_name: ctx.calendar.name,
+      event_id: event.id,
+      event_title: event.title,
+      event_date: event.start_date,
+      action: ctx.action,
+      detail,
+    })));
+  } catch (error) {
+    console.warn('[calendarIpc] 알림 insert 실패 (best-effort — 일정 저장은 성공 유지):', error);
+  }
 }
 
 const membersOf = (all: CalendarMemberRow[], calendarId: string) =>

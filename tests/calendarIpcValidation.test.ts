@@ -76,6 +76,7 @@ function calendarIpcTestPlugin(): Plugin {
       builder.onResolve({ filter: /^electron$/ }, () => ({ path: 'electron', namespace: 'calendar-ipc-test' }));
       builder.onResolve({ filter: /^\.\/calendarStore$/ }, () => ({ path: 'store', namespace: 'calendar-ipc-test' }));
       builder.onResolve({ filter: /^\.\/broadcast$/ }, () => ({ path: 'broadcast', namespace: 'calendar-ipc-test' }));
+      builder.onResolve({ filter: /^\.\/supabase$/ }, () => ({ path: 'supabase', namespace: 'calendar-ipc-test' }));
       builder.onLoad({ filter: /^electron$/, namespace: 'calendar-ipc-test' }, () => ({
         contents: `export const ipcMain = { handle(channel, handler) { globalThis.${IPC_HARNESS_KEY}.handlers.set(channel, handler); } };`,
       }));
@@ -83,6 +84,9 @@ function calendarIpcTestPlugin(): Plugin {
         contents: storeFunctionNames.map((name) => (
           `export const ${name} = (...args) => globalThis.${IPC_HARNESS_KEY}.store.${name}(...args);`
         )).join('\n'),
+      }));
+      builder.onLoad({ filter: /^supabase$/, namespace: 'calendar-ipc-test' }, () => ({
+        contents: 'export const readUsers = async () => [];',
       }));
       builder.onLoad({ filter: /^broadcast$/, namespace: 'calendar-ipc-test' }, () => ({
         contents: [
