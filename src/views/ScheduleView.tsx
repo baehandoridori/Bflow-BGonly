@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
+import { motion, AnimatePresence, MotionConfig } from 'framer-motion';
 import {
   CalendarDays, ChevronLeft, ChevronRight, Plus,
 } from 'lucide-react';
@@ -890,7 +890,8 @@ export function ScheduleView() {
   }, []);
 
   return (
-    <div className="flex h-full">
+    <MotionConfig reducedMotion={reduce ? 'always' : 'never'}>
+      <div className="flex h-full">
       {/* ═══ 좌측 사이드바 ═══ */}
       <div
         className="flex-shrink-0 border-r border-bg-border/30 transition-all duration-250 overflow-hidden"
@@ -1227,6 +1228,7 @@ export function ScheduleView() {
         />
       )}
       </div>{/* 메인 영역 끝 */}
-    </div>
+      </div>
+    </MotionConfig>
   );
 }

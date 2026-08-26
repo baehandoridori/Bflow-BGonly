@@ -291,6 +291,7 @@ let scheduleWeekScrollProps: WeekScrollViewProps[] = [];
 let scheduleTimeGridProps: WeekTimeGridViewProps[] = [];
 let scheduleDayScrollProps: DayScrollViewProps[] = [];
 let scheduleCreateModalProps: EventCreateModalProps[] = [];
+let scheduleReducedMotion = false;
 const scheduleLocalStorage = new Map<string, string>();
 let scheduleCanonicalEvents: ScheduleCalendarEvent[] = [];
 let scheduleUpdateCalls: Array<{
@@ -647,6 +648,7 @@ function resetHarness(): void {
   scheduleTimeGridProps = [];
   scheduleDayScrollProps = [];
   scheduleCreateModalProps = [];
+  scheduleReducedMotion = false;
   scheduleLocalStorage.clear();
   scheduleCanonicalEvents = [];
   scheduleUpdateCalls = [];
@@ -1215,7 +1217,17 @@ async function loadScheduleView(): Promise<ScheduleViewComponent> {
         };
       }
       if (id === 'react/jsx-runtime') return jsxRuntime;
-      if (id === 'framer-motion') return { AnimatePresence: ({ children }: { children: ReactNode }) => children, motion: { div: 'div' } };
+      if (id === 'framer-motion') {
+        return {
+          AnimatePresence: ({ children }: { children: ReactNode }) => children,
+          MotionConfig: ({ children, reducedMotion }: { children: ReactNode; reducedMotion?: string }) => jsxRuntime.jsx('motion-config', {
+            'data-testid': 'schedule-motion-config',
+            'data-reduced-motion': reducedMotion,
+            children,
+          }),
+          motion: { div: 'div' },
+        };
+      }
       if (id === 'lucide-react') return { CalendarDays: emptyComponent, ChevronLeft: emptyComponent, ChevronRight: emptyComponent, Plus: emptyComponent };
       if (id === '@/utils/cn') return { cn: (...values: string[]) => values.filter(Boolean).join(' ') };
       if (id === '@/stores/useDataStore') return { useDataStore: (selector: (state: { episodes: []; episodeTitles: {} }) => unknown) => selector({ episodes: [], episodeTitles: {} }) };
@@ -1283,6 +1295,9 @@ async function loadScheduleView(): Promise<ScheduleViewComponent> {
         };
       }
       if (id === '@/utils/vacationEvents') return { mapVacationEvents: () => [] };
+      if (id === '@/components/calendar/MiniCalendar') {
+        return { MiniCalendar: () => jsxRuntime.jsx('div', { 'data-testid': 'mini-calendar', children: '미니 캘린더' }) };
+      }
       if (id === '@/components/calendar/WeekScrollView') {
         return {
           __esModule: true,
@@ -1311,7 +1326,13 @@ async function loadScheduleView(): Promise<ScheduleViewComponent> {
           },
         };
       }
-      if (id === '@/hooks/useMotionPref') return { useMotionPref: () => ({ reduce: false }) };
+      if (id === '@/components/calendar/WeekSidebar') {
+        return { __esModule: true, default: () => jsxRuntime.jsx('div', { 'data-testid': 'week-sidebar', children: '주간 사이드바' }) };
+      }
+      if (id === '@/components/calendar/DaySidebar') {
+        return { __esModule: true, default: () => jsxRuntime.jsx('div', { 'data-testid': 'day-sidebar', children: '일간 사이드바' }) };
+      }
+      if (id === '@/hooks/useMotionPref') return { useMotionPref: () => ({ reduce: scheduleReducedMotion }) };
       if (id === '@/components/calendar/CalendarRail') {
         return {
           GOOGLE_CALENDAR_ID: 'google',
@@ -1369,7 +1390,7 @@ async function loadScheduleView(): Promise<ScheduleViewComponent> {
       };
       if (id === '@/utils/calendarEventFilter') return { filterCalendarEvents: (events: unknown[]) => events };
       if (id === '@/components/calendar/CalendarGrid') {
-        return { CalendarGrid: (props: ScheduleGridProps) => { scheduleGridProps.push(props); return jsxRuntime.jsx('div', { children: '캘린더 그리드' }); } };
+        return { CalendarGrid: (props: ScheduleGridProps) => { scheduleGridProps.push(props); return jsxRuntime.jsx('div', { 'data-testid': 'calendar-grid', children: '캘린더 그리드' }); } };
       }
       if (id === '@/components/calendar/EventSidePanel') {
         return { EventSidePanel: (props: SchedulePanelProps) => { schedulePanelProps.push(props); return jsxRuntime.jsx('div', { 'aria-label': '일정 상세 패널 연결됨', children: props.event.title }); } };
@@ -3924,6 +3945,76 @@ test('ScheduleView replaces legacy controls with the tag bar and reports visible
   assert.equal(typeof scheduleTagBarProps[0].onOpenTagManager, 'function', 'ScheduleView keeps the tag manager anchoring callback wired');
   assert.ok(labels.includes('일정'), 'the creation action uses the shared calendar wording');
   assert.match(textContent(tree), /이번 달 0개.*오늘 0개.*켜진 캘린더 4\/4/, 'statistics describe the filtered view and rail visibility instead of total and vacation counts');
+});
+
+test('ScheduleView applies one reduced-motion policy above every calendar branch, sidebar, and modal', async () => {
+  const boundaryFor = (tree: ReactNode, expectedPolicy: 'always' | 'never'): ReactElement<Record<string, unknown>> => {
+    const boundaries = findElements(tree, (element) => element.props['data-testid'] === 'schedule-motion-config');
+    assert.equal(boundaries.length, 1, 'one root boundary must cover the complete ScheduleView subtree');
+    const boundary = boundaries[0];
+    assert.equal(boundary.type, 'motion-config', 'the policy boundary stays above the sidebar and every calendar surface');
+    assert.equal(boundary.props['data-reduced-motion'], expectedPolicy);
+    return boundary;
+  };
+
+  for (const scenario of [
+    {
+      name: 'month grid',
+      reduce: true,
+      preference: { viewMode: 'month', weekSubMode: 'card' },
+      marker: 'calendar-grid',
+    },
+    {
+      name: 'weekly time grid',
+      reduce: false,
+      preference: { viewMode: 'week', weekSubMode: 'timegrid' },
+      marker: 'week-time-grid-view',
+    },
+    {
+      name: 'weekly card view',
+      reduce: true,
+      preference: { viewMode: 'week', weekSubMode: 'card' },
+      marker: 'week-scroll-view',
+    },
+    {
+      name: 'daily view',
+      reduce: false,
+      preference: { viewMode: 'today', weekSubMode: 'card' },
+      marker: 'day-scroll-view',
+    },
+  ] as const) {
+    resetHarness();
+    scheduleReducedMotion = scenario.reduce;
+    scheduleLocalStorage.set('bflow_calendar_view_v1', JSON.stringify(scenario.preference));
+
+    const boundary = boundaryFor(
+      await renderScheduleView(),
+      scenario.reduce ? 'always' : 'never',
+    );
+    assert.ok(
+      findElements(boundary.props.children as ReactNode, (element) => element.props['data-testid'] === scenario.marker).length > 0,
+      `${scenario.name} renders inside the shared motion boundary`,
+    );
+  }
+
+  resetHarness();
+  scheduleReducedMotion = true;
+  let tree = await renderScheduleView();
+  buttonByTitle(tree, '사이드바 펼치기').props.onClick?.({ stopPropagation() {} });
+  tree = await renderScheduleView();
+  let boundary = boundaryFor(tree, 'always');
+  assert.ok(
+    findElements(boundary.props.children as ReactNode, (element) => element.props['data-testid'] === 'mini-calendar').length > 0,
+    'the animated mini calendar stays below the same root policy',
+  );
+
+  buttonByText(tree, '일정').props.onClick?.({ stopPropagation() {} });
+  tree = await renderScheduleView();
+  boundary = boundaryFor(tree, 'always');
+  assert.ok(
+    findElements(boundary.props.children as ReactNode, (element) => element.props['aria-label'] === '일정 생성 모달 연결됨').length > 0,
+    'modal animation stays below the same root policy',
+  );
 });
 
 test('ScheduleView restores and remembers the weekly time-grid choice while opening a slot on its date', async () => {
