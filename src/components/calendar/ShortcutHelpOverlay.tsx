@@ -34,7 +34,8 @@ export function ShortcutHelpOverlay({ onClose }: ShortcutHelpOverlayProps) {
 
   const handleDialogKeyDown = (event: KeyboardEvent<HTMLElement>) => {
     event.stopPropagation();
-    if (event.key === 'Escape') {
+    const isHelpShortcut = event.key === '?' || (event.key === '/' && event.shiftKey);
+    if (event.key === 'Escape' || isHelpShortcut) {
       event.preventDefault();
       onClose();
       return;

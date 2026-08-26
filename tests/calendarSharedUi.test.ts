@@ -4832,7 +4832,8 @@ test('ShortcutHelpOverlay moves and contains focus, blocks background keys, then
   activeElement = opener;
   globalThis.document = { get activeElement() { return activeElement; } } as unknown as Document;
 
-  const tree = resolveComponents(ShortcutHelpOverlay({ onClose() {} }));
+  let closeRequests = 0;
+  const tree = resolveComponents(ShortcutHelpOverlay({ onClose() { closeRequests += 1; } }));
   const dialogNode = nodeByAriaLabel(tree, '캘린더 단축키') as ReactElement<Record<string, unknown>>;
   const closeNode = buttonByLabel(tree, '단축키 도움말 닫기') as unknown as ReactElement<Record<string, unknown>>;
   const dialogRef = (dialogNode as unknown as { ref?: { current: unknown } }).ref;
@@ -4846,6 +4847,16 @@ test('ShortcutHelpOverlay moves and contains focus, blocks background keys, then
   assert.equal(activeElement, closeButton, '열리면 배경의 기존 포커스 대신 닫기 버튼에 포커스한다');
 
   const onKeyDown = dialogNode.props.onKeyDown as ((event: Record<string, unknown>) => void) | undefined;
+  let helpTogglePrevented = false;
+  onKeyDown?.({
+    key: '?',
+    shiftKey: true,
+    preventDefault() { helpTogglePrevented = true; },
+    stopPropagation() {},
+  });
+  assert.equal(closeRequests, 1, '포커스가 도움말 안에 있어도 Shift+/를 다시 누르면 도움말을 닫는다');
+  assert.equal(helpTogglePrevented, true);
+
   let tabPrevented = false;
   onKeyDown?.({
     key: 'Tab',
