@@ -4108,13 +4108,6 @@ test('ScheduleView restores and remembers the weekly time-grid choice while open
   assert.equal(scheduleCreateModalProps.at(-1)?.initialStartTime, '13:15', 'a time-grid drag preserves its exact start');
   assert.equal(scheduleCreateModalProps.at(-1)?.initialEndTime, '14:45', 'a time-grid drag preserves its exact end');
 
-  scheduleCreateModalProps.at(-1)?.onClose();
-  tree = await renderScheduleView();
-  buttonByText(tree, '일정').props.onClick?.({ stopPropagation() {} });
-  tree = await renderScheduleView();
-  assert.equal(scheduleCreateModalProps.at(-1)?.initialStartTime, undefined, 'closing clears timed prefill before a normal create');
-  assert.equal(scheduleCreateModalProps.at(-1)?.initialEndTime, undefined);
-
   await scheduleCreateModalProps.at(-1)?.onSave({
     title: '저장 뒤 일반 일정',
     memo: '',
@@ -4123,8 +4116,33 @@ test('ScheduleView restores and remembers the weekly time-grid choice while open
     startDate: '2026-08-27',
     endDate: '2026-08-27',
     createdBy: '배한솔',
-    allDay: true,
+    allDay: false,
+    startTime: '13:15',
+    endTime: '14:45',
   });
+  assert.deepEqual(
+    scheduleAddedEvents.map((event) => ({
+      startDate: event.startDate,
+      endDate: event.endDate,
+      startTime: event.startTime,
+      endTime: event.endTime,
+    })),
+    [{
+      startDate: '2026-08-27',
+      endDate: '2026-08-27',
+      startTime: '13:15',
+      endTime: '14:45',
+    }],
+    'the still-prefilled timed modal saves its exact drag range',
+  );
+  // The ordinary-create button also resets these fields, so assert the successful-save
+  // reset before opening it to keep this path independently covered.
+  assert.deepEqual(
+    stateSlots.slice(5, 9),
+    [undefined, undefined, undefined, undefined],
+    'a successful timed save clears its date and time prefill before the next opener',
+  );
+
   tree = await renderScheduleView();
   buttonByText(tree, '일정').props.onClick?.({ stopPropagation() {} });
   tree = await renderScheduleView();
@@ -4142,6 +4160,32 @@ test('ScheduleView restores and remembers the weekly time-grid choice while open
       initialEndTime: undefined,
     },
     'a successful save clears every date and time prefill before the next ordinary creation',
+  );
+
+  scheduleCreateModalProps.at(-1)?.onClose();
+  tree = await renderScheduleView();
+  scheduleTimeGridProps.at(-1)?.onTimeGridCreate?.('2026-08-28', '09:00', '09:30');
+  tree = await renderScheduleView();
+  assert.equal(scheduleCreateModalProps.at(-1)?.initialStartTime, '09:00', 'the close check begins from a timed time-grid creation');
+  assert.equal(scheduleCreateModalProps.at(-1)?.initialEndTime, '09:30');
+  scheduleCreateModalProps.at(-1)?.onClose();
+  tree = await renderScheduleView();
+  buttonByText(tree, '일정').props.onClick?.({ stopPropagation() {} });
+  tree = await renderScheduleView();
+  assert.deepEqual(
+    {
+      initialDate: scheduleCreateModalProps.at(-1)?.initialDate,
+      initialEndDate: scheduleCreateModalProps.at(-1)?.initialEndDate,
+      initialStartTime: scheduleCreateModalProps.at(-1)?.initialStartTime,
+      initialEndTime: scheduleCreateModalProps.at(-1)?.initialEndTime,
+    },
+    {
+      initialDate: undefined,
+      initialEndDate: undefined,
+      initialStartTime: undefined,
+      initialEndTime: undefined,
+    },
+    'closing a timed creation also clears every date and time prefill before the next ordinary creation',
   );
 
   cardToggle.props.onClick?.({ stopPropagation() {} });
