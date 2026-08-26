@@ -2057,13 +2057,17 @@ export async function addEvent(
   event: CalendarEvent,
   options?: CalendarEventAddOptions,
 ): Promise<void> {
-  await addEventInternal(
-    event,
-    undefined,
-    false,
-    undefined,
-    (_eventId, identity) => options?.onPersistedIdentity?.(identity),
-  );
+  await withBflowMutation(async (token) => {
+    await addEventInternal(
+      event,
+      token,
+      false,
+      undefined,
+      (_eventId, identity) => {
+        if (isBflowMutationCurrent(token)) options?.onPersistedIdentity?.(identity);
+      },
+    );
+  });
 }
 
 async function deletePersistedCreatedEvent(created: CreatedEventRef): Promise<void> {

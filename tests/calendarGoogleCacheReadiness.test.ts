@@ -791,6 +791,46 @@ test('addEvent reports each exact persisted identity while keeping its Promise<v
   }
 });
 
+test('addEvent does not report a delayed persisted identity after the calendar actor changes', async () => {
+  let activeUserId = 'user-a';
+  const createStarted = deferred<void>();
+  const createGate = deferred<BflowEventFixture>();
+  const persistedIdentities: EventIdentityFixture[] = [];
+  const harness = await createHarness({
+    currentUserId: activeUserId,
+    calendarList: async () => [personalCalendar(activeUserId)],
+    bflowEventsList: async () => [],
+    fullSync: async () => [],
+    createBflowEvent: async () => {
+      createStarted.resolve();
+      return createGate.promise;
+    },
+  });
+
+  try {
+    const pendingAdd = harness.service.addEvent(
+      calendarEventInput('stale-local-id', '세션 전환 전 일정'),
+      { onPersistedIdentity: (identity) => persistedIdentities.push(identity) },
+    );
+    await createStarted.promise;
+
+    activeUserId = 'user-b';
+    harness.service.__testUseAuthStore.setState({ currentUser: authUser(activeUserId) });
+    await harness.service.loadBflowEvents();
+    createGate.resolve(bflowEvent('stale-persisted-id', '세션 전환 전 일정'));
+
+    assert.equal(await pendingAdd, undefined, 'the public add promise still resolves as void');
+    assert.deepEqual(
+      persistedIdentities,
+      [],
+      'a completion from the previous actor cannot register a guard in the current Schedule session',
+    );
+  } finally {
+    createGate.resolve(bflowEvent('stale-persisted-id', '세션 전환 전 일정'));
+    harness.restore();
+  }
+});
+
 test('Google sync maps RFC3339 dateTime into timed B flow fields while all-day end dates stay exclusive', async () => {
   const timed: GoogleEventFixture = {
     id: 'google-timed-1',
