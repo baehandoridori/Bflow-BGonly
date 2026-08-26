@@ -1,6 +1,12 @@
 /** 주간 시간표 배치·스냅 순수 유틸. UI/DOM 의존성 없음 (node --test 대상). */
 export const SNAP_MINUTES = 15;
 
+/** 시간표 열의 세로 픽셀 위치를 분 단위로 바꾼다. 스냅은 호출자가 담당한다. */
+export function pxToMinutes(px: number, hourPx: number): number {
+  if (!Number.isFinite(px) || !Number.isFinite(hourPx) || hourPx <= 0) return 0;
+  return (px / hourPx) * 60;
+}
+
 export function snapMinutes(min: number, step: number = SNAP_MINUTES): number {
   const snapped = Math.round(min / step) * step;
   return Math.max(0, Math.min(24 * 60, snapped));

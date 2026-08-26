@@ -39,7 +39,16 @@ type WeekTimeGridModule = {
     activeWeekIndex: number;
     weekCount: number;
     onWeekChange(nextIndex: number): void;
-    onEventContextMenu?(event: CalendarEvent, mouse: unknown): void;
+  onEventContextMenu?(event: CalendarEvent, mouse: unknown): void;
+  timeGridDragPreview?: {
+    mode: 'create' | 'move' | 'resize-end';
+    startDate: string;
+    endDate: string;
+    startTime: string;
+    endTime: string;
+    eventId?: string;
+    identityKey?: string;
+  } | null;
   }): ReactNode;
   resolveBandExpanded(
     hasTimedBlocks: boolean,
@@ -506,4 +515,27 @@ test('WeekTimeGridView: 30분 이상 시간 블록은 원본색 시각을 제목
   }));
 
   assert.match(markup, /data-time-grid-time="true"[^>]*>09:00 – 09:30<\/span><span data-time-grid-title="true"[^>]*>오전 회의<\/span>/);
+});
+
+test('WeekTimeGridView: 외부 시간표 preview는 해당 날짜 열의 생성 ghost와 실시간 범위를 표시한다', async () => {
+  const module = await loadWeekTimeGridView();
+  const markup = renderToStaticMarkup(createElement(module.default, {
+    weekDays: Array.from({ length: 7 }, (_, index) => new Date(2026, 7, 23 + index, 12)),
+    events: [],
+    today: '2026-01-01',
+    onEventClick() {},
+    onSlotClick() {},
+    tagNameById: {},
+    calendarNameById: {},
+    activeWeekIndex: 1,
+    weekCount: 4,
+    onWeekChange() {},
+    timeGridDragPreview: {
+      mode: 'create', startDate: '2026-08-25', endDate: '2026-08-25', startTime: '10:15', endTime: '10:45',
+    },
+  }));
+
+  assert.match(markup, /data-time-grid-column="true" data-date="2026-08-25"/);
+  assert.match(markup, /data-time-grid-create-ghost="true"/);
+  assert.match(markup, /data-time-grid-live-label="true">10:15 – 10:45/);
 });

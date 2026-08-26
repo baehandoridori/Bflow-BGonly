@@ -8,6 +8,14 @@ import { calendarEventIdentityKey } from '@/utils/calendarEventIdentity';
 import { layoutDayBlocks, minutesToTime, timeToMinutes } from '@/utils/timeGridLayout';
 import { useMotionPref } from '@/hooks/useMotionPref';
 import { clampStaggerDelay } from '@/components/widgets/my-tasks/motionUtils';
+import {
+  useTimeGridDnD,
+  getTimeGridEventDragMode,
+  type TimeGridDragPreview,
+  type TimeGridEventChangeCallback,
+  type TimeGridCreateCallback,
+  type TimeGridPointerTarget,
+} from '@/hooks/useTimeGridDnD';
 
 const HOUR_PX = 56;
 const TIME_GUTTER_PX = 56;
@@ -40,6 +48,12 @@ export interface WeekTimeGridViewProps {
   onWeekChange: (nextIndex: number) => void;
   /** PR-D에서 DOM 핸들러를 연결할 미래 확장점. B.3에서는 의도적으로 attach하지 않는다. */
   onEventContextMenu?: (event: CalendarEvent, mouse: React.MouseEvent<HTMLButtonElement>) => void;
+  /** ScheduleView가 기존 optimistic update 경로로 연결할 시간표 생성 콜백. */
+  onTimeGridCreate?: TimeGridCreateCallback;
+  /** ScheduleView가 source-aware identity로 연결할 시간표 이동·종료 리사이즈 콜백. */
+  onTimeGridEventChange?: TimeGridEventChangeCallback;
+  /** 상위가 낙관적 변경을 보이는 동안 내부 preview를 덮어쓸 수 있는 선택 계약. */
+  timeGridDragPreview?: TimeGridDragPreview | null;
 }
 
 type TimedEvent = {
@@ -291,6 +305,9 @@ export function WeekTimeGridView({
   activeWeekIndex,
   weekCount,
   onWeekChange,
+  onTimeGridCreate,
+  onTimeGridEventChange,
+  timeGridDragPreview,
 }: WeekTimeGridViewProps) {
   const { reduce } = useMotionPref();
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -299,11 +316,28 @@ export function WeekTimeGridView({
   const [eveningChoice, setEveningChoice] = useState<boolean | null>(null);
   const [now, setNow] = useState(() => new Date());
   const wheelGestureLock = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const timeGridDnD = useTimeGridDnD({
+    scrollContainerRef: scrollRef,
+    onCreate: onTimeGridCreate,
+    onEventChange: onTimeGridEventChange,
+  });
+  const dragPreview = timeGridDragPreview ?? timeGridDnD.preview;
 
   const dates = useMemo(() => weekDays.slice(0, 7), [weekDays]);
   const dateStrings = useMemo(() => dates.map(fmtDate), [dates]);
   const weekKey = dateStrings.join('|');
-  const { allDayEvents, timedEventsByDate } = useMemo(() => splitWeekTimeGridEvents(events), [events]);
+  const displayedEvents = useMemo(() => {
+    if (!dragPreview?.identityKey || dragPreview.mode === 'create') return events;
+    return events.map((event) => calendarEventIdentityKey(event) === dragPreview.identityKey
+      ? { ...event, ...dragPreview }
+      : event);
+  }, [dragPreview, events]);
+  const { allDayEvents, timedEventsByDate } = useMemo(() => splitWeekTimeGridEvents(displayedEvents), [displayedEvents]);
+  const dragGhostEvent = useMemo(() => (
+    dragPreview?.mode === 'move' && dragPreview.identityKey
+      ? events.find((event) => calendarEventIdentityKey(event) === dragPreview.identityKey) ?? null
+      : null
+  ), [dragPreview, events]);
   const allDayBars = useMemo(
     () => (dates.length === 7 ? layoutEventBars(allDayEvents, dates[0], 7) : []),
     [allDayEvents, dates],
@@ -464,6 +498,9 @@ export function WeekTimeGridView({
           onEventClick={onEventClick}
           onSlotClick={onSlotClick}
           tagNameById={tagNameById}
+          timeGridDnD={timeGridDnD}
+          dragPreview={dragPreview}
+          dragGhostEvent={dragGhostEvent}
         />
         <TimeBand
           label="시간대"
@@ -480,6 +517,9 @@ export function WeekTimeGridView({
           onEventClick={onEventClick}
           onSlotClick={onSlotClick}
           tagNameById={tagNameById}
+          timeGridDnD={timeGridDnD}
+          dragPreview={dragPreview}
+          dragGhostEvent={dragGhostEvent}
         />
         <TimeBand
           label="저녁 시간대"
@@ -497,6 +537,9 @@ export function WeekTimeGridView({
           onEventClick={onEventClick}
           onSlotClick={onSlotClick}
           tagNameById={tagNameById}
+          timeGridDnD={timeGridDnD}
+          dragPreview={dragPreview}
+          dragGhostEvent={dragGhostEvent}
         />
       </div>
     </div>
@@ -519,6 +562,9 @@ function TimeBand({
   onEventClick,
   onSlotClick,
   tagNameById,
+  timeGridDnD,
+  dragPreview,
+  dragGhostEvent,
 }: {
   label: string;
   startMin: number;
@@ -535,6 +581,9 @@ function TimeBand({
   onEventClick: (event: CalendarEvent) => void;
   onSlotClick: (date: string, startTime: string, endTime: string) => void;
   tagNameById: Record<string, string>;
+  timeGridDnD: ReturnType<typeof useTimeGridDnD>;
+  dragPreview: TimeGridDragPreview | null;
+  dragGhostEvent: CalendarEvent | null;
 }) {
   if (!visible) {
     return (
@@ -554,6 +603,10 @@ function TimeBand({
     .filter((minute) => minute <= endMin);
   const slots = getTimeSlots(startMin, endMin);
   const currentTimeMarker = getCurrentTimeMarker(nowMin, startMin, endMin, todayIndex);
+  const getPointerTarget = (element: HTMLElement, date: string): TimeGridPointerTarget | null => {
+    const column = element.closest<HTMLElement>('[data-time-grid-column="true"][data-date]');
+    return column ? { date, bandStartMin: startMin, column } : null;
+  };
 
   return (
     <section className="relative border-b border-bg-border/25" style={{ height }} aria-label={label}>
@@ -585,6 +638,9 @@ function TimeBand({
           return (
             <div
               key={date}
+              data-time-grid-column="true"
+              data-date={date}
+              data-time-grid-band-start={startMin}
               className={`relative border-r border-bg-border/20 ${date === today ? 'bg-accent/[0.035]' : ''}`}
               style={getWeekendCellStyle(isWeekend)}
             >
@@ -602,10 +658,40 @@ function TimeBand({
                     aria-label={`${date} ${minutesToTime(slotStart)} 일정 만들기`}
                     className="absolute left-0 right-0 z-[1] cursor-cell outline-none hover:bg-accent/[0.06] focus-visible:bg-accent/10"
                     style={{ top: ((slotStart - startMin) / 60) * HOUR_PX, height: ((slotEnd - slotStart) / 60) * HOUR_PX }}
+                    onMouseDown={(event) => {
+                      const target = getPointerTarget(event.currentTarget, date);
+                      if (target) timeGridDnD.beginCreate(event, target);
+                    }}
                     onClick={() => onSlotClick(date, minutesToTime(slotStart), minutesToTime(slotEnd))}
                   />
                 );
               })}
+              {dragGhostEvent && dragGhostEvent.startDate === date && dragGhostEvent.startTime && dragGhostEvent.endTime
+                && timeToMinutes(dragGhostEvent.startTime) >= startMin && timeToMinutes(dragGhostEvent.startTime) < endMin && (
+                <div
+                  data-time-grid-original-ghost="true"
+                  className="pointer-events-none absolute z-[9] rounded border border-dashed border-white/70 bg-bg-primary/20"
+                  style={{
+                    top: ((timeToMinutes(dragGhostEvent.startTime) - startMin) / 60) * HOUR_PX,
+                    height: ((timeToMinutes(dragGhostEvent.endTime) - timeToMinutes(dragGhostEvent.startTime)) / 60) * HOUR_PX,
+                    left: '2px', right: '2px',
+                  }}
+                />
+              )}
+              {dragPreview?.mode === 'create' && dragPreview.startDate === date
+                && timeToMinutes(dragPreview.startTime) >= startMin && timeToMinutes(dragPreview.startTime) < endMin && (
+                <div
+                  data-time-grid-create-ghost="true"
+                  className="pointer-events-none absolute z-20 overflow-hidden rounded border border-dashed border-accent bg-accent/20 px-1 text-[9px] font-bold text-white shadow-lg"
+                  style={{
+                    top: ((timeToMinutes(dragPreview.startTime) - startMin) / 60) * HOUR_PX,
+                    height: ((timeToMinutes(dragPreview.endTime) - timeToMinutes(dragPreview.startTime)) / 60) * HOUR_PX,
+                    left: '2px', right: '2px',
+                  }}
+                >
+                  <span data-time-grid-live-label="true">{dragPreview.startTime} – {dragPreview.endTime}</span>
+                </div>
+              )}
               {layouts.map((layout, layoutIndex) => {
                 const bandBlock = bandBlocks.find((candidate) => candidate.layoutId === layout.id);
                 if (!bandBlock) return null;
@@ -620,13 +706,32 @@ function TimeBand({
                 const opacity = getTimedBlockOpacity(isPast);
                 const timeLabel = formatEventTimeRange(block.event, tagNameById)
                   ?? `${minutesToTime(block.startMin)}–${minutesToTime(block.endMin)}`;
+                const isPreviewed = dragPreview?.identityKey === calendarEventIdentityKey(block.event);
+                const isReadOnly = block.event.isReadOnly === true;
+                const eventDragProps = isReadOnly ? {} : {
+                  onMouseDown: (event: React.MouseEvent<HTMLElement>) => {
+                    const target = getPointerTarget(event.currentTarget, date);
+                    if (!target) return;
+                    const rect = event.currentTarget.getBoundingClientRect();
+                    const mode = getTimeGridEventDragMode(isReadOnly, event.clientY, rect.bottom);
+                    if (!mode) return;
+                    timeGridDnD.beginEventDrag(
+                      event,
+                      block.event,
+                      mode,
+                      target,
+                    );
+                  },
+                };
                 return (
                   <motion.button
                     key={layout.id}
                     type="button"
                     title={`${block.event.title} · ${minutesToTime(block.startMin)}–${minutesToTime(block.endMin)}`}
                     aria-label={`${block.event.title}, ${date} ${minutesToTime(block.startMin)}부터 ${minutesToTime(block.endMin)}까지`}
-                    className={`absolute z-10 overflow-hidden rounded ${canShowText ? 'px-1.5 py-1' : 'p-0'} text-left font-semibold outline-none focus-visible:ring-2 focus-visible:ring-white focus-visible:ring-offset-1 focus-visible:ring-offset-bg-primary`}
+                    data-time-grid-event="true"
+                    data-event-identity={calendarEventIdentityKey(block.event)}
+                    className={`absolute z-10 overflow-hidden rounded ${canShowText ? 'px-1.5 py-1' : 'p-0'} text-left font-semibold outline-none focus-visible:ring-2 focus-visible:ring-white focus-visible:ring-offset-1 focus-visible:ring-offset-bg-primary ${isPreviewed && timeGridDnD.isDragActive ? 'scale-[1.02] shadow-xl' : ''} ${timeGridDnD.isSettling(block.event) ? 'time-grid-settling' : ''}`}
                     style={{
                       ...eventBlockStyle(
                         layout,
@@ -643,10 +748,12 @@ function TimeBand({
                     transition={{ duration: reduce ? 0 : 0.18, delay: clampStaggerDelay(layoutIndex, reduce) }}
                     onClick={(event) => {
                       event.stopPropagation();
+                      if (timeGridDnD.shouldSuppressClick()) return;
                       onEventClick(block.event);
                     }}
+                    {...eventDragProps}
                   >
-                    {canShowText && duration >= 30 && <span data-time-grid-time="true" className="block truncate" style={{ color: visualStyle.timeColor, fontSize: 9 }}>{timeLabel}</span>}
+                    {canShowText && duration >= 30 && <span data-time-grid-time="true" data-time-grid-live-label={isPreviewed ? 'true' : undefined} className="block truncate" style={{ color: visualStyle.timeColor, fontSize: 9 }}>{timeLabel}</span>}
                     {canShowText && <span data-time-grid-title="true" className="block truncate" style={{ color: visualStyle.titleColor, fontSize: visualStyle.titleFontSize }}>{block.event.title}</span>}
                   </motion.button>
                 );
