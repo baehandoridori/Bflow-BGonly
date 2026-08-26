@@ -3951,6 +3951,21 @@ test('calendar notification catch-up migration keeps filtering, ordering, and th
   const migrationPath = join('DEVLOG', 'migrations', '2026-08-27-calendar-notification-catchup.sql');
   assert.ok(existsSync(migrationPath), 'notification catch-up migration must be added separately');
   const sql = readFileSync(migrationPath, 'utf8').replace(/\r\n?/g, '\n');
+  assert.match(
+    sql,
+    /apply only AFTER\s+DEVLOG\/migrations\/2026-08-24-shared-calendars\.sql\s+has successfully been applied/i,
+    'the migration must name the successful shared-calendar migration prerequisite',
+  );
+  assert.match(
+    sql,
+    /Before deploying v1\.106\.0, manually apply this migration after user approval/i,
+    'the migration must require user-approved manual application before this release deploys',
+  );
+  assert.match(
+    sql,
+    /Verify that function public\.list_calendar_notifications_authorized and partial index idx_calendar_notifications_unread_recipient_created_id exist\. This PR does not execute SQL\./i,
+    'the migration must name its post-apply verification and state that this PR never executes SQL',
+  );
   const functionStart = sql.indexOf('CREATE OR REPLACE FUNCTION public.list_calendar_notifications_authorized');
   const functionEnd = sql.indexOf('COMMENT ON FUNCTION public.list_calendar_notifications_authorized');
   assert.ok(functionStart >= 0 && functionEnd > functionStart, 'authorized catch-up RPC must have a bounded definition');

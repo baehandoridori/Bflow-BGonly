@@ -1,6 +1,9 @@
 -- DEVLOG/migrations/2026-08-27-calendar-notification-catchup.sql
 -- 캘린더 알림 catch-up: 큰 숨김 목록도 POST RPC 본문으로 안전하게 전달한다.
--- 재실행 안전(idempotent). 라이브 적용은 PR 머지 후 한솔의 별도 수동 SQL 게이트에서만 하며, 이 세션에서는 실행하지 않는다.
+-- Prerequisite: apply only AFTER DEVLOG/migrations/2026-08-24-shared-calendars.sql has successfully been applied.
+-- Before deploying v1.106.0, manually apply this migration after user approval.
+-- Verify that function public.list_calendar_notifications_authorized and partial index idx_calendar_notifications_unread_recipient_created_id exist. This PR does not execute SQL.
+-- 재실행 안전(idempotent). 위 선행 migration 성공 뒤에만, 승인된 수동 SQL 게이트에서 적용한다.
 
 -- 읽지 않은 수신자 알림을 최신순으로 고정 200개만 반환한다.
 -- NULL calendar_id는 삭제된 캘린더의 알림이므로 anti-join 대상에서 의도적으로 보존한다.
