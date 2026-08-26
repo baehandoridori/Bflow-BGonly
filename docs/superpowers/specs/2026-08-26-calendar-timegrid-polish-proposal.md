@@ -1,7 +1,9 @@
 # 캘린더 2차 개편 제안 — 주간 시간표(타임그리드) 보기 + 폴리싱 + 외부 캘린더 구독 검토
 
 - **작성일**: 2026-08-26
-- **상태**: 제안(한솔 결정 대기). 결정 포인트 Q1~Q5 확정 후 상세 설계서·구현 플랜으로 승격한다.
+- **상태**: **결정 완료** — 한솔이 Q1~Q5 전부 추천안(A) 채택 + 주 시작 요일 = 일요일 유지
+  (2026-08-26). 확정 스펙은 `2026-08-26-calendar-timegrid-design.md`(D8~D15)가 SSOT이며,
+  이 문서는 배경·근거 기록용으로 남는다.
 - **시안**: https://claude.ai/code/artifact/2f5ba08d-2590-4c28-a75d-5df3a873ef8f (원본: `docs/superpowers/specs/mockups/2026-08-26-calendar-timegrid/proposal.html`)
 - **선행 라운드**: 공유 캘린더 1차 (`2026-08-24-calendar-pm-shared-calendars-design.md`, PR1~3 = #252/#253/#254 = v1.103~1.105 머지 완료. PR4 알림은 미착수)
 
