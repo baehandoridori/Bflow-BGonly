@@ -39,6 +39,11 @@ type CalendarIpcExternalDeps = {
   onCommittedReplacementDelete?: (payload: unknown) => void;
 };
 
+type CalendarNotificationRuntime = {
+  getPendingNotificationCount(): number;
+  waitForNotificationIdle(timeoutMs: number): Promise<boolean>;
+};
+
 const IPC_HARNESS_KEY = '__calendarIpcBehaviorHarness';
 const STORE_HARNESS_KEY = '__calendarStoreStrictReadHarness';
 const SUPABASE_PRIVATE_HARNESS_KEY = '__calendarSupabasePrivateHarness';
@@ -240,6 +245,7 @@ async function createIpcHarness(
   userId: string | (() => string) = 'user-1',
   externalDeps: CalendarIpcExternalDeps = {},
 ): Promise<IpcHarnessState & {
+  notificationRuntime: CalendarNotificationRuntime | undefined;
   invoke(channel: string, ...args: unknown[]): Promise<unknown>;
   invokeAs(senderId: number, channel: string, ...args: unknown[]): Promise<unknown>;
   restore(): void;
@@ -259,9 +265,9 @@ async function createIpcHarness(
   try {
     const encoded = Buffer.from(await bundledCalendarIpcSource()).toString('base64');
     const module = await import(`data:text/javascript;base64,${encoded}#calendar-ipc-${ipcNonce++}`) as {
-      registerCalendarIpc(deps: { getSessionUserIdOrThrow(): string }): void;
+      registerCalendarIpc(deps: { getSessionUserIdOrThrow(): string }): CalendarNotificationRuntime | undefined;
     };
-    module.registerCalendarIpc({
+    const notificationRuntime = module.registerCalendarIpc({
       getSessionUserIdOrThrow: () => typeof userId === 'function' ? userId() : userId,
       createLegacyPrivateEvent: externalDeps.createLegacyPrivateEvent ?? (async () => {
         throw new Error('unexpected legacy private replacement create');
@@ -296,6 +302,7 @@ async function createIpcHarness(
     };
     return {
       ...state,
+      notificationRuntime,
       async invoke(channel, ...args) {
         return invokeAs(101, channel, ...args);
       },
@@ -407,6 +414,7 @@ test('calendar event notifications persist recipient-specific create, update, an
 
   await t.test('update', async () => {
     let rows: unknown;
+    let insertCallCount = 0;
     const inserted = deferred<void>();
     const previous = calendarEventRow({ ...eventInput, created_by: 'actor' });
     const updated = calendarEventRow({ ...eventInput, title: 'EP12 일정 변경', start_date: '2026-09-26', end_date: '2026-09-26', created_by: 'actor' });
@@ -415,17 +423,28 @@ test('calendar event notifications persist recipient-specific create, update, an
       getEventByIdForWrite: async () => previous,
       getCalendarWithMembers: async () => ({ calendar, members }),
       updateEvent: async () => updated,
-      insertNotifications: async (nextRows) => { rows = nextRows; inserted.resolve(); },
+      insertNotifications: async (nextRows) => {
+        insertCallCount += 1;
+        rows = nextRows;
+        inserted.resolve();
+      },
     }, 'actor', { readUsers: async () => users });
     try {
       assert.deepEqual(await harness.invoke('calendar:events:update', 'event-1', {
         title: 'EP12 일정 변경', start_date: '2026-09-26', end_date: '2026-09-26',
       }), updated);
       await inserted.promise;
+      assert.ok(harness.notificationRuntime);
+      assert.equal(
+        await harness.notificationRuntime.waitForNotificationIdle(1_000),
+        true,
+        'the ordinary update notification settles before its count is checked',
+      );
       assert.deepEqual(rows, [
         { recipient_id: 'owner', actor_id: 'actor', actor_name: '한솔', calendar_id: 'calendar-1', calendar_name: 'EP 마일스톤', event_id: 'event-1', event_title: 'EP12 일정 변경', event_date: '2026-09-26', action: 'update', detail: '9/25 → 9/26' },
         { recipient_id: 'member', actor_id: 'actor', actor_name: '한솔', calendar_id: 'calendar-1', calendar_name: 'EP 마일스톤', event_id: 'event-1', event_title: 'EP12 일정 변경', event_date: '2026-09-26', action: 'update', detail: '9/25 → 9/26' },
       ]);
+      assert.equal(insertCallCount, 1, 'a non-move update remains one update notification');
     } finally {
       harness.restore();
     }
@@ -523,6 +542,94 @@ test('calendar CRUD and strict migration do not wait for best-effort notificatio
       }
     });
   }
+});
+
+test('calendar notification drain tracks nonblocking work until a failed best-effort write settles', async () => {
+  const readStarted = deferred<void>();
+  const releaseRead = deferred<Array<{ id: string; name: string }>>();
+  const writeStarted = deferred<void>();
+  const releaseWrite = deferred<void>();
+  const eventInput = {
+    calendar_id: 'calendar-1', title: '종료 전 알림', memo: null, tag_id: null,
+    all_day: true, start_date: '2026-09-25', end_date: '2026-09-25',
+    start_time: null, end_time: null, linked_episode: null, linked_part: null,
+    linked_sheet_name: null, linked_scene_id: null, linked_department: null, linked_todo_id: null,
+  };
+  const harness = await createIpcHarness({
+    getUserRole: async () => 'user',
+    getCalendarWithMembers: async () => ({
+      calendar: calendarRow({ visibility: 'team' }),
+      members: [{ calendar_id: 'calendar-1', user_id: 'actor', can_edit: true }],
+    }),
+    createEvent: async () => calendarEventRow(eventInput),
+    insertNotifications: async () => {
+      writeStarted.resolve();
+      await releaseWrite.promise;
+      throw new Error('best-effort notification insert unavailable');
+    },
+  }, 'actor', {
+    readUsers: async () => {
+      readStarted.resolve();
+      return releaseRead.promise;
+    },
+  });
+  const originalWarn = console.warn;
+  try {
+    console.warn = () => {};
+    const invocation = harness.invoke('calendar:events:create', eventInput);
+    await readStarted.promise;
+    let returned = false;
+    void invocation.then(() => { returned = true; }, () => {});
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    assert.equal(returned, true, 'calendar create remains immediate while its notification is pending');
+
+    assert.ok(harness.notificationRuntime, 'calendar IPC exposes a shutdown drain for tracked notifications');
+    assert.equal(harness.notificationRuntime.getPendingNotificationCount(), 1);
+    assert.equal(
+      await harness.notificationRuntime.waitForNotificationIdle(0),
+      false,
+      'a bounded drain reports timeout while the notification task is still blocked',
+    );
+
+    const draining = harness.notificationRuntime.waitForNotificationIdle(1_000);
+    releaseRead.resolve([{ id: 'recipient', name: '수신자' }]);
+    await writeStarted.promise;
+    let drained = false;
+    void draining.then(() => { drained = true; }, () => {});
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    assert.equal(drained, false, 'the drain waits for the actual write, not just the directory lookup');
+
+    releaseWrite.resolve();
+    await invocation;
+    assert.equal(await draining, true, 'a caught best-effort failure cannot leave shutdown waiting forever');
+    assert.equal(harness.notificationRuntime.getPendingNotificationCount(), 0);
+  } finally {
+    console.warn = originalWarn;
+    releaseRead.resolve([]);
+    releaseWrite.resolve();
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    harness.restore();
+  }
+});
+
+test('main shutdown includes the calendar notification drain alongside existing persistence queues', () => {
+  const main = readFileSync('electron/main.ts', 'utf8');
+  const beforeQuit = main.slice(main.indexOf("app.on('before-quit'"), main.indexOf("process.on('exit'"));
+  assert.match(
+    main,
+    /const calendarNotificationDrain = registerCalendarIpc\(/,
+    'main keeps the calendar IPC drain returned at registration time',
+  );
+  assert.match(
+    beforeQuit,
+    /calendarNotificationDrain\.getPendingNotificationCount\(\)/,
+    'calendar notification work contributes to the shutdown pending count',
+  );
+  assert.match(
+    beforeQuit,
+    /calendarNotificationDrain\.waitForNotificationIdle\(15000\)/,
+    'shutdown waits for a bounded calendar notification drain before exit',
+  );
 });
 
 test('failed calendar notification reads and inserts leave CRUD successful', async (t) => {
@@ -1734,6 +1841,113 @@ test('calendar event create passes the session actor and strips renderer-control
       linked_department: null,
       linked_todo_id: null,
     }, 'session-user']]);
+  } finally {
+    harness.restore();
+  }
+});
+
+test('a B flow privacy replacement emits its create notification only after its receipt is kept', async () => {
+  const notificationRows: Array<Array<Record<string, unknown>>> = [];
+  const inserted = deferred<void>();
+  let replacementNumber = 0;
+  const replacementCalendar = calendarRow({
+    id: 'replacement-calendar',
+    name: '이관 대상',
+    visibility: 'members',
+    owner_id: 'recipient',
+  });
+  const request = {
+    storage: 'bflow' as const,
+    event: {
+      calendar_id: 'replacement-calendar', title: '보상 전용 일정', memo: null, tag_id: null,
+      all_day: true, start_date: '2026-08-26', end_date: '2026-08-26',
+      start_time: null, end_time: null, linked_episode: null, linked_part: null,
+      linked_sheet_name: null, linked_scene_id: null, linked_department: null, linked_todo_id: null,
+    },
+  };
+  const harness = await createIpcHarness({
+    getUserRole: async () => 'user',
+    getCalendarWithMembers: async () => ({
+      calendar: replacementCalendar,
+      members: [{ calendar_id: 'replacement-calendar', user_id: 'actor', can_edit: true }],
+    }),
+    createEvent: async () => calendarEventRow({
+      id: `replacement-${++replacementNumber}`,
+      calendar_id: 'replacement-calendar',
+      title: '보상 전용 일정',
+      start_date: '2026-08-26',
+      end_date: '2026-08-26',
+      created_by: 'actor',
+      created_at: `2026-08-26T00:00:0${replacementNumber}.000Z`,
+    }),
+    deletePrivacyReplacementEvent: async () => {},
+    insertNotifications: async (rows) => {
+      notificationRows.push(rows as Array<Record<string, unknown>>);
+      inserted.resolve();
+    },
+  }, 'actor', {
+    readUsers: async () => [
+      { id: 'actor', name: '행위자' },
+      { id: 'recipient', name: '수신자' },
+    ],
+  });
+  try {
+    const kept = await harness.invokeAs(
+      501,
+      'calendar:privacy-migration:create-replacement',
+      request,
+    ) as { receipt: string };
+
+    assert.deepEqual(
+      notificationRows,
+      [],
+      'the provisional replacement is not visible to recipients before source deletion is settled',
+    );
+
+    await harness.invokeAs(
+      501,
+      'calendar:privacy-migration:settle-replacement',
+      kept.receipt,
+      'keep',
+    );
+    await inserted.promise;
+    assert.deepEqual(notificationRows, [[{
+      recipient_id: 'recipient', actor_id: 'actor', actor_name: '행위자',
+      calendar_id: 'replacement-calendar', calendar_name: '이관 대상',
+      event_id: 'replacement-1', event_title: '보상 전용 일정', event_date: '2026-08-26',
+      action: 'create', detail: null,
+    }]], 'keeping the replacement emits its create notification exactly once');
+    await assert.rejects(
+      harness.invokeAs(
+        501,
+        'calendar:privacy-migration:settle-replacement',
+        kept.receipt,
+        'keep',
+      ),
+      /receipt|보상|사용/i,
+      'a settled receipt cannot queue the same replacement notification again',
+    );
+    assert.ok(harness.notificationRuntime);
+    assert.equal(await harness.notificationRuntime.waitForNotificationIdle(1_000), true);
+    assert.equal(notificationRows.length, 1, 'a duplicate keep attempt adds no notification');
+
+    const compensated = await harness.invokeAs(
+      501,
+      'calendar:privacy-migration:create-replacement',
+      request,
+    ) as { receipt: string };
+    await harness.invokeAs(
+      501,
+      'calendar:privacy-migration:settle-replacement',
+      compensated.receipt,
+      'delete',
+    );
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    assert.equal(
+      notificationRows.length,
+      1,
+      'compensating the provisional replacement never exposes a create notification',
+    );
   } finally {
     harness.restore();
   }
@@ -2979,6 +3193,134 @@ test('calendar event move passes the expected source, whitelisted target patch, 
       'source-calendar',
       'session-user',
     ]]);
+  } finally {
+    harness.restore();
+  }
+});
+
+test('calendar event move emits an isolated source delete and target create notification', async () => {
+  const sourceCalendar = calendarRow({
+    id: 'source-calendar',
+    name: '원본 전용 캘린더',
+    visibility: 'members',
+    owner_id: 'source-owner',
+  });
+  const targetCalendar = calendarRow({
+    id: 'target-calendar',
+    name: '대상 전용 캘린더',
+    visibility: 'members',
+    owner_id: 'target-owner',
+  });
+  const sourceMembers = [
+    { calendar_id: 'source-calendar', user_id: 'actor', can_edit: true },
+    { calendar_id: 'source-calendar', user_id: 'source-only', can_edit: false },
+    { calendar_id: 'source-calendar', user_id: 'common', can_edit: false },
+  ];
+  const targetMembers = [
+    { calendar_id: 'target-calendar', user_id: 'actor', can_edit: true },
+    { calendar_id: 'target-calendar', user_id: 'target-only', can_edit: false },
+    { calendar_id: 'target-calendar', user_id: 'common', can_edit: false },
+  ];
+  const previous = calendarEventRow({
+    id: 'moving-event',
+    calendar_id: 'source-calendar',
+    title: '원본 전용 제목',
+    start_date: '2026-09-20',
+    end_date: '2026-09-20',
+    created_by: 'actor',
+  });
+  const updated = calendarEventRow({
+    ...previous,
+    calendar_id: 'target-calendar',
+    title: '대상 전용 제목',
+    start_date: '2026-09-22',
+    end_date: '2026-09-22',
+  });
+  const notificationBatches: Array<Array<Record<string, unknown>>> = [];
+  const harness = await createIpcHarness({
+    getUserRole: async () => 'user',
+    getEventByIdForWrite: async () => previous,
+    getCalendarWithMembers: async (calendarId) => {
+      if (calendarId === 'source-calendar') {
+        return { calendar: sourceCalendar, members: sourceMembers };
+      }
+      if (calendarId === 'target-calendar') {
+        return { calendar: targetCalendar, members: targetMembers };
+      }
+      throw new Error(`unexpected calendar ${String(calendarId)}`);
+    },
+    updateEvent: async () => updated,
+    insertNotifications: async (rows) => {
+      notificationBatches.push(rows as Array<Record<string, unknown>>);
+    },
+  }, 'actor', {
+    readUsers: async () => [
+      { id: 'actor', name: '행위자' },
+      { id: 'source-owner', name: '원본 소유자' },
+      { id: 'source-only', name: '원본 멤버' },
+      { id: 'target-owner', name: '대상 소유자' },
+      { id: 'target-only', name: '대상 멤버' },
+      { id: 'common', name: '공통 멤버' },
+    ],
+  });
+  try {
+    assert.deepEqual(
+      await harness.invoke('calendar:events:update', 'moving-event', {
+        calendar_id: 'target-calendar',
+        title: '대상 전용 제목',
+        start_date: '2026-09-22',
+        end_date: '2026-09-22',
+      }),
+      updated,
+    );
+    assert.ok(harness.notificationRuntime);
+    assert.equal(await harness.notificationRuntime.waitForNotificationIdle(1_000), true);
+
+    const rows = notificationBatches.flat();
+    const sourceRows = rows.filter((row) => row.action === 'delete');
+    const targetRows = rows.filter((row) => row.action === 'create');
+    assert.deepEqual(
+      sourceRows.map((row) => row.recipient_id).sort(),
+      ['common', 'source-only', 'source-owner'],
+      'the source audience receives only the removal context',
+    );
+    assert.deepEqual(
+      targetRows.map((row) => row.recipient_id).sort(),
+      ['common', 'target-only', 'target-owner'],
+      'the target audience receives only the new-calendar context',
+    );
+    assert.deepEqual(
+      sourceRows.filter((row) => row.recipient_id === 'source-only'),
+      [{
+        recipient_id: 'source-only', actor_id: 'actor', actor_name: '행위자',
+        calendar_id: 'source-calendar', calendar_name: '원본 전용 캘린더',
+        event_id: 'moving-event', event_title: '원본 전용 제목', event_date: '2026-09-20',
+        action: 'delete', detail: null,
+      }],
+      'a source-only member never receives target title or calendar metadata',
+    );
+    assert.deepEqual(
+      targetRows.filter((row) => row.recipient_id === 'target-only'),
+      [{
+        recipient_id: 'target-only', actor_id: 'actor', actor_name: '행위자',
+        calendar_id: 'target-calendar', calendar_name: '대상 전용 캘린더',
+        event_id: 'moving-event', event_title: '대상 전용 제목', event_date: '2026-09-22',
+        action: 'create', detail: null,
+      }],
+      'a target-only member never receives source title or calendar metadata',
+    );
+    assert.deepEqual(
+      rows.filter((row) => row.recipient_id === 'common').map((row) => ({
+        action: row.action,
+        calendar_id: row.calendar_id,
+        event_title: row.event_title,
+      })).sort((left, right) => String(left.action).localeCompare(String(right.action))),
+      [
+        { action: 'create', calendar_id: 'target-calendar', event_title: '대상 전용 제목' },
+        { action: 'delete', calendar_id: 'source-calendar', event_title: '원본 전용 제목' },
+      ],
+      'a common member may see both, each with its own authoritative context',
+    );
   } finally {
     harness.restore();
   }

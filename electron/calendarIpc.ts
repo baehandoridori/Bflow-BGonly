@@ -57,8 +57,29 @@ interface CalendarIpcDeps {
   onCommittedReplacementDelete: (payload: CalendarCommittedReplacementDeleteMarker) => void;
 }
 
+/** 종료 직전에 best-effort 캘린더 알림 작업을 유한 시간만 기다리기 위한 메인 프로세스 경계. */
+export interface CalendarNotificationDrain {
+  getPendingNotificationCount(): number;
+  waitForNotificationIdle(timeoutMs: number): Promise<boolean>;
+}
+
 type CalendarEventCreateInput = Parameters<typeof store.createEvent>[0];
 type InvokeEvent = { sender?: { id?: number } };
+
+/** receipt에 남기는 알림 정보는 수신자 계산과 표시 문구에 필요한 필드로 제한한다. */
+type CalendarNotificationEvent = Pick<
+  CalendarEventRow,
+  'id' | 'title' | 'start_date' | 'end_date'
+>;
+
+type CalendarNotificationContext = {
+  actorId: string;
+  action: 'create' | 'update' | 'delete';
+  calendar: Pick<CalendarRow, 'id' | 'name' | 'owner_id' | 'visibility'>;
+  memberIds: string[];
+  event: CalendarNotificationEvent | null;
+  previous: CalendarNotificationEvent | null;
+};
 
 type PrivacyReplacementTarget =
   | {
@@ -67,6 +88,7 @@ type PrivacyReplacementTarget =
       calendarId: string;
       actorId: string;
       createdAt: string;
+      notification: CalendarNotificationContext;
     }
   | { storage: 'legacy-private'; actualId: string; actorId: string }
   | { storage: 'google'; actualId: string; calendarId: string; actorId: string };
@@ -211,14 +233,36 @@ function committedReplacementDeleteMarker(
 }
 
 /** 일정 쓰기 성공 후 알림 파이프라인 진입점 — 실패해도 일정 저장은 유지한다. */
-async function emitCalendarEventNotifications(ctx: {
+function calendarNotificationContext(ctx: {
   actorId: string;
-  action: 'create' | 'update' | 'delete';
+  action: CalendarNotificationContext['action'];
   calendar: CalendarRow;
   members: CalendarMemberRow[];
   event: CalendarEventRow | null;
   previous: CalendarEventRow | null;
-}): Promise<void> {
+}): CalendarNotificationContext {
+  const toEvent = (event: CalendarEventRow | null): CalendarNotificationEvent | null => event && {
+    id: event.id,
+    title: event.title,
+    start_date: event.start_date,
+    end_date: event.end_date,
+  };
+  return {
+    actorId: ctx.actorId,
+    action: ctx.action,
+    calendar: {
+      id: ctx.calendar.id,
+      name: ctx.calendar.name,
+      owner_id: ctx.calendar.owner_id,
+      visibility: ctx.calendar.visibility,
+    },
+    memberIds: ctx.members.map((member) => member.user_id),
+    event: toEvent(ctx.event),
+    previous: toEvent(ctx.previous),
+  };
+}
+
+async function emitCalendarEventNotifications(ctx: CalendarNotificationContext): Promise<void> {
   try {
     const event = ctx.event ?? ctx.previous;
     if (!event) return;
@@ -226,7 +270,7 @@ async function emitCalendarEventNotifications(ctx: {
     const users = await readUsers();
     const recipients = computeCalendarNotificationRecipients(
       ctx.calendar,
-      ctx.members.map((member) => member.user_id),
+      ctx.memberIds,
       users.map((user) => user.id),
       ctx.actorId,
     );
@@ -345,8 +389,38 @@ function safeGoogleCreateInput(input: GoogleReplacementCreateInput): GoogleRepla
   };
 }
 
-export function registerCalendarIpc(deps: CalendarIpcDeps): void {
+export function registerCalendarIpc(deps: CalendarIpcDeps): CalendarNotificationDrain {
   const privacyReplacementReceipts = new Map<string, PrivacyReplacementReceipt>();
+  const pendingNotificationTasks = new Set<Promise<void>>();
+
+  const queueCalendarNotification = (notification: CalendarNotificationContext): void => {
+    const task = emitCalendarEventNotifications(notification).catch((error) => {
+      // emitCalendarEventNotifications 자체도 실패를 격리하지만, 후속 리팩터링 중
+      // 예외가 새어도 종료 대기 집합에 영구 작업이 남지 않게 마지막 경계를 둔다.
+      console.warn('[calendarIpc] 알림 작업 실패 (best-effort):', error);
+    });
+    pendingNotificationTasks.add(task);
+    void task.then(() => {
+      pendingNotificationTasks.delete(task);
+    });
+  };
+
+  const waitForNotificationIdle = async (timeoutMs: number): Promise<boolean> => {
+    const deadline = Date.now() + Math.max(0, timeoutMs);
+    while (pendingNotificationTasks.size > 0) {
+      const remainingMs = deadline - Date.now();
+      if (remainingMs <= 0) return false;
+      const settled = await new Promise<boolean>((resolve) => {
+        const timeout = setTimeout(() => resolve(false), remainingMs);
+        void Promise.all([...pendingNotificationTasks]).then(() => {
+          clearTimeout(timeout);
+          resolve(true);
+        });
+      });
+      if (!settled) return false;
+    }
+    return true;
+  };
 
   const emitCommittedDelete = (marker: CalendarCommittedReplacementDeleteMarker): void => {
     // persistence는 이미 commit됐다. 닫히는 BrowserWindow나 일시적인 broadcast 오류가
@@ -509,13 +583,14 @@ export function registerCalendarIpc(deps: CalendarIpcDeps): void {
   const createBflowEventForActor = async (
     input: CalendarEventCreateInput,
     actorId: string,
+    deferNotification = false,
   ) => {
     const { calendar, members } = await loadCalendarForUserOrThrow(input.calendar_id, actorId);
     if (!canEditCalendarEvents(calendar, members, actorId)) {
       throw new Error('이 캘린더에 일정을 만들 권한이 없습니다');
     }
     const created = await store.createEvent(safeCalendarEventCreateInput(input), actorId);
-    void emitCalendarEventNotifications({
+    const notification = calendarNotificationContext({
       actorId,
       action: 'create',
       calendar,
@@ -523,7 +598,8 @@ export function registerCalendarIpc(deps: CalendarIpcDeps): void {
       event: created,
       previous: null,
     });
-    return created;
+    if (!deferNotification) queueCalendarNotification(notification);
+    return { created, notification };
   };
 
   ipcMain.handle('calendar:list', wrap(async () => {
@@ -652,7 +728,7 @@ export function registerCalendarIpc(deps: CalendarIpcDeps): void {
 
   ipcMain.handle('calendar:events:create', wrap(async (input: CalendarEventCreateInput) => {
     const user = await sessionUser();
-    const created = await createBflowEventForActor(input, user.id);
+    const { created } = await createBflowEventForActor(input, user.id);
     broadcastDataChange('calendar_events', 'INSERT');
     broadcastCalendarChanged('INSERT');
     return created;
@@ -669,13 +745,14 @@ export function registerCalendarIpc(deps: CalendarIpcDeps): void {
     let target: PrivacyReplacementTarget;
 
     if (request.storage === 'bflow') {
-      const created = await createBflowEventForActor(request.event, actorId);
+      const { created, notification } = await createBflowEventForActor(request.event, actorId, true);
       target = {
         storage: 'bflow',
         actualId: created.id,
         calendarId: created.calendar_id,
         actorId,
         createdAt: created.created_at,
+        notification,
       };
       broadcastDataChange('calendar_events', 'INSERT');
       broadcastCalendarChanged('INSERT');
@@ -718,6 +795,9 @@ export function registerCalendarIpc(deps: CalendarIpcDeps): void {
     const acquired = acquirePrivacyReplacementReceipt(receipt, requireSenderId(event));
     if (disposition === 'keep') {
       settlePrivacyReplacementReceipt(acquired.receipt, true);
+      if (acquired.target.storage === 'bflow') {
+        queueCalendarNotification(acquired.target.notification);
+      }
       return;
     }
 
@@ -747,15 +827,13 @@ export function registerCalendarIpc(deps: CalendarIpcDeps): void {
       throw new Error('이 일정을 수정할 권한이 없습니다');
     }
 
-    let notificationCalendar = calendar;
-    let notificationMembers = members;
+    let targetNotification: { calendar: CalendarRow; members: CalendarMemberRow[] } | null = null;
     if (updates.calendar_id && updates.calendar_id !== previous.calendar_id) {
       const target = await loadCalendarForUserOrThrow(updates.calendar_id, user.id);
       if (!canEditCalendarEvents(target.calendar, target.members, user.id)) {
         throw new Error('옮기려는 캘린더에 일정을 만들 권한이 없습니다');
       }
-      notificationCalendar = target.calendar;
-      notificationMembers = target.members;
+      targetNotification = target;
     }
 
     const safeUpdates: Parameters<typeof store.updateEvent>[1] = {};
@@ -775,14 +853,33 @@ export function registerCalendarIpc(deps: CalendarIpcDeps): void {
     if (updates.linked_department !== undefined) safeUpdates.linked_department = updates.linked_department;
     if (updates.linked_todo_id !== undefined) safeUpdates.linked_todo_id = updates.linked_todo_id;
     const updated = await store.updateEvent(id, safeUpdates, previous.calendar_id, user.id);
-    void emitCalendarEventNotifications({
-      actorId: user.id,
-      action: 'update',
-      calendar: notificationCalendar,
-      members: notificationMembers,
-      event: updated,
-      previous,
-    });
+    if (targetNotification) {
+      queueCalendarNotification(calendarNotificationContext({
+        actorId: user.id,
+        action: 'delete',
+        calendar,
+        members,
+        event: null,
+        previous,
+      }));
+      queueCalendarNotification(calendarNotificationContext({
+        actorId: user.id,
+        action: 'create',
+        calendar: targetNotification.calendar,
+        members: targetNotification.members,
+        event: updated,
+        previous: null,
+      }));
+    } else {
+      queueCalendarNotification(calendarNotificationContext({
+        actorId: user.id,
+        action: 'update',
+        calendar,
+        members,
+        event: updated,
+        previous,
+      }));
+    }
     broadcastDataChange('calendar_events', 'UPDATE');
     broadcastCalendarChanged('UPDATE');
     return updated;
@@ -839,14 +936,14 @@ export function registerCalendarIpc(deps: CalendarIpcDeps): void {
         committedPrivacyReplacementDelete: true,
       });
       await runStrictPostCommitSideEffect('notification', () => {
-        void emitCalendarEventNotifications({
+        queueCalendarNotification(calendarNotificationContext({
           actorId: user.id,
           action: 'delete',
           calendar,
           members,
           event: null,
           previous,
-        });
+        }));
       });
       await runStrictPostCommitSideEffect('data broadcast', () => {
         broadcastDataChange('calendar_events', 'DELETE');
@@ -856,14 +953,14 @@ export function registerCalendarIpc(deps: CalendarIpcDeps): void {
       });
       return 'deleted';
     }
-    void emitCalendarEventNotifications({
+    queueCalendarNotification(calendarNotificationContext({
       actorId: user.id,
       action: 'delete',
       calendar,
       members,
       event: null,
       previous,
-    });
+    }));
     broadcastDataChange('calendar_events', 'DELETE');
     broadcastCalendarChanged('DELETE');
     return 'deleted';
@@ -1024,4 +1121,9 @@ export function registerCalendarIpc(deps: CalendarIpcDeps): void {
     const user = await sessionUser();
     await store.markNotificationsRead(user.id, ids);
   }));
+
+  return {
+    getPendingNotificationCount: () => pendingNotificationTasks.size,
+    waitForNotificationIdle,
+  };
 }

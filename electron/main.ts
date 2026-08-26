@@ -2476,7 +2476,7 @@ setCalendarChangedLocalListener((payload) => {
   );
 });
 
-registerCalendarIpc({
+const calendarNotificationDrain = registerCalendarIpc({
   getSessionUserIdOrThrow,
   createLegacyPrivateEvent: (input, actorId) => sbAddPrivateEvent({
     ...input,
@@ -5157,14 +5157,19 @@ app.on('before-quit', (e) => {
   const vacPending = getVacPendingOpsCount();
   const personalPending = personalTodoService.getPendingCount();
   const marketPending = marketAccountService.getPendingCount();
-  const totalPending = sheetsPending + vacPending + personalPending + marketPending;
+  const calendarNotificationPending = calendarNotificationDrain.getPendingNotificationCount();
+  const totalPending = sheetsPending
+    + vacPending
+    + personalPending
+    + marketPending
+    + calendarNotificationPending;
   // 자동 업데이트 installer 적용이 있으면 어떤 분기든 e.preventDefault + 비동기 chain 끝에 적용.
   // 기존 fire-and-forget 분기도 installer helper spawn 시점까지 대기 — race 위험 제거.
   e.preventDefault();
 
   // 메인 윈도우에 "저장 중" 알림 (pending 작업이 있는 경우만 의미 있음)
   if (totalPending > 0) {
-    console.log(`[종료] ${totalPending}개 작업 대기 중 (시트: ${sheetsPending}, 휴가: ${vacPending}, 모의투자: ${marketPending})... 완료 후 종료합니다.`);
+    console.log(`[종료] ${totalPending}개 작업 대기 중 (시트: ${sheetsPending}, 휴가: ${vacPending}, 개인: ${personalPending}, 모의투자: ${marketPending}, 캘린더 알림: ${calendarNotificationPending})... 완료 후 종료합니다.`);
     if (mainWindow && !mainWindow.isDestroyed()) {
       mainWindow.webContents.send('app:saving-before-quit', totalPending);
     }
@@ -5178,14 +5183,15 @@ app.on('before-quit', (e) => {
   (async () => {
     try {
       if (totalPending > 0) {
-        const [, sheetsDone, vacDone, personalDone, marketDone] = await Promise.all([
+        const [, sheetsDone, vacDone, personalDone, marketDone, calendarNotificationDone] = await Promise.all([
           watchWithTimeout,
           waitForAllPendingOps(15000),
           waitForVacPendingOps(60000),
           personalTodoService.waitForIdle(15000),
           marketAccountService.waitForIdle(15000),
+          calendarNotificationDrain.waitForNotificationIdle(15000),
         ]);
-        if (!sheetsDone || !vacDone || !personalDone || !marketDone) {
+        if (!sheetsDone || !vacDone || !personalDone || !marketDone || !calendarNotificationDone) {
           console.warn('[종료] 타임아웃 — 일부 작업이 완료되지 않았을 수 있습니다');
         } else {
           console.log('[종료] 저장 완료, 앱을 종료합니다');
@@ -5195,6 +5201,7 @@ app.on('before-quit', (e) => {
           watchWithTimeout.catch(() => { /* noop */ }),
           personalTodoService.waitForIdle(15000),
           marketAccountService.waitForIdle(15000),
+          calendarNotificationDrain.waitForNotificationIdle(15000),
         ]);
       }
 
