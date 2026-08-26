@@ -26,12 +26,15 @@ type WeekTimeGridModule = {
     timedEventsByDate: Map<string, CalendarEvent[]>;
   };
   default(props: {
-    week: Date[];
+    weekDays: Date[];
     events: CalendarEvent[];
     today: string;
     onEventClick(event: CalendarEvent): void;
     onSlotClick(date: string, startTime: string, endTime: string): void;
-    onWeekShift(delta: -1 | 1): void;
+    activeWeekIndex: number;
+    weekCount: number;
+    onWeekChange(nextIndex: number): void;
+    onEventContextMenu?(event: CalendarEvent, mouse: unknown): void;
   }): ReactNode;
   resolveBandExpanded(
     hasTimedBlocks: boolean,
@@ -72,6 +75,9 @@ type WeekTimeGridModule = {
   };
   formatKoreanHour(min: number): string;
   getCollapsedBandLabel(label: string, startMin: number, endMin: number): string;
+  getNextWeekIndex(activeWeekIndex: number, weekCount: number, delta: -1 | 1): number | null;
+  getNonTodayCurrentLineStyle(): { background: string; height: number };
+  getWeekendCellStyle(isWeekend: boolean): { background?: string };
 };
 
 async function loadWeekTimeGridView(): Promise<WeekTimeGridModule> {
@@ -221,6 +227,24 @@ test('WeekTimeGridView: 한국어 시간 눈금과 접힌 밴드의 범위·상�
   assert.equal(getCollapsedBandLabel('새벽 시간대', 0, 540), '▸ 새벽 시간대 · 오전 12시–오전 9시 · 접힘');
 });
 
+test('WeekTimeGridView: 상위 주 인덱스 계약으로 한 칸만 이동하고 범위 밖은 요청하지 않는다', async () => {
+  const { getNextWeekIndex } = await loadWeekTimeGridView();
+
+  assert.equal(getNextWeekIndex(2, 6, 1), 3);
+  assert.equal(getNextWeekIndex(2, 6, -1), 1);
+  assert.equal(getNextWeekIndex(0, 6, -1), null);
+  assert.equal(getNextWeekIndex(5, 6, 1), null);
+});
+
+test('WeekTimeGridView: 오늘 외 열의 현재 시각선은 28% 빨강 1px을 사용한다', async () => {
+  const { getNonTodayCurrentLineStyle } = await loadWeekTimeGridView();
+
+  assert.deepEqual(getNonTodayCurrentLineStyle(), {
+    background: 'rgba(255, 107, 107, 0.28)',
+    height: 1,
+  });
+});
+
 test('WeekTimeGridView: 종일 칩의 틴트·왼쪽 경계와 주말 dim, +N개 표기를 실제 마크업에 남긴다', async () => {
   const module = await loadWeekTimeGridView();
   const week = Array.from({ length: 7 }, (_, index) => new Date(2026, 7, 23 + index, 12));
@@ -230,12 +254,15 @@ test('WeekTimeGridView: 종일 칩의 틴트·왼쪽 경계와 주말 dim, +N개
     event({ id: 'all-3', allDay: true }),
   ];
   const markup = renderToStaticMarkup(createElement(module.default, {
-    week,
+    weekDays: week,
     events: allDayEvents,
     today: '2026-01-01',
     onEventClick() {},
     onSlotClick() {},
-    onWeekShift() {},
+    activeWeekIndex: 0,
+    weekCount: 4,
+    onWeekChange() {},
+    onEventContextMenu() {},
   }));
 
   assert.deepEqual(module.getAllDayBarStyle('#6C5CE7'), {
@@ -244,7 +271,25 @@ test('WeekTimeGridView: 종일 칩의 틴트·왼쪽 경계와 주말 dim, +N개
     color: '#E8E8EE',
   });
   assert.match(markup, /\+1개/);
-  assert.match(markup, /opacity-60/);
+  assert.doesNotMatch(markup, /opacity-60/);
+  assert.match(markup, /background:rgba\(116, 185, 255, 0.06\)/);
   assert.match(markup, /background:rgb\(41, 40, 74\)/);
   assert.match(markup, /▸ 새벽 시간대 · 오전 12시–오전 9시 · 접힘/);
+});
+
+test('WeekTimeGridView: 30분 이상 시간 블록은 원본색 시각을 제목보다 먼저 마크업에 둔다', async () => {
+  const module = await loadWeekTimeGridView();
+  const weekDays = Array.from({ length: 7 }, (_, index) => new Date(2026, 7, 23 + index, 12));
+  const markup = renderToStaticMarkup(createElement(module.default, {
+    weekDays,
+    events: [event({ id: 'timed-label', title: '오전 회의', startDate: '2026-08-25', endDate: '2026-08-25', startTime: '09:00', endTime: '09:30' })],
+    today: '2026-01-01',
+    onEventClick() {},
+    onSlotClick() {},
+    activeWeekIndex: 1,
+    weekCount: 4,
+    onWeekChange() {},
+  }));
+
+  assert.match(markup, /data-time-grid-time="true"[^>]*>09:00–09:30<\/span><span data-time-grid-title="true"[^>]*>오전 회의<\/span>/);
 });

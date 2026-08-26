@@ -21,14 +21,18 @@ const CARD_BASE_RGB = [26, 29, 39] as const; // #1A1D27
 
 export interface WeekTimeGridViewProps {
   /** 일요일부터 토요일까지의 활성 주간 날짜 7개 */
-  week: Date[];
+  weekDays: Date[];
   events: CalendarEvent[];
   today: string;
   onEventClick: (event: CalendarEvent) => void;
   /** PR-C에서 시간 prefill을 연결한다. PR-B는 선택한 날짜만 연다. */
   onSlotClick: (date: string, startTime: string, endTime: string) => void;
-  /** ScheduleView가 이동 가능 범위를 소유하도록 delta만 전달한다. */
-  onWeekShift: (delta: -1 | 1) => void;
+  /** ScheduleView가 주 범위를 소유하고, 그리드는 계산한 다음 인덱스만 요청한다. */
+  activeWeekIndex: number;
+  weekCount: number;
+  onWeekChange: (nextIndex: number) => void;
+  /** PR-D에서 DOM 핸들러를 연결할 미래 확장점. B.3에서는 의도적으로 attach하지 않는다. */
+  onEventContextMenu?: (event: CalendarEvent, mouse: React.MouseEvent<HTMLButtonElement>) => void;
 }
 
 type TimedEvent = {
@@ -79,6 +83,11 @@ export function getTimeSlots(startMin: number, endMin: number): Array<{ startMin
     slots.push({ startMin: slotStart, endMin: Math.min(endMin, slotStart + 30) });
   }
   return slots;
+}
+
+export function getNextWeekIndex(activeWeekIndex: number, weekCount: number, delta: -1 | 1): number | null {
+  const nextIndex = activeWeekIndex + delta;
+  return nextIndex >= 0 && nextIndex < weekCount ? nextIndex : null;
 }
 
 /** 종일 레인으로 강등된 시간 일정도 시작 시각과 주간 경계 계속 표시를 잃지 않는다. */
@@ -180,6 +189,14 @@ export function getCollapsedBandLabel(label: string, startMin: number, endMin: n
   return `▸ ${label} · ${formatKoreanHour(startMin)}–${formatKoreanHour(endMin)} · 접힘`;
 }
 
+export function getNonTodayCurrentLineStyle(): { background: string; height: number } {
+  return { background: 'rgba(255, 107, 107, 0.28)', height: 1 };
+}
+
+export function getWeekendCellStyle(isWeekend: boolean): { background?: string } {
+  return isWeekend ? { background: 'rgba(116, 185, 255, 0.06)' } : {};
+}
+
 function eventBlockStyle(layout: { col: number; span: number; cols: number }, top: number, height: number) {
   return {
     top,
@@ -190,12 +207,14 @@ function eventBlockStyle(layout: { col: number; span: number; cols: number }, to
 }
 
 export function WeekTimeGridView({
-  week,
+  weekDays,
   events,
   today,
   onEventClick,
   onSlotClick,
-  onWeekShift,
+  activeWeekIndex,
+  weekCount,
+  onWeekChange,
 }: WeekTimeGridViewProps) {
   const { reduce } = useMotionPref();
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -204,7 +223,7 @@ export function WeekTimeGridView({
   const [eveningChoice, setEveningChoice] = useState<boolean | null>(null);
   const [now, setNow] = useState(() => new Date());
 
-  const dates = useMemo(() => week.slice(0, 7), [week]);
+  const dates = useMemo(() => weekDays.slice(0, 7), [weekDays]);
   const dateStrings = useMemo(() => dates.map(fmtDate), [dates]);
   const weekKey = dateStrings.join('|');
   const { allDayEvents, timedEventsByDate } = useMemo(() => splitWeekTimeGridEvents(events), [events]);
@@ -270,9 +289,11 @@ export function WeekTimeGridView({
     if (!event.shiftKey) return;
     const movement = event.deltaY || event.deltaX;
     if (movement === 0) return;
+    const nextIndex = getNextWeekIndex(activeWeekIndex, weekCount, movement > 0 ? 1 : -1);
+    if (nextIndex === null) return;
     event.preventDefault();
-    onWeekShift(movement > 0 ? 1 : -1);
-  }, [onWeekShift]);
+    onWeekChange(nextIndex);
+  }, [activeWeekIndex, onWeekChange, weekCount]);
 
   return (
     <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl border border-bg-border/40 bg-bg-primary/50">
@@ -286,7 +307,8 @@ export function WeekTimeGridView({
             return (
               <div
                 key={dateStr}
-                className={`min-w-0 border-l border-bg-border/25 px-2 py-2 text-center ${isToday ? 'bg-accent/10' : ''} ${isWeekend ? 'opacity-60' : ''}`}
+                className={`min-w-0 border-l border-bg-border/25 px-2 py-2 text-center ${isToday ? 'bg-accent/10' : ''}`}
+                style={getWeekendCellStyle(isWeekend)}
               >
                 <div className={`text-[11px] font-semibold ${index === 0 ? 'text-red-400' : index === 6 ? 'text-blue-400' : 'text-text-secondary'}`}>
                   {WEEKDAY_KR[index]}
@@ -302,12 +324,13 @@ export function WeekTimeGridView({
         <div className="relative border-t border-bg-border/25" style={{ minHeight: Math.max(ALL_DAY_ROW_PX, visibleAllDayRows * ALL_DAY_ROW_PX) + 6 }}>
           <div className="absolute inset-y-0 left-0 flex items-start justify-center pt-2 text-[9px] text-text-secondary" style={{ width: TIME_GUTTER_PX }}>종일</div>
           <div className="absolute inset-y-0 right-0 grid grid-cols-7" style={{ left: TIME_GUTTER_PX }}>
-            {dateStrings.map((dateStr) => (
+            {dateStrings.map((dateStr, index) => (
               <button
                 key={dateStr}
                 type="button"
                 aria-label={`${dateStr} 종일 일정 만들기`}
-                className={`border-l border-bg-border/20 transition-colors hover:bg-bg-border/15 ${dateStr === today ? 'bg-accent/[0.03]' : ''}`}
+                className={`border-l border-bg-border/20 transition-colors hover:bg-accent/[0.08] ${dateStr === today ? 'bg-accent/[0.03]' : ''}`}
+                style={getWeekendCellStyle(index === 0 || index === 6)}
                 onClick={() => onSlotClick(dateStr, '00:00', '23:59')}
               />
             ))}
@@ -479,7 +502,11 @@ function TimeBand({
           const timedBlocks = blocksByDate.get(date) ?? [];
           const layouts = layoutDayBlocks(timedBlocks.map((block) => ({ id: block.layoutId, startMin: block.startMin, endMin: block.endMin })));
           return (
-            <div key={date} className={`relative border-r border-bg-border/20 ${date === today ? 'bg-accent/[0.035]' : ''} ${isWeekend ? 'opacity-60' : ''}`}>
+            <div
+              key={date}
+              className={`relative border-r border-bg-border/20 ${date === today ? 'bg-accent/[0.035]' : ''}`}
+              style={getWeekendCellStyle(isWeekend)}
+            >
               {hours.map((minute) => (
                 <div key={minute} className="pointer-events-none absolute left-0 right-0 border-t border-bg-border/20" style={{ top: ((minute - startMin) / 60) * HOUR_PX }} />
               ))}
@@ -536,8 +563,8 @@ function TimeBand({
                       onEventClick(block.event);
                     }}
                   >
-                    <span className="block truncate" style={{ color: visualStyle.titleColor, fontSize: visualStyle.titleFontSize }}>{block.event.title}</span>
-                    {duration >= 30 && <span className="block truncate" style={{ color: visualStyle.timeColor, fontSize: 9 }}>{minutesToTime(block.startMin)}–{minutesToTime(block.endMin)}</span>}
+                    {duration >= 30 && <span data-time-grid-time="true" className="block truncate" style={{ color: visualStyle.timeColor, fontSize: 9 }}>{minutesToTime(block.startMin)}–{minutesToTime(block.endMin)}</span>}
+                    <span data-time-grid-title="true" className="block truncate" style={{ color: visualStyle.titleColor, fontSize: visualStyle.titleFontSize }}>{block.event.title}</span>
                   </motion.button>
                 );
               })}
@@ -548,7 +575,7 @@ function TimeBand({
       {currentTimeMarker && (
         <div className="pointer-events-none absolute left-0 right-0 z-30" aria-label={`현재 시각 ${currentTimeMarker.label}`} style={{ top: currentTimeMarker.top }}>
           <span className="absolute -top-2 rounded bg-red-500 px-1 py-0.5 text-[9px] font-bold text-white shadow" style={{ left: 2 }}>{currentTimeMarker.label}</span>
-          <div className="absolute right-0 h-px bg-text-secondary/45" style={{ left: TIME_GUTTER_PX }}>
+          <div className="absolute right-0" style={{ left: TIME_GUTTER_PX, ...getNonTodayCurrentLineStyle() }}>
             <div
               className="absolute -top-px h-0.5 bg-red-500"
               style={{ left: `${(currentTimeMarker.todayIndex / 7) * 100}%`, width: `${100 / 7}%` }}
