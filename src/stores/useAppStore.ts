@@ -72,9 +72,12 @@ interface AppState {
    * CustomEvent는 화면 마운트 전 listener가 없으면 유실되므로 store가 소유한다.
    */
   pendingScheduleDateNavigationRequest: ScheduleDateNavigationRequest | null;
+  /** 날짜 이동 뒤 연결된 할일 패널은 이벤트 목록이 준비될 때까지 별도로 보존한다. */
+  pendingScheduleTodoPanelNavigationRequest: ScheduleDateNavigationRequest | null;
   nextScheduleDateNavigationRequestId: number;
   requestScheduleDateNavigation: (target: Omit<ScheduleDateNavigationRequest, 'id'>) => ScheduleDateNavigationRequest;
   consumeScheduleDateNavigationRequest: (requestId: number) => ScheduleDateNavigationRequest | null;
+  consumeScheduleTodoPanelNavigationRequest: (requestId: number) => ScheduleDateNavigationRequest | null;
   navigateToScheduleDate: (target?: Omit<ScheduleDateNavigationRequest, 'id'>) => void;
 
   // 알림/링크/활동 피드 점프 뒤 돌아갈 화면 위치
@@ -285,8 +288,12 @@ export const useAppStore = create<AppState>((set, get) => ({
     pendingScheduleDateNavigationRequest: view === 'schedule'
       ? s.pendingScheduleDateNavigationRequest
       : null,
+    pendingScheduleTodoPanelNavigationRequest: view === 'schedule'
+      ? s.pendingScheduleTodoPanelNavigationRequest
+      : null,
   })),
   pendingScheduleDateNavigationRequest: null,
+  pendingScheduleTodoPanelNavigationRequest: null,
   nextScheduleDateNavigationRequestId: 0,
   requestScheduleDateNavigation: (target) => {
     let request: ScheduleDateNavigationRequest | null = null;
@@ -298,6 +305,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       };
       return {
         pendingScheduleDateNavigationRequest: request,
+        pendingScheduleTodoPanelNavigationRequest: request.todoId ? request : null,
         nextScheduleDateNavigationRequestId: request.id,
       };
     });
@@ -313,6 +321,16 @@ export const useAppStore = create<AppState>((set, get) => ({
     });
     return consumed;
   },
+  consumeScheduleTodoPanelNavigationRequest: (requestId) => {
+    let consumed: ScheduleDateNavigationRequest | null = null;
+    set((s) => {
+      const pending = s.pendingScheduleTodoPanelNavigationRequest;
+      if (!pending || pending.id !== requestId) return {};
+      consumed = pending;
+      return { pendingScheduleTodoPanelNavigationRequest: null };
+    });
+    return consumed;
+  },
   navigateToScheduleDate: (target) => {
     // store에 먼저 기록하고 화면을 전환한다. lazy ScheduleView가 나중에 mount되어도
     // 최신 요청을 한 번만 꺼낼 수 있다.
@@ -321,7 +339,10 @@ export const useAppStore = create<AppState>((set, get) => ({
     } else {
       // 날짜 없는 알림은 기존 동작처럼 일정 화면만 열어야 한다. 앞선 요청이 남아
       // 의도하지 않은 날짜로 늦게 점프하지 않도록 명시적으로 폐기한다.
-      set({ pendingScheduleDateNavigationRequest: null });
+      set({
+        pendingScheduleDateNavigationRequest: null,
+        pendingScheduleTodoPanelNavigationRequest: null,
+      });
     }
     get().setView('schedule');
   },
@@ -362,6 +383,9 @@ export const useAppStore = create<AppState>((set, get) => ({
         highlightSceneId: null,
         pendingScheduleDateNavigationRequest: target.currentView === 'schedule'
           ? s.pendingScheduleDateNavigationRequest
+          : null,
+        pendingScheduleTodoPanelNavigationRequest: target.currentView === 'schedule'
+          ? s.pendingScheduleTodoPanelNavigationRequest
           : null,
         selectedSceneIds: new Set<string>(),
         closeSceneModalSignal: s.closeSceneModalSignal + 1,

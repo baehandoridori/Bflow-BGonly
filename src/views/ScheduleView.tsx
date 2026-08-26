@@ -71,6 +71,25 @@ async function unlinkTodoFromCalendar(todoId: string) {
   }
 }
 
+function findUniqueLinkedTodoEvent(events: CalendarEvent[], todoId: string): CalendarEvent | undefined {
+  const linkedCandidates = events.filter((event) => event.linkedTodoId === todoId);
+  const fallbackCandidates = linkedCandidates.length === 0
+    ? events.filter((event) => (
+        event.linkedTodoId === undefined
+        && calendarEventLinkedTodoId(event) === todoId
+      ))
+    : [];
+  const candidatesByIdentity = new Map(
+    [...linkedCandidates, ...fallbackCandidates]
+      .map((event) => [calendarEventIdentityKey(event), event]),
+  );
+  // todo detail에는 source namespace가 없으므로 후보가 둘 이상이면 다른
+  // storage 행을 임의로 채택하지 않고 패널을 그대로 둔다.
+  return candidatesByIdentity.size === 1
+    ? candidatesByIdentity.values().next().value
+    : undefined;
+}
+
 /* ═══════════════════════════════════════════════════
    메인 ScheduleView
    ═══════════════════════════════════════════════════ */
@@ -84,6 +103,8 @@ export function ScheduleView() {
   const currentView = useAppStore((s) => s.currentView);
   const pendingScheduleDateNavigationRequest = useAppStore((s) => s.pendingScheduleDateNavigationRequest);
   const consumeScheduleDateNavigationRequest = useAppStore((s) => s.consumeScheduleDateNavigationRequest);
+  const pendingScheduleTodoPanelNavigationRequest = useAppStore((s) => s.pendingScheduleTodoPanelNavigationRequest);
+  const consumeScheduleTodoPanelNavigationRequest = useAppStore((s) => s.consumeScheduleTodoPanelNavigationRequest);
 
   const [events, setEvents] = useState<CalendarEvent[]>([]);
   const [vacationEvents, setVacationEvents] = useState<CalendarEvent[]>([]);
@@ -597,37 +618,30 @@ export function ScheduleView() {
     navigateTimersRef.current.push(
       setTimeout(() => { setPersistedDateRange(null); setPulseDate(null); }, 3000),
     );
-    // 해당 날짜의 연동된 이벤트를 사이드패널에 표시
-    if (detail.todoId) {
-      navigateTimersRef.current.push(
-        setTimeout(() => {
-          const linkedCandidates = events.filter((ev) => ev.linkedTodoId === detail.todoId);
-          const fallbackCandidates = linkedCandidates.length === 0
-            ? events.filter((ev) => (
-                ev.linkedTodoId === undefined
-                && calendarEventLinkedTodoId(ev) === detail.todoId
-              ))
-            : [];
-          const candidatesByIdentity = new Map(
-            [...linkedCandidates, ...fallbackCandidates]
-              .map((event) => [calendarEventIdentityKey(event), event]),
-          );
-          // todo detail에는 source namespace가 없으므로 후보가 둘 이상이면 다른
-          // storage 행을 임의로 채택하지 않고 패널을 그대로 둔다.
-          const linkedEvent = candidatesByIdentity.size === 1
-            ? candidatesByIdentity.values().next().value
-            : undefined;
-          if (linkedEvent) setPanelEvent(linkedEvent);
-        }, 100),
-      );
-    }
-  }, [events]);
+  }, []);
 
   useEffect(() => {
     if (currentView !== 'schedule' || !pendingScheduleDateNavigationRequest) return;
     const request = consumeScheduleDateNavigationRequest(pendingScheduleDateNavigationRequest.id);
     if (request) applyScheduleDateNavigation(request);
   }, [applyScheduleDateNavigation, consumeScheduleDateNavigationRequest, currentView, pendingScheduleDateNavigationRequest]);
+
+  // 날짜 이동은 즉시 적용하지만, 연결 할일 패널은 이벤트 정본이 늦게 도착할 수 있다.
+  // 따라서 시간 대기 대신 events 갱신마다 같은 ID 요청을 재해석하고, 성공한 정확한 ID만 소비한다.
+  useEffect(() => {
+    if (currentView !== 'schedule' || !pendingScheduleTodoPanelNavigationRequest) return;
+    const todoId = pendingScheduleTodoPanelNavigationRequest.todoId;
+    if (!todoId) return;
+    const linkedEvent = findUniqueLinkedTodoEvent(events, todoId);
+    if (!linkedEvent) return;
+    const request = consumeScheduleTodoPanelNavigationRequest(pendingScheduleTodoPanelNavigationRequest.id);
+    if (request) setPanelEvent(linkedEvent);
+  }, [
+    consumeScheduleTodoPanelNavigationRequest,
+    currentView,
+    events,
+    pendingScheduleTodoPanelNavigationRequest,
+  ]);
 
   useEffect(() => () => {
     navigateTimersRef.current.forEach(clearTimeout);
