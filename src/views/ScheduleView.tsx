@@ -54,10 +54,6 @@ const CALENDAR_VIEW_MODES: CalendarViewMode[] = ['month', '2week', 'week', 'toda
 const LOCAL_CHANGE_GUARD_MS = 3_000;
 const REALTIME_HIGHLIGHT_MS = 2_000;
 
-function localCreateSignature(event: CalendarEvent): string {
-  return buildEventSnapshot([event]).values().next().value ?? '';
-}
-
 function readCalendarViewPreference(): { viewMode: CalendarViewMode; weekSubMode: WeekSubMode } {
   const fallback = { viewMode: 'month' as CalendarViewMode, weekSubMode: 'card' as WeekSubMode };
   try {
@@ -170,7 +166,6 @@ export function ScheduleView() {
   const [highlightedEventIdentities, setHighlightedEventIdentities] = useState<ReadonlySet<string>>(() => new Set());
   const canonicalEventSnapshotRef = useRef<CalendarEventSnapshot | null>(null);
   const localChangeGuardsRef = useRef(new Map<string, number>());
-  const localCreateGuardsRef = useRef(new Map<string, number[]>());
   const realtimeHighlightTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const realtimeHighlightRevisionRef = useRef(0);
 
@@ -250,12 +245,6 @@ export function ScheduleView() {
   }, []);
 
   const guardCreatedEvent = useCallback((event: CalendarEvent) => {
-    const now = Date.now();
-    const signature = localCreateSignature(event);
-    const activeGuards = (localCreateGuardsRef.current.get(signature) ?? [])
-      .filter((expiresAt) => expiresAt > now);
-    activeGuards.push(now + LOCAL_CHANGE_GUARD_MS);
-    localCreateGuardsRef.current.set(signature, activeGuards);
     guardLocalIdentity(snapshotCalendarEventIdentity(event));
     if (event.calendarId) {
       guardLocalIdentity({
@@ -282,28 +271,7 @@ export function ScheduleView() {
       for (const [identityKey, expiresAt] of localChangeGuardsRef.current) {
         if (expiresAt <= now) localChangeGuardsRef.current.delete(identityKey);
       }
-      for (const [signature, expiries] of localCreateGuardsRef.current) {
-        const activeGuards = expiries.filter((expiresAt) => expiresAt > now);
-        if (activeGuards.length === 0) localCreateGuardsRef.current.delete(signature);
-        else localCreateGuardsRef.current.set(signature, activeGuards);
-      }
       const diff = diffEventSnapshots(previousSnapshot, nextSnapshot);
-      const canonicalByIdentity = new Map(
-        canonicalEvents.map((event) => [calendarEventIdentityKey(event), event]),
-      );
-      for (const identityKey of diff.added) {
-        // 낙관적 ID 자체는 exact guard가 맡고, 서버가 바꾼 ID만 생성 1건당
-        // fallback 표 한 장을 소비한다. 같은 내용의 외부 일정까지 숨기지 않는다.
-        if (localChangeGuardsRef.current.has(identityKey)) continue;
-        const addedEvent = canonicalByIdentity.get(identityKey);
-        if (!addedEvent) continue;
-        const signature = localCreateSignature(addedEvent);
-        const createGuards = localCreateGuardsRef.current.get(signature);
-        if (!createGuards || createGuards.length === 0) continue;
-        const createGuardExpiry = createGuards.shift()!;
-        localChangeGuardsRef.current.set(identityKey, createGuardExpiry);
-        if (createGuards.length === 0) localCreateGuardsRef.current.delete(signature);
-      }
       const targets = [...diff.added, ...diff.changed]
         .filter((identityKey) => !localChangeGuardsRef.current.has(identityKey));
       if (targets.length > 0) {
@@ -600,14 +568,14 @@ export function ScheduleView() {
         createdAt: new Date().toISOString(),
       };
       guardCreatedEvent(ev);
-      await addEvent(ev);
+      await addEvent(ev, { onPersistedIdentity: guardLocalIdentity });
       // bflow:calendar-changed 구독이 자동 refresh하므로 수동 추가 불필요
       setShowCreate(false);
       resetCreatePrefill();
     } finally {
       isAddingRef.current = false;
     }
-  }, [guardCreatedEvent, resetCreatePrefill]);
+  }, [guardCreatedEvent, guardLocalIdentity, resetCreatePrefill]);
 
   const handleDeleteEvent = useCallback(async (deletingEvent: CalendarEvent) => {
     const mutationIdentity = snapshotCalendarEventIdentity(deletingEvent);
@@ -1014,9 +982,9 @@ export function ScheduleView() {
       linkedPart: undefined,
     };
     guardCreatedEvent(newEv);
-    await addEvent(newEv);
+    await addEvent(newEv, { onPersistedIdentity: guardLocalIdentity });
     // bflow:calendar-changed 구독이 자동 refresh
-  }, [guardCreatedEvent]);
+  }, [guardCreatedEvent, guardLocalIdentity]);
 
   // 이벤트 우클릭 → QuickEdit
   const handleEventContextMenu = useCallback((ev: CalendarEvent, e: React.MouseEvent) => {

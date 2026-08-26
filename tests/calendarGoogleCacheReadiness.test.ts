@@ -16,7 +16,10 @@ type ServiceModule = {
   loadBflowEvents(): Promise<void>;
   syncAll(options?: { broadcast?: boolean; skipBflowLoad?: boolean }): Promise<unknown>;
   syncIncremental(): Promise<void>;
-  addEvent(event: Record<string, unknown>): Promise<void>;
+  addEvent(
+    event: Record<string, unknown>,
+    options?: { onPersistedIdentity?: (identity: EventIdentityFixture) => void },
+  ): Promise<void>;
   updateEvent(
     eventId: string,
     updates: Record<string, unknown>,
@@ -749,6 +752,41 @@ test('timed Google create serializes KST fields and keeps its optimistic and per
   } finally {
     insertGate.resolve('google-timed-1');
     await creation?.catch(() => {});
+    harness.restore();
+  }
+});
+
+test('addEvent reports each exact persisted identity while keeping its Promise<void> result', async () => {
+  const persistedIds = ['local-preserved-id', 'server-replaced-id'];
+  const persistedIdentities: EventIdentityFixture[] = [];
+  const harness = await createHarness({
+    currentUserId: 'user-1',
+    calendarList: async () => [personalCalendar('user-1')],
+    bflowEventsList: async () => [],
+    fullSync: async () => [],
+    createBflowEvent: async (input) => bflowEvent(
+      persistedIds.shift() ?? 'unexpected-persisted-id',
+      String(input.title),
+    ),
+  });
+
+  try {
+    const firstResult = await harness.service.addEvent(
+      calendarEventInput('local-preserved-id', '같은 내용의 일정'),
+      { onPersistedIdentity: (identity) => persistedIdentities.push(identity) },
+    );
+    const secondResult = await harness.service.addEvent(
+      calendarEventInput('local-replaced-id', '같은 내용의 일정'),
+      { onPersistedIdentity: (identity) => persistedIdentities.push(identity) },
+    );
+
+    assert.equal(firstResult, undefined, 'the public add contract remains Promise<void>');
+    assert.equal(secondResult, undefined, 'a second identical create keeps the same public contract');
+    assert.deepEqual(persistedIdentities, [
+      { id: 'local-preserved-id', source: 'bflow', sourceCalendarId: 'bflow:calendar-1' },
+      { id: 'server-replaced-id', source: 'bflow', sourceCalendarId: 'bflow:calendar-1' },
+    ]);
+  } finally {
     harness.restore();
   }
 });

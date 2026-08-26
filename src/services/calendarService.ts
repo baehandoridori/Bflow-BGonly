@@ -2049,8 +2049,21 @@ async function addEventInternal(
   }
 }
 
-export async function addEvent(event: CalendarEvent): Promise<void> {
-  await addEventInternal(event);
+export type CalendarEventAddOptions = {
+  onPersistedIdentity?: (identity: CalendarEventIdentity) => void;
+};
+
+export async function addEvent(
+  event: CalendarEvent,
+  options?: CalendarEventAddOptions,
+): Promise<void> {
+  await addEventInternal(
+    event,
+    undefined,
+    false,
+    undefined,
+    (_eventId, identity) => options?.onPersistedIdentity?.(identity),
+  );
 }
 
 async function deletePersistedCreatedEvent(created: CreatedEventRef): Promise<void> {

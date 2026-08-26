@@ -319,6 +319,8 @@ let scheduleDeleteCalls: Array<{ id: string; targetIdentity?: ScheduleEventIdent
 let scheduleDragDoneHandler: ((eventId: string, newStart: string, newEnd: string) => void | Promise<void>) | undefined;
 let scheduleTodoSyncCalls: Array<{ todoId: string; patch: Record<string, unknown> }> = [];
 let scheduleAddedEvents: ScheduleCalendarEvent[] = [];
+let schedulePersistedAddIdentities: ScheduleEventIdentity[] = [];
+let scheduleCreateUuidValues: string[] = [];
 let scheduleGetEventsCalls = 0;
 let scheduleGetEventsGate: Promise<void> | null = null;
 let resolveScheduleGetEventsGate: (() => void) | null = null;
@@ -675,6 +677,8 @@ function resetHarness(): void {
   scheduleTodoSyncCalls = [];
   (globalThis as typeof globalThis & { __scheduleTodoSyncCalls?: typeof scheduleTodoSyncCalls }).__scheduleTodoSyncCalls = scheduleTodoSyncCalls;
   scheduleAddedEvents = [];
+  schedulePersistedAddIdentities = [];
+  scheduleCreateUuidValues = [];
   scheduleGetEventsCalls = 0;
   scheduleGetEventsGate = null;
   resolveScheduleGetEventsGate = null;
@@ -1293,7 +1297,14 @@ async function loadScheduleView(): Promise<ScheduleViewComponent> {
           scheduleLoadBflowEventsCalls += 1;
           return true;
         },
-        addEvent: async (event: ScheduleCalendarEvent) => { scheduleAddedEvents.push(event); },
+        addEvent: async (
+          event: ScheduleCalendarEvent,
+          options?: { onPersistedIdentity?: (identity: ScheduleEventIdentity) => void },
+        ) => {
+          scheduleAddedEvents.push(event);
+          const persistedIdentity = schedulePersistedAddIdentities.shift();
+          if (persistedIdentity) options?.onPersistedIdentity?.(persistedIdentity);
+        },
         updateEvent: async (
           id: string,
           updates: Partial<ScheduleCalendarEvent>,
@@ -1403,7 +1414,9 @@ async function loadScheduleView(): Promise<ScheduleViewComponent> {
         return { useCalendarStore };
       }
       if (id === '@/utils/sceneNavigationAction') return { navigateToSceneView() {} };
-      if (id === '@/utils/createUuid') return { createUuid: () => 'new-id' };
+      if (id === '@/utils/createUuid') {
+        return { createUuid: () => scheduleCreateUuidValues.shift() ?? 'new-id' };
+      }
       if (id === '@/utils/calendarDate') return {
         fmtDate: scheduleFmtDate,
         parseDate: (date: string) => new Date(`${date}T12:00:00`),
@@ -3590,7 +3603,7 @@ test('ScheduleView does not highlight deletions and passes an external add targe
   );
 });
 
-test('ScheduleView excludes guarded local add and update refreshes, then allows a later external change after three seconds', async () => {
+test('ScheduleView guards multiple exact local create identities without hiding a reversed identical external add', async () => {
   resetHarness();
   scheduleLocalStorage.set('bflow_calendar_view_v1', JSON.stringify({ viewMode: 'week', weekSubMode: 'timegrid' }));
   const existing = calendarListEvent({
@@ -3621,9 +3634,26 @@ test('ScheduleView excludes guarded local add and update refreshes, then allows 
     await renderScheduleView();
     assert.equal(scheduleTimeGridProps.at(-1)?.highlightedEventIdentities?.size, 0, 'a local time-grid update stays excluded');
 
+    scheduleCreateUuidValues = ['local-preserved-id', 'local-replaced-id'];
+    schedulePersistedAddIdentities = [
+      { id: 'local-preserved-id', source: 'bflow', sourceCalendarId: 'bflow:mine' },
+      { id: 'persisted-new-id', source: 'bflow', sourceCalendarId: 'bflow:mine' },
+    ];
     scheduleTimeGridProps.at(-1)?.onTimeGridCreate?.('2026-08-27', '13:00', '14:00');
     await renderScheduleView();
-    const created = calendarListEvent({
+    const createdPreserved = calendarListEvent({
+      id: 'local-preserved-id',
+      title: '로컬 추가',
+      source: 'bflow',
+      sourceCalendarId: 'bflow:mine',
+      calendarId: 'mine',
+      allDay: false,
+      startDate: '2026-08-27',
+      endDate: '2026-08-27',
+      startTime: '13:00',
+      endTime: '14:00',
+    });
+    const createdReplaced = calendarListEvent({
       id: 'persisted-new-id',
       title: '로컬 추가',
       source: 'bflow',
@@ -3635,23 +3665,35 @@ test('ScheduleView excludes guarded local add and update refreshes, then allows 
       startTime: '13:00',
       endTime: '14:00',
     });
-    await scheduleCreateModalProps.at(-1)?.onSave({ ...created, id: undefined, createdAt: undefined });
+    const createData = { ...createdPreserved, id: undefined, createdAt: undefined };
+    await scheduleCreateModalProps.at(-1)?.onSave(createData);
+    await scheduleCreateModalProps.at(-1)?.onSave(createData);
+    assert.deepEqual(
+      scheduleAddedEvents.map(({ id }) => id),
+      ['local-preserved-id', 'local-replaced-id'],
+      'two identical local creates retain separate optimistic identities',
+    );
     const unrelatedExternalTwin = {
-      ...created,
+      ...createdReplaced,
       id: 'unrelated-external-twin',
       createdAt: '2026-08-27T01:00:00.000Z',
     };
-    scheduleCanonicalEvents = [moved, created, unrelatedExternalTwin];
+    scheduleCanonicalEvents = [moved, unrelatedExternalTwin, createdReplaced, createdPreserved];
     await dispatchScheduleWindowEvent('bflow:calendar-changed');
     await renderScheduleView();
     assert.deepEqual(
       [...(scheduleTimeGridProps.at(-1)?.highlightedEventIdentities ?? [])],
       ['bflow\u0000unrelated-external-twin'],
-      'one local create guard suppresses only its persisted replacement, not an unrelated identical external add',
+      'exact local guards ignore canonical ordering and leave the unrelated external twin highlighted',
     );
 
     clock.advance(3_001);
-    scheduleCanonicalEvents = [moved, { ...created, title: '다른 창에서 수정됨' }, unrelatedExternalTwin];
+    scheduleCanonicalEvents = [
+      moved,
+      unrelatedExternalTwin,
+      { ...createdReplaced, title: '다른 창에서 수정됨' },
+      createdPreserved,
+    ];
     await dispatchScheduleWindowEvent('bflow:calendar-changed');
     await renderScheduleView();
     assert.deepEqual(
