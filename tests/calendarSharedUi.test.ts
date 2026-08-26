@@ -58,6 +58,7 @@ type TagManagerPopoverProps = {
 };
 type TagManagerPopoverComponent = (props: TagManagerPopoverProps) => ReactNode;
 type ScheduleViewComponent = () => ReactNode;
+type ShortcutHelpOverlayComponent = (props: { onClose(): void }) => ReactNode;
 type CalendarGridProps = {
   weeks: Date[][];
   events: ScheduleCalendarEvent[];
@@ -291,6 +292,7 @@ let bundledRail: Promise<CalendarRailComponent> | undefined;
 let bundledTagBar: Promise<TagBarComponent> | undefined;
 let bundledTagManagerPopover: Promise<TagManagerPopoverComponent> | undefined;
 let bundledScheduleView: Promise<ScheduleViewComponent> | undefined;
+let bundledShortcutHelpOverlay: Promise<ShortcutHelpOverlayComponent> | undefined;
 let bundledCalendarGrid: Promise<CalendarGridComponent> | undefined;
 let bundledEventCreateModal: Promise<EventCreateModalComponent> | undefined;
 let bundledEventSidePanel: Promise<EventSidePanelComponent> | undefined;
@@ -307,6 +309,8 @@ let scheduleTimeGridProps: WeekTimeGridViewProps[] = [];
 let scheduleDayScrollProps: DayScrollViewProps[] = [];
 let scheduleCreateModalProps: EventCreateModalProps[] = [];
 let scheduleReducedMotion = false;
+let shortcutOverlayRefs: Array<{ current: unknown }> = [];
+let shortcutOverlayEffects: Array<() => void | (() => void)> = [];
 const scheduleLocalStorage = new Map<string, string>();
 let scheduleCanonicalEvents: ScheduleCalendarEvent[] = [];
 let scheduleUpdateCalls: Array<{
@@ -1464,6 +1468,46 @@ async function loadScheduleView(): Promise<ScheduleViewComponent> {
     return module.exports.ScheduleView as ScheduleViewComponent;
   });
   return bundledScheduleView;
+}
+
+async function loadShortcutHelpOverlay(): Promise<ShortcutHelpOverlayComponent> {
+  bundledShortcutHelpOverlay ??= build({
+    entryPoints: ['src/components/calendar/ShortcutHelpOverlay.tsx'],
+    bundle: true,
+    format: 'cjs',
+    platform: 'node',
+    target: 'node22',
+    write: false,
+    external: ['react', 'react/jsx-runtime', '@/utils/cn', '@/hooks/useMotionPref'],
+  }).then((result) => {
+    const module = { exports: {} as Record<string, unknown> };
+    const nodeRequire = createRequire(import.meta.url);
+    const react = nodeRequire('react') as Record<string, unknown>;
+    const jsxRuntime = nodeRequire('react/jsx-runtime');
+    let refCursor = 0;
+    const evaluate = new Function('require', 'module', 'exports', result.outputFiles[0].text);
+    evaluate((id: string) => {
+      if (id === 'react') {
+        return {
+          ...react,
+          useEffect(effect: () => void | (() => void)) {
+            shortcutOverlayEffects.push(effect);
+          },
+          useRef(initial: unknown) {
+            const slot = refCursor++;
+            shortcutOverlayRefs[slot] ??= { current: initial };
+            return shortcutOverlayRefs[slot];
+          },
+        };
+      }
+      if (id === 'react/jsx-runtime') return jsxRuntime;
+      if (id === '@/utils/cn') return { cn: (...values: unknown[]) => values.filter(Boolean).join(' ') };
+      if (id === '@/hooks/useMotionPref') return { useMotionPref: () => ({ reduce: false }) };
+      return nodeRequire(id);
+    }, module, module.exports);
+    return module.exports.ShortcutHelpOverlay as ShortcutHelpOverlayComponent;
+  });
+  return bundledShortcutHelpOverlay;
 }
 
 async function loadCalendarGrid(): Promise<CalendarGridComponent> {
@@ -4755,6 +4799,87 @@ test('ScheduleView shortcut help toggles with ? and closes with Escape without m
   tree = await renderScheduleView();
   const reducedDialog = nodeByAriaLabel(tree, '캘린더 단축키');
   assert.doesNotMatch(String((reducedDialog.props as { className?: string }).className), /char-modal-in/);
+});
+
+test('ShortcutHelpOverlay moves and contains focus, blocks background keys, then restores the opener', async () => {
+  const ShortcutHelpOverlay = await loadShortcutHelpOverlay();
+  const previousDocument = globalThis.document;
+  shortcutOverlayRefs = [];
+  shortcutOverlayEffects = [];
+
+  type FocusTarget = {
+    name: string;
+    isConnected: boolean;
+    focus(): void;
+    querySelectorAll?(): FocusTarget[];
+  };
+  let activeElement: FocusTarget | null = null;
+  const focusLog: string[] = [];
+  const makeTarget = (name: string): FocusTarget => ({
+    name,
+    isConnected: true,
+    focus() {
+      activeElement = this;
+      focusLog.push(name);
+    },
+  });
+  const opener = makeTarget('opener');
+  const closeButton = makeTarget('close');
+  const dialog = {
+    ...makeTarget('dialog'),
+    querySelectorAll: () => [closeButton],
+  };
+  activeElement = opener;
+  globalThis.document = { get activeElement() { return activeElement; } } as unknown as Document;
+
+  const tree = resolveComponents(ShortcutHelpOverlay({ onClose() {} }));
+  const dialogNode = nodeByAriaLabel(tree, '캘린더 단축키') as ReactElement<Record<string, unknown>>;
+  const closeNode = buttonByLabel(tree, '단축키 도움말 닫기') as unknown as ReactElement<Record<string, unknown>>;
+  const dialogRef = (dialogNode as unknown as { ref?: { current: unknown } }).ref;
+  const closeRef = (closeNode as unknown as { ref?: { current: unknown } }).ref;
+  if (dialogRef) dialogRef.current = dialog;
+  if (closeRef) closeRef.current = closeButton;
+
+  const cleanups = shortcutOverlayEffects
+    .map((effect) => effect())
+    .filter((cleanup): cleanup is () => void => typeof cleanup === 'function');
+  assert.equal(activeElement, closeButton, '열리면 배경의 기존 포커스 대신 닫기 버튼에 포커스한다');
+
+  const onKeyDown = dialogNode.props.onKeyDown as ((event: Record<string, unknown>) => void) | undefined;
+  let tabPrevented = false;
+  onKeyDown?.({
+    key: 'Tab',
+    shiftKey: false,
+    preventDefault() { tabPrevented = true; },
+    stopPropagation() {},
+  });
+  assert.equal(tabPrevented, true, '마지막 포커스 요소에서 Tab을 누르면 다이얼로그 안에 머문다');
+  assert.equal(activeElement, closeButton);
+
+  let shiftTabPrevented = false;
+  onKeyDown?.({
+    key: 'Tab',
+    shiftKey: true,
+    preventDefault() { shiftTabPrevented = true; },
+    stopPropagation() {},
+  });
+  assert.equal(shiftTabPrevented, true, '첫 포커스 요소에서 Shift+Tab을 눌러도 다이얼로그 안에 머문다');
+
+  let backgroundEnterActivations = 0;
+  let propagationStopped = false;
+  onKeyDown?.({
+    key: 'Enter',
+    shiftKey: false,
+    preventDefault() {},
+    stopPropagation() { propagationStopped = true; },
+  });
+  if (!propagationStopped) backgroundEnterActivations += 1;
+  assert.equal(backgroundEnterActivations, 0, '모달 안 Enter가 배경 단축키까지 전달되지 않는다');
+
+  for (const cleanup of cleanups.reverse()) cleanup();
+  assert.equal(activeElement, opener, '닫힐 때 연결된 기존 포커스 요소로 돌아간다');
+  assert.deepEqual(focusLog, ['close', 'close', 'close', 'opener']);
+  globalThis.document = previousDocument;
 });
 
 test('ScheduleView calendar shortcuts ignore editing targets, modifiers, and open modal UI', async () => {

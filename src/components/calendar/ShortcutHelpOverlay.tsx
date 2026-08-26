@@ -1,3 +1,4 @@
+import { useEffect, useRef, type KeyboardEvent } from 'react';
 import { cn } from '@/utils/cn';
 import { useMotionPref } from '@/hooks/useMotionPref';
 
@@ -17,6 +18,47 @@ const SHORTCUTS = [
 
 export function ShortcutHelpOverlay({ onClose }: ShortcutHelpOverlayProps) {
   const { reduce } = useMotionPref();
+  const dialogRef = useRef<HTMLElement>(null);
+  const closeButtonRef = useRef<HTMLButtonElement>(null);
+  const previousFocusRef = useRef<HTMLElement | null>(null);
+
+  useEffect(() => {
+    previousFocusRef.current = document.activeElement as HTMLElement | null;
+    closeButtonRef.current?.focus();
+
+    return () => {
+      const previousFocus = previousFocusRef.current;
+      if (previousFocus?.isConnected) previousFocus.focus();
+    };
+  }, []);
+
+  const handleDialogKeyDown = (event: KeyboardEvent<HTMLElement>) => {
+    event.stopPropagation();
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      onClose();
+      return;
+    }
+    if (event.key !== 'Tab') return;
+
+    const focusableElements = Array.from(dialogRef.current?.querySelectorAll<HTMLElement>(
+      'button:not([disabled]), a[href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
+    ) ?? []);
+    const first = focusableElements[0];
+    const last = focusableElements.at(-1);
+    if (!first || !last) {
+      event.preventDefault();
+      dialogRef.current?.focus();
+      return;
+    }
+
+    const activeElement = document.activeElement as HTMLElement | null;
+    const isOutsideDialog = !activeElement || !focusableElements.includes(activeElement);
+    if (event.shiftKey ? activeElement === first || isOutsideDialog : activeElement === last || isOutsideDialog) {
+      event.preventDefault();
+      (event.shiftKey ? last : first).focus();
+    }
+  };
 
   return (
     <div
@@ -26,9 +68,12 @@ export function ShortcutHelpOverlay({ onClose }: ShortcutHelpOverlayProps) {
       }}
     >
       <section
+        ref={dialogRef}
         role="dialog"
         aria-modal="true"
         aria-label="캘린더 단축키"
+        tabIndex={-1}
+        onKeyDown={handleDialogKeyDown}
         className={cn(
           'w-full max-w-sm rounded-2xl border border-white/10 bg-bg-card/95 p-5 shadow-2xl shadow-black/40',
           !reduce && 'animate-[char-modal-in_200ms_ease-out]',
@@ -40,6 +85,7 @@ export function ShortcutHelpOverlay({ onClose }: ShortcutHelpOverlayProps) {
             <p className="mt-1 text-[11px] text-text-secondary">자주 쓰는 동작을 빠르게 열 수 있어요.</p>
           </div>
           <button
+            ref={closeButtonRef}
             type="button"
             aria-label="단축키 도움말 닫기"
             onClick={onClose}

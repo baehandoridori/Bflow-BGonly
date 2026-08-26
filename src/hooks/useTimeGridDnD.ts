@@ -110,9 +110,14 @@ export function getTimeGridEventPatch(
     };
   }
 
-  const isBeforeStart = targetDate < original.startDate;
-  const end = isBeforeStart ? originalStart + 15 : Math.max(originalStart + 15, targetMinutes);
-  const normalizedEnd = normalizeEndDateTime(isBeforeStart ? original.startDate : targetDate, end);
+  const isBeforeStartDate = targetDate < original.startDate;
+  const isSameStartDate = targetDate === original.startDate;
+  const end = isBeforeStartDate
+    ? originalStart + 15
+    : isSameStartDate
+      ? Math.max(originalStart + 15, targetMinutes)
+      : targetMinutes;
+  const normalizedEnd = normalizeEndDateTime(isBeforeStartDate ? original.startDate : targetDate, end);
   return {
     startDate: original.startDate,
     ...normalizedEnd,

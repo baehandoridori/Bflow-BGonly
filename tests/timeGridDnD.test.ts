@@ -66,6 +66,33 @@ test('useTimeGridDnD: 이동과 하단 리사이즈는 날짜·시간 patch를 �
   );
 });
 
+test('useTimeGridDnD: 여러 날짜 리사이즈는 날짜를 먼저 비교하고 같은 날에만 최소 길이를 보정한다', async () => {
+  const dnd = await loadTimeGridDnD();
+  const afternoon = {
+    startDate: '2026-08-24', endDate: '2026-08-24', startTime: '15:00', endTime: '16:00',
+  };
+
+  assert.deepEqual(
+    dnd.getTimeGridEventPatch('resize-end', afternoon, '2026-08-25', 600),
+    { startDate: '2026-08-24', endDate: '2026-08-25', startTime: '15:00', endTime: '10:00' },
+    '다음 날의 이른 시각은 유효한 종료 시각이다',
+  );
+  assert.deepEqual(
+    dnd.getTimeGridEventPatch('resize-end', {
+      ...afternoon,
+      startTime: '23:45',
+      endTime: '23:59',
+    }, '2026-08-25', 0),
+    { startDate: '2026-08-24', endDate: '2026-08-25', startTime: '23:45', endTime: '00:00' },
+    '월요일 23:45에서 화요일 자정까지의 경계를 보존한다',
+  );
+  assert.deepEqual(
+    dnd.getTimeGridEventPatch('resize-end', afternoon, '2026-08-24', 600),
+    { startDate: '2026-08-24', endDate: '2026-08-24', startTime: '15:00', endTime: '15:15' },
+    '같은 날 시작 이전으로 줄이면 최소 15분을 유지한다',
+  );
+});
+
 test('useTimeGridDnD: 5px 미만 클릭은 드래그·사후 클릭 억제를 시작하지 않는다', async () => {
   const dnd = await loadTimeGridDnD();
 

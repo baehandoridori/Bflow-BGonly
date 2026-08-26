@@ -9,16 +9,34 @@ export interface CalendarEventDiff {
 }
 
 function eventChangeKey(event: CalendarEvent): string {
-  return [
-    event.startDate,
-    event.endDate,
-    event.startTime ?? '',
-    event.endTime ?? '',
-    String(event.allDay ?? ''),
-    event.title,
-    event.calendarId ?? '',
-    event.tagId ?? '',
-  ].join('|');
+  return JSON.stringify({
+    title: event.title,
+    memo: event.memo,
+    color: event.color,
+    type: event.type,
+    startDate: event.startDate,
+    endDate: event.endDate,
+    startTime: event.startTime,
+    endTime: event.endTime,
+    allDay: event.allDay,
+    createdBy: event.createdBy,
+    createdAt: event.createdAt,
+    calendarId: event.calendarId,
+    tagId: event.tagId,
+    linkedEpisode: event.linkedEpisode,
+    linkedPart: event.linkedPart,
+    linkedSheetName: event.linkedSheetName,
+    linkedSceneId: event.linkedSceneId,
+    linkedDepartment: event.linkedDepartment,
+    linkedTodoId: event.linkedTodoId,
+    vacationType: event.vacationType,
+    vacationUserName: event.vacationUserName,
+    isReadOnly: event.isReadOnly,
+    isPrivate: event.isPrivate,
+    canEdit: event.canEdit,
+    source: event.source,
+    sourceCalendarId: event.sourceCalendarId,
+  });
 }
 
 export function buildEventSnapshot(events: CalendarEvent[]): CalendarEventSnapshot {
