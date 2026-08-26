@@ -5,7 +5,7 @@ import {
 } from 'lucide-react';
 import { cn } from '@/utils/cn';
 import { useDataStore } from '@/stores/useDataStore';
-import { useAppStore } from '@/stores/useAppStore';
+import { useAppStore, type ScheduleDateNavigationRequest } from '@/stores/useAppStore';
 import {
   getEvents, isGoogleCacheReady, loadBflowEvents, addEvent, updateEvent, deleteEvent,
 } from '@/services/calendarService';
@@ -71,6 +71,25 @@ async function unlinkTodoFromCalendar(todoId: string) {
   }
 }
 
+function findUniqueLinkedTodoEvent(events: CalendarEvent[], todoId: string): CalendarEvent | undefined {
+  const linkedCandidates = events.filter((event) => event.linkedTodoId === todoId);
+  const fallbackCandidates = linkedCandidates.length === 0
+    ? events.filter((event) => (
+        event.linkedTodoId === undefined
+        && calendarEventLinkedTodoId(event) === todoId
+      ))
+    : [];
+  const candidatesByIdentity = new Map(
+    [...linkedCandidates, ...fallbackCandidates]
+      .map((event) => [calendarEventIdentityKey(event), event]),
+  );
+  // todo detail에는 source namespace가 없으므로 후보가 둘 이상이면 다른
+  // storage 행을 임의로 채택하지 않고 패널을 그대로 둔다.
+  return candidatesByIdentity.size === 1
+    ? candidatesByIdentity.values().next().value
+    : undefined;
+}
+
 /* ═══════════════════════════════════════════════════
    메인 ScheduleView
    ═══════════════════════════════════════════════════ */
@@ -81,6 +100,11 @@ export function ScheduleView() {
   const {
     setView,
   } = useAppStore();
+  const currentView = useAppStore((s) => s.currentView);
+  const pendingScheduleDateNavigationRequest = useAppStore((s) => s.pendingScheduleDateNavigationRequest);
+  const consumeScheduleDateNavigationRequest = useAppStore((s) => s.consumeScheduleDateNavigationRequest);
+  const pendingScheduleTodoPanelNavigationRequest = useAppStore((s) => s.pendingScheduleTodoPanelNavigationRequest);
+  const consumeScheduleTodoPanelNavigationRequest = useAppStore((s) => s.consumeScheduleTodoPanelNavigationRequest);
 
   const [events, setEvents] = useState<CalendarEvent[]>([]);
   const [vacationEvents, setVacationEvents] = useState<CalendarEvent[]>([]);
@@ -568,66 +592,60 @@ export function ScheduleView() {
     setFocusedDate(null);
   }, [viewMode]);
 
-  // 외부에서 날짜 이동 요청 수신 (MyTasksWidget 등)
+  // 일정 알림/할일이 store에 남긴 날짜 이동을 적용한다. CustomEvent와 달리 lazy mount
+  // 전에도 요청이 보존되며, 정확히 일치하는 요청 ID만 소비해 새 요청을 지우지 않는다.
   const navigateTimersRef = useRef<ReturnType<typeof setTimeout>[]>([]);
-  useEffect(() => {
-    const handler = (e: Event) => {
-      const detail = (e as CustomEvent).detail;
-      if (detail?.date) {
-        // 이전 타이머 정리
-        navigateTimersRef.current.forEach(clearTimeout);
-        navigateTimersRef.current = [];
+  const applyScheduleDateNavigation = useCallback((detail: Pick<ScheduleDateNavigationRequest, 'date' | 'todoId'>) => {
+    // 이전 타이머 정리
+    navigateTimersRef.current.forEach(clearTimeout);
+    navigateTimersRef.current = [];
 
-        const dateStr = detail.date as string;
-        const d = parseDate(dateStr);
-        setYear(d.getFullYear());
-        setMonth(d.getMonth());
-        setPersistedDateRange({ startDate: dateStr, endDate: dateStr });
-        // 주간/일간 뷰에서도 해당 날짜로 이동
-        const yearWeeks = generateYearWeeks(d.getFullYear());
-        const weekIdx = findWeekIndexForDate(yearWeeks, dateStr);
-        if (weekIdx >= 0) setActiveWeekIndex(weekIdx);
-        // 일간 뷰: 연초 기준 일수 계산
-        const yearStart = new Date(d.getFullYear(), 0, 1);
-        const dayIdx = Math.floor((d.getTime() - yearStart.getTime()) / 86400000);
-        setActiveDayIndex(dayIdx);
-        setPulseDate(dateStr);
-        // 3초 후 하이라이트 및 펄스 해제
-        navigateTimersRef.current.push(
-          setTimeout(() => { setPersistedDateRange(null); setPulseDate(null); }, 3000)
-        );
-        // 해당 날짜의 연동된 이벤트를 사이드패널에 표시
-        if (detail.todoId) {
-          navigateTimersRef.current.push(
-            setTimeout(() => {
-              const linkedCandidates = events.filter((ev) => ev.linkedTodoId === detail.todoId);
-              const fallbackCandidates = linkedCandidates.length === 0
-                ? events.filter((ev) => (
-                    ev.linkedTodoId === undefined
-                    && calendarEventLinkedTodoId(ev) === detail.todoId
-                  ))
-                : [];
-              const candidatesByIdentity = new Map(
-                [...linkedCandidates, ...fallbackCandidates]
-                  .map((event) => [calendarEventIdentityKey(event), event]),
-              );
-              // todo detail에는 source namespace가 없으므로 후보가 둘 이상이면 다른
-              // storage 행을 임의로 채택하지 않고 패널을 그대로 둔다.
-              const linkedEvent = candidatesByIdentity.size === 1
-                ? candidatesByIdentity.values().next().value
-                : undefined;
-              if (linkedEvent) setPanelEvent(linkedEvent);
-            }, 100)
-          );
-        }
-      }
-    };
-    window.addEventListener('bflow:navigate-to-date', handler);
-    return () => {
-      window.removeEventListener('bflow:navigate-to-date', handler);
-      navigateTimersRef.current.forEach(clearTimeout);
-    };
-  }, [events]);
+    const dateStr = detail.date;
+    const d = parseDate(dateStr);
+    setYear(d.getFullYear());
+    setMonth(d.getMonth());
+    setPersistedDateRange({ startDate: dateStr, endDate: dateStr });
+    // 주간/일간 뷰에서도 해당 날짜로 이동
+    const yearWeeks = generateYearWeeks(d.getFullYear());
+    const weekIdx = findWeekIndexForDate(yearWeeks, dateStr);
+    if (weekIdx >= 0) setActiveWeekIndex(weekIdx);
+    // 일간 뷰: 연초 기준 일수 계산
+    const yearStart = new Date(d.getFullYear(), 0, 1);
+    const dayIdx = Math.floor((d.getTime() - yearStart.getTime()) / 86400000);
+    setActiveDayIndex(dayIdx);
+    setPulseDate(dateStr);
+    // 3초 후 하이라이트 및 펄스 해제
+    navigateTimersRef.current.push(
+      setTimeout(() => { setPersistedDateRange(null); setPulseDate(null); }, 3000),
+    );
+  }, []);
+
+  useEffect(() => {
+    if (currentView !== 'schedule' || !pendingScheduleDateNavigationRequest) return;
+    const request = consumeScheduleDateNavigationRequest(pendingScheduleDateNavigationRequest.id);
+    if (request) applyScheduleDateNavigation(request);
+  }, [applyScheduleDateNavigation, consumeScheduleDateNavigationRequest, currentView, pendingScheduleDateNavigationRequest]);
+
+  // 날짜 이동은 즉시 적용하지만, 연결 할일 패널은 이벤트 정본이 늦게 도착할 수 있다.
+  // 따라서 시간 대기 대신 events 갱신마다 같은 ID 요청을 재해석하고, 성공한 정확한 ID만 소비한다.
+  useEffect(() => {
+    if (currentView !== 'schedule' || !pendingScheduleTodoPanelNavigationRequest) return;
+    const todoId = pendingScheduleTodoPanelNavigationRequest.todoId;
+    if (!todoId) return;
+    const linkedEvent = findUniqueLinkedTodoEvent(events, todoId);
+    if (!linkedEvent) return;
+    const request = consumeScheduleTodoPanelNavigationRequest(pendingScheduleTodoPanelNavigationRequest.id);
+    if (request) setPanelEvent(linkedEvent);
+  }, [
+    consumeScheduleTodoPanelNavigationRequest,
+    currentView,
+    events,
+    pendingScheduleTodoPanelNavigationRequest,
+  ]);
+
+  useEffect(() => () => {
+    navigateTimersRef.current.forEach(clearTimeout);
+  }, []);
 
   // 드래그 범위 OR 모달 열림 시 persisted 범위를 통합 체크
   const isDateInHighlightRange = useCallback((date: string): boolean => {

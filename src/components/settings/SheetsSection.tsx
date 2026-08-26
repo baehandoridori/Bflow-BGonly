@@ -14,7 +14,7 @@ import {
   checkVacationConnection,
 } from '@/services/vacationService';
 import * as gcalService from '@/services/googleCalendarService';
-import { getGCalSettings, saveGCalSettings, saveLocalGCalSettings, saveTeamCalendarId, syncAll } from '@/services/calendarService';
+import { getGCalSettings, saveGCalSettings, saveLocalGCalSettings, syncAll } from '@/services/calendarService';
 import type { GCalSettings } from '@/types/calendar';
 import { DEFAULT_GAS_IMAGE_URL, DEFAULT_VACATION_URL } from '@/config';
 import { IntegrationCard, btnStyles } from './IntegrationCard';
@@ -50,8 +50,7 @@ export function SheetsSection() {
   const [gcalAuth, setGcalAuth] = useState(() => localStorage.getItem('bflow_gcal_authed') === 'true');
   const [gcalConnecting, setGcalConnecting] = useState(false);
   const [gcalError, setGcalError] = useState<string | null>(null);
-  const [calendars, setCalendars] = useState<Array<{ id: string; summary: string; primary: boolean }>>([]);
-  const [gcalSettings, setGcalSettingsState] = useState<GCalSettings>({ teamCalendarId: null, personalCalendarId: null, lastSyncAt: null });
+  const [gcalSettings, setGcalSettingsState] = useState<GCalSettings>({ personalCalendarId: null, lastSyncAt: null });
   const [isSyncing, setIsSyncing] = useState(false);
   const [syncMessage, setSyncMessage] = useState<string | null>(null);
   const [gcalHasCreds, setGcalHasCreds] = useState<boolean>(false);
@@ -85,10 +84,6 @@ export function SheetsSection() {
         const authed = await gcalService.isAuthenticated();
         setGcalAuthCheckedAt(new Date().toISOString());
         setGcalAuth(authed); publishGcalAuthState(authed);
-        if (authed) {
-          const cals = await gcalService.listCalendars();
-          setCalendars(cals);
-        }
         setGcalSettingsState(await getGCalSettings());
       } catch { /* GCal not configured yet */ }
     }
@@ -168,10 +163,6 @@ export function SheetsSection() {
       const authed = await gcalService.isAuthenticated();
       setGcalAuthCheckedAt(new Date().toISOString());
       setGcalAuth(authed); publishGcalAuthState(authed);
-      if (authed) {
-        const cals = await gcalService.listCalendars();
-        setCalendars(cals);
-      }
     } catch (err) {
       const msg = String(err);
       if (msg.includes('invalid_request') || msg.includes('invalid_grant') || msg.includes('unauthorized')) {
@@ -201,7 +192,6 @@ export function SheetsSection() {
       await gcalService.signOut();
       setGcalAuth(false); publishGcalAuthState(false);
       setGcalAuthCheckedAt(new Date().toISOString());
-      setCalendars([]);
       saveLocalGCalSettings({ personalCalendarId: null, lastSyncAt: null });
       setGcalSettingsState((prev) => ({ ...prev, personalCalendarId: null, lastSyncAt: null }));
     } catch (err) { setGcalError(String(err)); }
@@ -223,7 +213,6 @@ export function SheetsSection() {
         setGcalAuth(false);
         setGcalAuthCheckedAt(new Date().toISOString());
         publishGcalAuthState(false);
-        setCalendars([]);
         setGcalError(
           '인증 토큰이 유효하지 않습니다. 아래 단계를 확인해 주세요:\n' +
           '1) Google Cloud Console 에서 Calendar API 가 활성화되어 있는지\n' +
@@ -238,21 +227,6 @@ export function SheetsSection() {
       }
     } finally { setIsSyncing(false); }
   };
-
-  // 캘린더 선택 핸들러 (기존 로직 유지 — 현재 UI 에서는 primary 캘린더만 사용하지만 훅 유지)
-  void calendars;
-  void handleCalendarSelect;
-  function handleCalendarSelect(field: 'teamCalendarId' | 'personalCalendarId', calId: string) {
-    const updated: GCalSettings = { ...gcalSettings, [field]: calId || null };
-    if (field === 'teamCalendarId') {
-      saveTeamCalendarId(calId || null).catch(console.error);
-      setGcalSettingsState(updated);
-    } else {
-      saveGCalSettings(updated);
-      setGcalSettingsState(updated);
-    }
-    if (calId) gcalService.ensureWatch(calId, 'bflow').catch(() => {});
-  }
 
   return (
     <div className="space-y-6">

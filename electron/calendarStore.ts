@@ -3,6 +3,8 @@
  * 마이그레이션 전(테이블 부재) 안전: 읽기는 빈 결과 + console.warn, 쓰기는 throw. */
 import { supabase } from './supabase';
 import type { CalendarUpdateInput } from '../src/shared/calendarApiContract';
+import { normalizeCalendarNotificationCatchupInput } from '../src/shared/calendarNotificationCatchup';
+import type { CalendarNotificationCatchupInput } from '../src/shared/calendarNotificationCatchup';
 
 export interface CalendarRow {
   id: string;
@@ -425,17 +427,17 @@ export async function insertNotifications(
 export async function listUnreadNotifications(
   recipientId: string,
   sinceIso: string,
+  input?: CalendarNotificationCatchupInput,
 ): Promise<CalendarNotificationRow[]> {
-  const { data, error } = await supabase
-    .from('calendar_notifications')
-    .select('*')
-    .eq('recipient_id', recipientId)
-    .is('read_at', null)
-    .gte('created_at', sinceIso)
-    .order('created_at', { ascending: false });
+  const { excludedCalendarIds } = normalizeCalendarNotificationCatchupInput(input);
+  const { data, error } = await supabase.rpc('list_calendar_notifications_authorized', {
+    p_actor_id: recipientId,
+    p_since: sinceIso,
+    p_excluded_calendar_ids: excludedCalendarIds,
+  });
   if (error) {
-    if (isMissingTable(error)) {
-      warnMissingTable('calendar_notifications', '빈 목록');
+    if (isMissingFunction(error, 'list_calendar_notifications_authorized')) {
+      console.warn('[calendar] 알림 catch-up RPC 없음 — 마이그레이션 전, 빈 목록 반환');
       return [];
     }
     throwIfError(error);

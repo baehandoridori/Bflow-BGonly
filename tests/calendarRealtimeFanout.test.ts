@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs';
 import test from 'node:test';
 import { build, type Plugin } from 'esbuild';
 import * as calendarWindowFanout from '../electron/calendarWindowFanout.ts';
+import { mapCalendarNotificationRow } from '../src/shared/calendarNotifications.ts';
 
 type RegisteredHandler = {
   type: string;
@@ -162,6 +163,73 @@ test('the live Supabase realtime channel forwards shared-calendar changes as row
       expectedTables.map((table) => ({ table, payload: { eventType: 'UPDATE' } })),
       'renderer invalidations may identify the fixed table and event type, but must never include database rows',
     );
+    cleanup();
+  } finally {
+    delete (globalThis as Record<string, unknown>)[REALTIME_HARNESS_KEY];
+  }
+});
+
+test('the live Supabase realtime channel receives only inserted calendar notification rows', async () => {
+  const registrations: RegisteredHandler[] = [];
+  const channel = {
+    on(type: string, filter: Record<string, unknown>, handler: RegisteredHandler['handler']) {
+      registrations.push({ type, filter, handler });
+      return this;
+    },
+    subscribe(callback?: (status: string) => void) {
+      callback?.('SUBSCRIBED');
+      return this;
+    },
+    presenceState: () => ({}),
+    track: async () => 'ok',
+  };
+  (globalThis as Record<string, unknown>)[REALTIME_HARNESS_KEY] = {
+    supabase: {
+      channel: () => channel,
+      removeChannel: () => {},
+    },
+  };
+
+  try {
+    const module = await bundleModule(
+      "export * from './electron/realtime.ts';",
+      realtimePlugin(),
+    );
+    const setup = module.setupRealtimeSubscription as ((callbacks: Record<string, unknown>) => () => void);
+    const received: Record<string, unknown>[] = [];
+    const noOp = () => {};
+    const cleanup = setup({
+      onSceneChange: noOp,
+      onCommentChange: noOp,
+      onRevisionChange: noOp,
+      onRevisionSetChange: noOp,
+      onEpisodeChange: noOp,
+      onPartChange: noOp,
+      onSceneWorkLinkChange: noOp,
+      onActivityInsert: noOp,
+      onStatusChange: noOp,
+      onCalendarChange: noOp,
+      onCalendarNotificationInsert: (payload: Record<string, unknown>) => received.push(payload),
+    });
+
+    const notificationRegistration = registrations.find(({ type, filter }) => (
+      type === 'postgres_changes' && filter.table === 'calendar_notifications'
+    ));
+    assert.deepEqual(
+      notificationRegistration?.filter,
+      { event: 'INSERT', schema: 'public', table: 'calendar_notifications' },
+      'notification rows must never subscribe to UPDATE or DELETE events',
+    );
+    const inserted = {
+      eventType: 'INSERT',
+      schema: 'public',
+      table: 'calendar_notifications',
+      commit_timestamp: '2026-08-26T00:00:00.000Z',
+      new: { id: 'notification-1', recipient_id: 'user-2' },
+      old: {},
+    };
+    notificationRegistration?.handler(inserted);
+    assert.deepEqual(received, [inserted]);
     cleanup();
   } finally {
     delete (globalThis as Record<string, unknown>)[REALTIME_HARNESS_KEY];
@@ -496,6 +564,76 @@ test('remote shared-calendar relay channels continue from a failed main window t
   }
 });
 
+test('calendar notification realtime fanout sends only the canonical main-session recipient', () => {
+  const fanout = (calendarWindowFanout as Record<string, unknown>)
+    .broadcastCalendarNotificationToSessionWindows as undefined | ((
+      payload: unknown,
+      getSessionUserIdOrThrow: () => string,
+      mainWindow: unknown,
+      widgetWindows: Iterable<unknown>,
+      onError?: (error: unknown) => void,
+    ) => boolean);
+  assert.equal(
+    typeof fanout,
+    'function',
+    'notification fanout must verify the canonical main session before any BrowserWindow send',
+  );
+
+  const mainSends: Array<{ channel: string; payload: unknown }> = [];
+  const widgetSends: Array<{ channel: string; payload: unknown }> = [];
+  const mainWindow = {
+    isDestroyed: () => false,
+    webContents: { send: (channel: string, payload: unknown) => mainSends.push({ channel, payload }) },
+  };
+  const widgetWindows = [{
+    isDestroyed: () => false,
+    webContents: { send: (channel: string, payload: unknown) => widgetSends.push({ channel, payload }) },
+  }];
+  const notification = mapCalendarNotificationRow({
+    id: 'notice-1',
+    recipient_id: 'recipient-1',
+    actor_id: 'actor-1',
+    actor_name: '작업자',
+    calendar_id: 'calendar-1',
+    calendar_name: '팀 일정',
+    event_title: '비공개 세부 제목',
+    event_date: '2026-08-26',
+    action: 'create',
+    detail: null,
+    created_at: '2026-08-26T00:00:00.000Z',
+    private_only_column: 'renderer에 노출되면 안 됨',
+  });
+  assert.ok(notification, 'the main boundary must have a valid minimal notification before fanout');
+  assert.equal('private_only_column' in notification, false);
+  const expectedEvent = {
+    table: 'calendar_notifications',
+    payload: {
+      notification: {
+        id: 'notice-1',
+        recipientId: 'recipient-1',
+        actorId: 'actor-1',
+        actorName: '작업자',
+        calendarId: 'calendar-1',
+        calendarName: '팀 일정',
+        eventTitle: '비공개 세부 제목',
+        eventDate: '2026-08-26',
+        action: 'create',
+        detail: null,
+        createdAt: '2026-08-26T00:00:00.000Z',
+      },
+    },
+  };
+
+  assert.equal(fanout!(notification, () => 'recipient-1', mainWindow, widgetWindows), true);
+  assert.deepEqual(mainSends, [{ channel: 'supabase:realtime-event', payload: expectedEvent }]);
+  assert.deepEqual(widgetSends, [{ channel: 'supabase:realtime-event', payload: expectedEvent }]);
+
+  assert.equal(fanout!(notification, () => 'another-user', mainWindow, widgetWindows), false);
+  assert.equal(fanout!(notification, () => { throw new Error('no main session'); }, mainWindow, widgetWindows), false);
+  assert.deepEqual(mainSends, [{ channel: 'supabase:realtime-event', payload: expectedEvent }]);
+  assert.deepEqual(widgetSends, [{ channel: 'supabase:realtime-event', payload: expectedEvent }]);
+});
+
 test('only ordinary calendar broadcasts enter the generic hardened relay', () => {
   const predicate = (calendarWindowFanout as Record<string, unknown>)
     .isSharedCalendarBroadcastSignal as undefined | ((event: string, payload: unknown) => boolean);
@@ -538,11 +676,55 @@ test('main wires realtime calendar rows to renderers and persistence commits to 
     /setCalendarChangedLocalListener\(\(payload\)\s*=>[\s\S]{0,300}broadcastTrustedSharedCalendarChangeToWindows\([\s\S]{0,200}mainWindow[\s\S]{0,200}widgetWindows\.values\(\)/,
     'main must register the one local trusted-change fanout for every live window',
   );
+  assert.match(
+    main,
+    /onCalendarNotificationInsert:\s*\(payload\)\s*=>\s*broadcastSupabaseCalendarNotification\(payload\)/,
+    'main must route inserted notification rows through the typed calendar notification fanout',
+  );
+  assert.match(
+    main,
+    /function broadcastSupabaseCalendarNotification\([\s\S]{0,300}mapCalendarNotificationRow\([\s\S]{0,300}broadcastCalendarNotificationToSessionWindows\(\s*notification,\s*getSessionUserIdOrThrow,\s*mainWindow,\s*widgetWindows\.values\(\)/,
+    'main must route notification delivery through the canonical-session fanout boundary',
+  );
 
   const calendarIpc = readFileSync('electron/calendarIpc.ts', 'utf8');
   assert.match(calendarIpc, /await store\.createCalendar\([\s\S]{0,500}broadcastCalendarChanged\('INSERT'\)/);
   assert.match(calendarIpc, /await store\.updateCalendar\([\s\S]{0,500}broadcastCalendarChanged\('UPDATE'\)/);
   assert.match(calendarIpc, /await store\.replaceMembers\([\s\S]{0,300}broadcastCalendarChanged\('UPDATE'\)/);
+});
+
+test('App keeps calendar-specialized invalidations off generic reloads and refreshes B flow events without Google auth', () => {
+  const app = readFileSync('src/App.tsx', 'utf8');
+  assert.match(
+    app,
+    /changedTable && \(changedTable\.startsWith\('calendar'\) \|\| changedTable === 'private_calendar_events'\)[\s\S]{0,100}return;/,
+    'calendar rows must not enter the generic full-app reload path',
+  );
+  assert.match(
+    app,
+    /if \(data\.event === 'calendar-changed'\) \{[\s\S]{0,1200}loadBflowEvents\(\{ broadcast: false \}\)[\s\S]{0,1200}isAuthenticated\(\)[\s\S]{0,500}syncIncremental\(\)/,
+    'canonical B flow refresh must run before the Google-auth-only incremental sync',
+  );
+  assert.match(
+    app,
+    /if \(table === 'calendar_notifications'\) \{[\s\S]{0,1800}recipientId !== me\.id[\s\S]{0,500}actorId === me\.id[\s\S]{0,500}mutedCalendarIds[\s\S]{0,1200}dispatchNotification\(/,
+    'calendar notification delivery must reject another recipient, self actions, and muted calendars before dispatch',
+  );
+});
+
+test('notification-only realtime payloads do not trigger popup data reloads or weaken normal row contracts', () => {
+  const popup = readFileSync('src/views/WidgetPopup.tsx', 'utf8');
+  const service = readFileSync('src/services/supabaseService.ts', 'utf8');
+  assert.match(
+    popup,
+    /if \(table === 'calendar_notifications'\) return;[\s\S]{0,2500}\/\/ 그 외 → 디바운스 full reload/,
+    'widget popups receive the notification fanout but must not reload their dashboard data for it',
+  );
+  assert.match(
+    service,
+    /export type SupabaseRealtimePayload =\s*[\s\S]*?eventType: 'INSERT' \| 'UPDATE' \| 'DELETE';[\s\S]*?new: Record<string, unknown>;[\s\S]*?old: Record<string, unknown>;[\s\S]*?notification\?: never;[\s\S]*?notification: CalendarNotificationPushRow;/,
+    'ordinary row event fields must remain required while calendar notifications use their own union branch',
+  );
 });
 
 test('Realtime reconnect metadata stays row-free across main and preload status transport', () => {

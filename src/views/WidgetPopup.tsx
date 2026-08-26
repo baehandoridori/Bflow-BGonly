@@ -583,6 +583,9 @@ export function WidgetPopup({ widgetId, extraParams }: { widgetId: string; extra
         return;
       }
 
+      // 알림은 App 창에서만 표시한다. popup까지 fanout되지만 현황 데이터 재조회 대상은 아니다.
+      if (table === 'calendar_notifications') return;
+
       if (table === 'users') {
         void reconcilePopupUserDirectory()
           .then((result) => { if (result !== 'deleted') reloadData(); })

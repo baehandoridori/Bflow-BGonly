@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { readFileSync, unlinkSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { join } from 'node:path';
 import test from 'node:test';
@@ -18,12 +18,16 @@ type Handler = (_event: unknown, ...args: unknown[]) => Promise<unknown>;
 type IpcHarnessState = {
   handlers: Map<string, Handler>;
   store: Record<string, (...args: unknown[]) => unknown>;
+  readUsers: () => Promise<Array<{ id: string; name: string }>>;
   broadcasts: Array<{ kind: 'data' | 'calendar'; args: unknown[] }>;
   committedDeleteMarkers: unknown[];
   broadcastFailure: { data: boolean; calendar: boolean };
 };
 
 type CalendarIpcExternalDeps = {
+  getSessionOrigin?: () => { userId: string; epoch: number; role: 'admin' | 'user' };
+  privacyReplacementReceiptTtlMs?: number;
+  readUsers?: () => Promise<Array<{ id: string; name: string }>>;
   createLegacyPrivateEvent?: (input: Record<string, unknown>, actorId: string) => Promise<{ id: string }>;
   deleteLegacyPrivateEvent?: (eventId: string, actorId: string) => Promise<void>;
   deleteLegacyPrivateSourceEvent?: (
@@ -37,11 +41,24 @@ type CalendarIpcExternalDeps = {
   onCommittedReplacementDelete?: (payload: unknown) => void;
 };
 
+type CalendarNotificationRuntime = {
+  beginQuitting(): void;
+  beginPrivacyReplacementTransition(origin: { userId: string; epoch: number }): void;
+  drainPrivacyReplacementTransition(origin: { userId: string; epoch: number }): Promise<void>;
+  completePrivacyReplacementTransition(origin: { userId: string; epoch: number }): void;
+  abortPrivacyReplacementTransition(origin: { userId: string; epoch: number }): void;
+  getPendingNotificationCount(): number;
+  waitForNotificationIdle(timeoutMs: number): Promise<boolean>;
+};
+
 const IPC_HARNESS_KEY = '__calendarIpcBehaviorHarness';
 const STORE_HARNESS_KEY = '__calendarStoreStrictReadHarness';
 const SUPABASE_PRIVATE_HARNESS_KEY = '__calendarSupabasePrivateHarness';
 let ipcBundle: Promise<string> | undefined;
 let ipcNonce = 0;
+const PRELOAD_HARNESS_KEY = '__calendarPreloadHarness';
+let preloadBundle: Promise<string> | undefined;
+let preloadNonce = 0;
 let storeBundle: Promise<string> | undefined;
 let storeNonce = 0;
 let supabasePrivateBundle: Promise<string> | undefined;
@@ -67,6 +84,7 @@ const storeFunctionNames = [
   'saveTags',
   'listUnreadNotifications',
   'markNotificationsRead',
+  'insertNotifications',
 ] as const;
 
 function calendarIpcTestPlugin(): Plugin {
@@ -76,6 +94,7 @@ function calendarIpcTestPlugin(): Plugin {
       builder.onResolve({ filter: /^electron$/ }, () => ({ path: 'electron', namespace: 'calendar-ipc-test' }));
       builder.onResolve({ filter: /^\.\/calendarStore$/ }, () => ({ path: 'store', namespace: 'calendar-ipc-test' }));
       builder.onResolve({ filter: /^\.\/broadcast$/ }, () => ({ path: 'broadcast', namespace: 'calendar-ipc-test' }));
+      builder.onResolve({ filter: /^\.\/supabase$/ }, () => ({ path: 'supabase', namespace: 'calendar-ipc-test' }));
       builder.onLoad({ filter: /^electron$/, namespace: 'calendar-ipc-test' }, () => ({
         contents: `export const ipcMain = { handle(channel, handler) { globalThis.${IPC_HARNESS_KEY}.handlers.set(channel, handler); } };`,
       }));
@@ -83,6 +102,9 @@ function calendarIpcTestPlugin(): Plugin {
         contents: storeFunctionNames.map((name) => (
           `export const ${name} = (...args) => globalThis.${IPC_HARNESS_KEY}.store.${name}(...args);`
         )).join('\n'),
+      }));
+      builder.onLoad({ filter: /^supabase$/, namespace: 'calendar-ipc-test' }, () => ({
+        contents: `export const readUsers = () => globalThis.${IPC_HARNESS_KEY}.readUsers();`,
       }));
       builder.onLoad({ filter: /^broadcast$/, namespace: 'calendar-ipc-test' }, () => ({
         contents: [
@@ -233,6 +255,7 @@ async function createIpcHarness(
   userId: string | (() => string) = 'user-1',
   externalDeps: CalendarIpcExternalDeps = {},
 ): Promise<IpcHarnessState & {
+  notificationRuntime: CalendarNotificationRuntime | undefined;
   invoke(channel: string, ...args: unknown[]): Promise<unknown>;
   invokeAs(senderId: number, channel: string, ...args: unknown[]): Promise<unknown>;
   restore(): void;
@@ -243,6 +266,7 @@ async function createIpcHarness(
   const state: IpcHarnessState = {
     handlers: new Map(),
     store: { ...defaultStore(), ...overrides },
+    readUsers: externalDeps.readUsers ?? (async () => []),
     broadcasts: [],
     committedDeleteMarkers: [],
     broadcastFailure: { data: false, calendar: false },
@@ -251,10 +275,20 @@ async function createIpcHarness(
   try {
     const encoded = Buffer.from(await bundledCalendarIpcSource()).toString('base64');
     const module = await import(`data:text/javascript;base64,${encoded}#calendar-ipc-${ipcNonce++}`) as {
-      registerCalendarIpc(deps: { getSessionUserIdOrThrow(): string }): void;
+      registerCalendarIpc(deps: {
+        getSessionUserIdOrThrow(): string;
+        getSessionOriginOrThrow(): { userId: string; epoch: number; role: 'admin' | 'user' };
+        privacyReplacementReceiptTtlMs?: number;
+      }): CalendarNotificationRuntime | undefined;
     };
-    module.registerCalendarIpc({
+    const notificationRuntime = module.registerCalendarIpc({
       getSessionUserIdOrThrow: () => typeof userId === 'function' ? userId() : userId,
+      getSessionOriginOrThrow: () => externalDeps.getSessionOrigin?.() ?? {
+        userId: typeof userId === 'function' ? userId() : userId,
+        epoch: 0,
+        role: 'user',
+      },
+      privacyReplacementReceiptTtlMs: externalDeps.privacyReplacementReceiptTtlMs,
       createLegacyPrivateEvent: externalDeps.createLegacyPrivateEvent ?? (async () => {
         throw new Error('unexpected legacy private replacement create');
       }),
@@ -281,13 +315,47 @@ async function createIpcHarness(
         externalDeps.onCommittedReplacementDelete?.(payload);
       },
     });
+    // 기존 receipt 테스트는 main raw IPC를 직접 호출한다. 제품 preload는 raw secret을
+    // 공개하지 않지만, 이전 테스트의 3-argument invocation은 새 capability 형식으로
+    // 정규화해 exact target/상태기 회귀를 계속 검증한다. 4-argument 호출은 그대로 두어
+    // no-secret/wrong-secret 거부를 별도로 검증한다.
+    const legacyReceiptSecrets = new Map<string, string>();
     const invokeAs = async (senderId: number, channel: string, ...args: unknown[]) => {
       const handler = state.handlers.get(channel);
       assert.ok(handler, `missing IPC handler: ${channel}`);
-      return handler({ sender: { id: senderId } }, ...args);
+      let normalizedArgs = args;
+      if (channel === 'calendar:privacy-migration:create-replacement') {
+        const input = args[0];
+        if (input && typeof input === 'object' && !('source' in input)) {
+          normalizedArgs = [{
+            ...(input as Record<string, unknown>),
+            source: { storage: 'bflow', event_id: 'legacy-test-source' },
+          }];
+        }
+      } else if (
+        channel === 'calendar:privacy-migration:settle-replacement'
+        && args.length === 2
+        && typeof args[0] === 'string'
+        && (args[1] === 'keep' || args[1] === 'delete')
+      ) {
+        normalizedArgs = [args[0], legacyReceiptSecrets.get(args[0]), args[1]];
+      }
+      const result = await handler({ sender: { id: senderId } }, ...normalizedArgs);
+      if (
+        channel === 'calendar:privacy-migration:create-replacement'
+        && result
+        && typeof result === 'object'
+        && typeof (result as { receipt?: unknown }).receipt === 'string'
+        && typeof (result as { continuation_secret?: unknown }).continuation_secret === 'string'
+      ) {
+        const raw = result as { receipt: string; continuation_secret: string };
+        legacyReceiptSecrets.set(raw.receipt, raw.continuation_secret);
+      }
+      return result;
     };
     return {
       ...state,
+      notificationRuntime,
       async invoke(channel, ...args) {
         return invokeAs(101, channel, ...args);
       },
@@ -352,6 +420,500 @@ function deferred<T>() {
   });
   return { promise, resolve, reject };
 }
+
+function calendarPreloadTestPlugin(): Plugin {
+  return {
+    name: 'calendar-preload-test-electron',
+    setup(builder) {
+      builder.onResolve({ filter: /^electron$/ }, () => ({
+        path: 'electron',
+        namespace: 'calendar-preload-test',
+      }));
+      builder.onLoad({ filter: /^electron$/, namespace: 'calendar-preload-test' }, () => ({
+        contents: [
+          `export const contextBridge = { exposeInMainWorld: (name, api) => globalThis.${PRELOAD_HARNESS_KEY}.exposed.set(name, api) };`,
+          `export const ipcRenderer = { invoke: (...args) => globalThis.${PRELOAD_HARNESS_KEY}.invoke(...args), on: () => {}, removeListener: () => {} };`,
+          'export const webUtils = { getPathForFile: () => \"\" };',
+        ].join('\n'),
+      }));
+    },
+  };
+}
+
+async function loadCalendarPreloadApi(
+  invoke: (channel: string, ...args: unknown[]) => Promise<unknown>,
+): Promise<{
+  api: Record<string, unknown>;
+  restore(): void;
+}> {
+  const globalScope = globalThis as Record<string, unknown>;
+  const hadPrior = Object.prototype.hasOwnProperty.call(globalScope, PRELOAD_HARNESS_KEY);
+  const prior = globalScope[PRELOAD_HARNESS_KEY];
+  const exposed = new Map<string, Record<string, unknown>>();
+  globalScope[PRELOAD_HARNESS_KEY] = { exposed, invoke };
+  try {
+    preloadBundle ??= build({
+      entryPoints: ['electron/preload.ts'],
+      bundle: true,
+      format: 'esm',
+      platform: 'node',
+      target: 'node22',
+      plugins: [calendarPreloadTestPlugin()],
+      write: false,
+    }).then((result) => result.outputFiles[0].text);
+    const encoded = Buffer.from(await preloadBundle).toString('base64');
+    await import(`data:text/javascript;base64,${encoded}#calendar-preload-${preloadNonce++}`);
+    const api = exposed.get('electronAPI');
+    assert.ok(api, 'preload exposes ElectronAPI through the context bridge');
+    return {
+      api,
+      restore() {
+        if (hadPrior) globalScope[PRELOAD_HARNESS_KEY] = prior;
+        else delete globalScope[PRELOAD_HARNESS_KEY];
+      },
+    };
+  } catch (error) {
+    if (hadPrior) globalScope[PRELOAD_HARNESS_KEY] = prior;
+    else delete globalScope[PRELOAD_HARNESS_KEY];
+    throw error;
+  }
+}
+
+test('calendar event notifications persist recipient-specific create, update, and delete rows', async (t) => {
+  const users = [
+    { id: 'actor', name: '한솔' },
+    { id: 'owner', name: '리더' },
+    { id: 'member', name: '멤버' },
+  ];
+  const calendar = calendarRow({
+    name: 'EP 마일스톤',
+    visibility: 'members',
+    owner_id: 'owner',
+  });
+  const members = [
+    { calendar_id: 'calendar-1', user_id: 'actor', can_edit: true },
+    { calendar_id: 'calendar-1', user_id: 'member', can_edit: true },
+  ];
+  const eventInput = {
+    calendar_id: 'calendar-1', title: 'EP12 업로드', memo: null, tag_id: null,
+    all_day: true, start_date: '2026-09-25', end_date: '2026-09-25',
+    start_time: null, end_time: null, linked_episode: null, linked_part: null,
+    linked_sheet_name: null, linked_scene_id: null, linked_department: null, linked_todo_id: null,
+  };
+
+  await t.test('create', async () => {
+    let rows: unknown;
+    const inserted = deferred<void>();
+    const created = calendarEventRow({ ...eventInput, created_by: 'actor' });
+    const harness = await createIpcHarness({
+      getUserRole: async () => 'user',
+      getCalendarWithMembers: async () => ({ calendar, members }),
+      createEvent: async () => created,
+      insertNotifications: async (nextRows) => { rows = nextRows; inserted.resolve(); },
+    }, 'actor', { readUsers: async () => users });
+    try {
+      assert.deepEqual(await harness.invoke('calendar:events:create', eventInput), created);
+      await inserted.promise;
+      assert.deepEqual(rows, [
+        { recipient_id: 'owner', actor_id: 'actor', actor_name: '한솔', calendar_id: 'calendar-1', calendar_name: 'EP 마일스톤', event_id: 'event-1', event_title: 'EP12 업로드', event_date: '2026-09-25', action: 'create', detail: null },
+        { recipient_id: 'member', actor_id: 'actor', actor_name: '한솔', calendar_id: 'calendar-1', calendar_name: 'EP 마일스톤', event_id: 'event-1', event_title: 'EP12 업로드', event_date: '2026-09-25', action: 'create', detail: null },
+      ]);
+    } finally {
+      harness.restore();
+    }
+  });
+
+  await t.test('update', async () => {
+    let rows: unknown;
+    let insertCallCount = 0;
+    const inserted = deferred<void>();
+    const previous = calendarEventRow({ ...eventInput, created_by: 'actor' });
+    const updated = calendarEventRow({ ...eventInput, title: 'EP12 일정 변경', start_date: '2026-09-26', end_date: '2026-09-26', created_by: 'actor' });
+    const harness = await createIpcHarness({
+      getUserRole: async () => 'user',
+      getEventByIdForWrite: async () => previous,
+      getCalendarWithMembers: async () => ({ calendar, members }),
+      updateEvent: async () => updated,
+      insertNotifications: async (nextRows) => {
+        insertCallCount += 1;
+        rows = nextRows;
+        inserted.resolve();
+      },
+    }, 'actor', { readUsers: async () => users });
+    try {
+      assert.deepEqual(await harness.invoke('calendar:events:update', 'event-1', {
+        title: 'EP12 일정 변경', start_date: '2026-09-26', end_date: '2026-09-26',
+      }), updated);
+      await inserted.promise;
+      assert.ok(harness.notificationRuntime);
+      assert.equal(
+        await harness.notificationRuntime.waitForNotificationIdle(1_000),
+        true,
+        'the ordinary update notification settles before its count is checked',
+      );
+      assert.deepEqual(rows, [
+        { recipient_id: 'owner', actor_id: 'actor', actor_name: '한솔', calendar_id: 'calendar-1', calendar_name: 'EP 마일스톤', event_id: 'event-1', event_title: 'EP12 일정 변경', event_date: '2026-09-26', action: 'update', detail: '9/25 → 9/26' },
+        { recipient_id: 'member', actor_id: 'actor', actor_name: '한솔', calendar_id: 'calendar-1', calendar_name: 'EP 마일스톤', event_id: 'event-1', event_title: 'EP12 일정 변경', event_date: '2026-09-26', action: 'update', detail: '9/25 → 9/26' },
+      ]);
+      assert.equal(insertCallCount, 1, 'a non-move update remains one update notification');
+    } finally {
+      harness.restore();
+    }
+  });
+
+  await t.test('delete', async () => {
+    let rows: unknown;
+    const inserted = deferred<void>();
+    const previous = calendarEventRow({ ...eventInput, created_by: 'actor' });
+    const harness = await createIpcHarness({
+      getUserRole: async () => 'user',
+      getEventByIdForWrite: async () => previous,
+      getCalendarWithMembers: async () => ({ calendar, members }),
+      deleteEvent: async () => {},
+      insertNotifications: async (nextRows) => { rows = nextRows; inserted.resolve(); },
+    }, 'actor', { readUsers: async () => users });
+    try {
+      assert.equal(await harness.invoke('calendar:events:delete', 'event-1'), undefined);
+      await inserted.promise;
+      assert.deepEqual(rows, [
+        { recipient_id: 'owner', actor_id: 'actor', actor_name: '한솔', calendar_id: 'calendar-1', calendar_name: 'EP 마일스톤', event_id: 'event-1', event_title: 'EP12 업로드', event_date: '2026-09-25', action: 'delete', detail: null },
+        { recipient_id: 'member', actor_id: 'actor', actor_name: '한솔', calendar_id: 'calendar-1', calendar_name: 'EP 마일스톤', event_id: 'event-1', event_title: 'EP12 업로드', event_date: '2026-09-25', action: 'delete', detail: null },
+      ]);
+    } finally {
+      harness.restore();
+    }
+  });
+});
+
+test('calendar CRUD and strict migration do not wait for best-effort notification reads', async (t) => {
+  const eventInput = {
+    calendar_id: 'calendar-1', title: '비차단 알림', memo: null, tag_id: null,
+    all_day: true, start_date: '2026-09-25', end_date: '2026-09-25',
+    start_time: null, end_time: null, linked_episode: null, linked_part: null,
+    linked_sheet_name: null, linked_scene_id: null, linked_department: null, linked_todo_id: null,
+  };
+  const scenarios = [
+    {
+      name: 'create',
+      channel: 'calendar:events:create',
+      args: [eventInput],
+      store: { createEvent: async () => calendarEventRow(eventInput) },
+    },
+    {
+      name: 'update',
+      channel: 'calendar:events:update',
+      args: ['event-1', { title: '수정됨' }],
+      store: {
+        getEventByIdForWrite: async () => calendarEventRow(eventInput),
+        updateEvent: async () => calendarEventRow({ ...eventInput, title: '수정됨' }),
+      },
+    },
+    {
+      name: 'delete',
+      channel: 'calendar:events:delete',
+      args: ['event-1'],
+      store: { getEventByIdForWrite: async () => calendarEventRow(eventInput), deleteEvent: async () => {} },
+    },
+    {
+      name: 'strict migration delete',
+      channel: 'calendar:privacy-migration:delete-source',
+      args: [{ storage: 'bflow', event_id: 'event-1' }],
+      store: { getEventByIdForWrite: async () => calendarEventRow(eventInput), deleteEvent: async () => {} },
+    },
+  ] as const;
+
+  for (const scenario of scenarios) {
+    await t.test(scenario.name, async () => {
+      const readStarted = deferred<void>();
+      const releaseRead = deferred<Array<{ id: string; name: string }>>();
+      const harness = await createIpcHarness({
+        getUserRole: async () => 'user',
+        getCalendarWithMembers: async () => ({ calendar: calendarRow(), members: [] }),
+        insertNotifications: async () => {},
+        ...scenario.store,
+      }, 'user-1', {
+        readUsers: async () => {
+          readStarted.resolve();
+          return releaseRead.promise;
+        },
+      });
+      try {
+        const invocation = harness.invoke(scenario.channel, ...scenario.args);
+        await readStarted.promise;
+        let returned = false;
+        void invocation.then(() => { returned = true; }, () => {});
+        await new Promise<void>((resolve) => setImmediate(resolve));
+        assert.equal(returned, true);
+        releaseRead.resolve([]);
+        await invocation;
+      } finally {
+        releaseRead.resolve([]);
+        await new Promise<void>((resolve) => setImmediate(resolve));
+        harness.restore();
+      }
+    });
+  }
+});
+
+test('calendar notification drain tracks nonblocking work until a failed best-effort write settles', async () => {
+  const readStarted = deferred<void>();
+  const releaseRead = deferred<Array<{ id: string; name: string }>>();
+  const writeStarted = deferred<void>();
+  const releaseWrite = deferred<void>();
+  const eventInput = {
+    calendar_id: 'calendar-1', title: '종료 전 알림', memo: null, tag_id: null,
+    all_day: true, start_date: '2026-09-25', end_date: '2026-09-25',
+    start_time: null, end_time: null, linked_episode: null, linked_part: null,
+    linked_sheet_name: null, linked_scene_id: null, linked_department: null, linked_todo_id: null,
+  };
+  const harness = await createIpcHarness({
+    getUserRole: async () => 'user',
+    getCalendarWithMembers: async () => ({
+      calendar: calendarRow({ visibility: 'team' }),
+      members: [{ calendar_id: 'calendar-1', user_id: 'actor', can_edit: true }],
+    }),
+    createEvent: async () => calendarEventRow(eventInput),
+    insertNotifications: async () => {
+      writeStarted.resolve();
+      await releaseWrite.promise;
+      throw new Error('best-effort notification insert unavailable');
+    },
+  }, 'actor', {
+    readUsers: async () => {
+      readStarted.resolve();
+      return releaseRead.promise;
+    },
+  });
+  const originalWarn = console.warn;
+  try {
+    console.warn = () => {};
+    const invocation = harness.invoke('calendar:events:create', eventInput);
+    await readStarted.promise;
+    let returned = false;
+    void invocation.then(() => { returned = true; }, () => {});
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    assert.equal(returned, true, 'calendar create remains immediate while its notification is pending');
+
+    assert.ok(harness.notificationRuntime, 'calendar IPC exposes a shutdown drain for tracked notifications');
+    assert.equal(harness.notificationRuntime.getPendingNotificationCount(), 1);
+    assert.equal(
+      await harness.notificationRuntime.waitForNotificationIdle(0),
+      false,
+      'a bounded drain reports timeout while the notification task is still blocked',
+    );
+
+    const draining = harness.notificationRuntime.waitForNotificationIdle(1_000);
+    releaseRead.resolve([{ id: 'recipient', name: '수신자' }]);
+    await writeStarted.promise;
+    let drained = false;
+    void draining.then(() => { drained = true; }, () => {});
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    assert.equal(drained, false, 'the drain waits for the actual write, not just the directory lookup');
+
+    releaseWrite.resolve();
+    await invocation;
+    assert.equal(await draining, true, 'a caught best-effort failure cannot leave shutdown waiting forever');
+    assert.equal(harness.notificationRuntime.getPendingNotificationCount(), 0);
+  } finally {
+    console.warn = originalWarn;
+    releaseRead.resolve([]);
+    releaseWrite.resolve();
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    harness.restore();
+  }
+});
+
+test('calendar shutdown fence keeps an already-started create and its notification in the drain', async () => {
+  const createStarted = deferred<void>();
+  const releaseCreate = deferred<ReturnType<typeof calendarEventRow>>();
+  const notificationReadStarted = deferred<void>();
+  const releaseNotificationRead = deferred<Array<{ id: string; name: string }>>();
+  let createCalls = 0;
+  const eventInput = {
+    calendar_id: 'calendar-1', title: '종료 경계 일정', memo: null, tag_id: null,
+    all_day: true, start_date: '2026-09-25', end_date: '2026-09-25',
+    start_time: null, end_time: null, linked_episode: null, linked_part: null,
+    linked_sheet_name: null, linked_scene_id: null, linked_department: null, linked_todo_id: null,
+  };
+  const harness = await createIpcHarness({
+    getUserRole: async () => 'user',
+    getCalendarWithMembers: async () => ({
+      calendar: calendarRow({ visibility: 'team', owner_id: 'actor' }),
+      members: [],
+    }),
+    createEvent: async () => {
+      createCalls += 1;
+      createStarted.resolve();
+      return releaseCreate.promise;
+    },
+    insertNotifications: async () => {},
+  }, 'actor', {
+    readUsers: async () => {
+      notificationReadStarted.resolve();
+      return releaseNotificationRead.promise;
+    },
+  });
+  try {
+    const invocation = harness.invoke('calendar:events:create', eventInput);
+    await createStarted.promise;
+    assert.ok(harness.notificationRuntime);
+    assert.equal(
+      harness.notificationRuntime.getPendingNotificationCount(),
+      1,
+      'the producer fence is registered before the persistence await can race shutdown',
+    );
+
+    harness.notificationRuntime.beginQuitting();
+    const draining = harness.notificationRuntime.waitForNotificationIdle(1_000);
+    assert.equal(await harness.notificationRuntime.waitForNotificationIdle(0), false);
+
+    releaseCreate.resolve(calendarEventRow(eventInput));
+    await notificationReadStarted.promise;
+    assert.deepEqual(
+      await invocation,
+      calendarEventRow(eventInput),
+      'normal CRUD replies without waiting for the best-effort notification read',
+    );
+    let drained = false;
+    void draining.then(() => { drained = true; }, () => {});
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    assert.equal(drained, false, 'the notification remains in the drain after its producer releases');
+
+    releaseNotificationRead.resolve([]);
+    assert.equal(await draining, true);
+    assert.equal(harness.notificationRuntime.getPendingNotificationCount(), 0);
+
+    await assert.rejects(
+      harness.invoke('calendar:events:create', eventInput),
+      /종료|quitting/i,
+      'new notification-producing writes are rejected after the intake closes',
+    );
+    assert.equal(createCalls, 1, 'a post-shutdown create never reaches persistence');
+  } finally {
+    releaseCreate.resolve(calendarEventRow(eventInput));
+    releaseNotificationRead.resolve([]);
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    harness.restore();
+  }
+});
+
+test('calendar shutdown fence releases a failed persistence producer', async () => {
+  const createStarted = deferred<void>();
+  const releaseFailure = deferred<void>();
+  const eventInput = {
+    calendar_id: 'calendar-1', title: '실패 종료 경계', memo: null, tag_id: null,
+    all_day: true, start_date: '2026-09-25', end_date: '2026-09-25',
+    start_time: null, end_time: null, linked_episode: null, linked_part: null,
+    linked_sheet_name: null, linked_scene_id: null, linked_department: null, linked_todo_id: null,
+  };
+  const harness = await createIpcHarness({
+    getUserRole: async () => 'user',
+    getCalendarWithMembers: async () => ({ calendar: calendarRow(), members: [] }),
+    createEvent: async () => {
+      createStarted.resolve();
+      await releaseFailure.promise;
+      throw new Error('calendar persistence unavailable');
+    },
+  });
+  const originalError = console.error;
+  try {
+    console.error = () => {};
+    const invocation = harness.invoke('calendar:events:create', eventInput);
+    void invocation.catch(() => {});
+    await createStarted.promise;
+    assert.ok(harness.notificationRuntime);
+    assert.equal(harness.notificationRuntime.getPendingNotificationCount(), 1);
+    harness.notificationRuntime.beginQuitting();
+    releaseFailure.resolve();
+    await assert.rejects(invocation, /calendar persistence unavailable/);
+    assert.equal(
+      await harness.notificationRuntime.waitForNotificationIdle(1_000),
+      true,
+      'a rejected persistence promise always releases its shutdown fence',
+    );
+    assert.equal(harness.notificationRuntime.getPendingNotificationCount(), 0);
+  } finally {
+    console.error = originalError;
+    releaseFailure.resolve();
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    harness.restore();
+  }
+});
+
+test('main shutdown includes the calendar notification drain alongside existing persistence queues', () => {
+  const main = readFileSync('electron/main.ts', 'utf8');
+  const beforeQuit = main.slice(main.indexOf("app.on('before-quit'"), main.indexOf("process.on('exit'"));
+  assert.match(
+    main,
+    /calendarNotificationDrain\s*=\s*registerCalendarIpc\(/,
+    'main keeps the calendar IPC drain returned at registration time',
+  );
+  assert.match(
+    beforeQuit,
+    /calendarNotificationDrain\.getPendingNotificationCount\(\)/,
+    'calendar notification work contributes to the shutdown pending count',
+  );
+  const closingIndex = beforeQuit.indexOf('calendarNotificationDrain.beginQuitting()');
+  const pendingSnapshotIndex = beforeQuit.indexOf('calendarNotificationDrain.getPendingNotificationCount()');
+  assert.ok(
+    closingIndex >= 0 && closingIndex < pendingSnapshotIndex,
+    'main closes calendar notification intake before snapshotting pending work',
+  );
+  assert.match(
+    beforeQuit,
+    /calendarNotificationDrain\.waitForNotificationIdle\(15000\)/,
+    'shutdown waits for a bounded calendar notification drain before exit',
+  );
+});
+
+test('failed calendar notification reads and inserts leave CRUD successful', async (t) => {
+  const eventInput = {
+    calendar_id: 'calendar-1', title: '실패 격리', memo: null, tag_id: null,
+    all_day: true, start_date: '2026-09-25', end_date: '2026-09-25',
+    start_time: null, end_time: null, linked_episode: null, linked_part: null,
+    linked_sheet_name: null, linked_scene_id: null, linked_department: null, linked_todo_id: null,
+  };
+  const originalWarn = console.warn;
+  console.warn = () => {};
+  try {
+    await t.test('read failure', async () => {
+      const attempted = deferred<void>();
+      const created = calendarEventRow(eventInput);
+      const harness = await createIpcHarness({
+        getUserRole: async () => 'user',
+        getCalendarWithMembers: async () => ({ calendar: calendarRow({ visibility: 'team' }), members: [] }),
+        createEvent: async () => created,
+      }, 'user-1', {
+        readUsers: async () => { attempted.resolve(); throw new Error('directory unavailable'); },
+      });
+      try {
+        assert.deepEqual(await harness.invoke('calendar:events:create', eventInput), created);
+        await attempted.promise;
+      } finally {
+        harness.restore();
+      }
+    });
+
+    await t.test('insert failure', async () => {
+      const attempted = deferred<void>();
+      const created = calendarEventRow(eventInput);
+      const harness = await createIpcHarness({
+        getUserRole: async () => 'user',
+        getCalendarWithMembers: async () => ({ calendar: calendarRow({ visibility: 'team' }), members: [] }),
+        createEvent: async () => created,
+        insertNotifications: async () => { attempted.resolve(); throw new Error('insert unavailable'); },
+      }, 'user-1', { readUsers: async () => [{ id: 'other', name: '다른 사용자' }] });
+      try {
+        assert.deepEqual(await harness.invoke('calendar:events:create', eventInput), created);
+        await attempted.promise;
+      } finally {
+        harness.restore();
+      }
+    });
+  } finally {
+    console.warn = originalWarn;
+  }
+});
 
 test('deleted session users cannot reach any actor-bound calendar IPC operation', async (t) => {
   const eventInput = {
@@ -948,9 +1510,20 @@ replacementInput.actor_id = 'spoofed-user';
 // @ts-expect-error Main, not the renderer, binds the receipt to the returned event id.
 replacementInput.event.id = 'other-event';
 
-type ReplacementDisposition = Parameters<ElectronAPI['calendarPrivacyReplacementSettle']>[1];
-// @ts-expect-error A receipt can only be kept or used for exact compensation deletion.
-const invalidDisposition: ReplacementDisposition = 'replace';
+type ReplacementResult = Awaited<ReturnType<ElectronAPI['calendarPrivacyReplacementCreate']>>;
+declare const replacementResult: ReplacementResult;
+if (!('transition_resolved' in replacementResult)) {
+  replacementResult.settle('keep');
+  // @ts-expect-error The main-process receipt never crosses the context bridge.
+  replacementResult.receipt;
+  // @ts-expect-error The private continuation secret never crosses the context bridge.
+  replacementResult.continuation_secret;
+}
+declare const api: ElectronAPI;
+// @ts-expect-error Renderer code cannot invoke a generic raw-receipt settlement route.
+api.calendarPrivacyReplacementSettle('raw-receipt', 'delete');
+// @ts-expect-error Renderer code cannot choose a raw source-delete target.
+api.calendarPrivacyMigrationSourceDelete({ storage: 'bflow', event_id: 'raw-source' });
 `);
   try {
     const result = spawnSync(process.execPath, [
@@ -975,7 +1548,7 @@ test('preload calendar bridge parameters stay linked to the public ElectronAPI c
   const publicTypes = readFileSync('src/types/index.ts', 'utf8');
   assert.match(
     source,
-    /import type \{ CalendarApiInputContract \} from '\.\.\/src\/shared\/calendarApiContract';/,
+    /CalendarApiInputContract,[\s\S]*from '\.\.\/src\/shared\/calendarApiContract';/,
   );
   assert.match(
     publicTypes,
@@ -987,9 +1560,7 @@ test('preload calendar bridge parameters stay linked to the public ElectronAPI c
     calendarSetMembers: [0, 1],
     calendarEventsList: [0],
     calendarEventCreate: [0],
-    calendarPrivacyMigrationSourceDelete: [0],
     calendarPrivacyReplacementCreate: [0],
-    calendarPrivacyReplacementSettle: [0, 1],
     calendarEventUpdate: [0, 1],
     calendarTagsSave: [0],
   };
@@ -1518,7 +2089,226 @@ test('calendar event create passes the session actor and strips renderer-control
   }
 });
 
-test('privacy replacement receipt deletes its exact B flow create after ordinary permission is revoked', async () => {
+test('preload exposes only an opaque privacy replacement continuation', async () => {
+  const settleCalls: unknown[][] = [];
+  const raw = {
+    storage: 'bflow',
+    actual_id: 'replacement-1',
+    calendar_id: 'calendar-1',
+    receipt: 'main-only-receipt',
+    continuation_secret: 'main-only-continuation-secret',
+  };
+  const harness = await loadCalendarPreloadApi(async (channel, ...args) => {
+    if (channel === 'calendar:privacy-migration:create-replacement') return raw;
+    if (channel === 'calendar:privacy-migration:settle-replacement') {
+      settleCalls.push(args);
+      return undefined;
+    }
+    throw new Error(`unexpected preload channel: ${channel}`);
+  });
+  try {
+    const create = harness.api.calendarPrivacyReplacementCreate as ((input: unknown) => Promise<Record<string, unknown>>);
+    const created = await create({ storage: 'bflow', event: {} });
+    assert.deepEqual(
+      Object.keys(created).sort(),
+      ['actual_id', 'calendar_id', 'deleteSource', 'settle', 'storage'],
+      'the public result contains only event identity plus a narrow continuation function',
+    );
+    assert.equal('receipt' in created, false);
+    assert.equal('continuation_secret' in created, false);
+    assert.equal('calendarPrivacyReplacementSettle' in harness.api, false);
+    assert.equal('calendarPrivacyMigrationSourceDelete' in harness.api, false);
+    assert.equal(typeof created.settle, 'function');
+    assert.equal(typeof created.deleteSource, 'function');
+
+    await (created.settle as (disposition: 'keep' | 'delete') => Promise<void>)('delete');
+    assert.deepEqual(settleCalls, [[
+      raw.receipt,
+      raw.continuation_secret,
+      'delete',
+    ]], 'only the preload closure supplies the private capability to main');
+  } finally {
+    harness.restore();
+  }
+});
+
+test('a B flow privacy replacement emits its create notification only after its receipt is kept', async () => {
+  const notificationRows: Array<Array<Record<string, unknown>>> = [];
+  let replacementNumber = 0;
+  const source = calendarEventRow({
+    id: 'notification-source',
+    calendar_id: 'replacement-calendar',
+    created_by: 'actor',
+  });
+  const replacementCalendar = calendarRow({
+    id: 'replacement-calendar',
+    name: '이관 대상',
+    visibility: 'members',
+    owner_id: 'recipient',
+  });
+  const request = {
+    storage: 'bflow' as const,
+    source: { storage: 'bflow' as const, event_id: source.id },
+    event: {
+      calendar_id: 'replacement-calendar', title: '보상 전용 일정', memo: null, tag_id: null,
+      all_day: true, start_date: '2026-08-26', end_date: '2026-08-26',
+      start_time: null, end_time: null, linked_episode: null, linked_part: null,
+      linked_sheet_name: null, linked_scene_id: null, linked_department: null, linked_todo_id: null,
+    },
+  };
+  const harness = await createIpcHarness({
+    getUserRole: async () => 'user',
+    getCalendarWithMembers: async () => ({
+      calendar: replacementCalendar,
+      members: [{ calendar_id: 'replacement-calendar', user_id: 'actor', can_edit: true }],
+    }),
+    createEvent: async () => calendarEventRow({
+      id: `replacement-${++replacementNumber}`,
+      calendar_id: 'replacement-calendar',
+      title: '보상 전용 일정',
+      start_date: '2026-08-26',
+      end_date: '2026-08-26',
+      created_by: 'actor',
+      created_at: `2026-08-26T00:00:0${replacementNumber}.000Z`,
+    }),
+    getEventByIdForWrite: async (eventId) => eventId === source.id ? source : null,
+    deleteEvent: async () => {},
+    deletePrivacyReplacementEvent: async () => {},
+    insertNotifications: async (rows) => {
+      notificationRows.push(rows as Array<Record<string, unknown>>);
+    },
+  }, 'actor', {
+    readUsers: async () => [
+      { id: 'actor', name: '행위자' },
+      { id: 'recipient', name: '수신자' },
+    ],
+  });
+  try {
+    const kept = await harness.invokeAs(
+      501,
+      'calendar:privacy-migration:create-replacement',
+      request,
+    ) as { receipt: string; continuation_secret: string };
+
+    assert.deepEqual(
+      notificationRows,
+      [],
+      'the provisional replacement is not visible to recipients before source deletion is settled',
+    );
+
+    assert.equal(
+      await harness.invokeAs(
+        501,
+        'calendar:privacy-migration:delete-bound-source',
+        kept.receipt,
+        kept.continuation_secret,
+      ),
+      'deleted',
+      'the bound original must be deleted before its replacement can be kept',
+    );
+    await harness.invokeAs(
+      501,
+      'calendar:privacy-migration:settle-replacement',
+      kept.receipt,
+      kept.continuation_secret,
+      'keep',
+    );
+    assert.ok(harness.notificationRuntime);
+    assert.equal(await harness.notificationRuntime.waitForNotificationIdle(1_000), true);
+    const replacementCreateNotifications = notificationRows.filter((rows) => rows[0]?.action === 'create');
+    assert.deepEqual(replacementCreateNotifications, [[{
+      recipient_id: 'recipient', actor_id: 'actor', actor_name: '행위자',
+      calendar_id: 'replacement-calendar', calendar_name: '이관 대상',
+      event_id: 'replacement-1', event_title: '보상 전용 일정', event_date: '2026-08-26',
+      action: 'create', detail: null,
+    }]], 'keeping the replacement emits its create notification exactly once');
+    await assert.rejects(
+      harness.invokeAs(
+        501,
+        'calendar:privacy-migration:settle-replacement',
+        kept.receipt,
+        kept.continuation_secret,
+        'keep',
+      ),
+      /receipt|보상|사용/i,
+      'a settled receipt cannot queue the same replacement notification again',
+    );
+    assert.equal(await harness.notificationRuntime.waitForNotificationIdle(1_000), true);
+    assert.equal(
+      notificationRows.filter((rows) => rows[0]?.action === 'create').length,
+      1,
+      'a duplicate keep attempt adds no replacement notification',
+    );
+
+    const compensated = await harness.invokeAs(
+      501,
+      'calendar:privacy-migration:create-replacement',
+      request,
+    ) as { receipt: string };
+    await harness.invokeAs(
+      501,
+      'calendar:privacy-migration:settle-replacement',
+      compensated.receipt,
+      'delete',
+    );
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    assert.equal(
+      notificationRows.filter((rows) => rows[0]?.action === 'create').length,
+      1,
+      'compensating the provisional replacement never exposes a create notification',
+    );
+  } finally {
+    harness.restore();
+  }
+});
+
+test('a B flow replacement create compensates its exact target when post-create broadcast fails', async () => {
+  const replacement = calendarEventRow({
+    id: 'broadcast-failure-replacement',
+    calendar_id: 'calendar-1',
+    created_by: 'user-a',
+    created_at: '2026-08-27T03:04:05.678Z',
+  });
+  const replacementDeletes: unknown[][] = [];
+  const harness = await createIpcHarness({
+    getUserRole: async () => 'user',
+    getCalendarWithMembers: async () => ({
+      calendar: calendarRow({ owner_id: 'user-a' }),
+      members: [],
+    }),
+    createEvent: async () => replacement,
+    getEventByIdForWrite: async () => null,
+    deletePrivacyReplacementEvent: async (...args) => { replacementDeletes.push(args); },
+  }, 'user-a');
+  const originalError = console.error;
+  try {
+    console.error = () => {};
+    harness.broadcastFailure.data = true;
+    await assert.rejects(
+      harness.invokeAs(501, 'calendar:privacy-migration:create-replacement', {
+        storage: 'bflow',
+        source: { storage: 'bflow', event_id: 'source-before-broadcast-failure' },
+        event: {
+          calendar_id: 'calendar-1', title: 'fanout 실패 정리', memo: null, tag_id: null,
+          all_day: true, start_date: '2026-08-27', end_date: '2026-08-27',
+          start_time: null, end_time: null, linked_episode: null, linked_part: null,
+          linked_sheet_name: null, linked_scene_id: null, linked_department: null, linked_todo_id: null,
+        },
+      }),
+      /data broadcast channel closed/,
+    );
+    assert.deepEqual(replacementDeletes, [[
+      'broadcast-failure-replacement',
+      'calendar-1',
+      '2026-08-27T03:04:05.678Z',
+    ]], 'a broadcast failure after persistence still deletes the exact provisional replacement');
+  } finally {
+    console.error = originalError;
+    harness.restore();
+  }
+});
+
+test('privacy replacement capability keeps the original continuation valid across a session switch without exposing raw settlement', async () => {
   let currentUserId = 'user-a';
   let actorExists = true;
   const createCalls: unknown[][] = [];
@@ -1562,10 +2352,16 @@ test('privacy replacement receipt deletes its exact B flow create after ordinary
       501,
       'calendar:privacy-migration:create-replacement',
       request,
-    ) as { actual_id: string; receipt: string; storage: string };
+    ) as {
+      actual_id: string;
+      receipt: string;
+      continuation_secret: string;
+      storage: string;
+    };
     assert.equal(result.actual_id, 'replacement-user-a');
     assert.equal(result.storage, 'bflow');
     assert.equal(typeof result.receipt, 'string');
+    assert.equal(typeof result.continuation_secret, 'string');
     assert.equal(result.receipt.includes('replacement-user-a'), false, 'receipt stays opaque');
     assert.deepEqual(createCalls, [[request.event, 'user-a']]);
 
@@ -1575,9 +2371,37 @@ test('privacy replacement receipt deletes its exact B flow create after ordinary
     try {
       console.error = () => {};
       await assert.rejects(
-        harness.invokeAs(777, 'calendar:privacy-migration:settle-replacement', result.receipt, 'delete'),
+        harness.invokeAs(
+          501,
+          'calendar:privacy-migration:settle-replacement',
+          result.receipt,
+          undefined,
+          'delete',
+        ),
+        /secret|continuation|보상/i,
+        'a raw receipt without the private continuation secret cannot settle after the session changed',
+      );
+      await assert.rejects(
+        harness.invokeAs(
+          501,
+          'calendar:privacy-migration:settle-replacement',
+          result.receipt,
+          'wrong-continuation-secret',
+          'delete',
+        ),
+        /secret|continuation|보상/i,
+        'a raw receipt with a forged secret cannot settle after the session changed',
+      );
+      await assert.rejects(
+        harness.invokeAs(
+          777,
+          'calendar:privacy-migration:settle-replacement',
+          result.receipt,
+          result.continuation_secret,
+          'delete',
+        ),
         /receipt|보상|발급/i,
-        'another renderer cannot spend the receipt',
+        'another renderer cannot spend the private continuation capability',
       );
       assert.deepEqual(receiptDeleteCalls, []);
 
@@ -1585,6 +2409,7 @@ test('privacy replacement receipt deletes its exact B flow create after ordinary
         501,
         'calendar:privacy-migration:settle-replacement',
         result.receipt,
+        result.continuation_secret,
         'delete',
       );
       assert.deepEqual(receiptDeleteCalls, [[
@@ -1594,12 +2419,24 @@ test('privacy replacement receipt deletes its exact B flow create after ordinary
       ]]);
 
       await assert.rejects(
-        harness.invokeAs(501, 'calendar:privacy-migration:settle-replacement', result.receipt, 'delete'),
+        harness.invokeAs(
+          501,
+          'calendar:privacy-migration:settle-replacement',
+          result.receipt,
+          result.continuation_secret,
+          'delete',
+        ),
         /receipt|보상|사용/i,
         'a consumed receipt cannot be reused',
       );
       await assert.rejects(
-        harness.invokeAs(501, 'calendar:privacy-migration:settle-replacement', 'forged-receipt', 'delete'),
+        harness.invokeAs(
+          501,
+          'calendar:privacy-migration:settle-replacement',
+          'forged-receipt',
+          result.continuation_secret,
+          'delete',
+        ),
         /receipt|보상/i,
         'a renderer cannot forge an event id into a receipt',
       );
@@ -1607,6 +2444,769 @@ test('privacy replacement receipt deletes its exact B flow create after ordinary
     } finally {
       console.error = originalError;
     }
+  } finally {
+    harness.restore();
+  }
+});
+
+test('privacy replacement transition waits for a bound source delete and keeps only the settled replacement', async () => {
+  let origin = { userId: 'user-a', epoch: 7, role: 'user' as const };
+  const sourceDeleteStarted = deferred<void>();
+  const releaseSourceDelete = deferred<void>();
+  const targetDeleteCalls: unknown[][] = [];
+  const source = calendarEventRow({
+    id: 'source-a',
+    calendar_id: 'calendar-1',
+    created_by: 'user-a',
+  });
+  const replacement = calendarEventRow({
+    id: 'replacement-a',
+    calendar_id: 'calendar-1',
+    created_by: 'user-a',
+    created_at: '2026-08-27T01:02:03.456Z',
+  });
+  const request = {
+    storage: 'bflow' as const,
+    source: { storage: 'bflow' as const, event_id: source.id },
+    event: {
+      calendar_id: 'calendar-1', title: '이관 대상', memo: null, tag_id: null,
+      all_day: true, start_date: '2026-08-27', end_date: '2026-08-27',
+      start_time: null, end_time: null, linked_episode: null, linked_part: null,
+      linked_sheet_name: null, linked_scene_id: null, linked_department: null, linked_todo_id: null,
+    },
+  };
+  const harness = await createIpcHarness({
+    getUserRole: async () => 'user',
+    getCalendarWithMembers: async () => ({
+      calendar: calendarRow({ owner_id: 'user-a', visibility: 'members' }),
+      members: [],
+    }),
+    createEvent: async () => replacement,
+    getEventByIdForWrite: async (eventId) => eventId === source.id ? source : null,
+    deleteEvent: async (eventId) => {
+      assert.equal(eventId, source.id, 'the bound source—not a renderer argument—reaches persistence');
+      sourceDeleteStarted.resolve();
+      await releaseSourceDelete.promise;
+    },
+    deletePrivacyReplacementEvent: async (...args) => { targetDeleteCalls.push(args); },
+    insertNotifications: async () => {},
+  }, () => origin.userId, {
+    getSessionOrigin: () => origin,
+    readUsers: async () => [{ id: 'user-a', name: 'A' }],
+  });
+  const originalError = console.error;
+  try {
+    console.error = () => {};
+    const created = await harness.invokeAs(
+      501,
+      'calendar:privacy-migration:create-replacement',
+      request,
+    ) as { receipt: string; continuation_secret: string };
+    const sourceDelete = harness.invokeAs(
+      501,
+      'calendar:privacy-migration:delete-bound-source',
+      created.receipt,
+      created.continuation_secret,
+    );
+    await sourceDeleteStarted.promise;
+    assert.ok(harness.notificationRuntime);
+    harness.notificationRuntime.beginPrivacyReplacementTransition({ userId: 'user-a', epoch: 7 });
+    const transitionDrain = harness.notificationRuntime.drainPrivacyReplacementTransition({
+      userId: 'user-a', epoch: 7,
+    });
+    let drained = false;
+    void transitionDrain.then(() => { drained = true; }, () => {});
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    assert.equal(drained, false, 'the session transition waits for the already-started source delete');
+
+    await assert.rejects(
+      harness.invokeAs(
+        501,
+        'calendar:privacy-migration:settle-replacement',
+        created.receipt,
+        created.continuation_secret,
+        'delete',
+      ),
+      /전환.*정리|retir/i,
+      'a retiring receipt cannot let the renderer choose delete while source deletion is in flight',
+    );
+    assert.deepEqual(targetDeleteCalls, [], 'the rejected retiring settlement never reaches target persistence');
+
+    origin = { userId: 'user-b', epoch: 8, role: 'user' };
+    await assert.rejects(
+      harness.invokeAs(
+        501,
+        'calendar:privacy-migration:delete-bound-source',
+        created.receipt,
+        created.continuation_secret,
+      ),
+      /retir|전환|source/i,
+      'a retired receipt cannot start a second source mutation in user B\'s session',
+    );
+
+    releaseSourceDelete.resolve();
+    assert.equal(await sourceDelete, 'deleted');
+    assert.equal(await transitionDrain, undefined);
+    assert.deepEqual(targetDeleteCalls, [], 'a committed source deletion keeps the exact replacement');
+
+    assert.equal(
+      await harness.invokeAs(
+        501,
+        'calendar:privacy-migration:settle-replacement',
+        created.receipt,
+        created.continuation_secret,
+        'keep',
+      ),
+      undefined,
+      'the retained A continuation sees the transition-owned keep as an idempotent completion',
+    );
+    await assert.rejects(
+      harness.invokeAs(
+        501,
+        'calendar:privacy-migration:settle-replacement',
+        created.receipt,
+        created.continuation_secret,
+        'delete',
+      ),
+      /완료|처리|보상/i,
+      'the opposite stale disposition cannot mutate the replacement after B publishes',
+    );
+  } finally {
+    console.error = originalError;
+    releaseSourceDelete.resolve();
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    harness.restore();
+  }
+});
+
+test('privacy replacement cannot keep a created target before its bound source outcome is known', async () => {
+  const notificationRows: Array<Array<Record<string, unknown>>> = [];
+  const targetDeleteCalls: unknown[][] = [];
+  const harness = await createIpcHarness({
+    getUserRole: async () => 'user',
+    getCalendarWithMembers: async () => ({
+      calendar: calendarRow({ owner_id: 'user-a', visibility: 'members' }),
+      members: [{ calendar_id: 'calendar-1', user_id: 'user-a', can_edit: true }],
+    }),
+    createEvent: async () => calendarEventRow({
+      id: 'unsettled-created-target',
+      calendar_id: 'calendar-1',
+      created_by: 'user-a',
+      created_at: '2026-08-27T07:08:09.012Z',
+    }),
+    deletePrivacyReplacementEvent: async (...args) => { targetDeleteCalls.push(args); },
+    insertNotifications: async (rows) => { notificationRows.push(rows as Array<Record<string, unknown>>); },
+  }, 'user-a', {
+    getSessionOrigin: () => ({ userId: 'user-a', epoch: 7, role: 'user' }),
+    readUsers: async () => [{ id: 'user-a', name: 'A' }],
+  });
+  const originalError = console.error;
+  try {
+    console.error = () => {};
+    const created = await harness.invokeAs(501, 'calendar:privacy-migration:create-replacement', {
+      storage: 'bflow',
+      source: { storage: 'bflow', event_id: 'source-must-remain' },
+      event: {
+        calendar_id: 'calendar-1', title: '원본 확인 전 replacement', memo: null, tag_id: null,
+        all_day: true, start_date: '2026-08-27', end_date: '2026-08-27',
+        start_time: null, end_time: null, linked_episode: null, linked_part: null,
+        linked_sheet_name: null, linked_scene_id: null, linked_department: null, linked_todo_id: null,
+      },
+    }) as { receipt: string; continuation_secret: string };
+
+    await assert.rejects(
+      harness.invokeAs(
+        501,
+        'calendar:privacy-migration:settle-replacement',
+        created.receipt,
+        created.continuation_secret,
+        'keep',
+      ),
+      /원본.*삭제|결과|replacement/i,
+      'a replacement stays provisional until main has recorded a successful or ambiguous source outcome',
+    );
+    assert.deepEqual(notificationRows, [], 'an undeleted source cannot expose a replacement create notification');
+    assert.deepEqual(targetDeleteCalls, [], 'rejecting early keep does not mutate the exact target either');
+  } finally {
+    console.error = originalError;
+    harness.restore();
+  }
+});
+
+test('shutdown retires a created privacy replacement before its source can be deleted', async () => {
+  const targetDeleteStarted = deferred<void>();
+  const releaseTargetDelete = deferred<void>();
+  const targetDeleteCalls: unknown[][] = [];
+  let sourceDeleteCalls = 0;
+  const replacement = calendarEventRow({
+    id: 'shutdown-created-replacement',
+    calendar_id: 'calendar-1',
+    created_by: 'user-a',
+    created_at: '2026-08-27T08:09:10.123Z',
+  });
+  const harness = await createIpcHarness({
+    getUserRole: async () => 'user',
+    getCalendarWithMembers: async () => ({
+      calendar: calendarRow({ owner_id: 'user-a' }),
+      members: [],
+    }),
+    createEvent: async () => replacement,
+    deleteEvent: async () => { sourceDeleteCalls += 1; },
+    deletePrivacyReplacementEvent: async (...args) => {
+      targetDeleteCalls.push(args);
+      targetDeleteStarted.resolve();
+      await releaseTargetDelete.promise;
+    },
+  }, 'user-a', {
+    getSessionOrigin: () => ({ userId: 'user-a', epoch: 7, role: 'user' }),
+  });
+  try {
+    const created = await harness.invokeAs(501, 'calendar:privacy-migration:create-replacement', {
+      storage: 'bflow',
+      source: { storage: 'bflow', event_id: 'shutdown-source-must-remain' },
+      event: {
+        calendar_id: 'calendar-1', title: '종료 전 replacement', memo: null, tag_id: null,
+        all_day: true, start_date: '2026-08-27', end_date: '2026-08-27',
+        start_time: null, end_time: null, linked_episode: null, linked_part: null,
+        linked_sheet_name: null, linked_scene_id: null, linked_department: null, linked_todo_id: null,
+      },
+    }) as { receipt: string; continuation_secret: string };
+    assert.ok(harness.notificationRuntime);
+    assert.equal(harness.notificationRuntime.getPendingNotificationCount(), 0);
+
+    harness.notificationRuntime.beginQuitting();
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    assert.equal(targetDeleteCalls.length, 1, 'quit immediately starts exact cleanup for an unresolved created target');
+    assert.equal(
+      await harness.notificationRuntime.waitForNotificationIdle(0),
+      false,
+      'the shutdown drain remains open while exact replacement cleanup is pending',
+    );
+    await assert.rejects(
+      harness.invokeAs(
+        501,
+        'calendar:privacy-migration:delete-bound-source',
+        created.receipt,
+        created.continuation_secret,
+      ),
+      /종료|retir|전환/i,
+      'quit never lets the renderer delete the original after main owns compensation',
+    );
+    assert.equal(sourceDeleteCalls, 0, 'the original source remains untouched during shutdown compensation');
+
+    releaseTargetDelete.resolve();
+    await targetDeleteStarted.promise;
+    assert.equal(await harness.notificationRuntime.waitForNotificationIdle(1_000), true);
+    assert.deepEqual(targetDeleteCalls, [[
+      'shutdown-created-replacement',
+      'calendar-1',
+      '2026-08-27T08:09:10.123Z',
+    ]]);
+  } finally {
+    releaseTargetDelete.resolve();
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    harness.restore();
+  }
+});
+
+test('an abandoned privacy replacement is retired by its scheduled expiry without another privacy IPC', async () => {
+  const targetDeleteStarted = deferred<void>();
+  const releaseTargetDelete = deferred<void>();
+  const targetDeleteCalls: unknown[][] = [];
+  const replacement = calendarEventRow({
+    id: 'expired-created-replacement',
+    calendar_id: 'calendar-1',
+    created_by: 'user-a',
+    created_at: '2026-08-27T09:10:11.234Z',
+  });
+  const harness = await createIpcHarness({
+    getUserRole: async () => 'user',
+    getCalendarWithMembers: async () => ({
+      calendar: calendarRow({ owner_id: 'user-a' }),
+      members: [],
+    }),
+    createEvent: async () => replacement,
+    deletePrivacyReplacementEvent: async (...args) => {
+      targetDeleteCalls.push(args);
+      targetDeleteStarted.resolve();
+      await releaseTargetDelete.promise;
+    },
+  }, 'user-a', {
+    getSessionOrigin: () => ({ userId: 'user-a', epoch: 7, role: 'user' }),
+    privacyReplacementReceiptTtlMs: 20,
+  });
+  try {
+    await harness.invokeAs(501, 'calendar:privacy-migration:create-replacement', {
+      storage: 'bflow',
+      source: { storage: 'bflow', event_id: 'expired-source-must-remain' },
+      event: {
+        calendar_id: 'calendar-1', title: '만료 정리 대상', memo: null, tag_id: null,
+        all_day: true, start_date: '2026-08-27', end_date: '2026-08-27',
+        start_time: null, end_time: null, linked_episode: null, linked_part: null,
+        linked_sheet_name: null, linked_scene_id: null, linked_department: null, linked_todo_id: null,
+      },
+    });
+    assert.ok(harness.notificationRuntime);
+    assert.equal(harness.notificationRuntime.getPendingNotificationCount(), 0);
+
+    await new Promise<void>((resolve, reject) => {
+      const timeout = setTimeout(() => reject(new Error('receipt expiry did not start cleanup')), 500);
+      void targetDeleteStarted.promise.then(
+        () => { clearTimeout(timeout); resolve(); },
+        reject,
+      );
+    });
+    assert.equal(
+      await harness.notificationRuntime.waitForNotificationIdle(0),
+      false,
+      'the scheduled exact cleanup stays in the shutdown drain until persistence settles',
+    );
+    assert.deepEqual(targetDeleteCalls, [[
+      'expired-created-replacement',
+      'calendar-1',
+      '2026-08-27T09:10:11.234Z',
+    ]]);
+
+    releaseTargetDelete.resolve();
+    assert.equal(await harness.notificationRuntime.waitForNotificationIdle(1_000), true);
+  } finally {
+    releaseTargetDelete.resolve();
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    harness.restore();
+  }
+});
+
+test('a retiring created replacement ignores renderer keep and transition deletes it exactly once', async () => {
+  const targetDeleteStarted = deferred<void>();
+  const releaseTargetDelete = deferred<void>();
+  const targetDeleteCalls: unknown[][] = [];
+  const notificationRows: Array<Array<Record<string, unknown>>> = [];
+  let sourceDeleteCalls = 0;
+  const replacement = calendarEventRow({
+    id: 'retiring-created-replacement',
+    calendar_id: 'calendar-1',
+    created_by: 'user-a',
+    created_at: '2026-08-27T04:05:06.789Z',
+  });
+  const harness = await createIpcHarness({
+    getUserRole: async () => 'user',
+    getCalendarWithMembers: async () => ({
+      calendar: calendarRow({
+        owner_id: 'recipient',
+        visibility: 'members',
+      }),
+      members: [{ calendar_id: 'calendar-1', user_id: 'user-a', can_edit: true }],
+    }),
+    createEvent: async () => replacement,
+    deleteEvent: async () => { sourceDeleteCalls += 1; },
+    deletePrivacyReplacementEvent: async (...args) => {
+      targetDeleteCalls.push(args);
+      targetDeleteStarted.resolve();
+      await releaseTargetDelete.promise;
+    },
+    insertNotifications: async (rows) => { notificationRows.push(rows as Array<Record<string, unknown>>); },
+  }, 'user-a', {
+    getSessionOrigin: () => ({ userId: 'user-a', epoch: 7, role: 'user' }),
+    readUsers: async () => [
+      { id: 'user-a', name: 'A' },
+      { id: 'recipient', name: 'R' },
+    ],
+  });
+  try {
+    const created = await harness.invokeAs(
+      501,
+      'calendar:privacy-migration:create-replacement',
+      {
+        storage: 'bflow',
+        source: { storage: 'bflow', event_id: 'source-still-undeleted' },
+        event: {
+          calendar_id: 'calendar-1', title: '전환 중 created', memo: null, tag_id: null,
+          all_day: true, start_date: '2026-08-27', end_date: '2026-08-27',
+          start_time: null, end_time: null, linked_episode: null, linked_part: null,
+          linked_sheet_name: null, linked_scene_id: null, linked_department: null, linked_todo_id: null,
+        },
+      },
+    ) as { receipt: string; continuation_secret: string };
+    assert.ok(harness.notificationRuntime);
+    harness.notificationRuntime.beginPrivacyReplacementTransition({ userId: 'user-a', epoch: 7 });
+    const transitionDrain = harness.notificationRuntime.drainPrivacyReplacementTransition({
+      userId: 'user-a', epoch: 7,
+    });
+    await targetDeleteStarted.promise;
+
+    await assert.rejects(
+      harness.invokeAs(
+        501,
+        'calendar:privacy-migration:settle-replacement',
+        created.receipt,
+        created.continuation_secret,
+        'keep',
+      ),
+      /전환.*정리|retir/i,
+      'a renderer continuation cannot keep a replacement once transition cleanup owns it',
+    );
+    assert.equal(sourceDeleteCalls, 0, 'transition cleanup never deletes an undeleted source');
+    assert.deepEqual(notificationRows, [], 'the rejected keep queues no create notification');
+    assert.equal(targetDeleteCalls.length, 1, 'only transition cleanup begins the exact target deletion');
+
+    releaseTargetDelete.resolve();
+    await transitionDrain;
+    assert.deepEqual(targetDeleteCalls, [[
+      'retiring-created-replacement',
+      'calendar-1',
+      '2026-08-27T04:05:06.789Z',
+    ]]);
+    await assert.rejects(
+      harness.invokeAs(
+        501,
+        'calendar:privacy-migration:settle-replacement',
+        created.receipt,
+        created.continuation_secret,
+        'keep',
+      ),
+      /반대|확정|보상/i,
+      'after terminal delete, stale keep cannot revive the replacement',
+    );
+  } finally {
+    releaseTargetDelete.resolve();
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    harness.restore();
+  }
+});
+
+test('shutdown drain keeps a transition-owned replacement delete after its source producer releases', async () => {
+  const sourceDeleteStarted = deferred<void>();
+  const releaseSourceDelete = deferred<void>();
+  const targetDeleteStarted = deferred<void>();
+  const releaseTargetDelete = deferred<void>();
+  let sourceExists = true;
+  const source = calendarEventRow({ id: 'transition-drain-source', created_by: 'user-a' });
+  const replacement = calendarEventRow({
+    id: 'transition-drain-replacement',
+    created_by: 'user-a',
+    created_at: '2026-08-27T05:06:07.890Z',
+  });
+  const harness = await createIpcHarness({
+    getUserRole: async () => 'user',
+    getCalendarWithMembers: async () => ({
+      calendar: calendarRow({ owner_id: 'user-a' }),
+      members: [],
+    }),
+    createEvent: async () => replacement,
+    getEventByIdForWrite: async () => sourceExists ? source : null,
+    deleteEvent: async () => {
+      sourceDeleteStarted.resolve();
+      await releaseSourceDelete.promise;
+      sourceExists = false;
+      throw new Error('calendar event source changed; refresh and retry');
+    },
+    deletePrivacyReplacementEvent: async () => {
+      targetDeleteStarted.resolve();
+      await releaseTargetDelete.promise;
+    },
+  }, 'user-a', {
+    getSessionOrigin: () => ({ userId: 'user-a', epoch: 7, role: 'user' }),
+  });
+  const originalError = console.error;
+  try {
+    console.error = () => {};
+    const created = await harness.invokeAs(
+      501,
+      'calendar:privacy-migration:create-replacement',
+      {
+        storage: 'bflow',
+        source: { storage: 'bflow', event_id: source.id },
+        event: {
+          calendar_id: 'calendar-1', title: '종료 경합 대상', memo: null, tag_id: null,
+          all_day: true, start_date: '2026-08-27', end_date: '2026-08-27',
+          start_time: null, end_time: null, linked_episode: null, linked_part: null,
+          linked_sheet_name: null, linked_scene_id: null, linked_department: null, linked_todo_id: null,
+        },
+      },
+    ) as { receipt: string; continuation_secret: string };
+    const sourceDelete = harness.invokeAs(
+      501,
+      'calendar:privacy-migration:delete-bound-source',
+      created.receipt,
+      created.continuation_secret,
+    );
+    await sourceDeleteStarted.promise;
+    assert.ok(harness.notificationRuntime);
+    harness.notificationRuntime.beginPrivacyReplacementTransition({ userId: 'user-a', epoch: 7 });
+    const transitionDrain = harness.notificationRuntime.drainPrivacyReplacementTransition({
+      userId: 'user-a', epoch: 7,
+    });
+
+    releaseSourceDelete.resolve();
+    assert.equal(await sourceDelete, 'missing');
+    await targetDeleteStarted.promise;
+    harness.notificationRuntime.beginQuitting();
+    assert.equal(
+      await harness.notificationRuntime.waitForNotificationIdle(0),
+      false,
+      'the transition-owned exact delete stays visible after the source handler releases its producer fence',
+    );
+
+    releaseTargetDelete.resolve();
+    await transitionDrain;
+    assert.equal(await harness.notificationRuntime.waitForNotificationIdle(1_000), true);
+  } finally {
+    console.error = originalError;
+    releaseSourceDelete.resolve();
+    releaseTargetDelete.resolve();
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    harness.restore();
+  }
+});
+
+test('shutdown retires an existing replacement and rejects a new unreserved privacy transition', async () => {
+  let targetDeleteCalls = 0;
+  const harness = await createIpcHarness({
+    getUserRole: async () => 'user',
+    getCalendarWithMembers: async () => ({
+      calendar: calendarRow({ owner_id: 'user-a' }),
+      members: [],
+    }),
+    createEvent: async () => calendarEventRow({
+      id: 'shutdown-unreserved-replacement',
+      created_by: 'user-a',
+      created_at: '2026-08-27T06:07:08.901Z',
+    }),
+    deletePrivacyReplacementEvent: async () => { targetDeleteCalls += 1; },
+  }, 'user-a', {
+    getSessionOrigin: () => ({ userId: 'user-a', epoch: 7, role: 'user' }),
+  });
+  try {
+    await harness.invokeAs(501, 'calendar:privacy-migration:create-replacement', {
+      storage: 'bflow',
+      source: { storage: 'bflow', event_id: 'source-that-must-remain' },
+      event: {
+        calendar_id: 'calendar-1', title: '종료 뒤 전환 차단', memo: null, tag_id: null,
+        all_day: true, start_date: '2026-08-27', end_date: '2026-08-27',
+        start_time: null, end_time: null, linked_episode: null, linked_part: null,
+        linked_sheet_name: null, linked_scene_id: null, linked_department: null, linked_todo_id: null,
+      },
+    });
+    assert.ok(harness.notificationRuntime);
+    assert.equal(harness.notificationRuntime.getPendingNotificationCount(), 0);
+    harness.notificationRuntime.beginQuitting();
+    assert.equal(
+      await harness.notificationRuntime.waitForNotificationIdle(1_000),
+      true,
+      'quit owns the already-issued provisional replacement until its exact cleanup completes',
+    );
+    assert.equal(targetDeleteCalls, 1, 'quit cleanup deletes the provisional target while leaving its source alone');
+
+    assert.throws(
+      () => harness.notificationRuntime?.beginPrivacyReplacementTransition({ userId: 'user-a', epoch: 7 }),
+      /종료|quitting/i,
+      'a transition that begins after quit cannot reserve replacement cleanup work',
+    );
+    await assert.rejects(
+      harness.notificationRuntime.drainPrivacyReplacementTransition({ userId: 'user-a', epoch: 7 }),
+      /종료|quitting|예약/i,
+    );
+    assert.equal(targetDeleteCalls, 1, 'the rejected post-quit transition cannot start a second cleanup');
+  } finally {
+    harness.restore();
+  }
+});
+
+test('privacy replacement transition compensates a target created while its origin is retiring', async () => {
+  let origin = { userId: 'user-a', epoch: 7, role: 'user' as const };
+  const createStarted = deferred<void>();
+  const releaseCreate = deferred<ReturnType<typeof calendarEventRow>>();
+  const targetDeleteCalls: unknown[][] = [];
+  const replacement = calendarEventRow({
+    id: 'replacement-race',
+    calendar_id: 'calendar-1',
+    created_by: 'user-a',
+    created_at: '2026-08-27T02:03:04.567Z',
+  });
+  const harness = await createIpcHarness({
+    getUserRole: async () => 'user',
+    getCalendarWithMembers: async () => ({
+      calendar: calendarRow({ owner_id: 'user-a' }),
+      members: [],
+    }),
+    createEvent: async () => {
+      createStarted.resolve();
+      return releaseCreate.promise;
+    },
+    deletePrivacyReplacementEvent: async (...args) => { targetDeleteCalls.push(args); },
+  }, () => origin.userId, {
+    getSessionOrigin: () => origin,
+  });
+  try {
+    const creating = harness.invokeAs(
+      501,
+      'calendar:privacy-migration:create-replacement',
+      {
+        storage: 'bflow',
+        source: { storage: 'bflow', event_id: 'source-race' },
+        event: {
+          calendar_id: 'calendar-1', title: '전환 경합 대상', memo: null, tag_id: null,
+          all_day: true, start_date: '2026-08-27', end_date: '2026-08-27',
+          start_time: null, end_time: null, linked_episode: null, linked_part: null,
+          linked_sheet_name: null, linked_scene_id: null, linked_department: null, linked_todo_id: null,
+        },
+      },
+    );
+    await createStarted.promise;
+    assert.ok(harness.notificationRuntime);
+    harness.notificationRuntime.beginPrivacyReplacementTransition({ userId: 'user-a', epoch: 7 });
+    const transitionDrain = harness.notificationRuntime.drainPrivacyReplacementTransition({
+      userId: 'user-a', epoch: 7,
+    });
+    origin = { userId: 'user-b', epoch: 8, role: 'user' };
+    releaseCreate.resolve(replacement);
+
+    assert.deepEqual(
+      await creating,
+      { transition_resolved: 'deleted' },
+      'a create that wins the DB race returns no usable continuation once its origin retires',
+    );
+    await transitionDrain;
+    assert.deepEqual(targetDeleteCalls, [[
+      'replacement-race',
+      'calendar-1',
+      '2026-08-27T02:03:04.567Z',
+    ]], 'the main process compensates the exact persisted target before user B can publish');
+  } finally {
+    releaseCreate.resolve(replacement);
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    harness.restore();
+  }
+});
+
+test('session transition does not publish user B when privacy replacement drain fails', async () => {
+  const { SessionManager } = await import('../electron/sessionManager.ts');
+  const users = [
+    { id: 'user-a', name: 'A', password: 'a', role: 'user' },
+    { id: 'user-b', name: 'B', password: 'b', role: 'user' },
+  ];
+  const published: Array<string | null> = [];
+  const begun: Array<{ userId: string; epoch: number }> = [];
+  const manager = new SessionManager({
+    readUsers: async () => ({ users, status: 'authoritative' as const }),
+    readRememberedSession: async () => null,
+    writeRememberedSession: async () => undefined,
+    beginPersonalDataTransition: () => undefined,
+    endPersonalDataTransition: () => undefined,
+    drainPersonalDataQueue: async () => undefined,
+    flushCalendarJournal: async () => undefined,
+    beginPrivacyReplacementTransition: (userId: string, epoch: number) => {
+      begun.push({ userId, epoch });
+    },
+    drainPrivacyReplacementTransition: async () => {
+      throw new Error('privacy replacement cleanup unavailable');
+    },
+    setActivityUser: () => undefined,
+    broadcast: (payload: { user: { id: string } | null }) => { published.push(payload.user?.id ?? null); },
+  });
+
+  assert.equal((await manager.login({ name: 'A', password: 'a' })).ok, true);
+  const switched = await manager.login({ name: 'B', password: 'b' });
+  assert.equal(switched.ok, false);
+  assert.match(switched.error ?? '', /privacy replacement cleanup unavailable/);
+  assert.deepEqual(begun, [{ userId: 'user-a', epoch: 1 }]);
+  assert.equal(manager.getCanonicalUserId(), 'user-a');
+  assert.deepEqual(published, ['user-a'], 'B is never published after an unresolved A replacement');
+});
+
+test('session transition closes personal work and leaves B unpublished when quit blocks privacy transition start', async () => {
+  const { SessionManager } = await import('../electron/sessionManager.ts');
+  const users = [
+    { id: 'user-a', name: 'A', password: 'a', role: 'user' },
+    { id: 'user-b', name: 'B', password: 'b', role: 'user' },
+  ];
+  const published: Array<string | null> = [];
+  const ended: Array<{ userId: string; epoch: number }> = [];
+  const manager = new SessionManager({
+    readUsers: async () => ({ users, status: 'authoritative' as const }),
+    readRememberedSession: async () => null,
+    writeRememberedSession: async () => undefined,
+    beginPersonalDataTransition: () => undefined,
+    endPersonalDataTransition: (userId, epoch) => { ended.push({ userId, epoch }); },
+    drainPersonalDataQueue: async () => undefined,
+    beginPrivacyReplacementTransition: () => {
+      throw new Error('앱 종료 중이라 새 캘린더 변경을 저장할 수 없습니다');
+    },
+    drainPrivacyReplacementTransition: async () => undefined,
+    flushCalendarJournal: async () => undefined,
+    setActivityUser: () => undefined,
+    broadcast: (payload: { user: { id: string } | null }) => { published.push(payload.user?.id ?? null); },
+  });
+
+  assert.equal((await manager.login({ name: 'A', password: 'a' })).ok, true);
+  const switched = await manager.login({ name: 'B', password: 'b' });
+  assert.equal(switched.ok, false);
+  assert.match(switched.error ?? '', /종료/);
+  assert.deepEqual(ended, [{ userId: 'user-a', epoch: 1 }]);
+  assert.equal(manager.getCanonicalUserId(), 'user-a');
+  assert.deepEqual(published, ['user-a'], 'B never publishes when shutdown rejects transition reservation');
+});
+
+test('a finished or aborted session transition releases only its retired privacy origin lock', async () => {
+  const origin = { userId: 'user-a', epoch: 7, role: 'user' as const };
+  const harness = await createIpcHarness({
+    getUserRole: async () => 'user',
+    getCalendarWithMembers: async () => ({ calendar: calendarRow({ owner_id: 'user-a' }), members: [] }),
+    createEvent: async () => calendarEventRow({ id: 'origin-lock-replacement', created_by: 'user-a' }),
+    deletePrivacyReplacementEvent: async () => {},
+  }, 'user-a', {
+    getSessionOrigin: () => origin,
+  });
+  const createInput = {
+    storage: 'bflow',
+    source: { storage: 'bflow', event_id: 'origin-lock-source' },
+    event: {
+      calendar_id: 'calendar-1', title: 'origin lock', memo: null, tag_id: null,
+      all_day: true, start_date: '2026-08-27', end_date: '2026-08-27',
+      start_time: null, end_time: null, linked_episode: null, linked_part: null,
+      linked_sheet_name: null, linked_scene_id: null, linked_department: null, linked_todo_id: null,
+    },
+  };
+  try {
+    assert.ok(harness.notificationRuntime);
+    const transition = { userId: 'user-a', epoch: 7 };
+    harness.notificationRuntime.beginPrivacyReplacementTransition(transition);
+    await harness.notificationRuntime.drainPrivacyReplacementTransition(transition);
+    await assert.rejects(
+      harness.invokeAs(501, 'calendar:privacy-migration:create-replacement', createInput),
+      /정리 중|이전 사용자/i,
+      'drain alone must retain the old origin lock until SessionManager decides publish or abort',
+    );
+
+    harness.notificationRuntime.completePrivacyReplacementTransition(transition);
+    const afterPublish = await harness.invokeAs(
+      501,
+      'calendar:privacy-migration:create-replacement',
+      createInput,
+    ) as { receipt: string; continuation_secret: string };
+    await harness.invokeAs(
+      501,
+      'calendar:privacy-migration:settle-replacement',
+      afterPublish.receipt,
+      afterPublish.continuation_secret,
+      'delete',
+    );
+
+    harness.notificationRuntime.beginPrivacyReplacementTransition(transition);
+    await harness.notificationRuntime.drainPrivacyReplacementTransition(transition);
+    harness.notificationRuntime.abortPrivacyReplacementTransition(transition);
+    const afterAbort = await harness.invokeAs(
+      501,
+      'calendar:privacy-migration:create-replacement',
+      createInput,
+    ) as { receipt: string; continuation_secret: string };
+    await harness.invokeAs(
+      501,
+      'calendar:privacy-migration:settle-replacement',
+      afterAbort.receipt,
+      afterAbort.continuation_secret,
+      'delete',
+    );
   } finally {
     harness.restore();
   }
@@ -2664,13 +4264,16 @@ test('privacy replacement receipt is consumed on keep but released after a confi
   let deleteCalls = 0;
   let replacementExists = true;
   let deleteFails = true;
+  const source = calendarEventRow({ id: 'legacy-test-source' });
   const harness = await createIpcHarness({
     getUserRole: async () => 'user',
     getCalendarWithMembers: async () => ({ calendar: calendarRow(), members: [] }),
     createEvent: async () => calendarEventRow({ id: `replacement-${deleteCalls}` }),
-    getEventByIdForWrite: async () => (
-      replacementExists ? calendarEventRow({ id: 'replacement-0' }) : null
-    ),
+    getEventByIdForWrite: async (eventId) => {
+      if (eventId === source.id) return source;
+      return replacementExists ? calendarEventRow({ id: 'replacement-0' }) : null;
+    },
+    deleteEvent: async () => {},
     deletePrivacyReplacementEvent: async () => {
       deleteCalls += 1;
       if (deleteFails) throw new Error('privacy replacement row identity no longer matches');
@@ -2690,9 +4293,23 @@ test('privacy replacement receipt is consumed on keep but released after a confi
     const kept = await harness.invoke(
       'calendar:privacy-migration:create-replacement',
       { storage: 'bflow', event },
-    ) as { receipt: string };
+    ) as { receipt: string; continuation_secret: string };
+    assert.equal(
+      await harness.invoke(
+        'calendar:privacy-migration:delete-bound-source',
+        kept.receipt,
+        kept.continuation_secret,
+      ),
+      'deleted',
+      'only a confirmed source delete may move a provisional replacement to keep',
+    );
+    const markerCountAfterSourceDelete = harness.committedDeleteMarkers.length;
     await harness.invoke('calendar:privacy-migration:settle-replacement', kept.receipt, 'keep');
-    assert.deepEqual(harness.committedDeleteMarkers, [], 'keep is not a committed delete');
+    assert.equal(
+      harness.committedDeleteMarkers.length,
+      markerCountAfterSourceDelete,
+      'keep does not add a committed replacement delete marker after the source marker',
+    );
     await assert.rejects(
       harness.invoke('calendar:privacy-migration:settle-replacement', kept.receipt, 'delete'),
       /receipt|보상|사용/i,
@@ -2707,14 +4324,18 @@ test('privacy replacement receipt is consumed on keep but released after a confi
       harness.invoke('calendar:privacy-migration:settle-replacement', failing.receipt, 'delete'),
       /identity no longer matches/,
     );
-    assert.deepEqual(harness.committedDeleteMarkers, [], 'failed persistence emits no committed marker');
+    assert.equal(
+      harness.committedDeleteMarkers.length,
+      markerCountAfterSourceDelete,
+      'failed replacement persistence emits no additional committed marker',
+    );
     deleteFails = false;
     assert.equal(
       await harness.invoke('calendar:privacy-migration:settle-replacement', failing.receipt, 'delete'),
       undefined,
       'a confirmed non-commit leaves the exact receipt reusable',
     );
-    assert.equal(harness.committedDeleteMarkers.length, 1);
+    assert.equal(harness.committedDeleteMarkers.length, markerCountAfterSourceDelete + 1);
     await assert.rejects(
       harness.invoke('calendar:privacy-migration:settle-replacement', failing.receipt, 'delete'),
       /receipt|보상|사용/i,
@@ -2758,6 +4379,134 @@ test('calendar event move passes the expected source, whitelisted target patch, 
       'source-calendar',
       'session-user',
     ]]);
+  } finally {
+    harness.restore();
+  }
+});
+
+test('calendar event move emits an isolated source delete and target create notification', async () => {
+  const sourceCalendar = calendarRow({
+    id: 'source-calendar',
+    name: '원본 전용 캘린더',
+    visibility: 'members',
+    owner_id: 'source-owner',
+  });
+  const targetCalendar = calendarRow({
+    id: 'target-calendar',
+    name: '대상 전용 캘린더',
+    visibility: 'members',
+    owner_id: 'target-owner',
+  });
+  const sourceMembers = [
+    { calendar_id: 'source-calendar', user_id: 'actor', can_edit: true },
+    { calendar_id: 'source-calendar', user_id: 'source-only', can_edit: false },
+    { calendar_id: 'source-calendar', user_id: 'common', can_edit: false },
+  ];
+  const targetMembers = [
+    { calendar_id: 'target-calendar', user_id: 'actor', can_edit: true },
+    { calendar_id: 'target-calendar', user_id: 'target-only', can_edit: false },
+    { calendar_id: 'target-calendar', user_id: 'common', can_edit: false },
+  ];
+  const previous = calendarEventRow({
+    id: 'moving-event',
+    calendar_id: 'source-calendar',
+    title: '원본 전용 제목',
+    start_date: '2026-09-20',
+    end_date: '2026-09-20',
+    created_by: 'actor',
+  });
+  const updated = calendarEventRow({
+    ...previous,
+    calendar_id: 'target-calendar',
+    title: '대상 전용 제목',
+    start_date: '2026-09-22',
+    end_date: '2026-09-22',
+  });
+  const notificationBatches: Array<Array<Record<string, unknown>>> = [];
+  const harness = await createIpcHarness({
+    getUserRole: async () => 'user',
+    getEventByIdForWrite: async () => previous,
+    getCalendarWithMembers: async (calendarId) => {
+      if (calendarId === 'source-calendar') {
+        return { calendar: sourceCalendar, members: sourceMembers };
+      }
+      if (calendarId === 'target-calendar') {
+        return { calendar: targetCalendar, members: targetMembers };
+      }
+      throw new Error(`unexpected calendar ${String(calendarId)}`);
+    },
+    updateEvent: async () => updated,
+    insertNotifications: async (rows) => {
+      notificationBatches.push(rows as Array<Record<string, unknown>>);
+    },
+  }, 'actor', {
+    readUsers: async () => [
+      { id: 'actor', name: '행위자' },
+      { id: 'source-owner', name: '원본 소유자' },
+      { id: 'source-only', name: '원본 멤버' },
+      { id: 'target-owner', name: '대상 소유자' },
+      { id: 'target-only', name: '대상 멤버' },
+      { id: 'common', name: '공통 멤버' },
+    ],
+  });
+  try {
+    assert.deepEqual(
+      await harness.invoke('calendar:events:update', 'moving-event', {
+        calendar_id: 'target-calendar',
+        title: '대상 전용 제목',
+        start_date: '2026-09-22',
+        end_date: '2026-09-22',
+      }),
+      updated,
+    );
+    assert.ok(harness.notificationRuntime);
+    assert.equal(await harness.notificationRuntime.waitForNotificationIdle(1_000), true);
+
+    const rows = notificationBatches.flat();
+    const sourceRows = rows.filter((row) => row.action === 'delete');
+    const targetRows = rows.filter((row) => row.action === 'create');
+    assert.deepEqual(
+      sourceRows.map((row) => row.recipient_id).sort(),
+      ['common', 'source-only', 'source-owner'],
+      'the source audience receives only the removal context',
+    );
+    assert.deepEqual(
+      targetRows.map((row) => row.recipient_id).sort(),
+      ['common', 'target-only', 'target-owner'],
+      'the target audience receives only the new-calendar context',
+    );
+    assert.deepEqual(
+      sourceRows.filter((row) => row.recipient_id === 'source-only'),
+      [{
+        recipient_id: 'source-only', actor_id: 'actor', actor_name: '행위자',
+        calendar_id: 'source-calendar', calendar_name: '원본 전용 캘린더',
+        event_id: 'moving-event', event_title: '원본 전용 제목', event_date: '2026-09-20',
+        action: 'delete', detail: null,
+      }],
+      'a source-only member never receives target title or calendar metadata',
+    );
+    assert.deepEqual(
+      targetRows.filter((row) => row.recipient_id === 'target-only'),
+      [{
+        recipient_id: 'target-only', actor_id: 'actor', actor_name: '행위자',
+        calendar_id: 'target-calendar', calendar_name: '대상 전용 캘린더',
+        event_id: 'moving-event', event_title: '대상 전용 제목', event_date: '2026-09-22',
+        action: 'create', detail: null,
+      }],
+      'a target-only member never receives source title or calendar metadata',
+    );
+    assert.deepEqual(
+      rows.filter((row) => row.recipient_id === 'common').map((row) => ({
+        action: row.action,
+        calendar_id: row.calendar_id,
+        event_title: row.event_title,
+      })).sort((left, right) => String(left.action).localeCompare(String(right.action))),
+      [
+        { action: 'create', calendar_id: 'target-calendar', event_title: '대상 전용 제목' },
+        { action: 'delete', calendar_id: 'source-calendar', event_title: '원본 전용 제목' },
+      ],
+      'a common member may see both, each with its own authoritative context',
+    );
   } finally {
     harness.restore();
   }
@@ -3136,6 +4885,331 @@ test('calendar store keeps soft reads empty while strict write pre-reads surface
     console.warn = originalWarn;
     if (hadPrior) globalScope[STORE_HARNESS_KEY] = prior;
     else delete globalScope[STORE_HARNESS_KEY];
+  }
+});
+
+test('calendar notification catch-up posts every normalized exclusion UUID to its authorized RPC without a GET fallback', async () => {
+  const globalScope = globalThis as Record<string, unknown>;
+  const hadPrior = Object.prototype.hasOwnProperty.call(globalScope, STORE_HARNESS_KEY);
+  const prior = globalScope[STORE_HARNESS_KEY];
+  const expectedExcludedIds = Array.from(
+    { length: 303 },
+    (_, index) => `10000000-0000-4000-8000-${String(index + 1).padStart(12, '0')}`,
+  );
+  const rpcCalls: Array<{ name: string; args: Record<string, unknown> }> = [];
+  globalScope[STORE_HARNESS_KEY] = {
+    from() {
+      assert.fail('notification catch-up must not fall back to a direct GET query');
+    },
+    rpc: async (name: string, args: Record<string, unknown>) => {
+      rpcCalls.push({ name, args });
+      return { data: [{ id: 'newest' }], error: null };
+    },
+  };
+  try {
+    const encoded = Buffer.from(await bundledCalendarStoreSource()).toString('base64');
+    const store = await import(`data:text/javascript;base64,${encoded}#calendar-store-${storeNonce++}`) as {
+      listUnreadNotifications(
+        recipientId: string,
+        sinceIso: string,
+        input?: { excludedCalendarIds?: string[] },
+      ): Promise<Array<{ id: string }>>;
+    };
+
+    assert.deepEqual(
+      await store.listUnreadNotifications('canonical-recipient', '2026-07-27T00:00:00.000Z', {
+        excludedCalendarIds: [
+          expectedExcludedIds[0].toUpperCase(),
+          expectedExcludedIds[0],
+          'calendar_id.eq.renderer-controlled-recipient',
+          ...expectedExcludedIds.slice(1),
+        ],
+      }),
+      [{ id: 'newest' }],
+    );
+    assert.deepEqual(rpcCalls, [{
+      name: 'list_calendar_notifications_authorized',
+      args: {
+        p_actor_id: 'canonical-recipient',
+        p_since: '2026-07-27T00:00:00.000Z',
+        p_excluded_calendar_ids: expectedExcludedIds,
+      },
+    }]);
+  } finally {
+    if (hadPrior) globalScope[STORE_HARNESS_KEY] = prior;
+    else delete globalScope[STORE_HARNESS_KEY];
+  }
+});
+
+test('calendar notification catch-up forwards all 101 muted calendars before the RPC limit, keeps deletion rows, and never marks rows read', async () => {
+  const globalScope = globalThis as Record<string, unknown>;
+  const hadPrior = Object.prototype.hasOwnProperty.call(globalScope, STORE_HARNESS_KEY);
+  const prior = globalScope[STORE_HARNESS_KEY];
+  const mutedCalendarIds = Array.from(
+    { length: 101 },
+    (_, index) => `10000000-0000-4000-8000-${String(index + 1).padStart(12, '0')}`,
+  );
+  const visibleCalendarId = '30000000-0000-4000-8000-000000000003';
+  const rows = [
+    {
+      id: 'visible-z',
+      recipient_id: 'recipient-1',
+      read_at: null,
+      calendar_id: visibleCalendarId,
+      created_at: '2026-08-26T11:00:00.000Z',
+    },
+    {
+      id: 'visible-a',
+      recipient_id: 'recipient-1',
+      read_at: null,
+      calendar_id: visibleCalendarId,
+      created_at: '2026-08-26T11:00:00.000Z',
+    },
+    {
+      id: 'deleted-event',
+      recipient_id: 'recipient-1',
+      read_at: null,
+      calendar_id: null,
+      created_at: '2026-08-26T10:00:00.000Z',
+    },
+  ];
+  const rpcCalls: Array<{ name: string; args: Record<string, unknown> }> = [];
+  globalScope[STORE_HARNESS_KEY] = {
+    from() {
+      assert.fail('notification catch-up must not perform a direct GET query');
+    },
+    rpc: async (name: string, args: Record<string, unknown>) => {
+      rpcCalls.push({ name, args });
+      return { data: rows, error: null };
+    },
+  };
+  try {
+    const encoded = Buffer.from(await bundledCalendarStoreSource()).toString('base64');
+    const store = await import(`data:text/javascript;base64,${encoded}#calendar-store-${storeNonce++}`) as {
+      listUnreadNotifications(
+        recipientId: string,
+        sinceIso: string,
+        input?: { excludedCalendarIds?: string[] },
+      ): Promise<Array<{ id: string }>>;
+    };
+
+    assert.deepEqual(
+      (await store.listUnreadNotifications('recipient-1', '2026-07-27T00:00:00.000Z', {
+        excludedCalendarIds: mutedCalendarIds,
+      })).map((row) => row.id),
+      ['visible-z', 'visible-a', 'deleted-event'],
+    );
+    assert.ok(rows.every((row) => row.read_at === null), 'muting only filters catch-up rows and never marks them read');
+    assert.deepEqual(rpcCalls, [{
+      name: 'list_calendar_notifications_authorized',
+      args: {
+        p_actor_id: 'recipient-1',
+        p_since: '2026-07-27T00:00:00.000Z',
+        p_excluded_calendar_ids: mutedCalendarIds,
+      },
+    }]);
+  } finally {
+    if (hadPrior) globalScope[STORE_HARNESS_KEY] = prior;
+    else delete globalScope[STORE_HARNESS_KEY];
+  }
+});
+
+test('calendar notification catch-up ignores malformed exclusion values before the RPC payload', async () => {
+  const globalScope = globalThis as Record<string, unknown>;
+  const hadPrior = Object.prototype.hasOwnProperty.call(globalScope, STORE_HARNESS_KEY);
+  const prior = globalScope[STORE_HARNESS_KEY];
+  const rpcCalls: Array<{ name: string; args: Record<string, unknown> }> = [];
+  globalScope[STORE_HARNESS_KEY] = {
+    from() {
+      assert.fail('notification catch-up must not compose a direct storage filter');
+    },
+    rpc: async (name: string, args: Record<string, unknown>) => {
+      rpcCalls.push({ name, args });
+      return { data: [{ id: 'still-visible' }], error: null };
+    },
+  };
+  try {
+    const encoded = Buffer.from(await bundledCalendarStoreSource()).toString('base64');
+    const store = await import(`data:text/javascript;base64,${encoded}#calendar-store-${storeNonce++}`) as {
+      listUnreadNotifications(
+        recipientId: string,
+        sinceIso: string,
+        input?: { excludedCalendarIds?: unknown[] },
+      ): Promise<Array<{ id: string }>>;
+    };
+
+    assert.deepEqual(
+      await store.listUnreadNotifications('recipient-1', '2026-07-27T00:00:00.000Z', {
+        excludedCalendarIds: [
+          'calendar_id.eq.someone-else',
+          '10000000-0000-4000-8000-000000000002),recipient_id.eq(attacker)',
+          42,
+        ],
+      }),
+      [{ id: 'still-visible' }],
+    );
+    assert.deepEqual(rpcCalls, [{
+      name: 'list_calendar_notifications_authorized',
+      args: {
+        p_actor_id: 'recipient-1',
+        p_since: '2026-07-27T00:00:00.000Z',
+        p_excluded_calendar_ids: [],
+      },
+    }]);
+  } finally {
+    if (hadPrior) globalScope[STORE_HARNESS_KEY] = prior;
+    else delete globalScope[STORE_HARNESS_KEY];
+  }
+});
+
+test('calendar notification catch-up soft-reads only its exactly missing authorized RPC', async () => {
+  const globalScope = globalThis as Record<string, unknown>;
+  const hadPrior = Object.prototype.hasOwnProperty.call(globalScope, STORE_HARNESS_KEY);
+  const prior = globalScope[STORE_HARNESS_KEY];
+  const originalWarn = console.warn;
+  const scenarios = [
+    {
+      error: {
+        code: 'PGRST202',
+        message: 'Could not find the function public.list_calendar_notifications_authorized in the schema cache',
+      },
+      empty: true,
+    },
+    {
+      error: {
+        code: '42883',
+        message: 'function public.list_calendar_notifications_authorized(text,timestamp with time zone,uuid[]) does not exist',
+      },
+      empty: true,
+    },
+    {
+      error: {
+        code: 'PGRST202',
+        message: 'Could not find the function public.some_other_function in the schema cache',
+      },
+      empty: false,
+    },
+    {
+      error: {
+        code: '08006',
+        message: 'temporary connection failure while calling list_calendar_notifications_authorized',
+      },
+      empty: false,
+    },
+    {
+      error: {
+        code: '42P01',
+        message: 'relation calendar_notifications does not exist',
+      },
+      empty: false,
+    },
+  ] as const;
+  try {
+    console.warn = () => {};
+    const encoded = Buffer.from(await bundledCalendarStoreSource()).toString('base64');
+    for (const scenario of scenarios) {
+      globalScope[STORE_HARNESS_KEY] = {
+        from() {
+          assert.fail('notification catch-up must not fall back to a direct GET query');
+        },
+        rpc: async () => ({ data: null, error: scenario.error }),
+      };
+      const store = await import(`data:text/javascript;base64,${encoded}#calendar-store-${storeNonce++}`) as {
+        listUnreadNotifications(recipientId: string, sinceIso: string): Promise<unknown[]>;
+      };
+      if (scenario.empty) {
+        assert.deepEqual(await store.listUnreadNotifications('recipient-1', '2026-07-27T00:00:00.000Z'), []);
+      } else {
+        await assert.rejects(
+          store.listUnreadNotifications('recipient-1', '2026-07-27T00:00:00.000Z'),
+          new RegExp(scenario.error.message.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')),
+        );
+      }
+    }
+  } finally {
+    console.warn = originalWarn;
+    if (hadPrior) globalScope[STORE_HARNESS_KEY] = prior;
+    else delete globalScope[STORE_HARNESS_KEY];
+  }
+});
+
+test('calendar notification catch-up migration keeps filtering, ordering, and the 200-row cap inside an invoker RPC', () => {
+  const migrationPath = join('DEVLOG', 'migrations', '2026-08-27-calendar-notification-catchup.sql');
+  assert.ok(existsSync(migrationPath), 'notification catch-up migration must be added separately');
+  const sql = readFileSync(migrationPath, 'utf8').replace(/\r\n?/g, '\n');
+  assert.match(
+    sql,
+    /apply only AFTER\s+DEVLOG\/migrations\/2026-08-24-shared-calendars\.sql\s+has successfully been applied/i,
+    'the migration must name the successful shared-calendar migration prerequisite',
+  );
+  assert.match(
+    sql,
+    /Before deploying v1\.106\.0, manually apply this migration after user approval/i,
+    'the migration must require user-approved manual application before this release deploys',
+  );
+  assert.match(
+    sql,
+    /Verify that function public\.list_calendar_notifications_authorized and partial index idx_calendar_notifications_unread_recipient_created_id exist\. This PR does not execute SQL\./i,
+    'the migration must name its post-apply verification and state that this PR never executes SQL',
+  );
+  const functionStart = sql.indexOf('CREATE OR REPLACE FUNCTION public.list_calendar_notifications_authorized');
+  const functionEnd = sql.indexOf('COMMENT ON FUNCTION public.list_calendar_notifications_authorized');
+  assert.ok(functionStart >= 0 && functionEnd > functionStart, 'authorized catch-up RPC must have a bounded definition');
+  const functionSql = sql.slice(functionStart, functionEnd);
+
+  assert.match(
+    functionSql,
+    /p_actor_id\s+TEXT[\s\S]*p_since\s+TIMESTAMPTZ[\s\S]*p_excluded_calendar_ids\s+UUID\[\]\s+DEFAULT\s+ARRAY\[\]::UUID\[\][\s\S]*RETURNS\s+SETOF\s+public\.calendar_notifications/i,
+  );
+  assert.match(functionSql, /LANGUAGE\s+sql\s+SECURITY INVOKER\s+SET search_path\s*=\s*public,\s*pg_temp\s+STABLE/i);
+  assert.doesNotMatch(functionSql, /SECURITY DEFINER/i);
+  assert.match(
+    functionSql,
+    /unnest\s*\(\s*COALESCE\s*\(\s*p_excluded_calendar_ids\s*,\s*ARRAY\[\]::UUID\[\]\s*\)\s*\)\s+AS\s+input\s*\(\s*excluded_calendar_id\s*\)/i,
+  );
+  assert.match(functionSql, /input\.excluded_calendar_id\s+IS\s+NOT\s+NULL/i);
+  assert.match(functionSql, /FROM\s+public\.users\s+AS\s+actor[\s\S]*actor\.id\s*=\s*p_actor_id/i);
+  assert.match(functionSql, /notification\.recipient_id\s*=\s*p_actor_id/i);
+  assert.match(functionSql, /notification\.read_at\s+IS\s+NULL/i);
+  assert.match(functionSql, /notification\.created_at\s*>=\s*p_since/i);
+  assert.match(
+    functionSql,
+    /LEFT JOIN\s+excluded_calendar_ids\s+AS\s+excluded\s+ON\s+excluded\.excluded_calendar_id\s*=\s*notification\.calendar_id/i,
+  );
+  assert.match(functionSql, /excluded\.excluded_calendar_id\s+IS\s+NULL/i);
+  assert.match(functionSql, /ORDER BY\s+notification\.created_at\s+DESC\s*,\s*notification\.id\s+DESC\s+LIMIT\s+200\s*;/i);
+  assert.match(
+    sql,
+    /CREATE INDEX IF NOT EXISTS idx_calendar_notifications_unread_recipient_created_id\s+ON public\.calendar_notifications\s+\(recipient_id, created_at DESC, id DESC\)\s+WHERE read_at IS NULL\s*;/i,
+  );
+});
+
+test('calendar notification catch-up binds the recipient to the canonical session while forwarding only safe muted calendar ids', async () => {
+  const calls: unknown[][] = [];
+  const safeCalendarId = '10000000-0000-4000-8000-000000000002';
+  const harness = await createIpcHarness({
+    getUserRole: async () => 'user',
+    listUnreadNotifications: async (...args: unknown[]) => {
+      calls.push(args);
+      return [];
+    },
+  }, 'canonical-recipient');
+  try {
+    await harness.invoke('calendar:notifications:catchup', {
+      recipientId: 'renderer-controlled-recipient',
+      excludedCalendarIds: [
+        safeCalendarId,
+        safeCalendarId,
+        'calendar_id.eq.renderer-controlled-recipient',
+      ],
+    });
+
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0][0], 'canonical-recipient');
+    assert.equal(typeof calls[0][1], 'string');
+    assert.deepEqual(calls[0][2], { excludedCalendarIds: [safeCalendarId] });
+  } finally {
+    harness.restore();
   }
 });
 

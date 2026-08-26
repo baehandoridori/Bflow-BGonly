@@ -72,6 +72,7 @@ import { Toaster, toast as sonnerToast } from 'sonner';
 import { ConfirmDialogHost } from '@/components/common/ConfirmDialog';
 import { SvgIconDefs } from '@/components/SvgIconDefs';
 import { useNotificationStore, type AppNotification } from '@/stores/useNotificationStore';
+import { useCalendarStore } from '@/stores/useCalendarStore';
 import { useVacationPendingStore } from '@/stores/useVacationPendingStore';
 import { useSceneWorkLinkStore } from '@/stores/useSceneWorkLinkStore';
 import { dispatchNotification, type NotificationSettings } from '@/utils/notificationHelper';
@@ -99,6 +100,8 @@ import {
 } from '@/utils/notificationEpisodeLabels';
 import { isGeneralRevisionSceneKey } from '@/utils/revisionGeneral';
 import { isRecentSelfRevisionAction } from '@/stores/useRevisionStore';
+import { buildCalendarNotificationText } from '@/shared/calendarNotifications';
+import type { CalendarNotificationPushRow } from '@/shared/calendarNotifications';
 import type { RevisionAssigneeState, SupabaseRealtimeStatusMetadata, UpdateInfo } from '@/types';
 
 // Lazy chunk 로드 실패(네트워크 끊김, 빌드 artifact 누락) 시 블랭크 스크린 방지용 ErrorBoundary.
@@ -1247,6 +1250,61 @@ export default function App() {
     })();
   }, [currentUser, authReady]);
 
+  // PR4: 캘린더 알림 catch-up — 최근 30일 미읽음은 read_at 기준으로 IPC가 제한한다.
+  // 원본 IPC 행은 snake_case 경계를 유지하고, renderer에서는 표시 메타데이터만 만든다.
+  const calendarCatchupDoneRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!currentUser) {
+      resetCatchupRun(calendarCatchupDoneRef);
+      return;
+    }
+    if (!authReady) return;
+    if (!beginCatchupRun(calendarCatchupDoneRef, currentUser.id)) return;
+
+    const me = currentUser;
+    (async () => {
+      try {
+        const muted = useCalendarStore.getState().mutedCalendarIds;
+        const rows = await window.electronAPI?.calendarNotificationsCatchup?.({
+          excludedCalendarIds: muted,
+        });
+        if (useAuthStore.getState().currentUser?.id !== me.id || !rows?.length) return;
+
+        const store = useNotificationStore.getState();
+        let shown = 0;
+        for (const r of orderCatchupRowsForPrepend(rows)) {
+          if (r.recipient_id !== me.id) continue;
+          if (r.actor_id === me.id) continue;
+          if (r.calendar_id && muted.includes(r.calendar_id)) continue;
+
+          const text = buildCalendarNotificationText({
+            actorName: r.actor_name ?? '알 수 없음',
+            calendarName: r.calendar_name ?? '캘린더',
+            eventTitle: r.event_title ?? '',
+            action: r.action,
+            detail: r.detail,
+          });
+          store.addNotification({
+            type: 'calendar',
+            title: text.title,
+            body: text.body,
+            createdAt: r.created_at,
+            metadata: {
+              calendarNotificationId: r.id,
+              calendarId: r.calendar_id ?? undefined,
+              eventDate: r.event_date ?? undefined,
+            },
+          });
+          shown += 1;
+        }
+        if (shown > 0) console.log('[calendar-catchup] 미읽음 캘린더 알림', shown, '건 복원');
+      } catch (err) {
+        console.warn('[calendar-catchup] 실패:', err);
+        releaseCatchupRunOnError(calendarCatchupDoneRef, me.id);
+      }
+    })();
+  }, [currentUser, authReady]);
+
   // v1.29.0: 댓글 이모지 반응 알림 catch-up — 미접속 사이 받은 반응 알림 일괄 조회.
   //   acting_feedback / scene_assignment 와 동일 패턴 (별도 lastSeen + 페이지네이션 + logout 시 ref clear).
   const reactionCatchupDoneRef = useRef<string | null>(null);
@@ -1509,6 +1567,34 @@ export default function App() {
     const cleanup = onSupabaseRealtimeEvent((event: SupabaseRealtimeEvent) => {
       const { table, payload } = event;
       console.log(`[App Realtime] 이벤트 수신: table=${table}, type=${payload?.eventType}`);
+
+      if (table === 'calendar_notifications') {
+        const notification = payload?.notification as CalendarNotificationPushRow | undefined;
+        const me = useAuthStore.getState().currentUser;
+        if (!notification || !me?.id) return;
+        if (notification.recipientId !== me.id) return;
+        if (notification.actorId === me.id) return;
+        const mutedCalendarIds = useCalendarStore.getState().mutedCalendarIds;
+        if (notification.calendarId && mutedCalendarIds.includes(notification.calendarId)) return;
+        const text = buildCalendarNotificationText({
+          actorName: notification.actorName ?? '알 수 없음',
+          calendarName: notification.calendarName ?? '캘린더',
+          eventTitle: notification.eventTitle ?? '',
+          action: notification.action,
+          detail: notification.detail,
+        });
+        dispatchNotification({
+          type: 'calendar',
+          title: text.title,
+          body: text.body,
+          metadata: {
+            calendarNotificationId: notification.id,
+            calendarId: notification.calendarId ?? undefined,
+            eventDate: notification.eventDate ?? undefined,
+          },
+        }, notiSettingsRef.current);
+        return;
+      }
 
       if (sharedBflowCalendarChangeDetail(event)) {
         void applyIncomingSharedBflowCalendarChangeInApp(event);
@@ -2323,15 +2409,11 @@ export default function App() {
     });
 
     // 위젯 팝업의 개인 할일 → 본체 캘린더(일정)의 해당 날짜로 이동.
-    // 팝업 창엔 ScheduleView·setView 가 없어 자기 창에서는 무동작이므로, 본체가 신호를 받아 라우팅.
+    // 팝업 창엔 ScheduleView가 없어 자기 창에서는 무동작이므로, 본체가 저장소 기반 요청으로 라우팅.
     const offWidgetNavigateDate = window.electronAPI.onWidgetNavigateToDate?.((payload) => {
-      useAppStore.getState().setView('schedule');
-      if (payload.date) {
-        // ScheduleView 마운트 후 이벤트 디스패치 (300ms 대기) — 자기 창 경로와 동일 타이밍
-        setTimeout(() => {
-          window.dispatchEvent(new CustomEvent('bflow:navigate-to-date', { detail: { date: payload.date, todoId: payload.todoId } }));
-        }, 300);
-      }
+      useAppStore.getState().navigateToScheduleDate(
+        payload.date ? { date: payload.date, todoId: payload.todoId } : undefined,
+      );
     });
 
     return () => {
@@ -2604,6 +2686,11 @@ export default function App() {
           )).catch((e) => console.warn('[Broadcast] users 변경 재로드 실패:', e));
           return;
         }
+        // 캘린더 계열은 전용 정본 재조회/알림 경로로만 반영한다.
+        // 구버전 나만 보기 쓰기(private_calendar_events)도 일반 전체 reload를 유발하지 않는다.
+        if (changedTable && (changedTable.startsWith('calendar') || changedTable === 'private_calendar_events')) {
+          return;
+        }
         // 구조적 변경 (씬/파트/에피소드 추가/삭제) → 디바운스 full reload
         if (reloadTimer) clearTimeout(reloadTimer);
         reloadTimer = setTimeout(() => {
@@ -2728,6 +2815,7 @@ export default function App() {
               }));
               return;
             }
+            await calendar.loadBflowEvents({ broadcast: false });
             const { isAuthenticated } = await import('@/services/googleCalendarService');
             if (!await isAuthenticated()) return;
             await calendar.syncIncremental();

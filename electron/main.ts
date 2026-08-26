@@ -19,8 +19,9 @@ import { uploadImage as driveUploadImage, setImageUploadUrl } from './drive-imag
 import { uploadImage as storageUploadImage, deleteImage as storageDeleteImage, uploadCharacterImage as storageUploadCharacterImage } from './storage';
 // v1.20.0: 사용자 폰트 IPC + bflow-font:// custom protocol
 import { registerFontProtocol, registerFontIpcHandlers } from './fontIpc';
-import { registerCalendarIpc } from './calendarIpc';
+import { registerCalendarIpc, type CalendarNotificationDrain } from './calendarIpc';
 import {
+  broadcastCalendarNotificationToSessionWindows,
   broadcastCommittedCalendarDeleteToWindows,
   broadcastSharedCalendarSignalToWindows,
   broadcastTrustedSharedCalendarChangeToWindows,
@@ -1441,6 +1442,7 @@ import {
 } from './supabase';
 import type { BulkStageUpdate, BulkFieldUpdate } from './supabase';
 import { setupRealtimeSubscription, teardownRealtime, trackPresence } from './realtime';
+import { mapCalendarNotificationRow } from '../src/shared/calendarNotifications';
 import { recordActivity, getActivity, channelToTable, channelToAction } from './activityLogger';
 import { startEditingPresenceService, receivePresence } from './presence/editingPresenceService';
 import { sceneWorkFileEntries } from './presence/sceneLinkIndex';
@@ -1653,6 +1655,7 @@ let sessionManager: SessionManager;
 let personalTodoService: PersonalTodoService;
 let marketAccountService: MarketAccountService;
 let arcadeService: ArcadeService;
+let calendarNotificationDrain: CalendarNotificationDrain;
 
 // 아케이드 신기록 슬랙 웹훅 — Task 13(신기록 알림)에서 실제 URL 을 채운다.
 // 빈 문자열이면 발송을 건너뛴다(기존 웹훅 패턴과 동일).
@@ -1775,6 +1778,18 @@ sessionManager = new SessionManager({
     personalTodoService.endSessionTransition(userId, epoch);
     marketAccountService.endSessionTransition(userId, epoch);
     arcadeService.endSessionTransition(userId, epoch);
+  },
+  beginPrivacyReplacementTransition: (userId, epoch) => {
+    calendarNotificationDrain.beginPrivacyReplacementTransition({ userId, epoch });
+  },
+  drainPrivacyReplacementTransition: (userId, epoch) => (
+    calendarNotificationDrain.drainPrivacyReplacementTransition({ userId, epoch })
+  ),
+  completePrivacyReplacementTransition: (userId, epoch) => {
+    calendarNotificationDrain.completePrivacyReplacementTransition({ userId, epoch });
+  },
+  abortPrivacyReplacementTransition: (userId, epoch) => {
+    calendarNotificationDrain.abortPrivacyReplacementTransition({ userId, epoch });
   },
   drainPersonalDataQueue: async (userId) => {
     await Promise.all([
@@ -2448,6 +2463,25 @@ function getSessionUserIdOrThrow(): string {
   return id;
 }
 
+/** replacement 생성의 actor/epoch는 첫 persistence await 전에 고정한다. */
+function getSessionOriginOrThrow(): { userId: string; epoch: number; role: 'admin' | 'user' } {
+  const session = lastKnownSession as {
+    user?: { id?: string; role?: unknown };
+    epoch?: unknown;
+  } | null;
+  const userId = session?.user?.id;
+  const epoch = session?.epoch;
+  if (!userId || typeof epoch !== 'number' || !Number.isSafeInteger(epoch) || epoch < 0) {
+    throw new Error('세션에 로그인 사용자 정보가 없습니다 (비공개 일정)');
+  }
+  return {
+    userId,
+    epoch,
+    // 알 수 없는 role을 admin으로 넓히지 않는다. 정상 세션에는 Supabase role이 들어온다.
+    role: session.user?.role === 'admin' ? 'admin' : 'user',
+  };
+}
+
 registerLegacyPrivateEventIpc(ipcMain, {
   getSessionUserIdOrThrow,
   assertLiveUser: async (userId) => {
@@ -2474,8 +2508,9 @@ setCalendarChangedLocalListener((payload) => {
   );
 });
 
-registerCalendarIpc({
+calendarNotificationDrain = registerCalendarIpc({
   getSessionUserIdOrThrow,
+  getSessionOriginOrThrow,
   createLegacyPrivateEvent: (input, actorId) => sbAddPrivateEvent({
     ...input,
     user_id: actorId,
@@ -3111,6 +3146,7 @@ function startSupabaseRealtime() {
     onEpisodeChange: (payload) => broadcastSupabaseEvent('episodes', payload),
     onPartChange: (payload) => broadcastSupabaseEvent('parts', payload),
     onCalendarChange: (table, payload) => broadcastSupabaseCalendarEvent(table, payload),
+    onCalendarNotificationInsert: (payload) => broadcastSupabaseCalendarNotification(payload),
     onSceneWorkLinkChange: (payload) => {
       broadcastSupabaseEvent('scene_work_links', payload);
       // 프레즌스 basename→씬 매칭에 쓰는 캐시를 최신화(전체 재로드) 후 재평가.
@@ -3304,6 +3340,22 @@ function broadcastSupabaseCalendarEvent(table: string, payload: unknown) {
     mainWindow,
     widgetWindows.values(),
     event,
+  );
+}
+
+/** calendar_notifications 는 canonical main 세션 수신자에게만 최소 형태로 전달한다. */
+function broadcastSupabaseCalendarNotification(payload: unknown) {
+  const row = payload && typeof payload === 'object'
+    ? (payload as { new?: unknown }).new
+    : null;
+  if (!row || typeof row !== 'object') return;
+  const notification = mapCalendarNotificationRow(row as Record<string, unknown>);
+  if (!notification) return;
+  broadcastCalendarNotificationToSessionWindows(
+    notification,
+    getSessionUserIdOrThrow,
+    mainWindow,
+    widgetWindows.values(),
   );
 }
 
@@ -5112,6 +5164,9 @@ app.on('before-quit', (e) => {
   isQuitting = true;
   personalTodoService.beginQuitting();
   marketAccountService.beginQuitting();
+  // pending snapshot 전에 캘린더 알림 mutation intake를 닫는다. 이미 시작된 저장은
+  // producer fence에 남아 알림 enqueue까지 기다리고, 이후 새 쓰기는 persistence에 닿지 않는다.
+  calendarNotificationDrain.beginQuitting();
 
   // GCal Watch 채널 중지 (5초 타임아웃)
   const watchCleanup = gcal.stopAllWatches().catch(() => {});
@@ -5138,14 +5193,19 @@ app.on('before-quit', (e) => {
   const vacPending = getVacPendingOpsCount();
   const personalPending = personalTodoService.getPendingCount();
   const marketPending = marketAccountService.getPendingCount();
-  const totalPending = sheetsPending + vacPending + personalPending + marketPending;
+  const calendarNotificationPending = calendarNotificationDrain.getPendingNotificationCount();
+  const totalPending = sheetsPending
+    + vacPending
+    + personalPending
+    + marketPending
+    + calendarNotificationPending;
   // 자동 업데이트 installer 적용이 있으면 어떤 분기든 e.preventDefault + 비동기 chain 끝에 적용.
   // 기존 fire-and-forget 분기도 installer helper spawn 시점까지 대기 — race 위험 제거.
   e.preventDefault();
 
   // 메인 윈도우에 "저장 중" 알림 (pending 작업이 있는 경우만 의미 있음)
   if (totalPending > 0) {
-    console.log(`[종료] ${totalPending}개 작업 대기 중 (시트: ${sheetsPending}, 휴가: ${vacPending}, 모의투자: ${marketPending})... 완료 후 종료합니다.`);
+    console.log(`[종료] ${totalPending}개 작업 대기 중 (시트: ${sheetsPending}, 휴가: ${vacPending}, 개인: ${personalPending}, 모의투자: ${marketPending}, 캘린더 알림: ${calendarNotificationPending})... 완료 후 종료합니다.`);
     if (mainWindow && !mainWindow.isDestroyed()) {
       mainWindow.webContents.send('app:saving-before-quit', totalPending);
     }
@@ -5159,14 +5219,15 @@ app.on('before-quit', (e) => {
   (async () => {
     try {
       if (totalPending > 0) {
-        const [, sheetsDone, vacDone, personalDone, marketDone] = await Promise.all([
+        const [, sheetsDone, vacDone, personalDone, marketDone, calendarNotificationDone] = await Promise.all([
           watchWithTimeout,
           waitForAllPendingOps(15000),
           waitForVacPendingOps(60000),
           personalTodoService.waitForIdle(15000),
           marketAccountService.waitForIdle(15000),
+          calendarNotificationDrain.waitForNotificationIdle(15000),
         ]);
-        if (!sheetsDone || !vacDone || !personalDone || !marketDone) {
+        if (!sheetsDone || !vacDone || !personalDone || !marketDone || !calendarNotificationDone) {
           console.warn('[종료] 타임아웃 — 일부 작업이 완료되지 않았을 수 있습니다');
         } else {
           console.log('[종료] 저장 완료, 앱을 종료합니다');
@@ -5176,6 +5237,7 @@ app.on('before-quit', (e) => {
           watchWithTimeout.catch(() => { /* noop */ }),
           personalTodoService.waitForIdle(15000),
           marketAccountService.waitForIdle(15000),
+          calendarNotificationDrain.waitForNotificationIdle(15000),
         ]);
       }
 

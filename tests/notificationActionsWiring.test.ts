@@ -13,6 +13,7 @@ const sceneDetailModal = readFileSync('src/components/scenes/SceneDetailModal.ts
 const unifiedSceneDetailModal = readFileSync('src/components/scenes/UnifiedSceneDetailModal.tsx', 'utf8');
 const revisionCommentThread = readFileSync('src/components/scenes/RevisionCommentThread.tsx', 'utf8');
 const app = readFileSync('src/App.tsx', 'utf8');
+const myTasksWidget = readFileSync('src/components/widgets/MyTasksWidget.tsx', 'utf8');
 
 test('notification panel and toast actions share one scene navigation path', () => {
   assert.match(notificationPanel, /navigateNotificationToScene\(n\.type,\s*n\.metadata\)/);
@@ -53,6 +54,35 @@ test('all notification click paths mark domain read state before navigating', ()
   assert.match(notificationDomainRead, /markCommentReactionRead\(reactionNotificationId\)/);
   assert.match(notificationDomainRead, /markFeedbackNotificationRead\(feedbackNotificationId\)/);
   assert.match(notificationDomainRead, /markAssignmentNotificationRead\(assignmentNotificationId\)/);
+  assert.match(notificationDomainRead, /calendarNotificationsMarkRead\?\.\(\[calendarNotificationId\]\)/);
+});
+
+test('calendar date entry points store a durable schedule request instead of racing a custom event', () => {
+  assert.match(notificationPanel, /CalendarDays/);
+  assert.match(notificationPanel, /case 'calendar': return \{ icon: CalendarDays, color: '#74B9FF', label: '일정' \}/);
+  assert.match(notificationPanel, /if \(n\.type === 'calendar'\) \{[\s\S]*?navigateToScheduleDate\(date \? \{ date \} : undefined\)/);
+  assert.match(myTasksWidget, /navigateToScheduleDate\(todo\.startDate \? \{ date: todo\.startDate, todoId: todo\.id \} : undefined\)/);
+  assert.match(app, /onWidgetNavigateToDate\?\.\(\(payload\) => \{[\s\S]*?navigateToScheduleDate\([\s\S]*?date: payload\.date, todoId: payload\.todoId/);
+  assert.doesNotMatch(notificationPanel, /bflow:navigate-to-date/);
+  assert.doesNotMatch(myTasksWidget, /bflow:navigate-to-date/);
+  assert.doesNotMatch(app, /bflow:navigate-to-date/);
+});
+
+test('calendar catch-up keeps IPC rows snake_case and filters by recipient, actor, and muted calendar', () => {
+  assert.match(app, /const calendarCatchupDoneRef = useRef<string \| null>\(null\)/);
+  assert.match(
+    app,
+    /const muted = useCalendarStore\.getState\(\)\.mutedCalendarIds;[\s\S]*?calendarNotificationsCatchup\?\.\(\{\s*excludedCalendarIds: muted,\s*\}\)/,
+    'the renderer forwards only its local muted calendar IDs; the main process still owns the recipient identity',
+  );
+  assert.match(app, /r\.recipient_id !== me\.id/);
+  assert.match(app, /r\.actor_id === me\.id/);
+  assert.match(app, /muted\.includes\(r\.calendar_id\)/);
+  assert.match(app, /calendarNotificationId: r\.id/);
+  assert.match(app, /calendarId: r\.calendar_id \?\? undefined/);
+  assert.match(app, /eventDate: r\.event_date \?\? undefined/);
+  assert.match(app, /buildCalendarNotificationText\(/);
+  assert.match(app, /releaseCatchupRunOnError\(calendarCatchupDoneRef, me\.id\)/);
 });
 
 test('manual read and deletion paths also sync durable domain read state', () => {

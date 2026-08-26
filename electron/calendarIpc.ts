@@ -1,7 +1,7 @@
 /** electron/calendarIpc.ts — calendar:* IPC 등록.
  *  세션 검증(getSessionUserIdOrThrow 주입) + 권한 강제(calendarPermissions) + broadcast.
  *  main.ts 비대화 방지를 위해 분리. 렌더러 → 여기 → calendarStore → Supabase 단일 경로. */
-import { randomBytes } from 'node:crypto';
+import { randomBytes, timingSafeEqual } from 'node:crypto';
 import { ipcMain } from 'electron';
 import {
   canViewCalendar,
@@ -9,8 +9,14 @@ import {
   canManageCalendar,
   canCreateCalendar,
 } from '../src/shared/calendarPermissions';
+import {
+  buildCalendarChangeDetail,
+  computeCalendarNotificationRecipients,
+} from '../src/shared/calendarNotifications';
+import { normalizeCalendarNotificationCatchupInput } from '../src/shared/calendarNotificationCatchup';
 import * as store from './calendarStore';
 import type { CalendarRow, CalendarEventRow, CalendarMemberRow } from './calendarStore';
+import { readUsers } from './supabase';
 import {
   broadcastCalendarChanged,
   broadcastCalendarCommittedDelete,
@@ -28,6 +34,8 @@ import type {
 
 interface CalendarIpcDeps {
   getSessionUserIdOrThrow: () => string;
+  /** 세션 전환 전 origin을 동기적으로 고정한다. 이후 await가 현재 사용자를 바꿔도 receipt는 이 값을 따른다. */
+  getSessionOriginOrThrow: () => CalendarSessionOrigin;
   createLegacyPrivateEvent: (
     input: LegacyPrivateReplacementCreateInput,
     actorId: string,
@@ -50,10 +58,53 @@ interface CalendarIpcDeps {
     actorId: string,
   ) => Promise<{ id: string } | null>;
   onCommittedReplacementDelete: (payload: CalendarCommittedReplacementDeleteMarker) => void;
+  /** 테스트에서만 짧은 만료를 검증할 수 있는 replacement receipt TTL override. */
+  privacyReplacementReceiptTtlMs?: number;
+}
+
+/** 종료 직전에 best-effort 캘린더 알림 작업을 유한 시간만 기다리기 위한 메인 프로세스 경계. */
+export interface CalendarNotificationDrain {
+  /** 종료 시작 뒤 새 알림 생성 mutation의 persistence 진입을 막는다. */
+  beginQuitting(): void;
+  /** 새 세션을 publish하기 전에 기존 actor의 replacement capability를 더 이상 진행하지 못하게 한다. */
+  beginPrivacyReplacementTransition(origin: CalendarPrivacyReplacementOrigin): void;
+  /** 기존 actor의 creating/sourceDeleting receipt를 정리해 terminal 상태가 될 때까지 기다린다. */
+  drainPrivacyReplacementTransition(origin: CalendarPrivacyReplacementOrigin): Promise<void>;
+  /** 다음 canonical session을 publish한 뒤 더 이상 쓰일 수 없는 origin lock을 해제한다. */
+  completePrivacyReplacementTransition(origin: CalendarPrivacyReplacementOrigin): void;
+  /** publish 전에 후속 단계가 실패하면 현재 actor가 다시 작업할 수 있게 origin lock을 되돌린다. */
+  abortPrivacyReplacementTransition(origin: CalendarPrivacyReplacementOrigin): void;
+  getPendingNotificationCount(): number;
+  waitForNotificationIdle(timeoutMs: number): Promise<boolean>;
 }
 
 type CalendarEventCreateInput = Parameters<typeof store.createEvent>[0];
 type InvokeEvent = { sender?: { id?: number } };
+
+type CalendarSessionOrigin = {
+  userId: string;
+  epoch: number;
+  role: 'admin' | 'user';
+};
+
+type CalendarActor = Pick<CalendarSessionOrigin, 'role'> & { id: string };
+
+type CalendarPrivacyReplacementOrigin = Pick<CalendarSessionOrigin, 'userId' | 'epoch'>;
+
+/** receipt에 남기는 알림 정보는 수신자 계산과 표시 문구에 필요한 필드로 제한한다. */
+type CalendarNotificationEvent = Pick<
+  CalendarEventRow,
+  'id' | 'title' | 'start_date' | 'end_date'
+>;
+
+type CalendarNotificationContext = {
+  actorId: string;
+  action: 'create' | 'update' | 'delete';
+  calendar: Pick<CalendarRow, 'id' | 'name' | 'owner_id' | 'visibility'>;
+  memberIds: string[];
+  event: CalendarNotificationEvent | null;
+  previous: CalendarNotificationEvent | null;
+};
 
 type PrivacyReplacementTarget =
   | {
@@ -62,15 +113,43 @@ type PrivacyReplacementTarget =
       calendarId: string;
       actorId: string;
       createdAt: string;
+      notification: CalendarNotificationContext;
     }
   | { storage: 'legacy-private'; actualId: string; actorId: string }
   | { storage: 'google'; actualId: string; calendarId: string; actorId: string };
 
+type PrivacyReplacementState =
+  | 'creating'
+  | 'created'
+  | 'sourceDeleting'
+  | 'needsKeep'
+  | 'needsDelete'
+  | 'settling'
+  | 'kept'
+  | 'deleted';
+
 type PrivacyReplacementReceipt = {
+  receipt: string;
   senderId: number;
-  target: PrivacyReplacementTarget;
+  secret: string;
+  origin: CalendarSessionOrigin;
+  source: CalendarPrivacyMigrationSourceDeleteInput;
+  target: PrivacyReplacementTarget | null;
   expiresAt: number;
-  inFlight: boolean;
+  state: PrivacyReplacementState;
+  terminalDisposition: CalendarPrivacyReplacementDisposition | null;
+  retiring: boolean;
+  operation: Promise<void> | null;
+  resolveOperation: (() => void) | null;
+  /** session/TTL cleanup은 하나의 tracked resolution만 공유한다. */
+  transitionResolution: Promise<void> | null;
+  /** renderer가 사라져도 만료 정리를 시작하는 main-owned timer. */
+  expiryTimer: ReturnType<typeof setTimeout> | null;
+};
+
+type PrivacyReplacementTransitionReservation = {
+  releaseWork: () => void;
+  drain: Promise<void> | null;
 };
 
 const PRIVACY_REPLACEMENT_RECEIPT_TTL_MS = 5 * 60 * 1000;
@@ -124,13 +203,29 @@ function requirePrivacyReplacementRequest(value: unknown): CalendarPrivacyReplac
   if (!request.event || typeof request.event !== 'object') {
     throw new Error('보상 가능한 일정 입력이 올바르지 않습니다');
   }
+  const source = requirePrivacyMigrationSourceDeleteRequest(request.source);
   if (request.storage === 'google' && (
     typeof request.calendar_id !== 'string'
     || request.calendar_id.trim().length === 0
   )) {
     throw new Error('구글 캘린더 ID가 올바르지 않습니다');
   }
-  return request as unknown as CalendarPrivacyReplacementCreateInput;
+  if (request.storage === 'bflow') {
+    return { storage: 'bflow', source, event: request.event as CalendarEventCreateInput };
+  }
+  if (request.storage === 'legacy-private') {
+    return {
+      storage: 'legacy-private',
+      source,
+      event: request.event as LegacyPrivateReplacementCreateInput,
+    };
+  }
+  return {
+    storage: 'google',
+    source,
+    calendar_id: request.calendar_id as string,
+    event: request.event as GoogleReplacementCreateInput,
+  };
 }
 
 function requirePrivacyMigrationSourceDeleteRequest(
@@ -160,7 +255,16 @@ function requirePrivacyMigrationSourceDeleteRequest(
   ) {
     throw new Error('이관 원본 구글 캘린더 ID가 올바르지 않습니다');
   }
-  return request as unknown as CalendarPrivacyMigrationSourceDeleteInput;
+  if (request.storage === 'google') {
+    return {
+      storage: 'google',
+      calendar_id: request.calendar_id as string,
+      event_id: request.event_id,
+    };
+  }
+  return request.storage === 'bflow'
+    ? { storage: 'bflow', event_id: request.event_id }
+    : { storage: 'legacy-private', event_id: request.event_id };
 }
 
 function isGoogleNotFoundError(error: unknown): boolean {
@@ -205,18 +309,72 @@ function committedReplacementDeleteMarker(
   };
 }
 
-/** 일정 쓰기 성공 후 알림 파이프라인 진입점 (설계서 §8).
- *  PR4 에서 수신자 계산 + calendar_notifications insert 를 구현한다.
- *  PR2 에서는 호출 지점만 확정하고 의도적으로 아무것도 하지 않는다. */
-async function emitCalendarEventNotifications(_ctx: {
+/** 일정 쓰기 성공 후 알림 파이프라인 진입점 — 실패해도 일정 저장은 유지한다. */
+function calendarNotificationContext(ctx: {
   actorId: string;
-  action: 'create' | 'update' | 'delete';
+  action: CalendarNotificationContext['action'];
   calendar: CalendarRow;
   members: CalendarMemberRow[];
   event: CalendarEventRow | null;
   previous: CalendarEventRow | null;
-}): Promise<void> {
-  return;
+}): CalendarNotificationContext {
+  const toEvent = (event: CalendarEventRow | null): CalendarNotificationEvent | null => event && {
+    id: event.id,
+    title: event.title,
+    start_date: event.start_date,
+    end_date: event.end_date,
+  };
+  return {
+    actorId: ctx.actorId,
+    action: ctx.action,
+    calendar: {
+      id: ctx.calendar.id,
+      name: ctx.calendar.name,
+      owner_id: ctx.calendar.owner_id,
+      visibility: ctx.calendar.visibility,
+    },
+    memberIds: ctx.members.map((member) => member.user_id),
+    event: toEvent(ctx.event),
+    previous: toEvent(ctx.previous),
+  };
+}
+
+async function emitCalendarEventNotifications(ctx: CalendarNotificationContext): Promise<void> {
+  try {
+    const event = ctx.event ?? ctx.previous;
+    if (!event) return;
+
+    const users = await readUsers();
+    const recipients = computeCalendarNotificationRecipients(
+      ctx.calendar,
+      ctx.memberIds,
+      users.map((user) => user.id),
+      ctx.actorId,
+    );
+    if (recipients.length === 0) return;
+
+    const detail = ctx.action === 'update' && ctx.previous && ctx.event
+      ? buildCalendarChangeDetail(
+        { startDate: ctx.previous.start_date, endDate: ctx.previous.end_date },
+        { startDate: ctx.event.start_date, endDate: ctx.event.end_date },
+      )
+      : null;
+    const actor = users.find((user) => user.id === ctx.actorId);
+    await store.insertNotifications(recipients.map((recipientId) => ({
+      recipient_id: recipientId,
+      actor_id: ctx.actorId,
+      actor_name: actor?.name ?? '알 수 없음',
+      calendar_id: ctx.calendar.id,
+      calendar_name: ctx.calendar.name,
+      event_id: event.id,
+      event_title: event.title,
+      event_date: event.start_date,
+      action: ctx.action,
+      detail,
+    })));
+  } catch (error) {
+    console.warn('[calendarIpc] 알림 insert 실패 (best-effort — 일정 저장은 성공 유지):', error);
+  }
 }
 
 const membersOf = (all: CalendarMemberRow[], calendarId: string) =>
@@ -308,8 +466,84 @@ function safeGoogleCreateInput(input: GoogleReplacementCreateInput): GoogleRepla
   };
 }
 
-export function registerCalendarIpc(deps: CalendarIpcDeps): void {
+export function registerCalendarIpc(deps: CalendarIpcDeps): CalendarNotificationDrain {
   const privacyReplacementReceipts = new Map<string, PrivacyReplacementReceipt>();
+  const configuredReceiptTtl = deps.privacyReplacementReceiptTtlMs;
+  const privacyReplacementReceiptTtlMs = Number.isFinite(configuredReceiptTtl)
+    && (configuredReceiptTtl as number) > 0
+    ? Math.floor(configuredReceiptTtl as number)
+    : PRIVACY_REPLACEMENT_RECEIPT_TTL_MS;
+  // 알림 Promise뿐 아니라 DB await 전에 등록한 mutation fence도 같은 집합으로 관리한다.
+  // 종료 직전 0개를 읽은 뒤, 이미 시작된 mutation이 알림을 enqueue하는 race를 막는다.
+  const pendingNotificationWork = new Set<Promise<void>>();
+  let notificationMutationIntakeOpen = true;
+
+  const trackNotificationWork = (task: Promise<void>): void => {
+    pendingNotificationWork.add(task);
+    // best-effort task뿐 아니라 transition cleanup도 같은 idle 집합을 쓸 수 있다.
+    // reject한 work가 집합에 영구히 남거나 unhandled rejection이 되지 않게 all-settled로 정리한다.
+    void task.then(
+      () => { pendingNotificationWork.delete(task); },
+      () => { pendingNotificationWork.delete(task); },
+    );
+  };
+
+  const beginTrackedNotificationWork = (): (() => void) => {
+    let released = false;
+    let resolveFence!: () => void;
+    const fence = new Promise<void>((resolve) => { resolveFence = resolve; });
+    pendingNotificationWork.add(fence);
+    return () => {
+      if (released) return;
+      released = true;
+      // producer가 notification task를 enqueue한 뒤 finally에서 풀린다. 그러므로
+      // wait loop의 다음 snapshot에는 후속 best-effort 작업도 반드시 포함된다.
+      pendingNotificationWork.delete(fence);
+      resolveFence();
+    };
+  };
+
+  const beginNotificationMutation = (): (() => void) => {
+    if (!notificationMutationIntakeOpen) {
+      throw new Error('앱 종료 중이라 새 캘린더 변경을 저장할 수 없습니다');
+    }
+    return beginTrackedNotificationWork();
+  };
+
+  const runNotificationMutation = async <T>(operation: () => Promise<T>): Promise<T> => {
+    const release = beginNotificationMutation();
+    try {
+      return await operation();
+    } finally {
+      release();
+    }
+  };
+
+  const queueCalendarNotification = (notification: CalendarNotificationContext): void => {
+    const task = emitCalendarEventNotifications(notification).catch((error) => {
+      // emitCalendarEventNotifications 자체도 실패를 격리하지만, 후속 리팩터링 중
+      // 예외가 새어도 종료 대기 집합에 영구 작업이 남지 않게 마지막 경계를 둔다.
+      console.warn('[calendarIpc] 알림 작업 실패 (best-effort):', error);
+    });
+    trackNotificationWork(task);
+  };
+
+  const waitForNotificationIdle = async (timeoutMs: number): Promise<boolean> => {
+    const deadline = Date.now() + Math.max(0, timeoutMs);
+    while (pendingNotificationWork.size > 0) {
+      const remainingMs = deadline - Date.now();
+      if (remainingMs <= 0) return false;
+      const settled = await new Promise<boolean>((resolve) => {
+        const timeout = setTimeout(() => resolve(false), remainingMs);
+        void Promise.all([...pendingNotificationWork]).then(() => {
+          clearTimeout(timeout);
+          resolve(true);
+        });
+      });
+      if (!settled) return false;
+    }
+    return true;
+  };
 
   const emitCommittedDelete = (marker: CalendarCommittedReplacementDeleteMarker): void => {
     // persistence는 이미 commit됐다. 닫히는 BrowserWindow나 일시적인 broadcast 오류가
@@ -339,64 +573,182 @@ export function registerCalendarIpc(deps: CalendarIpcDeps): void {
     }
   };
 
-  const purgeExpiredReceipts = (now: number) => {
-    for (const [receipt, entry] of privacyReplacementReceipts) {
-      // 이미 persistence 요청이 시작된 receipt는 완료 판정 전까지 유지한다.
-      if (!entry.inFlight && entry.expiresAt <= now) privacyReplacementReceipts.delete(receipt);
+  const privacyReplacementRetiringOrigins = new Set<string>();
+  const privacyReplacementTransitionReservations = new Map<
+    string,
+    PrivacyReplacementTransitionReservation
+  >();
+  let resolveRetiringReceipt: (entry: PrivacyReplacementReceipt) => Promise<void> = async () => undefined;
+  let resolveTrackedRetiringReceipt: (entry: PrivacyReplacementReceipt) => Promise<void> = async (entry) => (
+    resolveRetiringReceipt(entry)
+  );
+
+  const originKey = (origin: CalendarPrivacyReplacementOrigin): string => (
+    `${origin.userId}\u0000${origin.epoch}`
+  );
+  const isTerminalReceipt = (entry: PrivacyReplacementReceipt): boolean => (
+    entry.state === 'kept' || entry.state === 'deleted'
+  );
+  const sameOrigin = (
+    left: CalendarPrivacyReplacementOrigin,
+    right: CalendarPrivacyReplacementOrigin,
+  ): boolean => left.userId === right.userId && left.epoch === right.epoch;
+
+  const finishReceiptOperation = (
+    entry: PrivacyReplacementReceipt,
+    operation: Promise<void>,
+  ): void => {
+    if (entry.operation !== operation) return;
+    const resolve = entry.resolveOperation;
+    entry.operation = null;
+    entry.resolveOperation = null;
+    resolve?.();
+  };
+
+  const beginReceiptOperation = (
+    entry: PrivacyReplacementReceipt,
+    state: Extract<PrivacyReplacementState, 'creating' | 'sourceDeleting' | 'settling'>,
+  ): (() => void) => {
+    if (entry.operation) throw new Error('보상 receipt가 이미 처리 중입니다');
+    let resolveOperation!: () => void;
+    const operation = new Promise<void>((resolve) => { resolveOperation = resolve; });
+    entry.operation = operation;
+    entry.resolveOperation = resolveOperation;
+    entry.state = state;
+    return () => finishReceiptOperation(entry, operation);
+  };
+
+  const waitForReceiptOperation = async (entry: PrivacyReplacementReceipt): Promise<void> => {
+    while (entry.operation) await entry.operation;
+  };
+
+  const clearReceiptExpiryTimer = (entry: PrivacyReplacementReceipt): void => {
+    if (!entry.expiryTimer) return;
+    clearTimeout(entry.expiryTimer);
+    entry.expiryTimer = null;
+  };
+
+  const scheduleReceiptExpiry = (entry: PrivacyReplacementReceipt): void => {
+    clearReceiptExpiryTimer(entry);
+    const delayMs = Math.max(0, entry.expiresAt - Date.now());
+    const timer = setTimeout(() => {
+      entry.expiryTimer = null;
+      const current = privacyReplacementReceipts.get(entry.receipt);
+      if (current !== entry) return;
+      expirePrivacyReplacementReceipt(entry.receipt, entry, Date.now());
+    }, delayMs);
+    // receipt는 최대 5분 동안만 보조 정리 대상으로 남는다. 이 timer가 정상 앱 종료를
+    // 붙들면 안 되므로 Node/Electron timer일 때만 unref 한다.
+    timer.unref?.();
+    entry.expiryTimer = timer;
+  };
+
+  const expirePrivacyReplacementReceipt = (
+    receipt: string,
+    entry: PrivacyReplacementReceipt,
+    now: number,
+  ): void => {
+    if (privacyReplacementReceipts.get(receipt) !== entry) return;
+    if (entry.expiresAt > now) {
+      scheduleReceiptExpiry(entry);
+      return;
     }
+    if (isTerminalReceipt(entry)) {
+      clearReceiptExpiryTimer(entry);
+      privacyReplacementReceipts.delete(receipt);
+      return;
+    }
+    // renderer가 reload/crash하여 후속 privacy IPC가 한 번도 오지 않아도, 원본과
+    // replacement를 영구히 함께 남기지 않는다. 정리 실패는 다음 TTL에 다시 시도한다.
+    entry.retiring = true;
+    entry.expiresAt = now + privacyReplacementReceiptTtlMs;
+    scheduleReceiptExpiry(entry);
+    void resolveTrackedRetiringReceipt(entry).catch((error) => {
+      console.warn('[Calendar IPC] 만료 replacement receipt 정리 실패:', error);
+    });
+  };
+
+  const markReceiptTerminal = (
+    entry: PrivacyReplacementReceipt,
+    disposition: CalendarPrivacyReplacementDisposition,
+  ): void => {
+    entry.state = disposition === 'keep' ? 'kept' : 'deleted';
+    entry.terminalDisposition = disposition;
+    // terminal outcome은 TTL 동안 보존한다. 세션 전환이 끝난 뒤 돌아온 A의 같은
+    // continuation은 idempotent하지만, 반대 outcome은 더 이상 mutation할 수 없다.
+    entry.expiresAt = Date.now() + privacyReplacementReceiptTtlMs;
+    scheduleReceiptExpiry(entry);
+  };
+
+  const purgeExpiredReceipts = (now: number): void => {
+    for (const [receipt, entry] of privacyReplacementReceipts) {
+      if (entry.expiresAt <= now) expirePrivacyReplacementReceipt(receipt, entry, now);
+    }
+  };
+
+  const timingSafeSecretEquals = (expected: string, supplied: unknown): boolean => {
+    if (typeof supplied !== 'string' || supplied.length === 0) return false;
+    const expectedBytes = Buffer.from(expected);
+    const suppliedBytes = Buffer.from(supplied);
+    return expectedBytes.length === suppliedBytes.length
+      && timingSafeEqual(expectedBytes, suppliedBytes);
   };
 
   const issuePrivacyReplacementReceipt = (
     senderId: number,
-    target: PrivacyReplacementTarget,
-  ): string => {
+    origin: CalendarSessionOrigin,
+    source: CalendarPrivacyMigrationSourceDeleteInput,
+  ): { receipt: string; secret: string; entry: PrivacyReplacementReceipt } => {
     const now = Date.now();
     purgeExpiredReceipts(now);
+    if (privacyReplacementRetiringOrigins.has(originKey(origin))) {
+      throw new Error('이전 사용자 세션의 일정 이관은 이미 정리 중입니다');
+    }
     let receipt: string;
     do {
       receipt = randomBytes(32).toString('base64url');
     } while (privacyReplacementReceipts.has(receipt));
-    privacyReplacementReceipts.set(receipt, {
+    const entry: PrivacyReplacementReceipt = {
       senderId,
-      target,
-      expiresAt: now + PRIVACY_REPLACEMENT_RECEIPT_TTL_MS,
-      inFlight: false,
-    });
-    return receipt;
+      secret: randomBytes(32).toString('base64url'),
+      origin: { ...origin },
+      // IPC object를 그대로 잡지 않아 원본 identity가 renderer 객체 변경에 영향을 받지 않는다.
+      source: { ...source } as CalendarPrivacyMigrationSourceDeleteInput,
+      target: null,
+      expiresAt: now + privacyReplacementReceiptTtlMs,
+      state: 'creating',
+      terminalDisposition: null,
+      retiring: false,
+      operation: null,
+      resolveOperation: null,
+      transitionResolution: null,
+      receipt,
+      expiryTimer: null,
+    };
+    privacyReplacementReceipts.set(receipt, entry);
+    beginReceiptOperation(entry, 'creating');
+    scheduleReceiptExpiry(entry);
+    return { receipt, secret: entry.secret, entry };
   };
 
   const acquirePrivacyReplacementReceipt = (
     receipt: unknown,
+    secret: unknown,
     senderId: number,
-  ): { receipt: string; target: PrivacyReplacementTarget } => {
+  ): { receipt: string; entry: PrivacyReplacementReceipt } => {
+    purgeExpiredReceipts(Date.now());
     if (typeof receipt !== 'string' || receipt.length === 0) {
       throw new Error('보상 receipt가 올바르지 않습니다');
     }
     const entry = privacyReplacementReceipts.get(receipt);
-    if (!entry) throw new Error('보상 receipt가 없거나 이미 사용되었습니다');
-    if (entry.expiresAt <= Date.now()) {
-      privacyReplacementReceipts.delete(receipt);
-      throw new Error('보상 receipt가 만료되었습니다');
-    }
+    if (!entry) throw new Error('보상 receipt가 없거나 만료되었습니다');
     if (entry.senderId !== senderId) {
       throw new Error('보상 receipt를 발급받은 창이 아닙니다');
     }
-    if (entry.inFlight) {
-      throw new Error('보상 receipt가 이미 처리 중입니다');
+    if (!timingSafeSecretEquals(entry.secret, secret)) {
+      throw new Error('보상 continuation을 확인할 수 없습니다');
     }
-    entry.inFlight = true;
-    return { receipt, target: entry.target };
-  };
-
-  const settlePrivacyReplacementReceipt = (receipt: string, consume: boolean): void => {
-    const entry = privacyReplacementReceipts.get(receipt);
-    if (!entry) return;
-    if (consume) {
-      privacyReplacementReceipts.delete(receipt);
-      return;
-    }
-    // 삭제가 커밋되지 않았거나 확인할 수 없으면 같은 창이 정확한 target으로 재시도한다.
-    entry.inFlight = false;
+    return { receipt, entry };
   };
 
   const replacementStillExists = async (target: PrivacyReplacementTarget): Promise<boolean> => {
@@ -448,6 +800,125 @@ export function registerCalendarIpc(deps: CalendarIpcDeps): void {
     }
   };
 
+  const settlePrivacyReplacementReceipt = async (
+    entry: PrivacyReplacementReceipt,
+    disposition: CalendarPrivacyReplacementDisposition,
+    options: { transitionOwned?: boolean } = {},
+  ): Promise<void> => {
+    if (disposition !== 'keep' && disposition !== 'delete') {
+      throw new Error('보상 receipt 처리 방식이 올바르지 않습니다');
+    }
+    if (isTerminalReceipt(entry)) {
+      // session transition이 main-owned terminal outcome을 만든 경우에만, 늦게 돌아온
+      // A continuation의 같은 outcome을 idempotent하게 인정한다. 일반 완료 receipt는
+      // 기존처럼 단일 소비라 duplicate 알림/삭제를 조기에 드러낸다.
+      if (entry.retiring && entry.terminalDisposition === disposition) return;
+      throw new Error('보상 receipt는 이미 반대 방식으로 확정되었습니다');
+    }
+    if (entry.retiring && !options.transitionOwned) {
+      // 세션 전환이 시작된 뒤에는 renderer continuation이 다음 outcome을 고를 수 없다.
+      // transition drain만 source 결과에 따라 terminal outcome을 정한다. terminal 처리 뒤에
+      // 돌아온 A continuation은 위의 같은-outcome idempotence만 받을 수 있다.
+      throw new Error('보상 receipt는 세션 전환 정리 중입니다');
+    }
+    if (entry.operation) {
+      throw new Error('보상 receipt가 이미 처리 중입니다');
+    }
+    if (entry.state === 'created' && disposition !== 'delete') {
+      // replacement는 원본 삭제 결과가 confirmed/ambiguous가 되기 전까지 provisional이다.
+      // keep을 허용하면 원본과 공개 replacement가 함께 남을 수 있으므로, 이 상태에서는
+      // 정확한 target 보상 삭제만 가능하다.
+      throw new Error('원본 일정 삭제 결과를 확인하기 전에는 replacement를 유지할 수 없습니다');
+    }
+    if (entry.state === 'needsKeep' && disposition !== 'keep') {
+      throw new Error('원본 삭제 결과가 불확실하여 replacement를 유지해야 합니다');
+    }
+    if (entry.state === 'needsDelete' && disposition !== 'delete') {
+      throw new Error('원본 일정이 남아 있어 replacement를 삭제해야 합니다');
+    }
+    if (!entry.target) throw new Error('보상 대상 일정이 아직 준비되지 않았습니다');
+
+    const previousState = entry.state;
+    const release = beginReceiptOperation(entry, 'settling');
+    try {
+      if (disposition === 'keep') {
+        if (entry.target.storage === 'bflow') queueCalendarNotification(entry.target.notification);
+        markReceiptTerminal(entry, 'keep');
+        return;
+      }
+
+      await deletePrivacyReplacement(entry.target);
+      markReceiptTerminal(entry, 'delete');
+      // persistence boundary가 직접 확정 marker를 만든다. invoke 응답이 유실되거나 sender가
+      // 종료돼도 다른 BrowserWindow와 다른 앱 인스턴스는 exact row를 tombstone할 수 있다.
+      emitCommittedDelete(committedReplacementDeleteMarker(entry.target));
+    } catch (error) {
+      // delete failure는 exact target 재시도가 가능해야 하므로 terminal로 소비하지 않는다.
+      entry.state = previousState;
+      throw error;
+    } finally {
+      release();
+    }
+  };
+
+  resolveRetiringReceipt = async (entry: PrivacyReplacementReceipt): Promise<void> => {
+    entry.retiring = true;
+    while (!isTerminalReceipt(entry)) {
+      if (entry.operation) {
+        await waitForReceiptOperation(entry);
+        continue;
+      }
+      if (entry.state === 'created') entry.state = 'needsDelete';
+      if (entry.state === 'needsKeep') {
+        await settlePrivacyReplacementReceipt(entry, 'keep', { transitionOwned: true });
+        continue;
+      }
+      if (entry.state === 'needsDelete') {
+        await settlePrivacyReplacementReceipt(entry, 'delete', { transitionOwned: true });
+        continue;
+      }
+      throw new Error('replacement receipt 정리 상태가 올바르지 않습니다');
+    }
+  };
+
+  /**
+   * 전환/TTL 정리는 handler producer와 별도 Promise로 이어질 수 있다. persistence await
+   * 전에 fence를 등록해 quit drain이 exact replacement delete까지 기다리게 한다. 원래
+   * Promise는 SessionManager에 그대로 돌려 실패 시 B publish를 막고, idle 집합만 all-settled
+   * 로 해제한다.
+   */
+  resolveTrackedRetiringReceipt = (entry: PrivacyReplacementReceipt): Promise<void> => {
+    if (entry.transitionResolution) return entry.transitionResolution;
+    const releaseWork = beginTrackedNotificationWork();
+    const resolution = resolveRetiringReceipt(entry);
+    entry.transitionResolution = resolution;
+    void resolution.then(
+      () => {
+        if (entry.transitionResolution === resolution) entry.transitionResolution = null;
+        releaseWork();
+      },
+      () => {
+        if (entry.transitionResolution === resolution) entry.transitionResolution = null;
+        releaseWork();
+      },
+    );
+    return resolution;
+  };
+
+  const retirePrivacyReplacementReceiptsForQuit = (): void => {
+    for (const entry of privacyReplacementReceipts.values()) {
+      if (isTerminalReceipt(entry)) continue;
+      // create가 이미 persistence를 기다리는 중이어도 entry는 발급돼 있다. 이 플래그를
+      // 먼저 세우면 handler가 돌아왔을 때 ordinary continuation을 돌려주지 않고 exact
+      // target 정리로 연결한다. resolution은 tracked work로 등록돼 before-quit snapshot에
+      // 포함되며, 실패는 기존 best-effort 종료 정책대로 로그만 남긴다.
+      entry.retiring = true;
+      void resolveTrackedRetiringReceipt(entry).catch((error) => {
+        console.warn('[Calendar IPC] 종료 중 replacement receipt 정리 실패:', error);
+      });
+    }
+  };
+
   const sessionUser = async () => {
     const id = deps.getSessionUserIdOrThrow();
     return { id, role: await store.getUserRole(id) };
@@ -472,13 +943,14 @@ export function registerCalendarIpc(deps: CalendarIpcDeps): void {
   const createBflowEventForActor = async (
     input: CalendarEventCreateInput,
     actorId: string,
+    deferNotification = false,
   ) => {
     const { calendar, members } = await loadCalendarForUserOrThrow(input.calendar_id, actorId);
     if (!canEditCalendarEvents(calendar, members, actorId)) {
       throw new Error('이 캘린더에 일정을 만들 권한이 없습니다');
     }
     const created = await store.createEvent(safeCalendarEventCreateInput(input), actorId);
-    await emitCalendarEventNotifications({
+    const notification = calendarNotificationContext({
       actorId,
       action: 'create',
       calendar,
@@ -486,7 +958,8 @@ export function registerCalendarIpc(deps: CalendarIpcDeps): void {
       event: created,
       previous: null,
     });
-    return created;
+    if (!deferNotification) queueCalendarNotification(notification);
+    return { created, notification };
   };
 
   ipcMain.handle('calendar:list', wrap(async () => {
@@ -613,95 +1086,120 @@ export function registerCalendarIpc(deps: CalendarIpcDeps): void {
     });
   }));
 
-  ipcMain.handle('calendar:events:create', wrap(async (input: CalendarEventCreateInput) => {
+  ipcMain.handle('calendar:events:create', wrap(async (input: CalendarEventCreateInput) => runNotificationMutation(async () => {
     const user = await sessionUser();
-    const created = await createBflowEventForActor(input, user.id);
+    const { created } = await createBflowEventForActor(input, user.id);
     broadcastDataChange('calendar_events', 'INSERT');
     broadcastCalendarChanged('INSERT');
     return created;
-  }));
+  })));
 
   ipcMain.handle('calendar:privacy-migration:create-replacement', wrapWithEvent(async (
     event,
     rawRequest: unknown,
-  ) => {
+  ) => runNotificationMutation(async () => {
     const senderId = requireSenderId(event);
-    const user = await sessionUser();
-    const actorId = user.id;
     const request = requirePrivacyReplacementRequest(rawRequest);
-    let target: PrivacyReplacementTarget;
-
-    if (request.storage === 'bflow') {
-      const created = await createBflowEventForActor(request.event, actorId);
-      target = {
-        storage: 'bflow',
-        actualId: created.id,
-        calendarId: created.calendar_id,
-        actorId,
-        createdAt: created.created_at,
-      };
-      broadcastDataChange('calendar_events', 'INSERT');
-      broadcastCalendarChanged('INSERT');
-    } else if (request.storage === 'legacy-private') {
-      const created = await deps.createLegacyPrivateEvent(
-        safeLegacyPrivateCreateInput(request.event),
-        actorId,
-      );
-      target = { storage: 'legacy-private', actualId: created.id, actorId };
-    } else {
-      const actualId = await deps.createGoogleEvent(
-        request.calendar_id,
-        safeGoogleCreateInput(request.event),
-        actorId,
-      );
-      target = {
-        storage: 'google',
-        actualId,
-        calendarId: request.calendar_id,
-        actorId,
-      };
-    }
-
-    return {
-      storage: target.storage,
-      actual_id: target.actualId,
-      calendar_id: 'calendarId' in target ? target.calendarId : undefined,
-      receipt: issuePrivacyReplacementReceipt(senderId, target),
+    // 세션을 재조회하는 async helper보다 먼저 고정한다. 이후 로그인 전환이 일어나도
+    // 이 replacement와 bound source는 처음 actor/epoch만 사용한다.
+    const origin = deps.getSessionOriginOrThrow();
+    const issued = issuePrivacyReplacementReceipt(senderId, origin, request.source);
+    const { entry } = issued;
+    const releaseCreation = () => {
+      if (entry.operation) finishReceiptOperation(entry, entry.operation);
     };
-  }));
+
+    try {
+      // canonical origin은 동기적으로 고정했지만, 삭제된 사용자가 stale session payload로
+      // target을 만들 수는 없다. target persistence 전 live-row만 확인한다.
+      await store.getUserRole(origin.userId);
+      let target: PrivacyReplacementTarget;
+      if (request.storage === 'bflow') {
+        const { created, notification } = await createBflowEventForActor(request.event, origin.userId, true);
+        target = {
+          storage: 'bflow',
+          actualId: created.id,
+          calendarId: created.calendar_id,
+          actorId: origin.userId,
+          createdAt: created.created_at,
+          notification,
+        };
+        // create persistence 뒤의 broadcast도 예외를 낼 수 있다. 그 전에 exact target을
+        // receipt에 기록해야 catch가 같은 row만 보수적으로 정리할 수 있다.
+        entry.target = target;
+        broadcastDataChange('calendar_events', 'INSERT');
+        broadcastCalendarChanged('INSERT');
+      } else if (request.storage === 'legacy-private') {
+        const created = await deps.createLegacyPrivateEvent(
+          safeLegacyPrivateCreateInput(request.event),
+          origin.userId,
+        );
+        target = { storage: 'legacy-private', actualId: created.id, actorId: origin.userId };
+        entry.target = target;
+      } else {
+        const actualId = await deps.createGoogleEvent(
+          request.calendar_id,
+          safeGoogleCreateInput(request.event),
+          origin.userId,
+        );
+        target = {
+          storage: 'google',
+          actualId,
+          calendarId: request.calendar_id,
+          actorId: origin.userId,
+        };
+        entry.target = target;
+      }
+
+      if (entry.retiring) {
+        entry.state = 'needsDelete';
+        releaseCreation();
+        await resolveTrackedRetiringReceipt(entry);
+        return { transition_resolved: 'deleted' as const };
+      }
+
+      entry.state = 'created';
+      releaseCreation();
+      return {
+        storage: target.storage,
+        actual_id: target.actualId,
+        calendar_id: 'calendarId' in target ? target.calendarId : undefined,
+        receipt: issued.receipt,
+        continuation_secret: issued.secret,
+      };
+    } catch (error) {
+      if (entry.target) {
+        // create 응답/후속 fanout에서 예외가 나도 target만 남기지 않는다.
+        entry.retiring = true;
+        entry.state = 'needsDelete';
+        releaseCreation();
+        try {
+          await resolveTrackedRetiringReceipt(entry);
+        } catch (cleanupError) {
+          console.warn('[Calendar IPC] replacement create 실패 뒤 정리 실패:', cleanupError);
+        }
+      } else {
+        markReceiptTerminal(entry, 'delete');
+        releaseCreation();
+      }
+      throw error;
+    }
+  })));
 
   ipcMain.handle('calendar:privacy-migration:settle-replacement', wrapWithEvent(async (
     event,
     receipt: unknown,
+    secret: unknown,
     disposition: CalendarPrivacyReplacementDisposition,
-  ) => {
-    if (disposition !== 'keep' && disposition !== 'delete') {
-      throw new Error('보상 receipt 처리 방식이 올바르지 않습니다');
-    }
-    const acquired = acquirePrivacyReplacementReceipt(receipt, requireSenderId(event));
-    if (disposition === 'keep') {
-      settlePrivacyReplacementReceipt(acquired.receipt, true);
-      return;
-    }
-
-    try {
-      await deletePrivacyReplacement(acquired.target);
-    } catch (error) {
-      settlePrivacyReplacementReceipt(acquired.receipt, false);
-      throw error;
-    }
-
-    settlePrivacyReplacementReceipt(acquired.receipt, true);
-    const marker = committedReplacementDeleteMarker(acquired.target);
-    // persistence boundary가 직접 확정 marker를 만든다. invoke 응답이 유실되거나 sender가
-    // 종료돼도 다른 BrowserWindow와 다른 앱 인스턴스는 exact row를 tombstone할 수 있다.
-    emitCommittedDelete(marker);
-  }));
+  ) => runNotificationMutation(async () => {
+    const acquired = acquirePrivacyReplacementReceipt(receipt, secret, requireSenderId(event));
+    await settlePrivacyReplacementReceipt(acquired.entry, disposition);
+  })));
 
   ipcMain.handle('calendar:events:update', wrap(async (
     id: string,
     updates: Parameters<typeof store.updateEvent>[1],
-  ) => {
+  ) => runNotificationMutation(async () => {
     const user = await sessionUser();
     const previous = await store.getEventByIdForWrite(id);
     if (!previous) throw new Error('일정을 찾을 수 없습니다');
@@ -710,15 +1208,13 @@ export function registerCalendarIpc(deps: CalendarIpcDeps): void {
       throw new Error('이 일정을 수정할 권한이 없습니다');
     }
 
-    let notificationCalendar = calendar;
-    let notificationMembers = members;
+    let targetNotification: { calendar: CalendarRow; members: CalendarMemberRow[] } | null = null;
     if (updates.calendar_id && updates.calendar_id !== previous.calendar_id) {
       const target = await loadCalendarForUserOrThrow(updates.calendar_id, user.id);
       if (!canEditCalendarEvents(target.calendar, target.members, user.id)) {
         throw new Error('옮기려는 캘린더에 일정을 만들 권한이 없습니다');
       }
-      notificationCalendar = target.calendar;
-      notificationMembers = target.members;
+      targetNotification = target;
     }
 
     const safeUpdates: Parameters<typeof store.updateEvent>[1] = {};
@@ -738,24 +1234,44 @@ export function registerCalendarIpc(deps: CalendarIpcDeps): void {
     if (updates.linked_department !== undefined) safeUpdates.linked_department = updates.linked_department;
     if (updates.linked_todo_id !== undefined) safeUpdates.linked_todo_id = updates.linked_todo_id;
     const updated = await store.updateEvent(id, safeUpdates, previous.calendar_id, user.id);
-    await emitCalendarEventNotifications({
-      actorId: user.id,
-      action: 'update',
-      calendar: notificationCalendar,
-      members: notificationMembers,
-      event: updated,
-      previous,
-    });
+    if (targetNotification) {
+      queueCalendarNotification(calendarNotificationContext({
+        actorId: user.id,
+        action: 'delete',
+        calendar,
+        members,
+        event: null,
+        previous,
+      }));
+      queueCalendarNotification(calendarNotificationContext({
+        actorId: user.id,
+        action: 'create',
+        calendar: targetNotification.calendar,
+        members: targetNotification.members,
+        event: updated,
+        previous: null,
+      }));
+    } else {
+      queueCalendarNotification(calendarNotificationContext({
+        actorId: user.id,
+        action: 'update',
+        calendar,
+        members,
+        event: updated,
+        previous,
+      }));
+    }
     broadcastDataChange('calendar_events', 'UPDATE');
     broadcastCalendarChanged('UPDATE');
     return updated;
-  }));
+  })));
 
   const deleteCalendarEventIfPresent = async (
     id: string,
     classifyStrictMigrationOutcome = false,
+    capturedActor?: CalendarActor,
   ): Promise<CalendarPrivacyMigrationSourceDeleteResult> => {
-    const user = await sessionUser();
+    const user = capturedActor ?? await sessionUser();
     const previous = await store.getEventByIdForWrite(id);
     if (!previous) return 'missing';
     const { calendar, members } = await loadCalendarForUserOrThrow(previous.calendar_id, user.id);
@@ -801,14 +1317,16 @@ export function registerCalendarIpc(deps: CalendarIpcDeps): void {
         calendarId: previous.calendar_id,
         committedPrivacyReplacementDelete: true,
       });
-      await runStrictPostCommitSideEffect('notification', () => emitCalendarEventNotifications({
-        actorId: user.id,
-        action: 'delete',
-        calendar,
-        members,
-        event: null,
-        previous,
-      }));
+      await runStrictPostCommitSideEffect('notification', () => {
+        queueCalendarNotification(calendarNotificationContext({
+          actorId: user.id,
+          action: 'delete',
+          calendar,
+          members,
+          event: null,
+          previous,
+        }));
+      });
       await runStrictPostCommitSideEffect('data broadcast', () => {
         broadcastDataChange('calendar_events', 'DELETE');
       });
@@ -817,14 +1335,14 @@ export function registerCalendarIpc(deps: CalendarIpcDeps): void {
       });
       return 'deleted';
     }
-    await emitCalendarEventNotifications({
+    queueCalendarNotification(calendarNotificationContext({
       actorId: user.id,
       action: 'delete',
       calendar,
       members,
       event: null,
       previous,
-    });
+    }));
     broadcastDataChange('calendar_events', 'DELETE');
     broadcastCalendarChanged('DELETE');
     return 'deleted';
@@ -832,8 +1350,9 @@ export function registerCalendarIpc(deps: CalendarIpcDeps): void {
 
   const deleteLegacyPrivateMigrationSource = async (
     eventId: string,
+    capturedActor?: CalendarActor,
   ): Promise<CalendarPrivacyMigrationSourceDeleteResult> => {
-    const user = await sessionUser();
+    const user = capturedActor ?? await sessionUser();
     const ownerId = await deps.getLegacyPrivateEventOwner(eventId);
     if (!ownerId) return 'missing';
     if (ownerId !== user.id) {
@@ -900,8 +1419,9 @@ export function registerCalendarIpc(deps: CalendarIpcDeps): void {
   const deleteGoogleMigrationSource = async (
     calendarId: string,
     eventId: string,
+    capturedActor?: CalendarActor,
   ): Promise<CalendarPrivacyMigrationSourceDeleteResult> => {
-    const user = await sessionUser();
+    const user = capturedActor ?? await sessionUser();
     const previous = await deps.getGoogleEvent(calendarId, eventId, user.id);
     if (!previous) return 'missing';
 
@@ -943,11 +1463,11 @@ export function registerCalendarIpc(deps: CalendarIpcDeps): void {
     }
   };
 
-  ipcMain.handle('calendar:events:delete', wrap(async (id: string) => {
+  ipcMain.handle('calendar:events:delete', wrap(async (id: string) => runNotificationMutation(async () => {
     await deleteCalendarEventIfPresent(id);
-  }));
+  })));
 
-  ipcMain.handle('calendar:privacy-migration:delete-source', wrap(async (rawRequest: unknown) => {
+  ipcMain.handle('calendar:privacy-migration:delete-source', wrap(async (rawRequest: unknown) => runNotificationMutation(async () => {
     const request = requirePrivacyMigrationSourceDeleteRequest(rawRequest);
     if (request.storage === 'bflow') {
       return deleteCalendarEventIfPresent(request.event_id, true);
@@ -956,7 +1476,47 @@ export function registerCalendarIpc(deps: CalendarIpcDeps): void {
       return deleteLegacyPrivateMigrationSource(request.event_id);
     }
     return deleteGoogleMigrationSource(request.calendar_id, request.event_id);
-  }));
+  })));
+
+  /**
+   * preload만 raw receipt/secret을 가진 private source-delete capability.
+   * renderer는 source identity를 고를 수 없고, 세션 전환 뒤 B가 A의 closure를
+   * 호출해도 origin/retiring fence가 persistence 전에 막는다.
+   */
+  ipcMain.handle('calendar:privacy-migration:delete-bound-source', wrapWithEvent(async (
+    event,
+    receipt: unknown,
+    secret: unknown,
+  ) => runNotificationMutation(async () => {
+    const acquired = acquirePrivacyReplacementReceipt(receipt, secret, requireSenderId(event));
+    const { entry } = acquired;
+    const currentOrigin = deps.getSessionOriginOrThrow();
+    if (entry.retiring || !sameOrigin(entry.origin, currentOrigin)) {
+      throw new Error('세션 전환 뒤 이전 사용자의 이관 원본은 더 이상 삭제할 수 없습니다');
+    }
+    if (entry.state !== 'created' || entry.operation) {
+      throw new Error('이관 원본을 삭제할 수 있는 replacement 상태가 아닙니다');
+    }
+
+    const release = beginReceiptOperation(entry, 'sourceDeleting');
+    const actor: CalendarActor = { id: entry.origin.userId, role: entry.origin.role };
+    try {
+      const result = entry.source.storage === 'bflow'
+        ? await deleteCalendarEventIfPresent(entry.source.event_id, true, actor)
+        : entry.source.storage === 'legacy-private'
+          ? await deleteLegacyPrivateMigrationSource(entry.source.event_id, actor)
+          : await deleteGoogleMigrationSource(entry.source.calendar_id, entry.source.event_id, actor);
+      entry.state = result === 'deleted' || result === 'ambiguous' ? 'needsKeep' : 'needsDelete';
+      return result;
+    } catch (error) {
+      // strict source helper가 throw하면 source가 남았다고 보수적으로 취급해 target을
+      // 삭제한다. 세션 전환 drain도 동일한 terminal rule을 사용한다.
+      entry.state = 'needsDelete';
+      throw error;
+    } finally {
+      release();
+    }
+  })));
 
   ipcMain.handle('calendar:tags:list', wrap(async () => {
     await sessionUser();
@@ -975,14 +1535,83 @@ export function registerCalendarIpc(deps: CalendarIpcDeps): void {
     return saved;
   }));
 
-  ipcMain.handle('calendar:notifications:catchup', wrap(async () => {
+  ipcMain.handle('calendar:notifications:catchup', wrap(async (input: unknown) => {
     const user = await sessionUser();
     const since = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
-    return store.listUnreadNotifications(user.id, since);
+    return store.listUnreadNotifications(
+      user.id,
+      since,
+      normalizeCalendarNotificationCatchupInput(input),
+    );
   }));
 
   ipcMain.handle('calendar:notifications:mark-read', wrap(async (ids: string[]) => {
     const user = await sessionUser();
     await store.markNotificationsRead(user.id, ids);
   }));
+
+  return {
+    beginQuitting: () => {
+      notificationMutationIntakeOpen = false;
+      retirePrivacyReplacementReceiptsForQuit();
+    },
+    beginPrivacyReplacementTransition: (origin) => {
+      const key = originKey(origin);
+      // prepareTransition은 begin 직후 첫 await 전에 drain을 시작한다. 여기서 미리
+      // fence를 잡아 quit snapshot과 그 사이에 새 target cleanup이 끼어드는 race를 막는다.
+      if (!privacyReplacementTransitionReservations.has(key)) {
+        if (!notificationMutationIntakeOpen) {
+          throw new Error('앱 종료 중이라 새 캘린더 세션 전환을 시작할 수 없습니다');
+        }
+        privacyReplacementTransitionReservations.set(key, {
+          releaseWork: beginTrackedNotificationWork(),
+          drain: null,
+        });
+      }
+      privacyReplacementRetiringOrigins.add(key);
+      for (const entry of privacyReplacementReceipts.values()) {
+        if (sameOrigin(entry.origin, origin)) entry.retiring = true;
+      }
+    },
+    drainPrivacyReplacementTransition: async (origin) => {
+      const key = originKey(origin);
+      const reservation = privacyReplacementTransitionReservations.get(key);
+      if (!reservation) {
+        if (!notificationMutationIntakeOpen) {
+          throw new Error('앱 종료 뒤에는 예약되지 않은 캘린더 세션 전환을 정리할 수 없습니다');
+        }
+        throw new Error('캘린더 세션 전환이 먼저 예약되지 않았습니다');
+      }
+      if (reservation.drain) return reservation.drain;
+
+      // begin 이후 이미 시작된 create/source-delete는 operation completion을 기다리고,
+      // completion 결과에 맞춰 keep 또는 exact target delete로 terminalize한다. reject는
+      // SessionManager까지 그대로 전파하지만, finally에서 reservation fence는 해제한다.
+      const drain = (async () => {
+        try {
+          while (true) {
+            const entries = [...privacyReplacementReceipts.values()]
+              .filter((entry) => sameOrigin(entry.origin, origin));
+            if (entries.length === 0 || entries.every(isTerminalReceipt)) return;
+            await Promise.all(entries.map((entry) => resolveTrackedRetiringReceipt(entry)));
+          }
+        } finally {
+          if (privacyReplacementTransitionReservations.get(key) === reservation) {
+            privacyReplacementTransitionReservations.delete(key);
+            reservation.releaseWork();
+          }
+        }
+      })();
+      reservation.drain = drain;
+      return drain;
+    },
+    completePrivacyReplacementTransition: (origin) => {
+      privacyReplacementRetiringOrigins.delete(originKey(origin));
+    },
+    abortPrivacyReplacementTransition: (origin) => {
+      privacyReplacementRetiringOrigins.delete(originKey(origin));
+    },
+    getPendingNotificationCount: () => pendingNotificationWork.size,
+    waitForNotificationIdle,
+  };
 }

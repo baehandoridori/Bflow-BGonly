@@ -1,5 +1,10 @@
 import { contextBridge, ipcRenderer, webUtils } from 'electron';
-import type { CalendarApiInputContract } from '../src/shared/calendarApiContract';
+import type {
+  CalendarApiInputContract,
+  CalendarPrivacyMigrationSourceDeleteResult,
+  CalendarPrivacyReplacementCreateResult,
+  CalendarPrivacyReplacementDisposition,
+} from '../src/shared/calendarApiContract';
 import type { BulkStageUpdate, BulkFieldUpdate, BulkUpdateResult } from './supabase';
 import type { CalendarTodoPatch, PersonalTodoCreateInput, PersonalTodoLabelColorKey, PersonalTodoOrderMutation, PersonalTodoPatch } from './personalTodoService';
 import type { SessionActionResult } from './sessionManager';
@@ -11,6 +16,51 @@ let canonicalSessionEpoch = 0;
 function rememberSessionEpoch(result: SessionActionResult): SessionActionResult {
   if (result?.payload && typeof result.payload.epoch === 'number') canonicalSessionEpoch = result.payload.epoch;
   return result;
+}
+
+type RawPrivacyReplacementCreateResult =
+  | {
+      storage: 'bflow' | 'legacy-private' | 'google';
+      actual_id: string;
+      calendar_id?: string;
+      receipt: string;
+      continuation_secret: string;
+    }
+  | { transition_resolved: 'deleted' };
+
+/**
+ * contextIsolation 경계에서만 raw capability를 보관한다. renderer에는 secret/receipt를
+ * 전혀 넘기지 않고, 이 closure가 가진 한 번의 capability만 노출한다.
+ */
+function opaquePrivacyReplacementContinuation(
+  raw: RawPrivacyReplacementCreateResult,
+): CalendarPrivacyReplacementCreateResult {
+  if ('transition_resolved' in raw) return raw;
+  const { storage, actual_id: actualId, calendar_id: calendarId, receipt, continuation_secret: secret } = raw;
+  if (
+    (storage !== 'bflow' && storage !== 'legacy-private' && storage !== 'google')
+    || typeof actualId !== 'string'
+    || actualId.length === 0
+    || typeof receipt !== 'string'
+    || receipt.length === 0
+    || typeof secret !== 'string'
+    || secret.length === 0
+  ) {
+    throw new Error('보상 가능한 일정 생성 결과가 올바르지 않습니다');
+  }
+
+  const settle = (disposition: CalendarPrivacyReplacementDisposition): Promise<void> =>
+    ipcRenderer.invoke('calendar:privacy-migration:settle-replacement', receipt, secret, disposition);
+  const deleteSource = (): Promise<CalendarPrivacyMigrationSourceDeleteResult> =>
+    ipcRenderer.invoke('calendar:privacy-migration:delete-bound-source', receipt, secret);
+
+  return {
+    storage,
+    actual_id: actualId,
+    ...(typeof calendarId === 'string' ? { calendar_id: calendarId } : {}),
+    settle,
+    deleteSource,
+  };
 }
 
 contextBridge.exposeInMainWorld('electronAPI', {
@@ -283,20 +333,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.invoke('calendar:events:list', params),
   calendarEventCreate: (input: Parameters<CalendarApiInputContract['calendarEventCreate']>[0]) =>
     ipcRenderer.invoke('calendar:events:create', input),
-  calendarPrivacyMigrationSourceDelete: (
-    input: Parameters<CalendarApiInputContract['calendarPrivacyMigrationSourceDelete']>[0],
-  ) => ipcRenderer.invoke('calendar:privacy-migration:delete-source', input),
   calendarPrivacyReplacementCreate: (
     input: Parameters<CalendarApiInputContract['calendarPrivacyReplacementCreate']>[0],
-  ) => ipcRenderer.invoke('calendar:privacy-migration:create-replacement', input),
-  calendarPrivacyReplacementSettle: (
-    receipt: Parameters<CalendarApiInputContract['calendarPrivacyReplacementSettle']>[0],
-    disposition: Parameters<CalendarApiInputContract['calendarPrivacyReplacementSettle']>[1],
-  ) => ipcRenderer.invoke(
-    'calendar:privacy-migration:settle-replacement',
-    receipt,
-    disposition,
-  ),
+  ) => ipcRenderer.invoke('calendar:privacy-migration:create-replacement', input)
+    .then((raw: RawPrivacyReplacementCreateResult) => opaquePrivacyReplacementContinuation(raw)),
   calendarEventUpdate: (
     id: Parameters<CalendarApiInputContract['calendarEventUpdate']>[0],
     updates: Parameters<CalendarApiInputContract['calendarEventUpdate']>[1],
@@ -306,8 +346,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
   calendarTagsList: () => ipcRenderer.invoke('calendar:tags:list'),
   calendarTagsSave: (tags: Parameters<CalendarApiInputContract['calendarTagsSave']>[0]) =>
     ipcRenderer.invoke('calendar:tags:save', tags),
-  calendarNotificationsCatchup: () => ipcRenderer.invoke('calendar:notifications:catchup'),
-  calendarNotificationsMarkRead: (ids: string[]) =>
+  calendarNotificationsCatchup: (
+    input?: Parameters<CalendarApiInputContract['calendarNotificationsCatchup']>[0],
+  ) => ipcRenderer.invoke('calendar:notifications:catchup', input),
+  calendarNotificationsMarkRead: (ids: Parameters<CalendarApiInputContract['calendarNotificationsMarkRead']>[0]) =>
     ipcRenderer.invoke('calendar:notifications:mark-read', ids),
   supabaseReadRevisions: () =>
     ipcRenderer.invoke('supabase:read-revisions'),

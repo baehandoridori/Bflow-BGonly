@@ -101,9 +101,16 @@ type ScheduleGridProps = {
   events: ScheduleCalendarEvent[];
   tagNameById: Record<string, string>;
   calendarNameById: Record<string, string>;
+  focusedDate?: string | null;
+  pulseDate?: string | null;
   onEventClick(event: ScheduleCalendarEvent): void;
   onDragStart(event: ScheduleCalendarEvent, mode: 'move' | 'resize-start' | 'resize-end', anchorDate: string): void;
   onEventContextMenu(event: ScheduleCalendarEvent, mouse: { preventDefault(): void; stopPropagation(): void; clientX: number; clientY: number }): void;
+};
+type ScheduleDateNavigationRequest = {
+  id: number;
+  date: string;
+  todoId?: string;
 };
 type SchedulePanelProps = {
   event: ScheduleCalendarEvent;
@@ -279,9 +286,16 @@ let scheduleDragDoneHandler: ((eventId: string, newStart: string, newEnd: string
 let scheduleTodoSyncCalls: Array<{ todoId: string; patch: Record<string, unknown> }> = [];
 let scheduleAddedEvents: ScheduleCalendarEvent[] = [];
 let scheduleGetEventsCalls = 0;
+let scheduleGetEventsGate: Promise<void> | null = null;
+let resolveScheduleGetEventsGate: (() => void) | null = null;
 let schedulePendingEffects: Array<() => void | (() => void)> = [];
 let scheduleMountedEffectCleanups: Array<() => void> = [];
 const scheduleWindowListeners = new Map<string, Set<(event: Event) => void>>();
+let scheduleCurrentView = 'schedule';
+let schedulePendingDateNavigation: ScheduleDateNavigationRequest | null = null;
+let scheduleDateNavigationConsumeIds: number[] = [];
+let schedulePendingTodoPanelNavigation: ScheduleDateNavigationRequest | null = null;
+let scheduleTodoPanelNavigationConsumeIds: number[] = [];
 let scheduleLoadAllCalls = 0;
 let scheduleLoadBflowEventsCalls = 0;
 let settingsCurrentUser: TestUser;
@@ -582,7 +596,14 @@ function resetHarness(): void {
   (globalThis as typeof globalThis & { __scheduleTodoSyncCalls?: typeof scheduleTodoSyncCalls }).__scheduleTodoSyncCalls = scheduleTodoSyncCalls;
   scheduleAddedEvents = [];
   scheduleGetEventsCalls = 0;
+  scheduleGetEventsGate = null;
+  resolveScheduleGetEventsGate = null;
   schedulePendingEffects = [];
+  scheduleCurrentView = 'schedule';
+  schedulePendingDateNavigation = null;
+  scheduleDateNavigationConsumeIds = [];
+  schedulePendingTodoPanelNavigation = null;
+  scheduleTodoPanelNavigationConsumeIds = [];
   scheduleLoadAllCalls = 0;
   scheduleLoadBflowEventsCalls = 0;
   settingsCurrentUser = {
@@ -1136,12 +1157,39 @@ async function loadScheduleView(): Promise<ScheduleViewComponent> {
       if (id === '@/utils/cn') return { cn: (...values: string[]) => values.filter(Boolean).join(' ') };
       if (id === '@/stores/useDataStore') return { useDataStore: (selector: (state: { episodes: []; episodeTitles: {} }) => unknown) => selector({ episodes: [], episodeTitles: {} }) };
       if (id === '@/stores/useAppStore') {
-        const appState = { setView() {}, vacationConnected: false };
+        const appState = {
+          setView() {},
+          get currentView() {
+            return scheduleCurrentView;
+          },
+          vacationConnected: false,
+          get pendingScheduleDateNavigationRequest() {
+            return schedulePendingDateNavigation;
+          },
+          get pendingScheduleTodoPanelNavigationRequest() {
+            return schedulePendingTodoPanelNavigation;
+          },
+          consumeScheduleDateNavigationRequest(requestId: number) {
+            if (schedulePendingDateNavigation?.id !== requestId) return null;
+            const request = schedulePendingDateNavigation;
+            schedulePendingDateNavigation = null;
+            scheduleDateNavigationConsumeIds.push(requestId);
+            return request;
+          },
+          consumeScheduleTodoPanelNavigationRequest(requestId: number) {
+            if (schedulePendingTodoPanelNavigation?.id !== requestId) return null;
+            const request = schedulePendingTodoPanelNavigation;
+            schedulePendingTodoPanelNavigation = null;
+            scheduleTodoPanelNavigationConsumeIds.push(requestId);
+            return request;
+          },
+        };
         return { useAppStore: (selector?: (state: typeof appState) => unknown) => selector ? selector(appState) : appState };
       }
       if (id === '@/services/calendarService') return {
         getEvents: async () => {
           scheduleGetEventsCalls += 1;
+          if (scheduleGetEventsGate) await scheduleGetEventsGate;
           return scheduleCanonicalEvents;
         },
         isGoogleCacheReady: () => true,
@@ -3231,6 +3279,205 @@ test('ScheduleView follows canonical B flow moves but rejects same-id rows from 
   assert.equal(scheduleQuickEditProps.length, 0, 'same id from Google cannot replace B flow quick edit');
 });
 
+test('ScheduleView consumes a stored date request after it mounts exactly once', async () => {
+  resetHarness();
+  // 알림/위젯이 먼저 store에 남긴 요청: ScheduleView 리스너가 아직 없는 콜드 마운트다.
+  schedulePendingDateNavigation = {
+    id: 47,
+    date: '2026-09-17',
+    todoId: 'todo-cold-mount',
+  };
+  schedulePendingTodoPanelNavigation = schedulePendingDateNavigation;
+
+  await renderScheduleView();
+  await flushScheduleMountEffects();
+  assert.deepEqual(scheduleDateNavigationConsumeIds, [47]);
+  assert.equal(schedulePendingDateNavigation, null);
+
+  scheduleGridProps = [];
+  await renderScheduleView();
+  const grid = scheduleGridProps.at(-1);
+  assert.equal(grid?.currentMonth, 8, 'the mounted view moves to the requested September month');
+  assert.equal(grid?.pulseDate, '2026-09-17', 'the requested date receives the existing visual pulse');
+
+  await flushScheduleMountEffects();
+  await renderScheduleView();
+  assert.deepEqual(
+    scheduleDateNavigationConsumeIds,
+    [47],
+    'StrictMode-like repeat effects cannot consume and pulse the same request twice',
+  );
+  resetHarness();
+});
+
+test('ScheduleView resolves a stored todo panel after canonical events finish loading', async () => {
+  resetHarness();
+  const linkedEvent: ScheduleCalendarEvent = {
+    id: 'delayed-todo-event',
+    title: '늦게 도착한 연결 일정',
+    memo: '목록 로드가 끝난 뒤 패널에 열려야 한다',
+    color: '#74B9FF',
+    type: 'custom',
+    startDate: '2026-09-17',
+    endDate: '2026-09-17',
+    createdBy: 'owner',
+    createdAt: '2026-08-24T00:00:00.000Z',
+    source: 'bflow',
+    sourceCalendarId: 'bflow:mine',
+    calendarId: 'mine',
+    linkedTodoId: 'todo-delayed-load',
+    canEdit: true,
+    isReadOnly: false,
+  };
+  scheduleCanonicalEvents = [linkedEvent];
+  scheduleGetEventsGate = new Promise<void>((resolve) => {
+    resolveScheduleGetEventsGate = resolve;
+  });
+  schedulePendingDateNavigation = {
+    id: 48,
+    date: '2026-09-17',
+    todoId: 'todo-delayed-load',
+  };
+  schedulePendingTodoPanelNavigation = schedulePendingDateNavigation;
+
+  await renderScheduleView();
+  await flushScheduleMountEffects();
+  await new Promise<void>((resolve) => setTimeout(resolve, 120));
+  assert.equal(schedulePanelProps.length, 0, 'the historical 100ms lookup has no events before the delayed canonical load');
+
+  resolveScheduleGetEventsGate?.();
+  await new Promise<void>((resolve) => setImmediate(resolve));
+  schedulePanelProps = [];
+  await renderScheduleView();
+  await flushScheduleMountEffects();
+  await renderScheduleView();
+
+  assert.deepEqual(
+    schedulePanelProps.at(-1)?.event,
+    linkedEvent,
+    'the request must still open its linked event after the canonical list arrives',
+  );
+  assert.deepEqual(scheduleTodoPanelNavigationConsumeIds, [48]);
+  await flushScheduleMountEffects();
+  await renderScheduleView();
+  assert.deepEqual(
+    scheduleTodoPanelNavigationConsumeIds,
+    [48],
+    'repeat effects cannot open the same delayed todo panel twice',
+  );
+  resetHarness();
+});
+
+test('ScheduleView resolves only the latest stored todo panel when delayed events arrive', async () => {
+  resetHarness();
+  const oldLinkedEvent: ScheduleCalendarEvent = {
+    id: 'old-delayed-todo-event',
+    title: '이전 할일 일정',
+    memo: '',
+    color: '#74B9FF',
+    type: 'custom',
+    startDate: '2026-09-17',
+    endDate: '2026-09-17',
+    createdBy: 'owner',
+    createdAt: '2026-08-24T00:00:00.000Z',
+    source: 'bflow',
+    sourceCalendarId: 'bflow:mine',
+    calendarId: 'mine',
+    linkedTodoId: 'todo-old-delayed',
+    canEdit: true,
+    isReadOnly: false,
+  };
+  const latestLinkedEvent: ScheduleCalendarEvent = {
+    ...oldLinkedEvent,
+    id: 'latest-delayed-todo-event',
+    title: '최신 할일 일정',
+    linkedTodoId: 'todo-latest-delayed',
+  };
+  scheduleCanonicalEvents = [oldLinkedEvent, latestLinkedEvent];
+  scheduleGetEventsGate = new Promise<void>((resolve) => {
+    resolveScheduleGetEventsGate = resolve;
+  });
+  schedulePendingDateNavigation = {
+    id: 51,
+    date: '2026-09-17',
+    todoId: oldLinkedEvent.linkedTodoId,
+  };
+  schedulePendingTodoPanelNavigation = schedulePendingDateNavigation;
+
+  await renderScheduleView();
+  await flushScheduleMountEffects();
+
+  schedulePendingDateNavigation = {
+    id: 52,
+    date: '2026-09-18',
+    todoId: latestLinkedEvent.linkedTodoId,
+  };
+  schedulePendingTodoPanelNavigation = schedulePendingDateNavigation;
+  await renderScheduleView();
+  await flushScheduleMountEffects();
+
+  resolveScheduleGetEventsGate?.();
+  await new Promise<void>((resolve) => setImmediate(resolve));
+  schedulePanelProps = [];
+  await renderScheduleView();
+  await flushScheduleMountEffects();
+  await renderScheduleView();
+
+  assert.deepEqual(scheduleDateNavigationConsumeIds, [51, 52]);
+  assert.deepEqual(
+    scheduleTodoPanelNavigationConsumeIds,
+    [52],
+    'the stale todo request must not consume the newer panel intent',
+  );
+  assert.deepEqual(schedulePanelProps.at(-1)?.event, latestLinkedEvent);
+  resetHarness();
+});
+
+test('ScheduleView does not resolve a delayed todo panel after leaving the schedule', async () => {
+  resetHarness();
+  const linkedEvent: ScheduleCalendarEvent = {
+    id: 'left-schedule-todo-event',
+    title: '떠난 화면에서 열리면 안 되는 일정',
+    memo: '',
+    color: '#74B9FF',
+    type: 'custom',
+    startDate: '2026-09-17',
+    endDate: '2026-09-17',
+    createdBy: 'owner',
+    createdAt: '2026-08-24T00:00:00.000Z',
+    source: 'bflow',
+    sourceCalendarId: 'bflow:mine',
+    calendarId: 'mine',
+    linkedTodoId: 'todo-left-schedule',
+    canEdit: true,
+    isReadOnly: false,
+  };
+  scheduleCanonicalEvents = [linkedEvent];
+  scheduleGetEventsGate = new Promise<void>((resolve) => {
+    resolveScheduleGetEventsGate = resolve;
+  });
+  schedulePendingDateNavigation = {
+    id: 53,
+    date: '2026-09-17',
+    todoId: linkedEvent.linkedTodoId,
+  };
+  schedulePendingTodoPanelNavigation = schedulePendingDateNavigation;
+
+  await renderScheduleView();
+  await flushScheduleMountEffects();
+  scheduleCurrentView = 'dashboard';
+  resolveScheduleGetEventsGate?.();
+  await new Promise<void>((resolve) => setImmediate(resolve));
+  schedulePanelProps = [];
+  await renderScheduleView();
+  await flushScheduleMountEffects();
+  await renderScheduleView();
+
+  assert.deepEqual(scheduleTodoPanelNavigationConsumeIds, []);
+  assert.equal(schedulePanelProps.length, 0, 'a delayed event list cannot open a panel after navigation leaves schedule');
+  resetHarness();
+});
+
 test('ScheduleView todo navigation does not adopt an unrelated same-id storage row', async () => {
   resetHarness();
   const unrelatedGoogle: ScheduleCalendarEvent = {
@@ -3254,10 +3501,14 @@ test('ScheduleView todo navigation does not adopt an unrelated same-id storage r
   await flushScheduleMountEffects();
   await renderScheduleView();
   await flushScheduleMountEffects();
-  await dispatchScheduleWindowEvent('bflow:navigate-to-date', {
+  schedulePendingDateNavigation = {
+    id: 101,
     date: '2026-08-25',
     todoId: 'todo-identity',
-  });
+  };
+  schedulePendingTodoPanelNavigation = schedulePendingDateNavigation;
+  await renderScheduleView();
+  await flushScheduleMountEffects();
   await new Promise<void>((resolve) => setTimeout(resolve, 120));
   schedulePanelProps = [];
   await renderScheduleView();
@@ -3301,10 +3552,14 @@ test('ScheduleView todo navigation prefers the unique linked identity over a raw
   await flushScheduleMountEffects();
   await renderScheduleView();
   await flushScheduleMountEffects();
-  await dispatchScheduleWindowEvent('bflow:navigate-to-date', {
+  schedulePendingDateNavigation = {
+    id: 102,
     date: '2026-08-25',
     todoId: 'todo-identity',
-  });
+  };
+  schedulePendingTodoPanelNavigation = schedulePendingDateNavigation;
+  await renderScheduleView();
+  await flushScheduleMountEffects();
   await new Promise<void>((resolve) => setTimeout(resolve, 120));
   schedulePanelProps = [];
   await renderScheduleView();

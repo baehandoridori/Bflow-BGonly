@@ -7,7 +7,7 @@ import type {
 } from '../features/playground/arcade/types';
 import type {
   CalendarApiInputContract,
-  CalendarPrivacyMigrationSourceDeleteResult,
+  CalendarPrivacyReplacementCreateResult,
 } from '../shared/calendarApiContract';
 
 // ─── 부서 (Department) ──────────────────────
@@ -1492,21 +1492,9 @@ export interface ElectronAPI extends CalendarApiInputContract {
     created_at: string;
     updated_at: string;
   }>;
-  calendarPrivacyMigrationSourceDelete: (
-    input: Parameters<CalendarApiInputContract['calendarPrivacyMigrationSourceDelete']>[0],
-  ) => Promise<CalendarPrivacyMigrationSourceDeleteResult>;
   calendarPrivacyReplacementCreate: (
     input: Parameters<CalendarApiInputContract['calendarPrivacyReplacementCreate']>[0],
-  ) => Promise<{
-    storage: 'bflow' | 'legacy-private' | 'google';
-    actual_id: string;
-    calendar_id?: string;
-    receipt: string;
-  }>;
-  calendarPrivacyReplacementSettle: (
-    receipt: Parameters<CalendarApiInputContract['calendarPrivacyReplacementSettle']>[0],
-    disposition: Parameters<CalendarApiInputContract['calendarPrivacyReplacementSettle']>[1],
-  ) => Promise<void>;
+  ) => Promise<CalendarPrivacyReplacementCreateResult>;
   calendarEventUpdate: (
     id: Parameters<CalendarApiInputContract['calendarEventUpdate']>[0],
     updates: Parameters<CalendarApiInputContract['calendarEventUpdate']>[1],
@@ -1541,7 +1529,9 @@ export interface ElectronAPI extends CalendarApiInputContract {
   calendarTagsSave: (
     tags: Parameters<CalendarApiInputContract['calendarTagsSave']>[0],
   ) => Promise<Array<{ id: string; name: string; color: string; sort_order: number }>>;
-  calendarNotificationsCatchup: () => Promise<Array<{
+  calendarNotificationsCatchup: (
+    input?: Parameters<CalendarApiInputContract['calendarNotificationsCatchup']>[0],
+  ) => Promise<Array<{
     id: string;
     recipient_id: string;
     actor_id: string | null;
@@ -1556,7 +1546,9 @@ export interface ElectronAPI extends CalendarApiInputContract {
     created_at: string;
     read_at: string | null;
   }>>;
-  calendarNotificationsMarkRead: (ids: string[]) => Promise<void>;
+  calendarNotificationsMarkRead: (
+    ids: Parameters<CalendarApiInputContract['calendarNotificationsMarkRead']>[0],
+  ) => Promise<void>;
   supabaseReadRevisions: () => Promise<unknown[]>;
   supabaseAddRevision: (id: string, partUuid: string, sceneId: string, revisionNo: number, status: string, priority: string, description: string, frameNo: string, imageUrl: string, department: string, lookupDepartment: string, requesterId: string, requesterName: string, assignee: string, createdAt: string, notifyUserIdsJson: string, assigneeIdsJson?: string, setId?: string) => Promise<void>;
   supabaseUpdateRevision: (id: string, updates: Record<string, string>) => Promise<void>;

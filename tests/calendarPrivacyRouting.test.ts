@@ -53,6 +53,7 @@ const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{
 const UNKNOWN_TAG_UUID = '00000000-0000-4000-8000-000000000099';
 
 type ServiceModule = {
+  getGCalSettings(): Promise<{ personalCalendarId: string | null; lastSyncAt: string | null }>;
   loadBflowEvents(): Promise<void>;
   syncAll(options?: { broadcast?: boolean; skipBflowLoad?: boolean }): Promise<Array<Record<string, unknown>>>;
   syncIncremental(): Promise<void>;
@@ -90,10 +91,24 @@ type PreviewCalendarApi = {
   ): Promise<CalendarEventRow>;
   calendarEventDelete(id: string): Promise<void>;
   calendarPrivacyReplacementCreate(request: {
-    storage: 'google';
-    calendar_id: string;
+    storage: 'bflow' | 'legacy-private' | 'google';
+    calendar_id?: string;
+    source: {
+      storage: 'bflow' | 'legacy-private' | 'google';
+      event_id: string;
+      calendar_id?: string;
+    };
     event: Record<string, unknown>;
-  }): Promise<unknown>;
+  }): Promise<
+    | {
+        storage: 'bflow' | 'legacy-private' | 'google';
+        actual_id: string;
+        calendar_id?: string;
+        settle(disposition: 'keep' | 'delete'): Promise<void>;
+        deleteSource(): Promise<'deleted' | 'missing' | 'ambiguous'>;
+      }
+    | { transition_resolved: 'deleted' }
+  >;
 };
 
 const previewLogin = async (api: PreviewCalendarApi, name: string) => {
@@ -134,6 +149,11 @@ type Calls = {
   googleUpdates: Array<{ calendarId: string; eventId: string; input: unknown }>;
   googleDeletes: Array<{ calendarId: string; eventId: string }>;
   watches: Array<{ calendarId: string; userId: string }>;
+  privacySourceDeletes: Array<{
+    storage: 'bflow' | 'legacy-private' | 'google';
+    event_id: string;
+    calendar_id?: string;
+  }>;
 };
 
 let bundleSource: Promise<string> | undefined;
@@ -302,10 +322,10 @@ async function createHarness(options: {
     deleted: string[];
     isFullSync: boolean;
   }>;
-  teamGoogleCalendarId?: string;
   personalGoogleCalendarId?: string;
   includePersonalCalendar?: boolean;
   calendarList?: () => Promise<CalendarRow[]>;
+  transitionResolvedReplacement?: boolean;
 }): Promise<{ service: ServiceModule; calls: Calls; restore(): void }> {
   const globalScope = globalThis as Record<string, unknown>;
   const prior = new Map<string, { exists: boolean; value: unknown }>();
@@ -348,13 +368,8 @@ async function createHarness(options: {
     googleUpdates: [],
     googleDeletes: [],
     watches: [],
+    privacySourceDeletes: [],
   };
-  const privacyReplacementReceipts = new Map<string, {
-    storage: 'bflow' | 'legacy-private' | 'google';
-    actualId: string;
-    calendarId?: string;
-  }>();
-  let privacyReceiptNonce = 0;
   const calendars = options.includePersonalCalendar === false
     ? [calendarRow('shared-cal', false)]
     : [calendarRow('personal-cal', true), calendarRow('shared-cal', false)];
@@ -370,6 +385,11 @@ async function createHarness(options: {
     },
     calendarPrivacyReplacementCreate: async (request: {
       storage: 'bflow' | 'legacy-private' | 'google';
+      source: {
+        storage: 'bflow' | 'legacy-private' | 'google';
+        event_id: string;
+        calendar_id?: string;
+      };
       event: Record<string, unknown>;
       calendar_id?: string;
     }) => {
@@ -386,39 +406,51 @@ async function createHarness(options: {
         if (options.failGoogleCreate) throw new Error('Google calendar unavailable');
         actualId = 'created-google-event';
       }
-      const receipt = `privacy-receipt-${privacyReceiptNonce++}`;
-      privacyReplacementReceipts.set(receipt, {
-        storage: request.storage,
-        actualId,
-        calendarId: request.calendar_id,
-      });
+      if (options.transitionResolvedReplacement) {
+        return { transition_resolved: 'deleted' as const };
+      }
+      let settled = false;
       return {
         storage: request.storage,
         actual_id: actualId,
         calendar_id: request.calendar_id,
-        receipt,
+        settle: async (disposition: 'keep' | 'delete') => {
+          if (settled) throw new Error('replacement continuation is already settled');
+          settled = true;
+          if (disposition === 'keep') return;
+          if (request.storage === 'bflow') {
+            calls.bflowDeletes.push(actualId);
+            if (options.bflowDelete) await options.bflowDelete(actualId);
+            else if (options.bflowDeleteError) throw options.bflowDeleteError;
+          } else if (request.storage === 'legacy-private') {
+            calls.legacyDeletes.push(actualId);
+          } else {
+            const calendarId = request.calendar_id ?? 'primary';
+            calls.googleDeletes.push({ calendarId, eventId: actualId });
+            if (options.googleDelete) await options.googleDelete(calendarId, actualId);
+            else if (options.googleDeleteError) throw options.googleDeleteError;
+          }
+        },
+        deleteSource: async () => {
+          const source = request.source;
+          calls.privacySourceDeletes.push(source);
+          if (source.storage === 'legacy-private') {
+            calls.legacyDeletes.push(source.event_id);
+            return 'deleted' as const;
+          }
+          if (source.storage === 'google') {
+            const calendarId = source.calendar_id ?? 'primary';
+            calls.googleDeletes.push({ calendarId, eventId: source.event_id });
+            if (options.googleDelete) await options.googleDelete(calendarId, source.event_id);
+            else if (options.googleDeleteError) throw options.googleDeleteError;
+            return 'deleted' as const;
+          }
+          calls.bflowDeletes.push(source.event_id);
+          if (options.bflowDelete) await options.bflowDelete(source.event_id);
+          else if (options.bflowDeleteError) throw options.bflowDeleteError;
+          return 'deleted' as const;
+        },
       };
-    },
-    calendarPrivacyReplacementSettle: async (
-      receipt: string,
-      disposition: 'keep' | 'delete',
-    ) => {
-      const target = privacyReplacementReceipts.get(receipt);
-      if (!target) throw new Error('receipt missing or consumed');
-      privacyReplacementReceipts.delete(receipt);
-      if (disposition === 'keep') return;
-      if (target.storage === 'bflow') {
-        calls.bflowDeletes.push(target.actualId);
-        if (options.bflowDelete) await options.bflowDelete(target.actualId);
-        else if (options.bflowDeleteError) throw options.bflowDeleteError;
-      } else if (target.storage === 'legacy-private') {
-        calls.legacyDeletes.push(target.actualId);
-      } else {
-        const calendarId = target.calendarId ?? 'primary';
-        calls.googleDeletes.push({ calendarId, eventId: target.actualId });
-        if (options.googleDelete) await options.googleDelete(calendarId, target.actualId);
-        else if (options.googleDeleteError) throw options.googleDeleteError;
-      }
     },
     calendarEventUpdate: async (id: string, patch: Record<string, unknown>) => {
       calls.bflowUpdates.push({ id, patch });
@@ -430,16 +462,6 @@ async function createHarness(options: {
         return;
       }
       if (options.bflowDeleteError) throw options.bflowDeleteError;
-    },
-    calendarPrivacyMigrationSourceDelete: async (request: string | {
-      storage: 'bflow' | 'legacy-private' | 'google';
-      event_id: string;
-    }) => {
-      const id = typeof request === 'string' ? request : request.event_id;
-      calls.bflowDeletes.push(id);
-      if (options.bflowDelete) await options.bflowDelete(id);
-      else if (options.bflowDeleteError) throw options.bflowDeleteError;
-      return 'deleted' as const;
     },
     calendarBroadcastChange: async (detail: unknown) => {
       calls.broadcasts.push(detail);
@@ -454,17 +476,6 @@ async function createHarness(options: {
       calls.legacyUpdates.push({ id, patch });
     },
     supabaseDeletePrivateEvent: async (id: string) => { calls.legacyDeletes.push(id); },
-    supabaseReadMetadata: async (type: string, key: string) => (
-      type === 'gcal' && key === 'teamCalendarId' && options.teamGoogleCalendarId
-        ? {
-          type,
-          key,
-          value: options.teamGoogleCalendarId,
-          updatedAt: '2026-08-24T00:00:00.000Z',
-        }
-        : null
-    ),
-    supabaseWriteMetadata: async () => {},
     gcalIsAuthenticated: async () => false,
     gcalSaveLocalSettings: async () => {},
     gcalFullSync: async (calendarId: string) => (
@@ -617,6 +628,21 @@ test('personal B flow calendar rows retain isPrivate on load', async () => {
   }
 });
 
+test('Google settings expose only local personal sync fields', async () => {
+  const harness = await createHarness({
+    rows: [],
+    personalGoogleCalendarId: 'personal-google-calendar',
+  });
+  try {
+    assert.deepEqual(await harness.service.getGCalSettings(), {
+      personalCalendarId: 'personal-google-calendar',
+      lastSyncAt: null,
+    });
+  } finally {
+    harness.restore();
+  }
+});
+
 test('making a personal B flow event public creates Google replacement before deleting source', async () => {
   const harness = await createHarness({ rows: [eventRow('personal-event', 'personal-cal')] });
   try {
@@ -624,7 +650,16 @@ test('making a personal B flow event public creates Google replacement before de
     await harness.service.updateEvent('personal-event', { isPrivate: false });
 
     assert.equal(harness.calls.googleCreates.length, 1);
+    assert.equal(harness.calls.googleCreates[0].calendarId, 'primary');
+    assert.equal(
+      Object.hasOwn(harness.calls.googleCreates[0].input as object, 'visibility'),
+      false,
+    );
     assert.deepEqual(harness.calls.bflowDeletes, ['personal-event']);
+    assert.deepEqual(harness.calls.privacySourceDeletes, [{
+      storage: 'bflow',
+      event_id: 'personal-event',
+    }]);
     assert.deepEqual(harness.calls.bflowUpdates, []);
     const events = await harness.service.getEvents();
     const migrated = events.find((event) => event.id === 'created-google-event');
@@ -644,9 +679,35 @@ test('making a shared B flow event private creates personal-calendar replacement
     assert.equal(harness.calls.bflowCreates.length, 1);
     assert.equal(harness.calls.bflowCreates[0].calendar_id, 'personal-cal');
     assert.deepEqual(harness.calls.bflowDeletes, ['shared-event']);
+    assert.deepEqual(harness.calls.privacySourceDeletes, [{
+      storage: 'bflow',
+      event_id: 'shared-event',
+    }]);
     assert.deepEqual(harness.calls.bflowUpdates, []);
     const events = await harness.service.getEvents();
     assert.equal(events.find((event) => event.id === 'created-private-event')?.isPrivate, true);
+  } finally {
+    harness.restore();
+  }
+});
+
+test('transition-resolved replacement clears its optimistic row without deleting the bound source', async () => {
+  const harness = await createHarness({
+    rows: [eventRow('personal-event', 'personal-cal')],
+    transitionResolvedReplacement: true,
+  });
+  try {
+    await harness.service.loadBflowEvents();
+    await harness.service.updateEvent('personal-event', { isPrivate: false });
+
+    assert.deepEqual(harness.calls.privacySourceDeletes, []);
+    assert.deepEqual(harness.calls.bflowDeletes, []);
+    assert.deepEqual(harness.calls.googleDeletes, []);
+    assert.deepEqual(
+      (await harness.service.getEvents()).map((event) => event.id),
+      ['personal-event'],
+      'the stale renderer does not retain a target that main already compensated during session transition',
+    );
   } finally {
     harness.restore();
   }
@@ -729,6 +790,10 @@ test('unauthenticated preview rejects a Google replacement and keeps the persona
       harness.api.calendarPrivacyReplacementCreate({
         storage: 'google',
         calendar_id: 'primary',
+        source: {
+          storage: 'bflow',
+          event_id: source.id,
+        },
         event: { summary: '공개 전환 시도' },
       }),
       /Google Calendar.*연결/,
@@ -744,6 +809,114 @@ test('unauthenticated preview rejects a Google replacement and keeps the persona
       (await harness.api.calendarEventsList()).find(({ id }) => id === source.id),
       source,
     );
+  } finally {
+    harness.restore();
+  }
+});
+
+test('preview session transition resolves a created replacement and only repeats its terminal delete', async () => {
+  const harness = await createPreviewCalendarHarness();
+  try {
+    await previewLogin(harness.api, '배한솔');
+    const personalCalendar = (await harness.api.calendarList()).find((calendar) => calendar.is_personal);
+    assert.ok(personalCalendar);
+    const source = await harness.api.calendarEventCreate(
+      previewEventInput(personalCalendar.id, '이관 원본'),
+    );
+    const replacement = await harness.api.calendarPrivacyReplacementCreate({
+      storage: 'bflow',
+      source: { storage: 'bflow', event_id: source.id },
+      event: previewEventInput(personalCalendar.id, '이관 대상'),
+    });
+    assert.equal('transition_resolved' in replacement, false);
+    if ('transition_resolved' in replacement) throw new Error('unexpected transition resolution');
+    assert.equal('receipt' in replacement, false);
+    assert.equal(
+      'calendarPrivacyMigrationSourceDelete' in (harness.api as unknown as Record<string, unknown>),
+      false,
+    );
+    assert.equal(
+      'calendarPrivacyReplacementSettle' in (harness.api as unknown as Record<string, unknown>),
+      false,
+    );
+
+    await harness.api.logoutCanonicalSession();
+    await previewLogin(harness.api, '허혜원');
+    await assert.rejects(replacement.deleteSource(), /세션/);
+    await assert.rejects(replacement.settle('keep'), /반대 방식/);
+    await replacement.settle('delete');
+    await replacement.settle('delete');
+
+    await harness.api.logoutCanonicalSession();
+    await previewLogin(harness.api, '배한솔');
+    const ids = (await harness.api.calendarEventsList()).map((event) => event.id);
+    assert.ok(ids.includes(source.id), 'new-session actor never deletes the bound A source');
+    assert.equal(ids.includes(replacement.actual_id), false, 'session transition owns the created target cleanup');
+  } finally {
+    harness.restore();
+  }
+});
+
+test('preview session transition preserves a source-deleted replacement and only repeats its terminal keep', async () => {
+  const harness = await createPreviewCalendarHarness();
+  try {
+    await previewLogin(harness.api, '배한솔');
+    const personalCalendar = (await harness.api.calendarList()).find((calendar) => calendar.is_personal);
+    assert.ok(personalCalendar);
+    const source = await harness.api.calendarEventCreate(
+      previewEventInput(personalCalendar.id, '삭제 완료 원본'),
+    );
+    const replacement = await harness.api.calendarPrivacyReplacementCreate({
+      storage: 'bflow',
+      source: { storage: 'bflow', event_id: source.id },
+      event: previewEventInput(personalCalendar.id, '보존할 이관 대상'),
+    });
+    assert.equal('transition_resolved' in replacement, false);
+    if ('transition_resolved' in replacement) throw new Error('unexpected transition resolution');
+    assert.equal(await replacement.deleteSource(), 'deleted');
+
+    await harness.api.logoutCanonicalSession();
+    await previewLogin(harness.api, '허혜원');
+    await assert.rejects(replacement.settle('delete'), /반대 방식/);
+    await replacement.settle('keep');
+    await replacement.settle('keep');
+
+    await harness.api.logoutCanonicalSession();
+    await previewLogin(harness.api, '배한솔');
+    const ids = (await harness.api.calendarEventsList()).map((event) => event.id);
+    assert.equal(ids.includes(source.id), false, 'source deletion remains committed before the session transition');
+    assert.ok(ids.includes(replacement.actual_id), 'session transition keeps the already-migrated target');
+  } finally {
+    harness.restore();
+  }
+});
+
+test('preview privacy replacement cannot keep a created target before its bound source is resolved', async () => {
+  const harness = await createPreviewCalendarHarness();
+  try {
+    await previewLogin(harness.api, '배한솔');
+    const personalCalendar = (await harness.api.calendarList()).find((calendar) => calendar.is_personal);
+    assert.ok(personalCalendar);
+    const source = await harness.api.calendarEventCreate(
+      previewEventInput(personalCalendar.id, '원본 삭제 전 일정'),
+    );
+    const replacement = await harness.api.calendarPrivacyReplacementCreate({
+      storage: 'bflow',
+      source: { storage: 'bflow', event_id: source.id },
+      event: previewEventInput(personalCalendar.id, '공개 전환 대상'),
+    });
+    assert.equal('transition_resolved' in replacement, false);
+    if ('transition_resolved' in replacement) throw new Error('unexpected transition resolution');
+
+    await assert.rejects(replacement.settle('keep'), /원본 일정 삭제 결과/);
+    const beforeCompensation = await harness.api.calendarEventsList();
+    assert.ok(beforeCompensation.some(({ id }) => id === source.id));
+    assert.ok(beforeCompensation.some(({ id }) => id === replacement.actual_id));
+
+    await replacement.settle('delete');
+    const afterCompensation = await harness.api.calendarEventsList();
+    assert.ok(afterCompensation.some(({ id }) => id === source.id));
+    assert.equal(afterCompensation.some(({ id }) => id === replacement.actual_id), false);
   } finally {
     harness.restore();
   }
@@ -1454,7 +1627,6 @@ test('Google compensation tombstone keeps the same event ID from another calenda
   const harness = await createHarness({
     rows: [eventRow('personal-event', 'personal-cal')],
     bflowDeleteError: originalDeleteError,
-    teamGoogleCalendarId: 'primary',
     personalGoogleCalendarId: 'other-google-calendar',
     googleFullSync: async () => [googleEvent('created-google-event')],
   });
@@ -1475,7 +1647,7 @@ test('Google compensation tombstone keeps the same event ID from another calenda
     assert.equal(matchingEvents.length, 1);
     assert.equal(matchingEvents[0].sourceCalendarId, 'other-google-calendar');
     assert.equal(harness.calls.broadcasts.length, broadcastsAfterCompensation + 1);
-    assert.equal(harness.calls.watches.length, watchesAfterCompensation + 2);
+    assert.equal(harness.calls.watches.length, watchesAfterCompensation + 1);
   } finally {
     harness.restore();
   }

@@ -15,9 +15,10 @@ import { notificationFileNameForUser } from '../utils/notificationPersistence';
  * - 'revision': 리테이크 등록/진행/완료 알림
  * - 'acting_feedback': v1.25.5 — 액팅 씬 리테이크 대기 요청 (강한 톤, mention 과 동일 시각 처리)
  * - 'scene_assignment': v1.25.8 — 본인이 새 담당자로 배정된 씬 알림 (강한 톤, mention 과 동일 시각 처리)
+ * - 'calendar': 공유 캘린더 일정 변경 알림 (강한 톤, mention 과 동일 시각 처리)
  * - 'scene_change' / 'milestone' / 'system': 기존 동작 유지
  */
-export type NotificationType = 'scene_change' | 'comment' | 'mention' | 'milestone' | 'system' | 'revision' | 'acting_feedback' | 'scene_assignment' | 'comment_reaction';
+export type NotificationType = 'scene_change' | 'comment' | 'mention' | 'milestone' | 'system' | 'revision' | 'acting_feedback' | 'scene_assignment' | 'comment_reaction' | 'calendar';
 
 export interface AppNotification {
   id: string;
@@ -61,6 +62,12 @@ export interface AppNotification {
     reactionEmojis?: string[];
     /** v1.29.0: 이모지 반응 알림 — 반응한 사람 id (자기 자신 필터링 fallback) */
     reactionActorId?: string;
+    /** PR4: 캘린더 알림 DB row id — batch mark-read IPC 호출용 */
+    calendarNotificationId?: string;
+    /** PR4: 캘린더 알림의 원본 캘린더 — 뮤트 필터용 */
+    calendarId?: string;
+    /** PR4: 캘린더 알림 클릭 시 이동할 날짜 (YYYY-MM-DD) */
+    eventDate?: string;
   };
   isRead: boolean;
   createdAt: string; // ISO 8601
@@ -82,7 +89,7 @@ function countUnread(notifications: AppNotification[]): number {
  */
 function countUnreadMentions(notifications: AppNotification[]): number {
   return notifications.filter(
-    (x) => !x.isRead && (x.type === 'mention' || x.type === 'acting_feedback' || x.type === 'scene_assignment'),
+    (x) => !x.isRead && (x.type === 'mention' || x.type === 'acting_feedback' || x.type === 'scene_assignment' || x.type === 'calendar'),
   ).length;
 }
 

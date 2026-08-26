@@ -10,7 +10,6 @@ import type {
   GCalSettings,
 } from '@/types/calendar';
 import * as gcalService from './googleCalendarService';
-import { readMetadata, writeMetadata } from './supabaseService';
 import { useAuthStore } from '@/stores/useAuthStore';
 import { getPersonalCalendar, useCalendarStore } from '@/stores/useCalendarStore';
 import { createUuid } from '@/utils/createUuid';
@@ -20,6 +19,11 @@ import {
   snapshotCalendarEventIdentity,
   type CalendarEventIdentity,
 } from '@/utils/calendarEventIdentity';
+import type {
+  CalendarPrivacyMigrationSourceDeleteInput,
+  CalendarPrivacyReplacementContinuation,
+  CalendarPrivacyReplacementCreateResult,
+} from '@/shared/calendarApiContract';
 
 // 비공개 이벤트는 Google Calendar 가 아닌 Supabase 에만 저장된다.
 // sourceCalendarId 에 이 특수 식별자를 써서 update/delete 시 올바른 저장소로 라우팅.
@@ -167,8 +171,7 @@ function toCalendarEventFromBflowRow(
   };
 }
 
-// teamCalendarId는 Supabase metadata에 저장 (팀 전체 공유)
-// personalCalendarId, lastSyncAt은 로컬에만 저장 (사용자별)
+// Google 연동 설정은 사용자별 로컬에만 저장한다.
 const OLD_SETTINGS_KEY = 'bflow_gcal_settings';
 const GCAL_LOCAL_SETTINGS_KEY = 'bflow_gcal_local_settings';
 
@@ -198,18 +201,12 @@ export function saveLocalGCalSettings(settings: Partial<GCalLocalSettings>): voi
   saveLocalSettings({ ...current, ...settings });
 }
 
-let cachedTeamCalendarId: string | null | undefined = undefined; // undefined = 아직 로드 안 됨
-
 /** 구 localStorage 전용 설정 → 새 구조로 마이그레이션 */
 async function migrateOldSettings(): Promise<void> {
   const old = localStorage.getItem(OLD_SETTINGS_KEY);
   if (!old) return;
   try {
     const parsed = JSON.parse(old);
-    if (parsed.teamCalendarId) {
-      await writeMetadata('gcal', 'teamCalendarId', parsed.teamCalendarId);
-      cachedTeamCalendarId = parsed.teamCalendarId;
-    }
     saveLocalSettings({
       personalCalendarId: parsed.personalCalendarId || null,
       lastSyncAt: parsed.lastSyncAt || null,
@@ -222,44 +219,23 @@ export async function getGCalSettings(): Promise<GCalSettings> {
   // 구 설정 마이그레이션 (있으면)
   await migrateOldSettings();
 
-  // teamCalendarId: Supabase metadata에서 로드 (캐시 활용)
-  if (cachedTeamCalendarId === undefined) {
-    try {
-      const meta = await readMetadata('gcal', 'teamCalendarId');
-      cachedTeamCalendarId = meta?.value || null;
-    } catch {
-      cachedTeamCalendarId = null;
-    }
-  }
-
   const local = getLocalSettings();
   // Main-side personal-todo calendar sync reads the same setting from the
   // app-data file; mirror existing renderer settings before it resolves a
   // target calendar (important after upgrading from the localStorage-only path).
   saveLocalSettings(local);
   return {
-    teamCalendarId: cachedTeamCalendarId ?? null,
     personalCalendarId: local.personalCalendarId,
     lastSyncAt: local.lastSyncAt,
   };
 }
 
-/** 팀 캘린더 ID를 Supabase에 저장 (팀 전체 공유) */
-export async function saveTeamCalendarId(calId: string | null): Promise<void> {
-  cachedTeamCalendarId = calId;
-  await writeMetadata('gcal', 'teamCalendarId', calId || '');
-}
-
-/** 하위 호환: 기존 saveGCalSettings 시그니처 유지 (로컬 부분 즉시 저장, 팀 ID는 비동기) */
+/** Google 연동 로컬 설정 저장 */
 export function saveGCalSettings(settings: GCalSettings): void {
   saveLocalSettings({
     personalCalendarId: settings.personalCalendarId,
     lastSyncAt: settings.lastSyncAt,
   });
-  if (settings.teamCalendarId !== cachedTeamCalendarId) {
-    cachedTeamCalendarId = settings.teamCalendarId;
-    writeMetadata('gcal', 'teamCalendarId', settings.teamCalendarId || '').catch(console.error);
-  }
 }
 
 /** GCal 이벤트 → B flow CalendarEvent 변환 */
@@ -355,14 +331,6 @@ function toBflowMeta(event: Partial<CalendarEvent>): Record<string, string> {
   if (event.vacationType) meta.bflow_vacation_type = event.vacationType;
   if (event.vacationUserName) meta.bflow_vacation_user = event.vacationUserName;
   return meta;
-}
-
-/** 공개 일정은 항상 로그인 계정의 primary 캘린더에 저장한다.
- *  (팀 캘린더 / 개인 캘린더 구분은 제거 — 비공개는 Supabase 로 분리)
- *  type 파라미터는 시그니처 호환을 위해 유지하되 사용하지 않는다. */
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
-async function getTargetCalendar(_type: CalendarEventType): Promise<string | null> {
-  return 'primary';
 }
 
 // ─── 공개 API (기존 인터페이스 유지) ──────────────────────────
@@ -568,9 +536,30 @@ async function withConcurrentEventUpdateReconciliation<T>(
 }
 
 type CreatedEventRef =
-  | { actualId: string; storage: 'bflow'; calendarId: string; receipt?: string }
-  | { actualId: string; storage: 'legacy-private'; ownerId: string; receipt?: string }
-  | { actualId: string; storage: 'google'; calendarId: string; receipt?: string };
+  | {
+      actualId: string;
+      storage: 'bflow';
+      calendarId: string;
+      continuation?: CalendarPrivacyReplacementContinuation;
+    }
+  | {
+      actualId: string;
+      storage: 'legacy-private';
+      ownerId: string;
+      continuation?: CalendarPrivacyReplacementContinuation;
+    }
+  | {
+      actualId: string;
+      storage: 'google';
+      calendarId: string;
+      continuation?: CalendarPrivacyReplacementContinuation;
+    };
+
+function isTransitionResolvedReplacement(
+  replacement: CalendarPrivacyReplacementCreateResult,
+): replacement is Extract<CalendarPrivacyReplacementCreateResult, { transition_resolved: 'deleted' }> {
+  return 'transition_resolved' in replacement && replacement.transition_resolved === 'deleted';
+}
 
 function createdEventIdentity(created: CreatedEventRef, eventId: string): CalendarEventIdentity {
   if (created.storage === 'google') {
@@ -1217,12 +1206,11 @@ export async function syncAll(options: { broadcast?: boolean; skipBflowLoad?: bo
   const successfulEvents: CalendarEvent[] = [];
   const successfulEventsByCalendar = new Map<string, CalendarEvent[]>();
 
-  // 팀/개인 캘린더 목록 — 설정 조회 실패 시에도 비공개 이벤트는 이미 위에서 로드됨
+  // 개인 Google 캘린더 목록 — 설정 조회 실패 시에도 비공개 이벤트는 이미 위에서 로드됨
   const calIds = new Set<string>();
   let settingsLoaded = false;
   try {
     const settings = await getGCalSettings();
-    if (settings.teamCalendarId) calIds.add(settings.teamCalendarId);
     calIds.add(settings.personalCalendarId || 'primary');
     settingsLoaded = true;
   } catch (err) {
@@ -1299,9 +1287,8 @@ export async function syncAll(options: { broadcast?: boolean; skipBflowLoad?: bo
 export async function syncIncremental(): Promise<void> {
   const settings = await getGCalSettings();
 
-  // 팀/개인 캘린더 목록 (중복 제거, getTargetCalendar과 일치)
+  // 개인 Google 캘린더 하나만 증분 동기화한다.
   const calIds = new Set<string>();
-  if (settings.teamCalendarId) calIds.add(settings.teamCalendarId);
   calIds.add(settings.personalCalendarId || 'primary');
 
   for (const calId of calIds) {
@@ -1682,6 +1669,33 @@ function isPrivateStorageEvent(event: CalendarEvent): boolean {
   return event.sourceCalendarId === PRIVATE_CAL_ID || isBflowPersonalEvent(event);
 }
 
+/**
+ * replacement를 만들기 전에 source identity를 한 번만 고정한다. 이후 renderer cache나
+ * 현재 로그인 사용자가 바뀌어도 preload continuation은 이 exact source만 삭제할 수 있다.
+ */
+function privacyMigrationSourceForEvent(
+  event: CalendarEvent,
+): CalendarPrivacyMigrationSourceDeleteInput {
+  if (event.sourceCalendarId?.startsWith(BFLOW_CAL_PREFIX)) {
+    return { storage: 'bflow', event_id: event.id };
+  }
+  if (event.sourceCalendarId === PRIVATE_CAL_ID) {
+    return { storage: 'legacy-private', event_id: event.id };
+  }
+  return {
+    storage: 'google',
+    calendar_id: event.sourceCalendarId || 'primary',
+    event_id: event.id,
+  };
+}
+
+function requirePrivacyMigrationSource(
+  source: CalendarPrivacyMigrationSourceDeleteInput | undefined,
+): CalendarPrivacyMigrationSourceDeleteInput {
+  if (!source) throw new Error('[calendar] privacy migration source is required');
+  return source;
+}
+
 function uniqueResolvedEvent(
   eventId: string,
   candidates: CalendarEvent[],
@@ -1723,6 +1737,7 @@ async function addBflowEvent(
   calendarId: string,
   inheritedToken?: BflowMutationToken,
   isPrivacyMigrationReplacement = false,
+  privacyMigrationSource?: CalendarPrivacyMigrationSourceDeleteInput,
   onPersistedId?: (eventId: string, identity: CalendarEventIdentity) => void,
   onOptimisticIdentity?: (identity: CalendarEventIdentity) => void,
 ): Promise<CreatedEventRef | null> {
@@ -1759,9 +1774,22 @@ async function addBflowEvent(
       const replacement = isPrivacyMigrationReplacement
         ? await window.electronAPI.calendarPrivacyReplacementCreate({
             storage: 'bflow',
+            source: requirePrivacyMigrationSource(privacyMigrationSource),
             event: createInput,
           })
         : null;
+      if (replacement && isTransitionResolvedReplacement(replacement)) {
+        // main이 세션 전환 중 exact replacement를 이미 보상 삭제했다. 새 세션 cache에는
+        // 손대지 않고, 아직 이 token이 유효한 renderer의 optimistic 행만 제거한다.
+        if (isBflowMutationCurrent(token)) {
+          mutateSourceEvents('bflow', (events) => events.filter((item) => (
+            !hasSameCalendarEventIdentity(item, optimistic)
+          )));
+          cleanupDeletedEventAliases(localId, localId, optimistic);
+          broadcastCalendarChange({ eventId: localId, action: 'delete' });
+        }
+        return null;
+      }
       const actualId = replacement
         ? replacement.actual_id
         : (await window.electronAPI.calendarEventCreate(createInput)).id;
@@ -1769,7 +1797,7 @@ async function addBflowEvent(
         actualId,
         storage: 'bflow',
         calendarId: replacement?.calendar_id ?? calendarId,
-        receipt: replacement?.receipt,
+        continuation: replacement ?? undefined,
       };
       onPersistedId?.(actualId, createdEventIdentity(created, actualId));
       // 메인은 이미 이전 세션 actor로 insert를 커밋했을 수 있다. 실ID를 버리면
@@ -1800,6 +1828,7 @@ async function addEventInternal(
   event: CalendarEvent,
   inheritedToken?: BflowMutationToken,
   isPrivacyMigrationReplacement = false,
+  privacyMigrationSource?: CalendarPrivacyMigrationSourceDeleteInput,
   onPersistedId?: (eventId: string, identity: CalendarEventIdentity) => void,
   onOptimisticIdentity?: (identity: CalendarEventIdentity) => void,
 ): Promise<CreatedEventRef | null> {
@@ -1809,6 +1838,7 @@ async function addEventInternal(
       event.calendarId,
       inheritedToken,
       isPrivacyMigrationReplacement,
+      privacyMigrationSource,
       onPersistedId,
       onOptimisticIdentity,
     );
@@ -1836,6 +1866,7 @@ async function addEventInternal(
           personal.id,
           token,
           isPrivacyMigrationReplacement,
+          privacyMigrationSource,
           onPersistedId,
           onOptimisticIdentity,
         );
@@ -1872,9 +1903,20 @@ async function addEventInternal(
         const replacement = isPrivacyMigrationReplacement
           ? await window.electronAPI.calendarPrivacyReplacementCreate({
               storage: 'legacy-private',
+              source: requirePrivacyMigrationSource(privacyMigrationSource),
               event: createInput,
             })
           : null;
+        if (replacement && isTransitionResolvedReplacement(replacement)) {
+          if (isBflowMutationCurrent(token)) {
+            mutateSourceEvents('bflow', (events) => events.filter((item) => (
+              !hasSameCalendarEventIdentity(item, optimistic)
+            )));
+            cleanupDeletedEventAliases(localId, localId, optimistic);
+            broadcastCalendarChange({ eventId: localId, action: 'delete' });
+          }
+          return null;
+        }
         const actualId = replacement
           ? replacement.actual_id
           : (await window.electronAPI.supabaseAddPrivateEvent({
@@ -1885,7 +1927,7 @@ async function addEventInternal(
           actualId,
           storage: 'legacy-private',
           ownerId: userId,
-          receipt: replacement?.receipt,
+          continuation: replacement ?? undefined,
         };
         onPersistedId?.(actualId, createdEventIdentity(created, actualId));
         if (!isBflowMutationCurrent(token)) return created;
@@ -1913,7 +1955,7 @@ async function addEventInternal(
 
   if (inheritedToken && !isBflowMutationCurrent(inheritedToken)) return null;
 
-  const calId = await getTargetCalendar(event.type);
+  const calId = 'primary';
   if (inheritedToken && !isBflowMutationCurrent(inheritedToken)) return null;
   if (!calId) throw new Error('캘린더가 설정되지 않았습니다');
 
@@ -1948,22 +1990,32 @@ async function addEventInternal(
         ? gcalEndDate
         : toKstRfc3339(event.endDate, event.endTime ?? ''),
       extendedProperties: toBflowMeta(event),
-      // 비공개 일정이면 Google Calendar 에 'private' 로 저장 — 도메인 내 다른 사용자에게 숨김
-      visibility: event.isPrivate ? 'private' as const : undefined,
     };
     const replacement = isPrivacyMigrationReplacement
       ? await window.electronAPI.calendarPrivacyReplacementCreate({
           storage: 'google',
+          source: requirePrivacyMigrationSource(privacyMigrationSource),
           calendar_id: calId,
           event: createInput,
         })
       : null;
+    if (replacement && isTransitionResolvedReplacement(replacement)) {
+      sessionOptimisticGoogleEventKeys.delete(optimisticIdentityKey);
+      if (!inheritedToken || isBflowMutationCurrent(inheritedToken)) {
+        mutateSourceEvents('google', (events) => events.filter((item) => (
+          !hasSameCalendarEventIdentity(item, optimistic)
+        )));
+        cleanupDeletedEventAliases(localId, localId, optimistic);
+        broadcastCalendarChange({ eventId: localId, action: 'delete' });
+      }
+      return null;
+    }
     const gcalId = replacement?.actual_id ?? await gcalService.insertEvent(calId, createInput);
     const created: CreatedEventRef = {
       actualId: gcalId,
       storage: 'google',
       calendarId: replacement?.calendar_id ?? calId,
-      receipt: replacement?.receipt,
+      continuation: replacement ?? undefined,
     };
     onPersistedId?.(gcalId, createdEventIdentity(created, gcalId));
     if (inheritedToken && !isBflowMutationCurrent(inheritedToken)) return created;
@@ -2002,8 +2054,8 @@ export async function addEvent(event: CalendarEvent): Promise<void> {
 }
 
 async function deletePersistedCreatedEvent(created: CreatedEventRef): Promise<void> {
-  if (created.receipt) {
-    await window.electronAPI.calendarPrivacyReplacementSettle(created.receipt, 'delete');
+  if (created.continuation) {
+    await created.continuation.settle('delete');
     return;
   }
   if (created.storage === 'google') {
@@ -2016,8 +2068,8 @@ async function deletePersistedCreatedEvent(created: CreatedEventRef): Promise<vo
 }
 
 async function keepPersistedCreatedEvent(created: CreatedEventRef): Promise<void> {
-  if (!created.receipt) return;
-  await window.electronAPI.calendarPrivacyReplacementSettle(created.receipt, 'keep');
+  if (!created.continuation) return;
+  await created.continuation.settle('keep');
 }
 
 function tombstoneGoogleEvent(calendarId: string, eventId: string): boolean {
@@ -2269,6 +2321,9 @@ async function updateEventForToken(
     // refreshed B를 포함한 reverse/transitive identity를 보존해 최종 replacement로 잇는다.
     const inheritedSourceAliases = knownEventIdentityKeys(eventId, targetIdentity);
     if (!inheritedSourceAliases.includes(actualId)) inheritedSourceAliases.push(actualId);
+    // create IPC에 원본 identity를 함께 고정한다. 이후 delete 단계는 raw source 입력을
+    // 다시 만들지 않고 replacement continuation만 사용한다.
+    const privacyMigrationSource = privacyMigrationSourceForEvent(existing);
 
     // create-first: 새 저장소에 먼저 생성해 성공을 확정한 뒤 기존 저장소에서 제거한다.
     // delete-first 방식이면 create 가 네트워크/인증 오류로 실패했을 때 원본이 이미
@@ -2298,6 +2353,7 @@ async function updateEventForToken(
           fresh,
           token,
           true,
+          privacyMigrationSource,
           (replacementId, replacementIdentity) => {
             if (!isBflowMutationCurrent(token)) return;
             if (
@@ -2371,6 +2427,7 @@ async function updateEventForToken(
           token,
           token,
           snapshotCalendarEventIdentity(existing),
+          replacement.continuation,
         );
       } catch (originalDeleteError) {
         if (!isBflowMutationCurrent(token)) {
@@ -2511,7 +2568,7 @@ async function updateEventForToken(
   }
 
   // 원본 캘린더 ID 우선 사용 (캘린더 설정 변경 후에도 올바른 캘린더에서 수정)
-  const calId = existing.sourceCalendarId || await getTargetCalendar(existing.type);
+  const calId = existing.sourceCalendarId || 'primary';
   if (!calId) return;
   const existingSource = inferExistingEventSource(existing);
 
@@ -2579,6 +2636,7 @@ async function deleteEventForToken(
   inheritedToken: BflowMutationToken | undefined,
   requestToken: BflowMutationToken,
   targetIdentity?: CalendarEventIdentity,
+  privacyReplacementContinuation?: CalendarPrivacyReplacementContinuation,
 ): Promise<void> {
   const continueBeforeSourceDelete = (token: BflowMutationToken): boolean => {
     if (isBflowMutationCurrent(token)) return true;
@@ -2586,6 +2644,12 @@ async function deleteEventForToken(
       throw new Error('[calendar] privacy migration session changed before source deletion');
     }
     return false;
+  };
+  const deleteBoundPrivacyMigrationSource = async () => {
+    if (!inheritedToken || !privacyReplacementContinuation) {
+      throw new Error('[calendar] privacy migration replacement continuation is required');
+    }
+    return privacyReplacementContinuation.deleteSource();
   };
   if (!continueBeforeSourceDelete(requestToken)) return;
   const existing = await resolveEvent(eventId, targetIdentity);
@@ -2630,10 +2694,7 @@ async function deleteEventForToken(
           // privacy migration은 canonical B flow 행의 존재를 엄격히 확인한 뒤에만
           // legacy shadow를 정리한다. canonical 행이 이미 사라졌다면 legacy가 마지막
           // source copy일 수 있으므로 replacement만 보상하고 shadow는 보존해야 한다.
-          const deleteResult = await window.electronAPI.calendarPrivacyMigrationSourceDelete({
-            storage: 'bflow',
-            event_id: actualId,
-          });
+          const deleteResult = await deleteBoundPrivacyMigrationSource();
           if (deleteResult === 'missing') {
             const survivingLegacy = legacyCopy
               ? toCalendarEventFromPrivate(legacyCopy)
@@ -2728,10 +2789,7 @@ async function deleteEventForToken(
       broadcastCalendarChange({ eventId: actualId, action: 'delete' });
       try {
         if (inheritedToken) {
-          const deleteResult = await window.electronAPI.calendarPrivacyMigrationSourceDelete({
-            storage: 'legacy-private',
-            event_id: actualId,
-          });
+          const deleteResult = await deleteBoundPrivacyMigrationSource();
           if (deleteResult === 'missing') {
             if (isBflowMutationCurrent(token)) forgetLegacyPrivateEvent(actualId);
             throw new PrivacyMigrationSourceMissingError(actualId);
@@ -2795,7 +2853,7 @@ async function deleteEventForToken(
   }
 
   // 원본 캘린더 ID 우선 사용
-  const calId = existing.sourceCalendarId || await getTargetCalendar(existing.type);
+  const calId = existing.sourceCalendarId || 'primary';
   if (!continueBeforeSourceDelete(requestToken)) return;
   if (!calId) return;
   const existingSource = inferExistingEventSource(existing);
@@ -2808,11 +2866,7 @@ async function deleteEventForToken(
 
   try {
     if (inheritedToken) {
-      const deleteResult = await window.electronAPI.calendarPrivacyMigrationSourceDelete({
-        storage: 'google',
-        calendar_id: calId,
-        event_id: actualId,
-      });
+      const deleteResult = await deleteBoundPrivacyMigrationSource();
       if (deleteResult === 'missing') {
         throw new PrivacyMigrationSourceMissingError(actualId);
       }

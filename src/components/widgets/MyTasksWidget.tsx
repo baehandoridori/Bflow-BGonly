@@ -388,6 +388,7 @@ export function MyTasksWidget() {
     retryPersonalTodoSync,
   } = useMyTasksData(isPopup);
   const setView = useAppStore((s) => s.setView);
+  const navigateToScheduleDate = useAppStore((s) => s.navigateToScheduleDate);
   const setPendingCharacterBoardRequest = useAppStore((s) => s.setPendingCharacterBoardRequest);
 
   const [showPicker, setShowPicker] = useState(false);
@@ -506,7 +507,7 @@ export function MyTasksWidget() {
   };
 
   // 개인 할일 → 본체 캘린더(일정)의 해당 날짜로 이동 — 대시보드/팝업 분기 (navigateToMainScene 패턴 미러링).
-  // 대시보드: 같은 창이므로 뷰 전환 + 이벤트 디스패치를 직접 수행.
+  // 대시보드: 같은 창이므로 store에 날짜 요청을 남긴 뒤 일정 화면으로 전환한다.
   // 팝업: 별도 창이라 setView·ScheduleView 가 없으므로 본체 창에 점프 신호를 보낸다(본체 App 이 동일 경로로 변환).
   const navigateToCalendar = (todo: PersonalTodo) => {
     if (isPopup) {
@@ -515,13 +516,7 @@ export function MyTasksWidget() {
       }
       return;
     }
-    setView('schedule');
-    if (todo.startDate) {
-      // ScheduleView 마운트 후 이벤트 디스패치 (300ms 대기)
-      setTimeout(() => {
-        window.dispatchEvent(new CustomEvent('bflow:navigate-to-date', { detail: { date: todo.startDate, todoId: todo.id } }));
-      }, 300);
-    }
+    navigateToScheduleDate(todo.startDate ? { date: todo.startDate, todoId: todo.id } : undefined);
   };
 
   // 캘린더의 "할일로 이동" 신호는 완료 항목도 바로 찾을 수 있게 한다.

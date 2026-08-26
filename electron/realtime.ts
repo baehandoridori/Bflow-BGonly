@@ -40,6 +40,7 @@ export interface RealtimeCallbacks {
     table: SharedCalendarRealtimeTable,
     payload: SharedCalendarRealtimeInvalidation,
   ) => void;
+  onCalendarNotificationInsert?: (payload: ChangePayload) => void;
   onActivityInsert: (payload: ChangePayload) => void;
   onStatusChange: (status: string, metadata: RealtimeStatusMetadata) => void;
   /** Supabase presence sync/join/leave — 전체 presence 상태 스냅샷 전달 */
@@ -164,6 +165,11 @@ function createChannel(callbacks: RealtimeCallbacks): RealtimeChannel {
       },
     );
   }
+  built.on(
+    'postgres_changes',
+    { event: 'INSERT', schema: 'public', table: 'calendar_notifications' },
+    (payload) => callbacks.onCalendarNotificationInsert?.(payload),
+  );
   // presence 는 와일드카드('*') 미지원 → sync/join/leave 3개 이벤트를 개별 구독.
   // 각 이벤트마다 전체 상태를 다시 병합하도록 스냅샷을 넘긴다.
   const emitPresence = () => callbacks.onPresenceSync?.(built.presenceState() as Record<string, unknown[]>);
