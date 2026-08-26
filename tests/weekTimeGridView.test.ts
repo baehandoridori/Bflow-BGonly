@@ -206,6 +206,45 @@ test('WeekTimeGridView: 밴드별로 잘라 배치해 새벽 충돌 뒤 본 시�
   );
 });
 
+test('WeekTimeGridView: 연속 10분 일정은 실제 9.33px hitbox 안에만 그려져 겹치지 않는다', async () => {
+  const module = await loadWeekTimeGridView();
+  const markup = renderToStaticMarkup(createElement(module.default, {
+    weekDays: Array.from({ length: 7 }, (_, index) => new Date(2026, 7, 23 + index, 12)),
+    events: [
+      event({ id: 'short-first', title: '첫 10분', startDate: '2026-08-25', endDate: '2026-08-25', startTime: '09:00', endTime: '09:10' }),
+      event({ id: 'short-second', title: '둘째 10분', startDate: '2026-08-25', endDate: '2026-08-25', startTime: '09:10', endTime: '09:20' }),
+    ],
+    today: '2026-01-01',
+    onEventClick() {},
+    onSlotClick() {},
+    tagNameById: {},
+    calendarNameById: {},
+    activeWeekIndex: 0,
+    weekCount: 4,
+    onWeekChange() {},
+  }));
+  const hitboxFor = (title: string) => {
+    const match = markup.match(new RegExp(`<button[^>]*aria-label="${title}, 2026-08-25 [^"]*"[^>]*style="([^"]*)"`));
+    assert.ok(match, `${title} 버튼을 찾을 수 있어야 한다`);
+    const top = match[1].match(/top:([\d.]+)(?:px)?/);
+    const height = match[1].match(/height:([\d.]+)px/);
+    assert.ok(top && height, `${title}의 hitbox top/height가 있어야 한다`);
+    return { top: Number(top[1]), height: Number(height[1]) };
+  };
+
+  const first = hitboxFor('첫 10분');
+  const second = hitboxFor('둘째 10분');
+  const tenMinutesPx = 56 / 6;
+  const precision = 0.001;
+  assert.equal(first.top, 0);
+  assert.ok(Math.abs(first.height - tenMinutesPx) < precision);
+  assert.ok(Math.abs(second.top - tenMinutesPx) < precision);
+  assert.ok(Math.abs(second.height - tenMinutesPx) < precision);
+  assert.ok(first.top + first.height <= second.top + precision, '첫 블록 hitbox가 둘째 블록 영역을 침범하지 않는다');
+  assert.match(markup, /aria-label="첫 10분, 2026-08-25 09:00부터 09:10까지"/);
+  assert.doesNotMatch(markup, /data-time-grid-title="true"[^>]*>첫 10분<\/span>/, '읽을 수 없는 짧은 블록의 제목은 시각적으로 자르지 않는다');
+});
+
 test('WeekTimeGridView: 종일 레인에 이어진 일정 표시와 강등된 시간 접두를 남긴다', async () => {
   const { getAllDayBarLabel } = await loadWeekTimeGridView();
   const label = getAllDayBarLabel({

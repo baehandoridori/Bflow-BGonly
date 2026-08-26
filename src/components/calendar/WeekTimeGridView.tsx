@@ -17,6 +17,7 @@ const DAWN_END_MIN = MAIN_START_MIN;
 const EVENING_START_MIN = MAIN_END_MIN;
 const DAY_END_MIN = 24 * 60;
 const ALL_DAY_ROW_PX = 28;
+const MIN_TIMED_TEXT_HEIGHT_PX = 14;
 const WHEEL_GESTURE_LOCK_MS = 150;
 const WEEKDAY_KR = ['일', '월', '화', '수', '목', '금', '토'];
 const CARD_BASE_RGB = [26, 29, 39] as const; // #1A1D27
@@ -274,7 +275,7 @@ export function getWeekendCellStyle(isWeekend: boolean): { backgroundImage?: str
 function eventBlockStyle(layout: { col: number; span: number; cols: number }, top: number, height: number) {
   return {
     top,
-    height: Math.max(14, height),
+    height,
     left: `calc(${(layout.col / layout.cols) * 100}% + 2px)`,
     width: `calc(${(layout.span / layout.cols) * 100}% - 4px)`,
   };
@@ -612,6 +613,8 @@ function TimeBand({
                 const isPast = date < today || (date === today && block.endMin <= nowMin);
                 const isCurrent = date === today && block.startMin <= nowMin && nowMin < block.endMin;
                 const duration = block.endMin - block.startMin;
+                const visibleHeight = ((bandBlock.endMin - bandBlock.startMin) / 60) * HOUR_PX;
+                const canShowText = visibleHeight >= MIN_TIMED_TEXT_HEIGHT_PX;
                 const visualStyle = getTimedBlockVisualStyle(block.event.color);
                 const stateStyle = getTimedBlockStateStyle(block.event.color, isCurrent);
                 const opacity = getTimedBlockOpacity(isPast);
@@ -623,12 +626,12 @@ function TimeBand({
                     type="button"
                     title={`${block.event.title} · ${minutesToTime(block.startMin)}–${minutesToTime(block.endMin)}`}
                     aria-label={`${block.event.title}, ${date} ${minutesToTime(block.startMin)}부터 ${minutesToTime(block.endMin)}까지`}
-                    className="absolute z-10 overflow-hidden rounded px-1.5 py-1 text-left font-semibold outline-none focus-visible:ring-2 focus-visible:ring-white focus-visible:ring-offset-1 focus-visible:ring-offset-bg-primary"
+                    className={`absolute z-10 overflow-hidden rounded ${canShowText ? 'px-1.5 py-1' : 'p-0'} text-left font-semibold outline-none focus-visible:ring-2 focus-visible:ring-white focus-visible:ring-offset-1 focus-visible:ring-offset-bg-primary`}
                     style={{
                       ...eventBlockStyle(
                         layout,
                         ((bandBlock.startMin - startMin) / 60) * HOUR_PX,
-                        ((bandBlock.endMin - bandBlock.startMin) / 60) * HOUR_PX,
+                        visibleHeight,
                       ),
                       background: visualStyle.background,
                       borderLeft: visualStyle.borderLeft,
@@ -643,8 +646,8 @@ function TimeBand({
                       onEventClick(block.event);
                     }}
                   >
-                    {duration >= 30 && <span data-time-grid-time="true" className="block truncate" style={{ color: visualStyle.timeColor, fontSize: 9 }}>{timeLabel}</span>}
-                    <span data-time-grid-title="true" className="block truncate" style={{ color: visualStyle.titleColor, fontSize: visualStyle.titleFontSize }}>{block.event.title}</span>
+                    {canShowText && duration >= 30 && <span data-time-grid-time="true" className="block truncate" style={{ color: visualStyle.timeColor, fontSize: 9 }}>{timeLabel}</span>}
+                    {canShowText && <span data-time-grid-title="true" className="block truncate" style={{ color: visualStyle.titleColor, fontSize: visualStyle.titleFontSize }}>{block.event.title}</span>}
                   </motion.button>
                 );
               })}
