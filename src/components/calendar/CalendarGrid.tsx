@@ -18,7 +18,7 @@ import {
 import { floatingGlassStyle, tooltipGlassStyle } from '@/utils/glassStyles';
 
 /** 이벤트의 연속 바 레이아웃 계산 */
-interface EventBar {
+export interface EventBar {
   event: CalendarEvent;
   row: number;
   startCol: number; // 0-indexed in week
@@ -27,7 +27,7 @@ interface EventBar {
   isEnd: boolean;   // bar ends in this week
 }
 
-function layoutEventBars(
+export function layoutEventBars(
   events: CalendarEvent[],
   weekStart: Date,
   cols: number,
