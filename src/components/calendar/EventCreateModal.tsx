@@ -20,6 +20,8 @@ export const GOOGLE_CALENDAR_OPTION = 'google';
 type Props = {
   initialDate?: string;
   initialEndDate?: string;
+  initialStartTime?: string;
+  initialEndTime?: string;
   episodes: { episodeNumber: number; title: string; parts: { partId: string; sheetName: string; department: string; scenes: { sceneId: string; no: number }[] }[] }[];
   googleAuthenticated: boolean;
   onClose: () => void;
@@ -42,7 +44,7 @@ function oneHourAfter(date: string, time: string): { date: string; time: string 
   };
 }
 
-export function EventCreateModal({ initialDate, initialEndDate, episodes, googleAuthenticated, onClose, onSave }: Props) {
+export function EventCreateModal({ initialDate, initialEndDate, initialStartTime, initialEndTime, episodes, googleAuthenticated, onClose, onSave }: Props) {
   const currentUser = useAuthStore((state) => state.currentUser);
   const episodeTitles = useDataStore((state) => state.episodeTitles);
   const colorMode = useAppStore((state) => state.colorMode);
@@ -66,11 +68,11 @@ export function EventCreateModal({ initialDate, initialEndDate, episodes, google
 
   const [selectedCalendarId, setSelectedCalendarId] = useState(defaultCalendarId);
   const [title, setTitle] = useState('');
-  const [allDay, setAllDay] = useState(true);
+  const [allDay, setAllDay] = useState(() => !(initialStartTime || initialEndTime));
   const [startDate, setStartDate] = useState(initialDate ?? today);
-  const [startTime, setStartTime] = useState('');
+  const [startTime, setStartTime] = useState(initialStartTime ?? '');
   const [endDate, setEndDate] = useState(initialEndDate ?? initialDate ?? today);
-  const [endTime, setEndTime] = useState('');
+  const [endTime, setEndTime] = useState(initialEndTime ?? '');
   const [tagId, setTagId] = useState<string | undefined>();
   const [evType, setEvType] = useState<CalendarEventType>('custom');
   const [memo, setMemo] = useState('');

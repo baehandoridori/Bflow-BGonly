@@ -130,6 +130,8 @@ type ScheduleQuickEditProps = {
 type EventCreateModalProps = {
   initialDate?: string;
   initialEndDate?: string;
+  initialStartTime?: string;
+  initialEndTime?: string;
   episodes: Array<{
     episodeNumber: number;
     title: string;
@@ -183,6 +185,12 @@ type WeekTimeGridViewProps = {
   activeWeekIndex: number;
   weekCount: number;
   onWeekChange(index: number): void;
+  onTimeGridCreate?(date: string, startTime: string, endTime: string): void;
+  onTimeGridEventChange?(
+    eventId: string,
+    identity: ScheduleEventIdentity,
+    patch: Required<Pick<ScheduleCalendarEvent, 'startDate' | 'endDate' | 'startTime' | 'endTime'>>,
+  ): void;
 };
 type DayScrollViewProps = {
   events: ScheduleCalendarEvent[];
@@ -2120,6 +2128,7 @@ async function renderEventCreateModal(
   onSave: (event: Record<string, unknown>) => void,
   initialDate = '2026-08-25',
   episodes: EventCreateModalProps['episodes'] = [],
+  prefill: Pick<EventCreateModalProps, 'initialEndDate' | 'initialStartTime' | 'initialEndTime'> = {},
 ): Promise<ReactNode> {
   const EventCreateModal = await loadEventCreateModal();
   stateCursor = 0;
@@ -2128,6 +2137,7 @@ async function renderEventCreateModal(
   return resolveComponents(EventCreateModal({
     initialDate,
     initialEndDate: initialDate,
+    ...prefill,
     episodes,
     googleAuthenticated,
     onClose() {},
@@ -4069,7 +4079,7 @@ test('ScheduleView applies one reduced-motion policy above every calendar branch
   );
 });
 
-test('ScheduleView restores and remembers the weekly time-grid choice while opening a slot on its date', async () => {
+test('ScheduleView restores and remembers the weekly time-grid choice while opening timed slot and drag ranges', async () => {
   resetHarness();
   scheduleLocalStorage.set('bflow_calendar_view_v1', JSON.stringify({
     viewMode: 'week',
@@ -4086,8 +4096,24 @@ test('ScheduleView restores and remembers the weekly time-grid choice while open
 
   scheduleTimeGridProps.at(-1)?.onSlotClick('2026-08-26', '10:00', '10:30');
   tree = await renderScheduleView();
-  assert.equal(scheduleCreateModalProps.at(-1)?.initialDate, '2026-08-26', 'B.4 carries only the selected date; time prefill remains a PR-C concern');
+  assert.equal(scheduleCreateModalProps.at(-1)?.initialDate, '2026-08-26');
   assert.equal(scheduleCreateModalProps.at(-1)?.initialEndDate, '2026-08-26');
+  assert.equal(scheduleCreateModalProps.at(-1)?.initialStartTime, '10:00', 'a slot click starts a timed 30-minute create');
+  assert.equal(scheduleCreateModalProps.at(-1)?.initialEndTime, '10:30');
+
+  scheduleTimeGridProps.at(-1)?.onTimeGridCreate?.('2026-08-27', '13:15', '14:45');
+  tree = await renderScheduleView();
+  assert.equal(scheduleCreateModalProps.at(-1)?.initialDate, '2026-08-27');
+  assert.equal(scheduleCreateModalProps.at(-1)?.initialEndDate, '2026-08-27');
+  assert.equal(scheduleCreateModalProps.at(-1)?.initialStartTime, '13:15', 'a time-grid drag preserves its exact start');
+  assert.equal(scheduleCreateModalProps.at(-1)?.initialEndTime, '14:45', 'a time-grid drag preserves its exact end');
+
+  scheduleCreateModalProps.at(-1)?.onClose();
+  tree = await renderScheduleView();
+  buttonByText(tree, '일정').props.onClick?.({ stopPropagation() {} });
+  tree = await renderScheduleView();
+  assert.equal(scheduleCreateModalProps.at(-1)?.initialStartTime, undefined, 'closing clears timed prefill before a normal create');
+  assert.equal(scheduleCreateModalProps.at(-1)?.initialEndTime, undefined);
 
   cardToggle.props.onClick?.({ stopPropagation() {} });
   tree = await renderScheduleView();
@@ -4103,6 +4129,87 @@ test('ScheduleView restores and remembers the weekly time-grid choice while open
   buttonByText(tree, '월').props.onClick?.({ stopPropagation() {} });
   tree = await renderScheduleView();
   assert.equal(findButtons(tree).some((button) => button.props['aria-label'] === '주간 카드 보기'), false, 'the sub-toggle stays exclusive to the weekly view');
+});
+
+test('EventCreateModal makes a supplied timed range editable without inheriting it into normal creation', async () => {
+  resetHarness();
+  const saved: Record<string, unknown>[] = [];
+  const renderTimed = () => renderEventCreateModal(
+    false,
+    (event) => saved.push(event),
+    '2026-08-26',
+    [],
+    { initialEndDate: '2026-08-26', initialStartTime: '10:00', initialEndTime: '10:30' },
+  );
+
+  let tree = await renderTimed();
+  assert.equal(formElementByLabel(tree, '종일 일정').props.checked, false, 'a supplied time range disables all-day by default');
+  assert.equal(formElementByLabel(tree, '시작 시각').props.value, '10:00');
+  assert.equal(formElementByLabel(tree, '종료 시각').props.value, '10:30');
+
+  formElementByLabel(tree, '제목').props.onChange?.({ target: { value: '시간표 일정', checked: false } });
+  tree = await renderTimed();
+  buttonByText(tree, '만들기').props.onClick?.();
+  assert.deepEqual(
+    { allDay: saved[0]?.allDay, startTime: saved[0]?.startTime, endTime: saved[0]?.endTime },
+    { allDay: false, startTime: '10:00', endTime: '10:30' },
+  );
+
+});
+
+test('ScheduleView persists a time-grid move with its complete patch and source-aware identity', async () => {
+  resetHarness();
+  scheduleLocalStorage.set('bflow_calendar_view_v1', JSON.stringify({
+    viewMode: 'week',
+    weekSubMode: 'timegrid',
+  }));
+  const before = calendarListEvent({
+    id: 'time-grid-shared-id',
+    source: 'bflow',
+    sourceCalendarId: 'bflow:mine',
+    allDay: false,
+    startTime: '09:00',
+    endTime: '09:30',
+  });
+  const moved = {
+    ...before,
+    startDate: '2026-08-27',
+    endDate: '2026-08-27',
+    startTime: '13:15',
+    endTime: '14:45',
+  };
+  scheduleCanonicalEvents = [moved];
+
+  await renderScheduleView();
+  stateSlots[0] = [before];
+  await renderScheduleView();
+  const grid = scheduleTimeGridProps.at(-1);
+  assert.ok(grid?.onTimeGridEventChange, 'the existing C.2 time-grid mutation contract reaches ScheduleView');
+  await grid.onTimeGridEventChange?.(before.id, {
+    id: before.id,
+    source: before.source,
+    sourceCalendarId: before.sourceCalendarId,
+  }, {
+    startDate: moved.startDate,
+    endDate: moved.endDate,
+    startTime: moved.startTime!,
+    endTime: moved.endTime!,
+  });
+
+  assert.deepEqual(scheduleUpdateCalls.at(-1), {
+    id: before.id,
+    updates: {
+      startDate: '2026-08-27',
+      endDate: '2026-08-27',
+      startTime: '13:15',
+      endTime: '14:45',
+    },
+    targetIdentity: {
+      id: before.id,
+      source: 'bflow',
+      sourceCalendarId: 'bflow:mine',
+    },
+  });
 });
 
 test('ScheduleView carries weekly and daily navigation across a calendar-year boundary', async (t) => {

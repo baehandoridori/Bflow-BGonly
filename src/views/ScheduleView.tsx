@@ -153,6 +153,9 @@ export function ScheduleView() {
   const [weekSubMode, setWeekSubMode] = useState<WeekSubMode>(() => readCalendarViewPreference().weekSubMode);
   const [showCreate, setShowCreate] = useState(false);
   const [createDate, setCreateDate] = useState<string | undefined>();
+  const [createEndDate, setCreateEndDate] = useState<string | undefined>();
+  const [createStartTime, setCreateStartTime] = useState<string | undefined>();
+  const [createEndTime, setCreateEndTime] = useState<string | undefined>();
   const [googleAuthenticated, setGoogleAuthenticated] = useState(false);
   const [calendarSettings, setCalendarSettings] = useState<BflowCalendar | null | undefined>(undefined);
   const [tagManagerAnchor, setTagManagerAnchor] = useState<DOMRect | null>(null);
@@ -168,6 +171,13 @@ export function ScheduleView() {
     event: CalendarEvent; position: { x: number; y: number };
   } | null>(null);
   const draggedEventIdentityRef = useRef<CalendarEventIdentity | null>(null);
+
+  const resetCreatePrefill = useCallback(() => {
+    setCreateDate(undefined);
+    setCreateEndDate(undefined);
+    setCreateStartTime(undefined);
+    setCreateEndTime(undefined);
+  }, []);
 
   // Week scroll view state — 연도 기준 절대 인덱스
   const [activeWeekIndex, setActiveWeekIndex] = useState(() => {
@@ -496,7 +506,7 @@ export function ScheduleView() {
       await addEvent(ev);
       // bflow:calendar-changed 구독이 자동 refresh하므로 수동 추가 불필요
       setShowCreate(false);
-      setCreateDate(undefined);
+      resetCreatePrefill();
     } finally {
       isAddingRef.current = false;
     }
@@ -541,6 +551,22 @@ export function ScheduleView() {
     });
   }, [setView]);
 
+  const reconcileEventMutation = useCallback(async (mutationIdentity?: CalendarEventIdentity) => {
+    const canonicalEvents = await getEvents();
+    const canonical = mutationIdentity
+      ? canonicalEvents.find((event) => hasSameCalendarEventIdentity(event, mutationIdentity))
+      : undefined;
+    setEvents(canonicalEvents);
+    setPanelEvent((previous) => previous && mutationIdentity && hasSameCalendarEventIdentity(previous, mutationIdentity)
+      ? canonical ?? null
+      : previous);
+    setQuickEdit((previous) => previous && mutationIdentity && hasSameCalendarEventIdentity(previous.event, mutationIdentity)
+      ? canonical ? { ...previous, event: canonical } : null
+      : previous);
+    const todoId = canonical ? calendarEventLinkedTodoId(canonical) : undefined;
+    if (canonical && todoId) void syncCalendarToTodo(todoId, canonical);
+  }, []);
+
   // 드래그&드롭
   const handleEventDragDone = useCallback(async (eventId: string, newStart: string, newEnd: string) => {
     const mutationIdentity = draggedEventIdentityRef.current;
@@ -550,22 +576,17 @@ export function ScheduleView() {
       { startDate: newStart, endDate: newEnd },
       mutationIdentity ?? undefined,
     );
-    const canonicalEvents = await getEvents();
-    const canonical = mutationIdentity
-      ? canonicalEvents.find((event) => hasSameCalendarEventIdentity(event, mutationIdentity))
-      : undefined;
-    setEvents(canonicalEvents);
-    setPanelEvent((previous) => previous && mutationIdentity
-      && hasSameCalendarEventIdentity(previous, mutationIdentity)
-      ? canonical ?? null
-      : previous);
-    setQuickEdit((previous) => previous && mutationIdentity
-      && hasSameCalendarEventIdentity(previous.event, mutationIdentity)
-      ? canonical ? { ...previous, event: canonical } : null
-      : previous);
-    const todoId = canonical ? calendarEventLinkedTodoId(canonical) : undefined;
-    if (canonical && todoId) void syncCalendarToTodo(todoId, canonical);
-  }, []);
+    await reconcileEventMutation(mutationIdentity ?? undefined);
+  }, [reconcileEventMutation]);
+
+  const handleTimeGridEventChange = useCallback(async (
+    eventId: string,
+    mutationIdentity: CalendarEventIdentity,
+    patch: Pick<CalendarEvent, 'startDate' | 'endDate' | 'startTime' | 'endTime'>,
+  ) => {
+    await updateEvent(eventId, patch, mutationIdentity);
+    await reconcileEventMutation(mutationIdentity);
+  }, [reconcileEventMutation]);
 
   const { isDragging, preview: dragPreview, startDrag } = useCalendarDnD(handleEventDragDone, handleEventDragDone);
 
@@ -575,13 +596,11 @@ export function ScheduleView() {
     startDrag(ev.id, mode, ev.startDate, ev.endDate, 0, anchorDate);
   }, [startDrag]);
 
-  // ─── 드래그-투-크리에이트: 시작/종료 날짜 상태 ───
-  const [createEndDate, setCreateEndDate] = useState<string | undefined>();
-
-  const handleTimeGridSlotClick = useCallback((date: string, _startTime: string, _endTime: string) => {
-    // 시각 프리필은 PR-C에서 EventCreateModal 계약을 확장해 연결한다.
+  const handleTimeGridCreate = useCallback((date: string, startTime: string, endTime: string) => {
     setCreateDate(date);
     setCreateEndDate(date);
+    setCreateStartTime(startTime);
+    setCreateEndTime(endTime);
     setShowCreate(true);
   }, []);
 
@@ -602,6 +621,8 @@ export function ScheduleView() {
       // 드래그/클릭 완료 → 상세 편집 모달 열기 (시작일+종료일 프리필)
       setCreateDate(startDate);
       setCreateEndDate(endDate);
+      setCreateStartTime(undefined);
+      setCreateEndTime(undefined);
       setShowCreate(true);
       // 모달이 열려 있는 동안 하이라이트 유지
       setPersistedDateRange({ startDate, endDate });
@@ -1051,7 +1072,7 @@ export function ScheduleView() {
 
           {/* 이벤트 생성 */}
           <button
-            onClick={() => { setCreateDate(undefined); setShowCreate(true); }}
+            onClick={() => { resetCreatePrefill(); setShowCreate(true); }}
             className="flex items-center gap-1.5 px-4 py-2 rounded-lg bg-accent hover:bg-accent/80 text-white text-sm font-medium shadow-sm shadow-accent/20 transition-colors cursor-pointer"
           >
             <Plus size={16} />
@@ -1110,12 +1131,14 @@ export function ScheduleView() {
                 events={filteredEvents}
                 today={today}
                 onEventClick={handleEventClick}
-                onSlotClick={handleTimeGridSlotClick}
+                onSlotClick={handleTimeGridCreate}
                 tagNameById={tagNameById}
                 calendarNameById={calendarNameById}
                 activeWeekIndex={activeWeekIndex}
                 weekCount={weeks.length}
                 onWeekChange={handleWeekChange}
+                onTimeGridCreate={handleTimeGridCreate}
+                onTimeGridEventChange={handleTimeGridEventChange}
               />
             ) : viewMode === 'week' || viewMode === '2week' ? (
               <WeekScrollView
@@ -1178,9 +1201,11 @@ export function ScheduleView() {
             key="create"
             initialDate={createDate}
             initialEndDate={createEndDate}
+            initialStartTime={createStartTime}
+            initialEndTime={createEndTime}
             episodes={episodes}
             googleAuthenticated={googleAuthenticated}
-            onClose={() => { setShowCreate(false); setCreateDate(undefined); setCreateEndDate(undefined); }}
+            onClose={() => { setShowCreate(false); resetCreatePrefill(); }}
             onSave={handleAddEvent}
           />
         )}
