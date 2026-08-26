@@ -193,8 +193,10 @@ export function getNonTodayCurrentLineStyle(): { background: string; height: num
   return { background: 'rgba(255, 107, 107, 0.28)', height: 1 };
 }
 
-export function getWeekendCellStyle(isWeekend: boolean): { background?: string } {
-  return isWeekend ? { background: 'rgba(116, 185, 255, 0.06)' } : {};
+export function getWeekendCellStyle(isWeekend: boolean): { backgroundImage?: string } {
+  return isWeekend
+    ? { backgroundImage: 'linear-gradient(rgba(116, 185, 255, 0.06), rgba(116, 185, 255, 0.06))' }
+    : {};
 }
 
 function eventBlockStyle(layout: { col: number; span: number; cols: number }, top: number, height: number) {
@@ -329,7 +331,7 @@ export function WeekTimeGridView({
                 key={dateStr}
                 type="button"
                 aria-label={`${dateStr} 종일 일정 만들기`}
-                className={`border-l border-bg-border/20 transition-colors hover:bg-accent/[0.08] ${dateStr === today ? 'bg-accent/[0.03]' : ''}`}
+                className={`border-l border-bg-border/20 transition-colors hover:bg-bg-border/15 ${dateStr === today ? 'bg-accent/[0.03]' : ''}`}
                 style={getWeekendCellStyle(index === 0 || index === 6)}
                 onClick={() => onSlotClick(dateStr, '00:00', '23:59')}
               />
