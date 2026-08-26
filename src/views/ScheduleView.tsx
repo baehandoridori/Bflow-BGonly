@@ -30,6 +30,7 @@ import { CalendarRail, GOOGLE_CALENDAR_ID } from '@/components/calendar/Calendar
 import { TagBar } from '@/components/calendar/TagBar';
 import { TagManagerPopover } from '@/components/calendar/TagManagerPopover';
 import { CalendarSettingsModal } from '@/components/calendar/CalendarSettingsModal';
+import { ShortcutHelpOverlay } from '@/components/calendar/ShortcutHelpOverlay';
 import { useCalendarDragCreate } from '@/hooks/useCalendarDragCreate';
 import { useCalendarStore } from '@/stores/useCalendarStore';
 import { filterCalendarEvents } from '@/utils/calendarEventFilter';
@@ -612,6 +613,7 @@ export function ScheduleView() {
 
   // navigate-to-date 펄스 애니메이션용
   const [pulseDate, setPulseDate] = useState<string | null>(null);
+  const [showShortcutHelp, setShowShortcutHelp] = useState(false);
 
   // 오늘 버튼 하이라이트 (persistedDateRange와 분리)
   // todayHighlight 제거됨 — pulseDate로 통합
@@ -636,15 +638,70 @@ export function ScheduleView() {
 
   // 캘린더 키보드 네비게이션 (모든 뷰)
   useEffect(() => {
-    if (showCreate || quickEdit) return;
+    if (showCreate || quickEdit || panelEvent) return;
 
     const handler = (e: KeyboardEvent) => {
-      // input/textarea에 포커스 있으면 무시
+      // 편집 중이거나 OS/앱 조합키를 누른 상태면 캘린더 단축키를 가로채지 않는다.
       const tag = (e.target as HTMLElement)?.tagName;
-      if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
+      if (
+        tag === 'INPUT'
+        || tag === 'TEXTAREA'
+        || tag === 'SELECT'
+        || (e.target as HTMLElement)?.isContentEditable
+        || e.ctrlKey
+        || e.metaKey
+        || e.altKey
+      ) return;
 
-      // 패널의 첫 ESC는 편집 취소, 다음 ESC는 닫기다. 패널 자체 리스너에 맡긴다.
-      if (panelEvent && e.key === 'Escape') {
+      const key = e.key.toLowerCase();
+      const isHelpShortcut = e.key === '?' || (e.key === '/' && e.shiftKey);
+
+      if (isHelpShortcut) {
+        e.preventDefault();
+        e.stopPropagation();
+        setShowShortcutHelp((open) => !open);
+        return;
+      }
+
+      if (showShortcutHelp) {
+        if (e.key === 'Escape') {
+          e.preventDefault();
+          e.stopPropagation();
+          setShowShortcutHelp(false);
+        }
+        return;
+      }
+
+      if (key === 't') {
+        e.preventDefault();
+        e.stopPropagation();
+        goToToday();
+        return;
+      }
+
+      if (key === 'w') {
+        e.preventDefault();
+        e.stopPropagation();
+        setViewMode('week');
+        return;
+      }
+
+      if (key === 'm') {
+        e.preventDefault();
+        e.stopPropagation();
+        setViewMode('month');
+        return;
+      }
+
+      if (key === 'c') {
+        e.preventDefault();
+        e.stopPropagation();
+        const targetDate = focusedDate ?? fmtDate(new Date());
+        resetCreatePrefill();
+        setCreateDate(targetDate);
+        setCreateEndDate(targetDate);
+        setShowCreate(true);
+        setPersistedDateRange({ startDate: targetDate, endDate: targetDate });
         return;
       }
 
@@ -722,7 +779,10 @@ export function ScheduleView() {
 
     document.addEventListener('keydown', handler);
     return () => document.removeEventListener('keydown', handler);
-  }, [viewMode, showCreate, quickEdit, panelEvent, focusedDate, month, year, moveWeekBy, moveDayBy]);
+  }, [
+    viewMode, showCreate, quickEdit, panelEvent, showShortcutHelp, focusedDate,
+    month, year, moveWeekBy, moveDayBy, resetCreatePrefill,
+  ]);
 
   // 뷰 모드 변경 시 포커스 초기화
   useEffect(() => {
@@ -1253,6 +1313,9 @@ export function ScheduleView() {
           }}
           onDuplicate={handleDuplicateEvent}
         />
+      )}
+      {showShortcutHelp && (
+        <ShortcutHelpOverlay onClose={() => setShowShortcutHelp(false)} />
       )}
       </div>{/* 메인 영역 끝 */}
       </div>

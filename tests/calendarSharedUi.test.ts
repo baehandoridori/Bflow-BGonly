@@ -2063,6 +2063,14 @@ async function renderScheduleView(): Promise<ReactNode> {
   return resolveComponents(ScheduleView());
 }
 
+async function rerenderScheduleViewWithFreshEffects(): Promise<ReactNode> {
+  for (const cleanup of scheduleMountedEffectCleanups.splice(0).reverse()) cleanup();
+  schedulePendingEffects = [];
+  const tree = await renderScheduleView();
+  await flushScheduleMountEffects();
+  return tree;
+}
+
 async function flushScheduleMountEffects(): Promise<void> {
   const effects = schedulePendingEffects.splice(0);
   for (const effect of effects) {
@@ -2072,10 +2080,15 @@ async function flushScheduleMountEffects(): Promise<void> {
   await new Promise<void>((resolve) => setImmediate(resolve));
 }
 
-function dispatchScheduleKeydown(key: string): void {
+function dispatchScheduleKeydown(
+  key: string,
+  target: { tagName: string; isContentEditable?: boolean } = { tagName: 'DIV' },
+  modifiers: { ctrlKey?: boolean; metaKey?: boolean; altKey?: boolean; shiftKey?: boolean } = {},
+): void {
   const event = {
     key,
-    target: { tagName: 'DIV' },
+    target,
+    ...modifiers,
     preventDefault() {},
     stopPropagation() {},
   } as unknown as Event;
@@ -4283,6 +4296,133 @@ test('ScheduleView persists a time-grid move with its complete patch and source-
       sourceCalendarId: 'bflow:mine',
     },
   });
+});
+
+test('ScheduleView calendar shortcuts switch views, return to today, and preserve arrow navigation', async (t) => {
+  await t.test('W and M switch directly between the weekly and monthly views', async () => {
+    resetHarness();
+    await renderScheduleView();
+    await flushScheduleMountEffects();
+
+    dispatchScheduleKeydown('w');
+    await renderScheduleView();
+    assert.ok(scheduleWeekScrollProps.at(-1), 'W renders the weekly calendar');
+
+    for (const cleanup of scheduleMountedEffectCleanups.splice(0).reverse()) cleanup();
+    await flushScheduleMountEffects();
+    const monthRenderCountBeforeM = scheduleGridProps.length;
+    dispatchScheduleKeydown('m');
+    await renderScheduleView();
+    assert.equal(scheduleGridProps.length, monthRenderCountBeforeM + 1, 'M renders a new monthly calendar');
+  });
+
+  await t.test('T returns the daily calendar to the real current date', async () => {
+    resetHarness();
+    scheduleLocalStorage.set('bflow_calendar_view_v1', JSON.stringify({
+      viewMode: 'today',
+      weekSubMode: 'card',
+    }));
+    await renderScheduleView();
+    scheduleDayScrollProps.at(-1)!.onActiveDayChange(0);
+    await renderScheduleView();
+    for (const cleanup of scheduleMountedEffectCleanups.splice(0).reverse()) cleanup();
+    await flushScheduleMountEffects();
+
+    dispatchScheduleKeydown('t');
+    await renderScheduleView();
+
+    const now = new Date();
+    const expectedIndex = Math.round((
+      new Date(now.getFullYear(), now.getMonth(), now.getDate(), 12).getTime()
+      - new Date(now.getFullYear(), 0, 1, 12).getTime()
+    ) / 86_400_000);
+    assert.equal(scheduleDayScrollProps.at(-1)?.year, now.getFullYear());
+    assert.equal(scheduleDayScrollProps.at(-1)?.activeDayIndex, expectedIndex);
+  });
+
+  await t.test('ArrowRight still moves the focused month date before C uses it', async () => {
+    resetHarness();
+    await renderScheduleView();
+    await flushScheduleMountEffects();
+
+    dispatchScheduleKeydown('ArrowRight');
+    await renderScheduleView();
+    const focusedDate = scheduleGridProps.at(-1)?.focusedDate;
+    assert.ok(focusedDate, 'the existing arrow navigation still focuses a calendar date');
+
+    for (const cleanup of scheduleMountedEffectCleanups.splice(0).reverse()) cleanup();
+    await flushScheduleMountEffects();
+    dispatchScheduleKeydown('c');
+    await renderScheduleView();
+    assert.equal(scheduleCreateModalProps.at(-1)?.initialDate, focusedDate);
+    assert.equal(scheduleCreateModalProps.at(-1)?.initialEndDate, focusedDate);
+  });
+
+  await t.test('C falls back to today when no month date is focused', async () => {
+    resetHarness();
+    await renderScheduleView();
+    await flushScheduleMountEffects();
+
+    dispatchScheduleKeydown('c');
+    await renderScheduleView();
+
+    const today = scheduleFmtDate(new Date());
+    assert.equal(scheduleCreateModalProps.at(-1)?.initialDate, today);
+    assert.equal(scheduleCreateModalProps.at(-1)?.initialEndDate, today);
+  });
+});
+
+test('ScheduleView shortcut help toggles with ? and closes with Escape without motion when reduced', async () => {
+  resetHarness();
+  await renderScheduleView();
+  await flushScheduleMountEffects();
+
+  dispatchScheduleKeydown('?', { tagName: 'DIV' }, { shiftKey: true });
+  let tree = await renderScheduleView();
+  const animatedDialog = nodeByAriaLabel(tree, '캘린더 단축키');
+  assert.match(String((animatedDialog.props as { className?: string }).className), /char-modal-in_200ms_ease-out/);
+  assert.match(textContent(animatedDialog), /오늘/);
+  assert.match(textContent(animatedDialog), /새 일정/);
+
+  dispatchScheduleKeydown('?', { tagName: 'DIV' }, { shiftKey: true });
+  tree = await renderScheduleView();
+  assert.throws(() => nodeByAriaLabel(tree, '캘린더 단축키'), /must be rendered/);
+
+  dispatchScheduleKeydown('?', { tagName: 'DIV' }, { shiftKey: true });
+  await rerenderScheduleViewWithFreshEffects();
+  dispatchScheduleKeydown('Escape');
+  tree = await renderScheduleView();
+  assert.throws(() => nodeByAriaLabel(tree, '캘린더 단축키'), /must be rendered/);
+
+  resetHarness();
+  scheduleReducedMotion = true;
+  await renderScheduleView();
+  await flushScheduleMountEffects();
+  dispatchScheduleKeydown('?', { tagName: 'DIV' }, { shiftKey: true });
+  tree = await renderScheduleView();
+  const reducedDialog = nodeByAriaLabel(tree, '캘린더 단축키');
+  assert.doesNotMatch(String((reducedDialog.props as { className?: string }).className), /char-modal-in/);
+});
+
+test('ScheduleView calendar shortcuts ignore editing targets, modifiers, and open modal UI', async () => {
+  resetHarness();
+  await renderScheduleView();
+  await flushScheduleMountEffects();
+
+  dispatchScheduleKeydown('w', { tagName: 'INPUT' });
+  dispatchScheduleKeydown('c', { tagName: 'DIV', isContentEditable: true });
+  dispatchScheduleKeydown('w', { tagName: 'DIV' }, { ctrlKey: true });
+  let tree = await renderScheduleView();
+  assert.equal(scheduleWeekScrollProps.length, 0, 'text editing and modified keys do not switch views');
+  assert.equal(scheduleCreateModalProps.length, 0, 'contenteditable does not open the create modal');
+  assert.ok(scheduleGridProps.at(-1), 'the monthly view remains active');
+
+  dispatchScheduleKeydown('c');
+  tree = await rerenderScheduleViewWithFreshEffects();
+  assert.ok(scheduleCreateModalProps.at(-1), 'the unmodified shortcut opens create mode');
+  dispatchScheduleKeydown('w');
+  await renderScheduleView();
+  assert.equal(scheduleWeekScrollProps.length, 0, 'open create UI blocks calendar shortcuts');
 });
 
 test('ScheduleView carries weekly and daily navigation across a calendar-year boundary', async (t) => {
