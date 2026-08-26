@@ -4,6 +4,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { CalendarDays } from 'lucide-react';
 import type { CalendarEvent } from '@/types/calendar';
 import { useCalendarStore } from '@/stores/useCalendarStore';
+import { useMotionPref } from '@/hooks/useMotionPref';
 import { WEEKDAYS, fmtDate, addDays, daysBetween, getISOWeekNumber, hexToRgba } from '@/utils/calendarDate';
 import { formatEventTimeRange, sortEventsForList } from '@/utils/calendarEventFilter';
 import { calendarEventIdentityKey } from '@/utils/calendarEventIdentity';
@@ -83,6 +84,7 @@ export default function WeekScrollView({
 }: WeekScrollViewProps) {
   const is2Week = mode === '2week';
   const tags = useCalendarStore((state) => state.tags);
+  const { reduce } = useMotionPref();
   const tagNameById = useMemo(
     () => Object.fromEntries(tags.map((tag) => [tag.id, tag.name])) as Record<string, string>,
     [tags],
@@ -182,6 +184,7 @@ export default function WeekScrollView({
                   onEventClick={onEventClick}
                   onDateClick={onDateClick}
                   compact={is2Week}
+                  reduce={reduce}
                   tagNameById={tagNameById}
                 />
               ) : isNear ? (
@@ -221,6 +224,7 @@ function ActiveWeek({
   onEventClick,
   onDateClick,
   compact,
+  reduce,
   tagNameById,
 }: {
   week: Date[];
@@ -230,6 +234,7 @@ function ActiveWeek({
   onEventClick: (ev: CalendarEvent) => void;
   onDateClick?: (date: string) => void;
   compact?: boolean;
+  reduce: boolean;
   tagNameById: Record<string, string>;
 }) {
   const sortedEvents = useMemo(() => sortEventsForList(events), [events]);
@@ -239,9 +244,9 @@ function ActiveWeek({
   const revealEventList = useCallback(() => {
     const list = eventListRef.current;
     if (!list) return;
-    list.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    list.scrollIntoView({ behavior: reduce ? 'auto' : 'smooth', block: 'nearest' });
     list.focus({ preventScroll: true });
-  }, []);
+  }, [reduce]);
 
   return (
     <div

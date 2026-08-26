@@ -1910,7 +1910,7 @@ async function loadWeekScrollView(): Promise<WeekScrollViewModule> {
     write: false,
     external: [
       'react', 'react/jsx-runtime', 'framer-motion', 'lucide-react',
-      '@/stores/useCalendarStore',
+      '@/stores/useCalendarStore', '@/hooks/useMotionPref',
     ],
   }).then((result) => {
     const module = { exports: {} as Record<string, unknown> };
@@ -1938,6 +1938,7 @@ async function loadWeekScrollView(): Promise<WeekScrollViewModule> {
       if (id === '@/stores/useCalendarStore') {
         return { useCalendarStore: (selector: (state: typeof calendarState) => unknown) => selector(calendarState) };
       }
+      if (id === '@/hooks/useMotionPref') return { useMotionPref: () => ({ reduce: scheduleReducedMotion }) };
       return nodeRequire(id);
     }, module, module.exports);
     return module.exports as unknown as WeekScrollViewModule;
@@ -2321,6 +2322,57 @@ test('WeekScrollView keeps every event card while exposing a linked +N overflow 
   assert.ok(eventList, 'the active week still contains the full card list');
   assert.equal(overflowButton.props['aria-controls'], eventList.props.id, 'the overflow control targets the card list it reveals');
   assert.equal(directElementChildren(eventList).length, 6, 'only the bar strip is capped; every event remains available as a card');
+});
+
+test('WeekScrollView respects reduced motion when +N reveals the full event card list', async (t) => {
+  for (const scenario of [
+    { reduce: false, behavior: 'smooth' },
+    { reduce: true, behavior: 'auto' },
+  ] as const) {
+    await t.test(scenario.reduce ? 'reduced motion uses an instant jump' : 'normal motion keeps a smooth jump', async () => {
+      resetHarness();
+      scheduleReducedMotion = scenario.reduce;
+      const weekModule = await loadWeekScrollView();
+      const weeks = weekModule.generateYearWeeks(2026);
+      const events = Array.from({ length: 6 }, (_, index) => calendarListEvent({
+        id: `motion-overflow-${index + 1}`,
+        title: `모션 넘침 일정 ${index + 1}`,
+        startDate: '2026-08-23',
+        endDate: '2026-08-23',
+      }));
+      const tree = resolveComponents(weekModule.default({
+        currentMonth: 7,
+        currentYear: 2026,
+        events,
+        today: '2026-08-25',
+        onEventClick() {},
+        activeWeekIndex: weekModule.findWeekIndexForDate(weeks, '2026-08-25'),
+        onWeekChange() {},
+      }));
+
+      const eventList = findElements(tree, (element) => element.props['data-scroll-events'] === true)[0];
+      assert.ok(eventList, 'the reveal target remains the complete card list');
+      const eventListRef = (eventList as unknown as {
+        ref: {
+          current: {
+            scrollIntoView(options: Record<string, unknown>): void;
+            focus(options: Record<string, unknown>): void;
+          } | null;
+        };
+      }).ref;
+      assert.ok(eventListRef, 'the card list is reachable through its reveal ref');
+      const scrollCalls: Array<Record<string, unknown>> = [];
+      const focusCalls: Array<Record<string, unknown>> = [];
+      eventListRef.current = {
+        scrollIntoView(options) { scrollCalls.push(options); },
+        focus(options) { focusCalls.push(options); },
+      };
+
+      buttonByLabel(tree, '숨은 일정 1개 보기').props.onClick?.({ stopPropagation() {} });
+      assert.deepEqual(scrollCalls, [{ behavior: scenario.behavior, block: 'nearest' }]);
+      assert.deepEqual(focusCalls, [{ preventScroll: true }]);
+    });
+  }
 });
 
 test('WeekScrollView delegates a boundary wheel step so ScheduleView can change the year', async () => {
@@ -4104,6 +4156,60 @@ test('ScheduleView carries weekly and daily navigation across a calendar-year bo
     assert.ok(nextDay);
     assert.equal(nextDay.year, initialDay.year + 1);
     assert.equal(nextDay.activeDayIndex, 0, 'January 1 is the first valid index of the new year');
+  });
+});
+
+test('ScheduleView keeps valid weekly indices owned by the displayed year', async (t) => {
+  await t.test('a valid timegrid index for the first 2026 week keeps January 2026 selected', async () => {
+    resetHarness();
+    scheduleLocalStorage.set('bflow_calendar_view_v1', JSON.stringify({
+      viewMode: 'week',
+      weekSubMode: 'timegrid',
+    }));
+
+    let tree = await renderScheduleView();
+    const timeGrid = scheduleTimeGridProps.at(-1);
+    assert.ok(timeGrid);
+    assert.equal(
+      scheduleFmtDate(scheduleGenerateYearWeeks(2026)[0][0]),
+      '2025-12-28',
+      'the first generated 2026 week intentionally includes December dates',
+    );
+    timeGrid.onWeekChange(0);
+    tree = await renderScheduleView();
+
+    buttonByLabel(tree, '주간 카드 보기').props.onClick?.({ stopPropagation() {} });
+    await renderScheduleView();
+    const card = scheduleWeekScrollProps.at(-1);
+    assert.ok(card);
+    assert.equal(card.currentYear, 2026);
+    assert.equal(card.currentMonth, 0, 'the first valid week is owned by January in the displayed year');
+    assert.equal(card.activeWeekIndex, 0);
+  });
+
+  await t.test('a valid card index stays in 2026 while an out-of-range sentinel still crosses years', async () => {
+    resetHarness();
+    scheduleLocalStorage.set('bflow_calendar_view_v1', JSON.stringify({
+      viewMode: 'week',
+      weekSubMode: 'card',
+    }));
+
+    await renderScheduleView();
+    const card = scheduleWeekScrollProps.at(-1);
+    assert.ok(card);
+    card.onWeekChange(0);
+    await renderScheduleView();
+    const firstWeek = scheduleWeekScrollProps.at(-1);
+    assert.ok(firstWeek);
+    assert.equal(firstWeek.currentYear, 2026);
+    assert.equal(firstWeek.currentMonth, 0);
+    assert.equal(firstWeek.activeWeekIndex, 0);
+
+    firstWeek.onWeekChange(-1);
+    await renderScheduleView();
+    const priorYear = scheduleWeekScrollProps.at(-1);
+    assert.ok(priorYear);
+    assert.equal(priorYear.currentYear, 2025, 'only the boundary sentinel changes the displayed year');
   });
 });
 

@@ -411,7 +411,11 @@ export function ScheduleView() {
       moveToWeekContaining(addDays(yearWeeks[lastIndex][3], 7));
       return;
     }
-    moveToWeekContaining(yearWeeks[requestedIndex][3]);
+    const requestedWeek = yearWeeks[requestedIndex];
+    const dateInDisplayedYear = requestedWeek.find((date) => date.getFullYear() === year)
+      ?? new Date(year, 11, 31, 12, 0, 0, 0);
+    setMonth(dateInDisplayedYear.getMonth());
+    setActiveWeekIndex(requestedIndex);
   }, [moveToWeekContaining, year]);
 
   const moveToDay = useCallback((date: Date) => {
