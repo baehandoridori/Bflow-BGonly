@@ -105,3 +105,20 @@ test('useTimeGridDnD: 전용 16ms 스크롤은 edge=40에서만 가장자리 속
   assert.ok(dnd.getTimeGridAutoScrollSpeed(110, { top: 100, bottom: 900 }) < 0);
   assert.ok(dnd.getTimeGridAutoScrollSpeed(890, { top: 100, bottom: 900 }) > 0);
 });
+
+test('useTimeGridDnD: 하루 끝 스냅은 create를 안전한 같은 날짜 범위로, move·resize를 다음 날짜로 보낸다', async () => {
+  const dnd = await loadTimeGridDnD();
+  const late = {
+    startDate: '2026-08-24', endDate: '2026-08-24', startTime: '23:45', endTime: '23:59',
+  };
+
+  assert.deepEqual(dnd.getTimeGridCreateRange(1440, 1440), { startTime: '23:30', endTime: '23:45' });
+  assert.deepEqual(
+    dnd.getTimeGridEventPatch('move', { ...late, startTime: '23:00', endTime: '23:30' }, '2026-08-24', 1440),
+    { startDate: '2026-08-25', endDate: '2026-08-25', startTime: '00:00', endTime: '00:30' },
+  );
+  assert.deepEqual(
+    dnd.getTimeGridEventPatch('resize-end', late, '2026-08-24', 1440),
+    { startDate: '2026-08-24', endDate: '2026-08-25', startTime: '23:45', endTime: '00:00' },
+  );
+});

@@ -1552,13 +1552,14 @@ input[type="range"]::-webkit-slider-thumb {
 }
 /* 시간표 드롭 직후 해당 일정에만 적용한다. widget-animations.css는 Dashboard 전용이라 분리한다. */
 @keyframes timeGridSettleFlash {
-  0% { box-shadow: 0 0 0 0 rgba(108, 92, 231, 0.88); }
-  100% { box-shadow: 0 0 0 5px rgba(108, 92, 231, 0); }
+  0% { border-color: rgba(108, 92, 231, 0.95); box-shadow: 0 0 0 0 rgba(108, 92, 231, 0.88); }
+  55% { border-color: rgba(162, 155, 254, 0.72); box-shadow: 0 0 0 5px rgba(108, 92, 231, 0.08); }
+  100% { border-color: transparent; box-shadow: 0 0 0 5px rgba(108, 92, 231, 0); }
 }
 
 .time-grid-settling {
+  border: 1px solid transparent;
   animation: timeGridSettleFlash 0.45s cubic-bezier(0.34, 1.56, 0.64, 1);
-  transition: transform 0.45s cubic-bezier(0.34, 1.56, 0.64, 1), border-color 0.45s ease;
 }
 
 @media (prefers-reduced-motion: reduce) {

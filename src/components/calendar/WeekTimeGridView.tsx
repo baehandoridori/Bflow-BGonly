@@ -231,6 +231,37 @@ export function getTimedBlockOpacity(isPast: boolean): number {
   return isPast ? 0.5 : 1;
 }
 
+/** 드래그 중인 블록은 Framer Motion transform으로만 확대해 inline transform과 충돌하지 않게 한다. */
+export function getTimeGridBlockMotion({
+  reduce,
+  opacity,
+  layoutIndex,
+  isMoving,
+  isSettling,
+}: {
+  reduce: boolean;
+  opacity: number;
+  layoutIndex: number;
+  isMoving: boolean;
+  isSettling: boolean;
+}): {
+  animate: { opacity: number; y: number; scale: number };
+  transition: { duration: number; delay?: number; ease?: number[] };
+} {
+  const animate = { opacity, y: 0, scale: reduce ? 1 : (isMoving ? 1.02 : 1) };
+  if (reduce) return { animate, transition: { duration: 0 } };
+  if (isSettling) {
+    return {
+      animate,
+      transition: { duration: 0.45, ease: [0.34, 1.56, 0.64, 1] },
+    };
+  }
+  return {
+    animate,
+    transition: { duration: 0.18, delay: clampStaggerDelay(layoutIndex, false) },
+  };
+}
+
 export function getAllDayBarStyle(color: string): { background: string; borderLeft: string; color: string } {
   return {
     background: tintOnCard(color),
@@ -707,6 +738,15 @@ function TimeBand({
                 const timeLabel = formatEventTimeRange(block.event, tagNameById)
                   ?? `${minutesToTime(block.startMin)}–${minutesToTime(block.endMin)}`;
                 const isPreviewed = dragPreview?.identityKey === calendarEventIdentityKey(block.event);
+                const isMoving = isPreviewed && timeGridDnD.isDragActive;
+                const isSettling = timeGridDnD.isSettling(block.event);
+                const blockMotion = getTimeGridBlockMotion({
+                  reduce,
+                  opacity,
+                  layoutIndex,
+                  isMoving,
+                  isSettling,
+                });
                 const isReadOnly = block.event.isReadOnly === true;
                 const eventDragProps = isReadOnly ? {} : {
                   onMouseDown: (event: React.MouseEvent<HTMLElement>) => {
@@ -731,7 +771,7 @@ function TimeBand({
                     aria-label={`${block.event.title}, ${date} ${minutesToTime(block.startMin)}부터 ${minutesToTime(block.endMin)}까지`}
                     data-time-grid-event="true"
                     data-event-identity={calendarEventIdentityKey(block.event)}
-                    className={`absolute z-10 overflow-hidden rounded ${canShowText ? 'px-1.5 py-1' : 'p-0'} text-left font-semibold outline-none focus-visible:ring-2 focus-visible:ring-white focus-visible:ring-offset-1 focus-visible:ring-offset-bg-primary ${isPreviewed && timeGridDnD.isDragActive ? 'scale-[1.02] shadow-xl' : ''} ${timeGridDnD.isSettling(block.event) ? 'time-grid-settling' : ''}`}
+                    className={`absolute z-10 overflow-hidden rounded ${canShowText ? 'px-1.5 py-1' : 'p-0'} text-left font-semibold outline-none focus-visible:ring-2 focus-visible:ring-white focus-visible:ring-offset-1 focus-visible:ring-offset-bg-primary ${isMoving ? 'shadow-xl' : ''} ${isSettling ? 'time-grid-settling' : ''}`}
                     style={{
                       ...eventBlockStyle(
                         layout,
@@ -744,8 +784,8 @@ function TimeBand({
                       ...stateStyle,
                     }}
                     initial={reduce ? false : { opacity: 0, y: 4 }}
-                    animate={{ opacity, y: 0 }}
-                    transition={{ duration: reduce ? 0 : 0.18, delay: clampStaggerDelay(layoutIndex, reduce) }}
+                    animate={blockMotion.animate}
+                    transition={blockMotion.transition}
                     onClick={(event) => {
                       event.stopPropagation();
                       if (timeGridDnD.shouldSuppressClick()) return;

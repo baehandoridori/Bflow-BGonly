@@ -7,6 +7,7 @@ import {
 } from '@/utils/calendarEventIdentity';
 import { computeEdgeScrollSpeed } from '@/utils/dragAutoScroll';
 import { minutesToTime, pxToMinutes, snapMinutes, timeToMinutes } from '@/utils/timeGridLayout';
+import { addDays, fmtDate, parseDate } from '@/utils/calendarDate';
 
 export type TimeGridDragMode = 'create' | 'move' | 'resize-end';
 
@@ -35,6 +36,7 @@ export const TIME_GRID_HOUR_PX = 56;
 export const TIME_GRID_DRAG_EDGE = 40;
 const DRAG_THRESHOLD_PX = 5;
 const CLICK_SUPPRESS_MS = 280;
+const LATEST_SAME_DAY_END_MINUTES = 23 * 60 + 45;
 
 export type TimeGridPointerTarget = {
   date: string;
@@ -63,9 +65,26 @@ export function getTimeGridPointerMinutes(clientY: number, rect: { top: number }
 }
 
 export function getTimeGridCreateRange(startMinutes: number, currentMinutes: number): Pick<TimeGridEventPatch, 'startTime' | 'endTime'> {
-  const start = Math.min(startMinutes, currentMinutes);
-  const end = startMinutes === currentMinutes ? start + 15 : Math.max(startMinutes, currentMinutes);
-  return { startTime: minutesToTime(start), endTime: minutesToTime(Math.min(24 * 60, end)) };
+  const safeAnchor = Math.min(startMinutes, LATEST_SAME_DAY_END_MINUTES - 15);
+  const safeCurrent = Math.min(currentMinutes, LATEST_SAME_DAY_END_MINUTES);
+  const start = Math.min(safeAnchor, safeCurrent);
+  const end = Math.min(
+    LATEST_SAME_DAY_END_MINUTES,
+    safeAnchor === safeCurrent ? start + 15 : Math.max(safeAnchor, safeCurrent),
+  );
+  return { startTime: minutesToTime(Math.min(start, end - 15)), endTime: minutesToTime(end) };
+}
+
+function addDaysToDate(date: string, days: number): string {
+  return fmtDate(addDays(parseDate(date), days));
+}
+
+function normalizeEndDateTime(date: string, minutes: number): Pick<TimeGridEventPatch, 'endDate' | 'endTime'> {
+  const overflowDays = Math.floor(Math.max(0, minutes) / (24 * 60));
+  return {
+    endDate: addDaysToDate(date, overflowDays),
+    endTime: minutesToTime(minutes - overflowDays * 24 * 60),
+  };
 }
 
 export function getTimeGridEventPatch(
@@ -79,22 +98,25 @@ export function getTimeGridEventPatch(
   const originalEnd = timeToMinutes(original.endTime);
   if (mode === 'move') {
     const duration = Math.max(15, originalEnd - originalStart);
-    const start = Math.max(0, Math.min(24 * 60 - duration, targetMinutes - (anchorMinutes - originalStart)));
+    const start = Math.max(0, targetMinutes - (anchorMinutes - originalStart));
+    const startOverflowDays = Math.floor(start / (24 * 60));
+    const startDate = addDaysToDate(targetDate, startOverflowDays);
+    const startTime = minutesToTime(start - startOverflowDays * 24 * 60);
+    const end = normalizeEndDateTime(startDate, start - startOverflowDays * 24 * 60 + duration);
     return {
-      startDate: targetDate,
-      endDate: targetDate,
-      startTime: minutesToTime(start),
-      endTime: minutesToTime(start + duration),
+      startDate,
+      startTime,
+      ...end,
     };
   }
 
   const isBeforeStart = targetDate < original.startDate;
   const end = isBeforeStart ? originalStart + 15 : Math.max(originalStart + 15, targetMinutes);
+  const normalizedEnd = normalizeEndDateTime(isBeforeStart ? original.startDate : targetDate, end);
   return {
     startDate: original.startDate,
-    endDate: isBeforeStart ? original.startDate : targetDate,
+    ...normalizedEnd,
     startTime: original.startTime,
-    endTime: minutesToTime(Math.min(24 * 60, end)),
   };
 }
 
@@ -234,12 +256,14 @@ export function useTimeGridDnD({ scrollContainerRef, onCreate, onEventChange }: 
 
   useEffect(() => {
     if (!drag) return;
-    const block = document.createElement('style');
-    block.id = 'time-grid-dnd-pointer-block';
-    block.textContent = '[data-time-grid-event="true"] { pointer-events: none !important; }';
-    document.head.appendChild(block);
-    document.body.style.userSelect = 'none';
-    document.body.style.cursor = drag.mode === 'resize-end' ? 'row-resize' : 'grabbing';
+    const block = drag.hasCrossedThreshold ? document.createElement('style') : null;
+    if (block) {
+      block.id = 'time-grid-dnd-pointer-block';
+      block.textContent = '[data-time-grid-event="true"] { pointer-events: none !important; }';
+      document.head.appendChild(block);
+      document.body.style.userSelect = 'none';
+      document.body.style.cursor = drag.mode === 'resize-end' ? 'row-resize' : 'grabbing';
+    }
 
     const handleMouseMove = (event: MouseEvent) => {
       const state = dragRef.current;
@@ -307,9 +331,11 @@ export function useTimeGridDnD({ scrollContainerRef, onCreate, onEventChange }: 
       document.removeEventListener('mousemove', handleMouseMove);
       document.removeEventListener('mouseup', finish);
       document.removeEventListener('keydown', cancel);
-      document.body.style.userSelect = '';
-      document.body.style.cursor = '';
-      block.remove();
+      if (block) {
+        document.body.style.userSelect = '';
+        document.body.style.cursor = '';
+        block.remove();
+      }
     };
   }, [clearDrag, drag, scrollContainerRef]);
 

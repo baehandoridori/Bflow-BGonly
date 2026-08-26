@@ -101,6 +101,10 @@ type WeekTimeGridModule = {
   clearWeekWheelGestureLock(gestureLock: { current: ReturnType<typeof setTimeout> | null }): void;
   getNonTodayCurrentLineStyle(): { background: string; height: number };
   getWeekendCellStyle(isWeekend: boolean): { backgroundImage?: string };
+  getTimeGridBlockMotion(args: { reduce: boolean; opacity: number; layoutIndex: number; isMoving: boolean; isSettling: boolean }): {
+    animate: { opacity: number; y: number; scale: number };
+    transition: { duration: number; delay?: number; ease?: number[] };
+  };
 };
 
 async function loadWeekTimeGridView(): Promise<WeekTimeGridModule> {
@@ -538,4 +542,21 @@ test('WeekTimeGridView: 외부 시간표 preview는 해당 날짜 열의 생성 
   assert.match(markup, /data-time-grid-column="true" data-date="2026-08-25"/);
   assert.match(markup, /data-time-grid-create-ghost="true"/);
   assert.match(markup, /data-time-grid-live-label="true">10:15 – 10:45/);
+});
+
+test('WeekTimeGridView: 이동 블록은 Framer Motion scale 1.02를 쓰고 안착은 0.45초 overshoot로 복귀한다', async () => {
+  const { getTimeGridBlockMotion } = await loadWeekTimeGridView();
+
+  assert.deepEqual(getTimeGridBlockMotion({ reduce: false, opacity: 1, layoutIndex: 0, isMoving: true, isSettling: false }), {
+    animate: { opacity: 1, y: 0, scale: 1.02 },
+    transition: { duration: 0.18, delay: 0 },
+  });
+  assert.deepEqual(getTimeGridBlockMotion({ reduce: false, opacity: 1, layoutIndex: 0, isMoving: false, isSettling: true }), {
+    animate: { opacity: 1, y: 0, scale: 1 },
+    transition: { duration: 0.45, ease: [0.34, 1.56, 0.64, 1] },
+  });
+  assert.deepEqual(getTimeGridBlockMotion({ reduce: true, opacity: 1, layoutIndex: 0, isMoving: true, isSettling: true }), {
+    animate: { opacity: 1, y: 0, scale: 1 },
+    transition: { duration: 0 },
+  });
 });
