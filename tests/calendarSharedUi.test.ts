@@ -3806,6 +3806,95 @@ test('ScheduleView guards multiple exact local create identities without hiding 
   }
 });
 
+test('ScheduleView consumes a matched local update guard before a collaborator changes the same identity', async () => {
+  resetHarness();
+  scheduleLocalStorage.set('bflow_calendar_view_v1', JSON.stringify({ viewMode: 'week', weekSubMode: 'timegrid' }));
+  const before = calendarListEvent({
+    id: 'same-event-fast-follow',
+    title: '내 수정 전 회의',
+    source: 'bflow',
+    sourceCalendarId: 'bflow:mine',
+    calendarId: 'mine',
+    allDay: false,
+    startTime: '09:00',
+    endTime: '10:00',
+  });
+  scheduleCanonicalEvents = [before];
+  await renderScheduleView();
+  await flushScheduleMountEffects();
+  await renderScheduleView();
+
+  const clock = installScheduleFakeClock();
+  try {
+    const localEcho = { ...before, startTime: '10:00', endTime: '11:00' };
+    scheduleCanonicalEvents = [localEcho];
+    await scheduleTimeGridProps.at(-1)?.onTimeGridEventChange?.(
+      before.id,
+      { id: before.id, source: before.source, sourceCalendarId: before.sourceCalendarId },
+      { startDate: localEcho.startDate, endDate: localEcho.endDate, startTime: '10:00', endTime: '11:00' },
+    );
+    await renderScheduleView();
+    assert.equal(
+      scheduleTimeGridProps.at(-1)?.highlightedEventIdentities?.size,
+      0,
+      'the matching canonical echo of this window\'s save stays quiet',
+    );
+
+    scheduleCanonicalEvents = [{ ...localEcho, title: '동료가 바로 이어서 수정한 회의' }];
+    await dispatchScheduleWindowEvent('bflow:calendar-changed');
+    await renderScheduleView();
+    assert.deepEqual(
+      [...(scheduleTimeGridProps.at(-1)?.highlightedEventIdentities ?? [])],
+      ['bflow\u0000same-event-fast-follow'],
+      'a collaborator update within the former three-second guard window is still announced',
+    );
+  } finally {
+    clock.restore();
+  }
+});
+
+test('ScheduleView does not use a local guard to hide a nonmatching collaborator refresh', async () => {
+  resetHarness();
+  scheduleLocalStorage.set('bflow_calendar_view_v1', JSON.stringify({ viewMode: 'week', weekSubMode: 'timegrid' }));
+  const before = calendarListEvent({
+    id: 'same-event-conflict',
+    title: '내 수정 전 회의',
+    source: 'bflow',
+    sourceCalendarId: 'bflow:mine',
+    calendarId: 'mine',
+    allDay: false,
+    startTime: '09:00',
+    endTime: '10:00',
+  });
+  scheduleCanonicalEvents = [before];
+  await renderScheduleView();
+  await flushScheduleMountEffects();
+  await renderScheduleView();
+
+  const clock = installScheduleFakeClock();
+  try {
+    scheduleCanonicalEvents = [{
+      ...before,
+      title: '동료의 최신 수정',
+      startTime: '10:00',
+      endTime: '11:00',
+    }];
+    await scheduleTimeGridProps.at(-1)?.onTimeGridEventChange?.(
+      before.id,
+      { id: before.id, source: before.source, sourceCalendarId: before.sourceCalendarId },
+      { startDate: before.startDate, endDate: before.endDate, startTime: '10:00', endTime: '11:00' },
+    );
+    await renderScheduleView();
+    assert.deepEqual(
+      [...(scheduleTimeGridProps.at(-1)?.highlightedEventIdentities ?? [])],
+      ['bflow\u0000same-event-conflict'],
+      'the local save guard is only valid for its own expected canonical version, not a collaborator version',
+    );
+  } finally {
+    clock.restore();
+  }
+});
+
 test('ScheduleView only preserves external vacation selections outside the canonical event cache', async (t) => {
   const vacation = calendarListEvent({
     id: 'vacation-selection',
