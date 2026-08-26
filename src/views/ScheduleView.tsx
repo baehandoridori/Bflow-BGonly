@@ -170,7 +170,7 @@ export function ScheduleView() {
   const [highlightedEventIdentities, setHighlightedEventIdentities] = useState<ReadonlySet<string>>(() => new Set());
   const canonicalEventSnapshotRef = useRef<CalendarEventSnapshot | null>(null);
   const localChangeGuardsRef = useRef(new Map<string, number>());
-  const localCreateGuardsRef = useRef(new Map<string, number>());
+  const localCreateGuardsRef = useRef(new Map<string, number[]>());
   const realtimeHighlightTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const realtimeHighlightRevisionRef = useRef(0);
 
@@ -250,7 +250,12 @@ export function ScheduleView() {
   }, []);
 
   const guardCreatedEvent = useCallback((event: CalendarEvent) => {
-    localCreateGuardsRef.current.set(localCreateSignature(event), Date.now() + LOCAL_CHANGE_GUARD_MS);
+    const now = Date.now();
+    const signature = localCreateSignature(event);
+    const activeGuards = (localCreateGuardsRef.current.get(signature) ?? [])
+      .filter((expiresAt) => expiresAt > now);
+    activeGuards.push(now + LOCAL_CHANGE_GUARD_MS);
+    localCreateGuardsRef.current.set(signature, activeGuards);
     guardLocalIdentity(snapshotCalendarEventIdentity(event));
     if (event.calendarId) {
       guardLocalIdentity({
@@ -277,20 +282,27 @@ export function ScheduleView() {
       for (const [identityKey, expiresAt] of localChangeGuardsRef.current) {
         if (expiresAt <= now) localChangeGuardsRef.current.delete(identityKey);
       }
-      for (const [signature, expiresAt] of localCreateGuardsRef.current) {
-        if (expiresAt <= now) localCreateGuardsRef.current.delete(signature);
+      for (const [signature, expiries] of localCreateGuardsRef.current) {
+        const activeGuards = expiries.filter((expiresAt) => expiresAt > now);
+        if (activeGuards.length === 0) localCreateGuardsRef.current.delete(signature);
+        else localCreateGuardsRef.current.set(signature, activeGuards);
       }
       const diff = diffEventSnapshots(previousSnapshot, nextSnapshot);
       const canonicalByIdentity = new Map(
         canonicalEvents.map((event) => [calendarEventIdentityKey(event), event]),
       );
       for (const identityKey of diff.added) {
+        // 낙관적 ID 자체는 exact guard가 맡고, 서버가 바꾼 ID만 생성 1건당
+        // fallback 표 한 장을 소비한다. 같은 내용의 외부 일정까지 숨기지 않는다.
+        if (localChangeGuardsRef.current.has(identityKey)) continue;
         const addedEvent = canonicalByIdentity.get(identityKey);
         if (!addedEvent) continue;
-        const createGuardExpiry = localCreateGuardsRef.current.get(localCreateSignature(addedEvent));
-        if (createGuardExpiry && createGuardExpiry > now) {
-          localChangeGuardsRef.current.set(identityKey, createGuardExpiry);
-        }
+        const signature = localCreateSignature(addedEvent);
+        const createGuards = localCreateGuardsRef.current.get(signature);
+        if (!createGuards || createGuards.length === 0) continue;
+        const createGuardExpiry = createGuards.shift()!;
+        localChangeGuardsRef.current.set(identityKey, createGuardExpiry);
+        if (createGuards.length === 0) localCreateGuardsRef.current.delete(signature);
       }
       const targets = [...diff.added, ...diff.changed]
         .filter((identityKey) => !localChangeGuardsRef.current.has(identityKey));

@@ -3636,13 +3636,22 @@ test('ScheduleView excludes guarded local add and update refreshes, then allows 
       endTime: '14:00',
     });
     await scheduleCreateModalProps.at(-1)?.onSave({ ...created, id: undefined, createdAt: undefined });
-    scheduleCanonicalEvents = [moved, created];
+    const unrelatedExternalTwin = {
+      ...created,
+      id: 'unrelated-external-twin',
+      createdAt: '2026-08-27T01:00:00.000Z',
+    };
+    scheduleCanonicalEvents = [moved, created, unrelatedExternalTwin];
     await dispatchScheduleWindowEvent('bflow:calendar-changed');
     await renderScheduleView();
-    assert.equal(scheduleTimeGridProps.at(-1)?.highlightedEventIdentities?.size, 0, 'a local add stays excluded');
+    assert.deepEqual(
+      [...(scheduleTimeGridProps.at(-1)?.highlightedEventIdentities ?? [])],
+      ['bflow\u0000unrelated-external-twin'],
+      'one local create guard suppresses only its persisted replacement, not an unrelated identical external add',
+    );
 
     clock.advance(3_001);
-    scheduleCanonicalEvents = [moved, { ...created, title: '다른 창에서 수정됨' }];
+    scheduleCanonicalEvents = [moved, { ...created, title: '다른 창에서 수정됨' }, unrelatedExternalTwin];
     await dispatchScheduleWindowEvent('bflow:calendar-changed');
     await renderScheduleView();
     assert.deepEqual(
