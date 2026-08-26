@@ -177,3 +177,191 @@ test('useTimeGridDnD DOM: create·resize callback, Escape 취소, 읽기전용 i
     harness.restore();
   }
 });
+
+type CalendarDndModule = {
+  useCalendarDnD(
+    onEventMove: (eventId: string, newStart: string, newEnd: string) => void,
+    onEventResize: (eventId: string, newStart: string, newEnd: string) => void,
+  ): {
+    isDragging: boolean;
+    preview: { eventId: string; newStartDate: string; newEndDate: string } | null;
+    startDrag(
+      eventId: string,
+      mode: 'move' | 'resize-start' | 'resize-end',
+      startDate: string,
+      endDate: string,
+      mouseX: number,
+      anchorDate: string,
+    ): void;
+  };
+};
+
+async function loadCalendarDnD(): Promise<CalendarDndModule> {
+  const result = await build({
+    entryPoints: ['src/hooks/useCalendarDnD.ts'], bundle: true, format: 'cjs', platform: 'node', target: 'node22', write: false, external: ['react'],
+  });
+  const module = { exports: {} as Record<string, unknown> };
+  const require = createRequire(import.meta.url);
+  new Function('require', 'module', 'exports', result.outputFiles[0].text)(
+    (id: string) => id === 'react' ? require('react') : require(id), module, module.exports,
+  );
+  return module.exports as unknown as CalendarDndModule;
+}
+
+function installCalendarDndHarness(
+  module: CalendarDndModule,
+  onMove: (eventId: string, newStart: string, newEnd: string) => void,
+  onResize: (eventId: string, newStart: string, newEnd: string) => void,
+) {
+  const React = createRequire(import.meta.url)('react');
+  const dispatcher = React.__SECRET_INTERNALS_DO_NOT_USE_OR_YOU_WILL_BE_FIRED.ReactCurrentDispatcher;
+  const previousDispatcher = dispatcher.current;
+  const previousDocument = (globalThis as any).document;
+  const previousWindow = (globalThis as any).window;
+  const listeners = new Map<string, Set<Listener>>();
+  const styleNodes = new Map<string, any>();
+  const frames = new Map<number, FrameRequestCallback>();
+  let nextFrame = 1;
+  const dateElement = (date: string) => ({
+    getAttribute: (name: string) => name === 'data-date' ? date : null,
+    parentElement: null,
+  });
+  const bodyStyle: Record<string, string> = {};
+  const document = {
+    body: { style: bodyStyle },
+    head: { appendChild: (node: any) => { if (node.id) styleNodes.set(node.id, node); } },
+    createElement: () => ({ id: '', textContent: '', remove() { styleNodes.delete(this.id); } }),
+    getElementById: (id: string) => styleNodes.get(id) ?? null,
+    elementFromPoint: (clientX: number) => dateElement(clientX < 150 ? '2026-08-25' : '2026-08-26'),
+    addEventListener(type: string, listener: Listener) { (listeners.get(type) ?? listeners.set(type, new Set()).get(type)!).add(listener); },
+    removeEventListener(type: string, listener: Listener) { listeners.get(type)?.delete(listener); },
+  };
+  (globalThis as any).document = document;
+  (globalThis as any).window = {
+    requestAnimationFrame(callback: FrameRequestCallback) { const id = nextFrame++; frames.set(id, callback); return id; },
+    cancelAnimationFrame(id: number) { frames.delete(id); },
+  };
+
+  const values: unknown[] = [];
+  const refs: unknown[] = [];
+  const cleanups: Array<(() => void) | undefined> = [];
+  let cursor = 0;
+  let effectCursor = 0;
+  let value: ReturnType<CalendarDndModule['useCalendarDnD']>;
+  dispatcher.current = {
+    useState(initial: unknown) {
+      const index = cursor++;
+      if (!(index in values)) values[index] = typeof initial === 'function' ? initial() : initial;
+      return [values[index], (next: unknown) => { values[index] = typeof next === 'function' ? (next as any)(values[index]) : next; }];
+    },
+    useRef(initial: unknown) {
+      const index = cursor++;
+      if (!(index in refs)) refs[index] = { current: initial };
+      return refs[index];
+    },
+    useCallback(fn: unknown) { cursor++; return fn; },
+    useEffect(effect: () => void | (() => void)) { const index = effectCursor++; cleanups[index] = effect() || undefined; },
+  };
+  const render = () => {
+    cleanups.splice(0).forEach((cleanup) => cleanup?.());
+    cursor = 0;
+    effectCursor = 0;
+    value = module.useCalendarDnD(onMove, onResize);
+    return value;
+  };
+  return {
+    render,
+    fire(type: string, event: any) { [...(listeners.get(type) ?? [])].forEach((listener) => listener(event)); },
+    readDrag: () => values[0],
+    readPreview: () => values[1],
+    pendingFrames: () => frames.size,
+    flushFrames() {
+      const pending = [...frames.entries()];
+      frames.clear();
+      pending.forEach(([, callback]) => callback(16));
+    },
+    hasPointerBlock: () => styleNodes.has('dnd-pointer-block'),
+    bodyStyle,
+    restore() {
+      cleanups.forEach((cleanup) => cleanup?.());
+      dispatcher.current = previousDispatcher;
+      (globalThis as any).document = previousDocument;
+      (globalThis as any).window = previousWindow;
+    },
+  };
+}
+
+test('useCalendarDnD DOM: mousemove 프리뷰는 프레임당 한 번만 반영하고 가장 최신 날짜를 유지한다', async () => {
+  const moves: Array<[string, string, string]> = [];
+  const harness = installCalendarDndHarness(await loadCalendarDnD(), (...args) => moves.push(args), () => {});
+  try {
+    let dnd = harness.render();
+    dnd.startDrag('event-1', 'move', '2026-08-24', '2026-08-24', 0, '2026-08-24');
+    dnd = harness.render();
+
+    harness.fire('mousemove', { clientX: 100, clientY: 20 });
+    harness.fire('mousemove', { clientX: 200, clientY: 20 });
+    assert.equal(harness.pendingFrames(), 1, '연속 mousemove는 하나의 animation frame으로 합쳐진다');
+    assert.deepEqual(harness.readPreview(), {
+      eventId: 'event-1', newStartDate: '2026-08-24', newEndDate: '2026-08-24',
+    }, '프레임 전에는 렌더링 상태를 중복 갱신하지 않는다');
+
+    harness.flushFrames();
+    assert.deepEqual(harness.readPreview(), {
+      eventId: 'event-1', newStartDate: '2026-08-26', newEndDate: '2026-08-26',
+    }, '프레임에서 가장 나중에 가리킨 날짜가 보인다');
+
+    harness.fire('mouseup', {});
+    assert.deepEqual(moves, [['event-1', '2026-08-26', '2026-08-26']]);
+  } finally {
+    harness.restore();
+  }
+});
+
+test('useCalendarDnD DOM: Escape는 대기 프레임과 드래그를 취소하고 뒤이은 mouseup 저장을 막는다', async () => {
+  const moves: Array<[string, string, string]> = [];
+  const harness = installCalendarDndHarness(await loadCalendarDnD(), (...args) => moves.push(args), () => {});
+  try {
+    let dnd = harness.render();
+    dnd.startDrag('event-2', 'move', '2026-08-24', '2026-08-24', 0, '2026-08-24');
+    dnd = harness.render();
+    assert.equal(harness.hasPointerBlock(), true);
+    assert.equal(harness.bodyStyle.userSelect, 'none');
+    assert.equal(harness.bodyStyle.cursor, 'grabbing');
+
+    harness.fire('mousemove', { clientX: 100, clientY: 20 });
+    assert.equal(harness.pendingFrames(), 1);
+    harness.fire('keydown', { key: 'Escape', preventDefault() {} });
+    assert.equal(harness.pendingFrames(), 0, 'Escape는 아직 실행되지 않은 프레임도 취소한다');
+    assert.equal(harness.readDrag(), null);
+    assert.equal(harness.readPreview(), null);
+
+    dnd = harness.render();
+    assert.equal(dnd.isDragging, false);
+    assert.equal(harness.hasPointerBlock(), false);
+    assert.equal(harness.bodyStyle.userSelect, '');
+    assert.equal(harness.bodyStyle.cursor, '');
+    harness.fire('mouseup', {});
+    assert.equal(moves.length, 0, 'Escape 뒤 mouseup은 이동 callback을 호출하지 않는다');
+  } finally {
+    harness.restore();
+  }
+});
+
+test('useCalendarDnD DOM: 프레임 전 mouseup도 최신 날짜로 딱 한 번 저장한다', async () => {
+  const resizes: Array<[string, string, string]> = [];
+  const harness = installCalendarDndHarness(await loadCalendarDnD(), () => {}, (...args) => resizes.push(args));
+  try {
+    let dnd = harness.render();
+    dnd.startDrag('event-3', 'resize-end', '2026-08-24', '2026-08-24', 0, '2026-08-24');
+    dnd = harness.render();
+    harness.fire('mousemove', { clientX: 200, clientY: 20 });
+    assert.equal(harness.pendingFrames(), 1);
+
+    harness.fire('mouseup', {});
+    assert.deepEqual(resizes, [['event-3', '2026-08-24', '2026-08-26']]);
+    assert.equal(harness.pendingFrames(), 0, 'mouseup 정리는 대기 프레임을 남기지 않는다');
+  } finally {
+    harness.restore();
+  }
+});

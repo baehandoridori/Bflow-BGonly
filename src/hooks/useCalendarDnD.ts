@@ -49,6 +49,32 @@ export function useCalendarDnD(
   const [preview, setPreview] = useState<DragPreview | null>(null);
   const dragRef = useRef<DragState | null>(null);
   const previewRef = useRef<DragPreview | null>(null);
+  const previewFrameRef = useRef<number | null>(null);
+
+  const cancelPreviewFrame = useCallback(() => {
+    if (previewFrameRef.current === null) return;
+    window.cancelAnimationFrame(previewFrameRef.current);
+    previewFrameRef.current = null;
+  }, []);
+
+  const schedulePreview = useCallback((next: DragPreview) => {
+    // mouseup은 다음 프레임 전에 올 수 있으므로 저장용 최신값은 즉시 보존한다.
+    previewRef.current = next;
+    if (previewFrameRef.current !== null) return;
+    previewFrameRef.current = window.requestAnimationFrame(() => {
+      previewFrameRef.current = null;
+      const latest = previewRef.current;
+      if (latest) setPreview(latest);
+    });
+  }, []);
+
+  const clearDrag = useCallback(() => {
+    cancelPreviewFrame();
+    dragRef.current = null;
+    previewRef.current = null;
+    setDragState(null);
+    setPreview(null);
+  }, [cancelPreviewFrame]);
 
   const startDrag = useCallback((
     eventId: string,
@@ -58,6 +84,7 @@ export function useCalendarDnD(
     mouseX: number,
     anchorDate: string,
   ) => {
+    cancelPreviewFrame();
     const state: DragState = {
       eventId,
       mode,
@@ -71,7 +98,7 @@ export function useCalendarDnD(
     const p = { eventId, newStartDate: startDate, newEndDate: endDate };
     previewRef.current = p;
     setPreview(p);
-  }, []);
+  }, [cancelPreviewFrame]);
 
   useEffect(() => {
     if (!dragState) return;
@@ -107,8 +134,7 @@ export function useCalendarDnD(
       }
 
       const p = { eventId: state.eventId, newStartDate: newStart, newEndDate: newEnd };
-      previewRef.current = p;
-      setPreview(p);
+      schedulePreview(p);
     };
 
     const handleMouseUp = () => {
@@ -128,14 +154,18 @@ export function useCalendarDnD(
         }
       }
 
-      dragRef.current = null;
-      previewRef.current = null;
-      setDragState(null);
-      setPreview(null);
+      clearDrag();
+    };
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return;
+      e.preventDefault();
+      clearDrag();
     };
 
     document.addEventListener('mousemove', handleMouseMove);
     document.addEventListener('mouseup', handleMouseUp);
+    document.addEventListener('keydown', handleKeyDown);
 
     // 드래그 중 텍스트 선택 방지 + 이벤트 바 pointer-events 차단
     document.body.style.userSelect = 'none';
@@ -151,11 +181,13 @@ export function useCalendarDnD(
     return () => {
       document.removeEventListener('mousemove', handleMouseMove);
       document.removeEventListener('mouseup', handleMouseUp);
+      document.removeEventListener('keydown', handleKeyDown);
+      cancelPreviewFrame();
       document.body.style.userSelect = '';
       document.body.style.cursor = '';
       document.getElementById('dnd-pointer-block')?.remove();
     };
-  }, [dragState, onEventMove, onEventResize]);
+  }, [cancelPreviewFrame, clearDrag, dragState, onEventMove, onEventResize, schedulePreview]);
 
   return {
     isDragging: !!dragState,
