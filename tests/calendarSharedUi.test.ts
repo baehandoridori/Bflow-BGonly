@@ -286,6 +286,7 @@ let schedulePanelProps: SchedulePanelProps[] = [];
 let scheduleQuickEditProps: ScheduleQuickEditProps[] = [];
 let scheduleWeekScrollProps: WeekScrollViewProps[] = [];
 let scheduleTimeGridProps: WeekTimeGridViewProps[] = [];
+let scheduleDayScrollProps: DayScrollViewProps[] = [];
 let scheduleCreateModalProps: EventCreateModalProps[] = [];
 const scheduleLocalStorage = new Map<string, string>();
 let scheduleCanonicalEvents: ScheduleCalendarEvent[] = [];
@@ -305,6 +306,43 @@ let resolveScheduleGetEventsGate: (() => void) | null = null;
 let schedulePendingEffects: Array<() => void | (() => void)> = [];
 let scheduleMountedEffectCleanups: Array<() => void> = [];
 const scheduleWindowListeners = new Map<string, Set<(event: Event) => void>>();
+const scheduleDocumentListeners = new Map<string, Set<(event: Event) => void>>();
+const scheduleDocumentMock = {
+  addEventListener(type: string, listener: (event: Event) => void) {
+    const listeners = scheduleDocumentListeners.get(type) ?? new Set();
+    listeners.add(listener);
+    scheduleDocumentListeners.set(type, listeners);
+  },
+  removeEventListener(type: string, listener: (event: Event) => void) {
+    scheduleDocumentListeners.get(type)?.delete(listener);
+  },
+};
+
+function scheduleFmtDate(date: Date): string {
+  const yyyy = date.getFullYear();
+  const mm = String(date.getMonth() + 1).padStart(2, '0');
+  const dd = String(date.getDate()).padStart(2, '0');
+  return `${yyyy}-${mm}-${dd}`;
+}
+
+function scheduleGenerateYearWeeks(year: number): Date[][] {
+  const jan1 = new Date(year, 0, 1, 12, 0, 0, 0);
+  const firstSunday = new Date(year, 0, 1 - jan1.getDay(), 12, 0, 0, 0);
+  const endDate = new Date(year + 1, 0, 7, 12, 0, 0, 0);
+  const weeks: Date[][] = [];
+  for (let current = firstSunday; current.getTime() < endDate.getTime(); current = new Date(current.getFullYear(), current.getMonth(), current.getDate() + 7, 12, 0, 0, 0)) {
+    weeks.push(Array.from({ length: 7 }, (_, day) => (
+      new Date(current.getFullYear(), current.getMonth(), current.getDate() + day, 12, 0, 0, 0)
+    )));
+  }
+  return weeks;
+}
+
+function scheduleFindWeekIndexForDate(weeks: Date[][], date: string): number {
+  const index = weeks.findIndex((week) => date >= scheduleFmtDate(week[0]) && date <= scheduleFmtDate(week[6]));
+  return index >= 0 ? index : 0;
+}
+
 let scheduleCurrentView = 'schedule';
 let schedulePendingDateNavigation: ScheduleDateNavigationRequest | null = null;
 let scheduleDateNavigationConsumeIds: number[] = [];
@@ -579,6 +617,7 @@ function publishSettingsCanonicalSnapshot(actorId: string, calendars: BflowCalen
 function resetHarness(): void {
   for (const cleanup of scheduleMountedEffectCleanups.splice(0).reverse()) cleanup();
   scheduleWindowListeners.clear();
+  scheduleDocumentListeners.clear();
   tagManagerEffectCleanup?.();
   tagManagerEffectCleanup = undefined;
   tagManagerEffectCursor = 0;
@@ -603,6 +642,7 @@ function resetHarness(): void {
   scheduleQuickEditProps = [];
   scheduleWeekScrollProps = [];
   scheduleTimeGridProps = [];
+  scheduleDayScrollProps = [];
   scheduleCreateModalProps = [];
   scheduleLocalStorage.clear();
   scheduleCanonicalEvents = [];
@@ -1247,8 +1287,8 @@ async function loadScheduleView(): Promise<ScheduleViewComponent> {
             scheduleWeekScrollProps.push(props);
             return jsxRuntime.jsx('div', { 'data-testid': 'week-scroll-view', children: '주간 카드 본체' });
           },
-          generateYearWeeks: () => [Array.from({ length: 7 }, (_, day) => new Date(2026, 7, 23 + day, 12))],
-          findWeekIndexForDate: () => 0,
+          generateYearWeeks: scheduleGenerateYearWeeks,
+          findWeekIndexForDate: scheduleFindWeekIndexForDate,
         };
       }
       if (id === '@/components/calendar/WeekTimeGridView') {
@@ -1256,6 +1296,15 @@ async function loadScheduleView(): Promise<ScheduleViewComponent> {
           WeekTimeGridView: (props: WeekTimeGridViewProps) => {
             scheduleTimeGridProps.push(props);
             return jsxRuntime.jsx('div', { 'data-testid': 'week-time-grid-view', children: '주간 시간표 본체' });
+          },
+        };
+      }
+      if (id === '@/components/calendar/DayScrollView') {
+        return {
+          __esModule: true,
+          default: (props: DayScrollViewProps) => {
+            scheduleDayScrollProps.push(props);
+            return jsxRuntime.jsx('div', { 'data-testid': 'day-scroll-view', children: '오늘 카드 본체' });
           },
         };
       }
@@ -1310,7 +1359,11 @@ async function loadScheduleView(): Promise<ScheduleViewComponent> {
       }
       if (id === '@/utils/sceneNavigationAction') return { navigateToSceneView() {} };
       if (id === '@/utils/createUuid') return { createUuid: () => 'new-id' };
-      if (id === '@/utils/calendarDate') return { fmtDate: () => '2026-08-25', parseDate: (date: string) => new Date(`${date}T12:00:00`), addDays: (date: Date, days: number) => new Date(date.getFullYear(), date.getMonth(), date.getDate() + days, 12) };
+      if (id === '@/utils/calendarDate') return {
+        fmtDate: scheduleFmtDate,
+        parseDate: (date: string) => new Date(`${date}T12:00:00`),
+        addDays: (date: Date, days: number) => new Date(date.getFullYear(), date.getMonth(), date.getDate() + days, 12),
+      };
       if (id === '@/utils/calendarEventFilter') return { filterCalendarEvents: (events: unknown[]) => events };
       if (id === '@/components/calendar/CalendarGrid') {
         return { CalendarGrid: (props: ScheduleGridProps) => { scheduleGridProps.push(props); return jsxRuntime.jsx('div', { children: '캘린더 그리드' }); } };
@@ -1333,7 +1386,7 @@ async function loadScheduleView(): Promise<ScheduleViewComponent> {
       return nodeRequire(id);
     }, module, module.exports);
     Object.assign(globalThis, {
-      document: { addEventListener() {}, removeEventListener() {} },
+      document: scheduleDocumentMock,
       window: {
         addEventListener(type: string, listener: (event: Event) => void) {
           const listeners = scheduleWindowListeners.get(type) ?? new Set();
@@ -1972,6 +2025,7 @@ function dispatchTagManagerEscape(target?: FormElement): void {
 
 async function renderScheduleView(): Promise<ReactNode> {
   const ScheduleView = await loadScheduleView();
+  globalThis.document = scheduleDocumentMock as unknown as Document;
   stateCursor = 0;
   return resolveComponents(ScheduleView());
 }
@@ -1983,6 +2037,16 @@ async function flushScheduleMountEffects(): Promise<void> {
     if (typeof cleanup === 'function') scheduleMountedEffectCleanups.push(cleanup);
   }
   await new Promise<void>((resolve) => setImmediate(resolve));
+}
+
+function dispatchScheduleKeydown(key: string): void {
+  const event = {
+    key,
+    target: { tagName: 'DIV' },
+    preventDefault() {},
+    stopPropagation() {},
+  } as unknown as Event;
+  for (const listener of scheduleDocumentListeners.get('keydown') ?? []) listener(event);
 }
 
 async function dispatchScheduleWindowEvent(type: string, detail?: Record<string, unknown>): Promise<void> {
@@ -3744,7 +3808,7 @@ test('ScheduleView restores and remembers the weekly time-grid choice while open
   assert.equal(cardToggle.props['aria-pressed'], false);
   assert.equal(timeGridToggle.props['aria-pressed'], true);
   assert.equal(scheduleTimeGridProps.at(-1)?.weekDays.length, 7, 'the active Sunday-start week reaches the time grid');
-  assert.equal(scheduleTimeGridProps.at(-1)?.weekCount, 1, 'ScheduleView retains ownership of weekly navigation bounds');
+  assert.ok((scheduleTimeGridProps.at(-1)?.weekCount ?? 0) >= 52, 'ScheduleView retains ownership of the full calendar-year navigation range');
 
   scheduleTimeGridProps.at(-1)?.onSlotClick('2026-08-26', '10:00', '10:30');
   tree = await renderScheduleView();

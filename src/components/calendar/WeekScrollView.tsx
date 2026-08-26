@@ -119,8 +119,8 @@ export default function WeekScrollView({
         if (!atTop && !atBottom) return;
       }
       const dir = e.deltaY > 0 ? 1 : -1;
-      const next = Math.max(0, Math.min(allWeeks.length - 1, activeWeekIndex + dir));
-      if (next !== activeWeekIndex) onWeekChange(next);
+      // 부모가 연도 경계를 소유한다. -1/length는 이전/다음 해로 넘길 sentinel이다.
+      onWeekChange(activeWeekIndex + dir);
       wheelTimer.current = setTimeout(() => {
         wheelTimer.current = null;
       }, DEBOUNCE_MS);
