@@ -638,11 +638,12 @@ export function ScheduleView() {
 
   // 캘린더 키보드 네비게이션 (모든 뷰)
   useEffect(() => {
-    if (showCreate || quickEdit || panelEvent) return;
+    if (showCreate || quickEdit || panelEvent || calendarSettings !== undefined) return;
 
     const handler = (e: KeyboardEvent) => {
       // 편집 중이거나 OS/앱 조합키를 누른 상태면 캘린더 단축키를 가로채지 않는다.
       const tag = (e.target as HTMLElement)?.tagName;
+      const isHelpShortcut = e.key === '?' || (e.key === '/' && e.shiftKey);
       if (
         tag === 'INPUT'
         || tag === 'TEXTAREA'
@@ -651,10 +652,10 @@ export function ScheduleView() {
         || e.ctrlKey
         || e.metaKey
         || e.altKey
+        || (e.shiftKey && !isHelpShortcut)
       ) return;
 
       const key = e.key.toLowerCase();
-      const isHelpShortcut = e.key === '?' || (e.key === '/' && e.shiftKey);
 
       if (isHelpShortcut) {
         e.preventDefault();
@@ -780,7 +781,7 @@ export function ScheduleView() {
     document.addEventListener('keydown', handler);
     return () => document.removeEventListener('keydown', handler);
   }, [
-    viewMode, showCreate, quickEdit, panelEvent, showShortcutHelp, focusedDate,
+    viewMode, showCreate, quickEdit, panelEvent, calendarSettings, showShortcutHelp, focusedDate,
     month, year, moveWeekBy, moveDayBy, resetCreatePrefill,
   ]);
 

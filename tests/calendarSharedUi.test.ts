@@ -4425,6 +4425,50 @@ test('ScheduleView calendar shortcuts ignore editing targets, modifiers, and ope
   assert.equal(scheduleWeekScrollProps.length, 0, 'open create UI blocks calendar shortcuts');
 });
 
+test('ScheduleView allows Shift only for shortcut help and ignores Shift+T/W/M/C', async () => {
+  resetHarness();
+  scheduleLocalStorage.set('bflow_calendar_view_v1', JSON.stringify({
+    viewMode: 'today',
+    weekSubMode: 'card',
+  }));
+  await renderScheduleView();
+  scheduleDayScrollProps.at(-1)!.onActiveDayChange(0);
+  await rerenderScheduleViewWithFreshEffects();
+
+  dispatchScheduleKeydown('T', { tagName: 'DIV' }, { shiftKey: true });
+  dispatchScheduleKeydown('W', { tagName: 'DIV' }, { shiftKey: true });
+  dispatchScheduleKeydown('M', { tagName: 'DIV' }, { shiftKey: true });
+  dispatchScheduleKeydown('C', { tagName: 'DIV' }, { shiftKey: true });
+  let tree = await renderScheduleView();
+
+  assert.equal(scheduleDayScrollProps.at(-1)?.activeDayIndex, 0, 'Shift+T does not return to today');
+  assert.equal(scheduleWeekScrollProps.length, 0, 'Shift+W does not switch to week');
+  assert.equal(scheduleGridProps.length, 0, 'Shift+M does not switch to month');
+  assert.equal(scheduleCreateModalProps.length, 0, 'Shift+C does not open create mode');
+
+  dispatchScheduleKeydown('?', { tagName: 'DIV' }, { shiftKey: true });
+  tree = await renderScheduleView();
+  assert.ok(nodeByAriaLabel(tree, '캘린더 단축키'), 'Shift+/ remains the one allowed Shift shortcut');
+});
+
+test('ScheduleView suppresses calendar shortcuts while calendar settings is open', async () => {
+  resetHarness();
+  let tree = await renderScheduleView();
+  await flushScheduleMountEffects();
+
+  buttonByTitle(tree, '사이드바 펼치기').props.onClick?.();
+  tree = await renderScheduleView();
+  buttonByLabel(tree, '레일 새 캘린더').props.onClick?.();
+  tree = await rerenderScheduleViewWithFreshEffects();
+  assert.ok(nodeByAriaLabel(tree, '캘린더 설정 모달'));
+
+  dispatchScheduleKeydown('w');
+  dispatchScheduleKeydown('c');
+  await renderScheduleView();
+  assert.equal(scheduleWeekScrollProps.length, 0, 'settings modal blocks view shortcuts');
+  assert.equal(scheduleCreateModalProps.length, 0, 'settings modal blocks create shortcuts');
+});
+
 test('ScheduleView carries weekly and daily navigation across a calendar-year boundary', async (t) => {
   await t.test('weekly header navigation moves past the last generated week and returns without an empty week', async () => {
     resetHarness();
