@@ -85,9 +85,24 @@ export function getTimeSlots(startMin: number, endMin: number): Array<{ startMin
   return slots;
 }
 
-export function getNextWeekIndex(activeWeekIndex: number, weekCount: number, delta: -1 | 1): number | null {
-  const nextIndex = activeWeekIndex + delta;
-  return nextIndex >= 0 && nextIndex < weekCount ? nextIndex : null;
+/** 범위 밖 -1 / weekCount도 상위가 연도 이동으로 해석하도록 그대로 전달한다. */
+export function getNextWeekIndex(activeWeekIndex: number, _weekCount: number, delta: -1 | 1): number {
+  return activeWeekIndex + delta;
+}
+
+/** Shift+wheel만 상위 주 이동으로 소비한다. 일반 wheel과 0 이동은 native scroll에 맡긴다. */
+export function requestWeekChangeFromWheel(
+  event: Pick<React.WheelEvent<HTMLDivElement>, 'shiftKey' | 'deltaY' | 'deltaX' | 'preventDefault'>,
+  activeWeekIndex: number,
+  weekCount: number,
+  onWeekChange: (nextIndex: number) => void,
+): boolean {
+  if (!event.shiftKey) return false;
+  const movement = event.deltaY || event.deltaX;
+  if (movement === 0) return false;
+  event.preventDefault();
+  onWeekChange(getNextWeekIndex(activeWeekIndex, weekCount, movement > 0 ? 1 : -1));
+  return true;
 }
 
 /** 종일 레인으로 강등된 시간 일정도 시작 시각과 주간 경계 계속 표시를 잃지 않는다. */
@@ -288,13 +303,7 @@ export function WeekTimeGridView({
   }, [dawnVisible, today, weekKey]);
 
   const handleWheel = useCallback((event: React.WheelEvent<HTMLDivElement>) => {
-    if (!event.shiftKey) return;
-    const movement = event.deltaY || event.deltaX;
-    if (movement === 0) return;
-    const nextIndex = getNextWeekIndex(activeWeekIndex, weekCount, movement > 0 ? 1 : -1);
-    if (nextIndex === null) return;
-    event.preventDefault();
-    onWeekChange(nextIndex);
+    requestWeekChangeFromWheel(event, activeWeekIndex, weekCount, onWeekChange);
   }, [activeWeekIndex, onWeekChange, weekCount]);
 
   return (

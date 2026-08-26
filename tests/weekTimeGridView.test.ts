@@ -75,7 +75,13 @@ type WeekTimeGridModule = {
   };
   formatKoreanHour(min: number): string;
   getCollapsedBandLabel(label: string, startMin: number, endMin: number): string;
-  getNextWeekIndex(activeWeekIndex: number, weekCount: number, delta: -1 | 1): number | null;
+  getNextWeekIndex(activeWeekIndex: number, weekCount: number, delta: -1 | 1): number;
+  requestWeekChangeFromWheel(
+    event: { shiftKey: boolean; deltaY: number; deltaX: number; preventDefault(): void },
+    activeWeekIndex: number,
+    weekCount: number,
+    onWeekChange: (nextIndex: number) => void,
+  ): boolean;
   getNonTodayCurrentLineStyle(): { background: string; height: number };
   getWeekendCellStyle(isWeekend: boolean): { backgroundImage?: string };
 };
@@ -227,13 +233,34 @@ test('WeekTimeGridView: 한국어 시간 눈금과 접힌 밴드의 범위·상�
   assert.equal(getCollapsedBandLabel('새벽 시간대', 0, 540), '▸ 새벽 시간대 · 오전 12시–오전 9시 · 접힘');
 });
 
-test('WeekTimeGridView: 상위 주 인덱스 계약으로 한 칸만 이동하고 범위 밖은 요청하지 않는다', async () => {
-  const { getNextWeekIndex } = await loadWeekTimeGridView();
+test('WeekTimeGridView: Shift+wheel은 연도 경계 sentinel을 부모로 전달하고 Shift 없이는 이동하지 않는다', async () => {
+  const { getNextWeekIndex, requestWeekChangeFromWheel } = await loadWeekTimeGridView();
 
   assert.equal(getNextWeekIndex(2, 6, 1), 3);
   assert.equal(getNextWeekIndex(2, 6, -1), 1);
-  assert.equal(getNextWeekIndex(0, 6, -1), null);
-  assert.equal(getNextWeekIndex(5, 6, 1), null);
+  assert.equal(getNextWeekIndex(0, 6, -1), -1);
+  assert.equal(getNextWeekIndex(5, 6, 1), 6);
+
+  const requestedIndices: number[] = [];
+  let preventDefaultCount = 0;
+  const makeWheel = (shiftKey: boolean, deltaY: number) => ({
+    shiftKey,
+    deltaY,
+    deltaX: 0,
+    preventDefault() {
+      preventDefaultCount += 1;
+    },
+  });
+  const onWeekChange = (nextIndex: number) => requestedIndices.push(nextIndex);
+
+  assert.equal(requestWeekChangeFromWheel(makeWheel(true, -1), 0, 6, onWeekChange), true);
+  assert.equal(requestWeekChangeFromWheel(makeWheel(true, 1), 5, 6, onWeekChange), true);
+  assert.equal(requestWeekChangeFromWheel(makeWheel(true, 1), 2, 6, onWeekChange), true);
+  assert.equal(requestWeekChangeFromWheel(makeWheel(false, -1), 0, 6, onWeekChange), false);
+  assert.equal(requestWeekChangeFromWheel(makeWheel(true, 0), 2, 6, onWeekChange), false);
+
+  assert.deepEqual(requestedIndices, [-1, 6, 3]);
+  assert.equal(preventDefaultCount, 3);
 });
 
 test('WeekTimeGridView: 오늘 외 열의 현재 시각선은 28% 빨강 1px을 사용한다', async () => {
