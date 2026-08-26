@@ -19,7 +19,7 @@ import { uploadImage as driveUploadImage, setImageUploadUrl } from './drive-imag
 import { uploadImage as storageUploadImage, deleteImage as storageDeleteImage, uploadCharacterImage as storageUploadCharacterImage } from './storage';
 // v1.20.0: 사용자 폰트 IPC + bflow-font:// custom protocol
 import { registerFontProtocol, registerFontIpcHandlers } from './fontIpc';
-import { registerCalendarIpc } from './calendarIpc';
+import { registerCalendarIpc, type CalendarNotificationDrain } from './calendarIpc';
 import {
   broadcastCalendarNotificationToSessionWindows,
   broadcastCommittedCalendarDeleteToWindows,
@@ -1655,6 +1655,7 @@ let sessionManager: SessionManager;
 let personalTodoService: PersonalTodoService;
 let marketAccountService: MarketAccountService;
 let arcadeService: ArcadeService;
+let calendarNotificationDrain: CalendarNotificationDrain;
 
 // 아케이드 신기록 슬랙 웹훅 — Task 13(신기록 알림)에서 실제 URL 을 채운다.
 // 빈 문자열이면 발송을 건너뛴다(기존 웹훅 패턴과 동일).
@@ -1778,6 +1779,12 @@ sessionManager = new SessionManager({
     marketAccountService.endSessionTransition(userId, epoch);
     arcadeService.endSessionTransition(userId, epoch);
   },
+  beginPrivacyReplacementTransition: (userId, epoch) => {
+    calendarNotificationDrain.beginPrivacyReplacementTransition({ userId, epoch });
+  },
+  drainPrivacyReplacementTransition: (userId, epoch) => (
+    calendarNotificationDrain.drainPrivacyReplacementTransition({ userId, epoch })
+  ),
   drainPersonalDataQueue: async (userId) => {
     await Promise.all([
       personalTodoService.drainUser(userId),
@@ -2450,6 +2457,25 @@ function getSessionUserIdOrThrow(): string {
   return id;
 }
 
+/** replacement 생성의 actor/epoch는 첫 persistence await 전에 고정한다. */
+function getSessionOriginOrThrow(): { userId: string; epoch: number; role: 'admin' | 'user' } {
+  const session = lastKnownSession as {
+    user?: { id?: string; role?: unknown };
+    epoch?: unknown;
+  } | null;
+  const userId = session?.user?.id;
+  const epoch = session?.epoch;
+  if (!userId || typeof epoch !== 'number' || !Number.isSafeInteger(epoch) || epoch < 0) {
+    throw new Error('세션에 로그인 사용자 정보가 없습니다 (비공개 일정)');
+  }
+  return {
+    userId,
+    epoch,
+    // 알 수 없는 role을 admin으로 넓히지 않는다. 정상 세션에는 Supabase role이 들어온다.
+    role: session.user?.role === 'admin' ? 'admin' : 'user',
+  };
+}
+
 registerLegacyPrivateEventIpc(ipcMain, {
   getSessionUserIdOrThrow,
   assertLiveUser: async (userId) => {
@@ -2476,8 +2502,9 @@ setCalendarChangedLocalListener((payload) => {
   );
 });
 
-const calendarNotificationDrain = registerCalendarIpc({
+calendarNotificationDrain = registerCalendarIpc({
   getSessionUserIdOrThrow,
+  getSessionOriginOrThrow,
   createLegacyPrivateEvent: (input, actorId) => sbAddPrivateEvent({
     ...input,
     user_id: actorId,
@@ -5131,6 +5158,9 @@ app.on('before-quit', (e) => {
   isQuitting = true;
   personalTodoService.beginQuitting();
   marketAccountService.beginQuitting();
+  // pending snapshot 전에 캘린더 알림 mutation intake를 닫는다. 이미 시작된 저장은
+  // producer fence에 남아 알림 enqueue까지 기다리고, 이후 새 쓰기는 persistence에 닿지 않는다.
+  calendarNotificationDrain.beginQuitting();
 
   // GCal Watch 채널 중지 (5초 타임아웃)
   const watchCleanup = gcal.stopAllWatches().catch(() => {});

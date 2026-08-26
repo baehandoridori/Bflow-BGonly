@@ -40,6 +40,10 @@ export interface SessionManagerDependencies {
   drainPersonalDataQueue(userId: string): Promise<void>;
   beginPersonalDataTransition(userId: string, epoch: number): void;
   endPersonalDataTransition(userId: string, epoch: number): void;
+  /** 새 세션을 publish하기 전에 이전 사용자의 replacement capability를 즉시 retire한다. */
+  beginPrivacyReplacementTransition(userId: string, epoch: number): void;
+  /** retire 뒤 남은 create/source-delete를 terminal 상태까지 정리한다. */
+  drainPrivacyReplacementTransition(userId: string, epoch: number): Promise<void>;
   flushCalendarJournal(): Promise<void>;
   setActivityUser(user: { id: string; name: string } | null): void;
   broadcast(payload: CanonicalSessionPayload): void;
@@ -92,12 +96,23 @@ export class SessionManager {
     const currentUserId = this.getCanonicalUserId();
     if (currentUserId && currentUserId !== nextUserId) {
       const transition = { userId: currentUserId, epoch: this.getEpoch() };
-      this.dependencies.beginPersonalDataTransition(transition.userId, transition.epoch);
+      let personalTransitionStarted = false;
       try {
-        await this.dependencies.drainPersonalDataQueue(currentUserId);
+        this.dependencies.beginPersonalDataTransition(transition.userId, transition.epoch);
+        personalTransitionStarted = true;
+        // 이 두 fence는 첫 await 전에 닫혀야 같은 BrowserWindow에서 다음 사용자가
+        // 이전 사용자의 replacement를 계속 진행할 수 없다. 종료가 이미 시작됐다면
+        // privacy begin이 throw하고, 아래 catch가 personal fence를 되돌린 채 B publish를 막는다.
+        this.dependencies.beginPrivacyReplacementTransition(transition.userId, transition.epoch);
+        await Promise.all([
+          this.dependencies.drainPersonalDataQueue(currentUserId),
+          this.dependencies.drainPrivacyReplacementTransition(transition.userId, transition.epoch),
+        ]);
         await this.dependencies.flushCalendarJournal();
       } catch (error) {
-        this.dependencies.endPersonalDataTransition(transition.userId, transition.epoch);
+        if (personalTransitionStarted) {
+          this.dependencies.endPersonalDataTransition(transition.userId, transition.epoch);
+        }
         throw error;
       }
       return transition;

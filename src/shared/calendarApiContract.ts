@@ -68,9 +68,22 @@ export interface GoogleReplacementCreateInput {
 }
 
 export type CalendarPrivacyReplacementCreateInput =
-  | { storage: 'bflow'; event: CalendarEventCreateInput }
-  | { storage: 'legacy-private'; event: LegacyPrivateReplacementCreateInput }
-  | { storage: 'google'; calendar_id: string; event: GoogleReplacementCreateInput };
+  | {
+      storage: 'bflow';
+      source: CalendarPrivacyMigrationSourceDeleteInput;
+      event: CalendarEventCreateInput;
+    }
+  | {
+      storage: 'legacy-private';
+      source: CalendarPrivacyMigrationSourceDeleteInput;
+      event: LegacyPrivateReplacementCreateInput;
+    }
+  | {
+      storage: 'google';
+      source: CalendarPrivacyMigrationSourceDeleteInput;
+      calendar_id: string;
+      event: GoogleReplacementCreateInput;
+    };
 
 export type CalendarPrivacyReplacementDisposition = 'keep' | 'delete';
 export type CalendarPrivacyMigrationSourceDeleteResult = 'deleted' | 'missing' | 'ambiguous';
@@ -78,6 +91,23 @@ export type CalendarPrivacyMigrationSourceDeleteInput =
   | { storage: 'bflow'; event_id: string }
   | { storage: 'legacy-private'; event_id: string }
   | { storage: 'google'; calendar_id: string; event_id: string };
+
+/**
+ * Renderer에는 receipt/secret을 공개하지 않는다. preload가 가진 한정된 closure만
+ * replacement를 확정하거나, create 때 고정한 원본을 삭제할 수 있다.
+ */
+export interface CalendarPrivacyReplacementContinuation {
+  settle(disposition: CalendarPrivacyReplacementDisposition): Promise<void>;
+  deleteSource(): Promise<CalendarPrivacyMigrationSourceDeleteResult>;
+}
+
+export type CalendarPrivacyReplacementCreateResult =
+  | ({
+      storage: 'bflow' | 'legacy-private' | 'google';
+      actual_id: string;
+      calendar_id?: string;
+    } & CalendarPrivacyReplacementContinuation)
+  | { transition_resolved: 'deleted' };
 
 export type CalendarCommittedReplacementDeleteMarker =
   | {
@@ -108,12 +138,7 @@ export interface CalendarApiInputContract {
   calendarEventsList: (params?: { from?: string; to?: string }) => unknown;
   calendarEventCreate: (input: CalendarEventCreateInput) => unknown;
   calendarEventUpdate: (id: string, updates: CalendarEventUpdateInput) => unknown;
-  calendarPrivacyMigrationSourceDelete: (input: CalendarPrivacyMigrationSourceDeleteInput) => unknown;
   calendarPrivacyReplacementCreate: (input: CalendarPrivacyReplacementCreateInput) => unknown;
-  calendarPrivacyReplacementSettle: (
-    receipt: string,
-    disposition: CalendarPrivacyReplacementDisposition,
-  ) => unknown;
   calendarTagsSave: (
     tags: Array<{ id?: string; name: string; color: string; sort_order: number }>,
   ) => unknown;

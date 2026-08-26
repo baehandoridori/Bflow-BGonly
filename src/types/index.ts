@@ -7,7 +7,7 @@ import type {
 } from '../features/playground/arcade/types';
 import type {
   CalendarApiInputContract,
-  CalendarPrivacyMigrationSourceDeleteResult,
+  CalendarPrivacyReplacementCreateResult,
 } from '../shared/calendarApiContract';
 
 // ─── 부서 (Department) ──────────────────────
@@ -1492,21 +1492,9 @@ export interface ElectronAPI extends CalendarApiInputContract {
     created_at: string;
     updated_at: string;
   }>;
-  calendarPrivacyMigrationSourceDelete: (
-    input: Parameters<CalendarApiInputContract['calendarPrivacyMigrationSourceDelete']>[0],
-  ) => Promise<CalendarPrivacyMigrationSourceDeleteResult>;
   calendarPrivacyReplacementCreate: (
     input: Parameters<CalendarApiInputContract['calendarPrivacyReplacementCreate']>[0],
-  ) => Promise<{
-    storage: 'bflow' | 'legacy-private' | 'google';
-    actual_id: string;
-    calendar_id?: string;
-    receipt: string;
-  }>;
-  calendarPrivacyReplacementSettle: (
-    receipt: Parameters<CalendarApiInputContract['calendarPrivacyReplacementSettle']>[0],
-    disposition: Parameters<CalendarApiInputContract['calendarPrivacyReplacementSettle']>[1],
-  ) => Promise<void>;
+  ) => Promise<CalendarPrivacyReplacementCreateResult>;
   calendarEventUpdate: (
     id: Parameters<CalendarApiInputContract['calendarEventUpdate']>[0],
     updates: Parameters<CalendarApiInputContract['calendarEventUpdate']>[1],

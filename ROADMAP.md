@@ -1179,7 +1179,7 @@ AFTER (Supabase):
 | **댓글 시스템** | `commentService.ts` (197줄) | 씬별 댓글 스레드, @멘션, Sheets `_COMMENTS` 탭 + 로컬 폴백 | ✅ 완료 |
 | **캘린더 서비스** | `calendarService.ts` (2,834줄) | 공유·개인 일정 CRUD, 태그·알림, 날짜 범위 필터 | ✅ 완료 |
 | **공유 캘린더** | `calendarStore.ts`, `calendarService.ts` | Supabase 5테이블 + IPC 권한 강제 — 팀·개인 일정, 태그, 알림 | ✅ 완료 |
-| **스케줄 뷰** | `ScheduleView.tsx` (1,067줄) | 월간/주간 캘린더, 시간 단위 일정, 드래그&드롭 | ✅ 완료 |
+| **스케줄 뷰** | `ScheduleView.tsx` (1,085줄) | 월간/주간 캘린더, 시간 단위 일정, 드래그&드롭 | ✅ 완료 |
 | **팀 뷰** | `TeamView.tsx` (19KB) | 팀원별 작업 통계, 프로그레스 링, 부서별 분포 | ✅ 완료 |
 | **내 할일 위젯** | `MyTasksWidget.tsx` (1198줄) | 할당 씬 + 개인 투두, 캘린더 연동, 드래그 정렬 | ✅ 완료 |
 | **캘린더 위젯** | `CalendarWidget.tsx` (842줄) | 대시보드 미니 캘린더, 이벤트 히트맵, 필터링 | ✅ 완료 |

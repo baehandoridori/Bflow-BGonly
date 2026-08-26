@@ -386,6 +386,8 @@ test('transient remote user outage cannot clear a verified canonical session', a
     beginPersonalDataTransition: () => undefined,
     endPersonalDataTransition: () => undefined,
     drainPersonalDataQueue: async () => undefined,
+    beginPrivacyReplacementTransition: () => undefined,
+    drainPrivacyReplacementTransition: async () => undefined,
     flushCalendarJournal: async () => undefined,
     setActivityUser: () => undefined,
     broadcast: (payload) => { broadcasts.push(payload as { user: { id: string } | null }); },
