@@ -3360,6 +3360,69 @@ test('calendar store keeps soft reads empty while strict write pre-reads surface
   }
 });
 
+test('calendar notification catch-up requests latest unread rows with a bounded payload', async () => {
+  const globalScope = globalThis as Record<string, unknown>;
+  const hadPrior = Object.prototype.hasOwnProperty.call(globalScope, STORE_HARNESS_KEY);
+  const prior = globalScope[STORE_HARNESS_KEY];
+  const filters: Array<[string, unknown, unknown?]> = [];
+  const orders: Array<{ column: string; options: unknown }> = [];
+  const limits: number[] = [];
+  const query = {
+    select: () => query,
+    eq: (column: string, value: unknown) => {
+      filters.push(['eq', column, value]);
+      return query;
+    },
+    is: (column: string, value: unknown) => {
+      filters.push(['is', column, value]);
+      return query;
+    },
+    gte: (column: string, value: unknown) => {
+      filters.push(['gte', column, value]);
+      return query;
+    },
+    order: (column: string, options: unknown) => {
+      orders.push({ column, options });
+      return query;
+    },
+    limit: (count: number) => {
+      limits.push(count);
+      return query;
+    },
+    then: (
+      resolve: (value: { data: Array<{ id: string }>; error: null }) => unknown,
+      reject: (reason?: unknown) => unknown,
+    ) => Promise.resolve({ data: [{ id: 'newest' }], error: null }).then(resolve, reject),
+  };
+  globalScope[STORE_HARNESS_KEY] = {
+    from(table: string) {
+      assert.equal(table, 'calendar_notifications');
+      return query;
+    },
+  };
+  try {
+    const encoded = Buffer.from(await bundledCalendarStoreSource()).toString('base64');
+    const store = await import(`data:text/javascript;base64,${encoded}#calendar-store-${storeNonce++}`) as {
+      listUnreadNotifications(recipientId: string, sinceIso: string): Promise<Array<{ id: string }>>;
+    };
+
+    assert.deepEqual(
+      await store.listUnreadNotifications('recipient-1', '2026-07-27T00:00:00.000Z'),
+      [{ id: 'newest' }],
+    );
+    assert.deepEqual(filters, [
+      ['eq', 'recipient_id', 'recipient-1'],
+      ['is', 'read_at', null],
+      ['gte', 'created_at', '2026-07-27T00:00:00.000Z'],
+    ]);
+    assert.deepEqual(orders, [{ column: 'created_at', options: { ascending: false } }]);
+    assert.deepEqual(limits, [200]);
+  } finally {
+    if (hadPrior) globalScope[STORE_HARNESS_KEY] = prior;
+    else delete globalScope[STORE_HARNESS_KEY];
+  }
+});
+
 test('personal calendar provisioning ignores only missing-table errors and propagates transient failures', async () => {
   const globalScope = globalThis as Record<string, unknown>;
   const hadPrior = Object.prototype.hasOwnProperty.call(globalScope, STORE_HARNESS_KEY);

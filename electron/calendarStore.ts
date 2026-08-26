@@ -432,7 +432,8 @@ export async function listUnreadNotifications(
     .eq('recipient_id', recipientId)
     .is('read_at', null)
     .gte('created_at', sinceIso)
-    .order('created_at', { ascending: false });
+    .order('created_at', { ascending: false })
+    .limit(200);
   if (error) {
     if (isMissingTable(error)) {
       warnMissingTable('calendar_notifications', '빈 목록');
