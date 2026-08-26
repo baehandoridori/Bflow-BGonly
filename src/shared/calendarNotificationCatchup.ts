@@ -2,8 +2,8 @@
 export const CALENDAR_NOTIFICATION_CATCHUP_LIMIT = 200;
 
 /**
- * 숨김 캘린더 ID는 PostgREST `in.(...)` 표현식으로만 사용된다.
- * DB/프리뷰 모두 UUID를 사용하므로 허용 목록으로 조립 전 입력을 좁힌다.
+ * 숨김 캘린더 ID는 authorized RPC의 POST `UUID[]` 본문으로만 전달된다.
+ * DB/프리뷰 모두 UUID를 사용하므로, 전송 전 허용 목록으로 입력을 좁힌다.
  */
 const CALENDAR_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
