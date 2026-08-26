@@ -101,9 +101,16 @@ type ScheduleGridProps = {
   events: ScheduleCalendarEvent[];
   tagNameById: Record<string, string>;
   calendarNameById: Record<string, string>;
+  focusedDate?: string | null;
+  pulseDate?: string | null;
   onEventClick(event: ScheduleCalendarEvent): void;
   onDragStart(event: ScheduleCalendarEvent, mode: 'move' | 'resize-start' | 'resize-end', anchorDate: string): void;
   onEventContextMenu(event: ScheduleCalendarEvent, mouse: { preventDefault(): void; stopPropagation(): void; clientX: number; clientY: number }): void;
+};
+type ScheduleDateNavigationRequest = {
+  id: number;
+  date: string;
+  todoId?: string;
 };
 type SchedulePanelProps = {
   event: ScheduleCalendarEvent;
@@ -282,6 +289,8 @@ let scheduleGetEventsCalls = 0;
 let schedulePendingEffects: Array<() => void | (() => void)> = [];
 let scheduleMountedEffectCleanups: Array<() => void> = [];
 const scheduleWindowListeners = new Map<string, Set<(event: Event) => void>>();
+let schedulePendingDateNavigation: ScheduleDateNavigationRequest | null = null;
+let scheduleDateNavigationConsumeIds: number[] = [];
 let scheduleLoadAllCalls = 0;
 let scheduleLoadBflowEventsCalls = 0;
 let settingsCurrentUser: TestUser;
@@ -583,6 +592,8 @@ function resetHarness(): void {
   scheduleAddedEvents = [];
   scheduleGetEventsCalls = 0;
   schedulePendingEffects = [];
+  schedulePendingDateNavigation = null;
+  scheduleDateNavigationConsumeIds = [];
   scheduleLoadAllCalls = 0;
   scheduleLoadBflowEventsCalls = 0;
   settingsCurrentUser = {
@@ -1136,7 +1147,21 @@ async function loadScheduleView(): Promise<ScheduleViewComponent> {
       if (id === '@/utils/cn') return { cn: (...values: string[]) => values.filter(Boolean).join(' ') };
       if (id === '@/stores/useDataStore') return { useDataStore: (selector: (state: { episodes: []; episodeTitles: {} }) => unknown) => selector({ episodes: [], episodeTitles: {} }) };
       if (id === '@/stores/useAppStore') {
-        const appState = { setView() {}, vacationConnected: false };
+        const appState = {
+          setView() {},
+          currentView: 'schedule',
+          vacationConnected: false,
+          get pendingScheduleDateNavigationRequest() {
+            return schedulePendingDateNavigation;
+          },
+          consumeScheduleDateNavigationRequest(requestId: number) {
+            if (schedulePendingDateNavigation?.id !== requestId) return null;
+            const request = schedulePendingDateNavigation;
+            schedulePendingDateNavigation = null;
+            scheduleDateNavigationConsumeIds.push(requestId);
+            return request;
+          },
+        };
         return { useAppStore: (selector?: (state: typeof appState) => unknown) => selector ? selector(appState) : appState };
       }
       if (id === '@/services/calendarService') return {
@@ -3231,6 +3256,36 @@ test('ScheduleView follows canonical B flow moves but rejects same-id rows from 
   assert.equal(scheduleQuickEditProps.length, 0, 'same id from Google cannot replace B flow quick edit');
 });
 
+test('ScheduleView consumes a stored date request after it mounts exactly once', async () => {
+  resetHarness();
+  // 알림/위젯이 먼저 store에 남긴 요청: ScheduleView 리스너가 아직 없는 콜드 마운트다.
+  schedulePendingDateNavigation = {
+    id: 47,
+    date: '2026-09-17',
+    todoId: 'todo-cold-mount',
+  };
+
+  await renderScheduleView();
+  await flushScheduleMountEffects();
+  assert.deepEqual(scheduleDateNavigationConsumeIds, [47]);
+  assert.equal(schedulePendingDateNavigation, null);
+
+  scheduleGridProps = [];
+  await renderScheduleView();
+  const grid = scheduleGridProps.at(-1);
+  assert.equal(grid?.currentMonth, 8, 'the mounted view moves to the requested September month');
+  assert.equal(grid?.pulseDate, '2026-09-17', 'the requested date receives the existing visual pulse');
+
+  await flushScheduleMountEffects();
+  await renderScheduleView();
+  assert.deepEqual(
+    scheduleDateNavigationConsumeIds,
+    [47],
+    'StrictMode-like repeat effects cannot consume and pulse the same request twice',
+  );
+  resetHarness();
+});
+
 test('ScheduleView todo navigation does not adopt an unrelated same-id storage row', async () => {
   resetHarness();
   const unrelatedGoogle: ScheduleCalendarEvent = {
@@ -3254,10 +3309,13 @@ test('ScheduleView todo navigation does not adopt an unrelated same-id storage r
   await flushScheduleMountEffects();
   await renderScheduleView();
   await flushScheduleMountEffects();
-  await dispatchScheduleWindowEvent('bflow:navigate-to-date', {
+  schedulePendingDateNavigation = {
+    id: 101,
     date: '2026-08-25',
     todoId: 'todo-identity',
-  });
+  };
+  await renderScheduleView();
+  await flushScheduleMountEffects();
   await new Promise<void>((resolve) => setTimeout(resolve, 120));
   schedulePanelProps = [];
   await renderScheduleView();
@@ -3301,10 +3359,13 @@ test('ScheduleView todo navigation prefers the unique linked identity over a raw
   await flushScheduleMountEffects();
   await renderScheduleView();
   await flushScheduleMountEffects();
-  await dispatchScheduleWindowEvent('bflow:navigate-to-date', {
+  schedulePendingDateNavigation = {
+    id: 102,
     date: '2026-08-25',
     todoId: 'todo-identity',
-  });
+  };
+  await renderScheduleView();
+  await flushScheduleMountEffects();
   await new Promise<void>((resolve) => setTimeout(resolve, 120));
   schedulePanelProps = [];
   await renderScheduleView();

@@ -13,6 +13,7 @@ const sceneDetailModal = readFileSync('src/components/scenes/SceneDetailModal.ts
 const unifiedSceneDetailModal = readFileSync('src/components/scenes/UnifiedSceneDetailModal.tsx', 'utf8');
 const revisionCommentThread = readFileSync('src/components/scenes/RevisionCommentThread.tsx', 'utf8');
 const app = readFileSync('src/App.tsx', 'utf8');
+const myTasksWidget = readFileSync('src/components/widgets/MyTasksWidget.tsx', 'utf8');
 
 test('notification panel and toast actions share one scene navigation path', () => {
   assert.match(notificationPanel, /navigateNotificationToScene\(n\.type,\s*n\.metadata\)/);
@@ -56,10 +57,15 @@ test('all notification click paths mark domain read state before navigating', ()
   assert.match(notificationDomainRead, /calendarNotificationsMarkRead\?\.\(\[calendarNotificationId\]\)/);
 });
 
-test('calendar notifications use the schedule date route instead of scene navigation', () => {
+test('calendar date entry points store a durable schedule request instead of racing a custom event', () => {
   assert.match(notificationPanel, /CalendarDays/);
   assert.match(notificationPanel, /case 'calendar': return \{ icon: CalendarDays, color: '#74B9FF', label: '일정' \}/);
-  assert.match(notificationPanel, /if \(n\.type === 'calendar'\) \{[\s\S]*?setView\('schedule'\)[\s\S]*?bflow:navigate-to-date/);
+  assert.match(notificationPanel, /if \(n\.type === 'calendar'\) \{[\s\S]*?navigateToScheduleDate\(date \? \{ date \} : undefined\)/);
+  assert.match(myTasksWidget, /navigateToScheduleDate\(todo\.startDate \? \{ date: todo\.startDate, todoId: todo\.id \} : undefined\)/);
+  assert.match(app, /onWidgetNavigateToDate\?\.\(\(payload\) => \{[\s\S]*?navigateToScheduleDate\([\s\S]*?date: payload\.date, todoId: payload\.todoId/);
+  assert.doesNotMatch(notificationPanel, /bflow:navigate-to-date/);
+  assert.doesNotMatch(myTasksWidget, /bflow:navigate-to-date/);
+  assert.doesNotMatch(app, /bflow:navigate-to-date/);
 });
 
 test('calendar catch-up keeps IPC rows snake_case and filters by recipient, actor, and muted calendar', () => {

@@ -318,13 +318,8 @@ function NotificationDropdown() {
 
   const handleNavigate = (n: AppNotification) => {
     if (n.type === 'calendar') {
-      useAppStore.getState().setView('schedule');
       const date = n.metadata?.eventDate;
-      if (date) {
-        setTimeout(() => {
-          window.dispatchEvent(new CustomEvent('bflow:navigate-to-date', { detail: { date } }));
-        }, 300);
-      }
+      useAppStore.getState().navigateToScheduleDate(date ? { date } : undefined);
       setPanelOpen(false);
       return;
     }

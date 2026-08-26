@@ -2407,15 +2407,11 @@ export default function App() {
     });
 
     // 위젯 팝업의 개인 할일 → 본체 캘린더(일정)의 해당 날짜로 이동.
-    // 팝업 창엔 ScheduleView·setView 가 없어 자기 창에서는 무동작이므로, 본체가 신호를 받아 라우팅.
+    // 팝업 창엔 ScheduleView가 없어 자기 창에서는 무동작이므로, 본체가 저장소 기반 요청으로 라우팅.
     const offWidgetNavigateDate = window.electronAPI.onWidgetNavigateToDate?.((payload) => {
-      useAppStore.getState().setView('schedule');
-      if (payload.date) {
-        // ScheduleView 마운트 후 이벤트 디스패치 (300ms 대기) — 자기 창 경로와 동일 타이밍
-        setTimeout(() => {
-          window.dispatchEvent(new CustomEvent('bflow:navigate-to-date', { detail: { date: payload.date, todoId: payload.todoId } }));
-        }, 300);
-      }
+      useAppStore.getState().navigateToScheduleDate(
+        payload.date ? { date: payload.date, todoId: payload.todoId } : undefined,
+      );
     });
 
     return () => {

@@ -45,6 +45,12 @@ export type DashboardDeptFilter = Department | 'all';
 
 export type DataSource = 'supabase' | 'sheets' | null;
 
+export interface ScheduleDateNavigationRequest {
+  id: number;
+  date: string;
+  todoId?: string;
+}
+
 interface AppState {
   // 데이터 소스 연결 상태 (Supabase 또는 GAS)
   dataConnected: boolean;
@@ -60,6 +66,16 @@ interface AppState {
   currentView: ViewMode;
   previousView: ViewMode | null;
   setView: (view: ViewMode) => void;
+
+  /**
+   * 일정 알림/할일에서 lazy ScheduleView로 날짜 이동을 남기는 요청.
+   * CustomEvent는 화면 마운트 전 listener가 없으면 유실되므로 store가 소유한다.
+   */
+  pendingScheduleDateNavigationRequest: ScheduleDateNavigationRequest | null;
+  nextScheduleDateNavigationRequestId: number;
+  requestScheduleDateNavigation: (target: Omit<ScheduleDateNavigationRequest, 'id'>) => ScheduleDateNavigationRequest;
+  consumeScheduleDateNavigationRequest: (requestId: number) => ScheduleDateNavigationRequest | null;
+  navigateToScheduleDate: (target?: Omit<ScheduleDateNavigationRequest, 'id'>) => void;
 
   // 알림/링크/활동 피드 점프 뒤 돌아갈 화면 위치
   navigationBackStack: NavigationBackSnapshot[];
@@ -247,7 +263,7 @@ interface AppState {
   toggleSidebarExpanded: () => void;
 }
 
-export const useAppStore = create<AppState>((set) => ({
+export const useAppStore = create<AppState>((set, get) => ({
   dataConnected: false,
   gasConfig: null,
   setDataConnected: (v) => set({ dataConnected: v }),
@@ -264,7 +280,51 @@ export const useAppStore = create<AppState>((set) => ({
     // 캐릭터 딥링크 요청은 현황판이 아닌 다른 뷰로 이동하는 순간 폐기 —
     //   로드 지연 중 사이드바로 이탈한 미소비 요청이 나중에 예기치 않은 모달을 열지 않게 한다.
     pendingCharacterBoardRequest: view === 'character-board' ? s.pendingCharacterBoardRequest : null,
+    // 일정 화면을 벗어나면 아직 소비되지 않은 날짜 점프도 폐기한다.
+    // 늦게 마운트된 ScheduleView가 이미 떠난 화면의 날짜로 점프하지 않게 한다.
+    pendingScheduleDateNavigationRequest: view === 'schedule'
+      ? s.pendingScheduleDateNavigationRequest
+      : null,
   })),
+  pendingScheduleDateNavigationRequest: null,
+  nextScheduleDateNavigationRequestId: 0,
+  requestScheduleDateNavigation: (target) => {
+    let request: ScheduleDateNavigationRequest | null = null;
+    set((s) => {
+      request = {
+        id: s.nextScheduleDateNavigationRequestId + 1,
+        date: target.date,
+        ...(target.todoId ? { todoId: target.todoId } : {}),
+      };
+      return {
+        pendingScheduleDateNavigationRequest: request,
+        nextScheduleDateNavigationRequestId: request.id,
+      };
+    });
+    return request!;
+  },
+  consumeScheduleDateNavigationRequest: (requestId) => {
+    let consumed: ScheduleDateNavigationRequest | null = null;
+    set((s) => {
+      const pending = s.pendingScheduleDateNavigationRequest;
+      if (!pending || pending.id !== requestId) return {};
+      consumed = pending;
+      return { pendingScheduleDateNavigationRequest: null };
+    });
+    return consumed;
+  },
+  navigateToScheduleDate: (target) => {
+    // store에 먼저 기록하고 화면을 전환한다. lazy ScheduleView가 나중에 mount되어도
+    // 최신 요청을 한 번만 꺼낼 수 있다.
+    if (target?.date) {
+      get().requestScheduleDateNavigation(target);
+    } else {
+      // 날짜 없는 알림은 기존 동작처럼 일정 화면만 열어야 한다. 앞선 요청이 남아
+      // 의도하지 않은 날짜로 늦게 점프하지 않도록 명시적으로 폐기한다.
+      set({ pendingScheduleDateNavigationRequest: null });
+    }
+    get().setView('schedule');
+  },
   navigationBackStack: [],
   pushNavigationBackTarget: () => set((s) => {
     const nextStack = appendNavigationBackSnapshot(
@@ -300,6 +360,9 @@ export const useAppStore = create<AppState>((set) => ({
         pendingSceneModalRequest: null,
         pendingCharacterBoardRequest: null,
         highlightSceneId: null,
+        pendingScheduleDateNavigationRequest: target.currentView === 'schedule'
+          ? s.pendingScheduleDateNavigationRequest
+          : null,
         selectedSceneIds: new Set<string>(),
         closeSceneModalSignal: s.closeSceneModalSignal + 1,
       };
