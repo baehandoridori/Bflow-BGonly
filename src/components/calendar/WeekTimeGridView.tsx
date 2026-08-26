@@ -17,6 +17,7 @@ const DAWN_END_MIN = MAIN_START_MIN;
 const EVENING_START_MIN = MAIN_END_MIN;
 const DAY_END_MIN = 24 * 60;
 const ALL_DAY_ROW_PX = 28;
+const WHEEL_GESTURE_LOCK_MS = 150;
 const WEEKDAY_KR = ['일', '월', '화', '수', '목', '금', '토'];
 const CARD_BASE_RGB = [26, 29, 39] as const; // #1A1D27
 const EMPTY_NAME_MAP: Record<string, string> = {};
@@ -46,6 +47,15 @@ type TimedEvent = {
   endMin: number;
   layoutId: string;
 };
+
+type TimeBandBlock = {
+  source: TimedEvent;
+  startMin: number;
+  endMin: number;
+  layoutId: string;
+};
+
+type WeekWheelGestureLock = { current: ReturnType<typeof setTimeout> | null };
 
 export function splitWeekTimeGridEvents(events: CalendarEvent[]): {
   allDayEvents: CalendarEvent[];
@@ -107,13 +117,31 @@ export function requestWeekChangeFromWheel(
   activeWeekIndex: number,
   weekCount: number,
   onWeekChange: (nextIndex: number) => void,
+  gestureLock?: WeekWheelGestureLock,
 ): boolean {
   if (!event.shiftKey) return false;
   const movement = event.deltaY || event.deltaX;
   if (movement === 0) return false;
+  if (gestureLock?.current != null) {
+    event.preventDefault();
+    return false;
+  }
   event.preventDefault();
   onWeekChange(getNextWeekIndex(activeWeekIndex, weekCount, movement > 0 ? 1 : -1));
+  if (gestureLock) {
+    gestureLock.current = setTimeout(() => {
+      gestureLock.current = null;
+    }, WHEEL_GESTURE_LOCK_MS);
+  }
   return true;
+}
+
+/** 컴포넌트 unmount 시 남아 있는 Shift+wheel 잠금을 정리한다. */
+export function clearWeekWheelGestureLock(gestureLock: WeekWheelGestureLock): void {
+  if (gestureLock.current !== null) {
+    clearTimeout(gestureLock.current);
+    gestureLock.current = null;
+  }
 }
 
 /** 종일 레인으로 강등된 시간 일정도 시작 시각과 주간 경계 계속 표시를 잃지 않는다. */
@@ -207,6 +235,21 @@ function bandContains(blocks: TimedEvent[], startMin: number, endMin: number): b
   return blocks.some((block) => block.startMin < endMin && block.endMin > startMin);
 }
 
+/** 각 보이는 시간 밴드 안에서만 겹침을 계산하도록 블록을 자르고 고유 ID를 붙인다. */
+function clipTimedBlocksToBand(blocks: TimedEvent[], startMin: number, endMin: number): TimeBandBlock[] {
+  return blocks.flatMap((block) => {
+    const clippedStart = Math.max(block.startMin, startMin);
+    const clippedEnd = Math.min(block.endMin, endMin);
+    if (clippedEnd <= clippedStart) return [];
+    return [{
+      source: block,
+      startMin: clippedStart,
+      endMin: clippedEnd,
+      layoutId: `${block.layoutId}@${startMin}-${endMin}`,
+    }];
+  });
+}
+
 export function formatKoreanHour(min: number): string {
   const hour = Math.floor(min / 60) % 24;
   const period = hour < 12 ? '오전' : '오후';
@@ -254,6 +297,7 @@ export function WeekTimeGridView({
   const [dawnChoice, setDawnChoice] = useState<boolean | null>(null);
   const [eveningChoice, setEveningChoice] = useState<boolean | null>(null);
   const [now, setNow] = useState(() => new Date());
+  const wheelGestureLock = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const dates = useMemo(() => weekDays.slice(0, 7), [weekDays]);
   const dateStrings = useMemo(() => dates.map(fmtDate), [dates]);
@@ -294,6 +338,8 @@ export function WeekTimeGridView({
     return () => window.clearInterval(interval);
   }, []);
 
+  useEffect(() => () => clearWeekWheelGestureLock(wheelGestureLock), []);
+
   useEffect(() => {
     let cancelled = false;
     let done = false;
@@ -318,7 +364,7 @@ export function WeekTimeGridView({
   }, [actualToday, dawnVisible, weekKey]);
 
   const handleWheel = useCallback((event: React.WheelEvent<HTMLDivElement>) => {
-    requestWeekChangeFromWheel(event, activeWeekIndex, weekCount, onWeekChange);
+    requestWeekChangeFromWheel(event, activeWeekIndex, weekCount, onWeekChange, wheelGestureLock);
   }, [activeWeekIndex, onWeekChange, weekCount]);
 
   return (
@@ -533,7 +579,8 @@ function TimeBand({
           const date = dateStrings[index];
           const isWeekend = index === 0 || index === 6;
           const timedBlocks = blocksByDate.get(date) ?? [];
-          const layouts = layoutDayBlocks(timedBlocks.map((block) => ({ id: block.layoutId, startMin: block.startMin, endMin: block.endMin })));
+          const bandBlocks = clipTimedBlocksToBand(timedBlocks, startMin, endMin);
+          const layouts = layoutDayBlocks(bandBlocks.map((block) => ({ id: block.layoutId, startMin: block.startMin, endMin: block.endMin })));
           return (
             <div
               key={date}
@@ -559,11 +606,9 @@ function TimeBand({
                 );
               })}
               {layouts.map((layout, layoutIndex) => {
-                const block = timedBlocks.find((candidate) => candidate.layoutId === layout.id);
-                if (!block) return null;
-                const clippedStart = Math.max(block.startMin, startMin);
-                const clippedEnd = Math.min(block.endMin, endMin);
-                if (clippedEnd <= clippedStart) return null;
+                const bandBlock = bandBlocks.find((candidate) => candidate.layoutId === layout.id);
+                if (!bandBlock) return null;
+                const block = bandBlock.source;
                 const isPast = date < today || (date === today && block.endMin <= nowMin);
                 const isCurrent = date === today && block.startMin <= nowMin && nowMin < block.endMin;
                 const duration = block.endMin - block.startMin;
@@ -582,8 +627,8 @@ function TimeBand({
                     style={{
                       ...eventBlockStyle(
                         layout,
-                        ((clippedStart - startMin) / 60) * HOUR_PX,
-                        ((clippedEnd - clippedStart) / 60) * HOUR_PX,
+                        ((bandBlock.startMin - startMin) / 60) * HOUR_PX,
+                        ((bandBlock.endMin - bandBlock.startMin) / 60) * HOUR_PX,
                       ),
                       background: visualStyle.background,
                       borderLeft: visualStyle.borderLeft,

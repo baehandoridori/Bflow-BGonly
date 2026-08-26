@@ -87,7 +87,9 @@ type WeekTimeGridModule = {
     activeWeekIndex: number,
     weekCount: number,
     onWeekChange: (nextIndex: number) => void,
+    gestureLock?: { current: ReturnType<typeof setTimeout> | null },
   ): boolean;
+  clearWeekWheelGestureLock(gestureLock: { current: ReturnType<typeof setTimeout> | null }): void;
   getNonTodayCurrentLineStyle(): { background: string; height: number };
   getWeekendCellStyle(isWeekend: boolean): { backgroundImage?: string };
 };
@@ -178,6 +180,30 @@ test('WeekTimeGridView: 시간 슬롯은 30분 단위 종료 시간을 사용한
     { startMin: 540, endMin: 570 },
     { startMin: 570, endMin: 600 },
   ]);
+});
+
+test('WeekTimeGridView: 밴드별로 잘라 배치해 새벽 충돌 뒤 본 시간대 조각을 전폭으로 그린다', async () => {
+  const module = await loadWeekTimeGridView();
+  const markup = renderToStaticMarkup(createElement(module.default, {
+    weekDays: Array.from({ length: 7 }, (_, index) => new Date(2026, 7, 23 + index, 12)),
+    events: [
+      event({ id: 'cross-band', title: '경계 일정', startDate: '2026-08-25', endDate: '2026-08-25', startTime: '08:00', endTime: '10:00' }),
+      event({ id: 'dawn-only', title: '새벽 겹침', startDate: '2026-08-25', endDate: '2026-08-25', startTime: '08:30', endTime: '09:00' }),
+    ],
+    today: '2026-01-01',
+    onEventClick() {},
+    onSlotClick() {},
+    tagNameById: {},
+    calendarNameById: {},
+    activeWeekIndex: 0,
+    weekCount: 4,
+    onWeekChange() {},
+  }));
+
+  assert.match(
+    markup,
+    /<button[^>]*style="top:0(?:px)?;height:56px;left:calc\(0% \+ 2px\);width:calc\(100% - 4px\);[^"]*"[^>]*><span[^>]*>08:00 – 10:00<\/span><span[^>]*>경계 일정<\/span><\/button>/,
+  );
 });
 
 test('WeekTimeGridView: 종일 레인에 이어진 일정 표시와 강등된 시간 접두를 남긴다', async () => {
@@ -323,6 +349,36 @@ test('WeekTimeGridView: Shift+wheel은 연도 경계 sentinel을 부모로 전�
 
   assert.deepEqual(requestedIndices, [-1, 6, 3]);
   assert.equal(preventDefaultCount, 3);
+});
+
+test('WeekTimeGridView: Shift+wheel 한 번의 150ms 제스처는 한 번만 주 이동을 요청한다', async () => {
+  const { requestWeekChangeFromWheel, clearWeekWheelGestureLock } = await loadWeekTimeGridView();
+  const requestedIndices: number[] = [];
+  let preventDefaultCount = 0;
+  const gestureLock = { current: null as ReturnType<typeof setTimeout> | null };
+  const makeWheel = (deltaY: number) => ({
+    shiftKey: true,
+    deltaY,
+    deltaX: 0,
+    preventDefault() {
+      preventDefaultCount += 1;
+    },
+  });
+  const onWeekChange = (nextIndex: number) => requestedIndices.push(nextIndex);
+
+  assert.equal(requestWeekChangeFromWheel(makeWheel(-1), 0, 6, onWeekChange, gestureLock), true);
+  assert.notEqual(gestureLock.current, null);
+  assert.equal(requestWeekChangeFromWheel(makeWheel(1), 5, 6, onWeekChange, gestureLock), false);
+  assert.deepEqual(requestedIndices, [-1]);
+
+  await new Promise((resolve) => setTimeout(resolve, 170));
+  assert.equal(gestureLock.current, null);
+  assert.equal(requestWeekChangeFromWheel(makeWheel(1), 5, 6, onWeekChange, gestureLock), true);
+  assert.deepEqual(requestedIndices, [-1, 6]);
+  assert.equal(preventDefaultCount, 3);
+
+  clearWeekWheelGestureLock(gestureLock);
+  assert.equal(gestureLock.current, null);
 });
 
 test('WeekTimeGridView: 오늘 외 열의 현재 시각선은 28% 빨강 1px을 사용한다', async () => {
