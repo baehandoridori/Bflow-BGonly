@@ -1,5 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+import path from 'node:path';
 
 import {
   computeCalendarNotificationRecipients,
@@ -136,4 +138,37 @@ test('realtime 알림 행은 renderer에 필요한 표시 필드만 camelCase로
       createdAt: '2026-08-26T00:00:00.000Z',
     },
   );
+});
+
+const previewMockPath = path.join(process.cwd(), 'src', 'mocks', 'devElectronAPI.ts');
+
+function readPreviewApiSource(): string {
+  return readFileSync(previewMockPath, 'utf8');
+}
+
+test('preview calendar catch-up seeds use the signed-in mock user and visible current-month seed rows', () => {
+  const source = readPreviewApiSource();
+
+  assert.match(source, /recipient_id:\s*MOCK_USERS\[0\]\.id/);
+  assert.match(source, /createDevCalendarSeed\(\)/);
+  assert.match(source, /EP06 업로드/);
+  assert.match(source, /EP07 가편 작업/);
+  assert.match(source, /action:\s*'create'/);
+  assert.match(source, /action:\s*'update'/);
+  assert.match(source, /detail:\s*`\$\{.*?\}\/12 → \$\{.*?\}\/13`/s);
+  assert.match(source, /calendarNotificationsCatchup:\s*async \(\) => mockCalendarNotifications/);
+  assert.match(source, /calendarNotificationsMarkRead:\s*async \(\) => \{\}/);
+});
+
+test('preview broadcast mock fans out calendar notifications through unsubscribable isolated listeners', () => {
+  const source = readPreviewApiSource();
+
+  assert.match(source, /const supabaseBroadcastListeners = new Set<\(event: unknown\) => void>\(\)/);
+  assert.match(source, /supabaseBroadcastListeners\.add\(callback\)/);
+  assert.match(source, /return \(\) => supabaseBroadcastListeners\.delete\(callback\)/);
+  assert.match(source, /catch \(err\)\s*\{\s*console\.warn\('\[dev preview broadcast\] listener failed:', err\)/s);
+  assert.match(source, /__bflowMockCalendarNotify/);
+  assert.match(source, /event: 'calendar-notification'/);
+  assert.match(source, /payload: \{ notification: row \}/);
+  assert.doesNotMatch(source, /payload:\s*\{\s*notification:\s*mockCalendarNotifications\[0\]/s);
 });

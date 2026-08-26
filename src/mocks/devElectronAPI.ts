@@ -23,6 +23,7 @@ import { createArcadeLocalStorageGateway } from '@/features/playground/arcade/lo
 import type { ArcadePreviewGateway } from '@/features/playground/arcade/previewGateway';
 import { useArcadeStore } from '@/features/playground/arcade/useArcadeStore';
 import { createDevCalendarSeed } from './devCalendarSeed';
+import type { CalendarNotificationPushRow } from '@/shared/calendarNotifications';
 import {
   canCreateCalendar,
   canEditCalendarEvents,
@@ -72,6 +73,11 @@ type MockCalendarEventRow = Awaited<ReturnType<ElectronAPI['calendarEventCreate'
 type MockCalendarTagRow = Awaited<ReturnType<ElectronAPI['calendarTagsList']>>[number];
 type MockCalendarMemberRow = { calendar_id: string; user_id: string; can_edit: boolean };
 type MockCalendarEventCreateInput = Parameters<ElectronAPI['calendarEventCreate']>[0];
+type MockCalendarNotificationRow = Awaited<ReturnType<ElectronAPI['calendarNotificationsCatchup']>>[number];
+type MockCalendarNotificationOverrides = Omit<Partial<CalendarNotificationPushRow>, 'id' | 'createdAt'>;
+type DevPreviewWindow = Window & typeof globalThis & {
+  __bflowMockCalendarNotify?: (overrides?: MockCalendarNotificationOverrides) => void;
+};
 const CALENDAR_TAG_UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 const devCalendarSeed = createDevCalendarSeed();
@@ -84,6 +90,112 @@ type MockPrivacyReplacementTarget =
   | { storage: 'google'; actualId: string; calendarId: string };
 const mockPrivacyReplacementReceipts = new Map<string, MockPrivacyReplacementTarget>();
 const mockCalendarTags: MockCalendarTagRow[] = devCalendarSeed.tags;
+const supabaseBroadcastListeners = new Set<(event: unknown) => void>();
+
+function buildMockCalendarNotifications(): MockCalendarNotificationRow[] {
+  const milestoneCalendar = mockCalendars.find((calendar) => calendar.name === 'EP 마일스톤');
+  const uploadEvent = mockCalendarEvents.find((event) => (
+    event.calendar_id === milestoneCalendar?.id && event.title === 'EP06 업로드'
+  ));
+  const editEvent = mockCalendarEvents.find((event) => (
+    event.calendar_id === milestoneCalendar?.id && event.title === 'EP07 가편 작업'
+  ));
+  if (!milestoneCalendar || !uploadEvent || !editEvent) return [];
+
+  const currentMonth = new Date().getMonth() + 1;
+  return [
+    {
+      id: 'mock-calendar-notification-create',
+      recipient_id: MOCK_USERS[0].id,
+      actor_id: MOCK_USERS[1].id,
+      actor_name: MOCK_USERS[1].name,
+      calendar_id: milestoneCalendar.id,
+      calendar_name: milestoneCalendar.name,
+      event_id: uploadEvent.id,
+      event_title: uploadEvent.title,
+      event_date: uploadEvent.start_date,
+      action: 'create',
+      detail: null,
+      created_at: new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString(),
+      read_at: null,
+    },
+    {
+      id: 'mock-calendar-notification-date-change',
+      recipient_id: MOCK_USERS[0].id,
+      actor_id: MOCK_USERS[2].id,
+      actor_name: MOCK_USERS[2].name,
+      calendar_id: milestoneCalendar.id,
+      calendar_name: milestoneCalendar.name,
+      event_id: editEvent.id,
+      event_title: editEvent.title,
+      event_date: editEvent.start_date,
+      action: 'update',
+      detail: `${currentMonth}/12 → ${currentMonth}/13`,
+      created_at: new Date(Date.now() - 30 * 60 * 1000).toISOString(),
+      read_at: null,
+    },
+  ];
+}
+
+const mockCalendarNotifications = buildMockCalendarNotifications();
+
+function toMockCalendarNotificationPushRow(row: MockCalendarNotificationRow): CalendarNotificationPushRow {
+  return {
+    id: row.id,
+    recipientId: row.recipient_id,
+    actorId: row.actor_id,
+    actorName: row.actor_name,
+    calendarId: row.calendar_id,
+    calendarName: row.calendar_name,
+    eventTitle: row.event_title,
+    eventDate: row.event_date,
+    action: row.action,
+    detail: row.detail,
+    createdAt: row.created_at,
+  };
+}
+
+function safeMockCalendarNotificationPushRow(
+  base: CalendarNotificationPushRow,
+  overrides: unknown,
+): CalendarNotificationPushRow {
+  const values = overrides && typeof overrides === 'object'
+    ? overrides as Record<string, unknown>
+    : {};
+  const optionalString = (key: keyof CalendarNotificationPushRow, fallback: string | null): string | null => {
+    const value = values[key];
+    return value === null || typeof value === 'string' ? value : fallback;
+  };
+  const requiredString = (key: keyof CalendarNotificationPushRow, fallback: string): string => {
+    const value = values[key];
+    return typeof value === 'string' && value.trim() ? value : fallback;
+  };
+  const action = values.action;
+
+  return {
+    id: requiredString('id', base.id),
+    recipientId: requiredString('recipientId', base.recipientId),
+    actorId: optionalString('actorId', base.actorId),
+    actorName: optionalString('actorName', base.actorName),
+    calendarId: optionalString('calendarId', base.calendarId),
+    calendarName: optionalString('calendarName', base.calendarName),
+    eventTitle: optionalString('eventTitle', base.eventTitle),
+    eventDate: optionalString('eventDate', base.eventDate),
+    action: action === 'create' || action === 'update' || action === 'delete' ? action : base.action,
+    detail: optionalString('detail', base.detail),
+    createdAt: requiredString('createdAt', base.createdAt),
+  };
+}
+
+function emitMockSupabaseBroadcast(event: unknown): void {
+  for (const callback of supabaseBroadcastListeners) {
+    try {
+      callback(event);
+    } catch (err) {
+      console.warn('[dev preview broadcast] listener failed:', err);
+    }
+  }
+}
 
 function normalizeMockCalendarEventTagId(tagId: unknown): string | null {
   if (tagId === undefined || tagId === null) return null;
@@ -1527,7 +1639,7 @@ export function installDevElectronAPI(): void {
       mockCalendarTags.splice(0, mockCalendarTags.length, ...saved);
       return saved.map((tag) => ({ ...tag }));
     },
-    calendarNotificationsCatchup: async () => [],
+    calendarNotificationsCatchup: async () => mockCalendarNotifications,
     calendarNotificationsMarkRead: async () => {},
     supabaseReadRevisions: async () => getMockRevisionRows(),
     supabaseAddRevision: async (
@@ -1705,7 +1817,10 @@ export function installDevElectronAPI(): void {
     onSupabasePresence: noop,
     getPresenceSnapshot: async () => ({}),
     onSupabaseStatus: noop,
-    onSupabaseBroadcast: noop,
+    onSupabaseBroadcast: (callback) => {
+      supabaseBroadcastListeners.add(callback);
+      return () => supabaseBroadcastListeners.delete(callback);
+    },
 
     // ─── Playground market mock (same user-scoped localStorage adapter) ───
     marketRead: async () => toMarketRemoteState(await getPreviewMarketGateway().read()),
@@ -2101,5 +2216,17 @@ export function installDevElectronAPI(): void {
   };
 
   (window as Window & typeof globalThis).electronAPI = mockAPI;
+  const previewWindow = window as DevPreviewWindow;
+  previewWindow.__bflowMockCalendarNotify = (overrides = {}) => {
+    const template = mockCalendarNotifications[0];
+    if (!template) return;
+
+    const row = {
+      ...safeMockCalendarNotificationPushRow(toMockCalendarNotificationPushRow(template), overrides),
+      id: `mock-calendar-notification-${Date.now()}`,
+      createdAt: new Date().toISOString(),
+    };
+    emitMockSupabaseBroadcast({ event: 'calendar-notification', payload: { notification: row } });
+  };
   document.documentElement.dataset.devElectronApi = 'installed';
 }
