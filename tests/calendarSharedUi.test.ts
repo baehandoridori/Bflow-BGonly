@@ -75,6 +75,8 @@ type CalendarGridProps = {
   } | null;
   draggedEventIdentity?: ScheduleEventIdentity | null;
   isDragging?: boolean;
+  highlightedEventIdentities?: ReadonlySet<string>;
+  reduceMotion?: boolean;
 };
 type CalendarGridComponent = (props: CalendarGridProps) => ReactNode;
 type ScheduleCalendarEvent = {
@@ -105,6 +107,8 @@ type ScheduleGridProps = {
   calendarNameById: Record<string, string>;
   focusedDate?: string | null;
   pulseDate?: string | null;
+  highlightedEventIdentities?: ReadonlySet<string>;
+  reduceMotion?: boolean;
   onEventClick(event: ScheduleCalendarEvent): void;
   onDragStart(event: ScheduleCalendarEvent, mode: 'move' | 'resize-start' | 'resize-end', anchorDate: string): void;
   onEventContextMenu(event: ScheduleCalendarEvent, mouse: { preventDefault(): void; stopPropagation(): void; clientX: number; clientY: number }): void;
@@ -191,6 +195,7 @@ type WeekTimeGridViewProps = {
     identity: ScheduleEventIdentity,
     patch: Required<Pick<ScheduleCalendarEvent, 'startDate' | 'endDate' | 'startTime' | 'endTime'>>,
   ): void;
+  highlightedEventIdentities?: ReadonlySet<string>;
 };
 type DayScrollViewProps = {
   events: ScheduleCalendarEvent[];
@@ -242,6 +247,8 @@ type FormElement = ReactElement<{
 const myUserId = 'user-me';
 let stateSlots: unknown[] = [];
 let stateCursor = 0;
+let scheduleRefSlots: Array<{ current: unknown }> = [];
+let scheduleRefCursor = 0;
 let modalRefSlots: Array<{ current: unknown }> = [];
 let modalRefCursor = 0;
 let modalEffectDeps: Array<readonly unknown[] | undefined> = [];
@@ -637,6 +644,8 @@ function resetHarness(): void {
   tagManagerDocumentListeners.clear();
   stateSlots = [];
   stateCursor = 0;
+  scheduleRefSlots = [];
+  scheduleRefCursor = 0;
   modalRefSlots = [];
   modalRefCursor = 0;
   modalEffectDeps = [];
@@ -1221,7 +1230,11 @@ async function loadScheduleView(): Promise<ScheduleViewComponent> {
             schedulePendingEffects.push(effect);
           },
           useMemo: (factory: () => unknown) => factory(), useCallback: (fn: unknown) => fn,
-          useRef: (initial: unknown) => ({ current: initial }),
+          useRef(initial: unknown) {
+            const slot = scheduleRefCursor++;
+            scheduleRefSlots[slot] ??= { current: initial };
+            return scheduleRefSlots[slot];
+          },
         };
       }
       if (id === 'react/jsx-runtime') return jsxRuntime;
@@ -2060,6 +2073,7 @@ async function renderScheduleView(): Promise<ReactNode> {
   const ScheduleView = await loadScheduleView();
   globalThis.document = scheduleDocumentMock as unknown as Document;
   stateCursor = 0;
+  scheduleRefCursor = 0;
   return resolveComponents(ScheduleView());
 }
 
@@ -2100,6 +2114,47 @@ async function dispatchScheduleWindowEvent(type: string, detail?: Record<string,
     listener({ type, detail } as unknown as Event);
   }
   await new Promise<void>((resolve) => setImmediate(resolve));
+}
+
+function installScheduleFakeClock(initialNow = 1_000): {
+  advance(ms: number): void;
+  restore(): void;
+} {
+  const realDateNow = Date.now;
+  const realSetTimeout = globalThis.setTimeout;
+  const realClearTimeout = globalThis.clearTimeout;
+  let now = initialNow;
+  let nextTimerId = 0;
+  const timers = new Map<number, { due: number; callback: () => void }>();
+
+  Date.now = () => now;
+  globalThis.setTimeout = ((callback: (...args: unknown[]) => void, delay = 0, ...args: unknown[]) => {
+    const id = ++nextTimerId;
+    timers.set(id, { due: now + Number(delay), callback: () => callback(...args) });
+    return id as unknown as ReturnType<typeof setTimeout>;
+  }) as typeof setTimeout;
+  globalThis.clearTimeout = ((handle: ReturnType<typeof setTimeout>) => {
+    timers.delete(handle as unknown as number);
+  }) as typeof clearTimeout;
+
+  return {
+    advance(ms: number) {
+      now += ms;
+      while (true) {
+        const due = [...timers.entries()]
+          .filter(([, timer]) => timer.due <= now)
+          .sort((left, right) => left[1].due - right[1].due)[0];
+        if (!due) break;
+        timers.delete(due[0]);
+        due[1].callback();
+      }
+    },
+    restore() {
+      Date.now = realDateNow;
+      globalThis.setTimeout = realSetTimeout;
+      globalThis.clearTimeout = realClearTimeout;
+    },
+  };
 }
 
 async function renderCalendarGrid(
@@ -3433,6 +3488,173 @@ test('ScheduleView calendar-changed listener replaces or closes long-lived event
   assert.equal(scheduleQuickEditProps.length, 0, 'the revoked row closes quick edit');
 });
 
+test('ScheduleView highlights only later external additions and changes, then clears the newest pulse after two seconds', async () => {
+  resetHarness();
+  const baseline = calendarListEvent({
+    id: 'external-change',
+    title: '변경 전 회의',
+    source: 'bflow',
+    sourceCalendarId: 'bflow:mine',
+    calendarId: 'mine',
+  });
+  scheduleCanonicalEvents = [baseline];
+  await renderScheduleView();
+  await flushScheduleMountEffects();
+  await renderScheduleView();
+  assert.deepEqual(
+    [...(scheduleGridProps.at(-1)?.highlightedEventIdentities ?? [])],
+    [],
+    'the initial canonical load establishes a baseline without pulsing every event',
+  );
+
+  const clock = installScheduleFakeClock();
+  try {
+    scheduleCanonicalEvents = [{ ...baseline, title: '1차 외부 수정' }];
+    await dispatchScheduleWindowEvent('bflow:calendar-changed');
+    await renderScheduleView();
+    assert.deepEqual(
+      [...(scheduleGridProps.at(-1)?.highlightedEventIdentities ?? [])],
+      ['bflow\u0000external-change'],
+      'an external title change targets the exact B flow identity',
+    );
+
+    clock.advance(1_000);
+    const added = calendarListEvent({
+      id: 'external-added',
+      title: '외부에서 추가',
+      source: 'google',
+      sourceCalendarId: 'primary',
+      calendarId: undefined,
+    });
+    scheduleCanonicalEvents = [{ ...baseline, title: '2차 외부 수정' }, added];
+    await dispatchScheduleWindowEvent('bflow:calendar-changed');
+    await renderScheduleView();
+    assert.deepEqual(
+      [...(scheduleGridProps.at(-1)?.highlightedEventIdentities ?? [])].sort(),
+      ['bflow\u0000external-change', 'google\u0000primary\u0000external-added'].sort(),
+      'a repeated refresh replaces the active targets with only its own added and changed identities',
+    );
+
+    clock.advance(1_000);
+    await renderScheduleView();
+    assert.equal(
+      scheduleGridProps.at(-1)?.highlightedEventIdentities?.size,
+      2,
+      'the superseded first timeout cannot clear the newer highlight set',
+    );
+    clock.advance(1_001);
+    await renderScheduleView();
+    assert.equal(scheduleGridProps.at(-1)?.highlightedEventIdentities?.size, 0, 'the newest set clears after two seconds');
+  } finally {
+    clock.restore();
+  }
+});
+
+test('ScheduleView does not highlight deletions and passes an external add target to the weekly time grid', async () => {
+  resetHarness();
+  const removed = calendarListEvent({
+    id: 'removed-external',
+    source: 'google',
+    sourceCalendarId: 'primary',
+    calendarId: undefined,
+  });
+  scheduleCanonicalEvents = [removed];
+  await renderScheduleView();
+  await flushScheduleMountEffects();
+  scheduleCanonicalEvents = [];
+  await dispatchScheduleWindowEvent('bflow:calendar-changed');
+  await renderScheduleView();
+  assert.equal(scheduleGridProps.at(-1)?.highlightedEventIdentities?.size, 0, 'a deletion never creates a target');
+
+  resetHarness();
+  scheduleLocalStorage.set('bflow_calendar_view_v1', JSON.stringify({ viewMode: 'week', weekSubMode: 'timegrid' }));
+  await renderScheduleView();
+  await flushScheduleMountEffects();
+  const timed = calendarListEvent({
+    id: 'external-timed',
+    title: '외부 시간 일정',
+    source: 'google',
+    sourceCalendarId: 'primary',
+    calendarId: undefined,
+    allDay: false,
+    startTime: '10:00',
+    endTime: '11:00',
+  });
+  scheduleCanonicalEvents = [timed];
+  await dispatchScheduleWindowEvent('bflow:calendar-changed');
+  await renderScheduleView();
+  assert.deepEqual(
+    [...(scheduleTimeGridProps.at(-1)?.highlightedEventIdentities ?? [])],
+    ['google\u0000primary\u0000external-timed'],
+    'the weekly time-grid receives the exact externally added identity',
+  );
+});
+
+test('ScheduleView excludes guarded local add and update refreshes, then allows a later external change after three seconds', async () => {
+  resetHarness();
+  scheduleLocalStorage.set('bflow_calendar_view_v1', JSON.stringify({ viewMode: 'week', weekSubMode: 'timegrid' }));
+  const existing = calendarListEvent({
+    id: 'local-update',
+    title: '로컬 수정 전',
+    source: 'bflow',
+    sourceCalendarId: 'bflow:mine',
+    calendarId: 'mine',
+    allDay: false,
+    startTime: '09:00',
+    endTime: '10:00',
+  });
+  scheduleCanonicalEvents = [existing];
+  await renderScheduleView();
+  await flushScheduleMountEffects();
+  await renderScheduleView();
+
+  const clock = installScheduleFakeClock();
+  try {
+    const moved = { ...existing, startTime: '10:00', endTime: '11:00' };
+    scheduleCanonicalEvents = [moved];
+    await scheduleTimeGridProps.at(-1)?.onTimeGridEventChange?.(
+      existing.id,
+      { id: existing.id, source: existing.source, sourceCalendarId: existing.sourceCalendarId },
+      { startDate: moved.startDate, endDate: moved.endDate, startTime: '10:00', endTime: '11:00' },
+    );
+    await dispatchScheduleWindowEvent('bflow:calendar-changed');
+    await renderScheduleView();
+    assert.equal(scheduleTimeGridProps.at(-1)?.highlightedEventIdentities?.size, 0, 'a local time-grid update stays excluded');
+
+    scheduleTimeGridProps.at(-1)?.onTimeGridCreate?.('2026-08-27', '13:00', '14:00');
+    await renderScheduleView();
+    const created = calendarListEvent({
+      id: 'persisted-new-id',
+      title: '로컬 추가',
+      source: 'bflow',
+      sourceCalendarId: 'bflow:mine',
+      calendarId: 'mine',
+      allDay: false,
+      startDate: '2026-08-27',
+      endDate: '2026-08-27',
+      startTime: '13:00',
+      endTime: '14:00',
+    });
+    await scheduleCreateModalProps.at(-1)?.onSave({ ...created, id: undefined, createdAt: undefined });
+    scheduleCanonicalEvents = [moved, created];
+    await dispatchScheduleWindowEvent('bflow:calendar-changed');
+    await renderScheduleView();
+    assert.equal(scheduleTimeGridProps.at(-1)?.highlightedEventIdentities?.size, 0, 'a local add stays excluded');
+
+    clock.advance(3_001);
+    scheduleCanonicalEvents = [moved, { ...created, title: '다른 창에서 수정됨' }];
+    await dispatchScheduleWindowEvent('bflow:calendar-changed');
+    await renderScheduleView();
+    assert.deepEqual(
+      [...(scheduleTimeGridProps.at(-1)?.highlightedEventIdentities ?? [])],
+      ['bflow\u0000persisted-new-id'],
+      'after the guard expires, a later canonical change is treated as external',
+    );
+  } finally {
+    clock.restore();
+  }
+});
+
 test('ScheduleView only preserves external vacation selections outside the canonical event cache', async (t) => {
   const vacation = calendarListEvent({
     id: 'vacation-selection',
@@ -4691,6 +4913,46 @@ test('CalendarGrid renders tag-aware chip text while keeping each event color as
   const tintStyle = tintedChipBody.props.style as { background?: string; borderLeft?: string };
   assert.match(tintStyle.background ?? '', /#74B9FF/, 'the chip tint still comes from event.color');
   assert.equal(tintStyle.borderLeft, '3px solid #74B9FF', 'the chip border still comes from event.color');
+});
+
+test('CalendarGrid renders a source-aware external-change ring and keeps reduced motion static', async () => {
+  const bflow = calendarListEvent({
+    id: 'shared-highlight-id',
+    title: 'B flow 일정',
+    source: 'bflow',
+    sourceCalendarId: 'bflow:mine',
+    calendarId: 'mine',
+  });
+  const google = calendarListEvent({
+    id: 'shared-highlight-id',
+    title: 'Google 일정',
+    source: 'google',
+    sourceCalendarId: 'primary',
+    calendarId: undefined,
+  });
+  const highlighted = new Set(['google\u0000primary\u0000shared-highlight-id']);
+
+  const animatedTree = await renderCalendarGrid([bflow, google], {
+    highlightedEventIdentities: highlighted,
+    reduceMotion: false,
+  });
+  const animatedBars = findElements(animatedTree, (element) => element.props['data-event-identity'] !== undefined);
+  const bflowBar = animatedBars.find((element) => element.props['data-event-identity'] === 'bflow\u0000shared-highlight-id');
+  const googleBar = animatedBars.find((element) => element.props['data-event-identity'] === 'google\u0000primary\u0000shared-highlight-id');
+  assert.ok(bflowBar);
+  assert.ok(googleBar);
+  assert.equal(bflowBar.props['data-realtime-highlight'], undefined, 'same raw id from B flow is not targeted');
+  assert.equal(googleBar.props['data-realtime-highlight'], 'true', 'the exact Google storage identity receives the ring');
+  assert.match(String(googleBar.props.className), /calendar-realtime-highlight(?!-static)/);
+
+  const staticTree = await renderCalendarGrid([google], {
+    highlightedEventIdentities: highlighted,
+    reduceMotion: true,
+  });
+  const staticBar = findElements(staticTree, (element) => element.props['data-realtime-highlight'] === 'true')[0];
+  assert.ok(staticBar);
+  assert.match(String(staticBar.props.className), /calendar-realtime-highlight-static/);
+  assert.doesNotMatch(String(staticBar.props.className), /calendar-realtime-highlight(?!-static)/, 'reduced motion omits the pulse animation class');
 });
 
 test('CalendarGrid keeps same-id rows keyed and ghosted by source identity and forwards the dragged event object', async () => {

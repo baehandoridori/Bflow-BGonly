@@ -45,11 +45,18 @@ import { navigateToSceneView } from '@/utils/sceneNavigationAction';
 import { createUuid } from '@/utils/createUuid';
 import { fmtDate, parseDate, addDays } from '@/utils/calendarDate';
 import { useMotionPref } from '@/hooks/useMotionPref';
+import { buildEventSnapshot, diffEventSnapshots, type CalendarEventSnapshot } from '@/utils/calendarEventDiff';
 
 type WeekSubMode = 'card' | 'timegrid';
 
 const CALENDAR_VIEW_STORAGE_KEY = 'bflow_calendar_view_v1';
 const CALENDAR_VIEW_MODES: CalendarViewMode[] = ['month', '2week', 'week', 'today'];
+const LOCAL_CHANGE_GUARD_MS = 3_000;
+const REALTIME_HIGHLIGHT_MS = 2_000;
+
+function localCreateSignature(event: CalendarEvent): string {
+  return buildEventSnapshot([event]).values().next().value ?? '';
+}
 
 function readCalendarViewPreference(): { viewMode: CalendarViewMode; weekSubMode: WeekSubMode } {
   const fallback = { viewMode: 'month' as CalendarViewMode, weekSubMode: 'card' as WeekSubMode };
@@ -160,6 +167,12 @@ export function ScheduleView() {
   const [googleAuthenticated, setGoogleAuthenticated] = useState(false);
   const [calendarSettings, setCalendarSettings] = useState<BflowCalendar | null | undefined>(undefined);
   const [tagManagerAnchor, setTagManagerAnchor] = useState<DOMRect | null>(null);
+  const [highlightedEventIdentities, setHighlightedEventIdentities] = useState<ReadonlySet<string>>(() => new Set());
+  const canonicalEventSnapshotRef = useRef<CalendarEventSnapshot | null>(null);
+  const localChangeGuardsRef = useRef(new Map<string, number>());
+  const localCreateGuardsRef = useRef(new Map<string, number>());
+  const realtimeHighlightTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const realtimeHighlightRevisionRef = useRef(0);
 
   // ─── 새 컴포넌트 상태 ───
   const [panelEvent, setPanelEvent] = useState<CalendarEvent | null>(null);
@@ -228,6 +241,91 @@ export function ScheduleView() {
     [optimisticDeletedTagIds],
   );
 
+  const guardLocalIdentity = useCallback((identity: CalendarEventIdentity) => {
+    const now = Date.now();
+    for (const [identityKey, expiresAt] of localChangeGuardsRef.current) {
+      if (expiresAt <= now) localChangeGuardsRef.current.delete(identityKey);
+    }
+    localChangeGuardsRef.current.set(calendarEventIdentityKey(identity), now + LOCAL_CHANGE_GUARD_MS);
+  }, []);
+
+  const guardCreatedEvent = useCallback((event: CalendarEvent) => {
+    localCreateGuardsRef.current.set(localCreateSignature(event), Date.now() + LOCAL_CHANGE_GUARD_MS);
+    guardLocalIdentity(snapshotCalendarEventIdentity(event));
+    if (event.calendarId) {
+      guardLocalIdentity({
+        id: event.id,
+        source: 'bflow',
+        sourceCalendarId: `bflow:${event.calendarId}`,
+      });
+      return;
+    }
+    guardLocalIdentity({
+      id: event.id,
+      source: event.isPrivate ? 'bflow' : 'google',
+      sourceCalendarId: event.isPrivate ? 'supabase-private' : 'primary',
+    });
+  }, [guardLocalIdentity]);
+
+  const applyCanonicalEvents = useCallback((canonicalEvents: CalendarEvent[]) => {
+    const nextSnapshot = buildEventSnapshot(canonicalEvents);
+    const previousSnapshot = canonicalEventSnapshotRef.current;
+    canonicalEventSnapshotRef.current = nextSnapshot;
+
+    if (previousSnapshot) {
+      const now = Date.now();
+      for (const [identityKey, expiresAt] of localChangeGuardsRef.current) {
+        if (expiresAt <= now) localChangeGuardsRef.current.delete(identityKey);
+      }
+      for (const [signature, expiresAt] of localCreateGuardsRef.current) {
+        if (expiresAt <= now) localCreateGuardsRef.current.delete(signature);
+      }
+      const diff = diffEventSnapshots(previousSnapshot, nextSnapshot);
+      const canonicalByIdentity = new Map(
+        canonicalEvents.map((event) => [calendarEventIdentityKey(event), event]),
+      );
+      for (const identityKey of diff.added) {
+        const addedEvent = canonicalByIdentity.get(identityKey);
+        if (!addedEvent) continue;
+        const createGuardExpiry = localCreateGuardsRef.current.get(localCreateSignature(addedEvent));
+        if (createGuardExpiry && createGuardExpiry > now) {
+          localChangeGuardsRef.current.set(identityKey, createGuardExpiry);
+        }
+      }
+      const targets = [...diff.added, ...diff.changed]
+        .filter((identityKey) => !localChangeGuardsRef.current.has(identityKey));
+      if (targets.length > 0) {
+        const revision = ++realtimeHighlightRevisionRef.current;
+        setHighlightedEventIdentities(new Set(targets));
+        if (realtimeHighlightTimerRef.current) clearTimeout(realtimeHighlightTimerRef.current);
+        realtimeHighlightTimerRef.current = setTimeout(() => {
+          if (realtimeHighlightRevisionRef.current !== revision) return;
+          setHighlightedEventIdentities(new Set());
+          realtimeHighlightTimerRef.current = null;
+        }, REALTIME_HIGHLIGHT_MS);
+      }
+    }
+
+    setEvents(canonicalEvents);
+    setPanelEvent((previous) => {
+      if (!previous || previous.source === 'vacation') return previous;
+      return canonicalEvents.find((event) => hasSameCalendarEventIdentity(event, previous)) ?? null;
+    });
+    setQuickEdit((previous) => {
+      if (!previous) return previous;
+      if (previous.event.source === 'vacation') return previous;
+      const canonical = canonicalEvents.find((event) => (
+        hasSameCalendarEventIdentity(event, previous.event)
+      ));
+      return canonical ? { ...previous, event: canonical } : null;
+    });
+  }, []);
+
+  useEffect(() => () => {
+    realtimeHighlightRevisionRef.current += 1;
+    if (realtimeHighlightTimerRef.current) clearTimeout(realtimeHighlightTimerRef.current);
+  }, []);
+
   useEffect(() => {
     let cancelled = false;
     const refreshGoogleAuthentication = async () => {
@@ -255,21 +353,6 @@ export function ScheduleView() {
   // 이벤트 로드 + 외부 변경 구독 (할일 위젯 등에서 수정 시 즉시 반영)
   useEffect(() => {
     let cancelled = false;
-    const applyCanonicalEvents = (canonicalEvents: CalendarEvent[]) => {
-      setEvents(canonicalEvents);
-      setPanelEvent((previous) => {
-        if (!previous || previous.source === 'vacation') return previous;
-        return canonicalEvents.find((event) => hasSameCalendarEventIdentity(event, previous)) ?? null;
-      });
-      setQuickEdit((previous) => {
-        if (!previous) return previous;
-        if (previous.event.source === 'vacation') return previous;
-        const canonical = canonicalEvents.find((event) => (
-          hasSameCalendarEventIdentity(event, previous.event)
-        ));
-        return canonical ? { ...previous, event: canonical } : null;
-      });
-    };
     const refresh = async () => {
       const canonicalEvents = await getEvents();
       if (!cancelled) applyCanonicalEvents(canonicalEvents);
@@ -291,7 +374,7 @@ export function ScheduleView() {
     const handleCalendarChanged = () => { void refresh(); };
     window.addEventListener('bflow:calendar-changed', handleCalendarChanged);
     return () => { cancelled = true; window.removeEventListener('bflow:calendar-changed', handleCalendarChanged); };
-  }, []);
+  }, [applyCanonicalEvents]);
 
   // 휴가 이벤트 로드
   const loadVacationEvents = useCallback(async () => {
@@ -504,6 +587,7 @@ export function ScheduleView() {
         id: createUuid(),
         createdAt: new Date().toISOString(),
       };
+      guardCreatedEvent(ev);
       await addEvent(ev);
       // bflow:calendar-changed 구독이 자동 refresh하므로 수동 추가 불필요
       setShowCreate(false);
@@ -511,7 +595,7 @@ export function ScheduleView() {
     } finally {
       isAddingRef.current = false;
     }
-  }, []);
+  }, [guardCreatedEvent, resetCreatePrefill]);
 
   const handleDeleteEvent = useCallback(async (deletingEvent: CalendarEvent) => {
     const mutationIdentity = snapshotCalendarEventIdentity(deletingEvent);
@@ -557,37 +641,33 @@ export function ScheduleView() {
     const canonical = mutationIdentity
       ? canonicalEvents.find((event) => hasSameCalendarEventIdentity(event, mutationIdentity))
       : undefined;
-    setEvents(canonicalEvents);
-    setPanelEvent((previous) => previous && mutationIdentity && hasSameCalendarEventIdentity(previous, mutationIdentity)
-      ? canonical ?? null
-      : previous);
-    setQuickEdit((previous) => previous && mutationIdentity && hasSameCalendarEventIdentity(previous.event, mutationIdentity)
-      ? canonical ? { ...previous, event: canonical } : null
-      : previous);
+    applyCanonicalEvents(canonicalEvents);
     const todoId = canonical ? calendarEventLinkedTodoId(canonical) : undefined;
     if (canonical && todoId) void syncCalendarToTodo(todoId, canonical);
-  }, []);
+  }, [applyCanonicalEvents]);
 
   // 드래그&드롭
   const handleEventDragDone = useCallback(async (eventId: string, newStart: string, newEnd: string) => {
     const mutationIdentity = draggedEventIdentityRef.current;
     draggedEventIdentityRef.current = null;
+    if (mutationIdentity) guardLocalIdentity(mutationIdentity);
     await updateEvent(
       eventId,
       { startDate: newStart, endDate: newEnd },
       mutationIdentity ?? undefined,
     );
     await reconcileEventMutation(mutationIdentity ?? undefined);
-  }, [reconcileEventMutation]);
+  }, [guardLocalIdentity, reconcileEventMutation]);
 
   const handleTimeGridEventChange = useCallback(async (
     eventId: string,
     mutationIdentity: CalendarEventIdentity,
     patch: Pick<CalendarEvent, 'startDate' | 'endDate' | 'startTime' | 'endTime'>,
   ) => {
+    guardLocalIdentity(mutationIdentity);
     await updateEvent(eventId, patch, mutationIdentity);
     await reconcileEventMutation(mutationIdentity);
-  }, [reconcileEventMutation]);
+  }, [guardLocalIdentity, reconcileEventMutation]);
 
   const { isDragging, preview: dragPreview, startDrag } = useCalendarDnD(handleEventDragDone, handleEventDragDone);
 
@@ -853,6 +933,7 @@ export function ScheduleView() {
     updates: Partial<CalendarEvent>,
   ) => {
     const mutationIdentity = snapshotCalendarEventIdentity(eventBeforeUpdate);
+    guardLocalIdentity(mutationIdentity);
     const sanitized = { ...updates };
     // 빈 문자열 날짜 방지: 기존 값 유지
     if ('startDate' in sanitized && !sanitized.startDate) delete sanitized.startDate;
@@ -875,24 +956,16 @@ export function ScheduleView() {
       const canonical = canonicalEvents.find((event) => (
         hasSameCalendarEventIdentity(event, mutationIdentity)
       ));
-      setEvents(canonicalEvents);
+      applyCanonicalEvents(canonicalEvents);
       const todoId = canonical ? calendarEventLinkedTodoId(canonical) : undefined;
       if (!persistenceFailed && canonical && todoId) void syncCalendarToTodo(todoId, canonical);
-      setPanelEvent((previous) => previous
-        && hasSameCalendarEventIdentity(previous, mutationIdentity)
-        ? canonical ?? null
-        : previous);
-      setQuickEdit((previous) => previous
-        && hasSameCalendarEventIdentity(previous.event, mutationIdentity)
-        ? canonical ? { ...previous, event: canonical } : null
-        : previous);
     } catch (refreshError) {
       if (!persistenceFailed) throw refreshError;
       console.warn('[ScheduleView] 일정 저장 실패 후 정본 새로고침 실패:', refreshError);
     }
 
     if (persistenceFailed) throw persistenceError;
-  }, []);
+  }, [applyCanonicalEvents, guardLocalIdentity]);
 
   const handleDuplicateEvent = useCallback(async (event: CalendarEvent) => {
     const isCanonicalBflow = event.sourceCalendarId?.startsWith('bflow:') === true
@@ -928,9 +1001,10 @@ export function ScheduleView() {
       linkedDepartment: undefined,
       linkedPart: undefined,
     };
+    guardCreatedEvent(newEv);
     await addEvent(newEv);
     // bflow:calendar-changed 구독이 자동 refresh
-  }, []);
+  }, [guardCreatedEvent]);
 
   // 이벤트 우클릭 → QuickEdit
   const handleEventContextMenu = useCallback((ev: CalendarEvent, e: React.MouseEvent) => {
@@ -1200,6 +1274,7 @@ export function ScheduleView() {
                 onWeekChange={handleWeekChange}
                 onTimeGridCreate={handleTimeGridCreate}
                 onTimeGridEventChange={handleTimeGridEventChange}
+                highlightedEventIdentities={highlightedEventIdentities}
               />
             ) : viewMode === 'week' || viewMode === '2week' ? (
               <WeekScrollView
@@ -1236,6 +1311,8 @@ export function ScheduleView() {
                 monthDirection={monthDir}
                 focusedDate={focusedDate}
                 pulseDate={pulseDate}
+                highlightedEventIdentities={highlightedEventIdentities}
+                reduceMotion={reduce}
                 tagNameById={tagNameById}
                 calendarNameById={calendarNameById}
                 onWheel={(e) => {

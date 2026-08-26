@@ -54,6 +54,8 @@ export interface WeekTimeGridViewProps {
   onTimeGridEventChange?: TimeGridEventChangeCallback;
   /** 상위가 낙관적 변경을 보이는 동안 내부 preview를 덮어쓸 수 있는 선택 계약. */
   timeGridDragPreview?: TimeGridDragPreview | null;
+  /** 다른 창에서 추가·수정된 source-aware 일정 identity. */
+  highlightedEventIdentities?: ReadonlySet<string>;
 }
 
 type TimedEvent = {
@@ -339,6 +341,7 @@ export function WeekTimeGridView({
   onTimeGridCreate,
   onTimeGridEventChange,
   timeGridDragPreview,
+  highlightedEventIdentities,
 }: WeekTimeGridViewProps) {
   const { reduce } = useMotionPref();
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -475,19 +478,28 @@ export function WeekTimeGridView({
           <div className="absolute inset-y-0 right-0" style={{ left: TIME_GUTTER_PX }}>
             {allDayBars.filter((bar) => bar.row < visibleAllDayRows).map((bar) => {
               const label = getAllDayBarLabel(bar, tagNameById, calendarNameById);
+              const identityKey = calendarEventIdentityKey(bar.event);
+              const isRealtimeHighlighted = highlightedEventIdentities?.has(identityKey) === true;
               return (
                 <button
-                  key={`${calendarEventIdentityKey(bar.event)}-${bar.startCol}`}
+                  key={`${identityKey}-${bar.startCol}`}
                   type="button"
                   title={label}
                   aria-label={`${label}, 종일 일정`}
-                  className="absolute z-10 truncate rounded px-1.5 text-left text-[10px] font-semibold text-white shadow-sm outline-none focus-visible:ring-2 focus-visible:ring-white focus-visible:ring-offset-1 focus-visible:ring-offset-bg-primary"
+                  data-event-identity={identityKey}
+                  data-realtime-highlight={isRealtimeHighlighted ? 'true' : undefined}
+                  className={`absolute z-10 truncate rounded px-1.5 text-left text-[10px] font-semibold text-white shadow-sm outline-none focus-visible:ring-2 focus-visible:ring-white focus-visible:ring-offset-1 focus-visible:ring-offset-bg-primary ${isRealtimeHighlighted ? reduce ? 'calendar-realtime-highlight-static' : 'calendar-realtime-highlight' : ''}`}
                   style={{
                     top: 3 + bar.row * ALL_DAY_ROW_PX,
                     left: `calc(${bar.startCol * (100 / 7)}% + 2px)`,
                     width: `calc(${bar.span * (100 / 7)}% - 4px)`,
                     height: 22,
                     ...getAllDayBarStyle(bar.event.color),
+                    ...(isRealtimeHighlighted ? {
+                      outline: `2px solid ${bar.event.color}`,
+                      outlineOffset: 2,
+                      boxShadow: `0 0 12px ${bar.event.color}80`,
+                    } : {}),
                   }}
                   onClick={(event) => {
                     event.stopPropagation();
@@ -532,6 +544,7 @@ export function WeekTimeGridView({
           timeGridDnD={timeGridDnD}
           dragPreview={dragPreview}
           dragGhostEvent={dragGhostEvent}
+          highlightedEventIdentities={highlightedEventIdentities}
         />
         <TimeBand
           label="시간대"
@@ -551,6 +564,7 @@ export function WeekTimeGridView({
           timeGridDnD={timeGridDnD}
           dragPreview={dragPreview}
           dragGhostEvent={dragGhostEvent}
+          highlightedEventIdentities={highlightedEventIdentities}
         />
         <TimeBand
           label="저녁 시간대"
@@ -571,6 +585,7 @@ export function WeekTimeGridView({
           timeGridDnD={timeGridDnD}
           dragPreview={dragPreview}
           dragGhostEvent={dragGhostEvent}
+          highlightedEventIdentities={highlightedEventIdentities}
         />
       </div>
     </div>
@@ -596,6 +611,7 @@ function TimeBand({
   timeGridDnD,
   dragPreview,
   dragGhostEvent,
+  highlightedEventIdentities,
 }: {
   label: string;
   startMin: number;
@@ -615,6 +631,7 @@ function TimeBand({
   timeGridDnD: ReturnType<typeof useTimeGridDnD>;
   dragPreview: TimeGridDragPreview | null;
   dragGhostEvent: CalendarEvent | null;
+  highlightedEventIdentities?: ReadonlySet<string>;
 }) {
   if (!visible) {
     return (
@@ -743,6 +760,7 @@ function TimeBand({
                 const isPreviewed = dragPreview?.identityKey === calendarEventIdentityKey(block.event);
                 const isMoving = isPreviewed && timeGridDnD.isDragActive;
                 const isSettling = timeGridDnD.isSettling(block.event);
+                const isRealtimeHighlighted = highlightedEventIdentities?.has(calendarEventIdentityKey(block.event)) === true;
                 const blockMotion = getTimeGridBlockMotion({
                   reduce,
                   opacity,
@@ -774,7 +792,8 @@ function TimeBand({
                     aria-label={`${block.event.title}, ${date} ${minutesToTime(block.startMin)}부터 ${minutesToTime(block.endMin)}까지`}
                     data-time-grid-event="true"
                     data-event-identity={calendarEventIdentityKey(block.event)}
-                    className={`absolute z-10 overflow-hidden rounded ${canShowText ? 'px-1.5 py-1' : 'p-0'} text-left font-semibold outline-none focus-visible:ring-2 focus-visible:ring-white focus-visible:ring-offset-1 focus-visible:ring-offset-bg-primary ${isMoving ? 'shadow-xl' : ''} ${isSettling ? 'time-grid-settling' : ''}`}
+                    data-realtime-highlight={isRealtimeHighlighted ? 'true' : undefined}
+                    className={`absolute z-10 overflow-hidden rounded ${canShowText ? 'px-1.5 py-1' : 'p-0'} text-left font-semibold outline-none focus-visible:ring-2 focus-visible:ring-white focus-visible:ring-offset-1 focus-visible:ring-offset-bg-primary ${isMoving ? 'shadow-xl' : ''} ${isSettling ? 'time-grid-settling' : ''} ${isRealtimeHighlighted ? reduce ? 'calendar-realtime-highlight-static' : 'calendar-realtime-highlight' : ''}`}
                     style={{
                       ...eventBlockStyle(
                         layout,
@@ -785,6 +804,11 @@ function TimeBand({
                       borderLeft: visualStyle.borderLeft,
                       opacity,
                       ...stateStyle,
+                      ...(isRealtimeHighlighted ? {
+                        outline: `2px solid ${block.event.color}`,
+                        outlineOffset: 2,
+                        boxShadow: `0 0 12px ${block.event.color}80`,
+                      } : {}),
                     }}
                     initial={reduce ? false : { opacity: 0, y: 4 }}
                     animate={blockMotion.animate}

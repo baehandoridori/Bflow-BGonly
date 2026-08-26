@@ -94,6 +94,7 @@ export function layoutEventBars(
 function EventBarChip({
   bar, onClick, onDragStart, isDragging, isGhost,
   hoveredEventIdentity, onHover, onContextMenu, tagNameById, calendarNameById,
+  isRealtimeHighlighted, reduceMotion,
 }: {
   bar: EventBar;
   onClick: (e: CalendarEvent) => void;
@@ -105,6 +106,8 @@ function EventBarChip({
   onContextMenu?: (ev: CalendarEvent, e: React.MouseEvent) => void;
   tagNameById: Record<string, string>;
   calendarNameById: Record<string, string>;
+  isRealtimeHighlighted?: boolean;
+  reduceMotion?: boolean;
 }) {
   const ev = bar.event;
   const hex = ev.color || EVENT_COLORS[0];
@@ -214,11 +217,13 @@ function EventBarChip({
       onContextMenu={onContextMenu ? (e) => onContextMenu(ev, e) : undefined}
       data-event-id={ev.id}
       data-event-identity={calendarEventIdentityKey(ev)}
+      data-realtime-highlight={isRealtimeHighlighted ? 'true' : undefined}
       className={cn(
         'absolute text-left z-10 calendar-event-bar',
         isGhost ? 'pointer-events-none opacity-50' : 'transition-all duration-150',
         !isGhost && isHovered && 'brightness-110 scale-[1.02] z-20',
         isDragging ? 'opacity-40' : '',
+        isRealtimeHighlighted && (reduceMotion ? 'calendar-realtime-highlight-static' : 'calendar-realtime-highlight'),
         'group/bar',
       )}
       style={{
@@ -228,6 +233,11 @@ function EventBarChip({
         height: '26px',
         cursor: ev.isReadOnly ? 'pointer' : isDragging ? 'grabbing' : 'grab',
         transition: isGhost ? 'left 0.12s ease-out, width 0.12s ease-out, top 0.12s ease-out' : undefined,
+        ...(isRealtimeHighlighted ? {
+          outline: `2px solid ${hex}`,
+          outlineOffset: '2px',
+          boxShadow: `0 0 12px ${hex}80`,
+        } : {}),
       }}
     >
       <div
@@ -382,6 +392,8 @@ export function CalendarGrid({
   monthDirection = 0,
   focusedDate,
   pulseDate,
+  highlightedEventIdentities,
+  reduceMotion = false,
   tagNameById,
   calendarNameById,
 }: {
@@ -403,6 +415,8 @@ export function CalendarGrid({
   monthDirection?: number;
   focusedDate?: string | null;
   pulseDate?: string | null;
+  highlightedEventIdentities?: ReadonlySet<string>;
+  reduceMotion?: boolean;
   tagNameById: Record<string, string>;
   calendarNameById: Record<string, string>;
 }) {
@@ -569,6 +583,8 @@ export function CalendarGrid({
                     onContextMenu={onEventContextMenu}
                     tagNameById={tagNameById}
                     calendarNameById={calendarNameById}
+                    isRealtimeHighlighted={highlightedEventIdentities?.has(calendarEventIdentityKey(bar.event))}
+                    reduceMotion={reduceMotion}
                   />
                 );
               })}

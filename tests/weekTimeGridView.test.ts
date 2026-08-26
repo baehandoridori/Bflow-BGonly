@@ -21,6 +21,7 @@ type CalendarEvent = {
   tagId?: string;
   calendarId?: string;
   source?: 'bflow' | 'google' | 'vacation';
+  sourceCalendarId?: string;
 };
 
 type WeekTimeGridModule = {
@@ -40,6 +41,7 @@ type WeekTimeGridModule = {
     weekCount: number;
     onWeekChange(nextIndex: number): void;
     onTimeGridCreate?(date: string, startTime: string, endTime: string): void;
+  highlightedEventIdentities?: ReadonlySet<string>;
   onEventContextMenu?(event: CalendarEvent, mouse: unknown): void;
   timeGridDragPreview?: {
     mode: 'create' | 'move' | 'resize-end';
@@ -134,7 +136,7 @@ function resetTimeGridDndStub(): void {
   };
 }
 
-async function loadWeekTimeGridView(): Promise<WeekTimeGridModule> {
+async function loadWeekTimeGridView(reduceMotion = false): Promise<WeekTimeGridModule> {
   resetTimeGridDndStub();
   const result = await build({
     entryPoints: ['src/components/calendar/WeekTimeGridView.tsx'],
@@ -154,7 +156,14 @@ async function loadWeekTimeGridView(): Promise<WeekTimeGridModule> {
   evaluate((id: string) => {
     if (id === 'react') return nodeRequire('react');
     if (id === 'react/jsx-runtime') return nodeRequire('react/jsx-runtime');
-    if (id === 'framer-motion') return { motion: { button: 'button', div: 'div' } };
+    if (id === 'framer-motion') {
+      return {
+        motion: {
+          button: ({ initial: _initial, animate: _animate, transition: _transition, ...props }: Record<string, unknown>) => createElement('button', props),
+          div: 'div',
+        },
+      };
+    }
     if (id === '@/components/calendar/CalendarGrid') {
       return {
         layoutEventBars: (events: CalendarEvent[]) => events.map((item, index) => ({
@@ -167,7 +176,7 @@ async function loadWeekTimeGridView(): Promise<WeekTimeGridModule> {
         })),
       };
     }
-    if (id === '@/hooks/useMotionPref') return { useMotionPref: () => ({ reduce: false }) };
+    if (id === '@/hooks/useMotionPref') return { useMotionPref: () => ({ reduce: reduceMotion }) };
     if (id === '@/hooks/useTimeGridDnD') {
       return {
         useTimeGridDnD: (options: TimeGridDndOptions) => {
@@ -657,6 +666,45 @@ test('WeekTimeGridView: 외부 시간표 preview는 해당 날짜 열의 생성 
   assert.match(markup, /data-time-grid-column="true" data-date="2026-08-25"/);
   assert.match(markup, /data-time-grid-create-ghost="true"/);
   assert.match(markup, /data-time-grid-live-label="true">10:15 – 10:45/);
+});
+
+test('WeekTimeGridView: 외부 변경 ring은 종일·시간 블록에 표시하고 동작 줄이기에서는 정적으로 유지한다', async () => {
+  const highlighted = new Set([
+    'google\u0000primary\u0000highlight-all-day',
+    'google\u0000primary\u0000highlight-timed',
+  ]);
+  const props = {
+    weekDays: Array.from({ length: 7 }, (_, index) => new Date(2026, 7, 23 + index, 12)),
+    events: [
+      event({
+        id: 'highlight-all-day', allDay: true, source: 'google', sourceCalendarId: 'primary',
+      }),
+      event({
+        id: 'highlight-timed', startDate: '2026-08-25', endDate: '2026-08-25',
+        startTime: '10:00', endTime: '11:00', source: 'google', sourceCalendarId: 'primary',
+      }),
+    ],
+    today: '2026-01-01',
+    onEventClick() {},
+    onSlotClick() {},
+    tagNameById: {},
+    calendarNameById: {},
+    activeWeekIndex: 1,
+    weekCount: 4,
+    onWeekChange() {},
+    highlightedEventIdentities: highlighted,
+  };
+  const animatedModule = await loadWeekTimeGridView(false);
+  const animatedMarkup = renderToStaticMarkup(createElement(animatedModule.default, props));
+  assert.match(animatedMarkup, /data-event-identity="google\u0000primary\u0000highlight-all-day"[^>]*data-realtime-highlight="true"/);
+  assert.match(animatedMarkup, /data-event-identity="google\u0000primary\u0000highlight-timed"[^>]*data-realtime-highlight="true"/);
+  assert.match(animatedMarkup, /calendar-realtime-highlight/);
+  assert.doesNotMatch(animatedMarkup, /calendar-realtime-highlight-static/);
+
+  const staticModule = await loadWeekTimeGridView(true);
+  const staticMarkup = renderToStaticMarkup(createElement(staticModule.default, props));
+  assert.match(staticMarkup, /calendar-realtime-highlight-static/);
+  assert.doesNotMatch(staticMarkup, /class="[^"]*calendar-realtime-highlight [^"]*"/);
 });
 
 test('WeekTimeGridView: 이동 블록은 Framer Motion scale 1.02를 쓰고 안착은 0.45초 overshoot로 복귀한다', async () => {
