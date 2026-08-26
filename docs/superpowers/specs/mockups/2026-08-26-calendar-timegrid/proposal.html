@@ -1,0 +1,1078 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>캘린더 시간표 시안</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;700;800&display=swap">
+<style>
+  :root {
+    --bg: #0F1117;
+    --panel: #1A1D27;
+    --panel-2: #20242F;
+    --line: #2D3041;
+    --line-soft: rgba(45, 48, 65, 0.55);
+    --text: #E8E8EE;
+    --muted: #8B8DA3;
+    --accent: #6C5CE7;
+    --accent-soft: #A29BFE;
+    --red: #FF5F5F;
+    --blue: #74B9FF;
+    --purple: #A29BFE;
+    --yellow: #FDCB6E;
+    --green: #00B894;
+    --orange: #E17055;
+    --radius: 10px;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'Pretendard Variable', Pretendard, 'Noto Sans KR', system-ui, -apple-system, 'Segoe UI', 'Malgun Gothic', sans-serif;
+    line-height: 1.65;
+    -webkit-font-smoothing: antialiased;
+  }
+  .wrap { max-width: 1160px; margin: 0 auto; padding: 56px 28px 96px; }
+  section { margin-top: 88px; }
+
+  /* ---------- 타이포 ---------- */
+  .eyebrow {
+    font-size: 12px; font-weight: 700; letter-spacing: 0.12em;
+    color: var(--accent-soft); text-transform: uppercase;
+  }
+  h1 {
+    font-size: clamp(30px, 4.4vw, 44px); font-weight: 800; line-height: 1.25;
+    letter-spacing: -0.02em; margin-top: 14px; text-wrap: balance;
+  }
+  h2 {
+    font-size: 24px; font-weight: 800; letter-spacing: -0.01em;
+    margin-bottom: 6px; text-wrap: balance;
+  }
+  .kicker { font-size: 12px; font-weight: 700; letter-spacing: 0.1em; color: var(--muted); margin-bottom: 10px; }
+  .lead { font-size: 16px; color: var(--muted); max-width: 62ch; margin-top: 16px; }
+  .sub { font-size: 14px; color: var(--muted); max-width: 68ch; margin-bottom: 26px; }
+  .sub strong, .lead strong { color: var(--text); font-weight: 700; }
+  .num { font-variant-numeric: tabular-nums; }
+
+  .meta-chips { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 24px; }
+  .meta-chip {
+    font-size: 12px; font-weight: 500; color: var(--muted);
+    background: var(--panel); border: 1px solid var(--line); border-radius: 999px;
+    padding: 6px 14px;
+  }
+  .meta-chip b { color: var(--text); font-weight: 700; }
+
+  /* ---------- 카드 공통 ---------- */
+  .cards { display: grid; gap: 14px; }
+  .cards.c3 { grid-template-columns: repeat(3, 1fr); }
+  .cards.c2 { grid-template-columns: repeat(2, 1fr); }
+  @media (max-width: 900px) { .cards.c3, .cards.c2 { grid-template-columns: 1fr; } }
+  .card {
+    background: var(--panel); border: 1px solid var(--line); border-radius: 14px;
+    padding: 22px 24px;
+  }
+  .card h3 { font-size: 15px; font-weight: 700; margin-bottom: 8px; display: flex; align-items: center; gap: 8px; }
+  .card p { font-size: 13px; color: var(--muted); }
+  .card p strong { color: var(--text); font-weight: 700; }
+  .dot { width: 8px; height: 8px; border-radius: 999px; flex: 0 0 auto; }
+
+  /* ---------- 목업 프레임 ---------- */
+  .frame {
+    background: #0B0D12; border: 1px solid var(--line); border-radius: 16px;
+    padding: 18px; overflow-x: auto;
+  }
+  .mock { min-width: 1060px; }
+
+  /* 앱 헤더 재현 */
+  .mock-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 2px 4px 12px; }
+  .mock-head .left { display: flex; align-items: center; gap: 14px; }
+  .mock-title { display: flex; align-items: center; gap: 8px; font-size: 16px; font-weight: 800; }
+  .mock-title svg { flex: 0 0 auto; }
+  .mock-nav { display: flex; align-items: center; gap: 8px; font-size: 15px; font-weight: 700; }
+  .mock-nav .arrow { color: var(--muted); font-size: 15px; padding: 0 2px; }
+  .btn-today {
+    font-size: 11px; font-weight: 700; color: var(--accent-soft);
+    background: rgba(108, 92, 231, 0.12); border-radius: 8px; padding: 5px 10px;
+  }
+  .seg-group {
+    display: flex; background: var(--panel); border: 1px solid var(--line-soft);
+    border-radius: 8px; padding: 2px;
+  }
+  .seg { font-size: 11px; font-weight: 700; color: var(--muted); padding: 5px 11px; border-radius: 6px; }
+  .seg.on { background: rgba(108, 92, 231, 0.22); color: var(--accent-soft); }
+  .subseg {
+    display: flex; align-items: center; background: var(--panel); border: 1px solid rgba(108, 92, 231, 0.45);
+    border-radius: 8px; padding: 2px; position: relative;
+  }
+  .subseg .seg.on { background: var(--accent); color: #fff; }
+  .btn-new {
+    display: inline-flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 700;
+    color: #fff; background: var(--accent); border-radius: 8px; padding: 7px 14px;
+  }
+  .mock-tagbar { display: flex; align-items: center; gap: 6px; padding: 0 4px 12px; font-size: 11px; }
+  .mock-tagbar .lbl { color: var(--muted); margin-right: 2px; }
+  .tag {
+    font-weight: 700; border-radius: 999px; padding: 4px 11px;
+    border: 1px solid var(--line); color: var(--muted); background: var(--panel);
+  }
+  .tag.on-all { border-color: rgba(108,92,231,0.5); background: rgba(108,92,231,0.15); color: #C4BCFA; }
+  .tag.t-or { border-color: rgba(225,112,85,0.5); background: rgba(225,112,85,0.14); color: #F3A08B; }
+  .tag.t-bl { border-color: rgba(116,185,255,0.5); background: rgba(116,185,255,0.14); color: #9FCDFF; }
+  .tag.t-ye { border-color: rgba(253,203,110,0.5); background: rgba(253,203,110,0.14); color: #FFE09A; }
+  .tag.t-gr { border-color: rgba(0,184,148,0.5); background: rgba(0,184,148,0.12); color: #6FE3C7; }
+
+  .mock-body { display: flex; gap: 12px; }
+
+  /* 좌측 레일 */
+  .rail { width: 176px; flex: 0 0 auto; display: flex; flex-direction: column; gap: 10px; }
+  .rail-box { background: var(--panel); border: 1px solid var(--line-soft); border-radius: 10px; padding: 10px; }
+  .rail-box .bx-t { font-size: 10px; color: var(--muted); padding: 0 2px 6px; }
+  .mini-head { display: flex; justify-content: space-between; align-items: center; font-size: 11px; font-weight: 700; padding: 0 2px 6px; }
+  .mini-head span:last-child { color: var(--muted); letter-spacing: 2px; }
+  .mini { display: grid; grid-template-columns: repeat(7, 1fr); gap: 1px; font-size: 9px; text-align: center; }
+  .mini .dw { color: var(--muted); font-size: 8px; padding-bottom: 3px; }
+  .mini .d {
+    height: 18px; display: inline-flex; align-items: center; justify-content: center;
+    border-radius: 999px; color: var(--text); position: relative;
+  }
+  .mini .d.dim { color: rgba(139, 141, 163, 0.4); }
+  .mini .d.sun { color: #FF8A8A; }
+  .mini .d.sat { color: #8FC4FF; }
+  .mini .today { background: var(--accent); color: #fff; font-weight: 700; }
+  .mini-week { position: relative; }
+  .mini-week::before {
+    content: ''; position: absolute; inset: -1px -2px; border-radius: 7px;
+    background: rgba(108, 92, 231, 0.14); border: 1px solid rgba(108, 92, 231, 0.4);
+  }
+  .mini .d { z-index: 1; }
+  .rail-sec { font-size: 9px; color: var(--muted); letter-spacing: 0.06em; padding: 6px 2px 4px; }
+  .rail-row { display: flex; align-items: center; gap: 7px; font-size: 11px; padding: 4px 2px; }
+  .rail-row .chk {
+    width: 13px; height: 13px; border-radius: 4px; flex: 0 0 auto;
+    display: inline-flex; align-items: center; justify-content: center;
+    font-size: 9px; color: #fff; font-weight: 800;
+  }
+  .rail-row .off { background: transparent !important; border: 1.5px solid var(--line); color: transparent; }
+  .rail-row .nm { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+  .rail-row .perm { margin-left: auto; font-size: 8px; color: var(--muted); border: 1px solid var(--line); border-radius: 4px; padding: 0 4px; }
+
+  /* 시간 그리드 */
+  .tg { flex: 1 1 0; min-width: 0; background: var(--panel); border: 1px solid var(--line-soft); border-radius: 12px; overflow: hidden; position: relative; }
+  .tg-days { display: grid; grid-template-columns: 56px repeat(7, 1fr); border-bottom: 1px solid var(--line-soft); }
+  .tg-day { text-align: center; padding: 9px 0 7px; font-size: 11px; color: var(--muted); border-left: 1px solid var(--line-soft); }
+  .tg-day .dn { display: inline-flex; align-items: center; justify-content: center; min-width: 24px; height: 24px; border-radius: 999px; font-size: 13px; font-weight: 700; color: var(--text); margin-left: 4px; }
+  .tg-day.is-today { color: var(--accent-soft); }
+  .tg-day.is-today .dn { background: var(--accent); color: #fff; }
+  .tg-day.sun, .tg-day.sun .dn { color: #FF8A8A; }
+  .tg-day.sat, .tg-day.sat .dn { color: #8FC4FF; }
+  .tg-day.sun.is-today .dn, .tg-day.sat.is-today .dn { color: #fff; }
+
+  .tg-allday { display: grid; grid-template-columns: 56px repeat(7, 1fr); border-bottom: 1px solid var(--line); position: relative; }
+  .tg-allday .gut { font-size: 9px; color: var(--muted); display: flex; align-items: center; justify-content: flex-end; padding-right: 8px; }
+  .tg-allday .cell { border-left: 1px solid var(--line-soft); height: 58px; }
+  .adbar {
+    position: absolute; height: 22px; border-radius: 6px; display: flex; align-items: center;
+    padding: 0 8px; font-size: 10px; font-weight: 700; color: var(--text);
+    background: color-mix(in srgb, var(--c) 22%, var(--panel));
+    border-left: 3px solid var(--c);
+  }
+  .adbar .t { color: var(--c); margin-right: 5px; }
+  .admore { position: absolute; font-size: 9px; font-weight: 700; color: var(--muted); background: var(--panel-2); border: 1px solid var(--line); border-radius: 5px; padding: 1px 7px; }
+
+  .tg-collapse {
+    display: flex; align-items: center; justify-content: center; gap: 6px;
+    font-size: 10px; color: var(--muted); padding: 5px 0; border-bottom: 1px solid var(--line-soft);
+    background: rgba(15, 17, 23, 0.5);
+  }
+  .tg-body { display: grid; grid-template-columns: 56px repeat(7, 1fr); position: relative; }
+  .tg-gut { position: relative; height: 560px; }
+  .tg-gut .hl { position: absolute; right: 8px; transform: translateY(-55%); font-size: 10px; color: var(--muted); }
+  .tg-col {
+    position: relative; height: 560px; border-left: 1px solid var(--line-soft);
+    background:
+      repeating-linear-gradient(to bottom, transparent 0 27px, rgba(45,48,65,0.28) 27px 28px, transparent 28px 55px, rgba(45,48,65,0.62) 55px 56px);
+  }
+  .tg-col.is-today { background-color: rgba(108, 92, 231, 0.05); }
+  .tg-col.wknd { background-color: rgba(15, 17, 23, 0.35); }
+
+  .blk {
+    position: absolute; left: 3px; right: 3px; border-radius: 7px;
+    background: color-mix(in srgb, var(--c) 18%, var(--panel));
+    border-left: 3px solid var(--c);
+    padding: 3px 7px; overflow: hidden; box-shadow: 0 1px 0 rgba(0,0,0,0.25);
+  }
+  .blk .tm { font-size: 9px; font-weight: 700; color: var(--c); letter-spacing: 0.02em; }
+  .blk .ti { font-size: 11px; font-weight: 700; color: var(--text); line-height: 1.3; }
+  .blk.past { opacity: 0.5; }
+  .blk.now-on { box-shadow: 0 0 0 1px color-mix(in srgb, var(--c) 55%, transparent), 0 4px 14px rgba(0,0,0,0.35); }
+  .blk.half-l { right: 51%; }
+  .blk.half-r { left: 51%; }
+  .blk .rz {
+    position: absolute; left: 0; right: 0; bottom: 0; height: 8px; cursor: ns-resize;
+    display: flex; align-items: flex-end; justify-content: center;
+  }
+  .blk .rz::after { content: ''; width: 22px; height: 3px; border-radius: 2px; background: color-mix(in srgb, var(--c) 70%, transparent); margin-bottom: 2px; }
+  .blk.ghost {
+    background: rgba(108, 92, 231, 0.10); border: 1.5px dashed var(--accent-soft); border-left-width: 1.5px;
+    box-shadow: none;
+  }
+  .blk.ghost .tm { color: var(--accent-soft); }
+
+  .nowline { position: absolute; left: 56px; right: 0; height: 0; border-top: 1px solid rgba(255, 95, 95, 0.28); pointer-events: none; }
+  .nowline-strong { position: absolute; height: 0; border-top: 2px solid var(--red); pointer-events: none; }
+  .nowline-strong::before {
+    content: ''; position: absolute; left: -4px; top: -5px; width: 8px; height: 8px;
+    border-radius: 999px; background: var(--red);
+  }
+  .now-chip {
+    position: absolute; right: calc(100% - 52px); transform: translateY(-55%);
+    font-size: 9px; font-weight: 800; color: #fff; background: var(--red);
+    border-radius: 4px; padding: 1px 5px;
+  }
+
+  /* 주석 배지 */
+  .ann {
+    position: absolute; z-index: 5; width: 20px; height: 20px; border-radius: 999px;
+    background: var(--accent); color: #fff; font-size: 11px; font-weight: 800;
+    display: inline-flex; align-items: center; justify-content: center;
+    box-shadow: 0 0 0 3px rgba(108, 92, 231, 0.25);
+  }
+  .legend { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px 26px; margin-top: 22px; }
+  @media (max-width: 800px) { .legend { grid-template-columns: 1fr; } }
+  .legend li { display: flex; gap: 10px; font-size: 13px; color: var(--muted); list-style: none; }
+  .legend b { color: var(--text); }
+  .legend .n {
+    flex: 0 0 auto; width: 20px; height: 20px; border-radius: 999px; margin-top: 2px;
+    background: var(--accent); color: #fff; font-size: 11px; font-weight: 800;
+    display: inline-flex; align-items: center; justify-content: center;
+  }
+  .callout {
+    display: flex; gap: 12px; align-items: flex-start;
+    background: rgba(108, 92, 231, 0.08); border: 1px solid rgba(108, 92, 231, 0.35);
+    border-radius: 12px; padding: 16px 18px; margin-top: 18px; font-size: 13px; color: var(--muted);
+  }
+  .callout b { color: var(--accent-soft); }
+
+  /* ---------- 데모 카드 ---------- */
+  .demo-stage {
+    margin-top: 14px; background: #0B0D12; border: 1px solid var(--line-soft); border-radius: 10px;
+    height: 170px; position: relative; overflow: hidden;
+    background-image: repeating-linear-gradient(to bottom, transparent 0 27px, rgba(45,48,65,0.4) 27px 28px);
+  }
+  .demo-stage .dcol { position: absolute; top: 0; bottom: 0; border-left: 1px solid var(--line-soft); }
+  .demo-note { font-size: 11px; color: var(--muted); margin-top: 10px; }
+  .demo-note b { color: var(--text); }
+
+  /* 데모 1: 드래그 생성 */
+  @keyframes d1-grow {
+    0% { height: 0; opacity: 0; }
+    8% { height: 28px; opacity: 1; }
+    28% { height: 28px; }
+    36% { height: 56px; }
+    58% { height: 84px; }
+    82% { height: 84px; opacity: 1; }
+    92%, 100% { height: 84px; opacity: 0; }
+  }
+  .d1-blk {
+    position: absolute; left: 68px; width: 150px; top: 28px; height: 84px;
+    background: rgba(108, 92, 231, 0.14); border: 1.5px dashed var(--accent-soft);
+    border-radius: 7px; padding: 4px 8px; overflow: hidden;
+    animation: d1-grow 4.2s ease-in-out infinite;
+  }
+  .d1-lbl { position: absolute; top: 4px; left: 8px; font-size: 10px; font-weight: 800; color: var(--accent-soft); }
+  @keyframes d1-l1 { 0%, 7% { opacity: 1; } 30%, 100% { opacity: 0; } }
+  @keyframes d1-l2 { 0%, 30% { opacity: 0; } 34%, 55% { opacity: 1; } 60%, 100% { opacity: 0; } }
+  @keyframes d1-l3 { 0%, 57% { opacity: 0; } 62%, 88% { opacity: 1; } 94%, 100% { opacity: 0; } }
+  .d1-l1 { animation: d1-l1 4.2s infinite; }
+  .d1-l2 { animation: d1-l2 4.2s infinite; }
+  .d1-l3 { animation: d1-l3 4.2s infinite; }
+  @keyframes d1-pop {
+    0%, 62% { opacity: 0; transform: scale(0.95) translateY(4px); }
+    68%, 86% { opacity: 1; transform: scale(1) translateY(0); }
+    94%, 100% { opacity: 0; }
+  }
+  .d1-pop {
+    position: absolute; right: 8px; top: 44px; width: 120px;
+    background: var(--panel-2); border: 1px solid var(--line); border-radius: 8px;
+    padding: 8px 10px; font-size: 10px; color: var(--muted);
+    animation: d1-pop 4.2s cubic-bezier(0.16, 1, 0.3, 1) infinite;
+  }
+  .d1-pop .fld { height: 8px; border-radius: 3px; background: var(--line); margin-top: 5px; }
+  .d1-pop .fld.short { width: 60%; }
+
+  /* 데모 2: 이동 고스트 */
+  @keyframes d2-move {
+    0%, 12% { transform: translate(0, 0) scale(1); box-shadow: 0 1px 0 rgba(0,0,0,0.25); }
+    20% { transform: translate(0, -3px) scale(1.03); box-shadow: 0 10px 22px rgba(0,0,0,0.5); }
+    55% { transform: translate(120px, 28px) scale(1.03); box-shadow: 0 10px 22px rgba(0,0,0,0.5); }
+    64% { transform: translate(120px, 28px) scale(0.995); box-shadow: 0 1px 0 rgba(0,0,0,0.25); }
+    68% { transform: translate(120px, 28px) scale(1.008); }
+    72%, 88% { transform: translate(120px, 28px) scale(1); }
+    96%, 100% { transform: translate(0, 0) scale(1); opacity: 0; }
+  }
+  @keyframes d2-ghost {
+    0%, 14% { opacity: 0; }
+    22%, 60% { opacity: 1; }
+    68%, 100% { opacity: 0; }
+  }
+  .d2-blk {
+    position: absolute; left: 40px; top: 28px; width: 140px; height: 56px;
+    border-radius: 7px; background: color-mix(in srgb, var(--yellow) 18%, var(--panel));
+    border-left: 3px solid var(--yellow); padding: 3px 8px;
+    animation: d2-move 5s cubic-bezier(0.16, 1, 0.3, 1) infinite;
+  }
+  .d2-ghost {
+    position: absolute; left: 40px; top: 28px; width: 140px; height: 56px;
+    border-radius: 7px; border: 1.5px dashed rgba(253, 203, 110, 0.5);
+    animation: d2-ghost 5s infinite;
+  }
+  @keyframes d2-tm { 0%, 30% { opacity: 1; } 34%, 100% { opacity: 0; } }
+  @keyframes d2-tm2 { 0%, 32% { opacity: 0; } 38%, 100% { opacity: 1; } }
+  .d2-tm1 { animation: d2-tm 5s infinite; }
+  .d2-tm2 { position: absolute; top: 3px; left: 8px; animation: d2-tm2 5s infinite; }
+
+  /* 데모 3: 안착 피드백 (클릭 리플레이) */
+  .d3-blk {
+    position: absolute; left: 70px; top: 42px; width: 170px; height: 56px;
+    border-radius: 7px; background: color-mix(in srgb, var(--blue) 18%, var(--panel));
+    border-left: 3px solid var(--blue); padding: 3px 8px; cursor: pointer;
+  }
+  @keyframes d3-settle {
+    0% { transform: translateY(-14px) scale(1.03); box-shadow: 0 12px 24px rgba(0,0,0,0.5); }
+    55% { transform: translateY(2px) scale(0.995); box-shadow: 0 1px 0 rgba(0,0,0,0.25); }
+    75% { transform: translateY(-1px) scale(1.006); }
+    100% { transform: translateY(0) scale(1); }
+  }
+  @keyframes d3-flash {
+    0%, 20% { box-shadow: 0 0 0 0 rgba(116, 185, 255, 0); }
+    45% { box-shadow: 0 0 0 3px rgba(116, 185, 255, 0.45); }
+    100% { box-shadow: 0 0 0 0 rgba(116, 185, 255, 0); }
+  }
+  .d3-blk.play { animation: d3-settle 0.45s cubic-bezier(0.34, 1.56, 0.64, 1), d3-flash 0.9s ease-out; }
+
+  /* 데모 4: 실시간 반영 */
+  @keyframes d4-jump {
+    0%, 30% { transform: translate(0, 0); }
+    44% { transform: translate(0, 56px); }
+    50%, 100% { transform: translate(0, 56px); }
+  }
+  @keyframes d4-ring {
+    0%, 44% { opacity: 0; transform: scale(0.9); }
+    52% { opacity: 1; transform: scale(1); }
+    80%, 100% { opacity: 0; transform: scale(1.25); }
+  }
+  @keyframes d4-chip {
+    0%, 46% { opacity: 0; transform: translateY(4px); }
+    54%, 86% { opacity: 1; transform: translateY(0); }
+    96%, 100% { opacity: 0; }
+  }
+  .d4-blk {
+    position: absolute; left: 60px; top: 20px; width: 160px; height: 42px;
+    border-radius: 7px; background: color-mix(in srgb, var(--green) 18%, var(--panel));
+    border-left: 3px solid var(--green); padding: 3px 8px;
+    animation: d4-jump 5.5s cubic-bezier(0.16, 1, 0.3, 1) infinite;
+  }
+  .d4-ring {
+    position: absolute; left: 56px; top: 72px; width: 168px; height: 50px; border-radius: 9px;
+    border: 2px solid rgba(0, 184, 148, 0.55); pointer-events: none;
+    animation: d4-ring 5.5s ease-out infinite;
+  }
+  .d4-chip {
+    position: absolute; right: 10px; top: 132px; font-size: 10px; font-weight: 700;
+    color: #6FE3C7; background: rgba(0, 184, 148, 0.14); border: 1px solid rgba(0, 184, 148, 0.4);
+    border-radius: 999px; padding: 3px 10px;
+    animation: d4-chip 5.5s ease-out infinite;
+  }
+
+  /* 데모 5: 툴팁 등장 (호버) */
+  .d5-chip {
+    position: absolute; left: 60px; top: 62px; width: 180px; height: 26px; border-radius: 6px;
+    background: color-mix(in srgb, var(--purple) 20%, var(--panel));
+    border-left: 3px solid var(--purple); display: flex; align-items: center;
+    padding: 0 8px; font-size: 11px; font-weight: 700; cursor: default;
+  }
+  .d5-tip {
+    position: absolute; left: 96px; top: 90px; width: 190px;
+    background: rgba(26, 29, 39, 0.92); border: 1px solid var(--line); border-radius: 10px;
+    padding: 10px 12px; font-size: 11px; color: var(--muted);
+    opacity: 0; transform: scale(0.96) translateY(-3px); transform-origin: top left;
+    transition: opacity 0.2s ease-out, transform 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+    pointer-events: none; backdrop-filter: blur(8px);
+  }
+  .d5-tip b { color: var(--text); display: block; margin-bottom: 2px; }
+  .d5-chip:hover + .d5-tip, .d5-chip:focus-visible + .d5-tip { opacity: 1; transform: scale(1) translateY(0); }
+
+  /* 데모 6: 태그 칩 스프링 */
+  .d6-row { position: absolute; left: 0; right: 0; top: 56px; display: flex; justify-content: center; gap: 8px; }
+  .d6-tag {
+    font-size: 12px; font-weight: 700; border-radius: 999px; padding: 7px 16px;
+    border: 1px solid var(--line); color: var(--muted); background: var(--panel); cursor: pointer;
+    transition: transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1), background 0.15s, color 0.15s, border-color 0.15s;
+  }
+  .d6-tag.on { border-color: rgba(253, 203, 110, 0.5); background: rgba(253, 203, 110, 0.14); color: #FFE09A; }
+  .d6-tag:active { transform: scale(0.92); }
+  .d6-tag.pop { animation: d6-pop 0.35s cubic-bezier(0.34, 1.56, 0.64, 1); }
+  @keyframes d6-pop { 0% { transform: scale(0.9); } 60% { transform: scale(1.06); } 100% { transform: scale(1); } }
+
+  /* ---------- 월 보기 before/after ---------- */
+  .ba { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+  @media (max-width: 800px) { .ba { grid-template-columns: 1fr; } }
+  .ba-cell {
+    background: #0B0D12; border: 1px solid var(--line-soft); border-radius: 10px;
+    padding: 12px; margin-top: 14px;
+  }
+  .ba-cell .dnum { font-size: 12px; font-weight: 700; margin-bottom: 8px; color: var(--text); }
+  .ba-bar {
+    height: 24px; border-radius: 6px; display: flex; align-items: center; gap: 5px;
+    padding: 0 8px; font-size: 10px; font-weight: 700; color: var(--text); margin-bottom: 5px;
+    background: color-mix(in srgb, var(--c) 20%, var(--panel));
+    border-left: 3px solid var(--c);
+  }
+  .ba-bar .t { color: var(--c); }
+  .ba-dotline {
+    height: 22px; display: flex; align-items: center; gap: 6px; padding: 0 4px;
+    font-size: 10.5px; font-weight: 600; color: var(--text); margin-bottom: 3px; border-radius: 6px;
+  }
+  .ba-dotline:hover { background: rgba(45, 48, 65, 0.4); }
+  .ba-dotline .dt { width: 7px; height: 7px; border-radius: 999px; background: var(--c); flex: 0 0 auto; }
+  .ba-dotline .t { color: var(--muted); font-weight: 700; font-size: 10px; }
+  .ba-label { font-size: 11px; font-weight: 800; letter-spacing: 0.08em; color: var(--muted); }
+  .ba-label.aft { color: var(--accent-soft); }
+
+  /* ---------- 옵션/결정 ---------- */
+  .opt { position: relative; }
+  .opt .pick {
+    position: absolute; top: -10px; right: 14px; font-size: 10px; font-weight: 800;
+    color: #fff; background: var(--accent); border-radius: 999px; padding: 3px 10px;
+    letter-spacing: 0.05em;
+  }
+  .opt-vis {
+    margin-top: 12px; background: #0B0D12; border: 1px solid var(--line-soft); border-radius: 8px;
+    padding: 10px; display: flex; align-items: center; gap: 6px; flex-wrap: wrap;
+  }
+  .decision { border-left: 3px solid var(--accent); }
+  .decision h3 .qn { color: var(--accent-soft); }
+  .dec-opts { display: flex; flex-direction: column; gap: 8px; margin-top: 12px; }
+  .dec-opt {
+    display: flex; gap: 10px; align-items: baseline; font-size: 13px; color: var(--muted);
+    background: rgba(15, 17, 23, 0.6); border: 1px solid var(--line-soft); border-radius: 8px; padding: 9px 12px;
+  }
+  .dec-opt b { color: var(--text); }
+  .dec-opt.rec { border-color: rgba(108, 92, 231, 0.5); background: rgba(108, 92, 231, 0.07); }
+  .dec-opt .ab { flex: 0 0 auto; font-size: 11px; font-weight: 800; color: var(--accent-soft); }
+
+  /* ---------- 보완 목록 ---------- */
+  .tier { margin-top: 20px; }
+  .tier-h { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
+  .tier-badge { font-size: 11px; font-weight: 800; border-radius: 6px; padding: 3px 10px; letter-spacing: 0.06em; }
+  .tier-badge.t0 { background: rgba(108, 92, 231, 0.18); color: var(--accent-soft); }
+  .tier-badge.t1 { background: rgba(116, 185, 255, 0.14); color: #9FCDFF; }
+  .tier-badge.t2 { background: rgba(139, 141, 163, 0.14); color: var(--muted); }
+  .tier-h span { font-size: 12px; color: var(--muted); }
+  .item-list { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  @media (max-width: 800px) { .item-list { grid-template-columns: 1fr; } }
+  .item {
+    background: var(--panel); border: 1px solid var(--line-soft); border-radius: 10px;
+    padding: 12px 15px; font-size: 13px; color: var(--muted);
+  }
+  .item b { color: var(--text); display: block; margin-bottom: 2px; font-size: 13px; }
+
+  /* ---------- 로드맵 ---------- */
+  .road { display: flex; flex-direction: column; gap: 0; margin-top: 8px; }
+  .road-step { display: flex; gap: 18px; position: relative; padding-bottom: 26px; }
+  .road-step::before {
+    content: ''; position: absolute; left: 15px; top: 34px; bottom: 0; width: 2px;
+    background: var(--line);
+  }
+  .road-step:last-child::before { display: none; }
+  .road-n {
+    flex: 0 0 auto; width: 32px; height: 32px; border-radius: 999px;
+    background: var(--panel); border: 2px solid var(--accent); color: var(--accent-soft);
+    font-size: 13px; font-weight: 800; display: inline-flex; align-items: center; justify-content: center;
+  }
+  .road-b { padding-top: 3px; }
+  .road-b h3 { font-size: 15px; font-weight: 700; margin-bottom: 4px; }
+  .road-b h3 .vtag { font-size: 10px; font-weight: 700; color: var(--muted); border: 1px solid var(--line); border-radius: 5px; padding: 1px 7px; margin-left: 8px; vertical-align: 2px; }
+  .road-b p { font-size: 13px; color: var(--muted); max-width: 64ch; }
+
+  footer { margin-top: 88px; border-top: 1px solid var(--line); padding-top: 26px; font-size: 12px; color: var(--muted); }
+
+  @media (prefers-reduced-motion: reduce) {
+    * { animation: none !important; transition: none !important; }
+    .d5-tip { opacity: 1; transform: none; }
+  }
+</style>
+</head>
+<body>
+
+<div class="wrap">
+
+  <header>
+    <div class="eyebrow">B flow 캘린더 개편 · 2차 제안 · 2026-08-26</div>
+    <h1>주간 시간표 보기,<br>그리고 캘린더 다듬기</h1>
+    <p class="lead">
+      지금 캘린더의 주간 보기는 <strong>일정을 카드로 쌓아 보여주는 방식</strong>이라, 하루 안에서
+      "몇 시에 뭐가 있고 언제가 비는지"는 한눈에 들어오지 않아요. 구글 캘린더처럼
+      <strong>세로 시간표 위에 일정을 배치하는 보기</strong>를 추가하고, 그 김에 캘린더 전반의
+      감각을 프로 앱 수준으로 다듬는 제안입니다.
+    </p>
+    <div class="meta-chips">
+      <span class="meta-chip">현재 <b>v1.105</b> · 공유 캘린더 1차 완료</span>
+      <span class="meta-chip">시간 정보 저장·입력은 <b>이미 지원됨</b> → 그리는 방식만 추가</span>
+      <span class="meta-chip">원래 기획서에서도 <b>"다음 단계"로 예약</b>돼 있던 항목</span>
+    </div>
+  </header>
+
+  <!-- ============ 1. 왜 ============ -->
+  <section>
+    <div class="kicker">01 · 왜 지금 이걸 하나요</div>
+    <h2>재료는 다 있는데, 시간을 "그리는" 화면만 없어요</h2>
+    <p class="sub">일정을 만들 때 이미 시작·종료 시각을 입력할 수 있고, 저장도 잘 되고 있어요. 다만 그 시각이 카드 속 글자로만 보일 뿐이에요.</p>
+    <div class="cards c3">
+      <div class="card">
+        <h3><span class="dot" style="background: var(--yellow)"></span>지금은</h3>
+        <p>주간 보기에서 "회의 14:00 – 15:00"이라는 <strong>글자</strong>는 보이지만, 오후가 얼마나 비는지·일정끼리 겹치는지는 머릿속으로 계산해야 해요.</p>
+      </div>
+      <div class="card">
+        <h3><span class="dot" style="background: var(--blue)"></span>시간표가 생기면</h3>
+        <p>회의가 시간표 위 <strong>블록</strong>으로 그려져서, 빈 시간·겹친 일정·지금 진행 중인 일정이 보자마자 읽혀요. 빈 칸을 드래그하면 그 시간대로 일정이 만들어져요.</p>
+      </div>
+      <div class="card">
+        <h3><span class="dot" style="background: var(--green)"></span>기존 방식은 그대로</h3>
+        <p>한솔님이 고안한 <strong>카드형 주간 보기는 없애지 않아요.</strong> 마감·D-day 훑어보기엔 카드가 더 좋아서, 두 방식을 전환해 쓰는 구성을 추천해요.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ 2. 메인 시안 ============ -->
+  <section>
+    <div class="kicker">02 · 시안</div>
+    <h2>주간 시간표 보기</h2>
+    <p class="sub">보라색 번호 배지는 설명용 표시예요. 아래 목록에서 번호별 설명을 확인해 주세요. 색·글꼴은 실제 앱 기준으로 재현했고, <strong>배지 8·9번은 시간표와 함께 새로 제안하는 변경</strong>이에요.</p>
+
+    <div class="frame">
+      <div class="mock">
+        <!-- 헤더 -->
+        <div class="mock-head">
+          <div class="left">
+            <div class="mock-title">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#6C5CE7" stroke-width="2" stroke-linecap="round"><rect x="3" y="4" width="18" height="18" rx="2"></rect><path d="M16 2v4M8 2v4M3 10h18"></path></svg>
+              캘린더
+            </div>
+            <div class="mock-nav">
+              <span class="arrow">‹</span>
+              <span class="num">2026년 8월</span>
+              <span class="arrow">›</span>
+              <span class="btn-today">오늘</span>
+              <span style="font-size: 11px; color: var(--muted); font-weight: 500; margin-left: 4px;" class="num">35주차 · 8.24 – 8.30</span>
+            </div>
+          </div>
+          <div style="display: flex; align-items: center; gap: 8px; position: relative;">
+            <div class="seg-group">
+              <span class="seg">월</span>
+              <span class="seg">2주</span>
+              <span class="seg on">주</span>
+              <span class="seg">오늘</span>
+            </div>
+            <div class="subseg">
+              <span class="seg">카드</span>
+              <span class="seg on">시간표</span>
+              <span class="ann" style="top: -12px; right: -10px;">9</span>
+            </div>
+            <span class="btn-new">＋ 일정</span>
+          </div>
+        </div>
+
+        <!-- 태그줄 -->
+        <div class="mock-tagbar">
+          <span class="lbl">태그</span>
+          <span class="tag on-all">전체</span>
+          <span class="tag t-or">업로드</span>
+          <span class="tag t-bl">가편</span>
+          <span class="tag t-ye">대본</span>
+          <span class="tag">회의</span>
+          <span class="tag t-gr">휴가</span>
+          <span style="border: none; background: none; color: var(--muted); padding: 4px 6px;">⚙ 태그 관리</span>
+        </div>
+
+        <div class="mock-body">
+          <!-- 좌측 레일 -->
+          <div class="rail">
+            <div class="rail-box" style="position: relative;">
+              <span class="ann" style="top: -8px; left: -8px;">8</span>
+              <div class="mini-head"><span class="num">2026년 8월</span><span>‹ ›</span></div>
+              <div class="mini">
+                <span class="dw">월</span><span class="dw">화</span><span class="dw">수</span><span class="dw">목</span><span class="dw">금</span><span class="dw" style="color:#8FC4FF">토</span><span class="dw" style="color:#FF8A8A">일</span>
+                <span class="d dim num">27</span><span class="d dim num">28</span><span class="d dim num">29</span><span class="d dim num">30</span><span class="d dim num">31</span><span class="d sat num">1</span><span class="d sun num">2</span>
+                <span class="d num">3</span><span class="d num">4</span><span class="d num">5</span><span class="d num">6</span><span class="d num">7</span><span class="d sat num">8</span><span class="d sun num">9</span>
+                <span class="d num">10</span><span class="d num">11</span><span class="d num">12</span><span class="d num">13</span><span class="d num">14</span><span class="d sat num">15</span><span class="d sun num">16</span>
+                <span class="d num">17</span><span class="d num">18</span><span class="d num">19</span><span class="d num">20</span><span class="d num">21</span><span class="d sat num">22</span><span class="d sun num">23</span>
+              </div>
+              <div class="mini mini-week">
+                <span class="d num">24</span><span class="d num">25</span><span class="d today num">26</span><span class="d num">27</span><span class="d num">28</span><span class="d sat num">29</span><span class="d sun num">30</span>
+              </div>
+              <div class="mini">
+                <span class="d num">31</span><span class="d dim num">1</span><span class="d dim num">2</span><span class="d dim num">3</span><span class="d dim num">4</span><span class="d dim num" style="color: rgba(143,196,255,0.4)">5</span><span class="d dim num" style="color: rgba(255,138,138,0.4)">6</span>
+              </div>
+            </div>
+            <div class="rail-box">
+              <div class="rail-sec">내 캘린더</div>
+              <div class="rail-row"><span class="chk" style="background: var(--accent)">✓</span><span class="nm">내 개인 일정</span></div>
+              <div class="rail-sec">팀 전체</div>
+              <div class="rail-row"><span class="chk" style="background: var(--purple)">✓</span><span class="nm">제작 전체</span></div>
+              <div class="rail-row"><span class="chk" style="background: var(--orange)">✓</span><span class="nm">업로드 일정</span></div>
+              <div class="rail-sec">나에게 공유됨</div>
+              <div class="rail-row"><span class="chk" style="background: var(--yellow)">✓</span><span class="nm">연출팀</span><span class="perm">편집</span></div>
+              <div class="rail-sec">내 구글</div>
+              <div class="rail-row"><span class="chk off"></span><span class="nm" style="color: var(--muted)">Google 캘린더</span></div>
+            </div>
+          </div>
+
+          <!-- 시간 그리드 -->
+          <div class="tg">
+            <!-- 요일 헤더 -->
+            <div class="tg-days">
+              <div></div>
+              <div class="tg-day">월 <span class="dn num">24</span></div>
+              <div class="tg-day">화 <span class="dn num">25</span></div>
+              <div class="tg-day is-today">수 <span class="dn num">26</span></div>
+              <div class="tg-day">목 <span class="dn num">27</span></div>
+              <div class="tg-day">금 <span class="dn num">28</span></div>
+              <div class="tg-day sat">토 <span class="dn num">29</span></div>
+              <div class="tg-day sun">일 <span class="dn num">30</span></div>
+            </div>
+
+            <!-- 종일 레인 -->
+            <div class="tg-allday">
+              <span class="ann" style="top: 18px; left: 8px;">1</span>
+              <div class="gut">종일</div>
+              <div class="cell"></div><div class="cell"></div><div class="cell"></div><div class="cell"></div><div class="cell"></div><div class="cell"></div><div class="cell"></div>
+              <!-- 종일 바: gutter 56px + 7col, col폭 = (100%-56px)/7 -->
+              <div class="adbar" style="--c: var(--blue); left: calc(56px + 4px); width: calc((100% - 56px) / 7 * 3 - 8px); top: 7px;"><span class="t">가편</span> EP07 A파트 마감</div>
+              <div class="adbar" style="--c: var(--green); left: calc(56px + (100% - 56px) / 7 * 3 + 4px); width: calc((100% - 56px) / 7 * 2 - 8px); top: 7px;"><span class="t">휴가</span> 민지</div>
+              <div class="adbar" style="--c: var(--orange); left: calc(56px + (100% - 56px) / 7 * 4 + 4px); width: calc((100% - 56px) / 7 - 8px); top: 33px;"><span class="t">업로드</span> EP05 최종</div>
+              <div class="admore" style="left: calc(56px + (100% - 56px) / 7 * 2 + 4px); top: 35px;">+2개</div>
+            </div>
+
+            <!-- 새벽 접힘 -->
+            <div class="tg-collapse" style="position: relative;">
+              <span class="ann" style="top: 2px; left: 8px;">7</span>
+              <span>⌄ &nbsp;0시 – 9시 · 접혀 있어요 (클릭해 펼치기)</span>
+            </div>
+
+            <!-- 본체 -->
+            <div class="tg-body">
+              <!-- 옅은 현재시각 라인 (전체 폭) : 14:20 = (14.333-9)*56 = 298.7 -->
+              <div class="nowline" style="top: 299px;"></div>
+
+              <div class="tg-gut">
+                <span class="hl" style="top: 0px;">오전 9시</span>
+                <span class="hl" style="top: 56px;">10시</span>
+                <span class="hl" style="top: 112px;">11시</span>
+                <span class="hl" style="top: 168px;">오후 12시</span>
+                <span class="hl" style="top: 224px;">1시</span>
+                <span class="hl" style="top: 280px;">2시</span>
+                <span class="hl" style="top: 336px;">3시</span>
+                <span class="hl" style="top: 392px;">4시</span>
+                <span class="hl" style="top: 448px;">5시</span>
+                <span class="hl" style="top: 504px;">6시</span>
+                <span class="now-chip num" style="top: 299px;">14:20</span>
+              </div>
+
+              <!-- 월 -->
+              <div class="tg-col">
+                <div class="blk past" style="--c: var(--blue); top: 224px; height: 56px;">
+                  <div class="tm num">13:00</div><div class="ti">리깅 싱크</div>
+                </div>
+                <div class="blk past" style="--c: var(--purple); top: 392px; height: 56px;">
+                  <div class="tm num">16:00</div><div class="ti">BG 싱크업</div>
+                </div>
+              </div>
+              <!-- 화 -->
+              <div class="tg-col">
+                <span class="ann" style="top: 64px; left: -10px;">4</span>
+                <div class="blk past" style="--c: var(--yellow); top: 56px; height: 84px;">
+                  <div class="tm num">10:00 – 11:30</div><div class="ti">대본 · EP08 리딩</div>
+                </div>
+              </div>
+              <!-- 수 (오늘) -->
+              <div class="tg-col is-today">
+                <div class="blk past" style="--c: var(--yellow); top: 56px; height: 56px;">
+                  <div class="tm num">10:00</div><div class="ti">콘티 회의</div>
+                </div>
+                <span class="ann" style="top: 268px; right: -8px;">3</span>
+                <div class="blk half-l now-on" style="--c: var(--accent); top: 280px; height: 56px;">
+                  <div class="tm num">14:00</div><div class="ti">주간 제작 회의</div>
+                </div>
+                <div class="blk half-r" style="--c: var(--purple); top: 308px; height: 56px;">
+                  <div class="tm num">14:30</div><div class="ti">검수 · EP06</div>
+                </div>
+                <!-- 진한 현재시각 라인 (오늘 컬럼) -->
+                <div class="nowline-strong" style="top: 299px; left: 0; right: 0;"></div>
+                <span class="ann" style="top: 288px; left: -10px;">2</span>
+              </div>
+              <!-- 목 -->
+              <div class="tg-col">
+                <div class="blk" style="--c: var(--orange); top: 112px; height: 56px;">
+                  <div class="tm num">11:00</div><div class="ti">업로드 점검</div>
+                </div>
+                <div class="blk ghost" style="top: 336px; height: 28px;">
+                  <div class="tm num">15:00 – 15:30</div>
+                </div>
+                <span class="ann" style="top: 330px; right: -8px;">5</span>
+              </div>
+              <!-- 금 -->
+              <div class="tg-col">
+                <div class="blk" style="--c: var(--accent); top: 336px; height: 84px;">
+                  <div class="tm num">15:00 – 16:30</div><div class="ti">합평회</div>
+                  <div class="rz"></div>
+                </div>
+                <span class="ann" style="top: 404px; right: -8px;">6</span>
+              </div>
+              <!-- 토 -->
+              <div class="tg-col wknd"></div>
+              <!-- 일 -->
+              <div class="tg-col wknd"></div>
+            </div>
+
+            <!-- 저녁 접힘 -->
+            <div class="tg-collapse" style="border-bottom: none; border-top: 1px solid var(--line-soft);">
+              <span>⌃ &nbsp;오후 7시 – 자정 · 접혀 있어요 (이 시간대에 일정이 있으면 자동으로 펼쳐져요)</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <ul class="legend">
+      <li><span class="n">1</span><span><b>종일 레인.</b> 마감·휴가처럼 시각이 없는 일정은 위쪽 전용 줄에 가로 바로 깔려요. 줄이 넘치면 "+N개"로 접어요.</span></li>
+      <li><span class="n">2</span><span><b>현재 시각 줄.</b> 빨간 줄이 "지금"을 가리키고, 매분 내려가요. 오늘 칸은 진하게, 다른 요일은 옅게. 화면을 열면 이 줄 근처로 자동 스크롤돼요.</span></li>
+      <li><span class="n">3</span><span><b>겹치면 나란히.</b> 같은 시간대에 일정이 겹치면 반씩 나눠 나란히 배치돼요. 지금 진행 중인 일정은 살짝 도드라져요.</span></li>
+      <li><span class="n">4</span><span><b>지난 일정은 흐리게.</b> 이미 지나간 일정은 옅어져서 "앞으로 남은 일"에 눈이 먼저 가요.</span></li>
+      <li><span class="n">5</span><span><b>빈 칸을 드래그하면 새 일정.</b> 끌수록 15분 단위로 시간이 늘어나고, 놓으면 그 시간이 채워진 일정 만들기 창이 열려요.</span></li>
+      <li><span class="n">6</span><span><b>아래 모서리로 길이 조절.</b> 블록 아래 가장자리를 잡아 끌면 종료 시각이 바뀌어요. 블록을 통째로 끌면 다른 요일·시간대로 이동해요.</span></li>
+      <li><span class="n">7</span><span><b>새벽·늦은 밤은 접어두기.</b> 0~9시와 오후 7시~자정은 평소 접혀 있고, 그 시간대에 일정이 있으면 자동으로 펼쳐져요. 화면 대부분을 업무 시간에 써요.</span></li>
+      <li><span class="n">8</span><span><b>미니 달력을 시간표에 새로 넣는 안이에요.</b> 지금 주간 보기 옆에는 주 목록이 있고, 미니 달력은 월 보기에만 있어요. 시간표에는 미니 달력을 두고, 날짜를 클릭하면 그 주로 이동하게 하는 걸 함께 제안해요. (지금은 미니 달력을 클릭하면 바로 일정 만들기 창이 떠요.)</span></li>
+      <li><span class="n">9</span><span><b>카드 ↔ 시간표 전환.</b> 기존 카드형 주간 보기는 그대로 두고, 스위치로 오가는 방식을 추천해요. 마지막 선택을 기억해요.</span></li>
+    </ul>
+
+    <div class="callout">
+      <span style="font-size: 18px;">💡</span>
+      <span><b>일정 색은 지금 규칙 그대로예요.</b> 소속 캘린더의 색을 따라가되, 다크 화면에서 눈이 편하도록 "옅게 채우고 왼쪽에 진한 띠"를 두는 방식이에요. 구글·Notion 캘린더가 다크 모드에서 쓰는 정석 패턴이고, B flow의 기존 색들과 잘 맞아요.</span>
+    </div>
+  </section>
+
+  <!-- ============ 3. 인터랙션 & 모션 ============ -->
+  <section>
+    <div class="kicker">03 · 만지는 감각</div>
+    <h2>인터랙션 &amp; 모션 데모</h2>
+    <p class="sub">아래 카드들은 실제로 움직여요. 프로 캘린더 앱들이 공통으로 쓰는 손맛을 B flow의 기존 모션 문법(빠르고 절제된 감속)으로 옮겼어요.</p>
+    <div class="cards c3">
+      <div class="card">
+        <h3>드래그로 만들기</h3>
+        <p>빈 칸을 끌면 <strong>15분 단위</strong>로 시간이 붙으며 자라고, 놓는 순간 제목 입력이 열려요.</p>
+        <div class="demo-stage">
+          <div class="dcol" style="left: 56px;"></div>
+          <div class="dcol" style="left: 226px;"></div>
+          <div class="d1-blk">
+            <span class="d1-lbl d1-l1 num">14:00 – 14:15</span>
+            <span class="d1-lbl d1-l2 num">14:00 – 14:30</span>
+            <span class="d1-lbl d1-l3 num">14:00 – 15:00</span>
+          </div>
+          <div class="d1-pop">제목 입력<div class="fld"></div><div class="fld short"></div></div>
+        </div>
+        <div class="demo-note">클릭만 하면 기본 <b>30분</b> 일정이 만들어져요.</div>
+      </div>
+      <div class="card">
+        <h3>옮기는 동안 자리 표시</h3>
+        <p>블록을 들면 원래 자리에 <strong>점선 잔상</strong>이 남고, 블록 속 시각이 실시간으로 바뀌어요.</p>
+        <div class="demo-stage">
+          <div class="dcol" style="left: 30px;"></div>
+          <div class="dcol" style="left: 190px;"></div>
+          <div class="d2-ghost"></div>
+          <div class="d2-blk">
+            <div style="font-size: 9px; font-weight: 800; color: var(--yellow);" class="d2-tm1 num">10:00 – 11:00</div>
+            <div style="font-size: 9px; font-weight: 800; color: var(--yellow);" class="d2-tm2 num">10:30 – 11:30</div>
+            <div style="font-size: 11px; font-weight: 700; margin-top: 10px;">검수 리뷰</div>
+          </div>
+        </div>
+        <div class="demo-note">놓기 전에 <b>Esc</b>를 누르면 원래 자리로 돌아가요.</div>
+      </div>
+      <div class="card">
+        <h3>놓으면 "탁" 안착</h3>
+        <p>드롭 순간 살짝 눌렸다 제자리를 잡고, 테두리가 <strong>한 번 반짝</strong>여서 저장됐음을 알려줘요.</p>
+        <div class="demo-stage" style="cursor: pointer;" id="d3stage">
+          <div class="dcol" style="left: 66px;"></div>
+          <div class="dcol" style="left: 244px;"></div>
+          <div class="d3-blk" id="d3blk">
+            <div style="font-size: 9px; font-weight: 800; color: var(--blue);" class="num">11:00 – 12:00</div>
+            <div style="font-size: 11px; font-weight: 700; margin-top: 2px;">가편 체크</div>
+          </div>
+        </div>
+        <div class="demo-note"><b>카드를 클릭</b>하면 다시 재생돼요.</div>
+      </div>
+      <div class="card">
+        <h3>팀원의 변경이 눈앞에서</h3>
+        <p>다른 팀원이 일정을 옮기면 내 화면에서도 블록이 <strong>부드럽게 이동</strong>하고 잠깐 빛나요. 흔한 캘린더 앱엔 없는, B flow 실시간 동기화만의 맛이에요.</p>
+        <div class="demo-stage">
+          <div class="dcol" style="left: 46px;"></div>
+          <div class="dcol" style="left: 236px;"></div>
+          <div class="d4-blk">
+            <div style="font-size: 9px; font-weight: 800; color: var(--green);" class="num">13:00 – 14:00</div>
+            <div style="font-size: 11px; font-weight: 700;">색보정 점검</div>
+          </div>
+          <div class="d4-ring"></div>
+          <div class="d4-chip">방금 이동 · 지혜</div>
+        </div>
+        <div class="demo-note">이동한 자리에 <b>초록 테두리</b>가 잠깐 남아요.</div>
+      </div>
+      <div class="card">
+        <h3>말풍선도 부드럽게</h3>
+        <p>지금은 일정 위에 말풍선이 <strong>딱 하고 즉시</strong> 떠요. 짧은 페이드를 얹어 등장을 다듬어요.</p>
+        <div class="demo-stage">
+          <div class="d5-chip" tabindex="0"><span class="num" style="color: var(--purple); margin-right: 5px;">14:00</span> 주간 제작 회의</div>
+          <div class="d5-tip"><b>주간 제작 회의</b>수 14:00 – 15:00 · 제작 전체<br>회의실 A · 지난주 이슈 정리</div>
+        </div>
+        <div class="demo-note"><b>일정 위에 마우스를 올려</b> 보세요.</div>
+      </div>
+      <div class="card">
+        <h3>태그 칩에 탄력을</h3>
+        <p>태그를 켜고 끌 때 <strong>살짝 튀는 스프링</strong>을 더하고, 일정들이 부드럽게 나타나고 사라지게 해요.</p>
+        <div class="demo-stage">
+          <div class="d6-row">
+            <button class="d6-tag on" type="button">업로드</button>
+            <button class="d6-tag" type="button">가편</button>
+            <button class="d6-tag on" type="button">대본</button>
+          </div>
+        </div>
+        <div class="demo-note"><b>칩을 클릭</b>해 보세요.</div>
+      </div>
+    </div>
+    <div class="callout">
+      <span style="font-size: 18px;">⚙️</span>
+      <span><b>절제가 기본값이에요.</b> 화면 전환은 빠르게(0.2초 안팎), 연타로 주를 넘길 땐 애니메이션을 건너뛰어요. 시스템의 "움직임 줄이기" 설정을 켠 팀원에게는 지금도 일부 연출이 꺼지지만, <b>화면 전환·창 열림 같은 큰 움직임은 안 꺼져요</b> — 그 빈 부분을 이번에 채워요.</span>
+    </div>
+  </section>
+
+  <!-- ============ 4. 월 보기 폴리싱 ============ -->
+  <section>
+    <div class="kicker">04 · 월 보기 다듬기</div>
+    <h2>시각 일정과 종일 일정을 구분해요</h2>
+    <p class="sub">지금 월 보기에서는 "14:00 회의"도 "3일짜리 마감"도 똑같은 바로 보여요. 구글처럼 시각 일정은 <strong>점 + 시각</strong>으로 가볍게, 기간 일정만 <strong>바</strong>로 그리면 월 화면이 훨씬 덜 빽빽해지고, 칸당 보여줄 수 있는 일정 수도 늘어나요. 다만 겉모습만 바꾸는 게 아니라 <strong>끌어서 옮기는 동작도 점 표시에서 그대로 살려야 해서</strong> 손이 좀 가는 작업이에요 — 부담되면 이 항목만 다음 라운드로 미룰 수 있어요.</p>
+    <div class="ba">
+      <div>
+        <span class="ba-label">지금</span>
+        <div class="ba-cell">
+          <div class="dnum num">26</div>
+          <div class="ba-bar" style="--c: var(--blue);"><span class="t">가편</span> EP07 A파트 마감</div>
+          <div class="ba-bar" style="--c: var(--accent);"><span class="t num">14:00</span> 주간 제작 회의</div>
+          <div class="ba-bar" style="--c: var(--yellow);"><span class="t num">10:00</span> 콘티 회의</div>
+        </div>
+      </div>
+      <div>
+        <span class="ba-label aft">제안</span>
+        <div class="ba-cell">
+          <div class="dnum num">26</div>
+          <div class="ba-bar" style="--c: var(--blue);"><span class="t">가편</span> EP07 A파트 마감</div>
+          <div class="ba-dotline" style="--c: var(--yellow);"><span class="dt"></span><span class="t num">10:00</span> 콘티 회의</div>
+          <div class="ba-dotline" style="--c: var(--accent);"><span class="dt"></span><span class="t num">14:00</span> 주간 제작 회의</div>
+          <div class="ba-dotline" style="--c: var(--purple);"><span class="dt"></span><span class="t num">14:30</span> 검수 · EP06</div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ 5. 함께 챙길 보완 ============ -->
+  <section>
+    <div class="kicker">05 · 함께 챙길 것들</div>
+    <h2>조사하며 발견한 보완 목록</h2>
+    <p class="sub">이번 라운드를 준비하며 캘린더 전체를 훑었더니, 시간표와 별개로 손봐두면 좋은 것들이 나왔어요. 급한 정도로 나눴어요.</p>
+
+    <div class="tier">
+      <div class="tier-h"><span class="tier-badge t0">꼭 같이</span><span>시간표 작업에 자연스럽게 얹을 것들</span></div>
+      <div class="item-list">
+        <div class="item"><b>마지막 보기 기억</b>주/월 등 마지막으로 보던 화면과 카드·시간표 선택을 기억했다가 다음에 그대로 열어줘요. 지금은 캘린더를 떠났다 오면 늘 월 보기로 돌아가요.</div>
+        <div class="item"><b>해 넘김 버그 수정</b>'오늘' 보기에서 12월 31일 → 1월 1일로 넘어갈 수 없는 문제가 있어요. 주간 보기도 연말 이후 넘김이 막혀 있어요.</div>
+        <div class="item"><b>"이번 달 N개" 숫자 정확히</b>지난달에 시작해 이번 달까지 걸친 일정이 위쪽 통계에서 빠져요. 걸친 일정도 세도록 고쳐요.</div>
+        <div class="item"><b>주간 보기 "+N개 더" 표시</b>주간 카드 보기 위쪽 띠는 그 주 일정이 6개를 넘으면 일부가 표시 없이 잘려요. 하루짜리 일정도 포함이라 생각보다 자주 걸리는 문제예요 — "+N개 더"로 보이게 고쳐요.</div>
+        <div class="item"><b>움직임 줄이기 마저 채우기</b>시스템 접근성 설정을 켠 팀원에게 화면 전환·창 열림 같은 큰 움직임까지 전부 꺼지게 해요. 지금은 일부만 꺼져요.</div>
+      </div>
+    </div>
+
+    <div class="tier">
+      <div class="tier-h"><span class="tier-badge t1">추천</span><span>체감이 큰 개선 — 범위는 선택 가능 (Q4)</span></div>
+      <div class="item-list">
+        <div class="item"><b>미니 달력 = 날짜 이동</b>미니 달력 날짜를 클릭하면 지금은 일정 만들기 창이 떠요. 클릭은 "그 날짜로 이동"으로 바꾸는 게 손에 익은 방식이에요.</div>
+        <div class="item"><b>우클릭 빠른 편집 어디서나</b>지금은 월 보기에서만 우클릭 편집이 돼요. 주간·오늘 보기에서도 되게 하고, 빠른 편집에서 시각도 바꿀 수 있게 해요.</div>
+        <div class="item"><b>드래그 취소와 부드러움</b>지금 월 보기에서 일정을 끌다가 마음이 바뀌어도 Esc로 되돌릴 방법이 없고, 빠르게 움직이면 살짝 버벅일 수 있어요. 둘 다 손봐요.</div>
+        <div class="item"><b>말풍선·팝업 다듬기</b>우클릭 편집 창이 닫힐 때 뚝 사라지는 것, 말풍선이 즉시 팝 되는 것, 일정 만들기 창이 열려도 뒤 화면이 전혀 어두워지지 않는 것 등 잔손질 모음이에요.</div>
+        <div class="item"><b>주간 제목줄 보강</b>주간 보기 위쪽에 지금은 "8/24 — 8/30"만 보여요. 시안처럼 연·월과 몇 주차인지 함께 보여줘요.</div>
+      </div>
+    </div>
+
+    <div class="callout">
+      <span style="font-size: 18px;">📌</span>
+      <span>이 밖에 <b>지난번에 남겨둔 알림 작업</b>(일정이 생기거나 바뀌면 앱 안 종으로 알려주고, "이 캘린더 알림 끄기"가 실제로 동작하게)과 <b>키보드 단축키</b>(T=오늘, W/M=주·월 전환, C=새 일정, ←→=주 넘기기, ?=안내)는 아래 진행 순서에 이미 들어 있어요 — 범위 선택(Q4)과 무관하게 진행돼요.</span>
+    </div>
+
+    <div class="tier">
+      <div class="tier-h"><span class="tier-badge t2">다음 기회</span><span>이번 범위에서 빼고, 따로 기획할 것들</span></div>
+      <div class="item-list">
+        <div class="item"><b>반복 일정</b>"매주 월요일 제작 회의" 같은 반복은 저장 구조부터 새로 설계해야 해서 별도 라운드로 빼는 게 안전해요.</div>
+        <div class="item"><b>할 일을 시간표로 끌어오기</b>내 할 일 카드를 시간표에 떨어뜨려 작업 시간을 잡아두는 방식 — 매력적이지만 이번엔 범위 밖으로.</div>
+        <div class="item"><b>대시보드 캘린더 위젯 반영</b>위젯은 별도로 만들어져 있어서 새 시간표가 자동으로 반영되지 않아요. 위젯 개편은 다음에.</div>
+        <div class="item"><b>태그 하나만 보기</b>태그를 더블클릭하면 그 태그만 남기고 다 끄는 방식 — 태그가 더 늘어나면 그때 넣어요.</div>
+        <div class="item"><b>키보드만으로 일정 다루기</b>새 시간표는 처음부터 키보드로 일정을 고를 수 있게 만들고, 기존 월 보기는 다음에 같은 수준으로 맞춰요.</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ 6. 외부 캘린더 구독 ============ -->
+  <section>
+    <div class="kicker">06 · 추가 검토</div>
+    <h2>외부 캘린더 구독, 오버일까요?</h2>
+    <p class="sub">"팀원들이 각자의 개인 캘린더와 연동하는 것"까지 검토해 달라고 하셔서 사이즈를 재봤어요. 결론: <strong>절반은 이미 있고, 절반은 넣을 만한 크기이고, 마지막 하나만 큰 작업</strong>이에요.</p>
+    <div class="cards c3">
+      <div class="card">
+        <h3><span class="dot" style="background: var(--green)"></span>이미 돼요 — 내 구글 연동</h3>
+        <p>팀원 누구나 <strong>설정에서 버튼 한 번</strong>으로 자기 구글 계정을 연결해, 내 구글 일정을 캘린더에 겹쳐 볼 수 있어요. 연결 정보는 각자 PC에만 안전하게 저장되고, 내 구글 일정은 <strong>나에게만 보여요.</strong> 이 기능을 모르는 팀원이 많다면 안내만으로도 절반은 해결돼요.</p>
+      </div>
+      <div class="card">
+        <h3><span class="dot" style="background: var(--blue)"></span>넣을 만해요 — 주소로 구독</h3>
+        <p>애플·네이버·아웃룩·구글 모두 "캘린더 공유 → 주소 복사"를 제공해요. 그 <strong>주소를 붙여넣으면 읽기 전용으로 겹쳐 보이는 구독 기능</strong>을 만들면, 어떤 서비스든 하나의 방식으로 다 커버돼요. 구글이 아닌 개인 캘린더를 쓰는 팀원도 해결. <strong>적당한 크기라 이번 계획 마지막 단계로 넣을 수 있어요.</strong> (Q5)</p>
+      </div>
+      <div class="card">
+        <h3><span class="dot" style="background: var(--orange)"></span>이번엔 무리 — 서로 보기</h3>
+        <p>"팀원들의 개인 일정을 서로 겹쳐 보기"는 개인 일정을 팀 서버에 올려야 해서 <strong>무엇을 얼마나 공개할지(제목까지? "바쁨"만?), 동의는 어떻게 받을지</strong>부터 설계해야 하는 큰 작업이에요. 이번에 끼우면 시간표가 밀려요 — 원하시면 다음 라운드에서 따로 기획할게요.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ 7. 결정 포인트 ============ -->
+  <section>
+    <div class="kicker">07 · 한솔님이 정해주세요</div>
+    <h2>결정 포인트 5가지</h2>
+    <p class="sub">보라 테두리가 제 추천이에요. 다르게 골라도 계획서만 고치면 돼요.</p>
+    <div class="cards c2">
+      <div class="card decision">
+        <h3><span class="qn">Q1.</span> 시간표를 어디에 넣을까요?</h3>
+        <div class="dec-opts">
+          <div class="dec-opt rec"><span class="ab">A</span><span><b>'주' 보기 안에 [카드 | 시간표] 스위치</b> — 위쪽 버튼은 4개 그대로, 주간에서만 방식을 고르는 구성. 기존 방식 유지 + 추가라는 취지에 딱 맞아요. <b>(추천)</b></span></div>
+          <div class="dec-opt"><span class="ab">B</span><span><b>다섯 번째 보기 버튼 추가</b> — [월|2주|주|시간표|오늘]. 한 번에 보이지만 버튼 줄이 길어져요.</span></div>
+          <div class="dec-opt"><span class="ab">C</span><span><b>기존 주 보기를 시간표로 교체</b> — 화면은 단순해지지만 카드형이 사라져요.</span></div>
+        </div>
+        <p style="font-size: 11px; margin-top: 10px;">※ 어느 안이든 <strong style="color: var(--text);">2주 보기는 카드형 그대로</strong>예요 — 시간표는 주간에만 넣어요.</p>
+      </div>
+      <div class="card decision">
+        <h3><span class="qn">Q2.</span> '오늘' 보기도 시간표로?</h3>
+        <div class="dec-opts">
+          <div class="dec-opt rec"><span class="ab">A</span><span><b>이번엔 주간만</b> — 주간에서 반응을 본 뒤 오늘 보기 확장을 결정해요. <b>(추천)</b></span></div>
+          <div class="dec-opt"><span class="ab">B</span><span><b>오늘 보기도 같이</b> — 하루를 크게 보는 세로 시간표 하나가 더 생겨요. 작업량이 늘어요.</span></div>
+        </div>
+      </div>
+      <div class="card decision">
+        <h3><span class="qn">Q3.</span> 진행 순서는?</h3>
+        <div class="dec-opts">
+          <div class="dec-opt rec"><span class="ab">A</span><span><b>지난번에 남겨둔 알림 작업 먼저 → 시간표</b> — 같은 파일을 만지는 작업이라, 정리하고 시작해야 뒤탈이 없어요. <b>(추천)</b></span></div>
+          <div class="dec-opt"><span class="ab">B</span><span><b>시간표 먼저</b> — 눈에 보이는 변화가 빨리 나오지만, 알림 작업과 겹치는 파일 정리를 두 번 하게 될 수 있어요.</span></div>
+        </div>
+      </div>
+      <div class="card decision">
+        <h3><span class="qn">Q4.</span> 다듬기 범위는?</h3>
+        <div class="dec-opts">
+          <div class="dec-opt rec"><span class="ab">A</span><span><b>"꼭 같이" + "추천" 전부</b> — 이번 기회에 캘린더를 완성형으로 끌어올려요. <b>(추천)</b></span></div>
+          <div class="dec-opt"><span class="ab">B</span><span><b>"꼭 같이"만</b> — 시간표에 집중하고 추천 목록은 다음 라운드로. (알림 작업과 키보드 단축키는 이 선택과 무관하게 진행돼요)</span></div>
+        </div>
+      </div>
+      <div class="card decision">
+        <h3><span class="qn">Q5.</span> 외부 캘린더 "주소로 구독"도 넣을까요?</h3>
+        <div class="dec-opts">
+          <div class="dec-opt rec"><span class="ab">A</span><span><b>마지막 단계로 포함</b> — 애플·네이버·아웃룩 등 개인 캘린더를 주소 하나로 구독(읽기 전용, 나만 보기). 시간표 작업과 겹치는 부분이 거의 없어 뒤에 붙이기 좋아요. <b>(추천)</b></span></div>
+          <div class="dec-opt"><span class="ab">B</span><span><b>다음 라운드로</b> — 이번엔 시간표에만 집중해요. ("서로 보기"는 어느 쪽이든 별도 기획이에요)</span></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ 8. 로드맵 ============ -->
+  <section>
+    <div class="kicker">08 · 진행 순서 제안</div>
+    <h2>단계마다 확인받고 진행해요</h2>
+    <p class="sub">단계마다 코드 검토를 통과한 뒤 한솔님 확인을 받고 합쳐요. 배포는 마지막에 따로 지시해 주시면 진행해요.</p>
+    <div class="road">
+      <div class="road-step">
+        <div class="road-n">1</div>
+        <div class="road-b">
+          <h3>남겨둔 알림 작업 마무리<span class="vtag">v1.106</span></h3>
+          <p>지난 캘린더 개편에서 남겨둔 마지막 조각. 일정이 생기거나 바뀌면 앱 안 종으로 알려주고, "이 캘린더 알림 끄기"가 실제로 동작하게 돼요.</p>
+        </div>
+      </div>
+      <div class="road-step">
+        <div class="road-n">2</div>
+        <div class="road-b">
+          <h3>주간 시간표 본체<span class="vtag">v1.107</span></h3>
+          <p>시간표 화면 자체 — 시간축, 종일 레인, 일정 블록 배치, 현재 시각 줄, 겹침 나란히 배치, 카드↔시간표 전환. 여기에 "꼭 같이" 목록(마지막 보기 기억 · 해 넘김 · 이번 달 숫자 · +N개 표시 · 움직임 줄이기)도 함께 들어가요. 이 단계만 합쳐져도 시간표를 "볼" 수 있어요.</p>
+        </div>
+      </div>
+      <div class="road-step">
+        <div class="road-n">3</div>
+        <div class="road-b">
+          <h3>만지는 기능<span class="vtag">v1.108</span></h3>
+          <p>드래그로 만들기, 블록 이동·길이 조절, Esc 취소, 안착 연출, 키보드 단축키, 팀원 변경 실시간 하이라이트. 시간표가 "쓰는" 도구가 돼요.</p>
+        </div>
+      </div>
+      <div class="road-step">
+        <div class="road-n">4</div>
+        <div class="road-b">
+          <h3>폴리싱 패키지<span class="vtag">v1.109</span></h3>
+          <p>"추천" 목록(미니 달력 이동 · 우클릭 편집 확대 · 드래그 취소 · 말풍선 다듬기 · 주간 제목줄)과 월 보기 점·바 구분. Q4 결정에 따라 범위를 조절해요.</p>
+        </div>
+      </div>
+      <div class="road-step">
+        <div class="road-n">5</div>
+        <div class="road-b">
+          <h3>(선택) 외부 캘린더 구독<span class="vtag">v1.110</span></h3>
+          <p>Q5에서 A를 고르시면 — 주소를 붙여넣어 애플·네이버·아웃룩 등 개인 캘린더를 읽기 전용으로 구독하는 기능을 마지막에 붙여요.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <footer>
+    B flow 캘린더 개편 2차 제안 · 2026-08-26 · Claude × 한솔 (Studio JBBJ) —
+    결정 포인트 5가지에 답해 주시면 상세 계획서를 확정하고 구현을 시작할 수 있어요.
+  </footer>
+</div>
+
+<script>
+  (function () {
+    var reduce = false;
+    try { reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches; } catch (e) {}
+
+    // 데모 3: 안착 리플레이
+    var d3 = document.getElementById('d3blk');
+    var d3stage = document.getElementById('d3stage');
+    function playSettle() {
+      if (reduce || !d3) return;
+      d3.classList.remove('play');
+      void d3.offsetWidth;
+      d3.classList.add('play');
+    }
+    if (d3stage) d3stage.addEventListener('click', playSettle);
+    if (!reduce) setTimeout(playSettle, 900);
+
+    // 데모 6: 태그 칩 토글
+    document.querySelectorAll('.d6-tag').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        btn.classList.toggle('on');
+        if (reduce) return;
+        btn.classList.remove('pop');
+        void btn.offsetWidth;
+        btn.classList.add('pop');
+      });
+    });
+  })();
+</script>
+
+</body>
+</html>
