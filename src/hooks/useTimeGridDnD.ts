@@ -97,7 +97,7 @@ export function getTimeGridEventPatch(
   const originalStart = timeToMinutes(original.startTime);
   const originalEnd = timeToMinutes(original.endTime);
   if (mode === 'move') {
-    const duration = Math.max(15, originalEnd - originalStart);
+    const duration = originalEnd - originalStart;
     const start = Math.max(0, targetMinutes - (anchorMinutes - originalStart));
     const startOverflowDays = Math.floor(start / (24 * 60));
     const startDate = addDaysToDate(targetDate, startOverflowDays);
@@ -318,7 +318,7 @@ export function useTimeGridDnD({ scrollContainerRef, onCreate, onEventChange }: 
       if (!target) return;
       const targetMinutes = getPointerMinute(target, clientY);
       const next = state.mode === 'create'
-        ? getTimeGridCreatePreview(target.date, state.anchor.minutes, targetMinutes)
+        ? getTimeGridCreatePreview(state.anchor.date, state.anchor.minutes, targetMinutes)
         : {
           mode: state.mode,
           eventId: state.eventId,

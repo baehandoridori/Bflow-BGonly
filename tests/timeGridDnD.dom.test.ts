@@ -32,7 +32,11 @@ async function loadDnD(): Promise<DndModule> {
 
 type Listener = (event: any) => void;
 
-function installDomHookHarness(module: DndModule, options: Parameters<DndModule['useTimeGridDnD']>[0]) {
+function installDomHookHarness(
+  module: DndModule,
+  options: Parameters<DndModule['useTimeGridDnD']>[0],
+  pointerTargetAt?: (clientX: number, clientY: number, defaultColumn: unknown) => unknown,
+) {
   const React = createRequire(import.meta.url)('react');
   const dispatcher = React.__SECRET_INTERNALS_DO_NOT_USE_OR_YOU_WILL_BE_FIRED.ReactCurrentDispatcher;
   const previousDispatcher = dispatcher.current;
@@ -58,7 +62,7 @@ function installDomHookHarness(module: DndModule, options: Parameters<DndModule[
     head: { appendChild: (node: any) => { if (node.id) styleNodes.set(node.id, node); } },
     createElement: () => ({ id: '', textContent: '', remove() { styleNodes.delete(this.id); } }),
     getElementById: (id: string) => styleNodes.get(id) ?? null,
-    elementFromPoint: () => column,
+    elementFromPoint: (clientX: number, clientY: number) => pointerTargetAt?.(clientX, clientY, column) ?? column,
     addEventListener(type: string, listener: Listener) { (listeners.get(type) ?? listeners.set(type, new Set()).get(type)!).add(listener); },
     removeEventListener(type: string, listener: Listener) { listeners.get(type)?.delete(listener); },
   };
@@ -208,6 +212,40 @@ test('useTimeGridDnD DOM: create·resize callback, Escape 취소, 읽기전용 i
     dnd = harness.render();
     assert.equal(dnd.preview, null);
     assert.equal(changes.length, 0, 'Escape는 완료 callback을 발생시키지 않는다');
+  } finally {
+    harness.restore();
+  }
+});
+
+test('useTimeGridDnD DOM: 새 일정 수직 선택은 옆 날짜 열을 지나도 시작한 날짜에 저장한다', async () => {
+  const creates: unknown[][] = [];
+  let adjacentColumn: any;
+  const harness = installDomHookHarness(
+    await loadDnD(),
+    {
+      scrollContainerRef: { current: { scrollTop: 0, getBoundingClientRect: () => ({ top: 100, bottom: 500 }) } },
+      onCreate: (...args) => creates.push(args),
+    },
+    (clientX, _clientY, defaultColumn) => clientX >= 150 ? adjacentColumn : defaultColumn,
+  );
+  adjacentColumn = {
+    dataset: { date: '2026-08-25', timeGridBandStart: '540' },
+    getBoundingClientRect: harness.column.getBoundingClientRect,
+    closest: () => adjacentColumn,
+  };
+  try {
+    let dnd = harness.render();
+    dnd.beginCreate(event(10, 156), { date: '2026-08-24', bandStartMin: 540, column: harness.column });
+    dnd = harness.render();
+    harness.fire('mousemove', { clientX: 200, clientY: 184 });
+    dnd = harness.render();
+    harness.fire('mouseup', {});
+
+    assert.deepEqual(
+      creates,
+      [['2026-08-24', '10:00', '10:30']],
+      '수직 create는 시작 열의 날짜 하나만 사용한다',
+    );
   } finally {
     harness.restore();
   }

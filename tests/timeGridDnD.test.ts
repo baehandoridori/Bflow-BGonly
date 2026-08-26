@@ -66,6 +66,19 @@ test('useTimeGridDnD: 이동과 하단 리사이즈는 날짜·시간 patch를 �
   );
 });
 
+test('useTimeGridDnD: 15분보다 짧은 외부 일정도 이동하면 원래의 양수 길이를 유지한다', async () => {
+  const dnd = await loadTimeGridDnD();
+  const importedShortEvent = {
+    startDate: '2026-08-24', endDate: '2026-08-24', startTime: '09:00', endTime: '09:10',
+  };
+
+  assert.deepEqual(
+    dnd.getTimeGridEventPatch('move', importedShortEvent, '2026-08-26', 600),
+    { startDate: '2026-08-26', endDate: '2026-08-26', startTime: '10:00', endTime: '10:10' },
+    '이동은 생성·리사이즈와 달리 기존 일정의 길이를 늘리지 않는다',
+  );
+});
+
 test('useTimeGridDnD: 여러 날짜 리사이즈는 날짜를 먼저 비교하고 같은 날에만 최소 길이를 보정한다', async () => {
   const dnd = await loadTimeGridDnD();
   const afternoon = {
