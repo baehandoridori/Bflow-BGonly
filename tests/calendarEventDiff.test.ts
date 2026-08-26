@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { buildEventSnapshot, diffEventSnapshots } from '../src/utils/calendarEventDiff.ts';
+import { calendarEventIdentityKey } from '../src/utils/calendarEventIdentity.ts';
 
 const ev = (id: string, over: Record<string, unknown> = {}) => ({
   id, title: '회의', startDate: '2026-08-26', endDate: '2026-08-26',
@@ -20,6 +21,7 @@ test('시각 변경 → changed에 identity 키', () => {
   const b = buildEventSnapshot([ev('e1', { startTime: '15:00', endTime: '16:00' })] as never);
   const d = diffEventSnapshots(a, b);
   assert.equal(d.changed.length, 1);
+  assert.deepEqual(d.changed, [calendarEventIdentityKey(ev('e1') as never)]);
   assert.equal(d.added.length, 0);
 });
 
@@ -28,6 +30,7 @@ test('신규 이벤트 → added', () => {
   const b = buildEventSnapshot([ev('e1'), ev('e2')] as never);
   const d = diffEventSnapshots(a, b);
   assert.equal(d.added.length, 1);
+  assert.deepEqual(d.added, [calendarEventIdentityKey(ev('e2') as never)]);
 });
 
 test('삭제는 무시(하이라이트 대상 아님)', () => {
