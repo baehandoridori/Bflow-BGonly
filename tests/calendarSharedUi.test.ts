@@ -2324,6 +2324,29 @@ test('WeekScrollView delegates a boundary wheel step so ScheduleView can change 
   assert.deepEqual(requestedIndices, [-1], 'the previous-year boundary is passed to the parent instead of being silently clamped');
 });
 
+test('DayScrollView delegates the December 31 wheel step so ScheduleView can advance to January 1', async () => {
+  resetHarness();
+  const DayScrollView = await loadDayScrollView();
+  const requestedIndices: number[] = [];
+  const tree = resolveComponents(DayScrollView({
+    events: [],
+    activeDayIndex: 364,
+    onActiveDayChange: (index) => requestedIndices.push(index),
+    year: 2026,
+  }));
+  const wheelSurface = findElements(tree, (element) => typeof element.props.onWheel === 'function')[0];
+  assert.ok(wheelSurface, 'the daily card surface owns its wheel policy');
+  (wheelSurface.props.onWheel as (event: { deltaY: number; target: { closest(): null } }) => void)({
+    deltaY: 1,
+    target: { closest: () => null },
+  });
+  assert.deepEqual(
+    requestedIndices,
+    [365],
+    'December 31 forwards the next-day sentinel to ScheduleView instead of silently clamping',
+  );
+});
+
 test('CalendarRail renders four grouped sections and drives visibility, menu permissions, callbacks, and Google settings navigation', async () => {
   resetHarness();
 
