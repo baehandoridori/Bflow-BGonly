@@ -641,6 +641,21 @@ test('App keeps calendar-specialized invalidations off generic reloads and refre
   );
 });
 
+test('notification-only realtime payloads do not trigger popup data reloads or weaken normal row contracts', () => {
+  const popup = readFileSync('src/views/WidgetPopup.tsx', 'utf8');
+  const service = readFileSync('src/services/supabaseService.ts', 'utf8');
+  assert.match(
+    popup,
+    /if \(table === 'calendar_notifications'\) return;[\s\S]{0,2500}\/\/ 그 외 → 디바운스 full reload/,
+    'widget popups receive the notification fanout but must not reload their dashboard data for it',
+  );
+  assert.match(
+    service,
+    /export type SupabaseRealtimePayload =\s*[\s\S]*?eventType: 'INSERT' \| 'UPDATE' \| 'DELETE';[\s\S]*?new: Record<string, unknown>;[\s\S]*?old: Record<string, unknown>;[\s\S]*?notification\?: never;[\s\S]*?notification: CalendarNotificationPushRow;/,
+    'ordinary row event fields must remain required while calendar notifications use their own union branch',
+  );
+});
+
 test('Realtime reconnect metadata stays row-free across main and preload status transport', () => {
   const realtime = readFileSync('electron/realtime.ts', 'utf8');
   const main = readFileSync('electron/main.ts', 'utf8');

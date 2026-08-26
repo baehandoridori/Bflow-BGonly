@@ -19,6 +19,7 @@ import type {
 import { applyAssigneeProgressMetadata } from '../utils/assigneeProgress';
 import { normalizeCharacterImageBackground, normalizeCharacterImageFit } from '../utils/characterAssets';
 import { sanitizeTabGroups } from '@/utils/characterTabGroups';
+import type { CalendarNotificationPushRow } from '../shared/calendarNotifications';
 
 // 일괄 작업 타입 재노출 — 다른 렌더러 모듈에서 쉽게 참조 가능
 export type { BulkStageUpdate, BulkFieldUpdate, BulkUpdateResult };
@@ -559,13 +560,23 @@ export async function checkConnection(): Promise<boolean> {
 
 export interface SupabaseRealtimeEvent {
   table: string;
-  payload: {
-    eventType?: 'INSERT' | 'UPDATE' | 'DELETE';
-    new?: Record<string, unknown>;
-    old?: Record<string, unknown>;
-    notification?: import('../shared/calendarNotifications').CalendarNotificationPushRow;
-  };
+  payload: SupabaseRealtimePayload;
 }
+
+/** 일반 Postgres 행 변경과 최소 캘린더 알림 fanout을 같은 IPC 채널에서 구별한다. */
+export type SupabaseRealtimePayload =
+  | {
+    eventType: 'INSERT' | 'UPDATE' | 'DELETE';
+    new: Record<string, unknown>;
+    old: Record<string, unknown>;
+    notification?: never;
+  }
+  | {
+    eventType?: never;
+    new?: never;
+    old?: never;
+    notification: CalendarNotificationPushRow;
+  };
 
 /** Realtime 이벤트 리스너 등록 (cleanup 함수 반환) */
 export function onSupabaseRealtimeEvent(callback: (event: SupabaseRealtimeEvent) => void): () => void {
