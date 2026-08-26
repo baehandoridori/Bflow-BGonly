@@ -659,7 +659,8 @@ export function ScheduleView() {
 
   const handleTimeGridCreate = useCallback((date: string, startTime: string, endTime: string) => {
     setCreateDate(date);
-    setCreateEndDate(date);
+    // 시간표의 24:00은 저장 모델의 다음 날 00:00으로 표현한다.
+    setCreateEndDate(endTime <= startTime ? fmtDate(addDays(parseDate(date), 1)) : date);
     setCreateStartTime(startTime);
     setCreateEndTime(endTime);
     setShowCreate(true);

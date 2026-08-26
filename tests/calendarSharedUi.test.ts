@@ -4516,6 +4516,86 @@ test('EventCreateModal makes a supplied timed range editable without inheriting 
 
 });
 
+test('ScheduleView rolls end-of-day time-grid slot and drag creation into a savable next-day timed modal', async () => {
+  resetHarness();
+  scheduleLocalStorage.set('bflow_calendar_view_v1', JSON.stringify({
+    viewMode: 'week',
+    weekSubMode: 'timegrid',
+  }));
+
+  await renderScheduleView();
+  scheduleTimeGridProps.at(-1)?.onSlotClick('2026-08-31', '23:30', '00:00');
+  await renderScheduleView();
+  const lastSlotPrefill = scheduleCreateModalProps.at(-1);
+  assert.deepEqual(
+    {
+      initialDate: lastSlotPrefill?.initialDate,
+      initialEndDate: lastSlotPrefill?.initialEndDate,
+      initialStartTime: lastSlotPrefill?.initialStartTime,
+      initialEndTime: lastSlotPrefill?.initialEndTime,
+    },
+    {
+      initialDate: '2026-08-31',
+      initialEndDate: '2026-09-01',
+      initialStartTime: '23:30',
+      initialEndTime: '00:00',
+    },
+    '23:30–24:00 slot click opens the next-day timed interval rather than a reversed same-day range',
+  );
+
+  scheduleTimeGridProps.at(-1)?.onTimeGridCreate?.('2026-08-31', '23:45', '00:00');
+  await renderScheduleView();
+  assert.deepEqual(
+    {
+      initialDate: scheduleCreateModalProps.at(-1)?.initialDate,
+      initialEndDate: scheduleCreateModalProps.at(-1)?.initialEndDate,
+      initialStartTime: scheduleCreateModalProps.at(-1)?.initialStartTime,
+      initialEndTime: scheduleCreateModalProps.at(-1)?.initialEndTime,
+    },
+    {
+      initialDate: '2026-08-31',
+      initialEndDate: '2026-09-01',
+      initialStartTime: '23:45',
+      initialEndTime: '00:00',
+    },
+    'late create drag keeps its 15-minute midnight boundary intact',
+  );
+
+  resetHarness();
+  const saved: Record<string, unknown>[] = [];
+  const renderModal = () => renderEventCreateModal(
+    false,
+    (created) => saved.push(created),
+    '2026-08-31',
+    [],
+    { initialEndDate: '2026-09-01', initialStartTime: '23:45', initialEndTime: '00:00' },
+  );
+  let modal = await renderModal();
+  assert.equal(formElementByLabel(modal, '종일 일정').props.checked, false);
+  assert.equal(formElementByLabel(modal, '종료일').props.value, '2026-09-01');
+  assert.doesNotMatch(textContent(modal), /종료 시각은 시작 시각보다 뒤여야 해요/);
+  formElementByLabel(modal, '제목').props.onChange?.({ target: { value: '자정 경계 일정', checked: false } });
+  modal = await renderModal();
+  buttonByText(modal, '만들기').props.onClick?.();
+  assert.deepEqual(
+    {
+      allDay: saved[0]?.allDay,
+      startDate: saved[0]?.startDate,
+      endDate: saved[0]?.endDate,
+      startTime: saved[0]?.startTime,
+      endTime: saved[0]?.endTime,
+    },
+    {
+      allDay: false,
+      startDate: '2026-08-31',
+      endDate: '2026-09-01',
+      startTime: '23:45',
+      endTime: '00:00',
+    },
+    'the actual modal accepts and saves the wrapped time range',
+  );
+});
+
 test('ScheduleView persists a time-grid move with its complete patch and source-aware identity', async () => {
   resetHarness();
   scheduleLocalStorage.set('bflow_calendar_view_v1', JSON.stringify({

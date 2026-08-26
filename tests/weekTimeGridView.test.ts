@@ -668,6 +668,35 @@ test('WeekTimeGridView: 외부 시간표 preview는 해당 날짜 열의 생성 
   assert.match(markup, /data-time-grid-live-label="true">10:15 – 10:45/);
 });
 
+test('WeekTimeGridView: 자정으로 넘기는 마지막 생성 ghost는 15분의 양수 높이를 유지한다', async () => {
+  const module = await loadWeekTimeGridView();
+  const markup = renderToStaticMarkup(createElement(module.default, {
+    weekDays: Array.from({ length: 7 }, (_, index) => new Date(2026, 7, 23 + index, 12)),
+    events: [event({
+      id: 'evening-visible',
+      title: '저녁 표시',
+      startDate: '2026-08-25',
+      endDate: '2026-08-25',
+      startTime: '19:00',
+      endTime: '19:15',
+    })],
+    today: '2026-01-01',
+    onEventClick() {},
+    onSlotClick() {},
+    tagNameById: {},
+    calendarNameById: {},
+    activeWeekIndex: 1,
+    weekCount: 4,
+    onWeekChange() {},
+    timeGridDragPreview: {
+      mode: 'create', startDate: '2026-08-25', endDate: '2026-08-26', startTime: '23:45', endTime: '00:00',
+    },
+  }));
+
+  assert.match(markup, /data-time-grid-create-ghost="true"[^>]*style="top:266px;height:14px;left:2px;right:2px"/);
+  assert.match(markup, /data-time-grid-live-label="true">23:45 – 00:00/);
+});
+
 test('WeekTimeGridView: 외부 변경 ring은 종일·시간 블록에 표시하고 동작 줄이기에서는 정적으로 유지한다', async () => {
   const highlighted = new Set([
     'google\u0000primary\u0000highlight-all-day',

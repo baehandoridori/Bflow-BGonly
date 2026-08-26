@@ -233,6 +233,13 @@ export function getTimedBlockOpacity(isPast: boolean): number {
   return isPast ? 0.5 : 1;
 }
 
+/** 24:00은 다음 날짜의 00:00으로 저장되므로, 같은 열에서는 하루를 더해 ghost 높이를 계산한다. */
+export function getTimeGridCreateGhostHeight(preview: Pick<TimeGridDragPreview, 'startDate' | 'endDate' | 'startTime' | 'endTime'>): number {
+  const startMinutes = timeToMinutes(preview.startTime);
+  const endMinutes = timeToMinutes(preview.endTime) + (preview.endDate > preview.startDate ? DAY_END_MIN : 0);
+  return Math.max(0, ((endMinutes - startMinutes) / 60) * HOUR_PX);
+}
+
 /** 드래그 중인 블록은 Framer Motion transform으로만 확대해 inline transform과 충돌하지 않게 한다. */
 export function getTimeGridBlockMotion({
   reduce,
@@ -736,7 +743,7 @@ function TimeBand({
                   className="pointer-events-none absolute z-20 overflow-hidden rounded border border-dashed border-accent bg-accent/20 px-1 text-[9px] font-bold text-white shadow-lg"
                   style={{
                     top: ((timeToMinutes(dragPreview.startTime) - startMin) / 60) * HOUR_PX,
-                    height: ((timeToMinutes(dragPreview.endTime) - timeToMinutes(dragPreview.startTime)) / 60) * HOUR_PX,
+                    height: getTimeGridCreateGhostHeight(dragPreview),
                     left: '2px', right: '2px',
                   }}
                 >

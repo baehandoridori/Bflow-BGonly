@@ -41,10 +41,16 @@ function installDomHookHarness(module: DndModule, options: Parameters<DndModule[
   const listeners = new Map<string, Set<Listener>>();
   const styleNodes = new Map<string, any>();
   const intervals = new Map<number, () => void>();
+  const frames = new Map<number, FrameRequestCallback>();
   let nextInterval = 1;
+  let nextFrame = 1;
+  const scroller = options.scrollContainerRef.current;
   const column = {
     dataset: { date: '2026-08-24', timeGridBandStart: '540' },
-    getBoundingClientRect: () => ({ top: 100, bottom: 500 }),
+    getBoundingClientRect: () => ({
+      top: 100 - (scroller?.scrollTop ?? 0),
+      bottom: 500 - (scroller?.scrollTop ?? 0),
+    }),
     closest: () => column,
   };
   const document = {
@@ -60,14 +66,23 @@ function installDomHookHarness(module: DndModule, options: Parameters<DndModule[
   (globalThis as any).window = {
     setInterval(fn: () => void) { const id = nextInterval++; intervals.set(id, fn); return id; },
     clearInterval(id: number) { intervals.delete(id); },
+    requestAnimationFrame(callback: FrameRequestCallback) { const id = nextFrame++; frames.set(id, callback); return id; },
+    cancelAnimationFrame(id: number) { frames.delete(id); },
   };
 
   const values: unknown[] = [];
   const refs: unknown[] = [];
+  const callbackValues: unknown[] = [];
+  const callbackDependencies: Array<readonly unknown[] | undefined> = [];
   const cleanups: Array<(() => void) | undefined> = [];
+  const effectDependencies: Array<readonly unknown[] | undefined> = [];
   let cursor = 0;
   let effectCursor = 0;
   let value: ReturnType<DndModule['useTimeGridDnD']>;
+  const dependenciesChanged = (previous: readonly unknown[] | undefined, next: readonly unknown[] | undefined) => (
+    previous === undefined || next === undefined || previous.length !== next.length
+      || previous.some((dependency, index) => dependency !== next[index])
+  );
   dispatcher.current = {
     useState(initial: unknown) {
       const index = cursor++;
@@ -79,11 +94,23 @@ function installDomHookHarness(module: DndModule, options: Parameters<DndModule[
       if (!(index in refs)) refs[index] = { current: initial };
       return refs[index];
     },
-    useCallback(fn: unknown) { cursor++; return fn; },
-    useEffect(effect: () => void | (() => void)) { const index = effectCursor++; cleanups[index] = effect() || undefined; },
+    useCallback(fn: unknown, dependencies?: readonly unknown[]) {
+      const index = cursor++;
+      if (!(index in callbackValues) || dependenciesChanged(callbackDependencies[index], dependencies)) {
+        callbackValues[index] = fn;
+        callbackDependencies[index] = dependencies;
+      }
+      return callbackValues[index];
+    },
+    useEffect(effect: () => void | (() => void), dependencies?: readonly unknown[]) {
+      const index = effectCursor++;
+      if (!dependenciesChanged(effectDependencies[index], dependencies)) return;
+      cleanups[index]?.();
+      cleanups[index] = effect() || undefined;
+      effectDependencies[index] = dependencies;
+    },
   };
   const render = () => {
-    cleanups.splice(0).forEach((cleanup) => cleanup?.());
     cursor = 0;
     effectCursor = 0;
     value = module.useTimeGridDnD(options);
@@ -95,7 +122,15 @@ function installDomHookHarness(module: DndModule, options: Parameters<DndModule[
     render,
     fire,
     tickIntervals: () => intervals.forEach((tick) => tick()),
+    pendingFrames: () => frames.size,
+    flushFrames: () => {
+      const pending = [...frames.entries()];
+      frames.clear();
+      pending.forEach(([, callback]) => callback(16));
+    },
+    readPreview: () => values[1],
     hasPointerBlock: () => styleNodes.has('time-grid-dnd-pointer-block'),
+    unmount: () => cleanups.splice(0).forEach((cleanup) => cleanup?.()),
     restore() {
       cleanups.forEach((cleanup) => cleanup?.());
       dispatcher.current = previousDispatcher;
@@ -175,6 +210,112 @@ test('useTimeGridDnD DOM: create·resize callback, Escape 취소, 읽기전용 i
     assert.equal(changes.length, 0, 'Escape는 완료 callback을 발생시키지 않는다');
   } finally {
     harness.restore();
+  }
+});
+
+test('useTimeGridDnD DOM: 가장자리의 정지·5px 미만 후보는 스크롤·프리뷰·완료를 만들지 않는다', async () => {
+  const changes: unknown[][] = [];
+  const scroller = { scrollTop: 0, getBoundingClientRect: () => ({ top: 100, bottom: 500 }) };
+  const harness = installDomHookHarness(await loadDnD(), {
+    scrollContainerRef: { current: scroller },
+    onEventChange: (...args) => changes.push(args),
+  });
+  try {
+    let dnd = harness.render();
+    dnd.beginEventDrag(event(10, 496), source, 'move', { date: '2026-08-24', bandStartMin: 540, column: harness.column });
+    dnd = harness.render();
+    harness.tickIntervals();
+    assert.equal(scroller.scrollTop, 0, '정지한 edge press는 16ms 스크롤을 시작하지 않는다');
+    assert.equal(harness.hasPointerBlock(), false);
+    assert.equal(harness.pendingFrames(), 0);
+
+    harness.fire('mousemove', { clientX: 13, clientY: 499 });
+    harness.tickIntervals();
+    assert.equal(scroller.scrollTop, 0, '5px 미만의 edge movement도 자동 스크롤하지 않는다');
+    assert.equal(harness.readPreview(), dnd.preview, '프레임 전 후보는 원래 preview를 유지한다');
+    harness.fire('mouseup', {});
+    assert.deepEqual(changes, []);
+  } finally {
+    harness.restore();
+  }
+});
+
+test('useTimeGridDnD DOM: 활성 드래그는 rAF로 합치고 고정 포인터 auto-scroll 뒤 최신 시간을 보인다', async () => {
+  const scroller = { scrollTop: 0, getBoundingClientRect: () => ({ top: 100, bottom: 500 }) };
+  const harness = installDomHookHarness(await loadDnD(), {
+    scrollContainerRef: { current: scroller },
+  });
+  try {
+    let dnd = harness.render();
+    dnd.beginEventDrag(event(10, 156), source, 'move', { date: '2026-08-24', bandStartMin: 540, column: harness.column });
+    dnd = harness.render();
+
+    harness.fire('mousemove', { clientX: 16, clientY: 490 });
+    harness.fire('mousemove', { clientX: 20, clientY: 490 });
+    assert.equal(harness.pendingFrames(), 1, '여러 native mousemove는 하나의 rAF로 합쳐진다');
+    assert.deepEqual(harness.readPreview(), dnd.preview, 'rAF 전에는 React preview state를 다시 쓰지 않는다');
+
+    harness.flushFrames();
+    const beforeScroll = harness.readPreview() as { startTime: string };
+    assert.notEqual(beforeScroll.startTime, '09:00');
+    harness.tickIntervals();
+    assert.ok(scroller.scrollTop > 0, '5px 이후 edge loop만 스크롤을 소유한다');
+    assert.equal(harness.pendingFrames(), 1, '고정 포인터 scroll 보정도 다음 한 프레임으로 합친다');
+    harness.flushFrames();
+    const afterScroll = harness.readPreview() as { startTime: string };
+    assert.notEqual(afterScroll.startTime, beforeScroll.startTime, '스크롤 뒤 같은 포인터의 time preview를 다시 계산한다');
+  } finally {
+    harness.restore();
+  }
+});
+
+test('useTimeGridDnD DOM: mouseup은 대기 rAF의 최신 값을 완료하고 Escape·unmount는 이를 취소한다', async () => {
+  const changes: unknown[][] = [];
+  const createHarness = async () => installDomHookHarness(await loadDnD(), {
+    scrollContainerRef: { current: { scrollTop: 0, getBoundingClientRect: () => ({ top: 100, bottom: 500 }) } },
+    onEventChange: (...args) => changes.push(args),
+  });
+  const completionHarness = await createHarness();
+  try {
+    let dnd = completionHarness.render();
+    dnd.beginEventDrag(event(10, 156), source, 'move', { date: '2026-08-24', bandStartMin: 540, column: completionHarness.column });
+    dnd = completionHarness.render();
+    completionHarness.fire('mousemove', { clientX: 20, clientY: 184 });
+    assert.equal(completionHarness.pendingFrames(), 1);
+    completionHarness.fire('mouseup', {});
+    assert.equal(completionHarness.pendingFrames(), 0, 'mouseup은 대기 frame을 남기지 않는다');
+    assert.deepEqual(changes, [[
+      'shared-id',
+      { id: 'shared-id', source: 'google', sourceCalendarId: 'team-a' },
+       { startDate: '2026-08-24', endDate: '2026-08-24', startTime: '09:30', endTime: '10:30' },
+    ]], 'mouseup은 frame 전 최신 포인터 위치로 정확히 완료한다');
+  } finally {
+    completionHarness.restore();
+  }
+
+  const cancellationHarness = await createHarness();
+  try {
+    let dnd = cancellationHarness.render();
+    dnd.beginEventDrag(event(10, 156), source, 'move', { date: '2026-08-24', bandStartMin: 540, column: cancellationHarness.column });
+    dnd = cancellationHarness.render();
+    cancellationHarness.fire('mousemove', { clientX: 20, clientY: 184 });
+    assert.equal(cancellationHarness.pendingFrames(), 1);
+    cancellationHarness.fire('keydown', { key: 'Escape' });
+    assert.equal(cancellationHarness.pendingFrames(), 0, 'Escape는 대기 frame을 취소한다');
+    cancellationHarness.fire('mouseup', {});
+    assert.equal(changes.length, 1, 'Escape 뒤 mouseup은 새 완료를 만들지 않는다');
+
+    dnd = cancellationHarness.render();
+    dnd.beginEventDrag(event(10, 156), source, 'move', { date: '2026-08-24', bandStartMin: 540, column: cancellationHarness.column });
+    dnd = cancellationHarness.render();
+    cancellationHarness.fire('mousemove', { clientX: 20, clientY: 184 });
+    assert.equal(cancellationHarness.pendingFrames(), 1);
+    cancellationHarness.unmount();
+    assert.equal(cancellationHarness.pendingFrames(), 0, 'unmount도 대기 frame을 취소한다');
+    cancellationHarness.fire('mouseup', {});
+    assert.equal(changes.length, 1, 'unmount 뒤에는 남은 listener가 완료하지 않는다');
+  } finally {
+    cancellationHarness.restore();
   }
 });
 

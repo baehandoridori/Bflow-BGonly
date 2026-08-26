@@ -36,7 +36,7 @@ export const TIME_GRID_HOUR_PX = 56;
 export const TIME_GRID_DRAG_EDGE = 40;
 const DRAG_THRESHOLD_PX = 5;
 const CLICK_SUPPRESS_MS = 280;
-const LATEST_SAME_DAY_END_MINUTES = 23 * 60 + 45;
+const DAY_END_MINUTES = 24 * 60;
 
 export type TimeGridPointerTarget = {
   date: string;
@@ -65,11 +65,11 @@ export function getTimeGridPointerMinutes(clientY: number, rect: { top: number }
 }
 
 export function getTimeGridCreateRange(startMinutes: number, currentMinutes: number): Pick<TimeGridEventPatch, 'startTime' | 'endTime'> {
-  const safeAnchor = Math.min(startMinutes, LATEST_SAME_DAY_END_MINUTES - 15);
-  const safeCurrent = Math.min(currentMinutes, LATEST_SAME_DAY_END_MINUTES);
+  const safeAnchor = Math.max(0, Math.min(startMinutes, DAY_END_MINUTES - 15));
+  const safeCurrent = Math.max(0, Math.min(currentMinutes, DAY_END_MINUTES));
   const start = Math.min(safeAnchor, safeCurrent);
   const end = Math.min(
-    LATEST_SAME_DAY_END_MINUTES,
+    DAY_END_MINUTES,
     safeAnchor === safeCurrent ? start + 15 : Math.max(safeAnchor, safeCurrent),
   );
   return { startTime: minutesToTime(Math.min(start, end - 15)), endTime: minutesToTime(end) };
@@ -179,13 +179,24 @@ function getPointerMinute(target: TimeGridPointerTarget, clientY: number): numbe
   return snapMinutes(target.bandStartMin + getTimeGridPointerMinutes(clientY, target.column.getBoundingClientRect()));
 }
 
+function getTimeGridCreatePreview(date: string, startMinutes: number, currentMinutes: number): TimeGridDragPreview {
+  const range = getTimeGridCreateRange(startMinutes, currentMinutes);
+  return {
+    mode: 'create',
+    startDate: date,
+    endDate: range.endTime <= range.startTime ? addDaysToDate(date, 1) : date,
+    ...range,
+  };
+}
+
 export function useTimeGridDnD({ scrollContainerRef, onCreate, onEventChange }: UseTimeGridDnDOptions) {
   const [drag, setDrag] = useState<ActiveTimeGridDrag | null>(null);
   const [preview, setPreview] = useState<TimeGridDragPreview | null>(null);
   const [settledIdentityKey, setSettledIdentityKey] = useState<string | null>(null);
   const dragRef = useRef<ActiveTimeGridDrag | null>(null);
   const previewRef = useRef<TimeGridDragPreview | null>(null);
-  const latestClientY = useRef<number | null>(null);
+  const latestPointerRef = useRef<{ x: number; y: number } | null>(null);
+  const previewFrameRef = useRef<number | null>(null);
   const onCreateRef = useRef(onCreate);
   const onEventChangeRef = useRef(onEventChange);
   const finishedAtRef = useRef(0);
@@ -193,29 +204,54 @@ export function useTimeGridDnD({ scrollContainerRef, onCreate, onEventChange }: 
   onCreateRef.current = onCreate;
   onEventChangeRef.current = onEventChange;
 
+  const cancelPreviewFrame = useCallback(() => {
+    if (previewFrameRef.current === null) return;
+    window.cancelAnimationFrame(previewFrameRef.current);
+    previewFrameRef.current = null;
+  }, []);
+
+  const schedulePreview = useCallback((next: TimeGridDragPreview) => {
+    // mouseup은 다음 프레임 전에 올 수 있으므로 완료 계산용 최신값은 즉시 보존한다.
+    previewRef.current = next;
+    if (previewFrameRef.current !== null) return;
+    previewFrameRef.current = window.requestAnimationFrame(() => {
+      previewFrameRef.current = null;
+      const latest = previewRef.current;
+      if (latest) setPreview(latest);
+    });
+  }, []);
+
+  const flushPreviewFrame = useCallback(() => {
+    if (previewFrameRef.current === null) return;
+    cancelPreviewFrame();
+    const latest = previewRef.current;
+    if (latest) setPreview(latest);
+  }, [cancelPreviewFrame]);
+
   const clearDrag = useCallback(() => {
+    cancelPreviewFrame();
     dragRef.current = null;
     previewRef.current = null;
-    latestClientY.current = null;
+    latestPointerRef.current = null;
     setDrag(null);
     setPreview(null);
-  }, []);
+  }, [cancelPreviewFrame]);
 
   const beginCreate = useCallback((event: React.MouseEvent<HTMLElement>, target: TimeGridPointerTarget) => {
     if (event.button !== 0) return;
+    cancelPreviewFrame();
     const minutes = getPointerMinute(target, event.clientY);
     const state: ActiveTimeGridDrag = {
       mode: 'create',
       anchor: { x: event.clientX, y: event.clientY, minutes, date: target.date },
       hasCrossedThreshold: false,
     };
-    const range = getTimeGridCreateRange(minutes, minutes);
     dragRef.current = state;
-    previewRef.current = { mode: 'create', startDate: target.date, endDate: target.date, ...range };
-    latestClientY.current = event.clientY;
+    previewRef.current = null;
+    latestPointerRef.current = { x: event.clientX, y: event.clientY };
     setDrag(state);
-    setPreview(previewRef.current);
-  }, []);
+    setPreview(null);
+  }, [cancelPreviewFrame]);
 
   const beginEventDrag = useCallback((
     event: React.MouseEvent<HTMLElement>,
@@ -224,6 +260,7 @@ export function useTimeGridDnD({ scrollContainerRef, onCreate, onEventChange }: 
     target: TimeGridPointerTarget,
   ) => {
     if (event.button !== 0 || source.isReadOnly) return;
+    cancelPreviewFrame();
     const anchorMinutes = getPointerMinute(target, event.clientY);
     const original: TimeGridEventPatch = {
       startDate: source.startDate,
@@ -240,13 +277,12 @@ export function useTimeGridDnD({ scrollContainerRef, onCreate, onEventChange }: 
       identity,
       hasCrossedThreshold: false,
     };
-    const identityKey = calendarEventIdentityKey(identity);
     dragRef.current = state;
-    previewRef.current = { mode, eventId: source.id, identity, identityKey, ...original };
-    latestClientY.current = event.clientY;
+    previewRef.current = null;
+    latestPointerRef.current = { x: event.clientX, y: event.clientY };
     setDrag(state);
-    setPreview(previewRef.current);
-  }, []);
+    setPreview(null);
+  }, [cancelPreviewFrame]);
 
   const isSettling = useCallback((event: CalendarEvent): boolean => (
     settledIdentityKey === calendarEventIdentityKey(event)
@@ -254,31 +290,30 @@ export function useTimeGridDnD({ scrollContainerRef, onCreate, onEventChange }: 
 
   const shouldSuppressClick = useCallback(() => shouldSuppressTimeGridClick(finishedAtRef.current, Date.now()), []);
 
-  useEffect(() => {
-    if (!drag) return;
-    const block = drag.hasCrossedThreshold ? document.createElement('style') : null;
-    if (block) {
-      block.id = 'time-grid-dnd-pointer-block';
-      block.textContent = '[data-time-grid-event="true"] { pointer-events: none !important; }';
-      document.head.appendChild(block);
-      document.body.style.userSelect = 'none';
-      document.body.style.cursor = drag.mode === 'resize-end' ? 'row-resize' : 'grabbing';
-    }
+  const isDragPresent = drag !== null;
 
-    const handleMouseMove = (event: MouseEvent) => {
-      const state = dragRef.current;
-      if (!state) return;
-      latestClientY.current = event.clientY;
-      if (!state.hasCrossedThreshold) {
-        if (!shouldStartTimeGridDrag(state.anchor, { x: event.clientX, y: event.clientY })) return;
-        state.hasCrossedThreshold = true;
-        setDrag({ ...state });
+  useEffect(() => {
+    if (!isDragPresent) return;
+
+    const activateDrag = (state: ActiveTimeGridDrag) => {
+      if (!document.getElementById('time-grid-dnd-pointer-block')) {
+        const block = document.createElement('style');
+        block.id = 'time-grid-dnd-pointer-block';
+        block.textContent = '[data-time-grid-event="true"] { pointer-events: none !important; }';
+        document.head.appendChild(block);
       }
-      const target = findPointerTarget(event.clientX, event.clientY);
+      document.body.style.userSelect = 'none';
+      document.body.style.cursor = state.mode === 'resize-end' ? 'row-resize' : 'grabbing';
+    };
+
+    const refreshPreview = (clientX: number, clientY: number) => {
+      const state = dragRef.current;
+      if (!state?.hasCrossedThreshold) return;
+      const target = findPointerTarget(clientX, clientY);
       if (!target) return;
-      const targetMinutes = getPointerMinute(target, event.clientY);
+      const targetMinutes = getPointerMinute(target, clientY);
       const next = state.mode === 'create'
-        ? { mode: state.mode, startDate: target.date, endDate: target.date, ...getTimeGridCreateRange(state.anchor.minutes, targetMinutes) }
+        ? getTimeGridCreatePreview(target.date, state.anchor.minutes, targetMinutes)
         : {
           mode: state.mode,
           eventId: state.eventId,
@@ -286,12 +321,27 @@ export function useTimeGridDnD({ scrollContainerRef, onCreate, onEventChange }: 
           identityKey: state.identity ? calendarEventIdentityKey(state.identity) : undefined,
           ...getTimeGridEventPatch(state.mode, state.original!, target.date, targetMinutes, state.anchor.minutes),
         };
-      previewRef.current = next;
-      setPreview(next);
+      schedulePreview(next);
+    };
+
+    const handleMouseMove = (event: MouseEvent) => {
+      const state = dragRef.current;
+      if (!state) return;
+      latestPointerRef.current = { x: event.clientX, y: event.clientY };
+      if (!state.hasCrossedThreshold) {
+        if (!shouldStartTimeGridDrag(state.anchor, { x: event.clientX, y: event.clientY })) return;
+        state.hasCrossedThreshold = true;
+        activateDrag(state);
+        setDrag({ ...state });
+      }
+      refreshPreview(event.clientX, event.clientY);
     };
 
     const finish = () => {
       const state = dragRef.current;
+      const pointer = latestPointerRef.current;
+      if (pointer) refreshPreview(pointer.x, pointer.y);
+      flushPreviewFrame();
       const current = previewRef.current;
       const completion = getTimeGridDragCompletion(state, current);
       if (completion) {
@@ -311,16 +361,20 @@ export function useTimeGridDnD({ scrollContainerRef, onCreate, onEventChange }: 
 
     const cancel = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
-        getTimeGridDragCompletion(dragRef.current, previewRef.current, true);
+        event.preventDefault?.();
         clearDrag();
       }
     };
 
     const scrollTimer = window.setInterval(() => {
-      const y = latestClientY.current;
+      const state = dragRef.current;
+      const pointer = latestPointerRef.current;
       const scroller = scrollContainerRef.current;
-      if (y == null || !scroller) return;
-      scroller.scrollTop += getTimeGridAutoScrollSpeed(y, scroller.getBoundingClientRect());
+      if (!state?.hasCrossedThreshold || !pointer || !scroller) return;
+      const speed = getTimeGridAutoScrollSpeed(pointer.y, scroller.getBoundingClientRect());
+      if (speed === 0) return;
+      scroller.scrollTop += speed;
+      refreshPreview(pointer.x, pointer.y);
     }, 16);
 
     document.addEventListener('mousemove', handleMouseMove);
@@ -331,13 +385,12 @@ export function useTimeGridDnD({ scrollContainerRef, onCreate, onEventChange }: 
       document.removeEventListener('mousemove', handleMouseMove);
       document.removeEventListener('mouseup', finish);
       document.removeEventListener('keydown', cancel);
-      if (block) {
-        document.body.style.userSelect = '';
-        document.body.style.cursor = '';
-        block.remove();
-      }
+      cancelPreviewFrame();
+      document.body.style.userSelect = '';
+      document.body.style.cursor = '';
+      document.getElementById('time-grid-dnd-pointer-block')?.remove();
     };
-  }, [clearDrag, drag, scrollContainerRef]);
+  }, [cancelPreviewFrame, clearDrag, flushPreviewFrame, isDragPresent, schedulePreview, scrollContainerRef]);
 
   useEffect(() => () => {
     if (settleTimer.current) clearTimeout(settleTimer.current);
