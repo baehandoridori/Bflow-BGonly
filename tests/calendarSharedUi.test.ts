@@ -172,6 +172,16 @@ type WeekScrollViewModule = {
   generateYearWeeks(year: number): Date[][];
   findWeekIndexForDate(weeks: Date[][], date: string): number;
 };
+type WeekTimeGridViewProps = {
+  weekDays: Date[];
+  events: ScheduleCalendarEvent[];
+  today: string;
+  onEventClick(event: ScheduleCalendarEvent): void;
+  onSlotClick(date: string, startTime: string, endTime: string): void;
+  activeWeekIndex: number;
+  weekCount: number;
+  onWeekChange(index: number): void;
+};
 type DayScrollViewProps = {
   events: ScheduleCalendarEvent[];
   activeDayIndex: number;
@@ -274,6 +284,10 @@ let scheduleTagManagerProps: TagManagerPopoverProps[] = [];
 let scheduleGridProps: ScheduleGridProps[] = [];
 let schedulePanelProps: SchedulePanelProps[] = [];
 let scheduleQuickEditProps: ScheduleQuickEditProps[] = [];
+let scheduleWeekScrollProps: WeekScrollViewProps[] = [];
+let scheduleTimeGridProps: WeekTimeGridViewProps[] = [];
+let scheduleCreateModalProps: EventCreateModalProps[] = [];
+const scheduleLocalStorage = new Map<string, string>();
 let scheduleCanonicalEvents: ScheduleCalendarEvent[] = [];
 let scheduleUpdateCalls: Array<{
   id: string;
@@ -587,6 +601,10 @@ function resetHarness(): void {
   scheduleGridProps = [];
   schedulePanelProps = [];
   scheduleQuickEditProps = [];
+  scheduleWeekScrollProps = [];
+  scheduleTimeGridProps = [];
+  scheduleCreateModalProps = [];
+  scheduleLocalStorage.clear();
   scheduleCanonicalEvents = [];
   scheduleUpdateCalls = [];
   scheduleUpdateHandler = undefined;
@@ -1115,10 +1133,12 @@ async function loadScheduleView(): Promise<ScheduleViewComponent> {
       '@/components/calendar/MiniCalendar', '@/components/calendar/EventSidePanel',
       '@/components/calendar/EventQuickEdit', '@/components/calendar/CalendarGrid',
       '@/components/calendar/EventCreateModal', '@/components/calendar/WeekScrollView',
+      '@/components/calendar/WeekTimeGridView',
       '@/components/calendar/WeekSidebar', '@/components/calendar/DayScrollView',
       '@/components/calendar/DaySidebar', '@/components/calendar/CalendarRail',
       '@/components/calendar/TagBar', '@/components/calendar/TagManagerPopover', '@/components/calendar/CalendarSettingsModal',
       '@/hooks/useCalendarDragCreate', '@/stores/useCalendarStore',
+      '@/hooks/useMotionPref',
       '@/utils/sceneNavigationAction', '@/utils/createUuid', '@/utils/calendarDate',
       '@/utils/calendarEventFilter',
     ],
@@ -1220,7 +1240,26 @@ async function loadScheduleView(): Promise<ScheduleViewComponent> {
         };
       }
       if (id === '@/utils/vacationEvents') return { mapVacationEvents: () => [] };
-      if (id === '@/components/calendar/WeekScrollView') return { default: emptyComponent, generateYearWeeks: () => [], findWeekIndexForDate: () => 0 };
+      if (id === '@/components/calendar/WeekScrollView') {
+        return {
+          __esModule: true,
+          default: (props: WeekScrollViewProps) => {
+            scheduleWeekScrollProps.push(props);
+            return jsxRuntime.jsx('div', { 'data-testid': 'week-scroll-view', children: '주간 카드 본체' });
+          },
+          generateYearWeeks: () => [Array.from({ length: 7 }, (_, day) => new Date(2026, 7, 23 + day, 12))],
+          findWeekIndexForDate: () => 0,
+        };
+      }
+      if (id === '@/components/calendar/WeekTimeGridView') {
+        return {
+          WeekTimeGridView: (props: WeekTimeGridViewProps) => {
+            scheduleTimeGridProps.push(props);
+            return jsxRuntime.jsx('div', { 'data-testid': 'week-time-grid-view', children: '주간 시간표 본체' });
+          },
+        };
+      }
+      if (id === '@/hooks/useMotionPref') return { useMotionPref: () => ({ reduce: false }) };
       if (id === '@/components/calendar/CalendarRail') {
         return {
           GOOGLE_CALENDAR_ID: 'google',
@@ -1279,6 +1318,14 @@ async function loadScheduleView(): Promise<ScheduleViewComponent> {
       if (id === '@/components/calendar/EventSidePanel') {
         return { EventSidePanel: (props: SchedulePanelProps) => { schedulePanelProps.push(props); return jsxRuntime.jsx('div', { 'aria-label': '일정 상세 패널 연결됨', children: props.event.title }); } };
       }
+      if (id === '@/components/calendar/EventCreateModal') {
+        return {
+          EventCreateModal: (props: EventCreateModalProps) => {
+            scheduleCreateModalProps.push(props);
+            return jsxRuntime.jsx('div', { 'aria-label': '일정 생성 모달 연결됨', children: props.initialDate ?? '오늘' });
+          },
+        };
+      }
       if (id === '@/components/calendar/EventQuickEdit') {
         return { EventQuickEdit: (props: ScheduleQuickEditProps) => { scheduleQuickEditProps.push(props); return jsxRuntime.jsx('div', { 'aria-label': '일정 퀵에디트 연결됨', children: props.event.title }); } };
       }
@@ -1295,6 +1342,10 @@ async function loadScheduleView(): Promise<ScheduleViewComponent> {
         },
         removeEventListener(type: string, listener: (event: Event) => void) {
           scheduleWindowListeners.get(type)?.delete(listener);
+        },
+        localStorage: {
+          getItem(key: string) { return scheduleLocalStorage.get(key) ?? null; },
+          setItem(key: string, value: string) { scheduleLocalStorage.set(key, value); },
         },
         electronAPI: { async gcalIsAuthenticated() { return false; } },
       },
@@ -3678,6 +3729,51 @@ test('ScheduleView replaces legacy controls with the tag bar and reports visible
   assert.equal(typeof scheduleTagBarProps[0].onOpenTagManager, 'function', 'ScheduleView keeps the tag manager anchoring callback wired');
   assert.ok(labels.includes('일정'), 'the creation action uses the shared calendar wording');
   assert.match(textContent(tree), /이번 달 0개.*오늘 0개.*켜진 캘린더 4\/4/, 'statistics describe the filtered view and rail visibility instead of total and vacation counts');
+});
+
+test('ScheduleView restores and remembers the weekly time-grid choice while opening a slot on its date', async () => {
+  resetHarness();
+  scheduleLocalStorage.set('bflow_calendar_view_v1', JSON.stringify({
+    viewMode: 'week',
+    weekSubMode: 'timegrid',
+  }));
+
+  let tree = await renderScheduleView();
+  const cardToggle = buttonByLabel(tree, '주간 카드 보기');
+  const timeGridToggle = buttonByLabel(tree, '주간 시간표 보기');
+  assert.equal(cardToggle.props['aria-pressed'], false);
+  assert.equal(timeGridToggle.props['aria-pressed'], true);
+  assert.equal(scheduleTimeGridProps.at(-1)?.weekDays.length, 7, 'the active Sunday-start week reaches the time grid');
+  assert.equal(scheduleTimeGridProps.at(-1)?.weekCount, 1, 'ScheduleView retains ownership of weekly navigation bounds');
+
+  scheduleTimeGridProps.at(-1)?.onSlotClick('2026-08-26', '10:00', '10:30');
+  tree = await renderScheduleView();
+  assert.equal(scheduleCreateModalProps.at(-1)?.initialDate, '2026-08-26', 'B.4 carries only the selected date; time prefill remains a PR-C concern');
+  assert.equal(scheduleCreateModalProps.at(-1)?.initialEndDate, '2026-08-26');
+
+  cardToggle.props.onClick?.({ stopPropagation() {} });
+  tree = await renderScheduleView();
+  assert.equal(buttonByLabel(tree, '주간 카드 보기').props['aria-pressed'], true);
+  assert.equal(scheduleWeekScrollProps.at(-1)?.mode, 'week', 'the existing card mode remains the weekly fallback');
+  await flushScheduleMountEffects();
+  assert.equal(
+    scheduleLocalStorage.get('bflow_calendar_view_v1'),
+    JSON.stringify({ viewMode: 'week', weekSubMode: 'card' }),
+    'the latest weekly sub-mode is saved with the main view mode',
+  );
+
+  buttonByText(tree, '월').props.onClick?.({ stopPropagation() {} });
+  tree = await renderScheduleView();
+  assert.equal(findButtons(tree).some((button) => button.props['aria-label'] === '주간 카드 보기'), false, 'the sub-toggle stays exclusive to the weekly view');
+});
+
+test('ScheduleView ignores malformed remembered calendar view data', async () => {
+  resetHarness();
+  scheduleLocalStorage.set('bflow_calendar_view_v1', '{not-json');
+
+  const tree = await renderScheduleView();
+  assert.equal(findButtons(tree).some((button) => button.props['aria-label'] === '주간 시간표 보기'), false, 'malformed storage falls back to the existing monthly view');
+  assert.equal(scheduleTimeGridProps.length, 0);
 });
 
 test('CalendarGrid renders tag-aware chip text while keeping each event color as the tint and border source', async () => {

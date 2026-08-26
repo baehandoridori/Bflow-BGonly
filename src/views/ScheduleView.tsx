@@ -22,6 +22,7 @@ import { EventQuickEdit } from '@/components/calendar/EventQuickEdit';
 import { CalendarGrid } from '@/components/calendar/CalendarGrid';
 import { EventCreateModal } from '@/components/calendar/EventCreateModal';
 import WeekScrollView, { generateYearWeeks, findWeekIndexForDate } from '@/components/calendar/WeekScrollView';
+import { WeekTimeGridView } from '@/components/calendar/WeekTimeGridView';
 import WeekSidebar from '@/components/calendar/WeekSidebar';
 import DayScrollView from '@/components/calendar/DayScrollView';
 import DaySidebar from '@/components/calendar/DaySidebar';
@@ -42,6 +43,32 @@ import {
 import { navigateToSceneView } from '@/utils/sceneNavigationAction';
 import { createUuid } from '@/utils/createUuid';
 import { fmtDate, parseDate, addDays } from '@/utils/calendarDate';
+import { useMotionPref } from '@/hooks/useMotionPref';
+
+type WeekSubMode = 'card' | 'timegrid';
+
+const CALENDAR_VIEW_STORAGE_KEY = 'bflow_calendar_view_v1';
+const CALENDAR_VIEW_MODES: CalendarViewMode[] = ['month', '2week', 'week', 'today'];
+
+function readCalendarViewPreference(): { viewMode: CalendarViewMode; weekSubMode: WeekSubMode } {
+  const fallback = { viewMode: 'month' as CalendarViewMode, weekSubMode: 'card' as WeekSubMode };
+  try {
+    if (typeof window === 'undefined') return fallback;
+    const raw = window.localStorage.getItem(CALENDAR_VIEW_STORAGE_KEY);
+    if (!raw) return fallback;
+    const value = JSON.parse(raw) as { viewMode?: unknown; weekSubMode?: unknown };
+    if (
+      !CALENDAR_VIEW_MODES.includes(value.viewMode as CalendarViewMode)
+      || (value.weekSubMode !== 'card' && value.weekSubMode !== 'timegrid')
+    ) return fallback;
+    return {
+      viewMode: value.viewMode as CalendarViewMode,
+      weekSubMode: value.weekSubMode,
+    };
+  } catch {
+    return fallback;
+  }
+}
 
 /* ═══════════════════════════════════════════════════
    캘린더 → 할일 역동기화 헬퍼
@@ -108,7 +135,8 @@ export function ScheduleView() {
 
   const [events, setEvents] = useState<CalendarEvent[]>([]);
   const [vacationEvents, setVacationEvents] = useState<CalendarEvent[]>([]);
-  const [viewMode, setViewMode] = useState<CalendarViewMode>('month');
+  const [viewMode, setViewMode] = useState<CalendarViewMode>(() => readCalendarViewPreference().viewMode);
+  const [weekSubMode, setWeekSubMode] = useState<WeekSubMode>(() => readCalendarViewPreference().weekSubMode);
   const [showCreate, setShowCreate] = useState(false);
   const [createDate, setCreateDate] = useState<string | undefined>();
   const [googleAuthenticated, setGoogleAuthenticated] = useState(false);
@@ -145,6 +173,15 @@ export function ScheduleView() {
   const [year, setYear] = useState(() => new Date().getFullYear());
   const [month, setMonth] = useState(() => new Date().getMonth());
   const [monthDir, setMonthDir] = useState(0); // 월 슬라이드 방향
+  const { reduce } = useMotionPref();
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(CALENDAR_VIEW_STORAGE_KEY, JSON.stringify({ viewMode, weekSubMode }));
+    } catch {
+      // 시크릿 모드·저장소 접근 제한에서는 기존 화면 동작을 유지한다.
+    }
+  }, [viewMode, weekSubMode]);
 
   const today = fmtDate(new Date());
   const vacationConnected = useAppStore((s) => s.vacationConnected);
@@ -468,6 +505,13 @@ export function ScheduleView() {
 
   // ─── 드래그-투-크리에이트: 시작/종료 날짜 상태 ───
   const [createEndDate, setCreateEndDate] = useState<string | undefined>();
+
+  const handleTimeGridSlotClick = useCallback((date: string, _startTime: string, _endTime: string) => {
+    // 시각 프리필은 PR-C에서 EventCreateModal 계약을 확장해 연결한다.
+    setCreateDate(date);
+    setCreateEndDate(date);
+    setShowCreate(true);
+  }, []);
 
   // 드래그 완료 후 모달이 열려 있는 동안 선택 범위를 유지하기 위한 상태
   const [persistedDateRange, setPersistedDateRange] = useState<{ startDate: string; endDate: string } | null>(null);
@@ -909,6 +953,35 @@ export function ScheduleView() {
             ))}
           </div>
 
+          {viewMode === 'week' && (
+            <div className="flex rounded-lg border border-accent/35 bg-accent/5 p-0.5" aria-label="주간 보기 방식">
+              <button
+                type="button"
+                aria-label="주간 카드 보기"
+                aria-pressed={weekSubMode === 'card'}
+                onClick={() => setWeekSubMode('card')}
+                className={cn(
+                  'rounded-md px-2.5 py-1.5 text-xs font-medium transition-colors cursor-pointer',
+                  weekSubMode === 'card' ? 'bg-accent/20 text-accent' : 'text-text-secondary hover:text-text-primary',
+                )}
+              >
+                카드
+              </button>
+              <button
+                type="button"
+                aria-label="주간 시간표 보기"
+                aria-pressed={weekSubMode === 'timegrid'}
+                onClick={() => setWeekSubMode('timegrid')}
+                className={cn(
+                  'rounded-md px-2.5 py-1.5 text-xs font-medium transition-colors cursor-pointer',
+                  weekSubMode === 'timegrid' ? 'bg-accent/20 text-accent' : 'text-text-secondary hover:text-text-primary',
+                )}
+              >
+                시간표
+              </button>
+            </div>
+          )}
+
           {/* 이벤트 생성 */}
           <button
             onClick={() => { setCreateDate(undefined); setShowCreate(true); }}
@@ -947,11 +1020,11 @@ export function ScheduleView() {
       <div className="flex-1 flex flex-col overflow-hidden px-3 pb-2">
         <AnimatePresence mode="wait">
           <motion.div
-            key={viewMode}
-            initial={{ opacity: 0, y: 8 }}
+            key={`${viewMode}:${weekSubMode}`}
+            initial={reduce ? false : { opacity: 0, y: 8 }}
             animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -8 }}
-            transition={{ duration: 0.2, ease: 'easeInOut' }}
+            exit={reduce ? undefined : { opacity: 0, y: -8 }}
+            transition={reduce ? { duration: 0 } : { duration: 0.2, ease: [0.16, 1, 0.3, 1] }}
             className="flex-1 flex flex-col overflow-hidden"
           >
             {viewMode === 'today' ? (
@@ -966,6 +1039,17 @@ export function ScheduleView() {
                   setShowCreate(true);
                 }}
                 year={year}
+              />
+            ) : viewMode === 'week' && weekSubMode === 'timegrid' ? (
+              <WeekTimeGridView
+                weekDays={weeks[activeWeekIndex] ?? []}
+                events={filteredEvents}
+                today={today}
+                onEventClick={handleEventClick}
+                onSlotClick={handleTimeGridSlotClick}
+                activeWeekIndex={activeWeekIndex}
+                weekCount={weeks.length}
+                onWeekChange={setActiveWeekIndex}
               />
             ) : viewMode === 'week' || viewMode === '2week' ? (
               <WeekScrollView
