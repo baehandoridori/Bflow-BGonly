@@ -693,7 +693,10 @@ function TimeBand({
                       const target = getPointerTarget(event.currentTarget, date);
                       if (target) timeGridDnD.beginCreate(event, target);
                     }}
-                    onClick={() => onSlotClick(date, minutesToTime(slotStart), minutesToTime(slotEnd))}
+                    onClick={() => {
+                      if (timeGridDnD.shouldSuppressClick()) return;
+                      onSlotClick(date, minutesToTime(slotStart), minutesToTime(slotEnd));
+                    }}
                   />
                 );
               })}

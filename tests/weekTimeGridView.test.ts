@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
 import test from 'node:test';
 import { build } from 'esbuild';
-import { createElement, type ReactNode } from 'react';
+import { createElement, isValidElement, type ReactElement, type ReactNode } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 
 type CalendarEvent = {
@@ -39,6 +39,7 @@ type WeekTimeGridModule = {
     activeWeekIndex: number;
     weekCount: number;
     onWeekChange(nextIndex: number): void;
+    onTimeGridCreate?(date: string, startTime: string, endTime: string): void;
   onEventContextMenu?(event: CalendarEvent, mouse: unknown): void;
   timeGridDragPreview?: {
     mode: 'create' | 'move' | 'resize-end';
@@ -107,7 +108,34 @@ type WeekTimeGridModule = {
   };
 };
 
+type TimeGridDndOptions = {
+  onCreate?: (date: string, startTime: string, endTime: string) => void;
+};
+
+let capturedTimeGridDndOptions: TimeGridDndOptions | undefined;
+let timeGridDndStub: {
+  preview: null;
+  isDragActive: boolean;
+  beginCreate(): void;
+  beginEventDrag(): void;
+  isSettling(): boolean;
+  shouldSuppressClick(): boolean;
+};
+
+function resetTimeGridDndStub(): void {
+  capturedTimeGridDndOptions = undefined;
+  timeGridDndStub = {
+    preview: null,
+    isDragActive: false,
+    beginCreate() {},
+    beginEventDrag() {},
+    isSettling: () => false,
+    shouldSuppressClick: () => false,
+  };
+}
+
 async function loadWeekTimeGridView(): Promise<WeekTimeGridModule> {
+  resetTimeGridDndStub();
   const result = await build({
     entryPoints: ['src/components/calendar/WeekTimeGridView.tsx'],
     bundle: true,
@@ -117,7 +145,7 @@ async function loadWeekTimeGridView(): Promise<WeekTimeGridModule> {
     write: false,
     external: [
       'react', 'react/jsx-runtime', 'framer-motion',
-      '@/components/calendar/CalendarGrid', '@/hooks/useMotionPref',
+      '@/components/calendar/CalendarGrid', '@/hooks/useMotionPref', '@/hooks/useTimeGridDnD',
     ],
   });
   const module = { exports: {} as Record<string, unknown> };
@@ -140,9 +168,62 @@ async function loadWeekTimeGridView(): Promise<WeekTimeGridModule> {
       };
     }
     if (id === '@/hooks/useMotionPref') return { useMotionPref: () => ({ reduce: false }) };
+    if (id === '@/hooks/useTimeGridDnD') {
+      return {
+        useTimeGridDnD: (options: TimeGridDndOptions) => {
+          capturedTimeGridDndOptions = options;
+          return timeGridDndStub;
+        },
+        getTimeGridEventDragMode: (isReadOnly: boolean, clientY: number, bottom: number) => (
+          isReadOnly ? null : clientY >= bottom - 8 ? 'resize-end' : 'move'
+        ),
+      };
+    }
     return nodeRequire(id);
   }, module, module.exports);
   return module.exports as unknown as WeekTimeGridModule;
+}
+
+function findWeekElements(
+  node: ReactNode,
+  predicate: (element: ReactElement<Record<string, unknown>>) => boolean,
+): ReactElement<Record<string, unknown>>[] {
+  if (Array.isArray(node)) return node.flatMap((child) => findWeekElements(child, predicate));
+  if (!isValidElement(node)) return [];
+  const element = node as ReactElement<Record<string, unknown>>;
+  return [
+    ...(predicate(element) ? [element] : []),
+    ...findWeekElements(element.props.children as ReactNode, predicate),
+  ];
+}
+
+function renderInteractiveWeekTimeGrid(
+  module: WeekTimeGridModule,
+  props: Parameters<WeekTimeGridModule['default']>[0],
+): { tree: ReactNode; restore(): void } {
+  const React = createRequire(import.meta.url)('react');
+  const dispatcher = React.__SECRET_INTERNALS_DO_NOT_USE_OR_YOU_WILL_BE_FIRED.ReactCurrentDispatcher;
+  const previousDispatcher = dispatcher.current;
+  dispatcher.current = {
+    useState(initial: unknown) {
+      return [typeof initial === 'function' ? (initial as () => unknown)() : initial, () => {}];
+    },
+    useRef(initial: unknown) { return { current: initial }; },
+    useEffect() {},
+    useMemo(factory: () => unknown) { return factory(); },
+    useCallback(fn: unknown) { return fn; },
+  };
+  const resolve = (node: ReactNode): ReactNode => {
+    if (Array.isArray(node)) return node.map(resolve);
+    if (!isValidElement(node)) return node;
+    const element = node as ReactElement<Record<string, unknown>>;
+    if (typeof element.type === 'function') return resolve(element.type(element.props));
+    return { ...element, props: { ...element.props, children: resolve(element.props.children as ReactNode) } };
+  };
+  return {
+    tree: resolve(module.default(props)),
+    restore() { dispatcher.current = previousDispatcher; },
+  };
 }
 
 function event(overrides: Partial<CalendarEvent>): CalendarEvent {
@@ -519,6 +600,40 @@ test('WeekTimeGridView: 30분 이상 시간 블록은 원본색 시각을 제목
   }));
 
   assert.match(markup, /data-time-grid-time="true"[^>]*>09:00 – 09:30<\/span><span data-time-grid-title="true"[^>]*>오전 회의<\/span>/);
+});
+
+test('WeekTimeGridView: 같은 슬롯에서 끝난 드래그는 exact create 범위를 30분 click으로 덮어쓰지 않는다', async () => {
+  const module = await loadWeekTimeGridView();
+  const exactCreates: Array<[string, string, string]> = [];
+  const slotCreates: Array<[string, string, string]> = [];
+  const harness = renderInteractiveWeekTimeGrid(module, {
+    weekDays: Array.from({ length: 7 }, (_, index) => new Date(2026, 7, 23 + index, 12)),
+    events: [],
+    today: '2026-08-23',
+    onEventClick() {},
+    onSlotClick: (...args) => slotCreates.push(args),
+    onTimeGridCreate: (...args) => exactCreates.push(args),
+    tagNameById: {},
+    calendarNameById: {},
+    activeWeekIndex: 0,
+    weekCount: 4,
+    onWeekChange() {},
+  });
+  try {
+    assert.ok(capturedTimeGridDndOptions?.onCreate, 'the time-grid create callback reaches its DnD hook');
+    timeGridDndStub.shouldSuppressClick = () => true;
+    capturedTimeGridDndOptions.onCreate?.('2026-08-25', '10:00', '10:45');
+    const slot = findWeekElements(harness.tree, (element) => (
+      element.props['aria-label'] === '2026-08-25 10:00 일정 만들기'
+    ))[0];
+    assert.ok(slot, 'the same slot exposes its ordinary click callback');
+    slot.props.onClick?.();
+
+    assert.deepEqual(exactCreates, [['2026-08-25', '10:00', '10:45']]);
+    assert.deepEqual(slotCreates, [], 'the suppressed trailing click cannot replace the exact drag range');
+  } finally {
+    harness.restore();
+  }
 });
 
 test('WeekTimeGridView: 외부 시간표 preview는 해당 날짜 열의 생성 ghost와 실시간 범위를 표시한다', async () => {
