@@ -2,6 +2,8 @@ import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
 import test from 'node:test';
 import { build } from 'esbuild';
+import { createElement, type ReactNode } from 'react';
+import { renderToStaticMarkup } from 'react-dom/server';
 
 type CalendarEvent = {
   id: string;
@@ -23,7 +25,22 @@ type WeekTimeGridModule = {
     allDayEvents: CalendarEvent[];
     timedEventsByDate: Map<string, CalendarEvent[]>;
   };
-  resolveBandExpanded(hasTimedBlocks: boolean, userChoice: boolean | null): boolean;
+  default(props: {
+    week: Date[];
+    events: CalendarEvent[];
+    today: string;
+    onEventClick(event: CalendarEvent): void;
+    onSlotClick(date: string, startTime: string, endTime: string): void;
+    onWeekShift(delta: -1 | 1): void;
+  }): ReactNode;
+  resolveBandExpanded(
+    hasTimedBlocks: boolean,
+    userChoice: boolean | null,
+    nowMin: number,
+    bandStartMin: number,
+    bandEndMin: number,
+    includesToday: boolean,
+  ): boolean;
   getTimeSlots(startMin: number, endMin: number): Array<{ startMin: number; endMin: number }>;
   getAllDayBarLabel(bar: {
     event: CalendarEvent;
@@ -42,6 +59,19 @@ type WeekTimeGridModule = {
     titleFontSize: number;
     timeColor: string;
   };
+  getTimedBlockStateStyle(color: string, isCurrent: boolean): {
+    outline?: string;
+    outlineOffset?: number;
+    boxShadow?: string;
+  };
+  getTimedBlockOpacity(isPast: boolean): number;
+  getAllDayBarStyle(color: string): {
+    background: string;
+    borderLeft: string;
+    color: string;
+  };
+  formatKoreanHour(min: number): string;
+  getCollapsedBandLabel(label: string, startMin: number, endMin: number): string;
 };
 
 async function loadWeekTimeGridView(): Promise<WeekTimeGridModule> {
@@ -64,7 +94,18 @@ async function loadWeekTimeGridView(): Promise<WeekTimeGridModule> {
     if (id === 'react') return nodeRequire('react');
     if (id === 'react/jsx-runtime') return nodeRequire('react/jsx-runtime');
     if (id === 'framer-motion') return { motion: { button: 'button', div: 'div' } };
-    if (id === '@/components/calendar/CalendarGrid') return { layoutEventBars: () => [] };
+    if (id === '@/components/calendar/CalendarGrid') {
+      return {
+        layoutEventBars: (events: CalendarEvent[]) => events.map((item, index) => ({
+          event: item,
+          row: index,
+          startCol: 0,
+          span: 1,
+          isStart: true,
+          isEnd: true,
+        })),
+      };
+    }
     if (id === '@/hooks/useMotionPref') return { useMotionPref: () => ({ reduce: false }) };
     return nodeRequire(id);
   }, module, module.exports);
@@ -105,9 +146,11 @@ test('WeekTimeGridView: 종일과 날짜를 넘는 일정은 종일 레인으로
 test('WeekTimeGridView: 새벽·저녁 일정은 처음에는 펼치되 사용자의 접기 선택을 우선한다', async () => {
   const { resolveBandExpanded } = await loadWeekTimeGridView();
 
-  assert.equal(resolveBandExpanded(true, null), true, '시간 일정이 있으면 최초 기본값은 펼침이다');
-  assert.equal(resolveBandExpanded(true, false), false, '사용자가 접으면 시간 일정이 남아도 접힘을 유지한다');
-  assert.equal(resolveBandExpanded(false, true), true, '사용자가 펼친 빈 밴드는 열린 상태를 유지한다');
+  assert.equal(resolveBandExpanded(true, null, 600, 0, 540, true), true, '시간 일정이 있으면 최초 기본값은 펼침이다');
+  assert.equal(resolveBandExpanded(false, null, 300, 0, 540, true), true, '현재 시각이 새벽 밴드면 일정이 없어도 최초 기본값은 펼침이다');
+  assert.equal(resolveBandExpanded(false, false, 300, 0, 540, true), false, '사용자가 접으면 현재 시각이 있어도 접힘을 유지한다');
+  assert.equal(resolveBandExpanded(false, null, 540, 0, 540, true), false, '09:00 경계는 다음 밴드에만 속한다');
+  assert.equal(resolveBandExpanded(false, true, 600, 0, 540, true), true, '사용자가 펼친 빈 밴드는 열린 상태를 유지한다');
 });
 
 test('WeekTimeGridView: 시간 슬롯은 30분 단위 종료 시간을 사용한다', async () => {
@@ -138,17 +181,70 @@ test('WeekTimeGridView: 현재 시각선은 56px 시간 눈금 기준 위치와 
     label: '09:30',
     todayIndex: 2,
   });
-  assert.equal(getCurrentTimeMarker(510, 540, 1140, 2), null);
+  assert.equal(getCurrentTimeMarker(540, 0, 540, 2), null, '09:00은 새벽 밴드에 중복 표시하지 않는다');
+  assert.equal(getCurrentTimeMarker(540, 540, 1140, 2)?.label, '09:00', '09:00은 본 시간대에만 표시한다');
+  assert.equal(getCurrentTimeMarker(1140, 540, 1140, 2), null, '19:00은 본 시간대에 중복 표시하지 않는다');
+  assert.equal(getCurrentTimeMarker(1140, 1140, 1440, 2)?.label, '19:00', '19:00은 저녁 밴드에만 표시한다');
 });
 
 test('WeekTimeGridView: 시간 블록은 D10 색조와 왼쪽 경계·시간 라벨을 원본 색으로 그린다', async () => {
   const { getTimedBlockVisualStyle } = await loadWeekTimeGridView();
 
   assert.deepEqual(getTimedBlockVisualStyle('#6C5CE7'), {
-    background: 'rgba(108,92,231,0.18)',
+    background: 'rgb(41, 40, 74)',
     borderLeft: '3px solid #6C5CE7',
-    titleColor: '#ffffff',
+    titleColor: '#E8E8EE',
     titleFontSize: 11,
     timeColor: '#6C5CE7',
   });
+});
+
+test('WeekTimeGridView: 현재 블록만 원본색 1px 윤곽과 강한 그림자를 가진다', async () => {
+  const { getTimedBlockStateStyle, getTimedBlockOpacity } = await loadWeekTimeGridView();
+
+  assert.deepEqual(getTimedBlockStateStyle('#6C5CE7', false), {});
+  assert.deepEqual(getTimedBlockStateStyle('#6C5CE7', true), {
+    outline: '1px solid #6C5CE7',
+    outlineOffset: 1,
+    boxShadow: '0 0 16px rgba(108,92,231,0.75)',
+  });
+  assert.equal(getTimedBlockOpacity(true), 0.5);
+  assert.equal(getTimedBlockOpacity(false), 1);
+});
+
+test('WeekTimeGridView: 한국어 시간 눈금과 접힌 밴드의 범위·상태·화살표를 만든다', async () => {
+  const { formatKoreanHour, getCollapsedBandLabel } = await loadWeekTimeGridView();
+
+  assert.equal(formatKoreanHour(0), '오전 12시');
+  assert.equal(formatKoreanHour(540), '오전 9시');
+  assert.equal(formatKoreanHour(1140), '오후 7시');
+  assert.equal(getCollapsedBandLabel('새벽 시간대', 0, 540), '▸ 새벽 시간대 · 오전 12시–오전 9시 · 접힘');
+});
+
+test('WeekTimeGridView: 종일 칩의 틴트·왼쪽 경계와 주말 dim, +N개 표기를 실제 마크업에 남긴다', async () => {
+  const module = await loadWeekTimeGridView();
+  const week = Array.from({ length: 7 }, (_, index) => new Date(2026, 7, 23 + index, 12));
+  const allDayEvents = [
+    event({ id: 'all-1', allDay: true }),
+    event({ id: 'all-2', allDay: true }),
+    event({ id: 'all-3', allDay: true }),
+  ];
+  const markup = renderToStaticMarkup(createElement(module.default, {
+    week,
+    events: allDayEvents,
+    today: '2026-01-01',
+    onEventClick() {},
+    onSlotClick() {},
+    onWeekShift() {},
+  }));
+
+  assert.deepEqual(module.getAllDayBarStyle('#6C5CE7'), {
+    background: 'rgb(41, 40, 74)',
+    borderLeft: '3px solid #6C5CE7',
+    color: '#E8E8EE',
+  });
+  assert.match(markup, /\+1개/);
+  assert.match(markup, /opacity-60/);
+  assert.match(markup, /background:rgb\(41, 40, 74\)/);
+  assert.match(markup, /▸ 새벽 시간대 · 오전 12시–오전 9시 · 접힘/);
 });

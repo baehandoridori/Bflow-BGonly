@@ -17,6 +17,7 @@ const EVENING_START_MIN = MAIN_END_MIN;
 const DAY_END_MIN = 24 * 60;
 const ALL_DAY_ROW_PX = 28;
 const WEEKDAY_KR = ['일', '월', '화', '수', '목', '금', '토'];
+const CARD_BASE_RGB = [26, 29, 39] as const; // #1A1D27
 
 export interface WeekTimeGridViewProps {
   /** 일요일부터 토요일까지의 활성 주간 날짜 7개 */
@@ -57,9 +58,18 @@ export function splitWeekTimeGridEvents(events: CalendarEvent[]): {
   return { allDayEvents, timedEventsByDate };
 }
 
-/** 밴드에 일정이 있어도 사용자가 명시적으로 접은 상태는 덮어쓰지 않는다. */
-export function resolveBandExpanded(hasTimedBlocks: boolean, userChoice: boolean | null): boolean {
-  return userChoice ?? hasTimedBlocks;
+/** 밴드에 일정이 있거나 현재 시각이 속하면 최초 기본값은 펼치되, 사용자의 선택은 우선한다. */
+export function resolveBandExpanded(
+  hasTimedBlocks: boolean,
+  userChoice: boolean | null,
+  nowMin: number,
+  bandStartMin: number,
+  bandEndMin: number,
+  includesToday: boolean,
+): boolean {
+  if (userChoice !== null) return userChoice;
+  const containsNow = includesToday && nowMin >= bandStartMin && nowMin < bandEndMin;
+  return hasTimedBlocks || containsNow;
 }
 
 /** 빈 시간 클릭을 위한 30분 단위 슬롯. */
@@ -79,19 +89,31 @@ export function getAllDayBarLabel(bar: Pick<EventBar, 'event' | 'isStart' | 'isE
   return `${before}${time}${bar.event.title}${after}`;
 }
 
-/** 현재 시각선은 활성 밴드 내부일 때만 위치를 만든다. */
+/** 현재 시각선은 활성 밴드 내부의 half-open 구간에서만 위치를 만든다. */
 export function getCurrentTimeMarker(
   nowMin: number,
   bandStartMin: number,
   bandEndMin: number,
   todayIndex: number,
 ): { top: number; label: string; todayIndex: number } | null {
-  if (todayIndex < 0 || nowMin < bandStartMin || nowMin > bandEndMin) return null;
+  if (todayIndex < 0 || nowMin < bandStartMin || nowMin >= bandEndMin) return null;
   return {
     top: ((nowMin - bandStartMin) / 60) * HOUR_PX,
     label: minutesToTime(nowMin),
     todayIndex,
   };
+}
+
+function tintOnCard(color: string): string {
+  const hex = color.replace('#', '');
+  if (!/^[0-9a-fA-F]{6}$/.test(hex)) return color;
+  const source = [
+    Number.parseInt(hex.slice(0, 2), 16),
+    Number.parseInt(hex.slice(2, 4), 16),
+    Number.parseInt(hex.slice(4, 6), 16),
+  ];
+  const tinted = source.map((channel, index) => Math.round(CARD_BASE_RGB[index] * 0.82 + channel * 0.18));
+  return `rgb(${tinted.join(', ')})`;
 }
 
 /** D10 시간 블록의 공통 색상 처리. */
@@ -103,11 +125,36 @@ export function getTimedBlockVisualStyle(color: string): {
   timeColor: string;
 } {
   return {
-    background: hexToRgba(color, 0.18),
+    background: tintOnCard(color),
     borderLeft: `3px solid ${color}`,
-    titleColor: '#ffffff',
+    titleColor: '#E8E8EE',
     titleFontSize: 11,
     timeColor: color,
+  };
+}
+
+export function getTimedBlockStateStyle(color: string, isCurrent: boolean): {
+  outline?: string;
+  outlineOffset?: number;
+  boxShadow?: string;
+} {
+  if (!isCurrent) return {};
+  return {
+    outline: `1px solid ${color}`,
+    outlineOffset: 1,
+    boxShadow: `0 0 16px ${hexToRgba(color, 0.75)}`,
+  };
+}
+
+export function getTimedBlockOpacity(isPast: boolean): number {
+  return isPast ? 0.5 : 1;
+}
+
+export function getAllDayBarStyle(color: string): { background: string; borderLeft: string; color: string } {
+  return {
+    background: tintOnCard(color),
+    borderLeft: `3px solid ${color}`,
+    color: '#E8E8EE',
   };
 }
 
@@ -122,8 +169,15 @@ function bandContains(blocks: TimedEvent[], startMin: number, endMin: number): b
   return blocks.some((block) => block.startMin < endMin && block.endMin > startMin);
 }
 
-function formatHour(min: number): string {
-  return `${String(Math.floor(min / 60)).padStart(2, '0')}:00`;
+export function formatKoreanHour(min: number): string {
+  const hour = Math.floor(min / 60) % 24;
+  const period = hour < 12 ? '오전' : '오후';
+  const displayHour = hour % 12 || 12;
+  return `${period} ${displayHour}시`;
+}
+
+export function getCollapsedBandLabel(label: string, startMin: number, endMin: number): string {
+  return `▸ ${label} · ${formatKoreanHour(startMin)}–${formatKoreanHour(endMin)} · 접힘`;
 }
 
 function eventBlockStyle(layout: { col: number; span: number; cols: number }, top: number, height: number) {
@@ -178,9 +232,11 @@ export function WeekTimeGridView({
     () => [...timedByDate.values()].some((blocks) => bandContains(blocks, EVENING_START_MIN, DAY_END_MIN)),
     [timedByDate],
   );
-  const dawnVisible = resolveBandExpanded(hasDawnBlocks, dawnChoice);
-  const eveningVisible = resolveBandExpanded(hasEveningBlocks, eveningChoice);
   const todayIndex = dateStrings.indexOf(today);
+  const nowMin = now.getHours() * 60 + now.getMinutes();
+  const includesToday = todayIndex >= 0;
+  const dawnVisible = resolveBandExpanded(hasDawnBlocks, dawnChoice, nowMin, 0, DAWN_END_MIN, includesToday);
+  const eveningVisible = resolveBandExpanded(hasEveningBlocks, eveningChoice, nowMin, EVENING_START_MIN, DAY_END_MIN, includesToday);
 
   useEffect(() => {
     const interval = window.setInterval(() => setNow(new Date()), 60_000);
@@ -218,8 +274,6 @@ export function WeekTimeGridView({
     onWeekShift(movement > 0 ? 1 : -1);
   }, [onWeekShift]);
 
-  const nowMin = now.getHours() * 60 + now.getMinutes();
-
   return (
     <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl border border-bg-border/40 bg-bg-primary/50">
       <div className="sticky top-0 z-30 border-b border-bg-border/40 bg-bg-primary/95 backdrop-blur">
@@ -228,10 +282,11 @@ export function WeekTimeGridView({
           {dates.map((date, index) => {
             const dateStr = dateStrings[index];
             const isToday = dateStr === today;
+            const isWeekend = index === 0 || index === 6;
             return (
               <div
                 key={dateStr}
-                className={`min-w-0 border-l border-bg-border/25 px-2 py-2 text-center ${isToday ? 'bg-accent/10' : ''}`}
+                className={`min-w-0 border-l border-bg-border/25 px-2 py-2 text-center ${isToday ? 'bg-accent/10' : ''} ${isWeekend ? 'opacity-60' : ''}`}
               >
                 <div className={`text-[11px] font-semibold ${index === 0 ? 'text-red-400' : index === 6 ? 'text-blue-400' : 'text-text-secondary'}`}>
                   {WEEKDAY_KR[index]}
@@ -270,7 +325,7 @@ export function WeekTimeGridView({
                   left: `calc(${bar.startCol * (100 / 7)}% + 2px)`,
                   width: `calc(${bar.span * (100 / 7)}% - 4px)`,
                   height: 22,
-                  background: bar.event.color,
+                  ...getAllDayBarStyle(bar.event.color),
                 }}
                 onClick={(event) => {
                   event.stopPropagation();
@@ -288,7 +343,7 @@ export function WeekTimeGridView({
               aria-expanded={showAllDay}
               onClick={() => setShowAllDay((expanded) => !expanded)}
             >
-              {showAllDay ? '접기' : `+${hiddenAllDayCount}`}
+              {showAllDay ? '접기' : `+${hiddenAllDayCount}개`}
             </button>
           )}
         </div>
@@ -300,7 +355,7 @@ export function WeekTimeGridView({
           startMin={0}
           endMin={DAWN_END_MIN}
           visible={dawnVisible}
-          onToggle={() => setDawnChoice((choice) => !resolveBandExpanded(hasDawnBlocks, choice))}
+          onToggle={() => setDawnChoice((choice) => !resolveBandExpanded(hasDawnBlocks, choice, nowMin, 0, DAWN_END_MIN, includesToday))}
           dates={dates}
           dateStrings={dateStrings}
           blocksByDate={timedByDate}
@@ -331,7 +386,7 @@ export function WeekTimeGridView({
           startMin={EVENING_START_MIN}
           endMin={DAY_END_MIN}
           visible={eveningVisible}
-          onToggle={() => setEveningChoice((choice) => !resolveBandExpanded(hasEveningBlocks, choice))}
+          onToggle={() => setEveningChoice((choice) => !resolveBandExpanded(hasEveningBlocks, choice, nowMin, EVENING_START_MIN, DAY_END_MIN, includesToday))}
           dates={dates}
           dateStrings={dateStrings}
           blocksByDate={timedByDate}
@@ -386,7 +441,7 @@ function TimeBand({
         aria-label={`${label} 펼치기`}
         onClick={onToggle}
       >
-        {label} 펼치기
+        {getCollapsedBandLabel(label, startMin, endMin)}
       </button>
     );
   }
@@ -407,23 +462,24 @@ function TimeBand({
           onClick={onToggle}
           style={{ width: TIME_GUTTER_PX }}
         >
-          접기
+          ▾ 접기
         </button>
       )}
       <div className="absolute inset-0 grid" style={{ gridTemplateColumns: `${TIME_GUTTER_PX}px repeat(7, minmax(0, 1fr))` }}>
         <div className="relative border-r border-bg-border/25">
           {hours.map((minute) => (
             <span key={minute} className="absolute right-1 -translate-y-1/2 text-[9px] text-text-secondary" style={{ top: ((minute - startMin) / 60) * HOUR_PX }}>
-              {formatHour(minute)}
+              {formatKoreanHour(minute)}
             </span>
           ))}
         </div>
         {dates.map((_, index) => {
           const date = dateStrings[index];
+          const isWeekend = index === 0 || index === 6;
           const timedBlocks = blocksByDate.get(date) ?? [];
           const layouts = layoutDayBlocks(timedBlocks.map((block) => ({ id: block.layoutId, startMin: block.startMin, endMin: block.endMin })));
           return (
-            <div key={date} className={`relative border-r border-bg-border/20 ${date === today ? 'bg-accent/[0.035]' : ''}`}>
+            <div key={date} className={`relative border-r border-bg-border/20 ${date === today ? 'bg-accent/[0.035]' : ''} ${isWeekend ? 'opacity-60' : ''}`}>
               {hours.map((minute) => (
                 <div key={minute} className="pointer-events-none absolute left-0 right-0 border-t border-bg-border/20" style={{ top: ((minute - startMin) / 60) * HOUR_PX }} />
               ))}
@@ -452,13 +508,15 @@ function TimeBand({
                 const isCurrent = date === today && block.startMin <= nowMin && nowMin < block.endMin;
                 const duration = block.endMin - block.startMin;
                 const visualStyle = getTimedBlockVisualStyle(block.event.color);
+                const stateStyle = getTimedBlockStateStyle(block.event.color, isCurrent);
+                const opacity = getTimedBlockOpacity(isPast);
                 return (
                   <motion.button
                     key={layout.id}
                     type="button"
                     title={`${block.event.title} · ${minutesToTime(block.startMin)}–${minutesToTime(block.endMin)}`}
                     aria-label={`${block.event.title}, ${date} ${minutesToTime(block.startMin)}부터 ${minutesToTime(block.endMin)}까지`}
-                    className={`absolute z-10 overflow-hidden rounded px-1.5 py-1 text-left text-[10px] font-semibold text-white shadow-sm outline-none focus-visible:ring-2 focus-visible:ring-white focus-visible:ring-offset-1 focus-visible:ring-offset-bg-primary ${isPast ? 'opacity-45' : ''} ${isCurrent ? 'ring-2 ring-white ring-offset-1 ring-offset-bg-primary' : ''}`}
+                    className="absolute z-10 overflow-hidden rounded px-1.5 py-1 text-left font-semibold outline-none focus-visible:ring-2 focus-visible:ring-white focus-visible:ring-offset-1 focus-visible:ring-offset-bg-primary"
                     style={{
                       ...eventBlockStyle(
                         layout,
@@ -467,9 +525,11 @@ function TimeBand({
                       ),
                       background: visualStyle.background,
                       borderLeft: visualStyle.borderLeft,
+                      opacity,
+                      ...stateStyle,
                     }}
                     initial={reduce ? false : { opacity: 0, y: 4 }}
-                    animate={{ opacity: isPast ? 0.45 : 1, y: 0 }}
+                    animate={{ opacity, y: 0 }}
                     transition={{ duration: reduce ? 0 : 0.18, delay: clampStaggerDelay(layoutIndex, reduce) }}
                     onClick={(event) => {
                       event.stopPropagation();
