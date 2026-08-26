@@ -10,7 +10,6 @@ import type {
   GCalSettings,
 } from '@/types/calendar';
 import * as gcalService from './googleCalendarService';
-import { readMetadata, writeMetadata } from './supabaseService';
 import { useAuthStore } from '@/stores/useAuthStore';
 import { getPersonalCalendar, useCalendarStore } from '@/stores/useCalendarStore';
 import { createUuid } from '@/utils/createUuid';
@@ -167,8 +166,7 @@ function toCalendarEventFromBflowRow(
   };
 }
 
-// teamCalendarId는 Supabase metadata에 저장 (팀 전체 공유)
-// personalCalendarId, lastSyncAt은 로컬에만 저장 (사용자별)
+// Google 연동 설정은 사용자별 로컬에만 저장한다.
 const OLD_SETTINGS_KEY = 'bflow_gcal_settings';
 const GCAL_LOCAL_SETTINGS_KEY = 'bflow_gcal_local_settings';
 
@@ -198,18 +196,12 @@ export function saveLocalGCalSettings(settings: Partial<GCalLocalSettings>): voi
   saveLocalSettings({ ...current, ...settings });
 }
 
-let cachedTeamCalendarId: string | null | undefined = undefined; // undefined = 아직 로드 안 됨
-
 /** 구 localStorage 전용 설정 → 새 구조로 마이그레이션 */
 async function migrateOldSettings(): Promise<void> {
   const old = localStorage.getItem(OLD_SETTINGS_KEY);
   if (!old) return;
   try {
     const parsed = JSON.parse(old);
-    if (parsed.teamCalendarId) {
-      await writeMetadata('gcal', 'teamCalendarId', parsed.teamCalendarId);
-      cachedTeamCalendarId = parsed.teamCalendarId;
-    }
     saveLocalSettings({
       personalCalendarId: parsed.personalCalendarId || null,
       lastSyncAt: parsed.lastSyncAt || null,
@@ -222,44 +214,23 @@ export async function getGCalSettings(): Promise<GCalSettings> {
   // 구 설정 마이그레이션 (있으면)
   await migrateOldSettings();
 
-  // teamCalendarId: Supabase metadata에서 로드 (캐시 활용)
-  if (cachedTeamCalendarId === undefined) {
-    try {
-      const meta = await readMetadata('gcal', 'teamCalendarId');
-      cachedTeamCalendarId = meta?.value || null;
-    } catch {
-      cachedTeamCalendarId = null;
-    }
-  }
-
   const local = getLocalSettings();
   // Main-side personal-todo calendar sync reads the same setting from the
   // app-data file; mirror existing renderer settings before it resolves a
   // target calendar (important after upgrading from the localStorage-only path).
   saveLocalSettings(local);
   return {
-    teamCalendarId: cachedTeamCalendarId ?? null,
     personalCalendarId: local.personalCalendarId,
     lastSyncAt: local.lastSyncAt,
   };
 }
 
-/** 팀 캘린더 ID를 Supabase에 저장 (팀 전체 공유) */
-export async function saveTeamCalendarId(calId: string | null): Promise<void> {
-  cachedTeamCalendarId = calId;
-  await writeMetadata('gcal', 'teamCalendarId', calId || '');
-}
-
-/** 하위 호환: 기존 saveGCalSettings 시그니처 유지 (로컬 부분 즉시 저장, 팀 ID는 비동기) */
+/** Google 연동 로컬 설정 저장 */
 export function saveGCalSettings(settings: GCalSettings): void {
   saveLocalSettings({
     personalCalendarId: settings.personalCalendarId,
     lastSyncAt: settings.lastSyncAt,
   });
-  if (settings.teamCalendarId !== cachedTeamCalendarId) {
-    cachedTeamCalendarId = settings.teamCalendarId;
-    writeMetadata('gcal', 'teamCalendarId', settings.teamCalendarId || '').catch(console.error);
-  }
 }
 
 /** GCal 이벤트 → B flow CalendarEvent 변환 */
@@ -355,14 +326,6 @@ function toBflowMeta(event: Partial<CalendarEvent>): Record<string, string> {
   if (event.vacationType) meta.bflow_vacation_type = event.vacationType;
   if (event.vacationUserName) meta.bflow_vacation_user = event.vacationUserName;
   return meta;
-}
-
-/** 공개 일정은 항상 로그인 계정의 primary 캘린더에 저장한다.
- *  (팀 캘린더 / 개인 캘린더 구분은 제거 — 비공개는 Supabase 로 분리)
- *  type 파라미터는 시그니처 호환을 위해 유지하되 사용하지 않는다. */
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
-async function getTargetCalendar(_type: CalendarEventType): Promise<string | null> {
-  return 'primary';
 }
 
 // ─── 공개 API (기존 인터페이스 유지) ──────────────────────────
@@ -1217,12 +1180,11 @@ export async function syncAll(options: { broadcast?: boolean; skipBflowLoad?: bo
   const successfulEvents: CalendarEvent[] = [];
   const successfulEventsByCalendar = new Map<string, CalendarEvent[]>();
 
-  // 팀/개인 캘린더 목록 — 설정 조회 실패 시에도 비공개 이벤트는 이미 위에서 로드됨
+  // 개인 Google 캘린더 목록 — 설정 조회 실패 시에도 비공개 이벤트는 이미 위에서 로드됨
   const calIds = new Set<string>();
   let settingsLoaded = false;
   try {
     const settings = await getGCalSettings();
-    if (settings.teamCalendarId) calIds.add(settings.teamCalendarId);
     calIds.add(settings.personalCalendarId || 'primary');
     settingsLoaded = true;
   } catch (err) {
@@ -1299,9 +1261,8 @@ export async function syncAll(options: { broadcast?: boolean; skipBflowLoad?: bo
 export async function syncIncremental(): Promise<void> {
   const settings = await getGCalSettings();
 
-  // 팀/개인 캘린더 목록 (중복 제거, getTargetCalendar과 일치)
+  // 개인 Google 캘린더 하나만 증분 동기화한다.
   const calIds = new Set<string>();
-  if (settings.teamCalendarId) calIds.add(settings.teamCalendarId);
   calIds.add(settings.personalCalendarId || 'primary');
 
   for (const calId of calIds) {
@@ -1913,7 +1874,7 @@ async function addEventInternal(
 
   if (inheritedToken && !isBflowMutationCurrent(inheritedToken)) return null;
 
-  const calId = await getTargetCalendar(event.type);
+  const calId = 'primary';
   if (inheritedToken && !isBflowMutationCurrent(inheritedToken)) return null;
   if (!calId) throw new Error('캘린더가 설정되지 않았습니다');
 
@@ -1948,8 +1909,6 @@ async function addEventInternal(
         ? gcalEndDate
         : toKstRfc3339(event.endDate, event.endTime ?? ''),
       extendedProperties: toBflowMeta(event),
-      // 비공개 일정이면 Google Calendar 에 'private' 로 저장 — 도메인 내 다른 사용자에게 숨김
-      visibility: event.isPrivate ? 'private' as const : undefined,
     };
     const replacement = isPrivacyMigrationReplacement
       ? await window.electronAPI.calendarPrivacyReplacementCreate({
@@ -2511,7 +2470,7 @@ async function updateEventForToken(
   }
 
   // 원본 캘린더 ID 우선 사용 (캘린더 설정 변경 후에도 올바른 캘린더에서 수정)
-  const calId = existing.sourceCalendarId || await getTargetCalendar(existing.type);
+  const calId = existing.sourceCalendarId || 'primary';
   if (!calId) return;
   const existingSource = inferExistingEventSource(existing);
 
@@ -2795,7 +2754,7 @@ async function deleteEventForToken(
   }
 
   // 원본 캘린더 ID 우선 사용
-  const calId = existing.sourceCalendarId || await getTargetCalendar(existing.type);
+  const calId = existing.sourceCalendarId || 'primary';
   if (!continueBeforeSourceDelete(requestToken)) return;
   if (!calId) return;
   const existingSource = inferExistingEventSource(existing);

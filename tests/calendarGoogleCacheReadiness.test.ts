@@ -41,7 +41,6 @@ type ServiceModule = {
     isReadOnly?: boolean;
   }>>;
   deleteEvent(eventId: string, targetIdentity?: EventIdentityFixture): Promise<void>;
-  saveTeamCalendarId(calendarId: string | null): Promise<void>;
   applyCommittedGoogleDelete(payload: unknown): boolean;
   applyCommittedPrivacyReplacementDelete(payload: unknown): boolean;
   refreshCalendarPresentationFromMetadata(): void;
@@ -234,7 +233,6 @@ type HarnessOptions = {
   deleteGoogleEvent?: (calendarId: string, eventId: string) => Promise<void>;
   readPrivateEvents?: (userId: string) => Promise<LegacyPrivateEventFixture[]>;
   currentUserId?: string;
-  teamCalendarId?: string | null;
   personalCalendarId?: string | null;
   failSettingsWrite?: () => boolean;
 };
@@ -607,15 +605,6 @@ async function createHarness(
         deletedLegacyEventIds.push(eventId);
         await options.deleteLegacyEvent?.(eventId);
       },
-      supabaseWriteMetadata: async () => {},
-      supabaseReadMetadata: async () => options.teamCalendarId
-        ? {
-            type: 'gcal',
-            key: 'teamCalendarId',
-            value: options.teamCalendarId,
-            updatedAt: '2026-08-24T00:00:00.000Z',
-          }
-        : null,
       gcalFullSync: options.fullSync,
       gcalIncrementalSync: options.incrementalSync ?? (async () => ({
         updated: [],
@@ -1779,108 +1768,6 @@ test('a settings lookup failure preserves the last successful Google cache and m
   }
 });
 
-test('full sync keeps same-id Google rows from different source calendars', async () => {
-  const harness = await createHarness({
-    teamCalendarId: 'team',
-    personalCalendarId: 'primary',
-    fullSync: async (calendarId) => [
-      googleEvent('shared-google-id', calendarId === 'team' ? '팀 일정' : '개인 일정'),
-    ],
-  });
-  try {
-    await harness.service.syncAll({ skipBflowLoad: true });
-
-    assert.deepEqual(
-      (await harness.service.getEvents()).map(({ id, title, sourceCalendarId }) => ({
-        id,
-        title,
-        sourceCalendarId,
-      })),
-      [
-        { id: 'shared-google-id', title: '팀 일정', sourceCalendarId: 'team' },
-        { id: 'shared-google-id', title: '개인 일정', sourceCalendarId: 'primary' },
-      ],
-      'a provider-local ID is not a renderer-global event identity',
-    );
-  } finally {
-    harness.restore();
-  }
-});
-
-test('an exact Google identity updates only the selected same-id calendar row', async () => {
-  const updateCalls: Array<{ calendarId: string; eventId: string }> = [];
-  const harness = await createHarness({
-    teamCalendarId: 'team',
-    personalCalendarId: 'primary',
-    fullSync: async (calendarId) => [
-      googleEvent('shared-google-id', calendarId === 'team' ? '팀 일정' : '개인 일정'),
-    ],
-    updateGoogleEvent: async (calendarId, eventId) => {
-      updateCalls.push({ calendarId, eventId });
-    },
-  });
-  try {
-    await harness.service.syncAll({ skipBflowLoad: true });
-    await harness.service.updateEvent(
-      'shared-google-id',
-      { title: '개인 일정 수정' },
-      { id: 'shared-google-id', source: 'google', sourceCalendarId: 'primary' },
-    );
-
-    assert.deepEqual(updateCalls, [{ calendarId: 'primary', eventId: 'shared-google-id' }]);
-    assert.deepEqual(
-      (await harness.service.getEvents()).map(({ title, sourceCalendarId }) => ({ title, sourceCalendarId })),
-      [
-        { title: '팀 일정', sourceCalendarId: 'team' },
-        { title: '개인 일정 수정', sourceCalendarId: 'primary' },
-      ],
-      'the optimistic cache patch must not spill into the other Google calendar',
-    );
-  } finally {
-    harness.restore();
-  }
-});
-
-test('a Google create returning another calendar same ID replaces only its optimistic source row', async () => {
-  const harness = await createHarness({
-    teamCalendarId: 'team',
-    personalCalendarId: 'primary',
-    fullSync: async (calendarId) => calendarId === 'team'
-      ? [googleEvent('server-shared-id', '기존 팀 일정')]
-      : [],
-    createGoogleEvent: async () => 'server-shared-id',
-  });
-  try {
-    await harness.service.syncAll({ skipBflowLoad: true });
-    await harness.service.addEvent({
-      id: 'local-create-id',
-      title: '새 개인 일정',
-      memo: '',
-      color: '#6C5CE7',
-      type: 'custom',
-      startDate: '2026-08-25',
-      endDate: '2026-08-25',
-      allDay: true,
-      createdBy: 'user-a',
-      createdAt: '2026-08-24T00:00:00.000Z',
-    });
-
-    assert.deepEqual(
-      (await harness.service.getEvents()).map(({ id, title, sourceCalendarId }) => ({
-        id,
-        title,
-        sourceCalendarId,
-      })),
-      [
-        { id: 'server-shared-id', title: '기존 팀 일정', sourceCalendarId: 'team' },
-        { id: 'server-shared-id', title: '새 개인 일정', sourceCalendarId: 'primary' },
-      ],
-    );
-  } finally {
-    harness.restore();
-  }
-});
-
 test('an exact Google identity deletes only its row when B flow has the same raw ID', async () => {
   const googleDeletes: Array<{ calendarId: string; eventId: string }> = [];
   const harness = await createHarness({
@@ -2353,47 +2240,6 @@ test('a raw follower inherits ambiguity when one of several same-id migrations l
   }
 });
 
-test('raw-id-only mutations fail closed when multiple storage identities share the ID', async () => {
-  const updateCalls: Array<{ calendarId: string; eventId: string }> = [];
-  const deleteCalls: Array<{ calendarId: string; eventId: string }> = [];
-  const harness = await createHarness({
-    teamCalendarId: 'team',
-    personalCalendarId: 'primary',
-    fullSync: async (calendarId) => [googleEvent('ambiguous-id', `${calendarId} 일정`)],
-    updateGoogleEvent: async (calendarId, eventId) => {
-      updateCalls.push({ calendarId, eventId });
-    },
-    deleteGoogleEvent: async (calendarId, eventId) => {
-      deleteCalls.push({ calendarId, eventId });
-    },
-  });
-  try {
-    await harness.service.syncAll({ skipBflowLoad: true });
-
-    await assert.rejects(
-      harness.service.updateEvent('ambiguous-id', { title: '잘못된 수정' }),
-      /ambiguous/i,
-    );
-    assert.deepEqual(updateCalls, [], 'an ambiguous ID never reaches persistence');
-    await assert.rejects(
-      harness.service.deleteEvent('ambiguous-id'),
-      /ambiguous/i,
-    );
-    assert.deepEqual(deleteCalls, [], 'an ambiguous delete never reaches persistence');
-    await assert.rejects(
-      harness.service.updateEvent(
-        'ambiguous-id',
-        { title: '불일치 target' },
-        { id: 'different-id', source: 'google', sourceCalendarId: 'primary' },
-      ),
-      /does not match/i,
-    );
-    assert.deepEqual(updateCalls, [], 'a mismatched target identity also fails before persistence');
-  } finally {
-    harness.restore();
-  }
-});
-
 test('raw cal_* mutations union direct provider and linked-todo identity candidates', async () => {
   const todoId = 'provider-collision';
   const rawGoogleId = `cal_${todoId}`;
@@ -2466,148 +2312,6 @@ test('raw cal_* mutations union direct provider and linked-todo identity candida
   }
 });
 
-test('incremental delete scopes a same-id tombstone to the reporting Google calendar', async () => {
-  let incremental = false;
-  const harness = await createHarness({
-    teamCalendarId: 'team',
-    personalCalendarId: 'primary',
-    fullSync: async (calendarId) => [googleEvent('incremental-shared', `${calendarId} 원본`)],
-    incrementalSync: async (calendarId) => incremental && calendarId === 'team'
-      ? { updated: [], deleted: ['incremental-shared'], isFullSync: false }
-      : { updated: [], deleted: [], isFullSync: false },
-  });
-  try {
-    await harness.service.syncAll({ skipBflowLoad: true });
-    incremental = true;
-    await harness.service.syncIncremental();
-
-    assert.deepEqual(
-      (await harness.service.getEvents()).map(({ title, sourceCalendarId }) => ({ title, sourceCalendarId })),
-      [{ title: 'primary 원본', sourceCalendarId: 'primary' }],
-    );
-  } finally {
-    harness.restore();
-  }
-});
-
-test('incremental update replaces only the reporting same-id Google calendar row', async () => {
-  let incremental = false;
-  const harness = await createHarness({
-    teamCalendarId: 'team',
-    personalCalendarId: 'primary',
-    fullSync: async (calendarId) => [googleEvent('incremental-shared', `${calendarId} 원본`)],
-    incrementalSync: async (calendarId) => incremental && calendarId === 'team'
-      ? { updated: [googleEvent('incremental-shared', 'team 수정')], deleted: [], isFullSync: false }
-      : { updated: [], deleted: [], isFullSync: false },
-  });
-  try {
-    await harness.service.syncAll({ skipBflowLoad: true });
-    incremental = true;
-    await harness.service.syncIncremental();
-
-    assert.deepEqual(
-      (await harness.service.getEvents()).map(({ title, sourceCalendarId }) => ({ title, sourceCalendarId })),
-      [
-        { title: 'team 수정', sourceCalendarId: 'team' },
-        { title: 'primary 원본', sourceCalendarId: 'primary' },
-      ],
-    );
-  } finally {
-    harness.restore();
-  }
-});
-
-test('incremental full-sync fallback does not skip a same-id row owned by another Google calendar', async () => {
-  let incremental = false;
-  const harness = await createHarness({
-    teamCalendarId: 'team',
-    personalCalendarId: 'primary',
-    fullSync: async (calendarId) => [googleEvent('incremental-shared', `${calendarId} 원본`)],
-    incrementalSync: async (calendarId) => incremental && calendarId === 'team'
-      ? { updated: [googleEvent('incremental-shared', 'team 전체 교체')], deleted: [], isFullSync: true }
-      : { updated: [], deleted: [], isFullSync: false },
-  });
-  try {
-    await harness.service.syncAll({ skipBflowLoad: true });
-    incremental = true;
-    await harness.service.syncIncremental();
-
-    assert.deepEqual(
-      (await harness.service.getEvents()).map(({ title, sourceCalendarId }) => ({ title, sourceCalendarId })),
-      [
-        { title: 'primary 원본', sourceCalendarId: 'primary' },
-        { title: 'team 전체 교체', sourceCalendarId: 'team' },
-      ],
-    );
-  } finally {
-    harness.restore();
-  }
-});
-
-test('failed exact Google update rolls back only its same-id target row', async () => {
-  const harness = await createHarness({
-    teamCalendarId: 'team',
-    personalCalendarId: 'primary',
-    fullSync: async (calendarId) => [googleEvent('rollback-shared', `${calendarId} 원본`)],
-    updateGoogleEvent: async () => {
-      throw new Error('update failed');
-    },
-  });
-  try {
-    await harness.service.syncAll({ skipBflowLoad: true });
-    await assert.rejects(
-      harness.service.updateEvent(
-        'rollback-shared',
-        { title: '실패할 개인 수정' },
-        { id: 'rollback-shared', source: 'google', sourceCalendarId: 'primary' },
-      ),
-      /update failed/,
-    );
-
-    assert.deepEqual(
-      (await harness.service.getEvents()).map(({ title, sourceCalendarId }) => ({ title, sourceCalendarId })),
-      [
-        { title: 'team 원본', sourceCalendarId: 'team' },
-        { title: 'primary 원본', sourceCalendarId: 'primary' },
-      ],
-    );
-  } finally {
-    harness.restore();
-  }
-});
-
-test('failed exact Google delete restores its target despite a same-id sibling', async () => {
-  const harness = await createHarness({
-    teamCalendarId: 'team',
-    personalCalendarId: 'primary',
-    fullSync: async (calendarId) => [googleEvent('rollback-shared', `${calendarId} 원본`)],
-    deleteGoogleEvent: async () => {
-      throw new Error('delete failed');
-    },
-  });
-  try {
-    await harness.service.syncAll({ skipBflowLoad: true });
-    await assert.rejects(
-      harness.service.deleteEvent(
-        'rollback-shared',
-        { id: 'rollback-shared', source: 'google', sourceCalendarId: 'primary' },
-      ),
-      /delete failed/,
-    );
-
-    assert.deepEqual(
-      (await harness.service.getEvents()).map(({ title, sourceCalendarId }) => ({ title, sourceCalendarId })),
-      [
-        { title: 'team 원본', sourceCalendarId: 'team' },
-        { title: 'primary 원본', sourceCalendarId: 'primary' },
-      ],
-      'the sibling cannot satisfy the rollback existence check for the deleted target',
-    );
-  } finally {
-    harness.restore();
-  }
-});
-
 test('a captured canonical B flow identity still routes after the row moves calendars', async () => {
   let rows = [bflowEvent('moved-bflow-id', '이동 전 일정')];
   const updateCalls: Array<{ eventId: string; patch: Record<string, unknown> }> = [];
@@ -2642,87 +2346,6 @@ test('a captured canonical B flow identity still routes after the row moves cale
 
     assert.deepEqual(updateCalls, [{ eventId: 'moved-bflow-id', patch: { title: '이동 뒤 수정' } }]);
   } finally {
-    harness.restore();
-  }
-});
-
-test('a partial sync replaces successful calendars, retains failed calendars, and preserves same-id rows by source calendar', async () => {
-  let attempt = 1;
-  const harness = await createHarness({
-    teamCalendarId: 'team',
-    personalCalendarId: 'primary',
-    fullSync: async (calendarId) => {
-      if (attempt === 1) {
-        return calendarId === 'team'
-          ? [
-              googleEvent('shared', '팀의 이전 중복 일정'),
-              googleEvent('team-only', '유지할 팀 일정'),
-            ]
-          : [googleEvent('primary-old', '교체할 개인 일정')];
-      }
-      if (calendarId === 'team') throw new Error('team unavailable');
-      return [
-        googleEvent('shared', '개인의 새 중복 일정'),
-        googleEvent('primary-new', '새 개인 일정'),
-      ];
-    },
-  });
-  const originalWarn = console.warn;
-  try {
-    console.warn = () => {};
-    await harness.service.syncAll({ skipBflowLoad: true });
-    attempt = 2;
-
-    await harness.service.syncAll({ skipBflowLoad: true });
-
-    assert.equal(harness.service.isGoogleCacheReady(), false);
-    const events = await harness.service.getEvents();
-    assert.deepEqual(
-      events.map(({ id, title, sourceCalendarId }) => ({ id, title, sourceCalendarId })),
-      [
-        { id: 'shared', title: '개인의 새 중복 일정', sourceCalendarId: 'primary' },
-        { id: 'primary-new', title: '새 개인 일정', sourceCalendarId: 'primary' },
-        { id: 'shared', title: '팀의 이전 중복 일정', sourceCalendarId: 'team' },
-        { id: 'team-only', title: '유지할 팀 일정', sourceCalendarId: 'team' },
-      ],
-    );
-  } finally {
-    console.warn = originalWarn;
-    harness.restore();
-  }
-});
-
-test('a configured-calendar failure retains only that calendar after another calendar is removed from settings', async () => {
-  let firstSync = true;
-  const harness = await createHarness({
-    teamCalendarId: 'team',
-    personalCalendarId: 'primary',
-    fullSync: async (calendarId) => {
-      if (firstSync) {
-        return calendarId === 'team'
-          ? [googleEvent('team-old', '설정에서 제거할 팀 일정')]
-          : [googleEvent('primary-old', '유지할 개인 일정')];
-      }
-      throw new Error('primary unavailable');
-    },
-  });
-  const originalWarn = console.warn;
-  try {
-    console.warn = () => {};
-    await harness.service.syncAll({ skipBflowLoad: true });
-    await harness.service.saveTeamCalendarId(null);
-    firstSync = false;
-
-    await harness.service.syncAll({ skipBflowLoad: true });
-
-    assert.equal(harness.service.isGoogleCacheReady(), false);
-    const events = await harness.service.getEvents();
-    assert.deepEqual(
-      events.map(({ id, title, sourceCalendarId }) => ({ id, title, sourceCalendarId })),
-      [{ id: 'primary-old', title: '유지할 개인 일정', sourceCalendarId: 'primary' }],
-    );
-  } finally {
-    console.warn = originalWarn;
     harness.restore();
   }
 });
@@ -3366,10 +2989,8 @@ test('failed full sync and empty incremental never confirm a pending optimistic 
       const gates = [deferred<void>(), deferred<void>()];
       const patches: Array<Record<string, unknown>> = [];
       const harness = await createHarness({
-        teamCalendarId: 'team-calendar',
         personalCalendarId: 'primary',
         fullSync: async (calendarId) => {
-          if (calendarId === 'team-calendar') return [];
           if (failPrimaryFullSync) throw new Error('primary sync failed');
           return [googleEvent(eventId, '서버 제목')];
         },

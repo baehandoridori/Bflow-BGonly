@@ -101,7 +101,6 @@ export interface CalendarEvent {
 
 /** Google Calendar 연동 설정 */
 export interface GCalSettings {
-  teamCalendarId: string | null;     // 팀 공유 캘린더 ID
   personalCalendarId: string | null; // 개인 캘린더 ID (보통 'primary')
   lastSyncAt: string | null;         // 마지막 동기화 시각
 }

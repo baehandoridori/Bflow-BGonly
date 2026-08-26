@@ -53,6 +53,7 @@ const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{
 const UNKNOWN_TAG_UUID = '00000000-0000-4000-8000-000000000099';
 
 type ServiceModule = {
+  getGCalSettings(): Promise<{ personalCalendarId: string | null; lastSyncAt: string | null }>;
   loadBflowEvents(): Promise<void>;
   syncAll(options?: { broadcast?: boolean; skipBflowLoad?: boolean }): Promise<Array<Record<string, unknown>>>;
   syncIncremental(): Promise<void>;
@@ -302,7 +303,6 @@ async function createHarness(options: {
     deleted: string[];
     isFullSync: boolean;
   }>;
-  teamGoogleCalendarId?: string;
   personalGoogleCalendarId?: string;
   includePersonalCalendar?: boolean;
   calendarList?: () => Promise<CalendarRow[]>;
@@ -454,17 +454,6 @@ async function createHarness(options: {
       calls.legacyUpdates.push({ id, patch });
     },
     supabaseDeletePrivateEvent: async (id: string) => { calls.legacyDeletes.push(id); },
-    supabaseReadMetadata: async (type: string, key: string) => (
-      type === 'gcal' && key === 'teamCalendarId' && options.teamGoogleCalendarId
-        ? {
-          type,
-          key,
-          value: options.teamGoogleCalendarId,
-          updatedAt: '2026-08-24T00:00:00.000Z',
-        }
-        : null
-    ),
-    supabaseWriteMetadata: async () => {},
     gcalIsAuthenticated: async () => false,
     gcalSaveLocalSettings: async () => {},
     gcalFullSync: async (calendarId: string) => (
@@ -617,6 +606,21 @@ test('personal B flow calendar rows retain isPrivate on load', async () => {
   }
 });
 
+test('Google settings expose only local personal sync fields', async () => {
+  const harness = await createHarness({
+    rows: [],
+    personalGoogleCalendarId: 'personal-google-calendar',
+  });
+  try {
+    assert.deepEqual(await harness.service.getGCalSettings(), {
+      personalCalendarId: 'personal-google-calendar',
+      lastSyncAt: null,
+    });
+  } finally {
+    harness.restore();
+  }
+});
+
 test('making a personal B flow event public creates Google replacement before deleting source', async () => {
   const harness = await createHarness({ rows: [eventRow('personal-event', 'personal-cal')] });
   try {
@@ -624,6 +628,11 @@ test('making a personal B flow event public creates Google replacement before de
     await harness.service.updateEvent('personal-event', { isPrivate: false });
 
     assert.equal(harness.calls.googleCreates.length, 1);
+    assert.equal(harness.calls.googleCreates[0].calendarId, 'primary');
+    assert.equal(
+      Object.hasOwn(harness.calls.googleCreates[0].input as object, 'visibility'),
+      false,
+    );
     assert.deepEqual(harness.calls.bflowDeletes, ['personal-event']);
     assert.deepEqual(harness.calls.bflowUpdates, []);
     const events = await harness.service.getEvents();
@@ -1454,7 +1463,6 @@ test('Google compensation tombstone keeps the same event ID from another calenda
   const harness = await createHarness({
     rows: [eventRow('personal-event', 'personal-cal')],
     bflowDeleteError: originalDeleteError,
-    teamGoogleCalendarId: 'primary',
     personalGoogleCalendarId: 'other-google-calendar',
     googleFullSync: async () => [googleEvent('created-google-event')],
   });
@@ -1475,7 +1483,7 @@ test('Google compensation tombstone keeps the same event ID from another calenda
     assert.equal(matchingEvents.length, 1);
     assert.equal(matchingEvents[0].sourceCalendarId, 'other-google-calendar');
     assert.equal(harness.calls.broadcasts.length, broadcastsAfterCompensation + 1);
-    assert.equal(harness.calls.watches.length, watchesAfterCompensation + 2);
+    assert.equal(harness.calls.watches.length, watchesAfterCompensation + 1);
   } finally {
     harness.restore();
   }
