@@ -312,6 +312,11 @@ export function ScheduleView() {
     [calendars, visibleCalendarIds, googleAuthenticated, googleVisible],
   );
   const totalRailCalendarCount = calendars.length + (googleAuthenticated ? 1 : 0);
+  const currentMonthEventCount = useMemo(() => {
+    const monthStart = fmtDate(new Date(year, month, 1, 12, 0, 0, 0));
+    const monthEnd = fmtDate(new Date(year, month + 1, 0, 12, 0, 0, 0));
+    return filteredEvents.filter((event) => event.startDate <= monthEnd && event.endDate >= monthStart).length;
+  }, [filteredEvents, month, year]);
   const tagNameById = useMemo<Record<string, string>>(
     () => Object.fromEntries(tags.map((tag) => [tag.id, tag.name])),
     [tags],
@@ -1065,10 +1070,7 @@ export function ScheduleView() {
 
       {/* ═══ 이벤트 수 통계 ═══ */}
       <div className="flex items-center gap-4 text-sm text-text-secondary/50 px-4">
-        <span>이번 달 {filteredEvents.filter((e) => {
-          const s = parseDate(e.startDate);
-          return s.getFullYear() === year && s.getMonth() === month;
-        }).length}개</span>
+        <span>이번 달 {currentMonthEventCount}개</span>
         <span className="text-bg-border/50">·</span>
         <span>오늘 {filteredEvents.filter((e) => e.startDate <= today && e.endDate >= today).length}개</span>
         <span className="text-bg-border/50">·</span>
