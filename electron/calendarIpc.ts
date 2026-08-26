@@ -13,6 +13,7 @@ import {
   buildCalendarChangeDetail,
   computeCalendarNotificationRecipients,
 } from '../src/shared/calendarNotifications';
+import { normalizeCalendarNotificationCatchupInput } from '../src/shared/calendarNotificationCatchup';
 import * as store from './calendarStore';
 import type { CalendarRow, CalendarEventRow, CalendarMemberRow } from './calendarStore';
 import { readUsers } from './supabase';
@@ -1111,10 +1112,14 @@ export function registerCalendarIpc(deps: CalendarIpcDeps): CalendarNotification
     return saved;
   }));
 
-  ipcMain.handle('calendar:notifications:catchup', wrap(async () => {
+  ipcMain.handle('calendar:notifications:catchup', wrap(async (input: unknown) => {
     const user = await sessionUser();
     const since = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
-    return store.listUnreadNotifications(user.id, since);
+    return store.listUnreadNotifications(
+      user.id,
+      since,
+      normalizeCalendarNotificationCatchupInput(input),
+    );
   }));
 
   ipcMain.handle('calendar:notifications:mark-read', wrap(async (ids: string[]) => {

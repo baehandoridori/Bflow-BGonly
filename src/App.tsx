@@ -1264,10 +1264,12 @@ export default function App() {
     const me = currentUser;
     (async () => {
       try {
-        const rows = await window.electronAPI?.calendarNotificationsCatchup?.();
+        const muted = useCalendarStore.getState().mutedCalendarIds;
+        const rows = await window.electronAPI?.calendarNotificationsCatchup?.({
+          excludedCalendarIds: muted,
+        });
         if (useAuthStore.getState().currentUser?.id !== me.id || !rows?.length) return;
 
-        const muted = useCalendarStore.getState().mutedCalendarIds;
         const store = useNotificationStore.getState();
         let shown = 0;
         for (const r of orderCatchupRowsForPrepend(rows)) {

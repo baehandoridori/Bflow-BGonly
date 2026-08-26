@@ -1541,7 +1541,9 @@ export interface ElectronAPI extends CalendarApiInputContract {
   calendarTagsSave: (
     tags: Parameters<CalendarApiInputContract['calendarTagsSave']>[0],
   ) => Promise<Array<{ id: string; name: string; color: string; sort_order: number }>>;
-  calendarNotificationsCatchup: () => Promise<Array<{
+  calendarNotificationsCatchup: (
+    input?: Parameters<CalendarApiInputContract['calendarNotificationsCatchup']>[0],
+  ) => Promise<Array<{
     id: string;
     recipient_id: string;
     actor_id: string | null;
@@ -1556,7 +1558,9 @@ export interface ElectronAPI extends CalendarApiInputContract {
     created_at: string;
     read_at: string | null;
   }>>;
-  calendarNotificationsMarkRead: (ids: string[]) => Promise<void>;
+  calendarNotificationsMarkRead: (
+    ids: Parameters<CalendarApiInputContract['calendarNotificationsMarkRead']>[0],
+  ) => Promise<void>;
   supabaseReadRevisions: () => Promise<unknown[]>;
   supabaseAddRevision: (id: string, partUuid: string, sceneId: string, revisionNo: number, status: string, priority: string, description: string, frameNo: string, imageUrl: string, department: string, lookupDepartment: string, requesterId: string, requesterName: string, assignee: string, createdAt: string, notifyUserIdsJson: string, assigneeIdsJson?: string, setId?: string) => Promise<void>;
   supabaseUpdateRevision: (id: string, updates: Record<string, string>) => Promise<void>;

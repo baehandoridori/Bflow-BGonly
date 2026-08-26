@@ -70,7 +70,11 @@ test('calendar date entry points store a durable schedule request instead of rac
 
 test('calendar catch-up keeps IPC rows snake_case and filters by recipient, actor, and muted calendar', () => {
   assert.match(app, /const calendarCatchupDoneRef = useRef<string \| null>\(null\)/);
-  assert.match(app, /calendarNotificationsCatchup\?\.\(\)/);
+  assert.match(
+    app,
+    /const muted = useCalendarStore\.getState\(\)\.mutedCalendarIds;[\s\S]*?calendarNotificationsCatchup\?\.\(\{\s*excludedCalendarIds: muted,\s*\}\)/,
+    'the renderer forwards only its local muted calendar IDs; the main process still owns the recipient identity',
+  );
   assert.match(app, /r\.recipient_id !== me\.id/);
   assert.match(app, /r\.actor_id === me\.id/);
   assert.match(app, /muted\.includes\(r\.calendar_id\)/);

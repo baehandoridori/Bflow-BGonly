@@ -3702,7 +3702,7 @@ test('calendar store keeps soft reads empty while strict write pre-reads surface
   }
 });
 
-test('calendar notification catch-up requests latest unread rows with a bounded payload', async () => {
+test('calendar notification catch-up applies valid muted calendar exclusions before its deterministic 200-row cap', async () => {
   const globalScope = globalThis as Record<string, unknown>;
   const hadPrior = Object.prototype.hasOwnProperty.call(globalScope, STORE_HARNESS_KEY);
   const prior = globalScope[STORE_HARNESS_KEY];
@@ -3719,16 +3719,27 @@ test('calendar notification catch-up requests latest unread rows with a bounded 
       return terminal;
     },
   };
-  const orderStage = {
+  const afterCreatedAtOrderStage = {
     order: (column: string, options: unknown) => {
       operations.push(['order', column, options]);
       return limitStage;
+    },
+    limit: limitStage.limit,
+  };
+  const filteredStage = {
+    or: (expression: string) => {
+      operations.push(['or', expression]);
+      return filteredStage;
+    },
+    order: (column: string, options: unknown) => {
+      operations.push(['order', column, options]);
+      return afterCreatedAtOrderStage;
     },
   };
   const gteStage = {
     gte: (column: string, value: unknown) => {
       operations.push(['gte', column, value]);
-      return orderStage;
+      return filteredStage;
     },
   };
   const isStage = {
@@ -3758,23 +3769,229 @@ test('calendar notification catch-up requests latest unread rows with a bounded 
   try {
     const encoded = Buffer.from(await bundledCalendarStoreSource()).toString('base64');
     const store = await import(`data:text/javascript;base64,${encoded}#calendar-store-${storeNonce++}`) as {
-      listUnreadNotifications(recipientId: string, sinceIso: string): Promise<Array<{ id: string }>>;
+      listUnreadNotifications(
+        recipientId: string,
+        sinceIso: string,
+        input?: { excludedCalendarIds?: string[] },
+      ): Promise<Array<{ id: string }>>;
     };
 
+    const mutedCalendarId = '10000000-0000-4000-8000-000000000002';
+
     assert.deepEqual(
-      await store.listUnreadNotifications('recipient-1', '2026-07-27T00:00:00.000Z'),
+      await store.listUnreadNotifications('recipient-1', '2026-07-27T00:00:00.000Z', {
+        excludedCalendarIds: [mutedCalendarId],
+      }),
       [{ id: 'newest' }],
     );
     assert.deepEqual(operations, [
       ['eq', 'recipient_id', 'recipient-1'],
       ['is', 'read_at', null],
       ['gte', 'created_at', '2026-07-27T00:00:00.000Z'],
+      ['or', `calendar_id.is.null,calendar_id.not.in.(${mutedCalendarId})`],
       ['order', 'created_at', { ascending: false }],
+      ['order', 'id', { ascending: false }],
       ['limit', 200],
     ]);
   } finally {
     if (hadPrior) globalScope[STORE_HARNESS_KEY] = prior;
     else delete globalScope[STORE_HARNESS_KEY];
+  }
+});
+
+test('calendar notification catch-up filters 200 muted rows before limiting, keeps deletes, and orders timestamp ties by id', async () => {
+  const globalScope = globalThis as Record<string, unknown>;
+  const hadPrior = Object.prototype.hasOwnProperty.call(globalScope, STORE_HARNESS_KEY);
+  const prior = globalScope[STORE_HARNESS_KEY];
+  const mutedCalendarId = '10000000-0000-4000-8000-000000000002';
+  const visibleCalendarId = '10000000-0000-4000-8000-000000000003';
+  const rows = [
+    ...Array.from({ length: 200 }, (_, index) => ({
+      id: `muted-${String(index).padStart(3, '0')}`,
+      recipient_id: 'recipient-1',
+      read_at: null,
+      calendar_id: mutedCalendarId,
+      created_at: '2026-08-26T12:00:00.000Z',
+    })),
+    {
+      id: 'visible-a',
+      recipient_id: 'recipient-1',
+      read_at: null,
+      calendar_id: visibleCalendarId,
+      created_at: '2026-08-26T11:00:00.000Z',
+    },
+    {
+      id: 'visible-z',
+      recipient_id: 'recipient-1',
+      read_at: null,
+      calendar_id: visibleCalendarId,
+      created_at: '2026-08-26T11:00:00.000Z',
+    },
+    {
+      id: 'deleted-event',
+      recipient_id: 'recipient-1',
+      read_at: null,
+      calendar_id: null,
+      created_at: '2026-08-26T10:00:00.000Z',
+    },
+  ];
+  let recipientId = '';
+  let sinceIso = '';
+  let exclusionExpression: string | undefined;
+  const orders: Array<{ column: string; ascending: boolean }> = [];
+  const query = {
+    select: () => query,
+    eq: (column: string, value: string) => {
+      assert.equal(column, 'recipient_id');
+      recipientId = value;
+      return query;
+    },
+    is: (column: string, value: null) => {
+      assert.equal(column, 'read_at');
+      assert.equal(value, null);
+      return query;
+    },
+    gte: (column: string, value: string) => {
+      assert.equal(column, 'created_at');
+      sinceIso = value;
+      return query;
+    },
+    or: (expression: string) => {
+      exclusionExpression = expression;
+      return query;
+    },
+    order: (column: string, options: { ascending: boolean }) => {
+      orders.push({ column, ascending: options.ascending });
+      return query;
+    },
+    limit: (count: number) => {
+      const excludedCalendarIds = exclusionExpression
+        ?.match(/calendar_id\.not\.in\.\(([^)]+)\)/)?.[1]
+        .split(',')
+        .filter(Boolean)
+        ?? [];
+      const selected = rows
+        .filter((row) => row.recipient_id === recipientId)
+        .filter((row) => row.read_at === null)
+        .filter((row) => row.created_at >= sinceIso)
+        .filter((row) => !exclusionExpression || row.calendar_id === null || !excludedCalendarIds.includes(row.calendar_id))
+        .sort((left, right) => {
+          for (const { column, ascending } of orders) {
+            const a = String(left[column as keyof typeof left]);
+            const b = String(right[column as keyof typeof right]);
+            if (a === b) continue;
+            return (a < b ? -1 : 1) * (ascending ? 1 : -1);
+          }
+          return 0;
+        })
+        .slice(0, count);
+      return { data: selected, error: null };
+    },
+  };
+  globalScope[STORE_HARNESS_KEY] = {
+    from(table: string) {
+      assert.equal(table, 'calendar_notifications');
+      return query;
+    },
+  };
+  try {
+    const encoded = Buffer.from(await bundledCalendarStoreSource()).toString('base64');
+    const store = await import(`data:text/javascript;base64,${encoded}#calendar-store-${storeNonce++}`) as {
+      listUnreadNotifications(
+        recipientId: string,
+        sinceIso: string,
+        input?: { excludedCalendarIds?: string[] },
+      ): Promise<Array<{ id: string }>>;
+    };
+
+    assert.deepEqual(
+      (await store.listUnreadNotifications('recipient-1', '2026-07-27T00:00:00.000Z', {
+        excludedCalendarIds: [mutedCalendarId],
+      })).map((row) => row.id),
+      ['visible-z', 'visible-a', 'deleted-event'],
+    );
+    assert.deepEqual(orders, [
+      { column: 'created_at', ascending: false },
+      { column: 'id', ascending: false },
+    ]);
+  } finally {
+    if (hadPrior) globalScope[STORE_HARNESS_KEY] = prior;
+    else delete globalScope[STORE_HARNESS_KEY];
+  }
+});
+
+test('calendar notification catch-up ignores malformed exclusion values instead of composing them into the storage filter', async () => {
+  const globalScope = globalThis as Record<string, unknown>;
+  const hadPrior = Object.prototype.hasOwnProperty.call(globalScope, STORE_HARNESS_KEY);
+  const prior = globalScope[STORE_HARNESS_KEY];
+  const operations: Array<unknown> = [];
+  const terminal = { data: [{ id: 'still-visible' }], error: null };
+  const query = {
+    select: () => query,
+    eq: () => query,
+    is: () => query,
+    gte: () => query,
+    or: (expression: string) => {
+      operations.push(['or', expression]);
+      return query;
+    },
+    order: () => query,
+    limit: () => terminal,
+  };
+  globalScope[STORE_HARNESS_KEY] = { from: () => query };
+  try {
+    const encoded = Buffer.from(await bundledCalendarStoreSource()).toString('base64');
+    const store = await import(`data:text/javascript;base64,${encoded}#calendar-store-${storeNonce++}`) as {
+      listUnreadNotifications(
+        recipientId: string,
+        sinceIso: string,
+        input?: { excludedCalendarIds?: unknown[] },
+      ): Promise<Array<{ id: string }>>;
+    };
+
+    assert.deepEqual(
+      await store.listUnreadNotifications('recipient-1', '2026-07-27T00:00:00.000Z', {
+        excludedCalendarIds: [
+          'calendar_id.eq.someone-else',
+          '10000000-0000-4000-8000-000000000002),recipient_id.eq(attacker)',
+          42,
+        ],
+      }),
+      [{ id: 'still-visible' }],
+    );
+    assert.deepEqual(operations, []);
+  } finally {
+    if (hadPrior) globalScope[STORE_HARNESS_KEY] = prior;
+    else delete globalScope[STORE_HARNESS_KEY];
+  }
+});
+
+test('calendar notification catch-up binds the recipient to the canonical session while forwarding only safe muted calendar ids', async () => {
+  const calls: unknown[][] = [];
+  const safeCalendarId = '10000000-0000-4000-8000-000000000002';
+  const harness = await createIpcHarness({
+    getUserRole: async () => 'user',
+    listUnreadNotifications: async (...args: unknown[]) => {
+      calls.push(args);
+      return [];
+    },
+  }, 'canonical-recipient');
+  try {
+    await harness.invoke('calendar:notifications:catchup', {
+      recipientId: 'renderer-controlled-recipient',
+      excludedCalendarIds: [
+        safeCalendarId,
+        safeCalendarId,
+        'calendar_id.eq.renderer-controlled-recipient',
+      ],
+    });
+
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0][0], 'canonical-recipient');
+    assert.equal(typeof calls[0][1], 'string');
+    assert.deepEqual(calls[0][2], { excludedCalendarIds: [safeCalendarId] });
+  } finally {
+    harness.restore();
   }
 });
 

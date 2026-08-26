@@ -3,6 +3,11 @@
  * 마이그레이션 전(테이블 부재) 안전: 읽기는 빈 결과 + console.warn, 쓰기는 throw. */
 import { supabase } from './supabase';
 import type { CalendarUpdateInput } from '../src/shared/calendarApiContract';
+import {
+  CALENDAR_NOTIFICATION_CATCHUP_LIMIT,
+  normalizeCalendarNotificationCatchupInput,
+} from '../src/shared/calendarNotificationCatchup';
+import type { CalendarNotificationCatchupInput } from '../src/shared/calendarNotificationCatchup';
 
 export interface CalendarRow {
   id: string;
@@ -425,15 +430,22 @@ export async function insertNotifications(
 export async function listUnreadNotifications(
   recipientId: string,
   sinceIso: string,
+  input?: CalendarNotificationCatchupInput,
 ): Promise<CalendarNotificationRow[]> {
-  const { data, error } = await supabase
+  const { excludedCalendarIds } = normalizeCalendarNotificationCatchupInput(input);
+  const baseQuery = supabase
     .from('calendar_notifications')
     .select('*')
     .eq('recipient_id', recipientId)
     .is('read_at', null)
-    .gte('created_at', sinceIso)
+    .gte('created_at', sinceIso);
+  const filteredQuery = excludedCalendarIds.length > 0
+    ? baseQuery.or(`calendar_id.is.null,calendar_id.not.in.(${excludedCalendarIds.join(',')})`)
+    : baseQuery;
+  const { data, error } = await filteredQuery
     .order('created_at', { ascending: false })
-    .limit(200);
+    .order('id', { ascending: false })
+    .limit(CALENDAR_NOTIFICATION_CATCHUP_LIMIT);
   if (error) {
     if (isMissingTable(error)) {
       warnMissingTable('calendar_notifications', '빈 목록');

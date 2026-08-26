@@ -306,8 +306,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
   calendarTagsList: () => ipcRenderer.invoke('calendar:tags:list'),
   calendarTagsSave: (tags: Parameters<CalendarApiInputContract['calendarTagsSave']>[0]) =>
     ipcRenderer.invoke('calendar:tags:save', tags),
-  calendarNotificationsCatchup: () => ipcRenderer.invoke('calendar:notifications:catchup'),
-  calendarNotificationsMarkRead: (ids: string[]) =>
+  calendarNotificationsCatchup: (
+    input?: Parameters<CalendarApiInputContract['calendarNotificationsCatchup']>[0],
+  ) => ipcRenderer.invoke('calendar:notifications:catchup', input),
+  calendarNotificationsMarkRead: (ids: Parameters<CalendarApiInputContract['calendarNotificationsMarkRead']>[0]) =>
     ipcRenderer.invoke('calendar:notifications:mark-read', ids),
   supabaseReadRevisions: () =>
     ipcRenderer.invoke('supabase:read-revisions'),

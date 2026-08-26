@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
+import { build } from 'esbuild';
 
 import {
   computeCalendarNotificationRecipients,
@@ -10,6 +11,10 @@ import {
   buildCalendarNotificationText,
   mapCalendarNotificationRow,
 } from '../src/shared/calendarNotifications.ts';
+import {
+  CALENDAR_NOTIFICATION_CATCHUP_LIMIT,
+  normalizeCalendarNotificationCatchupInput,
+} from '../src/shared/calendarNotificationCatchup.ts';
 import { createDevCalendarNotificationRealtimeListeners } from '../src/mocks/devCalendarNotificationRealtime.ts';
 
 test('수신자: members 캘린더 = 소유자 + 멤버 - 행위자', () => {
@@ -141,13 +146,147 @@ test('realtime 알림 행은 renderer에 필요한 표시 필드만 camelCase로
   );
 });
 
+test('catch-up exclusion input keeps only unique UUID calendar ids and has a bounded payload', () => {
+  const validIds = Array.from(
+    { length: 101 },
+    (_, index) => `10000000-0000-4000-8000-${String(index + 1).padStart(12, '0')}`,
+  );
+  const normalized = normalizeCalendarNotificationCatchupInput({
+    excludedCalendarIds: [
+      validIds[0].toUpperCase(),
+      validIds[0],
+      'calendar_id.eq.renderer-controlled-recipient',
+      ...validIds.slice(1),
+    ],
+  });
+
+  assert.equal(CALENDAR_NOTIFICATION_CATCHUP_LIMIT, 200);
+  assert.equal(normalized.excludedCalendarIds.length, 100);
+  assert.deepEqual(normalized.excludedCalendarIds.slice(0, 2), validIds.slice(0, 2));
+  assert.equal(normalized.excludedCalendarIds.includes('calendar_id.eq.renderer-controlled-recipient'), false);
+});
+
 const previewMockPath = path.join(process.cwd(), 'src', 'mocks', 'devElectronAPI.ts');
 
 function readPreviewApiSource(): string {
   return readFileSync(previewMockPath, 'utf8');
 }
 
-test('preview calendar catch-up seeds use the signed-in mock user and visible current-month seed rows', () => {
+type PreviewCalendarNotificationRow = {
+  id: string;
+  recipient_id: string;
+  actor_id: string | null;
+  actor_name: string | null;
+  calendar_id: string | null;
+  calendar_name: string | null;
+  event_id: string | null;
+  event_title: string | null;
+  event_date: string | null;
+  action: 'create' | 'update' | 'delete';
+  detail: string | null;
+  created_at: string;
+  read_at: string | null;
+};
+
+type PreviewCalendarNotificationApi = {
+  loginCanonicalSession(input: { name: string; password: string; rememberMe: boolean }): Promise<{ ok: boolean }>;
+  logoutCanonicalSession(): Promise<unknown>;
+  calendarNotificationsCatchup(input?: { excludedCalendarIds?: string[] }): Promise<PreviewCalendarNotificationRow[]>;
+  calendarNotificationsMarkRead(ids: string[]): Promise<void>;
+  onSupabaseRealtime(callback: (event: unknown) => void): () => void;
+};
+
+type PreviewCalendarNotificationWindow = {
+  electronAPI?: PreviewCalendarNotificationApi;
+  localStorage: {
+    getItem(key: string): string | null;
+    setItem(key: string, value: string): void;
+    removeItem(key: string): void;
+  };
+  __bflowMockCalendarNotify?: (overrides?: {
+    recipientId?: string;
+    calendarId?: string | null;
+    eventTitle?: string | null;
+  }) => void;
+};
+
+let previewCalendarNotificationBundle: Promise<string> | undefined;
+let previewCalendarNotificationNonce = 0;
+
+async function bundledPreviewCalendarNotificationSource(): Promise<string> {
+  previewCalendarNotificationBundle ??= build({
+    stdin: {
+      contents: "export { installDevElectronAPI } from './src/mocks/devElectronAPI.ts';",
+      resolveDir: process.cwd(),
+      sourcefile: 'calendar-notification-preview-entry.ts',
+    },
+    bundle: true,
+    format: 'esm',
+    platform: 'browser',
+    target: 'es2022',
+    write: false,
+  }).then((result) => result.outputFiles[0].text);
+  return previewCalendarNotificationBundle;
+}
+
+async function createPreviewCalendarNotificationHarness(): Promise<{
+  api: PreviewCalendarNotificationApi;
+  previewWindow: PreviewCalendarNotificationWindow;
+  restore(): void;
+}> {
+  const globalScope = globalThis as Record<string, unknown>;
+  const prior = new Map<string, { exists: boolean; value: unknown }>();
+  for (const key of ['window', 'document']) {
+    prior.set(key, {
+      exists: Object.prototype.hasOwnProperty.call(globalScope, key),
+      value: globalScope[key],
+    });
+  }
+
+  const localStorageValues = new Map<string, string>();
+  const previewWindow: PreviewCalendarNotificationWindow = {
+    localStorage: {
+      getItem: (key) => localStorageValues.get(key) ?? null,
+      setItem: (key, value) => { localStorageValues.set(key, value); },
+      removeItem: (key) => { localStorageValues.delete(key); },
+    },
+  };
+  globalScope.window = previewWindow;
+  globalScope.document = { documentElement: { dataset: {} } };
+
+  try {
+    const source = await bundledPreviewCalendarNotificationSource();
+    const encoded = Buffer.from(source).toString('base64');
+    const preview = await import(
+      `data:text/javascript;base64,${encoded}#calendar-notification-preview-${previewCalendarNotificationNonce++}`,
+    ) as { installDevElectronAPI(): void };
+    preview.installDevElectronAPI();
+    assert.ok(previewWindow.electronAPI);
+    return {
+      api: previewWindow.electronAPI,
+      previewWindow,
+      restore() {
+        for (const [key, value] of prior) {
+          if (value.exists) globalScope[key] = value.value;
+          else delete globalScope[key];
+        }
+      },
+    };
+  } catch (error) {
+    for (const [key, value] of prior) {
+      if (value.exists) globalScope[key] = value.value;
+      else delete globalScope[key];
+    }
+    throw error;
+  }
+}
+
+async function previewLogin(api: PreviewCalendarNotificationApi, name: string): Promise<void> {
+  const result = await api.loginCanonicalSession({ name, password: '1234', rememberMe: false });
+  assert.equal(result.ok, true);
+}
+
+test('preview calendar catch-up seeds use the signed-in mock user and real current-month calendar rows', () => {
   const source = readPreviewApiSource();
 
   assert.match(source, /recipient_id:\s*MOCK_USERS\[0\]\.id/);
@@ -157,10 +296,107 @@ test('preview calendar catch-up seeds use the signed-in mock user and visible cu
   assert.match(source, /action:\s*'create'/);
   assert.match(source, /action:\s*'update'/);
   assert.match(source, /detail:\s*`\$\{.*?\}\/12 → \$\{.*?\}\/13`/s);
-  assert.match(source, /calendarNotificationsCatchup:\s*async \(\) => mockCalendarNotifications/);
-  assert.match(source, /calendarNotificationsMarkRead:\s*async \(\) => \{\}/);
   assert.match(source, /onSupabaseRealtime:\s*\(callback\) => previewCalendarNotificationRealtime\.subscribe\(callback\)/);
-  assert.match(source, /previewCalendarNotificationRealtime\.emitCalendarNotification\(row\)/);
+});
+
+test('preview calendar catch-up returns copies, excludes the real muted seed calendar before its deterministic 200-row cap, and ignores malformed exclusions', async () => {
+  const harness = await createPreviewCalendarNotificationHarness();
+  try {
+    await previewLogin(harness.api, '배한솔');
+    const initial = await harness.api.calendarNotificationsCatchup();
+    assert.ok(initial.length >= 2);
+    const mutedSeedCalendarId = initial[0].calendar_id;
+    assert.equal(mutedSeedCalendarId, '10000000-0000-4000-8000-000000000002');
+
+    initial[0].event_title = '외부에서 바꾼 값';
+    const reread = await harness.api.calendarNotificationsCatchup();
+    assert.notEqual(reread[0].event_title, '외부에서 바꾼 값');
+
+    for (let index = 0; index < 201; index += 1) {
+      harness.previewWindow.__bflowMockCalendarNotify?.({ recipientId: '1' });
+    }
+    const capped = await harness.api.calendarNotificationsCatchup({
+      excludedCalendarIds: ['calendar_id.eq.renderer-controlled-recipient'],
+    });
+    assert.equal(capped.length, 200);
+    for (let index = 1; index < capped.length; index += 1) {
+      const previous = capped[index - 1];
+      const current = capped[index];
+      assert.ok(
+        previous.created_at > current.created_at
+          || (previous.created_at === current.created_at && previous.id >= current.id),
+        'preview rows use the same created_at DESC, id DESC order as the production catch-up query',
+      );
+    }
+
+    assert.deepEqual(
+      await harness.api.calendarNotificationsCatchup({ excludedCalendarIds: [mutedSeedCalendarId!] }),
+      [],
+      'the actual UUID-shaped seed calendar is removed before the cap without marking its rows read',
+    );
+    assert.deepEqual(
+      await harness.api.calendarNotificationsCatchup(),
+      capped,
+      'muting is a read-time exclusion only, so unmuting reveals the same unread rows again',
+    );
+  } finally {
+    harness.restore();
+  }
+});
+
+test('preview calendar notification reads persist per current session and injected realtime rows never fan out across users', async () => {
+  const harness = await createPreviewCalendarNotificationHarness();
+  try {
+    await previewLogin(harness.api, '배한솔');
+    const ownRows = await harness.api.calendarNotificationsCatchup();
+    assert.ok(ownRows.length >= 2);
+    const ownReadId = ownRows[0].id;
+    const ownUntouchedId = ownRows[1].id;
+    await harness.api.calendarNotificationsMarkRead([ownReadId]);
+    assert.equal(
+      (await harness.api.calendarNotificationsCatchup()).some((row) => row.id === ownReadId),
+      false,
+      'read_at persists in the preview store instead of returning the same unread row again',
+    );
+
+    const received: unknown[] = [];
+    const unsubscribe = harness.api.onSupabaseRealtime((event) => received.push(event));
+    harness.previewWindow.__bflowMockCalendarNotify?.({ recipientId: '2', eventTitle: '다른 사용자 알림' });
+    assert.equal(received.length, 0, 'a database row for another user must not enter this mock renderer realtime channel');
+
+    await harness.api.logoutCanonicalSession();
+    await previewLogin(harness.api, '장삐쭈');
+    const otherRows = await harness.api.calendarNotificationsCatchup();
+    assert.ok(otherRows.length >= 1);
+    assert.ok(otherRows.every((row) => row.recipient_id === '2'));
+    const otherRowId = otherRows[0].id;
+    await harness.api.calendarNotificationsMarkRead([otherRowId, ownUntouchedId]);
+
+    harness.previewWindow.__bflowMockCalendarNotify?.({ recipientId: '2', eventTitle: '현재 사용자 알림' });
+    assert.equal(received.length, 1);
+    const currentRecipientEvent = received[0] as {
+      table?: string;
+      payload?: { notification?: { recipientId?: string; eventTitle?: string } };
+    };
+    assert.equal(currentRecipientEvent.table, 'calendar_notifications');
+    assert.equal(currentRecipientEvent.payload?.notification?.recipientId, '2');
+    assert.equal(currentRecipientEvent.payload?.notification?.eventTitle, '현재 사용자 알림');
+    unsubscribe();
+    harness.previewWindow.__bflowMockCalendarNotify?.({ recipientId: '2' });
+    assert.equal(received.length, 1, 'the preview realtime unsubscribe still detaches the listener');
+
+    await harness.api.logoutCanonicalSession();
+    await previewLogin(harness.api, '배한솔');
+    const restoredOwnRows = await harness.api.calendarNotificationsCatchup();
+    assert.equal(restoredOwnRows.some((row) => row.id === ownReadId), false);
+    assert.equal(
+      restoredOwnRows.some((row) => row.id === ownUntouchedId),
+      true,
+      'another session cannot mark this user’s unread row read by guessing its id',
+    );
+  } finally {
+    harness.restore();
+  }
 });
 
 test('preview realtime helper emits the canonical calendar envelope, isolates listener failures, and unsubscribes', () => {

@@ -26,6 +26,10 @@ import { createDevCalendarSeed } from './devCalendarSeed';
 import { createDevCalendarNotificationRealtimeListeners } from './devCalendarNotificationRealtime';
 import type { CalendarNotificationPushRow } from '@/shared/calendarNotifications';
 import {
+  CALENDAR_NOTIFICATION_CATCHUP_LIMIT,
+  normalizeCalendarNotificationCatchupInput,
+} from '@/shared/calendarNotificationCatchup';
+import {
   canCreateCalendar,
   canEditCalendarEvents,
   canManageCalendar,
@@ -140,6 +144,50 @@ function buildMockCalendarNotifications(): MockCalendarNotificationRow[] {
 }
 
 const mockCalendarNotifications = buildMockCalendarNotifications();
+let nextMockCalendarNotificationSequence = 0;
+
+function listMockCalendarNotifications(
+  userId: string,
+  input: unknown,
+): MockCalendarNotificationRow[] {
+  const { excludedCalendarIds } = normalizeCalendarNotificationCatchupInput(input);
+  const excluded = new Set(excludedCalendarIds);
+  const since = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
+
+  return mockCalendarNotifications
+    .filter((row) => row.recipient_id === userId)
+    .filter((row) => row.read_at === null)
+    .filter((row) => row.created_at >= since)
+    .filter((row) => row.calendar_id === null || !excluded.has(row.calendar_id.toLowerCase()))
+    .sort((left, right) => {
+      if (left.created_at !== right.created_at) return left.created_at > right.created_at ? -1 : 1;
+      if (left.id === right.id) return 0;
+      return left.id > right.id ? -1 : 1;
+    })
+    .slice(0, CALENDAR_NOTIFICATION_CATCHUP_LIMIT)
+    .map((row) => ({ ...row }));
+}
+
+function mockCalendarNotificationRowFromPush(
+  notification: CalendarNotificationPushRow,
+  template: MockCalendarNotificationRow,
+): MockCalendarNotificationRow {
+  return {
+    id: notification.id,
+    recipient_id: notification.recipientId,
+    actor_id: notification.actorId,
+    actor_name: notification.actorName,
+    calendar_id: notification.calendarId,
+    calendar_name: notification.calendarName,
+    event_id: template.event_id,
+    event_title: notification.eventTitle,
+    event_date: notification.eventDate,
+    action: notification.action,
+    detail: notification.detail,
+    created_at: notification.createdAt,
+    read_at: null,
+  };
+}
 
 function toMockCalendarNotificationPushRow(row: MockCalendarNotificationRow): CalendarNotificationPushRow {
   return {
@@ -1641,8 +1689,20 @@ export function installDevElectronAPI(): void {
       mockCalendarTags.splice(0, mockCalendarTags.length, ...saved);
       return saved.map((tag) => ({ ...tag }));
     },
-    calendarNotificationsCatchup: async () => mockCalendarNotifications,
-    calendarNotificationsMarkRead: async () => {},
+    calendarNotificationsCatchup: async (input) => {
+      const user = requireMockCalendarUser();
+      return listMockCalendarNotifications(user.id, input);
+    },
+    calendarNotificationsMarkRead: async (ids) => {
+      const user = requireMockCalendarUser();
+      const requestedIds = new Set(ids.filter((id): id is string => typeof id === 'string'));
+      if (requestedIds.size === 0) return;
+      const readAt = new Date().toISOString();
+      for (const row of mockCalendarNotifications) {
+        if (row.recipient_id !== user.id || row.read_at !== null || !requestedIds.has(row.id)) continue;
+        row.read_at = readAt;
+      }
+    },
     supabaseReadRevisions: async () => getMockRevisionRows(),
     supabaseAddRevision: async (
       id: string,
@@ -2225,10 +2285,13 @@ export function installDevElectronAPI(): void {
 
     const row = {
       ...safeMockCalendarNotificationPushRow(toMockCalendarNotificationPushRow(template), overrides),
-      id: `mock-calendar-notification-${Date.now()}`,
+      id: `mock-calendar-notification-${Date.now()}-${String(++nextMockCalendarNotificationSequence).padStart(6, '0')}`,
       createdAt: new Date().toISOString(),
     };
-    previewCalendarNotificationRealtime.emitCalendarNotification(row);
+    mockCalendarNotifications.push(mockCalendarNotificationRowFromPush(row, template));
+    if (row.recipientId === previewCanonicalUserId) {
+      previewCalendarNotificationRealtime.emitCalendarNotification(row);
+    }
   };
   document.documentElement.dataset.devElectronApi = 'installed';
 }

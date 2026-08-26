@@ -1,3 +1,5 @@
+import type { CalendarNotificationCatchupInput } from './calendarNotificationCatchup';
+
 export type CalendarVisibility = 'private' | 'members' | 'team';
 
 export interface CalendarMemberInput {
@@ -115,4 +117,6 @@ export interface CalendarApiInputContract {
   calendarTagsSave: (
     tags: Array<{ id?: string; name: string; color: string; sort_order: number }>,
   ) => unknown;
+  calendarNotificationsCatchup: (input?: CalendarNotificationCatchupInput) => unknown;
+  calendarNotificationsMarkRead: (ids: string[]) => unknown;
 }
