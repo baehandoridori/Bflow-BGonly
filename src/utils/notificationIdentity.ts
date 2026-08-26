@@ -27,6 +27,9 @@ export function getNotificationIdentity(notification: NotificationIdentityInput)
   const reactionNotificationId = asNonEmptyString(metadataField(metadata, 'reactionNotificationId'));
   if (reactionNotificationId) return `comment_reaction:${reactionNotificationId}`;
 
+  const calendarNotificationId = asNonEmptyString(metadataField(metadata, 'calendarNotificationId'));
+  if (calendarNotificationId) return `calendar:${calendarNotificationId}`;
+
   const commentId = asNonEmptyString(metadataField(metadata, 'commentId'));
   if ((type === 'comment' || type === 'mention') && commentId) {
     return `scene_comment:${commentId}`;

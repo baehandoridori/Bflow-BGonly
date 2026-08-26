@@ -30,4 +30,10 @@ export function markNotificationDomainRead(
       .then(({ markAssignmentNotificationRead }) => markAssignmentNotificationRead(assignmentNotificationId))
       .catch((err) => console.warn('[notificationDomainRead] markAssignmentNotificationRead 실패:', err));
   }
+
+  const calendarNotificationId = asString(metadataValue(metadata, 'calendarNotificationId'));
+  if (type === 'calendar' && calendarNotificationId) {
+    Promise.resolve(window.electronAPI?.calendarNotificationsMarkRead?.([calendarNotificationId]))
+      .catch((err) => console.warn('[notificationDomainRead] 캘린더 알림 read 실패:', err));
+  }
 }

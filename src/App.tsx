@@ -72,6 +72,7 @@ import { Toaster, toast as sonnerToast } from 'sonner';
 import { ConfirmDialogHost } from '@/components/common/ConfirmDialog';
 import { SvgIconDefs } from '@/components/SvgIconDefs';
 import { useNotificationStore, type AppNotification } from '@/stores/useNotificationStore';
+import { useCalendarStore } from '@/stores/useCalendarStore';
 import { useVacationPendingStore } from '@/stores/useVacationPendingStore';
 import { useSceneWorkLinkStore } from '@/stores/useSceneWorkLinkStore';
 import { dispatchNotification, type NotificationSettings } from '@/utils/notificationHelper';
@@ -99,6 +100,7 @@ import {
 } from '@/utils/notificationEpisodeLabels';
 import { isGeneralRevisionSceneKey } from '@/utils/revisionGeneral';
 import { isRecentSelfRevisionAction } from '@/stores/useRevisionStore';
+import { buildCalendarNotificationText } from '@/shared/calendarNotifications';
 import type { RevisionAssigneeState, SupabaseRealtimeStatusMetadata, UpdateInfo } from '@/types';
 
 // Lazy chunk 로드 실패(네트워크 끊김, 빌드 artifact 누락) 시 블랭크 스크린 방지용 ErrorBoundary.
@@ -1243,6 +1245,59 @@ export default function App() {
       } catch (err) {
         console.warn('[assignment-catchup] 실패:', err);
         releaseCatchupRunOnError(assignmentCatchupDoneRef, me.id);
+      }
+    })();
+  }, [currentUser, authReady]);
+
+  // PR4: 캘린더 알림 catch-up — 최근 30일 미읽음은 read_at 기준으로 IPC가 제한한다.
+  // 원본 IPC 행은 snake_case 경계를 유지하고, renderer에서는 표시 메타데이터만 만든다.
+  const calendarCatchupDoneRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!currentUser) {
+      resetCatchupRun(calendarCatchupDoneRef);
+      return;
+    }
+    if (!authReady) return;
+    if (!beginCatchupRun(calendarCatchupDoneRef, currentUser.id)) return;
+
+    const me = currentUser;
+    (async () => {
+      try {
+        const rows = await window.electronAPI?.calendarNotificationsCatchup?.();
+        if (useAuthStore.getState().currentUser?.id !== me.id || !rows?.length) return;
+
+        const muted = useCalendarStore.getState().mutedCalendarIds;
+        const store = useNotificationStore.getState();
+        let shown = 0;
+        for (const r of orderCatchupRowsForPrepend(rows)) {
+          if (r.recipient_id !== me.id) continue;
+          if (r.actor_id === me.id) continue;
+          if (r.calendar_id && muted.includes(r.calendar_id)) continue;
+
+          const text = buildCalendarNotificationText({
+            actorName: r.actor_name ?? '알 수 없음',
+            calendarName: r.calendar_name ?? '캘린더',
+            eventTitle: r.event_title ?? '',
+            action: r.action,
+            detail: r.detail,
+          });
+          store.addNotification({
+            type: 'calendar',
+            title: text.title,
+            body: text.body,
+            createdAt: r.created_at,
+            metadata: {
+              calendarNotificationId: r.id,
+              calendarId: r.calendar_id ?? undefined,
+              eventDate: r.event_date ?? undefined,
+            },
+          });
+          shown += 1;
+        }
+        if (shown > 0) console.log('[calendar-catchup] 미읽음 캘린더 알림', shown, '건 복원');
+      } catch (err) {
+        console.warn('[calendar-catchup] 실패:', err);
+        releaseCatchupRunOnError(calendarCatchupDoneRef, me.id);
       }
     })();
   }, [currentUser, authReady]);

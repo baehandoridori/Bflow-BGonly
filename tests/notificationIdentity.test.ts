@@ -29,6 +29,13 @@ test('notification identity uses source row ids for catch-up domains', () => {
     }),
     'comment_reaction:reaction-row-1',
   );
+  assert.equal(
+    getNotificationIdentity({
+      type: 'calendar',
+      metadata: { calendarNotificationId: 'calendar-row-1' },
+    }),
+    'calendar:calendar-row-1',
+  );
 });
 
 test('comment and revision comment notifications dedupe by comment source id', () => {

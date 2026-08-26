@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Bell, Check, Trash2, MessageSquare, MessageSquareWarning, RefreshCw, Award, ExternalLink, AtSign, UserPlus, ChevronDown, ChevronRight } from 'lucide-react';
+import { Bell, Check, Trash2, MessageSquare, MessageSquareWarning, RefreshCw, Award, ExternalLink, AtSign, UserPlus, CalendarDays, ChevronDown, ChevronRight } from 'lucide-react';
 import { useNotificationStore, type AppNotification, type NotificationType } from '@/stores/useNotificationStore';
+import { useAppStore } from '@/stores/useAppStore';
 import { cn } from '@/utils/cn';
 import { floatingGlassStyle, glassTopHighlight } from '@/utils/glassStyles';
 import { useNotificationPanelSize, useNotificationPanelResizer } from '@/hooks/useNotificationPanelSize';
@@ -55,6 +56,7 @@ function typeConfig(type: NotificationType) {
     case 'acting_feedback': return { icon: MessageSquareWarning, color: '#FDCB6E', label: '피드백' };
     // v1.25.8: 씬 담당자 배정 — 본인이 새 담당자 (강한 톤, mention 동일 시각 처리).
     case 'scene_assignment': return { icon: UserPlus, color: 'rgb(var(--color-accent))', label: '배정' };
+    case 'calendar': return { icon: CalendarDays, color: '#74B9FF', label: '일정' };
     // v1.29.0: 댓글 이모지 반응 — 차분 톤(comment 동등). 아이콘은 NotificationItem 에서 metadata.reactionEmojis 의
     //   마지막 원소(또는 fallback 💬) 로 덮어 그리므로 여기 icon 값은 placeholder.
     case 'comment_reaction': return { icon: MessageSquare, color: '#8B8DA3', label: '반응' };
@@ -315,6 +317,17 @@ function NotificationDropdown() {
   }, [setPanelOpen, dragAxis]);
 
   const handleNavigate = (n: AppNotification) => {
+    if (n.type === 'calendar') {
+      useAppStore.getState().setView('schedule');
+      const date = n.metadata?.eventDate;
+      if (date) {
+        setTimeout(() => {
+          window.dispatchEvent(new CustomEvent('bflow:navigate-to-date', { detail: { date } }));
+        }, 300);
+      }
+      setPanelOpen(false);
+      return;
+    }
     navigateNotificationToScene(n.type, n.metadata);
     setPanelOpen(false);
   };

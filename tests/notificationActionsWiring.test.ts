@@ -53,6 +53,26 @@ test('all notification click paths mark domain read state before navigating', ()
   assert.match(notificationDomainRead, /markCommentReactionRead\(reactionNotificationId\)/);
   assert.match(notificationDomainRead, /markFeedbackNotificationRead\(feedbackNotificationId\)/);
   assert.match(notificationDomainRead, /markAssignmentNotificationRead\(assignmentNotificationId\)/);
+  assert.match(notificationDomainRead, /calendarNotificationsMarkRead\?\.\(\[calendarNotificationId\]\)/);
+});
+
+test('calendar notifications use the schedule date route instead of scene navigation', () => {
+  assert.match(notificationPanel, /CalendarDays/);
+  assert.match(notificationPanel, /case 'calendar': return \{ icon: CalendarDays, color: '#74B9FF', label: '일정' \}/);
+  assert.match(notificationPanel, /if \(n\.type === 'calendar'\) \{[\s\S]*?setView\('schedule'\)[\s\S]*?bflow:navigate-to-date/);
+});
+
+test('calendar catch-up keeps IPC rows snake_case and filters by recipient, actor, and muted calendar', () => {
+  assert.match(app, /const calendarCatchupDoneRef = useRef<string \| null>\(null\)/);
+  assert.match(app, /calendarNotificationsCatchup\?\.\(\)/);
+  assert.match(app, /r\.recipient_id !== me\.id/);
+  assert.match(app, /r\.actor_id === me\.id/);
+  assert.match(app, /muted\.includes\(r\.calendar_id\)/);
+  assert.match(app, /calendarNotificationId: r\.id/);
+  assert.match(app, /calendarId: r\.calendar_id \?\? undefined/);
+  assert.match(app, /eventDate: r\.event_date \?\? undefined/);
+  assert.match(app, /buildCalendarNotificationText\(/);
+  assert.match(app, /releaseCatchupRunOnError\(calendarCatchupDoneRef, me\.id\)/);
 });
 
 test('manual read and deletion paths also sync durable domain read state', () => {
