@@ -529,6 +529,7 @@ export function ScheduleView() {
 
   // 네비게이션
   const goToPrev = () => {
+    setFocusedDate(null);
     if (viewMode === 'month') {
       setMonthDir(-1);
       if (month === 0) { setYear(year - 1); setMonth(11); }
@@ -542,6 +543,7 @@ export function ScheduleView() {
   };
 
   const goToNext = () => {
+    setFocusedDate(null);
     if (viewMode === 'month') {
       setMonthDir(1);
       if (month === 11) { setYear(year + 1); setMonth(0); }

@@ -330,6 +330,8 @@ let scheduleGetEventsGate: Promise<void> | null = null;
 let resolveScheduleGetEventsGate: (() => void) | null = null;
 let schedulePendingEffects: Array<() => void | (() => void)> = [];
 let scheduleMountedEffectCleanups: Array<() => void> = [];
+let scheduleEffectDeps: Array<readonly unknown[] | undefined> = [];
+let scheduleEffectCursor = 0;
 const scheduleWindowListeners = new Map<string, Set<(event: Event) => void>>();
 const scheduleDocumentListeners = new Map<string, Set<(event: Event) => void>>();
 const scheduleDocumentMock = {
@@ -687,6 +689,8 @@ function resetHarness(): void {
   scheduleGetEventsGate = null;
   resolveScheduleGetEventsGate = null;
   schedulePendingEffects = [];
+  scheduleEffectDeps = [];
+  scheduleEffectCursor = 0;
   scheduleCurrentView = 'schedule';
   schedulePendingDateNavigation = null;
   scheduleDateNavigationConsumeIds = [];
@@ -1234,8 +1238,15 @@ async function loadScheduleView(): Promise<ScheduleViewComponent> {
                 : next;
             }];
           },
-          useEffect(effect: () => void | (() => void)) {
-            schedulePendingEffects.push(effect);
+          useEffect(effect: () => void | (() => void), deps?: readonly unknown[]) {
+            const slot = scheduleEffectCursor++;
+            const previous = scheduleEffectDeps[slot];
+            const changed = deps === undefined
+              || previous === undefined
+              || deps.length !== previous.length
+              || deps.some((value, index) => !Object.is(value, previous[index]));
+            scheduleEffectDeps[slot] = deps;
+            if (changed) schedulePendingEffects.push(effect);
           },
           useMemo: (factory: () => unknown) => factory(), useCallback: (fn: unknown) => fn,
           useRef(initial: unknown) {
@@ -2131,6 +2142,7 @@ async function renderScheduleView(): Promise<ReactNode> {
   globalThis.document = scheduleDocumentMock as unknown as Document;
   stateCursor = 0;
   scheduleRefCursor = 0;
+  scheduleEffectCursor = 0;
   return resolveComponents(ScheduleView());
 }
 
@@ -4797,6 +4809,29 @@ test('ScheduleView calendar shortcuts switch views, return to today, and preserv
     await renderScheduleView();
     assert.equal(scheduleCreateModalProps.at(-1)?.initialDate, focusedDate);
     assert.equal(scheduleCreateModalProps.at(-1)?.initialEndDate, focusedDate);
+  });
+
+  await t.test('period navigation discards a hidden month focus before C creates a new event', async () => {
+    resetHarness();
+    let tree = await renderScheduleView();
+    await flushScheduleMountEffects();
+
+    dispatchScheduleKeydown('t');
+    await rerenderScheduleViewWithFreshEffects();
+    dispatchScheduleKeydown('ArrowRight');
+    tree = await rerenderScheduleViewWithFreshEffects();
+    const focusedDate = scheduleGridProps.at(-1)?.focusedDate;
+    const today = scheduleFmtDate(new Date());
+    assert.ok(focusedDate, 'a month arrow creates a focused date before the period changes');
+    assert.notEqual(focusedDate, today, 'the focused date differs from C\'s normal today fallback');
+
+    buttonByLabel(tree, '다음 기간').props.onClick?.();
+    await rerenderScheduleViewWithFreshEffects();
+
+    dispatchScheduleKeydown('c');
+    await renderScheduleView();
+    assert.equal(scheduleCreateModalProps.at(-1)?.initialDate, today);
+    assert.equal(scheduleCreateModalProps.at(-1)?.initialEndDate, today);
   });
 
   await t.test('C falls back to today when no month date is focused', async () => {
