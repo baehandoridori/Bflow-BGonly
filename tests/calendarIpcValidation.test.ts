@@ -3364,40 +3364,53 @@ test('calendar notification catch-up requests latest unread rows with a bounded 
   const globalScope = globalThis as Record<string, unknown>;
   const hadPrior = Object.prototype.hasOwnProperty.call(globalScope, STORE_HARNESS_KEY);
   const prior = globalScope[STORE_HARNESS_KEY];
-  const filters: Array<[string, unknown, unknown?]> = [];
-  const orders: Array<{ column: string; options: unknown }> = [];
-  const limits: number[] = [];
-  const query = {
-    select: () => query,
-    eq: (column: string, value: unknown) => {
-      filters.push(['eq', column, value]);
-      return query;
-    },
-    is: (column: string, value: unknown) => {
-      filters.push(['is', column, value]);
-      return query;
-    },
-    gte: (column: string, value: unknown) => {
-      filters.push(['gte', column, value]);
-      return query;
-    },
-    order: (column: string, options: unknown) => {
-      orders.push({ column, options });
-      return query;
-    },
-    limit: (count: number) => {
-      limits.push(count);
-      return query;
-    },
+  const operations: Array<unknown> = [];
+  const terminal = {
     then: (
       resolve: (value: { data: Array<{ id: string }>; error: null }) => unknown,
       reject: (reason?: unknown) => unknown,
     ) => Promise.resolve({ data: [{ id: 'newest' }], error: null }).then(resolve, reject),
   };
+  const limitStage = {
+    limit: (count: number) => {
+      operations.push(['limit', count]);
+      return terminal;
+    },
+  };
+  const orderStage = {
+    order: (column: string, options: unknown) => {
+      operations.push(['order', column, options]);
+      return limitStage;
+    },
+  };
+  const gteStage = {
+    gte: (column: string, value: unknown) => {
+      operations.push(['gte', column, value]);
+      return orderStage;
+    },
+  };
+  const isStage = {
+    is: (column: string, value: unknown) => {
+      operations.push(['is', column, value]);
+      return gteStage;
+    },
+  };
+  const eqStage = {
+    eq: (column: string, value: unknown) => {
+      operations.push(['eq', column, value]);
+      return isStage;
+    },
+  };
+  const selectStage = {
+    select: (columns: string) => {
+      assert.equal(columns, '*');
+      return eqStage;
+    },
+  };
   globalScope[STORE_HARNESS_KEY] = {
     from(table: string) {
       assert.equal(table, 'calendar_notifications');
-      return query;
+      return selectStage;
     },
   };
   try {
@@ -3410,13 +3423,13 @@ test('calendar notification catch-up requests latest unread rows with a bounded 
       await store.listUnreadNotifications('recipient-1', '2026-07-27T00:00:00.000Z'),
       [{ id: 'newest' }],
     );
-    assert.deepEqual(filters, [
+    assert.deepEqual(operations, [
       ['eq', 'recipient_id', 'recipient-1'],
       ['is', 'read_at', null],
       ['gte', 'created_at', '2026-07-27T00:00:00.000Z'],
+      ['order', 'created_at', { ascending: false }],
+      ['limit', 200],
     ]);
-    assert.deepEqual(orders, [{ column: 'created_at', options: { ascending: false } }]);
-    assert.deepEqual(limits, [200]);
   } finally {
     if (hadPrior) globalScope[STORE_HARNESS_KEY] = prior;
     else delete globalScope[STORE_HARNESS_KEY];
