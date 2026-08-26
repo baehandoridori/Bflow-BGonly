@@ -727,6 +727,46 @@ test('WeekTimeGridView: 외부 시간표 preview는 해당 날짜 열의 생성 
   assert.match(markup, /data-time-grid-live-label="true">10:15 – 10:45/);
 });
 
+test('WeekTimeGridView: 이동 preview 중에는 원래 자동 펼침 시간대를 유지하고 끝난 뒤에는 preview 기준으로 되돌린다', async () => {
+  const module = await loadWeekTimeGridView();
+  const props = {
+    weekDays: Array.from({ length: 7 }, (_, index) => new Date(2000, 0, 2 + index, 12)),
+    events: [event({
+      id: 'dawn-source',
+      title: '새벽 원본 일정',
+      startDate: '2000-01-04',
+      endDate: '2000-01-04',
+      startTime: '08:00',
+      endTime: '09:00',
+    })],
+    today: '2000-01-01',
+    onEventClick() {},
+    onSlotClick() {},
+    tagNameById: {},
+    calendarNameById: {},
+    activeWeekIndex: 0,
+    weekCount: 4,
+    onWeekChange() {},
+    timeGridDragPreview: {
+      mode: 'move' as const,
+      identityKey: '\u0000\u0000dawn-source',
+      startDate: '2000-01-04',
+      endDate: '2000-01-04',
+      startTime: '10:00',
+      endTime: '11:00',
+    },
+  };
+
+  timeGridDndStub.isDragActive = true;
+  const duringDragMarkup = renderToStaticMarkup(createElement(module.default, props));
+  assert.match(duringDragMarkup, /<section[^>]*aria-label="새벽 시간대"/);
+  assert.doesNotMatch(duringDragMarkup, /aria-label="새벽 시간대 펼치기"/);
+
+  timeGridDndStub.isDragActive = false;
+  const afterDragMarkup = renderToStaticMarkup(createElement(module.default, props));
+  assert.match(afterDragMarkup, /aria-label="새벽 시간대 펼치기"/);
+});
+
 test('WeekTimeGridView: 자정으로 넘기는 마지막 생성 ghost는 15분의 양수 높이를 유지한다', async () => {
   const module = await loadWeekTimeGridView();
   const markup = renderToStaticMarkup(createElement(module.default, {

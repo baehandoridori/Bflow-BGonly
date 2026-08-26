@@ -290,6 +290,18 @@ function bandContains(blocks: TimedEvent[], startMin: number, endMin: number): b
   return blocks.some((block) => block.startMin < endMin && block.endMin > startMin);
 }
 
+function hasBlocksInBand(blocksByDate: Map<string, TimedEvent[]>, startMin: number, endMin: number): boolean {
+  return [...blocksByDate.values()].some((blocks) => bandContains(blocks, startMin, endMin));
+}
+
+/** 이동 preview는 새 위치를 그리되, mouseup 전에는 원래 밴드가 접혀 pointer 좌표가 바뀌지 않게 한다. */
+function isTimedEventInBand(event: CalendarEvent | null, startMin: number, endMin: number): boolean {
+  return event !== null
+    && event.allDay === false
+    && event.startDate === event.endDate
+    && bandContains([toTimedEvent(event)], startMin, endMin);
+}
+
 /** 각 보이는 시간 밴드 안에서만 겹침을 계산하도록 블록을 자르고 고유 ID를 붙인다. */
 function clipTimedBlocksToBand(blocks: TimedEvent[], startMin: number, endMin: number): TimeBandBlock[] {
   return blocks.flatMap((block) => {
@@ -395,14 +407,14 @@ export function WeekTimeGridView({
     }
     return result;
   }, [dateStrings, timedEventsByDate]);
-  const hasDawnBlocks = useMemo(
-    () => [...timedByDate.values()].some((blocks) => bandContains(blocks, 0, DAWN_END_MIN)),
-    [timedByDate],
-  );
-  const hasEveningBlocks = useMemo(
-    () => [...timedByDate.values()].some((blocks) => bandContains(blocks, EVENING_START_MIN, DAY_END_MIN)),
-    [timedByDate],
-  );
+  const hasDawnBlocks = useMemo(() => (
+    hasBlocksInBand(timedByDate, 0, DAWN_END_MIN)
+    || (timeGridDnD.isDragActive && isTimedEventInBand(dragGhostEvent, 0, DAWN_END_MIN))
+  ), [dragGhostEvent, timeGridDnD.isDragActive, timedByDate]);
+  const hasEveningBlocks = useMemo(() => (
+    hasBlocksInBand(timedByDate, EVENING_START_MIN, DAY_END_MIN)
+    || (timeGridDnD.isDragActive && isTimedEventInBand(dragGhostEvent, EVENING_START_MIN, DAY_END_MIN))
+  ), [dragGhostEvent, timeGridDnD.isDragActive, timedByDate]);
   const { today: actualToday, todayIndex } = getTimeGridToday(now, dateStrings);
   const nowMin = now.getHours() * 60 + now.getMinutes();
   const includesToday = todayIndex >= 0;
