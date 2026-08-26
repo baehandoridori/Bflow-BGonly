@@ -233,6 +233,15 @@ function ActiveWeek({
   tagNameById: Record<string, string>;
 }) {
   const sortedEvents = useMemo(() => sortEventsForList(events), [events]);
+  const eventListRef = useRef<HTMLDivElement>(null);
+  const eventListId = `week-event-list-${fmtDate(week[0])}`;
+  const hiddenBarCount = Math.max(0, events.length - 5);
+  const revealEventList = useCallback(() => {
+    const list = eventListRef.current;
+    if (!list) return;
+    list.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    list.focus({ preventScroll: true });
+  }, []);
 
   return (
     <div
@@ -348,6 +357,20 @@ function ActiveWeek({
               </div>
             );
           })}
+          {hiddenBarCount > 0 && (
+            <button
+              type="button"
+              aria-label={`숨은 일정 ${hiddenBarCount}개 보기`}
+              aria-controls={eventListId}
+              onClick={(event) => {
+                event.stopPropagation();
+                revealEventList();
+              }}
+              className="self-start px-1 text-[9px] font-semibold text-text-secondary hover:text-text-primary transition-colors cursor-pointer"
+            >
+              +{hiddenBarCount}개
+            </button>
+          )}
         </div>
       )}
 
@@ -363,7 +386,13 @@ function ActiveWeek({
           </span>
         </div>
       ) : (
-        <div data-scroll-events className="flex flex-col gap-2 flex-1 overflow-y-auto mt-2">
+        <div
+          ref={eventListRef}
+          id={eventListId}
+          data-scroll-events
+          tabIndex={-1}
+          className="flex flex-col gap-2 flex-1 overflow-y-auto mt-2 focus:outline-none"
+        >
           {sortedEvents.map((ev) => (
             <EventCard
               key={calendarEventIdentityKey(ev)}

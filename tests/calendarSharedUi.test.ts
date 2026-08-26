@@ -203,6 +203,7 @@ type TestUser = {
 
 type ButtonElement = ReactElement<{
   'aria-label'?: string;
+  'aria-controls'?: string;
   'aria-pressed'?: boolean;
   children?: ReactNode;
   disabled?: boolean;
@@ -2269,6 +2270,58 @@ test('WeekScrollView and DayScrollView sort active cards and render tag-aware ti
   });
 });
 
+test('WeekScrollView keeps every event card while exposing a linked +N overflow control after five bars', async () => {
+  resetHarness();
+  const weekModule = await loadWeekScrollView();
+  const weeks = weekModule.generateYearWeeks(2026);
+  const activeWeekIndex = weekModule.findWeekIndexForDate(weeks, '2026-08-25');
+  const events = Array.from({ length: 6 }, (_, index) => calendarListEvent({
+    id: `overflow-${index + 1}`,
+    title: `넘침 일정 ${index + 1}`,
+    startDate: '2026-08-23',
+    endDate: '2026-08-23',
+  }));
+
+  const tree = resolveComponents(weekModule.default({
+    currentMonth: 7,
+    currentYear: 2026,
+    events,
+    today: '2026-08-25',
+    onEventClick() {},
+    activeWeekIndex,
+    onWeekChange() {},
+  }));
+
+  const overflowButton = buttonByLabel(tree, '숨은 일정 1개 보기');
+  assert.equal(textContent(overflowButton), '+1개');
+  const eventList = findElements(tree, (element) => element.props['data-scroll-events'] === true)[0];
+  assert.ok(eventList, 'the active week still contains the full card list');
+  assert.equal(overflowButton.props['aria-controls'], eventList.props.id, 'the overflow control targets the card list it reveals');
+  assert.equal(directElementChildren(eventList).length, 6, 'only the bar strip is capped; every event remains available as a card');
+});
+
+test('WeekScrollView delegates a boundary wheel step so ScheduleView can change the year', async () => {
+  resetHarness();
+  const weekModule = await loadWeekScrollView();
+  const requestedIndices: number[] = [];
+  const tree = resolveComponents(weekModule.default({
+    currentMonth: 7,
+    currentYear: 2026,
+    events: [],
+    today: '2026-08-25',
+    onEventClick() {},
+    activeWeekIndex: 0,
+    onWeekChange: (index) => requestedIndices.push(index),
+  }));
+  const wheelSurface = findElements(tree, (element) => typeof element.props.onWheel === 'function')[0];
+  assert.ok(wheelSurface, 'the weekly card surface owns its wheel policy');
+  (wheelSurface.props.onWheel as (event: { deltaY: number; target: { closest(): null } }) => void)({
+    deltaY: -1,
+    target: { closest: () => null },
+  });
+  assert.deepEqual(requestedIndices, [-1], 'the previous-year boundary is passed to the parent instead of being silently clamped');
+});
+
 test('CalendarRail renders four grouped sections and drives visibility, menu permissions, callbacks, and Google settings navigation', async () => {
   resetHarness();
 
@@ -3829,6 +3882,75 @@ test('ScheduleView restores and remembers the weekly time-grid choice while open
   buttonByText(tree, '월').props.onClick?.({ stopPropagation() {} });
   tree = await renderScheduleView();
   assert.equal(findButtons(tree).some((button) => button.props['aria-label'] === '주간 카드 보기'), false, 'the sub-toggle stays exclusive to the weekly view');
+});
+
+test('ScheduleView carries weekly and daily navigation across a calendar-year boundary', async (t) => {
+  await t.test('weekly header navigation moves past the last generated week and returns without an empty week', async () => {
+    resetHarness();
+    scheduleLocalStorage.set('bflow_calendar_view_v1', JSON.stringify({
+      viewMode: 'week',
+      weekSubMode: 'timegrid',
+    }));
+
+    let tree = await renderScheduleView();
+    const initialGrid = scheduleTimeGridProps.at(-1);
+    assert.ok(initialGrid);
+    initialGrid.onWeekChange(initialGrid.weekCount - 1);
+    tree = await renderScheduleView();
+    const lastWeek = scheduleTimeGridProps.at(-1);
+    assert.ok(lastWeek);
+    const lastWeekStart = scheduleFmtDate(lastWeek.weekDays[0]);
+
+    buttonByLabel(tree, '다음 기간').props.onClick?.({ stopPropagation() {} });
+    tree = await renderScheduleView();
+    const followingWeek = scheduleTimeGridProps.at(-1);
+    assert.ok(followingWeek);
+    assert.equal(followingWeek.weekDays.length, 7, 'next year still provides a complete Sunday-start week');
+    assert.ok(scheduleFmtDate(followingWeek.weekDays[0]) > lastWeekStart, 'the header arrow moves to the next actual week instead of clamping');
+
+    buttonByLabel(tree, '이전 기간').props.onClick?.({ stopPropagation() {} });
+    await renderScheduleView();
+    assert.equal(scheduleFmtDate(scheduleTimeGridProps.at(-1)!.weekDays[0]), lastWeekStart, 'moving back restores the prior week across the year edge');
+  });
+
+  await t.test('today keyboard arrow advances 12/31 to 1/1 with the new year index', async () => {
+    resetHarness();
+    scheduleLocalStorage.set('bflow_calendar_view_v1', JSON.stringify({
+      viewMode: 'today',
+      weekSubMode: 'card',
+    }));
+
+    await renderScheduleView();
+    const initialDay = scheduleDayScrollProps.at(-1);
+    assert.ok(initialDay);
+    const lastDayIndex = new Date(initialDay.year, 1, 29).getDate() === 29 ? 365 : 364;
+    initialDay.onActiveDayChange(lastDayIndex);
+    schedulePendingEffects.splice(0);
+    await renderScheduleView();
+    await flushScheduleMountEffects();
+
+    dispatchScheduleKeydown('ArrowRight');
+    await renderScheduleView();
+    const nextDay = scheduleDayScrollProps.at(-1);
+    assert.ok(nextDay);
+    assert.equal(nextDay.year, initialDay.year + 1);
+    assert.equal(nextDay.activeDayIndex, 0, 'January 1 is the first valid index of the new year');
+  });
+});
+
+test('ScheduleView counts every event overlapping the displayed month', async () => {
+  resetHarness();
+  scheduleCanonicalEvents = [
+    calendarListEvent({ id: 'from-prior-month', title: '전달에서 이어짐', startDate: '2026-07-30', endDate: '2026-08-02' }),
+    calendarListEvent({ id: 'inside-month', title: '이번 달 일정', startDate: '2026-08-12', endDate: '2026-08-12' }),
+    calendarListEvent({ id: 'into-next-month', title: '다음 달까지', startDate: '2026-08-30', endDate: '2026-09-03' }),
+    calendarListEvent({ id: 'outside-month', title: '다음 달만', startDate: '2026-09-01', endDate: '2026-09-02' }),
+  ];
+
+  await renderScheduleView();
+  await flushScheduleMountEffects();
+  const tree = await renderScheduleView();
+  assert.match(textContent(tree), /이번 달 3개/, 'events that started before or end after this month still count while they overlap it');
 });
 
 test('ScheduleView ignores malformed remembered calendar view data', async () => {
