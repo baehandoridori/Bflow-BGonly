@@ -81,7 +81,7 @@ function daysInCalendarYear(year: number): number {
 function calendarDayIndex(date: Date): number {
   const normalized = normalizeCalendarDate(date);
   const jan1 = new Date(normalized.getFullYear(), 0, 1, 12, 0, 0, 0);
-  return Math.floor((normalized.getTime() - jan1.getTime()) / 86400000);
+  return Math.round((normalized.getTime() - jan1.getTime()) / 86400000);
 }
 
 /* ═══════════════════════════════════════════════════

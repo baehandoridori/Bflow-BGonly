@@ -3478,6 +3478,32 @@ test('ScheduleView consumes a stored date request after it mounts exactly once',
   resetHarness();
 });
 
+test('ScheduleView keeps the March 8 day index when spring DST shortens the elapsed day', async () => {
+  resetHarness();
+  scheduleLocalStorage.set('bflow_calendar_view_v1', JSON.stringify({
+    viewMode: 'today',
+    weekSubMode: 'card',
+  }));
+  schedulePendingDateNavigation = {
+    id: 54,
+    date: '2026-03-08',
+  };
+
+  await renderScheduleView();
+  await flushScheduleMountEffects();
+  await renderScheduleView();
+
+  const day = scheduleDayScrollProps.at(-1);
+  assert.ok(day);
+  assert.equal(day.year, 2026);
+  assert.equal(
+    day.activeDayIndex,
+    66,
+    'March 8 is the zero-based 66th day of 2026 even where the DST jump removes one elapsed hour',
+  );
+  resetHarness();
+});
+
 test('ScheduleView resolves a stored todo panel after canonical events finish loading', async () => {
   resetHarness();
   const linkedEvent: ScheduleCalendarEvent = {
