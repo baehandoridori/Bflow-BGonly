@@ -768,6 +768,7 @@ function TimeBand({
                 const isMoving = isPreviewed && timeGridDnD.isDragActive;
                 const isSettling = timeGridDnD.isSettling(block.event);
                 const isRealtimeHighlighted = highlightedEventIdentities?.has(calendarEventIdentityKey(block.event)) === true;
+                const canResizeEnd = bandBlock.endMin === block.endMin;
                 const blockMotion = getTimeGridBlockMotion({
                   reduce,
                   opacity,
@@ -781,7 +782,9 @@ function TimeBand({
                     const target = getPointerTarget(event.currentTarget, date);
                     if (!target) return;
                     const rect = event.currentTarget.getBoundingClientRect();
-                    const mode = getTimeGridEventDragMode(isReadOnly, event.clientY, rect.bottom);
+                    const mode = canResizeEnd
+                      ? getTimeGridEventDragMode(isReadOnly, event.clientY, rect.bottom)
+                      : 'move';
                     if (!mode) return;
                     timeGridDnD.beginEventDrag(
                       event,

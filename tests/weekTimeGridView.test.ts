@@ -645,6 +645,65 @@ test('WeekTimeGridView: 같은 슬롯에서 끝난 드래그는 exact create 범
   }
 });
 
+test('WeekTimeGridView: 밴드 경계로 잘린 앞 조각은 끝을 늘리지 않고 실제 마지막 조각만 종료 늘리기를 시작한다', async () => {
+  const module = await loadWeekTimeGridView();
+  const harness = renderInteractiveWeekTimeGrid(module, {
+    weekDays: Array.from({ length: 7 }, (_, index) => new Date(2026, 7, 23 + index, 12)),
+    events: [event({
+      id: 'cross-band-resize',
+      title: '경계 리사이즈',
+      startDate: '2026-08-25',
+      endDate: '2026-08-25',
+      startTime: '08:30',
+      endTime: '09:30',
+    })],
+    today: '2026-01-01',
+    onEventClick() {},
+    onSlotClick() {},
+    tagNameById: {},
+    calendarNameById: {},
+    activeWeekIndex: 0,
+    weekCount: 4,
+    onWeekChange() {},
+  });
+  try {
+    const segments = findWeekElements(harness.tree, (element) => (
+      element.props['data-time-grid-event'] === 'true'
+      && element.props['aria-label'] === '경계 리사이즈, 2026-08-25 08:30부터 09:30까지'
+    ));
+    assert.equal(segments.length, 2, '08:30–09:30 일정은 새벽·본 시간대 조각으로 각각 표시된다');
+    const frontSegment = segments.find((segment) => (
+      Number((segment.props.style as { top?: number }).top) > 0
+    ));
+    const lastSegment = segments.find((segment) => (
+      Number((segment.props.style as { top?: number }).top) === 0
+    ));
+    assert.ok(frontSegment, '새벽 밴드의 앞 조각을 찾을 수 있다');
+    assert.ok(lastSegment, '실제 종료 시각을 포함한 본 시간대 조각을 찾을 수 있다');
+
+    const modes: unknown[] = [];
+    timeGridDndStub.beginEventDrag = (...args: unknown[]) => { modes.push(args[2]); };
+    const beginAtBottom = (segment: ReactElement<Record<string, unknown>>) => {
+      const onMouseDown = segment.props.onMouseDown as ((mouse: unknown) => void) | undefined;
+      assert.ok(onMouseDown, '수정 가능한 일정 조각은 드래그 시작 핸들러를 가진다');
+      onMouseDown({
+        currentTarget: {
+          closest: () => ({}),
+          getBoundingClientRect: () => ({ bottom: 100 }),
+        },
+        clientY: 100,
+      });
+    };
+
+    beginAtBottom(frontSegment);
+    beginAtBottom(lastSegment);
+
+    assert.deepEqual(modes, ['move', 'resize-end']);
+  } finally {
+    harness.restore();
+  }
+});
+
 test('WeekTimeGridView: 외부 시간표 preview는 해당 날짜 열의 생성 ghost와 실시간 범위를 표시한다', async () => {
   const module = await loadWeekTimeGridView();
   const markup = renderToStaticMarkup(createElement(module.default, {
