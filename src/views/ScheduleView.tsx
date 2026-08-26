@@ -54,6 +54,13 @@ const CALENDAR_VIEW_MODES: CalendarViewMode[] = ['month', '2week', 'week', 'toda
 const LOCAL_CHANGE_GUARD_MS = 3_000;
 const REALTIME_HIGHLIGHT_MS = 2_000;
 
+function isOptimisticMetadataCalendarRefresh(event: Event): boolean {
+  const detail = (event as CustomEvent<unknown>).detail;
+  return typeof detail === 'object'
+    && detail !== null
+    && (detail as { action?: unknown }).action === 'optimistic-metadata';
+}
+
 function readCalendarViewPreference(): { viewMode: CalendarViewMode; weekSubMode: WeekSubMode } {
   const fallback = { viewMode: 'month' as CalendarViewMode, weekSubMode: 'card' as WeekSubMode };
   try {
@@ -261,12 +268,15 @@ export function ScheduleView() {
     });
   }, [guardLocalIdentity]);
 
-  const applyCanonicalEvents = useCallback((canonicalEvents: CalendarEvent[]) => {
+  const applyCanonicalEvents = useCallback((
+    canonicalEvents: CalendarEvent[],
+    { suppressRealtimeHighlight = false }: { suppressRealtimeHighlight?: boolean } = {},
+  ) => {
     const nextSnapshot = buildEventSnapshot(canonicalEvents);
     const previousSnapshot = canonicalEventSnapshotRef.current;
     canonicalEventSnapshotRef.current = nextSnapshot;
 
-    if (previousSnapshot) {
+    if (previousSnapshot && !suppressRealtimeHighlight) {
       const now = Date.now();
       for (const [identityKey, expiresAt] of localChangeGuardsRef.current) {
         if (expiresAt <= now) localChangeGuardsRef.current.delete(identityKey);
@@ -333,9 +343,9 @@ export function ScheduleView() {
   // 이벤트 로드 + 외부 변경 구독 (할일 위젯 등에서 수정 시 즉시 반영)
   useEffect(() => {
     let cancelled = false;
-    const refresh = async () => {
+    const refresh = async (options?: { suppressRealtimeHighlight?: boolean }) => {
       const canonicalEvents = await getEvents();
-      if (!cancelled) applyCanonicalEvents(canonicalEvents);
+      if (!cancelled) applyCanonicalEvents(canonicalEvents, options);
     };
     // B flow와 Google 캐시는 별도로 준비된다. B flow 행이 있어도 Google full sync는 필요할 수 있다.
     (async () => {
@@ -351,7 +361,9 @@ export function ScheduleView() {
       }
       await refresh();
     })();
-    const handleCalendarChanged = () => { void refresh(); };
+    const handleCalendarChanged = (event: Event) => {
+      void refresh({ suppressRealtimeHighlight: isOptimisticMetadataCalendarRefresh(event) });
+    };
     window.addEventListener('bflow:calendar-changed', handleCalendarChanged);
     return () => { cancelled = true; window.removeEventListener('bflow:calendar-changed', handleCalendarChanged); };
   }, [applyCanonicalEvents]);
@@ -699,7 +711,7 @@ export function ScheduleView() {
 
   // 캘린더 키보드 네비게이션 (모든 뷰)
   useEffect(() => {
-    if (showCreate || quickEdit || panelEvent || calendarSettings !== undefined) return;
+    if (showCreate || quickEdit || panelEvent || calendarSettings !== undefined || tagManagerAnchor) return;
 
     const handler = (e: KeyboardEvent) => {
       // 편집 중이거나 OS/앱 조합키를 누른 상태면 캘린더 단축키를 가로채지 않는다.
@@ -842,7 +854,7 @@ export function ScheduleView() {
     document.addEventListener('keydown', handler);
     return () => document.removeEventListener('keydown', handler);
   }, [
-    viewMode, showCreate, quickEdit, panelEvent, calendarSettings, showShortcutHelp, focusedDate,
+    viewMode, showCreate, quickEdit, panelEvent, calendarSettings, tagManagerAnchor, showShortcutHelp, focusedDate,
     month, year, moveWeekBy, moveDayBy, resetCreatePrefill,
   ]);
 

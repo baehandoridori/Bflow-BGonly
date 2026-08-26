@@ -3607,6 +3607,50 @@ test('ScheduleView highlights only later external additions and changes, then cl
   }
 });
 
+test('ScheduleView treats its optimistic calendar metadata refresh as local before highlighting a later external change', async () => {
+  resetHarness();
+  const baseline = calendarListEvent({
+    id: 'metadata-refresh',
+    title: '색상 변경 전 일정',
+    source: 'bflow',
+    sourceCalendarId: 'bflow:mine',
+    calendarId: 'mine',
+    color: '#6C5CE7',
+    canEdit: true,
+  });
+  scheduleCanonicalEvents = [baseline];
+  await renderScheduleView();
+  await flushScheduleMountEffects();
+
+  const clock = installScheduleFakeClock();
+  try {
+    scheduleCanonicalEvents = [{ ...baseline, color: '#00B894', canEdit: false }];
+    await dispatchScheduleWindowEvent('bflow:calendar-changed', { action: 'optimistic-metadata' });
+    await renderScheduleView();
+    assert.deepEqual(
+      [...(scheduleGridProps.at(-1)?.highlightedEventIdentities ?? [])],
+      [],
+      'the current user\'s colour or membership presentation refresh does not impersonate an external edit',
+    );
+
+    scheduleCanonicalEvents = [{
+      ...baseline,
+      color: '#00B894',
+      canEdit: false,
+      title: '다른 사용자가 수정한 일정',
+    }];
+    await dispatchScheduleWindowEvent('bflow:calendar-changed', { action: 'update' });
+    await renderScheduleView();
+    assert.deepEqual(
+      [...(scheduleGridProps.at(-1)?.highlightedEventIdentities ?? [])],
+      ['bflow\u0000metadata-refresh'],
+      'a later non-local calendar change still highlights the exact affected event',
+    );
+  } finally {
+    clock.restore();
+  }
+});
+
 test('ScheduleView does not highlight deletions and passes an external add target to the weekly time grid', async () => {
   resetHarness();
   const removed = calendarListEvent({
@@ -4956,6 +5000,25 @@ test('ScheduleView suppresses calendar shortcuts while calendar settings is open
   await renderScheduleView();
   assert.equal(scheduleWeekScrollProps.length, 0, 'settings modal blocks view shortcuts');
   assert.equal(scheduleCreateModalProps.length, 0, 'settings modal blocks create shortcuts');
+});
+
+test('ScheduleView suppresses calendar shortcuts while the tag manager popover is open', async () => {
+  resetHarness();
+  await renderScheduleView();
+  await flushScheduleMountEffects();
+
+  scheduleTagBarProps.at(-1)?.onOpenTagManager({
+    left: 111, right: 207, top: 52, bottom: 80, width: 96, height: 28,
+  } as DOMRect);
+  let tree = await rerenderScheduleViewWithFreshEffects();
+  assert.ok(nodeByAriaLabel(tree, '태그 관리 팝오버 연결됨'));
+
+  dispatchScheduleKeydown('c');
+  dispatchScheduleKeydown('?', { tagName: 'DIV' }, { shiftKey: true });
+  tree = await renderScheduleView();
+
+  assert.equal(scheduleCreateModalProps.length, 0, 'tag management blocks a create modal behind the popover');
+  assert.throws(() => nodeByAriaLabel(tree, '캘린더 단축키'), /must be rendered/, 'tag management blocks shortcut help behind the popover');
 });
 
 test('ScheduleView carries weekly and daily navigation across a calendar-year boundary', async (t) => {
