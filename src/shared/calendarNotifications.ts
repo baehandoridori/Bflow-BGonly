@@ -3,6 +3,49 @@
 
 export type CalendarNotificationAction = 'create' | 'update' | 'delete';
 
+/** Realtime IPC 경계를 넘어 renderer가 표시·필터에 쓰는 캘린더 알림의 최소 형태. */
+export interface CalendarNotificationPushRow {
+  id: string;
+  recipientId: string;
+  actorId: string | null;
+  actorName: string | null;
+  calendarId: string | null;
+  calendarName: string | null;
+  eventTitle: string | null;
+  eventDate: string | null;
+  action: CalendarNotificationAction;
+  detail: string | null;
+  createdAt: string;
+}
+
+function asNullableString(value: unknown): string | null {
+  return typeof value === 'string' ? value : null;
+}
+
+/** DB의 snake_case 행에서 renderer가 필요한 공개 알림 필드만 골라 정규화한다. */
+export function mapCalendarNotificationRow(row: Record<string, unknown>): CalendarNotificationPushRow | null {
+  const id = asNullableString(row.id);
+  const recipientId = asNullableString(row.recipient_id);
+  const createdAt = asNullableString(row.created_at);
+  const action = row.action;
+  if (!id || !recipientId || !createdAt || (action !== 'create' && action !== 'update' && action !== 'delete')) {
+    return null;
+  }
+  return {
+    id,
+    recipientId,
+    actorId: asNullableString(row.actor_id),
+    actorName: asNullableString(row.actor_name),
+    calendarId: asNullableString(row.calendar_id),
+    calendarName: asNullableString(row.calendar_name),
+    eventTitle: asNullableString(row.event_title),
+    eventDate: asNullableString(row.event_date),
+    action,
+    detail: asNullableString(row.detail),
+    createdAt,
+  };
+}
+
 export interface NotifCalendarShape {
   owner_id: string;
   visibility: 'private' | 'members' | 'team';

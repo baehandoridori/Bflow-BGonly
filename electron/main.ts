@@ -1441,6 +1441,7 @@ import {
 } from './supabase';
 import type { BulkStageUpdate, BulkFieldUpdate } from './supabase';
 import { setupRealtimeSubscription, teardownRealtime, trackPresence } from './realtime';
+import { mapCalendarNotificationRow } from '../src/shared/calendarNotifications';
 import { recordActivity, getActivity, channelToTable, channelToAction } from './activityLogger';
 import { startEditingPresenceService, receivePresence } from './presence/editingPresenceService';
 import { sceneWorkFileEntries } from './presence/sceneLinkIndex';
@@ -3111,6 +3112,7 @@ function startSupabaseRealtime() {
     onEpisodeChange: (payload) => broadcastSupabaseEvent('episodes', payload),
     onPartChange: (payload) => broadcastSupabaseEvent('parts', payload),
     onCalendarChange: (table, payload) => broadcastSupabaseCalendarEvent(table, payload),
+    onCalendarNotificationInsert: (payload) => broadcastSupabaseCalendarNotification(payload),
     onSceneWorkLinkChange: (payload) => {
       broadcastSupabaseEvent('scene_work_links', payload);
       // 프레즌스 basename→씬 매칭에 쓰는 캐시를 최신화(전체 재로드) 후 재평가.
@@ -3304,6 +3306,22 @@ function broadcastSupabaseCalendarEvent(table: string, payload: unknown) {
     mainWindow,
     widgetWindows.values(),
     event,
+  );
+}
+
+/** calendar_notifications 원시 행은 표시·수신자 필터에 필요한 최소 필드만 renderer로 전달한다. */
+function broadcastSupabaseCalendarNotification(payload: unknown) {
+  const row = payload && typeof payload === 'object'
+    ? (payload as { new?: unknown }).new
+    : null;
+  if (!row || typeof row !== 'object') return;
+  const notification = mapCalendarNotificationRow(row as Record<string, unknown>);
+  if (!notification) return;
+  broadcastSharedCalendarSignalToWindows(
+    'supabase:realtime-event',
+    mainWindow,
+    widgetWindows.values(),
+    { table: 'calendar_notifications', payload: { notification } },
   );
 }
 

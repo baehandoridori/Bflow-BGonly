@@ -101,6 +101,7 @@ import {
 import { isGeneralRevisionSceneKey } from '@/utils/revisionGeneral';
 import { isRecentSelfRevisionAction } from '@/stores/useRevisionStore';
 import { buildCalendarNotificationText } from '@/shared/calendarNotifications';
+import type { CalendarNotificationPushRow } from '@/shared/calendarNotifications';
 import type { RevisionAssigneeState, SupabaseRealtimeStatusMetadata, UpdateInfo } from '@/types';
 
 // Lazy chunk 로드 실패(네트워크 끊김, 빌드 artifact 누락) 시 블랭크 스크린 방지용 ErrorBoundary.
@@ -1565,6 +1566,34 @@ export default function App() {
       const { table, payload } = event;
       console.log(`[App Realtime] 이벤트 수신: table=${table}, type=${payload?.eventType}`);
 
+      if (table === 'calendar_notifications') {
+        const notification = payload?.notification as CalendarNotificationPushRow | undefined;
+        const me = useAuthStore.getState().currentUser;
+        if (!notification || !me?.id) return;
+        if (notification.recipientId !== me.id) return;
+        if (notification.actorId === me.id) return;
+        const mutedCalendarIds = useCalendarStore.getState().mutedCalendarIds;
+        if (notification.calendarId && mutedCalendarIds.includes(notification.calendarId)) return;
+        const text = buildCalendarNotificationText({
+          actorName: notification.actorName ?? '알 수 없음',
+          calendarName: notification.calendarName ?? '캘린더',
+          eventTitle: notification.eventTitle ?? '',
+          action: notification.action,
+          detail: notification.detail,
+        });
+        dispatchNotification({
+          type: 'calendar',
+          title: text.title,
+          body: text.body,
+          metadata: {
+            calendarNotificationId: notification.id,
+            calendarId: notification.calendarId ?? undefined,
+            eventDate: notification.eventDate ?? undefined,
+          },
+        }, notiSettingsRef.current);
+        return;
+      }
+
       if (sharedBflowCalendarChangeDetail(event)) {
         void applyIncomingSharedBflowCalendarChangeInApp(event);
         return;
@@ -2659,6 +2688,11 @@ export default function App() {
           )).catch((e) => console.warn('[Broadcast] users 변경 재로드 실패:', e));
           return;
         }
+        // 캘린더 계열은 전용 정본 재조회/알림 경로로만 반영한다.
+        // 구버전 나만 보기 쓰기(private_calendar_events)도 일반 전체 reload를 유발하지 않는다.
+        if (changedTable && (changedTable.startsWith('calendar') || changedTable === 'private_calendar_events')) {
+          return;
+        }
         // 구조적 변경 (씬/파트/에피소드 추가/삭제) → 디바운스 full reload
         if (reloadTimer) clearTimeout(reloadTimer);
         reloadTimer = setTimeout(() => {
@@ -2783,6 +2817,7 @@ export default function App() {
               }));
               return;
             }
+            await calendar.loadBflowEvents({ broadcast: false });
             const { isAuthenticated } = await import('@/services/googleCalendarService');
             if (!await isAuthenticated()) return;
             await calendar.syncIncremental();

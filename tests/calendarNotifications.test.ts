@@ -6,6 +6,7 @@ import {
   formatCalendarDateShort,
   buildCalendarChangeDetail,
   buildCalendarNotificationText,
+  mapCalendarNotificationRow,
 } from '../src/shared/calendarNotifications.ts';
 
 test('수신자: members 캘린더 = 소유자 + 멤버 - 행위자', () => {
@@ -100,5 +101,39 @@ test('문구: create / update(detail 유·무) / delete', () => {
   assert.deepEqual(
     buildCalendarNotificationText({ actorName: '한솔', calendarName: 'EP 마일스톤', eventTitle: 'EP12 업로드', action: 'delete', detail: null }),
     { title: '한솔 님이 [EP 마일스톤] 의 일정을 삭제했어요', body: "'EP12 업로드'" },
+  );
+});
+
+test('realtime 알림 행은 renderer에 필요한 표시 필드만 camelCase로 정규화한다', () => {
+  assert.deepEqual(
+    mapCalendarNotificationRow({
+      id: 'notification-1',
+      recipient_id: 'user-2',
+      actor_id: 'user-1',
+      actor_name: '한솔',
+      calendar_id: 'calendar-1',
+      calendar_name: 'EP 마일스톤',
+      event_id: 'event-1',
+      event_title: 'EP12 업로드',
+      event_date: '2026-09-25',
+      action: 'create',
+      detail: null,
+      created_at: '2026-08-26T00:00:00.000Z',
+      read_at: null,
+      internal_audit_note: 'renderer에 전달하면 안 됨',
+    }),
+    {
+      id: 'notification-1',
+      recipientId: 'user-2',
+      actorId: 'user-1',
+      actorName: '한솔',
+      calendarId: 'calendar-1',
+      calendarName: 'EP 마일스톤',
+      eventTitle: 'EP12 업로드',
+      eventDate: '2026-09-25',
+      action: 'create',
+      detail: null,
+      createdAt: '2026-08-26T00:00:00.000Z',
+    },
   );
 });

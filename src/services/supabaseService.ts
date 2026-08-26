@@ -560,9 +560,10 @@ export async function checkConnection(): Promise<boolean> {
 export interface SupabaseRealtimeEvent {
   table: string;
   payload: {
-    eventType: 'INSERT' | 'UPDATE' | 'DELETE';
-    new: Record<string, unknown>;
-    old: Record<string, unknown>;
+    eventType?: 'INSERT' | 'UPDATE' | 'DELETE';
+    new?: Record<string, unknown>;
+    old?: Record<string, unknown>;
+    notification?: import('../shared/calendarNotifications').CalendarNotificationPushRow;
   };
 }
 
