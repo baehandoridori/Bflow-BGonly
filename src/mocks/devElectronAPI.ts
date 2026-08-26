@@ -35,6 +35,10 @@ import {
   canManageCalendar,
   canViewCalendar,
 } from '@/shared/calendarPermissions';
+import type {
+  CalendarPrivacyMigrationSourceDeleteInput,
+  CalendarPrivacyMigrationSourceDeleteResult,
+} from '@/shared/calendarApiContract';
 
 type PreviewUser = AppUser & { password: string };
 
@@ -93,7 +97,6 @@ type MockPrivacyReplacementTarget =
   | { storage: 'bflow'; actualId: string; calendarId: string }
   | { storage: 'legacy-private'; actualId: string }
   | { storage: 'google'; actualId: string; calendarId: string };
-const mockPrivacyReplacementReceipts = new Map<string, MockPrivacyReplacementTarget>();
 const mockCalendarTags: MockCalendarTagRow[] = devCalendarSeed.tags;
 const supabaseBroadcastListeners = new Set<(event: unknown) => void>();
 const previewCalendarNotificationRealtime = createDevCalendarNotificationRealtimeListeners();
@@ -363,6 +366,31 @@ function createMockCalendarEvent(input: MockCalendarEventCreateInput, userId: st
   };
   mockCalendarEvents.push(created);
   return created;
+}
+
+/**
+ * preview도 renderer에 raw source-delete IPC를 열어 두지 않는다. replacement creation 때
+ * 고정한 source를 closure가 보관해, 이후 호출자는 다른 원본을 골라 삭제할 수 없다.
+ */
+function deleteMockBoundPrivacyMigrationSource(
+  source: CalendarPrivacyMigrationSourceDeleteInput,
+  actorId: string,
+): CalendarPrivacyMigrationSourceDeleteResult {
+  if (source.storage === 'legacy-private') return 'missing';
+  if (source.storage === 'google') return 'deleted';
+  const index = mockCalendarEvents.findIndex((event) => event.id === source.event_id);
+  if (index < 0) return 'missing';
+  requireMockCalendarEventWrite(mockCalendarEvents[index].calendar_id, actorId);
+  mockCalendarEvents.splice(index, 1);
+  return 'deleted';
+}
+
+function deleteMockPrivacyReplacementTarget(target: MockPrivacyReplacementTarget): void {
+  if (target.storage !== 'bflow') return;
+  const index = mockCalendarEvents.findIndex((event) => (
+    event.id === target.actualId && event.calendar_id === target.calendarId
+  ));
+  if (index >= 0) mockCalendarEvents.splice(index, 1);
 }
 
 function ensureMockPersonalCalendar(): MockCalendarRow | null {
@@ -721,8 +749,6 @@ export function hasUsableElectronAPI(api: Partial<ElectronAPI> | undefined): boo
     && typeof api?.calendarEventsList === 'function'
     && typeof api?.calendarEventCreate === 'function'
     && typeof api?.calendarPrivacyReplacementCreate === 'function'
-    && typeof api?.calendarPrivacyReplacementSettle === 'function'
-    && typeof api?.calendarPrivacyMigrationSourceDelete === 'function'
     && typeof api?.calendarEventUpdate === 'function'
     && typeof api?.calendarEventDelete === 'function'
     && typeof api?.calendarTagsList === 'function'
@@ -1562,22 +1588,12 @@ export function installDevElectronAPI(): void {
       const created = createMockCalendarEvent(input, requireMockCalendarUser().id);
       return { ...created };
     },
-    calendarPrivacyMigrationSourceDelete: async (request) => {
-      if (request.storage === 'legacy-private') return 'missing';
-      if (request.storage === 'google') return 'deleted';
-      const index = mockCalendarEvents.findIndex((event) => event.id === request.event_id);
-      if (index < 0) return 'missing';
-      requireMockCalendarEventWrite(
-        mockCalendarEvents[index].calendar_id,
-        requireMockCalendarUser().id,
-      );
-      mockCalendarEvents.splice(index, 1);
-      return 'deleted';
-    },
     calendarPrivacyReplacementCreate: async (request) => {
+      const actor = requireMockCalendarUser();
+      const originEpoch = previewCanonicalEpoch;
       let target: MockPrivacyReplacementTarget;
       if (request.storage === 'bflow') {
-        const created = createMockCalendarEvent(request.event, requireMockCalendarUser().id);
+        const created = createMockCalendarEvent(request.event, actor.id);
         target = {
           storage: 'bflow',
           actualId: created.id,
@@ -1588,24 +1604,25 @@ export function installDevElectronAPI(): void {
       } else {
         throw new Error('Google Calendar 연결 후 공개 일정으로 전환할 수 있습니다.');
       }
-      const receipt = createUuid();
-      mockPrivacyReplacementReceipts.set(receipt, target);
+      let settled = false;
       return {
         storage: target.storage,
         actual_id: target.actualId,
         calendar_id: 'calendarId' in target ? target.calendarId : undefined,
-        receipt,
+        settle: async (disposition) => {
+          if (settled) throw new Error('보상 continuation이 이미 처리되었습니다');
+          settled = true;
+          if (disposition === 'delete') deleteMockPrivacyReplacementTarget(target);
+        },
+        deleteSource: async () => {
+          // stale renderer의 보상 settle은 계속 허용하되, 새 로그인 세션이 old source를
+          // 삭제하는 일은 preview에서도 막는다. 실제 main transition fence와 같은 방향이다.
+          if (previewCanonicalUserId !== actor.id || previewCanonicalEpoch !== originEpoch) {
+            throw new Error('이전 사용자 세션의 이관 원본은 더 이상 삭제할 수 없습니다');
+          }
+          return deleteMockBoundPrivacyMigrationSource(request.source, actor.id);
+        },
       };
-    },
-    calendarPrivacyReplacementSettle: async (receipt, disposition) => {
-      const target = mockPrivacyReplacementReceipts.get(receipt);
-      if (!target) throw new Error('보상 receipt가 없거나 이미 사용되었습니다');
-      mockPrivacyReplacementReceipts.delete(receipt);
-      if (disposition !== 'delete' || target.storage !== 'bflow') return;
-      const index = mockCalendarEvents.findIndex((event) => (
-        event.id === target.actualId && event.calendar_id === target.calendarId
-      ));
-      if (index >= 0) mockCalendarEvents.splice(index, 1);
     },
     calendarEventUpdate: async (id, updates) => {
       const user = requireMockCalendarUser();

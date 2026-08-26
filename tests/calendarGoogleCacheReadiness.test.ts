@@ -209,12 +209,16 @@ type HarnessOptions = {
   bflowEventsList?: () => Promise<BflowEventFixture[]>;
   createBflowEvent?: (input: Record<string, unknown>) => Promise<BflowEventFixture>;
   createLegacyEvent?: (input: Record<string, unknown>) => Promise<LegacyPrivateEventFixture>;
-  createPrivacyReplacement?: (input: Record<string, unknown>) => Promise<{
-    actual_id: string;
-    storage: 'bflow' | 'legacy-private' | 'google';
-    calendar_id?: string;
-    receipt: string;
-  }>;
+  createPrivacyReplacement?: (input: Record<string, unknown>) => Promise<
+    | {
+        actual_id: string;
+        storage: 'bflow' | 'legacy-private' | 'google';
+        calendar_id?: string;
+        /** Test-only identifier; renderer API never receives it. */
+        receipt: string;
+      }
+    | { transition_resolved: 'deleted' }
+  >;
   settlePrivacyReplacement?: (receipt: string, disposition: 'keep' | 'delete') => Promise<void>;
   updateBflowEvent?: (eventId: string, patch: Record<string, unknown>) => Promise<BflowEventFixture>;
   updateLegacyEvent?: (eventId: string, patch: Record<string, unknown>) => Promise<void>;
@@ -544,49 +548,53 @@ async function createHarness(
         deletedBflowEventIds.push(eventId);
         await options.deleteBflowEvent?.(eventId);
       },
-      calendarPrivacyMigrationSourceDelete: async (rawRequest: string | {
-        storage: 'bflow' | 'legacy-private' | 'google';
-        event_id: string;
-        calendar_id?: string;
-      }) => {
-        const request = typeof rawRequest === 'string'
-          ? { storage: 'bflow' as const, event_id: rawRequest }
-          : rawRequest;
-        privacyMigrationSourceDeletes.push(request);
-        if (options.deletePrivacyMigrationSource) {
-          return options.deletePrivacyMigrationSource(request);
-        }
-        if (request.storage === 'bflow') {
-          deletedBflowEventIds.push(request.event_id);
-          if (options.deleteBflowMigrationSource) {
-            return options.deleteBflowMigrationSource(request.event_id);
-          }
-          await options.deleteBflowEvent?.(request.event_id);
-        } else if (request.storage === 'legacy-private') {
-          deletedLegacyEventIds.push(request.event_id);
-          await options.deleteLegacyEvent?.(request.event_id);
-        } else {
-          deletedGoogleEventIds.push(request.event_id);
-          await options.deleteGoogleEvent?.(request.calendar_id ?? '', request.event_id);
-        }
-        return 'deleted';
-      },
       calendarPrivacyReplacementCreate: async (request: Record<string, unknown>) => {
         privacyReplacementCreates.push(request);
         if (!options.createPrivacyReplacement) {
           throw new Error('unexpected calendarPrivacyReplacementCreate');
         }
-        return options.createPrivacyReplacement(request);
-      },
-      calendarPrivacyReplacementSettle: async (
-        receipt: string,
-        disposition: 'keep' | 'delete',
-      ) => {
-        privacyReplacementSettlements.push({ receipt, disposition });
-        if (!options.settlePrivacyReplacement) {
-          throw new Error('unexpected calendarPrivacyReplacementSettle');
-        }
-        await options.settlePrivacyReplacement(receipt, disposition);
+        const target = await options.createPrivacyReplacement(request);
+        if ('transition_resolved' in target) return target;
+        const source = request.source as {
+          storage: 'bflow' | 'legacy-private' | 'google';
+          event_id: string;
+          calendar_id?: string;
+        };
+        let settled = false;
+        return {
+          storage: target.storage,
+          actual_id: target.actual_id,
+          ...(target.calendar_id !== undefined ? { calendar_id: target.calendar_id } : {}),
+          settle: async (disposition: 'keep' | 'delete') => {
+            if (settled) throw new Error('replacement continuation is already settled');
+            settled = true;
+            privacyReplacementSettlements.push({ receipt: target.receipt, disposition });
+            if (!options.settlePrivacyReplacement) {
+              throw new Error('unexpected calendarPrivacyReplacementSettle');
+            }
+            await options.settlePrivacyReplacement(target.receipt, disposition);
+          },
+          deleteSource: async () => {
+            privacyMigrationSourceDeletes.push(source);
+            if (options.deletePrivacyMigrationSource) {
+              return options.deletePrivacyMigrationSource(source);
+            }
+            if (source.storage === 'bflow') {
+              deletedBflowEventIds.push(source.event_id);
+              if (options.deleteBflowMigrationSource) {
+                return options.deleteBflowMigrationSource(source.event_id);
+              }
+              await options.deleteBflowEvent?.(source.event_id);
+            } else if (source.storage === 'legacy-private') {
+              deletedLegacyEventIds.push(source.event_id);
+              await options.deleteLegacyEvent?.(source.event_id);
+            } else {
+              deletedGoogleEventIds.push(source.event_id);
+              await options.deleteGoogleEvent?.(source.calendar_id ?? '', source.event_id);
+            }
+            return 'deleted' as const;
+          },
+        };
       },
       calendarBroadcastChange: async (detail: unknown) => {
         broadcasts.push(detail);
