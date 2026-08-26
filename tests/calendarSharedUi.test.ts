@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict';
+import { spawnSync } from 'node:child_process';
 import { createRequire } from 'node:module';
 import test from 'node:test';
+import { fileURLToPath } from 'node:url';
 import {
   isValidElement,
   type ReactElement,
@@ -3478,7 +3480,7 @@ test('ScheduleView consumes a stored date request after it mounts exactly once',
   resetHarness();
 });
 
-test('ScheduleView keeps the March 8 day index when spring DST shortens the elapsed day', async () => {
+async function assertSpringDstDateNavigation(): Promise<void> {
   resetHarness();
   scheduleLocalStorage.set('bflow_calendar_view_v1', JSON.stringify({
     viewMode: 'today',
@@ -3502,6 +3504,33 @@ test('ScheduleView keeps the March 8 day index when spring DST shortens the elap
     'March 8 is the zero-based 66th day of 2026 even where the DST jump removes one elapsed hour',
   );
   resetHarness();
+}
+
+test('ScheduleView keeps the March 8 day index when spring DST shortens the elapsed day', async () => {
+  if (process.env.BFLOW_CALENDAR_DST_CHILD === '1') {
+    await assertSpringDstDateNavigation();
+    return;
+  }
+
+  const childEnv = { ...process.env };
+  delete childEnv.NODE_TEST_CONTEXT;
+  const child = spawnSync(process.execPath, [
+    '--test',
+    '--test-name-pattern',
+    '^ScheduleView keeps the March 8 day index when spring DST shortens the elapsed day$',
+    fileURLToPath(import.meta.url),
+  ], {
+    cwd: process.cwd(),
+    encoding: 'utf8',
+    env: {
+      ...childEnv,
+      TZ: 'America/New_York',
+      BFLOW_CALENDAR_DST_CHILD: '1',
+    },
+  });
+  const childOutput = `${child.stdout ?? ''}\n${child.stderr ?? ''}`;
+  assert.equal(child.error, undefined, childOutput);
+  assert.equal(child.status, 0, childOutput);
 });
 
 test('ScheduleView resolves a stored todo panel after canonical events finish loading', async () => {
