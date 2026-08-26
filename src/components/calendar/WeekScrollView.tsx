@@ -4,6 +4,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { CalendarDays } from 'lucide-react';
 import type { CalendarEvent } from '@/types/calendar';
 import { useCalendarStore } from '@/stores/useCalendarStore';
+import { useMotionPref } from '@/hooks/useMotionPref';
 import { WEEKDAYS, fmtDate, addDays, daysBetween, getISOWeekNumber, hexToRgba } from '@/utils/calendarDate';
 import { formatEventTimeRange, sortEventsForList } from '@/utils/calendarEventFilter';
 import { calendarEventIdentityKey } from '@/utils/calendarEventIdentity';
@@ -83,6 +84,7 @@ export default function WeekScrollView({
 }: WeekScrollViewProps) {
   const is2Week = mode === '2week';
   const tags = useCalendarStore((state) => state.tags);
+  const { reduce } = useMotionPref();
   const tagNameById = useMemo(
     () => Object.fromEntries(tags.map((tag) => [tag.id, tag.name])) as Record<string, string>,
     [tags],
@@ -119,8 +121,8 @@ export default function WeekScrollView({
         if (!atTop && !atBottom) return;
       }
       const dir = e.deltaY > 0 ? 1 : -1;
-      const next = Math.max(0, Math.min(allWeeks.length - 1, activeWeekIndex + dir));
-      if (next !== activeWeekIndex) onWeekChange(next);
+      // 부모가 연도 경계를 소유한다. -1/length는 이전/다음 해로 넘길 sentinel이다.
+      onWeekChange(activeWeekIndex + dir);
       wheelTimer.current = setTimeout(() => {
         wheelTimer.current = null;
       }, DEBOUNCE_MS);
@@ -182,6 +184,7 @@ export default function WeekScrollView({
                   onEventClick={onEventClick}
                   onDateClick={onDateClick}
                   compact={is2Week}
+                  reduce={reduce}
                   tagNameById={tagNameById}
                 />
               ) : isNear ? (
@@ -221,6 +224,7 @@ function ActiveWeek({
   onEventClick,
   onDateClick,
   compact,
+  reduce,
   tagNameById,
 }: {
   week: Date[];
@@ -230,9 +234,19 @@ function ActiveWeek({
   onEventClick: (ev: CalendarEvent) => void;
   onDateClick?: (date: string) => void;
   compact?: boolean;
+  reduce: boolean;
   tagNameById: Record<string, string>;
 }) {
   const sortedEvents = useMemo(() => sortEventsForList(events), [events]);
+  const eventListRef = useRef<HTMLDivElement>(null);
+  const eventListId = `week-event-list-${fmtDate(week[0])}`;
+  const hiddenBarCount = Math.max(0, events.length - 5);
+  const revealEventList = useCallback(() => {
+    const list = eventListRef.current;
+    if (!list) return;
+    list.scrollIntoView({ behavior: reduce ? 'auto' : 'smooth', block: 'nearest' });
+    list.focus({ preventScroll: true });
+  }, [reduce]);
 
   return (
     <div
@@ -348,6 +362,20 @@ function ActiveWeek({
               </div>
             );
           })}
+          {hiddenBarCount > 0 && (
+            <button
+              type="button"
+              aria-label={`숨은 일정 ${hiddenBarCount}개 보기`}
+              aria-controls={eventListId}
+              onClick={(event) => {
+                event.stopPropagation();
+                revealEventList();
+              }}
+              className="self-start px-1 text-[9px] font-semibold text-text-secondary hover:text-text-primary transition-colors cursor-pointer"
+            >
+              +{hiddenBarCount}개
+            </button>
+          )}
         </div>
       )}
 
@@ -363,7 +391,13 @@ function ActiveWeek({
           </span>
         </div>
       ) : (
-        <div data-scroll-events className="flex flex-col gap-2 flex-1 overflow-y-auto mt-2">
+        <div
+          ref={eventListRef}
+          id={eventListId}
+          data-scroll-events
+          tabIndex={-1}
+          className="flex flex-col gap-2 flex-1 overflow-y-auto mt-2 focus:outline-none"
+        >
           {sortedEvents.map((ev) => (
             <EventCard
               key={calendarEventIdentityKey(ev)}

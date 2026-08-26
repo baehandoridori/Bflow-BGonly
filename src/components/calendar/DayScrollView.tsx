@@ -92,13 +92,12 @@ export default function DayScrollView({
         if (!atTop && !atBottom) return; // 리스트 내 스크롤 우선
       }
       const dir = e.deltaY > 0 ? 1 : -1;
-      const next = Math.max(0, Math.min(maxDay, activeDayIndex + dir));
-      if (next !== activeDayIndex) onActiveDayChange(next);
+      onActiveDayChange(activeDayIndex + dir);
       wheelTimer.current = setTimeout(() => {
         wheelTimer.current = null;
       }, DEBOUNCE_MS);
     },
-    [activeDayIndex, maxDay, onActiveDayChange],
+    [activeDayIndex, onActiveDayChange],
   );
 
   /* 특정 날짜의 이벤트 */

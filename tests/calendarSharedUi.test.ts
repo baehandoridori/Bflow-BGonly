@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict';
+import { spawnSync } from 'node:child_process';
 import { createRequire } from 'node:module';
 import test from 'node:test';
+import { fileURLToPath } from 'node:url';
 import {
   isValidElement,
   type ReactElement,
@@ -172,6 +174,16 @@ type WeekScrollViewModule = {
   generateYearWeeks(year: number): Date[][];
   findWeekIndexForDate(weeks: Date[][], date: string): number;
 };
+type WeekTimeGridViewProps = {
+  weekDays: Date[];
+  events: ScheduleCalendarEvent[];
+  today: string;
+  onEventClick(event: ScheduleCalendarEvent): void;
+  onSlotClick(date: string, startTime: string, endTime: string): void;
+  activeWeekIndex: number;
+  weekCount: number;
+  onWeekChange(index: number): void;
+};
 type DayScrollViewProps = {
   events: ScheduleCalendarEvent[];
   activeDayIndex: number;
@@ -193,6 +205,7 @@ type TestUser = {
 
 type ButtonElement = ReactElement<{
   'aria-label'?: string;
+  'aria-controls'?: string;
   'aria-pressed'?: boolean;
   children?: ReactNode;
   disabled?: boolean;
@@ -274,6 +287,12 @@ let scheduleTagManagerProps: TagManagerPopoverProps[] = [];
 let scheduleGridProps: ScheduleGridProps[] = [];
 let schedulePanelProps: SchedulePanelProps[] = [];
 let scheduleQuickEditProps: ScheduleQuickEditProps[] = [];
+let scheduleWeekScrollProps: WeekScrollViewProps[] = [];
+let scheduleTimeGridProps: WeekTimeGridViewProps[] = [];
+let scheduleDayScrollProps: DayScrollViewProps[] = [];
+let scheduleCreateModalProps: EventCreateModalProps[] = [];
+let scheduleReducedMotion = false;
+const scheduleLocalStorage = new Map<string, string>();
 let scheduleCanonicalEvents: ScheduleCalendarEvent[] = [];
 let scheduleUpdateCalls: Array<{
   id: string;
@@ -291,6 +310,43 @@ let resolveScheduleGetEventsGate: (() => void) | null = null;
 let schedulePendingEffects: Array<() => void | (() => void)> = [];
 let scheduleMountedEffectCleanups: Array<() => void> = [];
 const scheduleWindowListeners = new Map<string, Set<(event: Event) => void>>();
+const scheduleDocumentListeners = new Map<string, Set<(event: Event) => void>>();
+const scheduleDocumentMock = {
+  addEventListener(type: string, listener: (event: Event) => void) {
+    const listeners = scheduleDocumentListeners.get(type) ?? new Set();
+    listeners.add(listener);
+    scheduleDocumentListeners.set(type, listeners);
+  },
+  removeEventListener(type: string, listener: (event: Event) => void) {
+    scheduleDocumentListeners.get(type)?.delete(listener);
+  },
+};
+
+function scheduleFmtDate(date: Date): string {
+  const yyyy = date.getFullYear();
+  const mm = String(date.getMonth() + 1).padStart(2, '0');
+  const dd = String(date.getDate()).padStart(2, '0');
+  return `${yyyy}-${mm}-${dd}`;
+}
+
+function scheduleGenerateYearWeeks(year: number): Date[][] {
+  const jan1 = new Date(year, 0, 1, 12, 0, 0, 0);
+  const firstSunday = new Date(year, 0, 1 - jan1.getDay(), 12, 0, 0, 0);
+  const endDate = new Date(year + 1, 0, 7, 12, 0, 0, 0);
+  const weeks: Date[][] = [];
+  for (let current = firstSunday; current.getTime() < endDate.getTime(); current = new Date(current.getFullYear(), current.getMonth(), current.getDate() + 7, 12, 0, 0, 0)) {
+    weeks.push(Array.from({ length: 7 }, (_, day) => (
+      new Date(current.getFullYear(), current.getMonth(), current.getDate() + day, 12, 0, 0, 0)
+    )));
+  }
+  return weeks;
+}
+
+function scheduleFindWeekIndexForDate(weeks: Date[][], date: string): number {
+  const index = weeks.findIndex((week) => date >= scheduleFmtDate(week[0]) && date <= scheduleFmtDate(week[6]));
+  return index >= 0 ? index : 0;
+}
+
 let scheduleCurrentView = 'schedule';
 let schedulePendingDateNavigation: ScheduleDateNavigationRequest | null = null;
 let scheduleDateNavigationConsumeIds: number[] = [];
@@ -565,6 +621,7 @@ function publishSettingsCanonicalSnapshot(actorId: string, calendars: BflowCalen
 function resetHarness(): void {
   for (const cleanup of scheduleMountedEffectCleanups.splice(0).reverse()) cleanup();
   scheduleWindowListeners.clear();
+  scheduleDocumentListeners.clear();
   tagManagerEffectCleanup?.();
   tagManagerEffectCleanup = undefined;
   tagManagerEffectCursor = 0;
@@ -587,6 +644,12 @@ function resetHarness(): void {
   scheduleGridProps = [];
   schedulePanelProps = [];
   scheduleQuickEditProps = [];
+  scheduleWeekScrollProps = [];
+  scheduleTimeGridProps = [];
+  scheduleDayScrollProps = [];
+  scheduleCreateModalProps = [];
+  scheduleReducedMotion = false;
+  scheduleLocalStorage.clear();
   scheduleCanonicalEvents = [];
   scheduleUpdateCalls = [];
   scheduleUpdateHandler = undefined;
@@ -1115,10 +1178,12 @@ async function loadScheduleView(): Promise<ScheduleViewComponent> {
       '@/components/calendar/MiniCalendar', '@/components/calendar/EventSidePanel',
       '@/components/calendar/EventQuickEdit', '@/components/calendar/CalendarGrid',
       '@/components/calendar/EventCreateModal', '@/components/calendar/WeekScrollView',
+      '@/components/calendar/WeekTimeGridView',
       '@/components/calendar/WeekSidebar', '@/components/calendar/DayScrollView',
       '@/components/calendar/DaySidebar', '@/components/calendar/CalendarRail',
       '@/components/calendar/TagBar', '@/components/calendar/TagManagerPopover', '@/components/calendar/CalendarSettingsModal',
       '@/hooks/useCalendarDragCreate', '@/stores/useCalendarStore',
+      '@/hooks/useMotionPref',
       '@/utils/sceneNavigationAction', '@/utils/createUuid', '@/utils/calendarDate',
       '@/utils/calendarEventFilter',
     ],
@@ -1152,7 +1217,17 @@ async function loadScheduleView(): Promise<ScheduleViewComponent> {
         };
       }
       if (id === 'react/jsx-runtime') return jsxRuntime;
-      if (id === 'framer-motion') return { AnimatePresence: ({ children }: { children: ReactNode }) => children, motion: { div: 'div' } };
+      if (id === 'framer-motion') {
+        return {
+          AnimatePresence: ({ children }: { children: ReactNode }) => children,
+          MotionConfig: ({ children, reducedMotion }: { children: ReactNode; reducedMotion?: string }) => jsxRuntime.jsx('motion-config', {
+            'data-testid': 'schedule-motion-config',
+            'data-reduced-motion': reducedMotion,
+            children,
+          }),
+          motion: { div: 'div' },
+        };
+      }
       if (id === 'lucide-react') return { CalendarDays: emptyComponent, ChevronLeft: emptyComponent, ChevronRight: emptyComponent, Plus: emptyComponent };
       if (id === '@/utils/cn') return { cn: (...values: string[]) => values.filter(Boolean).join(' ') };
       if (id === '@/stores/useDataStore') return { useDataStore: (selector: (state: { episodes: []; episodeTitles: {} }) => unknown) => selector({ episodes: [], episodeTitles: {} }) };
@@ -1220,7 +1295,44 @@ async function loadScheduleView(): Promise<ScheduleViewComponent> {
         };
       }
       if (id === '@/utils/vacationEvents') return { mapVacationEvents: () => [] };
-      if (id === '@/components/calendar/WeekScrollView') return { default: emptyComponent, generateYearWeeks: () => [], findWeekIndexForDate: () => 0 };
+      if (id === '@/components/calendar/MiniCalendar') {
+        return { MiniCalendar: () => jsxRuntime.jsx('div', { 'data-testid': 'mini-calendar', children: '미니 캘린더' }) };
+      }
+      if (id === '@/components/calendar/WeekScrollView') {
+        return {
+          __esModule: true,
+          default: (props: WeekScrollViewProps) => {
+            scheduleWeekScrollProps.push(props);
+            return jsxRuntime.jsx('div', { 'data-testid': 'week-scroll-view', children: '주간 카드 본체' });
+          },
+          generateYearWeeks: scheduleGenerateYearWeeks,
+          findWeekIndexForDate: scheduleFindWeekIndexForDate,
+        };
+      }
+      if (id === '@/components/calendar/WeekTimeGridView') {
+        return {
+          WeekTimeGridView: (props: WeekTimeGridViewProps) => {
+            scheduleTimeGridProps.push(props);
+            return jsxRuntime.jsx('div', { 'data-testid': 'week-time-grid-view', children: '주간 시간표 본체' });
+          },
+        };
+      }
+      if (id === '@/components/calendar/DayScrollView') {
+        return {
+          __esModule: true,
+          default: (props: DayScrollViewProps) => {
+            scheduleDayScrollProps.push(props);
+            return jsxRuntime.jsx('div', { 'data-testid': 'day-scroll-view', children: '오늘 카드 본체' });
+          },
+        };
+      }
+      if (id === '@/components/calendar/WeekSidebar') {
+        return { __esModule: true, default: () => jsxRuntime.jsx('div', { 'data-testid': 'week-sidebar', children: '주간 사이드바' }) };
+      }
+      if (id === '@/components/calendar/DaySidebar') {
+        return { __esModule: true, default: () => jsxRuntime.jsx('div', { 'data-testid': 'day-sidebar', children: '일간 사이드바' }) };
+      }
+      if (id === '@/hooks/useMotionPref') return { useMotionPref: () => ({ reduce: scheduleReducedMotion }) };
       if (id === '@/components/calendar/CalendarRail') {
         return {
           GOOGLE_CALENDAR_ID: 'google',
@@ -1271,13 +1383,25 @@ async function loadScheduleView(): Promise<ScheduleViewComponent> {
       }
       if (id === '@/utils/sceneNavigationAction') return { navigateToSceneView() {} };
       if (id === '@/utils/createUuid') return { createUuid: () => 'new-id' };
-      if (id === '@/utils/calendarDate') return { fmtDate: () => '2026-08-25', parseDate: (date: string) => new Date(`${date}T12:00:00`), addDays: (date: Date, days: number) => new Date(date.getFullYear(), date.getMonth(), date.getDate() + days, 12) };
+      if (id === '@/utils/calendarDate') return {
+        fmtDate: scheduleFmtDate,
+        parseDate: (date: string) => new Date(`${date}T12:00:00`),
+        addDays: (date: Date, days: number) => new Date(date.getFullYear(), date.getMonth(), date.getDate() + days, 12),
+      };
       if (id === '@/utils/calendarEventFilter') return { filterCalendarEvents: (events: unknown[]) => events };
       if (id === '@/components/calendar/CalendarGrid') {
-        return { CalendarGrid: (props: ScheduleGridProps) => { scheduleGridProps.push(props); return jsxRuntime.jsx('div', { children: '캘린더 그리드' }); } };
+        return { CalendarGrid: (props: ScheduleGridProps) => { scheduleGridProps.push(props); return jsxRuntime.jsx('div', { 'data-testid': 'calendar-grid', children: '캘린더 그리드' }); } };
       }
       if (id === '@/components/calendar/EventSidePanel') {
         return { EventSidePanel: (props: SchedulePanelProps) => { schedulePanelProps.push(props); return jsxRuntime.jsx('div', { 'aria-label': '일정 상세 패널 연결됨', children: props.event.title }); } };
+      }
+      if (id === '@/components/calendar/EventCreateModal') {
+        return {
+          EventCreateModal: (props: EventCreateModalProps) => {
+            scheduleCreateModalProps.push(props);
+            return jsxRuntime.jsx('div', { 'aria-label': '일정 생성 모달 연결됨', children: props.initialDate ?? '오늘' });
+          },
+        };
       }
       if (id === '@/components/calendar/EventQuickEdit') {
         return { EventQuickEdit: (props: ScheduleQuickEditProps) => { scheduleQuickEditProps.push(props); return jsxRuntime.jsx('div', { 'aria-label': '일정 퀵에디트 연결됨', children: props.event.title }); } };
@@ -1286,7 +1410,7 @@ async function loadScheduleView(): Promise<ScheduleViewComponent> {
       return nodeRequire(id);
     }, module, module.exports);
     Object.assign(globalThis, {
-      document: { addEventListener() {}, removeEventListener() {} },
+      document: scheduleDocumentMock,
       window: {
         addEventListener(type: string, listener: (event: Event) => void) {
           const listeners = scheduleWindowListeners.get(type) ?? new Set();
@@ -1295,6 +1419,10 @@ async function loadScheduleView(): Promise<ScheduleViewComponent> {
         },
         removeEventListener(type: string, listener: (event: Event) => void) {
           scheduleWindowListeners.get(type)?.delete(listener);
+        },
+        localStorage: {
+          getItem(key: string) { return scheduleLocalStorage.get(key) ?? null; },
+          setItem(key: string, value: string) { scheduleLocalStorage.set(key, value); },
         },
         electronAPI: { async gcalIsAuthenticated() { return false; } },
       },
@@ -1782,7 +1910,7 @@ async function loadWeekScrollView(): Promise<WeekScrollViewModule> {
     write: false,
     external: [
       'react', 'react/jsx-runtime', 'framer-motion', 'lucide-react',
-      '@/stores/useCalendarStore',
+      '@/stores/useCalendarStore', '@/hooks/useMotionPref',
     ],
   }).then((result) => {
     const module = { exports: {} as Record<string, unknown> };
@@ -1810,6 +1938,7 @@ async function loadWeekScrollView(): Promise<WeekScrollViewModule> {
       if (id === '@/stores/useCalendarStore') {
         return { useCalendarStore: (selector: (state: typeof calendarState) => unknown) => selector(calendarState) };
       }
+      if (id === '@/hooks/useMotionPref') return { useMotionPref: () => ({ reduce: scheduleReducedMotion }) };
       return nodeRequire(id);
     }, module, module.exports);
     return module.exports as unknown as WeekScrollViewModule;
@@ -1921,6 +2050,7 @@ function dispatchTagManagerEscape(target?: FormElement): void {
 
 async function renderScheduleView(): Promise<ReactNode> {
   const ScheduleView = await loadScheduleView();
+  globalThis.document = scheduleDocumentMock as unknown as Document;
   stateCursor = 0;
   return resolveComponents(ScheduleView());
 }
@@ -1932,6 +2062,16 @@ async function flushScheduleMountEffects(): Promise<void> {
     if (typeof cleanup === 'function') scheduleMountedEffectCleanups.push(cleanup);
   }
   await new Promise<void>((resolve) => setImmediate(resolve));
+}
+
+function dispatchScheduleKeydown(key: string): void {
+  const event = {
+    key,
+    target: { tagName: 'DIV' },
+    preventDefault() {},
+    stopPropagation() {},
+  } as unknown as Event;
+  for (const listener of scheduleDocumentListeners.get('keydown') ?? []) listener(event);
 }
 
 async function dispatchScheduleWindowEvent(type: string, detail?: Record<string, unknown>): Promise<void> {
@@ -2152,6 +2292,132 @@ test('WeekScrollView and DayScrollView sort active cards and render tag-aware ti
     assert.equal(stopped, true);
     assert.equal(clicked[0], early, 'the sorted card still forwards the original event object');
   });
+});
+
+test('WeekScrollView keeps every event card while exposing a linked +N overflow control after five bars', async () => {
+  resetHarness();
+  const weekModule = await loadWeekScrollView();
+  const weeks = weekModule.generateYearWeeks(2026);
+  const activeWeekIndex = weekModule.findWeekIndexForDate(weeks, '2026-08-25');
+  const events = Array.from({ length: 6 }, (_, index) => calendarListEvent({
+    id: `overflow-${index + 1}`,
+    title: `넘침 일정 ${index + 1}`,
+    startDate: '2026-08-23',
+    endDate: '2026-08-23',
+  }));
+
+  const tree = resolveComponents(weekModule.default({
+    currentMonth: 7,
+    currentYear: 2026,
+    events,
+    today: '2026-08-25',
+    onEventClick() {},
+    activeWeekIndex,
+    onWeekChange() {},
+  }));
+
+  const overflowButton = buttonByLabel(tree, '숨은 일정 1개 보기');
+  assert.equal(textContent(overflowButton), '+1개');
+  const eventList = findElements(tree, (element) => element.props['data-scroll-events'] === true)[0];
+  assert.ok(eventList, 'the active week still contains the full card list');
+  assert.equal(overflowButton.props['aria-controls'], eventList.props.id, 'the overflow control targets the card list it reveals');
+  assert.equal(directElementChildren(eventList).length, 6, 'only the bar strip is capped; every event remains available as a card');
+});
+
+test('WeekScrollView respects reduced motion when +N reveals the full event card list', async (t) => {
+  for (const scenario of [
+    { reduce: false, behavior: 'smooth' },
+    { reduce: true, behavior: 'auto' },
+  ] as const) {
+    await t.test(scenario.reduce ? 'reduced motion uses an instant jump' : 'normal motion keeps a smooth jump', async () => {
+      resetHarness();
+      scheduleReducedMotion = scenario.reduce;
+      const weekModule = await loadWeekScrollView();
+      const weeks = weekModule.generateYearWeeks(2026);
+      const events = Array.from({ length: 6 }, (_, index) => calendarListEvent({
+        id: `motion-overflow-${index + 1}`,
+        title: `모션 넘침 일정 ${index + 1}`,
+        startDate: '2026-08-23',
+        endDate: '2026-08-23',
+      }));
+      const tree = resolveComponents(weekModule.default({
+        currentMonth: 7,
+        currentYear: 2026,
+        events,
+        today: '2026-08-25',
+        onEventClick() {},
+        activeWeekIndex: weekModule.findWeekIndexForDate(weeks, '2026-08-25'),
+        onWeekChange() {},
+      }));
+
+      const eventList = findElements(tree, (element) => element.props['data-scroll-events'] === true)[0];
+      assert.ok(eventList, 'the reveal target remains the complete card list');
+      const eventListRef = (eventList as unknown as {
+        ref: {
+          current: {
+            scrollIntoView(options: Record<string, unknown>): void;
+            focus(options: Record<string, unknown>): void;
+          } | null;
+        };
+      }).ref;
+      assert.ok(eventListRef, 'the card list is reachable through its reveal ref');
+      const scrollCalls: Array<Record<string, unknown>> = [];
+      const focusCalls: Array<Record<string, unknown>> = [];
+      eventListRef.current = {
+        scrollIntoView(options) { scrollCalls.push(options); },
+        focus(options) { focusCalls.push(options); },
+      };
+
+      buttonByLabel(tree, '숨은 일정 1개 보기').props.onClick?.({ stopPropagation() {} });
+      assert.deepEqual(scrollCalls, [{ behavior: scenario.behavior, block: 'nearest' }]);
+      assert.deepEqual(focusCalls, [{ preventScroll: true }]);
+    });
+  }
+});
+
+test('WeekScrollView delegates a boundary wheel step so ScheduleView can change the year', async () => {
+  resetHarness();
+  const weekModule = await loadWeekScrollView();
+  const requestedIndices: number[] = [];
+  const tree = resolveComponents(weekModule.default({
+    currentMonth: 7,
+    currentYear: 2026,
+    events: [],
+    today: '2026-08-25',
+    onEventClick() {},
+    activeWeekIndex: 0,
+    onWeekChange: (index) => requestedIndices.push(index),
+  }));
+  const wheelSurface = findElements(tree, (element) => typeof element.props.onWheel === 'function')[0];
+  assert.ok(wheelSurface, 'the weekly card surface owns its wheel policy');
+  (wheelSurface.props.onWheel as (event: { deltaY: number; target: { closest(): null } }) => void)({
+    deltaY: -1,
+    target: { closest: () => null },
+  });
+  assert.deepEqual(requestedIndices, [-1], 'the previous-year boundary is passed to the parent instead of being silently clamped');
+});
+
+test('DayScrollView delegates the December 31 wheel step so ScheduleView can advance to January 1', async () => {
+  resetHarness();
+  const DayScrollView = await loadDayScrollView();
+  const requestedIndices: number[] = [];
+  const tree = resolveComponents(DayScrollView({
+    events: [],
+    activeDayIndex: 364,
+    onActiveDayChange: (index) => requestedIndices.push(index),
+    year: 2026,
+  }));
+  const wheelSurface = findElements(tree, (element) => typeof element.props.onWheel === 'function')[0];
+  assert.ok(wheelSurface, 'the daily card surface owns its wheel policy');
+  (wheelSurface.props.onWheel as (event: { deltaY: number; target: { closest(): null } }) => void)({
+    deltaY: 1,
+    target: { closest: () => null },
+  });
+  assert.deepEqual(
+    requestedIndices,
+    [365],
+    'December 31 forwards the next-day sentinel to ScheduleView instead of silently clamping',
+  );
 });
 
 test('CalendarRail renders four grouped sections and drives visibility, menu permissions, callbacks, and Google settings navigation', async () => {
@@ -3310,6 +3576,59 @@ test('ScheduleView consumes a stored date request after it mounts exactly once',
   resetHarness();
 });
 
+async function assertSpringDstDateNavigation(): Promise<void> {
+  resetHarness();
+  scheduleLocalStorage.set('bflow_calendar_view_v1', JSON.stringify({
+    viewMode: 'today',
+    weekSubMode: 'card',
+  }));
+  schedulePendingDateNavigation = {
+    id: 54,
+    date: '2026-03-08',
+  };
+
+  await renderScheduleView();
+  await flushScheduleMountEffects();
+  await renderScheduleView();
+
+  const day = scheduleDayScrollProps.at(-1);
+  assert.ok(day);
+  assert.equal(day.year, 2026);
+  assert.equal(
+    day.activeDayIndex,
+    66,
+    'March 8 is the zero-based 66th day of 2026 even where the DST jump removes one elapsed hour',
+  );
+  resetHarness();
+}
+
+test('ScheduleView keeps the March 8 day index when spring DST shortens the elapsed day', async () => {
+  if (process.env.BFLOW_CALENDAR_DST_CHILD === '1') {
+    await assertSpringDstDateNavigation();
+    return;
+  }
+
+  const childEnv = { ...process.env };
+  delete childEnv.NODE_TEST_CONTEXT;
+  const child = spawnSync(process.execPath, [
+    '--test',
+    '--test-name-pattern',
+    '^ScheduleView keeps the March 8 day index when spring DST shortens the elapsed day$',
+    fileURLToPath(import.meta.url),
+  ], {
+    cwd: process.cwd(),
+    encoding: 'utf8',
+    env: {
+      ...childEnv,
+      TZ: 'America/New_York',
+      BFLOW_CALENDAR_DST_CHILD: '1',
+    },
+  });
+  const childOutput = `${child.stdout ?? ''}\n${child.stderr ?? ''}`;
+  assert.equal(child.error, undefined, childOutput);
+  assert.equal(child.status, 0, childOutput);
+});
+
 test('ScheduleView resolves a stored todo panel after canonical events finish loading', async () => {
   resetHarness();
   const linkedEvent: ScheduleCalendarEvent = {
@@ -3678,6 +3997,291 @@ test('ScheduleView replaces legacy controls with the tag bar and reports visible
   assert.equal(typeof scheduleTagBarProps[0].onOpenTagManager, 'function', 'ScheduleView keeps the tag manager anchoring callback wired');
   assert.ok(labels.includes('일정'), 'the creation action uses the shared calendar wording');
   assert.match(textContent(tree), /이번 달 0개.*오늘 0개.*켜진 캘린더 4\/4/, 'statistics describe the filtered view and rail visibility instead of total and vacation counts');
+});
+
+test('ScheduleView applies one reduced-motion policy above every calendar branch, sidebar, and modal', async () => {
+  const boundaryFor = (tree: ReactNode, expectedPolicy: 'always' | 'never'): ReactElement<Record<string, unknown>> => {
+    const boundaries = findElements(tree, (element) => element.props['data-testid'] === 'schedule-motion-config');
+    assert.equal(boundaries.length, 1, 'one root boundary must cover the complete ScheduleView subtree');
+    const boundary = boundaries[0];
+    assert.equal(boundary.type, 'motion-config', 'the policy boundary stays above the sidebar and every calendar surface');
+    assert.equal(boundary.props['data-reduced-motion'], expectedPolicy);
+    return boundary;
+  };
+
+  for (const scenario of [
+    {
+      name: 'month grid',
+      reduce: true,
+      preference: { viewMode: 'month', weekSubMode: 'card' },
+      marker: 'calendar-grid',
+    },
+    {
+      name: 'weekly time grid',
+      reduce: false,
+      preference: { viewMode: 'week', weekSubMode: 'timegrid' },
+      marker: 'week-time-grid-view',
+    },
+    {
+      name: 'weekly card view',
+      reduce: true,
+      preference: { viewMode: 'week', weekSubMode: 'card' },
+      marker: 'week-scroll-view',
+    },
+    {
+      name: 'daily view',
+      reduce: false,
+      preference: { viewMode: 'today', weekSubMode: 'card' },
+      marker: 'day-scroll-view',
+    },
+  ] as const) {
+    resetHarness();
+    scheduleReducedMotion = scenario.reduce;
+    scheduleLocalStorage.set('bflow_calendar_view_v1', JSON.stringify(scenario.preference));
+
+    const boundary = boundaryFor(
+      await renderScheduleView(),
+      scenario.reduce ? 'always' : 'never',
+    );
+    assert.ok(
+      findElements(boundary.props.children as ReactNode, (element) => element.props['data-testid'] === scenario.marker).length > 0,
+      `${scenario.name} renders inside the shared motion boundary`,
+    );
+  }
+
+  resetHarness();
+  scheduleReducedMotion = true;
+  let tree = await renderScheduleView();
+  buttonByTitle(tree, '사이드바 펼치기').props.onClick?.({ stopPropagation() {} });
+  tree = await renderScheduleView();
+  let boundary = boundaryFor(tree, 'always');
+  assert.ok(
+    findElements(boundary.props.children as ReactNode, (element) => element.props['data-testid'] === 'mini-calendar').length > 0,
+    'the animated mini calendar stays below the same root policy',
+  );
+
+  buttonByText(tree, '일정').props.onClick?.({ stopPropagation() {} });
+  tree = await renderScheduleView();
+  boundary = boundaryFor(tree, 'always');
+  assert.ok(
+    findElements(boundary.props.children as ReactNode, (element) => element.props['aria-label'] === '일정 생성 모달 연결됨').length > 0,
+    'modal animation stays below the same root policy',
+  );
+});
+
+test('ScheduleView restores and remembers the weekly time-grid choice while opening a slot on its date', async () => {
+  resetHarness();
+  scheduleLocalStorage.set('bflow_calendar_view_v1', JSON.stringify({
+    viewMode: 'week',
+    weekSubMode: 'timegrid',
+  }));
+
+  let tree = await renderScheduleView();
+  const cardToggle = buttonByLabel(tree, '주간 카드 보기');
+  const timeGridToggle = buttonByLabel(tree, '주간 시간표 보기');
+  assert.equal(cardToggle.props['aria-pressed'], false);
+  assert.equal(timeGridToggle.props['aria-pressed'], true);
+  assert.equal(scheduleTimeGridProps.at(-1)?.weekDays.length, 7, 'the active Sunday-start week reaches the time grid');
+  assert.ok((scheduleTimeGridProps.at(-1)?.weekCount ?? 0) >= 52, 'ScheduleView retains ownership of the full calendar-year navigation range');
+
+  scheduleTimeGridProps.at(-1)?.onSlotClick('2026-08-26', '10:00', '10:30');
+  tree = await renderScheduleView();
+  assert.equal(scheduleCreateModalProps.at(-1)?.initialDate, '2026-08-26', 'B.4 carries only the selected date; time prefill remains a PR-C concern');
+  assert.equal(scheduleCreateModalProps.at(-1)?.initialEndDate, '2026-08-26');
+
+  cardToggle.props.onClick?.({ stopPropagation() {} });
+  tree = await renderScheduleView();
+  assert.equal(buttonByLabel(tree, '주간 카드 보기').props['aria-pressed'], true);
+  assert.equal(scheduleWeekScrollProps.at(-1)?.mode, 'week', 'the existing card mode remains the weekly fallback');
+  await flushScheduleMountEffects();
+  assert.equal(
+    scheduleLocalStorage.get('bflow_calendar_view_v1'),
+    JSON.stringify({ viewMode: 'week', weekSubMode: 'card' }),
+    'the latest weekly sub-mode is saved with the main view mode',
+  );
+
+  buttonByText(tree, '월').props.onClick?.({ stopPropagation() {} });
+  tree = await renderScheduleView();
+  assert.equal(findButtons(tree).some((button) => button.props['aria-label'] === '주간 카드 보기'), false, 'the sub-toggle stays exclusive to the weekly view');
+});
+
+test('ScheduleView carries weekly and daily navigation across a calendar-year boundary', async (t) => {
+  await t.test('weekly header navigation moves past the last generated week and returns without an empty week', async () => {
+    resetHarness();
+    scheduleLocalStorage.set('bflow_calendar_view_v1', JSON.stringify({
+      viewMode: 'week',
+      weekSubMode: 'timegrid',
+    }));
+
+    let tree = await renderScheduleView();
+    const initialGrid = scheduleTimeGridProps.at(-1);
+    assert.ok(initialGrid);
+    initialGrid.onWeekChange(initialGrid.weekCount - 1);
+    tree = await renderScheduleView();
+    const lastWeek = scheduleTimeGridProps.at(-1);
+    assert.ok(lastWeek);
+    const lastWeekStart = scheduleFmtDate(lastWeek.weekDays[0]);
+
+    buttonByLabel(tree, '다음 기간').props.onClick?.({ stopPropagation() {} });
+    tree = await renderScheduleView();
+    const followingWeek = scheduleTimeGridProps.at(-1);
+    assert.ok(followingWeek);
+    assert.equal(followingWeek.weekDays.length, 7, 'next year still provides a complete Sunday-start week');
+    assert.ok(scheduleFmtDate(followingWeek.weekDays[0]) > lastWeekStart, 'the header arrow moves to the next actual week instead of clamping');
+
+    buttonByLabel(tree, '이전 기간').props.onClick?.({ stopPropagation() {} });
+    await renderScheduleView();
+    assert.equal(scheduleFmtDate(scheduleTimeGridProps.at(-1)!.weekDays[0]), lastWeekStart, 'moving back restores the prior week across the year edge');
+  });
+
+  await t.test('today keyboard arrow advances 12/31 to 1/1 with the new year index', async () => {
+    resetHarness();
+    scheduleLocalStorage.set('bflow_calendar_view_v1', JSON.stringify({
+      viewMode: 'today',
+      weekSubMode: 'card',
+    }));
+
+    await renderScheduleView();
+    const initialDay = scheduleDayScrollProps.at(-1);
+    assert.ok(initialDay);
+    const lastDayIndex = new Date(initialDay.year, 1, 29).getDate() === 29 ? 365 : 364;
+    initialDay.onActiveDayChange(lastDayIndex);
+    schedulePendingEffects.splice(0);
+    await renderScheduleView();
+    await flushScheduleMountEffects();
+
+    dispatchScheduleKeydown('ArrowRight');
+    await renderScheduleView();
+    const nextDay = scheduleDayScrollProps.at(-1);
+    assert.ok(nextDay);
+    assert.equal(nextDay.year, initialDay.year + 1);
+    assert.equal(nextDay.activeDayIndex, 0, 'January 1 is the first valid index of the new year');
+  });
+});
+
+test('ScheduleView keeps valid weekly indices owned by the displayed year', async (t) => {
+  const renderCardAtIndexOne = async (): Promise<ReactNode> => {
+    resetHarness();
+    scheduleLocalStorage.set('bflow_calendar_view_v1', JSON.stringify({
+      viewMode: 'week',
+      weekSubMode: 'card',
+    }));
+
+    await renderScheduleView();
+    const card = scheduleWeekScrollProps.at(-1);
+    assert.ok(card);
+    card.onWeekChange(1);
+    const tree = await renderScheduleView();
+    const indexOne = scheduleWeekScrollProps.at(-1);
+    assert.ok(indexOne);
+    assert.equal(indexOne.currentYear, 2026);
+    assert.equal(indexOne.currentMonth, 0);
+    assert.equal(indexOne.activeWeekIndex, 1);
+    return tree;
+  };
+
+  await t.test('a valid timegrid index for the first 2026 week keeps January 2026 selected', async () => {
+    resetHarness();
+    scheduleLocalStorage.set('bflow_calendar_view_v1', JSON.stringify({
+      viewMode: 'week',
+      weekSubMode: 'timegrid',
+    }));
+
+    let tree = await renderScheduleView();
+    const timeGrid = scheduleTimeGridProps.at(-1);
+    assert.ok(timeGrid);
+    assert.equal(
+      scheduleFmtDate(scheduleGenerateYearWeeks(2026)[0][0]),
+      '2025-12-28',
+      'the first generated 2026 week intentionally includes December dates',
+    );
+    timeGrid.onWeekChange(0);
+    tree = await renderScheduleView();
+
+    buttonByLabel(tree, '주간 카드 보기').props.onClick?.({ stopPropagation() {} });
+    await renderScheduleView();
+    const card = scheduleWeekScrollProps.at(-1);
+    assert.ok(card);
+    assert.equal(card.currentYear, 2026);
+    assert.equal(card.currentMonth, 0, 'the first valid week is owned by January in the displayed year');
+    assert.equal(card.activeWeekIndex, 0);
+  });
+
+  await t.test('a valid card index stays in 2026 while an out-of-range sentinel still crosses years', async () => {
+    resetHarness();
+    scheduleLocalStorage.set('bflow_calendar_view_v1', JSON.stringify({
+      viewMode: 'week',
+      weekSubMode: 'card',
+    }));
+
+    await renderScheduleView();
+    const card = scheduleWeekScrollProps.at(-1);
+    assert.ok(card);
+    card.onWeekChange(0);
+    await renderScheduleView();
+    const firstWeek = scheduleWeekScrollProps.at(-1);
+    assert.ok(firstWeek);
+    assert.equal(firstWeek.currentYear, 2026);
+    assert.equal(firstWeek.currentMonth, 0);
+    assert.equal(firstWeek.activeWeekIndex, 0);
+
+    firstWeek.onWeekChange(-1);
+    await renderScheduleView();
+    const priorYear = scheduleWeekScrollProps.at(-1);
+    assert.ok(priorYear);
+    assert.equal(priorYear.currentYear, 2025, 'only the boundary sentinel changes the displayed year');
+  });
+
+  await t.test('the header previous control keeps index one and index zero inside January 2026', async () => {
+    const tree = await renderCardAtIndexOne();
+    buttonByLabel(tree, '이전 기간').props.onClick?.({ stopPropagation() {} });
+    await renderScheduleView();
+
+    const firstWeek = scheduleWeekScrollProps.at(-1);
+    assert.ok(firstWeek);
+    assert.equal(firstWeek.currentYear, 2026);
+    assert.equal(firstWeek.currentMonth, 0);
+    assert.equal(firstWeek.activeWeekIndex, 0);
+  });
+
+  await t.test('ArrowLeft keeps index one and index zero inside January 2026', async () => {
+    await renderCardAtIndexOne();
+    schedulePendingEffects.splice(0);
+    await renderScheduleView();
+    await flushScheduleMountEffects();
+
+    dispatchScheduleKeydown('ArrowLeft');
+    await renderScheduleView();
+    const firstWeek = scheduleWeekScrollProps.at(-1);
+    assert.ok(firstWeek);
+    assert.equal(firstWeek.currentYear, 2026);
+    assert.equal(firstWeek.currentMonth, 0);
+    assert.equal(firstWeek.activeWeekIndex, 0);
+  });
+});
+
+test('ScheduleView counts every event overlapping the displayed month', async () => {
+  resetHarness();
+  scheduleCanonicalEvents = [
+    calendarListEvent({ id: 'from-prior-month', title: '전달에서 이어짐', startDate: '2026-07-30', endDate: '2026-08-02' }),
+    calendarListEvent({ id: 'inside-month', title: '이번 달 일정', startDate: '2026-08-12', endDate: '2026-08-12' }),
+    calendarListEvent({ id: 'into-next-month', title: '다음 달까지', startDate: '2026-08-30', endDate: '2026-09-03' }),
+    calendarListEvent({ id: 'outside-month', title: '다음 달만', startDate: '2026-09-01', endDate: '2026-09-02' }),
+  ];
+
+  await renderScheduleView();
+  await flushScheduleMountEffects();
+  const tree = await renderScheduleView();
+  assert.match(textContent(tree), /이번 달 3개/, 'events that started before or end after this month still count while they overlap it');
+});
+
+test('ScheduleView ignores malformed remembered calendar view data', async () => {
+  resetHarness();
+  scheduleLocalStorage.set('bflow_calendar_view_v1', '{not-json');
+
+  const tree = await renderScheduleView();
+  assert.equal(findButtons(tree).some((button) => button.props['aria-label'] === '주간 시간표 보기'), false, 'malformed storage falls back to the existing monthly view');
+  assert.equal(scheduleTimeGridProps.length, 0);
 });
 
 test('CalendarGrid renders tag-aware chip text while keeping each event color as the tint and border source', async () => {

@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
+import { motion, AnimatePresence, MotionConfig } from 'framer-motion';
 import {
   CalendarDays, ChevronLeft, ChevronRight, Plus,
 } from 'lucide-react';
@@ -22,6 +22,7 @@ import { EventQuickEdit } from '@/components/calendar/EventQuickEdit';
 import { CalendarGrid } from '@/components/calendar/CalendarGrid';
 import { EventCreateModal } from '@/components/calendar/EventCreateModal';
 import WeekScrollView, { generateYearWeeks, findWeekIndexForDate } from '@/components/calendar/WeekScrollView';
+import { WeekTimeGridView } from '@/components/calendar/WeekTimeGridView';
 import WeekSidebar from '@/components/calendar/WeekSidebar';
 import DayScrollView from '@/components/calendar/DayScrollView';
 import DaySidebar from '@/components/calendar/DaySidebar';
@@ -42,6 +43,46 @@ import {
 import { navigateToSceneView } from '@/utils/sceneNavigationAction';
 import { createUuid } from '@/utils/createUuid';
 import { fmtDate, parseDate, addDays } from '@/utils/calendarDate';
+import { useMotionPref } from '@/hooks/useMotionPref';
+
+type WeekSubMode = 'card' | 'timegrid';
+
+const CALENDAR_VIEW_STORAGE_KEY = 'bflow_calendar_view_v1';
+const CALENDAR_VIEW_MODES: CalendarViewMode[] = ['month', '2week', 'week', 'today'];
+
+function readCalendarViewPreference(): { viewMode: CalendarViewMode; weekSubMode: WeekSubMode } {
+  const fallback = { viewMode: 'month' as CalendarViewMode, weekSubMode: 'card' as WeekSubMode };
+  try {
+    if (typeof window === 'undefined') return fallback;
+    const raw = window.localStorage.getItem(CALENDAR_VIEW_STORAGE_KEY);
+    if (!raw) return fallback;
+    const value = JSON.parse(raw) as { viewMode?: unknown; weekSubMode?: unknown };
+    if (
+      !CALENDAR_VIEW_MODES.includes(value.viewMode as CalendarViewMode)
+      || (value.weekSubMode !== 'card' && value.weekSubMode !== 'timegrid')
+    ) return fallback;
+    return {
+      viewMode: value.viewMode as CalendarViewMode,
+      weekSubMode: value.weekSubMode,
+    };
+  } catch {
+    return fallback;
+  }
+}
+
+function normalizeCalendarDate(date: Date): Date {
+  return new Date(date.getFullYear(), date.getMonth(), date.getDate(), 12, 0, 0, 0);
+}
+
+function daysInCalendarYear(year: number): number {
+  return new Date(year, 1, 29).getDate() === 29 ? 366 : 365;
+}
+
+function calendarDayIndex(date: Date): number {
+  const normalized = normalizeCalendarDate(date);
+  const jan1 = new Date(normalized.getFullYear(), 0, 1, 12, 0, 0, 0);
+  return Math.round((normalized.getTime() - jan1.getTime()) / 86400000);
+}
 
 /* ═══════════════════════════════════════════════════
    캘린더 → 할일 역동기화 헬퍼
@@ -108,7 +149,8 @@ export function ScheduleView() {
 
   const [events, setEvents] = useState<CalendarEvent[]>([]);
   const [vacationEvents, setVacationEvents] = useState<CalendarEvent[]>([]);
-  const [viewMode, setViewMode] = useState<CalendarViewMode>('month');
+  const [viewMode, setViewMode] = useState<CalendarViewMode>(() => readCalendarViewPreference().viewMode);
+  const [weekSubMode, setWeekSubMode] = useState<WeekSubMode>(() => readCalendarViewPreference().weekSubMode);
   const [showCreate, setShowCreate] = useState(false);
   const [createDate, setCreateDate] = useState<string | undefined>();
   const [googleAuthenticated, setGoogleAuthenticated] = useState(false);
@@ -145,6 +187,15 @@ export function ScheduleView() {
   const [year, setYear] = useState(() => new Date().getFullYear());
   const [month, setMonth] = useState(() => new Date().getMonth());
   const [monthDir, setMonthDir] = useState(0); // 월 슬라이드 방향
+  const { reduce } = useMotionPref();
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(CALENDAR_VIEW_STORAGE_KEY, JSON.stringify({ viewMode, weekSubMode }));
+    } catch {
+      // 시크릿 모드·저장소 접근 제한에서는 기존 화면 동작을 유지한다.
+    }
+  }, [viewMode, weekSubMode]);
 
   const today = fmtDate(new Date());
   const vacationConnected = useAppStore((s) => s.vacationConnected);
@@ -261,6 +312,11 @@ export function ScheduleView() {
     [calendars, visibleCalendarIds, googleAuthenticated, googleVisible],
   );
   const totalRailCalendarCount = calendars.length + (googleAuthenticated ? 1 : 0);
+  const currentMonthEventCount = useMemo(() => {
+    const monthStart = fmtDate(new Date(year, month, 1, 12, 0, 0, 0));
+    const monthEnd = fmtDate(new Date(year, month + 1, 0, 12, 0, 0, 0));
+    return filteredEvents.filter((event) => event.startDate <= monthEnd && event.endDate >= monthStart).length;
+  }, [filteredEvents, month, year]);
   const tagNameById = useMemo<Record<string, string>>(
     () => Object.fromEntries(tags.map((tag) => [tag.id, tag.name])),
     [tags],
@@ -325,6 +381,66 @@ export function ScheduleView() {
     return [];
   }, [viewMode, year, month]);
 
+  const moveToWeekContaining = useCallback((date: Date) => {
+    const target = normalizeCalendarDate(date);
+    const targetYear = target.getFullYear();
+    const targetWeeks = generateYearWeeks(targetYear);
+    setYear(targetYear);
+    setMonth(target.getMonth());
+    setActiveWeekIndex(findWeekIndexForDate(targetWeeks, fmtDate(target)));
+  }, []);
+
+  const handleWeekChange = useCallback((requestedIndex: number) => {
+    const yearWeeks = generateYearWeeks(year);
+    if (yearWeeks.length === 0) return;
+    const lastIndex = yearWeeks.length - 1;
+    if (requestedIndex < 0) {
+      moveToWeekContaining(addDays(yearWeeks[0][3], requestedIndex * 7));
+      return;
+    }
+    if (requestedIndex > lastIndex) {
+      moveToWeekContaining(addDays(yearWeeks[lastIndex][3], (requestedIndex - lastIndex) * 7));
+      return;
+    }
+    const requestedWeek = yearWeeks[requestedIndex];
+    const dateInDisplayedYear = requestedWeek.find((date) => date.getFullYear() === year)
+      ?? new Date(year, 11, 31, 12, 0, 0, 0);
+    setMonth(dateInDisplayedYear.getMonth());
+    setActiveWeekIndex(requestedIndex);
+  }, [moveToWeekContaining, year]);
+
+  const moveWeekBy = useCallback((delta: number) => {
+    const yearWeeks = generateYearWeeks(year);
+    if (yearWeeks.length === 0) return;
+    const safeIndex = Math.max(0, Math.min(yearWeeks.length - 1, activeWeekIndex));
+    handleWeekChange(safeIndex + delta);
+  }, [activeWeekIndex, handleWeekChange, year]);
+
+  const moveToDay = useCallback((date: Date) => {
+    const target = normalizeCalendarDate(date);
+    setYear(target.getFullYear());
+    setMonth(target.getMonth());
+    setActiveDayIndex(calendarDayIndex(target));
+  }, []);
+
+  const moveDayBy = useCallback((delta: number) => {
+    const safeIndex = Math.max(0, Math.min(daysInCalendarYear(year) - 1, activeDayIndex));
+    moveToDay(addDays(new Date(year, 0, safeIndex + 1, 12, 0, 0, 0), delta));
+  }, [activeDayIndex, moveToDay, year]);
+
+  const handleDayChange = useCallback((requestedIndex: number) => {
+    const lastIndex = daysInCalendarYear(year) - 1;
+    if (requestedIndex < 0) {
+      moveToDay(new Date(year - 1, 11, 31, 12, 0, 0, 0));
+      return;
+    }
+    if (requestedIndex > lastIndex) {
+      moveToDay(new Date(year + 1, 0, 1, 12, 0, 0, 0));
+      return;
+    }
+    moveToDay(new Date(year, 0, requestedIndex + 1, 12, 0, 0, 0));
+  }, [moveToDay, year]);
+
   // 네비게이션
   const goToPrev = () => {
     if (viewMode === 'month') {
@@ -333,9 +449,9 @@ export function ScheduleView() {
       else setMonth(month - 1);
     } else if (viewMode === 'week' || viewMode === '2week') {
       const step = viewMode === '2week' ? 2 : 1;
-      setActiveWeekIndex((idx: number) => Math.max(0, idx - step));
+      moveWeekBy(-step);
     } else {
-      setActiveDayIndex((idx: number) => Math.max(0, idx - 1));
+      moveDayBy(-1);
     }
   };
 
@@ -346,24 +462,17 @@ export function ScheduleView() {
       else setMonth(month + 1);
     } else if (viewMode === 'week' || viewMode === '2week') {
       const step = viewMode === '2week' ? 2 : 1;
-      setActiveWeekIndex((idx: number) => Math.min(generateYearWeeks(year).length - 1, idx + step));
+      moveWeekBy(step);
     } else {
-      setActiveDayIndex((idx: number) => Math.min((new Date(year, 1, 29).getDate() === 29 ? 365 : 364), idx + 1));
+      moveDayBy(1);
     }
   };
 
   const goToToday = () => {
     const now = new Date();
     const todayStr = fmtDate(now);
-    setYear(now.getFullYear());
-    setMonth(now.getMonth());
-    // 주간 뷰: 오늘이 속한 주로 이동
-    const yearWeeks = generateYearWeeks(now.getFullYear());
-    setActiveWeekIndex(findWeekIndexForDate(yearWeeks, todayStr));
-    // 일간 뷰: 오늘로 초기화 (양쪽 모두 정오로 정규화)
-    const jan1 = new Date(now.getFullYear(), 0, 1, 12, 0, 0, 0);
-    const todayNoon = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 12, 0, 0, 0);
-    setActiveDayIndex(Math.floor((todayNoon.getTime() - jan1.getTime()) / 86400000));
+    moveToWeekContaining(now);
+    moveToDay(now);
     // 월간 뷰: 오늘 날짜에 펄스 애니메이션 (모달 트리거 방지)
     if (viewMode === 'month') {
       setPulseDate(todayStr);
@@ -469,6 +578,13 @@ export function ScheduleView() {
   // ─── 드래그-투-크리에이트: 시작/종료 날짜 상태 ───
   const [createEndDate, setCreateEndDate] = useState<string | undefined>();
 
+  const handleTimeGridSlotClick = useCallback((date: string, _startTime: string, _endTime: string) => {
+    // 시각 프리필은 PR-C에서 EventCreateModal 계약을 확장해 연결한다.
+    setCreateDate(date);
+    setCreateEndDate(date);
+    setShowCreate(true);
+  }, []);
+
   // 드래그 완료 후 모달이 열려 있는 동안 선택 범위를 유지하기 위한 상태
   const [persistedDateRange, setPersistedDateRange] = useState<{ startDate: string; endDate: string } | null>(null);
 
@@ -521,13 +637,13 @@ export function ScheduleView() {
         if (e.key === 'ArrowUp' || e.key === 'ArrowLeft') {
           e.preventDefault();
           e.stopPropagation();
-          setActiveWeekIndex((idx: number) => Math.max(0, idx - 1));
+          moveWeekBy(-1);
           return;
         }
         if (e.key === 'ArrowDown' || e.key === 'ArrowRight') {
           e.preventDefault();
           e.stopPropagation();
-          setActiveWeekIndex((idx: number) => Math.min(generateYearWeeks(year).length - 1, idx + 1));
+          moveWeekBy(1);
           return;
         }
         return;
@@ -538,13 +654,13 @@ export function ScheduleView() {
         if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') {
           e.preventDefault();
           e.stopPropagation();
-          setActiveDayIndex((o: number) => Math.max(0, o - 1));
+          moveDayBy(-1);
           return;
         }
         if (e.key === 'ArrowRight' || e.key === 'ArrowDown') {
           e.preventDefault();
           e.stopPropagation();
-          setActiveDayIndex((o: number) => Math.min((new Date(year, 1, 29).getDate() === 29 ? 365 : 364), o + 1));
+          moveDayBy(1);
           return;
         }
         return;
@@ -585,7 +701,7 @@ export function ScheduleView() {
 
     document.addEventListener('keydown', handler);
     return () => document.removeEventListener('keydown', handler);
-  }, [viewMode, showCreate, quickEdit, panelEvent, focusedDate, month, year]);
+  }, [viewMode, showCreate, quickEdit, panelEvent, focusedDate, month, year, moveWeekBy, moveDayBy]);
 
   // 뷰 모드 변경 시 포커스 초기화
   useEffect(() => {
@@ -602,23 +718,15 @@ export function ScheduleView() {
 
     const dateStr = detail.date;
     const d = parseDate(dateStr);
-    setYear(d.getFullYear());
-    setMonth(d.getMonth());
+    moveToWeekContaining(d);
+    moveToDay(d);
     setPersistedDateRange({ startDate: dateStr, endDate: dateStr });
-    // 주간/일간 뷰에서도 해당 날짜로 이동
-    const yearWeeks = generateYearWeeks(d.getFullYear());
-    const weekIdx = findWeekIndexForDate(yearWeeks, dateStr);
-    if (weekIdx >= 0) setActiveWeekIndex(weekIdx);
-    // 일간 뷰: 연초 기준 일수 계산
-    const yearStart = new Date(d.getFullYear(), 0, 1);
-    const dayIdx = Math.floor((d.getTime() - yearStart.getTime()) / 86400000);
-    setActiveDayIndex(dayIdx);
     setPulseDate(dateStr);
     // 3초 후 하이라이트 및 펄스 해제
     navigateTimersRef.current.push(
       setTimeout(() => { setPersistedDateRange(null); setPulseDate(null); }, 3000),
     );
-  }, []);
+  }, [moveToDay, moveToWeekContaining]);
 
   useEffect(() => {
     if (currentView !== 'schedule' || !pendingScheduleDateNavigationRequest) return;
@@ -784,7 +892,8 @@ export function ScheduleView() {
   }, []);
 
   return (
-    <div className="flex h-full">
+    <MotionConfig reducedMotion={reduce ? 'always' : 'never'}>
+      <div className="flex h-full">
       {/* ═══ 좌측 사이드바 ═══ */}
       <div
         className="flex-shrink-0 border-r border-bg-border/30 transition-all duration-250 overflow-hidden"
@@ -806,7 +915,7 @@ export function ScheduleView() {
               {viewMode === 'today' ? (
                 <DaySidebar
                   activeDayIndex={activeDayIndex}
-                  onDaySelect={setActiveDayIndex}
+                  onDaySelect={handleDayChange}
                   events={filteredEvents}
                   year={year}
                 />
@@ -816,7 +925,7 @@ export function ScheduleView() {
                   events={filteredEvents}
                   today={today}
                   activeWeekIndex={activeWeekIndex}
-                  onWeekSelect={setActiveWeekIndex}
+                  onWeekSelect={handleWeekChange}
                   currentMonth={month}
                   currentYear={year}
                 />
@@ -867,6 +976,7 @@ export function ScheduleView() {
             <div className="flex items-center gap-1.5">
               <button
                 onClick={goToPrev}
+                aria-label="이전 기간"
                 className="p-2 rounded-lg hover:bg-bg-border/30 text-text-secondary/60 hover:text-text-primary transition-colors cursor-pointer"
               >
                 <ChevronLeft size={20} />
@@ -876,6 +986,7 @@ export function ScheduleView() {
               </span>
               <button
                 onClick={goToNext}
+                aria-label="다음 기간"
                 className="p-2 rounded-lg hover:bg-bg-border/30 text-text-secondary/60 hover:text-text-primary transition-colors cursor-pointer"
               >
                 <ChevronRight size={20} />
@@ -909,6 +1020,35 @@ export function ScheduleView() {
             ))}
           </div>
 
+          {viewMode === 'week' && (
+            <div className="flex rounded-lg border border-accent/35 bg-accent/5 p-0.5" aria-label="주간 보기 방식">
+              <button
+                type="button"
+                aria-label="주간 카드 보기"
+                aria-pressed={weekSubMode === 'card'}
+                onClick={() => setWeekSubMode('card')}
+                className={cn(
+                  'rounded-md px-2.5 py-1.5 text-xs font-medium transition-colors cursor-pointer',
+                  weekSubMode === 'card' ? 'bg-accent/20 text-accent' : 'text-text-secondary hover:text-text-primary',
+                )}
+              >
+                카드
+              </button>
+              <button
+                type="button"
+                aria-label="주간 시간표 보기"
+                aria-pressed={weekSubMode === 'timegrid'}
+                onClick={() => setWeekSubMode('timegrid')}
+                className={cn(
+                  'rounded-md px-2.5 py-1.5 text-xs font-medium transition-colors cursor-pointer',
+                  weekSubMode === 'timegrid' ? 'bg-accent/20 text-accent' : 'text-text-secondary hover:text-text-primary',
+                )}
+              >
+                시간표
+              </button>
+            </div>
+          )}
+
           {/* 이벤트 생성 */}
           <button
             onClick={() => { setCreateDate(undefined); setShowCreate(true); }}
@@ -933,10 +1073,7 @@ export function ScheduleView() {
 
       {/* ═══ 이벤트 수 통계 ═══ */}
       <div className="flex items-center gap-4 text-sm text-text-secondary/50 px-4">
-        <span>이번 달 {filteredEvents.filter((e) => {
-          const s = parseDate(e.startDate);
-          return s.getFullYear() === year && s.getMonth() === month;
-        }).length}개</span>
+        <span>이번 달 {currentMonthEventCount}개</span>
         <span className="text-bg-border/50">·</span>
         <span>오늘 {filteredEvents.filter((e) => e.startDate <= today && e.endDate >= today).length}개</span>
         <span className="text-bg-border/50">·</span>
@@ -947,18 +1084,18 @@ export function ScheduleView() {
       <div className="flex-1 flex flex-col overflow-hidden px-3 pb-2">
         <AnimatePresence mode="wait">
           <motion.div
-            key={viewMode}
-            initial={{ opacity: 0, y: 8 }}
+            key={`${viewMode}:${weekSubMode}`}
+            initial={reduce ? false : { opacity: 0, y: 8 }}
             animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -8 }}
-            transition={{ duration: 0.2, ease: 'easeInOut' }}
+            exit={reduce ? undefined : { opacity: 0, y: -8 }}
+            transition={reduce ? { duration: 0 } : { duration: 0.2, ease: [0.16, 1, 0.3, 1] }}
             className="flex-1 flex flex-col overflow-hidden"
           >
             {viewMode === 'today' ? (
               <DayScrollView
                 events={filteredEvents}
                 activeDayIndex={activeDayIndex}
-                onActiveDayChange={setActiveDayIndex}
+                onActiveDayChange={handleDayChange}
                 onEventClick={handleEventClick}
                 onDateClick={(dateStr) => {
                   setCreateDate(dateStr);
@@ -966,6 +1103,19 @@ export function ScheduleView() {
                   setShowCreate(true);
                 }}
                 year={year}
+              />
+            ) : viewMode === 'week' && weekSubMode === 'timegrid' ? (
+              <WeekTimeGridView
+                weekDays={weeks[activeWeekIndex] ?? []}
+                events={filteredEvents}
+                today={today}
+                onEventClick={handleEventClick}
+                onSlotClick={handleTimeGridSlotClick}
+                tagNameById={tagNameById}
+                calendarNameById={calendarNameById}
+                activeWeekIndex={activeWeekIndex}
+                weekCount={weeks.length}
+                onWeekChange={handleWeekChange}
               />
             ) : viewMode === 'week' || viewMode === '2week' ? (
               <WeekScrollView
@@ -980,7 +1130,7 @@ export function ScheduleView() {
                   setShowCreate(true);
                 }}
                 activeWeekIndex={activeWeekIndex}
-                onWeekChange={setActiveWeekIndex}
+                onWeekChange={handleWeekChange}
                 mode={viewMode === '2week' ? '2week' : 'week'}
               />
             ) : (
@@ -1080,6 +1230,7 @@ export function ScheduleView() {
         />
       )}
       </div>{/* 메인 영역 끝 */}
-    </div>
+      </div>
+    </MotionConfig>
   );
 }
