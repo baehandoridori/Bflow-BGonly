@@ -8,6 +8,8 @@ import { useAuthStore } from '@/stores/useAuthStore';
 import { isOptimisticCalendarTagId, useCalendarStore } from '@/stores/useCalendarStore';
 import { EntityAwareInput } from '@/components/common/EntityAwareInput';
 import { floatingGlassStyle } from '@/utils/glassStyles';
+import { buildEventSnapshot } from '@/utils/calendarEventDiff';
+import { calendarEventIdentityKey } from '@/utils/calendarEventIdentity';
 
 interface EventQuickEditProps {
   event: CalendarEvent;
@@ -28,6 +30,17 @@ interface PendingSelection<T> {
 
 function isPromiseLike(value: unknown): value is PromiseLike<void> {
   return typeof (value as { then?: unknown } | null)?.then === 'function';
+}
+
+type LocalMutationRecovery = {
+  identityKey: string;
+  rollbackSnapshot: string;
+  eventAtStart: CalendarEvent;
+  rollbackRefreshConsumed: boolean;
+};
+
+function eventContentSnapshot(event: CalendarEvent): string {
+  return buildEventSnapshot([event]).get(calendarEventIdentityKey(event)) ?? '';
 }
 
 const TYPE_OPTIONS: { value: CalendarEventType; label: string }[] = [
@@ -66,6 +79,11 @@ export function EventQuickEdit({
   const [mutationError, setMutationError] = useState<string | null>(null);
   const calendarUpdateRequestRef = useRef(0);
   const tagUpdateRequestRef = useRef(0);
+  const eventIdentityKey = calendarEventIdentityKey(event);
+  const eventSnapshot = eventContentSnapshot(event);
+  const latestEventRef = useRef(event);
+  const pendingMutationRef = useRef<LocalMutationRecovery | null>(null);
+  const failedMutationRecoveryRef = useRef<LocalMutationRecovery | null>(null);
 
   const isVacation = event.type === 'vacation';
   const isWriteProtected = event.isReadOnly === true || event.canEdit === false;
@@ -117,8 +135,40 @@ export function EventQuickEdit({
   }, [onClose]);
 
   useEffect(() => {
+    latestEventRef.current = event;
+    if (pendingMutationRef.current?.identityKey === eventIdentityKey) return;
+
+    const failedRecovery = failedMutationRecoveryRef.current;
+    if (failedRecovery?.identityKey === eventIdentityKey) {
+      if (failedRecovery.rollbackSnapshot === eventSnapshot) {
+        failedRecovery.rollbackRefreshConsumed = true;
+        return;
+      }
+      if (!failedRecovery.rollbackRefreshConsumed) {
+        failedRecovery.rollbackRefreshConsumed = true;
+        return;
+      }
+    }
+
+    failedMutationRecoveryRef.current = null;
+    setTitle(event.title);
+    setStartDate(event.startDate);
+    setEndDate(event.endDate);
+    setType(event.type);
+    setMemo(event.memo);
     setMutationError(null);
-  }, [event.id]);
+  }, [event, eventIdentityKey, eventSnapshot]);
+
+  const markMutationFailed = useCallback((mutation: LocalMutationRecovery, message: string) => {
+    if (pendingMutationRef.current !== mutation) return;
+    pendingMutationRef.current = null;
+    const latestEvent = latestEventRef.current;
+    mutation.rollbackRefreshConsumed = latestEvent !== mutation.eventAtStart
+      && calendarEventIdentityKey(latestEvent) === mutation.identityKey
+      && eventContentSnapshot(latestEvent) === mutation.rollbackSnapshot;
+    failedMutationRecoveryRef.current = mutation;
+    setMutationError(message);
+  }, []);
 
   const handleSave = useCallback(() => {
     if (!canWrite) return;
@@ -135,38 +185,66 @@ export function EventQuickEdit({
       return;
     }
     setMutationError(null);
+    const mutation: LocalMutationRecovery = {
+      identityKey: eventIdentityKey,
+      rollbackSnapshot: eventSnapshot,
+      eventAtStart: event,
+      rollbackRefreshConsumed: false,
+    };
+    pendingMutationRef.current = mutation;
+    failedMutationRecoveryRef.current = null;
     try {
       const persistence = onUpdate(event.id, updates);
       if (isPromiseLike(persistence)) {
         void persistence.then(
-          () => onClose(),
-          () => setMutationError('일정 저장에 실패했어요. 다시 시도해 주세요.'),
+          () => {
+            if (pendingMutationRef.current !== mutation) return;
+            pendingMutationRef.current = null;
+            onClose();
+          },
+          () => markMutationFailed(mutation, '일정 저장에 실패했어요. 다시 시도해 주세요.'),
         );
         return;
       }
+      if (pendingMutationRef.current !== mutation) return;
+      pendingMutationRef.current = null;
       onClose();
     } catch {
-      setMutationError('일정 저장에 실패했어요. 다시 시도해 주세요.');
+      markMutationFailed(mutation, '일정 저장에 실패했어요. 다시 시도해 주세요.');
     }
-  }, [canWrite, endDate, event, isCanonicalBflow, memo, onClose, onUpdate, startDate, title, type]);
+  }, [canWrite, endDate, event, eventIdentityKey, eventSnapshot, isCanonicalBflow, markMutationFailed, memo, onClose, onUpdate, startDate, title, type]);
 
   const handleDelete = useCallback(() => {
     if (!canWrite) return;
     setMutationError(null);
+    const mutation: LocalMutationRecovery = {
+      identityKey: eventIdentityKey,
+      rollbackSnapshot: eventSnapshot,
+      eventAtStart: event,
+      rollbackRefreshConsumed: false,
+    };
+    pendingMutationRef.current = mutation;
+    failedMutationRecoveryRef.current = null;
     try {
       const persistence = onDelete(event.id);
       if (isPromiseLike(persistence)) {
         void persistence.then(
-          () => onClose(),
-          () => setMutationError('일정 삭제에 실패했어요. 다시 시도해 주세요.'),
+          () => {
+            if (pendingMutationRef.current !== mutation) return;
+            pendingMutationRef.current = null;
+            onClose();
+          },
+          () => markMutationFailed(mutation, '일정 삭제에 실패했어요. 다시 시도해 주세요.'),
         );
         return;
       }
+      if (pendingMutationRef.current !== mutation) return;
+      pendingMutationRef.current = null;
       onClose();
     } catch {
-      setMutationError('일정 삭제에 실패했어요. 다시 시도해 주세요.');
+      markMutationFailed(mutation, '일정 삭제에 실패했어요. 다시 시도해 주세요.');
     }
-  }, [canWrite, event.id, onClose, onDelete]);
+  }, [canWrite, event, eventIdentityKey, eventSnapshot, markMutationFailed, onClose, onDelete]);
 
   const handleDuplicate = useCallback(() => {
     onDuplicate(event);

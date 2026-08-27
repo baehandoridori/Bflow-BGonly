@@ -380,7 +380,7 @@ function findTitleInput(node: ReactNode): InputElement {
 function findTitleInputOrUndefined(node: ReactNode): InputElement | undefined {
   if (!isValidElement(node)) return undefined;
   const props = node.props as { children?: ReactNode; type?: string; value?: unknown };
-  if (node.type === 'input' && props.type === undefined) return node as InputElement;
+  if (node.type === 'input' && (props.type === undefined || props.type === 'text')) return node as InputElement;
   const children = props.children;
   if (Array.isArray(children)) {
     for (const child of children) {
@@ -435,23 +435,41 @@ async function renderQuickEdit(
     onUpdate: (id: string, updates: Partial<TestCalendarEvent>) => void | Promise<void>;
     onDelete: (id: string) => void | Promise<void>;
   },
+  target = event(),
+  runEffects = false,
 ): Promise<ReactNode> {
   const EventQuickEdit = await loadQuickEdit();
-  const globalScope = globalThis as typeof globalThis & { document?: { body: object } };
+  const globalScope = globalThis as typeof globalThis & {
+    document?: {
+      body: object;
+      addEventListener: () => void;
+      removeEventListener: () => void;
+    };
+  };
   const previousDocument = globalScope.document;
-  globalScope.document = { body: {} };
+  globalScope.document = {
+    body: {},
+    addEventListener() {},
+    removeEventListener() {},
+  };
   activeHooks = store;
   resetHookCursors(store);
   capturedPortal = undefined;
   try {
-    EventQuickEdit({
-      event: event(),
+    const render = () => EventQuickEdit({
+      event: target,
       position: { x: 0, y: 0 },
       onClose: callbacks.onClose,
       onUpdate: callbacks.onUpdate,
       onDelete: callbacks.onDelete,
       onDuplicate: () => {},
     });
+    render();
+    if (runEffects) {
+      flushEffects(store);
+      resetHookCursors(store);
+      render();
+    }
     assert.ok(capturedPortal, 'quick edit portal must be captured');
     return capturedPortal;
   } finally {
@@ -544,6 +562,65 @@ test('quick edit stays open and explains a failed deletion', async () => {
   const recovered = await renderQuickEdit(hooks, callbacks);
   assert.match(textContent(recovered), /일정 삭제에 실패했어요/);
   assert.equal(findAlerts(recovered).length, 1, 'failed deletion must be announced to the user');
+});
+
+test('quick edit rehydrates a teammate update after preserving its failed-save rollback', async () => {
+  const hooks = createHookStore();
+  const originalEvent = event();
+  const persistence = deferredThenable();
+  const updateCalls: Array<Partial<TestCalendarEvent>> = [];
+  const callbacks = {
+    onClose: () => {},
+    onUpdate: (_id: string, updates: Partial<TestCalendarEvent>) => {
+      updateCalls.push(updates);
+      return persistence.promise;
+    },
+    onDelete: () => {},
+  };
+
+  await renderQuickEdit(hooks, callbacks, originalEvent, true);
+  hooks.state[1] = 'edit';
+  hooks.state[2] = '내 저장 시도';
+
+  await invoke(findButtonByText(await renderQuickEdit(hooks, callbacks, originalEvent, true), '저장'));
+  persistence.reject(new Error('save failed'));
+
+  const rollback = await renderQuickEdit(hooks, callbacks, event(), true);
+  assert.match(textContent(rollback), /일정 저장에 실패했어요/);
+  assert.equal(
+    findTitleInput(rollback).props.value,
+    '내 저장 시도',
+    'the matching local rollback must retain the retry draft',
+  );
+
+  const teammateRefresh = await renderQuickEdit(
+    hooks,
+    callbacks,
+    event({
+      title: '팀원이 바꾼 최신 일정',
+      startDate: '2026-08-28',
+      endDate: '2026-08-29',
+      type: 'scene',
+      memo: '팀원이 남긴 최신 메모',
+    }),
+    true,
+  );
+  assert.equal(
+    findAlerts(teammateRefresh).length,
+    0,
+    'a later teammate update must clear the stale local failure explanation',
+  );
+  assert.equal(
+    findTitleInput(teammateRefresh).props.value,
+    '팀원이 바꾼 최신 일정',
+    'a later teammate update must replace the failed local draft before another save',
+  );
+  await invoke(findButtonByText(teammateRefresh, '저장'));
+  assert.equal(
+    updateCalls.length,
+    1,
+    'the rehydrated title, dates, type, and memo must not be saved back over the teammate update',
+  );
 });
 
 test('side panel keeps edit mode and explains a failed save', async () => {
