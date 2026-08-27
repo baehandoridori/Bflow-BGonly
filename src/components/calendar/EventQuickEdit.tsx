@@ -14,7 +14,7 @@ interface EventQuickEditProps {
   position: { x: number; y: number };
   onClose: () => void;
   onUpdate: (id: string, updates: Partial<CalendarEvent>) => void | Promise<void>;
-  onDelete: (id: string) => void;
+  onDelete: (id: string) => void | Promise<void>;
   onDuplicate: (event: CalendarEvent) => void;
 }
 
@@ -24,6 +24,10 @@ interface PendingSelection<T> {
   eventId: string;
   value: T;
   requestId: number;
+}
+
+function isPromiseLike(value: unknown): value is PromiseLike<void> {
+  return typeof (value as { then?: unknown } | null)?.then === 'function';
 }
 
 const TYPE_OPTIONS: { value: CalendarEventType; label: string }[] = [
@@ -59,6 +63,7 @@ export function EventQuickEdit({
   const [memo, setMemo] = useState(event.memo);
   const [pendingCalendar, setPendingCalendar] = useState<PendingSelection<string | undefined> | null>(null);
   const [pendingTag, setPendingTag] = useState<PendingSelection<string | undefined> | null>(null);
+  const [mutationError, setMutationError] = useState<string | null>(null);
   const calendarUpdateRequestRef = useRef(0);
   const tagUpdateRequestRef = useRef(0);
 
@@ -111,6 +116,10 @@ export function EventQuickEdit({
     };
   }, [onClose]);
 
+  useEffect(() => {
+    setMutationError(null);
+  }, [event.id]);
+
   const handleSave = useCallback(() => {
     if (!canWrite) return;
     const updates: Partial<CalendarEvent> = {};
@@ -121,14 +130,42 @@ export function EventQuickEdit({
     }
     if (memo !== event.memo) updates.memo = memo;
     if (!isCanonicalBflow && type !== event.type) updates.type = type;
-    if (Object.keys(updates).length > 0) onUpdate(event.id, updates);
-    onClose();
+    if (Object.keys(updates).length === 0) {
+      onClose();
+      return;
+    }
+    setMutationError(null);
+    try {
+      const persistence = onUpdate(event.id, updates);
+      if (isPromiseLike(persistence)) {
+        void persistence.then(
+          () => onClose(),
+          () => setMutationError('일정 저장에 실패했어요. 다시 시도해 주세요.'),
+        );
+        return;
+      }
+      onClose();
+    } catch {
+      setMutationError('일정 저장에 실패했어요. 다시 시도해 주세요.');
+    }
   }, [canWrite, endDate, event, isCanonicalBflow, memo, onClose, onUpdate, startDate, title, type]);
 
   const handleDelete = useCallback(() => {
     if (!canWrite) return;
-    onDelete(event.id);
-    onClose();
+    setMutationError(null);
+    try {
+      const persistence = onDelete(event.id);
+      if (isPromiseLike(persistence)) {
+        void persistence.then(
+          () => onClose(),
+          () => setMutationError('일정 삭제에 실패했어요. 다시 시도해 주세요.'),
+        );
+        return;
+      }
+      onClose();
+    } catch {
+      setMutationError('일정 삭제에 실패했어요. 다시 시도해 주세요.');
+    }
   }, [canWrite, event.id, onClose, onDelete]);
 
   const handleDuplicate = useCallback(() => {
@@ -192,6 +229,11 @@ export function EventQuickEdit({
         )}
         {derivedFieldsDescriptionId && (
           <p id={derivedFieldsDescriptionId} className="sr-only">유형은 연결 정보에서 자동으로 결정됩니다.</p>
+        )}
+        {mutationError && (
+          <p role="alert" className="mx-3 mt-3 rounded-md bg-red-500/10 px-2.5 py-2 text-xs text-red-300">
+            {mutationError}
+          </p>
         )}
 
         <div className="flex border-b" style={{ borderColor: 'rgb(var(--color-bg-border) / 0.45)' }}>

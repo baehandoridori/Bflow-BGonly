@@ -71,13 +71,17 @@ const TYPE_LABELS: Record<CalendarEventType, string> = {
   vacation: '휴가',
 };
 
+function isPromiseLike(value: unknown): value is PromiseLike<void> {
+  return typeof (value as { then?: unknown } | null)?.then === 'function';
+}
+
 // ─── 인터페이스 ────────────────────────────────────
 
 interface EventSidePanelProps {
   event: CalendarEvent;
   onClose: () => void;
-  onDelete: (id: string) => void;
-  onUpdate: (id: string, updates: Partial<CalendarEvent>) => void;
+  onDelete: (id: string) => void | Promise<void>;
+  onUpdate: (id: string, updates: Partial<CalendarEvent>) => void | Promise<void>;
   onNavigate: (ev: CalendarEvent) => void;
 }
 
@@ -118,6 +122,7 @@ export function EventSidePanel({
   const [draftAllDay, setDraftAllDay] = useState(event.allDay ?? true);
   const [draftStartTime, setDraftStartTime] = useState(event.startTime ?? '');
   const [draftEndTime, setDraftEndTime] = useState(event.endTime ?? '');
+  const [mutationError, setMutationError] = useState<string | null>(null);
   const users = useAuthStore((s) => s.users);
   const userNames = useMemo(() => users.map((u) => u.name), [users]);
   const currentUser = useAuthStore((state) => state.currentUser);
@@ -146,6 +151,7 @@ export function EventSidePanel({
     setDraftAllDay(event.allDay ?? true);
     setDraftStartTime(event.startTime ?? '');
     setDraftEndTime(event.endTime ?? '');
+    setMutationError(null);
     setEditing(false);
   }, [event]);
 
@@ -254,8 +260,24 @@ export function EventSidePanel({
       if (draftCalendarId !== event.calendarId) updates.calendarId = draftCalendarId;
       if (persistedTagId !== event.tagId) updates.tagId = persistedTagId;
     }
-    if (Object.keys(updates).length > 0) onUpdate(event.id, updates);
-    setEditing(false);
+    if (Object.keys(updates).length === 0) {
+      setEditing(false);
+      return;
+    }
+    setMutationError(null);
+    try {
+      const persistence = onUpdate(event.id, updates);
+      if (isPromiseLike(persistence)) {
+        void persistence.then(
+          () => setEditing(false),
+          () => setMutationError('일정 저장에 실패했어요. 다시 시도해 주세요.'),
+        );
+        return;
+      }
+      setEditing(false);
+    } catch {
+      setMutationError('일정 저장에 실패했어요. 다시 시도해 주세요.');
+    }
   };
 
   // 편집 취소
@@ -269,7 +291,26 @@ export function EventSidePanel({
     setDraftAllDay(event.allDay ?? true);
     setDraftStartTime(event.startTime ?? '');
     setDraftEndTime(event.endTime ?? '');
+    setMutationError(null);
     setEditing(false);
+  };
+
+  const handleDelete = () => {
+    if (isVacation || isViewOnly) return;
+    setMutationError(null);
+    try {
+      const persistence = onDelete(event.id);
+      if (isPromiseLike(persistence)) {
+        void persistence.then(
+          () => onClose(),
+          () => setMutationError('일정 삭제에 실패했어요. 다시 시도해 주세요.'),
+        );
+        return;
+      }
+      onClose();
+    } catch {
+      setMutationError('일정 삭제에 실패했어요. 다시 시도해 주세요.');
+    }
   };
 
   const linkedNavigationButtons = (
@@ -606,6 +647,12 @@ export function EventSidePanel({
         {/* 스페이서 */}
         <div className="flex-1" />
 
+        {mutationError && (
+          <p role="alert" className="rounded-md bg-red-500/10 px-2.5 py-2 text-center text-[11px] text-red-300">
+            {mutationError}
+          </p>
+        )}
+
         {/* ── 액션 영역 ── */}
         {isVacation ? (
           /* 휴가 이벤트: 편집 불가 안내 */
@@ -661,7 +708,10 @@ export function EventSidePanel({
           <div className="flex flex-col gap-2 pt-1">
             <div className="flex gap-2">
               <button
-                onClick={() => setEditing(true)}
+                onClick={() => {
+                  setMutationError(null);
+                  setEditing(true);
+                }}
                 className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg text-xs font-medium bg-bg-primary/70 text-text-primary hover:bg-bg-border/45 transition-colors cursor-pointer"
               >
                 <Pencil size={12} />
@@ -670,10 +720,7 @@ export function EventSidePanel({
               {linkedNavigationButtons}
             </div>
             <button
-              onClick={() => {
-                onDelete(event.id);
-                onClose();
-              }}
+              onClick={handleDelete}
               className="w-full flex items-center justify-center gap-1.5 py-2 rounded-lg text-xs font-medium bg-red-500/10 text-red-400 hover:bg-red-500/20 transition-colors cursor-pointer"
             >
               <Trash2 size={12} />
