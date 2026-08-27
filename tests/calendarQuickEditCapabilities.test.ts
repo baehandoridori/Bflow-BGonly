@@ -99,6 +99,8 @@ let forcedSidePanelDraft: Partial<Pick<
   'title' | 'startDate' | 'endDate' | 'memo' | 'calendarId' | 'tagId' | 'allDay' | 'startTime' | 'endTime'
 >> = {};
 let sidePanelStateCursor = 0;
+let sidePanelRefCursor = 0;
+let sidePanelRefSlots: Array<{ current: unknown }> = [];
 let calendarTagOptionsOverride: Array<{
   id: string; name: string; color: string; sortOrder: number;
 }> | null = null;
@@ -358,6 +360,11 @@ async function loadSidePanel(): Promise<SidePanelComponent> {
           },
           useEffect: () => {},
           useMemo: (factory: () => unknown) => factory(),
+          useRef(initial: unknown) {
+            const slot = sidePanelRefCursor++;
+            sidePanelRefSlots[slot] ??= { current: initial };
+            return sidePanelRefSlots[slot];
+          },
         };
       }
       if (id === 'react/jsx-runtime') return nodeRequire('react/jsx-runtime');
@@ -559,6 +566,8 @@ async function renderSidePanel(
   forcedSidePanelEditing = editing;
   forcedSidePanelDraft = draft;
   sidePanelStateCursor = 0;
+  sidePanelRefCursor = 0;
+  sidePanelRefSlots = [];
   return EventSidePanel({
     event: target,
     onClose: callbacks.onClose ?? (() => {}),
