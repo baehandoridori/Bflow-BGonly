@@ -382,6 +382,7 @@ let schedulePendingTodoPanelNavigation: ScheduleDateNavigationRequest | null = n
 let scheduleTodoPanelNavigationConsumeIds: number[] = [];
 let scheduleLoadAllCalls = 0;
 let scheduleLoadBflowEventsCalls = 0;
+let scheduleLoadBflowEventsHandler: (() => void | Promise<void>) | undefined;
 let settingsCurrentUser: TestUser;
 let settingsUsers: TestUser[] = [];
 let settingsApiCalls: Array<{ name: string; args: unknown[] }> = [];
@@ -704,6 +705,7 @@ function resetHarness(): void {
   scheduleTodoPanelNavigationConsumeIds = [];
   scheduleLoadAllCalls = 0;
   scheduleLoadBflowEventsCalls = 0;
+  scheduleLoadBflowEventsHandler = undefined;
   settingsCurrentUser = {
     id: myUserId,
     name: '배한솔',
@@ -1196,7 +1198,7 @@ async function loadScheduleView(): Promise<ScheduleViewComponent> {
           path: 'schedule-todo-sync-double',
           namespace: 'schedule-test',
         }));
-        buildContext.onLoad({ filter: /.*/, namespace: 'schedule-test' }, () => ({
+        buildContext.onLoad({ filter: /^schedule-todo-sync-double$/, namespace: 'schedule-test' }, () => ({
           contents: `
             export async function applyCalendarToTodoPatch(todoId, patch) {
               globalThis.__scheduleTodoSyncCalls.push({ todoId, patch });
@@ -1316,6 +1318,7 @@ async function loadScheduleView(): Promise<ScheduleViewComponent> {
         isGoogleCacheReady: () => true,
         loadBflowEvents: async () => {
           scheduleLoadBflowEventsCalls += 1;
+          await scheduleLoadBflowEventsHandler?.();
           return true;
         },
         addEvent: async (
@@ -3556,6 +3559,56 @@ test('ScheduleView mount delegates B flow metadata and events through one canoni
   assert.equal(scheduleLoadAllCalls, 0, 'ScheduleView must not start a competing direct metadata generation');
 });
 
+test('ScheduleView waits for its initial B flow and Google sync before treating changes as teammate updates', async () => {
+  resetHarness();
+  const bflow = calendarListEvent({
+    id: 'initial-bflow-event',
+    title: '초기 B flow 일정',
+    source: 'bflow',
+    sourceCalendarId: 'bflow:mine',
+    calendarId: 'mine',
+  });
+  const google = calendarListEvent({
+    id: 'initial-google-event',
+    title: '초기 Google 일정',
+    source: 'google',
+    sourceCalendarId: 'primary',
+    calendarId: undefined,
+  });
+  let finishInitialSync!: () => void;
+  const initialSyncFinished = new Promise<void>((resolve) => { finishInitialSync = resolve; });
+  scheduleLoadBflowEventsHandler = async () => {
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    scheduleCanonicalEvents = [bflow];
+    await dispatchScheduleWindowEvent('bflow:calendar-changed');
+    scheduleCanonicalEvents = [bflow, google];
+    finishInitialSync();
+  };
+
+  await renderScheduleView();
+  await flushScheduleMountEffects();
+  await Promise.race([
+    initialSyncFinished,
+    new Promise<never>((_, reject) => setTimeout(() => reject(new Error('initial calendar sync did not finish')), 500)),
+  ]);
+  await new Promise<void>((resolve) => setImmediate(resolve));
+  await renderScheduleView();
+  assert.deepEqual(
+    [...(scheduleGridProps.at(-1)?.highlightedEventIdentities ?? [])],
+    [],
+    'cache preparation rows establish one baseline instead of looking like teammate edits',
+  );
+
+  scheduleCanonicalEvents = [{ ...bflow, title: '동료의 실제 수정' }, google];
+  await dispatchScheduleWindowEvent('bflow:calendar-changed');
+  await renderScheduleView();
+  assert.deepEqual(
+    [...(scheduleGridProps.at(-1)?.highlightedEventIdentities ?? [])],
+    ['bflow\u0000initial-bflow-event'],
+    'the first update after preparation still highlights the actual teammate change',
+  );
+});
+
 test('ScheduleView calendar-changed listener replaces or closes long-lived event state from the canonical cache', async () => {
   resetHarness();
   const stale: ScheduleCalendarEvent = {
@@ -3650,25 +3703,25 @@ test('ScheduleView highlights only later external additions and changes, then cl
       sourceCalendarId: 'primary',
       calendarId: undefined,
     });
-    scheduleCanonicalEvents = [{ ...baseline, title: '2차 외부 수정' }, added];
+    scheduleCanonicalEvents = [{ ...baseline, title: '1차 외부 수정' }, added];
     await dispatchScheduleWindowEvent('bflow:calendar-changed');
     await renderScheduleView();
     assert.deepEqual(
       [...(scheduleGridProps.at(-1)?.highlightedEventIdentities ?? [])].sort(),
       ['bflow\u0000external-change', 'google\u0000primary\u0000external-added'].sort(),
-      'a repeated refresh replaces the active targets with only its own added and changed identities',
+      'a later unrelated refresh keeps the earlier event highlighted for its own full duration',
     );
 
     clock.advance(1_000);
     await renderScheduleView();
-    assert.equal(
-      scheduleGridProps.at(-1)?.highlightedEventIdentities?.size,
-      2,
-      'the superseded first timeout cannot clear the newer highlight set',
+    assert.deepEqual(
+      [...(scheduleGridProps.at(-1)?.highlightedEventIdentities ?? [])],
+      ['google\u0000primary\u0000external-added'],
+      'the first event expires on its own schedule without clearing the later highlight',
     );
     clock.advance(1_001);
     await renderScheduleView();
-    assert.equal(scheduleGridProps.at(-1)?.highlightedEventIdentities?.size, 0, 'the newest set clears after two seconds');
+    assert.equal(scheduleGridProps.at(-1)?.highlightedEventIdentities?.size, 0, 'the later event also clears after its own two seconds');
   } finally {
     clock.restore();
   }
@@ -4124,6 +4177,67 @@ test('ScheduleView keeps a local delete rollback from pulsing as a teammate add'
   } finally {
     clock.restore();
   }
+});
+
+test('ScheduleView keeps overlapping local update and failed-delete guards separate for one event', async () => {
+  resetHarness();
+  scheduleLocalStorage.set('bflow_calendar_view_v1', JSON.stringify({ viewMode: 'week', weekSubMode: 'timegrid' }));
+  const before = calendarListEvent({
+    id: 'overlapping-local-guards',
+    title: '같은 일정의 겹친 저장',
+    source: 'bflow',
+    sourceCalendarId: 'bflow:mine',
+    calendarId: 'mine',
+    allDay: false,
+    startTime: '09:00',
+    endTime: '10:00',
+  });
+  const moved = { ...before, startTime: '10:00', endTime: '11:00' };
+  const deleteError = new Error('겹친 삭제 저장 실패');
+  let releaseUpdate!: () => void;
+  const updateFinished = new Promise<void>((resolve) => { releaseUpdate = resolve; });
+  let signalDeleteStarted!: () => void;
+  const deleteStarted = new Promise<void>((resolve) => { signalDeleteStarted = resolve; });
+  let releaseDeleteRollback!: () => void;
+  const deleteRollback = new Promise<void>((resolve) => { releaseDeleteRollback = resolve; });
+  scheduleCanonicalEvents = [before];
+  await renderScheduleView();
+  await flushScheduleMountEffects();
+  await renderScheduleView();
+  scheduleTimeGridProps.at(-1)?.onEventClick(before);
+  await renderScheduleView();
+
+  scheduleUpdateHandler = async () => updateFinished;
+  scheduleDeleteHandler = async () => {
+    signalDeleteStarted();
+    await deleteRollback;
+    scheduleCanonicalEvents = [];
+    await dispatchScheduleWindowEvent('bflow:calendar-changed');
+    scheduleCanonicalEvents = [before];
+    await dispatchScheduleWindowEvent('bflow:calendar-changed');
+    throw deleteError;
+  };
+  const updateResult = scheduleTimeGridProps.at(-1)?.onTimeGridEventChange?.(
+    before.id,
+    { id: before.id, source: before.source, sourceCalendarId: before.sourceCalendarId },
+    { startDate: moved.startDate, endDate: moved.endDate, startTime: '10:00', endTime: '11:00' },
+  );
+  await new Promise<void>((resolve) => setImmediate(resolve));
+  const panel = schedulePanelProps.at(-1);
+  assert.ok(panel, 'the initial panel keeps its delete action while the update is pending');
+  const deleteResult = panel.onDelete(before.id);
+  await deleteStarted;
+
+  releaseUpdate();
+  await updateResult;
+  releaseDeleteRollback();
+  await assert.rejects(deleteResult, (error) => error === deleteError);
+  await renderScheduleView();
+  assert.deepEqual(
+    [...(scheduleTimeGridProps.at(-1)?.highlightedEventIdentities ?? [])],
+    [],
+    'one operation settling cannot remove the other operation\'s rollback guard',
+  );
 });
 
 test('ScheduleView only preserves external vacation selections outside the canonical event cache', async (t) => {

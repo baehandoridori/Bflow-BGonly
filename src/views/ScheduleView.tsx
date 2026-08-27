@@ -55,6 +55,7 @@ const LOCAL_CHANGE_GUARD_MS = 3_000;
 const REALTIME_HIGHLIGHT_MS = 2_000;
 
 type LocalChangeGuard = {
+  identityKey: string;
   expiresAt: number;
   kind: 'add' | 'update' | 'delete';
   expectedSnapshot: string;
@@ -62,6 +63,10 @@ type LocalChangeGuard = {
   persistence: 'pending' | 'succeeded' | 'failed';
   sawExpected: boolean;
   sawRollback: boolean;
+};
+
+type LocalChangeGuardHandle = {
+  key: string;
 };
 
 function isOptimisticMetadataCalendarRefresh(event: Event): boolean {
@@ -213,8 +218,10 @@ export function ScheduleView() {
   const [highlightedEventIdentities, setHighlightedEventIdentities] = useState<ReadonlySet<string>>(() => new Set());
   const canonicalEventSnapshotRef = useRef<CalendarEventSnapshot | null>(null);
   const localChangeGuardsRef = useRef(new Map<string, LocalChangeGuard>());
+  const localChangeGuardSequenceRef = useRef(0);
   const realtimeHighlightTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const realtimeHighlightRevisionRef = useRef(0);
+  const realtimeHighlightExpiryRef = useRef(new Map<string, number>());
+  const isInitialCalendarSyncRef = useRef(true);
 
   // ─── 새 컴포넌트 상태 ───
   const [panelEvent, setPanelEvent] = useState<CalendarEvent | null>(null);
@@ -291,17 +298,19 @@ export function ScheduleView() {
   ) => {
     const identityKey = calendarEventIdentityKey(identity);
     const expectedSnapshot = buildEventSnapshot([expectedEvent]).get(identityKey);
-    if (expectedSnapshot === undefined) return;
+    if (expectedSnapshot === undefined) return undefined;
     const rollbackSnapshot = rollbackEvent
       ? buildEventSnapshot([rollbackEvent]).get(identityKey)
       : undefined;
     const now = Date.now();
-    for (const [guardIdentityKey, guard] of localChangeGuardsRef.current) {
+    for (const [guardKey, guard] of localChangeGuardsRef.current) {
       if (guard.expiresAt <= now && guard.persistence !== 'pending') {
-        localChangeGuardsRef.current.delete(guardIdentityKey);
+        localChangeGuardsRef.current.delete(guardKey);
       }
     }
-    localChangeGuardsRef.current.set(identityKey, {
+    const key = `${identityKey}\u0000${++localChangeGuardSequenceRef.current}`;
+    localChangeGuardsRef.current.set(key, {
+      identityKey,
       expiresAt: now + LOCAL_CHANGE_GUARD_MS,
       kind,
       expectedSnapshot,
@@ -310,21 +319,22 @@ export function ScheduleView() {
       sawExpected: false,
       sawRollback: false,
     });
+    return { key } satisfies LocalChangeGuardHandle;
   }, []);
 
   const settleLocalMutationGuard = useCallback((
-    identity: CalendarEventIdentity,
+    handle: LocalChangeGuardHandle | undefined,
     persistence: Extract<LocalChangeGuard['persistence'], 'succeeded' | 'failed'>,
   ) => {
-    const identityKey = calendarEventIdentityKey(identity);
-    const guard = localChangeGuardsRef.current.get(identityKey);
+    if (!handle) return;
+    const guard = localChangeGuardsRef.current.get(handle.key);
     if (!guard || (guard.kind !== 'update' && guard.kind !== 'delete')) return;
     guard.persistence = persistence;
     const isSettled = guard.kind === 'delete'
       ? persistence === 'succeeded' || (persistence === 'failed' && guard.sawExpected)
       : (persistence === 'succeeded' && guard.sawExpected) || (persistence === 'failed' && guard.sawRollback);
     if (isSettled) {
-      localChangeGuardsRef.current.delete(identityKey);
+      localChangeGuardsRef.current.delete(handle.key);
     }
   }, []);
 
@@ -338,6 +348,29 @@ export function ScheduleView() {
     guardLocalIdentity(identity, expectedCreatedEvent(event, identity), 'add');
   }, [guardLocalIdentity]);
 
+  const refreshRealtimeHighlights = useCallback((targets: readonly string[]) => {
+    const now = Date.now();
+    for (const identityKey of targets) {
+      realtimeHighlightExpiryRef.current.set(identityKey, now + REALTIME_HIGHLIGHT_MS);
+    }
+    const flushExpiredHighlights = () => {
+      const currentNow = Date.now();
+      for (const [identityKey, expiresAt] of realtimeHighlightExpiryRef.current) {
+        if (expiresAt <= currentNow) realtimeHighlightExpiryRef.current.delete(identityKey);
+      }
+      setHighlightedEventIdentities(new Set(realtimeHighlightExpiryRef.current.keys()));
+      if (realtimeHighlightTimerRef.current) clearTimeout(realtimeHighlightTimerRef.current);
+      const nextExpiry = [...realtimeHighlightExpiryRef.current.values()]
+        .reduce<number | undefined>((earliest, expiresAt) => (
+          earliest === undefined || expiresAt < earliest ? expiresAt : earliest
+        ), undefined);
+      realtimeHighlightTimerRef.current = nextExpiry === undefined
+        ? null
+        : setTimeout(flushExpiredHighlights, Math.max(0, nextExpiry - Date.now()));
+    };
+    flushExpiredHighlights();
+  }, []);
+
   const applyCanonicalEvents = useCallback((
     canonicalEvents: CalendarEvent[],
     { suppressRealtimeHighlight = false }: { suppressRealtimeHighlight?: boolean } = {},
@@ -348,9 +381,9 @@ export function ScheduleView() {
 
     if (previousSnapshot && !suppressRealtimeHighlight) {
       const now = Date.now();
-      for (const [identityKey, guard] of localChangeGuardsRef.current) {
+      for (const [guardKey, guard] of localChangeGuardsRef.current) {
         if (guard.expiresAt <= now && guard.persistence !== 'pending') {
-          localChangeGuardsRef.current.delete(identityKey);
+          localChangeGuardsRef.current.delete(guardKey);
         }
       }
       const diff = diffEventSnapshots(previousSnapshot, nextSnapshot);
@@ -358,42 +391,37 @@ export function ScheduleView() {
       const addedIdentities = new Set(diff.added);
       const localEchoIdentities = new Set(
         changedIdentities.filter((identityKey) => {
-          const guard = localChangeGuardsRef.current.get(identityKey);
-          if (!guard) return false;
           const nextEventSnapshot = nextSnapshot.get(identityKey);
-          const isMatchingLocalEcho = guard.kind === 'add'
-            ? addedIdentities.has(identityKey)
-            : guard.kind === 'delete'
-              ? addedIdentities.has(identityKey) && guard.expectedSnapshot === nextEventSnapshot
-              : guard.expectedSnapshot === nextEventSnapshot || guard.rollbackSnapshot === nextEventSnapshot;
-          if (!isMatchingLocalEcho) return false;
+          const matchingGuard = [...localChangeGuardsRef.current.entries()].find(([, guard]) => {
+            if (guard.identityKey !== identityKey) return false;
+            return guard.kind === 'add'
+              ? addedIdentities.has(identityKey)
+              : guard.kind === 'delete'
+                ? addedIdentities.has(identityKey) && guard.expectedSnapshot === nextEventSnapshot
+                : guard.expectedSnapshot === nextEventSnapshot || guard.rollbackSnapshot === nextEventSnapshot;
+          });
+          if (!matchingGuard) return false;
+          const [guardKey, guard] = matchingGuard;
           if (guard.kind === 'add') {
-            localChangeGuardsRef.current.delete(identityKey);
+            localChangeGuardsRef.current.delete(guardKey);
             return true;
           }
           if (guard.kind === 'delete') {
             guard.sawExpected = true;
-            if (guard.persistence === 'failed') localChangeGuardsRef.current.delete(identityKey);
+            if (guard.persistence === 'failed') localChangeGuardsRef.current.delete(guardKey);
             return true;
           }
           if (guard.expectedSnapshot === nextEventSnapshot) guard.sawExpected = true;
           if (guard.rollbackSnapshot === nextEventSnapshot) guard.sawRollback = true;
           if ((guard.persistence === 'succeeded' && guard.sawExpected) || (guard.persistence === 'failed' && guard.sawRollback)) {
-            localChangeGuardsRef.current.delete(identityKey);
+            localChangeGuardsRef.current.delete(guardKey);
           }
           return true;
         }),
       );
       const targets = changedIdentities.filter((identityKey) => !localEchoIdentities.has(identityKey));
       if (targets.length > 0) {
-        const revision = ++realtimeHighlightRevisionRef.current;
-        setHighlightedEventIdentities(new Set(targets));
-        if (realtimeHighlightTimerRef.current) clearTimeout(realtimeHighlightTimerRef.current);
-        realtimeHighlightTimerRef.current = setTimeout(() => {
-          if (realtimeHighlightRevisionRef.current !== revision) return;
-          setHighlightedEventIdentities(new Set());
-          realtimeHighlightTimerRef.current = null;
-        }, REALTIME_HIGHLIGHT_MS);
+        refreshRealtimeHighlights(targets);
       }
     }
 
@@ -410,11 +438,11 @@ export function ScheduleView() {
       ));
       return canonical ? { ...previous, event: canonical } : null;
     });
-  }, []);
+  }, [refreshRealtimeHighlights]);
 
   useEffect(() => () => {
-    realtimeHighlightRevisionRef.current += 1;
     if (realtimeHighlightTimerRef.current) clearTimeout(realtimeHighlightTimerRef.current);
+    realtimeHighlightExpiryRef.current.clear();
   }, []);
 
   useEffect(() => {
@@ -444,26 +472,33 @@ export function ScheduleView() {
   // 이벤트 로드 + 외부 변경 구독 (할일 위젯 등에서 수정 시 즉시 반영)
   useEffect(() => {
     let cancelled = false;
+    isInitialCalendarSyncRef.current = true;
     const refresh = async (options?: { suppressRealtimeHighlight?: boolean }) => {
       const canonicalEvents = await getEvents();
       if (!cancelled) applyCanonicalEvents(canonicalEvents, options);
     };
     // B flow와 Google 캐시는 별도로 준비된다. B flow 행이 있어도 Google full sync는 필요할 수 있다.
     (async () => {
-      await loadBflowEvents();
-      if (!isGoogleCacheReady()) {
-        try {
-          const { isAuthenticated } = await import('@/services/googleCalendarService');
-          if (await isAuthenticated()) {
-            const { syncAll } = await import('@/services/calendarService');
-            await syncAll({ skipBflowLoad: true });
-          }
-        } catch { /* GCal 미연결 시 무시 */ }
+      try {
+        await loadBflowEvents();
+        if (!isGoogleCacheReady()) {
+          try {
+            const { isAuthenticated } = await import('@/services/googleCalendarService');
+            if (await isAuthenticated()) {
+              const { syncAll } = await import('@/services/calendarService');
+              await syncAll({ skipBflowLoad: true });
+            }
+          } catch { /* GCal 미연결 시 무시 */ }
+        }
+        await refresh({ suppressRealtimeHighlight: true });
+      } finally {
+        if (!cancelled) isInitialCalendarSyncRef.current = false;
       }
-      await refresh();
     })();
     const handleCalendarChanged = (event: Event) => {
-      void refresh({ suppressRealtimeHighlight: isOptimisticMetadataCalendarRefresh(event) });
+      void refresh({
+        suppressRealtimeHighlight: isInitialCalendarSyncRef.current || isOptimisticMetadataCalendarRefresh(event),
+      });
     };
     window.addEventListener('bflow:calendar-changed', handleCalendarChanged);
     return () => { cancelled = true; window.removeEventListener('bflow:calendar-changed', handleCalendarChanged); };
@@ -700,12 +735,12 @@ export function ScheduleView() {
 
   const handleDeleteEvent = useCallback(async (deletingEvent: CalendarEvent) => {
     const mutationIdentity = snapshotCalendarEventIdentity(deletingEvent);
-    guardLocalIdentity(mutationIdentity, deletingEvent, 'delete');
+    const localGuard = guardLocalIdentity(mutationIdentity, deletingEvent, 'delete');
     try {
       await deleteEvent(deletingEvent.id, mutationIdentity);
-      settleLocalMutationGuard(mutationIdentity, 'succeeded');
+      settleLocalMutationGuard(localGuard, 'succeeded');
     } catch (error) {
-      settleLocalMutationGuard(mutationIdentity, 'failed');
+      settleLocalMutationGuard(localGuard, 'failed');
       throw error;
     }
     setEvents((prev) => prev.filter((event) => (
@@ -761,22 +796,22 @@ export function ScheduleView() {
     const eventBeforeUpdate = mutationIdentity
       ? events.find((event) => hasSameCalendarEventIdentity(event, mutationIdentity))
       : undefined;
-    if (mutationIdentity && eventBeforeUpdate) {
-      guardLocalIdentity(mutationIdentity, {
+    const localGuard = mutationIdentity && eventBeforeUpdate
+      ? guardLocalIdentity(mutationIdentity, {
         ...eventBeforeUpdate,
         startDate: newStart,
         endDate: newEnd,
-      }, 'update', eventBeforeUpdate);
-    }
+      }, 'update', eventBeforeUpdate)
+      : undefined;
     try {
       await updateEvent(
         eventId,
         { startDate: newStart, endDate: newEnd },
         mutationIdentity ?? undefined,
       );
-      if (mutationIdentity && eventBeforeUpdate) settleLocalMutationGuard(mutationIdentity, 'succeeded');
+      if (mutationIdentity && eventBeforeUpdate) settleLocalMutationGuard(localGuard, 'succeeded');
     } catch (error) {
-      if (mutationIdentity && eventBeforeUpdate) settleLocalMutationGuard(mutationIdentity, 'failed');
+      if (mutationIdentity && eventBeforeUpdate) settleLocalMutationGuard(localGuard, 'failed');
       throw error;
     }
     await reconcileEventMutation(mutationIdentity ?? undefined);
@@ -788,12 +823,14 @@ export function ScheduleView() {
     patch: Pick<CalendarEvent, 'startDate' | 'endDate' | 'startTime' | 'endTime'>,
   ) => {
     const eventBeforeUpdate = events.find((event) => hasSameCalendarEventIdentity(event, mutationIdentity));
-    if (eventBeforeUpdate) guardLocalIdentity(mutationIdentity, { ...eventBeforeUpdate, ...patch }, 'update', eventBeforeUpdate);
+    const localGuard = eventBeforeUpdate
+      ? guardLocalIdentity(mutationIdentity, { ...eventBeforeUpdate, ...patch }, 'update', eventBeforeUpdate)
+      : undefined;
     try {
       await updateEvent(eventId, patch, mutationIdentity);
-      if (eventBeforeUpdate) settleLocalMutationGuard(mutationIdentity, 'succeeded');
+      if (eventBeforeUpdate) settleLocalMutationGuard(localGuard, 'succeeded');
     } catch (error) {
-      if (eventBeforeUpdate) settleLocalMutationGuard(mutationIdentity, 'failed');
+      if (eventBeforeUpdate) settleLocalMutationGuard(localGuard, 'failed');
       throw error;
     }
     await reconcileEventMutation(mutationIdentity);
@@ -1072,16 +1109,16 @@ export function ScheduleView() {
     if (sanitized.startDate && sanitized.endDate && sanitized.endDate < sanitized.startDate) {
       [sanitized.startDate, sanitized.endDate] = [sanitized.endDate, sanitized.startDate];
     }
-    guardLocalIdentity(mutationIdentity, { ...eventBeforeUpdate, ...sanitized }, 'update', eventBeforeUpdate);
+    const localGuard = guardLocalIdentity(mutationIdentity, { ...eventBeforeUpdate, ...sanitized }, 'update', eventBeforeUpdate);
     let persistenceFailed = false;
     let persistenceError: unknown;
     try {
       await updateEvent(id, sanitized, mutationIdentity);
-      settleLocalMutationGuard(mutationIdentity, 'succeeded');
+      settleLocalMutationGuard(localGuard, 'succeeded');
     } catch (error) {
       persistenceFailed = true;
       persistenceError = error;
-      settleLocalMutationGuard(mutationIdentity, 'failed');
+      settleLocalMutationGuard(localGuard, 'failed');
     }
 
     try {
