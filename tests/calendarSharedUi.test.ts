@@ -171,6 +171,7 @@ type WeekScrollViewProps = {
   events: ScheduleCalendarEvent[];
   today: string;
   onEventClick(event: ScheduleCalendarEvent): void;
+  onEventContextMenu?(event: ScheduleCalendarEvent, mouse: { preventDefault(): void; stopPropagation(): void; clientX: number; clientY: number }): void;
   onDateClick?(date: string): void;
   activeWeekIndex: number;
   onWeekChange(index: number): void;
@@ -188,6 +189,7 @@ type WeekTimeGridViewProps = {
   events: ScheduleCalendarEvent[];
   today: string;
   onEventClick(event: ScheduleCalendarEvent): void;
+  onEventContextMenu?(event: ScheduleCalendarEvent, mouse: { preventDefault(): void; stopPropagation(): void; clientX: number; clientY: number }): void;
   onSlotClick(date: string, startTime: string, endTime: string): void;
   activeWeekIndex: number;
   weekCount: number;
@@ -205,6 +207,7 @@ type DayScrollViewProps = {
   activeDayIndex: number;
   onActiveDayChange(index: number): void;
   onEventClick?(event: ScheduleCalendarEvent): void;
+  onEventContextMenu?(event: ScheduleCalendarEvent, mouse: { preventDefault(): void; stopPropagation(): void; clientX: number; clientY: number }): void;
   onDateClick?(date: string): void;
   year: number;
   highlightedEventIdentities?: ReadonlySet<string>;
@@ -6259,6 +6262,64 @@ test('ScheduleView shows the mini calendar in every view and navigates instead o
     '오늘 보기는 보고 있는 날짜를 미니 달력에 표시한다',
   );
   assert.equal(scheduleMiniCalendarProps.at(-1)?.activeWeekStart, undefined);
+});
+
+test('ScheduleView opens quick edit from a right click in the weekly, timetable and today views', async () => {
+  const mouse = (clientX: number, clientY: number) => ({
+    preventDefault() {},
+    stopPropagation() {},
+    clientX,
+    clientY,
+  });
+  const todayStr = scheduleFmtDate(new Date());
+
+  const cases = [
+    {
+      label: '주간 카드',
+      stored: { viewMode: 'week', weekSubMode: 'card' },
+      read: () => scheduleWeekScrollProps.at(-1)?.onEventContextMenu,
+      position: { x: 120, y: 240 },
+    },
+    {
+      label: '주간 시간표',
+      stored: { viewMode: 'week', weekSubMode: 'timegrid' },
+      read: () => scheduleTimeGridProps.at(-1)?.onEventContextMenu,
+      position: { x: 310, y: 180 },
+    },
+    {
+      label: '오늘 카드',
+      stored: { viewMode: 'today', weekSubMode: 'card' },
+      read: () => scheduleDayScrollProps.at(-1)?.onEventContextMenu,
+      position: { x: 64, y: 96 },
+    },
+  ] as const;
+
+  for (const { label, stored, read, position } of cases) {
+    resetHarness();
+    scheduleLocalStorage.set('bflow_calendar_view_v1', JSON.stringify(stored));
+    const target = calendarListEvent({
+      id: 'context-menu-target',
+      title: '우클릭할 일정',
+      startDate: todayStr,
+      endDate: todayStr,
+    });
+    scheduleCanonicalEvents = [target];
+
+    await renderScheduleView();
+    await flushScheduleMountEffects();
+    await renderScheduleView();
+
+    const onEventContextMenu = read();
+    assert.ok(onEventContextMenu, `${label} 보기도 우클릭 빠른 편집을 연결한다`);
+
+    onEventContextMenu(target, mouse(position.x, position.y));
+    await renderScheduleView();
+
+    const quickEdit = scheduleQuickEditProps.at(-1);
+    assert.ok(quickEdit, `${label} 우클릭이 빠른 편집을 연다`);
+    assert.equal(quickEdit.event.id, target.id);
+    assert.deepEqual(quickEdit.position, position, `${label} 빠른 편집은 눌린 좌표에서 열린다`);
+  }
 });
 
 test('ScheduleView opens TagManagerPopover with the exact TagBar anchor', async () => {

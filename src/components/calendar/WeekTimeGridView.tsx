@@ -351,6 +351,7 @@ export function WeekTimeGridView({
   weekDays,
   events,
   onEventClick,
+  onEventContextMenu,
   onSlotClick,
   tagNameById,
   calendarNameById,
@@ -545,6 +546,7 @@ export function WeekTimeGridView({
                     event.stopPropagation();
                     onEventClick(bar.event);
                   }}
+                  onContextMenu={onEventContextMenu ? (event) => onEventContextMenu(bar.event, event) : undefined}
                 >
                   {label}
                 </button>
@@ -599,6 +601,7 @@ export function WeekTimeGridView({
           nowMin={nowMin}
           reduce={reduce}
           onEventClick={onEventClick}
+          onEventContextMenu={onEventContextMenu}
           onSlotClick={onSlotClick}
           tagNameById={tagNameById}
           timeGridDnD={timeGridDnD}
@@ -619,6 +622,7 @@ export function WeekTimeGridView({
           nowMin={nowMin}
           reduce={reduce}
           onEventClick={onEventClick}
+          onEventContextMenu={onEventContextMenu}
           onSlotClick={onSlotClick}
           tagNameById={tagNameById}
           timeGridDnD={timeGridDnD}
@@ -640,6 +644,7 @@ export function WeekTimeGridView({
           nowMin={nowMin}
           reduce={reduce}
           onEventClick={onEventClick}
+          onEventContextMenu={onEventContextMenu}
           onSlotClick={onSlotClick}
           tagNameById={tagNameById}
           timeGridDnD={timeGridDnD}
@@ -666,6 +671,7 @@ function TimeBand({
   nowMin,
   reduce,
   onEventClick,
+  onEventContextMenu,
   onSlotClick,
   tagNameById,
   timeGridDnD,
@@ -686,6 +692,7 @@ function TimeBand({
   nowMin: number;
   reduce: boolean;
   onEventClick: (event: CalendarEvent) => void;
+  onEventContextMenu?: (event: CalendarEvent, mouse: React.MouseEvent<HTMLButtonElement>) => void;
   onSlotClick: (date: string, startTime: string, endTime: string) => void;
   tagNameById: Record<string, string>;
   timeGridDnD: ReturnType<typeof useTimeGridDnD>;
@@ -883,6 +890,7 @@ function TimeBand({
                       if (timeGridDnD.shouldSuppressClick()) return;
                       onEventClick(block.event);
                     }}
+                    onContextMenu={onEventContextMenu ? (event) => onEventContextMenu(block.event, event) : undefined}
                     {...eventDragProps}
                   >
                     {canShowText && duration >= 30 && <span data-time-grid-time="true" data-time-grid-live-label={isPreviewed ? 'true' : undefined} className="block truncate" style={{ color: visualStyle.timeColor, fontSize: 9 }}>{timeLabel}</span>}

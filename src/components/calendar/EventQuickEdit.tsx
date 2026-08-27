@@ -74,6 +74,9 @@ export function EventQuickEdit({
   // 저장/삭제가 진행 중이면 같은 일정의 다음 요청을 막는다. 두 요청이 겹치면
   // 먼저 보낸 오래된 초안이 나중에 커밋돼 방금 저장한 내용을 되돌릴 수 있다.
   const [isMutating, setIsMutating] = useState(false);
+  const [allDay, setAllDay] = useState(event.allDay ?? true);
+  const [startTime, setStartTime] = useState(event.startTime ?? '');
+  const [endTime, setEndTime] = useState(event.endTime ?? '');
   const calendarUpdateRequestRef = useRef(0);
   const tagUpdateRequestRef = useRef(0);
   const eventIdentityKey = calendarEventIdentityKey(event);
@@ -86,6 +89,15 @@ export function EventQuickEdit({
   const isWriteProtected = event.isReadOnly === true || event.canEdit === false;
   const canWrite = !isVacation && !isWriteProtected;
   const isCanonicalBflow = event.sourceCalendarId?.startsWith('bflow:') === true && Boolean(event.calendarId);
+  // 시각 편집 지원 범위는 상세 패널과 동일하게 캐노니컬 B flow + 구글 일정만이다.
+  const supportsTimeEditing = isCanonicalBflow || event.source === 'google';
+  const hasInvalidTimedInterval = supportsTimeEditing
+    && !allDay
+    && Boolean(startTime && endTime)
+    && `${endDate}T${endTime}` <= `${startDate}T${startTime}`;
+  const isTimedSaveBlocked = supportsTimeEditing
+    && !allDay
+    && (!startTime || !endTime || hasInvalidTimedInterval);
   const displayedCalendarId = pendingCalendar?.eventId === event.id
     ? pendingCalendar.value
     : event.calendarId;
@@ -146,6 +158,9 @@ export function EventQuickEdit({
     setEndDate(event.endDate);
     setType(event.type);
     setMemo(event.memo);
+    setAllDay(event.allDay ?? true);
+    setStartTime(event.startTime ?? '');
+    setEndTime(event.endTime ?? '');
     setMutationError(null);
   }, [event, eventIdentityKey, eventSnapshot]);
 
@@ -175,6 +190,9 @@ export function EventQuickEdit({
       setEndDate(latestEvent.endDate);
       setType(latestEvent.type);
       setMemo(latestEvent.memo);
+      setAllDay(latestEvent.allDay ?? true);
+      setStartTime(latestEvent.startTime ?? '');
+      setEndTime(latestEvent.endTime ?? '');
       setMutationError(null);
       return;
     }
@@ -183,7 +201,7 @@ export function EventQuickEdit({
   }, [settleMutation]);
 
   const handleSave = useCallback(() => {
-    if (!canWrite || pendingMutationRef.current) return;
+    if (!canWrite || pendingMutationRef.current || isTimedSaveBlocked) return;
     const updates: Partial<CalendarEvent> = {};
     if (title !== event.title) updates.title = title;
     if (startDate !== event.startDate || endDate !== event.endDate) {
@@ -192,6 +210,19 @@ export function EventQuickEdit({
     }
     if (memo !== event.memo) updates.memo = memo;
     if (!isCanonicalBflow && type !== event.type) updates.type = type;
+    if (supportsTimeEditing) {
+      const allDayChanged = allDay !== (event.allDay ?? true);
+      if (allDayChanged) updates.allDay = allDay;
+      if (allDay) {
+        if (allDayChanged) {
+          updates.startTime = undefined;
+          updates.endTime = undefined;
+        }
+      } else {
+        if (startTime !== event.startTime) updates.startTime = startTime;
+        if (endTime !== event.endTime) updates.endTime = endTime;
+      }
+    }
     if (Object.keys(updates).length === 0) {
       onClose();
       return;
@@ -218,7 +249,7 @@ export function EventQuickEdit({
     } catch {
       markMutationFailed(mutation, '일정 저장에 실패했어요. 다시 시도해 주세요.');
     }
-  }, [beginMutation, canWrite, endDate, event, eventIdentityKey, eventSnapshot, isCanonicalBflow, markMutationFailed, memo, onClose, onUpdate, settleMutation, startDate, title, type]);
+  }, [allDay, beginMutation, canWrite, endDate, endTime, event, eventIdentityKey, eventSnapshot, isCanonicalBflow, isTimedSaveBlocked, markMutationFailed, memo, onClose, onUpdate, settleMutation, startDate, startTime, supportsTimeEditing, title, type]);
 
   const handleDelete = useCallback(() => {
     if (!canWrite || pendingMutationRef.current) return;
@@ -453,6 +484,52 @@ export function EventQuickEdit({
                     <input type="date" value={startDate} onChange={(changeEvent) => setStartDate(changeEvent.target.value)} className="flex-1 rounded-lg px-2.5 py-1.5 text-xs outline-none" style={{ ...fieldStyle, colorScheme: colorMode }} />
                     <input type="date" value={endDate} onChange={(changeEvent) => setEndDate(changeEvent.target.value)} className="flex-1 rounded-lg px-2.5 py-1.5 text-xs outline-none" style={{ ...fieldStyle, colorScheme: colorMode }} />
                   </div>
+                  {supportsTimeEditing && (
+                    <label className="flex items-center justify-between gap-3 text-[11px] font-medium text-text-secondary">
+                      <span>종일</span>
+                      <input
+                        aria-label="종일 일정"
+                        type="checkbox"
+                        checked={allDay}
+                        onChange={(changeEvent) => {
+                          const checked = changeEvent.target.checked;
+                          setAllDay(checked);
+                          if (!checked) {
+                            if (!startTime) setStartTime('09:00');
+                            if (!endTime) setEndTime('10:00');
+                          }
+                        }}
+                        className="h-3.5 w-3.5 rounded accent-accent cursor-pointer"
+                      />
+                    </label>
+                  )}
+                  {supportsTimeEditing && !allDay && (
+                    <div className="flex gap-2">
+                      <input
+                        aria-label="시작 시각"
+                        type="time"
+                        step={600}
+                        value={startTime}
+                        onChange={(changeEvent) => setStartTime(changeEvent.target.value)}
+                        className="flex-1 rounded-lg px-2.5 py-1.5 text-xs outline-none"
+                        style={{ ...fieldStyle, colorScheme: colorMode }}
+                      />
+                      <input
+                        aria-label="종료 시각"
+                        type="time"
+                        step={600}
+                        value={endTime}
+                        onChange={(changeEvent) => setEndTime(changeEvent.target.value)}
+                        className="flex-1 rounded-lg px-2.5 py-1.5 text-xs outline-none"
+                        style={{ ...fieldStyle, colorScheme: colorMode }}
+                      />
+                    </div>
+                  )}
+                  {hasInvalidTimedInterval && (
+                    <p role="alert" className="text-[11px] font-medium text-red-400">
+                      종료 시각은 시작 시각보다 뒤여야 해요.
+                    </p>
+                  )}
                   <div className="flex gap-1">
                     {TYPE_OPTIONS.map((option) => (
                       <button
@@ -480,7 +557,7 @@ export function EventQuickEdit({
                     dropdownPositionClassName="left-2 right-2"
                     className="w-full resize-none rounded-lg border border-bg-border/[0.56] bg-bg-primary/[0.82] px-2.5 py-1.5 text-xs text-text-primary outline-none placeholder:text-text-secondary/45"
                   />
-                  <button onClick={handleSave} disabled={isMutating} className="w-full cursor-pointer rounded-lg py-2 text-xs font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-45" style={{ background: 'rgb(var(--color-accent))', color: 'rgb(var(--color-on-accent))' }}>저장</button>
+                  <button onClick={handleSave} disabled={isMutating || isTimedSaveBlocked} className="w-full cursor-pointer rounded-lg py-2 text-xs font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-45" style={{ background: 'rgb(var(--color-accent))', color: 'rgb(var(--color-on-accent))' }}>저장</button>
                 </div>
               )}
             </div>

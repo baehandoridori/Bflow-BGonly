@@ -1505,6 +1505,7 @@ export function ScheduleView() {
                 activeDayIndex={activeDayIndex}
                 onActiveDayChange={handleDayChange}
                 onEventClick={handleEventClick}
+                onEventContextMenu={handleEventContextMenu}
                 onDateClick={(dateStr) => {
                   setCreateDate(dateStr);
                   setCreateEndDate(dateStr);
@@ -1520,6 +1521,7 @@ export function ScheduleView() {
                 events={filteredEvents}
                 today={today}
                 onEventClick={handleEventClick}
+                onEventContextMenu={handleEventContextMenu}
                 onSlotClick={handleTimeGridCreate}
                 tagNameById={tagNameById}
                 calendarNameById={calendarNameById}
@@ -1537,6 +1539,7 @@ export function ScheduleView() {
                 events={filteredEvents}
                 today={today}
                 onEventClick={handleEventClick}
+                onEventContextMenu={handleEventContextMenu}
                 onDateClick={(dateStr) => {
                   setCreateDate(dateStr);
                   setCreateEndDate(dateStr);

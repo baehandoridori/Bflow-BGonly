@@ -51,6 +51,7 @@ export interface WeekScrollViewProps {
   events: CalendarEvent[];
   today: string; // YYYY-MM-DD
   onEventClick: (ev: CalendarEvent) => void;
+  onEventContextMenu?: (ev: CalendarEvent, mouse: React.MouseEvent) => void;
   onDateClick?: (date: string) => void; // YYYY-MM-DD — 날짜 클릭 시 이벤트 생성
   activeWeekIndex: number; // 연도 기준 절대 인덱스 (0~52)
   onWeekChange: (index: number) => void;
@@ -79,6 +80,7 @@ export default function WeekScrollView({
   events,
   today,
   onEventClick,
+  onEventContextMenu,
   onDateClick,
   activeWeekIndex,
   onWeekChange,
@@ -186,6 +188,7 @@ export default function WeekScrollView({
                   today={today}
                   isoWeek={isoWeek}
                   onEventClick={onEventClick}
+                  onEventContextMenu={onEventContextMenu}
                   onDateClick={onDateClick}
                   compact={is2Week}
                   reduce={reduce}
@@ -228,6 +231,7 @@ function ActiveWeek({
   today,
   isoWeek,
   onEventClick,
+  onEventContextMenu,
   onDateClick,
   compact,
   reduce,
@@ -240,6 +244,7 @@ function ActiveWeek({
   today: string;
   isoWeek: number;
   onEventClick: (ev: CalendarEvent) => void;
+  onEventContextMenu?: (ev: CalendarEvent, mouse: React.MouseEvent) => void;
   onDateClick?: (date: string) => void;
   compact?: boolean;
   reduce: boolean;
@@ -421,6 +426,7 @@ function ActiveWeek({
               isRealtimeHighlighted={highlightedEventIdentities?.has(calendarEventIdentityKey(ev)) === true}
               reduceMotion={reduceMotion}
               onClick={(e) => { e.stopPropagation(); onEventClick(ev); }}
+              onContextMenu={onEventContextMenu ? (e) => onEventContextMenu(ev, e) : undefined}
             />
           ))}
         </div>
@@ -437,6 +443,7 @@ function EventCard({
   isRealtimeHighlighted,
   reduceMotion,
   onClick,
+  onContextMenu,
 }: {
   event: CalendarEvent;
   today: string;
@@ -444,6 +451,7 @@ function EventCard({
   isRealtimeHighlighted: boolean;
   reduceMotion: boolean;
   onClick: (e: React.MouseEvent) => void;
+  onContextMenu?: (e: React.MouseEvent) => void;
 }) {
   const dDay = daysBetween(today, event.endDate);
   const dDayLabel =
@@ -456,6 +464,7 @@ function EventCard({
     <motion.div
       whileHover={{ scale: 1.01 }}
       onClick={onClick}
+      onContextMenu={onContextMenu}
       data-event-identity={calendarEventIdentityKey(event)}
       data-realtime-highlight={isRealtimeHighlighted ? 'true' : undefined}
       className={`flex items-center gap-2 cursor-pointer ${isRealtimeHighlighted ? reduceMotion ? 'calendar-realtime-highlight-static' : 'calendar-realtime-highlight' : ''}`}
