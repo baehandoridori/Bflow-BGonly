@@ -367,6 +367,9 @@ export function useTimeGridDnD({ scrollContainerRef, onCreate, onEventChange }: 
     const cancel = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
         event.preventDefault?.();
+        if (dragRef.current?.hasCrossedThreshold) {
+          finishedAtRef.current = Date.now();
+        }
         clearDrag();
       }
     };

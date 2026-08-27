@@ -217,6 +217,44 @@ test('useTimeGridDnD DOM: create·resize callback, Escape 취소, 읽기전용 i
   }
 });
 
+test('useTimeGridDnD DOM: Escape 뒤 mouseup click은 create와 event drag의 연속 열림을 막는다', async () => {
+  const createHarness = installDomHookHarness(await loadDnD(), {
+    scrollContainerRef: { current: { scrollTop: 0, getBoundingClientRect: () => ({ top: 100, bottom: 500 }) } },
+  });
+  try {
+    let dnd = createHarness.render();
+    dnd.beginCreate(event(10, 156), { date: '2026-08-24', bandStartMin: 540, column: createHarness.column });
+    dnd = createHarness.render();
+    createHarness.fire('mousemove', { clientX: 20, clientY: 184 });
+    dnd = createHarness.render();
+    assert.equal(dnd.isDragActive, true, '임계값을 넘긴 create만 뒤이은 click을 막아야 한다');
+    createHarness.fire('keydown', { key: 'Escape', preventDefault() {} });
+    createHarness.fire('mouseup', {});
+    dnd = createHarness.render();
+    assert.equal(dnd.shouldSuppressClick(), true, 'Escape로 취소한 create의 mouseup click은 일정 만들기 모달을 열지 않는다');
+  } finally {
+    createHarness.restore();
+  }
+
+  const dragHarness = installDomHookHarness(await loadDnD(), {
+    scrollContainerRef: { current: { scrollTop: 0, getBoundingClientRect: () => ({ top: 100, bottom: 500 }) } },
+  });
+  try {
+    let dnd = dragHarness.render();
+    dnd.beginEventDrag(event(10, 156), source, 'move', { date: '2026-08-24', bandStartMin: 540, column: dragHarness.column });
+    dnd = dragHarness.render();
+    dragHarness.fire('mousemove', { clientX: 20, clientY: 184 });
+    dnd = dragHarness.render();
+    assert.equal(dnd.isDragActive, true, '임계값을 넘긴 event drag만 뒤이은 click을 막아야 한다');
+    dragHarness.fire('keydown', { key: 'Escape', preventDefault() {} });
+    dragHarness.fire('mouseup', {});
+    dnd = dragHarness.render();
+    assert.equal(dnd.shouldSuppressClick(), true, 'Escape로 취소한 event drag의 mouseup click은 상세 패널을 열지 않는다');
+  } finally {
+    dragHarness.restore();
+  }
+});
+
 test('useTimeGridDnD DOM: 새 일정 수직 선택은 옆 날짜 열을 지나도 시작한 날짜에 저장한다', async () => {
   const creates: unknown[][] = [];
   let adjacentColumn: any;
