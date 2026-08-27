@@ -55,6 +55,8 @@ export interface WeekScrollViewProps {
   activeWeekIndex: number; // 연도 기준 절대 인덱스 (0~52)
   onWeekChange: (index: number) => void;
   mode?: 'week' | '2week'; // 'week' = 1주 포커스, '2week' = 2주 활성
+  highlightedEventIdentities?: ReadonlySet<string>;
+  reduceMotion?: boolean;
 }
 
 /* ── 상수 ────────────────────────────────────────────── */
@@ -81,6 +83,8 @@ export default function WeekScrollView({
   activeWeekIndex,
   onWeekChange,
   mode = 'week',
+  highlightedEventIdentities,
+  reduceMotion,
 }: WeekScrollViewProps) {
   const is2Week = mode === '2week';
   const tags = useCalendarStore((state) => state.tags);
@@ -186,6 +190,8 @@ export default function WeekScrollView({
                   compact={is2Week}
                   reduce={reduce}
                   tagNameById={tagNameById}
+                  highlightedEventIdentities={highlightedEventIdentities}
+                  reduceMotion={reduceMotion ?? reduce}
                 />
               ) : isNear ? (
                 <CompactWeek
@@ -226,6 +232,8 @@ function ActiveWeek({
   compact,
   reduce,
   tagNameById,
+  highlightedEventIdentities,
+  reduceMotion,
 }: {
   week: Date[];
   events: CalendarEvent[];
@@ -236,6 +244,8 @@ function ActiveWeek({
   compact?: boolean;
   reduce: boolean;
   tagNameById: Record<string, string>;
+  highlightedEventIdentities?: ReadonlySet<string>;
+  reduceMotion: boolean;
 }) {
   const sortedEvents = useMemo(() => sortEventsForList(events), [events]);
   const eventListRef = useRef<HTMLDivElement>(null);
@@ -331,6 +341,8 @@ function ActiveWeek({
       {events.length > 0 && (
         <div className="flex flex-col gap-0.5 mb-2">
           {events.slice(0, 5).map((ev) => {
+            const identityKey = calendarEventIdentityKey(ev);
+            const isRealtimeHighlighted = highlightedEventIdentities?.has(identityKey) === true;
             const wStart = fmtDate(week[0]);
             const wEnd = fmtDate(week[6]);
             // 이벤트가 이 주에서 차지하는 범위 계산
@@ -346,7 +358,9 @@ function ActiveWeek({
                 className="grid grid-cols-7 gap-1"
               >
                 <div
-                  className="rounded-full truncate flex items-center px-1.5"
+                  data-event-identity={identityKey}
+                  data-realtime-highlight={isRealtimeHighlighted ? 'true' : undefined}
+                  className={`rounded-full truncate flex items-center px-1.5 ${isRealtimeHighlighted ? reduceMotion ? 'calendar-realtime-highlight-static' : 'calendar-realtime-highlight' : ''}`}
                   style={{
                     gridColumnStart: startCol + 1,
                     gridColumnEnd: startCol + 1 + spanCols,
@@ -404,6 +418,8 @@ function ActiveWeek({
               event={ev}
               today={today}
               tagNameById={tagNameById}
+              isRealtimeHighlighted={highlightedEventIdentities?.has(calendarEventIdentityKey(ev)) === true}
+              reduceMotion={reduceMotion}
               onClick={(e) => { e.stopPropagation(); onEventClick(ev); }}
             />
           ))}
@@ -418,11 +434,15 @@ function EventCard({
   event,
   today,
   tagNameById,
+  isRealtimeHighlighted,
+  reduceMotion,
   onClick,
 }: {
   event: CalendarEvent;
   today: string;
   tagNameById: Record<string, string>;
+  isRealtimeHighlighted: boolean;
+  reduceMotion: boolean;
   onClick: (e: React.MouseEvent) => void;
 }) {
   const dDay = daysBetween(today, event.endDate);
@@ -436,7 +456,9 @@ function EventCard({
     <motion.div
       whileHover={{ scale: 1.01 }}
       onClick={onClick}
-      className="flex items-center gap-2 cursor-pointer"
+      data-event-identity={calendarEventIdentityKey(event)}
+      data-realtime-highlight={isRealtimeHighlighted ? 'true' : undefined}
+      className={`flex items-center gap-2 cursor-pointer ${isRealtimeHighlighted ? reduceMotion ? 'calendar-realtime-highlight-static' : 'calendar-realtime-highlight' : ''}`}
       style={{
         background: hexToRgba(event.color, 0.08),
         borderLeft: `3px solid ${event.color}`,

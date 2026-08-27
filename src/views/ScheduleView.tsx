@@ -56,7 +56,7 @@ const REALTIME_HIGHLIGHT_MS = 2_000;
 
 type LocalChangeGuard = {
   expiresAt: number;
-  kind: 'add' | 'update';
+  kind: 'add' | 'update' | 'delete';
   expectedSnapshot: string;
   rollbackSnapshot?: string;
   persistence: 'pending' | 'succeeded' | 'failed';
@@ -310,15 +310,18 @@ export function ScheduleView() {
     });
   }, []);
 
-  const settleLocalUpdateGuard = useCallback((
+  const settleLocalMutationGuard = useCallback((
     identity: CalendarEventIdentity,
     persistence: Extract<LocalChangeGuard['persistence'], 'succeeded' | 'failed'>,
   ) => {
     const identityKey = calendarEventIdentityKey(identity);
     const guard = localChangeGuardsRef.current.get(identityKey);
-    if (!guard || guard.kind !== 'update') return;
+    if (!guard || (guard.kind !== 'update' && guard.kind !== 'delete')) return;
     guard.persistence = persistence;
-    if ((persistence === 'succeeded' && guard.sawExpected) || (persistence === 'failed' && guard.sawRollback)) {
+    const isSettled = guard.kind === 'delete'
+      ? persistence === 'succeeded' || (persistence === 'failed' && guard.sawExpected)
+      : (persistence === 'succeeded' && guard.sawExpected) || (persistence === 'failed' && guard.sawRollback);
+    if (isSettled) {
       localChangeGuardsRef.current.delete(identityKey);
     }
   }, []);
@@ -356,10 +359,17 @@ export function ScheduleView() {
           const nextEventSnapshot = nextSnapshot.get(identityKey);
           const isMatchingLocalEcho = guard.kind === 'add'
             ? addedIdentities.has(identityKey)
-            : guard.expectedSnapshot === nextEventSnapshot || guard.rollbackSnapshot === nextEventSnapshot;
+            : guard.kind === 'delete'
+              ? addedIdentities.has(identityKey) && guard.expectedSnapshot === nextEventSnapshot
+              : guard.expectedSnapshot === nextEventSnapshot || guard.rollbackSnapshot === nextEventSnapshot;
           if (!isMatchingLocalEcho) return false;
           if (guard.kind === 'add') {
             localChangeGuardsRef.current.delete(identityKey);
+            return true;
+          }
+          if (guard.kind === 'delete') {
+            guard.sawExpected = true;
+            if (guard.persistence === 'failed') localChangeGuardsRef.current.delete(identityKey);
             return true;
           }
           if (guard.expectedSnapshot === nextEventSnapshot) guard.sawExpected = true;
@@ -686,14 +696,21 @@ export function ScheduleView() {
 
   const handleDeleteEvent = useCallback(async (deletingEvent: CalendarEvent) => {
     const mutationIdentity = snapshotCalendarEventIdentity(deletingEvent);
-    await deleteEvent(deletingEvent.id, mutationIdentity);
+    guardLocalIdentity(mutationIdentity, deletingEvent, 'delete');
+    try {
+      await deleteEvent(deletingEvent.id, mutationIdentity);
+      settleLocalMutationGuard(mutationIdentity, 'succeeded');
+    } catch (error) {
+      settleLocalMutationGuard(mutationIdentity, 'failed');
+      throw error;
+    }
     setEvents((prev) => prev.filter((event) => (
       !hasSameCalendarEventIdentity(event, mutationIdentity)
     )));
     // 할일 연결된 이벤트인 경우 addToCalendar = false 처리 (할일 자체는 유지)
     const todoId = calendarEventLinkedTodoId(deletingEvent);
     if (todoId) unlinkTodoFromCalendar(todoId);
-  }, []);
+  }, [guardLocalIdentity, settleLocalMutationGuard]);
 
   // 이벤트 클릭 → 사이드패널 토글 (같은 이벤트 재클릭 시 닫기)
   const handleEventClick = useCallback((ev: CalendarEvent) => {
@@ -753,13 +770,13 @@ export function ScheduleView() {
         { startDate: newStart, endDate: newEnd },
         mutationIdentity ?? undefined,
       );
-      if (mutationIdentity && eventBeforeUpdate) settleLocalUpdateGuard(mutationIdentity, 'succeeded');
+      if (mutationIdentity && eventBeforeUpdate) settleLocalMutationGuard(mutationIdentity, 'succeeded');
     } catch (error) {
-      if (mutationIdentity && eventBeforeUpdate) settleLocalUpdateGuard(mutationIdentity, 'failed');
+      if (mutationIdentity && eventBeforeUpdate) settleLocalMutationGuard(mutationIdentity, 'failed');
       throw error;
     }
     await reconcileEventMutation(mutationIdentity ?? undefined);
-  }, [events, guardLocalIdentity, reconcileEventMutation, settleLocalUpdateGuard]);
+  }, [events, guardLocalIdentity, reconcileEventMutation, settleLocalMutationGuard]);
 
   const handleTimeGridEventChange = useCallback(async (
     eventId: string,
@@ -770,13 +787,13 @@ export function ScheduleView() {
     if (eventBeforeUpdate) guardLocalIdentity(mutationIdentity, { ...eventBeforeUpdate, ...patch }, 'update', eventBeforeUpdate);
     try {
       await updateEvent(eventId, patch, mutationIdentity);
-      if (eventBeforeUpdate) settleLocalUpdateGuard(mutationIdentity, 'succeeded');
+      if (eventBeforeUpdate) settleLocalMutationGuard(mutationIdentity, 'succeeded');
     } catch (error) {
-      if (eventBeforeUpdate) settleLocalUpdateGuard(mutationIdentity, 'failed');
+      if (eventBeforeUpdate) settleLocalMutationGuard(mutationIdentity, 'failed');
       throw error;
     }
     await reconcileEventMutation(mutationIdentity);
-  }, [events, guardLocalIdentity, reconcileEventMutation, settleLocalUpdateGuard]);
+  }, [events, guardLocalIdentity, reconcileEventMutation, settleLocalMutationGuard]);
 
   const { isDragging, preview: dragPreview, startDrag } = useCalendarDnD(handleEventDragDone, handleEventDragDone);
 
@@ -1056,11 +1073,11 @@ export function ScheduleView() {
     let persistenceError: unknown;
     try {
       await updateEvent(id, sanitized, mutationIdentity);
-      settleLocalUpdateGuard(mutationIdentity, 'succeeded');
+      settleLocalMutationGuard(mutationIdentity, 'succeeded');
     } catch (error) {
       persistenceFailed = true;
       persistenceError = error;
-      settleLocalUpdateGuard(mutationIdentity, 'failed');
+      settleLocalMutationGuard(mutationIdentity, 'failed');
     }
 
     try {
@@ -1077,7 +1094,7 @@ export function ScheduleView() {
     }
 
     if (persistenceFailed) throw persistenceError;
-  }, [applyCanonicalEvents, guardLocalIdentity, settleLocalUpdateGuard]);
+  }, [applyCanonicalEvents, guardLocalIdentity, settleLocalMutationGuard]);
 
   const handleDuplicateEvent = useCallback(async (event: CalendarEvent) => {
     const isCanonicalBflow = event.sourceCalendarId?.startsWith('bflow:') === true
@@ -1377,6 +1394,8 @@ export function ScheduleView() {
                   setShowCreate(true);
                 }}
                 year={year}
+                highlightedEventIdentities={highlightedEventIdentities}
+                reduceMotion={reduce}
               />
             ) : viewMode === 'week' && weekSubMode === 'timegrid' ? (
               <WeekTimeGridView
@@ -1409,6 +1428,8 @@ export function ScheduleView() {
                 activeWeekIndex={activeWeekIndex}
                 onWeekChange={handleWeekChange}
                 mode={viewMode === '2week' ? '2week' : 'week'}
+                highlightedEventIdentities={highlightedEventIdentities}
+                reduceMotion={reduce}
               />
             ) : (
               <CalendarGrid
@@ -1484,7 +1505,7 @@ export function ScheduleView() {
             key={`panel-${calendarEventIdentityKey(panelEvent)}`}
             event={panelEvent}
             onClose={() => setPanelEvent(null)}
-            onDelete={() => { void handleDeleteEvent(panelEvent); setPanelEvent(null); }}
+            onDelete={() => handleDeleteEvent(panelEvent)}
             onUpdate={(id, updates) => handleUpdateEventDirect(panelEvent, id, updates)}
             onNavigate={handleNavigate}
           />
@@ -1498,15 +1519,16 @@ export function ScheduleView() {
           event={quickEdit.event}
           position={quickEdit.position}
           onClose={() => setQuickEdit(null)}
-          onUpdate={(id, updates) => handleUpdateEventDirect(quickEdit.event, id, updates)}
-          onDelete={() => {
-            const deletingEvent = quickEdit.event;
-            void handleDeleteEvent(deletingEvent);
-            setPanelEvent((previous) => previous
-              && hasSameCalendarEventIdentity(previous, deletingEvent)
-              ? null
-              : previous);
-          }}
+            onUpdate={(id, updates) => handleUpdateEventDirect(quickEdit.event, id, updates)}
+            onDelete={() => {
+              const deletingEvent = quickEdit.event;
+              const deletion = handleDeleteEvent(deletingEvent);
+              setPanelEvent((previous) => previous
+                && hasSameCalendarEventIdentity(previous, deletingEvent)
+                ? null
+                : previous);
+              return deletion;
+            }}
           onDuplicate={handleDuplicateEvent}
         />
       )}

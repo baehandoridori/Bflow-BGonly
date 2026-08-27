@@ -175,6 +175,8 @@ type WeekScrollViewProps = {
   activeWeekIndex: number;
   onWeekChange(index: number): void;
   mode?: 'week' | '2week';
+  highlightedEventIdentities?: ReadonlySet<string>;
+  reduceMotion?: boolean;
 };
 type WeekScrollViewModule = {
   default(props: WeekScrollViewProps): ReactNode;
@@ -205,6 +207,8 @@ type DayScrollViewProps = {
   onEventClick?(event: ScheduleCalendarEvent): void;
   onDateClick?(date: string): void;
   year: number;
+  highlightedEventIdentities?: ReadonlySet<string>;
+  reduceMotion?: boolean;
 };
 type DayScrollViewComponent = (props: DayScrollViewProps) => ReactNode;
 
@@ -320,6 +324,7 @@ let scheduleUpdateCalls: Array<{
 }> = [];
 let scheduleUpdateHandler: ((id: string, updates: Partial<ScheduleCalendarEvent>) => Promise<void>) | undefined;
 let scheduleDeleteCalls: Array<{ id: string; targetIdentity?: ScheduleEventIdentity }> = [];
+let scheduleDeleteHandler: ((id: string, targetIdentity?: ScheduleEventIdentity) => Promise<void>) | undefined;
 let scheduleDragDoneHandler: ((eventId: string, newStart: string, newEnd: string) => void | Promise<void>) | undefined;
 let scheduleTodoSyncCalls: Array<{ todoId: string; patch: Record<string, unknown> }> = [];
 let scheduleAddedEvents: ScheduleCalendarEvent[] = [];
@@ -679,6 +684,7 @@ function resetHarness(): void {
   scheduleUpdateCalls = [];
   scheduleUpdateHandler = undefined;
   scheduleDeleteCalls = [];
+  scheduleDeleteHandler = undefined;
   scheduleDragDoneHandler = undefined;
   scheduleTodoSyncCalls = [];
   (globalThis as typeof globalThis & { __scheduleTodoSyncCalls?: typeof scheduleTodoSyncCalls }).__scheduleTodoSyncCalls = scheduleTodoSyncCalls;
@@ -1330,6 +1336,7 @@ async function loadScheduleView(): Promise<ScheduleViewComponent> {
         },
         deleteEvent: async (id: string, targetIdentity?: ScheduleEventIdentity) => {
           scheduleDeleteCalls.push({ id, targetIdentity });
+          await scheduleDeleteHandler?.(id, targetIdentity);
         },
       };
       if (id === '@/services/vacationService') return { fetchAllVacationEvents: async () => [] };
@@ -2438,6 +2445,54 @@ test('WeekScrollView and DayScrollView sort active cards and render tag-aware ti
     });
     assert.equal(stopped, true);
     assert.equal(clicked[0], early, 'the sorted card still forwards the original event object');
+  });
+});
+
+test('WeekScrollView and DayScrollView render an exact realtime target on active event cards', async (t) => {
+  const event = calendarListEvent({
+    id: 'card-realtime-target',
+    title: '다른 팀원의 변경',
+    source: 'google',
+    sourceCalendarId: 'primary',
+    calendarId: undefined,
+  });
+  const identityKey = 'google\u0000primary\u0000card-realtime-target';
+  const highlighted = new Set([identityKey]);
+
+  await t.test('week card view', async () => {
+    resetHarness();
+    const weekModule = await loadWeekScrollView();
+    const weeks = weekModule.generateYearWeeks(2026);
+    const tree = resolveComponents(weekModule.default({
+      currentMonth: 7,
+      currentYear: 2026,
+      events: [event],
+      today: '2026-08-25',
+      onEventClick() {},
+      activeWeekIndex: weekModule.findWeekIndexForDate(weeks, '2026-08-25'),
+      onWeekChange() {},
+      highlightedEventIdentities: highlighted,
+    }));
+    const card = findElements(tree, (candidate) => candidate.props['data-event-identity'] === identityKey)[0];
+    assert.ok(card, 'the active weekly card keeps its source-aware identity');
+    assert.equal(card.props['data-realtime-highlight'], 'true');
+    assert.match(String(card.props.className), /calendar-realtime-highlight/);
+  });
+
+  await t.test('today card view', async () => {
+    resetHarness();
+    const DayScrollView = await loadDayScrollView();
+    const tree = resolveComponents(DayScrollView({
+      events: [event],
+      activeDayIndex: activeDayIndex(2026, 7, 25),
+      onActiveDayChange() {},
+      year: 2026,
+      highlightedEventIdentities: highlighted,
+    }));
+    const card = findElements(tree, (candidate) => candidate.props['data-event-identity'] === identityKey)[0];
+    assert.ok(card, 'the active daily card keeps its source-aware identity');
+    assert.equal(card.props['data-realtime-highlight'], 'true');
+    assert.match(String(card.props.className), /calendar-realtime-highlight/);
   });
 });
 
@@ -3703,6 +3758,49 @@ test('ScheduleView does not highlight deletions and passes an external add targe
   );
 });
 
+test('ScheduleView passes realtime targets to weekly card and today card views', async (t) => {
+  const baseline = calendarListEvent({
+    id: 'card-view-external',
+    title: '변경 전 카드 일정',
+    source: 'bflow',
+    sourceCalendarId: 'bflow:mine',
+    calendarId: 'mine',
+  });
+  const target = 'bflow\u0000card-view-external';
+
+  await t.test('weekly card view', async () => {
+    resetHarness();
+    scheduleLocalStorage.set('bflow_calendar_view_v1', JSON.stringify({ viewMode: 'week', weekSubMode: 'card' }));
+    scheduleCanonicalEvents = [baseline];
+    await renderScheduleView();
+    await flushScheduleMountEffects();
+    scheduleCanonicalEvents = [{ ...baseline, title: '다른 팀원이 수정한 카드 일정' }];
+    await dispatchScheduleWindowEvent('bflow:calendar-changed');
+    await renderScheduleView();
+    assert.deepEqual(
+      [...(scheduleWeekScrollProps.at(-1)?.highlightedEventIdentities ?? [])],
+      [target],
+      'weekly card mode receives the same source-aware target as the grid',
+    );
+  });
+
+  await t.test('today card view', async () => {
+    resetHarness();
+    scheduleLocalStorage.set('bflow_calendar_view_v1', JSON.stringify({ viewMode: 'today', weekSubMode: 'card' }));
+    scheduleCanonicalEvents = [baseline];
+    await renderScheduleView();
+    await flushScheduleMountEffects();
+    scheduleCanonicalEvents = [{ ...baseline, title: '다른 팀원이 수정한 오늘 일정' }];
+    await dispatchScheduleWindowEvent('bflow:calendar-changed');
+    await renderScheduleView();
+    assert.deepEqual(
+      [...(scheduleDayScrollProps.at(-1)?.highlightedEventIdentities ?? [])],
+      [target],
+      'today card mode receives the same source-aware target as the grid',
+    );
+  });
+});
+
 test('ScheduleView guards multiple exact local create identities without hiding a reversed identical external add', async () => {
   resetHarness();
   scheduleLocalStorage.set('bflow_calendar_view_v1', JSON.stringify({ viewMode: 'week', weekSubMode: 'timegrid' }));
@@ -3935,6 +4033,46 @@ test('ScheduleView keeps a local update guard through its failed-save rollback',
       [...(scheduleTimeGridProps.at(-1)?.highlightedEventIdentities ?? [])],
       [],
       'the local rollback is not presented as a teammate change after the optimistic echo',
+    );
+  } finally {
+    clock.restore();
+  }
+});
+
+test('ScheduleView keeps a local delete rollback from pulsing as a teammate add', async () => {
+  resetHarness();
+  const before = calendarListEvent({
+    id: 'failed-local-delete',
+    title: '되돌릴 삭제 일정',
+    source: 'bflow',
+    sourceCalendarId: 'bflow:mine',
+    calendarId: 'mine',
+  });
+  const persistenceError = new Error('삭제 저장 실패');
+  scheduleCanonicalEvents = [before];
+  await renderScheduleView();
+  await flushScheduleMountEffects();
+  await renderScheduleView();
+  scheduleGridProps.at(-1)?.onEventClick(before);
+  await renderScheduleView();
+
+  const clock = installScheduleFakeClock();
+  try {
+    scheduleDeleteHandler = async () => {
+      scheduleCanonicalEvents = [];
+      await dispatchScheduleWindowEvent('bflow:calendar-changed');
+      scheduleCanonicalEvents = [before];
+      await dispatchScheduleWindowEvent('bflow:calendar-changed');
+      throw persistenceError;
+    };
+    const panel = schedulePanelProps.at(-1);
+    assert.ok(panel, 'the selected local event exposes the detail delete callback');
+    await assert.rejects(panel.onDelete(before.id), (error) => error === persistenceError);
+    await renderScheduleView();
+    assert.deepEqual(
+      [...(scheduleGridProps.at(-1)?.highlightedEventIdentities ?? [])],
+      [],
+      'the local failed-delete restoration is not presented as a teammate add',
     );
   } finally {
     clock.restore();

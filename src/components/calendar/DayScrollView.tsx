@@ -32,6 +32,8 @@ export interface DayScrollViewProps {
   onEventClick?: (event: CalendarEvent) => void;
   onDateClick?: (date: string) => void; // YYYY-MM-DD — 날짜 클릭 시 이벤트 생성
   year: number;
+  highlightedEventIdentities?: ReadonlySet<string>;
+  reduceMotion?: boolean;
 }
 
 /* ── 상수 ────────────────────────────────────────────── */
@@ -57,6 +59,8 @@ export default function DayScrollView({
   onEventClick,
   onDateClick,
   year,
+  highlightedEventIdentities,
+  reduceMotion = false,
 }: DayScrollViewProps) {
   const maxDay = daysInYear(year) - 1;
   const tags = useCalendarStore((state) => state.tags);
@@ -154,6 +158,8 @@ export default function DayScrollView({
                   onEventClick={onEventClick}
                   onDateClick={onDateClick}
                   tagNameById={tagNameById}
+                  highlightedEventIdentities={highlightedEventIdentities}
+                  reduceMotion={reduceMotion}
                 />
               ) : isNear ? (
                 <NearDay
@@ -186,6 +192,8 @@ function ActiveDay({
   onEventClick,
   onDateClick,
   tagNameById,
+  highlightedEventIdentities,
+  reduceMotion,
 }: {
   date: Date;
   dateStr: string;
@@ -194,6 +202,8 @@ function ActiveDay({
   onEventClick?: (ev: CalendarEvent) => void;
   onDateClick?: (date: string) => void;
   tagNameById: Record<string, string>;
+  highlightedEventIdentities?: ReadonlySet<string>;
+  reduceMotion: boolean;
 }) {
   const dow = date.getDay();
   const isToday = dateStr === today;
@@ -258,6 +268,8 @@ function ActiveDay({
               event={ev}
               today={today}
               tagNameById={tagNameById}
+              isRealtimeHighlighted={highlightedEventIdentities?.has(calendarEventIdentityKey(ev)) === true}
+              reduceMotion={reduceMotion}
               onClick={(e) => { e.stopPropagation(); onEventClick?.(ev); }}
             />
           ))}
@@ -277,11 +289,15 @@ function DayEventCard({
   event,
   today,
   tagNameById,
+  isRealtimeHighlighted,
+  reduceMotion,
   onClick,
 }: {
   event: CalendarEvent;
   today: string;
   tagNameById: Record<string, string>;
+  isRealtimeHighlighted: boolean;
+  reduceMotion: boolean;
   onClick: (e: React.MouseEvent) => void;
 }) {
   const dDay = daysBetween(today, event.endDate);
@@ -295,7 +311,9 @@ function DayEventCard({
     <motion.div
       whileHover={{ scale: 1.01 }}
       onClick={onClick}
-      className="flex items-center gap-2 cursor-pointer"
+      data-event-identity={calendarEventIdentityKey(event)}
+      data-realtime-highlight={isRealtimeHighlighted ? 'true' : undefined}
+      className={`flex items-center gap-2 cursor-pointer ${isRealtimeHighlighted ? reduceMotion ? 'calendar-realtime-highlight-static' : 'calendar-realtime-highlight' : ''}`}
       style={{
         background: hexToRgba(event.color, 0.08),
         borderLeft: `3px solid ${event.color}`,
