@@ -1026,6 +1026,11 @@ function mutateSourceEvents(
   source: CalendarCacheSource,
   fn: (events: CalendarEvent[]) => CalendarEvent[],
 ): void {
+  // 외부 구독 캐시는 bflow/google 어느 쪽에도 섞이지 않으므로 여기에 도달할 수 없다.
+  // 계약이 깨지면 조용히 다른 저장소를 건드리는 대신 즉시 드러나게 한다.
+  if (source !== 'bflow' && source !== 'google') {
+    throw new Error('[Calendar] 변경할 수 없는 일정 저장소입니다');
+  }
   if (source === 'bflow') {
     // CRUD가 시작된 뒤 도착한 이전 load 결과가 낙관적 변경을 되돌리지 못하게 한다.
     invalidateBflowLoads();
@@ -1038,15 +1043,79 @@ function mutateSourceEvents(
 
 export async function getEvents(): Promise<CalendarEvent[]> {
   const calendarState = useCalendarStore.getState();
-  if (!calendarState.loaded) return [...eventCache];
+  // 외부 구독은 bflow/google 캐시 밖에 따로 두고 출력 시점에만 합친다(D14).
+  // 그래야 뮤테이션·구글 새로고침 경로가 구독 일정을 건드리지 못한다.
+  if (!calendarState.loaded) return [...eventCache, ...icsEvents];
   const calendarsById = new Map(calendarState.calendars.map((calendar) => [calendar.id, calendar]));
-  return eventCache.flatMap((event) => {
+  const bflowAndGoogle = eventCache.flatMap((event) => {
     if (event.source !== 'bflow' || !event.calendarId) return [event];
     if (!calendarsById.has(event.calendarId)) return [];
     // 색·편집 권한·개인 캘린더 표시는 event row가 아니라 현재 캘린더 메타데이터가
     // 정본이다. 메타데이터의 낙관적 변경도 별도 event 재조회 없이 즉시 파생한다.
     return [withBflowCalendarPresentation(event, event.calendarId)];
   });
+  return [...bflowAndGoogle, ...icsEvents];
+}
+
+/* ─── 외부 캘린더(ICS) 구독 ───────────────────────────────────── */
+
+/** 구독 일정의 sourceCalendarId·가시성 키 접두사. */
+export const ICS_CAL_PREFIX = 'ics:';
+
+/** bflowEvents/googleEvents와 섞이지 않는 별도 캐시. */
+let icsEvents: CalendarEvent[] = [];
+
+function toIcsCalendarEvent(
+  subscription: { id: string; name: string; color: string },
+  dto: {
+    uid: string; title: string; startDate: string; endDate: string;
+    allDay: boolean; startTime: string | null; endTime: string | null;
+  },
+): CalendarEvent {
+  const sourceCalendarId = `${ICS_CAL_PREFIX}${subscription.id}`;
+  return {
+    // uid는 구독 안에서만 유일하고 반복 전개분끼리도 겹칠 수 있어 날짜까지 붙인다.
+    id: `${sourceCalendarId}:${dto.uid}:${dto.startDate}`,
+    title: dto.title,
+    memo: '',
+    color: subscription.color,
+    type: 'custom',
+    startDate: dto.startDate,
+    endDate: dto.endDate,
+    createdBy: subscription.name,
+    createdAt: '',
+    allDay: dto.allDay,
+    startTime: dto.startTime ?? undefined,
+    endTime: dto.endTime ?? undefined,
+    source: 'ics',
+    sourceCalendarId,
+    isReadOnly: true,
+    canEdit: false,
+  };
+}
+
+/** 구독 일정을 다시 읽어 별도 캐시에만 반영한다. 실패하면 직전 캐시를 유지한다. */
+export async function loadIcsEvents(): Promise<boolean> {
+  const api = window.electronAPI;
+  if (!api?.icsList || !api?.icsEvents) return false;
+  try {
+    const [subscriptions, grouped] = await Promise.all([api.icsList(), api.icsEvents()]);
+    const byId = new Map(subscriptions.map((row) => [row.id, row]));
+    icsEvents = grouped.flatMap((entry) => {
+      const subscription = byId.get(entry.subId);
+      if (!subscription || !subscription.enabled) return [];
+      return entry.events.map((dto) => toIcsCalendarEvent(subscription, dto));
+    });
+    return true;
+  } catch (error) {
+    console.warn('[Calendar] 외부 구독 일정 조회 실패:', error);
+    return false;
+  }
+}
+
+/** 로그아웃·세션 전환처럼 캐시를 비워야 할 때 쓴다. */
+export function clearIcsEvents(): void {
+  icsEvents = [];
 }
 
 /** 현재 renderer의 메타데이터 낙관적 변경을 event state 구독자에게만 알린다.
@@ -1538,6 +1607,11 @@ function confirmGoogleEventUpdate(
 }
 
 function inferExistingEventSource(event: CalendarEvent): CalendarCacheSource {
+  // 외부 구독은 읽기 전용이다. sourceCalendarId prefix로 먼저 걸러야 아래의
+  // "sourceCalendarId가 있으면 google" 폴백에 잘못 빨려 들어가지 않는다.
+  if (event.source === 'ics' || event.sourceCalendarId?.startsWith(ICS_CAL_PREFIX)) {
+    throw new Error('[Calendar] 외부 구독 일정은 이 앱에서 바꿀 수 없습니다');
+  }
   if (
     event.source === 'bflow'
     || event.sourceCalendarId === PRIVATE_CAL_ID

@@ -25,7 +25,7 @@ function isLegacyPrivateBflowEvent(ev: CalendarEvent): boolean {
     && ev.type !== 'vacation';
 }
 
-function sourceOf(ev: CalendarEvent): 'bflow' | 'google' | 'vacation' {
+function sourceOf(ev: CalendarEvent): 'bflow' | 'google' | 'vacation' | 'ics' {
   if (ev.source) return ev.source;
   if (ev.type === 'vacation') return 'vacation';
   if (isLegacyPrivateBflowEvent(ev)) return 'bflow';
@@ -40,6 +40,12 @@ export function filterCalendarEvents(
     const source = sourceOf(ev);
     if (source === 'vacation') return state.enabledTagIds[VACATION_CHIP_ID] !== false;
     if (source === 'google') return state.googleVisible;
+    // 외부 구독은 구글과 같은 방식으로 sourceCalendarId('ics:<구독 id>') 키로만 켜고 끈다.
+    // 태그가 없는 읽기 전용 일정이므로 태그 필터는 지나가지 않는다.
+    if (source === 'ics') {
+      const subscriptionKey = ev.sourceCalendarId;
+      return !subscriptionKey || state.visibleCalendarIds[subscriptionKey] !== false;
+    }
     const calendarId = ev.calendarId
       ?? (isLegacyPrivateBflowEvent(ev) ? state.personalCalendarId : undefined);
     if (ev.calendarId && state.knownCalendarIds && !state.knownCalendarIds.has(ev.calendarId)) return false;
@@ -61,7 +67,8 @@ export function formatEventChipText(
   const source = sourceOf(ev);
   const prefix = (ev.tagId ? tagNameById[ev.tagId] : undefined)
     ?? (source === 'google' ? '구글' : source === 'vacation' ? '휴가'
-      : ev.calendarId ? calendarNameById[ev.calendarId] : undefined);
+      : source === 'ics' ? (ev.sourceCalendarId ? calendarNameById[ev.sourceCalendarId] : undefined)
+        : ev.calendarId ? calendarNameById[ev.calendarId] : undefined);
   return prefix ? `${prefix} · ${ev.title}` : ev.title;
 }
 
