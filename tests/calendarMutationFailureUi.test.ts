@@ -1028,6 +1028,63 @@ test('side panel drops its failed-save recovery once the user cancels the edit',
   assert.equal(updateCalls.length, 1, '정본과 같은 값은 다시 저장 요청을 만들지 않는다');
 });
 
+test('side panel and quick edit refuse a second save while the first one is still pending', async () => {
+  const sidePanelHooks = createHookStore();
+  const sidePanelEvent = event();
+  const sidePanelPersistence = deferredThenable();
+  const sidePanelUpdates: Array<Partial<TestCalendarEvent>> = [];
+  const sidePanelCallbacks = {
+    onClose: () => {},
+    onUpdate: (_id: string, updates: Partial<TestCalendarEvent>) => {
+      sidePanelUpdates.push(updates);
+      return sidePanelPersistence.promise;
+    },
+    onDelete: () => {},
+  };
+
+  await renderSidePanel(sidePanelHooks, sidePanelCallbacks, sidePanelEvent, true);
+  sidePanelHooks.state[0] = true;
+  sidePanelHooks.state[1] = '첫 번째 저장';
+  await invoke(findButtonByText(await renderSidePanel(sidePanelHooks, sidePanelCallbacks, sidePanelEvent, true), '저장'));
+
+  // 저장이 아직 끝나지 않은 사이에 초안을 더 바꾸고 다시 저장을 눌러 본다.
+  sidePanelHooks.state[1] = '두 번째 저장';
+  const pendingPanel = await renderSidePanel(sidePanelHooks, sidePanelCallbacks, sidePanelEvent, true);
+  const pendingSaveButton = findButtonByText(pendingPanel, '저장');
+  assert.equal(pendingSaveButton.props.disabled, true, '저장 중에는 저장 버튼을 다시 누를 수 없다');
+  await invoke(pendingSaveButton);
+  assert.equal(
+    sidePanelUpdates.length,
+    1,
+    '진행 중인 저장이 끝나기 전에는 같은 일정의 두 번째 저장을 보내지 않는다',
+  );
+
+  const quickHooks = createHookStore();
+  const quickEvent = event();
+  const quickPersistence = deferredThenable();
+  const quickUpdates: Array<Partial<TestCalendarEvent>> = [];
+  const quickCallbacks = {
+    onClose: () => {},
+    onUpdate: (_id: string, updates: Partial<TestCalendarEvent>) => {
+      quickUpdates.push(updates);
+      return quickPersistence.promise;
+    },
+    onDelete: () => {},
+  };
+
+  await renderQuickEdit(quickHooks, quickCallbacks, quickEvent, true);
+  quickHooks.state[1] = 'edit';
+  quickHooks.state[2] = '첫 번째 저장';
+  await invoke(findButtonByText(await renderQuickEdit(quickHooks, quickCallbacks, quickEvent, true), '저장'));
+
+  quickHooks.state[2] = '두 번째 저장';
+  const pendingQuick = await renderQuickEdit(quickHooks, quickCallbacks, quickEvent, true);
+  const pendingQuickSave = findButtonByText(pendingQuick, '저장');
+  assert.equal(pendingQuickSave.props.disabled, true, '빠른 편집도 저장 중에는 저장 버튼을 잠근다');
+  await invoke(pendingQuickSave);
+  assert.equal(quickUpdates.length, 1, '빠른 편집도 진행 중인 저장과 두 번째 저장을 겹치지 않는다');
+});
+
 test('side panel rehydrates a same-event teammate update that is unrelated to a local mutation', async () => {
   const hooks = createHookStore();
   const originalEvent = event();

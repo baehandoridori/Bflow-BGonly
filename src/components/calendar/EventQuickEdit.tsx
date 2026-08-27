@@ -71,6 +71,9 @@ export function EventQuickEdit({
   const [pendingCalendar, setPendingCalendar] = useState<PendingSelection<string | undefined> | null>(null);
   const [pendingTag, setPendingTag] = useState<PendingSelection<string | undefined> | null>(null);
   const [mutationError, setMutationError] = useState<string | null>(null);
+  // 저장/삭제가 진행 중이면 같은 일정의 다음 요청을 막는다. 두 요청이 겹치면
+  // 먼저 보낸 오래된 초안이 나중에 커밋돼 방금 저장한 내용을 되돌릴 수 있다.
+  const [isMutating, setIsMutating] = useState(false);
   const calendarUpdateRequestRef = useRef(0);
   const tagUpdateRequestRef = useRef(0);
   const eventIdentityKey = calendarEventIdentityKey(event);
@@ -146,9 +149,21 @@ export function EventQuickEdit({
     setMutationError(null);
   }, [event, eventIdentityKey, eventSnapshot]);
 
-  const markMutationFailed = useCallback((mutation: LocalMutationRecovery, message: string) => {
-    if (pendingMutationRef.current !== mutation) return;
+  const beginMutation = useCallback((mutation: LocalMutationRecovery) => {
+    pendingMutationRef.current = mutation;
+    failedMutationRecoveryRef.current = null;
+    setIsMutating(true);
+  }, []);
+
+  const settleMutation = useCallback((mutation: LocalMutationRecovery): boolean => {
+    if (pendingMutationRef.current !== mutation) return false;
     pendingMutationRef.current = null;
+    setIsMutating(false);
+    return true;
+  }, []);
+
+  const markMutationFailed = useCallback((mutation: LocalMutationRecovery, message: string) => {
+    if (!settleMutation(mutation)) return;
     const latestEvent = latestEventRef.current;
     const latestSnapshot = calendarEventIdentityKey(latestEvent) === mutation.identityKey
       ? eventContentSnapshot(latestEvent)
@@ -165,10 +180,10 @@ export function EventQuickEdit({
     }
     failedMutationRecoveryRef.current = mutation;
     setMutationError(message);
-  }, []);
+  }, [settleMutation]);
 
   const handleSave = useCallback(() => {
-    if (!canWrite) return;
+    if (!canWrite || pendingMutationRef.current) return;
     const updates: Partial<CalendarEvent> = {};
     if (title !== event.title) updates.title = title;
     if (startDate !== event.startDate || endDate !== event.endDate) {
@@ -187,58 +202,48 @@ export function EventQuickEdit({
       rollbackSnapshot: eventSnapshot,
       optimisticSnapshot: directUpdateSnapshot(event, updates),
     };
-    pendingMutationRef.current = mutation;
-    failedMutationRecoveryRef.current = null;
+    beginMutation(mutation);
     try {
       const persistence = onUpdate(event.id, updates);
       if (isPromiseLike(persistence)) {
         void persistence.then(
           () => {
-            if (pendingMutationRef.current !== mutation) return;
-            pendingMutationRef.current = null;
-            onClose();
+            if (settleMutation(mutation)) onClose();
           },
           () => markMutationFailed(mutation, '일정 저장에 실패했어요. 다시 시도해 주세요.'),
         );
         return;
       }
-      if (pendingMutationRef.current !== mutation) return;
-      pendingMutationRef.current = null;
-      onClose();
+      if (settleMutation(mutation)) onClose();
     } catch {
       markMutationFailed(mutation, '일정 저장에 실패했어요. 다시 시도해 주세요.');
     }
-  }, [canWrite, endDate, event, eventIdentityKey, eventSnapshot, isCanonicalBflow, markMutationFailed, memo, onClose, onUpdate, startDate, title, type]);
+  }, [beginMutation, canWrite, endDate, event, eventIdentityKey, eventSnapshot, isCanonicalBflow, markMutationFailed, memo, onClose, onUpdate, settleMutation, startDate, title, type]);
 
   const handleDelete = useCallback(() => {
-    if (!canWrite) return;
+    if (!canWrite || pendingMutationRef.current) return;
     setMutationError(null);
     const mutation: LocalMutationRecovery = {
       identityKey: eventIdentityKey,
       rollbackSnapshot: eventSnapshot,
     };
-    pendingMutationRef.current = mutation;
-    failedMutationRecoveryRef.current = null;
+    beginMutation(mutation);
     try {
       const persistence = onDelete(event.id);
       if (isPromiseLike(persistence)) {
         void persistence.then(
           () => {
-            if (pendingMutationRef.current !== mutation) return;
-            pendingMutationRef.current = null;
-            onClose();
+            if (settleMutation(mutation)) onClose();
           },
           () => markMutationFailed(mutation, '일정 삭제에 실패했어요. 다시 시도해 주세요.'),
         );
         return;
       }
-      if (pendingMutationRef.current !== mutation) return;
-      pendingMutationRef.current = null;
-      onClose();
+      if (settleMutation(mutation)) onClose();
     } catch {
       markMutationFailed(mutation, '일정 삭제에 실패했어요. 다시 시도해 주세요.');
     }
-  }, [canWrite, event, eventIdentityKey, eventSnapshot, markMutationFailed, onClose, onDelete]);
+  }, [beginMutation, canWrite, event, eventIdentityKey, eventSnapshot, markMutationFailed, onClose, onDelete, settleMutation]);
 
   const handleDuplicate = useCallback(() => {
     onDuplicate(event);
@@ -420,7 +425,7 @@ export function EventQuickEdit({
                   <Copy size={12} className="mr-1.5 inline" /> 복사
                 </button>
                 <button
-                  disabled={!canWrite}
+                  disabled={!canWrite || isMutating}
                   aria-describedby={readOnlyDescriptionId}
                   onClick={canWrite ? handleDelete : undefined}
                   className="flex-1 cursor-pointer rounded-lg py-1.5 text-xs disabled:cursor-not-allowed disabled:opacity-45"
@@ -475,7 +480,7 @@ export function EventQuickEdit({
                     dropdownPositionClassName="left-2 right-2"
                     className="w-full resize-none rounded-lg border border-bg-border/[0.56] bg-bg-primary/[0.82] px-2.5 py-1.5 text-xs text-text-primary outline-none placeholder:text-text-secondary/45"
                   />
-                  <button onClick={handleSave} className="w-full cursor-pointer rounded-lg py-2 text-xs font-medium transition-colors" style={{ background: 'rgb(var(--color-accent))', color: 'rgb(var(--color-on-accent))' }}>저장</button>
+                  <button onClick={handleSave} disabled={isMutating} className="w-full cursor-pointer rounded-lg py-2 text-xs font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-45" style={{ background: 'rgb(var(--color-accent))', color: 'rgb(var(--color-on-accent))' }}>저장</button>
                 </div>
               )}
             </div>

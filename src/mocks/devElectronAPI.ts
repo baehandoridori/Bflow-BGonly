@@ -290,6 +290,17 @@ function mockCalendarChangeKey(scope: string, id: string): string {
   return `${scope}:${id}`;
 }
 
+/**
+ * 운영 RPC는 캘린더 patch를 직렬화해 병합한다. 프리뷰도 두 창이 같은 캘린더의 서로 다른
+ * 필드를 동시에 바꿨을 때 늦게 온 행 전체가 상대 필드를 되돌리지 않도록, 실제로 바뀐
+ * 필드만 필드별 stamp 순서로 채택한다.
+ */
+const MERGEABLE_MOCK_CALENDAR_FIELDS = new Set(['name', 'color', 'visibility']);
+
+function mockCalendarFieldChangeKey(calendarId: string, field: string): string {
+  return mockCalendarChangeKey('calendar-field', `${calendarId}|${field}`);
+}
+
 function compareMockCalendarChangeStamp(
   left: MockCalendarChangeStamp,
   right: MockCalendarChangeStamp,
@@ -548,7 +559,18 @@ function applyMockCalendarSharedSnapshot(
     if (tombstonedMockCalendarIds.has(calendarId)) return;
     const calendar = snapshot.calendars.find((candidate) => candidate.id === calendarId);
     if (!calendar) return;
-    if (rememberMockCalendarChangeStamp(mockCalendarChangeKey('calendar', calendarId), stamp)) {
+    const changedFields = readMockCalendarChangeIds(detail, 'changedFields')
+      .filter((field) => MERGEABLE_MOCK_CALENDAR_FIELDS.has(field));
+    const localCalendar = mockCalendars.find((candidate) => candidate.id === calendarId);
+    if (action === 'UPDATE' && changedFields.length > 0 && localCalendar) {
+      for (const field of changedFields) {
+        if (!rememberMockCalendarChangeStamp(mockCalendarFieldChangeKey(calendarId, field), stamp)) continue;
+        (localCalendar as unknown as Record<string, unknown>)[field] =
+          (calendar as unknown as Record<string, unknown>)[field];
+        if (calendar.updated_at > localCalendar.updated_at) localCalendar.updated_at = calendar.updated_at;
+      }
+      rememberMockCalendarChangeStamp(mockCalendarChangeKey('calendar', calendarId), stamp);
+    } else if (rememberMockCalendarChangeStamp(mockCalendarChangeKey('calendar', calendarId), stamp)) {
       upsertMockCalendar(calendar);
     }
     if ((action === 'INSERT' || detail.membersChanged === true)
@@ -724,7 +746,10 @@ function applyMockCalendarSyncState(envelope: MockCalendarSyncEnvelope): boolean
     if (scope === 'tag-list') {
       replaceMockCalendarTags(readMockCalendarTagAuthority() ?? snapshot.tags);
       changed = true;
+      continue;
     }
+
+    // calendar-field는 이후 병합 순서만 정한다. 행 내용은 calendar 항목이 채운다.
   }
 
   if (mergeMockCalendarNotifications(snapshot.notifications).length > 0) changed = true;
@@ -802,6 +827,10 @@ function recordMockCalendarChange(
     }
     if (!tombstonedMockCalendarIds.has(calendarId)) {
       rememberMockCalendarChangeStamp(mockCalendarChangeKey('calendar', calendarId), stamp);
+      for (const field of readMockCalendarChangeIds(detail, 'changedFields')) {
+        if (!MERGEABLE_MOCK_CALENDAR_FIELDS.has(field)) continue;
+        rememberMockCalendarChangeStamp(mockCalendarFieldChangeKey(calendarId, field), stamp);
+      }
       if (action === 'INSERT' || detail.membersChanged === true) {
         rememberMockCalendarChangeStamp(mockCalendarChangeKey('members', calendarId), stamp);
       }
@@ -2452,15 +2481,26 @@ export function installDevElectronAPI(): void {
         nextMembers = [];
       }
 
-      if (updates.name !== undefined) calendar.name = updates.name;
-      if (updates.color !== undefined) calendar.color = updates.color;
-      calendar.visibility = nextVisibility;
+      const changedFields: string[] = [];
+      if (updates.name !== undefined && calendar.name !== updates.name) {
+        calendar.name = updates.name;
+        changedFields.push('name');
+      }
+      if (updates.color !== undefined && calendar.color !== updates.color) {
+        calendar.color = updates.color;
+        changedFields.push('color');
+      }
+      if (calendar.visibility !== nextVisibility) {
+        calendar.visibility = nextVisibility;
+        changedFields.push('visibility');
+      }
       calendar.updated_at = new Date().toISOString();
       if (nextMembers !== undefined) applyNormalizedMockCalendarMembers(calendar.id, nextMembers);
       publishMockCalendarChange({
         table: 'calendars',
         action: 'UPDATE',
         calendarId: calendar.id,
+        changedFields,
         membersChanged: nextMembers !== undefined,
       });
     },

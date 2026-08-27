@@ -12,7 +12,9 @@ type TimeGridDnDModule = {
     original: { startDate: string; endDate: string; startTime: string; endTime: string },
     targetDate: string,
     targetMinutes: number,
+    anchorMinutes?: number,
   ): { startDate: string; endDate: string; startTime: string; endTime: string };
+  getTimeGridFallbackEndTime(startTime?: string, endTime?: string): string;
   shouldStartTimeGridDrag(start: { x: number; y: number }, current: { x: number; y: number }): boolean;
   shouldSuppressTimeGridClick(dragFinishedAt: number, now: number): boolean;
   getTimeGridAutoScrollSpeed(clientY: number, rect: { top: number; bottom: number }): number;
@@ -161,5 +163,29 @@ test('useTimeGridDnD: 하루 끝 스냅은 create를 자정으로 넘기고 move
   assert.deepEqual(
     dnd.getTimeGridEventPatch('resize-end', late, '2026-08-24', 1440),
     { startDate: '2026-08-24', endDate: '2026-08-25', startTime: '23:45', endTime: '00:00' },
+  );
+});
+
+test('useTimeGridDnD: 종료 시각이 비어 있으면 시간표와 같은 1시간 기본값으로 이동한다', async () => {
+  const dnd = await loadTimeGridDnD();
+
+  assert.equal(dnd.getTimeGridFallbackEndTime('14:00', undefined), '15:00');
+  assert.equal(dnd.getTimeGridFallbackEndTime('14:00', '14:30'), '14:30');
+  assert.equal(dnd.getTimeGridFallbackEndTime(undefined, undefined), '01:00');
+  assert.equal(
+    dnd.getTimeGridFallbackEndTime('23:30', undefined),
+    '24:00',
+    '자정에 닿는 기본 종료도 시작보다 뒤여야 길이가 음수가 되지 않는다',
+  );
+
+  const original = {
+    startDate: '2026-08-24',
+    endDate: '2026-08-24',
+    startTime: '14:00',
+    endTime: dnd.getTimeGridFallbackEndTime('14:00', undefined),
+  };
+  assert.deepEqual(
+    dnd.getTimeGridEventPatch('move', original, '2026-08-25', 600, 840),
+    { startDate: '2026-08-25', endDate: '2026-08-25', startTime: '10:00', endTime: '11:00' },
   );
 });

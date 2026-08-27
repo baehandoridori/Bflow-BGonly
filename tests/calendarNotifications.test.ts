@@ -1743,3 +1743,40 @@ test('preview keeps a generated personal calendar identical in every tab of the 
     restoreBroadcastChannel();
   }
 });
+
+test('preview merges concurrent calendar edits that touch different fields', async () => {
+  const restoreBroadcastChannel = installPreviewCalendarBroadcastChannel({ deferMessages: true });
+  const namer = await createPreviewCalendarNotificationHarness();
+  const colorer = await createPreviewCalendarNotificationHarness();
+  const unsubscribeNamer = namer.api.onCalendarChanged(() => {});
+  const unsubscribeColorer = colorer.api.onCalendarChanged(() => {});
+  try {
+    await previewLogin(namer.api, '배한솔');
+    await previewLogin(colorer.api, '배한솔');
+    const shared = await namer.api.calendarCreate({
+      name: '동시 수정 검증 캘린더',
+      color: '#74B9FF',
+      visibility: 'team',
+      members: [],
+    });
+    restoreBroadcastChannel.flush();
+
+    // 서로의 변경을 받기 전에 각자 다른 필드를 저장한다.
+    await namer.api.calendarUpdate(shared.id, { name: '이름만 바꾼 캘린더' });
+    await colorer.api.calendarUpdate(shared.id, { color: '#00B894' });
+    restoreBroadcastChannel.flush();
+    restoreBroadcastChannel.flush();
+
+    for (const [label, harness] of [['이름 쪽', namer], ['색상 쪽', colorer]] as const) {
+      const merged = (await harness.api.calendarList()).find((calendar) => calendar.id === shared.id);
+      assert.equal(merged?.name, '이름만 바꾼 캘린더', `${label} 창에서 이름 변경이 남아야 한다`);
+      assert.equal(merged?.color, '#00B894', `${label} 창에서 색상 변경이 남아야 한다`);
+    }
+  } finally {
+    unsubscribeColorer();
+    unsubscribeNamer();
+    colorer.restore();
+    namer.restore();
+    restoreBroadcastChannel();
+  }
+});

@@ -129,6 +129,9 @@ export function EventSidePanel({
   const [draftStartTime, setDraftStartTime] = useState(event.startTime ?? '');
   const [draftEndTime, setDraftEndTime] = useState(event.endTime ?? '');
   const [mutationError, setMutationError] = useState<string | null>(null);
+  // 저장/삭제가 진행 중이면 같은 일정의 다음 요청을 막는다. 두 요청이 겹치면
+  // 먼저 보낸 오래된 초안이 나중에 커밋돼 방금 저장한 내용을 되돌릴 수 있다.
+  const [isMutating, setIsMutating] = useState(false);
   const users = useAuthStore((s) => s.users);
   const userNames = useMemo(() => users.map((u) => u.name), [users]);
   const currentUser = useAuthStore((state) => state.currentUser);
@@ -250,9 +253,21 @@ export function EventSidePanel({
     return parts.join(' ');
   })();
 
-  const markMutationFailed = (mutation: LocalMutationRecovery, message: string) => {
-    if (pendingMutationRef.current !== mutation) return;
+  const beginMutation = (mutation: LocalMutationRecovery) => {
+    pendingMutationRef.current = mutation;
+    failedMutationRecoveryRef.current = null;
+    setIsMutating(true);
+  };
+
+  const settleMutation = (mutation: LocalMutationRecovery): boolean => {
+    if (pendingMutationRef.current !== mutation) return false;
     pendingMutationRef.current = null;
+    setIsMutating(false);
+    return true;
+  };
+
+  const markMutationFailed = (mutation: LocalMutationRecovery, message: string) => {
+    if (!settleMutation(mutation)) return;
     const latestEvent = latestEventRef.current;
     const latestSnapshot = calendarEventIdentityKey(latestEvent) === mutation.identityKey
       ? eventContentSnapshot(latestEvent)
@@ -272,7 +287,7 @@ export function EventSidePanel({
       setEditing(false);
       return;
     }
-    if (isTimedSaveBlocked) return;
+    if (isTimedSaveBlocked || pendingMutationRef.current) return;
     const updates: Partial<CalendarEvent> = {};
     const nextStartDate = fromInputDate(draftStart);
     const nextEndDate = fromInputDate(draftEnd);
@@ -312,24 +327,19 @@ export function EventSidePanel({
       rollbackSnapshot: eventSnapshot,
       optimisticSnapshot: directUpdateSnapshot(event, updates),
     };
-    pendingMutationRef.current = mutation;
-    failedMutationRecoveryRef.current = null;
+    beginMutation(mutation);
     try {
       const persistence = onUpdate(event.id, updates);
       if (isPromiseLike(persistence)) {
         void persistence.then(
           () => {
-            if (pendingMutationRef.current !== mutation) return;
-            pendingMutationRef.current = null;
-            setEditing(false);
+            if (settleMutation(mutation)) setEditing(false);
           },
           () => markMutationFailed(mutation, '일정 저장에 실패했어요. 다시 시도해 주세요.'),
         );
         return;
       }
-      if (pendingMutationRef.current !== mutation) return;
-      pendingMutationRef.current = null;
-      setEditing(false);
+      if (settleMutation(mutation)) setEditing(false);
     } catch {
       markMutationFailed(mutation, '일정 저장에 실패했어요. 다시 시도해 주세요.');
     }
@@ -339,30 +349,25 @@ export function EventSidePanel({
   const handleCancel = abandonEdit;
 
   const handleDelete = () => {
-    if (isVacation || isViewOnly) return;
+    if (isVacation || isViewOnly || pendingMutationRef.current) return;
     setMutationError(null);
     const mutation: LocalMutationRecovery = {
       identityKey: eventIdentityKey,
       rollbackSnapshot: eventSnapshot,
     };
-    pendingMutationRef.current = mutation;
-    failedMutationRecoveryRef.current = null;
+    beginMutation(mutation);
     try {
       const persistence = onDelete(event.id);
       if (isPromiseLike(persistence)) {
         void persistence.then(
           () => {
-            if (pendingMutationRef.current !== mutation) return;
-            pendingMutationRef.current = null;
-            onClose();
+            if (settleMutation(mutation)) onClose();
           },
           () => markMutationFailed(mutation, '일정 삭제에 실패했어요. 다시 시도해 주세요.'),
         );
         return;
       }
-      if (pendingMutationRef.current !== mutation) return;
-      pendingMutationRef.current = null;
-      onClose();
+      if (settleMutation(mutation)) onClose();
     } catch {
       markMutationFailed(mutation, '일정 삭제에 실패했어요. 다시 시도해 주세요.');
     }
@@ -751,7 +756,7 @@ export function EventSidePanel({
             </button>
             <button
               onClick={handleSave}
-              disabled={isTimedSaveBlocked}
+              disabled={isTimedSaveBlocked || isMutating}
               className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg text-xs font-medium bg-[#6C5CE7]/20 text-[#6C5CE7] hover:bg-[#6C5CE7]/30 transition-colors cursor-pointer disabled:cursor-not-allowed disabled:opacity-45"
             >
               <Save size={13} />
@@ -776,7 +781,8 @@ export function EventSidePanel({
             </div>
             <button
               onClick={handleDelete}
-              className="w-full flex items-center justify-center gap-1.5 py-2 rounded-lg text-xs font-medium bg-red-500/10 text-red-400 hover:bg-red-500/20 transition-colors cursor-pointer"
+              disabled={isMutating}
+              className="w-full flex items-center justify-center gap-1.5 py-2 rounded-lg text-xs font-medium bg-red-500/10 text-red-400 hover:bg-red-500/20 transition-colors cursor-pointer disabled:cursor-not-allowed disabled:opacity-45"
             >
               <Trash2 size={12} />
               삭제

@@ -127,6 +127,20 @@ export function getTimeGridEventPatch(
   };
 }
 
+/**
+ * calendar_events.end_time은 nullable이다. 시간표는 종료가 비면 1시간 블록으로 그리므로
+ * 드래그의 원본 길이도 같은 기본값을 써야 한다. 15분 고정값을 쓰면 14:00 같은 행이
+ * 음수 길이로 계산돼 시작보다 이른 종료를 저장하려다 거부·롤백된다.
+ */
+export function getTimeGridFallbackEndTime(startTime?: string, endTime?: string): string {
+  if (endTime) return endTime;
+  const start = Math.max(0, Math.min(DAY_END_MINUTES, timeToMinutes(startTime ?? '00:00')));
+  const end = Math.min(DAY_END_MINUTES, start + 60);
+  // minutesToTime은 1440을 '00:00'으로 접어 길이를 음수로 만든다. 이 값은 길이 계산용
+  // 원본에만 쓰이고 저장 패치는 normalizeEndDateTime을 거치므로 24:00을 그대로 둔다.
+  return end === DAY_END_MINUTES ? '24:00' : minutesToTime(end);
+}
+
 export function shouldStartTimeGridDrag(start: { x: number; y: number }, current: { x: number; y: number }): boolean {
   return Math.hypot(current.x - start.x, current.y - start.y) >= DRAG_THRESHOLD_PX;
 }
@@ -285,7 +299,7 @@ export function useTimeGridDnD({ scrollContainerRef, onCreate, onEventChange }: 
       startDate: source.startDate,
       endDate: source.endDate,
       startTime: source.startTime ?? '00:00',
-      endTime: source.endTime ?? '00:15',
+      endTime: getTimeGridFallbackEndTime(source.startTime, source.endTime),
     };
     const identity = snapshotCalendarEventIdentity(source);
     const state: ActiveTimeGridDrag = {
