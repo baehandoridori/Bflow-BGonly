@@ -109,6 +109,7 @@ type ScheduleGridProps = {
   calendarNameById: Record<string, string>;
   focusedDate?: string | null;
   pulseDate?: string | null;
+  instantTransition?: boolean;
   highlightedEventIdentities?: ReadonlySet<string>;
   reduceMotion?: boolean;
   onEventClick(event: ScheduleCalendarEvent): void;
@@ -5904,6 +5905,43 @@ test('CalendarGrid renders tag-aware chip text while keeping each event color as
   const tintStyle = tintedChipBody.props.style as { background?: string; borderLeft?: string };
   assert.match(tintStyle.background ?? '', /#74B9FF/, 'the chip tint still comes from event.color');
   assert.equal(tintStyle.borderLeft, '3px solid #74B9FF', 'the chip border still comes from event.color');
+});
+
+test('rapid period navigation draws the next period instantly instead of queueing slides', async () => {
+  resetHarness();
+  const clock = installScheduleFakeClock();
+  const monthGrid = () => scheduleGridProps.at(-1);
+  try {
+    let tree = await renderScheduleView();
+    await flushScheduleMountEffects();
+    tree = await renderScheduleView();
+
+    assert.equal(monthGrid()?.instantTransition, false, '처음에는 평소 전환을 쓴다');
+
+    // 첫 이동은 평소대로 애니메이션한다.
+    buttonByLabel(tree, '다음 기간').props.onClick?.();
+    tree = await renderScheduleView();
+    assert.equal(monthGrid()?.instantTransition, false, '한 번만 눌렀을 때는 전환을 유지한다');
+
+    // 300ms 안에 다시 누르면 그 전환은 즉시 그린다.
+    clock.advance(120);
+    buttonByLabel(tree, '다음 기간').props.onClick?.();
+    tree = await renderScheduleView();
+    assert.equal(monthGrid()?.instantTransition, true, '연타 중에는 슬라이드를 건너뛴다');
+
+    // 손을 떼고 300ms가 지나면 평소 전환으로 돌아온다.
+    clock.advance(300);
+    tree = await renderScheduleView();
+    assert.equal(monthGrid()?.instantTransition, false, '연타가 끝나면 전환이 돌아온다');
+
+    // 충분히 뜸을 들인 다음 이동은 다시 애니메이션한다.
+    clock.advance(1_000);
+    buttonByLabel(tree, '이전 기간').props.onClick?.();
+    await renderScheduleView();
+    assert.equal(monthGrid()?.instantTransition, false, '천천히 누르면 전환을 유지한다');
+  } finally {
+    clock.restore();
+  }
 });
 
 test('tag chips pop on toggle and the filtered result fades instead of jumping', async () => {

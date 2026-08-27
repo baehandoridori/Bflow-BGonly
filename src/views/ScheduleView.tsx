@@ -52,6 +52,7 @@ type WeekSubMode = 'card' | 'timegrid';
 const CALENDAR_VIEW_STORAGE_KEY = 'bflow_calendar_view_v1';
 const CALENDAR_VIEW_MODES: CalendarViewMode[] = ['month', '2week', 'week', 'today'];
 const LOCAL_CHANGE_GUARD_MS = 3_000;
+const RAPID_PERIOD_NAV_MS = 300;
 const REALTIME_HIGHLIGHT_MS = 2_000;
 
 type LocalChangeGuard = {
@@ -710,8 +711,29 @@ export function ScheduleView() {
     moveToDay(new Date(year, 0, requestedIndex + 1, 12, 0, 0, 0));
   }, [moveToDay, year]);
 
+  // 기간 이동을 연타하면 전환 애니메이션이 밀려 화면이 계속 흐르는 것처럼 보인다.
+  // 300ms 안에 다시 누르면 그 다음 전환은 즉시 그린다.
+  const periodNavigatedAtRef = useRef(0);
+  const periodNavigationResetRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [skipPeriodTransition, setSkipPeriodTransition] = useState(false);
+  const markPeriodNavigation = useCallback(() => {
+    const now = Date.now();
+    const isRapidRepeat = now - periodNavigatedAtRef.current < RAPID_PERIOD_NAV_MS;
+    periodNavigatedAtRef.current = now;
+    setSkipPeriodTransition(isRapidRepeat);
+    if (periodNavigationResetRef.current) clearTimeout(periodNavigationResetRef.current);
+    periodNavigationResetRef.current = setTimeout(
+      () => setSkipPeriodTransition(false),
+      RAPID_PERIOD_NAV_MS,
+    );
+  }, []);
+  useEffect(() => () => {
+    if (periodNavigationResetRef.current) clearTimeout(periodNavigationResetRef.current);
+  }, []);
+
   // 네비게이션
   const goToPrev = () => {
+    markPeriodNavigation();
     setFocusedDate(null);
     if (viewMode === 'month') {
       setMonthDir(-1);
@@ -726,6 +748,7 @@ export function ScheduleView() {
   };
 
   const goToNext = () => {
+    markPeriodNavigation();
     setFocusedDate(null);
     if (viewMode === 'month') {
       setMonthDir(1);
@@ -1033,12 +1056,14 @@ export function ScheduleView() {
         if (e.key === 'ArrowUp' || e.key === 'ArrowLeft') {
           e.preventDefault();
           e.stopPropagation();
+          markPeriodNavigation();
           moveWeekBy(-1);
           return;
         }
         if (e.key === 'ArrowDown' || e.key === 'ArrowRight') {
           e.preventDefault();
           e.stopPropagation();
+          markPeriodNavigation();
           moveWeekBy(1);
           return;
         }
@@ -1050,12 +1075,14 @@ export function ScheduleView() {
         if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') {
           e.preventDefault();
           e.stopPropagation();
+          markPeriodNavigation();
           moveDayBy(-1);
           return;
         }
         if (e.key === 'ArrowRight' || e.key === 'ArrowDown') {
           e.preventDefault();
           e.stopPropagation();
+          markPeriodNavigation();
           moveDayBy(1);
           return;
         }
@@ -1513,7 +1540,7 @@ export function ScheduleView() {
             initial={reduce ? false : { opacity: 0, y: 8 }}
             animate={{ opacity: filterFadeOpacity, y: 0 }}
             exit={reduce ? undefined : { opacity: 0, y: -8 }}
-            transition={reduce
+            transition={reduce || skipPeriodTransition
               ? { duration: 0 }
               : { duration: 0.2, ease: [0.16, 1, 0.3, 1], opacity: { duration: 0.12 } }}
             className="flex-1 flex flex-col overflow-hidden"
@@ -1587,6 +1614,7 @@ export function ScheduleView() {
                 onEventContextMenu={handleEventContextMenu}
                 monthKey={`${year}-${month}`}
                 monthDirection={monthDir}
+                instantTransition={skipPeriodTransition}
                 focusedDate={focusedDate}
                 pulseDate={pulseDate}
                 highlightedEventIdentities={highlightedEventIdentities}

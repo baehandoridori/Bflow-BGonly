@@ -452,6 +452,7 @@ export function CalendarGrid({
   onWheel,
   monthKey,
   monthDirection = 0,
+  instantTransition = false,
   focusedDate,
   pulseDate,
   highlightedEventIdentities,
@@ -475,6 +476,7 @@ export function CalendarGrid({
   onEventContextMenu?: (ev: CalendarEvent, e: React.MouseEvent) => void;
   monthKey?: string;
   monthDirection?: number;
+  instantTransition?: boolean;
   focusedDate?: string | null;
   pulseDate?: string | null;
   highlightedEventIdentities?: ReadonlySet<string>;
@@ -518,10 +520,10 @@ export function CalendarGrid({
       <AnimatePresence mode="popLayout" initial={false}>
       <motion.div
         key={monthKey || 'default'}
-        initial={{ opacity: 0, y: monthDirection > 0 ? 30 : -30 }}
+        initial={instantTransition ? false : { opacity: 0, y: monthDirection > 0 ? 30 : -30 }}
         animate={{ opacity: 1, y: 0 }}
-        exit={{ opacity: 0, y: monthDirection > 0 ? -30 : 30 }}
-        transition={{ duration: 0.3, ease: [0.16, 1, 0.3, 1] }}
+        exit={instantTransition ? undefined : { opacity: 0, y: monthDirection > 0 ? -30 : 30 }}
+        transition={instantTransition ? { duration: 0 } : { duration: 0.3, ease: [0.16, 1, 0.3, 1] }}
         className="flex flex-col flex-1 min-h-0 rounded-xl overflow-hidden border border-bg-border/30"
       >
         {weeks.map((week, wi) => {
