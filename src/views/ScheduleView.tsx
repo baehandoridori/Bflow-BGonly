@@ -1110,6 +1110,15 @@ export function ScheduleView() {
     );
   }, [moveToDay, moveToWeekContaining]);
 
+  /**
+   * 미니 달력 클릭은 생성이 아니라 이동이다(D13 G4). 생성은 셀 클릭·+일정 버튼 경로가 있다.
+   * 월간은 그 달로 포커스+펄스, 주간은 그 주로(서브모드 유지), 오늘 보기는 그 날짜로 간다.
+   */
+  const handleMiniCalendarDateSelect = useCallback((dateStr: string) => {
+    applyScheduleDateNavigation({ date: dateStr });
+    if (viewMode === 'month') setFocusedDate(dateStr);
+  }, [applyScheduleDateNavigation, viewMode]);
+
   useEffect(() => {
     if (currentView !== 'schedule' || !pendingScheduleDateNavigationRequest) return;
     const request = consumeScheduleDateNavigationRequest(pendingScheduleDateNavigationRequest.id);
@@ -1276,6 +1285,19 @@ export function ScheduleView() {
 
   // 사이드바 상태
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  // 주간·2주는 보고 있는 주를, 오늘 보기는 그 날짜를, 월간은 키보드 포커스 날짜를 표시한다.
+  const miniCalendarActiveWeekStart = useMemo(() => {
+    if (viewMode !== 'week' && viewMode !== '2week') return undefined;
+    const activeWeek = weeks[activeWeekIndex];
+    return activeWeek?.[0] ? fmtDate(activeWeek[0]) : undefined;
+  }, [activeWeekIndex, viewMode, weeks]);
+
+  const miniCalendarSelectedDate = useMemo(() => {
+    if (viewMode === 'today') return fmtDate(new Date(year, 0, activeDayIndex + 1, 12, 0, 0, 0));
+    if (viewMode === 'month') return focusedDate ?? undefined;
+    return undefined;
+  }, [activeDayIndex, focusedDate, viewMode, year]);
+
   const handleOpenTagManager = useCallback((anchorRect: DOMRect) => {
     setTagManagerAnchor(anchorRect);
   }, []);
@@ -1301,6 +1323,14 @@ export function ScheduleView() {
               접기
             </button>
             <div className="min-h-0 flex-1 overflow-y-auto pr-1">
+              <MiniCalendar
+                currentMonth={new Date(year, month, 1)}
+                onMonthChange={(d) => { setYear(d.getFullYear()); setMonth(d.getMonth()); }}
+                onDateSelect={handleMiniCalendarDateSelect}
+                events={filteredEvents}
+                activeWeekStart={miniCalendarActiveWeekStart}
+                selectedDate={miniCalendarSelectedDate}
+              />
               {viewMode === 'today' ? (
                 <DaySidebar
                   activeDayIndex={activeDayIndex}
@@ -1318,18 +1348,7 @@ export function ScheduleView() {
                   currentMonth={month}
                   currentYear={year}
                 />
-              ) : (
-                <MiniCalendar
-                  currentMonth={new Date(year, month, 1)}
-                  onMonthChange={(d) => { setYear(d.getFullYear()); setMonth(d.getMonth()); }}
-                  onDateSelect={(dateStr) => {
-                    setCreateDate(dateStr);
-                    setShowCreate(true);
-                  }}
-                  events={filteredEvents}
-                  selectedDate={createDate}
-                />
-              )}
+              ) : null}
               <CalendarRail
                 isAuthenticated={googleAuthenticated}
                 onOpenSettings={(calendar) => setCalendarSettings(calendar)}

@@ -314,6 +314,14 @@ let schedulePanelProps: SchedulePanelProps[] = [];
 let scheduleQuickEditProps: ScheduleQuickEditProps[] = [];
 let scheduleWeekScrollProps: WeekScrollViewProps[] = [];
 let scheduleTimeGridProps: WeekTimeGridViewProps[] = [];
+type MiniCalendarProps = {
+  currentMonth: Date;
+  onMonthChange(month: Date): void;
+  onDateSelect(dateStr: string): void;
+  activeWeekStart?: string;
+  selectedDate?: string;
+};
+let scheduleMiniCalendarProps: MiniCalendarProps[] = [];
 let scheduleDayScrollProps: DayScrollViewProps[] = [];
 let scheduleCreateModalProps: EventCreateModalProps[] = [];
 let scheduleReducedMotion = false;
@@ -692,6 +700,7 @@ function resetHarness(): void {
   scheduleQuickEditProps = [];
   scheduleWeekScrollProps = [];
   scheduleTimeGridProps = [];
+  scheduleMiniCalendarProps = [];
   scheduleDayScrollProps = [];
   scheduleCreateModalProps = [];
   scheduleReducedMotion = false;
@@ -1385,7 +1394,12 @@ async function loadScheduleView(): Promise<ScheduleViewComponent> {
       }
       if (id === '@/utils/vacationEvents') return { mapVacationEvents: () => [] };
       if (id === '@/components/calendar/MiniCalendar') {
-        return { MiniCalendar: () => jsxRuntime.jsx('div', { 'data-testid': 'mini-calendar', children: '미니 캘린더' }) };
+        return {
+          MiniCalendar: (props: MiniCalendarProps) => {
+            scheduleMiniCalendarProps.push(props);
+            return jsxRuntime.jsx('div', { 'data-testid': 'mini-calendar', children: '미니 캘린더' });
+          },
+        };
       }
       if (id === '@/components/calendar/WeekScrollView') {
         return {
@@ -6178,6 +6192,73 @@ test('ScheduleView passes tag and calendar lookup maps to its only month grid', 
     'editable-share': '리드 회의',
     'view-share': '외부 보기',
   });
+});
+
+test('ScheduleView shows the mini calendar in every view and navigates instead of creating', async () => {
+  resetHarness();
+  let tree = await renderScheduleView();
+  await flushScheduleMountEffects();
+  buttonByTitle(tree, '사이드바 펼치기').props.onClick?.();
+  tree = await renderScheduleView();
+
+  assert.equal(
+    findElements(tree, (node) => node.props['data-testid'] === 'mini-calendar').length,
+    1,
+    '월 보기에도 미니 달력이 있다',
+  );
+
+  scheduleMiniCalendarProps.at(-1)?.onDateSelect('2026-08-11');
+  tree = await renderScheduleView();
+  assert.equal(scheduleCreateModalProps.length, 0, '미니 달력 클릭은 새 일정 창을 열지 않는다');
+  assert.equal(scheduleGridProps.at(-1)?.pulseDate, '2026-08-11', '고른 날짜로 이동해 펄스로 알린다');
+  assert.equal(scheduleGridProps.at(-1)?.focusedDate, '2026-08-11', '월 보기는 그 날짜를 포커스로 잡는다');
+
+  // 주간 보기: 미니 달력과 주간 사이드바가 함께 보이고 현재 주를 하이라이트한다.
+  resetHarness();
+  scheduleLocalStorage.set('bflow_calendar_view_v1', JSON.stringify({ viewMode: 'week', weekSubMode: 'card' }));
+  tree = await renderScheduleView();
+  await flushScheduleMountEffects();
+  buttonByTitle(tree, '사이드바 펼치기').props.onClick?.();
+  tree = await renderScheduleView();
+
+  assert.equal(
+    findElements(tree, (node) => node.props['data-testid'] === 'mini-calendar').length,
+    1,
+    '주간 보기에도 미니 달력이 있다',
+  );
+  assert.equal(
+    findElements(tree, (node) => node.props['data-testid'] === 'week-sidebar').length,
+    1,
+    '기존 주간 사이드바는 미니 달력 아래에 그대로 남는다',
+  );
+  const weekStart = scheduleMiniCalendarProps.at(-1)?.activeWeekStart;
+  assert.ok(weekStart, '주간 보기는 보고 있는 주를 미니 달력에 표시한다');
+  assert.equal(new Date(`${weekStart}T12:00:00`).getDay(), 0, '주 하이라이트는 일요일에서 시작한다');
+
+  // 오늘 보기: 미니 달력과 일간 사이드바가 함께 보이고 그 날짜를 표시한다.
+  resetHarness();
+  scheduleLocalStorage.set('bflow_calendar_view_v1', JSON.stringify({ viewMode: 'today', weekSubMode: 'card' }));
+  tree = await renderScheduleView();
+  await flushScheduleMountEffects();
+  buttonByTitle(tree, '사이드바 펼치기').props.onClick?.();
+  tree = await renderScheduleView();
+
+  assert.equal(
+    findElements(tree, (node) => node.props['data-testid'] === 'mini-calendar').length,
+    1,
+    '오늘 보기에도 미니 달력이 있다',
+  );
+  assert.equal(
+    findElements(tree, (node) => node.props['data-testid'] === 'day-sidebar').length,
+    1,
+    '기존 일간 사이드바는 미니 달력 아래에 그대로 남는다',
+  );
+  assert.match(
+    String(scheduleMiniCalendarProps.at(-1)?.selectedDate ?? ''),
+    /^\d{4}-\d{2}-\d{2}$/,
+    '오늘 보기는 보고 있는 날짜를 미니 달력에 표시한다',
+  );
+  assert.equal(scheduleMiniCalendarProps.at(-1)?.activeWeekStart, undefined);
 });
 
 test('ScheduleView opens TagManagerPopover with the exact TagBar anchor', async () => {
