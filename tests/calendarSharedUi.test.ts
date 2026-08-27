@@ -923,6 +923,12 @@ function resetHarness(): void {
   });
 }
 
+let railSubscribeFormProps: Record<string, unknown>[] = [];
+let railConfirmResult = true;
+const jsxRuntimeForRail = createRequire(import.meta.url)('react/jsx-runtime') as {
+  jsx(type: unknown, props: unknown, key?: string): ReactNode;
+};
+
 async function loadRail(): Promise<CalendarRailComponent> {
   bundledRail ??= build({
     entryPoints: ['src/components/calendar/CalendarRail.tsx'],
@@ -938,6 +944,8 @@ async function loadRail(): Promise<CalendarRailComponent> {
       '@/stores/useCalendarStore',
       '@/stores/useAuthStore',
       '@/stores/useAppStore',
+      '@/components/common/ConfirmDialog',
+      '@/components/calendar/IcsSubscribeForm',
     ],
   }).then((result) => {
     const module = { exports: {} as Record<string, unknown> };
@@ -960,6 +968,7 @@ async function loadRail(): Promise<CalendarRailComponent> {
             }];
           },
           useEffect: () => {},
+          useCallback: (callback: unknown) => callback,
           useRef: (initial: unknown) => ({ current: initial }),
           useMemo: (factory: () => unknown) => factory(),
         };
@@ -967,7 +976,23 @@ async function loadRail(): Promise<CalendarRailComponent> {
       if (id === 'react/jsx-runtime') return nodeRequire('react/jsx-runtime');
       if (id === 'lucide-react') {
         const Icon = () => null;
-        return { BellOff: Icon, Check: Icon, ChevronDown: Icon, MoreHorizontal: Icon, Plus: Icon, Settings: Icon };
+        return {
+          AlertTriangle: Icon, BellOff: Icon, Check: Icon, ChevronDown: Icon,
+          MoreHorizontal: Icon, Plus: Icon, RefreshCw: Icon, Settings: Icon, Trash2: Icon,
+        };
+      }
+      if (id === '@/components/common/ConfirmDialog') {
+        return { ConfirmDialog: { show: async () => railConfirmResult } };
+      }
+      if (id === '@/components/calendar/IcsSubscribeForm') {
+        return {
+          IcsSubscribeForm: (props: Record<string, unknown>) => {
+            railSubscribeFormProps.push(props);
+            return jsxRuntimeForRail.jsx('div', {
+              'aria-label': props.initial ? '구독 이름·색 바꾸기' : '주소로 구독 추가',
+            });
+          },
+        };
       }
       if (id === '@/stores/useCalendarStore') return {
         useCalendarStore: (selector: (state: typeof calendarState) => unknown) => selector(calendarState),
@@ -2162,8 +2187,15 @@ async function loadDayScrollView(): Promise<DayScrollViewComponent> {
   return bundledDayScrollView;
 }
 
-async function renderRail(isAuthenticated: boolean): Promise<ReactNode> {
+async function renderRail(
+  isAuthenticated: boolean,
+  options: { resetState?: boolean } = {},
+): Promise<ReactNode> {
   const CalendarRail = await loadRail();
+  // stateSlots는 컴포넌트 사이에 공유된다. 다른 컴포넌트를 먼저 렌더한 테스트는
+  // 남은 값이 레일의 훅 슬롯으로 새지 않도록 resetState를 켜야 한다. 레일을 연달아
+  // 렌더하며 열린 메뉴 같은 상태를 이어 보는 테스트는 기본값(유지)을 쓴다.
+  if (options.resetState) stateSlots = [];
   stateCursor = 0;
   return resolveComponents(CalendarRail({
     isAuthenticated,
@@ -6049,6 +6081,82 @@ test('rapid period navigation draws the next period instantly instead of queuein
   }
 });
 
+test('the rail lists ICS subscriptions with their own toggle, refresh, rename and unsubscribe', async () => {
+  resetHarness();
+  railSubscribeFormProps = [];
+  railConfirmResult = true;
+
+  const subscriptions = [{
+    id: 'sub-1',
+    name: '외부 팀 캘린더',
+    url: 'https://example.com/team.ics',
+    color: '#00B894',
+    enabled: true,
+    lastFetchedAt: '2026-09-01T00:00:00.000Z',
+    lastError: null as string | null,
+  }];
+  const calls: string[] = [];
+  const previousApi = (globalThis as { window?: { electronAPI?: unknown } }).window;
+  (globalThis as unknown as { window: Record<string, unknown> }).window = {
+    electronAPI: {
+      icsList: async () => subscriptions.map((row) => ({ ...row })),
+      icsRefresh: async (id: string) => { calls.push(`refresh:${id}`); },
+      icsRemove: async (id: string) => { calls.push(`remove:${id}`); },
+      icsUpdate: async (id: string, patch: Record<string, unknown>) => {
+        calls.push(`update:${id}:${JSON.stringify(patch)}`);
+        return null;
+      },
+      onIcsChanged: () => () => {},
+    },
+    dispatchEvent: () => true,
+    CustomEvent: class {},
+  };
+
+  try {
+    // 훅 mock의 useEffect가 비어 있어 목록은 직접 채워 준 상태로 렌더한다.
+    stateSlots = [];
+    stateCursor = 0;
+    let tree = await renderRail(false, { resetState: true });
+    stateSlots[1] = subscriptions.map((row) => ({ ...row }));
+    tree = await renderRail(false);
+
+    assert.match(textContent(tree), /구독/, '레일에 구독 섹션이 있다');
+    const toggle = buttonByLabel(tree, '외부 팀 캘린더 표시');
+    assert.equal(toggle.props['aria-pressed'], true, '기본값은 켜짐이다');
+    toggle.props.onClick?.();
+    assert.equal(
+      calendarState.visibleCalendarIds['ics:sub-1'],
+      false,
+      '구독 토글은 구독 전용 키만 쓴다',
+    );
+
+    // ⋯ 메뉴: 지금 새로고침 / 이름·색 바꾸기 / 구독 해제
+    buttonByLabel(tree, '외부 팀 캘린더 메뉴 열기').props.onClick?.({ stopPropagation() {} });
+    tree = await renderRail(false);
+    const menuItems = findButtons(tree).filter((button) => button.props.role === 'menuitem');
+    assert.deepEqual(
+      menuItems.map((button) => textContent(button).trim()),
+      ['이름·색 바꾸기', '지금 새로고침', '구독 해제'],
+    );
+
+    await menuItems[1].props.onClick?.();
+    await Promise.resolve();
+    assert.ok(calls.includes('refresh:sub-1'), '지금 새로고침이 그 구독만 갱신한다');
+
+    // 실패한 구독은 경고 아이콘과 마지막 확인 시각을 함께 보여 준다.
+    subscriptions[0].lastError = '네트워크가 불안정합니다';
+    stateSlots[1] = subscriptions.map((row) => ({ ...row }));
+    tree = await renderRail(false);
+    const warning = findElements(tree, (node) => node.props['aria-label'] === '외부 팀 캘린더 불러오기 실패')[0];
+    assert.ok(warning, '실패하면 경고 아이콘이 뜬다');
+    assert.match(String(warning.props.title), /네트워크가 불안정합니다/);
+    assert.match(String(warning.props.title), /마지막 확인/, '마지막 성공 시각도 함께 알려 준다');
+  } finally {
+    if (previousApi === undefined) delete (globalThis as { window?: unknown }).window;
+    else (globalThis as unknown as { window: unknown }).window = previousApi;
+  }
+});
+
 test('tag chips pop on toggle and the filtered result fades instead of jumping', async () => {
   resetHarness();
   tagBarReducedMotion = false;
@@ -7200,7 +7308,7 @@ test('CalendarSettingsModal updates calendar metadata and event presentation bef
     assert.ok(optimistic, 'the rail store changes in the same turn instead of waiting for IPC');
     assert.match(optimistic.id, /^optimistic-calendar:/, 'the placeholder is visibly local, not a fake server UUID');
     assert.equal(optimistic.canEdit, false, 'events cannot be persisted against the local-only placeholder');
-    assert.match(textContent(await renderRail(false)), /즉시 보이는 캘린더/);
+    assert.match(textContent(await renderRail(false, { resetState: true })), /즉시 보이는 캘린더/);
     assert.deepEqual(settingsApiCalls[0].args, [{
       name: '즉시 보이는 캘린더',
       color: '#6C5CE7',
@@ -7248,7 +7356,7 @@ test('CalendarSettingsModal updates calendar metadata and event presentation bef
       optimistic && { name: optimistic.name, color: optimistic.color, visibility: optimistic.visibility },
       { name: '수정 즉시', color: '#74B9FF', visibility: 'team' },
     );
-    const rail = await renderRail(false);
+    const rail = await renderRail(false, { resetState: true });
     assert.match(textContent(rail), /팀 전체.*수정 즉시/);
     assert.equal(buttonByLabel(rail, '수정 즉시 표시').props.style?.backgroundColor, '#74B9FF');
     assert.equal(settingsCachedEvents[0]?.color, '#74B9FF', 'existing event chips derive the new calendar tint without an event reload');
@@ -7275,7 +7383,7 @@ test('CalendarSettingsModal updates calendar metadata and event presentation bef
     await new Promise<void>((resolve) => setImmediate(resolve));
 
     assert.equal(calendarState.calendars.some((item) => item.id === editable.id), false);
-    assert.doesNotMatch(textContent(await renderRail(false)), /즉시 삭제/);
+    assert.doesNotMatch(textContent(await renderRail(false, { resetState: true })), /즉시 삭제/);
     assert.deepEqual(settingsCachedEvents, [], 'known-calendar filtering hides deleted calendar events immediately');
     assert.deepEqual(settingsApiCalls.map((call) => call.name), ['calendarDelete']);
 

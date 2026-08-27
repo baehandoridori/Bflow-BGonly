@@ -2885,6 +2885,20 @@ export default function App() {
     return () => { cleanup?.(); };
   }, []);
 
+  // ─── 외부 캘린더(ICS) 구독 일정 로드 + 주기 갱신 수신 ─────
+  // 구독 일정은 별도 캐시라 B flow/Google 동기화 경로로는 채워지지 않는다.
+  // 시작 시 한 번 읽고, 메인의 주기 갱신이 끝나면 다시 읽어 화면에 알린다.
+  useEffect(() => {
+    const reloadIcsEvents = async () => {
+      const { loadIcsEvents } = await import('@/services/calendarService');
+      if (!(await loadIcsEvents())) return;
+      window.dispatchEvent(new CustomEvent('bflow:calendar-changed', { detail: { action: 'ics' } }));
+    };
+    void reloadIcsEvents();
+    const cleanup = window.electronAPI?.onIcsChanged?.(() => { void reloadIcsEvents(); });
+    return () => { cleanup?.(); };
+  }, []);
+
   // ─── 휴가 등록 완료 브로드캐스트 구독 → Sonner 토스트 ─────
   useEffect(() => {
     const cleanup = window.electronAPI?.onVacationRegistered?.((payload) => {

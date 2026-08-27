@@ -285,6 +285,17 @@ function buildMockIcsEvents(): IcsEventDto[] {
 }
 
 const mockIcsEvents = buildMockIcsEvents();
+const mockIcsChangeListeners = new Set<(payload: unknown) => void>();
+
+function notifyMockIcsChanged(subId: string | null): void {
+  for (const listener of mockIcsChangeListeners) {
+    try {
+      listener({ subId });
+    } catch (error) {
+      console.warn('[dev preview ics] 변경 listener 실패:', error);
+    }
+  }
+}
 
 const mockCalendarNotifications = buildMockCalendarNotifications();
 let nextMockCalendarNotificationSequence = 0;
@@ -3220,6 +3231,7 @@ export function installDevElectronAPI(): void {
         lastError: null,
       };
       mockIcsSubscriptions.push(created);
+      notifyMockIcsChanged(created.id);
       return { ...created };
     },
     icsUpdate: async (id: string, patch: IcsSubscriptionUpdateInput) => {
@@ -3228,11 +3240,13 @@ export function installDevElectronAPI(): void {
       if (typeof patch?.name === 'string' && patch.name.trim() !== '') target.name = patch.name.trim();
       if (typeof patch?.color === 'string' && patch.color.trim() !== '') target.color = patch.color;
       if (typeof patch?.enabled === 'boolean') target.enabled = patch.enabled;
+      notifyMockIcsChanged(target.id);
       return { ...target };
     },
     icsRemove: async (id: string) => {
       const index = mockIcsSubscriptions.findIndex((row) => row.id === id);
       if (index >= 0) mockIcsSubscriptions.splice(index, 1);
+      notifyMockIcsChanged(id);
     },
     icsRefresh: async (id: string | null) => {
       for (const row of mockIcsSubscriptions) {
@@ -3240,6 +3254,7 @@ export function installDevElectronAPI(): void {
         row.lastFetchedAt = new Date().toISOString();
         row.lastError = null;
       }
+      notifyMockIcsChanged(id);
     },
     icsEvents: async (): Promise<IcsSubscriptionEvents[]> => mockIcsSubscriptions
       .filter((row) => row.enabled)
@@ -3249,7 +3264,10 @@ export function installDevElectronAPI(): void {
         events: row.id === 'mock-ics-subscription' ? mockIcsEvents.map((event) => ({ ...event })) : [],
         truncated: false,
       })),
-    onIcsChanged: noop,
+    onIcsChanged: (callback) => {
+      mockIcsChangeListeners.add(callback);
+      return () => mockIcsChangeListeners.delete(callback);
+    },
 
     // ─── 휴가 pending 상태 + 브로드캐스트 (mock은 no-op) ───
     vacationPendingLoad: async () => [],
