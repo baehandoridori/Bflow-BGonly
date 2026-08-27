@@ -89,10 +89,27 @@ type MockCalendarMemberRow = { calendar_id: string; user_id: string; can_edit: b
 type MockCalendarEventCreateInput = Parameters<ElectronAPI['calendarEventCreate']>[0];
 type MockCalendarNotificationRow = Awaited<ReturnType<ElectronAPI['calendarNotificationsCatchup']>>[number];
 type MockCalendarNotificationOverrides = Omit<Partial<CalendarNotificationPushRow>, 'id' | 'createdAt'>;
+type MockCalendarSharedSnapshot = {
+  calendars: MockCalendarRow[];
+  events: MockCalendarEventRow[];
+  members: MockCalendarMemberRow[];
+  tags: MockCalendarTagRow[];
+  notifications: MockCalendarNotificationRow[];
+};
+type MockCalendarChangeEnvelope = {
+  kind: 'bflow-dev-calendar-change';
+  sourceId: string;
+  detail: unknown;
+  snapshot: MockCalendarSharedSnapshot;
+};
 type DevPreviewWindow = Window & typeof globalThis & {
   __bflowMockCalendarNotify?: (overrides?: MockCalendarNotificationOverrides) => void;
 };
 const CALENDAR_TAG_UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const MOCK_CALENDAR_CHANGE_CHANNEL = 'bflow-dev-calendar-change-v1';
+const mockCalendarChangeListeners = new Set<(payload: unknown) => void>();
+const mockCalendarChangeSourceId = createUuid();
+let mockCalendarChangeChannel: BroadcastChannel | null | undefined;
 
 const devCalendarSeed = createDevCalendarSeed();
 const mockCalendars: MockCalendarRow[] = devCalendarSeed.calendars;
@@ -174,6 +191,108 @@ function buildMockCalendarNotifications(): MockCalendarNotificationRow[] {
 
 const mockCalendarNotifications = buildMockCalendarNotifications();
 let nextMockCalendarNotificationSequence = 0;
+
+function cloneMockCalendarSharedSnapshot(): MockCalendarSharedSnapshot {
+  return {
+    calendars: mockCalendars.map((calendar) => ({ ...calendar })),
+    events: mockCalendarEvents.map((event) => ({ ...event })),
+    members: mockCalendarMembers.map((member) => ({ ...member })),
+    tags: mockCalendarTags.map((tag) => ({ ...tag })),
+    notifications: mockCalendarNotifications.map((notification) => ({ ...notification })),
+  };
+}
+
+function isMockCalendarSharedSnapshot(value: unknown): value is MockCalendarSharedSnapshot {
+  if (!value || typeof value !== 'object') return false;
+  const snapshot = value as Record<string, unknown>;
+  return Array.isArray(snapshot.calendars)
+    && Array.isArray(snapshot.events)
+    && Array.isArray(snapshot.members)
+    && Array.isArray(snapshot.tags)
+    && Array.isArray(snapshot.notifications);
+}
+
+function isMockCalendarChangeEnvelope(value: unknown): value is MockCalendarChangeEnvelope {
+  if (!value || typeof value !== 'object') return false;
+  const envelope = value as Record<string, unknown>;
+  return envelope.kind === 'bflow-dev-calendar-change'
+    && typeof envelope.sourceId === 'string'
+    && isMockCalendarSharedSnapshot(envelope.snapshot);
+}
+
+function applyMockCalendarSharedSnapshot(snapshot: MockCalendarSharedSnapshot): void {
+  mockCalendars.splice(0, mockCalendars.length, ...snapshot.calendars.map((calendar) => ({ ...calendar })));
+  mockCalendarEvents.splice(0, mockCalendarEvents.length, ...snapshot.events.map((event) => ({ ...event })));
+  mockCalendarMembers.splice(0, mockCalendarMembers.length, ...snapshot.members.map((member) => ({ ...member })));
+  mockCalendarTags.splice(0, mockCalendarTags.length, ...snapshot.tags.map((tag) => ({ ...tag })));
+  mockCalendarNotifications.splice(
+    0,
+    mockCalendarNotifications.length,
+    ...snapshot.notifications.map((notification) => ({ ...notification })),
+  );
+}
+
+function notifyMockCalendarChanged(payload: unknown): void {
+  for (const callback of mockCalendarChangeListeners) {
+    try {
+      callback(payload);
+    } catch (error) {
+      console.warn('[dev preview calendar] 변경 listener 실패:', error);
+    }
+  }
+}
+
+function normalizeMockCalendarChangeDetail(detail: unknown): Record<string, unknown> {
+  const raw = detail && typeof detail === 'object'
+    ? detail as Record<string, unknown>
+    : {};
+  const table = raw.table === 'calendars'
+    || raw.table === 'calendar_members'
+    || raw.table === 'calendar_events'
+    || raw.table === 'calendar_tags'
+    ? raw.table
+    : 'calendar_events';
+  const action = raw.action === 'INSERT' || raw.action === 'DELETE' || raw.action === 'UPDATE'
+    ? raw.action
+    : raw.action === 'add'
+      ? 'INSERT'
+      : raw.action === 'delete'
+        ? 'DELETE'
+        : 'UPDATE';
+  return { ...raw, table, action };
+}
+
+function receiveMockCalendarChange(event: MessageEvent<unknown>): void {
+  const envelope = event.data;
+  if (!isMockCalendarChangeEnvelope(envelope) || envelope.sourceId === mockCalendarChangeSourceId) return;
+  applyMockCalendarSharedSnapshot(envelope.snapshot);
+  notifyMockCalendarChanged(envelope.detail);
+}
+
+function getMockCalendarChangeChannel(): BroadcastChannel | null {
+  if (mockCalendarChangeChannel !== undefined) return mockCalendarChangeChannel;
+  if (typeof BroadcastChannel === 'undefined') {
+    mockCalendarChangeChannel = null;
+    return null;
+  }
+  const channel = new BroadcastChannel(MOCK_CALENDAR_CHANGE_CHANNEL);
+  channel.addEventListener('message', receiveMockCalendarChange);
+  (channel as BroadcastChannel & { unref?: () => void }).unref?.();
+  mockCalendarChangeChannel = channel;
+  return channel;
+}
+
+function publishMockCalendarChange(detail?: unknown): void {
+  const channel = getMockCalendarChangeChannel();
+  if (!channel) return;
+  const envelope: MockCalendarChangeEnvelope = {
+    kind: 'bflow-dev-calendar-change',
+    sourceId: mockCalendarChangeSourceId,
+    detail: normalizeMockCalendarChangeDetail(detail),
+    snapshot: cloneMockCalendarSharedSnapshot(),
+  };
+  channel.postMessage(envelope);
+}
 
 function listMockCalendarNotifications(
   userId: string,
@@ -1715,6 +1834,7 @@ export function installDevElectronAPI(): void {
         : normalizeMockCalendarMembers(created, input.members ?? []);
       mockCalendars.push(created);
       mockCalendarMembers.push(...members);
+      publishMockCalendarChange({ table: 'calendars', action: 'INSERT', calendarId: created.id });
       return { ...created };
     },
     calendarUpdate: async (id, updates) => {
@@ -1757,6 +1877,7 @@ export function installDevElectronAPI(): void {
       calendar.visibility = nextVisibility;
       calendar.updated_at = new Date().toISOString();
       if (nextMembers !== undefined) applyNormalizedMockCalendarMembers(calendar.id, nextMembers);
+      publishMockCalendarChange({ table: 'calendars', action: 'UPDATE', calendarId: calendar.id });
     },
     calendarDelete: async (id) => {
       const user = requireMockCalendarUser();
@@ -1775,6 +1896,7 @@ export function installDevElectronAPI(): void {
           mockCalendarEvents.splice(eventIndex, 1);
         }
       }
+      publishMockCalendarChange({ table: 'calendars', action: 'DELETE', calendarId: id });
     },
     calendarSetMembers: async (calendarId, members) => {
       const user = requireMockCalendarUser();
@@ -1787,6 +1909,7 @@ export function installDevElectronAPI(): void {
         throw new Error('비공개 캘린더에는 멤버를 추가할 수 없습니다');
       }
       replaceMockCalendarMembers(calendar, members);
+      publishMockCalendarChange({ table: 'calendar_members', action: 'UPDATE', calendarId });
     },
     calendarEventsList: async (params) => {
       const visibleIds = visibleMockCalendarIds();
@@ -1806,6 +1929,7 @@ export function installDevElectronAPI(): void {
         event: created,
         previous: null,
       });
+      publishMockCalendarChange({ table: 'calendar_events', action: 'INSERT', eventId: created.id });
       return { ...created };
     },
     calendarPrivacyReplacementCreate: async (request) => {
@@ -1891,6 +2015,7 @@ export function installDevElectronAPI(): void {
           previous,
         });
       }
+      publishMockCalendarChange({ table: 'calendar_events', action: 'UPDATE', eventId: event.id });
       return { ...event };
     },
     calendarEventDelete: async (id) => {
@@ -1907,6 +2032,7 @@ export function installDevElectronAPI(): void {
         event: null,
         previous,
       });
+      publishMockCalendarChange({ table: 'calendar_events', action: 'DELETE', eventId: previous.id });
     },
     calendarTagsList: async () => {
       requireMockCalendarUser();
@@ -1960,6 +2086,7 @@ export function installDevElectronAPI(): void {
         if (event.tag_id && !savedIds.has(event.tag_id)) event.tag_id = null;
       }
       mockCalendarTags.splice(0, mockCalendarTags.length, ...saved);
+      publishMockCalendarChange({ table: 'calendar_tags', action: 'UPDATE' });
       return saved.map((tag) => ({ ...tag }));
     },
     calendarNotificationsCatchup: async (input) => {
@@ -2317,8 +2444,15 @@ export function installDevElectronAPI(): void {
     onSessionChanged: noop,
     themeBroadcastChange: async () => ({ ok: true }),
     onThemeChanged: noop,
-    calendarBroadcastChange: async () => ({ ok: true }),
-    onCalendarChanged: noop,
+    calendarBroadcastChange: async (payload) => {
+      publishMockCalendarChange(payload);
+      return { ok: true };
+    },
+    onCalendarChanged: (callback) => {
+      getMockCalendarChangeChannel();
+      mockCalendarChangeListeners.add(callback);
+      return () => mockCalendarChangeListeners.delete(callback);
+    },
 
     // ─── 휴가 pending 상태 + 브로드캐스트 (mock은 no-op) ───
     vacationPendingLoad: async () => [],

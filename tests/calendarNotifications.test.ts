@@ -257,6 +257,8 @@ type PreviewCalendarNotificationApi = {
   }): Promise<PreviewCalendarPrivacyReplacement | { transition_resolved: 'deleted' }>;
   calendarNotificationsCatchup(input?: { excludedCalendarIds?: string[] }): Promise<PreviewCalendarNotificationRow[]>;
   calendarNotificationsMarkRead(ids: string[]): Promise<void>;
+  calendarBroadcastChange(payload?: unknown): Promise<{ ok: boolean }>;
+  onCalendarChanged(callback: (payload: unknown) => void): () => void;
   onSupabaseRealtime(callback: (event: unknown) => void): () => void;
 };
 
@@ -276,6 +278,62 @@ type PreviewCalendarNotificationWindow = {
 
 let previewCalendarNotificationBundle: Promise<string> | undefined;
 let previewCalendarNotificationNonce = 0;
+
+function installPreviewCalendarBroadcastChannel(): () => void {
+  const globalScope = globalThis as Record<string, unknown>;
+  const hadBroadcastChannel = Object.prototype.hasOwnProperty.call(globalScope, 'BroadcastChannel');
+  const previousBroadcastChannel = globalScope.BroadcastChannel;
+  const channelsByName = new Map<string, Set<PreviewCalendarBroadcastChannel>>();
+
+  class PreviewCalendarBroadcastChannel {
+    private readonly listeners = new Set<(event: { data: unknown }) => void>();
+    private closed = false;
+    readonly name: string;
+
+    constructor(name: string) {
+      this.name = name;
+      const channels = channelsByName.get(name) ?? new Set<PreviewCalendarBroadcastChannel>();
+      channels.add(this);
+      channelsByName.set(name, channels);
+    }
+
+    addEventListener(type: string, listener: (event: { data: unknown }) => void): void {
+      if (type === 'message') this.listeners.add(listener);
+    }
+
+    removeEventListener(type: string, listener: (event: { data: unknown }) => void): void {
+      if (type === 'message') this.listeners.delete(listener);
+    }
+
+    postMessage(data: unknown): void {
+      for (const channel of channelsByName.get(this.name) ?? []) {
+        if (channel === this || channel.closed) continue;
+        queueMicrotask(() => channel.emit(data));
+      }
+    }
+
+    close(): void {
+      this.closed = true;
+      const channels = channelsByName.get(this.name);
+      channels?.delete(this);
+      if (channels?.size === 0) channelsByName.delete(this.name);
+    }
+
+    unref(): void {
+      // Node의 실제 BroadcastChannel과 달리 이 test double은 열린 포트를 유지하지 않는다.
+    }
+
+    private emit(data: unknown): void {
+      for (const listener of this.listeners) listener({ data });
+    }
+  }
+
+  globalScope.BroadcastChannel = PreviewCalendarBroadcastChannel;
+  return () => {
+    if (hadBroadcastChannel) globalScope.BroadcastChannel = previousBroadcastChannel;
+    else delete globalScope.BroadcastChannel;
+  };
+}
 
 async function bundledPreviewCalendarNotificationSource(): Promise<string> {
   previewCalendarNotificationBundle ??= build({
@@ -580,6 +638,60 @@ test('preview calendar CRUD persists recipient-specific notification rows for an
     unsubscribe();
   } finally {
     harness.restore();
+  }
+});
+
+test('preview shared calendar fanout syncs canonical changes to another mock context without echoing the sender', async () => {
+  const restoreBroadcastChannel = installPreviewCalendarBroadcastChannel();
+  const actor = await createPreviewCalendarNotificationHarness();
+  const receiver = await createPreviewCalendarNotificationHarness();
+  const actorChanges: unknown[] = [];
+  const receiverChanges: unknown[] = [];
+  const unsubscribeActor = actor.api.onCalendarChanged((payload) => actorChanges.push(payload));
+  const unsubscribeReceiver = receiver.api.onCalendarChanged((payload) => receiverChanges.push(payload));
+  try {
+    await previewLogin(actor.api, '배한솔');
+    await previewLogin(receiver.api, '장삐쭈');
+    const sharedCalendar = await actor.api.calendarCreate({
+      name: '프리뷰 창 간 공유 일정',
+      color: '#74B9FF',
+      visibility: 'members',
+      members: [{ user_id: '2', can_edit: true }],
+    });
+    await Promise.resolve();
+
+    const created = await actor.api.calendarEventCreate(
+      previewNotificationEventInput(sharedCalendar.id, '다른 프리뷰 창에서 만든 일정'),
+    );
+    await Promise.resolve();
+    const updated = await actor.api.calendarEventUpdate(created.id, {
+      title: '다른 프리뷰 창에서 고친 일정',
+    });
+    await Promise.resolve();
+
+    assert.deepEqual(actorChanges, [], '보낸 프리뷰 창에는 자기 변경을 IPC로 되돌려 보내지 않는다');
+    assert.ok(receiverChanges.length >= 3, '다른 프리뷰 창은 캘린더와 일정의 canonical 변경을 각각 받는다');
+    assert.deepEqual(
+      (await receiver.api.calendarEventsList()).find((event) => event.id === created.id),
+      updated,
+      '수신 프리뷰의 module-local row도 전달된 정본 snapshot으로 갱신한다',
+    );
+
+    await actor.api.calendarBroadcastChange({ eventId: created.id, action: 'update' });
+    await Promise.resolve();
+
+    assert.deepEqual(actorChanges, [], '명시적 브로드캐스트도 송신자에게 echo하지 않는다');
+    assert.deepEqual(receiverChanges.at(-1), {
+      table: 'calendar_events',
+      action: 'UPDATE',
+      eventId: created.id,
+    });
+  } finally {
+    unsubscribeReceiver();
+    unsubscribeActor();
+    receiver.restore();
+    actor.restore();
+    restoreBroadcastChannel();
   }
 });
 
