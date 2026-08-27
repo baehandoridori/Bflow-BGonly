@@ -7,7 +7,7 @@ type DndModule = {
   useTimeGridDnD(options: {
     scrollContainerRef: { current: { scrollTop: number; getBoundingClientRect(): { top: number; bottom: number } } | null };
     onCreate?: (date: string, startTime: string, endTime: string) => void;
-    onEventChange?: (id: string, identity: unknown, patch: unknown) => void;
+    onEventChange?: (id: string, identity: unknown, patch: unknown) => void | Promise<void>;
   }): {
     isDragging: boolean;
     isDragActive: boolean;
@@ -392,6 +392,30 @@ test('useTimeGridDnD DOM: mouseup은 대기 rAF의 최신 값을 완료하고 Es
     assert.equal(changes.length, 1, 'unmount 뒤에는 남은 listener가 완료하지 않는다');
   } finally {
     cancellationHarness.restore();
+  }
+});
+
+test('useTimeGridDnD DOM: mouseup에서 거부된 일정 변경 저장은 전역 Promise 오류로 남기지 않는다', async () => {
+  const persistenceError = new Error('저장 실패');
+  const warnings: unknown[][] = [];
+  const originalWarn = console.warn;
+  console.warn = (...args: unknown[]) => warnings.push(args);
+  const harness = installDomHookHarness(await loadDnD(), {
+    scrollContainerRef: { current: { scrollTop: 0, getBoundingClientRect: () => ({ top: 100, bottom: 500 }) } },
+    onEventChange: () => Promise.reject(persistenceError),
+  });
+  try {
+    let dnd = harness.render();
+    dnd.beginEventDrag(event(10, 156), source, 'move', { date: '2026-08-24', bandStartMin: 540, column: harness.column });
+    dnd = harness.render();
+    harness.fire('mousemove', { clientX: 20, clientY: 184 });
+    harness.fire('mouseup', {});
+
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    assert.deepEqual(warnings, [['[Calendar] 시간표 일정 변경 저장 실패:', persistenceError]]);
+  } finally {
+    harness.restore();
+    console.warn = originalWarn;
   }
 });
 

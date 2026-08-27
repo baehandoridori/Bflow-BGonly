@@ -30,7 +30,7 @@ export type TimeGridEventChangeCallback = (
   eventId: string,
   identity: CalendarEventIdentity,
   patch: TimeGridEventPatch,
-) => void;
+) => void | Promise<void>;
 
 export const TIME_GRID_HOUR_PX = 56;
 export const TIME_GRID_DRAG_EDGE = 40;
@@ -353,7 +353,14 @@ export function useTimeGridDnD({ scrollContainerRef, onCreate, onEventChange }: 
         if (completion.type === 'create') {
           onCreateRef.current?.(completion.date, completion.startTime, completion.endTime);
         } else if (onEventChangeRef.current) {
-          onEventChangeRef.current?.(completion.eventId, completion.identity, completion.patch);
+          try {
+            const changeResult = onEventChangeRef.current(completion.eventId, completion.identity, completion.patch);
+            void Promise.resolve(changeResult).catch((error) => {
+              console.warn('[Calendar] 시간표 일정 변경 저장 실패:', error);
+            });
+          } catch (error) {
+            console.warn('[Calendar] 시간표 일정 변경 저장 실패:', error);
+          }
           const key = calendarEventIdentityKey(completion.identity);
           setSettledIdentityKey(key);
           if (settleTimer.current) clearTimeout(settleTimer.current);
