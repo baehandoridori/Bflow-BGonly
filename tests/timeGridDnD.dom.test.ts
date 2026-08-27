@@ -182,6 +182,41 @@ test('useTimeGridDnD DOM: 클릭 후보는 pointer target을 보존하고 임계
   }
 });
 
+test('useTimeGridDnD DOM: 5분 일정은 짧아도 하단 후보에서 이동을 시작할 수 있다', async () => {
+  const changes: Array<[string, unknown, { startTime: string; endTime: string }]> = [];
+  const harness = installDomHookHarness(await loadDnD(), {
+    scrollContainerRef: { current: { scrollTop: 0, getBoundingClientRect: () => ({ top: 100, bottom: 500 }) } },
+    onEventChange: (id, identity, patch) => changes.push([id, identity, patch as { startTime: string; endTime: string }]),
+  });
+  try {
+    let dnd = harness.render();
+    const shortEvent = {
+      button: 0,
+      clientX: 10,
+      clientY: 102,
+      currentTarget: {
+        getBoundingClientRect: () => ({ top: 100, bottom: 104.67, height: 4.67 }),
+      },
+    };
+    const shortSource = { ...source, startTime: '09:00', endTime: '09:05' };
+
+    dnd.beginEventDrag(shortEvent, shortSource, 'resize-end', { date: '2026-08-24', bandStartMin: 540, column: harness.column });
+    dnd = harness.render();
+    harness.fire('mousemove', { clientX: 20, clientY: 160 });
+    dnd = harness.render();
+    harness.fire('mouseup', {});
+    dnd = harness.render();
+
+    assert.deepEqual(
+      changes.map(([id, , { startTime, endTime }]) => [id, { startTime, endTime }]),
+      [['shared-id', { startTime: '10:00', endTime: '10:05' }]],
+      '5분 블록의 하단 후보도 최소한의 이동 영역을 남겨 원래 길이로 이동한다',
+    );
+  } finally {
+    harness.restore();
+  }
+});
+
 test('useTimeGridDnD DOM: create·resize callback, Escape 취소, 읽기전용 inertness를 실제 리스너로 보장한다', async () => {
   const creates: unknown[][] = [];
   const changes: unknown[][] = [];

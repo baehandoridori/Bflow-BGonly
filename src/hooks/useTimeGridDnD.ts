@@ -37,6 +37,8 @@ export const TIME_GRID_DRAG_EDGE = 40;
 const DRAG_THRESHOLD_PX = 5;
 const CLICK_SUPPRESS_MS = 280;
 const DAY_END_MINUTES = 24 * 60;
+const RESIZE_END_ZONE_PX = 8;
+const MIN_MOVE_ZONE_PX = 4;
 
 export type TimeGridPointerTarget = {
   date: string;
@@ -133,9 +135,17 @@ export function shouldSuppressTimeGridClick(dragFinishedAt: number, now: number)
   return dragFinishedAt > 0 && now - dragFinishedAt >= 0 && now - dragFinishedAt < CLICK_SUPPRESS_MS;
 }
 
-export function getTimeGridEventDragMode(isReadOnly: boolean, clientY: number, rectBottom: number): Extract<TimeGridDragMode, 'move' | 'resize-end'> | null {
+export function getTimeGridEventDragMode(
+  isReadOnly: boolean,
+  clientY: number,
+  rectBottom: number,
+  rectHeight?: number,
+): Extract<TimeGridDragMode, 'move' | 'resize-end'> | null {
   if (isReadOnly) return null;
-  return clientY >= rectBottom - 8 ? 'resize-end' : 'move';
+  const resizeEndZone = typeof rectHeight === 'number' && Number.isFinite(rectHeight)
+    ? Math.min(RESIZE_END_ZONE_PX, Math.max(0, rectHeight - MIN_MOVE_ZONE_PX))
+    : RESIZE_END_ZONE_PX;
+  return clientY >= rectBottom - resizeEndZone ? 'resize-end' : 'move';
 }
 
 export type TimeGridDragCompletion =
@@ -266,6 +276,10 @@ export function useTimeGridDnD({ scrollContainerRef, onCreate, onEventChange }: 
   ) => {
     if (event.button !== 0 || source.isReadOnly) return;
     cancelPreviewFrame();
+    const rect = event.currentTarget.getBoundingClientRect?.();
+    const resolvedMode = mode === 'resize-end' && rect
+      ? getTimeGridEventDragMode(false, event.clientY, rect.bottom, rect.height) ?? 'move'
+      : mode;
     const anchorMinutes = getPointerMinute(target, event.clientY);
     const original: TimeGridEventPatch = {
       startDate: source.startDate,
@@ -275,7 +289,7 @@ export function useTimeGridDnD({ scrollContainerRef, onCreate, onEventChange }: 
     };
     const identity = snapshotCalendarEventIdentity(source);
     const state: ActiveTimeGridDrag = {
-      mode,
+      mode: resolvedMode,
       anchor: { x: event.clientX, y: event.clientY, minutes: anchorMinutes, date: target.date },
       original,
       eventId: source.id,
