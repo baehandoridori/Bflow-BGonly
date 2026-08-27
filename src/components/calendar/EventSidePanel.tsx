@@ -79,8 +79,6 @@ function isPromiseLike(value: unknown): value is PromiseLike<void> {
 type LocalMutationRecovery = {
   identityKey: string;
   rollbackSnapshot: string;
-  eventAtStart: CalendarEvent;
-  rollbackRefreshConsumed: boolean;
 };
 
 function eventContentSnapshot(event: CalendarEvent): string {
@@ -152,7 +150,6 @@ export function EventSidePanel({
     ? new Set(canonicalTagSnapshot.tags.map((tag) => tag.id))
     : null;
   const eventIdentityKey = calendarEventIdentityKey(event);
-  const latestEventRef = useRef(event);
   const eventSnapshot = eventContentSnapshot(event);
   const pendingMutationRef = useRef<LocalMutationRecovery | null>(null);
   const failedMutationRecoveryRef = useRef<LocalMutationRecovery | null>(null);
@@ -161,19 +158,14 @@ export function EventSidePanel({
   // 내 저장/삭제 중에는 드래프트를 유지하고, 실패 뒤에는 그 작업의 롤백 갱신만 한 번 소비한다.
   // 같은 일정의 이후 정본 변경은 다시 최신 내용으로 채워, 실패한 초안이 동료 변경을 덮지 않게 한다.
   useEffect(() => {
-    latestEventRef.current = event;
     if (pendingMutationRef.current?.identityKey === eventIdentityKey) return;
 
     const failedRecovery = failedMutationRecoveryRef.current;
-    if (failedRecovery?.identityKey === eventIdentityKey) {
-      if (failedRecovery.rollbackSnapshot === eventSnapshot) {
-        failedRecovery.rollbackRefreshConsumed = true;
-        return;
-      }
-      if (!failedRecovery.rollbackRefreshConsumed) {
-        failedRecovery.rollbackRefreshConsumed = true;
-        return;
-      }
+    if (
+      failedRecovery?.identityKey === eventIdentityKey
+      && failedRecovery.rollbackSnapshot === eventSnapshot
+    ) {
+      return;
     }
 
     failedMutationRecoveryRef.current = null;
@@ -303,8 +295,6 @@ export function EventSidePanel({
     const mutation: LocalMutationRecovery = {
       identityKey: eventIdentityKey,
       rollbackSnapshot: eventSnapshot,
-      eventAtStart: event,
-      rollbackRefreshConsumed: false,
     };
     pendingMutationRef.current = mutation;
     failedMutationRecoveryRef.current = null;
@@ -320,10 +310,6 @@ export function EventSidePanel({
           () => {
             if (pendingMutationRef.current !== mutation) return;
             pendingMutationRef.current = null;
-            const latestEvent = latestEventRef.current;
-            mutation.rollbackRefreshConsumed = latestEvent !== mutation.eventAtStart
-              && calendarEventIdentityKey(latestEvent) === mutation.identityKey
-              && eventContentSnapshot(latestEvent) === mutation.rollbackSnapshot;
             failedMutationRecoveryRef.current = mutation;
             setMutationError('일정 저장에 실패했어요. 다시 시도해 주세요.');
           },
@@ -336,10 +322,6 @@ export function EventSidePanel({
     } catch {
       if (pendingMutationRef.current !== mutation) return;
       pendingMutationRef.current = null;
-      const latestEvent = latestEventRef.current;
-      mutation.rollbackRefreshConsumed = latestEvent !== mutation.eventAtStart
-        && calendarEventIdentityKey(latestEvent) === mutation.identityKey
-        && eventContentSnapshot(latestEvent) === mutation.rollbackSnapshot;
       failedMutationRecoveryRef.current = mutation;
       setMutationError('일정 저장에 실패했어요. 다시 시도해 주세요.');
     }
@@ -366,8 +348,6 @@ export function EventSidePanel({
     const mutation: LocalMutationRecovery = {
       identityKey: eventIdentityKey,
       rollbackSnapshot: eventSnapshot,
-      eventAtStart: event,
-      rollbackRefreshConsumed: false,
     };
     pendingMutationRef.current = mutation;
     failedMutationRecoveryRef.current = null;
@@ -383,10 +363,6 @@ export function EventSidePanel({
           () => {
             if (pendingMutationRef.current !== mutation) return;
             pendingMutationRef.current = null;
-            const latestEvent = latestEventRef.current;
-            mutation.rollbackRefreshConsumed = latestEvent !== mutation.eventAtStart
-              && calendarEventIdentityKey(latestEvent) === mutation.identityKey
-              && eventContentSnapshot(latestEvent) === mutation.rollbackSnapshot;
             failedMutationRecoveryRef.current = mutation;
             setMutationError('일정 삭제에 실패했어요. 다시 시도해 주세요.');
           },
@@ -399,10 +375,6 @@ export function EventSidePanel({
     } catch {
       if (pendingMutationRef.current !== mutation) return;
       pendingMutationRef.current = null;
-      const latestEvent = latestEventRef.current;
-      mutation.rollbackRefreshConsumed = latestEvent !== mutation.eventAtStart
-        && calendarEventIdentityKey(latestEvent) === mutation.identityKey
-        && eventContentSnapshot(latestEvent) === mutation.rollbackSnapshot;
       failedMutationRecoveryRef.current = mutation;
       setMutationError('일정 삭제에 실패했어요. 다시 시도해 주세요.');
     }

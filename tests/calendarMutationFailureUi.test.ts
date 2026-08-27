@@ -728,7 +728,7 @@ test('side panel keeps failed save recovery when a same-event rollback is batche
   const restoredSameEvent = await renderSidePanel(
     hooks,
     callbacks,
-    event({ title: '복구된 원래 일정' }),
+    event(),
     true,
   );
   assert.ok(
@@ -764,7 +764,7 @@ test('side panel keeps failed deletion explanation when a same-event rollback is
   const restoredSameEvent = await renderSidePanel(
     hooks,
     callbacks,
-    event({ title: '복구된 원래 일정' }),
+    event(),
     true,
   );
   assert.match(
@@ -827,6 +827,60 @@ test('side panel accepts a teammate update after preserving its failed-save roll
     findTitleInput(editableTeammateRefresh).props.value,
     '팀원이 바꾼 최신 일정',
     'a later teammate update must replace the failed local draft before another save',
+  );
+});
+
+test('side panel rehydrates a teammate update when a failed save has no rollback refresh', async () => {
+  const hooks = createHookStore();
+  const originalEvent = event();
+  const teammateEvent = event({
+    title: '팀원이 바꾼 최신 일정',
+    memo: '동료가 남긴 메모',
+    startDate: '2026-08-28',
+    endDate: '2026-08-29',
+  });
+  const persistence = deferredThenable();
+  const updateCalls: Array<Partial<TestCalendarEvent>> = [];
+  const callbacks = {
+    onClose: () => {},
+    onUpdate: (_id: string, updates: Partial<TestCalendarEvent>) => {
+      updateCalls.push(updates);
+      return persistence.promise;
+    },
+    onDelete: () => {},
+  };
+
+  await renderSidePanel(hooks, callbacks, originalEvent, true);
+  hooks.state[0] = true;
+  hooks.state[1] = '내 저장 시도';
+
+  await invoke(findButtonByText(await renderSidePanel(hooks, callbacks, originalEvent, true), '저장'));
+  persistence.reject(new Error('save failed'));
+
+  const teammateRefresh = await renderSidePanel(hooks, callbacks, teammateEvent, true);
+  assert.equal(
+    findButtons(teammateRefresh).some((button) => textContent(button).includes('저장')),
+    false,
+    'a teammate update must leave failed local edit mode when no matching rollback arrived',
+  );
+  assert.equal(
+    findAlerts(teammateRefresh).length,
+    0,
+    'a teammate update must clear the failed local save explanation instead of being consumed as rollback',
+  );
+
+  await invoke(findButtonByText(teammateRefresh, '편집'));
+  const editableTeammateRefresh = await renderSidePanel(hooks, callbacks, teammateEvent);
+  assert.equal(
+    findTitleInput(editableTeammateRefresh).props.value,
+    '팀원이 바꾼 최신 일정',
+    'the panel must rehydrate the teammate title before a retry can overwrite it',
+  );
+  await invoke(findButtonByText(editableTeammateRefresh, '저장'));
+  assert.equal(
+    updateCalls.length,
+    1,
+    'the rehydrated teammate event must not be sent back as the stale local retry',
   );
 });
 
