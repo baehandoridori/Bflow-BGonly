@@ -871,6 +871,11 @@ test('WeekTimeGridView: 날짜를 넘긴 시간 일정 드래그 중에는 종�
     /data-time-grid-drag-preview="true"[^>]*>.*시간 일정/s,
     'a cross-date timed preview remains visible without contributing a new all-day layout row',
   );
+  assert.match(
+    duringDragMarkup,
+    /data-time-grid-drag-preview="true"[^>]*style="top:3px;/,
+    'a promoted preview overlaps the last visible all-day row instead of extending into the first timed row',
+  );
 
   timeGridDndStub.isDragActive = false;
   const afterDragMarkup = renderToStaticMarkup(createElement(module.default, props));

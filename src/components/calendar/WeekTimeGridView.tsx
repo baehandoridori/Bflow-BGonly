@@ -556,7 +556,11 @@ export function WeekTimeGridView({
                 data-time-grid-drag-preview="true"
                 className="pointer-events-none absolute z-20 truncate rounded border border-dashed border-white/70 px-1.5 text-left text-[10px] font-semibold text-white shadow-lg"
                 style={{
-                  top: 3 + frozenTimedDragPreviewBar.row * ALL_DAY_ROW_PX,
+                  // 승격된 preview의 새 행은 고정된 레인에 없을 수 있으므로, 마지막 표시 행 위에만 겹친다.
+                  top: 3 + Math.min(
+                    frozenTimedDragPreviewBar.row,
+                    Math.max(0, visibleAllDayRows - 1),
+                  ) * ALL_DAY_ROW_PX,
                   left: `calc(${frozenTimedDragPreviewBar.startCol * (100 / 7)}% + 2px)`,
                   width: `calc(${frozenTimedDragPreviewBar.span * (100 / 7)}% - 4px)`,
                   height: 22,
