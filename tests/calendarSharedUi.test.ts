@@ -337,6 +337,9 @@ let schedulePendingEffects: Array<() => void | (() => void)> = [];
 let scheduleMountedEffectCleanups: Array<() => void> = [];
 let scheduleEffectDeps: Array<readonly unknown[] | undefined> = [];
 let scheduleEffectCursor = 0;
+let scheduleCallbackSlots: unknown[] = [];
+let scheduleCallbackDeps: Array<readonly unknown[] | undefined> = [];
+let scheduleCallbackCursor = 0;
 const scheduleWindowListeners = new Map<string, Set<(event: Event) => void>>();
 const scheduleDocumentListeners = new Map<string, Set<(event: Event) => void>>();
 let scheduleGlobalModalOpen = false;
@@ -705,6 +708,9 @@ function resetHarness(): void {
   schedulePendingEffects = [];
   scheduleEffectDeps = [];
   scheduleEffectCursor = 0;
+  scheduleCallbackSlots = [];
+  scheduleCallbackDeps = [];
+  scheduleCallbackCursor = 0;
   scheduleCurrentView = 'schedule';
   schedulePendingDateNavigation = null;
   scheduleDateNavigationConsumeIds = [];
@@ -1263,7 +1269,20 @@ async function loadScheduleView(): Promise<ScheduleViewComponent> {
             scheduleEffectDeps[slot] = deps;
             if (changed) schedulePendingEffects.push(effect);
           },
-          useMemo: (factory: () => unknown) => factory(), useCallback: (fn: unknown) => fn,
+          useMemo: (factory: () => unknown) => factory(),
+          useCallback<T>(fn: T, deps?: readonly unknown[]) {
+            const slot = scheduleCallbackCursor++;
+            const previousDeps = scheduleCallbackDeps[slot];
+            const changed = deps === undefined
+              || previousDeps === undefined
+              || deps.length !== previousDeps.length
+              || deps.some((dependency, index) => !Object.is(dependency, previousDeps[index]));
+            if (changed) {
+              scheduleCallbackSlots[slot] = fn;
+              scheduleCallbackDeps[slot] = deps;
+            }
+            return scheduleCallbackSlots[slot] as T;
+          },
           useRef(initial: unknown) {
             const slot = scheduleRefCursor++;
             scheduleRefSlots[slot] ??= { current: initial };
@@ -2160,12 +2179,14 @@ async function renderScheduleView(): Promise<ReactNode> {
   stateCursor = 0;
   scheduleRefCursor = 0;
   scheduleEffectCursor = 0;
+  scheduleCallbackCursor = 0;
   return resolveComponents(ScheduleView());
 }
 
 async function rerenderScheduleViewWithFreshEffects(): Promise<ReactNode> {
   for (const cleanup of scheduleMountedEffectCleanups.splice(0).reverse()) cleanup();
   schedulePendingEffects = [];
+  scheduleEffectDeps = [];
   const tree = await renderScheduleView();
   await flushScheduleMountEffects();
   return tree;
@@ -5753,9 +5774,7 @@ test('ScheduleView keeps valid weekly indices owned by the displayed year', asyn
 
   await t.test('ArrowLeft keeps index one and index zero inside January 2026', async () => {
     await renderCardAtIndexOne();
-    schedulePendingEffects.splice(0);
-    await renderScheduleView();
-    await flushScheduleMountEffects();
+    await rerenderScheduleViewWithFreshEffects();
 
     dispatchScheduleKeydown('ArrowLeft');
     await renderScheduleView();

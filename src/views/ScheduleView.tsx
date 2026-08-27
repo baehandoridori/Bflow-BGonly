@@ -794,7 +794,7 @@ export function ScheduleView() {
     // 할일 연결된 이벤트인 경우 addToCalendar = false 처리 (할일 자체는 유지)
     const todoId = calendarEventLinkedTodoId(deletingEvent);
     if (todoId) unlinkTodoFromCalendar(todoId);
-  }, [guardLocalIdentity, settleLocalMutationGuard]);
+  }, [guardLocalIdentity, panelEvent, quickEdit, settleLocalMutationGuard]);
 
   // 이벤트 클릭 → 사이드패널 토글 (같은 이벤트 재클릭 시 닫기)
   const handleEventClick = useCallback((ev: CalendarEvent) => {
