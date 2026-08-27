@@ -225,10 +225,20 @@ function applyMockCalendarSharedSnapshot(snapshot: MockCalendarSharedSnapshot): 
   mockCalendarEvents.splice(0, mockCalendarEvents.length, ...snapshot.events.map((event) => ({ ...event })));
   mockCalendarMembers.splice(0, mockCalendarMembers.length, ...snapshot.members.map((member) => ({ ...member })));
   mockCalendarTags.splice(0, mockCalendarTags.length, ...snapshot.tags.map((tag) => ({ ...tag })));
+  // 읽음은 수신 창에서 먼저 확정될 수 있다. 다른 창의 오래된 캘린더 snapshot이
+  // 그 상태를 null로 되돌리면 catch-up 알림이 다시 나타나므로, 읽음 시각은 단조롭게 병합한다.
+  const readAtByNotificationId = new Map(
+    mockCalendarNotifications
+      .filter((notification) => notification.read_at !== null)
+      .map((notification) => [notification.id, notification.read_at] as const),
+  );
   mockCalendarNotifications.splice(
     0,
     mockCalendarNotifications.length,
-    ...snapshot.notifications.map((notification) => ({ ...notification })),
+    ...snapshot.notifications.map((notification) => ({
+      ...notification,
+      read_at: readAtByNotificationId.get(notification.id) ?? notification.read_at,
+    })),
   );
 }
 

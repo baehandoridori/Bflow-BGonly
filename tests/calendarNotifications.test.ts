@@ -695,6 +695,40 @@ test('preview shared calendar fanout syncs canonical changes to another mock con
   }
 });
 
+test('preview calendar fanout never restores a notification that this window already marked read', async () => {
+  const restoreBroadcastChannel = installPreviewCalendarBroadcastChannel();
+  const actor = await createPreviewCalendarNotificationHarness();
+  const receiver = await createPreviewCalendarNotificationHarness();
+  const unsubscribeReceiver = receiver.api.onCalendarChanged(() => {});
+  try {
+    await previewLogin(actor.api, '배한솔');
+    await previewLogin(receiver.api, '배한솔');
+    const [row] = await receiver.api.calendarNotificationsCatchup();
+    assert.ok(row, 'the signed-in preview user has an unread seed row to mark');
+
+    await receiver.api.calendarNotificationsMarkRead([row.id]);
+    assert.equal(
+      (await receiver.api.calendarNotificationsCatchup()).some((candidate) => candidate.id === row.id),
+      false,
+      'the receiver records its read state before another window publishes a calendar snapshot',
+    );
+
+    await actor.api.calendarBroadcastChange({ table: 'calendar_events', action: 'UPDATE' });
+    await Promise.resolve();
+
+    assert.equal(
+      (await receiver.api.calendarNotificationsCatchup()).some((candidate) => candidate.id === row.id),
+      false,
+      'an unrelated remote calendar snapshot must not turn the receiver\'s read notification back into unread',
+    );
+  } finally {
+    unsubscribeReceiver();
+    receiver.restore();
+    actor.restore();
+    restoreBroadcastChannel();
+  }
+});
+
 test('preview calendar move emits a source delete and target create to their separate recipients', async () => {
   const harness = await createPreviewCalendarNotificationHarness();
   try {
