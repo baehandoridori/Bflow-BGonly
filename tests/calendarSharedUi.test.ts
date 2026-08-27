@@ -4039,6 +4039,53 @@ test('ScheduleView keeps a local update guard through its failed-save rollback',
   }
 });
 
+test('ScheduleView keeps a pending local update guard through a delayed failed-save rollback', async () => {
+  resetHarness();
+  scheduleLocalStorage.set('bflow_calendar_view_v1', JSON.stringify({ viewMode: 'week', weekSubMode: 'timegrid' }));
+  const before = calendarListEvent({
+    id: 'delayed-failed-local-rollback',
+    title: '늦게 되돌릴 회의',
+    source: 'bflow',
+    sourceCalendarId: 'bflow:mine',
+    calendarId: 'mine',
+    allDay: false,
+    startTime: '09:00',
+    endTime: '10:00',
+  });
+  const optimistic = { ...before, startTime: '10:00', endTime: '11:00' };
+  const persistenceError = new Error('늦은 저장 실패');
+  scheduleCanonicalEvents = [before];
+  await renderScheduleView();
+  await flushScheduleMountEffects();
+  await renderScheduleView();
+
+  const clock = installScheduleFakeClock();
+  try {
+    scheduleUpdateHandler = async () => {
+      scheduleCanonicalEvents = [optimistic];
+      await dispatchScheduleWindowEvent('bflow:calendar-changed');
+      clock.advance(3_001);
+      scheduleCanonicalEvents = [before];
+      await dispatchScheduleWindowEvent('bflow:calendar-changed');
+      throw persistenceError;
+    };
+    const result = scheduleTimeGridProps.at(-1)?.onTimeGridEventChange?.(
+      before.id,
+      { id: before.id, source: before.source, sourceCalendarId: before.sourceCalendarId },
+      { startDate: optimistic.startDate, endDate: optimistic.endDate, startTime: '10:00', endTime: '11:00' },
+    );
+    await assert.rejects(result, (error) => error === persistenceError);
+    await renderScheduleView();
+    assert.deepEqual(
+      [...(scheduleTimeGridProps.at(-1)?.highlightedEventIdentities ?? [])],
+      [],
+      'a still-pending local mutation keeps its rollback out of teammate highlights even after the normal TTL',
+    );
+  } finally {
+    clock.restore();
+  }
+});
+
 test('ScheduleView keeps a local delete rollback from pulsing as a teammate add', async () => {
   resetHarness();
   const before = calendarListEvent({

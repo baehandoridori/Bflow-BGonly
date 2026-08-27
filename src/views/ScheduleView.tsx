@@ -297,7 +297,9 @@ export function ScheduleView() {
       : undefined;
     const now = Date.now();
     for (const [guardIdentityKey, guard] of localChangeGuardsRef.current) {
-      if (guard.expiresAt <= now) localChangeGuardsRef.current.delete(guardIdentityKey);
+      if (guard.expiresAt <= now && guard.persistence !== 'pending') {
+        localChangeGuardsRef.current.delete(guardIdentityKey);
+      }
     }
     localChangeGuardsRef.current.set(identityKey, {
       expiresAt: now + LOCAL_CHANGE_GUARD_MS,
@@ -347,7 +349,9 @@ export function ScheduleView() {
     if (previousSnapshot && !suppressRealtimeHighlight) {
       const now = Date.now();
       for (const [identityKey, guard] of localChangeGuardsRef.current) {
-        if (guard.expiresAt <= now) localChangeGuardsRef.current.delete(identityKey);
+        if (guard.expiresAt <= now && guard.persistence !== 'pending') {
+          localChangeGuardsRef.current.delete(identityKey);
+        }
       }
       const diff = diffEventSnapshots(previousSnapshot, nextSnapshot);
       const changedIdentities = [...diff.added, ...diff.changed];
