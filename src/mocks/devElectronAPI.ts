@@ -2800,8 +2800,9 @@ export function installDevElectronAPI(): void {
     onSessionChanged: noop,
     themeBroadcastChange: async () => ({ ok: true }),
     onThemeChanged: noop,
-    calendarBroadcastChange: async (payload) => {
-      publishMockCalendarChange(payload);
+    calendarBroadcastChange: async () => {
+      // calendarService가 같은 renderer의 window event를 이미 즉시 갱신한다.
+      // 여기까지는 낙관적 변경/rollback도 지나가므로, 성공한 mock 저장소만 정본 snapshot을 공유한다.
       return { ok: true };
     },
     onCalendarChanged: (callback) => {

@@ -722,15 +722,65 @@ test('preview shared calendar fanout syncs canonical changes to another mock con
       '수신 프리뷰의 module-local row도 전달된 정본 snapshot으로 갱신한다',
     );
 
+    const receiverChangeCount = receiverChanges.length;
     await actor.api.calendarBroadcastChange({ eventId: created.id, action: 'update' });
     await Promise.resolve();
 
-    assert.deepEqual(actorChanges, [], '명시적 브로드캐스트도 송신자에게 echo하지 않는다');
-    assert.deepEqual(receiverChanges.at(-1), {
+    assert.deepEqual(actorChanges, [], '렌더러의 즉시 화면 갱신은 calendarService의 window event가 담당한다');
+    assert.equal(
+      receiverChanges.length,
+      receiverChangeCount,
+      '렌더러의 presentation broadcast는 다른 프리뷰 창의 canonical 상태를 바꾸지 않는다',
+    );
+  } finally {
+    unsubscribeReceiver();
+    unsubscribeActor();
+    receiver.restore();
+    actor.restore();
+    restoreBroadcastChannel();
+  }
+});
+
+test('preview failed optimistic delete rollback never tombstones a peer canonical event', async () => {
+  const restoreBroadcastChannel = installPreviewCalendarBroadcastChannel({ deferMessages: true });
+  const actor = await createPreviewCalendarNotificationHarness();
+  const receiver = await createPreviewCalendarNotificationHarness();
+  const unsubscribeActor = actor.api.onCalendarChanged(() => {});
+  const unsubscribeReceiver = receiver.api.onCalendarChanged(() => {});
+  try {
+    await previewLogin(actor.api, '배한솔');
+    await previewLogin(receiver.api, '장삐쭈');
+    const sharedCalendar = await actor.api.calendarCreate({
+      name: '롤백 격리 프리뷰 공유 일정',
+      color: '#74B9FF',
+      visibility: 'members',
+      members: [{ user_id: '2', can_edit: true }],
+    });
+    restoreBroadcastChannel.flush();
+    const created = await actor.api.calendarEventCreate(
+      previewNotificationEventInput(sharedCalendar.id, '삭제 실패 후 되돌릴 일정'),
+    );
+    restoreBroadcastChannel.flush();
+
+    // calendarService는 삭제를 먼저 화면에 반영하고 bridge를 호출한 뒤, 저장 실패 시 add로 되돌린다.
+    // 이 두 renderer-origin 메시지는 이미 저장된 peer 정본을 바꾸면 안 된다.
+    await actor.api.calendarBroadcastChange({
       table: 'calendar_events',
-      action: 'UPDATE',
+      action: 'DELETE',
       eventId: created.id,
     });
+    await actor.api.calendarBroadcastChange({
+      table: 'calendar_events',
+      action: 'INSERT',
+      eventId: created.id,
+    });
+    restoreBroadcastChannel.flush();
+
+    assert.deepEqual(
+      (await receiver.api.calendarEventsList()).find((event) => event.id === created.id),
+      created,
+      '실패한 낙관 삭제와 rollback은 다른 프리뷰 창의 이미 저장된 일정을 tombstone 처리하지 않는다',
+    );
   } finally {
     unsubscribeReceiver();
     unsubscribeActor();
