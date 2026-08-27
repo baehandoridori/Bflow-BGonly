@@ -623,6 +623,54 @@ test('quick edit rehydrates a teammate update after preserving its failed-save r
   );
 });
 
+test('quick edit accepts an early teammate refresh instead of treating it as a failed-save rollback', async () => {
+  const hooks = createHookStore();
+  const originalEvent = event();
+  const persistence = deferredThenable();
+  const updateCalls: Array<Partial<TestCalendarEvent>> = [];
+  const callbacks = {
+    onClose: () => {},
+    onUpdate: (_id: string, updates: Partial<TestCalendarEvent>) => {
+      updateCalls.push(updates);
+      return persistence.promise;
+    },
+    onDelete: () => {},
+  };
+  const teammateEvent = event({
+    title: '팀원이 먼저 바꾼 일정',
+    startDate: '2026-08-28',
+    endDate: '2026-08-29',
+    type: 'scene',
+    memo: '팀원이 먼저 남긴 메모',
+  });
+
+  await renderQuickEdit(hooks, callbacks, originalEvent, true);
+  hooks.state[1] = 'edit';
+  hooks.state[2] = '내 저장 시도';
+
+  await invoke(findButtonByText(await renderQuickEdit(hooks, callbacks, originalEvent, true), '저장'));
+  await renderQuickEdit(hooks, callbacks, teammateEvent, true);
+  persistence.reject(new Error('save failed'));
+
+  const recovered = await renderQuickEdit(hooks, callbacks, teammateEvent, true);
+  assert.equal(
+    findAlerts(recovered).length,
+    0,
+    'an early teammate refresh must clear the local failure explanation instead of being consumed as rollback',
+  );
+  assert.equal(
+    findTitleInput(recovered).props.value,
+    '팀원이 먼저 바꾼 일정',
+    'an early teammate refresh must replace the stale local draft immediately after failure',
+  );
+  await invoke(findButtonByText(recovered, '저장'));
+  assert.equal(
+    updateCalls.length,
+    1,
+    'the rehydrated teammate data must not be written back as another stale save',
+  );
+});
+
 test('side panel keeps edit mode and explains a failed save', async () => {
   const hooks = createHookStore();
   hooks.state[0] = true;

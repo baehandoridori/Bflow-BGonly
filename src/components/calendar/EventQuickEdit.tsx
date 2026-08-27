@@ -35,12 +35,25 @@ function isPromiseLike(value: unknown): value is PromiseLike<void> {
 type LocalMutationRecovery = {
   identityKey: string;
   rollbackSnapshot: string;
-  eventAtStart: CalendarEvent;
-  rollbackRefreshConsumed: boolean;
+  optimisticSnapshot?: string;
 };
 
 function eventContentSnapshot(event: CalendarEvent): string {
   return buildEventSnapshot([event]).get(calendarEventIdentityKey(event)) ?? '';
+}
+
+function directUpdateSnapshot(event: CalendarEvent, updates: Partial<CalendarEvent>): string {
+  const normalized = { ...updates };
+  if ('startDate' in normalized && !normalized.startDate) delete normalized.startDate;
+  if ('endDate' in normalized && !normalized.endDate) delete normalized.endDate;
+  if (normalized.startDate && normalized.endDate && normalized.endDate < normalized.startDate) {
+    [normalized.startDate, normalized.endDate] = [normalized.endDate, normalized.startDate];
+  }
+  return eventContentSnapshot({ ...event, ...normalized });
+}
+
+function isLocalMutationSnapshot(mutation: LocalMutationRecovery, snapshot: string): boolean {
+  return snapshot === mutation.rollbackSnapshot || snapshot === mutation.optimisticSnapshot;
 }
 
 const TYPE_OPTIONS: { value: CalendarEventType; label: string }[] = [
@@ -140,14 +153,7 @@ export function EventQuickEdit({
 
     const failedRecovery = failedMutationRecoveryRef.current;
     if (failedRecovery?.identityKey === eventIdentityKey) {
-      if (failedRecovery.rollbackSnapshot === eventSnapshot) {
-        failedRecovery.rollbackRefreshConsumed = true;
-        return;
-      }
-      if (!failedRecovery.rollbackRefreshConsumed) {
-        failedRecovery.rollbackRefreshConsumed = true;
-        return;
-      }
+      if (isLocalMutationSnapshot(failedRecovery, eventSnapshot)) return;
     }
 
     failedMutationRecoveryRef.current = null;
@@ -163,9 +169,19 @@ export function EventQuickEdit({
     if (pendingMutationRef.current !== mutation) return;
     pendingMutationRef.current = null;
     const latestEvent = latestEventRef.current;
-    mutation.rollbackRefreshConsumed = latestEvent !== mutation.eventAtStart
-      && calendarEventIdentityKey(latestEvent) === mutation.identityKey
-      && eventContentSnapshot(latestEvent) === mutation.rollbackSnapshot;
+    const latestSnapshot = calendarEventIdentityKey(latestEvent) === mutation.identityKey
+      ? eventContentSnapshot(latestEvent)
+      : undefined;
+    if (latestSnapshot === undefined || !isLocalMutationSnapshot(mutation, latestSnapshot)) {
+      failedMutationRecoveryRef.current = null;
+      setTitle(latestEvent.title);
+      setStartDate(latestEvent.startDate);
+      setEndDate(latestEvent.endDate);
+      setType(latestEvent.type);
+      setMemo(latestEvent.memo);
+      setMutationError(null);
+      return;
+    }
     failedMutationRecoveryRef.current = mutation;
     setMutationError(message);
   }, []);
@@ -188,8 +204,7 @@ export function EventQuickEdit({
     const mutation: LocalMutationRecovery = {
       identityKey: eventIdentityKey,
       rollbackSnapshot: eventSnapshot,
-      eventAtStart: event,
-      rollbackRefreshConsumed: false,
+      optimisticSnapshot: directUpdateSnapshot(event, updates),
     };
     pendingMutationRef.current = mutation;
     failedMutationRecoveryRef.current = null;
@@ -220,8 +235,6 @@ export function EventQuickEdit({
     const mutation: LocalMutationRecovery = {
       identityKey: eventIdentityKey,
       rollbackSnapshot: eventSnapshot,
-      eventAtStart: event,
-      rollbackRefreshConsumed: false,
     };
     pendingMutationRef.current = mutation;
     failedMutationRecoveryRef.current = null;
