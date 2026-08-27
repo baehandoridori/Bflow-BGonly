@@ -404,6 +404,18 @@ export function WeekTimeGridView({
     () => (dates.length === 7 ? layoutEventBars(allDayEvents, dates[0], 7) : []),
     [allDayEvents, dates],
   );
+  // 시간 일정이 날짜를 넘겨 종일 레인으로 승격돼도, 드래그 중 레인 높이는 원래 배치로 고정한다.
+  // 이때 preview 자체는 별도 절대 배치로 남겨 사용자가 이동 결과와 시각을 계속 확인할 수 있게 한다.
+  const frozenTimedDragPreviewBar = useMemo(() => {
+    if (!shouldFreezeAllDayLayout || !dragPreview?.identityKey || dates.length !== 7) return null;
+    const previewEvent = displayedAllDayEvents.find((event) => (
+      calendarEventIdentityKey(event) === dragPreview.identityKey
+    ));
+    if (!previewEvent) return null;
+    return layoutEventBars([...sourceAllDayEvents, previewEvent], dates[0], 7).find((bar) => (
+      calendarEventIdentityKey(bar.event) === dragPreview.identityKey
+    )) ?? null;
+  }, [dates, displayedAllDayEvents, dragPreview, shouldFreezeAllDayLayout, sourceAllDayEvents]);
   const visibleAllDayRows = showAllDay
     ? (allDayBars.length ? Math.max(...allDayBars.map((bar) => bar.row)) + 1 : 0)
     : Math.min(2, allDayBars.length ? Math.max(...allDayBars.map((bar) => bar.row)) + 1 : 0);
@@ -538,6 +550,22 @@ export function WeekTimeGridView({
                 </button>
               );
             })}
+            {frozenTimedDragPreviewBar && (
+              <div
+                aria-hidden="true"
+                data-time-grid-drag-preview="true"
+                className="pointer-events-none absolute z-20 truncate rounded border border-dashed border-white/70 px-1.5 text-left text-[10px] font-semibold text-white shadow-lg"
+                style={{
+                  top: 3 + frozenTimedDragPreviewBar.row * ALL_DAY_ROW_PX,
+                  left: `calc(${frozenTimedDragPreviewBar.startCol * (100 / 7)}% + 2px)`,
+                  width: `calc(${frozenTimedDragPreviewBar.span * (100 / 7)}% - 4px)`,
+                  height: 22,
+                  ...getAllDayBarStyle(frozenTimedDragPreviewBar.event.color),
+                }}
+              >
+                {getAllDayBarLabel(frozenTimedDragPreviewBar, tagNameById, calendarNameById)}
+              </div>
+            )}
           </div>
           {hiddenAllDayCount > 0 && (
             <button
