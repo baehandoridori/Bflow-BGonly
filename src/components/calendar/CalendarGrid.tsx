@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react';
 import { createPortal } from 'react-dom';
 import { motion, AnimatePresence } from 'framer-motion';
-import { X, Palmtree, CheckSquare } from 'lucide-react';
+import { X, Palmtree, CheckSquare, CalendarDays } from 'lucide-react';
 import { cn } from '@/utils/cn';
 import type { CalendarEvent } from '@/types/calendar';
 import { EVENT_COLORS } from '@/types/calendar';
@@ -499,6 +499,14 @@ export function CalendarGrid({
     );
   }, [events, dragPreview, draggedEventIdentity]);
 
+  // 이번 달에 걸치는 일정이 하나도 없으면 격자만 남아 무엇을 해야 할지 알기 어렵다.
+  // 날짜 셀 클릭이 곧 생성 경로이므로 안내는 클릭을 가리지 않게 얹기만 한다.
+  const hasCurrentMonthEvent = useMemo(() => weeks.some((week) => week.some((day) => {
+    if (day.getMonth() !== currentMonth) return false;
+    const dateStr = fmtDate(day);
+    return displayEvents.some((candidate) => candidate.startDate <= dateStr && candidate.endDate >= dateStr);
+  })), [currentMonth, displayEvents, weeks]);
+
   return (
     <div className="flex flex-col flex-1 h-full min-h-0" onWheel={onWheel}>
       {/* 요일 헤더 */}
@@ -524,8 +532,15 @@ export function CalendarGrid({
         animate={{ opacity: 1, y: 0 }}
         exit={instantTransition ? undefined : { opacity: 0, y: monthDirection > 0 ? -30 : 30 }}
         transition={instantTransition ? { duration: 0 } : { duration: 0.3, ease: [0.16, 1, 0.3, 1] }}
-        className="flex flex-col flex-1 min-h-0 rounded-xl overflow-hidden border border-bg-border/30"
+        className="relative flex flex-col flex-1 min-h-0 rounded-xl overflow-hidden border border-bg-border/30"
       >
+        {!hasCurrentMonthEvent && (
+          <div className="pointer-events-none absolute inset-0 z-0 flex flex-col items-center justify-center gap-2">
+            <CalendarDays size={36} className="text-text-secondary/60" />
+            <span className="text-sm text-text-secondary">이번 달 일정이 없습니다</span>
+            <span className="text-[11px] text-text-secondary/60">날짜를 눌러 새 일정을 만들어 보세요</span>
+          </div>
+        )}
         {weeks.map((week, wi) => {
           const bars = layoutEventBars(displayEvents, week[0], 7);
           const maxRow = bars.length > 0 ? Math.max(...bars.map((b) => b.row)) + 1 : 0;

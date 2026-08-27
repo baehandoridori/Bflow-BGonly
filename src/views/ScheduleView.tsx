@@ -43,7 +43,7 @@ import {
 } from '@/utils/calendarEventIdentity';
 import { navigateToSceneView } from '@/utils/sceneNavigationAction';
 import { createUuid } from '@/utils/createUuid';
-import { fmtDate, parseDate, addDays } from '@/utils/calendarDate';
+import { fmtDate, parseDate, addDays, getISOWeekNumber } from '@/utils/calendarDate';
 import { useMotionPref } from '@/hooks/useMotionPref';
 import { buildEventSnapshot, diffEventSnapshots, type CalendarEventSnapshot } from '@/utils/calendarEventDiff';
 
@@ -731,6 +731,11 @@ export function ScheduleView() {
     if (periodNavigationResetRef.current) clearTimeout(periodNavigationResetRef.current);
   }, []);
 
+  const todayPulseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => () => {
+    if (todayPulseTimerRef.current) clearTimeout(todayPulseTimerRef.current);
+  }, []);
+
   // 네비게이션
   const goToPrev = () => {
     markPeriodNavigation();
@@ -767,13 +772,12 @@ export function ScheduleView() {
     const todayStr = fmtDate(now);
     moveToWeekContaining(now);
     moveToDay(now);
-    // 월간 뷰: 오늘 날짜에 펄스 애니메이션 (모달 트리거 방지)
-    if (viewMode === 'month') {
-      setPulseDate(todayStr);
-      setFocusedDate(todayStr);
-      setTimeout(() => { setPulseDate(null); }, 2500);
-    }
-    // 주간/2주: showCreate 트리거하지 않음
+    // 펄스는 모든 보기에서 알려 준다. 키보드 포커스 날짜는 월간 전용 상태라 그대로 둔다.
+    if (viewMode === 'month') setFocusedDate(todayStr);
+    setPulseDate(todayStr);
+    if (todayPulseTimerRef.current) clearTimeout(todayPulseTimerRef.current);
+    todayPulseTimerRef.current = setTimeout(() => { setPulseDate(null); }, 2500);
+    // 어느 보기에서도 showCreate를 트리거하지 않는다.
   };
 
   // 이벤트 CRUD
@@ -1306,20 +1310,18 @@ export function ScheduleView() {
       const d = new Date();
       return `${d.getFullYear()}년 ${d.getMonth() + 1}월 ${d.getDate()}일`;
     }
-    // 주간/2주간: activeWeekIndex 기준으로 현재 보이는 범위 표시
+    // 주간/2주간: activeWeekIndex 기준으로 현재 보이는 범위 표시.
+    // 범위만 있으면 몇 월 몇째 주인지 알기 어려워 연·월과 주차를 함께 보여 준다.
     if (weeks.length > 0 && activeWeekIndex < weeks.length) {
-      if (viewMode === '2week') {
-        const startWeek = weeks[activeWeekIndex];
-        const endIdx = Math.min(activeWeekIndex + 1, weeks.length - 1);
-        const endWeek = weeks[endIdx];
-        const first = startWeek[0];
-        const last = endWeek[6];
-        return `${first.getMonth() + 1}/${first.getDate()} — ${last.getMonth() + 1}/${last.getDate()}`;
-      }
-      const activeWeek = weeks[activeWeekIndex];
-      const first = activeWeek[0];
-      const last = activeWeek[6];
-      return `${first.getMonth() + 1}/${first.getDate()} — ${last.getMonth() + 1}/${last.getDate()}`;
+      const startWeek = weeks[activeWeekIndex];
+      const endWeek = viewMode === '2week'
+        ? weeks[Math.min(activeWeekIndex + 1, weeks.length - 1)]
+        : startWeek;
+      const first = startWeek[0];
+      const last = endWeek[6];
+      const anchor = startWeek[3]; // 목요일 기준 ISO 주차
+      const range = `${first.getMonth() + 1}.${first.getDate()} – ${last.getMonth() + 1}.${last.getDate()}`;
+      return `${anchor.getFullYear()}년 ${anchor.getMonth() + 1}월 · ${getISOWeekNumber(anchor)}주차 · ${range}`;
     }
     return '';
   }, [viewMode, year, month, weeks, activeWeekIndex]);
@@ -1557,6 +1559,7 @@ export function ScheduleView() {
                   setCreateEndDate(dateStr);
                   setShowCreate(true);
                 }}
+                pulseDate={pulseDate}
                 year={year}
                 highlightedEventIdentities={highlightedEventIdentities}
                 reduceMotion={reduce}
@@ -1593,6 +1596,7 @@ export function ScheduleView() {
                 }}
                 activeWeekIndex={activeWeekIndex}
                 onWeekChange={handleWeekChange}
+                pulseDate={pulseDate}
                 mode={viewMode === '2week' ? '2week' : 'week'}
                 highlightedEventIdentities={highlightedEventIdentities}
                 reduceMotion={reduce}

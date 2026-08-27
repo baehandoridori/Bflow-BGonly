@@ -31,6 +31,7 @@ export interface DayScrollViewProps {
   onActiveDayChange: (index: number) => void;
   onEventClick?: (event: CalendarEvent) => void;
   onEventContextMenu?: (event: CalendarEvent, mouse: React.MouseEvent) => void;
+  pulseDate?: string | null; // '오늘' 이동 안내 펄스
   onDateClick?: (date: string) => void; // YYYY-MM-DD — 날짜 클릭 시 이벤트 생성
   year: number;
   highlightedEventIdentities?: ReadonlySet<string>;
@@ -60,6 +61,7 @@ export default function DayScrollView({
   onEventClick,
   onEventContextMenu,
   onDateClick,
+  pulseDate,
   year,
   highlightedEventIdentities,
   reduceMotion = false,
@@ -160,6 +162,7 @@ export default function DayScrollView({
                   onEventClick={onEventClick}
                   onEventContextMenu={onEventContextMenu}
                   onDateClick={onDateClick}
+                  pulseDate={pulseDate}
                   tagNameById={tagNameById}
                   highlightedEventIdentities={highlightedEventIdentities}
                   reduceMotion={reduceMotion}
@@ -195,6 +198,7 @@ function ActiveDay({
   onEventClick,
   onEventContextMenu,
   onDateClick,
+  pulseDate,
   tagNameById,
   highlightedEventIdentities,
   reduceMotion,
@@ -206,6 +210,7 @@ function ActiveDay({
   onEventClick?: (ev: CalendarEvent) => void;
   onEventContextMenu?: (ev: CalendarEvent, mouse: React.MouseEvent) => void;
   onDateClick?: (date: string) => void;
+  pulseDate?: string | null;
   tagNameById: Record<string, string>;
   highlightedEventIdentities?: ReadonlySet<string>;
   reduceMotion: boolean;
@@ -218,13 +223,25 @@ function ActiveDay({
 
   return (
     <div
-      className="rounded-xl p-5 flex flex-col h-full"
+      className="relative rounded-xl p-5 flex flex-col h-full"
       style={{
         background: 'rgba(108,92,231,0.06)',
         border: '1px solid rgba(108,92,231,0.35)',
         boxShadow: '0 0 18px rgba(108,92,231,0.12)',
       }}
     >
+      {dateStr === pulseDate && (
+        <motion.div
+          data-navigate-pulse="true"
+          className="absolute inset-0 rounded-xl border-2 border-accent pointer-events-none"
+          style={{ boxShadow: '0 0 12px 4px rgba(108, 92, 231, 0.4), 0 0 24px 8px rgba(108, 92, 231, 0.15)' }}
+          initial={reduceMotion ? false : { opacity: 0, scale: 0.98 }}
+          animate={reduceMotion
+            ? { opacity: 1, scale: 1 }
+            : { opacity: [0, 1, 0.6, 1, 0], scale: [0.98, 1.01, 1, 1.005, 1] }}
+          transition={reduceMotion ? { duration: 0 } : { duration: 2, ease: 'easeInOut' }}
+        />
+      )}
       {/* 날짜 헤더 */}
       <div className="flex items-center gap-3 mb-4">
         <span

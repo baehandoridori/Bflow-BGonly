@@ -177,6 +177,7 @@ type WeekScrollViewProps = {
   onDateClick?(date: string): void;
   activeWeekIndex: number;
   onWeekChange(index: number): void;
+  pulseDate?: string | null;
   mode?: 'week' | '2week';
   highlightedEventIdentities?: ReadonlySet<string>;
   reduceMotion?: boolean;
@@ -211,6 +212,7 @@ type DayScrollViewProps = {
   onEventClick?(event: ScheduleCalendarEvent): void;
   onEventContextMenu?(event: ScheduleCalendarEvent, mouse: { preventDefault(): void; stopPropagation(): void; clientX: number; clientY: number }): void;
   onDateClick?(date: string): void;
+  pulseDate?: string | null;
   year: number;
   highlightedEventIdentities?: ReadonlySet<string>;
   reduceMotion?: boolean;
@@ -1504,6 +1506,12 @@ async function loadScheduleView(): Promise<ScheduleViewComponent> {
         fmtDate: scheduleFmtDate,
         parseDate: (date: string) => new Date(`${date}T12:00:00`),
         addDays: (date: Date, days: number) => new Date(date.getFullYear(), date.getMonth(), date.getDate() + days, 12),
+        getISOWeekNumber: (value: Date) => {
+          const date = new Date(value.getFullYear(), value.getMonth(), value.getDate());
+          date.setDate(date.getDate() + 4 - (date.getDay() || 7));
+          const yearStart = new Date(date.getFullYear(), 0, 1);
+          return Math.ceil(((date.getTime() - yearStart.getTime()) / 86400000 + 1) / 7);
+        },
       };
       if (id === '@/utils/calendarEventFilter') return { filterCalendarEvents: (events: unknown[]) => events };
       if (id === '@/components/calendar/CalendarGrid') {
@@ -5905,6 +5913,103 @@ test('CalendarGrid renders tag-aware chip text while keeping each event color as
   const tintStyle = tintedChipBody.props.style as { background?: string; borderLeft?: string };
   assert.match(tintStyle.background ?? '', /#74B9FF/, 'the chip tint still comes from event.color');
   assert.equal(tintStyle.borderLeft, '3px solid #74B9FF', 'the chip border still comes from event.color');
+});
+
+test('the weekly header names the month and week, and today pulses in every view', async () => {
+  // 주간 헤더는 범위만으로는 몇 월 몇째 주인지 알기 어려워 연·월·주차를 함께 보여 준다.
+  resetHarness();
+  scheduleLocalStorage.set('bflow_calendar_view_v1', JSON.stringify({ viewMode: 'week', weekSubMode: 'card' }));
+  let tree = await renderScheduleView();
+  await flushScheduleMountEffects();
+  tree = await renderScheduleView();
+
+  assert.match(
+    textContent(tree),
+    /\d{4}년 \d{1,2}월 · \d{1,2}주차 · \d{1,2}\.\d{1,2} – \d{1,2}\.\d{1,2}/,
+    '주간 헤더가 연·월·주차·범위를 모두 담는다',
+  );
+
+  // '오늘' 버튼은 헤더 네비게이션에 있어 월·주·2주 보기에서 누를 수 있다.
+  // 오늘 보기에는 헤더 네비게이션 자체가 없으므로, 같은 펄스를 미니 달력 이동으로 확인한다.
+  const todayButtonCases = [
+    { label: '월 보기', stored: { viewMode: 'month', weekSubMode: 'card' }, read: () => scheduleGridProps.at(-1)?.pulseDate },
+    { label: '주간 카드', stored: { viewMode: 'week', weekSubMode: 'card' }, read: () => scheduleWeekScrollProps.at(-1)?.pulseDate },
+    { label: '주간 시간표', stored: { viewMode: 'week', weekSubMode: 'timegrid' }, read: () => scheduleGridProps.at(-1)?.pulseDate ?? null },
+  ] as const;
+
+  for (const { label, stored, read } of todayButtonCases.slice(0, 2)) {
+    resetHarness();
+    scheduleLocalStorage.set('bflow_calendar_view_v1', JSON.stringify(stored));
+    const clock = installScheduleFakeClock();
+    try {
+      tree = await renderScheduleView();
+      await flushScheduleMountEffects();
+      tree = await renderScheduleView();
+      assert.equal(read(), null, `${label}: 처음에는 펄스가 없다`);
+
+      buttonByText(tree, '오늘').props.onClick?.();
+      tree = await renderScheduleView();
+      assert.equal(read(), scheduleFmtDate(new Date()), `${label}: '오늘'을 누르면 그 날짜가 펄스한다`);
+      assert.equal(scheduleCreateModalProps.length, 0, `${label}: '오늘'은 새 일정 창을 열지 않는다`);
+
+      clock.advance(2_500);
+      tree = await renderScheduleView();
+      assert.equal(read(), null, `${label}: 펄스는 잠시 뒤 사라진다`);
+    } finally {
+      clock.restore();
+    }
+  }
+
+  // 오늘 보기: 미니 달력으로 날짜를 옮기면 그 날짜 카드가 펄스한다.
+  resetHarness();
+  scheduleLocalStorage.set('bflow_calendar_view_v1', JSON.stringify({ viewMode: 'today', weekSubMode: 'card' }));
+  tree = await renderScheduleView();
+  await flushScheduleMountEffects();
+  buttonByTitle(tree, '사이드바 펼치기').props.onClick?.();
+  tree = await renderScheduleView();
+  assert.equal(scheduleDayScrollProps.at(-1)?.pulseDate, null, '오늘 카드: 처음에는 펄스가 없다');
+
+  const miniCalendar = scheduleMiniCalendarProps.at(-1);
+  assert.ok(miniCalendar, '오늘 보기 사이드바에도 미니 달력이 있다');
+  miniCalendar.onDateSelect('2026-08-11');
+  await renderScheduleView();
+  assert.equal(
+    scheduleDayScrollProps.at(-1)?.pulseDate,
+    '2026-08-11',
+    '오늘 카드도 이동한 날짜를 펄스로 알려 준다',
+  );
+});
+
+test('the month grid explains an empty month without blocking the create path', async () => {
+  resetHarness();
+  const emptyTree = await renderCalendarGrid([]);
+  assert.match(textContent(emptyTree), /이번 달 일정이 없습니다/);
+  assert.match(textContent(emptyTree), /날짜를 눌러 새 일정을 만들어 보세요/);
+
+  const notice = findElements(emptyTree, (node) => (
+    typeof node.props.className === 'string'
+    && node.props.className.includes('pointer-events-none')
+    && node.props.className.includes('absolute inset-0')
+  ))[0];
+  assert.ok(notice, '안내는 격자 위에 얹기만 한다');
+  assert.match(
+    String(notice.props.className),
+    /pointer-events-none/,
+    '날짜 셀 클릭이 곧 생성 경로이므로 안내가 클릭을 가리면 안 된다',
+  );
+
+  // 이번 달에 걸치는 일정이 하나라도 있으면 안내를 숨긴다.
+  const filledTree = await renderCalendarGrid([calendarListEvent({ id: 'filled', title: '이번 달 일정' })]);
+  assert.doesNotMatch(textContent(filledTree), /이번 달 일정이 없습니다/);
+
+  // 옆 달에만 걸친 일정은 이번 달을 채우지 않는다.
+  const neighbourTree = await renderCalendarGrid([calendarListEvent({
+    id: 'neighbour',
+    title: '다음 달 일정',
+    startDate: '2026-09-10',
+    endDate: '2026-09-10',
+  })]);
+  assert.match(textContent(neighbourTree), /이번 달 일정이 없습니다/);
 });
 
 test('rapid period navigation draws the next period instantly instead of queueing slides', async () => {

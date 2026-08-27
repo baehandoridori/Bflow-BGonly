@@ -55,6 +55,7 @@ export interface WeekScrollViewProps {
   onDateClick?: (date: string) => void; // YYYY-MM-DD — 날짜 클릭 시 이벤트 생성
   activeWeekIndex: number; // 연도 기준 절대 인덱스 (0~52)
   onWeekChange: (index: number) => void;
+  pulseDate?: string | null; // '오늘' 이동 안내 펄스
   mode?: 'week' | '2week'; // 'week' = 1주 포커스, '2week' = 2주 활성
   highlightedEventIdentities?: ReadonlySet<string>;
   reduceMotion?: boolean;
@@ -84,6 +85,7 @@ export default function WeekScrollView({
   onDateClick,
   activeWeekIndex,
   onWeekChange,
+  pulseDate,
   mode = 'week',
   highlightedEventIdentities,
   reduceMotion,
@@ -190,6 +192,7 @@ export default function WeekScrollView({
                   onEventClick={onEventClick}
                   onEventContextMenu={onEventContextMenu}
                   onDateClick={onDateClick}
+                  pulseDate={pulseDate}
                   compact={is2Week}
                   reduce={reduce}
                   tagNameById={tagNameById}
@@ -233,6 +236,7 @@ function ActiveWeek({
   onEventClick,
   onEventContextMenu,
   onDateClick,
+  pulseDate,
   compact,
   reduce,
   tagNameById,
@@ -246,6 +250,7 @@ function ActiveWeek({
   onEventClick: (ev: CalendarEvent) => void;
   onEventContextMenu?: (ev: CalendarEvent, mouse: React.MouseEvent) => void;
   onDateClick?: (date: string) => void;
+  pulseDate?: string | null;
   compact?: boolean;
   reduce: boolean;
   tagNameById: Record<string, string>;
@@ -300,9 +305,22 @@ function ActiveWeek({
           return (
             <div
               key={ds}
-              className="flex flex-col items-center gap-0.5 cursor-pointer rounded-lg hover:bg-bg-border/20 transition-colors py-0.5"
+              data-week-day={ds}
+              className="relative flex flex-col items-center gap-0.5 cursor-pointer rounded-lg hover:bg-bg-border/20 transition-colors py-0.5"
               onClick={() => onDateClick?.(ds)}
             >
+              {ds === pulseDate && (
+                <motion.div
+                  data-navigate-pulse="true"
+                  className="absolute inset-0 rounded-lg border-2 border-accent pointer-events-none"
+                  style={{ boxShadow: '0 0 12px 4px rgba(108, 92, 231, 0.4), 0 0 24px 8px rgba(108, 92, 231, 0.15)' }}
+                  initial={reduceMotion ? false : { opacity: 0, scale: 0.9 }}
+                  animate={reduceMotion
+                    ? { opacity: 1, scale: 1 }
+                    : { opacity: [0, 1, 0.6, 1, 0], scale: [0.9, 1.03, 1, 1.02, 1] }}
+                  transition={reduceMotion ? { duration: 0 } : { duration: 2, ease: 'easeInOut' }}
+                />
+              )}
               <span
                 className="text-[10px] font-medium"
                 style={{ color }}
