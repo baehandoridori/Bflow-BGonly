@@ -205,7 +205,8 @@ export function EventCreateModal({ initialDate, initialEndDate, initialStartTime
 
   return (
     <>
-      <motion.div initial={{ opacity: 0 }} animate={{ opacity: 0.01 }} exit={{ opacity: 0 }} className="fixed inset-0 z-40" onClick={onClose} />
+      {/* 배경색 유틸이 없어 농도만 있던 투명막이었다. 캘린더 설정 모달과 같은 농도로 통일한다. */}
+      <motion.div initial={{ opacity: 0 }} animate={{ opacity: 0.16 }} exit={{ opacity: 0 }} className="fixed inset-0 z-40 bg-black" onClick={onClose} />
       <motion.div
         initial={{ opacity: 0, x: 40 }}
         animate={{ opacity: 1, x: 0 }}

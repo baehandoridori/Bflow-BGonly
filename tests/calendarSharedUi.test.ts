@@ -5899,6 +5899,28 @@ test('CalendarGrid renders tag-aware chip text while keeping each event color as
   assert.equal(tintStyle.borderLeft, '3px solid #74B9FF', 'the chip border still comes from event.color');
 });
 
+test('the event create backdrop dims the background like the calendar settings modal', async () => {
+  resetHarness();
+  const tree = await renderEventCreateModal(false, () => {});
+  const backdrop = findElements(tree, (node) => (
+    typeof node.props.className === 'string'
+    && node.props.className.includes('fixed inset-0')
+    && node.props.className.includes('z-40')
+  ))[0];
+
+  assert.ok(backdrop, '생성 모달에도 배경막이 있다');
+  assert.match(
+    String(backdrop.props.className),
+    /bg-black/,
+    '배경색 없이 농도만 주면 배경막이 보이지 않는다',
+  );
+  assert.deepEqual(
+    backdrop.props.animate,
+    { opacity: 0.16 },
+    '캘린더 설정 모달과 같은 농도로 통일한다',
+  );
+});
+
 test('CalendarGrid fades in the chip tooltip and limits chip hover to transform and filter', async () => {
   resetHarness();
   const clock = installScheduleFakeClock();
