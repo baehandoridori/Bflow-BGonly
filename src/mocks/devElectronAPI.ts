@@ -220,26 +220,117 @@ function isMockCalendarChangeEnvelope(value: unknown): value is MockCalendarChan
     && isMockCalendarSharedSnapshot(envelope.snapshot);
 }
 
-function applyMockCalendarSharedSnapshot(snapshot: MockCalendarSharedSnapshot): void {
-  mockCalendars.splice(0, mockCalendars.length, ...snapshot.calendars.map((calendar) => ({ ...calendar })));
-  mockCalendarEvents.splice(0, mockCalendarEvents.length, ...snapshot.events.map((event) => ({ ...event })));
-  mockCalendarMembers.splice(0, mockCalendarMembers.length, ...snapshot.members.map((member) => ({ ...member })));
-  mockCalendarTags.splice(0, mockCalendarTags.length, ...snapshot.tags.map((tag) => ({ ...tag })));
-  // 읽음은 수신 창에서 먼저 확정될 수 있다. 다른 창의 오래된 캘린더 snapshot이
-  // 그 상태를 null로 되돌리면 catch-up 알림이 다시 나타나므로, 읽음 시각은 단조롭게 병합한다.
-  const readAtByNotificationId = new Map(
-    mockCalendarNotifications
-      .filter((notification) => notification.read_at !== null)
-      .map((notification) => [notification.id, notification.read_at] as const),
-  );
+function readMockCalendarChangeId(
+  detail: Record<string, unknown>,
+  key: 'calendarId' | 'eventId',
+): string | null {
+  const value = detail[key];
+  return typeof value === 'string' && value.trim() !== '' ? value : null;
+}
+
+function upsertMockCalendar(calendar: MockCalendarRow): void {
+  const index = mockCalendars.findIndex((candidate) => candidate.id === calendar.id);
+  if (index >= 0) mockCalendars.splice(index, 1, { ...calendar });
+  else mockCalendars.push({ ...calendar });
+}
+
+function upsertMockCalendarEvent(event: MockCalendarEventRow): void {
+  const index = mockCalendarEvents.findIndex((candidate) => candidate.id === event.id);
+  if (index >= 0) mockCalendarEvents.splice(index, 1, { ...event });
+  else mockCalendarEvents.push({ ...event });
+}
+
+function mergeMockCalendarNotifications(notifications: MockCalendarNotificationRow[]): void {
+  const merged = new Map(mockCalendarNotifications.map((notification) => [notification.id, notification]));
+  for (const notification of notifications) {
+    const current = merged.get(notification.id);
+    const readAt = current?.read_at === null || current?.read_at === undefined
+      ? notification.read_at
+      : notification.read_at === null
+        ? current.read_at
+        : current.read_at > notification.read_at
+          ? current.read_at
+          : notification.read_at;
+    merged.set(notification.id, { ...notification, read_at: readAt });
+  }
   mockCalendarNotifications.splice(
     0,
     mockCalendarNotifications.length,
-    ...snapshot.notifications.map((notification) => ({
-      ...notification,
-      read_at: readAtByNotificationId.get(notification.id) ?? notification.read_at,
-    })),
+    ...[...merged.values()].map((notification) => ({ ...notification })),
   );
+}
+
+function applyMockCalendarSharedSnapshot(
+  snapshot: MockCalendarSharedSnapshot,
+  detail: Record<string, unknown>,
+): void {
+  // 각 프리뷰 창은 독립된 mock module을 가진다. 전체 snapshot을 교체하면 서로 다른
+  // 일정의 동시 변경도 마지막 도착 메시지 하나만 남는다. 따라서 변경 detail이 가리키는
+  // 행/캘린더 범위만 적용하고, 알림 읽음은 기존처럼 단조롭게 병합한다.
+  mergeMockCalendarNotifications(snapshot.notifications);
+
+  const table = detail.table;
+  const action = detail.action;
+  if (table === 'calendar_events') {
+    const eventId = readMockCalendarChangeId(detail, 'eventId');
+    if (!eventId) return;
+    if (action === 'DELETE') {
+      const index = mockCalendarEvents.findIndex((event) => event.id === eventId);
+      if (index >= 0) mockCalendarEvents.splice(index, 1);
+      return;
+    }
+    const event = snapshot.events.find((candidate) => candidate.id === eventId);
+    if (event) upsertMockCalendarEvent(event);
+    return;
+  }
+
+  if (table === 'calendars') {
+    const calendarId = readMockCalendarChangeId(detail, 'calendarId');
+    if (!calendarId) return;
+    if (action === 'DELETE') {
+      const calendarIndex = mockCalendars.findIndex((calendar) => calendar.id === calendarId);
+      if (calendarIndex >= 0) mockCalendars.splice(calendarIndex, 1);
+      for (let index = mockCalendarMembers.length - 1; index >= 0; index -= 1) {
+        if (mockCalendarMembers[index].calendar_id === calendarId) mockCalendarMembers.splice(index, 1);
+      }
+      for (let index = mockCalendarEvents.length - 1; index >= 0; index -= 1) {
+        if (mockCalendarEvents[index].calendar_id === calendarId) mockCalendarEvents.splice(index, 1);
+      }
+      return;
+    }
+    const calendar = snapshot.calendars.find((candidate) => candidate.id === calendarId);
+    if (!calendar) return;
+    upsertMockCalendar(calendar);
+    if (action === 'INSERT' || detail.membersChanged === true) {
+      applyNormalizedMockCalendarMembers(
+        calendarId,
+        snapshot.members
+          .filter((member) => member.calendar_id === calendarId)
+          .map((member) => ({ ...member })),
+      );
+    }
+    return;
+  }
+
+  if (table === 'calendar_members') {
+    const calendarId = readMockCalendarChangeId(detail, 'calendarId');
+    if (!calendarId) return;
+    applyNormalizedMockCalendarMembers(
+      calendarId,
+      snapshot.members
+        .filter((member) => member.calendar_id === calendarId)
+        .map((member) => ({ ...member })),
+    );
+    return;
+  }
+
+  if (table === 'calendar_tags') {
+    mockCalendarTags.splice(0, mockCalendarTags.length, ...snapshot.tags.map((tag) => ({ ...tag })));
+    const tagIds = new Set(mockCalendarTags.map((tag) => tag.id));
+    for (const event of mockCalendarEvents) {
+      if (event.tag_id && !tagIds.has(event.tag_id)) event.tag_id = null;
+    }
+  }
 }
 
 function notifyMockCalendarChanged(payload: unknown): void {
@@ -275,7 +366,7 @@ function normalizeMockCalendarChangeDetail(detail: unknown): Record<string, unkn
 function receiveMockCalendarChange(event: MessageEvent<unknown>): void {
   const envelope = event.data;
   if (!isMockCalendarChangeEnvelope(envelope) || envelope.sourceId === mockCalendarChangeSourceId) return;
-  applyMockCalendarSharedSnapshot(envelope.snapshot);
+  applyMockCalendarSharedSnapshot(envelope.snapshot, normalizeMockCalendarChangeDetail(envelope.detail));
   notifyMockCalendarChanged(envelope.detail);
 }
 
@@ -364,7 +455,7 @@ function toMockCalendarNotificationPushRow(row: MockCalendarNotificationRow): Ca
 }
 
 function nextMockCalendarNotificationId(): string {
-  return `mock-calendar-notification-${Date.now()}-${String(++nextMockCalendarNotificationSequence).padStart(6, '0')}`;
+  return `mock-calendar-notification-${mockCalendarChangeSourceId}-${Date.now()}-${String(++nextMockCalendarNotificationSequence).padStart(6, '0')}`;
 }
 
 /**
@@ -1887,7 +1978,12 @@ export function installDevElectronAPI(): void {
       calendar.visibility = nextVisibility;
       calendar.updated_at = new Date().toISOString();
       if (nextMembers !== undefined) applyNormalizedMockCalendarMembers(calendar.id, nextMembers);
-      publishMockCalendarChange({ table: 'calendars', action: 'UPDATE', calendarId: calendar.id });
+      publishMockCalendarChange({
+        table: 'calendars',
+        action: 'UPDATE',
+        calendarId: calendar.id,
+        membersChanged: nextMembers !== undefined,
+      });
     },
     calendarDelete: async (id) => {
       const user = requireMockCalendarUser();

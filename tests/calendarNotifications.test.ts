@@ -238,6 +238,15 @@ type PreviewCalendarNotificationApi = {
     visibility: 'private' | 'members' | 'team';
     members?: Array<{ user_id: string; can_edit: boolean }>;
   }): Promise<PreviewCalendarNotificationCalendar>;
+  calendarUpdate(
+    id: string,
+    updates: {
+      name?: string;
+      color?: string;
+      visibility?: 'private' | 'members' | 'team';
+      members?: Array<{ user_id: string; can_edit: boolean }>;
+    },
+  ): Promise<void>;
   calendarEventCreate(input: PreviewCalendarNotificationEventInput): Promise<PreviewCalendarNotificationEvent>;
   calendarEventUpdate(
     id: string,
@@ -279,11 +288,18 @@ type PreviewCalendarNotificationWindow = {
 let previewCalendarNotificationBundle: Promise<string> | undefined;
 let previewCalendarNotificationNonce = 0;
 
-function installPreviewCalendarBroadcastChannel(): () => void {
+type PreviewCalendarBroadcastChannelCleanup = (() => void) & {
+  flush(): void;
+};
+
+function installPreviewCalendarBroadcastChannel(options?: {
+  deferMessages?: boolean;
+}): PreviewCalendarBroadcastChannelCleanup {
   const globalScope = globalThis as Record<string, unknown>;
   const hadBroadcastChannel = Object.prototype.hasOwnProperty.call(globalScope, 'BroadcastChannel');
   const previousBroadcastChannel = globalScope.BroadcastChannel;
   const channelsByName = new Map<string, Set<PreviewCalendarBroadcastChannel>>();
+  const pendingMessages: Array<{ channel: PreviewCalendarBroadcastChannel; data: unknown }> = [];
 
   class PreviewCalendarBroadcastChannel {
     private readonly listeners = new Set<(event: { data: unknown }) => void>();
@@ -308,7 +324,11 @@ function installPreviewCalendarBroadcastChannel(): () => void {
     postMessage(data: unknown): void {
       for (const channel of channelsByName.get(this.name) ?? []) {
         if (channel === this || channel.closed) continue;
-        queueMicrotask(() => channel.emit(data));
+        if (options?.deferMessages) {
+          pendingMessages.push({ channel, data });
+        } else {
+          queueMicrotask(() => channel.emit(data));
+        }
       }
     }
 
@@ -329,10 +349,15 @@ function installPreviewCalendarBroadcastChannel(): () => void {
   }
 
   globalScope.BroadcastChannel = PreviewCalendarBroadcastChannel;
-  return () => {
+  const cleanup = (() => {
     if (hadBroadcastChannel) globalScope.BroadcastChannel = previousBroadcastChannel;
     else delete globalScope.BroadcastChannel;
+  }) as PreviewCalendarBroadcastChannelCleanup;
+  cleanup.flush = () => {
+    const messages = pendingMessages.splice(0, pendingMessages.length);
+    for (const { channel, data } of messages) channel.emit(data);
   };
+  return cleanup;
 }
 
 async function bundledPreviewCalendarNotificationSource(): Promise<string> {
@@ -686,6 +711,135 @@ test('preview shared calendar fanout syncs canonical changes to another mock con
       action: 'UPDATE',
       eventId: created.id,
     });
+  } finally {
+    unsubscribeReceiver();
+    unsubscribeActor();
+    receiver.restore();
+    actor.restore();
+    restoreBroadcastChannel();
+  }
+});
+
+test('preview calendar fanout merges separate event changes that were both made before delivery', async () => {
+  const restoreBroadcastChannel = installPreviewCalendarBroadcastChannel({ deferMessages: true });
+  const actor = await createPreviewCalendarNotificationHarness();
+  const receiver = await createPreviewCalendarNotificationHarness();
+  const unsubscribeActor = actor.api.onCalendarChanged(() => {});
+  const unsubscribeReceiver = receiver.api.onCalendarChanged(() => {});
+  try {
+    await previewLogin(actor.api, '배한솔');
+    await previewLogin(receiver.api, '장삐쭈');
+    const sharedCalendar = await actor.api.calendarCreate({
+      name: '동시 변경 프리뷰 공유 일정',
+      color: '#74B9FF',
+      visibility: 'members',
+      members: [{ user_id: '2', can_edit: true }],
+    });
+    restoreBroadcastChannel.flush();
+
+    const actorEvent = await actor.api.calendarEventCreate(
+      previewNotificationEventInput(sharedCalendar.id, '첫 번째 창에서 만든 일정'),
+    );
+    const receiverEvent = await receiver.api.calendarEventCreate(
+      previewNotificationEventInput(sharedCalendar.id, '두 번째 창에서 만든 일정'),
+    );
+
+    restoreBroadcastChannel.flush();
+
+    for (const api of [actor.api, receiver.api]) {
+      const eventIds = new Set((await api.calendarEventsList()).map((event) => event.id));
+      assert.ok(eventIds.has(actorEvent.id), '한 창의 전송 대기 중 변경이 다른 창의 일정에 덮어써지지 않는다');
+      assert.ok(eventIds.has(receiverEvent.id), '다른 창의 전송 대기 중 변경도 함께 남는다');
+    }
+  } finally {
+    unsubscribeReceiver();
+    unsubscribeActor();
+    receiver.restore();
+    actor.restore();
+    restoreBroadcastChannel();
+  }
+});
+
+test('preview calendar fanout keeps both notification rows when isolated previews create them in the same millisecond', async () => {
+  const restoreBroadcastChannel = installPreviewCalendarBroadcastChannel({ deferMessages: true });
+  const actor = await createPreviewCalendarNotificationHarness();
+  const receiver = await createPreviewCalendarNotificationHarness();
+  const unsubscribeActor = actor.api.onCalendarChanged(() => {});
+  const unsubscribeReceiver = receiver.api.onCalendarChanged(() => {});
+  const previousNow = Date.now;
+  try {
+    await previewLogin(actor.api, '배한솔');
+    await previewLogin(receiver.api, '장삐쭈');
+    const sharedCalendar = await actor.api.calendarCreate({
+      name: '동시 알림 프리뷰 공유 일정',
+      color: '#74B9FF',
+      visibility: 'members',
+      members: [{ user_id: '2', can_edit: true }],
+    });
+    restoreBroadcastChannel.flush();
+
+    Date.now = () => 1_800_000_000_000;
+    const actorEvent = await actor.api.calendarEventCreate(
+      previewNotificationEventInput(sharedCalendar.id, '첫 번째 창의 알림 일정'),
+    );
+    const receiverEvent = await receiver.api.calendarEventCreate(
+      previewNotificationEventInput(sharedCalendar.id, '두 번째 창의 알림 일정'),
+    );
+    Date.now = previousNow;
+    restoreBroadcastChannel.flush();
+
+    await actor.api.logoutCanonicalSession();
+    await previewLogin(actor.api, '장삐쭈');
+    assert.ok(
+      (await actor.api.calendarNotificationsCatchup()).some((row) => row.event_id === actorEvent.id),
+      '같은 시각에 만든 알림도 다른 창의 수신함에서 서로 덮어써지지 않는다',
+    );
+
+    await receiver.api.logoutCanonicalSession();
+    await previewLogin(receiver.api, '배한솔');
+    assert.ok(
+      (await receiver.api.calendarNotificationsCatchup()).some((row) => row.event_id === receiverEvent.id),
+      '다른 창의 알림도 독립된 행으로 유지한다',
+    );
+  } finally {
+    Date.now = previousNow;
+    unsubscribeReceiver();
+    unsubscribeActor();
+    receiver.restore();
+    actor.restore();
+    restoreBroadcastChannel();
+  }
+});
+
+test('preview calendar fanout applies members changed through a calendar update', async () => {
+  const restoreBroadcastChannel = installPreviewCalendarBroadcastChannel({ deferMessages: true });
+  const actor = await createPreviewCalendarNotificationHarness();
+  const receiver = await createPreviewCalendarNotificationHarness();
+  const unsubscribeActor = actor.api.onCalendarChanged(() => {});
+  const unsubscribeReceiver = receiver.api.onCalendarChanged(() => {});
+  try {
+    await previewLogin(actor.api, '배한솔');
+    await previewLogin(receiver.api, '장삐쭈');
+    const sharedCalendar = await actor.api.calendarCreate({
+      name: '멤버 변경 프리뷰 공유 일정',
+      color: '#74B9FF',
+      visibility: 'members',
+      members: [{ user_id: '2', can_edit: true }],
+    });
+    restoreBroadcastChannel.flush();
+
+    await actor.api.calendarUpdate(sharedCalendar.id, {
+      members: [{ user_id: '2', can_edit: false }],
+    });
+    restoreBroadcastChannel.flush();
+
+    await assert.rejects(
+      receiver.api.calendarEventCreate(
+        previewNotificationEventInput(sharedCalendar.id, '수정 권한이 제거된 일정'),
+      ),
+      /권한/,
+      '캘린더 수정과 함께 바뀐 멤버 권한도 다른 프리뷰 창에 적용한다',
+    );
   } finally {
     unsubscribeReceiver();
     unsubscribeActor();
