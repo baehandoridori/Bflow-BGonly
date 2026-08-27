@@ -484,3 +484,116 @@ export function createIcsSubscriptionStore(deps: IcsSubscriptionStoreDeps): IcsS
     },
   };
 }
+
+
+/* ═══════════════════════════════════════════════════
+   본문 받아 오기 (전송)
+   ═══════════════════════════════════════════════════ */
+
+/** 리다이렉트 추적 상한. 순환하는 주소에 매달리지 않게 한다. */
+export const ICS_MAX_REDIRECTS = 3;
+/** 한 번에 받아들일 본문 크기 상한. 넘으면 받다가 끊는다. */
+export const ICS_MAX_RESPONSE_BYTES = 5 * 1024 * 1024;
+
+/** node의 http(s).get 응답 중 이 모듈이 실제로 쓰는 부분만 추린 모양. */
+export interface IcsHttpResponse {
+  statusCode?: number;
+  headers: Record<string, string | string[] | undefined>;
+  setEncoding(encoding: string): void;
+  on(eventName: 'data', handler: (chunk: string) => void): void;
+  on(eventName: 'end' | 'error', handler: (value?: unknown) => void): void;
+  destroy(): void;
+}
+
+export interface IcsHttpRequest {
+  on(eventName: 'error' | 'timeout', handler: (value?: unknown) => void): IcsHttpRequest;
+  destroy(): void;
+}
+
+export interface IcsTextFetcherDeps {
+  get(url: string, onResponse: (response: IcsHttpResponse) => void): IcsHttpRequest;
+}
+
+function readLocationHeader(response: IcsHttpResponse): string | null {
+  const raw = response.headers?.location;
+  const value = Array.isArray(raw) ? raw[0] : raw;
+  return typeof value === 'string' && value.trim() !== '' ? value : null;
+}
+
+/**
+ * 구독 주소의 본문을 문자열로 받아 온다. 리다이렉트는 정해진 횟수까지만 따라가고,
+ * 목적지가 http(s)를 벗어나면 거절한다. 본문이 상한을 넘으면 연결을 끊는다.
+ */
+export function createIcsTextFetcher(deps: IcsTextFetcherDeps): (url: string) => Promise<string> {
+  const requestOnce = (url: string, redirectsLeft: number): Promise<string> => (
+    new Promise<string>((resolve, reject) => {
+      let settled = false;
+      const settle = (run: () => void): void => {
+        if (settled) return;
+        settled = true;
+        run();
+      };
+
+      const request = deps.get(url, (response) => {
+        const status = response.statusCode ?? 0;
+
+        if (status >= 300 && status < 400) {
+          const location = readLocationHeader(response);
+          response.destroy();
+          if (!location) {
+            settle(() => reject(new Error(`외부 캘린더가 옮겨 간 주소를 알려 주지 않았습니다 (${status})`)));
+            return;
+          }
+          if (redirectsLeft <= 0) {
+            settle(() => reject(new Error('주소가 너무 여러 번 옮겨져 불러오지 못했습니다')));
+            return;
+          }
+          const next = normalizeIcsUrl(new URL(location, url).toString());
+          if (!next) {
+            settle(() => reject(new Error(ICS_URL_ERROR)));
+            return;
+          }
+          settle(() => { resolve(requestOnce(next, redirectsLeft - 1)); });
+          return;
+        }
+
+        if (status < 200 || status >= 300) {
+          response.destroy();
+          settle(() => reject(new Error(`외부 캘린더를 불러오지 못했습니다 (${status})`)));
+          return;
+        }
+
+        let received = 0;
+        const chunks: string[] = [];
+        response.setEncoding('utf8');
+        response.on('data', (chunk: string) => {
+          received += Buffer.byteLength(chunk, 'utf8');
+          if (received > ICS_MAX_RESPONSE_BYTES) {
+            response.destroy();
+            settle(() => reject(new Error('외부 캘린더 파일이 너무 큽니다')));
+            return;
+          }
+          chunks.push(chunk);
+        });
+        response.on('end', () => { settle(() => resolve(chunks.join(''))); });
+        response.on('error', (error) => {
+          settle(() => reject(error instanceof Error ? error : new Error(readErrorMessage(error))));
+        });
+      });
+
+      request.on('error', (error) => {
+        settle(() => reject(error instanceof Error ? error : new Error(readErrorMessage(error))));
+      });
+      request.on('timeout', () => {
+        request.destroy();
+        settle(() => reject(new Error('외부 캘린더 응답이 너무 늦습니다')));
+      });
+    })
+  );
+
+  return (url: string) => {
+    const normalized = normalizeIcsUrl(url);
+    if (!normalized) return Promise.reject(new Error(ICS_URL_ERROR));
+    return requestOnce(normalized, ICS_MAX_REDIRECTS);
+  };
+}

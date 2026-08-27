@@ -1,7 +1,10 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
+  ICS_MAX_REDIRECTS,
+  ICS_MAX_RESPONSE_BYTES,
   createIcsSubscriptionStore,
+  createIcsTextFetcher,
   expandIcsToEvents,
   normalizeIcsUrl,
 } from '../electron/icsSubscriptions.ts';
@@ -360,4 +363,123 @@ test('갱신이 끝나면 렌더러에 변경을 알린다', async () => {
   const pushedBefore = harness.pushed.length;
   await harness.store.refresh(added.id);
   assert.ok(harness.pushed.length > pushedBefore, '갱신이 끝나면 다시 알린다');
+});
+
+
+/* ── 본문 받아 오기(전송) ─────────────────────────────────────────── */
+
+type FakeResponse = {
+  statusCode?: number;
+  headers?: Record<string, string>;
+  chunks?: string[];
+  failWith?: Error;
+};
+
+function createFetcherHarness(responses: Record<string, FakeResponse>) {
+  const requested: string[] = [];
+  let destroyed = 0;
+
+  const fetchText = createIcsTextFetcher({
+    get(url, onResponse) {
+      requested.push(url);
+      const response = responses[url];
+      const handlers = new Map<string, ((value?: unknown) => void)[]>();
+      const request = {
+        on(eventName: string, handler: (value?: unknown) => void) {
+          if (eventName === 'error' && response?.failWith) {
+            queueMicrotask(() => handler(response.failWith));
+          }
+          return request;
+        },
+        destroy() { destroyed += 1; },
+      };
+      if (!response?.failWith) {
+        queueMicrotask(() => {
+          onResponse({
+            statusCode: response?.statusCode ?? 200,
+            headers: response?.headers ?? {},
+            setEncoding() {},
+            destroy() { destroyed += 1; },
+            on(eventName: string, handler: (value?: unknown) => void) {
+              const list = handlers.get(eventName) ?? [];
+              list.push(handler);
+              handlers.set(eventName, list);
+              if (eventName === 'end') {
+                queueMicrotask(() => {
+                  for (const chunk of response?.chunks ?? []) {
+                    for (const dataHandler of handlers.get('data') ?? []) dataHandler(chunk);
+                  }
+                  for (const endHandler of handlers.get('end') ?? []) endHandler();
+                });
+              }
+            },
+          });
+        });
+      }
+      return request;
+    },
+  });
+
+  return { fetchText, requested, destroyedCount: () => destroyed };
+}
+
+test('createIcsTextFetcher: 본문을 이어 붙여 돌려준다', async () => {
+  const harness = createFetcherHarness({
+    'https://example.com/team.ics': { chunks: ['BEGIN:VCALENDAR\r\n', 'END:VCALENDAR'] },
+  });
+
+  assert.equal(
+    await harness.fetchText('https://example.com/team.ics'),
+    'BEGIN:VCALENDAR\r\nEND:VCALENDAR',
+  );
+  assert.deepEqual(harness.requested, ['https://example.com/team.ics']);
+});
+
+test('createIcsTextFetcher: 리다이렉트를 따라가되 횟수를 제한한다', async () => {
+  const hop = (to: string): FakeResponse => ({ statusCode: 302, headers: { location: to } });
+  const withinLimit = createFetcherHarness({
+    'https://a.example/1.ics': hop('https://a.example/2.ics'),
+    'https://a.example/2.ics': hop('https://a.example/3.ics'),
+    'https://a.example/3.ics': hop('https://a.example/4.ics'),
+    'https://a.example/4.ics': { chunks: ['BEGIN:VCALENDAR'] },
+  });
+  assert.equal(await withinLimit.fetchText('https://a.example/1.ics'), 'BEGIN:VCALENDAR');
+  assert.equal(withinLimit.requested.length, ICS_MAX_REDIRECTS + 1);
+
+  const tooMany = createFetcherHarness({
+    'https://b.example/1.ics': hop('https://b.example/2.ics'),
+    'https://b.example/2.ics': hop('https://b.example/3.ics'),
+    'https://b.example/3.ics': hop('https://b.example/4.ics'),
+    'https://b.example/4.ics': hop('https://b.example/5.ics'),
+    'https://b.example/5.ics': { chunks: ['BEGIN:VCALENDAR'] },
+  });
+  await assert.rejects(() => tooMany.fetchText('https://b.example/1.ics'), /주소가 너무 여러 번/);
+});
+
+test('createIcsTextFetcher: http(s) 밖으로 가는 리다이렉트는 따라가지 않는다', async () => {
+  const harness = createFetcherHarness({
+    'https://example.com/team.ics': { statusCode: 302, headers: { location: 'file:///etc/passwd' } },
+  });
+
+  await assert.rejects(() => harness.fetchText('https://example.com/team.ics'), /http 또는 https/);
+});
+
+test('createIcsTextFetcher: 실패 응답과 전송 오류를 사유와 함께 알린다', async () => {
+  const notFound = createFetcherHarness({ 'https://example.com/a.ics': { statusCode: 404 } });
+  await assert.rejects(() => notFound.fetchText('https://example.com/a.ics'), /404/);
+
+  const broken = createFetcherHarness({
+    'https://example.com/b.ics': { failWith: new Error('연결이 끊겼습니다') },
+  });
+  await assert.rejects(() => broken.fetchText('https://example.com/b.ics'), /연결이 끊겼습니다/);
+});
+
+test('createIcsTextFetcher: 상한을 넘는 본문은 받다가 끊는다', async () => {
+  const oversized = 'x'.repeat(ICS_MAX_RESPONSE_BYTES + 1);
+  const harness = createFetcherHarness({
+    'https://example.com/huge.ics': { chunks: [oversized] },
+  });
+
+  await assert.rejects(() => harness.fetchText('https://example.com/huge.ics'), /너무 큽니다/);
+  assert.ok(harness.destroyedCount() > 0, '상한을 넘으면 연결을 끊는다');
 });
