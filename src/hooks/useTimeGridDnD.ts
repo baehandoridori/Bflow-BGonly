@@ -369,16 +369,17 @@ export function useTimeGridDnD({ scrollContainerRef, onCreate, onEventChange }: 
         } else if (onEventChangeRef.current) {
           try {
             const changeResult = onEventChangeRef.current(completion.eventId, completion.identity, completion.patch);
-            void Promise.resolve(changeResult).catch((error) => {
+            void Promise.resolve(changeResult).then(() => {
+              const key = calendarEventIdentityKey(completion.identity);
+              setSettledIdentityKey(key);
+              if (settleTimer.current) clearTimeout(settleTimer.current);
+              settleTimer.current = setTimeout(() => setSettledIdentityKey(null), 450);
+            }).catch((error) => {
               console.warn('[Calendar] 시간표 일정 변경 저장 실패:', error);
             });
           } catch (error) {
             console.warn('[Calendar] 시간표 일정 변경 저장 실패:', error);
           }
-          const key = calendarEventIdentityKey(completion.identity);
-          setSettledIdentityKey(key);
-          if (settleTimer.current) clearTimeout(settleTimer.current);
-          settleTimer.current = setTimeout(() => setSettledIdentityKey(null), 450);
         }
         finishedAtRef.current = Date.now();
       }

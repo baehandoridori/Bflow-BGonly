@@ -14,6 +14,7 @@ type DndModule = {
     preview: unknown;
     beginCreate(event: unknown, target: unknown): void;
     beginEventDrag(event: unknown, source: unknown, mode: 'move' | 'resize-end', target: unknown): void;
+    isSettling(event: unknown): boolean;
     shouldSuppressClick(): boolean;
   };
 };
@@ -456,6 +457,34 @@ test('useTimeGridDnD DOM: mouseup은 대기 rAF의 최신 값을 완료하고 Es
   }
 });
 
+test('useTimeGridDnD DOM: 일정 이동 완료 강조는 저장이 성공한 뒤에만 보인다', async () => {
+  let resolveSave: (() => void) | undefined;
+  const save = new Promise<void>((resolve) => {
+    resolveSave = resolve;
+  });
+  const harness = installDomHookHarness(await loadDnD(), {
+    scrollContainerRef: { current: { scrollTop: 0, getBoundingClientRect: () => ({ top: 100, bottom: 500 }) } },
+    onEventChange: () => save,
+  });
+  try {
+    let dnd = harness.render();
+    dnd.beginEventDrag(event(10, 156), source, 'move', { date: '2026-08-24', bandStartMin: 540, column: harness.column });
+    dnd = harness.render();
+    harness.fire('mousemove', { clientX: 20, clientY: 184 });
+    harness.fire('mouseup', {});
+
+    dnd = harness.render();
+    assert.equal(dnd.isSettling(source), false, '저장 결과를 기다리는 동안에는 완료 강조를 보이지 않는다');
+
+    resolveSave?.();
+    await Promise.resolve();
+    dnd = harness.render();
+    assert.equal(dnd.isSettling(source), true, '저장이 성공하면 다음 렌더에서 완료 강조를 보인다');
+  } finally {
+    harness.restore();
+  }
+});
+
 test('useTimeGridDnD DOM: mouseup에서 거부된 일정 변경 저장은 전역 Promise 오류로 남기지 않는다', async () => {
   const persistenceError = new Error('저장 실패');
   const warnings: unknown[][] = [];
@@ -472,7 +501,12 @@ test('useTimeGridDnD DOM: mouseup에서 거부된 일정 변경 저장은 전역
     harness.fire('mousemove', { clientX: 20, clientY: 184 });
     harness.fire('mouseup', {});
 
+    dnd = harness.render();
+    assert.equal(dnd.isSettling(source), false, '저장이 거부되면 완료 강조를 보이지 않는다');
+
     await new Promise<void>((resolve) => setImmediate(resolve));
+    dnd = harness.render();
+    assert.equal(dnd.isSettling(source), false, '거부를 처리한 뒤에도 완료 강조를 보이지 않는다');
     assert.deepEqual(warnings, [['[Calendar] 시간표 일정 변경 저장 실패:', persistenceError]]);
   } finally {
     harness.restore();
