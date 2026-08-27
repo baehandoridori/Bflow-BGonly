@@ -252,6 +252,32 @@ test('useTimeGridDnD DOM: create·resize callback, Escape 취소, 읽기전용 i
   }
 });
 
+test('useTimeGridDnD DOM: 자정에서 시작해 위로 만들면 마지막 15분을 포함한다', async () => {
+  const creates: unknown[][] = [];
+  const harness = installDomHookHarness(await loadDnD(), {
+    scrollContainerRef: { current: { scrollTop: 0, getBoundingClientRect: () => ({ top: 100, bottom: 500 }) } },
+    onCreate: (...args) => creates.push(args),
+  });
+  try {
+    // 19:00 밴드의 하단(24:00)에서 시작해 23:30까지 위로 선택한다.
+    harness.column.dataset.timeGridBandStart = '1140';
+    let dnd = harness.render();
+    dnd.beginCreate(event(10, 380), { date: '2026-08-24', bandStartMin: 1140, column: harness.column });
+    dnd = harness.render();
+    harness.fire('mousemove', { clientX: 20, clientY: 352 });
+    dnd = harness.render();
+    harness.fire('mouseup', {});
+
+    assert.deepEqual(
+      creates,
+      [['2026-08-24', '23:30', '00:00']],
+      '처음 가리킨 24:00을 23:45로 당기지 않아 마지막 15분을 잃지 않는다',
+    );
+  } finally {
+    harness.restore();
+  }
+});
+
 test('useTimeGridDnD DOM: Escape 뒤 mouseup click은 create와 event drag의 연속 열림을 막는다', async () => {
   const createHarness = installDomHookHarness(await loadDnD(), {
     scrollContainerRef: { current: { scrollTop: 0, getBoundingClientRect: () => ({ top: 100, bottom: 500 }) } },

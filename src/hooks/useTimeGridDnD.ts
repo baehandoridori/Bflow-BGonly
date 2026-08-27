@@ -67,7 +67,7 @@ export function getTimeGridPointerMinutes(clientY: number, rect: { top: number }
 }
 
 export function getTimeGridCreateRange(startMinutes: number, currentMinutes: number): Pick<TimeGridEventPatch, 'startTime' | 'endTime'> {
-  const safeAnchor = Math.max(0, Math.min(startMinutes, DAY_END_MINUTES - 15));
+  const safeAnchor = Math.max(0, Math.min(startMinutes, DAY_END_MINUTES));
   const safeCurrent = Math.max(0, Math.min(currentMinutes, DAY_END_MINUTES));
   const start = Math.min(safeAnchor, safeCurrent);
   const end = Math.min(
