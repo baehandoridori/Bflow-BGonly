@@ -252,6 +252,8 @@ type FormElement = ReactElement<{
 const myUserId = 'user-me';
 let stateSlots: unknown[] = [];
 let stateCursor = 0;
+let eventSidePanelRefSlots: Array<{ current: unknown }> = [];
+let eventSidePanelRefCursor = 0;
 let scheduleRefSlots: Array<{ current: unknown }> = [];
 let scheduleRefCursor = 0;
 let modalRefSlots: Array<{ current: unknown }> = [];
@@ -667,6 +669,8 @@ function resetHarness(): void {
   tagManagerDocumentListeners.clear();
   stateSlots = [];
   stateCursor = 0;
+  eventSidePanelRefSlots = [];
+  eventSidePanelRefCursor = 0;
   scheduleRefSlots = [];
   scheduleRefCursor = 0;
   modalRefSlots = [];
@@ -1653,6 +1657,11 @@ async function loadEventSidePanel(): Promise<EventSidePanelComponent> {
           },
           useEffect() {},
           useMemo: (factory: () => unknown) => factory(),
+          useRef(initial: unknown) {
+            const slot = eventSidePanelRefCursor++;
+            eventSidePanelRefSlots[slot] ??= { current: initial };
+            return eventSidePanelRefSlots[slot];
+          },
         };
       }
       if (id === 'react/jsx-runtime') return jsxRuntime;
@@ -2289,6 +2298,8 @@ async function renderEventSidePanel(event: ScheduleCalendarEvent): Promise<React
   const EventSidePanel = await loadEventSidePanel();
   stateSlots = [];
   stateCursor = 0;
+  eventSidePanelRefSlots = [];
+  eventSidePanelRefCursor = 0;
   return resolveComponents(EventSidePanel({
     event,
     onClose() {},
