@@ -884,6 +884,61 @@ test('side panel rehydrates a teammate update when a failed save has no rollback
   );
 });
 
+test('side panel accepts an early teammate refresh before a failed save settles', async () => {
+  const hooks = createHookStore();
+  const originalEvent = event();
+  const teammateEvent = event({
+    title: '팀원이 먼저 바꾼 일정',
+    memo: '동료가 먼저 남긴 메모',
+    startDate: '2026-08-28',
+    endDate: '2026-08-29',
+  });
+  const persistence = deferredThenable();
+  const updateCalls: Array<Partial<TestCalendarEvent>> = [];
+  const callbacks = {
+    onClose: () => {},
+    onUpdate: (_id: string, updates: Partial<TestCalendarEvent>) => {
+      updateCalls.push(updates);
+      return persistence.promise;
+    },
+    onDelete: () => {},
+  };
+
+  await renderSidePanel(hooks, callbacks, originalEvent, true);
+  hooks.state[0] = true;
+  hooks.state[1] = '내 저장 시도';
+
+  await invoke(findButtonByText(await renderSidePanel(hooks, callbacks, originalEvent, true), '저장'));
+  await renderSidePanel(hooks, callbacks, teammateEvent, true);
+  persistence.reject(new Error('save failed'));
+
+  const recovered = await renderSidePanel(hooks, callbacks, teammateEvent, true);
+  assert.equal(
+    findButtons(recovered).some((button) => textContent(button).includes('저장')),
+    false,
+    'an early teammate refresh must leave edit mode when the local save later fails',
+  );
+  assert.equal(
+    findAlerts(recovered).length,
+    0,
+    'an early teammate refresh must clear the failed local save explanation',
+  );
+
+  await invoke(findButtonByText(recovered, '편집'));
+  const editable = await renderSidePanel(hooks, callbacks, teammateEvent, true);
+  assert.equal(
+    findTitleInput(editable).props.value,
+    '팀원이 먼저 바꾼 일정',
+    'the teammate event captured during the pending save must replace the stale draft after rejection',
+  );
+  await invoke(findButtonByText(editable, '저장'));
+  assert.equal(
+    updateCalls.length,
+    1,
+    'the captured teammate event must not be written back as a stale retry',
+  );
+});
+
 test('side panel rehydrates a same-event teammate update that is unrelated to a local mutation', async () => {
   const hooks = createHookStore();
   const originalEvent = event();

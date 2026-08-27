@@ -151,13 +151,29 @@ export function EventSidePanel({
     : null;
   const eventIdentityKey = calendarEventIdentityKey(event);
   const eventSnapshot = eventContentSnapshot(event);
+  const latestEventRef = useRef(event);
   const pendingMutationRef = useRef<LocalMutationRecovery | null>(null);
   const failedMutationRecoveryRef = useRef<LocalMutationRecovery | null>(null);
 
+  const rehydrateFromEvent = (nextEvent: CalendarEvent) => {
+    setDraftTitle(nextEvent.title);
+    setDraftStart(nextEvent.startDate);
+    setDraftEnd(nextEvent.endDate);
+    setDraftMemo(nextEvent.memo);
+    setDraftCalendarId(nextEvent.calendarId ?? '');
+    setDraftTagId(nextEvent.tagId);
+    setDraftAllDay(nextEvent.allDay ?? true);
+    setDraftStartTime(nextEvent.startTime ?? '');
+    setDraftEndTime(nextEvent.endTime ?? '');
+    setMutationError(null);
+    setEditing(false);
+  };
+
   // 외부에서 새 이벤트 객체가 들어오면 최신 내용으로 다시 채운다.
-  // 내 저장/삭제 중에는 드래프트를 유지하고, 실패 뒤에는 그 작업의 롤백 갱신만 한 번 소비한다.
+  // 내 저장/삭제 중에는 드래프트를 유지하고, 실패 뒤에는 원래 스냅샷과 일치하는 롤백만 보존한다.
   // 같은 일정의 이후 정본 변경은 다시 최신 내용으로 채워, 실패한 초안이 동료 변경을 덮지 않게 한다.
   useEffect(() => {
+    latestEventRef.current = event;
     if (pendingMutationRef.current?.identityKey === eventIdentityKey) return;
 
     const failedRecovery = failedMutationRecoveryRef.current;
@@ -169,17 +185,7 @@ export function EventSidePanel({
     }
 
     failedMutationRecoveryRef.current = null;
-    setDraftTitle(event.title);
-    setDraftStart(event.startDate);
-    setDraftEnd(event.endDate);
-    setDraftMemo(event.memo);
-    setDraftCalendarId(event.calendarId ?? '');
-    setDraftTagId(event.tagId);
-    setDraftAllDay(event.allDay ?? true);
-    setDraftStartTime(event.startTime ?? '');
-    setDraftEndTime(event.endTime ?? '');
-    setMutationError(null);
-    setEditing(false);
+    rehydrateFromEvent(event);
   }, [event, eventIdentityKey, eventSnapshot]);
 
   const selectedTagUnavailable = Boolean(draftTagId && (
@@ -251,6 +257,22 @@ export function EventSidePanel({
     return parts.join(' ');
   })();
 
+  const markMutationFailed = (mutation: LocalMutationRecovery, message: string) => {
+    if (pendingMutationRef.current !== mutation) return;
+    pendingMutationRef.current = null;
+    const latestEvent = latestEventRef.current;
+    const latestSnapshot = calendarEventIdentityKey(latestEvent) === mutation.identityKey
+      ? eventContentSnapshot(latestEvent)
+      : undefined;
+    if (latestSnapshot !== mutation.rollbackSnapshot) {
+      failedMutationRecoveryRef.current = null;
+      rehydrateFromEvent(latestEvent);
+      return;
+    }
+    failedMutationRecoveryRef.current = mutation;
+    setMutationError(message);
+  };
+
   // 편집 저장
   const handleSave = () => {
     if (isVacation || isViewOnly) {
@@ -307,12 +329,7 @@ export function EventSidePanel({
             pendingMutationRef.current = null;
             setEditing(false);
           },
-          () => {
-            if (pendingMutationRef.current !== mutation) return;
-            pendingMutationRef.current = null;
-            failedMutationRecoveryRef.current = mutation;
-            setMutationError('일정 저장에 실패했어요. 다시 시도해 주세요.');
-          },
+          () => markMutationFailed(mutation, '일정 저장에 실패했어요. 다시 시도해 주세요.'),
         );
         return;
       }
@@ -320,10 +337,7 @@ export function EventSidePanel({
       pendingMutationRef.current = null;
       setEditing(false);
     } catch {
-      if (pendingMutationRef.current !== mutation) return;
-      pendingMutationRef.current = null;
-      failedMutationRecoveryRef.current = mutation;
-      setMutationError('일정 저장에 실패했어요. 다시 시도해 주세요.');
+      markMutationFailed(mutation, '일정 저장에 실패했어요. 다시 시도해 주세요.');
     }
   };
 
@@ -360,12 +374,7 @@ export function EventSidePanel({
             pendingMutationRef.current = null;
             onClose();
           },
-          () => {
-            if (pendingMutationRef.current !== mutation) return;
-            pendingMutationRef.current = null;
-            failedMutationRecoveryRef.current = mutation;
-            setMutationError('일정 삭제에 실패했어요. 다시 시도해 주세요.');
-          },
+          () => markMutationFailed(mutation, '일정 삭제에 실패했어요. 다시 시도해 주세요.'),
         );
         return;
       }
@@ -373,10 +382,7 @@ export function EventSidePanel({
       pendingMutationRef.current = null;
       onClose();
     } catch {
-      if (pendingMutationRef.current !== mutation) return;
-      pendingMutationRef.current = null;
-      failedMutationRecoveryRef.current = mutation;
-      setMutationError('일정 삭제에 실패했어요. 다시 시도해 주세요.');
+      markMutationFailed(mutation, '일정 삭제에 실패했어요. 다시 시도해 주세요.');
     }
   };
 
