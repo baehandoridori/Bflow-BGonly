@@ -311,6 +311,11 @@ test('외부 구독 칩은 구독 이름을 앞에 붙인다', () => {
     '외부 팀 캘린더 · 외부 회의',
   );
   assert.equal(
+    formatEventChipText(icsEvent({ allDay: true, startTime: undefined }), {}, {}),
+    '외부 팀 캘린더 · 외부 회의',
+    '캘린더 이름 맵에 없어도 일정에 실려 온 구독 이름을 쓴다',
+  );
+  assert.equal(
     formatEventChipText(icsEvent(), {}, { 'ics:sub-1': '외부 팀 캘린더' }),
     '15:00 외부 회의',
     '시각 일정은 기존처럼 시각을 앞세운다',

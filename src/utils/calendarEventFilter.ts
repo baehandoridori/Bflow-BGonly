@@ -67,7 +67,9 @@ export function formatEventChipText(
   const source = sourceOf(ev);
   const prefix = (ev.tagId ? tagNameById[ev.tagId] : undefined)
     ?? (source === 'google' ? '구글' : source === 'vacation' ? '휴가'
-      : source === 'ics' ? (ev.sourceCalendarId ? calendarNameById[ev.sourceCalendarId] : undefined)
+      // 구독 이름은 캘린더 메타데이터가 아니라 일정 자체에 실려 온다(createdBy).
+      : source === 'ics'
+        ? ((ev.sourceCalendarId ? calendarNameById[ev.sourceCalendarId] : undefined) ?? (ev.createdBy || undefined))
         : ev.calendarId ? calendarNameById[ev.calendarId] : undefined);
   return prefix ? `${prefix} · ${ev.title}` : ev.title;
 }
