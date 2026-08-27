@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { X, Palmtree, CheckSquare } from 'lucide-react';
@@ -319,8 +319,24 @@ function OverflowPopup({
   const d = parseDate(date);
   const label = `${d.getMonth() + 1}월 ${d.getDate()}일 (${WEEKDAYS[d.getDay()]})`;
 
+  // 캘린더 단축키(C/W/M/?)는 aria-modal 대화상자가 떠 있으면 배경으로 흘러가지 않는다.
+  // 이 팝업도 같은 규칙을 따르므로, 닫기는 여기서 Escape로 직접 처리한다.
+  useEffect(() => {
+    const handleKeyDown = (keyboardEvent: KeyboardEvent) => {
+      if (keyboardEvent.key !== 'Escape') return;
+      keyboardEvent.preventDefault();
+      keyboardEvent.stopPropagation();
+      onClose();
+    };
+    document.addEventListener('keydown', handleKeyDown);
+    return () => document.removeEventListener('keydown', handleKeyDown);
+  }, [onClose]);
+
   return (
     <motion.div
+      role="dialog"
+      aria-modal="true"
+      aria-label={`${label} 일정 목록`}
       initial={{ opacity: 0, scale: 0.95, y: -4 }}
       animate={{ opacity: 1, scale: 1, y: 0 }}
       exit={{ opacity: 0, scale: 0.95, y: -4 }}

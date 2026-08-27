@@ -44,6 +44,7 @@ function installDomHookHarness(
   const previousDocument = (globalThis as any).document;
   const previousWindow = (globalThis as any).window;
   const listeners = new Map<string, Set<Listener>>();
+  const windowListeners = new Map<string, Set<Listener>>();
   const styleNodes = new Map<string, any>();
   const intervals = new Map<number, () => void>();
   const frames = new Map<number, FrameRequestCallback>();
@@ -73,6 +74,8 @@ function installDomHookHarness(
     clearInterval(id: number) { intervals.delete(id); },
     requestAnimationFrame(callback: FrameRequestCallback) { const id = nextFrame++; frames.set(id, callback); return id; },
     cancelAnimationFrame(id: number) { frames.delete(id); },
+    addEventListener(type: string, listener: Listener) { (windowListeners.get(type) ?? windowListeners.set(type, new Set()).get(type)!).add(listener); },
+    removeEventListener(type: string, listener: Listener) { windowListeners.get(type)?.delete(listener); },
   };
 
   const values: unknown[] = [];
@@ -122,10 +125,13 @@ function installDomHookHarness(
     return value;
   };
   const fire = (type: string, event: any) => [...(listeners.get(type) ?? [])].forEach((listener) => listener(event));
+  const fireWindow = (type: string, event: any) => [...(windowListeners.get(type) ?? [])].forEach((listener) => listener(event));
   return {
     column,
     render,
     fire,
+    fireWindow,
+    windowListenerCount: (type: string) => windowListeners.get(type)?.size ?? 0,
     tickIntervals: () => intervals.forEach((tick) => tick()),
     pendingFrames: () => frames.size,
     flushFrames: () => {
@@ -697,6 +703,83 @@ test('useCalendarDnD DOM: 프레임 전 mouseup도 최신 날짜로 딱 한 번 
     harness.fire('mouseup', {});
     assert.deepEqual(resizes, [['event-3', '2026-08-24', '2026-08-26']]);
     assert.equal(harness.pendingFrames(), 0, 'mouseup 정리는 대기 프레임을 남기지 않는다');
+  } finally {
+    harness.restore();
+  }
+});
+
+test('useTimeGridDnD DOM: 격자 밖에서 손을 떼면 마지막 유효 슬롯으로 저장하지 않는다', async () => {
+  const changes: unknown[][] = [];
+  const creates: unknown[][] = [];
+  const harness = installDomHookHarness(
+    await loadDnD(),
+    {
+      scrollContainerRef: { current: { scrollTop: 0, getBoundingClientRect: () => ({ top: 100, bottom: 500 }) } },
+      onCreate: (...args) => creates.push(args),
+      onEventChange: (...args) => changes.push(args),
+    },
+    // 시간 눈금(clientX < 50)과 헤더(clientY < 100)는 날짜 열 밖의 요소다.
+    (clientX, clientY, defaultColumn) => (
+      clientX < 50 || clientY < 100 ? { closest: () => null } : defaultColumn
+    ),
+  );
+  try {
+    let dnd = harness.render();
+    dnd.beginEventDrag(event(200, 156), source, 'move', { date: '2026-08-24', bandStartMin: 540, column: harness.column });
+    dnd = harness.render();
+    harness.fire('mousemove', { clientX: 210, clientY: 300 });
+    dnd = harness.render();
+    harness.flushFrames();
+    dnd = harness.render();
+    assert.equal(dnd.isDragActive, true);
+    assert.notEqual(dnd.preview, null, '격자 안에서는 미리보기가 만들어진다');
+
+    harness.fire('mouseup', { clientX: 20, clientY: 300 });
+    dnd = harness.render();
+    assert.deepEqual(changes, [], '시간 눈금 위에서 놓으면 마지막 유효 슬롯으로 이동을 저장하지 않는다');
+    assert.equal(dnd.isDragging, false);
+    assert.equal(dnd.shouldSuppressClick(), true, '무효 drop도 이어지는 click을 열지 않는다');
+
+    dnd.beginCreate(event(200, 200), { date: '2026-08-24', bandStartMin: 540, column: harness.column });
+    dnd = harness.render();
+    harness.fire('mousemove', { clientX: 205, clientY: 280 });
+    dnd = harness.render();
+    harness.fire('mouseup', { clientX: 205, clientY: 40 });
+    dnd = harness.render();
+    assert.deepEqual(creates, [], '헤더 위에서 놓은 새 일정 드래그도 생성으로 확정하지 않는다');
+  } finally {
+    harness.restore();
+  }
+});
+
+test('useTimeGridDnD DOM: 창 포커스를 잃으면 드래그와 자동 스크롤 상태를 정리한다', async () => {
+  const changes: unknown[][] = [];
+  const scroller = { scrollTop: 0, getBoundingClientRect: () => ({ top: 100, bottom: 500 }) };
+  const harness = installDomHookHarness(await loadDnD(), {
+    scrollContainerRef: { current: scroller },
+    onEventChange: (...args) => changes.push(args),
+  });
+  try {
+    let dnd = harness.render();
+    dnd.beginEventDrag(event(200, 156), source, 'move', { date: '2026-08-24', bandStartMin: 540, column: harness.column });
+    dnd = harness.render();
+    harness.fire('mousemove', { clientX: 210, clientY: 300 });
+    dnd = harness.render();
+    assert.equal(dnd.isDragActive, true);
+    assert.equal(harness.hasPointerBlock(), true);
+    assert.equal(harness.windowListenerCount('blur'), 1, '활성 드래그만 창 blur 취소를 구독한다');
+
+    harness.fireWindow('blur', {});
+    dnd = harness.render();
+    assert.equal(dnd.isDragging, false, 'Alt+Tab처럼 mouseup이 오지 않아도 드래그가 남지 않는다');
+    assert.equal(harness.hasPointerBlock(), false, '포인터 차단 스타일이 남아 일정 조작을 막지 않는다');
+    assert.equal(harness.windowListenerCount('blur'), 0);
+    assert.deepEqual(changes, [], '창을 벗어난 드래그는 저장하지 않는다');
+    assert.equal(dnd.shouldSuppressClick(), true);
+
+    const scrollTopAfterCancel = scroller.scrollTop;
+    harness.tickIntervals();
+    assert.equal(scroller.scrollTop, scrollTopAfterCancel, '취소 뒤에는 16ms 자동 스크롤도 멈춘다');
   } finally {
     harness.restore();
   }

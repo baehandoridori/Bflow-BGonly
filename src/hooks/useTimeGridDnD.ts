@@ -356,13 +356,17 @@ export function useTimeGridDnD({ scrollContainerRef, onCreate, onEventChange }: 
       refreshPreview(event.clientX, event.clientY);
     };
 
-    const finish = () => {
+    const finish = (event?: MouseEvent) => {
       const state = dragRef.current;
-      const pointer = latestPointerRef.current;
-      if (pointer) refreshPreview(pointer.x, pointer.y);
+      const pointer = Number.isFinite(event?.clientX) && Number.isFinite(event?.clientY)
+        ? { x: event!.clientX, y: event!.clientY }
+        : latestPointerRef.current;
+      // 시간 눈금·헤더·격자 바깥에서 손을 떼면 마지막 유효 슬롯이 아니라 무효 drop으로 본다.
+      const dropTarget = pointer ? findPointerTarget(pointer.x, pointer.y) : null;
+      if (pointer && dropTarget) refreshPreview(pointer.x, pointer.y);
       flushPreviewFrame();
       const current = previewRef.current;
-      const completion = getTimeGridDragCompletion(state, current);
+      const completion = getTimeGridDragCompletion(state, current, !dropTarget);
       if (completion) {
         if (completion.type === 'create') {
           onCreateRef.current?.(completion.date, completion.startTime, completion.endTime);
@@ -381,6 +385,13 @@ export function useTimeGridDnD({ scrollContainerRef, onCreate, onEventChange }: 
             console.warn('[Calendar] 시간표 일정 변경 저장 실패:', error);
           }
         }
+      }
+      if (state?.hasCrossedThreshold) finishedAtRef.current = Date.now();
+      clearDrag();
+    };
+
+    const cancelDrag = () => {
+      if (dragRef.current?.hasCrossedThreshold) {
         finishedAtRef.current = Date.now();
       }
       clearDrag();
@@ -389,12 +400,13 @@ export function useTimeGridDnD({ scrollContainerRef, onCreate, onEventChange }: 
     const cancel = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
         event.preventDefault?.();
-        if (dragRef.current?.hasCrossedThreshold) {
-          finishedAtRef.current = Date.now();
-        }
-        clearDrag();
+        cancelDrag();
       }
     };
+
+    // Alt+Tab 등으로 창을 벗어나면 mouseup이 오지 않는다. 드래그 상태·16ms 타이머·
+    // 포인터 차단 스타일이 남아 일정 조작이 먹통이 되지 않도록 여기서 취소한다.
+    const handleWindowBlur = () => cancelDrag();
 
     const scrollTimer = window.setInterval(() => {
       const state = dragRef.current;
@@ -410,11 +422,13 @@ export function useTimeGridDnD({ scrollContainerRef, onCreate, onEventChange }: 
     document.addEventListener('mousemove', handleMouseMove);
     document.addEventListener('mouseup', finish);
     document.addEventListener('keydown', cancel);
+    window.addEventListener('blur', handleWindowBlur);
     return () => {
       window.clearInterval(scrollTimer);
       document.removeEventListener('mousemove', handleMouseMove);
       document.removeEventListener('mouseup', finish);
       document.removeEventListener('keydown', cancel);
+      window.removeEventListener('blur', handleWindowBlur);
       cancelPreviewFrame();
       document.body.style.userSelect = '';
       document.body.style.cursor = '';

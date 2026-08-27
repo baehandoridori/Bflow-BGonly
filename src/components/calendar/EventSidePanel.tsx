@@ -27,8 +27,13 @@ import { EntityText } from '@/components/common/EntityText';
 import { DEPARTMENT_CONFIGS } from '@/types';
 import { floatingGlassStyle } from '@/utils/glassStyles';
 import { parseDate } from '@/utils/calendarDate';
-import { buildEventSnapshot } from '@/utils/calendarEventDiff';
 import { calendarEventIdentityKey, calendarEventLinkedTodoId } from '@/utils/calendarEventIdentity';
+import {
+  directUpdateSnapshot,
+  eventContentSnapshot,
+  isLocalMutationSnapshot,
+  type LocalMutationRecovery,
+} from '@/utils/calendarLocalMutation';
 
 // ─── 유틸 ──────────────────────────────────────────
 
@@ -74,15 +79,6 @@ const TYPE_LABELS: Record<CalendarEventType, string> = {
 
 function isPromiseLike(value: unknown): value is PromiseLike<void> {
   return typeof (value as { then?: unknown } | null)?.then === 'function';
-}
-
-type LocalMutationRecovery = {
-  identityKey: string;
-  rollbackSnapshot: string;
-};
-
-function eventContentSnapshot(event: CalendarEvent): string {
-  return buildEventSnapshot([event]).get(calendarEventIdentityKey(event)) ?? '';
 }
 
 // ─── 인터페이스 ────────────────────────────────────
@@ -179,7 +175,7 @@ export function EventSidePanel({
     const failedRecovery = failedMutationRecoveryRef.current;
     if (
       failedRecovery?.identityKey === eventIdentityKey
-      && failedRecovery.rollbackSnapshot === eventSnapshot
+      && isLocalMutationSnapshot(failedRecovery, eventSnapshot)
     ) {
       return;
     }
@@ -264,7 +260,7 @@ export function EventSidePanel({
     const latestSnapshot = calendarEventIdentityKey(latestEvent) === mutation.identityKey
       ? eventContentSnapshot(latestEvent)
       : undefined;
-    if (latestSnapshot !== mutation.rollbackSnapshot) {
+    if (latestSnapshot === undefined || !isLocalMutationSnapshot(mutation, latestSnapshot)) {
       failedMutationRecoveryRef.current = null;
       rehydrateFromEvent(latestEvent);
       return;
@@ -317,6 +313,7 @@ export function EventSidePanel({
     const mutation: LocalMutationRecovery = {
       identityKey: eventIdentityKey,
       rollbackSnapshot: eventSnapshot,
+      optimisticSnapshot: directUpdateSnapshot(event, updates),
     };
     pendingMutationRef.current = mutation;
     failedMutationRecoveryRef.current = null;

@@ -1615,3 +1615,93 @@ test('preview realtime helper emits the canonical calendar envelope, isolates li
   realtime.emitCalendarNotification({ ...notification, id: 'mock-calendar-notification-2' });
   assert.equal(received.length, 1);
 });
+
+test('preview hydrates a late tab from the shared calendar state instead of keeping its seed', async () => {
+  const restoreBroadcastChannel = installPreviewCalendarBroadcastChannel({ deferMessages: true });
+  const actor = await createPreviewCalendarNotificationHarness();
+  const unsubscribeActor = actor.api.onCalendarChanged(() => {});
+  let late: Awaited<ReturnType<typeof createPreviewCalendarNotificationHarness>> | undefined;
+  let unsubscribeLate: (() => void) | undefined;
+  try {
+    await previewLogin(actor.api, '배한솔');
+    const sharedCalendar = await actor.api.calendarCreate({
+      name: '늦게 연 창이 받아야 할 캘린더',
+      color: '#74B9FF',
+      visibility: 'members',
+      members: [{ user_id: '2', can_edit: true }],
+    });
+    const created = await actor.api.calendarEventCreate(
+      previewNotificationEventInput(sharedCalendar.id, '늦게 연 창이 받아야 할 일정'),
+    );
+    // 아직 아무도 듣고 있지 않은 동안 전파된 변경은 늦게 연 창에 남지 않는다.
+    restoreBroadcastChannel.flush();
+
+    late = await createPreviewCalendarNotificationHarness();
+    const hydrations: unknown[] = [];
+    unsubscribeLate = late.api.onCalendarChanged((payload) => hydrations.push(payload));
+    await previewLogin(late.api, '장삐쭈');
+    restoreBroadcastChannel.flush();
+    restoreBroadcastChannel.flush();
+
+    assert.ok(
+      (await late.api.calendarList()).some((calendar) => calendar.id === sharedCalendar.id),
+      '늦게 연 프리뷰 창도 그동안 만들어진 공유 캘린더를 받는다',
+    );
+    assert.deepEqual(
+      (await late.api.calendarEventsList()).find((event) => event.id === created.id),
+      created,
+      '늦게 연 프리뷰 창은 놓친 일정까지 정본 상태로 채운다',
+    );
+    assert.ok(hydrations.length >= 1, '하이드레이션은 렌더러가 정본을 다시 읽도록 변경 신호를 낸다');
+  } finally {
+    unsubscribeLate?.();
+    unsubscribeActor();
+    late?.restore();
+    actor.restore();
+    restoreBroadcastChannel();
+  }
+});
+
+test('preview rejects a write authorized by membership that the owner already revoked', async () => {
+  const restoreBroadcastChannel = installPreviewCalendarBroadcastChannel({
+    deferMessages: true,
+    sharedStorage: true,
+  });
+  const owner = await createPreviewCalendarNotificationHarness();
+  const member = await createPreviewCalendarNotificationHarness();
+  const unsubscribeOwner = owner.api.onCalendarChanged(() => {});
+  const unsubscribeMember = member.api.onCalendarChanged(() => {});
+  try {
+    await previewLogin(owner.api, '배한솔');
+    await previewLogin(member.api, '장삐쭈');
+    const sharedCalendar = await owner.api.calendarCreate({
+      name: '권한 회수 검증 캘린더',
+      color: '#74B9FF',
+      visibility: 'members',
+      members: [{ user_id: '2', can_edit: true }],
+    });
+    restoreBroadcastChannel.flush();
+
+    const allowed = await member.api.calendarEventCreate(
+      previewNotificationEventInput(sharedCalendar.id, '회수 전에는 쓸 수 있는 일정'),
+    );
+    assert.ok(allowed.id, '권한이 있는 동안에는 다른 프리뷰 창도 일정을 만들 수 있다');
+    restoreBroadcastChannel.flush();
+
+    await owner.api.calendarSetMembers(sharedCalendar.id, [{ user_id: '2', can_edit: false }]);
+    // 회수 envelope를 아직 전달하지 않은 상태에서도 운영과 같은 판정이어야 한다.
+    await assert.rejects(
+      () => member.api.calendarEventCreate(
+        previewNotificationEventInput(sharedCalendar.id, '회수 뒤에는 막혀야 하는 일정'),
+      ),
+      /권한이 없습니다/,
+      '권한 회수 전파 전에 시작한 쓰기도 현재 membership으로 거절한다',
+    );
+  } finally {
+    unsubscribeMember();
+    unsubscribeOwner();
+    member.restore();
+    owner.restore();
+    restoreBroadcastChannel();
+  }
+});

@@ -939,6 +939,53 @@ test('side panel accepts an early teammate refresh before a failed save settles'
   );
 });
 
+test('side panel keeps the retry draft when its own optimistic save renders before the rejection', async () => {
+  const hooks = createHookStore();
+  const originalEvent = event();
+  const persistence = deferredThenable();
+  const callbacks = {
+    onClose: () => {},
+    onUpdate: () => persistence.promise,
+    onDelete: () => {},
+  };
+
+  await renderSidePanel(hooks, callbacks, originalEvent, true);
+  hooks.state[0] = true;
+  hooks.state[1] = '내 저장 시도';
+
+  await invoke(findButtonByText(await renderSidePanel(hooks, callbacks, originalEvent, true), '저장'));
+
+  // 저장이 오래 걸려 낙관적 갱신이 먼저 화면에 반영된 상태에서 요청이 실패한다.
+  const optimisticEvent = event({ title: '내 저장 시도' });
+  await renderSidePanel(hooks, callbacks, optimisticEvent, true);
+  persistence.reject(new Error('save failed'));
+
+  const recovered = await renderSidePanel(hooks, callbacks, optimisticEvent, true);
+  assert.ok(
+    findButtons(recovered).some((button) => textContent(button).includes('저장')),
+    'a rendered optimistic save must not be mistaken for a teammate update that closes edit mode',
+  );
+  assert.match(
+    textContent(recovered),
+    /일정 저장에 실패했어요/,
+    'the failure explanation must survive its own optimistic refresh',
+  );
+  assert.equal(
+    findTitleInput(recovered).props.value,
+    '내 저장 시도',
+    'the retry draft must survive a rejection that arrives after the optimistic render',
+  );
+
+  // 그 뒤 도착한 동료의 실제 변경은 여전히 최신 값으로 다시 채운다.
+  const teammateEvent = event({ title: '팀원이 바꾼 일정' });
+  const rehydrated = await renderSidePanel(hooks, callbacks, teammateEvent, true);
+  assert.equal(
+    findAlerts(rehydrated).length,
+    0,
+    'a later teammate change must still clear the local failure explanation',
+  );
+});
+
 test('side panel rehydrates a same-event teammate update that is unrelated to a local mutation', async () => {
   const hooks = createHookStore();
   const originalEvent = event();

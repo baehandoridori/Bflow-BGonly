@@ -8,8 +8,13 @@ import { useAuthStore } from '@/stores/useAuthStore';
 import { isOptimisticCalendarTagId, useCalendarStore } from '@/stores/useCalendarStore';
 import { EntityAwareInput } from '@/components/common/EntityAwareInput';
 import { floatingGlassStyle } from '@/utils/glassStyles';
-import { buildEventSnapshot } from '@/utils/calendarEventDiff';
 import { calendarEventIdentityKey } from '@/utils/calendarEventIdentity';
+import {
+  directUpdateSnapshot,
+  eventContentSnapshot,
+  isLocalMutationSnapshot,
+  type LocalMutationRecovery,
+} from '@/utils/calendarLocalMutation';
 
 interface EventQuickEditProps {
   event: CalendarEvent;
@@ -30,30 +35,6 @@ interface PendingSelection<T> {
 
 function isPromiseLike(value: unknown): value is PromiseLike<void> {
   return typeof (value as { then?: unknown } | null)?.then === 'function';
-}
-
-type LocalMutationRecovery = {
-  identityKey: string;
-  rollbackSnapshot: string;
-  optimisticSnapshot?: string;
-};
-
-function eventContentSnapshot(event: CalendarEvent): string {
-  return buildEventSnapshot([event]).get(calendarEventIdentityKey(event)) ?? '';
-}
-
-function directUpdateSnapshot(event: CalendarEvent, updates: Partial<CalendarEvent>): string {
-  const normalized = { ...updates };
-  if ('startDate' in normalized && !normalized.startDate) delete normalized.startDate;
-  if ('endDate' in normalized && !normalized.endDate) delete normalized.endDate;
-  if (normalized.startDate && normalized.endDate && normalized.endDate < normalized.startDate) {
-    [normalized.startDate, normalized.endDate] = [normalized.endDate, normalized.startDate];
-  }
-  return eventContentSnapshot({ ...event, ...normalized });
-}
-
-function isLocalMutationSnapshot(mutation: LocalMutationRecovery, snapshot: string): boolean {
-  return snapshot === mutation.rollbackSnapshot || snapshot === mutation.optimisticSnapshot;
 }
 
 const TYPE_OPTIONS: { value: CalendarEventType; label: string }[] = [

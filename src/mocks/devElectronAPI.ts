@@ -108,12 +108,29 @@ type MockCalendarChangeEnvelope = {
   detail: unknown;
   snapshot: MockCalendarSharedSnapshot;
 };
+type MockCalendarStampEntry = { key: string; stamp: MockCalendarChangeStamp };
+/**
+ * 운영에서 늦게 열린 창은 Supabase를 새로 조회해 그동안의 변경을 모두 받는다.
+ * 프리뷰에는 서버가 없으므로, 새 구독자가 join 요청을 보내고 기존 창이 자기 정본
+ * 상태(스냅샷 + 행별 stamp + tombstone)를 한 번 돌려주는 handshake로 같은 효과를 낸다.
+ */
+type MockCalendarSyncEnvelope = {
+  kind: 'bflow-dev-calendar-sync';
+  role: 'request' | 'state';
+  sourceId: string;
+  snapshot?: MockCalendarSharedSnapshot;
+  stamps?: MockCalendarStampEntry[];
+  tombstonedCalendarIds?: string[];
+  tombstonedEventIds?: string[];
+  latestTimestamp?: number;
+};
 type DevPreviewWindow = Window & typeof globalThis & {
   __bflowMockCalendarNotify?: (overrides?: MockCalendarNotificationOverrides) => void;
 };
 const CALENDAR_TAG_UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const MOCK_CALENDAR_CHANGE_CHANNEL = 'bflow-dev-calendar-change-v1';
 const MOCK_CALENDAR_TAG_AUTHORITY_STORAGE_KEY = 'bflow-dev-calendar-tag-authority-v1';
+const MOCK_CALENDAR_MEMBER_AUTHORITY_STORAGE_KEY = 'bflow-dev-calendar-member-authority-v1';
 const mockCalendarTagAuthorityStorage = (() => {
   try {
     return typeof window === 'undefined' ? null : window.localStorage;
@@ -374,6 +391,64 @@ function synchronizeMockCalendarTagsWithAuthority(): void {
   writeMockCalendarTagAuthority(mockCalendarTags);
 }
 
+function isMockCalendarMemberRow(value: unknown): value is MockCalendarMemberRow {
+  if (!value || typeof value !== 'object') return false;
+  const member = value as Record<string, unknown>;
+  return typeof member.calendar_id === 'string'
+    && typeof member.user_id === 'string'
+    && typeof member.can_edit === 'boolean';
+}
+
+function readMockCalendarMemberAuthority(): MockCalendarMemberRow[] | null {
+  if (!mockCalendarTagAuthorityStorage) return null;
+  try {
+    const raw = mockCalendarTagAuthorityStorage.getItem(MOCK_CALENDAR_MEMBER_AUTHORITY_STORAGE_KEY);
+    if (raw === null) return null;
+    const members = JSON.parse(raw) as unknown;
+    if (!Array.isArray(members) || !members.every(isMockCalendarMemberRow)) return null;
+    return members.map((member) => ({ ...member }));
+  } catch {
+    return null;
+  }
+}
+
+function writeMockCalendarMemberAuthority(members: MockCalendarMemberRow[]): void {
+  if (!mockCalendarTagAuthorityStorage) return;
+  try {
+    mockCalendarTagAuthorityStorage.setItem(
+      MOCK_CALENDAR_MEMBER_AUTHORITY_STORAGE_KEY,
+      JSON.stringify(members.filter((member) => !tombstonedMockCalendarIds.has(member.calendar_id))),
+    );
+  } catch {
+    // localStorage를 쓸 수 없는 프리뷰에서는 기존 BroadcastChannel 동기화로 계속 동작한다.
+  }
+}
+
+/**
+ * 운영의 authorized write는 DB의 현재 membership을 다시 읽어 판정한다. 프리뷰의 각 창은
+ * 독립된 module 배열을 갖기 때문에, 권한 회수 envelope가 도착하기 전이라도 공유 authority를
+ * 먼저 읽어야 회수된 멤버의 쓰기를 같은 시점에 거절할 수 있다.
+ */
+function synchronizeMockCalendarMembersWithAuthority(): void {
+  const authoritativeMembers = readMockCalendarMemberAuthority();
+  if (authoritativeMembers === null) {
+    writeMockCalendarMemberAuthority(mockCalendarMembers);
+    return;
+  }
+  const adopted = authoritativeMembers.filter(
+    (member) => !tombstonedMockCalendarIds.has(member.calendar_id),
+  );
+  mockCalendarMembers.splice(0, mockCalendarMembers.length, ...adopted);
+}
+
+/** 바뀐 캘린더의 멤버 목록만 공유 authority에 반영해, 다른 캘린더 항목을 덮지 않는다. */
+function commitMockCalendarMembersToAuthority(calendarId: string): void {
+  const base = readMockCalendarMemberAuthority();
+  const others = (base ?? mockCalendarMembers).filter((member) => member.calendar_id !== calendarId);
+  const current = mockCalendarMembers.filter((member) => member.calendar_id === calendarId);
+  writeMockCalendarMemberAuthority([...others, ...current]);
+}
+
 function removeMockCalendarEvent(id: string): void {
   const index = mockCalendarEvents.findIndex((event) => event.id === id);
   if (index >= 0) mockCalendarEvents.splice(index, 1);
@@ -385,6 +460,7 @@ function removeMockCalendar(calendarId: string, stamp: MockCalendarChangeStamp, 
   for (let index = mockCalendarMembers.length - 1; index >= 0; index -= 1) {
     if (mockCalendarMembers[index].calendar_id === calendarId) mockCalendarMembers.splice(index, 1);
   }
+  commitMockCalendarMembersToAuthority(calendarId);
   const eventIds = new Set([
     ...deletedEventIds,
     ...mockCalendarEvents
@@ -539,8 +615,137 @@ function normalizeMockCalendarChangeDetail(detail: unknown): Record<string, unkn
   return { ...raw, table, action };
 }
 
-function receiveMockCalendarChange(event: MessageEvent<unknown>): void {
+function isMockCalendarSyncEnvelope(value: unknown): value is MockCalendarSyncEnvelope {
+  if (!value || typeof value !== 'object') return false;
+  const envelope = value as Record<string, unknown>;
+  return envelope.kind === 'bflow-dev-calendar-sync'
+    && (envelope.role === 'request' || envelope.role === 'state')
+    && typeof envelope.sourceId === 'string'
+    && envelope.sourceId.length > 0;
+}
+
+function collectMockCalendarChangeStamps(): MockCalendarStampEntry[] {
+  return [...mockCalendarChangeStamps].map(([key, stamp]) => ({ key, stamp: { ...stamp } }));
+}
+
+function buildMockCalendarSyncState(): MockCalendarSyncEnvelope {
+  return {
+    kind: 'bflow-dev-calendar-sync',
+    role: 'state',
+    sourceId: mockCalendarChangeSourceId,
+    snapshot: cloneMockCalendarSharedSnapshot(),
+    stamps: collectMockCalendarChangeStamps(),
+    tombstonedCalendarIds: [...tombstonedMockCalendarIds],
+    tombstonedEventIds: [...tombstonedMockCalendarEventIds],
+    latestTimestamp: latestMockCalendarChangeTimestamp,
+  };
+}
+
+function splitMockCalendarChangeKey(key: string): { scope: string; id: string } | null {
+  const separator = key.indexOf(':');
+  if (separator <= 0 || separator === key.length - 1) return null;
+  return { scope: key.slice(0, separator), id: key.slice(separator + 1) };
+}
+
+/**
+ * 늦게 연 창은 join 응답의 행별 stamp를 기존 규칙 그대로 비교해, 자기 stamp보다 새 행만
+ * 받아들인다. 이미 지난 알림은 inbox에만 병합하고 toast로 다시 띄우지 않는다.
+ */
+function applyMockCalendarSyncState(envelope: MockCalendarSyncEnvelope): boolean {
+  const snapshot = envelope.snapshot;
+  const stamps = envelope.stamps;
+  if (!isMockCalendarSharedSnapshot(snapshot) || !Array.isArray(stamps)) return false;
+  latestMockCalendarChangeTimestamp = Math.max(
+    latestMockCalendarChangeTimestamp,
+    typeof envelope.latestTimestamp === 'number' && Number.isSafeInteger(envelope.latestTimestamp)
+      ? envelope.latestTimestamp
+      : 0,
+  );
+
+  const peerTombstonedCalendarIds = new Set(
+    (envelope.tombstonedCalendarIds ?? []).filter((id): id is string => typeof id === 'string'),
+  );
+  const peerTombstonedEventIds = new Set(
+    (envelope.tombstonedEventIds ?? []).filter((id): id is string => typeof id === 'string'),
+  );
+
+  let changed = false;
+  for (const entry of stamps) {
+    if (!entry || typeof entry.key !== 'string' || !isMockCalendarChangeStamp(entry.stamp)) continue;
+    const parsed = splitMockCalendarChangeKey(entry.key);
+    if (!parsed) continue;
+    if (!rememberMockCalendarChangeStamp(entry.key, entry.stamp)) continue;
+    const { scope, id } = parsed;
+
+    if (scope === 'event') {
+      if (peerTombstonedEventIds.has(id)) {
+        tombstonedMockCalendarEventIds.add(id);
+        removeMockCalendarEvent(id);
+        changed = true;
+        continue;
+      }
+      if (tombstonedMockCalendarEventIds.has(id)) continue;
+      const event = snapshot.events.find((candidate) => candidate.id === id);
+      if (event) {
+        upsertMockCalendarEvent(event);
+        changed = true;
+      }
+      continue;
+    }
+
+    if (scope === 'calendar') {
+      if (peerTombstonedCalendarIds.has(id)) {
+        tombstonedMockCalendarIds.add(id);
+        removeMockCalendar(id, entry.stamp, []);
+        changed = true;
+        continue;
+      }
+      if (tombstonedMockCalendarIds.has(id)) continue;
+      const calendar = snapshot.calendars.find((candidate) => candidate.id === id);
+      if (calendar) {
+        upsertMockCalendar(calendar);
+        changed = true;
+      }
+      continue;
+    }
+
+    if (scope === 'members') {
+      if (tombstonedMockCalendarIds.has(id)) continue;
+      applyNormalizedMockCalendarMembers(
+        id,
+        snapshot.members
+          .filter((member) => member.calendar_id === id)
+          .map((member) => ({ ...member })),
+      );
+      changed = true;
+      continue;
+    }
+
+    if (scope === 'tag-list') {
+      replaceMockCalendarTags(readMockCalendarTagAuthority() ?? snapshot.tags);
+      changed = true;
+    }
+  }
+
+  if (mergeMockCalendarNotifications(snapshot.notifications).length > 0) changed = true;
+  return changed;
+}
+
+function receiveMockCalendarMessage(event: MessageEvent<unknown>): void {
   const envelope = event.data;
+  if (isMockCalendarSyncEnvelope(envelope)) {
+    if (envelope.sourceId === mockCalendarChangeSourceId) return;
+    if (envelope.role === 'request') {
+      // 아직 아무 변경도 없는 창은 seed와 동일하므로 굳이 응답하지 않는다.
+      if (mockCalendarChangeStamps.size === 0) return;
+      mockCalendarChangeChannel?.postMessage(buildMockCalendarSyncState());
+      return;
+    }
+    if (applyMockCalendarSyncState(envelope)) {
+      notifyMockCalendarChanged({ table: 'calendars', action: 'UPDATE', hydrated: true });
+    }
+    return;
+  }
   if (!isMockCalendarChangeEnvelope(envelope) || envelope.sourceId === mockCalendarChangeSourceId) return;
   applyMockCalendarSharedSnapshot(
     envelope.snapshot,
@@ -557,9 +762,15 @@ function getMockCalendarChangeChannel(): BroadcastChannel | null {
     return null;
   }
   const channel = new BroadcastChannel(MOCK_CALENDAR_CHANGE_CHANNEL);
-  channel.addEventListener('message', receiveMockCalendarChange);
+  channel.addEventListener('message', receiveMockCalendarMessage);
   (channel as BroadcastChannel & { unref?: () => void }).unref?.();
   mockCalendarChangeChannel = channel;
+  // 먼저 열려 있던 창의 정본 상태를 한 번 받아, 늦게 연 창도 그동안의 변경을 놓치지 않는다.
+  channel.postMessage({
+    kind: 'bflow-dev-calendar-sync',
+    role: 'request',
+    sourceId: mockCalendarChangeSourceId,
+  } satisfies MockCalendarSyncEnvelope);
   return channel;
 }
 
@@ -818,6 +1029,7 @@ function requireMockCalendar(calendarId: string): MockCalendarRow {
 }
 
 function mockMembersOf(calendarId: string): MockCalendarMemberRow[] {
+  synchronizeMockCalendarMembersWithAuthority();
   return mockCalendarMembers.filter((member) => member.calendar_id === calendarId);
 }
 
@@ -863,6 +1075,7 @@ function applyNormalizedMockCalendarMembers(
     if (mockCalendarMembers[index].calendar_id === calendarId) mockCalendarMembers.splice(index, 1);
   }
   mockCalendarMembers.push(...members);
+  commitMockCalendarMembersToAuthority(calendarId);
 }
 
 function replaceMockCalendarMembers(
@@ -2185,7 +2398,7 @@ export function installDevElectronAPI(): void {
         ? []
         : normalizeMockCalendarMembers(created, input.members ?? []);
       mockCalendars.push(created);
-      mockCalendarMembers.push(...members);
+      applyNormalizedMockCalendarMembers(created.id, members);
       publishMockCalendarChange({ table: 'calendars', action: 'INSERT', calendarId: created.id });
       return { ...created };
     },
@@ -2248,9 +2461,7 @@ export function installDevElectronAPI(): void {
         .map((event) => event.id);
       const index = mockCalendars.findIndex((calendar) => calendar.id === id);
       if (index >= 0) mockCalendars.splice(index, 1);
-      for (let memberIndex = mockCalendarMembers.length - 1; memberIndex >= 0; memberIndex--) {
-        if (mockCalendarMembers[memberIndex].calendar_id === id) mockCalendarMembers.splice(memberIndex, 1);
-      }
+      applyNormalizedMockCalendarMembers(id, []);
       for (let eventIndex = mockCalendarEvents.length - 1; eventIndex >= 0; eventIndex--) {
         if (mockCalendarEvents[eventIndex].calendar_id === id) {
           mockCalendarEvents.splice(eventIndex, 1);

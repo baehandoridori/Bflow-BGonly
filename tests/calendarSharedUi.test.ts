@@ -261,6 +261,8 @@ let modalRefCursor = 0;
 let modalEffectDeps: Array<readonly unknown[] | undefined> = [];
 let modalEffectCursor = 0;
 let pendingModalEffects: Array<() => void> = [];
+let pendingCalendarGridEffects: Array<() => void | (() => void)> = [];
+let calendarGridEffectCleanups: Array<() => void> = [];
 let tagManagerRefSlots: Array<{ current: unknown }> = [];
 let tagManagerRefCursor = 0;
 let calendarState: {
@@ -1597,6 +1599,7 @@ async function loadCalendarGrid(): Promise<CalendarGridComponent> {
           },
           useMemo: (factory: () => unknown) => factory(),
           useRef: (initial: unknown) => ({ current: initial }),
+          useEffect: (effect: () => void | (() => void)) => { pendingCalendarGridEffects.push(effect); },
         };
       }
       if (id === 'react/jsx-runtime') return jsxRuntime;
@@ -2276,9 +2279,14 @@ function installScheduleFakeClock(initialNow = 1_000): {
 async function renderCalendarGrid(
   events: ScheduleCalendarEvent[],
   overrides: Partial<CalendarGridProps> = {},
+  preserveState = false,
 ): Promise<ReactNode> {
   const CalendarGrid = await loadCalendarGrid();
-  stateSlots = [];
+  if (!preserveState) {
+    stateSlots = [];
+    calendarGridEffectCleanups.splice(0).forEach((cleanup) => cleanup());
+  }
+  pendingCalendarGridEffects = [];
   stateCursor = 0;
   const week = Array.from({ length: 7 }, (_, index) => new Date(2026, 7, 23 + index, 12));
   return resolveComponents(CalendarGrid({
@@ -2334,6 +2342,13 @@ async function renderEventCreateModal(
 function flushEventCreateEffects(): void {
   const effects = pendingModalEffects.splice(0);
   for (const effect of effects) effect();
+}
+
+function flushCalendarGridEffects(): void {
+  for (const effect of pendingCalendarGridEffects.splice(0)) {
+    const cleanup = effect();
+    if (typeof cleanup === 'function') calendarGridEffectCleanups.push(cleanup);
+  }
 }
 
 async function renderCalendarSettingsModal(
@@ -5864,6 +5879,65 @@ test('CalendarGrid renders tag-aware chip text while keeping each event color as
   const tintStyle = tintedChipBody.props.style as { background?: string; borderLeft?: string };
   assert.match(tintStyle.background ?? '', /#74B9FF/, 'the chip tint still comes from event.color');
   assert.equal(tintStyle.borderLeft, '3px solid #74B9FF', 'the chip border still comes from event.color');
+});
+
+test('CalendarGrid gives the month overflow popup modal semantics and closes it with Escape', async () => {
+  resetHarness();
+  const previousDocument = globalThis.document;
+  const documentListeners = new Map<string, Set<(event: Event) => void>>();
+  globalThis.document = {
+    addEventListener(type: string, listener: (event: Event) => void) {
+      const listeners = documentListeners.get(type) ?? new Set();
+      listeners.add(listener);
+      documentListeners.set(type, listeners);
+    },
+    removeEventListener(type: string, listener: (event: Event) => void) {
+      documentListeners.get(type)?.delete(listener);
+    },
+  } as unknown as Document;
+
+  try {
+    const events = Array.from({ length: 5 }, (_, index) => calendarListEvent({
+      id: `overflow-${index}`,
+      title: `겹친 일정 ${index}`,
+    }));
+
+    let tree = await renderCalendarGrid(events, { maxVisibleBars: 2 });
+    const moreButton = buttonByText(tree, '더보기');
+    moreButton.props.onClick?.({
+      stopPropagation() {},
+      target: { getBoundingClientRect: () => ({ left: 40, bottom: 120 }) },
+    } as never);
+
+    tree = await renderCalendarGrid(events, { maxVisibleBars: 2 }, true);
+    const popup = findElements(tree, (candidate) => candidate.props.role === 'dialog')[0];
+    assert.ok(popup, '월 보기 "+N 더보기" 팝업이 열린다');
+    assert.equal(
+      popup.props['aria-modal'],
+      'true',
+      '팝업이 aria-modal 대화상자여야 배경 캘린더 단축키(C/W/M/?)가 뒤에서 열리지 않는다',
+    );
+    assert.match(String(popup.props['aria-label'] ?? ''), /일정 목록$/);
+
+    flushCalendarGridEffects();
+    const escapeListeners = documentListeners.get('keydown');
+    assert.equal(escapeListeners?.size, 1, '팝업이 자기 Escape 닫기를 직접 소유한다');
+    let defaultPrevented = false;
+    for (const listener of escapeListeners ?? []) {
+      listener({ key: 'Escape', preventDefault() { defaultPrevented = true; }, stopPropagation() {} } as unknown as Event);
+    }
+    assert.equal(defaultPrevented, true);
+
+    tree = await renderCalendarGrid(events, { maxVisibleBars: 2 }, true);
+    assert.equal(
+      findElements(tree, (candidate) => candidate.props.role === 'dialog').length,
+      0,
+      'Escape로 팝업이 닫힌다',
+    );
+  } finally {
+    calendarGridEffectCleanups.splice(0).forEach((cleanup) => cleanup());
+    globalThis.document = previousDocument;
+  }
 });
 
 test('CalendarGrid renders a source-aware external-change ring and keeps reduced motion static', async () => {
