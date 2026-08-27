@@ -3895,6 +3895,52 @@ test('ScheduleView does not use a local guard to hide a nonmatching collaborator
   }
 });
 
+test('ScheduleView keeps a local update guard through its failed-save rollback', async () => {
+  resetHarness();
+  scheduleLocalStorage.set('bflow_calendar_view_v1', JSON.stringify({ viewMode: 'week', weekSubMode: 'timegrid' }));
+  const before = calendarListEvent({
+    id: 'failed-local-rollback',
+    title: '되돌릴 회의',
+    source: 'bflow',
+    sourceCalendarId: 'bflow:mine',
+    calendarId: 'mine',
+    allDay: false,
+    startTime: '09:00',
+    endTime: '10:00',
+  });
+  const optimistic = { ...before, startTime: '10:00', endTime: '11:00' };
+  const persistenceError = new Error('저장 실패');
+  scheduleCanonicalEvents = [before];
+  await renderScheduleView();
+  await flushScheduleMountEffects();
+  await renderScheduleView();
+
+  const clock = installScheduleFakeClock();
+  try {
+    scheduleUpdateHandler = async () => {
+      scheduleCanonicalEvents = [optimistic];
+      await dispatchScheduleWindowEvent('bflow:calendar-changed');
+      scheduleCanonicalEvents = [before];
+      await dispatchScheduleWindowEvent('bflow:calendar-changed');
+      throw persistenceError;
+    };
+    const result = scheduleTimeGridProps.at(-1)?.onTimeGridEventChange?.(
+      before.id,
+      { id: before.id, source: before.source, sourceCalendarId: before.sourceCalendarId },
+      { startDate: optimistic.startDate, endDate: optimistic.endDate, startTime: '10:00', endTime: '11:00' },
+    );
+    await assert.rejects(result, (error) => error === persistenceError);
+    await renderScheduleView();
+    assert.deepEqual(
+      [...(scheduleTimeGridProps.at(-1)?.highlightedEventIdentities ?? [])],
+      [],
+      'the local rollback is not presented as a teammate change after the optimistic echo',
+    );
+  } finally {
+    clock.restore();
+  }
+});
+
 test('ScheduleView only preserves external vacation selections outside the canonical event cache', async (t) => {
   const vacation = calendarListEvent({
     id: 'vacation-selection',

@@ -58,6 +58,10 @@ type LocalChangeGuard = {
   expiresAt: number;
   kind: 'add' | 'update';
   expectedSnapshot: string;
+  rollbackSnapshot?: string;
+  persistence: 'pending' | 'succeeded' | 'failed';
+  sawExpected: boolean;
+  sawRollback: boolean;
 };
 
 function isOptimisticMetadataCalendarRefresh(event: Event): boolean {
@@ -283,10 +287,14 @@ export function ScheduleView() {
     identity: CalendarEventIdentity,
     expectedEvent: CalendarEvent,
     kind: LocalChangeGuard['kind'] = 'update',
+    rollbackEvent?: CalendarEvent,
   ) => {
     const identityKey = calendarEventIdentityKey(identity);
     const expectedSnapshot = buildEventSnapshot([expectedEvent]).get(identityKey);
     if (expectedSnapshot === undefined) return;
+    const rollbackSnapshot = rollbackEvent
+      ? buildEventSnapshot([rollbackEvent]).get(identityKey)
+      : undefined;
     const now = Date.now();
     for (const [guardIdentityKey, guard] of localChangeGuardsRef.current) {
       if (guard.expiresAt <= now) localChangeGuardsRef.current.delete(guardIdentityKey);
@@ -295,7 +303,24 @@ export function ScheduleView() {
       expiresAt: now + LOCAL_CHANGE_GUARD_MS,
       kind,
       expectedSnapshot,
+      rollbackSnapshot,
+      persistence: 'pending',
+      sawExpected: false,
+      sawRollback: false,
     });
+  }, []);
+
+  const settleLocalUpdateGuard = useCallback((
+    identity: CalendarEventIdentity,
+    persistence: Extract<LocalChangeGuard['persistence'], 'succeeded' | 'failed'>,
+  ) => {
+    const identityKey = calendarEventIdentityKey(identity);
+    const guard = localChangeGuardsRef.current.get(identityKey);
+    if (!guard || guard.kind !== 'update') return;
+    guard.persistence = persistence;
+    if ((persistence === 'succeeded' && guard.sawExpected) || (persistence === 'failed' && guard.sawRollback)) {
+      localChangeGuardsRef.current.delete(identityKey);
+    }
   }, []);
 
   const guardCreatedEvent = useCallback((event: CalendarEvent): CalendarEventIdentity => {
@@ -327,11 +352,21 @@ export function ScheduleView() {
       const localEchoIdentities = new Set(
         changedIdentities.filter((identityKey) => {
           const guard = localChangeGuardsRef.current.get(identityKey);
-          const isMatchingLocalEcho = guard?.kind === 'add'
+          if (!guard) return false;
+          const nextEventSnapshot = nextSnapshot.get(identityKey);
+          const isMatchingLocalEcho = guard.kind === 'add'
             ? addedIdentities.has(identityKey)
-            : guard?.expectedSnapshot === nextSnapshot.get(identityKey);
+            : guard.expectedSnapshot === nextEventSnapshot || guard.rollbackSnapshot === nextEventSnapshot;
           if (!isMatchingLocalEcho) return false;
-          localChangeGuardsRef.current.delete(identityKey);
+          if (guard.kind === 'add') {
+            localChangeGuardsRef.current.delete(identityKey);
+            return true;
+          }
+          if (guard.expectedSnapshot === nextEventSnapshot) guard.sawExpected = true;
+          if (guard.rollbackSnapshot === nextEventSnapshot) guard.sawRollback = true;
+          if ((guard.persistence === 'succeeded' && guard.sawExpected) || (guard.persistence === 'failed' && guard.sawRollback)) {
+            localChangeGuardsRef.current.delete(identityKey);
+          }
           return true;
         }),
       );
@@ -710,15 +745,21 @@ export function ScheduleView() {
         ...eventBeforeUpdate,
         startDate: newStart,
         endDate: newEnd,
-      });
+      }, 'update', eventBeforeUpdate);
     }
-    await updateEvent(
-      eventId,
-      { startDate: newStart, endDate: newEnd },
-      mutationIdentity ?? undefined,
-    );
+    try {
+      await updateEvent(
+        eventId,
+        { startDate: newStart, endDate: newEnd },
+        mutationIdentity ?? undefined,
+      );
+      if (mutationIdentity && eventBeforeUpdate) settleLocalUpdateGuard(mutationIdentity, 'succeeded');
+    } catch (error) {
+      if (mutationIdentity && eventBeforeUpdate) settleLocalUpdateGuard(mutationIdentity, 'failed');
+      throw error;
+    }
     await reconcileEventMutation(mutationIdentity ?? undefined);
-  }, [events, guardLocalIdentity, reconcileEventMutation]);
+  }, [events, guardLocalIdentity, reconcileEventMutation, settleLocalUpdateGuard]);
 
   const handleTimeGridEventChange = useCallback(async (
     eventId: string,
@@ -726,10 +767,16 @@ export function ScheduleView() {
     patch: Pick<CalendarEvent, 'startDate' | 'endDate' | 'startTime' | 'endTime'>,
   ) => {
     const eventBeforeUpdate = events.find((event) => hasSameCalendarEventIdentity(event, mutationIdentity));
-    if (eventBeforeUpdate) guardLocalIdentity(mutationIdentity, { ...eventBeforeUpdate, ...patch });
-    await updateEvent(eventId, patch, mutationIdentity);
+    if (eventBeforeUpdate) guardLocalIdentity(mutationIdentity, { ...eventBeforeUpdate, ...patch }, 'update', eventBeforeUpdate);
+    try {
+      await updateEvent(eventId, patch, mutationIdentity);
+      if (eventBeforeUpdate) settleLocalUpdateGuard(mutationIdentity, 'succeeded');
+    } catch (error) {
+      if (eventBeforeUpdate) settleLocalUpdateGuard(mutationIdentity, 'failed');
+      throw error;
+    }
     await reconcileEventMutation(mutationIdentity);
-  }, [events, guardLocalIdentity, reconcileEventMutation]);
+  }, [events, guardLocalIdentity, reconcileEventMutation, settleLocalUpdateGuard]);
 
   const { isDragging, preview: dragPreview, startDrag } = useCalendarDnD(handleEventDragDone, handleEventDragDone);
 
@@ -1004,14 +1051,16 @@ export function ScheduleView() {
     if (sanitized.startDate && sanitized.endDate && sanitized.endDate < sanitized.startDate) {
       [sanitized.startDate, sanitized.endDate] = [sanitized.endDate, sanitized.startDate];
     }
-    guardLocalIdentity(mutationIdentity, { ...eventBeforeUpdate, ...sanitized });
+    guardLocalIdentity(mutationIdentity, { ...eventBeforeUpdate, ...sanitized }, 'update', eventBeforeUpdate);
     let persistenceFailed = false;
     let persistenceError: unknown;
     try {
       await updateEvent(id, sanitized, mutationIdentity);
+      settleLocalUpdateGuard(mutationIdentity, 'succeeded');
     } catch (error) {
       persistenceFailed = true;
       persistenceError = error;
+      settleLocalUpdateGuard(mutationIdentity, 'failed');
     }
 
     try {
@@ -1028,7 +1077,7 @@ export function ScheduleView() {
     }
 
     if (persistenceFailed) throw persistenceError;
-  }, [applyCanonicalEvents, guardLocalIdentity]);
+  }, [applyCanonicalEvents, guardLocalIdentity, settleLocalUpdateGuard]);
 
   const handleDuplicateEvent = useCallback(async (event: CalendarEvent) => {
     const isCanonicalBflow = event.sourceCalendarId?.startsWith('bflow:') === true
