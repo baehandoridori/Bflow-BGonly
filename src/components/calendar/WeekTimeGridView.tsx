@@ -385,12 +385,21 @@ export function WeekTimeGridView({
       ? { ...event, ...dragPreview }
       : event);
   }, [dragPreview, events]);
-  const { allDayEvents, timedEventsByDate } = useMemo(() => splitWeekTimeGridEvents(displayedEvents), [displayedEvents]);
+  const { allDayEvents: displayedAllDayEvents, timedEventsByDate } = useMemo(
+    () => splitWeekTimeGridEvents(displayedEvents),
+    [displayedEvents],
+  );
+  const { allDayEvents: sourceAllDayEvents } = useMemo(() => splitWeekTimeGridEvents(events), [events]);
   const dragGhostEvent = useMemo(() => (
     dragPreview && dragPreview.mode !== 'create' && dragPreview.identityKey
       ? events.find((event) => calendarEventIdentityKey(event) === dragPreview.identityKey) ?? null
       : null
   ), [dragPreview, events]);
+  // 날짜를 넘긴 시간 일정 preview는 종일 레인으로 승격되지만, mouseup 전에는 헤더 높이가 변하면 안 된다.
+  const shouldFreezeAllDayLayout = timeGridDnD.isDragActive
+    && dragGhostEvent?.allDay === false
+    && dragGhostEvent.startDate === dragGhostEvent.endDate;
+  const allDayEvents = shouldFreezeAllDayLayout ? sourceAllDayEvents : displayedAllDayEvents;
   const allDayBars = useMemo(
     () => (dates.length === 7 ? layoutEventBars(allDayEvents, dates[0], 7) : []),
     [allDayEvents, dates],

@@ -824,6 +824,54 @@ test('WeekTimeGridView: 날짜를 넘긴 종료 리사이즈 preview 중에는 �
   }
 });
 
+test('WeekTimeGridView: 날짜를 넘긴 시간 일정 드래그 중에는 종일 레인 높이를 원래 배치로 고정한다', async () => {
+  const module = await loadWeekTimeGridView();
+  const props = {
+    weekDays: Array.from({ length: 7 }, (_, index) => new Date(2026, 7, 23 + index, 12)),
+    events: [
+      event({
+        id: 'all-day-source',
+        title: '기존 종일 일정',
+        startDate: '2026-08-25',
+        endDate: '2026-08-25',
+        allDay: true,
+      }),
+      event({
+        id: 'timed-resize-source',
+        title: '시간 일정',
+        startDate: '2026-08-25',
+        endDate: '2026-08-25',
+        startTime: '10:00',
+        endTime: '11:00',
+      }),
+    ],
+    today: '2026-01-01',
+    onEventClick() {},
+    onSlotClick() {},
+    tagNameById: {},
+    calendarNameById: {},
+    activeWeekIndex: 1,
+    weekCount: 4,
+    onWeekChange() {},
+    timeGridDragPreview: {
+      mode: 'resize-end' as const,
+      identityKey: '\u0000\u0000timed-resize-source',
+      startDate: '2026-08-25',
+      endDate: '2026-08-26',
+      startTime: '10:00',
+      endTime: '11:00',
+    },
+  };
+
+  timeGridDndStub.isDragActive = true;
+  const duringDragMarkup = renderToStaticMarkup(createElement(module.default, props));
+  assert.match(duringDragMarkup, /min-height:34px/);
+
+  timeGridDndStub.isDragActive = false;
+  const afterDragMarkup = renderToStaticMarkup(createElement(module.default, props));
+  assert.match(afterDragMarkup, /min-height:62px/);
+});
+
 test('WeekTimeGridView: 자정으로 넘기는 마지막 생성 ghost는 15분의 양수 높이를 유지한다', async () => {
   const module = await loadWeekTimeGridView();
   const markup = renderToStaticMarkup(createElement(module.default, {
