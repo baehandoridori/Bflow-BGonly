@@ -220,6 +220,13 @@ type PreviewCalendarNotificationEvent = PreviewCalendarNotificationEventInput & 
   updated_at: string;
 };
 
+type PreviewCalendarNotificationTag = {
+  id: string;
+  name: string;
+  color: string;
+  sort_order: number;
+};
+
 type PreviewCalendarPrivacyReplacement = {
   storage: 'bflow' | 'legacy-private' | 'google';
   actual_id: string;
@@ -247,6 +254,7 @@ type PreviewCalendarNotificationApi = {
       members?: Array<{ user_id: string; can_edit: boolean }>;
     },
   ): Promise<void>;
+  calendarDelete(id: string): Promise<void>;
   calendarEventCreate(input: PreviewCalendarNotificationEventInput): Promise<PreviewCalendarNotificationEvent>;
   calendarEventUpdate(
     id: string,
@@ -254,6 +262,13 @@ type PreviewCalendarNotificationApi = {
   ): Promise<PreviewCalendarNotificationEvent>;
   calendarEventDelete(id: string): Promise<void>;
   calendarEventsList(params?: { from?: string; to?: string }): Promise<PreviewCalendarNotificationEvent[]>;
+  calendarTagsList(): Promise<PreviewCalendarNotificationTag[]>;
+  calendarTagsSave(tags: Array<{
+    id?: string;
+    name: string;
+    color: string;
+    sort_order: number;
+  }>): Promise<PreviewCalendarNotificationTag[]>;
   calendarPrivacyReplacementCreate(request: {
     storage: 'bflow' | 'legacy-private' | 'google';
     calendar_id?: string;
@@ -840,6 +855,202 @@ test('preview calendar fanout applies members changed through a calendar update'
       /권한/,
       '캘린더 수정과 함께 바뀐 멤버 권한도 다른 프리뷰 창에 적용한다',
     );
+  } finally {
+    unsubscribeReceiver();
+    unsubscribeActor();
+    receiver.restore();
+    actor.restore();
+    restoreBroadcastChannel();
+  }
+});
+
+test('preview calendar fanout never revives a locally deleted event from an older remote update', async () => {
+  const restoreBroadcastChannel = installPreviewCalendarBroadcastChannel({ deferMessages: true });
+  const actor = await createPreviewCalendarNotificationHarness();
+  const receiver = await createPreviewCalendarNotificationHarness();
+  const unsubscribeActor = actor.api.onCalendarChanged(() => {});
+  const unsubscribeReceiver = receiver.api.onCalendarChanged(() => {});
+  try {
+    await previewLogin(actor.api, '배한솔');
+    await previewLogin(receiver.api, '장삐쭈');
+    const sharedCalendar = await actor.api.calendarCreate({
+      name: '삭제 우선 프리뷰 공유 일정',
+      color: '#74B9FF',
+      visibility: 'members',
+      members: [{ user_id: '2', can_edit: true }],
+    });
+    restoreBroadcastChannel.flush();
+    const created = await actor.api.calendarEventCreate(
+      previewNotificationEventInput(sharedCalendar.id, '삭제와 수정이 교차한 일정'),
+    );
+    restoreBroadcastChannel.flush();
+
+    await actor.api.calendarEventUpdate(created.id, { title: '늦게 도착한 수정' });
+    await receiver.api.calendarEventDelete(created.id);
+    restoreBroadcastChannel.flush();
+
+    for (const api of [actor.api, receiver.api]) {
+      assert.equal(
+        (await api.calendarEventsList()).some((event) => event.id === created.id),
+        false,
+        '삭제가 확정된 일정은 전송 대기 중이던 수정 snapshot으로 되살아나지 않는다',
+      );
+    }
+  } finally {
+    unsubscribeReceiver();
+    unsubscribeActor();
+    receiver.restore();
+    actor.restore();
+    restoreBroadcastChannel();
+  }
+});
+
+test('preview calendar fanout deterministically converges concurrent updates of one event', async () => {
+  const restoreBroadcastChannel = installPreviewCalendarBroadcastChannel({ deferMessages: true });
+  const actor = await createPreviewCalendarNotificationHarness();
+  const receiver = await createPreviewCalendarNotificationHarness();
+  const unsubscribeActor = actor.api.onCalendarChanged(() => {});
+  const unsubscribeReceiver = receiver.api.onCalendarChanged(() => {});
+  const previousNow = Date.now;
+  try {
+    await previewLogin(actor.api, '배한솔');
+    await previewLogin(receiver.api, '장삐쭈');
+    const sharedCalendar = await actor.api.calendarCreate({
+      name: '동시 수정 프리뷰 공유 일정',
+      color: '#74B9FF',
+      visibility: 'members',
+      members: [{ user_id: '2', can_edit: true }],
+    });
+    restoreBroadcastChannel.flush();
+    const created = await actor.api.calendarEventCreate(
+      previewNotificationEventInput(sharedCalendar.id, '동시 수정 전 일정'),
+    );
+    restoreBroadcastChannel.flush();
+
+    Date.now = () => 9_000_000_000_000;
+    await actor.api.calendarEventUpdate(created.id, { title: '첫 번째 창 수정' });
+    await receiver.api.calendarEventUpdate(created.id, { title: '두 번째 창 수정' });
+    Date.now = previousNow;
+    restoreBroadcastChannel.flush();
+
+    const actorTitle = (await actor.api.calendarEventsList()).find((event) => event.id === created.id)?.title;
+    const receiverTitle = (await receiver.api.calendarEventsList()).find((event) => event.id === created.id)?.title;
+    assert.equal(actorTitle, receiverTitle, '같은 일정의 동시 수정은 메시지 도착 순서와 무관하게 한 값으로 수렴한다');
+    assert.ok(
+      actorTitle === '첫 번째 창 수정' || actorTitle === '두 번째 창 수정',
+      '수렴 결과는 두 창 중 하나가 실제로 저장한 값이다',
+    );
+  } finally {
+    Date.now = previousNow;
+    unsubscribeReceiver();
+    unsubscribeActor();
+    receiver.restore();
+    actor.restore();
+    restoreBroadcastChannel();
+  }
+});
+
+test('preview calendar fanout never revives a locally deleted calendar from an older remote update', async () => {
+  const restoreBroadcastChannel = installPreviewCalendarBroadcastChannel({ deferMessages: true });
+  const actor = await createPreviewCalendarNotificationHarness();
+  const receiver = await createPreviewCalendarNotificationHarness();
+  const unsubscribeActor = actor.api.onCalendarChanged(() => {});
+  const unsubscribeReceiver = receiver.api.onCalendarChanged(() => {});
+  try {
+    await previewLogin(actor.api, '배한솔');
+    await previewLogin(receiver.api, '배한솔');
+    const sharedCalendar = await actor.api.calendarCreate({
+      name: '삭제와 수정이 교차한 캘린더',
+      color: '#74B9FF',
+      visibility: 'members',
+    });
+    restoreBroadcastChannel.flush();
+
+    await actor.api.calendarUpdate(sharedCalendar.id, { name: '늦게 도착한 캘린더 수정' });
+    await receiver.api.calendarDelete(sharedCalendar.id);
+    restoreBroadcastChannel.flush();
+
+    for (const api of [actor.api, receiver.api]) {
+      assert.equal(
+        (await api.calendarList()).some((calendar) => calendar.id === sharedCalendar.id),
+        false,
+        '삭제된 캘린더는 전송 대기 중이던 수정 snapshot으로 되살아나지 않는다',
+      );
+    }
+  } finally {
+    unsubscribeReceiver();
+    unsubscribeActor();
+    receiver.restore();
+    actor.restore();
+    restoreBroadcastChannel();
+  }
+});
+
+test('preview calendar fanout merges concurrent tag changes by tag id instead of replacing the full tag list', async () => {
+  const restoreBroadcastChannel = installPreviewCalendarBroadcastChannel({ deferMessages: true });
+  const actor = await createPreviewCalendarNotificationHarness();
+  const receiver = await createPreviewCalendarNotificationHarness();
+  const unsubscribeActor = actor.api.onCalendarChanged(() => {});
+  const unsubscribeReceiver = receiver.api.onCalendarChanged(() => {});
+  try {
+    await previewLogin(actor.api, '배한솔');
+    await previewLogin(receiver.api, '배한솔');
+    const actorTags = await actor.api.calendarTagsList();
+    const receiverTags = await receiver.api.calendarTagsList();
+    const firstTag = actorTags[0];
+    const secondTag = actorTags[1];
+    assert.ok(firstTag && secondTag);
+
+    await actor.api.calendarTagsSave(actorTags.map((tag) => (
+      tag.id === firstTag.id ? { ...tag, name: '첫 번째 창 태그' } : tag
+    )));
+    await receiver.api.calendarTagsSave(receiverTags.map((tag) => (
+      tag.id === secondTag.id ? { ...tag, name: '두 번째 창 태그' } : tag
+    )));
+    restoreBroadcastChannel.flush();
+
+    for (const api of [actor.api, receiver.api]) {
+      const namesById = new Map((await api.calendarTagsList()).map((tag) => [tag.id, tag.name]));
+      assert.equal(namesById.get(firstTag.id), '첫 번째 창 태그');
+      assert.equal(namesById.get(secondTag.id), '두 번째 창 태그');
+    }
+  } finally {
+    unsubscribeReceiver();
+    unsubscribeActor();
+    receiver.restore();
+    actor.restore();
+    restoreBroadcastChannel();
+  }
+});
+
+test('preview calendar notification read fans out immediately to another preview of the same user', async () => {
+  const restoreBroadcastChannel = installPreviewCalendarBroadcastChannel({ deferMessages: true });
+  const actor = await createPreviewCalendarNotificationHarness();
+  const receiver = await createPreviewCalendarNotificationHarness();
+  const actorChanges: unknown[] = [];
+  const receiverChanges: unknown[] = [];
+  const unsubscribeActor = actor.api.onCalendarChanged((payload) => actorChanges.push(payload));
+  const unsubscribeReceiver = receiver.api.onCalendarChanged((payload) => receiverChanges.push(payload));
+  try {
+    await previewLogin(actor.api, '배한솔');
+    await previewLogin(receiver.api, '배한솔');
+    const [row] = await actor.api.calendarNotificationsCatchup();
+    assert.ok(row, '읽음 상태를 함께 반영할 초기 알림이 있다');
+
+    await actor.api.calendarNotificationsMarkRead([row.id]);
+    restoreBroadcastChannel.flush();
+
+    assert.equal(actorChanges.length, 0, '읽음 처리 창에는 자기 메시지를 되돌려 보내지 않는다');
+    assert.equal(
+      (await receiver.api.calendarNotificationsCatchup()).some((candidate) => candidate.id === row.id),
+      false,
+      '같은 사용자의 다른 프리뷰 창도 읽음 상태를 즉시 반영한다',
+    );
+    assert.deepEqual(receiverChanges.at(-1), {
+      table: 'calendar_notifications',
+      action: 'UPDATE',
+      notificationIds: [row.id],
+    });
   } finally {
     unsubscribeReceiver();
     unsubscribeActor();

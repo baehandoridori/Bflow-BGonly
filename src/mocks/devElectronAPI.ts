@@ -93,14 +93,24 @@ type MockCalendarSharedSnapshot = {
   calendars: MockCalendarRow[];
   events: MockCalendarEventRow[];
   members: MockCalendarMemberRow[];
-  tags: MockCalendarTagRow[];
   notifications: MockCalendarNotificationRow[];
+};
+type MockCalendarChangeStamp = {
+  timestamp: number;
+  sourceId: string;
+  sequence: number;
+};
+type MockCalendarTagPatch = {
+  upserts: MockCalendarTagRow[];
+  deletedIds: string[];
 };
 type MockCalendarChangeEnvelope = {
   kind: 'bflow-dev-calendar-change';
   sourceId: string;
+  stamp: MockCalendarChangeStamp;
   detail: unknown;
   snapshot: MockCalendarSharedSnapshot;
+  tagPatch?: MockCalendarTagPatch;
 };
 type DevPreviewWindow = Window & typeof globalThis & {
   __bflowMockCalendarNotify?: (overrides?: MockCalendarNotificationOverrides) => void;
@@ -109,6 +119,12 @@ const CALENDAR_TAG_UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]
 const MOCK_CALENDAR_CHANGE_CHANNEL = 'bflow-dev-calendar-change-v1';
 const mockCalendarChangeListeners = new Set<(payload: unknown) => void>();
 const mockCalendarChangeSourceId = createUuid();
+let nextMockCalendarChangeSequence = 0;
+let latestMockCalendarChangeTimestamp = 0;
+const mockCalendarChangeStamps = new Map<string, MockCalendarChangeStamp>();
+const tombstonedMockCalendarIds = new Set<string>();
+const tombstonedMockCalendarEventIds = new Set<string>();
+const tombstonedMockCalendarTagIds = new Set<string>();
 let mockCalendarChangeChannel: BroadcastChannel | null | undefined;
 
 const devCalendarSeed = createDevCalendarSeed();
@@ -197,7 +213,6 @@ function cloneMockCalendarSharedSnapshot(): MockCalendarSharedSnapshot {
     calendars: mockCalendars.map((calendar) => ({ ...calendar })),
     events: mockCalendarEvents.map((event) => ({ ...event })),
     members: mockCalendarMembers.map((member) => ({ ...member })),
-    tags: mockCalendarTags.map((tag) => ({ ...tag })),
     notifications: mockCalendarNotifications.map((notification) => ({ ...notification })),
   };
 }
@@ -208,8 +223,35 @@ function isMockCalendarSharedSnapshot(value: unknown): value is MockCalendarShar
   return Array.isArray(snapshot.calendars)
     && Array.isArray(snapshot.events)
     && Array.isArray(snapshot.members)
-    && Array.isArray(snapshot.tags)
     && Array.isArray(snapshot.notifications);
+}
+
+function isMockCalendarChangeStamp(value: unknown): value is MockCalendarChangeStamp {
+  if (!value || typeof value !== 'object') return false;
+  const stamp = value as Record<string, unknown>;
+  return typeof stamp.timestamp === 'number'
+    && Number.isSafeInteger(stamp.timestamp)
+    && typeof stamp.sourceId === 'string'
+    && stamp.sourceId.length > 0
+    && typeof stamp.sequence === 'number'
+    && Number.isSafeInteger(stamp.sequence)
+    && stamp.sequence > 0;
+}
+
+function isMockCalendarTagPatch(value: unknown): value is MockCalendarTagPatch {
+  if (!value || typeof value !== 'object') return false;
+  const patch = value as Record<string, unknown>;
+  return Array.isArray(patch.upserts)
+    && Array.isArray(patch.deletedIds)
+    && patch.deletedIds.every((id) => typeof id === 'string')
+    && patch.upserts.every((tag) => (
+      tag
+      && typeof tag === 'object'
+      && typeof (tag as Record<string, unknown>).id === 'string'
+      && typeof (tag as Record<string, unknown>).name === 'string'
+      && typeof (tag as Record<string, unknown>).color === 'string'
+      && typeof (tag as Record<string, unknown>).sort_order === 'number'
+    ));
 }
 
 function isMockCalendarChangeEnvelope(value: unknown): value is MockCalendarChangeEnvelope {
@@ -217,7 +259,10 @@ function isMockCalendarChangeEnvelope(value: unknown): value is MockCalendarChan
   const envelope = value as Record<string, unknown>;
   return envelope.kind === 'bflow-dev-calendar-change'
     && typeof envelope.sourceId === 'string'
-    && isMockCalendarSharedSnapshot(envelope.snapshot);
+    && isMockCalendarChangeStamp(envelope.stamp)
+    && envelope.stamp.sourceId === envelope.sourceId
+    && isMockCalendarSharedSnapshot(envelope.snapshot)
+    && (envelope.tagPatch === undefined || isMockCalendarTagPatch(envelope.tagPatch));
 }
 
 function readMockCalendarChangeId(
@@ -228,16 +273,115 @@ function readMockCalendarChangeId(
   return typeof value === 'string' && value.trim() !== '' ? value : null;
 }
 
+function readMockCalendarChangeIds(detail: Record<string, unknown>, key: string): string[] {
+  const values = detail[key];
+  if (!Array.isArray(values)) return [];
+  return [...new Set(values.filter((value): value is string => (
+    typeof value === 'string' && value.trim() !== ''
+  )))];
+}
+
+function mockCalendarChangeKey(scope: string, id: string): string {
+  return `${scope}:${id}`;
+}
+
+function compareMockCalendarChangeStamp(
+  left: MockCalendarChangeStamp,
+  right: MockCalendarChangeStamp,
+): number {
+  if (left.timestamp !== right.timestamp) return left.timestamp - right.timestamp;
+  if (left.sourceId !== right.sourceId) return left.sourceId > right.sourceId ? 1 : -1;
+  return left.sequence - right.sequence;
+}
+
+function rememberMockCalendarChangeStamp(key: string, stamp: MockCalendarChangeStamp): boolean {
+  const current = mockCalendarChangeStamps.get(key);
+  if (current && compareMockCalendarChangeStamp(stamp, current) <= 0) return false;
+  mockCalendarChangeStamps.set(key, { ...stamp });
+  return true;
+}
+
+function createMockCalendarChangeStamp(): MockCalendarChangeStamp {
+  const latestTimestamp = Math.max(Date.now(), latestMockCalendarChangeTimestamp + 1);
+  latestMockCalendarChangeTimestamp = latestTimestamp;
+  return {
+    timestamp: latestTimestamp,
+    sourceId: mockCalendarChangeSourceId,
+    sequence: ++nextMockCalendarChangeSequence,
+  };
+}
+
+function tombstoneMockCalendarEvent(id: string, stamp: MockCalendarChangeStamp): void {
+  tombstonedMockCalendarEventIds.add(id);
+  rememberMockCalendarChangeStamp(mockCalendarChangeKey('event', id), stamp);
+}
+
+function tombstoneMockCalendar(id: string, stamp: MockCalendarChangeStamp): void {
+  tombstonedMockCalendarIds.add(id);
+  rememberMockCalendarChangeStamp(mockCalendarChangeKey('calendar', id), stamp);
+}
+
+function tombstoneMockCalendarTag(id: string, stamp: MockCalendarChangeStamp): void {
+  tombstonedMockCalendarTagIds.add(id);
+  rememberMockCalendarChangeStamp(mockCalendarChangeKey('tag', id), stamp);
+}
+
 function upsertMockCalendar(calendar: MockCalendarRow): void {
+  if (tombstonedMockCalendarIds.has(calendar.id)) return;
   const index = mockCalendars.findIndex((candidate) => candidate.id === calendar.id);
   if (index >= 0) mockCalendars.splice(index, 1, { ...calendar });
   else mockCalendars.push({ ...calendar });
 }
 
 function upsertMockCalendarEvent(event: MockCalendarEventRow): void {
+  if (tombstonedMockCalendarEventIds.has(event.id) || tombstonedMockCalendarIds.has(event.calendar_id)) return;
+  // A matching tag patch can arrive after its event patch. Only clear a tag that
+  // was explicitly deleted; otherwise retain the reference until that patch lands.
+  const tagId = event.tag_id && tombstonedMockCalendarTagIds.has(event.tag_id)
+    ? null
+    : event.tag_id;
+  const normalized = { ...event, tag_id: tagId };
   const index = mockCalendarEvents.findIndex((candidate) => candidate.id === event.id);
-  if (index >= 0) mockCalendarEvents.splice(index, 1, { ...event });
-  else mockCalendarEvents.push({ ...event });
+  if (index >= 0) mockCalendarEvents.splice(index, 1, normalized);
+  else mockCalendarEvents.push(normalized);
+}
+
+function upsertMockCalendarTag(tag: MockCalendarTagRow): void {
+  if (tombstonedMockCalendarTagIds.has(tag.id)) return;
+  const index = mockCalendarTags.findIndex((candidate) => candidate.id === tag.id);
+  if (index >= 0) mockCalendarTags.splice(index, 1, { ...tag });
+  else mockCalendarTags.push({ ...tag });
+}
+
+function removeMockCalendarTag(id: string): void {
+  const index = mockCalendarTags.findIndex((tag) => tag.id === id);
+  if (index >= 0) mockCalendarTags.splice(index, 1);
+  for (const event of mockCalendarEvents) {
+    if (event.tag_id === id) event.tag_id = null;
+  }
+}
+
+function removeMockCalendarEvent(id: string): void {
+  const index = mockCalendarEvents.findIndex((event) => event.id === id);
+  if (index >= 0) mockCalendarEvents.splice(index, 1);
+}
+
+function removeMockCalendar(calendarId: string, stamp: MockCalendarChangeStamp, deletedEventIds: string[]): void {
+  const calendarIndex = mockCalendars.findIndex((calendar) => calendar.id === calendarId);
+  if (calendarIndex >= 0) mockCalendars.splice(calendarIndex, 1);
+  for (let index = mockCalendarMembers.length - 1; index >= 0; index -= 1) {
+    if (mockCalendarMembers[index].calendar_id === calendarId) mockCalendarMembers.splice(index, 1);
+  }
+  const eventIds = new Set([
+    ...deletedEventIds,
+    ...mockCalendarEvents
+      .filter((event) => event.calendar_id === calendarId)
+      .map((event) => event.id),
+  ]);
+  for (const eventId of eventIds) tombstoneMockCalendarEvent(eventId, stamp);
+  for (let index = mockCalendarEvents.length - 1; index >= 0; index -= 1) {
+    if (mockCalendarEvents[index].calendar_id === calendarId) mockCalendarEvents.splice(index, 1);
+  }
 }
 
 function mergeMockCalendarNotifications(notifications: MockCalendarNotificationRow[]): void {
@@ -260,13 +404,43 @@ function mergeMockCalendarNotifications(notifications: MockCalendarNotificationR
   );
 }
 
+function rememberMockCalendarTagPatch(
+  patch: MockCalendarTagPatch,
+  stamp: MockCalendarChangeStamp,
+): void {
+  for (const id of patch.deletedIds) tombstoneMockCalendarTag(id, stamp);
+  for (const tag of patch.upserts) {
+    if (!tombstonedMockCalendarTagIds.has(tag.id)) {
+      rememberMockCalendarChangeStamp(mockCalendarChangeKey('tag', tag.id), stamp);
+    }
+  }
+}
+
+function applyMockCalendarTagPatch(
+  patch: MockCalendarTagPatch,
+  stamp: MockCalendarChangeStamp,
+): void {
+  for (const id of patch.deletedIds) {
+    tombstoneMockCalendarTag(id, stamp);
+    removeMockCalendarTag(id);
+  }
+  for (const tag of patch.upserts) {
+    if (tombstonedMockCalendarTagIds.has(tag.id)) continue;
+    if (rememberMockCalendarChangeStamp(mockCalendarChangeKey('tag', tag.id), stamp)) {
+      upsertMockCalendarTag(tag);
+    }
+  }
+}
+
 function applyMockCalendarSharedSnapshot(
   snapshot: MockCalendarSharedSnapshot,
   detail: Record<string, unknown>,
+  stamp: MockCalendarChangeStamp,
+  tagPatch?: MockCalendarTagPatch,
 ): void {
-  // 각 프리뷰 창은 독립된 mock module을 가진다. 전체 snapshot을 교체하면 서로 다른
-  // 일정의 동시 변경도 마지막 도착 메시지 하나만 남는다. 따라서 변경 detail이 가리키는
-  // 행/캘린더 범위만 적용하고, 알림 읽음은 기존처럼 단조롭게 병합한다.
+  // 각 프리뷰 창은 독립된 mock module을 가진다. 행별 stamp로 동시 UPDATE의 winner를
+  // 고정하고 DELETE tombstone은 이후 도착한 stale snapshot이 행을 되살리지 못하게 한다.
+  latestMockCalendarChangeTimestamp = Math.max(latestMockCalendarChangeTimestamp, stamp.timestamp);
   mergeMockCalendarNotifications(snapshot.notifications);
 
   const table = detail.table;
@@ -275,12 +449,15 @@ function applyMockCalendarSharedSnapshot(
     const eventId = readMockCalendarChangeId(detail, 'eventId');
     if (!eventId) return;
     if (action === 'DELETE') {
-      const index = mockCalendarEvents.findIndex((event) => event.id === eventId);
-      if (index >= 0) mockCalendarEvents.splice(index, 1);
+      tombstoneMockCalendarEvent(eventId, stamp);
+      removeMockCalendarEvent(eventId);
       return;
     }
+    if (tombstonedMockCalendarEventIds.has(eventId)) return;
     const event = snapshot.events.find((candidate) => candidate.id === eventId);
-    if (event) upsertMockCalendarEvent(event);
+    if (event && rememberMockCalendarChangeStamp(mockCalendarChangeKey('event', eventId), stamp)) {
+      upsertMockCalendarEvent(event);
+    }
     return;
   }
 
@@ -288,20 +465,18 @@ function applyMockCalendarSharedSnapshot(
     const calendarId = readMockCalendarChangeId(detail, 'calendarId');
     if (!calendarId) return;
     if (action === 'DELETE') {
-      const calendarIndex = mockCalendars.findIndex((calendar) => calendar.id === calendarId);
-      if (calendarIndex >= 0) mockCalendars.splice(calendarIndex, 1);
-      for (let index = mockCalendarMembers.length - 1; index >= 0; index -= 1) {
-        if (mockCalendarMembers[index].calendar_id === calendarId) mockCalendarMembers.splice(index, 1);
-      }
-      for (let index = mockCalendarEvents.length - 1; index >= 0; index -= 1) {
-        if (mockCalendarEvents[index].calendar_id === calendarId) mockCalendarEvents.splice(index, 1);
-      }
+      tombstoneMockCalendar(calendarId, stamp);
+      removeMockCalendar(calendarId, stamp, readMockCalendarChangeIds(detail, 'deletedEventIds'));
       return;
     }
+    if (tombstonedMockCalendarIds.has(calendarId)) return;
     const calendar = snapshot.calendars.find((candidate) => candidate.id === calendarId);
     if (!calendar) return;
-    upsertMockCalendar(calendar);
-    if (action === 'INSERT' || detail.membersChanged === true) {
+    if (rememberMockCalendarChangeStamp(mockCalendarChangeKey('calendar', calendarId), stamp)) {
+      upsertMockCalendar(calendar);
+    }
+    if ((action === 'INSERT' || detail.membersChanged === true)
+      && rememberMockCalendarChangeStamp(mockCalendarChangeKey('members', calendarId), stamp)) {
       applyNormalizedMockCalendarMembers(
         calendarId,
         snapshot.members
@@ -314,7 +489,8 @@ function applyMockCalendarSharedSnapshot(
 
   if (table === 'calendar_members') {
     const calendarId = readMockCalendarChangeId(detail, 'calendarId');
-    if (!calendarId) return;
+    if (!calendarId || tombstonedMockCalendarIds.has(calendarId)) return;
+    if (!rememberMockCalendarChangeStamp(mockCalendarChangeKey('members', calendarId), stamp)) return;
     applyNormalizedMockCalendarMembers(
       calendarId,
       snapshot.members
@@ -325,11 +501,7 @@ function applyMockCalendarSharedSnapshot(
   }
 
   if (table === 'calendar_tags') {
-    mockCalendarTags.splice(0, mockCalendarTags.length, ...snapshot.tags.map((tag) => ({ ...tag })));
-    const tagIds = new Set(mockCalendarTags.map((tag) => tag.id));
-    for (const event of mockCalendarEvents) {
-      if (event.tag_id && !tagIds.has(event.tag_id)) event.tag_id = null;
-    }
+    if (tagPatch) applyMockCalendarTagPatch(tagPatch, stamp);
   }
 }
 
@@ -351,6 +523,7 @@ function normalizeMockCalendarChangeDetail(detail: unknown): Record<string, unkn
     || raw.table === 'calendar_members'
     || raw.table === 'calendar_events'
     || raw.table === 'calendar_tags'
+    || raw.table === 'calendar_notifications'
     ? raw.table
     : 'calendar_events';
   const action = raw.action === 'INSERT' || raw.action === 'DELETE' || raw.action === 'UPDATE'
@@ -366,7 +539,12 @@ function normalizeMockCalendarChangeDetail(detail: unknown): Record<string, unkn
 function receiveMockCalendarChange(event: MessageEvent<unknown>): void {
   const envelope = event.data;
   if (!isMockCalendarChangeEnvelope(envelope) || envelope.sourceId === mockCalendarChangeSourceId) return;
-  applyMockCalendarSharedSnapshot(envelope.snapshot, normalizeMockCalendarChangeDetail(envelope.detail));
+  applyMockCalendarSharedSnapshot(
+    envelope.snapshot,
+    normalizeMockCalendarChangeDetail(envelope.detail),
+    envelope.stamp,
+    envelope.tagPatch,
+  );
   notifyMockCalendarChanged(envelope.detail);
 }
 
@@ -383,14 +561,100 @@ function getMockCalendarChangeChannel(): BroadcastChannel | null {
   return channel;
 }
 
-function publishMockCalendarChange(detail?: unknown): void {
+function recordMockCalendarChange(
+  detail: Record<string, unknown>,
+  stamp: MockCalendarChangeStamp,
+  tagPatch?: MockCalendarTagPatch,
+): void {
+  const table = detail.table;
+  const action = detail.action;
+  if (table === 'calendar_events') {
+    const eventId = readMockCalendarChangeId(detail, 'eventId');
+    if (!eventId) return;
+    if (action === 'DELETE') tombstoneMockCalendarEvent(eventId, stamp);
+    else if (!tombstonedMockCalendarEventIds.has(eventId)) {
+      rememberMockCalendarChangeStamp(mockCalendarChangeKey('event', eventId), stamp);
+    }
+    return;
+  }
+
+  if (table === 'calendars') {
+    const calendarId = readMockCalendarChangeId(detail, 'calendarId');
+    if (!calendarId) return;
+    if (action === 'DELETE') {
+      tombstoneMockCalendar(calendarId, stamp);
+      for (const eventId of readMockCalendarChangeIds(detail, 'deletedEventIds')) {
+        tombstoneMockCalendarEvent(eventId, stamp);
+      }
+      return;
+    }
+    if (!tombstonedMockCalendarIds.has(calendarId)) {
+      rememberMockCalendarChangeStamp(mockCalendarChangeKey('calendar', calendarId), stamp);
+      if (action === 'INSERT' || detail.membersChanged === true) {
+        rememberMockCalendarChangeStamp(mockCalendarChangeKey('members', calendarId), stamp);
+      }
+    }
+    return;
+  }
+
+  if (table === 'calendar_members') {
+    const calendarId = readMockCalendarChangeId(detail, 'calendarId');
+    if (calendarId && !tombstonedMockCalendarIds.has(calendarId)) {
+      rememberMockCalendarChangeStamp(mockCalendarChangeKey('members', calendarId), stamp);
+    }
+    return;
+  }
+
+  if (table === 'calendar_tags' && tagPatch) rememberMockCalendarTagPatch(tagPatch, stamp);
+}
+
+function cloneMockCalendarTagPatch(patch: MockCalendarTagPatch | undefined): MockCalendarTagPatch | undefined {
+  if (!patch) return undefined;
+  return {
+    upserts: patch.upserts.map((tag) => ({ ...tag })),
+    deletedIds: [...patch.deletedIds],
+  };
+}
+
+function buildMockCalendarTagPatch(
+  previousTags: MockCalendarTagRow[],
+  nextTags: MockCalendarTagRow[],
+): MockCalendarTagPatch {
+  const previousById = new Map(previousTags.map((tag) => [tag.id, tag]));
+  const nextIds = new Set(nextTags.map((tag) => tag.id));
+  return {
+    upserts: nextTags
+      .filter((tag) => {
+        const previous = previousById.get(tag.id);
+        return !previous
+          || previous.name !== tag.name
+          || previous.color !== tag.color
+          || previous.sort_order !== tag.sort_order;
+      })
+      .map((tag) => ({ ...tag })),
+    deletedIds: previousTags
+      .filter((tag) => !nextIds.has(tag.id))
+      .map((tag) => tag.id),
+  };
+}
+
+function publishMockCalendarChange(
+  detail?: unknown,
+  options?: { tagPatch?: MockCalendarTagPatch },
+): void {
+  const normalizedDetail = normalizeMockCalendarChangeDetail(detail);
+  const stamp = createMockCalendarChangeStamp();
+  const tagPatch = cloneMockCalendarTagPatch(options?.tagPatch);
+  recordMockCalendarChange(normalizedDetail, stamp, tagPatch);
   const channel = getMockCalendarChangeChannel();
   if (!channel) return;
   const envelope: MockCalendarChangeEnvelope = {
     kind: 'bflow-dev-calendar-change',
     sourceId: mockCalendarChangeSourceId,
-    detail: normalizeMockCalendarChangeDetail(detail),
+    stamp,
+    detail: normalizedDetail,
     snapshot: cloneMockCalendarSharedSnapshot(),
+    tagPatch,
   };
   channel.postMessage(envelope);
 }
@@ -1992,6 +2256,9 @@ export function installDevElectronAPI(): void {
       if (!canManageCalendar(calendar, mockPermissionUser(user))) {
         throw new Error('이 캘린더를 삭제할 권한이 없습니다');
       }
+      const deletedEventIds = mockCalendarEvents
+        .filter((event) => event.calendar_id === id)
+        .map((event) => event.id);
       const index = mockCalendars.findIndex((calendar) => calendar.id === id);
       if (index >= 0) mockCalendars.splice(index, 1);
       for (let memberIndex = mockCalendarMembers.length - 1; memberIndex >= 0; memberIndex--) {
@@ -2002,7 +2269,12 @@ export function installDevElectronAPI(): void {
           mockCalendarEvents.splice(eventIndex, 1);
         }
       }
-      publishMockCalendarChange({ table: 'calendars', action: 'DELETE', calendarId: id });
+      publishMockCalendarChange({
+        table: 'calendars',
+        action: 'DELETE',
+        calendarId: id,
+        deletedEventIds,
+      });
     },
     calendarSetMembers: async (calendarId, members) => {
       const user = requireMockCalendarUser();
@@ -2181,6 +2453,7 @@ export function installDevElectronAPI(): void {
         throw new Error('Unknown calendar tag id');
       }
 
+      const previousTags = mockCalendarTags.map((tag) => ({ ...tag }));
       const saved = tags.map((tag) => ({
         id: tag.id ?? createUuid(),
         name: tag.name,
@@ -2192,7 +2465,10 @@ export function installDevElectronAPI(): void {
         if (event.tag_id && !savedIds.has(event.tag_id)) event.tag_id = null;
       }
       mockCalendarTags.splice(0, mockCalendarTags.length, ...saved);
-      publishMockCalendarChange({ table: 'calendar_tags', action: 'UPDATE' });
+      publishMockCalendarChange(
+        { table: 'calendar_tags', action: 'UPDATE' },
+        { tagPatch: buildMockCalendarTagPatch(previousTags, saved) },
+      );
       return saved.map((tag) => ({ ...tag }));
     },
     calendarNotificationsCatchup: async (input) => {
@@ -2204,9 +2480,18 @@ export function installDevElectronAPI(): void {
       const requestedIds = new Set(ids.filter((id): id is string => typeof id === 'string'));
       if (requestedIds.size === 0) return;
       const readAt = new Date().toISOString();
+      const notificationIds: string[] = [];
       for (const row of mockCalendarNotifications) {
         if (row.recipient_id !== user.id || row.read_at !== null || !requestedIds.has(row.id)) continue;
         row.read_at = readAt;
+        notificationIds.push(row.id);
+      }
+      if (notificationIds.length > 0) {
+        publishMockCalendarChange({
+          table: 'calendar_notifications',
+          action: 'UPDATE',
+          notificationIds,
+        });
       }
     },
     supabaseReadRevisions: async () => getMockRevisionRows(),
