@@ -27,7 +27,7 @@ import { EntityText } from '@/components/common/EntityText';
 import { DEPARTMENT_CONFIGS } from '@/types';
 import { floatingGlassStyle } from '@/utils/glassStyles';
 import { parseDate } from '@/utils/calendarDate';
-import { calendarEventLinkedTodoId } from '@/utils/calendarEventIdentity';
+import { calendarEventIdentityKey, calendarEventLinkedTodoId } from '@/utils/calendarEventIdentity';
 
 // ─── 유틸 ──────────────────────────────────────────
 
@@ -139,8 +139,10 @@ export function EventSidePanel({
   const canonicalTagIds = canonicalTagSnapshot
     ? new Set(canonicalTagSnapshot.tags.map((tag) => tag.id))
     : null;
+  const eventIdentityKey = calendarEventIdentityKey(event);
 
-  // 이벤트 변경 시 드래프트 리셋
+  // 다른 일정으로 전환할 때만 드래프트와 실패 상태를 리셋한다.
+  // 같은 일정의 낙관적 저장 롤백은 새 객체로 들어와도 재시도 상태를 유지한다.
   useEffect(() => {
     setDraftTitle(event.title);
     setDraftStart(event.startDate);
@@ -153,7 +155,7 @@ export function EventSidePanel({
     setDraftEndTime(event.endTime ?? '');
     setMutationError(null);
     setEditing(false);
-  }, [event]);
+  }, [eventIdentityKey]);
 
   const selectedTagUnavailable = Boolean(draftTagId && (
     isOptimisticCalendarTagId(draftTagId)
