@@ -113,6 +113,14 @@ type DevPreviewWindow = Window & typeof globalThis & {
 };
 const CALENDAR_TAG_UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const MOCK_CALENDAR_CHANGE_CHANNEL = 'bflow-dev-calendar-change-v1';
+const MOCK_CALENDAR_TAG_AUTHORITY_STORAGE_KEY = 'bflow-dev-calendar-tag-authority-v1';
+const mockCalendarTagAuthorityStorage = (() => {
+  try {
+    return typeof window === 'undefined' ? null : window.localStorage;
+  } catch {
+    return null;
+  }
+})();
 const mockCalendarChangeListeners = new Set<(payload: unknown) => void>();
 const mockCalendarChangeSourceId = createUuid();
 let nextMockCalendarChangeSequence = 0;
@@ -323,6 +331,49 @@ function replaceMockCalendarTags(tags: MockCalendarTagRow[]): void {
   }
 }
 
+function isMockCalendarTagRow(value: unknown): value is MockCalendarTagRow {
+  if (!value || typeof value !== 'object') return false;
+  const tag = value as Record<string, unknown>;
+  return typeof tag.id === 'string'
+    && typeof tag.name === 'string'
+    && typeof tag.color === 'string'
+    && typeof tag.sort_order === 'number';
+}
+
+function readMockCalendarTagAuthority(): MockCalendarTagRow[] | null {
+  if (!mockCalendarTagAuthorityStorage) return null;
+  try {
+    const raw = mockCalendarTagAuthorityStorage.getItem(MOCK_CALENDAR_TAG_AUTHORITY_STORAGE_KEY);
+    if (raw === null) return null;
+    const tags = JSON.parse(raw) as unknown;
+    if (!Array.isArray(tags) || !tags.every(isMockCalendarTagRow)) return null;
+    return tags.map((tag) => ({ ...tag }));
+  } catch {
+    return null;
+  }
+}
+
+function writeMockCalendarTagAuthority(tags: MockCalendarTagRow[]): void {
+  if (!mockCalendarTagAuthorityStorage) return;
+  try {
+    mockCalendarTagAuthorityStorage.setItem(
+      MOCK_CALENDAR_TAG_AUTHORITY_STORAGE_KEY,
+      JSON.stringify(tags),
+    );
+  } catch {
+    // localStorage를 쓸 수 없는 프리뷰에서는 기존 BroadcastChannel 동기화로 계속 동작한다.
+  }
+}
+
+function synchronizeMockCalendarTagsWithAuthority(): void {
+  const authoritativeTags = readMockCalendarTagAuthority();
+  if (authoritativeTags !== null) {
+    replaceMockCalendarTags(authoritativeTags);
+    return;
+  }
+  writeMockCalendarTagAuthority(mockCalendarTags);
+}
+
 function removeMockCalendarEvent(id: string): void {
   const index = mockCalendarEvents.findIndex((event) => event.id === id);
   if (index >= 0) mockCalendarEvents.splice(index, 1);
@@ -386,10 +437,14 @@ function applyMockCalendarSharedSnapshot(
   // 각 프리뷰 창은 독립된 mock module을 가진다. 행별 stamp로 동시 UPDATE의 winner를
   // 고정하고 DELETE tombstone은 이후 도착한 stale snapshot이 행을 되살리지 못하게 한다.
   latestMockCalendarChangeTimestamp = Math.max(latestMockCalendarChangeTimestamp, stamp.timestamp);
-  emitReceivedMockCalendarNotifications(mergeMockCalendarNotifications(snapshot.notifications));
-
   const table = detail.table;
   const action = detail.action;
+  const insertedNotifications = mergeMockCalendarNotifications(snapshot.notifications);
+  // 운영 renderer는 calendar_notifications의 INSERT만 toast/inbox realtime으로 구독한다.
+  // read UPDATE snapshot에서 처음 본 행은 저장만 하고 새 알림처럼 다시 띄우지 않는다.
+  if (table !== 'calendar_notifications' || action === 'INSERT') {
+    emitReceivedMockCalendarNotifications(insertedNotifications);
+  }
   if (table === 'calendar_events') {
     const eventId = readMockCalendarChangeId(detail, 'eventId');
     if (!eventId) return;
@@ -448,7 +503,7 @@ function applyMockCalendarSharedSnapshot(
   if (table === 'calendar_tags') {
     // 운영 RPC는 태그 배열 전체를 원자적으로 교체하므로, 프리뷰도 한 목록만 stamp 순서로 채택한다.
     if (rememberMockCalendarChangeStamp(mockCalendarChangeKey('tag-list', 'all'), stamp)) {
-      replaceMockCalendarTags(snapshot.tags);
+      replaceMockCalendarTags(readMockCalendarTagAuthority() ?? snapshot.tags);
     }
   }
 }
@@ -2327,6 +2382,7 @@ export function installDevElectronAPI(): void {
     },
     calendarTagsList: async () => {
       requireMockCalendarUser();
+      synchronizeMockCalendarTagsWithAuthority();
       return mockCalendarTags.map((tag) => ({ ...tag }));
     },
     calendarTagsSave: async (tags) => {
@@ -2361,6 +2417,9 @@ export function installDevElectronAPI(): void {
         submittedNames.add(tag.name);
       }
 
+      // 실제 RPC는 calendar_tags table lock 뒤 현재 DB 목록으로 ID를 검증한다.
+      // 같은 브라우저 탭은 localStorage를 공용 정본으로 삼아 늦은 stale 목록도 똑같이 거절한다.
+      synchronizeMockCalendarTagsWithAuthority();
       const currentIds = new Set(mockCalendarTags.map((tag) => tag.id));
       if (tags.some((tag) => tag.id !== undefined && !currentIds.has(tag.id))) {
         throw new Error('Unknown calendar tag id');
@@ -2372,6 +2431,7 @@ export function installDevElectronAPI(): void {
         color: tag.color,
         sort_order: tag.sort_order,
       }));
+      writeMockCalendarTagAuthority(saved);
       replaceMockCalendarTags(saved);
       publishMockCalendarChange({ table: 'calendar_tags', action: 'UPDATE' });
       return saved.map((tag) => ({ ...tag }));

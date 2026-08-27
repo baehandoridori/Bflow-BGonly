@@ -302,6 +302,7 @@ type PreviewCalendarNotificationWindow = {
 
 let previewCalendarNotificationBundle: Promise<string> | undefined;
 let previewCalendarNotificationNonce = 0;
+let previewCalendarSharedStorageValues: Map<string, string> | null = null;
 
 type PreviewCalendarBroadcastChannelCleanup = (() => void) & {
   flush(): void;
@@ -309,10 +310,13 @@ type PreviewCalendarBroadcastChannelCleanup = (() => void) & {
 
 function installPreviewCalendarBroadcastChannel(options?: {
   deferMessages?: boolean;
+  sharedStorage?: boolean;
 }): PreviewCalendarBroadcastChannelCleanup {
   const globalScope = globalThis as Record<string, unknown>;
   const hadBroadcastChannel = Object.prototype.hasOwnProperty.call(globalScope, 'BroadcastChannel');
   const previousBroadcastChannel = globalScope.BroadcastChannel;
+  const previousSharedStorageValues = previewCalendarSharedStorageValues;
+  if (options?.sharedStorage) previewCalendarSharedStorageValues = new Map<string, string>();
   const channelsByName = new Map<string, Set<PreviewCalendarBroadcastChannel>>();
   const pendingMessages: Array<{ channel: PreviewCalendarBroadcastChannel; data: unknown }> = [];
 
@@ -367,6 +371,7 @@ function installPreviewCalendarBroadcastChannel(options?: {
   const cleanup = (() => {
     if (hadBroadcastChannel) globalScope.BroadcastChannel = previousBroadcastChannel;
     else delete globalScope.BroadcastChannel;
+    previewCalendarSharedStorageValues = previousSharedStorageValues;
   }) as PreviewCalendarBroadcastChannelCleanup;
   cleanup.flush = () => {
     const messages = pendingMessages.splice(0, pendingMessages.length);
@@ -405,7 +410,7 @@ async function createPreviewCalendarNotificationHarness(): Promise<{
     });
   }
 
-  const localStorageValues = new Map<string, string>();
+  const localStorageValues = previewCalendarSharedStorageValues ?? new Map<string, string>();
   const previewWindow: PreviewCalendarNotificationWindow = {
     localStorage: {
       getItem: (key) => localStorageValues.get(key) ?? null,
@@ -781,6 +786,18 @@ test('preview calendar fanout emits each newly received notification only to its
     await actor.api.calendarBroadcastChange({ table: 'calendar_events', action: 'UPDATE', eventId: created.id });
     restoreBroadcastChannel.flush();
     assert.equal(recipientRealtime.length, 1, '이미 병합한 notification row는 후속 snapshot에서 중복 realtime을 만들지 않는다');
+
+    await actor.api.calendarEventUpdate(created.id, { title: '수정된 원격 알림 일정' });
+    restoreBroadcastChannel.flush();
+    await actor.api.calendarEventDelete(created.id);
+    restoreBroadcastChannel.flush();
+    assert.deepEqual(
+      recipientRealtime.map((event) => (
+        event as { payload?: { notification?: { action?: string } } }
+      ).payload?.notification?.action),
+      ['create', 'update', 'delete'],
+      '일정 create·update·delete가 만든 새 알림은 모두 수신자 realtime으로 즉시 전달한다',
+    );
   } finally {
     unsubscribeBystander();
     unsubscribeRecipient();
@@ -789,6 +806,70 @@ test('preview calendar fanout emits each newly received notification only to its
     bystander.restore();
     recipient.restore();
     actor.restore();
+    restoreBroadcastChannel();
+  }
+});
+
+test('preview mark-read fanout does not emit a first-seen read notification as a realtime insert', async () => {
+  const restoreBroadcastChannel = installPreviewCalendarBroadcastChannel({ deferMessages: true });
+  const owner = await createPreviewCalendarNotificationHarness();
+  const editor = await createPreviewCalendarNotificationHarness();
+  const reader = await createPreviewCalendarNotificationHarness();
+  const unsubscribeOwnerCalendar = owner.api.onCalendarChanged(() => {});
+  const unsubscribeEditorCalendar = editor.api.onCalendarChanged(() => {});
+  const unsubscribeReaderCalendar = reader.api.onCalendarChanged(() => {});
+  let lateRecipient: Awaited<ReturnType<typeof createPreviewCalendarNotificationHarness>> | null = null;
+  let unsubscribeLateRecipientCalendar = () => {};
+  let unsubscribeLateRecipientRealtime = () => {};
+  try {
+    await previewLogin(owner.api, '배한솔');
+    await previewLogin(editor.api, '장삐쭈');
+    await previewLogin(reader.api, '배한솔');
+    const sharedCalendar = await owner.api.calendarCreate({
+      name: '읽음 동기화 프리뷰 공유 일정',
+      color: '#74B9FF',
+      visibility: 'members',
+      members: [{ user_id: '2', can_edit: true }],
+    });
+    restoreBroadcastChannel.flush();
+
+    const created = await editor.api.calendarEventCreate(
+      previewNotificationEventInput(sharedCalendar.id, '늦게 열린 수신 창의 읽음 알림'),
+    );
+    restoreBroadcastChannel.flush();
+    const unread = (await reader.api.calendarNotificationsCatchup())
+      .find((row) => row.event_id === created.id);
+    assert.ok(unread, '읽음 처리할 새 notification row가 먼저 수신자 창에 도착한다');
+
+    lateRecipient = await createPreviewCalendarNotificationHarness();
+    const lateRecipientRealtime: unknown[] = [];
+    unsubscribeLateRecipientCalendar = lateRecipient.api.onCalendarChanged(() => {});
+    unsubscribeLateRecipientRealtime = lateRecipient.api.onSupabaseRealtime((event) => lateRecipientRealtime.push(event));
+    await previewLogin(lateRecipient.api, '배한솔');
+
+    await reader.api.calendarNotificationsMarkRead([unread.id]);
+    restoreBroadcastChannel.flush();
+
+    assert.equal(
+      lateRecipientRealtime.length,
+      0,
+      'calendar_notifications UPDATE snapshot에서 처음 본 read row도 INSERT realtime/toast로 보내지 않는다',
+    );
+    assert.equal(
+      (await lateRecipient.api.calendarNotificationsCatchup()).some((row) => row.id === unread.id),
+      false,
+      '읽음 상태 자체는 늦게 열린 같은 사용자 창에도 반영한다',
+    );
+  } finally {
+    unsubscribeLateRecipientRealtime();
+    unsubscribeLateRecipientCalendar();
+    lateRecipient?.restore();
+    unsubscribeReaderCalendar();
+    unsubscribeEditorCalendar();
+    unsubscribeOwnerCalendar();
+    reader.restore();
+    editor.restore();
+    owner.restore();
     restoreBroadcastChannel();
   }
 });
@@ -1044,13 +1125,15 @@ test('preview calendar fanout never revives a locally deleted calendar from an o
   }
 });
 
-test('preview calendar fanout resolves concurrent stale tag saves as one complete list', async () => {
-  const restoreBroadcastChannel = installPreviewCalendarBroadcastChannel({ deferMessages: true });
+test('preview calendar tag saves keep a later valid complete list as one atomic replacement', async () => {
+  const restoreBroadcastChannel = installPreviewCalendarBroadcastChannel({
+    deferMessages: true,
+    sharedStorage: true,
+  });
   const actor = await createPreviewCalendarNotificationHarness();
   const receiver = await createPreviewCalendarNotificationHarness();
   const unsubscribeActor = actor.api.onCalendarChanged(() => {});
   const unsubscribeReceiver = receiver.api.onCalendarChanged(() => {});
-  const previousNow = Date.now;
   try {
     await previewLogin(actor.api, '배한솔');
     await previewLogin(receiver.api, '배한솔');
@@ -1060,26 +1143,62 @@ test('preview calendar fanout resolves concurrent stale tag saves as one complet
     const secondTag = actorTags[1];
     assert.ok(firstTag && secondTag);
 
-    const actorFinalList = actorTags.filter((tag) => tag.id !== secondTag.id);
-    const receiverFinalList = receiverTags.map((tag) => (
-      tag.id === firstTag.id ? { ...tag, name: '두 번째 창이 저장한 전체 목록' } : tag
+    const actorFinalList = actorTags.map((tag) => (
+      tag.id === firstTag.id ? { ...tag, name: '먼저 저장한 전체 목록' } : tag
     ));
-    Date.now = () => 9_000_000_000_000;
+    const receiverFinalList = receiverTags.map((tag) => (
+      tag.id === secondTag.id ? { ...tag, name: '나중에 저장한 전체 목록' } : tag
+    ));
     await actor.api.calendarTagsSave(actorFinalList);
     await receiver.api.calendarTagsSave(receiverFinalList);
-    Date.now = previousNow;
     restoreBroadcastChannel.flush();
 
     const actorResult = await actor.api.calendarTagsList();
     const receiverResult = await receiver.api.calendarTagsList();
-    assert.deepEqual(receiverResult, actorResult, '동시 저장 뒤 두 창은 같은 전체 태그 목록으로 수렴한다');
-    assert.ok(
-      JSON.stringify(actorResult) === JSON.stringify(actorFinalList)
-        || JSON.stringify(actorResult) === JSON.stringify(receiverFinalList),
-      '직렬화된 저장 중 하나의 complete list만 남고, 삭제와 수정이 ID별로 합성되지는 않는다',
+    assert.deepEqual(actorResult, receiverFinalList, '나중에 직렬화된 유효 목록이 전체 태그 목록을 교체한다');
+    assert.deepEqual(receiverResult, receiverFinalList, '두 프리뷰 창은 같은 complete list만 본다');
+  } finally {
+    unsubscribeReceiver();
+    unsubscribeActor();
+    receiver.restore();
+    actor.restore();
+    restoreBroadcastChannel();
+  }
+});
+
+test('preview calendar tag save rejects a stale complete list that resurrects a deleted tag', async () => {
+  const restoreBroadcastChannel = installPreviewCalendarBroadcastChannel({
+    deferMessages: true,
+    sharedStorage: true,
+  });
+  const actor = await createPreviewCalendarNotificationHarness();
+  const receiver = await createPreviewCalendarNotificationHarness();
+  const unsubscribeActor = actor.api.onCalendarChanged(() => {});
+  const unsubscribeReceiver = receiver.api.onCalendarChanged(() => {});
+  try {
+    await previewLogin(actor.api, '배한솔');
+    await previewLogin(receiver.api, '배한솔');
+    const actorTags = await actor.api.calendarTagsList();
+    const staleReceiverList = await receiver.api.calendarTagsList();
+    const deletedTag = actorTags[1];
+    assert.ok(deletedTag, '삭제될 기존 태그가 있어야 stale save를 재현할 수 있다');
+    const committedList = actorTags.filter((tag) => tag.id !== deletedTag.id);
+
+    await actor.api.calendarTagsSave(committedList);
+    await assert.rejects(
+      receiver.api.calendarTagsSave(staleReceiverList),
+      /Unknown calendar tag id/,
+      '먼저 삭제된 태그를 다시 포함한 늦은 전체 목록은 운영 RPC처럼 거절한다',
+    );
+    restoreBroadcastChannel.flush();
+
+    assert.deepEqual(await actor.api.calendarTagsList(), committedList);
+    assert.deepEqual(
+      await receiver.api.calendarTagsList(),
+      committedList,
+      '거절된 창도 rollback된 authoritative complete list를 유지한다',
     );
   } finally {
-    Date.now = previousNow;
     unsubscribeReceiver();
     unsubscribeActor();
     receiver.restore();
