@@ -290,6 +290,28 @@ export function ScheduleView() {
     [optimisticDeletedTagIds],
   );
 
+  const expectedLocalUpdatePresentation = useCallback((
+    event: CalendarEvent,
+    updates: Partial<CalendarEvent>,
+  ): CalendarEvent => {
+    const expected = { ...event, ...updates };
+    if (updates.calendarId === undefined || event.source !== 'bflow') return expected;
+    // calendarService가 저장 전 캐시에 반영하는 B flow 이동 표시와 같아야
+    // 이 창의 optimistic echo를 동료 변경으로 오인하지 않는다.
+    const destination = calendars.find((calendar) => calendar.id === updates.calendarId);
+    const canEdit = destination?.canEdit ?? false;
+    return {
+      ...expected,
+      source: 'bflow',
+      sourceCalendarId: `bflow:${updates.calendarId}`,
+      calendarId: updates.calendarId,
+      color: destination?.color ?? '#6C5CE7',
+      canEdit,
+      isReadOnly: !canEdit,
+      isPrivate: destination?.isPersonal === true,
+    };
+  }, [calendars]);
+
   const guardLocalIdentity = useCallback((
     identity: CalendarEventIdentity,
     expectedEvent: CalendarEvent,
@@ -1109,7 +1131,12 @@ export function ScheduleView() {
     if (sanitized.startDate && sanitized.endDate && sanitized.endDate < sanitized.startDate) {
       [sanitized.startDate, sanitized.endDate] = [sanitized.endDate, sanitized.startDate];
     }
-    const localGuard = guardLocalIdentity(mutationIdentity, { ...eventBeforeUpdate, ...sanitized }, 'update', eventBeforeUpdate);
+    const localGuard = guardLocalIdentity(
+      mutationIdentity,
+      expectedLocalUpdatePresentation(eventBeforeUpdate, sanitized),
+      'update',
+      eventBeforeUpdate,
+    );
     let persistenceFailed = false;
     let persistenceError: unknown;
     try {
@@ -1135,7 +1162,7 @@ export function ScheduleView() {
     }
 
     if (persistenceFailed) throw persistenceError;
-  }, [applyCanonicalEvents, guardLocalIdentity, settleLocalMutationGuard]);
+  }, [applyCanonicalEvents, expectedLocalUpdatePresentation, guardLocalIdentity, settleLocalMutationGuard]);
 
   const handleDuplicateEvent = useCallback(async (event: CalendarEvent) => {
     const isCanonicalBflow = event.sourceCalendarId?.startsWith('bflow:') === true

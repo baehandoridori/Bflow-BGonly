@@ -4240,6 +4240,51 @@ test('ScheduleView keeps overlapping local update and failed-delete guards separ
   );
 });
 
+test('ScheduleView does not present its own B flow calendar move as a teammate update', async () => {
+  resetHarness();
+  const before = calendarListEvent({
+    id: 'local-calendar-move',
+    title: '내가 옮긴 일정',
+    source: 'bflow',
+    sourceCalendarId: 'bflow:mine',
+    calendarId: 'mine',
+    color: '#6C5CE7',
+    canEdit: true,
+    isReadOnly: false,
+    isPrivate: true,
+  });
+  const moved = {
+    ...before,
+    source: 'bflow' as const,
+    sourceCalendarId: 'bflow:editable-share',
+    calendarId: 'editable-share',
+    color: '#6C5CE7',
+    canEdit: true,
+    isReadOnly: false,
+    isPrivate: false,
+  };
+  scheduleCanonicalEvents = [before];
+  await renderScheduleView();
+  await flushScheduleMountEffects();
+  await renderScheduleView();
+  scheduleGridProps.at(-1)?.onEventClick(before);
+  await renderScheduleView();
+  scheduleUpdateHandler = async () => {
+    scheduleCanonicalEvents = [moved];
+    await dispatchScheduleWindowEvent('bflow:calendar-changed');
+  };
+
+  const panel = schedulePanelProps.at(-1);
+  assert.ok(panel, 'the editable B flow row exposes its direct update callback');
+  await panel.onUpdate(before.id, { calendarId: moved.calendarId });
+  await renderScheduleView();
+  assert.deepEqual(
+    [...(scheduleGridProps.at(-1)?.highlightedEventIdentities ?? [])],
+    [],
+    'the local destination presentation is consumed as this window\'s own echo',
+  );
+});
+
 test('ScheduleView only preserves external vacation selections outside the canonical event cache', async (t) => {
   const vacation = calendarListEvent({
     id: 'vacation-selection',
