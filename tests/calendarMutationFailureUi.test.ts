@@ -36,6 +36,11 @@ type ButtonElement = ReactElement<{
   onClick?: () => unknown;
 }, 'button'>;
 
+type InputElement = ReactElement<{
+  type?: string;
+  value?: unknown;
+}, 'input'>;
+
 type HookStore = {
   state: unknown[];
   refs: Array<{ current: unknown }>;
@@ -359,6 +364,34 @@ function findButtonByText(node: ReactNode, label: string): ButtonElement {
   return button;
 }
 
+function findTitleInput(node: ReactNode): InputElement {
+  if (Array.isArray(node)) {
+    for (const child of node) {
+      const found = findTitleInputOrUndefined(child);
+      if (found) return found;
+    }
+  } else {
+    const found = findTitleInputOrUndefined(node);
+    if (found) return found;
+  }
+  assert.fail('an editable title input must exist');
+}
+
+function findTitleInputOrUndefined(node: ReactNode): InputElement | undefined {
+  if (!isValidElement(node)) return undefined;
+  const props = node.props as { children?: ReactNode; type?: string; value?: unknown };
+  if (node.type === 'input' && props.type === undefined) return node as InputElement;
+  const children = props.children;
+  if (Array.isArray(children)) {
+    for (const child of children) {
+      const found = findTitleInputOrUndefined(child);
+      if (found) return found;
+    }
+    return undefined;
+  }
+  return findTitleInputOrUndefined(children);
+}
+
 function findAlerts(node: ReactNode): ReactElement[] {
   if (Array.isArray(node)) return node.flatMap(findAlerts);
   if (!isValidElement(node)) return [];
@@ -375,6 +408,20 @@ function rejectedThenable(reason: Error): Promise<void> {
       reject?.(reason);
     },
   } as unknown as Promise<void>;
+}
+
+function deferredThenable(): { promise: Promise<void>; reject: (reason: Error) => void } {
+  let rejectHandler: ((reason: Error) => void) | undefined;
+  return {
+    promise: {
+      then(_resolve: (() => void) | undefined, reject: ((reason: Error) => void) | undefined) {
+        rejectHandler = reject;
+      },
+    } as unknown as Promise<void>,
+    reject(reason: Error) {
+      rejectHandler?.(reason);
+    },
+  };
 }
 
 async function invoke(button: ButtonElement): Promise<void> {
@@ -536,17 +583,22 @@ test('side panel stays open and explains a failed deletion', async () => {
   assert.equal(findAlerts(recovered).length, 1, 'failed deletion must be announced to the user');
 });
 
-test('side panel keeps failed save recovery on a same-event rollback refresh', async () => {
+test('side panel keeps failed save recovery when a same-event rollback is batched with rejection', async () => {
   const hooks = createHookStore();
-  hooks.state[0] = true;
-  hooks.state[1] = '바꾼 일정';
+  const originalEvent = event();
+  const persistence = deferredThenable();
   const callbacks = {
     onClose: () => {},
-    onUpdate: () => rejectedThenable(new Error('save failed')),
+    onUpdate: () => persistence.promise,
     onDelete: () => {},
   };
 
-  await invoke(findButtonByText(await renderSidePanel(hooks, callbacks), '저장'));
+  await renderSidePanel(hooks, callbacks, originalEvent, true);
+  hooks.state[0] = true;
+  hooks.state[1] = '바꾼 일정';
+
+  await invoke(findButtonByText(await renderSidePanel(hooks, callbacks, originalEvent, true), '저장'));
+  persistence.reject(new Error('save failed'));
 
   const restoredSameEvent = await renderSidePanel(
     hooks,
@@ -563,12 +615,66 @@ test('side panel keeps failed save recovery on a same-event rollback refresh', a
     /일정 저장에 실패했어요/,
     'a rollback refresh for the same event must keep its failure explanation visible',
   );
-
-  const nextEvent = await renderSidePanel(hooks, callbacks, event({ id: 'event-2', title: '다른 일정' }), true);
   assert.equal(
-    findButtons(nextEvent).some((button) => textContent(button).includes('저장')),
-    false,
-    'switching to another event must leave the old retry mode behind',
+    findTitleInput(restoredSameEvent).props.value,
+    '바꾼 일정',
+    'a rollback refresh must keep the retry draft instead of overwriting it',
   );
-  assert.equal(findAlerts(nextEvent).length, 0, 'switching to another event must clear the previous event failure');
+});
+
+test('side panel keeps failed deletion explanation when a same-event rollback is batched with rejection', async () => {
+  const hooks = createHookStore();
+  const originalEvent = event();
+  const persistence = deferredThenable();
+  const callbacks = {
+    onClose: () => {},
+    onUpdate: () => {},
+    onDelete: () => persistence.promise,
+  };
+
+  await renderSidePanel(hooks, callbacks, originalEvent, true);
+  await invoke(findButtonByText(await renderSidePanel(hooks, callbacks, originalEvent), '삭제'));
+  persistence.reject(new Error('delete failed'));
+
+  const restoredSameEvent = await renderSidePanel(
+    hooks,
+    callbacks,
+    event({ title: '복구된 원래 일정' }),
+    true,
+  );
+  assert.match(
+    textContent(restoredSameEvent),
+    /일정 삭제에 실패했어요/,
+    'a rollback refresh for the same event must keep its deletion failure explanation visible',
+  );
+});
+
+test('side panel rehydrates a same-event teammate update that is unrelated to a local mutation', async () => {
+  const hooks = createHookStore();
+  const originalEvent = event();
+  const teammateUpdate = event({ title: '팀원이 바꾼 일정' });
+  const callbacks = {
+    onClose: () => {},
+    onUpdate: () => {},
+    onDelete: () => {},
+  };
+
+  await renderSidePanel(hooks, callbacks, originalEvent, true);
+  hooks.state[0] = true;
+  hooks.state[1] = '내 임시 제목';
+
+  const refreshed = await renderSidePanel(hooks, callbacks, teammateUpdate, true);
+  assert.equal(
+    findButtons(refreshed).some((button) => textContent(button).includes('저장')),
+    false,
+    'an unrelated teammate update must leave local edit mode and use the latest event data',
+  );
+
+  await invoke(findButtonByText(refreshed, '편집'));
+  const editable = await renderSidePanel(hooks, callbacks, teammateUpdate);
+  assert.equal(
+    findTitleInput(editable).props.value,
+    '팀원이 바꾼 일정',
+    'an unrelated teammate update must replace the stale local draft with the latest title',
+  );
 });

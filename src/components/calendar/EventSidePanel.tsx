@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   X,
@@ -123,6 +123,7 @@ export function EventSidePanel({
   const [draftStartTime, setDraftStartTime] = useState(event.startTime ?? '');
   const [draftEndTime, setDraftEndTime] = useState(event.endTime ?? '');
   const [mutationError, setMutationError] = useState<string | null>(null);
+  const [isMutationPending, setIsMutationPending] = useState(false);
   const users = useAuthStore((s) => s.users);
   const userNames = useMemo(() => users.map((u) => u.name), [users]);
   const currentUser = useAuthStore((state) => state.currentUser);
@@ -140,10 +141,16 @@ export function EventSidePanel({
     ? new Set(canonicalTagSnapshot.tags.map((tag) => tag.id))
     : null;
   const eventIdentityKey = calendarEventIdentityKey(event);
+  const pendingMutationIdentityRef = useRef<string | null>(null);
 
-  // 다른 일정으로 전환할 때만 드래프트와 실패 상태를 리셋한다.
-  // 같은 일정의 낙관적 저장 롤백은 새 객체로 들어와도 재시도 상태를 유지한다.
+  // 외부에서 새 이벤트 객체가 들어오면 최신 내용으로 다시 채운다.
+  // 단, 내 저장/삭제가 진행 중이거나 막 실패한 같은 일정의 롤백은 재시도 상태를 보존한다.
   useEffect(() => {
+    if (
+      pendingMutationIdentityRef.current === eventIdentityKey
+      || isMutationPending
+      || mutationError !== null
+    ) return;
     setDraftTitle(event.title);
     setDraftStart(event.startDate);
     setDraftEnd(event.endDate);
@@ -155,7 +162,7 @@ export function EventSidePanel({
     setDraftEndTime(event.endTime ?? '');
     setMutationError(null);
     setEditing(false);
-  }, [eventIdentityKey]);
+  }, [event]);
 
   const selectedTagUnavailable = Boolean(draftTagId && (
     isOptimisticCalendarTagId(draftTagId)
@@ -267,17 +274,31 @@ export function EventSidePanel({
       return;
     }
     setMutationError(null);
+    pendingMutationIdentityRef.current = eventIdentityKey;
+    setIsMutationPending(true);
     try {
       const persistence = onUpdate(event.id, updates);
       if (isPromiseLike(persistence)) {
         void persistence.then(
-          () => setEditing(false),
-          () => setMutationError('일정 저장에 실패했어요. 다시 시도해 주세요.'),
+          () => {
+            pendingMutationIdentityRef.current = null;
+            setIsMutationPending(false);
+            setEditing(false);
+          },
+          () => {
+            setMutationError('일정 저장에 실패했어요. 다시 시도해 주세요.');
+            pendingMutationIdentityRef.current = null;
+            setIsMutationPending(false);
+          },
         );
         return;
       }
+      pendingMutationIdentityRef.current = null;
+      setIsMutationPending(false);
       setEditing(false);
     } catch {
+      pendingMutationIdentityRef.current = null;
+      setIsMutationPending(false);
       setMutationError('일정 저장에 실패했어요. 다시 시도해 주세요.');
     }
   };
@@ -300,17 +321,31 @@ export function EventSidePanel({
   const handleDelete = () => {
     if (isVacation || isViewOnly) return;
     setMutationError(null);
+    pendingMutationIdentityRef.current = eventIdentityKey;
+    setIsMutationPending(true);
     try {
       const persistence = onDelete(event.id);
       if (isPromiseLike(persistence)) {
         void persistence.then(
-          () => onClose(),
-          () => setMutationError('일정 삭제에 실패했어요. 다시 시도해 주세요.'),
+          () => {
+            pendingMutationIdentityRef.current = null;
+            setIsMutationPending(false);
+            onClose();
+          },
+          () => {
+            setMutationError('일정 삭제에 실패했어요. 다시 시도해 주세요.');
+            pendingMutationIdentityRef.current = null;
+            setIsMutationPending(false);
+          },
         );
         return;
       }
+      pendingMutationIdentityRef.current = null;
+      setIsMutationPending(false);
       onClose();
     } catch {
+      pendingMutationIdentityRef.current = null;
+      setIsMutationPending(false);
       setMutationError('일정 삭제에 실패했어요. 다시 시도해 주세요.');
     }
   };
