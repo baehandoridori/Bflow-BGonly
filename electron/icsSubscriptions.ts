@@ -5,6 +5,14 @@
  * 파일 IO·fetch·경로가 필요한 부분은 전부 주입(DI)으로 받는다.
  */
 import icalModule from 'node-ical';
+// node --test가 이 파일을 직접 import하므로 src/shared에서는 타입만 가져온다.
+// 값 import는 확장자 없는 상대 경로를 런타임에 해석하지 못한다.
+import type {
+  IcsSubscription,
+  IcsSubscriptionAddInput,
+  IcsSubscriptionEvents,
+  IcsSubscriptionUpdateInput,
+} from '../src/shared/icsApiContract';
 
 /** 한 구독이 만들어 낼 수 있는 일정 수 상한. 넘으면 가까운 회차부터 채우고 잘라 낸다. */
 export const ICS_EVENTS_PER_SUBSCRIPTION_LIMIT = 500;
@@ -85,14 +93,6 @@ function daysBetween(from: string, to: string): number {
   const end = new Date(`${to}T00:00:00Z`).getTime();
   if (Number.isNaN(start) || Number.isNaN(end)) return 0;
   return Math.round((end - start) / DAY_MS);
-}
-
-function addMinutesToTime(time: string, minutes: number): { time: string; dayOffset: number } {
-  const [hours, mins] = time.split(':').map(Number);
-  const total = (Number.isFinite(hours) ? hours : 0) * 60 + (Number.isFinite(mins) ? mins : 0) + minutes;
-  const dayOffset = Math.floor(total / (24 * 60));
-  const withinDay = total - dayOffset * 24 * 60;
-  return { time: `${pad(Math.floor(withinDay / 60))}:${pad(withinDay % 60)}`, dayOffset };
 }
 
 function isVevent(value: unknown): value is IcsVevent {
@@ -261,4 +261,226 @@ export function expandIcsToEvents(icsText: string, window: IcsExpandWindow): Ics
     return { events: collected, truncated: false };
   }
   return { events: collected.slice(0, ICS_EVENTS_PER_SUBSCRIPTION_LIMIT), truncated: true };
+}
+
+
+/* ═══════════════════════════════════════════════════
+   구독 저장 · 갱신
+   ═══════════════════════════════════════════════════ */
+
+/** 조회 창 기본값 — 지난 6개월부터 앞으로 12개월까지. */
+const ICS_WINDOW_PAST_MONTHS = 6;
+const ICS_WINDOW_FUTURE_MONTHS = 12;
+const ICS_STORE_VERSION = 1;
+/** 주소 형식 거절 사유. 메인 프로세스가 권한 있는 판정을 내린다. */
+export const ICS_URL_ERROR = '캘린더 주소는 http 또는 https로 시작해야 합니다';
+
+export interface IcsSubscriptionStoreDeps {
+  /** 저장 파일 내용. 파일이 없으면 null. */
+  readSubscriptionsFile(): Promise<string | null>;
+  writeSubscriptionsFile(contents: string): Promise<void>;
+  /** 정규화된 https URL의 본문을 가져온다. 리다이렉트·크기 제한은 구현 쪽 책임. */
+  fetchText(url: string): Promise<string>;
+  createId(): string;
+  now(): Date;
+  /** 갱신이 끝났음을 렌더러에 알린다. */
+  publishChanged?(payload: { subId: string | null }): void;
+  /** 조회 창 재정의(테스트·특수 목적). 없으면 now() 기준 기본 창을 쓴다. */
+  resolveWindow?(now: Date): IcsExpandWindow;
+}
+
+export interface IcsSubscriptionStore {
+  list(): Promise<IcsSubscription[]>;
+  add(input: IcsSubscriptionAddInput): Promise<IcsSubscription>;
+  update(id: string, patch: IcsSubscriptionUpdateInput): Promise<IcsSubscription | null>;
+  remove(id: string): Promise<void>;
+  /** id가 null이면 켜져 있는 모든 구독을 갱신한다. */
+  refresh(id: string | null): Promise<void>;
+  events(): Promise<IcsSubscriptionEvents[]>;
+}
+
+/**
+ * webcal://은 https://로 바꾸고, http(s) 밖의 프로토콜은 거절한다.
+ * 거절 대상을 문자열로 되돌려 주면 그대로 fetch에 들어가므로 반드시 null을 반환한다.
+ */
+export function normalizeIcsUrl(rawUrl: unknown): string | null {
+  if (typeof rawUrl !== 'string') return null;
+  const trimmed = rawUrl.trim();
+  if (trimmed === '') return null;
+  const withProtocol = /^webcal:\/\//i.test(trimmed)
+    ? `https://${trimmed.slice('webcal://'.length)}`
+    : trimmed;
+  let parsed: URL;
+  try {
+    parsed = new URL(withProtocol);
+  } catch {
+    return null;
+  }
+  if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') return null;
+  if (!parsed.hostname) return null;
+  return parsed.toString();
+}
+
+function shiftMonths(now: Date, months: number): Date {
+  return new Date(Date.UTC(
+    now.getUTCFullYear(),
+    now.getUTCMonth() + months,
+    now.getUTCDate(),
+  ));
+}
+
+function defaultWindow(now: Date): IcsExpandWindow {
+  return {
+    from: shiftMonths(now, -ICS_WINDOW_PAST_MONTHS).toISOString().slice(0, 10),
+    to: shiftMonths(now, ICS_WINDOW_FUTURE_MONTHS).toISOString().slice(0, 10),
+  };
+}
+
+function sanitizeSubscription(value: unknown): IcsSubscription | null {
+  if (!value || typeof value !== 'object') return null;
+  const row = value as Record<string, unknown>;
+  const url = normalizeIcsUrl(row.url);
+  if (typeof row.id !== 'string' || row.id.trim() === '' || !url) return null;
+  if (typeof row.name !== 'string' || typeof row.color !== 'string') return null;
+  return {
+    id: row.id,
+    name: row.name,
+    url,
+    color: row.color,
+    enabled: row.enabled !== false,
+    lastFetchedAt: typeof row.lastFetchedAt === 'string' ? row.lastFetchedAt : null,
+    lastError: typeof row.lastError === 'string' ? row.lastError : null,
+  };
+}
+
+function readErrorMessage(error: unknown): string {
+  if (error instanceof Error && error.message.trim() !== '') return error.message;
+  if (typeof error === 'string' && error.trim() !== '') return error;
+  return '외부 캘린더를 불러오지 못했습니다';
+}
+
+export function createIcsSubscriptionStore(deps: IcsSubscriptionStoreDeps): IcsSubscriptionStore {
+  let subscriptions: IcsSubscription[] | null = null;
+  /** 조회 결과는 메모리에만 둔다. 저장 파일에는 구독 설정만 남긴다. */
+  const cache = new Map<string, { events: IcsExpandedEvent[]; truncated: boolean }>();
+
+  const loadSubscriptions = async (): Promise<IcsSubscription[]> => {
+    if (subscriptions) return subscriptions;
+    let parsed: unknown = null;
+    try {
+      const raw = await deps.readSubscriptionsFile();
+      parsed = raw ? JSON.parse(raw) : null;
+    } catch {
+      parsed = null;
+    }
+    const rows = parsed && typeof parsed === 'object'
+      ? (parsed as { subscriptions?: unknown }).subscriptions
+      : null;
+    subscriptions = Array.isArray(rows)
+      ? rows.map(sanitizeSubscription).filter((row): row is IcsSubscription => row !== null)
+      : [];
+    return subscriptions;
+  };
+
+  const persist = async (): Promise<void> => {
+    const rows = await loadSubscriptions();
+    await deps.writeSubscriptionsFile(JSON.stringify({
+      version: ICS_STORE_VERSION,
+      subscriptions: rows,
+    }, null, 2));
+  };
+
+  const announce = (subId: string | null): void => {
+    try {
+      deps.publishChanged?.({ subId });
+    } catch {
+      // 알림 실패가 갱신 자체를 되돌리지는 않는다.
+    }
+  };
+
+  /** 실패해도 직전에 받아 둔 캐시와 마지막 성공 시각은 그대로 둔다. */
+  const fetchOne = async (subscription: IcsSubscription): Promise<void> => {
+    try {
+      const text = await deps.fetchText(subscription.url);
+      const window = deps.resolveWindow?.(deps.now()) ?? defaultWindow(deps.now());
+      const expanded = expandIcsToEvents(text, window);
+      cache.set(subscription.id, { events: expanded.events, truncated: expanded.truncated });
+      subscription.lastFetchedAt = deps.now().toISOString();
+      subscription.lastError = null;
+    } catch (error) {
+      subscription.lastError = readErrorMessage(error);
+    }
+  };
+
+  return {
+    async list() {
+      return (await loadSubscriptions()).map((row) => ({ ...row }));
+    },
+
+    async add(input) {
+      const url = normalizeIcsUrl(input?.url);
+      if (!url) throw new Error(ICS_URL_ERROR);
+      const rows = await loadSubscriptions();
+      const created: IcsSubscription = {
+        id: deps.createId(),
+        name: typeof input.name === 'string' && input.name.trim() !== '' ? input.name.trim() : url,
+        url,
+        color: typeof input.color === 'string' && input.color.trim() !== '' ? input.color : '#8B8DA3',
+        enabled: true,
+        lastFetchedAt: null,
+        lastError: null,
+      };
+      rows.push(created);
+      await fetchOne(created);
+      await persist();
+      announce(created.id);
+      return { ...created };
+    },
+
+    async update(id, patch) {
+      const rows = await loadSubscriptions();
+      const target = rows.find((row) => row.id === id);
+      if (!target) return null;
+      if (typeof patch?.name === 'string' && patch.name.trim() !== '') target.name = patch.name.trim();
+      if (typeof patch?.color === 'string' && patch.color.trim() !== '') target.color = patch.color;
+      if (typeof patch?.enabled === 'boolean') target.enabled = patch.enabled;
+      await persist();
+      announce(target.id);
+      return { ...target };
+    },
+
+    async remove(id) {
+      const rows = await loadSubscriptions();
+      const index = rows.findIndex((row) => row.id === id);
+      if (index < 0) return;
+      rows.splice(index, 1);
+      cache.delete(id);
+      await persist();
+      announce(id);
+    },
+
+    async refresh(id) {
+      const rows = await loadSubscriptions();
+      const targets = rows.filter((row) => row.enabled && (id === null || row.id === id));
+      for (const target of targets) await fetchOne(target);
+      await persist();
+      announce(id);
+    },
+
+    async events() {
+      const rows = await loadSubscriptions();
+      const result: IcsSubscriptionEvents[] = [];
+      for (const row of rows) {
+        if (!row.enabled) continue;
+        const cached = cache.get(row.id);
+        if (!cached) continue;
+        result.push({
+          subId: row.id,
+          events: cached.events.map((event) => ({ ...event })),
+          truncated: cached.truncated,
+        });
+      }
+      return result;
+    },
+  };
 }
