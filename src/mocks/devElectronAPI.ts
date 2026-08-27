@@ -975,7 +975,17 @@ function settleMockPrivacyReplacement(
     throw new Error('원본 일정이 남아 있어 replacement를 삭제해야 합니다');
   }
 
-  if (disposition === 'delete') deleteMockPrivacyReplacementTarget(entry.target);
+  if (disposition === 'delete') {
+    deleteMockPrivacyReplacementTarget(entry.target);
+    if (entry.target.storage === 'bflow') {
+      publishMockCalendarChange({
+        table: 'calendar_events',
+        action: 'DELETE',
+        eventId: entry.target.actualId,
+        committedPrivacyReplacementDelete: true,
+      });
+    }
+  }
   if (disposition === 'keep' && entry.target.storage === 'bflow') {
     const { notification } = entry.target;
     persistMockCalendarEventNotifications({
@@ -983,6 +993,7 @@ function settleMockPrivacyReplacement(
       action: 'create',
       previous: null,
     });
+    publishMockCalendarChange({ table: 'calendar_notifications', action: 'INSERT' });
   }
   markMockPrivacyReplacementTerminal(entry, disposition);
 }
@@ -1019,6 +1030,14 @@ function deleteMockPrivacyReplacementSource(
         action: 'delete',
         previous: sourceNotification.event,
         event: null,
+      });
+    }
+    if ((result === 'deleted' || result === 'ambiguous') && entry.source.storage === 'bflow') {
+      publishMockCalendarChange({
+        table: 'calendar_events',
+        action: 'DELETE',
+        eventId: entry.source.event_id,
+        committedPrivacyReplacementDelete: true,
       });
     }
     entry.state = result === 'deleted' || result === 'ambiguous' ? 'needsKeep' : 'needsDelete';
@@ -2308,6 +2327,13 @@ export function installDevElectronAPI(): void {
         retiring: false,
       };
       mockPrivacyReplacementEntries.add(entry);
+      if (target.storage === 'bflow') {
+        publishMockCalendarChange({
+          table: 'calendar_events',
+          action: 'INSERT',
+          eventId: target.actualId,
+        });
+      }
       return {
         storage: target.storage,
         actual_id: target.actualId,

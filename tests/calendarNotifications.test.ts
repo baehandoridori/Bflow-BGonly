@@ -1442,6 +1442,148 @@ test('preview privacy migration compensation never notifies a replacement that i
   }
 });
 
+test('preview privacy migration fans out the committed target, source deletion, and recipient notifications to another context', async () => {
+  const restoreBroadcastChannel = installPreviewCalendarBroadcastChannel({ deferMessages: true });
+  const actor = await createPreviewCalendarNotificationHarness();
+  const recipient = await createPreviewCalendarNotificationHarness();
+  const recipientRealtime: unknown[] = [];
+  const unsubscribeActor = actor.api.onCalendarChanged(() => {});
+  const unsubscribeRecipientCalendar = recipient.api.onCalendarChanged(() => {});
+  const unsubscribeRecipientRealtime = recipient.api.onSupabaseRealtime((event) => recipientRealtime.push(event));
+  try {
+    await previewLogin(actor.api, '배한솔');
+    await previewLogin(recipient.api, '장삐쭈');
+    const sourceCalendar = (await actor.api.calendarList())
+      .find((calendar) => calendar.name === 'EP 마일스톤');
+    assert.ok(sourceCalendar);
+    const source = (await actor.api.calendarEventsList())
+      .find((event) => event.calendar_id === sourceCalendar.id && event.title === 'EP05 업로드');
+    assert.ok(source);
+    const targetCalendar = await actor.api.calendarCreate({
+      name: '프리뷰 이관 수신 일정',
+      color: '#A29BFE',
+      visibility: 'members',
+      members: [{ user_id: '2', can_edit: true }],
+    });
+    restoreBroadcastChannel.flush();
+
+    const replacement = await actor.api.calendarPrivacyReplacementCreate({
+      storage: 'bflow',
+      source: { storage: 'bflow', event_id: source.id },
+      event: previewNotificationEventInput(targetCalendar.id, '다른 창에도 보일 이관 일정'),
+    });
+    assert.equal('transition_resolved' in replacement, false);
+    if ('transition_resolved' in replacement) throw new Error('unexpected transition resolution');
+    restoreBroadcastChannel.flush();
+    assert.equal(
+      (await recipient.api.calendarEventsList()).some((event) => event.id === replacement.actual_id),
+      true,
+      '성공한 replacement 생성은 다른 프리뷰 창에도 target INSERT로 전달한다',
+    );
+
+    assert.equal(await replacement.deleteSource(), 'deleted');
+    restoreBroadcastChannel.flush();
+    assert.equal(
+      (await recipient.api.calendarEventsList()).some((event) => event.id === source.id),
+      false,
+      '확정된 bound source 삭제는 다른 프리뷰 창에도 DELETE로 전달한다',
+    );
+
+    await replacement.settle('keep');
+    restoreBroadcastChannel.flush();
+    const recipientRows = await recipient.api.calendarNotificationsCatchup();
+    assert.deepEqual(
+      recipientRows
+        .filter((row) => row.event_id === source.id || row.event_id === replacement.actual_id)
+        .map((row) => ({ eventId: row.event_id, action: row.action }))
+        .sort((left, right) => left.eventId!.localeCompare(right.eventId!)),
+      [
+        { eventId: replacement.actual_id, action: 'create' },
+        { eventId: source.id, action: 'delete' },
+      ].sort((left, right) => left.eventId.localeCompare(right.eventId)),
+      'source 삭제와 확정 target 생성은 수신자 수신함에 각각 한 번씩 남는다',
+    );
+    assert.deepEqual(
+      recipientRealtime.map((event) => (
+        event as { payload?: { notification?: { eventTitle?: string; action?: string } } }
+      ).payload?.notification).map((notification) => ({
+        eventTitle: notification?.eventTitle,
+        action: notification?.action,
+      })),
+      [
+        { eventTitle: source.title, action: 'delete' },
+        { eventTitle: '다른 창에도 보일 이관 일정', action: 'create' },
+      ],
+      '수신자 창은 확정된 source 삭제와 target 생성 알림을 realtime으로 받는다',
+    );
+  } finally {
+    unsubscribeRecipientRealtime();
+    unsubscribeRecipientCalendar();
+    unsubscribeActor();
+    recipient.restore();
+    actor.restore();
+    restoreBroadcastChannel();
+  }
+});
+
+test('preview privacy migration compensation removes the provisional target without a recipient success notification', async () => {
+  const restoreBroadcastChannel = installPreviewCalendarBroadcastChannel({ deferMessages: true });
+  const actor = await createPreviewCalendarNotificationHarness();
+  const recipient = await createPreviewCalendarNotificationHarness();
+  const recipientRealtime: unknown[] = [];
+  const unsubscribeActor = actor.api.onCalendarChanged(() => {});
+  const unsubscribeRecipientCalendar = recipient.api.onCalendarChanged(() => {});
+  const unsubscribeRecipientRealtime = recipient.api.onSupabaseRealtime((event) => recipientRealtime.push(event));
+  try {
+    await previewLogin(actor.api, '배한솔');
+    await previewLogin(recipient.api, '장삐쭈');
+    const targetCalendar = await actor.api.calendarCreate({
+      name: '프리뷰 이관 보상 일정',
+      color: '#A29BFE',
+      visibility: 'members',
+      members: [{ user_id: '2', can_edit: true }],
+    });
+    restoreBroadcastChannel.flush();
+
+    const replacement = await actor.api.calendarPrivacyReplacementCreate({
+      storage: 'bflow',
+      source: { storage: 'legacy-private', event_id: 'missing-legacy-source' },
+      event: previewNotificationEventInput(targetCalendar.id, '보상으로 사라질 원격 일정'),
+    });
+    assert.equal('transition_resolved' in replacement, false);
+    if ('transition_resolved' in replacement) throw new Error('unexpected transition resolution');
+    restoreBroadcastChannel.flush();
+    assert.equal(
+      (await recipient.api.calendarEventsList()).some((event) => event.id === replacement.actual_id),
+      true,
+      '성공한 replacement persistence는 보상 전에도 다른 창에 전달한다',
+    );
+
+    assert.equal(await replacement.deleteSource(), 'missing');
+    await replacement.settle('delete');
+    restoreBroadcastChannel.flush();
+    assert.equal(
+      (await recipient.api.calendarEventsList()).some((event) => event.id === replacement.actual_id),
+      false,
+      '원본이 남아 보상된 target은 exact DELETE로 다른 프리뷰 창에서도 제거한다',
+    );
+    assert.equal(
+      (await recipient.api.calendarNotificationsCatchup())
+        .some((row) => row.event_id === replacement.actual_id),
+      false,
+      '보상 경로는 수신자에게 성공한 replacement 생성 알림을 만들지 않는다',
+    );
+    assert.deepEqual(recipientRealtime, [], '보상 경로는 수신자 realtime 성공 알림을 보내지 않는다');
+  } finally {
+    unsubscribeRecipientRealtime();
+    unsubscribeRecipientCalendar();
+    unsubscribeActor();
+    recipient.restore();
+    actor.restore();
+    restoreBroadcastChannel();
+  }
+});
+
 test('preview realtime helper emits the canonical calendar envelope, isolates listener failures, and unsubscribes', () => {
   const realtime = createDevCalendarNotificationRealtimeListeners(() => {});
   const received: unknown[] = [];
