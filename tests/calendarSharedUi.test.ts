@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
+import { readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
@@ -6320,6 +6321,29 @@ test('ScheduleView opens quick edit from a right click in the weekly, timetable 
     assert.equal(quickEdit.event.id, target.id);
     assert.deepEqual(quickEdit.position, position, `${label} 빠른 편집은 눌린 좌표에서 열린다`);
   }
+});
+
+test('quick edit closing animation is owned by exactly one presence boundary', () => {
+  // framer-motion 10.x는 중첩 AnimatePresence로 exit를 전파하지 않는다. 빠른 편집이
+  // 자기 자신을 감싸면 닫힘 애니메이션이 죽으므로, presence는 ScheduleView가 소유한다.
+  const quickEditSource = readFileSync('src/components/calendar/EventQuickEdit.tsx', 'utf8');
+  const scheduleSource = readFileSync('src/views/ScheduleView.tsx', 'utf8');
+
+  assert.doesNotMatch(
+    quickEditSource,
+    /<AnimatePresence/,
+    '빠른 편집은 자기 presence를 소유하지 않는다',
+  );
+  assert.match(
+    quickEditSource,
+    /exit=\{\{ opacity: 0, scale: 0\.95 \}\}/,
+    '빠른 편집 motion.div는 exit 상태를 유지한다',
+  );
+  assert.match(
+    scheduleSource,
+    /<AnimatePresence>\s*\{quickEdit && \(/,
+    'ScheduleView의 조건부 렌더가 presence 경계를 소유한다',
+  );
 });
 
 test('ScheduleView opens TagManagerPopover with the exact TagBar anchor', async () => {

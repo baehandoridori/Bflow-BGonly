@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { createPortal } from 'react-dom';
-import { motion, AnimatePresence } from 'framer-motion';
+import { motion } from 'framer-motion';
 import { CalendarDays, Copy, Pencil, Tags, Trash2 } from 'lucide-react';
 import type { CalendarEvent, CalendarEventType } from '@/types/calendar';
 import { useAppStore } from '@/stores/useAppStore';
@@ -313,8 +313,9 @@ export function EventQuickEdit({
     setPendingTag((current) => current?.requestId === requestId ? null : current);
   }, [canWrite, displayedTagId, event.id, isCanonicalBflow, onUpdate, tagSelectionPending]);
 
+  // 자체 AnimatePresence 로 감싸면 부모 presence 의 exit 가 전파되지 않아 닫힘 애니가 죽는다
+  // (framer-motion 10.x). presence 는 ScheduleView 쪽 조건부 렌더가 소유한다.
   return createPortal(
-    <AnimatePresence>
       <motion.div
         ref={ref}
         initial={{ opacity: 0, scale: 0.95 }}
@@ -563,8 +564,7 @@ export function EventQuickEdit({
             </div>
           )}
         </div>
-      </motion.div>
-    </AnimatePresence>,
+      </motion.div>,
     document.body,
   );
 }

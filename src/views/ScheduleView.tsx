@@ -1633,7 +1633,8 @@ export function ScheduleView() {
       </AnimatePresence>
 
       {/* ═══ EventQuickEdit (right-click popup) ═══ */}
-      {quickEdit && (
+      <AnimatePresence>
+        {quickEdit && (
         <EventQuickEdit
           key={calendarEventIdentityKey(quickEdit.event)}
           event={quickEdit.event}
@@ -1651,7 +1652,8 @@ export function ScheduleView() {
             }}
           onDuplicate={handleDuplicateEvent}
         />
-      )}
+        )}
+      </AnimatePresence>
       {showShortcutHelp && (
         <ShortcutHelpOverlay onClose={() => setShowShortcutHelp(false)} />
       )}
