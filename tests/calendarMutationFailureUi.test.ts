@@ -649,6 +649,62 @@ test('side panel keeps failed deletion explanation when a same-event rollback is
   );
 });
 
+test('side panel accepts a teammate update after preserving its failed-save rollback', async () => {
+  const hooks = createHookStore();
+  const originalEvent = event();
+  const persistence = deferredThenable();
+  const callbacks = {
+    onClose: () => {},
+    onUpdate: () => persistence.promise,
+    onDelete: () => {},
+  };
+
+  await renderSidePanel(hooks, callbacks, originalEvent, true);
+  hooks.state[0] = true;
+  hooks.state[1] = '내 저장 시도';
+
+  await invoke(findButtonByText(await renderSidePanel(hooks, callbacks, originalEvent, true), '저장'));
+  persistence.reject(new Error('save failed'));
+
+  const rollback = await renderSidePanel(
+    hooks,
+    callbacks,
+    event({ title: '원래 일정' }),
+    true,
+  );
+  assert.match(textContent(rollback), /일정 저장에 실패했어요/);
+  assert.equal(
+    findTitleInput(rollback).props.value,
+    '내 저장 시도',
+    'the matching local rollback must retain the retry draft',
+  );
+
+  const teammateRefresh = await renderSidePanel(
+    hooks,
+    callbacks,
+    event({ title: '팀원이 바꾼 최신 일정' }),
+    true,
+  );
+  assert.equal(
+    findButtons(teammateRefresh).some((button) => textContent(button).includes('저장')),
+    false,
+    'a later teammate update must leave failed local edit mode',
+  );
+  assert.equal(
+    findAlerts(teammateRefresh).length,
+    0,
+    'a later teammate update must clear the stale local failure explanation',
+  );
+
+  await invoke(findButtonByText(teammateRefresh, '편집'));
+  const editableTeammateRefresh = await renderSidePanel(hooks, callbacks, event({ title: '팀원이 바꾼 최신 일정' }));
+  assert.equal(
+    findTitleInput(editableTeammateRefresh).props.value,
+    '팀원이 바꾼 최신 일정',
+    'a later teammate update must replace the failed local draft before another save',
+  );
+});
+
 test('side panel rehydrates a same-event teammate update that is unrelated to a local mutation', async () => {
   const hooks = createHookStore();
   const originalEvent = event();
