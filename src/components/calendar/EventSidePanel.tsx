@@ -165,6 +165,15 @@ export function EventSidePanel({
     setEditing(false);
   };
 
+  /**
+   * 사용자가 편집을 버리면 실패 복구 표식도 함께 버린다. 남겨두면 이후 동료 변경이
+   * 우연히 같은 내용일 때 로컬 echo로 오인해, 버린 초안이 정본을 덮어쓸 수 있다.
+   */
+  const abandonEdit = () => {
+    failedMutationRecoveryRef.current = null;
+    rehydrateFromEvent(event);
+  };
+
   // 외부에서 새 이벤트 객체가 들어오면 최신 내용으로 다시 채운다.
   // 내 저장/삭제 중에는 드래프트를 유지하고, 실패 뒤에는 원래 스냅샷과 일치하는 롤백만 보존한다.
   // 같은 일정의 이후 정본 변경은 다시 최신 내용으로 채워, 실패한 초안이 동료 변경을 덮지 않게 한다.
@@ -198,20 +207,8 @@ export function EventSidePanel({
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
-        if (editing) {
-          setEditing(false);
-          setDraftTitle(event.title);
-          setDraftStart(event.startDate);
-          setDraftEnd(event.endDate);
-          setDraftMemo(event.memo);
-          setDraftCalendarId(event.calendarId ?? '');
-          setDraftTagId(event.tagId);
-          setDraftAllDay(event.allDay ?? true);
-          setDraftStartTime(event.startTime ?? '');
-          setDraftEndTime(event.endTime ?? '');
-        } else {
-          onClose();
-        }
+        if (editing) abandonEdit();
+        else onClose();
       }
     };
     window.addEventListener('keydown', onKey);
@@ -339,19 +336,7 @@ export function EventSidePanel({
   };
 
   // 편집 취소
-  const handleCancel = () => {
-    setDraftTitle(event.title);
-    setDraftStart(event.startDate);
-    setDraftEnd(event.endDate);
-    setDraftMemo(event.memo);
-    setDraftCalendarId(event.calendarId ?? '');
-    setDraftTagId(event.tagId);
-    setDraftAllDay(event.allDay ?? true);
-    setDraftStartTime(event.startTime ?? '');
-    setDraftEndTime(event.endTime ?? '');
-    setMutationError(null);
-    setEditing(false);
-  };
+  const handleCancel = abandonEdit;
 
   const handleDelete = () => {
     if (isVacation || isViewOnly) return;

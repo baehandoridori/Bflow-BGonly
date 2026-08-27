@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react';
 import { createPortal } from 'react-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { X, Palmtree, CheckSquare } from 'lucide-react';
@@ -318,6 +318,9 @@ function OverflowPopup({
 }) {
   const d = parseDate(date);
   const label = `${d.getMonth() + 1}월 ${d.getDate()}일 (${WEEKDAYS[d.getDay()]})`;
+  const dialogRef = useRef<HTMLDivElement>(null);
+  const closeButtonRef = useRef<HTMLButtonElement>(null);
+  const previousFocusRef = useRef<HTMLElement | null>(null);
 
   // 캘린더 단축키(C/W/M/?)는 aria-modal 대화상자가 떠 있으면 배경으로 흘러가지 않는다.
   // 이 팝업도 같은 규칙을 따르므로, 닫기는 여기서 Escape로 직접 처리한다.
@@ -332,11 +335,45 @@ function OverflowPopup({
     return () => document.removeEventListener('keydown', handleKeyDown);
   }, [onClose]);
 
+  // 대화상자를 열면 포커스를 안으로 옮기고, 닫을 때 원래 위치로 돌려준다.
+  // 그러지 않으면 키보드 사용자가 팝업 뒤의 캘린더 버튼으로 Tab 이동해 눌러 버린다.
+  useEffect(() => {
+    previousFocusRef.current = document.activeElement as HTMLElement | null;
+    closeButtonRef.current?.focus();
+    return () => {
+      const previousFocus = previousFocusRef.current;
+      if (previousFocus?.isConnected) previousFocus.focus();
+    };
+  }, []);
+
+  const handleDialogKeyDown = (keyboardEvent: ReactKeyboardEvent<HTMLElement>) => {
+    if (keyboardEvent.key !== 'Tab') return;
+    const focusableElements = Array.from(dialogRef.current?.querySelectorAll<HTMLElement>(
+      'button:not([disabled]), a[href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
+    ) ?? []);
+    const first = focusableElements[0];
+    const last = focusableElements.at(-1);
+    if (!first || !last) {
+      keyboardEvent.preventDefault();
+      dialogRef.current?.focus();
+      return;
+    }
+    const activeElement = document.activeElement as HTMLElement | null;
+    const isOutsideDialog = !activeElement || !focusableElements.includes(activeElement);
+    if (keyboardEvent.shiftKey ? activeElement === first || isOutsideDialog : activeElement === last || isOutsideDialog) {
+      keyboardEvent.preventDefault();
+      (keyboardEvent.shiftKey ? last : first).focus();
+    }
+  };
+
   return (
     <motion.div
+      ref={dialogRef}
       role="dialog"
       aria-modal="true"
       aria-label={`${label} 일정 목록`}
+      tabIndex={-1}
+      onKeyDown={handleDialogKeyDown}
       initial={{ opacity: 0, scale: 0.95, y: -4 }}
       animate={{ opacity: 1, scale: 1, y: 0 }}
       exit={{ opacity: 0, scale: 0.95, y: -4 }}
@@ -350,7 +387,13 @@ function OverflowPopup({
     >
       <div className="flex items-center justify-between mb-2">
         <span className="text-xs font-semibold text-text-primary">{label}</span>
-        <button onClick={onClose} className="p-0.5 text-text-secondary hover:text-text-primary cursor-pointer">
+        <button
+          ref={closeButtonRef}
+          type="button"
+          aria-label={`${label} 일정 목록 닫기`}
+          onClick={onClose}
+          className="p-0.5 text-text-secondary hover:text-text-primary cursor-pointer"
+        >
           <X size={12} />
         </button>
       </div>

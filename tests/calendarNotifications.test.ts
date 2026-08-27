@@ -1705,3 +1705,41 @@ test('preview rejects a write authorized by membership that the owner already re
     restoreBroadcastChannel();
   }
 });
+
+test('preview keeps a generated personal calendar identical in every tab of the same user', async () => {
+  const restoreBroadcastChannel = installPreviewCalendarBroadcastChannel({ deferMessages: true });
+  const first = await createPreviewCalendarNotificationHarness();
+  const second = await createPreviewCalendarNotificationHarness();
+  const unsubscribeFirst = first.api.onCalendarChanged(() => {});
+  const unsubscribeSecond = second.api.onCalendarChanged(() => {});
+  try {
+    // 장삐쭈는 seed에 개인 캘린더가 없어 각 창이 스스로 만든다.
+    await previewLogin(first.api, '장삐쭈');
+    await previewLogin(second.api, '장삐쭈');
+    const firstPersonal = (await first.api.calendarList()).find((calendar) => calendar.is_personal);
+    const secondPersonal = (await second.api.calendarList()).find((calendar) => calendar.is_personal);
+    assert.ok(firstPersonal, '개인 캘린더가 없는 사용자도 프리뷰에서 하나를 갖는다');
+    assert.equal(
+      secondPersonal?.id,
+      firstPersonal.id,
+      '같은 사용자의 개인 캘린더는 창마다 같은 ID여야 한다',
+    );
+
+    const created = await first.api.calendarEventCreate(
+      previewNotificationEventInput(firstPersonal.id, '개인 캘린더에 만든 일정'),
+    );
+    restoreBroadcastChannel.flush();
+
+    assert.deepEqual(
+      (await second.api.calendarEventsList()).find((event) => event.id === created.id),
+      created,
+      '개인 캘린더 일정이 다른 창에서 소속 캘린더 없음으로 걸러지지 않는다',
+    );
+  } finally {
+    unsubscribeSecond();
+    unsubscribeFirst();
+    second.restore();
+    first.restore();
+    restoreBroadcastChannel();
+  }
+});

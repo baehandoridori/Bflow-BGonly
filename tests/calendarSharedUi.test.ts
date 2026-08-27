@@ -5885,7 +5885,10 @@ test('CalendarGrid gives the month overflow popup modal semantics and closes it 
   resetHarness();
   const previousDocument = globalThis.document;
   const documentListeners = new Map<string, Set<(event: Event) => void>>();
+  const backgroundTrigger = { isConnected: true, focus: () => { restoredFocus += 1; } };
+  let restoredFocus = 0;
   globalThis.document = {
+    activeElement: backgroundTrigger,
     addEventListener(type: string, listener: (event: Event) => void) {
       const listeners = documentListeners.get(type) ?? new Set();
       listeners.add(listener);
@@ -5919,6 +5922,20 @@ test('CalendarGrid gives the month overflow popup modal semantics and closes it 
     );
     assert.match(String(popup.props['aria-label'] ?? ''), /일정 목록$/);
 
+    assert.equal(popup.props.tabIndex, -1, '팝업 자체가 포커스를 받을 수 있어야 한다');
+    assert.ok(
+      buttonByLabel(tree, `${String(popup.props['aria-label'])} 닫기`),
+      '키보드로 닿을 수 있는 닫기 버튼이 팝업 안에 있다',
+    );
+
+    let tabPrevented = false;
+    (popup.props.onKeyDown as ((event: unknown) => void) | undefined)?.({
+      key: 'Tab',
+      shiftKey: false,
+      preventDefault() { tabPrevented = true; },
+    });
+    assert.equal(tabPrevented, true, 'Tab이 팝업 안에 머물고 뒤쪽 캘린더로 빠져나가지 않는다');
+
     flushCalendarGridEffects();
     const escapeListeners = documentListeners.get('keydown');
     assert.equal(escapeListeners?.size, 1, '팝업이 자기 Escape 닫기를 직접 소유한다');
@@ -5934,6 +5951,8 @@ test('CalendarGrid gives the month overflow popup modal semantics and closes it 
       0,
       'Escape로 팝업이 닫힌다',
     );
+    calendarGridEffectCleanups.splice(0).forEach((cleanup) => cleanup());
+    assert.equal(restoredFocus, 1, '팝업이 닫히면 포커스를 원래 트리거로 돌려준다');
   } finally {
     calendarGridEffectCleanups.splice(0).forEach((cleanup) => cleanup());
     globalThis.document = previousDocument;

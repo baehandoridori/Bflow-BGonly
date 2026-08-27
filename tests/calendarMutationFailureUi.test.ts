@@ -986,6 +986,48 @@ test('side panel keeps the retry draft when its own optimistic save renders befo
   );
 });
 
+test('side panel drops its failed-save recovery once the user cancels the edit', async () => {
+  const hooks = createHookStore();
+  const originalEvent = event();
+  const persistence = deferredThenable();
+  const updateCalls: Array<Partial<TestCalendarEvent>> = [];
+  const callbacks = {
+    onClose: () => {},
+    onUpdate: (_id: string, updates: Partial<TestCalendarEvent>) => {
+      updateCalls.push(updates);
+      return persistence.promise;
+    },
+    onDelete: () => {},
+  };
+
+  await renderSidePanel(hooks, callbacks, originalEvent, true);
+  hooks.state[0] = true;
+  hooks.state[1] = '내가 버릴 제목';
+
+  await invoke(findButtonByText(await renderSidePanel(hooks, callbacks, originalEvent, true), '저장'));
+  persistence.reject(new Error('save failed'));
+
+  const failed = await renderSidePanel(hooks, callbacks, originalEvent, true);
+  assert.match(textContent(failed), /일정 저장에 실패했어요/);
+
+  await invoke(findButtonByText(failed, '취소'));
+  const cancelled = await renderSidePanel(hooks, callbacks, originalEvent, true);
+  assert.equal(findAlerts(cancelled).length, 0, '편집을 취소하면 실패 안내도 함께 사라진다');
+
+  // 동료가 우연히 버려진 초안과 같은 내용으로 바꿔도 로컬 echo로 오인하면 안 된다.
+  const teammateEvent = event({ title: '내가 버릴 제목' });
+  await renderSidePanel(hooks, callbacks, teammateEvent, true);
+  await invoke(findButtonByText(await renderSidePanel(hooks, callbacks, teammateEvent, true), '편집'));
+  const editable = await renderSidePanel(hooks, callbacks, teammateEvent, true);
+  assert.equal(
+    findTitleInput(editable).props.value,
+    '내가 버릴 제목',
+    '취소 뒤 편집은 버려진 초안이 아니라 정본 값에서 시작한다',
+  );
+  await invoke(findButtonByText(editable, '저장'));
+  assert.equal(updateCalls.length, 1, '정본과 같은 값은 다시 저장 요청을 만들지 않는다');
+});
+
 test('side panel rehydrates a same-event teammate update that is unrelated to a local mutation', async () => {
   const hooks = createHookStore();
   const originalEvent = event();

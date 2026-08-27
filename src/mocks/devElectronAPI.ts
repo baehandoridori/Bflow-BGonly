@@ -1289,6 +1289,21 @@ function transitionMockPrivacyReplacementOrigin(origin: MockPrivacyReplacementOr
   }
 }
 
+/**
+ * 프리뷰 창마다 mock module이 따로 있으므로, 같은 사용자의 개인 캘린더는 어느 창에서
+ * 만들어도 같은 ID여야 한다. 창마다 다른 UUID면 다른 창이 받은 일정의 calendar_id가
+ * 자기 목록에 없어 통째로 걸러지고, 늦게 연 창의 하이드레이션으로도 복구되지 않는다.
+ * 개인 캘린더는 비공개라 fanout으로 알릴 대상이 없으므로 ID 자체를 결정적으로 만든다.
+ */
+function mockPersonalCalendarId(userId: string): string {
+  let hash = 0x811c9dc5;
+  for (const character of userId) {
+    hash ^= character.codePointAt(0) ?? 0;
+    hash = Math.imul(hash, 0x01000193) >>> 0;
+  }
+  return `30000000-0000-4000-8000-${hash.toString(16).padStart(8, '0')}0000`;
+}
+
 function ensureMockPersonalCalendar(): MockCalendarRow | null {
   const userId = previewCanonicalUserId;
   if (!userId) return null;
@@ -1300,7 +1315,7 @@ function ensureMockPersonalCalendar(): MockCalendarRow | null {
 
   const now = new Date().toISOString();
   const created: MockCalendarRow = {
-    id: createUuid(),
+    id: mockPersonalCalendarId(userId),
     name: '개인',
     color: '#6C5CE7',
     visibility: 'private',
