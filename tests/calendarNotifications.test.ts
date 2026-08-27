@@ -735,6 +735,64 @@ test('preview shared calendar fanout syncs canonical changes to another mock con
   }
 });
 
+test('preview calendar fanout emits each newly received notification only to its canonical recipient', async () => {
+  const restoreBroadcastChannel = installPreviewCalendarBroadcastChannel({ deferMessages: true });
+  const actor = await createPreviewCalendarNotificationHarness();
+  const recipient = await createPreviewCalendarNotificationHarness();
+  const bystander = await createPreviewCalendarNotificationHarness();
+  const recipientRealtime: unknown[] = [];
+  const bystanderRealtime: unknown[] = [];
+  const unsubscribeRecipientCalendar = recipient.api.onCalendarChanged(() => {});
+  const unsubscribeBystanderCalendar = bystander.api.onCalendarChanged(() => {});
+  const unsubscribeRecipient = recipient.api.onSupabaseRealtime((event) => recipientRealtime.push(event));
+  const unsubscribeBystander = bystander.api.onSupabaseRealtime((event) => bystanderRealtime.push(event));
+  try {
+    await previewLogin(actor.api, '배한솔');
+    await previewLogin(recipient.api, '장삐쭈');
+    await previewLogin(bystander.api, '허혜원');
+    const sharedCalendar = await actor.api.calendarCreate({
+      name: '프리뷰 실시간 수신 공유 일정',
+      color: '#74B9FF',
+      visibility: 'members',
+      members: [{ user_id: '2', can_edit: true }],
+    });
+    restoreBroadcastChannel.flush();
+
+    const created = await actor.api.calendarEventCreate(
+      previewNotificationEventInput(sharedCalendar.id, '다른 창에 바로 알려 줄 일정'),
+    );
+    restoreBroadcastChannel.flush();
+
+    assert.equal(recipientRealtime.length, 1, '수신자 창은 새 notification row를 realtime 경로로 즉시 받는다');
+    assert.equal(bystanderRealtime.length, 0, '수신 대상이 아닌 창에는 다른 사용자의 notification row를 보내지 않는다');
+    const realtime = recipientRealtime[0] as {
+      table?: string;
+      payload?: { notification?: { recipientId?: string; eventTitle?: string } };
+    };
+    assert.equal(realtime.table, 'calendar_notifications');
+    assert.equal(realtime.payload?.notification?.recipientId, '2');
+    assert.equal(realtime.payload?.notification?.eventTitle, created.title);
+    assert.equal(
+      (await recipient.api.calendarNotificationsCatchup()).some((row) => row.event_id === created.id),
+      true,
+      'realtime을 보낸 row는 수신자 수신함 snapshot에도 함께 남는다',
+    );
+
+    await actor.api.calendarBroadcastChange({ table: 'calendar_events', action: 'UPDATE', eventId: created.id });
+    restoreBroadcastChannel.flush();
+    assert.equal(recipientRealtime.length, 1, '이미 병합한 notification row는 후속 snapshot에서 중복 realtime을 만들지 않는다');
+  } finally {
+    unsubscribeBystander();
+    unsubscribeRecipient();
+    unsubscribeBystanderCalendar();
+    unsubscribeRecipientCalendar();
+    bystander.restore();
+    recipient.restore();
+    actor.restore();
+    restoreBroadcastChannel();
+  }
+});
+
 test('preview calendar fanout merges separate event changes that were both made before delivery', async () => {
   const restoreBroadcastChannel = installPreviewCalendarBroadcastChannel({ deferMessages: true });
   const actor = await createPreviewCalendarNotificationHarness();
@@ -986,12 +1044,13 @@ test('preview calendar fanout never revives a locally deleted calendar from an o
   }
 });
 
-test('preview calendar fanout merges concurrent tag changes by tag id instead of replacing the full tag list', async () => {
+test('preview calendar fanout resolves concurrent stale tag saves as one complete list', async () => {
   const restoreBroadcastChannel = installPreviewCalendarBroadcastChannel({ deferMessages: true });
   const actor = await createPreviewCalendarNotificationHarness();
   const receiver = await createPreviewCalendarNotificationHarness();
   const unsubscribeActor = actor.api.onCalendarChanged(() => {});
   const unsubscribeReceiver = receiver.api.onCalendarChanged(() => {});
+  const previousNow = Date.now;
   try {
     await previewLogin(actor.api, '배한솔');
     await previewLogin(receiver.api, '배한솔');
@@ -1001,20 +1060,26 @@ test('preview calendar fanout merges concurrent tag changes by tag id instead of
     const secondTag = actorTags[1];
     assert.ok(firstTag && secondTag);
 
-    await actor.api.calendarTagsSave(actorTags.map((tag) => (
-      tag.id === firstTag.id ? { ...tag, name: '첫 번째 창 태그' } : tag
-    )));
-    await receiver.api.calendarTagsSave(receiverTags.map((tag) => (
-      tag.id === secondTag.id ? { ...tag, name: '두 번째 창 태그' } : tag
-    )));
+    const actorFinalList = actorTags.filter((tag) => tag.id !== secondTag.id);
+    const receiverFinalList = receiverTags.map((tag) => (
+      tag.id === firstTag.id ? { ...tag, name: '두 번째 창이 저장한 전체 목록' } : tag
+    ));
+    Date.now = () => 9_000_000_000_000;
+    await actor.api.calendarTagsSave(actorFinalList);
+    await receiver.api.calendarTagsSave(receiverFinalList);
+    Date.now = previousNow;
     restoreBroadcastChannel.flush();
 
-    for (const api of [actor.api, receiver.api]) {
-      const namesById = new Map((await api.calendarTagsList()).map((tag) => [tag.id, tag.name]));
-      assert.equal(namesById.get(firstTag.id), '첫 번째 창 태그');
-      assert.equal(namesById.get(secondTag.id), '두 번째 창 태그');
-    }
+    const actorResult = await actor.api.calendarTagsList();
+    const receiverResult = await receiver.api.calendarTagsList();
+    assert.deepEqual(receiverResult, actorResult, '동시 저장 뒤 두 창은 같은 전체 태그 목록으로 수렴한다');
+    assert.ok(
+      JSON.stringify(actorResult) === JSON.stringify(actorFinalList)
+        || JSON.stringify(actorResult) === JSON.stringify(receiverFinalList),
+      '직렬화된 저장 중 하나의 complete list만 남고, 삭제와 수정이 ID별로 합성되지는 않는다',
+    );
   } finally {
+    Date.now = previousNow;
     unsubscribeReceiver();
     unsubscribeActor();
     receiver.restore();
