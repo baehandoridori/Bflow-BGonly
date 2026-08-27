@@ -234,6 +234,7 @@ export function ScheduleView() {
     event: CalendarEvent; position: { x: number; y: number };
   } | null>(null);
   const draggedEventIdentityRef = useRef<CalendarEventIdentity | null>(null);
+  const pendingEditorDeleteCountsRef = useRef(new Map<string, number>());
 
   const resetCreatePrefill = useCallback(() => {
     setCreateDate(undefined);
@@ -450,7 +451,11 @@ export function ScheduleView() {
     setEvents(canonicalEvents);
     setPanelEvent((previous) => {
       if (!previous || previous.source === 'vacation') return previous;
-      return canonicalEvents.find((event) => hasSameCalendarEventIdentity(event, previous)) ?? null;
+      const canonical = canonicalEvents.find((event) => hasSameCalendarEventIdentity(event, previous));
+      if (canonical) return canonical;
+      return pendingEditorDeleteCountsRef.current.has(calendarEventIdentityKey(previous))
+        ? previous
+        : null;
     });
     setQuickEdit((previous) => {
       if (!previous) return previous;
@@ -458,7 +463,10 @@ export function ScheduleView() {
       const canonical = canonicalEvents.find((event) => (
         hasSameCalendarEventIdentity(event, previous.event)
       ));
-      return canonical ? { ...previous, event: canonical } : null;
+      if (canonical) return { ...previous, event: canonical };
+      return pendingEditorDeleteCountsRef.current.has(calendarEventIdentityKey(previous.event))
+        ? previous
+        : null;
     });
   }, [refreshRealtimeHighlights]);
 
@@ -758,12 +766,27 @@ export function ScheduleView() {
   const handleDeleteEvent = useCallback(async (deletingEvent: CalendarEvent) => {
     const mutationIdentity = snapshotCalendarEventIdentity(deletingEvent);
     const localGuard = guardLocalIdentity(mutationIdentity, deletingEvent, 'delete');
+    const mutationIdentityKey = calendarEventIdentityKey(mutationIdentity);
+    const preservesOpenEditor = Boolean(
+      (panelEvent && hasSameCalendarEventIdentity(panelEvent, mutationIdentity))
+      || (quickEdit && hasSameCalendarEventIdentity(quickEdit.event, mutationIdentity)),
+    );
+    if (preservesOpenEditor) {
+      const current = pendingEditorDeleteCountsRef.current.get(mutationIdentityKey) ?? 0;
+      pendingEditorDeleteCountsRef.current.set(mutationIdentityKey, current + 1);
+    }
     try {
       await deleteEvent(deletingEvent.id, mutationIdentity);
       settleLocalMutationGuard(localGuard, 'succeeded');
     } catch (error) {
       settleLocalMutationGuard(localGuard, 'failed');
       throw error;
+    } finally {
+      if (preservesOpenEditor) {
+        const current = pendingEditorDeleteCountsRef.current.get(mutationIdentityKey) ?? 0;
+        if (current <= 1) pendingEditorDeleteCountsRef.current.delete(mutationIdentityKey);
+        else pendingEditorDeleteCountsRef.current.set(mutationIdentityKey, current - 1);
+      }
     }
     setEvents((prev) => prev.filter((event) => (
       !hasSameCalendarEventIdentity(event, mutationIdentity)
@@ -908,9 +931,16 @@ export function ScheduleView() {
 
   // 캘린더 키보드 네비게이션 (모든 뷰)
   useEffect(() => {
-    if (showCreate || quickEdit || panelEvent || calendarSettings !== undefined || tagManagerAnchor) return;
+    if (
+      showCreate
+      || quickEdit
+      || panelEvent
+      || calendarSettings !== undefined
+      || tagManagerAnchor
+    ) return;
 
     const handler = (e: KeyboardEvent) => {
+      if (document.querySelector('[role="dialog"][aria-modal="true"]')) return;
       // 편집 중이거나 OS/앱 조합키를 누른 상태면 캘린더 단축키를 가로채지 않는다.
       const tag = (e.target as HTMLElement)?.tagName;
       const isHelpShortcut = e.key === '?' || (e.key === '/' && e.shiftKey);

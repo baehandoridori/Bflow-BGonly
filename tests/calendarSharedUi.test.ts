@@ -339,6 +339,7 @@ let scheduleEffectDeps: Array<readonly unknown[] | undefined> = [];
 let scheduleEffectCursor = 0;
 const scheduleWindowListeners = new Map<string, Set<(event: Event) => void>>();
 const scheduleDocumentListeners = new Map<string, Set<(event: Event) => void>>();
+let scheduleGlobalModalOpen = false;
 const scheduleDocumentMock = {
   addEventListener(type: string, listener: (event: Event) => void) {
     const listeners = scheduleDocumentListeners.get(type) ?? new Set();
@@ -347,6 +348,11 @@ const scheduleDocumentMock = {
   },
   removeEventListener(type: string, listener: (event: Event) => void) {
     scheduleDocumentListeners.get(type)?.delete(listener);
+  },
+  querySelector(selector: string) {
+    return scheduleGlobalModalOpen && selector === '[role="dialog"][aria-modal="true"]'
+      ? { role: 'dialog' }
+      : null;
   },
 };
 
@@ -680,6 +686,7 @@ function resetHarness(): void {
   scheduleDayScrollProps = [];
   scheduleCreateModalProps = [];
   scheduleReducedMotion = false;
+  scheduleGlobalModalOpen = false;
   scheduleLocalStorage.clear();
   scheduleCanonicalEvents = [];
   scheduleUpdateCalls = [];
@@ -4179,6 +4186,59 @@ test('ScheduleView keeps a local delete rollback from pulsing as a teammate add'
   }
 });
 
+test('ScheduleView keeps an open delete editor mounted until a failed optimistic delete rolls back', async () => {
+  resetHarness();
+  const before = calendarListEvent({
+    id: 'failed-delete-editor-stays-open',
+    title: '삭제 실패 안내를 보여줄 일정',
+    source: 'bflow',
+    sourceCalendarId: 'bflow:mine',
+    calendarId: 'mine',
+  });
+  const persistenceError = new Error('삭제 저장 실패');
+  let signalOptimisticRemoval!: () => void;
+  const optimisticRemoval = new Promise<void>((resolve) => { signalOptimisticRemoval = resolve; });
+  let releaseRollback!: () => void;
+  const rollbackRelease = new Promise<void>((resolve) => { releaseRollback = resolve; });
+  scheduleCanonicalEvents = [before];
+  await renderScheduleView();
+  await flushScheduleMountEffects();
+  await renderScheduleView();
+  scheduleGridProps.at(-1)?.onEventClick(before);
+  await renderScheduleView();
+
+  scheduleDeleteHandler = async () => {
+    scheduleCanonicalEvents = [];
+    await dispatchScheduleWindowEvent('bflow:calendar-changed');
+    signalOptimisticRemoval();
+    await rollbackRelease;
+    scheduleCanonicalEvents = [before];
+    await dispatchScheduleWindowEvent('bflow:calendar-changed');
+    throw persistenceError;
+  };
+  const panel = schedulePanelProps.at(-1);
+  assert.ok(panel, 'the selected row exposes the detail delete callback');
+  const deletion = panel.onDelete(before.id);
+  await optimisticRemoval;
+  schedulePanelProps = [];
+  await renderScheduleView();
+  assert.deepEqual(
+    schedulePanelProps.at(-1)?.event,
+    before,
+    'the side panel stays mounted while the optimistic deletion is pending',
+  );
+
+  releaseRollback();
+  await assert.rejects(deletion, (error) => error === persistenceError);
+  schedulePanelProps = [];
+  await renderScheduleView();
+  assert.deepEqual(
+    schedulePanelProps.at(-1)?.event,
+    before,
+    'the restored row remains in the editor so its rejection handler can show the error',
+  );
+});
+
 test('ScheduleView keeps overlapping local update and failed-delete guards separate for one event', async () => {
   resetHarness();
   scheduleLocalStorage.set('bflow_calendar_view_v1', JSON.stringify({ viewMode: 'week', weekSubMode: 'timegrid' }));
@@ -5533,6 +5593,23 @@ test('ScheduleView suppresses calendar shortcuts while the tag manager popover i
 
   assert.equal(scheduleCreateModalProps.length, 0, 'tag management blocks a create modal behind the popover');
   assert.throws(() => nodeByAriaLabel(tree, '캘린더 단축키'), /must be rendered/, 'tag management blocks shortcut help behind the popover');
+});
+
+test('ScheduleView suppresses calendar shortcuts while a global modal is open', async () => {
+  resetHarness();
+  await renderScheduleView();
+  await flushScheduleMountEffects();
+  scheduleGlobalModalOpen = true;
+
+  dispatchScheduleKeydown('w', { tagName: 'BUTTON' });
+  dispatchScheduleKeydown('m', { tagName: 'BUTTON' });
+  dispatchScheduleKeydown('c', { tagName: 'BUTTON' });
+  dispatchScheduleKeydown('?', { tagName: 'BUTTON' }, { shiftKey: true });
+  const tree = await renderScheduleView();
+
+  assert.equal(scheduleWeekScrollProps.length, 0, 'a global dialog blocks view changes behind it');
+  assert.equal(scheduleCreateModalProps.length, 0, 'a global dialog blocks create mode behind it');
+  assert.throws(() => nodeByAriaLabel(tree, '캘린더 단축키'), /must be rendered/, 'a global dialog blocks shortcut help behind it');
 });
 
 test('ScheduleView carries weekly and daily navigation across a calendar-year boundary', async (t) => {
