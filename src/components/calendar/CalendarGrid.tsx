@@ -220,7 +220,7 @@ function EventBarChip({
       data-realtime-highlight={isRealtimeHighlighted ? 'true' : undefined}
       className={cn(
         'absolute text-left z-10 calendar-event-bar',
-        isGhost ? 'pointer-events-none opacity-50' : 'transition-all duration-150',
+        isGhost ? 'pointer-events-none opacity-50' : 'transition-[transform,filter] duration-150',
         !isGhost && isHovered && 'brightness-110 scale-[1.02] z-20',
         isDragging ? 'opacity-40' : '',
         isRealtimeHighlighted && (reduceMotion ? 'calendar-realtime-highlight-static' : 'calendar-realtime-highlight'),
@@ -282,7 +282,10 @@ function EventBarChip({
 
       {/* 글래스모피즘 툴팁 — Portal로 body에 직접 렌더 (부모 transform/overflow 무관) */}
       {showTooltip && !isDragging && !isGhost && createPortal(
-        <div
+        <motion.div
+          initial={reduceMotion ? false : { opacity: 0, scale: 0.96 }}
+          animate={{ opacity: 1, scale: 1 }}
+          transition={reduceMotion ? { duration: 0 } : { duration: 0.2, ease: [0.16, 1, 0.3, 1] }}
           className="pointer-events-none rounded-2xl px-4 py-3 max-w-[260px]"
           style={{
             ...tooltipGlassStyle,
@@ -296,7 +299,7 @@ function EventBarChip({
           <div className="text-[13px] font-semibold text-text-primary truncate">{ev.title}</div>
           <div className="text-[12px] text-text-secondary/70 mt-1">{dateLabel}</div>
           {ev.memo && <div className="text-[11px] text-text-secondary/50 mt-1 line-clamp-2">{ev.memo}</div>}
-        </div>,
+        </motion.div>,
         document.body,
       )}
     </div>

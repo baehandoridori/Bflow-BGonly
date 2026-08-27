@@ -5899,6 +5899,66 @@ test('CalendarGrid renders tag-aware chip text while keeping each event color as
   assert.equal(tintStyle.borderLeft, '3px solid #74B9FF', 'the chip border still comes from event.color');
 });
 
+test('CalendarGrid fades in the chip tooltip and limits chip hover to transform and filter', async () => {
+  resetHarness();
+  const clock = installScheduleFakeClock();
+  const previousDocument = globalThis.document;
+  globalThis.document = { body: {}, addEventListener() {}, removeEventListener() {} } as unknown as Document;
+
+  try {
+    const events = [calendarListEvent({ id: 'tooltip-chip', title: '툴팁 대상' })];
+    let tree = await renderCalendarGrid(events);
+    const chip = findElements(tree, (node) => node.props['data-event-id'] === 'tooltip-chip')[0];
+    assert.ok(chip, '월 그리드 칩이 있다');
+
+    const chipClass = String(chip.props.className ?? '');
+    assert.match(
+      chipClass,
+      /transition-\[transform,filter\]/,
+      'hover 트랜지션은 transform과 filter로만 제한한다',
+    );
+    assert.doesNotMatch(chipClass, /transition-all/, 'transition-all은 레이아웃 속성까지 애니메이션한다');
+
+    // 툴팁은 400ms 지연 뒤 나타난다.
+    (chip.props.onMouseEnter as ((event: unknown) => void) | undefined)?.({ clientX: 120, clientY: 200 });
+    clock.advance(400);
+    tree = await renderCalendarGrid(events, {}, true);
+
+    const tooltip = findElements(tree, (node) => (
+      typeof node.props.className === 'string' && node.props.className.includes('max-w-[260px]')
+    ))[0];
+    assert.ok(tooltip, '400ms 뒤 툴팁이 나타난다');
+    assert.deepEqual(
+      tooltip.props.initial,
+      { opacity: 0, scale: 0.96 },
+      '툴팁은 사라진 상태에서 등장한다',
+    );
+    assert.deepEqual(
+      tooltip.props.transition,
+      { duration: 0.2, ease: [0.16, 1, 0.3, 1] },
+      '툴팁 등장은 200ms 공용 이징을 쓴다',
+    );
+
+    // 동작 줄이기에서는 등장 애니메이션을 쓰지 않는다.
+    resetHarness();
+    let reducedTree = await renderCalendarGrid(events, { reduceMotion: true });
+    const reducedChip = findElements(reducedTree, (node) => node.props['data-event-id'] === 'tooltip-chip')[0];
+    (reducedChip.props.onMouseEnter as ((event: unknown) => void) | undefined)?.({ clientX: 120, clientY: 200 });
+    clock.advance(400);
+    reducedTree = await renderCalendarGrid(events, { reduceMotion: true }, true);
+    const reducedTooltip = findElements(reducedTree, (node) => (
+      typeof node.props.className === 'string' && node.props.className.includes('max-w-[260px]')
+    ))[0];
+    assert.ok(reducedTooltip);
+    assert.equal(reducedTooltip.props.initial, false, '동작 줄이기에서는 등장 애니메이션을 건너뛴다');
+    assert.deepEqual(reducedTooltip.props.transition, { duration: 0 });
+  } finally {
+    calendarGridEffectCleanups.splice(0).forEach((cleanup) => cleanup());
+    globalThis.document = previousDocument;
+    clock.restore();
+  }
+});
+
 test('CalendarGrid gives the month overflow popup modal semantics and closes it with Escape', async () => {
   resetHarness();
   const previousDocument = globalThis.document;
