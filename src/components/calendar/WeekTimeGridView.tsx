@@ -294,7 +294,7 @@ function hasBlocksInBand(blocksByDate: Map<string, TimedEvent[]>, startMin: numb
   return [...blocksByDate.values()].some((blocks) => bandContains(blocks, startMin, endMin));
 }
 
-/** 이동 preview는 새 위치를 그리되, mouseup 전에는 원래 밴드가 접혀 pointer 좌표가 바뀌지 않게 한다. */
+/** 이동·종료 리사이즈 preview는 새 범위를 그리되, mouseup 전에는 원래 밴드가 접혀 pointer 좌표가 바뀌지 않게 한다. */
 function isTimedEventInBand(event: CalendarEvent | null, startMin: number, endMin: number): boolean {
   return event !== null
     && event.allDay === false
@@ -387,7 +387,7 @@ export function WeekTimeGridView({
   }, [dragPreview, events]);
   const { allDayEvents, timedEventsByDate } = useMemo(() => splitWeekTimeGridEvents(displayedEvents), [displayedEvents]);
   const dragGhostEvent = useMemo(() => (
-    dragPreview?.mode === 'move' && dragPreview.identityKey
+    dragPreview && dragPreview.mode !== 'create' && dragPreview.identityKey
       ? events.find((event) => calendarEventIdentityKey(event) === dragPreview.identityKey) ?? null
       : null
   ), [dragPreview, events]);

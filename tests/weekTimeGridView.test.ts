@@ -767,6 +767,63 @@ test('WeekTimeGridView: 이동 preview 중에는 원래 자동 펼침 시간대�
   assert.match(afterDragMarkup, /aria-label="새벽 시간대 펼치기"/);
 });
 
+test('WeekTimeGridView: 날짜를 넘긴 종료 리사이즈 preview 중에는 원래 자동 펼침 시간대를 유지한다', async () => {
+  const module = await loadWeekTimeGridView();
+  const scenarios = [
+    {
+      label: '새벽 시간대',
+      id: 'dawn-resize-source',
+      startTime: '08:00',
+      endTime: '09:00',
+    },
+    {
+      label: '저녁 시간대',
+      id: 'evening-resize-source',
+      startTime: '20:00',
+      endTime: '21:00',
+    },
+  ];
+
+  for (const scenario of scenarios) {
+    const props = {
+      weekDays: Array.from({ length: 7 }, (_, index) => new Date(2000, 0, 2 + index, 12)),
+      events: [event({
+        id: scenario.id,
+        title: `${scenario.label} 원본 일정`,
+        startDate: '2000-01-04',
+        endDate: '2000-01-04',
+        startTime: scenario.startTime,
+        endTime: scenario.endTime,
+      })],
+      today: '2000-01-01',
+      onEventClick() {},
+      onSlotClick() {},
+      tagNameById: {},
+      calendarNameById: {},
+      activeWeekIndex: 0,
+      weekCount: 4,
+      onWeekChange() {},
+      timeGridDragPreview: {
+        mode: 'resize-end' as const,
+        identityKey: `\u0000\u0000${scenario.id}`,
+        startDate: '2000-01-04',
+        endDate: '2000-01-05',
+        startTime: scenario.startTime,
+        endTime: scenario.endTime,
+      },
+    };
+
+    timeGridDndStub.isDragActive = true;
+    const duringDragMarkup = renderToStaticMarkup(createElement(module.default, props));
+    assert.match(duringDragMarkup, new RegExp(`<section[^>]*aria-label="${scenario.label}"`));
+    assert.doesNotMatch(duringDragMarkup, new RegExp(`aria-label="${scenario.label} 펼치기"`));
+
+    timeGridDndStub.isDragActive = false;
+    const afterDragMarkup = renderToStaticMarkup(createElement(module.default, props));
+    assert.match(afterDragMarkup, new RegExp(`aria-label="${scenario.label} 펼치기"`));
+  }
+});
+
 test('WeekTimeGridView: 자정으로 넘기는 마지막 생성 ghost는 15분의 양수 높이를 유지한다', async () => {
   const module = await loadWeekTimeGridView();
   const markup = renderToStaticMarkup(createElement(module.default, {
