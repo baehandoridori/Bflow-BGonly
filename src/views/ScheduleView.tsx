@@ -550,6 +550,23 @@ export function ScheduleView() {
 
   // 통합 이벤트 (B flow + 연결된 휴가)와 캘린더∩태그 필터를 한 경로로 유지한다.
   const allEvents = useMemo(() => [...events, ...vacationEvents], [events, vacationEvents]);
+  // 태그·캘린더 필터가 바뀌면 결과가 뚝 갈리므로 짧게 페이드로 이어 준다.
+  // 컨테이너를 다시 마운트하면 스크롤·드래그가 끊기므로 투명도만 잠깐 낮춘다.
+  const filterSignature = useMemo(
+    () => JSON.stringify([visibleCalendarIds, enabledTagIds]),
+    [enabledTagIds, visibleCalendarIds],
+  );
+  const [filterFadeOpacity, setFilterFadeOpacity] = useState(1);
+  const lastFilterSignatureRef = useRef(filterSignature);
+  useEffect(() => {
+    if (lastFilterSignatureRef.current === filterSignature) return;
+    lastFilterSignatureRef.current = filterSignature;
+    if (reduce) return;
+    setFilterFadeOpacity(0.55);
+    const restore = setTimeout(() => setFilterFadeOpacity(1), 120);
+    return () => clearTimeout(restore);
+  }, [filterSignature, reduce]);
+
   const filteredEvents = useMemo(
     () => filterCalendarEvents(allEvents, {
       visibleCalendarIds, enabledTagIds, optimisticDeletedTagIds: deletedTagIds,
@@ -1494,9 +1511,11 @@ export function ScheduleView() {
           <motion.div
             key={`${viewMode}:${weekSubMode}`}
             initial={reduce ? false : { opacity: 0, y: 8 }}
-            animate={{ opacity: 1, y: 0 }}
+            animate={{ opacity: filterFadeOpacity, y: 0 }}
             exit={reduce ? undefined : { opacity: 0, y: -8 }}
-            transition={reduce ? { duration: 0 } : { duration: 0.2, ease: [0.16, 1, 0.3, 1] }}
+            transition={reduce
+              ? { duration: 0 }
+              : { duration: 0.2, ease: [0.16, 1, 0.3, 1], opacity: { duration: 0.12 } }}
             className="flex-1 flex flex-col overflow-hidden"
           >
             {viewMode === 'today' ? (

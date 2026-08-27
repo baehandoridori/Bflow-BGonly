@@ -979,6 +979,8 @@ async function loadRail(): Promise<CalendarRailComponent> {
   return bundledRail;
 }
 
+let tagBarReducedMotion = false;
+
 async function loadTagBar(): Promise<TagBarComponent> {
   bundledTagBar ??= build({
     entryPoints: ['src/components/calendar/TagBar.tsx'],
@@ -987,7 +989,10 @@ async function loadTagBar(): Promise<TagBarComponent> {
     platform: 'node',
     target: 'node22',
     write: false,
-    external: ['react', 'react/jsx-runtime', 'lucide-react', '@/stores/useCalendarStore'],
+    external: [
+      'react', 'react/jsx-runtime', 'framer-motion', 'lucide-react',
+      '@/hooks/useMotionPref', '@/stores/useCalendarStore',
+    ],
   }).then((result) => {
     const module = { exports: {} as Record<string, unknown> };
     const nodeRequire = createRequire(import.meta.url);
@@ -996,6 +1001,8 @@ async function loadTagBar(): Promise<TagBarComponent> {
     evaluate((id: string) => {
       if (id === 'react') return { ...react, useMemo: (factory: () => unknown) => factory() };
       if (id === 'react/jsx-runtime') return nodeRequire('react/jsx-runtime');
+      if (id === 'framer-motion') return { motion: { button: 'button' } };
+      if (id === '@/hooks/useMotionPref') return { useMotionPref: () => ({ reduce: tagBarReducedMotion }) };
       if (id === 'lucide-react') return { Settings: () => null };
       if (id === '@/stores/useCalendarStore') {
         return { useCalendarStore: (selector: (state: typeof calendarState) => unknown) => selector(calendarState) };
@@ -5897,6 +5904,95 @@ test('CalendarGrid renders tag-aware chip text while keeping each event color as
   const tintStyle = tintedChipBody.props.style as { background?: string; borderLeft?: string };
   assert.match(tintStyle.background ?? '', /#74B9FF/, 'the chip tint still comes from event.color');
   assert.equal(tintStyle.borderLeft, '3px solid #74B9FF', 'the chip border still comes from event.color');
+});
+
+test('tag chips pop on toggle and the filtered result fades instead of jumping', async () => {
+  resetHarness();
+  tagBarReducedMotion = false;
+  const noopAnchor = () => {};
+  try {
+    calendarState.enabledTagIds = { 'tag-review': false };
+    const tree = await renderTagBar(false, noopAnchor);
+    const enabledChip = findButtons(tree).find((button) => button.props['aria-label'] === '회의 태그');
+    const disabledChip = findButtons(tree).find((button) => button.props['aria-label'] === '검수 태그');
+    assert.ok(enabledChip && disabledChip, '켜진 칩과 꺼진 칩이 모두 렌더된다');
+    assert.equal(enabledChip.props['aria-pressed'], true);
+    assert.equal(disabledChip.props['aria-pressed'], false);
+
+    assert.deepEqual(
+      (enabledChip.props as { animate?: { scale?: number[] } }).animate,
+      { scale: [1, 1.12, 1] },
+      '켤 때는 살짝 커졌다 돌아온다',
+    );
+    assert.deepEqual(
+      (disabledChip.props as { animate?: { scale?: number[] } }).animate,
+      { scale: [1, 0.92, 1] },
+      '끌 때는 살짝 작아졌다 돌아온다',
+    );
+    assert.deepEqual(
+      (enabledChip.props as { transition?: unknown }).transition,
+      { duration: 0.35, ease: [0.16, 1, 0.3, 1] },
+    );
+
+    tagBarReducedMotion = true;
+    const reducedTree = await renderTagBar(false, noopAnchor);
+    const reducedChip = findButtons(reducedTree).find((button) => button.props['aria-label'] === '회의 태그');
+    assert.equal(
+      (reducedChip?.props as { animate?: unknown }).animate,
+      undefined,
+      '동작 줄이기에서는 칩이 튀지 않는다',
+    );
+    assert.deepEqual((reducedChip?.props as { transition?: unknown }).transition, { duration: 0 });
+  } finally {
+    tagBarReducedMotion = false;
+  }
+
+  // 필터가 바뀌면 결과 컨테이너는 다시 마운트되지 않고 짧게 페이드로 이어진다.
+  resetHarness();
+  const clock = installScheduleFakeClock();
+  const calendarBody = (tree: ReactNode) => findElements(tree, (node) => (
+    typeof node.props.className === 'string'
+    && node.props.className === 'flex-1 flex flex-col overflow-hidden'
+  ))[0];
+  try {
+    let tree = await renderScheduleView();
+    await flushScheduleMountEffects();
+    tree = await renderScheduleView();
+
+    const body = calendarBody(tree);
+    assert.ok(body, '캘린더 본체 컨테이너가 있다');
+    assert.deepEqual((body.props as { animate?: unknown }).animate, { opacity: 1, y: 0 });
+    assert.deepEqual(
+      (body.props as { transition?: unknown }).transition,
+      { duration: 0.2, ease: [0.16, 1, 0.3, 1], opacity: { duration: 0.12 } },
+      '보기 전환은 200ms를 유지하고 필터 페이드만 120ms를 쓴다',
+    );
+
+    calendarState.toggleTag('tag-meeting');
+    tree = await renderScheduleView();
+    await flushScheduleMountEffects();
+    tree = await renderScheduleView();
+    assert.equal(
+      (calendarBody(tree)?.props as { animate?: { opacity?: number } }).animate?.opacity,
+      0.55,
+      '필터가 바뀌면 결과가 잠깐 옅어진다',
+    );
+    assert.equal(
+      calendarBody(tree)?.props.key,
+      body.props.key,
+      '필터 변화는 컨테이너를 다시 마운트하지 않는다',
+    );
+
+    clock.advance(120);
+    tree = await renderScheduleView();
+    assert.equal(
+      (calendarBody(tree)?.props as { animate?: { opacity?: number } }).animate?.opacity,
+      1,
+      '120ms 뒤에는 원래 농도로 돌아온다',
+    );
+  } finally {
+    clock.restore();
+  }
 });
 
 test('the event create backdrop dims the background like the calendar settings modal', async () => {
