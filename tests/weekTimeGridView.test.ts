@@ -121,6 +121,7 @@ let timeGridDndStub: {
   beginCreate(): void;
   beginEventDrag(): void;
   isSettling(): boolean;
+  isPersisting(event: { id: string }): boolean;
   shouldSuppressClick(): boolean;
 };
 
@@ -132,6 +133,7 @@ function resetTimeGridDndStub(): void {
     beginCreate() {},
     beginEventDrag() {},
     isSettling: () => false,
+    isPersisting: () => false,
     shouldSuppressClick: () => false,
   };
 }

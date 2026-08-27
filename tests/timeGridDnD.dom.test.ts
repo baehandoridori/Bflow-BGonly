@@ -15,6 +15,7 @@ type DndModule = {
     beginCreate(event: unknown, target: unknown): void;
     beginEventDrag(event: unknown, source: unknown, mode: 'move' | 'resize-end', target: unknown): void;
     isSettling(event: unknown): boolean;
+    isPersisting(event: unknown): boolean;
     shouldSuppressClick(): boolean;
   };
 };
@@ -780,6 +781,48 @@ test('useTimeGridDnD DOM: 창 포커스를 잃으면 드래그와 자동 스크�
     const scrollTopAfterCancel = scroller.scrollTop;
     harness.tickIntervals();
     assert.equal(scroller.scrollTop, scrollTopAfterCancel, '취소 뒤에는 16ms 자동 스크롤도 멈춘다');
+  } finally {
+    harness.restore();
+  }
+});
+
+test('useTimeGridDnD DOM: 저장이 확정되기 전에는 같은 일정을 다시 끌 수 없다', async () => {
+  const changes: unknown[][] = [];
+  let settleFirstSave: (() => void) | undefined;
+  const harness = installDomHookHarness(await loadDnD(), {
+    scrollContainerRef: { current: { scrollTop: 0, getBoundingClientRect: () => ({ top: 100, bottom: 500 }) } },
+    onEventChange: (...args) => {
+      changes.push(args);
+      return new Promise<void>((resolve) => { settleFirstSave = resolve; });
+    },
+  });
+  try {
+    let dnd = harness.render();
+    assert.equal(dnd.isPersisting(source), false);
+
+    dnd.beginEventDrag(event(200, 156), source, 'move', { date: '2026-08-24', bandStartMin: 540, column: harness.column });
+    dnd = harness.render();
+    harness.fire('mousemove', { clientX: 210, clientY: 300 });
+    dnd = harness.render();
+    harness.fire('mouseup', { clientX: 210, clientY: 300 });
+    dnd = harness.render();
+    assert.equal(changes.length, 1);
+    assert.equal(dnd.isPersisting(source), true, '저장이 확정될 때까지 대기 상태로 표시한다');
+
+    // 저장이 끝나기 전에 같은 블록을 다시 끌어 본다.
+    dnd.beginEventDrag(event(200, 200), source, 'move', { date: '2026-08-24', bandStartMin: 540, column: harness.column });
+    dnd = harness.render();
+    assert.equal(dnd.isDragging, false, '저장 대기 중에는 새 드래그를 시작하지 않는다');
+    harness.fire('mousemove', { clientX: 220, clientY: 400 });
+    harness.fire('mouseup', { clientX: 220, clientY: 400 });
+    dnd = harness.render();
+    assert.equal(changes.length, 1, '겹친 두 번째 저장이 옛 위치로 되돌리는 일을 막는다');
+
+    settleFirstSave?.();
+    await Promise.resolve();
+    await Promise.resolve();
+    dnd = harness.render();
+    assert.equal(dnd.isPersisting(source), false, '저장이 끝나면 다시 끌 수 있다');
   } finally {
     harness.restore();
   }

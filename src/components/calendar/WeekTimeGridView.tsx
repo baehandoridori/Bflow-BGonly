@@ -830,7 +830,9 @@ function TimeBand({
                   isSettling,
                 });
                 const isReadOnly = block.event.isReadOnly === true;
-                const eventDragProps = isReadOnly ? {} : {
+                // 앞선 드롭의 저장이 확정되기 전에는 같은 블록을 다시 끌지 못하게 한다.
+                const isPersisting = timeGridDnD.isPersisting(block.event);
+                const eventDragProps = isReadOnly || isPersisting ? {} : {
                   onMouseDown: (event: React.MouseEvent<HTMLElement>) => {
                     const target = getPointerTarget(event.currentTarget, date);
                     if (!target) return;

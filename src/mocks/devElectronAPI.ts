@@ -301,6 +301,17 @@ function mockCalendarFieldChangeKey(calendarId: string, field: string): string {
   return mockCalendarChangeKey('calendar-field', `${calendarId}|${field}`);
 }
 
+/**
+ * 일정도 같은 이유로 행 전체가 아니라 patch에 담긴 키만 채택한다. 운영 RPC는 행을 잠그고
+ * 보내온 키만 적용하므로, 두 창이 서로 다른 필드를 고쳤다면 둘 다 살아남아야 한다.
+ * id·created_by·created_at은 불변이라 병합 대상에서 제외한다.
+ */
+const IMMUTABLE_MOCK_CALENDAR_EVENT_FIELDS = new Set(['id', 'created_by', 'created_at']);
+
+function mockCalendarEventFieldChangeKey(eventId: string, field: string): string {
+  return mockCalendarChangeKey('event-field', `${eventId}|${field}`);
+}
+
 function compareMockCalendarChangeStamp(
   left: MockCalendarChangeStamp,
   right: MockCalendarChangeStamp,
@@ -542,7 +553,21 @@ function applyMockCalendarSharedSnapshot(
     }
     if (tombstonedMockCalendarEventIds.has(eventId)) return;
     const event = snapshot.events.find((candidate) => candidate.id === eventId);
-    if (event && rememberMockCalendarChangeStamp(mockCalendarChangeKey('event', eventId), stamp)) {
+    if (!event) return;
+    const changedFields = readMockCalendarChangeIds(detail, 'changedFields')
+      .filter((field) => !IMMUTABLE_MOCK_CALENDAR_EVENT_FIELDS.has(field));
+    const localEvent = mockCalendarEvents.find((candidate) => candidate.id === eventId);
+    if (action === 'UPDATE' && changedFields.length > 0 && localEvent) {
+      for (const field of changedFields) {
+        if (!rememberMockCalendarChangeStamp(mockCalendarEventFieldChangeKey(eventId, field), stamp)) continue;
+        (localEvent as unknown as Record<string, unknown>)[field] =
+          (event as unknown as Record<string, unknown>)[field];
+        if (event.updated_at > localEvent.updated_at) localEvent.updated_at = event.updated_at;
+      }
+      rememberMockCalendarChangeStamp(mockCalendarChangeKey('event', eventId), stamp);
+      return;
+    }
+    if (rememberMockCalendarChangeStamp(mockCalendarChangeKey('event', eventId), stamp)) {
       upsertMockCalendarEvent(event);
     }
     return;
@@ -749,7 +774,7 @@ function applyMockCalendarSyncState(envelope: MockCalendarSyncEnvelope): boolean
       continue;
     }
 
-    // calendar-field는 이후 병합 순서만 정한다. 행 내용은 calendar 항목이 채운다.
+    // calendar-field·event-field는 이후 병합 순서만 정한다. 행 내용은 calendar·event 항목이 채운다.
   }
 
   if (mergeMockCalendarNotifications(snapshot.notifications).length > 0) changed = true;
@@ -761,8 +786,8 @@ function receiveMockCalendarMessage(event: MessageEvent<unknown>): void {
   if (isMockCalendarSyncEnvelope(envelope)) {
     if (envelope.sourceId === mockCalendarChangeSourceId) return;
     if (envelope.role === 'request') {
-      // 아직 아무 변경도 없는 창은 seed와 동일하므로 굳이 응답하지 않는다.
-      if (mockCalendarChangeStamps.size === 0) return;
+      // 알림 읽음처럼 stamp를 남기지 않는 변경도 늦게 연 창이 받아야 하므로 항상 응답한다.
+      // 바뀐 게 없으면 수신 쪽 병합이 no-op이라 안전하다.
       mockCalendarChangeChannel?.postMessage(buildMockCalendarSyncState());
       return;
     }
@@ -811,6 +836,10 @@ function recordMockCalendarChange(
     if (action === 'DELETE') tombstoneMockCalendarEvent(eventId, stamp);
     else if (!tombstonedMockCalendarEventIds.has(eventId)) {
       rememberMockCalendarChangeStamp(mockCalendarChangeKey('event', eventId), stamp);
+      for (const field of readMockCalendarChangeIds(detail, 'changedFields')) {
+        if (IMMUTABLE_MOCK_CALENDAR_EVENT_FIELDS.has(field)) continue;
+        rememberMockCalendarChangeStamp(mockCalendarEventFieldChangeKey(eventId, field), stamp);
+      }
     }
     return;
   }
@@ -2628,6 +2657,8 @@ export function installDevElectronAPI(): void {
         created_by: event.created_by,
         created_at: event.created_at,
       };
+      const changedFields = Object.keys(normalizedUpdates)
+        .filter((field) => !IMMUTABLE_MOCK_CALENDAR_EVENT_FIELDS.has(field));
       Object.assign(event, normalizedUpdates, immutableFields, { updated_at: new Date().toISOString() });
       if (previous.calendar_id !== event.calendar_id) {
         persistMockCalendarEventNotifications({
@@ -2653,7 +2684,12 @@ export function installDevElectronAPI(): void {
           previous,
         });
       }
-      publishMockCalendarChange({ table: 'calendar_events', action: 'UPDATE', eventId: event.id });
+      publishMockCalendarChange({
+        table: 'calendar_events',
+        action: 'UPDATE',
+        eventId: event.id,
+        changedFields,
+      });
       return { ...event };
     },
     calendarEventDelete: async (id) => {

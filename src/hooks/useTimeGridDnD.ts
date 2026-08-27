@@ -222,6 +222,10 @@ export function useTimeGridDnD({ scrollContainerRef, onCreate, onEventChange }: 
   const [drag, setDrag] = useState<ActiveTimeGridDrag | null>(null);
   const [preview, setPreview] = useState<TimeGridDragPreview | null>(null);
   const [settledIdentityKey, setSettledIdentityKey] = useState<string | null>(null);
+  // 저장이 끝나기 전에 같은 블록을 또 놓으면 두 요청이 겹쳐, 먼저 보낸 옛 위치가
+  // 나중에 커밋되며 방금 옮긴 자리를 되돌릴 수 있다. 확정될 때까지 재드래그를 막는다.
+  const [pendingIdentityKeys, setPendingIdentityKeys] = useState<ReadonlySet<string>>(() => new Set());
+  const pendingIdentityKeysRef = useRef<Set<string>>(new Set());
   const dragRef = useRef<ActiveTimeGridDrag | null>(null);
   const previewRef = useRef<TimeGridDragPreview | null>(null);
   const latestPointerRef = useRef<{ x: number; y: number } | null>(null);
@@ -232,6 +236,14 @@ export function useTimeGridDnD({ scrollContainerRef, onCreate, onEventChange }: 
   const settleTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   onCreateRef.current = onCreate;
   onEventChangeRef.current = onEventChange;
+
+  const markIdentityPending = useCallback((key: string, pending: boolean) => {
+    const next = new Set(pendingIdentityKeysRef.current);
+    if (pending) next.add(key);
+    else next.delete(key);
+    pendingIdentityKeysRef.current = next;
+    setPendingIdentityKeys(next);
+  }, []);
 
   const cancelPreviewFrame = useCallback(() => {
     if (previewFrameRef.current === null) return;
@@ -289,6 +301,7 @@ export function useTimeGridDnD({ scrollContainerRef, onCreate, onEventChange }: 
     target: TimeGridPointerTarget,
   ) => {
     if (event.button !== 0 || source.isReadOnly) return;
+    if (pendingIdentityKeysRef.current.has(calendarEventIdentityKey(source))) return;
     cancelPreviewFrame();
     const rect = event.currentTarget.getBoundingClientRect?.();
     const resolvedMode = mode === 'resize-end' && rect
@@ -320,6 +333,10 @@ export function useTimeGridDnD({ scrollContainerRef, onCreate, onEventChange }: 
   const isSettling = useCallback((event: CalendarEvent): boolean => (
     settledIdentityKey === calendarEventIdentityKey(event)
   ), [settledIdentityKey]);
+
+  const isPersisting = useCallback((event: CalendarEvent): boolean => (
+    pendingIdentityKeys.has(calendarEventIdentityKey(event))
+  ), [pendingIdentityKeys]);
 
   const shouldSuppressClick = useCallback(() => shouldSuppressTimeGridClick(finishedAtRef.current, Date.now()), []);
 
@@ -385,17 +402,21 @@ export function useTimeGridDnD({ scrollContainerRef, onCreate, onEventChange }: 
         if (completion.type === 'create') {
           onCreateRef.current?.(completion.date, completion.startTime, completion.endTime);
         } else if (onEventChangeRef.current) {
+          const key = calendarEventIdentityKey(completion.identity);
+          markIdentityPending(key, true);
           try {
             const changeResult = onEventChangeRef.current(completion.eventId, completion.identity, completion.patch);
             void Promise.resolve(changeResult).then(() => {
-              const key = calendarEventIdentityKey(completion.identity);
+              markIdentityPending(key, false);
               setSettledIdentityKey(key);
               if (settleTimer.current) clearTimeout(settleTimer.current);
               settleTimer.current = setTimeout(() => setSettledIdentityKey(null), 450);
             }).catch((error) => {
+              markIdentityPending(key, false);
               console.warn('[Calendar] 시간표 일정 변경 저장 실패:', error);
             });
           } catch (error) {
+            markIdentityPending(key, false);
             console.warn('[Calendar] 시간표 일정 변경 저장 실패:', error);
           }
         }
@@ -448,7 +469,7 @@ export function useTimeGridDnD({ scrollContainerRef, onCreate, onEventChange }: 
       document.body.style.cursor = '';
       document.getElementById('time-grid-dnd-pointer-block')?.remove();
     };
-  }, [cancelPreviewFrame, clearDrag, flushPreviewFrame, isDragPresent, schedulePreview, scrollContainerRef]);
+  }, [cancelPreviewFrame, clearDrag, flushPreviewFrame, isDragPresent, markIdentityPending, schedulePreview, scrollContainerRef]);
 
   useEffect(() => () => {
     if (settleTimer.current) clearTimeout(settleTimer.current);
@@ -461,6 +482,7 @@ export function useTimeGridDnD({ scrollContainerRef, onCreate, onEventChange }: 
     beginCreate,
     beginEventDrag,
     isSettling,
+    isPersisting,
     shouldSuppressClick,
   };
 }

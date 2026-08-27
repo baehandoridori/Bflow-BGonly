@@ -1780,3 +1780,77 @@ test('preview merges concurrent calendar edits that touch different fields', asy
     restoreBroadcastChannel();
   }
 });
+
+test('preview merges concurrent event edits that touch different fields', async () => {
+  const restoreBroadcastChannel = installPreviewCalendarBroadcastChannel({ deferMessages: true });
+  const titler = await createPreviewCalendarNotificationHarness();
+  const mover = await createPreviewCalendarNotificationHarness();
+  const unsubscribeTitler = titler.api.onCalendarChanged(() => {});
+  const unsubscribeMover = mover.api.onCalendarChanged(() => {});
+  try {
+    await previewLogin(titler.api, '배한솔');
+    await previewLogin(mover.api, '배한솔');
+    const shared = await titler.api.calendarCreate({
+      name: '일정 동시 수정 검증 캘린더',
+      color: '#74B9FF',
+      visibility: 'team',
+      members: [],
+    });
+    const created = await titler.api.calendarEventCreate(
+      previewNotificationEventInput(shared.id, '동시에 고칠 일정'),
+    );
+    restoreBroadcastChannel.flush();
+
+    // 서로의 변경을 받기 전에 각자 다른 필드를 저장한다.
+    await titler.api.calendarEventUpdate(created.id, { title: '제목만 바꾼 일정' });
+    await mover.api.calendarEventUpdate(created.id, { start_date: '2026-09-26', end_date: '2026-09-26' });
+    restoreBroadcastChannel.flush();
+    restoreBroadcastChannel.flush();
+
+    for (const [label, harness] of [['제목 쪽', titler], ['날짜 쪽', mover]] as const) {
+      const merged = (await harness.api.calendarEventsList()).find((event) => event.id === created.id);
+      assert.equal(merged?.title, '제목만 바꾼 일정', `${label} 창에서 제목 변경이 남아야 한다`);
+      assert.equal(merged?.start_date, '2026-09-26', `${label} 창에서 날짜 변경이 남아야 한다`);
+    }
+  } finally {
+    unsubscribeMover();
+    unsubscribeTitler();
+    mover.restore();
+    titler.restore();
+    restoreBroadcastChannel();
+  }
+});
+
+test('preview hydrates a late tab when the only earlier change was reading a notification', async () => {
+  const restoreBroadcastChannel = installPreviewCalendarBroadcastChannel({ deferMessages: true });
+  const reader = await createPreviewCalendarNotificationHarness();
+  const unsubscribeReader = reader.api.onCalendarChanged(() => {});
+  let late: Awaited<ReturnType<typeof createPreviewCalendarNotificationHarness>> | undefined;
+  let unsubscribeLate: (() => void) | undefined;
+  try {
+    await previewLogin(reader.api, '배한솔');
+    const unread = await reader.api.calendarNotificationsCatchup();
+    assert.ok(unread.length > 0, 'seed에는 읽지 않은 캘린더 알림이 있다');
+    await reader.api.calendarNotificationsMarkRead(unread.map((row) => row.id));
+    restoreBroadcastChannel.flush();
+    assert.equal((await reader.api.calendarNotificationsCatchup()).length, 0);
+
+    late = await createPreviewCalendarNotificationHarness();
+    unsubscribeLate = late.api.onCalendarChanged(() => {});
+    await previewLogin(late.api, '배한솔');
+    restoreBroadcastChannel.flush();
+    restoreBroadcastChannel.flush();
+
+    assert.equal(
+      (await late.api.calendarNotificationsCatchup()).length,
+      0,
+      '알림 읽음만 있었던 경우에도 늦게 연 창이 읽음 상태를 받는다',
+    );
+  } finally {
+    unsubscribeLate?.();
+    unsubscribeReader();
+    late?.restore();
+    reader.restore();
+    restoreBroadcastChannel();
+  }
+});
