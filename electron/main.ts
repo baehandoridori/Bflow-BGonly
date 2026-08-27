@@ -3,6 +3,8 @@ import type { MenuItemConstructorOptions } from 'electron';
 import * as gcal from './googleCalendar';
 import { pathToFileURL } from 'url';
 import path from 'path';
+import { get as httpGet } from 'node:http';
+import { get as httpsGet } from 'node:https';
 import fs from 'fs';
 import { randomUUID } from 'node:crypto';
 import {
@@ -20,6 +22,13 @@ import { uploadImage as storageUploadImage, deleteImage as storageDeleteImage, u
 // v1.20.0: 사용자 폰트 IPC + bflow-font:// custom protocol
 import { registerFontProtocol, registerFontIpcHandlers } from './fontIpc';
 import { registerCalendarIpc, type CalendarNotificationDrain } from './calendarIpc';
+import {
+  createIcsSubscriptionStore,
+  createIcsTextFetcher,
+  type IcsHttpRequest,
+  type IcsHttpResponse,
+} from './icsSubscriptions';
+import { registerIcsSubscriptionIpc } from './icsSubscriptionIpc';
 import {
   broadcastCalendarNotificationToSessionWindows,
   broadcastCommittedCalendarDeleteToWindows,
@@ -2531,6 +2540,49 @@ calendarNotificationDrain = registerCalendarIpc({
     broadcastCommittedCalendarDeleteToWindows(mainWindow, widgetWindows.values(), payload);
   },
 });
+
+// ─── 외부 캘린더(ICS) 구독 ───
+// 저장 경로는 portable 빌드에서 exe 기준 경로가 임시 폴더라 userData로 고정한다.
+const ICS_SUBSCRIPTIONS_FILE = 'ics-subscriptions.json';
+
+const icsSubscriptionStore = createIcsSubscriptionStore({
+  readSubscriptionsFile: async () => {
+    try {
+      return await fs.promises.readFile(path.join(getDataPath(), ICS_SUBSCRIPTIONS_FILE), 'utf8');
+    } catch {
+      return null;
+    }
+  },
+  writeSubscriptionsFile: async (contents) => {
+    const dir = getDataPath();
+    ensureDir(dir);
+    await fs.promises.writeFile(path.join(dir, ICS_SUBSCRIPTIONS_FILE), contents, 'utf8');
+  },
+  fetchText: createIcsTextFetcher({
+    get: (url, onResponse) => {
+      const transport = url.startsWith('http://') ? httpGet : httpsGet;
+      const request = transport(url, {
+        headers: { accept: 'text/calendar, text/plain;q=0.9, */*;q=0.8' },
+        timeout: 20_000,
+      }, (response) => onResponse(response as unknown as IcsHttpResponse));
+      return request as unknown as IcsHttpRequest;
+    },
+  }),
+  createId: () => randomUUID(),
+  now: () => new Date(),
+  publishChanged: (payload) => broadcastToAllWindows('ics:changed', payload),
+});
+
+const icsSubscriptionIpc = registerIcsSubscriptionIpc({
+  store: icsSubscriptionStore,
+  handle: (channel, handler) => {
+    ipcMain.handle(channel, wrapIpc(async (_event: unknown, ...args: unknown[]) => handler(...args)));
+  },
+  setInterval: (handler, intervalMs) => setInterval(handler, intervalMs),
+  clearInterval: (handle) => clearInterval(handle as ReturnType<typeof setInterval>),
+  logWarning: (message, error) => console.warn(message, error),
+});
+void icsSubscriptionIpc.primeOnStartup();
 
 // ─── Revisions ───
 ipcMain.handle('supabase:read-revisions', wrapIpc(async () => {
@@ -5160,6 +5212,7 @@ app.whenReady().then(async () => {
 // ─── 종료 시 미완료 작업 대기 (Phase 0-5) ─────────────────────
 
 app.on('before-quit', (e) => {
+  icsSubscriptionIpc.dispose();
   if (isQuitting) return;
   isQuitting = true;
   personalTodoService.beginQuitting();

@@ -742,6 +742,21 @@ contextBridge.exposeInMainWorld('electronAPI', {
     return () => ipcRenderer.removeListener('calendar:changed', listener);
   },
 
+  // ─── 외부 캘린더(ICS) 구독 ─────────────────────
+  icsList: () => ipcRenderer.invoke('ics:list'),
+  icsAdd: (input: { name: string; url: string; color: string }) =>
+    ipcRenderer.invoke('ics:add', input),
+  icsUpdate: (id: string, patch: { name?: string; color?: string; enabled?: boolean }) =>
+    ipcRenderer.invoke('ics:update', id, patch),
+  icsRemove: (id: string) => ipcRenderer.invoke('ics:remove', id),
+  icsRefresh: (id: string | null) => ipcRenderer.invoke('ics:refresh', id),
+  icsEvents: () => ipcRenderer.invoke('ics:events'),
+  onIcsChanged: (callback: (payload: unknown) => void) => {
+    const listener = (_event: Electron.IpcRendererEvent, payload: unknown) => callback(payload);
+    ipcRenderer.on('ics:changed', listener);
+    return () => ipcRenderer.removeListener('ics:changed', listener);
+  },
+
   // ─── 휴가 pending 상태 + 브로드캐스트 ─────────────
   vacationPendingLoad: () =>
     ipcRenderer.invoke('vacation:pending:load'),

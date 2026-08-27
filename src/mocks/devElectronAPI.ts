@@ -23,6 +23,13 @@ import { createArcadeLocalStorageGateway } from '@/features/playground/arcade/lo
 import type { ArcadePreviewGateway } from '@/features/playground/arcade/previewGateway';
 import { useArcadeStore } from '@/features/playground/arcade/useArcadeStore';
 import { createDevCalendarSeed } from './devCalendarSeed';
+import type {
+  IcsEventDto,
+  IcsSubscription,
+  IcsSubscriptionAddInput,
+  IcsSubscriptionEvents,
+  IcsSubscriptionUpdateInput,
+} from '@/shared/icsApiContract';
 import { createDevCalendarNotificationRealtimeListeners } from './devCalendarNotificationRealtime';
 import {
   buildCalendarChangeDetail,
@@ -224,6 +231,60 @@ function buildMockCalendarNotifications(): MockCalendarNotificationRow[] {
     },
   ];
 }
+
+/* ─── 외부 캘린더(ICS) 구독 mock ───────────────────────────── */
+
+const mockIcsSubscriptions: IcsSubscription[] = [{
+  id: 'mock-ics-subscription',
+  name: '외부 팀 캘린더',
+  url: 'https://example.com/team.ics',
+  color: '#00B894',
+  enabled: true,
+  lastFetchedAt: new Date(Date.now() - 15 * 60 * 1000).toISOString(),
+  lastError: null,
+}];
+
+function buildMockIcsEvents(): IcsEventDto[] {
+  const now = new Date();
+  const day = (offset: number): string => {
+    const target = new Date(now.getFullYear(), now.getMonth(), now.getDate() + offset, 12);
+    return `${target.getFullYear()}-${String(target.getMonth() + 1).padStart(2, '0')}-${String(target.getDate()).padStart(2, '0')}`;
+  };
+  return [
+    // 시각 1건
+    {
+      uid: 'mock-ics-timed',
+      title: '외부 정기 회의',
+      startDate: day(1),
+      endDate: day(1),
+      allDay: false,
+      startTime: '15:00',
+      endTime: '16:00',
+    },
+    // 종일 1건
+    {
+      uid: 'mock-ics-allday',
+      title: '외부 워크숍',
+      startDate: day(3),
+      endDate: day(4),
+      allDay: true,
+      startTime: null,
+      endTime: null,
+    },
+    // 반복 전개분 1건
+    {
+      uid: `mock-ics-weekly:${day(8)}`,
+      title: '외부 주간 점검',
+      startDate: day(8),
+      endDate: day(8),
+      allDay: false,
+      startTime: '10:00',
+      endTime: '10:30',
+    },
+  ];
+}
+
+const mockIcsEvents = buildMockIcsEvents();
 
 const mockCalendarNotifications = buildMockCalendarNotifications();
 let nextMockCalendarNotificationSequence = 0;
@@ -3138,6 +3199,57 @@ export function installDevElectronAPI(): void {
       mockCalendarChangeListeners.add(callback);
       return () => mockCalendarChangeListeners.delete(callback);
     },
+
+    // ─── 외부 캘린더(ICS) 구독 mock ───
+    icsList: async () => mockIcsSubscriptions.map((row) => ({ ...row })),
+    icsAdd: async (input: IcsSubscriptionAddInput) => {
+      const trimmed = typeof input?.url === 'string' ? input.url.trim() : '';
+      const normalized = /^webcal:\/\//i.test(trimmed)
+        ? `https://${trimmed.slice('webcal://'.length)}`
+        : trimmed;
+      if (!/^https?:\/\/.+/i.test(normalized)) {
+        throw new Error('캘린더 주소는 http 또는 https로 시작해야 합니다');
+      }
+      const created: IcsSubscription = {
+        id: createUuid(),
+        name: input.name?.trim() || normalized,
+        url: normalized,
+        color: input.color || '#8B8DA3',
+        enabled: true,
+        lastFetchedAt: new Date().toISOString(),
+        lastError: null,
+      };
+      mockIcsSubscriptions.push(created);
+      return { ...created };
+    },
+    icsUpdate: async (id: string, patch: IcsSubscriptionUpdateInput) => {
+      const target = mockIcsSubscriptions.find((row) => row.id === id);
+      if (!target) return null;
+      if (typeof patch?.name === 'string' && patch.name.trim() !== '') target.name = patch.name.trim();
+      if (typeof patch?.color === 'string' && patch.color.trim() !== '') target.color = patch.color;
+      if (typeof patch?.enabled === 'boolean') target.enabled = patch.enabled;
+      return { ...target };
+    },
+    icsRemove: async (id: string) => {
+      const index = mockIcsSubscriptions.findIndex((row) => row.id === id);
+      if (index >= 0) mockIcsSubscriptions.splice(index, 1);
+    },
+    icsRefresh: async (id: string | null) => {
+      for (const row of mockIcsSubscriptions) {
+        if (!row.enabled || (id !== null && row.id !== id)) continue;
+        row.lastFetchedAt = new Date().toISOString();
+        row.lastError = null;
+      }
+    },
+    icsEvents: async (): Promise<IcsSubscriptionEvents[]> => mockIcsSubscriptions
+      .filter((row) => row.enabled)
+      .map((row) => ({
+        subId: row.id,
+        // seed 구독만 예시 일정을 갖는다. 프리뷰에서 추가한 주소는 받아 올 곳이 없다.
+        events: row.id === 'mock-ics-subscription' ? mockIcsEvents.map((event) => ({ ...event })) : [],
+        truncated: false,
+      })),
+    onIcsChanged: noop,
 
     // ─── 휴가 pending 상태 + 브로드캐스트 (mock은 no-op) ───
     vacationPendingLoad: async () => [],

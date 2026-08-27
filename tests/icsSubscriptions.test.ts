@@ -8,6 +8,10 @@ import {
   expandIcsToEvents,
   normalizeIcsUrl,
 } from '../electron/icsSubscriptions.ts';
+import {
+  ICS_REFRESH_INTERVAL_MS,
+  registerIcsSubscriptionIpc,
+} from '../electron/icsSubscriptionIpc.ts';
 
 const calendar = (...lines: string[]): string => [
   'BEGIN:VCALENDAR',
@@ -482,4 +486,130 @@ test('createIcsTextFetcher: 상한을 넘는 본문은 받다가 끊는다', asy
 
   await assert.rejects(() => harness.fetchText('https://example.com/huge.ics'), /너무 큽니다/);
   assert.ok(harness.destroyedCount() > 0, '상한을 넘으면 연결을 끊는다');
+});
+
+
+/* ── IPC 등록 ─────────────────────────────────────────────────────── */
+
+function createIpcHarness() {
+  const handlers = new Map<string, (...args: unknown[]) => unknown>();
+  const warnings: string[] = [];
+  const calls: string[] = [];
+  let intervalHandler: (() => void) | null = null;
+  let cleared = 0;
+  let refreshShouldFail = false;
+
+  const store = {
+    async list() { calls.push('list'); return []; },
+    async add(input: { name: string; url: string; color: string }) {
+      calls.push(`add:${input.name}|${input.url}|${input.color}`);
+      return {
+        id: 'sub-1',
+        name: input.name,
+        url: input.url,
+        color: input.color,
+        enabled: true,
+        lastFetchedAt: null,
+        lastError: null,
+      };
+    },
+    async update(id: string, patch: Record<string, unknown>) {
+      calls.push(`update:${id}:${JSON.stringify(patch)}`);
+      return null;
+    },
+    async remove(id: string) { calls.push(`remove:${id}`); },
+    async refresh(id: string | null) {
+      calls.push(`refresh:${String(id)}`);
+      if (refreshShouldFail) throw new Error('주기 갱신이 실패했습니다');
+    },
+    async events() { calls.push('events'); return []; },
+  };
+
+  const registration = registerIcsSubscriptionIpc({
+    store,
+    handle(channel, handler) { handlers.set(channel, handler); },
+    setInterval(handler, intervalMs) {
+      calls.push(`setInterval:${intervalMs}`);
+      intervalHandler = handler;
+      return 'timer';
+    },
+    clearInterval(handle) {
+      calls.push(`clearInterval:${String(handle)}`);
+      cleared += 1;
+    },
+    logWarning(message) { warnings.push(message); },
+  });
+
+  return {
+    registration,
+    handlers,
+    calls,
+    warnings,
+    clearedCount: () => cleared,
+    tick: () => intervalHandler?.(),
+    failRefresh(value: boolean) { refreshShouldFail = value; },
+  };
+}
+
+test('ICS IPC: 여섯 채널을 등록하고 입력을 정리해서 넘긴다', async () => {
+  const harness = createIpcHarness();
+
+  assert.deepEqual(
+    [...harness.handlers.keys()].sort(),
+    ['ics:add', 'ics:events', 'ics:list', 'ics:refresh', 'ics:remove', 'ics:update'],
+  );
+
+  await harness.handlers.get('ics:add')?.({ name: '팀 일정', url: 'https://example.com/a.ics', color: '#74B9FF' });
+  assert.ok(harness.calls.includes('add:팀 일정|https://example.com/a.ics|#74B9FF'));
+
+  // 모양이 어긋난 입력도 빈 값으로 정리해 넘긴다(메인이 최종 판정한다).
+  await harness.handlers.get('ics:add')?.({ name: 7, url: null });
+  assert.ok(harness.calls.includes('add:||'));
+
+  await harness.handlers.get('ics:update')?.('sub-1', { name: '새 이름', enabled: false, color: 3, 침입: true });
+  assert.ok(
+    harness.calls.some((call) => call.startsWith('update:sub-1:')
+      && call.includes('"name":"새 이름"')
+      && call.includes('"enabled":false')
+      && !call.includes('침입')
+      && !call.includes('"color"')),
+    '허용한 키만 통과시킨다',
+  );
+
+  await harness.handlers.get('ics:update')?.('', {});
+  await harness.handlers.get('ics:remove')?.('');
+  assert.equal(
+    harness.calls.filter((call) => call.startsWith('update:') || call.startsWith('remove:')).length,
+    1,
+    '빈 id는 store까지 내려보내지 않는다',
+  );
+
+  await harness.handlers.get('ics:refresh')?.(undefined);
+  assert.ok(harness.calls.includes('refresh:null'), 'id가 없으면 전체 갱신으로 본다');
+  await harness.handlers.get('ics:refresh')?.('sub-1');
+  assert.ok(harness.calls.includes('refresh:sub-1'));
+});
+
+test('ICS IPC: 시작 시 한 번 채우고 30분마다 갱신하며 실패해도 멈추지 않는다', async () => {
+  const harness = createIpcHarness();
+
+  assert.ok(
+    harness.calls.includes(`setInterval:${ICS_REFRESH_INTERVAL_MS}`),
+    '주기 갱신 타이머를 건다',
+  );
+
+  await harness.registration.primeOnStartup();
+  assert.ok(harness.calls.includes('refresh:null'), '앱 시작 직후 한 번 채운다');
+
+  harness.failRefresh(true);
+  harness.tick();
+  await Promise.resolve();
+  await Promise.resolve();
+  assert.deepEqual(harness.warnings, ['[ICS] 주기 갱신 실패'], '실패는 남기되 던지지 않는다');
+
+  await harness.registration.primeOnStartup();
+  assert.equal(harness.warnings.length, 2, '시작 갱신 실패도 같은 방식으로 남긴다');
+
+  harness.registration.dispose();
+  assert.equal(harness.clearedCount(), 1, '정리하면 주기 갱신 타이머를 해제한다');
 });

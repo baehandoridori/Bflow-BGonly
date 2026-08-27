@@ -9,6 +9,12 @@ import type {
   CalendarApiInputContract,
   CalendarPrivacyReplacementCreateResult,
 } from '../shared/calendarApiContract';
+import type {
+  IcsSubscription,
+  IcsSubscriptionAddInput,
+  IcsSubscriptionEvents,
+  IcsSubscriptionUpdateInput,
+} from '../shared/icsApiContract';
 
 // ─── 부서 (Department) ──────────────────────
 
@@ -1664,6 +1670,15 @@ export interface ElectronAPI extends CalendarApiInputContract {
   onThemeChanged: (cb: (payload: unknown) => void) => () => void;
   calendarBroadcastChange: (payload?: unknown) => Promise<{ ok: boolean }>;
   onCalendarChanged: (cb: (payload: unknown) => void) => () => void;
+
+  // ─── 외부 캘린더(ICS) 구독 ─────────────────────
+  icsList: () => Promise<IcsSubscription[]>;
+  icsAdd: (input: IcsSubscriptionAddInput) => Promise<IcsSubscription>;
+  icsUpdate: (id: string, patch: IcsSubscriptionUpdateInput) => Promise<IcsSubscription | null>;
+  icsRemove: (id: string) => Promise<void>;
+  icsRefresh: (id: string | null) => Promise<void>;
+  icsEvents: () => Promise<IcsSubscriptionEvents[]>;
+  onIcsChanged: (cb: (payload: unknown) => void) => () => void;
 
   // ─── 휴가 pending 상태 + 브로드캐스트 ─────────────
   vacationPendingLoad: () => Promise<unknown>;
