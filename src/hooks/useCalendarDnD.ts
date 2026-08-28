@@ -160,6 +160,9 @@ export function useCalendarDnD(
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key !== 'Escape') return;
       e.preventDefault();
+      // 드래그 취소로 소비되는 Escape다. 그대로 두면 window에 걸린 상세 패널
+      // 리스너까지 닿아 편집 중인 초안이 함께 버려진다(드래그 중에만 걸린 리스너).
+      e.stopPropagation?.();
       clearDrag();
     };
 

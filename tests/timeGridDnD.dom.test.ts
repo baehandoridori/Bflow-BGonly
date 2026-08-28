@@ -827,3 +827,54 @@ test('useTimeGridDnD DOM: 저장이 확정되기 전에는 같은 일정을 다�
     harness.restore();
   }
 });
+
+test('useTimeGridDnD DOM: 드래그 취소 Escape는 창의 다른 리스너로 새지 않는다', async () => {
+  const harness = installDomHookHarness(await loadDnD(), {
+    scrollContainerRef: { current: { scrollTop: 0, getBoundingClientRect: () => ({ top: 100, bottom: 500 }) } },
+    onEventChange: () => {},
+  });
+  try {
+    let dnd = harness.render();
+    dnd.beginEventDrag(event(200, 156), source, 'move', { date: '2026-08-24', bandStartMin: 540, column: harness.column });
+    dnd = harness.render();
+    harness.fire('mousemove', { clientX: 210, clientY: 300 });
+    dnd = harness.render();
+    assert.equal(dnd.isDragActive, true);
+
+    let stopped = 0;
+    harness.fire('keydown', { key: 'Escape', preventDefault() {}, stopPropagation() { stopped += 1; } });
+    dnd = harness.render();
+
+    assert.equal(dnd.isDragActive, false, '드래그는 취소된다');
+    assert.equal(stopped, 1, '같은 Escape가 상세 패널까지 닿아 편집 초안을 지우면 안 된다');
+  } finally {
+    harness.restore();
+  }
+});
+
+test('useTimeGridDnD DOM: 좌클릭 드래그 중 우클릭을 떼도 드롭으로 확정하지 않는다', async () => {
+  const changes: Array<[string, unknown, unknown]> = [];
+  const harness = installDomHookHarness(await loadDnD(), {
+    scrollContainerRef: { current: { scrollTop: 0, getBoundingClientRect: () => ({ top: 100, bottom: 500 }) } },
+    onEventChange: (id, identity, patch) => changes.push([id, identity, patch]),
+  });
+  try {
+    let dnd = harness.render();
+    dnd.beginEventDrag(event(200, 156), source, 'move', { date: '2026-08-24', bandStartMin: 540, column: harness.column });
+    dnd = harness.render();
+    harness.fire('mousemove', { clientX: 210, clientY: 300 });
+    dnd = harness.render();
+    assert.equal(dnd.isDragActive, true);
+
+    harness.fire('mouseup', { button: 2, clientX: 210, clientY: 300 });
+    dnd = harness.render();
+    assert.equal(changes.length, 0, '우클릭 mouseup은 드롭이 아니다');
+    assert.equal(dnd.isDragActive, true, '좌버튼이 아직 눌려 있으므로 드래그는 이어진다');
+
+    harness.fire('mouseup', { button: 0, clientX: 210, clientY: 300 });
+    dnd = harness.render();
+    assert.equal(changes.length, 1, '좌버튼을 떼면 평소처럼 확정한다');
+  } finally {
+    harness.restore();
+  }
+});

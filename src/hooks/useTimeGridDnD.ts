@@ -400,6 +400,10 @@ export function useTimeGridDnD({ scrollContainerRef, onCreate, onEventChange }: 
     };
 
     const finish = (event?: MouseEvent) => {
+      // 좌클릭 드래그 도중 우클릭을 눌렀다 떼면 그 mouseup(button=2)이 들어온다.
+      // 그것을 드롭으로 확정하면 '취소' 의도가 저장 + 뒤이은 퀵에디트로 끝난다.
+      // 좌버튼은 아직 눌려 있으므로 드래그는 그대로 이어 간다.
+      if (event && typeof event.button === 'number' && event.button !== 0) return;
       const state = dragRef.current;
       const pointer = Number.isFinite(event?.clientX) && Number.isFinite(event?.clientY)
         ? { x: event!.clientX, y: event!.clientY }
@@ -447,6 +451,10 @@ export function useTimeGridDnD({ scrollContainerRef, onCreate, onEventChange }: 
     const cancel = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
         event.preventDefault?.();
+        // 이 Escape는 드래그 취소로 소비된다. 막지 않으면 window에 걸린 상세 패널
+        // 리스너까지 도달해 패널이 닫히거나 편집 중인 초안이 함께 버려진다.
+        // 리스너는 드래그가 있을 때만 붙으므로 영향 범위는 드래그 중으로 한정된다.
+        event.stopPropagation?.();
         cancelDrag();
       }
     };
