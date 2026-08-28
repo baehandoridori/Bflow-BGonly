@@ -117,7 +117,7 @@ function formatLastFetched(value: string | null): string {
   if (!value) return '아직 받아 온 적 없음';
   const parsed = new Date(value);
   if (Number.isNaN(parsed.getTime())) return '아직 받아 온 적 없음';
-  return `마지막 확인 ${parsed.getMonth() + 1}/${parsed.getDate()} ${String(parsed.getHours()).padStart(2, '0')}:${String(parsed.getMinutes()).padStart(2, '0')}`;
+  return `마지막으로 받아온 ${parsed.getMonth() + 1}/${parsed.getDate()} ${String(parsed.getHours()).padStart(2, '0')}:${String(parsed.getMinutes()).padStart(2, '0')}`;
 }
 
 interface IcsSubscriptionRowProps {
@@ -369,8 +369,13 @@ export function CalendarRail({ isAuthenticated, onOpenSettings, onCreateCalendar
               onRefresh={() => {
                 setOpenMenuId(null);
                 void (async () => {
-                  // 일정 재조회는 메인이 보내는 ics:changed 한 경로로 수렴한다.
-                  await window.electronAPI?.icsRefresh?.(subscription.id);
+                  try {
+                    // 일정 재조회는 메인이 보내는 ics:changed 한 경로로 수렴한다.
+                    await window.electronAPI?.icsRefresh?.(subscription.id);
+                  } catch (error) {
+                    // 갱신 실패 사유는 구독 행의 경고 아이콘으로 드러난다. 목록만 다시 읽어 둔다.
+                    console.warn('[Calendar] 구독 새로고침 실패:', error);
+                  }
                   await reloadIcsSubscriptions();
                 })();
               }}
@@ -387,7 +392,12 @@ export function CalendarRail({ isAuthenticated, onOpenSettings, onCreateCalendar
                     tone: 'danger',
                   });
                   if (!confirmed) return;
-                  await window.electronAPI?.icsRemove?.(subscription.id);
+                  try {
+                    await window.electronAPI?.icsRemove?.(subscription.id);
+                  } catch (error) {
+                    console.warn('[Calendar] 구독 해제 실패:', error);
+                  }
+                  // 성공·실패 어느 쪽이든 목록을 다시 읽어 화면과 실제를 맞춘다.
                   await reloadIcsSubscriptions();
                 })();
               }}

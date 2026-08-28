@@ -9,6 +9,7 @@ import type {
   BflowEventMeta,
   GCalSettings,
 } from '@/types/calendar';
+import { ICS_CALENDAR_ID_PREFIX } from '@/shared/icsApiContract';
 import * as gcalService from './googleCalendarService';
 import { useAuthStore } from '@/stores/useAuthStore';
 import { getPersonalCalendar, useCalendarStore } from '@/stores/useCalendarStore';
@@ -1059,8 +1060,6 @@ export async function getEvents(): Promise<CalendarEvent[]> {
 
 /* ─── 외부 캘린더(ICS) 구독 ───────────────────────────────────── */
 
-/** 구독 일정의 sourceCalendarId·가시성 키 접두사. */
-export const ICS_CAL_PREFIX = 'ics:';
 
 /** bflowEvents/googleEvents와 섞이지 않는 별도 캐시. */
 let icsEvents: CalendarEvent[] = [];
@@ -1072,7 +1071,7 @@ function toIcsCalendarEvent(
     allDay: boolean; startTime: string | null; endTime: string | null;
   },
 ): CalendarEvent {
-  const sourceCalendarId = `${ICS_CAL_PREFIX}${subscription.id}`;
+  const sourceCalendarId = `${ICS_CALENDAR_ID_PREFIX}${subscription.id}`;
   return {
     // uid는 구독 안에서만 유일하고 반복 전개분끼리도 겹칠 수 있어 날짜까지 붙인다.
     id: `${sourceCalendarId}:${dto.uid}:${dto.startDate}`,
@@ -1605,7 +1604,7 @@ function confirmGoogleEventUpdate(
 function inferExistingEventSource(event: CalendarEvent): CalendarCacheSource {
   // 외부 구독은 읽기 전용이다. sourceCalendarId prefix로 먼저 걸러야 아래의
   // "sourceCalendarId가 있으면 google" 폴백에 잘못 빨려 들어가지 않는다.
-  if (event.source === 'ics' || event.sourceCalendarId?.startsWith(ICS_CAL_PREFIX)) {
+  if (event.source === 'ics' || event.sourceCalendarId?.startsWith(ICS_CALENDAR_ID_PREFIX)) {
     throw new Error('[Calendar] 외부 구독 일정은 이 앱에서 바꿀 수 없습니다');
   }
   if (

@@ -78,7 +78,7 @@ export function IcsSubscribeForm({ initial, onSubmit, onCancel }: IcsSubscribeFo
         type="text"
         value={name}
         autoFocus={isEditing}
-        placeholder="이름 (비우면 주소를 씁니다)"
+        placeholder={isEditing ? "이름" : "이름 (비우면 주소를 씁니다)"}
         onChange={(event) => setName(event.target.value)}
         className="w-full rounded border border-bg-border/70 bg-bg-primary/85 px-1.5 py-1 text-[11px] text-text-primary outline-none placeholder:text-text-secondary/45 focus:border-accent/50"
       />

@@ -12,6 +12,7 @@ import {
   ICS_REFRESH_INTERVAL_MS,
   registerIcsSubscriptionIpc,
 } from '../electron/icsSubscriptionIpc.ts';
+import { ICS_IPC_CHANNELS } from '../src/shared/icsApiContract.ts';
 
 const calendar = (...lines: string[]): string => [
   'BEGIN:VCALENDAR',
@@ -771,6 +772,18 @@ function createIpcHarness() {
     refreshCount: () => calls.filter((entry) => entry.startsWith('refresh:')).length,
   };
 }
+
+test('ICS IPC: 등록 채널이 공유 계약(ICS_IPC_CHANNELS)과 어긋나지 않는다', async () => {
+  const harness = createIpcHarness();
+  const { changed, ...invokeChannels } = ICS_IPC_CHANNELS;
+
+  assert.equal(typeof changed, 'string', 'push 채널은 handle이 아니라 preload가 듣는다');
+  assert.deepEqual(
+    [...harness.handlers.keys()].sort(),
+    Object.values(invokeChannels).sort(),
+    '메인의 리터럴 채널과 shared 계약이 같아야 한다',
+  );
+});
 
 test('ICS IPC: 여섯 채널을 등록하고 입력을 정리해서 넘긴다', async () => {
   const harness = createIpcHarness();

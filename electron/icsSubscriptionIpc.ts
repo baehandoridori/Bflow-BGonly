@@ -60,6 +60,9 @@ export function registerIcsSubscriptionIpc(
 ): IcsSubscriptionIpcRegistration {
   const { store } = deps;
 
+  // 채널 이름은 src/shared/icsApiContract.ts의 ICS_IPC_CHANNELS와 같은 값이다.
+  // 이 파일은 node --test가 직접 import해서 shared의 '값'을 가져올 수 없어(확장자 없는
+  // 상대 경로를 런타임에 해석하지 못함) 리터럴로 둔다 — 바꿀 때 두 곳을 함께 고칠 것.
   deps.handle('ics:list', async (): Promise<IcsSubscription[]> => store.list());
 
   deps.handle('ics:add', async (input: unknown): Promise<IcsSubscription> => (

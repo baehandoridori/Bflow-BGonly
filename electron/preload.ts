@@ -5,6 +5,8 @@ import type {
   CalendarPrivacyReplacementCreateResult,
   CalendarPrivacyReplacementDisposition,
 } from '../src/shared/calendarApiContract';
+// 채널 이름은 렌더러·메인이 공유하는 계약이다. preload는 값 import가 가능하므로 여기서 쓴다.
+import { ICS_IPC_CHANNELS } from '../src/shared/icsApiContract';
 import type { BulkStageUpdate, BulkFieldUpdate, BulkUpdateResult } from './supabase';
 import type { CalendarTodoPatch, PersonalTodoCreateInput, PersonalTodoLabelColorKey, PersonalTodoOrderMutation, PersonalTodoPatch } from './personalTodoService';
 import type { SessionActionResult } from './sessionManager';
@@ -743,18 +745,18 @@ contextBridge.exposeInMainWorld('electronAPI', {
   },
 
   // ─── 외부 캘린더(ICS) 구독 ─────────────────────
-  icsList: () => ipcRenderer.invoke('ics:list'),
+  icsList: () => ipcRenderer.invoke(ICS_IPC_CHANNELS.list),
   icsAdd: (input: { name: string; url: string; color: string }) =>
-    ipcRenderer.invoke('ics:add', input),
+    ipcRenderer.invoke(ICS_IPC_CHANNELS.add, input),
   icsUpdate: (id: string, patch: { name?: string; color?: string; enabled?: boolean }) =>
-    ipcRenderer.invoke('ics:update', id, patch),
-  icsRemove: (id: string) => ipcRenderer.invoke('ics:remove', id),
-  icsRefresh: (id: string | null) => ipcRenderer.invoke('ics:refresh', id),
-  icsEvents: () => ipcRenderer.invoke('ics:events'),
+    ipcRenderer.invoke(ICS_IPC_CHANNELS.update, id, patch),
+  icsRemove: (id: string) => ipcRenderer.invoke(ICS_IPC_CHANNELS.remove, id),
+  icsRefresh: (id: string | null) => ipcRenderer.invoke(ICS_IPC_CHANNELS.refresh, id),
+  icsEvents: () => ipcRenderer.invoke(ICS_IPC_CHANNELS.events),
   onIcsChanged: (callback: (payload: unknown) => void) => {
     const listener = (_event: Electron.IpcRendererEvent, payload: unknown) => callback(payload);
-    ipcRenderer.on('ics:changed', listener);
-    return () => ipcRenderer.removeListener('ics:changed', listener);
+    ipcRenderer.on(ICS_IPC_CHANNELS.changed, listener);
+    return () => ipcRenderer.removeListener(ICS_IPC_CHANNELS.changed, listener);
   },
 
   // ─── 휴가 pending 상태 + 브로드캐스트 ─────────────

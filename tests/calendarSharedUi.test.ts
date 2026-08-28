@@ -6447,7 +6447,7 @@ test('the rail lists ICS subscriptions with their own toggle, refresh, rename an
     const warning = findElements(tree, (node) => node.props['aria-label'] === '외부 팀 캘린더 불러오기 실패')[0];
     assert.ok(warning, '실패하면 경고 아이콘이 뜬다');
     assert.match(String(warning.props.title), /네트워크가 불안정합니다/);
-    assert.match(String(warning.props.title), /마지막 확인/, '마지막 성공 시각도 함께 알려 준다');
+    assert.match(String(warning.props.title), /마지막으로 받아온/, '마지막 성공 시각도 함께 알려 준다');
 
     // 일정이 잘려 보일 때는 경고와 구분되는 안내 아이콘을 따로 붙인다.
     assert.equal(
