@@ -1113,10 +1113,6 @@ export async function loadIcsEvents(): Promise<boolean> {
   }
 }
 
-/** 로그아웃·세션 전환처럼 캐시를 비워야 할 때 쓴다. */
-export function clearIcsEvents(): void {
-  icsEvents = [];
-}
 
 /** 현재 renderer의 메타데이터 낙관적 변경을 event state 구독자에게만 알린다.
  * persistence 전 상태를 다른 BrowserWindow로 보내지 않으며, main의 커밋 fanout은

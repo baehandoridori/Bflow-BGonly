@@ -41,12 +41,13 @@ export function IcsSubscribeForm({ initial, onSubmit, onCancel }: IcsSubscribeFo
     setSubmitting(true);
     try {
       await onSubmit({ name: name.trim(), url: url.trim(), color });
+      // 성공하면 부모가 폼을 닫는다. 닫힌 뒤 상태를 건드리지 않도록 여기서 끝낸다.
       onCancel();
+      return;
     } catch (submitError) {
       setError(submitError instanceof Error ? submitError.message : '구독을 추가하지 못했습니다');
-    } finally {
-      setSubmitting(false);
     }
+    setSubmitting(false);
   };
 
   return (
