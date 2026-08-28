@@ -486,7 +486,23 @@ export function WeekTimeGridView({
       window.cancelAnimationFrame(frame);
       window.clearTimeout(fallback);
     };
-  }, [actualToday, dawnVisible, weekKey]);
+    // dawnVisible은 deps에 넣지 않는다. 넣으면 새벽 밴드를 접었다 펼 때마다 화면이
+    // '지금'으로 튄다. 초기 진입·주 변경 때만 now에 맞추고, 접힘 변화는 아래에서 보정한다.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [actualToday, weekKey]);
+
+  /**
+   * 새벽 밴드를 접거나 펴면 그 위의 높이가 통째로 바뀌어, 보고 있던 시간대가 위아래로
+   * 밀린다. 접힘 직후 밴드 높이만큼 스크롤을 보정해 화면상 위치를 지킨다.
+   */
+  const toggleDawnBand = useCallback(() => {
+    const wasVisible = dawnVisible;
+    setDawnChoice((choice) => !resolveBandExpanded(hasDawnBlocks, choice, nowMin, 0, DAWN_END_MIN, includesToday));
+    const scroller = scrollRef.current;
+    if (!scroller) return;
+    const bandHeight = (DAWN_END_MIN / 60) * HOUR_PX;
+    scroller.scrollTop = Math.max(0, scroller.scrollTop + (wasVisible ? -bandHeight : bandHeight));
+  }, [dawnVisible, hasDawnBlocks, includesToday, nowMin]);
 
   const handleWheel = useCallback((event: React.WheelEvent<HTMLDivElement>) => {
     requestWeekChangeFromWheel(event, activeWeekIndex, weekCount, onWeekChange, wheelGestureLock);
@@ -626,7 +642,7 @@ export function WeekTimeGridView({
           startMin={0}
           endMin={DAWN_END_MIN}
           visible={dawnVisible}
-          onToggle={() => setDawnChoice((choice) => !resolveBandExpanded(hasDawnBlocks, choice, nowMin, 0, DAWN_END_MIN, includesToday))}
+          onToggle={toggleDawnBand}
           dates={dates}
           dateStrings={dateStrings}
           blocksByDate={timedByDate}
@@ -936,6 +952,16 @@ function TimeBand({
                   >
                     {canShowText && duration >= 30 && <span data-time-grid-time="true" data-time-grid-live-label={isPreviewed ? 'true' : undefined} className="block truncate" style={{ color: visualStyle.timeColor, fontSize: 9 }}>{timeLabel}</span>}
                     {canShowText && <span data-time-grid-title="true" className="block truncate" style={{ color: visualStyle.titleColor, fontSize: visualStyle.titleFontSize }}>{block.event.title}</span>}
+                    {/* 길이 조절 구간(하단 8px)에 커서로 어포던스를 준다(D11).
+                        자식이라 mousedown은 블록 핸들러로 그대로 버블한다. */}
+                    {!isReadOnly && !isPersisting && canResizeEnd && (
+                      <span
+                        aria-hidden="true"
+                        data-time-grid-resize-affordance="true"
+                        className="absolute inset-x-0 bottom-0"
+                        style={{ height: 8, cursor: 'ns-resize' }}
+                      />
+                    )}
                   </motion.button>
                 );
               })}

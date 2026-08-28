@@ -391,7 +391,7 @@ test('WeekTimeGridView: 밴드별로 잘라 배치해 새벽 충돌 뒤 본 시�
 
   assert.match(
     markup,
-    /<button[^>]*style="top:0(?:px)?;height:56px;left:calc\(0% \+ 2px\);width:calc\(100% - 4px\);[^"]*"[^>]*><span[^>]*>08:00 – 10:00<\/span><span[^>]*>경계 일정<\/span><\/button>/,
+    /<button[^>]*style="top:0(?:px)?;height:56px;left:calc\(0% \+ 2px\);width:calc\(100% - 4px\);[^"]*"[^>]*><span[^>]*>08:00 – 10:00<\/span><span[^>]*>경계 일정<\/span>/,
   );
 });
 
@@ -1311,6 +1311,59 @@ test('WeekTimeGridView: 동작 줄이기에서는 펄스가 튀지 않는다', a
     assert.equal((pulse.props as { initial?: unknown }).initial, false);
     assert.deepEqual((pulse.props as { animate?: unknown }).animate, { opacity: 1, scale: 1 });
     assert.deepEqual((pulse.props as { transition?: unknown }).transition, { duration: 0 });
+  } finally {
+    harness.restore();
+  }
+});
+
+test('WeekTimeGridView: 길이 조절 구간에 커서 안내를 붙이고 읽기 전용에는 붙이지 않는다', async () => {
+  const module = await loadWeekTimeGridView();
+  const editable = event({
+    id: 'editable',
+    title: '내 일정',
+    startDate: '2026-08-25',
+    endDate: '2026-08-25',
+    startTime: '10:00',
+    endTime: '11:00',
+  });
+  const readOnly = event({
+    id: 'read-only',
+    title: '보기 전용',
+    startDate: '2026-08-26',
+    endDate: '2026-08-26',
+    startTime: '10:00',
+    endTime: '11:00',
+    isReadOnly: true,
+  });
+
+  const harness = renderInteractiveWeekTimeGrid(module, {
+    weekDays: Array.from({ length: 7 }, (_, index) => new Date(2026, 7, 23 + index, 12)),
+    events: [editable, readOnly],
+    today: '2026-01-01',
+    onEventClick() {},
+    onSlotClick() {},
+    tagNameById: {},
+    calendarNameById: {},
+    activeWeekIndex: 0,
+    weekCount: 4,
+    onWeekChange() {},
+  });
+  try {
+    const affordances = findWeekElements(
+      harness.tree,
+      (element) => element.props['data-time-grid-resize-affordance'] === 'true',
+    );
+    assert.equal(affordances.length, 1, '편집 가능한 블록에만 붙는다');
+    assert.equal(
+      (affordances[0].props.style as { cursor?: string }).cursor,
+      'ns-resize',
+      '길이 조절 커서를 보여 준다',
+    );
+    assert.equal(
+      (affordances[0].props.style as { height?: number }).height,
+      8,
+      '드래그 판정과 같은 하단 8px 구간이다',
+    );
   } finally {
     harness.restore();
   }
