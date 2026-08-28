@@ -5599,6 +5599,46 @@ test('ScheduleView calendar shortcuts switch views, return to today, and preserv
     assert.equal(scheduleDayScrollProps.at(-1)?.activeDayIndex, expectedIndex);
   });
 
+  await t.test('the detail panel keeps calendar keyboard navigation alive, only yielding Escape', async () => {
+    resetHarness();
+    const target = calendarListEvent({
+      id: 'panel-open',
+      title: '열어 둔 일정',
+      source: 'bflow',
+      sourceCalendarId: 'bflow:mine',
+      calendarId: 'mine',
+      canEdit: true,
+    });
+    scheduleCanonicalEvents = [target];
+    await renderScheduleView();
+    await flushScheduleMountEffects();
+    await renderScheduleView();
+    scheduleGridProps.at(-1)?.onEventClick(target);
+    await renderScheduleView();
+    assert.ok(schedulePanelProps.at(-1), '상세 패널이 열려 있다');
+
+    for (const cleanup of scheduleMountedEffectCleanups.splice(0).reverse()) cleanup();
+    await flushScheduleMountEffects();
+
+    dispatchScheduleKeydown('ArrowRight');
+    await renderScheduleView();
+    assert.ok(
+      scheduleGridProps.at(-1)?.focusedDate,
+      '패널이 열려 있어도 방향키 이동은 살아 있다',
+    );
+
+    for (const cleanup of scheduleMountedEffectCleanups.splice(0).reverse()) cleanup();
+    await flushScheduleMountEffects();
+    const createCountBefore = scheduleCreateModalProps.length;
+    dispatchScheduleKeydown('Escape');
+    await renderScheduleView();
+    assert.equal(
+      scheduleCreateModalProps.length,
+      createCountBefore,
+      'Escape는 패널 자신이 처리하도록 캘린더가 손대지 않는다',
+    );
+  });
+
   await t.test('ArrowRight still moves the focused month date before C uses it', async () => {
     resetHarness();
     await renderScheduleView();

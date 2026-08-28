@@ -979,13 +979,15 @@ export function ScheduleView() {
     if (
       showCreate
       || quickEdit
-      || panelEvent
       || calendarSettings !== undefined
       || tagManagerAnchor
     ) return;
 
     const handler = (e: KeyboardEvent) => {
       if (document.querySelector('[role="dialog"][aria-modal="true"]')) return;
+      // 상세 패널은 모달이 아니라 위 가드에 안 걸린다. 패널이 열려 있어도 ←→·T/W/M/C는
+      // 그대로 살리고, 첫 ESC=편집 취소·다음 ESC=닫기인 Escape만 패널 리스너에 맡긴다.
+      if (panelEvent && e.key === 'Escape') return;
       // 편집 중이거나 OS/앱 조합키를 누른 상태면 캘린더 단축키를 가로채지 않는다.
       const tag = (e.target as HTMLElement)?.tagName;
       const isHelpShortcut = e.key === '?' || (e.key === '/' && e.shiftKey);
