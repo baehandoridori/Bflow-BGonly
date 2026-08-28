@@ -111,6 +111,7 @@ type ScheduleGridProps = {
   pulseDate?: string | null;
   instantTransition?: boolean;
   eventsLoaded?: boolean;
+  showWeekends?: boolean;
   highlightedEventIdentities?: ReadonlySet<string>;
   reduceMotion?: boolean;
   onEventClick(event: ScheduleCalendarEvent): void;
@@ -183,6 +184,7 @@ type WeekScrollViewProps = {
   highlightedEventIdentities?: ReadonlySet<string>;
   reduceMotion?: boolean;
   instantScroll?: boolean;
+  showWeekends?: boolean;
 };
 type WeekScrollViewModule = {
   default(props: WeekScrollViewProps): ReactNode;
@@ -207,6 +209,7 @@ type WeekTimeGridViewProps = {
   ): void;
   highlightedEventIdentities?: ReadonlySet<string>;
   pulseDate?: string | null;
+  showWeekends?: boolean;
 };
 type DayScrollViewProps = {
   events: ScheduleCalendarEvent[];
@@ -5341,7 +5344,7 @@ test('ScheduleView restores and remembers the weekly time-grid choice while open
   await flushScheduleMountEffects();
   assert.equal(
     scheduleLocalStorage.get('bflow_calendar_view_v1'),
-    JSON.stringify({ viewMode: 'week', weekSubMode: 'card' }),
+    JSON.stringify({ viewMode: 'week', weekSubMode: 'card', showWeekends: true }),
     'the latest weekly sub-mode is saved with the main view mode',
   );
 
@@ -6284,6 +6287,68 @@ test('the month empty-state waits for the first load', async () => {
   await flushScheduleMountEffects();
   await renderScheduleView();
   assert.equal(scheduleGridProps.at(-1)?.eventsLoaded, true, '로드가 끝나면 안내를 띄운다');
+});
+
+test('the weekend toggle hides Saturday and Sunday and remembers the choice', async () => {
+  resetHarness();
+  scheduleLocalStorage.set('bflow_calendar_view_v1', JSON.stringify({ viewMode: 'week', weekSubMode: 'timegrid' }));
+  let tree = await renderScheduleView();
+  await flushScheduleMountEffects();
+  tree = await renderScheduleView();
+
+  // 저장값에 항목이 없던 예전 사용자는 지금까지처럼 주말을 본다.
+  assert.equal(scheduleTimeGridProps.at(-1)?.showWeekends, true, '기본은 주말 표시');
+  const toggle = buttonByLabel(tree, '주말 표시');
+  assert.equal(toggle.props['aria-pressed'], true);
+  assert.equal(textContent(toggle).trim(), '주말');
+
+  toggle.props.onClick?.();
+  tree = await renderScheduleView();
+  assert.equal(scheduleTimeGridProps.at(-1)?.showWeekends, false, '끄면 시간표에 전달된다');
+  assert.equal(buttonByLabel(tree, '주말 표시').props['aria-pressed'], false);
+  assert.equal(textContent(buttonByLabel(tree, '주말 표시')).trim(), '평일만');
+
+  await flushScheduleMountEffects();
+  assert.equal(
+    scheduleLocalStorage.get('bflow_calendar_view_v1'),
+    JSON.stringify({ viewMode: 'week', weekSubMode: 'timegrid', showWeekends: false }),
+    '선택은 이 PC에 남는다',
+  );
+});
+
+test('every schedule surface follows the saved weekend choice', async () => {
+  // 저장값이 꺼짐이면 월·주 카드·주간 사이드바까지 같은 값을 받는다.
+  for (const stored of [
+    { viewMode: 'month', weekSubMode: 'card' },
+    { viewMode: 'week', weekSubMode: 'card' },
+  ] as const) {
+    resetHarness();
+    scheduleLocalStorage.set(
+      'bflow_calendar_view_v1',
+      JSON.stringify({ ...stored, showWeekends: false }),
+    );
+    await renderScheduleView();
+    await flushScheduleMountEffects();
+    await renderScheduleView();
+
+    const surface = stored.viewMode === 'month'
+      ? scheduleGridProps.at(-1)?.showWeekends
+      : scheduleWeekScrollProps.at(-1)?.showWeekends;
+    assert.equal(surface, false, `${stored.viewMode} 보기가 저장된 선택을 따른다`);
+  }
+});
+
+test("the weekend toggle is hidden in the single-day view", async () => {
+  resetHarness();
+  scheduleLocalStorage.set('bflow_calendar_view_v1', JSON.stringify({ viewMode: 'today', weekSubMode: 'card' }));
+  const tree = await renderScheduleView();
+  await flushScheduleMountEffects();
+
+  assert.equal(
+    findButtons(tree).some((button) => button.props['aria-label'] === '주말 표시'),
+    false,
+    '하루만 보는 화면에는 숨길 칸이 없다',
+  );
 });
 
 test('a later move pulse is not cut short by the earlier one', async () => {

@@ -121,13 +121,21 @@ function optimisticCreatedEventIdentity(event: CalendarEvent): CalendarEventIden
   };
 }
 
-function readCalendarViewPreference(): { viewMode: CalendarViewMode; weekSubMode: WeekSubMode } {
-  const fallback = { viewMode: 'month' as CalendarViewMode, weekSubMode: 'card' as WeekSubMode };
+function readCalendarViewPreference(): {
+  viewMode: CalendarViewMode;
+  weekSubMode: WeekSubMode;
+  showWeekends: boolean;
+} {
+  const fallback = {
+    viewMode: 'month' as CalendarViewMode,
+    weekSubMode: 'card' as WeekSubMode,
+    showWeekends: true,
+  };
   try {
     if (typeof window === 'undefined') return fallback;
     const raw = window.localStorage.getItem(CALENDAR_VIEW_STORAGE_KEY);
     if (!raw) return fallback;
-    const value = JSON.parse(raw) as { viewMode?: unknown; weekSubMode?: unknown };
+    const value = JSON.parse(raw) as { viewMode?: unknown; weekSubMode?: unknown; showWeekends?: unknown };
     if (
       !CALENDAR_VIEW_MODES.includes(value.viewMode as CalendarViewMode)
       || (value.weekSubMode !== 'card' && value.weekSubMode !== 'timegrid')
@@ -135,6 +143,8 @@ function readCalendarViewPreference(): { viewMode: CalendarViewMode; weekSubMode
     return {
       viewMode: value.viewMode as CalendarViewMode,
       weekSubMode: value.weekSubMode,
+      // 예전 저장값에는 이 항목이 없다. 없으면 지금까지처럼 주말을 보여준다.
+      showWeekends: value.showWeekends !== false,
     };
   } catch {
     return fallback;
@@ -277,14 +287,6 @@ export function ScheduleView() {
   const [month, setMonth] = useState(() => new Date().getMonth());
   const [monthDir, setMonthDir] = useState(0); // 월 슬라이드 방향
   const { reduce } = useMotionPref();
-
-  useEffect(() => {
-    try {
-      window.localStorage.setItem(CALENDAR_VIEW_STORAGE_KEY, JSON.stringify({ viewMode, weekSubMode }));
-    } catch {
-      // 시크릿 모드·저장소 접근 제한에서는 기존 화면 동작을 유지한다.
-    }
-  }, [viewMode, weekSubMode]);
 
   const today = fmtDate(new Date());
   const vacationConnected = useAppStore((s) => s.vacationConnected);
@@ -1370,6 +1372,19 @@ export function ScheduleView() {
   const [miniCalendarBrowseMonth, setMiniCalendarBrowseMonth] = useState<Date | null>(null);
   /** 첫 정본 로드가 끝났는지. 로드 전에는 빈 상태 안내를 띄우지 않는다(진입 직후 오탐). */
   const [eventsLoaded, setEventsLoaded] = useState(false);
+  /**
+   * 주말(토·일) 칸을 그릴지. 끄면 평일 5칸만 보이는 캘린더가 된다.
+   * 새 useState는 기존 선언들 뒤에 둔다(테스트 하네스가 훅을 슬롯 인덱스로 흉내 냄).
+   */
+  const [showWeekends, setShowWeekends] = useState(() => readCalendarViewPreference().showWeekends);
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(CALENDAR_VIEW_STORAGE_KEY, JSON.stringify({ viewMode, weekSubMode, showWeekends }));
+    } catch {
+      // 시크릿 모드·저장소 접근 제한에서는 기존 화면 동작을 유지한다.
+    }
+  }, [showWeekends, viewMode, weekSubMode]);
   // 주간·2주는 보고 있는 주를, 오늘 보기는 그 날짜를, 월간은 키보드 포커스 날짜를 표시한다.
   const miniCalendarActiveWeekStart = useMemo(() => {
     if (viewMode !== 'week' && viewMode !== '2week') return undefined;
@@ -1461,6 +1476,7 @@ export function ScheduleView() {
                   onWeekSelect={handleWeekChange}
                   currentMonth={month}
                   currentYear={year}
+                  showWeekends={showWeekends}
                 />
               ) : null}
               <CalendarRail
@@ -1571,6 +1587,25 @@ export function ScheduleView() {
             </div>
           )}
 
+          {/* 주말 표시 — 끄면 평일 5칸만 그린다. 선택은 이 PC에 남는다. */}
+          {viewMode !== 'today' && (
+            <button
+              type="button"
+              aria-label="주말 표시"
+              aria-pressed={showWeekends}
+              title={showWeekends ? '주말을 숨기고 평일만 봅니다' : '주말을 다시 표시합니다'}
+              onClick={() => setShowWeekends((current) => !current)}
+              className={cn(
+                'px-3 py-1.5 text-xs rounded-lg font-medium border cursor-pointer transition-colors',
+                showWeekends
+                  ? 'border-bg-border/50 bg-bg-card text-text-secondary hover:text-text-primary'
+                  : 'border-accent/35 bg-accent/20 text-accent',
+              )}
+            >
+              {showWeekends ? '주말' : '평일만'}
+            </button>
+          )}
+
           {/* 이벤트 생성 */}
           <button
             onClick={() => { resetCreatePrefill(); setShowCreate(true); }}
@@ -1649,6 +1684,7 @@ export function ScheduleView() {
                 onTimeGridEventChange={handleTimeGridEventChange}
                 highlightedEventIdentities={highlightedEventIdentities}
                 pulseDate={pulseDate}
+                showWeekends={showWeekends}
               />
             ) : viewMode === 'week' || viewMode === '2week' ? (
               <WeekScrollView
@@ -1670,6 +1706,7 @@ export function ScheduleView() {
                 highlightedEventIdentities={highlightedEventIdentities}
                 reduceMotion={reduce}
                 instantScroll={skipPeriodTransition}
+                showWeekends={showWeekends}
               />
             ) : (
               <CalendarGrid
@@ -1690,6 +1727,7 @@ export function ScheduleView() {
                 monthDirection={monthDir}
                 instantTransition={skipPeriodTransition}
                 eventsLoaded={eventsLoaded}
+                showWeekends={showWeekends}
                 focusedDate={focusedDate}
                 pulseDate={pulseDate}
                 highlightedEventIdentities={highlightedEventIdentities}

@@ -1368,3 +1368,51 @@ test('WeekTimeGridView: 길이 조절 구간에 커서 안내를 붙이고 읽�
     harness.restore();
   }
 });
+
+test('WeekTimeGridView: 주말을 끄면 평일 5칸만 그린다', async () => {
+  const module = await loadWeekTimeGridView();
+  const props = {
+    weekDays: Array.from({ length: 7 }, (_, index) => new Date(2026, 7, 23 + index, 12)),
+    events: [],
+    today: '2026-08-26',
+    onEventClick() {},
+    onSlotClick() {},
+    tagNameById: {},
+    calendarNameById: {},
+    activeWeekIndex: 0,
+    weekCount: 4,
+    onWeekChange() {},
+  };
+
+  // 시간대 밴드마다 같은 날짜 열이 반복되므로 고유 날짜로 센다.
+  const columnDates = (tree: ReactNode): string[] => [...new Set(
+    findWeekElements(tree, (element) => element.props['data-time-grid-column'] === 'true')
+      .map((column) => String(column.props['data-date'])),
+  )].sort();
+
+  const withWeekends = renderInteractiveWeekTimeGrid(module, props);
+  try {
+    assert.deepEqual(
+      columnDates(withWeekends.tree),
+      ['2026-08-23', '2026-08-24', '2026-08-25', '2026-08-26', '2026-08-27', '2026-08-28', '2026-08-29'],
+      '기본은 일~토 7칸',
+    );
+  } finally {
+    withWeekends.restore();
+  }
+
+  const weekdaysOnly = renderInteractiveWeekTimeGrid(module, { ...props, showWeekends: false });
+  try {
+    assert.deepEqual(
+      columnDates(weekdaysOnly.tree),
+      ['2026-08-24', '2026-08-25', '2026-08-26', '2026-08-27', '2026-08-28'],
+      '주말을 끄면 월~금 5칸만 남는다',
+    );
+
+    const markup = renderToStaticMarkup(createElement(module.default, { ...props, showWeekends: false }));
+    assert.match(markup, /grid-template-columns:56px repeat\(5, minmax\(0, 1fr\)\)/, '격자도 5칸으로 그린다');
+    assert.doesNotMatch(markup, /data-date="2026-08-29"/, '토요일 칸은 아예 없다');
+  } finally {
+    weekdaysOnly.restore();
+  }
+});

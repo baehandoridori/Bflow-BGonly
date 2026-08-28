@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { motion } from 'framer-motion';
 import type { CalendarEvent } from '@/types/calendar';
 import { layoutEventBars, type EventBar } from '@/components/calendar/CalendarGrid';
+import { isWeekendDate, visibleWeekDays } from '@/utils/calendarWeekdays';
 import { fmtDate, hexToRgba } from '@/utils/calendarDate';
 import { formatEventChipText, formatEventTimeRange } from '@/utils/calendarEventFilter';
 import { calendarEventIdentityKey } from '@/utils/calendarEventIdentity';
@@ -58,6 +59,8 @@ export interface WeekTimeGridViewProps {
   highlightedEventIdentities?: ReadonlySet<string>;
   /** '오늘'·미니 달력 이동 안내 펄스가 가리키는 날짜. */
   pulseDate?: string | null;
+  /** 꺼져 있으면 토·일 칸 자체를 그리지 않는다(주 5일 보기). */
+  showWeekends?: boolean;
 }
 
 type TimedEvent = {
@@ -365,6 +368,7 @@ export function WeekTimeGridView({
   timeGridDragPreview,
   highlightedEventIdentities,
   pulseDate,
+  showWeekends = true,
 }: WeekTimeGridViewProps) {
   const { reduce } = useMotionPref();
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -380,7 +384,10 @@ export function WeekTimeGridView({
   });
   const dragPreview = timeGridDragPreview ?? timeGridDnD.preview;
 
-  const dates = useMemo(() => weekDays.slice(0, 7), [weekDays]);
+  // 주말을 숨기면 토·일 칸 자체를 그리지 않는다. 주 배열은 7일 그대로 받고 여기서만 거른다.
+  const dates = useMemo(() => visibleWeekDays(weekDays.slice(0, 7), showWeekends), [showWeekends, weekDays]);
+  const columnCount = dates.length;
+  const dayColumns = `${TIME_GUTTER_PX}px repeat(${columnCount}, minmax(0, 1fr))`;
   const dateStrings = useMemo(() => dates.map(fmtDate), [dates]);
   const weekKey = dateStrings.join('|');
 
@@ -511,12 +518,12 @@ export function WeekTimeGridView({
   return (
     <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl border border-bg-border/40 bg-bg-primary/50">
       <div className="sticky top-0 z-30 border-b border-bg-border/40 bg-bg-primary/95 backdrop-blur">
-        <div className="grid" style={{ gridTemplateColumns: `${TIME_GUTTER_PX}px repeat(7, minmax(0, 1fr))` }}>
+        <div className="grid" style={{ gridTemplateColumns: dayColumns }}>
           <div aria-hidden="true" />
           {dates.map((date, index) => {
             const dateStr = dateStrings[index];
             const isToday = dateStr === actualToday;
-            const isWeekend = index === 0 || index === 6;
+            const isWeekend = isWeekendDate(date);
             return (
               <div
                 key={dateStr}
@@ -536,8 +543,8 @@ export function WeekTimeGridView({
                     transition={reduce ? { duration: 0 } : { duration: 2, ease: 'easeInOut' }}
                   />
                 )}
-                <div className={`text-[11px] font-semibold ${index === 0 ? 'text-red-400' : index === 6 ? 'text-blue-400' : 'text-text-secondary'}`}>
-                  {WEEKDAY_KR[index]}
+                <div className={`text-[11px] font-semibold ${date.getDay() === 0 ? 'text-red-400' : date.getDay() === 6 ? 'text-blue-400' : 'text-text-secondary'}`}>
+                  {WEEKDAY_KR[date.getDay()]}
                 </div>
                 <div className={`mx-auto mt-0.5 flex h-7 w-7 items-center justify-center rounded-full text-sm font-bold ${isToday ? 'bg-accent text-white' : 'text-text-primary'}`}>
                   {date.getDate()}
@@ -549,14 +556,14 @@ export function WeekTimeGridView({
 
         <div className="relative border-t border-bg-border/25" style={{ minHeight: Math.max(ALL_DAY_ROW_PX, visibleAllDayRows * ALL_DAY_ROW_PX) + 6 }}>
           <div className="absolute inset-y-0 left-0 flex items-start justify-center pt-2 text-[9px] text-text-secondary" style={{ width: TIME_GUTTER_PX }}>종일</div>
-          <div className="absolute inset-y-0 right-0 grid grid-cols-7" style={{ left: TIME_GUTTER_PX }}>
+          <div className="absolute inset-y-0 right-0 grid" style={{ left: TIME_GUTTER_PX, gridTemplateColumns: `repeat(${columnCount}, minmax(0, 1fr))` }}>
             {dateStrings.map((dateStr, index) => (
               <div
                 key={dateStr}
                 aria-hidden="true"
                 data-time-grid-all-day-empty="true"
                 className={`border-l border-bg-border/20 transition-colors hover:bg-bg-border/15 ${dateStr === actualToday ? 'bg-accent/[0.03]' : ''}`}
-                style={getWeekendCellStyle(index === 0 || index === 6)}
+                style={getWeekendCellStyle(isWeekendDate(dates[index]))}
               />
             ))}
           </div>
@@ -576,8 +583,8 @@ export function WeekTimeGridView({
                   className={`absolute z-10 truncate rounded px-1.5 text-left text-[10px] font-semibold text-white shadow-sm outline-none focus-visible:ring-2 focus-visible:ring-white focus-visible:ring-offset-1 focus-visible:ring-offset-bg-primary ${isRealtimeHighlighted ? reduce ? 'calendar-realtime-highlight-static' : 'calendar-realtime-highlight' : ''}`}
                   style={{
                     top: 3 + bar.row * ALL_DAY_ROW_PX,
-                    left: `calc(${bar.startCol * (100 / 7)}% + 2px)`,
-                    width: `calc(${bar.span * (100 / 7)}% - 4px)`,
+                    left: `calc(${bar.startCol * (100 / columnCount)}% + 2px)`,
+                    width: `calc(${bar.span * (100 / columnCount)}% - 4px)`,
                     height: 22,
                     ...getAllDayBarStyle(bar.event.color),
                     ...(isRealtimeHighlighted ? {
@@ -613,8 +620,8 @@ export function WeekTimeGridView({
                     frozenTimedDragPreviewBar.row,
                     Math.max(0, visibleAllDayRows - 1),
                   ) * ALL_DAY_ROW_PX,
-                  left: `calc(${frozenTimedDragPreviewBar.startCol * (100 / 7)}% + 2px)`,
-                  width: `calc(${frozenTimedDragPreviewBar.span * (100 / 7)}% - 4px)`,
+                  left: `calc(${frozenTimedDragPreviewBar.startCol * (100 / columnCount)}% + 2px)`,
+                  width: `calc(${frozenTimedDragPreviewBar.span * (100 / columnCount)}% - 4px)`,
                   height: 22,
                   ...getAllDayBarStyle(frozenTimedDragPreviewBar.event.color),
                 }}
@@ -734,7 +741,7 @@ function TimeBand({
   endMin: number;
   visible: boolean;
   onToggle?: () => void;
-  dates: Date[];
+  dates: readonly Date[];
   dateStrings: string[];
   blocksByDate: Map<string, TimedEvent[]>;
   today: string;
@@ -764,6 +771,9 @@ function TimeBand({
   }
 
   const height = ((endMin - startMin) / 60) * HOUR_PX;
+  // 주말을 숨기면 상위가 5일만 넘겨준다. 밴드도 받은 날짜 수만큼만 칸을 그린다.
+  const columnCount = dates.length;
+  const dayColumns = `${TIME_GUTTER_PX}px repeat(${columnCount}, minmax(0, 1fr))`;
   const hours = Array.from({ length: Math.ceil((endMin - startMin) / 60) + 1 }, (_, index) => startMin + index * 60)
     .filter((minute) => minute <= endMin);
   const slots = getTimeSlots(startMin, endMin);
@@ -786,7 +796,7 @@ function TimeBand({
           ▾ 접기
         </button>
       )}
-      <div className="absolute inset-0 grid" style={{ gridTemplateColumns: `${TIME_GUTTER_PX}px repeat(7, minmax(0, 1fr))` }}>
+      <div className="absolute inset-0 grid" style={{ gridTemplateColumns: dayColumns }}>
         <div className="relative border-r border-bg-border/25">
           {hours.map((minute) => (
             <span key={minute} className="absolute right-1 -translate-y-1/2 text-[9px] text-text-secondary" style={{ top: ((minute - startMin) / 60) * HOUR_PX }}>
@@ -794,9 +804,9 @@ function TimeBand({
             </span>
           ))}
         </div>
-        {dates.map((_, index) => {
+        {dates.map((day, index) => {
           const date = dateStrings[index];
-          const isWeekend = index === 0 || index === 6;
+          const isWeekend = isWeekendDate(day);
           const timedBlocks = blocksByDate.get(date) ?? [];
           const bandBlocks = clipTimedBlocksToBand(timedBlocks, startMin, endMin);
           const layouts = layoutDayBlocks(bandBlocks.map((block) => ({ id: block.layoutId, startMin: block.startMin, endMin: block.endMin })));
@@ -975,11 +985,11 @@ function TimeBand({
           <div className="absolute right-0" style={{ left: TIME_GUTTER_PX, ...getNonTodayCurrentLineStyle() }}>
             <div
               className="absolute -top-px h-0.5 bg-red-500"
-              style={{ left: `${(currentTimeMarker.todayIndex / 7) * 100}%`, width: `${100 / 7}%` }}
+              style={{ left: `${(currentTimeMarker.todayIndex / columnCount) * 100}%`, width: `${100 / columnCount}%` }}
             />
             <span
               className="absolute -top-1.5 h-3 w-3 rounded-full border-2 border-bg-primary bg-red-500"
-              style={{ left: `calc(${(currentTimeMarker.todayIndex / 7) * 100}% - 5px)` }}
+              style={{ left: `calc(${(currentTimeMarker.todayIndex / columnCount) * 100}% - 5px)` }}
             />
           </div>
         </div>
