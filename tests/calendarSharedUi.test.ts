@@ -6962,6 +6962,42 @@ test('ScheduleView shows the mini calendar in every view and navigates instead o
   assert.equal(scheduleMiniCalendarProps.at(-1)?.activeWeekStart, undefined);
 });
 
+test('browsing months in the mini calendar does not drag the weekly view along', async () => {
+  resetHarness();
+  scheduleLocalStorage.set('bflow_calendar_view_v1', JSON.stringify({ viewMode: 'week', weekSubMode: 'card' }));
+  let tree = await renderScheduleView();
+  await flushScheduleMountEffects();
+  buttonByTitle(tree, '사이드바 펼치기').props.onClick?.();
+  tree = await renderScheduleView();
+
+  const headerBefore = textContent(tree);
+  const weekStartBefore = scheduleMiniCalendarProps.at(-1)?.activeWeekStart;
+  const weekIndexBefore = scheduleWeekScrollProps.at(-1)?.activeWeekIndex;
+  assert.ok(weekStartBefore);
+
+  // 연도 경계를 넘겨 '구경만' 한다 — 클릭은 하지 않았다.
+  scheduleMiniCalendarProps.at(-1)?.onMonthChange(new Date(2027, 0, 1));
+  tree = await renderScheduleView();
+
+  assert.equal(textContent(tree), headerBefore, '본화면 헤더는 그대로다');
+  assert.equal(scheduleWeekScrollProps.at(-1)?.activeWeekIndex, weekIndexBefore, '보고 있는 주도 그대로다');
+  assert.equal(
+    scheduleMiniCalendarProps.at(-1)?.currentMonth.getFullYear(),
+    2027,
+    '미니 달력만 넘겨 본 달을 따라간다',
+  );
+  assert.equal(scheduleMiniCalendarProps.at(-1)?.currentMonth.getMonth(), 0);
+
+  // 날짜를 실제로 고르면 기존대로 본화면이 따라 움직인다.
+  scheduleMiniCalendarProps.at(-1)?.onDateSelect('2027-01-13');
+  tree = await renderScheduleView();
+  assert.notEqual(
+    scheduleWeekScrollProps.at(-1)?.activeWeekIndex,
+    weekIndexBefore,
+    '날짜 클릭 이동은 기존대로 동작한다',
+  );
+});
+
 test('ScheduleView opens quick edit from a right click in the weekly, timetable and today views', async () => {
   const mouse = (clientX: number, clientY: number) => ({
     preventDefault() {},

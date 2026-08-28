@@ -1167,6 +1167,8 @@ export function ScheduleView() {
    */
   const handleMiniCalendarDateSelect = useCallback((dateStr: string) => {
     applyScheduleDateNavigation({ date: dateStr });
+    // 날짜를 실제로 골랐으면 본화면이 그리로 갔으니 넘겨보던 달은 버린다.
+    setMiniCalendarBrowseMonth(null);
     if (viewMode === 'month') setFocusedDate(dateStr);
   }, [applyScheduleDateNavigation, viewMode]);
 
@@ -1337,6 +1339,12 @@ export function ScheduleView() {
 
   // 사이드바 상태
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  /**
+   * 주간·오늘 보기는 연 기준 절대 인덱스로 그려서, 미니 달력 화살표로 연 경계를 넘기는
+   * 것만으로 본화면이 1년 점프해 버렸다. 넘겨보기(browse)는 미니 달력 안에서만 유지하고
+   * 본화면은 날짜를 실제로 고를 때만 움직인다. 새 useState는 기존 선언들 뒤에 둔다.
+   */
+  const [miniCalendarBrowseMonth, setMiniCalendarBrowseMonth] = useState<Date | null>(null);
   // 주간·2주는 보고 있는 주를, 오늘 보기는 그 날짜를, 월간은 키보드 포커스 날짜를 표시한다.
   const miniCalendarActiveWeekStart = useMemo(() => {
     if (viewMode !== 'week' && viewMode !== '2week') return undefined;
@@ -1349,6 +1357,35 @@ export function ScheduleView() {
     if (viewMode === 'month') return focusedDate ?? undefined;
     return undefined;
   }, [activeDayIndex, focusedDate, viewMode, year]);
+
+  /** 미니 달력이 실제로 펼쳐 보일 달. 월간은 본화면 값, 그 밖은 넘겨보기 값이 우선한다. */
+  const miniCalendarMonth = useMemo(() => {
+    if (viewMode === 'month') return new Date(year, month, 1);
+    if (miniCalendarBrowseMonth) return miniCalendarBrowseMonth;
+    if (miniCalendarActiveWeekStart) {
+      const weekStart = parseDate(miniCalendarActiveWeekStart);
+      return new Date(weekStart.getFullYear(), weekStart.getMonth(), 1);
+    }
+    if (miniCalendarSelectedDate) {
+      const selected = parseDate(miniCalendarSelectedDate);
+      return new Date(selected.getFullYear(), selected.getMonth(), 1);
+    }
+    return new Date(year, month, 1);
+  }, [miniCalendarActiveWeekStart, miniCalendarBrowseMonth, miniCalendarSelectedDate, month, viewMode, year]);
+
+  const handleMiniCalendarMonthChange = useCallback((next: Date) => {
+    if (viewMode === 'month') {
+      setYear(next.getFullYear());
+      setMonth(next.getMonth());
+      return;
+    }
+    setMiniCalendarBrowseMonth(next);
+  }, [viewMode]);
+
+  // 본화면이 다른 주·날짜·보기로 움직이면 넘겨보던 달은 버리고 다시 따라간다.
+  useEffect(() => {
+    setMiniCalendarBrowseMonth(null);
+  }, [activeWeekIndex, activeDayIndex, viewMode]);
 
   const handleOpenTagManager = useCallback((anchorRect: DOMRect) => {
     setTagManagerAnchor(anchorRect);
@@ -1376,8 +1413,8 @@ export function ScheduleView() {
             </button>
             <div className="min-h-0 flex-1 overflow-y-auto pr-1">
               <MiniCalendar
-                currentMonth={new Date(year, month, 1)}
-                onMonthChange={(d) => { setYear(d.getFullYear()); setMonth(d.getMonth()); }}
+                currentMonth={miniCalendarMonth}
+                onMonthChange={handleMiniCalendarMonthChange}
                 onDateSelect={handleMiniCalendarDateSelect}
                 events={filteredEvents}
                 activeWeekStart={miniCalendarActiveWeekStart}
