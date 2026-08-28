@@ -6624,7 +6624,30 @@ test('tag chips pop on toggle and the filtered result fades instead of jumping',
       1,
       '120ms 뒤에는 원래 농도로 돌아온다',
     );
+
+    // 페이드 도중 OS '동작 줄이기'가 켜져도 반투명으로 굳지 않는다.
+    calendarState.toggleTag('tag-review');
+    tree = await renderScheduleView();
+    await flushScheduleMountEffects();
+    tree = await renderScheduleView();
+    assert.equal(
+      (calendarBody(tree)?.props as { animate?: { opacity?: number } }).animate?.opacity,
+      0.55,
+      '다시 페이드가 시작된다',
+    );
+
+    scheduleReducedMotion = true;
+    calendarState.toggleTag('tag-meeting');
+    tree = await renderScheduleView();
+    await flushScheduleMountEffects();
+    tree = await renderScheduleView();
+    assert.equal(
+      (calendarBody(tree)?.props as { animate?: { opacity?: number } }).animate?.opacity,
+      1,
+      "페이드 중 '동작 줄이기'가 켜져도 화면이 반투명으로 굳지 않는다",
+    );
   } finally {
+    scheduleReducedMotion = false;
     clock.restore();
   }
 });

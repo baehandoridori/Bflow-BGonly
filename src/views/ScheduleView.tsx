@@ -567,7 +567,9 @@ export function ScheduleView() {
   useEffect(() => {
     if (lastFilterSignatureRef.current === filterSignature) return;
     lastFilterSignatureRef.current = filterSignature;
-    if (reduce) return;
+    // 페이드 도중 OS '동작 줄이기'가 켜지면 cleanup이 복구 타이머를 지운 뒤 재실행이
+    // 그냥 빠져나가 화면이 반투명으로 굳는다. 되돌리고 나가야 한다.
+    if (reduce) { setFilterFadeOpacity(1); return; }
     setFilterFadeOpacity(0.55);
     const restore = setTimeout(() => setFilterFadeOpacity(1), 120);
     return () => clearTimeout(restore);
