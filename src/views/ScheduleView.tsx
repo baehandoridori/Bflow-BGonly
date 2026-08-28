@@ -1633,6 +1633,7 @@ export function ScheduleView() {
                 onTimeGridCreate={handleTimeGridCreate}
                 onTimeGridEventChange={handleTimeGridEventChange}
                 highlightedEventIdentities={highlightedEventIdentities}
+                pulseDate={pulseDate}
               />
             ) : viewMode === 'week' || viewMode === '2week' ? (
               <WeekScrollView

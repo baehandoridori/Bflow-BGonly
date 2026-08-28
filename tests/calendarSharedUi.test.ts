@@ -205,6 +205,7 @@ type WeekTimeGridViewProps = {
     patch: Required<Pick<ScheduleCalendarEvent, 'startDate' | 'endDate' | 'startTime' | 'endTime'>>,
   ): void;
   highlightedEventIdentities?: ReadonlySet<string>;
+  pulseDate?: string | null;
 };
 type DayScrollViewProps = {
   events: ScheduleCalendarEvent[];
@@ -6172,10 +6173,10 @@ test('the weekly header names the month and week, and today pulses in every view
   const todayButtonCases = [
     { label: '월 보기', stored: { viewMode: 'month', weekSubMode: 'card' }, read: () => scheduleGridProps.at(-1)?.pulseDate },
     { label: '주간 카드', stored: { viewMode: 'week', weekSubMode: 'card' }, read: () => scheduleWeekScrollProps.at(-1)?.pulseDate },
-    { label: '주간 시간표', stored: { viewMode: 'week', weekSubMode: 'timegrid' }, read: () => scheduleGridProps.at(-1)?.pulseDate ?? null },
+    { label: '주간 시간표', stored: { viewMode: 'week', weekSubMode: 'timegrid' }, read: () => scheduleTimeGridProps.at(-1)?.pulseDate ?? null },
   ] as const;
 
-  for (const { label, stored, read } of todayButtonCases.slice(0, 2)) {
+  for (const { label, stored, read } of todayButtonCases) {
     resetHarness();
     scheduleLocalStorage.set('bflow_calendar_view_v1', JSON.stringify(stored));
     const clock = installScheduleFakeClock();

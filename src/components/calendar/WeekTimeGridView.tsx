@@ -56,6 +56,8 @@ export interface WeekTimeGridViewProps {
   timeGridDragPreview?: TimeGridDragPreview | null;
   /** 다른 창에서 추가·수정된 source-aware 일정 identity. */
   highlightedEventIdentities?: ReadonlySet<string>;
+  /** '오늘'·미니 달력 이동 안내 펄스가 가리키는 날짜. */
+  pulseDate?: string | null;
 }
 
 type TimedEvent = {
@@ -362,6 +364,7 @@ export function WeekTimeGridView({
   onTimeGridEventChange,
   timeGridDragPreview,
   highlightedEventIdentities,
+  pulseDate,
 }: WeekTimeGridViewProps) {
   const { reduce } = useMotionPref();
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -501,9 +504,22 @@ export function WeekTimeGridView({
             return (
               <div
                 key={dateStr}
-                className={`min-w-0 border-l border-bg-border/25 px-2 py-2 text-center ${isToday ? 'bg-accent/10' : ''}`}
+                className={`relative min-w-0 border-l border-bg-border/25 px-2 py-2 text-center ${isToday ? 'bg-accent/10' : ''}`}
                 style={getWeekendCellStyle(isWeekend)}
               >
+                {/* 이동 안내 펄스 — 주간 카드 보기와 같은 모션·reduce 규칙을 쓴다. */}
+                {dateStr === pulseDate && (
+                  <motion.div
+                    data-navigate-pulse="true"
+                    className="pointer-events-none absolute inset-0 rounded-lg border-2 border-accent"
+                    style={{ boxShadow: '0 0 12px 4px rgba(108, 92, 231, 0.4), 0 0 24px 8px rgba(108, 92, 231, 0.15)' }}
+                    initial={reduce ? false : { opacity: 0, scale: 0.9 }}
+                    animate={reduce
+                      ? { opacity: 1, scale: 1 }
+                      : { opacity: [0, 1, 0.6, 1, 0], scale: [0.9, 1.03, 1, 1.02, 1] }}
+                    transition={reduce ? { duration: 0 } : { duration: 2, ease: 'easeInOut' }}
+                  />
+                )}
                 <div className={`text-[11px] font-semibold ${index === 0 ? 'text-red-400' : index === 6 ? 'text-blue-400' : 'text-text-secondary'}`}>
                   {WEEKDAY_KR[index]}
                 </div>

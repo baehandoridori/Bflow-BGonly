@@ -669,7 +669,7 @@ test('WeekTimeGridView: weekend-today accent를 보존하는 주말 tint와 종�
   assert.deepEqual(module.getWeekendCellStyle(false), {});
   assert.match(markup, /\+1개/);
   assert.doesNotMatch(markup, /opacity-60/);
-  assert.match(markup, /class="min-w-0[^"]*bg-accent\/10" style="background-image:linear-gradient\(rgba\(116, 185, 255, 0.06\), rgba\(116, 185, 255, 0.06\)\)"/);
+  assert.match(markup, /class="[^"]*min-w-0[^"]*bg-accent\/10" style="background-image:linear-gradient\(rgba\(116, 185, 255, 0.06\), rgba\(116, 185, 255, 0.06\)\)"/);
   assert.match(markup, /data-time-grid-all-day-empty="true" class="[^"]*hover:bg-bg-border\/15[^"]*bg-accent\/\[0\.03\]" style="background-image:linear-gradient\(rgba\(116, 185, 255, 0.06\), rgba\(116, 185, 255, 0.06\)\)"/);
   assert.match(markup, /class="relative border-r border-bg-border\/20 bg-accent\/\[0\.035\]" style="background-image:linear-gradient\(rgba\(116, 185, 255, 0.06\), rgba\(116, 185, 255, 0.06\)\)"/);
   assert.match(markup, /hover:bg-bg-border\/15/);
@@ -1245,6 +1245,72 @@ test('WeekTimeGridView: 주가 바뀌면 진행 중인 드래그를 취소한다
     });
     harness.flushEffects();
     assert.equal(timeGridCancelCount, afterMount + 1, '주가 바뀌면 진행 중인 드래그를 취소한다');
+  } finally {
+    harness.restore();
+  }
+});
+
+test('WeekTimeGridView: 이동 안내 펄스를 그 날짜 요일 헤더에 그린다', async () => {
+  const module = await loadWeekTimeGridView();
+  const props = {
+    weekDays: Array.from({ length: 7 }, (_, index) => new Date(2026, 7, 23 + index, 12)),
+    events: [],
+    today: '2026-01-01',
+    onEventClick() {},
+    onSlotClick() {},
+    tagNameById: {},
+    calendarNameById: {},
+    activeWeekIndex: 0,
+    weekCount: 4,
+    onWeekChange() {},
+  };
+
+  const without = renderInteractiveWeekTimeGrid(module, props);
+  try {
+    assert.equal(
+      findWeekElements(without.tree, (element) => element.props['data-navigate-pulse'] === 'true').length,
+      0,
+      '펄스 날짜가 없으면 아무것도 그리지 않는다',
+    );
+  } finally {
+    without.restore();
+  }
+
+  const withPulse = renderInteractiveWeekTimeGrid(module, { ...props, pulseDate: '2026-08-26' });
+  try {
+    const pulses = findWeekElements(withPulse.tree, (element) => element.props['data-navigate-pulse'] === 'true');
+    assert.equal(pulses.length, 1, '펄스는 해당 날짜 하나에만 그린다');
+    assert.deepEqual(
+      (pulses[0].props as { animate?: unknown }).animate,
+      { opacity: [0, 1, 0.6, 1, 0], scale: [0.9, 1.03, 1, 1.02, 1] },
+      '주간 카드 보기와 같은 펄스 모션을 쓴다',
+    );
+  } finally {
+    withPulse.restore();
+  }
+});
+
+test('WeekTimeGridView: 동작 줄이기에서는 펄스가 튀지 않는다', async () => {
+  const module = await loadWeekTimeGridView(true);
+  const harness = renderInteractiveWeekTimeGrid(module, {
+    weekDays: Array.from({ length: 7 }, (_, index) => new Date(2026, 7, 23 + index, 12)),
+    events: [],
+    today: '2026-01-01',
+    onEventClick() {},
+    onSlotClick() {},
+    tagNameById: {},
+    calendarNameById: {},
+    activeWeekIndex: 0,
+    weekCount: 4,
+    onWeekChange() {},
+    pulseDate: '2026-08-26',
+  });
+  try {
+    const pulse = findWeekElements(harness.tree, (element) => element.props['data-navigate-pulse'] === 'true')[0];
+    assert.ok(pulse);
+    assert.equal((pulse.props as { initial?: unknown }).initial, false);
+    assert.deepEqual((pulse.props as { animate?: unknown }).animate, { opacity: 1, scale: 1 });
+    assert.deepEqual((pulse.props as { transition?: unknown }).transition, { duration: 0 });
   } finally {
     harness.restore();
   }
