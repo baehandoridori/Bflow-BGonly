@@ -551,13 +551,19 @@ type FakeResponse = {
   headers?: Record<string, string>;
   chunks?: string[];
   failWith?: Error;
+  /** 본문을 끝내지 않고 붙잡고 있는 서버. */
+  stall?: boolean;
 };
 
-function createFetcherHarness(responses: Record<string, FakeResponse>) {
+function createFetcherHarness(
+  responses: Record<string, FakeResponse>,
+  options: { overallTimeoutMs?: number } = {},
+) {
   const requested: string[] = [];
   let destroyed = 0;
 
   const fetchText = createIcsTextFetcher({
+    overallTimeoutMs: options.overallTimeoutMs,
     get(url, onResponse) {
       requested.push(url);
       const response = responses[url];
@@ -583,6 +589,7 @@ function createFetcherHarness(responses: Record<string, FakeResponse>) {
               list.push(handler);
               handlers.set(eventName, list);
               if (eventName === 'end') {
+                if (response?.stall) return;
                 queueMicrotask(() => {
                   for (const chunk of response?.chunks ?? []) {
                     for (const dataHandler of handlers.get('data') ?? []) dataHandler(chunk);
@@ -660,6 +667,16 @@ test('createIcsTextFetcher: 실패 응답과 전송 오류를 사유와 함께 �
   await assert.rejects(() => broken.fetchText('https://example.com/b.ics'), /연결이 끊겼습니다/);
 });
 
+test('createIcsTextFetcher: 본문을 끝내지 않는 서버는 전체 시한에서 끊는다', async () => {
+  const harness = createFetcherHarness(
+    { 'https://example.com/slow.ics': { stall: true, chunks: ['BEGIN:VCALENDAR'] } },
+    { overallTimeoutMs: 20 },
+  );
+
+  await assert.rejects(() => harness.fetchText('https://example.com/slow.ics'), /너무 늦습니다/);
+  assert.ok(harness.destroyedCount() > 0, '시한을 넘기면 연결을 끊는다');
+});
+
 test('createIcsTextFetcher: 상한을 넘는 본문은 받다가 끊는다', async () => {
   const oversized = 'x'.repeat(ICS_MAX_RESPONSE_BYTES + 1);
   const harness = createFetcherHarness({
@@ -680,6 +697,8 @@ function createIpcHarness() {
   let intervalHandler: (() => void) | null = null;
   let cleared = 0;
   let refreshShouldFail = false;
+  let refreshGate: Promise<void> | null = null;
+  let releaseRefresh: (() => void) | undefined;
 
   const store = {
     async list() { calls.push('list'); return []; },
@@ -703,6 +722,7 @@ function createIpcHarness() {
     async refresh(id: string | null) {
       calls.push(`refresh:${String(id)}`);
       if (refreshShouldFail) throw new Error('주기 갱신이 실패했습니다');
+      if (refreshGate) await refreshGate;
     },
     async events() { calls.push('events'); return []; },
   };
@@ -730,6 +750,9 @@ function createIpcHarness() {
     clearedCount: () => cleared,
     tick: () => intervalHandler?.(),
     failRefresh(value: boolean) { refreshShouldFail = value; },
+    holdRefresh() { refreshGate = new Promise<void>((resolve) => { releaseRefresh = resolve; }); },
+    releaseRefresh() { refreshGate = null; releaseRefresh?.(); },
+    refreshCount: () => calls.filter((entry) => entry.startsWith('refresh:')).length,
   };
 }
 
@@ -794,6 +817,27 @@ test('ICS IPC: 시작 시 한 번 채우고 30분마다 갱신하며 실패해�
 
   harness.registration.dispose();
   assert.equal(harness.clearedCount(), 1, '정리하면 주기 갱신 타이머를 해제한다');
+});
+
+test('ICS IPC: 앞선 주기 갱신이 아직 안 끝났으면 새로 시작하지 않는다', async () => {
+  const harness = createIpcHarness();
+  harness.holdRefresh();
+
+  harness.tick();
+  await Promise.resolve();
+  harness.tick();
+  await Promise.resolve();
+
+  assert.equal(harness.refreshCount(), 1, '진행 중인 갱신이 있으면 다음 주기는 건너뛴다');
+
+  harness.releaseRefresh();
+  await Promise.resolve();
+  await Promise.resolve();
+  await Promise.resolve();
+
+  harness.tick();
+  await Promise.resolve();
+  assert.equal(harness.refreshCount(), 2, '앞선 갱신이 끝나면 다시 돈다');
 });
 
 /* ── 자체 리뷰에서 찾은 결함 ─────────────────────────────────────── */

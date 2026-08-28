@@ -676,7 +676,12 @@ export interface IcsHttpRequest {
 
 export interface IcsTextFetcherDeps {
   get(url: string, onResponse: (response: IcsHttpResponse) => void): IcsHttpRequest;
+  /** 요청 하나의 전체 시한(ms). http 타임아웃은 '유휴' 기준이라 트리클 응답을 못 끊는다. */
+  overallTimeoutMs?: number;
 }
+
+/** 한 요청이 붙잡고 있을 수 있는 최대 시간. 이 시간을 넘기면 연결을 끊는다. */
+const ICS_OVERALL_TIMEOUT_MS = 60_000;
 
 function readLocationHeader(response: IcsHttpResponse): string | null {
   const raw = response.headers?.location;
@@ -695,8 +700,16 @@ export function createIcsTextFetcher(deps: IcsTextFetcherDeps): (url: string) =>
       const settle = (run: () => void): void => {
         if (settled) return;
         settled = true;
+        clearTimeout(overallTimer);
         run();
       };
+
+      // 20s http 타임아웃은 '유휴' 기준이라, 20s 미만 간격으로 찔끔찔끔 보내는 서버는
+      // 영원히 끝나지 않는다. 전체 시한을 따로 두어 갱신이 붙잡히지 않게 한다.
+      const overallTimer = setTimeout(() => {
+        request.destroy();
+        settle(() => reject(new Error('외부 캘린더 응답이 너무 늦습니다')));
+      }, deps.overallTimeoutMs ?? ICS_OVERALL_TIMEOUT_MS);
 
       // 응답 콜백은 http 모듈이 동기로 호출한다 — 여기서 던진 예외는 잡아 줄 곳이 없어
       // 메인 프로세스 uncaughtException(=앱 종료)이 된다. 본문 전체를 감싸 실패로 접는다.

@@ -83,11 +83,19 @@ export function registerIcsSubscriptionIpc(
 
   deps.handle('ics:events', async (): Promise<IcsSubscriptionEvents[]> => store.events());
 
+  // 느린 서버 하나가 갱신을 붙잡고 있으면 30분마다 새 갱신이 겹쳐 쌓인다.
+  // 겹친 갱신들은 같은 구독 객체·저장 파일을 동시에 건드리므로 한 번에 하나만 돌린다.
+  let refreshRunning = false;
   const runScheduledRefresh = (): void => {
+    if (refreshRunning) {
+      deps.logWarning?.('[ICS] 앞선 주기 갱신이 아직 진행 중이라 이번 주기는 건너뜁니다', null);
+      return;
+    }
+    refreshRunning = true;
     void store.refresh(null).catch((error: unknown) => {
       // 한 주기가 실패해도 다음 주기는 계속 돈다. 사유는 구독별 lastError에도 남는다.
       deps.logWarning?.('[ICS] 주기 갱신 실패', error);
-    });
+    }).finally(() => { refreshRunning = false; });
   };
 
   const timer = deps.setInterval(runScheduledRefresh, ICS_REFRESH_INTERVAL_MS);
