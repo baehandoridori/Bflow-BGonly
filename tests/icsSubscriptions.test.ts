@@ -613,3 +613,63 @@ test('ICS IPC: 시작 시 한 번 채우고 30분마다 갱신하며 실패해�
   harness.registration.dispose();
   assert.equal(harness.clearedCount(), 1, '정리하면 주기 갱신 타이머를 해제한다');
 });
+
+/* ── 자체 리뷰에서 찾은 결함 ─────────────────────────────────────── */
+
+test('구독 추가와 목록 조회가 겹쳐도 추가한 구독이 저장에서 빠지지 않는다', async () => {
+  // 첫 로드가 끝나기 전에 두 호출이 겹치면, 나중에 끝난 읽기가 앞선 호출의 결과를
+  // 통째로 덮어쓴다. 앱 시작 시 주기 갱신과 렌더러의 목록 조회가 실제로 겹친다.
+  let releaseSecondRead: (() => void) | undefined;
+  const secondReadGate = new Promise<void>((resolve) => { releaseSecondRead = resolve; });
+  let readCount = 0;
+  let file: string | null = null;
+
+  const store = createIcsSubscriptionStore({
+    readSubscriptionsFile: async () => {
+      readCount += 1;
+      if (readCount === 2) await secondReadGate;
+      return file;
+    },
+    writeSubscriptionsFile: async (contents: string) => { file = contents; },
+    fetchText: async () => SINGLE,
+    createId: () => 'sub-1',
+    now: () => new Date('2026-09-01T00:00:00.000Z'),
+  });
+
+  const adding = store.add({ name: '겹친 구독', url: 'https://example.com/a.ics', color: '#74B9FF' });
+  const listing = store.list();
+  await Promise.resolve();
+  releaseSecondRead?.();
+  await Promise.all([adding, listing]);
+
+  assert.equal((await store.list()).length, 1, '추가한 구독이 목록에 남는다');
+  assert.match(String(file), /겹친 구독/, '저장 파일에도 추가한 구독이 들어간다');
+  assert.equal((await store.events()).length, 1, '받아 온 일정도 유지된다');
+});
+
+test('expandIcsToEvents: 상한을 넘기면 지난 회차를 버리고 다가오는 회차를 남긴다', () => {
+  const daily = calendar(
+    'BEGIN:VEVENT', 'UID:ev-long',
+    'DTSTART;TZID=Asia/Seoul:20250101T090000', 'DTEND;TZID=Asia/Seoul:20250101T093000',
+    'RRULE:FREQ=DAILY;COUNT=900', 'SUMMARY:매일 스탠드업', 'END:VEVENT',
+  );
+  // 창 안 회차가 약 550개라 상한(500)을 넘는다.
+  const expanded = expandIcsToEvents(
+    daily,
+    { from: '2025-03-01', to: '2026-09-01' },
+    { today: '2025-09-01' },
+  );
+
+  assert.equal(expanded.truncated, true);
+  assert.equal(expanded.events.length, 500);
+  assert.equal(
+    expanded.events.at(-1)?.startDate,
+    '2026-09-01',
+    '지난 회차를 채우느라 창 끝의 다가오는 회차를 잘라 내면 안 된다',
+  );
+  assert.deepEqual(
+    expanded.events.map((event) => event.startDate),
+    [...expanded.events.map((event) => event.startDate)].sort(),
+    '출력은 여전히 날짜순이다',
+  );
+});

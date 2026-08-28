@@ -28,6 +28,14 @@ export interface IcsExpandWindow {
   to: string;
 }
 
+export interface IcsExpandOptions {
+  /**
+   * 상한을 넘겨 잘라 낼 때의 기준일(YYYY-MM-DD). 이 날짜 이후 회차를 먼저 채우고
+   * 남는 자리에만 지난 회차를 넣는다. 없으면 창 시작일을 기준으로 본다.
+   */
+  today?: string;
+}
+
 export interface IcsExpandedEvent {
   uid: string;
   title: string;
@@ -239,7 +247,11 @@ function parseCalendar(icsText: string): Record<string, unknown> | null {
  * ICS 본문을 조회 창 안의 일정 목록으로 전개한다. 반복 일정은 회차별로 펼치고,
  * 상한을 넘으면 가까운 회차부터 채운 뒤 잘라 냈다는 사실을 함께 알린다.
  */
-export function expandIcsToEvents(icsText: string, window: IcsExpandWindow): IcsExpansion {
+export function expandIcsToEvents(
+  icsText: string,
+  window: IcsExpandWindow,
+  options: IcsExpandOptions = {},
+): IcsExpansion {
   const parsed = parseCalendar(icsText);
   if (!parsed) return { events: [], truncated: false };
 
@@ -249,18 +261,31 @@ export function expandIcsToEvents(icsText: string, window: IcsExpandWindow): Ics
     collectVevent(component, window, collected);
   }
 
-  collected.sort((left, right) => {
+  const byDate = (left: IcsExpandedEvent, right: IcsExpandedEvent): number => {
     if (left.startDate !== right.startDate) return left.startDate < right.startDate ? -1 : 1;
     const leftTime = left.startTime ?? '';
     const rightTime = right.startTime ?? '';
     if (leftTime !== rightTime) return leftTime < rightTime ? -1 : 1;
     return left.uid.localeCompare(right.uid);
-  });
+  };
+  collected.sort(byDate);
 
   if (collected.length <= ICS_EVENTS_PER_SUBSCRIPTION_LIMIT) {
     return { events: collected, truncated: false };
   }
-  return { events: collected.slice(0, ICS_EVENTS_PER_SUBSCRIPTION_LIMIT), truncated: true };
+
+  // 앞에서부터 자르면 매일 반복처럼 회차가 많은 구독은 지난 일정으로 자리를 다 채우고
+  // 정작 다가오는 일정을 잘라 낸다. 기준일 이후를 먼저 채우고 남는 자리만 과거로 메운다.
+  const today = options.today ?? window.from;
+  const upcoming = collected.filter((event) => event.endDate >= today);
+  const past = collected.filter((event) => event.endDate < today);
+  const kept = upcoming.slice(0, ICS_EVENTS_PER_SUBSCRIPTION_LIMIT);
+  if (kept.length < ICS_EVENTS_PER_SUBSCRIPTION_LIMIT) {
+    // 과거는 최근 것부터 채운다.
+    kept.push(...past.slice(-(ICS_EVENTS_PER_SUBSCRIPTION_LIMIT - kept.length)));
+  }
+  kept.sort(byDate);
+  return { events: kept, truncated: true };
 }
 
 
@@ -361,11 +386,16 @@ function readErrorMessage(error: unknown): string {
 
 export function createIcsSubscriptionStore(deps: IcsSubscriptionStoreDeps): IcsSubscriptionStore {
   let subscriptions: IcsSubscription[] | null = null;
+  /**
+   * 첫 로드가 끝나기 전에 두 호출이 겹치면, 나중에 끝난 읽기가 앞선 호출이 이미 담아 둔
+   * 배열을 통째로 갈아치운다(앱 시작 시 주기 갱신과 렌더러 목록 조회가 실제로 겹친다).
+   * 진행 중인 읽기를 공유해 목록 배열이 한 번만 만들어지게 한다.
+   */
+  let loadInFlight: Promise<IcsSubscription[]> | null = null;
   /** 조회 결과는 메모리에만 둔다. 저장 파일에는 구독 설정만 남긴다. */
   const cache = new Map<string, { events: IcsExpandedEvent[]; truncated: boolean }>();
 
-  const loadSubscriptions = async (): Promise<IcsSubscription[]> => {
-    if (subscriptions) return subscriptions;
+  const readSubscriptions = async (): Promise<IcsSubscription[]> => {
     let parsed: unknown = null;
     try {
       const raw = await deps.readSubscriptionsFile();
@@ -376,10 +406,21 @@ export function createIcsSubscriptionStore(deps: IcsSubscriptionStoreDeps): IcsS
     const rows = parsed && typeof parsed === 'object'
       ? (parsed as { subscriptions?: unknown }).subscriptions
       : null;
-    subscriptions = Array.isArray(rows)
+    return Array.isArray(rows)
       ? rows.map(sanitizeSubscription).filter((row): row is IcsSubscription => row !== null)
       : [];
-    return subscriptions;
+  };
+
+  const loadSubscriptions = async (): Promise<IcsSubscription[]> => {
+    if (subscriptions) return subscriptions;
+    if (!loadInFlight) {
+      loadInFlight = readSubscriptions().then((rows) => {
+        // 먼저 끝난 로드만 목록을 만든다. 뒤늦게 끝난 읽기는 그 배열을 그대로 쓴다.
+        subscriptions ??= rows;
+        return subscriptions;
+      }).finally(() => { loadInFlight = null; });
+    }
+    return loadInFlight;
   };
 
   const persist = async (): Promise<void> => {
@@ -402,8 +443,9 @@ export function createIcsSubscriptionStore(deps: IcsSubscriptionStoreDeps): IcsS
   const fetchOne = async (subscription: IcsSubscription): Promise<void> => {
     try {
       const text = await deps.fetchText(subscription.url);
-      const window = deps.resolveWindow?.(deps.now()) ?? defaultWindow(deps.now());
-      const expanded = expandIcsToEvents(text, window);
+      const now = deps.now();
+      const window = deps.resolveWindow?.(now) ?? defaultWindow(now);
+      const expanded = expandIcsToEvents(text, window, { today: toKstFields(now).date });
       cache.set(subscription.id, { events: expanded.events, truncated: expanded.truncated });
       subscription.lastFetchedAt = deps.now().toISOString();
       subscription.lastError = null;
