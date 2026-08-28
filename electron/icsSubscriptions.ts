@@ -231,13 +231,26 @@ function collectVevent(event: IcsVevent, window: IcsExpandWindow, out: IcsExpand
   }
 }
 
+/**
+ * 응답이 캘린더 형식인지 먼저 가리고 파싱한다. 로그인 페이지 같은 비-ICS 200 응답을
+ * '일정 0건 성공'으로 접으면 멀쩡한 캐시를 빈 목록으로 덮어쓰게 되므로 실패로 던진다.
+ */
+function parseIcsCalendarOrThrow(icsText: string): Record<string, unknown> {
+  if (typeof icsText !== 'string' || !icsText.includes('BEGIN:VCALENDAR')) {
+    throw new Error('외부 캘린더 응답이 일정 형식이 아닙니다');
+  }
+  const parsed = (icalModule as unknown as {
+    sync: { parseICS(text: string): Record<string, unknown> };
+  }).sync.parseICS(icsText);
+  if (!parsed || typeof parsed !== 'object') {
+    throw new Error('외부 캘린더 응답이 일정 형식이 아닙니다');
+  }
+  return parsed;
+}
+
 function parseCalendar(icsText: string): Record<string, unknown> | null {
-  if (typeof icsText !== 'string' || !icsText.includes('BEGIN:VEVENT')) return null;
   try {
-    const parsed = (icalModule as unknown as {
-      sync: { parseICS(text: string): Record<string, unknown> };
-    }).sync.parseICS(icsText);
-    return parsed && typeof parsed === 'object' ? parsed : null;
+    return parseIcsCalendarOrThrow(icsText);
   } catch {
     return null;
   }
@@ -254,7 +267,26 @@ export function expandIcsToEvents(
 ): IcsExpansion {
   const parsed = parseCalendar(icsText);
   if (!parsed) return { events: [], truncated: false };
+  return expandParsedCalendar(parsed, window, options);
+}
 
+/**
+ * `expandIcsToEvents`와 같지만 파싱 실패를 삼키지 않고 던진다. 주기 갱신은 이 쪽을 써서
+ * 파싱 실패가 전송 실패와 같은 경로(사유 기록 + 직전 캐시 보존)로 합류하게 한다.
+ */
+export function expandIcsToEventsStrict(
+  icsText: string,
+  window: IcsExpandWindow,
+  options: IcsExpandOptions = {},
+): IcsExpansion {
+  return expandParsedCalendar(parseIcsCalendarOrThrow(icsText), window, options);
+}
+
+function expandParsedCalendar(
+  parsed: Record<string, unknown>,
+  window: IcsExpandWindow,
+  options: IcsExpandOptions,
+): IcsExpansion {
   const collected: IcsExpandedEvent[] = [];
   for (const component of Object.values(parsed)) {
     if (!isVevent(component)) continue;
@@ -445,7 +477,7 @@ export function createIcsSubscriptionStore(deps: IcsSubscriptionStoreDeps): IcsS
       const text = await deps.fetchText(subscription.url);
       const now = deps.now();
       const window = deps.resolveWindow?.(now) ?? defaultWindow(now);
-      const expanded = expandIcsToEvents(text, window, { today: toKstFields(now).date });
+      const expanded = expandIcsToEventsStrict(text, window, { today: toKstFields(now).date });
       cache.set(subscription.id, { events: expanded.events, truncated: expanded.truncated });
       subscription.lastFetchedAt = deps.now().toISOString();
       subscription.lastError = null;

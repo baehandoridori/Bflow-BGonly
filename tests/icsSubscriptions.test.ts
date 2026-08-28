@@ -359,6 +359,37 @@ test('저장된 구독은 다음 실행에서 그대로 복원된다', async () 
   assert.equal((await restored.store.events())[0].events.length, 1);
 });
 
+test('본문이 ICS가 아니면 실패로 기록하고 기존 캐시를 지킨다', async () => {
+  let call = 0;
+  const harness = createStoreHarness({
+    fetchText: async () => {
+      call += 1;
+      return call === 1 ? SINGLE : '<html><body>login</body></html>';
+    },
+  });
+  const added = await harness.store.add({ name: '팀 외부 일정', url: 'https://example.com/team.ics', color: '#74B9FF' });
+  assert.equal((await harness.store.events())[0].events.length, 1, '첫 조회는 정상');
+
+  await harness.store.refresh(added.id);
+
+  assert.equal(
+    (await harness.store.events())[0].events.length,
+    1,
+    '비-ICS 응답은 직전 캐시를 덮어쓰지 않는다',
+  );
+  assert.notEqual((await harness.store.list())[0].lastError, null, '실패 사유를 기록한다');
+});
+
+test('VEVENT가 하나도 없는 정상 캘린더는 빈 목록 성공이다', async () => {
+  const harness = createStoreHarness({
+    fetchText: async () => 'BEGIN:VCALENDAR\r\nVERSION:2.0\r\nEND:VCALENDAR',
+  });
+  await harness.store.add({ name: '빈 캘린더', url: 'https://example.com/empty.ics', color: '#74B9FF' });
+
+  assert.equal((await harness.store.list())[0].lastError, null);
+  assert.deepEqual((await harness.store.events())[0].events, []);
+});
+
 test('갱신이 끝나면 렌더러에 변경을 알린다', async () => {
   const harness = createStoreHarness();
   const added = await harness.store.add({ name: '팀 외부 일정', url: 'https://example.com/team.ics', color: '#74B9FF' });
