@@ -255,6 +255,7 @@ async function loadQuickEdit(): Promise<QuickEditComponent> {
         return {
           motion: { div: 'div' },
           AnimatePresence: ({ children }: { children: ReactNode }) => children,
+          useIsPresent: () => true,
         };
       }
       if (id === 'lucide-react') {

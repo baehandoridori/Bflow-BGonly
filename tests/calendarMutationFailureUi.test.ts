@@ -32,6 +32,20 @@ type TestCalendarEvent = {
   endTime?: string;
 };
 
+let quickEditIsPresent = true;
+const quickEditDocumentListeners = new Map<string, Set<(event: unknown) => void>>();
+
+/** 팝업이 document에 건 닫기 리스너를 직접 발화해 본다. */
+function captureQuickEditDocumentListeners() {
+  quickEditDocumentListeners.clear();
+  return {
+    fire(type: string, event: Record<string, unknown>) {
+      for (const listener of [...(quickEditDocumentListeners.get(type) ?? [])]) listener(event);
+    },
+    restore() { quickEditDocumentListeners.clear(); },
+  };
+}
+
 type ButtonElement = ReactElement<{
   children?: ReactNode;
   onClick?: () => unknown;
@@ -179,6 +193,7 @@ function runtimeRequireFactory(nodeRequire: NodeRequire): (id: string) => unknow
       return {
         motion: { div: 'div' },
         AnimatePresence: ({ children }: { children: ReactNode }) => children,
+        useIsPresent: () => quickEditIsPresent,
       };
     }
     if (id === 'lucide-react') {
@@ -451,8 +466,14 @@ async function renderQuickEdit(
   const previousDocument = globalScope.document;
   globalScope.document = {
     body: {},
-    addEventListener() {},
-    removeEventListener() {},
+    addEventListener(type: string, listener: (event: unknown) => void) {
+      const bucket = quickEditDocumentListeners.get(type) ?? new Set();
+      bucket.add(listener);
+      quickEditDocumentListeners.set(type, bucket);
+    },
+    removeEventListener(type: string, listener: (event: unknown) => void) {
+      quickEditDocumentListeners.get(type)?.delete(listener);
+    },
   };
   activeHooks = store;
   resetHookCursors(store);
@@ -1276,4 +1297,125 @@ test('quick edit closes on a successful duplicate', async () => {
   await Promise.resolve();
 
   assert.equal(closeCalls, 1, '복사가 성공하면 평소처럼 닫힌다');
+});
+
+test('quick edit ignores outside clicks and Escape while it is animating away', async () => {
+  const hooks = createHookStore();
+  let closeCalls = 0;
+  const callbacks = { onClose: () => { closeCalls += 1; }, onUpdate: () => {}, onDelete: () => {} };
+  const listeners = captureQuickEditDocumentListeners();
+  // 하네스 계약: 같은 이벤트 객체를 재사용해야 rehydrate effect가 돌지 않는다.
+  const target = event();
+  try {
+    quickEditIsPresent = false;
+    await renderQuickEdit(hooks, callbacks, target, true);
+
+    listeners.fire('mousedown', { target: {} });
+    listeners.fire('keydown', { key: 'Escape' });
+    assert.equal(closeCalls, 0, 'exit 중인 인스턴스는 새 팝업의 첫 클릭을 삼키지 않는다');
+  } finally {
+    quickEditIsPresent = true;
+    listeners.restore();
+  }
+});
+
+test('quick edit refuses to close while a save is still pending', async () => {
+  const hooks = createHookStore();
+  let closeCalls = 0;
+  const persistence = deferredThenable();
+  const callbacks = {
+    onClose: () => { closeCalls += 1; },
+    onUpdate: () => persistence.promise,
+    onDelete: () => {},
+  };
+  const listeners = captureQuickEditDocumentListeners();
+  // 하네스 계약: 같은 이벤트 객체를 재사용해야 rehydrate effect가 초안을 지우지 않는다.
+  const target = event();
+  try {
+    await renderQuickEdit(hooks, callbacks, target, true);
+    hooks.state[1] = 'edit';
+    hooks.state[2] = '바꾼 일정';
+    await invoke(findButtonByText(await renderQuickEdit(hooks, callbacks, target, true), '저장'));
+
+    listeners.fire('mousedown', { target: {} });
+    listeners.fire('keydown', { key: 'Escape' });
+    assert.equal(closeCalls, 0, '저장 중에 닫으면 실패 안내를 띄울 곳이 사라진다');
+
+    persistence.reject(new Error('save failed'));
+    const recovered = await renderQuickEdit(hooks, callbacks, target, true);
+    assert.match(textContent(recovered), /일정 저장에 실패했어요/);
+  } finally {
+    listeners.restore();
+  }
+});
+
+function findSelects(node: ReactNode): ReactElement<Record<string, unknown>>[] {
+  if (Array.isArray(node)) return node.flatMap(findSelects);
+  if (!isValidElement(node)) return [];
+  const element = node as ReactElement<Record<string, unknown>>;
+  return [
+    ...(element.type === 'select' ? [element] : []),
+    ...findSelects(element.props.children as ReactNode),
+  ];
+}
+
+test('editors lock calendar, tag and chip pickers while a save is pending', async () => {
+  // 퀵에디트: 저장 대기 중에는 캘린더·태그 변경 요청 자체를 보내지 않는다.
+  const quickHooks = createHookStore();
+  const quickTarget = event({
+    source: 'bflow',
+    sourceCalendarId: 'bflow:calendar-1',
+    calendarId: 'calendar-1',
+  });
+  const updates: Array<Partial<TestCalendarEvent>> = [];
+  const persistence = deferredThenable();
+  const quickCallbacks = {
+    onClose: () => {},
+    onUpdate: (_id: string, patch: Partial<TestCalendarEvent>) => {
+      updates.push(patch);
+      return persistence.promise;
+    },
+    onDelete: () => {},
+  };
+
+  await renderQuickEdit(quickHooks, quickCallbacks, quickTarget, true);
+  quickHooks.state[1] = 'edit';
+  quickHooks.state[2] = '바꾼 일정';
+  await invoke(findButtonByText(await renderQuickEdit(quickHooks, quickCallbacks, quickTarget, true), '저장'));
+  assert.equal(updates.length, 1, '저장 요청이 하나 나갔다');
+
+  const pendingTree = await renderQuickEdit(quickHooks, quickCallbacks, quickTarget, true);
+  const calendarSelect = findSelects(pendingTree)
+    .find((element) => element.props['aria-label'] === '캘린더');
+  if (calendarSelect) {
+    (calendarSelect.props.onChange as ((changeEvent: unknown) => void) | undefined)?.({
+      target: { value: 'calendar-2' },
+    });
+    await Promise.resolve();
+  }
+  assert.equal(updates.length, 1, '저장 대기 중에는 캘린더 변경을 보내지 않는다');
+
+  // 상세 패널: 저장 대기 중에는 태그 칩도 잠근다.
+  const panelHooks = createHookStore();
+  const panelTarget = event({
+    source: 'bflow',
+    sourceCalendarId: 'bflow:calendar-1',
+    calendarId: 'calendar-1',
+  });
+  const panelPersistence = deferredThenable();
+  const panelCallbacks = {
+    onClose: () => {},
+    onUpdate: () => panelPersistence.promise,
+    onDelete: () => {},
+  };
+
+  await renderSidePanel(panelHooks, panelCallbacks, panelTarget, true);
+  panelHooks.state[0] = true;
+  panelHooks.state[1] = '바꾼 일정';
+  await invoke(findButtonByText(await renderSidePanel(panelHooks, panelCallbacks, panelTarget, true), '저장'));
+
+  const panelPending = await renderSidePanel(panelHooks, panelCallbacks, panelTarget, true);
+  const noneChip = findButtons(panelPending).find((button) => textContent(button).trim() === '없음');
+  assert.ok(noneChip, "태그 '없음' 칩이 있다");
+  assert.equal(noneChip.props.disabled, true, '저장 대기 중에는 태그 칩도 잠근다');
 });

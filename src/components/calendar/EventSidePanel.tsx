@@ -591,8 +591,9 @@ export function EventSidePanel({
                   <button
                     type="button"
                     aria-pressed={draftTagId === undefined}
+                    disabled={isMutating}
                     onClick={() => setDraftTagId(undefined)}
-                    className={`rounded-full px-2 py-1 text-[10px] ${draftTagId === undefined ? 'bg-accent/20 text-accent' : 'bg-bg-primary/70 text-text-secondary'}`}
+                    className={`rounded-full px-2 py-1 text-[10px] disabled:opacity-45 ${draftTagId === undefined ? 'bg-accent/20 text-accent' : 'bg-bg-primary/70 text-text-secondary'}`}
                   >
                     없음
                   </button>
@@ -603,8 +604,9 @@ export function EventSidePanel({
                         type="button"
                         key={tag.id}
                         aria-pressed={selected}
+                        disabled={isMutating}
                         onClick={() => setDraftTagId(tag.id)}
-                        className="rounded-full border px-2 py-1 text-[10px]"
+                        className="rounded-full border px-2 py-1 text-[10px] disabled:opacity-45"
                         style={{
                           color: selected ? tag.color : 'rgb(var(--color-text-secondary))',
                           borderColor: selected ? tag.color : 'rgb(var(--color-bg-border) / 0.7)',

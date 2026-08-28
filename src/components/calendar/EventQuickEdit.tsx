@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { createPortal } from 'react-dom';
-import { motion } from 'framer-motion';
+import { motion, useIsPresent } from 'framer-motion';
 import { CalendarDays, Copy, Pencil, Tags, Trash2 } from 'lucide-react';
 import type { CalendarEvent, CalendarEventType } from '@/types/calendar';
 import { useAppStore } from '@/stores/useAppStore';
@@ -84,6 +84,10 @@ export function EventQuickEdit({
   const latestEventRef = useRef(event);
   const pendingMutationRef = useRef<LocalMutationRecovery | null>(null);
   const failedMutationRecoveryRef = useRef<LocalMutationRecovery | null>(null);
+  // exit 애니메이션이 끝나기 전까지 이 인스턴스의 리스너는 살아 있다.
+  const isPresent = useIsPresent();
+  const isPresentRef = useRef(true);
+  isPresentRef.current = isPresent !== false;
 
   const isVacation = event.type === 'vacation';
   const isWriteProtected = event.isReadOnly === true || event.canEdit === false;
@@ -129,10 +133,19 @@ export function EventQuickEdit({
   }, [position]);
 
   useEffect(() => {
+    /**
+     * 닫히지 말아야 할 두 경우를 함께 막는다.
+     * ① exit 애니메이션(150ms) 중인 죽은 인스턴스의 리스너가 살아 있어, 새로 연 팝업의
+     *    첫 클릭을 그 인스턴스가 삼켜 버린다.
+     * ② 저장·삭제가 진행 중일 때 닫으면 실패 안내를 띄울 곳이 사라진다.
+     */
+    const shouldIgnore = () => !isPresentRef.current || pendingMutationRef.current !== null;
     const handleClick = (mouseEvent: MouseEvent) => {
+      if (shouldIgnore()) return;
       if (ref.current && !ref.current.contains(mouseEvent.target as Node)) onClose();
     };
     const handleKey = (keyboardEvent: KeyboardEvent) => {
+      if (shouldIgnore()) return;
       if (keyboardEvent.key === 'Escape') onClose();
     };
     document.addEventListener('mousedown', handleClick);
@@ -304,6 +317,7 @@ export function EventQuickEdit({
   }, [beginMutation, event, eventIdentityKey, eventSnapshot, markMutationFailed, onClose, onDuplicate, settleMutation]);
 
   const handleCalendarChange = useCallback(async (calendarId: string) => {
+    if (pendingMutationRef.current) return;
     if (!canWrite || !isCanonicalBflow || calendarSelectionPending || calendarId === displayedCalendarId) return;
     const requestId = ++calendarUpdateRequestRef.current;
     setPendingCalendar({
@@ -320,6 +334,7 @@ export function EventQuickEdit({
   }, [calendarSelectionPending, canWrite, displayedCalendarId, event.id, isCanonicalBflow, onUpdate]);
 
   const handleTagChange = useCallback(async (tagId: string | undefined) => {
+    if (pendingMutationRef.current) return;
     if (!canWrite || !isCanonicalBflow || tagSelectionPending || tagId === displayedTagId) return;
     const requestId = ++tagUpdateRequestRef.current;
     setPendingTag({
