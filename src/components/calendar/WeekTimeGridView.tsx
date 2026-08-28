@@ -547,7 +547,12 @@ export function WeekTimeGridView({
                     if (timeGridDnD.isPersisting(bar.event)) return;
                     onEventClick(bar.event);
                   }}
-                  onContextMenu={onEventContextMenu ? (event) => onEventContextMenu(bar.event, event) : undefined}
+                  onContextMenu={onEventContextMenu ? (event) => {
+                    // 좌클릭과 같은 이유로 막는다 — 저장 대기 중 퀵에디트를 열면
+                    // 같은 일정에 두 번째 저장이 겹쳐 예전 드롭이 방금 옮긴 자리를 되돌린다.
+                    if (timeGridDnD.isPersisting(bar.event)) return;
+                    onEventContextMenu(bar.event, event);
+                  } : undefined}
                 >
                   {label}
                 </button>
@@ -895,7 +900,10 @@ function TimeBand({
                       if (isPersisting) return;
                       onEventClick(block.event);
                     }}
-                    onContextMenu={onEventContextMenu ? (event) => onEventContextMenu(block.event, event) : undefined}
+                    onContextMenu={onEventContextMenu ? (event) => {
+                      if (isPersisting) return;
+                      onEventContextMenu(block.event, event);
+                    } : undefined}
                     {...eventDragProps}
                   >
                     {canShowText && duration >= 30 && <span data-time-grid-time="true" data-time-grid-live-label={isPreviewed ? 'true' : undefined} className="block truncate" style={{ color: visualStyle.timeColor, fontSize: 9 }}>{timeLabel}</span>}

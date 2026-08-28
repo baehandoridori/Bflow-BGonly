@@ -1048,3 +1048,76 @@ test('WeekTimeGridView: 앞선 드롭이 저장 중이면 그 일정의 편집�
     harness.restore();
   }
 });
+
+test('WeekTimeGridView: 저장 중인 블록은 우클릭 편집도 열지 않는다', async () => {
+  const module = await loadWeekTimeGridView();
+  const contextOpened: string[] = [];
+  const pendingEvent = event({
+    id: 'pending-save',
+    title: '저장 중 일정',
+    startDate: '2026-08-25',
+    endDate: '2026-08-25',
+    startTime: '10:00',
+    endTime: '11:00',
+  });
+  const settledEvent = event({
+    id: 'settled',
+    title: '저장 끝난 일정',
+    startDate: '2026-08-26',
+    endDate: '2026-08-26',
+    startTime: '10:00',
+    endTime: '11:00',
+  });
+  const allDayPending = event({
+    id: 'pending-save-allday',
+    title: '저장 중 종일',
+    startDate: '2026-08-25',
+    endDate: '2026-08-25',
+    allDay: true,
+  });
+
+  const props = {
+    weekDays: Array.from({ length: 7 }, (_, index) => new Date(2026, 7, 23 + index, 12)),
+    events: [pendingEvent, settledEvent, allDayPending],
+    today: '2026-01-01',
+    onEventClick() {},
+    onEventContextMenu: (target: CalendarEvent) => { contextOpened.push(target.id); },
+    onSlotClick() {},
+    tagNameById: {},
+    calendarNameById: {},
+    activeWeekIndex: 0,
+    weekCount: 4,
+    onWeekChange() {},
+  };
+
+  const harness = renderInteractiveWeekTimeGrid(module, props);
+  try {
+    timeGridDndStub.shouldSuppressClick = () => false;
+    timeGridDndStub.isPersisting = (candidate: { id: string }) => candidate.id.startsWith('pending-save');
+
+    const rerendered = renderInteractiveWeekTimeGrid(module, props);
+    try {
+      const contextByTitle = (title: string) => {
+        const target = findWeekElements(rerendered.tree, (element) => (
+          typeof element.props['aria-label'] === 'string'
+          && (element.props['aria-label'] as string).includes(title)
+        ))[0];
+        assert.ok(target, `${title} 요소를 찾을 수 있다`);
+        (target.props.onContextMenu as ((mouse: unknown) => void) | undefined)?.({
+          preventDefault() {}, stopPropagation() {}, clientX: 0, clientY: 0,
+        });
+      };
+
+      contextByTitle('저장 중 일정');
+      contextByTitle('저장 중 종일');
+      assert.deepEqual(contextOpened, [], '저장이 끝나기 전에는 퀵에디트도 열지 않는다');
+
+      contextByTitle('저장 끝난 일정');
+      assert.deepEqual(contextOpened, ['settled'], '저장이 끝난 일정은 평소처럼 열린다');
+    } finally {
+      rerendered.restore();
+    }
+  } finally {
+    harness.restore();
+  }
+});
