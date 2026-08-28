@@ -53,6 +53,11 @@ type WeekSubMode = 'card' | 'timegrid';
 const CALENDAR_VIEW_STORAGE_KEY = 'bflow_calendar_view_v1';
 const CALENDAR_VIEW_MODES: CalendarViewMode[] = ['month', '2week', 'week', 'today'];
 const LOCAL_CHANGE_GUARD_MS = 3_000;
+/** 캘린더 단축키 — 한글 입력 모드에서는 물리 키(e.code)로 폴백한다. */
+const CALENDAR_SHORTCUT_KEYS = new Set(['t', 'w', 'm', 'c']);
+const CALENDAR_SHORTCUT_BY_CODE: Record<string, string> = {
+  KeyT: 't', KeyW: 'w', KeyM: 'm', KeyC: 'c',
+};
 /** '오늘' 이동 펄스 길이. */
 const TODAY_PULSE_MS = 2_500;
 /** 미니 달력·딥링크 이동 펄스 길이. */
@@ -528,7 +533,10 @@ export function ScheduleView() {
         }
         await refresh({ suppressRealtimeHighlight: true });
       } finally {
-        if (!cancelled) isInitialCalendarSyncRef.current = false;
+        if (!cancelled) {
+          isInitialCalendarSyncRef.current = false;
+          setEventsLoaded(true);
+        }
       }
     })();
     const handleCalendarChanged = (event: Event) => {
@@ -1015,7 +1023,12 @@ export function ScheduleView() {
         || (e.shiftKey && !isHelpShortcut)
       ) return;
 
-      const key = e.key.toLowerCase();
+      // 한글 입력 모드에서는 e.key가 'ㅅ'·'Process' 같은 값이 되어 T/W/M/C가 죽는다.
+      // 그럴 때만 물리 키(e.code)로 폴백한다 — 영문 모드 동작은 그대로다.
+      const rawKey = e.key.toLowerCase();
+      const key = CALENDAR_SHORTCUT_KEYS.has(rawKey)
+        ? rawKey
+        : CALENDAR_SHORTCUT_BY_CODE[e.code] ?? rawKey;
 
       if (isHelpShortcut) {
         e.preventDefault();
@@ -1355,6 +1368,8 @@ export function ScheduleView() {
    * 본화면은 날짜를 실제로 고를 때만 움직인다. 새 useState는 기존 선언들 뒤에 둔다.
    */
   const [miniCalendarBrowseMonth, setMiniCalendarBrowseMonth] = useState<Date | null>(null);
+  /** 첫 정본 로드가 끝났는지. 로드 전에는 빈 상태 안내를 띄우지 않는다(진입 직후 오탐). */
+  const [eventsLoaded, setEventsLoaded] = useState(false);
   // 주간·2주는 보고 있는 주를, 오늘 보기는 그 날짜를, 월간은 키보드 포커스 날짜를 표시한다.
   const miniCalendarActiveWeekStart = useMemo(() => {
     if (viewMode !== 'week' && viewMode !== '2week') return undefined;
@@ -1674,6 +1689,7 @@ export function ScheduleView() {
                 monthKey={`${year}-${month}`}
                 monthDirection={monthDir}
                 instantTransition={skipPeriodTransition}
+                eventsLoaded={eventsLoaded}
                 focusedDate={focusedDate}
                 pulseDate={pulseDate}
                 highlightedEventIdentities={highlightedEventIdentities}

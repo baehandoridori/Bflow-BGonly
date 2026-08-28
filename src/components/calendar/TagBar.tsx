@@ -29,6 +29,8 @@ function TagChip({ name, color, enabled, reduce, onClick }: TagChipProps) {
       aria-label={`${name} 태그`}
       aria-pressed={enabled}
       onClick={onClick}
+      // 마운트 때 칩들이 일제히 튀지 않게 한다. 토글할 때만 pop이 재생된다.
+      initial={false}
       animate={reduce ? undefined : { scale: enabled ? [1, 1.12, 1] : [1, 0.92, 1] }}
       transition={reduce ? { duration: 0 } : TAG_CHIP_POP}
       className="rounded-full border px-2.5 py-1 text-xs font-medium transition-colors cursor-pointer"

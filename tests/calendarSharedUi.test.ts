@@ -110,6 +110,7 @@ type ScheduleGridProps = {
   focusedDate?: string | null;
   pulseDate?: string | null;
   instantTransition?: boolean;
+  eventsLoaded?: boolean;
   highlightedEventIdentities?: ReadonlySet<string>;
   reduceMotion?: boolean;
   onEventClick(event: ScheduleCalendarEvent): void;
@@ -2295,11 +2296,12 @@ async function flushScheduleMountEffects(): Promise<void> {
 function dispatchScheduleKeydown(
   key: string,
   target: { tagName: string; isContentEditable?: boolean } = { tagName: 'DIV' },
-  modifiers: { ctrlKey?: boolean; metaKey?: boolean; altKey?: boolean; shiftKey?: boolean } = {},
+  modifiers: { ctrlKey?: boolean; metaKey?: boolean; altKey?: boolean; shiftKey?: boolean; code?: string } = {},
 ): void {
   const event = {
     key,
     target,
+    code: '',
     ...modifiers,
     preventDefault() {},
     stopPropagation() {},
@@ -6251,6 +6253,39 @@ test('the month grid explains an empty month without blocking the create path', 
   assert.match(textContent(neighbourTree), /이번 달 일정이 없습니다/);
 });
 
+test('calendar shortcuts still work while the Korean IME is on', async () => {
+  resetHarness();
+  await renderScheduleView();
+  await flushScheduleMountEffects();
+
+  // 한글 모드에서는 e.key가 조합 중 값('Process')으로 오고, 물리 키는 e.code에 남는다.
+  dispatchScheduleKeydown('Process', { tagName: 'DIV' }, { code: 'KeyW' });
+  await renderScheduleView();
+  assert.ok(scheduleWeekScrollProps.at(-1), '한글 모드에서도 W가 주간 보기를 연다');
+
+  for (const cleanup of scheduleMountedEffectCleanups.splice(0).reverse()) cleanup();
+  await flushScheduleMountEffects();
+  const monthRendersBefore = scheduleGridProps.length;
+  dispatchScheduleKeydown('ㅡ', { tagName: 'DIV' }, { code: 'KeyM' });
+  await renderScheduleView();
+  assert.equal(scheduleGridProps.length, monthRendersBefore + 1, '한글 모드에서도 M이 월 보기를 연다');
+});
+
+test('the month empty-state waits for the first load', async () => {
+  resetHarness();
+  scheduleCanonicalEvents = [];
+  await renderScheduleView();
+  assert.equal(
+    scheduleGridProps.at(-1)?.eventsLoaded,
+    false,
+    '첫 로드가 끝나기 전에는 빈 상태 안내를 띄우지 않는다',
+  );
+
+  await flushScheduleMountEffects();
+  await renderScheduleView();
+  assert.equal(scheduleGridProps.at(-1)?.eventsLoaded, true, '로드가 끝나면 안내를 띄운다');
+});
+
 test('a later move pulse is not cut short by the earlier one', async () => {
   resetHarness();
   let tree = await renderScheduleView();
@@ -6567,6 +6602,11 @@ test('tag chips pop on toggle and the filtered result fades instead of jumping',
     assert.deepEqual(
       (enabledChip.props as { transition?: unknown }).transition,
       { duration: 0.35, ease: [0.16, 1, 0.3, 1] },
+    );
+    assert.equal(
+      (enabledChip.props as { initial?: unknown }).initial,
+      false,
+      '칩은 마운트 때 일제히 튀지 않고 토글할 때만 재생한다',
     );
 
     tagBarReducedMotion = true;

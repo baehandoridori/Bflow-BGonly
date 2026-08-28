@@ -454,6 +454,7 @@ export function CalendarGrid({
   monthKey,
   monthDirection = 0,
   instantTransition = false,
+  eventsLoaded = true,
   focusedDate,
   pulseDate,
   highlightedEventIdentities,
@@ -478,6 +479,8 @@ export function CalendarGrid({
   monthKey?: string;
   monthDirection?: number;
   instantTransition?: boolean;
+  /** 일정 첫 로드가 끝났는지. 로드 전에는 '일정이 없다'고 단정하지 않는다. */
+  eventsLoaded?: boolean;
   focusedDate?: string | null;
   pulseDate?: string | null;
   highlightedEventIdentities?: ReadonlySet<string>;
@@ -535,8 +538,8 @@ export function CalendarGrid({
         transition={instantTransition ? { duration: 0 } : { duration: 0.3, ease: [0.16, 1, 0.3, 1] }}
         className="relative flex flex-col flex-1 min-h-0 rounded-xl overflow-hidden border border-bg-border/30"
       >
-        {!hasCurrentMonthEvent && (
-          <div className="pointer-events-none absolute inset-0 z-0 flex flex-col items-center justify-center gap-2">
+        {eventsLoaded && !hasCurrentMonthEvent && (
+          <div className="pointer-events-none absolute inset-0 z-10 flex flex-col items-center justify-center gap-2">
             <CalendarDays size={36} className="text-text-secondary/60" />
             <span className="text-sm text-text-secondary">이번 달 일정이 없습니다</span>
             <span className="text-[11px] text-text-secondary/60">날짜를 눌러 새 일정을 만들어 보세요</span>
