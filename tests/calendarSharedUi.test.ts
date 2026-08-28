@@ -1527,17 +1527,28 @@ async function loadScheduleView(): Promise<ScheduleViewComponent> {
       if (id === '@/utils/createUuid') {
         return { createUuid: () => scheduleCreateUuidValues.shift() ?? 'new-id' };
       }
-      if (id === '@/utils/calendarDate') return {
-        fmtDate: scheduleFmtDate,
-        parseDate: (date: string) => new Date(`${date}T12:00:00`),
-        addDays: (date: Date, days: number) => new Date(date.getFullYear(), date.getMonth(), date.getDate() + days, 12),
-        getISOWeekNumber: (value: Date) => {
+      if (id === '@/utils/calendarDate') {
+        const getISOWeekNumber = (value: Date) => {
           const date = new Date(value.getFullYear(), value.getMonth(), value.getDate());
           date.setDate(date.getDate() + 4 - (date.getDay() || 7));
           const yearStart = new Date(date.getFullYear(), 0, 1);
           return Math.ceil(((date.getTime() - yearStart.getTime()) / 86400000 + 1) / 7);
-        },
-      };
+        };
+        return {
+          fmtDate: scheduleFmtDate,
+          parseDate: (date: string) => new Date(`${date}T12:00:00`),
+          addDays: (date: Date, days: number) => new Date(date.getFullYear(), date.getMonth(), date.getDate() + days, 12),
+          getISOWeekNumber,
+          formatWeekHeaderLabel: (startWeek: readonly Date[], endWeek: readonly Date[]) => {
+            const first = startWeek[0];
+            const last = endWeek[6];
+            const anchor = startWeek[4];
+            if (!first || !last || !anchor) return '';
+            const range = `${first.getMonth() + 1}.${first.getDate()} – ${last.getMonth() + 1}.${last.getDate()}`;
+            return `${anchor.getFullYear()}년 ${anchor.getMonth() + 1}월 · ${getISOWeekNumber(anchor)}주차 · ${range}`;
+          },
+        };
+      }
       if (id === '@/utils/calendarEventFilter') return { filterCalendarEvents: (events: unknown[]) => events };
       if (id === '@/components/calendar/CalendarGrid') {
         return { CalendarGrid: (props: ScheduleGridProps) => { scheduleGridProps.push(props); return jsxRuntime.jsx('div', { 'data-testid': 'calendar-grid', children: '캘린더 그리드' }); } };

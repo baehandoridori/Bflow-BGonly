@@ -43,7 +43,7 @@ import {
 } from '@/utils/calendarEventIdentity';
 import { navigateToSceneView } from '@/utils/sceneNavigationAction';
 import { createUuid } from '@/utils/createUuid';
-import { fmtDate, parseDate, addDays, getISOWeekNumber } from '@/utils/calendarDate';
+import { fmtDate, parseDate, addDays, formatWeekHeaderLabel } from '@/utils/calendarDate';
 import { useMotionPref } from '@/hooks/useMotionPref';
 import { buildEventSnapshot, diffEventSnapshots, type CalendarEventSnapshot } from '@/utils/calendarEventDiff';
 import { eventContentSnapshot, withCalendarPresentationForSnapshot } from '@/utils/calendarLocalMutation';
@@ -1325,11 +1325,7 @@ export function ScheduleView() {
       const endWeek = viewMode === '2week'
         ? weeks[Math.min(activeWeekIndex + 1, weeks.length - 1)]
         : startWeek;
-      const first = startWeek[0];
-      const last = endWeek[6];
-      const anchor = startWeek[3]; // 목요일 기준 ISO 주차
-      const range = `${first.getMonth() + 1}.${first.getDate()} – ${last.getMonth() + 1}.${last.getDate()}`;
-      return `${anchor.getFullYear()}년 ${anchor.getMonth() + 1}월 · ${getISOWeekNumber(anchor)}주차 · ${range}`;
+      return formatWeekHeaderLabel(startWeek, endWeek);
     }
     return '';
   }, [viewMode, year, month, weeks, activeWeekIndex]);
