@@ -1255,8 +1255,11 @@ export function ScheduleView() {
     const isCanonicalBflow = event.sourceCalendarId?.startsWith('bflow:') === true
       && Boolean(event.calendarId);
     const isWriteProtected = event.isReadOnly === true || event.canEdit === false;
+    // 구독(ICS) 일정은 calendarId가 없어 그대로 두면 구글 primary 생성 경로로 흘러간다.
+    // 복사본은 언제나 내 개인 캘린더에 만든다.
+    const isIcs = event.source === 'ics' || event.sourceCalendarId?.startsWith('ics:') === true;
     let duplicateCalendarId = event.calendarId;
-    if (isCanonicalBflow && isWriteProtected) {
+    if ((isCanonicalBflow && isWriteProtected) || isIcs) {
       const personal = useCalendarStore.getState().calendars.find((calendar) => (
         calendar.isPersonal && calendar.canEdit
       ));

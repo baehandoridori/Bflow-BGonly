@@ -7333,6 +7333,48 @@ test('ScheduleView quick edit removes the color callback and duplicates a read-o
   assert.notEqual(scheduleAddedEvents[0].calendarId, readOnly.calendarId);
 });
 
+test('ScheduleView duplicates a subscribed (ICS) event into the editable personal calendar', async () => {
+  resetHarness();
+  const subscribed: ScheduleCalendarEvent = {
+    id: 'ics:sub-1:ext-1:2026-08-25',
+    title: '외부 세미나',
+    memo: '',
+    color: '#00B894',
+    type: 'custom',
+    startDate: '2026-08-25',
+    endDate: '2026-08-25',
+    createdBy: '외부 팀 캘린더',
+    createdAt: '2026-08-24T00:00:00.000Z',
+    source: 'ics',
+    sourceCalendarId: 'ics:sub-1',
+    canEdit: false,
+    isReadOnly: true,
+  };
+
+  await renderScheduleView();
+  stateSlots[0] = [subscribed];
+  await renderScheduleView();
+  scheduleGridProps.at(-1)?.onEventContextMenu(subscribed, {
+    preventDefault() {},
+    stopPropagation() {},
+    clientX: 100,
+    clientY: 120,
+  });
+  await renderScheduleView();
+  const quickEdit = scheduleQuickEditProps.at(-1);
+  assert.ok(quickEdit);
+  await quickEdit.onDuplicate(subscribed);
+
+  assert.equal(scheduleAddedEvents.length, 1);
+  assert.equal(
+    scheduleAddedEvents[0].calendarId,
+    'mine',
+    '구독 일정 복사는 편집 가능한 개인 캘린더로 간다',
+  );
+  assert.equal(scheduleAddedEvents[0].source, undefined);
+  assert.equal(scheduleAddedEvents[0].sourceCalendarId, undefined);
+});
+
 test('CalendarSettingsModal creates a members calendar atomically and reloads before closing', async () => {
   resetHarness();
   let tree = await renderCalendarSettingsModal();
