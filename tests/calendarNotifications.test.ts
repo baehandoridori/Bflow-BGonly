@@ -1139,6 +1139,49 @@ test('preview calendar fanout deterministically converges concurrent updates of 
   }
 });
 
+test('preview calendar fanout keeps a name edit when the other window only changes members', async () => {
+  const restoreBroadcastChannel = installPreviewCalendarBroadcastChannel({ deferMessages: true });
+  const owner = await createPreviewCalendarNotificationHarness();
+  const other = await createPreviewCalendarNotificationHarness();
+  const unsubscribeOwner = owner.api.onCalendarChanged(() => {});
+  const unsubscribeOther = other.api.onCalendarChanged(() => {});
+  try {
+    await previewLogin(owner.api, '배한솔');
+    await previewLogin(other.api, '배한솔');
+    const shared = await owner.api.calendarCreate({
+      name: '이름 수정 전 캘린더',
+      color: '#74B9FF',
+      visibility: 'members',
+    });
+    restoreBroadcastChannel.flush();
+
+    // A창이 이름을 바꾸는 사이, 그 변경을 아직 못 받은 B창이 멤버만 바꾼다.
+    // 멤버-only 봉투는 changedFields가 비어 있고 스냅샷에는 예전 이름이 담겨 있다.
+    // B의 봉투가 더 나중이 되도록(=LWW 승자) 시계를 밀어 최악의 순서를 만든다.
+    const realNow = Date.now;
+    try {
+      Date.now = () => realNow() - 1_000;
+      await owner.api.calendarUpdate(shared.id, { name: '바뀐 이름' });
+      Date.now = () => realNow() + 1_000;
+      await other.api.calendarUpdate(shared.id, { members: [{ user_id: '2', can_edit: true }] });
+    } finally {
+      Date.now = realNow;
+    }
+    restoreBroadcastChannel.flush();
+
+    const ownerRow = (await owner.api.calendarList()).find((calendar) => calendar.id === shared.id);
+    const otherRow = (await other.api.calendarList()).find((calendar) => calendar.id === shared.id);
+    assert.equal(ownerRow?.name, '바뀐 이름', '멤버만 바꾼 봉투가 이름 수정을 되돌리지 않는다');
+    assert.equal(otherRow?.name, '바뀐 이름', '두 창의 이름이 같은 값으로 수렴한다');
+  } finally {
+    unsubscribeOther();
+    unsubscribeOwner();
+    other.restore();
+    owner.restore();
+    restoreBroadcastChannel();
+  }
+});
+
 test('preview calendar fanout never revives a locally deleted calendar from an older remote update', async () => {
   const restoreBroadcastChannel = installPreviewCalendarBroadcastChannel({ deferMessages: true });
   const actor = await createPreviewCalendarNotificationHarness();

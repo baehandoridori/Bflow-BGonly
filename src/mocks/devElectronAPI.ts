@@ -703,7 +703,10 @@ function applyMockCalendarSharedSnapshot(
     const changedFields = readMockCalendarChangeIds(detail, 'changedFields')
       .filter((field) => MERGEABLE_MOCK_CALENDAR_FIELDS.has(field));
     const localCalendar = mockCalendars.find((candidate) => candidate.id === calendarId);
-    if (action === 'UPDATE' && changedFields.length > 0 && localCalendar) {
+    if (action === 'UPDATE' && localCalendar) {
+      // 이미 있는 행은 '바뀐 필드'만 얹는다. 멤버만 바꾼 봉투(changedFields 빈 배열)를
+      // 행 전체 upsert로 처리하면, 동시에 진행된 상대 창의 이름·색·공개범위 수정을
+      // 송신자의 낡은 스냅샷으로 되돌린다. 필드가 없으면 아래 멤버 처리만 남는다.
       for (const field of changedFields) {
         if (!rememberMockCalendarChangeStamp(mockCalendarFieldChangeKey(calendarId, field), stamp)) continue;
         (localCalendar as unknown as Record<string, unknown>)[field] =
