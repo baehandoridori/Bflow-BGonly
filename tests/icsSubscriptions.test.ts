@@ -533,6 +533,22 @@ test('VEVENT가 하나도 없는 정상 캘린더는 빈 목록 성공이다', a
   assert.deepEqual((await harness.store.events())[0].events, []);
 });
 
+test('목록은 상한을 넘겨 잘렸는지도 함께 알려 준다', async () => {
+  // 기본 조회 창(과거 1개월~미래 6개월) 안에서 상한 500을 확실히 넘기도록 채운다.
+  const many = calendar(...Array.from({ length: 600 }, (_, index) => [
+    'BEGIN:VEVENT', `UID:ev-many-${index}`,
+    'DTSTART;TZID=Asia/Seoul:20260901T090000', 'DTEND;TZID=Asia/Seoul:20260901T093000',
+    'SUMMARY:많은 일정', 'END:VEVENT',
+  ]).flat());
+  const truncated = createStoreHarness({ fetchText: async () => many });
+  await truncated.store.add({ name: '많은 일정', url: 'https://example.com/many.ics', color: '#74B9FF' });
+  assert.equal((await truncated.store.list())[0].lastFetchTruncated, true);
+
+  const normal = createStoreHarness();
+  await normal.store.add({ name: '보통 일정', url: 'https://example.com/one.ics', color: '#74B9FF' });
+  assert.equal((await normal.store.list())[0].lastFetchTruncated, false);
+});
+
 test('갱신이 끝나면 렌더러에 변경을 알린다', async () => {
   const harness = createStoreHarness();
   const added = await harness.store.add({ name: '팀 외부 일정', url: 'https://example.com/team.ics', color: '#74B9FF' });

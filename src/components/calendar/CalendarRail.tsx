@@ -1,5 +1,5 @@
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { AlertTriangle, BellOff, Check, MoreHorizontal, Plus, RefreshCw, Settings, Trash2 } from 'lucide-react';
+import { AlertTriangle, BellOff, Check, Info, MoreHorizontal, Plus, RefreshCw, Settings, Trash2 } from 'lucide-react';
 import type { BflowCalendar } from '@/types/calendar';
 import type { IcsSubscription } from '@/shared/icsApiContract';
 import { icsCalendarId } from '@/shared/icsApiContract';
@@ -167,6 +167,15 @@ function IcsSubscriptionRow({
           className="shrink-0 text-amber-400"
         >
           <AlertTriangle size={12} />
+        </span>
+      )}
+      {subscription.lastFetchTruncated && (
+        <span
+          aria-label={`${subscription.name} 일부만 표시`}
+          title="일정이 많아 가까운 500개까지만 보여요"
+          className="shrink-0 text-amber-400/80"
+        >
+          <Info size={12} />
         </span>
       )}
       <button

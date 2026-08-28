@@ -977,7 +977,7 @@ async function loadRail(): Promise<CalendarRailComponent> {
       if (id === 'lucide-react') {
         const Icon = () => null;
         return {
-          AlertTriangle: Icon, BellOff: Icon, Check: Icon, ChevronDown: Icon,
+          AlertTriangle: Icon, BellOff: Icon, Check: Icon, ChevronDown: Icon, Info: Icon,
           MoreHorizontal: Icon, Plus: Icon, RefreshCw: Icon, Settings: Icon, Trash2: Icon,
         };
       }
@@ -6288,6 +6288,7 @@ test('the rail lists ICS subscriptions with their own toggle, refresh, rename an
     enabled: true,
     lastFetchedAt: '2026-09-01T00:00:00.000Z',
     lastError: null as string | null,
+    lastFetchTruncated: false,
   }];
   const calls: string[] = [];
   const previousApi = (globalThis as { window?: { electronAPI?: unknown } }).window;
@@ -6345,6 +6346,19 @@ test('the rail lists ICS subscriptions with their own toggle, refresh, rename an
     assert.ok(warning, '실패하면 경고 아이콘이 뜬다');
     assert.match(String(warning.props.title), /네트워크가 불안정합니다/);
     assert.match(String(warning.props.title), /마지막 확인/, '마지막 성공 시각도 함께 알려 준다');
+
+    // 일정이 잘려 보일 때는 경고와 구분되는 안내 아이콘을 따로 붙인다.
+    assert.equal(
+      findElements(tree, (node) => node.props['aria-label'] === '외부 팀 캘린더 일부만 표시').length,
+      0,
+      '잘리지 않았으면 안내 아이콘도 없다',
+    );
+    subscriptions[0].lastFetchTruncated = true;
+    stateSlots[1] = subscriptions.map((row) => ({ ...row }));
+    tree = await renderRail(false);
+    const truncatedHint = findElements(tree, (node) => node.props['aria-label'] === '외부 팀 캘린더 일부만 표시')[0];
+    assert.ok(truncatedHint, '잘렸으면 안내 아이콘이 뜬다');
+    assert.match(String(truncatedHint.props.title), /500개까지만/);
   } finally {
     if (previousApi === undefined) delete (globalThis as { window?: unknown }).window;
     else (globalThis as unknown as { window: unknown }).window = previousApi;

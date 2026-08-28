@@ -575,7 +575,11 @@ export function createIcsSubscriptionStore(deps: IcsSubscriptionStoreDeps): IcsS
 
   return {
     async list() {
-      return (await loadSubscriptions()).map((row) => ({ ...row }));
+      // truncated는 메모리 캐시에만 있는 값이라 목록을 돌려줄 때 합성한다.
+      return (await loadSubscriptions()).map((row) => ({
+        ...row,
+        lastFetchTruncated: cache.get(row.id)?.truncated === true,
+      }));
     },
 
     async add(input) {

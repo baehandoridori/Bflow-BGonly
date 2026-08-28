@@ -11,6 +11,11 @@ export interface IcsSubscription {
   lastFetchedAt: string | null;
   /** 마지막 실패 사유. 성공하면 null로 지운다. */
   lastError: string | null;
+  /**
+   * 마지막 조회가 구독당 상한을 넘겨 잘렸는지. 메모리 캐시에서 합성하는 값이라
+   * 저장 파일에는 남기지 않는다(sanitizeSubscription이 무시한다).
+   */
+  lastFetchTruncated?: boolean;
 }
 
 export interface IcsSubscriptionAddInput {
