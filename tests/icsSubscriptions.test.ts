@@ -801,3 +801,19 @@ test('expandIcsToEvents: 상한을 넘기면 지난 회차를 버리고 다가�
     '출력은 여전히 날짜순이다',
   );
 });
+
+test('expandIcsToEvents: 다른 회차 날짜로 옮긴 수정본도 겹치지 않는 식별자를 갖는다', () => {
+  const ics = calendar(
+    'BEGIN:VEVENT', 'UID:ov-2',
+    'DTSTART;TZID=Asia/Seoul:20260901T100000', 'DTEND;TZID=Asia/Seoul:20260901T110000',
+    'RRULE:FREQ=WEEKLY;COUNT=3', 'SUMMARY:원본', 'END:VEVENT',
+    // 9/8 회차를 9/15(다른 회차의 날짜) 위로 옮긴다.
+    'BEGIN:VEVENT', 'UID:ov-2', 'RECURRENCE-ID;TZID=Asia/Seoul:20260908T100000',
+    'DTSTART;TZID=Asia/Seoul:20260915T140000', 'DTEND;TZID=Asia/Seoul:20260915T150000',
+    'SUMMARY:옮긴 회차', 'END:VEVENT',
+  );
+
+  const out = expandIcsToEvents(ics, { from: '2026-08-01', to: '2026-10-01' }).events;
+
+  assert.equal(new Set(out.map((entry) => entry.uid)).size, out.length, '회차 식별자는 서로 겹치지 않는다');
+});

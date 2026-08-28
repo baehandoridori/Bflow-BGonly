@@ -245,7 +245,9 @@ function collectVevent(event: IcsVevent, window: IcsExpandWindow, out: IcsExpand
     if (!overlapsWindow(fields, window)) continue;
 
     out.push({
-      uid: uid ? `${uid}:${fields.startDate}` : fields.startDate,
+      // 접미는 '옮긴 뒤 날짜'가 아니라 원 회차 날짜다. 수정본이 다른 회차 날짜 위로
+      // 옮겨지면 두 회차가 같은 식별자가 되어 렌더러 이벤트 id까지 충돌한다.
+      uid: uid ? `${uid}:${occurrenceKst.date}` : occurrenceKst.date,
       title: isVevent(override) ? readText(override.summary, title) : title,
       ...fields,
     });
