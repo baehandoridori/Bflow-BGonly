@@ -346,9 +346,9 @@ function expandParsedCalendar(
    구독 저장 · 갱신
    ═══════════════════════════════════════════════════ */
 
-/** 조회 창 기본값 — 지난 6개월부터 앞으로 12개월까지. */
-const ICS_WINDOW_PAST_MONTHS = 6;
-const ICS_WINDOW_FUTURE_MONTHS = 12;
+/** 조회 창 기본값 — 설계 SSOT(D14) "과거 1개월 ~ 미래 6개월". */
+const ICS_WINDOW_PAST_MONTHS = 1;
+const ICS_WINDOW_FUTURE_MONTHS = 6;
 const ICS_STORE_VERSION = 1;
 /** 주소 형식 거절 사유. 메인 프로세스가 권한 있는 판정을 내린다. */
 export const ICS_URL_ERROR = '캘린더 주소는 http 또는 https로 시작해야 합니다';
