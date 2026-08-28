@@ -46,7 +46,7 @@ import { createUuid } from '@/utils/createUuid';
 import { fmtDate, parseDate, addDays, getISOWeekNumber } from '@/utils/calendarDate';
 import { useMotionPref } from '@/hooks/useMotionPref';
 import { buildEventSnapshot, diffEventSnapshots, type CalendarEventSnapshot } from '@/utils/calendarEventDiff';
-import { eventContentSnapshot } from '@/utils/calendarLocalMutation';
+import { eventContentSnapshot, withCalendarPresentationForSnapshot } from '@/utils/calendarLocalMutation';
 
 type WeekSubMode = 'card' | 'timegrid';
 
@@ -300,24 +300,11 @@ export function ScheduleView() {
   const expectedLocalUpdatePresentation = useCallback((
     event: CalendarEvent,
     updates: Partial<CalendarEvent>,
-  ): CalendarEvent => {
-    const expected = { ...event, ...updates };
-    if (updates.calendarId === undefined || event.source !== 'bflow') return expected;
+  ): CalendarEvent => (
     // calendarService가 저장 전 캐시에 반영하는 B flow 이동 표시와 같아야
     // 이 창의 optimistic echo를 동료 변경으로 오인하지 않는다.
-    const destination = calendars.find((calendar) => calendar.id === updates.calendarId);
-    const canEdit = destination?.canEdit ?? false;
-    return {
-      ...expected,
-      source: 'bflow',
-      sourceCalendarId: `bflow:${updates.calendarId}`,
-      calendarId: updates.calendarId,
-      color: destination?.color ?? '#6C5CE7',
-      canEdit,
-      isReadOnly: !canEdit,
-      isPrivate: destination?.isPersonal === true,
-    };
-  }, [calendars]);
+    { ...event, ...withCalendarPresentationForSnapshot(event, updates, calendars) }
+  ), [calendars]);
 
   const guardLocalIdentity = useCallback((
     identity: CalendarEventIdentity,

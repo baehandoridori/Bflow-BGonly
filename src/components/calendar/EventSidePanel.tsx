@@ -32,6 +32,7 @@ import {
   directUpdateSnapshot,
   eventContentSnapshot,
   isLocalMutationSnapshot,
+  withCalendarPresentationForSnapshot,
   type LocalMutationRecovery,
 } from '@/utils/calendarLocalMutation';
 
@@ -325,7 +326,12 @@ export function EventSidePanel({
     const mutation: LocalMutationRecovery = {
       identityKey: eventIdentityKey,
       rollbackSnapshot: eventSnapshot,
-      optimisticSnapshot: directUpdateSnapshot(event, updates),
+      // 캘린더를 옮기면 서비스가 색·권한까지 파생해 얹으므로, 스냅샷도 같은 파생을 거쳐야
+      // 실패 시 '내 변화'로 알아보고 안내를 띄운다(그러지 않으면 조용히 원복된다).
+      optimisticSnapshot: directUpdateSnapshot(
+        event,
+        withCalendarPresentationForSnapshot(event, updates, calendars),
+      ),
     };
     beginMutation(mutation);
     try {

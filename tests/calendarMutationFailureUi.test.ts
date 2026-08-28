@@ -26,6 +26,7 @@ type TestCalendarEvent = {
   tagId?: string;
   canEdit?: boolean;
   isReadOnly?: boolean;
+  isPrivate?: boolean;
   allDay?: boolean;
   startTime?: string;
   endTime?: string;
@@ -1183,4 +1184,53 @@ test('the side panel names the subscription and shows its time', async () => {
   assert.match(text, /외부 팀 캘린더/, '구독 일정은 구독 이름을 보여 준다');
   assert.doesNotMatch(text, /이전 일정/, "'이전 일정' 폴백으로 새지 않는다");
   assert.match(text, /14:00 – 15:00/, '구독 시각 일정의 시각을 보여 준다');
+});
+
+test('side panel explains a failed calendar move instead of silently closing', async () => {
+  const hooks = createHookStore();
+  const originalEvent = event({
+    source: 'bflow',
+    sourceCalendarId: 'bflow:calendar-2',
+    calendarId: 'calendar-2',
+    color: '#8B8DA3',
+    canEdit: true,
+    isReadOnly: false,
+  });
+  const persistence = deferredThenable();
+  const callbacks = {
+    onClose: () => {},
+    onUpdate: () => persistence.promise,
+    onDelete: () => {},
+  };
+
+  await renderSidePanel(hooks, callbacks, originalEvent, true);
+  hooks.state[0] = true;          // editing
+  hooks.state[5] = 'calendar-1';  // 다른 캘린더로 옮긴다
+
+  await invoke(findButtonByText(await renderSidePanel(hooks, callbacks, originalEvent, true), '저장'));
+
+  // calendarService의 낙관 반영은 목적지 캘린더의 색·권한까지 파생해서 얹는다.
+  // 실제 서비스는 목적지 캘린더 기준으로 색·권한·공개범위까지 명시해서 얹는다.
+  const optimisticEvent = event({
+    source: 'bflow',
+    sourceCalendarId: 'bflow:calendar-1',
+    calendarId: 'calendar-1',
+    color: '#6C5CE7',
+    canEdit: true,
+    isReadOnly: false,
+    isPrivate: false,
+  });
+  await renderSidePanel(hooks, callbacks, optimisticEvent, true);
+  persistence.reject(new Error('move failed'));
+
+  const recovered = await renderSidePanel(hooks, callbacks, optimisticEvent, true);
+  assert.match(
+    textContent(recovered),
+    /일정 저장에 실패했어요/,
+    '캘린더를 옮기다 실패해도 안내 없이 편집이 닫히면 안 된다',
+  );
+  assert.ok(
+    findButtons(recovered).some((button) => textContent(button).includes('저장')),
+    '실패한 이동은 편집 모드와 초안을 유지한다',
+  );
 });
