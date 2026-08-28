@@ -48,6 +48,7 @@ import {
   migrateUsersToSheets,
 } from '@/services/userService';
 import { reconcileAuthoritativeUserDirectory } from '@/services/authoritativeUserSession';
+import { useIcsEventsFeed } from '@/hooks/useIcsEventsFeed';
 import { setFeedbackLastSeenAt, setAssignmentLastSeenAt, getCommentReactionLastSeenAt, setCommentReactionLastSeenAt } from '@/utils/lastSeenTracker';
 import { buildReactionNotificationTitle } from '@/utils/commentReactionEmojiFormat';
 import { applyTheme, getPreset, getLightColors, deriveThemeFromAccent, sanitizeCustomHex, hexToRgb, DEFAULT_THEME_ID } from '@/themes';
@@ -333,6 +334,9 @@ export default function App() {
   const setStoreToast = useAppStore((s) => s.setToast);
   const storeToast = useAppStore((s) => s.toast);
   const setUpdateInfo = useAppStore((s) => s.setUpdateInfo);
+
+  // 외부 캘린더(ICS) 구독 일정 — 위젯 팝업 창과 같은 배선을 쓴다.
+  useIcsEventsFeed();
 
   // 전역 그라데이션 배경 토글 (모든 뷰 뒤에 표시, 로그인/스플래시 포함)
   const globalGradientEnabled = useAppStore((s) => s.plexusSettings.globalGradientEnabled !== false);
@@ -2882,20 +2886,6 @@ export default function App() {
       };
       void refresh();
     });
-    return () => { cleanup?.(); };
-  }, []);
-
-  // ─── 외부 캘린더(ICS) 구독 일정 로드 + 주기 갱신 수신 ─────
-  // 구독 일정은 별도 캐시라 B flow/Google 동기화 경로로는 채워지지 않는다.
-  // 시작 시 한 번 읽고, 메인의 주기 갱신이 끝나면 다시 읽어 화면에 알린다.
-  useEffect(() => {
-    const reloadIcsEvents = async () => {
-      const { loadIcsEvents } = await import('@/services/calendarService');
-      if (!(await loadIcsEvents())) return;
-      window.dispatchEvent(new CustomEvent('bflow:calendar-changed', { detail: { action: 'ics' } }));
-    };
-    void reloadIcsEvents();
-    const cleanup = window.electronAPI?.onIcsChanged?.(() => { void reloadIcsEvents(); });
     return () => { cleanup?.(); };
   }, []);
 
