@@ -6567,8 +6567,18 @@ test('CalendarGrid fades in the chip tooltip and limits chip hover to transform 
     assert.ok(tooltip, '400ms 뒤 툴팁이 나타난다');
     assert.deepEqual(
       tooltip.props.initial,
-      { opacity: 0, scale: 0.96 },
-      '툴팁은 사라진 상태에서 등장한다',
+      { opacity: 0, scale: 0.96, x: '-50%', y: '-100%' },
+      '툴팁은 사라진 상태에서 등장하고 커서 위 중앙 앵커를 유지한다',
+    );
+    assert.deepEqual(
+      tooltip.props.animate,
+      { opacity: 1, scale: 1, x: '-50%', y: '-100%' },
+      'framer가 transform을 직접 관리하므로 앵커도 motion value로 넘긴다',
+    );
+    assert.equal(
+      (tooltip.props.style as { transform?: unknown }).transform,
+      undefined,
+      'style의 정적 transform은 덮어써지므로 남겨 두지 않는다',
     );
     assert.deepEqual(
       tooltip.props.transition,
@@ -6588,6 +6598,11 @@ test('CalendarGrid fades in the chip tooltip and limits chip hover to transform 
     ))[0];
     assert.ok(reducedTooltip);
     assert.equal(reducedTooltip.props.initial, false, '동작 줄이기에서는 등장 애니메이션을 건너뛴다');
+    assert.deepEqual(
+      reducedTooltip.props.animate,
+      { opacity: 1, scale: 1, x: '-50%', y: '-100%' },
+      '동작 줄이기에서도 앵커는 그대로다',
+    );
     assert.deepEqual(reducedTooltip.props.transition, { duration: 0 });
   } finally {
     calendarGridEffectCleanups.splice(0).forEach((cleanup) => cleanup());

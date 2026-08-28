@@ -283,8 +283,10 @@ function EventBarChip({
       {/* 글래스모피즘 툴팁 — Portal로 body에 직접 렌더 (부모 transform/overflow 무관) */}
       {showTooltip && !isDragging && !isGhost && createPortal(
         <motion.div
-          initial={reduceMotion ? false : { opacity: 0, scale: 0.96 }}
-          animate={{ opacity: 1, scale: 1 }}
+          // framer-motion이 transform을 직접 관리하므로 style의 정적 transform은 덮어써진다.
+          // 커서 위 중앙 앵커도 motion value(x·y)로 넘겨야 자리를 지킨다.
+          initial={reduceMotion ? false : { opacity: 0, scale: 0.96, x: '-50%', y: '-100%' }}
+          animate={{ opacity: 1, scale: 1, x: '-50%', y: '-100%' }}
           transition={reduceMotion ? { duration: 0 } : { duration: 0.2, ease: [0.16, 1, 0.3, 1] }}
           className="pointer-events-none rounded-2xl px-4 py-3 max-w-[260px]"
           style={{
@@ -293,7 +295,6 @@ function EventBarChip({
             zIndex: 99999,
             left: Math.min(tooltipPos.x, window.innerWidth - 280),
             top: Math.max(tooltipPos.y - 12, 8),
-            transform: 'translate(-50%, -100%)',
           }}
         >
           <div className="text-[13px] font-semibold text-text-primary truncate">{ev.title}</div>
