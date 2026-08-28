@@ -64,7 +64,7 @@ type QuickEditComponent = (props: {
   onClose: () => void;
   onUpdate: (id: string, updates: Partial<TestCalendarEvent>) => void | Promise<void>;
   onDelete: (id: string) => void | Promise<void>;
-  onDuplicate: (event: TestCalendarEvent) => void;
+  onDuplicate: (event: TestCalendarEvent) => void | Promise<void>;
 }) => ReactNode;
 
 type SidePanelComponent = (props: {
@@ -435,6 +435,7 @@ async function renderQuickEdit(
     onClose: () => void;
     onUpdate: (id: string, updates: Partial<TestCalendarEvent>) => void | Promise<void>;
     onDelete: (id: string) => void | Promise<void>;
+    onDuplicate?: (event: TestCalendarEvent) => void | Promise<void>;
   },
   target = event(),
   runEffects = false,
@@ -463,7 +464,7 @@ async function renderQuickEdit(
       onClose: callbacks.onClose,
       onUpdate: callbacks.onUpdate,
       onDelete: callbacks.onDelete,
-      onDuplicate: () => {},
+      onDuplicate: callbacks.onDuplicate ?? (() => {}),
     });
     render();
     if (runEffects) {
@@ -1233,4 +1234,46 @@ test('side panel explains a failed calendar move instead of silently closing', a
     findButtons(recovered).some((button) => textContent(button).includes('저장')),
     '실패한 이동은 편집 모드와 초안을 유지한다',
   );
+});
+
+test('quick edit stays open and explains a failed duplicate', async () => {
+  const hooks = createHookStore();
+  let closeCalls = 0;
+  const readOnly = event({
+    source: 'bflow',
+    sourceCalendarId: 'bflow:view-share',
+    calendarId: 'view-share',
+    canEdit: false,
+    isReadOnly: true,
+  });
+  const callbacks = {
+    onClose: () => { closeCalls += 1; },
+    onUpdate: () => {},
+    onDelete: () => {},
+    onDuplicate: () => rejectedThenable(new Error('duplicate failed')),
+  };
+
+  await invoke(findButtonByText(await renderQuickEdit(hooks, callbacks, readOnly), '복사'));
+
+  assert.equal(closeCalls, 0, '복사가 실패하면 팝업을 닫지 않는다');
+  const recovered = await renderQuickEdit(hooks, callbacks, readOnly);
+  assert.match(textContent(recovered), /복사하지 못했어요/);
+  assert.equal(findAlerts(recovered).length, 1, '복사 실패도 사용자에게 알린다');
+});
+
+test('quick edit closes on a successful duplicate', async () => {
+  const hooks = createHookStore();
+  let closeCalls = 0;
+  const callbacks = {
+    onClose: () => { closeCalls += 1; },
+    onUpdate: () => {},
+    onDelete: () => {},
+    onDuplicate: () => Promise.resolve(),
+  };
+
+  await invoke(findButtonByText(await renderQuickEdit(hooks, callbacks), '복사'));
+  await Promise.resolve();
+  await Promise.resolve();
+
+  assert.equal(closeCalls, 1, '복사가 성공하면 평소처럼 닫힌다');
 });

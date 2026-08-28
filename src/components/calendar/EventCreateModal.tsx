@@ -25,7 +25,7 @@ type Props = {
   episodes: { episodeNumber: number; title: string; parts: { partId: string; sheetName: string; department: string; scenes: { sceneId: string; no: number }[] }[] }[];
   googleAuthenticated: boolean;
   onClose: () => void;
-  onSave: (event: Omit<CalendarEvent, 'id' | 'createdAt'>) => void;
+  onSave: (event: Omit<CalendarEvent, 'id' | 'createdAt'>) => void | Promise<void>;
 };
 
 function addOneDay(date: string): string {
@@ -79,6 +79,9 @@ export function EventCreateModal({ initialDate, initialEndDate, initialStartTime
   const [linkedEp, setLinkedEp] = useState<number | ''>('');
   const [linkedPart, setLinkedPart] = useState('');
   const [linkedScene, setLinkedScene] = useState('');
+  // 새 useState는 반드시 기존 선언들 뒤에 — 테스트 하네스가 훅을 슬롯 인덱스로 흉내 낸다.
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
   const userSelectedCalendarRef = useRef(false);
 
   const isGoogle = selectedCalendarId === GOOGLE_CALENDAR_OPTION;
@@ -172,28 +175,37 @@ export function EventCreateModal({ initialDate, initialEndDate, initialStartTime
     && hasRequiredLinkTarget
   ) && !hasInvalidTimedInterval;
 
-  const handleSubmit = () => {
-    if (!canSubmit) return;
+  const handleSubmit = async () => {
+    if (!canSubmit || saving) return;
     const persistedTagId = tagId && !selectedTagUnavailable ? tagId : undefined;
-    onSave({
-      title: title.trim(),
-      memo: memo.trim(),
-      color: selectedCalendar?.color ?? '#6C5CE7',
-      type: evType,
-      startDate,
-      endDate: endDate < startDate ? startDate : endDate,
-      createdBy: currentUser?.name ?? '알 수 없음',
-      ...(isGoogle ? {} : { calendarId: selectedCalendarId }),
-      tagId: isGoogle ? undefined : persistedTagId,
-      allDay,
-      startTime: allDay ? undefined : startTime,
-      endTime: allDay ? undefined : endTime,
-      linkedEpisode: linkedEp !== '' ? linkedEp : undefined,
-      linkedPart: selectedPartData?.partId,
-      linkedSheetName: linkedPart || undefined,
-      linkedSceneId: linkedScene || undefined,
-      linkedDepartment: selectedPartData?.department as 'bg' | 'acting' | undefined,
-    });
+    setSaveError(null);
+    setSaving(true);
+    try {
+      await onSave({
+        title: title.trim(),
+        memo: memo.trim(),
+        color: selectedCalendar?.color ?? '#6C5CE7',
+        type: evType,
+        startDate,
+        endDate: endDate < startDate ? startDate : endDate,
+        createdBy: currentUser?.name ?? '알 수 없음',
+        ...(isGoogle ? {} : { calendarId: selectedCalendarId }),
+        tagId: isGoogle ? undefined : persistedTagId,
+        allDay,
+        startTime: allDay ? undefined : startTime,
+        endTime: allDay ? undefined : endTime,
+        linkedEpisode: linkedEp !== '' ? linkedEp : undefined,
+        linkedPart: selectedPartData?.partId,
+        linkedSheetName: linkedPart || undefined,
+        linkedSceneId: linkedScene || undefined,
+        linkedDepartment: selectedPartData?.department as 'bg' | 'acting' | undefined,
+      });
+      // 성공하면 부모(ScheduleView)가 모달을 닫는다.
+    } catch {
+      setSaveError('일정을 저장하지 못했어요. 다시 시도해 주세요.');
+    } finally {
+      setSaving(false);
+    }
   };
 
   const sharingCopy = selectedCalendar?.visibility === 'team'
@@ -341,10 +353,14 @@ export function EventCreateModal({ initialDate, initialEndDate, initialStartTime
         </div>
 
         <div className="sticky bottom-0 flex items-center justify-between gap-3 border-t border-bg-border bg-bg-card/95 px-5 py-4">
-          <p className="min-h-4 text-[11px] text-text-secondary/75">{sharingCopy}</p>
+          {saveError ? (
+            <p role="alert" className="min-h-4 text-[11px] font-medium text-red-400">{saveError}</p>
+          ) : (
+            <p className="min-h-4 text-[11px] text-text-secondary/75">{sharingCopy}</p>
+          )}
           <div className="flex shrink-0 gap-2">
             <button type="button" onClick={onClose} className="px-3 py-2 rounded-lg text-xs text-text-secondary hover:text-text-primary cursor-pointer">취소</button>
-            <button type="button" onClick={handleSubmit} disabled={!canSubmit} className="px-4 py-2 rounded-lg text-xs font-medium bg-accent hover:bg-accent/80 text-white disabled:opacity-30 transition-colors cursor-pointer disabled:cursor-not-allowed">만들기</button>
+            <button type="button" onClick={handleSubmit} disabled={!canSubmit || saving} className="px-4 py-2 rounded-lg text-xs font-medium bg-accent hover:bg-accent/80 text-white disabled:opacity-30 transition-colors cursor-pointer disabled:cursor-not-allowed">{saving ? '저장 중…' : '만들기'}</button>
           </div>
         </div>
       </motion.div>

@@ -22,7 +22,7 @@ interface EventQuickEditProps {
   onClose: () => void;
   onUpdate: (id: string, updates: Partial<CalendarEvent>) => void | Promise<void>;
   onDelete: (id: string) => void | Promise<void>;
-  onDuplicate: (event: CalendarEvent) => void;
+  onDuplicate: (event: CalendarEvent) => void | Promise<void>;
 }
 
 type TabKey = 'calendar' | 'edit';
@@ -277,9 +277,31 @@ export function EventQuickEdit({
   }, [beginMutation, canWrite, event, eventIdentityKey, eventSnapshot, markMutationFailed, onClose, onDelete, settleMutation]);
 
   const handleDuplicate = useCallback(() => {
-    onDuplicate(event);
-    onClose();
-  }, [event, onClose, onDuplicate]);
+    if (pendingMutationRef.current) return;
+    setMutationError(null);
+    // 복사는 새 일정을 만드는 요청이라 이 일정 자체는 그대로다. 잠금·안내만 재사용하고
+    // 롤백 기준은 지금 보고 있는 내용으로 둔다(실패해도 이 일정은 변하지 않는다).
+    const mutation: LocalMutationRecovery = {
+      identityKey: eventIdentityKey,
+      rollbackSnapshot: eventSnapshot,
+    };
+    beginMutation(mutation);
+    try {
+      const persistence = onDuplicate(event);
+      if (isPromiseLike(persistence)) {
+        void persistence.then(
+          () => {
+            if (settleMutation(mutation)) onClose();
+          },
+          () => markMutationFailed(mutation, '일정을 복사하지 못했어요. 다시 시도해 주세요.'),
+        );
+        return;
+      }
+      if (settleMutation(mutation)) onClose();
+    } catch {
+      markMutationFailed(mutation, '일정을 복사하지 못했어요. 다시 시도해 주세요.');
+    }
+  }, [beginMutation, event, eventIdentityKey, eventSnapshot, markMutationFailed, onClose, onDuplicate, settleMutation]);
 
   const handleCalendarChange = useCallback(async (calendarId: string) => {
     if (!canWrite || !isCanonicalBflow || calendarSelectionPending || calendarId === displayedCalendarId) return;

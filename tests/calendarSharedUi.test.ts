@@ -151,7 +151,7 @@ type EventCreateModalProps = {
   }>;
   googleAuthenticated: boolean;
   onClose(): void;
-  onSave(event: Record<string, unknown>): void;
+  onSave(event: Record<string, unknown>): void | Promise<void>;
 };
 type EventCreateModalComponent = (props: EventCreateModalProps) => ReactNode;
 type EventSidePanelComponent = (props: {
@@ -2385,7 +2385,7 @@ async function renderEventSidePanel(event: ScheduleCalendarEvent): Promise<React
 
 async function renderEventCreateModal(
   googleAuthenticated: boolean,
-  onSave: (event: Record<string, unknown>) => void,
+  onSave: (event: Record<string, unknown>) => void | Promise<void>,
   initialDate = '2026-08-25',
   episodes: EventCreateModalProps['episodes'] = [],
   prefill: Pick<EventCreateModalProps, 'initialEndDate' | 'initialStartTime' | 'initialEndTime'> = {},
@@ -5359,6 +5359,67 @@ test('EventCreateModal makes a supplied timed range editable without inheriting 
     { allDay: false, startTime: '10:00', endTime: '10:30' },
   );
 
+});
+
+test('EventCreateModal stays open and explains a failed save', async () => {
+  resetHarness();
+  let attempts = 0;
+  const renderModal = () => renderEventCreateModal(
+    false,
+    () => {
+      attempts += 1;
+      return Promise.reject(new Error('save failed'));
+    },
+    '2026-08-26',
+  );
+
+  let tree = await renderModal();
+  formElementByLabel(tree, '제목').props.onChange?.({ target: { value: '실패할 일정', checked: false } });
+  tree = await renderModal();
+
+  const submit = buttonByText(tree, '만들기');
+  await submit.props.onClick?.();
+  await Promise.resolve();
+  await Promise.resolve();
+  tree = await renderModal();
+
+  assert.match(textContent(tree), /저장하지 못했어요/, '실패하면 모달에 사유가 뜬다');
+  assert.equal(
+    findButtons(tree).some((button) => textContent(button).includes('만들기')),
+    true,
+    '실패해도 모달은 그대로 열려 있다',
+  );
+  assert.equal(attempts, 1, '한 번의 클릭은 한 번만 저장을 시도한다');
+});
+
+test('EventCreateModal locks its submit button while a save is in flight', async () => {
+  resetHarness();
+  let attempts = 0;
+  let releaseSave: (() => void) | undefined;
+  const renderModal = () => renderEventCreateModal(
+    false,
+    () => {
+      attempts += 1;
+      return new Promise<void>((resolve) => { releaseSave = resolve; });
+    },
+    '2026-08-26',
+  );
+
+  let tree = await renderModal();
+  formElementByLabel(tree, '제목').props.onChange?.({ target: { value: '느린 저장', checked: false } });
+  tree = await renderModal();
+
+  void buttonByText(tree, '만들기').props.onClick?.();
+  await Promise.resolve();
+  tree = await renderModal();
+
+  const pendingSubmit = findButtons(tree).find((button) => textContent(button).includes('저장 중'));
+  assert.ok(pendingSubmit, '저장 중에는 버튼 라벨이 바뀐다');
+  assert.equal(pendingSubmit.props.disabled, true, '저장 중에는 버튼이 잠긴다');
+
+  pendingSubmit.props.onClick?.();
+  assert.equal(attempts, 1, '저장 중 다시 눌러도 두 번 저장하지 않는다');
+  releaseSave?.();
 });
 
 test('ScheduleView rolls end-of-day time-grid slot and drag creation into a savable next-day timed modal', async () => {
