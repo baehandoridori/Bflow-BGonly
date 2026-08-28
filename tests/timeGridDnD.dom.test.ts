@@ -5,7 +5,7 @@ import { build } from 'esbuild';
 
 type DndModule = {
   useTimeGridDnD(options: {
-    scrollContainerRef: { current: { scrollTop: number; getBoundingClientRect(): { top: number; bottom: number } } | null };
+    scrollContainerRef: { current: { scrollTop: number; getBoundingClientRect(): { top: number; bottom: number }; addEventListener?(type: string, listener: (event?: unknown) => void): void; removeEventListener?(type: string, listener: (event?: unknown) => void): void } | null };
     onCreate?: (date: string, startTime: string, endTime: string) => void;
     onEventChange?: (id: string, identity: unknown, patch: unknown) => void | Promise<void>;
   }): {
@@ -52,6 +52,16 @@ function installDomHookHarness(
   let nextInterval = 1;
   let nextFrame = 1;
   const scroller = options.scrollContainerRef.current;
+  // 훅이 드래그 중 수동 휠 스크롤을 듣도록 fake scroller에도 리스너 창구를 붙인다.
+  const scrollerListeners = new Set<Listener>();
+  if (scroller && typeof (scroller as any).addEventListener !== 'function') {
+    (scroller as any).addEventListener = (type: string, listener: Listener) => {
+      if (type === 'scroll') scrollerListeners.add(listener);
+    };
+    (scroller as any).removeEventListener = (type: string, listener: Listener) => {
+      if (type === 'scroll') scrollerListeners.delete(listener);
+    };
+  }
   const column = {
     dataset: { date: '2026-08-24', timeGridBandStart: '540' },
     getBoundingClientRect: () => ({
@@ -134,6 +144,8 @@ function installDomHookHarness(
     fireWindow,
     windowListenerCount: (type: string) => windowListeners.get(type)?.size ?? 0,
     tickIntervals: () => intervals.forEach((tick) => tick()),
+    scrollerListenerCount: () => scrollerListeners.size,
+    fireScroll: () => [...scrollerListeners].forEach((listener) => listener({})),
     pendingFrames: () => frames.size,
     flushFrames: () => {
       const pending = [...frames.entries()];
@@ -874,6 +886,37 @@ test('useTimeGridDnD DOM: 좌클릭 드래그 중 우클릭을 떼도 드롭으�
     harness.fire('mouseup', { button: 0, clientX: 210, clientY: 300 });
     dnd = harness.render();
     assert.equal(changes.length, 1, '좌버튼을 떼면 평소처럼 확정한다');
+  } finally {
+    harness.restore();
+  }
+});
+
+test('useTimeGridDnD DOM: 드래그 중 휠로 직접 스크롤해도 고스트가 따라온다', async () => {
+  const scroller = {
+    scrollTop: 0,
+    getBoundingClientRect: () => ({ top: 100, bottom: 500 }),
+  };
+  const harness = installDomHookHarness(await loadDnD(), {
+    scrollContainerRef: { current: scroller },
+    onEventChange: () => {},
+  });
+  try {
+    let dnd = harness.render();
+    dnd.beginEventDrag(event(10, 156), source, 'move', { date: '2026-08-24', bandStartMin: 540, column: harness.column });
+    dnd = harness.render();
+    // 가장자리 자동 스크롤이 끼어들지 않는 화면 한가운데로 옮긴다.
+    harness.fire('mousemove', { clientX: 20, clientY: 300 });
+    harness.flushFrames();
+    const before = harness.readPreview() as { startTime: string };
+    assert.ok(harness.scrollerListenerCount() > 0, '드래그 중에는 스크롤도 듣는다');
+
+    // 포인터는 그대로 두고 사용자가 휠로 직접 스크롤한다.
+    scroller.scrollTop += 120;
+    harness.fireScroll();
+    harness.flushFrames();
+    const after = harness.readPreview() as { startTime: string };
+
+    assert.notEqual(after.startTime, before.startTime, '수동 스크롤 뒤에도 프리뷰를 다시 계산한다');
   } finally {
     harness.restore();
   }

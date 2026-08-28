@@ -474,12 +474,23 @@ export function useTimeGridDnD({ scrollContainerRef, onCreate, onEventChange }: 
       refreshPreview(pointer.x, pointer.y);
     }, 16);
 
+    // 드래그 중 휠로 직접 스크롤하면 포인터는 그대로여도 가리키는 시각이 달라진다.
+    // 갱신하지 않으면 고스트·라이브 라벨이 보여 준 것과 다른 시각으로 저장된다.
+    const handleManualScroll = () => {
+      const pointer = latestPointerRef.current;
+      if (!dragRef.current?.hasCrossedThreshold || !pointer) return;
+      refreshPreview(pointer.x, pointer.y);
+    };
+    const scrollerNode = scrollContainerRef.current;
+    scrollerNode?.addEventListener('scroll', handleManualScroll);
+
     document.addEventListener('mousemove', handleMouseMove);
     document.addEventListener('mouseup', finish);
     document.addEventListener('keydown', cancel);
     window.addEventListener('blur', handleWindowBlur);
     return () => {
       window.clearInterval(scrollTimer);
+      scrollerNode?.removeEventListener('scroll', handleManualScroll);
       document.removeEventListener('mousemove', handleMouseMove);
       document.removeEventListener('mouseup', finish);
       document.removeEventListener('keydown', cancel);
