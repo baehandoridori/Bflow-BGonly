@@ -181,6 +181,7 @@ type WeekScrollViewProps = {
   mode?: 'week' | '2week';
   highlightedEventIdentities?: ReadonlySet<string>;
   reduceMotion?: boolean;
+  instantScroll?: boolean;
 };
 type WeekScrollViewModule = {
   default(props: WeekScrollViewProps): ReactNode;
@@ -6247,6 +6248,55 @@ test('the month grid explains an empty month without blocking the create path', 
     endDate: '2026-09-10',
   })]);
   assert.match(textContent(neighbourTree), /이번 달 일정이 없습니다/);
+});
+
+test('rapid navigation also skips the weekly scroll animation and month-crossing arrows', async () => {
+  // ① 주간 카드: 연타 중에는 주 이동 스크롤도 즉시 그린다.
+  resetHarness();
+  scheduleLocalStorage.set('bflow_calendar_view_v1', JSON.stringify({ viewMode: 'week', weekSubMode: 'card' }));
+  const clock = installScheduleFakeClock();
+  try {
+    let tree = await renderScheduleView();
+    await flushScheduleMountEffects();
+    tree = await renderScheduleView();
+    assert.equal(scheduleWeekScrollProps.at(-1)?.instantScroll, false, '처음에는 부드럽게 스크롤한다');
+
+    buttonByLabel(tree, '다음 기간').props.onClick?.();
+    tree = await renderScheduleView();
+    clock.advance(120);
+    buttonByLabel(tree, '다음 기간').props.onClick?.();
+    tree = await renderScheduleView();
+    assert.equal(scheduleWeekScrollProps.at(-1)?.instantScroll, true, '연타 중에는 즉시 스크롤한다');
+  } finally {
+    clock.restore();
+  }
+
+  // ② 월간 방향키가 달을 넘길 때도 연타 스킵이 걸린다.
+  resetHarness();
+  const monthClock = installScheduleFakeClock();
+  try {
+    await renderScheduleView();
+    await flushScheduleMountEffects();
+
+    // 달 안에서만 움직이는 첫 이동은 기간 이동이 아니다.
+    dispatchScheduleKeydown('ArrowRight');
+    await renderScheduleView();
+    assert.equal(scheduleGridProps.at(-1)?.instantTransition, false);
+
+    // 달 경계를 넘는 이동을 연달아 두 번 하면 두 번째는 즉시 그린다.
+    for (let step = 0; step < 40; step += 1) dispatchScheduleKeydown('ArrowDown');
+    await renderScheduleView();
+    monthClock.advance(120);
+    for (let step = 0; step < 40; step += 1) dispatchScheduleKeydown('ArrowDown');
+    await renderScheduleView();
+    assert.equal(
+      scheduleGridProps.at(-1)?.instantTransition,
+      true,
+      '방향키를 꾹 눌러 달을 넘길 때도 스킵이 걸린다',
+    );
+  } finally {
+    monthClock.restore();
+  }
 });
 
 test('rapid period navigation draws the next period instantly instead of queueing slides', async () => {

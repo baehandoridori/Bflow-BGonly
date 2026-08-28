@@ -1108,8 +1108,9 @@ export function ScheduleView() {
           const base = prev ? parseDate(prev) : new Date(year, month, 1, 12, 0, 0, 0);
           const next = addDays(base, delta);
           const nextStr = fmtDate(next);
-          // 월이 변경되면 자동으로 이동
+          // 월이 변경되면 자동으로 이동 — 이것도 '기간 이동'이라 꾹 누르면 스킵이 걸려야 한다.
           if (next.getMonth() !== month || next.getFullYear() !== year) {
+            markPeriodNavigation();
             setYear(next.getFullYear());
             setMonth(next.getMonth());
             setMonthDir(delta > 0 ? 1 : -1);
@@ -1133,7 +1134,7 @@ export function ScheduleView() {
     return () => document.removeEventListener('keydown', handler);
   }, [
     viewMode, showCreate, quickEdit, panelEvent, calendarSettings, tagManagerAnchor, showShortcutHelp, focusedDate,
-    month, year, moveWeekBy, moveDayBy, resetCreatePrefill,
+    month, year, moveWeekBy, moveDayBy, resetCreatePrefill, markPeriodNavigation,
   ]);
 
   // 뷰 모드 변경 시 포커스 초기화
@@ -1639,6 +1640,7 @@ export function ScheduleView() {
                 mode={viewMode === '2week' ? '2week' : 'week'}
                 highlightedEventIdentities={highlightedEventIdentities}
                 reduceMotion={reduce}
+                instantScroll={skipPeriodTransition}
               />
             ) : (
               <CalendarGrid

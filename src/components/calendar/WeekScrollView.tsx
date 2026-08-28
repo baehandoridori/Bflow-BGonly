@@ -59,6 +59,8 @@ export interface WeekScrollViewProps {
   mode?: 'week' | '2week'; // 'week' = 1주 포커스, '2week' = 2주 활성
   highlightedEventIdentities?: ReadonlySet<string>;
   reduceMotion?: boolean;
+  /** 연타 중이면 주 이동 스크롤도 즉시 — 부드러운 스크롤이 다음 입력에 밀린다. */
+  instantScroll?: boolean;
 }
 
 /* ── 상수 ────────────────────────────────────────────── */
@@ -89,6 +91,7 @@ export default function WeekScrollView({
   mode = 'week',
   highlightedEventIdentities,
   reduceMotion,
+  instantScroll,
 }: WeekScrollViewProps) {
   const is2Week = mode === '2week';
   const tags = useCalendarStore((state) => state.tags);
@@ -198,6 +201,7 @@ export default function WeekScrollView({
                   tagNameById={tagNameById}
                   highlightedEventIdentities={highlightedEventIdentities}
                   reduceMotion={reduceMotion ?? reduce}
+                  instantScroll={instantScroll === true}
                 />
               ) : isNear ? (
                 <CompactWeek
@@ -242,6 +246,7 @@ function ActiveWeek({
   tagNameById,
   highlightedEventIdentities,
   reduceMotion,
+  instantScroll,
 }: {
   week: Date[];
   events: CalendarEvent[];
@@ -256,6 +261,7 @@ function ActiveWeek({
   tagNameById: Record<string, string>;
   highlightedEventIdentities?: ReadonlySet<string>;
   reduceMotion: boolean;
+  instantScroll?: boolean;
 }) {
   const sortedEvents = useMemo(() => sortEventsForList(events), [events]);
   const eventListRef = useRef<HTMLDivElement>(null);
@@ -264,9 +270,9 @@ function ActiveWeek({
   const revealEventList = useCallback(() => {
     const list = eventListRef.current;
     if (!list) return;
-    list.scrollIntoView({ behavior: reduce ? 'auto' : 'smooth', block: 'nearest' });
+    list.scrollIntoView({ behavior: reduce || instantScroll ? 'auto' : 'smooth', block: 'nearest' });
     list.focus({ preventScroll: true });
-  }, [reduce]);
+  }, [instantScroll, reduce]);
 
   return (
     <div
