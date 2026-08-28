@@ -47,6 +47,8 @@ interface Props {
   autoGrowMaxRows?: number;
   /** 모달/패널 높이에 대한 autoGrow 최대 비율(0~1). */
   autoGrowMaxContainerRatio?: number;
+  /** 저장 진행 중처럼 입력을 잠가야 할 때. 멘션 자동완성도 함께 멈춘다. */
+  disabled?: boolean;
   'aria-label'?: string;
 }
 
@@ -59,7 +61,7 @@ interface Props {
 export function EntityAwareInput({
   value, onChange, users, multiline, placeholder, className, rows, autoFocus,
   dropdownPositionClassName, submitOn = 'none', onSubmit, onCancel, onPaste, onBlur,
-  enableHashtag, enableHashtags, autoGrow, autoGrowMinRows, autoGrowMaxRows, autoGrowMaxContainerRatio, 'aria-label': ariaLabel,
+  enableHashtag, enableHashtags, autoGrow, autoGrowMinRows, autoGrowMaxRows, autoGrowMaxContainerRatio, disabled, 'aria-label': ariaLabel,
 }: Props) {
   const inputRef = useRef<HTMLInputElement | HTMLTextAreaElement>(null);
   const [scroll, setScroll] = useState({ top: 0, left: 0 });
@@ -79,6 +81,16 @@ export function EntityAwareInput({
   // @멘션·#태그 둘 다 DOM 을 직접 읽어 갱신. active 는 한쪽만(키핸들에서 mention 우선).
   // refresh 는 무해(상태만 갱신, hashEnabled 시 드롭다운 미표시)하므로 게이트 불필요.
   const refreshAll = () => { mention.refresh(); hash.refresh(); };
+
+  // 입력칸이 잠기면(저장 진행 중 등) 열려 있던 자동완성도 함께 닫는다.
+  // 남겨 두면 못 쓰는 목록이 계속 떠 있고, 방향키가 그쪽으로 먹힌다.
+  const mentionClose = mention.close;
+  const hashClose = hash.close;
+  useEffect(() => {
+    if (!disabled) return;
+    mentionClose();
+    hashClose();
+  }, [disabled, hashClose, mentionClose]);
 
   // autoGrow(opt-in) 일 때만 multiline 내용 높이에 맞춰 자동 확장 — 긴 메모가 작은 칸에 갇히지 않고 큰 상태로 시작(한솔, E2).
   //   무조건 켜면 resize-y 입력칸(완료멘트·리테이크 등)의 수동 리사이즈가 매 입력마다 덮어써지는 회귀가 생겨 opt-in 으로 둔다.
@@ -152,6 +164,7 @@ export function EntityAwareInput({
     spellCheck: false,
     placeholder,
     autoFocus,
+    disabled,
     'aria-label': ariaLabel,
     // 입력칸 배경은 투명 강제(뒤 하이라이트 레이어가 비치도록). 배경/보더는 overlay 가 className 으로 그린다.
     className: `${className ?? ''} relative !bg-transparent`,

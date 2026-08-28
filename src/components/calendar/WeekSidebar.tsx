@@ -3,6 +3,7 @@ import React, { useMemo, useRef, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import type { CalendarEvent } from '@/types/calendar';
 import { fmtDate, getISOWeekNumber } from '@/utils/calendarDate';
+import { visibleWeekDays } from '@/utils/calendarWeekdays';
 
 /* ── 로컬 유틸 ──────────────────────────────────────── */
 /* ── 타입 ────────────────────────────────────────────── */
@@ -14,6 +15,8 @@ export interface WeekSidebarProps {
   onWeekSelect: (index: number) => void;
   currentMonth: number; // 호환용 (사용하지 않음)
   currentYear: number;
+  /** 꺼져 있으면 토·일 날짜를 그리지 않는다(주 5일 보기). */
+  showWeekends?: boolean;
 }
 
 /* ── 상수 ────────────────────────────────────────────── */
@@ -31,6 +34,7 @@ export default function WeekSidebar({
   today,
   activeWeekIndex,
   onWeekSelect,
+  showWeekends = true,
 }: WeekSidebarProps) {
   const containerRef = useRef<HTMLDivElement>(null);
 
@@ -59,6 +63,7 @@ export default function WeekSidebar({
           today={today}
           isActive={idx === activeWeekIndex}
           onSelect={() => onWeekSelect(idx)}
+          showWeekends={showWeekends}
         />
       ))}
     </div>
@@ -73,6 +78,7 @@ function WeekItem({
   today,
   isActive,
   onSelect,
+  showWeekends,
 }: {
   week: Date[];
   weekIndex: number;
@@ -80,8 +86,11 @@ function WeekItem({
   today: string;
   isActive: boolean;
   onSelect: () => void;
+  showWeekends: boolean;
 }) {
   const isoWeek = getISOWeekNumber(week[3]); // 목요일 기준
+  // 주차 계산은 7일 배열 그대로 쓰고, 날짜 점만 보이는 날로 거른다.
+  const visibleDays = visibleWeekDays(week, showWeekends);
 
   /* 이 주의 이벤트 컬러 수집 */
   const weekColors = useMemo(() => {
@@ -126,8 +135,8 @@ function WeekItem({
       </div>
 
       {/* 미니 7-number 날짜 그리드 */}
-      <div className="grid grid-cols-7 gap-px mb-1">
-        {week.map((day) => {
+      <div className="grid gap-px mb-1" style={{ gridTemplateColumns: `repeat(${visibleDays.length}, minmax(0, 1fr))` }}>
+        {visibleDays.map((day) => {
           const ds = fmtDate(day);
           const isToday = ds === today;
           const dow = day.getDay();

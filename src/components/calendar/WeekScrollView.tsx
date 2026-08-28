@@ -4,6 +4,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { CalendarDays } from 'lucide-react';
 import type { CalendarEvent } from '@/types/calendar';
 import { useCalendarStore } from '@/stores/useCalendarStore';
+import { visibleWeekDays } from '@/utils/calendarWeekdays';
 import { useMotionPref } from '@/hooks/useMotionPref';
 import { WEEKDAYS, fmtDate, addDays, daysBetween, getISOWeekNumber, hexToRgba } from '@/utils/calendarDate';
 import { formatEventTimeRange, sortEventsForList } from '@/utils/calendarEventFilter';
@@ -51,10 +52,18 @@ export interface WeekScrollViewProps {
   events: CalendarEvent[];
   today: string; // YYYY-MM-DD
   onEventClick: (ev: CalendarEvent) => void;
+  onEventContextMenu?: (ev: CalendarEvent, mouse: React.MouseEvent) => void;
   onDateClick?: (date: string) => void; // YYYY-MM-DD — 날짜 클릭 시 이벤트 생성
   activeWeekIndex: number; // 연도 기준 절대 인덱스 (0~52)
   onWeekChange: (index: number) => void;
+  pulseDate?: string | null; // '오늘' 이동 안내 펄스
   mode?: 'week' | '2week'; // 'week' = 1주 포커스, '2week' = 2주 활성
+  highlightedEventIdentities?: ReadonlySet<string>;
+  reduceMotion?: boolean;
+  /** 연타 중이면 주 이동 스크롤도 즉시 — 부드러운 스크롤이 다음 입력에 밀린다. */
+  instantScroll?: boolean;
+  /** 꺼져 있으면 토·일 칸 자체를 그리지 않는다(주 5일 보기). */
+  showWeekends?: boolean;
 }
 
 /* ── 상수 ────────────────────────────────────────────── */
@@ -77,10 +86,16 @@ export default function WeekScrollView({
   events,
   today,
   onEventClick,
+  onEventContextMenu,
   onDateClick,
   activeWeekIndex,
   onWeekChange,
+  pulseDate,
   mode = 'week',
+  highlightedEventIdentities,
+  reduceMotion,
+  instantScroll,
+  showWeekends = true,
 }: WeekScrollViewProps) {
   const is2Week = mode === '2week';
   const tags = useCalendarStore((state) => state.tags);
@@ -182,10 +197,16 @@ export default function WeekScrollView({
                   today={today}
                   isoWeek={isoWeek}
                   onEventClick={onEventClick}
+                  onEventContextMenu={onEventContextMenu}
                   onDateClick={onDateClick}
+                  pulseDate={pulseDate}
                   compact={is2Week}
                   reduce={reduce}
                   tagNameById={tagNameById}
+                  highlightedEventIdentities={highlightedEventIdentities}
+                  reduceMotion={reduceMotion ?? reduce}
+                  instantScroll={instantScroll === true}
+                  showWeekends={showWeekends}
                 />
               ) : isNear ? (
                 <CompactWeek
@@ -194,6 +215,7 @@ export default function WeekScrollView({
                   today={today}
                   isoWeek={isoWeek}
                   showBars
+                  showWeekends={showWeekends}
                 />
               ) : (
                 <CompactWeek
@@ -202,6 +224,7 @@ export default function WeekScrollView({
                   today={today}
                   isoWeek={isoWeek}
                   showBars={false}
+                  showWeekends={showWeekends}
                 />
               )}
             </motion.div>
@@ -222,31 +245,46 @@ function ActiveWeek({
   today,
   isoWeek,
   onEventClick,
+  onEventContextMenu,
   onDateClick,
+  pulseDate,
   compact,
   reduce,
   tagNameById,
+  highlightedEventIdentities,
+  reduceMotion,
+  instantScroll,
+  showWeekends,
 }: {
   week: Date[];
   events: CalendarEvent[];
   today: string;
   isoWeek: number;
   onEventClick: (ev: CalendarEvent) => void;
+  onEventContextMenu?: (ev: CalendarEvent, mouse: React.MouseEvent) => void;
   onDateClick?: (date: string) => void;
+  pulseDate?: string | null;
   compact?: boolean;
   reduce: boolean;
   tagNameById: Record<string, string>;
+  highlightedEventIdentities?: ReadonlySet<string>;
+  reduceMotion: boolean;
+  instantScroll?: boolean;
+  showWeekends: boolean;
 }) {
   const sortedEvents = useMemo(() => sortEventsForList(events), [events]);
+  // 주말을 숨기면 토·일 칸을 아예 그리지 않는다. 주 배열 자체는 7일 그대로 둔다.
+  const visibleDays = useMemo(() => visibleWeekDays(week, showWeekends), [showWeekends, week]);
+  const dayColumns = `repeat(${visibleDays.length}, minmax(0, 1fr))`;
   const eventListRef = useRef<HTMLDivElement>(null);
   const eventListId = `week-event-list-${fmtDate(week[0])}`;
   const hiddenBarCount = Math.max(0, events.length - 5);
   const revealEventList = useCallback(() => {
     const list = eventListRef.current;
     if (!list) return;
-    list.scrollIntoView({ behavior: reduce ? 'auto' : 'smooth', block: 'nearest' });
+    list.scrollIntoView({ behavior: reduce || instantScroll ? 'auto' : 'smooth', block: 'nearest' });
     list.focus({ preventScroll: true });
-  }, [reduce]);
+  }, [instantScroll, reduce]);
 
   return (
     <div
@@ -268,9 +306,9 @@ function ActiveWeek({
         </span>
       </div>
 
-      {/* 7-day date grid + event dots */}
-      <div className="grid grid-cols-7 gap-1 mb-3">
-        {week.map((day, i) => {
+      {/* 날짜 그리드 + 이벤트 점 (주말 숨김이면 5칸) */}
+      <div className="grid gap-1 mb-3" style={{ gridTemplateColumns: dayColumns }}>
+        {visibleDays.map((day, i) => {
           const ds = fmtDate(day);
           const isToday = ds === today;
           const dow = day.getDay();
@@ -285,9 +323,22 @@ function ActiveWeek({
           return (
             <div
               key={ds}
-              className="flex flex-col items-center gap-0.5 cursor-pointer rounded-lg hover:bg-bg-border/20 transition-colors py-0.5"
+              data-week-day={ds}
+              className="relative flex flex-col items-center gap-0.5 cursor-pointer rounded-lg hover:bg-bg-border/20 transition-colors py-0.5"
               onClick={() => onDateClick?.(ds)}
             >
+              {ds === pulseDate && (
+                <motion.div
+                  data-navigate-pulse="true"
+                  className="absolute inset-0 rounded-lg border-2 border-accent pointer-events-none"
+                  style={{ boxShadow: '0 0 12px 4px rgba(108, 92, 231, 0.4), 0 0 24px 8px rgba(108, 92, 231, 0.15)' }}
+                  initial={reduceMotion ? false : { opacity: 0, scale: 0.9 }}
+                  animate={reduceMotion
+                    ? { opacity: 1, scale: 1 }
+                    : { opacity: [0, 1, 0.6, 1, 0], scale: [0.9, 1.03, 1, 1.02, 1] }}
+                  transition={reduceMotion ? { duration: 0 } : { duration: 2, ease: 'easeInOut' }}
+                />
+              )}
               <span
                 className="text-[10px] font-medium"
                 style={{ color }}
@@ -331,22 +382,29 @@ function ActiveWeek({
       {events.length > 0 && (
         <div className="flex flex-col gap-0.5 mb-2">
           {events.slice(0, 5).map((ev) => {
-            const wStart = fmtDate(week[0]);
-            const wEnd = fmtDate(week[6]);
-            // 이벤트가 이 주에서 차지하는 범위 계산
-            const barStart = ev.startDate < wStart ? 0 : daysBetween(wStart, ev.startDate);
-            const barEnd = ev.endDate > wEnd ? 6 : daysBetween(wStart, ev.endDate);
-            const startCol = Math.max(0, Math.min(6, barStart));
-            const endCol = Math.max(0, Math.min(6, barEnd));
+            const identityKey = calendarEventIdentityKey(ev);
+            const isRealtimeHighlighted = highlightedEventIdentities?.has(identityKey) === true;
+            // 보이는 날짜 목록 안에서의 위치. 주말을 숨기면 금·월 칸이 맞붙어 막대 하나가 된다.
+            const dayStrings = visibleDays.map(fmtDate);
+            const startCol = dayStrings.findIndex((dateStr) => dateStr >= ev.startDate);
+            let endCol = -1;
+            for (let index = dayStrings.length - 1; index >= 0; index--) {
+              if (dayStrings[index] <= ev.endDate) { endCol = index; break; }
+            }
+            // 숨긴 날에만 걸친 일정은 그릴 칸이 없다.
+            if (startCol === -1 || endCol === -1 || endCol < startCol) return null;
             const spanCols = endCol - startCol + 1;
 
             return (
               <div
                 key={calendarEventIdentityKey(ev)}
-                className="grid grid-cols-7 gap-1"
+                className="grid gap-1"
+                style={{ gridTemplateColumns: dayColumns }}
               >
                 <div
-                  className="rounded-full truncate flex items-center px-1.5"
+                  data-event-identity={identityKey}
+                  data-realtime-highlight={isRealtimeHighlighted ? 'true' : undefined}
+                  className={`rounded-full truncate flex items-center px-1.5 ${isRealtimeHighlighted ? reduceMotion ? 'calendar-realtime-highlight-static' : 'calendar-realtime-highlight' : ''}`}
                   style={{
                     gridColumnStart: startCol + 1,
                     gridColumnEnd: startCol + 1 + spanCols,
@@ -404,7 +462,10 @@ function ActiveWeek({
               event={ev}
               today={today}
               tagNameById={tagNameById}
+              isRealtimeHighlighted={highlightedEventIdentities?.has(calendarEventIdentityKey(ev)) === true}
+              reduceMotion={reduceMotion}
               onClick={(e) => { e.stopPropagation(); onEventClick(ev); }}
+              onContextMenu={onEventContextMenu ? (e) => onEventContextMenu(ev, e) : undefined}
             />
           ))}
         </div>
@@ -418,12 +479,18 @@ function EventCard({
   event,
   today,
   tagNameById,
+  isRealtimeHighlighted,
+  reduceMotion,
   onClick,
+  onContextMenu,
 }: {
   event: CalendarEvent;
   today: string;
   tagNameById: Record<string, string>;
+  isRealtimeHighlighted: boolean;
+  reduceMotion: boolean;
   onClick: (e: React.MouseEvent) => void;
+  onContextMenu?: (e: React.MouseEvent) => void;
 }) {
   const dDay = daysBetween(today, event.endDate);
   const dDayLabel =
@@ -436,7 +503,10 @@ function EventCard({
     <motion.div
       whileHover={{ scale: 1.01 }}
       onClick={onClick}
-      className="flex items-center gap-2 cursor-pointer"
+      onContextMenu={onContextMenu}
+      data-event-identity={calendarEventIdentityKey(event)}
+      data-realtime-highlight={isRealtimeHighlighted ? 'true' : undefined}
+      className={`flex items-center gap-2 cursor-pointer ${isRealtimeHighlighted ? reduceMotion ? 'calendar-realtime-highlight-static' : 'calendar-realtime-highlight' : ''}`}
       style={{
         background: hexToRgba(event.color, 0.08),
         borderLeft: `3px solid ${event.color}`,
@@ -477,13 +547,16 @@ function CompactWeek({
   today,
   isoWeek,
   showBars,
+  showWeekends,
 }: {
   week: Date[];
   events: CalendarEvent[];
   today: string;
   isoWeek: number;
   showBars: boolean;
+  showWeekends: boolean;
 }) {
+  const visibleDays = visibleWeekDays(week, showWeekends);
   return (
     <div className="rounded-lg px-3 py-2 mb-1" style={{ background: COMPACT_BG, border: COMPACT_BORDER }}>
       {/* 주차 라벨 */}
@@ -500,8 +573,8 @@ function CompactWeek({
           </span>
         )}
       </div>
-      <div className="grid grid-cols-7 gap-1">
-        {week.map((day) => {
+      <div className="grid gap-1" style={{ gridTemplateColumns: `repeat(${visibleDays.length}, minmax(0, 1fr))` }}>
+        {visibleDays.map((day) => {
           const ds = fmtDate(day);
           const isToday = ds === today;
           const dow = day.getDay();

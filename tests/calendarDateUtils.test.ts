@@ -4,7 +4,7 @@ import { mapVacationEvents } from '../src/utils/vacationEvents.ts';
 import { VACATION_COLOR } from '../src/types/vacation.ts';
 import {
   WEEKDAYS, WEEKDAY_SHORT, fmtDate, parseDate, addDays, daysBetween,
-  hexToRgba, getISOWeekNumber,
+  hexToRgba, getISOWeekNumber, formatWeekHeaderLabel,
 } from '../src/utils/calendarDate.ts';
 
 test('fmtDate/parseDate — 왕복·패딩·정오 정규화', () => {
@@ -85,4 +85,34 @@ test('mapVacationEvents — 접두별 ID·읽기전용·필드 매핑', () => {
   assert.equal(a.vacationType, '연차');
   assert.equal(a.vacationUserName, '배한솔');
   assert.equal(a.isReadOnly, true);
+});
+
+const sundayWeek = (year: number, monthIndex: number, day: number): Date[] => (
+  Array.from({ length: 7 }, (_, offset) => new Date(year, monthIndex, day + offset))
+);
+
+test('formatWeekHeaderLabel — 연말 주의 연도·주차가 서로 어긋나지 않는다', () => {
+  // 2025-12-28(일) ~ 2026-01-03(토): 이 주의 목요일은 2026-01-01이다.
+  const week = sundayWeek(2025, 11, 28);
+  assert.equal(week[4].getDay(), 4, 'index 4가 진짜 목요일이다');
+
+  assert.equal(formatWeekHeaderLabel(week, week), '2026년 1월 · 1주차 · 12.28 – 1.3');
+});
+
+test('formatWeekHeaderLabel — 주차 값은 주간 사이드바(week[3])와 계속 일치한다', () => {
+  // 일요일 시작 주에서 수요일과 목요일은 항상 같은 ISO 주에 속한다.
+  for (let offset = 0; offset < 371; offset += 7) {
+    const week = sundayWeek(2025, 11, 28 + offset);
+    assert.equal(
+      getISOWeekNumber(week[4]),
+      getISOWeekNumber(week[3]),
+      `${week[0].toDateString()} 주의 수/목 주차가 같다`,
+    );
+  }
+});
+
+test('formatWeekHeaderLabel — 2주 보기는 끝 주의 마지막 날까지 범위를 넓힌다', () => {
+  const start = sundayWeek(2026, 7, 23);
+  const end = sundayWeek(2026, 7, 30);
+  assert.match(formatWeekHeaderLabel(start, end), /8\.23 – 9\.5$/);
 });

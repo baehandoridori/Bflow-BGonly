@@ -37,6 +37,7 @@ import {
   setUsersSheetsMode,
 } from '@/services/userService';
 import { reconcileAuthoritativeUserDirectory } from '@/services/authoritativeUserSession';
+import { useIcsEventsFeed } from '@/hooks/useIcsEventsFeed';
 import { applyPreferencesToDOM } from '@/utils/typography';
 import { readAll, checkConnection, readMetadata } from '@/services/supabaseService';
 import { connectGas, loadGasConfig } from '@/services/gasConfigService';
@@ -294,6 +295,9 @@ function applyPlexusFromPrefs(prefs: Awaited<ReturnType<typeof loadPreferences>>
 }
 
 export function WidgetPopup({ widgetId, extraParams }: { widgetId: string; extraParams?: Record<string, string> }) {
+  // 외부 캘린더(ICS) 구독 일정 — 없으면 이 창의 캘린더만 구독 일정이 빠져 보인다.
+  useIcsEventsFeed();
+
   // 전역 그라데이션 배경 토글 (설정의 "전체 화면 그라데이션"이 플로팅 위젯에도 반영되도록)
   const globalGradientEnabled = useAppStore((s) => s.plexusSettings.globalGradientEnabled !== false);
   const colorMode = useAppStore((s) => s.colorMode);

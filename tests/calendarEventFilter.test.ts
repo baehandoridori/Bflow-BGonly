@@ -230,3 +230,94 @@ test('레일 그룹: team 은 소유 무관 팀 전체 섹션, members 소유=�
   assert.deepEqual(g.team.map((c: { id: string }) => c.id).sort(), ['team-mine', 'team-other'].sort());
   assert.deepEqual(g.shared.map((c: { id: string }) => c.id), ['shared']);
 });
+
+
+/* ── 외부 캘린더(ICS) 구독 ─────────────────────────────────────── */
+
+const icsEvent = (overrides: Partial<CalendarEvent> = {}): CalendarEvent => ({
+  id: 'ics:sub-1:ev-1:2026-09-01',
+  title: '외부 회의',
+  memo: '',
+  color: '#00B894',
+  type: 'custom',
+  startDate: '2026-09-01',
+  endDate: '2026-09-01',
+  createdBy: '외부 팀 캘린더',
+  createdAt: '',
+  allDay: false,
+  startTime: '15:00',
+  endTime: '16:00',
+  source: 'ics',
+  sourceCalendarId: 'ics:sub-1',
+  isReadOnly: true,
+  canEdit: false,
+  ...overrides,
+});
+
+const icsFilterState = (overrides: Partial<Parameters<typeof filterCalendarEvents>[1]> = {}) => ({
+  visibleCalendarIds: {},
+  enabledTagIds: {},
+  googleVisible: true,
+  ...overrides,
+});
+
+test('외부 구독 일정은 구독별 토글로만 켜고 끈다', () => {
+  const event = icsEvent();
+
+  assert.deepEqual(
+    filterCalendarEvents([event], icsFilterState()),
+    [event],
+    '기본값은 켜짐이다',
+  );
+  assert.deepEqual(
+    filterCalendarEvents([event], icsFilterState({ visibleCalendarIds: { 'ics:sub-1': false } })),
+    [],
+    '그 구독만 끄면 사라진다',
+  );
+  assert.deepEqual(
+    filterCalendarEvents([event], icsFilterState({ visibleCalendarIds: { 'ics:sub-2': false } })),
+    [event],
+    '다른 구독을 꺼도 남는다',
+  );
+});
+
+test('외부 구독 일정은 구글 토글과 태그 필터에 끌려가지 않는다', () => {
+  const event = icsEvent({ tagId: 'tag-meeting' });
+
+  assert.deepEqual(
+    filterCalendarEvents([event], icsFilterState({ googleVisible: false })),
+    [event],
+    '구글을 꺼도 외부 구독은 남는다',
+  );
+  assert.deepEqual(
+    filterCalendarEvents([event], icsFilterState({ enabledTagIds: { 'tag-meeting': false } })),
+    [event],
+    '읽기 전용 구독 일정은 태그 필터를 지나가지 않는다',
+  );
+});
+
+test('알 수 없는 B flow 캘린더 필터가 외부 구독을 지우지 않는다', () => {
+  const event = icsEvent();
+
+  assert.deepEqual(
+    filterCalendarEvents([event], icsFilterState({ knownCalendarIds: new Set(['other']) })),
+    [event],
+  );
+});
+
+test('외부 구독 칩은 구독 이름을 앞에 붙인다', () => {
+  assert.equal(
+    formatEventChipText(icsEvent({ allDay: true, startTime: undefined }), {}, { 'ics:sub-1': '외부 팀 캘린더' }),
+    '외부 팀 캘린더 · 외부 회의',
+  );
+  assert.equal(
+    formatEventChipText(icsEvent({ allDay: true, startTime: undefined }), {}, {}),
+    '외부 팀 캘린더 · 외부 회의',
+    '캘린더 이름 맵에 없어도 일정에 실려 온 구독 이름을 쓴다',
+  );
+  assert.equal(
+    formatEventChipText(icsEvent(), {}, { 'ics:sub-1': '외부 팀 캘린더' }),
+    '15:00 외부 회의',
+    '시각 일정은 기존처럼 시각을 앞세운다',
+  );
+});

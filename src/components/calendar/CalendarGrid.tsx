@@ -1,12 +1,12 @@
-import { useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react';
 import { createPortal } from 'react-dom';
 import { motion, AnimatePresence } from 'framer-motion';
-import { X, Palmtree, CheckSquare } from 'lucide-react';
+import { X, Palmtree, CheckSquare, CalendarDays } from 'lucide-react';
 import { cn } from '@/utils/cn';
 import type { CalendarEvent } from '@/types/calendar';
 import { EVENT_COLORS } from '@/types/calendar';
 import type { DragMode, DragPreview } from '@/hooks/useCalendarDnD';
-import { WEEKDAYS, fmtDate, parseDate, addDays, daysBetween } from '@/utils/calendarDate';
+import { WEEKDAYS, fmtDate, parseDate, addDays } from '@/utils/calendarDate';
 import { formatEventChipText } from '@/utils/calendarEventFilter';
 import {
   calendarEventLinkedTodoId,
@@ -16,86 +16,24 @@ import {
   type CalendarEventIdentity,
 } from '@/utils/calendarEventIdentity';
 import { floatingGlassStyle, tooltipGlassStyle } from '@/utils/glassStyles';
+import { layoutEventBars, visibleWeekDays, type EventBar } from '@/utils/calendarWeekdays';
 
-/** 이벤트의 연속 바 레이아웃 계산 */
-export interface EventBar {
-  event: CalendarEvent;
-  row: number;
-  startCol: number; // 0-indexed in week
-  span: number;     // how many columns it spans
-  isStart: boolean; // bar starts in this week
-  isEnd: boolean;   // bar ends in this week
-}
+// 바 배치는 주말 숨김과 한 몸이라 유틸로 옮겼다. 기존 import 경로는 그대로 살려 둔다.
+export { layoutEventBars, type EventBar };
 
-export function layoutEventBars(
-  events: CalendarEvent[],
-  weekStart: Date,
-  cols: number,
-): EventBar[] {
-  const weekEnd = addDays(weekStart, cols - 1);
-  const weekStartStr = fmtDate(weekStart);
-  const weekEndStr = fmtDate(weekEnd);
-
-  const relevant = events
-    .filter((e) => e.endDate >= weekStartStr && e.startDate <= weekEndStr)
-    .sort((a, b) => {
-      const dSpan = daysBetween(b.startDate, b.endDate) - daysBetween(a.startDate, a.endDate);
-      if (dSpan !== 0) return dSpan;
-      return a.startDate.localeCompare(b.startDate);
-    });
-
-  const rows: string[][] = []; // rows[row][col] = eventId or ''
-  const bars: EventBar[] = [];
-
-  for (const ev of relevant) {
-    const evStart = parseDate(ev.startDate);
-    const evEnd = parseDate(ev.endDate);
-    const clampStart = evStart < weekStart ? weekStart : evStart;
-    const clampEnd = evEnd > weekEnd ? weekEnd : evEnd;
-
-    const startCol = Math.round((clampStart.getTime() - weekStart.getTime()) / 86400000);
-    const endCol = Math.round((clampEnd.getTime() - weekStart.getTime()) / 86400000);
-    const span = endCol - startCol + 1;
-
-    // find a row where all cols are free
-    let placed = -1;
-    for (let r = 0; r < rows.length; r++) {
-      let free = true;
-      for (let c = startCol; c <= endCol; c++) {
-        if (rows[r][c]) { free = false; break; }
-      }
-      if (free) { placed = r; break; }
-    }
-    if (placed === -1) {
-      placed = rows.length;
-      rows.push(new Array(cols).fill(''));
-    }
-    for (let c = startCol; c <= endCol; c++) {
-      rows[placed][c] = calendarEventIdentityKey(ev);
-    }
-
-    bars.push({
-      event: ev,
-      row: placed,
-      startCol,
-      span,
-      isStart: evStart >= weekStart,
-      isEnd: evEnd <= weekEnd,
-    });
-  }
-
-  return bars;
-}
 
 /* ═══════════════════════════════════════════════════
    이벤트 바 컴포넌트 (리퀴드 글라스)
    ═══════════════════════════════════════════════════ */
 
 function EventBarChip({
-  bar, onClick, onDragStart, isDragging, isGhost,
+  bar, columnCount, onClick, onDragStart, isDragging, isGhost,
   hoveredEventIdentity, onHover, onContextMenu, tagNameById, calendarNameById,
+  isRealtimeHighlighted, reduceMotion,
 }: {
   bar: EventBar;
+  /** 그 주에 실제로 그려지는 칸 수(주말을 숨기면 5). */
+  columnCount: number;
   onClick: (e: CalendarEvent) => void;
   onDragStart?: (event: CalendarEvent, mode: DragMode, anchorDate: string) => void;
   isDragging?: boolean;
@@ -105,6 +43,8 @@ function EventBarChip({
   onContextMenu?: (ev: CalendarEvent, e: React.MouseEvent) => void;
   tagNameById: Record<string, string>;
   calendarNameById: Record<string, string>;
+  isRealtimeHighlighted?: boolean;
+  reduceMotion?: boolean;
 }) {
   const ev = bar.event;
   const hex = ev.color || EVENT_COLORS[0];
@@ -214,20 +154,27 @@ function EventBarChip({
       onContextMenu={onContextMenu ? (e) => onContextMenu(ev, e) : undefined}
       data-event-id={ev.id}
       data-event-identity={calendarEventIdentityKey(ev)}
+      data-realtime-highlight={isRealtimeHighlighted ? 'true' : undefined}
       className={cn(
         'absolute text-left z-10 calendar-event-bar',
-        isGhost ? 'pointer-events-none opacity-50' : 'transition-all duration-150',
+        isGhost ? 'pointer-events-none opacity-50' : 'transition-[transform,filter] duration-150',
         !isGhost && isHovered && 'brightness-110 scale-[1.02] z-20',
         isDragging ? 'opacity-40' : '',
+        isRealtimeHighlighted && (reduceMotion ? 'calendar-realtime-highlight-static' : 'calendar-realtime-highlight'),
         'group/bar',
       )}
       style={{
-        left: `calc(${(bar.startCol / 7) * 100}% + 2px)`,
-        width: `calc(${(bar.span / 7) * 100}% - 4px)`,
+        left: `calc(${(bar.startCol / columnCount) * 100}% + 2px)`,
+        width: `calc(${(bar.span / columnCount) * 100}% - 4px)`,
         top: `${bar.row * 28 + 36}px`,
         height: '26px',
         cursor: ev.isReadOnly ? 'pointer' : isDragging ? 'grabbing' : 'grab',
         transition: isGhost ? 'left 0.12s ease-out, width 0.12s ease-out, top 0.12s ease-out' : undefined,
+        ...(isRealtimeHighlighted ? {
+          outline: `2px solid ${hex}`,
+          outlineOffset: '2px',
+          boxShadow: `0 0 12px ${hex}80`,
+        } : {}),
       }}
     >
       <div
@@ -272,7 +219,12 @@ function EventBarChip({
 
       {/* 글래스모피즘 툴팁 — Portal로 body에 직접 렌더 (부모 transform/overflow 무관) */}
       {showTooltip && !isDragging && !isGhost && createPortal(
-        <div
+        <motion.div
+          // framer-motion이 transform을 직접 관리하므로 style의 정적 transform은 덮어써진다.
+          // 커서 위 중앙 앵커도 motion value(x·y)로 넘겨야 자리를 지킨다.
+          initial={reduceMotion ? false : { opacity: 0, scale: 0.96, x: '-50%', y: '-100%' }}
+          animate={{ opacity: 1, scale: 1, x: '-50%', y: '-100%' }}
+          transition={reduceMotion ? { duration: 0 } : { duration: 0.2, ease: [0.16, 1, 0.3, 1] }}
           className="pointer-events-none rounded-2xl px-4 py-3 max-w-[260px]"
           style={{
             ...tooltipGlassStyle,
@@ -280,13 +232,12 @@ function EventBarChip({
             zIndex: 99999,
             left: Math.min(tooltipPos.x, window.innerWidth - 280),
             top: Math.max(tooltipPos.y - 12, 8),
-            transform: 'translate(-50%, -100%)',
           }}
         >
           <div className="text-[13px] font-semibold text-text-primary truncate">{ev.title}</div>
           <div className="text-[12px] text-text-secondary/70 mt-1">{dateLabel}</div>
           {ev.memo && <div className="text-[11px] text-text-secondary/50 mt-1 line-clamp-2">{ev.memo}</div>}
-        </div>,
+        </motion.div>,
         document.body,
       )}
     </div>
@@ -308,9 +259,62 @@ function OverflowPopup({
 }) {
   const d = parseDate(date);
   const label = `${d.getMonth() + 1}월 ${d.getDate()}일 (${WEEKDAYS[d.getDay()]})`;
+  const dialogRef = useRef<HTMLDivElement>(null);
+  const closeButtonRef = useRef<HTMLButtonElement>(null);
+  const previousFocusRef = useRef<HTMLElement | null>(null);
+
+  // 캘린더 단축키(C/W/M/?)는 aria-modal 대화상자가 떠 있으면 배경으로 흘러가지 않는다.
+  // 이 팝업도 같은 규칙을 따르므로, 닫기는 여기서 Escape로 직접 처리한다.
+  useEffect(() => {
+    const handleKeyDown = (keyboardEvent: KeyboardEvent) => {
+      if (keyboardEvent.key !== 'Escape') return;
+      keyboardEvent.preventDefault();
+      keyboardEvent.stopPropagation();
+      onClose();
+    };
+    document.addEventListener('keydown', handleKeyDown);
+    return () => document.removeEventListener('keydown', handleKeyDown);
+  }, [onClose]);
+
+  // 대화상자를 열면 포커스를 안으로 옮기고, 닫을 때 원래 위치로 돌려준다.
+  // 그러지 않으면 키보드 사용자가 팝업 뒤의 캘린더 버튼으로 Tab 이동해 눌러 버린다.
+  useEffect(() => {
+    previousFocusRef.current = document.activeElement as HTMLElement | null;
+    closeButtonRef.current?.focus();
+    return () => {
+      const previousFocus = previousFocusRef.current;
+      if (previousFocus?.isConnected) previousFocus.focus();
+    };
+  }, []);
+
+  const handleDialogKeyDown = (keyboardEvent: ReactKeyboardEvent<HTMLElement>) => {
+    if (keyboardEvent.key !== 'Tab') return;
+    const focusableElements = Array.from(dialogRef.current?.querySelectorAll<HTMLElement>(
+      'button:not([disabled]), a[href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
+    ) ?? []);
+    const first = focusableElements[0];
+    const last = focusableElements.at(-1);
+    if (!first || !last) {
+      keyboardEvent.preventDefault();
+      dialogRef.current?.focus();
+      return;
+    }
+    const activeElement = document.activeElement as HTMLElement | null;
+    const isOutsideDialog = !activeElement || !focusableElements.includes(activeElement);
+    if (keyboardEvent.shiftKey ? activeElement === first || isOutsideDialog : activeElement === last || isOutsideDialog) {
+      keyboardEvent.preventDefault();
+      (keyboardEvent.shiftKey ? last : first).focus();
+    }
+  };
 
   return (
     <motion.div
+      ref={dialogRef}
+      role="dialog"
+      aria-modal="true"
+      aria-label={`${label} 일정 목록`}
+      tabIndex={-1}
+      onKeyDown={handleDialogKeyDown}
       initial={{ opacity: 0, scale: 0.95, y: -4 }}
       animate={{ opacity: 1, scale: 1, y: 0 }}
       exit={{ opacity: 0, scale: 0.95, y: -4 }}
@@ -324,7 +328,13 @@ function OverflowPopup({
     >
       <div className="flex items-center justify-between mb-2">
         <span className="text-xs font-semibold text-text-primary">{label}</span>
-        <button onClick={onClose} className="p-0.5 text-text-secondary hover:text-text-primary cursor-pointer">
+        <button
+          ref={closeButtonRef}
+          type="button"
+          aria-label={`${label} 일정 목록 닫기`}
+          onClick={onClose}
+          className="p-0.5 text-text-secondary hover:text-text-primary cursor-pointer"
+        >
           <X size={12} />
         </button>
       </div>
@@ -380,8 +390,13 @@ export function CalendarGrid({
   onWheel,
   monthKey,
   monthDirection = 0,
+  instantTransition = false,
+  eventsLoaded = true,
+  showWeekends = true,
   focusedDate,
   pulseDate,
+  highlightedEventIdentities,
+  reduceMotion = false,
   tagNameById,
   calendarNameById,
 }: {
@@ -401,8 +416,15 @@ export function CalendarGrid({
   onEventContextMenu?: (ev: CalendarEvent, e: React.MouseEvent) => void;
   monthKey?: string;
   monthDirection?: number;
+  instantTransition?: boolean;
+  /** 일정 첫 로드가 끝났는지. 로드 전에는 '일정이 없다'고 단정하지 않는다. */
+  eventsLoaded?: boolean;
+  /** 꺼져 있으면 토·일 칸 자체를 그리지 않는다(주 5일 보기). */
+  showWeekends?: boolean;
   focusedDate?: string | null;
   pulseDate?: string | null;
+  highlightedEventIdentities?: ReadonlySet<string>;
+  reduceMotion?: boolean;
   tagNameById: Record<string, string>;
   calendarNameById: Record<string, string>;
 }) {
@@ -421,16 +443,37 @@ export function CalendarGrid({
     );
   }, [events, dragPreview, draggedEventIdentity]);
 
+  // 주말을 숨기면 토·일 칸 자체를 그리지 않는다. 주 배열 자체는 7일 그대로 두고
+  // 렌더 직전에만 걸러, 주 경계·주차 계산은 손대지 않는다.
+  const visibleWeeks = useMemo(
+    () => weeks.map((week) => visibleWeekDays(week, showWeekends)),
+    [showWeekends, weeks],
+  );
+  const columnCount = visibleWeeks[0]?.length ?? (showWeekends ? 7 : 5);
+  const gridTemplateColumns = `repeat(${columnCount}, minmax(0, 1fr))`;
+  const visibleWeekdayLabels = useMemo(
+    () => (showWeekends ? WEEKDAYS : WEEKDAYS.filter((_, index) => index !== 0 && index !== 6)),
+    [showWeekends],
+  );
+
+  // 이번 달에 걸치는 일정이 하나도 없으면 격자만 남아 무엇을 해야 할지 알기 어렵다.
+  // 날짜 셀 클릭이 곧 생성 경로이므로 안내는 클릭을 가리지 않게 얹기만 한다.
+  const hasCurrentMonthEvent = useMemo(() => visibleWeeks.some((week) => week.some((day) => {
+    if (day.getMonth() !== currentMonth) return false;
+    const dateStr = fmtDate(day);
+    return displayEvents.some((candidate) => candidate.startDate <= dateStr && candidate.endDate >= dateStr);
+  })), [currentMonth, displayEvents, visibleWeeks]);
+
   return (
     <div className="flex flex-col flex-1 h-full min-h-0" onWheel={onWheel}>
       {/* 요일 헤더 */}
-      <div className="grid grid-cols-7 mb-0.5 border-b border-bg-border/25">
-        {WEEKDAYS.map((day, i) => (
+      <div className="grid mb-0.5 border-b border-bg-border/25" style={{ gridTemplateColumns }}>
+        {visibleWeekdayLabels.map((day) => (
           <div
             key={day}
             className={cn(
               'text-center text-xs font-semibold py-2.5 tracking-wider',
-              i === 0 ? 'text-red-400/60' : i === 6 ? 'text-blue-400/60' : 'text-text-secondary/50',
+              day === '일' ? 'text-red-400/60' : day === '토' ? 'text-blue-400/60' : 'text-text-secondary/50',
             )}
           >
             {day}
@@ -442,21 +485,29 @@ export function CalendarGrid({
       <AnimatePresence mode="popLayout" initial={false}>
       <motion.div
         key={monthKey || 'default'}
-        initial={{ opacity: 0, y: monthDirection > 0 ? 30 : -30 }}
+        initial={instantTransition ? false : { opacity: 0, y: monthDirection > 0 ? 30 : -30 }}
         animate={{ opacity: 1, y: 0 }}
-        exit={{ opacity: 0, y: monthDirection > 0 ? -30 : 30 }}
-        transition={{ duration: 0.3, ease: [0.16, 1, 0.3, 1] }}
-        className="flex flex-col flex-1 min-h-0 rounded-xl overflow-hidden border border-bg-border/30"
+        exit={instantTransition ? undefined : { opacity: 0, y: monthDirection > 0 ? -30 : 30 }}
+        transition={instantTransition ? { duration: 0 } : { duration: 0.3, ease: [0.16, 1, 0.3, 1] }}
+        className="relative flex flex-col flex-1 min-h-0 rounded-xl overflow-hidden border border-bg-border/30"
       >
-        {weeks.map((week, wi) => {
-          const bars = layoutEventBars(displayEvents, week[0], 7);
+        {eventsLoaded && !hasCurrentMonthEvent && (
+          <div className="pointer-events-none absolute inset-0 z-10 flex flex-col items-center justify-center gap-2">
+            <CalendarDays size={36} className="text-text-secondary/60" />
+            <span className="text-sm text-text-secondary">이번 달 일정이 없습니다</span>
+            <span className="text-[11px] text-text-secondary/60">날짜를 눌러 새 일정을 만들어 보세요</span>
+          </div>
+        )}
+        {visibleWeeks.map((week, wi) => {
+          const bars = layoutEventBars(displayEvents, week);
           const maxRow = bars.length > 0 ? Math.max(...bars.map((b) => b.row)) + 1 : 0;
           // 현재 주 하이라이트
           const isCurrentWeek = week.some((d) => fmtDate(d) === today);
           return (
             <div
               key={wi}
-              className={cn("relative grid grid-cols-7 flex-1 min-h-0", isCurrentWeek && 'bg-accent/[0.03]')}
+              className={cn("relative grid flex-1 min-h-0", isCurrentWeek && 'bg-accent/[0.03]')}
+              style={{ gridTemplateColumns }}
             >
               {/* 날짜 셀 배경 */}
               {week.map((day, di) => {
@@ -560,6 +611,7 @@ export function CalendarGrid({
                   <EventBarChip
                     key={`${calendarEventIdentityKey(bar.event)}-w${wi}-c${bar.startCol}`}
                     bar={bar}
+                    columnCount={columnCount}
                     onClick={onEventClick}
                     onDragStart={onDragStart}
                     isDragging={barIsDragging}
@@ -569,6 +621,8 @@ export function CalendarGrid({
                     onContextMenu={onEventContextMenu}
                     tagNameById={tagNameById}
                     calendarNameById={calendarNameById}
+                    isRealtimeHighlighted={highlightedEventIdentities?.has(calendarEventIdentityKey(bar.event))}
+                    reduceMotion={reduceMotion}
                   />
                 );
               })}

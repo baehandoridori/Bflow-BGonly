@@ -96,7 +96,8 @@ export interface CalendarEvent {
   startTime?: string;
   endTime?: string;
   canEdit?: boolean;
-  source?: 'bflow' | 'google' | 'vacation';
+  /** 'ics'는 읽기 전용 외부 구독. 뮤테이션 경로에 진입해서는 안 된다. */
+  source?: 'bflow' | 'google' | 'vacation' | 'ics';
 }
 
 /** Google Calendar 연동 설정 */

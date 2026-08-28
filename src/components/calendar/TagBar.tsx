@@ -1,5 +1,7 @@
+import { motion } from 'framer-motion';
 import { Settings } from 'lucide-react';
 import { useMemo } from 'react';
+import { useMotionPref } from '@/hooks/useMotionPref';
 import { useCalendarStore } from '@/stores/useCalendarStore';
 import { hexToRgba } from '@/utils/calendarDate';
 import { VACATION_CHIP_ID } from '@/utils/calendarEventFilter';
@@ -13,23 +15,31 @@ interface TagChipProps {
   name: string;
   color: string;
   enabled: boolean;
+  reduce: boolean;
   onClick: () => void;
 }
 
-function TagChip({ name, color, enabled, onClick }: TagChipProps) {
+// 켜고 끌 때 색만 바뀌면 눌렸는지 확신이 안 선다. 짧은 오버슈트로 반응을 준다.
+const TAG_CHIP_POP = { duration: 0.35, ease: [0.16, 1, 0.3, 1] } as const;
+
+function TagChip({ name, color, enabled, reduce, onClick }: TagChipProps) {
   return (
-    <button
+    <motion.button
       type="button"
       aria-label={`${name} 태그`}
       aria-pressed={enabled}
       onClick={onClick}
+      // 마운트 때 칩들이 일제히 튀지 않게 한다. 토글할 때만 pop이 재생된다.
+      initial={false}
+      animate={reduce ? undefined : { scale: enabled ? [1, 1.12, 1] : [1, 0.92, 1] }}
+      transition={reduce ? { duration: 0 } : TAG_CHIP_POP}
       className="rounded-full border px-2.5 py-1 text-xs font-medium transition-colors cursor-pointer"
       style={enabled
         ? { backgroundColor: hexToRgba(color, 0.22), borderColor: hexToRgba(color, 0.45), color }
         : { backgroundColor: 'transparent', borderColor: 'rgba(139, 141, 163, 0.35)', color: '#8B8DA3' }}
     >
       {name}
-    </button>
+    </motion.button>
   );
 }
 
@@ -38,6 +48,7 @@ export function TagBar({ vacationConnected, onOpenTagManager }: TagBarProps) {
   const enabledTagIds = useCalendarStore((state) => state.enabledTagIds);
   const toggleTag = useCalendarStore((state) => state.toggleTag);
   const resetTagsAllOn = useCalendarStore((state) => state.resetTagsAllOn);
+  const { reduce } = useMotionPref();
   const orderedTags = useMemo(() => [...tags].sort((a, b) => a.sortOrder - b.sortOrder), [tags]);
   const allEnabled = orderedTags.every((tag) => enabledTagIds[tag.id] !== false)
     && (!vacationConnected || enabledTagIds[VACATION_CHIP_ID] !== false);
@@ -62,6 +73,7 @@ export function TagBar({ vacationConnected, onOpenTagManager }: TagBarProps) {
           name={tag.name}
           color={tag.color}
           enabled={enabledTagIds[tag.id] !== false}
+          reduce={reduce}
           onClick={() => toggleTag(tag.id)}
         />
       ))}
@@ -70,6 +82,7 @@ export function TagBar({ vacationConnected, onOpenTagManager }: TagBarProps) {
           name="휴가"
           color="#00B894"
           enabled={enabledTagIds[VACATION_CHIP_ID] !== false}
+          reduce={reduce}
           onClick={() => toggleTag(VACATION_CHIP_ID)}
         />
       )}

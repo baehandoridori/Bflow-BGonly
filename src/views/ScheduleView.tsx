@@ -30,6 +30,7 @@ import { CalendarRail, GOOGLE_CALENDAR_ID } from '@/components/calendar/Calendar
 import { TagBar } from '@/components/calendar/TagBar';
 import { TagManagerPopover } from '@/components/calendar/TagManagerPopover';
 import { CalendarSettingsModal } from '@/components/calendar/CalendarSettingsModal';
+import { ShortcutHelpOverlay } from '@/components/calendar/ShortcutHelpOverlay';
 import { useCalendarDragCreate } from '@/hooks/useCalendarDragCreate';
 import { useCalendarStore } from '@/stores/useCalendarStore';
 import { filterCalendarEvents } from '@/utils/calendarEventFilter';
@@ -42,21 +43,99 @@ import {
 } from '@/utils/calendarEventIdentity';
 import { navigateToSceneView } from '@/utils/sceneNavigationAction';
 import { createUuid } from '@/utils/createUuid';
-import { fmtDate, parseDate, addDays } from '@/utils/calendarDate';
+import { fmtDate, parseDate, addDays, formatWeekHeaderLabel } from '@/utils/calendarDate';
 import { useMotionPref } from '@/hooks/useMotionPref';
+import { buildEventSnapshot, diffEventSnapshots, type CalendarEventSnapshot } from '@/utils/calendarEventDiff';
+import { eventContentSnapshot, withCalendarPresentationForSnapshot } from '@/utils/calendarLocalMutation';
 
 type WeekSubMode = 'card' | 'timegrid';
 
 const CALENDAR_VIEW_STORAGE_KEY = 'bflow_calendar_view_v1';
 const CALENDAR_VIEW_MODES: CalendarViewMode[] = ['month', '2week', 'week', 'today'];
+const LOCAL_CHANGE_GUARD_MS = 3_000;
+/** 캘린더 단축키 — 한글 입력 모드에서는 물리 키(e.code)로 폴백한다. */
+const CALENDAR_SHORTCUT_KEYS = new Set(['t', 'w', 'm', 'c']);
+const CALENDAR_SHORTCUT_BY_CODE: Record<string, string> = {
+  KeyT: 't', KeyW: 'w', KeyM: 'm', KeyC: 'c',
+};
+/** '오늘' 이동 펄스 길이. */
+const TODAY_PULSE_MS = 2_500;
+/** 미니 달력·딥링크 이동 펄스 길이. */
+const NAVIGATION_PULSE_MS = 3_000;
+const RAPID_PERIOD_NAV_MS = 300;
+const REALTIME_HIGHLIGHT_MS = 2_000;
 
-function readCalendarViewPreference(): { viewMode: CalendarViewMode; weekSubMode: WeekSubMode } {
-  const fallback = { viewMode: 'month' as CalendarViewMode, weekSubMode: 'card' as WeekSubMode };
+type LocalChangeGuard = {
+  identityKey: string;
+  expiresAt: number;
+  kind: 'add' | 'update' | 'delete';
+  expectedSnapshot: string;
+  rollbackSnapshot?: string;
+  persistence: 'pending' | 'succeeded' | 'failed';
+  sawExpected: boolean;
+  sawRollback: boolean;
+};
+
+type LocalChangeGuardHandle = {
+  key: string;
+};
+
+/**
+ * 실시간 하이라이트는 '팀원이 방금 바꿨어요'를 알리는 용도다. 내가 만든 낙관 반영과
+ * 외부 구독(ICS) 재적재는 팀원 변경이 아니므로 펄스 대상에서 뺀다.
+ */
+function isSelfDrivenCalendarRefresh(event: Event): boolean {
+  const detail = (event as CustomEvent<unknown>).detail;
+  if (typeof detail !== 'object' || detail === null) return false;
+  const action = (detail as { action?: unknown }).action;
+  return action === 'optimistic-metadata' || action === 'ics';
+}
+
+function expectedCreatedEvent(
+  event: CalendarEvent,
+  identity: CalendarEventIdentity,
+): CalendarEvent {
+  return {
+    ...event,
+    id: identity.id,
+    source: identity.source,
+    sourceCalendarId: identity.sourceCalendarId,
+    allDay: event.allDay ?? true,
+    // Google 생성은 서비스가 캐시에 넣는 중립 색으로 즉시 반영된다.
+    ...(identity.source === 'google' ? { color: '#8B8DA3' } : {}),
+  };
+}
+
+function optimisticCreatedEventIdentity(event: CalendarEvent): CalendarEventIdentity {
+  if (event.calendarId) {
+    return {
+      id: event.id,
+      source: 'bflow',
+      sourceCalendarId: `bflow:${event.calendarId}`,
+    };
+  }
+  return {
+    id: event.id,
+    source: event.isPrivate ? 'bflow' : 'google',
+    sourceCalendarId: event.isPrivate ? 'supabase-private' : 'primary',
+  };
+}
+
+function readCalendarViewPreference(): {
+  viewMode: CalendarViewMode;
+  weekSubMode: WeekSubMode;
+  showWeekends: boolean;
+} {
+  const fallback = {
+    viewMode: 'month' as CalendarViewMode,
+    weekSubMode: 'card' as WeekSubMode,
+    showWeekends: true,
+  };
   try {
     if (typeof window === 'undefined') return fallback;
     const raw = window.localStorage.getItem(CALENDAR_VIEW_STORAGE_KEY);
     if (!raw) return fallback;
-    const value = JSON.parse(raw) as { viewMode?: unknown; weekSubMode?: unknown };
+    const value = JSON.parse(raw) as { viewMode?: unknown; weekSubMode?: unknown; showWeekends?: unknown };
     if (
       !CALENDAR_VIEW_MODES.includes(value.viewMode as CalendarViewMode)
       || (value.weekSubMode !== 'card' && value.weekSubMode !== 'timegrid')
@@ -64,6 +143,8 @@ function readCalendarViewPreference(): { viewMode: CalendarViewMode; weekSubMode
     return {
       viewMode: value.viewMode as CalendarViewMode,
       weekSubMode: value.weekSubMode,
+      // 예전 저장값에는 이 항목이 없다. 없으면 지금까지처럼 주말을 보여준다.
+      showWeekends: value.showWeekends !== false,
     };
   } catch {
     return fallback;
@@ -153,9 +234,19 @@ export function ScheduleView() {
   const [weekSubMode, setWeekSubMode] = useState<WeekSubMode>(() => readCalendarViewPreference().weekSubMode);
   const [showCreate, setShowCreate] = useState(false);
   const [createDate, setCreateDate] = useState<string | undefined>();
+  const [createEndDate, setCreateEndDate] = useState<string | undefined>();
+  const [createStartTime, setCreateStartTime] = useState<string | undefined>();
+  const [createEndTime, setCreateEndTime] = useState<string | undefined>();
   const [googleAuthenticated, setGoogleAuthenticated] = useState(false);
   const [calendarSettings, setCalendarSettings] = useState<BflowCalendar | null | undefined>(undefined);
   const [tagManagerAnchor, setTagManagerAnchor] = useState<DOMRect | null>(null);
+  const [highlightedEventIdentities, setHighlightedEventIdentities] = useState<ReadonlySet<string>>(() => new Set());
+  const canonicalEventSnapshotRef = useRef<CalendarEventSnapshot | null>(null);
+  const localChangeGuardsRef = useRef(new Map<string, LocalChangeGuard>());
+  const localChangeGuardSequenceRef = useRef(0);
+  const realtimeHighlightTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const realtimeHighlightExpiryRef = useRef(new Map<string, number>());
+  const isInitialCalendarSyncRef = useRef(true);
 
   // ─── 새 컴포넌트 상태 ───
   const [panelEvent, setPanelEvent] = useState<CalendarEvent | null>(null);
@@ -168,6 +259,14 @@ export function ScheduleView() {
     event: CalendarEvent; position: { x: number; y: number };
   } | null>(null);
   const draggedEventIdentityRef = useRef<CalendarEventIdentity | null>(null);
+  const pendingEditorDeleteCountsRef = useRef(new Map<string, number>());
+
+  const resetCreatePrefill = useCallback(() => {
+    setCreateDate(undefined);
+    setCreateEndDate(undefined);
+    setCreateStartTime(undefined);
+    setCreateEndTime(undefined);
+  }, []);
 
   // Week scroll view state — 연도 기준 절대 인덱스
   const [activeWeekIndex, setActiveWeekIndex] = useState(() => {
@@ -189,14 +288,6 @@ export function ScheduleView() {
   const [monthDir, setMonthDir] = useState(0); // 월 슬라이드 방향
   const { reduce } = useMotionPref();
 
-  useEffect(() => {
-    try {
-      window.localStorage.setItem(CALENDAR_VIEW_STORAGE_KEY, JSON.stringify({ viewMode, weekSubMode }));
-    } catch {
-      // 시크릿 모드·저장소 접근 제한에서는 기존 화면 동작을 유지한다.
-    }
-  }, [viewMode, weekSubMode]);
-
   const today = fmtDate(new Date());
   const vacationConnected = useAppStore((s) => s.vacationConnected);
   const calendars = useCalendarStore((state) => state.calendars);
@@ -216,6 +307,186 @@ export function ScheduleView() {
     () => new Set(optimisticDeletedTagIds),
     [optimisticDeletedTagIds],
   );
+
+  const expectedLocalUpdatePresentation = useCallback((
+    event: CalendarEvent,
+    updates: Partial<CalendarEvent>,
+  ): CalendarEvent => (
+    // calendarService가 저장 전 캐시에 반영하는 B flow 이동 표시와 같아야
+    // 이 창의 optimistic echo를 동료 변경으로 오인하지 않는다.
+    { ...event, ...withCalendarPresentationForSnapshot(event, updates, calendars) }
+  ), [calendars]);
+
+  const guardLocalIdentity = useCallback((
+    identity: CalendarEventIdentity,
+    expectedEvent: CalendarEvent,
+    kind: LocalChangeGuard['kind'] = 'update',
+    rollbackEvent?: CalendarEvent,
+  ) => {
+    const identityKey = calendarEventIdentityKey(identity);
+    const expectedSnapshot = buildEventSnapshot([expectedEvent]).get(identityKey);
+    if (expectedSnapshot === undefined) return undefined;
+    const rollbackSnapshot = rollbackEvent
+      ? buildEventSnapshot([rollbackEvent]).get(identityKey)
+      : undefined;
+    const now = Date.now();
+    for (const [guardKey, guard] of localChangeGuardsRef.current) {
+      if (guard.expiresAt <= now && guard.persistence !== 'pending') {
+        localChangeGuardsRef.current.delete(guardKey);
+      }
+    }
+    const key = `${identityKey}\u0000${++localChangeGuardSequenceRef.current}`;
+    localChangeGuardsRef.current.set(key, {
+      identityKey,
+      expiresAt: now + LOCAL_CHANGE_GUARD_MS,
+      kind,
+      expectedSnapshot,
+      rollbackSnapshot,
+      persistence: 'pending',
+      sawExpected: false,
+      sawRollback: false,
+    });
+    return { key } satisfies LocalChangeGuardHandle;
+  }, []);
+
+  const settleLocalMutationGuard = useCallback((
+    handle: LocalChangeGuardHandle | undefined,
+    persistence: Extract<LocalChangeGuard['persistence'], 'succeeded' | 'failed'>,
+  ) => {
+    if (!handle) return;
+    const guard = localChangeGuardsRef.current.get(handle.key);
+    if (!guard || (guard.kind !== 'update' && guard.kind !== 'delete')) return;
+    guard.persistence = persistence;
+    const isSettled = guard.kind === 'delete'
+      ? persistence === 'succeeded' || (persistence === 'failed' && guard.sawExpected)
+      : (persistence === 'succeeded' && guard.sawExpected) || (persistence === 'failed' && guard.sawRollback);
+    if (isSettled) {
+      localChangeGuardsRef.current.delete(handle.key);
+    }
+  }, []);
+
+  const guardCreatedEvent = useCallback((event: CalendarEvent): CalendarEventIdentity => {
+    const identity = optimisticCreatedEventIdentity(event);
+    guardLocalIdentity(identity, expectedCreatedEvent(event, identity), 'add');
+    return identity;
+  }, [guardLocalIdentity]);
+
+  const guardPersistedCreatedEvent = useCallback((event: CalendarEvent, identity: CalendarEventIdentity) => {
+    guardLocalIdentity(identity, expectedCreatedEvent(event, identity), 'add');
+  }, [guardLocalIdentity]);
+
+  const refreshRealtimeHighlights = useCallback((targets: readonly string[]) => {
+    const now = Date.now();
+    for (const identityKey of targets) {
+      realtimeHighlightExpiryRef.current.set(identityKey, now + REALTIME_HIGHLIGHT_MS);
+    }
+    const flushExpiredHighlights = () => {
+      const currentNow = Date.now();
+      for (const [identityKey, expiresAt] of realtimeHighlightExpiryRef.current) {
+        if (expiresAt <= currentNow) realtimeHighlightExpiryRef.current.delete(identityKey);
+      }
+      setHighlightedEventIdentities(new Set(realtimeHighlightExpiryRef.current.keys()));
+      if (realtimeHighlightTimerRef.current) clearTimeout(realtimeHighlightTimerRef.current);
+      const nextExpiry = [...realtimeHighlightExpiryRef.current.values()]
+        .reduce<number | undefined>((earliest, expiresAt) => (
+          earliest === undefined || expiresAt < earliest ? expiresAt : earliest
+        ), undefined);
+      realtimeHighlightTimerRef.current = nextExpiry === undefined
+        ? null
+        : setTimeout(flushExpiredHighlights, Math.max(0, nextExpiry - Date.now()));
+    };
+    flushExpiredHighlights();
+  }, []);
+
+  const applyCanonicalEvents = useCallback((
+    canonicalEvents: CalendarEvent[],
+    { suppressRealtimeHighlight = false }: { suppressRealtimeHighlight?: boolean } = {},
+  ) => {
+    const nextSnapshot = buildEventSnapshot(canonicalEvents);
+    const previousSnapshot = canonicalEventSnapshotRef.current;
+    canonicalEventSnapshotRef.current = nextSnapshot;
+
+    if (previousSnapshot && !suppressRealtimeHighlight) {
+      const now = Date.now();
+      for (const [guardKey, guard] of localChangeGuardsRef.current) {
+        if (guard.expiresAt <= now && guard.persistence !== 'pending') {
+          localChangeGuardsRef.current.delete(guardKey);
+        }
+      }
+      const diff = diffEventSnapshots(previousSnapshot, nextSnapshot);
+      const changedIdentities = [...diff.added, ...diff.changed];
+      const addedIdentities = new Set(diff.added);
+      const localEchoIdentities = new Set(
+        changedIdentities.filter((identityKey) => {
+          const nextEventSnapshot = nextSnapshot.get(identityKey);
+          const matchingGuard = [...localChangeGuardsRef.current.entries()].find(([, guard]) => {
+            if (guard.identityKey !== identityKey) return false;
+            return guard.kind === 'add'
+              ? addedIdentities.has(identityKey)
+              : guard.kind === 'delete'
+                ? addedIdentities.has(identityKey) && guard.expectedSnapshot === nextEventSnapshot
+                : guard.expectedSnapshot === nextEventSnapshot || guard.rollbackSnapshot === nextEventSnapshot;
+          });
+          if (!matchingGuard) return false;
+          const [guardKey, guard] = matchingGuard;
+          if (guard.kind === 'add') {
+            localChangeGuardsRef.current.delete(guardKey);
+            return true;
+          }
+          if (guard.kind === 'delete') {
+            guard.sawExpected = true;
+            if (guard.persistence === 'failed') localChangeGuardsRef.current.delete(guardKey);
+            return true;
+          }
+          if (guard.expectedSnapshot === nextEventSnapshot) guard.sawExpected = true;
+          if (guard.rollbackSnapshot === nextEventSnapshot) guard.sawRollback = true;
+          if ((guard.persistence === 'succeeded' && guard.sawExpected) || (guard.persistence === 'failed' && guard.sawRollback)) {
+            localChangeGuardsRef.current.delete(guardKey);
+          }
+          return true;
+        }),
+      );
+      const targets = changedIdentities.filter((identityKey) => !localEchoIdentities.has(identityKey));
+      if (targets.length > 0) {
+        refreshRealtimeHighlights(targets);
+      }
+    }
+
+    setEvents(canonicalEvents);
+    // bflow 일정은 재조회 때마다 새 객체로 만들어진다. 내용이 그대로인데 참조만 바뀌면
+    // 편집기의 재수화 effect가 돌아 편집 모드가 풀리고 초안이 사라진다(팀원이 '다른'
+    // 일정을 바꿔도 재조회가 돌기 때문에 상시 발생). 내용이 같으면 기존 객체를 그대로 둔다.
+    const keepIfUnchanged = (previous: CalendarEvent, canonical: CalendarEvent): CalendarEvent => (
+      eventContentSnapshot(canonical) === eventContentSnapshot(previous) ? previous : canonical
+    );
+    setPanelEvent((previous) => {
+      if (!previous || previous.source === 'vacation') return previous;
+      const canonical = canonicalEvents.find((event) => hasSameCalendarEventIdentity(event, previous));
+      if (canonical) return keepIfUnchanged(previous, canonical);
+      return pendingEditorDeleteCountsRef.current.has(calendarEventIdentityKey(previous))
+        ? previous
+        : null;
+    });
+    setQuickEdit((previous) => {
+      if (!previous) return previous;
+      if (previous.event.source === 'vacation') return previous;
+      const canonical = canonicalEvents.find((event) => (
+        hasSameCalendarEventIdentity(event, previous.event)
+      ));
+      if (canonical) {
+        const next = keepIfUnchanged(previous.event, canonical);
+        return next === previous.event ? previous : { ...previous, event: next };
+      }
+      return pendingEditorDeleteCountsRef.current.has(calendarEventIdentityKey(previous.event))
+        ? previous
+        : null;
+    });
+  }, [refreshRealtimeHighlights]);
+
+  useEffect(() => () => {
+    if (realtimeHighlightTimerRef.current) clearTimeout(realtimeHighlightTimerRef.current);
+    realtimeHighlightExpiryRef.current.clear();
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -244,43 +515,40 @@ export function ScheduleView() {
   // 이벤트 로드 + 외부 변경 구독 (할일 위젯 등에서 수정 시 즉시 반영)
   useEffect(() => {
     let cancelled = false;
-    const applyCanonicalEvents = (canonicalEvents: CalendarEvent[]) => {
-      setEvents(canonicalEvents);
-      setPanelEvent((previous) => {
-        if (!previous || previous.source === 'vacation') return previous;
-        return canonicalEvents.find((event) => hasSameCalendarEventIdentity(event, previous)) ?? null;
-      });
-      setQuickEdit((previous) => {
-        if (!previous) return previous;
-        if (previous.event.source === 'vacation') return previous;
-        const canonical = canonicalEvents.find((event) => (
-          hasSameCalendarEventIdentity(event, previous.event)
-        ));
-        return canonical ? { ...previous, event: canonical } : null;
-      });
-    };
-    const refresh = async () => {
+    isInitialCalendarSyncRef.current = true;
+    const refresh = async (options?: { suppressRealtimeHighlight?: boolean }) => {
       const canonicalEvents = await getEvents();
-      if (!cancelled) applyCanonicalEvents(canonicalEvents);
+      if (!cancelled) applyCanonicalEvents(canonicalEvents, options);
     };
     // B flow와 Google 캐시는 별도로 준비된다. B flow 행이 있어도 Google full sync는 필요할 수 있다.
     (async () => {
-      await loadBflowEvents();
-      if (!isGoogleCacheReady()) {
-        try {
-          const { isAuthenticated } = await import('@/services/googleCalendarService');
-          if (await isAuthenticated()) {
-            const { syncAll } = await import('@/services/calendarService');
-            await syncAll({ skipBflowLoad: true });
-          }
-        } catch { /* GCal 미연결 시 무시 */ }
+      try {
+        await loadBflowEvents();
+        if (!isGoogleCacheReady()) {
+          try {
+            const { isAuthenticated } = await import('@/services/googleCalendarService');
+            if (await isAuthenticated()) {
+              const { syncAll } = await import('@/services/calendarService');
+              await syncAll({ skipBflowLoad: true });
+            }
+          } catch { /* GCal 미연결 시 무시 */ }
+        }
+        await refresh({ suppressRealtimeHighlight: true });
+      } finally {
+        if (!cancelled) {
+          isInitialCalendarSyncRef.current = false;
+          setEventsLoaded(true);
+        }
       }
-      await refresh();
     })();
-    const handleCalendarChanged = () => { void refresh(); };
+    const handleCalendarChanged = (event: Event) => {
+      void refresh({
+        suppressRealtimeHighlight: isInitialCalendarSyncRef.current || isSelfDrivenCalendarRefresh(event),
+      });
+    };
     window.addEventListener('bflow:calendar-changed', handleCalendarChanged);
     return () => { cancelled = true; window.removeEventListener('bflow:calendar-changed', handleCalendarChanged); };
-  }, []);
+  }, [applyCanonicalEvents]);
 
   // 휴가 이벤트 로드
   const loadVacationEvents = useCallback(async () => {
@@ -298,6 +566,25 @@ export function ScheduleView() {
 
   // 통합 이벤트 (B flow + 연결된 휴가)와 캘린더∩태그 필터를 한 경로로 유지한다.
   const allEvents = useMemo(() => [...events, ...vacationEvents], [events, vacationEvents]);
+  // 태그·캘린더 필터가 바뀌면 결과가 뚝 갈리므로 짧게 페이드로 이어 준다.
+  // 컨테이너를 다시 마운트하면 스크롤·드래그가 끊기므로 투명도만 잠깐 낮춘다.
+  const filterSignature = useMemo(
+    () => JSON.stringify([visibleCalendarIds, enabledTagIds]),
+    [enabledTagIds, visibleCalendarIds],
+  );
+  const [filterFadeOpacity, setFilterFadeOpacity] = useState(1);
+  const lastFilterSignatureRef = useRef(filterSignature);
+  useEffect(() => {
+    if (lastFilterSignatureRef.current === filterSignature) return;
+    lastFilterSignatureRef.current = filterSignature;
+    // 페이드 도중 OS '동작 줄이기'가 켜지면 cleanup이 복구 타이머를 지운 뒤 재실행이
+    // 그냥 빠져나가 화면이 반투명으로 굳는다. 되돌리고 나가야 한다.
+    if (reduce) { setFilterFadeOpacity(1); return; }
+    setFilterFadeOpacity(0.55);
+    const restore = setTimeout(() => setFilterFadeOpacity(1), 120);
+    return () => clearTimeout(restore);
+  }, [filterSignature, reduce]);
+
   const filteredEvents = useMemo(
     () => filterCalendarEvents(allEvents, {
       visibleCalendarIds, enabledTagIds, optimisticDeletedTagIds: deletedTagIds,
@@ -441,8 +728,44 @@ export function ScheduleView() {
     moveToDay(new Date(year, 0, requestedIndex + 1, 12, 0, 0, 0));
   }, [moveToDay, year]);
 
+  // 기간 이동을 연타하면 전환 애니메이션이 밀려 화면이 계속 흐르는 것처럼 보인다.
+  // 300ms 안에 다시 누르면 그 다음 전환은 즉시 그린다.
+  const periodNavigatedAtRef = useRef(0);
+  const periodNavigationResetRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [skipPeriodTransition, setSkipPeriodTransition] = useState(false);
+  const markPeriodNavigation = useCallback(() => {
+    const now = Date.now();
+    const isRapidRepeat = now - periodNavigatedAtRef.current < RAPID_PERIOD_NAV_MS;
+    periodNavigatedAtRef.current = now;
+    setSkipPeriodTransition(isRapidRepeat);
+    if (periodNavigationResetRef.current) clearTimeout(periodNavigationResetRef.current);
+    periodNavigationResetRef.current = setTimeout(
+      () => setSkipPeriodTransition(false),
+      RAPID_PERIOD_NAV_MS,
+    );
+  }, []);
+  useEffect(() => () => {
+    if (periodNavigationResetRef.current) clearTimeout(periodNavigationResetRef.current);
+  }, []);
+
+  /**
+   * '오늘' 이동과 미니 달력·딥링크 이동이 각자 타이머를 들고 있으면, 앞선 타이머가
+   * 뒤늦게 켠 펄스를 조기에 꺼 버린다. 펄스 타이머는 하나만 둔다.
+   */
+  const pulseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const startPulse = useCallback((dateStr: string, durationMs: number) => {
+    setPulseDate(dateStr);
+    if (pulseTimerRef.current) clearTimeout(pulseTimerRef.current);
+    pulseTimerRef.current = setTimeout(() => { setPulseDate(null); }, durationMs);
+  }, []);
+  useEffect(() => () => {
+    if (pulseTimerRef.current) clearTimeout(pulseTimerRef.current);
+  }, []);
+
   // 네비게이션
   const goToPrev = () => {
+    markPeriodNavigation();
+    setFocusedDate(null);
     if (viewMode === 'month') {
       setMonthDir(-1);
       if (month === 0) { setYear(year - 1); setMonth(11); }
@@ -456,6 +779,8 @@ export function ScheduleView() {
   };
 
   const goToNext = () => {
+    markPeriodNavigation();
+    setFocusedDate(null);
     if (viewMode === 'month') {
       setMonthDir(1);
       if (month === 11) { setYear(year + 1); setMonth(0); }
@@ -473,13 +798,10 @@ export function ScheduleView() {
     const todayStr = fmtDate(now);
     moveToWeekContaining(now);
     moveToDay(now);
-    // 월간 뷰: 오늘 날짜에 펄스 애니메이션 (모달 트리거 방지)
-    if (viewMode === 'month') {
-      setPulseDate(todayStr);
-      setFocusedDate(todayStr);
-      setTimeout(() => { setPulseDate(null); }, 2500);
-    }
-    // 주간/2주: showCreate 트리거하지 않음
+    // 펄스는 모든 보기에서 알려 준다. 키보드 포커스 날짜는 월간 전용 상태라 그대로 둔다.
+    if (viewMode === 'month') setFocusedDate(todayStr);
+    startPulse(todayStr, TODAY_PULSE_MS);
+    // 어느 보기에서도 showCreate를 트리거하지 않는다.
   };
 
   // 이벤트 CRUD
@@ -493,25 +815,54 @@ export function ScheduleView() {
         id: createUuid(),
         createdAt: new Date().toISOString(),
       };
-      await addEvent(ev);
+      const optimisticIdentity = guardCreatedEvent(ev);
+      await addEvent(ev, {
+        onPersistedIdentity: (identity) => {
+          if (!hasSameCalendarEventIdentity(identity, optimisticIdentity)) {
+            guardPersistedCreatedEvent(ev, identity);
+          }
+        },
+      });
       // bflow:calendar-changed 구독이 자동 refresh하므로 수동 추가 불필요
       setShowCreate(false);
-      setCreateDate(undefined);
+      resetCreatePrefill();
     } finally {
       isAddingRef.current = false;
     }
-  }, []);
+  }, [guardCreatedEvent, guardPersistedCreatedEvent, resetCreatePrefill]);
 
   const handleDeleteEvent = useCallback(async (deletingEvent: CalendarEvent) => {
     const mutationIdentity = snapshotCalendarEventIdentity(deletingEvent);
-    await deleteEvent(deletingEvent.id, mutationIdentity);
+    const localGuard = guardLocalIdentity(mutationIdentity, deletingEvent, 'delete');
+    const mutationIdentityKey = calendarEventIdentityKey(mutationIdentity);
+    const preservesOpenEditor = Boolean(
+      (panelEvent && hasSameCalendarEventIdentity(panelEvent, mutationIdentity))
+      || (quickEdit && hasSameCalendarEventIdentity(quickEdit.event, mutationIdentity)),
+    );
+    if (preservesOpenEditor) {
+      const current = pendingEditorDeleteCountsRef.current.get(mutationIdentityKey) ?? 0;
+      pendingEditorDeleteCountsRef.current.set(mutationIdentityKey, current + 1);
+    }
+    try {
+      await deleteEvent(deletingEvent.id, mutationIdentity);
+      settleLocalMutationGuard(localGuard, 'succeeded');
+    } catch (error) {
+      settleLocalMutationGuard(localGuard, 'failed');
+      throw error;
+    } finally {
+      if (preservesOpenEditor) {
+        const current = pendingEditorDeleteCountsRef.current.get(mutationIdentityKey) ?? 0;
+        if (current <= 1) pendingEditorDeleteCountsRef.current.delete(mutationIdentityKey);
+        else pendingEditorDeleteCountsRef.current.set(mutationIdentityKey, current - 1);
+      }
+    }
     setEvents((prev) => prev.filter((event) => (
       !hasSameCalendarEventIdentity(event, mutationIdentity)
     )));
     // 할일 연결된 이벤트인 경우 addToCalendar = false 처리 (할일 자체는 유지)
     const todoId = calendarEventLinkedTodoId(deletingEvent);
     if (todoId) unlinkTodoFromCalendar(todoId);
-  }, []);
+  }, [guardLocalIdentity, panelEvent, quickEdit, settleLocalMutationGuard]);
 
   // 이벤트 클릭 → 사이드패널 토글 (같은 이벤트 재클릭 시 닫기)
   const handleEventClick = useCallback((ev: CalendarEvent) => {
@@ -541,31 +892,62 @@ export function ScheduleView() {
     });
   }, [setView]);
 
-  // 드래그&드롭
-  const handleEventDragDone = useCallback(async (eventId: string, newStart: string, newEnd: string) => {
-    const mutationIdentity = draggedEventIdentityRef.current;
-    draggedEventIdentityRef.current = null;
-    await updateEvent(
-      eventId,
-      { startDate: newStart, endDate: newEnd },
-      mutationIdentity ?? undefined,
-    );
+  const reconcileEventMutation = useCallback(async (mutationIdentity?: CalendarEventIdentity) => {
     const canonicalEvents = await getEvents();
     const canonical = mutationIdentity
       ? canonicalEvents.find((event) => hasSameCalendarEventIdentity(event, mutationIdentity))
       : undefined;
-    setEvents(canonicalEvents);
-    setPanelEvent((previous) => previous && mutationIdentity
-      && hasSameCalendarEventIdentity(previous, mutationIdentity)
-      ? canonical ?? null
-      : previous);
-    setQuickEdit((previous) => previous && mutationIdentity
-      && hasSameCalendarEventIdentity(previous.event, mutationIdentity)
-      ? canonical ? { ...previous, event: canonical } : null
-      : previous);
+    applyCanonicalEvents(canonicalEvents);
     const todoId = canonical ? calendarEventLinkedTodoId(canonical) : undefined;
     if (canonical && todoId) void syncCalendarToTodo(todoId, canonical);
-  }, []);
+  }, [applyCanonicalEvents]);
+
+  // 드래그&드롭
+  const handleEventDragDone = useCallback(async (eventId: string, newStart: string, newEnd: string) => {
+    const mutationIdentity = draggedEventIdentityRef.current;
+    draggedEventIdentityRef.current = null;
+    const eventBeforeUpdate = mutationIdentity
+      ? events.find((event) => hasSameCalendarEventIdentity(event, mutationIdentity))
+      : undefined;
+    const localGuard = mutationIdentity && eventBeforeUpdate
+      ? guardLocalIdentity(mutationIdentity, {
+        ...eventBeforeUpdate,
+        startDate: newStart,
+        endDate: newEnd,
+      }, 'update', eventBeforeUpdate)
+      : undefined;
+    try {
+      await updateEvent(
+        eventId,
+        { startDate: newStart, endDate: newEnd },
+        mutationIdentity ?? undefined,
+      );
+      if (mutationIdentity && eventBeforeUpdate) settleLocalMutationGuard(localGuard, 'succeeded');
+    } catch (error) {
+      if (mutationIdentity && eventBeforeUpdate) settleLocalMutationGuard(localGuard, 'failed');
+      throw error;
+    }
+    await reconcileEventMutation(mutationIdentity ?? undefined);
+  }, [events, guardLocalIdentity, reconcileEventMutation, settleLocalMutationGuard]);
+
+  const handleTimeGridEventChange = useCallback(async (
+    eventId: string,
+    mutationIdentity: CalendarEventIdentity,
+    patch: Pick<CalendarEvent, 'startDate' | 'endDate' | 'startTime' | 'endTime'>,
+  ) => {
+    const eventBeforeUpdate = events.find((event) => hasSameCalendarEventIdentity(event, mutationIdentity));
+    const localGuard = eventBeforeUpdate
+      ? guardLocalIdentity(mutationIdentity, { ...eventBeforeUpdate, ...patch }, 'update', eventBeforeUpdate)
+      : undefined;
+    try {
+      await updateEvent(eventId, patch, mutationIdentity);
+      if (eventBeforeUpdate) settleLocalMutationGuard(localGuard, 'succeeded');
+    } catch (error) {
+      if (eventBeforeUpdate) settleLocalMutationGuard(localGuard, 'failed');
+      throw error;
+    }
+    await reconcileEventMutation(mutationIdentity);
+  }, [events, guardLocalIdentity, reconcileEventMutation, settleLocalMutationGuard]);
 
   const { isDragging, preview: dragPreview, startDrag } = useCalendarDnD(handleEventDragDone, handleEventDragDone);
 
@@ -575,13 +957,12 @@ export function ScheduleView() {
     startDrag(ev.id, mode, ev.startDate, ev.endDate, 0, anchorDate);
   }, [startDrag]);
 
-  // ─── 드래그-투-크리에이트: 시작/종료 날짜 상태 ───
-  const [createEndDate, setCreateEndDate] = useState<string | undefined>();
-
-  const handleTimeGridSlotClick = useCallback((date: string, _startTime: string, _endTime: string) => {
-    // 시각 프리필은 PR-C에서 EventCreateModal 계약을 확장해 연결한다.
+  const handleTimeGridCreate = useCallback((date: string, startTime: string, endTime: string) => {
     setCreateDate(date);
-    setCreateEndDate(date);
+    // 시간표의 24:00은 저장 모델의 다음 날 00:00으로 표현한다.
+    setCreateEndDate(endTime <= startTime ? fmtDate(addDays(parseDate(date), 1)) : date);
+    setCreateStartTime(startTime);
+    setCreateEndTime(endTime);
     setShowCreate(true);
   }, []);
 
@@ -593,6 +974,7 @@ export function ScheduleView() {
 
   // navigate-to-date 펄스 애니메이션용
   const [pulseDate, setPulseDate] = useState<string | null>(null);
+  const [showShortcutHelp, setShowShortcutHelp] = useState(false);
 
   // 오늘 버튼 하이라이트 (persistedDateRange와 분리)
   // todayHighlight 제거됨 — pulseDate로 통합
@@ -602,6 +984,8 @@ export function ScheduleView() {
       // 드래그/클릭 완료 → 상세 편집 모달 열기 (시작일+종료일 프리필)
       setCreateDate(startDate);
       setCreateEndDate(endDate);
+      setCreateStartTime(undefined);
+      setCreateEndTime(undefined);
       setShowCreate(true);
       // 모달이 열려 있는 동안 하이라이트 유지
       setPersistedDateRange({ startDate, endDate });
@@ -615,15 +999,85 @@ export function ScheduleView() {
 
   // 캘린더 키보드 네비게이션 (모든 뷰)
   useEffect(() => {
-    if (showCreate || quickEdit) return;
+    if (
+      showCreate
+      || quickEdit
+      || calendarSettings !== undefined
+      || tagManagerAnchor
+    ) return;
 
     const handler = (e: KeyboardEvent) => {
-      // input/textarea에 포커스 있으면 무시
+      if (document.querySelector('[role="dialog"][aria-modal="true"]')) return;
+      // 상세 패널은 모달이 아니라 위 가드에 안 걸린다. 패널이 열려 있어도 ←→·T/W/M/C는
+      // 그대로 살리고, 첫 ESC=편집 취소·다음 ESC=닫기인 Escape만 패널 리스너에 맡긴다.
+      if (panelEvent && e.key === 'Escape') return;
+      // 편집 중이거나 OS/앱 조합키를 누른 상태면 캘린더 단축키를 가로채지 않는다.
       const tag = (e.target as HTMLElement)?.tagName;
-      if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
+      const isHelpShortcut = e.key === '?' || (e.key === '/' && e.shiftKey);
+      if (
+        tag === 'INPUT'
+        || tag === 'TEXTAREA'
+        || tag === 'SELECT'
+        || (e.target as HTMLElement)?.isContentEditable
+        || e.ctrlKey
+        || e.metaKey
+        || e.altKey
+        || (e.shiftKey && !isHelpShortcut)
+      ) return;
 
-      // 패널의 첫 ESC는 편집 취소, 다음 ESC는 닫기다. 패널 자체 리스너에 맡긴다.
-      if (panelEvent && e.key === 'Escape') {
+      // 한글 입력 모드에서는 e.key가 'ㅅ'·'Process' 같은 값이 되어 T/W/M/C가 죽는다.
+      // 그럴 때만 물리 키(e.code)로 폴백한다 — 영문 모드 동작은 그대로다.
+      const rawKey = e.key.toLowerCase();
+      const key = CALENDAR_SHORTCUT_KEYS.has(rawKey)
+        ? rawKey
+        : CALENDAR_SHORTCUT_BY_CODE[e.code] ?? rawKey;
+
+      if (isHelpShortcut) {
+        e.preventDefault();
+        e.stopPropagation();
+        setShowShortcutHelp((open) => !open);
+        return;
+      }
+
+      if (showShortcutHelp) {
+        if (e.key === 'Escape') {
+          e.preventDefault();
+          e.stopPropagation();
+          setShowShortcutHelp(false);
+        }
+        return;
+      }
+
+      if (key === 't') {
+        e.preventDefault();
+        e.stopPropagation();
+        goToToday();
+        return;
+      }
+
+      if (key === 'w') {
+        e.preventDefault();
+        e.stopPropagation();
+        setViewMode('week');
+        return;
+      }
+
+      if (key === 'm') {
+        e.preventDefault();
+        e.stopPropagation();
+        setViewMode('month');
+        return;
+      }
+
+      if (key === 'c') {
+        e.preventDefault();
+        e.stopPropagation();
+        const targetDate = focusedDate ?? fmtDate(new Date());
+        resetCreatePrefill();
+        setCreateDate(targetDate);
+        setCreateEndDate(targetDate);
+        setShowCreate(true);
+        setPersistedDateRange({ startDate: targetDate, endDate: targetDate });
         return;
       }
 
@@ -637,12 +1091,14 @@ export function ScheduleView() {
         if (e.key === 'ArrowUp' || e.key === 'ArrowLeft') {
           e.preventDefault();
           e.stopPropagation();
+          markPeriodNavigation();
           moveWeekBy(-1);
           return;
         }
         if (e.key === 'ArrowDown' || e.key === 'ArrowRight') {
           e.preventDefault();
           e.stopPropagation();
+          markPeriodNavigation();
           moveWeekBy(1);
           return;
         }
@@ -654,12 +1110,14 @@ export function ScheduleView() {
         if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') {
           e.preventDefault();
           e.stopPropagation();
+          markPeriodNavigation();
           moveDayBy(-1);
           return;
         }
         if (e.key === 'ArrowRight' || e.key === 'ArrowDown') {
           e.preventDefault();
           e.stopPropagation();
+          markPeriodNavigation();
           moveDayBy(1);
           return;
         }
@@ -678,8 +1136,9 @@ export function ScheduleView() {
           const base = prev ? parseDate(prev) : new Date(year, month, 1, 12, 0, 0, 0);
           const next = addDays(base, delta);
           const nextStr = fmtDate(next);
-          // 월이 변경되면 자동으로 이동
+          // 월이 변경되면 자동으로 이동 — 이것도 '기간 이동'이라 꾹 누르면 스킵이 걸려야 한다.
           if (next.getMonth() !== month || next.getFullYear() !== year) {
+            markPeriodNavigation();
             setYear(next.getFullYear());
             setMonth(next.getMonth());
             setMonthDir(delta > 0 ? 1 : -1);
@@ -701,7 +1160,10 @@ export function ScheduleView() {
 
     document.addEventListener('keydown', handler);
     return () => document.removeEventListener('keydown', handler);
-  }, [viewMode, showCreate, quickEdit, panelEvent, focusedDate, month, year, moveWeekBy, moveDayBy]);
+  }, [
+    viewMode, showCreate, quickEdit, panelEvent, calendarSettings, tagManagerAnchor, showShortcutHelp, focusedDate,
+    month, year, moveWeekBy, moveDayBy, resetCreatePrefill, markPeriodNavigation,
+  ]);
 
   // 뷰 모드 변경 시 포커스 초기화
   useEffect(() => {
@@ -721,12 +1183,23 @@ export function ScheduleView() {
     moveToWeekContaining(d);
     moveToDay(d);
     setPersistedDateRange({ startDate: dateStr, endDate: dateStr });
-    setPulseDate(dateStr);
-    // 3초 후 하이라이트 및 펄스 해제
+    startPulse(dateStr, NAVIGATION_PULSE_MS);
+    // 하이라이트(범위 강조) 해제는 펄스와 별개 수명이라 그대로 둔다.
     navigateTimersRef.current.push(
-      setTimeout(() => { setPersistedDateRange(null); setPulseDate(null); }, 3000),
+      setTimeout(() => { setPersistedDateRange(null); }, NAVIGATION_PULSE_MS),
     );
-  }, [moveToDay, moveToWeekContaining]);
+  }, [moveToDay, moveToWeekContaining, startPulse]);
+
+  /**
+   * 미니 달력 클릭은 생성이 아니라 이동이다(D13 G4). 생성은 셀 클릭·+일정 버튼 경로가 있다.
+   * 월간은 그 달로 포커스+펄스, 주간은 그 주로(서브모드 유지), 오늘 보기는 그 날짜로 간다.
+   */
+  const handleMiniCalendarDateSelect = useCallback((dateStr: string) => {
+    applyScheduleDateNavigation({ date: dateStr });
+    // 날짜를 실제로 골랐으면 본화면이 그리로 갔으니 넘겨보던 달은 버린다.
+    setMiniCalendarBrowseMonth(null);
+    if (viewMode === 'month') setFocusedDate(dateStr);
+  }, [applyScheduleDateNavigation, viewMode]);
 
   useEffect(() => {
     if (currentView !== 'schedule' || !pendingScheduleDateNavigationRequest) return;
@@ -779,13 +1252,21 @@ export function ScheduleView() {
     if (sanitized.startDate && sanitized.endDate && sanitized.endDate < sanitized.startDate) {
       [sanitized.startDate, sanitized.endDate] = [sanitized.endDate, sanitized.startDate];
     }
+    const localGuard = guardLocalIdentity(
+      mutationIdentity,
+      expectedLocalUpdatePresentation(eventBeforeUpdate, sanitized),
+      'update',
+      eventBeforeUpdate,
+    );
     let persistenceFailed = false;
     let persistenceError: unknown;
     try {
       await updateEvent(id, sanitized, mutationIdentity);
+      settleLocalMutationGuard(localGuard, 'succeeded');
     } catch (error) {
       persistenceFailed = true;
       persistenceError = error;
+      settleLocalMutationGuard(localGuard, 'failed');
     }
 
     try {
@@ -793,31 +1274,26 @@ export function ScheduleView() {
       const canonical = canonicalEvents.find((event) => (
         hasSameCalendarEventIdentity(event, mutationIdentity)
       ));
-      setEvents(canonicalEvents);
+      applyCanonicalEvents(canonicalEvents);
       const todoId = canonical ? calendarEventLinkedTodoId(canonical) : undefined;
       if (!persistenceFailed && canonical && todoId) void syncCalendarToTodo(todoId, canonical);
-      setPanelEvent((previous) => previous
-        && hasSameCalendarEventIdentity(previous, mutationIdentity)
-        ? canonical ?? null
-        : previous);
-      setQuickEdit((previous) => previous
-        && hasSameCalendarEventIdentity(previous.event, mutationIdentity)
-        ? canonical ? { ...previous, event: canonical } : null
-        : previous);
     } catch (refreshError) {
       if (!persistenceFailed) throw refreshError;
       console.warn('[ScheduleView] 일정 저장 실패 후 정본 새로고침 실패:', refreshError);
     }
 
     if (persistenceFailed) throw persistenceError;
-  }, []);
+  }, [applyCanonicalEvents, expectedLocalUpdatePresentation, guardLocalIdentity, settleLocalMutationGuard]);
 
   const handleDuplicateEvent = useCallback(async (event: CalendarEvent) => {
     const isCanonicalBflow = event.sourceCalendarId?.startsWith('bflow:') === true
       && Boolean(event.calendarId);
     const isWriteProtected = event.isReadOnly === true || event.canEdit === false;
+    // 구독(ICS) 일정은 calendarId가 없어 그대로 두면 구글 primary 생성 경로로 흘러간다.
+    // 복사본은 언제나 내 개인 캘린더에 만든다.
+    const isIcs = event.source === 'ics' || event.sourceCalendarId?.startsWith('ics:') === true;
     let duplicateCalendarId = event.calendarId;
-    if (isCanonicalBflow && isWriteProtected) {
+    if ((isCanonicalBflow && isWriteProtected) || isIcs) {
       const personal = useCalendarStore.getState().calendars.find((calendar) => (
         calendar.isPersonal && calendar.canEdit
       ));
@@ -846,9 +1322,16 @@ export function ScheduleView() {
       linkedDepartment: undefined,
       linkedPart: undefined,
     };
-    await addEvent(newEv);
+    const optimisticIdentity = guardCreatedEvent(newEv);
+    await addEvent(newEv, {
+      onPersistedIdentity: (identity) => {
+        if (!hasSameCalendarEventIdentity(identity, optimisticIdentity)) {
+          guardPersistedCreatedEvent(newEv, identity);
+        }
+      },
+    });
     // bflow:calendar-changed 구독이 자동 refresh
-  }, []);
+  }, [guardCreatedEvent, guardPersistedCreatedEvent]);
 
   // 이벤트 우클릭 → QuickEdit
   const handleEventContextMenu = useCallback((ev: CalendarEvent, e: React.MouseEvent) => {
@@ -864,20 +1347,14 @@ export function ScheduleView() {
       const d = new Date();
       return `${d.getFullYear()}년 ${d.getMonth() + 1}월 ${d.getDate()}일`;
     }
-    // 주간/2주간: activeWeekIndex 기준으로 현재 보이는 범위 표시
+    // 주간/2주간: activeWeekIndex 기준으로 현재 보이는 범위 표시.
+    // 범위만 있으면 몇 월 몇째 주인지 알기 어려워 연·월과 주차를 함께 보여 준다.
     if (weeks.length > 0 && activeWeekIndex < weeks.length) {
-      if (viewMode === '2week') {
-        const startWeek = weeks[activeWeekIndex];
-        const endIdx = Math.min(activeWeekIndex + 1, weeks.length - 1);
-        const endWeek = weeks[endIdx];
-        const first = startWeek[0];
-        const last = endWeek[6];
-        return `${first.getMonth() + 1}/${first.getDate()} — ${last.getMonth() + 1}/${last.getDate()}`;
-      }
-      const activeWeek = weeks[activeWeekIndex];
-      const first = activeWeek[0];
-      const last = activeWeek[6];
-      return `${first.getMonth() + 1}/${first.getDate()} — ${last.getMonth() + 1}/${last.getDate()}`;
+      const startWeek = weeks[activeWeekIndex];
+      const endWeek = viewMode === '2week'
+        ? weeks[Math.min(activeWeekIndex + 1, weeks.length - 1)]
+        : startWeek;
+      return formatWeekHeaderLabel(startWeek, endWeek);
     }
     return '';
   }, [viewMode, year, month, weeks, activeWeekIndex]);
@@ -887,6 +1364,69 @@ export function ScheduleView() {
 
   // 사이드바 상태
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  /**
+   * 주간·오늘 보기는 연 기준 절대 인덱스로 그려서, 미니 달력 화살표로 연 경계를 넘기는
+   * 것만으로 본화면이 1년 점프해 버렸다. 넘겨보기(browse)는 미니 달력 안에서만 유지하고
+   * 본화면은 날짜를 실제로 고를 때만 움직인다. 새 useState는 기존 선언들 뒤에 둔다.
+   */
+  const [miniCalendarBrowseMonth, setMiniCalendarBrowseMonth] = useState<Date | null>(null);
+  /** 첫 정본 로드가 끝났는지. 로드 전에는 빈 상태 안내를 띄우지 않는다(진입 직후 오탐). */
+  const [eventsLoaded, setEventsLoaded] = useState(false);
+  /**
+   * 주말(토·일) 칸을 그릴지. 끄면 평일 5칸만 보이는 캘린더가 된다.
+   * 새 useState는 기존 선언들 뒤에 둔다(테스트 하네스가 훅을 슬롯 인덱스로 흉내 냄).
+   */
+  const [showWeekends, setShowWeekends] = useState(() => readCalendarViewPreference().showWeekends);
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(CALENDAR_VIEW_STORAGE_KEY, JSON.stringify({ viewMode, weekSubMode, showWeekends }));
+    } catch {
+      // 시크릿 모드·저장소 접근 제한에서는 기존 화면 동작을 유지한다.
+    }
+  }, [showWeekends, viewMode, weekSubMode]);
+  // 주간·2주는 보고 있는 주를, 오늘 보기는 그 날짜를, 월간은 키보드 포커스 날짜를 표시한다.
+  const miniCalendarActiveWeekStart = useMemo(() => {
+    if (viewMode !== 'week' && viewMode !== '2week') return undefined;
+    const activeWeek = weeks[activeWeekIndex];
+    return activeWeek?.[0] ? fmtDate(activeWeek[0]) : undefined;
+  }, [activeWeekIndex, viewMode, weeks]);
+
+  const miniCalendarSelectedDate = useMemo(() => {
+    if (viewMode === 'today') return fmtDate(new Date(year, 0, activeDayIndex + 1, 12, 0, 0, 0));
+    if (viewMode === 'month') return focusedDate ?? undefined;
+    return undefined;
+  }, [activeDayIndex, focusedDate, viewMode, year]);
+
+  /** 미니 달력이 실제로 펼쳐 보일 달. 월간은 본화면 값, 그 밖은 넘겨보기 값이 우선한다. */
+  const miniCalendarMonth = useMemo(() => {
+    if (viewMode === 'month') return new Date(year, month, 1);
+    if (miniCalendarBrowseMonth) return miniCalendarBrowseMonth;
+    if (miniCalendarActiveWeekStart) {
+      const weekStart = parseDate(miniCalendarActiveWeekStart);
+      return new Date(weekStart.getFullYear(), weekStart.getMonth(), 1);
+    }
+    if (miniCalendarSelectedDate) {
+      const selected = parseDate(miniCalendarSelectedDate);
+      return new Date(selected.getFullYear(), selected.getMonth(), 1);
+    }
+    return new Date(year, month, 1);
+  }, [miniCalendarActiveWeekStart, miniCalendarBrowseMonth, miniCalendarSelectedDate, month, viewMode, year]);
+
+  const handleMiniCalendarMonthChange = useCallback((next: Date) => {
+    if (viewMode === 'month') {
+      setYear(next.getFullYear());
+      setMonth(next.getMonth());
+      return;
+    }
+    setMiniCalendarBrowseMonth(next);
+  }, [viewMode]);
+
+  // 본화면이 다른 주·날짜·보기로 움직이면 넘겨보던 달은 버리고 다시 따라간다.
+  useEffect(() => {
+    setMiniCalendarBrowseMonth(null);
+  }, [activeWeekIndex, activeDayIndex, viewMode]);
+
   const handleOpenTagManager = useCallback((anchorRect: DOMRect) => {
     setTagManagerAnchor(anchorRect);
   }, []);
@@ -912,6 +1452,14 @@ export function ScheduleView() {
               접기
             </button>
             <div className="min-h-0 flex-1 overflow-y-auto pr-1">
+              <MiniCalendar
+                currentMonth={miniCalendarMonth}
+                onMonthChange={handleMiniCalendarMonthChange}
+                onDateSelect={handleMiniCalendarDateSelect}
+                events={filteredEvents}
+                activeWeekStart={miniCalendarActiveWeekStart}
+                selectedDate={miniCalendarSelectedDate}
+              />
               {viewMode === 'today' ? (
                 <DaySidebar
                   activeDayIndex={activeDayIndex}
@@ -928,19 +1476,9 @@ export function ScheduleView() {
                   onWeekSelect={handleWeekChange}
                   currentMonth={month}
                   currentYear={year}
+                  showWeekends={showWeekends}
                 />
-              ) : (
-                <MiniCalendar
-                  currentMonth={new Date(year, month, 1)}
-                  onMonthChange={(d) => { setYear(d.getFullYear()); setMonth(d.getMonth()); }}
-                  onDateSelect={(dateStr) => {
-                    setCreateDate(dateStr);
-                    setShowCreate(true);
-                  }}
-                  events={filteredEvents}
-                  selectedDate={createDate}
-                />
-              )}
+              ) : null}
               <CalendarRail
                 isAuthenticated={googleAuthenticated}
                 onOpenSettings={(calendar) => setCalendarSettings(calendar)}
@@ -1049,9 +1587,28 @@ export function ScheduleView() {
             </div>
           )}
 
+          {/* 주말 표시 — 끄면 평일 5칸만 그린다. 선택은 이 PC에 남는다. */}
+          {viewMode !== 'today' && (
+            <button
+              type="button"
+              aria-label="주말 표시"
+              aria-pressed={showWeekends}
+              title={showWeekends ? '주말을 숨기고 평일만 봅니다' : '주말을 다시 표시합니다'}
+              onClick={() => setShowWeekends((current) => !current)}
+              className={cn(
+                'px-3 py-1.5 text-xs rounded-lg font-medium border cursor-pointer transition-colors',
+                showWeekends
+                  ? 'border-bg-border/50 bg-bg-card text-text-secondary hover:text-text-primary'
+                  : 'border-accent/35 bg-accent/20 text-accent',
+              )}
+            >
+              {showWeekends ? '주말' : '평일만'}
+            </button>
+          )}
+
           {/* 이벤트 생성 */}
           <button
-            onClick={() => { setCreateDate(undefined); setShowCreate(true); }}
+            onClick={() => { resetCreatePrefill(); setShowCreate(true); }}
             className="flex items-center gap-1.5 px-4 py-2 rounded-lg bg-accent hover:bg-accent/80 text-white text-sm font-medium shadow-sm shadow-accent/20 transition-colors cursor-pointer"
           >
             <Plus size={16} />
@@ -1086,9 +1643,11 @@ export function ScheduleView() {
           <motion.div
             key={`${viewMode}:${weekSubMode}`}
             initial={reduce ? false : { opacity: 0, y: 8 }}
-            animate={{ opacity: 1, y: 0 }}
+            animate={{ opacity: filterFadeOpacity, y: 0 }}
             exit={reduce ? undefined : { opacity: 0, y: -8 }}
-            transition={reduce ? { duration: 0 } : { duration: 0.2, ease: [0.16, 1, 0.3, 1] }}
+            transition={reduce || skipPeriodTransition
+              ? { duration: 0 }
+              : { duration: 0.2, ease: [0.16, 1, 0.3, 1], opacity: { duration: 0.12 } }}
             className="flex-1 flex flex-col overflow-hidden"
           >
             {viewMode === 'today' ? (
@@ -1097,12 +1656,16 @@ export function ScheduleView() {
                 activeDayIndex={activeDayIndex}
                 onActiveDayChange={handleDayChange}
                 onEventClick={handleEventClick}
+                onEventContextMenu={handleEventContextMenu}
                 onDateClick={(dateStr) => {
                   setCreateDate(dateStr);
                   setCreateEndDate(dateStr);
                   setShowCreate(true);
                 }}
+                pulseDate={pulseDate}
                 year={year}
+                highlightedEventIdentities={highlightedEventIdentities}
+                reduceMotion={reduce}
               />
             ) : viewMode === 'week' && weekSubMode === 'timegrid' ? (
               <WeekTimeGridView
@@ -1110,12 +1673,18 @@ export function ScheduleView() {
                 events={filteredEvents}
                 today={today}
                 onEventClick={handleEventClick}
-                onSlotClick={handleTimeGridSlotClick}
+                onEventContextMenu={handleEventContextMenu}
+                onSlotClick={handleTimeGridCreate}
                 tagNameById={tagNameById}
                 calendarNameById={calendarNameById}
                 activeWeekIndex={activeWeekIndex}
                 weekCount={weeks.length}
                 onWeekChange={handleWeekChange}
+                onTimeGridCreate={handleTimeGridCreate}
+                onTimeGridEventChange={handleTimeGridEventChange}
+                highlightedEventIdentities={highlightedEventIdentities}
+                pulseDate={pulseDate}
+                showWeekends={showWeekends}
               />
             ) : viewMode === 'week' || viewMode === '2week' ? (
               <WeekScrollView
@@ -1124,6 +1693,7 @@ export function ScheduleView() {
                 events={filteredEvents}
                 today={today}
                 onEventClick={handleEventClick}
+                onEventContextMenu={handleEventContextMenu}
                 onDateClick={(dateStr) => {
                   setCreateDate(dateStr);
                   setCreateEndDate(dateStr);
@@ -1131,7 +1701,12 @@ export function ScheduleView() {
                 }}
                 activeWeekIndex={activeWeekIndex}
                 onWeekChange={handleWeekChange}
+                pulseDate={pulseDate}
                 mode={viewMode === '2week' ? '2week' : 'week'}
+                highlightedEventIdentities={highlightedEventIdentities}
+                reduceMotion={reduce}
+                instantScroll={skipPeriodTransition}
+                showWeekends={showWeekends}
               />
             ) : (
               <CalendarGrid
@@ -1150,8 +1725,13 @@ export function ScheduleView() {
                 onEventContextMenu={handleEventContextMenu}
                 monthKey={`${year}-${month}`}
                 monthDirection={monthDir}
+                instantTransition={skipPeriodTransition}
+                eventsLoaded={eventsLoaded}
+                showWeekends={showWeekends}
                 focusedDate={focusedDate}
                 pulseDate={pulseDate}
+                highlightedEventIdentities={highlightedEventIdentities}
+                reduceMotion={reduce}
                 tagNameById={tagNameById}
                 calendarNameById={calendarNameById}
                 onWheel={(e) => {
@@ -1178,9 +1758,11 @@ export function ScheduleView() {
             key="create"
             initialDate={createDate}
             initialEndDate={createEndDate}
+            initialStartTime={createStartTime}
+            initialEndTime={createEndTime}
             episodes={episodes}
             googleAuthenticated={googleAuthenticated}
-            onClose={() => { setShowCreate(false); setCreateDate(undefined); setCreateEndDate(undefined); }}
+            onClose={() => { setShowCreate(false); resetCreatePrefill(); }}
             onSave={handleAddEvent}
           />
         )}
@@ -1203,7 +1785,7 @@ export function ScheduleView() {
             key={`panel-${calendarEventIdentityKey(panelEvent)}`}
             event={panelEvent}
             onClose={() => setPanelEvent(null)}
-            onDelete={() => { void handleDeleteEvent(panelEvent); setPanelEvent(null); }}
+            onDelete={() => handleDeleteEvent(panelEvent)}
             onUpdate={(id, updates) => handleUpdateEventDirect(panelEvent, id, updates)}
             onNavigate={handleNavigate}
           />
@@ -1211,23 +1793,29 @@ export function ScheduleView() {
       </AnimatePresence>
 
       {/* ═══ EventQuickEdit (right-click popup) ═══ */}
-      {quickEdit && (
+      <AnimatePresence>
+        {quickEdit && (
         <EventQuickEdit
           key={calendarEventIdentityKey(quickEdit.event)}
           event={quickEdit.event}
           position={quickEdit.position}
           onClose={() => setQuickEdit(null)}
-          onUpdate={(id, updates) => handleUpdateEventDirect(quickEdit.event, id, updates)}
-          onDelete={() => {
-            const deletingEvent = quickEdit.event;
-            void handleDeleteEvent(deletingEvent);
-            setPanelEvent((previous) => previous
-              && hasSameCalendarEventIdentity(previous, deletingEvent)
-              ? null
-              : previous);
-          }}
+            onUpdate={(id, updates) => handleUpdateEventDirect(quickEdit.event, id, updates)}
+            onDelete={() => {
+              const deletingEvent = quickEdit.event;
+              const deletion = handleDeleteEvent(deletingEvent);
+              setPanelEvent((previous) => previous
+                && hasSameCalendarEventIdentity(previous, deletingEvent)
+                ? null
+                : previous);
+              return deletion;
+            }}
           onDuplicate={handleDuplicateEvent}
         />
+        )}
+      </AnimatePresence>
+      {showShortcutHelp && (
+        <ShortcutHelpOverlay onClose={() => setShowShortcutHelp(false)} />
       )}
       </div>{/* 메인 영역 끝 */}
       </div>

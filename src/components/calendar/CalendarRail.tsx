@@ -1,10 +1,14 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
-import { BellOff, Check, MoreHorizontal, Plus, Settings } from 'lucide-react';
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { AlertTriangle, BellOff, Check, Info, MoreHorizontal, Plus, RefreshCw, Settings, Trash2 } from 'lucide-react';
 import type { BflowCalendar } from '@/types/calendar';
+import type { IcsSubscription } from '@/shared/icsApiContract';
+import { icsCalendarId } from '@/shared/icsApiContract';
 import { useAppStore } from '@/stores/useAppStore';
 import { useAuthStore } from '@/stores/useAuthStore';
 import { useCalendarStore } from '@/stores/useCalendarStore';
 import { groupCalendarsForRail } from '@/utils/calendarEventFilter';
+import { ConfirmDialog } from '@/components/common/ConfirmDialog';
+import { IcsSubscribeForm } from '@/components/calendar/IcsSubscribeForm';
 
 export const GOOGLE_CALENDAR_ID = 'google';
 
@@ -109,6 +113,120 @@ function CalendarRow({
   );
 }
 
+function formatLastFetched(value: string | null): string {
+  if (!value) return '아직 받아 온 적 없음';
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return '아직 받아 온 적 없음';
+  return `마지막으로 받아온 ${parsed.getMonth() + 1}/${parsed.getDate()} ${String(parsed.getHours()).padStart(2, '0')}:${String(parsed.getMinutes()).padStart(2, '0')}`;
+}
+
+interface IcsSubscriptionRowProps {
+  subscription: IcsSubscription;
+  visible: boolean;
+  open: boolean;
+  onToggleVisible: () => void;
+  onToggleMenu: () => void;
+  onRefresh: () => void;
+  onRename: () => void;
+  onRemove: () => void;
+  menuRef: React.RefObject<HTMLDivElement>;
+  triggerRef: React.RefObject<HTMLButtonElement>;
+}
+
+function IcsSubscriptionRow({
+  subscription,
+  visible,
+  open,
+  onToggleVisible,
+  onToggleMenu,
+  onRefresh,
+  onRename,
+  onRemove,
+  menuRef,
+  triggerRef,
+}: IcsSubscriptionRowProps) {
+  return (
+    <div className="group relative flex items-center gap-1 rounded-md px-1 py-1 hover:bg-bg-border/25">
+      <button
+        type="button"
+        aria-label={`${subscription.name} 표시`}
+        aria-pressed={visible}
+        onClick={onToggleVisible}
+        className="relative flex h-3.5 w-3.5 shrink-0 items-center justify-center rounded-[4px] cursor-pointer"
+        style={{ backgroundColor: subscription.color }}
+      >
+        {visible && <Check size={10} strokeWidth={3} className="text-white" />}
+      </button>
+      <span className="min-w-0 flex-1 truncate text-[11px] text-text-primary" title={subscription.url}>
+        {subscription.name}
+      </span>
+      {subscription.lastError && (
+        <span
+          aria-label={`${subscription.name} 불러오기 실패`}
+          title={`${subscription.lastError} · ${formatLastFetched(subscription.lastFetchedAt)}`}
+          className="shrink-0 text-amber-400"
+        >
+          <AlertTriangle size={12} />
+        </span>
+      )}
+      {subscription.lastFetchTruncated && (
+        <span
+          aria-label={`${subscription.name} 일부만 표시`}
+          title="일정이 많아 가까운 500개까지만 보여요"
+          className="shrink-0 text-amber-400/80"
+        >
+          <Info size={12} />
+        </span>
+      )}
+      <button
+        ref={open ? triggerRef : undefined}
+        type="button"
+        aria-label={`${subscription.name} 메뉴 열기`}
+        aria-expanded={open}
+        onClick={(event) => {
+          event.stopPropagation();
+          onToggleMenu();
+        }}
+        className="shrink-0 rounded p-0.5 text-text-secondary opacity-0 transition-opacity hover:bg-bg-border/50 group-hover:opacity-100 focus:opacity-100 cursor-pointer"
+      >
+        <MoreHorizontal size={14} />
+      </button>
+      {open && (
+        <div
+          ref={menuRef}
+          role="menu"
+          className="absolute right-0 top-7 z-30 w-40 rounded-md border border-bg-border bg-bg-card p-1 shadow-lg"
+        >
+          <button
+            type="button"
+            role="menuitem"
+            onClick={onRename}
+            className="flex w-full items-center gap-1.5 rounded px-2 py-1.5 text-left text-[11px] text-text-primary hover:bg-bg-border/50 cursor-pointer"
+          >
+            <Settings size={12} /> 이름·색 바꾸기
+          </button>
+          <button
+            type="button"
+            role="menuitem"
+            onClick={onRefresh}
+            className="flex w-full items-center gap-1.5 rounded px-2 py-1.5 text-left text-[11px] text-text-primary hover:bg-bg-border/50 cursor-pointer"
+          >
+            <RefreshCw size={12} /> 지금 새로고침
+          </button>
+          <button
+            type="button"
+            role="menuitem"
+            onClick={onRemove}
+            className="flex w-full items-center gap-1.5 rounded px-2 py-1.5 text-left text-[11px] text-red-400 hover:bg-red-500/10 cursor-pointer"
+          >
+            <Trash2 size={12} /> 구독 해제
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function CalendarRail({ isAuthenticated, onOpenSettings, onCreateCalendar }: CalendarRailProps) {
   const calendars = useCalendarStore((state) => state.calendars);
   const visibleCalendarIds = useCalendarStore((state) => state.visibleCalendarIds);
@@ -125,6 +243,26 @@ export function CalendarRail({ isAuthenticated, onOpenSettings, onCreateCalendar
     [calendars, currentUser?.id],
   );
   const googleVisible = visibleCalendarIds[GOOGLE_CALENDAR_ID] !== false;
+  const [icsSubscriptions, setIcsSubscriptions] = useState<IcsSubscription[]>([]);
+  const [showSubscribeForm, setShowSubscribeForm] = useState(false);
+  const [renamingSubscription, setRenamingSubscription] = useState<IcsSubscription | null>(null);
+
+  const reloadIcsSubscriptions = useCallback(async () => {
+    try {
+      const rows = await window.electronAPI?.icsList?.();
+      if (rows) setIcsSubscriptions(rows);
+    } catch (error) {
+      console.warn('[Calendar] 외부 구독 목록을 불러오지 못했습니다:', error);
+    }
+  }, []);
+
+  useEffect(() => {
+    void reloadIcsSubscriptions();
+    // 주기 갱신이 끝나면 마지막 확인 시각·실패 표시가 바뀌므로 목록도 다시 읽는다.
+    const cleanup = window.electronAPI?.onIcsChanged?.(() => { void reloadIcsSubscriptions(); });
+    return () => { cleanup?.(); };
+  }, [reloadIcsSubscriptions]);
+
 
   useEffect(() => {
     if (!openMenuId) return;
@@ -209,6 +347,99 @@ export function CalendarRail({ isAuthenticated, onOpenSettings, onCreateCalendar
               구글 캘린더 연동 안 됨 · <button type="button" onClick={() => setView('settings')} className="text-accent hover:underline cursor-pointer">설정에서 연동하기</button>
             </span>
           </div>
+        )}
+      </section>
+      <section className="mt-3">
+        <h3 className="mb-1 px-1 text-[10px] font-semibold text-text-secondary">구독</h3>
+        {icsSubscriptions.length === 0 && !showSubscribeForm && (
+          <p className="px-1 py-1 text-[10px] leading-4 text-text-secondary/70">
+            다른 캘린더의 공유 주소를 붙여넣으면 그 일정이 여기 함께 보여요.
+          </p>
+        )}
+        {icsSubscriptions.map((subscription) => {
+          const visibilityKey = icsCalendarId(subscription.id);
+          return (
+            <Fragment key={subscription.id}>
+            <IcsSubscriptionRow
+              subscription={subscription}
+              visible={visibleCalendarIds[visibilityKey] !== false}
+              open={openMenuId === visibilityKey}
+              onToggleVisible={() => toggleCalendarVisible(visibilityKey)}
+              onToggleMenu={() => setOpenMenuId((current) => (current === visibilityKey ? null : visibilityKey))}
+              onRefresh={() => {
+                setOpenMenuId(null);
+                void (async () => {
+                  try {
+                    // 일정 재조회는 메인이 보내는 ics:changed 한 경로로 수렴한다.
+                    await window.electronAPI?.icsRefresh?.(subscription.id);
+                  } catch (error) {
+                    // 갱신 실패 사유는 구독 행의 경고 아이콘으로 드러난다. 목록만 다시 읽어 둔다.
+                    console.warn('[Calendar] 구독 새로고침 실패:', error);
+                  }
+                  await reloadIcsSubscriptions();
+                })();
+              }}
+              onRename={() => {
+                setOpenMenuId(null);
+                setRenamingSubscription(subscription);
+              }}
+              onRemove={() => {
+                setOpenMenuId(null);
+                void (async () => {
+                  const confirmed = await ConfirmDialog.show({
+                    message: `${subscription.name} 구독을 해제할까요?\n이 주소에서 받아 온 일정이 캘린더에서 사라져요.`,
+                    confirmLabel: '해제',
+                    tone: 'danger',
+                  });
+                  if (!confirmed) return;
+                  try {
+                    await window.electronAPI?.icsRemove?.(subscription.id);
+                  } catch (error) {
+                    console.warn('[Calendar] 구독 해제 실패:', error);
+                  }
+                  // 성공·실패 어느 쪽이든 목록을 다시 읽어 화면과 실제를 맞춘다.
+                  await reloadIcsSubscriptions();
+                })();
+              }}
+              menuRef={menuRef}
+              triggerRef={triggerRef}
+            />
+            {renamingSubscription?.id === subscription.id && (
+              <IcsSubscribeForm
+                initial={{
+                  name: subscription.name,
+                  url: subscription.url,
+                  color: subscription.color,
+                }}
+                onCancel={() => setRenamingSubscription(null)}
+                onSubmit={async (input) => {
+                  await window.electronAPI?.icsUpdate?.(subscription.id, {
+                    name: input.name,
+                    color: input.color,
+                  });
+                  await reloadIcsSubscriptions();
+                }}
+              />
+            )}
+            </Fragment>
+          );
+        })}
+        {showSubscribeForm ? (
+          <IcsSubscribeForm
+            onCancel={() => setShowSubscribeForm(false)}
+            onSubmit={async (input) => {
+              await window.electronAPI?.icsAdd?.(input);
+              await reloadIcsSubscriptions();
+            }}
+          />
+        ) : (
+          <button
+            type="button"
+            onClick={() => setShowSubscribeForm(true)}
+            className="mt-1 flex w-full items-center gap-1 rounded-md px-1 py-1 text-[11px] text-accent hover:bg-accent/10 cursor-pointer"
+          >
+            <Plus size={13} /> 주소로 구독
+          </button>
         )}
       </section>
       <button

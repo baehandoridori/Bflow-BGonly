@@ -20,10 +20,12 @@ export const GOOGLE_CALENDAR_OPTION = 'google';
 type Props = {
   initialDate?: string;
   initialEndDate?: string;
+  initialStartTime?: string;
+  initialEndTime?: string;
   episodes: { episodeNumber: number; title: string; parts: { partId: string; sheetName: string; department: string; scenes: { sceneId: string; no: number }[] }[] }[];
   googleAuthenticated: boolean;
   onClose: () => void;
-  onSave: (event: Omit<CalendarEvent, 'id' | 'createdAt'>) => void;
+  onSave: (event: Omit<CalendarEvent, 'id' | 'createdAt'>) => void | Promise<void>;
 };
 
 function addOneDay(date: string): string {
@@ -42,7 +44,7 @@ function oneHourAfter(date: string, time: string): { date: string; time: string 
   };
 }
 
-export function EventCreateModal({ initialDate, initialEndDate, episodes, googleAuthenticated, onClose, onSave }: Props) {
+export function EventCreateModal({ initialDate, initialEndDate, initialStartTime, initialEndTime, episodes, googleAuthenticated, onClose, onSave }: Props) {
   const currentUser = useAuthStore((state) => state.currentUser);
   const episodeTitles = useDataStore((state) => state.episodeTitles);
   const colorMode = useAppStore((state) => state.colorMode);
@@ -66,17 +68,20 @@ export function EventCreateModal({ initialDate, initialEndDate, episodes, google
 
   const [selectedCalendarId, setSelectedCalendarId] = useState(defaultCalendarId);
   const [title, setTitle] = useState('');
-  const [allDay, setAllDay] = useState(true);
+  const [allDay, setAllDay] = useState(() => !(initialStartTime || initialEndTime));
   const [startDate, setStartDate] = useState(initialDate ?? today);
-  const [startTime, setStartTime] = useState('');
+  const [startTime, setStartTime] = useState(initialStartTime ?? '');
   const [endDate, setEndDate] = useState(initialEndDate ?? initialDate ?? today);
-  const [endTime, setEndTime] = useState('');
+  const [endTime, setEndTime] = useState(initialEndTime ?? '');
   const [tagId, setTagId] = useState<string | undefined>();
   const [evType, setEvType] = useState<CalendarEventType>('custom');
   const [memo, setMemo] = useState('');
   const [linkedEp, setLinkedEp] = useState<number | ''>('');
   const [linkedPart, setLinkedPart] = useState('');
   const [linkedScene, setLinkedScene] = useState('');
+  // 새 useState는 반드시 기존 선언들 뒤에 — 테스트 하네스가 훅을 슬롯 인덱스로 흉내 낸다.
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
   const userSelectedCalendarRef = useRef(false);
 
   const isGoogle = selectedCalendarId === GOOGLE_CALENDAR_OPTION;
@@ -170,28 +175,37 @@ export function EventCreateModal({ initialDate, initialEndDate, episodes, google
     && hasRequiredLinkTarget
   ) && !hasInvalidTimedInterval;
 
-  const handleSubmit = () => {
-    if (!canSubmit) return;
+  const handleSubmit = async () => {
+    if (!canSubmit || saving) return;
     const persistedTagId = tagId && !selectedTagUnavailable ? tagId : undefined;
-    onSave({
-      title: title.trim(),
-      memo: memo.trim(),
-      color: selectedCalendar?.color ?? '#6C5CE7',
-      type: evType,
-      startDate,
-      endDate: endDate < startDate ? startDate : endDate,
-      createdBy: currentUser?.name ?? '알 수 없음',
-      ...(isGoogle ? {} : { calendarId: selectedCalendarId }),
-      tagId: isGoogle ? undefined : persistedTagId,
-      allDay,
-      startTime: allDay ? undefined : startTime,
-      endTime: allDay ? undefined : endTime,
-      linkedEpisode: linkedEp !== '' ? linkedEp : undefined,
-      linkedPart: selectedPartData?.partId,
-      linkedSheetName: linkedPart || undefined,
-      linkedSceneId: linkedScene || undefined,
-      linkedDepartment: selectedPartData?.department as 'bg' | 'acting' | undefined,
-    });
+    setSaveError(null);
+    setSaving(true);
+    try {
+      await onSave({
+        title: title.trim(),
+        memo: memo.trim(),
+        color: selectedCalendar?.color ?? '#6C5CE7',
+        type: evType,
+        startDate,
+        endDate: endDate < startDate ? startDate : endDate,
+        createdBy: currentUser?.name ?? '알 수 없음',
+        ...(isGoogle ? {} : { calendarId: selectedCalendarId }),
+        tagId: isGoogle ? undefined : persistedTagId,
+        allDay,
+        startTime: allDay ? undefined : startTime,
+        endTime: allDay ? undefined : endTime,
+        linkedEpisode: linkedEp !== '' ? linkedEp : undefined,
+        linkedPart: selectedPartData?.partId,
+        linkedSheetName: linkedPart || undefined,
+        linkedSceneId: linkedScene || undefined,
+        linkedDepartment: selectedPartData?.department as 'bg' | 'acting' | undefined,
+      });
+      // 성공하면 부모(ScheduleView)가 모달을 닫는다.
+    } catch {
+      setSaveError('일정을 저장하지 못했어요. 다시 시도해 주세요.');
+    } finally {
+      setSaving(false);
+    }
   };
 
   const sharingCopy = selectedCalendar?.visibility === 'team'
@@ -203,7 +217,8 @@ export function EventCreateModal({ initialDate, initialEndDate, episodes, google
 
   return (
     <>
-      <motion.div initial={{ opacity: 0 }} animate={{ opacity: 0.01 }} exit={{ opacity: 0 }} className="fixed inset-0 z-40" onClick={onClose} />
+      {/* 배경색 유틸이 없어 농도만 있던 투명막이었다. 캘린더 설정 모달과 같은 농도로 통일한다. */}
+      <motion.div initial={{ opacity: 0 }} animate={{ opacity: 0.16 }} exit={{ opacity: 0 }} className="fixed inset-0 z-40 bg-black" onClick={onClose} />
       <motion.div
         initial={{ opacity: 0, x: 40 }}
         animate={{ opacity: 1, x: 0 }}
@@ -338,10 +353,14 @@ export function EventCreateModal({ initialDate, initialEndDate, episodes, google
         </div>
 
         <div className="sticky bottom-0 flex items-center justify-between gap-3 border-t border-bg-border bg-bg-card/95 px-5 py-4">
-          <p className="min-h-4 text-[11px] text-text-secondary/75">{sharingCopy}</p>
+          {saveError ? (
+            <p role="alert" className="min-h-4 text-[11px] font-medium text-red-400">{saveError}</p>
+          ) : (
+            <p className="min-h-4 text-[11px] text-text-secondary/75">{sharingCopy}</p>
+          )}
           <div className="flex shrink-0 gap-2">
             <button type="button" onClick={onClose} className="px-3 py-2 rounded-lg text-xs text-text-secondary hover:text-text-primary cursor-pointer">취소</button>
-            <button type="button" onClick={handleSubmit} disabled={!canSubmit} className="px-4 py-2 rounded-lg text-xs font-medium bg-accent hover:bg-accent/80 text-white disabled:opacity-30 transition-colors cursor-pointer disabled:cursor-not-allowed">만들기</button>
+            <button type="button" onClick={handleSubmit} disabled={!canSubmit || saving} className="px-4 py-2 rounded-lg text-xs font-medium bg-accent hover:bg-accent/80 text-white disabled:opacity-30 transition-colors cursor-pointer disabled:cursor-not-allowed">{saving ? '저장 중…' : '만들기'}</button>
           </div>
         </div>
       </motion.div>

@@ -16,7 +16,10 @@ type ServiceModule = {
   loadBflowEvents(): Promise<void>;
   syncAll(options?: { broadcast?: boolean; skipBflowLoad?: boolean }): Promise<unknown>;
   syncIncremental(): Promise<void>;
-  addEvent(event: Record<string, unknown>): Promise<void>;
+  addEvent(
+    event: Record<string, unknown>,
+    options?: { onPersistedIdentity?: (identity: EventIdentityFixture) => void },
+  ): Promise<void>;
   updateEvent(
     eventId: string,
     updates: Record<string, unknown>,
@@ -749,6 +752,81 @@ test('timed Google create serializes KST fields and keeps its optimistic and per
   } finally {
     insertGate.resolve('google-timed-1');
     await creation?.catch(() => {});
+    harness.restore();
+  }
+});
+
+test('addEvent reports each exact persisted identity while keeping its Promise<void> result', async () => {
+  const persistedIds = ['local-preserved-id', 'server-replaced-id'];
+  const persistedIdentities: EventIdentityFixture[] = [];
+  const harness = await createHarness({
+    currentUserId: 'user-1',
+    calendarList: async () => [personalCalendar('user-1')],
+    bflowEventsList: async () => [],
+    fullSync: async () => [],
+    createBflowEvent: async (input) => bflowEvent(
+      persistedIds.shift() ?? 'unexpected-persisted-id',
+      String(input.title),
+    ),
+  });
+
+  try {
+    const firstResult = await harness.service.addEvent(
+      calendarEventInput('local-preserved-id', '같은 내용의 일정'),
+      { onPersistedIdentity: (identity) => persistedIdentities.push(identity) },
+    );
+    const secondResult = await harness.service.addEvent(
+      calendarEventInput('local-replaced-id', '같은 내용의 일정'),
+      { onPersistedIdentity: (identity) => persistedIdentities.push(identity) },
+    );
+
+    assert.equal(firstResult, undefined, 'the public add contract remains Promise<void>');
+    assert.equal(secondResult, undefined, 'a second identical create keeps the same public contract');
+    assert.deepEqual(persistedIdentities, [
+      { id: 'local-preserved-id', source: 'bflow', sourceCalendarId: 'bflow:calendar-1' },
+      { id: 'server-replaced-id', source: 'bflow', sourceCalendarId: 'bflow:calendar-1' },
+    ]);
+  } finally {
+    harness.restore();
+  }
+});
+
+test('addEvent does not report a delayed persisted identity after the calendar actor changes', async () => {
+  let activeUserId = 'user-a';
+  const createStarted = deferred<void>();
+  const createGate = deferred<BflowEventFixture>();
+  const persistedIdentities: EventIdentityFixture[] = [];
+  const harness = await createHarness({
+    currentUserId: activeUserId,
+    calendarList: async () => [personalCalendar(activeUserId)],
+    bflowEventsList: async () => [],
+    fullSync: async () => [],
+    createBflowEvent: async () => {
+      createStarted.resolve();
+      return createGate.promise;
+    },
+  });
+
+  try {
+    const pendingAdd = harness.service.addEvent(
+      calendarEventInput('stale-local-id', '세션 전환 전 일정'),
+      { onPersistedIdentity: (identity) => persistedIdentities.push(identity) },
+    );
+    await createStarted.promise;
+
+    activeUserId = 'user-b';
+    harness.service.__testUseAuthStore.setState({ currentUser: authUser(activeUserId) });
+    await harness.service.loadBflowEvents();
+    createGate.resolve(bflowEvent('stale-persisted-id', '세션 전환 전 일정'));
+
+    assert.equal(await pendingAdd, undefined, 'the public add promise still resolves as void');
+    assert.deepEqual(
+      persistedIdentities,
+      [],
+      'a completion from the previous actor cannot register a guard in the current Schedule session',
+    );
+  } finally {
+    createGate.resolve(bflowEvent('stale-persisted-id', '세션 전환 전 일정'));
     harness.restore();
   }
 });

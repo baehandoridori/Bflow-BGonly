@@ -87,7 +87,10 @@ let bundledQuickEdit: Promise<QuickEditComponent> | undefined;
 let bundledSidePanel: Promise<SidePanelComponent> | undefined;
 let forcedTab: 'calendar' | 'edit' = 'calendar';
 let forcedEventType: QuickEditEventType | undefined;
-let forcedQuickEditDraft: Partial<Pick<QuickEditEvent, 'title' | 'startDate' | 'endDate' | 'memo'>> = {};
+let forcedQuickEditDraft: Partial<Pick<
+  QuickEditEvent,
+  'title' | 'startDate' | 'endDate' | 'memo' | 'allDay' | 'startTime' | 'endTime'
+>> = {};
 let quickEditStateCursor = 0;
 let quickEditRefCursor = 0;
 let statefulQuickEditState: unknown[] | undefined;
@@ -99,6 +102,8 @@ let forcedSidePanelDraft: Partial<Pick<
   'title' | 'startDate' | 'endDate' | 'memo' | 'calendarId' | 'tagId' | 'allDay' | 'startTime' | 'endTime'
 >> = {};
 let sidePanelStateCursor = 0;
+let sidePanelRefCursor = 0;
+let sidePanelRefSlots: Array<{ current: unknown }> = [];
 let calendarTagOptionsOverride: Array<{
   id: string; name: string; color: string; sortOrder: number;
 }> | null = null;
@@ -220,6 +225,9 @@ async function loadQuickEdit(): Promise<QuickEditComponent> {
             if (slot === 4 && forcedQuickEditDraft.endDate !== undefined) return [forcedQuickEditDraft.endDate, () => {}];
             if (slot === 5) return [forcedEventType ?? value, () => {}];
             if (slot === 6 && forcedQuickEditDraft.memo !== undefined) return [forcedQuickEditDraft.memo, () => {}];
+            if (slot === 11 && forcedQuickEditDraft.allDay !== undefined) return [forcedQuickEditDraft.allDay, () => {}];
+            if (slot === 12 && forcedQuickEditDraft.startTime !== undefined) return [forcedQuickEditDraft.startTime, () => {}];
+            if (slot === 13 && forcedQuickEditDraft.endTime !== undefined) return [forcedQuickEditDraft.endTime, () => {}];
             return [value, () => {}];
           },
           useEffect: () => {},
@@ -247,6 +255,7 @@ async function loadQuickEdit(): Promise<QuickEditComponent> {
         return {
           motion: { div: 'div' },
           AnimatePresence: ({ children }: { children: ReactNode }) => children,
+          useIsPresent: () => true,
         };
       }
       if (id === 'lucide-react') {
@@ -358,6 +367,11 @@ async function loadSidePanel(): Promise<SidePanelComponent> {
           },
           useEffect: () => {},
           useMemo: (factory: () => unknown) => factory(),
+          useRef(initial: unknown) {
+            const slot = sidePanelRefCursor++;
+            sidePanelRefSlots[slot] ??= { current: initial };
+            return sidePanelRefSlots[slot];
+          },
         };
       }
       if (id === 'react/jsx-runtime') return nodeRequire('react/jsx-runtime');
@@ -462,7 +476,10 @@ async function renderQuickEdit(
   tab: 'calendar' | 'edit',
   callbacks: Partial<QuickEditCallbacks> = {},
   draftType?: QuickEditEventType,
-  draft: Partial<Pick<QuickEditEvent, 'title' | 'startDate' | 'endDate' | 'memo'>> = {},
+  draft: Partial<Pick<
+    QuickEditEvent,
+    'title' | 'startDate' | 'endDate' | 'memo' | 'allDay' | 'startTime' | 'endTime'
+  >> = {},
 ): Promise<ReactNode> {
   const EventQuickEdit = await loadQuickEdit();
   const globalScope = globalThis as typeof globalThis & { document?: { body: object } };
@@ -559,6 +576,8 @@ async function renderSidePanel(
   forcedSidePanelEditing = editing;
   forcedSidePanelDraft = draft;
   sidePanelStateCursor = 0;
+  sidePanelRefCursor = 0;
+  sidePanelRefSlots = [];
   return EventSidePanel({
     event: target,
     onClose: callbacks.onClose ?? (() => {}),
@@ -877,6 +896,71 @@ test('side panel blocks non-increasing timed ranges while allowing an overnight 
       endTime: '00:30',
     },
   }]);
+});
+
+test('quick edit edits timed ranges with the same rules as the side panel', async () => {
+  const target = event({
+    source: 'bflow',
+    sourceCalendarId: 'bflow:calendar-1',
+    calendarId: 'calendar-1',
+    allDay: false,
+    startDate: '2026-08-24',
+    endDate: '2026-08-24',
+    startTime: '15:00',
+    endTime: '16:00',
+    canEdit: true,
+  });
+
+  const invalidUpdates: Array<{ id: string; patch: Partial<QuickEditEvent> }> = [];
+  const invalidTree = await renderQuickEdit(target, 'edit', {
+    onUpdate: (id, patch) => invalidUpdates.push({ id, patch }),
+  }, undefined, { startTime: '15:00', endTime: '14:00' });
+  const invalidSave = findButtonByText(invalidTree, '저장');
+
+  assert.equal(invalidSave.props.disabled, true, '뒤집힌 시각은 저장을 막는다');
+  assert.match(textContent(invalidTree), /종료 시각은 시작 시각보다 뒤여야 해요\./);
+  invalidSave.props.onClick?.();
+  assert.deepEqual(invalidUpdates, [], '직접 호출해도 뒤집힌 시각은 저장되지 않는다');
+
+  const updates: Array<{ id: string; patch: Partial<QuickEditEvent> }> = [];
+  const validTree = await renderQuickEdit(target, 'edit', {
+    onUpdate: (id, patch) => updates.push({ id, patch }),
+  }, undefined, { startTime: '13:30', endTime: '14:45' });
+  const validSave = findButtonByText(validTree, '저장');
+
+  assert.notEqual(validSave.props.disabled, true);
+  validSave.props.onClick?.();
+  assert.deepEqual(updates, [{
+    id: target.id,
+    patch: { startTime: '13:30', endTime: '14:45' },
+  }], '바뀐 시각만 저장한다');
+
+  // 종일로 되돌리면 시각 키를 비운다.
+  const allDayUpdates: Array<{ id: string; patch: Partial<QuickEditEvent> }> = [];
+  const allDayTree = await renderQuickEdit(target, 'edit', {
+    onUpdate: (id, patch) => allDayUpdates.push({ id, patch }),
+  }, undefined, { allDay: true });
+  findButtonByText(allDayTree, '저장').props.onClick?.();
+  assert.deepEqual(allDayUpdates, [{
+    id: target.id,
+    patch: { allDay: true, startTime: undefined, endTime: undefined },
+  }]);
+
+  // 시각 편집을 지원하지 않는 저장소에는 시각 입력을 노출하지 않는다.
+  const legacyTree = await renderQuickEdit(event({
+    source: 'bflow',
+    sourceCalendarId: undefined,
+    calendarId: undefined,
+    allDay: false,
+    startTime: '15:00',
+    endTime: '16:00',
+    canEdit: true,
+  }), 'edit');
+  assert.throws(
+    () => findFormElementByLabel(legacyTree, '시작 시각'),
+    /must exist/,
+    '구 비공개 일정에는 시각 입력을 열지 않는다',
+  );
 });
 
 test('quick edit title-only save emits no unchanged Google temporal or memo fields', async () => {

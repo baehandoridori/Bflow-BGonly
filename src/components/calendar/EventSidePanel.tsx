@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   X,
@@ -27,7 +27,14 @@ import { EntityText } from '@/components/common/EntityText';
 import { DEPARTMENT_CONFIGS } from '@/types';
 import { floatingGlassStyle } from '@/utils/glassStyles';
 import { parseDate } from '@/utils/calendarDate';
-import { calendarEventLinkedTodoId } from '@/utils/calendarEventIdentity';
+import { calendarEventIdentityKey, calendarEventLinkedTodoId } from '@/utils/calendarEventIdentity';
+import {
+  directUpdateSnapshot,
+  eventContentSnapshot,
+  isLocalMutationSnapshot,
+  withCalendarPresentationForSnapshot,
+  type LocalMutationRecovery,
+} from '@/utils/calendarLocalMutation';
 
 // ─── 유틸 ──────────────────────────────────────────
 
@@ -71,13 +78,17 @@ const TYPE_LABELS: Record<CalendarEventType, string> = {
   vacation: '휴가',
 };
 
+function isPromiseLike(value: unknown): value is PromiseLike<void> {
+  return typeof (value as { then?: unknown } | null)?.then === 'function';
+}
+
 // ─── 인터페이스 ────────────────────────────────────
 
 interface EventSidePanelProps {
   event: CalendarEvent;
   onClose: () => void;
-  onDelete: (id: string) => void;
-  onUpdate: (id: string, updates: Partial<CalendarEvent>) => void;
+  onDelete: (id: string) => void | Promise<void>;
+  onUpdate: (id: string, updates: Partial<CalendarEvent>) => void | Promise<void>;
   onNavigate: (ev: CalendarEvent) => void;
 }
 
@@ -118,6 +129,10 @@ export function EventSidePanel({
   const [draftAllDay, setDraftAllDay] = useState(event.allDay ?? true);
   const [draftStartTime, setDraftStartTime] = useState(event.startTime ?? '');
   const [draftEndTime, setDraftEndTime] = useState(event.endTime ?? '');
+  const [mutationError, setMutationError] = useState<string | null>(null);
+  // 저장/삭제가 진행 중이면 같은 일정의 다음 요청을 막는다. 두 요청이 겹치면
+  // 먼저 보낸 오래된 초안이 나중에 커밋돼 방금 저장한 내용을 되돌릴 수 있다.
+  const [isMutating, setIsMutating] = useState(false);
   const users = useAuthStore((s) => s.users);
   const userNames = useMemo(() => users.map((u) => u.name), [users]);
   const currentUser = useAuthStore((state) => state.currentUser);
@@ -134,20 +149,53 @@ export function EventSidePanel({
   const canonicalTagIds = canonicalTagSnapshot
     ? new Set(canonicalTagSnapshot.tags.map((tag) => tag.id))
     : null;
+  const eventIdentityKey = calendarEventIdentityKey(event);
+  const eventSnapshot = eventContentSnapshot(event);
+  const latestEventRef = useRef(event);
+  const pendingMutationRef = useRef<LocalMutationRecovery | null>(null);
+  const failedMutationRecoveryRef = useRef<LocalMutationRecovery | null>(null);
 
-  // 이벤트 변경 시 드래프트 리셋
-  useEffect(() => {
-    setDraftTitle(event.title);
-    setDraftStart(event.startDate);
-    setDraftEnd(event.endDate);
-    setDraftMemo(event.memo);
-    setDraftCalendarId(event.calendarId ?? '');
-    setDraftTagId(event.tagId);
-    setDraftAllDay(event.allDay ?? true);
-    setDraftStartTime(event.startTime ?? '');
-    setDraftEndTime(event.endTime ?? '');
+  const rehydrateFromEvent = (nextEvent: CalendarEvent) => {
+    setDraftTitle(nextEvent.title);
+    setDraftStart(nextEvent.startDate);
+    setDraftEnd(nextEvent.endDate);
+    setDraftMemo(nextEvent.memo);
+    setDraftCalendarId(nextEvent.calendarId ?? '');
+    setDraftTagId(nextEvent.tagId);
+    setDraftAllDay(nextEvent.allDay ?? true);
+    setDraftStartTime(nextEvent.startTime ?? '');
+    setDraftEndTime(nextEvent.endTime ?? '');
+    setMutationError(null);
     setEditing(false);
-  }, [event]);
+  };
+
+  /**
+   * 사용자가 편집을 버리면 실패 복구 표식도 함께 버린다. 남겨두면 이후 동료 변경이
+   * 우연히 같은 내용일 때 로컬 echo로 오인해, 버린 초안이 정본을 덮어쓸 수 있다.
+   */
+  const abandonEdit = () => {
+    failedMutationRecoveryRef.current = null;
+    rehydrateFromEvent(event);
+  };
+
+  // 외부에서 새 이벤트 객체가 들어오면 최신 내용으로 다시 채운다.
+  // 내 저장/삭제 중에는 드래프트를 유지하고, 실패 뒤에는 원래 스냅샷과 일치하는 롤백만 보존한다.
+  // 같은 일정의 이후 정본 변경은 다시 최신 내용으로 채워, 실패한 초안이 동료 변경을 덮지 않게 한다.
+  useEffect(() => {
+    latestEventRef.current = event;
+    if (pendingMutationRef.current?.identityKey === eventIdentityKey) return;
+
+    const failedRecovery = failedMutationRecoveryRef.current;
+    if (
+      failedRecovery?.identityKey === eventIdentityKey
+      && isLocalMutationSnapshot(failedRecovery, eventSnapshot)
+    ) {
+      return;
+    }
+
+    failedMutationRecoveryRef.current = null;
+    rehydrateFromEvent(event);
+  }, [event, eventIdentityKey, eventSnapshot]);
 
   const selectedTagUnavailable = Boolean(draftTagId && (
     isOptimisticCalendarTagId(draftTagId)
@@ -163,20 +211,8 @@ export function EventSidePanel({
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
-        if (editing) {
-          setEditing(false);
-          setDraftTitle(event.title);
-          setDraftStart(event.startDate);
-          setDraftEnd(event.endDate);
-          setDraftMemo(event.memo);
-          setDraftCalendarId(event.calendarId ?? '');
-          setDraftTagId(event.tagId);
-          setDraftAllDay(event.allDay ?? true);
-          setDraftStartTime(event.startTime ?? '');
-          setDraftEndTime(event.endTime ?? '');
-        } else {
-          onClose();
-        }
+        if (editing) abandonEdit();
+        else onClose();
       }
     };
     window.addEventListener('keydown', onKey);
@@ -218,13 +254,41 @@ export function EventSidePanel({
     return parts.join(' ');
   })();
 
+  const beginMutation = (mutation: LocalMutationRecovery) => {
+    pendingMutationRef.current = mutation;
+    failedMutationRecoveryRef.current = null;
+    setIsMutating(true);
+  };
+
+  const settleMutation = (mutation: LocalMutationRecovery): boolean => {
+    if (pendingMutationRef.current !== mutation) return false;
+    pendingMutationRef.current = null;
+    setIsMutating(false);
+    return true;
+  };
+
+  const markMutationFailed = (mutation: LocalMutationRecovery, message: string) => {
+    if (!settleMutation(mutation)) return;
+    const latestEvent = latestEventRef.current;
+    const latestSnapshot = calendarEventIdentityKey(latestEvent) === mutation.identityKey
+      ? eventContentSnapshot(latestEvent)
+      : undefined;
+    if (latestSnapshot === undefined || !isLocalMutationSnapshot(mutation, latestSnapshot)) {
+      failedMutationRecoveryRef.current = null;
+      rehydrateFromEvent(latestEvent);
+      return;
+    }
+    failedMutationRecoveryRef.current = mutation;
+    setMutationError(message);
+  };
+
   // 편집 저장
   const handleSave = () => {
     if (isVacation || isViewOnly) {
       setEditing(false);
       return;
     }
-    if (isTimedSaveBlocked) return;
+    if (isTimedSaveBlocked || pendingMutationRef.current) return;
     const updates: Partial<CalendarEvent> = {};
     const nextStartDate = fromInputDate(draftStart);
     const nextEndDate = fromInputDate(draftEnd);
@@ -254,22 +318,65 @@ export function EventSidePanel({
       if (draftCalendarId !== event.calendarId) updates.calendarId = draftCalendarId;
       if (persistedTagId !== event.tagId) updates.tagId = persistedTagId;
     }
-    if (Object.keys(updates).length > 0) onUpdate(event.id, updates);
-    setEditing(false);
+    if (Object.keys(updates).length === 0) {
+      setEditing(false);
+      return;
+    }
+    setMutationError(null);
+    const mutation: LocalMutationRecovery = {
+      identityKey: eventIdentityKey,
+      rollbackSnapshot: eventSnapshot,
+      // 캘린더를 옮기면 서비스가 색·권한까지 파생해 얹으므로, 스냅샷도 같은 파생을 거쳐야
+      // 실패 시 '내 변화'로 알아보고 안내를 띄운다(그러지 않으면 조용히 원복된다).
+      optimisticSnapshot: directUpdateSnapshot(
+        event,
+        withCalendarPresentationForSnapshot(event, updates, calendars),
+      ),
+    };
+    beginMutation(mutation);
+    try {
+      const persistence = onUpdate(event.id, updates);
+      if (isPromiseLike(persistence)) {
+        void persistence.then(
+          () => {
+            if (settleMutation(mutation)) setEditing(false);
+          },
+          () => markMutationFailed(mutation, '일정 저장에 실패했어요. 다시 시도해 주세요.'),
+        );
+        return;
+      }
+      if (settleMutation(mutation)) setEditing(false);
+    } catch {
+      markMutationFailed(mutation, '일정 저장에 실패했어요. 다시 시도해 주세요.');
+    }
   };
 
   // 편집 취소
-  const handleCancel = () => {
-    setDraftTitle(event.title);
-    setDraftStart(event.startDate);
-    setDraftEnd(event.endDate);
-    setDraftMemo(event.memo);
-    setDraftCalendarId(event.calendarId ?? '');
-    setDraftTagId(event.tagId);
-    setDraftAllDay(event.allDay ?? true);
-    setDraftStartTime(event.startTime ?? '');
-    setDraftEndTime(event.endTime ?? '');
-    setEditing(false);
+  const handleCancel = abandonEdit;
+
+  const handleDelete = () => {
+    if (isVacation || isViewOnly || pendingMutationRef.current) return;
+    setMutationError(null);
+    const mutation: LocalMutationRecovery = {
+      identityKey: eventIdentityKey,
+      rollbackSnapshot: eventSnapshot,
+    };
+    beginMutation(mutation);
+    try {
+      const persistence = onDelete(event.id);
+      if (isPromiseLike(persistence)) {
+        void persistence.then(
+          () => {
+            if (settleMutation(mutation)) onClose();
+          },
+          () => markMutationFailed(mutation, '일정 삭제에 실패했어요. 다시 시도해 주세요.'),
+        );
+        return;
+      }
+      if (settleMutation(mutation)) onClose();
+    } catch {
+      markMutationFailed(mutation, '일정 삭제에 실패했어요. 다시 시도해 주세요.');
+    }
   };
 
   const linkedNavigationButtons = (
@@ -334,6 +441,7 @@ export function EventSidePanel({
           {isEditing ? (
             <input
               value={draftTitle}
+              disabled={isMutating}
               onChange={(e) => setDraftTitle(e.target.value)}
               className={fieldClassName}
               autoFocus
@@ -373,6 +481,7 @@ export function EventSidePanel({
                     aria-label="종일 일정"
                     type="checkbox"
                     checked={draftAllDay}
+                    disabled={isMutating}
                     onChange={(changeEvent) => {
                       const checked = changeEvent.target.checked;
                       setDraftAllDay(checked);
@@ -391,6 +500,7 @@ export function EventSidePanel({
               <input
                 type="date"
                 value={toInputDate(draftStart)}
+                disabled={isMutating}
                 onChange={(e) => setDraftStart(fromInputDate(e.target.value))}
                 className={dateFieldClassName}
                 style={{ colorScheme: colorMode }}
@@ -401,6 +511,7 @@ export function EventSidePanel({
                   type="time"
                   step={600}
                   value={draftStartTime}
+                  disabled={isMutating}
                   onChange={(changeEvent) => setDraftStartTime(changeEvent.target.value)}
                   className={dateFieldClassName}
                   style={{ colorScheme: colorMode }}
@@ -412,6 +523,7 @@ export function EventSidePanel({
               <input
                 type="date"
                 value={toInputDate(draftEnd)}
+                disabled={isMutating}
                 onChange={(e) => setDraftEnd(fromInputDate(e.target.value))}
                 className={dateFieldClassName}
                 style={{ colorScheme: colorMode }}
@@ -422,6 +534,7 @@ export function EventSidePanel({
                   type="time"
                   step={600}
                   value={draftEndTime}
+                  disabled={isMutating}
                   onChange={(changeEvent) => setDraftEndTime(changeEvent.target.value)}
                   className={dateFieldClassName}
                   style={{ colorScheme: colorMode }}
@@ -438,7 +551,8 @@ export function EventSidePanel({
               <Clock size={12} className="shrink-0" />
               <span className="text-xs">
                 {formatDateRange(event.startDate, event.endDate)}
-                {supportsTimeEditing && event.allDay === false && event.startTime && event.endTime
+                {/* 편집 가능 여부와 표시는 별개다 — 구독 일정은 못 고쳐도 시각은 보여 준다. */}
+                {(supportsTimeEditing || event.source === 'ics') && event.allDay === false && event.startTime && event.endTime
                   ? ` ${event.startTime} – ${event.endTime}`
                   : ''}
               </span>
@@ -462,6 +576,7 @@ export function EventSidePanel({
                 <select
                   aria-label="캘린더"
                   value={draftCalendarId}
+                  disabled={isMutating}
                   onChange={(changeEvent) => setDraftCalendarId(changeEvent.target.value)}
                   className={`${dateFieldClassName} mt-1`}
                 >
@@ -476,8 +591,9 @@ export function EventSidePanel({
                   <button
                     type="button"
                     aria-pressed={draftTagId === undefined}
+                    disabled={isMutating}
                     onClick={() => setDraftTagId(undefined)}
-                    className={`rounded-full px-2 py-1 text-[10px] ${draftTagId === undefined ? 'bg-accent/20 text-accent' : 'bg-bg-primary/70 text-text-secondary'}`}
+                    className={`rounded-full px-2 py-1 text-[10px] disabled:opacity-45 ${draftTagId === undefined ? 'bg-accent/20 text-accent' : 'bg-bg-primary/70 text-text-secondary'}`}
                   >
                     없음
                   </button>
@@ -488,8 +604,9 @@ export function EventSidePanel({
                         type="button"
                         key={tag.id}
                         aria-pressed={selected}
+                        disabled={isMutating}
                         onClick={() => setDraftTagId(tag.id)}
-                        className="rounded-full border px-2 py-1 text-[10px]"
+                        className="rounded-full border px-2 py-1 text-[10px] disabled:opacity-45"
                         style={{
                           color: selected ? tag.color : 'rgb(var(--color-text-secondary))',
                           borderColor: selected ? tag.color : 'rgb(var(--color-bg-border) / 0.7)',
@@ -507,7 +624,11 @@ export function EventSidePanel({
             <div className="flex flex-wrap items-center gap-1.5 border-t border-bg-border/45 pt-2 text-[10px] text-text-secondary">
               <span className="inline-flex items-center gap-1.5 rounded-full bg-bg-primary/65 px-2 py-1">
                 <span className="h-2 w-2 rounded-full" style={{ backgroundColor: event.color }} />
-                {currentCalendar?.name ?? (event.source === 'google' ? '내 구글 캘린더' : isVacation ? '휴가' : '이전 일정')}
+                {currentCalendar?.name ?? (
+                  event.sourceCalendarId?.startsWith('ics:')
+                    ? (event.createdBy || '외부 캘린더')
+                    : event.source === 'google' ? '내 구글 캘린더' : isVacation ? '휴가' : '이전 일정'
+                )}
               </span>
               {currentTag && (
                 <span
@@ -578,6 +699,7 @@ export function EventSidePanel({
             <EntityAwareInput
               multiline
               value={draftMemo ?? ''}
+              disabled={isMutating}
               onChange={setDraftMemo}
               users={users}
               /* #태그 끔: 이 메모는 ScheduleView 카드/툴팁/상세·CalendarView 선택 패널에서 평문({event.memo})으로
@@ -605,6 +727,12 @@ export function EventSidePanel({
 
         {/* 스페이서 */}
         <div className="flex-1" />
+
+        {mutationError && (
+          <p role="alert" className="rounded-md bg-red-500/10 px-2.5 py-2 text-center text-[11px] text-red-300">
+            {mutationError}
+          </p>
+        )}
 
         {/* ── 액션 영역 ── */}
         {isVacation ? (
@@ -649,7 +777,7 @@ export function EventSidePanel({
             </button>
             <button
               onClick={handleSave}
-              disabled={isTimedSaveBlocked}
+              disabled={isTimedSaveBlocked || isMutating}
               className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg text-xs font-medium bg-[#6C5CE7]/20 text-[#6C5CE7] hover:bg-[#6C5CE7]/30 transition-colors cursor-pointer disabled:cursor-not-allowed disabled:opacity-45"
             >
               <Save size={13} />
@@ -661,7 +789,10 @@ export function EventSidePanel({
           <div className="flex flex-col gap-2 pt-1">
             <div className="flex gap-2">
               <button
-                onClick={() => setEditing(true)}
+                onClick={() => {
+                  setMutationError(null);
+                  setEditing(true);
+                }}
                 className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg text-xs font-medium bg-bg-primary/70 text-text-primary hover:bg-bg-border/45 transition-colors cursor-pointer"
               >
                 <Pencil size={12} />
@@ -670,11 +801,9 @@ export function EventSidePanel({
               {linkedNavigationButtons}
             </div>
             <button
-              onClick={() => {
-                onDelete(event.id);
-                onClose();
-              }}
-              className="w-full flex items-center justify-center gap-1.5 py-2 rounded-lg text-xs font-medium bg-red-500/10 text-red-400 hover:bg-red-500/20 transition-colors cursor-pointer"
+              onClick={handleDelete}
+              disabled={isMutating}
+              className="w-full flex items-center justify-center gap-1.5 py-2 rounded-lg text-xs font-medium bg-red-500/10 text-red-400 hover:bg-red-500/20 transition-colors cursor-pointer disabled:cursor-not-allowed disabled:opacity-45"
             >
               <Trash2 size={12} />
               삭제

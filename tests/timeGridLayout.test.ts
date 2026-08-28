@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import {
   layoutDayBlocks,
   minutesToTime,
+  pxToMinutes,
   snapMinutes,
   timeToMinutes,
 } from '../src/utils/timeGridLayout.ts';
@@ -14,6 +15,11 @@ test('snapMinutes: 15분 단위 반올림과 하루 범위 클램프', () => {
   assert.equal(snapMinutes(23), 30);
   assert.equal(snapMinutes(-10), 0);
   assert.equal(snapMinutes(1500), 1440);
+});
+
+test('pxToMinutes: 시간 눈금 높이 기준으로 좌표를 분으로 환산한다', () => {
+  assert.equal(pxToMinutes(14, 56), 15);
+  assert.equal(pxToMinutes(56, 56), 60);
 });
 
 test('timeToMinutes와 minutesToTime은 시간을 왕복한다', () => {

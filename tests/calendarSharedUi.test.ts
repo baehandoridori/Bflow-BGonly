@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
+import { readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
@@ -58,6 +59,7 @@ type TagManagerPopoverProps = {
 };
 type TagManagerPopoverComponent = (props: TagManagerPopoverProps) => ReactNode;
 type ScheduleViewComponent = () => ReactNode;
+type ShortcutHelpOverlayComponent = (props: { onClose(): void }) => ReactNode;
 type CalendarGridProps = {
   weeks: Date[][];
   events: ScheduleCalendarEvent[];
@@ -75,6 +77,8 @@ type CalendarGridProps = {
   } | null;
   draggedEventIdentity?: ScheduleEventIdentity | null;
   isDragging?: boolean;
+  highlightedEventIdentities?: ReadonlySet<string>;
+  reduceMotion?: boolean;
 };
 type CalendarGridComponent = (props: CalendarGridProps) => ReactNode;
 type ScheduleCalendarEvent = {
@@ -105,6 +109,11 @@ type ScheduleGridProps = {
   calendarNameById: Record<string, string>;
   focusedDate?: string | null;
   pulseDate?: string | null;
+  instantTransition?: boolean;
+  eventsLoaded?: boolean;
+  showWeekends?: boolean;
+  highlightedEventIdentities?: ReadonlySet<string>;
+  reduceMotion?: boolean;
   onEventClick(event: ScheduleCalendarEvent): void;
   onDragStart(event: ScheduleCalendarEvent, mode: 'move' | 'resize-start' | 'resize-end', anchorDate: string): void;
   onEventContextMenu(event: ScheduleCalendarEvent, mouse: { preventDefault(): void; stopPropagation(): void; clientX: number; clientY: number }): void;
@@ -130,6 +139,8 @@ type ScheduleQuickEditProps = {
 type EventCreateModalProps = {
   initialDate?: string;
   initialEndDate?: string;
+  initialStartTime?: string;
+  initialEndTime?: string;
   episodes: Array<{
     episodeNumber: number;
     title: string;
@@ -142,7 +153,7 @@ type EventCreateModalProps = {
   }>;
   googleAuthenticated: boolean;
   onClose(): void;
-  onSave(event: Record<string, unknown>): void;
+  onSave(event: Record<string, unknown>): void | Promise<void>;
 };
 type EventCreateModalComponent = (props: EventCreateModalProps) => ReactNode;
 type EventSidePanelComponent = (props: {
@@ -164,10 +175,16 @@ type WeekScrollViewProps = {
   events: ScheduleCalendarEvent[];
   today: string;
   onEventClick(event: ScheduleCalendarEvent): void;
+  onEventContextMenu?(event: ScheduleCalendarEvent, mouse: { preventDefault(): void; stopPropagation(): void; clientX: number; clientY: number }): void;
   onDateClick?(date: string): void;
   activeWeekIndex: number;
   onWeekChange(index: number): void;
+  pulseDate?: string | null;
   mode?: 'week' | '2week';
+  highlightedEventIdentities?: ReadonlySet<string>;
+  reduceMotion?: boolean;
+  instantScroll?: boolean;
+  showWeekends?: boolean;
 };
 type WeekScrollViewModule = {
   default(props: WeekScrollViewProps): ReactNode;
@@ -179,18 +196,32 @@ type WeekTimeGridViewProps = {
   events: ScheduleCalendarEvent[];
   today: string;
   onEventClick(event: ScheduleCalendarEvent): void;
+  onEventContextMenu?(event: ScheduleCalendarEvent, mouse: { preventDefault(): void; stopPropagation(): void; clientX: number; clientY: number }): void;
   onSlotClick(date: string, startTime: string, endTime: string): void;
   activeWeekIndex: number;
   weekCount: number;
   onWeekChange(index: number): void;
+  onTimeGridCreate?(date: string, startTime: string, endTime: string): void;
+  onTimeGridEventChange?(
+    eventId: string,
+    identity: ScheduleEventIdentity,
+    patch: Required<Pick<ScheduleCalendarEvent, 'startDate' | 'endDate' | 'startTime' | 'endTime'>>,
+  ): void;
+  highlightedEventIdentities?: ReadonlySet<string>;
+  pulseDate?: string | null;
+  showWeekends?: boolean;
 };
 type DayScrollViewProps = {
   events: ScheduleCalendarEvent[];
   activeDayIndex: number;
   onActiveDayChange(index: number): void;
   onEventClick?(event: ScheduleCalendarEvent): void;
+  onEventContextMenu?(event: ScheduleCalendarEvent, mouse: { preventDefault(): void; stopPropagation(): void; clientX: number; clientY: number }): void;
   onDateClick?(date: string): void;
+  pulseDate?: string | null;
   year: number;
+  highlightedEventIdentities?: ReadonlySet<string>;
+  reduceMotion?: boolean;
 };
 type DayScrollViewComponent = (props: DayScrollViewProps) => ReactNode;
 
@@ -234,11 +265,17 @@ type FormElement = ReactElement<{
 const myUserId = 'user-me';
 let stateSlots: unknown[] = [];
 let stateCursor = 0;
+let eventSidePanelRefSlots: Array<{ current: unknown }> = [];
+let eventSidePanelRefCursor = 0;
+let scheduleRefSlots: Array<{ current: unknown }> = [];
+let scheduleRefCursor = 0;
 let modalRefSlots: Array<{ current: unknown }> = [];
 let modalRefCursor = 0;
 let modalEffectDeps: Array<readonly unknown[] | undefined> = [];
 let modalEffectCursor = 0;
 let pendingModalEffects: Array<() => void> = [];
+let pendingCalendarGridEffects: Array<() => void | (() => void)> = [];
+let calendarGridEffectCleanups: Array<() => void> = [];
 let tagManagerRefSlots: Array<{ current: unknown }> = [];
 let tagManagerRefCursor = 0;
 let calendarState: {
@@ -276,6 +313,7 @@ let bundledRail: Promise<CalendarRailComponent> | undefined;
 let bundledTagBar: Promise<TagBarComponent> | undefined;
 let bundledTagManagerPopover: Promise<TagManagerPopoverComponent> | undefined;
 let bundledScheduleView: Promise<ScheduleViewComponent> | undefined;
+let bundledShortcutHelpOverlay: Promise<ShortcutHelpOverlayComponent> | undefined;
 let bundledCalendarGrid: Promise<CalendarGridComponent> | undefined;
 let bundledEventCreateModal: Promise<EventCreateModalComponent> | undefined;
 let bundledEventSidePanel: Promise<EventSidePanelComponent> | undefined;
@@ -289,9 +327,19 @@ let schedulePanelProps: SchedulePanelProps[] = [];
 let scheduleQuickEditProps: ScheduleQuickEditProps[] = [];
 let scheduleWeekScrollProps: WeekScrollViewProps[] = [];
 let scheduleTimeGridProps: WeekTimeGridViewProps[] = [];
+type MiniCalendarProps = {
+  currentMonth: Date;
+  onMonthChange(month: Date): void;
+  onDateSelect(dateStr: string): void;
+  activeWeekStart?: string;
+  selectedDate?: string;
+};
+let scheduleMiniCalendarProps: MiniCalendarProps[] = [];
 let scheduleDayScrollProps: DayScrollViewProps[] = [];
 let scheduleCreateModalProps: EventCreateModalProps[] = [];
 let scheduleReducedMotion = false;
+let shortcutOverlayRefs: Array<{ current: unknown }> = [];
+let shortcutOverlayEffects: Array<() => void | (() => void)> = [];
 const scheduleLocalStorage = new Map<string, string>();
 let scheduleCanonicalEvents: ScheduleCalendarEvent[] = [];
 let scheduleUpdateCalls: Array<{
@@ -301,16 +349,25 @@ let scheduleUpdateCalls: Array<{
 }> = [];
 let scheduleUpdateHandler: ((id: string, updates: Partial<ScheduleCalendarEvent>) => Promise<void>) | undefined;
 let scheduleDeleteCalls: Array<{ id: string; targetIdentity?: ScheduleEventIdentity }> = [];
+let scheduleDeleteHandler: ((id: string, targetIdentity?: ScheduleEventIdentity) => Promise<void>) | undefined;
 let scheduleDragDoneHandler: ((eventId: string, newStart: string, newEnd: string) => void | Promise<void>) | undefined;
 let scheduleTodoSyncCalls: Array<{ todoId: string; patch: Record<string, unknown> }> = [];
 let scheduleAddedEvents: ScheduleCalendarEvent[] = [];
+let schedulePersistedAddIdentities: ScheduleEventIdentity[] = [];
+let scheduleCreateUuidValues: string[] = [];
 let scheduleGetEventsCalls = 0;
 let scheduleGetEventsGate: Promise<void> | null = null;
 let resolveScheduleGetEventsGate: (() => void) | null = null;
 let schedulePendingEffects: Array<() => void | (() => void)> = [];
 let scheduleMountedEffectCleanups: Array<() => void> = [];
+let scheduleEffectDeps: Array<readonly unknown[] | undefined> = [];
+let scheduleEffectCursor = 0;
+let scheduleCallbackSlots: unknown[] = [];
+let scheduleCallbackDeps: Array<readonly unknown[] | undefined> = [];
+let scheduleCallbackCursor = 0;
 const scheduleWindowListeners = new Map<string, Set<(event: Event) => void>>();
 const scheduleDocumentListeners = new Map<string, Set<(event: Event) => void>>();
+let scheduleGlobalModalOpen = false;
 const scheduleDocumentMock = {
   addEventListener(type: string, listener: (event: Event) => void) {
     const listeners = scheduleDocumentListeners.get(type) ?? new Set();
@@ -319,6 +376,11 @@ const scheduleDocumentMock = {
   },
   removeEventListener(type: string, listener: (event: Event) => void) {
     scheduleDocumentListeners.get(type)?.delete(listener);
+  },
+  querySelector(selector: string) {
+    return scheduleGlobalModalOpen && selector === '[role="dialog"][aria-modal="true"]'
+      ? { role: 'dialog' }
+      : null;
   },
 };
 
@@ -354,6 +416,7 @@ let schedulePendingTodoPanelNavigation: ScheduleDateNavigationRequest | null = n
 let scheduleTodoPanelNavigationConsumeIds: number[] = [];
 let scheduleLoadAllCalls = 0;
 let scheduleLoadBflowEventsCalls = 0;
+let scheduleLoadBflowEventsHandler: (() => void | Promise<void>) | undefined;
 let settingsCurrentUser: TestUser;
 let settingsUsers: TestUser[] = [];
 let settingsApiCalls: Array<{ name: string; args: unknown[] }> = [];
@@ -629,6 +692,10 @@ function resetHarness(): void {
   tagManagerDocumentListeners.clear();
   stateSlots = [];
   stateCursor = 0;
+  eventSidePanelRefSlots = [];
+  eventSidePanelRefCursor = 0;
+  scheduleRefSlots = [];
+  scheduleRefCursor = 0;
   modalRefSlots = [];
   modalRefCursor = 0;
   modalEffectDeps = [];
@@ -646,22 +713,32 @@ function resetHarness(): void {
   scheduleQuickEditProps = [];
   scheduleWeekScrollProps = [];
   scheduleTimeGridProps = [];
+  scheduleMiniCalendarProps = [];
   scheduleDayScrollProps = [];
   scheduleCreateModalProps = [];
   scheduleReducedMotion = false;
+  scheduleGlobalModalOpen = false;
   scheduleLocalStorage.clear();
   scheduleCanonicalEvents = [];
   scheduleUpdateCalls = [];
   scheduleUpdateHandler = undefined;
   scheduleDeleteCalls = [];
+  scheduleDeleteHandler = undefined;
   scheduleDragDoneHandler = undefined;
   scheduleTodoSyncCalls = [];
   (globalThis as typeof globalThis & { __scheduleTodoSyncCalls?: typeof scheduleTodoSyncCalls }).__scheduleTodoSyncCalls = scheduleTodoSyncCalls;
   scheduleAddedEvents = [];
+  schedulePersistedAddIdentities = [];
+  scheduleCreateUuidValues = [];
   scheduleGetEventsCalls = 0;
   scheduleGetEventsGate = null;
   resolveScheduleGetEventsGate = null;
   schedulePendingEffects = [];
+  scheduleEffectDeps = [];
+  scheduleEffectCursor = 0;
+  scheduleCallbackSlots = [];
+  scheduleCallbackDeps = [];
+  scheduleCallbackCursor = 0;
   scheduleCurrentView = 'schedule';
   schedulePendingDateNavigation = null;
   scheduleDateNavigationConsumeIds = [];
@@ -669,6 +746,7 @@ function resetHarness(): void {
   scheduleTodoPanelNavigationConsumeIds = [];
   scheduleLoadAllCalls = 0;
   scheduleLoadBflowEventsCalls = 0;
+  scheduleLoadBflowEventsHandler = undefined;
   settingsCurrentUser = {
     id: myUserId,
     name: '배한솔',
@@ -851,6 +929,12 @@ function resetHarness(): void {
   });
 }
 
+let railSubscribeFormProps: Record<string, unknown>[] = [];
+let railConfirmResult = true;
+const jsxRuntimeForRail = createRequire(import.meta.url)('react/jsx-runtime') as {
+  jsx(type: unknown, props: unknown, key?: string): ReactNode;
+};
+
 async function loadRail(): Promise<CalendarRailComponent> {
   bundledRail ??= build({
     entryPoints: ['src/components/calendar/CalendarRail.tsx'],
@@ -866,6 +950,8 @@ async function loadRail(): Promise<CalendarRailComponent> {
       '@/stores/useCalendarStore',
       '@/stores/useAuthStore',
       '@/stores/useAppStore',
+      '@/components/common/ConfirmDialog',
+      '@/components/calendar/IcsSubscribeForm',
     ],
   }).then((result) => {
     const module = { exports: {} as Record<string, unknown> };
@@ -888,6 +974,7 @@ async function loadRail(): Promise<CalendarRailComponent> {
             }];
           },
           useEffect: () => {},
+          useCallback: (callback: unknown) => callback,
           useRef: (initial: unknown) => ({ current: initial }),
           useMemo: (factory: () => unknown) => factory(),
         };
@@ -895,7 +982,23 @@ async function loadRail(): Promise<CalendarRailComponent> {
       if (id === 'react/jsx-runtime') return nodeRequire('react/jsx-runtime');
       if (id === 'lucide-react') {
         const Icon = () => null;
-        return { BellOff: Icon, Check: Icon, ChevronDown: Icon, MoreHorizontal: Icon, Plus: Icon, Settings: Icon };
+        return {
+          AlertTriangle: Icon, BellOff: Icon, Check: Icon, ChevronDown: Icon, Info: Icon,
+          MoreHorizontal: Icon, Plus: Icon, RefreshCw: Icon, Settings: Icon, Trash2: Icon,
+        };
+      }
+      if (id === '@/components/common/ConfirmDialog') {
+        return { ConfirmDialog: { show: async () => railConfirmResult } };
+      }
+      if (id === '@/components/calendar/IcsSubscribeForm') {
+        return {
+          IcsSubscribeForm: (props: Record<string, unknown>) => {
+            railSubscribeFormProps.push(props);
+            return jsxRuntimeForRail.jsx('div', {
+              'aria-label': props.initial ? '구독 이름·색 바꾸기' : '주소로 구독 추가',
+            });
+          },
+        };
       }
       if (id === '@/stores/useCalendarStore') return {
         useCalendarStore: (selector: (state: typeof calendarState) => unknown) => selector(calendarState),
@@ -910,6 +1013,8 @@ async function loadRail(): Promise<CalendarRailComponent> {
   return bundledRail;
 }
 
+let tagBarReducedMotion = false;
+
 async function loadTagBar(): Promise<TagBarComponent> {
   bundledTagBar ??= build({
     entryPoints: ['src/components/calendar/TagBar.tsx'],
@@ -918,7 +1023,10 @@ async function loadTagBar(): Promise<TagBarComponent> {
     platform: 'node',
     target: 'node22',
     write: false,
-    external: ['react', 'react/jsx-runtime', 'lucide-react', '@/stores/useCalendarStore'],
+    external: [
+      'react', 'react/jsx-runtime', 'framer-motion', 'lucide-react',
+      '@/hooks/useMotionPref', '@/stores/useCalendarStore',
+    ],
   }).then((result) => {
     const module = { exports: {} as Record<string, unknown> };
     const nodeRequire = createRequire(import.meta.url);
@@ -927,6 +1035,8 @@ async function loadTagBar(): Promise<TagBarComponent> {
     evaluate((id: string) => {
       if (id === 'react') return { ...react, useMemo: (factory: () => unknown) => factory() };
       if (id === 'react/jsx-runtime') return nodeRequire('react/jsx-runtime');
+      if (id === 'framer-motion') return { motion: { button: 'button' } };
+      if (id === '@/hooks/useMotionPref') return { useMotionPref: () => ({ reduce: tagBarReducedMotion }) };
       if (id === 'lucide-react') return { Settings: () => null };
       if (id === '@/stores/useCalendarStore') {
         return { useCalendarStore: (selector: (state: typeof calendarState) => unknown) => selector(calendarState) };
@@ -1161,7 +1271,7 @@ async function loadScheduleView(): Promise<ScheduleViewComponent> {
           path: 'schedule-todo-sync-double',
           namespace: 'schedule-test',
         }));
-        buildContext.onLoad({ filter: /.*/, namespace: 'schedule-test' }, () => ({
+        buildContext.onLoad({ filter: /^schedule-todo-sync-double$/, namespace: 'schedule-test' }, () => ({
           contents: `
             export async function applyCalendarToTodoPatch(todoId, patch) {
               globalThis.__scheduleTodoSyncCalls.push({ todoId, patch });
@@ -1209,11 +1319,35 @@ async function loadScheduleView(): Promise<ScheduleViewComponent> {
                 : next;
             }];
           },
-          useEffect(effect: () => void | (() => void)) {
-            schedulePendingEffects.push(effect);
+          useEffect(effect: () => void | (() => void), deps?: readonly unknown[]) {
+            const slot = scheduleEffectCursor++;
+            const previous = scheduleEffectDeps[slot];
+            const changed = deps === undefined
+              || previous === undefined
+              || deps.length !== previous.length
+              || deps.some((value, index) => !Object.is(value, previous[index]));
+            scheduleEffectDeps[slot] = deps;
+            if (changed) schedulePendingEffects.push(effect);
           },
-          useMemo: (factory: () => unknown) => factory(), useCallback: (fn: unknown) => fn,
-          useRef: (initial: unknown) => ({ current: initial }),
+          useMemo: (factory: () => unknown) => factory(),
+          useCallback<T>(fn: T, deps?: readonly unknown[]) {
+            const slot = scheduleCallbackCursor++;
+            const previousDeps = scheduleCallbackDeps[slot];
+            const changed = deps === undefined
+              || previousDeps === undefined
+              || deps.length !== previousDeps.length
+              || deps.some((dependency, index) => !Object.is(dependency, previousDeps[index]));
+            if (changed) {
+              scheduleCallbackSlots[slot] = fn;
+              scheduleCallbackDeps[slot] = deps;
+            }
+            return scheduleCallbackSlots[slot] as T;
+          },
+          useRef(initial: unknown) {
+            const slot = scheduleRefCursor++;
+            scheduleRefSlots[slot] ??= { current: initial };
+            return scheduleRefSlots[slot];
+          },
         };
       }
       if (id === 'react/jsx-runtime') return jsxRuntime;
@@ -1270,9 +1404,17 @@ async function loadScheduleView(): Promise<ScheduleViewComponent> {
         isGoogleCacheReady: () => true,
         loadBflowEvents: async () => {
           scheduleLoadBflowEventsCalls += 1;
+          await scheduleLoadBflowEventsHandler?.();
           return true;
         },
-        addEvent: async (event: ScheduleCalendarEvent) => { scheduleAddedEvents.push(event); },
+        addEvent: async (
+          event: ScheduleCalendarEvent,
+          options?: { onPersistedIdentity?: (identity: ScheduleEventIdentity) => void },
+        ) => {
+          scheduleAddedEvents.push(event);
+          const persistedIdentity = schedulePersistedAddIdentities.shift();
+          if (persistedIdentity) options?.onPersistedIdentity?.(persistedIdentity);
+        },
         updateEvent: async (
           id: string,
           updates: Partial<ScheduleCalendarEvent>,
@@ -1283,6 +1425,7 @@ async function loadScheduleView(): Promise<ScheduleViewComponent> {
         },
         deleteEvent: async (id: string, targetIdentity?: ScheduleEventIdentity) => {
           scheduleDeleteCalls.push({ id, targetIdentity });
+          await scheduleDeleteHandler?.(id, targetIdentity);
         },
       };
       if (id === '@/services/vacationService') return { fetchAllVacationEvents: async () => [] };
@@ -1296,7 +1439,12 @@ async function loadScheduleView(): Promise<ScheduleViewComponent> {
       }
       if (id === '@/utils/vacationEvents') return { mapVacationEvents: () => [] };
       if (id === '@/components/calendar/MiniCalendar') {
-        return { MiniCalendar: () => jsxRuntime.jsx('div', { 'data-testid': 'mini-calendar', children: '미니 캘린더' }) };
+        return {
+          MiniCalendar: (props: MiniCalendarProps) => {
+            scheduleMiniCalendarProps.push(props);
+            return jsxRuntime.jsx('div', { 'data-testid': 'mini-calendar', children: '미니 캘린더' });
+          },
+        };
       }
       if (id === '@/components/calendar/WeekScrollView') {
         return {
@@ -1382,12 +1530,31 @@ async function loadScheduleView(): Promise<ScheduleViewComponent> {
         return { useCalendarStore };
       }
       if (id === '@/utils/sceneNavigationAction') return { navigateToSceneView() {} };
-      if (id === '@/utils/createUuid') return { createUuid: () => 'new-id' };
-      if (id === '@/utils/calendarDate') return {
-        fmtDate: scheduleFmtDate,
-        parseDate: (date: string) => new Date(`${date}T12:00:00`),
-        addDays: (date: Date, days: number) => new Date(date.getFullYear(), date.getMonth(), date.getDate() + days, 12),
-      };
+      if (id === '@/utils/createUuid') {
+        return { createUuid: () => scheduleCreateUuidValues.shift() ?? 'new-id' };
+      }
+      if (id === '@/utils/calendarDate') {
+        const getISOWeekNumber = (value: Date) => {
+          const date = new Date(value.getFullYear(), value.getMonth(), value.getDate());
+          date.setDate(date.getDate() + 4 - (date.getDay() || 7));
+          const yearStart = new Date(date.getFullYear(), 0, 1);
+          return Math.ceil(((date.getTime() - yearStart.getTime()) / 86400000 + 1) / 7);
+        };
+        return {
+          fmtDate: scheduleFmtDate,
+          parseDate: (date: string) => new Date(`${date}T12:00:00`),
+          addDays: (date: Date, days: number) => new Date(date.getFullYear(), date.getMonth(), date.getDate() + days, 12),
+          getISOWeekNumber,
+          formatWeekHeaderLabel: (startWeek: readonly Date[], endWeek: readonly Date[]) => {
+            const first = startWeek[0];
+            const last = endWeek[6];
+            const anchor = startWeek[4];
+            if (!first || !last || !anchor) return '';
+            const range = `${first.getMonth() + 1}.${first.getDate()} – ${last.getMonth() + 1}.${last.getDate()}`;
+            return `${anchor.getFullYear()}년 ${anchor.getMonth() + 1}월 · ${getISOWeekNumber(anchor)}주차 · ${range}`;
+          },
+        };
+      }
       if (id === '@/utils/calendarEventFilter') return { filterCalendarEvents: (events: unknown[]) => events };
       if (id === '@/components/calendar/CalendarGrid') {
         return { CalendarGrid: (props: ScheduleGridProps) => { scheduleGridProps.push(props); return jsxRuntime.jsx('div', { 'data-testid': 'calendar-grid', children: '캘린더 그리드' }); } };
@@ -1432,6 +1599,46 @@ async function loadScheduleView(): Promise<ScheduleViewComponent> {
   return bundledScheduleView;
 }
 
+async function loadShortcutHelpOverlay(): Promise<ShortcutHelpOverlayComponent> {
+  bundledShortcutHelpOverlay ??= build({
+    entryPoints: ['src/components/calendar/ShortcutHelpOverlay.tsx'],
+    bundle: true,
+    format: 'cjs',
+    platform: 'node',
+    target: 'node22',
+    write: false,
+    external: ['react', 'react/jsx-runtime', '@/utils/cn', '@/hooks/useMotionPref'],
+  }).then((result) => {
+    const module = { exports: {} as Record<string, unknown> };
+    const nodeRequire = createRequire(import.meta.url);
+    const react = nodeRequire('react') as Record<string, unknown>;
+    const jsxRuntime = nodeRequire('react/jsx-runtime');
+    let refCursor = 0;
+    const evaluate = new Function('require', 'module', 'exports', result.outputFiles[0].text);
+    evaluate((id: string) => {
+      if (id === 'react') {
+        return {
+          ...react,
+          useEffect(effect: () => void | (() => void)) {
+            shortcutOverlayEffects.push(effect);
+          },
+          useRef(initial: unknown) {
+            const slot = refCursor++;
+            shortcutOverlayRefs[slot] ??= { current: initial };
+            return shortcutOverlayRefs[slot];
+          },
+        };
+      }
+      if (id === 'react/jsx-runtime') return jsxRuntime;
+      if (id === '@/utils/cn') return { cn: (...values: unknown[]) => values.filter(Boolean).join(' ') };
+      if (id === '@/hooks/useMotionPref') return { useMotionPref: () => ({ reduce: false }) };
+      return nodeRequire(id);
+    }, module, module.exports);
+    return module.exports.ShortcutHelpOverlay as ShortcutHelpOverlayComponent;
+  });
+  return bundledShortcutHelpOverlay;
+}
+
 async function loadCalendarGrid(): Promise<CalendarGridComponent> {
   bundledCalendarGrid ??= build({
     entryPoints: ['src/components/calendar/CalendarGrid.tsx'],
@@ -1468,6 +1675,7 @@ async function loadCalendarGrid(): Promise<CalendarGridComponent> {
           },
           useMemo: (factory: () => unknown) => factory(),
           useRef: (initial: unknown) => ({ current: initial }),
+          useEffect: (effect: () => void | (() => void)) => { pendingCalendarGridEffects.push(effect); },
         };
       }
       if (id === 'react/jsx-runtime') return jsxRuntime;
@@ -1528,6 +1736,11 @@ async function loadEventSidePanel(): Promise<EventSidePanelComponent> {
           },
           useEffect() {},
           useMemo: (factory: () => unknown) => factory(),
+          useRef(initial: unknown) {
+            const slot = eventSidePanelRefCursor++;
+            eventSidePanelRefSlots[slot] ??= { current: initial };
+            return eventSidePanelRefSlots[slot];
+          },
         };
       }
       if (id === 'react/jsx-runtime') return jsxRuntime;
@@ -1991,8 +2204,15 @@ async function loadDayScrollView(): Promise<DayScrollViewComponent> {
   return bundledDayScrollView;
 }
 
-async function renderRail(isAuthenticated: boolean): Promise<ReactNode> {
+async function renderRail(
+  isAuthenticated: boolean,
+  options: { resetState?: boolean } = {},
+): Promise<ReactNode> {
   const CalendarRail = await loadRail();
+  // stateSlots는 컴포넌트 사이에 공유된다. 다른 컴포넌트를 먼저 렌더한 테스트는
+  // 남은 값이 레일의 훅 슬롯으로 새지 않도록 resetState를 켜야 한다. 레일을 연달아
+  // 렌더하며 열린 메뉴 같은 상태를 이어 보는 테스트는 기본값(유지)을 쓴다.
+  if (options.resetState) stateSlots = [];
   stateCursor = 0;
   return resolveComponents(CalendarRail({
     isAuthenticated,
@@ -2052,7 +2272,19 @@ async function renderScheduleView(): Promise<ReactNode> {
   const ScheduleView = await loadScheduleView();
   globalThis.document = scheduleDocumentMock as unknown as Document;
   stateCursor = 0;
+  scheduleRefCursor = 0;
+  scheduleEffectCursor = 0;
+  scheduleCallbackCursor = 0;
   return resolveComponents(ScheduleView());
+}
+
+async function rerenderScheduleViewWithFreshEffects(): Promise<ReactNode> {
+  for (const cleanup of scheduleMountedEffectCleanups.splice(0).reverse()) cleanup();
+  schedulePendingEffects = [];
+  scheduleEffectDeps = [];
+  const tree = await renderScheduleView();
+  await flushScheduleMountEffects();
+  return tree;
 }
 
 async function flushScheduleMountEffects(): Promise<void> {
@@ -2064,10 +2296,16 @@ async function flushScheduleMountEffects(): Promise<void> {
   await new Promise<void>((resolve) => setImmediate(resolve));
 }
 
-function dispatchScheduleKeydown(key: string): void {
+function dispatchScheduleKeydown(
+  key: string,
+  target: { tagName: string; isContentEditable?: boolean } = { tagName: 'DIV' },
+  modifiers: { ctrlKey?: boolean; metaKey?: boolean; altKey?: boolean; shiftKey?: boolean; code?: string } = {},
+): void {
   const event = {
     key,
-    target: { tagName: 'DIV' },
+    target,
+    code: '',
+    ...modifiers,
     preventDefault() {},
     stopPropagation() {},
   } as unknown as Event;
@@ -2081,12 +2319,58 @@ async function dispatchScheduleWindowEvent(type: string, detail?: Record<string,
   await new Promise<void>((resolve) => setImmediate(resolve));
 }
 
+function installScheduleFakeClock(initialNow = 1_000): {
+  advance(ms: number): void;
+  restore(): void;
+} {
+  const realDateNow = Date.now;
+  const realSetTimeout = globalThis.setTimeout;
+  const realClearTimeout = globalThis.clearTimeout;
+  let now = initialNow;
+  let nextTimerId = 0;
+  const timers = new Map<number, { due: number; callback: () => void }>();
+
+  Date.now = () => now;
+  globalThis.setTimeout = ((callback: (...args: unknown[]) => void, delay = 0, ...args: unknown[]) => {
+    const id = ++nextTimerId;
+    timers.set(id, { due: now + Number(delay), callback: () => callback(...args) });
+    return id as unknown as ReturnType<typeof setTimeout>;
+  }) as typeof setTimeout;
+  globalThis.clearTimeout = ((handle: ReturnType<typeof setTimeout>) => {
+    timers.delete(handle as unknown as number);
+  }) as typeof clearTimeout;
+
+  return {
+    advance(ms: number) {
+      now += ms;
+      while (true) {
+        const due = [...timers.entries()]
+          .filter(([, timer]) => timer.due <= now)
+          .sort((left, right) => left[1].due - right[1].due)[0];
+        if (!due) break;
+        timers.delete(due[0]);
+        due[1].callback();
+      }
+    },
+    restore() {
+      Date.now = realDateNow;
+      globalThis.setTimeout = realSetTimeout;
+      globalThis.clearTimeout = realClearTimeout;
+    },
+  };
+}
+
 async function renderCalendarGrid(
   events: ScheduleCalendarEvent[],
   overrides: Partial<CalendarGridProps> = {},
+  preserveState = false,
 ): Promise<ReactNode> {
   const CalendarGrid = await loadCalendarGrid();
-  stateSlots = [];
+  if (!preserveState) {
+    stateSlots = [];
+    calendarGridEffectCleanups.splice(0).forEach((cleanup) => cleanup());
+  }
+  pendingCalendarGridEffects = [];
   stateCursor = 0;
   const week = Array.from({ length: 7 }, (_, index) => new Date(2026, 7, 23 + index, 12));
   return resolveComponents(CalendarGrid({
@@ -2106,6 +2390,8 @@ async function renderEventSidePanel(event: ScheduleCalendarEvent): Promise<React
   const EventSidePanel = await loadEventSidePanel();
   stateSlots = [];
   stateCursor = 0;
+  eventSidePanelRefSlots = [];
+  eventSidePanelRefCursor = 0;
   return resolveComponents(EventSidePanel({
     event,
     onClose() {},
@@ -2117,9 +2403,10 @@ async function renderEventSidePanel(event: ScheduleCalendarEvent): Promise<React
 
 async function renderEventCreateModal(
   googleAuthenticated: boolean,
-  onSave: (event: Record<string, unknown>) => void,
+  onSave: (event: Record<string, unknown>) => void | Promise<void>,
   initialDate = '2026-08-25',
   episodes: EventCreateModalProps['episodes'] = [],
+  prefill: Pick<EventCreateModalProps, 'initialEndDate' | 'initialStartTime' | 'initialEndTime'> = {},
 ): Promise<ReactNode> {
   const EventCreateModal = await loadEventCreateModal();
   stateCursor = 0;
@@ -2128,6 +2415,7 @@ async function renderEventCreateModal(
   return resolveComponents(EventCreateModal({
     initialDate,
     initialEndDate: initialDate,
+    ...prefill,
     episodes,
     googleAuthenticated,
     onClose() {},
@@ -2138,6 +2426,13 @@ async function renderEventCreateModal(
 function flushEventCreateEffects(): void {
   const effects = pendingModalEffects.splice(0);
   for (const effect of effects) effect();
+}
+
+function flushCalendarGridEffects(): void {
+  for (const effect of pendingCalendarGridEffects.splice(0)) {
+    const cleanup = effect();
+    if (typeof cleanup === 'function') calendarGridEffectCleanups.push(cleanup);
+  }
 }
 
 async function renderCalendarSettingsModal(
@@ -2291,6 +2586,54 @@ test('WeekScrollView and DayScrollView sort active cards and render tag-aware ti
     });
     assert.equal(stopped, true);
     assert.equal(clicked[0], early, 'the sorted card still forwards the original event object');
+  });
+});
+
+test('WeekScrollView and DayScrollView render an exact realtime target on active event cards', async (t) => {
+  const event = calendarListEvent({
+    id: 'card-realtime-target',
+    title: '다른 팀원의 변경',
+    source: 'google',
+    sourceCalendarId: 'primary',
+    calendarId: undefined,
+  });
+  const identityKey = 'google\u0000primary\u0000card-realtime-target';
+  const highlighted = new Set([identityKey]);
+
+  await t.test('week card view', async () => {
+    resetHarness();
+    const weekModule = await loadWeekScrollView();
+    const weeks = weekModule.generateYearWeeks(2026);
+    const tree = resolveComponents(weekModule.default({
+      currentMonth: 7,
+      currentYear: 2026,
+      events: [event],
+      today: '2026-08-25',
+      onEventClick() {},
+      activeWeekIndex: weekModule.findWeekIndexForDate(weeks, '2026-08-25'),
+      onWeekChange() {},
+      highlightedEventIdentities: highlighted,
+    }));
+    const card = findElements(tree, (candidate) => candidate.props['data-event-identity'] === identityKey)[0];
+    assert.ok(card, 'the active weekly card keeps its source-aware identity');
+    assert.equal(card.props['data-realtime-highlight'], 'true');
+    assert.match(String(card.props.className), /calendar-realtime-highlight/);
+  });
+
+  await t.test('today card view', async () => {
+    resetHarness();
+    const DayScrollView = await loadDayScrollView();
+    const tree = resolveComponents(DayScrollView({
+      events: [event],
+      activeDayIndex: activeDayIndex(2026, 7, 25),
+      onActiveDayChange() {},
+      year: 2026,
+      highlightedEventIdentities: highlighted,
+    }));
+    const card = findElements(tree, (candidate) => candidate.props['data-event-identity'] === identityKey)[0];
+    assert.ok(card, 'the active daily card keeps its source-aware identity');
+    assert.equal(card.props['data-realtime-highlight'], 'true');
+    assert.match(String(card.props.className), /calendar-realtime-highlight/);
   });
 });
 
@@ -3354,6 +3697,56 @@ test('ScheduleView mount delegates B flow metadata and events through one canoni
   assert.equal(scheduleLoadAllCalls, 0, 'ScheduleView must not start a competing direct metadata generation');
 });
 
+test('ScheduleView waits for its initial B flow and Google sync before treating changes as teammate updates', async () => {
+  resetHarness();
+  const bflow = calendarListEvent({
+    id: 'initial-bflow-event',
+    title: '초기 B flow 일정',
+    source: 'bflow',
+    sourceCalendarId: 'bflow:mine',
+    calendarId: 'mine',
+  });
+  const google = calendarListEvent({
+    id: 'initial-google-event',
+    title: '초기 Google 일정',
+    source: 'google',
+    sourceCalendarId: 'primary',
+    calendarId: undefined,
+  });
+  let finishInitialSync!: () => void;
+  const initialSyncFinished = new Promise<void>((resolve) => { finishInitialSync = resolve; });
+  scheduleLoadBflowEventsHandler = async () => {
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    scheduleCanonicalEvents = [bflow];
+    await dispatchScheduleWindowEvent('bflow:calendar-changed');
+    scheduleCanonicalEvents = [bflow, google];
+    finishInitialSync();
+  };
+
+  await renderScheduleView();
+  await flushScheduleMountEffects();
+  await Promise.race([
+    initialSyncFinished,
+    new Promise<never>((_, reject) => setTimeout(() => reject(new Error('initial calendar sync did not finish')), 500)),
+  ]);
+  await new Promise<void>((resolve) => setImmediate(resolve));
+  await renderScheduleView();
+  assert.deepEqual(
+    [...(scheduleGridProps.at(-1)?.highlightedEventIdentities ?? [])],
+    [],
+    'cache preparation rows establish one baseline instead of looking like teammate edits',
+  );
+
+  scheduleCanonicalEvents = [{ ...bflow, title: '동료의 실제 수정' }, google];
+  await dispatchScheduleWindowEvent('bflow:calendar-changed');
+  await renderScheduleView();
+  assert.deepEqual(
+    [...(scheduleGridProps.at(-1)?.highlightedEventIdentities ?? [])],
+    ['bflow\u0000initial-bflow-event'],
+    'the first update after preparation still highlights the actual teammate change',
+  );
+});
+
 test('ScheduleView calendar-changed listener replaces or closes long-lived event state from the canonical cache', async () => {
   resetHarness();
   const stale: ScheduleCalendarEvent = {
@@ -3408,6 +3801,772 @@ test('ScheduleView calendar-changed listener replaces or closes long-lived event
   assert.deepEqual(scheduleGridProps.at(-1)?.events, [], 'the revoked row leaves the visible event list');
   assert.equal(schedulePanelProps.length, 0, 'the revoked row closes the detail panel');
   assert.equal(scheduleQuickEditProps.length, 0, 'the revoked row closes quick edit');
+});
+
+test('ScheduleView keeps the same event object when an unrelated refresh brings identical content', async () => {
+  resetHarness();
+  const original = calendarListEvent({
+    id: 'editing-target',
+    title: '내가 열어 둔 일정',
+    memo: '메모',
+    source: 'bflow',
+    sourceCalendarId: 'bflow:mine',
+    calendarId: 'mine',
+    canEdit: true,
+    isReadOnly: false,
+  });
+  scheduleCanonicalEvents = [original];
+
+  await renderScheduleView();
+  await flushScheduleMountEffects();
+  await renderScheduleView();
+  scheduleGridProps.at(-1)?.onEventClick(original);
+  scheduleGridProps.at(-1)?.onEventContextMenu(original, {
+    preventDefault() {}, stopPropagation() {}, clientX: 120, clientY: 180,
+  });
+  await renderScheduleView();
+  const panelBefore = schedulePanelProps.at(-1)?.event;
+  const quickEditBefore = scheduleQuickEditProps.at(-1)?.event;
+  assert.ok(panelBefore && quickEditBefore);
+
+  // 팀원이 '다른' 일정을 바꿔 재조회가 돌았다. 내 일정 내용은 그대로지만
+  // getEvents()가 매번 새 객체를 만들어 준다.
+  scheduleCanonicalEvents = [{ ...original }];
+  await dispatchScheduleWindowEvent('bflow:calendar-changed');
+  schedulePanelProps = [];
+  scheduleQuickEditProps = [];
+  await renderScheduleView();
+
+  assert.equal(
+    schedulePanelProps.at(-1)?.event,
+    panelBefore,
+    '내용이 같으면 패널에 같은 객체를 유지해 편집 초안이 풀리지 않는다',
+  );
+  assert.equal(
+    scheduleQuickEditProps.at(-1)?.event,
+    quickEditBefore,
+    '퀵에디트도 같은 객체를 유지한다',
+  );
+
+  // 내용이 실제로 바뀌면 기존대로 정본을 따라간다.
+  const changed = { ...original, title: '팀원이 바꾼 제목' };
+  scheduleCanonicalEvents = [changed];
+  await dispatchScheduleWindowEvent('bflow:calendar-changed');
+  schedulePanelProps = [];
+  scheduleQuickEditProps = [];
+  await renderScheduleView();
+
+  assert.deepEqual(schedulePanelProps.at(-1)?.event, changed, '실제 변경은 그대로 반영한다');
+  assert.deepEqual(scheduleQuickEditProps.at(-1)?.event, changed);
+});
+
+test('ScheduleView highlights only later external additions and changes, then clears the newest pulse after two seconds', async () => {
+  resetHarness();
+  const baseline = calendarListEvent({
+    id: 'external-change',
+    title: '변경 전 회의',
+    source: 'bflow',
+    sourceCalendarId: 'bflow:mine',
+    calendarId: 'mine',
+  });
+  scheduleCanonicalEvents = [baseline];
+  await renderScheduleView();
+  await flushScheduleMountEffects();
+  await renderScheduleView();
+  assert.deepEqual(
+    [...(scheduleGridProps.at(-1)?.highlightedEventIdentities ?? [])],
+    [],
+    'the initial canonical load establishes a baseline without pulsing every event',
+  );
+
+  const clock = installScheduleFakeClock();
+  try {
+    scheduleCanonicalEvents = [{ ...baseline, title: '1차 외부 수정' }];
+    await dispatchScheduleWindowEvent('bflow:calendar-changed');
+    await renderScheduleView();
+    assert.deepEqual(
+      [...(scheduleGridProps.at(-1)?.highlightedEventIdentities ?? [])],
+      ['bflow\u0000external-change'],
+      'an external title change targets the exact B flow identity',
+    );
+
+    clock.advance(1_000);
+    const added = calendarListEvent({
+      id: 'external-added',
+      title: '외부에서 추가',
+      source: 'google',
+      sourceCalendarId: 'primary',
+      calendarId: undefined,
+    });
+    scheduleCanonicalEvents = [{ ...baseline, title: '1차 외부 수정' }, added];
+    await dispatchScheduleWindowEvent('bflow:calendar-changed');
+    await renderScheduleView();
+    assert.deepEqual(
+      [...(scheduleGridProps.at(-1)?.highlightedEventIdentities ?? [])].sort(),
+      ['bflow\u0000external-change', 'google\u0000primary\u0000external-added'].sort(),
+      'a later unrelated refresh keeps the earlier event highlighted for its own full duration',
+    );
+
+    clock.advance(1_000);
+    await renderScheduleView();
+    assert.deepEqual(
+      [...(scheduleGridProps.at(-1)?.highlightedEventIdentities ?? [])],
+      ['google\u0000primary\u0000external-added'],
+      'the first event expires on its own schedule without clearing the later highlight',
+    );
+    clock.advance(1_001);
+    await renderScheduleView();
+    assert.equal(scheduleGridProps.at(-1)?.highlightedEventIdentities?.size, 0, 'the later event also clears after its own two seconds');
+  } finally {
+    clock.restore();
+  }
+});
+
+test('ScheduleView treats its optimistic calendar metadata refresh as local before highlighting a later external change', async () => {
+  resetHarness();
+  const baseline = calendarListEvent({
+    id: 'metadata-refresh',
+    title: '색상 변경 전 일정',
+    source: 'bflow',
+    sourceCalendarId: 'bflow:mine',
+    calendarId: 'mine',
+    color: '#6C5CE7',
+    canEdit: true,
+  });
+  scheduleCanonicalEvents = [baseline];
+  await renderScheduleView();
+  await flushScheduleMountEffects();
+
+  const clock = installScheduleFakeClock();
+  try {
+    scheduleCanonicalEvents = [{ ...baseline, color: '#00B894', canEdit: false }];
+    await dispatchScheduleWindowEvent('bflow:calendar-changed', { action: 'optimistic-metadata' });
+    await renderScheduleView();
+    assert.deepEqual(
+      [...(scheduleGridProps.at(-1)?.highlightedEventIdentities ?? [])],
+      [],
+      'the current user\'s colour or membership presentation refresh does not impersonate an external edit',
+    );
+
+    scheduleCanonicalEvents = [{
+      ...baseline,
+      color: '#00B894',
+      canEdit: false,
+      title: '다른 사용자가 수정한 일정',
+    }];
+    await dispatchScheduleWindowEvent('bflow:calendar-changed', { action: 'update' });
+    await renderScheduleView();
+    assert.deepEqual(
+      [...(scheduleGridProps.at(-1)?.highlightedEventIdentities ?? [])],
+      ['bflow\u0000metadata-refresh'],
+      'a later non-local calendar change still highlights the exact affected event',
+    );
+  } finally {
+    clock.restore();
+  }
+});
+
+test('ScheduleView does not flash a subscription refresh as a teammate change', async () => {
+  resetHarness();
+  const baseline = calendarListEvent({
+    id: 'ics-baseline',
+    title: '기존 일정',
+    source: 'bflow',
+    sourceCalendarId: 'bflow:mine',
+    calendarId: 'mine',
+    canEdit: true,
+  });
+  scheduleCanonicalEvents = [baseline];
+  await renderScheduleView();
+  await flushScheduleMountEffects();
+
+  const clock = installScheduleFakeClock();
+  try {
+    scheduleCanonicalEvents = [baseline, calendarListEvent({
+      id: 'ics:sub-1:ext-1:2026-08-27',
+      title: '외부 세미나',
+      source: 'ics',
+      sourceCalendarId: 'ics:sub-1',
+      calendarId: undefined,
+      canEdit: false,
+    })];
+    await dispatchScheduleWindowEvent('bflow:calendar-changed', { action: 'ics' });
+    await renderScheduleView();
+    assert.deepEqual(
+      [...(scheduleGridProps.at(-1)?.highlightedEventIdentities ?? [])],
+      [],
+      '외부 구독 갱신은 팀원 변경 안내가 아니다',
+    );
+  } finally {
+    clock.restore();
+  }
+});
+
+test('ScheduleView does not highlight deletions and passes an external add target to the weekly time grid', async () => {
+  resetHarness();
+  const removed = calendarListEvent({
+    id: 'removed-external',
+    source: 'google',
+    sourceCalendarId: 'primary',
+    calendarId: undefined,
+  });
+  scheduleCanonicalEvents = [removed];
+  await renderScheduleView();
+  await flushScheduleMountEffects();
+  scheduleCanonicalEvents = [];
+  await dispatchScheduleWindowEvent('bflow:calendar-changed');
+  await renderScheduleView();
+  assert.equal(scheduleGridProps.at(-1)?.highlightedEventIdentities?.size, 0, 'a deletion never creates a target');
+
+  resetHarness();
+  scheduleLocalStorage.set('bflow_calendar_view_v1', JSON.stringify({ viewMode: 'week', weekSubMode: 'timegrid' }));
+  await renderScheduleView();
+  await flushScheduleMountEffects();
+  const timed = calendarListEvent({
+    id: 'external-timed',
+    title: '외부 시간 일정',
+    source: 'google',
+    sourceCalendarId: 'primary',
+    calendarId: undefined,
+    allDay: false,
+    startTime: '10:00',
+    endTime: '11:00',
+  });
+  scheduleCanonicalEvents = [timed];
+  await dispatchScheduleWindowEvent('bflow:calendar-changed');
+  await renderScheduleView();
+  assert.deepEqual(
+    [...(scheduleTimeGridProps.at(-1)?.highlightedEventIdentities ?? [])],
+    ['google\u0000primary\u0000external-timed'],
+    'the weekly time-grid receives the exact externally added identity',
+  );
+});
+
+test('ScheduleView passes realtime targets to weekly card and today card views', async (t) => {
+  const baseline = calendarListEvent({
+    id: 'card-view-external',
+    title: '변경 전 카드 일정',
+    source: 'bflow',
+    sourceCalendarId: 'bflow:mine',
+    calendarId: 'mine',
+  });
+  const target = 'bflow\u0000card-view-external';
+
+  await t.test('weekly card view', async () => {
+    resetHarness();
+    scheduleLocalStorage.set('bflow_calendar_view_v1', JSON.stringify({ viewMode: 'week', weekSubMode: 'card' }));
+    scheduleCanonicalEvents = [baseline];
+    await renderScheduleView();
+    await flushScheduleMountEffects();
+    scheduleCanonicalEvents = [{ ...baseline, title: '다른 팀원이 수정한 카드 일정' }];
+    await dispatchScheduleWindowEvent('bflow:calendar-changed');
+    await renderScheduleView();
+    assert.deepEqual(
+      [...(scheduleWeekScrollProps.at(-1)?.highlightedEventIdentities ?? [])],
+      [target],
+      'weekly card mode receives the same source-aware target as the grid',
+    );
+  });
+
+  await t.test('today card view', async () => {
+    resetHarness();
+    scheduleLocalStorage.set('bflow_calendar_view_v1', JSON.stringify({ viewMode: 'today', weekSubMode: 'card' }));
+    scheduleCanonicalEvents = [baseline];
+    await renderScheduleView();
+    await flushScheduleMountEffects();
+    scheduleCanonicalEvents = [{ ...baseline, title: '다른 팀원이 수정한 오늘 일정' }];
+    await dispatchScheduleWindowEvent('bflow:calendar-changed');
+    await renderScheduleView();
+    assert.deepEqual(
+      [...(scheduleDayScrollProps.at(-1)?.highlightedEventIdentities ?? [])],
+      [target],
+      'today card mode receives the same source-aware target as the grid',
+    );
+  });
+});
+
+test('ScheduleView guards multiple exact local create identities without hiding a reversed identical external add', async () => {
+  resetHarness();
+  scheduleLocalStorage.set('bflow_calendar_view_v1', JSON.stringify({ viewMode: 'week', weekSubMode: 'timegrid' }));
+  const existing = calendarListEvent({
+    id: 'local-update',
+    title: '로컬 수정 전',
+    source: 'bflow',
+    sourceCalendarId: 'bflow:mine',
+    calendarId: 'mine',
+    allDay: false,
+    startTime: '09:00',
+    endTime: '10:00',
+  });
+  scheduleCanonicalEvents = [existing];
+  await renderScheduleView();
+  await flushScheduleMountEffects();
+  await renderScheduleView();
+
+  const clock = installScheduleFakeClock();
+  try {
+    const moved = { ...existing, startTime: '10:00', endTime: '11:00' };
+    scheduleCanonicalEvents = [moved];
+    await scheduleTimeGridProps.at(-1)?.onTimeGridEventChange?.(
+      existing.id,
+      { id: existing.id, source: existing.source, sourceCalendarId: existing.sourceCalendarId },
+      { startDate: moved.startDate, endDate: moved.endDate, startTime: '10:00', endTime: '11:00' },
+    );
+    await dispatchScheduleWindowEvent('bflow:calendar-changed');
+    await renderScheduleView();
+    assert.equal(scheduleTimeGridProps.at(-1)?.highlightedEventIdentities?.size, 0, 'a local time-grid update stays excluded');
+
+    scheduleCreateUuidValues = ['local-preserved-id', 'local-replaced-id'];
+    schedulePersistedAddIdentities = [
+      { id: 'local-preserved-id', source: 'bflow', sourceCalendarId: 'bflow:mine' },
+      { id: 'persisted-new-id', source: 'bflow', sourceCalendarId: 'bflow:mine' },
+    ];
+    scheduleTimeGridProps.at(-1)?.onTimeGridCreate?.('2026-08-27', '13:00', '14:00');
+    await renderScheduleView();
+    const createdPreserved = calendarListEvent({
+      id: 'local-preserved-id',
+      title: '로컬 추가',
+      source: 'bflow',
+      sourceCalendarId: 'bflow:mine',
+      calendarId: 'mine',
+      allDay: false,
+      startDate: '2026-08-27',
+      endDate: '2026-08-27',
+      startTime: '13:00',
+      endTime: '14:00',
+    });
+    const createdReplaced = calendarListEvent({
+      id: 'persisted-new-id',
+      title: '로컬 추가',
+      source: 'bflow',
+      sourceCalendarId: 'bflow:mine',
+      calendarId: 'mine',
+      allDay: false,
+      startDate: '2026-08-27',
+      endDate: '2026-08-27',
+      startTime: '13:00',
+      endTime: '14:00',
+    });
+    const createData = { ...createdPreserved, id: undefined, createdAt: undefined };
+    await scheduleCreateModalProps.at(-1)?.onSave(createData);
+    await scheduleCreateModalProps.at(-1)?.onSave(createData);
+    assert.deepEqual(
+      scheduleAddedEvents.map(({ id }) => id),
+      ['local-preserved-id', 'local-replaced-id'],
+      'two identical local creates retain separate optimistic identities',
+    );
+    const unrelatedExternalTwin = {
+      ...createdReplaced,
+      id: 'unrelated-external-twin',
+      createdAt: '2026-08-27T01:00:00.000Z',
+    };
+    scheduleCanonicalEvents = [moved, unrelatedExternalTwin, createdReplaced, createdPreserved];
+    await dispatchScheduleWindowEvent('bflow:calendar-changed');
+    await renderScheduleView();
+    assert.deepEqual(
+      [...(scheduleTimeGridProps.at(-1)?.highlightedEventIdentities ?? [])],
+      ['bflow\u0000unrelated-external-twin'],
+      'exact local guards ignore canonical ordering and leave the unrelated external twin highlighted',
+    );
+
+    clock.advance(3_001);
+    scheduleCanonicalEvents = [
+      moved,
+      unrelatedExternalTwin,
+      { ...createdReplaced, title: '다른 창에서 수정됨' },
+      createdPreserved,
+    ];
+    await dispatchScheduleWindowEvent('bflow:calendar-changed');
+    await renderScheduleView();
+    assert.deepEqual(
+      [...(scheduleTimeGridProps.at(-1)?.highlightedEventIdentities ?? [])],
+      ['bflow\u0000persisted-new-id'],
+      'after the guard expires, a later canonical change is treated as external',
+    );
+  } finally {
+    clock.restore();
+  }
+});
+
+test('ScheduleView consumes a matched local update guard before a collaborator changes the same identity', async () => {
+  resetHarness();
+  scheduleLocalStorage.set('bflow_calendar_view_v1', JSON.stringify({ viewMode: 'week', weekSubMode: 'timegrid' }));
+  const before = calendarListEvent({
+    id: 'same-event-fast-follow',
+    title: '내 수정 전 회의',
+    source: 'bflow',
+    sourceCalendarId: 'bflow:mine',
+    calendarId: 'mine',
+    allDay: false,
+    startTime: '09:00',
+    endTime: '10:00',
+  });
+  scheduleCanonicalEvents = [before];
+  await renderScheduleView();
+  await flushScheduleMountEffects();
+  await renderScheduleView();
+
+  const clock = installScheduleFakeClock();
+  try {
+    const localEcho = { ...before, startTime: '10:00', endTime: '11:00' };
+    scheduleCanonicalEvents = [localEcho];
+    await scheduleTimeGridProps.at(-1)?.onTimeGridEventChange?.(
+      before.id,
+      { id: before.id, source: before.source, sourceCalendarId: before.sourceCalendarId },
+      { startDate: localEcho.startDate, endDate: localEcho.endDate, startTime: '10:00', endTime: '11:00' },
+    );
+    await renderScheduleView();
+    assert.equal(
+      scheduleTimeGridProps.at(-1)?.highlightedEventIdentities?.size,
+      0,
+      'the matching canonical echo of this window\'s save stays quiet',
+    );
+
+    scheduleCanonicalEvents = [{ ...localEcho, title: '동료가 바로 이어서 수정한 회의' }];
+    await dispatchScheduleWindowEvent('bflow:calendar-changed');
+    await renderScheduleView();
+    assert.deepEqual(
+      [...(scheduleTimeGridProps.at(-1)?.highlightedEventIdentities ?? [])],
+      ['bflow\u0000same-event-fast-follow'],
+      'a collaborator update within the former three-second guard window is still announced',
+    );
+  } finally {
+    clock.restore();
+  }
+});
+
+test('ScheduleView does not use a local guard to hide a nonmatching collaborator refresh', async () => {
+  resetHarness();
+  scheduleLocalStorage.set('bflow_calendar_view_v1', JSON.stringify({ viewMode: 'week', weekSubMode: 'timegrid' }));
+  const before = calendarListEvent({
+    id: 'same-event-conflict',
+    title: '내 수정 전 회의',
+    source: 'bflow',
+    sourceCalendarId: 'bflow:mine',
+    calendarId: 'mine',
+    allDay: false,
+    startTime: '09:00',
+    endTime: '10:00',
+  });
+  scheduleCanonicalEvents = [before];
+  await renderScheduleView();
+  await flushScheduleMountEffects();
+  await renderScheduleView();
+
+  const clock = installScheduleFakeClock();
+  try {
+    scheduleCanonicalEvents = [{
+      ...before,
+      title: '동료의 최신 수정',
+      startTime: '10:00',
+      endTime: '11:00',
+    }];
+    await scheduleTimeGridProps.at(-1)?.onTimeGridEventChange?.(
+      before.id,
+      { id: before.id, source: before.source, sourceCalendarId: before.sourceCalendarId },
+      { startDate: before.startDate, endDate: before.endDate, startTime: '10:00', endTime: '11:00' },
+    );
+    await renderScheduleView();
+    assert.deepEqual(
+      [...(scheduleTimeGridProps.at(-1)?.highlightedEventIdentities ?? [])],
+      ['bflow\u0000same-event-conflict'],
+      'the local save guard is only valid for its own expected canonical version, not a collaborator version',
+    );
+  } finally {
+    clock.restore();
+  }
+});
+
+test('ScheduleView keeps a local update guard through its failed-save rollback', async () => {
+  resetHarness();
+  scheduleLocalStorage.set('bflow_calendar_view_v1', JSON.stringify({ viewMode: 'week', weekSubMode: 'timegrid' }));
+  const before = calendarListEvent({
+    id: 'failed-local-rollback',
+    title: '되돌릴 회의',
+    source: 'bflow',
+    sourceCalendarId: 'bflow:mine',
+    calendarId: 'mine',
+    allDay: false,
+    startTime: '09:00',
+    endTime: '10:00',
+  });
+  const optimistic = { ...before, startTime: '10:00', endTime: '11:00' };
+  const persistenceError = new Error('저장 실패');
+  scheduleCanonicalEvents = [before];
+  await renderScheduleView();
+  await flushScheduleMountEffects();
+  await renderScheduleView();
+
+  const clock = installScheduleFakeClock();
+  try {
+    scheduleUpdateHandler = async () => {
+      scheduleCanonicalEvents = [optimistic];
+      await dispatchScheduleWindowEvent('bflow:calendar-changed');
+      scheduleCanonicalEvents = [before];
+      await dispatchScheduleWindowEvent('bflow:calendar-changed');
+      throw persistenceError;
+    };
+    const result = scheduleTimeGridProps.at(-1)?.onTimeGridEventChange?.(
+      before.id,
+      { id: before.id, source: before.source, sourceCalendarId: before.sourceCalendarId },
+      { startDate: optimistic.startDate, endDate: optimistic.endDate, startTime: '10:00', endTime: '11:00' },
+    );
+    await assert.rejects(result, (error) => error === persistenceError);
+    await renderScheduleView();
+    assert.deepEqual(
+      [...(scheduleTimeGridProps.at(-1)?.highlightedEventIdentities ?? [])],
+      [],
+      'the local rollback is not presented as a teammate change after the optimistic echo',
+    );
+  } finally {
+    clock.restore();
+  }
+});
+
+test('ScheduleView keeps a pending local update guard through a delayed failed-save rollback', async () => {
+  resetHarness();
+  scheduleLocalStorage.set('bflow_calendar_view_v1', JSON.stringify({ viewMode: 'week', weekSubMode: 'timegrid' }));
+  const before = calendarListEvent({
+    id: 'delayed-failed-local-rollback',
+    title: '늦게 되돌릴 회의',
+    source: 'bflow',
+    sourceCalendarId: 'bflow:mine',
+    calendarId: 'mine',
+    allDay: false,
+    startTime: '09:00',
+    endTime: '10:00',
+  });
+  const optimistic = { ...before, startTime: '10:00', endTime: '11:00' };
+  const persistenceError = new Error('늦은 저장 실패');
+  scheduleCanonicalEvents = [before];
+  await renderScheduleView();
+  await flushScheduleMountEffects();
+  await renderScheduleView();
+
+  const clock = installScheduleFakeClock();
+  try {
+    scheduleUpdateHandler = async () => {
+      scheduleCanonicalEvents = [optimistic];
+      await dispatchScheduleWindowEvent('bflow:calendar-changed');
+      clock.advance(3_001);
+      scheduleCanonicalEvents = [before];
+      await dispatchScheduleWindowEvent('bflow:calendar-changed');
+      throw persistenceError;
+    };
+    const result = scheduleTimeGridProps.at(-1)?.onTimeGridEventChange?.(
+      before.id,
+      { id: before.id, source: before.source, sourceCalendarId: before.sourceCalendarId },
+      { startDate: optimistic.startDate, endDate: optimistic.endDate, startTime: '10:00', endTime: '11:00' },
+    );
+    await assert.rejects(result, (error) => error === persistenceError);
+    await renderScheduleView();
+    assert.deepEqual(
+      [...(scheduleTimeGridProps.at(-1)?.highlightedEventIdentities ?? [])],
+      [],
+      'a still-pending local mutation keeps its rollback out of teammate highlights even after the normal TTL',
+    );
+  } finally {
+    clock.restore();
+  }
+});
+
+test('ScheduleView keeps a local delete rollback from pulsing as a teammate add', async () => {
+  resetHarness();
+  const before = calendarListEvent({
+    id: 'failed-local-delete',
+    title: '되돌릴 삭제 일정',
+    source: 'bflow',
+    sourceCalendarId: 'bflow:mine',
+    calendarId: 'mine',
+  });
+  const persistenceError = new Error('삭제 저장 실패');
+  scheduleCanonicalEvents = [before];
+  await renderScheduleView();
+  await flushScheduleMountEffects();
+  await renderScheduleView();
+  scheduleGridProps.at(-1)?.onEventClick(before);
+  await renderScheduleView();
+
+  const clock = installScheduleFakeClock();
+  try {
+    scheduleDeleteHandler = async () => {
+      scheduleCanonicalEvents = [];
+      await dispatchScheduleWindowEvent('bflow:calendar-changed');
+      scheduleCanonicalEvents = [before];
+      await dispatchScheduleWindowEvent('bflow:calendar-changed');
+      throw persistenceError;
+    };
+    const panel = schedulePanelProps.at(-1);
+    assert.ok(panel, 'the selected local event exposes the detail delete callback');
+    await assert.rejects(panel.onDelete(before.id), (error) => error === persistenceError);
+    await renderScheduleView();
+    assert.deepEqual(
+      [...(scheduleGridProps.at(-1)?.highlightedEventIdentities ?? [])],
+      [],
+      'the local failed-delete restoration is not presented as a teammate add',
+    );
+  } finally {
+    clock.restore();
+  }
+});
+
+test('ScheduleView keeps an open delete editor mounted until a failed optimistic delete rolls back', async () => {
+  resetHarness();
+  const before = calendarListEvent({
+    id: 'failed-delete-editor-stays-open',
+    title: '삭제 실패 안내를 보여줄 일정',
+    source: 'bflow',
+    sourceCalendarId: 'bflow:mine',
+    calendarId: 'mine',
+  });
+  const persistenceError = new Error('삭제 저장 실패');
+  let signalOptimisticRemoval!: () => void;
+  const optimisticRemoval = new Promise<void>((resolve) => { signalOptimisticRemoval = resolve; });
+  let releaseRollback!: () => void;
+  const rollbackRelease = new Promise<void>((resolve) => { releaseRollback = resolve; });
+  scheduleCanonicalEvents = [before];
+  await renderScheduleView();
+  await flushScheduleMountEffects();
+  await renderScheduleView();
+  scheduleGridProps.at(-1)?.onEventClick(before);
+  await renderScheduleView();
+
+  scheduleDeleteHandler = async () => {
+    scheduleCanonicalEvents = [];
+    await dispatchScheduleWindowEvent('bflow:calendar-changed');
+    signalOptimisticRemoval();
+    await rollbackRelease;
+    scheduleCanonicalEvents = [before];
+    await dispatchScheduleWindowEvent('bflow:calendar-changed');
+    throw persistenceError;
+  };
+  const panel = schedulePanelProps.at(-1);
+  assert.ok(panel, 'the selected row exposes the detail delete callback');
+  const deletion = panel.onDelete(before.id);
+  await optimisticRemoval;
+  schedulePanelProps = [];
+  await renderScheduleView();
+  assert.deepEqual(
+    schedulePanelProps.at(-1)?.event,
+    before,
+    'the side panel stays mounted while the optimistic deletion is pending',
+  );
+
+  releaseRollback();
+  await assert.rejects(deletion, (error) => error === persistenceError);
+  schedulePanelProps = [];
+  await renderScheduleView();
+  assert.deepEqual(
+    schedulePanelProps.at(-1)?.event,
+    before,
+    'the restored row remains in the editor so its rejection handler can show the error',
+  );
+});
+
+test('ScheduleView keeps overlapping local update and failed-delete guards separate for one event', async () => {
+  resetHarness();
+  scheduleLocalStorage.set('bflow_calendar_view_v1', JSON.stringify({ viewMode: 'week', weekSubMode: 'timegrid' }));
+  const before = calendarListEvent({
+    id: 'overlapping-local-guards',
+    title: '같은 일정의 겹친 저장',
+    source: 'bflow',
+    sourceCalendarId: 'bflow:mine',
+    calendarId: 'mine',
+    allDay: false,
+    startTime: '09:00',
+    endTime: '10:00',
+  });
+  const moved = { ...before, startTime: '10:00', endTime: '11:00' };
+  const deleteError = new Error('겹친 삭제 저장 실패');
+  let releaseUpdate!: () => void;
+  const updateFinished = new Promise<void>((resolve) => { releaseUpdate = resolve; });
+  let signalDeleteStarted!: () => void;
+  const deleteStarted = new Promise<void>((resolve) => { signalDeleteStarted = resolve; });
+  let releaseDeleteRollback!: () => void;
+  const deleteRollback = new Promise<void>((resolve) => { releaseDeleteRollback = resolve; });
+  scheduleCanonicalEvents = [before];
+  await renderScheduleView();
+  await flushScheduleMountEffects();
+  await renderScheduleView();
+  scheduleTimeGridProps.at(-1)?.onEventClick(before);
+  await renderScheduleView();
+
+  scheduleUpdateHandler = async () => updateFinished;
+  scheduleDeleteHandler = async () => {
+    signalDeleteStarted();
+    await deleteRollback;
+    scheduleCanonicalEvents = [];
+    await dispatchScheduleWindowEvent('bflow:calendar-changed');
+    scheduleCanonicalEvents = [before];
+    await dispatchScheduleWindowEvent('bflow:calendar-changed');
+    throw deleteError;
+  };
+  const updateResult = scheduleTimeGridProps.at(-1)?.onTimeGridEventChange?.(
+    before.id,
+    { id: before.id, source: before.source, sourceCalendarId: before.sourceCalendarId },
+    { startDate: moved.startDate, endDate: moved.endDate, startTime: '10:00', endTime: '11:00' },
+  );
+  await new Promise<void>((resolve) => setImmediate(resolve));
+  const panel = schedulePanelProps.at(-1);
+  assert.ok(panel, 'the initial panel keeps its delete action while the update is pending');
+  const deleteResult = panel.onDelete(before.id);
+  await deleteStarted;
+
+  releaseUpdate();
+  await updateResult;
+  releaseDeleteRollback();
+  await assert.rejects(deleteResult, (error) => error === deleteError);
+  await renderScheduleView();
+  assert.deepEqual(
+    [...(scheduleTimeGridProps.at(-1)?.highlightedEventIdentities ?? [])],
+    [],
+    'one operation settling cannot remove the other operation\'s rollback guard',
+  );
+});
+
+test('ScheduleView does not present its own B flow calendar move as a teammate update', async () => {
+  resetHarness();
+  const before = calendarListEvent({
+    id: 'local-calendar-move',
+    title: '내가 옮긴 일정',
+    source: 'bflow',
+    sourceCalendarId: 'bflow:mine',
+    calendarId: 'mine',
+    color: '#6C5CE7',
+    canEdit: true,
+    isReadOnly: false,
+    isPrivate: true,
+  });
+  const moved = {
+    ...before,
+    source: 'bflow' as const,
+    sourceCalendarId: 'bflow:editable-share',
+    calendarId: 'editable-share',
+    color: '#6C5CE7',
+    canEdit: true,
+    isReadOnly: false,
+    isPrivate: false,
+  };
+  scheduleCanonicalEvents = [before];
+  await renderScheduleView();
+  await flushScheduleMountEffects();
+  await renderScheduleView();
+  scheduleGridProps.at(-1)?.onEventClick(before);
+  await renderScheduleView();
+  scheduleUpdateHandler = async () => {
+    scheduleCanonicalEvents = [moved];
+    await dispatchScheduleWindowEvent('bflow:calendar-changed');
+  };
+
+  const panel = schedulePanelProps.at(-1);
+  assert.ok(panel, 'the editable B flow row exposes its direct update callback');
+  await panel.onUpdate(before.id, { calendarId: moved.calendarId });
+  await renderScheduleView();
+  assert.deepEqual(
+    [...(scheduleGridProps.at(-1)?.highlightedEventIdentities ?? [])],
+    [],
+    'the local destination presentation is consumed as this window\'s own echo',
+  );
 });
 
 test('ScheduleView only preserves external vacation selections outside the canonical event cache', async (t) => {
@@ -4069,7 +5228,7 @@ test('ScheduleView applies one reduced-motion policy above every calendar branch
   );
 });
 
-test('ScheduleView restores and remembers the weekly time-grid choice while opening a slot on its date', async () => {
+test('ScheduleView restores and remembers the weekly time-grid choice while opening timed slot and drag ranges', async () => {
   resetHarness();
   scheduleLocalStorage.set('bflow_calendar_view_v1', JSON.stringify({
     viewMode: 'week',
@@ -4086,8 +5245,97 @@ test('ScheduleView restores and remembers the weekly time-grid choice while open
 
   scheduleTimeGridProps.at(-1)?.onSlotClick('2026-08-26', '10:00', '10:30');
   tree = await renderScheduleView();
-  assert.equal(scheduleCreateModalProps.at(-1)?.initialDate, '2026-08-26', 'B.4 carries only the selected date; time prefill remains a PR-C concern');
+  assert.equal(scheduleCreateModalProps.at(-1)?.initialDate, '2026-08-26');
   assert.equal(scheduleCreateModalProps.at(-1)?.initialEndDate, '2026-08-26');
+  assert.equal(scheduleCreateModalProps.at(-1)?.initialStartTime, '10:00', 'a slot click starts a timed 30-minute create');
+  assert.equal(scheduleCreateModalProps.at(-1)?.initialEndTime, '10:30');
+
+  scheduleTimeGridProps.at(-1)?.onTimeGridCreate?.('2026-08-27', '13:15', '14:45');
+  tree = await renderScheduleView();
+  assert.equal(scheduleCreateModalProps.at(-1)?.initialDate, '2026-08-27');
+  assert.equal(scheduleCreateModalProps.at(-1)?.initialEndDate, '2026-08-27');
+  assert.equal(scheduleCreateModalProps.at(-1)?.initialStartTime, '13:15', 'a time-grid drag preserves its exact start');
+  assert.equal(scheduleCreateModalProps.at(-1)?.initialEndTime, '14:45', 'a time-grid drag preserves its exact end');
+
+  await scheduleCreateModalProps.at(-1)?.onSave({
+    title: '저장 뒤 일반 일정',
+    memo: '',
+    color: '#6C5CE7',
+    type: 'custom',
+    startDate: '2026-08-27',
+    endDate: '2026-08-27',
+    createdBy: '배한솔',
+    allDay: false,
+    startTime: '13:15',
+    endTime: '14:45',
+  });
+  assert.deepEqual(
+    scheduleAddedEvents.map((event) => ({
+      startDate: event.startDate,
+      endDate: event.endDate,
+      startTime: event.startTime,
+      endTime: event.endTime,
+    })),
+    [{
+      startDate: '2026-08-27',
+      endDate: '2026-08-27',
+      startTime: '13:15',
+      endTime: '14:45',
+    }],
+    'the still-prefilled timed modal saves its exact drag range',
+  );
+  // The ordinary-create button also resets these fields, so assert the successful-save
+  // reset before opening it to keep this path independently covered.
+  assert.deepEqual(
+    stateSlots.slice(5, 9),
+    [undefined, undefined, undefined, undefined],
+    'a successful timed save clears its date and time prefill before the next opener',
+  );
+
+  tree = await renderScheduleView();
+  buttonByText(tree, '일정').props.onClick?.({ stopPropagation() {} });
+  tree = await renderScheduleView();
+  assert.deepEqual(
+    {
+      initialDate: scheduleCreateModalProps.at(-1)?.initialDate,
+      initialEndDate: scheduleCreateModalProps.at(-1)?.initialEndDate,
+      initialStartTime: scheduleCreateModalProps.at(-1)?.initialStartTime,
+      initialEndTime: scheduleCreateModalProps.at(-1)?.initialEndTime,
+    },
+    {
+      initialDate: undefined,
+      initialEndDate: undefined,
+      initialStartTime: undefined,
+      initialEndTime: undefined,
+    },
+    'a successful save clears every date and time prefill before the next ordinary creation',
+  );
+
+  scheduleCreateModalProps.at(-1)?.onClose();
+  tree = await renderScheduleView();
+  scheduleTimeGridProps.at(-1)?.onTimeGridCreate?.('2026-08-28', '09:00', '09:30');
+  tree = await renderScheduleView();
+  assert.equal(scheduleCreateModalProps.at(-1)?.initialStartTime, '09:00', 'the close check begins from a timed time-grid creation');
+  assert.equal(scheduleCreateModalProps.at(-1)?.initialEndTime, '09:30');
+  scheduleCreateModalProps.at(-1)?.onClose();
+  tree = await renderScheduleView();
+  buttonByText(tree, '일정').props.onClick?.({ stopPropagation() {} });
+  tree = await renderScheduleView();
+  assert.deepEqual(
+    {
+      initialDate: scheduleCreateModalProps.at(-1)?.initialDate,
+      initialEndDate: scheduleCreateModalProps.at(-1)?.initialEndDate,
+      initialStartTime: scheduleCreateModalProps.at(-1)?.initialStartTime,
+      initialEndTime: scheduleCreateModalProps.at(-1)?.initialEndTime,
+    },
+    {
+      initialDate: undefined,
+      initialEndDate: undefined,
+      initialStartTime: undefined,
+      initialEndTime: undefined,
+    },
+    'closing a timed creation also clears every date and time prefill before the next ordinary creation',
+  );
 
   cardToggle.props.onClick?.({ stopPropagation() {} });
   tree = await renderScheduleView();
@@ -4096,13 +5344,597 @@ test('ScheduleView restores and remembers the weekly time-grid choice while open
   await flushScheduleMountEffects();
   assert.equal(
     scheduleLocalStorage.get('bflow_calendar_view_v1'),
-    JSON.stringify({ viewMode: 'week', weekSubMode: 'card' }),
+    JSON.stringify({ viewMode: 'week', weekSubMode: 'card', showWeekends: true }),
     'the latest weekly sub-mode is saved with the main view mode',
   );
 
   buttonByText(tree, '월').props.onClick?.({ stopPropagation() {} });
   tree = await renderScheduleView();
   assert.equal(findButtons(tree).some((button) => button.props['aria-label'] === '주간 카드 보기'), false, 'the sub-toggle stays exclusive to the weekly view');
+});
+
+test('EventCreateModal makes a supplied timed range editable without inheriting it into normal creation', async () => {
+  resetHarness();
+  const saved: Record<string, unknown>[] = [];
+  const renderTimed = () => renderEventCreateModal(
+    false,
+    (event) => saved.push(event),
+    '2026-08-26',
+    [],
+    { initialEndDate: '2026-08-26', initialStartTime: '10:00', initialEndTime: '10:30' },
+  );
+
+  let tree = await renderTimed();
+  assert.equal(formElementByLabel(tree, '종일 일정').props.checked, false, 'a supplied time range disables all-day by default');
+  assert.equal(formElementByLabel(tree, '시작 시각').props.value, '10:00');
+  assert.equal(formElementByLabel(tree, '종료 시각').props.value, '10:30');
+
+  formElementByLabel(tree, '제목').props.onChange?.({ target: { value: '시간표 일정', checked: false } });
+  tree = await renderTimed();
+  buttonByText(tree, '만들기').props.onClick?.();
+  assert.deepEqual(
+    { allDay: saved[0]?.allDay, startTime: saved[0]?.startTime, endTime: saved[0]?.endTime },
+    { allDay: false, startTime: '10:00', endTime: '10:30' },
+  );
+
+});
+
+test('EventCreateModal stays open and explains a failed save', async () => {
+  resetHarness();
+  let attempts = 0;
+  const renderModal = () => renderEventCreateModal(
+    false,
+    () => {
+      attempts += 1;
+      return Promise.reject(new Error('save failed'));
+    },
+    '2026-08-26',
+  );
+
+  let tree = await renderModal();
+  formElementByLabel(tree, '제목').props.onChange?.({ target: { value: '실패할 일정', checked: false } });
+  tree = await renderModal();
+
+  const submit = buttonByText(tree, '만들기');
+  await submit.props.onClick?.();
+  await Promise.resolve();
+  await Promise.resolve();
+  tree = await renderModal();
+
+  assert.match(textContent(tree), /저장하지 못했어요/, '실패하면 모달에 사유가 뜬다');
+  assert.equal(
+    findButtons(tree).some((button) => textContent(button).includes('만들기')),
+    true,
+    '실패해도 모달은 그대로 열려 있다',
+  );
+  assert.equal(attempts, 1, '한 번의 클릭은 한 번만 저장을 시도한다');
+});
+
+test('EventCreateModal locks its submit button while a save is in flight', async () => {
+  resetHarness();
+  let attempts = 0;
+  let releaseSave: (() => void) | undefined;
+  const renderModal = () => renderEventCreateModal(
+    false,
+    () => {
+      attempts += 1;
+      return new Promise<void>((resolve) => { releaseSave = resolve; });
+    },
+    '2026-08-26',
+  );
+
+  let tree = await renderModal();
+  formElementByLabel(tree, '제목').props.onChange?.({ target: { value: '느린 저장', checked: false } });
+  tree = await renderModal();
+
+  void buttonByText(tree, '만들기').props.onClick?.();
+  await Promise.resolve();
+  tree = await renderModal();
+
+  const pendingSubmit = findButtons(tree).find((button) => textContent(button).includes('저장 중'));
+  assert.ok(pendingSubmit, '저장 중에는 버튼 라벨이 바뀐다');
+  assert.equal(pendingSubmit.props.disabled, true, '저장 중에는 버튼이 잠긴다');
+
+  pendingSubmit.props.onClick?.();
+  assert.equal(attempts, 1, '저장 중 다시 눌러도 두 번 저장하지 않는다');
+  releaseSave?.();
+});
+
+test('ScheduleView rolls end-of-day time-grid slot and drag creation into a savable next-day timed modal', async () => {
+  resetHarness();
+  scheduleLocalStorage.set('bflow_calendar_view_v1', JSON.stringify({
+    viewMode: 'week',
+    weekSubMode: 'timegrid',
+  }));
+
+  await renderScheduleView();
+  scheduleTimeGridProps.at(-1)?.onSlotClick('2026-08-31', '23:30', '00:00');
+  await renderScheduleView();
+  const lastSlotPrefill = scheduleCreateModalProps.at(-1);
+  assert.deepEqual(
+    {
+      initialDate: lastSlotPrefill?.initialDate,
+      initialEndDate: lastSlotPrefill?.initialEndDate,
+      initialStartTime: lastSlotPrefill?.initialStartTime,
+      initialEndTime: lastSlotPrefill?.initialEndTime,
+    },
+    {
+      initialDate: '2026-08-31',
+      initialEndDate: '2026-09-01',
+      initialStartTime: '23:30',
+      initialEndTime: '00:00',
+    },
+    '23:30–24:00 slot click opens the next-day timed interval rather than a reversed same-day range',
+  );
+
+  scheduleTimeGridProps.at(-1)?.onTimeGridCreate?.('2026-08-31', '23:45', '00:00');
+  await renderScheduleView();
+  assert.deepEqual(
+    {
+      initialDate: scheduleCreateModalProps.at(-1)?.initialDate,
+      initialEndDate: scheduleCreateModalProps.at(-1)?.initialEndDate,
+      initialStartTime: scheduleCreateModalProps.at(-1)?.initialStartTime,
+      initialEndTime: scheduleCreateModalProps.at(-1)?.initialEndTime,
+    },
+    {
+      initialDate: '2026-08-31',
+      initialEndDate: '2026-09-01',
+      initialStartTime: '23:45',
+      initialEndTime: '00:00',
+    },
+    'late create drag keeps its 15-minute midnight boundary intact',
+  );
+
+  resetHarness();
+  const saved: Record<string, unknown>[] = [];
+  const renderModal = () => renderEventCreateModal(
+    false,
+    (created) => saved.push(created),
+    '2026-08-31',
+    [],
+    { initialEndDate: '2026-09-01', initialStartTime: '23:45', initialEndTime: '00:00' },
+  );
+  let modal = await renderModal();
+  assert.equal(formElementByLabel(modal, '종일 일정').props.checked, false);
+  assert.equal(formElementByLabel(modal, '종료일').props.value, '2026-09-01');
+  assert.doesNotMatch(textContent(modal), /종료 시각은 시작 시각보다 뒤여야 해요/);
+  formElementByLabel(modal, '제목').props.onChange?.({ target: { value: '자정 경계 일정', checked: false } });
+  modal = await renderModal();
+  buttonByText(modal, '만들기').props.onClick?.();
+  assert.deepEqual(
+    {
+      allDay: saved[0]?.allDay,
+      startDate: saved[0]?.startDate,
+      endDate: saved[0]?.endDate,
+      startTime: saved[0]?.startTime,
+      endTime: saved[0]?.endTime,
+    },
+    {
+      allDay: false,
+      startDate: '2026-08-31',
+      endDate: '2026-09-01',
+      startTime: '23:45',
+      endTime: '00:00',
+    },
+    'the actual modal accepts and saves the wrapped time range',
+  );
+});
+
+test('ScheduleView persists a time-grid move with its complete patch and source-aware identity', async () => {
+  resetHarness();
+  scheduleLocalStorage.set('bflow_calendar_view_v1', JSON.stringify({
+    viewMode: 'week',
+    weekSubMode: 'timegrid',
+  }));
+  const before = calendarListEvent({
+    id: 'time-grid-shared-id',
+    source: 'bflow',
+    sourceCalendarId: 'bflow:mine',
+    allDay: false,
+    startTime: '09:00',
+    endTime: '09:30',
+  });
+  const moved = {
+    ...before,
+    startDate: '2026-08-27',
+    endDate: '2026-08-27',
+    startTime: '13:15',
+    endTime: '14:45',
+  };
+  scheduleCanonicalEvents = [moved];
+
+  await renderScheduleView();
+  stateSlots[0] = [before];
+  await renderScheduleView();
+  const grid = scheduleTimeGridProps.at(-1);
+  assert.ok(grid?.onTimeGridEventChange, 'the existing C.2 time-grid mutation contract reaches ScheduleView');
+  await grid.onTimeGridEventChange?.(before.id, {
+    id: before.id,
+    source: before.source,
+    sourceCalendarId: before.sourceCalendarId,
+  }, {
+    startDate: moved.startDate,
+    endDate: moved.endDate,
+    startTime: moved.startTime!,
+    endTime: moved.endTime!,
+  });
+
+  assert.deepEqual(scheduleUpdateCalls.at(-1), {
+    id: before.id,
+    updates: {
+      startDate: '2026-08-27',
+      endDate: '2026-08-27',
+      startTime: '13:15',
+      endTime: '14:45',
+    },
+    targetIdentity: {
+      id: before.id,
+      source: 'bflow',
+      sourceCalendarId: 'bflow:mine',
+    },
+  });
+});
+
+test('ScheduleView calendar shortcuts switch views, return to today, and preserve arrow navigation', async (t) => {
+  await t.test('W and M switch directly between the weekly and monthly views', async () => {
+    resetHarness();
+    await renderScheduleView();
+    await flushScheduleMountEffects();
+
+    dispatchScheduleKeydown('w');
+    await renderScheduleView();
+    assert.ok(scheduleWeekScrollProps.at(-1), 'W renders the weekly calendar');
+
+    for (const cleanup of scheduleMountedEffectCleanups.splice(0).reverse()) cleanup();
+    await flushScheduleMountEffects();
+    const monthRenderCountBeforeM = scheduleGridProps.length;
+    dispatchScheduleKeydown('m');
+    await renderScheduleView();
+    assert.equal(scheduleGridProps.length, monthRenderCountBeforeM + 1, 'M renders a new monthly calendar');
+  });
+
+  await t.test('T returns the daily calendar to the real current date', async () => {
+    resetHarness();
+    scheduleLocalStorage.set('bflow_calendar_view_v1', JSON.stringify({
+      viewMode: 'today',
+      weekSubMode: 'card',
+    }));
+    await renderScheduleView();
+    scheduleDayScrollProps.at(-1)!.onActiveDayChange(0);
+    await renderScheduleView();
+    for (const cleanup of scheduleMountedEffectCleanups.splice(0).reverse()) cleanup();
+    await flushScheduleMountEffects();
+
+    dispatchScheduleKeydown('t');
+    await renderScheduleView();
+
+    const now = new Date();
+    const expectedIndex = Math.round((
+      new Date(now.getFullYear(), now.getMonth(), now.getDate(), 12).getTime()
+      - new Date(now.getFullYear(), 0, 1, 12).getTime()
+    ) / 86_400_000);
+    assert.equal(scheduleDayScrollProps.at(-1)?.year, now.getFullYear());
+    assert.equal(scheduleDayScrollProps.at(-1)?.activeDayIndex, expectedIndex);
+  });
+
+  await t.test('the detail panel keeps calendar keyboard navigation alive, only yielding Escape', async () => {
+    resetHarness();
+    const target = calendarListEvent({
+      id: 'panel-open',
+      title: '열어 둔 일정',
+      source: 'bflow',
+      sourceCalendarId: 'bflow:mine',
+      calendarId: 'mine',
+      canEdit: true,
+    });
+    scheduleCanonicalEvents = [target];
+    await renderScheduleView();
+    await flushScheduleMountEffects();
+    await renderScheduleView();
+    scheduleGridProps.at(-1)?.onEventClick(target);
+    await renderScheduleView();
+    assert.ok(schedulePanelProps.at(-1), '상세 패널이 열려 있다');
+
+    for (const cleanup of scheduleMountedEffectCleanups.splice(0).reverse()) cleanup();
+    await flushScheduleMountEffects();
+
+    dispatchScheduleKeydown('ArrowRight');
+    await renderScheduleView();
+    assert.ok(
+      scheduleGridProps.at(-1)?.focusedDate,
+      '패널이 열려 있어도 방향키 이동은 살아 있다',
+    );
+
+    for (const cleanup of scheduleMountedEffectCleanups.splice(0).reverse()) cleanup();
+    await flushScheduleMountEffects();
+    const createCountBefore = scheduleCreateModalProps.length;
+    dispatchScheduleKeydown('Escape');
+    await renderScheduleView();
+    assert.equal(
+      scheduleCreateModalProps.length,
+      createCountBefore,
+      'Escape는 패널 자신이 처리하도록 캘린더가 손대지 않는다',
+    );
+  });
+
+  await t.test('ArrowRight still moves the focused month date before C uses it', async () => {
+    resetHarness();
+    await renderScheduleView();
+    await flushScheduleMountEffects();
+
+    dispatchScheduleKeydown('ArrowRight');
+    await renderScheduleView();
+    const focusedDate = scheduleGridProps.at(-1)?.focusedDate;
+    assert.ok(focusedDate, 'the existing arrow navigation still focuses a calendar date');
+
+    for (const cleanup of scheduleMountedEffectCleanups.splice(0).reverse()) cleanup();
+    await flushScheduleMountEffects();
+    dispatchScheduleKeydown('c');
+    await renderScheduleView();
+    assert.equal(scheduleCreateModalProps.at(-1)?.initialDate, focusedDate);
+    assert.equal(scheduleCreateModalProps.at(-1)?.initialEndDate, focusedDate);
+  });
+
+  await t.test('period navigation discards a hidden month focus before C creates a new event', async () => {
+    resetHarness();
+    let tree = await renderScheduleView();
+    await flushScheduleMountEffects();
+
+    dispatchScheduleKeydown('t');
+    await rerenderScheduleViewWithFreshEffects();
+    dispatchScheduleKeydown('ArrowRight');
+    tree = await rerenderScheduleViewWithFreshEffects();
+    const focusedDate = scheduleGridProps.at(-1)?.focusedDate;
+    const today = scheduleFmtDate(new Date());
+    assert.ok(focusedDate, 'a month arrow creates a focused date before the period changes');
+    assert.notEqual(focusedDate, today, 'the focused date differs from C\'s normal today fallback');
+
+    buttonByLabel(tree, '다음 기간').props.onClick?.();
+    await rerenderScheduleViewWithFreshEffects();
+
+    dispatchScheduleKeydown('c');
+    await renderScheduleView();
+    assert.equal(scheduleCreateModalProps.at(-1)?.initialDate, today);
+    assert.equal(scheduleCreateModalProps.at(-1)?.initialEndDate, today);
+  });
+
+  await t.test('C falls back to today when no month date is focused', async () => {
+    resetHarness();
+    await renderScheduleView();
+    await flushScheduleMountEffects();
+
+    dispatchScheduleKeydown('c');
+    await renderScheduleView();
+
+    const today = scheduleFmtDate(new Date());
+    assert.equal(scheduleCreateModalProps.at(-1)?.initialDate, today);
+    assert.equal(scheduleCreateModalProps.at(-1)?.initialEndDate, today);
+  });
+});
+
+test('ScheduleView shortcut help toggles with ? and closes with Escape without motion when reduced', async () => {
+  resetHarness();
+  await renderScheduleView();
+  await flushScheduleMountEffects();
+
+  dispatchScheduleKeydown('?', { tagName: 'DIV' }, { shiftKey: true });
+  let tree = await renderScheduleView();
+  const animatedDialog = nodeByAriaLabel(tree, '캘린더 단축키');
+  assert.match(String((animatedDialog.props as { className?: string }).className), /char-modal-in_200ms_ease-out/);
+  assert.match(textContent(animatedDialog), /오늘/);
+  assert.match(textContent(animatedDialog), /새 일정/);
+
+  dispatchScheduleKeydown('?', { tagName: 'DIV' }, { shiftKey: true });
+  tree = await renderScheduleView();
+  assert.throws(() => nodeByAriaLabel(tree, '캘린더 단축키'), /must be rendered/);
+
+  dispatchScheduleKeydown('?', { tagName: 'DIV' }, { shiftKey: true });
+  await rerenderScheduleViewWithFreshEffects();
+  dispatchScheduleKeydown('Escape');
+  tree = await renderScheduleView();
+  assert.throws(() => nodeByAriaLabel(tree, '캘린더 단축키'), /must be rendered/);
+
+  resetHarness();
+  scheduleReducedMotion = true;
+  await renderScheduleView();
+  await flushScheduleMountEffects();
+  dispatchScheduleKeydown('?', { tagName: 'DIV' }, { shiftKey: true });
+  tree = await renderScheduleView();
+  const reducedDialog = nodeByAriaLabel(tree, '캘린더 단축키');
+  assert.doesNotMatch(String((reducedDialog.props as { className?: string }).className), /char-modal-in/);
+});
+
+test('ShortcutHelpOverlay moves and contains focus, blocks background keys, then restores the opener', async () => {
+  const ShortcutHelpOverlay = await loadShortcutHelpOverlay();
+  const previousDocument = globalThis.document;
+  shortcutOverlayRefs = [];
+  shortcutOverlayEffects = [];
+
+  type FocusTarget = {
+    name: string;
+    isConnected: boolean;
+    focus(): void;
+    querySelectorAll?(): FocusTarget[];
+  };
+  let activeElement: FocusTarget | null = null;
+  const focusLog: string[] = [];
+  const makeTarget = (name: string): FocusTarget => ({
+    name,
+    isConnected: true,
+    focus() {
+      activeElement = this;
+      focusLog.push(name);
+    },
+  });
+  const opener = makeTarget('opener');
+  const closeButton = makeTarget('close');
+  const dialog = {
+    ...makeTarget('dialog'),
+    querySelectorAll: () => [closeButton],
+  };
+  activeElement = opener;
+  globalThis.document = { get activeElement() { return activeElement; } } as unknown as Document;
+
+  let closeRequests = 0;
+  const tree = resolveComponents(ShortcutHelpOverlay({ onClose() { closeRequests += 1; } }));
+  const dialogNode = nodeByAriaLabel(tree, '캘린더 단축키') as ReactElement<Record<string, unknown>>;
+  const closeNode = buttonByLabel(tree, '단축키 도움말 닫기') as unknown as ReactElement<Record<string, unknown>>;
+  const dialogRef = (dialogNode as unknown as { ref?: { current: unknown } }).ref;
+  const closeRef = (closeNode as unknown as { ref?: { current: unknown } }).ref;
+  if (dialogRef) dialogRef.current = dialog;
+  if (closeRef) closeRef.current = closeButton;
+
+  const cleanups = shortcutOverlayEffects
+    .map((effect) => effect())
+    .filter((cleanup): cleanup is () => void => typeof cleanup === 'function');
+  assert.equal(activeElement, closeButton, '열리면 배경의 기존 포커스 대신 닫기 버튼에 포커스한다');
+
+  const onKeyDown = dialogNode.props.onKeyDown as ((event: Record<string, unknown>) => void) | undefined;
+  let helpTogglePrevented = false;
+  onKeyDown?.({
+    key: '?',
+    shiftKey: true,
+    preventDefault() { helpTogglePrevented = true; },
+    stopPropagation() {},
+  });
+  assert.equal(closeRequests, 1, '포커스가 도움말 안에 있어도 Shift+/를 다시 누르면 도움말을 닫는다');
+  assert.equal(helpTogglePrevented, true);
+
+  let tabPrevented = false;
+  onKeyDown?.({
+    key: 'Tab',
+    shiftKey: false,
+    preventDefault() { tabPrevented = true; },
+    stopPropagation() {},
+  });
+  assert.equal(tabPrevented, true, '마지막 포커스 요소에서 Tab을 누르면 다이얼로그 안에 머문다');
+  assert.equal(activeElement, closeButton);
+
+  let shiftTabPrevented = false;
+  onKeyDown?.({
+    key: 'Tab',
+    shiftKey: true,
+    preventDefault() { shiftTabPrevented = true; },
+    stopPropagation() {},
+  });
+  assert.equal(shiftTabPrevented, true, '첫 포커스 요소에서 Shift+Tab을 눌러도 다이얼로그 안에 머문다');
+
+  let backgroundEnterActivations = 0;
+  let propagationStopped = false;
+  onKeyDown?.({
+    key: 'Enter',
+    shiftKey: false,
+    preventDefault() {},
+    stopPropagation() { propagationStopped = true; },
+  });
+  if (!propagationStopped) backgroundEnterActivations += 1;
+  assert.equal(backgroundEnterActivations, 0, '모달 안 Enter가 배경 단축키까지 전달되지 않는다');
+
+  for (const cleanup of cleanups.reverse()) cleanup();
+  assert.equal(activeElement, opener, '닫힐 때 연결된 기존 포커스 요소로 돌아간다');
+  assert.deepEqual(focusLog, ['close', 'close', 'close', 'opener']);
+  globalThis.document = previousDocument;
+});
+
+test('ScheduleView calendar shortcuts ignore editing targets, modifiers, and open modal UI', async () => {
+  resetHarness();
+  await renderScheduleView();
+  await flushScheduleMountEffects();
+
+  dispatchScheduleKeydown('w', { tagName: 'INPUT' });
+  dispatchScheduleKeydown('c', { tagName: 'DIV', isContentEditable: true });
+  dispatchScheduleKeydown('w', { tagName: 'DIV' }, { ctrlKey: true });
+  let tree = await renderScheduleView();
+  assert.equal(scheduleWeekScrollProps.length, 0, 'text editing and modified keys do not switch views');
+  assert.equal(scheduleCreateModalProps.length, 0, 'contenteditable does not open the create modal');
+  assert.ok(scheduleGridProps.at(-1), 'the monthly view remains active');
+
+  dispatchScheduleKeydown('c');
+  tree = await rerenderScheduleViewWithFreshEffects();
+  assert.ok(scheduleCreateModalProps.at(-1), 'the unmodified shortcut opens create mode');
+  dispatchScheduleKeydown('w');
+  await renderScheduleView();
+  assert.equal(scheduleWeekScrollProps.length, 0, 'open create UI blocks calendar shortcuts');
+});
+
+test('ScheduleView allows Shift only for shortcut help and ignores Shift+T/W/M/C', async () => {
+  resetHarness();
+  scheduleLocalStorage.set('bflow_calendar_view_v1', JSON.stringify({
+    viewMode: 'today',
+    weekSubMode: 'card',
+  }));
+  await renderScheduleView();
+  scheduleDayScrollProps.at(-1)!.onActiveDayChange(0);
+  await rerenderScheduleViewWithFreshEffects();
+
+  dispatchScheduleKeydown('T', { tagName: 'DIV' }, { shiftKey: true });
+  dispatchScheduleKeydown('W', { tagName: 'DIV' }, { shiftKey: true });
+  dispatchScheduleKeydown('M', { tagName: 'DIV' }, { shiftKey: true });
+  dispatchScheduleKeydown('C', { tagName: 'DIV' }, { shiftKey: true });
+  let tree = await renderScheduleView();
+
+  assert.equal(scheduleDayScrollProps.at(-1)?.activeDayIndex, 0, 'Shift+T does not return to today');
+  assert.equal(scheduleWeekScrollProps.length, 0, 'Shift+W does not switch to week');
+  assert.equal(scheduleGridProps.length, 0, 'Shift+M does not switch to month');
+  assert.equal(scheduleCreateModalProps.length, 0, 'Shift+C does not open create mode');
+
+  dispatchScheduleKeydown('?', { tagName: 'DIV' }, { shiftKey: true });
+  tree = await renderScheduleView();
+  assert.ok(nodeByAriaLabel(tree, '캘린더 단축키'), 'Shift+/ remains the one allowed Shift shortcut');
+});
+
+test('ScheduleView suppresses calendar shortcuts while calendar settings is open', async () => {
+  resetHarness();
+  let tree = await renderScheduleView();
+  await flushScheduleMountEffects();
+
+  buttonByTitle(tree, '사이드바 펼치기').props.onClick?.();
+  tree = await renderScheduleView();
+  buttonByLabel(tree, '레일 새 캘린더').props.onClick?.();
+  tree = await rerenderScheduleViewWithFreshEffects();
+  assert.ok(nodeByAriaLabel(tree, '캘린더 설정 모달'));
+
+  dispatchScheduleKeydown('w');
+  dispatchScheduleKeydown('c');
+  await renderScheduleView();
+  assert.equal(scheduleWeekScrollProps.length, 0, 'settings modal blocks view shortcuts');
+  assert.equal(scheduleCreateModalProps.length, 0, 'settings modal blocks create shortcuts');
+});
+
+test('ScheduleView suppresses calendar shortcuts while the tag manager popover is open', async () => {
+  resetHarness();
+  await renderScheduleView();
+  await flushScheduleMountEffects();
+
+  scheduleTagBarProps.at(-1)?.onOpenTagManager({
+    left: 111, right: 207, top: 52, bottom: 80, width: 96, height: 28,
+  } as DOMRect);
+  let tree = await rerenderScheduleViewWithFreshEffects();
+  assert.ok(nodeByAriaLabel(tree, '태그 관리 팝오버 연결됨'));
+
+  dispatchScheduleKeydown('c');
+  dispatchScheduleKeydown('?', { tagName: 'DIV' }, { shiftKey: true });
+  tree = await renderScheduleView();
+
+  assert.equal(scheduleCreateModalProps.length, 0, 'tag management blocks a create modal behind the popover');
+  assert.throws(() => nodeByAriaLabel(tree, '캘린더 단축키'), /must be rendered/, 'tag management blocks shortcut help behind the popover');
+});
+
+test('ScheduleView suppresses calendar shortcuts while a global modal is open', async () => {
+  resetHarness();
+  await renderScheduleView();
+  await flushScheduleMountEffects();
+  scheduleGlobalModalOpen = true;
+
+  dispatchScheduleKeydown('w', { tagName: 'BUTTON' });
+  dispatchScheduleKeydown('m', { tagName: 'BUTTON' });
+  dispatchScheduleKeydown('c', { tagName: 'BUTTON' });
+  dispatchScheduleKeydown('?', { tagName: 'BUTTON' }, { shiftKey: true });
+  const tree = await renderScheduleView();
+
+  assert.equal(scheduleWeekScrollProps.length, 0, 'a global dialog blocks view changes behind it');
+  assert.equal(scheduleCreateModalProps.length, 0, 'a global dialog blocks create mode behind it');
+  assert.throws(() => nodeByAriaLabel(tree, '캘린더 단축키'), /must be rendered/, 'a global dialog blocks shortcut help behind it');
 });
 
 test('ScheduleView carries weekly and daily navigation across a calendar-year boundary', async (t) => {
@@ -4246,9 +6078,7 @@ test('ScheduleView keeps valid weekly indices owned by the displayed year', asyn
 
   await t.test('ArrowLeft keeps index one and index zero inside January 2026', async () => {
     await renderCardAtIndexOne();
-    schedulePendingEffects.splice(0);
-    await renderScheduleView();
-    await flushScheduleMountEffects();
+    await rerenderScheduleViewWithFreshEffects();
 
     dispatchScheduleKeydown('ArrowLeft');
     await renderScheduleView();
@@ -4327,6 +6157,820 @@ test('CalendarGrid renders tag-aware chip text while keeping each event color as
   const tintStyle = tintedChipBody.props.style as { background?: string; borderLeft?: string };
   assert.match(tintStyle.background ?? '', /#74B9FF/, 'the chip tint still comes from event.color');
   assert.equal(tintStyle.borderLeft, '3px solid #74B9FF', 'the chip border still comes from event.color');
+});
+
+test('the weekly header names the month and week, and today pulses in every view', async () => {
+  // 주간 헤더는 범위만으로는 몇 월 몇째 주인지 알기 어려워 연·월·주차를 함께 보여 준다.
+  resetHarness();
+  scheduleLocalStorage.set('bflow_calendar_view_v1', JSON.stringify({ viewMode: 'week', weekSubMode: 'card' }));
+  let tree = await renderScheduleView();
+  await flushScheduleMountEffects();
+  tree = await renderScheduleView();
+
+  assert.match(
+    textContent(tree),
+    /\d{4}년 \d{1,2}월 · \d{1,2}주차 · \d{1,2}\.\d{1,2} – \d{1,2}\.\d{1,2}/,
+    '주간 헤더가 연·월·주차·범위를 모두 담는다',
+  );
+
+  // '오늘' 버튼은 헤더 네비게이션에 있어 월·주·2주 보기에서 누를 수 있다.
+  // 오늘 보기에는 헤더 네비게이션 자체가 없으므로, 같은 펄스를 미니 달력 이동으로 확인한다.
+  const todayButtonCases = [
+    { label: '월 보기', stored: { viewMode: 'month', weekSubMode: 'card' }, read: () => scheduleGridProps.at(-1)?.pulseDate },
+    { label: '주간 카드', stored: { viewMode: 'week', weekSubMode: 'card' }, read: () => scheduleWeekScrollProps.at(-1)?.pulseDate },
+    { label: '주간 시간표', stored: { viewMode: 'week', weekSubMode: 'timegrid' }, read: () => scheduleTimeGridProps.at(-1)?.pulseDate ?? null },
+  ] as const;
+
+  for (const { label, stored, read } of todayButtonCases) {
+    resetHarness();
+    scheduleLocalStorage.set('bflow_calendar_view_v1', JSON.stringify(stored));
+    const clock = installScheduleFakeClock();
+    try {
+      tree = await renderScheduleView();
+      await flushScheduleMountEffects();
+      tree = await renderScheduleView();
+      assert.equal(read(), null, `${label}: 처음에는 펄스가 없다`);
+
+      buttonByText(tree, '오늘').props.onClick?.();
+      tree = await renderScheduleView();
+      assert.equal(read(), scheduleFmtDate(new Date()), `${label}: '오늘'을 누르면 그 날짜가 펄스한다`);
+      assert.equal(scheduleCreateModalProps.length, 0, `${label}: '오늘'은 새 일정 창을 열지 않는다`);
+
+      clock.advance(2_500);
+      tree = await renderScheduleView();
+      assert.equal(read(), null, `${label}: 펄스는 잠시 뒤 사라진다`);
+    } finally {
+      clock.restore();
+    }
+  }
+
+  // 오늘 보기: 미니 달력으로 날짜를 옮기면 그 날짜 카드가 펄스한다.
+  resetHarness();
+  scheduleLocalStorage.set('bflow_calendar_view_v1', JSON.stringify({ viewMode: 'today', weekSubMode: 'card' }));
+  tree = await renderScheduleView();
+  await flushScheduleMountEffects();
+  buttonByTitle(tree, '사이드바 펼치기').props.onClick?.();
+  tree = await renderScheduleView();
+  assert.equal(scheduleDayScrollProps.at(-1)?.pulseDate, null, '오늘 카드: 처음에는 펄스가 없다');
+
+  const miniCalendar = scheduleMiniCalendarProps.at(-1);
+  assert.ok(miniCalendar, '오늘 보기 사이드바에도 미니 달력이 있다');
+  miniCalendar.onDateSelect('2026-08-11');
+  await renderScheduleView();
+  assert.equal(
+    scheduleDayScrollProps.at(-1)?.pulseDate,
+    '2026-08-11',
+    '오늘 카드도 이동한 날짜를 펄스로 알려 준다',
+  );
+});
+
+test('the month grid explains an empty month without blocking the create path', async () => {
+  resetHarness();
+  const emptyTree = await renderCalendarGrid([]);
+  assert.match(textContent(emptyTree), /이번 달 일정이 없습니다/);
+  assert.match(textContent(emptyTree), /날짜를 눌러 새 일정을 만들어 보세요/);
+
+  const notice = findElements(emptyTree, (node) => (
+    typeof node.props.className === 'string'
+    && node.props.className.includes('pointer-events-none')
+    && node.props.className.includes('absolute inset-0')
+  ))[0];
+  assert.ok(notice, '안내는 격자 위에 얹기만 한다');
+  assert.match(
+    String(notice.props.className),
+    /pointer-events-none/,
+    '날짜 셀 클릭이 곧 생성 경로이므로 안내가 클릭을 가리면 안 된다',
+  );
+
+  // 이번 달에 걸치는 일정이 하나라도 있으면 안내를 숨긴다.
+  const filledTree = await renderCalendarGrid([calendarListEvent({ id: 'filled', title: '이번 달 일정' })]);
+  assert.doesNotMatch(textContent(filledTree), /이번 달 일정이 없습니다/);
+
+  // 옆 달에만 걸친 일정은 이번 달을 채우지 않는다.
+  const neighbourTree = await renderCalendarGrid([calendarListEvent({
+    id: 'neighbour',
+    title: '다음 달 일정',
+    startDate: '2026-09-10',
+    endDate: '2026-09-10',
+  })]);
+  assert.match(textContent(neighbourTree), /이번 달 일정이 없습니다/);
+});
+
+test('calendar shortcuts still work while the Korean IME is on', async () => {
+  resetHarness();
+  await renderScheduleView();
+  await flushScheduleMountEffects();
+
+  // 한글 모드에서는 e.key가 조합 중 값('Process')으로 오고, 물리 키는 e.code에 남는다.
+  dispatchScheduleKeydown('Process', { tagName: 'DIV' }, { code: 'KeyW' });
+  await renderScheduleView();
+  assert.ok(scheduleWeekScrollProps.at(-1), '한글 모드에서도 W가 주간 보기를 연다');
+
+  for (const cleanup of scheduleMountedEffectCleanups.splice(0).reverse()) cleanup();
+  await flushScheduleMountEffects();
+  const monthRendersBefore = scheduleGridProps.length;
+  dispatchScheduleKeydown('ㅡ', { tagName: 'DIV' }, { code: 'KeyM' });
+  await renderScheduleView();
+  assert.equal(scheduleGridProps.length, monthRendersBefore + 1, '한글 모드에서도 M이 월 보기를 연다');
+});
+
+test('the month empty-state waits for the first load', async () => {
+  resetHarness();
+  scheduleCanonicalEvents = [];
+  await renderScheduleView();
+  assert.equal(
+    scheduleGridProps.at(-1)?.eventsLoaded,
+    false,
+    '첫 로드가 끝나기 전에는 빈 상태 안내를 띄우지 않는다',
+  );
+
+  await flushScheduleMountEffects();
+  await renderScheduleView();
+  assert.equal(scheduleGridProps.at(-1)?.eventsLoaded, true, '로드가 끝나면 안내를 띄운다');
+});
+
+test('the weekend toggle hides Saturday and Sunday and remembers the choice', async () => {
+  resetHarness();
+  scheduleLocalStorage.set('bflow_calendar_view_v1', JSON.stringify({ viewMode: 'week', weekSubMode: 'timegrid' }));
+  let tree = await renderScheduleView();
+  await flushScheduleMountEffects();
+  tree = await renderScheduleView();
+
+  // 저장값에 항목이 없던 예전 사용자는 지금까지처럼 주말을 본다.
+  assert.equal(scheduleTimeGridProps.at(-1)?.showWeekends, true, '기본은 주말 표시');
+  const toggle = buttonByLabel(tree, '주말 표시');
+  assert.equal(toggle.props['aria-pressed'], true);
+  assert.equal(textContent(toggle).trim(), '주말');
+
+  toggle.props.onClick?.();
+  tree = await renderScheduleView();
+  assert.equal(scheduleTimeGridProps.at(-1)?.showWeekends, false, '끄면 시간표에 전달된다');
+  assert.equal(buttonByLabel(tree, '주말 표시').props['aria-pressed'], false);
+  assert.equal(textContent(buttonByLabel(tree, '주말 표시')).trim(), '평일만');
+
+  await flushScheduleMountEffects();
+  assert.equal(
+    scheduleLocalStorage.get('bflow_calendar_view_v1'),
+    JSON.stringify({ viewMode: 'week', weekSubMode: 'timegrid', showWeekends: false }),
+    '선택은 이 PC에 남는다',
+  );
+});
+
+test('every schedule surface follows the saved weekend choice', async () => {
+  // 저장값이 꺼짐이면 월·주 카드·주간 사이드바까지 같은 값을 받는다.
+  for (const stored of [
+    { viewMode: 'month', weekSubMode: 'card' },
+    { viewMode: 'week', weekSubMode: 'card' },
+  ] as const) {
+    resetHarness();
+    scheduleLocalStorage.set(
+      'bflow_calendar_view_v1',
+      JSON.stringify({ ...stored, showWeekends: false }),
+    );
+    await renderScheduleView();
+    await flushScheduleMountEffects();
+    await renderScheduleView();
+
+    const surface = stored.viewMode === 'month'
+      ? scheduleGridProps.at(-1)?.showWeekends
+      : scheduleWeekScrollProps.at(-1)?.showWeekends;
+    assert.equal(surface, false, `${stored.viewMode} 보기가 저장된 선택을 따른다`);
+  }
+});
+
+test("the weekend toggle is hidden in the single-day view", async () => {
+  resetHarness();
+  scheduleLocalStorage.set('bflow_calendar_view_v1', JSON.stringify({ viewMode: 'today', weekSubMode: 'card' }));
+  const tree = await renderScheduleView();
+  await flushScheduleMountEffects();
+
+  assert.equal(
+    findButtons(tree).some((button) => button.props['aria-label'] === '주말 표시'),
+    false,
+    '하루만 보는 화면에는 숨길 칸이 없다',
+  );
+});
+
+test('a later move pulse is not cut short by the earlier one', async () => {
+  resetHarness();
+  let tree = await renderScheduleView();
+  await flushScheduleMountEffects();
+  tree = await renderScheduleView();
+  buttonByTitle(tree, '사이드바 펼치기').props.onClick?.();
+  tree = await renderScheduleView();
+
+  const clock = installScheduleFakeClock();
+  try {
+    // '오늘'로 이동(2.5초 펄스).
+    buttonByText(tree, '오늘').props.onClick?.();
+    tree = await renderScheduleView();
+    const todayStr = scheduleFmtDate(new Date());
+    assert.equal(scheduleGridProps.at(-1)?.pulseDate, todayStr);
+
+    // 2초 뒤 미니 달력으로 다른 날짜로 이동(3초 펄스).
+    clock.advance(2_000);
+    scheduleMiniCalendarProps.at(-1)?.onDateSelect('2026-08-11');
+    tree = await renderScheduleView();
+    assert.equal(scheduleGridProps.at(-1)?.pulseDate, '2026-08-11');
+
+    // 앞선 '오늘' 타이머가 만료되는 시점(+0.5초)에도 새 펄스는 살아 있어야 한다.
+    clock.advance(600);
+    tree = await renderScheduleView();
+    assert.equal(
+      scheduleGridProps.at(-1)?.pulseDate,
+      '2026-08-11',
+      '앞선 타이머가 새 펄스를 조기에 끄지 않는다',
+    );
+
+    // 새 펄스는 자기 수명(3초)만큼만 남는다.
+    clock.advance(2_500);
+    await renderScheduleView();
+    assert.equal(scheduleGridProps.at(-1)?.pulseDate, null, '자기 수명이 끝나면 꺼진다');
+  } finally {
+    clock.restore();
+  }
+});
+
+test('rapid navigation also skips the weekly scroll animation and month-crossing arrows', async () => {
+  // ① 주간 카드: 연타 중에는 주 이동 스크롤도 즉시 그린다.
+  resetHarness();
+  scheduleLocalStorage.set('bflow_calendar_view_v1', JSON.stringify({ viewMode: 'week', weekSubMode: 'card' }));
+  const clock = installScheduleFakeClock();
+  try {
+    let tree = await renderScheduleView();
+    await flushScheduleMountEffects();
+    tree = await renderScheduleView();
+    assert.equal(scheduleWeekScrollProps.at(-1)?.instantScroll, false, '처음에는 부드럽게 스크롤한다');
+
+    buttonByLabel(tree, '다음 기간').props.onClick?.();
+    tree = await renderScheduleView();
+    clock.advance(120);
+    buttonByLabel(tree, '다음 기간').props.onClick?.();
+    tree = await renderScheduleView();
+    assert.equal(scheduleWeekScrollProps.at(-1)?.instantScroll, true, '연타 중에는 즉시 스크롤한다');
+  } finally {
+    clock.restore();
+  }
+
+  // ② 월간 방향키가 달을 넘길 때도 연타 스킵이 걸린다.
+  resetHarness();
+  const monthClock = installScheduleFakeClock();
+  try {
+    await renderScheduleView();
+    await flushScheduleMountEffects();
+
+    // 달 안에서만 움직이는 첫 이동은 기간 이동이 아니다.
+    dispatchScheduleKeydown('ArrowRight');
+    await renderScheduleView();
+    assert.equal(scheduleGridProps.at(-1)?.instantTransition, false);
+
+    // 달 경계를 넘는 이동을 연달아 두 번 하면 두 번째는 즉시 그린다.
+    for (let step = 0; step < 40; step += 1) dispatchScheduleKeydown('ArrowDown');
+    await renderScheduleView();
+    monthClock.advance(120);
+    for (let step = 0; step < 40; step += 1) dispatchScheduleKeydown('ArrowDown');
+    await renderScheduleView();
+    assert.equal(
+      scheduleGridProps.at(-1)?.instantTransition,
+      true,
+      '방향키를 꾹 눌러 달을 넘길 때도 스킵이 걸린다',
+    );
+  } finally {
+    monthClock.restore();
+  }
+});
+
+test('rapid period navigation draws the next period instantly instead of queueing slides', async () => {
+  resetHarness();
+  const clock = installScheduleFakeClock();
+  const monthGrid = () => scheduleGridProps.at(-1);
+  try {
+    let tree = await renderScheduleView();
+    await flushScheduleMountEffects();
+    tree = await renderScheduleView();
+
+    assert.equal(monthGrid()?.instantTransition, false, '처음에는 평소 전환을 쓴다');
+
+    // 첫 이동은 평소대로 애니메이션한다.
+    buttonByLabel(tree, '다음 기간').props.onClick?.();
+    tree = await renderScheduleView();
+    assert.equal(monthGrid()?.instantTransition, false, '한 번만 눌렀을 때는 전환을 유지한다');
+
+    // 300ms 안에 다시 누르면 그 전환은 즉시 그린다.
+    clock.advance(120);
+    buttonByLabel(tree, '다음 기간').props.onClick?.();
+    tree = await renderScheduleView();
+    assert.equal(monthGrid()?.instantTransition, true, '연타 중에는 슬라이드를 건너뛴다');
+
+    // 손을 떼고 300ms가 지나면 평소 전환으로 돌아온다.
+    clock.advance(300);
+    tree = await renderScheduleView();
+    assert.equal(monthGrid()?.instantTransition, false, '연타가 끝나면 전환이 돌아온다');
+
+    // 충분히 뜸을 들인 다음 이동은 다시 애니메이션한다.
+    clock.advance(1_000);
+    buttonByLabel(tree, '이전 기간').props.onClick?.();
+    await renderScheduleView();
+    assert.equal(monthGrid()?.instantTransition, false, '천천히 누르면 전환을 유지한다');
+  } finally {
+    clock.restore();
+  }
+});
+
+test('the rail lists ICS subscriptions with their own toggle, refresh, rename and unsubscribe', async () => {
+  resetHarness();
+  railSubscribeFormProps = [];
+  railConfirmResult = true;
+
+  const subscriptions = [{
+    id: 'sub-1',
+    name: '외부 팀 캘린더',
+    url: 'https://example.com/team.ics',
+    color: '#00B894',
+    enabled: true,
+    lastFetchedAt: '2026-09-01T00:00:00.000Z',
+    lastError: null as string | null,
+    lastFetchTruncated: false,
+  }];
+  const calls: string[] = [];
+  const previousApi = (globalThis as { window?: { electronAPI?: unknown } }).window;
+  (globalThis as unknown as { window: Record<string, unknown> }).window = {
+    electronAPI: {
+      icsList: async () => subscriptions.map((row) => ({ ...row })),
+      icsRefresh: async (id: string) => { calls.push(`refresh:${id}`); },
+      icsRemove: async (id: string) => { calls.push(`remove:${id}`); },
+      icsUpdate: async (id: string, patch: Record<string, unknown>) => {
+        calls.push(`update:${id}:${JSON.stringify(patch)}`);
+        return null;
+      },
+      onIcsChanged: () => () => {},
+    },
+    dispatchEvent: () => true,
+    CustomEvent: class {},
+  };
+
+  try {
+    // 훅 mock의 useEffect가 비어 있어 목록은 직접 채워 준 상태로 렌더한다.
+    stateSlots = [];
+    stateCursor = 0;
+    let tree = await renderRail(false, { resetState: true });
+    stateSlots[1] = subscriptions.map((row) => ({ ...row }));
+    tree = await renderRail(false);
+
+    assert.match(textContent(tree), /구독/, '레일에 구독 섹션이 있다');
+    const toggle = buttonByLabel(tree, '외부 팀 캘린더 표시');
+    assert.equal(toggle.props['aria-pressed'], true, '기본값은 켜짐이다');
+    toggle.props.onClick?.();
+    assert.equal(
+      calendarState.visibleCalendarIds['ics:sub-1'],
+      false,
+      '구독 토글은 구독 전용 키만 쓴다',
+    );
+
+    // ⋯ 메뉴: 지금 새로고침 / 이름·색 바꾸기 / 구독 해제
+    buttonByLabel(tree, '외부 팀 캘린더 메뉴 열기').props.onClick?.({ stopPropagation() {} });
+    tree = await renderRail(false);
+    const menuItems = findButtons(tree).filter((button) => button.props.role === 'menuitem');
+    assert.deepEqual(
+      menuItems.map((button) => textContent(button).trim()),
+      ['이름·색 바꾸기', '지금 새로고침', '구독 해제'],
+    );
+
+    await menuItems[1].props.onClick?.();
+    await Promise.resolve();
+    assert.ok(calls.includes('refresh:sub-1'), '지금 새로고침이 그 구독만 갱신한다');
+
+    // 실패한 구독은 경고 아이콘과 마지막 확인 시각을 함께 보여 준다.
+    subscriptions[0].lastError = '네트워크가 불안정합니다';
+    stateSlots[1] = subscriptions.map((row) => ({ ...row }));
+    tree = await renderRail(false);
+    const warning = findElements(tree, (node) => node.props['aria-label'] === '외부 팀 캘린더 불러오기 실패')[0];
+    assert.ok(warning, '실패하면 경고 아이콘이 뜬다');
+    assert.match(String(warning.props.title), /네트워크가 불안정합니다/);
+    assert.match(String(warning.props.title), /마지막으로 받아온/, '마지막 성공 시각도 함께 알려 준다');
+
+    // 일정이 잘려 보일 때는 경고와 구분되는 안내 아이콘을 따로 붙인다.
+    assert.equal(
+      findElements(tree, (node) => node.props['aria-label'] === '외부 팀 캘린더 일부만 표시').length,
+      0,
+      '잘리지 않았으면 안내 아이콘도 없다',
+    );
+    subscriptions[0].lastFetchTruncated = true;
+    stateSlots[1] = subscriptions.map((row) => ({ ...row }));
+    tree = await renderRail(false);
+    const truncatedHint = findElements(tree, (node) => node.props['aria-label'] === '외부 팀 캘린더 일부만 표시')[0];
+    assert.ok(truncatedHint, '잘렸으면 안내 아이콘이 뜬다');
+    assert.match(String(truncatedHint.props.title), /500개까지만/);
+  } finally {
+    if (previousApi === undefined) delete (globalThis as { window?: unknown }).window;
+    else (globalThis as unknown as { window: unknown }).window = previousApi;
+  }
+});
+
+test('the rename form appears once, right under its subscription row', async () => {
+  resetHarness();
+  railSubscribeFormProps = [];
+  railConfirmResult = true;
+
+  const subscriptions = [{
+    id: 'sub-1',
+    name: '외부 팀 캘린더',
+    url: 'https://example.com/team.ics',
+    color: '#00B894',
+    enabled: true,
+    lastFetchedAt: '2026-09-01T00:00:00.000Z',
+    lastError: null as string | null,
+  }];
+  const previousApi = (globalThis as { window?: { electronAPI?: unknown } }).window;
+  (globalThis as unknown as { window: Record<string, unknown> }).window = {
+    electronAPI: {
+      icsList: async () => subscriptions.map((row) => ({ ...row })),
+      icsUpdate: async () => null,
+      onIcsChanged: () => () => {},
+    },
+    dispatchEvent: () => true,
+    CustomEvent: class {},
+  };
+
+  try {
+    stateSlots = [];
+    stateCursor = 0;
+    let tree = await renderRail(false, { resetState: true });
+    stateSlots[1] = subscriptions.map((row) => ({ ...row }));
+    tree = await renderRail(false);
+
+    buttonByLabel(tree, '외부 팀 캘린더 메뉴 열기').props.onClick?.({ stopPropagation() {} });
+    tree = await renderRail(false);
+    const renameItem = findButtons(tree)
+      .filter((button) => button.props.role === 'menuitem')
+      .find((button) => textContent(button).trim() === '이름·색 바꾸기');
+    assert.ok(renameItem, '이름·색 바꾸기 메뉴가 있다');
+    renameItem.props.onClick?.();
+    tree = await renderRail(false);
+
+    const isEditForm = (element: { props: Record<string, unknown> }): boolean => (
+      element.props['aria-label'] === '구독 이름·색 바꾸기'
+    );
+    assert.equal(findElements(tree, isEditForm).length, 1, '편집 폼은 정확히 하나만 뜬다');
+
+    const sectionOf = (title: string) => findElements(
+      tree,
+      (element) => element.type === 'section' && textContent(element).includes(title),
+    )[0];
+
+    const subscriptionSection = sectionOf('구독');
+    assert.ok(subscriptionSection, '구독 섹션이 있다');
+    assert.equal(
+      findElements(subscriptionSection, isEditForm).length,
+      1,
+      '편집 폼은 구독 섹션 안에 있다',
+    );
+
+    for (const bflowSection of ['내 캘린더', '팀 전체', '나에게 공유됨']) {
+      const section = sectionOf(bflowSection);
+      if (!section) continue;
+      assert.equal(
+        findElements(section, isEditForm).length,
+        0,
+        `${bflowSection} 섹션에는 편집 폼이 없다`,
+      );
+    }
+  } finally {
+    if (previousApi === undefined) delete (globalThis as { window?: unknown }).window;
+    else (globalThis as unknown as { window: unknown }).window = previousApi;
+  }
+});
+
+test('tag chips pop on toggle and the filtered result fades instead of jumping', async () => {
+  resetHarness();
+  tagBarReducedMotion = false;
+  const noopAnchor = () => {};
+  try {
+    calendarState.enabledTagIds = { 'tag-review': false };
+    const tree = await renderTagBar(false, noopAnchor);
+    const enabledChip = findButtons(tree).find((button) => button.props['aria-label'] === '회의 태그');
+    const disabledChip = findButtons(tree).find((button) => button.props['aria-label'] === '검수 태그');
+    assert.ok(enabledChip && disabledChip, '켜진 칩과 꺼진 칩이 모두 렌더된다');
+    assert.equal(enabledChip.props['aria-pressed'], true);
+    assert.equal(disabledChip.props['aria-pressed'], false);
+
+    assert.deepEqual(
+      (enabledChip.props as { animate?: { scale?: number[] } }).animate,
+      { scale: [1, 1.12, 1] },
+      '켤 때는 살짝 커졌다 돌아온다',
+    );
+    assert.deepEqual(
+      (disabledChip.props as { animate?: { scale?: number[] } }).animate,
+      { scale: [1, 0.92, 1] },
+      '끌 때는 살짝 작아졌다 돌아온다',
+    );
+    assert.deepEqual(
+      (enabledChip.props as { transition?: unknown }).transition,
+      { duration: 0.35, ease: [0.16, 1, 0.3, 1] },
+    );
+    assert.equal(
+      (enabledChip.props as { initial?: unknown }).initial,
+      false,
+      '칩은 마운트 때 일제히 튀지 않고 토글할 때만 재생한다',
+    );
+
+    tagBarReducedMotion = true;
+    const reducedTree = await renderTagBar(false, noopAnchor);
+    const reducedChip = findButtons(reducedTree).find((button) => button.props['aria-label'] === '회의 태그');
+    assert.equal(
+      (reducedChip?.props as { animate?: unknown }).animate,
+      undefined,
+      '동작 줄이기에서는 칩이 튀지 않는다',
+    );
+    assert.deepEqual((reducedChip?.props as { transition?: unknown }).transition, { duration: 0 });
+  } finally {
+    tagBarReducedMotion = false;
+  }
+
+  // 필터가 바뀌면 결과 컨테이너는 다시 마운트되지 않고 짧게 페이드로 이어진다.
+  resetHarness();
+  const clock = installScheduleFakeClock();
+  const calendarBody = (tree: ReactNode) => findElements(tree, (node) => (
+    typeof node.props.className === 'string'
+    && node.props.className === 'flex-1 flex flex-col overflow-hidden'
+  ))[0];
+  try {
+    let tree = await renderScheduleView();
+    await flushScheduleMountEffects();
+    tree = await renderScheduleView();
+
+    const body = calendarBody(tree);
+    assert.ok(body, '캘린더 본체 컨테이너가 있다');
+    assert.deepEqual((body.props as { animate?: unknown }).animate, { opacity: 1, y: 0 });
+    assert.deepEqual(
+      (body.props as { transition?: unknown }).transition,
+      { duration: 0.2, ease: [0.16, 1, 0.3, 1], opacity: { duration: 0.12 } },
+      '보기 전환은 200ms를 유지하고 필터 페이드만 120ms를 쓴다',
+    );
+
+    calendarState.toggleTag('tag-meeting');
+    tree = await renderScheduleView();
+    await flushScheduleMountEffects();
+    tree = await renderScheduleView();
+    assert.equal(
+      (calendarBody(tree)?.props as { animate?: { opacity?: number } }).animate?.opacity,
+      0.55,
+      '필터가 바뀌면 결과가 잠깐 옅어진다',
+    );
+    assert.equal(
+      calendarBody(tree)?.props.key,
+      body.props.key,
+      '필터 변화는 컨테이너를 다시 마운트하지 않는다',
+    );
+
+    clock.advance(120);
+    tree = await renderScheduleView();
+    assert.equal(
+      (calendarBody(tree)?.props as { animate?: { opacity?: number } }).animate?.opacity,
+      1,
+      '120ms 뒤에는 원래 농도로 돌아온다',
+    );
+
+    // 페이드 도중 OS '동작 줄이기'가 켜져도 반투명으로 굳지 않는다.
+    calendarState.toggleTag('tag-review');
+    tree = await renderScheduleView();
+    await flushScheduleMountEffects();
+    tree = await renderScheduleView();
+    assert.equal(
+      (calendarBody(tree)?.props as { animate?: { opacity?: number } }).animate?.opacity,
+      0.55,
+      '다시 페이드가 시작된다',
+    );
+
+    scheduleReducedMotion = true;
+    calendarState.toggleTag('tag-meeting');
+    tree = await renderScheduleView();
+    await flushScheduleMountEffects();
+    tree = await renderScheduleView();
+    assert.equal(
+      (calendarBody(tree)?.props as { animate?: { opacity?: number } }).animate?.opacity,
+      1,
+      "페이드 중 '동작 줄이기'가 켜져도 화면이 반투명으로 굳지 않는다",
+    );
+  } finally {
+    scheduleReducedMotion = false;
+    clock.restore();
+  }
+});
+
+test('the event create backdrop dims the background like the calendar settings modal', async () => {
+  resetHarness();
+  const tree = await renderEventCreateModal(false, () => {});
+  const backdrop = findElements(tree, (node) => (
+    typeof node.props.className === 'string'
+    && node.props.className.includes('fixed inset-0')
+    && node.props.className.includes('z-40')
+  ))[0];
+
+  assert.ok(backdrop, '생성 모달에도 배경막이 있다');
+  assert.match(
+    String(backdrop.props.className),
+    /bg-black/,
+    '배경색 없이 농도만 주면 배경막이 보이지 않는다',
+  );
+  assert.deepEqual(
+    backdrop.props.animate,
+    { opacity: 0.16 },
+    '캘린더 설정 모달과 같은 농도로 통일한다',
+  );
+});
+
+test('CalendarGrid fades in the chip tooltip and limits chip hover to transform and filter', async () => {
+  resetHarness();
+  const clock = installScheduleFakeClock();
+  const previousDocument = globalThis.document;
+  globalThis.document = { body: {}, addEventListener() {}, removeEventListener() {} } as unknown as Document;
+
+  try {
+    const events = [calendarListEvent({ id: 'tooltip-chip', title: '툴팁 대상' })];
+    let tree = await renderCalendarGrid(events);
+    const chip = findElements(tree, (node) => node.props['data-event-id'] === 'tooltip-chip')[0];
+    assert.ok(chip, '월 그리드 칩이 있다');
+
+    const chipClass = String(chip.props.className ?? '');
+    assert.match(
+      chipClass,
+      /transition-\[transform,filter\]/,
+      'hover 트랜지션은 transform과 filter로만 제한한다',
+    );
+    assert.doesNotMatch(chipClass, /transition-all/, 'transition-all은 레이아웃 속성까지 애니메이션한다');
+
+    // 툴팁은 400ms 지연 뒤 나타난다.
+    (chip.props.onMouseEnter as ((event: unknown) => void) | undefined)?.({ clientX: 120, clientY: 200 });
+    clock.advance(400);
+    tree = await renderCalendarGrid(events, {}, true);
+
+    const tooltip = findElements(tree, (node) => (
+      typeof node.props.className === 'string' && node.props.className.includes('max-w-[260px]')
+    ))[0];
+    assert.ok(tooltip, '400ms 뒤 툴팁이 나타난다');
+    assert.deepEqual(
+      tooltip.props.initial,
+      { opacity: 0, scale: 0.96, x: '-50%', y: '-100%' },
+      '툴팁은 사라진 상태에서 등장하고 커서 위 중앙 앵커를 유지한다',
+    );
+    assert.deepEqual(
+      tooltip.props.animate,
+      { opacity: 1, scale: 1, x: '-50%', y: '-100%' },
+      'framer가 transform을 직접 관리하므로 앵커도 motion value로 넘긴다',
+    );
+    assert.equal(
+      (tooltip.props.style as { transform?: unknown }).transform,
+      undefined,
+      'style의 정적 transform은 덮어써지므로 남겨 두지 않는다',
+    );
+    assert.deepEqual(
+      tooltip.props.transition,
+      { duration: 0.2, ease: [0.16, 1, 0.3, 1] },
+      '툴팁 등장은 200ms 공용 이징을 쓴다',
+    );
+
+    // 동작 줄이기에서는 등장 애니메이션을 쓰지 않는다.
+    resetHarness();
+    let reducedTree = await renderCalendarGrid(events, { reduceMotion: true });
+    const reducedChip = findElements(reducedTree, (node) => node.props['data-event-id'] === 'tooltip-chip')[0];
+    (reducedChip.props.onMouseEnter as ((event: unknown) => void) | undefined)?.({ clientX: 120, clientY: 200 });
+    clock.advance(400);
+    reducedTree = await renderCalendarGrid(events, { reduceMotion: true }, true);
+    const reducedTooltip = findElements(reducedTree, (node) => (
+      typeof node.props.className === 'string' && node.props.className.includes('max-w-[260px]')
+    ))[0];
+    assert.ok(reducedTooltip);
+    assert.equal(reducedTooltip.props.initial, false, '동작 줄이기에서는 등장 애니메이션을 건너뛴다');
+    assert.deepEqual(
+      reducedTooltip.props.animate,
+      { opacity: 1, scale: 1, x: '-50%', y: '-100%' },
+      '동작 줄이기에서도 앵커는 그대로다',
+    );
+    assert.deepEqual(reducedTooltip.props.transition, { duration: 0 });
+  } finally {
+    calendarGridEffectCleanups.splice(0).forEach((cleanup) => cleanup());
+    globalThis.document = previousDocument;
+    clock.restore();
+  }
+});
+
+test('CalendarGrid gives the month overflow popup modal semantics and closes it with Escape', async () => {
+  resetHarness();
+  const previousDocument = globalThis.document;
+  const documentListeners = new Map<string, Set<(event: Event) => void>>();
+  const backgroundTrigger = { isConnected: true, focus: () => { restoredFocus += 1; } };
+  let restoredFocus = 0;
+  globalThis.document = {
+    activeElement: backgroundTrigger,
+    addEventListener(type: string, listener: (event: Event) => void) {
+      const listeners = documentListeners.get(type) ?? new Set();
+      listeners.add(listener);
+      documentListeners.set(type, listeners);
+    },
+    removeEventListener(type: string, listener: (event: Event) => void) {
+      documentListeners.get(type)?.delete(listener);
+    },
+  } as unknown as Document;
+
+  try {
+    const events = Array.from({ length: 5 }, (_, index) => calendarListEvent({
+      id: `overflow-${index}`,
+      title: `겹친 일정 ${index}`,
+    }));
+
+    let tree = await renderCalendarGrid(events, { maxVisibleBars: 2 });
+    const moreButton = buttonByText(tree, '더보기');
+    moreButton.props.onClick?.({
+      stopPropagation() {},
+      target: { getBoundingClientRect: () => ({ left: 40, bottom: 120 }) },
+    } as never);
+
+    tree = await renderCalendarGrid(events, { maxVisibleBars: 2 }, true);
+    const popup = findElements(tree, (candidate) => candidate.props.role === 'dialog')[0];
+    assert.ok(popup, '월 보기 "+N 더보기" 팝업이 열린다');
+    assert.equal(
+      popup.props['aria-modal'],
+      'true',
+      '팝업이 aria-modal 대화상자여야 배경 캘린더 단축키(C/W/M/?)가 뒤에서 열리지 않는다',
+    );
+    assert.match(String(popup.props['aria-label'] ?? ''), /일정 목록$/);
+
+    assert.equal(popup.props.tabIndex, -1, '팝업 자체가 포커스를 받을 수 있어야 한다');
+    assert.ok(
+      buttonByLabel(tree, `${String(popup.props['aria-label'])} 닫기`),
+      '키보드로 닿을 수 있는 닫기 버튼이 팝업 안에 있다',
+    );
+
+    let tabPrevented = false;
+    (popup.props.onKeyDown as ((event: unknown) => void) | undefined)?.({
+      key: 'Tab',
+      shiftKey: false,
+      preventDefault() { tabPrevented = true; },
+    });
+    assert.equal(tabPrevented, true, 'Tab이 팝업 안에 머물고 뒤쪽 캘린더로 빠져나가지 않는다');
+
+    flushCalendarGridEffects();
+    const escapeListeners = documentListeners.get('keydown');
+    assert.equal(escapeListeners?.size, 1, '팝업이 자기 Escape 닫기를 직접 소유한다');
+    let defaultPrevented = false;
+    for (const listener of escapeListeners ?? []) {
+      listener({ key: 'Escape', preventDefault() { defaultPrevented = true; }, stopPropagation() {} } as unknown as Event);
+    }
+    assert.equal(defaultPrevented, true);
+
+    tree = await renderCalendarGrid(events, { maxVisibleBars: 2 }, true);
+    assert.equal(
+      findElements(tree, (candidate) => candidate.props.role === 'dialog').length,
+      0,
+      'Escape로 팝업이 닫힌다',
+    );
+    calendarGridEffectCleanups.splice(0).forEach((cleanup) => cleanup());
+    assert.equal(restoredFocus, 1, '팝업이 닫히면 포커스를 원래 트리거로 돌려준다');
+  } finally {
+    calendarGridEffectCleanups.splice(0).forEach((cleanup) => cleanup());
+    globalThis.document = previousDocument;
+  }
+});
+
+test('CalendarGrid renders a source-aware external-change ring and keeps reduced motion static', async () => {
+  const bflow = calendarListEvent({
+    id: 'shared-highlight-id',
+    title: 'B flow 일정',
+    source: 'bflow',
+    sourceCalendarId: 'bflow:mine',
+    calendarId: 'mine',
+  });
+  const google = calendarListEvent({
+    id: 'shared-highlight-id',
+    title: 'Google 일정',
+    source: 'google',
+    sourceCalendarId: 'primary',
+    calendarId: undefined,
+  });
+  const highlighted = new Set(['google\u0000primary\u0000shared-highlight-id']);
+
+  const animatedTree = await renderCalendarGrid([bflow, google], {
+    highlightedEventIdentities: highlighted,
+    reduceMotion: false,
+  });
+  const animatedBars = findElements(animatedTree, (element) => element.props['data-event-identity'] !== undefined);
+  const bflowBar = animatedBars.find((element) => element.props['data-event-identity'] === 'bflow\u0000shared-highlight-id');
+  const googleBar = animatedBars.find((element) => element.props['data-event-identity'] === 'google\u0000primary\u0000shared-highlight-id');
+  assert.ok(bflowBar);
+  assert.ok(googleBar);
+  assert.equal(bflowBar.props['data-realtime-highlight'], undefined, 'same raw id from B flow is not targeted');
+  assert.equal(googleBar.props['data-realtime-highlight'], 'true', 'the exact Google storage identity receives the ring');
+  assert.match(String(googleBar.props.className), /calendar-realtime-highlight(?!-static)/);
+
+  const staticTree = await renderCalendarGrid([google], {
+    highlightedEventIdentities: highlighted,
+    reduceMotion: true,
+  });
+  const staticBar = findElements(staticTree, (element) => element.props['data-realtime-highlight'] === 'true')[0];
+  assert.ok(staticBar);
+  assert.match(String(staticBar.props.className), /calendar-realtime-highlight-static/);
+  assert.doesNotMatch(String(staticBar.props.className), /calendar-realtime-highlight(?!-static)/, 'reduced motion omits the pulse animation class');
 });
 
 test('CalendarGrid keeps same-id rows keyed and ghosted by source identity and forwards the dragged event object', async () => {
@@ -4508,6 +7152,190 @@ test('ScheduleView passes tag and calendar lookup maps to its only month grid', 
     'editable-share': '리드 회의',
     'view-share': '외부 보기',
   });
+});
+
+test('ScheduleView shows the mini calendar in every view and navigates instead of creating', async () => {
+  resetHarness();
+  let tree = await renderScheduleView();
+  await flushScheduleMountEffects();
+  buttonByTitle(tree, '사이드바 펼치기').props.onClick?.();
+  tree = await renderScheduleView();
+
+  assert.equal(
+    findElements(tree, (node) => node.props['data-testid'] === 'mini-calendar').length,
+    1,
+    '월 보기에도 미니 달력이 있다',
+  );
+
+  scheduleMiniCalendarProps.at(-1)?.onDateSelect('2026-08-11');
+  tree = await renderScheduleView();
+  assert.equal(scheduleCreateModalProps.length, 0, '미니 달력 클릭은 새 일정 창을 열지 않는다');
+  assert.equal(scheduleGridProps.at(-1)?.pulseDate, '2026-08-11', '고른 날짜로 이동해 펄스로 알린다');
+  assert.equal(scheduleGridProps.at(-1)?.focusedDate, '2026-08-11', '월 보기는 그 날짜를 포커스로 잡는다');
+
+  // 주간 보기: 미니 달력과 주간 사이드바가 함께 보이고 현재 주를 하이라이트한다.
+  resetHarness();
+  scheduleLocalStorage.set('bflow_calendar_view_v1', JSON.stringify({ viewMode: 'week', weekSubMode: 'card' }));
+  tree = await renderScheduleView();
+  await flushScheduleMountEffects();
+  buttonByTitle(tree, '사이드바 펼치기').props.onClick?.();
+  tree = await renderScheduleView();
+
+  assert.equal(
+    findElements(tree, (node) => node.props['data-testid'] === 'mini-calendar').length,
+    1,
+    '주간 보기에도 미니 달력이 있다',
+  );
+  assert.equal(
+    findElements(tree, (node) => node.props['data-testid'] === 'week-sidebar').length,
+    1,
+    '기존 주간 사이드바는 미니 달력 아래에 그대로 남는다',
+  );
+  const weekStart = scheduleMiniCalendarProps.at(-1)?.activeWeekStart;
+  assert.ok(weekStart, '주간 보기는 보고 있는 주를 미니 달력에 표시한다');
+  assert.equal(new Date(`${weekStart}T12:00:00`).getDay(), 0, '주 하이라이트는 일요일에서 시작한다');
+
+  // 오늘 보기: 미니 달력과 일간 사이드바가 함께 보이고 그 날짜를 표시한다.
+  resetHarness();
+  scheduleLocalStorage.set('bflow_calendar_view_v1', JSON.stringify({ viewMode: 'today', weekSubMode: 'card' }));
+  tree = await renderScheduleView();
+  await flushScheduleMountEffects();
+  buttonByTitle(tree, '사이드바 펼치기').props.onClick?.();
+  tree = await renderScheduleView();
+
+  assert.equal(
+    findElements(tree, (node) => node.props['data-testid'] === 'mini-calendar').length,
+    1,
+    '오늘 보기에도 미니 달력이 있다',
+  );
+  assert.equal(
+    findElements(tree, (node) => node.props['data-testid'] === 'day-sidebar').length,
+    1,
+    '기존 일간 사이드바는 미니 달력 아래에 그대로 남는다',
+  );
+  assert.match(
+    String(scheduleMiniCalendarProps.at(-1)?.selectedDate ?? ''),
+    /^\d{4}-\d{2}-\d{2}$/,
+    '오늘 보기는 보고 있는 날짜를 미니 달력에 표시한다',
+  );
+  assert.equal(scheduleMiniCalendarProps.at(-1)?.activeWeekStart, undefined);
+});
+
+test('browsing months in the mini calendar does not drag the weekly view along', async () => {
+  resetHarness();
+  scheduleLocalStorage.set('bflow_calendar_view_v1', JSON.stringify({ viewMode: 'week', weekSubMode: 'card' }));
+  let tree = await renderScheduleView();
+  await flushScheduleMountEffects();
+  buttonByTitle(tree, '사이드바 펼치기').props.onClick?.();
+  tree = await renderScheduleView();
+
+  const headerBefore = textContent(tree);
+  const weekStartBefore = scheduleMiniCalendarProps.at(-1)?.activeWeekStart;
+  const weekIndexBefore = scheduleWeekScrollProps.at(-1)?.activeWeekIndex;
+  assert.ok(weekStartBefore);
+
+  // 연도 경계를 넘겨 '구경만' 한다 — 클릭은 하지 않았다.
+  scheduleMiniCalendarProps.at(-1)?.onMonthChange(new Date(2027, 0, 1));
+  tree = await renderScheduleView();
+
+  assert.equal(textContent(tree), headerBefore, '본화면 헤더는 그대로다');
+  assert.equal(scheduleWeekScrollProps.at(-1)?.activeWeekIndex, weekIndexBefore, '보고 있는 주도 그대로다');
+  assert.equal(
+    scheduleMiniCalendarProps.at(-1)?.currentMonth.getFullYear(),
+    2027,
+    '미니 달력만 넘겨 본 달을 따라간다',
+  );
+  assert.equal(scheduleMiniCalendarProps.at(-1)?.currentMonth.getMonth(), 0);
+
+  // 날짜를 실제로 고르면 기존대로 본화면이 따라 움직인다.
+  scheduleMiniCalendarProps.at(-1)?.onDateSelect('2027-01-13');
+  tree = await renderScheduleView();
+  assert.notEqual(
+    scheduleWeekScrollProps.at(-1)?.activeWeekIndex,
+    weekIndexBefore,
+    '날짜 클릭 이동은 기존대로 동작한다',
+  );
+});
+
+test('ScheduleView opens quick edit from a right click in the weekly, timetable and today views', async () => {
+  const mouse = (clientX: number, clientY: number) => ({
+    preventDefault() {},
+    stopPropagation() {},
+    clientX,
+    clientY,
+  });
+  const todayStr = scheduleFmtDate(new Date());
+
+  const cases = [
+    {
+      label: '주간 카드',
+      stored: { viewMode: 'week', weekSubMode: 'card' },
+      read: () => scheduleWeekScrollProps.at(-1)?.onEventContextMenu,
+      position: { x: 120, y: 240 },
+    },
+    {
+      label: '주간 시간표',
+      stored: { viewMode: 'week', weekSubMode: 'timegrid' },
+      read: () => scheduleTimeGridProps.at(-1)?.onEventContextMenu,
+      position: { x: 310, y: 180 },
+    },
+    {
+      label: '오늘 카드',
+      stored: { viewMode: 'today', weekSubMode: 'card' },
+      read: () => scheduleDayScrollProps.at(-1)?.onEventContextMenu,
+      position: { x: 64, y: 96 },
+    },
+  ] as const;
+
+  for (const { label, stored, read, position } of cases) {
+    resetHarness();
+    scheduleLocalStorage.set('bflow_calendar_view_v1', JSON.stringify(stored));
+    const target = calendarListEvent({
+      id: 'context-menu-target',
+      title: '우클릭할 일정',
+      startDate: todayStr,
+      endDate: todayStr,
+    });
+    scheduleCanonicalEvents = [target];
+
+    await renderScheduleView();
+    await flushScheduleMountEffects();
+    await renderScheduleView();
+
+    const onEventContextMenu = read();
+    assert.ok(onEventContextMenu, `${label} 보기도 우클릭 빠른 편집을 연결한다`);
+
+    onEventContextMenu(target, mouse(position.x, position.y));
+    await renderScheduleView();
+
+    const quickEdit = scheduleQuickEditProps.at(-1);
+    assert.ok(quickEdit, `${label} 우클릭이 빠른 편집을 연다`);
+    assert.equal(quickEdit.event.id, target.id);
+    assert.deepEqual(quickEdit.position, position, `${label} 빠른 편집은 눌린 좌표에서 열린다`);
+  }
+});
+
+test('quick edit closing animation is owned by exactly one presence boundary', () => {
+  // framer-motion 10.x는 중첩 AnimatePresence로 exit를 전파하지 않는다. 빠른 편집이
+  // 자기 자신을 감싸면 닫힘 애니메이션이 죽으므로, presence는 ScheduleView가 소유한다.
+  const quickEditSource = readFileSync('src/components/calendar/EventQuickEdit.tsx', 'utf8');
+  const scheduleSource = readFileSync('src/views/ScheduleView.tsx', 'utf8');
+
+  assert.doesNotMatch(
+    quickEditSource,
+    /<AnimatePresence/,
+    '빠른 편집은 자기 presence를 소유하지 않는다',
+  );
+  assert.match(
+    quickEditSource,
+    /exit=\{\{ opacity: 0, scale: 0\.95 \}\}/,
+    '빠른 편집 motion.div는 exit 상태를 유지한다',
+  );
+  assert.match(
+    scheduleSource,
+    /<AnimatePresence>\s*\{quickEdit && \(/,
+    'ScheduleView의 조건부 렌더가 presence 경계를 소유한다',
+  );
 });
 
 test('ScheduleView opens TagManagerPopover with the exact TagBar anchor', async () => {
@@ -4994,6 +7822,48 @@ test('ScheduleView quick edit removes the color callback and duplicates a read-o
   assert.notEqual(scheduleAddedEvents[0].calendarId, readOnly.calendarId);
 });
 
+test('ScheduleView duplicates a subscribed (ICS) event into the editable personal calendar', async () => {
+  resetHarness();
+  const subscribed: ScheduleCalendarEvent = {
+    id: 'ics:sub-1:ext-1:2026-08-25',
+    title: '외부 세미나',
+    memo: '',
+    color: '#00B894',
+    type: 'custom',
+    startDate: '2026-08-25',
+    endDate: '2026-08-25',
+    createdBy: '외부 팀 캘린더',
+    createdAt: '2026-08-24T00:00:00.000Z',
+    source: 'ics',
+    sourceCalendarId: 'ics:sub-1',
+    canEdit: false,
+    isReadOnly: true,
+  };
+
+  await renderScheduleView();
+  stateSlots[0] = [subscribed];
+  await renderScheduleView();
+  scheduleGridProps.at(-1)?.onEventContextMenu(subscribed, {
+    preventDefault() {},
+    stopPropagation() {},
+    clientX: 100,
+    clientY: 120,
+  });
+  await renderScheduleView();
+  const quickEdit = scheduleQuickEditProps.at(-1);
+  assert.ok(quickEdit);
+  await quickEdit.onDuplicate(subscribed);
+
+  assert.equal(scheduleAddedEvents.length, 1);
+  assert.equal(
+    scheduleAddedEvents[0].calendarId,
+    'mine',
+    '구독 일정 복사는 편집 가능한 개인 캘린더로 간다',
+  );
+  assert.equal(scheduleAddedEvents[0].source, undefined);
+  assert.equal(scheduleAddedEvents[0].sourceCalendarId, undefined);
+});
+
 test('CalendarSettingsModal creates a members calendar atomically and reloads before closing', async () => {
   resetHarness();
   let tree = await renderCalendarSettingsModal();
@@ -5043,7 +7913,7 @@ test('CalendarSettingsModal updates calendar metadata and event presentation bef
     assert.ok(optimistic, 'the rail store changes in the same turn instead of waiting for IPC');
     assert.match(optimistic.id, /^optimistic-calendar:/, 'the placeholder is visibly local, not a fake server UUID');
     assert.equal(optimistic.canEdit, false, 'events cannot be persisted against the local-only placeholder');
-    assert.match(textContent(await renderRail(false)), /즉시 보이는 캘린더/);
+    assert.match(textContent(await renderRail(false, { resetState: true })), /즉시 보이는 캘린더/);
     assert.deepEqual(settingsApiCalls[0].args, [{
       name: '즉시 보이는 캘린더',
       color: '#6C5CE7',
@@ -5091,7 +7961,7 @@ test('CalendarSettingsModal updates calendar metadata and event presentation bef
       optimistic && { name: optimistic.name, color: optimistic.color, visibility: optimistic.visibility },
       { name: '수정 즉시', color: '#74B9FF', visibility: 'team' },
     );
-    const rail = await renderRail(false);
+    const rail = await renderRail(false, { resetState: true });
     assert.match(textContent(rail), /팀 전체.*수정 즉시/);
     assert.equal(buttonByLabel(rail, '수정 즉시 표시').props.style?.backgroundColor, '#74B9FF');
     assert.equal(settingsCachedEvents[0]?.color, '#74B9FF', 'existing event chips derive the new calendar tint without an event reload');
@@ -5118,7 +7988,7 @@ test('CalendarSettingsModal updates calendar metadata and event presentation bef
     await new Promise<void>((resolve) => setImmediate(resolve));
 
     assert.equal(calendarState.calendars.some((item) => item.id === editable.id), false);
-    assert.doesNotMatch(textContent(await renderRail(false)), /즉시 삭제/);
+    assert.doesNotMatch(textContent(await renderRail(false, { resetState: true })), /즉시 삭제/);
     assert.deepEqual(settingsCachedEvents, [], 'known-calendar filtering hides deleted calendar events immediately');
     assert.deepEqual(settingsApiCalls.map((call) => call.name), ['calendarDelete']);
 

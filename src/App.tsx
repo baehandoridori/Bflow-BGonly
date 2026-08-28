@@ -48,6 +48,7 @@ import {
   migrateUsersToSheets,
 } from '@/services/userService';
 import { reconcileAuthoritativeUserDirectory } from '@/services/authoritativeUserSession';
+import { useIcsEventsFeed } from '@/hooks/useIcsEventsFeed';
 import { setFeedbackLastSeenAt, setAssignmentLastSeenAt, getCommentReactionLastSeenAt, setCommentReactionLastSeenAt } from '@/utils/lastSeenTracker';
 import { buildReactionNotificationTitle } from '@/utils/commentReactionEmojiFormat';
 import { applyTheme, getPreset, getLightColors, deriveThemeFromAccent, sanitizeCustomHex, hexToRgb, DEFAULT_THEME_ID } from '@/themes';
@@ -333,6 +334,9 @@ export default function App() {
   const setStoreToast = useAppStore((s) => s.setToast);
   const storeToast = useAppStore((s) => s.toast);
   const setUpdateInfo = useAppStore((s) => s.setUpdateInfo);
+
+  // 외부 캘린더(ICS) 구독 일정 — 위젯 팝업 창과 같은 배선을 쓴다.
+  useIcsEventsFeed();
 
   // 전역 그라데이션 배경 토글 (모든 뷰 뒤에 표시, 로그인/스플래시 포함)
   const globalGradientEnabled = useAppStore((s) => s.plexusSettings.globalGradientEnabled !== false);

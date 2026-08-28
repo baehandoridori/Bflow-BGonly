@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { createPortal } from 'react-dom';
-import { motion, AnimatePresence } from 'framer-motion';
+import { motion, useIsPresent } from 'framer-motion';
 import { CalendarDays, Copy, Pencil, Tags, Trash2 } from 'lucide-react';
 import type { CalendarEvent, CalendarEventType } from '@/types/calendar';
 import { useAppStore } from '@/stores/useAppStore';
@@ -8,14 +8,21 @@ import { useAuthStore } from '@/stores/useAuthStore';
 import { isOptimisticCalendarTagId, useCalendarStore } from '@/stores/useCalendarStore';
 import { EntityAwareInput } from '@/components/common/EntityAwareInput';
 import { floatingGlassStyle } from '@/utils/glassStyles';
+import { calendarEventIdentityKey } from '@/utils/calendarEventIdentity';
+import {
+  directUpdateSnapshot,
+  eventContentSnapshot,
+  isLocalMutationSnapshot,
+  type LocalMutationRecovery,
+} from '@/utils/calendarLocalMutation';
 
 interface EventQuickEditProps {
   event: CalendarEvent;
   position: { x: number; y: number };
   onClose: () => void;
   onUpdate: (id: string, updates: Partial<CalendarEvent>) => void | Promise<void>;
-  onDelete: (id: string) => void;
-  onDuplicate: (event: CalendarEvent) => void;
+  onDelete: (id: string) => void | Promise<void>;
+  onDuplicate: (event: CalendarEvent) => void | Promise<void>;
 }
 
 type TabKey = 'calendar' | 'edit';
@@ -24,6 +31,10 @@ interface PendingSelection<T> {
   eventId: string;
   value: T;
   requestId: number;
+}
+
+function isPromiseLike(value: unknown): value is PromiseLike<void> {
+  return typeof (value as { then?: unknown } | null)?.then === 'function';
 }
 
 const TYPE_OPTIONS: { value: CalendarEventType; label: string }[] = [
@@ -59,13 +70,38 @@ export function EventQuickEdit({
   const [memo, setMemo] = useState(event.memo);
   const [pendingCalendar, setPendingCalendar] = useState<PendingSelection<string | undefined> | null>(null);
   const [pendingTag, setPendingTag] = useState<PendingSelection<string | undefined> | null>(null);
+  const [mutationError, setMutationError] = useState<string | null>(null);
+  // 저장/삭제가 진행 중이면 같은 일정의 다음 요청을 막는다. 두 요청이 겹치면
+  // 먼저 보낸 오래된 초안이 나중에 커밋돼 방금 저장한 내용을 되돌릴 수 있다.
+  const [isMutating, setIsMutating] = useState(false);
+  const [allDay, setAllDay] = useState(event.allDay ?? true);
+  const [startTime, setStartTime] = useState(event.startTime ?? '');
+  const [endTime, setEndTime] = useState(event.endTime ?? '');
   const calendarUpdateRequestRef = useRef(0);
   const tagUpdateRequestRef = useRef(0);
+  const eventIdentityKey = calendarEventIdentityKey(event);
+  const eventSnapshot = eventContentSnapshot(event);
+  const latestEventRef = useRef(event);
+  const pendingMutationRef = useRef<LocalMutationRecovery | null>(null);
+  const failedMutationRecoveryRef = useRef<LocalMutationRecovery | null>(null);
+  // exit 애니메이션이 끝나기 전까지 이 인스턴스의 리스너는 살아 있다.
+  const isPresent = useIsPresent();
+  const isPresentRef = useRef(true);
+  isPresentRef.current = isPresent !== false;
 
   const isVacation = event.type === 'vacation';
   const isWriteProtected = event.isReadOnly === true || event.canEdit === false;
   const canWrite = !isVacation && !isWriteProtected;
   const isCanonicalBflow = event.sourceCalendarId?.startsWith('bflow:') === true && Boolean(event.calendarId);
+  // 시각 편집 지원 범위는 상세 패널과 동일하게 캐노니컬 B flow + 구글 일정만이다.
+  const supportsTimeEditing = isCanonicalBflow || event.source === 'google';
+  const hasInvalidTimedInterval = supportsTimeEditing
+    && !allDay
+    && Boolean(startTime && endTime)
+    && `${endDate}T${endTime}` <= `${startDate}T${startTime}`;
+  const isTimedSaveBlocked = supportsTimeEditing
+    && !allDay
+    && (!startTime || !endTime || hasInvalidTimedInterval);
   const displayedCalendarId = pendingCalendar?.eventId === event.id
     ? pendingCalendar.value
     : event.calendarId;
@@ -97,10 +133,19 @@ export function EventQuickEdit({
   }, [position]);
 
   useEffect(() => {
+    /**
+     * 닫히지 말아야 할 두 경우를 함께 막는다.
+     * ① exit 애니메이션(150ms) 중인 죽은 인스턴스의 리스너가 살아 있어, 새로 연 팝업의
+     *    첫 클릭을 그 인스턴스가 삼켜 버린다.
+     * ② 저장·삭제가 진행 중일 때 닫으면 실패 안내를 띄울 곳이 사라진다.
+     */
+    const shouldIgnore = () => !isPresentRef.current || pendingMutationRef.current !== null;
     const handleClick = (mouseEvent: MouseEvent) => {
+      if (shouldIgnore()) return;
       if (ref.current && !ref.current.contains(mouseEvent.target as Node)) onClose();
     };
     const handleKey = (keyboardEvent: KeyboardEvent) => {
+      if (shouldIgnore()) return;
       if (keyboardEvent.key === 'Escape') onClose();
     };
     document.addEventListener('mousedown', handleClick);
@@ -111,8 +156,65 @@ export function EventQuickEdit({
     };
   }, [onClose]);
 
+  useEffect(() => {
+    latestEventRef.current = event;
+    if (pendingMutationRef.current?.identityKey === eventIdentityKey) return;
+
+    const failedRecovery = failedMutationRecoveryRef.current;
+    if (failedRecovery?.identityKey === eventIdentityKey) {
+      if (isLocalMutationSnapshot(failedRecovery, eventSnapshot)) return;
+    }
+
+    failedMutationRecoveryRef.current = null;
+    setTitle(event.title);
+    setStartDate(event.startDate);
+    setEndDate(event.endDate);
+    setType(event.type);
+    setMemo(event.memo);
+    setAllDay(event.allDay ?? true);
+    setStartTime(event.startTime ?? '');
+    setEndTime(event.endTime ?? '');
+    setMutationError(null);
+  }, [event, eventIdentityKey, eventSnapshot]);
+
+  const beginMutation = useCallback((mutation: LocalMutationRecovery) => {
+    pendingMutationRef.current = mutation;
+    failedMutationRecoveryRef.current = null;
+    setIsMutating(true);
+  }, []);
+
+  const settleMutation = useCallback((mutation: LocalMutationRecovery): boolean => {
+    if (pendingMutationRef.current !== mutation) return false;
+    pendingMutationRef.current = null;
+    setIsMutating(false);
+    return true;
+  }, []);
+
+  const markMutationFailed = useCallback((mutation: LocalMutationRecovery, message: string) => {
+    if (!settleMutation(mutation)) return;
+    const latestEvent = latestEventRef.current;
+    const latestSnapshot = calendarEventIdentityKey(latestEvent) === mutation.identityKey
+      ? eventContentSnapshot(latestEvent)
+      : undefined;
+    if (latestSnapshot === undefined || !isLocalMutationSnapshot(mutation, latestSnapshot)) {
+      failedMutationRecoveryRef.current = null;
+      setTitle(latestEvent.title);
+      setStartDate(latestEvent.startDate);
+      setEndDate(latestEvent.endDate);
+      setType(latestEvent.type);
+      setMemo(latestEvent.memo);
+      setAllDay(latestEvent.allDay ?? true);
+      setStartTime(latestEvent.startTime ?? '');
+      setEndTime(latestEvent.endTime ?? '');
+      setMutationError(null);
+      return;
+    }
+    failedMutationRecoveryRef.current = mutation;
+    setMutationError(message);
+  }, [settleMutation]);
+
   const handleSave = useCallback(() => {
-    if (!canWrite) return;
+    if (!canWrite || pendingMutationRef.current || isTimedSaveBlocked) return;
     const updates: Partial<CalendarEvent> = {};
     if (title !== event.title) updates.title = title;
     if (startDate !== event.startDate || endDate !== event.endDate) {
@@ -121,22 +223,101 @@ export function EventQuickEdit({
     }
     if (memo !== event.memo) updates.memo = memo;
     if (!isCanonicalBflow && type !== event.type) updates.type = type;
-    if (Object.keys(updates).length > 0) onUpdate(event.id, updates);
-    onClose();
-  }, [canWrite, endDate, event, isCanonicalBflow, memo, onClose, onUpdate, startDate, title, type]);
+    if (supportsTimeEditing) {
+      const allDayChanged = allDay !== (event.allDay ?? true);
+      if (allDayChanged) updates.allDay = allDay;
+      if (allDay) {
+        if (allDayChanged) {
+          updates.startTime = undefined;
+          updates.endTime = undefined;
+        }
+      } else {
+        if (startTime !== event.startTime) updates.startTime = startTime;
+        if (endTime !== event.endTime) updates.endTime = endTime;
+      }
+    }
+    if (Object.keys(updates).length === 0) {
+      onClose();
+      return;
+    }
+    setMutationError(null);
+    const mutation: LocalMutationRecovery = {
+      identityKey: eventIdentityKey,
+      rollbackSnapshot: eventSnapshot,
+      optimisticSnapshot: directUpdateSnapshot(event, updates),
+    };
+    beginMutation(mutation);
+    try {
+      const persistence = onUpdate(event.id, updates);
+      if (isPromiseLike(persistence)) {
+        void persistence.then(
+          () => {
+            if (settleMutation(mutation)) onClose();
+          },
+          () => markMutationFailed(mutation, '일정 저장에 실패했어요. 다시 시도해 주세요.'),
+        );
+        return;
+      }
+      if (settleMutation(mutation)) onClose();
+    } catch {
+      markMutationFailed(mutation, '일정 저장에 실패했어요. 다시 시도해 주세요.');
+    }
+  }, [allDay, beginMutation, canWrite, endDate, endTime, event, eventIdentityKey, eventSnapshot, isCanonicalBflow, isTimedSaveBlocked, markMutationFailed, memo, onClose, onUpdate, settleMutation, startDate, startTime, supportsTimeEditing, title, type]);
 
   const handleDelete = useCallback(() => {
-    if (!canWrite) return;
-    onDelete(event.id);
-    onClose();
-  }, [canWrite, event.id, onClose, onDelete]);
+    if (!canWrite || pendingMutationRef.current) return;
+    setMutationError(null);
+    const mutation: LocalMutationRecovery = {
+      identityKey: eventIdentityKey,
+      rollbackSnapshot: eventSnapshot,
+    };
+    beginMutation(mutation);
+    try {
+      const persistence = onDelete(event.id);
+      if (isPromiseLike(persistence)) {
+        void persistence.then(
+          () => {
+            if (settleMutation(mutation)) onClose();
+          },
+          () => markMutationFailed(mutation, '일정 삭제에 실패했어요. 다시 시도해 주세요.'),
+        );
+        return;
+      }
+      if (settleMutation(mutation)) onClose();
+    } catch {
+      markMutationFailed(mutation, '일정 삭제에 실패했어요. 다시 시도해 주세요.');
+    }
+  }, [beginMutation, canWrite, event, eventIdentityKey, eventSnapshot, markMutationFailed, onClose, onDelete, settleMutation]);
 
   const handleDuplicate = useCallback(() => {
-    onDuplicate(event);
-    onClose();
-  }, [event, onClose, onDuplicate]);
+    if (pendingMutationRef.current) return;
+    setMutationError(null);
+    // 복사는 새 일정을 만드는 요청이라 이 일정 자체는 그대로다. 잠금·안내만 재사용하고
+    // 롤백 기준은 지금 보고 있는 내용으로 둔다(실패해도 이 일정은 변하지 않는다).
+    const mutation: LocalMutationRecovery = {
+      identityKey: eventIdentityKey,
+      rollbackSnapshot: eventSnapshot,
+    };
+    beginMutation(mutation);
+    try {
+      const persistence = onDuplicate(event);
+      if (isPromiseLike(persistence)) {
+        void persistence.then(
+          () => {
+            if (settleMutation(mutation)) onClose();
+          },
+          () => markMutationFailed(mutation, '일정을 복사하지 못했어요. 다시 시도해 주세요.'),
+        );
+        return;
+      }
+      if (settleMutation(mutation)) onClose();
+    } catch {
+      markMutationFailed(mutation, '일정을 복사하지 못했어요. 다시 시도해 주세요.');
+    }
+  }, [beginMutation, event, eventIdentityKey, eventSnapshot, markMutationFailed, onClose, onDuplicate, settleMutation]);
 
   const handleCalendarChange = useCallback(async (calendarId: string) => {
+    if (pendingMutationRef.current) return;
     if (!canWrite || !isCanonicalBflow || calendarSelectionPending || calendarId === displayedCalendarId) return;
     const requestId = ++calendarUpdateRequestRef.current;
     setPendingCalendar({
@@ -153,6 +334,7 @@ export function EventQuickEdit({
   }, [calendarSelectionPending, canWrite, displayedCalendarId, event.id, isCanonicalBflow, onUpdate]);
 
   const handleTagChange = useCallback(async (tagId: string | undefined) => {
+    if (pendingMutationRef.current) return;
     if (!canWrite || !isCanonicalBflow || tagSelectionPending || tagId === displayedTagId) return;
     const requestId = ++tagUpdateRequestRef.current;
     setPendingTag({
@@ -168,8 +350,9 @@ export function EventQuickEdit({
     setPendingTag((current) => current?.requestId === requestId ? null : current);
   }, [canWrite, displayedTagId, event.id, isCanonicalBflow, onUpdate, tagSelectionPending]);
 
+  // 자체 AnimatePresence 로 감싸면 부모 presence 의 exit 가 전파되지 않아 닫힘 애니가 죽는다
+  // (framer-motion 10.x). presence 는 ScheduleView 쪽 조건부 렌더가 소유한다.
   return createPortal(
-    <AnimatePresence>
       <motion.div
         ref={ref}
         initial={{ opacity: 0, scale: 0.95 }}
@@ -192,6 +375,11 @@ export function EventQuickEdit({
         )}
         {derivedFieldsDescriptionId && (
           <p id={derivedFieldsDescriptionId} className="sr-only">유형은 연결 정보에서 자동으로 결정됩니다.</p>
+        )}
+        {mutationError && (
+          <p role="alert" className="mx-3 mt-3 rounded-md bg-red-500/10 px-2.5 py-2 text-xs text-red-300">
+            {mutationError}
+          </p>
         )}
 
         <div className="flex border-b" style={{ borderColor: 'rgb(var(--color-bg-border) / 0.45)' }}>
@@ -306,7 +494,7 @@ export function EventQuickEdit({
                   <Copy size={12} className="mr-1.5 inline" /> 복사
                 </button>
                 <button
-                  disabled={!canWrite}
+                  disabled={!canWrite || isMutating}
                   aria-describedby={readOnlyDescriptionId}
                   onClick={canWrite ? handleDelete : undefined}
                   className="flex-1 cursor-pointer rounded-lg py-1.5 text-xs disabled:cursor-not-allowed disabled:opacity-45"
@@ -325,20 +513,70 @@ export function EventQuickEdit({
                   <input
                     type="text"
                     value={title}
+                    disabled={isMutating}
                     onChange={(changeEvent) => setTitle(changeEvent.target.value)}
                     placeholder="일정 제목"
                     className="w-full rounded-lg px-2.5 py-1.5 text-xs outline-none placeholder:text-text-secondary/45"
                     style={fieldStyle}
                   />
                   <div className="flex gap-2">
-                    <input type="date" value={startDate} onChange={(changeEvent) => setStartDate(changeEvent.target.value)} className="flex-1 rounded-lg px-2.5 py-1.5 text-xs outline-none" style={{ ...fieldStyle, colorScheme: colorMode }} />
-                    <input type="date" value={endDate} onChange={(changeEvent) => setEndDate(changeEvent.target.value)} className="flex-1 rounded-lg px-2.5 py-1.5 text-xs outline-none" style={{ ...fieldStyle, colorScheme: colorMode }} />
+                    <input type="date" value={startDate} disabled={isMutating} onChange={(changeEvent) => setStartDate(changeEvent.target.value)} className="flex-1 rounded-lg px-2.5 py-1.5 text-xs outline-none" style={{ ...fieldStyle, colorScheme: colorMode }} />
+                    <input type="date" value={endDate} disabled={isMutating} onChange={(changeEvent) => setEndDate(changeEvent.target.value)} className="flex-1 rounded-lg px-2.5 py-1.5 text-xs outline-none" style={{ ...fieldStyle, colorScheme: colorMode }} />
                   </div>
+                  {supportsTimeEditing && (
+                    <label className="flex items-center justify-between gap-3 text-[11px] font-medium text-text-secondary">
+                      <span>종일</span>
+                      <input
+                        aria-label="종일 일정"
+                        type="checkbox"
+                        checked={allDay}
+                        disabled={isMutating}
+                        onChange={(changeEvent) => {
+                          const checked = changeEvent.target.checked;
+                          setAllDay(checked);
+                          if (!checked) {
+                            if (!startTime) setStartTime('09:00');
+                            if (!endTime) setEndTime('10:00');
+                          }
+                        }}
+                        className="h-3.5 w-3.5 rounded accent-accent cursor-pointer"
+                      />
+                    </label>
+                  )}
+                  {supportsTimeEditing && !allDay && (
+                    <div className="flex gap-2">
+                      <input
+                        aria-label="시작 시각"
+                        type="time"
+                        step={600}
+                        value={startTime}
+                        disabled={isMutating}
+                        onChange={(changeEvent) => setStartTime(changeEvent.target.value)}
+                        className="flex-1 rounded-lg px-2.5 py-1.5 text-xs outline-none"
+                        style={{ ...fieldStyle, colorScheme: colorMode }}
+                      />
+                      <input
+                        aria-label="종료 시각"
+                        type="time"
+                        step={600}
+                        value={endTime}
+                        disabled={isMutating}
+                        onChange={(changeEvent) => setEndTime(changeEvent.target.value)}
+                        className="flex-1 rounded-lg px-2.5 py-1.5 text-xs outline-none"
+                        style={{ ...fieldStyle, colorScheme: colorMode }}
+                      />
+                    </div>
+                  )}
+                  {hasInvalidTimedInterval && (
+                    <p role="alert" className="text-[11px] font-medium text-red-400">
+                      종료 시각은 시작 시각보다 뒤여야 해요.
+                    </p>
+                  )}
                   <div className="flex gap-1">
                     {TYPE_OPTIONS.map((option) => (
                       <button
                         key={option.value}
-                        disabled={isCanonicalBflow}
+                        disabled={isCanonicalBflow || isMutating}
                         aria-describedby={derivedFieldsDescriptionId}
                         onClick={isCanonicalBflow ? undefined : () => setType(option.value)}
                         className="flex-1 cursor-pointer rounded-lg py-1.5 text-[11px] font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-70"
@@ -354,6 +592,7 @@ export function EventQuickEdit({
                   <EntityAwareInput
                     multiline
                     value={memo ?? ''}
+                    disabled={isMutating}
                     onChange={setMemo}
                     users={users}
                     rows={3}
@@ -361,14 +600,13 @@ export function EventQuickEdit({
                     dropdownPositionClassName="left-2 right-2"
                     className="w-full resize-none rounded-lg border border-bg-border/[0.56] bg-bg-primary/[0.82] px-2.5 py-1.5 text-xs text-text-primary outline-none placeholder:text-text-secondary/45"
                   />
-                  <button onClick={handleSave} className="w-full cursor-pointer rounded-lg py-2 text-xs font-medium transition-colors" style={{ background: 'rgb(var(--color-accent))', color: 'rgb(var(--color-on-accent))' }}>저장</button>
+                  <button onClick={handleSave} disabled={isMutating || isTimedSaveBlocked} className="w-full cursor-pointer rounded-lg py-2 text-xs font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-45" style={{ background: 'rgb(var(--color-accent))', color: 'rgb(var(--color-on-accent))' }}>저장</button>
                 </div>
               )}
             </div>
           )}
         </div>
-      </motion.div>
-    </AnimatePresence>,
+      </motion.div>,
     document.body,
   );
 }
