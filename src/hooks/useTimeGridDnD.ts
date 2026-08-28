@@ -168,7 +168,7 @@ export type TimeGridDragCompletion =
 
 /** Escape 또는 클릭만 한 경우 null을 반환해 완료 콜백을 원천적으로 막는다. */
 export function getTimeGridDragCompletion(
-  state: Pick<ActiveTimeGridDrag, 'mode' | 'hasCrossedThreshold' | 'eventId' | 'identity'> | null,
+  state: Pick<ActiveTimeGridDrag, 'mode' | 'hasCrossedThreshold' | 'eventId' | 'identity' | 'original'> | null,
   preview: TimeGridDragPreview | null,
   cancelled = false,
 ): TimeGridDragCompletion | null {
@@ -177,16 +177,28 @@ export function getTimeGridDragCompletion(
     return { type: 'create', date: preview.startDate, startTime: preview.startTime, endTime: preview.endTime };
   }
   if (!state.eventId || !state.identity) return null;
+  const patch: TimeGridEventPatch = {
+    startDate: preview.startDate,
+    endDate: preview.endDate,
+    startTime: preview.startTime,
+    endTime: preview.endTime,
+  };
+  // 15분 슬롯이 14px이고 드래그 임계는 5px이라 같은 슬롯에 도로 놓는 일이 흔하다.
+  // 그 무변경 저장은 팀 캘린더면 전원에게 '변경했어요' 알림까지 실제로 보낸다.
+  // 종료 시각이 비어 있던 일정은 original.endTime이 1시간 폴백값이라 제자리 드롭이
+  // 폴백값과 같은 patch가 되는데, 사용자가 아무것도 안 바꿨으므로 이대로 접는 게 맞다.
+  if (state.original
+    && patch.startDate === state.original.startDate
+    && patch.endDate === state.original.endDate
+    && patch.startTime === state.original.startTime
+    && patch.endTime === state.original.endTime) {
+    return null;
+  }
   return {
     type: 'event-change',
     eventId: state.eventId,
     identity: state.identity,
-    patch: {
-      startDate: preview.startDate,
-      endDate: preview.endDate,
-      startTime: preview.startTime,
-      endTime: preview.endTime,
-    },
+    patch,
   };
 }
 

@@ -20,7 +20,7 @@ type TimeGridDnDModule = {
   getTimeGridAutoScrollSpeed(clientY: number, rect: { top: number; bottom: number }): number;
   getTimeGridEventDragMode(isReadOnly: boolean, clientY: number, rectBottom: number): 'move' | 'resize-end' | null;
   getTimeGridDragCompletion(
-    state: { mode: 'create' | 'move' | 'resize-end'; hasCrossedThreshold: boolean; eventId?: string; identity?: { id: string; source?: 'bflow' | 'google' | 'vacation'; sourceCalendarId?: string } } | null,
+    state: { mode: 'create' | 'move' | 'resize-end'; hasCrossedThreshold: boolean; eventId?: string; identity?: { id: string; source?: 'bflow' | 'google' | 'vacation'; sourceCalendarId?: string }; original?: { startDate: string; endDate: string; startTime: string; endTime: string } } | null,
     preview: { startDate: string; endDate: string; startTime: string; endTime: string } | null,
     cancelled?: boolean,
   ): unknown;
@@ -136,6 +136,33 @@ test('useTimeGridDnD: 하단 8px만 종료 리사이즈이고 읽기 전용·Esc
       identity: { id: 'same-id', source: 'google', sourceCalendarId: 'team-a' },
       patch: preview,
     },
+  );
+});
+
+test('useTimeGridDnD: 임계를 넘겼어도 원위치 드롭이면 완료를 만들지 않는다', async () => {
+  const dnd = await loadTimeGridDnD();
+  const original = { startDate: '2026-09-01', endDate: '2026-09-01', startTime: '14:00', endTime: '15:00' };
+
+  assert.equal(
+    dnd.getTimeGridDragCompletion(
+      { mode: 'move', hasCrossedThreshold: true, eventId: 'e1', identity: { id: 'e1' }, original },
+      { ...original },
+    ),
+    null,
+    '아무것도 바뀌지 않았으면 저장·알림을 만들지 않는다',
+  );
+});
+
+test('useTimeGridDnD: 한 슬롯이라도 움직였으면 완료를 만든다', async () => {
+  const dnd = await loadTimeGridDnD();
+  const original = { startDate: '2026-09-01', endDate: '2026-09-01', startTime: '14:00', endTime: '15:00' };
+
+  assert.notEqual(
+    dnd.getTimeGridDragCompletion(
+      { mode: 'move', hasCrossedThreshold: true, eventId: 'e1', identity: { id: 'e1' }, original },
+      { ...original, startTime: '14:15' },
+    ),
+    null,
   );
 });
 
