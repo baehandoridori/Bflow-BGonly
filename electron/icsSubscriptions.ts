@@ -333,9 +333,15 @@ const ICS_STORE_VERSION = 1;
 export const ICS_URL_ERROR = '캘린더 주소는 http 또는 https로 시작해야 합니다';
 
 export interface IcsSubscriptionStoreDeps {
-  /** 저장 파일 내용. 파일이 없으면 null. */
+  /**
+   * 저장 파일 내용. **파일이 없을 때만 null**, 그 밖의 읽기 오류(백신 EBUSY/EPERM 등)는
+   * 반드시 reject해야 한다. 오류를 null로 접으면 store가 빈 목록을 확정 캐시하고
+   * 다음 저장이 멀쩡한 파일을 통째로 지운다.
+   */
   readSubscriptionsFile(): Promise<string | null>;
   writeSubscriptionsFile(contents: string): Promise<void>;
+  /** 저장 파일이 깨졌을 때 첫 덮어쓰기 전에 원본을 옮겨 둔다(있을 때만 호출). */
+  backupSubscriptionsFile?(): Promise<void>;
   /** 정규화된 https URL의 본문을 가져온다. 리다이렉트·크기 제한은 구현 쪽 책임. */
   fetchText(url: string): Promise<string>;
   createId(): string;
@@ -427,28 +433,49 @@ export function createIcsSubscriptionStore(deps: IcsSubscriptionStoreDeps): IcsS
   /** 조회 결과는 메모리에만 둔다. 저장 파일에는 구독 설정만 남긴다. */
   const cache = new Map<string, { events: IcsExpandedEvent[]; truncated: boolean }>();
 
-  const readSubscriptions = async (): Promise<IcsSubscription[]> => {
-    let parsed: unknown = null;
+  /** 저장 파일이 깨져 있었다. 첫 덮어쓰기 전에 원본을 한 번 백업한다. */
+  let corrupted = false;
+  let backupDone = false;
+
+  const readSubscriptions = async (): Promise<{ rows: IcsSubscription[]; degraded: boolean }> => {
+    let raw: string | null;
     try {
-      const raw = await deps.readSubscriptionsFile();
-      parsed = raw ? JSON.parse(raw) : null;
+      raw = await deps.readSubscriptionsFile();
     } catch {
-      parsed = null;
+      // 파일이 없는 게 아니라 읽지 못한 것이다. 빈 목록을 확정하면 다음 저장이 파일을 지운다.
+      return { rows: [], degraded: true };
     }
+
+    let parsed: unknown = null;
+    if (raw) {
+      try {
+        parsed = JSON.parse(raw);
+      } catch {
+        // 읽히긴 했는데 내용이 깨졌다. 빈 목록으로 시작하되 원본은 백업해 둔다.
+        corrupted = true;
+        parsed = null;
+      }
+    }
+
     const rows = parsed && typeof parsed === 'object'
       ? (parsed as { subscriptions?: unknown }).subscriptions
       : null;
-    return Array.isArray(rows)
-      ? rows.map(sanitizeSubscription).filter((row): row is IcsSubscription => row !== null)
-      : [];
+    return {
+      rows: Array.isArray(rows)
+        ? rows.map(sanitizeSubscription).filter((row): row is IcsSubscription => row !== null)
+        : [],
+      degraded: false,
+    };
   };
 
   const loadSubscriptions = async (): Promise<IcsSubscription[]> => {
     if (subscriptions) return subscriptions;
     if (!loadInFlight) {
-      loadInFlight = readSubscriptions().then((rows) => {
+      loadInFlight = readSubscriptions().then((result) => {
+        // 읽기 실패는 캐시하지 않는다 — 다음 호출이 다시 읽는다.
+        if (result.degraded) return result.rows;
         // 먼저 끝난 로드만 목록을 만든다. 뒤늦게 끝난 읽기는 그 배열을 그대로 쓴다.
-        subscriptions ??= rows;
+        subscriptions ??= result.rows;
         return subscriptions;
       }).finally(() => { loadInFlight = null; });
     }
@@ -457,6 +484,19 @@ export function createIcsSubscriptionStore(deps: IcsSubscriptionStoreDeps): IcsS
 
   const persist = async (): Promise<void> => {
     const rows = await loadSubscriptions();
+    // 읽기에 실패한 상태(목록 미확정)에서 저장하면 멀쩡한 파일을 빈 목록으로 덮어쓴다.
+    // 조용히 넘기면 사용자는 저장된 줄 알게 되므로 사유를 알린다.
+    if (subscriptions === null) {
+      throw new Error('구독 설정을 읽지 못해 저장할 수 없습니다. 잠시 후 다시 시도해 주세요');
+    }
+    if (corrupted && !backupDone) {
+      backupDone = true;
+      try {
+        await deps.backupSubscriptionsFile?.();
+      } catch {
+        // 백업 실패가 저장 자체를 막지는 않는다.
+      }
+    }
     await deps.writeSubscriptionsFile(JSON.stringify({
       version: ICS_STORE_VERSION,
       subscriptions: rows,
@@ -536,6 +576,9 @@ export function createIcsSubscriptionStore(deps: IcsSubscriptionStoreDeps): IcsS
     async refresh(id) {
       const rows = await loadSubscriptions();
       const targets = rows.filter((row) => row.enabled && (id === null || row.id === id));
+      // 갱신할 대상이 없으면 저장·알림도 없다. 읽기 실패로 목록이 비어 보이는 순간에
+      // 무조건 저장하면 멀쩡한 파일이 빈 목록으로 덮어써진다.
+      if (targets.length === 0) return;
       for (const target of targets) await fetchOne(target);
       await persist();
       announce(id);

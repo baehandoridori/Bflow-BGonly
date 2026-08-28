@@ -2549,14 +2549,29 @@ const icsSubscriptionStore = createIcsSubscriptionStore({
   readSubscriptionsFile: async () => {
     try {
       return await fs.promises.readFile(path.join(getDataPath(), ICS_SUBSCRIPTIONS_FILE), 'utf8');
-    } catch {
-      return null;
+    } catch (error) {
+      // 파일이 없을 때만 '빈 목록'이다. 백신 잠금(EBUSY/EPERM) 같은 일시적 실패를 null로
+      // 접으면 store가 빈 목록을 확정하고 다음 저장이 멀쩡한 구독을 통째로 지운다.
+      if ((error as NodeJS.ErrnoException)?.code === 'ENOENT') return null;
+      throw error;
     }
   },
   writeSubscriptionsFile: async (contents) => {
     const dir = getDataPath();
     ensureDir(dir);
-    await fs.promises.writeFile(path.join(dir, ICS_SUBSCRIPTIONS_FILE), contents, 'utf8');
+    // 임시 파일에 먼저 쓰고 원자 교체 — 쓰는 도중 앱이 죽어도 원본이 반쯤 남지 않는다.
+    const target = path.join(dir, ICS_SUBSCRIPTIONS_FILE);
+    const temp = `${target}.tmp`;
+    await fs.promises.writeFile(temp, contents, 'utf8');
+    await fs.promises.rename(temp, target);
+  },
+  backupSubscriptionsFile: async () => {
+    const target = path.join(getDataPath(), ICS_SUBSCRIPTIONS_FILE);
+    try {
+      await fs.promises.rename(target, `${target}.bak`);
+    } catch {
+      // 백업할 원본이 없거나 옮기지 못해도 저장 자체는 이어 간다.
+    }
   },
   fetchText: createIcsTextFetcher({
     get: (url, onResponse) => {

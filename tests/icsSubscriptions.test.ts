@@ -217,17 +217,20 @@ test('normalizeIcsUrl: webcal은 https로 바꾸고 그 밖의 프로토콜은 �
 function createStoreHarness(options: {
   fetchText?: (url: string) => Promise<string>;
   stored?: string | null;
+  readSubscriptionsFile?: () => Promise<string | null>;
 } = {}) {
   const written: string[] = [];
   const fetched: string[] = [];
   const pushed: unknown[] = [];
+  const backedUp: number[] = [];
   let file = options.stored ?? null;
   let idSequence = 0;
   let clock = Date.parse('2026-09-01T00:00:00.000Z');
 
   const store = createIcsSubscriptionStore({
-    readSubscriptionsFile: async () => file,
+    readSubscriptionsFile: options.readSubscriptionsFile ?? (async () => file),
     writeSubscriptionsFile: async (contents: string) => { file = contents; written.push(contents); },
+    backupSubscriptionsFile: async () => { backedUp.push(written.length); },
     fetchText: async (url: string) => {
       fetched.push(url);
       if (options.fetchText) return options.fetchText(url);
@@ -243,10 +246,80 @@ function createStoreHarness(options: {
     written,
     fetched,
     pushed,
+    backedUp,
     advance(ms: number) { clock += ms; },
     readFile: () => file,
   };
 }
+
+test('읽기 오류(EBUSY류)면 빈 목록을 확정하지 않고 다음 호출에서 다시 읽는다', async () => {
+  let attempt = 0;
+  const harness = createStoreHarness({
+    readSubscriptionsFile: async () => {
+      attempt += 1;
+      if (attempt === 1) throw Object.assign(new Error('EBUSY'), { code: 'EBUSY' });
+      return JSON.stringify({
+        version: 1,
+        subscriptions: [{
+          id: 'sub-9',
+          name: '팀 외부 일정',
+          url: 'https://example.com/team.ics',
+          color: '#74B9FF',
+          enabled: true,
+          lastFetchedAt: null,
+          lastError: null,
+        }],
+      });
+    },
+  });
+
+  assert.deepEqual(await harness.store.list(), [], '읽기 실패는 빈 목록으로 보이되');
+  assert.deepEqual(
+    (await harness.store.list()).map((row) => row.id),
+    ['sub-9'],
+    '다음 호출에서 다시 읽어 낸다',
+  );
+});
+
+test('읽기 오류 상태에서는 refresh가 파일을 덮어쓰지 않는다', async () => {
+  const harness = createStoreHarness({
+    readSubscriptionsFile: async () => { throw Object.assign(new Error('EPERM'), { code: 'EPERM' }); },
+  });
+
+  await harness.store.refresh(null);
+
+  assert.equal(harness.written.length, 0, '읽지 못한 상태로 저장 파일을 건드리지 않는다');
+});
+
+test('읽기 오류 상태에서 구독을 추가하면 저장 대신 사유를 알린다', async () => {
+  const harness = createStoreHarness({
+    readSubscriptionsFile: async () => { throw Object.assign(new Error('EBUSY'), { code: 'EBUSY' }); },
+  });
+
+  await assert.rejects(
+    () => harness.store.add({ name: '팀 외부 일정', url: 'https://example.com/team.ics', color: '#74B9FF' }),
+    /읽지 못해/,
+  );
+  assert.equal(harness.written.length, 0);
+});
+
+test('구독이 0건이면 refresh가 persist·announce를 생략한다', async () => {
+  const harness = createStoreHarness();
+
+  await harness.store.refresh(null);
+
+  assert.equal(harness.written.length, 0);
+  assert.equal(harness.pushed.length, 0);
+});
+
+test('저장 파일이 깨져 있으면 덮어쓰기 전에 원본을 백업한다', async () => {
+  const harness = createStoreHarness({ stored: '{ 깨진 JSON' });
+
+  await harness.store.add({ name: '팀 외부 일정', url: 'https://example.com/team.ics', color: '#74B9FF' });
+
+  assert.equal(harness.backedUp.length, 1, '첫 저장 전에 한 번만 백업한다');
+  assert.equal(harness.backedUp[0], 0, '백업이 저장보다 먼저다');
+});
 
 test('구독 추가는 주소를 정규화해 저장하고 곧바로 한 번 조회한다', async () => {
   const harness = createStoreHarness();
