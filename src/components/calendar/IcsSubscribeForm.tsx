@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { EVENT_COLORS } from '@/types/calendar';
+import { cleanIpcErrorMessage } from '@/utils/ipcErrorMessage';
 
 interface IcsSubscribeFormProps {
   /** 있으면 기존 구독 편집 모드. 주소는 바꿀 수 없다(주소 변경은 다시 구독하는 것과 같다). */
@@ -45,7 +46,7 @@ export function IcsSubscribeForm({ initial, onSubmit, onCancel }: IcsSubscribeFo
       onCancel();
       return;
     } catch (submitError) {
-      setError(submitError instanceof Error ? submitError.message : '구독을 추가하지 못했습니다');
+      setError(cleanIpcErrorMessage(submitError, '구독을 추가하지 못했습니다'));
     }
     setSubmitting(false);
   };
