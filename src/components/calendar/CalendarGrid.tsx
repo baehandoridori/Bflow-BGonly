@@ -6,7 +6,7 @@ import { cn } from '@/utils/cn';
 import type { CalendarEvent } from '@/types/calendar';
 import { EVENT_COLORS } from '@/types/calendar';
 import type { DragMode, DragPreview } from '@/hooks/useCalendarDnD';
-import { WEEKDAYS, fmtDate, parseDate, addDays, daysBetween } from '@/utils/calendarDate';
+import { WEEKDAYS, fmtDate, parseDate, addDays } from '@/utils/calendarDate';
 import { formatEventChipText } from '@/utils/calendarEventFilter';
 import {
   calendarEventLinkedTodoId,
@@ -16,87 +16,24 @@ import {
   type CalendarEventIdentity,
 } from '@/utils/calendarEventIdentity';
 import { floatingGlassStyle, tooltipGlassStyle } from '@/utils/glassStyles';
+import { layoutEventBars, visibleWeekDays, type EventBar } from '@/utils/calendarWeekdays';
 
-/** 이벤트의 연속 바 레이아웃 계산 */
-export interface EventBar {
-  event: CalendarEvent;
-  row: number;
-  startCol: number; // 0-indexed in week
-  span: number;     // how many columns it spans
-  isStart: boolean; // bar starts in this week
-  isEnd: boolean;   // bar ends in this week
-}
+// 바 배치는 주말 숨김과 한 몸이라 유틸로 옮겼다. 기존 import 경로는 그대로 살려 둔다.
+export { layoutEventBars, type EventBar };
 
-export function layoutEventBars(
-  events: CalendarEvent[],
-  weekStart: Date,
-  cols: number,
-): EventBar[] {
-  const weekEnd = addDays(weekStart, cols - 1);
-  const weekStartStr = fmtDate(weekStart);
-  const weekEndStr = fmtDate(weekEnd);
-
-  const relevant = events
-    .filter((e) => e.endDate >= weekStartStr && e.startDate <= weekEndStr)
-    .sort((a, b) => {
-      const dSpan = daysBetween(b.startDate, b.endDate) - daysBetween(a.startDate, a.endDate);
-      if (dSpan !== 0) return dSpan;
-      return a.startDate.localeCompare(b.startDate);
-    });
-
-  const rows: string[][] = []; // rows[row][col] = eventId or ''
-  const bars: EventBar[] = [];
-
-  for (const ev of relevant) {
-    const evStart = parseDate(ev.startDate);
-    const evEnd = parseDate(ev.endDate);
-    const clampStart = evStart < weekStart ? weekStart : evStart;
-    const clampEnd = evEnd > weekEnd ? weekEnd : evEnd;
-
-    const startCol = Math.round((clampStart.getTime() - weekStart.getTime()) / 86400000);
-    const endCol = Math.round((clampEnd.getTime() - weekStart.getTime()) / 86400000);
-    const span = endCol - startCol + 1;
-
-    // find a row where all cols are free
-    let placed = -1;
-    for (let r = 0; r < rows.length; r++) {
-      let free = true;
-      for (let c = startCol; c <= endCol; c++) {
-        if (rows[r][c]) { free = false; break; }
-      }
-      if (free) { placed = r; break; }
-    }
-    if (placed === -1) {
-      placed = rows.length;
-      rows.push(new Array(cols).fill(''));
-    }
-    for (let c = startCol; c <= endCol; c++) {
-      rows[placed][c] = calendarEventIdentityKey(ev);
-    }
-
-    bars.push({
-      event: ev,
-      row: placed,
-      startCol,
-      span,
-      isStart: evStart >= weekStart,
-      isEnd: evEnd <= weekEnd,
-    });
-  }
-
-  return bars;
-}
 
 /* ═══════════════════════════════════════════════════
    이벤트 바 컴포넌트 (리퀴드 글라스)
    ═══════════════════════════════════════════════════ */
 
 function EventBarChip({
-  bar, onClick, onDragStart, isDragging, isGhost,
+  bar, columnCount, onClick, onDragStart, isDragging, isGhost,
   hoveredEventIdentity, onHover, onContextMenu, tagNameById, calendarNameById,
   isRealtimeHighlighted, reduceMotion,
 }: {
   bar: EventBar;
+  /** 그 주에 실제로 그려지는 칸 수(주말을 숨기면 5). */
+  columnCount: number;
   onClick: (e: CalendarEvent) => void;
   onDragStart?: (event: CalendarEvent, mode: DragMode, anchorDate: string) => void;
   isDragging?: boolean;
@@ -227,8 +164,8 @@ function EventBarChip({
         'group/bar',
       )}
       style={{
-        left: `calc(${(bar.startCol / 7) * 100}% + 2px)`,
-        width: `calc(${(bar.span / 7) * 100}% - 4px)`,
+        left: `calc(${(bar.startCol / columnCount) * 100}% + 2px)`,
+        width: `calc(${(bar.span / columnCount) * 100}% - 4px)`,
         top: `${bar.row * 28 + 36}px`,
         height: '26px',
         cursor: ev.isReadOnly ? 'pointer' : isDragging ? 'grabbing' : 'grab',
@@ -455,6 +392,7 @@ export function CalendarGrid({
   monthDirection = 0,
   instantTransition = false,
   eventsLoaded = true,
+  showWeekends = true,
   focusedDate,
   pulseDate,
   highlightedEventIdentities,
@@ -481,6 +419,8 @@ export function CalendarGrid({
   instantTransition?: boolean;
   /** 일정 첫 로드가 끝났는지. 로드 전에는 '일정이 없다'고 단정하지 않는다. */
   eventsLoaded?: boolean;
+  /** 꺼져 있으면 토·일 칸 자체를 그리지 않는다(주 5일 보기). */
+  showWeekends?: boolean;
   focusedDate?: string | null;
   pulseDate?: string | null;
   highlightedEventIdentities?: ReadonlySet<string>;
@@ -503,24 +443,37 @@ export function CalendarGrid({
     );
   }, [events, dragPreview, draggedEventIdentity]);
 
+  // 주말을 숨기면 토·일 칸 자체를 그리지 않는다. 주 배열 자체는 7일 그대로 두고
+  // 렌더 직전에만 걸러, 주 경계·주차 계산은 손대지 않는다.
+  const visibleWeeks = useMemo(
+    () => weeks.map((week) => visibleWeekDays(week, showWeekends)),
+    [showWeekends, weeks],
+  );
+  const columnCount = visibleWeeks[0]?.length ?? (showWeekends ? 7 : 5);
+  const gridTemplateColumns = `repeat(${columnCount}, minmax(0, 1fr))`;
+  const visibleWeekdayLabels = useMemo(
+    () => (showWeekends ? WEEKDAYS : WEEKDAYS.filter((_, index) => index !== 0 && index !== 6)),
+    [showWeekends],
+  );
+
   // 이번 달에 걸치는 일정이 하나도 없으면 격자만 남아 무엇을 해야 할지 알기 어렵다.
   // 날짜 셀 클릭이 곧 생성 경로이므로 안내는 클릭을 가리지 않게 얹기만 한다.
-  const hasCurrentMonthEvent = useMemo(() => weeks.some((week) => week.some((day) => {
+  const hasCurrentMonthEvent = useMemo(() => visibleWeeks.some((week) => week.some((day) => {
     if (day.getMonth() !== currentMonth) return false;
     const dateStr = fmtDate(day);
     return displayEvents.some((candidate) => candidate.startDate <= dateStr && candidate.endDate >= dateStr);
-  })), [currentMonth, displayEvents, weeks]);
+  })), [currentMonth, displayEvents, visibleWeeks]);
 
   return (
     <div className="flex flex-col flex-1 h-full min-h-0" onWheel={onWheel}>
       {/* 요일 헤더 */}
-      <div className="grid grid-cols-7 mb-0.5 border-b border-bg-border/25">
-        {WEEKDAYS.map((day, i) => (
+      <div className="grid mb-0.5 border-b border-bg-border/25" style={{ gridTemplateColumns }}>
+        {visibleWeekdayLabels.map((day) => (
           <div
             key={day}
             className={cn(
               'text-center text-xs font-semibold py-2.5 tracking-wider',
-              i === 0 ? 'text-red-400/60' : i === 6 ? 'text-blue-400/60' : 'text-text-secondary/50',
+              day === '일' ? 'text-red-400/60' : day === '토' ? 'text-blue-400/60' : 'text-text-secondary/50',
             )}
           >
             {day}
@@ -545,15 +498,16 @@ export function CalendarGrid({
             <span className="text-[11px] text-text-secondary/60">날짜를 눌러 새 일정을 만들어 보세요</span>
           </div>
         )}
-        {weeks.map((week, wi) => {
-          const bars = layoutEventBars(displayEvents, week[0], 7);
+        {visibleWeeks.map((week, wi) => {
+          const bars = layoutEventBars(displayEvents, week);
           const maxRow = bars.length > 0 ? Math.max(...bars.map((b) => b.row)) + 1 : 0;
           // 현재 주 하이라이트
           const isCurrentWeek = week.some((d) => fmtDate(d) === today);
           return (
             <div
               key={wi}
-              className={cn("relative grid grid-cols-7 flex-1 min-h-0", isCurrentWeek && 'bg-accent/[0.03]')}
+              className={cn("relative grid flex-1 min-h-0", isCurrentWeek && 'bg-accent/[0.03]')}
+              style={{ gridTemplateColumns }}
             >
               {/* 날짜 셀 배경 */}
               {week.map((day, di) => {
@@ -657,6 +611,7 @@ export function CalendarGrid({
                   <EventBarChip
                     key={`${calendarEventIdentityKey(bar.event)}-w${wi}-c${bar.startCol}`}
                     bar={bar}
+                    columnCount={columnCount}
                     onClick={onEventClick}
                     onDragStart={onDragStart}
                     isDragging={barIsDragging}
