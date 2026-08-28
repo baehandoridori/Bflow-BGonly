@@ -17,6 +17,7 @@ type DndModule = {
     isSettling(event: unknown): boolean;
     isPersisting(event: unknown): boolean;
     shouldSuppressClick(): boolean;
+    cancelActiveDrag(): void;
   };
 };
 
@@ -917,6 +918,37 @@ test('useTimeGridDnD DOM: 드래그 중 휠로 직접 스크롤해도 고스트�
     const after = harness.readPreview() as { startTime: string };
 
     assert.notEqual(after.startTime, before.startTime, '수동 스크롤 뒤에도 프리뷰를 다시 계산한다');
+  } finally {
+    harness.restore();
+  }
+});
+
+test('useTimeGridDnD DOM: 밖에서 취소하면(주 전환 등) 이후 mouseup이 저장·생성을 만들지 않는다', async () => {
+  const changes: unknown[][] = [];
+  const creates: unknown[][] = [];
+  const harness = installDomHookHarness(await loadDnD(), {
+    scrollContainerRef: { current: { scrollTop: 0, getBoundingClientRect: () => ({ top: 100, bottom: 500 }) } },
+    onEventChange: (...args) => changes.push(args),
+    onCreate: (...args) => creates.push(args),
+  });
+  try {
+    let dnd = harness.render();
+    dnd.beginCreate(event(20, 200), { date: '2026-08-24', bandStartMin: 540, column: harness.column });
+    dnd = harness.render();
+    harness.fire('mousemove', { clientX: 20, clientY: 300 });
+    dnd = harness.render();
+    assert.equal(dnd.isDragActive, true);
+
+    // 주가 바뀌면 상위 뷰가 이 함수를 부른다.
+    dnd.cancelActiveDrag();
+    dnd = harness.render();
+    assert.equal(dnd.isDragActive, false, '진행 중인 드래그가 접힌다');
+
+    harness.fire('mouseup', { button: 0, clientX: 20, clientY: 300 });
+    dnd = harness.render();
+    assert.deepEqual(creates, [], '취소 뒤 손을 떼도 지난주 날짜로 생성 창이 열리지 않는다');
+    assert.deepEqual(changes, []);
+    assert.equal(dnd.shouldSuppressClick(), true, '임계를 넘겼던 드래그의 사후 클릭은 억제한다');
   } finally {
     harness.restore();
   }

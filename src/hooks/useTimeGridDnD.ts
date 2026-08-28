@@ -290,6 +290,20 @@ export function useTimeGridDnD({ scrollContainerRef, onCreate, onEventChange }: 
     setPreview(null);
   }, [cancelPreviewFrame]);
 
+  /**
+   * 진행 중인 드래그를 밖에서 취소한다(주 전환 등). Escape·창 blur 취소와 같은 동작이다.
+   * 취소하지 않으면 create 드래그의 anchor가 이전 주 날짜에 고정된 채 남아,
+   * 손을 뗄 때 지난주 날짜가 프리필된 생성 창이 열린다.
+   */
+  const cancelActiveDragRef = useRef<() => void>(() => {});
+  const cancelActiveDrag = useCallback(() => {
+    if (dragRef.current?.hasCrossedThreshold) {
+      finishedAtRef.current = Date.now();
+    }
+    clearDrag();
+  }, [clearDrag]);
+  cancelActiveDragRef.current = cancelActiveDrag;
+
   const beginCreate = useCallback((event: React.MouseEvent<HTMLElement>, target: TimeGridPointerTarget) => {
     if (event.button !== 0) return;
     cancelPreviewFrame();
@@ -441,12 +455,7 @@ export function useTimeGridDnD({ scrollContainerRef, onCreate, onEventChange }: 
       clearDrag();
     };
 
-    const cancelDrag = () => {
-      if (dragRef.current?.hasCrossedThreshold) {
-        finishedAtRef.current = Date.now();
-      }
-      clearDrag();
-    };
+    const cancelDrag = cancelActiveDragRef.current;
 
     const cancel = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
@@ -515,5 +524,6 @@ export function useTimeGridDnD({ scrollContainerRef, onCreate, onEventChange }: 
     isSettling,
     isPersisting,
     shouldSuppressClick,
+    cancelActiveDrag,
   };
 }

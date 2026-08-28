@@ -380,6 +380,18 @@ export function WeekTimeGridView({
   const dates = useMemo(() => weekDays.slice(0, 7), [weekDays]);
   const dateStrings = useMemo(() => dates.map(fmtDate), [dates]);
   const weekKey = dateStrings.join('|');
+
+  // 드래그 도중 주가 바뀌면(휠·키보드·미니 달력 등 모든 경로) 진행 중인 드래그를 접는다.
+  // 그대로 두면 create 드래그의 기준 날짜가 지난주에 고정된 채 남아, 손을 뗄 때
+  // 지난주 날짜가 프리필된 생성 창이 열린다.
+  const cancelActiveDrag = timeGridDnD.cancelActiveDrag;
+  const previousWeekKeyRef = useRef(weekKey);
+  useEffect(() => {
+    if (previousWeekKeyRef.current === weekKey) return;
+    previousWeekKeyRef.current = weekKey;
+    cancelActiveDrag();
+  }, [cancelActiveDrag, weekKey]);
+
   const displayedEvents = useMemo(() => {
     if (!dragPreview?.identityKey || dragPreview.mode === 'create') return events;
     return events.map((event) => calendarEventIdentityKey(event) === dragPreview.identityKey

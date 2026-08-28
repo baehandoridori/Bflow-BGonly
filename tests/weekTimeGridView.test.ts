@@ -123,7 +123,9 @@ let timeGridDndStub: {
   isSettling(): boolean;
   isPersisting(event: { id: string }): boolean;
   shouldSuppressClick(): boolean;
+  cancelActiveDrag(): void;
 };
+let timeGridCancelCount = 0;
 
 function resetTimeGridDndStub(): void {
   capturedTimeGridDndOptions = undefined;
@@ -135,7 +137,9 @@ function resetTimeGridDndStub(): void {
     isSettling: () => false,
     isPersisting: () => false,
     shouldSuppressClick: () => false,
+    cancelActiveDrag() { timeGridCancelCount += 1; },
   };
+  timeGridCancelCount = 0;
 }
 
 async function loadWeekTimeGridView(reduceMotion = false): Promise<WeekTimeGridModule> {
@@ -206,6 +210,86 @@ function findWeekElements(
     ...(predicate(element) ? [element] : []),
     ...findWeekElements(element.props.children as ReactNode, predicate),
   ];
+}
+
+/**
+ * effect·ref·state를 렌더 사이에 유지하는 하네스. 주 전환처럼 "다시 렌더했을 때
+ * effect가 무엇을 하는가"를 봐야 하는 검증에 쓴다.
+ */
+function createStatefulWeekTimeGridHarness(module: WeekTimeGridModule) {
+  const React = createRequire(import.meta.url)('react');
+  const dispatcher = React.__SECRET_INTERNALS_DO_NOT_USE_OR_YOU_WILL_BE_FIRED.ReactCurrentDispatcher;
+  const previousDispatcher = dispatcher.current;
+  // 이 컴포넌트의 다른 effect들이 타이머·rAF를 쓴다. 검증 대상이 아니므로 빈 창구만 준다.
+  const globalScope = globalThis as typeof globalThis & { window?: unknown };
+  const previousWindow = globalScope.window;
+  globalScope.window = {
+    setInterval: () => 0,
+    clearInterval() {},
+    setTimeout: () => 0,
+    clearTimeout() {},
+    requestAnimationFrame: () => 0,
+    cancelAnimationFrame() {},
+  };
+  const states: unknown[] = [];
+  const refs: unknown[] = [];
+  const effectDeps: Array<readonly unknown[] | undefined> = [];
+  const cleanups: Array<(() => void) | undefined> = [];
+  let stateCursor = 0;
+  let refCursor = 0;
+  let effectCursor = 0;
+  let pending: Array<{ index: number; effect: () => void | (() => void) }> = [];
+
+  const changed = (before: readonly unknown[] | undefined, next: readonly unknown[] | undefined) => (
+    before === undefined || next === undefined || before.length !== next.length
+      || before.some((value, index) => !Object.is(value, next[index]))
+  );
+
+  dispatcher.current = {
+    useState(initial: unknown) {
+      const slot = stateCursor++;
+      if (!(slot in states)) states[slot] = typeof initial === 'function' ? (initial as () => unknown)() : initial;
+      return [states[slot], (next: unknown) => {
+        states[slot] = typeof next === 'function' ? (next as (value: unknown) => unknown)(states[slot]) : next;
+      }];
+    },
+    useRef(initial: unknown) {
+      const slot = refCursor++;
+      if (!(slot in refs)) refs[slot] = { current: initial };
+      return refs[slot];
+    },
+    useEffect(effect: () => void | (() => void), deps?: readonly unknown[]) {
+      const slot = effectCursor++;
+      if (!changed(effectDeps[slot], deps)) return;
+      effectDeps[slot] = deps;
+      pending.push({ index: slot, effect });
+    },
+    useMemo(factory: () => unknown) { return factory(); },
+    useCallback(fn: unknown) { return fn; },
+  };
+
+  return {
+    render(props: Parameters<WeekTimeGridModule['default']>[0]) {
+      stateCursor = 0;
+      refCursor = 0;
+      effectCursor = 0;
+      module.default(props);
+    },
+    flushEffects() {
+      const queued = pending;
+      pending = [];
+      for (const { index, effect } of queued) {
+        cleanups[index]?.();
+        cleanups[index] = effect() || undefined;
+      }
+    },
+    restore() {
+      cleanups.forEach((cleanup) => cleanup?.());
+      dispatcher.current = previousDispatcher;
+      if (previousWindow === undefined) delete globalScope.window;
+      else globalScope.window = previousWindow;
+    },
+  };
 }
 
 function renderInteractiveWeekTimeGrid(
@@ -1117,6 +1201,50 @@ test('WeekTimeGridView: 저장 중인 블록은 우클릭 편집도 열지 않�
     } finally {
       rerendered.restore();
     }
+  } finally {
+    harness.restore();
+  }
+});
+
+test('WeekTimeGridView: 주가 바뀌면 진행 중인 드래그를 취소한다', async () => {
+  const module = await loadWeekTimeGridView();
+  const harness = createStatefulWeekTimeGridHarness(module);
+  const baseProps = {
+    events: [],
+    today: '2026-08-23',
+    onEventClick() {},
+    onSlotClick() {},
+    tagNameById: {},
+    calendarNameById: {},
+    weekCount: 4,
+    onWeekChange() {},
+  };
+  try {
+    harness.render({
+      ...baseProps,
+      weekDays: Array.from({ length: 7 }, (_, index) => new Date(2026, 7, 23 + index, 12)),
+      activeWeekIndex: 0,
+    });
+    harness.flushEffects();
+    const afterMount = timeGridCancelCount;
+
+    // 같은 주를 다시 렌더해도 취소하지 않는다.
+    harness.render({
+      ...baseProps,
+      weekDays: Array.from({ length: 7 }, (_, index) => new Date(2026, 7, 23 + index, 12)),
+      activeWeekIndex: 0,
+    });
+    harness.flushEffects();
+    assert.equal(timeGridCancelCount, afterMount, '같은 주 재렌더는 드래그를 건드리지 않는다');
+
+    // 다음 주로 넘어가면 진행 중인 드래그를 접는다.
+    harness.render({
+      ...baseProps,
+      weekDays: Array.from({ length: 7 }, (_, index) => new Date(2026, 7, 30 + index, 12)),
+      activeWeekIndex: 1,
+    });
+    harness.flushEffects();
+    assert.equal(timeGridCancelCount, afterMount + 1, '주가 바뀌면 진행 중인 드래그를 취소한다');
   } finally {
     harness.restore();
   }
