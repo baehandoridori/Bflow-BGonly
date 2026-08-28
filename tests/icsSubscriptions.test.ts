@@ -162,6 +162,22 @@ test('expandIcsToEvents: 구독당 상한을 넘으면 미래 우선으로 자�
   assert.equal(expanded.events[0].startDate, '2026-09-01', '이른 회차부터 채운다');
 });
 
+test('expandIcsToEvents: UTC 피드에서 KST 다음날로 넘어가는 회차의 수정본이 반영된다', () => {
+  const ics = calendar(
+    'BEGIN:VEVENT', 'UID:ov-1',
+    'DTSTART:20260901T160000Z', 'DTEND:20260901T170000Z', // KST 9/2 01:00
+    'RRULE:FREQ=WEEKLY;COUNT=3', 'SUMMARY:원본', 'END:VEVENT',
+    'BEGIN:VEVENT', 'UID:ov-1', 'RECURRENCE-ID:20260908T160000Z',
+    'DTSTART:20260908T180000Z', 'DTEND:20260908T190000Z', 'SUMMARY:옮긴 회차',
+    'END:VEVENT',
+  );
+
+  const out = expandIcsToEvents(ics, { from: '2026-08-01', to: '2026-10-01' }).events;
+
+  assert.equal(out.filter((event) => event.title === '옮긴 회차').length, 1);
+  assert.equal(out.filter((event) => event.title === '원본').length, 2);
+});
+
 test('expandIcsToEvents: 제목 없는 일정과 깨진 입력에도 무너지지 않는다', () => {
   const untitled = calendar(
     'BEGIN:VEVENT', 'UID:ev-untitled',

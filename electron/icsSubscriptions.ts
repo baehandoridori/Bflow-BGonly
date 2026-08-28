@@ -183,6 +183,29 @@ function occurrenceFields(base: IcsBaseFields, occurrenceDate: string): IcsBaseF
   };
 }
 
+/**
+ * RECURRENCE-ID 수정본 조회. node-ical은 오버라이드를 **원본 시간대의 달력 날짜** 키로
+ * 저장하고, DATE-TIME 오버라이드는 full ISO 키로도 이중 저장한다. KST 날짜로만 찾으면
+ * 원본 TZ 날짜와 KST 날짜가 다른 회차(UTC 피드의 KST 새벽 등)의 수정본을 통째로 놓친다.
+ */
+function findOverride(
+  overrides: Record<string, IcsVevent>,
+  occurrence: Date & { dateOnly?: boolean },
+  occurrenceKstDate: string,
+): IcsVevent | undefined {
+  const candidates = occurrence.dateOnly === true
+    ? [toDateOnlyString(occurrence), occurrenceKstDate]
+    : [
+      occurrence.toISOString(), // 미이동 회차의 인스턴트 = RECURRENCE-ID 인스턴트
+      occurrence.toISOString().slice(0, 10), // 원본 TZ 미해석 폴백
+      occurrenceKstDate,
+    ];
+  for (const key of candidates) {
+    if (Object.prototype.hasOwnProperty.call(overrides, key)) return overrides[key];
+  }
+  return undefined;
+}
+
 function collectVevent(event: IcsVevent, window: IcsExpandWindow, out: IcsExpandedEvent[]): void {
   const base = readBaseFields(event);
   if (!base) return;
@@ -215,9 +238,7 @@ function collectVevent(event: IcsVevent, window: IcsExpandWindow, out: IcsExpand
     if (seen.has(occurrenceKst.date)) continue;
     seen.add(occurrenceKst.date);
 
-    const override = Object.prototype.hasOwnProperty.call(overrides, occurrenceKst.date)
-      ? overrides[occurrenceKst.date]
-      : undefined;
+    const override = findOverride(overrides, occurrence, occurrenceKst.date);
     const fields = isVevent(override)
       ? readBaseFields(override) ?? occurrenceFields(base, occurrenceKst.date)
       : occurrenceFields(base, occurrenceKst.date);
