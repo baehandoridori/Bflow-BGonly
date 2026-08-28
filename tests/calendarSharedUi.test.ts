@@ -6157,6 +6157,80 @@ test('the rail lists ICS subscriptions with their own toggle, refresh, rename an
   }
 });
 
+test('the rename form appears once, right under its subscription row', async () => {
+  resetHarness();
+  railSubscribeFormProps = [];
+  railConfirmResult = true;
+
+  const subscriptions = [{
+    id: 'sub-1',
+    name: '외부 팀 캘린더',
+    url: 'https://example.com/team.ics',
+    color: '#00B894',
+    enabled: true,
+    lastFetchedAt: '2026-09-01T00:00:00.000Z',
+    lastError: null as string | null,
+  }];
+  const previousApi = (globalThis as { window?: { electronAPI?: unknown } }).window;
+  (globalThis as unknown as { window: Record<string, unknown> }).window = {
+    electronAPI: {
+      icsList: async () => subscriptions.map((row) => ({ ...row })),
+      icsUpdate: async () => null,
+      onIcsChanged: () => () => {},
+    },
+    dispatchEvent: () => true,
+    CustomEvent: class {},
+  };
+
+  try {
+    stateSlots = [];
+    stateCursor = 0;
+    let tree = await renderRail(false, { resetState: true });
+    stateSlots[1] = subscriptions.map((row) => ({ ...row }));
+    tree = await renderRail(false);
+
+    buttonByLabel(tree, '외부 팀 캘린더 메뉴 열기').props.onClick?.({ stopPropagation() {} });
+    tree = await renderRail(false);
+    const renameItem = findButtons(tree)
+      .filter((button) => button.props.role === 'menuitem')
+      .find((button) => textContent(button).trim() === '이름·색 바꾸기');
+    assert.ok(renameItem, '이름·색 바꾸기 메뉴가 있다');
+    renameItem.props.onClick?.();
+    tree = await renderRail(false);
+
+    const isEditForm = (element: { props: Record<string, unknown> }): boolean => (
+      element.props['aria-label'] === '구독 이름·색 바꾸기'
+    );
+    assert.equal(findElements(tree, isEditForm).length, 1, '편집 폼은 정확히 하나만 뜬다');
+
+    const sectionOf = (title: string) => findElements(
+      tree,
+      (element) => element.type === 'section' && textContent(element).includes(title),
+    )[0];
+
+    const subscriptionSection = sectionOf('구독');
+    assert.ok(subscriptionSection, '구독 섹션이 있다');
+    assert.equal(
+      findElements(subscriptionSection, isEditForm).length,
+      1,
+      '편집 폼은 구독 섹션 안에 있다',
+    );
+
+    for (const bflowSection of ['내 캘린더', '팀 전체', '나에게 공유됨']) {
+      const section = sectionOf(bflowSection);
+      if (!section) continue;
+      assert.equal(
+        findElements(section, isEditForm).length,
+        0,
+        `${bflowSection} 섹션에는 편집 폼이 없다`,
+      );
+    }
+  } finally {
+    if (previousApi === undefined) delete (globalThis as { window?: unknown }).window;
+    else (globalThis as unknown as { window: unknown }).window = previousApi;
+  }
+});
+
 test('tag chips pop on toggle and the filtered result fades instead of jumping', async () => {
   resetHarness();
   tagBarReducedMotion = false;

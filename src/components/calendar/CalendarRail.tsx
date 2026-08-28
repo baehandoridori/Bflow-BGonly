@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AlertTriangle, BellOff, Check, MoreHorizontal, Plus, RefreshCw, Settings, Trash2 } from 'lucide-react';
 import type { BflowCalendar } from '@/types/calendar';
 import type { IcsSubscription } from '@/shared/icsApiContract';
@@ -306,24 +306,6 @@ export function CalendarRail({ isAuthenticated, onOpenSettings, onCreateCalendar
             />
           );
         })}
-        {renamingSubscription && (
-          <IcsSubscribeForm
-            key={renamingSubscription.id}
-            initial={{
-              name: renamingSubscription.name,
-              url: renamingSubscription.url,
-              color: renamingSubscription.color,
-            }}
-            onCancel={() => setRenamingSubscription(null)}
-            onSubmit={async (input) => {
-              await window.electronAPI?.icsUpdate?.(renamingSubscription.id, {
-                name: input.name,
-                color: input.color,
-              });
-              await reloadIcsSubscriptions();
-            }}
-          />
-        )}
       </section>
     );
   };
@@ -368,8 +350,8 @@ export function CalendarRail({ isAuthenticated, onOpenSettings, onCreateCalendar
         {icsSubscriptions.map((subscription) => {
           const visibilityKey = icsCalendarId(subscription.id);
           return (
+            <Fragment key={subscription.id}>
             <IcsSubscriptionRow
-              key={subscription.id}
               subscription={subscription}
               visible={visibleCalendarIds[visibilityKey] !== false}
               open={openMenuId === visibilityKey}
@@ -403,6 +385,24 @@ export function CalendarRail({ isAuthenticated, onOpenSettings, onCreateCalendar
               menuRef={menuRef}
               triggerRef={triggerRef}
             />
+            {renamingSubscription?.id === subscription.id && (
+              <IcsSubscribeForm
+                initial={{
+                  name: subscription.name,
+                  url: subscription.url,
+                  color: subscription.color,
+                }}
+                onCancel={() => setRenamingSubscription(null)}
+                onSubmit={async (input) => {
+                  await window.electronAPI?.icsUpdate?.(subscription.id, {
+                    name: input.name,
+                    color: input.color,
+                  });
+                  await reloadIcsSubscriptions();
+                }}
+              />
+            )}
+            </Fragment>
           );
         })}
         {showSubscribeForm ? (
