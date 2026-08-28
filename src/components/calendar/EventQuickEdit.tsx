@@ -476,14 +476,15 @@ export function EventQuickEdit({
                   <input
                     type="text"
                     value={title}
+                    disabled={isMutating}
                     onChange={(changeEvent) => setTitle(changeEvent.target.value)}
                     placeholder="일정 제목"
                     className="w-full rounded-lg px-2.5 py-1.5 text-xs outline-none placeholder:text-text-secondary/45"
                     style={fieldStyle}
                   />
                   <div className="flex gap-2">
-                    <input type="date" value={startDate} onChange={(changeEvent) => setStartDate(changeEvent.target.value)} className="flex-1 rounded-lg px-2.5 py-1.5 text-xs outline-none" style={{ ...fieldStyle, colorScheme: colorMode }} />
-                    <input type="date" value={endDate} onChange={(changeEvent) => setEndDate(changeEvent.target.value)} className="flex-1 rounded-lg px-2.5 py-1.5 text-xs outline-none" style={{ ...fieldStyle, colorScheme: colorMode }} />
+                    <input type="date" value={startDate} disabled={isMutating} onChange={(changeEvent) => setStartDate(changeEvent.target.value)} className="flex-1 rounded-lg px-2.5 py-1.5 text-xs outline-none" style={{ ...fieldStyle, colorScheme: colorMode }} />
+                    <input type="date" value={endDate} disabled={isMutating} onChange={(changeEvent) => setEndDate(changeEvent.target.value)} className="flex-1 rounded-lg px-2.5 py-1.5 text-xs outline-none" style={{ ...fieldStyle, colorScheme: colorMode }} />
                   </div>
                   {supportsTimeEditing && (
                     <label className="flex items-center justify-between gap-3 text-[11px] font-medium text-text-secondary">
@@ -492,6 +493,7 @@ export function EventQuickEdit({
                         aria-label="종일 일정"
                         type="checkbox"
                         checked={allDay}
+                        disabled={isMutating}
                         onChange={(changeEvent) => {
                           const checked = changeEvent.target.checked;
                           setAllDay(checked);
@@ -511,6 +513,7 @@ export function EventQuickEdit({
                         type="time"
                         step={600}
                         value={startTime}
+                        disabled={isMutating}
                         onChange={(changeEvent) => setStartTime(changeEvent.target.value)}
                         className="flex-1 rounded-lg px-2.5 py-1.5 text-xs outline-none"
                         style={{ ...fieldStyle, colorScheme: colorMode }}
@@ -520,6 +523,7 @@ export function EventQuickEdit({
                         type="time"
                         step={600}
                         value={endTime}
+                        disabled={isMutating}
                         onChange={(changeEvent) => setEndTime(changeEvent.target.value)}
                         className="flex-1 rounded-lg px-2.5 py-1.5 text-xs outline-none"
                         style={{ ...fieldStyle, colorScheme: colorMode }}
@@ -535,7 +539,7 @@ export function EventQuickEdit({
                     {TYPE_OPTIONS.map((option) => (
                       <button
                         key={option.value}
-                        disabled={isCanonicalBflow}
+                        disabled={isCanonicalBflow || isMutating}
                         aria-describedby={derivedFieldsDescriptionId}
                         onClick={isCanonicalBflow ? undefined : () => setType(option.value)}
                         className="flex-1 cursor-pointer rounded-lg py-1.5 text-[11px] font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-70"
@@ -551,6 +555,7 @@ export function EventQuickEdit({
                   <EntityAwareInput
                     multiline
                     value={memo ?? ''}
+                    disabled={isMutating}
                     onChange={setMemo}
                     users={users}
                     rows={3}

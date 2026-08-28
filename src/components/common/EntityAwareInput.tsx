@@ -47,6 +47,8 @@ interface Props {
   autoGrowMaxRows?: number;
   /** 모달/패널 높이에 대한 autoGrow 최대 비율(0~1). */
   autoGrowMaxContainerRatio?: number;
+  /** 저장 진행 중처럼 입력을 잠가야 할 때. 멘션 자동완성도 함께 멈춘다. */
+  disabled?: boolean;
   'aria-label'?: string;
 }
 
@@ -59,7 +61,7 @@ interface Props {
 export function EntityAwareInput({
   value, onChange, users, multiline, placeholder, className, rows, autoFocus,
   dropdownPositionClassName, submitOn = 'none', onSubmit, onCancel, onPaste, onBlur,
-  enableHashtag, enableHashtags, autoGrow, autoGrowMinRows, autoGrowMaxRows, autoGrowMaxContainerRatio, 'aria-label': ariaLabel,
+  enableHashtag, enableHashtags, autoGrow, autoGrowMinRows, autoGrowMaxRows, autoGrowMaxContainerRatio, disabled, 'aria-label': ariaLabel,
 }: Props) {
   const inputRef = useRef<HTMLInputElement | HTMLTextAreaElement>(null);
   const [scroll, setScroll] = useState({ top: 0, left: 0 });
@@ -152,6 +154,7 @@ export function EntityAwareInput({
     spellCheck: false,
     placeholder,
     autoFocus,
+    disabled,
     'aria-label': ariaLabel,
     // 입력칸 배경은 투명 강제(뒤 하이라이트 레이어가 비치도록). 배경/보더는 overlay 가 className 으로 그린다.
     className: `${className ?? ''} relative !bg-transparent`,

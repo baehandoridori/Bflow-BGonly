@@ -544,6 +544,7 @@ export function WeekTimeGridView({
                   }}
                   onClick={(event) => {
                     event.stopPropagation();
+                    if (timeGridDnD.isPersisting(bar.event)) return;
                     onEventClick(bar.event);
                   }}
                   onContextMenu={onEventContextMenu ? (event) => onEventContextMenu(bar.event, event) : undefined}
@@ -888,6 +889,10 @@ function TimeBand({
                     onClick={(event) => {
                       event.stopPropagation();
                       if (timeGridDnD.shouldSuppressClick()) return;
+                      // 앞선 드롭이 아직 저장 중이면 편집기를 열지 않는다. 열어 두면
+                      // 그 안에서 같은 일정을 또 저장해 두 요청이 겹치고, 늦게 커밋된
+                      // 예전 드롭이 방금 옮긴 시각을 되돌린다.
+                      if (isPersisting) return;
                       onEventClick(block.event);
                     }}
                     onContextMenu={onEventContextMenu ? (event) => onEventContextMenu(block.event, event) : undefined}

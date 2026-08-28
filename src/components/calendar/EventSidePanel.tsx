@@ -435,6 +435,7 @@ export function EventSidePanel({
           {isEditing ? (
             <input
               value={draftTitle}
+              disabled={isMutating}
               onChange={(e) => setDraftTitle(e.target.value)}
               className={fieldClassName}
               autoFocus
@@ -474,6 +475,7 @@ export function EventSidePanel({
                     aria-label="종일 일정"
                     type="checkbox"
                     checked={draftAllDay}
+                    disabled={isMutating}
                     onChange={(changeEvent) => {
                       const checked = changeEvent.target.checked;
                       setDraftAllDay(checked);
@@ -492,6 +494,7 @@ export function EventSidePanel({
               <input
                 type="date"
                 value={toInputDate(draftStart)}
+                disabled={isMutating}
                 onChange={(e) => setDraftStart(fromInputDate(e.target.value))}
                 className={dateFieldClassName}
                 style={{ colorScheme: colorMode }}
@@ -502,6 +505,7 @@ export function EventSidePanel({
                   type="time"
                   step={600}
                   value={draftStartTime}
+                  disabled={isMutating}
                   onChange={(changeEvent) => setDraftStartTime(changeEvent.target.value)}
                   className={dateFieldClassName}
                   style={{ colorScheme: colorMode }}
@@ -513,6 +517,7 @@ export function EventSidePanel({
               <input
                 type="date"
                 value={toInputDate(draftEnd)}
+                disabled={isMutating}
                 onChange={(e) => setDraftEnd(fromInputDate(e.target.value))}
                 className={dateFieldClassName}
                 style={{ colorScheme: colorMode }}
@@ -523,6 +528,7 @@ export function EventSidePanel({
                   type="time"
                   step={600}
                   value={draftEndTime}
+                  disabled={isMutating}
                   onChange={(changeEvent) => setDraftEndTime(changeEvent.target.value)}
                   className={dateFieldClassName}
                   style={{ colorScheme: colorMode }}
@@ -563,6 +569,7 @@ export function EventSidePanel({
                 <select
                   aria-label="캘린더"
                   value={draftCalendarId}
+                  disabled={isMutating}
                   onChange={(changeEvent) => setDraftCalendarId(changeEvent.target.value)}
                   className={`${dateFieldClassName} mt-1`}
                 >
@@ -679,6 +686,7 @@ export function EventSidePanel({
             <EntityAwareInput
               multiline
               value={draftMemo ?? ''}
+              disabled={isMutating}
               onChange={setDraftMemo}
               users={users}
               /* #태그 끔: 이 메모는 ScheduleView 카드/툴팁/상세·CalendarView 선택 패널에서 평문({event.memo})으로

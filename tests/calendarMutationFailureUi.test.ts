@@ -1085,6 +1085,52 @@ test('side panel and quick edit refuse a second save while the first one is stil
   assert.equal(quickUpdates.length, 1, '빠른 편집도 진행 중인 저장과 두 번째 저장을 겹치지 않는다');
 });
 
+test('editors lock their draft fields while a save is pending', async () => {
+  // 저장 버튼만 잠그면 그 사이에 고친 내용이 화면에는 보이지만 저장되지 않은 채
+  // 편집기가 닫혀 조용히 사라진다. 진행 중에는 입력칸도 함께 잠근다.
+  const quickHooks = createHookStore();
+  const quickEvent = event();
+  const quickPersistence = deferredThenable();
+  const quickCallbacks = {
+    onClose: () => {},
+    onUpdate: () => quickPersistence.promise,
+    onDelete: () => {},
+  };
+
+  await renderQuickEdit(quickHooks, quickCallbacks, quickEvent, true);
+  quickHooks.state[1] = 'edit';
+  quickHooks.state[2] = '저장할 제목';
+  await invoke(findButtonByText(await renderQuickEdit(quickHooks, quickCallbacks, quickEvent, true), '저장'));
+
+  const pendingQuick = await renderQuickEdit(quickHooks, quickCallbacks, quickEvent, true);
+  assert.equal(
+    findTitleInput(pendingQuick).props.disabled,
+    true,
+    '빠른 편집은 저장 중 제목 입력을 잠근다',
+  );
+
+  const sidePanelHooks = createHookStore();
+  const sidePanelEvent = event();
+  const sidePanelPersistence = deferredThenable();
+  const sidePanelCallbacks = {
+    onClose: () => {},
+    onUpdate: () => sidePanelPersistence.promise,
+    onDelete: () => {},
+  };
+
+  await renderSidePanel(sidePanelHooks, sidePanelCallbacks, sidePanelEvent, true);
+  sidePanelHooks.state[0] = true;
+  sidePanelHooks.state[1] = '저장할 제목';
+  await invoke(findButtonByText(await renderSidePanel(sidePanelHooks, sidePanelCallbacks, sidePanelEvent, true), '저장'));
+
+  const pendingPanel = await renderSidePanel(sidePanelHooks, sidePanelCallbacks, sidePanelEvent, true);
+  assert.equal(
+    findTitleInput(pendingPanel).props.disabled,
+    true,
+    '상세 패널도 저장 중 제목 입력을 잠근다',
+  );
+});
+
 test('side panel rehydrates a same-event teammate update that is unrelated to a local mutation', async () => {
   const hooks = createHookStore();
   const originalEvent = event();

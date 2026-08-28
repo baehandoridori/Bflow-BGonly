@@ -968,3 +968,83 @@ test('WeekTimeGridView: 이동 블록은 Framer Motion scale 1.02를 쓰고 안�
     transition: { duration: 0 },
   });
 });
+
+test('WeekTimeGridView: 앞선 드롭이 저장 중이면 그 일정의 편집기를 열지 않는다', async () => {
+  const module = await loadWeekTimeGridView();
+  const opened: string[] = [];
+  const pendingEvent = event({
+    id: 'pending-save',
+    title: '저장 중 일정',
+    startDate: '2026-08-25',
+    endDate: '2026-08-25',
+    startTime: '10:00',
+    endTime: '11:00',
+  });
+  const settledEvent = event({
+    id: 'settled',
+    title: '저장 끝난 일정',
+    startDate: '2026-08-26',
+    endDate: '2026-08-26',
+    startTime: '10:00',
+    endTime: '11:00',
+  });
+  const allDayPending = event({
+    id: 'pending-save-allday',
+    title: '저장 중 종일',
+    startDate: '2026-08-25',
+    endDate: '2026-08-25',
+    allDay: true,
+  });
+
+  const harness = renderInteractiveWeekTimeGrid(module, {
+    weekDays: Array.from({ length: 7 }, (_, index) => new Date(2026, 7, 23 + index, 12)),
+    events: [pendingEvent, settledEvent, allDayPending],
+    today: '2026-01-01',
+    onEventClick: (clicked: CalendarEvent) => { opened.push(clicked.id); },
+    onSlotClick() {},
+    tagNameById: {},
+    calendarNameById: {},
+    activeWeekIndex: 0,
+    weekCount: 4,
+    onWeekChange() {},
+  });
+  try {
+    // 클릭 억제 창(280ms)이 지난 뒤에도 저장이 끝나지 않은 일정이 있다.
+    timeGridDndStub.shouldSuppressClick = () => false;
+    timeGridDndStub.isPersisting = (candidate: { id: string }) => candidate.id.startsWith('pending-save');
+
+    const rerendered = renderInteractiveWeekTimeGrid(module, {
+      weekDays: Array.from({ length: 7 }, (_, index) => new Date(2026, 7, 23 + index, 12)),
+      events: [pendingEvent, settledEvent, allDayPending],
+      today: '2026-01-01',
+      onEventClick: (clicked: CalendarEvent) => { opened.push(clicked.id); },
+      onSlotClick() {},
+      tagNameById: {},
+      calendarNameById: {},
+      activeWeekIndex: 0,
+      weekCount: 4,
+      onWeekChange() {},
+    });
+    try {
+      const clickByTitle = (title: string) => {
+        const target = findWeekElements(rerendered.tree, (element) => (
+          typeof element.props['aria-label'] === 'string'
+          && (element.props['aria-label'] as string).includes(title)
+        ))[0];
+        assert.ok(target, `${title} 요소를 찾을 수 있다`);
+        (target.props.onClick as ((mouse: unknown) => void) | undefined)?.({ stopPropagation() {} });
+      };
+
+      clickByTitle('저장 중 일정');
+      clickByTitle('저장 중 종일');
+      assert.deepEqual(opened, [], '저장이 끝나기 전에는 편집기를 열지 않는다');
+
+      clickByTitle('저장 끝난 일정');
+      assert.deepEqual(opened, ['settled'], '저장이 끝난 일정은 평소처럼 열린다');
+    } finally {
+      rerendered.restore();
+    }
+  } finally {
+    harness.restore();
+  }
+});
