@@ -53,6 +53,10 @@ type WeekSubMode = 'card' | 'timegrid';
 const CALENDAR_VIEW_STORAGE_KEY = 'bflow_calendar_view_v1';
 const CALENDAR_VIEW_MODES: CalendarViewMode[] = ['month', '2week', 'week', 'today'];
 const LOCAL_CHANGE_GUARD_MS = 3_000;
+/** '오늘' 이동 펄스 길이. */
+const TODAY_PULSE_MS = 2_500;
+/** 미니 달력·딥링크 이동 펄스 길이. */
+const NAVIGATION_PULSE_MS = 3_000;
 const RAPID_PERIOD_NAV_MS = 300;
 const REALTIME_HIGHLIGHT_MS = 2_000;
 
@@ -732,9 +736,18 @@ export function ScheduleView() {
     if (periodNavigationResetRef.current) clearTimeout(periodNavigationResetRef.current);
   }, []);
 
-  const todayPulseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  /**
+   * '오늘' 이동과 미니 달력·딥링크 이동이 각자 타이머를 들고 있으면, 앞선 타이머가
+   * 뒤늦게 켠 펄스를 조기에 꺼 버린다. 펄스 타이머는 하나만 둔다.
+   */
+  const pulseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const startPulse = useCallback((dateStr: string, durationMs: number) => {
+    setPulseDate(dateStr);
+    if (pulseTimerRef.current) clearTimeout(pulseTimerRef.current);
+    pulseTimerRef.current = setTimeout(() => { setPulseDate(null); }, durationMs);
+  }, []);
   useEffect(() => () => {
-    if (todayPulseTimerRef.current) clearTimeout(todayPulseTimerRef.current);
+    if (pulseTimerRef.current) clearTimeout(pulseTimerRef.current);
   }, []);
 
   // 네비게이션
@@ -775,9 +788,7 @@ export function ScheduleView() {
     moveToDay(now);
     // 펄스는 모든 보기에서 알려 준다. 키보드 포커스 날짜는 월간 전용 상태라 그대로 둔다.
     if (viewMode === 'month') setFocusedDate(todayStr);
-    setPulseDate(todayStr);
-    if (todayPulseTimerRef.current) clearTimeout(todayPulseTimerRef.current);
-    todayPulseTimerRef.current = setTimeout(() => { setPulseDate(null); }, 2500);
+    startPulse(todayStr, TODAY_PULSE_MS);
     // 어느 보기에서도 showCreate를 트리거하지 않는다.
   };
 
@@ -1155,12 +1166,12 @@ export function ScheduleView() {
     moveToWeekContaining(d);
     moveToDay(d);
     setPersistedDateRange({ startDate: dateStr, endDate: dateStr });
-    setPulseDate(dateStr);
-    // 3초 후 하이라이트 및 펄스 해제
+    startPulse(dateStr, NAVIGATION_PULSE_MS);
+    // 하이라이트(범위 강조) 해제는 펄스와 별개 수명이라 그대로 둔다.
     navigateTimersRef.current.push(
-      setTimeout(() => { setPersistedDateRange(null); setPulseDate(null); }, 3000),
+      setTimeout(() => { setPersistedDateRange(null); }, NAVIGATION_PULSE_MS),
     );
-  }, [moveToDay, moveToWeekContaining]);
+  }, [moveToDay, moveToWeekContaining, startPulse]);
 
   /**
    * 미니 달력 클릭은 생성이 아니라 이동이다(D13 G4). 생성은 셀 클릭·+일정 버튼 경로가 있다.

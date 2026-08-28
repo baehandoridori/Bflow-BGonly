@@ -6250,6 +6250,46 @@ test('the month grid explains an empty month without blocking the create path', 
   assert.match(textContent(neighbourTree), /이번 달 일정이 없습니다/);
 });
 
+test('a later move pulse is not cut short by the earlier one', async () => {
+  resetHarness();
+  let tree = await renderScheduleView();
+  await flushScheduleMountEffects();
+  tree = await renderScheduleView();
+  buttonByTitle(tree, '사이드바 펼치기').props.onClick?.();
+  tree = await renderScheduleView();
+
+  const clock = installScheduleFakeClock();
+  try {
+    // '오늘'로 이동(2.5초 펄스).
+    buttonByText(tree, '오늘').props.onClick?.();
+    tree = await renderScheduleView();
+    const todayStr = scheduleFmtDate(new Date());
+    assert.equal(scheduleGridProps.at(-1)?.pulseDate, todayStr);
+
+    // 2초 뒤 미니 달력으로 다른 날짜로 이동(3초 펄스).
+    clock.advance(2_000);
+    scheduleMiniCalendarProps.at(-1)?.onDateSelect('2026-08-11');
+    tree = await renderScheduleView();
+    assert.equal(scheduleGridProps.at(-1)?.pulseDate, '2026-08-11');
+
+    // 앞선 '오늘' 타이머가 만료되는 시점(+0.5초)에도 새 펄스는 살아 있어야 한다.
+    clock.advance(600);
+    tree = await renderScheduleView();
+    assert.equal(
+      scheduleGridProps.at(-1)?.pulseDate,
+      '2026-08-11',
+      '앞선 타이머가 새 펄스를 조기에 끄지 않는다',
+    );
+
+    // 새 펄스는 자기 수명(3초)만큼만 남는다.
+    clock.advance(2_500);
+    await renderScheduleView();
+    assert.equal(scheduleGridProps.at(-1)?.pulseDate, null, '자기 수명이 끝나면 꺼진다');
+  } finally {
+    clock.restore();
+  }
+});
+
 test('rapid navigation also skips the weekly scroll animation and month-crossing arrows', async () => {
   // ① 주간 카드: 연타 중에는 주 이동 스크롤도 즉시 그린다.
   resetHarness();
