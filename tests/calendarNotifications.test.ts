@@ -1854,3 +1854,81 @@ test('preview hydrates a late tab when the only earlier change was reading a not
     restoreBroadcastChannel();
   }
 });
+
+test('preview refuses an event tag that another tab already deleted', async () => {
+  const restoreBroadcastChannel = installPreviewCalendarBroadcastChannel({
+    deferMessages: true,
+    sharedStorage: true,
+  });
+  const remover = await createPreviewCalendarNotificationHarness();
+  const writer = await createPreviewCalendarNotificationHarness();
+  const unsubscribeRemover = remover.api.onCalendarChanged(() => {});
+  const unsubscribeWriter = writer.api.onCalendarChanged(() => {});
+  try {
+    await previewLogin(remover.api, '배한솔');
+    await previewLogin(writer.api, '배한솔');
+    const tags = await remover.api.calendarTagsList();
+    assert.ok(tags.length > 1, 'seed에 태그가 여러 개 있다');
+    const doomed = tags[0];
+
+    const shared = await remover.api.calendarCreate({
+      name: '태그 검증 캘린더', color: '#74B9FF', visibility: 'team', members: [],
+    });
+    restoreBroadcastChannel.flush();
+
+    // 한 창이 태그를 지우고, 아직 전달되기 전에 다른 창이 그 태그를 참조해 저장한다.
+    await remover.api.calendarTagsSave(tags.filter((tag) => tag.id !== doomed.id));
+
+    await assert.rejects(
+      () => writer.api.calendarEventCreate({
+        ...previewNotificationEventInput(shared.id, '지워진 태그를 참조하는 일정'),
+        tag_id: doomed.id,
+      }),
+      /존재하지 않는 태그/,
+      '지워진 태그 참조는 전파 전에도 거절한다',
+    );
+  } finally {
+    unsubscribeWriter();
+    unsubscribeRemover();
+    writer.restore();
+    remover.restore();
+    restoreBroadcastChannel();
+  }
+});
+
+test('preview refuses members on a calendar another tab already made private', async () => {
+  const restoreBroadcastChannel = installPreviewCalendarBroadcastChannel({
+    deferMessages: true,
+    sharedStorage: true,
+  });
+  const owner = await createPreviewCalendarNotificationHarness();
+  const stale = await createPreviewCalendarNotificationHarness();
+  const unsubscribeOwner = owner.api.onCalendarChanged(() => {});
+  const unsubscribeStale = stale.api.onCalendarChanged(() => {});
+  try {
+    await previewLogin(owner.api, '배한솔');
+    await previewLogin(stale.api, '배한솔');
+    const shared = await owner.api.calendarCreate({
+      name: '공개 범위 검증 캘린더',
+      color: '#74B9FF',
+      visibility: 'members',
+      members: [{ user_id: '2', can_edit: true }],
+    });
+    restoreBroadcastChannel.flush();
+
+    // 한 창이 비공개로 바꾸고, 아직 전달되기 전에 다른 창이 멤버를 넣으려 한다.
+    await owner.api.calendarUpdate(shared.id, { visibility: 'private', members: [] });
+
+    await assert.rejects(
+      () => stale.api.calendarSetMembers(shared.id, [{ user_id: '2', can_edit: true }]),
+      /비공개 캘린더에는 멤버를 추가할 수 없습니다/,
+      '비공개 전환이 전달되기 전에도 멤버 추가를 거절한다',
+    );
+  } finally {
+    unsubscribeStale();
+    unsubscribeOwner();
+    stale.restore();
+    owner.restore();
+    restoreBroadcastChannel();
+  }
+});

@@ -138,6 +138,7 @@ const CALENDAR_TAG_UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]
 const MOCK_CALENDAR_CHANGE_CHANNEL = 'bflow-dev-calendar-change-v1';
 const MOCK_CALENDAR_TAG_AUTHORITY_STORAGE_KEY = 'bflow-dev-calendar-tag-authority-v1';
 const MOCK_CALENDAR_MEMBER_AUTHORITY_STORAGE_KEY = 'bflow-dev-calendar-member-authority-v1';
+const MOCK_CALENDAR_VISIBILITY_AUTHORITY_STORAGE_KEY = 'bflow-dev-calendar-visibility-authority-v1';
 const mockCalendarTagAuthorityStorage = (() => {
   try {
     return typeof window === 'undefined' ? null : window.localStorage;
@@ -425,6 +426,7 @@ function upsertMockCalendar(calendar: MockCalendarRow): void {
   const index = mockCalendars.findIndex((candidate) => candidate.id === calendar.id);
   if (index >= 0) mockCalendars.splice(index, 1, { ...calendar });
   else mockCalendars.push({ ...calendar });
+  commitMockCalendarVisibility(calendar.id, calendar.visibility);
 }
 
 function upsertMockCalendarEvent(event: MockCalendarEventRow): void {
@@ -533,6 +535,48 @@ function synchronizeMockCalendarMembersWithAuthority(): void {
     (member) => !tombstonedMockCalendarIds.has(member.calendar_id),
   );
   mockCalendarMembers.splice(0, mockCalendarMembers.length, ...adopted);
+}
+
+/**
+ * 캘린더 행 전체가 아니라 공개 범위 하나만 공유한다. 행을 통째로 공유하면 두 창이
+ * 서로 다른 필드를 고쳤을 때 마지막 기록이 상대 필드를 지워, 필드별 병합과 충돌한다.
+ */
+function readMockCalendarVisibilityAuthority(): Record<string, MockCalendarRow['visibility']> {
+  if (!mockCalendarTagAuthorityStorage) return {};
+  try {
+    const raw = mockCalendarTagAuthorityStorage.getItem(MOCK_CALENDAR_VISIBILITY_AUTHORITY_STORAGE_KEY);
+    if (raw === null) return {};
+    const parsed = JSON.parse(raw) as unknown;
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return {};
+    return parsed as Record<string, MockCalendarRow['visibility']>;
+  } catch {
+    return {};
+  }
+}
+
+function commitMockCalendarVisibility(calendarId: string, visibility: MockCalendarRow['visibility'] | null): void {
+  if (!mockCalendarTagAuthorityStorage) return;
+  const current = readMockCalendarVisibilityAuthority();
+  if (visibility === null) delete current[calendarId];
+  else current[calendarId] = visibility;
+  try {
+    mockCalendarTagAuthorityStorage.setItem(
+      MOCK_CALENDAR_VISIBILITY_AUTHORITY_STORAGE_KEY,
+      JSON.stringify(current),
+    );
+  } catch {
+    // localStorage를 쓸 수 없는 프리뷰에서는 기존 BroadcastChannel 동기화로 계속 동작한다.
+  }
+}
+
+/** 멤버 쓰기 판정처럼 공개 범위가 게이트인 곳에서는 공유 값을 먼저 본다. */
+function sharedMockCalendarVisibility(calendar: MockCalendarRow): MockCalendarRow['visibility'] {
+  const shared = readMockCalendarVisibilityAuthority()[calendar.id];
+  if (shared === 'private' || shared === 'members' || shared === 'team') {
+    if (shared !== calendar.visibility) calendar.visibility = shared;
+    return shared;
+  }
+  return calendar.visibility;
 }
 
 /** 바뀐 캘린더의 멤버 목록만 공유 authority에 반영해, 다른 캘린더 항목을 덮지 않는다. */
@@ -789,12 +833,22 @@ function applyMockCalendarSyncState(envelope: MockCalendarSyncEnvelope): boolean
   );
 
   let changed = false;
-  for (const entry of stamps) {
-    if (!entry || typeof entry.key !== 'string' || !isMockCalendarChangeStamp(entry.stamp)) continue;
-    const parsed = splitMockCalendarChangeKey(entry.key);
-    if (!parsed) continue;
+  const parsedEntries = stamps
+    .map((entry) => {
+      if (!entry || typeof entry.key !== 'string' || !isMockCalendarChangeStamp(entry.stamp)) return null;
+      const parsed = splitMockCalendarChangeKey(entry.key);
+      return parsed ? { key: entry.key, stamp: entry.stamp, ...parsed } : null;
+    })
+    .filter((entry): entry is { key: string; stamp: MockCalendarChangeStamp; scope: string; id: string } => entry !== null);
+
+  // 행 항목을 먼저, 필드 항목을 나중에 처리한다. 행을 통째로 덮으면 더 새로운 필드
+  // stamp가 가리키는 값까지 되돌아가므로, 이미 있는 행은 필드 항목이 채우게 둔다.
+  const rowEntries = parsedEntries.filter((entry) => !entry.scope.endsWith('-field'));
+  const fieldEntries = parsedEntries.filter((entry) => entry.scope.endsWith('-field'));
+
+  for (const entry of rowEntries) {
     if (!rememberMockCalendarChangeStamp(entry.key, entry.stamp)) continue;
-    const { scope, id } = parsed;
+    const { scope, id } = entry;
 
     if (scope === 'event') {
       if (peerTombstonedEventIds.has(id)) {
@@ -804,6 +858,8 @@ function applyMockCalendarSyncState(envelope: MockCalendarSyncEnvelope): boolean
         continue;
       }
       if (tombstonedMockCalendarEventIds.has(id)) continue;
+      // 이미 있는 행은 필드 항목이 stamp 순서대로 채운다. 여기서는 처음 보는 행만 넣는다.
+      if (mockCalendarEvents.some((candidate) => candidate.id === id)) continue;
       const event = snapshot.events.find((candidate) => candidate.id === id);
       if (event) {
         upsertMockCalendarEvent(event);
@@ -820,6 +876,7 @@ function applyMockCalendarSyncState(envelope: MockCalendarSyncEnvelope): boolean
         continue;
       }
       if (tombstonedMockCalendarIds.has(id)) continue;
+      if (mockCalendars.some((candidate) => candidate.id === id)) continue;
       const calendar = snapshot.calendars.find((candidate) => candidate.id === id);
       if (calendar) {
         upsertMockCalendar(calendar);
@@ -843,10 +900,39 @@ function applyMockCalendarSyncState(envelope: MockCalendarSyncEnvelope): boolean
     if (scope === 'tag-list') {
       replaceMockCalendarTags(readMockCalendarTagAuthority() ?? snapshot.tags);
       changed = true;
+    }
+  }
+
+  for (const entry of fieldEntries) {
+    if (!rememberMockCalendarChangeStamp(entry.key, entry.stamp)) continue;
+    const separator = entry.id.indexOf('|');
+    if (separator <= 0) continue;
+    const rowId = entry.id.slice(0, separator);
+    const field = entry.id.slice(separator + 1);
+
+    if (entry.scope === 'event-field') {
+      if (tombstonedMockCalendarEventIds.has(rowId)) continue;
+      const localEvent = mockCalendarEvents.find((candidate) => candidate.id === rowId);
+      const snapshotEvent = snapshot.events.find((candidate) => candidate.id === rowId);
+      if (!localEvent || !snapshotEvent || IMMUTABLE_MOCK_CALENDAR_EVENT_FIELDS.has(field)) continue;
+      (localEvent as unknown as Record<string, unknown>)[field] =
+        (snapshotEvent as unknown as Record<string, unknown>)[field];
+      if (snapshotEvent.updated_at > localEvent.updated_at) localEvent.updated_at = snapshotEvent.updated_at;
+      changed = true;
       continue;
     }
 
-    // calendar-field·event-field는 이후 병합 순서만 정한다. 행 내용은 calendar·event 항목이 채운다.
+    if (entry.scope === 'calendar-field') {
+      if (tombstonedMockCalendarIds.has(rowId)) continue;
+      const localCalendar = mockCalendars.find((candidate) => candidate.id === rowId);
+      const snapshotCalendar = snapshot.calendars.find((candidate) => candidate.id === rowId);
+      if (!localCalendar || !snapshotCalendar || !MERGEABLE_MOCK_CALENDAR_FIELDS.has(field)) continue;
+      (localCalendar as unknown as Record<string, unknown>)[field] =
+        (snapshotCalendar as unknown as Record<string, unknown>)[field];
+      if (snapshotCalendar.updated_at > localCalendar.updated_at) localCalendar.updated_at = snapshotCalendar.updated_at;
+      if (field === 'visibility') commitMockCalendarVisibility(rowId, localCalendar.visibility);
+      changed = true;
+    }
   }
 
   if (mergeMockCalendarNotifications(snapshot.notifications).length > 0) changed = true;
@@ -1134,6 +1220,9 @@ function normalizeMockCalendarEventTagId(tagId: unknown): string | null {
   if (typeof tagId !== 'string' || !CALENDAR_TAG_UUID_PATTERN.test(tagId)) {
     throw new Error('태그 ID는 UUID여야 합니다');
   }
+  // 다른 창이 방금 지운 태그를 module-local 목록만 보고 통과시키면, 운영의 외래키가
+  // 거절할 참조를 정본으로 퍼뜨리게 된다. 검증 직전에 공유 목록과 맞춘다.
+  synchronizeMockCalendarTagsWithAuthority();
   if (!mockCalendarTags.some(({ id }) => id === tagId)) {
     throw new Error('존재하지 않는 태그입니다');
   }
@@ -2543,6 +2632,7 @@ export function installDevElectronAPI(): void {
         ? []
         : normalizeMockCalendarMembers(created, input.members ?? []);
       mockCalendars.push(created);
+      commitMockCalendarVisibility(created.id, created.visibility);
       applyNormalizedMockCalendarMembers(created.id, members);
       publishMockCalendarChange({ table: 'calendars', action: 'INSERT', calendarId: created.id });
       return { ...created };
@@ -2567,9 +2657,10 @@ export function installDevElectronAPI(): void {
         throw new Error('캘린더 색상이 올바르지 않습니다');
       }
 
+      const currentVisibility = sharedMockCalendarVisibility(calendar);
       const nextVisibility = calendar.is_personal
-        ? calendar.visibility
-        : updates.visibility ?? calendar.visibility;
+        ? currentVisibility
+        : updates.visibility ?? currentVisibility;
       let nextMembers: MockCalendarMemberRow[] | undefined;
       if (updates.members !== undefined) {
         if (calendar.is_personal) throw new Error('개인 캘린더에는 멤버를 추가할 수 없습니다');
@@ -2595,6 +2686,7 @@ export function installDevElectronAPI(): void {
         calendar.visibility = nextVisibility;
         changedFields.push('visibility');
       }
+      commitMockCalendarVisibility(calendar.id, calendar.visibility);
       calendar.updated_at = new Date().toISOString();
       if (nextMembers !== undefined) applyNormalizedMockCalendarMembers(calendar.id, nextMembers);
       publishMockCalendarChange({
@@ -2617,6 +2709,7 @@ export function installDevElectronAPI(): void {
         .map((event) => event.id);
       const index = mockCalendars.findIndex((calendar) => calendar.id === id);
       if (index >= 0) mockCalendars.splice(index, 1);
+      commitMockCalendarVisibility(id, null);
       applyNormalizedMockCalendarMembers(id, []);
       for (let eventIndex = mockCalendarEvents.length - 1; eventIndex >= 0; eventIndex--) {
         if (mockCalendarEvents[eventIndex].calendar_id === id) {
@@ -2637,7 +2730,7 @@ export function installDevElectronAPI(): void {
       if (!canManageCalendar(calendar, mockPermissionUser(user))) {
         throw new Error('이 캘린더의 멤버를 수정할 권한이 없습니다');
       }
-      if (calendar.visibility === 'private' && members.length > 0) {
+      if (sharedMockCalendarVisibility(calendar) === 'private' && members.length > 0) {
         throw new Error('비공개 캘린더에는 멤버를 추가할 수 없습니다');
       }
       replaceMockCalendarMembers(calendar, members);
