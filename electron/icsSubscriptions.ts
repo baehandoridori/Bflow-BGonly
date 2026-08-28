@@ -64,6 +64,7 @@ type IcsVevent = {
   rrule?: { between(after: Date, before: Date, inclusive?: boolean): Date[] };
   exdate?: Record<string, unknown>;
   recurrences?: Record<string, IcsVevent>;
+  status?: unknown;
 };
 
 function pad(value: number): string {
@@ -157,15 +158,32 @@ function overlapsWindow(fields: Pick<IcsBaseFields, 'startDate' | 'endDate'>, wi
   return fields.endDate >= window.from && fields.startDate <= window.to;
 }
 
+/** STATUS:CANCELLED 인 일정·회차는 캘린더에 남기지 않는다. */
+function isCancelled(event: IcsVevent): boolean {
+  return readText(event.status, '').trim().toUpperCase() === 'CANCELLED';
+}
+
+/**
+ * node-ical은 VALUE=DATE를 "호스트 로컬 자정 + dateOnly 마커"로 준다.
+ * 인스턴트에 +9h를 더해 읽으면 UTC+10 이상 호스트에서 하루 밀리므로,
+ * 같은 파일의 비반복 경로(toDateOnlyString)와 규칙을 맞춘다.
+ */
+function occurrenceDateKey(value: Date & { dateOnly?: boolean }): string {
+  return value.dateOnly === true ? toDateOnlyString(value) : toKstFields(value).date;
+}
+
 function excludedOccurrenceKeys(event: IcsVevent): Set<string> {
   const keys = new Set<string>();
   const exdate = event.exdate;
   if (!exdate || typeof exdate !== 'object') return keys;
   for (const value of Object.values(exdate)) {
     if (!(value instanceof Date) || Number.isNaN(value.getTime())) continue;
-    const fields = toKstFields(value);
-    keys.add(fields.date);
-    keys.add(`${fields.date}T${fields.time}`);
+    const dated = value as Date & { dateOnly?: boolean };
+    keys.add(occurrenceDateKey(dated));
+    if (dated.dateOnly !== true) {
+      const fields = toKstFields(dated);
+      keys.add(`${fields.date}T${fields.time}`);
+    }
   }
   return keys;
 }
@@ -207,6 +225,7 @@ function findOverride(
 }
 
 function collectVevent(event: IcsVevent, window: IcsExpandWindow, out: IcsExpandedEvent[]): void {
+  if (isCancelled(event)) return;
   const base = readBaseFields(event);
   if (!base) return;
   const uid = readText(event.uid, '');
@@ -217,8 +236,10 @@ function collectVevent(event: IcsVevent, window: IcsExpandWindow, out: IcsExpand
     return;
   }
 
-  // 조회 창 경계에 걸친 회차를 잃지 않도록 하루씩 넉넉히 전개한 뒤 날짜로 다시 거른다.
-  const after = new Date(`${shiftDate(window.from, -1)}T00:00:00Z`);
+  // 조회 창 경계에 걸친 회차를 잃지 않도록 넉넉히 전개한 뒤 날짜로 다시 거른다.
+  // 패딩이 1일 고정이면 2일 이상 이어지는 회차가 창 시작 경계에서 통째로 빠진다.
+  const spanDays = Math.max(0, daysBetween(base.startDate, base.endDate)) + 1;
+  const after = new Date(`${shiftDate(window.from, -spanDays)}T00:00:00Z`);
   const before = new Date(`${shiftDate(window.to, 1)}T00:00:00Z`);
   let occurrences: Date[] = [];
   try {
@@ -234,20 +255,23 @@ function collectVevent(event: IcsVevent, window: IcsExpandWindow, out: IcsExpand
   for (const occurrence of occurrences) {
     if (!(occurrence instanceof Date) || Number.isNaN(occurrence.getTime())) continue;
     const occurrenceKst = toKstFields(occurrence);
-    if (excluded.has(occurrenceKst.date) || excluded.has(`${occurrenceKst.date}T${occurrenceKst.time}`)) continue;
-    if (seen.has(occurrenceKst.date)) continue;
-    seen.add(occurrenceKst.date);
+    const occurrenceDate = occurrenceDateKey(occurrence as Date & { dateOnly?: boolean });
+    if (excluded.has(occurrenceDate) || excluded.has(`${occurrenceKst.date}T${occurrenceKst.time}`)) continue;
+    if (seen.has(occurrenceDate)) continue;
+    seen.add(occurrenceDate);
 
-    const override = findOverride(overrides, occurrence, occurrenceKst.date);
+    const override = findOverride(overrides, occurrence, occurrenceDate);
+    // 오버라이드가 취소면 그 회차 자체를 건너뛴다(원본으로 되살리지 않는다).
+    if (isVevent(override) && isCancelled(override)) continue;
     const fields = isVevent(override)
-      ? readBaseFields(override) ?? occurrenceFields(base, occurrenceKst.date)
-      : occurrenceFields(base, occurrenceKst.date);
+      ? readBaseFields(override) ?? occurrenceFields(base, occurrenceDate)
+      : occurrenceFields(base, occurrenceDate);
     if (!overlapsWindow(fields, window)) continue;
 
     out.push({
       // 접미는 '옮긴 뒤 날짜'가 아니라 원 회차 날짜다. 수정본이 다른 회차 날짜 위로
       // 옮겨지면 두 회차가 같은 식별자가 되어 렌더러 이벤트 id까지 충돌한다.
-      uid: uid ? `${uid}:${occurrenceKst.date}` : occurrenceKst.date,
+      uid: uid ? `${uid}:${occurrenceDate}` : occurrenceDate,
       title: isVevent(override) ? readText(override.summary, title) : title,
       ...fields,
     });

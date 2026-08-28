@@ -178,6 +178,60 @@ test('expandIcsToEvents: UTC 피드에서 KST 다음날로 넘어가는 회차�
   assert.equal(out.filter((event) => event.title === '원본').length, 2);
 });
 
+test('expandIcsToEvents: 창 시작 경계에 걸친 다일 반복 회차를 잃지 않는다', () => {
+  // 매주 금요일 시작, 일요일까지 3일 종일 반복.
+  const ics = calendar(
+    'BEGIN:VEVENT', 'UID:span-1',
+    'DTSTART;VALUE=DATE:20260904', 'DTEND;VALUE=DATE:20260907', // 금~일(exclusive 종료)
+    'RRULE:FREQ=WEEKLY;COUNT=4', 'SUMMARY:주말 워크숍', 'END:VEVENT',
+  );
+
+  // 조회 창을 그 회차의 '일요일'부터 시작하면 금요일 시작 회차가 통째로 빠지면 안 된다.
+  const out = expandIcsToEvents(ics, { from: '2026-09-06', to: '2026-09-30' }).events;
+
+  assert.ok(
+    out.some((entry) => entry.startDate === '2026-09-04'),
+    '창 시작 이전에 시작해 창 안까지 이어지는 회차도 보여야 한다',
+  );
+});
+
+test('expandIcsToEvents: 종일 반복 회차의 날짜는 비반복 종일과 같은 규칙으로 읽는다', () => {
+  const repeating = calendar(
+    'BEGIN:VEVENT', 'UID:allday-rec',
+    'DTSTART;VALUE=DATE:20260901', 'DTEND;VALUE=DATE:20260902',
+    'RRULE:FREQ=WEEKLY;COUNT=3', 'SUMMARY:종일 반복', 'END:VEVENT',
+  );
+
+  assert.deepEqual(
+    expandIcsToEvents(repeating, WINDOW).events.map((entry) => entry.startDate),
+    ['2026-09-01', '2026-09-08', '2026-09-15'],
+    '종일 회차는 원래 적힌 날짜를 그대로 유지한다',
+  );
+});
+
+test('expandIcsToEvents: 취소된 일정과 취소된 회차는 보여 주지 않는다', () => {
+  const cancelledSingle = calendar(
+    'BEGIN:VEVENT', 'UID:cancelled-1',
+    'DTSTART;TZID=Asia/Seoul:20260901T140000', 'DTEND;TZID=Asia/Seoul:20260901T150000',
+    'STATUS:CANCELLED', 'SUMMARY:취소된 회의', 'END:VEVENT',
+  );
+  assert.deepEqual(expandIcsToEvents(cancelledSingle, WINDOW).events, []);
+
+  const cancelledOccurrence = calendar(
+    'BEGIN:VEVENT', 'UID:cancelled-2',
+    'DTSTART;TZID=Asia/Seoul:20260901T100000', 'DTEND;TZID=Asia/Seoul:20260901T103000',
+    'RRULE:FREQ=WEEKLY;COUNT=3', 'SUMMARY:주간 미팅', 'END:VEVENT',
+    'BEGIN:VEVENT', 'UID:cancelled-2', 'RECURRENCE-ID;TZID=Asia/Seoul:20260908T100000',
+    'DTSTART;TZID=Asia/Seoul:20260908T100000', 'DTEND;TZID=Asia/Seoul:20260908T103000',
+    'STATUS:CANCELLED', 'SUMMARY:주간 미팅', 'END:VEVENT',
+  );
+  assert.deepEqual(
+    expandIcsToEvents(cancelledOccurrence, WINDOW).events.map((entry) => entry.startDate),
+    ['2026-09-01', '2026-09-15'],
+    '취소된 회차만 빠진다',
+  );
+});
+
 test('expandIcsToEvents: 제목 없는 일정과 깨진 입력에도 무너지지 않는다', () => {
   const untitled = calendar(
     'BEGIN:VEVENT', 'UID:ev-untitled',
