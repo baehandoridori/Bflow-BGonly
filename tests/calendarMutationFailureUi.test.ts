@@ -20,7 +20,7 @@ type TestCalendarEvent = {
   endDate: string;
   createdBy: string;
   createdAt: string;
-  source?: 'bflow' | 'google' | 'vacation';
+  source?: 'bflow' | 'google' | 'vacation' | 'ics';
   sourceCalendarId?: string;
   calendarId?: string;
   tagId?: string;
@@ -1159,4 +1159,28 @@ test('side panel rehydrates a same-event teammate update that is unrelated to a 
     '팀원이 바꾼 일정',
     'an unrelated teammate update must replace the stale local draft with the latest title',
   );
+});
+
+test('the side panel names the subscription and shows its time', async () => {
+  const hooks = createHookStore();
+  const callbacks = { onClose() {}, onUpdate() {}, onDelete() {} };
+  const subscribed = event({
+    id: 'ics:sub-1:ext-1:2026-08-27',
+    title: '외부 세미나',
+    createdBy: '외부 팀 캘린더',
+    source: 'ics',
+    sourceCalendarId: 'ics:sub-1',
+    canEdit: false,
+    isReadOnly: true,
+    allDay: false,
+    startTime: '14:00',
+    endTime: '15:00',
+  });
+
+  const panel = await renderSidePanel(hooks, callbacks, subscribed);
+  const text = textContent(panel);
+
+  assert.match(text, /외부 팀 캘린더/, '구독 일정은 구독 이름을 보여 준다');
+  assert.doesNotMatch(text, /이전 일정/, "'이전 일정' 폴백으로 새지 않는다");
+  assert.match(text, /14:00 – 15:00/, '구독 시각 일정의 시각을 보여 준다');
 });

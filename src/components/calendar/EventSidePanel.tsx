@@ -545,7 +545,8 @@ export function EventSidePanel({
               <Clock size={12} className="shrink-0" />
               <span className="text-xs">
                 {formatDateRange(event.startDate, event.endDate)}
-                {supportsTimeEditing && event.allDay === false && event.startTime && event.endTime
+                {/* 편집 가능 여부와 표시는 별개다 — 구독 일정은 못 고쳐도 시각은 보여 준다. */}
+                {(supportsTimeEditing || event.source === 'ics') && event.allDay === false && event.startTime && event.endTime
                   ? ` ${event.startTime} – ${event.endTime}`
                   : ''}
               </span>
@@ -615,7 +616,11 @@ export function EventSidePanel({
             <div className="flex flex-wrap items-center gap-1.5 border-t border-bg-border/45 pt-2 text-[10px] text-text-secondary">
               <span className="inline-flex items-center gap-1.5 rounded-full bg-bg-primary/65 px-2 py-1">
                 <span className="h-2 w-2 rounded-full" style={{ backgroundColor: event.color }} />
-                {currentCalendar?.name ?? (event.source === 'google' ? '내 구글 캘린더' : isVacation ? '휴가' : '이전 일정')}
+                {currentCalendar?.name ?? (
+                  event.sourceCalendarId?.startsWith('ics:')
+                    ? (event.createdBy || '외부 캘린더')
+                    : event.source === 'google' ? '내 구글 캘린더' : isVacation ? '휴가' : '이전 일정'
+                )}
               </span>
               {currentTag && (
                 <span
