@@ -3785,6 +3785,63 @@ test('ScheduleView calendar-changed listener replaces or closes long-lived event
   assert.equal(scheduleQuickEditProps.length, 0, 'the revoked row closes quick edit');
 });
 
+test('ScheduleView keeps the same event object when an unrelated refresh brings identical content', async () => {
+  resetHarness();
+  const original = calendarListEvent({
+    id: 'editing-target',
+    title: '내가 열어 둔 일정',
+    memo: '메모',
+    source: 'bflow',
+    sourceCalendarId: 'bflow:mine',
+    calendarId: 'mine',
+    canEdit: true,
+    isReadOnly: false,
+  });
+  scheduleCanonicalEvents = [original];
+
+  await renderScheduleView();
+  await flushScheduleMountEffects();
+  await renderScheduleView();
+  scheduleGridProps.at(-1)?.onEventClick(original);
+  scheduleGridProps.at(-1)?.onEventContextMenu(original, {
+    preventDefault() {}, stopPropagation() {}, clientX: 120, clientY: 180,
+  });
+  await renderScheduleView();
+  const panelBefore = schedulePanelProps.at(-1)?.event;
+  const quickEditBefore = scheduleQuickEditProps.at(-1)?.event;
+  assert.ok(panelBefore && quickEditBefore);
+
+  // 팀원이 '다른' 일정을 바꿔 재조회가 돌았다. 내 일정 내용은 그대로지만
+  // getEvents()가 매번 새 객체를 만들어 준다.
+  scheduleCanonicalEvents = [{ ...original }];
+  await dispatchScheduleWindowEvent('bflow:calendar-changed');
+  schedulePanelProps = [];
+  scheduleQuickEditProps = [];
+  await renderScheduleView();
+
+  assert.equal(
+    schedulePanelProps.at(-1)?.event,
+    panelBefore,
+    '내용이 같으면 패널에 같은 객체를 유지해 편집 초안이 풀리지 않는다',
+  );
+  assert.equal(
+    scheduleQuickEditProps.at(-1)?.event,
+    quickEditBefore,
+    '퀵에디트도 같은 객체를 유지한다',
+  );
+
+  // 내용이 실제로 바뀌면 기존대로 정본을 따라간다.
+  const changed = { ...original, title: '팀원이 바꾼 제목' };
+  scheduleCanonicalEvents = [changed];
+  await dispatchScheduleWindowEvent('bflow:calendar-changed');
+  schedulePanelProps = [];
+  scheduleQuickEditProps = [];
+  await renderScheduleView();
+
+  assert.deepEqual(schedulePanelProps.at(-1)?.event, changed, '실제 변경은 그대로 반영한다');
+  assert.deepEqual(scheduleQuickEditProps.at(-1)?.event, changed);
+});
+
 test('ScheduleView highlights only later external additions and changes, then clears the newest pulse after two seconds', async () => {
   resetHarness();
   const baseline = calendarListEvent({

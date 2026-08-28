@@ -46,6 +46,7 @@ import { createUuid } from '@/utils/createUuid';
 import { fmtDate, parseDate, addDays, getISOWeekNumber } from '@/utils/calendarDate';
 import { useMotionPref } from '@/hooks/useMotionPref';
 import { buildEventSnapshot, diffEventSnapshots, type CalendarEventSnapshot } from '@/utils/calendarEventDiff';
+import { eventContentSnapshot } from '@/utils/calendarLocalMutation';
 
 type WeekSubMode = 'card' | 'timegrid';
 
@@ -454,10 +455,16 @@ export function ScheduleView() {
     }
 
     setEvents(canonicalEvents);
+    // bflow 일정은 재조회 때마다 새 객체로 만들어진다. 내용이 그대로인데 참조만 바뀌면
+    // 편집기의 재수화 effect가 돌아 편집 모드가 풀리고 초안이 사라진다(팀원이 '다른'
+    // 일정을 바꿔도 재조회가 돌기 때문에 상시 발생). 내용이 같으면 기존 객체를 그대로 둔다.
+    const keepIfUnchanged = (previous: CalendarEvent, canonical: CalendarEvent): CalendarEvent => (
+      eventContentSnapshot(canonical) === eventContentSnapshot(previous) ? previous : canonical
+    );
     setPanelEvent((previous) => {
       if (!previous || previous.source === 'vacation') return previous;
       const canonical = canonicalEvents.find((event) => hasSameCalendarEventIdentity(event, previous));
-      if (canonical) return canonical;
+      if (canonical) return keepIfUnchanged(previous, canonical);
       return pendingEditorDeleteCountsRef.current.has(calendarEventIdentityKey(previous))
         ? previous
         : null;
@@ -468,7 +475,10 @@ export function ScheduleView() {
       const canonical = canonicalEvents.find((event) => (
         hasSameCalendarEventIdentity(event, previous.event)
       ));
-      if (canonical) return { ...previous, event: canonical };
+      if (canonical) {
+        const next = keepIfUnchanged(previous.event, canonical);
+        return next === previous.event ? previous : { ...previous, event: next };
+      }
       return pendingEditorDeleteCountsRef.current.has(calendarEventIdentityKey(previous.event))
         ? previous
         : null;
