@@ -3891,6 +3891,42 @@ test('ScheduleView treats its optimistic calendar metadata refresh as local befo
   }
 });
 
+test('ScheduleView does not flash a subscription refresh as a teammate change', async () => {
+  resetHarness();
+  const baseline = calendarListEvent({
+    id: 'ics-baseline',
+    title: '기존 일정',
+    source: 'bflow',
+    sourceCalendarId: 'bflow:mine',
+    calendarId: 'mine',
+    canEdit: true,
+  });
+  scheduleCanonicalEvents = [baseline];
+  await renderScheduleView();
+  await flushScheduleMountEffects();
+
+  const clock = installScheduleFakeClock();
+  try {
+    scheduleCanonicalEvents = [baseline, calendarListEvent({
+      id: 'ics:sub-1:ext-1:2026-08-27',
+      title: '외부 세미나',
+      source: 'ics',
+      sourceCalendarId: 'ics:sub-1',
+      calendarId: undefined,
+      canEdit: false,
+    })];
+    await dispatchScheduleWindowEvent('bflow:calendar-changed', { action: 'ics' });
+    await renderScheduleView();
+    assert.deepEqual(
+      [...(scheduleGridProps.at(-1)?.highlightedEventIdentities ?? [])],
+      [],
+      '외부 구독 갱신은 팀원 변경 안내가 아니다',
+    );
+  } finally {
+    clock.restore();
+  }
+});
+
 test('ScheduleView does not highlight deletions and passes an external add target to the weekly time grid', async () => {
   resetHarness();
   const removed = calendarListEvent({

@@ -70,11 +70,15 @@ type LocalChangeGuardHandle = {
   key: string;
 };
 
-function isOptimisticMetadataCalendarRefresh(event: Event): boolean {
+/**
+ * 실시간 하이라이트는 '팀원이 방금 바꿨어요'를 알리는 용도다. 내가 만든 낙관 반영과
+ * 외부 구독(ICS) 재적재는 팀원 변경이 아니므로 펄스 대상에서 뺀다.
+ */
+function isSelfDrivenCalendarRefresh(event: Event): boolean {
   const detail = (event as CustomEvent<unknown>).detail;
-  return typeof detail === 'object'
-    && detail !== null
-    && (detail as { action?: unknown }).action === 'optimistic-metadata';
+  if (typeof detail !== 'object' || detail === null) return false;
+  const action = (detail as { action?: unknown }).action;
+  return action === 'optimistic-metadata' || action === 'ics';
 }
 
 function expectedCreatedEvent(
@@ -528,7 +532,7 @@ export function ScheduleView() {
     })();
     const handleCalendarChanged = (event: Event) => {
       void refresh({
-        suppressRealtimeHighlight: isInitialCalendarSyncRef.current || isOptimisticMetadataCalendarRefresh(event),
+        suppressRealtimeHighlight: isInitialCalendarSyncRef.current || isSelfDrivenCalendarRefresh(event),
       });
     };
     window.addEventListener('bflow:calendar-changed', handleCalendarChanged);
