@@ -468,6 +468,14 @@ test('createIcsTextFetcher: http(s) 밖으로 가는 리다이렉트는 따라�
   await assert.rejects(() => harness.fetchText('https://example.com/team.ics'), /http 또는 https/);
 });
 
+test('createIcsTextFetcher: 리다이렉트 주소가 깨져 있으면 크래시 대신 실패로 알린다', async () => {
+  const harness = createFetcherHarness({
+    'https://example.com/team.ics': { statusCode: 302, headers: { location: 'http://' } },
+  });
+
+  await assert.rejects(() => harness.fetchText('https://example.com/team.ics'), /주소/);
+});
+
 test('createIcsTextFetcher: 실패 응답과 전송 오류를 사유와 함께 알린다', async () => {
   const notFound = createFetcherHarness({ 'https://example.com/a.ics': { statusCode: 404 } });
   await assert.rejects(() => notFound.fetchText('https://example.com/a.ics'), /404/);

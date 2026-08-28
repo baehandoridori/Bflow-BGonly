@@ -576,51 +576,65 @@ export function createIcsTextFetcher(deps: IcsTextFetcherDeps): (url: string) =>
         run();
       };
 
+      // 응답 콜백은 http 모듈이 동기로 호출한다 — 여기서 던진 예외는 잡아 줄 곳이 없어
+      // 메인 프로세스 uncaughtException(=앱 종료)이 된다. 본문 전체를 감싸 실패로 접는다.
       const request = deps.get(url, (response) => {
-        const status = response.statusCode ?? 0;
+        try {
+          const status = response.statusCode ?? 0;
 
-        if (status >= 300 && status < 400) {
-          const location = readLocationHeader(response);
-          response.destroy();
-          if (!location) {
-            settle(() => reject(new Error(`외부 캘린더가 옮겨 간 주소를 알려 주지 않았습니다 (${status})`)));
-            return;
-          }
-          if (redirectsLeft <= 0) {
-            settle(() => reject(new Error('주소가 너무 여러 번 옮겨져 불러오지 못했습니다')));
-            return;
-          }
-          const next = normalizeIcsUrl(new URL(location, url).toString());
-          if (!next) {
-            settle(() => reject(new Error(ICS_URL_ERROR)));
-            return;
-          }
-          settle(() => { resolve(requestOnce(next, redirectsLeft - 1)); });
-          return;
-        }
-
-        if (status < 200 || status >= 300) {
-          response.destroy();
-          settle(() => reject(new Error(`외부 캘린더를 불러오지 못했습니다 (${status})`)));
-          return;
-        }
-
-        let received = 0;
-        const chunks: string[] = [];
-        response.setEncoding('utf8');
-        response.on('data', (chunk: string) => {
-          received += Buffer.byteLength(chunk, 'utf8');
-          if (received > ICS_MAX_RESPONSE_BYTES) {
+          if (status >= 300 && status < 400) {
+            const location = readLocationHeader(response);
             response.destroy();
-            settle(() => reject(new Error('외부 캘린더 파일이 너무 큽니다')));
+            if (!location) {
+              settle(() => reject(new Error(`외부 캘린더가 옮겨 간 주소를 알려 주지 않았습니다 (${status})`)));
+              return;
+            }
+            if (redirectsLeft <= 0) {
+              settle(() => reject(new Error('주소가 너무 여러 번 옮겨져 불러오지 못했습니다')));
+              return;
+            }
+            // 외부 서버가 파싱 불가능한 Location(예: 'http://')을 줄 수 있다.
+            let resolvedLocation: string;
+            try {
+              resolvedLocation = new URL(location, url).toString();
+            } catch {
+              settle(() => reject(new Error(ICS_URL_ERROR)));
+              return;
+            }
+            const next = normalizeIcsUrl(resolvedLocation);
+            if (!next) {
+              settle(() => reject(new Error(ICS_URL_ERROR)));
+              return;
+            }
+            settle(() => { resolve(requestOnce(next, redirectsLeft - 1)); });
             return;
           }
-          chunks.push(chunk);
-        });
-        response.on('end', () => { settle(() => resolve(chunks.join(''))); });
-        response.on('error', (error) => {
+
+          if (status < 200 || status >= 300) {
+            response.destroy();
+            settle(() => reject(new Error(`외부 캘린더를 불러오지 못했습니다 (${status})`)));
+            return;
+          }
+
+          let received = 0;
+          const chunks: string[] = [];
+          response.setEncoding('utf8');
+          response.on('data', (chunk: string) => {
+            received += Buffer.byteLength(chunk, 'utf8');
+            if (received > ICS_MAX_RESPONSE_BYTES) {
+              response.destroy();
+              settle(() => reject(new Error('외부 캘린더 파일이 너무 큽니다')));
+              return;
+            }
+            chunks.push(chunk);
+          });
+          response.on('end', () => { settle(() => resolve(chunks.join(''))); });
+          response.on('error', (error) => {
+            settle(() => reject(error instanceof Error ? error : new Error(readErrorMessage(error))));
+          });
+        } catch (error) {
           settle(() => reject(error instanceof Error ? error : new Error(readErrorMessage(error))));
-        });
+        }
       });
 
       request.on('error', (error) => {
