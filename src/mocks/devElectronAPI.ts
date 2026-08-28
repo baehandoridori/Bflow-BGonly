@@ -288,6 +288,29 @@ function buildMockIcsEvents(): IcsEventDto[] {
 const mockIcsEvents = buildMockIcsEvents();
 const mockIcsChangeListeners = new Set<(payload: unknown) => void>();
 
+/**
+ * 운영 normalizeIcsUrl(electron/icsSubscriptions.ts)과 같은 규칙.
+ * 그 파일은 메인 프로세스 전용이라 프리뷰에서 가져올 수 없어 여기에 복제해 둔다 —
+ * 규칙을 바꿀 때는 두 곳을 함께 고칠 것.
+ */
+function normalizeMockIcsUrl(rawUrl: unknown): string | null {
+  if (typeof rawUrl !== 'string') return null;
+  const trimmed = rawUrl.trim();
+  if (trimmed === '') return null;
+  const withProtocol = /^webcal:\/\//i.test(trimmed)
+    ? `https://${trimmed.slice('webcal://'.length)}`
+    : trimmed;
+  let parsed: URL;
+  try {
+    parsed = new URL(withProtocol);
+  } catch {
+    return null;
+  }
+  if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') return null;
+  if (!parsed.hostname) return null;
+  return parsed.toString();
+}
+
 function notifyMockIcsChanged(subId: string | null): void {
   for (const listener of mockIcsChangeListeners) {
     try {
@@ -3310,11 +3333,8 @@ export function installDevElectronAPI(): void {
     // ─── 외부 캘린더(ICS) 구독 mock ───
     icsList: async () => mockIcsSubscriptions.map((row) => ({ ...row })),
     icsAdd: async (input: IcsSubscriptionAddInput) => {
-      const trimmed = typeof input?.url === 'string' ? input.url.trim() : '';
-      const normalized = /^webcal:\/\//i.test(trimmed)
-        ? `https://${trimmed.slice('webcal://'.length)}`
-        : trimmed;
-      if (!/^https?:\/\/.+/i.test(normalized)) {
+      const normalized = normalizeMockIcsUrl(input?.url);
+      if (!normalized) {
         throw new Error('캘린더 주소는 http 또는 https로 시작해야 합니다');
       }
       const created: IcsSubscription = {

@@ -90,6 +90,8 @@ type PreviewCalendarApi = {
     updates: Partial<Omit<CalendarEventRow, 'id' | 'created_by' | 'created_at' | 'updated_at'>>,
   ): Promise<CalendarEventRow>;
   calendarEventDelete(id: string): Promise<void>;
+  icsAdd(input: { name: string; url: string; color: string }): Promise<{ id: string; url: string }>;
+  icsList(): Promise<Array<{ id: string; url: string }>>;
   calendarPrivacyReplacementCreate(request: {
     storage: 'bflow' | 'legacy-private' | 'google';
     calendar_id?: string;
@@ -1992,4 +1994,56 @@ test('EventCreateModal keeps a later-date timed interval even when its clock tim
   assert.equal(result.saved[0].startTime, '23:30');
   assert.equal(result.saved[0].endDate, '2026-08-26');
   assert.equal(result.saved[0].endTime, '00:30');
+});
+
+test('preview ICS subscribe rejects the same addresses as the real app and normalizes the rest', async () => {
+  const harness = await createPreviewCalendarHarness();
+  try {
+    assert.equal((await harness.api.loginCanonicalSession({
+      name: '배한솔',
+      password: '1234',
+      rememberMe: false,
+    })).ok, true);
+
+    // 운영 normalizeIcsUrl이 거절하는 주소는 프리뷰에서도 거절해야 한다.
+    for (const rejected of ['file:///etc/passwd', 'javascript:alert(1)', 'ftp://example.com/a.ics', 'http://', '그냥 글자', '']) {
+      await assert.rejects(
+        harness.api.icsAdd({ name: '이상한 주소', url: rejected, color: '#74B9FF' }),
+        /http 또는 https/,
+        `${rejected} 는 거절한다`,
+      );
+    }
+
+    const added = await harness.api.icsAdd({
+      name: '팀 외부 일정',
+      url: '  webcal://example.com/team.ics  ',
+      color: '#74B9FF',
+    });
+    assert.equal(added.url, 'https://example.com/team.ics', 'webcal은 https로 바꾸고 공백을 다듬는다');
+
+    // 운영은 주소를 파싱해 정규화한다. 문자열 검사만 하면 아래 값들이 그대로 저장돼
+    // 프리뷰에서만 통과하고 실제 앱에서는 다르게 동작한다.
+    const upperHost = await harness.api.icsAdd({
+      name: '대문자 호스트',
+      url: 'HTTPS://EXAMPLE.COM/Team.ics',
+      color: '#74B9FF',
+    });
+    assert.equal(upperHost.url, 'https://example.com/Team.ics', '호스트는 소문자로 정규화한다');
+
+    const noPath = await harness.api.icsAdd({
+      name: '경로 없는 주소',
+      url: 'https://example.com',
+      color: '#74B9FF',
+    });
+    assert.equal(noPath.url, 'https://example.com/', '경로가 없으면 운영과 같이 / 를 채운다');
+
+    const spaced = await harness.api.icsAdd({
+      name: '공백이 든 경로',
+      url: 'https://example.com/a b.ics',
+      color: '#74B9FF',
+    });
+    assert.equal(spaced.url, 'https://example.com/a%20b.ics', '경로의 공백도 운영과 같이 인코딩한다');
+  } finally {
+    harness.restore();
+  }
 });
