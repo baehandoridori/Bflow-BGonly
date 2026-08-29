@@ -28,7 +28,10 @@ export function Header({ activeView, onRefresh }: HeaderProps) {
     : '동기화 대기 중';
 
   return (
-    <header className="relative z-30 h-14 shrink-0 bg-bg-card border-b border-bg-border flex items-center justify-between px-6">
+    // z-40: 본문의 sticky 헤더(z-30)보다 위여야 한다. 알림 패널이 이 헤더 안에 붙어 있어서,
+    // 여기가 본문과 같은 z이면 패널이 z-[9999]여도 뒤에 그려진 본문에 가린다.
+    // 모달 백드롭(z-40이지만 DOM상 뒤)과 설정 모달(z-50)은 여전히 헤더를 덮는다.
+    <header className="relative z-40 h-14 shrink-0 bg-bg-card border-b border-bg-border flex items-center justify-between px-6">
       {/* 왼쪽: 현재 뷰 제목 */}
       <div className="flex min-w-0 items-center gap-3">
         {navigationBackTarget && (
