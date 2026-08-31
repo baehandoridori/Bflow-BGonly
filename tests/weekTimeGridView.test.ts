@@ -199,6 +199,28 @@ async function loadWeekTimeGridView(reduceMotion = false): Promise<WeekTimeGridM
   return module.exports as unknown as WeekTimeGridModule;
 }
 
+/**
+ * 렌더 동안만 '오늘'을 고정한다. 이 컴포넌트는 부모가 준 today 대신 살아 있는 시계
+ * (`new Date()`)로 오늘을 정하므로, 고정하지 않으면 테스트가 실행 요일에 따라 결과가 달라진다.
+ */
+function withFakeToday<T>(fixed: Date, run: () => T): T {
+  const RealDate = Date;
+  class FakeDate extends RealDate {
+    constructor(...args: ConstructorParameters<typeof Date> | []) {
+      if (args.length === 0) super(fixed.getTime());
+      else super(...(args as ConstructorParameters<typeof Date>));
+    }
+
+    static now(): number { return fixed.getTime(); }
+  }
+  (globalThis as { Date: DateConstructor }).Date = FakeDate as unknown as DateConstructor;
+  try {
+    return run();
+  } finally {
+    (globalThis as { Date: DateConstructor }).Date = RealDate;
+  }
+}
+
 function findWeekElements(
   node: ReactNode,
   predicate: (element: ReactElement<Record<string, unknown>>) => boolean,
@@ -620,11 +642,12 @@ test('WeekTimeGridView: 오늘 외 열의 현재 시각선은 28% 빨강 1px을 
 
 test('WeekTimeGridView: weekend-today accent를 보존하는 주말 tint와 종일 칩 표기를 실제 마크업에 남긴다', async () => {
   const module = await loadWeekTimeGridView();
-  const liveNow = new Date();
-  // 부모가 전달한 today가 오래되어도 minute-updated clock의 실제 오늘을 써야 한다.
+  // 오늘이 '주말이면서 오늘'인 칸을 항상 만들려면 시계를 고정해야 한다.
+  // 고정하지 않으면 실제로 토·일에 돌릴 때만 통과해 월~금에는 릴리스 빌드가 막힌다.
+  const fakeToday = new Date(2026, 7, 29, 12); // 2026-08-29 (토)
   const week = Array.from(
     { length: 7 },
-    (_, index) => new Date(liveNow.getFullYear(), liveNow.getMonth(), liveNow.getDate() + index, 12),
+    (_, index) => new Date(2026, 7, 29 + index, 12),
   );
   const weekOutsideToday = Array.from({ length: 7 }, (_, index) => new Date(2000, 0, 2 + index, 12));
   const allDayEvents = [
@@ -632,7 +655,7 @@ test('WeekTimeGridView: weekend-today accent를 보존하는 주말 tint와 종�
     event({ id: 'all-2', allDay: true }),
     event({ id: 'all-3', allDay: true }),
   ];
-  const markup = renderToStaticMarkup(createElement(module.default, {
+  const markup = withFakeToday(fakeToday, () => renderToStaticMarkup(createElement(module.default, {
     weekDays: week,
     events: allDayEvents,
     today: '1900-01-01',
@@ -644,8 +667,8 @@ test('WeekTimeGridView: weekend-today accent를 보존하는 주말 tint와 종�
     weekCount: 4,
     onWeekChange() {},
     onEventContextMenu() {},
-  }));
-  const collapsedMarkup = renderToStaticMarkup(createElement(module.default, {
+  })));
+  const collapsedMarkup = withFakeToday(fakeToday, () => renderToStaticMarkup(createElement(module.default, {
     weekDays: weekOutsideToday,
     events: allDayEvents,
     today: '1900-01-01',
@@ -656,7 +679,7 @@ test('WeekTimeGridView: weekend-today accent를 보존하는 주말 tint와 종�
     activeWeekIndex: 0,
     weekCount: 4,
     onWeekChange() {},
-  }));
+  })));
 
   assert.deepEqual(module.getAllDayBarStyle('#6C5CE7'), {
     background: 'rgb(41, 40, 74)',
