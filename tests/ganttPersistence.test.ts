@@ -343,8 +343,11 @@ test('PostgreSQL migration, ACL, CAS, replay, projection, and calendar deletion 
       await assert.rejects(store.execute('bob', { requestId: 'not-editor', command: { type: 'saveProject', expectedRevision: 5, project: { ...restricted, revision: 5 } } }), /프로젝트 편집/);
       await store.execute('alice', { requestId: 'remove-member', command: { type: 'saveSpace', expectedRevision: 1, space: { ...space, members: [] } } });
       assert.deepEqual(await store.read('bob'), { spaces: [], projects: [] });
+      const afterRevocation = (await store.read('alice')).projects[0];
+      assert.equal(afterRevocation.revision, 6, 'pruning the project access list increments its revision');
+      assert.deepEqual(afterRevocation.memberIds, []);
       const replay = await store.execute('alice', createProject);
-      assert.equal(replay.projects[0].revision, 5);
+      assert.deepEqual(replay.projects[0], afterRevocation, 'replay returns the current project after the folder cascade');
     });
     await t.test('user deletion requires a successor, preserves shared projects, and removes personal projects', async () => {
       const personalSpace = { ...space, id: '00000000-0000-4000-8000-000000000011', name: '개인', shared: false, members: [] };

@@ -188,7 +188,7 @@ END $$;
 -- can still be changed after calendar edit rights are revoked, without altering shared details.
 CREATE OR REPLACE FUNCTION public.gantt_check_calendar_changes(p_actor TEXT,p_before JSONB,p_after JSONB)
 RETURNS VOID LANGUAGE plpgsql SECURITY INVOKER SET search_path=public,pg_temp AS $$
-DECLARE entry RECORD; shared_keys TEXT[]:=ARRAY['title','memo','startDate','endDate','allDay','startTime','endTime','calendarId']; before_fields JSONB; after_fields JSONB;
+DECLARE entry RECORD; shared_keys TEXT[]:=ARRAY['title','memo','startDate','endDate','allDay','startTime','endTime','calendarId','kind']; before_fields JSONB; after_fields JSONB;
 BEGIN
   FOR entry IN
     SELECT b.value AS old_task,a.value AS new_task
@@ -210,7 +210,7 @@ END $$;
 
 CREATE OR REPLACE FUNCTION public.gantt_execute(p_actor_id TEXT,p_request_id TEXT,p_command JSONB)
 RETURNS JSONB LANGUAGE plpgsql SECURITY INVOKER SET search_path=public,pg_temp AS $$
-DECLARE kind TEXT; submitted JSONB; existing JSONB; space JSONB; receipt JSONB; expected INTEGER; next_revision INTEGER; entity_id TEXT; member JSONB; p RECORD;
+DECLARE kind TEXT; submitted JSONB; existing JSONB; space JSONB; receipt JSONB; expected INTEGER; next_revision INTEGER; entity_id TEXT; member JSONB; p RECORD; next_data JSONB; next_owner TEXT; acl_key TEXT;
 BEGIN
   IF COALESCE(btrim(p_request_id),'')='' OR length(p_request_id)>128 OR jsonb_typeof(p_command) IS DISTINCT FROM 'object' OR length(p_command::TEXT)>4000000 THEN
     RAISE EXCEPTION '간트 요청이 올바르지 않습니다' USING ERRCODE='22023';
@@ -254,6 +254,26 @@ BEGIN
     submitted:=jsonb_set(submitted,'{revision}',to_jsonb(next_revision));
     INSERT INTO public.gantt_spaces(id,owner_id,revision,data) VALUES(entity_id,p_actor_id,next_revision,submitted)
     ON CONFLICT(id) DO UPDATE SET revision=EXCLUDED.revision,data=EXCLUDED.data,updated_at=now();
+    -- A folder access change must leave each child project editable by its owner.
+    -- Transfer departed owners to the folder owner and trim explicit project ACLs
+    -- in this same locked transaction; revision changes invalidate stale saves/undo.
+    FOR p IN SELECT * FROM public.gantt_projects WHERE space_id=entity_id ORDER BY id LOOP
+      next_owner:=CASE WHEN public.gantt_space_access(submitted,p.owner_id) THEN p.owner_id ELSE submitted->>'ownerId' END;
+      next_data:=jsonb_set(p.data,'{ownerId}',to_jsonb(next_owner));
+      FOREACH acl_key IN ARRAY ARRAY['memberIds','editorIds'] LOOP
+        IF next_data->acl_key<>'null'::JSONB THEN
+          next_data:=jsonb_set(next_data,ARRAY[acl_key],COALESCE((
+            SELECT jsonb_agg(v ORDER BY ord)
+            FROM jsonb_array_elements(next_data->acl_key) WITH ORDINALITY e(v,ord)
+            WHERE public.gantt_space_access(submitted,v#>>'{}')
+          ),'[]'::JSONB));
+        END IF;
+      END LOOP;
+      IF next_data IS DISTINCT FROM p.data THEN
+        UPDATE public.gantt_projects SET owner_id=next_owner,revision=p.revision+1,
+          data=jsonb_set(next_data,'{revision}',to_jsonb(p.revision+1)),updated_at=now() WHERE id=p.id;
+      END IF;
+    END LOOP;
   ELSIF kind='saveProject' THEN
     submitted:=p_command->'project'; entity_id:=submitted->>'id';
     PERFORM public.gantt_validate_project(submitted);
@@ -297,6 +317,11 @@ BEGIN
     entity_id:=p_command->>'spaceId'; SELECT data INTO existing FROM public.gantt_spaces WHERE id=entity_id;
     IF existing IS NULL OR existing->>'ownerId'<>p_actor_id THEN RAISE EXCEPTION '폴더 소유자만 삭제할 수 있습니다' USING ERRCODE='42501'; END IF;
     IF expected IS DISTINCT FROM (existing->>'revision')::INTEGER THEN RAISE EXCEPTION '다른 사용자가 폴더를 먼저 수정했습니다' USING ERRCODE='40001'; END IF;
+    -- Undoing folder creation may only remove a still-empty folder. A project
+    -- can arrive after the renderer's read without changing the folder revision.
+    IF p_command->'requireEmpty'='true'::JSONB AND EXISTS(SELECT 1 FROM public.gantt_projects WHERE space_id=entity_id) THEN
+      RAISE EXCEPTION '폴더에 다른 프로젝트가 추가되어 실행 취소할 수 없습니다' USING ERRCODE='40001';
+    END IF;
     FOR p IN SELECT data FROM public.gantt_projects WHERE space_id=entity_id LOOP
       PERFORM public.gantt_check_calendar_changes(p_actor_id,p.data,NULL);
     END LOOP;
@@ -337,7 +362,7 @@ END $$;
 -- The trigger participates in the original calendar transaction and increments the same
 -- project revision, so an in-flight project save cannot restore the removed calendar ID.
 CREATE OR REPLACE FUNCTION public.gantt_unlink_deleted_calendar()
-RETURNS TRIGGER LANGUAGE plpgsql SECURITY INVOKER SET search_path=public,pg_temp AS $$
+RETURNS TRIGGER LANGUAGE plpgsql SECURITY DEFINER SET search_path=public,pg_temp AS $$
 BEGIN
   LOCK TABLE public.gantt_spaces IN SHARE ROW EXCLUSIVE MODE;
   LOCK TABLE public.gantt_projects IN SHARE ROW EXCLUSIVE MODE;
@@ -357,7 +382,7 @@ CREATE TRIGGER gantt_calendar_deleted AFTER DELETE ON public.calendars FOR EACH 
 -- before deleting users. Preserve its rule: personal data is removed; shared team assets
 -- move to another admin (배한솔 first), and the whole deletion fails if none exists.
 CREATE OR REPLACE FUNCTION public.gantt_before_user_delete()
-RETURNS TRIGGER LANGUAGE plpgsql SECURITY INVOKER SET search_path=public,pg_temp AS $$
+RETURNS TRIGGER LANGUAGE plpgsql SECURITY DEFINER SET search_path=public,pg_temp AS $$
 DECLARE successor TEXT; p RECORD; next_data JSONB; next_tasks JSONB; next_owner TEXT;
 BEGIN
   LOCK TABLE public.calendars IN SHARE ROW EXCLUSIVE MODE;
@@ -400,6 +425,17 @@ BEGIN
 END $$;
 DROP TRIGGER IF EXISTS gantt_user_deleted ON public.users;
 CREATE TRIGGER gantt_user_deleted BEFORE DELETE ON public.users FOR EACH ROW EXECUTE FUNCTION public.gantt_before_user_delete();
+
+-- Parent calendar/user DELETE keeps its existing authorization. Only these trigger
+-- bodies need Gantt table access after containment; they are never public RPCs.
+REVOKE ALL PRIVILEGES ON FUNCTION public.gantt_unlink_deleted_calendar(),public.gantt_before_user_delete() FROM PUBLIC;
+DO $$ DECLARE role_name TEXT; BEGIN
+  FOREACH role_name IN ARRAY ARRAY['anon','authenticated'] LOOP
+    IF EXISTS(SELECT 1 FROM pg_roles WHERE rolname=role_name) THEN
+      EXECUTE format('REVOKE ALL PRIVILEGES ON FUNCTION public.gantt_unlink_deleted_calendar(),public.gantt_before_user_delete() FROM %I',role_name);
+    END IF;
+  END LOOP;
+END $$;
 
 DO $$ DECLARE role_name TEXT; BEGIN
   FOREACH role_name IN ARRAY ARRAY['anon','authenticated'] LOOP

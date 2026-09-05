@@ -33,8 +33,8 @@ function fixture(): GanttSnapshot {
 }
 type Props = {children?: ReactNode; value?: string; disabled?: boolean; 'aria-label'?: string; onClick?: () => void; onChange?: (event: {target: {value: string}}) => void};
 type Element = ReactElement<Props>;
-type CanvasProps = {selected: string[]; onSelect(projectId: string, taskId: string | null, multiple?: boolean): void};
-type InspectorProps = {onAddChild(): void};
+type CanvasProps = {selected: string[]; onSelect(projectId: string, taskId: string | null, multiple?: boolean): void; onAdd(project: GanttProject, parentId: string|null, start: string, end: string): void};
+type InspectorProps = {onAddChild(): void; onDelete(): void; onSaveTask(patch: Partial<GanttTask>): Promise<void>};
 const bundle = build({
   entryPoints: ['src/features/gantt/GanttView.tsx'], bundle: true, format: 'cjs', platform: 'node', target: 'node22', write: false,
   external: ['react', 'react/jsx-runtime', 'lucide-react', '@/stores/useAuthStore', '@/stores/useDataStore', '@/stores/useCalendarStore', '@/utils/calcStats', './useGanttStore', './GanttCanvas', './GanttDialogs', './GanttInspector', './gantt.css'],
@@ -209,4 +209,26 @@ test('inspector child creation uses the selected group start date', async () => 
   assert.equal(child.parentId, GROUP);
   assert.equal(child.startDate, '2026-09-08', 'inspector and toolbar use the same selected group date');
   assert.equal(child.endDate, '2026-09-10');
+});
+
+test('adding and deleting a group child immediately reschedules its automatic successor', async () => {
+  const h=await harness(),project=h.latestProject(B),group=row(GROUP,'group',null,0),child={...row(TASK,'task',GROUP,0),startDate:'2026-09-05',endDate:'2026-09-05'},successor={...row(NEXT_TASK,'task',null,1),mode:'auto' as const,predecessorId:GROUP,startDate:'2026-09-06',endDate:'2026-09-06'};
+  project.tasks=[group,child,successor];let tree=h.render();
+  h.canvas(tree).onAdd(project,GROUP,'2026-09-10','2026-09-12');await settle();
+  assert.equal(h.latestProject(B).tasks.find(t=>t.id===NEXT_TASK)?.startDate,'2026-09-13');
+  const added=h.latestProject(B).tasks.find(t=>![GROUP,TASK,NEXT_TASK].includes(t.id))!;
+  tree=h.render();h.canvas(tree).onSelect(B,added.id);tree=h.render();h.inspector(tree).onDelete();tree=h.render();button(tree,'확인').props.onClick!();await settle();
+  assert.equal(h.latestProject(B).tasks.find(t=>t.id===NEXT_TASK)?.startDate,'2026-09-06');
+});
+
+test('moving a child to another group reschedules the former group successor', async () => {
+  const h=await harness(),project=h.latestProject(B),group=row(GROUP,'group',null,0),other=row(NEXT_GROUP,'group',null,1),early={...row(TASK,'task',GROUP,0),startDate:'2026-09-05',endDate:'2026-09-05'},late={...row(OUTER,'task',GROUP,1),startDate:'2026-09-10',endDate:'2026-09-12'},successor={...row(NEXT_TASK,'task',null,2),mode:'auto' as const,predecessorId:GROUP,startDate:'2026-09-13',endDate:'2026-09-13'};
+  project.tasks=[group,other,early,late,successor];let tree=h.render();h.canvas(tree).onSelect(B,OUTER);tree=h.render();await h.inspector(tree).onSaveTask({parentId:NEXT_GROUP});
+  assert.equal(h.latestProject(B).tasks.find(t=>t.id===NEXT_TASK)?.startDate,'2026-09-06');
+});
+
+test('deleting the last-ending child moves an automatic successor back in the same save', async () => {
+  const h=await harness(),project=h.latestProject(B),group=row(GROUP,'group',null,0),early={...row(TASK,'task',GROUP,0),startDate:'2026-09-05',endDate:'2026-09-05'},late={...row(OUTER,'task',GROUP,1),startDate:'2026-09-10',endDate:'2026-09-12'},successor={...row(NEXT_TASK,'task',null,2),mode:'auto' as const,predecessorId:GROUP,startDate:'2026-09-13',endDate:'2026-09-13'};
+  project.tasks=[group,early,late,successor];let tree=h.render();h.canvas(tree).onSelect(B,OUTER);tree=h.render();h.inspector(tree).onDelete();tree=h.render();button(tree,'확인').props.onClick!();await settle();
+  assert.equal(h.latestProject(B).tasks.some(t=>t.id===OUTER),false);assert.equal(h.latestProject(B).tasks.find(t=>t.id===NEXT_TASK)?.startDate,'2026-09-06');
 });

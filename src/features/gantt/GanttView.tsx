@@ -5,7 +5,7 @@ import { useDataStore } from '@/stores/useDataStore';
 import { useCalendarStore } from '@/stores/useCalendarStore';
 import { sceneProgress } from '@/utils/calcStats';
 import { useGanttStore } from './useGanttStore';
-import { canEditProject, completeTasks, taskBounds, updateTask } from './domain';
+import { canEditProject, completeTasks, scheduleProject, taskBounds, updateTask } from './domain';
 import type { GanttProject, GanttSpace, GanttTask } from './types';
 import { GanttCanvas, localDate, moveDate } from './GanttCanvas';
 import { GanttContextMenu, GanttModal, GanttSpaceDialog, type GanttContextTarget } from './GanttDialogs';
@@ -36,7 +36,7 @@ export function GanttView() {
   const ask=(message:string)=>new Promise<boolean>(resolve=>{answer.current?.(false);answer.current=resolve;setConfirm(message);});
   const respond=(value:boolean)=>{answer.current?.(value);answer.current=null;setConfirm(null);};
   const run=async(action:()=>Promise<unknown>,message='저장했습니다.')=>{try{await action();setNotice(message);}catch(e){setNotice((e as Error).message);}};
-  const saveProject=async(next:GanttProject,isNew=false)=>{await useGanttStore.getState().execute({type:'saveProject',project:next,expectedRevision:isNew?null:next.revision});};
+  const saveProject=async(next:GanttProject,isNew=false)=>{await useGanttStore.getState().execute({type:'saveProject',project:scheduleProject(next),expectedRevision:isNew?null:next.revision});};
   const patchTask=async(project:GanttProject,t:GanttTask,patch:Partial<GanttTask>)=>{
     const current=useGanttStore.getState().snapshot.projects.find(p=>p.id===project.id);if(!current)throw new Error('프로젝트가 더 이상 보이지 않습니다.');
     if(current.revision!==project.revision)throw new Error('다른 변경이 있습니다. 입력 내용을 복사한 뒤 최신 작업을 다시 열어 주세요.');

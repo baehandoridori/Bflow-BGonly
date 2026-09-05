@@ -81,3 +81,17 @@ test('an empty predecessor group supplies no schedule date or conflict until it 
  const same=updateTask(p,t.id,{memo:'메모'});assert.equal(same.tasks[1].startDate,'2026-09-05');assert.deepEqual(taskConflicts(same),[]);
  const child=createTask('실제 선행','2026-09-07');child.parentId=g.id;same.tasks.push(child);const scheduled=updateTask(same,child.id,{endDate:'2026-09-08'});assert.equal(scheduled.tasks[1].startDate,'2026-09-09');
 });
+
+test('removing folder members transfers their projects and prunes access in the same revision change',()=>{
+ const s=createSpace('공유','owner');s.shared=true;s.members=[{userId:'removed',canEdit:true},{userId:'remaining',canEdit:true}];
+ const p=createProject('이관',s.id,'removed');p.memberIds=['removed','remaining'];p.editorIds=['removed','remaining'];
+ const untouched=createProject('유지',s.id,'owner');
+ const original={spaces:[s],projects:[p,untouched]};
+ const next=applyCommand(original,'owner',{type:'saveSpace',space:{...s,members:s.members.slice(1)},expectedRevision:1});
+ assert.equal(next.projects[0].ownerId,'owner');assert.deepEqual(next.projects[0].memberIds,['remaining']);assert.deepEqual(next.projects[0].editorIds,['remaining']);assert.equal(next.projects[0].revision,2);
+ assert.equal(next.projects[1].revision,1);assert.equal(visibleSnapshot(next,'removed').projects.length,0);
+ assert.doesNotThrow(()=>applyCommand(next,'owner',{type:'saveProject',project:{...next.projects[0],name:'정리 가능'},expectedRevision:2}));
+ assert.equal(original.projects[0].ownerId,'removed');
+ const privateFolder=applyCommand(original,'owner',{type:'saveSpace',space:{...s,shared:false},expectedRevision:1});
+ assert.equal(privateFolder.projects[0].ownerId,'owner');assert.deepEqual(privateFolder.projects[0].memberIds,[]);assert.deepEqual(privateFolder.projects[0].editorIds,[]);assert.equal(visibleSnapshot(privateFolder,'remaining').projects.length,0);
+});

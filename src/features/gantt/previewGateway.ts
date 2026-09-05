@@ -67,7 +67,7 @@ function calendarAllowed(options:PreviewOptions,calendarId:string,actorId:string
   return edit?Boolean(member?.can_edit):calendar.visibility==='team'||(calendar.visibility==='members'&&Boolean(member));
 }
 function checkLinkedChanges(before:GanttSnapshot,after:GanttSnapshot,actorId:string,options:PreviewOptions):void {
-  const fields=(t:GanttTask)=>JSON.stringify([t.calendarId,t.title,t.memo,t.startDate,t.endDate,t.startTime,t.endTime,t.allDay]);
+  const fields=(t:GanttTask)=>JSON.stringify([t.calendarId,t.kind,t.title,t.memo,t.startDate,t.endDate,t.startTime,t.endTime,t.allDay]);
   for(const project of [...before.projects,...after.projects.filter(p=>!before.projects.some(x=>x.id===p.id))]) {
     const old=before.projects.find(p=>p.id===project.id),next=after.projects.find(p=>p.id===project.id);
     const ids=new Set([...(old?.tasks??[]).map(t=>t.id),...(next?.tasks??[]).map(t=>t.id)]);

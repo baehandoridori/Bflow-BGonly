@@ -1,4 +1,4 @@
-import { app, BrowserWindow, clipboard, ipcMain, protocol, net, desktopCapturer, screen, shell, Notification, Tray, Menu, nativeImage, dialog } from 'electron';
+import { app, BrowserWindow, clipboard, ipcMain, protocol, net, desktopCapturer, screen, shell, Notification, Tray, Menu, nativeImage, dialog, safeStorage } from 'electron';
 import type { MenuItemConstructorOptions } from 'electron';
 import * as gcal from './googleCalendar';
 import { pathToFileURL } from 'url';
@@ -56,6 +56,7 @@ import { PersonalTodoCalendarSync, PERSONAL_TODO_GOOGLE_LINK_KEY, PERSONAL_TODO_
 import type { LinkedPersonalTodoCalendarEvent, PersonalTodoCalendarAdapter } from './personalTodoCalendarSync';
 import { SessionManager } from './sessionManager';
 import type { RememberedAuthSession, SessionUserRecord } from './sessionManager';
+import { readRememberedAuthFile, writeRememberedAuthFile } from './rememberedAuthStorage';
 // v1.21.0: 자동 업데이트 시스템 (G드라이브 → 로컬 PC 본체로 swap)
 import {
   runFirstInstallIfNeeded,
@@ -1555,11 +1556,7 @@ function sanitizePublicUser<T extends { password?: unknown }>(user: T): Omit<T, 
 }
 
 async function writeRememberedAuthSession(session: RememberedAuthSession | null): Promise<void> {
-  const authPath = path.join(getDataPath(), 'auth.json');
-  ensureDir(path.dirname(authPath));
-  const tempPath = `${authPath}.tmp`;
-  await fs.promises.writeFile(tempPath, JSON.stringify(session, null, 2), { encoding: 'utf-8' });
-  await fs.promises.rename(tempPath, authPath);
+  await writeRememberedAuthFile(path.join(getDataPath(), 'auth.json'), session, safeStorage);
 }
 
 function addCalendarDay(date: string): string {
@@ -1791,12 +1788,7 @@ sessionManager = new SessionManager({
     }
   },
   remoteLogout: (token) => sbLogoutSession(token),
-  readRememberedSession: async () => {
-    try {
-      const raw = await fs.promises.readFile(path.join(getDataPath(), 'auth.json'), { encoding: 'utf-8' });
-      return JSON.parse(raw) as RememberedAuthSession | null;
-    } catch { return null; }
-  },
+  readRememberedSession: () => readRememberedAuthFile(path.join(getDataPath(), 'auth.json'), safeStorage),
   writeRememberedSession: writeRememberedAuthSession,
   beginPersonalDataTransition: (userId, epoch) => {
     personalTodoService.beginSessionTransition(userId, epoch);

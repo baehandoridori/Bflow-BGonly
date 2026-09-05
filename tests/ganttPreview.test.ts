@@ -90,3 +90,80 @@ test('canonical preview reload keeps project and folder order after task creatio
  await gateway.execute({requestId:crypto.randomUUID(),command:{type:'saveSpace',space:{...s,name:'수정 이름'},expectedRevision:1}});
  const loaded=await createPreviewGateway('u',options).read();assert.deepEqual(loaded.projects.map(p=>p.id),[a.id,b.id]);assert.deepEqual(loaded.spaces.map(x=>x.id),[s.id,s2.id]);
 });
+
+test('own project changes do not block undo and redo across a folder rename',async()=>{
+ const store=createGanttStore(),gateway=createPreviewGateway('u',setup());await store.getState().initialize('u',gateway);
+ const s=createSpace('폴더','u'),p=createProject('프로젝트',s.id,'u');
+ await store.getState().execute({type:'saveSpace',space:s,expectedRevision:null});await store.getState().execute({type:'saveProject',project:p,expectedRevision:null});await store.getState().execute({type:'saveSpace',space:{...s,name:'이름 수정'},expectedRevision:1});
+ await store.getState().undo();await store.getState().undo();await store.getState().undo();assert.equal(store.getState().snapshot.spaces.length,0);
+ await store.getState().redo();await store.getState().redo();await store.getState().redo();assert.equal(store.getState().snapshot.spaces[0].name,'이름 수정');assert.equal(store.getState().snapshot.projects.length,1);
+ await store.getState().initialize(null);
+});
+
+test('a cascading folder access change clears history and keeps the remaining owner able to edit',async()=>{
+ const options=setup(),owner=createPreviewGateway('owner',options),member=createPreviewGateway('member',options),store=createGanttStore();await store.getState().initialize('owner',owner);
+ const s={...createSpace('공유','owner'),shared:true,members:[{userId:'member',canEdit:true}]};await store.getState().execute({type:'saveSpace',space:s,expectedRevision:null});
+ const p=createProject('팀원 프로젝트',s.id,'member');await member.execute({requestId:crypto.randomUUID(),command:{type:'saveProject',project:p,expectedRevision:null}});await store.getState().refresh();
+ await store.getState().execute({type:'saveSpace',space:{...s,members:[]},expectedRevision:1});
+ assert.equal(store.getState().canUndo,false);assert.equal(store.getState().canRedo,false);assert.equal((await member.read()).projects.length,0);
+ const current=store.getState().snapshot.projects[0];assert.equal(current.ownerId,'owner');await store.getState().execute({type:'saveProject',project:{...current,name:'계속 편집'},expectedRevision:current.revision});
+ await store.getState().initialize(null);
+});
+
+test('a concurrent new project in the mutation response cannot be blessed by local undo bookkeeping',async()=>{
+ const options=setup(),base=createPreviewGateway('u',options),store=createGanttStore(),s=createSpace('폴더','u'),p=createProject('내 변경',s.id,'u'),remote=createProject('다른 창 변경',s.id,'u');
+ const gateway={read:base.read,execute:async(request:Parameters<typeof base.execute>[0])=>{const result=await base.execute(request);if(request.command.type==='saveProject'&&request.command.expectedRevision===null){await base.execute({requestId:crypto.randomUUID(),command:{type:'saveProject',project:remote,expectedRevision:null}});return base.read();}return result;}};
+ await store.getState().initialize('u',gateway);await store.getState().execute({type:'saveSpace',space:s,expectedRevision:null});await store.getState().execute({type:'saveProject',project:p,expectedRevision:null});await store.getState().undo();
+ await assert.rejects(store.getState().undo(),/다른 변경/);assert.equal((await base.read()).projects[0].id,remote.id);await store.getState().initialize(null);
+});
+
+test('changing a linked task to a group needs calendar edit permission before hiding its projection',async()=>{
+ const cal=crypto.randomUUID();let edit=true;const options={...setup(),canViewCalendar:()=>true,canEditCalendar:()=>edit};const gateway=createPreviewGateway('u',options),s=createSpace('폴더','u'),p=createProject('프로젝트',s.id,'u'),t=createTask('연결','2026-09-05');t.calendarId=cal;p.tasks=[t];
+ await gateway.execute({requestId:crypto.randomUUID(),command:{type:'saveSpace',space:s,expectedRevision:null}});await gateway.execute({requestId:crypto.randomUUID(),command:{type:'saveProject',project:p,expectedRevision:null}});edit=false;
+ await assert.rejects(gateway.execute({requestId:crypto.randomUUID(),command:{type:'saveProject',project:{...p,tasks:[{...t,kind:'group'}]},expectedRevision:1}}),/캘린더.*권한/);
+ assert.equal((await listCalendarEvents('u',options)).length,1);
+});
+
+test('a remote child arriving in a folder rename undo response is never included in the earlier creation undo',async()=>{
+ const base=createPreviewGateway('u',setup()),store=createGanttStore(),s=createSpace('처음','u'),remote=createProject('다른 창 프로젝트',s.id,'u');let inject=false;
+ const gateway={read:base.read,execute:async(request:Parameters<typeof base.execute>[0])=>{const result=await base.execute(request);if(inject){inject=false;await base.execute({requestId:crypto.randomUUID(),command:{type:'saveProject',project:remote,expectedRevision:null}});return base.read();}return result;}};
+ await store.getState().initialize('u',gateway);await store.getState().execute({type:'saveSpace',space:s,expectedRevision:null});await store.getState().execute({type:'saveSpace',space:{...s,name:'수정'},expectedRevision:1});inject=true;
+ await store.getState().undo();await assert.rejects(store.getState().undo(),/다른 변경/);
+ assert.equal((await base.read()).projects[0].id,remote.id);assert.equal((await base.read()).spaces.length,1);await store.getState().initialize(null);
+});
+
+test('a remote child preceding a local rename remains a conflict for the original folder creation history',async()=>{
+ const base=createPreviewGateway('u',setup()),store=createGanttStore(),s=createSpace('처음','u'),remote=createProject('먼저 도착한 프로젝트',s.id,'u');
+ await store.getState().initialize('u',base);await store.getState().execute({type:'saveSpace',space:s,expectedRevision:null});await base.execute({requestId:crypto.randomUUID(),command:{type:'saveProject',project:remote,expectedRevision:null}});await store.getState().refresh();
+ await store.getState().execute({type:'saveSpace',space:{...s,name:'수정'},expectedRevision:1});await store.getState().undo();await assert.rejects(store.getState().undo(),/다른 변경/);
+ assert.equal((await base.read()).projects[0].id,remote.id);await store.getState().initialize(null);
+});
+
+test('redo does not rebase its next entry over a remote folder edit returned with the response',async()=>{
+ const base=createPreviewGateway('u',setup()),store=createGanttStore(),s=createSpace('처음','u');let inject=false;
+ const gateway={read:base.read,execute:async(request:Parameters<typeof base.execute>[0])=>{const result=await base.execute(request);if(inject){inject=false;const latest=result.spaces[0];await base.execute({requestId:crypto.randomUUID(),command:{type:'saveSpace',space:{...latest,name:'다른 창 제목'},expectedRevision:latest.revision}});return base.read();}return result;}};
+ await store.getState().initialize('u',gateway);await store.getState().execute({type:'saveSpace',space:s,expectedRevision:null});await store.getState().execute({type:'saveSpace',space:{...s,name:'두 번째'},expectedRevision:1});await store.getState().execute({type:'saveSpace',space:{...s,name:'세 번째'},expectedRevision:2});await store.getState().undo();await store.getState().undo();inject=true;
+ await store.getState().redo();await assert.rejects(store.getState().redo(),/다른 변경/);assert.equal((await base.read()).spaces[0].name,'다른 창 제목');await store.getState().initialize(null);
+});
+
+test('redoing a previously empty folder deletion cannot remove a child arriving in its restore response',async()=>{
+ const base=createPreviewGateway('u',setup()),store=createGanttStore(),s=createSpace('빈 폴더','u'),remote=createProject('복원 중 도착',s.id,'u');let inject=false;
+ const gateway={read:base.read,execute:async(request:Parameters<typeof base.execute>[0])=>{const result=await base.execute(request);if(inject){inject=false;await base.execute({requestId:crypto.randomUUID(),command:{type:'saveProject',project:remote,expectedRevision:null}});return base.read();}return result;}};
+ await store.getState().initialize('u',gateway);await store.getState().execute({type:'saveSpace',space:s,expectedRevision:null});await store.getState().execute({type:'deleteSpace',spaceId:s.id,expectedRevision:1});inject=true;
+ await store.getState().undo();await assert.rejects(store.getState().redo(),/다른 변경/);assert.equal((await base.read()).projects[0].id,remote.id);await store.getState().initialize(null);
+});
+
+test('folder creation undo checks for remote children again inside the canonical write lock',async()=>{
+ const base=createPreviewGateway('u',setup()),store=createGanttStore(),s=createSpace('빈 폴더','u'),remote=createProject('저장 직전 도착',s.id,'u');let inject=false;
+ const gateway={read:base.read,execute:async(request:Parameters<typeof base.execute>[0])=>{if(inject){inject=false;await base.execute({requestId:crypto.randomUUID(),command:{type:'saveProject',project:remote,expectedRevision:null}});}return base.execute(request);}};
+ await store.getState().initialize('u',gateway);await store.getState().execute({type:'saveSpace',space:s,expectedRevision:null});inject=true;
+ await assert.rejects(store.getState().undo(),/다른 변경|작업|프로젝트/);assert.equal((await base.read()).projects[0].id,remote.id);assert.equal(store.getState().snapshot.projects[0].id,remote.id);
+ const latest=(await base.read()).spaces[0];await base.execute({requestId:crypto.randomUUID(),command:{type:'deleteSpace',spaceId:s.id,expectedRevision:latest.revision}});assert.equal((await base.read()).spaces.length,0,'explicit cascade deletion remains available');await store.getState().initialize(null);
+});
+
+test('a remote revision is not mistaken for our own undo even when its final folder content matches',async()=>{
+ const base=createPreviewGateway('u',setup()),store=createGanttStore(),s=createSpace('원래 이름','u');await store.getState().initialize('u',base);await store.getState().execute({type:'saveSpace',space:s,expectedRevision:null});
+ await base.execute({requestId:crypto.randomUUID(),command:{type:'saveSpace',space:{...s,name:'다른 창 수정'},expectedRevision:1}});await base.execute({requestId:crypto.randomUUID(),command:{type:'saveSpace',space:s,expectedRevision:2}});await store.getState().refresh();
+ const latest=store.getState().snapshot.spaces[0];await store.getState().execute({type:'saveSpace',space:{...latest,name:'내 수정'},expectedRevision:latest.revision});await store.getState().undo();
+ await assert.rejects(store.getState().undo(),/다른 변경/);assert.equal((await base.read()).spaces[0].name,'원래 이름');await store.getState().initialize(null);
+});

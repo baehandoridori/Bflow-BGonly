@@ -100,6 +100,11 @@ export function updateTask(project:GanttProject,taskId:string,patch:Partial<Gant
   Object.assign(task,patch);if(task.allDay){task.startTime='';task.endTime='';}if(task.kind==='milestone'){task.endDate=task.startDate;task.endTime=task.startTime;}
   if(patch.progress!==undefined&&task.progressMode==='manual')task.completed=task.progress===100;
   if(!task.completed)next.completed=false;
+  return scheduleProject(next);
+}
+/** Structural changes can change group bounds just as a date edit can. */
+export function scheduleProject(project:GanttProject):GanttProject {
+  const next=structuredClone(project);
   validateProject(next);
   const scheduled=new Set<string>();
   const schedule=(t:GanttTask)=>{
@@ -149,6 +154,15 @@ export function applyCommand(snapshot:GanttSnapshot,actorId:string,command:Gantt
     const old=next.spaces.find(x=>x.id===s.id);if((old&&!canManageSpace(old,actorId))||(!old&&s.ownerId!==actorId)||old&&old.ownerId!==s.ownerId)fail('폴더 관리 권한이 없습니다.');cas(old?.revision,command.expectedRevision);
     const saved={...structuredClone(s),revision:(old?.revision??0)+1};
     if(old)next.spaces=next.spaces.map(x=>x.id===s.id?saved:x);else next.spaces.push(saved);
+    const allowed=new Set([saved.ownerId,...(saved.shared?saved.members.map(m=>m.userId):[])]);
+    next.projects=next.projects.map(project=>{
+      if(project.spaceId!==saved.id)return project;
+      const ownerId=allowed.has(project.ownerId)?project.ownerId:saved.ownerId;
+      const memberIds=project.memberIds?.filter(userId=>allowed.has(userId))??null;
+      const editorIds=project.editorIds?.filter(userId=>allowed.has(userId))??null;
+      if(ownerId===project.ownerId&&JSON.stringify(memberIds)===JSON.stringify(project.memberIds)&&JSON.stringify(editorIds)===JSON.stringify(project.editorIds))return project;
+      return {...project,ownerId,memberIds,editorIds,revision:project.revision+1};
+    });
   }else if(command.type==='saveProject') {
     const p=command.project;validateProject(p);const s=next.spaces.find(s=>s.id===p.spaceId),old=next.projects.find(x=>x.id===p.id);
     if(!s||!canEditSpace(s,actorId)||(old&&!canEditProject(next,actorId,old))||(!old&&p.ownerId!==actorId))fail('프로젝트 편집 권한이 없습니다.');
@@ -162,7 +176,9 @@ export function applyCommand(snapshot:GanttSnapshot,actorId:string,command:Gantt
   }else if(command.type==='deleteProject') {
     const p=next.projects.find(p=>p.id===command.projectId);if(!p||!canEditProject(next,actorId,p))fail('프로젝트 삭제 권한이 없습니다.');cas(p.revision,command.expectedRevision);next.projects=next.projects.filter(x=>x.id!==p.id);
   }else if(command.type==='deleteSpace') {
-    const s=next.spaces.find(s=>s.id===command.spaceId);if(!s||!canManageSpace(s,actorId))fail('폴더 삭제 권한이 없습니다.');cas(s.revision,command.expectedRevision);next.spaces=next.spaces.filter(x=>x.id!==s.id);next.projects=next.projects.filter(p=>p.spaceId!==s.id);
+    const s=next.spaces.find(s=>s.id===command.spaceId);if(!s||!canManageSpace(s,actorId))fail('폴더 삭제 권한이 없습니다.');cas(s.revision,command.expectedRevision);
+    if(command.requireEmpty===true&&next.projects.some(p=>p.spaceId===s.id))fail('다른 변경으로 폴더에 프로젝트가 생겼습니다. 다시 확인해 주세요.');
+    next.spaces=next.spaces.filter(x=>x.id!==s.id);next.projects=next.projects.filter(p=>p.spaceId!==s.id);
   }else fail('지원하지 않는 변경입니다.');
   return next;
 }
