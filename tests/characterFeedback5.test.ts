@@ -52,3 +52,21 @@ test('피드백 55: 두 진입점(그리드·상세 모달)이 onOpenExisting �
 test('이 테스트 파일은 test:character 게이트에 등록돼 있다', () => {
   assert.match(packageJson.scripts['test:character'], /\.\/tests\/characterFeedback5\.test\.ts/);
 });
+
+test('피드백 57-1: 폴더 만들기 전 확인 창 — 환경 확인 뒤·실제 생성 전', () => {
+  assert.match(folderService, /import \{ ConfirmDialog \} from '@\/components\/common\/ConfirmDialog'/);
+  assert.match(folderService, /import \{ buildCharacterFolderConfirmMessage \} from '@\/utils\/characterName'/);
+  assert.match(folderService, /const confirmed = await ConfirmDialog\.show\(\{\s*message: buildCharacterFolderConfirmMessage\(root, character\.name\),\s*confirmLabel: '폴더 만들기',\s*\}\);/);
+  assert.match(folderService, /if \(!confirmed\) return false;/);
+  const envCheck = folderService.indexOf("if (!window.electronAPI?.pathCreateFolder) {");
+  const confirmAt = folderService.indexOf('const confirmed = await ConfirmDialog.show(');
+  const createAt = folderService.indexOf('window.electronAPI.pathCreateFolder(root, character.name)');
+  assert.ok(envCheck > -1 && confirmAt > envCheck && createAt > confirmAt, '확인 창은 환경 확인 뒤, 실제 폴더 생성 전에 떠야 한다');
+});
+
+test('피드백 57-1: 새 창 팝업에도 확인 창 호스트 — 브라우저 기본 confirm 폴백 방지', () => {
+  assert.match(widgetPopup, /import \{ ConfirmDialogHost \} from '@\/components\/common\/ConfirmDialog'/);
+  assert.match(widgetPopup, /<ConfirmDialogHost \/>/);
+  // 호스트는 팝업 루트에 1개만.
+  assert.equal((widgetPopup.match(/<ConfirmDialogHost \/>/g) ?? []).length, 1);
+});

@@ -1,6 +1,8 @@
 import { toast } from 'sonner';
 import type { Character } from '@/types';
 import { readMetadataFromSupabase, writeMetadataToSupabase } from '@/services/supabaseService';
+import { ConfirmDialog } from '@/components/common/ConfirmDialog';
+import { buildCharacterFolderConfirmMessage } from '@/utils/characterName';
 
 export const CHARACTER_FOLDER_ROOT_META = {
   type: 'character-board',
@@ -50,6 +52,13 @@ export async function createAndLinkCharacterFolder(
     toast.error('현재 환경에서는 폴더를 만들 수 없어요');
     return false;
   }
+
+  // 피드백 57-1: 실수로 눌러 공용 드라이브에 폴더가 생기지 않게 — 어디에 어떤 이름으로 만드는지 보여주고 확인받는다.
+  const confirmed = await ConfirmDialog.show({
+    message: buildCharacterFolderConfirmMessage(root, character.name),
+    confirmLabel: '폴더 만들기',
+  });
+  if (!confirmed) return false;
 
   const result: PathCreateFolderResult = await window.electronAPI.pathCreateFolder(root, character.name);
   if (!result.ok || !result.path) {
