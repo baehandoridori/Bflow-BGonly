@@ -46,3 +46,65 @@ export function deriveCharacterNameFromFileName(fileName: string | null | undefi
   if (/^[\d\s._:\-]+$/.test(withoutExt)) return null;
   return withoutExt;
 }
+
+/**
+ * 중복 판정용 이름 키(피드백 55) — 유니코드 정규화(NFC) + 모든 공백 제거 + 소문자.
+ * '찜질방 사장'/'찜질방사장', 'Kim'/'kim' 을 같은 이름으로 본다.
+ */
+export function characterNameKey(name: string | null | undefined): string {
+  return (name ?? '').normalize('NFC').replace(/\s+/g, '').toLowerCase();
+}
+
+type NamedCharacterLike = { name: string; status: 'active' | 'archived' };
+
+/**
+ * 입력 이름과 겹치는 기존 캐릭터를 찾는다(피드백 55).
+ * 활성 캐릭터가 우선 — 활성·보관이 동시에 겹치면 활성만 돌려준다(보관은 활성이 없을 때만).
+ * 빈 이름(공백만)은 임시 이름이 부여되므로 겹침 없음.
+ */
+export function findDuplicateCharacters<T extends NamedCharacterLike>(
+  characters: ReadonlyArray<T>,
+  name: string,
+): { active: T | null; archived: T | null } {
+  const key = characterNameKey(name);
+  if (!key) return { active: null, archived: null };
+  const matches = characters.filter((c) => characterNameKey(c.name) === key);
+  const active = matches.find((c) => c.status !== 'archived') ?? null;
+  const archived = active ? null : matches.find((c) => c.status === 'archived') ?? null;
+  return { active, archived };
+}
+
+/**
+ * 입력 중 '비슷한 이름' 제안(피드백 55) — 활성 캐릭터 중 이름 키와 입력 키가 한쪽이 다른 쪽을 포함하는 것
+ * (정확히 같은 이름은 제외 — 그건 중복 차단이 맡는다). 이름 순 정렬 후 최대 limit 개.
+ * 양방향인 이유: '한솔' 이 있는데 '한솔이' 를 치는(접미사·오타) 경우도 잡아야 중복 카드를 막는다.
+ */
+export function suggestSimilarCharacters<T extends NamedCharacterLike>(
+  characters: ReadonlyArray<T>,
+  name: string,
+  limit = 3,
+): T[] {
+  const key = characterNameKey(name);
+  if (!key) return [];
+  return characters
+    .filter((c) => c.status !== 'archived')
+    .filter((c) => {
+      const candidate = characterNameKey(c.name);
+      return candidate !== key && (candidate.includes(key) || key.includes(candidate));
+    })
+    .sort((a, b) => a.name.localeCompare(b.name, 'ko'))
+    .slice(0, limit);
+}
+
+/** 작업 폴더 '만들기' 확인 창 문구(피드백 57-1) — 어디에 어떤 이름으로 만들지 + 임시 이름 경고. */
+export function buildCharacterFolderConfirmMessage(root: string, characterName: string): string {
+  const lines = [
+    `아래 위치에 '${characterName}' 폴더를 만들고 작업 폴더로 연결할까요?`,
+    root,
+    '이미 같은 이름의 폴더가 있으면 새로 만들지 않고 그 폴더를 연결만 해요.',
+  ];
+  if (isTempCharacterName(characterName)) {
+    lines.push('지금 이름은 임시 이름이에요 — 폴더 이름으로 쓰기 전에 캐릭터 이름부터 정하는 게 좋아요.');
+  }
+  return lines.join('\n');
+}

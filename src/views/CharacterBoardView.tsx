@@ -227,7 +227,8 @@ function CharacterGrid({ onAdd, pendingOpenId, pendingOpenCostumeId, pendingOpen
   useEffect(() => {
     if (pendingOpenId) {
       const pendingCharacter = characters.find((c) => c.id === pendingOpenId);
-      if (pendingCharacter?.status === 'archived') setShowArchived(true);
+      // 보관 목록을 보는 중 활성 카드로 이동(피드백 55 '기존 카드 열기')하면 목록 모드도 되돌린다 — 안 그러면 보관 모드 상세가 엉뚱한 카드를 연다.
+      if (pendingCharacter) setShowArchived(pendingCharacter.status === 'archived');
       // 피드백 49 + 코덱스 1차 P2: 복장 태그로 들어온 딥링크는 모달 안 클릭과 같은 안내를 준다 —
       //   삭제된 복장이면 조용히 첫 복장으로 떨어지지 않게 알리고, 버전이 바뀌었으면 기록 시점을 알린다.
       let costumeId = pendingOpenCostumeId;
@@ -777,6 +778,7 @@ export function CharacterBoardView() {
         <AddCharacterModal
           onClose={() => setAddOpen(false)}
           onCreated={(c) => { setTab('board'); setPendingOpenId(c.id); }}
+          onOpenExisting={(c) => { setTab('board'); setPendingOpenId(c.id); }}
         />
       )}
     </div>

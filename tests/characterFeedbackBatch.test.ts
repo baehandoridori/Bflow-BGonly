@@ -24,7 +24,7 @@ test('B4: 이름 없이 추가 — 임시 이름 부여 + 파일명 자동 지�
   assert.match(store, /import \{ nextTempCharacterName \} from '@\/utils\/characterName'/);
   // 모달: 빈 이름 허용 + onCreated
   assert.match(addModal, /onCreated\?: \(character: Character\) => void/);
-  assert.match(addModal, /disabled=\{saving\}/);
+  assert.match(addModal, /disabled=\{saving \|\| !!blockingDuplicate\}/); // 피드백 55: 같은 이름이면 추가 차단
   assert.doesNotMatch(addModal, /disabled=\{!name\.trim\(\) \|\| saving\}/);
   assert.match(addModal, /onCreated\?\.\(created\); onClose\(\);/);
   // 파일명 자동 지정(파일선택·드래그만, 붙여넣기 제외)

@@ -932,6 +932,7 @@ export function CharacterDetailModal({
         <AddCharacterModal
           onClose={() => setAddOpen(false)}
           onCreated={(c) => setSelectedId(c.id)}
+          onOpenExisting={(c) => setSelectedId(c.id)}
         />
       )}
     </div>
