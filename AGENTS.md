@@ -32,8 +32,10 @@ Supabase(PostgreSQL + Realtime)를 단일 진실의 원천(SSOT)으로 사용. G
 ### 간트 데이터 경계 (v1.111.0)
 
 - 타임라인은 `src/features/gantt/GanttView.tsx`를 사용한다. `domain.ts`는 계층·선행 일정·기간·권한의 공용 계산이며, 프로젝트 하나의 작업을 revision CAS로 함께 저장한다.
+- 삭제·복원에도 revision은 증가한다. 비공개 `gantt_entity_revisions`와 preview의 revision 기록을 유지하며, 과거 삭제 기록에서 최종 revision을 복구할 수 없는 ID는 재사용을 거부한다. 새 DB에는 `20260905173804_gantt_revision_ledger.sql`까지 적용한다.
 - 실제 앱은 preload → 세션 epoch를 확인하는 `ganttIpc.ts` → `ganttStore.ts` → 서버 로그인 토큰을 받는 `gantt_session_read/gantt_session_execute` RPC를 사용한다. 내부 `gantt_read/gantt_execute`와 테이블 직접 접근은 anon에 허용하지 않는다. 폴더와 프로젝트 정본은 `gantt_spaces`/`gantt_projects`이다.
 - 연결 캘린더 일정은 작업의 projection(`gantt:<projectId>:<taskId>`)이다. `calendar_events`에 별도 복제하지 않는다. UUID만 받는 기존 이벤트 RPC/알림 외래키로 이 ID를 보내지 않는다.
+- `linked_gantt_task_kind`가 확인된 마일스톤만 시작·종료가 같은 시각을 허용한다. 캘린더 삭제는 작업을 보존하고 연결만 해제한다. 원격 로그인 사용 시 복원 토큰이 없는 기억된 계정은 재로그인 화면으로 안내한다.
 - preview는 공용 명령·권한을 사용하되 localStorage를 Web Locks로 직렬화한다. 기존 캘린더 authority 전체를 덮어쓰지 않는다. Realtime/BroadcastChannel은 재조회 신호만 전송한다.
 - 새 DB에는 간트 기본 스키마, containment, app-sessions 인증, password-lockdown 및 후속 간트 릴리스 migration을 순서대로 적용한다. 운영 적용 기록을 먼저 확인해 이전 권한을 다시 열지 않는다. `app_login`이 확인한 세션 토큰과 DB ACL을 함께 사용하며, 호출자가 보낸 actor 인자를 본인 인증으로 해석하지 않는다.
 
