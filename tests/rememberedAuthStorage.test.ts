@@ -143,15 +143,21 @@ test('legacy plaintext is removed even when OS encryption is unavailable', async
   assert.equal((await h.readRememberedSession())?.userId, 'user-a');
 });
 
-test('temporarily unavailable OS decryption restores only identity without leaking encrypted fields', async (t) => {
+test('temporarily unavailable OS decryption requires reauthentication and preserves the record for retry', async (t) => {
   let available = true;
   const h = await storageHarness(t, { ...encryption, isEncryptionAvailable: () => available });
   await h.writeRememberedSession(session);
   available = false;
-  assert.equal((await h.manager.restore()).ok, true);
+  const stored = await h.raw();
+  assert.equal((await h.manager.restore()).ok, false);
   assert.equal(h.manager.getSessionToken(), null);
-  assert.deepEqual(h.manager.getCurrentPayload().session, identity);
+  assert.equal(h.manager.getCurrentPayload().user, null);
+  assert.equal(h.manager.getCurrentPayload().session, null);
+  assert.equal(await h.raw(), stored);
   assert.throws(() => h.manager.getSessionTokenFor('user-a'), /로그인 세션이 필요/);
+  available = true;
+  assert.equal((await h.manager.restore()).ok, true);
+  assert.equal(h.manager.getSessionTokenFor('user-a'), token);
 });
 
 for (const corrupt of [
@@ -164,9 +170,10 @@ for (const corrupt of [
     await h.seed({ ...session, encryptedSessionToken: corrupt });
     assert.equal((await h.readRememberedSession())?.sessionToken, null);
     assert.equal((await h.raw()).includes(token), false, 'mixed legacy plaintext must also be removed');
-    assert.equal((await h.manager.restore()).ok, true);
+    assert.equal((await h.manager.restore()).ok, false);
     assert.equal(h.manager.getSessionToken(), null);
-    assert.deepEqual(h.manager.getCurrentPayload().session, identity);
+    assert.equal(h.manager.getCurrentPayload().user, null);
+    assert.equal(h.manager.getCurrentPayload().session, null);
   });
 }
 

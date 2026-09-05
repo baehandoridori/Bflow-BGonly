@@ -591,7 +591,7 @@ function Footer() {
 
 // ─── 로그인 폼 (글래스모피즘) ─────────────────────────────────
 
-function LoginForm({ onLogin }: { onLogin: (name: string, pw: string, rememberMe: boolean) => Promise<string | null> }) {
+function LoginForm({ onLogin, restoreError }: { onLogin: (name: string, pw: string, rememberMe: boolean) => Promise<string | null>; restoreError?: string }) {
   const [name, setName] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
@@ -732,14 +732,15 @@ function LoginForm({ onLogin }: { onLogin: (name: string, pw: string, rememberMe
       </label>
 
       <AnimatePresence>
-        {error && (
+        {(error || (!loading && restoreError)) && (
           <motion.p
+            role="alert"
             initial={{ opacity: 0, y: -4 }}
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: -4 }}
             className="text-xs text-status-none text-center"
           >
-            {error}
+            {error || restoreError}
           </motion.p>
         )}
       </AnimatePresence>
@@ -762,6 +763,7 @@ function LoginForm({ onLogin }: { onLogin: (name: string, pw: string, rememberMe
 interface LoginScreenProps {
   mode?: 'login' | 'splash';
   onComplete?: () => void;
+  restoreError?: string;
 }
 
 type Phase = 'landing' | 'ready' | 'transition' | 'login' | 'done';
@@ -774,7 +776,7 @@ function isCodexBrowserPreview(): boolean {
   return isLocalBrowserPreview() && new URLSearchParams(window.location.search).has('codex');
 }
 
-export function LoginScreen({ mode = 'login', onComplete }: LoginScreenProps) {
+export function LoginScreen({ mode = 'login', onComplete, restoreError }: LoginScreenProps) {
   const { setCurrentUser } = useAuthStore();
   const [phase, setPhase] = useState<Phase>(() => (
     mode === 'login' && isLocalBrowserPreview() ? 'login' : 'landing'
@@ -863,7 +865,7 @@ export function LoginScreen({ mode = 'login', onComplete }: LoginScreenProps) {
             className="flex flex-col items-center cursor-default"
             onClick={(e) => e.stopPropagation()}
           >
-            <LoginForm onLogin={handleLogin} />
+            <LoginForm onLogin={handleLogin} restoreError={restoreError} />
           </motion.div>
         )}
       </AnimatePresence>

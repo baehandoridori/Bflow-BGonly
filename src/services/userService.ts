@@ -133,10 +133,10 @@ export async function logout(): Promise<void> {
   if (!result.ok) throw new Error(result.error ?? '로그아웃에 실패했습니다.');
 }
 
-export async function loadSession(): Promise<{ session: AuthSession | null; user: AppUser | null }> {
+export async function loadSession(): Promise<{ session: AuthSession | null; user: AppUser | null; error?: string }> {
   const result = await window.electronAPI.restoreCanonicalSession();
   const user = result.payload.user;
-  if (!result.ok || !user) return { session: null, user: null };
+  if (!result.ok || !user) return { session: null, user: null, error: result.error };
   return {
     session: result.payload.session,
     user,

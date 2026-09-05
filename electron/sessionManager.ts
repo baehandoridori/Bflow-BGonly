@@ -277,6 +277,15 @@ export class SessionManager {
         if (this.getCanonicalUserId()) return { ok: true, payload: this.getCurrentPayload() };
         const remembered = await this.dependencies.readRememberedSession();
         if (!remembered?.userId) return { ok: true, payload: this.getCurrentPayload() };
+        // Legacy identity-only records and unavailable OS decryption are not a
+        // server login. Keep the record intact so decryption can be retried.
+        if (this.dependencies.remoteLogin && !remembered.sessionToken?.trim()) {
+          return {
+            ok: false,
+            payload: this.getCurrentPayload(),
+            error: '저장된 로그인 정보를 다시 확인해야 합니다. 이름과 비밀번호로 다시 로그인해 주세요.',
+          };
+        }
         const directory = await this.dependencies.readUsers();
         const users = directory.users;
         const user = users.find((candidate) => candidate.id === remembered.userId);

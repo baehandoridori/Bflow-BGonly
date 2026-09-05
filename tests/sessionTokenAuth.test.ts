@@ -111,6 +111,41 @@ test('restore reloads the remembered token, and logout revokes it on the server'
   assert.deepEqual(revoked, ['t-old']);
 });
 
+for (const sessionToken of [undefined, null, '']) {
+  test(`server-backed restore refuses identity without a usable token (${String(sessionToken)}) and allows fresh login`, async () => {
+    let loginCalls = 0;
+    const remembered = { userId: 'user-a', userName: 'A', loggedInAt: '2026-09-05T00:00:00.000Z', sessionToken };
+    const { manager, published, written } = harness({
+      remembered,
+      remoteLogin: async () => { loginCalls += 1; return okLogin('t-reauthenticated'); },
+    });
+    const restored = await manager.restore();
+    assert.equal(restored.ok, false);
+    assert.match(restored.error ?? '', /다시 로그인/);
+    assert.equal(restored.payload.user, null);
+    assert.equal(manager.getCanonicalUserId(), null);
+    assert.equal((await manager.ensure()).ok, false);
+    assert.equal(published.length, 0, 'identity alone must not start personal-data loads');
+    assert.equal(written.length, 0, 'a transient decryption failure must not destroy the stored record');
+    assert.equal(loginCalls, 0, 'restore cannot silently manufacture credentials');
+    assert.throws(() => manager.getSessionTokenFor('user-a'), /다시 로그인/);
+    assert.equal((await manager.login({ name: 'A', password: 'test-only' })).ok, true);
+    assert.equal(manager.getSessionTokenFor('user-a'), 't-reauthenticated');
+    assert.equal(loginCalls, 1);
+  });
+}
+
+test('server-backed restore keeps a valid remembered token without requesting a password', async () => {
+  let loginCalls = 0;
+  const { manager } = harness({
+    remembered: { userId: 'user-a', userName: 'A', loggedInAt: '2026-09-05T00:00:00.000Z', sessionToken: 't-remembered' },
+    remoteLogin: async () => { loginCalls += 1; return okLogin('unexpected'); },
+  });
+  assert.equal((await manager.restore()).ok, true);
+  assert.equal(manager.getSessionTokenFor('user-a'), 't-remembered');
+  assert.equal(loginCalls, 0);
+});
+
 test('switching users revokes the previous server token and keeps only the new one', async () => {
   const users: SessionUserRecord[] = [{ id: 'user-a', name: 'A' }, { id: 'user-b', name: 'B' }];
   const { manager, revoked } = harness({
