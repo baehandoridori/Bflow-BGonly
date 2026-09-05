@@ -18,14 +18,13 @@ function defaultGateway():GanttGateway {
   return {read:()=>api.ganttRead(),execute:request=>api.ganttExecute(request),subscribe:listener=>api.onGanttChanged?.(listener)??(()=>{})};
 }
 function entity(snapshot:GanttSnapshot,entry:Pick<HistoryEntry,'kind'|'id'>):Entity|null {return (entry.kind==='project'?snapshot.projects:snapshot.spaces).find(x=>x.id===entry.id)??null;}
-function fingerprint(snapshot:GanttSnapshot,entry:Pick<HistoryEntry,'kind'|'id'>):string {
-  const found=entity(snapshot,entry);
+function fingerprint(snapshot:GanttSnapshot,entry:Pick<HistoryEntry,'kind'|'id'>,found:Entity|null=entity(snapshot,entry)):string {
   return JSON.stringify([found,entry.kind==='space'?snapshot.projects.filter(p=>p.spaceId===entry.id).map(p=>[p.id,p.revision]).sort():null]);
 }
 function restoreCommand(snapshot:GanttSnapshot,entry:HistoryEntry,target:Entity|null):GanttCommand {
   const current=entity(snapshot,entry);
   if(entry.kind==='project')return target?{type:'saveProject',project:target as GanttProject,expectedRevision:current?.revision??null}:{type:'deleteProject',projectId:entry.id,expectedRevision:current!.revision};
-  return target?{type:'saveSpace',space:target as GanttSpace,expectedRevision:current?.revision??null}:{type:'deleteSpace',spaceId:entry.id,expectedRevision:current!.revision};
+  return target?{type:'saveSpace',space:target as GanttSpace,expectedRevision:current?.revision??null}:{type:'deleteSpace',spaceId:entry.id,expectedRevision:current!.revision,requireEmpty:true};
 }
 export function createGanttStore() {
   let gateway:GanttGateway|null=null,generation=0,refreshVersion=0,unsubscribe:(()=>void)|null=null;
@@ -43,24 +42,42 @@ export function createGanttStore() {
         const canonical=await activeGateway.execute({requestId:crypto.randomUUID(),command});
         if(currentGeneration!==generation)return;
         set({snapshot:canonical,pending:false,error:null});
+        if(command.type==='saveProject'||command.type==='deleteProject'){
+          // Rebase only our own child-project changes. A sibling/space commit
+          // arriving in the same response must remain a conflict for folder undo.
+          for(const item of [...undoStack,...redoStack])if(item.kind==='space'&&item.expected===fingerprint(before,item)&&fingerprint(canonical,item)===fingerprint(optimistic,item))item.expected=fingerprint(canonical,item);
+        }
         if(historyMode==='record'){
           const kind=command.type==='saveProject'||command.type==='deleteProject'?'project':'space';
           const id=command.type==='saveProject'?command.project.id:command.type==='saveSpace'?command.space.id:command.type==='deleteProject'?command.projectId:command.spaceId;
           const key={kind,id} as const;
-          // A folder cascade has no atomic inverse in the command contract.
-          if(command.type!=='deleteSpace'||!before.projects.some(p=>p.spaceId===id))undoStack.push({...key,before:entity(before,key),after:entity(canonical,key),expected:fingerprint(canonical,key)});
+          // Folder deletion and access cleanup have no atomic inverse in the
+          // command contract; do not offer a partial restore of their children.
+          const cascade=(command.type==='deleteSpace'&&before.projects.some(p=>p.spaceId===id))||(command.type==='saveSpace'&&before.projects.some(p=>p.spaceId===id&&JSON.stringify(p)!==JSON.stringify(optimistic.projects.find(next=>next.id===p.id))));
+          if(!cascade)undoStack.push({...key,before:entity(before,key),after:entity(canonical,key),expected:fingerprint(canonical,key)});
           else undoStack=[];
           if(undoStack.length>50)undoStack.shift();redoStack=[];
         }else if(entry){
-          const updated={...entry,expected:fingerprint(canonical,entry)};
+          // A later commit returned alongside ours must invalidate both travel
+          // directions, rather than becoming the baseline for another restore.
+          const expected=fingerprint(optimistic,entry);
+          const restoredTarget=historyMode==='undo'?entry.before:entry.after;
+          const previousExpected=fingerprint(before,entry,restoredTarget);
+          // Keep the actual revisions at both endpoints of our own travel. This
+          // lets later replays match exactly without ignoring a remote revision.
+          const source=entity(before,entry),destination=entity(optimistic,entry);
+          const updated={...entry,before:historyMode==='undo'?destination:source,after:historyMode==='undo'?source:destination,expected};
+          const rebasePrevious=(previous:HistoryEntry|undefined)=>{
+            if(previous&&previous.expected===previousExpected&&fingerprint(canonical,entry)===expected)previous.expected=expected;
+          };
           if(historyMode==='undo'){
             undoStack.pop();redoStack.push(updated);
             const previous=[...undoStack].reverse().find(item=>item.id===entry.id&&item.kind===entry.kind);
-            if(previous&&previous.id===entry.id&&previous.kind===entry.kind)previous.expected=fingerprint(canonical,previous);
+            rebasePrevious(previous);
           }else {
             redoStack.pop();undoStack.push(updated);
             const previous=[...redoStack].reverse().find(item=>item.id===entry.id&&item.kind===entry.kind);
-            if(previous&&previous.id===entry.id&&previous.kind===entry.kind)previous.expected=fingerprint(canonical,previous);
+            rebasePrevious(previous);
           }
         }
         publishHistory();

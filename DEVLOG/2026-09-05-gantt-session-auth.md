@@ -63,6 +63,8 @@ REST 검증(임시 사용자 `rest-check-2026-09-05`, 검증 뒤 삭제):
 
 ## 남은 순서
 
+> 2026-09-06 재검증: 아래는 당시 남은 작업 기록이다. 현재 운영 DB에는 `gantt_delete_triggers_security_definer`(20260905150955)와 `users_password_lockdown`(20260905151125)이 적용됐고 설치본은 v1.112.0이다. anon의 비밀번호 조회 차단 및 세션 smoke 통과를 다시 확인했다. 후속 보완·배포 상태는 `2026-09-06-gantt-release-audit.md`를 참조한다.
+
 1. v1.111.0 빌드·배포(간트 릴리스). 예전에 로그인해 둔 계정은 간트 화면에서 재로그인 안내를 보는 것이 정상이다.
 2. **팀 전원 갱신 확인 뒤** `DEVLOG/migrations/2026-09-06-users-password-lockdown.sql` 적용. anon 의 `users.password` 읽기/쓰기를 막아 "비밀번호 읽기 → 로그인" 우회를 닫는다. 그 전에 적용하면 v1.110.1 이하 로그인이 즉시 깨진다.
 3. 후속: 캘린더·사용자 관리 `*_authorized` RPC 도 같은 토큰 경계로 이전, 비밀번호 해시화.

@@ -27,7 +27,7 @@ export type GanttCommand =
   | { type: 'saveSpace'; space: GanttSpace; expectedRevision: number | null }
   | { type: 'saveProject'; project: GanttProject; expectedRevision: number | null }
   | { type: 'deleteProject'; projectId: string; expectedRevision: number }
-  | { type: 'deleteSpace'; spaceId: string; expectedRevision: number };
+  | { type: 'deleteSpace'; spaceId: string; expectedRevision: number; requireEmpty?: boolean };
 export interface GanttRequest { requestId: string; command: GanttCommand }
 export interface GanttGateway {
   read(): Promise<GanttSnapshot>;

@@ -14,7 +14,8 @@ export interface RememberedAuthSession {
   userName: string;
   loggedInAt: string;
   /**
-   * 서버(app_login)가 발급한 로그인 세션 토큰. main 프로세스 메모리와 auth.json 에만 존재하며,
+   * 서버(app_login)가 발급한 로그인 세션 토큰. main 메모리에서만 평문으로 사용하고,
+   * auth.json 에는 rememberedAuthStorage가 OS 암호화로 저장한다.
    * renderer 로 나가는 payload 에는 절대 포함하지 않는다(publish 가 벗겨낸다).
    * 서버 로그인 없이 로컬 저장소로만 대조한 세션은 null 이다.
    */
