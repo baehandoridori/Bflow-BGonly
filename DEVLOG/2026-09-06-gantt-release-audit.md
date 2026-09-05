@@ -15,7 +15,7 @@
 2. [x] UI/상태 및 저장/권한 독립 로컬 리뷰, 전체 기본 검증.
 3. [x] 재현된 문제의 실패 테스트 작성, 최소 수정, SQL/preview 동등성 확인.
 4. [x] 전체 타입/테스트/build:vite, 실제 브라우저 입력, 수정 후 독립 리뷰.
-5. [ ] 한국어 PR 생성, Codex 리뷰 4개 표면 확인 및 지적 수정 루프.
+5. [x] 한국어 PR 생성, Codex 리뷰 4개 표면 확인. 외부 리뷰 사용량 한도에 따라 사용자 승인으로 완료된 로컬 심층 리뷰로 대체.
 6. [ ] 검토된 migration 예행연습/운영 적용, 최종 커밋 머지, 해당 커밋의 정식 build.
 7. [ ] 설치 파일 먼저/manifest 마지막 배포, 전체 파일 크기·SHA-256·버전 검증 및 설치 상태 확인.
 
@@ -66,10 +66,11 @@
 - 기존 보안 진단 기준: ERROR 3개는 `comments_archive`, `comp_revisions_archive`, `comment_reaction_notifications`의 기존 RLS 항목이다. 이번 간트 수정 범위가 아니므로 기존 설정을 임의 변경하지 않는다. [진단 기준](https://supabase.com/docs/guides/database/database-linter?lint=0013_rls_disabled_in_public).
 - 첫 SQL 조립 시 JavaScript 문자열 치환이 dollar quote를 바꿔 구문 오류가 났다. DB 변경 전 중단됐으며 함수형 치환으로 원문을 보존한 뒤 migration + smoke 롤백 예행연습이 `passed: true`였다.
 - `requireEmpty`까지 포함한 최종 migration + smoke를 운영 DB에서 다시 롤백 예행연습해 `passed: true`를 확인했다. 종료 후 폴더/프로젝트 0행, 검증용 사용자 잔여 0행이다.
-- 실제 적용 및 배포는 PR 검토 이후에 진행한다. 이 문서의 체크되지 않은 단계는 완료 주장에 포함하지 않는다.
+- 사용자 승인 후 운영 migration `20260905163224_gantt_release_acl` 적용 완료. 적용 후 smoke `passed: true`, 보안 진단 57개 유지/신규 0개를 확인했다. 기존 내부 RPC와 비밀번호 접근 제한을 유지한다.
+- 머지 커밋의 정식 빌드 및 배포 결과는 PR #266의 최종 본문에 기록한다. 이 문서의 체크되지 않은 단계는 이 커밋 시점의 완료 주장에 포함하지 않는다.
 
 ## PR 검토 상태
 
 - PR #266: `https://github.com/baehandoridori/Bflow-BGonly/pull/266`.
 - GitHub Codex 봇이 계정의 code review 사용량 제한을 두 차례 응답했다. issue/line/review/reaction 네 표면을 확인했으며 명시적 승인 신호는 없다. 이것을 clean으로 해석하지 않는다.
-- 로컬 독립·심층 리뷰는 완료했으며, 외부 리뷰 대체에 대한 사용자 확인 전에는 머지/운영 적용/배포를 진행하지 않는다. 현재 운영·설치 버전은 1.112.0이다.
+- 2026-09-06 사용자가 "로컬 리뷰로 대체해서 배포해"라고 명시 승인했다. 완료된 로컬 독립·심층 리뷰를 통과 기준으로 삼아 운영 DB 보완, 머지, 정식 빌드와 배포를 이어간다. GitHub Codex 승인으로 표기하지 않는다.
