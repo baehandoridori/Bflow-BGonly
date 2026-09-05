@@ -6099,9 +6099,16 @@ test('ScheduleView counts every event overlapping the displayed month', async ()
     calendarListEvent({ id: 'outside-month', title: '다음 달만', startDate: '2026-09-01', endDate: '2026-09-02' }),
   ];
 
-  await renderScheduleView();
+  let tree = await renderScheduleView();
   await flushScheduleMountEffects();
-  const tree = await renderScheduleView();
+  // The fixture describes August 2026; never let the host's current month choose this assertion.
+  buttonByTitle(tree, '사이드바 펼치기').props.onClick?.();
+  tree = await renderScheduleView();
+  const miniCalendar = scheduleMiniCalendarProps.at(-1);
+  assert.ok(miniCalendar, 'the expanded sidebar provides the public month navigation');
+  miniCalendar.onMonthChange(new Date(2026, 7, 1));
+  tree = await renderScheduleView();
+  assert.match(textContent(tree), /2026년 8월/, 'the fixture month is visibly selected before counting');
   assert.match(textContent(tree), /이번 달 3개/, 'events that started before or end after this month still count while they overlap it');
 });
 

@@ -14,7 +14,7 @@ const ScenesView = lazy(() => import('@/views/ScenesView').then(m => ({ default:
 const EpisodeView = lazy(() => import('@/views/EpisodeView').then(m => ({ default: m.EpisodeView })));
 const AssigneeView = lazy(() => import('@/views/AssigneeView').then(m => ({ default: m.AssigneeView })));
 const TeamView = lazy(() => import('@/views/TeamView').then(m => ({ default: m.TeamView })));
-const CalendarView = lazy(() => import('@/views/CalendarView').then(m => ({ default: m.CalendarView })));
+const CalendarView = lazy(() => import('@/features/gantt/GanttView').then(m => ({ default: m.GanttView })));
 const ScheduleView = lazy(() => import('@/views/ScheduleView').then(m => ({ default: m.ScheduleView })));
 const VacationView = lazy(() => import('@/views/VacationView').then(m => ({ default: m.VacationView })));
 const CompositingView = lazy(() => import('@/views/CompositingView')); // default export — 기존 리테이크 보드 (v1.30.0~ 'compositing-revisions' 로 이관)
@@ -2692,6 +2692,7 @@ export default function App() {
         }
         // 캘린더 계열은 전용 정본 재조회/알림 경로로만 반영한다.
         // 구버전 나만 보기 쓰기(private_calendar_events)도 일반 전체 reload를 유발하지 않는다.
+        if (changedTable?.startsWith('gantt_')) return;
         if (changedTable && (changedTable.startsWith('calendar') || changedTable === 'private_calendar_events')) {
           return;
         }

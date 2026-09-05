@@ -425,6 +425,13 @@ contextBridge.exposeInMainWorld('electronAPI', {
   changeOwnPassword: (input: { currentPassword: string; newPassword: string }) =>
     ipcRenderer.invoke('auth:change-own-password', input),
   readPersonalTodos: () => ipcRenderer.invoke('personal-todo:read', canonicalSessionEpoch),
+  ganttRead: () => ipcRenderer.invoke('gantt:read', canonicalSessionEpoch),
+  ganttExecute: (request: import('../src/features/gantt/types').GanttRequest) => ipcRenderer.invoke('gantt:execute', request, canonicalSessionEpoch),
+  onGanttChanged: (callback: () => void) => {
+    const listener = () => callback();
+    ipcRenderer.on('gantt:changed', listener);
+    return () => ipcRenderer.removeListener('gantt:changed', listener);
+  },
   readPersonalTodoLabels: () => ipcRenderer.invoke('personal-todo:read-labels', canonicalSessionEpoch),
   createPersonalTodo: (input: PersonalTodoCreateInput) => ipcRenderer.invoke('personal-todo:create', input, canonicalSessionEpoch),
   patchPersonalTodo: (todoId: string, patch: PersonalTodoPatch) => ipcRenderer.invoke('personal-todo:patch', todoId, patch, canonicalSessionEpoch),
