@@ -33,8 +33,8 @@ function fixture(): GanttSnapshot {
 }
 type Props = {children?: ReactNode; value?: string; disabled?: boolean; 'aria-label'?: string; onClick?: () => void; onChange?: (event: {target: {value: string}}) => void};
 type Element = ReactElement<Props>;
-type CanvasProps = {selected: string[]; onSelect(projectId: string, taskId: string | null, multiple?: boolean): void; onAdd(project: GanttProject, parentId: string|null, start: string, end: string): void};
-type InspectorProps = {onAddChild(): void; onDelete(): void; onSaveTask(patch: Partial<GanttTask>): Promise<void>};
+type CanvasProps = {selected: string[]; statusFilter: string; onSelect(projectId: string, taskId: string | null, multiple?: boolean): void; onAdd(project: GanttProject, parentId: string|null, start: string, end: string): void; onMenu(project:GanttProject,task:GanttTask|null,x:number,y:number):void};
+type InspectorProps = {displayProgress?:number;onAddChild(): void; onDelete(): void; onComplete():void; onSaveTask(patch: Partial<GanttTask>): Promise<void>};
 const bundle = build({
   entryPoints: ['src/features/gantt/GanttView.tsx'], bundle: true, format: 'cjs', platform: 'node', target: 'node22', write: false,
   external: ['react', 'react/jsx-runtime', 'lucide-react', '@/stores/useAuthStore', '@/stores/useDataStore', '@/stores/useCalendarStore', '@/utils/calcStats', './useGanttStore', './GanttCanvas', './GanttDialogs', './GanttInspector', './gantt.css'],
@@ -76,7 +76,7 @@ async function harness() {
   const store = Object.assign(() => state, {getState: () => state});
   const calendarState = {calendars: [], async loadAll() {}};
   const calendarStore = Object.assign((selector: (value: typeof calendarState) => unknown) => selector(calendarState), {getState: () => calendarState});
-  const Canvas = () => null, Inspector = () => null, Empty = () => null;
+  const Canvas = () => null, Inspector = () => null, Context = () => null, SpaceDialog = () => null, Empty = () => null;
   const nodeRequire = createRequire(import.meta.url), react = nodeRequire('react');
   const module = {exports: {} as {GanttView?: () => ReactNode}};
   new Function('require', 'module', 'exports', 'window', 'localStorage', 'setInterval', 'clearInterval', (await bundle).outputFiles[0].text)(
@@ -104,7 +104,7 @@ async function harness() {
       if (name === '@/utils/calcStats') return {sceneProgress: () => 0};
       if (name === './useGanttStore') return {useGanttStore: store};
       if (name === './GanttCanvas') return {GanttCanvas: Canvas, localDate: () => '2026-09-05', moveDate: shiftDate};
-      if (name === './GanttDialogs') return {GanttContextMenu: Empty, GanttModal: Empty, GanttSpaceDialog: Empty};
+      if (name === './GanttDialogs') return {GanttContextMenu: Context, GanttModal: Empty, GanttSpaceDialog: SpaceDialog};
       if (name === './GanttInspector') return {GanttInspector: Inspector};
       if (name === './gantt.css') return {};
       if (name === 'lucide-react') return new Proxy({}, {get: () => Empty});
@@ -125,6 +125,9 @@ async function harness() {
     },
     canvas(tree: ReactNode): CanvasProps {const found = elements(tree, Canvas)[0];assert.ok(found);return found.props as unknown as CanvasProps;},
     inspector(tree: ReactNode): InspectorProps {const found = elements(tree, Inspector)[0];assert.ok(found);return found.props as unknown as InspectorProps;},
+    context(tree:ReactNode) {const found=elements(tree,Context)[0];assert.ok(found);return found.props as unknown as {onDelete():void;completed:boolean};},
+    folder(tree:ReactNode) {const found=elements(tree,SpaceDialog)[0];assert.ok(found);return found.props as unknown as {onDelete():Promise<void>;projectCount:number};},
+    snapshot:()=>state.snapshot,
     latestProject(projectId: string) {const found = state.snapshot.projects.find(project => project.id === projectId);assert.ok(found);return found;},
   };
 }
@@ -231,4 +234,50 @@ test('deleting the last-ending child moves an automatic successor back in the sa
   const h=await harness(),project=h.latestProject(B),group=row(GROUP,'group',null,0),early={...row(TASK,'task',GROUP,0),startDate:'2026-09-05',endDate:'2026-09-05'},late={...row(OUTER,'task',GROUP,1),startDate:'2026-09-10',endDate:'2026-09-12'},successor={...row(NEXT_TASK,'task',null,2),mode:'auto' as const,predecessorId:GROUP,startDate:'2026-09-13',endDate:'2026-09-13'};
   project.tasks=[group,early,late,successor];let tree=h.render();h.canvas(tree).onSelect(B,OUTER);tree=h.render();h.inspector(tree).onDelete();tree=h.render();button(tree,'확인').props.onClick!();await settle();
   assert.equal(h.latestProject(B).tasks.some(t=>t.id===OUTER),false);assert.equal(h.latestProject(B).tasks.find(t=>t.id===NEXT_TASK)?.startDate,'2026-09-06');
+});
+
+test('completion keeps the task selected and inspector open in the default all view', async()=>{
+  const h=await harness();let tree=h.render();h.canvas(tree).onSelect(B,TASK);tree=h.render();
+  h.inspector(tree).onComplete();await settle();tree=h.render();
+  assert.equal(h.latestProject(B).tasks.find(t=>t.id===TASK)?.completed,true);
+  assert.equal(h.canvas(tree).statusFilter,'all');
+  assert.deepEqual(h.canvas(tree).selected,[TASK]);
+  assert.ok(h.inspector(tree),'completion must not dismiss the active task');
+  assert.equal(h.latestProject(B).tasks.length,5,'completion preserves the full project');
+});
+
+test('reopening a project preserves its individual completed and partial tasks', async()=>{
+  const h=await harness(),project=h.latestProject(B);project.completed=true;
+  project.tasks.find(t=>t.id===TASK)!.completed=true;project.tasks.find(t=>t.id===TASK)!.progress=100;
+  project.tasks.find(t=>t.id===NEXT_TASK)!.progress=65;
+  let tree=h.render();h.canvas(tree).onSelect(B,null);tree=h.render();h.inspector(tree).onComplete();await settle();
+  assert.equal(h.latestProject(B).completed,false);
+  assert.equal(h.latestProject(B).tasks.find(t=>t.id===TASK)?.completed,true);
+  assert.equal(h.latestProject(B).tasks.find(t=>t.id===NEXT_TASK)?.progress,65);
+});
+
+test('context delete removes its target rather than the previously selected task', async()=>{
+  const h=await harness();let tree=h.render();h.canvas(tree).onSelect(B,TASK);tree=h.render();
+  h.canvas(tree).onMenu(h.latestProject(B),h.latestProject(B).tasks.find(t=>t.id===NEXT_TASK)!,50,50);tree=h.render();
+  h.context(tree).onDelete();tree=h.render();button(tree,'확인').props.onClick!();await settle();
+  assert.ok(h.latestProject(B).tasks.some(t=>t.id===TASK));
+  assert.equal(h.latestProject(B).tasks.some(t=>t.id===NEXT_TASK),false);
+});
+
+test('folder deletion rejects a folder containing projects and always requires empty authority state', async()=>{
+  const h=await harness();let tree=h.render();
+  const settings=elements(tree,'button').find(e=>e.props['aria-label']==='내 폴더 설정')!;assert.ok(settings);
+  (settings.props.onClick as (e:any)=>void)({preventDefault(){}});tree=h.render();
+  assert.equal(h.folder(tree).projectCount,2);
+  await assert.rejects(h.folder(tree).onDelete(),/프로젝트/);
+  assert.equal(h.commands.length,0);
+  h.snapshot().projects=h.snapshot().projects.filter(p=>p.spaceId!==id(20));
+  tree=h.render();await h.folder(tree).onDelete();
+  assert.deepEqual(h.commands,[{type:'deleteSpace',spaceId:id(20),expectedRevision:1,requireEmpty:true}]);
+});
+
+test('group inspector progress includes unfinished empty groups rather than showing 100 percent',async()=>{
+  const h=await harness();h.latestProject(B).tasks=[row(OUTER,'group',null,0),row(GROUP,'group',OUTER,0),{...row(TASK,'task',OUTER,1),completed:true,progress:100}];
+  let tree=h.render();h.canvas(tree).onSelect(B,OUTER);tree=h.render();
+  assert.equal(h.inspector(tree).displayProgress,50);
 });

@@ -36,6 +36,45 @@ export function descendantIds(project: GanttProject, taskId: string): Set<string
   do { previous = found.size; for (const t of project.tasks) if (t.parentId && found.has(t.parentId)) found.add(t.id); } while (previous !== found.size);
   return found;
 }
+type CompletionSummary = { completed: boolean; totalProgress: number; count: number };
+function completionSummary(project: GanttProject) {
+  const byParent = new Map<string, GanttTask[]>(), summaries = new Map<string, CompletionSummary>(), visiting = new Set<string>();
+  for (const task of project.tasks) if (task.parentId) {
+    const siblings = byParent.get(task.parentId) || [];
+    siblings.push(task);byParent.set(task.parentId, siblings);
+  }
+  const summarize = (task: GanttTask): CompletionSummary => {
+    const cached = summaries.get(task.id);if (cached) return cached;
+    if (visiting.has(task.id)) fail('작업에 순환 관계가 있습니다.');
+    visiting.add(task.id);
+    const descendants = task.kind === 'group' ? byParent.get(task.id) || [] : [];
+    const completed = task.completed || task.progress === 100;
+    const result = descendants.length ? descendants.map(summarize).reduce((sum, child) => ({ completed: sum.completed && child.completed, totalProgress: sum.totalProgress + child.totalProgress, count: sum.count + child.count }), { completed: true, totalProgress: 0, count: 0 }) : { completed, totalProgress: completed ? 100 : task.progress, count: 1 };
+    visiting.delete(task.id);summaries.set(task.id, result);return result;
+  };
+  return { summarize, byParent };
+}
+/** Groups follow their descendants; empty groups keep their explicit completion state. */
+export function isTaskComplete(project: GanttProject, task: GanttTask): boolean {
+  return completionSummary(project).summarize(task).completed;
+}
+function summaryProgress(summary: CompletionSummary): number {
+  return summary.completed ? 100 : Math.min(99, Math.round(summary.totalProgress / summary.count));
+}
+/** Display and persisted group progress use the same terminal-task aggregation. */
+export function taskProgress(project: GanttProject, task: GanttTask): number {
+  return summaryProgress(completionSummary(project).summarize(task));
+}
+function normalizeCompletion(project: GanttProject): void {
+  const { summarize, byParent } = completionSummary(project);
+  for (const task of project.tasks) if (task.kind === 'group' && byParent.has(task.id)) {
+    const summary = summarize(task);
+    task.completed = summary.completed;
+    task.progress = summaryProgress(summary);
+  }
+  // Closing a project is explicit; adding or reopening work only clears that flag.
+  if (project.completed && project.tasks.some(task => !summarize(task).completed)) project.completed = false;
+}
 export function taskBounds(project: GanttProject, taskId?: string): TaskBounds | null {
   const task = taskId ? project.tasks.find(t => t.id === taskId) : null;
   if (taskId && !task) return null;
@@ -99,7 +138,6 @@ export function updateTask(project:GanttProject,taskId:string,patch:Partial<Gant
   if(patch.id&&patch.id!==taskId) fail('작업 ID를 바꿀 수 없습니다.');
   Object.assign(task,patch);if(task.allDay){task.startTime='';task.endTime='';}if(task.kind==='milestone'){task.endDate=task.startDate;task.endTime=task.startTime;}
   if(patch.progress!==undefined&&task.progressMode==='manual')task.completed=task.progress===100;
-  if(!task.completed)next.completed=false;
   return scheduleProject(next);
 }
 /** Structural changes can change group bounds just as a date edit can. */
@@ -123,7 +161,7 @@ export function scheduleProject(project:GanttProject):GanttProject {
     }
     scheduled.add(t.id);
   };
-  next.tasks.forEach(schedule);validateProject(next);return next;
+  next.tasks.forEach(schedule);normalizeCompletion(next);validateProject(next);return next;
 }
 export function taskConflicts(project:GanttProject):Array<{id:string;message:string}> {
   return project.tasks.flatMap(t=>{if(!t.predecessorId)return [];const p=project.tasks.find(x=>x.id===t.predecessorId);if(!p)return [];const bounds=taskBounds(project,t.id),previous=taskBounds(project,p.id);if(!bounds||!previous)return [];return start(bounds)<finish({...previous,kind:p.kind})?[{id:t.id,message:`선행 작업 ‘${p.title}’이 끝나기 전에 시작합니다.`}]:[];});
@@ -133,6 +171,7 @@ export function completeTasks(project:GanttProject,ids:string[],completed:boolea
   for(const key of ids){const t=next.tasks.find(t=>t.id===key);if(!t)fail('작업을 찾을 수 없습니다.');for(const child of t.kind==='group'?descendantIds(next,key):[key])selected.add(child);}
   for(const t of next.tasks)if(selected.has(t.id)){t.completed=completed;t.progress=completed?100:0;t.progressMode='manual';}
   if(!completed&&selected.size)next.completed=false;
+  normalizeCompletion(next);
   return next;
 }
 export function canManageSpace(space:GanttSpace,actorId:string):boolean {return Boolean(actorId)&&space.ownerId===actorId;}

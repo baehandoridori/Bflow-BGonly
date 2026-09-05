@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ArrowDown, ArrowLeft, ArrowRight, ArrowUp, Check, ChevronDown, Plus, RotateCcw, Save, Trash2, X } from 'lucide-react';
 import type { Episode } from '@/types';
 import type { BflowCalendar } from '@/types/calendar';
-import { descendantIds, durationLabel, taskBounds } from './domain';
+import { descendantIds, durationLabel, taskBounds, taskProgress } from './domain';
 import type { GanttProject, GanttSceneLink, GanttTask } from './types';
 import './inspector.css';
 
@@ -24,6 +24,9 @@ export interface GanttInspectorProps {
   onDelete: () => void;
   onAddChild: () => void;
   canAddChild?: boolean;
+  completed?: boolean;
+  displayProgress?: number;
+  folderName?: string;
   onMove: (direction: 'up' | 'down' | 'indent' | 'outdent') => void;
 }
 
@@ -121,7 +124,6 @@ export function GanttInspector(props: GanttInspectorProps) {
   const group = taskDraft?.kind === 'group';
   const milestone = taskDraft?.kind === 'milestone';
   const bounds = task ? taskBounds(project, task.id) : taskBounds(project);
-  const groupProgress = task ? project.tasks.filter(row => excluded.has(row.id) && row.kind !== 'group') : [];
   const scenes = useMemo(() => episodes.filter(episode => String(episode.episodeNumber) === sceneEpisode).flatMap(episode => episode.parts.flatMap(part => part.scenes.map(scene => ({
     link: { episodeNumber: episode.episodeNumber, sheetName: part.sheetName, department: part.department, sceneId: scene.sceneId } as GanttSceneLink,
     title: `${part.department === 'bg' ? 'BG' : '액팅'} · ${part.partId} · ${scene.sceneId}`,
@@ -161,7 +163,7 @@ export function GanttInspector(props: GanttInspectorProps) {
   }
 
   return <aside className="gantt-inspector" aria-label={task ? '작업 상세' : '프로젝트 상세'}>
-    <div className="gantt-inspector-header"><div><span className="gantt-inspector-eyebrow">{task ? project.name : '프로젝트'}</span><h2>{task ? '작업 상세' : '프로젝트 설정'}</h2></div><button className="gantt-button" type="button" aria-label="상세 닫기" onClick={onClose}><X size={17} /></button></div>
+    <div className="gantt-inspector-header"><div><span className="gantt-inspector-eyebrow">{[props.folderName,project.name,task?.parentId?project.tasks.find(t=>t.id===task.parentId)?.title:undefined].filter(Boolean).join(' › ')}</span><h2>{task ? task.kind==='group'?'그룹 상세':task.kind==='milestone'?'마일스톤 상세':'작업 상세' : '프로젝트 설정'}</h2></div><button className="gantt-button" type="button" aria-label="상세 닫기" onClick={onClose}><X size={17} /></button></div>
     {!canEdit && <p className="gantt-inspector-notice">보기 권한으로 열었습니다.</p>}
     {externalChange && <div className="gantt-inspector-notice warning" role="status"><p>다른 변경이 도착했습니다. 작성 중인 내용은 유지했습니다. 최신 내용을 불러온 뒤 다시 편집해 주세요.</p><button type="button" className="gantt-button" onClick={() => reload(latest.current.project, latest.current.task)}><RotateCcw size={13} /> 최신 내용 불러오기</button></div>}
     <form onSubmit={submit} className="gantt-inspector-form">
@@ -185,9 +187,9 @@ export function GanttInspector(props: GanttInspectorProps) {
           <label className="gantt-field">메모<textarea value={taskDraft.memo} maxLength={20000} rows={4} onChange={event => changeTask({ memo: event.target.value })} placeholder="작업 내용이나 참고 사항을 남기세요." /></label>
           <PeoplePicker title="작업자" selected={taskDraft.workers} people={users} disabled={disabled} onChange={workers => changeTask({ workers })} />
           <PeoplePicker title="참석자" selected={taskDraft.attendees} people={users} disabled={disabled} onChange={attendees => changeTask({ attendees })} />
-          <section className="gantt-inspector-section"><h3>진행률</h3>{group ? <p className="gantt-inspector-hint">{groupProgress.length ? `${Math.round(groupProgress.reduce((sum, row) => sum + row.progress, 0) / groupProgress.length)}% · ` : ''}하위 작업의 진행률을 종합합니다.</p> : <>
+          <section className="gantt-inspector-section"><h3>진행률</h3>{group ? <p className="gantt-inspector-hint">{props.displayProgress??taskProgress(project,taskDraft)}% · 하위 작업의 진행률을 종합합니다.</p> : <>
             <label className="gantt-field"><span className="gantt-inspector-sr">진행률 계산 방식</span><select value={taskDraft.progressMode} onChange={event => changeTask({ progressMode: event.target.value as GanttTask['progressMode'] })}><option value="manual">직접 입력</option><option value="scenes">연결된 씬에서 자동 계산</option></select></label>
-            {taskDraft.progressMode === 'manual' ? <label className="gantt-field">진행 {taskDraft.progress}%<input type="range" min={0} max={100} step={5} value={taskDraft.progress} onChange={event => changeTask({ progress: Number(event.target.value) })} /></label> : <p className="gantt-inspector-hint">연결한 씬의 작업 현황을 따라갑니다.</p>}
+            {taskDraft.progressMode === 'manual' ? <label className="gantt-field">진행 {taskDraft.progress}%<input type="range" min={0} max={100} step={5} value={taskDraft.progress} onChange={event => changeTask({ progress: Number(event.target.value) })} /></label> : <p className="gantt-inspector-hint">{props.displayProgress??taskDraft.progress}% · 연결한 씬의 작업 현황을 따라갑니다.</p>}
           </>}</section>
           <details className="gantt-inspector-scenes" open={taskDraft.progressMode === 'scenes' ? true : undefined}><summary>씬 연결 <span>{taskDraft.sceneLinks.length}개</span></summary>
             <label className="gantt-field">에피소드<select value={sceneEpisode} onChange={event => setSceneEpisode(event.target.value)}><option value="">에피소드 선택</option>{episodes.map(episode => <option key={episode.episodeNumber} value={episode.episodeNumber}>{episode.title || `EP ${episode.episodeNumber}`}</option>)}</select></label>
@@ -224,7 +226,7 @@ export function GanttInspector(props: GanttInspectorProps) {
     <div className="gantt-inspector-actions">
       {task && <div className="gantt-inspector-order">{([['up', '위로', ArrowUp], ['down', '아래로', ArrowDown], ['indent', '하위로', ArrowRight], ['outdent', '상위로', ArrowLeft]] as const).map(([direction, label, Icon]) => <button key={direction} type="button" className="gantt-button" title={label} aria-label={label} disabled={disabled || dirty} onClick={() => onMove(direction)}><Icon size={14} /></button>)}</div>}
       {task?.kind === 'group' && <button className="gantt-button" type="button" disabled={disabled || dirty || props.canAddChild === false} onClick={onAddChild}><Plus size={14} />하위 작업</button>}
-      <button className="gantt-button" type="button" disabled={disabled || dirty} onClick={onComplete}><Check size={14} />{(task ? task.completed || task.progress === 100 : project.completed) ? '진행 중으로 복원' : '완료 표시'}</button>
+      <button className="gantt-button" type="button" disabled={disabled || dirty} onClick={onComplete}><Check size={14} />{(props.completed ?? (task ? task.completed || task.progress === 100 : project.completed)) ? '다시 열기' : '완료 표시'}</button>
       <button className="gantt-button gantt-inspector-delete" type="button" disabled={disabled || dirty} onClick={onDelete}><Trash2 size={14} />삭제</button>
     </div>
   </aside>;

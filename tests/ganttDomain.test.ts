@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createTask, createProject, createSpace, durationLabel, updateTask, completeTasks, taskBounds, resolveTaskColor, validateProject, applyCommand, visibleSnapshot, taskConflicts } from '../src/features/gantt/domain.ts';
+import { createTask, createProject, createSpace, durationLabel, updateTask, completeTasks, taskBounds, resolveTaskColor, validateProject, applyCommand, visibleSnapshot, taskConflicts, isTaskComplete, scheduleProject, taskProgress } from '../src/features/gantt/domain.ts';
 
 test('duration includes weekends and both dates, timed elapsed and milestone zero',()=>{
  const t=createTask('교육','2026-09-04');t.endDate='2026-09-07';assert.equal(durationLabel(t),'4일');
@@ -94,4 +94,58 @@ test('removing folder members transfers their projects and prunes access in the 
  assert.equal(original.projects[0].ownerId,'removed');
  const privateFolder=applyCommand(original,'owner',{type:'saveSpace',space:{...s,shared:false},expectedRevision:1});
  assert.equal(privateFolder.projects[0].ownerId,'owner');assert.deepEqual(privateFolder.projects[0].memberIds,[]);assert.deepEqual(privateFolder.projects[0].editorIds,[]);assert.equal(visibleSnapshot(privateFolder,'remaining').projects.length,0);
+});
+
+test('reopening one child updates completed ancestor groups without resetting sibling work',()=>{
+ const p=createProject('완료 후 재개',crypto.randomUUID(),'u'),outer=createTask('상위','2026-09-05'),inner=createTask('하위','2026-09-05'),a=createTask('a','2026-09-05'),b=createTask('b','2026-09-06'),unrelated=createTask('별도 작업','2026-09-07');
+ outer.kind=inner.kind='group';inner.parentId=outer.id;a.parentId=b.parentId=inner.id;unrelated.progress=35;unrelated.memo='이 내용은 유지';p.tasks=[outer,inner,a,b,unrelated];
+ const done=completeTasks(p,[outer.id],true);done.completed=true;
+ const reopened=completeTasks(done,[a.id],false);
+ assert.deepEqual(reopened.tasks.map(t=>[t.completed,t.progress]),[[false,50],[false,50],[false,0],[true,100],[false,35]]);
+ assert.equal(reopened.completed,false);assert.deepEqual(reopened.tasks[4],unrelated);assert.ok(done.tasks.slice(0,4).every(t=>t.completed));
+});
+
+test('all individually completed children complete their group display but do not close the project',()=>{
+ const p=createProject('개별 완료',crypto.randomUUID(),'u'),g=createTask('그룹','2026-09-05'),a=createTask('a','2026-09-05'),b=createTask('b','2026-09-06');g.kind='group';a.parentId=b.parentId=g.id;p.tasks=[g,a,b];
+ const done=completeTasks(completeTasks(p,[a.id],true),[b.id],true);
+ assert.equal(done.tasks[0].completed,true);assert.equal(done.tasks[0].progress,100);assert.equal(done.completed,false);
+ const stale=structuredClone(done);stale.tasks[0].completed=false;stale.tasks[0].progress=0;
+ assert.equal(isTaskComplete(stale,stale.tasks[0]),true);assert.equal(stale.tasks[0].completed,false);
+});
+
+test('empty and nested empty groups use explicit completion until real descendants are added',()=>{
+ const p=createProject('빈 그룹',crypto.randomUUID(),'u'),outer=createTask('상위','2026-09-05'),inner=createTask('빈 하위','2026-09-05'),leaf=createTask('완료 작업','2026-09-06');outer.kind=inner.kind='group';inner.parentId=outer.id;leaf.parentId=outer.id;leaf.completed=true;leaf.progress=100;p.tasks=[outer,inner,leaf];
+ assert.equal(isTaskComplete(p,inner),false);assert.equal(isTaskComplete(p,outer),false);
+ const done=completeTasks(p,[inner.id],true);assert.equal(isTaskComplete(done,done.tasks[1]),true);assert.equal(isTaskComplete(done,done.tasks[0]),true);
+ const child=createTask('새 하위 작업','2026-09-07');child.parentId=inner.id;done.tasks.push(child);
+ const next=scheduleProject(done);assert.equal(next.tasks[0].completed,false);assert.equal(next.tasks[1].completed,false);assert.equal(isTaskComplete(next,next.tasks[0]),false);
+});
+
+test('partial progress and newly added work reopen groups and closed projects while preserving finished siblings',()=>{
+ const p=createProject('작업 추가',crypto.randomUUID(),'u'),g=createTask('그룹','2026-09-05'),a=createTask('a','2026-09-05'),b=createTask('b','2026-09-06');g.kind='group';a.parentId=b.parentId=g.id;p.tasks=[g,a,b];
+ const done=completeTasks(p,[g.id],true);done.completed=true;
+ const changed=updateTask(done,a.id,{progress:40});assert.equal(changed.tasks[0].completed,false);assert.equal(changed.tasks[0].progress,70);assert.equal(changed.completed,false);assert.deepEqual(changed.tasks[2],done.tasks[2]);
+ const fresh=createTask('추가','2026-09-07');fresh.parentId=g.id;done.tasks.push(fresh);
+ const scheduled=scheduleProject(done);assert.equal(scheduled.completed,false);assert.equal(scheduled.tasks[0].completed,false);assert.equal(scheduled.tasks[0].progress,67);assert.deepEqual(scheduled.tasks[2],done.tasks[2]);
+});
+
+test('completion display honors scene-derived leaf values without mutating scene links or original state',()=>{
+ const p=createProject('씬 완료 표시',crypto.randomUUID(),'u'),g=createTask('그룹','2026-09-05'),t=createTask('씬 연결','2026-09-05');g.kind='group';t.parentId=g.id;t.progressMode='scenes';t.sceneLinks=[{episodeNumber:1,sheetName:'EP1',sceneId:'1',department:'bg'}];p.tasks=[g,t];
+ const effective={...p,tasks:p.tasks.map(row=>row.id===t.id?{...row,completed:true,progress:100}:row)};
+ assert.equal(isTaskComplete(p,g),false);assert.equal(isTaskComplete(effective,g),true);assert.equal(p.tasks[1].progressMode,'scenes');assert.equal(p.tasks[1].progress,0);assert.deepEqual(effective.tasks[1].sceneLinks,t.sceneLinks);
+});
+
+test('display progress includes empty groups and weights nested terminal work consistently with completion',()=>{
+ const p=createProject('진행률 표시',crypto.randomUUID(),'u'),outer=createTask('상위','2026-09-05'),inner=createTask('하위','2026-09-05'),empty=createTask('빈 그룹','2026-09-05'),done=createTask('완료 작업','2026-09-05'),partial=createTask('진행 작업','2026-09-05');
+ outer.kind=inner.kind=empty.kind='group';inner.parentId=partial.parentId=outer.id;empty.parentId=done.parentId=inner.id;done.completed=true;done.progress=100;partial.progress=40;p.tasks=[outer,inner,empty,done,partial];
+ assert.equal(taskProgress(p,inner),50);assert.equal(taskProgress(p,outer),47);
+ assert.equal(taskProgress(p,empty),0);assert.equal(taskProgress(p,done),100);assert.equal(taskProgress(p,partial),40);
+ assert.equal(isTaskComplete(p,inner),false);assert.equal(inner.progress,0,'reading derived progress must not rewrite the snapshot');
+});
+
+test('display progress follows effective scene progress while the stored task and scene links remain unchanged',()=>{
+ const p=createProject('씬 진행률',crypto.randomUUID(),'u'),g=createTask('그룹','2026-09-05'),t=createTask('씬','2026-09-05');g.kind='group';t.parentId=g.id;t.progressMode='scenes';t.sceneLinks=[{episodeNumber:1,sheetName:'EP1',sceneId:'1',department:'bg'}];p.tasks=[g,t];
+ const effective={...p,tasks:[g,{...t,progress:100,completed:true}]};
+ assert.equal(taskProgress(p,g),0);assert.equal(taskProgress(effective,g),100);assert.equal(taskProgress(effective,effective.tasks[1]),100);
+ assert.equal(t.progress,0);assert.equal(t.progressMode,'scenes');assert.equal(t.sceneLinks.length,1);
 });
