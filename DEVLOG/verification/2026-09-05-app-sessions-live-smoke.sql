@@ -12,6 +12,10 @@ VALUES ('smoke-owner-'  || gen_random_uuid()::TEXT, '__세션검증 소유자', 
        ('smoke-viewer-' || gen_random_uuid()::TEXT, '__세션검증 보기',   'user', 'viewer-pw'),
        ('smoke-lock-'   || gen_random_uuid()::TEXT, '__세션검증 잠금',   'user', 'lock-pw');
 
+-- 토큰 원문이 저장되지 않는지 확인하기 위한 트랜잭션 한정 임시 표.
+CREATE TEMP TABLE smoke_tokens(kind TEXT PRIMARY KEY, token TEXT) ON COMMIT DROP;
+GRANT INSERT, SELECT ON smoke_tokens TO anon;
+
 SET LOCAL ROLE anon;
 
 DO $smoke$
@@ -71,6 +75,7 @@ BEGIN
   IF NOT (viewer_login->>'ok')::BOOLEAN THEN RAISE EXCEPTION 'viewer login failed: %', viewer_login; END IF;
   viewer_token := viewer_login->>'token'; viewer_id := viewer_login->'user'->>'id';
   IF owner_token = viewer_token THEN RAISE EXCEPTION 'tokens collide'; END IF;
+  INSERT INTO smoke_tokens VALUES ('owner', owner_token), ('viewer', viewer_token);
 
   -- 5) 간트: 소유자가 공유 폴더(보기 멤버 = viewer)와 프로젝트를 만든다.
   result := public.gantt_session_execute(owner_token, 'smoke:space', jsonb_build_object(
@@ -131,6 +136,22 @@ BEGIN
   result := public.app_login('__세션검증 잠금', 'lock-pw');
   IF (result->>'ok')::BOOLEAN OR result->>'error' NOT LIKE '%너무 많%' THEN RAISE EXCEPTION 'lockout missing: %', result; END IF;
 END $smoke$;
+
+RESET ROLE;
+
+-- 잠금 카운터와 토큰 저장 형태는 anon 이 읽을 수 없으므로(그게 경계다) 역할을 되돌린 뒤 확인한다.
+DO $counters$
+DECLARE n INTEGER; lock_until TIMESTAMPTZ; raw_hits INTEGER;
+BEGIN
+  SELECT failures INTO n FROM public.app_login_throttle WHERE user_name = '__세션검증 소유자';
+  IF n IS DISTINCT FROM 0 THEN RAISE EXCEPTION 'owner counter should reset after success, got %', n; END IF;
+  SELECT failures, locked_until INTO n, lock_until FROM public.app_login_throttle WHERE user_name = '__세션검증 잠금';
+  IF n IS DISTINCT FROM 5 OR lock_until IS NULL OR lock_until <= now() THEN
+    RAISE EXCEPTION 'lock counter wrong: failures=% locked_until=%', n, lock_until;
+  END IF;
+  SELECT count(*) INTO raw_hits FROM public.app_sessions s JOIN smoke_tokens t ON s.token_hash = t.token;
+  IF raw_hits <> 0 THEN RAISE EXCEPTION 'raw tokens were stored'; END IF;
+END $counters$;
 
 ROLLBACK;
 

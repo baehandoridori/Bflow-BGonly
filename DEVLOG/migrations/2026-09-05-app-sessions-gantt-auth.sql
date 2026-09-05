@@ -98,8 +98,12 @@ BEGIN
     RAISE EXCEPTION '이름과 비밀번호를 입력해 주세요.' USING ERRCODE = '22023';
   END IF;
 
-  INSERT INTO public.app_login_throttle (user_name) VALUES (p_name) ON CONFLICT (user_name) DO NOTHING;
-  SELECT * INTO v_throttle FROM public.app_login_throttle WHERE user_name = p_name FOR UPDATE;
+  -- DO UPDATE(no-op)로 upsert해야 동시 로그인에서도 항상 잠긴 행을 돌려받는다.
+  -- DO NOTHING + 별도 SELECT 는 다른 트랜잭션이 롤백한 순간 행을 못 찾아 failures 가 NULL 이 되고,
+  -- 이어지는 UPDATE 가 NOT NULL 을 위반해 로그인 실패가 예외로 터진다.
+  INSERT INTO public.app_login_throttle (user_name) VALUES (p_name)
+  ON CONFLICT (user_name) DO UPDATE SET user_name = EXCLUDED.user_name
+  RETURNING * INTO v_throttle;
   IF v_throttle.locked_until IS NOT NULL AND v_throttle.locked_until > now() THEN
     RETURN jsonb_build_object('ok', false,
       'error', '로그인 시도가 너무 많습니다. 잠시 후 다시 시도해 주세요.',
