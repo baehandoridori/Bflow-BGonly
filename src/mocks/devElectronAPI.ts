@@ -16,7 +16,7 @@ import {
 import { normalizeSceneIdKey } from '@/utils/sceneIdKey';
 import { createUuid } from '@/utils/createUuid';
 import { createPersonalTodoPreviewStore, PERSONAL_TODO_PREVIEW_SESSION_KEY, type PersonalTodoPreviewStore } from './personalTodoPreviewStore';
-import { createPreviewGateway, listCalendarEvents as listGanttCalendarEvents, patchCalendarEvent as patchGanttCalendarEvent, deleteCalendarEvent as deleteGanttCalendarEvent, subscribePreviewGantt, type PreviewOptions as GanttPreviewOptions } from '@/features/gantt/previewGateway';
+import { createPreviewGateway, listCalendarEvents as listGanttCalendarEvents, patchCalendarEvent as patchGanttCalendarEvent, deleteCalendarEvent as deleteGanttCalendarEvent, unlinkDeletedCalendar, subscribePreviewGantt, type PreviewOptions as GanttPreviewOptions } from '@/features/gantt/previewGateway';
 import { createMarketLocalStorageGateway } from '@/features/playground/market/localStorageGateway';
 import type { MarketPreviewGateway } from '@/features/playground/market/previewGateway';
 import type { MarketRemoteState, MarketSnapshot } from '@/features/playground/market/types';
@@ -2755,30 +2755,30 @@ export function installDevElectronAPI(): void {
       });
     },
     calendarDelete: async (id) => {
-      const user = requireMockCalendarUser();
-      const calendar = requireMockCalendar(id);
-      if (calendar.is_personal) throw new Error('개인 캘린더는 삭제할 수 없습니다');
-      if (!canManageCalendar(calendar, mockPermissionUser(user))) {
-        throw new Error('이 캘린더를 삭제할 권한이 없습니다');
-      }
-      const deletedEventIds = mockCalendarEvents
-        .filter((event) => event.calendar_id === id)
-        .map((event) => event.id);
-      const index = mockCalendars.findIndex((calendar) => calendar.id === id);
-      if (index >= 0) mockCalendars.splice(index, 1);
-      commitMockCalendarVisibility(id, null);
-      applyNormalizedMockCalendarMembers(id, []);
-      for (let eventIndex = mockCalendarEvents.length - 1; eventIndex >= 0; eventIndex--) {
-        if (mockCalendarEvents[eventIndex].calendar_id === id) {
-          mockCalendarEvents.splice(eventIndex, 1);
+      const { actor, options } = requireGanttPreviewSession();
+      await unlinkDeletedCalendar(id, () => {
+        // Recheck authority after entering the same lock used by Gantt writes.
+        const calendar = requireMockCalendar(id);
+        sharedMockCalendarVisibility(calendar);
+        if (calendar.is_personal) throw new Error('개인 캘린더는 삭제할 수 없습니다');
+        if (!canManageCalendar(calendar, mockPermissionUser(actor))) {
+          throw new Error('이 캘린더를 삭제할 권한이 없습니다');
         }
-      }
-      publishMockCalendarChange({
-        table: 'calendars',
-        action: 'DELETE',
-        calendarId: id,
-        deletedEventIds,
-      });
+        const deletedEventIds = mockCalendarEvents.filter((event) => event.calendar_id === id).map((event) => event.id);
+        const index = mockCalendars.findIndex((item) => item.id === id);
+        if (index >= 0) mockCalendars.splice(index, 1);
+        commitMockCalendarVisibility(id, null);
+        applyNormalizedMockCalendarMembers(id, []);
+        for (let eventIndex = mockCalendarEvents.length - 1; eventIndex >= 0; eventIndex--) {
+          if (mockCalendarEvents[eventIndex].calendar_id === id) mockCalendarEvents.splice(eventIndex, 1);
+        }
+        try {
+          publishMockCalendarChange({ table: 'calendars', action: 'DELETE', calendarId: id, deletedEventIds });
+        } catch (error) {
+          // A failed broadcast cannot roll back only the already-committed Gantt half.
+          console.warn('[DEV] 캘린더 삭제 알림을 보내지 못했습니다:', error);
+        }
+      }, options);
     },
     calendarSetMembers: async (calendarId, members) => {
       const user = requireMockCalendarUser();

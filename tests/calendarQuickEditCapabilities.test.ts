@@ -31,6 +31,9 @@ type QuickEditEvent = {
   allDay?: boolean;
   startTime?: string;
   endTime?: string;
+  linkedGanttProjectId?: string;
+  linkedGanttTaskId?: string;
+  linkedGanttTaskKind?: 'task' | 'group' | 'milestone';
 };
 
 type QuickEditProps = {
@@ -598,6 +601,56 @@ const newBflowCases: Array<{ name: string; target: QuickEditEvent }> = [
   },
 ];
 
+const milestoneEvent = () => event({
+  id: 'gantt:project:milestone', source: 'bflow', sourceCalendarId: 'bflow:calendar-1', calendarId: 'calendar-1',
+  linkedGanttProjectId: 'project', linkedGanttTaskId: 'milestone', linkedGanttTaskKind: 'milestone',
+  allDay: false, startDate: '2026-09-06', endDate: '2026-09-06', startTime: '10:00', endTime: '10:00', canEdit: true,
+});
+
+for (const editor of ['quick', 'side'] as const) {
+  const renderMilestone = (target: QuickEditEvent, draft: typeof forcedQuickEditDraft, onUpdate: QuickEditCallbacks['onUpdate']) => editor === 'quick'
+    ? renderQuickEdit(target, 'edit', { onUpdate }, undefined, draft)
+    : renderSidePanel(target, { onUpdate }, true, draft);
+
+  test(`${editor} editor saves only title and memo on a timed Gantt milestone`, async () => {
+    const target = milestoneEvent(), updates: Partial<QuickEditEvent>[] = [];
+    const tree = await renderMilestone(target, { title: '마감 제목', memo: '마감 메모' }, (_id, patch) => { updates.push(patch); });
+    const save = findButtonByText(tree, '저장');
+    assert.equal(save.props.disabled, false);
+    save.props.onClick?.();
+    assert.deepEqual(updates, [{ title: '마감 제목', memo: '마감 메모' }]);
+    assert.equal(findFormElementByLabel(tree, '종료 시각').props.disabled, true, 'a milestone has no independently editable end');
+  });
+
+  test(`${editor} editor moves a Gantt milestone as one instant and preserves all-day transitions`, async () => {
+    const target = milestoneEvent(), updates: Partial<QuickEditEvent>[] = [];
+    const save = async (draft: typeof forcedQuickEditDraft, source = target) => {
+      const tree = await renderMilestone(source, draft, (_id, patch) => { updates.push(patch); });
+      assert.equal(findButtonByText(tree, '저장').props.disabled, false);
+      findButtonByText(tree, '저장').props.onClick?.();
+    };
+    await save({ startDate: '2026-09-07', startTime: '11:30' });
+    assert.deepEqual(updates.pop(), { startDate: '2026-09-07', endDate: '2026-09-07', startTime: '11:30', endTime: '11:30' });
+    await save({ allDay: true });
+    assert.deepEqual(updates.pop(), { allDay: true, startTime: undefined, endTime: undefined });
+    await save({ allDay: false, startTime: '09:00', endTime: '10:00' }, { ...target, allDay: true, startTime: undefined, endTime: undefined });
+    assert.deepEqual(updates.pop(), { allDay: false, startTime: '09:00', endTime: '09:00' });
+  });
+
+  test(`${editor} editor still rejects zero duration for ordinary events and Gantt tasks`, async () => {
+    for (const target of [
+      { ...milestoneEvent(), linkedGanttTaskKind: 'task' as const },
+      { ...milestoneEvent(), linkedGanttProjectId: undefined, linkedGanttTaskId: undefined },
+    ]) {
+      const updates: Partial<QuickEditEvent>[] = [];
+      const tree = await renderMilestone(target, { title: '변경 불가' }, (_id, patch) => { updates.push(patch); });
+      assert.equal(findButtonByText(tree, '저장').props.disabled, true);
+      findButtonByText(tree, '저장').props.onClick?.();
+      assert.deepEqual(updates, []);
+    }
+  });
+}
+
 test('canonical B flow quick edit replaces event colors with immediate tag and calendar controls', async () => {
   const target = event({
     source: 'bflow',
@@ -636,6 +689,37 @@ test('canonical B flow quick edit replaces event colors with immediate tag and c
   });
   findButtonByText(alreadyUntaggedTree, '없음').props.onClick?.();
   assert.deepEqual(alreadyUntaggedUpdates, [], 'clearing an already empty tag is a no-op');
+});
+
+test('Gantt projections show their calendar but do not offer unsupported calendar or tag changes', async () => {
+  const target = milestoneEvent(), updates: Partial<QuickEditEvent>[] = [];
+  const onUpdate = (_id: string, patch: Partial<QuickEditEvent>) => { updates.push(patch); };
+  for (const tree of [
+    await renderQuickEdit(target, 'calendar', { onUpdate }),
+    await renderSidePanel(target, { onUpdate }, true, { title: '제목만 수정', calendarId: 'calendar-2', tagId: 'tag-review' }),
+  ]) {
+    assert.equal(findFormElements(tree).some(field => field.props['aria-label'] === '캘린더'), false);
+    assert.equal(findButtons(tree).some(button => ['없음', '회의', '검수'].includes(textContent(button))), false);
+    assert.match(textContent(tree), /연결 캘린더는 타임라인의 작업 상세에서 변경/);
+    assert.match(textContent(tree), /태그를 지원하지 않/);
+    const save = findButtons(tree).find(button => textContent(button).includes('저장'));
+    save?.props.onClick?.();
+  }
+  assert.deepEqual(updates, [{ title: '제목만 수정' }]);
+});
+
+test('quick edit reports failed calendar and tag selections while restoring the canonical choices', async () => {
+  const target = event({ source: 'bflow', sourceCalendarId: 'bflow:calendar-1', calendarId: 'calendar-1', canEdit: true });
+  const harness = await createStatefulQuickEditHarness(target, { onUpdate: async () => { throw new Error('권한 회수'); } });
+  let tree = harness.render();
+  await findFormElementByLabel(tree, '캘린더').props.onChange?.({ target: { value: 'calendar-2', checked: false } });
+  tree = harness.render();
+  assert.equal(findFormElementByLabel(tree, '캘린더').props.value, 'calendar-1');
+  assert.match(textContent(tree), /캘린더 변경에 실패/);
+  await findButtonByText(tree, '회의').props.onClick?.();
+  tree = harness.render();
+  assert.equal(findButtonByText(tree, '없음').props['aria-pressed'], true);
+  assert.match(textContent(tree), /태그 변경에 실패/);
 });
 
 test('canonical B flow quick edit keeps pending calendar and tag selections visible until persistence settles', async () => {

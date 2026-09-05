@@ -41,7 +41,7 @@ async function harness() {
     INSERT INTO calendar_members VALUES ('${calendarId}','bob',true);
   `);
   for (const file of ['2026-09-05-gantt-workspaces.sql', '2026-09-05-gantt-containment.sql',
-    '2026-09-05-app-sessions-gantt-auth.sql', '2026-09-06-users-password-lockdown.sql']) {
+    '2026-09-05-app-sessions-gantt-auth.sql', '2026-09-06-users-password-lockdown.sql', '20260905173804_gantt_revision_ledger.sql']) {
     await db.exec(readFileSync(new URL(`../DEVLOG/migrations/${file}`, import.meta.url), 'utf8'));
   }
   await db.exec('SET ROLE anon');

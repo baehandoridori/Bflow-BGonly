@@ -186,6 +186,7 @@ test('PostgreSQL migration, ACL, CAS, replay, projection, and calendar deletion 
   const db = new PGlite();
   try {
     await db.exec(`
+      CREATE ROLE anon; CREATE ROLE authenticated; CREATE ROLE service_role;
       CREATE TABLE users(id TEXT PRIMARY KEY,role TEXT DEFAULT 'user',name TEXT DEFAULT '',password TEXT,slack_id TEXT,hire_date TEXT,birthday TEXT,
         is_initial_password BOOLEAN DEFAULT true,created_at TIMESTAMPTZ DEFAULT now(),is_compositor BOOLEAN DEFAULT false,is_acting_supervisor BOOLEAN DEFAULT false);
       CREATE TABLE calendars(id UUID PRIMARY KEY,owner_id TEXT REFERENCES users(id),visibility TEXT,is_personal BOOLEAN DEFAULT false);
@@ -195,10 +196,11 @@ test('PostgreSQL migration, ACL, CAS, replay, projection, and calendar deletion 
       INSERT INTO calendar_members VALUES('00000000-0000-4000-8000-000000000010','bob',true);
     `);
     const sql = readFileSync(new URL('../DEVLOG/migrations/2026-09-05-gantt-workspaces.sql', import.meta.url), 'utf8');
-    // 2026-09-05-gantt-containment.sql 은 anon/authenticated 역할을 전제하므로(PGlite 에 없음) 건너뛴다.
-    // app-sessions 마이그레이션은 역할 유무를 검사하며 같은 회수를 수행한다.
+    // This legacy store suite keeps the owner connection for malformed internal-RPC tests.
+    // ganttReleaseDatabase/ganttRevisionDatabase additionally exercise the real anon boundary.
     const sessionsSql = readFileSync(new URL('../DEVLOG/migrations/2026-09-05-app-sessions-gantt-auth.sql', import.meta.url), 'utf8');
     await db.exec(sql); await db.exec(sql); await db.exec(sessionsSql); await db.exec(sessionsSql);
+    await db.exec(readFileSync(new URL('../DEVLOG/migrations/20260905173804_gantt_revision_ledger.sql', import.meta.url), 'utf8'));
     const { createGanttStore } = await load('electron/ganttStore.ts');
     const client = { rpc: async (name: string, args: Record<string, unknown>) => {
       try {

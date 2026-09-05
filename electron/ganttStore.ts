@@ -24,7 +24,7 @@ export function setGanttSessionTokenResolver(resolver: GanttSessionResolver): vo
   sessionResolver = resolver;
 }
 export type GanttCalendarRow = CalendarEventRow & {
-  linked_gantt_project_id: string; linked_gantt_task_id: string; gantt_can_edit: boolean;
+  linked_gantt_project_id: string; linked_gantt_task_id: string; linked_gantt_task_kind: GanttTask['kind']; gantt_can_edit: boolean;
 };
 type EventQuery = { from?: string; to?: string; eventId?: string };
 const eventPrefix = 'gantt:';
@@ -70,7 +70,7 @@ function projectedRow(project: GanttProject, task: GanttTask): GanttCalendarRow 
     end_time: task.allDay ? null : task.endTime, linked_episode: null, linked_part: null,
     linked_sheet_name: null, linked_scene_id: null, linked_department: null, linked_todo_id: null,
     created_by: project.ownerId, created_at: '', updated_at: '',
-    linked_gantt_project_id: project.id, linked_gantt_task_id: task.id, gantt_can_edit: true,
+    linked_gantt_project_id: project.id, linked_gantt_task_id: task.id, linked_gantt_task_kind: task.kind, gantt_can_edit: true,
   };
 }
 

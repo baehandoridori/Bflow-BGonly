@@ -402,6 +402,24 @@ async function createPreviewCalendarNotificationHarness(): Promise<{
   restore(): void;
 }> {
   const globalScope = globalThis as Record<string, unknown>;
+  const navigatorDescriptor = Object.getOwnPropertyDescriptor(globalThis, 'navigator');
+  const existingNavigator = globalScope.navigator as { locks?: unknown } | undefined;
+  const installedLocks = !existingNavigator?.locks;
+  if (installedLocks) {
+    // All simultaneously open preview harnesses share the browser's lock manager.
+    const tails = new Map<string, Promise<void>>();
+    const locks = { request<T>(name: string, callback: () => Promise<T>): Promise<T> {
+      const result = (tails.get(name) ?? Promise.resolve()).then(callback);
+      tails.set(name, result.then(() => undefined, () => undefined));
+      return result;
+    } };
+    Object.defineProperty(globalThis, 'navigator', { configurable: true, value: { ...existingNavigator, locks } });
+  }
+  const restoreNavigator = () => {
+    if (!installedLocks) return;
+    if (navigatorDescriptor) Object.defineProperty(globalThis, 'navigator', navigatorDescriptor);
+    else Reflect.deleteProperty(globalThis, 'navigator');
+  };
   const prior = new Map<string, { exists: boolean; value: unknown }>();
   for (const key of ['window', 'document']) {
     prior.set(key, {
@@ -433,6 +451,7 @@ async function createPreviewCalendarNotificationHarness(): Promise<{
       api: previewWindow.electronAPI,
       previewWindow,
       restore() {
+        restoreNavigator();
         for (const [key, value] of prior) {
           if (value.exists) globalScope[key] = value.value;
           else delete globalScope[key];
@@ -440,6 +459,7 @@ async function createPreviewCalendarNotificationHarness(): Promise<{
       },
     };
   } catch (error) {
+    restoreNavigator();
     for (const [key, value] of prior) {
       if (value.exists) globalScope[key] = value.value;
       else delete globalScope[key];

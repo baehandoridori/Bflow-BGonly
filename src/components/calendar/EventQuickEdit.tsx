@@ -9,6 +9,7 @@ import { isOptimisticCalendarTagId, useCalendarStore } from '@/stores/useCalenda
 import { EntityAwareInput } from '@/components/common/EntityAwareInput';
 import { floatingGlassStyle } from '@/utils/glassStyles';
 import { calendarEventIdentityKey } from '@/utils/calendarEventIdentity';
+import { isGanttMilestone, isGanttProjection } from '@/utils/calendarGantt';
 import {
   directUpdateSnapshot,
   eventContentSnapshot,
@@ -95,13 +96,18 @@ export function EventQuickEdit({
   const isCanonicalBflow = event.sourceCalendarId?.startsWith('bflow:') === true && Boolean(event.calendarId);
   // 시각 편집 지원 범위는 상세 패널과 동일하게 캐노니컬 B flow + 구글 일정만이다.
   const supportsTimeEditing = isCanonicalBflow || event.source === 'google';
+  const milestone = isGanttMilestone(event);
+  const ganttProjection = isGanttProjection(event);
+  const effectiveEndDate = milestone ? startDate : endDate;
+  const effectiveEndTime = milestone ? startTime : endTime;
   const hasInvalidTimedInterval = supportsTimeEditing
     && !allDay
-    && Boolean(startTime && endTime)
-    && `${endDate}T${endTime}` <= `${startDate}T${startTime}`;
+    && !milestone
+    && Boolean(startTime && effectiveEndTime)
+    && `${effectiveEndDate}T${effectiveEndTime}` <= `${startDate}T${startTime}`;
   const isTimedSaveBlocked = supportsTimeEditing
     && !allDay
-    && (!startTime || !endTime || hasInvalidTimedInterval);
+    && (!startTime || !effectiveEndTime || hasInvalidTimedInterval);
   const displayedCalendarId = pendingCalendar?.eventId === event.id
     ? pendingCalendar.value
     : event.calendarId;
@@ -217,9 +223,9 @@ export function EventQuickEdit({
     if (!canWrite || pendingMutationRef.current || isTimedSaveBlocked) return;
     const updates: Partial<CalendarEvent> = {};
     if (title !== event.title) updates.title = title;
-    if (startDate !== event.startDate || endDate !== event.endDate) {
+    if (startDate !== event.startDate || effectiveEndDate !== event.endDate) {
       updates.startDate = startDate;
-      updates.endDate = endDate;
+      updates.endDate = effectiveEndDate;
     }
     if (memo !== event.memo) updates.memo = memo;
     if (!isCanonicalBflow && type !== event.type) updates.type = type;
@@ -233,7 +239,7 @@ export function EventQuickEdit({
         }
       } else {
         if (startTime !== event.startTime) updates.startTime = startTime;
-        if (endTime !== event.endTime) updates.endTime = endTime;
+        if (effectiveEndTime !== event.endTime) updates.endTime = effectiveEndTime;
       }
     }
     if (Object.keys(updates).length === 0) {
@@ -262,7 +268,7 @@ export function EventQuickEdit({
     } catch {
       markMutationFailed(mutation, '일정 저장에 실패했어요. 다시 시도해 주세요.');
     }
-  }, [allDay, beginMutation, canWrite, endDate, endTime, event, eventIdentityKey, eventSnapshot, isCanonicalBflow, isTimedSaveBlocked, markMutationFailed, memo, onClose, onUpdate, settleMutation, startDate, startTime, supportsTimeEditing, title, type]);
+  }, [allDay, beginMutation, canWrite, effectiveEndDate, effectiveEndTime, event, eventIdentityKey, eventSnapshot, isCanonicalBflow, isTimedSaveBlocked, markMutationFailed, memo, onClose, onUpdate, settleMutation, startDate, startTime, supportsTimeEditing, title, type]);
 
   const handleDelete = useCallback(() => {
     if (!canWrite || pendingMutationRef.current) return;
@@ -318,8 +324,9 @@ export function EventQuickEdit({
 
   const handleCalendarChange = useCallback(async (calendarId: string) => {
     if (pendingMutationRef.current) return;
-    if (!canWrite || !isCanonicalBflow || calendarSelectionPending || calendarId === displayedCalendarId) return;
+    if (!canWrite || !isCanonicalBflow || ganttProjection || calendarSelectionPending || calendarId === displayedCalendarId) return;
     const requestId = ++calendarUpdateRequestRef.current;
+    setMutationError(null);
     setPendingCalendar({
       eventId: event.id,
       value: calendarId,
@@ -328,15 +335,18 @@ export function EventQuickEdit({
     try {
       await onUpdate(event.id, { calendarId });
     } catch {
-      // The canonical event remains the rollback source below.
+      if (calendarUpdateRequestRef.current === requestId && calendarEventIdentityKey(latestEventRef.current) === eventIdentityKey) {
+        setMutationError('캘린더 변경에 실패했어요. 다시 시도해 주세요.');
+      }
     }
     setPendingCalendar((current) => current?.requestId === requestId ? null : current);
-  }, [calendarSelectionPending, canWrite, displayedCalendarId, event.id, isCanonicalBflow, onUpdate]);
+  }, [calendarSelectionPending, canWrite, displayedCalendarId, event.id, eventIdentityKey, ganttProjection, isCanonicalBflow, onUpdate]);
 
   const handleTagChange = useCallback(async (tagId: string | undefined) => {
     if (pendingMutationRef.current) return;
-    if (!canWrite || !isCanonicalBflow || tagSelectionPending || tagId === displayedTagId) return;
+    if (!canWrite || !isCanonicalBflow || ganttProjection || tagSelectionPending || tagId === displayedTagId) return;
     const requestId = ++tagUpdateRequestRef.current;
+    setMutationError(null);
     setPendingTag({
       eventId: event.id,
       value: tagId,
@@ -345,10 +355,12 @@ export function EventQuickEdit({
     try {
       await onUpdate(event.id, { tagId });
     } catch {
-      // The canonical event remains the rollback source below.
+      if (tagUpdateRequestRef.current === requestId && calendarEventIdentityKey(latestEventRef.current) === eventIdentityKey) {
+        setMutationError('태그 변경에 실패했어요. 다시 시도해 주세요.');
+      }
     }
     setPendingTag((current) => current?.requestId === requestId ? null : current);
-  }, [canWrite, displayedTagId, event.id, isCanonicalBflow, onUpdate, tagSelectionPending]);
+  }, [canWrite, displayedTagId, event.id, eventIdentityKey, ganttProjection, isCanonicalBflow, onUpdate, tagSelectionPending]);
 
   // 자체 AnimatePresence 로 감싸면 부모 presence 의 exit 가 전파되지 않아 닫힘 애니가 죽는다
   // (framer-motion 10.x). presence 는 ScheduleView 쪽 조건부 렌더가 소유한다.
@@ -419,7 +431,7 @@ export function EventQuickEdit({
               </div>
 
               {isCanonicalBflow ? (
-                canWrite ? (
+                canWrite && !ganttProjection ? (
                   <>
                     <div>
                       <label className="text-[10px] font-medium uppercase tracking-wide text-text-secondary">캘린더</label>
@@ -485,6 +497,8 @@ export function EventQuickEdit({
                 </div>
               )}
 
+              {ganttProjection && <p className="text-[11px] text-text-secondary">연결 캘린더는 타임라인의 작업 상세에서 변경해 주세요. 간트 연결 일정은 태그를 지원하지 않아요.</p>}
+
               <div className="flex gap-2">
                 <button
                   aria-describedby={readOnlyDescriptionId}
@@ -521,7 +535,7 @@ export function EventQuickEdit({
                   />
                   <div className="flex gap-2">
                     <input type="date" value={startDate} disabled={isMutating} onChange={(changeEvent) => setStartDate(changeEvent.target.value)} className="flex-1 rounded-lg px-2.5 py-1.5 text-xs outline-none" style={{ ...fieldStyle, colorScheme: colorMode }} />
-                    <input type="date" value={endDate} disabled={isMutating} onChange={(changeEvent) => setEndDate(changeEvent.target.value)} className="flex-1 rounded-lg px-2.5 py-1.5 text-xs outline-none" style={{ ...fieldStyle, colorScheme: colorMode }} />
+                    <input type="date" value={effectiveEndDate} disabled={isMutating || milestone} onChange={(changeEvent) => setEndDate(changeEvent.target.value)} className="flex-1 rounded-lg px-2.5 py-1.5 text-xs outline-none" style={{ ...fieldStyle, colorScheme: colorMode }} />
                   </div>
                   {supportsTimeEditing && (
                     <label className="flex items-center justify-between gap-3 text-[11px] font-medium text-text-secondary">
@@ -559,8 +573,8 @@ export function EventQuickEdit({
                         aria-label="종료 시각"
                         type="time"
                         step={600}
-                        value={endTime}
-                        disabled={isMutating}
+                        value={effectiveEndTime}
+                        disabled={isMutating || milestone}
                         onChange={(changeEvent) => setEndTime(changeEvent.target.value)}
                         className="flex-1 rounded-lg px-2.5 py-1.5 text-xs outline-none"
                         style={{ ...fieldStyle, colorScheme: colorMode }}
@@ -572,6 +586,7 @@ export function EventQuickEdit({
                       종료 시각은 시작 시각보다 뒤여야 해요.
                     </p>
                   )}
+                  {milestone && <p className="text-[11px] text-text-secondary">마일스톤은 시작 날짜와 시각 한 점으로 표시돼요.</p>}
                   <div className="flex gap-1">
                     {TYPE_OPTIONS.map((option) => (
                       <button
