@@ -70,3 +70,33 @@ test('피드백 57-1: 새 창 팝업에도 확인 창 호스트 — 브라우저
   // 호스트는 팝업 루트에 1개만.
   assert.equal((widgetPopup.match(/<ConfirmDialogHost \/>/g) ?? []).length, 1);
 });
+
+test('피드백 57-2·57-3: 경로 행 — 지우기 버튼 + 상태별 버튼 이름', () => {
+  // PathActionRow: onClear prop + 경로 있을 때만 지우기.
+  assert.match(costumeDetail, /onClear\?: \(\) => void;/);
+  assert.match(costumeDetail, /\{path && onClear && \(/);
+  assert.match(costumeDetail, /onClick=\{onClear\}/);
+  assert.match(costumeDetail, /지우기/);
+  // 57-3: '선택' 고정 문구 제거 → 상태별. (\s 는 CRLF 도 먹는다 — 작업 트리가 CRLF 라 \n 만 쓰면 죽은 가드가 된다.)
+  assert.match(costumeDetail, /\{path \? '경로 수정' : '경로 지정'\}/);
+  assert.doesNotMatch(costumeDetail, />\s*선택\s*<\/button>/);
+  // 기존 앵커 보존: 만들기 버튼 조건·title, 열기 버튼 title=경로.
+  assert.match(costumeDetail, /!path && onCreate/);
+  assert.match(costumeDetail, /title="기준 경로에 캐릭터 이름으로 폴더를 만들어 연결"/);
+  assert.match(costumeDetail, /onClick=\{onOpen\}\s*\n\s*title=\{path\}/);
+  // CostumeDetail props → 두 행에 배선.
+  assert.match(costumeDetail, /onClearFolder: \(\) => void;/);
+  assert.match(costumeDetail, /onClearFile: \(\) => void;/);
+  assert.match(costumeDetail, /onClear=\{onClearFolder\}/);
+  assert.match(costumeDetail, /onClear=\{onClearFile\}/);
+});
+
+test('피드백 57-2: 상세 모달 — 확인 창 뒤 경로만 null 로 저장', () => {
+  assert.match(detailModal, /const handleClearFolder = useCallback\(async \(\) => \{/);
+  assert.match(detailModal, /updateCharacterFolder\(character\.id, null\)/);
+  assert.match(detailModal, /const handleClearFile = useCallback\(async \(targetCostume: CharacterCostume\) => \{/);
+  assert.match(detailModal, /updateCostumeField\(targetCostume\.id, \{ workFilePath: null \}\)/);
+  assert.equal((detailModal.match(/confirmLabel: '연결 지우기'/g) ?? []).length, 2);
+  assert.match(detailModal, /onClearFolder=\{handleClearFolder\}/);
+  assert.match(detailModal, /onClearFile=\{\(\) => handleClearFile\(activeCostume\)\}/);
+});
