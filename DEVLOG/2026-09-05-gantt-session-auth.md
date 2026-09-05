@@ -66,3 +66,43 @@ REST 검증(임시 사용자 `rest-check-2026-09-05`, 검증 뒤 삭제):
 1. v1.111.0 빌드·배포(간트 릴리스). 예전에 로그인해 둔 계정은 간트 화면에서 재로그인 안내를 보는 것이 정상이다.
 2. **팀 전원 갱신 확인 뒤** `DEVLOG/migrations/2026-09-06-users-password-lockdown.sql` 적용. anon 의 `users.password` 읽기/쓰기를 막아 "비밀번호 읽기 → 로그인" 우회를 닫는다. 그 전에 적용하면 v1.110.1 이하 로그인이 즉시 깨진다.
 3. 후속: 캘린더·사용자 관리 `*_authorized` RPC 도 같은 토큰 경계로 이전, 비밀번호 해시화.
+
+## 2026-09-06: 2단계 적용과 삭제 경로 회귀 수정
+
+팀 전원이 v1.112.0 으로 갱신된 것을 확인하고 2단계를 적용했다. 적용 예행연습 중 이번 라운드가 만든 회귀를 하나 발견해 먼저 고쳤다.
+
+### 회귀: 사용자·캘린더 삭제 불가 (운영에서 재현)
+
+`delete_user_authorized` 와 `delete_calendar_authorized` 가 모두 `42501 permission denied for table gantt_spaces` 로 실패했다.
+
+- 원인: `gantt_workspaces` 가 users/calendars 에 붙인 정리 트리거 두 개(`gantt_before_user_delete`, `gantt_unlink_deleted_calendar`)가 SECURITY INVOKER 인데, 간트 테이블은 차단 이후 anon 권한이 없다. 삭제 RPC 도 SECURITY INVOKER 라 트리거가 호출자(anon) 권한으로 돌면서 간트 테이블 LOCK 에서 막혔다.
+- 간트 테이블에 anon 권한이 있던 최초 버전에서는 드러나지 않았고, 차단 이후 삭제를 시도한 적이 없어 배포까지 통과했다.
+- 조치: `2026-09-06-gantt-delete-triggers-security-definer.sql` — 두 트리거 함수만 SECURITY DEFINER 로. 간트 테이블의 anon 차단은 유지. 라이브 적용 `gantt_delete_triggers_security_definer`.
+- 교훈: 테이블 권한을 회수할 때 **다른 테이블의 트리거가 그 테이블을 건드리는지** 함께 본다. 트리거는 호출자 권한으로 돈다.
+
+### 2단계 적용
+
+`2026-09-06-users-password-lockdown.sql` → 라이브 `users_password_lockdown`. anon/authenticated 의 users 테이블 단위 SELECT/UPDATE 를 회수하고 `password`·(UPDATE 한정) `is_initial_password` 를 뺀 컬럼 권한만 재부여했다. `update_user_authorized` 의 `SELECT *` 도 명시 컬럼으로 교체했다.
+
+적용 전 배포본(v1.112.0) 실측 확인:
+
+| 확인 | 결과 |
+|---|---|
+| 배포본의 users 조회 | `select(USER_DIRECTORY_COLUMNS)`, `id, name`, `name`, `role` 뿐. `select('*')` 0건 |
+| 배포본의 users 쓰기 | 직접 쓰기 0건. 전부 `create_user_authorized`/`update_user_authorized`/`delete_user_authorized`/`app_change_password` 경유 |
+
+적용 후 실제 anon 키 REST 확인:
+
+| 호출 | 결과 |
+|---|---|
+| `GET users?select=id,password` | 401 permission denied |
+| `GET users?select=*` | 401 permission denied |
+| `PATCH users` (password) | 401 permission denied |
+| `GET users?select=<명시 컬럼>` | 200, 17명, password 필드 없음 |
+| `GET users?select=id,name` / `select=role` | 200 |
+| `rpc/app_login` | 200 (실제 팀원 계정 3건에 틀린 비밀번호 → 정상적으로 "비밀번호가 일치하지 않습니다") |
+| `rpc/gantt_session_read` (위조 토큰) | 401 |
+
+`DEVLOG/verification/2026-09-06-delete-paths-and-lockdown.sql` 을 한 배치로 실행해 `passed: true`. 삭제 경로 복구, 캘린더 삭제 시 간트 연결 해제, 공유 폴더 관리자 인계, 사용자 추가·수정·삭제, 잠금 뒤 로그인·비밀번호 변경까지 모두 검증하고 전부 ROLLBACK 했다. 검증 뒤 실제 사용자 17명·간트 0행·세션 0행 그대로다.
+
+이로써 "비밀번호 읽기 → 로그인 → 토큰" 우회 경로가 닫혔다.
