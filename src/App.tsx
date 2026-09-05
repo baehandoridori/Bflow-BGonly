@@ -581,6 +581,8 @@ export default function App() {
   const [showSplash, setShowSplash] = useState(true);
   // 로딩 스플래시: authReady 후에도 유지, 클릭으로 스킵
   const [loadingSplashDone, setLoadingSplashDone] = useState(false);
+  const [sessionRestoreError, setSessionRestoreError] = useState('');
+  useEffect(() => { if (currentUser) setSessionRestoreError(''); }, [currentUser]);
   // 환영 팝업: 로그인 직후에만 표시
   const [welcomeUser, setWelcomeUser] = useState<string | null>(null);
   // 시간대별 인사말 토스트 (WelcomeToast 스타일로 하단 표시)
@@ -876,7 +878,8 @@ export default function App() {
         const rememberMe = savedPrefs?.rememberMe !== false; // 기본 true (하위 호환)
         console.info('[auth] rememberMe =', rememberMe);
         if (rememberMe) {
-          const { user } = await loadSession();
+          const { user, error: restoreError } = await loadSession();
+          setSessionRestoreError(restoreError ?? '');
           if (user) {
             setCurrentUser(user);
             console.info('[auth] currentUser 설정 완료');
@@ -918,7 +921,8 @@ export default function App() {
           const freshUsers = await loadUsers();
           setUsers(freshUsers);
           if (rememberMe) {
-            const { user: freshUser } = await loadSession();
+            const { user: freshUser, error: restoreError } = await loadSession();
+            setSessionRestoreError(restoreError ?? '');
             if (freshUser) setCurrentUser(freshUser);
           }
         }
@@ -3166,7 +3170,7 @@ export default function App() {
     return (
       <>
         <GradientBackdrop intensity="normal" enabled={globalGradientEnabled} />
-        <LoginScreen />
+          <LoginScreen restoreError={sessionRestoreError} />
       </>
     );
   }

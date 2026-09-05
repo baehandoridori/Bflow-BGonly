@@ -267,6 +267,11 @@ async function createPreviewCalendarHarness(): Promise<{
   restore(): void;
 }> {
   const globalScope = globalThis as Record<string, unknown>;
+  const navigatorDescriptor = Object.getOwnPropertyDescriptor(globalThis, 'navigator');
+  let lockTail = Promise.resolve();
+  const locks = { request<T>(_name: string, callback: () => Promise<T>): Promise<T> { const result = lockTail.then(callback); lockTail = result.then(() => undefined, () => undefined); return result; } };
+  Object.defineProperty(globalThis, 'navigator', { configurable: true, value: { locks } });
+  const restoreNavigator = () => { if (navigatorDescriptor) Object.defineProperty(globalThis, 'navigator', navigatorDescriptor); else Reflect.deleteProperty(globalThis, 'navigator'); };
   const prior = new Map<string, { exists: boolean; value: unknown }>();
   for (const key of ['window', 'document']) {
     prior.set(key, {
@@ -296,6 +301,7 @@ async function createPreviewCalendarHarness(): Promise<{
     return {
       api: previewWindow.electronAPI,
       restore() {
+        restoreNavigator();
         for (const [key, value] of prior) {
           if (value.exists) globalScope[key] = value.value;
           else delete globalScope[key];
@@ -303,6 +309,7 @@ async function createPreviewCalendarHarness(): Promise<{
       },
     };
   } catch (error) {
+    restoreNavigator();
     for (const [key, value] of prior) {
       if (value.exists) globalScope[key] = value.value;
       else delete globalScope[key];
@@ -628,6 +635,21 @@ test('personal B flow calendar rows retain isPrivate on load', async () => {
   } finally {
     harness.restore();
   }
+});
+
+test('Gantt projection kind reaches the calendar editor without inferring milestones from time equality', async () => {
+  const rows = ['task', 'milestone'].map(kind => ({
+    ...eventRow(`gantt:project:${kind}`, 'personal-cal'),
+    all_day: false, start_time: '10:00', end_time: '10:00',
+    linked_gantt_project_id: 'project', linked_gantt_task_id: kind, linked_gantt_task_kind: kind,
+    gantt_can_edit: true,
+  }));
+  const harness = await createHarness({ rows });
+  try {
+    await harness.service.loadBflowEvents();
+    const events = await harness.service.getEvents();
+    assert.deepEqual(events.map(event => [event.linkedGanttTaskId, event.linkedGanttTaskKind]), [['task', 'task'], ['milestone', 'milestone']]);
+  } finally { harness.restore(); }
 });
 
 test('Google settings expose only local personal sync fields', async () => {

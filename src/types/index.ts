@@ -1461,6 +1461,7 @@ export interface ElectronAPI extends CalendarApiInputContract {
     id: string;
     linked_gantt_project_id?: string;
     linked_gantt_task_id?: string;
+    linked_gantt_task_kind?: 'task' | 'group' | 'milestone';
     gantt_can_edit?: boolean;
     calendar_id: string;
     title: string;

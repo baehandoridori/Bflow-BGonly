@@ -76,6 +76,7 @@ export interface CalendarEvent {
   linkedTodoId?: string;     // 연결된 PersonalTodo ID
   linkedGanttProjectId?: string;
   linkedGanttTaskId?: string;
+  linkedGanttTaskKind?: 'task' | 'group' | 'milestone';
   ganttCanEdit?: boolean;
 
   // 휴가 전용 필드 (type === 'vacation')

@@ -161,6 +161,7 @@ function toCalendarEventFromBflowRow(
     linkedTodoId: row.linked_todo_id ?? undefined,
     linkedGanttProjectId: row.linked_gantt_project_id,
     linkedGanttTaskId: row.linked_gantt_task_id,
+    linkedGanttTaskKind: row.linked_gantt_task_kind,
     ganttCanEdit: row.gantt_can_edit,
     sourceCalendarId: `${BFLOW_CAL_PREFIX}${row.calendar_id}`,
     calendarId: row.calendar_id,

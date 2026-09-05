@@ -28,6 +28,7 @@ import { DEPARTMENT_CONFIGS } from '@/types';
 import { floatingGlassStyle } from '@/utils/glassStyles';
 import { parseDate } from '@/utils/calendarDate';
 import { calendarEventIdentityKey, calendarEventLinkedTodoId } from '@/utils/calendarEventIdentity';
+import { isGanttMilestone, isGanttProjection } from '@/utils/calendarGantt';
 import {
   directUpdateSnapshot,
   eventContentSnapshot,
@@ -224,6 +225,10 @@ export function EventSidePanel({
   const isEditing = editing && !isVacation && !isViewOnly;
   const isCanonicalBflow = event.sourceCalendarId?.startsWith('bflow:') === true && Boolean(event.calendarId);
   const supportsTimeEditing = isCanonicalBflow || event.source === 'google';
+  const milestone = isGanttMilestone(event);
+  const ganttProjection = isGanttProjection(event);
+  const effectiveEnd = milestone ? draftStart : draftEnd;
+  const effectiveEndTime = milestone ? draftStartTime : draftEndTime;
   const currentCalendar = calendars.find((calendar) => calendar.id === event.calendarId);
   const currentTag = tags.find((tag) => tag.id === event.tagId);
   const hasLinkedScene = event.type !== 'custom' && event.type !== 'vacation';
@@ -235,11 +240,12 @@ export function EventSidePanel({
   const labelClassName = 'text-[10px] text-text-secondary/70 font-medium uppercase tracking-wide';
   const hasInvalidTimedInterval = supportsTimeEditing
     && !draftAllDay
-    && Boolean(draftStartTime && draftEndTime)
-    && `${draftEnd}T${draftEndTime}` <= `${draftStart}T${draftStartTime}`;
+    && !milestone
+    && Boolean(draftStartTime && effectiveEndTime)
+    && `${effectiveEnd}T${effectiveEndTime}` <= `${draftStart}T${draftStartTime}`;
   const isTimedSaveBlocked = supportsTimeEditing
     && !draftAllDay
-    && (!draftStartTime || !draftEndTime || hasInvalidTimedInterval);
+    && (!draftStartTime || !effectiveEndTime || hasInvalidTimedInterval);
 
   // 연결 정보 텍스트
   const linkedLabel = (() => {
@@ -291,7 +297,7 @@ export function EventSidePanel({
     if (isTimedSaveBlocked || pendingMutationRef.current) return;
     const updates: Partial<CalendarEvent> = {};
     const nextStartDate = fromInputDate(draftStart);
-    const nextEndDate = fromInputDate(draftEnd);
+    const nextEndDate = fromInputDate(effectiveEnd);
     if (draftTitle !== event.title) updates.title = draftTitle;
     if (nextStartDate !== event.startDate || nextEndDate !== event.endDate) {
       updates.startDate = nextStartDate;
@@ -308,10 +314,10 @@ export function EventSidePanel({
         }
       } else {
         if (draftStartTime !== event.startTime) updates.startTime = draftStartTime;
-        if (draftEndTime !== event.endTime) updates.endTime = draftEndTime;
+        if (effectiveEndTime !== event.endTime) updates.endTime = effectiveEndTime;
       }
     }
-    if (isCanonicalBflow) {
+    if (isCanonicalBflow && !ganttProjection) {
       const persistedTagId = draftTagId && !selectedTagUnavailable
         ? draftTagId
         : undefined;
@@ -522,8 +528,8 @@ export function EventSidePanel({
               </label>
               <input
                 type="date"
-                value={toInputDate(draftEnd)}
-                disabled={isMutating}
+                value={toInputDate(effectiveEnd)}
+                disabled={isMutating || milestone}
                 onChange={(e) => setDraftEnd(fromInputDate(e.target.value))}
                 className={dateFieldClassName}
                 style={{ colorScheme: colorMode }}
@@ -533,8 +539,8 @@ export function EventSidePanel({
                   aria-label="종료 시각"
                   type="time"
                   step={600}
-                  value={draftEndTime}
-                  disabled={isMutating}
+                  value={effectiveEndTime}
+                  disabled={isMutating || milestone}
                   onChange={(changeEvent) => setDraftEndTime(changeEvent.target.value)}
                   className={dateFieldClassName}
                   style={{ colorScheme: colorMode }}
@@ -545,6 +551,7 @@ export function EventSidePanel({
                   종료 시각은 시작 시각보다 뒤여야 해요.
                 </p>
               )}
+              {milestone && <p className="text-[11px] text-text-secondary">마일스톤은 시작 날짜와 시각 한 점으로 표시돼요.</p>}
             </div>
           ) : (
             <div className="flex items-center gap-2 text-text-secondary">
@@ -569,7 +576,7 @@ export function EventSidePanel({
           )}
 
           {/* 캘린더 + 태그 */}
-          {isEditing && isCanonicalBflow ? (
+          {isEditing && isCanonicalBflow && !ganttProjection ? (
             <div className="flex flex-col gap-2 border-t border-bg-border/45 pt-2">
               <div>
                 <label className={labelClassName}>캘린더</label>
@@ -640,6 +647,8 @@ export function EventSidePanel({
               )}
             </div>
           )}
+
+          {ganttProjection && <p className="text-[11px] text-text-secondary">연결 캘린더는 타임라인의 작업 상세에서 변경해 주세요. 간트 연결 일정은 태그를 지원하지 않아요.</p>}
 
           {/* 타입 배지 + 연결 정보 */}
           <div className="flex flex-wrap items-center gap-1.5">

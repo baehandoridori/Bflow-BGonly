@@ -1,5 +1,6 @@
 import type { GanttGateway, GanttProject, GanttRequest, GanttSnapshot, GanttTask } from './types.ts';
-import { applyCommand, canEditProject, createProject, createSpace, createTask, shiftDate, todayDate, updateTask, visibleSnapshot } from './domain.ts';
+import { applyCommand, canEditProject, createProject, createSpace, createTask, rememberGanttRevisions, shiftDate, todayDate, updateTask, visibleSnapshot } from './domain.ts';
+import type { GanttRevisionLedger } from './domain.ts';
 
 export interface PreviewCalendar { id:string; owner_id:string; visibility:string; members?:Array<{user_id:string;can_edit:boolean}> }
 export interface PreviewOptions {
@@ -16,20 +17,37 @@ export interface GanttCalendarEventRow {
   start_date:string; end_date:string; start_time:string|null; end_time:string|null;
   linked_episode:null; linked_part:null; linked_sheet_name:null; linked_scene_id:null; linked_department:null; linked_todo_id:null;
   created_by:string|null; created_at:string; updated_at:string;
-  linked_gantt_project_id:string; linked_gantt_task_id:string; gantt_can_edit:boolean;
+  linked_gantt_project_id:string; linked_gantt_task_id:string; linked_gantt_task_kind:GanttTask['kind']; gantt_can_edit:boolean;
 }
-interface Authority { snapshot:GanttSnapshot; receipts:Record<string,{actorId:string;command:string}>; seededUsers:string[] }
+interface Authority { snapshot:GanttSnapshot; receipts:Record<string,{actorId:string;command:string}>; seededUsers:string[]; revisions:GanttRevisionLedger; retiredIds:string[] }
 const KEY='bflow-gantt-preview-authority-v1',LOCK='bflow:gantt:preview:authority',CHANNEL='bflow:gantt:changed';
 const localListeners=new Set<()=>void>();
 function browserStorage():Storage { if(typeof localStorage==='undefined')throw new Error('간트 저장소를 사용할 수 없습니다.');return localStorage; }
 function readAuthority(options:PreviewOptions):Authority {
   const raw=(options.storage??browserStorage()).getItem(KEY);
-  if(!raw)return {snapshot:{spaces:[],projects:[]},receipts:{},seededUsers:[]};
+  if(!raw)return {snapshot:{spaces:[],projects:[]},receipts:{},seededUsers:[],revisions:{},retiredIds:[]};
   const value=JSON.parse(raw) as Authority;
   if(!Array.isArray(value.snapshot?.spaces)||!Array.isArray(value.snapshot?.projects)||!value.receipts||!Array.isArray(value.seededUsers))throw new Error('간트 저장 데이터가 올바르지 않습니다.');
+  if(!value.revisions){
+    value.revisions={};rememberGanttRevisions(value.revisions,value.snapshot);
+    for(const receipt of Object.values(value.receipts)){
+      const command=JSON.parse(receipt.command) as GanttRequest['command'];
+      const kind=command.type==='saveProject'||command.type==='deleteProject'?'project':'space';
+      const id=command.type==='saveProject'?command.project.id:command.type==='saveSpace'?command.space.id:command.type==='deleteProject'?command.projectId:command.spaceId;
+      const committed=command.type==='saveProject'||command.type==='saveSpace'?(command.expectedRevision??0)+1:command.expectedRevision;
+      if(Number.isSafeInteger(committed)&&committed>0)value.revisions[`${kind}:${id}`]=Math.max(value.revisions[`${kind}:${id}`]??0,committed);
+    }
+    const liveIds=new Set([...value.snapshot.spaces.map(entity=>`space:${entity.id}`),...value.snapshot.projects.map(entity=>`project:${entity.id}`)]);
+    value.retiredIds=Object.keys(value.revisions).filter(key=>!liveIds.has(key));
+    // Invalidate pre-upgrade snapshots once, including revisions reused before the ledger existed.
+    for(const [kind,entities] of [['space',value.snapshot.spaces],['project',value.snapshot.projects]] as const)
+      for(const entity of entities)entity.revision=value.revisions[`${kind}:${entity.id}`]+1;
+  }
+  value.retiredIds??=[];
+  rememberGanttRevisions(value.revisions,value.snapshot);
   return value;
 }
-function writeAuthority(options:PreviewOptions,value:Authority):void { (options.storage??browserStorage()).setItem(KEY,JSON.stringify(value)); }
+function writeAuthority(options:PreviewOptions,value:Authority):void { rememberGanttRevisions(value.revisions,value.snapshot);(options.storage??browserStorage()).setItem(KEY,JSON.stringify(value)); }
 async function withLock<T>(options:PreviewOptions,run:()=>Promise<T>):Promise<T> {
   if(options.locks)return options.locks.request(LOCK,run);
   if(typeof navigator!=='undefined'&&navigator.locks)return navigator.locks.request(LOCK,run);
@@ -90,7 +108,7 @@ export function createPreviewGateway(actorId:string,options:PreviewOptions={}):G
         if(!request.requestId||request.requestId.length>200)throw new Error('요청 ID가 필요합니다.');
         const value=readAuthority(options),serialized=JSON.stringify(request.command),receipt=value.receipts[request.requestId];
         if(receipt){if(receipt.actorId!==actorId||receipt.command!==serialized)throw new Error('이미 사용한 요청 ID입니다.');return visibleSnapshot(value.snapshot,actorId);}
-        const snapshot=applyCommand(value.snapshot,actorId,request.command);checkLinkedChanges(value.snapshot,snapshot,actorId,options);
+        const snapshot=applyCommand(value.snapshot,actorId,request.command,value.revisions,value.retiredIds);checkLinkedChanges(value.snapshot,snapshot,actorId,options);
         value.snapshot=snapshot;value.receipts[request.requestId]={actorId,command:serialized};
         writeAuthority(options,value);return visibleSnapshot(snapshot,actorId);
       });notify();return result;
@@ -108,7 +126,7 @@ export function calendarEventId(projectId:string,taskId:string):string{return `g
 function projection(project:GanttProject,task:GanttTask,canEdit=true):GanttCalendarEventRow {
   // Revision-derived timestamps remain stable between reads; actual content is canonical task data.
   const stamp=new Date(project.revision*1000).toISOString();
-  return {id:calendarEventId(project.id,task.id),calendar_id:task.calendarId!,title:task.title,memo:task.memo,tag_id:null,all_day:task.allDay,start_date:task.startDate,end_date:task.endDate,start_time:task.allDay?null:task.startTime,end_time:task.allDay?null:task.endTime,linked_episode:null,linked_part:null,linked_sheet_name:null,linked_scene_id:null,linked_department:null,linked_todo_id:null,created_by:project.ownerId,created_at:stamp,updated_at:stamp,linked_gantt_project_id:project.id,linked_gantt_task_id:task.id,gantt_can_edit:canEdit};
+  return {id:calendarEventId(project.id,task.id),calendar_id:task.calendarId!,title:task.title,memo:task.memo,tag_id:null,all_day:task.allDay,start_date:task.startDate,end_date:task.endDate,start_time:task.allDay?null:task.startTime,end_time:task.allDay?null:task.endTime,linked_episode:null,linked_part:null,linked_sheet_name:null,linked_scene_id:null,linked_department:null,linked_todo_id:null,created_by:project.ownerId,created_at:stamp,updated_at:stamp,linked_gantt_project_id:project.id,linked_gantt_task_id:task.id,linked_gantt_task_kind:task.kind,gantt_can_edit:canEdit};
 }
 export async function listCalendarEvents(actorId:string,options:PreviewOptions={}):Promise<GanttCalendarEventRow[]> {
   if(!actorId)return [];
@@ -129,7 +147,7 @@ export async function patchCalendarEvent(actorId:string,eventId:string,patch:Rec
     for(const key of Object.keys(pairs) as Array<keyof typeof pairs>)if(key in patch)(converted as Record<string,unknown>)[pairs[key]]=patch[key]===null?'':patch[key];
     const scheduling=['start_date','end_date','start_time','end_time','all_day'].some(k=>k in patch&&patch[k]!==current[k]);
     if(scheduling&&task.mode==='auto')throw new Error('자동 작업의 날짜는 간트에서 수동으로 전환한 뒤 수정해 주세요.');
-    const changed=updateTask(project,task.id,converted),next=applyCommand(value.snapshot,actorId,{type:'saveProject',project:changed,expectedRevision:project.revision});
+    const changed=updateTask(project,task.id,converted),next=applyCommand(value.snapshot,actorId,{type:'saveProject',project:changed,expectedRevision:project.revision},value.revisions,value.retiredIds);
     checkLinkedChanges(value.snapshot,next,actorId,options);value.snapshot=next;writeAuthority(options,value);
     return projection(next.projects.find(p=>p.id===project.id)!,changed.tasks.find(t=>t.id===task.id)!);
   });notify();return result;
@@ -144,6 +162,22 @@ export async function deleteCalendarEvent(actorId:string,eventId:string,options:
     const {project,task}=match;
     if(!canEditProject(value.snapshot,actorId,project)||!calendarAllowed(options,task.calendarId!,actorId,true))throw new Error('간트와 캘린더 양쪽 편집 권한이 필요합니다.');
     const changed=structuredClone(project),target=changed.tasks.find(t=>t.id===task.id)!;target.calendarId=null;target.calendarEventId=null;
-    value.snapshot=applyCommand(value.snapshot,actorId,{type:'saveProject',project:changed,expectedRevision:project.revision});writeAuthority(options,value);
+    value.snapshot=applyCommand(value.snapshot,actorId,{type:'saveProject',project:changed,expectedRevision:project.revision},value.revisions,value.retiredIds);writeAuthority(options,value);
+  });notify();
+}
+
+/** Calendar deletion owns its permission check; task links follow that deletion without deleting tasks. */
+export async function unlinkDeletedCalendar(calendarId:string,commitDelete:()=>void,options:PreviewOptions={}):Promise<void> {
+  await withLock(options,async()=>{
+    options.assertCurrent?.();
+    const value=readAuthority(options),before=structuredClone(value);
+    let changed=false;
+    value.snapshot.projects=value.snapshot.projects.map(project=>{
+      if(!project.tasks.some(task=>task.calendarId===calendarId))return project;
+      changed=true;
+      return {...project,revision:project.revision+1,tasks:project.tasks.map(task=>task.calendarId===calendarId?{...task,calendarId:null,calendarEventId:null}:task)};
+    });
+    if(changed)writeAuthority(options,value);
+    try{commitDelete();}catch(error){if(changed)writeAuthority(options,before);throw error;}
   });notify();
 }

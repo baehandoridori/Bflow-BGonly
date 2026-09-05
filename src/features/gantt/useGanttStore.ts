@@ -41,6 +41,15 @@ export function createGanttStore() {
       try {
         const canonical=await activeGateway.execute({requestId:crypto.randomUUID(),command});
         if(currentGeneration!==generation)return;
+        // Restoring a deleted ID gets an authority-owned revision above its tombstone.
+        // Accept only that field: concurrent task/ACL edits or sibling changes remain conflicts.
+        if((command.type==='saveProject'||command.type==='saveSpace')&&command.expectedRevision===null){
+          const key={kind:command.type==='saveProject'?'project':'space',id:command.type==='saveProject'?command.project.id:command.space.id} as const;
+          const predicted=entity(optimistic,key),saved=entity(canonical,key);
+          if(predicted&&saved&&Number.isSafeInteger(saved.revision)&&saved.revision>=predicted.revision&&JSON.stringify({...saved,revision:predicted.revision})===JSON.stringify(predicted)){
+            optimistic=structuredClone(optimistic);const created=entity(optimistic,key)!;created.revision=saved.revision;
+          }
+        }
         set({snapshot:canonical,pending:false,error:null});
         if(command.type==='saveProject'||command.type==='deleteProject'){
           // Rebase only our own child-project changes. A sibling/space commit

@@ -145,14 +145,21 @@ export function canEditProject(snapshot:GanttSnapshot,actorId:string,project:Gan
   const space=snapshot.spaces.find(s=>s.id===project.spaceId);return Boolean(space&&canViewProject(snapshot,actorId,project)&&canEditSpace(space,actorId)&&(space.ownerId===actorId||project.ownerId===actorId||project.editorIds===null||project.editorIds.includes(actorId)));
 }
 export function visibleSnapshot(snapshot:GanttSnapshot,actorId:string):GanttSnapshot {return structuredClone({spaces:snapshot.spaces.filter(s=>canViewSpace(s,actorId)),projects:snapshot.projects.filter(p=>canViewProject(snapshot,actorId,p))});}
-export function applyCommand(snapshot:GanttSnapshot,actorId:string,command:GanttCommand):GanttSnapshot {
+/** Private authority state. Never include deleted entity IDs in a visible snapshot. */
+export type GanttRevisionLedger = Record<string, number>;
+export function rememberGanttRevisions(ledger:GanttRevisionLedger,snapshot:GanttSnapshot):void {
+  for(const [kind,entities] of [['space',snapshot.spaces],['project',snapshot.projects]] as const)
+    for(const entity of entities)ledger[`${kind}:${entity.id}`]=Math.max(ledger[`${kind}:${entity.id}`]??0,entity.revision);
+}
+export function applyCommand(snapshot:GanttSnapshot,actorId:string,command:GanttCommand,ledger?:GanttRevisionLedger,retiredIds:readonly string[]=[]):GanttSnapshot {
   text(actorId,'로그인 사용자');const next=structuredClone(snapshot);
   const cas=(current:number|undefined,expected:number|null)=>{if(current===undefined?expected!==null:expected!==current)fail('다른 변경이 있습니다. 최신 내용을 다시 불러와 주세요.');};
   if(command.type==='saveSpace') {
     const s=command.space;id(s.id);text(s.name,'폴더 이름');text(s.ownerId,'소유자');revision(s.revision);
     if(typeof s.shared!=='boolean'||!Array.isArray(s.members)||s.members.some(m=>typeof m.canEdit!=='boolean'))fail('공유 설정을 확인해 주세요.');userIds(s.members.map(m=>m.userId));
     const old=next.spaces.find(x=>x.id===s.id);if((old&&!canManageSpace(old,actorId))||(!old&&s.ownerId!==actorId)||old&&old.ownerId!==s.ownerId)fail('폴더 관리 권한이 없습니다.');cas(old?.revision,command.expectedRevision);
-    const saved={...structuredClone(s),revision:(old?.revision??0)+1};
+    if(!old&&retiredIds.includes(`space:${s.id}`))fail('이전 버전에서 삭제한 항목은 복원할 수 없습니다. 새 항목을 만들어 주세요.');
+    const saved={...structuredClone(s),revision:(old?.revision??ledger?.[`space:${s.id}`]??0)+1};
     if(old)next.spaces=next.spaces.map(x=>x.id===s.id?saved:x);else next.spaces.push(saved);
     const allowed=new Set([saved.ownerId,...(saved.shared?saved.members.map(m=>m.userId):[])]);
     next.projects=next.projects.map(project=>{
@@ -171,7 +178,8 @@ export function applyCommand(snapshot:GanttSnapshot,actorId:string,command:Gantt
     const members=new Set([s.ownerId,...(s.shared?s.members.map(m=>m.userId):[])]);
     if(!members.has(p.ownerId)||(p.memberIds??[]).some(u=>!members.has(u))||(p.editorIds??[]).some(u=>!members.has(u)||(p.memberIds!==null&&!p.memberIds.includes(u)&&u!==p.ownerId)))fail('프로젝트 멤버는 폴더 범위 안에서 선택해 주세요.');
     cas(old?.revision,command.expectedRevision);
-    const saved={...structuredClone(p),revision:(old?.revision??0)+1};
+    if(!old&&retiredIds.includes(`project:${p.id}`))fail('이전 버전에서 삭제한 항목은 복원할 수 없습니다. 새 항목을 만들어 주세요.');
+    const saved={...structuredClone(p),revision:(old?.revision??ledger?.[`project:${p.id}`]??0)+1};
     if(old)next.projects=next.projects.map(x=>x.id===p.id?saved:x);else next.projects.push(saved);
   }else if(command.type==='deleteProject') {
     const p=next.projects.find(p=>p.id===command.projectId);if(!p||!canEditProject(next,actorId,p))fail('프로젝트 삭제 권한이 없습니다.');cas(p.revision,command.expectedRevision);next.projects=next.projects.filter(x=>x.id!==p.id);
