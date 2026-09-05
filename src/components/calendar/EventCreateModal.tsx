@@ -14,6 +14,7 @@ import type { CalendarEvent, CalendarEventType } from '@/types/calendar';
 import { DEPARTMENT_CONFIGS } from '@/types';
 import { fmtDate } from '@/utils/calendarDate';
 import { floatingGlassStyle } from '@/utils/glassStyles';
+import { GlassDropdown } from '@/components/common/GlassDropdown';
 
 export const GOOGLE_CALENDAR_OPTION = 'google';
 
@@ -235,21 +236,24 @@ export function EventCreateModal({ initialDate, initialEndDate, initialStartTime
 
         <div className="p-5 flex flex-col gap-4">
           <div>
-            <label className="text-xs font-semibold text-text-secondary/60 uppercase tracking-wider">캘린더</label>
-            <select aria-label="캘린더" required value={selectedCalendarId} onChange={(event) => changeCalendar(event.target.value)} className="mt-1 w-full bg-bg-primary border border-bg-border rounded-lg px-3 py-2 text-sm text-text-primary outline-none focus:border-accent">
-              {editableCalendars.map((calendar) => <option key={calendar.id} value={calendar.id}>{calendar.name}</option>)}
-              {googleAuthenticated && <option value={GOOGLE_CALENDAR_OPTION}>내 구글 캘린더</option>}
-            </select>
-            <p className="mt-1 text-[11px] text-text-secondary/70">편집 권한이 있는 캘린더만 보여요</p>
+            <label className="text-xs font-semibold text-text-secondary uppercase tracking-wider">캘린더</label>
+            <GlassDropdown label="캘린더" value={selectedCalendarId} onChange={changeCalendar} portal
+              options={[
+                ...editableCalendars.map((calendar) => ({ value: calendar.id, label: calendar.name })),
+                ...(googleAuthenticated ? [{ value: GOOGLE_CALENDAR_OPTION, label: '내 구글 캘린더' }] : []),
+              ]}
+              className="mt-1 w-full [&>button]:w-full [&>button]:justify-between"
+            />
+            <p className="mt-1 text-[11px] text-text-secondary">편집 권한이 있는 캘린더만 보여요</p>
           </div>
 
           <div>
-            <label className="text-xs font-semibold text-text-secondary/60 uppercase tracking-wider">제목</label>
-            <input aria-label="제목" value={title} onChange={(event) => setTitle(event.target.value)} placeholder="일정 이름" className="mt-1 w-full bg-bg-primary border border-bg-border rounded-lg px-3 py-2 text-sm text-text-primary placeholder:text-text-secondary/40 outline-none focus:border-accent" autoFocus />
+            <label className="text-xs font-semibold text-text-secondary uppercase tracking-wider">제목</label>
+            <input aria-label="제목" value={title} onChange={(event) => setTitle(event.target.value)} placeholder="일정 이름" className="mt-1 w-full bg-bg-primary border border-bg-border rounded-lg px-3 py-2 text-sm text-text-primary placeholder:text-text-secondary outline-none focus:border-accent" autoFocus />
           </div>
 
           <div>
-            <label className="flex items-center justify-between gap-3 text-xs font-semibold text-text-secondary/80">
+            <label className="flex items-center justify-between gap-3 text-xs font-semibold text-text-secondary">
               <span>종일</span>
               <input aria-label="종일 일정" type="checkbox" checked={allDay} onChange={(event) => setAllDay(event.target.checked)} className="h-4 w-4 rounded accent-accent cursor-pointer" />
             </label>
@@ -272,14 +276,14 @@ export function EventCreateModal({ initialDate, initialEndDate, initialStartTime
               {!allDay && <TimeField label="종료 시각" value={endTime} onChange={setEndTime} colorMode={colorMode} inputClass={inputClass} />}
             </div>
             {hasInvalidTimedInterval && (
-              <p role="alert" className="mt-2 text-[11px] font-medium text-red-400">
+              <p role="alert" className="mt-2 text-[11px] font-medium text-[color:color-mix(in_srgb,var(--status-error)_65%,rgb(var(--color-text-primary)))]">
                 종료 시각은 시작 시각보다 뒤여야 해요.
               </p>
             )}
           </div>
 
           <div>
-            <label className="text-xs font-semibold text-text-secondary/60 uppercase tracking-wider">태그</label>
+            <label className="text-xs font-semibold text-text-secondary uppercase tracking-wider">태그</label>
             <div className="flex flex-wrap gap-1.5 mt-1.5">
               <button type="button" aria-label="태그 없음" aria-pressed={tagId === undefined} disabled={isGoogle} onClick={() => setTagId(undefined)} className={cn('px-2.5 py-1.5 rounded-full text-[11px] transition-colors', tagId === undefined ? 'bg-accent/20 text-accent' : 'bg-bg-primary text-text-secondary', isGoogle ? 'opacity-40 cursor-not-allowed' : 'cursor-pointer')}>없음</button>
               {sortedTags.map((tag) => {
@@ -293,18 +297,18 @@ export function EventCreateModal({ initialDate, initialEndDate, initialStartTime
                     disabled={isGoogle}
                     onClick={() => setTagId(tag.id)}
                     className={cn('px-2.5 py-1.5 rounded-full text-[11px] border transition-colors', isGoogle ? 'opacity-40 cursor-not-allowed' : 'cursor-pointer')}
-                    style={selected ? { color: tag.color, borderColor: tag.color, background: `color-mix(in srgb, ${tag.color} 18%, transparent)` } : { borderColor: 'rgb(var(--color-bg-border) / 0.7)' }}
+                    style={selected ? { color: 'rgb(var(--color-text-primary))', borderColor: tag.color, background: `color-mix(in srgb, ${tag.color} 18%, transparent)` } : { borderColor: 'rgb(var(--color-bg-border) / 0.7)' }}
                   >
                     {tag.name}
                   </button>
                 );
               })}
             </div>
-            {isGoogle && <p className="mt-1.5 text-[11px] text-text-secondary/70">Google 일정에는 팀 태그를 붙일 수 없어요</p>}
+            {isGoogle && <p className="mt-1.5 text-[11px] text-text-secondary">Google 일정에는 팀 태그를 붙일 수 없어요</p>}
           </div>
 
           <div>
-            <label className="text-xs font-semibold text-text-secondary/60 uppercase tracking-wider">연결</label>
+            <label className="text-xs font-semibold text-text-secondary uppercase tracking-wider">연결</label>
             <div className="flex gap-1.5 mt-1">
               {([['custom', '없음'], ['episode', '에피소드'], ['part', '파트'], ['scene', '씬']] as const).map(([type, label]) => (
                 <button
@@ -326,37 +330,37 @@ export function EventCreateModal({ initialDate, initialEndDate, initialStartTime
 
           {evType !== 'custom' && (
             <div className="flex flex-col gap-2 bg-bg-primary/50 rounded-xl p-3 border border-bg-border/50">
-              <label className="text-xs font-semibold text-text-secondary/60 uppercase tracking-wider">연결 대상</label>
-              <select value={linkedEp} onChange={(event) => { setLinkedEp(event.target.value ? Number(event.target.value) : ''); setLinkedPart(''); setLinkedScene(''); }} className="w-full bg-bg-primary border border-bg-border rounded-lg px-3 py-1.5 text-xs text-text-primary outline-none focus:border-accent">
-                <option value="">에피소드 선택</option>
-                {episodes.map((episode) => <option key={episode.episodeNumber} value={episode.episodeNumber}>{episodeTitles[episode.episodeNumber] || episode.title}</option>)}
-              </select>
+              <label className="text-xs font-semibold text-text-secondary uppercase tracking-wider">연결 대상</label>
+              <GlassDropdown label="에피소드" value={String(linkedEp)} onChange={(value) => { setLinkedEp(value ? Number(value) : ''); setLinkedPart(''); setLinkedScene(''); }} portal
+                options={[{ value: '', label: '에피소드 선택' }, ...episodes.map((episode) => ({ value: String(episode.episodeNumber), label: episodeTitles[episode.episodeNumber] || episode.title }))]}
+                className="w-full [&>button]:w-full [&>button]:justify-between [&>button]:text-xs"
+              />
               {(evType === 'part' || evType === 'scene') && linkedEp !== '' && (
-                <select value={linkedPart} onChange={(event) => { setLinkedPart(event.target.value); setLinkedScene(''); }} className="w-full bg-bg-primary border border-bg-border rounded-lg px-3 py-1.5 text-xs text-text-primary outline-none focus:border-accent">
-                  <option value="">파트 선택</option>
-                  {selectedEpParts.map((part) => <option key={part.sheetName} value={part.sheetName}>{part.partId}파트 ({DEPARTMENT_CONFIGS[part.department as 'bg' | 'acting']?.shortLabel ?? part.department})</option>)}
-                </select>
+                <GlassDropdown label="파트" value={linkedPart} onChange={(value) => { setLinkedPart(value); setLinkedScene(''); }} portal
+                  options={[{ value: '', label: '파트 선택' }, ...selectedEpParts.map((part) => ({ value: part.sheetName, label: `${part.partId}파트 (${DEPARTMENT_CONFIGS[part.department as 'bg' | 'acting']?.shortLabel ?? part.department})` }))]}
+                  className="w-full [&>button]:w-full [&>button]:justify-between [&>button]:text-xs"
+                />
               )}
               {evType === 'scene' && linkedPart && (
-                <select value={linkedScene} onChange={(event) => setLinkedScene(event.target.value)} className="w-full bg-bg-primary border border-bg-border rounded-lg px-3 py-1.5 text-xs text-text-primary outline-none focus:border-accent">
-                  <option value="">씬 선택</option>
-                  {selectedPartScenes.map((scene) => <option key={scene.sceneId || scene.no} value={scene.sceneId || String(scene.no)}>#{scene.no} {scene.sceneId}</option>)}
-                </select>
+                <GlassDropdown label="씬" value={linkedScene} onChange={setLinkedScene} portal
+                  options={[{ value: '', label: '씬 선택' }, ...selectedPartScenes.map((scene) => ({ value: scene.sceneId || String(scene.no), label: `#${scene.no} ${scene.sceneId}` }))]}
+                  className="w-full [&>button]:w-full [&>button]:justify-between [&>button]:text-xs"
+                />
               )}
             </div>
           )}
 
           <div>
-            <label className="text-xs font-semibold text-text-secondary/60 uppercase tracking-wider">메모</label>
-            <textarea aria-label="메모" value={memo} onChange={(event) => setMemo(event.target.value)} placeholder="메모 (선택사항)" rows={2} className="mt-1 w-full bg-bg-primary border border-bg-border rounded-lg px-3 py-2 text-xs text-text-primary placeholder:text-text-secondary/40 resize-none outline-none focus:border-accent" />
+            <label className="text-xs font-semibold text-text-secondary uppercase tracking-wider">메모</label>
+            <textarea aria-label="메모" value={memo} onChange={(event) => setMemo(event.target.value)} placeholder="메모 (선택사항)" rows={2} className="mt-1 w-full bg-bg-primary border border-bg-border rounded-lg px-3 py-2 text-xs text-text-primary placeholder:text-text-secondary resize-none outline-none focus:border-accent" />
           </div>
         </div>
 
         <div className="sticky bottom-0 flex items-center justify-between gap-3 border-t border-bg-border bg-bg-card/95 px-5 py-4">
           {saveError ? (
-            <p role="alert" className="min-h-4 text-[11px] font-medium text-red-400">{saveError}</p>
+            <p role="alert" className="min-h-4 text-[11px] font-medium text-[color:color-mix(in_srgb,var(--status-error)_65%,rgb(var(--color-text-primary)))]">{saveError}</p>
           ) : (
-            <p className="min-h-4 text-[11px] text-text-secondary/75">{sharingCopy}</p>
+            <p className="min-h-4 text-[11px] text-text-secondary">{sharingCopy}</p>
           )}
           <div className="flex shrink-0 gap-2">
             <button type="button" onClick={onClose} className="px-3 py-2 rounded-lg text-xs text-text-secondary hover:text-text-primary cursor-pointer">취소</button>

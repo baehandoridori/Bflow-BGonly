@@ -238,6 +238,21 @@ test('useTimeGridDnD DOM: 5분 일정은 짧아도 하단 후보에서 이동을
   }
 });
 
+test('useTimeGridDnD DOM: a canonical milestone moves with zero duration even from its bottom resize zone',async()=>{
+  const changes: unknown[][]=[];
+  const harness=installDomHookHarness(await loadDnD(),{scrollContainerRef:{current:{scrollTop:0,getBoundingClientRect:()=>({top:100,bottom:500})}},onEventChange:(...args)=>changes.push(args)});
+  try{
+    let dnd=harness.render();
+    const milestone={...source,source:'bflow',id:'gantt:p:t',sourceCalendarId:'bflow:cal',linkedGanttProjectId:'p',linkedGanttTaskId:'t',linkedGanttTaskKind:'milestone',startTime:'10:00',endTime:'10:00'};
+    dnd.beginEventDrag(event(10,156),milestone,'resize-end',{date:'2026-08-24',bandStartMin:540,column:harness.column});
+    dnd=harness.render();harness.fire('mousemove',{clientX:20,clientY:184});harness.flushFrames();dnd=harness.render();
+    const preview=dnd.preview as {mode:string;startTime:string;endTime:string};
+    assert.equal(preview.mode,'move');assert.equal(preview.startTime,'10:30');assert.equal(preview.endTime,'10:30');
+    harness.fire('mouseup',{});harness.render();
+    assert.equal(changes.length,1);assert.deepEqual(changes[0][2],{startDate:'2026-08-24',endDate:'2026-08-24',startTime:'10:30',endTime:'10:30'});
+  }finally{harness.restore();}
+});
+
 test('useTimeGridDnD DOM: create·resize callback, Escape 취소, 읽기전용 inertness를 실제 리스너로 보장한다', async () => {
   const creates: unknown[][] = [];
   const changes: unknown[][] = [];

@@ -1,13 +1,15 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { Check, ChevronDown, ChevronRight, GripVertical, Hand, Minus, MoreHorizontal, Plus, Scan } from 'lucide-react';
+import { Check, ChevronDown, ChevronLeft, ChevronRight, GripVertical, Hand, Minus, MoreHorizontal, Plus, Scan } from 'lucide-react';
 import { descendantIds, durationLabel, isTaskComplete, projectProgress, resolveTaskColor, taskBounds, taskConflicts, taskProgress } from './domain';
 import { barGeometry, rebaseScroll, zoomScroll } from './geometry';
+import { GANTT_RULER_HEIGHT as RULER, monthStart, navigationRange, weekBands } from './dateAxis';
 import { rowDrop, type RowDrop, type RowDropPosition } from './rowDrag';
 import { GanttTooltip, type GanttHover } from './GanttTooltip';
 import type { GanttProject, GanttTask } from './types';
+import './navigation.css';
 
-const DAY = 86400000, ROW = 40, RULER = 48;
+const DAY = 86400000, ROW = 40;
 const dateMs = (d: string) => Date.parse(d + 'T00:00:00Z');
 const dayDiff = (a: string, b: string) => Math.round((dateMs(b) - dateMs(a)) / DAY);
 export const moveDate = (date: string, days: number) => new Date(dateMs(date) + days * DAY).toISOString().slice(0, 10);
@@ -42,26 +44,44 @@ export function GanttCanvas(props: Props) {
   const [rowDragging, setRowDragging] = useState<{row: ChartRow; drop: RowDrop | null; x: number; y: number} | null>(null);
   const dragRef = useRef<Gesture | null>(null);
   const suppressClick = useRef(false), zoomFrame = useRef(0), goal = useRef(48), pointer = useRef(0);
-  const leftWidth = layout === 'list' ? 380 : 0;
+  const [viewportWidth, setViewportWidth] = useState(0);
+  const leftWidth = layout === 'list' ? Math.min(380,Math.max(240,Math.round((viewportWidth || 900)*.45))) : 0;
+  useLayoutEffect(() => {
+    const el = chart.current;if(!el)return;
+    const measure = () => setViewportWidth(el.clientWidth);
+    measure();
+    const observer = typeof ResizeObserver !== 'undefined' ? new ResizeObserver(measure) : null;
+    observer?.observe(el);window.addEventListener('resize',measure);
+    return () => { observer?.disconnect();window.removeEventListener('resize',measure); };
+  }, []);
   const allDates = projects.flatMap(p => p.tasks.map(t => t.startDate));
   const firstDate = allDates.sort()[0] || localDate();
   const [base, setBase] = useState(() => moveDate(firstDate < localDate() ? firstDate : localDate(), -6));
-  const pendingScroll = useRef<number | null>(null);
+  const [visibleDate, setVisibleDate] = useState(base);
+  const [navigationEnd, setNavigationEnd] = useState(() => moveDate(base,59));
+  const pendingScroll = useRef<{base:string;left:number;kind:'view'|'zoom'} | null>(null);
   // Keep the viewport date stable when a project with earlier work is enabled.
   useLayoutEffect(() => {
     const candidate = moveDate(firstDate, -6);
     if (candidate < base) {
-      pendingScroll.current = rebaseScroll(base, candidate, chart.current?.scrollLeft || 0, widthRef.current);
+      pendingScroll.current = {base:candidate,left:rebaseScroll(base, candidate, chart.current?.scrollLeft || 0, widthRef.current),kind:'view'};
       setBase(candidate);
-    } else if (pendingScroll.current !== null && chart.current) {
-      chart.current.scrollLeft = pendingScroll.current;
-      pendingScroll.current = null;
     }
   }, [firstDate, base]);
   const lastDate = projects.flatMap(p => p.tasks.map(t => t.endDate)).sort().at(-1) || localDate();
-  const extent = useRef(60);
-  extent.current = Math.max(extent.current, dayDiff(base, lastDate) + 30);
-  const days = extent.current;
+  const extent = useRef(navigationEnd);
+  extent.current = [extent.current, navigationEnd, moveDate(lastDate,30)].sort().at(-1)!;
+  const days = dayDiff(base,extent.current)+1;
+  const weeks = useMemo(() => weekBands(base,days), [base,days]);
+  const syncVisibleDate = useCallback(() => {
+    setVisibleDate(moveDate(base,Math.floor((chart.current?.scrollLeft || 0)/widthRef.current)));
+  }, [base]);
+  useLayoutEffect(() => {
+    if(pendingScroll.current?.base===base&&chart.current){
+      chart.current.scrollLeft=pendingScroll.current.left;pendingScroll.current=null;
+    }
+    syncVisibleDate();
+  }, [base,days,width,leftWidth,syncVisibleDate]);
   const rows = useMemo(() => {
     const result: ChartRow[] = [];
     for (const p of projects) {
@@ -97,18 +117,19 @@ export function GanttCanvas(props: Props) {
     }
     hadRows.current = rows.length > 0;
   }, [rows.length]);
-  const stopZoom = useCallback(() => { cancelAnimationFrame(zoomFrame.current); zoomFrame.current = 0; goal.current = widthRef.current; }, []);
+  const stopZoom = useCallback(() => { cancelAnimationFrame(zoomFrame.current); zoomFrame.current = 0; goal.current = widthRef.current;if(pendingScroll.current?.kind==='zoom')pendingScroll.current=null; }, []);
   const zoomTo = useCallback((target: number, x: number) => {
     goal.current = Math.max(12,Math.min(480,target)); pointer.current = x;
     const tick = () => {
       const el = chart.current; if (!el) return;
       const old = widthRef.current, next = matchMedia('(prefers-reduced-motion: reduce)').matches || Math.abs(goal.current-old)<.08 ? goal.current : old+(goal.current-old)*.22;
       const scroll = zoomScroll(old,next,el.scrollLeft,pointer.current,leftWidth);
-      widthRef.current=next;setWidth(next);el.style.setProperty('--gantt-day',`${next}px`);el.scrollLeft=scroll;
+      if(next!==old)pendingScroll.current={base,left:scroll,kind:'zoom'};
+      widthRef.current=next;setWidth(next);el.style.setProperty('--gantt-day',`${next}px`);el.scrollLeft=scroll;syncVisibleDate();
       if (next !== goal.current) zoomFrame.current=requestAnimationFrame(tick);else zoomFrame.current=0;
     };
     if (!zoomFrame.current) zoomFrame.current=requestAnimationFrame(tick);
-  },[leftWidth]);
+  },[leftWidth,syncVisibleDate]);
   useEffect(() => {
     const el = chart.current; if (!el) return;
     const wheel = (e: WheelEvent) => {
@@ -116,11 +137,11 @@ export function GanttCanvas(props: Props) {
       const x=e.clientX-el.getBoundingClientRect().left;if(x<leftWidth)return;
       e.preventDefault();setHover(null);
       const unit=e.deltaMode===1?16:e.deltaMode===2?el.clientHeight:1;
-      if(e.shiftKey||Math.abs(e.deltaX)>Math.abs(e.deltaY)){stopZoom();el.scrollLeft+=(e.deltaX||e.deltaY)*unit;return;}
+      if(e.shiftKey||Math.abs(e.deltaX)>Math.abs(e.deltaY)){stopZoom();el.scrollLeft+=(e.deltaX||e.deltaY)*unit;syncVisibleDate();return;}
       zoomTo(goal.current*Math.exp(-Math.max(-180,Math.min(180,e.deltaY*unit))*.002),x);
     };
     el.addEventListener('wheel',wheel,{passive:false});return()=>{el.removeEventListener('wheel',wheel);stopZoom();};
-  },[leftWidth,stopZoom,zoomTo]);
+  },[leftWidth,stopZoom,zoomTo,syncVisibleDate]);
   useEffect(() => () => cancelAnimationFrame(zoomFrame.current), []);
   const cancelGesture = useCallback((pointerId?: number) => {
     const gesture = dragRef.current;
@@ -134,7 +155,7 @@ export function GanttCanvas(props: Props) {
   const visibleRowOrder = rows.map(r=>`${r.project.id}:${r.id}:${r.depth}`).join('|');
   // Polling may replace equal objects while the pointer is held. Only an actual
   // revision or visible hierarchy change invalidates the in-flight gesture.
-  useEffect(() => { cancelGesture(); setHover(null); }, [gestureRevision, visibleRowOrder, statusFilter, worker, mode, layout, cancelGesture]);
+  useEffect(() => { cancelGesture(); setHover(null); }, [gestureRevision, visibleRowOrder, statusFilter, worker, mode, layout, leftWidth, cancelGesture]);
   useEffect(() => {
     const clearSpace = () => { spaceRef.current = false; setSpaceHeld(false); };
     const keyboard = (event: KeyboardEvent) => {
@@ -153,9 +174,23 @@ export function GanttCanvas(props: Props) {
   }, [cancelGesture]);
   const fit = () => {
     const el=chart.current;if(!el)return;
-    stopZoom();const next=Math.max(12,Math.min(160,(el.clientWidth-leftWidth-300)/(dayDiff(firstDate,lastDate)+2)));
-    widthRef.current=goal.current=next;setWidth(next);el.style.setProperty('--gantt-day',`${next}px`);el.scrollLeft=Math.max(0,dayDiff(base,firstDate)*next-240);
+    cancelGesture();stopZoom();const available=Math.max(1,el.clientWidth-leftWidth),padding=Math.min(24,available*.08);
+    const next=Math.max(12,Math.min(160,(available-padding*2)/(dayDiff(firstDate,lastDate)+1)));
+    const scroll=Math.max(0,dayDiff(base,firstDate)*next-padding);
+    if(next!==widthRef.current)pendingScroll.current={base,left:scroll,kind:'view'};
+    widthRef.current=goal.current=next;setWidth(next);el.style.setProperty('--gantt-day',`${next}px`);el.scrollLeft=scroll;syncVisibleDate();
   };
+  const navigate = (target: string, alignment: 'start' | 'center' = 'start') => {
+    const el=chart.current;if(!el)return;
+    cancelGesture();stopZoom();setHover(null);
+    const range=navigationRange(base,extent.current,target,widthRef.current,Math.max(1,el.clientWidth-leftWidth),alignment);
+    pendingScroll.current={base:range.base,left:range.scrollLeft,kind:'view'};
+    setBase(range.base);setNavigationEnd(range.end);
+    // An existing destination does not change the rendered range, so it can be
+    // scrolled immediately. New ranges are applied after the grid is resized.
+    if(range.base===base&&range.end===extent.current){el.scrollLeft=range.scrollLeft;pendingScroll.current=null;syncVisibleDate();}
+  };
+  const moveMonth = (offset: number) => navigate(monthStart(moveDate(base,Math.floor((chart.current?.scrollLeft||0)/widthRef.current)),offset));
   const showHover = (r: ChartRow, x: number, y: number) => {
     if (dragRef.current || !r.bounds) return;
     const task=r.task || ({id:r.id,title:r.project.name,memo:r.project.memo,workers:[],...r.bounds} as unknown as GanttTask);
@@ -199,7 +234,7 @@ export function GanttCanvas(props: Props) {
     if(target.closest('input, textarea, select, [contenteditable="true"], [role="textbox"]'))return;
     const bar=target.closest('.gantt-bar');
     if(target.closest('button')&&!bar)return;
-    const blank=target===e.currentTarget||target.classList.contains('gantt-track')||target.classList.contains('gantt-grid')||!!target.closest('.gantt-dates');
+    const blank=target===e.currentTarget||target.classList.contains('gantt-track')||target.classList.contains('gantt-grid')||!!target.closest('.gantt-date-axis');
     if(!spaceRef.current&&!(mode==='pan'&&blank))return;
     const el=e.currentTarget;
     dragRef.current={kind:'pan',target:el,pointer:e.pointerId,x:e.clientX,y:e.clientY,left:el.scrollLeft,top:el.scrollTop,moved:false};
@@ -211,7 +246,7 @@ export function GanttCanvas(props: Props) {
     const dx=e.clientX-d.x,dy=e.clientY-d.y;
     if(!d.moved&&Math.hypot(dx,dy)<4)return;
     d.moved=true;
-    if(d.kind==='pan'){d.target.scrollLeft=Math.max(0,d.left-dx);d.target.scrollTop=Math.max(0,d.top-dy);setPanning(true);return;}
+    if(d.kind==='pan'){d.target.scrollLeft=Math.max(0,d.left-dx);d.target.scrollTop=Math.max(0,d.top-dy);syncVisibleDate();setPanning(true);return;}
     if(d.kind==='row'){d.lastX=e.clientX;d.lastY=e.clientY;d.drop=findRowDrop(d,e.clientX,e.clientY);setRowDragging({row:d.row,drop:d.drop,x:e.clientX,y:e.clientY});return;}
     d.delta=Math.round(dx/widthRef.current);
     if(d.kind==='create'){setCreating({id:d.row.id,first:d.first,last:Math.max(0,d.first+d.delta)});return;}
@@ -244,23 +279,47 @@ export function GanttCanvas(props: Props) {
   let dropIndicatorId=drop?.taskId??drop?.project.id;
   if(drop?.position==='after'&&drop.taskId){const descendants=descendantIds(drop.project,drop.taskId);dropIndicatorId=rows.filter(r=>r.project.id===drop.project.id&&descendants.has(r.id)).at(-1)?.id??drop.taskId;}
   const conflicts = new Map(projects.flatMap(project => taskConflicts(project).map(c => [c.id, c.message] as const)));
+  const today=localDate(),todayIndex=dayDiff(base,today);
   return <div className="gantt-canvas-wrap">
-    <div className="gantt-caption"><strong>{base.slice(0,4)}년 {Number(firstDate.slice(5,7))}월</strong><span>{Math.round(width/48*100)}%</span>
-      <div className="gantt-pointer-tools" role="group" aria-label="차트 조작">
-        <button aria-label="화면 이동" aria-pressed={mode==='pan'} title="빈 곳을 잡고 화면 이동 · 작업 막대는 날짜 이동" onClick={()=>setMode('pan')}><Hand size={14}/> 화면 이동</button>
-        <button aria-label="작업 만들기" aria-pressed={mode==='create'} title="빈 날짜 영역을 드래그해 작업 만들기" onClick={()=>setMode('create')}><Plus size={14}/> 작업 만들기</button>
+    <div className="gantt-caption gantt-navigation">
+      <div className="gantt-navigation-primary">
+        <div className="gantt-month-navigation" role="group" aria-label="표시 월 이동">
+          <button aria-label="이전 달" title="이전 달 1일로 이동" onClick={()=>moveMonth(-1)}><ChevronLeft size={15}/></button>
+          <strong aria-label="현재 표시 월" title="날짜 영역 왼쪽에 표시되는 월">{visibleDate.slice(0,4)}년 {Number(visibleDate.slice(5,7))}월</strong>
+          <button aria-label="다음 달" title="다음 달 1일로 이동" onClick={()=>moveMonth(1)}><ChevronRight size={15}/></button>
+          <button aria-label="오늘로 이동" title="오늘 날짜를 화면 가운데에 표시" onClick={()=>navigate(localDate(),'center')}>오늘</button>
+        </div>
+        <div className="gantt-zoom-navigation" role="group" aria-label="날짜 확대 및 축소">
+          <button aria-label="축소" onClick={()=>zoomTo(width*.8,leftWidth+(Math.max(1,(chart.current?.clientWidth||800)-leftWidth))/2)}><Minus size={14}/></button>
+          <span aria-label="확대 비율">{Math.round(width/48*100)}%</span>
+          <button aria-label="확대" onClick={()=>zoomTo(width*1.25,leftWidth+(Math.max(1,(chart.current?.clientWidth||800)-leftWidth))/2)}><Plus size={14}/></button>
+          <button aria-label="전체 일정 맞춤" onClick={fit}><Scan size={14}/> 전체 맞춤</button>
+        </div>
       </div>
-      <button onClick={()=>setLayout(v=>{const n=v==='beside'?'list':'beside';localStorage.setItem('bflow-gantt-name-layout',n);return n;})}>작업명 · {layout==='beside'?'막대 옆':'목록'}</button>
-      <small>이름 드래그: 소속·순서 · 막대: 날짜 · Space: 화면 이동</small><button aria-label="축소" onClick={()=>zoomTo(width*.8,(chart.current?.clientWidth||800)/2)}><Minus size={14}/></button><button aria-label="확대" onClick={()=>zoomTo(width*1.25,(chart.current?.clientWidth||800)/2)}><Plus size={14}/></button><button onClick={fit}><Scan size={14}/> 전체 맞춤</button>
+      <div className="gantt-navigation-secondary">
+        <div className="gantt-pointer-tools" role="group" aria-label="차트 조작">
+          <button aria-label="화면 이동" aria-pressed={mode==='pan'} title="빈 곳을 잡고 화면 이동 · 작업 막대는 날짜 이동" onClick={()=>setMode('pan')}><Hand size={14}/> 화면 이동</button>
+          <button aria-label="작업 만들기" aria-pressed={mode==='create'} title="빈 날짜 영역을 드래그해 작업 만들기" onClick={()=>setMode('create')}><Plus size={14}/> 작업 만들기</button>
+        </div>
+        <button className="gantt-name-layout" onClick={()=>setLayout(v=>{const n=v==='beside'?'list':'beside';localStorage.setItem('bflow-gantt-name-layout',n);return n;})}>작업명 · {layout==='beside'?'막대 옆':'목록'}</button>
+        <small>이름: 소속·순서 · 막대: 날짜 · Space: 화면 이동</small>
+      </div>
     </div>
-    <div ref={chart} className={`gantt-canvas ${layout} mode-${mode} ${spaceHeld?'space-pan':''} ${panning?'panning':''} ${rowDragging?'moving-row':''}`} tabIndex={0} aria-label="프로젝트 간트" style={{'--gantt-day':`${width}px`,'--gantt-label':`${leftWidth}px`} as React.CSSProperties}
-      onScroll={e=>{setHover(null);if(rows.length)savedScroll.current={left:e.currentTarget.scrollLeft,top:e.currentTarget.scrollTop};const d=dragRef.current;if(d?.kind==='row'&&d.moved){d.drop=findRowDrop(d,d.lastX,d.lastY);setRowDragging({row:d.row,drop:d.drop,x:d.lastX,y:d.lastY});}}}
+    <div ref={chart} className={`gantt-canvas ${layout} mode-${mode} ${spaceHeld?'space-pan':''} ${panning?'panning':''} ${rowDragging?'moving-row':''}`} tabIndex={0} aria-label="프로젝트 간트" style={{'--gantt-day':`${width}px`,'--gantt-label':`${leftWidth}px`,'--gantt-ruler-height':`${RULER}px`} as React.CSSProperties}
+      onScroll={e=>{setHover(null);syncVisibleDate();if(rows.length)savedScroll.current={left:e.currentTarget.scrollLeft,top:e.currentTarget.scrollTop};const d=dragRef.current;if(d?.kind==='row'&&d.moved){d.drop=findRowDrop(d,d.lastX,d.lastY);setRowDragging({row:d.row,drop:d.drop,x:d.lastX,y:d.lastY});}}}
       onPointerEnter={()=>{pointerOver.current=true;}} onPointerLeave={()=>{pointerOver.current=false;}}
       onPointerDownCapture={startPointer} onPointerMove={moveDrag} onPointerUp={endDrag}
       onPointerCancel={e=>cancelGesture(e.pointerId)} onLostPointerCapture={e=>cancelGesture(e.pointerId)}
       onClickCapture={suppressPointerClick} onDoubleClickCapture={suppressPointerClick}>
       {!rows.length?<div className="gantt-empty"><strong>{statusFilter==='completed'?'완료한 일정이 없습니다':statusFilter==='active'?'진행 중인 일정이 없습니다':'표시 중인 프로젝트가 없습니다'}</strong><p>{statusFilter==='completed'?'완료한 작업과 프로젝트를 삭제하지 않고 모아 봅니다.':'전체 보기에서 완료한 작업도 함께 보거나 새 프로젝트를 만드세요.'}</p></div>:<div className="gantt-grid" style={{width:leftWidth+days*width}}>
-        <div className="gantt-ruler">{layout==='list'&&<div className="gantt-list-label">프로젝트 / 작업</div>}<div className="gantt-dates">{Array.from({length:days},(_,i)=>{const date=moveDate(base,i),week=new Date(dateMs(date)).getUTCDay();return <div key={date} className={`gantt-date ${week===0||week===6?'weekend':''}`} style={{width}}>{width>26||i%Math.ceil(38/width)===0?date.slice(5).replace('-','/'):''}{width>38&&<small>{'일월화수목금토'[week]}</small>}{width>=240&&<div className="gantt-hours">00　06　12　18</div>}</div>;})}</div></div>
+        <div className="gantt-ruler gantt-date-ruler">
+          {layout==='list'&&<div className="gantt-list-label gantt-axis-corner"><strong>프로젝트 / 작업</strong><small title="ISO 8601: 월요일 시작, 첫 목요일을 포함하는 주가 1주">월요일 시작 · ISO 주차</small></div>}
+          <div className="gantt-date-axis">
+            <div className="gantt-weeks" aria-label="ISO 주차">{weeks.map(band=><div key={band.start} className="gantt-week" data-week={`${band.year}-W${String(band.week).padStart(2,'0')}`} style={{width:band.days*width}} title={`ISO ${band.year}년 ${band.week}주 · ${band.start} ~ ${band.end}`}><span>{band.year}년 {band.week}주</span></div>)}</div>
+            <div className="gantt-dates">{Array.from({length:days},(_,i)=>{const date=moveDate(base,i),week=new Date(dateMs(date)).getUTCDay();return <div key={date} data-date={date} aria-current={date===today?'date':undefined} className={`gantt-date ${week===0||week===6?'weekend':''} ${date===today?'today':''}`} style={{width}} title={`${date} (${'일월화수목금토'[week]})${date===today?' · 오늘':''}`}>{width>26||i%Math.ceil(38/width)===0?date.slice(5).replace('-','/'):''}{width>38&&<small>{'일월화수목금토'[week]}</small>}{width>=240&&<div className="gantt-hours">00　06　12　18</div>}</div>;})}</div>
+          </div>
+        </div>
+        {todayIndex>=0&&todayIndex<days&&<div className="gantt-today-line" aria-hidden="true" style={{left:leftWidth+(todayIndex+.5)*width,top:RULER}}/>}
         {rows.map((r,rowIndex)=>{
           const group=!r.task||r.task.kind==='group',t=r.task,b=r.bounds;
           const movable=!!t&&!group&&!r.completed&&!r.project.completed&&statusFilter!=='completed'&&props.canEdit(r.project);

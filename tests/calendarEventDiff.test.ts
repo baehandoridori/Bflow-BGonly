@@ -2,6 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { buildEventSnapshot, diffEventSnapshots } from '../src/utils/calendarEventDiff.ts';
 import { calendarEventIdentityKey } from '../src/utils/calendarEventIdentity.ts';
+import { withCalendarPresentationForSnapshot } from '../src/utils/calendarLocalMutation.ts';
 
 const ev = (id: string, over: Record<string, unknown> = {}) => ({
   id, title: '회의', memo: '준비', color: '#6C5CE7', type: 'custom',
@@ -10,6 +11,15 @@ const ev = (id: string, over: Record<string, unknown> = {}) => ({
   createdBy: 'user-1', createdAt: '2026-08-26T00:00:00.000Z',
   calendarId: 'cal-1', tagId: null, source: 'bflow', sourceCalendarId: 'bflow:cal-1',
   ...over,
+});
+
+test('Gantt optimistic snapshots keep inherited color and the intersection of calendar and project edit rights',()=>{
+  const linked=ev('gantt:p:t',{linkedGanttProjectId:'p',linkedGanttTaskId:'t',ganttColor:'#FDCB6E',ganttCanEdit:false});
+  const calendar={id:'cal-1',color:'#74B9FF',canEdit:true,isPersonal:false};
+  const projected=withCalendarPresentationForSnapshot(linked as never,{title:'수정',calendarId:'cal-1'},[calendar]);
+  assert.equal(projected.color,'#FDCB6E');assert.equal(projected.canEdit,false);assert.equal(projected.isReadOnly,true);
+  const ordinary=withCalendarPresentationForSnapshot(ev('normal') as never,{calendarId:'cal-1'},[calendar]);
+  assert.equal(ordinary.color,'#74B9FF');assert.equal(ordinary.canEdit,true);
 });
 
 test('변경 없음 → added/changed 모두 빈 배열', () => {

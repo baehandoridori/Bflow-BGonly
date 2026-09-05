@@ -93,7 +93,7 @@ export default function DaySidebar({
         const isActive = dayIdx === activeDayIndex;
         const isToday = dateStr === today;
         const dow = date.getDay();
-        const dayColor = dow === 0 ? '#E17055' : dow === 6 ? '#74B9FF' : PRIMARY_TEXT;
+        const dayColor = dow === 0 ? 'rgb(var(--color-calendar-sunday))' : dow === 6 ? 'rgb(var(--color-calendar-saturday))' : PRIMARY_TEXT;
 
         // 이 날짜의 이벤트 색상 수집
         const dayEvents = events.filter(
@@ -114,7 +114,7 @@ export default function DaySidebar({
               border: isActive
                 ? `1px solid ${ACTIVE_BORDER}`
                 : '1px solid transparent',
-              opacity: isActive ? 1 : 0.5,
+              opacity: isActive ? 1 : 0.9,
               cursor: 'pointer',
             }}
           >

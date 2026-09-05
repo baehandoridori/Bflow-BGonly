@@ -1,7 +1,7 @@
 /** Main-only Gantt persistence. Calendar entries project the same task data; no duplicate event writes. */
 import { randomUUID } from 'node:crypto';
 import { supabase } from './supabase';
-import { updateTask, validateProject } from '../src/features/gantt/domain';
+import { resolveTaskColor, updateTask, validateProject } from '../src/features/gantt/domain';
 import type { GanttRequest, GanttSnapshot, GanttProject, GanttTask } from '../src/features/gantt/types';
 import type { CalendarEventRow, CalendarEventWriteFields } from './calendarStore';
 
@@ -25,6 +25,7 @@ export function setGanttSessionTokenResolver(resolver: GanttSessionResolver): vo
 }
 export type GanttCalendarRow = CalendarEventRow & {
   linked_gantt_project_id: string; linked_gantt_task_id: string; linked_gantt_task_kind: GanttTask['kind']; gantt_can_edit: boolean;
+  gantt_color: string;
 };
 type EventQuery = { from?: string; to?: string; eventId?: string };
 const eventPrefix = 'gantt:';
@@ -78,6 +79,7 @@ function projectedRow(project: GanttProject, task: GanttTask): GanttCalendarRow 
     linked_sheet_name: null, linked_scene_id: null, linked_department: null, linked_todo_id: null,
     created_by: project.ownerId, created_at: '', updated_at: '',
     linked_gantt_project_id: project.id, linked_gantt_task_id: task.id, linked_gantt_task_kind: task.kind, gantt_can_edit: true,
+    gantt_color: resolveTaskColor(project, task),
   };
 }
 

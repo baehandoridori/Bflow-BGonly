@@ -652,6 +652,22 @@ test('Gantt projection kind reaches the calendar editor without inferring milest
   } finally { harness.restore(); }
 });
 
+test('Gantt colors survive calendar metadata presentation and title edits while normal events keep calendar colors', async () => {
+  const projection = {...eventRow('gantt:project:task','personal-cal'),linked_gantt_project_id:'project',linked_gantt_task_id:'task',linked_gantt_task_kind:'task',gantt_color:'#FDCB6E',gantt_can_edit:true};
+  const harness=await createHarness({rows:[projection,eventRow('ordinary','personal-cal')]});
+  try {
+    await harness.service.loadBflowEvents();
+    let events=await harness.service.getEvents();
+    const ordinaryColor=events.find(event=>event.id==='ordinary')?.color;
+    assert.equal(events.find(event=>event.id===projection.id)?.color,'#FDCB6E');
+    assert.notEqual(ordinaryColor,'#FDCB6E');
+    await harness.service.updateEvent(projection.id,{title:'제목 수정'});
+    events=await harness.service.getEvents();
+    assert.equal(events.find(event=>event.id===projection.id)?.color,'#FDCB6E');
+    assert.equal(events.find(event=>event.id==='ordinary')?.color,ordinaryColor);
+  }finally{harness.restore();}
+});
+
 test('Google settings expose only local personal sync fields', async () => {
   const harness = await createHarness({
     rows: [],
@@ -1874,6 +1890,7 @@ async function loadEventCreateModal(): Promise<EventCreateModalComponent> {
     target: 'node22',
     write: false,
     external: [
+      '@/components/common/GlassDropdown',
       'react', 'react/jsx-runtime', 'framer-motion', 'lucide-react',
       '@/utils/cn', '@/stores/useAuthStore', '@/stores/useDataStore', '@/stores/useAppStore',
       '@/stores/useCalendarStore', '@/types', '@/types/calendar', '@/utils/calendarDate', '@/utils/glassStyles',
@@ -1902,6 +1919,7 @@ async function loadEventCreateModal(): Promise<EventCreateModalComponent> {
     };
     const evaluate = new Function('require', 'module', 'exports', result.outputFiles[0].text);
     evaluate((id: string) => {
+      if (id === '@/components/common/GlassDropdown') return {GlassDropdown:(props:{value:string;ariaLabel?:string;disabled?:boolean;options:Array<{value:string;label:string;disabled?:boolean}>;onChange(value:string):void})=>jsxRuntime.jsx('select',{'aria-label':props.ariaLabel,value:props.value,disabled:props.disabled,onChange:(event:{target:{value:string}})=>props.onChange(event.target.value),children:props.options.map(option=>jsxRuntime.jsx('option',{value:option.value,disabled:option.disabled,children:option.label},option.value))})};
       if (id === 'react') {
         return {
           ...react,

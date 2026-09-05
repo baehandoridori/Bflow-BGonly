@@ -22,6 +22,7 @@ type CalendarEvent = {
   calendarId?: string;
   source?: 'bflow' | 'google' | 'vacation';
   sourceCalendarId?: string;
+  linkedGanttTaskKind?: 'task' | 'group' | 'milestone';
 };
 
 type WeekTimeGridModule = {
@@ -361,6 +362,23 @@ function event(overrides: Partial<CalendarEvent>): CalendarEvent {
   };
 }
 
+test('WeekTimeGridView: zero-duration Gantt milestones remain single-time markers at band boundaries', async () => {
+  const module=await loadWeekTimeGridView();
+  for(const time of ['09:00','19:00','23:59']){
+    const milestone=event({id:`gantt:p:${time}`,title:'마감 지점',linkedGanttTaskKind:'milestone',startDate:'2026-08-25',endDate:'2026-08-25',startTime:time,endTime:time});
+    const clicked:CalendarEvent[]=[];
+    const h=renderInteractiveWeekTimeGrid(module,{weekDays:Array.from({length:7},(_,i)=>new Date(2026,7,23+i,12)),events:[milestone],today:'2026-08-23',onEventClick:e=>clicked.push(e),onSlotClick(){},tagNameById:{},calendarNameById:{},activeWeekIndex:0,weekCount:4,onWeekChange(){}});
+    try {
+      const markers=findWeekElements(h.tree,e=>e.props['data-time-grid-milestone']==='true');assert.equal(markers.length,1);
+      const marker=markers[0];assert.equal(marker.props['aria-label'],`마감 지점, 2026-08-25 ${time} 마일스톤`);
+      assert.ok((marker.props.style as {height:number}).height<=18,'the marker does not claim a one-hour duration');
+      assert.equal(findWeekElements(marker,e=>e.props['data-time-grid-resize-affordance']==='true').length,0);
+      (marker.props.onClick as (event:unknown)=>void)({stopPropagation(){}});
+      assert.equal(clicked[0],milestone);assert.equal(milestone.startTime,milestone.endTime,'opening the marker retains the canonical zero duration');
+    } finally {h.restore();}
+  }
+});
+
 test('WeekTimeGridView: 종일과 날짜를 넘는 일정은 종일 레인으로, 당일 시간 일정만 시간 그리드로 분리한다', async () => {
   const { splitWeekTimeGridEvents } = await loadWeekTimeGridView();
   const groups = splitWeekTimeGridEvents([
@@ -537,15 +555,15 @@ test('WeekTimeGridView: 현재 시각선은 56px 시간 눈금 기준 위치와 
   assert.equal(getCurrentTimeMarker(1140, 1140, 1440, 2)?.label, '19:00', '19:00은 저녁 밴드에만 표시한다');
 });
 
-test('WeekTimeGridView: 시간 블록은 D10 색조와 왼쪽 경계·시간 라벨을 원본 색으로 그린다', async () => {
+test('WeekTimeGridView: 시간 블록은 테마 카드와 읽을 수 있는 글자색을 사용하고 원본 색 경계를 유지한다', async () => {
   const { getTimedBlockVisualStyle } = await loadWeekTimeGridView();
 
   assert.deepEqual(getTimedBlockVisualStyle('#6C5CE7'), {
-    background: 'rgb(41, 40, 74)',
+    background: 'color-mix(in srgb, #6C5CE7 18%, rgb(var(--color-bg-card)))',
     borderLeft: '3px solid #6C5CE7',
-    titleColor: '#E8E8EE',
+    titleColor: 'rgb(var(--color-text-primary))',
     titleFontSize: 11,
-    timeColor: '#6C5CE7',
+    timeColor: 'rgb(var(--color-text-primary))',
   });
 });
 
@@ -558,7 +576,7 @@ test('WeekTimeGridView: 현재 블록만 원본색 1px 윤곽과 강한 그림�
     outlineOffset: 1,
     boxShadow: '0 0 16px rgba(108,92,231,0.75)',
   });
-  assert.equal(getTimedBlockOpacity(true), 0.5);
+  assert.equal(getTimedBlockOpacity(true), 0.72);
   assert.equal(getTimedBlockOpacity(false), 1);
 });
 
@@ -682,9 +700,9 @@ test('WeekTimeGridView: weekend-today accent를 보존하는 주말 tint와 종�
   })));
 
   assert.deepEqual(module.getAllDayBarStyle('#6C5CE7'), {
-    background: 'rgb(41, 40, 74)',
+    background: 'color-mix(in srgb, #6C5CE7 18%, rgb(var(--color-bg-card)))',
     borderLeft: '3px solid #6C5CE7',
-    color: '#E8E8EE',
+    color: 'rgb(var(--color-text-primary))',
   });
   assert.deepEqual(module.getWeekendCellStyle(true), {
     backgroundImage: 'linear-gradient(rgba(116, 185, 255, 0.06), rgba(116, 185, 255, 0.06))',
@@ -697,11 +715,11 @@ test('WeekTimeGridView: weekend-today accent를 보존하는 주말 tint와 종�
   assert.match(markup, /class="relative border-r border-bg-border\/20 bg-accent\/\[0\.035\]" style="background-image:linear-gradient\(rgba\(116, 185, 255, 0.06\), rgba\(116, 185, 255, 0.06\)\)"/);
   assert.match(markup, /hover:bg-bg-border\/15/);
   assert.doesNotMatch(markup, /hover:bg-accent\/\[0.08\]/);
-  assert.match(markup, /background:rgb\(41, 40, 74\)/);
+  assert.match(markup, /background:color-mix\(in srgb, #6C5CE7 18%, rgb\(var\(--color-bg-card\)\)\)/);
   assert.match(collapsedMarkup, /▸ 새벽 시간대 · 오전 12시–오전 9시 · 접힘/);
 });
 
-test('WeekTimeGridView: 30분 이상 시간 블록은 원본색 시각을 제목보다 먼저 마크업에 둔다', async () => {
+test('WeekTimeGridView: 30분 이상 시간 블록은 시각을 제목보다 먼저 마크업에 둔다', async () => {
   const module = await loadWeekTimeGridView();
   const weekDays = Array.from({ length: 7 }, (_, index) => new Date(2026, 7, 23 + index, 12));
   const markup = renderToStaticMarkup(createElement(module.default, {

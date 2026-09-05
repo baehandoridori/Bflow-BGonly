@@ -119,6 +119,8 @@
   /* 시멘틱: 툴팁 */
   --color-tooltip-bg: 30 34 48;
   --color-tooltip-text: 255 255 255;
+  --color-calendar-sunday: 225 112 85;
+  --color-calendar-saturday: 116 185 255;
   /* 시멘틱: 글래스모피즘 */
   --color-glass-tint: 16 18 28;
   --glass-tint-alpha: 0.28;
@@ -180,6 +182,8 @@
   --overlay-alpha: 0.3;
   --color-tooltip-bg: 255 255 255;
   --color-tooltip-text: 30 35 50;
+  --color-calendar-sunday: 164 60 42;
+  --color-calendar-saturday: 45 99 163;
   --color-glass-tint: 255 255 255;
   --glass-tint-alpha: 0.8;
   --color-glass-highlight: 0 0 0;

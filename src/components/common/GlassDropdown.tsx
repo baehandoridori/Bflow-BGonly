@@ -1,9 +1,10 @@
 import { useState, useEffect, useRef, useCallback, useId } from 'react';
 import { createPortal } from 'react-dom';
-import { motion, AnimatePresence } from 'framer-motion';
+import { motion, AnimatePresence, useReducedMotion } from 'framer-motion';
 import { Check, ChevronDown } from 'lucide-react';
 import { cn } from '@/utils/cn';
 import { CompactIconLabel } from '@/components/common/CompactIconLabel';
+import { floatingGlassStyle } from '@/utils/glassStyles';
 
 export interface GlassDropdownOption<T extends string | number = string> {
   value: T;
@@ -27,6 +28,7 @@ interface GlassDropdownProps<T extends string | number = string> {
   minWidth?: number;
   disabled?: boolean;
   portal?: boolean;
+  portalOwner?: string;
 }
 
 export function GlassDropdown<T extends string | number = string>({
@@ -42,7 +44,9 @@ export function GlassDropdown<T extends string | number = string>({
   minWidth = 160,
   disabled = false,
   portal = false,
+  portalOwner,
 }: GlassDropdownProps<T>) {
+  const reduceMotion = useReducedMotion();
   const [open, setOpen] = useState(false);
   const [focusIdx, setFocusIdx] = useState(-1);
   const [openUpward, setOpenUpward] = useState(false);
@@ -97,6 +101,7 @@ export function GlassDropdown<T extends string | number = string>({
         e.preventDefault();e.stopPropagation();
         onChange(allItems[focusIdx].value);
         close();
+        triggerRef.current?.focus({preventScroll: true});
       } else if (e.key === 'Escape') {
         e.preventDefault();e.stopPropagation();close();triggerRef.current?.focus();
       } else if (e.key === 'Tab') {
@@ -181,7 +186,7 @@ export function GlassDropdown<T extends string | number = string>({
         <ChevronDown
           size={14}
           className={cn(
-            'shrink-0 text-text-secondary transition-transform duration-200',
+            'shrink-0 text-text-secondary transition-transform duration-200 motion-reduce:transition-none',
             open && 'rotate-180',
           )}
         />
@@ -191,18 +196,18 @@ export function GlassDropdown<T extends string | number = string>({
       {(() => {const menu = <AnimatePresence>
         {open && (
           <motion.div
-            initial={{
+            initial={reduceMotion ? false : {
               opacity: 0,
               y: openUpward ? 8 : -8,
               scale: 0.96,
             }}
             animate={{ opacity: 1, y: 0, scale: 1 }}
-            exit={{
+            exit={reduceMotion ? {opacity: 0} : {
               opacity: 0,
               y: openUpward ? 8 : -8,
               scale: 0.96,
             }}
-            transition={{ duration: 0.15 }}
+            transition={{ duration: reduceMotion ? 0 : 0.15 }}
             className={cn(
               portal ? 'fixed z-[1000]' : 'absolute left-0 z-[80]',
               !portal && (openUpward ? 'bottom-full mb-2' : 'top-full mt-2'),
@@ -213,19 +218,16 @@ export function GlassDropdown<T extends string | number = string>({
               ref={listRef}
               id={menuId}
               role="listbox"
+              data-dropdown-owner={portalOwner}
               aria-label={label || selectedLabel}
               className="rounded-xl overflow-hidden py-1.5 max-h-[320px] overflow-y-auto"
               style={{
+                ...floatingGlassStyle,
                 maxHeight: placement.maxHeight,
-                backgroundColor: 'rgb(var(--color-bg-card) / 0.92)',
-                border: '1px solid rgb(var(--color-bg-border) / 0.6)',
-                boxShadow:
-                  '0 12px 32px rgb(var(--color-shadow) / var(--shadow-alpha)), 0 0 0 1px rgb(var(--color-glass-highlight) / var(--glass-highlight-alpha)) inset',
-                backdropFilter: 'blur(12px)',
               }}
             >
               {label && (
-                <div className="px-3 py-1.5 text-[11px] font-medium text-text-secondary/50 uppercase tracking-wider">
+                <div className="px-3 py-1.5 text-[11px] font-medium text-text-secondary">
                   {label}
                 </div>
               )}
@@ -248,6 +250,7 @@ export function GlassDropdown<T extends string | number = string>({
                         if (disabled || fullOpt.disabled) return;
                         onChange(opt.value);
                         close();
+                        triggerRef.current?.focus({preventScroll: true});
                       }}
                       onMouseEnter={() => {if (!fullOpt.disabled) setFocusIdx(idx);}}
                       onContextMenu={
@@ -264,7 +267,7 @@ export function GlassDropdown<T extends string | number = string>({
                         fullOpt.disabled && 'opacity-40 cursor-default',
                         isFocused
                           ? 'bg-accent/12 text-text-primary'
-                          : 'text-text-primary/80 hover:bg-accent/8',
+                          : 'text-text-primary hover:bg-accent/8',
                       )}
                     >
                       {fullOpt.icon && (
@@ -274,7 +277,7 @@ export function GlassDropdown<T extends string | number = string>({
                       )}
                       <span className="flex-1 truncate">{opt.label}</span>
                       {fullOpt.sublabel && (
-                        <span className="text-xs text-text-secondary/60">
+                        <span className="text-xs text-text-secondary">
                           {fullOpt.sublabel}
                         </span>
                       )}

@@ -1,3 +1,4 @@
+import { glassDropdownTestModule, resolveGlassDropdown } from './helpers/glassDropdown.ts';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
@@ -516,6 +517,7 @@ let tagManagerEffectDeps: unknown[][] = [];
 let tagManagerEffectCleanup: (() => void) | undefined;
 
 function resolveComponents(node: ReactNode): ReactNode {
+  node = resolveGlassDropdown(node);
   if (Array.isArray(node)) return node.map(resolveComponents);
   if (!isValidElement(node)) return node;
   if (typeof node.type === 'function') {
@@ -943,7 +945,7 @@ async function loadRail(): Promise<CalendarRailComponent> {
     platform: 'node',
     target: 'node22',
     write: false,
-    external: [
+    external: ['@/components/common/GlassDropdown',
       'react',
       'react/jsx-runtime',
       'lucide-react',
@@ -1023,7 +1025,7 @@ async function loadTagBar(): Promise<TagBarComponent> {
     platform: 'node',
     target: 'node22',
     write: false,
-    external: [
+    external: ['@/components/common/GlassDropdown',
       'react', 'react/jsx-runtime', 'framer-motion', 'lucide-react',
       '@/hooks/useMotionPref', '@/stores/useCalendarStore',
     ],
@@ -1056,7 +1058,7 @@ async function loadTagManagerPopover(): Promise<TagManagerPopoverComponent> {
     platform: 'node',
     target: 'node22',
     write: false,
-    external: [
+    external: ['@/components/common/GlassDropdown',
       'react', 'react/jsx-runtime', 'react-dom', 'lucide-react', 'sonner',
       '@/components/common/ConfirmDialog', '@/stores/useAuthStore', '@/stores/useCalendarStore',
       '@/services/calendarService',
@@ -1217,6 +1219,7 @@ async function loadTagManagerPopover(): Promise<TagManagerPopoverComponent> {
           ],
         };
       }
+      if (id === '@/components/common/GlassDropdown') return glassDropdownTestModule;
       if (id === '@/utils/glassStyles') return { floatingGlassStyle: {} };
       return nodeRequire(id);
     }, module, module.exports);
@@ -1281,7 +1284,7 @@ async function loadScheduleView(): Promise<ScheduleViewComponent> {
         }));
       },
     }],
-    external: [
+    external: ['@/components/common/GlassDropdown',
       'react', 'react/jsx-runtime', 'framer-motion', 'lucide-react',
       '@/utils/cn', '@/stores/useDataStore', '@/stores/useAppStore', '@/services/calendarService',
       '@/services/vacationService', '@/hooks/useCalendarDnD', '@/utils/vacationEvents',
@@ -1607,7 +1610,7 @@ async function loadShortcutHelpOverlay(): Promise<ShortcutHelpOverlayComponent> 
     platform: 'node',
     target: 'node22',
     write: false,
-    external: ['react', 'react/jsx-runtime', '@/utils/cn', '@/hooks/useMotionPref'],
+    external: ['@/components/common/GlassDropdown', 'react', 'react/jsx-runtime', '@/utils/cn', '@/hooks/useMotionPref'],
   }).then((result) => {
     const module = { exports: {} as Record<string, unknown> };
     const nodeRequire = createRequire(import.meta.url);
@@ -1647,7 +1650,7 @@ async function loadCalendarGrid(): Promise<CalendarGridComponent> {
     platform: 'node',
     target: 'node22',
     write: false,
-    external: [
+    external: ['@/components/common/GlassDropdown',
       'react', 'react/jsx-runtime', 'react-dom', 'framer-motion', 'lucide-react',
       '@/utils/cn',
     ],
@@ -1705,7 +1708,7 @@ async function loadEventSidePanel(): Promise<EventSidePanelComponent> {
     platform: 'node',
     target: 'node22',
     write: false,
-    external: [
+    external: ['@/components/common/GlassDropdown',
       'react', 'react/jsx-runtime', 'framer-motion', 'lucide-react',
       '@/stores/useDataStore', '@/stores/useAppStore', '@/stores/useAuthStore',
       '@/stores/useCalendarStore', '@/components/common/EntityAwareInput',
@@ -1771,6 +1774,7 @@ async function loadEventSidePanel(): Promise<EventSidePanelComponent> {
       }
       if (id === '@/types') return { DEPARTMENT_CONFIGS: {} };
       if (id === '@/types/calendar') return { EVENT_COLORS: ['#6C5CE7'] };
+      if (id === '@/components/common/GlassDropdown') return glassDropdownTestModule;
       if (id === '@/utils/glassStyles') return { floatingGlassStyle: {} };
       if (id === '@/utils/calendarDate') return { parseDate: (date: string) => new Date(`${date}T12:00:00`) };
       return nodeRequire(id);
@@ -1788,7 +1792,7 @@ async function loadEventCreateModal(): Promise<EventCreateModalComponent> {
     platform: 'node',
     target: 'node22',
     write: false,
-    external: [
+    external: ['@/components/common/GlassDropdown',
       'react', 'react/jsx-runtime', 'framer-motion', 'lucide-react',
       '@/utils/cn', '@/stores/useAuthStore', '@/stores/useDataStore', '@/stores/useAppStore',
       '@/stores/useCalendarStore', '@/types', '@/types/calendar', '@/utils/calendarDate', '@/utils/glassStyles',
@@ -1855,6 +1859,7 @@ async function loadEventCreateModal(): Promise<EventCreateModalComponent> {
       if (id === '@/types') return { DEPARTMENT_CONFIGS: {} };
       if (id === '@/types/calendar') return { EVENT_COLORS: ['#6C5CE7'] };
       if (id === '@/utils/calendarDate') return { fmtDate: () => '2026-08-25' };
+      if (id === '@/components/common/GlassDropdown') return glassDropdownTestModule;
       if (id === '@/utils/glassStyles') return { floatingGlassStyle: {} };
       return nodeRequire(id);
     }, module, module.exports);
@@ -1871,7 +1876,7 @@ async function loadCalendarSettingsModal(): Promise<CalendarSettingsModalCompone
     platform: 'node',
     target: 'node22',
     write: false,
-    external: [
+    external: ['@/components/common/GlassDropdown',
       'react', 'react/jsx-runtime', 'framer-motion', 'lucide-react', 'sonner',
       '@/components/common/ConfirmDialog', '@/stores/useAuthStore', '@/stores/useCalendarStore',
       '@/services/calendarService',
@@ -2095,6 +2100,7 @@ async function loadCalendarSettingsModal(): Promise<CalendarSettingsModalCompone
       }
       if (id === '@/utils/avatarColor') return { avatarColor: () => '#6C5CE7' };
       if (id === '@/utils/cn') return { cn: (...values: string[]) => values.filter(Boolean).join(' ') };
+      if (id === '@/components/common/GlassDropdown') return glassDropdownTestModule;
       if (id === '@/utils/glassStyles') return { floatingGlassStyle: {} };
       return nodeRequire(id);
     }, module, module.exports);
@@ -2121,7 +2127,7 @@ async function loadWeekScrollView(): Promise<WeekScrollViewModule> {
     platform: 'node',
     target: 'node22',
     write: false,
-    external: [
+    external: ['@/components/common/GlassDropdown',
       'react', 'react/jsx-runtime', 'framer-motion', 'lucide-react',
       '@/stores/useCalendarStore', '@/hooks/useMotionPref',
     ],
@@ -2167,7 +2173,7 @@ async function loadDayScrollView(): Promise<DayScrollViewComponent> {
     platform: 'node',
     target: 'node22',
     write: false,
-    external: [
+    external: ['@/components/common/GlassDropdown',
       'react', 'react/jsx-runtime', 'framer-motion', 'lucide-react',
       '@/stores/useCalendarStore',
     ],
@@ -5935,6 +5941,24 @@ test('ScheduleView suppresses calendar shortcuts while a global modal is open', 
   assert.equal(scheduleWeekScrollProps.length, 0, 'a global dialog blocks view changes behind it');
   assert.equal(scheduleCreateModalProps.length, 0, 'a global dialog blocks create mode behind it');
   assert.throws(() => nodeByAriaLabel(tree, '캘린더 단축키'), /must be rendered/, 'a global dialog blocks shortcut help behind it');
+});
+
+test('ScheduleView preserves the browsed month and selected date when switching week, day and month views',async()=>{
+  resetHarness();scheduleLocalStorage.set('bflow_calendar_view_v1',JSON.stringify({viewMode:'month',weekSubMode:'timegrid'}));
+  let tree=await renderScheduleView();
+  buttonByLabel(tree,'다음 기간').props.onClick?.({stopPropagation(){}});tree=await renderScheduleView();
+  const now=new Date(),target=new Date(now.getFullYear(),now.getMonth()+1,1,12),targetStr=scheduleFmtDate(target);
+  const weekButton=findButtons(tree).find(button=>button.key==='week');assert.ok(weekButton);
+  weekButton.props.onClick?.();tree=await renderScheduleView();
+  assert.ok(scheduleTimeGridProps.at(-1)?.weekDays.some(date=>scheduleFmtDate(date)===targetStr),'switching to week must show the browsed month rather than the stale current-week index');
+  const dayButton=findButtons(tree).find(button=>button.key==='today');assert.ok(dayButton);
+  dayButton.props.onClick?.();tree=await renderScheduleView();
+  const day=scheduleDayScrollProps.at(-1)!;
+  assert.equal(scheduleFmtDate(new Date(day.year,0,day.activeDayIndex+1,12)),targetStr,'daily mode retains the anchor of the selected week');
+  const monthButton=findButtons(tree).find(button=>button.key==='month');assert.ok(monthButton);
+  monthButton.props.onClick?.();tree=await renderScheduleView();
+  assert.equal(scheduleGridProps.at(-1)?.focusedDate,targetStr,'returning to month keeps the selected date');
+  assert.match(textContent(tree),new RegExp(`${target.getFullYear()}년 ${target.getMonth()+1}월`));
 });
 
 test('ScheduleView carries weekly and daily navigation across a calendar-year boundary', async (t) => {
