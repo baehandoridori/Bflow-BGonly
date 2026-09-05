@@ -23,6 +23,12 @@ export function AddCharacterModal({
   const [saving, setSaving] = useState(false);
   const dialogRef = useRef<HTMLDivElement>(null);
   const modalFocus = useModalFocus(dialogRef, { autoFocus: false });
+  // 이 창이 아직 떠 있는지 — 비동기 작업이 끝난 뒤 화면을 옮겨도 되는지 판단하는 데 쓴다.
+  const openRef = useRef(true);
+  useEffect(() => {
+    openRef.current = true;
+    return () => { openRef.current = false; };
+  }, []);
   // 피드백 55: 같은 이름(공백·대소문자 무시)의 활성 카드가 있으면 추가를 막고 그 카드로 보낸다.
   //   보관된 카드와만 겹치면 막지 않고 '복원해서 열기'를 함께 제안한다. (예전 GAP-D 는 경고만 하고 추가를 허용했다.)
   const duplicate = useMemo(() => findDuplicateCharacters(characters, name), [characters, name]);
@@ -51,6 +57,8 @@ export function AddCharacterModal({
     setSaving(true);
     await restoreCharacter(character.id);
     setSaving(false);
+    // 복원을 기다리는 사이 사용자가 창을 닫았으면(취소·Escape·바깥 클릭) 화면을 마음대로 옮기지 않는다.
+    if (!openRef.current) return;
     const latest = useCharacterBoardStore.getState().characters.find((c) => c.id === character.id);
     if (!latest || latest.status === 'archived') return;
     openExisting(latest);
@@ -82,7 +90,8 @@ export function AddCharacterModal({
           <span className="text-xs text-text-secondary">이름</span>
           <input autoFocus value={name} onChange={(e) => setName(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') submit(); }} placeholder="캐릭터 이름 (비워도 돼요)" className="bg-transparent border border-bg-border rounded-md px-3 py-2 text-text-primary outline-none focus:border-accent/50" />
           {blockingDuplicate ? (
-            <div className="flex flex-wrap items-center gap-2 text-[11px]" style={{ color: 'rgb(var(--char-stage-feedback))' }}>
+            /* '추가' 를 잠그는 사유이므로 화면을 눈으로 보지 않는 사용자에게도 읽히도록 alert 로 알린다(저장소의 다른 차단성 검증과 같은 방식). */
+            <div role="alert" className="flex flex-wrap items-center gap-2 text-[11px]" style={{ color: 'rgb(var(--char-stage-feedback))' }}>
               <span>{`'${blockingDuplicate.name}' 캐릭터가 이미 있어요 — 같은 이름으로는 추가할 수 없어요.`}</span>
               {onOpenExisting && (
                 <button

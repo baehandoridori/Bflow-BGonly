@@ -323,9 +323,14 @@ function CharacterDetailPanel({
   };
   const fitEditorImage = fitEditorCostumeId ? primaryImageOf(fitEditorCostumeId) : null;
 
+  // 피드백 57-2: 사용자가 방금 [지우기]로 끊은 작업 폴더를, 뒤이은 작업 파일 지정이 자동 유추로 되살리지 않게 한다.
+  //   캐릭터를 바꾸면 자연히 무효가 되도록 "언제" 가 아니라 "어느 캐릭터에서 지웠는지" 를 담는다.
+  const clearedFolderCharacterIdRef = useRef<string | null>(null);
+
   const handlePickFolder = useCallback(async () => {
     const folder = await chooseWorkFolder();
     if (!folder) return;
+    clearedFolderCharacterIdRef.current = null;
     await updateCharacterFolder(character.id, folder);
   }, [character.id, updateCharacterFolder]);
 
@@ -337,13 +342,17 @@ function CharacterDetailPanel({
     });
     if (!ok) return;
     const saved = await updateCharacterFolder(character.id, null);
-    if (saved) toast.success('작업 폴더 연결을 지웠어요');
+    if (saved) {
+      clearedFolderCharacterIdRef.current = character.id;
+      toast.success('작업 폴더 연결을 지웠어요');
+    }
   }, [character.id, character.name, updateCharacterFolder]);
 
   const handleCreateFolder = useCallback(async () => {
     if (creatingFolder) return;
     setCreatingFolder(true);
     try {
+      clearedFolderCharacterIdRef.current = null;
       await createAndLinkCharacterFolder(character, updateCharacterFolder);
     } finally {
       setCreatingFolder(false);
@@ -365,7 +374,8 @@ function CharacterDetailPanel({
     const saved = await updateCostumeField(targetCostume.id, { workFilePath: filePath });
     if (!saved) return;
     const latestFolderPath = useCharacterBoardStore.getState().characters.find((item) => item.id === character.id)?.workFolderPath ?? character.workFolderPath;
-    if (!latestFolderPath?.trim()) {
+    // 방금 [지우기]로 끊은 캐릭터면 자동 유추를 건너뛴다 — 사용자가 일부러 없앤 연결을 조용히 되살리면 안 된다.
+    if (!latestFolderPath?.trim() && clearedFolderCharacterIdRef.current !== character.id) {
       const folder = await resolveFolderAfterCharacterFilePick(latestFolderPath, filePath);
       if (folder) await updateCharacterFolder(character.id, folder);
     }

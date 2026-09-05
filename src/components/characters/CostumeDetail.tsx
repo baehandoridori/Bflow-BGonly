@@ -44,9 +44,11 @@ function PathActionRow({
   creating?: boolean;
 }) {
   return (
-    <div className="flex items-center justify-between gap-3 rounded-lg border border-bg-border/70 bg-bg-border/10 px-3 py-2">
-      <div className="min-w-0">
-        <div className="text-xs text-text-secondary">{label}</div>
+    /* 피드백 57-2·3 으로 버튼이 늘고 라벨이 길어져, 2단 배치의 좁은 칸에서는 경로 이름이 거의 안 보였다.
+       한 줄에 다 못 들어가면 버튼 줄을 아래로 내려 경로 이름이 항상 읽히게 한다. */
+    <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2 rounded-lg border border-bg-border/70 bg-bg-border/10 px-3 py-2">
+      <div className="min-w-0 flex-1 basis-28">
+        <div className="text-xs text-text-secondary whitespace-nowrap">{label}</div>
         <div className="text-sm text-text-primary truncate" title={path ? displayCharacterPathName(path) : undefined}>{displayCharacterPathName(path)}</div>
       </div>
       <div className="flex items-center gap-1.5 shrink-0">
