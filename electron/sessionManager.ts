@@ -13,7 +13,18 @@ export interface RememberedAuthSession {
   userId: string;
   userName: string;
   loggedInAt: string;
+  /**
+   * 서버(app_login)가 발급한 로그인 세션 토큰. main 프로세스 메모리와 auth.json 에만 존재하며,
+   * renderer 로 나가는 payload 에는 절대 포함하지 않는다(publish 가 벗겨낸다).
+   * 서버 로그인 없이 로컬 저장소로만 대조한 세션은 null 이다.
+   */
+  sessionToken?: string | null;
 }
+
+export type RemoteLoginResult =
+  | { status: 'ok'; token: string; user: SessionUserRecord }
+  | { status: 'rejected'; error: string }
+  | { status: 'unavailable'; error?: string };
 
 export interface CanonicalSessionPayload {
   user: SanitizedSessionUser | null;
@@ -35,6 +46,13 @@ export interface SessionUserDirectoryResult {
 
 export interface SessionManagerDependencies {
   readUsers(): Promise<SessionUserDirectoryResult>;
+  /**
+   * 서버 로그인(app_login RPC). 비밀번호 대조와 세션 토큰 발급을 서버가 담당한다.
+   * 없거나 'unavailable' 이면(오프라인·함수 미적용) 비밀번호를 가진 디렉터리(로컬 저장소)로만 대조한다.
+   */
+  remoteLogin?(name: string, password: string): Promise<RemoteLoginResult>;
+  /** 세션 토큰 폐기(app_logout RPC). 실패해도 로그아웃은 진행한다(서버 쪽은 만료로 정리). */
+  remoteLogout?(token: string): Promise<void>;
   readRememberedSession(): Promise<RememberedAuthSession | null>;
   writeRememberedSession(session: RememberedAuthSession | null): Promise<void>;
   drainPersonalDataQueue(userId: string): Promise<void>;
@@ -62,6 +80,13 @@ function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
+/** renderer 에 보이는 세션: 토큰을 뺀 나머지. */
+function publicSession(session: RememberedAuthSession | null): RememberedAuthSession | null {
+  if (!session) return null;
+  const { sessionToken: _token, ...visible } = session;
+  return visible;
+}
+
 /**
  * The only authority for the personal-data owner. Login input contains a
  * password, but every stored/broadcast payload is sanitized before leaving the
@@ -69,10 +94,68 @@ function errorMessage(error: unknown): string {
  */
 export class SessionManager {
   private payload: CanonicalSessionPayload = { user: null, session: null, epoch: 0 };
+  /** 서버 세션 토큰. payload 와 분리해 두어 어떤 broadcast/IPC 응답에도 섞이지 않는다. */
+  private sessionToken: string | null = null;
   private transitionTail: Promise<void> = Promise.resolve();
   private readonly dependencies: SessionManagerDependencies;
 
   constructor(dependencies: SessionManagerDependencies) { this.dependencies = dependencies; }
+
+  /** main 프로세스 전용. renderer 로 나가는 어떤 payload 에도 넣지 않는다. */
+  getSessionToken(): string | null {
+    return this.sessionToken;
+  }
+
+  /** canonical 사용자와 일치할 때만 토큰을 준다. 토큰이 없거나(로컬 대조 세션) 다른 사용자면 재로그인 오류. */
+  getSessionTokenFor(userId: string): string {
+    if (!this.sessionToken || this.getCanonicalUserId() !== userId) {
+      throw new Error('로그인 세션이 필요합니다. 다시 로그인해 주세요.');
+    }
+    return this.sessionToken;
+  }
+
+  private setSessionToken(next: string | null): void {
+    const previous = this.sessionToken;
+    this.sessionToken = next;
+    if (previous && previous !== next) this.revokeRemoteToken(previous);
+  }
+
+  private revokeRemoteToken(token: string): void {
+    const revoke = this.dependencies.remoteLogout;
+    if (!revoke) return;
+    void revoke(token).catch((error) => {
+      console.warn('[auth] 서버 세션 폐기 실패 (만료로 정리됩니다):', errorMessage(error));
+    });
+  }
+
+  /**
+   * 서버 로그인이 우선이다. 서버가 거절하면 그대로 실패하고, 서버에 닿을 수 없을 때만
+   * 비밀번호를 가진 디렉터리(로컬 사용자 저장소)로 대조한다. Supabase 디렉터리는 비밀번호를
+   * 돌려주지 않으므로 이 경로에서는 절대 통과할 수 없다.
+   */
+  private async verifyCredentials(
+    name: string,
+    password: string,
+  ): Promise<{ ok: true; user: SessionUserRecord; token: string | null } | { ok: false; error: string }> {
+    const remote = this.dependencies.remoteLogin
+      ? await this.dependencies.remoteLogin(name, password)
+      : { status: 'unavailable' as const };
+    if (remote.status === 'rejected') return { ok: false, error: remote.error };
+    if (remote.status === 'ok') return { ok: true, user: remote.user, token: remote.token };
+    const { users } = await this.dependencies.readUsers();
+    const user = users.find((candidate) => candidate.name === name);
+    if (!user) return { ok: false, error: '등록되지 않은 사용자입니다.' };
+    if (typeof user.password !== 'string') {
+      return {
+        ok: false,
+        error: remote.error
+          ? `로그인 서버에 연결하지 못했습니다: ${remote.error}`
+          : '로그인 서버에 연결하지 못해 비밀번호를 확인할 수 없습니다. 잠시 후 다시 시도해 주세요.',
+      };
+    }
+    if (user.password !== password) return { ok: false, error: '비밀번호가 일치하지 않습니다.' };
+    return { ok: true, user, token: null };
+  }
 
   getCurrentPayload(): CanonicalSessionPayload {
     return {
@@ -152,7 +235,7 @@ export class SessionManager {
     const nextUser = user ? sanitizeSessionUser(user) : null;
     const nextId = nextUser?.id ?? null;
     const nextEpoch = previousId === nextId ? this.payload.epoch : this.payload.epoch + 1;
-    this.payload = { user: nextUser, session, epoch: nextEpoch };
+    this.payload = { user: nextUser, session: publicSession(session), epoch: nextEpoch };
     this.dependencies.setActivityUser(nextUser ? { id: nextUser.id, name: nextUser.name } : null);
     this.dependencies.broadcast(this.getCurrentPayload());
     return this.getCurrentPayload();
@@ -161,21 +244,20 @@ export class SessionManager {
   login(input: { name: string; password: string; rememberMe?: boolean }): Promise<SessionActionResult> {
     return this.serialize(async () => {
       try {
-        const { users } = await this.dependencies.readUsers();
-        const user = users.find((candidate) => candidate.name === input.name);
-        if (!user) return { ok: false, payload: this.getCurrentPayload(), error: '등록되지 않은 사용자입니다.' };
-        if (user.password !== input.password) {
-          return { ok: false, payload: this.getCurrentPayload(), error: '비밀번호가 일치하지 않습니다.' };
-        }
+        const verified = await this.verifyCredentials(input.name, input.password);
+        if (verified.ok === false) return { ok: false, payload: this.getCurrentPayload(), error: verified.error };
+        const { user, token } = verified;
         const transition = await this.prepareTransition(user.id);
         const session: RememberedAuthSession = {
           userId: user.id,
           userName: user.name,
           loggedInAt: new Date().toISOString(),
+          sessionToken: token,
         };
         let published = false;
         try {
           await this.dependencies.writeRememberedSession(input.rememberMe === false ? null : session);
+          this.setSessionToken(token);
           const payload = this.publish(user, session);
           published = true;
           return { ok: true, payload };
@@ -200,10 +282,12 @@ export class SessionManager {
         if (!user) {
           if (directory.status === 'authoritative') {
             await this.dependencies.writeRememberedSession(null);
+            if (remembered.sessionToken) this.revokeRemoteToken(remembered.sessionToken);
             return { ok: false, payload: this.getCurrentPayload(), error: '저장된 사용자를 찾을 수 없습니다.' };
           }
           return { ok: false, payload: this.getCurrentPayload(), error: '사용자 정보를 일시적으로 확인할 수 없습니다.' };
         }
+        this.setSessionToken(remembered.sessionToken ?? null);
         return { ok: true, payload: this.publish(user, remembered) };
       } catch (error) {
         return { ok: false, payload: this.getCurrentPayload(), error: errorMessage(error) };
@@ -225,6 +309,7 @@ export class SessionManager {
           await this.dependencies.writeRememberedSession(null);
           const payload = this.publish(null, null);
           published = true;
+          this.setSessionToken(null);
           return { ok: true, payload };
         } finally {
           this.finishTransition(transition, published);
@@ -253,6 +338,7 @@ export class SessionManager {
             await this.dependencies.writeRememberedSession(null);
             const payload = this.publish(null, null);
             published = true;
+            this.setSessionToken(null);
             return { ok: true, payload };
           } finally {
             this.finishTransition(transition, published);

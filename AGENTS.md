@@ -29,6 +29,14 @@ Supabase(PostgreSQL + Realtime)를 단일 진실의 원천(SSOT)으로 사용. G
 
 **동기화**: 체크박스 토글 → 로컬 즉시 반영(낙관적) → Supabase 저장 → 실패 시 롤백. 다른 사용자 변경은 Realtime WebSocket으로 수신.
 
+### 간트 데이터 경계 (v1.111.0)
+
+- 타임라인은 `src/features/gantt/GanttView.tsx`를 사용한다. `domain.ts`는 계층·선행 일정·기간·권한의 공용 계산이며, 프로젝트 하나의 작업을 revision CAS로 함께 저장한다.
+- 실제 앱은 preload → 세션 epoch를 확인하는 `ganttIpc.ts` → `ganttStore.ts` → `gantt_read/gantt_execute` RPC를 사용한다. 폴더와 프로젝트 정본은 `gantt_spaces`/`gantt_projects`이다.
+- 연결 캘린더 일정은 작업의 projection(`gantt:<projectId>:<taskId>`)이다. `calendar_events`에 별도 복제하지 않는다. UUID만 받는 기존 이벤트 RPC/알림 외래키로 이 ID를 보내지 않는다.
+- preview는 공용 명령·권한을 사용하되 localStorage를 Web Locks로 직렬화한다. 기존 캘린더 authority 전체를 덮어쓰지 않는다. Realtime/BroadcastChannel은 재조회 신호만 전송한다.
+- 새 설치에는 `DEVLOG/migrations/2026-09-05-gantt-workspaces.sql` 적용이 필요하다. 현재 앱의 main canonical actor + DB ACL 경계를 유지한다. SQL의 actor 인자가 Supabase Auth 본인 인증을 대체한다고 해석하지 않는다.
+
 ### 배플레이그라운드 v3 데이터 경계
 
 - **시세**: `shared/playgroundMarketModel.mjs`의 결정론 모델이 장 전체·업종·종목·이벤트 입력으로 로컬 계산한다. 실제 시장 API나 별도 시세 DB를 사용하지 않는다.

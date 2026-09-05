@@ -9,5 +9,5 @@
     "allowSyntheticDefaultImports": true,
     "resolveJsonModule": true
   },
-  "include": ["vite.config.ts", "electron", "src/shared"]
+  "include": ["vite.config.ts", "electron", "src/shared", "src/features/gantt/types.ts", "src/features/gantt/domain.ts"]
 }

@@ -132,7 +132,11 @@ export interface SupabaseUser {
   id: string;
   name: string;
   role: string;
-  password: string;
+  /**
+   * 비밀번호는 더 이상 조회하지 않는다(readUsers 는 반환하지 않음). 대조는 app_login RPC 가 서버에서 수행한다.
+   * 사용자 생성 입력에서만 쓰인다.
+   */
+  password?: string;
   slackId: string;
   hireDate: string;
   birthday: string;
@@ -1252,17 +1256,29 @@ export async function updateSceneField(
 // ═══════════════════════════════════════════════
 
 /** 모든 사용자 읽기 */
+/**
+ * 사용자 디렉터리. 비밀번호 컬럼은 읽지 않는다 — 명시 컬럼 목록이어야 하는 이유는
+ * 2026-09-06-users-password-lockdown.sql 이 password 컬럼 권한을 회수하면 `select *` 가 통째로 실패하기 때문이다.
+ */
+export const USER_DIRECTORY_COLUMNS =
+  'id, name, role, slack_id, hire_date, birthday, is_initial_password, created_at, is_compositor, is_acting_supervisor';
+
 export async function readUsers(): Promise<SupabaseUser[]> {
   const { data, error } = await supabase
     .from('users')
-    .select('*')
+    .select(USER_DIRECTORY_COLUMNS)
     .order('name');
   throwIfError(error);
-  return (data || []).map((u) => ({
+  return ((data || []) as Array<Record<string, unknown>>).map((row) => {
+    const u = row as {
+      id: string; name: string; role?: string | null; slack_id?: string | null; hire_date?: string | null;
+      birthday?: string | null; is_initial_password?: boolean | null; created_at?: string | null;
+      is_compositor?: boolean | null; is_acting_supervisor?: boolean | null;
+    };
+    return {
     id: u.id,
     name: u.name,
     role: u.role || 'user',
-    password: u.password || '',
     slackId: u.slack_id || '',
     hireDate: u.hire_date || '',
     birthday: u.birthday || '',
@@ -1272,7 +1288,59 @@ export async function readUsers(): Promise<SupabaseUser[]> {
     isCompositor: u.is_compositor === true,
     // v1.25.0~: 액팅 검수자 (컴포지터와 독립)
     isActingSupervisor: u.is_acting_supervisor === true,
-  }));
+    };
+  });
+}
+
+// ─── 로그인 세션 (app_login / app_logout / app_change_password) ───
+// 비밀번호 대조와 토큰 발급은 서버가 담당한다. 토큰은 main 프로세스 밖으로 나가지 않는다.
+
+export type AppLoginResult =
+  | { status: 'ok'; token: string; user: SupabaseUser }
+  | { status: 'rejected'; error: string };
+
+function isSessionRpcError(error: { code?: string } | null | undefined): boolean {
+  return error?.code === '42501';
+}
+
+/** 서버 로그인. 네트워크 오류·함수 미적용은 throw(호출자가 '서버 불가' 로 처리), 인증 실패는 rejected. */
+export async function loginSession(name: string, password: string): Promise<AppLoginResult> {
+  const { data, error } = await supabase.rpc('app_login', { p_name: name, p_password: password });
+  if (error) throw error;
+  const result = data as { ok?: unknown; error?: unknown; token?: unknown; user?: SupabaseUser | null } | null;
+  if (!result || typeof result.ok !== 'boolean') throw new Error('로그인 서버 응답이 올바르지 않습니다.');
+  if (!result.ok) {
+    return { status: 'rejected', error: typeof result.error === 'string' && result.error ? result.error : '로그인할 수 없습니다.' };
+  }
+  if (typeof result.token !== 'string' || !result.user || typeof result.user.id !== 'string') {
+    throw new Error('로그인 서버 응답이 올바르지 않습니다.');
+  }
+  return { status: 'ok', token: result.token, user: result.user };
+}
+
+export async function logoutSession(token: string): Promise<void> {
+  const { error } = await supabase.rpc('app_logout', { p_token: token });
+  if (error) throw error;
+}
+
+/** 세션 토큰으로 본인을 확인한 뒤 비밀번호를 바꾼다. 세션 만료(42501)는 ok:false 로 돌려준다. */
+export async function changeOwnPasswordWithSession(
+  token: string,
+  currentPassword: string,
+  newPassword: string,
+): Promise<{ ok: boolean; error?: string }> {
+  const { data, error } = await supabase.rpc('app_change_password', {
+    p_token: token, p_current: currentPassword, p_new: newPassword,
+  });
+  if (error) {
+    if (isSessionRpcError(error)) return { ok: false, error: error.message };
+    throw error;
+  }
+  const result = data as { ok?: unknown; error?: unknown } | null;
+  if (!result || typeof result.ok !== 'boolean') throw new Error('비밀번호 변경 응답이 올바르지 않습니다.');
+  if (!result.ok) return { ok: false, error: typeof result.error === 'string' ? result.error : '비밀번호를 변경하지 못했습니다.' };
+  broadcastDataChange('users', 'UPDATE');
+  return { ok: true };
 }
 
 /** 사용자 추가 */

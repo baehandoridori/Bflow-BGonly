@@ -366,7 +366,7 @@ async function emitCalendarEventNotifications(ctx: CalendarNotificationContext):
       actor_name: actor?.name ?? '알 수 없음',
       calendar_id: ctx.calendar.id,
       calendar_name: ctx.calendar.name,
-      event_id: event.id,
+      event_id: event.id.startsWith('gantt:') ? null : event.id,
       event_title: event.title,
       event_date: event.start_date,
       action: ctx.action,
@@ -753,7 +753,7 @@ export function registerCalendarIpc(deps: CalendarIpcDeps): CalendarNotification
 
   const replacementStillExists = async (target: PrivacyReplacementTarget): Promise<boolean> => {
     if (target.storage === 'bflow') {
-      return (await store.getEventByIdForWrite(target.actualId)) !== null;
+      return (await store.getEventByIdForWrite(target.actualId, target.actorId)) !== null;
     }
     if (target.storage === 'legacy-private') {
       return (await deps.getLegacyPrivateEventOwner(target.actualId)) !== null;
@@ -1201,7 +1201,7 @@ export function registerCalendarIpc(deps: CalendarIpcDeps): CalendarNotification
     updates: Parameters<typeof store.updateEvent>[1],
   ) => runNotificationMutation(async () => {
     const user = await sessionUser();
-    const previous = await store.getEventByIdForWrite(id);
+    const previous = await store.getEventByIdForWrite(id, user.id);
     if (!previous) throw new Error('일정을 찾을 수 없습니다');
     const { calendar, members } = await loadCalendarForUserOrThrow(previous.calendar_id, user.id);
     if (!canEditCalendarEvents(calendar, members, user.id)) {
@@ -1272,7 +1272,7 @@ export function registerCalendarIpc(deps: CalendarIpcDeps): CalendarNotification
     capturedActor?: CalendarActor,
   ): Promise<CalendarPrivacyMigrationSourceDeleteResult> => {
     const user = capturedActor ?? await sessionUser();
-    const previous = await store.getEventByIdForWrite(id);
+    const previous = await store.getEventByIdForWrite(id, user.id);
     if (!previous) return 'missing';
     const { calendar, members } = await loadCalendarForUserOrThrow(previous.calendar_id, user.id);
     if (!canEditCalendarEvents(calendar, members, user.id)) {
@@ -1290,7 +1290,7 @@ export function registerCalendarIpc(deps: CalendarIpcDeps): CalendarNotification
       // non-conflict error 뒤 사라졌다면 commit 여부가 불확실하므로 replacement를 유지한다.
       let latest: CalendarEventRow | null;
       try {
-        latest = await store.getEventByIdForWrite(id);
+        latest = await store.getEventByIdForWrite(id, user.id);
       } catch {
         return 'ambiguous';
       }

@@ -1049,6 +1049,9 @@ export interface SupabaseRealtimeStatusMetadata {
 }
 
 export interface ElectronAPI extends CalendarApiInputContract {
+  ganttRead: () => Promise<import('../features/gantt/types').GanttSnapshot>;
+  ganttExecute: (request: import('../features/gantt/types').GanttRequest) => Promise<import('../features/gantt/types').GanttSnapshot>;
+  onGanttChanged: (callback: () => void) => () => void;
   getDataPath: () => Promise<string>;
   shellShowItem?: (filePath: string) => Promise<{ ok: boolean; error?: string }>;
   shellOpenPath?: (targetPath: string) => Promise<{ ok: boolean; error?: string }>;
@@ -1456,6 +1459,9 @@ export interface ElectronAPI extends CalendarApiInputContract {
     params?: Parameters<CalendarApiInputContract['calendarEventsList']>[0]
   ) => Promise<Array<{
     id: string;
+    linked_gantt_project_id?: string;
+    linked_gantt_task_id?: string;
+    gantt_can_edit?: boolean;
     calendar_id: string;
     title: string;
     memo: string | null;

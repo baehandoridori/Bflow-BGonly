@@ -131,7 +131,7 @@ function toCalendarEventFromBflowRow(
   calendarsById: Map<string, BflowCalendar>,
 ): CalendarEvent {
   const calendar = calendarsById.get(row.calendar_id);
-  const canEdit = calendar?.canEdit ?? false;
+  const canEdit = (calendar?.canEdit ?? false) && row.gantt_can_edit !== false;
   const creator = row.created_by
     ? useAuthStore.getState().users.find((user) => user.id === row.created_by)
     : undefined;
@@ -159,6 +159,9 @@ function toCalendarEventFromBflowRow(
     linkedSceneId: row.linked_scene_id ?? undefined,
     linkedDepartment: (row.linked_department as 'bg' | 'acting' | undefined) ?? undefined,
     linkedTodoId: row.linked_todo_id ?? undefined,
+    linkedGanttProjectId: row.linked_gantt_project_id,
+    linkedGanttTaskId: row.linked_gantt_task_id,
+    ganttCanEdit: row.gantt_can_edit,
     sourceCalendarId: `${BFLOW_CAL_PREFIX}${row.calendar_id}`,
     calendarId: row.calendar_id,
     tagId: row.tag_id ?? undefined,
@@ -1656,7 +1659,7 @@ function bflowEventType(event: CalendarEvent): CalendarEventType {
 
 function withBflowCalendarPresentation(event: CalendarEvent, calendarId: string): CalendarEvent {
   const calendar = useCalendarStore.getState().calendars.find((item) => item.id === calendarId);
-  const canEdit = calendar?.canEdit ?? false;
+  const canEdit = (calendar?.canEdit ?? false) && event.ganttCanEdit !== false;
   return {
     ...event,
     color: calendar?.color ?? '#6C5CE7',
@@ -2381,6 +2384,11 @@ async function updateEventForToken(
   if (!isBflowMutationCurrent(requestToken)) return;
   if (!existing) return;
   const actualId = existing.id; // GCal ID (캐시에 저장된 실제 ID)
+
+  if (existing.linkedGanttTaskId && (
+    (updates.isPrivate !== undefined && updates.isPrivate !== existing.isPrivate)
+    || (updates.sourceCalendarId !== undefined && updates.sourceCalendarId !== existing.sourceCalendarId)
+  )) throw new Error('간트 연결 일정의 공개 범위는 타임라인의 캘린더 연결 설정에서 변경해 주세요.');
 
   // ── 저장소 이전(migration) 감지 ─────────────────────
   // 개인 B flow 캘린더와 구 private_calendar_events 는 모두 "나만 보기"의 실제 저장소다.

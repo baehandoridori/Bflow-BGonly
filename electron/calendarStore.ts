@@ -2,6 +2,7 @@
  * 권한 검증·broadcast 는 calendarIpc.ts 담당 — 여기는 순수 데이터 접근만.
  * 마이그레이션 전(테이블 부재) 안전: 읽기는 빈 결과 + console.warn, 쓰기는 throw. */
 import { supabase } from './supabase';
+import { isGanttCalendarEventId, listGanttCalendarEvents, updateGanttCalendarEvent, unlinkGanttCalendarEvent } from './ganttStore';
 import type { CalendarUpdateInput } from '../src/shared/calendarApiContract';
 import { normalizeCalendarNotificationCatchupInput } from '../src/shared/calendarNotificationCatchup';
 import type { CalendarNotificationCatchupInput } from '../src/shared/calendarNotificationCatchup';
@@ -50,6 +51,9 @@ export interface CalendarEventRow {
   created_by: string | null;
   created_at: string;
   updated_at: string;
+  linked_gantt_project_id?: string;
+  linked_gantt_task_id?: string;
+  gantt_can_edit?: boolean;
 }
 
 export interface CalendarNotificationRow {
@@ -272,7 +276,10 @@ export async function listEventsInRange(params: {
 
     const rows = (data ?? []) as CalendarEventRow[];
     all.push(...rows);
-    if (rows.length < pageSize) return all;
+    if (rows.length < pageSize) {
+      const linked = await listGanttCalendarEvents(params.actorId, { from: params.from, to: params.to });
+      return [...all, ...linked];
+    }
     offset += pageSize;
   }
 }
@@ -294,12 +301,17 @@ async function readEventById(id: string, missingTableIsEmpty: boolean): Promise<
 }
 
 /** 일반 조회는 마이그레이션 전 테이블 부재를 빈 결과로 취급한다. */
-export async function getEventById(id: string): Promise<CalendarEventRow | null> {
+export async function getEventById(id: string, actorId?: string): Promise<CalendarEventRow | null> {
+  if (isGanttCalendarEventId(id)) {
+    if (!actorId) throw new Error('간트 일정 조회에 로그인 세션이 필요합니다.');
+    return (await listGanttCalendarEvents(actorId, { eventId: id }))[0] ?? null;
+  }
   return readEventById(id, true);
 }
 
 /** 쓰기 전 권한/원본 확인은 테이블 부재를 성공으로 오인하면 안 되므로 오류를 그대로 올린다. */
-export async function getEventByIdForWrite(id: string): Promise<CalendarEventRow | null> {
+export async function getEventByIdForWrite(id: string, actorId?: string): Promise<CalendarEventRow | null> {
+  if (isGanttCalendarEventId(id)) return getEventById(id, actorId);
   return readEventById(id, false);
 }
 
@@ -340,6 +352,7 @@ export async function updateEvent(
   expectedCalendarId: string,
   actorId: string,
 ): Promise<CalendarEventRow> {
+  if (isGanttCalendarEventId(id)) return updateGanttCalendarEvent(actorId, id, updates, expectedCalendarId);
   const { data, error } = await supabase.rpc('update_calendar_event_authorized', {
     p_actor_id: actorId,
     p_event_id: id,
@@ -355,6 +368,7 @@ export async function deleteEvent(
   expectedCalendarId: string,
   actorId: string,
 ): Promise<void> {
+  if (isGanttCalendarEventId(id)) return unlinkGanttCalendarEvent(actorId, id, expectedCalendarId);
   const { data, error } = await supabase.rpc('delete_calendar_event_authorized', {
     p_actor_id: actorId,
     p_event_id: id,

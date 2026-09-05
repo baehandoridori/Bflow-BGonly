@@ -22,6 +22,8 @@ import { uploadImage as storageUploadImage, deleteImage as storageDeleteImage, u
 // v1.20.0: 사용자 폰트 IPC + bflow-font:// custom protocol
 import { registerFontProtocol, registerFontIpcHandlers } from './fontIpc';
 import { registerCalendarIpc, type CalendarNotificationDrain } from './calendarIpc';
+import { registerGanttIpc } from './ganttIpc';
+import { setGanttSessionTokenResolver } from './ganttStore';
 import {
   createIcsSubscriptionStore,
   createIcsTextFetcher,
@@ -1348,6 +1350,9 @@ import {
   bulkUpdateSceneFields as sbBulkUpdateSceneFields,
   updateSceneField as sbUpdateSceneField,
   readUsers as sbReadUsers,
+  loginSession as sbLoginSession,
+  logoutSession as sbLogoutSession,
+  changeOwnPasswordWithSession as sbChangeOwnPasswordWithSession,
   updateUser as sbUpdateUser,
   addUserAuthorized as sbAddUserAuthorized,
   updateUserAuthorized as sbUpdateUserAuthorized,
@@ -1771,6 +1776,21 @@ sessionManager = new SessionManager({
       status: fallbackUsers.length > 0 ? 'fallback' as const : 'remote-unavailable' as const,
     };
   },
+  // 비밀번호 대조와 세션 토큰 발급은 서버(app_login)가 한다. 서버에 닿지 못하면 'unavailable' 로
+  // 돌려 SessionManager 가 로컬 사용자 저장소(비밀번호 보유)로만 대조하게 한다.
+  remoteLogin: async (name, password) => {
+    try {
+      const result = await sbLoginSession(name, password);
+      if (result.status === 'ok') {
+        return { status: 'ok' as const, token: result.token, user: result.user as unknown as SessionUserRecord };
+      }
+      return result;
+    } catch (error) {
+      console.warn('[auth] 서버 로그인 확인 실패 — 로컬 사용자 저장소 확인:', error);
+      return { status: 'unavailable' as const, error: error instanceof Error ? error.message : String(error) };
+    }
+  },
+  remoteLogout: (token) => sbLogoutSession(token),
   readRememberedSession: async () => {
     try {
       const raw = await fs.promises.readFile(path.join(getDataPath(), 'auth.json'), { encoding: 'utf-8' });
@@ -2490,6 +2510,16 @@ function getSessionOriginOrThrow(): { userId: string; epoch: number; role: 'admi
     role: session.user?.role === 'admin' ? 'admin' : 'user',
   };
 }
+
+// 간트 RPC 는 actor id 대신 서버 세션 토큰을 받는다. canonical 사용자와 일치할 때만 토큰이 나간다.
+setGanttSessionTokenResolver({ tokenFor: (actorId) => sessionManager.getSessionTokenFor(actorId) });
+registerGanttIpc({
+  getSessionOriginOrThrow,
+  onChanged: () => {
+    broadcastToAllWindows('gantt:changed', {});
+    broadcastToAllWindows('calendar:changed', { action: 'UPDATE' });
+  },
+});
 
 registerLegacyPrivateEventIpc(ipcMain, {
   getSessionUserIdOrThrow,
@@ -3213,6 +3243,10 @@ function startSupabaseRealtime() {
     onEpisodeChange: (payload) => broadcastSupabaseEvent('episodes', payload),
     onPartChange: (payload) => broadcastSupabaseEvent('parts', payload),
     onCalendarChange: (table, payload) => broadcastSupabaseCalendarEvent(table, payload),
+    onGanttChange: () => {
+      broadcastToAllWindows('gantt:changed', {});
+      broadcastToAllWindows('calendar:changed', { action: 'UPDATE' });
+    },
     onCalendarNotificationInsert: (payload) => broadcastSupabaseCalendarNotification(payload),
     onSceneWorkLinkChange: (payload) => {
       broadcastSupabaseEvent('scene_work_links', payload);
@@ -3925,27 +3959,30 @@ ipcMain.handle('auth:change-own-password', async (_event, input: { currentPasswo
     if (!userId) return { ok: false, error: '로그인이 필요합니다.' };
     if (!input.newPassword) return { ok: false, error: '새 비밀번호를 입력해주세요.' };
 
-    let source: 'supabase' | 'local' = 'local';
-    let users: SessionUserRecord[] = [];
-    try {
-      const remoteUsers = await sbReadUsers();
-      if (remoteUsers.some((user) => user.id === userId)) {
-        source = 'supabase';
-        users = remoteUsers as unknown as SessionUserRecord[];
-      }
-    } catch { /* local fallback below */ }
-    if (users.length === 0) users = readLocalUsersForSession();
-    const user = users.find((candidate) => candidate.id === userId);
-    if (!user) return { ok: false, error: '사용자를 찾을 수 없습니다.' };
-    if (user.password !== input.currentPassword) return { ok: false, error: '현재 비밀번호가 일치하지 않습니다.' };
-
-    if (source === 'supabase') {
-      await sbUpdateUser(userId, { password: input.newPassword, isInitialPassword: false });
-    } else {
-      writeLocalUsersForSession(users.map((candidate) => candidate.id === userId
+    const mirrorLocalUsers = () => {
+      const locals = readLocalUsersForSession();
+      if (!locals.some((candidate) => candidate.id === userId)) return;
+      writeLocalUsersForSession(locals.map((candidate) => candidate.id === userId
         ? { ...candidate, password: input.newPassword, isInitialPassword: false }
         : candidate));
+    };
+
+    // 서버 로그인 세션이 있으면 서버가 현재 비밀번호를 대조하고 바꾼다(main 은 비밀번호를 읽지 않는다).
+    const token = sessionManager.getSessionToken();
+    if (token) {
+      const result = await sbChangeOwnPasswordWithSession(token, input.currentPassword, input.newPassword);
+      if (!result.ok) return { ok: false, error: result.error ?? '비밀번호를 변경하지 못했습니다.' };
+      mirrorLocalUsers();
+      await sessionManager.refreshCurrentUser();
+      return { ok: true };
     }
+
+    // 서버 세션 없이(오프라인 로컬 대조) 로그인한 경우: 로컬 사용자 저장소만 갱신한다.
+    const users = readLocalUsersForSession();
+    const user = users.find((candidate) => candidate.id === userId);
+    if (!user) return { ok: false, error: '서버 로그인 세션이 없어 비밀번호를 바꿀 수 없습니다. 다시 로그인해 주세요.' };
+    if (user.password !== input.currentPassword) return { ok: false, error: '현재 비밀번호가 일치하지 않습니다.' };
+    mirrorLocalUsers();
     await sessionManager.refreshCurrentUser();
     return { ok: true };
   } catch (error) {
