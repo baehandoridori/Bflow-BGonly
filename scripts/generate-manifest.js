@@ -93,7 +93,7 @@ if (fs.existsSync(releaseNotesPath)) {
         .map((note) => ({
           version: typeof note.version === 'string' ? note.version : pkg.version,
           title: typeof note.title === 'string' ? note.title : '',
-          items: note.items.map(normalizeReleaseNoteItem).filter(Boolean).slice(0, 5),
+          items: note.items.map(normalizeReleaseNoteItem).filter(Boolean),
         }))
         .filter((note) => note.items.length > 0);
     }
