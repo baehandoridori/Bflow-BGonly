@@ -313,7 +313,7 @@ function ActiveWeek({
           const isToday = ds === today;
           const dow = day.getDay();
           const color =
-            dow === 0 ? '#E17055' : dow === 6 ? '#74B9FF' : PRIMARY_TEXT;
+            dow === 0 ? 'rgb(var(--color-calendar-sunday))' : dow === 6 ? 'rgb(var(--color-calendar-saturday))' : PRIMARY_TEXT;
 
           // 이 날짜에 해당하는 이벤트 수집
           const dayEvents = events.filter(
@@ -531,7 +531,7 @@ function EventCard({
         className="shrink-0 text-[9px] font-bold px-1.5 py-0.5 rounded"
         style={{
           background: hexToRgba(event.color, 0.18),
-          color: event.color,
+          color: PRIMARY_TEXT,
         }}
       >
         {dDayLabel}
@@ -579,7 +579,7 @@ function CompactWeek({
           const isToday = ds === today;
           const dow = day.getDay();
           const color =
-            dow === 0 ? '#E17055' : dow === 6 ? '#74B9FF' : PRIMARY_TEXT;
+            dow === 0 ? 'rgb(var(--color-calendar-sunday))' : dow === 6 ? 'rgb(var(--color-calendar-saturday))' : PRIMARY_TEXT;
 
           return (
             <div

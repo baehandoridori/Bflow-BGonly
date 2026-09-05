@@ -10,6 +10,7 @@ import type {
   GCalSettings,
 } from '@/types/calendar';
 import { ICS_CALENDAR_ID_PREFIX } from '@/shared/icsApiContract';
+import { isGanttProjection } from '@/utils/calendarGantt';
 import * as gcalService from './googleCalendarService';
 import { useAuthStore } from '@/stores/useAuthStore';
 import { getPersonalCalendar, useCalendarStore } from '@/stores/useCalendarStore';
@@ -147,7 +148,7 @@ function toCalendarEventFromBflowRow(
     id: row.id,
     title: row.title,
     memo: row.memo ?? '',
-    color: calendar?.color ?? '#6C5CE7',
+    color: row.gantt_color ?? calendar?.color ?? '#6C5CE7',
     type,
     startDate: row.start_date,
     endDate: row.end_date,
@@ -163,6 +164,7 @@ function toCalendarEventFromBflowRow(
     linkedGanttTaskId: row.linked_gantt_task_id,
     linkedGanttTaskKind: row.linked_gantt_task_kind,
     ganttCanEdit: row.gantt_can_edit,
+    ganttColor: row.gantt_color,
     sourceCalendarId: `${BFLOW_CAL_PREFIX}${row.calendar_id}`,
     calendarId: row.calendar_id,
     tagId: row.tag_id ?? undefined,
@@ -1055,8 +1057,8 @@ export async function getEvents(): Promise<CalendarEvent[]> {
   const bflowAndGoogle = eventCache.flatMap((event) => {
     if (event.source !== 'bflow' || !event.calendarId) return [event];
     if (!calendarsById.has(event.calendarId)) return [];
-    // 색·편집 권한·개인 캘린더 표시는 event row가 아니라 현재 캘린더 메타데이터가
-    // 정본이다. 메타데이터의 낙관적 변경도 별도 event 재조회 없이 즉시 파생한다.
+    // 일반 일정 색·권한·개인 표시는 현재 캘린더 메타데이터에서 즉시 파생한다.
+    // 간트 연결 일정 색은 작업·그룹·프로젝트에서 상속한 projection 정본을 유지한다.
     return [withBflowCalendarPresentation(event, event.calendarId)];
   });
   return [...bflowAndGoogle, ...icsEvents];
@@ -1663,7 +1665,7 @@ function withBflowCalendarPresentation(event: CalendarEvent, calendarId: string)
   const canEdit = (calendar?.canEdit ?? false) && event.ganttCanEdit !== false;
   return {
     ...event,
-    color: calendar?.color ?? '#6C5CE7',
+    color: (isGanttProjection(event) ? event.ganttColor : undefined) ?? calendar?.color ?? '#6C5CE7',
     sourceCalendarId: `${BFLOW_CAL_PREFIX}${calendarId}`,
     calendarId,
     canEdit,

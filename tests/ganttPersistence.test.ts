@@ -211,6 +211,7 @@ test('PostgreSQL migration, ACL, CAS, replay, projection, and calendar deletion 
     const sessionsSql = readFileSync(new URL('../DEVLOG/migrations/2026-09-05-app-sessions-gantt-auth.sql', import.meta.url), 'utf8');
     await db.exec(sql); await db.exec(sql); await db.exec(sessionsSql); await db.exec(sessionsSql);
     await db.exec(readFileSync(new URL('../DEVLOG/migrations/20260905173804_gantt_revision_ledger.sql', import.meta.url), 'utf8'));
+    await db.exec(readFileSync(new URL('../DEVLOG/migrations/20260905210416_gantt_calendar_color.sql', import.meta.url), 'utf8'));
     const { createGanttStore } = await load('electron/ganttStore.ts');
     const client = { rpc: async (name: string, args: Record<string, unknown>) => {
       try {
@@ -262,6 +263,7 @@ test('PostgreSQL migration, ACL, CAS, replay, projection, and calendar deletion 
       assert.deepEqual((await store.read('dave')).projects, []);
       const rows = await store.listCalendarEvents('dave', {});
       assert.equal(rows.length, 2); assert.equal(rows[0].gantt_can_edit, false); assert.equal(rows[0].memo, '공유 메모');
+      assert.equal(rows[0].gantt_color,project.color);
       assert.equal('workers' in rows[0], false); assert.equal('tasks' in rows[0], false);
       await assert.rejects(store.updateCalendarEvent('dave', rows[0].id, { title: '공격' }, task.calendarId), /양쪽/);
     });
@@ -292,9 +294,22 @@ test('PostgreSQL migration, ACL, CAS, replay, projection, and calendar deletion 
       try {
         const row = await store.updateCalendarEvent('alice', `gantt:${project.id}:${task.id}`, { all_day: false, start_time: '10:00', end_time: '14:00' }, task.calendarId);
         assert.equal(row.all_day, false); assert.equal(row.start_time, '10:00'); assert.equal(row.end_time, '14:00');
+        assert.equal(row.gantt_color,project.color);
         assert.equal((await store.read('alice')).projects[0].tasks[0].startTime, '10:00');
         await assert.rejects(store.updateCalendarEvent('alice', `gantt:${project.id}:${project.tasks[1].id}`, { start_date: '2026-09-09', end_date: '2026-09-09' }, task.calendarId), /수동으로 전환/);
       } finally { await db.exec('ROLLBACK'); }
+    });
+    await t.test('completed linked tasks remain projected and inherit group colors in reads and calendar save responses',async()=>{
+      await db.exec('BEGIN');
+      try{
+        const before=(await store.read('alice')).projects[0];
+        const group={...before.tasks[0],id:'00000000-0000-4000-8000-000000000077',kind:'group',calendarId:null,color:'#FDCB6E'};
+        const changed={...before,tasks:[group,...before.tasks.map(item=>({...item,parentId:group.id,completed:true,progress:100}))]};
+        await store.execute('alice',{requestId:'completed-colors',command:{type:'saveProject',project:changed,expectedRevision:before.revision}});
+        const rows=await store.listCalendarEvents('alice',{});assert.equal(rows.length,2);assert.ok(rows.every(row=>row.gantt_color==='#FDCB6E'));
+        const updated=await store.updateCalendarEvent('alice',`gantt:${project.id}:${task.id}`,{memo:'완료 기록'},task.calendarId);
+        assert.equal(updated.gantt_color,'#FDCB6E');assert.equal((await store.read('alice')).projects[0].tasks.find(item=>item.id===task.id).completed,true);
+      }finally{await db.exec('ROLLBACK');}
     });
     await t.test('revoked calendar edit rights block shared edits but not unrelated project colors', async () => {
       await db.exec('BEGIN');

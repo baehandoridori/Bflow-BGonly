@@ -1,19 +1,20 @@
 .gantt-inspector-header{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;margin-bottom:18px}
+.gantt-inspector-header>div{min-width:0}.gantt-inspector-header>button{flex:none}
 .gantt-inspector-header h2{font-size:16px;line-height:1.5;margin:4px 0 0;font-weight:600;color:var(--text-primary,#e8e8ee)}
 .gantt-inspector-eyebrow{display:block;font-size:10px;color:var(--text-secondary,#8b8da3);overflow-wrap:anywhere}
 .gantt-inspector-form,.gantt-inspector-fields{display:grid;gap:13px;min-width:0}
 .gantt-inspector-fields{border:0;padding:0;margin:0}
-.gantt-inspector .gantt-field{min-width:0;display:grid;gap:6px;font-size:11px}
+.gantt-inspector .gantt-field{margin:0;min-width:0;display:grid;gap:6px;font-size:11px}
 .gantt-inspector .gantt-pair{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:9px}
 .gantt-inspector .gantt-field input,.gantt-inspector .gantt-field textarea,.gantt-inspector .gantt-field select{min-width:0;width:100%;font:inherit;font-size:12px}
 .gantt-inspector .gantt-field textarea{resize:vertical;line-height:1.65;min-height:78px}
-.gantt-inspector input[readonly]{opacity:.65;cursor:default}
+.gantt-inspector input[readonly]{opacity:1;cursor:default}
 .gantt-inspector button:disabled,.gantt-inspector input:disabled,.gantt-inspector select:disabled,.gantt-inspector textarea:disabled{opacity:.5;cursor:default}
 .gantt-inspector-section{padding-top:14px;border-top:1px solid var(--border,#2d3041);display:grid;gap:11px}
 .gantt-inspector-section h3{font-size:11px;line-height:1.6;font-weight:600;margin:0}
 .gantt-inspector-hint{font-size:10px;line-height:1.65;color:var(--text-secondary,#8b8da3);margin:0;overflow-wrap:anywhere}
 .gantt-inspector-check{display:flex;align-items:flex-start;gap:8px;font-size:11px;line-height:1.6;cursor:pointer;overflow-wrap:anywhere}
-.gantt-inspector-check input{width:13px;height:13px;margin-top:3px;flex:none;accent-color:#a29bfe}
+.gantt-inspector-check input{width:13px;height:13px;margin-top:3px;flex:none;accent-color:rgb(var(--color-accent))}
 .gantt-inspector-check span{min-width:0}
 .gantt-inspector-check small{display:block;font-size:9px;color:var(--text-secondary,#8b8da3)}
 .gantt-inspector-people,.gantt-inspector-scenes{border:1px solid var(--border,#2d3041);border-radius:6px;padding:9px 11px;min-width:0}
@@ -30,26 +31,26 @@
 .gantt-inspector-inherit{font-size:10px!important;padding:3px 6px!important}
 .gantt-inspector-notice{font-size:11px;line-height:1.7;margin:0 0 15px;padding:10px 12px;border-radius:6px;background:var(--bg-secondary,#202330);color:var(--text-secondary,#b8b8cb);overflow-wrap:anywhere}
 .gantt-inspector-notice p{margin:0 0 10px}
-.gantt-inspector-notice.warning{background:#49352455;color:#e8c69a;border:1px solid #74543155}
+.gantt-inspector-notice.warning{background:var(--g-warning-bg);color:var(--g-warning);border:1px solid color-mix(in srgb,var(--g-warning) 30%,transparent)}
 .gantt-inspector-audience{padding:11px;background:var(--bg-secondary,#202330);border-radius:6px;font-size:10px;line-height:1.7;overflow-wrap:anywhere}
 .gantt-inspector-audience b{font-weight:500;color:var(--text-secondary,#a6a4c0)}
 .gantt-inspector-audience p{margin:5px 0 9px}
 .gantt-inspector-audience .gantt-inspector-check{margin-top:12px}
-.gantt-inspector-error{color:#efa78f;font-size:11px;line-height:1.6;margin:0;overflow-wrap:anywhere}
+.gantt-inspector-error{color:var(--g-danger);font-size:11px;line-height:1.6;margin:0;overflow-wrap:anywhere}
 .gantt-inspector-save{display:grid;gap:6px;padding-top:5px}
 .gantt-inspector-save>.gantt-button{justify-content:center;background:#6c5ce7!important;border-color:#7c6de9!important;color:white!important;padding:10px!important}
 .gantt-inspector-save>span{font-size:9px;color:var(--text-secondary,#8b8da3);text-align:center}
 .gantt-inspector-actions{display:flex;align-items:center;gap:7px;flex-wrap:wrap;padding-top:20px;margin-top:18px;border-top:1px solid var(--border,#2d3041)}
 .gantt-inspector-order{display:flex;gap:4px}
-.gantt-inspector-delete{color:#dc968c!important}
+.gantt-inspector-delete{color:var(--g-danger)!important}
 .gantt-inspector-sr{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
-.gantt-inspector-sticky{position:sticky;top:-22px;z-index:8;margin:-1px -4px 15px;padding:4px 4px 12px;background:rgb(var(--color-bg-card)/.97);backdrop-filter:blur(16px);border-bottom:1px solid var(--border,#2d3041)}
+.gantt-inspector-sticky{position:sticky;top:0;z-index:8;margin:-20px -18px 15px;padding:16px 18px 12px;background:rgb(var(--color-bg-card)/.97);backdrop-filter:blur(16px);border-bottom:1px solid var(--border,#2d3041)}
 .gantt-inspector-sticky .gantt-inspector-header{margin-bottom:9px}
 .gantt-autosave-status{display:flex;align-items:center;justify-content:space-between;gap:7px;min-height:25px;font-size:10px;color:var(--text-secondary,#8b8da3)}
 .gantt-autosave-status>span{display:flex;align-items:center;gap:4px}
-.gantt-autosave-status[data-status=saved]{color:#65bca7}
-.gantt-autosave-status[data-status=saving]{color:#a29bfe}
-.gantt-autosave-status[data-status=error],.gantt-autosave-status[data-status=conflict]{color:#efa78f}
+.gantt-autosave-status[data-status=saved]{color:var(--g-success)}
+.gantt-autosave-status[data-status=saving]{color:var(--g-accent-ink)}
+.gantt-autosave-status[data-status=error],.gantt-autosave-status[data-status=conflict]{color:var(--g-danger)}
 .gantt-autosave-status button{font-size:10px!important;padding:4px 6px!important;white-space:nowrap}
 .gantt-inspector-sticky .gantt-inspector-error{font-size:10px;margin-top:5px}
 .gantt-inspector-fold{border-top:1px solid var(--border,#2d3041);padding-top:12px;min-width:0}
@@ -57,15 +58,21 @@
 .gantt-inspector-fold>summary::after{content:'+';font-size:14px;flex:none}
 .gantt-inspector-fold[open]>summary::after{content:'−'}
 .gantt-inspector-fold-content{display:grid;gap:11px;padding-top:12px;min-width:0}
-.gantt-progress-editor{display:grid;gap:10px;padding:13px;border:1px solid color-mix(in srgb,#a29bfe 25%,transparent);border-radius:9px;background:rgb(var(--color-accent)/.035)}
+.gantt-progress-editor{display:grid;gap:10px;padding:13px;border:1px solid rgb(var(--color-accent)/.25);border-radius:9px;background:rgb(var(--color-accent)/.035)}
 .gantt-progress-heading{display:flex;align-items:center;justify-content:space-between;gap:10px}
 .gantt-progress-heading h3{font-size:11px;font-weight:600;margin:0}
-.gantt-progress-heading>label{display:flex;align-items:center;gap:5px;font-size:11px;color:#a29bfe}
+.gantt-progress-heading>label{flex:none;display:flex;align-items:center;gap:5px;font-size:11px;color:var(--g-accent-ink)}
 .gantt-progress-heading input{width:60px!important;font-size:15px!important;text-align:right;font-variant-numeric:tabular-nums;padding:5px 7px!important}
-.gantt-progress-heading strong{font-size:15px;color:#a29bfe;font-variant-numeric:tabular-nums}
+.gantt-progress-heading strong{font-size:15px;color:var(--g-accent-ink);font-variant-numeric:tabular-nums}
 .gantt-progress-meter{height:8px;border-radius:20px;background:rgb(var(--color-bg-border)/.55);overflow:visible}
-.gantt-progress-meter>span{display:block;height:100%;width:var(--task-progress);border-radius:inherit;background:#a29bfe;box-shadow:0 0 calc(2px + 10px * var(--task-progress-glow)) rgb(var(--color-accent)/.35);transition:width .16s ease-out,box-shadow .16s ease-out}
-.gantt-inspector input.gantt-progress-slider{width:100%;height:14px;margin:0;padding:0!important;accent-color:#a29bfe;cursor:ew-resize;background:transparent;border:0}
+.gantt-progress-meter>span{display:block;height:100%;width:var(--task-progress);border-radius:inherit;background:rgb(var(--color-accent));box-shadow:0 0 calc(2px + 10px * var(--task-progress-glow)) rgb(var(--color-accent)/.35);transition:width .16s ease-out,box-shadow .16s ease-out}
+.gantt-inspector input.gantt-progress-slider{width:100%;height:14px;margin:0;padding:0!important;accent-color:rgb(var(--color-accent));cursor:ew-resize;background:transparent;border:0}
 .gantt-primary-dates{padding-top:3px;border-top:0}
 .gantt-inspector-actions{padding-top:13px;margin-top:12px}
 @media(prefers-reduced-motion:reduce){.gantt-progress-meter>span{transition:none;box-shadow:none}}
+
+.gantt-inspector-eyebrow{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.gantt-inspector .gantt-pair .gantt-field{margin:0}
+.gantt-inspector .gantt-inspector-swatch{width:22px;height:22px;padding:0;border-radius:50%;border:2px solid rgb(var(--color-bg-card))}
+.gantt-autosave-status{flex-wrap:wrap}
+@media(max-height:650px){.gantt-inspector-form{gap:10px}.gantt-progress-editor{padding:10px}.gantt-inspector .gantt-field textarea{min-height:60px}}

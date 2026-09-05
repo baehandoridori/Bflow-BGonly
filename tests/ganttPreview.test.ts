@@ -31,6 +31,27 @@ test('calendar projections use same tasks, permission intersection, auto chain a
  assert.equal((await gateway.read()).projects[0].tasks[1].startDate,'2026-09-08');
  await deleteCalendarEvent('owner',events[0].id,options);assert.equal((await listCalendarEvents('owner',options)).length,0);assert.equal((await gateway.read()).projects[0].tasks.length,2);
 });
+
+test('calendar projection inherits task, nearest group and project colors without sharing the project',async()=>{
+ const options={...setup(),canViewCalendar:()=>true,canEditCalendar:(_id:string,actor:string)=>actor==='owner'};
+ const gateway=createPreviewGateway('owner',options),s=createSpace('비공개','owner');
+ await gateway.execute({requestId:crypto.randomUUID(),command:{type:'saveSpace',space:s,expectedRevision:null}});
+ let p=createProject('색상',s.id,'owner');p.color='#74B9FF';
+ const group={...createTask('상위','2026-09-05'),kind:'group' as const,color:'#FDCB6E'};
+ const nested={...createTask('하위','2026-09-05'),kind:'group' as const,parentId:group.id};
+ const task={...createTask('연결','2026-09-05'),parentId:nested.id,calendarId:crypto.randomUUID()};p.tasks=[group,nested,task];
+ p=(await gateway.execute({requestId:crypto.randomUUID(),command:{type:'saveProject',project:p,expectedRevision:null}})).projects[0];
+ const readColor=async()=>{const [row]=await listCalendarEvents('outsider',options);assert.equal(row.gantt_can_edit,false);return row.gantt_color;};
+ assert.equal((await createPreviewGateway('outsider',options).read()).projects.length,0);
+ assert.equal(await readColor(),'#FDCB6E');
+ for(const [taskColor,groupColor,expected] of [['#FF6B6B','#FDCB6E','#FF6B6B'],[null,null,'#74B9FF']] as const){
+   p={...p,tasks:p.tasks.map(t=>t.id===task.id?{...t,color:taskColor}:t.id===group.id?{...t,color:groupColor}:t)};
+   p=(await gateway.execute({requestId:crypto.randomUUID(),command:{type:'saveProject',project:p,expectedRevision:p.revision}})).projects[0];
+   assert.equal(await readColor(),expected);
+ }
+ const row=await patchCalendarEvent('owner',`gantt:${p.id}:${task.id}`,{title:'바뀐 제목'},options);
+ assert.equal(row.gantt_color,'#74B9FF');
+});
 test('store ignores previous account reads and supports CAS guarded undo/redo',async()=>{
  const options=setup(),gateway=createPreviewGateway('u',options),store=createGanttStore();
  let release!:(x:{spaces:never[];projects:never[]})=>void;

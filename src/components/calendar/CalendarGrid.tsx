@@ -16,6 +16,7 @@ import {
   type CalendarEventIdentity,
 } from '@/utils/calendarEventIdentity';
 import { floatingGlassStyle, tooltipGlassStyle } from '@/utils/glassStyles';
+import { cursorTooltipAnchor } from '@/utils/tooltipPosition';
 import { layoutEventBars, visibleWeekDays, type EventBar } from '@/utils/calendarWeekdays';
 
 // 바 배치는 주말 숨김과 한 몸이라 유틸로 옮겼다. 기존 import 경로는 그대로 살려 둔다.
@@ -54,6 +55,21 @@ function EventBarChip({
   const [showTooltip, setShowTooltip] = useState(false);
   const [tooltipPos, setTooltipPos] = useState({ x: 0, y: 0 });
   const tooltipTimer = useRef<ReturnType<typeof setTimeout>>();
+  const tooltipBox = useRef<HTMLDivElement>(null);
+  const [tooltipSize, setTooltipSize] = useState({width:260,height:140});
+  useEffect(() => {
+    if (!showTooltip || !tooltipBox.current) return;
+    const {offsetWidth:width,offsetHeight:height}=tooltipBox.current;
+    if (width && height) setTooltipSize(previous=>previous.width===width&&previous.height===height?previous:{width,height});
+  }, [showTooltip,tooltipPos,ev.title,ev.memo]);
+  useEffect(() => {
+    if (!showTooltip) return;
+    const hide=()=>{clearTimeout(tooltipTimer.current);setShowTooltip(false);};
+    const key=(event:KeyboardEvent)=>{if(event.key==='Escape')hide();};
+    document.addEventListener('scroll',hide,true);document.addEventListener('pointerdown',hide,true);document.addEventListener('keydown',key);
+    return()=>{document.removeEventListener('scroll',hide,true);document.removeEventListener('pointerdown',hide,true);document.removeEventListener('keydown',key);};
+  }, [showTooltip]);
+  useEffect(()=>()=>clearTimeout(tooltipTimer.current),[]);
 
   const handleMouseDown = (e: React.MouseEvent) => {
     if (e.button !== 0) return;
@@ -189,13 +205,12 @@ function EventBarChip({
             : `linear-gradient(135deg, ${hex}40 0%, ${hex}25 100%)`,
           backdropFilter: isGhost ? undefined : 'blur(8px)',
           WebkitBackdropFilter: isGhost ? undefined : 'blur(8px)',
-          borderTop: `1px solid ${hex}50`,
-          borderBottom: `1px solid ${hex}20`,
-          borderLeft: bar.isStart ? `3px solid ${hex}` : `1px solid ${hex}30`,
-          borderRight: bar.isEnd ? `1px solid ${hex}40` : 'none',
-          color: hex,
-          textShadow: isGhost ? undefined : `0 0 12px ${hex}40`,
-          border: isGhost ? `1px dashed ${hex}80` : undefined,
+          borderTop: isGhost ? `1px dashed ${hex}80` : `1px solid ${hex}50`,
+          borderBottom: isGhost ? `1px dashed ${hex}80` : `1px solid ${hex}20`,
+          borderLeft: isGhost ? `1px dashed ${hex}80` : bar.isStart ? `3px solid ${hex}` : `1px solid ${hex}30`,
+          borderRight: isGhost ? `1px dashed ${hex}80` : bar.isEnd ? `1px solid ${hex}40` : 'none',
+          color: 'rgb(var(--color-text-primary))',
+          textShadow: undefined,
         }}
       >
         {/* 리사이즈 핸들 (왼쪽) */}
@@ -220,6 +235,7 @@ function EventBarChip({
       {/* 글래스모피즘 툴팁 — Portal로 body에 직접 렌더 (부모 transform/overflow 무관) */}
       {showTooltip && !isDragging && !isGhost && createPortal(
         <motion.div
+          ref={tooltipBox}
           // framer-motion이 transform을 직접 관리하므로 style의 정적 transform은 덮어써진다.
           // 커서 위 중앙 앵커도 motion value(x·y)로 넘겨야 자리를 지킨다.
           initial={reduceMotion ? false : { opacity: 0, scale: 0.96, x: '-50%', y: '-100%' }}
@@ -228,15 +244,18 @@ function EventBarChip({
           className="pointer-events-none rounded-2xl px-4 py-3 max-w-[260px]"
           style={{
             ...tooltipGlassStyle,
+            color: 'rgb(var(--color-tooltip-text))',
             position: 'fixed',
             zIndex: 99999,
-            left: Math.min(tooltipPos.x, window.innerWidth - 280),
-            top: Math.max(tooltipPos.y - 12, 8),
+            ...cursorTooltipAnchor(tooltipPos,tooltipSize,{width:window.innerWidth,height:window.innerHeight}),
+            maxWidth: 'min(260px, calc(100vw - 16px))',
+            maxHeight: 'calc(100vh - 16px)',
+            overflow: 'hidden',
           }}
         >
-          <div className="text-[13px] font-semibold text-text-primary truncate">{ev.title}</div>
-          <div className="text-[12px] text-text-secondary/70 mt-1">{dateLabel}</div>
-          {ev.memo && <div className="text-[11px] text-text-secondary/50 mt-1 line-clamp-2">{ev.memo}</div>}
+          <div className="text-[13px] font-semibold truncate">{ev.title}</div>
+          <div className="text-[12px] opacity-85 mt-1">{dateLabel}</div>
+          {ev.memo && <div className="text-[11px] opacity-85 mt-1 line-clamp-2">{ev.memo}</div>}
         </motion.div>,
         document.body,
       )}
@@ -473,7 +492,7 @@ export function CalendarGrid({
             key={day}
             className={cn(
               'text-center text-xs font-semibold py-2.5 tracking-wider',
-              day === '일' ? 'text-red-400/60' : day === '토' ? 'text-blue-400/60' : 'text-text-secondary/50',
+              day === '일' ? 'text-[rgb(var(--color-calendar-sunday))]' : day === '토' ? 'text-[rgb(var(--color-calendar-saturday))]' : 'text-text-secondary',
             )}
           >
             {day}
@@ -562,8 +581,8 @@ export function CalendarGrid({
                           'text-sm tabular-nums inline-flex items-center justify-center font-medium',
                           isToday
                             ? 'bg-accent text-white w-7 h-7 rounded-full text-xs font-bold'
-                            : dow === 0 ? 'text-red-400'
-                            : dow === 6 ? 'text-blue-400'
+                            : dow === 0 ? 'text-[rgb(var(--color-calendar-sunday))]'
+                            : dow === 6 ? 'text-[rgb(var(--color-calendar-saturday))]'
                             : isCurMonth ? 'text-text-primary/80' : 'text-text-secondary/40',
                         )}
                       >

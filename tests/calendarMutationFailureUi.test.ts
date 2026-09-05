@@ -1,3 +1,4 @@
+import { glassDropdownTestModule, resolveGlassDropdown } from './helpers/glassDropdown.ts';
 import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
 import test from 'node:test';
@@ -255,7 +256,8 @@ function runtimeRequireFactory(nodeRequire: NodeRequire): (id: string) => unknow
     if (id === '@/components/common/EntityAwareInput') return { EntityAwareInput: () => null };
     if (id === '@/components/common/EntityText') return { EntityText: () => null };
     if (id === '@/types') return { DEPARTMENT_CONFIGS: {} };
-    if (id === '@/utils/glassStyles') return { floatingGlassStyle: {} };
+    if (id === '@/components/common/GlassDropdown') return glassDropdownTestModule;
+      if (id === '@/utils/glassStyles') return { floatingGlassStyle: {} };
     if (id === '@/utils/calendarDate') return { parseDate: (value: string) => new Date(`${value}T12:00:00`) };
     if (id === '@/utils/calendarEventIdentity') {
       return {
@@ -280,7 +282,7 @@ async function loadQuickEdit(): Promise<QuickEditComponent> {
     platform: 'node',
     target: 'node22',
     write: false,
-    external: [
+    external: ['@/components/common/GlassDropdown',
       'react',
       'react/jsx-runtime',
       'react-dom',
@@ -313,7 +315,7 @@ async function loadSidePanel(): Promise<SidePanelComponent> {
     platform: 'node',
     target: 'node22',
     write: false,
-    external: [
+    external: ['@/components/common/GlassDropdown',
       'react',
       'react/jsx-runtime',
       'framer-motion',
@@ -1319,6 +1321,23 @@ test('quick edit ignores outside clicks and Escape while it is animating away', 
   }
 });
 
+test('quick edit keeps its portal dropdown interactive and still closes for outside clicks', async () => {
+  const hooks = createHookStore();
+  let closeCalls = 0;
+  const callbacks = { onClose: () => { closeCalls += 1; }, onUpdate: () => {}, onDelete: () => {} };
+  const listeners = captureQuickEditDocumentListeners();
+  try {
+    await renderQuickEdit(hooks, callbacks, event(), true);
+    hooks.refs[0].current = { contains: () => false };
+    listeners.fire('mousedown', { target: { closest: (selector: string) => selector === '[data-dropdown-owner="calendar-quick-edit"]' ? {} : null } });
+    assert.equal(closeCalls, 0, 'choosing a calendar in the body portal must not dismiss the editor');
+    listeners.fire('mousedown', { target: { closest: () => null } });
+    assert.equal(closeCalls, 1, 'a normal outside click still dismisses the editor');
+  } finally {
+    listeners.restore();
+  }
+});
+
 test('quick edit refuses to close while a save is still pending', async () => {
   const hooks = createHookStore();
   let closeCalls = 0;
@@ -1350,6 +1369,7 @@ test('quick edit refuses to close while a save is still pending', async () => {
 });
 
 function findSelects(node: ReactNode): ReactElement<Record<string, unknown>>[] {
+  node = resolveGlassDropdown(node);
   if (Array.isArray(node)) return node.flatMap(findSelects);
   if (!isValidElement(node)) return [];
   const element = node as ReactElement<Record<string, unknown>>;

@@ -1,6 +1,7 @@
-import type { CalendarEvent } from '@/types/calendar';
-import { buildEventSnapshot } from '@/utils/calendarEventDiff';
-import { calendarEventIdentityKey } from '@/utils/calendarEventIdentity';
+import type { CalendarEvent } from '../types/calendar.ts';
+import { buildEventSnapshot } from './calendarEventDiff.ts';
+import { calendarEventIdentityKey } from './calendarEventIdentity.ts';
+import { isGanttProjection } from './calendarGantt.ts';
 
 /**
  * 저장/삭제가 진행 중이거나 실패한 뒤, 정본 스냅샷이 "내가 만든 변화"인지 "동료의 변경"인지
@@ -47,13 +48,13 @@ export function withCalendarPresentationForSnapshot(
 ): Partial<CalendarEvent> {
   if (updates.calendarId === undefined || event.source !== 'bflow') return updates;
   const destination = calendars.find((calendar) => calendar.id === updates.calendarId);
-  const canEdit = destination?.canEdit ?? false;
+  const canEdit = (destination?.canEdit ?? false) && event.ganttCanEdit !== false;
   return {
     ...updates,
     source: 'bflow',
     sourceCalendarId: `bflow:${updates.calendarId}`,
     calendarId: updates.calendarId,
-    color: destination?.color ?? '#6C5CE7',
+    color: (isGanttProjection(event) ? event.ganttColor : undefined) ?? destination?.color ?? '#6C5CE7',
     canEdit,
     isReadOnly: !canEdit,
     isPrivate: destination?.isPersonal === true,

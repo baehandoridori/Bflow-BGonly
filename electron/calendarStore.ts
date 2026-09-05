@@ -55,6 +55,7 @@ export interface CalendarEventRow {
   linked_gantt_task_id?: string;
   linked_gantt_task_kind?: 'task' | 'group' | 'milestone';
   gantt_can_edit?: boolean;
+  gantt_color?: string;
 }
 
 export interface CalendarNotificationRow {

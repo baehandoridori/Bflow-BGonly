@@ -7,6 +7,7 @@ import { useAppStore } from '@/stores/useAppStore';
 import { useAuthStore } from '@/stores/useAuthStore';
 import { isOptimisticCalendarTagId, useCalendarStore } from '@/stores/useCalendarStore';
 import { EntityAwareInput } from '@/components/common/EntityAwareInput';
+import { GlassDropdown } from '@/components/common/GlassDropdown';
 import { floatingGlassStyle } from '@/utils/glassStyles';
 import { calendarEventIdentityKey } from '@/utils/calendarEventIdentity';
 import { isGanttMilestone, isGanttProjection } from '@/utils/calendarGantt';
@@ -148,6 +149,8 @@ export function EventQuickEdit({
     const shouldIgnore = () => !isPresentRef.current || pendingMutationRef.current !== null;
     const handleClick = (mouseEvent: MouseEvent) => {
       if (shouldIgnore()) return;
+      const target = mouseEvent.target as Element | null;
+      if (target?.closest?.('[data-dropdown-owner="calendar-quick-edit"]')) return;
       if (ref.current && !ref.current.contains(mouseEvent.target as Node)) onClose();
     };
     const handleKey = (keyboardEvent: KeyboardEvent) => {
@@ -389,7 +392,7 @@ export function EventQuickEdit({
           <p id={derivedFieldsDescriptionId} className="sr-only">유형은 연결 정보에서 자동으로 결정됩니다.</p>
         )}
         {mutationError && (
-          <p role="alert" className="mx-3 mt-3 rounded-md bg-red-500/10 px-2.5 py-2 text-xs text-red-300">
+          <p role="alert" className="mx-3 mt-3 rounded-md bg-red-500/10 px-2.5 py-2 text-xs text-text-primary">
             {mutationError}
           </p>
         )}
@@ -435,20 +438,18 @@ export function EventQuickEdit({
                   <>
                     <div>
                       <label className="text-[10px] font-medium uppercase tracking-wide text-text-secondary">캘린더</label>
-                      <div className="relative mt-1">
-                        <CalendarDays size={13} className="pointer-events-none absolute left-2 top-1/2 -translate-y-1/2 text-text-secondary" />
-                        <select
-                          aria-label="캘린더"
-                          value={displayedCalendarId}
+                      <div className="mt-1">
+                        <GlassDropdown
+                          label="캘린더"
+                          value={displayedCalendarId ?? null}
                           disabled={calendarSelectionPending}
-                          onChange={(changeEvent) => {
-                            const calendarId = changeEvent.target.value;
-                            return handleCalendarChange(calendarId);
-                          }}
-                          className="w-full rounded-lg border border-bg-border/60 bg-bg-primary/80 py-1.5 pl-7 pr-2 text-xs text-text-primary outline-none focus:border-accent/60"
-                        >
-                          {editableCalendars.map((calendar) => <option key={calendar.id} value={calendar.id}>{calendar.name}</option>)}
-                        </select>
+                          onChange={handleCalendarChange}
+                          options={editableCalendars.map((calendar) => ({ value: calendar.id, label: calendar.name }))}
+                          icon={<CalendarDays size={13} />}
+                          portal
+                          portalOwner="calendar-quick-edit"
+                          className="w-full [&>button]:w-full [&>button]:justify-between [&>button]:text-xs"
+                        />
                       </div>
                     </div>
                     <div>
@@ -474,7 +475,7 @@ export function EventQuickEdit({
                               onClick={() => handleTagChange(tag.id)}
                               className="rounded-full border px-2 py-1 text-[10px]"
                               style={{
-                                color: selected ? tag.color : 'rgb(var(--color-text-secondary))',
+                                color: selected ? 'rgb(var(--color-text-primary))' : 'rgb(var(--color-text-secondary))',
                                 borderColor: selected ? tag.color : 'rgb(var(--color-bg-border) / 0.65)',
                                 background: selected ? `color-mix(in srgb, ${tag.color} 18%, transparent)` : 'transparent',
                               }}
@@ -530,7 +531,7 @@ export function EventQuickEdit({
                     disabled={isMutating}
                     onChange={(changeEvent) => setTitle(changeEvent.target.value)}
                     placeholder="일정 제목"
-                    className="w-full rounded-lg px-2.5 py-1.5 text-xs outline-none placeholder:text-text-secondary/45"
+                    className="w-full rounded-lg px-2.5 py-1.5 text-xs outline-none placeholder:text-text-secondary"
                     style={fieldStyle}
                   />
                   <div className="flex gap-2">
@@ -582,7 +583,7 @@ export function EventQuickEdit({
                     </div>
                   )}
                   {hasInvalidTimedInterval && (
-                    <p role="alert" className="text-[11px] font-medium text-red-400">
+                    <p role="alert" className="text-[11px] font-medium text-[color:color-mix(in_srgb,var(--status-error)_65%,rgb(var(--color-text-primary)))]">
                       종료 시각은 시작 시각보다 뒤여야 해요.
                     </p>
                   )}
@@ -613,7 +614,7 @@ export function EventQuickEdit({
                     rows={3}
                     placeholder="메모"
                     dropdownPositionClassName="left-2 right-2"
-                    className="w-full resize-none rounded-lg border border-bg-border/[0.56] bg-bg-primary/[0.82] px-2.5 py-1.5 text-xs text-text-primary outline-none placeholder:text-text-secondary/45"
+                    className="w-full resize-none rounded-lg border border-bg-border/[0.56] bg-bg-primary/[0.82] px-2.5 py-1.5 text-xs text-text-primary outline-none placeholder:text-text-secondary"
                   />
                   <button onClick={handleSave} disabled={isMutating || isTimedSaveBlocked} className="w-full cursor-pointer rounded-lg py-2 text-xs font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-45" style={{ background: 'rgb(var(--color-accent))', color: 'rgb(var(--color-on-accent))' }}>저장</button>
                 </div>

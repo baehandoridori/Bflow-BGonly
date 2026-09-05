@@ -78,6 +78,8 @@ export interface CalendarEvent {
   linkedGanttTaskId?: string;
   linkedGanttTaskKind?: 'task' | 'group' | 'milestone';
   ganttCanEdit?: boolean;
+  /** 간트에서 상속까지 계산한 표시 색상. 캘린더의 고유 색상과 구분한다. */
+  ganttColor?: string;
 
   // 휴가 전용 필드 (type === 'vacation')
   vacationType?: string;     // 연차, 오전반차, 오후반차, 대체휴가, 특별휴가

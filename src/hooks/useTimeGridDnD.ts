@@ -8,6 +8,7 @@ import {
 import { computeEdgeScrollSpeed } from '@/utils/dragAutoScroll';
 import { minutesToTime, pxToMinutes, snapMinutes, timeToMinutes } from '@/utils/timeGridLayout';
 import { addDays, fmtDate, parseDate } from '@/utils/calendarDate';
+import { isGanttMilestone } from '@/utils/calendarGantt';
 
 export type TimeGridDragMode = 'create' | 'move' | 'resize-end';
 
@@ -330,7 +331,7 @@ export function useTimeGridDnD({ scrollContainerRef, onCreate, onEventChange }: 
     if (pendingIdentityKeysRef.current.has(calendarEventIdentityKey(source))) return;
     cancelPreviewFrame();
     const rect = event.currentTarget.getBoundingClientRect?.();
-    const resolvedMode = mode === 'resize-end' && rect
+    const resolvedMode = isGanttMilestone(source) ? 'move' : mode === 'resize-end' && rect
       ? getTimeGridEventDragMode(false, event.clientY, rect.bottom, rect.height) ?? 'move'
       : mode;
     const anchorMinutes = getPointerMinute(target, event.clientY);

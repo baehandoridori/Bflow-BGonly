@@ -217,7 +217,7 @@ function ActiveDay({
 }) {
   const dow = date.getDay();
   const isToday = dateStr === today;
-  const dayColor = dow === 0 ? '#E17055' : dow === 6 ? '#74B9FF' : PRIMARY_TEXT;
+  const dayColor = dow === 0 ? 'rgb(var(--color-calendar-sunday))' : dow === 6 ? 'rgb(var(--color-calendar-saturday))' : PRIMARY_TEXT;
   const label = `${date.getMonth() + 1}/${date.getDate()} ${WEEKDAY_KR[dow]}`;
   const sortedEvents = useMemo(() => sortEventsForList(events), [events]);
 
@@ -364,7 +364,7 @@ function DayEventCard({
         className="shrink-0 text-[9px] font-bold px-1.5 py-0.5 rounded"
         style={{
           background: hexToRgba(event.color, 0.18),
-          color: event.color,
+          color: PRIMARY_TEXT,
         }}
       >
         {dDayLabel}
@@ -387,7 +387,7 @@ function NearDay({
 }) {
   const dow = date.getDay();
   const isToday = dateStr === today;
-  const dayColor = dow === 0 ? '#E17055' : dow === 6 ? '#74B9FF' : PRIMARY_TEXT;
+  const dayColor = dow === 0 ? 'rgb(var(--color-calendar-sunday))' : dow === 6 ? 'rgb(var(--color-calendar-saturday))' : PRIMARY_TEXT;
 
   return (
     <div
@@ -440,7 +440,7 @@ function FarDay({
 }) {
   const dow = date.getDay();
   const isToday = dateStr === today;
-  const dayColor = dow === 0 ? '#E17055' : dow === 6 ? '#74B9FF' : PRIMARY_TEXT;
+  const dayColor = dow === 0 ? 'rgb(var(--color-calendar-sunday))' : dow === 6 ? 'rgb(var(--color-calendar-saturday))' : PRIMARY_TEXT;
 
   return (
     <div

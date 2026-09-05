@@ -1,3 +1,4 @@
+import { glassDropdownTestModule, resolveGlassDropdown } from './helpers/glassDropdown.ts';
 import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
 import test from 'node:test';
@@ -145,6 +146,7 @@ function findButtonByText(node: ReactNode, label: string): ButtonElement {
 }
 
 function findFormElements(node: ReactNode): FormElement[] {
+  node = resolveGlassDropdown(node);
   if (Array.isArray(node)) return node.flatMap(findFormElements);
   if (!isValidElement(node)) return [];
   const props = node.props as { children?: ReactNode };
@@ -187,7 +189,7 @@ async function loadQuickEdit(): Promise<QuickEditComponent> {
     platform: 'node',
     target: 'node22',
     write: false,
-    external: [
+    external: ['@/components/common/GlassDropdown',
       'react',
       'react/jsx-runtime',
       'react-dom',
@@ -302,6 +304,7 @@ async function loadQuickEdit(): Promise<QuickEditComponent> {
       if (id === '@/components/common/EntityAwareInput') {
         return { EntityAwareInput: () => null };
       }
+      if (id === '@/components/common/GlassDropdown') return glassDropdownTestModule;
       if (id === '@/utils/glassStyles') return { floatingGlassStyle: {} };
       return nodeRequire(id);
     };
@@ -321,7 +324,7 @@ async function loadSidePanel(): Promise<SidePanelComponent> {
     platform: 'node',
     target: 'node22',
     write: false,
-    external: [
+    external: ['@/components/common/GlassDropdown',
       'react',
       'react/jsx-runtime',
       'framer-motion',
@@ -445,6 +448,7 @@ async function loadSidePanel(): Promise<SidePanelComponent> {
       if (id === '@/components/common/EntityAwareInput') return { EntityAwareInput: () => null };
       if (id === '@/components/common/EntityText') return { EntityText: () => null };
       if (id === '@/types') return { DEPARTMENT_CONFIGS: {} };
+      if (id === '@/components/common/GlassDropdown') return glassDropdownTestModule;
       if (id === '@/utils/glassStyles') return { floatingGlassStyle: {} };
       if (id === '@/utils/calendarDate') {
         return { parseDate: (value: string) => new Date(`${value}T12:00:00`) };

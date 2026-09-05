@@ -154,6 +154,49 @@ test('calendar projection exposes canonical milestone kind without exposing priv
   } finally { await db.close(); }
 });
 
+test('calendar color migration preserves inherited colors, private project boundaries and RPC permissions', { skip: !runtime }, async () => {
+  const {db,execute,read,token,project,space}=await harness();
+  try {
+    const definition=()=>db.query("SELECT pg_get_functiondef('public.gantt_calendar_events(text,date,date,text)'::regprocedure) AS body");
+    await db.exec('RESET ROLE');const before=await definition();
+    await db.exec('BEGIN');await db.exec(sql('20260905210416_gantt_calendar_color.sql'));await db.exec('ROLLBACK');
+    assert.deepEqual((await definition()).rows,before.rows);
+    await db.exec(sql('20260905210416_gantt_calendar_color.sql'));await db.exec(sql('20260905210416_gantt_calendar_color.sql'));await db.exec('SET ROLE anon');
+    const calendarId=crypto.randomUUID();await db.query("INSERT INTO calendars(id,owner_id,visibility) VALUES($1,'alice','team')",[calendarId]);
+    await execute({type:'saveSpace',space:{...space,shared:false,members:[]},expectedRevision:1});
+    let p=(await read()).projects[0];
+    const parent={...createTask('상위','2026-09-06'),kind:'group' as const,color:'#FDCB6E'};
+    const group={...createTask('하위','2026-09-06'),kind:'group' as const,parentId:parent.id};
+    const task={...p.tasks[0],calendarId,parentId:group.id};
+    p={...p,color:'#74B9FF',tasks:[parent,group,task]};
+    p=(await execute({type:'saveProject',project:p,expectedRevision:p.revision})).projects[0];
+    const bobToken=(await db.query('SELECT app_login($1,$2) AS result',['bob','pw'])).rows[0].result.token;
+    assert.equal((await db.query('SELECT gantt_session_read($1) AS result',[bobToken])).rows[0].result.projects.length,0);
+    const events=async(viewer=token)=> (await db.query('SELECT gantt_session_calendar_events($1,$2,$3,$4) AS result',[viewer,'2026-09-06','2026-09-06',`gantt:${project.id}:${task.id}`])).rows[0].result;
+    assert.equal((await events(bobToken))[0].gantt_color,'#FDCB6E');assert.equal((await events(bobToken))[0].gantt_can_edit,false);
+    for(const [color,parentColor,expected] of [['#FF6B6B','#FDCB6E','#FF6B6B'],[null,null,'#74B9FF']] as const){
+      p={...p,tasks:p.tasks.map(t=>t.id===task.id?{...t,color}:t.id===parent.id?{...t,color:parentColor}:t)};
+      p=(await execute({type:'saveProject',project:p,expectedRevision:p.revision})).projects[0];
+      assert.equal((await events())[0].gantt_color,expected);
+    }
+    assert.deepEqual((await db.query('SELECT gantt_session_calendar_events($1,$2,$3) AS result',[token,'2026-09-07','2026-09-08'])).rows[0].result,[]);
+    await assert.rejects(db.query('SELECT gantt_calendar_events($1)',['alice']),/permission denied/);
+    await db.query("UPDATE calendars SET visibility='private' WHERE id=$1",[calendarId]);assert.deepEqual(await events(bobToken),[]);
+  }finally{await db.close();}
+});
+
+test('operational color smoke detects the old projection and rolls all fixtures back after upgrade', { skip: !runtime },async()=>{
+  const {db}=await harness();
+  try{
+    await db.exec('RESET ROLE');
+    const counts=async()=> (await db.query('SELECT (SELECT count(*) FROM users) users,(SELECT count(*) FROM app_sessions) sessions,(SELECT count(*) FROM calendars) calendars,(SELECT count(*) FROM gantt_projects) projects,(SELECT count(*) FROM gantt_entity_revisions) revisions')).rows;
+    const before=await counts();const smoke=readFileSync(new URL('../DEVLOG/verification/2026-09-06-gantt-calendar-color-smoke.sql',import.meta.url),'utf8');
+    await assert.rejects(db.exec(smoke),/projection color/);await db.exec('ROLLBACK');assert.deepEqual(await counts(),before);
+    await db.exec(sql('20260905210416_gantt_calendar_color.sql'));
+    const result=await db.exec(smoke);assert.equal(result.at(-1).rows[0].passed,true);assert.deepEqual(await counts(),before);
+  }finally{await db.close();}
+});
+
 test('upgrade retires previously deleted IDs but replay never retires a new supported tombstone', { skip: !runtime }, async () => {
   const { db, execute, project } = await harness(false);
   try {

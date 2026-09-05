@@ -1,5 +1,5 @@
 import type { GanttGateway, GanttProject, GanttRequest, GanttSnapshot, GanttTask } from './types.ts';
-import { applyCommand, canEditProject, createProject, createSpace, createTask, rememberGanttRevisions, shiftDate, todayDate, updateTask, visibleSnapshot } from './domain.ts';
+import { applyCommand, canEditProject, createProject, createSpace, createTask, rememberGanttRevisions, resolveTaskColor, shiftDate, todayDate, updateTask, visibleSnapshot } from './domain.ts';
 import type { GanttRevisionLedger } from './domain.ts';
 
 export interface PreviewCalendar { id:string; owner_id:string; visibility:string; members?:Array<{user_id:string;can_edit:boolean}> }
@@ -18,6 +18,7 @@ export interface GanttCalendarEventRow {
   linked_episode:null; linked_part:null; linked_sheet_name:null; linked_scene_id:null; linked_department:null; linked_todo_id:null;
   created_by:string|null; created_at:string; updated_at:string;
   linked_gantt_project_id:string; linked_gantt_task_id:string; linked_gantt_task_kind:GanttTask['kind']; gantt_can_edit:boolean;
+  gantt_color:string;
 }
 interface Authority { snapshot:GanttSnapshot; receipts:Record<string,{actorId:string;command:string}>; seededUsers:string[]; revisions:GanttRevisionLedger; retiredIds:string[] }
 const KEY='bflow-gantt-preview-authority-v1',LOCK='bflow:gantt:preview:authority',CHANNEL='bflow:gantt:changed';
@@ -130,7 +131,7 @@ export function calendarEventId(projectId:string,taskId:string):string{return `g
 function projection(project:GanttProject,task:GanttTask,canEdit=true):GanttCalendarEventRow {
   // Revision-derived timestamps remain stable between reads; actual content is canonical task data.
   const stamp=new Date(project.revision*1000).toISOString();
-  return {id:calendarEventId(project.id,task.id),calendar_id:task.calendarId!,title:task.title,memo:task.memo,tag_id:null,all_day:task.allDay,start_date:task.startDate,end_date:task.endDate,start_time:task.allDay?null:task.startTime,end_time:task.allDay?null:task.endTime,linked_episode:null,linked_part:null,linked_sheet_name:null,linked_scene_id:null,linked_department:null,linked_todo_id:null,created_by:project.ownerId,created_at:stamp,updated_at:stamp,linked_gantt_project_id:project.id,linked_gantt_task_id:task.id,linked_gantt_task_kind:task.kind,gantt_can_edit:canEdit};
+  return {id:calendarEventId(project.id,task.id),calendar_id:task.calendarId!,title:task.title,memo:task.memo,tag_id:null,all_day:task.allDay,start_date:task.startDate,end_date:task.endDate,start_time:task.allDay?null:task.startTime,end_time:task.allDay?null:task.endTime,linked_episode:null,linked_part:null,linked_sheet_name:null,linked_scene_id:null,linked_department:null,linked_todo_id:null,created_by:project.ownerId,created_at:stamp,updated_at:stamp,linked_gantt_project_id:project.id,linked_gantt_task_id:task.id,linked_gantt_task_kind:task.kind,gantt_can_edit:canEdit,gantt_color:resolveTaskColor(project,task)};
 }
 export async function listCalendarEvents(actorId:string,options:PreviewOptions={}):Promise<GanttCalendarEventRow[]> {
   if(!actorId)return [];

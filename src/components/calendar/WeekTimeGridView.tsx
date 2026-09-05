@@ -29,7 +29,6 @@ const ALL_DAY_ROW_PX = 28;
 const MIN_TIMED_TEXT_HEIGHT_PX = 14;
 const WHEEL_GESTURE_LOCK_MS = 150;
 const WEEKDAY_KR = ['일', '월', '화', '수', '목', '금', '토'];
-const CARD_BASE_RGB = [26, 29, 39] as const; // #1A1D27
 const EMPTY_NAME_MAP: Record<string, string> = {};
 
 export interface WeekTimeGridViewProps {
@@ -67,6 +66,8 @@ type TimedEvent = {
   event: CalendarEvent;
   startMin: number;
   endMin: number;
+  layoutEndMin: number;
+  milestone: boolean;
   layoutId: string;
 };
 
@@ -193,15 +194,7 @@ export function getCurrentTimeMarker(
 }
 
 function tintOnCard(color: string): string {
-  const hex = color.replace('#', '');
-  if (!/^[0-9a-fA-F]{6}$/.test(hex)) return color;
-  const source = [
-    Number.parseInt(hex.slice(0, 2), 16),
-    Number.parseInt(hex.slice(2, 4), 16),
-    Number.parseInt(hex.slice(4, 6), 16),
-  ];
-  const tinted = source.map((channel, index) => Math.round(CARD_BASE_RGB[index] * 0.82 + channel * 0.18));
-  return `rgb(${tinted.join(', ')})`;
+  return `color-mix(in srgb, ${color} 18%, rgb(var(--color-bg-card)))`;
 }
 
 /** D10 시간 블록의 공통 색상 처리. */
@@ -215,9 +208,9 @@ export function getTimedBlockVisualStyle(color: string): {
   return {
     background: tintOnCard(color),
     borderLeft: `3px solid ${color}`,
-    titleColor: '#E8E8EE',
+    titleColor: 'rgb(var(--color-text-primary))',
     titleFontSize: 11,
-    timeColor: color,
+    timeColor: 'rgb(var(--color-text-primary))',
   };
 }
 
@@ -235,7 +228,7 @@ export function getTimedBlockStateStyle(color: string, isCurrent: boolean): {
 }
 
 export function getTimedBlockOpacity(isPast: boolean): number {
-  return isPast ? 0.5 : 1;
+  return isPast ? 0.72 : 1;
 }
 
 /** 24:00은 다음 날짜의 00:00으로 저장되므로, 같은 열에서는 하루를 더해 ghost 높이를 계산한다. */
@@ -280,19 +273,24 @@ export function getAllDayBarStyle(color: string): { background: string; borderLe
   return {
     background: tintOnCard(color),
     borderLeft: `3px solid ${color}`,
-    color: '#E8E8EE',
+    color: 'rgb(var(--color-text-primary))',
   };
 }
 
 function toTimedEvent(event: CalendarEvent): TimedEvent {
   const startMin = Math.max(0, Math.min(DAY_END_MIN, timeToMinutes(event.startTime ?? '00:00')));
   const suppliedEnd = event.endTime ? timeToMinutes(event.endTime) : startMin + 60;
-  const endMin = Math.max(startMin + 1, Math.min(DAY_END_MIN, suppliedEnd > startMin ? suppliedEnd : startMin + 60));
-  return { event, startMin, endMin, layoutId: calendarEventIdentityKey(event) };
+  const milestone = event.linkedGanttTaskKind === 'milestone' && event.startTime === event.endTime;
+  const endMin = milestone ? startMin : Math.max(startMin + 1, Math.min(DAY_END_MIN, suppliedEnd > startMin ? suppliedEnd : startMin + 60));
+  // Reserve a small hit area for a point in the layout, while its true end stays at the start.
+  const layoutEndMin = milestone ? Math.min(DAY_END_MIN, startMin + 15) : endMin;
+  return { event, startMin, endMin, layoutEndMin, milestone, layoutId: calendarEventIdentityKey(event) };
 }
 
 function bandContains(blocks: TimedEvent[], startMin: number, endMin: number): boolean {
-  return blocks.some((block) => block.startMin < endMin && block.endMin > startMin);
+  return blocks.some((block) => block.milestone
+    ? block.startMin >= startMin && block.startMin < endMin
+    : block.startMin < endMin && block.endMin > startMin);
 }
 
 function hasBlocksInBand(blocksByDate: Map<string, TimedEvent[]>, startMin: number, endMin: number): boolean {
@@ -310,8 +308,9 @@ function isTimedEventInBand(event: CalendarEvent | null, startMin: number, endMi
 /** 각 보이는 시간 밴드 안에서만 겹침을 계산하도록 블록을 자르고 고유 ID를 붙인다. */
 function clipTimedBlocksToBand(blocks: TimedEvent[], startMin: number, endMin: number): TimeBandBlock[] {
   return blocks.flatMap((block) => {
+    if (block.milestone && (block.startMin < startMin || block.startMin >= endMin)) return [];
     const clippedStart = Math.max(block.startMin, startMin);
-    const clippedEnd = Math.min(block.endMin, endMin);
+    const clippedEnd = Math.min(block.layoutEndMin, endMin);
     if (clippedEnd <= clippedStart) return [];
     return [{
       source: block,
@@ -543,7 +542,7 @@ export function WeekTimeGridView({
                     transition={reduce ? { duration: 0 } : { duration: 2, ease: 'easeInOut' }}
                   />
                 )}
-                <div className={`text-[11px] font-semibold ${date.getDay() === 0 ? 'text-red-400' : date.getDay() === 6 ? 'text-blue-400' : 'text-text-secondary'}`}>
+                <div className={`text-[11px] font-semibold ${date.getDay() === 0 ? 'text-[rgb(var(--color-calendar-sunday))]' : date.getDay() === 6 ? 'text-[rgb(var(--color-calendar-saturday))]' : 'text-text-secondary'}`}>
                   {WEEKDAY_KR[date.getDay()]}
                 </div>
                 <div className={`mx-auto mt-0.5 flex h-7 w-7 items-center justify-center rounded-full text-sm font-bold ${isToday ? 'bg-accent text-white' : 'text-text-primary'}`}>
@@ -580,7 +579,7 @@ export function WeekTimeGridView({
                   aria-label={`${label}, 종일 일정`}
                   data-event-identity={identityKey}
                   data-realtime-highlight={isRealtimeHighlighted ? 'true' : undefined}
-                  className={`absolute z-10 truncate rounded px-1.5 text-left text-[10px] font-semibold text-white shadow-sm outline-none focus-visible:ring-2 focus-visible:ring-white focus-visible:ring-offset-1 focus-visible:ring-offset-bg-primary ${isRealtimeHighlighted ? reduce ? 'calendar-realtime-highlight-static' : 'calendar-realtime-highlight' : ''}`}
+                  className={`absolute z-10 truncate rounded px-1.5 text-left text-[10px] font-semibold text-text-primary shadow-sm outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-1 focus-visible:ring-offset-bg-primary ${isRealtimeHighlighted ? reduce ? 'calendar-realtime-highlight-static' : 'calendar-realtime-highlight' : ''}`}
                   style={{
                     top: 3 + bar.row * ALL_DAY_ROW_PX,
                     left: `calc(${bar.startCol * (100 / columnCount)}% + 2px)`,
@@ -877,7 +876,7 @@ function TimeBand({
                 const isPast = date < today || (date === today && block.endMin <= nowMin);
                 const isCurrent = date === today && block.startMin <= nowMin && nowMin < block.endMin;
                 const duration = block.endMin - block.startMin;
-                const visibleHeight = ((bandBlock.endMin - bandBlock.startMin) / 60) * HOUR_PX;
+                const visibleHeight = block.milestone ? MIN_TIMED_TEXT_HEIGHT_PX : ((bandBlock.endMin - bandBlock.startMin) / 60) * HOUR_PX;
                 const canShowText = visibleHeight >= MIN_TIMED_TEXT_HEIGHT_PX;
                 const visualStyle = getTimedBlockVisualStyle(block.event.color);
                 const stateStyle = getTimedBlockStateStyle(block.event.color, isCurrent);
@@ -888,7 +887,7 @@ function TimeBand({
                 const isMoving = isPreviewed && timeGridDnD.isDragActive;
                 const isSettling = timeGridDnD.isSettling(block.event);
                 const isRealtimeHighlighted = highlightedEventIdentities?.has(calendarEventIdentityKey(block.event)) === true;
-                const canResizeEnd = bandBlock.endMin === block.endMin;
+                const canResizeEnd = !block.milestone && bandBlock.endMin === block.endMin;
                 const blockMotion = getTimeGridBlockMotion({
                   reduce,
                   opacity,
@@ -920,12 +919,13 @@ function TimeBand({
                   <motion.button
                     key={layout.id}
                     type="button"
-                    title={`${block.event.title} · ${minutesToTime(block.startMin)}–${minutesToTime(block.endMin)}`}
-                    aria-label={`${block.event.title}, ${date} ${minutesToTime(block.startMin)}부터 ${minutesToTime(block.endMin)}까지`}
+                    title={block.milestone ? `${block.event.title} · ${minutesToTime(block.startMin)} 마일스톤` : `${block.event.title} · ${minutesToTime(block.startMin)}–${minutesToTime(block.endMin)}`}
+                    aria-label={block.milestone ? `${block.event.title}, ${date} ${minutesToTime(block.startMin)} 마일스톤` : `${block.event.title}, ${date} ${minutesToTime(block.startMin)}부터 ${minutesToTime(block.endMin)}까지`}
                     data-time-grid-event="true"
+                    data-time-grid-milestone={block.milestone ? 'true' : undefined}
                     data-event-identity={calendarEventIdentityKey(block.event)}
                     data-realtime-highlight={isRealtimeHighlighted ? 'true' : undefined}
-                    className={`absolute z-10 overflow-hidden rounded ${canShowText ? 'px-1.5 py-1' : 'p-0'} text-left font-semibold outline-none focus-visible:ring-2 focus-visible:ring-white focus-visible:ring-offset-1 focus-visible:ring-offset-bg-primary ${isMoving ? 'shadow-xl' : ''} ${isSettling ? 'time-grid-settling' : ''} ${isRealtimeHighlighted ? reduce ? 'calendar-realtime-highlight-static' : 'calendar-realtime-highlight' : ''}`}
+                    className={`absolute z-10 overflow-hidden rounded ${block.milestone ? 'px-1.5 py-0 leading-[14px]' : canShowText ? 'px-1.5 py-1' : 'p-0'} text-left font-semibold outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-1 focus-visible:ring-offset-bg-primary ${isMoving ? 'shadow-xl' : ''} ${isSettling ? 'time-grid-settling' : ''} ${isRealtimeHighlighted ? reduce ? 'calendar-realtime-highlight-static' : 'calendar-realtime-highlight' : ''}`}
                     style={{
                       ...eventBlockStyle(
                         layout,
@@ -961,7 +961,7 @@ function TimeBand({
                     {...eventDragProps}
                   >
                     {canShowText && duration >= 30 && <span data-time-grid-time="true" data-time-grid-live-label={isPreviewed ? 'true' : undefined} className="block truncate" style={{ color: visualStyle.timeColor, fontSize: 9 }}>{timeLabel}</span>}
-                    {canShowText && <span data-time-grid-title="true" className="block truncate" style={{ color: visualStyle.titleColor, fontSize: visualStyle.titleFontSize }}>{block.event.title}</span>}
+                    {canShowText && <span data-time-grid-title="true" className="block truncate" style={{ color: visualStyle.titleColor, fontSize: visualStyle.titleFontSize }}>{block.milestone ? `◇ ${minutesToTime(block.startMin)} · ${block.event.title}` : block.event.title}</span>}
                     {/* 길이 조절 구간(하단 8px)에 커서로 어포던스를 준다(D11).
                         자식이라 mousedown은 블록 핸들러로 그대로 버블한다. */}
                     {!isReadOnly && !isPersisting && canResizeEnd && (

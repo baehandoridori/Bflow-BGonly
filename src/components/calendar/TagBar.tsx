@@ -35,8 +35,8 @@ function TagChip({ name, color, enabled, reduce, onClick }: TagChipProps) {
       transition={reduce ? { duration: 0 } : TAG_CHIP_POP}
       className="rounded-full border px-2.5 py-1 text-xs font-medium transition-colors cursor-pointer"
       style={enabled
-        ? { backgroundColor: hexToRgba(color, 0.22), borderColor: hexToRgba(color, 0.45), color }
-        : { backgroundColor: 'transparent', borderColor: 'rgba(139, 141, 163, 0.35)', color: '#8B8DA3' }}
+        ? { backgroundColor: hexToRgba(color, 0.22), borderColor: hexToRgba(color, 0.45), color: 'rgb(var(--color-text-primary))' }
+        : { backgroundColor: 'transparent', borderColor: 'rgb(var(--color-bg-border) / 0.6)', color: 'rgb(var(--color-text-secondary))' }}
     >
       {name}
     </motion.button>
@@ -62,7 +62,7 @@ export function TagBar({ vacationConnected, onOpenTagManager }: TagBarProps) {
         aria-pressed={allEnabled}
         onClick={resetTagsAllOn}
         className={allEnabled
-          ? 'rounded-full border border-accent/40 bg-accent/15 px-2.5 py-1 text-xs font-medium text-accent transition-colors cursor-pointer'
+          ? 'rounded-full border border-accent/40 bg-accent/15 px-2.5 py-1 text-xs font-medium text-text-primary transition-colors cursor-pointer'
           : 'rounded-full border border-text-secondary/30 px-2.5 py-1 text-xs font-medium text-text-secondary transition-colors hover:text-text-primary cursor-pointer'}
       >
         전체

@@ -44,6 +44,7 @@ import {
 import { navigateToSceneView } from '@/utils/sceneNavigationAction';
 import { createUuid } from '@/utils/createUuid';
 import { fmtDate, parseDate, addDays, formatWeekHeaderLabel } from '@/utils/calendarDate';
+import { calendarViewAnchor } from '@/utils/calendarViewAnchor';
 import { useMotionPref } from '@/hooks/useMotionPref';
 import { buildEventSnapshot, diffEventSnapshots, type CalendarEventSnapshot } from '@/utils/calendarEventDiff';
 import { eventContentSnapshot, withCalendarPresentationForSnapshot } from '@/utils/calendarLocalMutation';
@@ -231,6 +232,7 @@ export function ScheduleView() {
   const [events, setEvents] = useState<CalendarEvent[]>([]);
   const [vacationEvents, setVacationEvents] = useState<CalendarEvent[]>([]);
   const [viewMode, setViewMode] = useState<CalendarViewMode>(() => readCalendarViewPreference().viewMode);
+  const viewAnchorRef = useRef<string | null>(null);
   const [weekSubMode, setWeekSubMode] = useState<WeekSubMode>(() => readCalendarViewPreference().weekSubMode);
   const [showCreate, setShowCreate] = useState(false);
   const [createDate, setCreateDate] = useState<string | undefined>();
@@ -670,6 +672,7 @@ export function ScheduleView() {
 
   const moveToWeekContaining = useCallback((date: Date) => {
     const target = normalizeCalendarDate(date);
+    viewAnchorRef.current = fmtDate(target);
     const targetYear = target.getFullYear();
     const targetWeeks = generateYearWeeks(targetYear);
     setYear(targetYear);
@@ -705,6 +708,7 @@ export function ScheduleView() {
 
   const moveToDay = useCallback((date: Date) => {
     const target = normalizeCalendarDate(date);
+    viewAnchorRef.current = fmtDate(target);
     setYear(target.getFullYear());
     setMonth(target.getMonth());
     setActiveDayIndex(calendarDayIndex(target));
@@ -971,6 +975,16 @@ export function ScheduleView() {
 
   // 키보드 네비게이션용 포커스 날짜 (월간 뷰 전용)
   const [focusedDate, setFocusedDate] = useState<string | null>(null);
+  const changeViewMode = useCallback((nextMode: CalendarViewMode) => {
+    if (nextMode === viewMode) return;
+    const anchor = calendarViewAnchor({mode:viewMode,year,month,activeDayIndex,
+      weekDays:weeks[activeWeekIndex],focusedDate,previousAnchor:viewAnchorRef.current});
+    viewAnchorRef.current = fmtDate(anchor);
+    moveToWeekContaining(anchor);
+    moveToDay(anchor);
+    setFocusedDate(nextMode === 'month' ? fmtDate(anchor) : null);
+    setViewMode(nextMode);
+  },[viewMode,year,month,activeDayIndex,weeks,activeWeekIndex,focusedDate,moveToWeekContaining,moveToDay]);
 
   // navigate-to-date 펄스 애니메이션용
   const [pulseDate, setPulseDate] = useState<string | null>(null);
@@ -1058,14 +1072,14 @@ export function ScheduleView() {
       if (key === 'w') {
         e.preventDefault();
         e.stopPropagation();
-        setViewMode('week');
+        changeViewMode('week');
         return;
       }
 
       if (key === 'm') {
         e.preventDefault();
         e.stopPropagation();
-        setViewMode('month');
+        changeViewMode('month');
         return;
       }
 
@@ -1162,13 +1176,8 @@ export function ScheduleView() {
     return () => document.removeEventListener('keydown', handler);
   }, [
     viewMode, showCreate, quickEdit, panelEvent, calendarSettings, tagManagerAnchor, showShortcutHelp, focusedDate,
-    month, year, moveWeekBy, moveDayBy, resetCreatePrefill, markPeriodNavigation,
+    month, year, moveWeekBy, moveDayBy, resetCreatePrefill, markPeriodNavigation, changeViewMode,
   ]);
-
-  // 뷰 모드 변경 시 포커스 초기화
-  useEffect(() => {
-    setFocusedDate(null);
-  }, [viewMode]);
 
   // 일정 알림/할일이 store에 남긴 날짜 이동을 적용한다. CustomEvent와 달리 lazy mount
   // 전에도 요청이 보존되며, 정확히 일치하는 요청 ID만 소비해 새 요청을 지우지 않는다.
@@ -1545,7 +1554,7 @@ export function ScheduleView() {
             {([['month', '월'], ['2week', '2주'], ['week', '주'], ['today', '오늘']] as const).map(([m, l]) => (
               <button
                 key={m}
-                onClick={() => setViewMode(m)}
+                onClick={() => changeViewMode(m)}
                 className={cn(
                   'px-3 py-1.5 text-xs rounded-md font-medium cursor-pointer transition-colors',
                   viewMode === m
@@ -1629,7 +1638,7 @@ export function ScheduleView() {
       )}
 
       {/* ═══ 이벤트 수 통계 ═══ */}
-      <div className="flex items-center gap-4 text-sm text-text-secondary/50 px-4">
+      <div className="flex items-center gap-4 text-sm text-text-secondary px-4">
         <span>이번 달 {currentMonthEventCount}개</span>
         <span className="text-bg-border/50">·</span>
         <span>오늘 {filteredEvents.filter((e) => e.startDate <= today && e.endDate >= today).length}개</span>

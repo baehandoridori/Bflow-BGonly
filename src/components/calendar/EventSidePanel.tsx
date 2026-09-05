@@ -26,6 +26,7 @@ import { EntityAwareInput } from '@/components/common/EntityAwareInput';
 import { EntityText } from '@/components/common/EntityText';
 import { DEPARTMENT_CONFIGS } from '@/types';
 import { floatingGlassStyle } from '@/utils/glassStyles';
+import { GlassDropdown } from '@/components/common/GlassDropdown';
 import { parseDate } from '@/utils/calendarDate';
 import { calendarEventIdentityKey, calendarEventLinkedTodoId } from '@/utils/calendarEventIdentity';
 import { isGanttMilestone, isGanttProjection } from '@/utils/calendarGantt';
@@ -237,7 +238,7 @@ export function EventSidePanel({
   const dday = calcDDay(event.endDate);
   const fieldClassName = 'w-full bg-bg-primary/85 border border-bg-border/70 focus:border-accent/50 rounded-md px-2 py-1 text-sm font-semibold text-text-primary outline-none transition-colors';
   const dateFieldClassName = 'w-full bg-bg-primary/85 border border-bg-border/70 focus:border-accent/50 rounded-md px-2 py-1 text-xs text-text-primary outline-none transition-colors';
-  const labelClassName = 'text-[10px] text-text-secondary/70 font-medium uppercase tracking-wide';
+  const labelClassName = 'text-[10px] text-text-secondary font-medium uppercase tracking-wide';
   const hasInvalidTimedInterval = supportsTimeEditing
     && !draftAllDay
     && !milestone
@@ -547,7 +548,7 @@ export function EventSidePanel({
                 />
               )}
               {hasInvalidTimedInterval && (
-                <p role="alert" className="text-[11px] font-medium text-red-400">
+                <p role="alert" className="text-[11px] font-medium text-[color:color-mix(in_srgb,var(--status-error)_65%,rgb(var(--color-text-primary)))]">
                   종료 시각은 시작 시각보다 뒤여야 해요.
                 </p>
               )}
@@ -567,7 +568,7 @@ export function EventSidePanel({
                 className="ml-auto text-[10px] font-bold px-1.5 py-0.5 rounded-full"
                 style={{
                   backgroundColor: `${event.color}20`,
-                  color: event.color,
+                  color: 'rgb(var(--color-text-primary))',
                 }}
               >
                 {dday}
@@ -580,17 +581,15 @@ export function EventSidePanel({
             <div className="flex flex-col gap-2 border-t border-bg-border/45 pt-2">
               <div>
                 <label className={labelClassName}>캘린더</label>
-                <select
-                  aria-label="캘린더"
+                <GlassDropdown
+                  label="캘린더"
                   value={draftCalendarId}
                   disabled={isMutating}
-                  onChange={(changeEvent) => setDraftCalendarId(changeEvent.target.value)}
-                  className={`${dateFieldClassName} mt-1`}
-                >
-                  {editableCalendars.map((calendar) => (
-                    <option key={calendar.id} value={calendar.id}>{calendar.name}</option>
-                  ))}
-                </select>
+                  onChange={setDraftCalendarId}
+                  options={editableCalendars.map((calendar) => ({ value: calendar.id, label: calendar.name }))}
+                  portal
+                  className="mt-1 w-full [&>button]:w-full [&>button]:justify-between [&>button]:text-xs"
+                />
               </div>
               <div>
                 <label className={labelClassName}>태그</label>
@@ -615,7 +614,7 @@ export function EventSidePanel({
                         onClick={() => setDraftTagId(tag.id)}
                         className="rounded-full border px-2 py-1 text-[10px] disabled:opacity-45"
                         style={{
-                          color: selected ? tag.color : 'rgb(var(--color-text-secondary))',
+                          color: selected ? 'rgb(var(--color-text-primary))' : 'rgb(var(--color-text-secondary))',
                           borderColor: selected ? tag.color : 'rgb(var(--color-bg-border) / 0.7)',
                           background: selected ? `color-mix(in srgb, ${tag.color} 18%, transparent)` : 'transparent',
                         }}
@@ -640,7 +639,7 @@ export function EventSidePanel({
               {currentTag && (
                 <span
                   className="rounded-full border px-2 py-1 font-medium"
-                  style={{ color: currentTag.color, borderColor: currentTag.color, background: `color-mix(in srgb, ${currentTag.color} 16%, transparent)` }}
+                  style={{ color: 'rgb(var(--color-text-primary))', borderColor: currentTag.color, background: `color-mix(in srgb, ${currentTag.color} 16%, transparent)` }}
                 >
                   {currentTag.name}
                 </span>
@@ -656,7 +655,7 @@ export function EventSidePanel({
               className="text-[10px] px-1.5 py-0.5 rounded-full font-medium"
               style={{
                 backgroundColor: `${event.color}20`,
-                color: event.color,
+                color: 'rgb(var(--color-text-primary))',
               }}
             >
               {TYPE_LABELS[event.type]}
@@ -692,7 +691,7 @@ export function EventSidePanel({
               <Palmtree size={12} className="shrink-0 text-emerald-400" />
               <span className="text-xs">{event.vacationType}</span>
               {event.vacationUserName && (
-                <span className="text-xs text-text-secondary/60">({event.vacationUserName})</span>
+                <span className="text-xs text-text-secondary">({event.vacationUserName})</span>
               )}
             </div>
           )}
@@ -722,14 +721,14 @@ export function EventSidePanel({
               <p className="text-xs text-text-primary/80 leading-relaxed whitespace-pre-wrap">
                 {event.memo
                   ? <EntityText text={event.memo} userNames={userNames} />
-                  : <span className="text-text-secondary/40">메모 없음</span>}
+                  : <span className="text-text-secondary">메모 없음</span>}
               </p>
             </div>
           )}
         </div>
 
         {/* 작성자 */}
-        <div className="flex items-center gap-2 text-text-secondary/60">
+        <div className="flex items-center gap-2 text-text-secondary">
           <MapPin size={11} />
           <span className="text-[10px]">작성: {event.createdBy}</span>
         </div>
@@ -738,7 +737,7 @@ export function EventSidePanel({
         <div className="flex-1" />
 
         {mutationError && (
-          <p role="alert" className="rounded-md bg-red-500/10 px-2.5 py-2 text-center text-[11px] text-red-300">
+          <p role="alert" className="rounded-md bg-red-500/10 px-2.5 py-2 text-center text-[11px] text-text-primary">
             {mutationError}
           </p>
         )}
@@ -747,7 +746,7 @@ export function EventSidePanel({
         {isVacation ? (
           /* 휴가 이벤트: 편집 불가 안내 */
           <div className="flex flex-col gap-2 pt-1">
-            <p className="text-[10px] text-text-secondary/50 text-center leading-relaxed">
+            <p className="text-[10px] text-text-secondary text-center leading-relaxed">
               휴가 관리는 휴가 탭에서 관리합니다
             </p>
             <button
@@ -764,7 +763,7 @@ export function EventSidePanel({
         ) : isViewOnly ? (
           <div className="flex flex-col gap-2 pt-1">
             <div className="rounded-lg border border-bg-border/55 bg-bg-primary/45 px-3 py-2.5 text-center">
-              <p className="text-[10px] leading-relaxed text-text-secondary/70">
+              <p className="text-[10px] leading-relaxed text-text-secondary">
                 보기 전용 일정이라 편집하거나 삭제할 수 없습니다
               </p>
             </div>
@@ -812,7 +811,7 @@ export function EventSidePanel({
             <button
               onClick={handleDelete}
               disabled={isMutating}
-              className="w-full flex items-center justify-center gap-1.5 py-2 rounded-lg text-xs font-medium bg-red-500/10 text-red-400 hover:bg-red-500/20 transition-colors cursor-pointer disabled:cursor-not-allowed disabled:opacity-45"
+              className="w-full flex items-center justify-center gap-1.5 py-2 rounded-lg text-xs font-medium bg-red-500/10 text-[color:color-mix(in_srgb,var(--status-error)_65%,rgb(var(--color-text-primary)))] hover:bg-red-500/20 transition-colors cursor-pointer disabled:cursor-not-allowed disabled:opacity-45"
             >
               <Trash2 size={12} />
               삭제
