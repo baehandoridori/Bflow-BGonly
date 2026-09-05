@@ -45,9 +45,10 @@
 
 ## 운영 적용 순서
 
-1. 변경 리뷰 후 승인된 DB에 migration을 적용한다. 미적용 앱은 간트 준비 안내를 표시하고 기존 캘린더는 계속 사용할 수 있다.
-2. 실제 Electron에서 소유자·편집자·보기 전용 계정으로 공유, 동시 편집, 캘린더 양방향 수정과 Realtime을 확인한다.
+1. ~~변경 리뷰 후 승인된 DB에 migration을 적용한다.~~ 적용 완료: `gantt_workspaces`(20260905124058) → 긴급 차단 `gantt_security_containment`(20260905125843) → 세션 토큰 경계 `app_sessions_gantt_session_auth`(2026-09-05, `DEVLOG/2026-09-05-gantt-session-auth.md`). 간트 RPC 는 이제 `app_login` 세션 토큰을 요구한다. 미적용 앱은 간트 준비 안내를 표시하고 기존 캘린더는 계속 사용할 수 있다.
+2. 실제 Electron에서 소유자·편집자·보기 전용 계정으로 공유, 동시 편집, 캘린더 양방향 수정과 Realtime(`gantt-changed` broadcast 신호)을 확인한다. 예전에 로그인해 둔 계정은 간트 화면에서 재로그인 안내를 보는 것이 정상이다.
 3. 정식 `npm run build` 및 설치·업데이트 검증 후 배포한다. 이번 `build:vite`의 개발용 manifest는 배포용 설치본이 아니다.
+4. **팀 전원이 v1.111.0 이상으로 갱신된 뒤** `DEVLOG/migrations/2026-09-06-users-password-lockdown.sql` 을 적용한다(anon 의 `users.password` 읽기/쓰기 차단). 그 전에 적용하면 v1.110.1 이하의 로그인이 즉시 깨진다.
 
 ## 2026-09-05 작업·그룹 추가 동작 수정
 

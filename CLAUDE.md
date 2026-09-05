@@ -20,6 +20,7 @@
 4. **Supabase 단일 경로**: 새 기능은 `supabaseService` 경유로만 구현 (Sheets 분기 추가 금지)
 5. **IPC 구조 유지**: 렌더러에서 직접 Supabase 호출 금지, 반드시 IPC → 메인 → Supabase
 6. **자동 업데이트 배포 원칙**: G드라이브에는 빌드 파일을 먼저 모두 올리고 `manifest.json`을 마지막에 갱신한다. 앱은 manifest를 보고 업데이트를 감지하므로, 반쯤 올라간 빌드가 최신으로 보이면 안 된다.
+7. **호출자 검증은 서버 세션 토큰으로**: 개인·공유 권한이 있는 데이터(간트 등)의 RPC 는 호출자가 보내는 `p_actor_id` 같은 신원 주장을 믿지 않고, `app_login` 이 발급한 세션 토큰(`gantt_session_*` 래퍼 패턴)으로 신원을 확정한다. 새 테이블은 anon 직접 권한 없이 SECURITY DEFINER 래퍼로만 열고, 토큰은 main 프로세스 밖(renderer payload)으로 내보내지 않는다. `users` 조회는 명시 컬럼만 쓴다(`select *` 금지 — 비밀번호 컬럼 권한이 회수되면 통째로 실패). 설계: `docs/superpowers/specs/2026-09-05-gantt-session-auth-design.md`.
 
 ---
 
