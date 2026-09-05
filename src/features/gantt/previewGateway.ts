@@ -32,6 +32,10 @@ function readAuthority(options:PreviewOptions):Authority {
     value.revisions={};rememberGanttRevisions(value.revisions,value.snapshot);
     for(const receipt of Object.values(value.receipts)){
       const command=JSON.parse(receipt.command) as GanttRequest['command'];
+      if(command.type==='saveProjectPair'){
+        for(const item of command.projects){const key=`project:${item.project.id}`,committed=item.expectedRevision+1;if(Number.isSafeInteger(committed)&&committed>0)value.revisions[key]=Math.max(value.revisions[key]??0,committed);}
+        continue;
+      }
       const kind=command.type==='saveProject'||command.type==='deleteProject'?'project':'space';
       const id=command.type==='saveProject'?command.project.id:command.type==='saveSpace'?command.space.id:command.type==='deleteProject'?command.projectId:command.spaceId;
       const committed=command.type==='saveProject'||command.type==='saveSpace'?(command.expectedRevision??0)+1:command.expectedRevision;

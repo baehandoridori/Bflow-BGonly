@@ -34,7 +34,7 @@ const project: GanttProject = {
 const bundle = build({
   entryPoints: ['src/features/gantt/GanttDialogs.tsx'], bundle: true, format: 'cjs',
   platform: 'node', target: 'node22', write: false,
-  external: ['react', 'react/jsx-runtime', 'react-dom', 'lucide-react', '@/utils/glassStyles'],
+  external: ['react', 'react/jsx-runtime', 'react-dom', 'lucide-react', '@/utils/glassStyles', './GanttSelect'],
 });
 
 // Use the existing calendar UI harness pattern: keep real component handlers and
@@ -60,6 +60,7 @@ async function harness(targetTask: GanttTask | null = task, failSave = false) {
       if (id === 'react-dom') return {createPortal: (child: ReactNode) => child};
       if (id === 'lucide-react') return {X: () => null};
       if (id === '@/utils/glassStyles') return {floatingGlassStyle: {}};
+      if (id === './GanttSelect') return {GanttSelect:()=>null};
       return nodeRequire(id);
     }, module, module.exports, {body: {}},
   );

@@ -4,6 +4,7 @@ import { build } from 'esbuild';
 import { readFileSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
 import type { GanttSnapshot } from '../src/features/gantt/types.ts';
+import { createProject } from '../src/features/gantt/domain.ts';
 
 let nonce = 0;
 const token = (actorId: string) => `token-${actorId}`;
@@ -45,6 +46,15 @@ test('store sends the session token (never an actor id) with the original reques
   await assert.rejects(store.execute('alice', request), /먼저 수정/);
   assert.deepEqual(calls, [{ name: 'gantt_session_execute', args: { p_session_token: 'token-alice', p_request_id: 'request-1', p_command: request.command } }]);
   assert.equal(JSON.stringify(calls).includes('p_actor_id'), false);
+});
+
+test('a two-project mutation crosses main as one session RPC and malformed batches never reach SQL',async()=>{
+  const {createGanttStore}=await load('electron/ganttStore.ts');const calls:unknown[]=[];
+  const store=createGanttStore({rpc:async(name:string,args:unknown)=>{calls.push({name,args});return {data:{spaces:[],projects:[]},error:null};}},sessions);
+  const spaceId=crypto.randomUUID(),a=createProject('A',spaceId,'alice'),b=createProject('B',spaceId,'alice');
+  const command={type:'saveProjectPair',projects:[{project:a,expectedRevision:1},{project:b,expectedRevision:1}],expectedSpaces:[{spaceId,expectedRevision:1}]};
+  await store.execute('alice',{requestId:'pair',command});assert.deepEqual(calls,[{name:'gantt_session_execute',args:{p_session_token:'token-alice',p_request_id:'pair',p_command:command}}]);
+  for(const bad of [{...command,projects:[command.projects[0]]},{...command,projects:[command.projects[0],command.projects[0]]},{...command,expectedSpaces:[]},{...command,projects:[command.projects[0],{...command.projects[1],expectedRevision:1.5}]}])await assert.rejects(store.execute('alice',{requestId:'bad',command:bad}));assert.equal(calls.length,1);
 });
 
 test('without a server session the store sends nothing and asks to log in again', async () => {

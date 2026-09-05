@@ -4,6 +4,7 @@ import test from 'node:test';
 import { build } from 'esbuild';
 import { isValidElement, type ReactElement, type ReactNode } from 'react';
 import { applyCommand, shiftDate } from '../src/features/gantt/domain.ts';
+import { InspectorAutosave } from '../src/features/gantt/inspectorAutosave.ts';
 import type { GanttCommand, GanttProject, GanttSnapshot, GanttTask } from '../src/features/gantt/types.ts';
 
 const id = (value: number) => `00000000-0000-4000-8000-${String(value).padStart(12, '0')}`;
@@ -31,13 +32,13 @@ function fixture(): GanttSnapshot {
     ],
   };
 }
-type Props = {children?: ReactNode; value?: string; disabled?: boolean; 'aria-label'?: string; onClick?: () => void; onChange?: (event: {target: {value: string}}) => void};
+type Props = {children?: ReactNode; value?: string; label?:string; options?:unknown[]; disabled?: boolean; 'aria-label'?: string; onClick?: () => void; onChange?: (event: {target: {value: string}}) => void};
 type Element = ReactElement<Props>;
 type CanvasProps = {selected: string[]; statusFilter: string; onSelect(projectId: string, taskId: string | null, multiple?: boolean): void; onAdd(project: GanttProject, parentId: string|null, start: string, end: string): void; onMenu(project:GanttProject,task:GanttTask|null,x:number,y:number):void};
-type InspectorProps = {displayProgress?:number;onAddChild(): void; onDelete(): void; onComplete():void; onSaveTask(patch: Partial<GanttTask>): Promise<void>};
+type InspectorProps = {displayProgress?:number;onAddChild(): void; onDelete(): void; onComplete():void; onSaveTask(patch: Partial<GanttTask>, expectedRevision?:number): Promise<GanttProject|void>;onDraftProgress(projectId:string,taskId:string,progress:number|null):void;onRegisterCloseGuard(guard:(()=>Promise<boolean>)|null):void};
 const bundle = build({
   entryPoints: ['src/features/gantt/GanttView.tsx'], bundle: true, format: 'cjs', platform: 'node', target: 'node22', write: false,
-  external: ['react', 'react/jsx-runtime', 'lucide-react', '@/stores/useAuthStore', '@/stores/useDataStore', '@/stores/useCalendarStore', '@/utils/calcStats', './useGanttStore', './GanttCanvas', './GanttDialogs', './GanttInspector', './gantt.css'],
+  external: ['react', 'react/jsx-runtime', 'lucide-react', '@/stores/useAuthStore', '@/stores/useDataStore', '@/stores/useCalendarStore', '@/utils/calcStats', './useGanttStore', './GanttCanvas', './GanttDialogs', './GanttInspector', './GanttSelect', './GanttTree', './gantt.css'],
 });
 
 function elements(node: ReactNode, type?: unknown): Element[] {
@@ -56,7 +57,7 @@ function button(tree: ReactNode, label: string) {
   assert.ok(found, `${label} button exists`);return found;
 }
 function projectPicker(tree: ReactNode) {
-  const found = elements(tree, 'select').find(node => node.props['aria-label'] === '작업을 추가할 프로젝트');
+  const found = elements(tree).find(node => node.props.label === '작업을 추가할 프로젝트');
   assert.ok(found, 'creation project combobox exists');return found;
 }
 const settle = () => new Promise<void>(resolve => setImmediate(resolve));
@@ -68,15 +69,16 @@ async function harness() {
   let stateCursor = 0, refCursor = 0, effectCursor = 0, changed = false;
   let effects: Array<() => unknown> = [];
   const commands: GanttCommand[] = [];
+  let writeDelay:Promise<void>|null=null;
   const state = {
     snapshot: fixture(), actorId: 'me', pending: false, loading: false, error: null,
     canUndo: false, canRedo: false, async initialize() {}, async refresh() {}, async undo() {}, async redo() {},
-    async execute(command: GanttCommand) {commands.push(structuredClone(command));state.snapshot = applyCommand(state.snapshot, 'me', command);},
+    async execute(command: GanttCommand) {commands.push(structuredClone(command));state.snapshot = applyCommand(state.snapshot, 'me', command);const delay=writeDelay;writeDelay=null;if(delay){state.pending=true;await delay;state.pending=false;}},
   };
   const store = Object.assign(() => state, {getState: () => state});
   const calendarState = {calendars: [], async loadAll() {}};
   const calendarStore = Object.assign((selector: (value: typeof calendarState) => unknown) => selector(calendarState), {getState: () => calendarState});
-  const Canvas = () => null, Inspector = () => null, Context = () => null, SpaceDialog = () => null, Empty = () => null;
+  const Canvas = () => null, Inspector = () => null, Context = () => null, SpaceDialog = () => null, Empty = () => null, Select=()=>null, Tree=()=>null;
   const nodeRequire = createRequire(import.meta.url), react = nodeRequire('react');
   const module = {exports: {} as {GanttView?: () => ReactNode}};
   new Function('require', 'module', 'exports', 'window', 'localStorage', 'setInterval', 'clearInterval', (await bundle).outputFiles[0].text)(
@@ -106,6 +108,8 @@ async function harness() {
       if (name === './GanttCanvas') return {GanttCanvas: Canvas, localDate: () => '2026-09-05', moveDate: shiftDate};
       if (name === './GanttDialogs') return {GanttContextMenu: Context, GanttModal: Empty, GanttSpaceDialog: SpaceDialog};
       if (name === './GanttInspector') return {GanttInspector: Inspector};
+      if (name === './GanttSelect') return {GanttSelect:Select};
+      if (name === './GanttTree') return {GanttTree:Tree};
       if (name === './gantt.css') return {};
       if (name === 'lucide-react') return new Proxy({}, {get: () => Empty});
       return nodeRequire(name);
@@ -113,7 +117,9 @@ async function harness() {
   );
   return {
     commands,
+    delayNextWrite(){let release!:()=>void;writeDelay=new Promise<void>(resolve=>{release=resolve;});return release;},
     setPending(value: boolean) {state.pending = value;},
+    setActor(value: string) {state.actorId = value;},
     render() {
       let tree: ReactNode;
       for (let pass = 0; pass < 10; pass++) {
@@ -127,6 +133,7 @@ async function harness() {
     inspector(tree: ReactNode): InspectorProps {const found = elements(tree, Inspector)[0];assert.ok(found);return found.props as unknown as InspectorProps;},
     context(tree:ReactNode) {const found=elements(tree,Context)[0];assert.ok(found);return found.props as unknown as {onDelete():void;completed:boolean};},
     folder(tree:ReactNode) {const found=elements(tree,SpaceDialog)[0];assert.ok(found);return found.props as unknown as {onDelete():Promise<void>;projectCount:number};},
+    navigation(tree:ReactNode) {const found=elements(tree,Tree)[0];assert.ok(found);return found.props as any;},
     snapshot:()=>state.snapshot,
     latestProject(projectId: string) {const found = state.snapshot.projects.find(project => project.id === projectId);assert.ok(found);return found;},
   };
@@ -152,7 +159,7 @@ test('selecting a group changes the creation project and adds a child in that gr
 
 test('adding a group creates a sibling and the next task becomes the new group child', async () => {
   const h = await harness();let tree = h.render();
-  projectPicker(tree).props.onChange!({target: {value: B}});tree = h.render();
+  projectPicker(tree).props.onChange!(B as any);tree = h.render();
   h.canvas(tree).onSelect(B, GROUP);tree = h.render();
   const before = new Set(h.latestProject(B).tasks.map(task => task.id));
   button(tree, '+ 그룹').props.onClick!();await settle();
@@ -164,7 +171,7 @@ test('adding a group creates a sibling and the next task becomes the new group c
 
 test('adding after a selected task inserts immediately after it within the same parent', async () => {
   const h = await harness();let tree = h.render();
-  projectPicker(tree).props.onChange!({target: {value: B}});tree = h.render();
+  projectPicker(tree).props.onChange!(B as any);tree = h.render();
   h.canvas(tree).onSelect(B, TASK);tree = h.render();
   const before = new Set(h.latestProject(B).tasks.map(task => task.id));
   button(tree, '+ 작업').props.onClick!();await settle();
@@ -177,7 +184,7 @@ test('adding after a selected task inserts immediately after it within the same 
 
 test('explicit project selection clears the previous task insertion target', async () => {
   const h = await harness();let tree = h.render();h.canvas(tree).onSelect(B, GROUP);tree = h.render();
-  projectPicker(tree).props.onChange!({target: {value: A}});tree = h.render();
+  projectPicker(tree).props.onChange!(A as any);tree = h.render();
   assert.equal(h.canvas(tree).selected.includes(GROUP), false, 'an explicit project choice clears the old group selection');
   button(tree, '+ 작업').props.onClick!();await settle();
   assert.equal(h.latestProject(A).tasks.length, 1);assert.equal(h.latestProject(A).tasks[0].parentId, null);
@@ -195,11 +202,11 @@ test('a read-only selected project cannot silently create in another editable pr
 
 test('saving keeps the selected creation project visible while creation is disabled', async () => {
   const h = await harness();let tree = h.render();
-  projectPicker(tree).props.onChange!({target: {value: B}});tree = h.render();
+  projectPicker(tree).props.onChange!(B as any);tree = h.render();
   h.canvas(tree).onSelect(B, GROUP);h.render();h.setPending(true);tree = h.render();
   const picker = projectPicker(tree);
   assert.equal(picker.props.value, B, 'pending does not erase the current project choice');
-  assert.ok(elements(picker, 'option').some(option => option.props.value === B), 'the selected project remains an available option');
+  assert.ok((picker.props.options as any[]).some(option => option.value === B), 'the selected project remains an available option');
   assert.equal(button(tree, '+ 작업').props.disabled, true, 'a second creation waits until the pending write finishes');
   assert.deepEqual(h.commands, []);
 });
@@ -266,8 +273,8 @@ test('context delete removes its target rather than the previously selected task
 
 test('folder deletion rejects a folder containing projects and always requires empty authority state', async()=>{
   const h=await harness();let tree=h.render();
-  const settings=elements(tree,'button').find(e=>e.props['aria-label']==='내 폴더 설정')!;assert.ok(settings);
-  (settings.props.onClick as (e:any)=>void)({preventDefault(){}});tree=h.render();
+  const nav=h.navigation(tree);
+  nav.onFolderSettings(h.snapshot().spaces.find(s=>s.id===id(20)));tree=h.render();
   assert.equal(h.folder(tree).projectCount,2);
   await assert.rejects(h.folder(tree).onDelete(),/프로젝트/);
   assert.equal(h.commands.length,0);
@@ -281,3 +288,131 @@ test('group inspector progress includes unfinished empty groups rather than show
   let tree=h.render();h.canvas(tree).onSelect(B,OUTER);tree=h.render();
   assert.equal(h.inspector(tree).displayProgress,50);
 });
+
+test('new direct work goes before nested groups when adding inside a group',async()=>{
+  const h=await harness(),project=h.latestProject(B);project.tasks=[row(GROUP,'group',null,0),row(TASK,'task',GROUP,0),row(NEXT_GROUP,'group',GROUP,1),row(NEXT_TASK,'task',NEXT_GROUP,0)];
+  let tree=h.render();h.canvas(tree).onSelect(B,GROUP);tree=h.render();
+  const before=new Set(project.tasks.map(t=>t.id));button(tree,'+ 작업').props.onClick!();await settle();
+  const added=addedTask(h,before,B);
+  assert.deepEqual(h.latestProject(B).tasks.filter(t=>t.parentId===GROUP).sort((a,b)=>a.sortOrder-b.sortOrder).map(t=>t.id),[TASK,added.id,NEXT_GROUP]);
+});
+
+test('autosave callbacks return canonical revision and preserve successive edits',async()=>{
+  const h=await harness();let tree=h.render();h.canvas(tree).onSelect(B,TASK);tree=h.render();
+  const inspector=h.inspector(tree),revision=h.latestProject(B).revision;
+  const first=await inspector.onSaveTask({title:'입력 1'},revision);
+  assert.equal(first?.revision,revision+1);
+  await inspector.onSaveTask({progress:65},first!.revision);
+  assert.equal(h.latestProject(B).tasks.find(t=>t.id===TASK)?.title,'입력 1');
+  assert.equal(h.latestProject(B).tasks.find(t=>t.id===TASK)?.progress,65);
+  await assert.rejects(inspector.onSaveTask({title:'충돌'},revision),/다른 변경/);
+});
+
+test('draft progress overlays the chart but never changes canonical data before saving',async()=>{
+  const h=await harness();let tree=h.render();h.canvas(tree).onSelect(B,TASK);tree=h.render();
+  h.inspector(tree).onDraftProgress(B,TASK,75);tree=h.render();
+  const chart=h.canvas(tree) as any;
+  assert.equal(chart.projects.find((p:GanttProject)=>p.id===B).tasks.find((t:GanttTask)=>t.id===TASK).progress,75);
+  assert.equal(h.latestProject(B).tasks.find(t=>t.id===TASK)?.progress,0);
+  h.inspector(tree).onDraftProgress(B,TASK,null);tree=h.render();
+  assert.equal((h.canvas(tree) as any).projects.find((p:GanttProject)=>p.id===B).tasks.find((t:GanttTask)=>t.id===TASK).progress,0);
+});
+
+test('failed pending draft keeps the current selection when navigating the tree',async()=>{
+  const h=await harness();let tree=h.render();h.canvas(tree).onSelect(B,TASK);tree=h.render();
+  h.inspector(tree).onRegisterCloseGuard(async()=>false);
+  h.navigation(tree).onSelect(A,null);await settle();tree=h.render();
+  assert.deepEqual(h.canvas(tree).selected,[TASK]);
+  h.inspector(tree).onRegisterCloseGuard(async()=>true);
+  h.navigation(tree).onSelect(A,null);await settle();tree=h.render();
+  assert.deepEqual(h.canvas(tree).selected,[A]);
+});
+
+test('cross-project drop saves one pair from raw data rather than draft display objects',async()=>{
+  const h=await harness();let tree=h.render();const source=h.latestProject(B),target=h.latestProject(A),display=structuredClone(source);
+  display.tasks.find(t=>t.id===TASK)!.title='화면 임시 값';display.tasks.find(t=>t.id===TASK)!.progress=95;
+  (h.canvas(tree) as any).onRelocate(display,display.tasks.find(t=>t.id===TASK),target,null,'inside');await settle();
+  assert.equal(h.commands.length,1);assert.equal(h.commands[0].type,'saveProjectPair');
+  assert.equal(h.latestProject(B).tasks.some(t=>t.id===TASK),false);
+  const moved=h.latestProject(A).tasks.find(t=>t.id===TASK)!;assert.equal(moved.title,TASK);assert.equal(moved.progress,0);assert.equal(moved.parentId,null);
+  tree=h.render();assert.deepEqual(h.canvas(tree).selected,[TASK]);assert.equal(projectPicker(tree).props.value,A);
+});
+
+test('drop rejects a changed target revision before writing either project',async()=>{
+  const h=await harness();const tree=h.render(),source=h.latestProject(B),target=structuredClone(h.latestProject(A));h.latestProject(A).revision++;
+  (h.canvas(tree) as any).onRelocate(source,source.tasks.find(t=>t.id===TASK),target,null,'inside');await settle();
+  assert.equal(h.commands.length,0);assert.ok(h.latestProject(B).tasks.some(t=>t.id===TASK));
+});
+
+test('wider project visibility requires confirmation and fences folder membership changes',async()=>{
+  const h=await harness(),source=h.latestProject(B),target=h.latestProject(A),space=h.snapshot().spaces.find(s=>s.id===source.spaceId)!;
+  space.shared=true;space.members=[{userId:'viewer',canEdit:false}];source.memberIds=['me'];
+  let tree=h.render();(h.canvas(tree) as any).onRelocate(source,source.tasks.find(t=>t.id===TASK),target,null,'inside');await settle();tree=h.render();
+  assert.equal(h.commands.length,0);assert.match(text(tree),/연결 정보를 볼 수/);
+  space.revision++;button(tree,'확인').props.onClick!();await settle();
+  assert.ok(h.latestProject(B).tasks.some(t=>t.id===TASK));assert.equal(h.latestProject(A).tasks.length,0);
+});
+
+test('adding a task cannot discard a failed or invalid inspector draft',async()=>{
+  const h=await harness();let tree=h.render();h.canvas(tree).onSelect(B,TASK);tree=h.render();
+  h.inspector(tree).onRegisterCloseGuard(async()=>false);
+  button(tree,'+ 작업').props.onClick!();await settle();tree=h.render();
+  assert.deepEqual(h.commands,[]);assert.deepEqual(h.canvas(tree).selected,[TASK]);
+});
+
+test('a title blur save does not swallow the following add-task click',async()=>{
+  const h=await harness();let tree=h.render();h.canvas(tree).onSelect(B,TASK);tree=h.render();
+  h.inspector(tree).onRegisterCloseGuard(async()=>{h.setPending(false);return true;});h.setPending(true);tree=h.render();
+  assert.equal(button(tree,'+ 작업').props.disabled,false);
+  button(tree,'+ 작업').props.onClick!();await settle();assert.equal(h.commands.length,1);
+});
+
+test('a delayed creation acknowledgement cannot replace a newer inspector selection',async()=>{
+  const h=await harness();let tree=h.render();h.canvas(tree).onSelect(B,TASK);tree=h.render();
+  const release=h.delayNextWrite();button(tree,'+ 작업').props.onClick!();await settle();tree=h.render();
+  h.navigation(tree).onSelect(A,null);await settle();tree=h.render();h.inspector(tree).onRegisterCloseGuard(async()=>false);
+  release();await settle();tree=h.render();assert.deepEqual(h.canvas(tree).selected,[A]);
+});
+
+test('a delayed relocation acknowledgement cannot replace a newer inspector selection',async()=>{
+  const h=await harness();let tree=h.render();const source=h.latestProject(B),target=h.latestProject(A),release=h.delayNextWrite();
+  (h.canvas(tree) as any).onRelocate(source,source.tasks.find(t=>t.id===TASK),target,null,'inside');await settle();tree=h.render();
+  h.navigation(tree).onSelect(B,NEXT_TASK);await settle();tree=h.render();h.inspector(tree).onRegisterCloseGuard(async()=>false);
+  release();await settle();tree=h.render();assert.deepEqual(h.canvas(tree).selected,[NEXT_TASK]);
+});
+
+for(const operation of ['creation','relocation'] as const) {
+  test(`${operation} keeps input entered in the same inspector while its write was pending`,async()=>{
+    const h=await harness();let tree=h.render();h.canvas(tree).onSelect(B,NEXT_TASK);tree=h.render();
+    const queue=new InspectorAutosave(()=>{}),source=h.latestProject(B),target=h.latestProject(A),before=new Set(source.tasks.map(t=>t.id));
+    queue.receive({key:`${B}:${NEXT_TASK}`,revision:source.revision,values:{title:'저장된 제목'}},{fields:['title'],prepare:values=>({values,error:values.title?'':'제목을 입력하세요.'}),save:async()=>{throw new Error('빈 제목을 저장하면 안 됩니다.');}});
+    h.inspector(tree).onRegisterCloseGuard(()=>queue.flush());
+    const release=h.delayNextWrite();
+    if(operation==='creation')button(tree,'+ 작업').props.onClick!();
+    else (h.canvas(tree) as any).onRelocate(source,source.tasks.find(t=>t.id===TASK),target,null,'inside');
+    await settle();queue.change({title:''});release();await settle();tree=h.render();
+    assert.equal(h.commands.length,1,'the completed mutation remains committed');
+    if(operation==='creation')addedTask(h,before,B);
+    else assert.ok(h.latestProject(A).tasks.some(t=>t.id===TASK));
+    assert.deepEqual(h.canvas(tree).selected,[NEXT_TASK],'the inspector containing the later draft remains selected');
+    assert.equal(queue.snapshot().values.title,'');assert.equal(queue.snapshot().dirty,true);assert.equal(queue.snapshot().status,'blocked');queue.dispose();
+  });
+
+  test(`${operation} rechecks navigation and actor after the final draft flush`,async()=>{
+    for(const boundary of ['navigation','actor'] as const){
+      const h=await harness();let tree=h.render();h.canvas(tree).onSelect(B,NEXT_TASK);tree=h.render();
+      h.inspector(tree).onRegisterCloseGuard(async()=>true);
+      const source=h.latestProject(B),target=h.latestProject(A),release=h.delayNextWrite();
+      if(operation==='creation')button(tree,'+ 작업').props.onClick!();
+      else (h.canvas(tree) as any).onRelocate(source,source.tasks.find(t=>t.id===TASK),target,null,'inside');
+      await settle();tree=h.render();let finish!:(value:boolean)=>void,finalChecks=0;
+      h.inspector(tree).onRegisterCloseGuard(()=>{finalChecks++;return new Promise<boolean>(resolve=>{finish=resolve;});});
+      release();await settle();assert.equal(finalChecks,1,'selection waits for input entered during the write');
+      if(boundary==='navigation'){
+        h.inspector(tree).onRegisterCloseGuard(async()=>true);h.navigation(tree).onSelect(A,null);await settle();
+      }else h.setActor('other');
+      finish(true);await settle();tree=h.render();
+      assert.equal(h.commands.length,1);assert.deepEqual(h.canvas(tree).selected,[boundary==='navigation'?A:NEXT_TASK]);
+    }
+  });
+}

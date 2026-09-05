@@ -53,7 +53,14 @@ export function validateGanttRequest(value: unknown): asserts value is GanttRequ
     throw new Error('올바른 간트 요청이 필요합니다.');
   }
   const command = request.command;
-  if (!['saveSpace', 'saveProject', 'deleteSpace', 'deleteProject'].includes(command.type)) throw new Error('알 수 없는 간트 요청입니다.');
+  if (!['saveSpace', 'saveProject', 'saveProjectPair', 'deleteSpace', 'deleteProject'].includes(command.type)) throw new Error('알 수 없는 간트 요청입니다.');
+  if(command.type==='saveProjectPair') {
+    if(!Array.isArray(command.projects)||command.projects.length!==2||new Set(command.projects.map(item=>item.project?.id)).size!==2)throw new Error('서로 다른 두 프로젝트가 필요합니다.');
+    for(const item of command.projects){validateProject(item.project);if(!Number.isSafeInteger(item.expectedRevision)||item.expectedRevision<1)throw new Error('간트 요청의 버전이 올바르지 않습니다.');}
+    const spaces=new Set(command.projects.map(item=>item.project.spaceId));
+    if(!Array.isArray(command.expectedSpaces)||command.expectedSpaces.length!==spaces.size||new Set(command.expectedSpaces.map(item=>item.spaceId)).size!==spaces.size||command.expectedSpaces.some(item=>!spaces.has(item.spaceId)||!Number.isSafeInteger(item.expectedRevision)||item.expectedRevision<1))throw new Error('이동할 폴더 버전이 필요합니다.');
+    return;
+  }
   if (command.expectedRevision !== null && (!Number.isSafeInteger(command.expectedRevision) || command.expectedRevision < 0)) throw new Error('간트 요청의 버전이 올바르지 않습니다.');
   if (command.type === 'saveProject') validateProject(command.project);
   else if (command.type === 'saveSpace') {
