@@ -31,6 +31,7 @@ function PathActionRow({
   onPick,
   onOpen,
   onCreate,
+  onClear,
   creating = false,
 }: {
   label: string;
@@ -38,12 +39,16 @@ function PathActionRow({
   onPick: () => void;
   onOpen: () => void;
   onCreate?: () => void;
+  /** 피드백 57-2: 등록된 경로만 지운다(실제 폴더·파일은 그대로). 경로가 있을 때만 버튼 표시. */
+  onClear?: () => void;
   creating?: boolean;
 }) {
   return (
-    <div className="flex items-center justify-between gap-3 rounded-lg border border-bg-border/70 bg-bg-border/10 px-3 py-2">
-      <div className="min-w-0">
-        <div className="text-xs text-text-secondary">{label}</div>
+    /* 피드백 57-2·3 으로 버튼이 늘고 라벨이 길어져, 2단 배치의 좁은 칸에서는 경로 이름이 거의 안 보였다.
+       한 줄에 다 못 들어가면 버튼 줄을 아래로 내려 경로 이름이 항상 읽히게 한다. */
+    <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2 rounded-lg border border-bg-border/70 bg-bg-border/10 px-3 py-2">
+      <div className="min-w-0 flex-1 basis-28">
+        <div className="text-xs text-text-secondary whitespace-nowrap">{label}</div>
         <div className="text-sm text-text-primary truncate" title={path ? displayCharacterPathName(path) : undefined}>{displayCharacterPathName(path)}</div>
       </div>
       <div className="flex items-center gap-1.5 shrink-0">
@@ -59,13 +64,15 @@ function PathActionRow({
             만들기
           </button>
         )}
+        {/* 피드백 57-3: '선택' → 상태별 '경로 지정'/'경로 수정' — 이름만 보고 무엇을 하는 버튼인지 알 수 있게. */}
         <button
           type="button"
           onClick={onPick}
           disabled={creating}
+          title={path ? `${label} 경로를 다른 곳으로 바꿔요` : `탐색기에서 골라 ${label} 경로를 등록해요`}
           className="rounded-md border border-bg-border px-2 py-1.5 text-xs text-text-secondary hover:text-text-primary hover:border-text-secondary/50 disabled:opacity-50"
         >
-          선택
+          {path ? '경로 수정' : '경로 지정'}
         </button>
         {path && (
           <button
@@ -75,6 +82,17 @@ function PathActionRow({
             className="rounded-md border border-bg-border px-2 py-1.5 text-xs text-text-secondary hover:text-text-primary hover:border-text-secondary/50"
           >
             열기
+          </button>
+        )}
+        {path && onClear && (
+          <button
+            type="button"
+            onClick={onClear}
+            disabled={creating}
+            title={`${label} 연결을 지워요 — 실제 폴더·파일은 그대로예요`}
+            className="rounded-md border border-bg-border px-2 py-1.5 text-xs text-text-secondary hover:text-red-400 hover:border-red-400/50 disabled:opacity-50"
+          >
+            지우기
           </button>
         )}
       </div>
@@ -138,6 +156,8 @@ export function CostumeDetail({
   onPickFile,
   onCreateFolder,
   creatingFolder,
+  onClearFolder,
+  onClearFile,
 }: {
   character: Character;
   costume: CharacterCostume;
@@ -145,6 +165,9 @@ export function CostumeDetail({
   onPickFile: () => void;
   onCreateFolder: () => void;
   creatingFolder: boolean;
+  /** 피드백 57-2: 작업 폴더/작업 파일 경로 지우기 — 확인 창은 부모(상세 모달)가 띄운다. */
+  onClearFolder: () => void;
+  onClearFile: () => void;
 }) {
   const updateCostumeStage = useCharacterBoardStore((s) => s.updateCostumeStage);
   const updateCostumeField = useCharacterBoardStore((s) => s.updateCostumeField);
@@ -300,6 +323,7 @@ export function CostumeDetail({
           onPick={onPickFolder}
           onOpen={() => openStoredCharacterPath(character.workFolderPath, '작업 폴더')}
           onCreate={onCreateFolder}
+          onClear={onClearFolder}
           creating={creatingFolder}
         />
         <PathActionRow
@@ -307,6 +331,7 @@ export function CostumeDetail({
           path={costume.workFilePath}
           onPick={onPickFile}
           onOpen={() => openStoredCharacterPath(costume.workFilePath, '작업 파일')}
+          onClear={onClearFile}
         />
       </div>
 

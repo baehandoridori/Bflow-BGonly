@@ -46,6 +46,7 @@ import { extractSceneDelta } from '@/utils/realtimeDelta';
 import { loadVacationConfig, connectVacation } from '@/services/vacationService';
 import { useVacationPendingStore } from '@/stores/useVacationPendingStore';
 import { Toaster, toast as sonnerToast } from 'sonner';
+import { ConfirmDialogHost } from '@/components/common/ConfirmDialog';
 import type {
   AppUser,
   ElectronAPI,
@@ -1122,6 +1123,10 @@ export function WidgetPopup({ widgetId, extraParams }: { widgetId: string; extra
         </WidgetIdContext.Provider>
         </IsPopupContext.Provider>
       </div>
+
+      {/* 확인 창 호스트 — 새 창의 캐릭터 현황판(보관·삭제·폴더 만들기·경로 지우기)도 앱과 같은 확인 창을 쓴다.
+          없으면 브라우저 기본 confirm 으로 떨어진다(피드백 57-1). */}
+      <ConfirmDialogHost />
 
       {/* Sonner 토스트 (휴가 등록 완료/실패 브로드캐스트 표시용) */}
       <Toaster

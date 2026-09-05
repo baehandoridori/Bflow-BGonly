@@ -323,16 +323,36 @@ function CharacterDetailPanel({
   };
   const fitEditorImage = fitEditorCostumeId ? primaryImageOf(fitEditorCostumeId) : null;
 
+  // 피드백 57-2: 사용자가 방금 [지우기]로 끊은 작업 폴더를, 뒤이은 작업 파일 지정이 자동 유추로 되살리지 않게 한다.
+  //   캐릭터를 바꾸면 자연히 무효가 되도록 "언제" 가 아니라 "어느 캐릭터에서 지웠는지" 를 담는다.
+  const clearedFolderCharacterIdRef = useRef<string | null>(null);
+
   const handlePickFolder = useCallback(async () => {
     const folder = await chooseWorkFolder();
     if (!folder) return;
+    clearedFolderCharacterIdRef.current = null;
     await updateCharacterFolder(character.id, folder);
   }, [character.id, updateCharacterFolder]);
+
+  // 피드백 57-2: 등록된 경로만 지운다 — 실제 폴더는 건드리지 않는다. 실수 방지로 확인 창을 거친다(보관·삭제와 같은 패턴).
+  const handleClearFolder = useCallback(async () => {
+    const ok = await ConfirmDialog.show({
+      message: `'${character.name}'의 작업 폴더 연결을 지울까요?\n실제 폴더는 그대로 두고 현황판에 등록된 경로만 지워요. 다시 '경로 지정'으로 연결할 수 있어요.`,
+      confirmLabel: '연결 지우기',
+    });
+    if (!ok) return;
+    const saved = await updateCharacterFolder(character.id, null);
+    if (saved) {
+      clearedFolderCharacterIdRef.current = character.id;
+      toast.success('작업 폴더 연결을 지웠어요');
+    }
+  }, [character.id, character.name, updateCharacterFolder]);
 
   const handleCreateFolder = useCallback(async () => {
     if (creatingFolder) return;
     setCreatingFolder(true);
     try {
+      clearedFolderCharacterIdRef.current = null;
       await createAndLinkCharacterFolder(character, updateCharacterFolder);
     } finally {
       setCreatingFolder(false);
@@ -354,11 +374,23 @@ function CharacterDetailPanel({
     const saved = await updateCostumeField(targetCostume.id, { workFilePath: filePath });
     if (!saved) return;
     const latestFolderPath = useCharacterBoardStore.getState().characters.find((item) => item.id === character.id)?.workFolderPath ?? character.workFolderPath;
-    if (!latestFolderPath?.trim()) {
+    // 방금 [지우기]로 끊은 캐릭터면 자동 유추를 건너뛴다 — 사용자가 일부러 없앤 연결을 조용히 되살리면 안 된다.
+    if (!latestFolderPath?.trim() && clearedFolderCharacterIdRef.current !== character.id) {
       const folder = await resolveFolderAfterCharacterFilePick(latestFolderPath, filePath);
       if (folder) await updateCharacterFolder(character.id, folder);
     }
   }, [activeCostume, character.id, character.workFolderPath, ensureCostume, updateCharacterFolder, updateCostumeField]);
+
+  // 피드백 57-2: 복장 작업 파일 연결 지우기 — 파일 자체는 그대로. 프레즌스(피드백 54) 캐시는 경로 null 도 실변경으로 처리한다.
+  const handleClearFile = useCallback(async (targetCostume: CharacterCostume) => {
+    const ok = await ConfirmDialog.show({
+      message: `'${targetCostume.name}' 복장의 작업 파일 연결을 지울까요?\n실제 파일은 그대로 두고 현황판에 등록된 경로만 지워요.`,
+      confirmLabel: '연결 지우기',
+    });
+    if (!ok) return;
+    const saved = await updateCostumeField(targetCostume.id, { workFilePath: null });
+    if (saved) toast.success('작업 파일 연결을 지웠어요');
+  }, [updateCostumeField]);
 
   const handleEpisodeReel = useCallback(async (episode: typeof episodes[number]) => {
     await openOrRegisterEpisodeReel({
@@ -630,6 +662,8 @@ function CharacterDetailPanel({
                 onPickFile={() => handlePickFile(activeCostume)}
                 onCreateFolder={handleCreateFolder}
                 creatingFolder={creatingFolder}
+                onClearFolder={handleClearFolder}
+                onClearFile={() => handleClearFile(activeCostume)}
               />
             ) : (
               <div className="text-center text-text-secondary text-sm py-10 border border-dashed border-bg-border rounded-lg">
@@ -932,6 +966,7 @@ export function CharacterDetailModal({
         <AddCharacterModal
           onClose={() => setAddOpen(false)}
           onCreated={(c) => setSelectedId(c.id)}
+          onOpenExisting={(c) => setSelectedId(c.id)}
         />
       )}
     </div>

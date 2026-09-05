@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 
 type ConfirmOptions = {
@@ -14,18 +14,34 @@ let externalShow: ((opts: ConfirmOptions) => Promise<boolean>) | null = null;
 
 export function ConfirmDialogHost() {
   const [state, setState] = useState<InternalState | null>(null);
+  // 화면에 떠 있는 확인 창을 ref 로도 들고 있는다 — show/언마운트에서 "지금 열려 있는지"를 최신 값으로 봐야 한다.
+  const pendingRef = useRef<InternalState | null>(null);
 
   useEffect(() => {
     externalShow = (opts) =>
       new Promise<boolean>((resolve) => {
-        setState({ ...opts, resolve });
+        // 이미 확인 창이 떠 있으면 덮어쓰지 않고 새 요청을 '취소'로 닫는다.
+        //   덮어쓰면 ① 앞 창을 기다리던 쪽이 영영 응답을 못 받아 멈추고, ② 사용자가 읽던 문구가
+        //   손 밑에서 바뀌어 엉뚱한 확인을 누르게 된다(느린 조회 뒤에 뜨는 확인 창이 있어 실제로 겹칠 수 있다).
+        if (pendingRef.current) {
+          console.warn('[ConfirmDialog] 이미 확인 창이 떠 있어 새 요청을 취소로 처리합니다');
+          resolve(false);
+          return;
+        }
+        const next = { ...opts, resolve };
+        pendingRef.current = next;
+        setState(next);
       });
     return () => {
       externalShow = null;
+      // 호스트가 사라지면 대기 중인 확인 창을 취소로 닫는다 — 기다리던 쪽이 영구히 멈추지 않게.
+      pendingRef.current?.resolve(false);
+      pendingRef.current = null;
     };
   }, []);
 
   const handle = (ok: boolean) => {
+    pendingRef.current = null;
     state?.resolve(ok);
     setState(null);
   };
