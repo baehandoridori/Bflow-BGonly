@@ -1,0 +1,81 @@
+{
+  "evidenceKind": "observed-native-ui-and-read-only-db-checks",
+  "completedAt": "2026-09-06T03:48:53+09:00",
+  "version": "1.112.2",
+  "releaseCommit": "09dd0dbf565d2643508f3261eb5a4dbcd00b095d",
+  "app": "Windows installed BFLOW.exe",
+  "authenticationAutomated": false,
+  "fixture": {
+    "spaceId": "e41c069d-60f8-4363-b934-9702850c0cdd",
+    "spaceName": "__실앱검증_0906_간트연동",
+    "projectId": "aaadef6c-7cfc-4336-a318-135c1b864574",
+    "projectName": "__실앱검증_양방향_0906",
+    "shared": false,
+    "memberCount": 0,
+    "taskId": "e4d54937-5945-419b-89b4-6c604b176938",
+    "milestoneId": "ee282d2f-58ab-4870-9ee8-8da5b27b60f4"
+  },
+  "ganttToCalendar": {
+    "revision": 3,
+    "title": "__실앱검증_3일작업",
+    "startDate": "2026-09-06",
+    "endDate": "2026-09-08",
+    "allDay": true,
+    "memo": "실제 설치본에서 저장한 간트 연동 검증 메모",
+    "calendarMonthAndDetailsMatched": true
+  },
+  "calendarToGantt": {
+    "revision": 4,
+    "title": "__실앱검증_캘린더수정",
+    "startDate": "2026-09-07",
+    "endDate": "2026-09-08",
+    "memo": "캘린더에서 수정한 메모: 9월 7~8일",
+    "databaseMatched": true,
+    "timelineAfterReentry": "same title, 2 days"
+  },
+  "timedMilestone": {
+    "createdRevision": 6,
+    "initialDate": "2026-09-07",
+    "initialStartTime": "10:00",
+    "initialEndTime": "10:00",
+    "calendarEditRevision": 7,
+    "finalStartDate": "2026-09-08",
+    "finalEndDate": "2026-09-08",
+    "finalStartTime": "11:00",
+    "finalEndTime": "11:00",
+    "kind": "milestone",
+    "allDay": false,
+    "endFieldsDisabledAndFollowedStart": true,
+    "saveSucceeded": true,
+    "databaseMatched": true,
+    "timelineAfterReentry": "0-day milestone on updated date"
+  },
+  "deleteUndoRedo": {
+    "revisionBeforeDelete": 7,
+    "afterDeleteProjectCount": 0,
+    "afterUndoRevision": 8,
+    "afterUndoLedgerRevision": 8,
+    "bothTasksAndCalendarLinksPreserved": true,
+    "afterRedoProjectCount": 0,
+    "ledgerRevisionRetainedAfterRedo": 8
+  },
+  "cleanup": {
+    "projectDeletedThroughNativeRedo": true,
+    "emptyFolderCleanup": "Scoped SQL with locked ID, owner, name, revision, private visibility, member list, and child-count assertions; no folder-delete UI exists.",
+    "finalFixtureFolderCount": 0,
+    "finalFixtureProjectCount": 0,
+    "finalFixtureCalendarEventsVisible": 0,
+    "finalExistingMonthEventsVisible": 4,
+    "ordinaryEventsInLinkedCalendar": 2,
+    "ordinaryEventsFingerprintBeforeDeletion": "2faf83735a1e57962198c50131e15a7b",
+    "ordinaryEventsFingerprintAfterCleanup": "2faf83735a1e57962198c50131e15a7b",
+    "idempotencyAndRevisionAuditRetained": true,
+    "unrelatedVisibleProjectPreserved": true
+  },
+  "scope": {
+    "realAccountCount": 1,
+    "nativeTwoAccountConcurrentEditing": false,
+    "nativeSaveOrCalendarErrorsObserved": false,
+    "permissionsConcurrencyRollbackCoverage": "Separate automated SQL, controlled failure tests, and two preview tabs; see scenario report."
+  }
+}
