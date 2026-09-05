@@ -6,11 +6,14 @@ import { pathToFileURL } from 'node:url';
 import type { GanttSnapshot } from '../src/features/gantt/types.ts';
 
 let nonce = 0;
-async function load(entry: string, client?: unknown) {
+const token = (actorId: string) => `token-${actorId}`;
+/** 테스트용 세션 해석기: actor id → 결정적 토큰. 실제 앱은 SessionManager 가 canonical 사용자에게만 토큰을 준다. */
+const sessions = { tokenFor: token };
+async function load(entry: string, client?: unknown, extraExports = '') {
   const key = `__ganttPersistenceClient${nonce++}`;
   (globalThis as Record<string, unknown>)[key] = client;
   const result = await build({
-    stdin: { contents: `export * from './${entry}';`, resolveDir: process.cwd() },
+    stdin: { contents: `export * from './${entry}';${extraExports}`, resolveDir: process.cwd() },
     bundle: true, format: 'esm', platform: 'node', write: false,
     plugins: [{ name: 'no-runtime-io', setup(builder) {
       builder.onResolve({ filter: /^\.\/supabase$/ }, () => ({ path: 'db', namespace: 'stub' }));
@@ -26,27 +29,51 @@ async function load(entry: string, client?: unknown) {
 
 test('read reports missing migration while calendar projection remains compatible', async () => {
   const { createGanttStore } = await load('electron/ganttStore.ts');
-  const store = createGanttStore({ rpc: async () => ({ data: null, error: { code: 'PGRST202', message: 'missing function' } }) });
+  const store = createGanttStore({ rpc: async () => ({ data: null, error: { code: 'PGRST202', message: 'missing function' } }) }, sessions);
   await assert.rejects(store.read('alice'), /간트.*준비/);
   assert.deepEqual(await store.listCalendarEvents('alice', {}), []);
 });
 
-test('store sends canonical actor and original request id and propagates conflicts', async () => {
+test('store sends the session token (never an actor id) with the original request id and propagates conflicts', async () => {
   const { createGanttStore } = await load('electron/ganttStore.ts');
   const calls: unknown[] = [];
   const store = createGanttStore({ rpc: async (name: string, args: unknown) => {
     calls.push({ name, args });
     return { data: null, error: { code: '40001', message: '다른 사용자가 먼저 수정했습니다' } };
-  } });
+  } }, sessions);
   const request = { requestId: 'request-1', command: { type: 'deleteProject', projectId: 'p', expectedRevision: 2 } };
   await assert.rejects(store.execute('alice', request), /먼저 수정/);
-  assert.deepEqual(calls, [{ name: 'gantt_execute', args: { p_actor_id: 'alice', p_request_id: 'request-1', p_command: request.command } }]);
+  assert.deepEqual(calls, [{ name: 'gantt_session_execute', args: { p_session_token: 'token-alice', p_request_id: 'request-1', p_command: request.command } }]);
+  assert.equal(JSON.stringify(calls).includes('p_actor_id'), false);
+});
+
+test('without a server session the store sends nothing and asks to log in again', async () => {
+  const { createGanttStore } = await load('electron/ganttStore.ts');
+  let calls = 0;
+  const noSession = { tokenFor() { throw new Error('로그인 세션이 필요합니다. 다시 로그인해 주세요.'); } };
+  const store = createGanttStore({ rpc: async () => { calls++; return { data: [], error: null }; } }, noSession);
+  await assert.rejects(store.read('alice'), /다시 로그인/);
+  await assert.rejects(store.execute('alice', { requestId: 'r', command: { type: 'deleteProject', projectId: 'p', expectedRevision: 1 } }), /다시 로그인/);
+  // 캘린더 목록은 막히지 않는다: projection 만 비운다.
+  assert.deepEqual(await store.listCalendarEvents('alice', {}), []);
+  // 쓰기 경로는 조용히 넘어가지 않는다.
+  await assert.rejects(store.updateCalendarEvent('alice', 'gantt:project:task', { title: 'x' }, 'cal'), /다시 로그인/);
+  assert.equal(calls, 0);
+});
+
+test('an expired server session empties the calendar projection but surfaces on projection writes', async () => {
+  const { createGanttStore } = await load('electron/ganttStore.ts');
+  const expired = { code: '42501', message: '로그인 세션이 만료되었습니다. 다시 로그인해 주세요.' };
+  const store = createGanttStore({ rpc: async () => ({ data: null, error: expired }) }, sessions);
+  assert.deepEqual(await store.listCalendarEvents('alice', {}), []);
+  await assert.rejects(store.read('alice'), /만료/);
+  await assert.rejects(store.updateCalendarEvent('alice', 'gantt:project:task', { title: 'x' }, 'cal'), /만료/);
 });
 
 test('projection identifiers are distinct and invalid identifiers never reach SQL', async () => {
   const { createGanttStore, isGanttCalendarEventId } = await load('electron/ganttStore.ts');
   let calls = 0;
-  const store = createGanttStore({ rpc: async () => { calls++; return { data: [], error: null }; } });
+  const store = createGanttStore({ rpc: async () => { calls++; return { data: [], error: null }; } }, sessions);
   assert.equal(isGanttCalendarEventId('gantt:project:task'), true);
   assert.equal(isGanttCalendarEventId('calendar-1'), false);
   await assert.rejects(store.updateCalendarEvent('alice', 'ordinary-event', {}, 'cal'), /간트 일정/);
@@ -59,14 +86,18 @@ test('calendar store routes projection identities away from UUID event storage',
     from() { throw new Error('projection must not query UUID calendar_events table'); },
     async rpc(name: string) {
       calls.push(name);
-      if (name !== 'gantt_calendar_events') throw new Error('projection must not call ordinary calendar RPC');
+      if (name !== 'gantt_session_calendar_events') throw new Error('projection must not call ordinary calendar RPC');
       return { data: [], error: null };
     },
-  });
+  }, "export { setGanttSessionTokenResolver } from './electron/ganttStore.ts';");
+  // 세션 해석기를 배선하기 전에는 projection 조회가 RPC 를 부르지 않는다.
+  assert.equal(await store.getEventByIdForWrite('gantt:project:task', 'alice'), null);
+  assert.deepEqual(calls, []);
+  store.setGanttSessionTokenResolver(sessions);
   assert.equal(await store.getEventByIdForWrite('gantt:project:task', 'alice'), null);
   await assert.rejects(store.updateEvent('gantt:project:task', { title: 'x' }, 'calendar', 'alice'), /연결이 변경/);
   await assert.rejects(store.deleteEvent('gantt:project:task', 'calendar', 'alice'), /연결이 변경/);
-  assert.deepEqual(calls, ['gantt_calendar_events', 'gantt_calendar_events', 'gantt_calendar_events']);
+  assert.deepEqual(calls, ['gantt_session_calendar_events', 'gantt_session_calendar_events', 'gantt_session_calendar_events']);
 });
 
 test('IPC discards reads when canonical session changes during persistence', async () => {
@@ -155,15 +186,19 @@ test('PostgreSQL migration, ACL, CAS, replay, projection, and calendar deletion 
   const db = new PGlite();
   try {
     await db.exec(`
-      CREATE TABLE users(id TEXT PRIMARY KEY,role TEXT DEFAULT 'user',name TEXT DEFAULT '',created_at TIMESTAMPTZ DEFAULT now());
+      CREATE TABLE users(id TEXT PRIMARY KEY,role TEXT DEFAULT 'user',name TEXT DEFAULT '',password TEXT,slack_id TEXT,hire_date TEXT,birthday TEXT,
+        is_initial_password BOOLEAN DEFAULT true,created_at TIMESTAMPTZ DEFAULT now(),is_compositor BOOLEAN DEFAULT false,is_acting_supervisor BOOLEAN DEFAULT false);
       CREATE TABLE calendars(id UUID PRIMARY KEY,owner_id TEXT REFERENCES users(id),visibility TEXT,is_personal BOOLEAN DEFAULT false);
       CREATE TABLE calendar_members(calendar_id UUID REFERENCES calendars(id) ON DELETE CASCADE,user_id TEXT REFERENCES users(id),can_edit BOOLEAN,PRIMARY KEY(calendar_id,user_id));
-      INSERT INTO users(id) VALUES('alice'),('bob'),('carol'),('dave');
+      INSERT INTO users(id,name,password) VALUES('alice','alice','pw'),('bob','bob','pw'),('carol','carol','pw'),('dave','dave','pw');
       INSERT INTO calendars VALUES('00000000-0000-4000-8000-000000000010','alice','team',false);
       INSERT INTO calendar_members VALUES('00000000-0000-4000-8000-000000000010','bob',true);
     `);
     const sql = readFileSync(new URL('../DEVLOG/migrations/2026-09-05-gantt-workspaces.sql', import.meta.url), 'utf8');
-    await db.exec(sql); await db.exec(sql);
+    // 2026-09-05-gantt-containment.sql 은 anon/authenticated 역할을 전제하므로(PGlite 에 없음) 건너뛴다.
+    // app-sessions 마이그레이션은 역할 유무를 검사하며 같은 회수를 수행한다.
+    const sessionsSql = readFileSync(new URL('../DEVLOG/migrations/2026-09-05-app-sessions-gantt-auth.sql', import.meta.url), 'utf8');
+    await db.exec(sql); await db.exec(sql); await db.exec(sessionsSql); await db.exec(sessionsSql);
     const { createGanttStore } = await load('electron/ganttStore.ts');
     const client = { rpc: async (name: string, args: Record<string, unknown>) => {
       try {
@@ -172,7 +207,27 @@ test('PostgreSQL migration, ACL, CAS, replay, projection, and calendar deletion 
         return { data: result.rows[0].result, error: null };
       } catch (error) { return { data: null, error }; }
     } };
-    const store = createGanttStore(client);
+    // 실제 앱처럼 서버 로그인으로 토큰을 받는다. actor id 는 RPC 로 전달되지 않는다.
+    const tokens: Record<string, string> = {};
+    for (const id of ['alice', 'bob', 'carol', 'dave']) {
+      const login = await db.query('SELECT public.app_login($1,$2) AS result', [id, 'pw']);
+      tokens[id] = (login.rows[0].result as { token: string }).token;
+    }
+    const store = createGanttStore(client, { tokenFor: (id) => tokens[id] });
+    await t.test('server login issues tokens, rejects wrong passwords, and wrappers reject unknown or revoked tokens', async () => {
+      const bad = await db.query('SELECT public.app_login($1,$2) AS result', ['alice', 'nope']);
+      assert.equal((bad.rows[0].result as { ok: boolean }).ok, false);
+      const forged = await client.rpc('gantt_session_read', { p_session_token: '0'.repeat(64) });
+      assert.ok(forged.error); assert.match(String((forged.error as Error).message), /다시 로그인/);
+      const extra = await db.query('SELECT public.app_login($1,$2) AS result', ['dave', 'pw']);
+      const extraToken = (extra.rows[0].result as { token: string }).token;
+      assert.equal((await client.rpc('gantt_session_read', { p_session_token: extraToken })).error, null);
+      await db.query('SELECT public.app_logout($1)', [extraToken]);
+      const revoked = await client.rpc('gantt_session_read', { p_session_token: extraToken });
+      assert.ok(revoked.error); assert.match(String((revoked.error as Error).message), /만료/);
+      const hashes = await db.query('SELECT token_hash FROM app_sessions');
+      assert.ok(hashes.rows.every((row) => !Object.values(tokens).includes((row as { token_hash: string }).token_hash)), 'raw tokens are never stored');
+    });
     const space = { id: '00000000-0000-4000-8000-000000000001', ownerId: 'alice', name: '교육', shared: true, revision: 1,
       members: [{ userId: 'bob', canEdit: true }, { userId: 'carol', canEdit: false }] };
     const task = { id: '00000000-0000-4000-8000-000000000003', parentId: null, kind: 'task', title: '첫 수업', memo: '공유 메모',

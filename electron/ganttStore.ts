@@ -9,6 +9,20 @@ type RpcError = { code?: string; message?: string };
 export interface GanttRpcClient {
   rpc(name: string, args: Record<string, unknown>): PromiseLike<{ data: unknown; error: RpcError | null }>;
 }
+/**
+ * 호출자 검증 경계. RPC 는 actor id 가 아니라 서버(app_login)가 발급한 세션 토큰을 받고,
+ * 토큰이 없으면 아무 요청도 보내지 않는다. main 의 SessionManager 가 canonical 사용자와
+ * 일치할 때만 토큰을 내준다.
+ */
+export interface GanttSessionResolver {
+  tokenFor(actorId: string): string;
+}
+const SESSION_REQUIRED = '로그인 세션이 필요합니다. 다시 로그인해 주세요.';
+let sessionResolver: GanttSessionResolver = { tokenFor() { throw new Error(SESSION_REQUIRED); } };
+/** main 이 SessionManager 배선 뒤 한 번 호출한다. 테스트는 createGanttStore 에 직접 주입한다. */
+export function setGanttSessionTokenResolver(resolver: GanttSessionResolver): void {
+  sessionResolver = resolver;
+}
 export type GanttCalendarRow = CalendarEventRow & {
   linked_gantt_project_id: string; linked_gantt_task_id: string; gantt_can_edit: boolean;
 };
@@ -21,7 +35,11 @@ function missingMigration(error: RpcError): boolean {
 }
 function fail(error: RpcError): never {
   if (missingMigration(error)) throw new Error('간트 저장소 준비가 필요합니다. 간트 데이터베이스 업데이트를 적용해 주세요.');
-  throw new Error(error.message || '간트 저장 중 오류가 발생했습니다.');
+  // SQLSTATE 를 남겨 호출자가 세션 만료(42501)를 구분할 수 있게 한다.
+  throw Object.assign(new Error(error.message || '간트 저장 중 오류가 발생했습니다.'), { code: error.code });
+}
+function isSessionFailure(error: unknown): boolean {
+  return Boolean(error) && typeof error === 'object' && (error as { code?: string }).code === '42501';
 }
 function snapshot(data: unknown): GanttSnapshot {
   if (!data || typeof data !== 'object' || !Array.isArray((data as GanttSnapshot).spaces) || !Array.isArray((data as GanttSnapshot).projects)) {
@@ -56,30 +74,48 @@ function projectedRow(project: GanttProject, task: GanttTask): GanttCalendarRow 
   };
 }
 
-export function createGanttStore(client: GanttRpcClient) {
+export function createGanttStore(client: GanttRpcClient, session: GanttSessionResolver = { tokenFor: (actorId) => sessionResolver.tokenFor(actorId) }) {
   async function read(actorId: string): Promise<GanttSnapshot> {
-    const { data, error } = await client.rpc('gantt_read', { p_actor_id: actorId });
+    const token = session.tokenFor(actorId);
+    const { data, error } = await client.rpc('gantt_session_read', { p_session_token: token });
     if (error) fail(error);
     return snapshot(data);
   }
   async function execute(actorId: string, request: GanttRequest): Promise<GanttSnapshot> {
     validateGanttRequest(request);
-    const { data, error } = await client.rpc('gantt_execute', { p_actor_id: actorId, p_request_id: request.requestId, p_command: request.command });
+    const token = session.tokenFor(actorId);
+    const { data, error } = await client.rpc('gantt_session_execute', { p_session_token: token, p_request_id: request.requestId, p_command: request.command });
     if (error) fail(error);
     return snapshot(data);
   }
-  async function listCalendarEvents(actorId: string, query: EventQuery = {}): Promise<GanttCalendarRow[]> {
-    if (!actorId) throw new Error('로그인 세션이 필요합니다.');
-    const { data, error } = await client.rpc('gantt_calendar_events', {
-      p_actor_id: actorId, p_from: query.from ?? null, p_to: query.to ?? null, p_event_id: query.eventId ?? null,
+  async function fetchCalendarRows(token: string, query: EventQuery): Promise<GanttCalendarRow[]> {
+    const { data, error } = await client.rpc('gantt_session_calendar_events', {
+      p_session_token: token, p_from: query.from ?? null, p_to: query.to ?? null, p_event_id: query.eventId ?? null,
     });
     if (error) { if (missingMigration(error)) return []; fail(error); }
     if (!Array.isArray(data)) throw new Error('간트 일정 조회 결과가 올바르지 않습니다.');
     return data as GanttCalendarRow[];
   }
+  /**
+   * 캘린더 목록에 섞이는 projection 조회. 세션이 없거나 만료됐으면 캘린더 전체를 막지 않도록
+   * 빈 목록을 돌려준다(간트 화면이 재로그인을 안내한다). 쓰기 경로(linkedProject)는 세션 오류를 그대로 올린다.
+   */
+  async function listCalendarEvents(actorId: string, query: EventQuery = {}): Promise<GanttCalendarRow[]> {
+    if (!actorId) throw new Error('로그인 세션이 필요합니다.');
+    let token: string;
+    try { token = session.tokenFor(actorId); } catch { return []; }
+    try {
+      return await fetchCalendarRows(token, query);
+    } catch (error) {
+      if (isSessionFailure(error)) return [];
+      throw error;
+    }
+  }
   async function linkedProject(actorId: string, eventId: string, expectedCalendarId: string) {
     if (!isGanttCalendarEventId(eventId)) throw new Error('간트 일정 식별자가 올바르지 않습니다.');
-    const row = (await listCalendarEvents(actorId, { eventId }))[0];
+    // 쓰기 경로는 세션 없음/만료를 조용히 빈 결과로 바꾸지 않는다 — 재로그인 안내가 그대로 올라간다.
+    const token = session.tokenFor(actorId);
+    const row = (await fetchCalendarRows(token, { eventId }))[0];
     if (!row || row.calendar_id !== expectedCalendarId) throw new Error('간트 일정의 연결이 변경되었습니다. 새로고침해 주세요.');
     if (!row.gantt_can_edit) throw new Error('간트와 캘린더 양쪽의 편집 권한이 필요합니다.');
     const current = await read(actorId);

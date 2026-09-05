@@ -173,9 +173,9 @@ function createChannel(callbacks: RealtimeCallbacks): RealtimeChannel {
   );
   // presence 는 와일드카드('*') 미지원 → sync/join/leave 3개 이벤트를 개별 구독.
   // 각 이벤트마다 전체 상태를 다시 병합하도록 스냅샷을 넘긴다.
-  for (const table of ['gantt_spaces', 'gantt_projects']) {
-    built.on('postgres_changes', { event: '*', schema: 'public', table }, () => callbacks.onGanttChange?.());
-  }
+  // 간트 테이블은 publication 에 없다(행 내용이 anon 구독자에게 흘러가지 않게). DB 트리거가
+  // realtime.send 로 같은 공개 채널에 '변경됐다' 신호만 보내고, 앱은 RPC 로 다시 읽는다.
+  built.on('broadcast', { event: 'gantt-changed' }, () => callbacks.onGanttChange?.());
   const emitPresence = () => callbacks.onPresenceSync?.(built.presenceState() as Record<string, unknown[]>);
   built
     .on('presence', { event: 'sync' }, emitPresence)
