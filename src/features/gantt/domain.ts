@@ -65,6 +65,13 @@ function summaryProgress(summary: CompletionSummary): number {
 export function taskProgress(project: GanttProject, task: GanttTask): number {
   return summaryProgress(completionSummary(project).summarize(task));
 }
+/** Count terminal tasks and empty groups once, regardless of nesting depth. */
+export function projectProgress(project: GanttProject): number {
+  if(project.completed)return 100;
+  const {summarize}=completionSummary(project);
+  const total=project.tasks.filter(task=>task.parentId===null).map(summarize).reduce((sum,item)=>({completed:sum.completed&&item.completed,totalProgress:sum.totalProgress+item.totalProgress,count:sum.count+item.count}),{completed:true,totalProgress:0,count:0});
+  return total.count?summaryProgress(total):0;
+}
 function normalizeCompletion(project: GanttProject): void {
   const { summarize, byParent } = completionSummary(project);
   for (const task of project.tasks) if (task.kind === 'group' && byParent.has(task.id)) {
@@ -209,6 +216,21 @@ export function applyCommand(snapshot:GanttSnapshot,actorId:string,command:Gantt
       if(ownerId===project.ownerId&&JSON.stringify(memberIds)===JSON.stringify(project.memberIds)&&JSON.stringify(editorIds)===JSON.stringify(project.editorIds))return project;
       return {...project,ownerId,memberIds,editorIds,revision:project.revision+1};
     });
+  }else if(command.type==='saveProjectPair') {
+    if(!Array.isArray(command.projects)||command.projects.length!==2||new Set(command.projects.map(item=>item.project?.id)).size!==2)fail('서로 다른 두 프로젝트가 필요합니다.');
+    const spaces=new Set(command.projects.map(item=>item.project.spaceId));
+    if(!Array.isArray(command.expectedSpaces)||command.expectedSpaces.length!==spaces.size||new Set(command.expectedSpaces.map(item=>item.spaceId)).size!==spaces.size)fail('이동할 폴더 버전이 필요합니다.');
+    for(const expected of command.expectedSpaces){if(!spaces.has(expected.spaceId))fail('이동할 폴더를 확인해 주세요.');revision(expected.expectedRevision);cas(next.spaces.find(s=>s.id===expected.spaceId)?.revision,expected.expectedRevision);}
+    for(const item of command.projects){
+      const old=next.projects.find(p=>p.id===item.project.id);revision(item.expectedRevision);
+      if(!old)fail('이동할 프로젝트를 찾을 수 없습니다.');
+      const metadata=(project:GanttProject)=>{const {tasks:_tasks,completed:_completed,revision:_revision,...fields}=project;return JSON.stringify(Object.entries(fields).sort(([a],[b])=>a.localeCompare(b)));};
+      if(metadata(old)!==metadata(item.project))fail('작업 이동 중 프로젝트 정보는 변경할 수 없습니다.');
+      if(old.completed||item.project.completed)fail('완료된 프로젝트를 다시 연 뒤 이동해 주세요.');
+    }
+    // Both validations finish against the original snapshot before publishing either result.
+    const results=command.projects.map(item=>applyCommand(snapshot,actorId,{type:'saveProject',...item},ledger,retiredIds).projects.find(p=>p.id===item.project.id)!);
+    next.projects=next.projects.map(project=>results.find(p=>p.id===project.id)??project);
   }else if(command.type==='saveProject') {
     const p=command.project;validateProject(p);const s=next.spaces.find(s=>s.id===p.spaceId),old=next.projects.find(x=>x.id===p.id);
     if(!s||!canEditSpace(s,actorId)||(old&&!canEditProject(next,actorId,old))||(!old&&p.ownerId!==actorId))fail('프로젝트 편집 권한이 없습니다.');

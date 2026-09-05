@@ -32,6 +32,7 @@ Supabase(PostgreSQL + Realtime)를 단일 진실의 원천(SSOT)으로 사용. G
 ### 간트 데이터 경계 (v1.111.0)
 
 - 타임라인은 `src/features/gantt/GanttView.tsx`를 사용한다. `domain.ts`는 계층·선행 일정·기간·권한의 공용 계산이며, 프로젝트 하나의 작업을 revision CAS로 함께 저장한다.
+- 프로젝트 간 작업·그룹 이동은 `saveProjectPair`로 양쪽 프로젝트와 폴더 revision을 함께 검사하고 원자 저장·실행 취소한다. `20260905193555_gantt_project_pair.sql`이 필요하며 기존 세션 인증·ACL을 유지한다. 차트의 계산된 진행률·입력 초안은 정본 저장 객체로 사용하지 않는다.
 - 삭제·복원에도 revision은 증가한다. 비공개 `gantt_entity_revisions`와 preview의 revision 기록을 유지하며, 과거 삭제 기록에서 최종 revision을 복구할 수 없는 ID는 재사용을 거부한다. 새 DB에는 `20260905173804_gantt_revision_ledger.sql`까지 적용한다.
 - 실제 앱은 preload → 세션 epoch를 확인하는 `ganttIpc.ts` → `ganttStore.ts` → 서버 로그인 토큰을 받는 `gantt_session_read/gantt_session_execute` RPC를 사용한다. 내부 `gantt_read/gantt_execute`와 테이블 직접 접근은 anon에 허용하지 않는다. 폴더와 프로젝트 정본은 `gantt_spaces`/`gantt_projects`이다.
 - 연결 캘린더 일정은 작업의 projection(`gantt:<projectId>:<taskId>`)이다. `calendar_events`에 별도 복제하지 않는다. UUID만 받는 기존 이벤트 RPC/알림 외래키로 이 ID를 보내지 않는다.
