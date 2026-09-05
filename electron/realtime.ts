@@ -29,6 +29,7 @@ const SHARED_CALENDAR_REALTIME_TABLES: readonly SharedCalendarRealtimeTable[] = 
 ];
 
 export interface RealtimeCallbacks {
+  onGanttChange?: () => void;
   onSceneChange: (payload: ChangePayload) => void;
   onCommentChange: (payload: ChangePayload) => void;
   onRevisionChange: (payload: ChangePayload) => void;
@@ -172,6 +173,9 @@ function createChannel(callbacks: RealtimeCallbacks): RealtimeChannel {
   );
   // presence 는 와일드카드('*') 미지원 → sync/join/leave 3개 이벤트를 개별 구독.
   // 각 이벤트마다 전체 상태를 다시 병합하도록 스냅샷을 넘긴다.
+  for (const table of ['gantt_spaces', 'gantt_projects']) {
+    built.on('postgres_changes', { event: '*', schema: 'public', table }, () => callbacks.onGanttChange?.());
+  }
   const emitPresence = () => callbacks.onPresenceSync?.(built.presenceState() as Record<string, unknown[]>);
   built
     .on('presence', { event: 'sync' }, emitPresence)

@@ -4674,6 +4674,7 @@ test('calendar store pages one actor-authorized event RPC without accepting call
   let eventPage = 0;
   globalScope[STORE_HARNESS_KEY] = {
     rpc(name: string, args: Record<string, unknown>) {
+      if (name === 'gantt_calendar_events') return Promise.resolve({ data: [], error: null });
       const orders: string[] = [];
       const query = {
         order(column: string) {
@@ -5708,6 +5709,49 @@ for (const receiver of [
     exportName: 'applyIncomingSharedBflowCalendarChangeInPopup',
   },
 ]) {
+  test(`${receiver.label} receiver reloads projected Gantt rows for both production Gantt broadcasts`, async () => {
+    const mainSource = readFileSync('electron/main.ts', 'utf8');
+    const callbacks = [
+      /registerGanttIpc\(\{[\s\S]*?onChanged:\s*(\(\)\s*=>\s*\{[\s\S]*?\n  \})/.exec(mainSource)?.[1],
+      /onGanttChange:\s*(\(\)\s*=>\s*\{[\s\S]*?\n    \})/.exec(mainSource)?.[1],
+    ];
+    assert.ok(callbacks.every(Boolean), 'local commits and remote Gantt changes must expose their production fanout callbacks');
+
+    await withCalendarReceiverWindow(async (order, received) => {
+      let canonicalTitle = '수정 전 간트 일정';
+      const displayedTitles: string[] = [];
+      window.addEventListener('bflow:calendar-changed', () => { displayedTitles.push(canonicalTitle); });
+      const loadOptions: Array<Record<string, unknown> | undefined> = [];
+      const handler = await loadSharedCalendarReceiver(
+        receiver.entryPoint,
+        receiver.exportName,
+        async (options) => {
+          loadOptions.push(options);
+          order.push('canonical-load');
+          canonicalTitle = `수정된 간트 일정 ${loadOptions.length}`;
+          return true;
+        },
+      );
+      assert.ok(handler);
+
+      for (const callback of callbacks) {
+        const emitted: Array<{ channel: string; payload: unknown }> = [];
+        const broadcast = (channel: string, payload: unknown) => { emitted.push({ channel, payload }); };
+        const invoke = new Function('broadcastToAllWindows', `return (${callback});`)(broadcast) as () => void;
+        invoke();
+        assert.ok(emitted.some((event) => event.channel === 'gantt:changed'));
+        const calendars = emitted.filter((event) => event.channel === 'calendar:changed');
+        assert.equal(calendars.length, 1);
+        assert.equal(await handler(calendars[0].payload), true, 'Gantt invalidation must enter the canonical calendar cache reload path');
+      }
+
+      assert.deepEqual(loadOptions, [{ broadcast: false }, { broadcast: false }]);
+      assert.deepEqual(order, ['canonical-load', 'ui-refresh', 'canonical-load', 'ui-refresh']);
+      assert.deepEqual(displayedTitles, ['수정된 간트 일정 1', '수정된 간트 일정 2']);
+      assert.equal(received.length, 2);
+    });
+  });
+
   test(`${receiver.label} receiver reloads canonical B flow rows before refreshing shared-calendar UI`, async () => {
     await withCalendarReceiverWindow(async (order, received) => {
       const loadGate = deferred<void>();

@@ -22,6 +22,7 @@ import { uploadImage as storageUploadImage, deleteImage as storageDeleteImage, u
 // v1.20.0: 사용자 폰트 IPC + bflow-font:// custom protocol
 import { registerFontProtocol, registerFontIpcHandlers } from './fontIpc';
 import { registerCalendarIpc, type CalendarNotificationDrain } from './calendarIpc';
+import { registerGanttIpc } from './ganttIpc';
 import {
   createIcsSubscriptionStore,
   createIcsTextFetcher,
@@ -2491,6 +2492,14 @@ function getSessionOriginOrThrow(): { userId: string; epoch: number; role: 'admi
   };
 }
 
+registerGanttIpc({
+  getSessionOriginOrThrow,
+  onChanged: () => {
+    broadcastToAllWindows('gantt:changed', {});
+    broadcastToAllWindows('calendar:changed', { action: 'UPDATE' });
+  },
+});
+
 registerLegacyPrivateEventIpc(ipcMain, {
   getSessionUserIdOrThrow,
   assertLiveUser: async (userId) => {
@@ -3213,6 +3222,10 @@ function startSupabaseRealtime() {
     onEpisodeChange: (payload) => broadcastSupabaseEvent('episodes', payload),
     onPartChange: (payload) => broadcastSupabaseEvent('parts', payload),
     onCalendarChange: (table, payload) => broadcastSupabaseCalendarEvent(table, payload),
+    onGanttChange: () => {
+      broadcastToAllWindows('gantt:changed', {});
+      broadcastToAllWindows('calendar:changed', { action: 'UPDATE' });
+    },
     onCalendarNotificationInsert: (payload) => broadcastSupabaseCalendarNotification(payload),
     onSceneWorkLinkChange: (payload) => {
       broadcastSupabaseEvent('scene_work_links', payload);

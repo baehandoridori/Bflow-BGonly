@@ -16,6 +16,7 @@ import {
 import { normalizeSceneIdKey } from '@/utils/sceneIdKey';
 import { createUuid } from '@/utils/createUuid';
 import { createPersonalTodoPreviewStore, PERSONAL_TODO_PREVIEW_SESSION_KEY, type PersonalTodoPreviewStore } from './personalTodoPreviewStore';
+import { createPreviewGateway, listCalendarEvents as listGanttCalendarEvents, patchCalendarEvent as patchGanttCalendarEvent, deleteCalendarEvent as deleteGanttCalendarEvent, subscribePreviewGantt, type PreviewOptions as GanttPreviewOptions } from '@/features/gantt/previewGateway';
 import { createMarketLocalStorageGateway } from '@/features/playground/market/localStorageGateway';
 import type { MarketPreviewGateway } from '@/features/playground/market/previewGateway';
 import type { MarketRemoteState, MarketSnapshot } from '@/features/playground/market/types';
@@ -88,6 +89,29 @@ let previewMarketUserId: string | null = null;
 let previewArcadeGateway: ArcadePreviewGateway | null = null;
 let previewArcadeUserId: string | null = null;
 const previewTodoCommitListeners = new Set<(payload: unknown) => void>();
+let previewGanttCalendarSubscribed = false;
+
+function ganttPreviewOptions(userId: string, epoch: number): GanttPreviewOptions {
+  return {
+    storage: window.localStorage,
+    assertCurrent: () => {
+      if (previewCanonicalUserId !== userId || previewCanonicalEpoch !== epoch) throw new Error('로그인 사용자가 변경되었습니다. 다시 시도해 주세요.');
+    },
+    canViewCalendar: (calendarId, actorId) => {
+      try { const calendar = requireMockCalendar(calendarId); sharedMockCalendarVisibility(calendar); return canViewMockCalendar(calendar, actorId); } catch { return false; }
+    },
+    canEditCalendar: (calendarId, actorId) => {
+      try { sharedMockCalendarVisibility(requireMockCalendar(calendarId)); requireMockCalendarEventWrite(calendarId, actorId); return true; } catch { return false; }
+    },
+  };
+}
+
+function requireGanttPreviewSession() {
+  const actor = requireMockCalendarUser();
+  const epoch = previewCanonicalEpoch;
+  const options = ganttPreviewOptions(actor.id, epoch);
+  return { actor, options, gateway: createPreviewGateway(actor.id, options) };
+}
 
 type MockCalendarRow = Awaited<ReturnType<ElectronAPI['calendarCreate']>>;
 type MockCalendarEventRow = Awaited<ReturnType<ElectronAPI['calendarEventCreate']>>;
@@ -1374,6 +1398,7 @@ function deleteMockBoundPrivacyMigrationSource(
 ): CalendarPrivacyMigrationSourceDeleteResult {
   if (source.storage === 'legacy-private') return 'missing';
   if (source.storage === 'google') return 'deleted';
+  if (source.event_id.startsWith('gantt:')) throw new Error('간트 일정의 공유 캘린더는 간트 상세에서 변경해 주세요.');
   const index = mockCalendarEvents.findIndex((event) => event.id === source.event_id);
   if (index < 0) return 'missing';
   requireMockCalendarEventWrite(mockCalendarEvents[index].calendar_id, actorId);
@@ -2273,6 +2298,12 @@ export function installDevElectronAPI(): void {
 
   localStore[COMMENTS_FILE] ??= buildDevPreviewLocalCommentStore(MOCK_EPISODES);
   console.log('[DEV] 브라우저 mock electronAPI 설치됨');
+  if (!previewGanttCalendarSubscribed) {
+    previewGanttCalendarSubscribed = true;
+    // Projection changes only invalidate the calendar. Never copy the Gantt authority
+    // into the legacy calendar snapshot or publish optimistic renderer snapshots.
+    subscribePreviewGantt(() => notifyMockCalendarChanged({ table: 'gantt_projects', action: 'UPDATE' }));
+  }
 
   const mockAPI: ElectronAPI = {
     getDataPath: async () => '/dev/mock-data',
@@ -2764,7 +2795,12 @@ export function installDevElectronAPI(): void {
     },
     calendarEventsList: async (params) => {
       const visibleIds = visibleMockCalendarIds();
-      return mockCalendarEvents
+      const actorId = previewCanonicalUserId;
+      const epoch = previewCanonicalEpoch;
+      const options = actorId ? ganttPreviewOptions(actorId, epoch) : null;
+      const linked = actorId && options ? await listGanttCalendarEvents(actorId, options) : [];
+      options?.assertCurrent?.();
+      return [...mockCalendarEvents, ...linked]
         .filter((event) => visibleIds.has(event.calendar_id))
         .filter((event) => !params?.from || event.end_date >= params.from)
         .filter((event) => !params?.to || event.start_date <= params.to)
@@ -2785,6 +2821,7 @@ export function installDevElectronAPI(): void {
     },
     calendarPrivacyReplacementCreate: async (request) => {
       const actor = requireMockCalendarUser();
+      if (request.source.storage === 'bflow' && request.source.event_id.startsWith('gantt:')) throw new Error('간트 일정의 공유 캘린더는 간트 상세에서 변경해 주세요.');
       let target: MockPrivacyReplacementTarget;
       if (request.storage === 'bflow') {
         const created = createMockCalendarEvent(request.event, actor.id);
@@ -2832,6 +2869,12 @@ export function installDevElectronAPI(): void {
     },
     calendarEventUpdate: async (id, updates) => {
       const actor = requireMockCalendarUser();
+      if (id.startsWith('gantt:')) {
+        const options = ganttPreviewOptions(actor.id, previewCanonicalEpoch);
+        const row = await patchGanttCalendarEvent(actor.id, id, updates, options);
+        options.assertCurrent?.();
+        return row;
+      }
       const event = mockCalendarEvents.find((candidate) => candidate.id === id);
       if (!event) throw new Error('일정을 찾을 수 없습니다');
       const previous = { ...event };
@@ -2884,6 +2927,12 @@ export function installDevElectronAPI(): void {
       return { ...event };
     },
     calendarEventDelete: async (id) => {
+      if (id.startsWith('gantt:')) {
+        const { actor, options } = requireGanttPreviewSession();
+        await deleteGanttCalendarEvent(actor.id, id, options);
+        options.assertCurrent?.();
+        return;
+      }
       const index = mockCalendarEvents.findIndex((event) => event.id === id);
       if (index < 0) return;
       const actor = requireMockCalendarUser();
@@ -3235,6 +3284,15 @@ export function installDevElectronAPI(): void {
       const store = getPreviewTodoStore();
       return store ? { ok: true as const, data: store.readTodos().map((todo, sortOrder) => ({ ...todo, userId: store.userId, startDate: todo.startDate ?? null, endDate: todo.endDate ?? null, addToCalendar: todo.addToCalendar ?? false, sortOrder, updatedAt: todo.createdAt })) } : previewNoSession([]);
     },
+    ganttRead: async () => {
+      const { gateway, options } = requireGanttPreviewSession();
+      const result = await gateway.read(); options.assertCurrent?.(); return result;
+    },
+    ganttExecute: async (request) => {
+      const { gateway, options } = requireGanttPreviewSession();
+      const result = await gateway.execute(request); options.assertCurrent?.(); return result;
+    },
+    onGanttChanged: (callback) => subscribePreviewGantt(() => callback()),
     readPersonalTodoLabels: async () => {
       const store = getPreviewTodoStore();
       return store ? { ok: true as const, data: store.readLabels().map((label) => ({ ...label, updatedAt: label.createdAt })) } : previewNoSession([]);
