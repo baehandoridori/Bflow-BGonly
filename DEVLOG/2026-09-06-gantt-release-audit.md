@@ -48,6 +48,8 @@
 - UI 담당과 DB 담당이 서로 수정본을 재검토했다. 2차에서 발견한 원격 프로젝트 삭제 경쟁 조건과 history revision 혼동까지 수정한 최종 소스에 추가 P1/P2 없음.
 - `requireEmpty`는 클라이언트 조회만 믿지 않고 DB lock/CAS 이후 다시 확인한다. 명시적 폴더 삭제는 기존 동작을 유지한다.
 - 첫 수정 후 전체 실행은 소유권 이관에 따른 revision 증가의 기존 기대값 불일치로 실패했다. 실제 CAS 계약에 맞게 기대값을 고친 뒤 위 최종 전체 실행으로 확인했다.
+- 정식 `npm run build`도 2,161/2,161, 실패·취소·건너뜀 0, exit 0을 기록했다. 다만 별도 산출물 검사에서 `latest.yml` 누락을 발견했다. electron-builder 24.13.3이 워크트리의 `.git` 파일을 디렉터리로 가정해 저장소를 찾지 못하는 원인이었다. 실제 origin 주소를 `package.json.repository`에 명시하여 워크트리에서도 배포 메타데이터를 만들도록 보완했다. 최종 설치 파일은 이 설정으로 다시 생성·검사한다.
+- 저장소 메타데이터 수정도 독립 리뷰 clean. 수정 후 정식 `npm run build`를 다시 실행해 **2,161/2,161, 실패·취소·건너뜀 0, exit 0**을 확인했다. 최종 manifest는 v1.112.1, unpacked 7,200개 파일을 기록한다.
 - 다중 실제 PC의 Electron 조작 및 운영 DB 동시 부하 실험은 수행하지 않았다. 브라우저 두 창 충돌, PGlite 경쟁 조건 회귀, 운영 DB 롤백 smoke로 확인한 범위를 구분한다.
 
 ## 실제 입력과 암호화 확인
@@ -65,3 +67,9 @@
 - 첫 SQL 조립 시 JavaScript 문자열 치환이 dollar quote를 바꿔 구문 오류가 났다. DB 변경 전 중단됐으며 함수형 치환으로 원문을 보존한 뒤 migration + smoke 롤백 예행연습이 `passed: true`였다.
 - `requireEmpty`까지 포함한 최종 migration + smoke를 운영 DB에서 다시 롤백 예행연습해 `passed: true`를 확인했다. 종료 후 폴더/프로젝트 0행, 검증용 사용자 잔여 0행이다.
 - 실제 적용 및 배포는 PR 검토 이후에 진행한다. 이 문서의 체크되지 않은 단계는 완료 주장에 포함하지 않는다.
+
+## PR 검토 상태
+
+- PR #266: `https://github.com/baehandoridori/Bflow-BGonly/pull/266`.
+- GitHub Codex 봇이 계정의 code review 사용량 제한을 두 차례 응답했다. issue/line/review/reaction 네 표면을 확인했으며 명시적 승인 신호는 없다. 이것을 clean으로 해석하지 않는다.
+- 로컬 독립·심층 리뷰는 완료했으며, 외부 리뷰 대체에 대한 사용자 확인 전에는 머지/운영 적용/배포를 진행하지 않는다. 현재 운영·설치 버전은 1.112.0이다.
