@@ -6,7 +6,7 @@ import type { GanttTask } from './types';
 export interface GanttHover {
   task: GanttTask; x: number; y: number; workers: string;
   typeLabel: string; context: string; duration: string; hasDates: boolean;
-  progress: number; completed: boolean; conflict?: string;
+  progress: number; completed: boolean; conflict?: string; focusMemo?: boolean;
 }
 export function GanttTooltip({ hover, resetKey = '' }: { hover: GanttHover | null; resetKey?: string }) {
   const [shown, setShown] = useState<GanttHover | null>(null);
@@ -35,12 +35,14 @@ export function GanttTooltip({ hover, resetKey = '' }: { hover: GanttHover | nul
       dismissedId.current='';
       // Allow the pointer to cross the gap into a long, scrollable memo.
       if(!inside.current.pointer&&!inside.current.focus)timer.current=setTimeout(hide,160);
+    }else if(hover.focusMemo){
+      dismissedId.current='';shownId.current=hover.task.id;setShown(hover);
     }else{
       if(dismissedId.current!==hover.task.id)dismissedId.current='';
       if(!dismissedId.current)timer.current=setTimeout(()=>{shownId.current=latest.current?.task.id||'';setShown(latest.current);},120);
     }
     return () => clearTimeout(timer.current);
-  }, [hover?.task.id,hide]);
+  }, [hover?.task.id,hover?.focusMemo,hide]);
   useEffect(() => {if(hover&&shownId.current===hover.task.id&&dismissedId.current!==hover.task.id)setShown(hover);},[hover]);
   useEffect(() => {
     const dismiss=()=>{dismissedId.current=latest.current?.task.id||shownId.current;hide();};
@@ -52,7 +54,7 @@ export function GanttTooltip({ hover, resetKey = '' }: { hover: GanttHover | nul
       event.preventDefault();event.stopPropagation();
       if(box.current?.contains(document.activeElement)){
         const id=shownId.current;dismiss();
-        document.querySelector<HTMLElement>(`[data-gantt-hover-anchor="${id}"]`)?.focus();
+        document.querySelector<HTMLElement>(`button.gantt-bar[data-gantt-hover-anchor="${id}"]`)?.focus();
       }else dismiss();
     };
     window.addEventListener('scroll',outside,true);window.addEventListener('pointerdown',outside,true);
@@ -67,6 +69,7 @@ export function GanttTooltip({ hover, resetKey = '' }: { hover: GanttHover | nul
   },[hide]);
   useLayoutEffect(() => {
     if (!shown || !box.current) return;
+    if(shown.focusMemo)box.current.focus();
     const { width, height } = box.current.getBoundingClientRect();
     setPosition({left:Math.max(8,Math.min(shown.x-width/2,window.innerWidth-width-8)),top:Math.max(8,Math.min(shown.y-height-12<8?shown.y+16:shown.y-height-12,window.innerHeight-height-8))});
   }, [shown]);

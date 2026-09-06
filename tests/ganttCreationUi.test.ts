@@ -34,7 +34,7 @@ function fixture(): GanttSnapshot {
 }
 type Props = {children?: ReactNode; value?: string; label?:string; options?:unknown[]; disabled?: boolean; 'aria-label'?: string; onClick?: () => void; onChange?: (event: {target: {value: string}}) => void};
 type Element = ReactElement<Props>;
-type CanvasProps = {selected: string[]; statusFilter: string; projects:GanttProject[]; collapsed:string[]; onCollapse(id:string):void; onSelect(projectId: string, taskId: string | null, multiple?: boolean): void; onAdd(project: GanttProject, parentId: string|null, start: string, end: string): void; onMenu(project:GanttProject,task:GanttTask|null,x:number,y:number):void};
+type CanvasProps = {selected: string[]; statusFilter: string; projects:GanttProject[]; collapsed:string[]; onCollapse(id:string):void; onSelect(projectId: string, taskId: string | null, multiple?: boolean): void; onAdd(project: GanttProject, parentId: string|null, start: string, end: string): void; onMenu(project:GanttProject,task:GanttTask|null,x:number,y:number):void; onShiftGroup(project:GanttProject,group:GanttTask,days:number):void};
 type InspectorProps = {displayProgress?:number;onAddChild(): void; onDelete(): void; onComplete():void; onSaveTask(patch: Partial<GanttTask>, expectedRevision?:number): Promise<GanttProject|void>;onDraftProgress(projectId:string,taskId:string,progress:number|null):void;onRegisterCloseGuard(guard:(()=>Promise<boolean>)|null):void};
 const bundle = build({
   entryPoints: ['src/features/gantt/GanttView.tsx'], bundle: true, format: 'cjs', platform: 'node', target: 'node22', write: false,
@@ -78,7 +78,7 @@ async function harness(storage = new Map<string,string>()) {
     async execute(command: GanttCommand) {commands.push(structuredClone(command));state.snapshot = applyCommand(state.snapshot, 'me', command);const delay=writeDelay;writeDelay=null;if(delay){state.pending=true;await delay;state.pending=false;}},
   };
   const store = Object.assign(() => state, {getState: () => state});
-  const calendarState = {calendars: [], async loadAll() {}};
+  const calendarState = {calendars: [] as {id:string;canEdit:boolean}[], async loadAll() {}};
   const calendarStore = Object.assign((selector: (value: typeof calendarState) => unknown) => selector(calendarState), {getState: () => calendarState});
   const Canvas = () => null, Inspector = () => null, Context = () => null, SpaceDialog = () => null, Empty = () => null, Select=()=>null, Tree=()=>null;
   const nodeRequire = createRequire(import.meta.url), react = nodeRequire('react');
@@ -124,6 +124,7 @@ async function harness(storage = new Map<string,string>()) {
     delayNextWrite(){let release!:()=>void;writeDelay=new Promise<void>(resolve=>{release=resolve;});return release;},
     setPending(value: boolean) {state.pending = value;},
     setActor(value: string) {state.actorId = value;},
+    setCalendars(value: {id:string;canEdit:boolean}[]) {calendarState.calendars=value;},
     render() {
       let tree: ReactNode;
       for (let pass = 0; pass < 10; pass++) {
@@ -397,6 +398,72 @@ test('failed pending draft keeps the current selection when navigating the tree'
   h.inspector(tree).onRegisterCloseGuard(async()=>true);
   h.navigation(tree).onSelect(A,null);await settle();tree=h.render();
   assert.deepEqual(h.canvas(tree).selected,[A]);
+});
+
+test('group date drag saves one canonical project including folded completed descendants',async()=>{
+  const h=await harness();h.latestProject(B).tasks.find(t=>t.id===NEXT_TASK)!.completed=true;
+  let tree=h.render();h.canvas(tree).onCollapse(GROUP);tree=h.render();
+  const display=structuredClone(h.canvas(tree).projects.find(p=>p.id===B)!);
+  display.tasks.find(t=>t.id===TASK)!.title='임시 화면 제목';display.tasks.find(t=>t.id===TASK)!.progress=96;
+  h.canvas(tree).onShiftGroup(display,display.tasks.find(t=>t.id===GROUP)!,3);await settle();
+  assert.equal(h.commands.length,1);assert.equal(h.commands[0].type,'saveProject');
+  const saved=h.latestProject(B),task=saved.tasks.find(t=>t.id===TASK)!,done=saved.tasks.find(t=>t.id===NEXT_TASK)!;
+  assert.equal(saved.revision,2);assert.equal(task.startDate,'2026-09-11');assert.equal(task.endDate,'2026-09-13');
+  assert.equal(task.title,TASK);assert.equal(task.progress,0);assert.equal(done.startDate,'2026-09-14');assert.equal(done.completed,true);
+});
+
+test('group date drag rejects stale revision, actor, permission, pending writes and failed drafts',async()=>{
+  for(const boundary of ['revision','actor','permission','pending','draft','calendar'] as const){
+    const h=await harness();let tree=h.render();h.canvas(tree).onSelect(B,TASK);tree=h.render();
+    const source=structuredClone(h.latestProject(B));
+    if(boundary==='revision')h.latestProject(B).revision++;
+    if(boundary==='actor')h.setActor('other');
+    if(boundary==='permission'){h.latestProject(B).ownerId='other';h.latestProject(B).spaceId=id(21);}
+    if(boundary==='pending')h.setPending(true);
+    if(boundary==='draft')h.inspector(tree).onRegisterCloseGuard(async()=>false);
+    if(boundary==='calendar')h.latestProject(B).tasks.find(t=>t.id===NEXT_TASK)!.calendarId=id(70);
+    h.canvas(tree).onShiftGroup(source,source.tasks.find(t=>t.id===GROUP)!,2);await settle();
+    assert.equal(h.commands.length,0,boundary);assert.equal(h.latestProject(B).tasks.find(t=>t.id===TASK)!.startDate,'2026-09-08');
+  }
+});
+
+test('group automatic dates require one confirmation and retain predecessor links',async()=>{
+  for(const accepted of [false,true]){
+    const h=await harness(),project=h.latestProject(B),automatic=project.tasks.find(t=>t.id===NEXT_TASK)!;
+    automatic.mode='auto';automatic.predecessorId=TASK;
+    let tree=h.render();h.canvas(tree).onShiftGroup(project,project.tasks.find(t=>t.id===GROUP)!,2);await settle();tree=h.render();
+    assert.equal(h.commands.length,0);assert.match(text(tree),/수동 일정으로 바뀌고 선행 관계는 유지/);
+    button(tree,accepted?'확인':'취소').props.onClick!();await settle();
+    assert.equal(h.commands.length,accepted?1:0);
+    const saved=h.latestProject(B).tasks.find(t=>t.id===NEXT_TASK)!;
+    assert.equal(saved.mode,accepted?'manual':'auto');assert.equal(saved.predecessorId,TASK);
+    assert.equal(saved.startDate,accepted?'2026-09-13':'2026-09-11');
+  }
+});
+
+test('group confirmation rechecks revision, identity, calendar access and navigation before committing',async()=>{
+  for(const boundary of ['revision','actor','calendar','navigation'] as const){
+    const h=await harness(),project=h.latestProject(B),automatic=project.tasks.find(t=>t.id===NEXT_TASK)!;
+    automatic.mode='auto';automatic.predecessorId=TASK;automatic.calendarId=id(70);h.setCalendars([{id:id(70),canEdit:true}]);
+    let tree=h.render();h.canvas(tree).onShiftGroup(structuredClone(project),project.tasks.find(t=>t.id===GROUP)!,2);await settle();tree=h.render();
+    if(boundary==='revision')project.revision++;
+    if(boundary==='actor')h.setActor('other');
+    if(boundary==='calendar')h.setCalendars([{id:id(70),canEdit:false}]);
+    if(boundary==='navigation')h.navigation(tree).onSelect(A,null);
+    button(tree,'확인').props.onClick!();await settle();assert.equal(h.commands.length,0,boundary);
+  }
+});
+
+test('new root groups receive distinct saved colors while nested groups inherit',async()=>{
+  const h=await harness();let tree=h.render();projectPicker(tree).props.onChange!(A as any);tree=h.render();
+  button(tree,'+ 그룹').props.onClick!();await settle();tree=h.render();
+  const first=h.latestProject(A).tasks[0];assert.ok(first.color);assert.notEqual(first.color,h.latestProject(A).color);
+  button(tree,'+ 그룹').props.onClick!();await settle();tree=h.render();
+  const second=h.latestProject(A).tasks.find(t=>t.id!==first.id)!;assert.equal(second.parentId,null);assert.ok(second.color);assert.notEqual(second.color,first.color);
+  h.inspector(tree).onAddChild();await settle();tree=h.render();
+  const child=h.latestProject(A).tasks.find(t=>t.parentId===second.id)!;assert.equal(child.color,null);
+  h.canvas(tree).onSelect(B,GROUP);tree=h.render();const before=new Set(h.latestProject(B).tasks.map(t=>t.id));
+  button(tree,'+ 그룹').props.onClick!();await settle();assert.equal(addedTask(h,before,B).color,null);
 });
 
 test('cross-project drop saves one pair from raw data rather than draft display objects',async()=>{

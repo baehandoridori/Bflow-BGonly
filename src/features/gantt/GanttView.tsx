@@ -5,7 +5,8 @@ import { useDataStore } from '@/stores/useDataStore';
 import { useCalendarStore } from '@/stores/useCalendarStore';
 import { sceneProgress } from '@/utils/calcStats';
 import { useGanttStore } from './useGanttStore';
-import { canEditProject, canManageSpace, canViewProject, completeTasks, descendantIds, isTaskComplete, scheduleProject, taskBounds, taskProgress, updateTask } from './domain';
+import { canEditProject, canManageSpace, canViewProject, completeTasks, descendantIds, isTaskComplete, scheduleProject, shiftTaskSubtree, taskBounds, taskProgress, updateTask } from './domain';
+import { newGroupColor, nextProjectColor } from './colors';
 import type { GanttProject, GanttSpace, GanttTask } from './types';
 import { GanttCanvas, localDate, moveDate } from './GanttCanvas';
 import { GanttContextMenu, GanttModal, GanttSpaceDialog, type GanttContextTarget } from './GanttDialogs';
@@ -74,6 +75,33 @@ export function GanttView() {
     if(current.revision!==expectedRevision)throw new Error('다른 변경이 있습니다. 최신 프로젝트를 다시 열어 주세요.');
     return saveProject({...current,...patch});
   };
+  const shiftGroup=async(source:GanttProject,group:GanttTask,days:number)=>{
+    if(days===0)return false;
+    const ticket=++navigationVersion.current,actor=user?.id;
+    if(closeGuard.current&&!await closeGuard.current())return false;
+    if(ticket!==navigationVersion.current)return false;
+    const read=()=>{
+      const latest=useGanttStore.getState(),current=latest.snapshot.projects.find(p=>p.id===source.id);
+      if(!actor||latest.actorId!==actor||!current||!canEditProject(latest.snapshot,actor,current))throw new Error('프로젝트 편집 권한을 확인해 주세요.');
+      if(latest.pending||current.completed)throw new Error('지금은 그룹 일정을 이동할 수 없습니다.');
+      if(current.revision!==source.revision)throw new Error('다른 변경이 반영되었습니다. 최신 일정에서 다시 이동해 주세요.');
+      const target=current.tasks.find(t=>t.id===group.id);
+      if(!target||target.kind!=='group'||isTaskComplete(current,target))throw new Error('이동할 진행 중인 그룹을 다시 선택해 주세요.');
+      const ids=descendantIds(current,target.id),children=current.tasks.filter(t=>ids.has(t.id));
+      const currentCalendars=useCalendarStore.getState().calendars;
+      if(children.some(t=>t.calendarId&&!currentCalendars.some(c=>c.id===t.calendarId&&c.canEdit)))throw new Error('하위 일정에 연결된 캘린더의 편집 권한을 확인해 주세요.');
+      return {current,target,children};
+    };
+    const initial=read();
+    if(initial.children.some(t=>t.mode==='auto')){
+      if(!await ask('그룹의 모든 하위 일정을 함께 이동합니다. 포함된 자동 일정은 수동 일정으로 바뀌고 선행 관계는 유지됩니다. 이동할까요?'))return false;
+      if(ticket!==navigationVersion.current||useGanttStore.getState().actorId!==actor)return false;
+    }
+    const {current,target}=read();
+    // Save only canonical entities; Canvas contains derived progress and a temporary date preview.
+    await saveProject(shiftTaskSubtree(current,target.id,days));
+    return true;
+  };
   const addTask=async(project:GanttProject,kind:GanttTask['kind']='task',parentId:string|null=null,start=localDate(),end=moveDate(start,2),afterId?:string)=>{
     const ticket=++navigationVersion.current;
     if(closeGuard.current&&!await closeGuard.current())return false;
@@ -85,6 +113,7 @@ export function GanttView() {
     const after=afterId?siblings.findIndex(t=>t.id===afterId):-1;
     if(afterId&&after<0)throw new Error('선택한 작업이 변경되었습니다. 추가 위치를 다시 선택해 주세요.');
     const task=newTask(kind,parentId,start,end);
+    if(kind==='group')task.color=newGroupColor(current,parentId);
     const firstGroup=kind!=='group'?siblings.findIndex(t=>t.kind==='group'):-1;
     siblings.splice(afterId?after+1:firstGroup>=0?firstGroup:siblings.length,0,task);
     const order=new Map(siblings.map((t,index)=>[t.id,index]));
@@ -189,11 +218,11 @@ export function GanttView() {
       <div className="gantt-toolbar"><div>{(['all','active','completed'] as const).map(filter=><button key={filter} aria-pressed={statusFilter===filter} onClick={()=>setStatusFilter(filter)}>{filter==='all'?'전체':filter==='active'?'진행 중':'완료'}</button>)}<GanttSelect label="작업을 추가할 프로젝트" value={targetProject?.id||''} disabled={pending} onChange={chooseProject} options={[...(!targetProject?[{value:'',label:'프로젝트 선택'}]:[]),...snapshot.projects.filter(p=>!p.completed||p.id===targetProject?.id).map(p=>({value:p.id,label:p.name+(!editable(p)?' · 보기 전용':p.completed?' · 완료':'')}))]}/>{(['task','group','milestone'] as const).map(kind=><button className={kind==='task'?'primary':''} key={kind} disabled={!targetProject||!editable(targetProject)||targetProject.completed||(pending&&!closeGuard.current)||done} onClick={()=>void run(async()=>{await addFromToolbar(kind);})}>{kind==='task'?'+ 작업':kind==='group'?'+ 그룹':'◇ 마일스톤'}</button>)}</div><label>작업자 <GanttSelect label="작업자" value={worker} onChange={setWorker} options={[{value:'',label:'전체'},...users.map(u=>({value:u.id,label:u.name}))]}/></label></div>
       {selected.length>1&&<div className="gantt-selection-bar"><span>{selected.length}개 선택 · 같은 프로젝트</span><button disabled={pending||!p||!editable(p)} onClick={()=>void run(async()=>{if(!p||!editable(p))throw new Error('프로젝트 편집 권한이 없습니다.');await saveProject(completeTasks(p,selected,true));})}>선택 일정 완료</button><button disabled={pending||!p||!editable(p)} onClick={()=>void run(async()=>{if(!p||!editable(p))throw new Error('프로젝트 편집 권한이 없습니다.');if(await ask('선택한 작업과 하위 작업을 진행 중으로 다시 열까요? 진행률은 0%로 바뀝니다.'))await saveProject(completeTasks(p,selected,false));})}>선택 일정 다시 열기</button><button onClick={()=>setSelected([])}>선택 해제</button></div>}
       {(error||notice)&&<div className="gantt-error" role="alert"><span>{error||notice}</span>{error?<button onClick={()=>void state.refresh()}>다시 불러오기</button>:<button aria-label="오류 안내 닫기" onClick={()=>setNotice('')}><X size={14}/></button>}</div>}
-      {loading&&!snapshot.spaces.length?<div className="gantt-empty">프로젝트를 불러오고 있습니다.</div>:<GanttCanvas projects={visibleProjects} selected={selected} statusFilter={statusFilter} worker={worker} collapsed={collapsed} names={names} onRelocate={(source,task,target,targetTaskId,position)=>void run(()=>relocate(source,task,target,targetTaskId,position))} canEdit={project=>!pending&&editable(project)} onCollapse={id=>setCollapsed(v=>v.includes(id)?v.filter(x=>x!==id):[...v,id])} onSelect={select} onPatch={(p,t,patch)=>void run(()=>patchTask(p,t,patch))} onAdd={(p,parent,start,end)=>void run(()=>addTask(p,'task',parent,start,end))} onMenu={(project,task,x,y)=>{setContext({project:snapshot.projects.find(p=>p.id===project.id)!,task:task?snapshot.projects.find(p=>p.id===project.id)!.tasks.find(t=>t.id===task.id)!:null,x,y});}}/>}
+      {loading&&!snapshot.spaces.length?<div className="gantt-empty">프로젝트를 불러오고 있습니다.</div>:<GanttCanvas projects={visibleProjects} selected={selected} statusFilter={statusFilter} worker={worker} collapsed={collapsed} names={names} onRelocate={(source,task,target,targetTaskId,position)=>void run(()=>relocate(source,task,target,targetTaskId,position))} canEdit={project=>!pending&&editable(project)} onCollapse={id=>setCollapsed(v=>v.includes(id)?v.filter(x=>x!==id):[...v,id])} onSelect={select} onPatch={(p,t,patch)=>void run(()=>patchTask(p,t,patch))} onShiftGroup={(p,t,days)=>void run(()=>shiftGroup(p,t,days))} onAdd={(p,parent,start,end)=>void run(()=>addTask(p,'task',parent,start,end))} onMenu={(project,task,x,y)=>{setContext({project:snapshot.projects.find(p=>p.id===project.id)!,task:task?snapshot.projects.find(p=>p.id===project.id)!.tasks.find(t=>t.id===task.id)!:null,x,y});}}/>}
     </main>
     {inspecting&&p&&<GanttInspector project={p} task={task} users={users} calendars={calendars} episodes={episodes} canEdit={editable(p)&&(!task?.calendarId||!!calendars.find(c=>c.id===task.calendarId)?.canEdit)} canManage={p.ownerId===user?.id||activeSpace?.ownerId===user?.id} memberOptions={users.filter(u=>u.id===activeSpace?.ownerId||activeSpace?.members.some(m=>m.userId===u.id)).map(u=>({...u,canEdit:u.id===activeSpace?.ownerId||!!activeSpace?.members.find(m=>m.userId===u.id)?.canEdit}))} pending={pending} onSaveTask={(patch,revision)=>task?patchTask(p,task,patch,revision):Promise.resolve()} onSaveProject={(patch,revision)=>patchProject(p,patch,revision)} onDraftProgress={previewProgress} onRegisterCloseGuard={registerCloseGuard} onClose={()=>setInspecting(false)} onComplete={()=>void run(()=>complete(p,task))} onDelete={()=>void run(()=>deleteItem(p,task))} completed={task?isTaskComplete(effectiveProjects.find(item=>item.id===p.id)||p,effectiveProjects.find(item=>item.id===p.id)?.tasks.find(item=>item.id===task.id)||task):p.completed} folderName={activeSpace?.name} displayProgress={task?taskProgress(effectiveProjects.find(item=>item.id===p.id)||p,effectiveProjects.find(item=>item.id===p.id)?.tasks.find(item=>item.id===task.id)||task):undefined} canAddChild={!done&&!p.completed} onAddChild={()=>void run(async()=>{await addFromToolbar('task');})} onMove={move}/>}
     {spaceDialog!==undefined&&user&&<GanttSpaceDialog space={spaceDialog} actorId={user.id} users={users} calendars={calendars} onClose={()=>setSpaceDialog(undefined)} projectCount={snapshot.projects.filter(p=>p.spaceId===spaceDialog?.id).length} onDelete={spaceDialog?()=>deleteSpace(spaceDialog):undefined} onSave={async space=>{await state.execute({type:'saveSpace',space,expectedRevision:spaceDialog?.revision??null});}}/>}
-    {projectDialog&&user&&<GanttModal title="새 프로젝트" onClose={()=>setProjectDialog(false)}><form onSubmit={e=>{e.preventDefault();const f=new FormData(e.currentTarget),name=String(f.get('name')).trim(),spaceId=String(f.get('space'));void run(async()=>{const p:GanttProject={id:crypto.randomUUID(),spaceId,ownerId:user.id,name,memo:'',color:'#A29BFE',completed:false,revision:1,memberIds:null,editorIds:null,linkedEpisode:null,tasks:[]};await saveProject(p,true);setProjectDialog(false);select(p.id,null);});}}><label className="gantt-field">프로젝트 이름<input autoFocus name="name" required maxLength={180}/></label><label className="gantt-field">폴더<GanttSelect name="space" label="폴더" options={snapshot.spaces.filter(s=>s.ownerId===user.id||s.members.some(m=>m.userId===user.id&&m.canEdit)).map(s=>({value:s.id,label:s.name}))}/></label><div className="gantt-dialog-actions"><button type="button" onClick={()=>setProjectDialog(false)}>취소</button><button disabled={pending} className="primary">만들기</button></div></form></GanttModal>}
+    {projectDialog&&user&&<GanttModal title="새 프로젝트" onClose={()=>setProjectDialog(false)}><form onSubmit={e=>{e.preventDefault();const f=new FormData(e.currentTarget),name=String(f.get('name')).trim(),spaceId=String(f.get('space'));void run(async()=>{const p:GanttProject={id:crypto.randomUUID(),spaceId,ownerId:user.id,name,memo:'',color:nextProjectColor(useGanttStore.getState().snapshot.projects),completed:false,revision:1,memberIds:null,editorIds:null,linkedEpisode:null,tasks:[]};await saveProject(p,true);setProjectDialog(false);select(p.id,null);});}}><label className="gantt-field">프로젝트 이름<input autoFocus name="name" required maxLength={180}/></label><label className="gantt-field">폴더<GanttSelect name="space" label="폴더" options={snapshot.spaces.filter(s=>s.ownerId===user.id||s.members.some(m=>m.userId===user.id&&m.canEdit)).map(s=>({value:s.id,label:s.name}))}/></label><div className="gantt-dialog-actions"><button type="button" onClick={()=>setProjectDialog(false)}>취소</button><button disabled={pending} className="primary">만들기</button></div></form></GanttModal>}
     {context&&<GanttContextMenu key={`${context.project.id}:${context.task?.id}`} target={context} canEdit={!pending&&editable(context.project)} completed={context.task?isTaskComplete(effectiveProjects.find(p=>p.id===context.project.id)||context.project,effectiveProjects.find(p=>p.id===context.project.id)?.tasks.find(t=>t.id===context.task?.id)||context.task):context.project.completed} onDelete={()=>void run(()=>deleteItem(context.project,context.task))} onClose={closeContext} onDetail={()=>{select(context.project.id,context.task?.id||null);setContext(null);}} onSave={async patch=>{if(context.task)await patchTask(context.project,context.task,patch);else await saveProject({...context.project,...patch,color:patch.color||context.project.color});}} onComplete={()=>void run(()=>complete(context.project,context.task))}/>}
     {confirm&&<GanttModal title="변경 확인" onClose={()=>respond(false)}><p>{confirm}</p><div className="gantt-dialog-actions"><button onClick={()=>respond(false)}>취소</button><button className="primary" onClick={()=>respond(true)}>확인</button></div></GanttModal>}
   </section>;

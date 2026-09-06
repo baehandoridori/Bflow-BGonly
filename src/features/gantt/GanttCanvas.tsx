@@ -1,10 +1,13 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { Check, ChevronDown, ChevronLeft, ChevronRight, GripVertical, Hand, Minus, MoreHorizontal, Plus, Scan } from 'lucide-react';
-import { descendantIds, durationLabel, isTaskComplete, projectProgress, resolveTaskColor, taskBounds, taskConflicts, taskProgress } from './domain';
+import { Check, ChevronDown, ChevronLeft, ChevronRight, FolderKanban, GripVertical, Hand, Minus, Plus, Scan, SlidersHorizontal } from 'lucide-react';
+import { descendantIds, durationLabel, isTaskComplete, projectProgress, resolveTaskColor, shiftTaskSubtree, taskBounds, taskConflicts, taskProgress } from './domain';
 import { barGeometry, rebaseScroll, zoomScroll } from './geometry';
 import { GANTT_RULER_HEIGHT as RULER, monthStart, navigationRange, weekBands } from './dateAxis';
 import { rowDrop, type RowDrop, type RowDropPosition } from './rowDrag';
+import { floatingGlassStyle } from '@/utils/glassStyles';
+import { compactDuration, DISPLAY_OPTIONS_KEY, localDate, millisecondsUntilMidnight, readDisplayOptions, remainingDaysLabel, type GanttDisplayOptions } from './barLabels';
+export { localDate } from './barLabels';
 import { GanttTooltip, type GanttHover } from './GanttTooltip';
 import type { GanttProject, GanttTask } from './types';
 import './navigation.css';
@@ -14,7 +17,6 @@ const DAY = 86400000, ROW = 40;
 const dateMs = (d: string) => Date.parse(d + 'T00:00:00Z');
 const dayDiff = (a: string, b: string) => Math.round((dateMs(b) - dateMs(a)) / DAY);
 export const moveDate = (date: string, days: number) => new Date(dateMs(date) + days * DAY).toISOString().slice(0, 10);
-export const localDate = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`; };
 interface ChartRow { id: string; project: GanttProject; task: GanttTask | null; depth: number; completed: boolean; bounds: ReturnType<typeof taskBounds> }
 type Gesture = { pointer: number; target: HTMLElement; x: number; y: number; moved: boolean } & (
   | { kind: 'pan'; left: number; top: number }
@@ -29,6 +31,7 @@ interface Props {
   onPatch: (p: GanttProject, task: GanttTask, patch: Partial<GanttTask>) => void;
   onMenu: (p: GanttProject, task: GanttTask | null, x: number, y: number) => void;
   onAdd: (p: GanttProject, parentId: string | null, start: string, end: string) => void;
+  onShiftGroup?: (project: GanttProject, task: GanttTask, deltaDays: number) => void;
   onRelocate?: (sourceProject: GanttProject, task: GanttTask, targetProject: GanttProject, targetTaskId: string | null, position: RowDropPosition) => void;
 }
 export function GanttCanvas(props: Props) {
@@ -36,8 +39,19 @@ export function GanttCanvas(props: Props) {
   const chart = useRef<HTMLDivElement>(null);
   const [width, setWidth] = useState(48), widthRef = useRef(48);
   const [layout, setLayout] = useState<'beside' | 'list'>(() => localStorage.getItem('bflow-gantt-name-layout') === 'beside' ? 'beside' : 'list');
+  const [today, setToday] = useState(localDate);
+  const [display, setDisplay] = useState(() => {try{return readDisplayOptions(localStorage.getItem(DISPLAY_OPTIONS_KEY));}catch{return readDisplayOptions(null);}});
+  const changeDisplay = (key: keyof GanttDisplayOptions, value: boolean) => setDisplay(previous => {
+    const next = {...previous,[key]:value};try{localStorage.setItem(DISPLAY_OPTIONS_KEY,JSON.stringify(next));}catch{/* Keep the view usable when local preferences cannot be saved. */}return next;
+  });
+  useEffect(() => {
+    let timer: ReturnType<typeof setTimeout>;
+    const refresh = () => {clearTimeout(timer);setToday(localDate());timer=setTimeout(refresh,millisecondsUntilMidnight());};
+    refresh();window.addEventListener('focus',refresh);
+    return () => {clearTimeout(timer);window.removeEventListener('focus',refresh);};
+  }, []);
   const [hover, setHover] = useState<GanttHover | null>(null);
-  const [drag, setDrag] = useState<{ id: string; delta: number; edge?: string } | null>(null);
+  const [drag, setDrag] = useState<{ id: string; projectId: string; delta: number; edge?: string } | null>(null);
   const [creating, setCreating] = useState<{ id: string; first: number; last: number } | null>(null);
   const [mode, setMode] = useState<'pan' | 'create'>('pan');
   const [spaceHeld, setSpaceHeld] = useState(false), spaceRef = useRef(false), pointerOver = useRef(false);
@@ -59,6 +73,7 @@ export function GanttCanvas(props: Props) {
   const firstDate = allDates.sort()[0] || localDate();
   const [base, setBase] = useState(() => moveDate(firstDate < localDate() ? firstDate : localDate(), -6));
   const [visibleDate, setVisibleDate] = useState(base);
+  const [visibleScrollLeft, setVisibleScrollLeft] = useState(0);
   const [navigationEnd, setNavigationEnd] = useState(() => moveDate(base,59));
   const pendingScroll = useRef<{base:string;left:number;kind:'view'|'zoom'} | null>(null);
   // Keep the viewport date stable when a project with earlier work is enabled.
@@ -75,7 +90,8 @@ export function GanttCanvas(props: Props) {
   const days = dayDiff(base,extent.current)+1;
   const weeks = useMemo(() => weekBands(base,days), [base,days]);
   const syncVisibleDate = useCallback(() => {
-    setVisibleDate(moveDate(base,Math.floor((chart.current?.scrollLeft || 0)/widthRef.current)));
+    const left=chart.current?.scrollLeft||0;
+    setVisibleScrollLeft(left);setVisibleDate(moveDate(base,Math.floor(left/widthRef.current)));
   }, [base]);
   useLayoutEffect(() => {
     if(pendingScroll.current?.base===base&&chart.current){
@@ -110,6 +126,30 @@ export function GanttCanvas(props: Props) {
     }
     return result;
   }, [projects, statusFilter, worker, collapsed]);
+  // Use the same pure shift as saving, including hidden descendants and any
+  // automatic successors, but never pass this preview project to persistence.
+  const previewProject = useMemo(() => {
+    if(!drag)return null;
+    const project=projects.find(p=>p.id===drag.projectId),task=project?.tasks.find(t=>t.id===drag.id);
+    if(!project||task?.kind!=='group')return null;
+    try{return shiftTaskSubtree(project,task.id,drag.delta);}catch{return null;}
+  },[projects,drag]);
+  const previewRows = useMemo(() => rows.map(row => {
+    if(previewProject?.id!==row.project.id)return row;
+    const task=row.task?previewProject.tasks.find(t=>t.id===row.id)!:null;
+    return {...row,bounds:!task||task.kind==='group'?taskBounds(previewProject,task?.id):task};
+  }),[rows,previewProject]);
+  const previousProgress = useRef(new Map<string,number>()),pulseSequence = useRef(0);
+  const [progressPulses,setProgressPulses] = useState<Record<string,number>>({});
+  const pulseTimer = useRef<ReturnType<typeof setTimeout>>();
+  const progressSignature = rows.map(row=>`${row.id}:${row.task?taskProgress(row.project,row.task):projectProgress(row.project)}`).join('|');
+  useEffect(() => {
+    const current=new Map<string,number>(),increased:Record<string,number>={};
+    for(const row of rows){const value=row.task?taskProgress(row.project,row.task):projectProgress(row.project),before=previousProgress.current.get(row.id);current.set(row.id,value);if(before!==undefined&&value>before)increased[row.id]=++pulseSequence.current;}
+    previousProgress.current=current;
+    if(Object.keys(increased).length){setProgressPulses(previous=>({...previous,...increased}));clearTimeout(pulseTimer.current);pulseTimer.current=setTimeout(()=>setProgressPulses({}),720);}
+  },[progressSignature]);
+  useEffect(()=>()=>clearTimeout(pulseTimer.current),[]);
   const savedScroll = useRef({left:0,top:0}), hadRows = useRef(false);
   useLayoutEffect(() => {
     if (rows.length && !hadRows.current && chart.current && pendingScroll.current === null) {
@@ -152,7 +192,7 @@ export function GanttCanvas(props: Props) {
     setDrag(null); setCreating(null); setPanning(false); setRowDragging(null);
     if (gesture.target.hasPointerCapture(gesture.pointer)) gesture.target.releasePointerCapture(gesture.pointer);
   }, []);
-  const gestureRevision = projects.map(p=>`${p.id}:${p.revision}:${p.completed}`).join('|');
+  const gestureRevision = projects.map(p=>`${p.id}:${p.revision}:${p.completed}:${props.canEdit(p)}`).join('|');
   const visibleRowOrder = rows.map(r=>`${r.project.id}:${r.id}:${r.depth}`).join('|');
   // Polling may replace equal objects while the pointer is held. Only an actual
   // revision or visible hierarchy change invalidates the in-flight gesture.
@@ -176,7 +216,11 @@ export function GanttCanvas(props: Props) {
   const fit = () => {
     const el=chart.current;if(!el)return;
     cancelGesture();stopZoom();const available=Math.max(1,el.clientWidth-leftWidth),padding=Math.min(24,available*.08);
-    const next=Math.max(12,Math.min(160,(available-padding*2)/(dayDiff(firstDate,lastDate)+1)));
+    // Beside labels remain outside the date bar. Reserve their measured width
+    // when fitting so moving a clipped left label to the right also stays visible.
+    const maxWidth=(selector:string)=>Math.max(0,...Array.from(el.querySelectorAll<HTMLElement>(selector),node=>node.getBoundingClientRect().width));
+    const tailSpace=layout==='beside'?maxWidth('.gantt-inline-name')+maxWidth('.gantt-duration')+27:0;
+    const next=Math.max(12,Math.min(160,(available-padding*2-tailSpace)/(dayDiff(firstDate,lastDate)+1)));
     const scroll=Math.max(0,dayDiff(base,firstDate)*next-padding);
     if(next!==widthRef.current)pendingScroll.current={base,left:scroll,kind:'view'};
     widthRef.current=goal.current=next;setWidth(next);el.style.setProperty('--gantt-day',`${next}px`);el.scrollLeft=scroll;syncVisibleDate();
@@ -192,7 +236,7 @@ export function GanttCanvas(props: Props) {
     if(range.base===base&&range.end===extent.current){el.scrollLeft=range.scrollLeft;pendingScroll.current=null;syncVisibleDate();}
   };
   const moveMonth = (offset: number) => navigate(monthStart(moveDate(base,Math.floor((chart.current?.scrollLeft||0)/widthRef.current)),offset));
-  const showHover = (r: ChartRow, x: number, y: number) => {
+  const showHover = (r: ChartRow, x: number, y: number, focusMemo=false) => {
     if (dragRef.current) return;
     const task=r.task || ({id:r.id,title:r.project.name,memo:r.project.memo,workers:[],allDay:true,...r.bounds} as unknown as GanttTask);
     const parent=r.task?.parentId?r.project.tasks.find(t=>t.id===r.task!.parentId):null;
@@ -201,12 +245,12 @@ export function GanttCanvas(props: Props) {
       context:r.task?[r.project.name,parent?.title].filter(Boolean).join(' › '):'',
       duration:r.bounds?durationLabel({...task,...r.bounds,kind:task.kind||'group'}):'',
       hasDates:!!r.bounds,progress:r.task?taskProgress(r.project,r.task):projectProgress(r.project),
-      completed:r.completed,conflict:conflicts.get(r.id)});
+      completed:r.completed,conflict:conflicts.get(r.id),focusMemo});
   };
   function startDrag(e: React.PointerEvent, row: ChartRow, edge?: string, create=false) {
     if(e.button!==0||dragRef.current||spaceRef.current||!props.canEdit(row.project)||row.project.completed||row.completed||statusFilter==='completed')return;
     if(create&&mode!=='create')return;
-    if(!create&&(!row.task||row.task.kind==='group'))return;
+    if(!create&&(!row.task||(row.task.kind==='group'&&(!row.bounds||!props.onShiftGroup||edge))))return;
     const target=e.currentTarget as HTMLElement;
     const first=create?Math.max(0,Math.floor((e.clientX-target.getBoundingClientRect().left)/widthRef.current)):0;
     dragRef.current={kind:create?'create':'edit',row,target,x:e.clientX,y:e.clientY,moved:false,edge,delta:0,pointer:e.pointerId,first};
@@ -256,7 +300,7 @@ export function GanttCanvas(props: Props) {
     if(d.kind==='row'){d.lastX=e.clientX;d.lastY=e.clientY;d.drop=findRowDrop(d,e.clientX,e.clientY);setRowDragging({row:d.row,drop:d.drop,x:e.clientX,y:e.clientY});return;}
     d.delta=Math.round(dx/widthRef.current);
     if(d.kind==='create'){setCreating({id:d.row.id,first:d.first,last:Math.max(0,d.first+d.delta)});return;}
-    setDrag({id:d.row.id,delta:d.delta,edge:d.edge});
+    setDrag({id:d.row.id,projectId:d.row.project.id,delta:d.delta,edge:d.edge});
   }
   function endDrag(e: React.PointerEvent) {
     const d=dragRef.current;if(!d||d.pointer!==e.pointerId)return;
@@ -274,6 +318,7 @@ export function GanttCanvas(props: Props) {
     const current=projects.find(p=>p.id===d.row.project.id),task=current?.tasks.find(t=>t.id===d.row.task?.id);
     if(!current||current.revision!==d.row.project.revision||current.completed||!props.canEdit(current)||statusFilter==='completed'||(d.row.task&&(!task||isTaskComplete(current,task))))return;
     if(d.kind==='create'){const first=Math.min(d.first,d.first+d.delta),last=Math.max(d.first,d.first+d.delta);props.onAdd(d.row.project,d.row.task?.kind==='group'?d.row.id:d.row.task?.parentId||null,moveDate(base,Math.max(0,first)),moveDate(base,Math.max(0,last)));return;}
+    if(task?.kind==='group'){props.onShiftGroup?.(current,task,d.delta);return;}
     const t=d.row.task!;const patch=d.edge==='start'?{startDate:moveDate(t.startDate,d.delta)}:d.edge==='end'?{endDate:moveDate(t.endDate,d.delta)}:{startDate:moveDate(t.startDate,d.delta),endDate:moveDate(t.endDate,d.delta)};
     if((patch.startDate||t.startDate)<=(patch.endDate||t.endDate))props.onPatch(d.row.project,t,patch);
   }
@@ -285,7 +330,7 @@ export function GanttCanvas(props: Props) {
   let dropIndicatorId=drop?.taskId??drop?.project.id;
   if(drop?.position==='after'&&drop.taskId){const descendants=descendantIds(drop.project,drop.taskId);dropIndicatorId=rows.filter(r=>r.project.id===drop.project.id&&descendants.has(r.id)).at(-1)?.id??drop.taskId;}
   const conflicts = new Map(projects.flatMap(project => taskConflicts(project).map(c => [c.id, c.message] as const)));
-  const today=localDate(),todayIndex=dayDiff(base,today);
+  const todayIndex=dayDiff(base,today);
   return <div className="gantt-canvas-wrap">
     <div className="gantt-caption gantt-navigation">
         <div className="gantt-month-navigation" role="group" aria-label="표시 월 이동">
@@ -305,6 +350,13 @@ export function GanttCanvas(props: Props) {
           <button aria-label="전체 일정 맞춤" title="전체 일정 맞춤" onClick={fit}><Scan size={14}/></button>
         </div>
         <button className="gantt-name-layout" title="작업 이름을 목록 또는 막대 옆에 표시 · 이름을 잡아 소속과 순서 변경" onClick={()=>setLayout(v=>{const n=v==='beside'?'list':'beside';localStorage.setItem('bflow-gantt-name-layout',n);return n;})}>작업명 · {layout==='beside'?'막대 옆':'목록'}</button>
+        <details className="gantt-display-options" onKeyDown={e=>{if(e.key==='Escape'){e.preventDefault();e.currentTarget.open=false;e.currentTarget.querySelector('summary')?.focus();}}} onBlur={e=>{if(!e.currentTarget.contains(e.relatedTarget as Node|null))e.currentTarget.open=false;}}>
+          <summary aria-label="일정 표시 옵션" title="일정 표시 옵션"><SlidersHorizontal size={14}/><span>표시</span></summary>
+          <div className="gantt-display-popover" style={floatingGlassStyle} role="group" aria-label="일정 표시">
+            <label><input type="checkbox" aria-label="오늘 세로선" checked={display.todayLine} onChange={e=>changeDisplay('todayLine',e.currentTarget.checked)}/>오늘 세로선</label>
+            <label><input type="checkbox" aria-label="남은 일수" checked={display.remainingDays} onChange={e=>changeDisplay('remainingDays',e.currentTarget.checked)}/>남은 일수</label>
+          </div>
+        </details>
     </div>
     <div ref={chart} className={`gantt-canvas ${layout} mode-${mode} ${spaceHeld?'space-pan':''} ${panning?'panning':''} ${rowDragging?'moving-row':''}`} tabIndex={0} aria-label="프로젝트 간트" style={{'--gantt-day':`${width}px`,'--gantt-label':`${leftWidth}px`,'--gantt-ruler-height':`${RULER}px`} as React.CSSProperties}
       onScroll={e=>{setHover(null);syncVisibleDate();if(rows.length)savedScroll.current={left:e.currentTarget.scrollLeft,top:e.currentTarget.scrollTop};const d=dragRef.current;if(d?.kind==='row'&&d.moved){d.drop=findRowDrop(d,d.lastX,d.lastY);setRowDragging({row:d.row,drop:d.drop,x:d.lastX,y:d.lastY});}}}
@@ -320,19 +372,24 @@ export function GanttCanvas(props: Props) {
             <div className="gantt-dates">{Array.from({length:days},(_,i)=>{const date=moveDate(base,i),week=new Date(dateMs(date)).getUTCDay();return <div key={date} data-date={date} aria-current={date===today?'date':undefined} className={`gantt-date ${week===0||week===6?'weekend':''} ${date===today?'today':''}`} style={{width}} title={`${date} (${'일월화수목금토'[week]})${date===today?' · 오늘':''}`}>{width>26||i%Math.ceil(38/width)===0?date.slice(5).replace('-','/'):''}{width>38&&<small>{'일월화수목금토'[week]}</small>}{width>=240&&<div className="gantt-hours">00　06　12　18</div>}</div>;})}</div>
           </div>
         </div>
-        {todayIndex>=0&&todayIndex<days&&<div className="gantt-today-line" aria-hidden="true" style={{left:leftWidth+(todayIndex+.5)*width,top:RULER}}/>}
-        {rows.map((r,rowIndex)=>{
+        {display.todayLine&&todayIndex>=0&&todayIndex<days&&<div className="gantt-today-line" aria-hidden="true" style={{left:leftWidth+(todayIndex+.5)*width,top:RULER}}/>}
+        {previewRows.map((r,rowIndex)=>{
           const group=!r.task||r.task.kind==='group',t=r.task,b=r.bounds;
-          const movable=!!t&&!group&&!r.completed&&!r.project.completed&&statusFilter!=='completed'&&props.canEdit(r.project);
+          const movable=!!t&&(!group||!!b&&!!props.onShiftGroup)&&!r.completed&&!r.project.completed&&statusFilter!=='completed'&&props.canEdit(r.project);
           const relocatable=!!t&&!r.project.completed&&props.canEdit(r.project)&&!!props.onRelocate;
           const creatable=!r.completed&&!r.project.completed&&statusFilter!=='completed'&&props.canEdit(r.project);
           const progress=t?taskProgress(r.project,t):projectProgress(r.project);
           const returning=!!t&&rowIndex>0&&rows[rowIndex-1].project.id===r.project.id&&rows[rowIndex-1].depth>r.depth;
           const geometry=b?barGeometry(b,t?.kind||'project',base,width):{left:0,width:0};
           let x=geometry.left,barWidth=geometry.width;
-          if(drag?.id===r.id){if(drag.edge==='start'){x+=drag.delta*width;barWidth-=drag.delta*width}else if(drag.edge==='end')barWidth+=drag.delta*width;else x+=drag.delta*width;}
+          if(drag?.id===r.id&&t?.kind!=='group'){if(drag.edge==='start'){x+=drag.delta*width;barWidth-=drag.delta*width}else if(drag.edge==='end')barWidth+=drag.delta*width;else x+=drag.delta*width;}
           const color=t?resolveTaskColor(r.project,t):r.project.color;
           const title=t?.title||r.project.name;
+          const duration=b?compactDuration({...b,kind:t?.kind||'group'}):'';
+          const barLabel=b?`${duration}${display.remainingDays?` · ${remainingDaysLabel(b.endDate,today)}`:''}`:'';
+          // The inline label is at most 360px wide (canvas.css), plus its 12px
+          // gap. Date-axis padding before the scrolled viewport is not usable space.
+          const inlineAfter=x-visibleScrollLeft<372;
           const hoverEvents = {
             onPointerMove:(e:React.PointerEvent<HTMLElement>)=>showHover(r,e.clientX,e.clientY),
             onPointerLeave:()=>setHover(null),
@@ -343,33 +400,38 @@ export function GanttCanvas(props: Props) {
           const nameKeys = (e:React.KeyboardEvent<HTMLElement>) => {
             if(e.target!==e.currentTarget)return;
             if(e.key==='Enter'){e.preventDefault();props.onSelect(r.project.id,t?.id||null);}
-            if(e.key==='F2'&&hover?.task.id===r.id){e.preventDefault();document.getElementById('gantt-hover')?.focus();}
+            if(e.key==='F2'&&e.currentTarget.classList.contains('gantt-bar')){e.preventDefault();const popup=document.getElementById('gantt-hover');if(popup&&hover?.task.id===r.id)popup.focus();else{const rect=e.currentTarget.getBoundingClientRect();showHover(r,(rect.left+rect.right)/2,rect.top,true);}}
             if(e.key==='ContextMenu'||e.shiftKey&&e.key==='F10'){e.preventDefault();const rect=e.currentTarget.getBoundingClientRect();setHover(null);props.onMenu(r.project,t,rect.left,rect.bottom);}
           };
           const label=<>
             {group?<button className="gantt-row-collapse" aria-label={`${title} ${collapsed.includes(r.id)?'펼치기':'접기'}`} aria-expanded={!collapsed.includes(r.id)} title={collapsed.includes(r.id)?'하위 일정 펼치기':'하위 일정 접기'} onClick={e=>{e.stopPropagation();setHover(null);onCollapse(r.id);}}>{collapsed.includes(r.id)?<ChevronRight size={16}/>:<ChevronDown size={16}/>}</button>:<span className="gantt-row-collapse-spacer" aria-hidden="true"/>}
             {relocatable&&<GripVertical size={12} className="gantt-row-grip" aria-hidden="true"/>}
+            {!t&&<FolderKanban size={15} className="gantt-project-icon" aria-hidden="true"/>}
             <span className="gantt-name-copy"><span className="gantt-row-title">{title}</span></span>
             <span className="gantt-row-progress" role="progressbar" aria-label={`${title} 진행률`} aria-valuemin={0} aria-valuemax={100} aria-valuenow={progress}><strong>{progress}%</strong><span className="gantt-row-progress-track"><span style={{width:`${progress}%`}}/></span></span>
-            {r.completed&&<small className="gantt-completed-badge" aria-label="완료" title="완료"><Check size={12}/></small>}
-            <button className="gantt-row-menu" aria-label={`${title} 메뉴`} title="상세 · 완료 · 삭제" onClick={e=>{e.stopPropagation();const bounds=e.currentTarget.getBoundingClientRect();setHover(null);props.onMenu(r.project,t,bounds.left,bounds.bottom);}}><MoreHorizontal size={15}/></button>
+            {r.completed&&<button className="gantt-completed-badge" aria-label="완료" title={`${title} 완료 · 상세 보기`} onClick={e=>{e.stopPropagation();props.onSelect(r.project.id,t?.id||null);}}><Check size={12}/>완료</button>}
           </>;
           return <div key={r.id} data-row-id={r.id} data-project-id={r.project.id} data-parent-id={t?.parentId??''} className={`gantt-row ${!t?'project':t.kind==='group'?'group-row':''} ${returning?'returns-to-parent':''} ${r.completed?'completed':''} ${selected.includes(r.id)?'selected':''} ${rowDragging?.row.id===r.id?'row-drag-source':''} ${dropIndicatorId===r.id?`drop-${drop?.position}`:''}`} style={{'--gantt-color':color,'--gantt-depth':r.depth} as React.CSSProperties} onClick={e=>props.onSelect(r.project.id,t?.id||null,e.ctrlKey||e.metaKey)} onContextMenu={e=>{e.preventDefault();setHover(null);props.onMenu(r.project,t,e.clientX,e.clientY);}}>
-            {layout==='list'&&<div className={`gantt-list-label gantt-name ${relocatable?'relocatable':''}`} style={{paddingLeft:10+r.depth*16}} tabIndex={0} data-gantt-hover-anchor={r.id} aria-keyshortcuts="F2" onKeyDown={nameKeys} onPointerDown={e=>startRowDrag(e,r)} {...hoverEvents}><span className="gantt-tree-guides" aria-hidden="true">{Array.from({length:r.depth},(_,level)=><i key={level} style={{left:10+level*16}}/>)}</span>{label}</div>}
+            {layout==='list'&&<div className={`gantt-list-label gantt-name ${relocatable?'relocatable':''}`} style={{paddingLeft:10+r.depth*16}} tabIndex={0} onKeyDown={nameKeys} onPointerDown={e=>startRowDrag(e,r)}><span className="gantt-tree-guides" aria-hidden="true">{Array.from({length:r.depth},(_,level)=><i key={level} style={{left:10+level*16}}/>)}</span>{label}</div>}
             <div className={`gantt-track ${creatable?'creatable':''}`} onPointerDown={e=>{if(e.target===e.currentTarget)startDrag(e,r,undefined,true);}} onDoubleClick={e=>{if(e.target!==e.currentTarget||!creatable||mode!=='create'||spaceRef.current)return;const day=Math.floor((e.clientX-e.currentTarget.getBoundingClientRect().left)/width);const date=moveDate(base,day);props.onAdd(r.project,t?.kind==='group'?t.id:t?.parentId||null,date,date);}}>
               {b&&<div className={`gantt-bar-position ${conflicts.has(r.id)?'conflict':''}`} style={{left:x,width:Math.max(6,barWidth)}}>
-                {layout==='beside'&&<div className={`gantt-inline-name gantt-name ${relocatable?'relocatable':''} ${x<Math.min(420,title.length*8+130+(r.completed?20:0))?'after':''}`} tabIndex={0} data-gantt-hover-anchor={r.id} aria-keyshortcuts="F2" onKeyDown={nameKeys} onPointerDown={e=>startRowDrag(e,r)} {...hoverEvents}>{label}</div>}
-                <button className={`gantt-bar ${group?'group':t?.kind||''} ${movable?'movable':''}`} aria-label={`${title}, ${durationLabel({...t,...b,kind:t?.kind||'group'} as GanttTask)}${r.completed?', 완료':''}`} aria-keyshortcuts="F2" onPointerDown={e=>startDrag(e,r,(e.target as HTMLElement).dataset.edge)} {...hoverEvents} onKeyDown={nameKeys}>
-                  {t?.kind!=='milestone'&&<><span className="gantt-progress" style={{width:`${progress}%`}}/>{movable&&<><span data-edge="start" className="gantt-resize start"/><span data-edge="end" className="gantt-resize end"/></>}</>}
+                {layout==='beside'&&!inlineAfter&&<div className={`gantt-inline-name gantt-name ${relocatable?'relocatable':''}`} tabIndex={0} onKeyDown={nameKeys} onPointerDown={e=>startRowDrag(e,r)}>{label}</div>}
+                <button className={`gantt-bar ${group?'group':t?.kind||''} ${movable?'movable':''}`} aria-label={`${title}, ${durationLabel({...t,...b,kind:t?.kind||'group'} as GanttTask)}${r.completed?', 완료':''}`} data-gantt-hover-anchor={r.id} aria-keyshortcuts="F2" onPointerDown={e=>startDrag(e,r,(e.target as HTMLElement).dataset.edge)} {...hoverEvents} onKeyDown={nameKeys}>
+                  {t?.kind!=='milestone'&&<><span className="gantt-progress" style={{width:`${progress}%`}}/>{movable&&!group&&<><span data-edge="start" className="gantt-resize start"/><span data-edge="end" className="gantt-resize end"/></>}</>}
+                  {progressPulses[r.id]&&<span key={progressPulses[r.id]} className="gantt-progress-pulse" aria-hidden="true"/>}
                 </button>
+                <div className="gantt-bar-tail">
+                  <span className="gantt-duration">{barLabel}</span>
+                  {layout==='beside'&&inlineAfter&&<div className={`gantt-inline-name gantt-name after ${relocatable?'relocatable':''}`} tabIndex={0} onKeyDown={nameKeys} onPointerDown={e=>startRowDrag(e,r)}>{label}</div>}
+                </div>
                 {conflicts.has(r.id)&&<span className="gantt-conflict-marker" aria-label={conflicts.get(r.id)} title={conflicts.get(r.id)}>!</span>}
               </div>}
-              {!b&&layout==='beside'&&<div className={`gantt-empty-project gantt-name ${relocatable?'relocatable':''}`} tabIndex={0} data-gantt-hover-anchor={r.id} aria-keyshortcuts="F2" onKeyDown={nameKeys} onPointerDown={e=>startRowDrag(e,r)} {...hoverEvents}>{label}</div>}
+              {!b&&layout==='beside'&&<div className={`gantt-empty-project gantt-name ${relocatable?'relocatable':''}`} tabIndex={0} onKeyDown={nameKeys} onPointerDown={e=>startRowDrag(e,r)}>{label}</div>}
               {creating?.id===r.id&&<div className="gantt-creation" style={{left:Math.min(creating.first,creating.last)*width,width:(Math.abs(creating.last-creating.first)+1)*width}}/>}
             </div>
           </div>;
         })}
-        <svg className="gantt-dependencies" width="100%" height={RULER+rows.length*ROW} aria-hidden="true"><g fill="none" stroke="currentColor" strokeWidth="1">{rows.flatMap((r,i)=>{if(!r.task?.predecessorId||!index.has(r.task.predecessorId)||!r.bounds)return[];const p=rows[index.get(r.task.predecessorId)!];if(!p.bounds)return[];const source=barGeometry(p.bounds,p.task?.kind||'project',base,width),target=barGeometry(r.bounds,r.task.kind,base,width);const x1=leftWidth+source.left+source.width,x2=leftWidth+target.left,y1=RULER+index.get(p.id)!*ROW+20,y2=RULER+i*ROW+20;return <path key={r.id} d={`M${x1},${y1} H${x1+9} V${y2} H${x2}`}/>;})}</g></svg>
+        <svg className="gantt-dependencies" width="100%" height={RULER+rows.length*ROW} aria-hidden="true"><g fill="none" stroke="currentColor" strokeWidth="1">{previewRows.flatMap((r,i)=>{if(!r.task?.predecessorId||!index.has(r.task.predecessorId)||!r.bounds)return[];const p=previewRows[index.get(r.task.predecessorId)!];if(!p.bounds)return[];const source=barGeometry(p.bounds,p.task?.kind||'project',base,width),target=barGeometry(r.bounds,r.task.kind,base,width);const x1=leftWidth+source.left+source.width,x2=leftWidth+target.left,y1=RULER+index.get(p.id)!*ROW+20,y2=RULER+i*ROW+20;return <path key={r.id} d={`M${x1},${y1} H${x1+9} V${y2} H${x2}`}/>;})}</g></svg>
       </div>}
     </div><GanttTooltip hover={hover} resetKey={`${gestureRevision}|${visibleRowOrder}|${statusFilter}|${worker}|${mode}|${layout}`}/>
     {rowDragging&&createPortal(<div className={`gantt-row-drag-preview ${rowDragging.drop?.allowed?'allowed':'unavailable'}`} role="status" style={{left:Math.max(8,Math.min(rowDragging.x+16,(window.innerWidth||1200)-300)),top:Math.max(8,Math.min(rowDragging.y+16,(window.innerHeight||800)-110))}}><strong><GripVertical size={14}/>{rowDragging.row.task?.title}</strong>{rowDragging.row.task?.kind==='group'&&<small>하위 작업과 함께 이동</small>}<p>{rowDragging.drop?.label??'옮길 작업이나 프로젝트 행 위로 드래그하세요.'}</p></div>,document.body)}

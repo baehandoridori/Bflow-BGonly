@@ -1,13 +1,93 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createPreviewGateway, listCalendarEvents, patchCalendarEvent, deleteCalendarEvent } from '../src/features/gantt/previewGateway.ts';
-import { createProject, createSpace, createTask } from '../src/features/gantt/domain.ts';
+import { createProject, createSpace, createTask, shiftTaskSubtree } from '../src/features/gantt/domain.ts';
 import { createGanttStore } from '../src/features/gantt/useGanttStore.ts';
 function setup() {
  const rows=new Map<string,string>();const storage={getItem:(k:string)=>rows.get(k)??null,setItem:(k:string,v:string)=>{rows.set(k,v);}};
  let tail=Promise.resolve();const locks={request<T>(_name:string,callback:()=>Promise<T>):Promise<T>{const result=tail.then(callback);tail=result.then(()=>undefined,()=>undefined);return result;}};
  return {storage,locks,seed:false};
 }
+
+test('a full subtree shift is one optimistic save and one undo entry with matching calendar dates', async () => {
+ const memory=setup();let writes=0;
+ const options={...memory,storage:{...memory.storage,setItem:(key:string,value:string)=>{writes++;memory.storage.setItem(key,value);}},canViewCalendar:()=>true,canEditCalendar:()=>true};
+ const base=createPreviewGateway('owner',options),space=createSpace('폴더','owner'),project=createProject('한 번에 이동',space.id,'owner'),calendarId=crypto.randomUUID();
+ const group={...createTask('상위','2024-03-01'),kind:'group' as const};
+ const nested={...createTask('접힌 하위','2024-03-01'),kind:'group' as const,parentId:group.id};
+ const completed={...createTask('완료 작업','2024-03-01'),endDate:'2024-03-02',parentId:nested.id,completed:true,progress:100,calendarId};
+ const timed={...createTask('자정을 넘는 작업','2024-03-02'),endDate:'2024-03-03',parentId:nested.id,allDay:false,startTime:'23:15',endTime:'02:45',progress:40,calendarId};
+ const milestone={...createTask('마일스톤','2024-03-03'),kind:'milestone' as const,parentId:group.id,allDay:false,startTime:'10:00',endTime:'10:00',calendarId};
+ const successor={...createTask('외부 자동 후속','2024-03-04'),mode:'auto' as const,predecessorId:group.id,calendarId};
+ project.tasks=[group,nested,completed,timed,milestone,successor];
+ await base.execute({requestId:crypto.randomUUID(),command:{type:'saveSpace',space,expectedRevision:null}});
+ await base.execute({requestId:crypto.randomUUID(),command:{type:'saveProject',project,expectedRevision:null}});
+ let release!:()=>void;const gate=new Promise<void>(resolve=>{release=resolve;});
+ const requests:Parameters<typeof base.execute>[0][]=[];
+ const gateway={read:base.read,execute:async(request:Parameters<typeof base.execute>[0])=>{requests.push(request);await gate;return base.execute(request);}};
+ const store=createGanttStore();await store.getState().initialize('owner',gateway);
+ try {
+  const before=structuredClone(store.getState().snapshot.projects[0]),writesBefore=writes;
+  const mutation=store.getState().execute({type:'saveProject',project:shiftTaskSubtree(before,group.id,3),expectedRevision:before.revision});
+  assert.equal(store.getState().pending,true);
+  assert.equal(store.getState().snapshot.projects[0].tasks.find(task=>task.id===completed.id)!.startDate,'2024-03-04');
+  assert.deepEqual((await base.read()).projects[0],before,'the authority waits for the one project write');
+  assert.equal(requests.length,1);assert.equal(requests[0].command.type,'saveProject');
+  release();await mutation;
+  const shifted=store.getState().snapshot.projects[0];
+  assert.equal(shifted.revision,before.revision+1);assert.equal(writes,writesBefore+1);
+  assert.equal(store.getState().canUndo,true);assert.equal(store.getState().canRedo,false);
+  const projectedDates=async()=>{
+   const rows=await listCalendarEvents('owner',options);
+   return [completed,timed,milestone,successor].map(task=>{const row=rows.find(row=>row.linked_gantt_task_id===task.id)!;return [row.start_date,row.end_date,row.start_time,row.end_time];});
+  };
+  const movedDates=[['2024-03-04','2024-03-05',null,null],['2024-03-05','2024-03-06','23:15','02:45'],['2024-03-06','2024-03-06','10:00','10:00'],['2024-03-07','2024-03-07',null,null]];
+  assert.deepEqual(await projectedDates(),movedDates);
+  await store.getState().undo();
+  const undone=store.getState().snapshot.projects[0];
+  assert.equal(undone.revision,before.revision+2);assert.deepEqual({...undone,revision:before.revision},before);
+  assert.equal(store.getState().canUndo,false,'the entire movement created exactly one history entry');
+  assert.equal(store.getState().canRedo,true);
+  assert.deepEqual(await projectedDates(),[['2024-03-01','2024-03-02',null,null],['2024-03-02','2024-03-03','23:15','02:45'],['2024-03-03','2024-03-03','10:00','10:00'],['2024-03-04','2024-03-04',null,null]]);
+  await store.getState().redo();
+  const redone=store.getState().snapshot.projects[0];
+  assert.equal(redone.revision,before.revision+3);assert.deepEqual({...redone,revision:shifted.revision},shifted);
+  assert.deepEqual(await projectedDates(),movedDates);
+  assert.equal(requests.length,3);assert.equal(writes,writesBefore+3);
+  assert.deepEqual(requests.map(({command})=>{assert.equal(command.type,'saveProject');return command.type==='saveProject'?command.expectedRevision:undefined;}),[1,2,3]);
+ } finally { release();await store.getState().initialize(null); }
+});
+
+test('one read-only descendant calendar rolls back the full optimistic shift without a revision or undo entry', async () => {
+ const memory=setup(),editableCalendar=crypto.randomUUID(),lockedCalendar=crypto.randomUUID();let locked=false,writes=0;
+ const options={...memory,storage:{...memory.storage,setItem:(key:string,value:string)=>{writes++;memory.storage.setItem(key,value);}},canViewCalendar:()=>true,canEditCalendar:(calendarId:string)=>!locked||calendarId!==lockedCalendar};
+ const base=createPreviewGateway('owner',options),space=createSpace('폴더','owner'),project=createProject('원자적 이동',space.id,'owner');
+ const group={...createTask('상위','2024-02-28'),kind:'group' as const};
+ const nested={...createTask('접힌 하위','2024-02-28'),kind:'group' as const,parentId:group.id};
+ const editable={...createTask('편집 가능한 작업','2024-02-28'),parentId:group.id,calendarId:editableCalendar};
+ const readOnly={...createTask('완료한 읽기 전용 작업','2024-02-29'),parentId:nested.id,completed:true,progress:100,calendarId:lockedCalendar};
+ const successor={...createTask('외부 자동 후속','2024-03-01'),mode:'auto' as const,predecessorId:readOnly.id,calendarId:editableCalendar};
+ project.tasks=[group,nested,editable,readOnly,successor];
+ await base.execute({requestId:crypto.randomUUID(),command:{type:'saveSpace',space,expectedRevision:null}});
+ await base.execute({requestId:crypto.randomUUID(),command:{type:'saveProject',project,expectedRevision:null}});
+ locked=true;
+ let release!:()=>void;const gate=new Promise<void>(resolve=>{release=resolve;});let requests=0;
+ const gateway={read:base.read,execute:async(request:Parameters<typeof base.execute>[0])=>{requests++;await gate;return base.execute(request);}};
+ const store=createGanttStore();await store.getState().initialize('owner',gateway);
+ try {
+  const before=structuredClone(store.getState().snapshot),eventsBefore=await listCalendarEvents('owner',options),writesBefore=writes;
+  const current=before.projects[0];
+  const mutation=store.getState().execute({type:'saveProject',project:shiftTaskSubtree(current,group.id,3),expectedRevision:current.revision});
+  assert.equal(store.getState().pending,true);
+  assert.equal(store.getState().snapshot.projects[0].tasks.find(task=>task.id===readOnly.id)!.startDate,'2024-03-03');
+  const rejection=assert.rejects(mutation,/캘린더.*권한/);release();await rejection;
+  assert.equal(requests,1);assert.equal(writes,writesBefore,'nothing was committed before the permission failure');
+  assert.deepEqual(store.getState().snapshot,before);assert.deepEqual(await base.read(),before);
+  assert.deepEqual(await listCalendarEvents('owner',options),eventsBefore);
+  assert.equal(store.getState().pending,false);assert.equal(store.getState().canUndo,false);assert.equal(store.getState().canRedo,false);
+  assert.match(store.getState().error!,/캘린더.*권한/);
+ } finally { release();await store.getState().initialize(null); }
+});
 test('shared authority serializes CAS, deduplicates retry and persists across gateways',async()=>{
  const options=setup(),a=createPreviewGateway('owner',options),b=createPreviewGateway('owner',options);const s=createSpace('공유','owner');
  const req={requestId:crypto.randomUUID(),command:{type:'saveSpace' as const,space:s,expectedRevision:null}};
