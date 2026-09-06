@@ -2,6 +2,7 @@ import { memo, type MouseEvent as ReactMouseEvent } from 'react';
 import { Image as ImageIcon } from 'lucide-react';
 import type { Character, CharacterCostume } from '@/types';
 import { CharacterImageFrame } from '@/components/characters/CharacterImageFrame';
+import { CharacterCommentBadge } from '@/components/characters/CharacterCommentBadge';
 import { DESIGN_STAGE_META, RIGGING_STAGE_META, characterStageColor } from '@/constants/characterStages';
 import { useCostumeEditingPresence, useCostumeCollisionWarn } from '@/stores/useEditingPresenceStore';
 import { editingBeamClass } from '@/utils/editingPresence';
@@ -51,7 +52,10 @@ export const CharacterListRow = memo(function CharacterListRow({
         )}
       </div>
       <div className="min-w-0 flex-1">
-        <div className="truncate font-medium text-text-primary">{character.name}</div>
+        <div className="flex min-w-0 items-center gap-1.5">
+          <div className="min-w-0 truncate font-medium text-text-primary">{character.name}</div>
+          <CharacterCommentBadge characterId={character.id} />
+        </div>
         <div className="text-xs text-text-secondary">
           복장 {costumes.length}
           {character.episodeIds.length > 0 ? ` · EP ${character.episodeIds.length}` : ''}

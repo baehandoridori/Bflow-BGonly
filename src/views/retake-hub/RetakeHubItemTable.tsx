@@ -23,6 +23,8 @@ interface Props {
   items: CompRevision[];
   tab: HubTab;
   allUsers: AppUser[];
+  focusRevisionId?: string | null;
+  focusToken?: number;
 }
 
 interface GroupBucket {
@@ -118,7 +120,7 @@ function buildGroups(
   return groups;
 }
 
-export function RetakeHubItemTable({ items, tab, allUsers }: Props) {
+export function RetakeHubItemTable({ items, tab, allUsers, focusRevisionId, focusToken }: Props) {
   const groups = useMemo(() => buildGroups(items, tab, allUsers), [items, tab, allUsers]);
 
   if (items.length === 0) {
@@ -162,6 +164,8 @@ export function RetakeHubItemTable({ items, tab, allUsers }: Props) {
                 allUsers={allUsers}
                 sideBarClass={sideBarColorClass(rev.status)}
                 reLabel={revisionNoToLabel(rev.revisionNo)}
+                focused={rev.id === focusRevisionId}
+                focusToken={focusToken}
               />
             ))}
           </div>

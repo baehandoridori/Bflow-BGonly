@@ -1,7 +1,7 @@
 import { useMemo, useCallback, useState, useEffect, useRef } from 'react';
 import { Responsive, WidthProvider, type Layouts, type Layout } from 'react-grid-layout';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Plus, ChevronDown, ChevronRight, ArrowLeft, Check, Trash2, RotateCcw, PieChart, BarChart3, Users, LayoutGrid, GitCompareArrows, Calendar as CalendarIcon, CheckSquare, StickyNote, Presentation, Palmtree, Activity, type LucideIcon } from 'lucide-react';
+import { Plus, ChevronDown, ChevronRight, ArrowLeft, Check, Trash2, RotateCcw, PieChart, BarChart3, Users, LayoutGrid, GitCompareArrows, Calendar as CalendarIcon, CheckSquare, StickyNote, Presentation, Palmtree, Activity, MessageSquareWarning, type LucideIcon } from 'lucide-react';
 import { useAppStore } from '@/stores/useAppStore';
 import { useDataStore } from '@/stores/useDataStore';
 import { useAuthStore } from '@/stores/useAuthStore';
@@ -12,6 +12,7 @@ import { EpisodeSummaryWidget } from '@/components/widgets/EpisodeSummaryWidget'
 import { DepartmentComparisonWidget } from '@/components/widgets/DepartmentComparisonWidget';
 import { CalendarWidget } from '@/components/widgets/CalendarWidget';
 import { MyTasksWidget } from '@/components/widgets/MyTasksWidget';
+import { MyRetakesWidget, MyRetakesReminder } from '@/components/widgets/MyRetakesWidget';
 import { VacationWidget } from '@/components/widgets/VacationWidget';
 import { MemoWidget } from '@/components/widgets/MemoWidget';
 import { RecentActivityWidget } from '@/components/widgets/RecentActivityWidget';
@@ -270,6 +271,7 @@ const ALL_WIDGETS: WidgetMeta[] = [
   { id: 'dept-comparison', label: '부서별 비교', component: <DepartmentComparisonWidget />, allOnly: true, category: 'progress', icon: GitCompareArrows },
   { id: 'calendar', label: '캘린더', component: <CalendarWidget />, category: 'tool', icon: CalendarIcon },
   { id: 'my-tasks', label: '내 할일', component: <MyTasksWidget />, category: 'tool', icon: CheckSquare },
+  { id: 'my-retakes', label: '내 리테이크', component: <MyRetakesWidget />, category: 'tool', icon: MessageSquareWarning },
   { id: 'vacation-today', label: '휴가자 현황', component: <VacationWidget />, category: 'etc', icon: Palmtree },
   { id: 'memo', label: '메모', component: <MemoWidget />, category: 'tool', icon: StickyNote },
   { id: 'whiteboard', label: '화이트보드', component: <WhiteboardWidget />, category: 'tool', icon: Presentation },
@@ -289,6 +291,7 @@ const EP_WIDGETS: WidgetMeta[] = [
   { id: 'ep-full-act-progress', label: 'EP 전체 ACT 진행률', component: <EpFullDeptProgressWidget dept="acting" />, category: 'progress', icon: BarChart3 },
   { id: 'calendar', label: '캘린더', component: <CalendarWidget />, category: 'tool', icon: CalendarIcon },
   { id: 'my-tasks', label: '내 할일', component: <MyTasksWidget />, category: 'tool', icon: CheckSquare },
+  { id: 'my-retakes', label: '내 리테이크', component: <MyRetakesWidget />, category: 'tool', icon: MessageSquareWarning },
   { id: 'memo', label: '메모', component: <MemoWidget />, category: 'tool', icon: StickyNote },
   { id: 'whiteboard', label: '화이트보드', component: <WhiteboardWidget />, category: 'tool', icon: Presentation },
 ];
@@ -333,8 +336,9 @@ const DEPT_LAYOUT: Layout[] = [
   { i: 'overall-progress', x: 12, y: 0, w: 5, h: 14, minW: 2, minH: 2 },
   { i: 'assignee-cards', x: 18, y: 0, w: 6, h: 28, minW: 2, minH: 2 },
   { i: 'episode-summary', x: 0, y: 11, w: 7, h: 15, minW: 2, minH: 2 },
-  { i: 'vacation-today', x: 7, y: 14, w: 7, h: 12, minW: 2, minH: 2 },
-  { i: 'recent-activity', x: 0, y: 26, w: 9, h: 31, minW: 4, minH: 4 },
+  { i: 'my-retakes', x: 7, y: 14, w: 11, h: 14, minW: 4, minH: 8 },
+  { i: 'vacation-today', x: 9, y: 28, w: 9, h: 12, minW: 2, minH: 2 },
+  { i: 'recent-activity', x: 0, y: 28, w: 9, h: 29, minW: 4, minH: 4 },
 ];
 
 /* ── 통합 기본 레이아웃 뷰 (24칸 그리드, rowHeight=16px) ── */
@@ -348,7 +352,8 @@ const ALL_LAYOUT: Layout[] = [
   { i: 'whiteboard', x: 5, y: 14, w: 5, h: 17, minW: 2, minH: 2 },
   { i: 'my-tasks', x: 10, y: 18, w: 5, h: 27, minW: 2, minH: 2 },
   { i: 'vacation-today', x: 5, y: 31, w: 5, h: 14, minW: 2, minH: 2 },
-  { i: 'recent-activity', x: 15, y: 16, w: 9, h: 41, minW: 4, minH: 4 },
+  { i: 'my-retakes', x: 15, y: 16, w: 9, h: 19, minW: 4, minH: 8 },
+  { i: 'recent-activity', x: 15, y: 35, w: 9, h: 22, minW: 4, minH: 4 },
 ];
 
 /* ── 에피소드 대시보드 기본 레이아웃 뷰 (24칸 그리드) ── */
@@ -357,6 +362,7 @@ const EP_LAYOUT: Layout[] = [
   { i: 'ep-stage-bars', x: 4, y: 0, w: 6, h: 11, minW: 2, minH: 2 },
   { i: 'ep-assignee-cards', x: 10, y: 0, w: 4, h: 21, minW: 2, minH: 2 },
   { i: 'ep-dept-comparison', x: 14, y: 0, w: 5, h: 13, minW: 2, minH: 2 },
+  { i: 'my-retakes', x: 14, y: 13, w: 10, h: 20, minW: 4, minH: 8 },
   { i: 'ep-part-progress', x: 0, y: 11, w: 5, h: 22, minW: 2, minH: 2 },
   { i: 'ep-part-bg-A', x: 5, y: 11, w: 5, h: 15, minW: 2, minH: 2 },
   { i: 'memo', x: 10, y: 21, w: 4, h: 15, minW: 2, minH: 2 },
@@ -1145,6 +1151,8 @@ export function Dashboard() {
           </button>
         </div>
       </div>
+
+      {!visibleIds.has('my-retakes') && <MyRetakesReminder />}
 
       <AnimatePresence mode="wait">
         <motion.div

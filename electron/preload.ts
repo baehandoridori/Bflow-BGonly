@@ -13,6 +13,47 @@ import type { SessionActionResult } from './sessionManager';
 import type { MarketAdminEventInput, MarketCommand, MarketRemoteState } from './marketAccountService';
 import type { ArcadeExecuteCommand, ArcadeExecuteResult, ArcadeWalletUpdate } from './arcadeService';
 import type { RealtimeStatusMetadata } from './realtime';
+import type { BflowDeepLink } from '../src/shared/bflowDeepLink';
+import type { RevisionUpdateResult } from '../src/shared/revisionPersistence';
+
+// ─── 딥링크 구독 준비 계약 ──────────────────────────────
+type DeepLinkReceipt = { documentId: string; subscriptionId: number; deliveryId: number };
+let deepLinkDocumentId: string | null = null;
+let deepLinkSubscriptionSequence = 0;
+let activeDeepLinkSubscription: { id: number; callback: (data: BflowDeepLink) => void } | null = null;
+
+function announceDeepLinkReady(): void {
+  if (!deepLinkDocumentId || !activeDeepLinkSubscription) return;
+  ipcRenderer.send('deep-link:ready', {
+    documentId: deepLinkDocumentId,
+    subscriptionId: activeDeepLinkSubscription.id,
+  });
+}
+
+// React보다 먼저 설치하여 DOM 준비 응답을 놓치지 않는다.
+ipcRenderer.on('deep-link:document-ready', (_event, documentId: string) => {
+  deepLinkDocumentId = documentId;
+  announceDeepLinkReady();
+});
+ipcRenderer.on('deep-link', (_event, data: BflowDeepLink, receipt: DeepLinkReceipt) => {
+  const subscription = activeDeepLinkSubscription;
+  if (!subscription || receipt?.documentId !== deepLinkDocumentId || receipt.subscriptionId !== subscription.id) return;
+  subscription.callback(data);
+  // 구독 교체 중 무시한 전송은 확인하지 않아 새 구독에서 다시 받을 수 있다.
+  ipcRenderer.send('deep-link:ack', receipt);
+});
+
+function subscribeDeepLink(callback: (data: BflowDeepLink) => void): () => void {
+  const id = ++deepLinkSubscriptionSequence;
+  activeDeepLinkSubscription = { id, callback };
+  announceDeepLinkReady();
+  return () => {
+    if (activeDeepLinkSubscription?.id !== id) return;
+    activeDeepLinkSubscription = null;
+    if (deepLinkDocumentId) ipcRenderer.send('deep-link:not-ready', { documentId: deepLinkDocumentId, subscriptionId: id });
+  };
+}
+// ─── 딥링크 구독 준비 계약 끝 ───────────────────────────
 
 let canonicalSessionEpoch = 0;
 function rememberSessionEpoch(result: SessionActionResult): SessionActionResult {
@@ -271,6 +312,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.invoke('supabase:read-comments', partUuid),
   supabaseReadCommentsForCharacter: (characterId: string) =>
     ipcRenderer.invoke('supabase:read-comments-for-character', characterId),
+  getCharacterCommentSummaries: (characterIds: string[]) =>
+    ipcRenderer.invoke('supabase:character-comment-summaries', characterIds),
   supabaseReadCommentReadStates: (userId: string) =>
     ipcRenderer.invoke('supabase:read-comment-read-states', userId),
   supabaseUpsertCommentReadState: (userId: string, sceneThreadKey: string, lastReadAt: string) =>
@@ -355,6 +398,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.invoke('calendar:notifications:mark-read', ids),
   supabaseReadRevisions: () =>
     ipcRenderer.invoke('supabase:read-revisions'),
+  supabaseReadRevisionById: (revisionId: string) =>
+    ipcRenderer.invoke('supabase:read-revision-by-id', revisionId),
+  remindRetake: (revisionId: string) => ipcRenderer.invoke('supabase:remind-retake', revisionId),
     supabaseAddRevision: (
       id: string, partUuid: string, sceneId: string, revisionNo: number, status: string,
       priority: string, description: string, frameNo: string, imageUrl: string,
@@ -364,7 +410,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
       ipcRenderer.invoke('supabase:add-revision', id, partUuid, sceneId, revisionNo, status,
         priority, description, frameNo, imageUrl, department, lookupDepartment, requesterId, requesterName, assignee, createdAt,
         notifyUserIdsJson, assigneeIdsJson, setId),
-  supabaseUpdateRevision: (id: string, updates: Record<string, string>) =>
+  supabaseUpdateRevision: (id: string, updates: Record<string, string>): Promise<RevisionUpdateResult> =>
     ipcRenderer.invoke('supabase:update-revision', id, updates),
   supabaseDeleteRevision: (id: string) =>
     ipcRenderer.invoke('supabase:delete-revision', id),
@@ -503,12 +549,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   sendRiggingWebhook: (payload: Record<string, string>) =>
     ipcRenderer.invoke('slack:send-rigging-webhook', payload),
 
-  // 딥링크 수신 (bflow://scene/...)
-  onDeepLink: (callback: (data: { sheetName: string; sceneId: string }) => void) => {
-    const handler = (_event: unknown, data: { sheetName: string; sceneId: string }) => callback(data);
-    ipcRenderer.on('deep-link', handler);
-    return () => ipcRenderer.removeListener('deep-link', handler);
-  },
+  // 씬/리테이크 딥링크: 실제 구독 설치 후 준비를 알린다.
+  onDeepLink: subscribeDeepLink,
 
   // Realtime 이벤트 수신 (메인 프로세스 → 렌더러)
   onSupabaseRealtime: (callback: (event: unknown) => void) => {
@@ -531,7 +573,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
   },
   // Broadcast 이벤트 수신 (즉시 동기화용)
   onSupabaseBroadcast: (callback: (event: unknown) => void) => {
-    const handler = (_event: unknown, data: unknown) => callback(data);
+    const handler = (_event: unknown, data: unknown) => {
+      const event = data as { event?: string; payload?: { epoch?: unknown } } | null;
+      if (event?.event === 'retake-delivery-result' && event.payload?.epoch !== canonicalSessionEpoch) return;
+      callback(data);
+    };
     ipcRenderer.on('supabase:broadcast-event', handler);
     return () => ipcRenderer.removeListener('supabase:broadcast-event', handler);
   },
@@ -659,11 +705,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.invoke('widget:navigate-main', payload),
   onWidgetNavigateMain: (callback: (payload: {
     sheetName: string; sceneId: string; sceneUuid: string;
-    episodeNumber?: number; partId?: string;
+    episodeNumber?: number; partId?: string; revisionId?: string;
   }) => void) => {
     const handler = (_event: unknown, data: {
       sheetName: string; sceneId: string; sceneUuid: string;
-      episodeNumber?: number; partId?: string;
+      episodeNumber?: number; partId?: string; revisionId?: string;
     }) => callback(data);
     ipcRenderer.on('widget:navigate-main', handler);
     return () => ipcRenderer.removeListener('widget:navigate-main', handler);

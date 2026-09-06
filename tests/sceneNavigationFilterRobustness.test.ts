@@ -91,6 +91,18 @@ test('compositing revision scene jump preserves the current scene department fil
   assert.doesNotMatch(jumpButton, /department\?: 'bg' \| 'acting';/);
   assert.doesNotMatch(jumpButton, /forceDeptFilter/);
   assert.doesNotMatch(detailPanel, /department=\{revision\.department/);
+  assert.match(jumpButton, /if \(openRetakeScene\) \{\s*openRetakeScene\(\{ sceneKey, sceneUuid, focusRevisionId \}\);\s*return;/);
+  assert.match(detailPanel, /focusRevisionId=\{revision\.id\}/);
+});
+
+test('board-hosted scene department tabs stay local and nested editors can claim Escape', async () => {
+  const modal = await readRepoFile('src', 'components', 'scenes', 'UnifiedSceneDetailModal.tsx');
+  const host = await readRepoFile('src', 'views', 'compositing-dashboard', 'modal', 'CompositingSceneModal.tsx');
+
+  assert.match(host, /localDepartmentSelection=\{!!sceneTarget\}/);
+  assert.match(modal, /localDepartmentSelection = false/);
+  assert.match(modal, /if \(localDepartmentSelection\) \{\s*setLocalDepartment\(next\);\s*return;\s*\}/);
+  assert.match(modal, /if \(e\.defaultPrevented\) return;/);
 });
 
 test('spotlight scene navigation syncs dashboard department filter', async () => {

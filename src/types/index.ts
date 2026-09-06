@@ -1,4 +1,8 @@
 import type { MarketAdminEventInput, MarketCommand, MarketRemoteState } from '../features/playground/market/types';
+import type { BflowDeepLink } from '../shared/bflowDeepLink';
+import type { RetakeDeliveryResult } from '../shared/retakeNotifications';
+import type { RevisionUpdateResult } from '../shared/revisionPersistence';
+import type { CharacterCommentSummaries } from '../shared/characterCommentSummary';
 import type {
   ArcadeExecuteCommand,
   ArcadeExecuteResult,
@@ -1317,13 +1321,13 @@ export interface ElectronAPI extends CalendarApiInputContract {
   /** 위젯 팝업 → 본체 씬 상세 이동 — 팝업에서 본체로 점프 신호 전송 */
   widgetNavigateMain?: (payload: {
     sheetName: string; sceneId: string; sceneUuid: string;
-    episodeNumber?: number; partId?: string;
+    episodeNumber?: number; partId?: string; revisionId?: string;
   }) => Promise<void>;
   /** 위젯 팝업 → 본체 씬 상세 이동 — 본체가 점프 신호 수신 */
   onWidgetNavigateMain?: (
     callback: (payload: {
       sheetName: string; sceneId: string; sceneUuid: string;
-      episodeNumber?: number; partId?: string;
+      episodeNumber?: number; partId?: string; revisionId?: string;
     }) => void,
   ) => () => void;
   /** 위젯 팝업 → 본체 캘린더 날짜 이동 — 팝업에서 본체로 점프 신호 전송 */
@@ -1341,6 +1345,7 @@ export interface ElectronAPI extends CalendarApiInputContract {
   supabaseReadComments: (partUuid: string) => Promise<unknown[]>;
   /** 캐릭터 현황판 상세 스레드 — 캐릭터별 댓글 일괄 조회. */
   supabaseReadCommentsForCharacter?: (characterId: string) => Promise<unknown[]>;
+  getCharacterCommentSummaries: (characterIds: string[]) => Promise<CharacterCommentSummaries>;
   supabaseReadCommentReadStates?: (userId: string) => Promise<CommentReadStateRow[]>;
   supabaseUpsertCommentReadState?: (userId: string, sceneThreadKey: string, lastReadAt: string) => Promise<void>;
   /** 한솔 결정 (v1.15.5): 로그인 catch-up — last seen 이후 받은 멘션 댓글 일괄 조회 */
@@ -1564,8 +1569,10 @@ export interface ElectronAPI extends CalendarApiInputContract {
     ids: Parameters<CalendarApiInputContract['calendarNotificationsMarkRead']>[0],
   ) => Promise<void>;
   supabaseReadRevisions: () => Promise<unknown[]>;
-  supabaseAddRevision: (id: string, partUuid: string, sceneId: string, revisionNo: number, status: string, priority: string, description: string, frameNo: string, imageUrl: string, department: string, lookupDepartment: string, requesterId: string, requesterName: string, assignee: string, createdAt: string, notifyUserIdsJson: string, assigneeIdsJson?: string, setId?: string) => Promise<void>;
-  supabaseUpdateRevision: (id: string, updates: Record<string, string>) => Promise<void>;
+  supabaseReadRevisionById: (revisionId: string) => Promise<unknown | null>;
+  supabaseAddRevision: (id: string, partUuid: string, sceneId: string, revisionNo: number, status: string, priority: string, description: string, frameNo: string, imageUrl: string, department: string, lookupDepartment: string, requesterId: string, requesterName: string, assignee: string, createdAt: string, notifyUserIdsJson: string, assigneeIdsJson?: string, setId?: string) => Promise<RetakeDeliveryResult | void>;
+  remindRetake: (revisionId: string) => Promise<RetakeDeliveryResult>;
+  supabaseUpdateRevision: (id: string, updates: Record<string, string>) => Promise<RevisionUpdateResult>;
   supabaseDeleteRevision: (id: string) => Promise<void>;
   supabaseReadRevisionSets: () => Promise<CompRevisionSet[]>;
   supabaseAddRevisionSet: (input: Omit<CompRevisionSet, 'id' | 'status' | 'createdAt' | 'updatedAt'>) => Promise<CompRevisionSet>;
@@ -1599,7 +1606,7 @@ export interface ElectronAPI extends CalendarApiInputContract {
   // 리깅 완성 공지 웹훅
   sendRiggingWebhook: (payload: Record<string, string>) => Promise<{ ok: boolean }>;
   // 딥링크
-  onDeepLink: (callback: (data: { sheetName: string; sceneId: string }) => void) => () => void;
+  onDeepLink: (callback: (data: BflowDeepLink) => void) => () => void;
 
   // ─── Personal Todos / Task Views (main-owned session) ──
   ensureCanonicalSession: () => Promise<CanonicalSessionResult>;

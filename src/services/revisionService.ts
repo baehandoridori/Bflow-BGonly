@@ -31,6 +31,19 @@ import {
 } from '../utils/revisionWorkflow';
 import { nextGeneralRevisionNo } from '../utils/revisionGeneral';
 import { createUuid } from '../utils/createUuid';
+import { toast } from 'sonner';
+import type { RetakeDeliveryResult } from '../shared/retakeNotifications';
+import { assertRevisionUpdated } from '../shared/revisionPersistence';
+
+export function reportRetakeDeliveryFailure(delivery: RetakeDeliveryResult | void, expectsAppNotification = false): void {
+  if (!delivery || (delivery.status !== 'partial' && delivery.status !== 'failed')) return;
+  const failures = [
+    expectsAppNotification && !delivery.inAppBroadcast ? '앱 알림 전송 실패' : '',
+    delivery.slackFailedUserIds.length ? `Slack 전송 실패 ${delivery.slackFailedUserIds.length}명` : '',
+    delivery.slackMissingUserIds.length ? `Slack 계정 미등록 ${delivery.slackMissingUserIds.length}명` : '',
+  ].filter(Boolean).join(' · ');
+  toast.warning(delivery.error || `리테이크는 저장됐지만 일부 알림을 보내지 못했어요. ${failures}. 담당자 정보를 확인하고 다시 알림을 보내주세요.`);
+}
 
 const REVISIONS_FILE = 'revisions.json';
 const DIGITS_ONLY_RE = /^\d+$/;
@@ -344,6 +357,23 @@ function rowToRevision(row: {
   };
 }
 
+/** Authoritative reads for notifications/navigation must distinguish an unavailable server from no rows. */
+export async function getCanonicalRevisions(): Promise<CompRevision[]> {
+  const rows = await window.electronAPI.supabaseReadRevisions();
+  if (!Array.isArray(rows)) throw new Error('리테이크 응답을 확인하지 못했어요.');
+  return (rows as Parameters<typeof rowToRevision>[0][]).map(rowToRevision);
+}
+
+/** Canonical navigation never depends on a cached or capped list. */
+export async function getCanonicalRevision(revisionId: string): Promise<CompRevision | null> {
+  const row = await window.electronAPI.supabaseReadRevisionById(revisionId);
+  if (row === null) return null;
+  if (!row || typeof row !== 'object' || Array.isArray(row) || (row as { id?: unknown }).id !== revisionId) {
+    throw new Error('리테이크 응답을 확인하지 못했어요.');
+  }
+  return rowToRevision(row as Parameters<typeof rowToRevision>[0]);
+}
+
 export async function loadAllRevisions(): Promise<RevisionsStore> {
   syncRevisionContextSignature();
   if (sheetsCache) return sheetsCache;
@@ -500,7 +530,7 @@ export async function createRevision(input: CreateRevisionServiceInput): Promise
 
     // Supabase: partUuid + sceneId로 저장 (sceneKey를 그대로 partUuid 자리에 전달 — 서버에서 해석)
     // 전반(허브 '전반' 항목)은 normalizedSceneKey 가 '' 라 서버에서 씬 해석을 건너뛰고 scene_id=null 로 저장.
-    await window.electronAPI.supabaseAddRevision(
+    const delivery = await window.electronAPI.supabaseAddRevision(
       id, '', isGeneral ? '' : normalizedSceneKey, revisionNo, initialStatus, priority,
       description, '', input.imageUrl || '', department || '', input.lookupDepartment || department || '',
       input.requesterId, input.requesterName, '', now,
@@ -508,6 +538,7 @@ export async function createRevision(input: CreateRevisionServiceInput): Promise
       JSON.stringify(assigneeIds),
       setId || undefined,
     );
+    reportRetakeDeliveryFailure(delivery);
 
     // 캐시 업데이트
     if (!store[normalizedSceneKey]) store[normalizedSceneKey] = [];
@@ -551,6 +582,16 @@ export async function createRevision(input: CreateRevisionServiceInput): Promise
   return revision;
 }
 
+async function updateCanonicalRevision(id: string, updates: Record<string, string>): Promise<void> {
+  try {
+    assertRevisionUpdated(await window.electronAPI.supabaseUpdateRevision(id, updates));
+  } catch (error) {
+    // Rollback must read the server again rather than restoring a deleted row from this cache.
+    invalidateRevisionsCache();
+    throw error;
+  }
+}
+
 export async function updateRevisionStatus(
   id: string,
   sceneKey: string,
@@ -567,7 +608,7 @@ export async function updateRevisionStatus(
   }
 
   if (sheetsMode) {
-    await window.electronAPI.supabaseUpdateRevision(id, updates);
+    await updateCanonicalRevision(id, updates);
     // 캐시 업데이트
     if (sheetsCache) {
       for (const lookupSceneKey of lookupSceneKeys) {
@@ -593,12 +634,14 @@ export async function updateRevisionStatus(
 
   // 로컬 모드
   const all = await loadLocalAll();
+  let affected = false;
   for (const lookupSceneKey of lookupSceneKeys) {
     const list = all[lookupSceneKey];
     if (!list) continue;
 
     const idx = list.findIndex(r => r.id === id);
     if (idx >= 0) {
+      affected = true;
       list[idx] = {
         ...list[idx],
         status,
@@ -610,6 +653,8 @@ export async function updateRevisionStatus(
       break;
     }
   }
+  if (!affected) localCache = null;
+  assertRevisionUpdated({ affected });
   await saveLocal(all);
 }
 
@@ -652,7 +697,7 @@ async function persistRevisionWorkflow(
 ): Promise<void> {
   const lookupSceneKeys = getRevisionLookupSceneKeys(rev.sceneKey);
   if (sheetsMode) {
-    await window.electronAPI.supabaseUpdateRevision(rev.id, supabaseUpdates);
+    await updateCanonicalRevision(rev.id, supabaseUpdates);
     if (sheetsCache) {
       for (const key of lookupSceneKeys) {
         const list = sheetsCache[key];
@@ -665,12 +710,15 @@ async function persistRevisionWorkflow(
   }
   // 로컬 모드 (preview/test fallback)
   const all = await loadLocalAll();
+  let affected = false;
   for (const key of lookupSceneKeys) {
     const list = all[key];
     if (!list) continue;
     const idx = list.findIndex((r) => r.id === rev.id);
-    if (idx >= 0) { list[idx] = { ...list[idx], ...localPatch }; break; }
+    if (idx >= 0) { list[idx] = { ...list[idx], ...localPatch }; affected = true; break; }
   }
+  if (!affected) localCache = null;
+  assertRevisionUpdated({ affected });
   await saveLocal(all);
 }
 
@@ -698,10 +746,8 @@ export async function updateRevisionDetails(
 async function freshAssigneeStates(rev: CompRevision): Promise<Record<string, RevisionAssigneeState>> {
   if (!sheetsMode) return rev.assigneeStates ?? {};
   try {
-    const rawData = await window.electronAPI.supabaseReadRevisions();
-    const rows = (rawData as Array<Parameters<typeof rowToRevision>[0]>) ?? [];
-    const fresh = rows.find((r) => r.id === rev.id);
-    return fresh ? (rowToRevision(fresh).assigneeStates ?? {}) : (rev.assigneeStates ?? {});
+    const fresh = await getCanonicalRevision(rev.id);
+    return fresh ? (fresh.assigneeStates ?? {}) : (rev.assigneeStates ?? {});
   } catch {
     return rev.assigneeStates ?? {};
   }

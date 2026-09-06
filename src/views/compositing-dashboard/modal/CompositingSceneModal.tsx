@@ -20,7 +20,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Layers } from 'lucide-react';
 import { toast as sonnerToast } from 'sonner';
 import { cn } from '@/utils/cn';
-import type { MergedScene, Stage, ScenePhaseState, CompositingStatus } from '@/types';
+import type { MergedScene, Scene, Stage, ScenePhaseState, CompositingStatus } from '@/types';
 import {
   COMPOSITING_STATUS_LABEL,
   COMPOSITING_STATUS_ORDER,
@@ -29,8 +29,8 @@ import {
 import { useDataStore, compositingKey } from '@/stores/useDataStore';
 import { useAuthStore } from '@/stores/useAuthStore';
 import { useCompositingDashboardStore } from '@/stores/useCompositingDashboardStore';
-import { UnifiedSceneDetailModal } from '@/components/scenes/UnifiedSceneDetailModal';
-import { updateSceneFieldInSupabase, updateSceneStageInSupabase } from '@/services/supabaseService';
+import { UnifiedSceneDetailModal, type UnifiedSceneDetailModalProps } from '@/components/scenes/UnifiedSceneDetailModal';
+import { updateSceneFieldInSupabase, updateSceneStageInSupabase, updateScenePhaseInSupabase } from '@/services/supabaseService';
 import {
   buildSequentialStagePatch,
   enqueueSequentialStageSave,
@@ -49,9 +49,18 @@ interface CompositingSceneModalProps {
   sceneKey: string;       // `${episodeNumber}:${sceneId}`
   episodeNumber: number;
   isCompositor: boolean;
+  /** Retake boards own their modal locally; a supplied target never changes dashboard selection. */
+  sceneTarget?: { partId: string; sceneUuid?: string };
+  onClose?: () => void;
+  initialTab?: UnifiedSceneDetailModalProps['initialTab'];
+  focusRevisionId?: string;
+  showCompositingSection?: boolean;
 }
 
-export function CompositingSceneModal({ sceneKey, episodeNumber, isCompositor }: CompositingSceneModalProps) {
+export function CompositingSceneModal({
+  sceneKey, episodeNumber, isCompositor, sceneTarget, onClose, initialTab, focusRevisionId,
+  showCompositingSection = true,
+}: CompositingSceneModalProps) {
   const setDetailScene = useCompositingDashboardStore((s) => s.setDetailScene);
   const compositingStates = useDataStore((s) => s.compositingStates);
   const episodes = useDataStore((s) => s.episodes);
@@ -61,14 +70,40 @@ export function CompositingSceneModal({ sceneKey, episodeNumber, isCompositor }:
   const currentUser = useAuthStore((s) => s.currentUser);
   const stageSaveQueueRef = useRef<Map<string, Promise<void>>>(new Map());
   const stageSaveBaselineRef = useRef<Map<string, SequentialStagePatch>>(new Map());
+  const mutationQueueRef = useRef<Map<string, Promise<void>>>(new Map());
+  const mutationBaselineRef = useRef<Map<string, Partial<Scene>>>(new Map());
+  const latestMutationRef = useRef<Map<string, Partial<Scene>>>(new Map());
 
   const sceneId = sceneKey.split(':').slice(1).join(':');
   const ep = episodes.find((e) => e.episodeNumber === episodeNumber);
+  const episodeTitle = useMemo(
+    () => ep ? getEpisodeDisplayName(ep) : `EP${String(episodeNumber).padStart(2, '0')}`,
+    [ep, episodeNumber, getEpisodeDisplayName, episodeTitles],
+  );
 
   // 한솔 결정 (2026-05-22): 별도 lookup 제거 — buildCardScenes 가 이미 sheetName/partUuid/sceneIndex 다 저장.
   // 두 lookup 패턴이 어긋나면서 댓글이 가끔 안 불러와지는 문제를 원천 차단.
   const cardCtx = useMemo(() => {
     if (!ep) return null;
+    if (sceneTarget) {
+      // Use the scene view's canonical BG/ACT pairing, including UUID identity and raw ACT ids.
+      const resolved = resolveReferenceMergedScene({
+        kind: 'scene', episodeNumber, sceneId, ...sceneTarget,
+      }, episodes, 'no', 'asc');
+      if (!resolved) return null;
+      const { merged, bgSheetName, actSheetName } = resolved;
+      const card = {
+        sceneId: merged.sceneId,
+        partId: sceneTarget.partId,
+        episodeNumber,
+        orderNo: merged.bgScene?.no ?? merged.actScene?.no ?? 0,
+        bg: merged.bgScene ?? undefined,
+        act: merged.actScene ?? undefined,
+        bgSceneIndex: merged.bgSceneIndex,
+        actSceneIndex: merged.actSceneIndex,
+      };
+      return { card, all: [card], bgSheetName, actSheetName, bgSceneIndex: card.bgSceneIndex, actSceneIndex: card.actSceneIndex };
+    }
     const cards = buildCardScenes(ep);
     const all = flattenCardScenes(cards);
     // 대소문자 무관 — 카드의 sceneId(병합 시 먼저 본 부서 케이스)와 sceneKey 케이스가 달라도 찾도록.
@@ -83,19 +118,19 @@ export function CompositingSceneModal({ sceneKey, episodeNumber, isCompositor }:
       bgSceneIndex: card.bgSceneIndex,
       actSceneIndex: card.actSceneIndex,
     };
-  }, [ep, sceneId]);
+  }, [ep, sceneId, sceneTarget, episodeNumber, episodes]);
 
   // prev/next 같은 부분에서 sceneIndex 변경 시 호출.
   const navigate = useCallback((dir: 'prev' | 'next') => {
-    if (!cardCtx) return;
+    if (!cardCtx || sceneTarget) return;
     const i = cardCtx.all.findIndex((s) => s.sceneId === cardCtx.card.sceneId);
     if (i < 0) return;
     const next = dir === 'prev' ? i - 1 : i + 1;
     if (next < 0 || next >= cardCtx.all.length) return;
     setDetailScene(`${episodeNumber}:${cardCtx.all[next].sceneId}`);
-  }, [cardCtx, episodeNumber, setDetailScene]);
+  }, [cardCtx, episodeNumber, setDetailScene, sceneTarget]);
 
-  const close = useCallback(() => setDetailScene(null), [setDetailScene]);
+  const close = useCallback(() => { if (onClose) onClose(); else setDetailScene(null); }, [setDetailScene, onClose]);
 
   // 4c v1.43.1 ③: 컴포지팅 씬 모달 안에서 #씬 칩 클릭 → 그 씬 상세를 좌/우 도킹 패널로 연다(편집 가능).
   //   ScenesView 의 검증된 참조 패널 패턴을 그대로 옮긴다.
@@ -149,7 +184,7 @@ export function CompositingSceneModal({ sceneKey, episodeNumber, isCompositor }:
   //   - INPUT/TEXTAREA/contenteditable 안에 포커스가 있으면 skip (메모/에러노트 편집 보호).
   //   - meta/ctrl/alt 조합도 skip (브라우저/OS 단축키 충돌 방지).
   useEffect(() => {
-    if (!cardCtx) return;
+    if (!cardCtx || !showCompositingSection) return;
     const card = cardCtx.card;
     const onKey = (e: KeyboardEvent) => {
       if (!isCompositor || !currentUser) return;
@@ -175,18 +210,20 @@ export function CompositingSceneModal({ sceneKey, episodeNumber, isCompositor }:
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [cardCtx, isCompositor, currentUser, episodeNumber]);
+  }, [cardCtx, isCompositor, currentUser, episodeNumber, showCompositingSection]);
 
   // ── BG/ACT 단계 토글 — 정상 시트 데이터 변경 (낙관적 + Supabase) ──
   // 코덱스 11차 P1 (2026-05-22): Supabase 실패 시 낙관적 토글을 복원해야 함.
   //   - BG 단계는 순차 진행이라 목표 단계 기준으로 이전/이후 단계를 함께 정규화.
   //   - 실패 토스트만 띄우고 store 상태는 잘못된 값으로 남아 사용자가 계속 작업하는 문제 fix.
-  const handleToggle = useCallback((sheetName: string, sceneIdArg: string, stage: Stage) => {
+  const handleToggle = useCallback<UnifiedSceneDetailModalProps['onToggle']>((sheetName, sceneIdArg, stage, options) => {
     if (!currentUser) return;
     const store = useDataStore.getState();
     // 참조 패널이 다른 화의 씬일 수 있어, 메인 화에 가두지 않고 전체 episodes 에서 sheetName 으로 파트를 찾는다.
     const part = useDataStore.getState().episodes.flatMap((e) => e.parts).find((p) => p.sheetName === sheetName);
-    const sc = part?.scenes.find((s) => s.sceneId === sceneIdArg);
+    const sc = options?.sceneUuid
+      ? part?.scenes.find((s) => s.id === options.sceneUuid)
+      : part?.scenes.find((s) => s.sceneId === sceneIdArg);
     if (!sc?.id) return;
     const stagePatch = buildSequentialStagePatch(sc, stage);
     const changedStages = getChangedSequentialStages(sc, stagePatch);
@@ -224,6 +261,35 @@ export function CompositingSceneModal({ sceneKey, episodeNumber, isCompositor }:
     });
   }, [currentUser]);
 
+  // Keep per-field/phase queues so a failed earlier edit cannot erase a newer local edit.
+  const persistScenePatch = useCallback((sc: Scene, key: string, next: Partial<Scene>, save: () => Promise<void>) => {
+    if (!sc.id) return;
+    const uuid = sc.id;
+    const queueKey = `${uuid}:${key}`;
+    const previous = Object.fromEntries(Object.keys(next).map((field) => [field, sc[field as keyof Scene]])) as Partial<Scene>;
+    if (!mutationQueueRef.current.has(queueKey)) mutationBaselineRef.current.set(queueKey, previous);
+    latestMutationRef.current.set(queueKey, next);
+    useDataStore.getState().updateSceneByUuid(uuid, next);
+    const operation = enqueueSequentialStageSave(mutationQueueRef.current, queueKey, async () => {
+      try {
+        await save();
+        mutationBaselineRef.current.set(queueKey, next);
+      } catch (err) {
+        const latestScene = useDataStore.getState().episodes.flatMap((episode) => episode.parts).flatMap((part) => part.scenes).find((scene) => scene.id === uuid);
+        const stillCurrent = latestMutationRef.current.get(queueKey) === next && latestScene
+          && Object.entries(next).every(([field, value]) => latestScene[field as keyof Scene] === value);
+        if (stillCurrent) useDataStore.getState().updateSceneByUuid(uuid, mutationBaselineRef.current.get(queueKey) ?? previous);
+        sonnerToast.error(`씬 수정 실패: ${err instanceof Error ? err.message : String(err)}`);
+      }
+    });
+    void operation.finally(() => {
+      if (!mutationQueueRef.current.has(queueKey)) {
+        mutationBaselineRef.current.delete(queueKey);
+        latestMutationRef.current.delete(queueKey);
+      }
+    });
+  }, []);
+
   // ── 필드 업데이트 — 메모 / 담당자 / 이미지 URL 등 ──
   const handleFieldUpdate = useCallback((sheetName: string, sceneIndex: number, field: string, value: string) => {
     if (!currentUser) return;
@@ -231,43 +297,38 @@ export function CompositingSceneModal({ sceneKey, episodeNumber, isCompositor }:
     // 낙관적 — 시트 안 그 sceneIndex 의 field 변경. 참조 패널이 다른 화일 수 있어 전체에서 sheetName 으로 찾는다(저장 누락 방지).
     const part = store.episodes.flatMap((e) => e.parts).find((p) => p.sheetName === sheetName);
     const sc = part?.scenes[sceneIndex];
-    if (!sc) return;
-    store.setSceneFieldBySceneId(sheetName, sc.sceneId, field, value);
-    if (sc.id) {
-      updateSceneFieldInSupabase(sc.id, field, value).catch((err) => {
-        sonnerToast.error(`필드 저장 실패: ${err instanceof Error ? err.message : String(err)}`);
-      });
-    }
-  }, [currentUser, episodeNumber]);
+    if (!sc?.id) return;
+    persistScenePatch(sc, field, { [field]: value }, () => updateSceneFieldInSupabase(sc.id!, field, value));
+  }, [currentUser, persistScenePatch]);
 
   // ── 액팅 단계 (대기/작업중/리테이크/완료) — ScenesView 와 동일 패턴 ──
   const handleActPhaseStateClick = useCallback((sheetName: string, sceneIdArg: string, newState: ScenePhaseState) => {
     if (!currentUser) return;
     const store = useDataStore.getState();
-    store.setScenePhaseOptimistic(sheetName, sceneIdArg, newState);
     // 참조 패널이 다른 화일 수 있어 전체 episodes 에서 sheetName 으로 찾는다(저장 누락 방지).
     const part = useDataStore.getState().episodes.flatMap((e) => e.parts).find((p) => p.sheetName === sheetName);
     const sc = part?.scenes.find((s) => s.sceneId === sceneIdArg);
-    if (sc?.id) {
-      window.electronAPI?.supabaseUpdateScenePhase?.(sc.id, newState, sc.workRound ?? 0, sc.feedbackRound ?? 0).catch((err: unknown) => {
-        sonnerToast.error(`액팅 단계 변경 실패: ${err instanceof Error ? err.message : String(err)}`);
-      });
-    }
-  }, [currentUser, episodeNumber]);
+    if (!sc?.id) return;
+    store.setScenePhaseOptimistic(sheetName, sceneIdArg, newState);
+    const next = useDataStore.getState().episodes.flatMap((episode) => episode.parts).flatMap((part) => part.scenes).find((scene) => scene.id === sc.id);
+    if (!next) return;
+    const patch = { sceneState: next.sceneState, workRound: next.workRound, feedbackRound: next.feedbackRound, lo: next.lo, done: next.done, review: next.review, png: next.png };
+    persistScenePatch(sc, 'phase', patch, () => updateScenePhaseInSupabase(sc.id!, newState, next.workRound ?? 0, next.feedbackRound ?? 0, currentUser.id));
+  }, [currentUser, persistScenePatch]);
 
   const handleActRoundBump = useCallback((sheetName: string, sceneIdArg: string, kind: 'work' | 'feedback', delta: 1 | -1) => {
     if (!currentUser) return;
     const store = useDataStore.getState();
-    store.bumpScenePhaseRoundOptimistic(sheetName, sceneIdArg, kind, delta);
     // 참조 패널이 다른 화일 수 있어 전체 episodes 에서 sheetName 으로 찾는다(저장 누락 방지).
     const part = useDataStore.getState().episodes.flatMap((e) => e.parts).find((p) => p.sheetName === sheetName);
     const sc = part?.scenes.find((s) => s.sceneId === sceneIdArg);
-    if (sc?.id) {
-      window.electronAPI?.supabaseUpdateScenePhase?.(sc.id, sc.sceneState ?? 'wait', sc.workRound ?? 0, sc.feedbackRound ?? 0).catch((err: unknown) => {
-        sonnerToast.error(`차수 변경 실패: ${err instanceof Error ? err.message : String(err)}`);
-      });
-    }
-  }, [currentUser, episodeNumber]);
+    if (!sc?.id) return;
+    store.bumpScenePhaseRoundOptimistic(sheetName, sceneIdArg, kind, delta);
+    const next = useDataStore.getState().episodes.flatMap((episode) => episode.parts).flatMap((part) => part.scenes).find((scene) => scene.id === sc.id);
+    if (!next) return;
+    const patch = { sceneState: next.sceneState, workRound: next.workRound, feedbackRound: next.feedbackRound, lo: next.lo, done: next.done, review: next.review, png: next.png };
+    persistScenePatch(sc, 'phase', patch, () => updateScenePhaseInSupabase(sc.id!, next.sceneState ?? 'wait', next.workRound ?? 0, next.feedbackRound ?? 0, currentUser.id));
+  }, [currentUser, persistScenePatch]);
 
   // ── 액팅 리테이크 요청 — 컴포지팅 환경에서는 단순 안내 (정식 흐름은 씬 뷰에서) ──
   const handleActFeedbackRequest = useCallback(() => {
@@ -327,10 +388,6 @@ export function CompositingSceneModal({ sceneKey, episodeNumber, isCompositor }:
   };
 
   // 헤더 라벨 (한솔 정정): EP 코드 → 에피소드 제목 + 메모
-  const episodeTitle = useMemo(
-    () => ep ? getEpisodeDisplayName(ep) : `EP${String(episodeNumber).padStart(2, '0')}`,
-    [ep, episodeNumber, getEpisodeDisplayName, episodeTitles],
-  );
   const episodeMemo = episodeMemos?.[episodeNumber] || '';
 
   const compositingSection = (
@@ -358,7 +415,7 @@ export function CompositingSceneModal({ sceneKey, episodeNumber, isCompositor }:
       onClose={clearReference}
       onSceneReference={openReference}
       onDockToggleSide={(side) => setReferenceSide(side)}
-      onDockPromote={() => { if (referenceTarget) navigateToHashTarget(referenceTarget); clearReference(); }}
+      onDockPromote={sceneTarget ? undefined : () => { if (referenceTarget) navigateToHashTarget(referenceTarget); clearReference(); }}
       onToggle={handleToggle}
       onFieldUpdate={handleFieldUpdate}
       onDeleteDept={handleDeleteDept}
@@ -373,6 +430,9 @@ export function CompositingSceneModal({ sceneKey, episodeNumber, isCompositor }:
   return (
     <UnifiedSceneDetailModal
       merged={merged}
+      localDepartmentSelection={!!sceneTarget}
+      initialTab={initialTab}
+      focusRevisionId={focusRevisionId}
       referencePanel={referencePanelNode}
       referenceSide={referenceSide}
       bgSheetName={bgSheetName}
@@ -391,7 +451,7 @@ export function CompositingSceneModal({ sceneKey, episodeNumber, isCompositor }:
       totalMerged={all.length}
       partLabel={`${card.partId}파트`}
       episodeLabel={episodeMemo ? `${episodeTitle} · ${episodeMemo}` : episodeTitle}
-      compositingSection={compositingSection}
+      compositingSection={showCompositingSection ? compositingSection : undefined}
       onActPhaseStateClick={handleActPhaseStateClick}
       onActFeedbackRequest={handleActFeedbackRequest}
       onActRoundBump={handleActRoundBump}

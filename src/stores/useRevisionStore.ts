@@ -49,6 +49,7 @@ interface RevisionState {
   lastLoadTime: number | null;
 
   loadRevisions: () => Promise<void>;
+  applyNavigationRevision: (id: string, revision: CompRevision | null) => void;
   addRevisionOptimistic: (revision: CompRevision) => void;
   updateRevisionOptimistic: (id: string, sceneKey: string, updates: Partial<CompRevision>) => void;
   deleteRevisionOptimistic: (id: string) => void;
@@ -115,6 +116,8 @@ function getRevisionLookupKeys(sceneKey: string): Set<string> {
   return new Set(revisionService.getRevisionLookupSceneKeys(sceneKey));
 }
 
+let revisionLoadSequence = 0;
+
 export const useRevisionStore = create<RevisionState>((set, get) => ({
   revisions: [],
   revisionCountByScene: {},
@@ -123,9 +126,12 @@ export const useRevisionStore = create<RevisionState>((set, get) => ({
   lastLoadTime: null,
 
   loadRevisions: async () => {
+    const loadId = ++revisionLoadSequence;
     set({ isLoading: true });
     try {
       const all = await revisionService.getAllRevisions();
+      // 로컬 시작 → 연결 복구 시 먼저 시작한 느린 조회가 최신 목록을 덮지 않게 한다.
+      if (loadId !== revisionLoadSequence) return;
       set({
         revisions: all,
         revisionCountByScene: buildCountMap(all),
@@ -135,8 +141,19 @@ export const useRevisionStore = create<RevisionState>((set, get) => ({
     } catch (err) {
       console.error('[리테이크 스토어] 로드 실패:', err);
     } finally {
-      set({ isLoading: false });
+      if (loadId === revisionLoadSequence) set({ isLoading: false });
     }
+  },
+
+  applyNavigationRevision: (id, revision) => {
+    // 정확 이동에서 확인한 대상은 먼저 시작한 캐시 조회가 다시 덮지 못한다.
+    ++revisionLoadSequence;
+    set((state) => {
+      const revisions = state.revisions.filter((item) => item.id !== id);
+      if (revision) revisions.push(revision);
+      return { revisions, revisionCountByScene: buildCountMap(revisions),
+        totalOpenRevisionCount: countOpenRevisions(revisions), isLoading: false };
+    });
   },
 
   addRevisionOptimistic: (revision) => {
@@ -238,6 +255,7 @@ export const useRevisionStore = create<RevisionState>((set, get) => ({
       console.error('[리테이크 스토어] 상태 업데이트 실패:', err);
       // 롤백: 다시 로드
       await get().loadRevisions();
+      return;
     }
     syncSetForRevision(setId); // resolved 진입/이탈이 세트 진행률을 바꾸므로 세트 자동완료 재계산
   },
@@ -326,7 +344,7 @@ export const useRevisionStore = create<RevisionState>((set, get) => ({
     get().updateRevisionOptimistic(rev.id, rev.sceneKey, { finalResolvedAt: now, finalResolvedBy: byName, status: 'resolved', updatedAt: now });
     markSelfRevisionAction(rev.id, 'resolve');
     try { await revisionService.finalResolveRevision(rev, byName); }
-    catch { await get().loadRevisions(); }
+    catch { await get().loadRevisions(); return; }
     syncSetForRevision(rev.setId); // 세트 소속이면 최종완료가 세트 자동완료(done)에 반영되게
   },
 
@@ -336,7 +354,7 @@ export const useRevisionStore = create<RevisionState>((set, get) => ({
     get().updateRevisionOptimistic(rev.id, rev.sceneKey, { finalResolvedAt: undefined, finalResolvedBy: undefined, status, updatedAt: now });
     markSelfFromStatus(rev.id, status);
     try { await revisionService.revertFinalResolve(rev); }
-    catch { await get().loadRevisions(); }
+    catch { await get().loadRevisions(); return; }
     syncSetForRevision(rev.setId); // 최종완료 되돌리면 세트가 done→open 으로 복귀해야 함
   },
 

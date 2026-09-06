@@ -100,6 +100,8 @@ import {
   buildNotificationSceneDisplayLabelFromSceneKey,
 } from '@/utils/notificationEpisodeLabels';
 import { isGeneralRevisionSceneKey } from '@/utils/revisionGeneral';
+import { useRetakeNotifications } from '@/hooks/useRetakeNotifications';
+import { openRetakeInApp } from '@/utils/retakeNavigation';
 import { isRecentSelfRevisionAction } from '@/stores/useRevisionStore';
 import { buildCalendarNotificationText } from '@/shared/calendarNotifications';
 import type { CalendarNotificationPushRow } from '@/shared/calendarNotifications';
@@ -1619,6 +1621,12 @@ export default function App() {
       //   hasUserCommentedOnScene 가 캐시 비어진 상태에서 호출되어 false 반환 → 답글-자동멘션·스레드 참여자
       //   알림이 silent skip. invalidate 는 분기 평가 *후* 로 옮기고, 호출 시점도 try/finally 로 보장.
       if (table === 'comments') {
+        const characterId = (payload?.new as { character_id?: string } | undefined)?.character_id
+          ?? (payload?.old as { character_id?: string } | undefined)?.character_id;
+        if (characterId) {
+          window.dispatchEvent(new CustomEvent('bflow:comments-invalidated', { detail: { characterId } }));
+          return;
+        }
         // INSERT 이벤트: 다른 사용자가 내 씬에 댓글 / @멘션 시 알림
         if (payload?.eventType === 'INSERT' && payload?.new) {
           // comments 테이블 컬럼: scene_id 는 사실 scene.no(sort_order, 예: '1', '2'...).
@@ -2399,6 +2407,10 @@ export default function App() {
     // 즉시 해석(현재 비어 있는 episodes 기준) 시 대상 씬을 못 찾아 뷰만 전환되고 상세 모달이 안 열린다.
     // 즉시 해석 대신 pendingSceneModalRequest(대기) 경로로 보내 ScenesView 가 데이터 로드 후 처리하게 한다.
     const offWidgetNavigate = window.electronAPI.onWidgetNavigateMain?.((payload) => {
+      if (payload.revisionId) {
+        openRetakeInApp(payload.revisionId);
+        return;
+      }
       navigateToSceneView({
         episodeNumber: payload.episodeNumber,
         partId: payload.partId,
@@ -2577,8 +2589,9 @@ export default function App() {
         // 캐릭터 댓글 broadcast(sceneId='char:{id}') 는 씬 알림 네비게이션이 없음 → 멘션/답글 알림 스킵, 캐시만 무효화.
         //   (캐릭터 현황판 상세에서 직접 확인. 씬 알림으로 잘못 흘러가 깨진 이동 링크가 뜨던 문제 차단.)
         if (typeof commentSceneNumber === 'string' && commentSceneNumber.startsWith('char:')) {
-          invalidatePartCache();
-          window.dispatchEvent(new Event('bflow:comments-invalidated'));
+          window.dispatchEvent(new CustomEvent('bflow:comments-invalidated', {
+            detail: { characterId: commentSceneNumber.slice('char:'.length) },
+          }));
           return;
         }
         if (commentRevisionId) {
@@ -3024,19 +3037,25 @@ export default function App() {
     return () => window.removeEventListener('keydown', handler);
   }, [isAdminMode, setAdminMode, setShowUserManager]);
 
-  // 딥링크 수신 (bflow://scene/...) → 씬 뷰로 이동
+  useRetakeNotifications();
+
+  // 로그인/기본 화면 복원이 끝난 뒤 구독한다. 그 전 요청은 main이 보관한다.
   const { setPendingDeepLink } = useAppStore();
   useEffect(() => {
-    if (!window.electronAPI?.onDeepLink) return;
+    if (!authReady || !currentUser || !window.electronAPI?.onDeepLink) return;
     const cleanup = window.electronAPI.onDeepLink((data) => {
       console.log('[DeepLink] 수신:', data);
+      if ('revisionId' in data) {
+        openRetakeInApp(data.revisionId);
+        return;
+      }
       setPendingDeepLink(data);
       const app = useAppStore.getState();
       app.pushNavigationBackTarget();
       app.setView('scenes');
     });
     return cleanup;
-  }, [setPendingDeepLink]);
+  }, [authReady, currentUser?.id, setPendingDeepLink]);
 
   const setView = useAppStore((state) => state.setView);
   const safeCurrentView = resolveAllowedView(currentView, currentUser);

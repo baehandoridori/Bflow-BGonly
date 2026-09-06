@@ -16,7 +16,7 @@
  * spec: docs/superpowers/specs/2026-06-17-retake-hub-redesign-design.md §9
  */
 
-import { lazy, Suspense, useEffect, useMemo, useState } from 'react';
+import { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react';
 import { ListChecks, Plus, Trash2, Users as UsersIcon, ChevronRight, FolderInput } from 'lucide-react';
 import { useAuthStore } from '@/stores/useAuthStore';
 import { useDataStore } from '@/stores/useDataStore';
@@ -32,6 +32,7 @@ import { ConfirmDialog } from '@/components/common/ConfirmDialog';
 import { toast as sonnerToast } from 'sonner';
 import type { CompRevision, CompRevisionSet } from '@/types';
 import { RetakeHubItemTable, type HubTab } from './retake-hub/RetakeHubItemTable';
+import { RetakeSceneModalProvider } from './retake-hub/RetakeSceneModalProvider';
 
 const RevisionSetCreateModal = lazy(() =>
   import('./retake-hub/RevisionSetCreateModal').then((m) => ({ default: m.RevisionSetCreateModal })),
@@ -238,10 +239,16 @@ export default function RetakeHubView() {
 
   const revisions = useRevisionStore((s) => s.revisions);
   const loadRevisions = useRevisionStore((s) => s.loadRevisions);
+  const isLoading = useRevisionStore((s) => s.isLoading);
   const deleteRevision = useRevisionStore((s) => s.deleteRevision);
   // 리비전 로드 완료 여부 — 자동완료 판정 가드(로드 전 빈 목록으로 done→open 오작동 방지).
   const revisionsLoaded = useRevisionStore((s) => s.lastLoadTime !== null && !s.isLoading);
   const dataConnected = useAppStore((s) => s.dataConnected);
+  const pendingRetakeId = useAppStore((s) => s.pendingRetakeId);
+  const pendingRetakeTarget = useAppStore((s) => s.pendingRetakeTarget);
+  const refreshedRetakeRequest = useRef<number | null>(null);
+  const [focusedRevisionId, setFocusedRevisionId] = useState<string | null>(null);
+  const [focusToken, setFocusToken] = useState(0);
 
   const [tab, setTab] = useState<HubTab>('part');
   const [showCreate, setShowCreate] = useState(false);
@@ -265,6 +272,44 @@ export default function RetakeHubView() {
       select(sets[0].id);
     }
   }, [sets, selectedSetId, select]);
+
+  useEffect(() => {
+    // The mount's load effect may already have started after this render.
+    if (!pendingRetakeId || useRevisionStore.getState().isLoading) return;
+    const live = useAppStore.getState();
+    if (live.pendingRetakeId !== pendingRetakeId || live.pendingRetakeTarget !== pendingRetakeTarget) return;
+    const verified = pendingRetakeTarget?.revision.id === pendingRetakeId ? pendingRetakeTarget.revision : undefined;
+    // Keep complete-list guards for set mutations, while allowing this verified row after a list failure.
+    if (!verified && !revisionsLoaded) return;
+    const revision = verified ?? revisions.find((item) => item.id === pendingRetakeId);
+    if (!revision?.setId) return;
+    if (!sets.some((set) => set.id === revision.setId)) {
+      if (loadingSets) return;
+      if (verified && pendingRetakeTarget && refreshedRetakeRequest.current !== pendingRetakeTarget.requestId) {
+        const requestId = pendingRetakeTarget.requestId;
+        refreshedRetakeRequest.current = requestId;
+        const refresh = () => {
+          const app = useAppStore.getState();
+          if (app.pendingRetakeTarget?.requestId !== requestId || app.currentView !== 'retake-hub') return;
+          void loadRevisionSets().then((nextSets) => {
+            if (useAppStore.getState().pendingRetakeTarget?.requestId !== requestId
+              || nextSets.some((set) => set.id === revision.setId)) return;
+            sonnerToast.error('리테이크 세트를 불러오지 못했어요. 연결 상태를 확인해주세요.', {
+              action: { label: '다시 시도', onClick: refresh },
+            });
+          });
+        };
+        refresh();
+      }
+      return;
+    }
+    if (verified) useRevisionStore.getState().applyNavigationRevision(revision.id, revision);
+    select(revision.setId);
+    setTab('part');
+    setFocusedRevisionId(revision.id);
+    setFocusToken((value) => value + 1);
+    useAppStore.getState().setPendingRetakeId(null);
+  }, [pendingRetakeId, pendingRetakeTarget, revisionsLoaded, isLoading, loadingSets, revisions, sets, select]);
 
   const userNameOf = useMemo(() => {
     const map = new Map(allUsers.map((u) => [u.id, u.name]));
@@ -353,6 +398,7 @@ export default function RetakeHubView() {
   };
 
   return (
+    <RetakeSceneModalProvider>
     <div className="flex h-full min-h-0">
       {/* ─── 좌측 세트 목록 ─── */}
       <aside className="w-72 shrink-0 flex flex-col border-r border-bg-border/60 min-h-0">
@@ -448,6 +494,8 @@ export default function RetakeHubView() {
                 items={selectedItems}
                 tab={tab}
                 allUsers={allUsers}
+                focusRevisionId={focusedRevisionId}
+                focusToken={focusToken}
               />
             </div>
           </>
@@ -497,5 +545,6 @@ export default function RetakeHubView() {
         </Suspense>
       )}
     </div>
+    </RetakeSceneModalProvider>
   );
 }
